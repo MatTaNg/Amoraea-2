@@ -4,8 +4,8 @@ import {
   StyleSheet,
   Text,
   ScrollView,
-  TouchableOpacity,
   Switch,
+  Platform,
 } from 'react-native';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { CompatibilityRepository } from '@data/repositories/CompatibilityRepository';
@@ -14,6 +14,14 @@ import {
   CompatibilityFormData,
   defaultCompatibilityFormData,
 } from '@domain/models/CompatibilityForm';
+import {
+  COMPATIBILITY_SECTIONS,
+  KIDS_VALUES,
+  WORK_HOURS_VALUES,
+  HOURS_PER_WEEK_VALUES,
+  SEX_FREQ_VALUES,
+  WEIGHT_VALUES,
+} from '@features/compatibility/compatibilityQuestions';
 import { SafeAreaContainer } from '@ui/components/SafeAreaContainer';
 import { Button } from '@ui/components/Button';
 import { SelectButton } from '@ui/components/SelectButton';
@@ -21,118 +29,10 @@ import { MultiSelectButton } from '@ui/components/MultiSelectButton';
 import { ScaleSelect } from '@ui/components/ScaleSelect';
 import { colors } from '@ui/theme/colors';
 import { spacing } from '@ui/theme/spacing';
-import { Ionicons } from '@expo/vector-icons';
+import { BMIPreferenceSelector } from './bmi_selector';
 
 const compatibilityRepository = new CompatibilityRepository();
 const compatibilityUseCase = new CompatibilityUseCase(compatibilityRepository);
-
-const RELATIONSHIP_OPTIONS = [
-  { value: 'monogamy' as const, label: 'Monogamy' },
-  { value: 'enm' as const, label: 'ENM' },
-  { value: 'poly' as const, label: 'Poly' },
-  { value: 'unsure' as const, label: 'Unsure' },
-];
-
-const MARRIAGE_PARTNERSHIP_OPTIONS = [
-  { value: 'yes' as const, label: 'Yes' },
-  { value: 'married_not_legal' as const, label: '"Married" but not legally' },
-  { value: 'committed_no_marriage' as const, label: 'I do not want to be married but we can be in a committed partnership' },
-  { value: 'no_commitment' as const, label: 'I am not looking for any committed partnership' },
-];
-
-const FUTURE_LIVING_OPTIONS = [
-  { value: 'city' as const, label: 'City' },
-  { value: 'suburban' as const, label: 'Suburban' },
-  { value: 'rural' as const, label: 'Rural' },
-  { value: 'nomadic' as const, label: 'Nomadic' },
-  { value: 'off_grid' as const, label: 'Off grid' },
-  { value: 'unsure' as const, label: 'Unsure' },
-];
-
-const INCOME_RANGE_OPTIONS = [
-  { value: 'under_25k', label: 'Under $25,000' },
-  { value: '25k_50k', label: '$25,000 - $50,000' },
-  { value: '50k_75k', label: '$50,000 - $75,000' },
-  { value: '75k_100k', label: '$75,000 - $100,000' },
-  { value: '100k_150k', label: '$100,000 - $150,000' },
-  { value: '150k_200k', label: '$150,000 - $200,000' },
-  { value: '200k_plus', label: '$200,000+' },
-  { value: 'prefer_not', label: 'Prefer not to say' },
-];
-
-const FINANCIAL_SUPPORT_OPTIONS = [
-  { value: 1 as const, label: 'I expect full financial independence on both sides' },
-  { value: 2 as const, label: "I'm open to mutual support depending on circumstances" },
-  { value: 3 as const, label: 'I expect to provide more financial support' },
-  { value: 4 as const, label: 'I expect to receive more financial support' },
-];
-
-const FINANCIAL_STRUCTURE_OPTIONS = [
-  { value: 1 as const, label: 'Fully pools finances' },
-  { value: 2 as const, label: 'Mostly pooled with some individual accounts' },
-  { value: 3 as const, label: 'Mostly separate with shared expenses' },
-  { value: 4 as const, label: 'Fully separate finances' },
-];
-
-const CLEANLINESS_OPTIONS = [
-  { value: 1 as const, label: 'Very relaxed (Clutter and mess don\'t bother me much)' },
-  { value: 2 as const, label: 'Moderately relaxed (Some clutter is fine)' },
-  { value: 3 as const, label: 'Balanced (generally tidy, occasional mess is okay)' },
-  { value: 4 as const, label: 'Very tidy (Things should usually be clean and organized)' },
-  { value: 5 as const, label: 'Highly structured (Clean and organized most of the time)' },
-];
-
-const KIDS_OPTIONS = [
-  { value: '0' as const, label: '0' },
-  { value: '1' as const, label: '1' },
-  { value: '2' as const, label: '2' },
-  { value: '3' as const, label: '3' },
-  { value: '4' as const, label: '4' },
-  { value: '5_plus' as const, label: '5+' },
-];
-
-const WORK_WEEK_HOURS_OPTIONS = [
-  { value: '0_20' as const, label: '0-20 hours' },
-  { value: '21_30' as const, label: '21-30 hours' },
-  { value: '31_40' as const, label: '31-40 hours' },
-  { value: '41_50' as const, label: '41-50 hours' },
-  { value: '51_60' as const, label: '51-60 hours' },
-  { value: '60_plus' as const, label: '60+ hours' },
-];
-
-const HOURS_PER_WEEK_QUALITY_TIME_OPTIONS = [
-  { value: '0_5' as const, label: '0-5 hours' },
-  { value: '6_10' as const, label: '6-10 hours' },
-  { value: '11_15' as const, label: '11-15 hours' },
-  { value: '16_20' as const, label: '16-20 hours' },
-  { value: '21_30' as const, label: '21-30 hours' },
-  { value: '31_plus' as const, label: '31+ hours' },
-];
-
-const SEX_FREQUENCY_OPTIONS = [
-  { value: 'rarely' as const, label: 'Rarely' },
-  { value: 'once_week' as const, label: 'Once a week' },
-  { value: '2_3_week' as const, label: '2-3 times per week' },
-  { value: 'several_week' as const, label: 'Several times per week' },
-  { value: 'daily' as const, label: 'Daily' },
-  { value: 'prefer_not' as const, label: 'Prefer not to say' },
-];
-
-const WEIGHT_OPTIONS = [
-  { value: '100_120' as const, label: '100-120 lbs' },
-  { value: '121_140' as const, label: '121-140 lbs' },
-  { value: '141_160' as const, label: '141-160 lbs' },
-  { value: '161_180' as const, label: '161-180 lbs' },
-  { value: '181_200' as const, label: '181-200 lbs' },
-  { value: '200_plus' as const, label: '200+ lbs' },
-  { value: 'prefer_not' as const, label: 'Prefer not to say' },
-];
-
-const KIDS_VALUES = ['0', '1', '2', '3', '4', '5_plus'] as const;
-const WORK_HOURS_VALUES = ['0_20', '21_30', '31_40', '41_50', '51_60', '60_plus'] as const;
-const HOURS_PER_WEEK_VALUES = ['0_5', '6_10', '11_15', '16_20', '21_30', '31_plus'] as const;
-const SEX_FREQ_VALUES = ['rarely', 'once_week', '2_3_week', 'several_week', 'daily', 'prefer_not'] as const;
-const WEIGHT_VALUES = ['100_120', '121_140', '141_160', '161_180', '181_200', '200_plus', 'prefer_not'] as const;
 
 function parseKids(v: unknown): CompatibilityFormData['kidsWanted'] {
   if (typeof v === 'string' && KIDS_VALUES.includes(v as (typeof KIDS_VALUES)[number])) return v as CompatibilityFormData['kidsWanted'];
@@ -199,6 +99,10 @@ function toFormData(data: Record<string, unknown> | null): CompatibilityFormData
     relationshipType: (data.relationshipType as CompatibilityFormData['relationshipType']) ?? null,
     marriagePartnershipPreference:
       (data.marriagePartnershipPreference as CompatibilityFormData['marriagePartnershipPreference']) ?? null,
+    religiousIdentity: (data.religiousIdentity as CompatibilityFormData['religiousIdentity']) ?? null,
+    faithPracticeLevel: (data.faithPracticeLevel as CompatibilityFormData['faithPracticeLevel']) ?? null,
+    partnerSharesFaithPracticeImportance:
+      (data.partnerSharesFaithPracticeImportance as number) ?? null,
     futureLivingLocation: (() => {
       const v = data.futureLivingLocation;
       const valid = ['city', 'suburban', 'rural', 'nomadic', 'off_grid', 'unsure'] as const;
@@ -221,9 +125,41 @@ function toFormData(data: Record<string, unknown> | null): CompatibilityFormData
       (data.partnerSharesFinancialStructureImportance as number) ?? null,
     financialRiskComfort: (data.financialRiskComfort as number) ?? null,
     incomeRange: (data.incomeRange as string) ?? null,
+    partnerSimilarFinancialPositionImportance:
+      (data.partnerSimilarFinancialPositionImportance as number) ?? null,
     weight: parseWeight(data.weight),
     cleanlinessPreference: (data.cleanlinessPreference as 1 | 2 | 3 | 4 | 5) ?? null,
+    partnerBMIPreference: (() => {
+      const v = data.partnerBMIPreference;
+      if (v === null || v === undefined) return null;
+      if (typeof v === 'object' && v !== null && 'noPreference' in v && (v as { noPreference?: boolean }).noPreference === true) {
+        return { noPreference: true };
+      }
+      if (typeof v === 'object' && v !== null && 'minBMI' in v && 'maxBMI' in v && 'minId' in v && 'maxId' in v) {
+        const o = v as { minBMI: number; maxBMI: number; minId: number; maxId: number };
+        return { minBMI: o.minBMI, maxBMI: o.maxBMI, minId: o.minId, maxId: o.maxId };
+      }
+      return null;
+    })(),
     partnerSharesCleanlinessImportance: (data.partnerSharesCleanlinessImportance as number) ?? null,
+    hasPets: (data.hasPets as CompatibilityFormData['hasPets']) ?? null,
+    partnerHasPetsPreference:
+      (data.partnerHasPetsPreference as CompatibilityFormData['partnerHasPetsPreference']) ?? null,
+    alcoholFrequency: (data.alcoholFrequency as CompatibilityFormData['alcoholFrequency']) ?? null,
+    partnerDrinksComfort:
+      (data.partnerDrinksComfort as CompatibilityFormData['partnerDrinksComfort']) ?? null,
+    cigaretteFrequency:
+      (data.cigaretteFrequency as CompatibilityFormData['cigaretteFrequency']) ?? null,
+    partnerCigarettesComfort:
+      (data.partnerCigarettesComfort as CompatibilityFormData['partnerCigarettesComfort']) ?? null,
+    cannabisTobaccoFrequency:
+      (data.cannabisTobaccoFrequency as CompatibilityFormData['cannabisTobaccoFrequency']) ?? null,
+    partnerCannabisTobaccoComfort:
+      (data.partnerCannabisTobaccoComfort as CompatibilityFormData['partnerCannabisTobaccoComfort']) ?? null,
+    recreationalDrugsFrequency:
+      (data.recreationalDrugsFrequency as CompatibilityFormData['recreationalDrugsFrequency']) ?? null,
+    partnerRecreationalDrugsComfort:
+      (data.partnerRecreationalDrugsComfort as CompatibilityFormData['partnerRecreationalDrugsComfort']) ?? null,
   };
 }
 
@@ -234,6 +170,9 @@ function toRecord(data: CompatibilityFormData): Record<string, unknown> {
     kidsExisting: data.kidsExisting,
     relationshipType: data.relationshipType,
     marriagePartnershipPreference: data.marriagePartnershipPreference,
+    religiousIdentity: data.religiousIdentity ?? undefined,
+    faithPracticeLevel: data.faithPracticeLevel ?? undefined,
+    partnerSharesFaithPracticeImportance: data.partnerSharesFaithPracticeImportance ?? undefined,
     futureLivingLocation: data.futureLivingLocation.length > 0 ? data.futureLivingLocation : undefined,
     willingToRelocate: data.willingToRelocate,
     workWeekHours: data.workWeekHours,
@@ -248,9 +187,21 @@ function toRecord(data: CompatibilityFormData): Record<string, unknown> {
     partnerSharesFinancialStructureImportance: data.partnerSharesFinancialStructureImportance,
     financialRiskComfort: data.financialRiskComfort,
     incomeRange: data.incomeRange ?? undefined,
+    partnerSimilarFinancialPositionImportance: data.partnerSimilarFinancialPositionImportance ?? undefined,
     weight: data.weight,
+    partnerBMIPreference: data.partnerBMIPreference ?? undefined,
     cleanlinessPreference: data.cleanlinessPreference,
     partnerSharesCleanlinessImportance: data.partnerSharesCleanlinessImportance,
+    hasPets: data.hasPets ?? undefined,
+    partnerHasPetsPreference: data.partnerHasPetsPreference ?? undefined,
+    alcoholFrequency: data.alcoholFrequency ?? undefined,
+    partnerDrinksComfort: data.partnerDrinksComfort ?? undefined,
+    cigaretteFrequency: data.cigaretteFrequency ?? undefined,
+    partnerCigarettesComfort: data.partnerCigarettesComfort ?? undefined,
+    cannabisTobaccoFrequency: data.cannabisTobaccoFrequency ?? undefined,
+    partnerCannabisTobaccoComfort: data.partnerCannabisTobaccoComfort ?? undefined,
+    recreationalDrugsFrequency: data.recreationalDrugsFrequency ?? undefined,
+    partnerRecreationalDrugsComfort: data.partnerRecreationalDrugsComfort ?? undefined,
   };
 }
 
@@ -295,234 +246,125 @@ export const CompatibilityScreen: React.FC<{ navigation: any; route: any }> = ({
     setFormData((prev) => ({ ...prev, [key]: value }));
   };
 
+  const workQualityTimeGapNote = ((): string | null => {
+    const work = formData.workWeekHours;
+    const quality = formData.hoursPerWeekQualityTime;
+    if (!work || !quality) return null;
+    const highWork = work === '51_60' || work === '60_plus';
+    const highQuality = quality === '21_30' || quality === '31_plus';
+    if (!highWork || !highQuality) return null;
+    const workLabel = work === '60_plus' ? '60+ hours' : '51-60 hours';
+    return `That's ambitious — most people working ${workLabel} find 10–15 hours of quality time more realistic. Want to adjust either number?`;
+  })();
+
   const renderForm = () => (
     <>
-      {/* Kids */}
-      <Text style={[styles.sectionTitle, styles.sectionTitleFirst]}>Family & Kids</Text>
-      <Text style={styles.questionLabel}>How many kids do you want?</Text>
-      {KIDS_OPTIONS.map((opt) => (
-        <SelectButton
-          key={opt.value}
-          label={opt.label}
-          selected={formData.kidsWanted === opt.value}
-          onPress={() => update('kidsWanted', opt.value)}
-        />
-      ))}
-      <View style={styles.switchRow}>
-        <Text style={styles.switchLabel}>Are you open to adopting kids?</Text>
-        <Switch
-          value={formData.openToAdopting ?? false}
-          onValueChange={(v) => update('openToAdopting', v)}
-          trackColor={{ false: colors.border, true: colors.primary + '60' }}
-          thumbColor={formData.openToAdopting ? colors.primary : colors.textSecondary}
-        />
-      </View>
-      <Text style={styles.questionLabel}>How many children do you already have?</Text>
-      {KIDS_OPTIONS.map((opt) => (
-        <SelectButton
-          key={opt.value}
-          label={opt.label}
-          selected={formData.kidsExisting === opt.value}
-          onPress={() => update('kidsExisting', opt.value)}
-        />
-      ))}
-
-            {/* Relationship */}
-            <Text style={styles.sectionTitle}>Relationship</Text>
-            <Text style={styles.questionLabel}>What kind of relationship are you looking for?</Text>
-            {RELATIONSHIP_OPTIONS.map((opt) => (
-              <SelectButton
-                key={opt.value}
-                label={opt.label}
-                selected={formData.relationshipType === opt.value}
-                onPress={() => update('relationshipType', opt.value)}
-              />
-            ))}
-            <Text style={styles.questionLabel}>Do you want marriage or a legally committed partnership?</Text>
-            {MARRIAGE_PARTNERSHIP_OPTIONS.map((opt) => (
-              <SelectButton
-                key={opt.value}
-                label={opt.label}
-                selected={formData.marriagePartnershipPreference === opt.value}
-                onPress={() => update('marriagePartnershipPreference', opt.value)}
-              />
-            ))}
-
-            {/* Location */}
-            <Text style={styles.sectionTitle}>Location</Text>
-            <Text style={styles.questionLabel}>Where do you see yourself living in the future? (Select all that apply)</Text>
-            {FUTURE_LIVING_OPTIONS.map((opt) => (
-              <MultiSelectButton
-                key={opt.value}
-                label={opt.label}
-                selected={formData.futureLivingLocation.includes(opt.value)}
-                onPress={() => {
-                  const current = formData.futureLivingLocation;
-                  const next = current.includes(opt.value)
-                    ? current.filter((x) => x !== opt.value)
-                    : [...current, opt.value];
-                  update('futureLivingLocation', next);
+      {COMPATIBILITY_SECTIONS.map((section, sectionIndex) => (
+        <View key={section.sectionTitle}>
+          <Text
+            style={[
+              styles.sectionTitle,
+              sectionIndex === 0 && styles.sectionTitleFirst,
+            ]}
+          >
+            {section.sectionTitle}
+          </Text>
+          {section.questions.map((q) => {
+            const value = formData[q.field];
+            if (q.type === 'select') {
+              return (
+                <View key={String(q.field)} style={styles.questionBlock}>
+                  <Text style={styles.questionLabel}>{q.label}</Text>
+                  {q.options.map((opt) => (
+                    <SelectButton
+                      key={String(opt.value)}
+                      label={opt.label}
+                      selected={value === opt.value}
+                      onPress={() => update(q.field, opt.value as CompatibilityFormData[typeof q.field])}
+                    />
+                  ))}
+                </View>
+              );
+            }
+            if (q.type === 'multiSelect') {
+              const arr = Array.isArray(value) ? value : [];
+              return (
+                <View key={String(q.field)} style={styles.questionBlock}>
+                  <Text style={styles.questionLabel}>{q.label}</Text>
+                  {q.options.map((opt) => (
+                    <MultiSelectButton
+                      key={String(opt.value)}
+                      label={opt.label}
+                      selected={arr.includes(opt.value as never)}
+                      onPress={() => {
+                        const next = arr.includes(opt.value as never)
+                          ? arr.filter((x) => x !== opt.value)
+                          : [...arr, opt.value];
+                        update(q.field, next as CompatibilityFormData[typeof q.field]);
+                      }}
+                    />
+                  ))}
+                </View>
+              );
+            }
+            if (q.type === 'scale') {
+              return (
+                <View key={String(q.field)} style={styles.questionBlock}>
+                  <ScaleSelect
+                    label={q.label}
+                    value={value as number | null}
+                    min={q.min}
+                    max={q.max}
+                    onSelect={(v) => update(q.field, v as CompatibilityFormData[typeof q.field])}
+                    minLabel={q.min === 1 && q.max === 7 ? 'Least important' : undefined}
+                    maxLabel={q.min === 1 && q.max === 7 ? 'Most important' : undefined}
+                  />
+                </View>
+              );
+            }
+            if (q.type === 'switch') {
+              return (
+                <View key={String(q.field)} style={styles.switchRow}>
+                  <Text style={styles.switchLabel}>{q.label}</Text>
+                  <Switch
+                    value={value === true}
+                    onValueChange={(v) => update(q.field, v as CompatibilityFormData[typeof q.field])}
+                    trackColor={{ false: colors.border, true: colors.primary + '60' }}
+                    thumbColor={value ? colors.primary : colors.textSecondary}
+                  />
+                </View>
+              );
+            }
+            return null;
+          })}
+          {section.sectionTitle === 'Time & Availability' && workQualityTimeGapNote ? (
+            <View style={styles.gapNote}>
+              <Text style={styles.gapNoteText}>{workQualityTimeGapNote}</Text>
+            </View>
+          ) : null}
+          {section.sectionTitle === 'About You' && Platform.OS === 'web' ? (
+            <View style={styles.bmiSection}>
+              <BMIPreferenceSelector
+                embedded
+                userHeightCm={undefined}
+                userWeightKg={undefined}
+                onComplete={(result: { noPreference?: true; minBMI?: number; maxBMI?: number; minId?: number; maxId?: number }) => {
+                  if (result.noPreference) {
+                    update('partnerBMIPreference', { noPreference: true });
+                  } else if (result.minBMI != null && result.maxBMI != null && result.minId != null && result.maxId != null) {
+                    update('partnerBMIPreference', {
+                      minBMI: result.minBMI,
+                      maxBMI: result.maxBMI,
+                      minId: result.minId,
+                      maxId: result.maxId,
+                    });
+                  }
                 }}
               />
-            ))}
-            <View style={styles.switchRow}>
-              <Text style={styles.switchLabel}>Are you willing to relocate?</Text>
-              <Switch
-                value={formData.willingToRelocate ?? false}
-                onValueChange={(v) => update('willingToRelocate', v)}
-                trackColor={{ false: colors.border, true: colors.primary + '60' }}
-                thumbColor={formData.willingToRelocate ? colors.primary : colors.textSecondary}
-              />
             </View>
-
-            {/* Time */}
-            <Text style={styles.sectionTitle}>Time & Availability</Text>
-            <Text style={styles.questionLabel}>Typical work week hours</Text>
-            {WORK_WEEK_HOURS_OPTIONS.map((opt) => (
-              <SelectButton
-                key={opt.value}
-                label={opt.label}
-                selected={formData.workWeekHours === opt.value}
-                onPress={() => update('workWeekHours', opt.value)}
-              />
-            ))}
-            <Text style={styles.questionLabel}>Hours per week of quality time desired</Text>
-            {HOURS_PER_WEEK_QUALITY_TIME_OPTIONS.map((opt) => (
-              <SelectButton
-                key={opt.value}
-                label={opt.label}
-                selected={formData.hoursPerWeekQualityTime === opt.value}
-                onPress={() => update('hoursPerWeekQualityTime', opt.value)}
-              />
-            ))}
-
-            {/* Sex / Intimacy */}
-            <Text style={styles.sectionTitle}>Sex & Intimacy</Text>
-            <ScaleSelect
-              label="How important is sex to you in a romantic relationship? (1-7)"
-              value={formData.sexualConnectionImportance}
-              min={1}
-              max={7}
-              onSelect={(v) => update('sexualConnectionImportance', v)}
-            />
-            <Text style={styles.questionLabel}>How often do you desire to have sex?</Text>
-            {SEX_FREQUENCY_OPTIONS.map((opt) => (
-              <SelectButton
-                key={opt.value}
-                label={opt.label}
-                selected={formData.sexFrequency === opt.value}
-                onPress={() => update('sexFrequency', opt.value)}
-              />
-            ))}
-            <View style={styles.switchRow}>
-              <Text style={styles.switchLabel}>Is this frequency flexible?</Text>
-              <Switch
-                value={formData.sexFrequencyFlexible ?? false}
-                onValueChange={(v) => update('sexFrequencyFlexible', v)}
-                trackColor={{ false: colors.border, true: colors.primary + '60' }}
-                thumbColor={formData.sexFrequencyFlexible ? colors.primary : colors.textSecondary}
-              />
-            </View>
-            <ScaleSelect
-              label="How open are you to exploring new sexual experiences with a partner? (1 = Very Closed, 7 = Very Open)"
-              value={formData.sexualExplorationOpenness}
-              min={1}
-              max={7}
-              onSelect={(v) => update('sexualExplorationOpenness', v)}
-            />
-
-            {/* Financial support */}
-            <Text style={styles.sectionTitle}>Financial Values</Text>
-            <Text style={styles.questionLabel}>
-              Which best reflects your expectations around financial support in a relationship?
-            </Text>
-            {FINANCIAL_SUPPORT_OPTIONS.map((opt) => (
-              <SelectButton
-                key={opt.value}
-                label={opt.label}
-                selected={formData.financialSupportExpectation === opt.value}
-                onPress={() => update('financialSupportExpectation', opt.value)}
-              />
-            ))}
-            <ScaleSelect
-              label="How important is it to you that your partner shares these values? (1-7)"
-              value={formData.partnerSharesFinancialValuesImportance}
-              min={1}
-              max={7}
-              onSelect={(v) => update('partnerSharesFinancialValuesImportance', v)}
-            />
-
-            {/* Financial structure */}
-            <Text style={styles.questionLabel}>
-              In a committed relationship, which financial structure feels more natural to you?
-            </Text>
-            {FINANCIAL_STRUCTURE_OPTIONS.map((opt) => (
-              <SelectButton
-                key={opt.value}
-                label={opt.label}
-                selected={formData.financialStructure === opt.value}
-                onPress={() => update('financialStructure', opt.value)}
-              />
-            ))}
-            <ScaleSelect
-              label="How important is it to you that your partner shares these values? (1-7)"
-              value={formData.partnerSharesFinancialStructureImportance}
-              min={1}
-              max={7}
-              onSelect={(v) => update('partnerSharesFinancialStructureImportance', v)}
-            />
-
-            {/* Financial risk */}
-            <ScaleSelect
-              label="How comfortable are you with financial risk? (1 = Very uncomfortable, 7 = Very Comfortable)"
-              value={formData.financialRiskComfort}
-              min={1}
-              max={7}
-              onSelect={(v) => update('financialRiskComfort', v)}
-            />
-            <Text style={styles.questionLabel}>What is your income? (Use income ranges)</Text>
-            {INCOME_RANGE_OPTIONS.map((opt) => (
-              <SelectButton
-                key={opt.value}
-                label={opt.label}
-                selected={formData.incomeRange === opt.value}
-                onPress={() => update('incomeRange', opt.value)}
-              />
-            ))}
-
-            {/* Cleanliness */}
-            <Text style={styles.sectionTitle}>Living Habits</Text>
-            <Text style={styles.questionLabel}>
-              Which best describes your preferred baseline for cleanliness in shared living spaces?
-            </Text>
-            {CLEANLINESS_OPTIONS.map((opt) => (
-              <SelectButton
-                key={opt.value}
-                label={opt.label}
-                selected={formData.cleanlinessPreference === opt.value}
-                onPress={() => update('cleanlinessPreference', opt.value)}
-              />
-            ))}
-            <ScaleSelect
-              label="How important is it that your partner shares your same cleanliness habits? (1-7)"
-              value={formData.partnerSharesCleanlinessImportance}
-              min={1}
-              max={7}
-              onSelect={(v) => update('partnerSharesCleanlinessImportance', v)}
-            />
-
-            {/* Physical */}
-            <Text style={styles.sectionTitle}>About You</Text>
-            <Text style={styles.questionLabel}>What is your weight?</Text>
-            {WEIGHT_OPTIONS.map((opt) => (
-              <SelectButton
-                key={opt.value}
-                label={opt.label}
-                selected={formData.weight === opt.value}
-                onPress={() => update('weight', opt.value)}
-              />
-            ))}
-
+          ) : null}
+        </View>
+      ))}
       <View style={styles.saveSpacer} />
     </>
   );
@@ -572,6 +414,28 @@ const styles = StyleSheet.create({
     fontWeight: '600',
     color: colors.text,
     marginBottom: spacing.sm,
+  },
+  questionBlock: {
+    marginBottom: spacing.lg,
+  },
+  gapNote: {
+    marginTop: -spacing.sm,
+    marginBottom: spacing.lg,
+    paddingVertical: spacing.sm,
+    paddingHorizontal: spacing.md,
+    backgroundColor: colors.surface,
+    borderRadius: 8,
+    borderLeftWidth: 3,
+    borderLeftColor: colors.primary + '80',
+  },
+  gapNoteText: {
+    fontSize: 13,
+    color: colors.textSecondary,
+    lineHeight: 20,
+  },
+  bmiSection: {
+    marginTop: spacing.md,
+    marginBottom: spacing.lg,
   },
   switchRow: {
     flexDirection: 'row',

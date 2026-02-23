@@ -8,6 +8,12 @@ export interface Location {
   label: string | null;
 }
 
+/** One profile prompt answer (UX only, not used by algorithm). */
+export interface ProfilePromptAnswer {
+  promptId: string;
+  answer: string;
+}
+
 export interface Profile {
   id: string;
   createdAt: string;
@@ -23,6 +29,8 @@ export interface Profile {
   location: Location | null;
   primaryPhotoUrl: string | null;
   inviteCode: string | null;
+  /** Up to 3 prompt answers (UX only). */
+  prompts: ProfilePromptAnswer[];
 }
 
 export interface ProfilePhoto {
@@ -45,5 +53,7 @@ export interface ProfileUpdate {
   primaryPhotoUrl?: string;
   onboardingStep?: number;
   onboardingCompleted?: boolean;
+  /** Up to 3 prompt answers. */
+  prompts?: ProfilePromptAnswer[];
 }
 

@@ -21,6 +21,7 @@ import { EditProfileScreen } from './src/app/screens/EditProfileScreen';
 import { ContactsScreen } from './src/app/screens/ContactsScreen';
 import { HumanDesignScreen } from './src/app/screens/HumanDesignScreen';
 import { AriaScreen } from './src/app/screens/AriaScreen';
+import { FullAssessmentScreen } from './src/app/screens/FullAssessmentScreen';
 import { AppHeader } from './src/ui/components/AppHeader';
 import { ProfileRepository } from './src/data/repositories/ProfileRepository';
 import { InviteCodeRepository } from './src/data/repositories/InviteCodeRepository';
@@ -146,6 +147,7 @@ const AppNavigator = ({ userId }: { userId: string }) => {
       </Stack.Screen>
       <Stack.Screen name="TypologyDetail" component={TypologyDetailScreen} />
       <Stack.Screen name="Compatibility" component={CompatibilityScreen} />
+      <Stack.Screen name="FullAssessment" component={FullAssessmentScreen} />
       <Stack.Screen name="EditProfile" component={EditProfileScreen} />
       <Stack.Screen name="Contacts" component={ContactsScreen} />
       <Stack.Screen name="HumanDesign" component={HumanDesignScreen} />

@@ -1,4 +1,4 @@
-export type TypologyType = 'big_five' | 'attachment_style' | 'schwartz_values';
+export type TypologyType = 'big_five' | 'attachment_style' | 'schwartz_values' | 'full_assessment';
 
 export interface Typology {
   id: string;

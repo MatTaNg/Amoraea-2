@@ -10,6 +10,21 @@ export interface CompatibilityFormData {
   relationshipType: 'monogamy' | 'enm' | 'poly' | 'unsure' | null;
   marriagePartnershipPreference: 'yes' | 'married_not_legal' | 'committed_no_marriage' | 'no_commitment' | null;
 
+  // Religion & spirituality
+  religiousIdentity:
+    | 'christian'
+    | 'muslim'
+    | 'jewish'
+    | 'hindu'
+    | 'buddhist'
+    | 'spiritual_not_religious'
+    | 'atheist_agnostic'
+    | 'other'
+    | 'prefer_not_say'
+    | null;
+  faithPracticeLevel: 'never' | 'occasionally' | 'regularly' | 'central_to_life' | null;
+  partnerSharesFaithPracticeImportance: number | null; // 1-7
+
   // Location
   futureLivingLocation: ('city' | 'suburban' | 'rural' | 'nomadic' | 'off_grid' | 'unsure')[];
   willingToRelocate: boolean | null;
@@ -37,11 +52,32 @@ export interface CompatibilityFormData {
 
   // Income & physical
   incomeRange: string | null;
+  partnerSimilarFinancialPositionImportance: number | null; // 1-7
   weight: '100_120' | '121_140' | '141_160' | '161_180' | '181_200' | '200_plus' | 'prefer_not' | null;
+
+  /** Partner body type (BMI) preference from BMI selector. null = not set. */
+  partnerBMIPreference:
+    | { noPreference: true }
+    | { minBMI: number; maxBMI: number; minId: number; maxId: number }
+    | null;
 
   // Cleanliness
   cleanlinessPreference: 1 | 2 | 3 | 4 | 5 | null;
   partnerSharesCleanlinessImportance: number | null; // 1-7
+
+  // Pets
+  hasPets: 'none' | 'dog' | 'cat' | 'other' | null;
+  partnerHasPetsPreference: 'love_it' | 'fine' | 'depends' | 'prefer_not' | 'dealbreaker' | null;
+
+  // Substance use
+  alcoholFrequency: 'never' | 'rarely' | 'socially' | 'regularly' | 'daily' | null;
+  partnerDrinksComfort: 'yes_fine' | 'socially_fine' | 'prefer_not' | 'no' | null;
+  cigaretteFrequency: 'never' | 'rarely' | 'socially' | 'regularly' | 'daily' | null;
+  partnerCigarettesComfort: 'yes_fine' | 'socially_fine' | 'prefer_not' | 'no' | null;
+  cannabisTobaccoFrequency: 'never' | 'only_ceremonially' | 'rarely' | 'socially' | 'regularly' | 'daily' | null;
+  partnerCannabisTobaccoComfort: 'yes_fine' | 'socially_fine' | 'only_ceremonially' | 'prefer_not' | 'no' | null;
+  recreationalDrugsFrequency: 'never' | 'only_ceremonially' | 'rarely' | 'socially' | 'regularly' | 'daily' | null;
+  partnerRecreationalDrugsComfort: 'yes_fine' | 'socially_fine' | 'only_ceremonially' | 'prefer_not' | 'no' | null;
 }
 
 export const defaultCompatibilityFormData: CompatibilityFormData = {
@@ -50,6 +86,9 @@ export const defaultCompatibilityFormData: CompatibilityFormData = {
   kidsExisting: null,
   relationshipType: null,
   marriagePartnershipPreference: null,
+  religiousIdentity: null,
+  faithPracticeLevel: null,
+  partnerSharesFaithPracticeImportance: null,
   futureLivingLocation: [],
   willingToRelocate: null,
   workWeekHours: null,
@@ -64,7 +103,19 @@ export const defaultCompatibilityFormData: CompatibilityFormData = {
   partnerSharesFinancialStructureImportance: null,
   financialRiskComfort: null,
   incomeRange: null,
+  partnerSimilarFinancialPositionImportance: null,
   weight: null,
+  partnerBMIPreference: null,
   cleanlinessPreference: null,
   partnerSharesCleanlinessImportance: null,
+  hasPets: null,
+  partnerHasPetsPreference: null,
+  alcoholFrequency: null,
+  partnerDrinksComfort: null,
+  cigaretteFrequency: null,
+  partnerCigarettesComfort: null,
+  cannabisTobaccoFrequency: null,
+  partnerCannabisTobaccoComfort: null,
+  recreationalDrugsFrequency: null,
+  partnerRecreationalDrugsComfort: null,
 };

@@ -132,11 +132,9 @@ export const HomeScreen: React.FC<{ navigation: any; userId: string }> = ({ navi
           <Text style={styles.requirementsTitle}>To complete your profile and start matching:</Text>
           <View style={styles.requirementsList}>
             <RequirementItem
-              label="Complete all 3 typologies (Big Five, Attachment, Schwartz)"
-              done={
-                (completion?.completedTypologyCount ?? 0) >= 3
-              }
-              onPress={() => navigation.navigate('TypologyDetail', { type: 'big_five', userId })}
+              label="Complete Compatibility Assessment (ECR, TIPI, DSI, BRS, PVQ)"
+              done={!!completion?.hasFullAssessment}
+              onPress={() => navigation.navigate('FullAssessment', { userId })}
             />
             <RequirementItem
               label="Fill out Compatibility"
@@ -159,22 +157,10 @@ export const HomeScreen: React.FC<{ navigation: any; userId: string }> = ({ navi
 
         <View style={styles.content}>
           <HomeButton
-            title="Big Five (10m)"
+            title="Compatibility Assessment (~15m)"
             icon="analytics"
-            color={colors.typologyBigFive}
-            onPress={() => navigation.navigate('TypologyDetail', { type: 'big_five', userId })}
-          />
-          <HomeButton
-            title="Attachment Styles (5m)"
-            icon="heart"
-            color={colors.typologyAttachment}
-            onPress={() => navigation.navigate('TypologyDetail', { type: 'attachment_style', userId })}
-          />
-          <HomeButton
-            title="Schwartz Values (10m)"
-            icon="star"
-            color={colors.typologySchwartz}
-            onPress={() => navigation.navigate('TypologyDetail', { type: 'schwartz_values', userId })}
+            color={colors.primary}
+            onPress={() => navigation.navigate('FullAssessment', { userId })}
           />
           <HomeButton
             title="Compatibility (10m)"

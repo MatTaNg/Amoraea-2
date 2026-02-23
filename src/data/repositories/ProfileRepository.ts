@@ -1,5 +1,16 @@
 import { supabase } from '../supabase/client';
-import { Profile, ProfileUpdate, ProfilePhoto, Location } from '@domain/models/Profile';
+import { Profile, ProfileUpdate, ProfilePhoto, Location, ProfilePromptAnswer } from '@domain/models/Profile';
+
+function parseProfilePrompts(v: unknown): ProfilePromptAnswer[] {
+  if (!Array.isArray(v)) return [];
+  return v
+    .filter((item): item is Record<string, unknown> => item !== null && typeof item === 'object')
+    .map((item) => ({
+      promptId: typeof item.promptId === 'string' ? item.promptId : '',
+      answer: typeof item.answer === 'string' ? item.answer : '',
+    }))
+    .filter((p) => p.promptId.length > 0);
+}
 
 // Many Supabase profiles use a PostgreSQL enum with lowercase values; our app uses capitalized
 const GENDER_TO_DB: Record<string, string> = { Man: 'man', Woman: 'woman', 'Non-binary': 'non-binary' };
@@ -57,6 +68,7 @@ export class ProfileRepository {
     if (update.primaryPhotoUrl !== undefined) updateData.primary_photo_url = update.primaryPhotoUrl;
     if (update.onboardingStep !== undefined) updateData.onboarding_step = update.onboardingStep;
     if (update.onboardingCompleted !== undefined) updateData.onboarding_completed = update.onboardingCompleted;
+    if (update.prompts !== undefined) updateData.profile_prompts = update.prompts;
 
     const { data, error } = await supabase
       .from('users')
@@ -175,6 +187,7 @@ export class ProfileRepository {
     location_label: string | null;
     primary_photo_url: string | null;
     invite_code?: string | null;
+    profile_prompts?: unknown;
   }): Profile {
     const location: Location | null =
       data.location_latitude !== null && data.location_longitude !== null
@@ -200,6 +213,7 @@ export class ProfileRepository {
       location,
       primaryPhotoUrl: data.primary_photo_url,
       inviteCode: data.invite_code ?? null,
+      prompts: parseProfilePrompts(data.profile_prompts),
     };
   }
 }

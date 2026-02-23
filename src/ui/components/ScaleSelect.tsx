@@ -10,6 +10,10 @@ interface ScaleSelectProps {
   max: number;
   onSelect: (value: number) => void;
   error?: string;
+  /** Optional label shown under the min value (e.g. "Least important") */
+  minLabel?: string;
+  /** Optional label shown under the max value (e.g. "Most important") */
+  maxLabel?: string;
 }
 
 export const ScaleSelect: React.FC<ScaleSelectProps> = ({
@@ -19,6 +23,8 @@ export const ScaleSelect: React.FC<ScaleSelectProps> = ({
   max,
   onSelect,
   error,
+  minLabel,
+  maxLabel,
 }) => {
   const options = Array.from({ length: max - min + 1 }, (_, i) => min + i);
 
@@ -27,13 +33,20 @@ export const ScaleSelect: React.FC<ScaleSelectProps> = ({
       {label && <Text style={styles.label}>{label}</Text>}
       <View style={styles.row}>
         {options.map((n) => (
-          <TouchableOpacity
-            key={n}
-            style={[styles.option, value === n && styles.optionSelected]}
-            onPress={() => onSelect(n)}
-          >
-            <Text style={[styles.optionText, value === n && styles.optionTextSelected]}>{n}</Text>
-          </TouchableOpacity>
+          <View key={n} style={styles.optionWrapper}>
+            <TouchableOpacity
+              style={[styles.option, value === n && styles.optionSelected]}
+              onPress={() => onSelect(n)}
+            >
+              <Text style={[styles.optionText, value === n && styles.optionTextSelected]}>{n}</Text>
+            </TouchableOpacity>
+            {n === min && minLabel ? (
+              <Text style={styles.optionSubtext} numberOfLines={1}>{minLabel}</Text>
+            ) : null}
+            {n === max && maxLabel ? (
+              <Text style={styles.optionSubtext} numberOfLines={1}>{maxLabel}</Text>
+            ) : null}
+          </View>
         ))}
       </View>
       {error && <Text style={styles.errorText}>{error}</Text>}
@@ -55,6 +68,10 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     flexWrap: 'wrap',
     gap: spacing.xs,
+  },
+  optionWrapper: {
+    alignItems: 'center',
+    minWidth: 36,
   },
   option: {
     width: 36,
@@ -78,6 +95,13 @@ const styles = StyleSheet.create({
   optionTextSelected: {
     color: colors.primary,
     fontWeight: '600',
+  },
+  optionSubtext: {
+    fontSize: 10,
+    color: colors.textSecondary,
+    marginTop: 2,
+    maxWidth: 44,
+    textAlign: 'center',
   },
   errorText: {
     fontSize: 12,
