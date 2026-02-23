@@ -1,0 +1,72 @@
+{
+  "expo": {
+    "name": "Amoraea",
+    "slug": "amoraea",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "icon": "./assets/icon.png",
+    "userInterfaceStyle": "light",
+    "splash": {
+      "image": "./assets/splash.png",
+      "resizeMode": "contain",
+      "backgroundColor": "#ffffff"
+    },
+    "assetBundlePatterns": [
+      "**/*"
+    ],
+    "ios": {
+      "supportsTablet": true,
+      "bundleIdentifier": "com.amoraea.app",
+      "infoPlist": {
+        "NSLocationWhenInUseUsageDescription": "Amoraea needs your location to help you find compatible matches.",
+        "NSPhotoLibraryUsageDescription": "Amoraea needs access to your photos to upload profile pictures.",
+        "NSContactsUsageDescription": "Amoraea needs access to your contacts to sync them with the app and find matches."
+      }
+    },
+    "android": {
+      "adaptiveIcon": {
+        "foregroundImage": "./assets/adaptive-icon.png",
+        "backgroundColor": "#ffffff"
+      },
+      "package": "com.amoraea.app",
+      "permissions": [
+        "ACCESS_FINE_LOCATION",
+        "ACCESS_COARSE_LOCATION",
+        "READ_EXTERNAL_STORAGE",
+        "WRITE_EXTERNAL_STORAGE",
+        "READ_CONTACTS"
+      ]
+    },
+    "web": {
+      "favicon": "./assets/favicon.png"
+    },
+    "plugins": [
+      [
+        "expo-location",
+        {
+          "locationAlwaysAndWhenInUsePermission": "Allow Amoraea to use your location."
+        }
+      ],
+      [
+        "expo-image-picker",
+        {
+          "photosPermission": "The app accesses your photos to let you share them."
+        }
+      ],
+      [
+        "expo-contacts",
+        {
+          "contactsPermission": "Allow Amoraea to sync your contacts with the app to find matches."
+        }
+      ],
+      [
+        "expo-speech-recognition",
+        {
+          "microphonePermission": "Amoraea uses the microphone so you can answer Aria's questions by voice.",
+          "speechRecognitionPermission": "Amoraea uses speech recognition to turn your voice answers into text."
+        }
+      ]
+    ]
+  }
+}
+
