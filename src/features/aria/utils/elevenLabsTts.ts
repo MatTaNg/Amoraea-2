@@ -5,10 +5,10 @@ import { Audio } from 'expo-av';
 import * as Speech from 'expo-speech';
 
 /**
- * Rachel — warm, friendly, conversational (less robotic than default Aria).
- * Override with EXPO_PUBLIC_ELEVENLABS_VOICE_ID if needed.
+ * Jessica — warm, friendly, conversational (ElevenLabs). Override with
+ * EXPO_PUBLIC_ELEVENLABS_VOICE_ID or app config elevenLabsVoiceId if needed.
  */
-const DEFAULT_VOICE_ID = '21m00Tcm4TlvDq8ikWAM'; // Rachel
+const DEFAULT_VOICE_ID = 'cgSgspJ2msm6clMCkdW9'; // Jessica — warm, friendly
 
 let activeWebAudio: { pause(): void; currentTime: number } | null = null;
 
@@ -50,11 +50,16 @@ export async function speakWithElevenLabs(
     || DEFAULT_VOICE_ID;
 
   if (!apiKey || !text.trim()) {
+    if (!apiKey) {
+      console.warn('ElevenLabs: No API key (EXPO_PUBLIC_ELEVENLABS_API_KEY or app config). Using fallback TTS — set the key for natural voice.');
+    }
     await speakFallback(text, onFallback);
     return;
   }
 
   try {
+    // Use multilingual v2 for more natural, expressive speech (less robotic than flash).
+    const modelId = 'eleven_multilingual_v2';
     const res = await fetch(
       `https://api.elevenlabs.io/v1/text-to-speech/${voiceId}/stream`,
       {
@@ -66,11 +71,11 @@ export async function speakWithElevenLabs(
         },
         body: JSON.stringify({
           text: text.trim(),
-          model_id: 'eleven_flash_v2_5',
+          model_id: modelId,
           voice_settings: {
-            stability: 0.28,
-            similarity_boost: 0.8,
-            style: 0.68,
+            stability: 0.22,
+            similarity_boost: 0.82,
+            style: 0.65,
             use_speaker_boost: true,
           },
         }),

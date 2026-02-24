@@ -52,6 +52,10 @@ export const useAuth = () => {
       password,
       options: {
         data: options?.inviteCode ? { referral_code: options.inviteCode.trim() } : undefined,
+        emailRedirectTo:
+          typeof window !== 'undefined' && window.location?.origin
+            ? `${window.location.origin}`
+            : undefined,
       },
     });
     if (error) throw error;

@@ -1,15 +1,12 @@
 import React from 'react';
 import { View, Text, TouchableOpacity, StyleSheet, Alert, Platform } from 'react-native';
-import { useNavigation } from '@react-navigation/native';
 import { Ionicons } from '@expo/vector-icons';
 import { useAuth } from '@features/authentication/hooks/useAuth';
 import { colors } from '@ui/theme/colors';
 import { spacing } from '@ui/theme/spacing';
 
-export const AppHeader: React.FC = () => {
-  const navigation = useNavigation();
+export const OnboardingHeader: React.FC = () => {
   const { signOut } = useAuth();
-  const canGoBack = navigation.canGoBack();
 
   const handleLogOut = () => {
     if (Platform.OS === 'web') {
@@ -29,21 +26,16 @@ export const AppHeader: React.FC = () => {
 
   return (
     <View style={styles.banner}>
-      <View style={[styles.side, styles.sideLeft]}>
-        {canGoBack ? (
-          <TouchableOpacity onPress={() => navigation.goBack()} style={styles.button} hitSlop={12}>
-            <Ionicons name="arrow-back" size={24} color={colors.text} />
-          </TouchableOpacity>
-        ) : (
-          <View style={styles.placeholder} />
-        )}
-      </View>
+      <View style={styles.placeholder} />
       <Text style={styles.title}>Amoraea</Text>
-      <View style={[styles.side, styles.sideRight]}>
-        <TouchableOpacity onPress={handleLogOut} style={styles.button} hitSlop={12} accessibilityLabel="Log out">
-          <Ionicons name="log-out-outline" size={24} color={colors.primary} />
-        </TouchableOpacity>
-      </View>
+      <TouchableOpacity
+        onPress={handleLogOut}
+        style={styles.button}
+        hitSlop={12}
+        accessibilityLabel="Log out"
+      >
+        <Ionicons name="log-out-outline" size={24} color={colors.primary} />
+      </TouchableOpacity>
     </View>
   );
 };
@@ -60,30 +52,16 @@ const styles = StyleSheet.create({
     backgroundColor: colors.background,
     minHeight: 56,
   },
-  side: {
-    minWidth: 80,
-  },
-  sideLeft: {
-    alignItems: 'flex-start',
-  },
-  sideRight: {
-    alignItems: 'flex-end',
-  },
   placeholder: {
     width: 40,
     height: 40,
   },
+  title: {
+    fontSize: 18,
+    fontWeight: '600',
+    color: colors.text,
+  },
   button: {
     padding: spacing.sm,
-  },
-  title: {
-    fontSize: 20,
-    fontWeight: 'bold',
-    color: colors.text,
-    position: 'absolute',
-    left: 0,
-    right: 0,
-    textAlign: 'center',
-    pointerEvents: 'none',
   },
 });

@@ -198,6 +198,7 @@ export const HomeScreen: React.FC<{ navigation: any; userId: string }> = ({ navi
         onSaved={() => {
           queryClient.invalidateQueries({ queryKey: ['profile', userId] });
           queryClient.invalidateQueries({ queryKey: ['profileCompletion', userId] });
+          queryClient.invalidateQueries({ queryKey: ['compatibility', userId] });
         }}
       />
     </SafeAreaContainer>

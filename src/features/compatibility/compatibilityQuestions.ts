@@ -494,10 +494,4 @@ export const COMPATIBILITY_SECTIONS: CompatibilitySectionConfig[] = [
       },
     ],
   },
-  {
-    sectionTitle: 'About You',
-    questions: [
-      { type: 'select', field: 'weight', label: 'What is your weight?', options: WEIGHT_OPTIONS },
-    ],
-  },
 ];

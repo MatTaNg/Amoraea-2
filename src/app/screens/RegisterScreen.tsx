@@ -37,7 +37,7 @@ export const RegisterScreen: React.FC<{ navigation: any }> = ({ navigation }) =>
 
     try {
       await signUp(email, password, inviteCode.trim() ? { inviteCode: inviteCode.trim() } : undefined);
-      // Navigation will be handled by auth state change
+      navigation.replace('Login', { confirmEmail: true });
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to create account');
     } finally {

@@ -24,18 +24,24 @@ import { spacing } from '@ui/theme/spacing';
 import { Ionicons } from '@expo/vector-icons';
 import { Profile, Gender, AttractedToOption, ProfilePromptAnswer } from '@domain/models/Profile';
 import { ProfileRepository } from '@data/repositories/ProfileRepository';
-import { LocationPermissionService } from '@utilities/permissions/LocationPermissionService';
 import { PhotoUseCase } from '@domain/useCases/PhotoUseCase';
+import { CompatibilityRepository } from '@data/repositories/CompatibilityRepository';
+import { CompatibilityUseCase } from '@domain/useCases/CompatibilityUseCase';
+import { LocationPermissionService } from '@utilities/permissions/LocationPermissionService';
 import {
   PROMPT_CATEGORIES,
   MAX_PROMPTS,
   getPromptById,
 } from '@features/profile/promptsByCategory';
+import { WEIGHT_OPTIONS } from '@features/compatibility/compatibilityQuestions';
 import type { PromptCategory, PromptOption } from '@features/profile/promptsByCategory';
+import type { CompatibilityFormData } from '@domain/models/CompatibilityForm';
 
 const profileRepository = new ProfileRepository();
-const locationService = new LocationPermissionService();
 const photoUseCase = new PhotoUseCase(profileRepository);
+const compatibilityRepository = new CompatibilityRepository();
+const compatibilityUseCase = new CompatibilityUseCase(compatibilityRepository);
+const locationService = new LocationPermissionService();
 
 const editProfileSchema = z.object({
   name: z.string().min(1, 'Name is required').max(100),
@@ -44,6 +50,7 @@ const editProfileSchema = z.object({
   attractedTo: z.array(z.enum(['Men', 'Women', 'Non-binary'])).min(1, 'Select at least one'),
   heightCentimeters: z.number().int().min(100).max(250),
   occupation: z.string().min(1).max(200),
+  weight: z.enum(['100_120', '121_140', '141_160', '161_180', '181_200', '200_plus', 'prefer_not']).optional().nullable(),
 });
 
 type EditProfileFormData = z.infer<typeof editProfileSchema>;
@@ -83,6 +90,12 @@ export const EditProfileModal: React.FC<EditProfileModalProps> = ({
     enabled: !!userId && visible,
   });
 
+  const { data: compatibility } = useQuery({
+    queryKey: ['compatibility', userId],
+    queryFn: () => compatibilityUseCase.getCompatibility(userId),
+    enabled: !!userId && visible,
+  });
+
   const {
     register,
     handleSubmit,
@@ -99,6 +112,7 @@ export const EditProfileModal: React.FC<EditProfileModalProps> = ({
       attractedTo: [],
       heightCentimeters: undefined,
       occupation: '',
+      weight: null,
     },
   });
 
@@ -108,6 +122,7 @@ export const EditProfileModal: React.FC<EditProfileModalProps> = ({
   const attractedToValue = watch('attractedTo') || [];
   const heightValue = watch('heightCentimeters');
   const occupationValue = watch('occupation');
+  const weightValue = watch('weight');
 
   useEffect(() => {
     if (profile && visible) {
@@ -118,9 +133,10 @@ export const EditProfileModal: React.FC<EditProfileModalProps> = ({
         attractedTo: profile.attractedTo || [],
         heightCentimeters: profile.heightCentimeters ?? undefined,
         occupation: profile.occupation || '',
+        weight: (compatibility?.compatibilityData?.weight as CompatibilityFormData['weight']) ?? null,
       });
     }
-  }, [profile, visible, reset]);
+  }, [profile, compatibility, visible, reset]);
 
   useEffect(() => {
     register('name');
@@ -129,6 +145,7 @@ export const EditProfileModal: React.FC<EditProfileModalProps> = ({
     register('attractedTo');
     register('heightCentimeters');
     register('occupation');
+    register('weight');
   }, [register]);
 
   const addPhotos = async () => {
@@ -198,6 +215,11 @@ export const EditProfileModal: React.FC<EditProfileModalProps> = ({
         heightCentimeters: data.heightCentimeters,
         occupation: data.occupation,
       });
+      const compatData: Record<string, unknown> = {
+        ...(compatibility?.compatibilityData ?? {}),
+        weight: data.weight ?? undefined,
+      };
+      await compatibilityUseCase.upsertCompatibility(userId, { compatibilityData: compatData });
       onSaved();
       onClose();
     } catch (error) {
@@ -411,6 +433,17 @@ export const EditProfileModal: React.FC<EditProfileModalProps> = ({
                 keyboardType="numeric"
                 error={errors.heightCentimeters?.message}
               />
+
+              <Text style={styles.fieldLabel}>Weight</Text>
+              <Text style={styles.photoHint}>Optional. Used for compatibility.</Text>
+              {WEIGHT_OPTIONS.map((opt) => (
+                <SelectButton
+                  key={opt.value}
+                  label={opt.label}
+                  selected={weightValue === opt.value}
+                  onPress={() => setValue('weight', opt.value, { shouldValidate: true })}
+                />
+              ))}
 
               <TextInput
                 label="Occupation"

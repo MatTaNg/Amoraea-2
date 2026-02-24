@@ -7,12 +7,13 @@ import { SafeAreaContainer } from '@ui/components/SafeAreaContainer';
 import { colors } from '@ui/theme/colors';
 import { spacing } from '@ui/theme/spacing';
 
-export const LoginScreen: React.FC<{ navigation: any }> = ({ navigation }) => {
+export const LoginScreen: React.FC<{ navigation: any; route?: { params?: { confirmEmail?: boolean } } }> = ({ navigation, route }) => {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const { signIn } = useAuth();
+  const confirmEmailMessage = route?.params?.confirmEmail ?? false;
 
   const handleLogin = async () => {
     if (!email || !password) {
@@ -60,6 +61,12 @@ export const LoginScreen: React.FC<{ navigation: any }> = ({ navigation }) => {
               placeholder="Enter your password"
               secureTextEntry
             />
+
+            {confirmEmailMessage && (
+              <Text style={styles.successText}>
+                Check your email to confirm your account, then sign in below.
+              </Text>
+            )}
 
             {error && <Text style={styles.errorText}>{error}</Text>}
 
@@ -116,6 +123,13 @@ const styles = StyleSheet.create({
     fontSize: 14,
     marginTop: spacing.sm,
     textAlign: 'center',
+  },
+  successText: {
+    color: colors.primary,
+    fontSize: 14,
+    marginTop: spacing.sm,
+    textAlign: 'center',
+    marginBottom: spacing.xs,
   },
 });
 

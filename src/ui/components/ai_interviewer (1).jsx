@@ -742,7 +742,7 @@ function ResultsScreen({ results, onContinue }) {
 // so the key is never exposed client-side.
 // ─────────────────────────────────────────────
 const ELEVENLABS_API_KEY  = "YOUR_ELEVENLABS_API_KEY";
-const ELEVENLABS_VOICE_ID = "9BWtsMINqrJLrRacOk9x"; // Aria — v3 generation, warm, conversational
+const ELEVENLABS_VOICE_ID = "cgSgspJ2msm6clMCkdW9"; // Jessica — warm, friendly
 
 // Active audio source — tracked so we can stop mid-playback if needed
 let activeAudioSource = null;
@@ -773,11 +773,11 @@ async function speak(text) {
         },
         body: JSON.stringify({
           text,
-          model_id: "eleven_flash_v2_5",
+          model_id: "eleven_multilingual_v2",
           voice_settings: {
-            stability: 0.40,
-            similarity_boost: 0.75,
-            style: 0.50,
+            stability: 0.22,
+            similarity_boost: 0.82,
+            style: 0.65,
             use_speaker_boost: true,
           },
         }),

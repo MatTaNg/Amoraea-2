@@ -62,8 +62,7 @@ export class PhotoUseCase {
     for (let i = 0; i < photoUris.length; i++) {
       const uri = photoUris[i];
       const fileName = uri.split('/').pop() || `photo_${Date.now()}_${i}.jpg`;
-      const publicUrl = await this.profileRepository.uploadPhoto(userId, uri, fileName);
-      const storagePath = `${userId}/${fileName}`;
+      const { publicUrl, storagePath } = await this.profileRepository.uploadPhoto(userId, uri, fileName);
 
       const photo = await this.profileRepository.savePhotoRecord({
         profileId: userId,

@@ -8,6 +8,9 @@ export interface Location {
   label: string | null;
 }
 
+/** Onboarding gates (Stage 1–4) — re-export for convenience */
+export type { OnboardingStage, ApplicationStatus, BasicInfo, Gate1Score, Gate2Psychometrics, Gate3Compatibility } from './OnboardingGates';
+
 /** One profile prompt answer (UX only, not used by algorithm). */
 export interface ProfilePromptAnswer {
   promptId: string;
@@ -31,6 +34,15 @@ export interface Profile {
   inviteCode: string | null;
   /** Up to 3 prompt answers (UX only). */
   prompts: ProfilePromptAnswer[];
+
+  // Onboarding gates
+  onboardingStage: OnboardingStage;
+  applicationStatus: ApplicationStatus;
+  profileVisible: boolean;
+  basicInfo: BasicInfo | null;
+  gate1Score: Gate1Score | null;
+  gate2Psychometrics: Gate2Psychometrics | null;
+  gate3Compatibility: Gate3Compatibility | null;
 }
 
 export interface ProfilePhoto {
@@ -55,5 +67,13 @@ export interface ProfileUpdate {
   onboardingCompleted?: boolean;
   /** Up to 3 prompt answers. */
   prompts?: ProfilePromptAnswer[];
+
+  onboardingStage?: OnboardingStage;
+  applicationStatus?: ApplicationStatus;
+  profileVisible?: boolean;
+  basicInfo?: BasicInfo | null;
+  gate1Score?: Gate1Score | null;
+  gate2Psychometrics?: Gate2Psychometrics | null;
+  gate3Compatibility?: Gate3Compatibility | null;
 }
 

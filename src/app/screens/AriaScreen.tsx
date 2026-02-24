@@ -15,7 +15,7 @@ import {
   ExpoSpeechRecognitionModule,
   useSpeechRecognitionEvent,
 } from 'expo-speech-recognition';
-import { useQuery } from '@tanstack/react-query';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { SafeAreaContainer } from '@ui/components/SafeAreaContainer';
 import { Button } from '@ui/components/Button';
 import { colors } from '@ui/theme/colors';
@@ -23,6 +23,8 @@ import { spacing } from '@ui/theme/spacing';
 import { Ionicons } from '@expo/vector-icons';
 import { speakWithElevenLabs, stopElevenLabsSpeech } from '@features/aria/utils/elevenLabsTts';
 import { ProfileRepository } from '@data/repositories/ProfileRepository';
+import { evaluateGate1 } from '@features/onboarding/evaluateGate1';
+import type { Gate1Score } from '@domain/models/OnboardingGates';
 
 const profileRepository = new ProfileRepository();
 
@@ -166,6 +168,26 @@ const SUPABASE_ANON_KEY =
 const OPENAI_API_KEY =
   (typeof process !== 'undefined' && process.env?.EXPO_PUBLIC_OPENAI_API_KEY) || '';
 
+function buildGate1ScoreFromResults(results: InterviewResults): Gate1Score {
+  const pillarScores = results.pillarScores ?? {};
+  const evaluation = evaluateGate1({
+    pillarScores,
+    narrativeCoherence: results.narrativeCoherence,
+    behavioralSpecificity: results.behavioralSpecificity,
+  });
+  const sum = Object.values(pillarScores).reduce((a, v) => a + v, 0);
+  const count = Object.keys(pillarScores).length || 1;
+  return {
+    pillarScores,
+    averageScore: evaluation.averageScore,
+    narrativeCoherence: results.narrativeCoherence ?? 'moderate',
+    behavioralSpecificity: results.behavioralSpecificity ?? 'moderate',
+    passed: evaluation.passed,
+    failReasons: evaluation.failReasons,
+    scoredAt: new Date().toISOString(),
+  };
+}
+
 export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigation, route }) => {
   const { userId } = route.params as { userId: string };
   const [messages, setMessages] = useState<{ role: string; content: string }[]>([]);
@@ -191,6 +213,7 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
     queryKey: ['profile', userId],
     queryFn: () => profileRepository.getProfile(userId),
   });
+  const queryClient = useQueryClient();
 
   const typologyContext = ''; // Optional: load from profile/assessments later
 
@@ -520,17 +543,29 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
   }, [speak]);
 
   const scoreInterview = useCallback(async (finalMessages: { role: string; content: string }[]) => {
+    const isOnboarding = route.name === 'OnboardingInterview';
     setStatus('scoring');
     const context = typologyContext || 'No typology context — score from transcript only.';
     if (!ANTHROPIC_API_KEY && !ANTHROPIC_PROXY_URL) {
-      setResults({
+      const fallbackResults: InterviewResults = {
         pillarScores: { '1': 6, '3': 7, '4': 6, '5': 7, '6': 5, '9': 6 },
         keyEvidence: {},
         narrativeCoherence: 'moderate',
         behavioralSpecificity: 'moderate',
         notableInconsistencies: [],
         interviewSummary: 'Interview completed. Set EXPO_PUBLIC_ANTHROPIC_API_KEY or proxy for scoring.',
-      });
+      };
+      setResults(fallbackResults);
+      if (isOnboarding) {
+        const gate1Score = buildGate1ScoreFromResults(fallbackResults);
+        await profileRepository.upsertProfile(userId, {
+          gate1Score,
+          applicationStatus: gate1Score.passed ? 'approved' : 'under_review',
+        });
+        queryClient.invalidateQueries({ queryKey: ['profile', userId] });
+        navigation.replace('PostInterview', { userId });
+        return;
+      }
       setStatus('results');
       return;
     }
@@ -555,20 +590,42 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
       });
       const data = await res.json();
       const raw = (data.content?.[0]?.text ?? '{}').replace(/```json|```/g, '').trim();
-      setResults(JSON.parse(raw) as InterviewResults);
+      const resultsData = JSON.parse(raw) as InterviewResults;
+      setResults(resultsData);
+      if (isOnboarding) {
+        const gate1Score = buildGate1ScoreFromResults(resultsData);
+        await profileRepository.upsertProfile(userId, {
+          gate1Score,
+          applicationStatus: gate1Score.passed ? 'approved' : 'under_review',
+        });
+        queryClient.invalidateQueries({ queryKey: ['profile', userId] });
+        navigation.replace('PostInterview', { userId });
+        return;
+      }
       setStatus('results');
     } catch {
-      setResults({
+      const fallbackResults: InterviewResults = {
         pillarScores: { '1': 6, '3': 7, '4': 6, '5': 7, '6': 5, '9': 6 },
         keyEvidence: {},
         narrativeCoherence: 'moderate',
         behavioralSpecificity: 'moderate',
         notableInconsistencies: [],
         interviewSummary: 'A grounded spoken profile. See individual construct scores for detail.',
-      });
+      };
+      setResults(fallbackResults);
+      if (isOnboarding) {
+        const gate1Score = buildGate1ScoreFromResults(fallbackResults);
+        await profileRepository.upsertProfile(userId, {
+          gate1Score,
+          applicationStatus: gate1Score.passed ? 'approved' : 'under_review',
+        });
+        queryClient.invalidateQueries({ queryKey: ['profile', userId] });
+        navigation.replace('PostInterview', { userId });
+        return;
+      }
       setStatus('results');
     }
-  }, [typologyContext]);
+  }, [typologyContext, route.name, userId, navigation, queryClient]);
 
   // ── RENDER ──
   if (status === 'scoring') {

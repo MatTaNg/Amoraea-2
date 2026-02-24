@@ -1,4 +1,4 @@
-import React, { useEffect } from 'react';
+import React, { useEffect, useMemo } from 'react';
 import { NavigationContainer } from '@react-navigation/native';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
@@ -6,6 +6,13 @@ import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { useAuth } from './src/features/authentication/hooks/useAuth';
 import { LoginScreen } from './src/app/screens/LoginScreen';
 import { RegisterScreen } from './src/app/screens/RegisterScreen';
+import { Stage1BasicInfoScreen } from './src/app/screens/onboarding/Stage1BasicInfoScreen';
+import { InterviewFramingScreen } from './src/app/screens/onboarding/InterviewFramingScreen';
+import { PostInterviewScreen } from './src/app/screens/onboarding/PostInterviewScreen';
+import { UnderReviewScreen } from './src/app/screens/onboarding/UnderReviewScreen';
+import { Gate2ReentryScreen } from './src/app/screens/onboarding/Gate2ReentryScreen';
+import { Stage3PsychometricsScreen } from './src/app/screens/onboarding/Stage3PsychometricsScreen';
+import { Stage4CompatibilityScreen } from './src/app/screens/onboarding/Stage4CompatibilityScreen';
 import { OnboardingNameScreen } from './src/app/screens/onboarding/OnboardingNameScreen';
 import { OnboardingAgeScreen } from './src/app/screens/onboarding/OnboardingAgeScreen';
 import { OnboardingGenderScreen } from './src/app/screens/onboarding/OnboardingGenderScreen';
@@ -23,6 +30,7 @@ import { HumanDesignScreen } from './src/app/screens/HumanDesignScreen';
 import { AriaScreen } from './src/app/screens/AriaScreen';
 import { FullAssessmentScreen } from './src/app/screens/FullAssessmentScreen';
 import { AppHeader } from './src/ui/components/AppHeader';
+import { OnboardingHeader } from './src/ui/components/OnboardingHeader';
 import { ProfileRepository } from './src/data/repositories/ProfileRepository';
 import { InviteCodeRepository } from './src/data/repositories/InviteCodeRepository';
 import { OnboardingUseCase } from './src/domain/useCases/OnboardingUseCase';
@@ -74,6 +82,51 @@ const OnboardingNavigator = ({ userId }: { userId: string }) => (
   </Stack.Navigator>
 );
 
+/** Gate-based onboarding: Stage 1 → Interview → Psychometrics (approved) → Compatibility → Complete */
+function getOnboardingInitialRoute(profile: { onboardingStage?: string; applicationStatus?: string; gate1Score?: unknown }): string {
+  const stage = profile.onboardingStage ?? 'basic_info';
+  if (stage === 'basic_info') return 'Stage1BasicInfo';
+  if (stage === 'interview') {
+    return profile.gate1Score ? 'PostInterview' : 'OnboardingInterview';
+  }
+  if (stage === 'psychometrics') {
+    if (profile.applicationStatus === 'approved') return 'Gate2Reentry';
+    if (profile.applicationStatus === 'under_review') return 'UnderReview';
+    return 'PostInterview';
+  }
+  if (stage === 'compatibility') return 'Stage4Compatibility';
+  if (stage === 'complete') return 'Stage1BasicInfo'; // should not be used; main app shown
+  return 'Stage1BasicInfo';
+}
+
+const GatesOnboardingNavigator = ({ userId }: { userId: string }) => {
+  const { data: profile } = useQuery({
+    queryKey: ['profile', userId],
+    queryFn: () => profileRepository.getProfile(userId),
+    enabled: !!userId,
+  });
+  const initialRoute = useMemo(() => getOnboardingInitialRoute(profile ?? {}), [profile]);
+  return (
+    <Stack.Navigator
+      initialRouteName={initialRoute}
+      screenOptions={{
+        headerShown: true,
+        header: () => <OnboardingHeader />,
+        title: '',
+      }}
+    >
+      <Stack.Screen name="Stage1BasicInfo" component={Stage1BasicInfoScreen} initialParams={{ userId }} />
+      <Stack.Screen name="InterviewFraming" component={InterviewFramingScreen} initialParams={{ userId }} />
+      <Stack.Screen name="OnboardingInterview" component={AriaScreen} initialParams={{ userId }} />
+      <Stack.Screen name="PostInterview" component={PostInterviewScreen} initialParams={{ userId }} />
+      <Stack.Screen name="UnderReview" component={UnderReviewScreen} initialParams={{ userId }} />
+      <Stack.Screen name="Gate2Reentry" component={Gate2ReentryScreen} initialParams={{ userId }} />
+      <Stack.Screen name="Stage3Psychometrics" component={Stage3PsychometricsScreen} initialParams={{ userId }} />
+      <Stack.Screen name="Stage4Compatibility" component={Stage4CompatibilityScreen} initialParams={{ userId }} />
+    </Stack.Navigator>
+  );
+};
+
 const AppNavigator = ({ userId }: { userId: string }) => {
   const { data: profile, isLoading } = useQuery({
     queryKey: ['profile', userId],
@@ -103,35 +156,11 @@ const AppNavigator = ({ userId }: { userId: string }) => {
     return null; // Loading state
   }
 
-  if (!profile.onboardingCompleted) {
-    return (
-      <Stack.Navigator screenOptions={{ headerShown: false }}>
-        <Stack.Screen name="OnboardingName">
-          {(props) => <OnboardingNameScreen {...props} userId={userId} />}
-        </Stack.Screen>
-        <Stack.Screen name="OnboardingAge">
-          {(props) => <OnboardingAgeScreen {...props} userId={userId} />}
-        </Stack.Screen>
-        <Stack.Screen name="OnboardingGender">
-          {(props) => <OnboardingGenderScreen {...props} userId={userId} />}
-        </Stack.Screen>
-        <Stack.Screen name="OnboardingAttractedTo">
-          {(props) => <OnboardingAttractedToScreen {...props} userId={userId} />}
-        </Stack.Screen>
-        <Stack.Screen name="OnboardingHeight">
-          {(props) => <OnboardingHeightScreen {...props} userId={userId} />}
-        </Stack.Screen>
-        <Stack.Screen name="OnboardingOccupation">
-          {(props) => <OnboardingOccupationScreen {...props} userId={userId} />}
-        </Stack.Screen>
-        <Stack.Screen name="OnboardingLocation">
-          {(props) => <OnboardingLocationScreen {...props} userId={userId} />}
-        </Stack.Screen>
-        <Stack.Screen name="OnboardingPhotos">
-          {(props) => <OnboardingPhotosScreen {...props} userId={userId} />}
-        </Stack.Screen>
-      </Stack.Navigator>
-    );
+  const stage = profile.onboardingStage ?? 'basic_info';
+  const showMainApp = stage === 'complete' || profile.profileVisible === true;
+
+  if (!showMainApp) {
+    return <GatesOnboardingNavigator userId={userId} />;
   }
 
   return (
