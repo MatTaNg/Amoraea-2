@@ -1,11 +1,18 @@
-import React, { useState } from 'react';
-import { View, StyleSheet, Text, KeyboardAvoidingView, Platform, ScrollView } from 'react-native';
+import React, { useState, useEffect } from 'react';
+import {
+  View,
+  Text,
+  StyleSheet,
+  TextInput,
+  Pressable,
+  KeyboardAvoidingView,
+  Platform,
+  ScrollView,
+} from 'react-native';
 import { useAuth } from '@features/authentication/hooks/useAuth';
-import { TextInput } from '@ui/components/TextInput';
-import { Button } from '@ui/components/Button';
 import { SafeAreaContainer } from '@ui/components/SafeAreaContainer';
-import { colors } from '@ui/theme/colors';
-import { spacing } from '@ui/theme/spacing';
+import { FlameOrb } from '@app/screens/FlameOrb';
+import { authStyles } from '@app/screens/authStyles';
 
 const isEmailNotConfirmedError = (err: unknown): boolean => {
   const msg = err instanceof Error ? err.message : String(err);
@@ -13,7 +20,13 @@ const isEmailNotConfirmedError = (err: unknown): boolean => {
   return lower.includes('email not confirmed') || lower.includes('confirm your email');
 };
 
-export const LoginScreen: React.FC<{ navigation: any; route?: { params?: { confirmEmail?: boolean } } }> = ({ navigation, route }) => {
+const GOOGLE_FONTS_URL =
+  "https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,300;0,400;1,300&family=Jost:wght@200;300;400&display=swap";
+
+export const LoginScreen: React.FC<{ navigation: any; route?: { params?: { confirmEmail?: boolean } } }> = ({
+  navigation,
+  route,
+}) => {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState<string | null>(null);
@@ -23,24 +36,34 @@ export const LoginScreen: React.FC<{ navigation: any; route?: { params?: { confi
   const { signIn, resendConfirmationEmail } = useAuth();
   const confirmEmailMessage = route?.params?.confirmEmail ?? false;
 
+  useEffect(() => {
+    if (Platform.OS !== 'web' || typeof document === 'undefined') return;
+    const link = document.createElement('link');
+    link.rel = 'stylesheet';
+    link.href = GOOGLE_FONTS_URL;
+    document.head.appendChild(link);
+    return () => {
+      if (link.parentNode) link.parentNode.removeChild(link);
+    };
+  }, []);
+
   const handleLogin = async () => {
-    if (!email || !password) {
+    if (!email?.trim() || !password) {
       setError('Please fill in all fields');
       return;
     }
-
     setError(null);
     setResendSent(false);
     setLoading(true);
-
     try {
-      await signIn(email, password);
-      // Navigation will be handled by auth state change
+      await signIn(email.trim(), password);
     } catch (err) {
       if (isEmailNotConfirmedError(err)) {
-        setError('Please confirm your email before signing in. Check your inbox or resend the confirmation link below.');
+        setError(
+          'Please confirm your email before signing in. Check your inbox or resend the confirmation link below.'
+        );
       } else {
-        setError(err instanceof Error ? err.message : 'Failed to sign in');
+        setError(err instanceof Error ? err.message : 'Incorrect email or password.');
       }
     } finally {
       setLoading(false);
@@ -62,65 +85,93 @@ export const LoginScreen: React.FC<{ navigation: any; route?: { params?: { confi
   };
 
   return (
-    <SafeAreaContainer>
+    <SafeAreaContainer style={styles.safeBg}>
       <KeyboardAvoidingView
         behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-        style={styles.container}
+        style={styles.keyboard}
       >
-        <ScrollView contentContainerStyle={styles.scrollContent}>
-          <View style={styles.content}>
-            <Text style={styles.title}>Welcome to Amoraea</Text>
-            <Text style={styles.subtitle}>Sign in to continue</Text>
+        <ScrollView
+          contentContainerStyle={styles.scrollContent}
+          keyboardShouldPersistTaps="handled"
+          showsVerticalScrollIndicator={false}
+        >
+          <View style={authStyles.fullScreen}>
+            {Platform.OS === 'web' && <View style={[StyleSheet.absoluteFill, authStyles.grainOverlay]} pointerEvents="none" />}
+            <View style={authStyles.ambientGlow} pointerEvents="none" />
 
-            <TextInput
-              label="Email"
-              value={email}
-              onChangeText={setEmail}
-              placeholder="Enter your email"
-              keyboardType="email-address"
-              autoCapitalize="none"
-            />
-
-            <TextInput
-              label="Password"
-              value={password}
-              onChangeText={setPassword}
-              placeholder="Enter your password"
-              secureTextEntry
-            />
-
-            {confirmEmailMessage && (
-              <Text style={styles.successText}>
-                Check your email to confirm your account, then sign in below.
+            <View style={[authStyles.inner, styles.innerCentered]}>
+              <Text style={authStyles.wordmark}>
+                amor<Text style={authStyles.wordmarkAe}>æ</Text>a
               </Text>
-            )}
 
-            {error && <Text style={styles.errorText}>{error}</Text>}
+              <View style={styles.flameWrap}>
+                <View style={styles.flameScale}>
+                  <FlameOrb state="idle" />
+                </View>
+              </View>
 
-            {error && error.includes('confirm your email') && email?.trim() && (
-              <Button
-                title={resendSent ? 'Confirmation email sent' : 'Resend confirmation email'}
-                onPress={handleResendConfirmation}
-                disabled={resendSent || resending}
-                loading={resending}
-                variant="outline"
-                style={styles.button}
+              <Text style={authStyles.tagline}>Enter to continue your journey.</Text>
+
+              <TextInput
+                placeholder="Email"
+                placeholderTextColor="#5B6B80"
+                value={email}
+                onChangeText={setEmail}
+                keyboardType="email-address"
+                autoCapitalize="none"
+                autoCorrect={false}
+                style={authStyles.input}
               />
-            )}
 
-            <Button
-              title="Sign In"
-              onPress={handleLogin}
-              loading={loading}
-              style={styles.button}
-            />
+              <TextInput
+                placeholder="Password"
+                placeholderTextColor="#5B6B80"
+                value={password}
+                onChangeText={setPassword}
+                secureTextEntry
+                style={[authStyles.input, { marginBottom: 24 }]}
+                onSubmitEditing={handleLogin}
+              />
 
-            <Button
-              title="Create Account"
-              onPress={() => navigation.navigate('Register')}
-              variant="outline"
-              style={styles.button}
-            />
+              {confirmEmailMessage && (
+                <Text style={styles.successText}>
+                  Check your email to confirm your account, then sign in below.
+                </Text>
+              )}
+
+              {error ? <Text style={authStyles.errorText}>{error}</Text> : null}
+
+              {error && error.includes('confirm your email') && email?.trim() ? (
+                <Pressable
+                  onPress={handleResendConfirmation}
+                  disabled={resendSent || resending}
+                  style={[authStyles.primaryButton, styles.button]}
+                >
+                  <Text style={authStyles.primaryButtonText}>
+                    {resendSent ? 'Confirmation email sent' : resending ? '...' : 'Resend confirmation email'}
+                  </Text>
+                </Pressable>
+              ) : null}
+
+              <Pressable
+                onPress={handleLogin}
+                disabled={loading}
+                style={[authStyles.primaryButton, styles.button]}
+              >
+                <Text style={authStyles.primaryButtonText}>
+                  {loading ? '...' : 'Sign In →'}
+                </Text>
+              </Pressable>
+
+              <View style={authStyles.divider} />
+
+              <Text style={authStyles.footerText}>
+                Don't have an account?{' '}
+                <Text style={authStyles.link} onPress={() => navigation.navigate('Register')}>
+                  Apply to join
+                </Text>
+              </Text>
+            </View>
           </View>
         </ScrollView>
       </KeyboardAvoidingView>
@@ -129,45 +180,34 @@ export const LoginScreen: React.FC<{ navigation: any; route?: { params?: { confi
 };
 
 const styles = StyleSheet.create({
-  container: {
+  safeBg: {
+    backgroundColor: '#05060D',
+  },
+  keyboard: {
     flex: 1,
   },
   scrollContent: {
     flexGrow: 1,
+  },
+  innerCentered: {
+    alignItems: 'center',
+  },
+  flameWrap: {
+    marginBottom: 24,
+    alignItems: 'center',
     justifyContent: 'center',
-    padding: spacing.lg,
   },
-  content: {
-    width: '100%',
-  },
-  title: {
-    fontSize: 32,
-    fontWeight: 'bold',
-    color: colors.text,
-    marginBottom: spacing.sm,
-    textAlign: 'center',
-  },
-  subtitle: {
-    fontSize: 16,
-    color: colors.textSecondary,
-    marginBottom: spacing.xl,
-    textAlign: 'center',
+  flameScale: {
+    transform: [{ scale: 0.62 }],
   },
   button: {
-    marginTop: spacing.md,
-  },
-  errorText: {
-    color: colors.error,
-    fontSize: 14,
-    marginTop: spacing.sm,
-    textAlign: 'center',
+    marginBottom: 12,
   },
   successText: {
-    color: colors.primary,
+    color: '#5BA8E8',
     fontSize: 14,
-    marginTop: spacing.sm,
+    marginBottom: 16,
     textAlign: 'center',
-    marginBottom: spacing.xs,
+    fontFamily: Platform.OS === 'web' ? "'Jost', sans-serif" : undefined,
   },
 });
-

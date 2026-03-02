@@ -1,109 +1,187 @@
-import React, { useState } from 'react';
-import { View, StyleSheet, Text, KeyboardAvoidingView, Platform, ScrollView } from 'react-native';
+import React, { useState, useEffect } from 'react';
+import {
+  View,
+  Text,
+  StyleSheet,
+  TextInput,
+  Pressable,
+  KeyboardAvoidingView,
+  Platform,
+  ScrollView,
+} from 'react-native';
 import { useAuth } from '@features/authentication/hooks/useAuth';
-import { TextInput } from '@ui/components/TextInput';
-import { Button } from '@ui/components/Button';
 import { SafeAreaContainer } from '@ui/components/SafeAreaContainer';
-import { colors } from '@ui/theme/colors';
-import { spacing } from '@ui/theme/spacing';
+import { FlameOrb } from '@app/screens/FlameOrb';
+import { authStyles } from '@app/screens/authStyles';
+
+const GOOGLE_FONTS_URL =
+  "https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,300;0,400;1,300&family=Jost:wght@200;300;400&display=swap";
 
 export const RegisterScreen: React.FC<{ navigation: any }> = ({ navigation }) => {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
-  const [confirmPassword, setConfirmPassword] = useState('');
+  const [confirm, setConfirm] = useState('');
   const [inviteCode, setInviteCode] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
+  const [sent, setSent] = useState(false);
   const { signUp } = useAuth();
 
+  useEffect(() => {
+    if (Platform.OS !== 'web' || typeof document === 'undefined') return;
+    const link = document.createElement('link');
+    link.rel = 'stylesheet';
+    link.href = GOOGLE_FONTS_URL;
+    document.head.appendChild(link);
+    return () => {
+      if (link.parentNode) link.parentNode.removeChild(link);
+    };
+  }, []);
+
   const handleRegister = async () => {
-    if (!email || !password || !confirmPassword) {
-      setError('Please fill in all fields');
+    if (password !== confirm) {
+      setError("Passwords don't match.");
       return;
     }
-
-    if (password !== confirmPassword) {
-      setError('Passwords do not match');
+    if (password.length < 8) {
+      setError('Password must be at least 8 characters.');
       return;
     }
-
-    if (password.length < 6) {
-      setError('Password must be at least 6 characters');
+    if (!email?.trim() || !password || !confirm) {
+      setError('Please fill in email and password.');
       return;
     }
-
     setError(null);
     setLoading(true);
-
     try {
-      await signUp(email, password, inviteCode.trim() ? { inviteCode: inviteCode.trim() } : undefined);
-      navigation.replace('Login', { confirmEmail: true });
+      await signUp(email.trim(), password, inviteCode.trim() ? { inviteCode: inviteCode.trim() } : undefined);
+      setSent(true);
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to create account');
+      setError(err instanceof Error ? err.message : 'Something went wrong. Please try again.');
     } finally {
       setLoading(false);
     }
   };
 
+  if (sent) {
+    return (
+      <SafeAreaContainer style={styles.safeBg}>
+        <View style={authStyles.fullScreen}>
+          {Platform.OS === 'web' && (
+            <View style={[StyleSheet.absoluteFill, authStyles.grainOverlay]} pointerEvents="none" />
+          )}
+          <View style={[authStyles.inner, styles.sentInner]}>
+            <Text style={styles.sentIcon}>✦</Text>
+            <Text style={authStyles.sentScreenTitle}>Check your email.</Text>
+            <Text style={authStyles.sentScreenBody}>
+              We've sent a confirmation link to <Text style={{ color: '#C8E4FF' }}>{email}</Text>. Open it to
+              complete your registration and begin your interview.
+            </Text>
+            <View style={authStyles.divider} />
+            <Text style={authStyles.footerText}>
+              Already have an account?{' '}
+              <Text style={authStyles.link} onPress={() => navigation.navigate('Login')}>
+                Sign in
+              </Text>
+            </Text>
+          </View>
+        </View>
+      </SafeAreaContainer>
+    );
+  }
+
   return (
-    <SafeAreaContainer>
+    <SafeAreaContainer style={styles.safeBg}>
       <KeyboardAvoidingView
         behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-        style={styles.container}
+        style={styles.keyboard}
       >
-        <ScrollView contentContainerStyle={styles.scrollContent}>
-          <View style={styles.content}>
-            <Text style={styles.title}>Create Account</Text>
-            <Text style={styles.subtitle}>Sign up to get started</Text>
+        <ScrollView
+          contentContainerStyle={styles.scrollContent}
+          keyboardShouldPersistTaps="handled"
+          showsVerticalScrollIndicator={false}
+        >
+          <View style={authStyles.fullScreen}>
+            {Platform.OS === 'web' && (
+              <View style={[StyleSheet.absoluteFill, authStyles.grainOverlay]} pointerEvents="none" />
+            )}
+            <View style={[authStyles.ambientGlow, authStyles.ambientGlowRegister]} pointerEvents="none" />
 
-            <TextInput
-              label="Email"
-              value={email}
-              onChangeText={setEmail}
-              placeholder="Enter your email"
-              keyboardType="email-address"
-              autoCapitalize="none"
-            />
+            <View style={[authStyles.inner, styles.innerCentered]}>
+              <Text style={authStyles.wordmark}>
+                amor<Text style={authStyles.wordmarkAe}>æ</Text>a
+              </Text>
 
-            <TextInput
-              label="Password"
-              value={password}
-              onChangeText={setPassword}
-              placeholder="Enter your password"
-              secureTextEntry
-            />
+              <View style={styles.flameWrap}>
+                <View style={styles.flameScale}>
+                  <FlameOrb state="idle" />
+                </View>
+              </View>
 
-            <TextInput
-              label="Confirm Password"
-              value={confirmPassword}
-              onChangeText={setConfirmPassword}
-              placeholder="Confirm your password"
-              secureTextEntry
-            />
+              <Text style={[authStyles.tagline, { marginBottom: 36 }]}>Begin with honesty.</Text>
 
-            <TextInput
-              label="Invite Code (optional)"
-              value={inviteCode}
-              onChangeText={setInviteCode}
-              placeholder="Enter a friend's invite code"
-              autoCapitalize="characters"
-            />
+              <TextInput
+                placeholder="Email"
+                placeholderTextColor="#5B6B80"
+                value={email}
+                onChangeText={setEmail}
+                keyboardType="email-address"
+                autoCapitalize="none"
+                autoCorrect={false}
+                style={authStyles.input}
+              />
 
-            {error && <Text style={styles.errorText}>{error}</Text>}
+              <TextInput
+                placeholder="Password"
+                placeholderTextColor="#5B6B80"
+                value={password}
+                onChangeText={setPassword}
+                secureTextEntry
+                style={authStyles.input}
+              />
 
-            <Button
-              title="Create Account"
-              onPress={handleRegister}
-              loading={loading}
-              style={styles.button}
-            />
+              <TextInput
+                placeholder="Confirm password"
+                placeholderTextColor="#5B6B80"
+                value={confirm}
+                onChangeText={setConfirm}
+                secureTextEntry
+                style={authStyles.input}
+              />
 
-            <Button
-              title="Back to Sign In"
-              onPress={() => navigation.navigate('Login')}
-              variant="outline"
-              style={styles.button}
-            />
+              <TextInput
+                placeholder="Invite code (optional)"
+                placeholderTextColor="#5B6B80"
+                value={inviteCode}
+                onChangeText={setInviteCode}
+                style={[authStyles.input, authStyles.inputOptional, { marginBottom: 24 }]}
+              />
+
+              {error ? <Text style={authStyles.errorText}>{error}</Text> : null}
+
+              <Pressable
+                onPress={handleRegister}
+                disabled={loading}
+                style={[authStyles.primaryButton, styles.button]}
+              >
+                <Text style={authStyles.primaryButtonText}>
+                  {loading ? '...' : 'Create Account →'}
+                </Text>
+              </Pressable>
+
+              <Text style={authStyles.confirmationNote}>
+                You'll receive a confirmation email to verify your address.
+              </Text>
+
+              <View style={authStyles.divider} />
+
+              <Text style={authStyles.footerText}>
+                Already have an account?{' '}
+                <Text style={authStyles.link} onPress={() => navigation.navigate('Login')}>
+                  Sign in
+                </Text>
+              </Text>
+            </View>
           </View>
         </ScrollView>
       </KeyboardAvoidingView>
@@ -112,38 +190,36 @@ export const RegisterScreen: React.FC<{ navigation: any }> = ({ navigation }) =>
 };
 
 const styles = StyleSheet.create({
-  container: {
+  safeBg: {
+    backgroundColor: '#05060D',
+  },
+  keyboard: {
     flex: 1,
   },
   scrollContent: {
     flexGrow: 1,
+  },
+  innerCentered: {
+    alignItems: 'center',
+  },
+  flameWrap: {
+    marginBottom: 20,
+    alignItems: 'center',
     justifyContent: 'center',
-    padding: spacing.lg,
   },
-  content: {
-    width: '100%',
-  },
-  title: {
-    fontSize: 32,
-    fontWeight: 'bold',
-    color: colors.text,
-    marginBottom: spacing.sm,
-    textAlign: 'center',
-  },
-  subtitle: {
-    fontSize: 16,
-    color: colors.textSecondary,
-    marginBottom: spacing.xl,
-    textAlign: 'center',
+  flameScale: {
+    transform: [{ scale: 0.48 }],
   },
   button: {
-    marginTop: spacing.md,
+    marginBottom: 0,
   },
-  errorText: {
-    color: colors.error,
-    fontSize: 14,
-    marginTop: spacing.sm,
+  sentInner: {
+    alignItems: 'center',
     textAlign: 'center',
   },
+  sentIcon: {
+    fontSize: 32,
+    marginBottom: 20,
+    color: '#C8E4FF',
+  },
 });
-

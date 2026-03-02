@@ -16,6 +16,7 @@ import {
   useSpeechRecognitionEvent,
 } from 'expo-speech-recognition';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { useAuth } from '@features/authentication/hooks/useAuth';
 import { SafeAreaContainer } from '@ui/components/SafeAreaContainer';
 import { Button } from '@ui/components/Button';
 import { colors } from '@ui/theme/colors';
@@ -32,8 +33,36 @@ import {
   clearInterviewFromStorage,
   getCurrentScenario,
 } from '@utilities/storage/InterviewStorage';
+import { FlameOrb } from '@app/screens/FlameOrb';
+import { UserInterviewLayout, type ActiveScenario } from '@app/screens/UserInterviewLayout';
 
 const profileRepository = new ProfileRepository();
+
+// Scenario display text for regular-user immersive layout (description only; DO NOT MODIFY scenario content).
+const SCENARIO_1_LABEL = 'Situation 1';
+const SCENARIO_1_TEXT =
+  "Jamie and Morgan have been together a year. Jamie is going through a hard stretch at work and has been withdrawn for a few weeks — shorter with Morgan, less present at home. Morgan hasn't brought it up. One evening Jamie snaps at Morgan over something small and immediately apologises. Morgan says 'it's fine, I know you're stressed.' A month later, during a different argument, Morgan brings up the withdrawal, the cancelled plans, and the snap. Jamie says 'why didn't you say something at the time?' Morgan says 'I didn't want to add to your stress.'";
+const SCENARIO_2_LABEL = 'Situation 2';
+const SCENARIO_2_TEXT =
+  "Jordan comes home and says they just got some good feedback on a project they'd been working on for weeks. Their partner Casey is on the phone, glances up, says 'that's great' and scrolls back down. Jordan says nothing and goes to another room. Later that evening Casey asks what's wrong. Jordan says 'nothing.' Casey asks again. Jordan says 'you never actually listen when I talk.' Casey says 'I was tired, I can't be completely present every second.' The conversation gets louder. Both keep talking. They go to bed without speaking. Neither says anything about it the next morning.";
+const SCENARIO_3_LABEL = 'Situation 3';
+const SCENARIO_3_TEXT =
+  "Riley initiates physical intimacy with her partner Drew. Drew says he's not in the right headspace and declines. Riley says 'you always have an excuse' and turns away. Drew says 'so I'm not allowed to not be in the mood?' The conversation becomes an argument. Drew eventually says 'fine, forget it' and they continue. Afterward Riley says very little. Drew says very little. They go to sleep. They don't bring it up the next day.";
+
+function detectActiveScenarioFromMessage(content: string): ActiveScenario | null {
+  const c = content.trim();
+  if (!c) return null;
+  if (c.includes('Jamie and Morgan have been together') || c.includes('Jamie is going through a hard stretch at work')) {
+    return { label: SCENARIO_1_LABEL, text: SCENARIO_1_TEXT };
+  }
+  if (c.includes('Jordan comes home and says') || c.includes('Jordan comes home and says they just got')) {
+    return { label: SCENARIO_2_LABEL, text: SCENARIO_2_TEXT };
+  }
+  if (c.includes('Riley initiates physical intimacy')) {
+    return { label: SCENARIO_3_LABEL, text: SCENARIO_3_TEXT };
+  }
+  return null;
+}
 
 function looksLikeName(text: string): boolean {
   const t = text.trim();
@@ -1426,6 +1455,7 @@ function buildGate1ScoreFromResults(results: InterviewResults): Gate1Score {
 
 export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigation, route }) => {
   const { userId } = route.params as { userId: string };
+  const { signOut } = useAuth();
   const [messages, setMessages] = useState<{ role: string; content: string; isScoreCard?: boolean }[]>([]);
   const [voiceState, setVoiceState] = useState<VoiceState>('idle');
   const [status, setStatus] = useState<Status>('intro');
@@ -1443,8 +1473,8 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
   const [isAdmin, setIsAdmin] = useState(false);
   const [userEmail, setUserEmail] = useState<string | null>(null);
   const [interviewStatus, setInterviewStatus] = useState<'loading' | 'not_started' | 'under_review' | 'congratulations'>('loading');
-  const [resumeData, setResumeData] = useState<Awaited<ReturnType<typeof loadInterviewFromStorage>> | null>(null);
-  const [showResumePrompt, setShowResumePrompt] = useState(false);
+  const [activeScenario, setActiveScenario] = useState<ActiveScenario | null>(null);
+  const [currentInterviewerText, setCurrentInterviewerText] = useState('');
 
   const recognitionRef = useRef<{ start(): void; stop(): void } | null>(null);
   const transcriptAtReleaseRef = useRef('');
@@ -1455,6 +1485,7 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const audioChunksRef = useRef<Blob[]>([]);
   const scrollViewRef = useRef<ScrollView | null>(null);
+  const hasResumedRef = useRef(false);
 
   useEffect(() => {
     const getSession = async () => {
@@ -1491,25 +1522,6 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
   }, [userId]);
 
   useEffect(() => {
-    if (!userId || isAdmin) return;
-    let cancelled = false;
-    (async () => {
-      const saved = await loadInterviewFromStorage(userId);
-      if (cancelled) return;
-      if (saved?.messages?.length) {
-        const completedCount = saved.scenariosCompleted?.length ?? 0;
-        if (completedCount < 3) {
-          setResumeData(saved);
-          setShowResumePrompt(true);
-        } else {
-          await clearInterviewFromStorage(userId);
-        }
-      }
-    })();
-    return () => { cancelled = true; };
-  }, [userId, isAdmin]);
-
-  useEffect(() => {
     if (!userId || isAdmin || status !== 'active' || messages.length === 0) return;
     const completed = Array.from(scoredScenariosRef.current);
     const scenarioScoresPayload: Record<number, { pillarScores: Record<string, number>; pillarConfidence: Record<string, string>; keyEvidence: Record<string, string>; scenarioName?: string }> = {};
@@ -1536,6 +1548,29 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
   useEffect(() => {
     scrollViewRef.current?.scrollToEnd?.({ animated: true });
   }, [messages, status]);
+
+  useEffect(() => {
+    const assistantOnly = messages.filter(
+      (m) => m.role === 'assistant' && !(m as { isScoreCard?: boolean }).isScoreCard && !(m as { isWelcomeBack?: boolean }).isWelcomeBack
+    );
+    const latest = assistantOnly[assistantOnly.length - 1];
+    const text = latest?.content ?? '';
+    const cleaned = text
+      .replace(/\[INTERVIEW_COMPLETE\]/g, '')
+      .replace(/\[SCENARIO_COMPLETE:\d\]/g, '')
+      .replace(/\[STAGE_[123]_COMPLETE\]/g, '')
+      .trim();
+    setCurrentInterviewerText(cleaned);
+    let found: ActiveScenario | null = null;
+    for (let i = assistantOnly.length - 1; i >= 0; i--) {
+      const scenario = detectActiveScenarioFromMessage(assistantOnly[i].content ?? '');
+      if (scenario) {
+        found = scenario;
+        break;
+      }
+    }
+    setActiveScenario(found ?? null);
+  }, [messages]);
 
   const speak = useCallback(async (text: string) => {
     stopElevenLabsSpeech();
@@ -2132,12 +2167,30 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
       setMessages([...fullMessages, welcomeMsg]);
       setTimeout(() => speak(welcomeBack), 500);
 
-      setShowResumePrompt(false);
-      setResumeData(null);
       setStatus('active');
     },
     [speak]
   );
+
+  useEffect(() => {
+    if (!userId || isAdmin) return;
+    if (hasResumedRef.current) return;
+    let cancelled = false;
+    (async () => {
+      const saved = await loadInterviewFromStorage(userId);
+      if (cancelled) return;
+      if (saved?.messages?.length) {
+        const completedCount = saved.scenariosCompleted?.length ?? 0;
+        if (completedCount < 3) {
+          hasResumedRef.current = true;
+          handleResume(saved);
+        } else {
+          await clearInterviewFromStorage(userId);
+        }
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [userId, isAdmin, handleResume]);
 
   const startInterview = useCallback(async () => {
     if (isAdmin) await clearInterviewFromStorage(userId);
@@ -2305,39 +2358,6 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
     );
   }
 
-  if (showResumePrompt && resumeData && status === 'intro') {
-    const completedCount = resumeData.scenariosCompleted?.length ?? 0;
-    const nextScenario = completedCount + 1;
-    const scenarioNames: Record<number, string> = {
-      1: 'the first situation',
-      2: 'the second situation',
-      3: 'the final situation',
-    };
-    return (
-      <SafeAreaContainer>
-        <View style={[styles.container, { minHeight: '100%', justifyContent: 'center', alignItems: 'center', padding: 24 }]}>
-          <Text style={[styles.introNote, { color: colors.warning, letterSpacing: 3, textTransform: 'uppercase', marginBottom: 20 }]}>◆ Welcome back</Text>
-          <Text style={[styles.introTitle, { marginBottom: 16 }]}>You have an interview in progress.</Text>
-          <Text style={[styles.introHint, { marginBottom: 32, maxWidth: 480, textAlign: 'center' }]}>
-            You completed {completedCount} of 3 situations last time. You can pick up from {scenarioNames[nextScenario] ?? 'where you left off'}.
-          </Text>
-          <View style={{ flexDirection: 'row', gap: 12, width: '100%', maxWidth: 400 }}>
-            <Button title="CONTINUE →" onPress={() => handleResume(resumeData)} style={{ flex: 1 }} />
-            <Button
-              title="START OVER"
-              variant="outline"
-              onPress={async () => {
-                await clearInterviewFromStorage(userId);
-                setShowResumePrompt(false);
-                setResumeData(null);
-              }}
-            />
-          </View>
-        </View>
-      </SafeAreaContainer>
-    );
-  }
-
   if (status === 'intro') {
     return (
       <SafeAreaContainer>
@@ -2384,9 +2404,37 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
     '9': { name: 'Stress Resilience', color: '#2A5C5C' },
   };
 
+  const isInterviewerView = status === 'active' && !isAdmin;
   return (
-    <SafeAreaContainer>
+    <SafeAreaContainer style={isInterviewerView ? { backgroundColor: '#05060D' } : undefined}>
       <View style={styles.activeContainer}>
+        {isInterviewerView ? (
+          <View style={{ flex: 1, backgroundColor: '#05060D' }}>
+            <UserInterviewLayout
+              flameState={voiceState}
+              activeScenario={activeScenario}
+              interviewerText={currentInterviewerText}
+              onPressStart={handlePressStart}
+              onPressEnd={handlePressEnd}
+              voiceState={voiceState}
+              micError={micError}
+              micWarning={micWarning}
+              inputDisabled={inputDisabled}
+              onExit={() => {
+                const confirmMessage = 'Are you sure you want to log out?';
+                if (Platform.OS === 'web' && typeof window !== 'undefined') {
+                  if (window.confirm(confirmMessage)) signOut();
+                } else {
+                  Alert.alert('Log out', confirmMessage, [
+                    { text: 'Cancel', style: 'cancel' },
+                    { text: 'Log out', style: 'destructive', onPress: () => signOut() },
+                  ]);
+                }
+              }}
+            />
+          </View>
+        ) : (
+          <>
         {isAdmin && (status === 'results' && results?.pillarScores ? (
           <View style={styles.stageScoresContainer}>
             <Text style={styles.stageScoresTitle}>Final scores</Text>
@@ -2594,6 +2642,8 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
               </View>
             )}
           </View>
+        )}
+          </>
         )}
       </View>
     </SafeAreaContainer>

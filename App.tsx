@@ -124,7 +124,12 @@ const GatesOnboardingNavigator = ({ userId }: { userId: string }) => {
     >
       <Stack.Screen name="Stage1BasicInfo" component={Stage1BasicInfoScreen} initialParams={{ userId }} />
       <Stack.Screen name="InterviewFraming" component={InterviewFramingScreen} initialParams={{ userId }} />
-      <Stack.Screen name="OnboardingInterview" component={AriaScreen} initialParams={{ userId }} />
+      <Stack.Screen
+        name="OnboardingInterview"
+        component={AriaScreen}
+        initialParams={{ userId }}
+        options={{ headerShown: false }}
+      />
       <Stack.Screen name="PostInterview" component={PostInterviewScreen} initialParams={{ userId }} />
       <Stack.Screen name="UnderReview" component={UnderReviewScreen} initialParams={{ userId }} />
       <Stack.Screen name="Gate2Reentry" component={Gate2ReentryScreen} initialParams={{ userId }} />
@@ -187,7 +192,11 @@ const AppNavigator = ({ userId }: { userId: string }) => {
       <Stack.Screen name="EditProfile" component={EditProfileScreen} />
       <Stack.Screen name="Contacts" component={ContactsScreen} />
       <Stack.Screen name="HumanDesign" component={HumanDesignScreen} />
-      <Stack.Screen name="Aria" component={AriaScreen} />
+      <Stack.Screen
+        name="Aria"
+        component={AriaScreen}
+        options={{ headerShown: false }}
+      />
     </Stack.Navigator>
   );
 };
