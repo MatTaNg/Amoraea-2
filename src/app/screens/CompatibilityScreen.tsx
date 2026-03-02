@@ -90,7 +90,7 @@ function parseWeight(v: unknown): CompatibilityFormData['weight'] {
   return null;
 }
 
-function toFormData(data: Record<string, unknown> | null): CompatibilityFormData {
+export function toFormData(data: Record<string, unknown> | null): CompatibilityFormData {
   if (!data) return defaultCompatibilityFormData;
   return {
     kidsWanted: parseKids(data.kidsWanted),

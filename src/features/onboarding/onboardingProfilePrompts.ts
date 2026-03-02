@@ -1,6 +1,6 @@
 /**
  * Fixed set of 15 profile prompts for Stage 4 onboarding.
- * Each answer must be 20–300 characters.
+ * Optional: user may pick 0–3 to answer. Each answer (if provided) must be 20–300 characters.
  */
 
 export interface OnboardingPromptItem {

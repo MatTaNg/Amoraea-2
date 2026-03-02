@@ -18,6 +18,15 @@ const T = {
   purple:    "#6B3FA0",
 };
 
+const APP_THEME = {
+  background: "#FFFFFF",
+  surface:    "#F9FAFB",
+  text:       "#111827",
+  textSecondary: "#6B7280",
+  border:     "#E5E7EB",
+  primary:    "#6366F1",
+};
+
 const serif = "'Palatino Linotype', 'Book Antiqua', Palatino, serif";
 const mono  = "'Courier New', Courier, monospace";
 
@@ -311,10 +320,12 @@ function ReciprocityNote({ userBMI, minId, maxId }) {
   );
 }
 
-export function BMIPreferenceSelector({ userHeightCm, userWeightKg, onComplete, embedded = false }) {
+export function BMIPreferenceSelector({ userHeightCm, userWeightKg, onComplete, embedded = false, showNoPreferenceButton = true, useAppTheme = false }) {
   const [rangeStart, setRangeStart] = useState(null);
   const [rangeEnd,   setRangeEnd]   = useState(null);
   const [confirmed,  setConfirmed]  = useState(false);
+
+  const C = { ...T, ...(useAppTheme && embedded ? APP_THEME : {}) };
 
   const userBMI = (userHeightCm && userWeightKg) ? userWeightKg / ((userHeightCm / 100) ** 2) : null;
   const minId = rangeStart !== null && rangeEnd !== null ? Math.min(rangeStart, rangeEnd) : rangeStart;
@@ -347,24 +358,24 @@ export function BMIPreferenceSelector({ userHeightCm, userWeightKg, onComplete, 
   return (
     <div style={{
       ...(embedded ? { width: '100%', padding: '16px 0' } : { minHeight: '100vh', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', padding: '40px 20px' }),
-      background: T.cream,
+      background: C.background || T.cream,
       fontFamily: serif,
     }}>
       <style>{css}</style>
       <div style={{ maxWidth: embedded ? '100%' : 860, width: '100%', animation: 'fadeUp 0.5s ease' }}>
 
         <div style={{ marginBottom: embedded ? 16 : 28, textAlign: 'center' }}>
-          <div style={{ fontFamily: mono, fontSize: 10, color: T.gold, letterSpacing: 3, textTransform: 'uppercase', marginBottom: 12 }}>◆ Physical Preference</div>
-          <h1 style={{ fontSize: embedded ? 18 : 26, fontWeight: 400, color: T.ink, lineHeight: 1.2, marginBottom: 12 }}>Which body types are you attracted to?</h1>
-          <p style={{ fontSize: 13, color: T.inkFaint, lineHeight: 1.75, maxWidth: 460, margin: embedded ? '0' : '0 auto' }}>
+          <div style={{ fontFamily: mono, fontSize: 10, color: C.primary || T.gold, letterSpacing: 3, textTransform: 'uppercase', marginBottom: 12 }}>◆ Physical Preference</div>
+          <h1 style={{ fontSize: embedded ? 18 : 26, fontWeight: 600, color: C.text || T.ink, lineHeight: 1.2, marginBottom: 12 }}>Which body types are you attracted to?</h1>
+          <p style={{ fontSize: 13, color: C.textSecondary || T.inkFaint, lineHeight: 1.75, maxWidth: 460, margin: embedded ? '0' : '0 auto' }}>
             Tap your lower limit, then your upper limit. Tap the same figure twice for a single type.
           </p>
         </div>
 
         <div style={{ display:"flex", justifyContent:"center", gap:28, marginBottom:24, fontFamily:mono, fontSize:10, letterSpacing:2, textTransform:"uppercase" }}>
           {[{n:1,label:"Lower limit"},{n:2,label:"Upper limit"},{n:3,label:"Confirm"}].map(s => (
-            <div key={s.n} style={{ display:"flex", alignItems:"center", gap:6, color: step >= s.n ? (step === s.n ? T.gold : T.inkLight) : T.inkGhost }}>
-              <div style={{ width:18, height:18, borderRadius:"50%", background: step > s.n ? T.ink : step === s.n ? T.gold : "transparent", border:`1px solid ${step >= s.n ? (step > s.n ? T.ink : T.gold) : T.inkGhost}`, display:"flex", alignItems:"center", justifyContent:"center", fontSize:9, color: step > s.n ? T.cream : "inherit", flexShrink:0 }}>
+            <div key={s.n} style={{ display:"flex", alignItems:"center", gap:6, color: step >= s.n ? (step === s.n ? (C.primary || T.gold) : C.textSecondary || T.inkLight) : T.inkGhost }}>
+              <div style={{ width:18, height:18, borderRadius:"50%", background: step > s.n ? (C.text || T.ink) : step === s.n ? (C.primary || T.gold) : "transparent", border:`1px solid ${step >= s.n ? (step > s.n ? (C.text || T.ink) : (C.primary || T.gold)) : T.inkGhost}`, display:"flex", alignItems:"center", justifyContent:"center", fontSize:9, color: step > s.n ? (C.background || T.cream) : "inherit", flexShrink:0 }}>
                 {step > s.n ? "✓" : s.n}
               </div>
               {s.label}
@@ -399,17 +410,19 @@ export function BMIPreferenceSelector({ userHeightCm, userWeightKg, onComplete, 
 
         <div style={{ display:"flex", flexDirection:"column", alignItems:"center", gap:14 }}>
           <button onClick={handleConfirm} disabled={minId === null || maxId === null || confirmed} style={{
-            background: minId !== null && maxId !== null && !confirmed ? T.ink : T.inkGhost,
-            color:T.cream, border:"none", fontFamily:mono, fontSize:12, letterSpacing:2,
-            textTransform:"uppercase", padding:"16px 52px",
+            background: minId !== null && maxId !== null && !confirmed ? (C.primary || C.text || T.ink) : T.inkGhost,
+            color: C.background || T.cream, border:"none", fontFamily:mono, fontSize:12, letterSpacing:2,
+            textTransform:"uppercase", padding:"16px 52px", borderRadius: 8,
             cursor: minId !== null && maxId !== null && !confirmed ? "pointer" : "not-allowed",
           }}>
             {confirmed ? "Saved ✓" : "Confirm preference →"}
           </button>
-          <button onClick={() => onComplete?.({ noPreference:true })} style={{
-            background:"transparent", border:"none", fontFamily:mono, fontSize:10,
-            color:T.inkFaint, letterSpacing:1, textTransform:"uppercase", textDecoration:"underline", cursor:"pointer",
-          }}>No preference</button>
+          {showNoPreferenceButton && (
+            <button onClick={() => onComplete?.({ noPreference:true })} style={{
+              background:"transparent", border:"none", fontFamily:mono, fontSize:10,
+              color: C.textSecondary || T.inkFaint, letterSpacing:1, textTransform:"uppercase", textDecoration:"underline", cursor:"pointer",
+            }}>No preference</button>
+          )}
         </div>
       </div>
     </div>

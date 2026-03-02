@@ -26,7 +26,7 @@ function parseProfilePrompts(v: unknown): ProfilePromptAnswer[] {
 const ONBOARDING_STAGES: OnboardingStage[] = ['basic_info', 'interview', 'psychometrics', 'compatibility', 'complete'];
 function parseOnboardingStage(v: unknown): OnboardingStage {
   if (typeof v === 'string' && ONBOARDING_STAGES.includes(v as OnboardingStage)) return v as OnboardingStage;
-  return 'basic_info';
+  return 'interview';
 }
 
 const APPLICATION_STATUSES: ApplicationStatus[] = ['pending', 'under_review', 'approved'];
@@ -90,6 +90,22 @@ function parseGate2Psychometrics(v: unknown): Gate2Psychometrics | null {
 function parseGate3Compatibility(v: unknown): Gate3Compatibility | null {
   if (v === null || v === undefined || typeof v !== 'object') return null;
   return v as Gate3Compatibility;
+}
+
+function parsePsychometricsProgress(v: unknown): Profile['psychometricsProgress'] {
+  if (v === null || v === undefined || typeof v !== 'object') return null;
+  const o = v as Record<string, unknown>;
+  const result: Record<string, Record<string, number>> = {};
+  for (const key of ['ecr', 'tipi', 'dsi', 'brs', 'pvq']) {
+    const val = o[key];
+    if (val !== null && val !== undefined && typeof val === 'object' && !Array.isArray(val)) {
+      const entries = Object.entries(val as Record<string, unknown>).filter(
+        ([, n]): n is number => typeof n === 'number'
+      );
+      if (entries.length) result[key] = Object.fromEntries(entries);
+    }
+  }
+  return Object.keys(result).length ? result : null;
 }
 
 // Many Supabase profiles use a PostgreSQL enum with lowercase values; our app uses capitalized
@@ -156,6 +172,7 @@ export class ProfileRepository {
     if (update.gate1Score !== undefined) updateData.gate1_score = update.gate1Score;
     if (update.gate2Psychometrics !== undefined) updateData.gate2_psychometrics = update.gate2Psychometrics;
     if (update.gate3Compatibility !== undefined) updateData.gate3_compatibility = update.gate3Compatibility;
+    if (update.psychometricsProgress !== undefined) updateData.psychometrics_progress = update.psychometricsProgress;
 
     // Remove undefined values so we don't send them to PostgREST (can cause 400)
     const payload: Record<string, unknown> = {};
@@ -272,8 +289,9 @@ export class ProfileRepository {
     updated_at: string;
     onboarding_completed: boolean;
     onboarding_step: number;
-    name: string | null;
-    age: number | null;
+    name?: string | null;
+    display_name?: string | null;
+    age?: number | null;
     gender: string | null;
     attracted_to: string[] | null;
     height_centimeters: number | null;
@@ -291,15 +309,18 @@ export class ProfileRepository {
     gate1_score?: unknown;
     gate2_psychometrics?: unknown;
     gate3_compatibility?: unknown;
+    psychometrics_progress?: unknown;
   }): Profile {
     const location: Location | null =
-      data.location_latitude !== null && data.location_longitude !== null
+      data.location_latitude != null && data.location_longitude != null
         ? {
             latitude: data.location_latitude,
             longitude: data.location_longitude,
-            label: data.location_label,
+            label: data.location_label ?? null,
           }
-        : null;
+        : data.location_label
+          ? { latitude: 0, longitude: 0, label: data.location_label }
+          : null;
 
     return {
       id: data.id,
@@ -307,8 +328,8 @@ export class ProfileRepository {
       updatedAt: data.updated_at,
       onboardingCompleted: data.onboarding_completed,
       onboardingStep: data.onboarding_step,
-      name: data.name,
-      age: data.age,
+      name: data.name ?? data.display_name ?? null,
+      age: data.age ?? null,
       gender: (data.gender ? GENDER_FROM_DB[data.gender.toLowerCase().replace('-', '_')] : null) ?? (data.gender as Profile['gender']),
       attractedTo: data.attracted_to as Profile['attractedTo'],
       heightCentimeters: data.height_centimeters,
@@ -324,6 +345,7 @@ export class ProfileRepository {
       gate1Score: parseGate1Score(data.gate1_score),
       gate2Psychometrics: parseGate2Psychometrics(data.gate2_psychometrics),
       gate3Compatibility: parseGate3Compatibility(data.gate3_compatibility),
+      psychometricsProgress: parsePsychometricsProgress(data.psychometrics_progress),
     };
   }
 }

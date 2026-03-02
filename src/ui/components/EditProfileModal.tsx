@@ -81,7 +81,18 @@ export const EditProfileModal: React.FC<EditProfileModalProps> = ({
   const [editingAnswer, setEditingAnswer] = useState('');
   const [promptsSaving, setPromptsSaving] = useState(false);
 
-  const currentPrompts: ProfilePromptAnswer[] = profile?.prompts ?? [];
+  const { data: profileFetched, refetch: refetchProfile } = useQuery({
+    queryKey: ['profile', userId],
+    queryFn: () => profileRepository.getProfile(userId),
+    enabled: !!userId && visible,
+  });
+  const profileToUse = profileFetched ?? profile;
+
+  useEffect(() => {
+    if (visible && userId) refetchProfile();
+  }, [visible, userId, refetchProfile]);
+
+  const currentPrompts: ProfilePromptAnswer[] = profileToUse?.prompts ?? [];
   const canAddPrompt = currentPrompts.length < MAX_PROMPTS;
 
   const { data: profilePhotos = [], refetch: refetchPhotos } = useQuery({
@@ -116,27 +127,50 @@ export const EditProfileModal: React.FC<EditProfileModalProps> = ({
     },
   });
 
-  const nameValue = watch('name');
-  const ageValue = watch('age');
-  const genderValue = watch('gender');
-  const attractedToValue = watch('attractedTo') || [];
-  const heightValue = watch('heightCentimeters');
-  const occupationValue = watch('occupation');
-  const weightValue = watch('weight');
+  const formValues = watch();
+  const nameValue = formValues.name;
+  const ageValue = formValues.age;
+  const genderValue = formValues.gender;
+  const attractedToValue = formValues.attractedTo || [];
+  const heightValue = formValues.heightCentimeters;
+  const occupationValue = formValues.occupation;
+  const weightValue = formValues.weight;
+
+  const hasResetForOpenRef = React.useRef(false);
+  useEffect(() => {
+    if (!visible) {
+      hasResetForOpenRef.current = false;
+      return;
+    }
+    if (!profileToUse) return;
+    if (hasResetForOpenRef.current) return;
+    hasResetForOpenRef.current = true;
+    const weightFromCompat = compatibility?.compatibilityData?.weight as CompatibilityFormData['weight'] | undefined;
+    const weightFromGate3 = (profileToUse.gate3Compatibility as Record<string, unknown> | null)?.weight as CompatibilityFormData['weight'] | undefined;
+    const ageVal = profileToUse.age ?? profileToUse.basicInfo?.age;
+    reset({
+      name: profileToUse.name || '',
+      age: ageVal ?? undefined,
+      gender: profileToUse.gender ?? undefined,
+      attractedTo: profileToUse.attractedTo || [],
+      heightCentimeters: profileToUse.heightCentimeters ?? undefined,
+      occupation: profileToUse.occupation || '',
+      weight: weightFromCompat ?? weightFromGate3 ?? null,
+    });
+  }, [visible, profileToUse, compatibility, reset]);
 
   useEffect(() => {
-    if (profile && visible) {
-      reset({
-        name: profile.name || '',
-        age: profile.age ?? undefined,
-        gender: profile.gender ?? undefined,
-        attractedTo: profile.attractedTo || [],
-        heightCentimeters: profile.heightCentimeters ?? undefined,
-        occupation: profile.occupation || '',
-        weight: (compatibility?.compatibilityData?.weight as CompatibilityFormData['weight']) ?? null,
-      });
+    if (!visible) return;
+    if (!hasResetForOpenRef.current) return;
+    const ageVal = profileToUse?.age ?? profileToUse?.basicInfo?.age;
+    if (ageVal != null && typeof ageVal === 'number') {
+      setValue('age', ageVal, { shouldValidate: false });
     }
-  }, [profile, compatibility, visible, reset]);
+    const w = compatibility?.compatibilityData?.weight ?? (profileToUse?.gate3Compatibility as Record<string, unknown> | null)?.weight;
+    if (w != null) {
+      setValue('weight', w as CompatibilityFormData['weight'], { shouldValidate: false });
+    }
+  }, [visible, profileToUse?.age, profileToUse?.basicInfo?.age, compatibility?.compatibilityData?.weight, profileToUse?.gate3Compatibility, setValue]);
 
   useEffect(() => {
     register('name');
@@ -169,7 +203,7 @@ export const EditProfileModal: React.FC<EditProfileModalProps> = ({
 
   const removePhoto = async (photoId: string) => {
     try {
-      await photoUseCase.removePhoto(userId, photoId, profile?.primaryPhotoUrl ?? null);
+      await photoUseCase.removePhoto(userId, photoId, profileToUse?.primaryPhotoUrl ?? null);
       refetchPhotos();
       onSaved();
     } catch (error) {
@@ -347,7 +381,7 @@ export const EditProfileModal: React.FC<EditProfileModalProps> = ({
                     <View key={photo.id} style={styles.photoWrapper}>
                       <Image source={{ uri: photo.publicUrl }} style={styles.photo} />
                       <View style={styles.photoActions}>
-                        {profile?.primaryPhotoUrl !== photo.publicUrl && (
+                        {profileToUse?.primaryPhotoUrl !== photo.publicUrl && (
                           <TouchableOpacity
                             style={styles.photoActionBtn}
                             onPress={() => setAsPrimary(photo.publicUrl)}
@@ -387,7 +421,7 @@ export const EditProfileModal: React.FC<EditProfileModalProps> = ({
               <TextInput
                 label="Name"
                 value={nameValue}
-                onChangeText={(t) => setValue('name', t)}
+                onChangeText={(t) => setValue('name', t, { shouldValidate: true })}
                 placeholder="Your name"
                 error={errors.name?.message}
               />
@@ -448,7 +482,7 @@ export const EditProfileModal: React.FC<EditProfileModalProps> = ({
               <TextInput
                 label="Occupation"
                 value={occupationValue}
-                onChangeText={(t) => setValue('occupation', t)}
+                onChangeText={(t) => setValue('occupation', t, { shouldValidate: true })}
                 placeholder="Your occupation"
                 error={errors.occupation?.message}
               />
@@ -540,7 +574,7 @@ export const EditProfileModal: React.FC<EditProfileModalProps> = ({
               <View style={styles.locationSection}>
                 <Text style={styles.fieldLabel}>Location</Text>
                 <Text style={styles.locationHint}>
-                  {profile?.location?.label || 'Not set'}
+                  {profileToUse?.location?.label || 'Not set'}
                 </Text>
                 <Button
                   title={locationLoading ? 'Updating…' : 'Update location'}

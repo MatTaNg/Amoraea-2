@@ -48,7 +48,7 @@ export async function speakWithElevenLabs(
   const voiceId = fromExtra?.elevenLabsVoiceId
     || (typeof process !== 'undefined' && process.env?.EXPO_PUBLIC_ELEVENLABS_VOICE_ID)
     || DEFAULT_VOICE_ID;
-
+console.log('<---voiceId', voiceId);
   if (!apiKey || !text.trim()) {
     if (!apiKey) {
       console.warn('ElevenLabs: No API key (EXPO_PUBLIC_ELEVENLABS_API_KEY or app config). Using fallback TTS — set the key for natural voice.');

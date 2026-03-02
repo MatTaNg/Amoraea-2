@@ -7,12 +7,20 @@ import { SafeAreaContainer } from '@ui/components/SafeAreaContainer';
 import { colors } from '@ui/theme/colors';
 import { spacing } from '@ui/theme/spacing';
 
+const isEmailNotConfirmedError = (err: unknown): boolean => {
+  const msg = err instanceof Error ? err.message : String(err);
+  const lower = msg.toLowerCase();
+  return lower.includes('email not confirmed') || lower.includes('confirm your email');
+};
+
 export const LoginScreen: React.FC<{ navigation: any; route?: { params?: { confirmEmail?: boolean } } }> = ({ navigation, route }) => {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
-  const { signIn } = useAuth();
+  const [resendSent, setResendSent] = useState(false);
+  const [resending, setResending] = useState(false);
+  const { signIn, resendConfirmationEmail } = useAuth();
   const confirmEmailMessage = route?.params?.confirmEmail ?? false;
 
   const handleLogin = async () => {
@@ -22,15 +30,34 @@ export const LoginScreen: React.FC<{ navigation: any; route?: { params?: { confi
     }
 
     setError(null);
+    setResendSent(false);
     setLoading(true);
 
     try {
       await signIn(email, password);
       // Navigation will be handled by auth state change
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to sign in');
+      if (isEmailNotConfirmedError(err)) {
+        setError('Please confirm your email before signing in. Check your inbox or resend the confirmation link below.');
+      } else {
+        setError(err instanceof Error ? err.message : 'Failed to sign in');
+      }
     } finally {
       setLoading(false);
+    }
+  };
+
+  const handleResendConfirmation = async () => {
+    if (!email?.trim()) return;
+    setResending(true);
+    setError(null);
+    try {
+      await resendConfirmationEmail(email.trim());
+      setResendSent(true);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to resend confirmation email');
+    } finally {
+      setResending(false);
     }
   };
 
@@ -69,6 +96,17 @@ export const LoginScreen: React.FC<{ navigation: any; route?: { params?: { confi
             )}
 
             {error && <Text style={styles.errorText}>{error}</Text>}
+
+            {error && error.includes('confirm your email') && email?.trim() && (
+              <Button
+                title={resendSent ? 'Confirmation email sent' : 'Resend confirmation email'}
+                onPress={handleResendConfirmation}
+                disabled={resendSent || resending}
+                loading={resending}
+                variant="outline"
+                style={styles.button}
+              />
+            )}
 
             <Button
               title="Sign In"

@@ -43,6 +43,8 @@ export interface Profile {
   gate1Score: Gate1Score | null;
   gate2Psychometrics: Gate2Psychometrics | null;
   gate3Compatibility: Gate3Compatibility | null;
+  /** Partial ECR/TIPI/DSI/BRS/PVQ answers for Stage 3 resume. */
+  psychometricsProgress: Record<string, Record<string, number>> | null;
 }
 
 export interface ProfilePhoto {
@@ -75,5 +77,6 @@ export interface ProfileUpdate {
   gate1Score?: Gate1Score | null;
   gate2Psychometrics?: Gate2Psychometrics | null;
   gate3Compatibility?: Gate3Compatibility | null;
+  psychometricsProgress?: Record<string, Record<string, number>> | null;
 }
 

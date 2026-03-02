@@ -7,10 +7,20 @@ export const useAuth = () => {
   const [user, setUser] = useState<User | null>(null);
   const [loading, setLoading] = useState(true);
 
+  const rejectUnconfirmed = (s: Session | null) => {
+    if (!s?.user?.email) return true;
+    if (!s.user.email_confirmed_at) return true;
+    return false;
+  };
+
   useEffect(() => {
     supabase.auth.getSession().then(async ({ data: { session } }) => {
       if (session?.user && !session.user.email) {
         await supabase.auth.signOut();
+        setSession(null);
+        setUser(null);
+      } else if (rejectUnconfirmed(session)) {
+        if (session?.user) await supabase.auth.signOut();
         setSession(null);
         setUser(null);
       } else {
@@ -25,6 +35,10 @@ export const useAuth = () => {
     } = supabase.auth.onAuthStateChange(async (_event, session) => {
       if (session?.user && !session.user.email) {
         await supabase.auth.signOut();
+        setSession(null);
+        setUser(null);
+      } else if (rejectUnconfirmed(session)) {
+        if (session?.user) await supabase.auth.signOut();
         setSession(null);
         setUser(null);
       } else {
@@ -67,6 +81,14 @@ export const useAuth = () => {
     if (error) throw error;
   };
 
+  const resendConfirmationEmail = async (email: string) => {
+    const { error } = await supabase.auth.resend({
+      type: 'signup',
+      email: email.trim(),
+    });
+    if (error) throw error;
+  };
+
   return {
     session,
     user,
@@ -74,6 +96,7 @@ export const useAuth = () => {
     signIn,
     signUp,
     signOut,
+    resendConfirmationEmail,
   };
 };
 

@@ -27,7 +27,18 @@ Get these values from your Supabase project settings → API.
 4. Paste and run it in the SQL Editor
 5. Verify all tables were created in the **Table Editor**
 
-### 4. Set Up Supabase Storage
+### 4. Enable Email Confirmation (recommended)
+
+To send a confirmation email when users sign up and require confirmation before they can sign in:
+
+1. In Supabase Dashboard go to **Authentication** → **Providers** → **Email**.
+2. Turn **ON** “Confirm email”.
+3. (Optional) Under **Authentication** → **URL Configuration**, set **Site URL** to your app’s URL (e.g. `https://yourapp.com` or your Expo deep link). Add any redirect URLs under **Redirect URLs** (e.g. `https://yourapp.com/**` for web).
+4. (Optional) To use your own SMTP instead of Supabase’s default, set **Custom SMTP** under **Authentication** → **Email Templates** / project settings so confirmation emails are delivered reliably.
+
+Until “Confirm email” is enabled, Supabase may not send confirmation emails and users can sign in without confirming. The app will still enforce confirmation when possible (it signs out users whose email is not confirmed).
+
+### 5. Set Up Supabase Storage
 
 1. Go to **Storage** in Supabase dashboard
 2. Click **New bucket**
@@ -37,7 +48,7 @@ Get these values from your Supabase project settings → API.
 
 Then set up storage policies (see `supabase/storage-setup.md` for SQL policies).
 
-### 5. Run the App
+### 6. Run the App
 
 ```bash
 npm start

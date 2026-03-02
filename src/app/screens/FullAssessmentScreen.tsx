@@ -131,9 +131,10 @@ export const FullAssessmentScreen: React.FC<{ navigation: any; route: any }> = (
     else if (key === 'dsi') setAnswers('dsi', (p) => ({ ...p, [item.id]: value }));
     else if (key === 'brs') setAnswers('brs', (p) => ({ ...p, [item.id]: value }));
     else setAnswers('pvq', (p) => ({ ...p, [item.id]: value }));
+    goNext(value);
   };
 
-  const goNext = () => {
+  const goNext = (overrideValue?: number) => {
     if (itemIndex < items.length - 1) {
       setItemIndex((i) => i + 1);
     } else {
@@ -146,8 +147,9 @@ export const FullAssessmentScreen: React.FC<{ navigation: any; route: any }> = (
         // Ensure current item's answer is included (state may not have flushed yet)
         const key = section as keyof FullAssessmentData;
         const sectionData = data[key];
+        const chosen = overrideValue ?? currentAnswer;
         const finalData: FullAssessmentData = item
-          ? { ...data, [key]: { ...sectionData, [item.id]: currentAnswer! } }
+          ? { ...data, [key]: { ...sectionData, [item.id]: chosen! } }
           : { ...data };
         upsertMutation.mutate(finalData, {
           onSuccess: () => navigation.goBack(),
@@ -201,7 +203,6 @@ export const FullAssessmentScreen: React.FC<{ navigation: any; route: any }> = (
   if (!item) return null;
 
   const sec = SECTIONS.find((s) => s.id === section)!;
-  const canProceed = currentAnswer !== undefined;
 
   return (
     <SafeAreaContainer>
@@ -234,11 +235,6 @@ export const FullAssessmentScreen: React.FC<{ navigation: any; route: any }> = (
         >
           <Text style={styles.footerBtnText}>← Back</Text>
         </TouchableOpacity>
-        <Button
-          title={itemIndex < items.length - 1 ? 'Next →' : 'Complete section →'}
-          onPress={goNext}
-          disabled={!canProceed || upsertMutation.isPending}
-        />
       </View>
     </SafeAreaContainer>
   );

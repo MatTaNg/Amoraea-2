@@ -94,8 +94,8 @@ export const Stage1BasicInfoScreen: React.FC<{ navigation: any; route: { params:
       return;
     }
     const info = profile.basicInfo;
+    setFirstName((profile?.name ?? info?.firstName ?? '').trim());
     if (info) {
-      setFirstName(info.firstName || '');
       setAgeStr(info.age > 0 ? String(info.age) : '');
       setGender(info.gender || null);
       setAttractedTo(Array.isArray(info.attractedTo) ? [...info.attractedTo] : []);
@@ -108,13 +108,8 @@ export const Stage1BasicInfoScreen: React.FC<{ navigation: any; route: { params:
       setWeightKg(info.weightKg > 0 ? String(info.weightKg) : '');
       setWeightLbs(info.weightKg > 0 ? String(Math.round(info.weightKg / 0.453592)) : '');
     }
-    // Start at name (step 0) unless they've clearly passed it: onboarding_step > 1 AND they have a name saved.
-    const firstNameSaved = (info?.firstName ?? '').trim().length > 0;
     const savedStepNum = typeof profile.onboardingStep === 'number' ? profile.onboardingStep : 0;
-    const shouldResume = savedStepNum > 1 && firstNameSaved;
-    const stepToUse = shouldResume
-      ? Math.min(Math.max(0, savedStepNum), TOTAL_STEPS - 1)
-      : 0;
+    const stepToUse = Math.min(Math.max(0, savedStepNum), TOTAL_STEPS - 1);
     setStep(stepToUse);
     setHydrated(true);
   }, [profile, hydrated]);
@@ -243,7 +238,7 @@ export const Stage1BasicInfoScreen: React.FC<{ navigation: any; route: { params:
     }
   };
 
-  /** Build basicInfo from current form state, merged with existing saved data. */
+  /** Build basicInfo from current form state; name comes from profile (set by interviewer). */
   const buildMergedBasicInfo = (): BasicInfo => {
     const age = parseInt(ageStr, 10) || 0;
     let heightCmVal = 0;
@@ -261,14 +256,14 @@ export const Stage1BasicInfoScreen: React.FC<{ navigation: any; route: { params:
     const bmiVal = heightCmVal > 0 ? bmi(weightKgVal, heightCmVal) : 0;
     const existing = profile?.basicInfo;
     return {
-      firstName: firstName.trim() || (existing?.firstName ?? ''),
+      firstName: firstName.trim() || (existing?.firstName ?? profile?.name ?? ''),
       age: age || (existing?.age ?? 0),
       gender: (gender ?? '') || (existing?.gender ?? ''),
       attractedTo: attractedTo.length > 0 ? [...attractedTo] : (existing?.attractedTo ?? []),
       locationCity: locationCity.trim() || (existing?.locationCity ?? ''),
       locationCountry: locationCountry.trim() || (existing?.locationCountry ?? ''),
       occupation: occupation.trim() || (existing?.occupation ?? ''),
-      photoUrl: existing?.photoUrl ?? '', // updated below when we have uploads
+      photoUrl: existing?.photoUrl ?? '',
       heightCm: heightCmVal || (existing?.heightCm ?? 0),
       weightKg: weightKgVal || (existing?.weightKg ?? 0),
       bmi: bmiVal || (existing?.bmi ?? 0),
@@ -389,18 +384,18 @@ export const Stage1BasicInfoScreen: React.FC<{ navigation: any; route: { params:
       };
 
       await profileRepository.upsertProfile(userId, {
-        name: basicInfo.firstName,
+        ...(basicInfo.firstName ? { name: basicInfo.firstName } : {}),
         age: basicInfo.age,
         gender: basicInfo.gender === 'Prefer not to say' ? null : (basicInfo.gender as 'Man' | 'Woman' | 'Non-binary'),
         attractedTo: basicInfo.attractedTo as ('Men' | 'Women' | 'Non-binary')[],
         heightCentimeters: basicInfo.heightCm,
         occupation: basicInfo.occupation,
         basicInfo,
-        onboardingStage: 'interview',
+        onboardingStage: 'psychometrics',
       });
 
       queryClient.invalidateQueries({ queryKey: ['profile', userId] });
-      navigation.replace('OnboardingInterview', { userId });
+      navigation.replace('Gate2Reentry', { userId });
     } catch (err) {
       Alert.alert('Error', err instanceof Error ? err.message : 'Failed to save');
     } finally {
@@ -414,6 +409,7 @@ export const Stage1BasicInfoScreen: React.FC<{ navigation: any; route: { params:
         return (
           <>
             <Text style={styles.stepTitle}>What's your first name?</Text>
+            <Text style={styles.stepHint}>We'll use the name you gave during the interview — you can change it here if you'd like.</Text>
             <TextInput
               label="First name"
               value={firstName}

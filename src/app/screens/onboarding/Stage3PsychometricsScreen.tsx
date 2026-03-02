@@ -7,7 +7,7 @@ import {
   TouchableOpacity,
   Alert,
 } from 'react-native';
-import { useQueryClient } from '@tanstack/react-query';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { SafeAreaContainer } from '@ui/components/SafeAreaContainer';
 import { Button } from '@ui/components/Button';
 import { ScaleSelect } from '@ui/components/ScaleSelect';
@@ -29,7 +29,8 @@ import {
   FullAssessmentData,
   isFullAssessmentComplete,
 } from '@features/assessment/assessmentData';
-import { buildGate2Psychometrics } from '@features/onboarding/buildGate2Psychometrics';
+import { buildGate2Psychometrics, getSectionSummary } from '@features/onboarding/buildGate2Psychometrics';
+import type { SectionId as BuildSectionId } from '@features/onboarding/buildGate2Psychometrics';
 
 const profileRepository = new ProfileRepository();
 
@@ -84,6 +85,29 @@ export const Stage3PsychometricsScreen: React.FC<{ navigation: any; route: { par
   const [itemIndex, setItemIndex] = useState(0);
   const [data, setData] = useState<FullAssessmentData>(defaultData);
   const [submitting, setSubmitting] = useState(false);
+  const [resultsForSection, setResultsForSection] = useState<BuildSectionId | null>(null);
+  const hasHydratedFromProgressRef = React.useRef(false);
+
+  const { data: profile } = useQuery({
+    queryKey: ['profile', userId],
+    queryFn: () => profileRepository.getProfile(userId),
+    enabled: !!userId,
+  });
+
+  // Hydrate saved progress into state so we have it when user clicks Begin/Continue; do not auto-advance to first question
+  React.useEffect(() => {
+    const progress = profile?.psychometricsProgress;
+    if (!progress || typeof progress !== 'object' || hasHydratedFromProgressRef.current) return;
+    hasHydratedFromProgressRef.current = true;
+    const hydrated: FullAssessmentData = {
+      ecr: progress.ecr && typeof progress.ecr === 'object' ? progress.ecr : {},
+      tipi: progress.tipi && typeof progress.tipi === 'object' ? progress.tipi : {},
+      dsi: progress.dsi && typeof progress.dsi === 'object' ? progress.dsi : {},
+      brs: progress.brs && typeof progress.brs === 'object' ? progress.brs : {},
+      pvq: progress.pvq && typeof progress.pvq === 'object' ? progress.pvq : {},
+    };
+    setData(hydrated);
+  }, [profile?.psychometricsProgress]);
 
   const answers = section === 'ecr' ? data.ecr : section === 'tipi' ? data.tipi : section === 'dsi' ? data.dsi : section === 'brs' ? data.brs : data.pvq;
   const setAnswers = useCallback(
@@ -98,6 +122,31 @@ export const Stage3PsychometricsScreen: React.FC<{ navigation: any; route: { par
   const scaleMax = getScaleMax(section);
   const currentAnswer = item ? answers[item.id] : undefined;
 
+  const getFirstIncompleteSection = useCallback((): { section: BuildSectionId; itemIndex: number } | null => {
+    const order: BuildSectionId[] = ['ecr', 'tipi', 'dsi', 'brs', 'pvq'];
+    const lengths = [ECR12.length, TIPI.length, DSI.length, BRS.length, PVQ21.length];
+    for (let i = 0; i < order.length; i++) {
+      const sid = order[i];
+      const keys = Object.keys(data[sid]).length;
+      if (keys < lengths[i]) return { section: sid, itemIndex: keys };
+    }
+    return null;
+  }, [data]);
+
+  const hasProgress = Object.keys(data.ecr).length > 0 || Object.keys(data.tipi).length > 0 ||
+    Object.keys(data.dsi).length > 0 || Object.keys(data.brs).length > 0 || Object.keys(data.pvq).length > 0;
+
+  const startOrContinue = () => {
+    const first = getFirstIncompleteSection();
+    if (first) {
+      setSection(first.section);
+      setItemIndex(first.itemIndex);
+    } else {
+      setSection('ecr');
+      setItemIndex(0);
+    }
+  };
+
   const handleAnswer = (value: number) => {
     if (!item) return;
     const key = section as keyof FullAssessmentData;
@@ -106,6 +155,7 @@ export const Stage3PsychometricsScreen: React.FC<{ navigation: any; route: { par
     else if (key === 'dsi') setAnswers('dsi', (p) => ({ ...p, [item.id]: value }));
     else if (key === 'brs') setAnswers('brs', (p) => ({ ...p, [item.id]: value }));
     else setAnswers('pvq', (p) => ({ ...p, [item.id]: value }));
+    goNext(value);
   };
 
   const finishAndSave = async (finalDataOverride?: FullAssessmentData) => {
@@ -124,6 +174,7 @@ export const Stage3PsychometricsScreen: React.FC<{ navigation: any; route: { par
       await profileRepository.upsertProfile(userId, {
         gate2Psychometrics: gate2,
         onboardingStage: 'compatibility',
+        psychometricsProgress: null,
       });
       queryClient.invalidateQueries({ queryKey: ['profile', userId] });
       navigation.replace('Stage4Compatibility', { userId });
@@ -134,21 +185,35 @@ export const Stage3PsychometricsScreen: React.FC<{ navigation: any; route: { par
     }
   };
 
-  const goNext = () => {
+  const saveProgress = async (updatedData: FullAssessmentData) => {
+    try {
+      await profileRepository.upsertProfile(userId, {
+        psychometricsProgress: updatedData as unknown as Record<string, Record<string, number>>,
+      });
+      queryClient.invalidateQueries({ queryKey: ['profile', userId] });
+    } catch (err) {
+      Alert.alert('Error', err instanceof Error ? err.message : 'Failed to save progress.');
+    }
+  };
+
+  const goNext = async (overrideValue?: number) => {
     if (itemIndex < items.length - 1) {
       setItemIndex((i) => i + 1);
     } else {
       const key = section as keyof FullAssessmentData;
       const sectionData = data[key];
-      const merged = item ? { ...sectionData, [item.id]: currentAnswer } : sectionData;
+      const chosen = overrideValue ?? currentAnswer;
+      const merged = item ? { ...sectionData, [item.id]: chosen } : sectionData;
       const updatedData: FullAssessmentData = { ...data, [key]: merged };
+      setData(updatedData);
 
       const nextSectionIndex = SECTIONS.findIndex((s) => s.id === section) + 1;
       const nextSection = SECTIONS[nextSectionIndex]?.id;
+
+      await saveProgress(updatedData);
+
       if (nextSection && nextSection !== 'intro') {
-        setData(updatedData);
-        setSection(nextSection);
-        setItemIndex(0);
+        setResultsForSection(section as BuildSectionId);
       } else {
         finishAndSave(updatedData);
       }
@@ -159,17 +224,11 @@ export const Stage3PsychometricsScreen: React.FC<{ navigation: any; route: { par
     if (itemIndex > 0) {
       setItemIndex((i) => i - 1);
     } else {
-      const prevIndex = SECTIONS.findIndex((s) => s.id === section) - 1;
-      const prevSection = SECTIONS[prevIndex]?.id;
-      if (prevSection && prevSection !== 'intro') {
-        setSection(prevSection);
-        const prevItems = getItems(prevSection);
-        setItemIndex(prevItems.length - 1);
-      } else {
-        setSection('intro');
-      }
+      setSection('intro');
     }
   };
+
+  const canGoBack = true;
 
   if (section === 'intro') {
     return (
@@ -188,8 +247,40 @@ export const Stage3PsychometricsScreen: React.FC<{ navigation: any; route: { par
             ))}
           </View>
           <Button
-            title="Begin"
-            onPress={() => setSection('ecr')}
+            title={hasProgress ? 'Continue' : 'Begin'}
+            onPress={startOrContinue}
+            style={styles.introButton}
+          />
+        </ScrollView>
+      </SafeAreaContainer>
+    );
+  }
+
+  if (resultsForSection) {
+    const summary = getSectionSummary(resultsForSection, data);
+    const nextSectionIndex = SECTIONS.findIndex((s) => s.id === resultsForSection) + 1;
+    const nextSection = SECTIONS[nextSectionIndex]?.id as SectionId | undefined;
+    const sec = SECTIONS.find((s) => s.id === resultsForSection);
+    return (
+      <SafeAreaContainer>
+        <ScrollView style={styles.container} contentContainerStyle={styles.resultsContent}>
+          <Text style={styles.resultsTitle}>Your results</Text>
+          <Text style={[styles.resultsSectionTitle, sec ? { color: sec.color } : undefined]}>
+            {summary?.title ?? resultsForSection}
+          </Text>
+          {summary?.lines.map((line, i) => (
+            <Text key={i} style={styles.resultsLine}>{line}</Text>
+          ))}
+          <Text style={styles.resultsHint}>Your progress is saved. You can continue later if you need to stop.</Text>
+          <Button
+            title={nextSection ? `Continue to ${SECTIONS.find((s) => s.id === nextSection)?.title ?? nextSection} →` : 'Complete →'}
+            onPress={() => {
+              setResultsForSection(null);
+              if (nextSection && nextSection !== 'intro') {
+                setSection(nextSection);
+                setItemIndex(0);
+              }
+            }}
             style={styles.introButton}
           />
         </ScrollView>
@@ -200,8 +291,6 @@ export const Stage3PsychometricsScreen: React.FC<{ navigation: any; route: { par
   if (!item) return null;
 
   const sec = SECTIONS.find((s) => s.id === section)!;
-  const canProceed = currentAnswer !== undefined;
-  const isLastItem = itemIndex === items.length - 1;
 
   return (
     <SafeAreaContainer>
@@ -227,15 +316,10 @@ export const Stage3PsychometricsScreen: React.FC<{ navigation: any; route: { par
         <TouchableOpacity
           onPress={goBack}
           style={styles.footerBtn}
-          disabled={section === 'ecr' && itemIndex === 0}
+          disabled={!canGoBack}
         >
           <Text style={styles.footerBtnText}>← Back</Text>
         </TouchableOpacity>
-        <Button
-          title={isLastItem ? 'Complete & continue →' : 'Next →'}
-          onPress={goNext}
-          disabled={!canProceed || submitting}
-        />
       </View>
     </SafeAreaContainer>
   );
@@ -256,6 +340,11 @@ const styles = StyleSheet.create({
   introCardTitle: { fontSize: 16, fontWeight: '600' },
   introCardSub: { fontSize: 13, color: colors.textSecondary, marginTop: 2 },
   introButton: { marginTop: spacing.md },
+  resultsContent: { padding: spacing.lg, paddingTop: spacing.xl },
+  resultsTitle: { fontSize: 22, fontWeight: '700', color: colors.text, marginBottom: spacing.sm },
+  resultsSectionTitle: { fontSize: 18, fontWeight: '600', marginBottom: spacing.md },
+  resultsLine: { fontSize: 15, color: colors.text, marginBottom: spacing.xs },
+  resultsHint: { fontSize: 14, color: colors.textSecondary, marginTop: spacing.lg, marginBottom: spacing.lg },
   header: { paddingHorizontal: spacing.lg, paddingTop: spacing.md, paddingBottom: spacing.sm },
   sectionLabel: { fontSize: 18, fontWeight: '600', marginTop: spacing.sm },
   sectionSub: { fontSize: 13, color: colors.textSecondary, marginTop: 2 },

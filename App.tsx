@@ -82,12 +82,19 @@ const OnboardingNavigator = ({ userId }: { userId: string }) => (
   </Stack.Navigator>
 );
 
-/** Gate-based onboarding: Stage 1 → Interview → Psychometrics (approved) → Compatibility → Complete */
+/** Gate-based onboarding: Interview first → (when approved) Basic Info → Psychometrics → Compatibility → Complete.
+ *  Skip basic info modals for now — go straight to AI interview; basic info screens remain available for later use. */
 function getOnboardingInitialRoute(profile: { onboardingStage?: string; applicationStatus?: string; gate1Score?: unknown }): string {
-  const stage = profile.onboardingStage ?? 'basic_info';
-  if (stage === 'basic_info') return 'Stage1BasicInfo';
+  const stage = profile.onboardingStage ?? 'interview';
+  // Only show Stage1BasicInfo after interview is passed; otherwise go straight to AI interview
+  if (stage === 'basic_info') {
+    if (profile.gate1Score && profile.applicationStatus === 'approved') return 'Stage1BasicInfo';
+    return 'OnboardingInterview';
+  }
   if (stage === 'interview') {
-    return profile.gate1Score ? 'PostInterview' : 'OnboardingInterview';
+    if (profile.applicationStatus === 'approved') return 'Stage1BasicInfo';
+    if (profile.gate1Score) return 'PostInterview';
+    return 'OnboardingInterview';
   }
   if (stage === 'psychometrics') {
     if (profile.applicationStatus === 'approved') return 'Gate2Reentry';
@@ -96,7 +103,7 @@ function getOnboardingInitialRoute(profile: { onboardingStage?: string; applicat
   }
   if (stage === 'compatibility') return 'Stage4Compatibility';
   if (stage === 'complete') return 'Stage1BasicInfo'; // should not be used; main app shown
-  return 'Stage1BasicInfo';
+  return 'OnboardingInterview';
 }
 
 const GatesOnboardingNavigator = ({ userId }: { userId: string }) => {
@@ -156,7 +163,7 @@ const AppNavigator = ({ userId }: { userId: string }) => {
     return null; // Loading state
   }
 
-  const stage = profile.onboardingStage ?? 'basic_info';
+  const stage = profile.onboardingStage ?? 'interview';
   const showMainApp = stage === 'complete' || profile.profileVisible === true;
 
   if (!showMainApp) {

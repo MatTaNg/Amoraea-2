@@ -257,6 +257,40 @@ Start with a warm introduction. Tell them three things:
 
 Begin with conflict — it's the richest entry point and usually the easiest to access.
 
+─────────────────────────────────────────
+SCENARIO COMPLETION TOKENS
+─────────────────────────────────────────
+
+After completing all questions for each scenario — including the both-characters probe and its answer — output a completion token in the transition message. The token fires AFTER receiving the both-characters answer, NEVER before.
+
+TOKEN FORMAT:
+[SCENARIO_COMPLETE:1] — after Scenario 1 (The Slow Drift or opening personal conflict example)
+[SCENARIO_COMPLETE:2] — after Scenario 2 (The Missed Moment)
+[SCENARIO_COMPLETE:3] — after Scenario 3 (The Intimacy Gap or bottling-up personal example)
+
+PLACEMENT RULES:
+- The token appears on its own line at the START of the transition message, before any other text
+- The transition summary and forward momentum phrase follow the token in the same message
+- The token fires AFTER the user's both-characters answer is received
+- The token NEVER fires in the same message as a question
+
+CORRECT example for Scenario 1 completing:
+[User answers Jordan both-characters probe]
+[Next assistant message]:
+[SCENARIO_COMPLETE:1]
+Two down, one to go. You caught both sides — the phone-scroll and Jordan going quiet instead of naming it. Last one — situation three.
+[Then present Scenario 3]
+
+WRONG — token fires before answer:
+[Assistant]: What about Jordan's side of it? [SCENARIO_COMPLETE:1]
+→ NEVER do this. Token fires in answer to a question, not in a question.
+
+SCENARIO 3 SPECIAL CASE:
+[SCENARIO_COMPLETE:3] fires in the message that transitions to the skepticism probe. The token, the transition summary, and the skepticism probe all appear in the same message:
+[SCENARIO_COMPLETE:3]
+[Transition summary].
+[Skepticism probe question]
+
 CLOSING:
 When you have covered all 6 constructs adequately (typically 12-18 exchanges), close the interview naturally. Say something like "I think I have a really good sense of how you show up in relationships. Thank you for being so open with me." Then output a special token: [INTERVIEW_COMPLETE]
 
@@ -399,6 +433,147 @@ Return ONLY valid JSON:
   "notableInconsistencies": ["specific inconsistency with quote, or empty array"],
   "interviewSummary": "3 honest sentences about this person's relational patterns. Distinguish between what the evidence shows and what is simply unknown. Not flattering — accurate."
 }`;
+}
+
+// ─────────────────────────────────────────────
+// PER-SCENARIO SCORING PROMPT
+// ─────────────────────────────────────────────
+function buildScenarioScoringPrompt(scenarioNumber, messages) {
+  const meta = {
+    1: {
+      name: "The Slow Drift / Opening Conflict",
+      pillars: [1, 3, 5],
+      pillarNames: { 1: "Conflict & Repair", 3: "Accountability", 5: "Responsiveness" },
+    },
+    2: {
+      name: "The Missed Moment",
+      pillars: [1, 3, 5],
+      pillarNames: { 1: "Conflict & Repair", 3: "Accountability", 5: "Responsiveness" },
+    },
+    3: {
+      name: "The Intimacy Gap / Bottling-Up",
+      pillars: [1, 3, 6],
+      pillarNames: { 1: "Conflict & Repair", 3: "Accountability", 6: "Desire & Boundaries" },
+    },
+  }[scenarioNumber];
+
+  const turns = messages
+    .filter(m => m.role === "user" || m.role === "assistant")
+    .filter(m => !m.isScoreCard)
+    .map(m => `${m.role === "user" ? "User" : "Interviewer"}: ${m.content}`)
+    .join("\n\n");
+
+  const pillarInstructions = meta.pillars.map(id => `Pillar ${id} (${meta.pillarNames[id]}): score 0-10`).join("\n");
+  const pillarScoresTemplate = meta.pillars.map(id => `"${id}": 0`).join(", ");
+  const pillarConfidenceTemplate = meta.pillars.map(id => `"${id}": "high | moderate | low"`).join(", ");
+  const pillarEvidenceTemplate = meta.pillars.map(id => `"${id}": "specific quote or paraphrase"`).join(", ");
+
+  return `Score this scenario from a relationship assessment interview.
+
+SCENARIO: ${meta.name}
+
+FULL TRANSCRIPT (use all context, score based on the scenario-relevant exchanges):
+${turns}
+
+CONSTRUCTS TO SCORE:
+${pillarInstructions}
+
+SCORING RULES:
+- Score 0-10 based on transcript evidence only
+- Personal examples and first-person scenario responses ("if you were Casey") carry equal weight — do not penalise scenario responses
+- SPECIFICITY: Generic responses ("I'd apologise", "communicate better") cap at 6 until specificity is shown
+- REPAIR COHERENCE: If the user's repair attempt replicates the same failure they diagnosed, lower Accountability by 1-2 points
+- FLOOR: Only score below 4 if there are active concerning signals — blame-shifting, contempt, consistent deflection. Absence of evidence scores at 5, not lower.
+- For Responsiveness (P5): distinguish no-signal situations (score 5-6) from missed explicit bids (score 3-4). Credit retrospective attunement.
+
+For each pillar cite the specific quote or paraphrase that most informed the score.
+
+Return ONLY valid JSON, no markdown:
+{
+  "scenarioNumber": ${scenarioNumber},
+  "scenarioName": "${meta.name}",
+  "pillarScores": { ${pillarScoresTemplate} },
+  "pillarConfidence": { ${pillarConfidenceTemplate} },
+  "keyEvidence": { ${pillarEvidenceTemplate} },
+  "repairCoherenceIssue": null,
+  "specificity": "high | medium | low"
+}`;
+}
+
+// ─────────────────────────────────────────────
+// FORMAT SCENARIO SCORE CARD
+// ─────────────────────────────────────────────
+function formatScenarioScoreCard(result) {
+  const pillarNames = { 1: "Conflict & Repair", 3: "Accountability", 5: "Responsiveness", 6: "Desire & Boundaries" };
+  const lines = Object.entries(result.pillarScores || {}).map(([id, score]) => {
+    const name = pillarNames[parseInt(id)] || `Pillar ${id}`;
+    const conf = result.pillarConfidence?.[id] || "high";
+    const evidence = result.keyEvidence?.[id] || "";
+    return `${name}: ${score}/10 (${conf} confidence)\n   "${evidence}"`;
+  });
+  const flags = [];
+  if (result.specificity === "low") flags.push("⚠ Generic responses — specificity was limited");
+  if (result.repairCoherenceIssue) flags.push(`⚠ Repair coherence: ${result.repairCoherenceIssue}`);
+  return ["── Scenario " + result.scenarioNumber + ": " + result.scenarioName + " ──", lines.join("\n\n"), flags.length ? flags.join("\n") : null].filter(Boolean).join("\n\n");
+}
+
+// ─────────────────────────────────────────────
+// COMPUTE PASS/FAIL GATE
+// ─────────────────────────────────────────────
+function computeGateResult(pillarScores) {
+  const weights = { 1: 0.30, 3: 0.30, 5: 0.25, 6: 0.15 };
+  const pillarNames = { 1: "Conflict & Repair", 3: "Accountability", 5: "Responsiveness", 6: "Desire & Boundaries" };
+  for (const [id] of Object.entries(weights)) {
+    const score = pillarScores[id] ?? pillarScores[parseInt(id)];
+    if (score !== undefined && score < 3) {
+      return { pass: false, reason: "floor", weightedScore: null, failingConstruct: pillarNames[id], failingScore: score };
+    }
+  }
+  let weightedSum = 0, totalWeight = 0;
+  for (const [id, weight] of Object.entries(weights)) {
+    const score = pillarScores[id] ?? pillarScores[parseInt(id)];
+    if (score !== undefined) { weightedSum += score * weight; totalWeight += weight; }
+  }
+  const weightedScore = totalWeight > 0 ? Math.round((weightedSum / totalWeight) * 10) / 10 : null;
+  return {
+    pass: weightedScore !== null && weightedScore >= 5.0,
+    reason: "weighted_average",
+    weightedScore,
+    failingConstruct: null,
+    failingScore: null,
+  };
+}
+
+// ─────────────────────────────────────────────
+// FORMAT PASS/FAIL INLINE CARD
+// ─────────────────────────────────────────────
+function formatPassFailCard(allScenarioResults) {
+  const pillarAccumulator = {};
+  const pillarCounts = {};
+  allScenarioResults.forEach(result => {
+    Object.entries(result.pillarScores || {}).forEach(([id, score]) => {
+      const numId = parseInt(id);
+      if (!pillarAccumulator[numId]) { pillarAccumulator[numId] = 0; pillarCounts[numId] = 0; }
+      pillarAccumulator[numId] += score;
+      pillarCounts[numId] += 1;
+    });
+  });
+  const mergedScores = {};
+  Object.entries(pillarAccumulator).forEach(([id, total]) => {
+    mergedScores[id] = Math.round((total / pillarCounts[id]) * 10) / 10;
+  });
+  const gate = computeGateResult(mergedScores);
+  const pillarNames = { 1: "Conflict & Repair", 3: "Accountability", 5: "Responsiveness", 6: "Desire & Boundaries" };
+  const scoreLines = Object.entries(mergedScores)
+    .filter(([id]) => pillarNames[parseInt(id)])
+    .map(([id, score]) => `${pillarNames[parseInt(id)]}: ${score}/10`)
+    .join("\n");
+  const result = gate.pass
+    ? `✓ INTERVIEW PASSED\nWeighted score: ${gate.weightedScore}/10`
+    : gate.reason === "floor"
+      ? `✗ INTERVIEW NOT PASSED\n${gate.failingConstruct} scored ${gate.failingScore}/10 — below the minimum threshold of 3.`
+      : `✗ INTERVIEW NOT PASSED\nWeighted score: ${gate.weightedScore}/10 — below the required threshold of 5.0.`;
+  return ["── Interview Summary ──", scoreLines, result].join("\n\n");
 }
 
 // ─────────────────────────────────────────────
@@ -613,7 +788,6 @@ function ResultsScreen({ results, onContinue }) {
               const isLowConf  = confidence === "low";
               const isMedConf  = confidence === "moderate";
               const isNoExample = results.noExampleConstructs?.includes(parseInt(id)) || results.noExampleConstructs?.includes(id);
-              const isScenario  = results.scenarioConstructs?.includes(parseInt(id)) || results.scenarioConstructs?.includes(id);
 
               return (
                 <div key={id} style={{
@@ -635,17 +809,6 @@ function ResultsScreen({ results, onContinue }) {
                           padding:"2px 6px", borderRadius:2,
                         }}>
                           {isLowConf ? "low confidence" : "moderate confidence"}
-                        </span>
-                      )}
-                      {/* Scenario badge */}
-                      {isScenario && (
-                        <span style={{
-                          fontFamily:mono, fontSize:9, letterSpacing:1.5,
-                          textTransform:"uppercase", marginLeft:6,
-                          color: T.blue, border:`1px solid ${T.blue}44`,
-                          padding:"2px 6px", borderRadius:2,
-                        }}>
-                          scenario
                         </span>
                       )}
                     </div>
@@ -959,6 +1122,30 @@ function TranscriptPanel({ messages, currentTranscript, voiceState }) {
       maxWidth: 600, width: "100%", margin: "0 auto",
     }}>
       {messages.map((msg, i) => {
+        if (msg.isScoreCard) {
+          const isPassFail = msg.isPassFail;
+          return (
+            <div
+              key={i}
+              style={{
+                margin: "12px 16px",
+                padding: "14px 18px",
+                background: isPassFail ? T.surface : T.creamDark,
+                border: "1px solid " + T.border,
+                borderLeft: "3px solid " + (isPassFail ? T.gold : T.inkLight),
+                borderRadius: 3,
+                fontFamily: mono,
+                fontSize: 11,
+                color: T.inkLight,
+                lineHeight: 1.75,
+                whiteSpace: "pre-wrap",
+                animation: "fadeIn 0.4s ease",
+              }}
+            >
+              {msg.content}
+            </div>
+          );
+        }
         const isAI = msg.role === "assistant";
         return (
           <div key={i} style={{
@@ -1022,9 +1209,11 @@ export default function AIInterviewer({ typologyContext = "", onComplete }) {
   const [currentTranscript, setCurrentTranscript] = useState(""); // live STT
   const [textInput, setTextInput]                 = useState("");  // typed input
   const [micError, setMicError]               = useState(null);
+  const [scenarioResults, setScenarioResults] = useState([]);
 
   const recognitionRef = useRef(null);
   const isSpeakingRef  = useRef(false);
+  const scoredScenariosRef = useRef(new Set());
 
   // ── Set up SpeechRecognition ──
   useEffect(() => {
@@ -1093,6 +1282,18 @@ export default function AIInterviewer({ typologyContext = "", onComplete }) {
       const data = await res.json();
       const text = data.content?.[0]?.text || "";
 
+      // Per-scenario completion tokens — strip token, show message, score scenario
+      const scenarioMatch = text.match(/\[SCENARIO_COMPLETE:(\d)\]/);
+      if (scenarioMatch) {
+        const scenarioNumber = parseInt(scenarioMatch[1]);
+        const cleanText = text.replace(/\[SCENARIO_COMPLETE:\d\]/g, "").trim();
+        const updatedMessages = [...newMessages, { role: "assistant", content: cleanText || "Good, that's helpful." }];
+        setMessages(updatedMessages);
+        await speakAndReturn(cleanText || "Good, that's helpful.");
+        scoreScenario(scenarioNumber, updatedMessages);
+        return;
+      }
+
       if (text.includes("[INTERVIEW_COMPLETE]")) {
         const cleanText = text.replace("[INTERVIEW_COMPLETE]", "").trim();
         const finalMessages = [...newMessages, { role:"assistant", content:cleanText }];
@@ -1115,7 +1316,7 @@ export default function AIInterviewer({ typologyContext = "", onComplete }) {
       setMessages(prev => [...prev, { role:"assistant", content:errMsg }]);
       await speakAndReturn(errMsg);
     }
-  }, [messages, speakAndReturn]);
+  }, [messages, speakAndReturn, scoreScenario]);
 
   // ── Push-to-talk handlers ──
   const handlePressStart = useCallback(() => {
@@ -1174,6 +1375,41 @@ export default function AIInterviewer({ typologyContext = "", onComplete }) {
       await speakAndReturn(fallback);
     }
   }, [speakAndReturn]);
+
+  // ── Score a single scenario (per-scenario score card)
+  const scoreScenario = useCallback(async (scenarioNumber, messages) => {
+    if (scoredScenariosRef.current.has(scenarioNumber)) return;
+    scoredScenariosRef.current.add(scenarioNumber);
+    try {
+      const res = await fetch("https://api.anthropic.com/v1/messages", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          model: "claude-sonnet-4-20250514",
+          max_tokens: 800,
+          messages: [{ role: "user", content: buildScenarioScoringPrompt(scenarioNumber, messages) }],
+        }),
+      });
+      const data = await res.json();
+      const text = data.content?.[0]?.text || "{}";
+      const clean = text.replace(/```json|```/g, "").trim();
+      const result = JSON.parse(clean);
+
+      const cardText = formatScenarioScoreCard(result);
+      setMessages(prev => [...prev, { role: "system", content: cardText, isScoreCard: true }]);
+
+      setScenarioResults(prev => {
+        const updated = [...prev, result];
+        if (updated.length === 3) {
+          const passFailText = formatPassFailCard(updated);
+          setMessages(prev2 => [...prev2, { role: "system", content: passFailText, isScoreCard: true, isPassFail: true }]);
+        }
+        return updated;
+      });
+    } catch (err) {
+      console.error("Scenario " + scenarioNumber + " scoring failed:", err);
+    }
+  }, []);
 
   // ── Score the completed interview ──
   const scoreInterview = useCallback(async (finalMessages) => {
