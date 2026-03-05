@@ -195,6 +195,7 @@ const AppNavigator = ({ userId }: { userId: string }) => {
       <Stack.Screen
         name="Aria"
         component={AriaScreen}
+        initialParams={{ userId }}
         options={{ headerShown: false }}
       />
     </Stack.Navigator>

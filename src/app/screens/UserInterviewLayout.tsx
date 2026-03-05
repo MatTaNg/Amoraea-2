@@ -7,6 +7,7 @@ import {
   ActivityIndicator,
   Platform,
   Animated,
+  Linking,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { FlameOrb, type FlameState } from './FlameOrb';
@@ -43,6 +44,12 @@ interface UserInterviewLayoutProps {
   micWarning: string | null;
   inputDisabled: boolean;
   onExit?: () => void;
+  /** When true, show "Audio unavailable — read above, then speak when ready" */
+  ttsFallbackActive?: boolean;
+  /** When true, show mic-denied state with "Enable in browser settings" / open app settings */
+  micPermissionDenied?: boolean;
+  /** When true, show "Aira is thinking..." (visual only, no TTS) */
+  isWaiting?: boolean;
 }
 
 const GOOGLE_FONTS_URL =
@@ -59,6 +66,9 @@ export const UserInterviewLayout: React.FC<UserInterviewLayoutProps> = ({
   micWarning,
   inputDisabled,
   onExit,
+  ttsFallbackActive = false,
+  micPermissionDenied = false,
+  isWaiting = false,
 }) => {
   const rippleAnim = useRef(new Animated.Value(0)).current;
 
@@ -151,46 +161,86 @@ export const UserInterviewLayout: React.FC<UserInterviewLayoutProps> = ({
             </View>
           )}
 
-          {interviewerText ? (
+          {isWaiting ? (
+            <Text style={styles.waitingText}>Aira is thinking...</Text>
+          ) : interviewerText ? (
             <Text style={styles.interviewerQuote} numberOfLines={4} ellipsizeMode="tail">
               "{interviewerText}"
+            </Text>
+          ) : null}
+
+          {ttsFallbackActive ? (
+            <Text style={styles.ttsFallbackNotice}>
+              ◆ Audio unavailable — read above, then speak when ready
             </Text>
           ) : null}
 
           <View style={styles.micSection}>
             {micError ? <Text style={styles.dockError}>{micError}</Text> : null}
             {micWarning && !micError ? <Text style={styles.dockWarning}>{micWarning}</Text> : null}
-            <View style={styles.micButtonWrapper}>
-              {voiceState === 'listening' && (
-                <Animated.View
-                  style={[
-                    styles.rippleRing,
-                    {
-                      opacity: rippleOpacity,
-                      transform: [{ scale: rippleScale }],
-                    },
-                  ]}
-                  pointerEvents="none"
-                />
-              )}
-              <Pressable
-                onPressIn={onPressStart}
-                onPressOut={onPressEnd}
-                disabled={isMicDisabled}
-                style={[
-                  styles.micButton,
-                  voiceState === 'listening' && styles.micButtonListening,
-                  { opacity: micOpacity },
-                ]}
-              >
-                {voiceState === 'processing' ? (
-                  <ActivityIndicator size="small" color={FLAME_MID} />
-                ) : (
-                  <Ionicons name="mic" size={24} color={FLAME_MID} />
-                )}
-              </Pressable>
-            </View>
-            <Text style={[styles.micLabel, { opacity: statusLabelOpacity }]}>{micLabel}</Text>
+            {micPermissionDenied ? (
+              <View style={styles.micDeniedBlock}>
+                <View style={styles.micDeniedIconWrap}>
+                  <Ionicons name="mic-off" size={24} color="#E87A7A" />
+                </View>
+                <Text style={styles.micDeniedText}>
+                  Microphone access is required for this interview.
+                </Text>
+                <Pressable
+                  onPress={() => {
+                    if (Platform.OS === 'web' && typeof window !== 'undefined' && window.location?.reload) {
+                      window.location.reload();
+                    } else {
+                      Linking.openSettings();
+                    }
+                  }}
+                  style={styles.micDeniedButton}
+                >
+                  <Text style={styles.micDeniedButtonLabel}>
+                    {Platform.OS === 'web' ? 'Enable in browser settings →' : 'Open app settings →'}
+                  </Text>
+                </Pressable>
+                <Text style={styles.micDeniedHint}>
+                  {Platform.OS === 'web'
+                    ? 'Open your browser settings, find this site under permissions, and allow microphone access. Then refresh the page.'
+                    : 'Allow microphone access in your device settings, then return here.'}
+                </Text>
+              </View>
+            ) : (
+              <>
+                <View style={styles.micButtonWrapper}>
+                  {voiceState === 'listening' && (
+                    <Animated.View
+                      style={[
+                        styles.rippleRing,
+                        {
+                          opacity: rippleOpacity,
+                          transform: [{ scale: rippleScale }],
+                        },
+                      ]}
+                      pointerEvents="none"
+                    />
+                  )}
+                  <Pressable
+                    onPressIn={onPressStart}
+                    onPressOut={onPressEnd}
+                    disabled={isMicDisabled}
+                    style={[
+                      styles.micButton,
+                      voiceState === 'listening' && styles.micButtonListening,
+                      { opacity: micOpacity },
+                    ]}
+                  >
+                    {voiceState === 'processing' ? (
+                      <ActivityIndicator size="small" color={FLAME_MID} />
+                    ) : (
+                      <Ionicons name="mic" size={24} color={FLAME_MID} />
+                    )}
+                  </Pressable>
+                </View>
+                <Text style={[styles.micLabel, { opacity: statusLabelOpacity }]}>{micLabel}</Text>
+              </>
+            )}
           </View>
         </View>
       </View>
@@ -352,6 +402,71 @@ const styles = StyleSheet.create({
     ...(Platform.OS === 'web'
       ? { textShadow: '0 0 40px rgba(30,111,217,0.3)' }
       : { textShadowColor: 'rgba(30,111,217,0.3)', textShadowOffset: { width: 0, height: 0 }, textShadowRadius: 40 }),
+  },
+  ttsFallbackNotice: {
+    fontFamily: FONT_UI,
+    fontSize: 10,
+    fontWeight: '300',
+    letterSpacing: 2,
+    textTransform: 'uppercase',
+    color: TEXT_DIM,
+    textAlign: 'center',
+    marginTop: 8,
+  },
+  waitingText: {
+    textAlign: 'center',
+    fontFamily: FONT_DISPLAY,
+    fontSize: 17,
+    fontWeight: '300',
+    fontStyle: 'italic',
+    color: TEXT_DIM,
+    letterSpacing: 0.4,
+  },
+  micDeniedBlock: {
+    alignItems: 'center',
+    maxWidth: 280,
+    gap: 10,
+  },
+  micDeniedIconWrap: {
+    width: 64,
+    height: 64,
+    borderRadius: 32,
+    borderWidth: 1.5,
+    borderColor: 'rgba(232,122,122,0.3)',
+    backgroundColor: 'rgba(232,122,122,0.05)',
+    alignItems: 'center',
+    justifyContent: 'center',
+    opacity: 0.5,
+  },
+  micDeniedText: {
+    fontFamily: FONT_UI,
+    fontSize: 12,
+    fontWeight: '300',
+    color: TEXT_SECONDARY,
+    lineHeight: 20,
+    textAlign: 'center',
+  },
+  micDeniedButton: {
+    paddingVertical: 10,
+    paddingHorizontal: 20,
+    borderRadius: 8,
+    backgroundColor: 'transparent',
+  },
+  micDeniedButtonLabel: {
+    fontFamily: FONT_UI,
+    fontSize: 10,
+    fontWeight: '400',
+    letterSpacing: 2,
+    textTransform: 'uppercase',
+    color: FLAME_BRIGHT,
+  },
+  micDeniedHint: {
+    fontFamily: FONT_UI,
+    fontSize: 10,
+    fontWeight: '300',
+    color: TEXT_DIM,
+    lineHeight: 16,
+    textAlign: 'center',
   },
   micSection: {
     alignItems: 'center',

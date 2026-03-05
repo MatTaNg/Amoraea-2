@@ -32,11 +32,127 @@ import {
   loadInterviewFromStorage,
   clearInterviewFromStorage,
   getCurrentScenario,
+  setStorageFallbackListener,
 } from '@utilities/storage/InterviewStorage';
+import { withRetry } from '@utilities/withRetry';
 import { FlameOrb } from '@app/screens/FlameOrb';
 import { UserInterviewLayout, type ActiveScenario } from '@app/screens/UserInterviewLayout';
+import { InterviewAnalysisScreen } from '@app/screens/InterviewAnalysisScreen';
+import {
+  calculateScoreConsistency,
+  calculateConstructAsymmetry,
+  analyzeLanguageMarkers,
+  buildScenarioBoundaries,
+} from '@features/aria/alphaAssessmentUtils';
+import { generateAIReasoning } from '@features/aria/generateAIReasoning';
 
 const profileRepository = new ProfileRepository();
+
+/**
+ * ALPHA_MODE: When true, shows full AI reasoning, analysis page, and retake option.
+ * Set to false before production.
+ *
+ * Cleanup before production:
+ * - Delete InterviewAnalysisScreen component (and file)
+ * - Delete generateAIReasoning + alphaAssessmentUtils (and alpha feature imports)
+ * - Remove ALPHA_MODE and all branches that use it (timing/probe refs, alpha save path)
+ * - Remove user_analysis_* from queries if not keeping for research; route post-completion to under_review
+ */
+const ALPHA_MODE = true;
+
+/**
+ * Aira-voiced fallbacks when something goes wrong. Never expose technical language.
+ */
+const AIRA_ERROR_MESSAGES = {
+  waiting: [
+    'Give me just a moment...',
+    'One moment...',
+    'Bear with me for a second...',
+  ],
+  conversationFailed: [
+    "I need to pause there — something interrupted me. Could you say that again?",
+    "I lost my thread for a moment. Can you repeat what you just said?",
+    "Something pulled me away briefly. I'm back — what were you saying?",
+  ],
+  recordingOrTranscriptionRetry: [
+    "I didn't quite catch that — could you say it again?",
+    "Something interrupted me there. Would you mind repeating that?",
+    "I missed that — can you say it once more?",
+  ],
+};
+function randomFrom<T>(arr: T[]): T {
+  return arr[Math.floor(Math.random() * arr.length)];
+}
+
+/** Removes control tokens from AI response before display or TTS. Use raw text for logic only. */
+function stripControlTokens(text: string): string {
+  if (!text) return text;
+  return text
+    .replace(/\[INTERVIEW_COMPLETE\]/gi, '')
+    .replace(/\[SCENARIO_COMPLETE:\d+\]/gi, '')
+    .replace(/\[STAGE_[123]_COMPLETE\]/g, '')
+    .replace(/\[PROBE_TRIGGERED\]/gi, '')
+    .replace(/\[SKEPTICISM_CHECK\]/gi, '')
+    .trim();
+}
+
+const DECLINE_PHRASES = [
+  "i can't think of one", "i cant think of one", "i don't know", "i dont know",
+  "nothing comes to mind", "not really", "no", "nope", "can't think of anything",
+  "don't have", "can't think", "no example",
+];
+
+function isDecline(text: string): boolean {
+  const lower = text.toLowerCase().trim();
+  return DECLINE_PHRASES.some((phrase) => lower.includes(phrase)) || lower.length < 15;
+}
+
+const PERSONAL_CLOSING_INSTRUCTION = `
+CLOSING: The user shared real personal experiences. Close with warmth that acknowledges their openness — something genuine but not effusive. "Thank you for being so open with me" is acceptable but you may vary it. Then output [INTERVIEW_COMPLETE].`;
+
+const SCENARIO_ONLY_CLOSING_INSTRUCTION = `
+CLOSING: The user did not share any personal examples — they responded only to fictional scenarios. Do NOT say "thank you for being open" or anything that implies personal disclosure. Instead, close by acknowledging the quality of their thinking — how clearly they saw the dynamics, what they noticed that others miss. Something like: "You worked through all three of those clearly — you have a sharp eye for where these moments go wrong." Keep it honest and specific to what they actually demonstrated. Do not imply they revealed anything personal about themselves. Then output [INTERVIEW_COMPLETE].`;
+
+/** Returns mic permission state on web (Permissions API); 'unavailable' on native or unsupported. */
+async function checkMicPermission(): Promise<'granted' | 'denied' | 'prompt' | 'unavailable'> {
+  if (Platform.OS !== 'web' || typeof navigator === 'undefined') return 'unavailable';
+  try {
+    const perm = (navigator as { permissions?: { query: (p: { name: string }) => Promise<{ state: string }> } }).permissions;
+    if (!perm) return 'unavailable';
+    const result = await perm.query({ name: 'microphone' });
+    const state = result.state as 'granted' | 'denied' | 'prompt';
+    return state;
+  } catch {
+    return 'unavailable';
+  }
+}
+
+async function generateAIReasoningSafe(
+  pillarScores: Record<string, number>,
+  scenarioScores: Record<number, { pillarScores: Record<string, number>; scenarioName?: string } | undefined>,
+  transcript: Array<{ role: string; content?: string }>,
+  weightedScore: number | null,
+  passed: boolean
+): Promise<import('@features/aria/generateAIReasoning').AIReasoningResult & { _generationFailed?: boolean; _error?: string }> {
+  try {
+    return await withRetry(
+      () => generateAIReasoning(pillarScores, scenarioScores, transcript, weightedScore, passed),
+      { retries: 3, baseDelay: 10000, maxDelay: 40000, context: 'AI reasoning generation' }
+    );
+  } catch (err) {
+    if (__DEV__) console.error('AI reasoning generation failed:', err instanceof Error ? err.message : err);
+    return {
+      _generationFailed: true,
+      _error: err instanceof Error ? err.message : String(err),
+      overall_summary: undefined,
+      overall_strengths: [],
+      overall_growth_areas: [],
+      construct_breakdown: {},
+      scenario_observations: {},
+      closing_reflection: undefined,
+    };
+  }
+}
 
 // Scenario display text for regular-user immersive layout (description only; DO NOT MODIFY scenario content).
 const SCENARIO_1_LABEL = 'Situation 1';
@@ -1454,8 +1570,8 @@ function buildGate1ScoreFromResults(results: InterviewResults): Gate1Score {
 }
 
 export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigation, route }) => {
-  const { userId } = route.params as { userId: string };
-  const { signOut } = useAuth();
+  const { user, signOut } = useAuth();
+  const userId = (route.params as { userId?: string } | undefined)?.userId ?? user?.id ?? '';
   const [messages, setMessages] = useState<{ role: string; content: string; isScoreCard?: boolean }[]>([]);
   const [voiceState, setVoiceState] = useState<VoiceState>('idle');
   const [status, setStatus] = useState<Status>('intro');
@@ -1472,9 +1588,13 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
 
   const [isAdmin, setIsAdmin] = useState(false);
   const [userEmail, setUserEmail] = useState<string | null>(null);
-  const [interviewStatus, setInterviewStatus] = useState<'loading' | 'not_started' | 'under_review' | 'congratulations'>('loading');
+  const [interviewStatus, setInterviewStatus] = useState<'loading' | 'not_started' | 'under_review' | 'congratulations' | 'analysis'>('loading');
+  const [analysisAttemptId, setAnalysisAttemptId] = useState<string | null>(null);
   const [activeScenario, setActiveScenario] = useState<ActiveScenario | null>(null);
   const [currentInterviewerText, setCurrentInterviewerText] = useState('');
+  const [tTSFallbackActive, setTTSFallbackActive] = useState(false);
+  type MicPermissionState = 'granted' | 'denied' | 'prompt' | 'unavailable';
+  const [micPermission, setMicPermission] = useState<MicPermissionState>('prompt');
 
   const recognitionRef = useRef<{ start(): void; stop(): void } | null>(null);
   const transcriptAtReleaseRef = useRef('');
@@ -1486,6 +1606,138 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
   const audioChunksRef = useRef<Blob[]>([]);
   const scrollViewRef = useRef<ScrollView | null>(null);
   const hasResumedRef = useRef(false);
+
+  // Alpha: Layer 1 timing and probe tracking
+  const timingRef = useRef<{
+    questionEndTime: number | null;
+    recordingStartTime: number | null;
+    recordingEndTime: number | null;
+  }>({ questionEndTime: null, recordingStartTime: null, recordingEndTime: null });
+  const lastQuestionTextRef = useRef('');
+  const responseTimingsRef = useRef<Array<{
+    question_id: string;
+    scenario: number | null;
+    question_text: string;
+    latency_ms: number;
+    duration_ms: number;
+    word_count: number;
+  }>>([]);
+  const probeLogRef = useRef<Array<{
+    scenario: number;
+    construct: string;
+    probe_fired: boolean;
+    trigger_reason: string | null;
+    pre_probe_score: number;
+    post_probe_score: number;
+    score_delta: number;
+  }>>([]);
+  const scenarioScoresRef = useRef<Record<number, ScenarioScoreResult>>({});
+  const waitingMessageIdRef = useRef<string | null>(null);
+  const currentMessagesRef = useRef(messages);
+  const statusRef = useRef(status);
+  statusRef.current = status;
+  const interviewStatusRef = useRef(interviewStatus);
+  interviewStatusRef.current = interviewStatus;
+
+  const [sessionExpired, setSessionExpired] = useState(false);
+  const [usingMemoryFallback, setUsingMemoryFallback] = useState(false);
+  type ReasoningProgress = 'generating' | 'slow' | 'very_slow' | 'done' | 'failed' | null;
+  const [reasoningProgress, setReasoningProgress] = useState<ReasoningProgress>(null);
+  const [usedPersonalExamples, setUsedPersonalExamples] = useState(false);
+  const [isWaiting, setIsWaiting] = useState(false);
+
+  useEffect(() => {
+    currentMessagesRef.current = messages;
+  }, [messages]);
+
+  useEffect(() => {
+    if (status !== 'scoring') setReasoningProgress(null);
+  }, [status]);
+
+  useEffect(() => {
+    setStorageFallbackListener(() => setUsingMemoryFallback(true));
+    return () => setStorageFallbackListener(null);
+  }, []);
+
+  useEffect(() => {
+    const w = Platform.OS === 'web' && typeof window !== 'undefined' ? window : null;
+    if (!w) return;
+    const handleUnhandledRejection = (event: PromiseRejectionEvent) => {
+      const err = event.reason;
+      event.preventDefault();
+      if (__DEV__) console.error('Unhandled rejection caught by safety net:', err);
+      const active = statusRef.current === 'active' || statusRef.current === 'scoring';
+      if (active && userId) {
+        try {
+          const msgs = currentMessagesRef.current.filter(
+            (m) => !(m as { isScoreCard?: boolean }).isScoreCard && !(m as { isWelcomeBack?: boolean }).isWelcomeBack
+          );
+          const completed = Array.from(scoredScenariosRef.current);
+          const scores: Record<number, { pillarScores: Record<string, number>; pillarConfidence: Record<string, string>; keyEvidence: Record<string, string>; scenarioName?: string }> = {};
+          [1, 2, 3].forEach((n) => {
+            const s = scenarioScoresRef.current[n];
+            if (s) scores[n] = { pillarScores: s.pillarScores, pillarConfidence: s.pillarConfidence, keyEvidence: s.keyEvidence, scenarioName: s.scenarioName };
+          });
+          saveInterviewToStorage(userId, {
+            messages: msgs,
+            scenariosCompleted: completed,
+            scenarioScores: scores,
+            currentScenario: getCurrentScenario(scoredScenariosRef.current),
+            emergencySave: true,
+            savedAt: new Date().toISOString(),
+          });
+        } catch {
+          // emergency save failed
+        }
+      }
+    };
+    w.addEventListener('unhandledrejection', handleUnhandledRejection);
+    return () => w.removeEventListener('unhandledrejection', handleUnhandledRejection);
+  }, [userId]);
+
+  const ensureValidSession = useCallback(async () => {
+    const { data: { session }, error } = await supabase.auth.getSession();
+    if (error || !session) {
+      const { error: refreshError } = await supabase.auth.refreshSession();
+      if (refreshError) throw new Error('Session could not be refreshed');
+    }
+  }, []);
+
+  useEffect(() => {
+    checkMicPermission().then(setMicPermission);
+  }, []);
+
+  useEffect(() => {
+    const {
+      data: { subscription },
+    } = supabase.auth.onAuthStateChange(async (event) => {
+      if (event === 'TOKEN_REFRESHED') {
+        if (__DEV__) console.log('Auth token refreshed');
+      }
+      if (event === 'SIGNED_OUT') {
+        const msgs = currentMessagesRef.current.filter(
+          (m) => !(m as { isScoreCard?: boolean }).isScoreCard && !(m as { isWelcomeBack?: boolean }).isWelcomeBack
+        );
+        const completed = Array.from(scoredScenariosRef.current);
+        const scores: Record<number, { pillarScores: Record<string, number>; pillarConfidence: Record<string, string>; keyEvidence: Record<string, string>; scenarioName?: string }> = {};
+        [1, 2, 3].forEach((n) => {
+          const s = scenarioScoresRef.current[n];
+          if (s) scores[n] = { pillarScores: s.pillarScores, pillarConfidence: s.pillarConfidence, keyEvidence: s.keyEvidence, scenarioName: s.scenarioName };
+        });
+        if (userId) {
+          await saveInterviewToStorage(userId, {
+            messages: msgs,
+            scenariosCompleted: completed,
+            scenarioScores: scores,
+            currentScenario: getCurrentScenario(scoredScenariosRef.current),
+            sessionExpired: true,
+          });
+        }
+        setSessionExpired(true);
+      }
+    });
+    return () => subscription.unsubscribe();
+  }, [userId]);
 
   useEffect(() => {
     const getSession = async () => {
@@ -1506,6 +1758,9 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
         .eq('id', userId)
         .maybeSingle();
 
+      // Never overwrite 'analysis' — user just completed and should see analysis page (admin and regular)
+      if (interviewStatusRef.current === 'analysis') return;
+
       if (error || !data) {
         setInterviewStatus('not_started');
         return;
@@ -1521,6 +1776,32 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
     checkInterviewStatus();
   }, [userId]);
 
+  useEffect(() => {
+    if (!userId || isAdmin) return;
+    const run = async () => {
+      const saved = await loadInterviewFromStorage(userId);
+      const payload = saved?.pendingAttemptPayload as { insert: Record<string, unknown>; update: Record<string, unknown>; attemptNum: number } | undefined;
+      if (!saved?.pendingDatabaseSave || !payload?.insert) return;
+      try {
+        await ensureValidSession();
+        const { data: insertData, error: insertErr } = await supabase.from('interview_attempts').insert(payload.insert).select('id').single();
+        if (insertErr) throw new Error(insertErr.message);
+        const update = { ...payload.update, latest_attempt_id: insertData?.id ?? null };
+        const { error: updateErr } = await supabase.from('users').update(update).eq('id', userId);
+        if (updateErr) throw new Error(updateErr.message);
+        const next = { ...saved };
+        delete next.pendingDatabaseSave;
+        delete next.saveFailedAt;
+        delete next.pendingAttemptPayload;
+        await saveInterviewToStorage(userId, next);
+      } catch (err) {
+        if (__DEV__) console.warn('Recovery save still failing:', err instanceof Error ? err.message : err);
+      }
+    };
+    run();
+  }, [userId, isAdmin, ensureValidSession]);
+
+  scenarioScoresRef.current = scenarioScores;
   useEffect(() => {
     if (!userId || isAdmin || status !== 'active' || messages.length === 0) return;
     const completed = Array.from(scoredScenariosRef.current);
@@ -1574,15 +1855,37 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
 
   const speak = useCallback(async (text: string) => {
     stopElevenLabsSpeech();
+    lastQuestionTextRef.current = text;
     setVoiceState('speaking');
     isSpeakingRef.current = true;
     try {
       await speakWithElevenLabs(text);
     } finally {
       isSpeakingRef.current = false;
+      timingRef.current.questionEndTime = Date.now();
       setVoiceState('idle');
     }
   }, []);
+
+  /** Attempts TTS; on failure shows text visually and continues (no stall). */
+  const speakTextSafe = useCallback(
+    async (text: string, options: { silent?: boolean } = {}) => {
+      const { silent = false } = options;
+      try {
+        await withRetry(() => speak(text), {
+          retries: 1,
+          baseDelay: 3000,
+          context: 'TTS',
+        });
+        setTTSFallbackActive(false);
+      } catch (err) {
+        if (__DEV__) console.warn('TTS failed, falling back to visual display:', err instanceof Error ? err.message : err);
+        if (!silent) setTTSFallbackActive(true);
+        setVoiceState('idle');
+      }
+    },
+    [speak]
+  );
 
   // ── Web: use browser SpeechRecognition (reliable result events)
   useEffect(() => {
@@ -1751,27 +2054,61 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
         headers['anthropic-version'] = '2023-06-01';
       }
       try {
-        const res = await fetch(apiUrl, {
-          method: 'POST',
-          headers,
-          body: JSON.stringify({
-            model: 'claude-sonnet-4-20250514',
-            max_tokens: 800,
-            messages: [{ role: 'user', content: buildScenarioScoringPrompt(scenarioNumber, allMessages, typeFor3) }],
-          }),
-        });
-        const data = await res.json();
-        const raw = (data.content?.[0]?.text ?? '{}').replace(/```json|```/g, '').trim();
-        const scenarioResult = JSON.parse(raw) as ScenarioScoreResult;
+        const scenarioResult = await withRetry(
+          async (): Promise<ScenarioScoreResult> => {
+            const res = await fetch(apiUrl, {
+              method: 'POST',
+              headers,
+              body: JSON.stringify({
+                model: 'claude-sonnet-4-20250514',
+                max_tokens: 800,
+                messages: [{ role: 'user', content: buildScenarioScoringPrompt(scenarioNumber, allMessages, typeFor3) }],
+              }),
+            });
+            const data = await res.json();
+            const raw = (data.content?.[0]?.text ?? '{}').replace(/```json|```/g, '').trim();
+            if (!res.ok) {
+              const e = new Error((data as { error?: { message?: string } })?.error?.message ?? `HTTP ${res.status}`);
+              (e as Error & { status?: number }).status = res.status;
+              throw e;
+            }
+            return JSON.parse(raw) as ScenarioScoreResult;
+          },
+          {
+            retries: 3,
+            baseDelay: 5000,
+            maxDelay: 30000,
+            context: `scoring scenario ${scenarioNumber}`,
+          }
+        );
         const scoreMessage = formatScoreMessage(scenarioResult);
         setScenarioScores((prev) => ({ ...prev, [scenarioNumber]: scenarioResult }));
+        if (ALPHA_MODE) {
+          const ps = scenarioResult.pillarScores ?? {};
+          const vals = Object.values(ps);
+          const postScore = vals.length ? vals.reduce((a, b) => a + b, 0) / vals.length : 0;
+          probeLogRef.current.push({
+            scenario: scenarioNumber,
+            construct: 'combined',
+            probe_fired: false,
+            trigger_reason: null,
+            pre_probe_score: 0,
+            post_probe_score: Math.round(postScore * 10) / 10,
+            score_delta: Math.round(postScore * 10) / 10,
+          });
+        }
         setMessages((prev) => [
           ...prev,
           { role: 'system', content: scoreMessage, isScoreCard: true } as { role: string; content: string; isScoreCard?: boolean },
         ]);
         saveScenarioCheckpoint(scenarioNumber, scenarioResult, allMessages, userId);
       } catch (err) {
-        if (__DEV__) console.error('Scenario scoring failed:', err);
+        if (__DEV__) console.error(`Scoring failed for scenario ${scenarioNumber}:`, err instanceof Error ? err.message : err);
+        const saved = await loadInterviewFromStorage(userId);
+        if (saved) {
+          const scoringFailed = [...(saved.scoringFailed ?? []), { scenario: scenarioNumber, failedAt: new Date().toISOString(), error: err instanceof Error ? err.message : String(err) }];
+          await saveInterviewToStorage(userId, { ...saved, scoringFailed });
+        }
       }
     },
     [userId, saveScenarioCheckpoint]
@@ -1783,6 +2120,25 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
       return;
     }
     const trimmed = spokenText.trim();
+
+    if (ALPHA_MODE && timingRef.current.recordingStartTime != null) {
+      timingRef.current.recordingEndTime = Date.now();
+      const qEnd = timingRef.current.questionEndTime ?? timingRef.current.recordingStartTime;
+      const latency = timingRef.current.recordingStartTime - qEnd;
+      const duration = (timingRef.current.recordingEndTime ?? 0) - timingRef.current.recordingStartTime;
+      const wordCount = trimmed.split(/\s+/).filter(Boolean).length;
+      const scenario = getCurrentScenario(scoredScenariosRef.current);
+      responseTimingsRef.current.push({
+        question_id: `q_${responseTimingsRef.current.length + 1}`,
+        scenario: scenario ?? null,
+        question_text: lastQuestionTextRef.current,
+        latency_ms: Math.max(0, latency),
+        duration_ms: Math.max(0, duration),
+        word_count: wordCount,
+      });
+      timingRef.current.recordingStartTime = null;
+      timingRef.current.questionEndTime = null;
+    }
 
     // Admin secret pass: skip interview and auto-approve for configured email (onboarding only)
     const isOnboardingInterview = route?.name === 'OnboardingInterview';
@@ -1841,8 +2197,15 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
     const detected = detectConstructs(trimmed);
     setTouchedConstructs((prev) => [...new Set([...prev, ...detected])]);
 
+    // Track if user shared a personal example (response to personal-opening question that isn't a decline)
+    const lastAssistant = [...newMessages].reverse().find((m) => m.role === 'assistant');
+    const lastContent = (lastAssistant?.content ?? '').toLowerCase();
+    const isPersonalOpening = /real (memory|example|situation|experience)|your own|from your (life|experience)|think of a time|can you think of|do you have (a|an) (example|memory)|share (a|something)|tell me about (a|something)/i.test(lastContent);
+    if (isPersonalOpening && !isDecline(trimmed)) setUsedPersonalExamples(true);
+
     if (!ANTHROPIC_API_KEY && !ANTHROPIC_PROXY_URL) {
-      setMessages((prev) => [...prev, { role: 'assistant', content: 'API key or proxy not set. Add EXPO_PUBLIC_ANTHROPIC_API_KEY or EXPO_PUBLIC_ANTHROPIC_PROXY_URL.' }]);
+      const fallback = randomFrom(AIRA_ERROR_MESSAGES.conversationFailed);
+      setMessages((prev) => [...prev, { role: 'assistant', content: fallback }]);
       setVoiceState('idle');
       return;
     }
@@ -1851,10 +2214,11 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
       const lastUserMsg = (newMessages[newMessages.length - 1] as { content?: string })?.content?.toLowerCase() ?? '';
       const isNoExample = /don't have|can't think|i dont|nothing comes|no example|i don't/i.test(lastUserMsg);
       const maxTok = isNoExample ? 600 : 200;
+      const closingInstruction = usedPersonalExamples ? PERSONAL_CLOSING_INSTRUCTION : SCENARIO_ONLY_CLOSING_INSTRUCTION;
       const requestBody = {
         model: 'claude-sonnet-4-20250514',
         max_tokens: maxTok,
-        system: INTERVIEWER_SYSTEM,
+        system: INTERVIEWER_SYSTEM + closingInstruction,
         messages: newMessages
           .filter((m) => m.role === 'user' || m.role === 'assistant')
           .map((m) => ({ role: m.role, content: m.content })),
@@ -1869,42 +2233,72 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
       headers['anthropic-version'] = '2023-06-01';
     }
 
-    try {
+    let data: { content?: Array<{ text?: string }>; error?: { message?: string } };
+    const makeCall = async (): Promise<typeof data> => {
       const res = await fetch(apiUrl, { method: 'POST', headers, body: JSON.stringify(requestBody) });
       const raw = await res.text();
-      let data: { content?: Array<{ text?: string }>; error?: { message?: string } };
+      let parsed: typeof data;
       try {
-        data = JSON.parse(raw);
+        parsed = JSON.parse(raw);
       } catch {
-        if (!res.ok) {
-          const errMsg = `API error ${res.status}. On web, direct API calls are often blocked (CORS). Use a backend proxy — set EXPO_PUBLIC_ANTHROPIC_PROXY_URL to your proxy URL.`;
-          setMessages((prev) => [...prev, { role: 'assistant', content: errMsg }]);
-          setVoiceState('idle');
-          return;
-        }
-        setMessages((prev) => [...prev, { role: 'assistant', content: "Couldn't parse API response. Please try again." }]);
-        setVoiceState('idle');
-        return;
+        const e = new Error('Invalid response');
+        (e as Error & { status?: number }).status = res.status;
+        throw e;
       }
-
       if (!res.ok) {
-        const msg = data?.error?.message || `API error ${res.status}`;
-        const hint = res.status === 401 ? ' Check your API key.' : res.status === 429 ? ' Rate limit — wait a moment.' : '';
-        setMessages((prev) => [...prev, { role: 'assistant', content: `${msg}.${hint}` }]);
-        setVoiceState('idle');
-        return;
+        const e = new Error(parsed?.error?.message ?? `HTTP ${res.status}`);
+        (e as Error & { status?: number }).status = res.status;
+        throw e;
       }
+      return parsed;
+    };
 
-      const text = (data.content?.[0]?.text ?? '').trim();
+    try {
+      data = await withRetry(makeCall, {
+        retries: 2,
+        baseDelay: 8000,
+        maxDelay: 20000,
+        context: 'conversation',
+        onRetry: (attempt) => {
+          if (attempt === 1) {
+            setIsWaiting(true);
+            setVoiceState('processing');
+          }
+        },
+      });
+      setIsWaiting(false);
+    } catch (err) {
+      setIsWaiting(false);
+      const fallback = randomFrom(AIRA_ERROR_MESSAGES.conversationFailed);
+      setMessages((prev) => [...prev, { role: 'assistant', content: fallback }]);
+      setVoiceState('speaking');
+      await speakTextSafe(fallback);
+      setVoiceState('idle');
+      const completed = Array.from(scoredScenariosRef.current);
+      const scenarioScoresPayload: Record<number, { pillarScores: Record<string, number>; pillarConfidence: Record<string, string>; keyEvidence: Record<string, string>; scenarioName?: string }> = {};
+      [1, 2, 3].forEach((n) => {
+        const s = scenarioScoresRef.current[n];
+        if (s) scenarioScoresPayload[n] = { pillarScores: s.pillarScores, pillarConfidence: s.pillarConfidence, keyEvidence: s.keyEvidence, scenarioName: s.scenarioName };
+      });
+      saveInterviewToStorage(userId, {
+        messages: newMessages.filter((m) => !(m as { isWaiting?: boolean }).isWaiting),
+        scenariosCompleted: completed,
+        scenarioScores: scenarioScoresPayload,
+        currentScenario: getCurrentScenario(scoredScenariosRef.current),
+      });
+      return;
+    }
+
+    const text = (data.content?.[0]?.text ?? '').trim();
 
       // Per-scenario completion token: strip token, show summary, insert score card in chat
       const scenarioMatch = text.match(/\[SCENARIO_COMPLETE:(\d)\]/);
       if (scenarioMatch) {
         const scenarioNumber = parseInt(scenarioMatch[1], 10) as 1 | 2 | 3;
-        const cleanText = text.replace(/\[SCENARIO_COMPLETE:\d\]/g, '').replace(/\[STAGE_[123]_COMPLETE\]/g, '').trim();
-        const updatedMessages = [...newMessages, { role: 'assistant', content: cleanText || 'Good, that’s helpful.' }];
+        const displayText = stripControlTokens(text) || "Good, that's helpful.";
+        const updatedMessages = [...newMessages, { role: 'assistant', content: displayText || 'Good, that’s helpful.' }];
         setMessages(updatedMessages);
-        await speak(cleanText || 'Good, that’s helpful.');
+        await speakTextSafe(displayText || 'Good, that’s helpful.');
         // Guard: only score each scenario once (prevents duplicate score cards)
         if (!scoredScenariosRef.current.has(scenarioNumber)) {
           scoredScenariosRef.current.add(scenarioNumber);
@@ -1917,14 +2311,10 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
 
       // Process INTERVIEW_COMPLETE first so final scoring runs and Stage 3 scores display immediately
       if (text.includes('[INTERVIEW_COMPLETE]')) {
-        const cleanText = text
-          .replace(/\[STAGE_[123]_COMPLETE\]/g, '')
-          .replace(/\[SCENARIO_COMPLETE:\d\]/g, '')
-          .replace('[INTERVIEW_COMPLETE]', '')
-          .trim();
-        const finalMessages = [...newMessages, { role: 'assistant', content: cleanText || 'Thank you. That was really helpful.' }];
+        const displayText = stripControlTokens(text) || 'Thank you. That was really helpful.';
+        const finalMessages = [...newMessages, { role: 'assistant', content: displayText }];
         setMessages(finalMessages);
-        await speak(cleanText || 'Thank you. That was really helpful.');
+        await speakTextSafe(displayText);
         const transcriptForScoring = finalMessages.filter((m) => m.role === 'user' || m.role === 'assistant');
         setTimeout(() => scoreInterview(transcriptForScoring), 1000);
         return;
@@ -1933,10 +2323,10 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
       const stageCompleteMatch = text.match(/\[STAGE_([123])_COMPLETE\]/);
       if (stageCompleteMatch) {
         const stageNum = parseInt(stageCompleteMatch[1], 10);
-        const cleanText = text.replace(/\[STAGE_[123]_COMPLETE\]/g, '').trim();
-        const finalMessages = [...newMessages, { role: 'assistant', content: cleanText || 'Good, that’s helpful.' }];
+        const displayText = stripControlTokens(text) || "Good, that's helpful.";
+        const finalMessages = [...newMessages, { role: 'assistant', content: displayText || 'Good, that’s helpful.' }];
         setMessages(finalMessages);
-        await speak(cleanText || 'Good, that’s helpful.');
+        await speakTextSafe(displayText || 'Good, that’s helpful.');
         try {
           const stageRes = await fetchStageScore(finalMessages);
           setStageResults((prev) => {
@@ -1965,21 +2355,13 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
         return;
       }
 
-      const aiMsg = { role: 'assistant', content: text };
+      const displayText = stripControlTokens(text);
+      const aiMsg = { role: 'assistant', content: displayText };
       setMessages([...newMessages, aiMsg]);
       const aiDetected = detectConstructs(text);
       setTouchedConstructs((prev) => [...new Set([...prev, ...aiDetected])]);
-      await speak(text);
-    } catch (err) {
-      const isNetwork = err instanceof TypeError && (err.message === 'Failed to fetch' || err.message?.includes('network'));
-      const errMsg = isNetwork || (err as Error)?.message?.toLowerCase?.().includes('fetch')
-        ? "Can't reach the API (network or CORS). If you're on web, call Anthropic from a backend and set EXPO_PUBLIC_ANTHROPIC_PROXY_URL to your proxy URL."
-        : "Something went wrong. Please try again.";
-      setMessages((prev) => [...prev, { role: 'assistant', content: errMsg }]);
-      setVoiceState('idle');
-      await speak(errMsg);
-    }
-  }, [messages, speak, route?.name, userId, navigation, queryClient, profile?.name, fetchStageScore, scoreScenario]);
+      await speakTextSafe(displayText);
+  }, [messages, speakTextSafe, route?.name, userId, navigation, queryClient, profile?.name, fetchStageScore, scoreScenario, usedPersonalExamples]);
 
   const handlePressStart = useCallback(async () => {
     if (voiceState !== 'idle') return;
@@ -1987,10 +2369,15 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
     stopElevenLabsSpeech();
     setCurrentTranscript('');
     transcriptAtReleaseRef.current = '';
+    const permission = await checkMicPermission();
+    setMicPermission(permission);
+    if (permission === 'denied') return;
+    timingRef.current.recordingStartTime = Date.now();
     setVoiceState('listening');
     if (useWhisperOnWeb && typeof navigator !== 'undefined' && navigator.mediaDevices?.getUserMedia) {
       try {
         const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+        setMicPermission('granted');
         mediaStreamRef.current = stream;
         audioChunksRef.current = [];
         const mime = MediaRecorder.isTypeSupported('audio/webm;codecs=opus') ? 'audio/webm;codecs=opus' : 'audio/webm';
@@ -1999,6 +2386,8 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
         recorder.ondataavailable = (e) => { if (e.data.size > 0) audioChunksRef.current.push(e.data); };
         recorder.start(100);
       } catch (err) {
+        const name = err instanceof Error ? err.name : '';
+        if (name === 'NotAllowedError' || name === 'PermissionDeniedError') setMicPermission('denied');
         setMicError('Microphone access was denied or unavailable.');
         setVoiceState('idle');
       }
@@ -2009,10 +2398,60 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
     } else {
       nativeTranscriptRef.current = { final: '', interim: '' };
       ExpoSpeechRecognitionModule.requestPermissionsAsync().then((r) => {
+        setMicPermission(r.granted ? 'granted' : 'denied');
         if (r.granted) ExpoSpeechRecognitionModule.start({ lang: 'en-US', interimResults: true, continuous: true });
       });
     }
   }, [voiceState, useWhisperOnWeb]);
+
+  const handleRecordingError = useCallback(
+    (err: Error) => {
+      if (__DEV__) console.error('Recording error:', err.message);
+      setVoiceState('idle');
+      const msg = randomFrom(AIRA_ERROR_MESSAGES.recordingOrTranscriptionRetry);
+      setMessages((prev) => [
+        ...prev,
+        { role: 'assistant', content: msg },
+      ]);
+      speakTextSafe(msg).catch(() => {});
+    },
+    [speakTextSafe]
+  );
+
+  /** Transcribe audio; on failure or empty result, Aira asks to repeat and returns null. */
+  const transcribeSafe = useCallback(
+    async (audioBlob: Blob): Promise<string | null> => {
+      try {
+        const transcript = await withRetry(
+          async () => {
+            const form = new FormData();
+            form.append('file', audioBlob, 'recording.webm');
+            form.append('model', 'whisper-1');
+            const transcriptUrl = OPENAI_WHISPER_PROXY_URL || 'https://api.openai.com/v1/audio/transcriptions';
+            const headers: Record<string, string> = {};
+            if (!OPENAI_WHISPER_PROXY_URL) headers.Authorization = `Bearer ${OPENAI_API_KEY}`;
+            const res = await fetch(transcriptUrl, { method: 'POST', headers, body: form });
+            if (!res.ok) throw new Error(await res.text());
+            const data = (await res.json()) as { text?: string };
+            const text = (data.text ?? '').trim();
+            if (text.length < 2) throw new Error('Empty transcription result');
+            return text;
+          },
+          { retries: 2, baseDelay: 4000, context: 'transcription' }
+        );
+        return transcript;
+      } catch (err) {
+        if (__DEV__) console.error('Transcription failed:', err instanceof Error ? err.message : err);
+        const msg = randomFrom(AIRA_ERROR_MESSAGES.recordingOrTranscriptionRetry);
+        setMessages((prev) => [...prev, { role: 'assistant', content: msg }]);
+        setVoiceState('speaking');
+        await speakTextSafe(msg).catch(() => {});
+        setVoiceState('idle');
+        return null;
+      }
+    },
+    [speakTextSafe]
+  );
 
   const handleSendTyped = useCallback(() => {
     const text = typedAnswer.trim();
@@ -2039,47 +2478,17 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
       const chunks = audioChunksRef.current;
       audioChunksRef.current = [];
       if (chunks.length === 0) {
-        setMicWarning('No audio recorded. Try again.');
-        setVoiceState('idle');
+        handleRecordingError(new Error('No audio chunks'));
         return;
       }
-      try {
-        const blob = new Blob(chunks, { type: 'audio/webm' });
-        const form = new FormData();
-        form.append('file', blob, 'recording.webm');
-        form.append('model', 'whisper-1');
-        const transcriptUrl = OPENAI_WHISPER_PROXY_URL || 'https://api.openai.com/v1/audio/transcriptions';
-        const headers: Record<string, string> = { };
-        if (!OPENAI_WHISPER_PROXY_URL) headers.Authorization = `Bearer ${OPENAI_API_KEY}`;
-        const res = await fetch(transcriptUrl, {
-          method: 'POST',
-          headers,
-          body: form,
-        });
-        if (!res.ok) {
-          const err = await res.text();
-          setMicWarning(res.status === 401 ? 'Invalid OpenAI API key.' : `Transcription failed: ${res.status}`);
-          setVoiceState('idle');
-          return;
-        }
-        const data = (await res.json()) as { text?: string };
-        const text = (data.text ?? '').trim();
-        if (text) processUserSpeech(text);
-        else {
-          setMicWarning('No speech detected. Try again.');
-          setVoiceState('idle');
-        }
-      } catch (err) {
-        const isCorsOrNetwork =
-          err instanceof TypeError ||
-          (err instanceof Error && (err.message === 'Failed to fetch' || /network|cors/i.test(err.message)));
-        setMicWarning(
-          isCorsOrNetwork && Platform.OS === 'web'
-            ? "Transcription can't be reached from this browser. Use Chrome for built-in speech recognition, or set EXPO_PUBLIC_OPENAI_WHISPER_PROXY_URL to a backend proxy."
-            : 'Connection problem. Check your internet and try again.'
-        );
-        setVoiceState('idle');
+      const blob = new Blob(chunks, { type: 'audio/webm' });
+      if (blob.size < 1000) {
+        handleRecordingError(new Error('Empty recording'));
+        return;
       }
+      const userText = await transcribeSafe(blob);
+      if (!userText) return;
+      processUserSpeech(userText);
       return;
     }
     if (Platform.OS === 'web' && recognitionRef.current) {
@@ -2092,7 +2501,7 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
       const text = transcriptAtReleaseRef.current?.trim() ?? currentTranscript.trim();
       processUserSpeech(text);
     }, 400);
-  }, [voiceState, currentTranscript, processUserSpeech, useWhisperOnWeb]);
+  }, [voiceState, currentTranscript, processUserSpeech, useWhisperOnWeb, handleRecordingError, transcribeSafe]);
 
   const handleResume = useCallback(
     async (saved: NonNullable<Awaited<ReturnType<typeof loadInterviewFromStorage>>>) => {
@@ -2165,7 +2574,7 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
         : "Welcome back. Let's pick up where we left off.";
       const welcomeMsg = { role: 'assistant', content: welcomeBack, isWelcomeBack: true };
       setMessages([...fullMessages, welcomeMsg]);
-      setTimeout(() => speak(welcomeBack), 500);
+      setTimeout(() => speakTextSafe(welcomeBack), 500);
 
       setStatus('active');
     },
@@ -2197,13 +2606,13 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
     setStatus('active');
     setVoiceState('processing');
     if (!ANTHROPIC_API_KEY && !ANTHROPIC_PROXY_URL) {
-      setMessages([{ role: 'assistant', content: 'API key or proxy not set. Add EXPO_PUBLIC_ANTHROPIC_API_KEY or EXPO_PUBLIC_ANTHROPIC_PROXY_URL.' }]);
+      setMessages([{ role: 'assistant', content: randomFrom(AIRA_ERROR_MESSAGES.conversationFailed) }]);
       setVoiceState('idle');
       return;
     }
     const openingLine = "Hi, I'm Aira, welcome to Amoraea, what can I call you?";
     setMessages([{ role: 'assistant', content: openingLine }]);
-    await speak(openingLine);
+    await speakTextSafe(openingLine);
   }, [speak, isAdmin, userId]);
 
   const saveInterviewResults = useCallback(
@@ -2240,7 +2649,7 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
         narrativeCoherence: 'moderate',
         behavioralSpecificity: 'moderate',
         notableInconsistencies: [],
-        interviewSummary: 'Interview completed. Set EXPO_PUBLIC_ANTHROPIC_API_KEY or proxy for scoring.',
+        interviewSummary: 'Interview completed. Scoring was unavailable.',
         gateResult: computeGateResult({ '1': 6, '3': 7, '5': 7, '6': 5 }),
       };
       setResults(fallbackResults);
@@ -2254,7 +2663,7 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
         queryClient.invalidateQueries({ queryKey: ['profile', userId] });
       }
       await saveInterviewResults(fallbackResults, fallbackResults.gateResult!, userId);
-      if (!isAdmin) setInterviewStatus('under_review');
+      setInterviewStatus('under_review');
       setStatus('results');
       return;
     }
@@ -2292,8 +2701,136 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
         });
         queryClient.invalidateQueries({ queryKey: ['profile', userId] });
       }
-      await saveInterviewResults(parsed, gateResult, userId);
-      if (!isAdmin) setInterviewStatus('under_review');
+      if (ALPHA_MODE && userId) {
+        let alphaSaveOk = false;
+        let insertPayload: Record<string, unknown> | null = null;
+        let updatePayload: Record<string, unknown> | null = null;
+        let attemptNum = 1;
+        try {
+          await ensureValidSession();
+          const s1 = scenarioScoresRef.current[1]?.pillarScores;
+          const s2 = scenarioScoresRef.current[2]?.pillarScores;
+          const s3 = scenarioScoresRef.current[3]?.pillarScores;
+          const scoreConsistency = calculateScoreConsistency(s1, s2, s3);
+          const pillarScores = parsed.pillarScores ?? {};
+          const constructAsymmetry = calculateConstructAsymmetry(pillarScores);
+          const scenarioBoundaries = buildScenarioBoundaries(
+            finalMessages,
+            Array.from(scoredScenariosRef.current)
+          );
+          const languageMarkers = analyzeLanguageMarkers(finalMessages, scenarioBoundaries);
+          setReasoningProgress('generating');
+          const slowTimer = setTimeout(() => setReasoningProgress('slow'), 10000);
+          const verySlowTimer = setTimeout(() => setReasoningProgress('very_slow'), 30000);
+          const reasoning = await generateAIReasoningSafe(
+            pillarScores,
+            {
+              1: scenarioScoresRef.current[1],
+              2: scenarioScoresRef.current[2],
+              3: scenarioScoresRef.current[3],
+            },
+            finalMessages,
+            gateResult.weightedScore,
+            gateResult.pass
+          );
+          setReasoningProgress(reasoning._generationFailed ? 'failed' : 'done');
+          clearTimeout(slowTimer);
+          clearTimeout(verySlowTimer);
+          const { data: userRow } = await supabase
+            .from('users')
+            .select('interview_attempt_count')
+            .eq('id', userId)
+            .single();
+          attemptNum = (userRow?.interview_attempt_count ?? 0) || 1;
+          insertPayload = {
+            user_id: userId,
+            attempt_number: attemptNum,
+            completed_at: new Date().toISOString(),
+            weighted_score: gateResult.weightedScore,
+            passed: gateResult.pass,
+            pillar_scores: pillarScores,
+            scenario_1_scores: scenarioScoresRef.current[1]
+              ? {
+                  pillarScores: scenarioScoresRef.current[1].pillarScores,
+                  pillarConfidence: scenarioScoresRef.current[1].pillarConfidence,
+                  keyEvidence: scenarioScoresRef.current[1].keyEvidence,
+                  scenarioName: scenarioScoresRef.current[1].scenarioName,
+                }
+              : null,
+            scenario_2_scores: scenarioScoresRef.current[2]
+              ? {
+                  pillarScores: scenarioScoresRef.current[2].pillarScores,
+                  pillarConfidence: scenarioScoresRef.current[2].pillarConfidence,
+                  keyEvidence: scenarioScoresRef.current[2].keyEvidence,
+                  scenarioName: scenarioScoresRef.current[2].scenarioName,
+                }
+              : null,
+            scenario_3_scores: scenarioScoresRef.current[3]
+              ? {
+                  pillarScores: scenarioScoresRef.current[3].pillarScores,
+                  pillarConfidence: scenarioScoresRef.current[3].pillarConfidence,
+                  keyEvidence: scenarioScoresRef.current[3].keyEvidence,
+                  scenarioName: scenarioScoresRef.current[3].scenarioName,
+                }
+              : null,
+            transcript: finalMessages,
+            response_timings: responseTimingsRef.current,
+            probe_log: probeLogRef.current,
+            score_consistency: scoreConsistency,
+            construct_asymmetry: constructAsymmetry,
+            language_markers: languageMarkers,
+            ai_reasoning: reasoning,
+          };
+          updatePayload = {
+            interview_completed: true,
+            interview_passed: gateResult.pass,
+            interview_weighted_score: gateResult.weightedScore,
+            interview_completed_at: new Date().toISOString(),
+            interview_attempt_count: attemptNum,
+            latest_attempt_id: null as string | null,
+          };
+          const { data: insertData } = await withRetry(
+            async () => {
+              const result = await supabase.from('interview_attempts').insert(insertPayload).select('id').single();
+              if (result.error) throw new Error(result.error.message);
+              return result;
+            },
+            { retries: 3, baseDelay: 3000, maxDelay: 15000, context: 'database interview_attempts insert' }
+          );
+          (updatePayload as Record<string, unknown>).latest_attempt_id = insertData?.id ?? null;
+          await withRetry(
+            async () => {
+              const { error } = await supabase.from('users').update(updatePayload).eq('id', userId);
+              if (error) throw new Error(error.message);
+            },
+            { retries: 3, baseDelay: 3000, maxDelay: 15000, context: 'database users update' }
+          );
+          await clearInterviewFromStorage(userId);
+          setAnalysisAttemptId(insertData?.id ?? null);
+          setInterviewStatus('analysis');
+          alphaSaveOk = true;
+        } catch (err) {
+          if (__DEV__) console.error('Alpha save failed:', err);
+          const saved = await loadInterviewFromStorage(userId);
+          if (saved && insertPayload != null && updatePayload != null) {
+            await saveInterviewToStorage(userId, {
+              ...saved,
+              pendingDatabaseSave: true,
+              saveFailedAt: new Date().toISOString(),
+              pendingAttemptPayload: { insert: insertPayload, update: { ...updatePayload, latest_attempt_id: null }, attemptNum },
+            });
+          }
+          await saveInterviewResults(parsed, gateResult, userId);
+          setInterviewStatus('under_review');
+        }
+        if (!alphaSaveOk) {
+          setStatus('results');
+          return;
+        }
+      } else {
+        await saveInterviewResults(parsed, gateResult, userId);
+        setInterviewStatus('under_review');
+      }
       setStatus('results');
     } catch {
       const fallbackResults: InterviewResults = {
@@ -2316,12 +2853,67 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
         queryClient.invalidateQueries({ queryKey: ['profile', userId] });
       }
       await saveInterviewResults(fallbackResults, fallbackResults.gateResult!, userId);
-      if (!isAdmin) setInterviewStatus('under_review');
+      setInterviewStatus('under_review');
       setStatus('results');
     }
-  }, [typologyContext, route.name, userId, navigation, queryClient, isAdmin, saveInterviewResults]);
+  }, [typologyContext, route.name, userId, navigation, queryClient, saveInterviewResults, ensureValidSession]);
+
+  const handleRetake = useCallback(async () => {
+    if (!userId) return;
+    const { data: userData } = await supabase
+      .from('users')
+      .select('interview_attempt_count')
+      .eq('id', userId)
+      .single();
+    const nextAttemptNumber = (userData?.interview_attempt_count ?? 0) + 1;
+    await supabase
+      .from('users')
+      .update({
+        interview_completed: false,
+        interview_passed: null,
+        interview_weighted_score: null,
+        interview_completed_at: null,
+        interview_last_checkpoint: 0,
+        interview_attempt_count: nextAttemptNumber,
+        latest_attempt_id: null,
+      })
+      .eq('id', userId);
+    await clearInterviewFromStorage(userId);
+    setMessages([]);
+    setScenarioScores({});
+    scoredScenariosRef.current = new Set();
+    setStatus('intro');
+    setResults(null);
+    responseTimingsRef.current = [];
+    probeLogRef.current = [];
+    setAnalysisAttemptId(null);
+    setInterviewStatus('not_started');
+  }, [userId]);
 
   // ── RENDER ──
+  if (sessionExpired) {
+    return (
+      <View style={styles.sessionExpiredOverlay}>
+        <Text style={styles.sessionExpiredTitle}>Your session timed out.</Text>
+        <Text style={styles.sessionExpiredBody}>
+          Your progress has been saved. Sign back in and your interview will continue from where you left off.
+        </Text>
+        <Pressable
+          onPress={async () => {
+            const { error } = await supabase.auth.refreshSession();
+            if (!error) setSessionExpired(false);
+            else {
+              await supabase.auth.signOut();
+              navigation.replace('Login');
+            }
+          }}
+          style={styles.sessionExpiredButton}
+        >
+          <Text style={styles.sessionExpiredButtonLabel}>Continue →</Text>
+        </Pressable>
+      </View>
+    );
+  }
   if (interviewStatus === 'loading') {
     return (
       <SafeAreaContainer>
@@ -2329,6 +2921,14 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
           <Text style={[styles.introNote, { letterSpacing: 2, textTransform: 'uppercase' }]}>Loading...</Text>
         </View>
       </SafeAreaContainer>
+    );
+  }
+  if (ALPHA_MODE && interviewStatus === 'analysis' && analysisAttemptId) {
+    return (
+      <InterviewAnalysisScreen
+        attemptId={analysisAttemptId}
+        onRetake={handleRetake}
+      />
     );
   }
   if (interviewStatus === 'under_review') {
@@ -2414,6 +3014,9 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
               flameState={voiceState}
               activeScenario={activeScenario}
               interviewerText={currentInterviewerText}
+              ttsFallbackActive={tTSFallbackActive}
+              micPermissionDenied={micPermission === 'denied'}
+              isWaiting={isWaiting}
               onPressStart={handlePressStart}
               onPressEnd={handlePressEnd}
               voiceState={voiceState}
@@ -2482,7 +3085,7 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
             if (isScoreCard && !isAdmin) return null;
             if (msg.role === 'user' && !isAdmin) return null;
             const displayContent = typeof msg.content === 'string'
-              ? msg.content.replace(/\[INTERVIEW_COMPLETE\]/g, '').replace(/\[SCENARIO_COMPLETE:\d\]/g, '').replace(/\[STAGE_[123]_COMPLETE\]/g, '').trim()
+              ? stripControlTokens(msg.content)
               : msg.content;
             if (isScoreCard) {
               return (
@@ -2491,13 +3094,20 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
                 </View>
               );
             }
+            const isWaiting = (msg as { isWaiting?: boolean }).isWaiting;
             return (
-              <View key={i} style={[styles.msgRow, msg.role === 'user' && styles.msgRowUser]}>
+              <View key={(msg as { id?: string }).id ?? i} style={[styles.msgRow, msg.role === 'user' && styles.msgRowUser]}>
                 <Text style={styles.msgRole}>{msg.role === 'assistant' ? '◆ Interviewer' : 'You'}</Text>
-                <Text style={styles.msgContent}>{displayContent}</Text>
+                <Text style={[styles.msgContent, isWaiting && styles.msgContentWaiting]}>{displayContent}</Text>
               </View>
             );
           })}
+          {isAdmin && isWaiting && (
+            <View style={styles.msgRowWaiting}>
+              <Text style={styles.msgRole}>◆ Interviewer</Text>
+              <Text style={styles.msgContentWaiting}>Aira is thinking...</Text>
+            </View>
+          )}
           {currentTranscript && voiceState === 'listening' && (
             <View style={styles.msgRow}>
               <Text style={[styles.msgRole, { color: colors.error }]}>● You (speaking…)</Text>
@@ -2509,7 +3119,37 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
         {status === 'scoring' && (
           <View style={styles.scoringIndicator}>
             <Text style={styles.scoringIndicatorDot}>◆</Text>
-            <Text style={styles.scoringIndicatorText}>Reading your interview...</Text>
+            <View style={{ flex: 1 }}>
+              <Text style={styles.scoringIndicatorText}>
+                {reasoningProgress === 'slow'
+                  ? 'This is taking a moment...'
+                  : reasoningProgress === 'very_slow'
+                    ? 'Almost there...'
+                    : reasoningProgress === 'failed'
+                      ? 'Something went wrong.'
+                      : 'Preparing your analysis...'}
+              </Text>
+              {(reasoningProgress === 'slow' || reasoningProgress === 'very_slow') && (
+                <Text style={styles.scoringIndicatorSub}>
+                  {reasoningProgress === 'very_slow'
+                    ? 'Detailed analyses take a little longer.'
+                    : 'Your transcript is being read carefully.'}
+                </Text>
+              )}
+              {reasoningProgress === 'failed' && (
+                <>
+                  <Text style={styles.scoringIndicatorSub}>
+                    Your scores have been saved. The detailed analysis may not be available.
+                  </Text>
+                  <Pressable
+                    onPress={() => setStatus('results')}
+                    style={styles.scoringViewScoresButton}
+                  >
+                    <Text style={styles.scoringViewScoresButtonLabel}>View Scores →</Text>
+                  </Pressable>
+                </>
+              )}
+            </View>
           </View>
         )}
 
@@ -2646,12 +3286,89 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
           </>
         )}
       </View>
+      {usingMemoryFallback ? (
+        <View style={styles.memoryFallbackBanner} pointerEvents="none">
+          <Text style={styles.memoryFallbackBannerText}>⚠ Low storage — progress saved to server only</Text>
+        </View>
+      ) : null}
     </SafeAreaContainer>
   );
 };
 
 const styles = StyleSheet.create({
   container: { flex: 1 },
+  sessionExpiredOverlay: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    zIndex: 9999,
+    backgroundColor: 'rgba(5,6,13,0.96)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: 40,
+  },
+  sessionExpiredTitle: {
+    fontFamily: Platform.OS === 'web' ? "'Cormorant Garamond', serif" : undefined,
+    fontSize: 24,
+    fontWeight: '300',
+    color: '#C8E4FF',
+    marginBottom: 14,
+    textAlign: 'center',
+  },
+  sessionExpiredBody: {
+    fontFamily: Platform.OS === 'web' ? "'Jost', sans-serif" : undefined,
+    fontSize: 14,
+    fontWeight: '300',
+    color: '#7A9ABE',
+    lineHeight: 24,
+    maxWidth: 320,
+    marginBottom: 32,
+    textAlign: 'center',
+  },
+  sessionExpiredButton: {
+    paddingVertical: 14,
+    paddingHorizontal: 32,
+    borderRadius: 10,
+    backgroundColor: colors.primary,
+    shadowColor: '#1E6FD9',
+    shadowOffset: { width: 0, height: 8 },
+    shadowOpacity: 0.25,
+    shadowRadius: 30,
+    elevation: 8,
+  },
+  sessionExpiredButtonLabel: {
+    fontFamily: Platform.OS === 'web' ? "'Jost', sans-serif" : undefined,
+    fontSize: 11,
+    fontWeight: '400',
+    letterSpacing: 2.5,
+    textTransform: 'uppercase',
+    color: '#EEF6FF',
+  },
+  memoryFallbackBanner: {
+    position: 'absolute',
+    bottom: 100,
+    left: '50%',
+    marginLeft: -140,
+    width: 280,
+    backgroundColor: 'rgba(13,17,32,0.95)',
+    borderWidth: 1,
+    borderColor: 'rgba(82,142,220,0.2)',
+    borderRadius: 10,
+    paddingVertical: 10,
+    paddingHorizontal: 18,
+    zIndex: 500,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  memoryFallbackBannerText: {
+    fontFamily: Platform.OS === 'web' ? "'Jost', sans-serif" : undefined,
+    fontSize: 11,
+    fontWeight: '300',
+    color: '#7A9ABE',
+    letterSpacing: 0.5,
+  },
   introContent: { padding: spacing.lg, paddingTop: spacing.xxl },
   ariaBadge: { alignItems: 'center', marginBottom: spacing.xl },
   ariaName: { fontSize: 26, fontWeight: '700', color: colors.text, marginTop: spacing.sm },
@@ -2676,6 +3393,27 @@ const styles = StyleSheet.create({
   },
   scoringIndicatorDot: { fontSize: 11, color: colors.primary, letterSpacing: 2 },
   scoringIndicatorText: { fontSize: 11, color: colors.textSecondary, letterSpacing: 1 },
+  scoringIndicatorSub: {
+    fontSize: 11,
+    color: colors.textSecondary,
+    marginTop: 4,
+    opacity: 0.9,
+  },
+  scoringViewScoresButton: {
+    marginTop: 12,
+    paddingVertical: 12,
+    paddingHorizontal: 28,
+    borderRadius: 10,
+    backgroundColor: colors.primary,
+    alignSelf: 'flex-start',
+  },
+  scoringViewScoresButtonLabel: {
+    fontSize: 11,
+    fontWeight: '400',
+    letterSpacing: 2,
+    textTransform: 'uppercase',
+    color: '#EEF6FF',
+  },
   resultsPanel: {
     borderTopWidth: 2,
     borderTopColor: colors.primary,
@@ -2757,9 +3495,16 @@ const styles = StyleSheet.create({
   transcriptScroll: { flex: 1 },
   transcriptContent: { padding: spacing.lg, paddingBottom: spacing.xl },
   msgRow: { marginBottom: spacing.lg },
+  msgRowWaiting: {
+    marginBottom: spacing.lg,
+    paddingVertical: 8,
+    borderBottomWidth: 1,
+    borderBottomColor: 'rgba(82,142,220,0.08)',
+  },
   msgRowUser: { alignItems: 'flex-end' },
   msgRole: { fontSize: 10, color: colors.primary, letterSpacing: 1, marginBottom: 4 },
   msgContent: { fontSize: 15, color: colors.text, lineHeight: 22, borderLeftWidth: 2, borderLeftColor: colors.border, paddingLeft: spacing.sm },
+  msgContentWaiting: { color: '#3D5470', fontStyle: 'italic' },
   scoreCard: {
     marginVertical: spacing.md,
     padding: spacing.md,
