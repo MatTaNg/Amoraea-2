@@ -159,7 +159,7 @@ export const UserInterviewLayout: React.FC<UserInterviewLayoutProps> = ({
 
         {/* FlameOrb — existing component, no changes */}
         <View style={styles.flameSection}>
-          <FlameOrb state={flameState} />
+          <FlameOrb state={flameState} size={180} />
         </View>
 
         {/* Bottom section */}

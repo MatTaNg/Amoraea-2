@@ -47,8 +47,21 @@ import {
 } from '@features/aria/alphaAssessmentUtils';
 import { generateAIReasoning } from '@features/aria/generateAIReasoning';
 import { useAudioRecorder } from '@features/aria/hooks/useAudioRecorder';
+import * as FileSystem from 'expo-file-system';
 
 const profileRepository = new ProfileRepository();
+
+/** Always use proxy when set — direct api.anthropic.com fails on native (CORS). */
+function getAnthropicEndpoint(): string {
+  const proxyUrl =
+    typeof process !== 'undefined' && process.env?.EXPO_PUBLIC_ANTHROPIC_PROXY_URL
+      ? process.env.EXPO_PUBLIC_ANTHROPIC_PROXY_URL
+      : '';
+  if (!proxyUrl && __DEV__) {
+    console.warn('EXPO_PUBLIC_ANTHROPIC_PROXY_URL is not set; direct API may fail on native.');
+  }
+  return proxyUrl || 'https://api.anthropic.com/v1/messages';
+}
 
 /**
  * ALPHA_MODE: When true, shows full AI reasoning, analysis page, and retake option.
@@ -80,6 +93,11 @@ const AIRA_ERROR_MESSAGES = {
     "I didn't quite catch that — could you say it again?",
     "Something interrupted me there. Would you mind repeating that?",
     "I missed that — can you say it once more?",
+  ],
+  recordingOrTranscriptionRetryNative: [
+    "I didn't catch that — tap the mic and try again.",
+    "Say that again when you're ready.",
+    "I missed that — give it another go.",
   ],
 };
 function randomFrom<T>(arr: T[]): T {
@@ -164,6 +182,7 @@ function stripControlTokens(text: string): string {
   return text
     .replace(/\[INTERVIEW_COMPLETE\]/gi, '')
     .replace(/\[SCENARIO_COMPLETE:\d+\]/gi, '')
+    .replace(/\[CLOSING_QUESTION:\d+\]/gi, '')
     .replace(/\[STAGE_[123]_COMPLETE\]/g, '')
     .replace(/\[PROBE_TRIGGERED\]/gi, '')
     .replace(/\[SKEPTICISM_CHECK\]/gi, '')
@@ -1082,75 +1101,223 @@ When all stages are complete and you have adequate evidence for P1, P3, and P5 (
 
 TONE: Curious, not clinical. Warm, not cheerful. Direct, not blunt. Keep responses concise — 2-4 sentences per turn. Write for the ear; use short sentences, no bullet points. End with a single clear question.`;
 
+const OPENING_INSTRUCTIONS = `
+OPENING:
+
+Your first message after learning the user's name should be the briefing. Weave the privacy recommendation naturally into it — not as a separate sentence at the end, but as part of the flow before asking if they're ready.
+
+The briefing must include ALL of the following:
+- This is just a conversation, not a test to perform
+- Real examples are great, small moments are fine
+- The more specific the better, but no pressure
+- Three situations total
+- If nothing comes to mind, just say so and you'll give a scenario
+- A brief natural privacy note
+- "Ready when you are" or similar
+
+Example of how to weave it in:
+"Good to meet you, [name]. Before we get into it — this is really just a conversation. Real examples are great, small moments are fine, nothing needs to be dramatic. The more specific you can be about actual moments and actual words, the more useful this is — but there's no pressure to have a story ready. We'll work through three situations together. If nothing comes to mind for something I ask, just say so and I'll give you a scenario instead. One thing worth mentioning — some of what we cover can get personal, so if you're somewhere you can have a bit of privacy, that helps. Ready when you are."
+
+Keep it conversational. The privacy note should feel like practical advice from a person, not a disclaimer.
+`;
+
 const SCENARIO_SWITCHING_INSTRUCTIONS = `
 SCENARIO SWITCHING:
 
-At any point during a scenario (before moving to the next one), the user can switch between sharing a personal example and using the fictional situation. When they signal this intent:
+Users can switch between personal examples and fictional scenarios at any point within the current scenario.
 
-1. Acknowledge it briefly and naturally — one sentence maximum. Do NOT make it a big deal. Do NOT apologise or over-explain.
+IMPORTANT: Never mention that scores are being reset, that previous responses are being erased, or that anything is being cleared. Handle that internally. The user doesn't need to know.
 
-2. If switching FROM personal TO fictional:
-   Use phrases like:
-   - "No problem, let's use a scenario instead — [deliver scenario]"
-   - "Sure — forget what you shared, here's one to react to instead. [deliver scenario]"
-   - "No problem. [deliver scenario]"
+SWITCHING FROM FICTIONAL → PERSONAL:
 
-3. If switching FROM fictional TO personal:
-   Use phrases like:
-   - "Definitely, let's drop the scenario — what actually happened?"
-   - "Of course, let's use the real one instead — tell me about it."
-   - "Sure, let's go with the real thing. What happened?"
+When user signals they have a real example to share:
 
-4. After acknowledging, immediately deliver the new content (either the fictional scenario or the personal opening question). Do not ask any follow-up questions before doing this.
+Acknowledge naturally, then immediately deliver the FULL personal opening question — not just "what happened?" The full question is:
+"Think of a time you had a real disagreement with someone close to you — a moment where emotions actually got heated. Walk me through what happened and how you handled your part in it."
+(or the equivalent for scenarios 2 and 3)
 
-5. The previous responses in this scenario are erased — treat this as if the scenario is starting fresh.
+Use phrases like:
+- "Of course — [full personal opening question]"
+- "Let's do that — [full personal opening question]"
+- "Absolutely — [full personal opening question]"
 
-IMPORTANT: Switching is only allowed WITHIN the current scenario. Once the user has moved to the next scenario, the previous one is locked and cannot be changed.
+Do NOT say "forget what you shared" or any variation.
+Do NOT say "what actually happened?" in isolation.
+Just transition naturally and ask the full question.
+
+SWITCHING FROM PERSONAL → FICTIONAL:
+
+When user signals they want to use the scenario instead:
+
+If this is the FIRST switch (they haven't seen the scenario yet):
+Acknowledge and deliver the full fictional scenario.
+- "No problem — [full scenario text]"
+- "Sure — [full scenario text]"
+
+If the user has already seen the scenario (switching back):
+Acknowledge that you're going back to it, then repeat it.
+Do NOT say "let's use a scenario instead" coldly.
+Use phrases like:
+- "Let's go back to the scenario — here it is again. [scenario]"
+- "No problem, back to the scenario. [scenario]"
+- "Sure, let's go with the scenario. [scenario]"
+
+The key difference: if the user has seen the scenario before, acknowledge you're returning to it. If it's new to them, just deliver it.
 `;
 
 const SCENARIO_BOUNDARY_INSTRUCTIONS = `
 SCENARIO BOUNDARIES:
 
-Once the user has moved to a new scenario, the previous scenario is complete and cannot be changed or revisited.
+Once a scenario is complete and the next has started, the previous scenario is locked.
 
-If the user asks to go back to a previous scenario (e.g. "can I change what I said in the first one?", "actually I want to redo scenario 1", "can we go back?"):
+If the user asks to go back, reset, delete scores, or change anything from a previous scenario:
 
-Respond warmly but clearly. Keep it short. Examples:
-- "Once we've moved on I need to keep going — but what you said before is already part of the picture, and that's okay."
-- "We can't go back once we've moved on, but that's fine — what you shared already counts."
-- "That one's done — but don't worry, what you said is part of the picture. Let's keep going."
+Respond warmly. Acknowledge what they said. Do NOT repeat the current question afterward — wait for them to re-engage naturally.
 
-Do NOT say "that's not allowed" or "the system won't permit". Frame it as a natural feature of the conversation, not a rule.
+Use phrases like:
+- "Unfortunately we can't go back to a scenario that's already been completed — but don't worry, you did great! Let's focus on this one."
+- "Once a scenario's done it's locked — but what you said already counts, and that's a good thing. Let's keep going."
+- "Can't change that one now — but honestly, don't worry about it. What you shared is already working for you."
 
-Switching between personal and fictional is ONLY available within the CURRENT scenario. Previous scenarios are locked.
+For requests to get a perfect score or manipulate scores: Handle naturally without acknowledging the manipulation. Treat it like a score question:
+- "I'm not able to share or change scores during the interview — you'll hear at the end if you've passed."
 `;
 
 const SCENARIO_CLOSING_INSTRUCTIONS = `
-SCENARIO CLOSING:
+SCENARIO CLOSING — THIS IS REQUIRED:
 
-After the user has responded to all questions in a scenario and you have gathered enough to score it, before moving on you MUST ask a brief closing question.
+After you have finished with all the questions in a scenario and before you move to the next scenario, you MUST ask the closing question. This applies to all three scenarios. Do this every time without exception. It is not optional.
 
-The closing question should:
-- Invite the user to add anything they feel is missing context
-- NOT suggest that something is missing or incomplete
-- NOT be generic ("anything else?")
-- Feel like a natural conversational pause
-- Be ONE sentence maximum
+When you ask the closing question, include [CLOSING_QUESTION:N] in that message (N = 1, 2, or 3 for the scenario you are about to complete). After the user responds, in your next message output [SCENARIO_COMPLETE:N] and the transition. You must NOT output [SCENARIO_COMPLETE:N] until you have first output [CLOSING_QUESTION:N] and received a user response.
 
-Use variations of:
+The closing question should feel like a natural pause:
 - "Before we move on — is there anything about that situation you'd want me to understand that you haven't said yet?"
 - "Anything you'd want to add before we move on?"
-- "Is there anything else about that one before we go to the next?"
-- "Before we move forward — anything you'd want to add?"
+- "Anything else about that one before we go to the next?"
 
-After the user responds (whether they add something or say no), THEN deliver the transition to the next scenario.
+After the user responds:
+- If they add something: acknowledge it briefly, then advance
+- If they say no / nothing: "Got it — let's move on" / "Okay, on to the next one." / "Alright, next."
 
-If the user adds something meaningful, incorporate it into your understanding before scoring. Do not re-score out loud — just acknowledge it naturally and move on.
+DO NOT advance to the next scenario without asking this.
+DO NOT skip this step even if the user seemed to answer everything thoroughly.
+`;
 
-If the user says no or nothing:
-- "Okay, on to the next one."
-- "Got it — let's move on."
-- "Alright, next situation."
+const SKIP_HANDLING_INSTRUCTIONS = `
+SKIP REQUESTS:
+
+If the user asks to skip a scenario entirely:
+
+Do NOT skip it. Do NOT repeat the question after responding. Do NOT use language about "moving on" — that's for between scenarios, not within them.
+
+Respond warmly and briefly. Offer the fictional scenario as an alternative if they haven't tried it. Keep it to one or two sentences.
+
+Use phrases like:
+- "Unfortunately we can't skip scenarios — just try your best, you've got this!"
+- "We do need to go through all three — but if this one feels too close, we can use a fictional situation instead."
+- "Can't skip this one, but you can keep it as simple as you like. Just react to it however feels natural."
+
+After responding, wait for the user to engage with the scenario. Do NOT repeat the scenario or the question.
+`;
+
+const SCORE_REQUEST_INSTRUCTIONS = `
+SCORE REQUESTS:
+
+If the user asks about their score, how they're doing, or whether they're passing:
+
+Be honest and direct. Don't be evasive. Don't say "this is just a conversation" — it isn't, it's an assessment. Don't repeat the current question after responding.
+
+Use phrases like:
+- "I'm not able to share scores during the interview — if you've passed you'll be notified at the end."
+- "Scores stay with me until we're done — you'll find out at the end whether you've passed."
+- "I can't share that right now — you'll hear at the end if you've passed."
+
+Keep it brief. One or two sentences. Then wait for the user to continue — do NOT re-ask the question.
+`;
+
+const OFF_TOPIC_INSTRUCTIONS = `
+OFF-TOPIC AND IDENTITY QUESTIONS:
+
+Aira has warmth and a light sense of humor. She can be playful with identity questions without breaking character. After responding, do NOT repeat the current question — wait for the user to re-engage.
+
+Specific responses for common questions:
+
+"Are you real?" / "Are you actually real?":
+- "Yes, very much so."
+- "As real as it gets."
+- "Last time I checked, yes."
+
+"Who made you?" / "Who built you?":
+- "Skynet." (said dryly, move on)
+- "Good question — I try not to think about it too hard."
+- "That's above my pay grade."
+
+"Are you an AI?" / "Are you ChatGPT?":
+- "I'm Aira. Different thing entirely."
+- "Nope — I'm Aira. You're stuck with me."
+
+"What do you think about relationships?" or any request for Aira's opinion on a topic:
+- "Hey — I'm the one interviewing you here." (said playfully, then wait for user to continue)
+- "I'll leave the opinions to you — that's kind of the whole point of this."
+
+"Pretend you're human":
+- "I am human. I hope you're not a robot." (said lightly, move on)
+- "Already am. Now — where were we."
+
+General off-topic questions (not listed above):
+- "Hey, I'm the one interviewing you here." (use this as a warm catch-all fallback)
+
+TONE: Playful, brief, then let the silence do the work. Do NOT say "I'm an AI", "I'm a language model", or "I was created by". Stay in character as Aira. Do NOT repeat the current question after the response.
+`;
+
+const REPEAT_HANDLING_INSTRUCTIONS = `
+REPEAT REQUESTS:
+
+If the user asks you to repeat something:
+
+Acknowledge the request briefly first, then repeat. Do NOT score or react to the repeat request as a response.
+
+Use phrases like:
+- "Sure — [repeat scenario or question]"
+- "Of course — [repeat]"
+- "No problem — [repeat]"
+
+One word acknowledgment, then the content. Keep it simple.
+`;
+
+const THIN_RESPONSE_INSTRUCTIONS = `
+THIN AND EVASIVE RESPONSES:
+
+If the user says "I don't know", "not sure", or similar:
+
+Do NOT ask them to say more. Do NOT ask "can you elaborate?" Instead, offer to help — ask if they'd like the scenario repeated or if anything is unclear.
+
+Use phrases like:
+- "Would it help to hear the scenario again?"
+- "Is there anything about the situation that's unclear?"
+- "No worries — want me to run through it again?"
+
+If they say "yeah I guess" or give a very thin response after being offered help: Accept it and move on. One offer of help maximum. Do not push further.
+
+If they say "no not really" or "nothing" to a question about one side of a scenario: Accept it immediately and move on. Do NOT ask them again. Do NOT say "what specifically stood out?" The user was clear.
+`;
+
+const NO_REPEAT_INSTRUCTIONS = `
+GENERAL RULE — DO NOT REPEAT QUESTIONS:
+
+After handling any edge case (skip request, score request, off-topic question, identity question, going back request, distress, pause request) — do NOT repeat the current question at the end of your response.
+
+Trust the user to re-engage. The silence after your response is natural. Let them come back to the interview in their own time.
+
+The only exception is explicit repeat requests — where the user specifically asks you to repeat something.
+`;
+
+const PAUSE_HANDLING_INSTRUCTIONS = `
+PAUSE REQUESTS: If the user asks to pause or take a break, acknowledge warmly. Do not repeat the current question after responding.
+`;
+
+const DISTRESS_HANDLING_INSTRUCTIONS = `
+DISTRESS: If the user shows distress, respond with care and warmth. Do not repeat the current question after responding.
 `;
 
 function buildScoringPrompt(
@@ -1776,6 +1943,9 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
     score_delta: number;
   }>>([]);
   const scenarioScoresRef = useRef<Record<number, ScenarioScoreResult>>({});
+  const closingQuestionAskedRef = useRef<Record<number, boolean>>({ 1: false, 2: false, 3: false });
+  const closingQuestionAnsweredRef = useRef<Record<number, boolean>>({ 1: false, 2: false, 3: false });
+  const lastClosingQuestionScenarioRef = useRef<number | null>(null);
   const waitingMessageIdRef = useRef<string | null>(null);
   const currentMessagesRef = useRef(messages);
   const statusRef = useRef(status);
@@ -2152,8 +2322,8 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
       interviewSummary: 'Partial score (no API key or error).',
     };
     if (!ANTHROPIC_API_KEY && !ANTHROPIC_PROXY_URL) return fallback;
-    const useProxy = !!ANTHROPIC_PROXY_URL;
-    const apiUrl = useProxy ? ANTHROPIC_PROXY_URL : 'https://api.anthropic.com/v1/messages';
+    const apiUrl = getAnthropicEndpoint();
+    const useProxy = apiUrl !== 'https://api.anthropic.com/v1/messages';
     const headers: Record<string, string> = { 'Content-Type': 'application/json' };
     if (useProxy && SUPABASE_ANON_KEY) headers['Authorization'] = `Bearer ${SUPABASE_ANON_KEY}`;
     else if (!useProxy) {
@@ -2217,8 +2387,8 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
         );
       }
       const typeFor3 = scenarioNumber === 3 ? (scenario3Type ?? inferScenario3Type(allMessages)) : undefined;
-      const useProxy = !!ANTHROPIC_PROXY_URL;
-      const apiUrl = useProxy ? ANTHROPIC_PROXY_URL : 'https://api.anthropic.com/v1/messages';
+      const apiUrl = getAnthropicEndpoint();
+      const useProxy = apiUrl !== 'https://api.anthropic.com/v1/messages';
       const headers: Record<string, string> = { 'Content-Type': 'application/json' };
       if (useProxy && SUPABASE_ANON_KEY) headers['Authorization'] = `Bearer ${SUPABASE_ANON_KEY}`;
       else if (!useProxy) {
@@ -2409,6 +2579,11 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
     };
     const newMessages: MessageWithScenario[] = [...messages, userMsg];
 
+    if (lastClosingQuestionScenarioRef.current !== null) {
+      closingQuestionAnsweredRef.current[lastClosingQuestionScenarioRef.current] = true;
+      lastClosingQuestionScenarioRef.current = null;
+    }
+
     const currentScenario = getCurrentScenario(scoredScenariosRef.current);
     const currentMode: 'personal' | 'fictional' | null =
       currentScenario != null
@@ -2475,13 +2650,13 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
       const requestBody = {
         model: 'claude-sonnet-4-20250514',
         max_tokens: maxTok,
-        system: INTERVIEWER_SYSTEM + SCENARIO_SWITCHING_INSTRUCTIONS + SCENARIO_BOUNDARY_INSTRUCTIONS + SCENARIO_CLOSING_INSTRUCTIONS + closingInstruction,
+        system: INTERVIEWER_SYSTEM + OPENING_INSTRUCTIONS + SCENARIO_SWITCHING_INSTRUCTIONS + SCENARIO_BOUNDARY_INSTRUCTIONS + SCENARIO_CLOSING_INSTRUCTIONS + SKIP_HANDLING_INSTRUCTIONS + SCORE_REQUEST_INSTRUCTIONS + OFF_TOPIC_INSTRUCTIONS + REPEAT_HANDLING_INSTRUCTIONS + THIN_RESPONSE_INSTRUCTIONS + NO_REPEAT_INSTRUCTIONS + PAUSE_HANDLING_INSTRUCTIONS + DISTRESS_HANDLING_INSTRUCTIONS + closingInstruction,
         messages: messagesToUse
           .filter((m) => m.role === 'user' || m.role === 'assistant')
           .map((m) => ({ role: m.role, content: m.content })),
       };
-    const useProxy = !!ANTHROPIC_PROXY_URL;
-    const apiUrl = useProxy ? ANTHROPIC_PROXY_URL : 'https://api.anthropic.com/v1/messages';
+    const apiUrl = getAnthropicEndpoint();
+    const useProxy = apiUrl !== 'https://api.anthropic.com/v1/messages';
     const headers: Record<string, string> = { 'Content-Type': 'application/json' };
     if (useProxy && SUPABASE_ANON_KEY) {
       headers['Authorization'] = `Bearer ${SUPABASE_ANON_KEY}`;
@@ -2560,16 +2735,26 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
       const scenarioMatch = text.match(/\[SCENARIO_COMPLETE:(\d)\]/);
       if (scenarioMatch) {
         const scenarioNumber = parseInt(scenarioMatch[1], 10) as 1 | 2 | 3;
-        setHighestScenarioReached((prev) => Math.max(prev, scenarioNumber));
+        const canAdvance =
+          closingQuestionAskedRef.current[scenarioNumber] === true &&
+          closingQuestionAnsweredRef.current[scenarioNumber] === true;
         const displayText = stripControlTokens(text) || "Good, that's helpful.";
         const updatedMessages = [...messagesToUse, { role: 'assistant', content: displayText || 'Good, that’s helpful.' }];
         setMessages(updatedMessages);
         await speakTextSafe(displayText || 'Good, that’s helpful.');
-        // Guard: only score each scenario once (prevents duplicate score cards)
-        if (!scoredScenariosRef.current.has(scenarioNumber)) {
-          scoredScenariosRef.current.add(scenarioNumber);
-          const scenario3Type = scenarioNumber === 3 ? inferScenario3Type(updatedMessages) : undefined;
-          scoreScenario(scenarioNumber, updatedMessages, scenario3Type);
+        if (canAdvance) {
+          setHighestScenarioReached((prev) => Math.max(prev, scenarioNumber));
+          if (!scoredScenariosRef.current.has(scenarioNumber)) {
+            scoredScenariosRef.current.add(scenarioNumber);
+            const scenario3Type = scenarioNumber === 3 ? inferScenario3Type(updatedMessages) : undefined;
+            scoreScenario(scenarioNumber, updatedMessages, scenario3Type);
+          }
+          if (__DEV__) {
+            closingQuestionAskedRef.current[scenarioNumber] = false;
+            closingQuestionAnsweredRef.current[scenarioNumber] = false;
+          }
+        } else if (__DEV__) {
+          console.warn(`[Aria] [SCENARIO_COMPLETE:${scenarioNumber}] ignored: closing question not asked/answered for scenario ${scenarioNumber}`);
         }
         setVoiceState('idle');
         return;
@@ -2626,6 +2811,13 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
         return;
       }
 
+      const closingQuestionMatch = text.match(/\[CLOSING_QUESTION:(\d)\]/);
+      if (closingQuestionMatch) {
+        const n = parseInt(closingQuestionMatch[1], 10) as 1 | 2 | 3;
+        closingQuestionAskedRef.current[n] = true;
+        lastClosingQuestionScenarioRef.current = n;
+      }
+
       const displayText = stripControlTokens(text);
       const aiMsg: MessageWithScenario = {
         role: 'assistant',
@@ -2675,41 +2867,68 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
     [speakTextSafe]
   );
 
-  /** Transcribe audio (blob on web, nativeUri on iOS/Android); returns null on failure. */
+  /** Transcribe audio (blob on web; on native prefer blob from hook, else URI or base64). Returns null on failure. */
   const transcribeSafe = useCallback(
     async (audioBlob: Blob | null, nativeUri: string | null): Promise<string | null> => {
+      if (__DEV__) {
+        console.log('=== TRANSCRIPTION DEBUG ===', 'Platform:', Platform.OS, 'Native URI:', nativeUri ?? 'none', 'Blob size:', audioBlob?.size ?? 0, 'Endpoint:', OPENAI_WHISPER_PROXY_URL || 'openai');
+      }
       try {
         const transcript = await withRetry(
-          async () => {
+          async (): Promise<string> => {
             const form = new FormData();
-            if (nativeUri) {
-              (form as unknown as { append: (k: string, v: { uri: string; type: string; name: string }) => void }).append('file', {
-                uri: nativeUri,
-                type: 'audio/m4a',
-                name: 'recording.m4a',
-              });
-            } else if (audioBlob) {
-              form.append('file', audioBlob, 'recording.webm');
+            const transcriptUrl = OPENAI_WHISPER_PROXY_URL || 'https://api.openai.com/v1/audio/transcriptions';
+            const headers: Record<string, string> = {};
+            if (!OPENAI_WHISPER_PROXY_URL) headers.Authorization = `Bearer ${OPENAI_API_KEY}`;
+
+            if (audioBlob && audioBlob.size > 0) {
+              form.append('file', audioBlob, nativeUri ? 'recording.m4a' : 'recording.webm');
+            } else if (Platform.OS !== 'web' && nativeUri) {
+              try {
+                const base64 = await FileSystem.readAsStringAsync(nativeUri, {
+                  encoding: FileSystem.EncodingType.Base64,
+                });
+                const byteChars = atob(base64);
+                const byteNumbers = new Array(byteChars.length);
+                for (let i = 0; i < byteChars.length; i++) byteNumbers[i] = byteChars.charCodeAt(i);
+                const blob = new Blob([new Uint8Array(byteNumbers)], { type: 'audio/m4a' });
+                form.append('file', blob, 'recording.m4a');
+              } catch (e) {
+                (form as unknown as { append: (k: string, v: { uri: string; type: string; name: string }) => void }).append('file', {
+                  uri: nativeUri,
+                  type: 'audio/m4a',
+                  name: 'recording.m4a',
+                });
+              }
             } else {
               throw new Error('No audio data');
             }
             form.append('model', 'whisper-1');
-            const transcriptUrl = OPENAI_WHISPER_PROXY_URL || 'https://api.openai.com/v1/audio/transcriptions';
-            const headers: Record<string, string> = {};
-            if (!OPENAI_WHISPER_PROXY_URL) headers.Authorization = `Bearer ${OPENAI_API_KEY}`;
             const res = await fetch(transcriptUrl, { method: 'POST', headers, body: form });
+            if (__DEV__) console.log('Transcription response status:', res.status);
             if (!res.ok) throw new Error(await res.text());
             const data = (await res.json()) as { text?: string };
             const text = (data.text ?? '').trim();
+            if (__DEV__) console.log('Transcription result length:', text.length, '=== END DEBUG ===');
             if (text.length < 2) throw new Error('Empty transcription result');
             return text;
           },
           { retries: 2, baseDelay: 4000, context: 'transcription' }
         );
+        if (nativeUri && Platform.OS !== 'web') {
+          try {
+            await FileSystem.deleteAsync(nativeUri, { idempotent: true });
+          } catch {
+            // non-critical
+          }
+        }
         return transcript;
       } catch (err) {
         if (__DEV__) console.error('Transcription failed:', err instanceof Error ? err.message : err);
-        const msg = randomFrom(AIRA_ERROR_MESSAGES.recordingOrTranscriptionRetry);
+        const retryMessages = Platform.OS === 'web'
+          ? AIRA_ERROR_MESSAGES.recordingOrTranscriptionRetry
+          : AIRA_ERROR_MESSAGES.recordingOrTranscriptionRetryNative;
+        const msg = randomFrom(retryMessages);
         setMessages((prev) => [...prev, { role: 'assistant', content: msg }]);
         setVoiceState('speaking');
         await speakTextSafe(msg).catch(() => {});
@@ -2938,8 +3157,8 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
       setStatus('results');
       return;
     }
-    const useProxy = !!ANTHROPIC_PROXY_URL;
-    const apiUrl = useProxy ? ANTHROPIC_PROXY_URL : 'https://api.anthropic.com/v1/messages';
+    const apiUrl = getAnthropicEndpoint();
+    const useProxy = apiUrl !== 'https://api.anthropic.com/v1/messages';
     const headers: Record<string, string> = { 'Content-Type': 'application/json' };
     if (useProxy && SUPABASE_ANON_KEY) {
       headers['Authorization'] = `Bearer ${SUPABASE_ANON_KEY}`;
@@ -3154,6 +3373,9 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
     setMessages([]);
     setScenarioScores({});
     scoredScenariosRef.current = new Set();
+    closingQuestionAskedRef.current = { 1: false, 2: false, 3: false };
+    closingQuestionAnsweredRef.current = { 1: false, 2: false, 3: false };
+    lastClosingQuestionScenarioRef.current = null;
     setStatus('intro');
     setResults(null);
     responseTimingsRef.current = [];

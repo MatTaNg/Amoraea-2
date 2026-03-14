@@ -1,5 +1,6 @@
 import React, { useEffect, useRef } from 'react';
-import { Platform, View, StyleSheet } from 'react-native';
+import { Platform } from 'react-native';
+import FlameOrbNative, { type FlameOrbNativeState } from './FlameOrbNative';
 
 export type FlameState = 'idle' | 'speaking' | 'listening' | 'processing' | 'recording';
 
@@ -77,7 +78,10 @@ const VIEWBOX_W = 280;
 const VIEWBOX_H = 300;
 const ID = 'amoraea-flame';
 
-export const FlameOrb: React.FC<{ state: FlameState }> = ({ state = 'idle' }) => {
+export const FlameOrb: React.FC<{ state: FlameState; size?: number }> = ({
+  state = 'idle',
+  size = 200,
+}) => {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const config = CONFIG[state] ?? CONFIG.idle;
 
@@ -95,12 +99,9 @@ export const FlameOrb: React.FC<{ state: FlameState }> = ({ state = 'idle' }) =>
   }, [state]);
 
   if (Platform.OS !== 'web') {
-    return (
-      <View style={[styles.nativeWrapper, { height: 320 }]}>
-        <View style={[styles.nativeGlow, { opacity: config.glowOpacity }]} />
-        <View style={styles.nativeFlame} />
-      </View>
-    );
+    const nativeState: FlameOrbNativeState =
+      state === 'recording' ? 'listening' : (state as FlameOrbNativeState);
+    return <FlameOrbNative state={nativeState} size={size} />;
   }
 
   return (
@@ -242,35 +243,3 @@ export const FlameOrb: React.FC<{ state: FlameState }> = ({ state = 'idle' }) =>
   );
 };
 
-const styles = StyleSheet.create({
-  nativeWrapper: {
-    width: W,
-    minHeight: 320,
-    justifyContent: 'flex-end',
-    alignItems: 'center',
-  },
-  nativeGlow: {
-    position: 'absolute',
-    bottom: 0,
-    width: 200,
-    height: 200,
-    borderRadius: 100,
-    backgroundColor: 'rgba(30, 111, 217, 0.4)',
-    ...(Platform.OS === 'web'
-      ? { filter: 'blur(60px)' }
-      : {
-          shadowColor: '#1E6FD9',
-          shadowOffset: { width: 0, height: 0 },
-          shadowOpacity: 0.6,
-          shadowRadius: 60,
-        }),
-  },
-  nativeFlame: {
-    width: 80,
-    height: 140,
-    borderTopLeftRadius: 40,
-    borderTopRightRadius: 40,
-    backgroundColor: '#1E6FD9',
-    transform: [{ perspective: 1 }, { scaleY: 1.2 }],
-  },
-});

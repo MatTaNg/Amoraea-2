@@ -7,6 +7,9 @@ const ANTHROPIC_API_KEY =
   (typeof process !== 'undefined' && process.env?.EXPO_PUBLIC_ANTHROPIC_API_KEY) || '';
 const ANTHROPIC_PROXY_URL =
   (typeof process !== 'undefined' && process.env?.EXPO_PUBLIC_ANTHROPIC_PROXY_URL) || '';
+function getAnthropicEndpoint(): string {
+  return ANTHROPIC_PROXY_URL || 'https://api.anthropic.com/v1/messages';
+}
 const SUPABASE_ANON_KEY =
   (typeof process !== 'undefined' && process.env?.EXPO_PUBLIC_SUPABASE_ANON_KEY) || '';
 
@@ -208,8 +211,8 @@ export async function generateAIReasoning(
   weightedScore: number | null,
   passed: boolean
 ): Promise<AIReasoningResult> {
-  const useProxy = !!ANTHROPIC_PROXY_URL;
-  const apiUrl = useProxy ? ANTHROPIC_PROXY_URL : 'https://api.anthropic.com/v1/messages';
+  const apiUrl = getAnthropicEndpoint();
+  const useProxy = apiUrl !== 'https://api.anthropic.com/v1/messages';
   const headers: Record<string, string> = { 'Content-Type': 'application/json' };
   if (useProxy && SUPABASE_ANON_KEY) {
     headers['Authorization'] = `Bearer ${SUPABASE_ANON_KEY}`;
