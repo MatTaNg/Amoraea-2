@@ -1,6 +1,5 @@
 {
-  "buildCommand": "npm run build:web",
-  "outputDirectory": "dist",
-  "framework": null,
-  "rewrites": [{ "source": "/((?!bundles|icons|manifest.webmanifest|.*\\.(js|css|png|ico|json)).*)", "destination": "/index.html" }]
+  "rewrites": [
+    { "source": "/(.*)", "destination": "/index.html" }
+  ]
 }
