@@ -34,6 +34,7 @@ import {
   getCurrentScenario,
   setStorageFallbackListener,
 } from '@utilities/storage/InterviewStorage';
+import { requestMicPermissionForPWA } from '@utilities/permissions/requestMicPermission';
 import { withRetry } from '@utilities/withRetry';
 import { FlameOrb } from '@app/screens/FlameOrb';
 import { UserInterviewLayout, type ActiveScenario } from '@app/screens/UserInterviewLayout';
@@ -2603,6 +2604,7 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
 
   const startInterview = useCallback(async () => {
     if (isAdmin) await clearInterviewFromStorage(userId);
+    if (Platform.OS === 'web') await requestMicPermissionForPWA();
     setStatus('active');
     setVoiceState('processing');
     if (!ANTHROPIC_API_KEY && !ANTHROPIC_PROXY_URL) {

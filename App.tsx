@@ -1,4 +1,5 @@
 import React, { useEffect, useMemo } from 'react';
+import { Platform } from 'react-native';
 import { NavigationContainer } from '@react-navigation/native';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
@@ -219,7 +220,37 @@ const RootNavigator = () => {
   );
 };
 
+/** On web (iOS Safari PWA), unlock audio on first user gesture so Aira TTS is not blocked. */
+function useWebAudioUnlock() {
+  useEffect(() => {
+    if (Platform.OS !== 'web' || typeof document === 'undefined') return;
+    const unlockAudio = () => {
+      const AudioContext = (window as unknown as { AudioContext?: typeof globalThis.AudioContext; webkitAudioContext?: typeof globalThis.AudioContext }).AudioContext
+        || (window as unknown as { webkitAudioContext?: typeof globalThis.AudioContext }).webkitAudioContext;
+      if (AudioContext) {
+        const ctx = new (AudioContext as new () => AudioContext)();
+        ctx.resume().then(() => {});
+      }
+      const silentAudio = new window.Audio();
+      silentAudio.src = 'data:audio/wav;base64,UklGRiQAAABXQVZFZm10IBAAAAEAAQARAAAAIgAAABIAAgAQABAAAAA=';
+      silentAudio.play().catch(() => {});
+      document.removeEventListener('touchstart', unlockAudio);
+      document.removeEventListener('touchend', unlockAudio);
+      document.removeEventListener('click', unlockAudio);
+    };
+    document.addEventListener('touchstart', unlockAudio, { once: true });
+    document.addEventListener('touchend', unlockAudio, { once: true });
+    document.addEventListener('click', unlockAudio, { once: true });
+    return () => {
+      document.removeEventListener('touchstart', unlockAudio);
+      document.removeEventListener('touchend', unlockAudio);
+      document.removeEventListener('click', unlockAudio);
+    };
+  }, []);
+}
+
 export default function App() {
+  useWebAudioUnlock();
   return (
     <QueryClientProvider client={queryClient}>
       <SafeAreaProvider>

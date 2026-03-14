@@ -16,7 +16,7 @@ const FONT_UI = Platform.OS === 'web' ? "'Jost', sans-serif" : undefined;
 export const authStyles = StyleSheet.create({
   fullScreen: {
     flex: 1,
-    minHeight: Platform.OS === 'web' ? '100vh' : undefined,
+    minHeight: Platform.OS === 'web' ? '100dvh' : undefined,
     backgroundColor: BG,
     alignItems: 'center',
     justifyContent: 'center',
