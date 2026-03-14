@@ -1,7 +1,7 @@
 import React, { useEffect, useRef } from 'react';
 import { Platform, View, StyleSheet } from 'react-native';
 
-export type FlameState = 'idle' | 'speaking' | 'listening' | 'processing';
+export type FlameState = 'idle' | 'speaking' | 'listening' | 'processing' | 'recording';
 
 // OUTER FLAME — smooth continuous outline, no side bumps
 // One clean path: tip → right side → wide smooth base → left side → back to tip
@@ -59,6 +59,14 @@ const CONFIG = {
     glowOpacity: 0.6,
     flickerDur: '1.0s',
     turbDur: '2.5s',
+    turbScale: 7,
+  },
+  recording: {
+    scale: 0.88,
+    glowSize: '35px',
+    glowOpacity: 0.3,
+    flickerDur: '2.5s',
+    turbDur: '5s',
     turbScale: 7,
   },
 } as const;

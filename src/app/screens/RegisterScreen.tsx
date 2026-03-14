@@ -92,34 +92,34 @@ export const RegisterScreen: React.FC<{ navigation: any }> = ({ navigation }) =>
 
   return (
     <SafeAreaContainer style={styles.safeBg}>
-      <KeyboardAvoidingView
-        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-        style={styles.keyboard}
-      >
-        <ScrollView
-          contentContainerStyle={styles.scrollContent}
-          keyboardShouldPersistTaps="handled"
-          showsVerticalScrollIndicator={false}
+      <View style={styles.outerLock}>
+        {Platform.OS === 'web' && (
+          <View style={[StyleSheet.absoluteFill, authStyles.grainOverlay]} pointerEvents="none" />
+        )}
+        <View style={[authStyles.ambientGlow, authStyles.ambientGlowRegister]} pointerEvents="none" />
+
+        <View style={styles.staticHeader}>
+          <Text style={[authStyles.wordmark, styles.wordmarkTight]}>
+            amor<Text style={authStyles.wordmarkAe}>æ</Text>a
+          </Text>
+          <View style={styles.flameWrap}>
+            <View style={styles.flameScale}>
+              <FlameOrb state="idle" />
+            </View>
+          </View>
+          <Text style={[authStyles.tagline, styles.taglineTight]}>Begin with honesty.</Text>
+        </View>
+
+        <KeyboardAvoidingView
+          behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+          style={styles.keyboard}
         >
-          <View style={authStyles.fullScreen}>
-            {Platform.OS === 'web' && (
-              <View style={[StyleSheet.absoluteFill, authStyles.grainOverlay]} pointerEvents="none" />
-            )}
-            <View style={[authStyles.ambientGlow, authStyles.ambientGlowRegister]} pointerEvents="none" />
-
+          <ScrollView
+            keyboardShouldPersistTaps="handled"
+            showsVerticalScrollIndicator={false}
+            contentContainerStyle={styles.formScrollContent}
+          >
             <View style={[authStyles.inner, styles.innerCentered]}>
-              <Text style={authStyles.wordmark}>
-                amor<Text style={authStyles.wordmarkAe}>æ</Text>a
-              </Text>
-
-              <View style={styles.flameWrap}>
-                <View style={styles.flameScale}>
-                  <FlameOrb state="idle" />
-                </View>
-              </View>
-
-              <Text style={[authStyles.tagline, { marginBottom: 36 }]}>Begin with honesty.</Text>
-
               <TextInput
                 placeholder="Email"
                 placeholderTextColor="#5B6B80"
@@ -154,7 +154,7 @@ export const RegisterScreen: React.FC<{ navigation: any }> = ({ navigation }) =>
                 placeholderTextColor="#5B6B80"
                 value={inviteCode}
                 onChangeText={setInviteCode}
-                style={[authStyles.input, authStyles.inputOptional, { marginBottom: 24 }]}
+                style={[authStyles.input, authStyles.inputOptional, { marginBottom: 18 }]}
               />
 
               {error ? <Text style={authStyles.errorText}>{error}</Text> : null}
@@ -182,9 +182,9 @@ export const RegisterScreen: React.FC<{ navigation: any }> = ({ navigation }) =>
                 </Text>
               </Text>
             </View>
-          </View>
-        </ScrollView>
-      </KeyboardAvoidingView>
+          </ScrollView>
+        </KeyboardAvoidingView>
+      </View>
     </SafeAreaContainer>
   );
 };
@@ -193,22 +193,42 @@ const styles = StyleSheet.create({
   safeBg: {
     backgroundColor: '#05060D',
   },
+  outerLock: {
+    flex: 1,
+    height: '100%',
+    overflow: 'hidden',
+    backgroundColor: '#05060D',
+  },
+  staticHeader: {
+    alignItems: 'center',
+    paddingTop: 24,
+    paddingHorizontal: 24,
+    paddingBottom: 16,
+  },
+  wordmarkTight: {
+    marginBottom: 18,
+  },
+  taglineTight: {
+    marginBottom: 20,
+  },
   keyboard: {
     flex: 1,
+    width: '100%',
   },
-  scrollContent: {
-    flexGrow: 1,
+  formScrollContent: {
+    paddingHorizontal: 24,
+    paddingBottom: 40,
   },
   innerCentered: {
     alignItems: 'center',
   },
   flameWrap: {
-    marginBottom: 20,
+    marginBottom: 12,
     alignItems: 'center',
     justifyContent: 'center',
   },
   flameScale: {
-    transform: [{ scale: 0.48 }],
+    transform: [{ scale: 0.4 }],
   },
   button: {
     marginBottom: 0,

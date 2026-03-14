@@ -38,6 +38,14 @@ import { OnboardingUseCase } from './src/domain/useCases/OnboardingUseCase';
 import { AsyncStorageService } from './src/utilities/storage/AsyncStorageService';
 import { supabase } from './src/data/supabase/client';
 import { useQuery } from '@tanstack/react-query';
+import { StyleSheet, View } from 'react-native';
+
+const ROOT_STYLE = {
+  flex: 1,
+  height: '100%' as const,
+  overflow: 'hidden' as const,
+  backgroundColor: '#05060D',
+};
 
 const Stack = createNativeStackNavigator();
 const queryClient = new QueryClient();
@@ -251,12 +259,38 @@ function useWebAudioUnlock() {
 
 export default function App() {
   useWebAudioUnlock();
+
+  useEffect(() => {
+    if (typeof document === 'undefined') return;
+    const style = document.createElement('style');
+    style.innerHTML = `
+      html, body, #root {
+        overflow: hidden !important;
+        height: 100% !important;
+        width: 100% !important;
+        position: fixed !important;
+        background-color: #05060D !important;
+      }
+      ::-webkit-scrollbar {
+        display: none !important;
+        width: 0 !important;
+      }
+      * {
+        -ms-overflow-style: none !important;
+        scrollbar-width: none !important;
+      }
+    `;
+    document.head.appendChild(style);
+  }, []);
+
   return (
-    <QueryClientProvider client={queryClient}>
-      <SafeAreaProvider>
-        <RootNavigator />
-      </SafeAreaProvider>
-    </QueryClientProvider>
+    <View style={ROOT_STYLE}>
+      <QueryClientProvider client={queryClient}>
+        <SafeAreaProvider>
+          <RootNavigator />
+        </SafeAreaProvider>
+      </QueryClientProvider>
+    </View>
   );
 }
 

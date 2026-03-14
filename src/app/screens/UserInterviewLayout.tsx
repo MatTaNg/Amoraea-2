@@ -39,7 +39,7 @@ interface UserInterviewLayoutProps {
   interviewerText: string;
   onPressStart: () => void;
   onPressEnd: () => void;
-  voiceState: 'idle' | 'listening' | 'processing' | 'speaking';
+  voiceState: 'idle' | 'listening' | 'processing' | 'speaking' | 'recording';
   micError: string | null;
   micWarning: string | null;
   inputDisabled: boolean;
@@ -50,6 +50,12 @@ interface UserInterviewLayoutProps {
   micPermissionDenied?: boolean;
   /** When true, show "Aira is thinking..." (visual only, no TTS) */
   isWaiting?: boolean;
+  /** When true, mic button is tap-to-toggle (one tap start, one tap stop) and onMicPress is used */
+  micToggleMode?: boolean;
+  /** Used when micToggleMode is true */
+  onMicPress?: () => void;
+  /** Override mic label when micToggleMode is true (e.g. "Tap to speak" / "Tap to stop") */
+  micLabelOverride?: string;
 }
 
 const GOOGLE_FONTS_URL =
@@ -69,6 +75,9 @@ export const UserInterviewLayout: React.FC<UserInterviewLayoutProps> = ({
   ttsFallbackActive = false,
   micPermissionDenied = false,
   isWaiting = false,
+  micToggleMode = false,
+  onMicPress,
+  micLabelOverride,
 }) => {
   const rippleAnim = useRef(new Animated.Value(0)).current;
 
@@ -84,7 +93,7 @@ export const UserInterviewLayout: React.FC<UserInterviewLayoutProps> = ({
   }, []);
 
   useEffect(() => {
-    if (voiceState !== 'listening') return;
+    if (voiceState !== 'listening' && voiceState !== 'recording') return;
     const loop = Animated.loop(
       Animated.sequence([
         Animated.timing(rippleAnim, { toValue: 1, duration: 1500, useNativeDriver: true }),
@@ -96,13 +105,15 @@ export const UserInterviewLayout: React.FC<UserInterviewLayoutProps> = ({
   }, [voiceState, rippleAnim]);
 
   const micLabel =
-    voiceState === 'listening'
-      ? 'Listening...'
-      : voiceState === 'speaking'
-        ? 'Speaking...'
-        : voiceState === 'processing'
-          ? '...'
-          : 'Hold to speak';
+    micLabelOverride !== undefined
+      ? micLabelOverride
+      : voiceState === 'listening' || voiceState === 'recording'
+        ? 'Listening...'
+        : voiceState === 'speaking'
+          ? 'Speaking...'
+          : voiceState === 'processing'
+            ? '...'
+            : 'Hold to speak';
 
   const statusLabelOpacity =
     voiceState === 'speaking' || voiceState === 'processing' ? 0.35 : 0.7;
@@ -112,6 +123,7 @@ export const UserInterviewLayout: React.FC<UserInterviewLayoutProps> = ({
 
   const isMicDisabled = !!micError || inputDisabled || voiceState === 'speaking' || voiceState === 'processing';
   const micOpacity = voiceState === 'speaking' ? 0.35 : 1;
+  const isListeningOrRecording = voiceState === 'listening' || voiceState === 'recording';
 
   return (
     <View style={styles.pageWrapper}>
@@ -209,7 +221,7 @@ export const UserInterviewLayout: React.FC<UserInterviewLayoutProps> = ({
             ) : (
               <>
                 <View style={styles.micButtonWrapper}>
-                  {voiceState === 'listening' && (
+                  {isListeningOrRecording && (
                     <Animated.View
                       style={[
                         styles.rippleRing,
@@ -222,12 +234,13 @@ export const UserInterviewLayout: React.FC<UserInterviewLayoutProps> = ({
                     />
                   )}
                   <Pressable
-                    onPressIn={onPressStart}
-                    onPressOut={onPressEnd}
+                    onPress={micToggleMode && onMicPress ? onMicPress : undefined}
+                    onPressIn={micToggleMode ? undefined : onPressStart}
+                    onPressOut={micToggleMode ? undefined : onPressEnd}
                     disabled={isMicDisabled}
                     style={[
                       styles.micButton,
-                      voiceState === 'listening' && styles.micButtonListening,
+                      isListeningOrRecording && styles.micButtonListening,
                       { opacity: micOpacity },
                     ]}
                   >

@@ -85,6 +85,25 @@ function randomFrom<T>(arr: T[]): T {
   return arr[Math.floor(Math.random() * arr.length)];
 }
 
+/** iOS Safari prefers audio/mp4; Chrome/Android prefer webm. Used for MediaRecorder. */
+function getSupportedMimeType(): string | null {
+  if (typeof MediaRecorder === 'undefined') return null;
+  const types = [
+    'audio/mp4',
+    'audio/aac',
+    'audio/webm;codecs=opus',
+    'audio/webm',
+    'audio/ogg;codecs=opus',
+  ];
+  for (const type of types) {
+    if (MediaRecorder.isTypeSupported(type)) {
+      if (__DEV__) console.log('Using MIME type:', type);
+      return type;
+    }
+  }
+  return null;
+}
+
 /** Removes control tokens from AI response before display or TTS. Use raw text for logic only. */
 function stripControlTokens(text: string): string {
   if (!text) return text;
@@ -1506,7 +1525,7 @@ function extractLastInterviewerMessage(messages: Array<{ role: string; content: 
   return null;
 }
 
-type VoiceState = 'idle' | 'listening' | 'processing' | 'speaking';
+type VoiceState = 'idle' | 'listening' | 'processing' | 'speaking' | 'recording';
 type Status = 'intro' | 'active' | 'scoring' | 'results';
 
 interface CommunicationQuality {
@@ -1605,6 +1624,10 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
   const mediaStreamRef = useRef<MediaStream | null>(null);
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const audioChunksRef = useRef<Blob[]>([]);
+  const [isRecording, setIsRecording] = useState(false);
+  const recordingStartTimeRef = useRef<number>(0);
+  const autoStopTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const webRecordingMimeRef = useRef<string>('audio/webm');
   const scrollViewRef = useRef<ScrollView | null>(null);
   const hasResumedRef = useRef(false);
 
@@ -1646,6 +1669,17 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
   const [reasoningProgress, setReasoningProgress] = useState<ReasoningProgress>(null);
   const [usedPersonalExamples, setUsedPersonalExamples] = useState(false);
   const [isWaiting, setIsWaiting] = useState(false);
+
+  useEffect(() => {
+    if (__DEV__ || ALPHA_MODE) {
+      const hasAnthropic = !!(typeof process !== 'undefined' && process.env?.EXPO_PUBLIC_ANTHROPIC_API_KEY);
+      const hasProxy = !!(typeof process !== 'undefined' && process.env?.EXPO_PUBLIC_ANTHROPIC_PROXY_URL);
+      const hasSupabase = !!(typeof process !== 'undefined' && process.env?.EXPO_PUBLIC_SUPABASE_URL);
+      if (__DEV__) {
+        console.log('AriaScreen env check:', { hasAnthropicKey: hasAnthropic, hasProxyUrl: hasProxy, hasSupabaseUrl: hasSupabase });
+      }
+    }
+  }, []);
 
   useEffect(() => {
     currentMessagesRef.current = messages;
@@ -2205,9 +2239,13 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
     if (isPersonalOpening && !isDecline(trimmed)) setUsedPersonalExamples(true);
 
     if (!ANTHROPIC_API_KEY && !ANTHROPIC_PROXY_URL) {
-      const fallback = randomFrom(AIRA_ERROR_MESSAGES.conversationFailed);
+      const userHasSpoken = newMessages.some((m) => m.role === 'user');
+      const fallback = userHasSpoken
+        ? randomFrom(AIRA_ERROR_MESSAGES.conversationFailed)
+        : "Welcome. Give me just a moment...";
       setMessages((prev) => [...prev, { role: 'assistant', content: fallback }]);
       setVoiceState('idle');
+      await speakTextSafe(fallback).catch(() => {});
       return;
     }
 
@@ -2254,12 +2292,17 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
       return parsed;
     };
 
+    const numUserMessages = newMessages.filter((m) => m.role === 'user').length;
+    const isFirstExchange = numUserMessages === 1;
+    if (isFirstExchange) {
+      await new Promise((r) => setTimeout(r, 500));
+    }
     try {
       data = await withRetry(makeCall, {
-        retries: 2,
-        baseDelay: 8000,
-        maxDelay: 20000,
-        context: 'conversation',
+        retries: isFirstExchange ? 4 : 2,
+        baseDelay: isFirstExchange ? 3000 : 8000,
+        maxDelay: isFirstExchange ? 10000 : 20000,
+        context: isFirstExchange ? 'welcome message' : 'conversation',
         onRetry: (attempt) => {
           if (attempt === 1) {
             setIsWaiting(true);
@@ -2270,7 +2313,10 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
       setIsWaiting(false);
     } catch (err) {
       setIsWaiting(false);
-      const fallback = randomFrom(AIRA_ERROR_MESSAGES.conversationFailed);
+      const userHasSpoken = newMessages.some((m) => m.role === 'user');
+      const fallback = userHasSpoken
+        ? randomFrom(AIRA_ERROR_MESSAGES.conversationFailed)
+        : "Welcome. Give me just a moment...";
       setMessages((prev) => [...prev, { role: 'assistant', content: fallback }]);
       setVoiceState('speaking');
       await speakTextSafe(fallback);
@@ -2366,6 +2412,7 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
 
   const handlePressStart = useCallback(async () => {
     if (voiceState !== 'idle') return;
+    if (useWhisperOnWeb) return; // web Whisper path uses handleMicToggle
     setMicWarning(null);
     stopElevenLabsSpeech();
     setCurrentTranscript('');
@@ -2375,25 +2422,6 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
     if (permission === 'denied') return;
     timingRef.current.recordingStartTime = Date.now();
     setVoiceState('listening');
-    if (useWhisperOnWeb && typeof navigator !== 'undefined' && navigator.mediaDevices?.getUserMedia) {
-      try {
-        const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-        setMicPermission('granted');
-        mediaStreamRef.current = stream;
-        audioChunksRef.current = [];
-        const mime = MediaRecorder.isTypeSupported('audio/webm;codecs=opus') ? 'audio/webm;codecs=opus' : 'audio/webm';
-        const recorder = new MediaRecorder(stream);
-        mediaRecorderRef.current = recorder;
-        recorder.ondataavailable = (e) => { if (e.data.size > 0) audioChunksRef.current.push(e.data); };
-        recorder.start(100);
-      } catch (err) {
-        const name = err instanceof Error ? err.name : '';
-        if (name === 'NotAllowedError' || name === 'PermissionDeniedError') setMicPermission('denied');
-        setMicError('Microphone access was denied or unavailable.');
-        setVoiceState('idle');
-      }
-      return;
-    }
     if (Platform.OS === 'web' && recognitionRef.current) {
       try { recognitionRef.current.start(); } catch {}
     } else {
@@ -2454,6 +2482,106 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
     [speakTextSafe]
   );
 
+  const MAX_RECORDING_MS = 120000; // 2 minutes max
+
+  const startRecording = useCallback(async () => {
+    if (voiceState !== 'idle' && voiceState !== 'recording') return;
+    setMicWarning(null);
+    stopElevenLabsSpeech();
+    setCurrentTranscript('');
+    transcriptAtReleaseRef.current = '';
+    const permission = await checkMicPermission();
+    setMicPermission(permission);
+    if (permission === 'denied') return;
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({
+        audio: {
+          echoCancellation: true,
+          noiseSuppression: true,
+          sampleRate: 44100,
+        },
+      });
+      setMicPermission('granted');
+      mediaStreamRef.current = stream;
+      audioChunksRef.current = [];
+      const mimeType = getSupportedMimeType();
+      webRecordingMimeRef.current = mimeType || 'audio/webm';
+      const recorder = mimeType
+        ? new MediaRecorder(stream, { mimeType })
+        : new MediaRecorder(stream);
+      mediaRecorderRef.current = recorder;
+      recorder.ondataavailable = (e) => {
+        if (e.data && e.data.size > 0) audioChunksRef.current.push(e.data);
+      };
+      recorder.onstop = async () => {
+        const chunks = audioChunksRef.current;
+        const blob = new Blob(chunks, {
+          type: webRecordingMimeRef.current || 'audio/webm',
+        });
+        stream.getTracks().forEach((t) => t.stop());
+        mediaStreamRef.current = null;
+        mediaRecorderRef.current = null;
+        if (autoStopTimerRef.current) {
+          clearTimeout(autoStopTimerRef.current);
+          autoStopTimerRef.current = null;
+        }
+        setIsRecording(false);
+        setVoiceState('processing');
+        if (chunks.length === 0 || blob.size < 1000) {
+          handleRecordingError(new Error('Empty recording'));
+          return;
+        }
+        const userText = await transcribeSafe(blob);
+        if (userText) processUserSpeech(userText);
+      };
+      recorder.start(1000); // iOS: request data every second so ondataavailable fires
+      recordingStartTimeRef.current = Date.now();
+      timingRef.current.recordingStartTime = Date.now();
+      setIsRecording(true);
+      setVoiceState('recording');
+      const recorderRef = mediaRecorderRef;
+      autoStopTimerRef.current = setTimeout(() => {
+        const rec = recorderRef.current;
+        if (rec?.state !== 'inactive') rec?.stop();
+        autoStopTimerRef.current = null;
+      }, MAX_RECORDING_MS);
+    } catch (err) {
+      const name = err instanceof Error ? err.name : '';
+      if (name === 'NotAllowedError' || name === 'PermissionDeniedError') setMicPermission('denied');
+      setMicError('Microphone access was denied or unavailable.');
+      setVoiceState('idle');
+      setIsRecording(false);
+      if (__DEV__) console.error('Recording start failed:', err);
+    }
+  }, [voiceState, handleRecordingError, processUserSpeech, transcribeSafe]);
+
+  const stopRecording = useCallback(() => {
+    if (autoStopTimerRef.current) {
+      clearTimeout(autoStopTimerRef.current);
+      autoStopTimerRef.current = null;
+    }
+    const elapsed = Date.now() - recordingStartTimeRef.current;
+    const rec = mediaRecorderRef.current;
+    if (elapsed < 1000) {
+      setTimeout(() => {
+        const r = mediaRecorderRef.current;
+        if (r && r.state !== 'inactive') r.stop();
+      }, 1000 - elapsed);
+      return;
+    }
+    if (rec && rec.state !== 'inactive') rec.stop();
+  }, []);
+
+  const handleMicToggle = useCallback(() => {
+    if (voiceState === 'speaking' || voiceState === 'processing') return;
+    if (!useWhisperOnWeb) return;
+    if (isRecording) {
+      stopRecording();
+    } else {
+      startRecording();
+    }
+  }, [voiceState, useWhisperOnWeb, isRecording, startRecording, stopRecording]);
+
   const handleSendTyped = useCallback(() => {
     const text = typedAnswer.trim();
     if (!text) return;
@@ -2465,33 +2593,7 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
 
   const handlePressEnd = useCallback(async () => {
     if (voiceState !== 'listening') return;
-    if (useWhisperOnWeb && mediaRecorderRef.current && mediaRecorderRef.current.state !== 'inactive') {
-      const recorder = mediaRecorderRef.current;
-      const stream = mediaStreamRef.current;
-      mediaRecorderRef.current = null;
-      mediaStreamRef.current = null;
-      await new Promise<void>((resolve) => {
-        recorder.onstop = () => resolve();
-        recorder.stop();
-      });
-      stream?.getTracks().forEach((t) => t.stop());
-      setVoiceState('processing');
-      const chunks = audioChunksRef.current;
-      audioChunksRef.current = [];
-      if (chunks.length === 0) {
-        handleRecordingError(new Error('No audio chunks'));
-        return;
-      }
-      const blob = new Blob(chunks, { type: 'audio/webm' });
-      if (blob.size < 1000) {
-        handleRecordingError(new Error('Empty recording'));
-        return;
-      }
-      const userText = await transcribeSafe(blob);
-      if (!userText) return;
-      processUserSpeech(userText);
-      return;
-    }
+    if (useWhisperOnWeb) return; // web Whisper path uses handleMicToggle
     if (Platform.OS === 'web' && recognitionRef.current) {
       recognitionRef.current.stop();
     } else {
@@ -2608,14 +2710,16 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
     setStatus('active');
     setVoiceState('processing');
     if (!ANTHROPIC_API_KEY && !ANTHROPIC_PROXY_URL) {
-      setMessages([{ role: 'assistant', content: randomFrom(AIRA_ERROR_MESSAGES.conversationFailed) }]);
+      const welcomeFallback = "Welcome. I'll be with you in just a moment.";
+      setMessages([{ role: 'assistant', content: welcomeFallback }]);
       setVoiceState('idle');
+      await speakTextSafe(welcomeFallback).catch(() => {});
       return;
     }
     const openingLine = "Hi, I'm Aira, welcome to Amoraea, what can I call you?";
     setMessages([{ role: 'assistant', content: openingLine }]);
     await speakTextSafe(openingLine);
-  }, [speak, isAdmin, userId]);
+  }, [speakTextSafe, isAdmin, userId]);
 
   const saveInterviewResults = useCallback(
     async (results: InterviewResults, gateResult: GateResult, uid: string) => {
@@ -3025,6 +3129,9 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
               micError={micError}
               micWarning={micWarning}
               inputDisabled={inputDisabled}
+              micToggleMode={useWhisperOnWeb}
+              onMicPress={useWhisperOnWeb ? handleMicToggle : undefined}
+              micLabelOverride={useWhisperOnWeb ? (isRecording ? 'Tap to stop' : 'Tap to speak') : undefined}
               onExit={() => {
                 const confirmMessage = 'Are you sure you want to log out?';
                 if (Platform.OS === 'web' && typeof window !== 'undefined') {

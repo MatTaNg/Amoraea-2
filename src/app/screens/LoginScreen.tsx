@@ -7,7 +7,6 @@ import {
   Pressable,
   KeyboardAvoidingView,
   Platform,
-  ScrollView,
 } from 'react-native';
 import { useAuth } from '@features/authentication/hooks/useAuth';
 import { SafeAreaContainer } from '@ui/components/SafeAreaContainer';
@@ -86,21 +85,17 @@ export const LoginScreen: React.FC<{ navigation: any; route?: { params?: { confi
 
   return (
     <SafeAreaContainer style={styles.safeBg}>
-      <KeyboardAvoidingView
-        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-        style={styles.keyboard}
-      >
-        <ScrollView
-          contentContainerStyle={styles.scrollContent}
-          keyboardShouldPersistTaps="handled"
-          showsVerticalScrollIndicator={false}
+      <View style={styles.outerLock}>
+        <KeyboardAvoidingView
+          behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+          style={styles.keyboard}
         >
-          <View style={authStyles.fullScreen}>
+          <View style={styles.contentWrap}>
             {Platform.OS === 'web' && <View style={[StyleSheet.absoluteFill, authStyles.grainOverlay]} pointerEvents="none" />}
             <View style={authStyles.ambientGlow} pointerEvents="none" />
 
             <View style={[authStyles.inner, styles.innerCentered]}>
-              <Text style={authStyles.wordmark}>
+              <Text style={[authStyles.wordmark, styles.wordmarkTight]}>
                 amor<Text style={authStyles.wordmarkAe}>æ</Text>a
               </Text>
 
@@ -110,7 +105,7 @@ export const LoginScreen: React.FC<{ navigation: any; route?: { params?: { confi
                 </View>
               </View>
 
-              <Text style={authStyles.tagline}>Enter to continue your journey.</Text>
+              <Text style={[authStyles.tagline, styles.taglineTight]}>Enter to continue your journey.</Text>
 
               <TextInput
                 placeholder="Email"
@@ -129,7 +124,7 @@ export const LoginScreen: React.FC<{ navigation: any; route?: { params?: { confi
                 value={password}
                 onChangeText={setPassword}
                 secureTextEntry
-                style={[authStyles.input, { marginBottom: 24 }]}
+                style={[authStyles.input, { marginBottom: 18 }]}
                 onSubmitEditing={handleLogin}
               />
 
@@ -173,8 +168,8 @@ export const LoginScreen: React.FC<{ navigation: any; route?: { params?: { confi
               </Text>
             </View>
           </View>
-        </ScrollView>
-      </KeyboardAvoidingView>
+        </KeyboardAvoidingView>
+      </View>
     </SafeAreaContainer>
   );
 };
@@ -183,22 +178,40 @@ const styles = StyleSheet.create({
   safeBg: {
     backgroundColor: '#05060D',
   },
+  outerLock: {
+    flex: 1,
+    height: '100%',
+    overflow: 'hidden',
+    backgroundColor: '#05060D',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
   keyboard: {
     flex: 1,
+    width: '100%',
   },
-  scrollContent: {
-    flexGrow: 1,
+  contentWrap: {
+    flex: 1,
+    ...authStyles.fullScreen,
+    paddingVertical: 24,
+    paddingHorizontal: 24,
   },
   innerCentered: {
     alignItems: 'center',
   },
+  wordmarkTight: {
+    marginBottom: 18,
+  },
+  taglineTight: {
+    marginBottom: 20,
+  },
   flameWrap: {
-    marginBottom: 24,
+    marginBottom: 16,
     alignItems: 'center',
     justifyContent: 'center',
   },
   flameScale: {
-    transform: [{ scale: 0.62 }],
+    transform: [{ scale: 0.52 }],
   },
   button: {
     marginBottom: 12,

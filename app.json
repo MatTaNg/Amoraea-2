@@ -15,6 +15,7 @@
       "**/*"
     ],
     "ios": {
+      "backgroundColor": "#05060D",
       "supportsTablet": true,
       "bundleIdentifier": "com.amoraea.app",
       "infoPlist": {
