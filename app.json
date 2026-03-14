@@ -4,48 +4,59 @@
     "slug": "amoraea",
     "version": "1.0.0",
     "orientation": "portrait",
-    "icon": "./assets/icon.png",
-    "userInterfaceStyle": "light",
+    "icon": "./public/icons/icon-512x512.png",
+    "userInterfaceStyle": "dark",
+    "backgroundColor": "#05060D",
     "splash": {
-      "image": "./assets/splash.png",
+      "image": "./public/icons/icon-512x512.png",
       "resizeMode": "contain",
-      "backgroundColor": "#ffffff"
+      "backgroundColor": "#05060D"
     },
     "assetBundlePatterns": [
       "**/*"
     ],
     "ios": {
-      "backgroundColor": "#05060D",
-      "supportsTablet": true,
+      "supportsTablet": false,
       "bundleIdentifier": "com.amoraea.app",
+      "backgroundColor": "#05060D",
       "infoPlist": {
         "NSLocationWhenInUseUsageDescription": "Amoraea needs your location to help you find compatible matches.",
         "NSPhotoLibraryUsageDescription": "Amoraea needs access to your photos to upload profile pictures.",
-        "NSContactsUsageDescription": "Amoraea needs access to your contacts to sync them with the app and find matches."
-      }
+        "NSContactsUsageDescription": "Amoraea needs access to your contacts to sync them with the app and find matches.",
+        "NSMicrophoneUsageDescription": "Amoraea uses the microphone so you can answer Aria's questions by voice.",
+        "NSSpeechRecognitionUsageDescription": "Amoraea uses speech recognition to turn your voice answers into text.",
+        "ITSAppUsesNonExemptEncryption": false
+      },
+      "buildNumber": "1"
     },
     "android": {
-      "adaptiveIcon": {
-        "foregroundImage": "./assets/adaptive-icon.png",
-        "backgroundColor": "#ffffff"
-      },
       "package": "com.amoraea.app",
+      "backgroundColor": "#05060D",
       "permissions": [
-        "ACCESS_FINE_LOCATION",
-        "ACCESS_COARSE_LOCATION",
-        "READ_EXTERNAL_STORAGE",
-        "WRITE_EXTERNAL_STORAGE",
-        "READ_CONTACTS"
-      ]
+        "android.permission.ACCESS_FINE_LOCATION",
+        "android.permission.ACCESS_COARSE_LOCATION",
+        "android.permission.READ_EXTERNAL_STORAGE",
+        "android.permission.WRITE_EXTERNAL_STORAGE",
+        "android.permission.READ_CONTACTS",
+        "android.permission.RECORD_AUDIO",
+        "android.permission.MODIFY_AUDIO_SETTINGS",
+        "android.permission.WRITE_CONTACTS"
+      ],
+      "versionCode": 1,
+      "adaptiveIcon": {
+        "foregroundImage": "./public/icons/icon-512x512-maskable.png",
+        "backgroundColor": "#05060D"
+      }
     },
     "web": {
-      "favicon": "./assets/favicon.png",
+      "favicon": "./public/icons/favicon-32x32.png",
       "name": "Amoraea",
       "shortName": "Amoraea",
-      "themeColor": "#05060D",
       "backgroundColor": "#05060D",
+      "themeColor": "#05060D",
       "display": "standalone",
-      "orientation": "portrait"
+      "orientation": "portrait",
+      "bundler": "metro"
     },
     "plugins": [
       [
@@ -72,8 +83,19 @@
           "microphonePermission": "Amoraea uses the microphone so you can answer Aria's questions by voice.",
           "speechRecognitionPermission": "Amoraea uses speech recognition to turn your voice answers into text."
         }
+      ],
+      [
+        "expo-av",
+        {
+          "microphonePermission": "Amoraea uses your microphone to record your responses during the interview."
+        }
       ]
-    ]
+    ],
+    "extra": {
+      "eas": {
+        "projectId": "084f7da3-b76f-4c1e-981d-7501a3e08e04"
+      }
+    },
+    "owner": "amoraea"
   }
 }
-

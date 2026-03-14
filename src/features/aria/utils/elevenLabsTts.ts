@@ -48,7 +48,6 @@ export async function speakWithElevenLabs(
   const voiceId = fromExtra?.elevenLabsVoiceId
     || (typeof process !== 'undefined' && process.env?.EXPO_PUBLIC_ELEVENLABS_VOICE_ID)
     || DEFAULT_VOICE_ID;
-console.log('<---voiceId', voiceId);
   if (!apiKey || !text.trim()) {
     if (!apiKey) {
       console.warn('ElevenLabs: No API key (EXPO_PUBLIC_ELEVENLABS_API_KEY or app config). Using fallback TTS — set the key for natural voice.');
@@ -129,6 +128,11 @@ console.log('<---voiceId', voiceId);
     }
     const fileUri = `${dir}tts_${Date.now()}.mp3`;
     await FileSystem.writeAsStringAsync(fileUri, base64, { encoding: FileSystem.EncodingType.Base64 });
+    await Audio.setAudioModeAsync({
+      playsInSilentModeIOS: true,
+      allowsRecordingIOS: false,
+      staysActiveInBackground: false,
+    });
     const { sound } = await Audio.Sound.createAsync({ uri: fileUri });
     await new Promise<void>((resolve, reject) => {
       sound.setOnPlaybackStatusUpdate((status) => {

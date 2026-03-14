@@ -46,6 +46,7 @@ import {
   buildScenarioBoundaries,
 } from '@features/aria/alphaAssessmentUtils';
 import { generateAIReasoning } from '@features/aria/generateAIReasoning';
+import { useAudioRecorder } from '@features/aria/hooks/useAudioRecorder';
 
 const profileRepository = new ProfileRepository();
 
@@ -83,25 +84,6 @@ const AIRA_ERROR_MESSAGES = {
 };
 function randomFrom<T>(arr: T[]): T {
   return arr[Math.floor(Math.random() * arr.length)];
-}
-
-/** iOS Safari prefers audio/mp4; Chrome/Android prefer webm. Used for MediaRecorder. */
-function getSupportedMimeType(): string | null {
-  if (typeof MediaRecorder === 'undefined') return null;
-  const types = [
-    'audio/mp4',
-    'audio/aac',
-    'audio/webm;codecs=opus',
-    'audio/webm',
-    'audio/ogg;codecs=opus',
-  ];
-  for (const type of types) {
-    if (MediaRecorder.isTypeSupported(type)) {
-      if (__DEV__) console.log('Using MIME type:', type);
-      return type;
-    }
-  }
-  return null;
 }
 
 /** Removes control tokens from AI response before display or TTS. Use raw text for logic only. */
@@ -1621,13 +1603,8 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
   const isSpeakingRef = useRef(false);
   // Use Whisper on web only when a proxy is set; direct OpenAI calls from the browser fail (CORS).
   const useWhisperOnWeb = Platform.OS === 'web' && !!OPENAI_API_KEY && !!OPENAI_WHISPER_PROXY_URL;
-  const mediaStreamRef = useRef<MediaStream | null>(null);
-  const mediaRecorderRef = useRef<MediaRecorder | null>(null);
-  const audioChunksRef = useRef<Blob[]>([]);
-  const [isRecording, setIsRecording] = useState(false);
-  const recordingStartTimeRef = useRef<number>(0);
-  const autoStopTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const webRecordingMimeRef = useRef<string>('audio/webm');
+  /** Native (expo-av) or web with Whisper (MediaRecorder) — use unified hook; else web hold-to-talk + speech recognition. */
+  const useNativeOrWhisperRecording = Platform.OS !== 'web' || useWhisperOnWeb;
   const scrollViewRef = useRef<ScrollView | null>(null);
   const hasResumedRef = useRef(false);
 
@@ -2412,7 +2389,7 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
 
   const handlePressStart = useCallback(async () => {
     if (voiceState !== 'idle') return;
-    if (useWhisperOnWeb) return; // web Whisper path uses handleMicToggle
+    if (useNativeOrWhisperRecording) return; // native or web Whisper use hook (tap-to-toggle)
     setMicWarning(null);
     stopElevenLabsSpeech();
     setCurrentTranscript('');
@@ -2431,7 +2408,7 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
         if (r.granted) ExpoSpeechRecognitionModule.start({ lang: 'en-US', interimResults: true, continuous: true });
       });
     }
-  }, [voiceState, useWhisperOnWeb]);
+  }, [voiceState, useNativeOrWhisperRecording]);
 
   const handleRecordingError = useCallback(
     (err: Error) => {
@@ -2447,14 +2424,24 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
     [speakTextSafe]
   );
 
-  /** Transcribe audio; on failure or empty result, Aira asks to repeat and returns null. */
+  /** Transcribe audio (blob on web, nativeUri on iOS/Android); returns null on failure. */
   const transcribeSafe = useCallback(
-    async (audioBlob: Blob): Promise<string | null> => {
+    async (audioBlob: Blob | null, nativeUri: string | null): Promise<string | null> => {
       try {
         const transcript = await withRetry(
           async () => {
             const form = new FormData();
-            form.append('file', audioBlob, 'recording.webm');
+            if (nativeUri) {
+              (form as unknown as { append: (k: string, v: { uri: string; type: string; name: string }) => void }).append('file', {
+                uri: nativeUri,
+                type: 'audio/m4a',
+                name: 'recording.m4a',
+              });
+            } else if (audioBlob) {
+              form.append('file', audioBlob, 'recording.webm');
+            } else {
+              throw new Error('No audio data');
+            }
             form.append('model', 'whisper-1');
             const transcriptUrl = OPENAI_WHISPER_PROXY_URL || 'https://api.openai.com/v1/audio/transcriptions';
             const headers: Record<string, string> = {};
@@ -2482,105 +2469,25 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
     [speakTextSafe]
   );
 
-  const MAX_RECORDING_MS = 120000; // 2 minutes max
+  const audioRecorder = useAudioRecorder({
+    onRecordingComplete: async (blob, nativeUri) => {
+      setVoiceState('processing');
+      const userText = await transcribeSafe(blob, nativeUri);
+      if (userText) processUserSpeech(userText);
+    },
+    onError: (err) => handleRecordingError(err),
+  });
 
-  const startRecording = useCallback(async () => {
-    if (voiceState !== 'idle' && voiceState !== 'recording') return;
-    setMicWarning(null);
-    stopElevenLabsSpeech();
-    setCurrentTranscript('');
-    transcriptAtReleaseRef.current = '';
-    const permission = await checkMicPermission();
-    setMicPermission(permission);
-    if (permission === 'denied') return;
-    try {
-      const stream = await navigator.mediaDevices.getUserMedia({
-        audio: {
-          echoCancellation: true,
-          noiseSuppression: true,
-          sampleRate: 44100,
-        },
-      });
-      setMicPermission('granted');
-      mediaStreamRef.current = stream;
-      audioChunksRef.current = [];
-      const mimeType = getSupportedMimeType();
-      webRecordingMimeRef.current = mimeType || 'audio/webm';
-      const recorder = mimeType
-        ? new MediaRecorder(stream, { mimeType })
-        : new MediaRecorder(stream);
-      mediaRecorderRef.current = recorder;
-      recorder.ondataavailable = (e) => {
-        if (e.data && e.data.size > 0) audioChunksRef.current.push(e.data);
-      };
-      recorder.onstop = async () => {
-        const chunks = audioChunksRef.current;
-        const blob = new Blob(chunks, {
-          type: webRecordingMimeRef.current || 'audio/webm',
-        });
-        stream.getTracks().forEach((t) => t.stop());
-        mediaStreamRef.current = null;
-        mediaRecorderRef.current = null;
-        if (autoStopTimerRef.current) {
-          clearTimeout(autoStopTimerRef.current);
-          autoStopTimerRef.current = null;
-        }
-        setIsRecording(false);
-        setVoiceState('processing');
-        if (chunks.length === 0 || blob.size < 1000) {
-          handleRecordingError(new Error('Empty recording'));
-          return;
-        }
-        const userText = await transcribeSafe(blob);
-        if (userText) processUserSpeech(userText);
-      };
-      recorder.start(1000); // iOS: request data every second so ondataavailable fires
-      recordingStartTimeRef.current = Date.now();
-      timingRef.current.recordingStartTime = Date.now();
-      setIsRecording(true);
-      setVoiceState('recording');
-      const recorderRef = mediaRecorderRef;
-      autoStopTimerRef.current = setTimeout(() => {
-        const rec = recorderRef.current;
-        if (rec?.state !== 'inactive') rec?.stop();
-        autoStopTimerRef.current = null;
-      }, MAX_RECORDING_MS);
-    } catch (err) {
-      const name = err instanceof Error ? err.name : '';
-      if (name === 'NotAllowedError' || name === 'PermissionDeniedError') setMicPermission('denied');
-      setMicError('Microphone access was denied or unavailable.');
-      setVoiceState('idle');
-      setIsRecording(false);
-      if (__DEV__) console.error('Recording start failed:', err);
-    }
-  }, [voiceState, handleRecordingError, processUserSpeech, transcribeSafe]);
-
-  const stopRecording = useCallback(() => {
-    if (autoStopTimerRef.current) {
-      clearTimeout(autoStopTimerRef.current);
-      autoStopTimerRef.current = null;
-    }
-    const elapsed = Date.now() - recordingStartTimeRef.current;
-    const rec = mediaRecorderRef.current;
-    if (elapsed < 1000) {
-      setTimeout(() => {
-        const r = mediaRecorderRef.current;
-        if (r && r.state !== 'inactive') r.stop();
-      }, 1000 - elapsed);
-      return;
-    }
-    if (rec && rec.state !== 'inactive') rec.stop();
-  }, []);
-
-  const handleMicToggle = useCallback(() => {
+  const handleNativeOrWhisperMicPress = useCallback(() => {
     if (voiceState === 'speaking' || voiceState === 'processing') return;
-    if (!useWhisperOnWeb) return;
-    if (isRecording) {
-      stopRecording();
+    if (!useNativeOrWhisperRecording) return;
+    if (audioRecorder.isRecording) {
+      audioRecorder.stopRecording();
     } else {
-      startRecording();
+      setVoiceState('recording');
+      audioRecorder.startRecording();
     }
-  }, [voiceState, useWhisperOnWeb, isRecording, startRecording, stopRecording]);
+  }, [voiceState, useNativeOrWhisperRecording, audioRecorder.isRecording, audioRecorder.stopRecording, audioRecorder.startRecording]);
 
   const handleSendTyped = useCallback(() => {
     const text = typedAnswer.trim();
@@ -2593,7 +2500,7 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
 
   const handlePressEnd = useCallback(async () => {
     if (voiceState !== 'listening') return;
-    if (useWhisperOnWeb) return; // web Whisper path uses handleMicToggle
+    if (useNativeOrWhisperRecording) return; // native or web Whisper use hook
     if (Platform.OS === 'web' && recognitionRef.current) {
       recognitionRef.current.stop();
     } else {
@@ -2604,7 +2511,7 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
       const text = transcriptAtReleaseRef.current?.trim() ?? currentTranscript.trim();
       processUserSpeech(text);
     }, 400);
-  }, [voiceState, currentTranscript, processUserSpeech, useWhisperOnWeb, handleRecordingError, transcribeSafe]);
+  }, [voiceState, currentTranscript, processUserSpeech, useNativeOrWhisperRecording, handleRecordingError, transcribeSafe]);
 
   const handleResume = useCallback(
     async (saved: NonNullable<Awaited<ReturnType<typeof loadInterviewFromStorage>>>) => {
@@ -2706,7 +2613,12 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
 
   const startInterview = useCallback(async () => {
     if (isAdmin) await clearInterviewFromStorage(userId);
-    if (Platform.OS === 'web') await requestMicPermissionForPWA();
+    if (Platform.OS === 'web') {
+      await requestMicPermissionForPWA();
+    } else if (useNativeOrWhisperRecording) {
+      const granted = await audioRecorder.requestPermission();
+      setMicPermission(granted ? 'granted' : 'denied');
+    }
     setStatus('active');
     setVoiceState('processing');
     if (!ANTHROPIC_API_KEY && !ANTHROPIC_PROXY_URL) {
@@ -2719,7 +2631,7 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
     const openingLine = "Hi, I'm Aira, welcome to Amoraea, what can I call you?";
     setMessages([{ role: 'assistant', content: openingLine }]);
     await speakTextSafe(openingLine);
-  }, [speakTextSafe, isAdmin, userId]);
+  }, [speakTextSafe, isAdmin, userId, useNativeOrWhisperRecording, audioRecorder]);
 
   const saveInterviewResults = useCallback(
     async (results: InterviewResults, gateResult: GateResult, uid: string) => {
@@ -3117,7 +3029,7 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
         {isInterviewerView ? (
           <View style={{ flex: 1, backgroundColor: '#05060D' }}>
             <UserInterviewLayout
-              flameState={voiceState}
+              flameState={useNativeOrWhisperRecording && audioRecorder.isRecording ? 'recording' : voiceState}
               activeScenario={activeScenario}
               interviewerText={currentInterviewerText}
               ttsFallbackActive={tTSFallbackActive}
@@ -3125,13 +3037,13 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
               isWaiting={isWaiting}
               onPressStart={handlePressStart}
               onPressEnd={handlePressEnd}
-              voiceState={voiceState}
+              voiceState={useNativeOrWhisperRecording && audioRecorder.isRecording ? 'recording' : voiceState}
               micError={micError}
               micWarning={micWarning}
               inputDisabled={inputDisabled}
-              micToggleMode={useWhisperOnWeb}
-              onMicPress={useWhisperOnWeb ? handleMicToggle : undefined}
-              micLabelOverride={useWhisperOnWeb ? (isRecording ? 'Tap to stop' : 'Tap to speak') : undefined}
+              micToggleMode={useNativeOrWhisperRecording}
+              onMicPress={useNativeOrWhisperRecording ? handleNativeOrWhisperMicPress : undefined}
+              micLabelOverride={useNativeOrWhisperRecording ? (audioRecorder.isRecording ? 'Tap to stop' : 'Tap to speak') : undefined}
               onExit={() => {
                 const confirmMessage = 'Are you sure you want to log out?';
                 if (Platform.OS === 'web' && typeof window !== 'undefined') {

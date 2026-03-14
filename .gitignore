@@ -17,3 +17,7 @@ web-build/
 
 .vercel
 .env*.local
+
+# EAS / App Store / Play Store — do not commit secrets
+eas.json
+google-service-account.json
