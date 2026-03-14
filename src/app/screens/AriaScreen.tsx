@@ -86,6 +86,78 @@ function randomFrom<T>(arr: T[]): T {
   return arr[Math.floor(Math.random() * arr.length)];
 }
 
+/**
+ * Detect if the user's message is requesting a scenario switch.
+ * Returns 'to_fictional' | 'to_personal' | null.
+ */
+function detectScenarioSwitch(
+  userMessage: string,
+  currentMode: 'personal' | 'fictional' | null
+): 'to_fictional' | 'to_personal' | null {
+  const text = userMessage.toLowerCase().trim();
+  const toFictionalSignals = [
+    'use a scenario',
+    'use the scenario',
+    'use the fake',
+    'fictional',
+    'just use the example',
+    'scenario instead',
+    'forget it',
+    'never mind',
+    "let's just do",
+    'give me the scenario',
+    'use the situation',
+  ];
+  const toPersonalSignals = [
+    'i do have',
+    'actually i',
+    'wait i',
+    'real example',
+    'real one',
+    'something comes to mind',
+    'i thought of',
+    'switch to real',
+    'use a real',
+    'let me share',
+    'i have one',
+    'i can think of one',
+  ];
+  if (currentMode === 'personal') {
+    if (toFictionalSignals.some((s) => text.includes(s))) return 'to_fictional';
+  }
+  if (currentMode === 'fictional') {
+    if (toPersonalSignals.some((s) => text.includes(s))) return 'to_personal';
+  }
+  return null;
+}
+
+type MessageWithScenario = { role: string; content: string; scenarioNumber?: number };
+
+function getScenarioNumberForNewMessage(
+  prevMessages: MessageWithScenario[],
+  role: 'user' | 'assistant',
+  newContent?: string
+): number {
+  const last = [...prevMessages].reverse().find((m) => m.role === 'user' || m.role === 'assistant');
+  const lastNum = (last as MessageWithScenario | undefined)?.scenarioNumber;
+  if (role === 'user') return lastNum ?? 1;
+  if (!newContent) return lastNum ?? 1;
+  const c = newContent.toLowerCase();
+  if (
+    /think of a time|first situation|slow drift|jamie.*morgan|morgan.*jamie|here's the first/.test(c)
+  )
+    return 1;
+  if (
+    /second situation|missed moment|casey.*jordan|jordan.*casey|on to the second|first situation/.test(c)
+  )
+    return 2;
+  if (
+    /third situation|last one|intimacy gap|riley.*drew|drew.*riley|situation three/.test(c)
+  )
+    return 3;
+  return lastNum ?? 1;
+}
+
 /** Removes control tokens from AI response before display or TTS. Use raw text for logic only. */
 function stripControlTokens(text: string): string {
   if (!text) return text;
@@ -1010,6 +1082,77 @@ When all stages are complete and you have adequate evidence for P1, P3, and P5 (
 
 TONE: Curious, not clinical. Warm, not cheerful. Direct, not blunt. Keep responses concise — 2-4 sentences per turn. Write for the ear; use short sentences, no bullet points. End with a single clear question.`;
 
+const SCENARIO_SWITCHING_INSTRUCTIONS = `
+SCENARIO SWITCHING:
+
+At any point during a scenario (before moving to the next one), the user can switch between sharing a personal example and using the fictional situation. When they signal this intent:
+
+1. Acknowledge it briefly and naturally — one sentence maximum. Do NOT make it a big deal. Do NOT apologise or over-explain.
+
+2. If switching FROM personal TO fictional:
+   Use phrases like:
+   - "No problem, let's use a scenario instead — [deliver scenario]"
+   - "Sure — forget what you shared, here's one to react to instead. [deliver scenario]"
+   - "No problem. [deliver scenario]"
+
+3. If switching FROM fictional TO personal:
+   Use phrases like:
+   - "Definitely, let's drop the scenario — what actually happened?"
+   - "Of course, let's use the real one instead — tell me about it."
+   - "Sure, let's go with the real thing. What happened?"
+
+4. After acknowledging, immediately deliver the new content (either the fictional scenario or the personal opening question). Do not ask any follow-up questions before doing this.
+
+5. The previous responses in this scenario are erased — treat this as if the scenario is starting fresh.
+
+IMPORTANT: Switching is only allowed WITHIN the current scenario. Once the user has moved to the next scenario, the previous one is locked and cannot be changed.
+`;
+
+const SCENARIO_BOUNDARY_INSTRUCTIONS = `
+SCENARIO BOUNDARIES:
+
+Once the user has moved to a new scenario, the previous scenario is complete and cannot be changed or revisited.
+
+If the user asks to go back to a previous scenario (e.g. "can I change what I said in the first one?", "actually I want to redo scenario 1", "can we go back?"):
+
+Respond warmly but clearly. Keep it short. Examples:
+- "Once we've moved on I need to keep going — but what you said before is already part of the picture, and that's okay."
+- "We can't go back once we've moved on, but that's fine — what you shared already counts."
+- "That one's done — but don't worry, what you said is part of the picture. Let's keep going."
+
+Do NOT say "that's not allowed" or "the system won't permit". Frame it as a natural feature of the conversation, not a rule.
+
+Switching between personal and fictional is ONLY available within the CURRENT scenario. Previous scenarios are locked.
+`;
+
+const SCENARIO_CLOSING_INSTRUCTIONS = `
+SCENARIO CLOSING:
+
+After the user has responded to all questions in a scenario and you have gathered enough to score it, before moving on you MUST ask a brief closing question.
+
+The closing question should:
+- Invite the user to add anything they feel is missing context
+- NOT suggest that something is missing or incomplete
+- NOT be generic ("anything else?")
+- Feel like a natural conversational pause
+- Be ONE sentence maximum
+
+Use variations of:
+- "Before we move on — is there anything about that situation you'd want me to understand that you haven't said yet?"
+- "Anything you'd want to add before we move on?"
+- "Is there anything else about that one before we go to the next?"
+- "Before we move forward — anything you'd want to add?"
+
+After the user responds (whether they add something or say no), THEN deliver the transition to the next scenario.
+
+If the user adds something meaningful, incorporate it into your understanding before scoring. Do not re-score out loud — just acknowledge it naturally and move on.
+
+If the user says no or nothing:
+- "Okay, on to the next one."
+- "Got it — let's move on."
+- "Alright, next situation."
+`;
+
 function buildScoringPrompt(
   transcript: { role: string; content: string }[],
   typologyContext: string
@@ -1647,6 +1790,23 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
   const [usedPersonalExamples, setUsedPersonalExamples] = useState(false);
   const [isWaiting, setIsWaiting] = useState(false);
 
+  /** Per-scenario mode: 'personal' | 'fictional' | null (not started). Updated on switch; scenario 2 is always fictional. */
+  const [scenarioMode, setScenarioMode] = useState<Record<number, 'personal' | 'fictional' | null>>({
+    1: null,
+    2: null,
+    3: null,
+  });
+  /** Once we move to scenario N, scenarios 1..N-1 are locked. */
+  const [highestScenarioReached, setHighestScenarioReached] = useState(1);
+  /** Alpha: log of scenario switches for Layer 1 data. */
+  const [switchLog, setSwitchLog] = useState<Array<{
+    scenario: number;
+    switched_from: 'personal' | 'fictional';
+    switched_to: 'personal' | 'fictional';
+    switched_at_message_index: number;
+    timestamp: string;
+  }>>([]);
+
   useEffect(() => {
     if (__DEV__ || ALPHA_MODE) {
       const hasAnthropic = !!(typeof process !== 'undefined' && process.env?.EXPO_PUBLIC_ANTHROPIC_API_KEY);
@@ -2126,6 +2286,49 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
     [userId, saveScenarioCheckpoint]
   );
 
+  const canSwitchScenario = useCallback(
+    (scenarioNumber: number) => {
+      const current = getCurrentScenario(scoredScenariosRef.current);
+      return current === scenarioNumber && highestScenarioReached === scenarioNumber;
+    },
+    [highestScenarioReached]
+  );
+
+  const handleScenarioSwitch = useCallback(
+    (
+      scenarioNumber: number,
+      fromMode: 'personal' | 'fictional',
+      toMode: 'personal' | 'fictional',
+      messageIndex: number
+    ) => {
+      setScenarioScores((prev) => {
+        const next = { ...prev };
+        delete next[scenarioNumber];
+        return next;
+      });
+      probeLogRef.current = probeLogRef.current.filter((p) => p.scenario !== scenarioNumber);
+      responseTimingsRef.current = responseTimingsRef.current.filter(
+        (t) => t.scenario !== scenarioNumber
+      );
+      if (scenarioScoresRef.current[scenarioNumber]) {
+        delete scenarioScoresRef.current[scenarioNumber];
+      }
+      scoredScenariosRef.current.delete(scenarioNumber);
+      setScenarioMode((prev) => ({ ...prev, [scenarioNumber]: toMode }));
+      setSwitchLog((prev) => [
+        ...prev,
+        {
+          scenario: scenarioNumber,
+          switched_from: fromMode,
+          switched_to: toMode,
+          switched_at_message_index: messageIndex,
+          timestamp: new Date().toISOString(),
+        },
+      ]);
+    },
+    []
+  );
+
   const processUserSpeech = useCallback(async (spokenText: string) => {
     if (!spokenText.trim()) {
       setVoiceState('idle');
@@ -2199,24 +2402,62 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
       }
     }
 
-    const userMsg = { role: 'user', content: trimmed };
-    const newMessages = [...messages, userMsg];
-    setMessages(newMessages);
-    setCurrentTranscript('');
-    transcriptAtReleaseRef.current = '';
-    setVoiceState('processing');
-    setExchangeCount((c) => c + 1);
+    const userMsg: MessageWithScenario = {
+      role: 'user',
+      content: trimmed,
+      scenarioNumber: getScenarioNumberForNewMessage(messages, 'user'),
+    };
+    const newMessages: MessageWithScenario[] = [...messages, userMsg];
+
+    const currentScenario = getCurrentScenario(scoredScenariosRef.current);
+    const currentMode: 'personal' | 'fictional' | null =
+      currentScenario != null
+        ? (scenarioMode[currentScenario] ?? (currentScenario === 2 ? 'fictional' : 'personal'))
+        : null;
+    const switchIntent = currentMode ? detectScenarioSwitch(trimmed, currentMode) : null;
+    const isSwitch =
+      !!(
+        switchIntent &&
+        currentScenario != null &&
+        canSwitchScenario(currentScenario)
+      );
+
+    if (isSwitch && currentScenario != null) {
+      const fromMode = switchIntent === 'to_fictional' ? 'personal' : 'fictional';
+      const toMode = switchIntent === 'to_fictional' ? 'fictional' : 'personal';
+      handleScenarioSwitch(currentScenario, fromMode, toMode, newMessages.length);
+      const scenarioStartIndex = newMessages.findIndex(
+        (m) => (m as MessageWithScenario).scenarioNumber === currentScenario
+      );
+      const truncated =
+        scenarioStartIndex >= 0 ? newMessages.slice(0, scenarioStartIndex) : [];
+      const messagesForApi: MessageWithScenario[] = [...truncated, userMsg];
+      setMessages(truncated);
+      setCurrentTranscript('');
+      transcriptAtReleaseRef.current = '';
+      setVoiceState('processing');
+      setExchangeCount((c) => c + 1);
+      // Use messagesForApi for this turn; requestBody and response handling will use messagesToUse
+      var messagesToUse = messagesForApi;
+    } else {
+      setMessages(newMessages);
+      setCurrentTranscript('');
+      transcriptAtReleaseRef.current = '';
+      setVoiceState('processing');
+      setExchangeCount((c) => c + 1);
+      var messagesToUse = newMessages;
+    }
     const detected = detectConstructs(trimmed);
     setTouchedConstructs((prev) => [...new Set([...prev, ...detected])]);
 
     // Track if user shared a personal example (response to personal-opening question that isn't a decline)
-    const lastAssistant = [...newMessages].reverse().find((m) => m.role === 'assistant');
+    const lastAssistant = [...messagesToUse].reverse().find((m) => m.role === 'assistant');
     const lastContent = (lastAssistant?.content ?? '').toLowerCase();
     const isPersonalOpening = /real (memory|example|situation|experience)|your own|from your (life|experience)|think of a time|can you think of|do you have (a|an) (example|memory)|share (a|something)|tell me about (a|something)/i.test(lastContent);
     if (isPersonalOpening && !isDecline(trimmed)) setUsedPersonalExamples(true);
 
     if (!ANTHROPIC_API_KEY && !ANTHROPIC_PROXY_URL) {
-      const userHasSpoken = newMessages.some((m) => m.role === 'user');
+      const userHasSpoken = messagesToUse.some((m) => m.role === 'user');
       const fallback = userHasSpoken
         ? randomFrom(AIRA_ERROR_MESSAGES.conversationFailed)
         : "Welcome. Give me just a moment...";
@@ -2227,15 +2468,15 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
     }
 
     // Scenarios need more tokens — detect from last user message (no-example → scenario next)
-      const lastUserMsg = (newMessages[newMessages.length - 1] as { content?: string })?.content?.toLowerCase() ?? '';
+      const lastUserMsg = (messagesToUse[messagesToUse.length - 1] as { content?: string })?.content?.toLowerCase() ?? '';
       const isNoExample = /don't have|can't think|i dont|nothing comes|no example|i don't/i.test(lastUserMsg);
       const maxTok = isNoExample ? 600 : 200;
       const closingInstruction = usedPersonalExamples ? PERSONAL_CLOSING_INSTRUCTION : SCENARIO_ONLY_CLOSING_INSTRUCTION;
       const requestBody = {
         model: 'claude-sonnet-4-20250514',
         max_tokens: maxTok,
-        system: INTERVIEWER_SYSTEM + closingInstruction,
-        messages: newMessages
+        system: INTERVIEWER_SYSTEM + SCENARIO_SWITCHING_INSTRUCTIONS + SCENARIO_BOUNDARY_INSTRUCTIONS + SCENARIO_CLOSING_INSTRUCTIONS + closingInstruction,
+        messages: messagesToUse
           .filter((m) => m.role === 'user' || m.role === 'assistant')
           .map((m) => ({ role: m.role, content: m.content })),
       };
@@ -2269,7 +2510,7 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
       return parsed;
     };
 
-    const numUserMessages = newMessages.filter((m) => m.role === 'user').length;
+    const numUserMessages = messagesToUse.filter((m) => m.role === 'user').length;
     const isFirstExchange = numUserMessages === 1;
     if (isFirstExchange) {
       await new Promise((r) => setTimeout(r, 500));
@@ -2290,7 +2531,7 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
       setIsWaiting(false);
     } catch (err) {
       setIsWaiting(false);
-      const userHasSpoken = newMessages.some((m) => m.role === 'user');
+      const userHasSpoken = messagesToUse.some((m) => m.role === 'user');
       const fallback = userHasSpoken
         ? randomFrom(AIRA_ERROR_MESSAGES.conversationFailed)
         : "Welcome. Give me just a moment...";
@@ -2305,7 +2546,7 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
         if (s) scenarioScoresPayload[n] = { pillarScores: s.pillarScores, pillarConfidence: s.pillarConfidence, keyEvidence: s.keyEvidence, scenarioName: s.scenarioName };
       });
       saveInterviewToStorage(userId, {
-        messages: newMessages.filter((m) => !(m as { isWaiting?: boolean }).isWaiting),
+        messages: messagesToUse.filter((m) => !(m as { isWaiting?: boolean }).isWaiting),
         scenariosCompleted: completed,
         scenarioScores: scenarioScoresPayload,
         currentScenario: getCurrentScenario(scoredScenariosRef.current),
@@ -2319,8 +2560,9 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
       const scenarioMatch = text.match(/\[SCENARIO_COMPLETE:(\d)\]/);
       if (scenarioMatch) {
         const scenarioNumber = parseInt(scenarioMatch[1], 10) as 1 | 2 | 3;
+        setHighestScenarioReached((prev) => Math.max(prev, scenarioNumber));
         const displayText = stripControlTokens(text) || "Good, that's helpful.";
-        const updatedMessages = [...newMessages, { role: 'assistant', content: displayText || 'Good, that’s helpful.' }];
+        const updatedMessages = [...messagesToUse, { role: 'assistant', content: displayText || 'Good, that’s helpful.' }];
         setMessages(updatedMessages);
         await speakTextSafe(displayText || 'Good, that’s helpful.');
         // Guard: only score each scenario once (prevents duplicate score cards)
@@ -2336,7 +2578,12 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
       // Process INTERVIEW_COMPLETE first so final scoring runs and Stage 3 scores display immediately
       if (text.includes('[INTERVIEW_COMPLETE]')) {
         const displayText = stripControlTokens(text) || 'Thank you. That was really helpful.';
-        const finalMessages = [...newMessages, { role: 'assistant', content: displayText }];
+        const finalAssistant: MessageWithScenario = {
+          role: 'assistant',
+          content: displayText,
+          scenarioNumber: getScenarioNumberForNewMessage(messagesToUse, 'assistant', displayText),
+        };
+        const finalMessages = [...messagesToUse, finalAssistant];
         setMessages(finalMessages);
         await speakTextSafe(displayText);
         const transcriptForScoring = finalMessages.filter((m) => m.role === 'user' || m.role === 'assistant');
@@ -2348,7 +2595,7 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
       if (stageCompleteMatch) {
         const stageNum = parseInt(stageCompleteMatch[1], 10);
         const displayText = stripControlTokens(text) || "Good, that's helpful.";
-        const finalMessages = [...newMessages, { role: 'assistant', content: displayText || 'Good, that’s helpful.' }];
+        const finalMessages = [...messagesToUse, { role: 'assistant', content: displayText || 'Good, that’s helpful.' }];
         setMessages(finalMessages);
         await speakTextSafe(displayText || 'Good, that’s helpful.');
         try {
@@ -2380,12 +2627,16 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
       }
 
       const displayText = stripControlTokens(text);
-      const aiMsg = { role: 'assistant', content: displayText };
-      setMessages([...newMessages, aiMsg]);
+      const aiMsg: MessageWithScenario = {
+        role: 'assistant',
+        content: displayText,
+        scenarioNumber: getScenarioNumberForNewMessage(messagesToUse, 'assistant', displayText),
+      };
+      setMessages([...messagesToUse, aiMsg]);
       const aiDetected = detectConstructs(text);
       setTouchedConstructs((prev) => [...new Set([...prev, ...aiDetected])]);
       await speakTextSafe(displayText);
-  }, [messages, speakTextSafe, route?.name, userId, navigation, queryClient, profile?.name, fetchStageScore, scoreScenario, usedPersonalExamples]);
+  }, [messages, speakTextSafe, route?.name, userId, navigation, queryClient, profile?.name, fetchStageScore, scoreScenario, usedPersonalExamples, scenarioMode, canSwitchScenario, handleScenarioSwitch]);
 
   const handlePressStart = useCallback(async () => {
     if (voiceState !== 'idle') return;
@@ -2518,6 +2769,8 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
       const restoredMessages = saved.messages ?? [];
       const completedSet = new Set(saved.scenariosCompleted ?? []);
       scoredScenariosRef.current = completedSet;
+      const maxCompleted = completedSet.size > 0 ? Math.max(...completedSet) : 1;
+      setHighestScenarioReached((prev) => Math.max(prev, maxCompleted));
 
       const scoreCards: { role: string; content: string; isScoreCard?: boolean }[] = (saved.scenariosCompleted ?? [])
         .slice()
@@ -2794,6 +3047,7 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
             transcript: finalMessages,
             response_timings: responseTimingsRef.current,
             probe_log: probeLogRef.current,
+            switch_log: switchLog,
             score_consistency: scoreConsistency,
             construct_asymmetry: constructAsymmetry,
             language_markers: languageMarkers,
