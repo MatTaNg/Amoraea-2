@@ -15,3 +15,5 @@ web-build/
 .env.local
 .DS_Store
 
+.vercel
+.env*.local
