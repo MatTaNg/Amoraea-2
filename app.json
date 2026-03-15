@@ -4,18 +4,27 @@
     "slug": "amoraea",
     "version": "1.0.0",
     "orientation": "portrait",
-    "icon": "./public/icons/icon-512x512.png",
-    "userInterfaceStyle": "dark",
-    "backgroundColor": "#05060D",
+    "icon": "./assets/icons/icon-512x512.png",
     "splash": {
-      "image": "./public/icons/icon-512x512.png",
+      "image": "./assets/icons/icon-512x512.png",
       "resizeMode": "contain",
       "backgroundColor": "#05060D"
+    },
+    "userInterfaceStyle": "dark",
+    "backgroundColor": "#05060D",
+    "updates": {
+      "url": "https://u.expo.dev/084f7da3-b76f-4c1e-981d-7501a3e08e04",
+      "enabled": true,
+      "fallbackToCacheTimeout": 0
+    },
+    "runtimeVersion": {
+      "policy": "sdkVersion"
     },
     "assetBundlePatterns": [
       "**/*"
     ],
     "ios": {
+      "icon": "./assets/icons/icon-512x512.png",
       "supportsTablet": false,
       "bundleIdentifier": "com.amoraea.app",
       "backgroundColor": "#05060D",
@@ -30,6 +39,10 @@
       "buildNumber": "1"
     },
     "android": {
+      "adaptiveIcon": {
+        "foregroundImage": "./assets/icons/icon-512x512-maskable.png",
+        "backgroundColor": "#05060D"
+      },
       "package": "com.amoraea.app",
       "backgroundColor": "#05060D",
       "permissions": [
@@ -43,10 +56,6 @@
         "android.permission.WRITE_CONTACTS"
       ],
       "versionCode": 1,
-      "adaptiveIcon": {
-        "foregroundImage": "./public/icons/icon-512x512-maskable.png",
-        "backgroundColor": "#05060D"
-      }
     },
     "web": {
       "favicon": "./public/icons/favicon-32x32.png",

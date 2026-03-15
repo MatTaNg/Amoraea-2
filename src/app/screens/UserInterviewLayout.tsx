@@ -56,6 +56,8 @@ interface UserInterviewLayoutProps {
   onMicPress?: () => void;
   /** Override mic label when micToggleMode is true (e.g. "Tap to speak" / "Tap to stop") */
   micLabelOverride?: string;
+  /** When true, the current interviewer line is an error message — style it distinctly (red tint) */
+  interviewerLineIsError?: boolean;
 }
 
 const GOOGLE_FONTS_URL =
@@ -78,6 +80,7 @@ export const UserInterviewLayout: React.FC<UserInterviewLayoutProps> = ({
   micToggleMode = false,
   onMicPress,
   micLabelOverride,
+  interviewerLineIsError = false,
 }) => {
   const rippleAnim = useRef(new Animated.Value(0)).current;
 
@@ -176,7 +179,11 @@ export const UserInterviewLayout: React.FC<UserInterviewLayoutProps> = ({
           {isWaiting ? (
             <Text style={styles.waitingText}>Aira is thinking...</Text>
           ) : interviewerText ? (
-            <Text style={styles.interviewerQuote} numberOfLines={4} ellipsizeMode="tail">
+            <Text
+              style={[styles.interviewerQuote, interviewerLineIsError && styles.interviewerQuoteError]}
+              numberOfLines={4}
+              ellipsizeMode="tail"
+            >
               "{interviewerText}"
             </Text>
           ) : null}
@@ -415,6 +422,13 @@ const styles = StyleSheet.create({
     ...(Platform.OS === 'web'
       ? { textShadow: '0 0 40px rgba(30,111,217,0.3)' }
       : { textShadowColor: 'rgba(30,111,217,0.3)', textShadowOffset: { width: 0, height: 0 }, textShadowRadius: 40 }),
+  },
+  interviewerQuoteError: {
+    color: '#E87A7A',
+    fontStyle: 'normal',
+    ...(Platform.OS === 'web'
+      ? { textShadow: 'none' }
+      : { textShadowColor: 'transparent', textShadowOffset: { width: 0, height: 0 }, textShadowRadius: 0 }),
   },
   ttsFallbackNotice: {
     fontFamily: FONT_UI,

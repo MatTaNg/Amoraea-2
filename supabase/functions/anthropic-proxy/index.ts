@@ -1,11 +1,14 @@
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
+  'Access-Control-Allow-Methods': 'POST, OPTIONS',
+  'Access-Control-Max-Age': '86400',
 };
 
 Deno.serve(async (req) => {
+  // Preflight: must return 204 and CORS headers so browser allows the actual POST
   if (req.method === 'OPTIONS') {
-    return new Response('ok', { headers: corsHeaders });
+    return new Response(null, { status: 204, headers: corsHeaders });
   }
 
   if (req.method !== 'POST') {
@@ -24,8 +27,24 @@ Deno.serve(async (req) => {
     );
   }
 
+  let body: unknown;
   try {
-    const body = await req.json();
+    body = await req.json();
+  } catch {
+    return new Response(
+      JSON.stringify({ error: { message: 'Invalid or missing JSON body' } }),
+      { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+    );
+  }
+
+  if (body == null || typeof body !== 'object' || !Array.isArray((body as { messages?: unknown }).messages)) {
+    return new Response(
+      JSON.stringify({ error: { message: 'Request body must be an object with a "messages" array' } }),
+      { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+    );
+  }
+
+  try {
     const res = await fetch('https://api.anthropic.com/v1/messages', {
       method: 'POST',
       headers: {
@@ -46,6 +65,7 @@ Deno.serve(async (req) => {
         { status: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
       );
     }
+    // Forward response (including 400) so client sees Anthropic's error message
     return new Response(text, {
       status: res.status,
       headers: { ...corsHeaders, 'Content-Type': 'application/json' },

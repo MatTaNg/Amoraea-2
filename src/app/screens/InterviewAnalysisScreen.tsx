@@ -120,7 +120,7 @@ export function InterviewAnalysisScreen({
   attemptId,
   onRetake,
 }: {
-  attemptId: string;
+  attemptId: string | null;
   onRetake: () => void;
 }) {
   const [attempt, setAttempt] = useState<AttemptRow | null>(null);
@@ -134,6 +134,10 @@ export function InterviewAnalysisScreen({
   const [saving, setSaving] = useState(false);
 
   useEffect(() => {
+    if (!attemptId) {
+      setLoading(false);
+      return;
+    }
     let cancelled = false;
     (async () => {
       const { data, error } = await supabase
@@ -170,6 +174,20 @@ export function InterviewAnalysisScreen({
     setSaving(false);
     setSubmitted(true);
   };
+
+  if (!attemptId) {
+    return (
+      <SafeAreaContainer>
+        <View style={styles.loadingRoot}>
+          <Text style={styles.loadingTitle}>Preparing your analysis...</Text>
+          <Text style={styles.loadingSub}>Your scores have been saved. The detailed analysis may not be available yet.</Text>
+          <Pressable onPress={onRetake} style={styles.startOverButton}>
+            <Text style={styles.startOverButtonText}>Start over →</Text>
+          </Pressable>
+        </View>
+      </SafeAreaContainer>
+    );
+  }
 
   if (loading) {
     return (
@@ -471,6 +489,21 @@ const styles = StyleSheet.create({
     letterSpacing: 2,
     textTransform: 'uppercase',
     color: '#3D5470',
+    marginBottom: 24,
+  },
+  startOverButton: {
+    marginTop: 16,
+    paddingVertical: 12,
+    paddingHorizontal: 24,
+    borderWidth: 1,
+    borderColor: 'rgba(82,142,220,0.4)',
+    borderRadius: 8,
+  },
+  startOverButtonText: {
+    fontSize: 14,
+    fontWeight: '500',
+    color: '#7A9ABE',
+    letterSpacing: 1,
   },
   header: { alignItems: 'center', marginBottom: 48 },
   headerLabel: {

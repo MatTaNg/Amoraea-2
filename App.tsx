@@ -38,7 +38,7 @@ import { OnboardingUseCase } from './src/domain/useCases/OnboardingUseCase';
 import { AsyncStorageService } from './src/utilities/storage/AsyncStorageService';
 import { supabase } from './src/data/supabase/client';
 import { useQuery } from '@tanstack/react-query';
-import { StyleSheet, View } from 'react-native';
+import { StyleSheet, View, Text, ActivityIndicator } from 'react-native';
 
 const ROOT_STYLE = {
   flex: 1,
@@ -174,7 +174,7 @@ const AppNavigator = ({ userId }: { userId: string }) => {
   }, [userId]);
 
   if (isLoading || !profile) {
-    return null; // Loading state
+    return <LoadingScreen />;
   }
 
   const stage = profile.onboardingStage ?? 'interview';
@@ -211,18 +211,37 @@ const AppNavigator = ({ userId }: { userId: string }) => {
   );
 };
 
+const LoadingScreen = () => (
+  <View style={[ROOT_STYLE, { justifyContent: 'center', alignItems: 'center' }]}>
+    <ActivityIndicator size="large" color="#7A9ABE" />
+    <Text style={{ marginTop: 16, color: '#7A9ABE', fontSize: 14 }}>Loading…</Text>
+  </View>
+);
+
 const RootNavigator = () => {
   const { user, loading } = useAuth();
 
   if (loading) {
-    return null; // Or a loading screen
+    return <LoadingScreen />;
   }
 
   // Only show app/onboarding when user has a real session with email (signed in or signed up)
   const isLoggedIn = user?.email != null && user.email !== '';
 
+  const navTheme = {
+    dark: true,
+    colors: {
+      primary: '#5BA8E8',
+      background: '#05060D',
+      card: '#05060D',
+      text: '#E8F0F8',
+      border: 'rgba(82,142,220,0.2)',
+      notification: '#5BA8E8',
+    },
+  };
+
   return (
-    <NavigationContainer>
+    <NavigationContainer theme={navTheme}>
       {isLoggedIn ? <AppNavigator userId={user!.id} /> : <AuthNavigator />}
     </NavigationContainer>
   );
