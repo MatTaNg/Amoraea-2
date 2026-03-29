@@ -1,0 +1,16 @@
+diff --git a/node_modules/expo-av/ios/EXAV/EXAV.m b/node_modules/expo-av/ios/EXAV/EXAV.m
+--- a/node_modules/expo-av/ios/EXAV/EXAV.m
++++ b/node_modules/expo-av/ios/EXAV/EXAV.m
+@@ -324,8 +324,12 @@
+   }
+ 
+   if (_allowsAudioRecording) {
+     // Bluetooth input is only available when recording is allowed
+     requiredAudioCategoryOptions = requiredAudioCategoryOptions | AVAudioSessionCategoryOptionAllowBluetooth;
++  } else {
++    // Playback: use PlayAndRecord + DefaultToSpeaker so TTS routes to loudspeaker, not earpiece (fixes quiet speaker after first mic use)
++    requiredAudioCategory = AVAudioSessionCategoryPlayAndRecord;
++    requiredAudioCategoryOptions = requiredAudioCategoryOptions | AVAudioSessionCategoryOptionDefaultToSpeaker;
+   }
+ 
+   return [_kernelAudioSessionManagerDelegate setCategory:requiredAudioCategory withOptions:requiredAudioCategoryOptions forModule:self];

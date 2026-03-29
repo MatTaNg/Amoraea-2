@@ -26,8 +26,8 @@ export const LoginScreen: React.FC<{ navigation: any; route?: { params?: { confi
   navigation,
   route,
 }) => {
-  const [email, setEmail] = useState('');
-  const [password, setPassword] = useState('');
+  const [email, setEmail] = useState('mattang5280@gmail.com');
+  const [password, setPassword] = useState('Ab#3dragons');
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [resendSent, setResendSent] = useState(false);

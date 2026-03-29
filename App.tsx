@@ -1,6 +1,6 @@
-import React, { useEffect, useMemo } from 'react';
+import React, { useEffect, useMemo, Suspense, lazy } from 'react';
 import { Platform } from 'react-native';
-import { NavigationContainer } from '@react-navigation/native';
+import { NavigationContainer, DarkTheme } from '@react-navigation/native';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
@@ -28,8 +28,30 @@ import { CompatibilityScreen } from './src/app/screens/CompatibilityScreen';
 import { EditProfileScreen } from './src/app/screens/EditProfileScreen';
 import { ContactsScreen } from './src/app/screens/ContactsScreen';
 import { HumanDesignScreen } from './src/app/screens/HumanDesignScreen';
-import { AriaScreen } from './src/app/screens/AriaScreen';
 import { FullAssessmentScreen } from './src/app/screens/FullAssessmentScreen';
+
+// Lazy-load AriaScreen so expo-speech-recognition is only required when user opens Aria.
+// If the module fails to load (e.g. Expo Go / native module missing), show a fallback instead of crashing.
+const AriaScreenLazy = lazy(() =>
+  import('./src/app/screens/AriaScreen').catch(() => ({
+    default: function AriaUnavailable() {
+      return (
+        <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: '#05060D', padding: 24 }}>
+          <Text style={{ color: '#E8F0F8', fontSize: 16, textAlign: 'center' }}>
+            Speech recognition is not available in this build. Use a development or production build (not Expo Go) for the full interview.
+          </Text>
+        </View>
+      );
+    },
+  }))
+);
+
+const AriaScreenWithSuspense = (props: { navigation: unknown; route: unknown }) => (
+  <Suspense fallback={<LoadingScreen />}>
+    <AriaScreenLazy {...props} />
+  </Suspense>
+);
+
 import { AppHeader } from './src/ui/components/AppHeader';
 import { OnboardingHeader } from './src/ui/components/OnboardingHeader';
 import { ProfileRepository } from './src/data/repositories/ProfileRepository';
@@ -91,18 +113,21 @@ const OnboardingNavigator = ({ userId }: { userId: string }) => (
   </Stack.Navigator>
 );
 
+const ALPHA_MODE = true;
+
 /** Gate-based onboarding: Interview first → (when approved) Basic Info → Psychometrics → Compatibility → Complete.
- *  Skip basic info modals for now — go straight to AI interview; basic info screens remain available for later use. */
+ *  Skip basic info modals for now — go straight to AI interview; basic info screens remain available for later use.
+ *  When ALPHA_MODE, keep users on OnboardingInterview after completion so they see the analysis screen. */
 function getOnboardingInitialRoute(profile: { onboardingStage?: string; applicationStatus?: string; gate1Score?: unknown }): string {
   const stage = profile.onboardingStage ?? 'interview';
-  // Only show Stage1BasicInfo after interview is passed; otherwise go straight to AI interview
   if (stage === 'basic_info') {
+    if (ALPHA_MODE) return 'OnboardingInterview';
     if (profile.gate1Score && profile.applicationStatus === 'approved') return 'Stage1BasicInfo';
     return 'OnboardingInterview';
   }
   if (stage === 'interview') {
-    if (profile.applicationStatus === 'approved') return 'Stage1BasicInfo';
-    if (profile.gate1Score) return 'PostInterview';
+    if (!ALPHA_MODE && profile.applicationStatus === 'approved') return 'Stage1BasicInfo';
+    if (!ALPHA_MODE && profile.gate1Score) return 'PostInterview';
     return 'OnboardingInterview';
   }
   if (stage === 'psychometrics') {
@@ -135,7 +160,7 @@ const GatesOnboardingNavigator = ({ userId }: { userId: string }) => {
       <Stack.Screen name="InterviewFraming" component={InterviewFramingScreen} initialParams={{ userId }} />
       <Stack.Screen
         name="OnboardingInterview"
-        component={AriaScreen}
+        component={AriaScreenWithSuspense}
         initialParams={{ userId }}
         options={{ headerShown: false }}
       />
@@ -203,7 +228,7 @@ const AppNavigator = ({ userId }: { userId: string }) => {
       <Stack.Screen name="HumanDesign" component={HumanDesignScreen} />
       <Stack.Screen
         name="Aria"
-        component={AriaScreen}
+        component={AriaScreenWithSuspense}
         initialParams={{ userId }}
         options={{ headerShown: false }}
       />
@@ -221,15 +246,31 @@ const LoadingScreen = () => (
 const RootNavigator = () => {
   const { user, loading } = useAuth();
 
+  // Only show app/onboarding when user has a real session with email (signed in or signed up)
+  const isLoggedIn = user?.email != null && user.email !== '';
+
+  // At app start for this user: clear any previous debug_logs rows for them, then log INIT.
+  useEffect(() => {
+    if (isLoggedIn && user?.id) {
+      import('@data/supabase/client').then(async ({ supabase }) => {
+        try {
+          await supabase.from('debug_logs').delete().eq('user_id', user.id);
+        } catch {
+          // best-effort only
+        }
+      });
+      import('@utilities/remoteLog').then(({ remoteLog }) => {
+        remoteLog('[INIT] App logged in', { userId: user.id, email: user.email ?? null });
+      });
+    }
+  }, [isLoggedIn, user?.id, user?.email]);
+
   if (loading) {
     return <LoadingScreen />;
   }
 
-  // Only show app/onboarding when user has a real session with email (signed in or signed up)
-  const isLoggedIn = user?.email != null && user.email !== '';
-
   const navTheme = {
-    dark: true,
+    ...DarkTheme,
     colors: {
       primary: '#5BA8E8',
       background: '#05060D',

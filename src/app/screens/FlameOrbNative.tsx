@@ -1,5 +1,5 @@
 import React, { useEffect, useRef } from 'react';
-import { View, Animated, Easing, StyleSheet } from 'react-native';
+import { View, Animated, StyleSheet } from 'react-native';
 
 export type FlameOrbNativeState = 'idle' | 'speaking' | 'listening' | 'processing';
 
@@ -31,29 +31,25 @@ const FlameOrbNative: React.FC<Props> = ({ state = 'idle', size = 200 }) => {
         Animated.sequence([
           Animated.parallel([
             Animated.timing(pulseAnim, {
-              toValue: 1.06,
-              duration: 2800,
-              easing: Easing.inOut(Easing.sine),
+              toValue: 1.05,
+              duration: 2500,
               useNativeDriver: true,
             }),
             Animated.timing(glowAnim, {
               toValue: 0.9,
-              duration: 2800,
-              easing: Easing.inOut(Easing.sine),
+              duration: 2500,
               useNativeDriver: true,
             }),
           ]),
           Animated.parallel([
             Animated.timing(pulseAnim, {
-              toValue: 1,
-              duration: 2800,
-              easing: Easing.inOut(Easing.sine),
+              toValue: 0.97,
+              duration: 2500,
               useNativeDriver: true,
             }),
             Animated.timing(glowAnim, {
               toValue: 0.6,
-              duration: 2800,
-              easing: Easing.inOut(Easing.sine),
+              duration: 2500,
               useNativeDriver: true,
             }),
           ]),
@@ -65,13 +61,11 @@ const FlameOrbNative: React.FC<Props> = ({ state = 'idle', size = 200 }) => {
           Animated.timing(innerPulse, {
             toValue: 1.04,
             duration: 1200,
-            easing: Easing.inOut(Easing.ease),
             useNativeDriver: true,
           }),
           Animated.timing(innerPulse, {
             toValue: 0.97,
             duration: 900,
-            easing: Easing.inOut(Easing.ease),
             useNativeDriver: true,
           }),
         ])
@@ -81,9 +75,8 @@ const FlameOrbNative: React.FC<Props> = ({ state = 'idle', size = 200 }) => {
         Animated.sequence([
           Animated.parallel([
             Animated.timing(pulseAnim, {
-              toValue: 1.22,
+              toValue: 1.08,
               duration: 600,
-              easing: Easing.out(Easing.cubic),
               useNativeDriver: true,
             }),
             Animated.timing(glowAnim, {
@@ -94,15 +87,13 @@ const FlameOrbNative: React.FC<Props> = ({ state = 'idle', size = 200 }) => {
           ]),
           Animated.parallel([
             Animated.timing(pulseAnim, {
-              toValue: 1.12,
+              toValue: 0.98,
               duration: 500,
-              easing: Easing.inOut(Easing.sine),
               useNativeDriver: true,
             }),
             Animated.timing(glowAnim, {
               toValue: 0.85,
               duration: 500,
-              easing: Easing.inOut(Easing.sine),
               useNativeDriver: true,
             }),
           ]),
@@ -114,13 +105,11 @@ const FlameOrbNative: React.FC<Props> = ({ state = 'idle', size = 200 }) => {
           Animated.timing(innerPulse, {
             toValue: 1.12,
             duration: 300,
-            easing: Easing.out(Easing.ease),
             useNativeDriver: true,
           }),
           Animated.timing(innerPulse, {
             toValue: 0.95,
             duration: 250,
-            easing: Easing.inOut(Easing.ease),
             useNativeDriver: true,
           }),
         ])
@@ -146,13 +135,11 @@ const FlameOrbNative: React.FC<Props> = ({ state = 'idle', size = 200 }) => {
           Animated.timing(pulseAnim, {
             toValue: 0.88,
             duration: 1500,
-            easing: Easing.inOut(Easing.sine),
             useNativeDriver: true,
           }),
           Animated.timing(pulseAnim, {
             toValue: 0.95,
             duration: 1500,
-            easing: Easing.inOut(Easing.sine),
             useNativeDriver: true,
           }),
         ])
@@ -178,13 +165,11 @@ const FlameOrbNative: React.FC<Props> = ({ state = 'idle', size = 200 }) => {
           Animated.timing(pulseAnim, {
             toValue: 1.08,
             duration: 1800,
-            easing: Easing.inOut(Easing.sine),
             useNativeDriver: true,
           }),
           Animated.timing(pulseAnim, {
             toValue: 0.96,
             duration: 1800,
-            easing: Easing.inOut(Easing.sine),
             useNativeDriver: true,
           }),
         ])
@@ -205,7 +190,7 @@ const FlameOrbNative: React.FC<Props> = ({ state = 'idle', size = 200 }) => {
   const isSpeaking = state === 'speaking';
 
   return (
-    <View style={[styles.container, { width: s * 1.8, height: s * 1.8 }]}>
+    <View style={[styles.container, { width: s * 1.8, height: s * 1.8, overflow: 'hidden' }]}>
       <Animated.View
         style={[
           styles.layer,
@@ -356,6 +341,8 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     position: 'relative',
+    overflow: 'hidden',
+    borderRadius: 999,
   },
   layer: {
     position: 'absolute',

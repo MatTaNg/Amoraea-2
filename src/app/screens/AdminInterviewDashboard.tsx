@@ -70,6 +70,7 @@ function getUserDisplayName(user: UserRow | null | undefined): string {
 }
 
 async function fetchAllAdminData(): Promise<UserGroup[]> {
+  // Return ALL registered users (no filter) — include those who haven't started, in progress, completed, or passed
   const { data: allUsers, error: usersError } = await supabase
     .from('users')
     .select(

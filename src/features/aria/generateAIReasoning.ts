@@ -31,6 +31,10 @@ Be specific — quote or closely paraphrase what they actually said.
 Be honest without being harsh. Be warm without being falsely positive.
 Acknowledge complexity. Notice nuance. Say the true thing, kindly.
 
+IMPORTANT — RESPONSIVENESS SECTION:
+
+When writing about Responsiveness, be careful about conclusions drawn from the "emotional awareness probe." If the user's scenario involved someone they were not in regular contact with, do not characterise low pre-conflict awareness as emotional unavailability. Only reference the attunement probe if the user had clear access to the person beforehand.
+
 Respond ONLY with valid JSON. No preamble, no markdown, no backticks.
 Do not truncate any field. Do not write placeholder text.`;
 

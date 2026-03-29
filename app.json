@@ -1,5 +1,7 @@
 {
   "expo": {
+    "sdkVersion": "54.0.0",
+    "newArchEnabled": false,
     "name": "Amoraea",
     "slug": "amoraea",
     "version": "1.0.0",

@@ -127,6 +127,34 @@ export const UserInterviewLayout: React.FC<UserInterviewLayoutProps> = ({
   const isMicDisabled = !!micError || inputDisabled || voiceState === 'speaking' || voiceState === 'processing';
   const micOpacity = voiceState === 'speaking' ? 0.35 : 1;
   const isListeningOrRecording = voiceState === 'listening' || voiceState === 'recording';
+  const isRecording = voiceState === 'recording';
+
+  // Pulse animation for mic button when recording/listening
+  const micPulseAnim = useRef(new Animated.Value(1)).current;
+  useEffect(() => {
+    if (isListeningOrRecording) {
+      const loop = Animated.loop(
+        Animated.sequence([
+          Animated.timing(micPulseAnim, {
+            toValue: 1.2,
+            duration: 600,
+            useNativeDriver: true,
+          }),
+          Animated.timing(micPulseAnim, {
+            toValue: 1,
+            duration: 600,
+            useNativeDriver: true,
+          }),
+        ])
+      );
+      loop.start();
+      return () => {
+        loop.stop();
+        micPulseAnim.setValue(1);
+      };
+    }
+    micPulseAnim.setValue(1);
+  }, [isListeningOrRecording, micPulseAnim]);
 
   return (
     <View style={styles.pageWrapper}>
@@ -236,29 +264,44 @@ export const UserInterviewLayout: React.FC<UserInterviewLayoutProps> = ({
                           opacity: rippleOpacity,
                           transform: [{ scale: rippleScale }],
                         },
+                        isRecording && styles.rippleRingRecording,
                       ]}
                       pointerEvents="none"
                     />
                   )}
-                  <Pressable
-                    onPress={micToggleMode && onMicPress ? onMicPress : undefined}
-                    onPressIn={micToggleMode ? undefined : onPressStart}
-                    onPressOut={micToggleMode ? undefined : onPressEnd}
-                    disabled={isMicDisabled}
-                    style={[
-                      styles.micButton,
-                      isListeningOrRecording && styles.micButtonListening,
-                      { opacity: micOpacity },
-                    ]}
-                  >
-                    {voiceState === 'processing' ? (
-                      <ActivityIndicator size="small" color={FLAME_MID} />
-                    ) : (
-                      <Ionicons name="mic" size={24} color={FLAME_MID} />
-                    )}
-                  </Pressable>
+                  <Animated.View style={{ transform: [{ scale: isListeningOrRecording ? micPulseAnim : 1 }] }}>
+                    <Pressable
+                      onPress={micToggleMode && onMicPress ? onMicPress : undefined}
+                      onPressIn={micToggleMode ? undefined : onPressStart}
+                      onPressOut={micToggleMode ? undefined : onPressEnd}
+                      disabled={isMicDisabled}
+                      style={[
+                        styles.micButton,
+                        isListeningOrRecording && (isRecording ? styles.micButtonRecording : styles.micButtonListening),
+                        { opacity: micOpacity },
+                      ]}
+                    >
+                      {voiceState === 'processing' ? (
+                        <ActivityIndicator size="small" color={FLAME_MID} />
+                      ) : (
+                        <Ionicons
+                          name="mic"
+                          size={24}
+                          color={isRecording ? '#E84444' : FLAME_MID}
+                        />
+                      )}
+                    </Pressable>
+                  </Animated.View>
                 </View>
-                <Text style={[styles.micLabel, { opacity: statusLabelOpacity }]}>{micLabel}</Text>
+                <Text
+                  style={[
+                    styles.micLabel,
+                    { opacity: statusLabelOpacity },
+                    isRecording && styles.micLabelRecording,
+                  ]}
+                >
+                  {micLabel}
+                </Text>
               </>
             )}
           </View>
@@ -515,6 +558,9 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: 'rgba(30, 111, 217, 0.2)',
   },
+  rippleRingRecording: {
+    borderColor: 'rgba(232, 68, 68, 0.4)',
+  },
   micButton: {
     width: 64,
     height: 64,
@@ -532,6 +578,13 @@ const styles = StyleSheet.create({
       ? { boxShadow: '0 0 24px rgba(30, 111, 217, 0.4)' }
       : { shadowColor: FLAME_CORE, shadowOffset: { width: 0, height: 0 }, shadowOpacity: 0.4, shadowRadius: 24, elevation: 8 }),
   },
+  micButtonRecording: {
+    borderColor: '#E84444',
+    backgroundColor: 'rgba(232, 68, 68, 0.2)',
+    ...(Platform.OS === 'web'
+      ? { boxShadow: '0 0 24px rgba(232, 68, 68, 0.4)' }
+      : { shadowColor: '#E84444', shadowOffset: { width: 0, height: 0 }, shadowOpacity: 0.4, shadowRadius: 24, elevation: 8 }),
+  },
   micLabel: {
     fontFamily: FONT_UI,
     fontSize: 10,
@@ -539,6 +592,9 @@ const styles = StyleSheet.create({
     letterSpacing: 3,
     textTransform: 'uppercase',
     color: FLAME_MID,
+  },
+  micLabelRecording: {
+    color: '#E84444',
   },
   dockError: {
     fontSize: 13,

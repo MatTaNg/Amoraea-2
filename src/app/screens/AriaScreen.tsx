@@ -11,17 +11,15 @@ import {
   Alert,
   Platform,
 } from 'react-native';
-import {
-  ExpoSpeechRecognitionModule,
-  useSpeechRecognitionEvent,
-} from 'expo-speech-recognition';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { Audio } from 'expo-av';
 import { useAuth } from '@features/authentication/hooks/useAuth';
 import { SafeAreaContainer } from '@ui/components/SafeAreaContainer';
 import { Button } from '@ui/components/Button';
 import { colors } from '@ui/theme/colors';
 import { spacing } from '@ui/theme/spacing';
 import { Ionicons } from '@expo/vector-icons';
+import { setPlaybackMode } from '@features/aria/utils/audioModeHelpers';
 import { speakWithElevenLabs, stopElevenLabsSpeech } from '@features/aria/utils/elevenLabsTts';
 import { ProfileRepository } from '@data/repositories/ProfileRepository';
 import { evaluateGate1 } from '@features/onboarding/evaluateGate1';
@@ -37,6 +35,7 @@ import {
 } from '@utilities/storage/InterviewStorage';
 import { requestMicPermissionForPWA } from '@utilities/permissions/requestMicPermission';
 import { withRetry, classifyError } from '@utilities/withRetry';
+import { remoteLog } from '@utilities/remoteLog';
 import { FlameOrb } from '@app/screens/FlameOrb';
 import { UserInterviewLayout, type ActiveScenario } from '@app/screens/UserInterviewLayout';
 import { InterviewAnalysisScreen } from '@app/screens/InterviewAnalysisScreen';
@@ -247,10 +246,92 @@ function getScenarioNumberForNewMessage(
   )
     return 2;
   if (
-    /third situation|last one|intimacy gap|riley.*drew|drew.*riley|situation three/.test(c)
+    /third situation|last one|intimacy gap|riley.*drew|drew.*riley|situation three|initiates intimacy|not in the right headspace|riley initiates|drew says he's not/.test(c)
   )
     return 3;
   return lastNum ?? 1;
+}
+
+/** Detect which scenario an AI response introduces from content (belt-and-suspenders for tagging). */
+function detectScenarioFromResponse(responseText: string): 1 | 2 | 3 | null {
+  if (!responseText?.trim()) return null;
+  const c = responseText.toLowerCase();
+  if (/withdrawn for weeks|jamie|morgan snaps|first situation|slow drift|here's the first/.test(c)) return 1;
+  if (/jordan comes home|good news about a project|casey is at the laptop|second situation|missed moment|on to the second/.test(c)) return 2;
+  if (/riley initiates|not in the right headspace|drew says he's not|intimacy gap|riley.*drew|drew.*riley|last one.*situation three|situation three/.test(c)) return 3;
+  return null;
+}
+
+/** Infer message slice for a scenario when tags are wrong: find anchor message for this scenario, slice until next scenario anchor. */
+function inferScenarioMessages(
+  allMessages: { role: string; content: string }[],
+  scenarioNum: 1 | 2 | 3
+): { role: string; content: string }[] {
+  const scenarioAnchors: Record<number, string[]> = {
+    1: [
+      'think of a time you had a real disagreement',
+      'real disagreement with someone close',
+      'jamie and morgan',
+      'jamie',
+      'morgan',
+      'withdrawn for weeks',
+      'slow drift',
+      "here's the first",
+      'first situation',
+      'walk me through what happened',
+      "what can i call you",
+      "i'm aira",
+      "welcome to amoraea",
+    ],
+    2: ['jordan comes home', 'good news about a project', 'casey is at the laptop', 'on to the second', 'second situation', 'missed moment'],
+    3: ['riley initiates', 'not in the right headspace', "drew says he's not", 'intimacy gap', 'last one', 'situation three', 'has there been a situation'],
+  };
+  const anchors = scenarioAnchors[scenarioNum].map((a) => a.toLowerCase());
+  const startIdx = allMessages.findIndex((m) => {
+    if (m.role !== 'assistant') return false;
+    const c = (m.content ?? '').toLowerCase();
+    return anchors.some((anchor) => c.includes(anchor));
+  });
+  const effectiveStartIdx = scenarioNum === 1 && startIdx === -1 ? 0 : startIdx;
+  if (effectiveStartIdx === -1) return [];
+  const nextScenarioAnchors =
+    scenarioNum < 3
+      ? ([] as string[]).concat(
+          ...Object.entries(scenarioAnchors)
+            .filter(([k]) => Number(k) > scenarioNum)
+            .map(([, v]) => v),
+          'on to the second situation',
+          'second situation',
+          'last one',
+          'situation three',
+          'situation two'
+        )
+      : [];
+  const nextAnchorsLower = nextScenarioAnchors.map((a) => a.toLowerCase());
+  const endIdx =
+    nextAnchorsLower.length > 0
+      ? allMessages.findIndex(
+          (m, i) => i > effectiveStartIdx && m.role === 'assistant' && nextAnchorsLower.some((anchor) => (m.content ?? '').toLowerCase().includes(anchor))
+        )
+      : -1;
+  return allMessages.slice(effectiveStartIdx, endIdx === -1 ? allMessages.length : endIdx);
+}
+
+/** Detect if assistant message is the closing question (so we set pending even when [CLOSING_QUESTION:N] is missing). */
+function isClosingQuestion(text: string): boolean {
+  if (!text?.trim()) return false;
+  const patterns = [
+    'is there anything about that situation',
+    "anything you'd want to add before we move on",
+    'anything else about that one before',
+    'before we move on',
+    'before we move forward',
+    "anything you'd want me to understand",
+    'anything else about that one you',
+    'before we wrap up',
+    'before we go to the next one',
+  ];
+  return patterns.some((p) => text.toLowerCase().includes(p.toLowerCase()));
 }
 
 /** Removes control tokens from AI response before display or TTS. Use raw text for logic only. */
@@ -275,6 +356,40 @@ const DECLINE_PHRASES = [
 function isDecline(text: string): boolean {
   const lower = text.toLowerCase().trim();
   return DECLINE_PHRASES.some((phrase) => lower.includes(phrase)) || lower.length < 15;
+}
+
+/** One short acknowledgment when user adds something after "yes" to closing question. Never a question or evaluative. */
+function generateBriefAck(_userText: string): string {
+  const acks = ['Got that.', 'Noted.', "That's useful context.", "Appreciate you adding that."];
+  return acks[Math.floor(Math.random() * acks.length)];
+}
+
+/** Build prompt for Claude to generate one closing line based on transcript (user turns only). */
+function buildClosingLinePrompt(messages: { role: string; content: string }[]): string {
+  const userMessages = messages
+    .filter((m) => m.role === 'user')
+    .map((m) => m.content)
+    .join('\n');
+  return `Based on this interview, write ONE closing line for the interviewer to deliver. It should:
+- Be specific to what this person actually said
+- Reference a genuine pattern you observed
+- Be honest without being harsh
+- NOT be flattering or generic
+- NOT be a question
+- Be 1-2 sentences maximum
+- NOT start with "Thank you"
+- NOT mention the word "journey" or "foundation"
+
+Banned closing phrases:
+"You worked through all three clearly"
+"You have a strong foundation"
+"Thank you for being so open"
+"You did a great job"
+
+Interview transcript (user turns only):
+${userMessages}
+
+Write only the closing line. No preamble.`;
 }
 
 const CLOSING_LINE_INSTRUCTIONS = `
@@ -370,30 +485,41 @@ async function generateAIReasoningSafe(
   }
 }
 
-// Scenario display text for regular-user immersive layout (description only; DO NOT MODIFY scenario content).
+// Scenario display text for regular-user immersive layout (condensed; meaning and scoring value unchanged).
 const SCENARIO_1_LABEL = 'Situation 1';
 const SCENARIO_1_TEXT =
-  "Jamie and Morgan have been together a year. Jamie is going through a hard stretch at work and has been withdrawn for a few weeks — shorter with Morgan, less present at home. Morgan hasn't brought it up. One evening Jamie snaps at Morgan over something small and immediately apologises. Morgan says 'it's fine, I know you're stressed.' A month later, during a different argument, Morgan brings up the withdrawal, the cancelled plans, and the snap. Jamie says 'why didn't you say something at the time?' Morgan says 'I didn't want to add to your stress.'";
+  "Jamie has been withdrawn for weeks — stressed at work, shorter with Morgan, less present. Morgan hasn't said anything. One evening Jamie snaps over something small and apologises. Morgan says 'it's fine.' A month later, in a different argument, Morgan brings it all up. Jamie says 'why didn't you say something?' Morgan says 'I didn't want to add to your stress.'\n\nIf you were Jamie in that conversation — what would you say to Morgan?";
 const SCENARIO_2_LABEL = 'Situation 2';
 const SCENARIO_2_TEXT =
-  "Jordan comes home and says they just got some good feedback on a project they'd been working on for weeks. Their partner Casey is at the laptop, finishing something for work — a deadline the next morning. Casey glances up, says 'that's great' and turns back to the screen. Jordan says nothing and goes to another room. Later that evening Casey asks what's wrong. Jordan says 'nothing.' Casey asks again. Jordan says 'you never actually listen when I talk.' Casey says 'I was stressed about this deadline, I can't be completely present every second.' The conversation gets louder. Both keep talking. They go to bed without speaking. Neither says anything about it the next morning.";
+  "Jordan comes home with good news about a project they'd been working on for weeks. Casey is at the laptop — deadline the next morning — glances up, says 'that's great,' turns back to the screen. Jordan goes quiet, leaves the room. Later Casey asks what's wrong. Jordan says 'nothing,' then: 'you never actually listen.' Casey says 'I can't be present every second.' They go to bed without speaking.\n\nIf you were Casey in that moment — what would you say to Jordan?";
 const SCENARIO_3_LABEL = 'Situation 3';
 const SCENARIO_3_TEXT =
-  "Riley initiates physical intimacy with her partner Drew. Drew says he's not in the right headspace and declines. Riley says 'you always have an excuse' and turns away. Drew says 'so I'm not allowed to not be in the mood?' The conversation becomes an argument. Drew eventually says 'fine, forget it' and they continue. Afterward Riley says very little. Drew says very little. They go to sleep. They don't bring it up the next day.";
+  "Riley initiates intimacy. Drew says he's not in the right headspace. Riley says 'you always have an excuse.' Drew says 'so I'm not allowed to say no?' It becomes an argument. Drew eventually says 'fine, forget it' and they continue. Afterward neither says much. They go to sleep. It doesn't come up the next day.\n\nIf you were Drew, after giving in like that — what would you say to Riley?";
 
 const STAGE_3_PERSONAL_QUESTION =
   "Has there been a situation — with anyone, a friend, a partner, a colleague — where you knew you needed to say or do something but kept putting it off, and by the time it came out it was messier than it needed to be? If nothing comes to mind, just say so and I'll give you a situation to react to instead.";
 
+/** Used when advancing after scenario 3 closing answer so we never show standalone "Got it." and pause. */
+const SKEPTICISM_PROBE_TEXT =
+  "That's a consistent read across all three. Where does it get hard for you in practice — not knowing what the right thing is, but actually doing it when the moment comes?";
+
 function detectActiveScenarioFromMessage(content: string): ActiveScenario | null {
   const c = content.trim();
   if (!c) return null;
-  if (c.includes('Jamie and Morgan have been together') || c.includes('Jamie is going through a hard stretch at work')) {
+  // Situation 3 personal question (before fictional scenario): show it in the scenario card so we don't keep showing Situation 2
+  if (
+    (c.includes('Last one — situation three') || c.includes('Has there been a situation')) &&
+    c.includes('kept putting it off')
+  ) {
+    return { label: SCENARIO_3_LABEL, text: STAGE_3_PERSONAL_QUESTION };
+  }
+  if (c.includes('Jamie has been withdrawn for weeks') || c.includes('Jamie is going through a hard stretch at work')) {
     return { label: SCENARIO_1_LABEL, text: SCENARIO_1_TEXT };
   }
-  if (c.includes('Jordan comes home and says') || c.includes('Jordan comes home and says they just got')) {
+  if (c.includes('Jordan comes home with good news') || c.includes('Jordan comes home and says')) {
     return { label: SCENARIO_2_LABEL, text: SCENARIO_2_TEXT };
   }
-  if (c.includes('Riley initiates physical intimacy')) {
+  if (c.includes('Riley initiates intimacy') || c.includes('Riley initiates physical intimacy')) {
     return { label: SCENARIO_3_LABEL, text: SCENARIO_3_TEXT };
   }
   return null;
@@ -411,7 +537,7 @@ const ADMIN_PASS_PHRASE = 'Ab#3dragons';
 
 // ─────────────────────────────────────────────
 // INTERVIEW SYSTEM PROMPT (from ai_interviewer)
-// Scenario texts (Slow Drift, Missed Moment, Intimacy Gap) — DO NOT MODIFY
+// Scenario texts (Slow Drift, Missed Moment, Intimacy Gap) — condensed; meaning and scoring unchanged
 // inline. Exact wording is diagnostically important. Use a dedicated prompt to update.
 // ─────────────────────────────────────────────
 const INTERVIEWER_SYSTEM = `You are a relationship assessment interviewer conducting a warm, thoughtful conversation to understand someone's relational patterns. You are not a therapist and this is not therapy — it is a structured assessment interview.
@@ -976,6 +1102,14 @@ SCENARIO 2 → SCENARIO 3:
 or "Good — almost there."
 or "That's two done."
 
+CRITICAL — SAME FORMAT FOR BOTH TRANSITIONS:
+The transition from situation 2 to situation 3 MUST include a one-sentence summary of what the user said in situation 2 (Casey/Jordan), just like the transition from situation 1 to 2 includes a summary of what they said about Jamie/Morgan. Never skip the transition summary when moving to situation 3. Format: "[Forward-momentum phrase]. [One-sentence summary of what the user demonstrated in the scenario just completed]. Last one — situation three."
+
+ORDINAL — MATCH THE SCENARIO JUST COMPLETED:
+After completing scenario 1, say "first one done" or "one down" (never "second" or "two").
+After completing scenario 2, say "two down" or "second one done" (never "first" or "first one done").
+After completing scenario 3, say "third" or "three done" only in the closing context. Always use the ordinal that matches the scenario number the user just finished.
+
 These are neutral and forward-looking. They do not say:
 — "Great job" (evaluative)
 — "You did really well there" (praise)
@@ -1050,7 +1184,7 @@ Constructs: Pillar 1, Pillar 3, Pillar 5
 // DO NOT MODIFY SCENARIO TEXT
 ─────────────────────────────────────────
 
-"Jamie and Morgan have been together a year. Jamie is going through a hard stretch at work and has been withdrawn for a few weeks — shorter with Morgan, less present at home. Morgan hasn't brought it up. One evening Jamie snaps at Morgan over something small and immediately apologises. Morgan says 'it's fine, I know you're stressed.' A month later, during a different argument, Morgan brings up the withdrawal, the cancelled plans, and the snap. Jamie says 'why didn't you say something at the time?' Morgan says 'I didn't want to add to your stress.'
+"Jamie has been withdrawn for weeks — stressed at work, shorter with Morgan, less present. Morgan hasn't said anything. One evening Jamie snaps over something small and apologises. Morgan says 'it's fine.' A month later, in a different argument, Morgan brings it all up. Jamie says 'why didn't you say something?' Morgan says 'I didn't want to add to your stress.'
 
 If you were Jamie in that conversation — what would you say to Morgan?"
 
@@ -1076,7 +1210,7 @@ Constructs: Pillar 1, Pillar 3, Pillar 5
 // DO NOT MODIFY SCENARIO TEXT
 ─────────────────────────────────────────
 
-"Jordan comes home and says they just got some good feedback on a project they'd been working on for weeks. Their partner Casey is at the laptop, finishing something for work — a deadline the next morning. Casey glances up, says 'that's great' and turns back to the screen. Jordan says nothing and goes to another room. Later that evening Casey asks what's wrong. Jordan says 'nothing.' Casey asks again. Jordan says 'you never actually listen when I talk.' Casey says 'I was stressed about this deadline, I can't be completely present every second.' The conversation gets louder. Both keep talking. They go to bed without speaking. Neither says anything about it the next morning.
+"Jordan comes home with good news about a project they'd been working on for weeks. Casey is at the laptop — deadline the next morning — glances up, says 'that's great,' turns back to the screen. Jordan goes quiet, leaves the room. Later Casey asks what's wrong. Jordan says 'nothing,' then: 'you never actually listen.' Casey says 'I can't be present every second.' They go to bed without speaking.
 
 If you were Casey in that moment — what would you say to Jordan?"
 
@@ -1084,8 +1218,8 @@ SCENARIO 2 PROBE: If the user doesn't mention Casey's deadline as context (e.g. 
 
 When Scenario 2 is complete (both-characters gate run; checklist satisfied), output [SCENARIO_COMPLETE:2] then the forward-momentum phrase then the transition summary per the rules above.
 
-Transition to Scenario 3:
-"[Forward-momentum phrase]. [One-sentence specific summary of what the user said]. Last one — situation three."
+Transition to Scenario 3 (required — same as 1→2):
+You MUST include a one-sentence summary of what the user said about Casey/Jordan in situation 2, then "Last one — situation three." Example: "[SCENARIO_COMPLETE:2] Two down, one to go. You flagged the dismissal as the starting point. Last one — situation three." Never transition to situation 3 with only a forward-momentum phrase and no summary of what they said.
 
 ─────────────────────────────────────────
 SCENARIO 3 — THE INTIMACY GAP
@@ -1093,7 +1227,7 @@ Constructs: Pillar 1, Pillar 3, Pillar 6
 // DO NOT MODIFY SCENARIO TEXT
 ─────────────────────────────────────────
 
-"Riley initiates physical intimacy with her partner Drew. Drew says he's not in the right headspace and declines. Riley says 'you always have an excuse' and turns away. Drew says 'so I'm not allowed to not be in the mood?' The conversation becomes an argument. Drew eventually says 'fine, forget it' and they continue. Afterward Riley says very little. Drew says very little. They go to sleep. They don't bring it up the next day.
+"Riley initiates intimacy. Drew says he's not in the right headspace. Riley says 'you always have an excuse.' Drew says 'so I'm not allowed to say no?' It becomes an argument. Drew eventually says 'fine, forget it' and they continue. Afterward neither says much. They go to sleep. It doesn't come up the next day.
 
 If you were Drew, after giving in like that — what would you say to Riley?"
 
@@ -1217,6 +1351,29 @@ ALSO SKIP P5 IF:
 When in doubt — SKIP P5. It is a probe for a specific slow-drift pattern. Firing it when it doesn't apply (e.g. after a sudden political argument) makes the interview feel mechanical and unlistening.
 
 When P5 does apply: After the user gives a personal conflict example and the follow-up probes are complete, ask the question before transitioning to Stage 2. ONE PROBE ONLY. Accept whatever the user gives and transition to Stage 2.
+
+EMOTIONAL AWARENESS PROBE — IMPORTANT CONSTRAINT:
+
+When asking whether the user noticed signs of how someone was feeling before a difficult moment, you MUST first establish whether the user had meaningful contact with that person in the preceding period.
+
+If the user's situation involves:
+- Someone they don't live with
+- Someone they hadn't seen recently
+- A message or phone call out of the blue
+- Any context where physical/regular proximity was absent
+
+...then DO NOT score "no, I didn't notice anything" as low responsiveness. The absence of noticing is explained by the absence of access — it reveals nothing about their capacity.
+
+Only score low on pre-attunement if:
+1. The user DID have access/proximity to the person, AND
+2. They show no awareness of available signals
+
+If access is unclear, ask: "Had you been in contact with them much before this happened?" before drawing any conclusion about their awareness.
+
+When a user says they didn't notice anything AND the context makes clear they had limited prior access, acknowledge the context explicitly:
+"That makes sense — it's hard to read someone you haven't been in contact with. Let's focus on what happened in the moment..."
+
+Then proceed without penalising the answer.
 
 WHAT P5 REVEALS (when it fires): User who noticed early signals but didn't act: P5 moderate, P3 lower. User who genuinely didn't notice: P5 lower — attunement gap. User who noticed and named it at the time: P5 high. User who reframes back to the conflict: possible avoidance of the attunement dimension.
 
@@ -1411,6 +1568,51 @@ CLOSING QUESTION — ASK EXACTLY ONCE PER SCENARIO:
 The closing question ([CLOSING_QUESTION:N]) fires exactly once per scenario. After it fires, the next user message is always the answer to it — regardless of what they say. "No", "nothing", "I'm good", any short response — that IS the answer. Accept it and advance. DO NOT repeat the closing question under any circumstances. If you find yourself about to ask it again, stop. The user has already answered — move to the next scenario.
 
 DO NOT advance without asking this. DO NOT use "before we finish" for scenarios 1 or 2 (use "before we move on").
+`;
+
+const CLOSING_QUESTION_HANDLING = `
+CLOSING QUESTION HANDLING — APPLICATION-CONTROLLED:
+
+After the closing question ("Is there anything about that situation you'd want me to understand that you haven't said yet?"), the transition to the next scenario is handled entirely by the application. You will NOT receive the user's answer to the closing question in this conversation. The next message you receive will already be the start of the next scenario (or the next prompt).
+
+Do NOT generate "Got it", "Got it — let's move on", "Alright", "Understood", or any transition phrase in response to the closing question. The app handles the advance. Simply include [CLOSING_QUESTION:N] when you ask the question; the user's response and the transition are handled in code.
+`;
+
+const SCENARIO_TRANSITION_CLOSING = `
+SCENARIO TRANSITION — CLOSE WARMLY BEFORE MOVING ON:
+
+Before delivering the next scenario, give a brief closing beat that names something specific the user demonstrated in the scenario they just finished. One or two sentences. Then move on.
+
+This is different from the transition summary (which reflects what they said about the characters). The closing beat acknowledges what THEY demonstrated — a quality, a pattern, an honest moment.
+
+FORMAT:
+"[Specific observation about what they demonstrated]. [Next scenario opener]."
+
+EXAMPLES:
+
+User showed strong accountability:
+"You moved toward your own part in it quickly there — that's not always the obvious place to look. On to the second situation."
+
+User showed good both-sides awareness:
+"You held both sides of that clearly — named what each person contributed without collapsing into one being simply right. On to the second situation."
+
+User showed limited accountability but honest answers:
+"You were consistent about where you saw the failure there. Last one — situation three."
+
+User gave a personal story and showed self-awareness:
+"That took honesty to bring — sitting with your own part in it after the fact. On to the second situation."
+
+User showed avoidance pattern:
+"You named the cost of waiting clearly there. Last one — situation three."
+
+RULES:
+- One or two sentences maximum
+- Must be specific to what this user actually did in this scenario — not generic praise
+- Not flattering — honest observation
+- Flows directly into "On to the second situation" or "Last one — situation three" with no gap
+- If the user showed a gap — name it gently but name it ("You stayed on the other person's side of it there — your own part was harder to get to.")
+- Never say "great job", "well done", "excellent"
+- Never say "clearly" as filler
 `;
 
 const SKIP_HANDLING_INSTRUCTIONS = `
@@ -1620,6 +1822,41 @@ SCENARIO 3 — if personal response skips what was actually said:
 First check STAGE_3_NOTHING_SAID below. If the user indicated nothing was ever said, do NOT ask "what did you say?" — acknowledge and offer the scenario. Only if something was eventually said, ask: "What did it sound like when it finally came out — what did you actually say to them?"
 `;
 
+const INVALID_SCENARIO_REDIRECT = `
+REDIRECTING AN INVALID SCENARIO — ACKNOWLEDGE FIRST:
+
+Before explaining what you're looking for, always acknowledge what the user just said in one short sentence. Use their actual words or a close echo. Then redirect.
+
+FORMAT:
+"[One sentence echo of what they said] — [what you're looking for instead]."
+
+EXAMPLES:
+
+User: "I procrastinate on work tasks all the time and then feel bad about it at the end of the week."
+WRONG:
+"What I'm really looking for is a moment with another person — where you kept putting off saying something and it got messier than it needed to be."
+RIGHT:
+"The procrastination pattern is real — what I'm actually looking for is a moment where you put off saying something to another person specifically, and the delay made it messier. Anything like that come to mind?"
+
+User: "I conflict with myself a lot about my life choices and whether I'm making the right decisions."
+WRONG:
+"I'm looking for a moment where it actually got tense between you and someone else."
+RIGHT:
+"That internal tension is its own thing — what I'm looking for here is a moment where it got heated between you and another person specifically. Does anything like that come to mind?"
+
+User gave a long story about finances:
+"I've had a lot of conflict with my finances recently, especially with unexpected bills and trying to budget for the future."
+RIGHT:
+"Financial stress is genuinely hard — for this one though I'm looking for a moment where things got tense between you and another person. Anything like that come to mind?"
+
+RULES:
+- Echo must use the user's actual subject (finances, gym, work tasks, internal conflict) — not a generic "that sounds difficult"
+- One sentence only — don't over-validate
+- Then redirect cleanly in one sentence
+- Never say "I understand but..." — just echo and redirect
+- Never say "that's not what I'm looking for" — frame it as what you ARE looking for, not what you're not
+`;
+
 const STAGE_3_NOTHING_SAID = `
 STAGE 3 — PERSONAL STORY FOLLOW-UP (nothing was said):
 
@@ -1646,27 +1883,33 @@ If you're not sure whether something was said, ask: "Did it ever come out — wa
 `;
 
 const COMMUNICATION_QUESTION_CHECK = `
-COMMUNICATION QUESTION — WORDS ALREADY GIVEN CHECK:
+COMMUNICATION QUESTION — SKIP IF ANY WORDS GIVEN:
 
-Before asking "what would those words sound like?" or any variation, run this check against the user's response.
+Before asking "What would those words actually sound like?" or any variation, run this check:
 
-THE RESPONSE HAS WORDS IF IT:
-✓ Starts with "I'd say:" or "I would say:" followed by 15+ characters of real content
-✓ Starts with "I'd tell" followed by real content
-✓ Starts with direct speech to the character: "You made me feel...", "I hear you...", "That wasn't fair...", "I should have...", "I'm sorry...", "I was wrong..."
-✓ Contains quoted dialogue in quotation marks 15+ chars long
-✓ Is a first-person feeling/need statement 40+ chars long: "I felt pressured and I need..."
-✓ Starts with "I'd say that I felt..." — this IS the words
+SKIP THE QUESTION if ANY of these are true:
 
-THE RESPONSE DOES NOT HAVE WORDS IF IT:
-✗ Describes an intention: "I would acknowledge her feelings"
-✗ Describes an action: "I'd apologise properly"
-✗ Is abstract: "I'd be honest with them"
-✗ Is analytical about the scenario without speaking to the character directly
+✓ Response starts with "I'd say:" or "I would say:" followed by ANY content
+✓ Response starts with "I'd tell" followed by content
+✓ Response contains a direct quote in quotation marks of any length
+✓ Response starts with a direct address to the character: "You made me feel...", "I hear you...", "That wasn't fair...", "I'm sorry...", "I was wrong...", "I should have..."
+✓ Response is a first-person feeling/need statement: "I felt...", "I feel...", "I need...", "I want..." followed by 10+ words
+✓ Response contains "I'd say that I..." followed by content
+✓ Response is 40+ words and contains first-person language — this is almost certainly already the words
 
-IF IN DOUBT — if you can imagine the words being spoken out loud to the character in the scenario, the words are already there. DO NOT ASK AGAIN.
+ASK THE QUESTION only if:
+✗ Response describes an intention without words: "I would acknowledge her feelings" (no words given)
+✗ Response describes an action without words: "I'd apologise" (no words given)
+✗ Response is purely analytical: "Casey should have put the laptop down"
+✗ Response is very short and abstract: "I'd be honest with them"
 
-NEVER ask for words twice in the same scenario question. If you already asked once and the user gave ANY response, accept it and move on.
+WHEN IN DOUBT — SKIP IT.
+It is better to skip this question when it wasn't needed than to ask it when the user already answered.
+
+NEVER ask this question more than once per scenario question. If you already asked once, accept whatever the user says next and move on.
+
+ANTI-FRUSTRATION RULE:
+If the user shows any sign of frustration at being asked this ("I just told you", "I already said", "I gave you the words") — admit the mistake, quote back what they said, and move on immediately. Never ask for words a third time under any circumstances.
 `;
 
 const PUSHBACK_RESPONSE_INSTRUCTIONS = `
@@ -1898,6 +2141,15 @@ D) PATTERN OF MISSING:
 User consistently describes partners as "fine" or "I never know what's going on with her" across multiple examples, with no evidence of noticing any signals. Score at 2-3 regardless of signal availability. This suggests a structural attunement gap, not just a single missed cue.
 
 IMPORTANT: A single "I didn't notice until she brought it up" with no other evidence of attunement failure should score at 5, not 3. Reserve scores below 4 for clear evidence of missed explicit bids or consistent patterns of not noticing.
+
+RESPONSIVENESS SCORING — CONTEXT SENSITIVITY:
+
+Do NOT reduce the Responsiveness score based on failure to notice pre-conflict emotional signals if:
+- The user lacked meaningful prior contact
+- The situation began with an unexpected communication (text, call out of nowhere)
+- The user was not physically present with the person
+
+In these cases, responsiveness should be assessed entirely on what happened IN the moment and AFTER — not on whether they sensed something coming.
 
 P5 — CROSS-STORY ATTUNEMENT EVIDENCE
 
@@ -2395,6 +2647,9 @@ function buildGate1ScoreFromResults(results: InterviewResults): Gate1Score {
   };
 }
 
+/** Navigation lock: set when interview completes and we navigate to analysis; prevents other effects from overriding. Survives remount. */
+let interviewJustCompletedInSession = false;
+
 export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigation, route }) => {
   const { user, signOut } = useAuth();
   const userId = (route.params as { userId?: string } | undefined)?.userId ?? user?.id ?? '';
@@ -2414,8 +2669,12 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
 
   const [isAdmin, setIsAdmin] = useState(false);
   const [userEmail, setUserEmail] = useState<string | null>(null);
-  const [interviewStatus, setInterviewStatus] = useState<'loading' | 'not_started' | 'in_progress' | 'under_review' | 'congratulations' | 'analysis'>('loading');
+  const [interviewStatus, setInterviewStatus] = useState<'loading' | 'not_started' | 'in_progress' | 'preparing_results' | 'under_review' | 'congratulations' | 'analysis'>('loading');
   const [analysisAttemptId, setAnalysisAttemptId] = useState<string | null>(null);
+  const isInterviewCompleteRef = useRef(false);
+  /** When true, transition to loading screen will run once voiceState becomes 'idle' (after TTS finishes). */
+  const [pendingCompletion, setPendingCompletion] = useState(false);
+  const pendingCompletionTranscriptRef = useRef<{ role: string; content: string }[] | null>(null);
   const [activeScenario, setActiveScenario] = useState<ActiveScenario | null>(null);
   const [currentInterviewerText, setCurrentInterviewerText] = useState('');
   const [interviewerLineIsError, setInterviewerLineIsError] = useState(false);
@@ -2464,6 +2723,10 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
     2: 'needed',
     3: 'needed',
   });
+  /** True when we have asked the closing question and are waiting for user answer; ensures we never send that answer to Claude. */
+  const [closingQuestionPending, setClosingQuestionPending] = useState(false);
+  /** Which scenario's closing question is pending (1, 2, or 3). */
+  const [closingQuestionScenario, setClosingQuestionScenario] = useState<1 | 2 | 3 | null>(null);
   const closingQuestionAskedRef = useRef<Record<number, boolean>>({ 1: false, 2: false, 3: false });
   const closingQuestionAnsweredRef = useRef<Record<number, boolean>>({ 1: false, 2: false, 3: false });
   const lastClosingQuestionScenarioRef = useRef<number | null>(null);
@@ -2473,8 +2736,12 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
   const stage3PersonalQuestionAskedRef = useRef(false);
   /** Stage 3: after user responds to personal question — 'personal' | 'fictional' | null (not yet responded). */
   const stage3ModeRef = useRef<'personal' | 'fictional' | null>(null);
+  /** Current scenario number for tagging new messages; avoids stale state in callbacks. Starts at 1 (first scenario). Updated on SCENARIO_COMPLETE and when injecting next scenario. */
+  const currentScenarioRef = useRef<1 | 2 | 3>(1);
   /** When user said "yes" to closing question; next message is their addition. null | 1 | 2 | 3 */
   const waitingForClosingAdditionRef = useRef<number | null>(null);
+  /** After scenario 3 closing we injected skepticism probe; next user message is the answer — then we deliver closing and complete. */
+  const waitingForSkepticismAnswerRef = useRef<boolean>(false);
   const waitingMessageIdRef = useRef<string | null>(null);
 
   const canAdvanceFromScenario = useCallback((scenarioNumber: 1 | 2 | 3) => closingQuestionState[scenarioNumber] === 'answered', [closingQuestionState]);
@@ -2535,6 +2802,11 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
       }
     }
   }, []);
+
+  // Remote log on mount so we can confirm debug_logs table works (e.g. after login, open interview screen)
+  useEffect(() => {
+    remoteLog('[INIT] AriaScreen mounted', { userId: userId ?? null, isAdmin });
+  }, [userId, isAdmin]);
 
   useEffect(() => {
     currentMessagesRef.current = messages;
@@ -2646,12 +2918,19 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
       if (!userId) return;
       const { data, error } = await supabase
         .from('users')
-        .select('interview_completed, interview_passed, interview_reviewed_at')
+        .select('interview_completed, interview_passed, interview_reviewed_at, latest_attempt_id')
         .eq('id', userId)
         .maybeSingle();
 
-      // Never overwrite 'analysis' or 'in_progress' — user may be viewing analysis or actively in interview
-      if (interviewStatusRef.current === 'analysis' || interviewStatusRef.current === 'in_progress') return;
+      // Navigation lock: interview just completed in this session — stay on analysis and set attempt id
+      if (interviewJustCompletedInSession) {
+        interviewJustCompletedInSession = false;
+        setInterviewStatus('analysis');
+        if (data?.latest_attempt_id) setAnalysisAttemptId(data.latest_attempt_id as string);
+        return;
+      }
+      // Never overwrite 'analysis', 'in_progress', or 'preparing_results'
+      if (interviewStatusRef.current === 'analysis' || interviewStatusRef.current === 'in_progress' || interviewStatusRef.current === 'preparing_results') return;
 
       if (error || !data) {
         setInterviewStatus('not_started');
@@ -2666,6 +2945,9 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
       }
       if (!data.interview_completed) {
         setInterviewStatus('not_started');
+      } else if (ALPHA_MODE) {
+        setInterviewStatus('analysis');
+        if (data.latest_attempt_id) setAnalysisAttemptId(data.latest_attempt_id as string);
       } else if (data.interview_passed && data.interview_reviewed_at) {
         setInterviewStatus('congratulations');
       } else {
@@ -2675,10 +2957,10 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
     checkInterviewStatus();
   }, [userId]);
 
-  // Admin never stays on interview-complete screens — send to admin panel (and intro when they close it)
+  // Admin: auto-open panel for under_review/congratulations; leave analysis screen visible so admin can see it
   useEffect(() => {
     if (!isAdmin) return;
-    if (interviewStatus === 'under_review' || interviewStatus === 'congratulations' || interviewStatus === 'analysis') {
+    if (interviewStatus === 'under_review' || interviewStatus === 'congratulations') {
       setShowAdminPanel(true);
       setInterviewStatus('not_started');
     }
@@ -2702,6 +2984,16 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
     if (__DEV__) console.warn('[Aria] Failsafe navigation to analysis triggered');
     setInterviewStatus('analysis');
   }, [ALPHA_MODE, userId, status, results, interviewStatus]);
+
+  // Timeout: if we stay on preparing_results too long, force navigation to analysis (analysis screen handles null attemptId)
+  useEffect(() => {
+    if (interviewStatus !== 'preparing_results') return;
+    const t = setTimeout(() => {
+      if (__DEV__) console.warn('[Aria] Preparing timeout — forcing navigation to analysis');
+      setInterviewStatus('analysis');
+    }, 90000);
+    return () => clearTimeout(t);
+  }, [interviewStatus]);
 
   useEffect(() => {
     if (!userId || isAdmin) return;
@@ -2757,6 +3049,7 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
     scrollViewRef.current?.scrollToEnd?.({ animated: true });
   }, [messages, status]);
 
+  // Transition summary and scenario text live only in the messages array (one source of truth). currentInterviewerText and activeScenario are derived from the latest assistant message — not stored separately, so the summary is never duplicated.
   useEffect(() => {
     const notScoreCard = (m: { role: string; content?: string; isScoreCard?: boolean; isWelcomeBack?: boolean }) =>
       !(m as { isScoreCard?: boolean }).isScoreCard && !(m as { isWelcomeBack?: boolean }).isWelcomeBack;
@@ -2802,6 +3095,13 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
     setVoiceState('speaking');
     isSpeakingRef.current = true;
     try {
+      await setPlaybackMode();
+      console.log('[AUDIO DEBUG] setPlaybackMode done, about to speak');
+      
+      // Check what mode we're actually in
+      const mode = await Audio.getAudioModeAsync?.();
+      console.log('[AUDIO DEBUG] current audio mode:', JSON.stringify(mode));
+      
       await speakWithElevenLabs(text);
     } finally {
       isSpeakingRef.current = false;
@@ -2885,32 +3185,6 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
     recognitionRef.current = rec;
     return () => { try { rec.stop(); } catch {} };
   }, []);
-
-  // ── Native: expo-speech-recognition (start/stop, read transcript from ref)
-  const nativeTranscriptRef = useRef({ final: '', interim: '' });
-  useSpeechRecognitionEvent('result', (event: { results: unknown; isFinal: boolean }) => {
-    if (Platform.OS === 'web') return;
-    const results = event.results as { length: number; [i: number]: { transcript?: string }; isFinal?: boolean }[];
-    const r = results?.[0];
-    if (!r) return;
-    let t = '';
-    for (let i = 0; i < (r.length ?? 0); i++) t += (r[i]?.transcript ?? '');
-    t = t.trim();
-    if (!t) return;
-    if (event.isFinal) {
-      nativeTranscriptRef.current.final += (nativeTranscriptRef.current.final ? ' ' : '') + t;
-    } else {
-      nativeTranscriptRef.current.interim = t;
-    }
-    const full = nativeTranscriptRef.current.final + (nativeTranscriptRef.current.interim ? ' ' + nativeTranscriptRef.current.interim : '');
-    setCurrentTranscript(full);
-    transcriptAtReleaseRef.current = full;
-  });
-  useSpeechRecognitionEvent('end', () => {
-    if (Platform.OS === 'web') return;
-    const { final: f, interim: i } = nativeTranscriptRef.current;
-    transcriptAtReleaseRef.current = (f + (i ? ' ' + i : '')).trim();
-  });
 
   const fetchStageScore = useCallback(async (finalMessages: { role: string; content: string }[]): Promise<InterviewResults> => {
     const context = typologyContext || 'No typology context — score from transcript only.';
@@ -3032,6 +3306,7 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
         );
         const scoreMessage = formatScoreMessage(scenarioResult);
         setScenarioScores((prev) => ({ ...prev, [scenarioNumber]: scenarioResult }));
+        scenarioScoresRef.current = { ...scenarioScoresRef.current, [scenarioNumber]: scenarioResult };
         if (ALPHA_MODE) {
           const ps = scenarioResult.pillarScores ?? {};
           const vals = Object.values(ps);
@@ -3107,6 +3382,52 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
     []
   );
 
+  const deliverClosingAndComplete = useCallback(
+    async (userResponseText: string) => {
+      const userMsg: MessageWithScenario = { role: 'user', content: userResponseText, scenarioNumber: 3 };
+      const newMessages = [...messages, userMsg];
+      setMessages(newMessages);
+      setVoiceState('processing');
+      let closing = "Thank you for being so open with me.";
+      if (ANTHROPIC_API_KEY || ANTHROPIC_PROXY_URL) {
+        try {
+          const apiUrl = getAnthropicEndpoint();
+          const useProxy = apiUrl !== 'https://api.anthropic.com/v1/messages';
+          const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+          if (useProxy && SUPABASE_ANON_KEY) headers['Authorization'] = `Bearer ${SUPABASE_ANON_KEY}`;
+          else if (!useProxy) {
+            headers['x-api-key'] = ANTHROPIC_API_KEY;
+            headers['anthropic-version'] = '2023-06-01';
+          }
+          const prompt = buildClosingLinePrompt(newMessages);
+          const res = await fetch(apiUrl, {
+            method: 'POST',
+            headers,
+            body: JSON.stringify({
+              model: 'claude-sonnet-4-20250514',
+              max_tokens: 150,
+              messages: [{ role: 'user', content: prompt }],
+            }),
+          });
+          const data = await res.json();
+          const raw = (data.content?.[0]?.text ?? '').trim();
+          if (raw) closing = raw.replace(/^["']|["']$/g, '').trim() || closing;
+        } catch (e) {
+          if (__DEV__) console.warn('Closing line generation failed:', e);
+        }
+      }
+      const closingMsg: MessageWithScenario = { role: 'assistant', content: closing, scenarioNumber: 3 };
+      const finalMessages = [...newMessages, closingMsg];
+      setMessages(finalMessages);
+      await speakTextSafe(closing);
+      isInterviewCompleteRef.current = true;
+      pendingCompletionTranscriptRef.current = finalMessages.filter((m) => m.role === 'user' || m.role === 'assistant');
+      setPendingCompletion(true);
+      setVoiceState('idle');
+    },
+    [messages, setMessages, speakTextSafe]
+  );
+
   const processUserSpeech = useCallback(async (spokenText: string) => {
     if (!spokenText.trim()) {
       setVoiceState('idle');
@@ -3180,79 +3501,149 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
       }
     }
 
-    const userMsg: MessageWithScenario = {
-      role: 'user',
-      content: trimmed,
-      scenarioNumber: getScenarioNumberForNewMessage(messages, 'user'),
-    };
-    const newMessages: MessageWithScenario[] = [...messages, userMsg];
+    // ━━━ INTERCEPT 0: Answer to skepticism probe (after scenario 3) — deliver closing and complete in code
+    if (waitingForSkepticismAnswerRef.current) {
+      waitingForSkepticismAnswerRef.current = false;
+      await deliverClosingAndComplete(trimmed);
+      return;
+    }
 
-    // Closing question answer: handle locally — "no" → advance; "yes" → ask what to add and wait
-    if (lastClosingQuestionScenarioRef.current !== null) {
-      const pendingClosingScenario = lastClosingQuestionScenarioRef.current as 1 | 2 | 3;
-      setMessages(newMessages);
+    // ━━━ INTERCEPT 1: Waiting for closing addition (after "yes") — never send to Claude
+    if (waitingForClosingAdditionRef.current !== null) {
+      const scenarioNumber = waitingForClosingAdditionRef.current as 1 | 2 | 3;
+      waitingForClosingAdditionRef.current = null;
+      setClosingQuestionPending(false);
+      setClosingQuestionScenario(null);
+      const userMsgAdd: MessageWithScenario = {
+        role: 'user',
+        content: trimmed,
+        scenarioNumber,
+      };
+      const newMessagesAdd = [...messages, userMsgAdd];
+      setMessages(newMessagesAdd);
       setCurrentTranscript('');
       transcriptAtReleaseRef.current = '';
       setVoiceState('processing');
       const lower = trimmed.toLowerCase().trim();
-      // Explicit affirmatives — checked first so short "yes" is never treated as decline
-      const isAffirmative = [
-        'yes',
-        'yeah',
-        'yep',
-        'yup',
-        'sure',
-        'actually',
-        'there is',
-        'there was',
-        'one thing',
-        'i wanted to',
-        'i do',
-        'kind of',
-        'a bit',
-      ].some((p) => lower.includes(p)) || /^\s*yes\s*\.?\s*$/i.test(trimmed);
-      const isDecline = [
-        'no',
-        'nope',
-        'nothing',
-        "i'm good",
-        'im good',
-        "that's all",
-        'thats all',
-        'nevermind',
-        'never mind',
-        'all good',
-        'nothing else',
-        'nah',
-        'nothin',
-      ].some((p) => lower.includes(p)) || (lower.length < 4 && !isAffirmative);
+      const isWithdrawal = [
+        'nevermind', 'never mind', 'forget it', "it's fine", 'its fine',
+        'nothing', 'no', 'lets move on', "let's move on", 'actually no', 'nvm', 'skip it', "doesn't matter", 'not important',
+      ].some((p) => lower.includes(p)) || lower.length < 3;
+      const ackMsg: MessageWithScenario = isWithdrawal
+        ? { role: 'assistant', content: 'No worries.', scenarioNumber }
+        : { role: 'assistant', content: generateBriefAck(trimmed), scenarioNumber };
+      const messagesAfterAck = [...newMessagesAdd, ackMsg];
+      setMessages(messagesAfterAck);
+      await speakTextSafe(ackMsg.content);
+      markClosingQuestionAnswered(scenarioNumber);
+      let nextContent = '';
+      if (scenarioNumber === 1) {
+        nextContent = `On to the second situation.\n\n${SCENARIO_2_TEXT}`;
+      } else if (scenarioNumber === 2) {
+        nextContent = `Last one — situation three.\n\n${STAGE_3_PERSONAL_QUESTION}`;
+        stage3PersonalQuestionAskedRef.current = true;
+        stage3ModeRef.current = null;
+      }
+      if (scenarioNumber === 3) {
+        const skepticismMsg: MessageWithScenario = { role: 'assistant', content: SKEPTICISM_PROBE_TEXT, scenarioNumber: 3 };
+        const withProbe = [...messagesAfterAck, skepticismMsg];
+        setMessages(withProbe);
+        await speakTextSafe(SKEPTICISM_PROBE_TEXT);
+        waitingForSkepticismAnswerRef.current = true;
+      } else {
+        const transitionMsg: MessageWithScenario = { role: 'assistant', content: nextContent, scenarioNumber: scenarioNumber === 1 ? 2 : 3 };
+        currentScenarioRef.current = scenarioNumber === 1 ? 2 : 3;
+        const withTransition = [...messagesAfterAck, transitionMsg];
+        setMessages(withTransition);
+        await speakTextSafe(nextContent);
+      }
+      const updatedMessages = scenarioNumber === 3 ? [...messagesAfterAck] : [...messagesAfterAck, { role: 'assistant', content: nextContent, scenarioNumber: scenarioNumber === 1 ? 2 : 3 }];
+      setHighestScenarioReached((prev) => Math.max(prev, scenarioNumber));
+      if (!scoredScenariosRef.current.has(scenarioNumber)) {
+        scoredScenariosRef.current.add(scenarioNumber);
+        const scenario3Type = scenarioNumber === 3 ? inferScenario3Type(messagesAfterAck) : undefined;
+        scoreScenario(scenarioNumber, scenarioNumber === 3 ? messagesAfterAck : updatedMessages, scenario3Type);
+      }
+      if (__DEV__) {
+        closingQuestionAskedRef.current[scenarioNumber] = false;
+        closingQuestionAnsweredRef.current[scenarioNumber] = false;
+      }
+      lastAnsweredClosingScenarioRef.current = null;
+      setVoiceState('idle');
+      return;
+    }
 
-      if (isAffirmative && !isDecline) {
+    // ━━━ INTERCEPT 2: Closing question answer — never send to Claude
+    const pendingScenarioFromRef = lastClosingQuestionScenarioRef.current;
+    const pendingScenarioFromState = closingQuestionScenario;
+    if (pendingScenarioFromRef !== null || closingQuestionPending) {
+      const pendingClosingScenario = (pendingScenarioFromRef ?? pendingScenarioFromState ?? 1) as 1 | 2 | 3;
+      setClosingQuestionPending(false);
+      setClosingQuestionScenario(null);
+      const userMsgClosing: MessageWithScenario = {
+        role: 'user',
+        content: trimmed,
+        scenarioNumber: pendingClosingScenario,
+      };
+      const newMessagesClosing = [...messages, userMsgClosing];
+      setMessages(newMessagesClosing);
+      setCurrentTranscript('');
+      transcriptAtReleaseRef.current = '';
+      setVoiceState('processing');
+      const lower = trimmed.toLowerCase().trim();
+      const isAffirmative = [
+        'yes', 'yeah', 'yep', 'yup', 'sure', 'actually', 'there is', 'there was',
+        'one thing', 'i wanted to', 'i do', 'kind of', 'a bit', 'sort of',
+      ].some((p) => lower.includes(p)) || /^\s*yes\s*\.?\s*$/i.test(trimmed);
+      const isNo = ['no', 'nope', 'nothing', "i'm good", 'im good', "that's all", 'thats all', 'nevermind', 'never mind', 'all good', 'nothing else', 'nah', 'nothin'].some((p) => lower.includes(p)) ||
+        (lower.length < 4 && !isAffirmative);
+      const isYes = isAffirmative && !isNo;
+
+      if (isYes && trimmed.length < 20) {
         lastClosingQuestionScenarioRef.current = null;
         waitingForClosingAdditionRef.current = pendingClosingScenario;
         const followUp = 'What would you want to add?';
-        const updatedMessages = [...newMessages, { role: 'assistant', content: followUp }];
-        setMessages(updatedMessages);
+        const followUpMsg: MessageWithScenario = { role: 'assistant', content: followUp, scenarioNumber: pendingClosingScenario };
+        setMessages([...newMessagesClosing, followUpMsg]);
         await speakTextSafe(followUp);
         setVoiceState('idle');
         return;
       }
 
-      markClosingQuestionAnswered(pendingClosingScenario);
-      let nextContent = '';
-      if (pendingClosingScenario === 1) {
-        nextContent = `On to the second situation.\n\n${SCENARIO_2_TEXT}\n\nIf you were Casey in that moment — what would you say to Jordan?`;
-      } else if (pendingClosingScenario === 2) {
-        nextContent = `Last one — situation three.\n\n${STAGE_3_PERSONAL_QUESTION}`;
-        stage3PersonalQuestionAskedRef.current = true;
-        stage3ModeRef.current = null;
+      let messagesAfterClosingAnswer = newMessagesClosing;
+      if (isYes && trimmed.length >= 20) {
+        const ackText = generateBriefAck(trimmed);
+        const ackMsg: MessageWithScenario = { role: 'assistant', content: ackText, scenarioNumber: pendingClosingScenario };
+        messagesAfterClosingAnswer = [...newMessagesClosing, ackMsg];
+        setMessages(messagesAfterClosingAnswer);
+        await speakTextSafe(ackText);
       }
-      // No separate "Got it — let's move on." — the transition + next scenario is the acknowledgment (avoids TTS pause)
-      const fullDisplay = nextContent || 'Got it.';
-      const updatedMessages = [...newMessages, { role: 'assistant', content: fullDisplay }];
-      setMessages(updatedMessages);
-      await speakTextSafe(fullDisplay);
+
+      markClosingQuestionAnswered(pendingClosingScenario);
+      lastClosingQuestionScenarioRef.current = null;
       const scenarioNumber = pendingClosingScenario;
+      if (scenarioNumber === 3) {
+        const skepticismMsg: MessageWithScenario = { role: 'assistant', content: SKEPTICISM_PROBE_TEXT, scenarioNumber: 3 };
+        const withProbe = [...messagesAfterClosingAnswer, skepticismMsg];
+        setMessages(withProbe);
+        await speakTextSafe(SKEPTICISM_PROBE_TEXT);
+        waitingForSkepticismAnswerRef.current = true;
+      } else {
+        let nextContent = '';
+        if (scenarioNumber === 1) {
+          nextContent = `On to the second situation.\n\n${SCENARIO_2_TEXT}`;
+        } else {
+          nextContent = `Last one — situation three.\n\n${STAGE_3_PERSONAL_QUESTION}`;
+          stage3PersonalQuestionAskedRef.current = true;
+          stage3ModeRef.current = null;
+        }
+        const newAssistantMsg: MessageWithScenario = { role: 'assistant', content: nextContent, scenarioNumber: scenarioNumber === 1 ? 2 : 3 };
+        currentScenarioRef.current = scenarioNumber === 1 ? 2 : 3;
+        const updatedMessages = [...messagesAfterClosingAnswer, newAssistantMsg];
+        setMessages(updatedMessages);
+        await speakTextSafe(nextContent);
+      }
+      const updatedMessages = scenarioNumber === 3 ? messagesAfterClosingAnswer : [...messagesAfterClosingAnswer, { role: 'assistant', content: scenarioNumber === 1 ? `On to the second situation.\n\n${SCENARIO_2_TEXT}` : `Last one — situation three.\n\n${STAGE_3_PERSONAL_QUESTION}`, scenarioNumber: scenarioNumber === 1 ? 2 : 3 }];
       setHighestScenarioReached((prev) => Math.max(prev, scenarioNumber));
       if (!scoredScenariosRef.current.has(scenarioNumber)) {
         scoredScenariosRef.current.add(scenarioNumber);
@@ -3269,54 +3660,12 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
       return;
     }
 
-    // Closing addition: user said "yes" and we asked "What would you want to add?" — this is their addition (or withdrawal)
-    if (waitingForClosingAdditionRef.current !== null) {
-      const scenarioNumber = waitingForClosingAdditionRef.current as 1 | 2 | 3;
-      waitingForClosingAdditionRef.current = null;
-      markClosingQuestionAnswered(scenarioNumber);
-      setMessages(newMessages);
-      setCurrentTranscript('');
-      transcriptAtReleaseRef.current = '';
-      setVoiceState('processing');
-      const lower = trimmed.toLowerCase().trim();
-      const isWithdrawal = [
-        'nevermind',
-        'never mind',
-        'forget it',
-        "it's fine",
-        'its fine',
-        'nothing',
-        'no',
-        'lets move on',
-        "let's move on",
-      ].some((p) => lower.includes(p)) || lower.length < 3;
-      let nextContent = '';
-      if (scenarioNumber === 1) {
-        nextContent = `On to the second situation.\n\n${SCENARIO_2_TEXT}\n\nIf you were Casey in that moment — what would you say to Jordan?`;
-      } else if (scenarioNumber === 2) {
-        nextContent = `Last one — situation three.\n\n${STAGE_3_PERSONAL_QUESTION}`;
-        stage3PersonalQuestionAskedRef.current = true;
-        stage3ModeRef.current = null;
-      }
-      // No separate "Got it" — advance immediately with transition + next scenario only (avoids pause)
-      const fullDisplay = nextContent || 'Got it.';
-      const updatedMessages = [...newMessages, { role: 'assistant', content: fullDisplay }];
-      setMessages(updatedMessages);
-      await speakTextSafe(fullDisplay);
-      setHighestScenarioReached((prev) => Math.max(prev, scenarioNumber));
-      if (!scoredScenariosRef.current.has(scenarioNumber)) {
-        scoredScenariosRef.current.add(scenarioNumber);
-        const scenario3Type = scenarioNumber === 3 ? inferScenario3Type(updatedMessages) : undefined;
-        scoreScenario(scenarioNumber, updatedMessages, scenario3Type);
-      }
-      if (__DEV__) {
-        closingQuestionAskedRef.current[scenarioNumber] = false;
-        closingQuestionAnsweredRef.current[scenarioNumber] = false;
-      }
-      lastAnsweredClosingScenarioRef.current = null;
-      setVoiceState('idle');
-      return;
-    }
+    const userMsg: MessageWithScenario = {
+      role: 'user',
+      content: trimmed,
+      scenarioNumber: currentScenarioRef.current ?? getScenarioNumberForNewMessage(messages, 'user'),
+    };
+    const newMessages: MessageWithScenario[] = [...messages, userMsg];
 
     // Stage 3 personal question response: user just answered "do you have a bottling-up example?"
     if (stage3PersonalQuestionAskedRef.current && stage3ModeRef.current === null) {
@@ -3352,7 +3701,7 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
       stage3PersonalQuestionAskedRef.current = false;
       if (isDecline) {
         stage3ModeRef.current = 'fictional';
-        const scenarioContent = `No problem — here's the situation.\n\n${SCENARIO_3_TEXT}\n\nIf you were Drew, after giving in like that — what would you say to Riley?`;
+        const scenarioContent = `No problem — here's the situation.\n\n${SCENARIO_3_TEXT}`;
         const updatedMessagesStage3 = [...newMessages, { role: 'assistant', content: scenarioContent }];
         setMessages(updatedMessagesStage3);
         await speakTextSafe(scenarioContent);
@@ -3420,7 +3769,7 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
       const requestBody = {
         model: 'claude-sonnet-4-20250514',
         max_tokens: maxTok,
-        system: INTERVIEWER_SYSTEM + OPENING_INSTRUCTIONS + SCENARIO_SWITCHING_INSTRUCTIONS + SCENARIO_3_SWITCHING + SCENARIO_2_NO_PERSONAL + SCENARIO_BOUNDARY_INSTRUCTIONS + SCENARIO_CLOSING_INSTRUCTIONS + PERSONAL_DISCLOSURE_TRANSITION + SKIP_HANDLING_INSTRUCTIONS + SCORE_REQUEST_INSTRUCTIONS + OFF_TOPIC_INSTRUCTIONS + REPEAT_HANDLING_INSTRUCTIONS + THIN_RESPONSE_INSTRUCTIONS + NO_REPEAT_INSTRUCTIONS + PAUSE_HANDLING_INSTRUCTIONS + DISTRESS_HANDLING_INSTRUCTIONS + MISUNDERSTANDING_HANDLING_INSTRUCTIONS + SCENARIO_REDIRECT_QUESTIONS + STAGE_3_NOTHING_SAID + COMMUNICATION_QUESTION_CHECK + PUSHBACK_RESPONSE_INSTRUCTIONS + REPAIR_COHERENCE_INSTRUCTIONS + SCENARIO_COMPLETE_TOKEN_INSTRUCTIONS + CLOSING_LINE_INSTRUCTIONS + closingInstruction,
+        system: INTERVIEWER_SYSTEM + OPENING_INSTRUCTIONS + SCENARIO_SWITCHING_INSTRUCTIONS + SCENARIO_3_SWITCHING + SCENARIO_2_NO_PERSONAL + SCENARIO_BOUNDARY_INSTRUCTIONS + SCENARIO_CLOSING_INSTRUCTIONS + CLOSING_QUESTION_HANDLING + SCENARIO_TRANSITION_CLOSING + PERSONAL_DISCLOSURE_TRANSITION + SKIP_HANDLING_INSTRUCTIONS + SCORE_REQUEST_INSTRUCTIONS + OFF_TOPIC_INSTRUCTIONS + REPEAT_HANDLING_INSTRUCTIONS + THIN_RESPONSE_INSTRUCTIONS + NO_REPEAT_INSTRUCTIONS + PAUSE_HANDLING_INSTRUCTIONS + DISTRESS_HANDLING_INSTRUCTIONS + MISUNDERSTANDING_HANDLING_INSTRUCTIONS + SCENARIO_REDIRECT_QUESTIONS + INVALID_SCENARIO_REDIRECT + STAGE_3_NOTHING_SAID + COMMUNICATION_QUESTION_CHECK + PUSHBACK_RESPONSE_INSTRUCTIONS + REPAIR_COHERENCE_INSTRUCTIONS + SCENARIO_COMPLETE_TOKEN_INSTRUCTIONS + CLOSING_LINE_INSTRUCTIONS + closingInstruction,
         messages: messagesToUse
           .filter((m) => m.role === 'user' || m.role === 'assistant')
           .map((m) => ({ role: m.role, content: m.content })),
@@ -3519,14 +3868,20 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
           closingQuestionAnsweredRef.current[scenarioNumber] === true;
         let nextContent = '';
         if (scenarioNumber === 1) {
-          nextContent = `On to the second situation.\n\n${SCENARIO_2_TEXT}\n\nIf you were Casey in that moment — what would you say to Jordan?`;
+          nextContent = `On to the second situation.\n\n${SCENARIO_2_TEXT}`;
         } else if (scenarioNumber === 2) {
           nextContent = `Last one — situation three.\n\n${STAGE_3_PERSONAL_QUESTION}`;
           stage3PersonalQuestionAskedRef.current = true;
           stage3ModeRef.current = null;
         }
         const fullDisplay = nextContent || (stripControlTokens(text) || 'Got it.');
-        const updatedMessages = [...messagesToUse, { role: 'assistant', content: fullDisplay }];
+        const nextScenarioNum = scenarioNumber === 1 ? 2 : scenarioNumber === 2 ? 3 : undefined;
+        const newAssistantMsg: MessageWithScenario = { role: 'assistant', content: fullDisplay };
+        if (nextScenarioNum != null) {
+          newAssistantMsg.scenarioNumber = nextScenarioNum;
+          currentScenarioRef.current = nextScenarioNum;
+        }
+        const updatedMessages = [...messagesToUse, newAssistantMsg];
         setMessages(updatedMessages);
         await speakTextSafe(fullDisplay);
         if (canAdvance && scenarioNumber <= 2) {
@@ -3555,14 +3910,20 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
           if (__DEV__) console.warn('[Aria] Closing question repeat detected — advancing without displaying');
           let nextContent = '';
           if (scenarioNumber === 1) {
-            nextContent = `On to the second situation.\n\n${SCENARIO_2_TEXT}\n\nIf you were Casey in that moment — what would you say to Jordan?`;
+            nextContent = `On to the second situation.\n\n${SCENARIO_2_TEXT}`;
           } else if (scenarioNumber === 2) {
             nextContent = `Last one — situation three.\n\n${STAGE_3_PERSONAL_QUESTION}`;
             stage3PersonalQuestionAskedRef.current = true;
             stage3ModeRef.current = null;
           }
           const fullDisplay = nextContent || 'Got it.';
-          const updatedMessages = [...messagesToUse, { role: 'assistant', content: fullDisplay }];
+          const nextScenarioNum = scenarioNumber === 1 ? 2 : scenarioNumber === 2 ? 3 : undefined;
+          const newAssistantMsg: MessageWithScenario = { role: 'assistant', content: fullDisplay };
+          if (nextScenarioNum != null) {
+            newAssistantMsg.scenarioNumber = nextScenarioNum;
+            currentScenarioRef.current = nextScenarioNum;
+          }
+          const updatedMessages = [...messagesToUse, newAssistantMsg];
           setMessages(updatedMessages);
           await speakTextSafe(fullDisplay);
           setHighestScenarioReached((prev) => Math.max(prev, scenarioNumber));
@@ -3582,6 +3943,36 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
       }
 
       // Per-scenario completion token: strip token, show summary, insert score card in chat
+      // Process INTERVIEW_COMPLETE first — wait for TTS to finish before showing loading screen
+      if (text.includes('[INTERVIEW_COMPLETE]')) {
+        await remoteLog('[0] INTERVIEW_COMPLETE token detected in response', {
+          isAdmin,
+          ALPHA_MODE,
+          userId: userId ?? null,
+          responseLength: text.length,
+          interviewStatus,
+        });
+        if (__DEV__) {
+          console.log('=== INTERVIEW_COMPLETE TOKEN DETECTED ===');
+        }
+        const displayText = stripControlTokens(text) || 'Thank you. That was really helpful.';
+        const finalAssistant: MessageWithScenario = {
+          role: 'assistant',
+          content: displayText,
+          scenarioNumber: currentScenarioRef.current ?? getScenarioNumberForNewMessage(messagesToUse, 'assistant', displayText),
+        };
+        const finalMessages = [...messagesToUse, finalAssistant];
+        setMessages(finalMessages);
+        speakTextSafe(displayText).catch(() => {});
+        isInterviewCompleteRef.current = true;
+        const transcriptForScoring = finalMessages.filter((m) => m.role === 'user' || m.role === 'assistant');
+        // Always wait for closing TTS to finish before showing loading screen
+        pendingCompletionTranscriptRef.current = transcriptForScoring;
+        setPendingCompletion(true);
+        return;
+      }
+
+      // Then handle per-scenario completion tokens (may appear in earlier messages or alongside other markers)
       const scenarioMatch = text.match(/\[SCENARIO_COMPLETE:(\d)\]/);
       if (scenarioMatch) {
         lastAnsweredClosingScenarioRef.current = null;
@@ -3590,9 +3981,12 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
           closingQuestionAskedRef.current[scenarioNumber] === true &&
           closingQuestionAnsweredRef.current[scenarioNumber] === true;
         const displayText = stripControlTokens(text) || "Good, that's helpful.";
-        const updatedMessages = [...messagesToUse, { role: 'assistant', content: displayText || 'Good, that’s helpful.' }];
+        const transitionMsg: MessageWithScenario = { role: 'assistant', content: displayText, scenarioNumber };
+        const nextScenarioNum = scenarioNumber < 3 ? (scenarioNumber + 1) as 2 | 3 : 3;
+        currentScenarioRef.current = nextScenarioNum;
+        const updatedMessages = [...messagesToUse, transitionMsg];
         setMessages(updatedMessages);
-        await speakTextSafe(displayText || 'Good, that’s helpful.');
+        await speakTextSafe(displayText);
         if (canAdvance) {
           setHighestScenarioReached((prev) => Math.max(prev, scenarioNumber));
           if (!scoredScenariosRef.current.has(scenarioNumber)) {
@@ -3605,32 +3999,11 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
             closingQuestionAnsweredRef.current[scenarioNumber] = false;
           }
         } else if (__DEV__) {
-          console.warn(`[Aria] [SCENARIO_COMPLETE:${scenarioNumber}] ignored: closing question not asked/answered for scenario ${scenarioNumber}`);
+          console.warn(
+            `[Aria] [SCENARIO_COMPLETE:${scenarioNumber}] ignored: closing question not asked/answered for scenario ${scenarioNumber}`
+          );
         }
         setVoiceState('idle');
-        return;
-      }
-
-      // Process INTERVIEW_COMPLETE first so final scoring runs and Stage 3 scores display immediately
-      if (text.includes('[INTERVIEW_COMPLETE]')) {
-        if (__DEV__) {
-          console.log('=== [1] INTERVIEW_COMPLETE token detected ===');
-          console.log('isAdmin:', isAdmin);
-          console.log('ALPHA_MODE:', ALPHA_MODE);
-          console.log('interviewStatus:', interviewStatus);
-          console.log('userId:', userId);
-        }
-        const displayText = stripControlTokens(text) || 'Thank you. That was really helpful.';
-        const finalAssistant: MessageWithScenario = {
-          role: 'assistant',
-          content: displayText,
-          scenarioNumber: getScenarioNumberForNewMessage(messagesToUse, 'assistant', displayText),
-        };
-        const finalMessages = [...messagesToUse, finalAssistant];
-        setMessages(finalMessages);
-        await speakTextSafe(displayText);
-        const transcriptForScoring = finalMessages.filter((m) => m.role === 'user' || m.role === 'assistant');
-        setTimeout(() => scoreInterview(transcriptForScoring), 1000);
         return;
       }
 
@@ -3673,20 +4046,33 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
       if (closingQuestionMatch) {
         const n = parseInt(closingQuestionMatch[1], 10) as 1 | 2 | 3;
         markClosingQuestionAsked(n);
+        setClosingQuestionPending(true);
+        setClosingQuestionScenario(n);
       }
 
       const displayText = stripControlTokens(text);
+      const detectedScenario = detectScenarioFromResponse(displayText);
+      if (detectedScenario !== null) currentScenarioRef.current = detectedScenario;
+      const scenarioNum = currentScenarioRef.current ?? detectedScenario ?? getScenarioNumberForNewMessage(messagesToUse, 'assistant', displayText);
+      if (isClosingQuestion(displayText)) {
+        setClosingQuestionPending(true);
+        const scenarioForClosing = (scenarioNum === 1 || scenarioNum === 2 || scenarioNum === 3 ? scenarioNum : 1) as 1 | 2 | 3;
+        setClosingQuestionScenario(scenarioForClosing);
+        lastClosingQuestionScenarioRef.current = scenarioForClosing;
+        closingQuestionAskedRef.current[scenarioForClosing] = true;
+        setClosingQuestionState((prev) => ({ ...prev, [scenarioForClosing]: 'asked' }));
+      }
       const aiMsg: MessageWithScenario = {
         role: 'assistant',
         content: displayText,
-        scenarioNumber: getScenarioNumberForNewMessage(messagesToUse, 'assistant', displayText),
+        scenarioNumber: scenarioNum,
       };
       lastAnsweredClosingScenarioRef.current = null;
       setMessages([...messagesToUse, aiMsg]);
       const aiDetected = detectConstructs(text);
       setTouchedConstructs((prev) => [...new Set([...prev, ...aiDetected])]);
       await speakTextSafe(displayText);
-  }, [messages, speakTextSafe, route?.name, userId, navigation, queryClient, profile?.name, fetchStageScore, scoreScenario, usedPersonalExamples, scenarioMode, canSwitchScenario, handleScenarioSwitch, markClosingQuestionAsked, markClosingQuestionAnswered]);
+  }, [messages, speakTextSafe, route?.name, userId, navigation, queryClient, profile?.name, fetchStageScore, scoreScenario, usedPersonalExamples, scenarioMode, canSwitchScenario, handleScenarioSwitch, markClosingQuestionAsked, markClosingQuestionAnswered, deliverClosingAndComplete]);
 
   const handlePressStart = useCallback(async () => {
     if (voiceState !== 'idle') return;
@@ -3702,12 +4088,6 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
     setVoiceState('listening');
     if (Platform.OS === 'web' && recognitionRef.current) {
       try { recognitionRef.current.start(); } catch {}
-    } else {
-      nativeTranscriptRef.current = { final: '', interim: '' };
-      ExpoSpeechRecognitionModule.requestPermissionsAsync().then((r) => {
-        setMicPermission(r.granted ? 'granted' : 'denied');
-        if (r.granted) ExpoSpeechRecognitionModule.start({ lang: 'en-US', interimResults: true, continuous: true });
-      });
     }
   }, [voiceState, useNativeOrWhisperRecording]);
 
@@ -3739,9 +4119,8 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
             const headers: Record<string, string> = {};
             if (!OPENAI_WHISPER_PROXY_URL) headers.Authorization = `Bearer ${OPENAI_API_KEY}`;
 
-            if (audioBlob && audioBlob.size > 0) {
-              form.append('file', audioBlob, nativeUri ? 'recording.m4a' : 'recording.webm');
-            } else if (Platform.OS !== 'web' && nativeUri) {
+            // Native: always build from file URI so we send explicit audio/mp4 (fetch(uri).blob() often has wrong type and Whisper rejects it)
+            if (Platform.OS !== 'web' && nativeUri) {
               try {
                 const base64 = await FileSystem.readAsStringAsync(nativeUri, {
                   encoding: FileSystem.EncodingType.Base64,
@@ -3749,15 +4128,23 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
                 const byteChars = atob(base64);
                 const byteNumbers = new Array(byteChars.length);
                 for (let i = 0; i < byteChars.length; i++) byteNumbers[i] = byteChars.charCodeAt(i);
-                const blob = new Blob([new Uint8Array(byteNumbers)], { type: 'audio/m4a' });
+                const blob = new Blob([new Uint8Array(byteNumbers)], { type: 'audio/mp4' });
                 form.append('file', blob, 'recording.m4a');
               } catch (e) {
                 (form as unknown as { append: (k: string, v: { uri: string; type: string; name: string }) => void }).append('file', {
                   uri: nativeUri,
-                  type: 'audio/m4a',
+                  type: 'audio/mp4',
                   name: 'recording.m4a',
                 });
               }
+            } else if (audioBlob && audioBlob.size > 0) {
+              const filename = 'recording.webm';
+              const typeOk = audioBlob.type === 'audio/webm' || audioBlob.type?.startsWith('audio/webm') || !audioBlob.type;
+              let blobToSend: Blob = audioBlob;
+              if (!typeOk && typeof audioBlob.arrayBuffer === 'function') {
+                blobToSend = new Blob([await audioBlob.arrayBuffer()], { type: 'audio/webm' });
+              }
+              form.append('file', blobToSend, filename);
             } else {
               throw new Error('No audio data');
             }
@@ -3806,16 +4193,27 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
     onError: (err) => handleRecordingError(err),
   });
 
-  const handleNativeOrWhisperMicPress = useCallback(() => {
+  const handleNativeOrWhisperMicPress = useCallback(async () => {
     if (voiceState === 'speaking' || voiceState === 'processing') return;
     if (!useNativeOrWhisperRecording) return;
-    if (audioRecorder.isRecording) {
-      audioRecorder.stopRecording();
-    } else {
-      setVoiceState('recording');
-      audioRecorder.startRecording();
+    if (__DEV__) console.log('[Aria] MIC PRESSED, isRecording:', audioRecorder.isRecording);
+    try {
+      if (audioRecorder.isRecording) {
+        await audioRecorder.stopRecording();
+        if (__DEV__) console.log('[Aria] RECORDING STOPPED');
+      } else {
+        const granted = await audioRecorder.requestPermission();
+        if (__DEV__) console.log('[Aria] MIC PERMISSION:', granted ? 'granted' : 'denied');
+        if (!granted) return;
+        setVoiceState('recording');
+        await audioRecorder.startRecording();
+        if (__DEV__) console.log('[Aria] RECORDING STARTED');
+      }
+    } catch (err) {
+      if (__DEV__) console.error('[Aria] MIC ERROR:', err instanceof Error ? err.message : err);
+      handleRecordingError(err instanceof Error ? err : new Error(String(err)));
     }
-  }, [voiceState, useNativeOrWhisperRecording, audioRecorder.isRecording, audioRecorder.stopRecording, audioRecorder.startRecording]);
+  }, [voiceState, useNativeOrWhisperRecording, audioRecorder.isRecording, audioRecorder.stopRecording, audioRecorder.startRecording, audioRecorder.requestPermission, handleRecordingError]);
 
   const handleSendTyped = useCallback(() => {
     const text = typedAnswer.trim();
@@ -3831,8 +4229,6 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
     if (useNativeOrWhisperRecording) return; // native or web Whisper use hook
     if (Platform.OS === 'web' && recognitionRef.current) {
       recognitionRef.current.stop();
-    } else {
-      ExpoSpeechRecognitionModule.stop();
     }
     setVoiceState('processing');
     setTimeout(() => {
@@ -3924,6 +4320,7 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
   useEffect(() => {
     if (!userId || isAdmin) return;
     if (hasResumedRef.current) return;
+    if (isInterviewCompleteRef.current) return;
     let cancelled = false;
     (async () => {
       const saved = await loadInterviewFromStorage(userId);
@@ -3954,31 +4351,86 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
   }, [userId, isAdmin, handleResume]);
 
   const startInterview = useCallback(async () => {
+    await remoteLog('[START] startInterview called', {
+      userId: userId ?? null,
+      isAdmin,
+      platform: Platform.OS,
+    });
     if (isAdmin) await clearInterviewFromStorage(userId);
-    // Clear any stale storage from a completed interview before starting fresh
     const saved = await loadInterviewFromStorage(userId);
     if (saved && (saved.scenariosCompleted?.length ?? 0) >= 3) {
       await clearInterviewFromStorage(userId);
     }
-    if (Platform.OS === 'web') {
-      await requestMicPermissionForPWA();
-    } else if (useNativeOrWhisperRecording) {
-      const granted = await audioRecorder.requestPermission();
-      setMicPermission(granted ? 'granted' : 'denied');
-    }
-    setStatus('active');
-    setInterviewStatus('in_progress');
-    setVoiceState('processing');
-    if (!ANTHROPIC_API_KEY && !ANTHROPIC_PROXY_URL) {
-      const welcomeFallback = "Welcome. I'll be with you in just a moment.";
-      setMessages([{ role: 'assistant', content: welcomeFallback }]);
+    try {
+      // 1 — Request mic permissions first
+      if (Platform.OS === 'web') {
+        await requestMicPermissionForPWA();
+        await remoteLog('[START] Mic permission (PWA) requested');
+      } else if (useNativeOrWhisperRecording) {
+        const granted = await audioRecorder.requestPermission();
+        setMicPermission(granted ? 'granted' : 'denied');
+        await remoteLog('[START] Mic permission result', { granted });
+        if (!granted) {
+          if (__DEV__) console.warn('[Aria] Mic permission denied at start');
+          setVoiceState('idle');
+          return;
+        }
+      }
+
+      // 2 — Set playback mode so welcome TTS plays through speaker; mic will switch to recording mode when user holds button
+      if (Platform.OS !== 'web') {
+        await setPlaybackMode();
+        await remoteLog('[START] Audio mode set');
+      }
+
+      setStatus('active');
+      setInterviewStatus('in_progress');
+      setVoiceState('processing');
+
+      const hasKey = !!ANTHROPIC_API_KEY;
+      const hasProxy = !!ANTHROPIC_PROXY_URL;
+      await remoteLog('[START] API check', {
+        hasAnthropicKey: hasKey,
+        hasProxyUrl: hasProxy,
+        willUseFallback: !hasKey && !hasProxy,
+      });
+
+      if (!ANTHROPIC_API_KEY && !ANTHROPIC_PROXY_URL) {
+        await remoteLog('[START] No API key or proxy — showing fallback message');
+        if (__DEV__) console.error('[Aria] INIT: No API key or proxy — showing fallback message');
+        const welcomeFallback = "Welcome. I'll be with you in just a moment.";
+        currentScenarioRef.current = 1;
+        setMessages([{ role: 'assistant', content: welcomeFallback, scenarioNumber: 1 } as MessageWithScenario]);
+        setVoiceState('idle');
+        await speakTextSafe(welcomeFallback).catch(() => {});
+        return;
+      }
+
+      // 3 — Deliver the real greeting (scenario 1 starts here)
+      await remoteLog('[START] Delivering real greeting');
+      currentScenarioRef.current = 1;
+      const openingLine = "Hi, I'm Aira, welcome to Amoraea, what can I call you?";
+      setMessages([{ role: 'assistant', content: openingLine, scenarioNumber: 1 } as MessageWithScenario]);
+      await speakTextSafe(openingLine);
+      await remoteLog('[START] Real greeting sent');
+    } catch (err) {
+      await remoteLog('[START] INIT ERROR causing fallback', {
+        name: err instanceof Error ? err.name : 'unknown',
+        message: err instanceof Error ? err.message : String(err),
+        stack: err instanceof Error ? err.stack?.slice(0, 500) : undefined,
+      });
+      if (__DEV__) {
+        console.error('=== INIT ERROR causing fallback ===');
+        console.error('Name:', err instanceof Error ? err.name : 'unknown');
+        console.error('Message:', err instanceof Error ? err.message : String(err));
+        console.error('Stack:', err instanceof Error ? err.stack : '');
+      }
       setVoiceState('idle');
-      await speakTextSafe(welcomeFallback).catch(() => {});
-      return;
+      currentScenarioRef.current = 1;
+      const fallbackMsg = "Welcome. I'll be with you in just a moment.";
+      setMessages([{ role: 'assistant', content: fallbackMsg, scenarioNumber: 1 } as MessageWithScenario]);
+      await speakTextSafe(fallbackMsg).catch(() => {});
     }
-    const openingLine = "Hi, I'm Aira, welcome to Amoraea, what can I call you?";
-    setMessages([{ role: 'assistant', content: openingLine }]);
-    await speakTextSafe(openingLine);
   }, [speakTextSafe, isAdmin, userId, useNativeOrWhisperRecording, audioRecorder]);
 
   const saveInterviewResults = useCallback(
@@ -4005,12 +4457,20 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
   );
 
   const scoreInterview = useCallback(async (finalMessages: { role: string; content: string }[]) => {
+    await remoteLog('[1] INTERVIEW_COMPLETE scoreInterview entered', {
+      isAdmin,
+      ALPHA_MODE,
+      userId: userId ?? null,
+      interviewStatus: interviewStatusRef.current,
+      routeName: route.name,
+    });
     if (__DEV__) {
       console.log('=== [2] Entering completion handler ===');
       console.log('interviewStatus:', interviewStatusRef.current);
     }
     const isOnboarding = route.name === 'OnboardingInterview';
     setStatus('scoring');
+    await remoteLog('[2] Screen set to scoring');
     const context = typologyContext || 'No typology context — score from transcript only.';
     if (!ANTHROPIC_API_KEY && !ANTHROPIC_PROXY_URL) {
       const fallbackResults: InterviewResults = {
@@ -4075,6 +4535,11 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
       const gateResult = computeGateResult(parsed.pillarScores ?? {}, parsed.skepticismModifier ?? null);
       parsed.gateResult = gateResult;
       setResults(parsed);
+      await remoteLog('[3] Scoring complete', {
+        weightedScore: gateResult?.weightedScore,
+        passed: gateResult?.pass,
+        pillarScores: parsed.pillarScores ?? {},
+      });
       if (__DEV__) {
         console.log('=== Scoring API complete ===', 'passed:', gateResult?.pass);
       }
@@ -4085,9 +4550,49 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
           applicationStatus: gate1Score.passed ? 'approved' : 'under_review',
           ...(gate1Score.passed ? { onboardingStage: 'basic_info' as const } : {}),
         });
-        queryClient.invalidateQueries({ queryKey: ['profile', userId] });
+        if (!ALPHA_MODE) {
+          queryClient.invalidateQueries({ queryKey: ['profile', userId] });
+        } else {
+          setTimeout(() => queryClient.invalidateQueries({ queryKey: ['profile', userId] }), 2000);
+        }
       }
       if (ALPHA_MODE && userId) {
+        const hasAllScores =
+          scenarioScoresRef.current[1] != null &&
+          scenarioScoresRef.current[2] != null &&
+          scenarioScoresRef.current[3] != null;
+        if (!hasAllScores) {
+          await remoteLog('COMPLETION_INCOMPLETE_SCORES', {
+            s1: !!scenarioScoresRef.current[1],
+            s2: !!scenarioScoresRef.current[2],
+            s3: !!scenarioScoresRef.current[3],
+          });
+          if (__DEV__) {
+            console.error('Interview complete but missing scenario scores:', {
+              s1: scenarioScoresRef.current[1],
+              s2: scenarioScoresRef.current[2],
+              s3: scenarioScoresRef.current[3],
+            });
+          }
+          const msgs = finalMessages as MessageWithScenario[];
+          const rescoreMissingScenarios = async () => {
+            const missing = ([1, 2, 3] as const).filter((n) => !scenarioScoresRef.current[n]);
+            if (__DEV__) console.log('[RESCORE] Missing scenarios:', missing);
+            for (const scenarioNum of missing) {
+              const taggedMessages = msgs.filter((m) => (m as MessageWithScenario).scenarioNumber === scenarioNum);
+              const inferredMessages = inferScenarioMessages(msgs, scenarioNum);
+              const messagesToScore = taggedMessages.length >= inferredMessages.length ? taggedMessages : inferredMessages;
+              if (__DEV__) console.log(`[RESCORE] Scenario ${scenarioNum}: ${messagesToScore.length} messages (tagged: ${taggedMessages.length}, inferred: ${inferredMessages.length})`);
+              if (messagesToScore.length >= 2) {
+                const scenario3Type = scenarioNum === 3 ? inferScenario3Type(msgs) : undefined;
+                await scoreScenario(scenarioNum, messagesToScore, scenario3Type);
+              } else if (__DEV__) {
+                console.error(`[RESCORE] Cannot score scenario ${scenarioNum} — insufficient messages`);
+              }
+            }
+          };
+          await rescoreMissingScenarios();
+        }
         let alphaSaveOk = false;
         let insertPayload: Record<string, unknown> | null = null;
         let updatePayload: Record<string, unknown> | null = null;
@@ -4130,13 +4635,17 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
           setReasoningProgress(reasoning._generationFailed ? 'failed' : 'done');
           clearTimeout(slowTimer);
           clearTimeout(verySlowTimer);
+          await remoteLog('[4] Reasoning generated', {
+            reasoningKeys: reasoning ? Object.keys(reasoning) : [],
+            generationFailed: reasoning?._generationFailed ?? null,
+          });
           if (__DEV__) console.log('=== [4] Reasoning complete ===');
           const { data: userRow } = await supabase
             .from('users')
             .select('interview_attempt_count')
             .eq('id', userId)
             .single();
-          attemptNum = (userRow?.interview_attempt_count ?? 0) || 1;
+          attemptNum = (userRow?.interview_attempt_count ?? 0) + 1;
           insertPayload = {
             user_id: userId,
             attempt_number: attemptNum,
@@ -4203,13 +4712,24 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
           );
           await clearInterviewFromStorage(userId);
           const attemptId = insertData?.id ?? null;
+          await remoteLog('[5] Database save result', {
+            attemptId: attemptId ?? null,
+            error: null,
+            errorCode: null,
+          });
           if (__DEV__) {
             console.log('=== [5] DB save ===', { id: attemptId ?? undefined, error: null });
           }
           setAnalysisAttemptId(attemptId);
+          await remoteLog('[6] setAnalysisAttemptId called', { id: attemptId ?? null });
           if (__DEV__) console.log('=== [6] latestAttemptId set ===', attemptId ?? 'null');
           alphaSaveOk = true;
         } catch (err) {
+          await remoteLog('[ERROR] Completion handler threw', {
+            message: err instanceof Error ? err.message : String(err),
+            name: err instanceof Error ? err.name : 'unknown',
+            stack: err instanceof Error ? err.stack?.slice(0, 500) : undefined,
+          });
           if (__DEV__) {
             console.error('=== [4] Alpha save failed ===', err);
           }
@@ -4226,9 +4746,15 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
           await saveInterviewResults(parsed, gateResult, userId);
         } finally {
           if (ALPHA_MODE) {
+            await remoteLog('[7] About to navigate', {
+              ALPHA_MODE: true,
+              destination: 'analysis',
+            });
             if (__DEV__) console.log('=== [7] Navigating to analysis ===');
+            interviewJustCompletedInSession = true;
             await new Promise((resolve) => setTimeout(resolve, 100));
             setInterviewStatus('analysis');
+            await remoteLog('[8] setInterviewStatus(analysis) called', { screen: 'analysis' });
             if (__DEV__) console.log('=== [8] Navigation complete ===');
           }
         }
@@ -4242,6 +4768,11 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
       }
       setStatus('results');
     } catch (err) {
+      await remoteLog('[ERROR] scoreInterview threw', {
+        message: err instanceof Error ? err.message : String(err),
+        name: err instanceof Error ? err.name : 'unknown',
+        stack: err instanceof Error ? err.stack?.slice(0, 500) : undefined,
+      });
       if (__DEV__) console.error('=== COMPLETION ERROR ===', err);
       const fallbackResults: InterviewResults = {
         pillarScores: { '1': 6, '3': 7, '4': 6, '5': 7, '6': 5, '9': 6 },
@@ -4266,7 +4797,18 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
       setInterviewStatus('under_review');
       setStatus('results');
     }
-  }, [typologyContext, route.name, userId, navigation, queryClient, saveInterviewResults, ensureValidSession]);
+  }, [typologyContext, route.name, userId, isAdmin, navigation, queryClient, saveInterviewResults, ensureValidSession, scoreScenario]);
+
+  // When INTERVIEW_COMPLETE was detected while TTS was still playing, transition to loading once TTS finishes
+  useEffect(() => {
+    if (!pendingCompletion || voiceState !== 'idle') return;
+    const transcript = pendingCompletionTranscriptRef.current;
+    pendingCompletionTranscriptRef.current = null;
+    setPendingCompletion(false);
+    if (!transcript || transcript.length === 0) return;
+    setInterviewStatus('preparing_results');
+    scoreInterview(transcript);
+  }, [pendingCompletion, voiceState, scoreInterview]);
 
   const handleRetake = useCallback(async () => {
     if (!userId) return;
@@ -4289,6 +4831,7 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
       })
       .eq('id', userId);
     await clearInterviewFromStorage(userId);
+    isInterviewCompleteRef.current = false;
     setMessages([]);
     setScenarioScores({});
     scoredScenariosRef.current = new Set();
@@ -4297,6 +4840,9 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
     closingQuestionAnsweredRef.current = { 1: false, 2: false, 3: false };
     lastClosingQuestionScenarioRef.current = null;
     waitingForClosingAdditionRef.current = null;
+    waitingForSkepticismAnswerRef.current = false;
+    setClosingQuestionPending(false);
+    setClosingQuestionScenario(null);
     lastAnsweredClosingScenarioRef.current = null;
     stage3PersonalQuestionAskedRef.current = false;
     stage3ModeRef.current = null;
@@ -4344,6 +4890,25 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
       </SafeAreaContainer>
     );
   }
+  if (interviewStatus === 'preparing_results') {
+    return (
+      <SafeAreaContainer>
+        <View style={[styles.container, { flex: 1, backgroundColor: '#05060D', alignItems: 'center', justifyContent: 'center', padding: 24 }]}>
+          <FlameOrb state="idle" size={80} />
+          <Text style={{
+            fontFamily: Platform.OS === 'web' ? undefined : 'Jost_300Light',
+            fontSize: 10,
+            letterSpacing: 3,
+            textTransform: 'uppercase',
+            color: '#3D5470',
+            marginTop: 24,
+          }}>
+            Preparing your results
+          </Text>
+        </View>
+      </SafeAreaContainer>
+    );
+  }
   // Admin always goes to admin panel — never show interview complete / under_review / analysis (use auth user so it works on first render)
   if (ALPHA_MODE && (isAdmin || isAdminUser) && shouldShowAdminPanel) {
     return (
@@ -4362,10 +4927,12 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
       <InterviewAnalysisScreen
         attemptId={analysisAttemptId}
         onRetake={handleRetake}
+        isAdmin={isAdmin}
+        alphaMode={ALPHA_MODE}
       />
     );
   }
-  if (interviewStatus === 'under_review') {
+  if (interviewStatus === 'under_review' && !ALPHA_MODE) {
     return (
       <SafeAreaContainer>
         <View style={[styles.container, { minHeight: '100%', justifyContent: 'center', alignItems: 'center', padding: 24 }]}>
@@ -4771,11 +5338,7 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
           </View>
         )}
       </View>
-      {usingMemoryFallback ? (
-        <View style={styles.memoryFallbackBanner} pointerEvents="none">
-          <Text style={styles.memoryFallbackBannerText}>⚠ Low storage — progress saved to server only</Text>
-        </View>
-      ) : null}
+      {/* Low-storage fallback is silent — no user-facing message; progress still saved to server */}
     </SafeAreaContainer>
   );
 };
@@ -5104,3 +5667,5 @@ const styles = StyleSheet.create({
   adminTypeFallbackLabel: { color: '#7A9ABE' },
   adminTypeFallbackInput: { backgroundColor: '#0D1120', borderColor: 'rgba(82,142,220,0.12)', color: '#E8F0F8' },
 });
+
+export default AriaScreen;

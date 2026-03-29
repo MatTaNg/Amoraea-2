@@ -1,8 +1,34 @@
 import { useState, useRef, useCallback } from 'react';
 import { Platform } from 'react-native';
 import { Audio } from 'expo-av';
-
+import { setRecordingMode } from '@features/aria/utils/audioModeHelpers';
 export type AudioRecorderPermissionStatus = 'granted' | 'denied' | null;
+
+const RECORDING_OPTIONS = {
+  android: {
+    extension: '.m4a',
+    outputFormat: Audio.AndroidOutputFormat.MPEG_4,
+    audioEncoder: Audio.AndroidAudioEncoder.AAC,
+    sampleRate: 44100,
+    numberOfChannels: 1,
+    bitRate: 128000,
+  },
+  ios: {
+    extension: '.m4a',
+    outputFormat: Audio.IOSOutputFormat.MPEG4AAC,
+    audioQuality: Audio.IOSAudioQuality.HIGH,
+    sampleRate: 44100,
+    numberOfChannels: 1,
+    bitRate: 128000,
+    linearPCMBitDepth: 16,
+    linearPCMIsBigEndian: false,
+    linearPCMIsFloat: false,
+  },
+  web: {
+    mimeType: 'audio/webm',
+    bitsPerSecond: 128000,
+  },
+};
 
 /**
  * useAudioRecorder
@@ -57,15 +83,19 @@ export function useAudioRecorder({
 
   const startNativeRecording = useCallback(async () => {
     try {
-      await Audio.setAudioModeAsync({
-        allowsRecordingIOS: true,
-        playsInSilentModeIOS: true,
-        staysActiveInBackground: false,
-      });
+      await setRecordingMode();
+      // Force recording mode on iOS immediately before starting (so playback can switch back after)
+      if (Platform.OS === 'ios') {
+        await Audio.setAudioModeAsync({
+          allowsRecordingIOS: true,
+          playsInSilentModeIOS: true,
+          interruptionModeIOS: 1,
+          shouldDuckAndroid: true,
+          playThroughEarpieceAndroid: false,
+        });
+      }
 
-      const { recording } = await Audio.Recording.createAsync(
-        Audio.RecordingOptionsPresets.HIGH_QUALITY
-      );
+      const { recording } = await Audio.Recording.createAsync(RECORDING_OPTIONS);
 
       recordingRef.current = recording;
       recordingStartTimeRef.current = Date.now();
@@ -82,11 +112,6 @@ export function useAudioRecorder({
 
     try {
       await recording.stopAndUnloadAsync();
-
-      await Audio.setAudioModeAsync({
-        allowsRecordingIOS: false,
-        playsInSilentModeIOS: true,
-      });
 
       const uri = recording.getURI();
       recordingRef.current = null;

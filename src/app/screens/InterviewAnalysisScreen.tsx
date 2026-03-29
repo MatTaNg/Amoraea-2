@@ -1,6 +1,6 @@
 /**
- * Alpha-only: User analysis page — full assessment with AI reasoning,
- * overall and per-construct ratings, and retake. Remove before production.
+ * Alpha-only: Analysis screen — flame orb header, score summary, feedback flow, retake.
+ * Design system: #05060D, Cormorant/Jost, blues, pass/fail, inline/StyleSheet.
  */
 
 import React, { useState, useEffect } from 'react';
@@ -9,12 +9,33 @@ import {
   Text,
   ScrollView,
   TextInput,
-  Pressable,
   StyleSheet,
-  ActivityIndicator,
+  TouchableOpacity,
 } from 'react-native';
+import * as Clipboard from 'expo-clipboard';
 import { SafeAreaContainer } from '@ui/components/SafeAreaContainer';
 import { supabase } from '@data/supabase/client';
+import { FlameOrb } from '@app/screens/FlameOrb';
+
+type TranscriptMessage = { role: string; content?: string; isScoreCard?: boolean; isWaiting?: boolean; isSwitchDivider?: boolean };
+
+function buildTranscriptString(messages: TranscriptMessage[] | null): string {
+  if (!messages || messages.length === 0) return 'No transcript available.';
+  return messages
+    .filter(
+      (m) =>
+        m.role !== 'error' &&
+        !(m as { isWaiting?: boolean }).isWaiting &&
+        !(m as { isSwitchDivider?: boolean }).isSwitchDivider &&
+        !(m as { isScoreCard?: boolean }).isScoreCard &&
+        (m.content?.trim() ?? '').length > 0
+    )
+    .map((m) => {
+      const speaker = m.role === 'assistant' ? 'Aira' : 'You';
+      return `${speaker}: ${(m.content ?? '').trim()}`;
+    })
+    .join('\n\n');
+}
 
 const CONSTRUCTS = [
   { key: 'conflict_repair', label: 'Conflict & Repair', pillarId: '1' },
@@ -29,150 +50,279 @@ type AttemptRow = {
   passed: boolean | null;
   pillar_scores: Record<string, number> | null;
   ai_reasoning: Record<string, unknown> | null;
+  transcript: TranscriptMessage[] | null;
 };
 
-function Section({
-  title,
-  children,
-}: {
+// —— Feedback flow (4 steps) ——
+
+const FEEDBACK_STEPS: Array<{
+  id: string;
   title: string;
-  children: React.ReactNode;
-}) {
-  return (
-    <View style={styles.section}>
-      <Text style={styles.sectionLabel}>{title}</Text>
-      {children}
-    </View>
-  );
-}
+  question?: string;
+  hint?: string;
+  isMulti?: boolean;
+  questions?: Array<{ id: string; question: string; hint: string }>;
+}> = [
+  {
+    id: 'accuracy',
+    title: 'Accuracy',
+    question: 'How accurately did the interview measure your relationship effectiveness?',
+    hint: '1 = Not at all accurate  ·  7 = Completely accurate',
+  },
+  {
+    id: 'human',
+    title: 'Human Feel',
+    question: 'How human did the interview feel?',
+    hint: '1 = Very robotic  ·  7 = Felt like a real conversation',
+  },
+  {
+    id: 'safety',
+    title: 'Emotional Safety',
+    question: 'How safe did you feel being honest during the interview?',
+    hint: '1 = Not safe at all  ·  7 = Completely safe to be honest',
+  },
+  {
+    id: 'multi',
+    title: 'Final Questions',
+    isMulti: true,
+    questions: [
+      { id: 'experience', question: 'Overall experience of the interview process', hint: '1 = Very poor  ·  7 = Excellent' },
+      { id: 'fairness', question: 'How fairly did the score reflect your actual patterns?', hint: '1 = Very unfair  ·  7 = Very fair' },
+      { id: 'surprise', question: 'How surprising were your results?', hint: '1 = Not surprising  ·  7 = Very surprising' },
+    ],
+  },
+];
 
-function ReasoningBlock({
-  label,
-  children,
-  gold,
-}: {
-  label: string;
-  children: string | undefined;
-  gold?: boolean;
-}) {
-  if (!children) return null;
-  return (
-    <View style={styles.reasoningBlock}>
-      <Text style={[styles.reasoningLabel, gold && styles.reasoningLabelGold]}>{label}</Text>
-      <Text style={styles.reasoningText}>{children}</Text>
-    </View>
-  );
-}
-
-function StarRating({
+function FeedbackQuestion({
+  question,
+  hint,
   value,
-  onChange,
-  large,
+  comment,
+  onRate,
+  onComment,
+  compact = false,
 }: {
+  question: string;
+  hint: string;
   value: number | undefined;
-  onChange: (n: number) => void;
-  large?: boolean;
+  comment: string | undefined;
+  onRate: (v: number) => void;
+  onComment: (t: string) => void;
+  compact?: boolean;
 }) {
   return (
-    <View style={styles.starRow}>
-      {[1, 2, 3, 4, 5].map((n) => (
-        <Pressable
-          key={n}
-          onPress={() => onChange(n)}
-          style={({ pressed }) => [{ opacity: pressed ? 0.7 : 1 }]}
-        >
-          <Text style={[styles.star, large && styles.starLarge, n <= (value ?? 0) && styles.starFilled]}>
-            ★
-          </Text>
-        </Pressable>
-      ))}
+    <View>
+      <Text style={[styles.feedbackQuestion, compact && styles.feedbackQuestionCompact]}>{question}</Text>
+      <Text style={styles.feedbackHint}>{hint}</Text>
+      <View style={styles.ratingRow}>
+        {[1, 2, 3, 4, 5, 6, 7].map((n) => (
+          <TouchableOpacity
+            key={n}
+            onPress={() => onRate(n)}
+            style={[
+              styles.ratingDot,
+              value === n && styles.ratingDotSelected,
+            ]}
+          >
+            <Text style={[styles.ratingDotText, value === n && styles.ratingDotTextSelected]}>{n}</Text>
+          </TouchableOpacity>
+        ))}
+      </View>
+      {!compact && (
+        <TextInput
+          placeholder="Add more if you'd like... (optional)"
+          placeholderTextColor="#3D5470"
+          value={comment ?? ''}
+          onChangeText={onComment}
+          multiline
+          numberOfLines={3}
+          style={styles.feedbackCommentInput}
+        />
+      )}
     </View>
   );
 }
 
-function RetakeButton({ onRetake }: { onRetake: () => void }) {
-  const [confirming, setConfirming] = useState(false);
-  if (!confirming) {
-    return (
-      <Pressable onPress={() => setConfirming(true)} style={styles.retakeButton}>
-        <Text style={styles.retakeButtonText}>Retake Interview</Text>
-      </Pressable>
-    );
-  }
+function FeedbackFlow({
+  attemptId,
+  onComplete,
+}: {
+  attemptId: string;
+  onComplete: () => void;
+}) {
+  const [step, setStep] = useState(0);
+  const [ratings, setRatings] = useState<Record<string, number>>({});
+  const [comments, setComments] = useState<Record<string, string>>({});
+  const [submitting, setSubmitting] = useState(false);
+
+  const currentStep = FEEDBACK_STEPS[step];
+  const isLastStep = step === FEEDBACK_STEPS.length - 1;
+  const progress = (step + 1) / FEEDBACK_STEPS.length;
+
+  const canAdvance = currentStep.isMulti
+    ? (currentStep.questions ?? []).every((q) => ratings[q.id] != null)
+    : ratings[currentStep.id] != null;
+
+  const handleNext = async () => {
+    if (isLastStep) {
+      setSubmitting(true);
+      await supabase
+        .from('interview_attempts')
+        .update({
+          feedback_accuracy: ratings.accuracy,
+          feedback_human: ratings.human,
+          feedback_safety: ratings.safety,
+          feedback_experience: ratings.experience,
+          feedback_fairness: ratings.fairness,
+          feedback_surprise: ratings.surprise,
+          feedback_comments: Object.keys(comments).length ? comments : null,
+          feedback_submitted_at: new Date().toISOString(),
+        })
+        .eq('id', attemptId);
+      setSubmitting(false);
+      onComplete();
+    } else {
+      setStep(step + 1);
+    }
+  };
+
   return (
-    <View style={styles.retakeConfirm}>
-      <Text style={styles.retakeConfirmText}>
-        Your current results will be preserved. This starts a new attempt.
+    <View style={styles.feedbackRoot}>
+      <View style={styles.feedbackProgressBg}>
+        <View style={[styles.feedbackProgressFill, { width: `${progress * 100}%` }]} />
+      </View>
+      <Text style={styles.feedbackStepLabel}>
+        {step + 1} of {FEEDBACK_STEPS.length}  ·  {currentStep.title}
       </Text>
-      <View style={styles.retakeConfirmRow}>
-        <Pressable onPress={() => setConfirming(false)} style={styles.retakeCancel}>
-          <Text style={styles.retakeCancelText}>Cancel</Text>
-        </Pressable>
-        <Pressable onPress={onRetake} style={styles.retakeStart}>
-          <Text style={styles.retakeStartText}>Start New Attempt →</Text>
-        </Pressable>
+
+      {!currentStep.isMulti && currentStep.question != null && currentStep.hint != null && (
+        <FeedbackQuestion
+          question={currentStep.question}
+          hint={currentStep.hint}
+          value={ratings[currentStep.id]}
+          comment={comments[currentStep.id]}
+          onRate={(v) => setRatings((prev) => ({ ...prev, [currentStep.id]: v }))}
+          onComment={(t) => setComments((prev) => ({ ...prev, [currentStep.id]: t }))}
+        />
+      )}
+
+      {currentStep.isMulti && (
+        <ScrollView showsVerticalScrollIndicator={false} style={styles.feedbackMultiScroll}>
+          {(currentStep.questions ?? []).map((q) => (
+            <View key={q.id} style={styles.feedbackMultiItem}>
+              <FeedbackQuestion
+                question={q.question}
+                hint={q.hint}
+                value={ratings[q.id]}
+                comment={comments[q.id]}
+                onRate={(v) => setRatings((prev) => ({ ...prev, [q.id]: v }))}
+                onComment={(t) => setComments((prev) => ({ ...prev, [q.id]: t }))}
+                compact
+              />
+            </View>
+          ))}
+        </ScrollView>
+      )}
+
+      <View style={styles.feedbackNav}>
+        {step > 0 ? (
+          <TouchableOpacity onPress={() => setStep(step - 1)}>
+            <Text style={styles.feedbackNavBack}>← Back</Text>
+          </TouchableOpacity>
+        ) : (
+          <TouchableOpacity onPress={onComplete}>
+            <Text style={styles.feedbackNavBack}>Skip</Text>
+          </TouchableOpacity>
+        )}
+        <TouchableOpacity
+          onPress={handleNext}
+          disabled={!canAdvance || submitting}
+          style={[styles.feedbackNavNext, canAdvance && styles.feedbackNavNextActive]}
+        >
+          <Text style={[styles.feedbackNavNextText, canAdvance && styles.feedbackNavNextTextActive]}>
+            {submitting ? 'Saving...' : isLastStep ? 'Submit' : 'Next →'}
+          </Text>
+        </TouchableOpacity>
       </View>
     </View>
   );
 }
 
+// —— Loading state ——
+
+function LoadingState() {
+  return (
+    <SafeAreaContainer>
+      <View style={styles.loadingRoot}>
+        <Text style={styles.loadingTitle}>Preparing your analysis...</Text>
+        <Text style={styles.loadingSub}>This may take a moment</Text>
+      </View>
+    </SafeAreaContainer>
+  );
+}
+
+// —— Main analysis screen ——
+
 export function InterviewAnalysisScreen({
   attemptId,
   onRetake,
+  isAdmin,
+  alphaMode = true,
 }: {
   attemptId: string | null;
   onRetake: () => void;
+  isAdmin?: boolean;
+  alphaMode?: boolean;
 }) {
   const [attempt, setAttempt] = useState<AttemptRow | null>(null);
   const [loading, setLoading] = useState(true);
-  const [ratings, setRatings] = useState<{ overall?: number }>({});
-  const [constructRatings, setConstructRatings] = useState<
-    Record<string, { rating?: number; comment?: string }>
-  >({});
-  const [overallComment, setOverallComment] = useState('');
-  const [submitted, setSubmitted] = useState(false);
-  const [saving, setSaving] = useState(false);
+  const [showFeedback, setShowFeedback] = useState(false);
+  const [reasoningExpanded, setReasoningExpanded] = useState(false);
+  const [copied, setCopied] = useState(false);
+  const [showStartOverFallback, setShowStartOverFallback] = useState(false);
+  const [showTranscript, setShowTranscript] = useState(false);
 
   useEffect(() => {
     if (!attemptId) {
       setLoading(false);
-      return;
+      const t = setTimeout(() => setShowStartOverFallback(true), 90000);
+      return () => clearTimeout(t);
     }
+    return undefined;
+  }, [attemptId]);
+
+  useEffect(() => {
+    if (!attemptId) return;
     let cancelled = false;
     (async () => {
       const { data, error } = await supabase
         .from('interview_attempts')
-        .select('id, weighted_score, passed, pillar_scores, ai_reasoning')
+        .select('*')
         .eq('id', attemptId)
         .single();
       if (!cancelled && !error && data) setAttempt(data as AttemptRow);
       if (!cancelled) setLoading(false);
     })();
-    return () => {
-      cancelled = true;
-    };
+    return () => { cancelled = true; };
   }, [attemptId]);
 
-  const handleConstructRating = (constructKey: string, field: 'rating' | 'comment', value: number | string) => {
-    setConstructRatings((prev) => ({
-      ...prev,
-      [constructKey]: { ...prev[constructKey], [field]: value },
-    }));
-  };
-
-  const handleSubmitFeedback = async () => {
-    setSaving(true);
-    await supabase
-      .from('interview_attempts')
-      .update({
-        user_analysis_rating: ratings.overall,
-        user_analysis_comment: overallComment || null,
-        user_analysis_submitted_at: new Date().toISOString(),
-        per_construct_ratings: constructRatings,
-      })
-      .eq('id', attemptId);
-    setSaving(false);
-    setSubmitted(true);
+  const handleCopyTranscript = async () => {
+    const transcriptString = buildTranscriptString(attempt?.transcript ?? null);
+    try {
+      await Clipboard.setStringAsync(transcriptString);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    } catch {
+      try {
+        if (typeof navigator !== 'undefined' && navigator.clipboard?.writeText) {
+          await navigator.clipboard.writeText(transcriptString);
+          setCopied(true);
+          setTimeout(() => setCopied(false), 2000);
+        }
+      } catch {
+        // ignore
+      }
+    }
   };
 
   if (!attemptId) {
@@ -180,258 +330,222 @@ export function InterviewAnalysisScreen({
       <SafeAreaContainer>
         <View style={styles.loadingRoot}>
           <Text style={styles.loadingTitle}>Preparing your analysis...</Text>
-          <Text style={styles.loadingSub}>Your scores have been saved. The detailed analysis may not be available yet.</Text>
-          <Pressable onPress={onRetake} style={styles.startOverButton}>
-            <Text style={styles.startOverButtonText}>Start over →</Text>
-          </Pressable>
+          <Text style={styles.loadingSub}>
+            {showStartOverFallback
+              ? 'Taking longer than expected. You can start over if needed.'
+              : 'This may take a moment'}
+          </Text>
+          {showStartOverFallback && (
+            <TouchableOpacity onPress={onRetake} style={styles.startOverBtn}>
+              <Text style={styles.startOverBtnText}>Start over →</Text>
+            </TouchableOpacity>
+          )}
         </View>
       </SafeAreaContainer>
     );
   }
 
-  if (loading) {
+  if (loading) return <LoadingState />;
+
+  if (showFeedback) {
     return (
       <SafeAreaContainer>
-        <View style={styles.loadingRoot}>
-          <Text style={styles.loadingTitle}>Preparing your analysis...</Text>
-          <Text style={styles.loadingSub}>This may take a moment</Text>
-        </View>
+        <FeedbackFlow attemptId={attemptId} onComplete={() => setShowFeedback(false)} />
       </SafeAreaContainer>
     );
   }
 
   const r = attempt?.ai_reasoning as Record<string, unknown> | undefined;
-  const reasoningFailed = r?._generationFailed === true;
   const scores = attempt?.pillar_scores ?? {};
-  const overallSummary = (r?.overall_summary as string) ?? '';
-  const overallStrengths = (r?.overall_strengths as string[]) ?? [];
-  const overallGrowthAreas = (r?.overall_growth_areas as string[]) ?? [];
-  const constructBreakdown = (r?.construct_breakdown as Record<string, Record<string, unknown>>) ?? {};
-  const scenarioObservations = (r?.scenario_observations as Record<string, { name?: string; what_happened?: string; standout_moments?: string[]; what_it_revealed?: string }>) ?? {};
-  const consistencyNote = r?.consistency_note as string | undefined;
-  const crossScenarioPatterns = r?.cross_scenario_patterns as string | undefined;
-  const languageStyle = r?.language_and_style_observations as string | undefined;
-  const partnerExperience = r?.what_a_partner_would_experience as string | undefined;
-  const readinessAssessment = r?.readiness_assessment as string | undefined;
-  const closingReflection = r?.closing_reflection as string | undefined;
+  const passed = attempt?.passed ?? false;
+  const weightedScore = attempt?.weighted_score ?? null;
 
   return (
     <SafeAreaContainer>
-      <View style={styles.alphaBadge}>
-        <Text style={styles.alphaBadgeText}>
-          ◆ Alpha — This analysis is shown to help improve the assessment
-        </Text>
-      </View>
       <ScrollView
         style={styles.scroll}
         contentContainerStyle={styles.scrollContent}
         showsVerticalScrollIndicator={false}
       >
-        {reasoningFailed && (
-          <View style={styles.reasoningFailedBanner}>
-            <Text style={styles.reasoningFailedText}>
-              The detailed analysis is still being prepared. Check back shortly — your scores and transcript have been saved.
-            </Text>
-          </View>
-        )}
-
+        {/* Header: flame orb, badge, overall score */}
         <View style={styles.header}>
-          <Text style={styles.headerLabel}>Your Assessment</Text>
-          <Text style={styles.scoreBig}>
-            {attempt?.weighted_score != null ? Number(attempt.weighted_score).toFixed(1) : '—'} / 10
-          </Text>
-          <Text
+          <FlameOrb state="idle" size={100} />
+          <View
             style={[
-              styles.passLabel,
-              attempt?.passed ? styles.passLabelPass : styles.passLabelFail,
+              styles.badge,
+              passed ? styles.badgePass : styles.badgeFail,
             ]}
           >
-            {attempt?.passed ? '● Passed' : '● Needs Work'}
+            <Text style={[styles.badgeText, passed ? styles.badgeTextPass : styles.badgeTextFail]}>
+              {passed ? '● Passed' : '● Not yet'}
+            </Text>
+          </View>
+          <Text style={styles.scoreBig}>
+            {weightedScore != null ? Number(weightedScore).toFixed(1) : '—'}
           </Text>
+          <Text style={styles.scoreLabel}>Overall Score</Text>
         </View>
 
-        <Section title="How You Show Up">
-          <Text style={styles.overallSummary}>"{overallSummary}"</Text>
-        </Section>
+        {/* Incomplete scoring note — when not all three scenarios were scored */}
+        {alphaMode && (() => {
+          const a = attempt as { scenario_1_scores?: unknown; scenario_2_scores?: unknown; scenario_3_scores?: unknown } | null | undefined;
+          const scoringComplete = a?.scenario_1_scores != null && a?.scenario_2_scores != null && a?.scenario_3_scores != null;
+          return !scoringComplete ? (
+            <View style={styles.incompleteScoringNote}>
+              <Text style={styles.incompleteScoringNoteText}>
+                Note: Some constructs were assessed from fewer than three scenarios. Your scores may be less precise than usual.
+              </Text>
+            </View>
+          ) : null;
+        })()}
 
-        <View style={styles.twoCol}>
-          <View style={styles.card}>
-            <Text style={styles.sectionLabel}>Strengths</Text>
-            {overallStrengths.map((s, i) => (
-              <View key={i} style={styles.strengthItem}>
-                <Text style={styles.bulletText}>{s}</Text>
+        {/* Score summary — Alpha only */}
+        {alphaMode && (
+          <View style={styles.summaryBlock}>
+            {r?.overall_summary && (
+              <View style={styles.overallSummaryCard}>
+                <Text style={styles.overallSummaryText}>
+                  "{String(r.overall_summary)}"
+                </Text>
               </View>
-            ))}
-          </View>
-          <View style={styles.card}>
-            <Text style={styles.sectionLabel}>Growth Areas</Text>
-            {overallGrowthAreas.map((s, i) => (
-              <View key={i} style={styles.growthItem}>
-                <Text style={styles.bulletText}>{s}</Text>
-              </View>
-            ))}
-          </View>
-        </View>
+            )}
 
-        <Section title="The Four Constructs">
-          {CONSTRUCTS.map(({ key, label, pillarId }) => {
-            const data = constructBreakdown[key];
-            const score = scores[pillarId] ?? (data?.score as number);
-            const cRating = constructRatings[key];
-            return (
-              <View key={key} style={styles.constructBlock}>
-                <View style={styles.constructHeader}>
-                  <View>
-                    <Text style={styles.constructTitle}>{label}</Text>
-                    <Text style={styles.constructHeadline} numberOfLines={2}>
-                      {(data?.headline as string) ?? ''}
+            {CONSTRUCTS.map((c) => {
+              const score = scores[c.pillarId] != null ? Number(scores[c.pillarId]) : undefined;
+              const breakdown = (r?.construct_breakdown as Record<string, { headline?: string; summary?: string }> | undefined)?.[c.key];
+              const scorePct = ((score ?? 0) / 10) * 100;
+              return (
+                <View key={c.key} style={styles.constructCard}>
+                  <View style={styles.constructCardHeader}>
+                    <View style={styles.constructCardHeaderLeft}>
+                      <Text style={styles.constructCardTitle}>{c.label}</Text>
+                      {breakdown?.headline && (
+                        <Text style={styles.constructCardHeadline}>{breakdown.headline}</Text>
+                      )}
+                    </View>
+                    <Text
+                      style={[
+                        styles.constructCardScore,
+                        score != null && score >= 7 && styles.constructScoreHigh,
+                        score != null && score >= 5 && score < 7 && styles.constructScoreMid,
+                        score != null && score < 5 && styles.constructScoreLow,
+                      ]}
+                    >
+                      {score != null ? score.toFixed(1) : '—'}
                     </Text>
                   </View>
-                  <View style={styles.constructScoreWrap}>
-                    <Text style={styles.constructScore}>{score != null ? Number(score).toFixed(1) : '—'}</Text>
-                    <Text style={styles.constructScoreLabel}>/ 10</Text>
-                  </View>
-                </View>
-                <View style={styles.scoreBarBg}>
-                  <View
-                    style={[
-                      styles.scoreBarFill,
-                      { width: Math.min(100, (Number(score) || 0) * 10) + '%' },
-                    ]}
-                  />
-                </View>
-                <ReasoningBlock label="Summary" children={data?.summary as string} />
-                <ReasoningBlock label="What you did well" children={data?.what_you_did_well as string} />
-                <ReasoningBlock label="Where you struggled" children={data?.where_you_struggled as string} />
-                <ReasoningBlock label="Core pattern" children={data?.key_pattern as string} gold />
-                <ReasoningBlock label="Nuance & Context" children={data?.nuance_and_context as string} />
-                <ReasoningBlock label="Growth Edge" children={data?.growth_edge as string} />
-                {!submitted && (
-                  <View style={styles.constructFeedback}>
-                    <Text style={styles.sectionLabel}>How accurate does this feel?</Text>
-                    <StarRating
-                      value={cRating?.rating}
-                      onChange={(v) => handleConstructRating(key, 'rating', v)}
-                    />
-                    <TextInput
-                      placeholder="Add a comment (optional)..."
-                      placeholderTextColor="#3D5470"
-                      value={cRating?.comment ?? ''}
-                      onChangeText={(t) => handleConstructRating(key, 'comment', t)}
-                      style={styles.textarea}
-                      multiline
+                  <View style={styles.scoreBarBg}>
+                    <View
+                      style={[
+                        styles.scoreBarFill,
+                        { width: `${scorePct}%` },
+                        score != null && score >= 7 && styles.scoreBarFillHigh,
+                        score != null && score >= 5 && score < 7 && styles.scoreBarFillMid,
+                        score != null && score < 5 && styles.scoreBarFillLow,
+                      ]}
                     />
                   </View>
-                )}
-                {submitted && cRating?.rating != null && (
-                  <Text style={styles.submittedRating}>
-                    Your rating: {'★'.repeat(cRating.rating)}{'☆'.repeat(5 - cRating.rating)}
-                    {cRating.comment ? ` — "${cRating.comment}"` : ''}
+                  {breakdown?.summary && (
+                    <Text style={styles.constructCardSummary}>{breakdown.summary}</Text>
+                  )}
+                </View>
+              );
+            })}
+
+            {r?.closing_reflection && (
+              <View style={styles.fullReasoningBlock}>
+                <TouchableOpacity
+                  onPress={() => setReasoningExpanded(!reasoningExpanded)}
+                  style={styles.fullReasoningToggle}
+                >
+                  <Text style={styles.fullReasoningToggleText}>
+                    {reasoningExpanded ? 'Hide Full Analysis ↑' : 'Read Full Analysis ↓'}
                   </Text>
+                </TouchableOpacity>
+                {reasoningExpanded && (
+                  <View style={styles.fullReasoningContent}>
+                    {[
+                      { label: 'Cross-Scenario Patterns', content: r.cross_scenario_patterns },
+                      { label: 'What a Partner Would Experience', content: r.what_a_partner_would_experience },
+                      { label: 'Closing Reflection', content: r.closing_reflection, italic: true },
+                    ]
+                      .filter((f) => f.content)
+                      .map((field, i) => (
+                        <View key={i} style={styles.fullReasoningField}>
+                          <Text style={styles.fullReasoningFieldLabel}>{field.label}</Text>
+                          <Text
+                            style={[
+                              field.italic ? styles.fullReasoningFieldItalic : styles.fullReasoningFieldBody,
+                            ]}
+                          >
+                            {field.italic ? `"${String(field.content)}"` : String(field.content)}
+                          </Text>
+                        </View>
+                      ))}
+                  </View>
                 )}
               </View>
-            );
-          })}
-        </Section>
-
-        <Section title="Moments That Stood Out">
-          {[1, 2, 3].map((n) => {
-            const obs = scenarioObservations[`scenario_${n}`];
-            if (!obs) return null;
-            return (
-              <View key={n} style={styles.scenarioCard}>
-                <Text style={styles.scenarioCardLabel}>
-                  Situation {n} — {obs.name ?? `Scenario ${n}`}
-                </Text>
-                <ReasoningBlock label="What Happened" children={obs.what_happened} />
-                {obs.standout_moments?.map((moment, mi) => (
-                  <Text key={mi} style={styles.standoutMoment}>
-                    {moment}
-                  </Text>
-                ))}
-                <ReasoningBlock label="What It Revealed" children={obs.what_it_revealed} />
-              </View>
-            );
-          })}
-        </Section>
-
-        {consistencyNote ? (
-          <Section title="Consistency Across Situations">
-            <Text style={styles.bodyText}>{consistencyNote}</Text>
-          </Section>
-        ) : null}
-        {crossScenarioPatterns ? (
-          <Section title="Patterns Across All Three Situations">
-            <Text style={styles.bodyText}>{crossScenarioPatterns}</Text>
-          </Section>
-        ) : null}
-        {languageStyle ? (
-          <Section title="How You Communicate">
-            <Text style={styles.bodyText}>{languageStyle}</Text>
-          </Section>
-        ) : null}
-        {partnerExperience ? (
-          <Section title="What a Partner Would Experience">
-            <Text style={styles.bodyText}>{partnerExperience}</Text>
-          </Section>
-        ) : null}
-        {readinessAssessment ? (
-          <Section title="Readiness for Intimacy">
-            <Text style={styles.bodyText}>{readinessAssessment}</Text>
-          </Section>
-        ) : null}
-        <Section title="A Closing Reflection">
-          <Text style={styles.closingReflection}>"{closingReflection}"</Text>
-        </Section>
-
-        {!submitted ? (
-          <Section title="How Accurate Was This Overall?">
-            <Text style={styles.feedbackHint}>
-              Your feedback helps us calibrate the assessment. Be honest — including if you disagree.
-            </Text>
-            <StarRating
-              value={ratings.overall}
-              onChange={(v) => setRatings((prev) => ({ ...prev, overall: v }))}
-              large
-            />
-            <TextInput
-              placeholder="What felt accurate? What didn't? Any context we should know?"
-              placeholderTextColor="#3D5470"
-              value={overallComment}
-              onChangeText={setOverallComment}
-              style={[styles.textarea, styles.textareaLarge]}
-              multiline
-            />
-            <Pressable
-              onPress={handleSubmitFeedback}
-              disabled={ratings.overall == null || saving}
-              style={[styles.submitButton, ratings.overall != null && styles.submitButtonActive]}
-            >
-              <Text
-                style={[
-                  styles.submitButtonText,
-                  ratings.overall != null && styles.submitButtonTextActive,
-                ]}
-              >
-                {saving ? 'Saving...' : 'Submit Feedback →'}
-              </Text>
-            </Pressable>
-          </Section>
-        ) : (
-          <View style={styles.thankYou}>
-            <Text style={styles.thankYouTitle}>Thank you for your honesty.</Text>
-            <Text style={styles.thankYouSub}>Your feedback helps us build something more true.</Text>
+            )}
           </View>
         )}
 
-        <View style={styles.retakeSection}>
-          <Text style={styles.retakeSectionLabel}>◆ Alpha Feature</Text>
-          <Text style={styles.retakeTitle}>Want to try again?</Text>
-          <Text style={styles.retakeSub}>
-            You can retake the interview as many times as you like during the Alpha. Your previous
-            results are always preserved.
-          </Text>
-          <RetakeButton onRetake={onRetake} />
+        {/* View Full Transcript (collapsed by default) */}
+        <View style={styles.transcriptContainer}>
+          <TouchableOpacity
+            onPress={() => setShowTranscript((prev) => !prev)}
+            style={styles.transcriptToggle}
+            activeOpacity={0.7}
+          >
+            <Text style={styles.transcriptToggleLabel}>
+              {showTranscript ? 'Hide Transcript' : 'View Full Transcript'}
+            </Text>
+            <Text style={styles.transcriptChevron}>{showTranscript ? '▲' : '▼'}</Text>
+          </TouchableOpacity>
+          {showTranscript && (
+            <View style={styles.transcriptBody}>
+              {(attempt?.transcript ?? [])
+                .filter(
+                  (m) =>
+                    (m.content?.trim() ?? '').length > 0 &&
+                    !(m as { isWaiting?: boolean }).isWaiting &&
+                    !(m as { isSystem?: boolean }).isSystem
+                )
+                .map((message, index) => (
+                  <View
+                    key={index}
+                    style={[
+                      styles.transcriptMessageRow,
+                      message.role === 'user' ? styles.transcriptUserMessage : styles.transcriptAiraMessage,
+                    ]}
+                  >
+                    <Text style={styles.transcriptSpeakerLabel}>
+                      {message.role === 'user' ? 'You' : 'Aira'}
+                    </Text>
+                    <Text style={styles.transcriptMessageText}>{message.content}</Text>
+                  </View>
+                ))}
+            </View>
+          )}
+        </View>
+
+        {/* Copy transcript */}
+        <View style={styles.copyBlock}>
+          <TouchableOpacity onPress={handleCopyTranscript} style={styles.copyBtn} activeOpacity={0.7}>
+            <Text style={[styles.copyBtnText, copied && styles.copyBtnTextCopied]}>
+              {copied ? '✓ Copied' : 'Copy Transcript'}
+            </Text>
+          </TouchableOpacity>
+        </View>
+
+        {/* Actions: Feedback, Retake */}
+        <View style={styles.actionsBlock}>
+          <TouchableOpacity onPress={() => setShowFeedback(true)} style={styles.feedbackBtn}>
+            <Text style={styles.feedbackBtnText}>Leave Feedback</Text>
+          </TouchableOpacity>
+          <TouchableOpacity onPress={onRetake} style={styles.retakeBtn}>
+            <Text style={styles.retakeBtnText}>Retake Interview</Text>
+            <Text style={styles.retakeBtnSub}>Your previous results are saved</Text>
+          </TouchableOpacity>
         </View>
       </ScrollView>
     </SafeAreaContainer>
@@ -439,38 +553,8 @@ export function InterviewAnalysisScreen({
 }
 
 const styles = StyleSheet.create({
-  alphaBadge: {
-    backgroundColor: 'rgba(201,169,110,0.12)',
-    borderBottomWidth: 1,
-    borderBottomColor: 'rgba(201,169,110,0.2)',
-    paddingVertical: 8,
-    paddingHorizontal: 24,
-  },
-  alphaBadgeText: {
-    fontSize: 10,
-    fontWeight: '300',
-    letterSpacing: 2,
-    textTransform: 'uppercase',
-    color: '#C9A96E',
-    textAlign: 'center',
-  },
   scroll: { flex: 1, backgroundColor: '#05060D' },
-  scrollContent: { maxWidth: 680, alignSelf: 'center', width: '100%', padding: 24, paddingBottom: 80 },
-  reasoningFailedBanner: {
-    backgroundColor: 'rgba(82,142,220,0.06)',
-    borderWidth: 1,
-    borderColor: 'rgba(82,142,220,0.12)',
-    borderRadius: 10,
-    paddingVertical: 14,
-    paddingHorizontal: 18,
-    marginBottom: 32,
-  },
-  reasoningFailedText: {
-    fontSize: 13,
-    fontWeight: '300',
-    color: '#7A9ABE',
-    lineHeight: 22,
-  },
+  scrollContent: { paddingBottom: 60 },
   loadingRoot: {
     flex: 1,
     backgroundColor: '#05060D',
@@ -479,19 +563,19 @@ const styles = StyleSheet.create({
     padding: 24,
   },
   loadingTitle: {
+    fontFamily: 'Cormorant_300Light',
     fontSize: 22,
-    fontWeight: '300',
     color: '#C8E4FF',
     marginBottom: 8,
   },
   loadingSub: {
+    fontFamily: 'Jost_300Light',
     fontSize: 10,
     letterSpacing: 2,
     textTransform: 'uppercase',
     color: '#3D5470',
-    marginBottom: 24,
   },
-  startOverButton: {
+  startOverBtn: {
     marginTop: 16,
     paddingVertical: 12,
     paddingHorizontal: 24,
@@ -499,243 +583,432 @@ const styles = StyleSheet.create({
     borderColor: 'rgba(82,142,220,0.4)',
     borderRadius: 8,
   },
-  startOverButtonText: {
+  startOverBtnText: {
+    fontFamily: 'Jost_300Light',
     fontSize: 14,
-    fontWeight: '500',
-    color: '#7A9ABE',
-    letterSpacing: 1,
+    color: '#5BA8E8',
   },
-  header: { alignItems: 'center', marginBottom: 48 },
-  headerLabel: {
-    fontSize: 11,
-    fontWeight: '300',
+  header: {
+    alignItems: 'center',
+    paddingTop: 60,
+    paddingBottom: 32,
+  },
+  badge: {
+    marginTop: 24,
+    paddingHorizontal: 20,
+    paddingVertical: 8,
+    borderRadius: 20,
+    borderWidth: 1,
+  },
+  badgePass: {
+    borderColor: 'rgba(42,140,106,0.4)',
+    backgroundColor: 'rgba(42,140,106,0.08)',
+  },
+  badgeFail: {
+    borderColor: 'rgba(232,122,122,0.4)',
+    backgroundColor: 'rgba(232,122,122,0.08)',
+  },
+  badgeText: {
+    fontFamily: 'Jost_300Light',
+    fontSize: 10,
     letterSpacing: 3,
     textTransform: 'uppercase',
-    color: '#3D5470',
-    marginBottom: 12,
   },
-  scoreBig: { fontSize: 36, fontWeight: '300', color: '#C8E4FF', marginBottom: 8 },
-  passLabel: { fontSize: 11, fontWeight: '300', letterSpacing: 2, textTransform: 'uppercase' },
-  passLabelPass: { color: '#2A8C6A' },
-  passLabelFail: { color: '#E87A7A' },
-  section: { marginBottom: 40 },
-  sectionLabel: {
-    fontSize: 9,
-    fontWeight: '400',
-    letterSpacing: 2.5,
-    textTransform: 'uppercase',
-    color: '#3D5470',
-    marginBottom: 16,
-  },
-  overallSummary: {
-    fontSize: 18,
+  badgeTextPass: { color: '#2A8C6A' },
+  badgeTextFail: { color: '#E87A7A' },
+  scoreBig: {
+    fontFamily: 'Cormorant_300Light',
+    fontSize: 72,
     fontWeight: '300',
-    fontStyle: 'italic',
-    lineHeight: 28,
     color: '#C8E4FF',
+    marginTop: 16,
+    lineHeight: 72,
   },
-  twoCol: { flexDirection: 'row', gap: 16, marginBottom: 40, flexWrap: 'wrap' },
-  card: {
-    flex: 1,
-    minWidth: 200,
-    backgroundColor: 'rgba(13,17,32,0.9)',
-    borderWidth: 1,
-    borderColor: 'rgba(82,142,220,0.12)',
-    borderRadius: 14,
-    padding: 20,
-  },
-  strengthItem: { marginBottom: 8, paddingLeft: 12, borderLeftWidth: 2, borderLeftColor: '#1E6FD9' },
-  growthItem: { marginBottom: 8, paddingLeft: 12, borderLeftWidth: 2, borderLeftColor: 'rgba(82,142,220,0.3)' },
-  bulletText: { fontSize: 13, fontWeight: '300', color: '#7A9ABE', lineHeight: 22 },
-  constructBlock: {
-    marginBottom: 32,
-    paddingBottom: 32,
-    borderBottomWidth: 1,
-    borderBottomColor: 'rgba(82,142,220,0.1)',
-  },
-  constructHeader: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'flex-start',
-    marginBottom: 12,
-  },
-  constructTitle: { fontSize: 20, fontWeight: '400', color: '#E8F0F8', marginBottom: 4 },
-  constructHeadline: { fontSize: 12, fontWeight: '300', color: '#7A9ABE', fontStyle: 'italic', flex: 1 },
-  constructScoreWrap: { alignItems: 'flex-end' },
-  constructScore: { fontSize: 28, fontWeight: '300', color: '#C8E4FF' },
-  constructScoreLabel: { fontSize: 9, color: '#3D5470', letterSpacing: 1 },
-  scoreBarBg: {
-    height: 3,
-    backgroundColor: 'rgba(255,255,255,0.05)',
-    borderRadius: 2,
-    marginBottom: 20,
-    overflow: 'hidden',
-  },
-  scoreBarFill: {
-    height: '100%',
-    backgroundColor: '#5BA8E8',
-    borderRadius: 2,
-  },
-  reasoningBlock: { marginBottom: 14, paddingLeft: 14, borderLeftWidth: 2, borderLeftColor: 'rgba(82,142,220,0.3)' },
-  reasoningLabel: {
-    fontSize: 9,
+  scoreLabel: {
+    fontFamily: 'Jost_300Light',
+    fontSize: 10,
     letterSpacing: 2,
     textTransform: 'uppercase',
     color: '#3D5470',
-    marginBottom: 4,
+    marginTop: 4,
   },
-  reasoningLabelGold: { color: '#C9A96E' },
-  reasoningText: { fontSize: 13, fontWeight: '300', color: '#7A9ABE', lineHeight: 22 },
-  constructFeedback: {
-    marginTop: 20,
-    backgroundColor: 'rgba(30,111,217,0.04)',
+  incompleteScoringNote: {
+    backgroundColor: 'rgba(201,169,110,0.08)',
     borderWidth: 1,
-    borderColor: 'rgba(82,142,220,0.1)',
+    borderColor: 'rgba(201,169,110,0.2)',
     borderRadius: 10,
-    padding: 16,
+    paddingVertical: 12,
+    paddingHorizontal: 16,
+    marginBottom: 24,
+    marginHorizontal: 24,
   },
-  textarea: {
-    padding: 12,
-    marginTop: 8,
-    backgroundColor: 'rgba(5,6,13,0.8)',
+  incompleteScoringNoteText: {
+    fontFamily: 'Jost_300Light',
+    fontSize: 12,
+    fontWeight: '300',
+    color: '#C9A96E',
+    letterSpacing: 0.5,
+  },
+  summaryBlock: { paddingHorizontal: 24 },
+  overallSummaryCard: {
     borderWidth: 1,
     borderColor: 'rgba(82,142,220,0.12)',
-    borderRadius: 10,
-    fontSize: 13,
-    fontWeight: '300',
-    color: '#E8F0F8',
-    minHeight: 72,
-    lineHeight: 20,
-  },
-  textareaLarge: { minHeight: 100 },
-  submittedRating: { fontSize: 11, color: '#3D5470', marginTop: 12 },
-  scenarioCard: {
-    marginBottom: 24,
+    borderRadius: 12,
     padding: 20,
-    backgroundColor: 'rgba(13,17,32,0.9)',
+    marginBottom: 16,
+    backgroundColor: 'rgba(13,17,32,0.6)',
+  },
+  overallSummaryText: {
+    fontFamily: 'Cormorant_300Light_Italic',
+    fontSize: 17,
+    fontStyle: 'italic',
+    color: '#C8E4FF',
+    lineHeight: 26,
+  },
+  constructCard: {
     borderWidth: 1,
     borderColor: 'rgba(82,142,220,0.1)',
     borderRadius: 12,
+    marginBottom: 12,
+    backgroundColor: 'rgba(13,17,32,0.5)',
   },
-  scenarioCardLabel: {
+  constructCardHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'flex-start',
+    padding: 16,
+    paddingRight: 20,
+  },
+  constructCardHeaderLeft: {
+    flex: 1,
+    paddingRight: 12,
+    minWidth: 0,
+  },
+  constructCardTitle: {
+    fontFamily: 'Cormorant_400Regular',
+    fontSize: 18,
+    color: '#E8F0F8',
+  },
+  constructCardHeadline: {
+    fontFamily: 'Jost_300Light',
+    fontSize: 11,
+    color: '#7A9ABE',
+    marginTop: 2,
+    fontStyle: 'italic',
+  },
+  constructCardScore: {
+    fontFamily: 'Cormorant_300Light',
+    fontSize: 28,
+    color: '#C8E4FF',
+    minWidth: 44,
+    textAlign: 'right',
+    flexShrink: 0,
+  },
+  constructScoreHigh: { color: '#C8E4FF' },
+  constructScoreMid: { color: '#7A9ABE' },
+  constructScoreLow: { color: '#E87A7A' },
+  scoreBarBg: {
+    height: 2,
+    backgroundColor: 'rgba(82,142,220,0.08)',
+    marginHorizontal: 16,
+  },
+  scoreBarFill: {
+    height: 2,
+    backgroundColor: '#1E6FD9',
+  },
+  scoreBarFillHigh: { backgroundColor: '#1E6FD9' },
+  scoreBarFillMid: { backgroundColor: '#7A9ABE' },
+  scoreBarFillLow: { backgroundColor: '#E87A7A' },
+  constructCardSummary: {
+    fontFamily: 'Jost_300Light',
+    fontSize: 13,
+    color: '#7A9ABE',
+    lineHeight: 20,
+    padding: 16,
+    paddingTop: 12,
+  },
+  fullReasoningBlock: { marginBottom: 24 },
+  fullReasoningToggle: {
+    borderWidth: 1,
+    borderColor: 'rgba(82,142,220,0.12)',
+    borderRadius: 8,
+    padding: 14,
+    alignItems: 'center',
+  },
+  fullReasoningToggleText: {
+    fontFamily: 'Jost_300Light',
+    fontSize: 10,
+    letterSpacing: 2,
+    textTransform: 'uppercase',
+    color: '#5BA8E8',
+  },
+  fullReasoningContent: {
+    marginTop: 12,
+    borderWidth: 1,
+    borderColor: 'rgba(82,142,220,0.1)',
+    borderRadius: 12,
+    padding: 20,
+    backgroundColor: 'rgba(13,17,32,0.5)',
+  },
+  fullReasoningField: { marginBottom: 20 },
+  fullReasoningFieldLabel: {
+    fontFamily: 'Jost_300Light',
     fontSize: 9,
     letterSpacing: 2,
     textTransform: 'uppercase',
     color: '#3D5470',
-    marginBottom: 10,
+    marginBottom: 8,
   },
-  standoutMoment: {
-    fontSize: 15,
+  fullReasoningFieldBody: {
+    fontFamily: 'Jost_300Light',
+    fontSize: 13,
+    color: '#7A9ABE',
+    lineHeight: 20,
+  },
+  fullReasoningFieldItalic: {
+    fontFamily: 'Cormorant_300Light_Italic',
+    fontSize: 16,
     fontStyle: 'italic',
     color: '#C8E4FF',
     lineHeight: 24,
-    marginBottom: 10,
-    paddingLeft: 14,
-    borderLeftWidth: 2,
-    borderLeftColor: 'rgba(200,228,255,0.2)',
   },
-  bodyText: { fontSize: 14, fontWeight: '300', color: '#7A9ABE', lineHeight: 24 },
-  closingReflection: {
-    fontSize: 18,
+  transcriptContainer: {
+    marginTop: 32,
+    borderTopWidth: 1,
+    borderTopColor: 'rgba(82,142,220,0.1)',
+    paddingTop: 24,
+    paddingHorizontal: 24,
+  },
+  transcriptToggle: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingVertical: 12,
+    paddingHorizontal: 4,
+  },
+  transcriptToggleLabel: {
+    fontFamily: 'Jost_300Light',
+    fontSize: 12,
     fontWeight: '300',
-    fontStyle: 'italic',
-    lineHeight: 28,
-    color: '#C8E4FF',
-  },
-  feedbackHint: { fontSize: 13, fontWeight: '300', color: '#7A9ABE', marginBottom: 16, lineHeight: 22 },
-  starRow: { flexDirection: 'row', gap: 8, marginBottom: 12 },
-  star: { fontSize: 20, color: '#3D5470' },
-  starLarge: { fontSize: 28 },
-  starFilled: { color: '#C8E4FF' },
-  submitButton: {
-    width: '100%',
-    padding: 15,
-    marginTop: 8,
-    backgroundColor: 'rgba(82,142,220,0.1)',
-    borderRadius: 10,
-    alignItems: 'center',
-  },
-  submitButtonActive: {
-    backgroundColor: '#1E6FD9',
-  },
-  submitButtonText: { fontSize: 11, fontWeight: '400', letterSpacing: 2.5, textTransform: 'uppercase', color: '#3D5470' },
-  submitButtonTextActive: { color: '#EEF6FF' },
-  thankYou: { alignItems: 'center', paddingVertical: 32, borderTopWidth: 1, borderTopColor: 'rgba(82,142,220,0.1)' },
-  thankYouTitle: { fontSize: 22, fontWeight: '300', color: '#C8E4FF', marginBottom: 8 },
-  thankYouSub: { fontSize: 13, fontWeight: '300', color: '#7A9ABE' },
-  retakeSection: {
-    marginTop: 48,
-    padding: 24,
-    backgroundColor: 'rgba(13,17,32,0.6)',
-    borderWidth: 1,
-    borderColor: 'rgba(82,142,220,0.08)',
-    borderRadius: 14,
-    alignItems: 'center',
-  },
-  retakeSectionLabel: {
-    fontSize: 9,
     letterSpacing: 2,
     textTransform: 'uppercase',
     color: '#3D5470',
-    marginBottom: 12,
   },
-  retakeTitle: { fontSize: 18, fontWeight: '300', color: '#7A9ABE', marginBottom: 8 },
-  retakeSub: {
-    fontSize: 13,
-    fontWeight: '300',
-    color: '#3D5470',
-    textAlign: 'center',
-    lineHeight: 22,
-    marginBottom: 20,
-  },
-  retakeButton: {
-    paddingVertical: 13,
-    paddingHorizontal: 32,
-    borderWidth: 1,
-    borderColor: 'rgba(82,142,220,0.2)',
-    borderRadius: 10,
-  },
-  retakeButtonText: {
+  transcriptChevron: {
+    fontFamily: 'Jost_300Light',
     fontSize: 11,
-    fontWeight: '300',
-    letterSpacing: 2,
-    textTransform: 'uppercase',
     color: '#3D5470',
   },
-  retakeConfirm: { width: '100%', alignItems: 'center' },
-  retakeConfirmText: {
-    fontSize: 13,
-    fontWeight: '300',
-    color: '#7A9ABE',
+  transcriptBody: {
+    marginTop: 16,
+  },
+  transcriptMessageRow: {
+    paddingVertical: 14,
+    paddingHorizontal: 16,
+    borderRadius: 10,
     marginBottom: 16,
-    textAlign: 'center',
+    maxWidth: '90%',
   },
-  retakeConfirmRow: { flexDirection: 'row', gap: 12, justifyContent: 'center' },
-  retakeCancel: {
-    paddingVertical: 12,
-    paddingHorizontal: 24,
+  transcriptAiraMessage: {
+    backgroundColor: 'rgba(13,17,32,0.9)',
     borderWidth: 1,
-    borderColor: 'rgba(82,142,220,0.15)',
-    borderRadius: 10,
+    borderColor: 'rgba(82,142,220,0.1)',
+    alignSelf: 'flex-start',
   },
-  retakeCancelText: {
-    fontSize: 11,
-    fontWeight: '300',
-    letterSpacing: 2,
-    textTransform: 'uppercase',
-    color: '#3D5470',
+  transcriptUserMessage: {
+    backgroundColor: 'rgba(30,111,217,0.08)',
+    borderWidth: 1,
+    borderColor: 'rgba(30,111,217,0.15)',
+    alignSelf: 'flex-end',
   },
-  retakeStart: {
-    paddingVertical: 12,
-    paddingHorizontal: 24,
-    backgroundColor: '#1E6FD9',
-    borderRadius: 10,
-  },
-  retakeStartText: {
-    fontSize: 11,
+  transcriptSpeakerLabel: {
+    fontFamily: 'Jost_300Light',
+    fontSize: 9,
     fontWeight: '400',
     letterSpacing: 2,
     textTransform: 'uppercase',
-    color: '#EEF6FF',
+    color: '#3D5470',
+    marginBottom: 6,
   },
+  transcriptMessageText: {
+    fontFamily: 'Jost_300Light',
+    fontSize: 14,
+    fontWeight: '300',
+    color: '#7A9ABE',
+    lineHeight: 22,
+  },
+  copyBlock: { paddingHorizontal: 24, marginTop: 8 },
+  copyBtn: {
+    borderWidth: 1,
+    borderColor: 'rgba(82,142,220,0.2)',
+    borderRadius: 8,
+    padding: 14,
+    alignItems: 'center',
+  },
+  copyBtnText: {
+    fontFamily: 'Jost_300Light',
+    fontSize: 10,
+    letterSpacing: 2,
+    textTransform: 'uppercase',
+    color: '#5BA8E8',
+  },
+  copyBtnTextCopied: { color: '#2A8C6A' },
+  actionsBlock: {
+    paddingHorizontal: 24,
+    marginTop: 24,
+  },
+  feedbackBtn: {
+    borderWidth: 1,
+    borderColor: 'rgba(82,142,220,0.3)',
+    borderRadius: 12,
+    padding: 18,
+    alignItems: 'center',
+    backgroundColor: 'rgba(30,111,217,0.08)',
+    marginBottom: 12,
+  },
+  feedbackBtnText: {
+    fontFamily: 'Jost_300Light',
+    fontSize: 11,
+    letterSpacing: 2,
+    textTransform: 'uppercase',
+    color: '#5BA8E8',
+  },
+  retakeBtn: {
+    borderWidth: 1,
+    borderColor: 'rgba(82,142,220,0.12)',
+    borderRadius: 12,
+    padding: 18,
+    alignItems: 'center',
+  },
+  retakeBtnText: {
+    fontFamily: 'Jost_300Light',
+    fontSize: 11,
+    letterSpacing: 2,
+    textTransform: 'uppercase',
+    color: '#3D5470',
+  },
+  retakeBtnSub: {
+    fontFamily: 'Jost_300Light',
+    fontSize: 10,
+    color: '#3D5470',
+    marginTop: 4,
+    opacity: 0.6,
+  },
+  // Feedback flow
+  feedbackRoot: {
+    flex: 1,
+    backgroundColor: '#05060D',
+    paddingHorizontal: 24,
+    paddingTop: 60,
+  },
+  feedbackProgressBg: {
+    height: 1,
+    backgroundColor: 'rgba(82,142,220,0.1)',
+    borderRadius: 1,
+    marginBottom: 40,
+  },
+  feedbackProgressFill: {
+    height: 1,
+    backgroundColor: '#1E6FD9',
+    borderRadius: 1,
+  },
+  feedbackStepLabel: {
+    fontFamily: 'Jost_300Light',
+    fontSize: 9,
+    letterSpacing: 3,
+    textTransform: 'uppercase',
+    color: '#3D5470',
+    marginBottom: 16,
+  },
+  feedbackQuestion: {
+    fontFamily: 'Cormorant_300Light',
+    fontSize: 24,
+    fontWeight: '300',
+    color: '#E8F0F8',
+    lineHeight: 32,
+    marginBottom: 8,
+  },
+  feedbackQuestionCompact: {
+    fontSize: 18,
+    lineHeight: 24,
+  },
+  feedbackHint: {
+    fontFamily: 'Jost_300Light',
+    fontSize: 10,
+    color: '#3D5470',
+    marginBottom: 20,
+    letterSpacing: 0.5,
+  },
+  ratingRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    marginBottom: 20,
+  },
+  ratingDot: {
+    width: 38,
+    height: 38,
+    borderRadius: 19,
+    borderWidth: 1,
+    borderColor: 'rgba(82,142,220,0.2)',
+    backgroundColor: 'transparent',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  ratingDotSelected: {
+    borderColor: '#1E6FD9',
+    backgroundColor: 'rgba(30,111,217,0.2)',
+  },
+  ratingDotText: {
+    fontFamily: 'Cormorant_300Light',
+    fontSize: 16,
+    color: '#3D5470',
+  },
+  ratingDotTextSelected: { color: '#C8E4FF' },
+  feedbackCommentInput: {
+    fontFamily: 'Jost_300Light',
+    fontSize: 13,
+    color: '#E8F0F8',
+    borderWidth: 1,
+    borderColor: 'rgba(82,142,220,0.12)',
+    borderRadius: 8,
+    padding: 14,
+    minHeight: 80,
+    textAlignVertical: 'top',
+  },
+  feedbackMultiScroll: { maxHeight: 400 },
+  feedbackMultiItem: { marginBottom: 32 },
+  feedbackNav: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingVertical: 24,
+    marginTop: 'auto',
+  },
+  feedbackNavBack: {
+    fontFamily: 'Jost_300Light',
+    fontSize: 10,
+    letterSpacing: 2,
+    textTransform: 'uppercase',
+    color: '#3D5470',
+  },
+  feedbackNavNext: {
+    paddingHorizontal: 24,
+    paddingVertical: 12,
+    borderRadius: 8,
+    backgroundColor: 'transparent',
+    borderWidth: 1,
+    borderColor: 'rgba(82,142,220,0.1)',
+  },
+  feedbackNavNextActive: {
+    backgroundColor: 'rgba(30,111,217,0.15)',
+    borderColor: 'rgba(82,142,220,0.4)',
+  },
+  feedbackNavNextText: {
+    fontFamily: 'Jost_300Light',
+    fontSize: 10,
+    letterSpacing: 2,
+    textTransform: 'uppercase',
+    color: '#3D5470',
+  },
+  feedbackNavNextTextActive: { color: '#5BA8E8' },
 });

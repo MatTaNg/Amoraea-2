@@ -3,6 +3,7 @@ import Constants from 'expo-constants';
 import * as FileSystem from 'expo-file-system';
 import { Audio } from 'expo-av';
 import * as Speech from 'expo-speech';
+import { setPlaybackMode } from './audioModeHelpers';
 
 /**
  * Jessica — warm, friendly, conversational (ElevenLabs). Override with
@@ -128,19 +129,20 @@ export async function speakWithElevenLabs(
     }
     const fileUri = `${dir}tts_${Date.now()}.mp3`;
     await FileSystem.writeAsStringAsync(fileUri, base64, { encoding: FileSystem.EncodingType.Base64 });
-    await Audio.setAudioModeAsync({
-      playsInSilentModeIOS: true,
-      allowsRecordingIOS: false,
-      staysActiveInBackground: false,
-    });
-    const { sound } = await Audio.Sound.createAsync({ uri: fileUri });
+    // Force speaker route on iOS immediately before playback (fixes low volume after first mic use)
+    await setPlaybackMode();
+    const { sound } = await Audio.Sound.createAsync(
+      { uri: fileUri },
+      { shouldPlay: false, volume: 1.0, isMuted: false } // shouldPlay: false, play manually below
+    );
+    
     await new Promise<void>((resolve, reject) => {
       sound.setOnPlaybackStatusUpdate((status) => {
         if (status.isLoaded && status.didJustFinishAndNotifyPlaying) {
           resolve();
         }
       });
-      sound.playAsync().catch(reject);
+      sound.playAsync().catch(reject); // clean, no second ensurePlaybackMode
     });
     await sound.unloadAsync();
     try {

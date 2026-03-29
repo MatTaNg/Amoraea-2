@@ -297,12 +297,16 @@ function BMICard({ point, isSelected, isInRange, onClick }) {
 
 function RangeTrack({ minId, maxId }) {
   const total = BMI_POINTS.length;
-  const leftPct  = minId !== null ? ((minId - 1) / (total - 1)) * 100 : 0;
-  const rightPct = maxId !== null ? ((maxId - 1) / (total - 1)) * 100 : 0;
+  const denom = Math.max(total - 1, 1);
+  const rawLeft  = minId !== null ? ((minId - 1) / denom) * 100 : 0;
+  const rawRight = maxId !== null ? ((maxId - 1) / denom) * 100 : 0;
+  const leftPct  = Math.min(100, Math.max(0, rawLeft));
+  const rightPct = Math.min(100, Math.max(0, rawRight));
+  const widthPct = Math.min(100 - leftPct, Math.max(2, rightPct - leftPct));
   return (
     <div style={{ position:"relative", height:3, background:T.border, borderRadius:2, margin:"0 4px" }}>
       {minId !== null && (
-        <div style={{ position:"absolute", left:`${leftPct}%`, width:`${Math.max(rightPct - leftPct, 2)}%`, height:"100%", background:T.gold, borderRadius:2, transition:"all 0.2s ease" }} />
+        <div style={{ position:"absolute", left:`${leftPct}%`, width:`${widthPct}%`, height:"100%", background:T.gold, borderRadius:2, transition:"all 0.2s ease" }} />
       )}
     </div>
   );
