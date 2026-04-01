@@ -992,10 +992,12 @@ The briefing must include ALL of the following:
 - Five parts total: three short described situations, then two personal questions — all are required
 - The three situations are fictional vignettes (not optional personal substitutes)
 - A brief natural privacy note
+- A clearly readable disclosure before starting:
+  "Your interview responses — including audio and transcript — will be used to assess your relational readiness and to find you compatible matches. Audio is analyzed for communication style only. Raw audio is never shared with other users or third parties."
 - "Ready when you are" or similar
 
 Example of how to weave it in:
-"Good to meet you, [name]. Before we get into it — this is really just a conversation. Real examples are great, small moments are fine, nothing needs to be dramatic. The more specific you can be about actual moments and actual words, the more useful this is — but there's no pressure to have a story ready. We'll do three short described situations, then two personal questions — all five parts matter. One thing worth mentioning — some of what we cover can get personal, so if you're somewhere you can have a bit of privacy, that helps. Ready when you are?"
+"Good to meet you, [name]. Before we get into it — this is really just a conversation. Real examples are great, small moments are fine, nothing needs to be dramatic. The more specific you can be about actual moments and actual words, the more useful this is — but there's no pressure to have a story ready. We'll do three short described situations, then two personal questions — all five parts matter. One thing worth mentioning — some of what we cover can get personal, so if you're somewhere you can have a bit of privacy, that helps. Your interview responses — including audio and transcript — will be used to assess your relational readiness and to find you compatible matches. Audio is analyzed for communication style only. Raw audio is never shared with other users or third parties. Ready when you are?"
 
 Keep it conversational. The privacy note should feel like practical advice from a person, not a disclaimer.
 `;
@@ -1983,6 +1985,17 @@ function buildGate1ScoreFromResults(results: InterviewResults): Gate1Score {
   };
 }
 
+function bytesToBase64(bytes: Uint8Array): string {
+  let binary = '';
+  for (let i = 0; i < bytes.length; i += 1) binary += String.fromCharCode(bytes[i]);
+  if (typeof btoa === 'function') return btoa(binary);
+  return '';
+}
+
+function newInterviewSessionId(userId: string): string {
+  return `${userId || 'anon'}-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
+}
+
 /** Navigation lock: set when interview completes and we navigate to analysis; prevents other effects from overriding. Survives remount. */
 let interviewJustCompletedInSession = false;
 
@@ -2082,6 +2095,9 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
   const moment5ProbePendingRef = useRef(false);
   const moment4ThresholdProbeAskedRef = useRef(false);
   const scenarioAContemptProbeAskedRef = useRef(false);
+  const interviewSessionIdRef = useRef<string>(newInterviewSessionId(userId));
+  const turnAudioIndexRef = useRef(0);
+  const [networkStatus, setNetworkStatus] = useState<'checking' | 'good' | 'poor'>('checking');
 
   const resetInterviewProgressRefs = useCallback(() => {
     interviewMomentsCompleteRef.current = createInitialMomentCompletion();
@@ -2092,6 +2108,181 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
     moment5ProbePendingRef.current = false;
     moment4ThresholdProbeAskedRef.current = false;
     scenarioAContemptProbeAskedRef.current = false;
+    turnAudioIndexRef.current = 0;
+    interviewSessionIdRef.current = newInterviewSessionId(userId);
+  }, [userId]);
+
+  const deleteTurnAudioFile = useCallback(async (nativeUri: string | null) => {
+    if (!nativeUri || Platform.OS === 'web') return;
+    try {
+      await FileSystem.deleteAsync(nativeUri, { idempotent: true });
+    } catch {
+      // non-critical cleanup
+    }
+  }, []);
+
+  const processTurnAudioWithRetry = useCallback(
+    async (
+      params: {
+        audioBlob: Blob | null;
+        nativeUri: string | null;
+        turnIndex: number;
+        scenarioNumber: number | null;
+      }
+    ) => {
+      const { audioBlob, nativeUri, turnIndex, scenarioNumber } = params;
+      if (!userId) {
+        await deleteTurnAudioFile(nativeUri);
+        return { success: false };
+      }
+      const supabaseUrl = getResolvedSupabaseUrl();
+      if (!supabaseUrl || !SUPABASE_ANON_KEY) {
+        await deleteTurnAudioFile(nativeUri);
+        return { success: false };
+      }
+
+      const MAX_RETRIES = 3;
+      const RETRY_DELAYS = [3000, 8000, 15000];
+      let lastError: unknown = null;
+      const startedAtMs = Date.now();
+
+      for (let attempt = 0; attempt < MAX_RETRIES; attempt += 1) {
+        try {
+          let audioBase64 = '';
+          let mimeType = 'audio/mp4';
+          if (nativeUri) {
+            audioBase64 = await FileSystem.readAsStringAsync(nativeUri, {
+              encoding: 'base64' as unknown as never,
+            });
+            mimeType = 'audio/mp4';
+          } else if (audioBlob && typeof audioBlob.arrayBuffer === 'function') {
+            const arr = new Uint8Array(await audioBlob.arrayBuffer());
+            audioBase64 = bytesToBase64(arr);
+            mimeType = audioBlob.type || 'audio/webm';
+          }
+          if (!audioBase64) throw new Error('No audio data for turn.');
+          const durationSec = Math.max(0, (Date.now() - startedAtMs) / 1000);
+
+          const res = await fetch(`${supabaseUrl.replace(/\/+$/, '')}/functions/v1/analyze-interview-audio`, {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              Authorization: `Bearer ${SUPABASE_ANON_KEY}`,
+              apikey: SUPABASE_ANON_KEY,
+            },
+            body: JSON.stringify({
+              action: 'process_turn',
+              user_id: userId,
+              session_id: interviewSessionIdRef.current,
+              turn_index: turnIndex,
+              scenario_number: scenarioNumber,
+              audio_duration_seconds: durationSec,
+              mime_type: mimeType,
+              audio_base64: audioBase64,
+            }),
+          });
+          if (!res.ok) throw new Error(`Edge function failed: ${res.status} ${await res.text()}`);
+          await deleteTurnAudioFile(nativeUri);
+          return { success: true };
+        } catch (error) {
+          lastError = error;
+          if (attempt < MAX_RETRIES - 1) {
+            await new Promise((resolve) => setTimeout(resolve, RETRY_DELAYS[attempt]));
+          }
+        }
+      }
+
+      try {
+        const message = lastError instanceof Error ? lastError.message : String(lastError);
+        await fetch(`${supabaseUrl.replace(/\/+$/, '')}/functions/v1/analyze-interview-audio`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${SUPABASE_ANON_KEY}`,
+            apikey: SUPABASE_ANON_KEY,
+          },
+          body: JSON.stringify({
+            action: 'log_turn_failure',
+            user_id: userId,
+            session_id: interviewSessionIdRef.current,
+            turn_index: turnIndex,
+            scenario_number: scenarioNumber,
+            error_message: `All ${MAX_RETRIES} attempts failed. Last error: ${message}`,
+          }),
+        });
+      } catch {
+        // Non-blocking logging only.
+      } finally {
+        await deleteTurnAudioFile(nativeUri);
+      }
+      return { success: false };
+    },
+    [deleteTurnAudioFile, userId]
+  );
+
+  const finalizeAudioProfile = useCallback(async (uid: string, attemptId: string | null, passed: boolean) => {
+    if (!uid || !passed || !attemptId) return;
+    const supabaseUrl = getResolvedSupabaseUrl();
+    if (!supabaseUrl || !SUPABASE_ANON_KEY) return;
+    try {
+      await fetch(`${supabaseUrl.replace(/\/+$/, '')}/functions/v1/analyze-interview-audio`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${SUPABASE_ANON_KEY}`,
+          apikey: SUPABASE_ANON_KEY,
+        },
+        body: JSON.stringify({
+          action: 'finalize_session',
+          user_id: uid,
+          attempt_id: attemptId,
+          session_id: interviewSessionIdRef.current,
+        }),
+      });
+    } catch (err) {
+      if (__DEV__) console.warn('[AUDIO_STYLE_FINALIZE] failed', err);
+    }
+  }, []);
+
+  const runPostInterviewTextStyleAnalysis = useCallback(async (uid: string, passed: boolean) => {
+    if (!uid || !passed) return;
+    const supabaseUrl = getResolvedSupabaseUrl();
+    if (!supabaseUrl || !SUPABASE_ANON_KEY) return;
+    try {
+      await fetch(`${supabaseUrl.replace(/\/+$/, '')}/functions/v1/analyze-interview-text`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${SUPABASE_ANON_KEY}`,
+          apikey: SUPABASE_ANON_KEY,
+        },
+        body: JSON.stringify({ user_id: uid }),
+      });
+    } catch (err) {
+      if (__DEV__) console.warn('[TEXT_STYLE] background processing failed', err);
+    }
+  }, []);
+
+  useEffect(() => {
+    const run = async () => {
+      const supabaseUrl = getResolvedSupabaseUrl();
+      if (!supabaseUrl) {
+        setNetworkStatus('poor');
+        return;
+      }
+      try {
+        const timeout = setTimeout(() => setNetworkStatus((prev) => (prev === 'checking' ? 'poor' : prev)), 4000);
+        await fetch(supabaseUrl, { method: 'GET' });
+        clearTimeout(timeout);
+        setNetworkStatus('good');
+      } catch {
+        setNetworkStatus('poor');
+      }
+    };
+    run();
+    return () => {
+      // no-op
+    };
   }, []);
 
   const canAdvanceFromScenario = useCallback((scenarioNumber: 1 | 2 | 3) => closingQuestionState[scenarioNumber] === 'answered', [closingQuestionState]);
@@ -3853,16 +4044,10 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
           },
           { retries: 2, baseDelay: 4000, context: 'transcription' }
         );
-        if (nativeUri && Platform.OS !== 'web') {
-          try {
-            await FileSystem.deleteAsync(nativeUri, { idempotent: true });
-          } catch {
-            // non-critical
-          }
-        }
         return transcript;
       } catch (err) {
         if (__DEV__) console.error('Transcription failed:', err instanceof Error ? err.message : err);
+        await deleteTurnAudioFile(nativeUri);
         const retryMessages = Platform.OS === 'web'
           ? AMORAEA_ERROR_MESSAGES.recordingOrTranscriptionRetry
           : AMORAEA_ERROR_MESSAGES.recordingOrTranscriptionRetryNative;
@@ -3874,14 +4059,25 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
         return null;
       }
     },
-    [speakTextSafe]
+    [speakTextSafe, deleteTurnAudioFile]
   );
 
   const audioRecorder = useAudioRecorder({
     onRecordingComplete: async (blob, nativeUri) => {
       setVoiceState('processing');
       const userText = await transcribeSafe(blob, nativeUri);
-      if (userText) processUserSpeech(userText);
+      if (userText) {
+        const turnIndex = turnAudioIndexRef.current;
+        turnAudioIndexRef.current += 1;
+        const scenarioNumber = currentScenarioRef.current ?? null;
+        void processTurnAudioWithRetry({
+          audioBlob: blob,
+          nativeUri,
+          turnIndex,
+          scenarioNumber,
+        });
+        processUserSpeech(userText);
+      }
     },
     onError: (err) => handleRecordingError(err),
   });
@@ -4510,6 +4706,8 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
             console.log('=== [5] DB save ===', { id: attemptId ?? undefined, error: null });
           }
           setAnalysisAttemptId(attemptId);
+          void runPostInterviewTextStyleAnalysis(userId, gateResult.pass);
+          await finalizeAudioProfile(userId, attemptId, gateResult.pass);
           await remoteLog('[6] setAnalysisAttemptId called', { id: attemptId ?? null });
           if (__DEV__) console.log('=== [6] latestAttemptId set ===', attemptId ?? 'null');
           alphaSaveOk = true;
@@ -4587,7 +4785,7 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
       setInterviewStatus('congratulations');
       setStatus('results');
     }
-  }, [typologyContext, route.name, userId, navigation, queryClient, saveInterviewResults, ensureValidSession, scoreScenario]);
+  }, [typologyContext, route.name, userId, navigation, queryClient, saveInterviewResults, ensureValidSession, scoreScenario, finalizeAudioProfile, runPostInterviewTextStyleAnalysis]);
 
   // When INTERVIEW_COMPLETE was detected while TTS was still playing, transition to loading once TTS finishes
   useEffect(() => {
@@ -5094,6 +5292,12 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
             You'll speak with an AI interviewer about how you show up in relationships. Hold the button to talk — release when you're done. About 15 minutes.
           </Text>
           <Text style={styles.introNote}>Small examples are fine — nothing needs to be dramatic.</Text>
+          <Text style={styles.introHint}>
+            Connection status: {networkStatus === 'good' ? 'Stable' : networkStatus === 'poor' ? 'Weak' : 'Checking...'}
+          </Text>
+          <Text style={styles.introNote}>
+            For best transcription reliability: use a stable connection, speak in a quieter space, and pause briefly before releasing the mic.
+          </Text>
           {micError ? (
             <View style={styles.micErrorBlock}>
               <Text style={styles.micErrorText}>{micError}</Text>

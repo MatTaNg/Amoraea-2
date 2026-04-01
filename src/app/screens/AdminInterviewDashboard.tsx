@@ -77,6 +77,29 @@ type AttemptRow = {
   probe_log?: unknown;
 };
 
+type CommunicationStyleProfileRow = {
+  user_id: string;
+  emotional_analytical_score: number | null;
+  narrative_conceptual_score: number | null;
+  certainty_ambiguity_score: number | null;
+  relational_individual_score: number | null;
+  emotional_vocab_density: number | null;
+  qualifier_density: number | null;
+  first_person_ratio: number | null;
+  avg_response_length: number | null;
+  pitch_mean: number | null;
+  pitch_range: number | null;
+  speech_rate: number | null;
+  pause_frequency: number | null;
+  energy_variation: number | null;
+  emotional_expressiveness: number | null;
+  warmth_score: number | null;
+  text_confidence: number | null;
+  audio_confidence: number | null;
+  overall_confidence: number | null;
+  updated_at: string | null;
+};
+
 function coerceScoreNumber(v: unknown): number | undefined {
   if (v == null || v === '') return undefined;
   const n = typeof v === 'number' ? v : Number(v);
@@ -414,6 +437,41 @@ function UserCard({ userData, onPress }: { userData: UserGroup; onPress: () => v
 }
 
 function SummaryTab({ attempt }: { attempt: AttemptRow }) {
+  const [styleProfile, setStyleProfile] = useState<CommunicationStyleProfileRow | null>(null);
+  const [styleStatus, setStyleStatus] = useState<'idle' | 'loading' | 'reprocessing'>('idle');
+
+  const loadStyleProfile = async () => {
+    setStyleStatus('loading');
+    const { data } = await supabase
+      .from('communication_style_profiles')
+      .select('*')
+      .eq('user_id', attempt.user_id)
+      .maybeSingle();
+    setStyleProfile((data as CommunicationStyleProfileRow | null) ?? null);
+    setStyleStatus('idle');
+  };
+
+  useEffect(() => {
+    void loadStyleProfile();
+  }, [attempt.user_id]);
+
+  const reprocessStyle = async () => {
+    setStyleStatus('reprocessing');
+    try {
+      await Promise.all([
+        supabase.functions.invoke('analyze-interview-text', {
+          body: { user_id: attempt.user_id },
+        }),
+        supabase.functions.invoke('analyze-interview-audio', {
+          body: { action: 'finalize_session', user_id: attempt.user_id, attempt_id: attempt.id },
+        }),
+      ]);
+      await loadStyleProfile();
+    } finally {
+      setStyleStatus('idle');
+    }
+  };
+
   const totalScoresStored = getResolvedPillarScores(attempt);
   const aggregate = computeMarkerAggregateFromAttempt(attempt);
   const totalScores: Record<string, number> = {};
@@ -478,6 +536,52 @@ function SummaryTab({ attempt }: { attempt: AttemptRow }) {
           ))}
         </View>
       ))}
+      <Text style={styles.sectionTitle}>Communication Style</Text>
+      <View style={styles.block}>
+        <Text style={styles.blockText}>
+          Processing status:{' '}
+          {styleProfile
+            ? styleProfile.text_confidence != null && styleProfile.audio_confidence != null
+              ? 'available'
+              : 'partial'
+            : styleStatus === 'loading'
+              ? 'loading'
+              : 'not processed'}
+        </Text>
+        <Text style={styles.blockText}>Text confidence: {formatScoreCell((styleProfile?.text_confidence ?? null) !== null ? Number(styleProfile?.text_confidence) * 10 : null)}</Text>
+        <Text style={styles.blockText}>Audio confidence: {formatScoreCell((styleProfile?.audio_confidence ?? null) !== null ? Number(styleProfile?.audio_confidence) * 10 : null)}</Text>
+        <Text style={styles.blockText}>Overall confidence: {formatScoreCell((styleProfile?.overall_confidence ?? null) !== null ? Number(styleProfile?.overall_confidence) * 10 : null)}</Text>
+
+        {[
+          ['Emotional vs Analytical', styleProfile?.emotional_analytical_score],
+          ['Narrative vs Conceptual', styleProfile?.narrative_conceptual_score],
+          ['Certainty vs Ambiguity', styleProfile?.certainty_ambiguity_score],
+          ['Relational vs Individual', styleProfile?.relational_individual_score],
+          ['Warmth', styleProfile?.warmth_score],
+          ['Expressiveness', styleProfile?.emotional_expressiveness],
+        ].map(([label, value]) => {
+          const n = typeof value === 'number' ? value : null;
+          return (
+            <View key={String(label)} style={styles.styleBarRow}>
+              <Text style={styles.scoreLabel}>{label}</Text>
+              <View style={styles.styleBarTrack}>
+                <View style={[styles.styleBarFill, { width: `${Math.max(0, Math.min(100, (n ?? 0) * 100))}%` }]} />
+              </View>
+              <Text style={styles.scoreValue}>{n == null ? '—' : n.toFixed(2)}</Text>
+            </View>
+          );
+        })}
+
+        <Pressable
+          onPress={() => void reprocessStyle()}
+          style={({ pressed }) => [styles.reprocessButton, pressed && styles.reprocessButtonPressed]}
+          disabled={styleStatus === 'reprocessing'}
+        >
+          <Text style={styles.reprocessButtonText}>
+            {styleStatus === 'reprocessing' ? 'Reprocessing...' : 'Reprocess style pipelines'}
+          </Text>
+        </Pressable>
+      </View>
     </ScrollView>
   );
 }
@@ -1046,5 +1150,39 @@ const styles = StyleSheet.create({
   emptyText: {
     color: '#7A9ABE',
     fontSize: 13,
+  },
+  styleBarRow: {
+    marginTop: 8,
+  },
+  styleBarTrack: {
+    marginTop: 4,
+    width: '100%',
+    height: 8,
+    borderRadius: 999,
+    backgroundColor: 'rgba(82,142,220,0.15)',
+    overflow: 'hidden',
+  },
+  styleBarFill: {
+    height: '100%',
+    borderRadius: 999,
+    backgroundColor: '#5BA8E8',
+  },
+  reprocessButton: {
+    marginTop: 12,
+    borderWidth: 1,
+    borderColor: 'rgba(82,142,220,0.5)',
+    borderRadius: 8,
+    paddingVertical: 8,
+    paddingHorizontal: 10,
+    backgroundColor: 'rgba(30,111,217,0.14)',
+    alignItems: 'center',
+  },
+  reprocessButtonPressed: {
+    backgroundColor: 'rgba(30,111,217,0.24)',
+  },
+  reprocessButtonText: {
+    color: '#C8E4FF',
+    fontSize: 12,
+    fontWeight: '600',
   },
 });
