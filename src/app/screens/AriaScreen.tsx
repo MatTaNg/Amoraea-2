@@ -2653,13 +2653,8 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
     setVoiceState('speaking');
     isSpeakingRef.current = true;
     try {
+      // Ensure playback route is reset immediately before TTS (fixes low-volume-after-recording on iOS).
       await setPlaybackMode();
-      console.log('[AUDIO DEBUG] setPlaybackMode done, about to speak');
-      
-      // Check what mode we're actually in
-      const mode = await Audio.getAudioModeAsync?.();
-      console.log('[AUDIO DEBUG] current audio mode:', JSON.stringify(mode));
-      
       await speakWithElevenLabs(text);
     } finally {
       isSpeakingRef.current = false;
@@ -4007,7 +4002,7 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
             if (Platform.OS !== 'web' && nativeUri) {
               try {
                 const base64 = await FileSystem.readAsStringAsync(nativeUri, {
-                  encoding: FileSystem.EncodingType.Base64,
+                  encoding: 'base64' as unknown as never,
                 });
                 const byteChars = atob(base64);
                 const byteNumbers = new Array(byteChars.length);
