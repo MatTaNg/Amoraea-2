@@ -48,7 +48,7 @@ interface UserInterviewLayoutProps {
   ttsFallbackActive?: boolean;
   /** When true, show mic-denied state with "Enable in browser settings" / open app settings */
   micPermissionDenied?: boolean;
-  /** When true, show "Aira is thinking..." (visual only, no TTS) */
+  /** When true, show "Amoraea is thinking..." (visual only, no TTS) */
   isWaiting?: boolean;
   /** When true, mic button is tap-to-toggle (one tap start, one tap stop) and onMicPress is used */
   micToggleMode?: boolean;
@@ -175,8 +175,15 @@ export const UserInterviewLayout: React.FC<UserInterviewLayoutProps> = ({
         </View>
         <Text style={styles.headerLabel}>Interview</Text>
         {onExit ? (
-          <Pressable onPress={onExit} style={styles.exitButton} hitSlop={16}>
-            <Ionicons name="exit-outline" size={24} color={FLAME_MID} />
+          <Pressable
+            onPress={onExit}
+            style={styles.exitButton}
+            hitSlop={12}
+            accessibilityRole="button"
+            accessibilityLabel="Log out"
+          >
+            <Ionicons name="log-out-outline" size={20} color={FLAME_MID} />
+            <Text style={styles.exitButtonLabel}>Log out</Text>
           </Pressable>
         ) : (
           <View style={styles.exitPlaceholder} />
@@ -205,7 +212,10 @@ export const UserInterviewLayout: React.FC<UserInterviewLayoutProps> = ({
           )}
 
           {isWaiting ? (
-            <Text style={styles.waitingText}>Aira is thinking...</Text>
+            <View style={styles.waitingRow}>
+              <Text style={styles.waitingDot}>◆</Text>
+              <Text style={styles.waitingText}>Amoraea is thinking...</Text>
+            </View>
           ) : interviewerText ? (
             <Text
               style={[styles.interviewerQuote, interviewerLineIsError && styles.interviewerQuoteError]}
@@ -375,16 +385,27 @@ const styles = StyleSheet.create({
     color: TEXT_DIM,
   },
   exitButton: {
-    backgroundColor: 'transparent',
-    padding: 8,
-    justifyContent: 'center',
+    flexDirection: 'row',
     alignItems: 'center',
+    gap: 8,
+    backgroundColor: 'transparent',
+    paddingVertical: 8,
+    paddingHorizontal: 10,
+    justifyContent: 'center',
     borderRadius: 8,
     borderWidth: 1,
     borderColor: 'rgba(82, 142, 220, 0.2)',
   },
+  exitButtonLabel: {
+    fontFamily: FONT_UI,
+    fontSize: 10,
+    fontWeight: '400',
+    letterSpacing: 1.5,
+    textTransform: 'uppercase',
+    color: FLAME_MID,
+  },
   exitPlaceholder: {
-    width: 40,
+    minWidth: 100,
     height: 40,
   },
   main: {
@@ -483,13 +504,25 @@ const styles = StyleSheet.create({
     textAlign: 'center',
     marginTop: 8,
   },
+  waitingRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+    marginTop: 2,
+  },
+  waitingDot: {
+    color: FLAME_MID,
+    fontSize: 11,
+    letterSpacing: 1,
+  },
   waitingText: {
     textAlign: 'center',
     fontFamily: FONT_DISPLAY,
     fontSize: 17,
     fontWeight: '300',
     fontStyle: 'italic',
-    color: TEXT_DIM,
+    color: '#8FB8E3',
     letterSpacing: 0.4,
   },
   micDeniedBlock: {

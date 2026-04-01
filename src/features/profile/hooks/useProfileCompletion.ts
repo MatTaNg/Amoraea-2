@@ -10,6 +10,7 @@ const compatibilityRepository = new CompatibilityRepository();
 const TOTAL_REQUIREMENTS = 2; // full assessment + compatibility
 
 async function getProfileCompletion(userId: string) {
+  if (__DEV__) console.log('[useProfileCompletion] fetch start', { userId });
   const [fullAssessment, compatibility] = await Promise.all([
     typologyRepository.getTypology(userId, 'full_assessment'),
     compatibilityRepository.getCompatibility(userId),
@@ -21,7 +22,7 @@ async function getProfileCompletion(userId: string) {
 
   const completedCount = (hasFullAssessment ? 1 : 0) + (hasCompatibility ? 1 : 0);
 
-  return {
+  const result = {
     completedCount,
     totalCount: TOTAL_REQUIREMENTS,
     completedTypologyCount: hasFullAssessment ? 1 : 0,
@@ -30,6 +31,8 @@ async function getProfileCompletion(userId: string) {
     hasFullAssessment,
     isComplete: hasFullAssessment && hasCompatibility,
   };
+  if (__DEV__) console.log('[useProfileCompletion] fetch success', { userId, result });
+  return result;
 }
 
 export function useProfileCompletion(userId: string | undefined) {

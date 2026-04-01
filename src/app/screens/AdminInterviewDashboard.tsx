@@ -15,13 +15,32 @@ import {
 } from 'react-native';
 import { supabase } from '@data/supabase/client';
 
-// Pillar IDs as stored in DB; construct keys match ai_reasoning.construct_breakdown
+// Marker ids as stored in DB; construct keys match ai_reasoning.construct_breakdown
 const PILLAR_ROWS = [
-  { id: '1', constructKey: 'conflict_repair', label: 'Conflict & Repair', short: 'C&R' },
-  { id: '3', constructKey: 'accountability', label: 'Accountability', short: 'Acc' },
-  { id: '5', constructKey: 'responsiveness', label: 'Responsiveness', short: 'Res' },
-  { id: '6', constructKey: 'desire_limits', label: 'Desire & Limits', short: 'D&L' },
+  { id: 'mentalizing', constructKey: 'mentalizing', label: 'Mentalizing', short: 'Men' },
+  { id: 'accountability', constructKey: 'accountability', label: 'Accountability', short: 'Acc' },
+  { id: 'contempt', constructKey: 'contempt', label: 'Contempt', short: 'Con' },
+  { id: 'repair', constructKey: 'repair', label: 'Repair', short: 'Rep' },
+  { id: 'regulation', constructKey: 'regulation', label: 'Regulation', short: 'Reg' },
+  { id: 'attunement', constructKey: 'attunement', label: 'Attunement', short: 'Att' },
+  { id: 'appreciation', constructKey: 'appreciation', label: 'Appreciation', short: 'App' },
+  { id: 'commitment_threshold', constructKey: 'commitment_threshold', label: 'Commitment Threshold', short: 'Com' },
 ];
+
+const MARKER_IDS = PILLAR_ROWS.map((p) => p.id);
+const ASSESSED_MARKERS_BY_SECTION: Record<string, string[]> = {
+  scenario_1: ['mentalizing', 'accountability', 'contempt', 'repair', 'attunement'],
+  scenario_2: ['appreciation', 'attunement', 'mentalizing', 'repair', 'accountability'],
+  scenario_3: ['regulation', 'repair', 'mentalizing', 'attunement', 'accountability', 'commitment_threshold'],
+  moment_4: ['contempt', 'commitment_threshold', 'accountability', 'mentalizing', 'repair'],
+  moment_5: ['appreciation', 'attunement', 'mentalizing'],
+};
+const USER_FEEDBACK_LABELS: Record<string, string> = {
+  conversation_quality: 'Conversation Quality',
+  clarity_flow: 'Clarity and Flow',
+  trust_accuracy: 'Trust and Accuracy',
+  other_feedback: 'Additional Feedback',
+};
 
 type UserRow = {
   id: string;
@@ -52,11 +71,204 @@ type AttemptRow = {
   ai_reasoning: Record<string, unknown> | null;
   user_analysis_rating: number | null;
   user_analysis_comment: string | null;
-  per_construct_ratings: Record<string, { rating?: number; comment?: string }> | null;
+  per_construct_ratings: Record<string, unknown> | null;
   transcript: Array<{ role: string; content?: string }> | null;
   scenario_specific_patterns?: Record<string, unknown> | null;
   probe_log?: unknown;
 };
+
+function coerceScoreNumber(v: unknown): number | undefined {
+  if (v == null || v === '') return undefined;
+  const n = typeof v === 'number' ? v : Number(v);
+  return Number.isFinite(n) ? n : undefined;
+}
+
+function formatScoreCell(v: unknown): string {
+  const n = coerceScoreNumber(v);
+  return n === undefined ? '—' : n.toFixed(1);
+}
+
+/**
+ * interview_attempts.pillar_scores and scenario_*_scores jsonb may arrive as:
+ * - parsed object, JSON string, nested { pillarScores } / { pillar_scores }, or numeric strings.
+ */
+function normalizePillarScoresMap(raw: unknown): Record<string, number> | null {
+  if (raw == null) return null;
+  let obj: unknown = raw;
+  if (typeof raw === 'string') {
+    try {
+      obj = JSON.parse(raw);
+    } catch {
+      return null;
+    }
+  }
+  if (typeof obj !== 'object' || obj === null || Array.isArray(obj)) return null;
+  const o = obj as Record<string, unknown>;
+  const nested = o.pillarScores ?? o.pillar_scores;
+  const source =
+    nested != null && typeof nested === 'object' && !Array.isArray(nested)
+      ? (nested as Record<string, unknown>)
+      : o;
+  const out: Record<string, number> = {};
+  for (const id of MARKER_IDS) {
+    const n = coerceScoreNumber(source[id]);
+    if (n !== undefined) out[id] = n;
+  }
+  return Object.keys(out).length > 0 ? out : null;
+}
+
+function pillarScoresFromAIReasoning(ai: unknown): Record<string, number> | null {
+  if (ai == null || typeof ai !== 'object') return null;
+  const breakdown = (ai as Record<string, unknown>).construct_breakdown;
+  if (breakdown == null || typeof breakdown !== 'object' || Array.isArray(breakdown)) return null;
+  const b = breakdown as Record<string, { score?: unknown }>;
+  const out: Record<string, number> = {};
+  for (const id of MARKER_IDS) {
+    const n = coerceScoreNumber(b[id]?.score);
+    if (n !== undefined) out[id] = n;
+  }
+  return Object.keys(out).length > 0 ? out : null;
+}
+
+/** Merge DB pillar_scores with construct_breakdown scores when column is empty or partial. */
+function getResolvedPillarScores(a: AttemptRow | null | undefined): Record<string, number> {
+  if (!a) return {};
+  const fromDb = normalizePillarScoresMap(a.pillar_scores);
+  const fromAi = pillarScoresFromAIReasoning(a.ai_reasoning);
+  return { ...(fromAi ?? {}), ...(fromDb ?? {}) };
+}
+
+function getScenarioPillarScoresMap(raw: unknown): Record<string, number> | null {
+  if (raw == null) return null;
+  let obj: unknown = raw;
+  if (typeof raw === 'string') {
+    try {
+      obj = JSON.parse(raw);
+    } catch {
+      return null;
+    }
+  }
+  if (typeof obj !== 'object' || obj === null) return null;
+  const o = obj as Record<string, unknown>;
+  const innerRaw = o.pillarScores ?? o.pillar_scores;
+  if (innerRaw != null && typeof innerRaw === 'object' && !Array.isArray(innerRaw)) {
+    return normalizePillarScoresMap(innerRaw);
+  }
+  if (typeof innerRaw === 'string') {
+    return normalizePillarScoresMap(innerRaw);
+  }
+  return normalizePillarScoresMap(o);
+}
+
+function parseObject(raw: unknown): Record<string, unknown> | null {
+  if (raw == null) return null;
+  if (typeof raw === 'string') {
+    try {
+      const parsed = JSON.parse(raw);
+      return typeof parsed === 'object' && parsed != null && !Array.isArray(parsed)
+        ? (parsed as Record<string, unknown>)
+        : null;
+    } catch {
+      return null;
+    }
+  }
+  if (typeof raw !== 'object' || Array.isArray(raw)) return null;
+  return raw as Record<string, unknown>;
+}
+
+function getMomentScoreBundle(
+  attempt: AttemptRow | null | undefined,
+  momentNumber: 4 | 5
+): { scores: Record<string, number> | null; summary: string | null } {
+  const patterns = parseObject(attempt?.scenario_specific_patterns);
+  const key = momentNumber === 4 ? 'moment_4_scores' : 'moment_5_scores';
+  const bundle = parseObject(patterns?.[key]);
+  const scores = getScenarioPillarScoresMap(bundle);
+  const summaryRaw = bundle?.summary;
+  const summary = typeof summaryRaw === 'string' && summaryRaw.trim().length > 0 ? summaryRaw.trim() : null;
+  return { scores, summary };
+}
+
+function getScoreBundleDetails(raw: unknown): {
+  scores: Record<string, number> | null;
+  evidence: Record<string, string>;
+  confidence: Record<string, string>;
+} {
+  const obj = parseObject(raw);
+  const scores = getScenarioPillarScoresMap(obj);
+  const evidenceRaw = parseObject(obj?.keyEvidence);
+  const confidenceRaw = parseObject(obj?.pillarConfidence);
+  const evidence: Record<string, string> = {};
+  const confidence: Record<string, string> = {};
+  MARKER_IDS.forEach((id) => {
+    const ev = getString(evidenceRaw?.[id]);
+    const cf = getString(confidenceRaw?.[id]);
+    if (ev) evidence[id] = ev;
+    if (cf) confidence[id] = cf;
+  });
+  return { scores, evidence, confidence };
+}
+
+function markerIsAssessedInSection(sectionKey: string, markerId: string): boolean {
+  return (ASSESSED_MARKERS_BY_SECTION[sectionKey] ?? []).includes(markerId);
+}
+
+function computeMarkerAggregateFromAttempt(
+  attempt: AttemptRow
+): { scores: Record<string, number>; counts: Record<string, number> } {
+  const sectionScores: Record<string, Record<string, number> | null> = {
+    scenario_1: getScoreBundleDetails(attempt.scenario_1_scores).scores,
+    scenario_2: getScoreBundleDetails(attempt.scenario_2_scores).scores,
+    scenario_3: getScoreBundleDetails(attempt.scenario_3_scores).scores,
+    moment_4: getMomentScoreBundle(attempt, 4).scores,
+    moment_5: getMomentScoreBundle(attempt, 5).scores,
+  };
+  const totals: Record<string, number> = {};
+  const counts: Record<string, number> = {};
+  MARKER_IDS.forEach((id) => {
+    totals[id] = 0;
+    counts[id] = 0;
+  });
+  Object.entries(sectionScores).forEach(([sectionKey, scores]) => {
+    if (!scores) return;
+    MARKER_IDS.forEach((id) => {
+      if (!markerIsAssessedInSection(sectionKey, id)) return;
+      const n = coerceScoreNumber(scores[id]);
+      if (n == null) return;
+      totals[id] += n;
+      counts[id] += 1;
+    });
+  });
+  const out: Record<string, number> = {};
+  MARKER_IDS.forEach((id) => {
+    if (counts[id] > 0) out[id] = Math.round((totals[id] / counts[id]) * 10) / 10;
+  });
+  return { scores: out, counts };
+}
+
+function buildMomentOrScenarioSummary(
+  title: string,
+  details: { evidence: Record<string, string> },
+  explicitSummary?: string | null
+): string {
+  if (explicitSummary && explicitSummary.trim().length > 0) return explicitSummary.trim();
+  const lines = Object.entries(details.evidence)
+    .slice(0, 3)
+    .map(([key, value]) => `${formatConstruct(key)}: ${value}`);
+  if (lines.length === 0) return `${title}: No summary text was recorded for this run.`;
+  return lines.join(' ');
+}
+
+/** Elapsed time between attempt created_at and completed_at (admin overview). */
+function formatAdminAttemptElapsed(start: string, end: string): string {
+  const t0 = new Date(start).getTime();
+  const t1 = new Date(end).getTime();
+  const ms = t1 - t0;
+  if (!Number.isFinite(ms) || ms < 0) return '—';
+  if (ms < 60000) return `${Math.max(1, Math.round(ms / 1000))} sec`;
+  const mins = Math.floor(ms / 60000);
+  return mins < 60 ? `${mins} min` : `${Math.floor(mins / 60)}h ${mins % 60}m`;
+}
 
 type UserGroup = {
   user: UserRow;
@@ -144,797 +356,462 @@ async function fetchAllAdminData(): Promise<UserGroup[]> {
   });
 }
 
-function formatDuration(start: string, end: string): string {
-  const ms = new Date(end).getTime() - new Date(start).getTime();
-  const mins = Math.floor(ms / 60000);
-  return mins < 60 ? `${mins} min` : `${Math.floor(mins / 60)}h ${mins % 60}m`;
-}
-
 function formatConstruct(key: string): string {
   const row = PILLAR_ROWS.find((r) => r.id === key || r.constructKey === key);
   return row?.label ?? key?.replace(/_/g, ' ') ?? '—';
 }
 
-// —— Shared UI ——
-function Section({ title, children }: { title: string; children: React.ReactNode }) {
-  return (
-    <View style={styles.section}>
-      <Text style={styles.sectionLabel}>{title}</Text>
-      {children}
-    </View>
-  );
+function getPassWord(attempt: AttemptRow | null): 'pass' | 'fail' | 'none' {
+  if (!attempt || attempt.passed == null) return 'none';
+  return attempt.passed ? 'pass' : 'fail';
 }
 
-function MetaGrid({
-  items,
-}: {
-  items: Array<{ label: string; value: React.ReactNode; alert?: boolean }>;
-}) {
-  return (
-    <View style={styles.metaGrid}>
-      {items.map((item, i) => (
-        <View
-          key={i}
-          style={[styles.metaGridItem, item.alert && styles.metaGridItemAlert]}
-        >
-          <Text style={[styles.metaGridLabel, item.alert && styles.metaGridLabelAlert]}>
-            {item.label}
-          </Text>
-          <Text style={[styles.metaGridValue, item.alert && styles.metaGridValueAlert]}>
-            {item.value ?? '—'}
-          </Text>
-        </View>
-      ))}
-    </View>
-  );
+function getPassColor(value: 'pass' | 'fail' | 'none'): string {
+  if (value === 'pass') return '#2A8C6A';
+  if (value === 'fail') return '#E87A7A';
+  return '#7A9ABE';
 }
 
-// —— Cohort overview ——
-function UserRow({
-  userData,
-  onPress,
-  isEven,
-}: {
-  userData: UserGroup;
-  onPress: () => void;
-  isEven: boolean;
-}) {
-  const a = userData.latestAttempt;
-  const scores = a?.pillar_scores ?? {};
-  const displayName = getUserDisplayName(userData.user);
-  const hasLowFeedback =
-    a?.user_analysis_rating != null && a.user_analysis_rating <= 2;
-  const statusColor = !a
-    ? '#3D5470'
-    : a.passed === true
-      ? '#2A8C6A'
-      : a.passed === false
-        ? '#E87A7A'
-        : '#7A9ABE';
-  const statusText = !a
-    ? '● No interview'
-    : a.passed === true
-      ? '● Pass'
-      : a.passed === false
-        ? '● Fail'
-        : '● Incomplete';
+function formatAttemptDate(attempt: AttemptRow): string {
+  const raw = attempt.completed_at ?? attempt.created_at;
+  if (!raw) return '—';
+  return new Date(raw).toLocaleString('en-GB');
+}
 
+function formatAttemptTabLabel(attempt: AttemptRow): string {
+  const raw = attempt.completed_at ?? attempt.created_at;
+  if (!raw) return `Test ${attempt.attempt_number}`;
+  return new Date(raw).toLocaleString('en-GB', {
+    day: '2-digit',
+    month: 'short',
+    year: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit',
+  });
+}
+
+function getAttemptsSorted(attempts: AttemptRow[]): AttemptRow[] {
+  return [...attempts].sort((a, b) => a.attempt_number - b.attempt_number);
+}
+
+function getString(v: unknown): string | null {
+  return typeof v === 'string' && v.trim().length > 0 ? v.trim() : null;
+}
+
+function UserCard({ userData, onPress }: { userData: UserGroup; onPress: () => void }) {
+  const latest = userData.latestAttempt;
+  const passWord = getPassWord(latest);
   return (
-    <Pressable
-      onPress={onPress}
-      style={({ pressed }) => [
-        styles.userRow,
-        isEven && styles.userRowEven,
-        pressed && styles.userRowPressed,
-      ]}
-    >
-      <View style={styles.userRowCol1}>
-        <Text style={styles.userRowName}>{displayName}</Text>
-        <Text style={styles.userRowEmail}>{userData.user?.email ?? '—'}</Text>
-        <Text style={styles.userRowDate}>
-          {a?.completed_at
-            ? new Date(a.completed_at).toLocaleDateString('en-GB', {
-                day: 'numeric',
-                month: 'short',
-                year: 'numeric',
-              })
-            : userData.user?.created_at
-              ? `Joined: ${new Date(userData.user.created_at).toLocaleDateString('en-GB', {
-                  day: 'numeric',
-                  month: 'short',
-                  year: 'numeric',
-                })}`
-              : 'Incomplete'}
-        </Text>
-      </View>
-      <View style={styles.userRowCol2}>
-        <Text
-          style={[
-            styles.userRowScore,
-            !a && { color: '#3D5470' },
-            (a?.weighted_score ?? 0) >= 7 && styles.userRowScoreHigh,
-            (a?.weighted_score ?? 0) >= 5 && (a?.weighted_score ?? 0) < 7 && styles.userRowScoreMid,
-            (a?.weighted_score ?? 0) < 5 && (a?.weighted_score ?? 0) > 0 && styles.userRowScoreLow,
-          ]}
-        >
-          {a?.weighted_score != null ? a.weighted_score.toFixed(1) : '—'}
-        </Text>
-      </View>
-      <View style={styles.userRowCol3}>
-        <Text
-          style={[
-            styles.userRowResult,
-            { color: statusColor },
-            a?.passed === true && styles.userRowResultPass,
-            a?.passed === false && styles.userRowResultFail,
-          ]}
-        >
-          {statusText}
-        </Text>
-      </View>
-      <View style={styles.userRowCol4}>
-        {PILLAR_ROWS.map((p) => (
-          <View key={p.id} style={styles.constructCell}>
-            <Text style={styles.constructLabel}>{p.short}</Text>
-            <Text
-              style={[
-                styles.constructScore,
-                (scores[p.id] ?? 0) >= 7 && styles.constructScoreHigh,
-                (scores[p.id] ?? 0) >= 5 && (scores[p.id] ?? 0) < 7 && styles.constructScoreMid,
-                scores[p.id] != null && (scores[p.id] ?? 0) < 5 && styles.constructScoreLow,
-              ]}
-            >
-              {scores[p.id] != null ? (scores[p.id] as number).toFixed(1) : '—'}
-            </Text>
-          </View>
-        ))}
-      </View>
-      <View style={styles.userRowCol5}>
-        <Text
-          style={[
-            styles.userRowAttempts,
-            userData.attempts.length === 0 && { color: '#3D5470' },
-          ]}
-        >
-          {userData.attempts.length}
-          {userData.attempts.length > 1 && (
-            <Text style={styles.userRowRuns}> runs</Text>
-          )}
-        </Text>
-      </View>
-      <View style={styles.userRowCol6}>
-        {a?.user_analysis_rating != null ? (
-          <View style={styles.feedbackCell}>
-            <Text
-              style={[
-                styles.stars,
-                hasLowFeedback && styles.starsLow,
-              ]}
-            >
-              {'★'.repeat(a.user_analysis_rating)}
-              {'☆'.repeat(5 - a.user_analysis_rating)}
-            </Text>
-            {hasLowFeedback && <Text style={styles.lowFeedbackBadge}>⚠</Text>}
-          </View>
-        ) : (
-          <Text style={styles.noFeedback}>—</Text>
-        )}
-      </View>
-      <View style={styles.userRowCol7}>
-        <Text style={styles.arrow}>›</Text>
+    <Pressable onPress={onPress} style={({ pressed }) => [styles.userCard, pressed && styles.userCardPressed]}>
+      <Text style={styles.userCardName}>{getUserDisplayName(userData.user)}</Text>
+      <Text style={styles.userCardEmail}>{userData.user.email ?? '—'}</Text>
+      <View style={styles.userCardMetaRow}>
+        <Text style={[styles.userCardStatus, { color: getPassColor(passWord) }]}>{passWord}</Text>
+        <Text style={styles.userCardTests}>{userData.attempts.length} tests</Text>
       </View>
     </Pressable>
   );
 }
 
-// —— Drill-down tabs ——
-function OverviewTab({
-  attempt: a,
-}: {
-  attempt: AttemptRow | null;
-  constructs: typeof PILLAR_ROWS;
-}) {
-  if (!a) return null;
-  const scenarioScores = [
-    a.scenario_1_scores as { pillarScores?: Record<string, number> } | null,
-    a.scenario_2_scores as { pillarScores?: Record<string, number> } | null,
-    a.scenario_3_scores as { pillarScores?: Record<string, number> } | null,
+function SummaryTab({ attempt }: { attempt: AttemptRow }) {
+  const totalScoresStored = getResolvedPillarScores(attempt);
+  const aggregate = computeMarkerAggregateFromAttempt(attempt);
+  const totalScores: Record<string, number> = {};
+  MARKER_IDS.forEach((id) => {
+    totalScores[id] = aggregate.scores[id] ?? totalScoresStored[id];
+  });
+  const scenario1Details = getScoreBundleDetails(attempt.scenario_1_scores);
+  const scenario2Details = getScoreBundleDetails(attempt.scenario_2_scores);
+  const scenario3Details = getScoreBundleDetails(attempt.scenario_3_scores);
+  const moment4Bundle = getMomentScoreBundle(attempt, 4);
+  const moment5Bundle = getMomentScoreBundle(attempt, 5);
+  const moment4Details = getScoreBundleDetails(parseObject(parseObject(attempt.scenario_specific_patterns)?.moment_4_scores));
+  const moment5Details = getScoreBundleDetails(parseObject(parseObject(attempt.scenario_specific_patterns)?.moment_5_scores));
+  const perScenario = [
+    { key: 'scenario_1', label: 'Scenario 1', scores: scenario1Details.scores, summary: buildMomentOrScenarioSummary('Scenario 1', scenario1Details) },
+    { key: 'scenario_2', label: 'Scenario 2', scores: scenario2Details.scores, summary: buildMomentOrScenarioSummary('Scenario 2', scenario2Details) },
+    { key: 'scenario_3', label: 'Scenario 3', scores: scenario3Details.scores, summary: buildMomentOrScenarioSummary('Scenario 3', scenario3Details) },
+    { key: 'moment_4', label: 'Moment 4', scores: moment4Bundle.scores, summary: buildMomentOrScenarioSummary('Moment 4', moment4Details, moment4Bundle.summary) },
+    { key: 'moment_5', label: 'Moment 5', scores: moment5Bundle.scores, summary: buildMomentOrScenarioSummary('Moment 5', moment5Details, moment5Bundle.summary) },
   ];
-  const asym = a.construct_asymmetry as {
-    strongest_construct?: string;
-    weakest_construct?: string;
-    gap?: number;
-    profile_type?: string;
-    user_mean?: number;
-  } | null;
-  const lang = a.language_markers as Record<string, number | undefined> | null;
-  const timings = a.response_timings ?? [];
-
+  const passWord = getPassWord(attempt);
   return (
-    <View style={styles.tabContent}>
-      <Section title="Interview Details">
-        <MetaGrid
-          items={[
-            {
-              label: 'Date',
-              value: a.completed_at
-                ? new Date(a.completed_at).toLocaleString('en-GB')
-                : 'Not completed',
-            },
-            {
-              label: 'Duration',
-              value:
-                a.created_at && a.completed_at
-                  ? formatDuration(a.created_at, a.completed_at)
-                  : '—',
-            },
-            { label: 'Attempt', value: `#${a.attempt_number ?? 1}` },
-            {
-              label: 'Dropout',
-              value: a.dropout_point
-                ? `Scenario ${(a.dropout_point as { scenario?: number }).scenario ?? '?'}`
-                : 'Completed',
-            },
-          ]}
-        />
-      </Section>
+    <ScrollView style={styles.innerTabContent}>
+      <Text style={styles.sectionTitle}>Overall</Text>
+      <View style={styles.metaRow}>
+        <Text style={styles.metaLabel}>Date</Text>
+        <Text style={styles.metaValue}>{formatAttemptDate(attempt)}</Text>
+      </View>
+      <View style={styles.metaRow}>
+        <Text style={styles.metaLabel}>Result</Text>
+        <Text style={[styles.metaValue, { color: getPassColor(passWord), textTransform: 'lowercase' }]}>{passWord}</Text>
+      </View>
+      <View style={styles.metaRow}>
+        <Text style={styles.metaLabel}>Weighted score</Text>
+        <Text style={styles.metaValue}>{formatScoreCell(attempt.weighted_score)}</Text>
+      </View>
 
-      {asym && (
-        <Section title="Profile Shape">
-          <MetaGrid
-            items={[
-              { label: 'Strongest', value: formatConstruct(asym.strongest_construct ?? '') },
-              { label: 'Weakest', value: formatConstruct(asym.weakest_construct ?? '') },
-              { label: 'Gap', value: asym.gap?.toFixed(1) },
-              {
-                label: 'Profile type',
-                value: (asym.profile_type ?? '').replace(/_/g, ' '),
-              },
-              { label: 'User mean', value: asym.user_mean?.toFixed(1) },
-            ]}
-          />
-        </Section>
-      )}
-
-      <Section title="Scores by Scenario">
-        <View style={styles.scenarioScoresRow}>
-          {[1, 2, 3].map((n) => {
-            const s = scenarioScores[n - 1]?.pillarScores;
-            return (
-              <View key={n} style={styles.scenarioCard}>
-                <Text style={styles.scenarioCardTitle}>Scenario {n}</Text>
-                {PILLAR_ROWS.map((p) => (
-                  <View key={p.id} style={styles.scenarioRow}>
-                    <Text style={styles.scenarioRowLabel}>{p.label.split(' ')[0]}</Text>
-                    <Text style={styles.scenarioRowValue}>
-                      {s?.[p.id]?.toFixed(1) ?? '—'}
-                    </Text>
-                  </View>
-                ))}
-              </View>
-            );
-          })}
+      <Text style={styles.sectionTitle}>8 Traits (Total)</Text>
+      {PILLAR_ROWS.map((p) => (
+        <View key={p.id} style={styles.scoreRow}>
+          <Text style={styles.scoreLabel}>{p.label}</Text>
+          <Text style={styles.scoreValue}>
+            {formatScoreCell(totalScores[p.id])}
+            {aggregate.counts[p.id] > 0 && aggregate.counts[p.id] < 2 ? ' *' : ''}
+          </Text>
         </View>
-      </Section>
+      ))}
+      <Text style={styles.blockText}>* score based on limited evidence (single contributing moment)</Text>
 
-      {lang && (
-        <Section title="Language Markers">
-          <MetaGrid
-            items={[
-              {
-                label: 'First person ratio',
-                value: `${Math.round((Number(lang.first_person_ratio) || 0) * 100)}%`,
-              },
-              { label: 'Qualifier count', value: lang.qualifier_count },
-              { label: 'Emotional vocab', value: lang.emotional_vocab_count },
-              { label: 'Accountability phrases', value: lang.accountability_phrases },
-              {
-                label: 'Deflection phrases',
-                value: lang.deflection_phrases,
-                alert: (lang.deflection_phrases ?? 0) > 3,
-              },
-            ]}
-          />
-        </Section>
-      )}
-
-      {timings.length > 0 && (
-        <Section title="Response Timing">
-          <MetaGrid
-            items={[
-              {
-                label: 'Avg latency',
-                value: `${(timings.reduce((s, t) => s + (t.latency_ms ?? 0), 0) / timings.length / 1000).toFixed(1)}s`,
-              },
-              {
-                label: 'Avg response duration',
-                value: `${(timings.reduce((s, t) => s + (t.duration_ms ?? 0), 0) / timings.length / 1000).toFixed(1)}s`,
-              },
-              {
-                label: 'Avg words per response',
-                value: Math.round(
-                  timings.reduce((s, t) => s + (t.word_count ?? 0), 0) / timings.length
-                ),
-              },
-              { label: 'Total responses', value: timings.length },
-            ]}
-          />
-        </Section>
-      )}
-    </View>
+      <Text style={styles.sectionTitle}>Scenario Breakdown</Text>
+      {perScenario.map((item) => (
+        <View key={item.label} style={styles.block}>
+          <Text style={styles.blockTitle}>{item.label}</Text>
+          <Text style={styles.blockText}>{item.summary}</Text>
+          {PILLAR_ROWS.map((p) => (
+            <View key={`${item.label}-${p.id}`} style={styles.scoreRow}>
+              <Text style={styles.scoreLabel}>{p.short}</Text>
+              <Text style={styles.scoreValue}>
+                {markerIsAssessedInSection(item.key, p.id) ? formatScoreCell(item.scores?.[p.id]) : '—'}
+              </Text>
+            </View>
+          ))}
+        </View>
+      ))}
+    </ScrollView>
   );
 }
 
-function ReasoningTab({
-  reasoning: r,
-  scores,
-}: {
-  reasoning: Record<string, unknown> | null;
-  constructs: typeof PILLAR_ROWS;
-  scores: Record<string, number> | null;
-}) {
-  const [expandedConstruct, setExpandedConstruct] = useState<string | null>(null);
-
-  if (!r || (r as { _generationFailed?: boolean })._generationFailed) {
+function ReasoningTab({ attempt }: { attempt: AttemptRow }) {
+  const reasoning = parseObject(attempt.ai_reasoning);
+  if (!reasoning) {
     return (
-      <View style={styles.emptyTab}>
-        <Text style={styles.emptyTabText}>AI reasoning was not generated for this attempt.</Text>
+      <View style={styles.emptyState}>
+        <Text style={styles.emptyText}>AI reasoning is not available for this test.</Text>
       </View>
     );
   }
-
-  const strengths = (r.overall_strengths as string[]) ?? [];
-  const growth = (r.overall_growth_areas as string[]) ?? [];
-  const breakdown = (r.construct_breakdown as Record<string, Record<string, string>>) ?? {};
+  const scenarioObservations = parseObject(reasoning.scenario_observations);
+  const breakdown = parseObject(reasoning.construct_breakdown);
+  const scenarioBundles = [
+    {
+      key: 'scenario_1',
+      label: 'Scenario 1',
+      details: getScoreBundleDetails(attempt.scenario_1_scores),
+    },
+    {
+      key: 'scenario_2',
+      label: 'Scenario 2',
+      details: getScoreBundleDetails(attempt.scenario_2_scores),
+    },
+    {
+      key: 'scenario_3',
+      label: 'Scenario 3',
+      details: getScoreBundleDetails(attempt.scenario_3_scores),
+    },
+    {
+      key: 'moment_4',
+      label: 'Moment 4',
+      details: getScoreBundleDetails(parseObject(parseObject(attempt.scenario_specific_patterns)?.moment_4_scores)),
+    },
+    {
+      key: 'moment_5',
+      label: 'Moment 5',
+      details: getScoreBundleDetails(parseObject(parseObject(attempt.scenario_specific_patterns)?.moment_5_scores)),
+    },
+  ];
 
   return (
-    <View style={styles.tabContent}>
-      <Section title="Overall Summary">
-        <Text style={styles.quoteText}>"{String(r.overall_summary ?? '')}"</Text>
-      </Section>
+    <ScrollView style={styles.innerTabContent}>
+      <Text style={styles.sectionTitle}>Scenario Reasoning</Text>
+      {['scenario_1', 'scenario_2', 'scenario_3'].map((key, idx) => {
+        const obs = parseObject(scenarioObservations?.[key]);
+        return (
+          <View key={key} style={styles.block}>
+            <Text style={styles.blockTitle}>{getString(obs?.name) ?? `Scenario ${idx + 1}`}</Text>
+            <Text style={styles.blockText}>{getString(obs?.what_happened) ?? 'No scenario reasoning recorded.'}</Text>
+            <Text style={styles.blockText}>{getString(obs?.what_it_revealed) ?? ''}</Text>
+          </View>
+        );
+      })}
 
-      <View style={styles.twoCol}>
-        <Section title="Strengths">
-          {strengths.map((s, i) => (
-            <View key={i} style={styles.bulletBlock}>
-              <Text style={styles.bulletText}>{s}</Text>
-            </View>
-          ))}
-        </Section>
-        <Section title="Growth Areas">
-          {growth.map((s, i) => (
-            <View key={i} style={styles.bulletBlockMuted}>
-              <Text style={styles.bulletText}>{s}</Text>
-            </View>
-          ))}
-        </Section>
-      </View>
-
-      <Section title="Construct Breakdown">
-        {PILLAR_ROWS.map((p) => {
-          const data = breakdown[p.constructKey] ?? breakdown[p.id];
-          const score = scores?.[p.id];
-          const isExpanded = expandedConstruct === p.id;
-          return (
-            <View key={p.id} style={styles.constructCard}>
-              <Pressable
-                onPress={() => setExpandedConstruct(isExpanded ? null : p.id)}
-                style={[styles.constructCardHeader, isExpanded && styles.constructCardHeaderOpen]}
-              >
-                <View>
-                  <Text style={styles.constructCardTitle}>{p.label}</Text>
-                  {data?.headline && (
-                    <Text style={styles.constructCardHeadline}>{data.headline}</Text>
-                  )}
-                </View>
-                <View style={styles.constructCardRight}>
-                  <Text
-                    style={[
-                      styles.constructCardScore,
-                      (score ?? 0) >= 7 && styles.scoreHigh,
-                      (score ?? 0) >= 5 && (score ?? 0) < 7 && styles.scoreMid,
-                      (score ?? 0) < 5 && score != null && styles.scoreLow,
-                    ]}
-                  >
-                    {score?.toFixed(1) ?? '—'}
+      <Text style={styles.sectionTitle}>Scenario Pillar Explanations</Text>
+      {scenarioBundles.map((bundle) => {
+        const obs = parseObject(scenarioObservations?.[bundle.key]);
+        const title = getString(obs?.name) ?? bundle.label;
+        const scoredPillars = PILLAR_ROWS.filter(
+          (p) =>
+            markerIsAssessedInSection(bundle.key, p.id) &&
+            coerceScoreNumber(bundle.details.scores?.[p.id]) != null
+        );
+        return (
+          <View key={bundle.key} style={styles.block}>
+            <Text style={styles.blockTitle}>{title}</Text>
+            {scoredPillars.length === 0 ? (
+              <Text style={styles.blockText}>No per-pillar scenario evidence was recorded for this section.</Text>
+            ) : (
+              scoredPillars.map((p) => {
+                const score = formatScoreCell(bundle.details.scores?.[p.id]);
+                const confidence = bundle.details.confidence[p.id] ?? 'unspecified confidence';
+                const evidence = bundle.details.evidence[p.id] ?? 'No specific evidence was captured in this run.';
+                return (
+                  <Text key={`${bundle.key}-${p.id}`} style={styles.blockText}>
+                    {p.label} was rated {score}/10 ({confidence}) because {evidence}.
                   </Text>
-                  <Text style={styles.expandIcon}>{isExpanded ? '▲' : '▼'}</Text>
-                </View>
-              </Pressable>
-              {isExpanded && data && (
-                <View style={styles.constructCardBody}>
-                  {[
-                    { label: 'Summary', content: data.summary },
-                    { label: 'What they did well', content: data.what_you_did_well },
-                    { label: 'Where they struggled', content: data.where_you_struggled },
-                    { label: 'Core pattern', content: data.key_pattern },
-                    { label: 'Nuance & context', content: data.nuance_and_context },
-                    { label: 'Growth edge', content: data.growth_edge },
-                  ]
-                    .filter((f) => f.content)
-                    .map((field, i) => (
-                      <View key={i} style={styles.fieldBlock}>
-                        <Text style={styles.fieldLabel}>{field.label}</Text>
-                        <Text style={styles.fieldValue}>{field.content}</Text>
-                      </View>
-                    ))}
-                </View>
-              )}
-            </View>
-          );
-        })}
-      </Section>
+                );
+              })
+            )}
+          </View>
+        );
+      })}
 
-      {r.cross_scenario_patterns && (
-        <Section title="Cross-Scenario Patterns">
-          <Text style={styles.bodyText}>{String(r.cross_scenario_patterns)}</Text>
-        </Section>
-      )}
-
-      {r.what_a_partner_would_experience && (
-        <Section title="What a Partner Would Experience">
-          <Text style={styles.bodyText}>{String(r.what_a_partner_would_experience)}</Text>
-        </Section>
-      )}
-
-      {r.closing_reflection && (
-        <Section title="Closing Reflection">
-          <Text style={styles.quoteText}>"{String(r.closing_reflection)}"</Text>
-        </Section>
-      )}
-    </View>
+      <Text style={styles.sectionTitle}>Pillar-by-Pillar Reasoning</Text>
+      {PILLAR_ROWS.map((p) => {
+        const pillar = parseObject(breakdown?.[p.id]);
+        return (
+          <View key={p.id} style={styles.block}>
+            <Text style={styles.blockTitle}>{p.label}</Text>
+            <Text style={styles.blockText}>Score: {formatScoreCell(pillar?.score)}</Text>
+            <Text style={styles.blockText}>{getString(pillar?.summary) ?? 'No summary recorded.'}</Text>
+            <Text style={styles.blockText}>{getString(pillar?.where_you_struggled) ?? ''}</Text>
+            <Text style={styles.blockText}>{getString(pillar?.what_you_did_well) ?? ''}</Text>
+          </View>
+        );
+      })}
+    </ScrollView>
   );
 }
 
-function FeedbackTab({ attempt: a }: { attempt: AttemptRow | null; constructs: typeof PILLAR_ROWS }) {
-  if (!a?.user_analysis_rating && !a?.user_analysis_comment) {
+function TranscriptTab({ attempt }: { attempt: AttemptRow }) {
+  const transcript = attempt.transcript ?? [];
+  if (transcript.length === 0) {
     return (
-      <View style={styles.emptyTab}>
-        <Text style={styles.emptyTabText}>No feedback submitted yet.</Text>
+      <View style={styles.emptyState}>
+        <Text style={styles.emptyText}>No transcript available for this test.</Text>
       </View>
     );
   }
-
-  const perConstruct = (a.per_construct_ratings ?? {}) as Record<
-    string,
-    { rating?: number; comment?: string }
-  >;
-
   return (
-    <View style={styles.tabContent}>
-      <Section title="Overall Accuracy Rating">
-        <View style={styles.starRow}>
-          <Text
-            style={[
-              styles.starsLarge,
-              (a.user_analysis_rating ?? 0) >= 4 && styles.starsGreen,
-              (a.user_analysis_rating ?? 0) >= 3 && (a.user_analysis_rating ?? 0) < 4 && styles.starsBlue,
-              (a.user_analysis_rating ?? 0) < 3 && styles.starsRed,
-            ]}
-          >
-            {'★'.repeat(a.user_analysis_rating ?? 0)}
-            {'☆'.repeat(5 - (a.user_analysis_rating ?? 0))}
-          </Text>
-          <Text style={styles.ratingCount}>{a.user_analysis_rating}/5</Text>
-        </View>
-        {a.user_analysis_comment && (
-          <View style={styles.commentBlock}>
-            <Text style={styles.commentText}>"{a.user_analysis_comment}"</Text>
-          </View>
-        )}
-      </Section>
+    <ScrollView style={styles.innerTabContent}>
+      {transcript.map((m, idx) => (
+        <Text key={`${m.role}-${idx}`} style={styles.transcriptLine}>
+          {m.role}: {m.content ?? ''}
+        </Text>
+      ))}
+    </ScrollView>
+  );
+}
 
-      {Object.keys(perConstruct).length > 0 && (
-        <Section title="Per-Construct Feedback">
-          {PILLAR_ROWS.map((p) => {
-            const fb = perConstruct[p.constructKey] ?? perConstruct[p.id];
-            if (!fb?.rating && !fb?.comment) return null;
+function FeedbackTab({ attempt }: { attempt: AttemptRow }) {
+  const perConstruct = parseObject(attempt.per_construct_ratings) ?? {};
+  const hasPerConstruct = Object.keys(perConstruct).length > 0;
+  if (!attempt.user_analysis_comment && attempt.user_analysis_rating == null && !hasPerConstruct) {
+    return (
+      <View style={styles.emptyState}>
+        <Text style={styles.emptyText}>No user feedback submitted for this test.</Text>
+      </View>
+    );
+  }
+  return (
+    <ScrollView style={styles.innerTabContent}>
+      <Text style={styles.sectionTitle}>User Feedback</Text>
+      <Text style={styles.blockText}>Overall rating: {attempt.user_analysis_rating ?? '—'}</Text>
+      <Text style={styles.blockText}>{attempt.user_analysis_comment ?? 'No overall comment.'}</Text>
+      {hasPerConstruct && (
+        <View style={styles.block}>
+          <Text style={styles.blockTitle}>Question-by-question feedback</Text>
+          {Object.entries(perConstruct).map(([key, value]) => {
+            const row = parseObject(value);
+            const label = USER_FEEDBACK_LABELS[key] ?? formatConstruct(key);
+            const comment = getString(row?.comment);
+            const rating = coerceScoreNumber(row?.rating);
             return (
-              <View key={p.id} style={styles.feedbackCard}>
-                <View style={styles.feedbackCardHeader}>
-                  <Text style={styles.feedbackCardTitle}>{p.label}</Text>
-                  {fb.rating != null && (
-                    <Text style={styles.feedbackStars}>
-                      {'★'.repeat(fb.rating)}
-                      {'☆'.repeat(5 - fb.rating)}
-                    </Text>
-                  )}
-                </View>
-                {fb.comment && (
-                  <Text style={styles.feedbackComment}>"{fb.comment}"</Text>
-                )}
+              <View key={key} style={styles.block}>
+                <Text style={styles.blockTitle}>{label}</Text>
+                {rating !== undefined ? <Text style={styles.blockText}>Rating: {rating}</Text> : null}
+                <Text style={styles.blockText}>{comment ?? 'No comment.'}</Text>
               </View>
             );
           })}
-        </Section>
+        </View>
       )}
-    </View>
+    </ScrollView>
   );
 }
 
-function HistoryTab({
-  attempts,
-}: {
-  attempts: AttemptRow[];
-  constructs: typeof PILLAR_ROWS;
-}) {
-  const sorted = [...attempts].sort((a, b) => a.attempt_number - b.attempt_number);
+function UserDetails({ userData, onBack }: { userData: UserGroup; onBack: () => void }) {
+  const attempts = getAttemptsSorted(userData.attempts);
+  const [selectedAttemptId, setSelectedAttemptId] = useState<string | null>(attempts[0]?.id ?? null);
+  const [activeInnerTab, setActiveInnerTab] = useState<'summary' | 'reasoning' | 'transcript' | 'feedback'>('summary');
 
-  return (
-    <View style={styles.tabContent}>
-      {sorted.map((a) => (
-        <View key={a.id} style={styles.historyCard}>
-          <View style={styles.historyCardHeader}>
-            <Text style={styles.historyCardTitle}>Attempt #{a.attempt_number}</Text>
-            <View style={styles.historyCardMeta}>
-              <Text style={styles.historyScore}>
-                {a.weighted_score?.toFixed(1) ?? '—'}
-              </Text>
-              <Text
-                style={[
-                  styles.historyResult,
-                  a.passed && styles.resultPass,
-                  a.passed === false && styles.resultFail,
-                ]}
-              >
-                {a.passed ? 'Pass' : 'Fail'}
-              </Text>
-              <Text style={styles.historyDate}>
-                {a.completed_at
-                  ? new Date(a.completed_at).toLocaleDateString('en-GB')
-                  : 'Incomplete'}
-              </Text>
-            </View>
-          </View>
-          <View style={styles.historyPillars}>
-            {PILLAR_ROWS.map((p) => (
-              <View key={p.id} style={styles.historyPillar}>
-                <Text style={styles.historyPillarValue}>
-                  {a.pillar_scores?.[p.id]?.toFixed(1) ?? '—'}
-                </Text>
-                <Text style={styles.historyPillarLabel}>{p.short}</Text>
-              </View>
-            ))}
-          </View>
-        </View>
-      ))}
-    </View>
-  );
-}
+  useEffect(() => {
+    if (!selectedAttemptId && attempts[0]?.id) setSelectedAttemptId(attempts[0].id);
+  }, [selectedAttemptId, attempts]);
 
-function TranscriptTab({ transcript }: { transcript: Array<{ role: string; content?: string }> | null }) {
-  const [revealed, setRevealed] = useState(false);
-
-  if (!transcript || transcript.length === 0) {
-    return (
-      <View style={styles.emptyTab}>
-        <Text style={styles.emptyTabText}>No transcript available.</Text>
-      </View>
-    );
-  }
-
-  const filtered = transcript.filter(
-    (m) => m.role !== 'error' && !(m as { isWaiting?: boolean }).isWaiting
-  );
-
-  if (!revealed) {
-    return (
-      <View style={styles.transcriptReveal}>
-        <Text style={styles.transcriptRevealTitle}>Full transcript available</Text>
-        <Text style={styles.transcriptRevealSub}>
-          {filtered.length} messages · Long read
-        </Text>
-        <TouchableOpacity style={styles.showTranscriptButton} onPress={() => setRevealed(true)}>
-          <Text style={styles.showTranscriptButtonText}>Show Transcript</Text>
-        </TouchableOpacity>
-      </View>
-    );
-  }
-
-  return (
-    <View style={styles.tabContent}>
-      <View style={styles.transcriptToolbar}>
-        <TouchableOpacity onPress={() => setRevealed(false)}>
-          <Text style={styles.hideTranscriptText}>Hide ↑</Text>
-        </TouchableOpacity>
-      </View>
-      {filtered.map((m, i) => (
-        <View
-          key={i}
-          style={[
-            styles.transcriptBubble,
-            m.role === 'assistant' ? styles.transcriptBubbleAssistant : styles.transcriptBubbleUser,
-          ]}
-        >
-          <Text style={styles.transcriptRole}>
-            {m.role === 'assistant' ? '◆ Aira' : 'User'}
-          </Text>
-          <Text style={styles.transcriptContent}>{m.content ?? ''}</Text>
-        </View>
-      ))}
-    </View>
-  );
-}
-
-// —— User drill-down ——
-function UserDrillDown({
-  userData,
-  onBack,
-}: {
-  userData: UserGroup;
-  onBack: () => void;
-}) {
-  const [activeTab, setActiveTab] = useState<'overview' | 'reasoning' | 'feedback' | 'history' | 'transcript'>('overview');
-  const a = userData.latestAttempt;
-  const r = (a?.ai_reasoning ?? null) as Record<string, unknown> | null;
-
-  const displayName = getUserDisplayName(userData.user);
-
-  if (!userData.latestAttempt) {
-    return (
-      <View style={styles.fullScreen}>
-        <View style={styles.header}>
-          <View style={styles.headerLeft}>
-            <TouchableOpacity onPress={onBack} style={styles.backButton}>
-              <Text style={styles.backButtonText}>←</Text>
-            </TouchableOpacity>
-            <View>
-              <Text style={styles.headerTitle}>{displayName}</Text>
-              <Text style={styles.headerSub}>{userData.user?.email ?? '—'}</Text>
-            </View>
-          </View>
-        </View>
-        <View style={styles.noAttemptEmpty}>
-          <Text style={styles.noAttemptTitle}>No interview yet</Text>
-          <Text style={styles.noAttemptSub}>
-            Joined{' '}
-            {userData.user?.created_at
-              ? new Date(userData.user.created_at).toLocaleDateString('en-GB', {
-                  day: 'numeric',
-                  month: 'long',
-                  year: 'numeric',
-                })
-              : '—'}
-          </Text>
-        </View>
-      </View>
-    );
-  }
-
-  const tabs: { id: typeof activeTab; label: string }[] = [
-    { id: 'overview', label: 'Overview' },
-    { id: 'reasoning', label: 'AI Reasoning' },
-    { id: 'feedback', label: 'User Feedback' },
-    { id: 'history', label: 'Attempt History' },
-    { id: 'transcript', label: 'Transcript' },
-  ];
+  const selectedAttempt = attempts.find((a) => a.id === selectedAttemptId) ?? attempts[0] ?? null;
 
   return (
     <View style={styles.fullScreen}>
       <View style={styles.header}>
-        <View style={styles.headerLeft}>
-          <TouchableOpacity onPress={onBack} style={styles.backButton}>
-            <Text style={styles.backButtonText}>←</Text>
-          </TouchableOpacity>
-          <View>
-            <Text style={styles.headerTitle}>{displayName}</Text>
-            <Text style={styles.headerSub}>
-              {userData.user?.email} · {userData.attempts.length} attempt
-              {userData.attempts.length !== 1 ? 's' : ''}
-            </Text>
+        <TouchableOpacity onPress={onBack}>
+          <Text style={styles.backText}>← Back</Text>
+        </TouchableOpacity>
+        <Text style={styles.headerTitle}>{getUserDisplayName(userData.user)}</Text>
+        <Text style={styles.headerSub}>{userData.user.email ?? '—'}</Text>
+      </View>
+
+      {attempts.length === 0 ? (
+        <View style={styles.emptyState}>
+          <Text style={styles.emptyText}>No tests found for this user.</Text>
+        </View>
+      ) : (
+        <View style={styles.detailsLayout}>
+          <ScrollView style={styles.attemptTabsColumn}>
+            {attempts.map((attempt) => (
+              <TouchableOpacity
+                key={attempt.id}
+                style={[styles.attemptTab, selectedAttempt?.id === attempt.id && styles.attemptTabActive]}
+                onPress={() => {
+                  setSelectedAttemptId(attempt.id);
+                  setActiveInnerTab('summary');
+                }}
+              >
+                <Text style={styles.attemptTabLabel}>{formatAttemptTabLabel(attempt)}</Text>
+              </TouchableOpacity>
+            ))}
+          </ScrollView>
+
+          <View style={styles.detailsPane}>
+            <View style={styles.innerTabsRow}>
+              {[
+                { id: 'summary' as const, label: 'Tab 1: Summary' },
+                { id: 'reasoning' as const, label: 'Tab 2: AI Reasoning' },
+                { id: 'transcript' as const, label: 'Tab 3: Transcript' },
+                { id: 'feedback' as const, label: 'Tab 4: User Feedback' },
+              ].map((t) => (
+                <TouchableOpacity
+                  key={t.id}
+                  style={[styles.innerTab, activeInnerTab === t.id && styles.innerTabActive]}
+                  onPress={() => setActiveInnerTab(t.id)}
+                >
+                  <Text style={[styles.innerTabText, activeInnerTab === t.id && styles.innerTabTextActive]}>{t.label}</Text>
+                </TouchableOpacity>
+              ))}
+            </View>
+
+            {selectedAttempt && activeInnerTab === 'summary' && <SummaryTab attempt={selectedAttempt} />}
+            {selectedAttempt && activeInnerTab === 'reasoning' && <ReasoningTab attempt={selectedAttempt} />}
+            {selectedAttempt && activeInnerTab === 'transcript' && <TranscriptTab attempt={selectedAttempt} />}
+            {selectedAttempt && activeInnerTab === 'feedback' && <FeedbackTab attempt={selectedAttempt} />}
           </View>
         </View>
-        <View
-          style={[
-            styles.badge,
-            a?.passed ? styles.badgePass : styles.badgeFail,
-          ]}
-        >
-          <Text
-            style={[
-              styles.badgeText,
-              a?.passed ? styles.badgeTextPass : styles.badgeTextFail,
-            ]}
-          >
-            {a?.passed === true ? '● Passed' : a?.passed === false ? '● Failed' : 'Incomplete'}
-          </Text>
-        </View>
-      </View>
-
-      <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.scoreStrip}>
-        <View style={styles.scoreCard}>
-          <Text style={styles.scoreCardValue}>
-            {a?.weighted_score?.toFixed(1) ?? '—'}
-          </Text>
-          <Text style={styles.scoreCardLabel}>Overall</Text>
-        </View>
-        {PILLAR_ROWS.map((p) => {
-          const score = a?.pillar_scores?.[p.id];
-          const consistency = (a?.score_consistency as Record<string, { std_dev?: number }> | undefined)?.[p.id];
-          return (
-            <View key={p.id} style={styles.scoreCardSmall}>
-              <Text
-                style={[
-                  styles.scoreCardValueSmall,
-                  (score ?? 0) >= 7 && styles.scoreHigh,
-                  (score ?? 0) >= 5 && (score ?? 0) < 7 && styles.scoreMid,
-                  (score ?? 0) < 5 && score != null && styles.scoreLow,
-                ]}
-              >
-                {score?.toFixed(1) ?? '—'}
-              </Text>
-              <Text style={styles.scoreCardLabelSmall}>{p.label}</Text>
-              {consistency?.std_dev != null && (
-                <Text style={styles.consistencyText}>
-                  σ {consistency.std_dev.toFixed(1)} across scenarios
-                  {consistency.std_dev > 2 && (
-                    <Text style={styles.consistencyWarn}> ⚠ variable</Text>
-                  )}
-                </Text>
-              )}
-            </View>
-          );
-        })}
-      </ScrollView>
-
-      <View style={styles.tabs}>
-        {tabs.map((tab) => (
-          <TouchableOpacity
-            key={tab.id}
-            onPress={() => setActiveTab(tab.id)}
-            style={[styles.tab, activeTab === tab.id && styles.tabActive]}
-          >
-            <Text
-              style={[
-                styles.tabLabel,
-                activeTab === tab.id && styles.tabLabelActive,
-              ]}
-            >
-              {tab.label}
-            </Text>
-          </TouchableOpacity>
-        ))}
-      </View>
-
-      <ScrollView style={styles.tabPane} contentContainerStyle={styles.tabPaneContent}>
-        {activeTab === 'overview' && (
-          <OverviewTab attempt={a} constructs={PILLAR_ROWS} />
-        )}
-        {activeTab === 'reasoning' && (
-          <ReasoningTab reasoning={r} constructs={PILLAR_ROWS} scores={a?.pillar_scores ?? null} />
-        )}
-        {activeTab === 'feedback' && (
-          <FeedbackTab attempt={a} constructs={PILLAR_ROWS} />
-        )}
-        {activeTab === 'history' && (
-          <HistoryTab attempts={userData.attempts} constructs={PILLAR_ROWS} />
-        )}
-        {activeTab === 'transcript' && (
-          <TranscriptTab transcript={a?.transcript ?? null} />
-        )}
-      </ScrollView>
+      )}
     </View>
   );
 }
 
-// —— Main Admin Panel ——
+export function AdminAttemptTabsView({
+  attemptId,
+  userId,
+  showFeedbackTab = true,
+}: {
+  attemptId: string | null;
+  userId?: string;
+  showFeedbackTab?: boolean;
+}) {
+  const [attempt, setAttempt] = useState<AttemptRow | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [activeInnerTab, setActiveInnerTab] = useState<'summary' | 'reasoning' | 'transcript' | 'feedback'>('summary');
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      setLoading(true);
+      try {
+        if (attemptId) {
+          const { data } = await supabase
+            .from('interview_attempts')
+            .select('*')
+            .eq('id', attemptId)
+            .maybeSingle();
+          if (!cancelled) setAttempt((data as AttemptRow | null) ?? null);
+        } else if (userId) {
+          const { data } = await supabase
+            .from('interview_attempts')
+            .select('*')
+            .eq('user_id', userId)
+            .order('created_at', { ascending: false })
+            .limit(1)
+            .maybeSingle();
+          if (!cancelled) setAttempt((data as AttemptRow | null) ?? null);
+        } else {
+          if (!cancelled) setAttempt(null);
+        }
+      } catch {
+        if (!cancelled) setAttempt(null);
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [attemptId, userId]);
+
+  if (loading) {
+    return (
+      <View style={styles.emptyState}>
+        <Text style={styles.emptyText}>Loading test details...</Text>
+      </View>
+    );
+  }
+
+  if (!attempt) {
+    return (
+      <View style={styles.emptyState}>
+        <Text style={styles.emptyText}>No test details available yet.</Text>
+      </View>
+    );
+  }
+
+  return (
+    <View style={{ width: '100%', maxWidth: 980 }}>
+      <View style={styles.innerTabsRow}>
+        {[
+          { id: 'summary' as const, label: 'Tab 1: Summary' },
+          { id: 'reasoning' as const, label: 'Tab 2: AI Reasoning' },
+          { id: 'transcript' as const, label: 'Tab 3: Transcript' },
+          ...(showFeedbackTab ? [{ id: 'feedback' as const, label: 'Tab 4: User Feedback' }] : []),
+        ].map((t) => (
+          <TouchableOpacity
+            key={t.id}
+            style={[styles.innerTab, activeInnerTab === t.id && styles.innerTabActive]}
+            onPress={() => setActiveInnerTab(t.id)}
+          >
+            <Text style={[styles.innerTabText, activeInnerTab === t.id && styles.innerTabTextActive]}>{t.label}</Text>
+          </TouchableOpacity>
+        ))}
+      </View>
+
+      {activeInnerTab === 'summary' && <SummaryTab attempt={attempt} />}
+      {activeInnerTab === 'reasoning' && <ReasoningTab attempt={attempt} />}
+      {activeInnerTab === 'transcript' && <TranscriptTab attempt={attempt} />}
+      {showFeedbackTab && activeInnerTab === 'feedback' && <FeedbackTab attempt={attempt} />}
+    </View>
+  );
+}
+
 export function AdminInterviewDashboard({ onClose }: { onClose: () => void }) {
   const [users, setUsers] = useState<UserGroup[]>([]);
   const [loading, setLoading] = useState(true);
   const [selectedUser, setSelectedUser] = useState<UserGroup | null>(null);
-  const [sortBy, setSortBy] = useState<'date' | 'score' | 'name'>('date');
-  const [filterBy, setFilterBy] = useState<
-    'all' | 'passed' | 'failed' | 'incomplete' | 'no_interview' | 'low_feedback'
-  >('all');
 
   useEffect(() => {
     let cancelled = false;
     (async () => {
       try {
         const data = await fetchAllAdminData();
-        if (!cancelled) {
-          setUsers(data);
-        }
+        if (!cancelled) setUsers(data);
       } catch (err) {
         if (!cancelled) {
           console.error('Admin panel fetch failed:', err);
@@ -949,165 +826,26 @@ export function AdminInterviewDashboard({ onClose }: { onClose: () => void }) {
     };
   }, []);
 
-  if (selectedUser) {
-    return (
-      <UserDrillDown
-        userData={selectedUser}
-        onBack={() => setSelectedUser(null)}
-      />
-    );
-  }
-
-  const totalUsers = users.length;
-  const startedUsers = users.filter((u) => u.attempts.length > 0);
-  const completedUsers = users.filter((u) => u.latestAttempt?.completed_at);
-  const passedCount = completedUsers.filter((u) => u.latestAttempt?.passed === true).length;
-  const passRate =
-    completedUsers.length > 0
-      ? `${Math.round((passedCount / completedUsers.length) * 100)}%`
-      : '—';
-  const dropOffCount = startedUsers.filter((u) => !u.latestAttempt?.completed_at).length;
-  const avgScore =
-    completedUsers.length > 0
-      ? (
-          completedUsers.reduce((s, u) => s + (u.latestAttempt?.weighted_score ?? 0), 0) /
-          completedUsers.length
-        ).toFixed(1)
-      : '—';
-  const lowFeedbackCount = completedUsers.filter(
-    (u) =>
-      u.latestAttempt?.user_analysis_rating != null &&
-      u.latestAttempt.user_analysis_rating <= 2
-  ).length;
-
-  const sorted = [...users]
-    .filter((u) => {
-      if (filterBy === 'passed') return u.latestAttempt?.passed === true;
-      if (filterBy === 'failed') return u.latestAttempt?.passed === false;
-      if (filterBy === 'incomplete')
-        return u.attempts.length > 0 && !u.latestAttempt?.completed_at;
-      if (filterBy === 'no_interview') return u.attempts.length === 0;
-      if (filterBy === 'low_feedback')
-        return (
-          u.latestAttempt?.user_analysis_rating != null &&
-          u.latestAttempt.user_analysis_rating <= 2
-        );
-      return true;
-    })
-    .sort((a, b) => {
-      if (sortBy === 'score')
-        return (b.latestAttempt?.weighted_score ?? 0) - (a.latestAttempt?.weighted_score ?? 0);
-      if (sortBy === 'name') {
-        const na = getUserDisplayName(a.user);
-        const nb = getUserDisplayName(b.user);
-        return na.localeCompare(nb);
-      }
-      const dateA = a.latestAttempt?.created_at ?? a.user?.created_at ?? 0;
-      const dateB = b.latestAttempt?.created_at ?? b.user?.created_at ?? 0;
-      return new Date(dateB).getTime() - new Date(dateA).getTime();
-    });
-
-  const stats = [
-    { label: 'Registered', value: String(totalUsers), alert: false },
-    { label: 'Started', value: String(startedUsers.length), alert: false },
-    { label: 'Completed', value: String(completedUsers.length), alert: false },
-    { label: 'Pass Rate', value: passRate, alert: false },
-    { label: 'Avg Score', value: String(avgScore), alert: false },
-    { label: 'Drop-off', value: String(dropOffCount), alert: dropOffCount > 0 },
-    { label: 'Low Feedback', value: String(lowFeedbackCount), alert: lowFeedbackCount > 0 },
-  ];
+  if (selectedUser) return <UserDetails userData={selectedUser} onBack={() => setSelectedUser(null)} />;
 
   return (
     <View style={styles.fullScreen}>
       <View style={styles.header}>
-        <Text style={styles.headerTitleMain}>Admin Panel</Text>
+        <Text style={styles.headerTitle}>Admin Panel</Text>
         <TouchableOpacity onPress={onClose}>
-          <Text style={styles.headerBackLink}>← Back to Interview</Text>
+          <Text style={styles.backText}>← Back to interview</Text>
         </TouchableOpacity>
       </View>
-
-      <ScrollView style={styles.body} contentContainerStyle={styles.bodyContent}>
-        <View style={styles.statsGrid}>
-          {stats.map((stat, i) => (
-            <View
-              key={i}
-              style={[styles.statCard, stat.alert && styles.statCardAlert]}
-            >
-              <Text style={[styles.statValue, stat.alert && styles.statValueAlert]}>
-                {stat.value}
-              </Text>
-              <Text style={styles.statLabel}>{stat.label}</Text>
-            </View>
-          ))}
-        </View>
-
-        <View style={styles.filterRow}>
-          <Text style={styles.filterLabel}>Filter:</Text>
-          {[
-            { key: 'all' as const, label: 'all' },
-            { key: 'passed' as const, label: 'passed' },
-            { key: 'failed' as const, label: 'failed' },
-            { key: 'incomplete' as const, label: 'incomplete' },
-            { key: 'no_interview' as const, label: 'no interview' },
-            { key: 'low_feedback' as const, label: 'low feedback' },
-          ].map(({ key, label }) => (
-            <TouchableOpacity
-              key={key}
-              onPress={() => setFilterBy(key)}
-              style={[styles.filterChip, filterBy === key && styles.filterChipActive]}
-            >
-              <Text
-                style={[styles.filterChipText, filterBy === key && styles.filterChipTextActive]}
-              >
-                {label}
-              </Text>
-            </TouchableOpacity>
-          ))}
-          <View style={{ flex: 1 }} />
-          <Text style={styles.filterLabel}>Sort:</Text>
-          {(['date', 'score', 'name'] as const).map((s) => (
-            <TouchableOpacity
-              key={s}
-              onPress={() => setSortBy(s)}
-              style={[styles.sortChip, sortBy === s && styles.sortChipActive]}
-            >
-              <Text style={[styles.sortChipText, sortBy === s && styles.sortChipTextActive]}>
-                {s}
-              </Text>
-            </TouchableOpacity>
-          ))}
-        </View>
-
-        <View style={styles.table}>
-          <View style={styles.tableHeader}>
-            <Text style={styles.tableHeaderCell}>User</Text>
-            <Text style={styles.tableHeaderCell}>Score</Text>
-            <Text style={styles.tableHeaderCell}>Result</Text>
-            <Text style={styles.tableHeaderCell}>Constructs</Text>
-            <Text style={styles.tableHeaderCell}>Attempts</Text>
-            <Text style={styles.tableHeaderCell}>Feedback</Text>
-            <Text style={[styles.tableHeaderCell, styles.tableHeaderCellLast]} />
-          </View>
-
-          {loading ? (
-            <View style={styles.tableLoading}>
-              <Text style={styles.tableLoadingText}>Loading...</Text>
-            </View>
-          ) : sorted.length === 0 ? (
-            <View style={styles.tableLoading}>
-              <Text style={styles.tableLoadingText}>No users match.</Text>
-            </View>
-          ) : (
-            sorted.map((userData, i) => (
-              <UserRow
-                key={userData.user?.id ?? i}
-                userData={userData}
-                onPress={() => setSelectedUser(userData)}
-                isEven={i % 2 === 0}
-              />
-            ))
-          )}
-        </View>
+      <ScrollView contentContainerStyle={styles.cardsContainer}>
+        {loading ? (
+          <Text style={styles.emptyText}>Loading users...</Text>
+        ) : users.length === 0 ? (
+          <Text style={styles.emptyText}>No users found.</Text>
+        ) : (
+          users.map((userData) => (
+            <UserCard key={userData.user.id} userData={userData} onPress={() => setSelectedUser(userData)} />
+          ))
+        )}
       </ScrollView>
     </View>
   );
@@ -1119,662 +857,194 @@ const styles = StyleSheet.create({
     backgroundColor: '#05060D',
   },
   header: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    paddingHorizontal: 32,
-    paddingVertical: 20,
     borderBottomWidth: 1,
     borderBottomColor: 'rgba(82,142,220,0.12)',
-    backgroundColor: '#05060D',
-  },
-  headerLeft: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 16,
-  },
-  headerTitleMain: {
-    fontFamily: Platform.OS === 'web' ? "'Cormorant Garamond', serif" : undefined,
-    fontSize: 22,
-    fontWeight: '300',
-    color: '#C8E4FF',
-    letterSpacing: 1,
+    paddingHorizontal: 24,
+    paddingVertical: 16,
+    gap: 4,
   },
   headerTitle: {
-    fontFamily: Platform.OS === 'web' ? "'Cormorant Garamond', serif" : undefined,
+    color: '#C8E4FF',
     fontSize: 22,
     fontWeight: '300',
-    color: '#C8E4FF',
+    fontFamily: Platform.OS === 'web' ? "'Cormorant Garamond', serif" : undefined,
   },
   headerSub: {
-    fontSize: 11,
-    fontWeight: '300',
-    color: '#3D5470',
-    marginTop: 2,
-  },
-  headerBackLink: {
-    color: '#3D5470',
-    fontSize: 13,
-    fontWeight: '300',
-    letterSpacing: 1,
-  },
-  backButton: {
-    padding: 8,
-  },
-  backButtonText: {
-    color: '#3D5470',
-    fontSize: 18,
-  },
-  noAttemptEmpty: {
-    flex: 1,
-    justifyContent: 'center',
-    alignItems: 'center',
-    gap: 12,
-  },
-  noAttemptTitle: {
-    fontFamily: Platform.OS === 'web' ? "'Cormorant Garamond', serif" : undefined,
-    fontSize: 22,
-    fontWeight: '300',
     color: '#7A9ABE',
+    fontSize: 12,
   },
-  noAttemptSub: {
-    fontSize: 11,
-    fontWeight: '300',
-    color: '#3D5470',
-    letterSpacing: 0.5,
+  backText: {
+    color: '#7A9ABE',
+    fontSize: 12,
   },
-  badge: {
-    paddingVertical: 8,
-    paddingHorizontal: 20,
-    borderRadius: 20,
-  },
-  badgePass: {
-    backgroundColor: 'rgba(42,140,106,0.1)',
-    borderWidth: 1,
-    borderColor: 'rgba(42,140,106,0.3)',
-  },
-  badgeFail: {
-    backgroundColor: 'rgba(232,122,122,0.1)',
-    borderWidth: 1,
-    borderColor: 'rgba(232,122,122,0.3)',
-  },
-  badgeText: {
-    fontSize: 11,
-    fontWeight: '300',
-    letterSpacing: 2,
-    textTransform: 'uppercase',
-  },
-  badgeTextPass: { color: '#2A8C6A' },
-  badgeTextFail: { color: '#E87A7A' },
-  body: { flex: 1 },
-  bodyContent: { padding: 28, paddingHorizontal: 32 },
-  statsGrid: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
+  cardsContainer: {
+    padding: 20,
     gap: 12,
-    marginBottom: 32,
   },
-  statCard: {
-    flex: 1,
-    minWidth: 100,
-    backgroundColor: 'rgba(13,17,32,0.9)',
+  userCard: {
+    backgroundColor: 'rgba(13,17,32,0.8)',
     borderWidth: 1,
     borderColor: 'rgba(82,142,220,0.12)',
     borderRadius: 10,
     padding: 14,
-    paddingHorizontal: 18,
   },
-  statCardAlert: {
-    borderColor: 'rgba(232,122,122,0.3)',
+  userCardPressed: {
+    backgroundColor: 'rgba(30,111,217,0.08)',
   },
-  statValue: {
-    fontFamily: Platform.OS === 'web' ? "'Cormorant Garamond', serif" : undefined,
-    fontSize: 28,
-    fontWeight: '300',
-    color: '#C8E4FF',
-    marginBottom: 4,
-  },
-  statValueAlert: { color: '#E87A7A' },
-  statLabel: {
-    fontSize: 9,
-    fontWeight: '300',
-    letterSpacing: 2,
-    textTransform: 'uppercase',
-    color: '#3D5470',
-  },
-  filterRow: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    alignItems: 'center',
-    gap: 12,
-    marginBottom: 20,
-  },
-  filterLabel: {
-    fontSize: 9,
-    letterSpacing: 2,
-    textTransform: 'uppercase',
-    color: '#3D5470',
-    fontWeight: '300',
-  },
-  filterChip: {
-    paddingVertical: 5,
-    paddingHorizontal: 12,
-    borderRadius: 20,
-    borderWidth: 1,
-    borderColor: 'rgba(82,142,220,0.12)',
-  },
-  filterChipActive: {
-    backgroundColor: 'rgba(30,111,217,0.15)',
-    borderColor: 'rgba(82,142,220,0.4)',
-  },
-  filterChipText: {
-    color: '#3D5470',
-    fontSize: 10,
-    fontWeight: '300',
-    letterSpacing: 1.5,
-    textTransform: 'uppercase',
-  },
-  filterChipTextActive: { color: '#5BA8E8' },
-  sortChip: {
-    paddingVertical: 5,
-    paddingHorizontal: 12,
-    borderRadius: 20,
-    borderWidth: 1,
-    borderColor: 'rgba(82,142,220,0.08)',
-  },
-  sortChipActive: {
-    backgroundColor: 'rgba(30,111,217,0.1)',
-    borderColor: 'rgba(82,142,220,0.3)',
-  },
-  sortChipText: {
-    color: '#3D5470',
-    fontSize: 10,
-    fontWeight: '300',
-    letterSpacing: 1.5,
-    textTransform: 'uppercase',
-  },
-  sortChipTextActive: { color: '#5BA8E8' },
-  table: {
-    borderWidth: 1,
-    borderColor: 'rgba(82,142,220,0.12)',
-    borderRadius: 12,
-    overflow: 'hidden',
-  },
-  tableHeader: {
-    flexDirection: 'row',
-    paddingVertical: 10,
-    paddingHorizontal: 20,
-    backgroundColor: 'rgba(13,17,32,0.8)',
-    borderBottomWidth: 1,
-    borderBottomColor: 'rgba(82,142,220,0.1)',
-  },
-  tableHeaderCell: {
-    flex: 1,
-    fontSize: 9,
-    fontWeight: '300',
-    letterSpacing: 2,
-    textTransform: 'uppercase',
-    color: '#3D5470',
-  },
-  tableHeaderCellLast: { flex: 0, width: 40 },
-  tableLoading: {
-    padding: 40,
-    alignItems: 'center',
-  },
-  tableLoadingText: {
-    color: '#3D5470',
-    fontSize: 13,
-    fontWeight: '300',
-  },
-  userRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingVertical: 14,
-    paddingHorizontal: 20,
-    borderBottomWidth: 1,
-    borderBottomColor: 'rgba(82,142,220,0.06)',
-  },
-  userRowEven: { backgroundColor: 'rgba(13,17,32,0.4)' },
-  userRowPressed: { backgroundColor: 'rgba(30,111,217,0.06)' },
-  userRowCol1: { flex: 2 },
-  userRowCol2: { flex: 1 },
-  userRowCol3: { flex: 1 },
-  userRowCol4: { flex: 1.5, flexDirection: 'row', flexWrap: 'wrap', gap: 6 },
-  userRowCol5: { flex: 1 },
-  userRowCol6: { flex: 1 },
-  userRowCol7: { flex: 0, width: 40, alignItems: 'flex-end' },
-  userRowName: {
-    fontFamily: Platform.OS === 'web' ? "'Cormorant Garamond', serif" : undefined,
-    fontSize: 16,
-    fontWeight: '400',
+  userCardName: {
     color: '#E8F0F8',
-    marginBottom: 2,
-  },
-  userRowEmail: { fontSize: 11, fontWeight: '300', color: '#3D5470' },
-  userRowDate: { fontSize: 10, fontWeight: '300', color: '#3D5470', marginTop: 2 },
-  userRowScore: {
+    fontSize: 18,
     fontFamily: Platform.OS === 'web' ? "'Cormorant Garamond', serif" : undefined,
-    fontSize: 24,
-    fontWeight: '300',
   },
-  userRowScoreHigh: { color: '#C8E4FF' },
-  userRowScoreMid: { color: '#7A9ABE' },
-  userRowScoreLow: { color: '#E87A7A' },
-  userRowResult: {
-    fontSize: 10,
-    fontWeight: '300',
-    letterSpacing: 1.5,
-    textTransform: 'uppercase',
-    color: '#3D5470',
-  },
-  userRowResultPass: { color: '#2A8C6A' },
-  userRowResultFail: { color: '#E87A7A' },
-  constructCell: { alignItems: 'center', gap: 2 },
-  constructLabel: { fontSize: 10, fontWeight: '300', color: '#3D5470' },
-  constructScore: {
-    fontFamily: Platform.OS === 'web' ? "'Cormorant Garamond', serif" : undefined,
-    fontSize: 14,
-    fontWeight: '300',
-    color: '#C8E4FF',
-  },
-  constructScoreHigh: { color: '#C8E4FF' },
-  constructScoreMid: { color: '#7A9ABE' },
-  constructScoreLow: { color: '#E87A7A' },
-  userRowAttempts: { fontSize: 13, fontWeight: '300', color: '#7A9ABE' },
-  userRowRuns: { color: '#3D5470', fontSize: 10 },
-  feedbackCell: { flexDirection: 'row', alignItems: 'center', gap: 4 },
-  stars: {
-    fontFamily: Platform.OS === 'web' ? "'Cormorant Garamond', serif" : undefined,
-    fontSize: 14,
-    fontWeight: '300',
+  userCardEmail: {
     color: '#7A9ABE',
+    fontSize: 12,
+    marginTop: 2,
   },
-  starsLow: { color: '#E87A7A' },
-  lowFeedbackBadge: { fontSize: 8, color: '#E87A7A', letterSpacing: 1 },
-  noFeedback: { color: '#3D5470', fontSize: 11 },
-  arrow: { color: '#3D5470', fontSize: 16 },
-  scoreStrip: {
-    flexGrow: 0,
-    paddingVertical: 20,
-    paddingHorizontal: 32,
+  userCardMetaRow: {
+    marginTop: 10,
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+  },
+  userCardStatus: {
+    fontSize: 13,
+    fontWeight: '600',
+    textTransform: 'lowercase',
+  },
+  userCardTests: {
+    color: '#7A9ABE',
+    fontSize: 12,
+  },
+  detailsLayout: {
+    flex: 1,
+    flexDirection: 'row',
+  },
+  attemptTabsColumn: {
+    width: '25%',
+    minWidth: 220,
+    borderRightWidth: 1,
+    borderRightColor: 'rgba(82,142,220,0.12)',
+    backgroundColor: 'rgba(13,17,32,0.6)',
+    alignSelf: 'stretch',
+  },
+  attemptTab: {
+    paddingVertical: 14,
+    paddingHorizontal: 12,
     borderBottomWidth: 1,
     borderBottomColor: 'rgba(82,142,220,0.08)',
   },
-  scoreCard: {
-    backgroundColor: 'rgba(13,17,32,0.9)',
-    borderWidth: 1,
-    borderColor: 'rgba(82,142,220,0.15)',
-    borderRadius: 10,
-    paddingVertical: 14,
-    paddingHorizontal: 20,
-    minWidth: 100,
-    alignItems: 'center',
-    marginRight: 16,
+  attemptTabActive: {
+    backgroundColor: 'rgba(30,111,217,0.14)',
   },
-  scoreCardValue: {
-    fontFamily: Platform.OS === 'web' ? "'Cormorant Garamond', serif" : undefined,
-    fontSize: 32,
-    fontWeight: '300',
+  attemptTabLabel: {
     color: '#C8E4FF',
-  },
-  scoreCardLabel: {
-    fontSize: 9,
-    letterSpacing: 2,
-    textTransform: 'uppercase',
-    color: '#3D5470',
-    marginTop: 4,
-  },
-  scoreCardSmall: {
-    backgroundColor: 'rgba(13,17,32,0.9)',
-    borderWidth: 1,
-    borderColor: 'rgba(82,142,220,0.1)',
-    borderRadius: 10,
-    paddingVertical: 14,
-    paddingHorizontal: 16,
-    minWidth: 120,
-    marginRight: 16,
-  },
-  scoreCardValueSmall: {
-    fontFamily: Platform.OS === 'web' ? "'Cormorant Garamond', serif" : undefined,
-    fontSize: 26,
-    fontWeight: '300',
-  },
-  scoreHigh: { color: '#C8E4FF' },
-  scoreMid: { color: '#7A9ABE' },
-  scoreLow: { color: '#E87A7A' },
-  scoreCardLabelSmall: { fontSize: 10, fontWeight: '300', color: '#7A9ABE', marginTop: 2 },
-  consistencyText: { fontSize: 9, color: '#3D5470', marginTop: 4 },
-  consistencyWarn: { color: '#C9A96E' },
-  tabs: {
-    flexDirection: 'row',
-    paddingHorizontal: 32,
-    borderBottomWidth: 1,
-    borderBottomColor: 'rgba(82,142,220,0.1)',
-  },
-  tab: {
-    paddingVertical: 14,
-    paddingHorizontal: 20,
-    borderBottomWidth: 2,
-    borderBottomColor: 'transparent',
-  },
-  tabActive: { borderBottomColor: '#1E6FD9' },
-  tabLabel: {
-    fontSize: 11,
-    fontWeight: '300',
-    letterSpacing: 1.5,
-    textTransform: 'uppercase',
-    color: '#3D5470',
-  },
-  tabLabelActive: { color: '#5BA8E8' },
-  tabPane: { flex: 1 },
-  tabPaneContent: { padding: 28, paddingHorizontal: 32, maxWidth: 900 },
-  section: { marginBottom: 24 },
-  sectionLabel: {
-    fontSize: 9,
-    fontWeight: '300',
-    letterSpacing: 2.5,
-    textTransform: 'uppercase',
-    color: '#3D5470',
-    marginBottom: 14,
-  },
-  metaGrid: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: 10,
-  },
-  metaGridItem: {
-    paddingVertical: 10,
-    paddingHorizontal: 14,
-    backgroundColor: 'rgba(13,17,32,0.6)',
-    borderWidth: 1,
-    borderColor: 'rgba(82,142,220,0.08)',
-    borderRadius: 8,
-    minWidth: 120,
-  },
-  metaGridItemAlert: { borderColor: 'rgba(232,122,122,0.2)' },
-  metaGridLabel: {
-    fontSize: 9,
-    letterSpacing: 1.5,
-    textTransform: 'uppercase',
-    color: '#3D5470',
-    marginBottom: 4,
-  },
-  metaGridLabelAlert: { color: '#E87A7A' },
-  metaGridValue: {
-    fontFamily: Platform.OS === 'web' ? "'Cormorant Garamond', serif" : undefined,
-    fontSize: 16,
-    fontWeight: '300',
-    color: '#C8E4FF',
-  },
-  metaGridValueAlert: { color: '#E87A7A' },
-  scenarioScoresRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 12 },
-  scenarioCard: {
-    flex: 1,
-    minWidth: 100,
-    backgroundColor: 'rgba(13,17,32,0.6)',
-    borderWidth: 1,
-    borderColor: 'rgba(82,142,220,0.1)',
-    borderRadius: 10,
-    padding: 16,
-  },
-  scenarioCardTitle: {
-    fontSize: 9,
-    letterSpacing: 2,
-    textTransform: 'uppercase',
-    color: '#3D5470',
-    marginBottom: 12,
-  },
-  scenarioRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    marginBottom: 6,
-  },
-  scenarioRowLabel: { fontSize: 11, color: '#7A9ABE' },
-  scenarioRowValue: {
-    fontFamily: Platform.OS === 'web' ? "'Cormorant Garamond', serif" : undefined,
-    fontSize: 14,
-    color: '#C8E4FF',
-  },
-  twoCol: { flexDirection: 'row', flexWrap: 'wrap', gap: 16 },
-  bulletBlock: {
-    marginBottom: 10,
-    paddingLeft: 12,
-    borderLeftWidth: 2,
-    borderLeftColor: '#1E6FD9',
-  },
-  bulletBlockMuted: {
-    marginBottom: 10,
-    paddingLeft: 12,
-    borderLeftWidth: 2,
-    borderLeftColor: 'rgba(82,142,220,0.3)',
-  },
-  bulletText: { fontSize: 13, fontWeight: '300', color: '#7A9ABE', lineHeight: 22 },
-  quoteText: {
-    fontFamily: Platform.OS === 'web' ? "'Cormorant Garamond', serif" : undefined,
-    fontSize: 17,
-    fontWeight: '300',
-    fontStyle: 'italic',
-    lineHeight: 26,
-    color: '#C8E4FF',
-  },
-  bodyText: { fontSize: 13, fontWeight: '300', color: '#7A9ABE', lineHeight: 22 },
-  constructCard: {
-    marginBottom: 8,
-    borderWidth: 1,
-    borderColor: 'rgba(82,142,220,0.1)',
-    borderRadius: 10,
-    overflow: 'hidden',
-  },
-  constructCardHeader: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    paddingVertical: 14,
-    paddingHorizontal: 20,
-    backgroundColor: 'rgba(13,17,32,0.6)',
-  },
-  constructCardHeaderOpen: { backgroundColor: 'rgba(30,111,217,0.06)' },
-  constructCardTitle: {
-    fontFamily: Platform.OS === 'web' ? "'Cormorant Garamond', serif" : undefined,
-    fontSize: 17,
-    fontWeight: '400',
-    color: '#E8F0F8',
-  },
-  constructCardHeadline: {
     fontSize: 12,
-    fontWeight: '300',
-    color: '#7A9ABE',
-    marginLeft: 12,
-    fontStyle: 'italic',
+    letterSpacing: 0.3,
   },
-  constructCardRight: { flexDirection: 'row', alignItems: 'center', gap: 12 },
-  constructCardScore: {
-    fontFamily: Platform.OS === 'web' ? "'Cormorant Garamond', serif" : undefined,
-    fontSize: 22,
-    fontWeight: '300',
+  detailsPane: {
+    flex: 1,
   },
-  expandIcon: { color: '#3D5470', fontSize: 16 },
-  constructCardBody: {
-    padding: 20,
-    backgroundColor: 'rgba(5,6,13,0.5)',
+  innerTabsRow: {
+    flexDirection: 'row',
+    borderBottomWidth: 1,
+    borderBottomColor: 'rgba(82,142,220,0.12)',
+    paddingHorizontal: 10,
+    paddingVertical: 8,
+    gap: 6,
   },
-  fieldBlock: { marginBottom: 16, paddingLeft: 14, borderLeftWidth: 2, borderLeftColor: 'rgba(82,142,220,0.2)' },
-  fieldLabel: {
-    fontSize: 9,
-    letterSpacing: 2,
-    textTransform: 'uppercase',
-    color: '#3D5470',
-    marginBottom: 4,
-  },
-  fieldValue: { fontSize: 13, fontWeight: '300', color: '#7A9ABE', lineHeight: 22 },
-  emptyTab: { padding: 40, alignItems: 'center' },
-  emptyTabText: { color: '#3D5470', fontSize: 13, fontWeight: '300' },
-  starRow: { flexDirection: 'row', alignItems: 'center', gap: 16 },
-  starsLarge: {
-    fontFamily: Platform.OS === 'web' ? "'Cormorant Garamond', serif" : undefined,
-    fontSize: 32,
-    fontWeight: '300',
-  },
-  starsGreen: { color: '#2A8C6A' },
-  starsBlue: { color: '#C8E4FF' },
-  starsRed: { color: '#E87A7A' },
-  ratingCount: { fontSize: 13, fontWeight: '300', color: '#7A9ABE' },
-  commentBlock: {
-    marginTop: 16,
-    padding: 16,
-    backgroundColor: 'rgba(13,17,32,0.6)',
+  innerTab: {
+    flex: 1,
     borderWidth: 1,
-    borderColor: 'rgba(82,142,220,0.1)',
-    borderRadius: 10,
+    borderColor: 'rgba(82,142,220,0.18)',
+    borderRadius: 8,
+    paddingHorizontal: 10,
+    paddingVertical: 7,
+    alignItems: 'center',
   },
-  commentText: {
-    fontFamily: Platform.OS === 'web' ? "'Cormorant Garamond', serif" : undefined,
-    fontSize: 16,
-    fontWeight: '300',
-    fontStyle: 'italic',
+  innerTabActive: {
+    backgroundColor: 'rgba(30,111,217,0.16)',
+    borderColor: 'rgba(82,142,220,0.4)',
+  },
+  innerTabText: {
+    color: '#7A9ABE',
+    fontSize: 11,
+  },
+  innerTabTextActive: {
     color: '#C8E4FF',
-    lineHeight: 24,
   },
-  feedbackCard: {
-    marginBottom: 16,
-    padding: 16,
-    backgroundColor: 'rgba(13,17,32,0.6)',
-    borderWidth: 1,
-    borderColor: 'rgba(82,142,220,0.08)',
-    borderRadius: 10,
+  innerTabContent: {
+    flex: 1,
+    padding: 14,
   },
-  feedbackCardHeader: { flexDirection: 'row', justifyContent: 'space-between', marginBottom: 8 },
-  feedbackCardTitle: {
-    fontFamily: Platform.OS === 'web' ? "'Cormorant Garamond', serif" : undefined,
-    fontSize: 16,
-    fontWeight: '400',
-    color: '#E8F0F8',
-  },
-  feedbackStars: {
-    fontFamily: Platform.OS === 'web' ? "'Cormorant Garamond', serif" : undefined,
+  sectionTitle: {
+    color: '#C8E4FF',
     fontSize: 14,
-    color: '#7A9ABE',
+    marginTop: 4,
+    marginBottom: 8,
+    letterSpacing: 0.3,
   },
-  feedbackComment: {
-    fontSize: 13,
-    fontWeight: '300',
-    color: '#7A9ABE',
-    lineHeight: 22,
-    fontStyle: 'italic',
-  },
-  historyCard: {
-    padding: 20,
-    backgroundColor: 'rgba(13,17,32,0.6)',
-    borderWidth: 1,
-    borderColor: 'rgba(82,142,220,0.1)',
-    borderRadius: 10,
-    marginBottom: 16,
-  },
-  historyCardHeader: {
+  metaRow: {
     flexDirection: 'row',
     justifyContent: 'space-between',
-    marginBottom: 12,
+    paddingVertical: 5,
+    borderBottomWidth: 1,
+    borderBottomColor: 'rgba(82,142,220,0.08)',
   },
-  historyCardTitle: {
-    fontFamily: Platform.OS === 'web' ? "'Cormorant Garamond', serif" : undefined,
-    fontSize: 17,
-    fontWeight: '400',
+  metaLabel: {
+    color: '#7A9ABE',
+    fontSize: 12,
+  },
+  metaValue: {
     color: '#E8F0F8',
+    fontSize: 12,
   },
-  historyCardMeta: { flexDirection: 'row', gap: 12, alignItems: 'center' },
-  historyScore: {
-    fontFamily: Platform.OS === 'web' ? "'Cormorant Garamond', serif" : undefined,
-    fontSize: 22,
-    fontWeight: '300',
+  scoreRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    paddingVertical: 4,
+  },
+  scoreLabel: {
+    color: '#7A9ABE',
+    fontSize: 12,
+  },
+  scoreValue: {
     color: '#C8E4FF',
+    fontSize: 12,
   },
-  historyResult: {
-    fontSize: 10,
-    letterSpacing: 1.5,
-    textTransform: 'uppercase',
-  },
-  resultPass: { color: '#2A8C6A' },
-  resultFail: { color: '#E87A7A' },
-  historyDate: { fontSize: 11, fontWeight: '300', color: '#3D5470' },
-  historyPillars: { flexDirection: 'row', gap: 16 },
-  historyPillar: { alignItems: 'center' },
-  historyPillarValue: {
-    fontFamily: Platform.OS === 'web' ? "'Cormorant Garamond', serif" : undefined,
-    fontSize: 16,
-    fontWeight: '300',
-    color: '#7A9ABE',
-  },
-  historyPillarLabel: {
-    fontSize: 9,
-    letterSpacing: 1,
-    color: '#3D5470',
-    textTransform: 'uppercase',
-  },
-  transcriptReveal: {
-    alignItems: 'center',
-    paddingVertical: 60,
-  },
-  transcriptRevealTitle: {
-    fontFamily: Platform.OS === 'web' ? "'Cormorant Garamond', serif" : undefined,
-    fontSize: 18,
-    fontWeight: '300',
-    color: '#7A9ABE',
-    marginBottom: 8,
-  },
-  transcriptRevealSub: {
-    fontSize: 11,
-    fontWeight: '300',
-    color: '#3D5470',
-    marginBottom: 24,
-  },
-  showTranscriptButton: {
-    paddingVertical: 10,
-    paddingHorizontal: 24,
-    borderWidth: 1,
-    borderColor: 'rgba(82,142,220,0.2)',
-    borderRadius: 8,
-  },
-  showTranscriptButtonText: {
-    fontSize: 10,
-    fontWeight: '300',
-    letterSpacing: 2,
-    textTransform: 'uppercase',
-    color: '#5BA8E8',
-  },
-  transcriptToolbar: { flexDirection: 'row', justifyContent: 'flex-end', marginBottom: 8 },
-  hideTranscriptText: {
-    fontSize: 10,
-    letterSpacing: 2,
-    textTransform: 'uppercase',
-    color: '#3D5470',
-  },
-  transcriptBubble: {
-    paddingVertical: 10,
-    paddingHorizontal: 16,
-    borderRadius: 8,
-    marginBottom: 8,
-  },
-  transcriptBubbleAssistant: {
-    backgroundColor: 'rgba(13,17,32,0.6)',
-    borderWidth: 1,
-    borderColor: 'rgba(82,142,220,0.08)',
-  },
-  transcriptBubbleUser: {
-    backgroundColor: 'rgba(30,111,217,0.05)',
+  block: {
+    marginTop: 10,
+    padding: 10,
     borderWidth: 1,
     borderColor: 'rgba(82,142,220,0.12)',
+    borderRadius: 8,
+    backgroundColor: 'rgba(13,17,32,0.5)',
   },
-  transcriptRole: {
-    fontSize: 9,
-    letterSpacing: 2,
-    textTransform: 'uppercase',
-    color: '#5BA8E8',
+  blockTitle: {
+    color: '#C8E4FF',
+    fontSize: 13,
+    marginBottom: 6,
+  },
+  blockText: {
+    color: '#7A9ABE',
+    fontSize: 12,
+    lineHeight: 18,
     marginBottom: 4,
   },
-  transcriptContent: {
-    fontSize: 13,
-    fontWeight: '300',
+  transcriptLine: {
     color: '#E8F0F8',
-    lineHeight: 22,
+    fontSize: 12,
+    lineHeight: 18,
+    marginBottom: 6,
+  },
+  emptyState: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    padding: 24,
+  },
+  emptyText: {
+    color: '#7A9ABE',
+    fontSize: 13,
   },
 });

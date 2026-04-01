@@ -14,6 +14,9 @@ const locationService = new LocationPermissionService();
 
 export const OnboardingLocationScreen: React.FC<{ navigation: any; userId: string }> = ({ navigation, userId }) => {
   const { state, updateStep, isLoading, currentStep, totalSteps, canGoBack } = useOnboarding(userId);
+  const profileLog = (...args: unknown[]) => {
+    if (__DEV__) console.log('[OnboardingLocation]', ...args);
+  };
   const [permissionGranted, setPermissionGranted] = useState(false);
   const [locationLoading, setLocationLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -50,6 +53,7 @@ export const OnboardingLocationScreen: React.FC<{ navigation: any; userId: strin
   };
 
   const getLocation = async () => {
+    profileLog('getLocation start', { userId, currentStep });
     setLocationLoading(true);
     setError(null);
     try {
@@ -58,8 +62,10 @@ export const OnboardingLocationScreen: React.FC<{ navigation: any; userId: strin
         step: currentStep + 1,
         update: { location },
       });
+      profileLog('getLocation success', { hasLabel: !!location.label });
       navigation.navigate('OnboardingPhotos');
     } catch (err) {
+      profileLog('getLocation error', { error: err instanceof Error ? err.message : String(err) });
       setError(err instanceof Error ? err.message : 'Failed to get location');
     } finally {
       setLocationLoading(false);
@@ -87,6 +93,17 @@ export const OnboardingLocationScreen: React.FC<{ navigation: any; userId: strin
   };
 
   const hasLocation = !!state.location;
+
+  useEffect(() => {
+    profileLog('ui flags', {
+      permissionGranted,
+      locationLoading,
+      isLoading,
+      hasLocation,
+      error,
+      currentStep,
+    });
+  }, [permissionGranted, locationLoading, isLoading, hasLocation, error, currentStep]);
 
   return (
     <SafeAreaContainer>

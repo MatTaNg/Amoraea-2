@@ -49,14 +49,26 @@ export const Stage1BasicInfoScreen: React.FC<{ navigation: any; route: { params:
   navigation,
   route,
 }) => {
+  const profileLog = (...args: unknown[]) => {
+    if (__DEV__) console.log('[Stage1BasicInfo]', ...args);
+  };
   const { userId } = route.params;
   const queryClient = useQueryClient();
-  const { data: profile } = useQuery({
+  const {
+    data: profile,
+    isLoading: isProfileLoading,
+    isFetching: isProfileFetching,
+    error: profileError,
+  } = useQuery({
     queryKey: ['profile', userId],
     queryFn: () => profileRepository.getProfile(userId),
     staleTime: 0,
   });
-  const { data: existingPhotos = [] } = useQuery({
+  const {
+    data: existingPhotos = [],
+    isFetching: isPhotosFetching,
+    error: photosError,
+  } = useQuery({
     queryKey: ['profile-photos', userId],
     queryFn: () => profileRepository.getProfilePhotos(userId),
     enabled: !!userId && (profile?.onboardingStage === 'basic_info' || !!profile?.primaryPhotoUrl),
@@ -85,6 +97,38 @@ export const Stage1BasicInfoScreen: React.FC<{ navigation: any; route: { params:
   const [locationLoading, setLocationLoading] = useState(false);
   const locationError = errors.location ?? null;
   const locationAutoRequestedRef = useRef(false);
+
+  useEffect(() => {
+    profileLog('profile query state', {
+      userId,
+      isProfileLoading,
+      isProfileFetching,
+      onboardingStage: profile?.onboardingStage ?? null,
+      onboardingStep: profile?.onboardingStep ?? null,
+      hasBasicInfo: !!profile?.basicInfo,
+      error: profileError instanceof Error ? profileError.message : profileError ? String(profileError) : null,
+    });
+  }, [userId, isProfileLoading, isProfileFetching, profile?.onboardingStage, profile?.onboardingStep, profile?.basicInfo, profileError]);
+
+  useEffect(() => {
+    profileLog('photo query state', {
+      isPhotosFetching,
+      existingCount: existingPhotos.length,
+      enabled: !!userId && (profile?.onboardingStage === 'basic_info' || !!profile?.primaryPhotoUrl),
+      error: photosError instanceof Error ? photosError.message : photosError ? String(photosError) : null,
+    });
+  }, [isPhotosFetching, existingPhotos.length, userId, profile?.onboardingStage, profile?.primaryPhotoUrl, photosError]);
+
+  useEffect(() => {
+    profileLog('ui loading flags', {
+      step,
+      hydrated,
+      savingProgress,
+      submitting,
+      locationLoading,
+      locationError,
+    });
+  }, [step, hydrated, savingProgress, submitting, locationLoading, locationError]);
 
   // Hydrate form and step from profile when we're in basic_info stage (only once profile has loaded)
   useEffect(() => {

@@ -30,10 +30,21 @@ Write in second person ("You showed...", "In this moment, you...").
 Be specific — quote or closely paraphrase what they actually said.
 Be honest without being harsh. Be warm without being falsely positive.
 Acknowledge complexity. Notice nuance. Say the true thing, kindly.
+Do not reframe low-scoring signals as positive traits.
+If signals are broadly low, keep closing_reflection brief, neutral, and kind; do not convert low-signal patterns into compliments.
+Do not use "clarity", "clear lines", or "principled" to positively describe patterns that score below 5.
+Strengths gating rule (strict): only include behaviors in overall_strengths when the corresponding marker score is >= 6.0.
+Do not include any behavior tied to a marker below 6.0, regardless of framing.
+If the user fails, do not reframe low-scoring patterns as strengths.
+If no markers are >= 6.0, return an empty overall_strengths array.
+Apply this gating consistently across all eight markers.
+For construct_breakdown.where_you_struggled, report only evidence observed in this interview.
+If a marker scored 8.0 or above and there is no specific struggle evidence in the transcript, use either an empty string or explicitly frame it as a potential future growth edge (not an observed pattern).
+Do not invent hypothetical struggle patterns and present them as observed facts.
 
-IMPORTANT — RESPONSIVENESS SECTION:
+Commitment-threshold calibration anchor: a vague answer like "keep trying for a while, and if this keeps happening for months maybe that's a sign, but I wouldn't give up yet" belongs in the mid range (about 5-6), not high range. Reserve 7-10 for specific process, explicit irrecoverability criteria, or clear bilateral reasoning about repair limits.
 
-When writing about Responsiveness, be careful about conclusions drawn from the "emotional awareness probe." If the user's scenario involved someone they were not in regular contact with, do not characterise low pre-conflict awareness as emotional unavailability. Only reference the attunement probe if the user had clear access to the person beforehand.
+Scores use eight markers: mentalizing, accountability, contempt, repair, regulation, attunement, appreciation, commitment_threshold. Map each construct_breakdown key to the matching score from the payload.
 
 Respond ONLY with valid JSON. No preamble, no markdown, no backticks.
 Do not truncate any field. Do not write placeholder text.`;
@@ -51,17 +62,6 @@ function buildUserPrompt(
     .filter((line) => line.length > 2)
     .join('\n');
 
-  const pillarNamed: Record<string, number> = {};
-  const names: Record<string, string> = {
-    '1': 'conflict_repair',
-    '3': 'accountability',
-    '5': 'responsiveness',
-    '6': 'desire_limits',
-  };
-  Object.entries(pillarScores).forEach(([id, v]) => {
-    if (names[id]) pillarNamed[names[id]] = v;
-  });
-
   const scenarioPayload: Record<string, unknown> = {};
   [1, 2, 3].forEach((n) => {
     const s = scenarioScores[n];
@@ -73,8 +73,8 @@ ASSESSMENT RESULTS:
 Weighted Score: ${weightedScore ?? 'N/A'}/10
 Result: ${passed ? 'PASS' : 'NEEDS WORK'}
 
-PILLAR SCORES (construct names):
-${JSON.stringify(pillarNamed, null, 2)}
+MARKER SCORES (eight markers):
+${JSON.stringify(pillarScores, null, 2)}
 
 SCENARIO SCORES:
 ${JSON.stringify(scenarioPayload, null, 2)}
@@ -89,12 +89,13 @@ For every field that asks for analysis, write full paragraphs — as much
 as the transcript evidence supports. This is a therapeutic-quality
 assessment report, not a summary. The user deserves to understand
 themselves fully through your eyes.
+For each construct_breakdown.where_you_struggled entry: include only observed evidence. If score >= 8 and no struggle was observed, set where_you_struggled to "" or explicitly label it as a potential growth edge, not an observed pattern.
 
 {
-  "overall_summary": "A rich, multi-paragraph introduction to this person's relational profile. Cover: how they show up across the three scenarios as a whole, what kind of relational style they appear to have developed, what their scores collectively suggest about their readiness for intimacy, and any overarching pattern that connects their strengths and struggles. Be warm and honest. Be specific — reference actual things they said. This is the first thing they read. It should feel like being truly seen.",
+  "overall_summary": "A rich, multi-paragraph introduction to this person's relational profile. Cover: how they show up across the full interview (three fictional scenarios plus two personal questions), what kind of relational style they appear to have developed, what their scores collectively suggest about their readiness for intimacy, and any overarching pattern that connects their strengths and struggles. Be warm and honest. Be specific — reference actual things they said. This is the first thing they read. It should feel like being truly seen.",
 
   "overall_strengths": [
-    "Full paragraph per strength — not a label, a real description of what you observed, why it matters in relationships, and where in the transcript it appeared. Include at least 4-6 distinct strengths."
+    "Full paragraph per strength - not a label, a real description of what you observed, why it matters in relationships, and where in the transcript it appeared. Include only strengths tied to construct_breakdown markers with score >= 6. Never present behaviors from markers below 6 as strengths. If all markers are below 6, return an empty array."
   ],
 
   "overall_growth_areas": [
@@ -102,72 +103,40 @@ themselves fully through your eyes.
   ],
 
   "construct_breakdown": {
-    "conflict_repair": {
-      "score": 0.0,
-      "headline": "A single evocative sentence that captures the essence of how they show up in conflict — specific and honest, not generic.",
-      "summary": "A concise paragraph (3-4 sentences) distilling the most important thing to know about this person in conflict and repair.",
-      "what_you_did_well": "Full, detailed paragraphs covering every moment and pattern where they demonstrated strength in this construct. Quote or closely paraphrase their actual words.",
-      "where_you_struggled": "Full, detailed paragraphs covering every moment and pattern that lowered this score. Be honest and specific without being harsh.",
-      "key_pattern": "A full paragraph describing the core underlying pattern — the deeper relational habit or defence that connects the strengths and struggles in this construct.",
-      "nuance_and_context": "A full paragraph noting anything that adds important context to the score.",
-      "growth_edge": "A full paragraph describing the specific, concrete thing they could work on to grow in this construct."
-    },
-    "accountability": {
-      "score": 0.0,
-      "headline": "...",
-      "summary": "...",
-      "what_you_did_well": "...",
-      "where_you_struggled": "...",
-      "key_pattern": "...",
-      "nuance_and_context": "...",
-      "growth_edge": "..."
-    },
-    "responsiveness": {
-      "score": 0.0,
-      "headline": "...",
-      "summary": "...",
-      "what_you_did_well": "...",
-      "where_you_struggled": "...",
-      "key_pattern": "...",
-      "nuance_and_context": "...",
-      "growth_edge": "..."
-    },
-    "desire_limits": {
-      "score": 0.0,
-      "headline": "...",
-      "summary": "...",
-      "what_you_did_well": "...",
-      "where_you_struggled": "...",
-      "key_pattern": "...",
-      "nuance_and_context": "...",
-      "growth_edge": "..."
-    }
+    "mentalizing": { "score": 0.0, "headline": "...", "summary": "...", "what_you_did_well": "...", "where_you_struggled": "...", "key_pattern": "...", "nuance_and_context": "...", "growth_edge": "..." },
+    "accountability": { "score": 0.0, "headline": "...", "summary": "...", "what_you_did_well": "...", "where_you_struggled": "...", "key_pattern": "...", "nuance_and_context": "...", "growth_edge": "..." },
+    "contempt": { "score": 0.0, "headline": "...", "summary": "...", "what_you_did_well": "...", "where_you_struggled": "...", "key_pattern": "...", "nuance_and_context": "...", "growth_edge": "..." },
+    "repair": { "score": 0.0, "headline": "...", "summary": "...", "what_you_did_well": "...", "where_you_struggled": "...", "key_pattern": "...", "nuance_and_context": "...", "growth_edge": "..." },
+    "regulation": { "score": 0.0, "headline": "...", "summary": "...", "what_you_did_well": "...", "where_you_struggled": "...", "key_pattern": "...", "nuance_and_context": "...", "growth_edge": "..." },
+    "attunement": { "score": 0.0, "headline": "...", "summary": "...", "what_you_did_well": "...", "where_you_struggled": "...", "key_pattern": "...", "nuance_and_context": "...", "growth_edge": "..." },
+    "appreciation": { "score": 0.0, "headline": "...", "summary": "...", "what_you_did_well": "...", "where_you_struggled": "...", "key_pattern": "...", "nuance_and_context": "...", "growth_edge": "..." },
+    "commitment_threshold": { "score": 0.0, "headline": "...", "summary": "...", "what_you_did_well": "...", "where_you_struggled": "...", "key_pattern": "...", "nuance_and_context": "...", "growth_edge": "..." }
   },
 
   "scenario_observations": {
     "scenario_1": {
-      "name": "The Slow Drift",
+      "name": "Scenario A (Sam/Reese)",
       "what_happened": "A detailed paragraph describing how this person navigated this scenario.",
       "standout_moments": ["Quote or close paraphrase with analysis.", "Second moment if warranted."],
       "what_it_revealed": "A full paragraph synthesising what this scenario unlocked about this person."
     },
     "scenario_2": {
-      "name": "The Missed Moment",
+      "name": "Scenario B (Alex/Jordan)",
       "what_happened": "...",
       "standout_moments": ["...", "..."],
       "what_it_revealed": "..."
     },
     "scenario_3": {
-      "name": "The Intimacy Gap",
+      "name": "Scenario C (Morgan/Theo)",
       "what_happened": "...",
       "standout_moments": ["...", "..."],
       "what_it_revealed": "..."
     }
   },
 
-  "cross_scenario_patterns": "A full, rich paragraph describing patterns that appeared across multiple scenarios.",
+  "cross_scenario_patterns": "A full, rich paragraph describing patterns that appeared across multiple parts of the interview (scenarios and personal moments).",
 
-  "consistency_note": "A thorough paragraph analysing score consistency across the three scenarios for each construct.",
+  "consistency_note": "A thorough paragraph analysing score consistency across the interview segments for each construct.",
 
   "language_and_style_observations": "A paragraph analysing how this person communicated — qualifiers, pronoun choices, emotional vocabulary, specificity or vagueness.",
 
@@ -175,7 +144,7 @@ themselves fully through your eyes.
 
   "readiness_assessment": "A candid paragraph on their overall readiness for the kind of intimacy Amoraea is designed to support.",
 
-  "closing_reflection": "A final, unhurried paragraph that lands with warmth and truth. Not a summary — a closing thought that acknowledges what they brought, honours the courage it takes to be assessed this way, and leaves them with one honest, forward-looking observation."
+  "closing_reflection": "A final paragraph that references no more than two specific moments from the transcript (by content). Keep it concrete and human. Do not use evaluative trait language about the user. Keep tone warm but do not spin low-scoring signals as strengths. If scores are broadly low, keep this brief, neutral, and kind without turning it into a compliment."
 }`;
 }
 
@@ -253,5 +222,20 @@ export async function generateAIReasoning(
 
   const data = (await response.json()) as { content?: Array<{ text?: string }> };
   const text = (data.content?.[0]?.text ?? '{}').replace(/```json|```/g, '').trim();
-  return JSON.parse(text) as AIReasoningResult;
+  const parsed = JSON.parse(text) as AIReasoningResult;
+  const breakdown = parsed.construct_breakdown ?? {};
+  Object.entries(breakdown).forEach(([, construct]) => {
+    const score = construct?.score;
+    const struggled = (construct?.where_you_struggled ?? '').trim();
+    if (
+      typeof score === 'number' &&
+      score >= 8 &&
+      struggled &&
+      !/^potential growth edge/i.test(struggled) &&
+      !/^no clear struggle pattern observed/i.test(struggled)
+    ) {
+      construct.where_you_struggled = `Potential growth edge (not a demonstrated struggle in this interview): ${struggled}`;
+    }
+  });
+  return parsed;
 }

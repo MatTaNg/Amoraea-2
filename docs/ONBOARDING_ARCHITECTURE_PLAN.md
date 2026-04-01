@@ -46,7 +46,7 @@ Four sequential stages: Basic Info → AI Interview (Gate 1) → Psychometrics (
    All new fields live on `users` table (basic_info, gate1_score, etc. as JSONB). Existing columns (name, age, gender, …) stay; Stage 1 can sync basicInfo into name, age, gender, height_centimeters, etc., so the rest of the app keeps working.
 
 3. **Interview UI**  
-   Spec says "existing ai_interviewer.jsx". That component is web (div/button). **Decision:** Use AriaScreen (React Native) as the interview for the app; it already has INTERVIEW_COMPLETE, scoring prompt, and scoring flow. We add Gate 1 logic (evaluateGate1, save gate1Score, applicationStatus) and navigation to PostInterviewScreen.
+   Early spec referred to a legacy web `ai_interviewer` prototype. **Decision:** The product interview lives in **AriaScreen** (React Native): system prompts in `interviewerFrameworkPrompt.ts`, `INTERVIEW_COMPLETE`, per-scenario scoring, Gate 1 (`evaluateGate1`, `gate1Score`, `applicationStatus`), and navigation to PostInterview. The old duplicate `ai_interviewer (1).jsx` asset was removed from the repo.
 
 4. **DSI-SF**  
    Spec: "DSI-SF — Dyadic satisfaction (4 items)". Codebase has DSI-SF as **Differentiation of Self** (20 items). **Decision:** Keep existing DSI (differentiation) for Gate 2; gate2Psychometrics.dsisf can store the DSI total/mean as `satisfactionScore` for API compatibility, or we add a separate 4-item Dyadic Satisfaction scale later. Document in code.

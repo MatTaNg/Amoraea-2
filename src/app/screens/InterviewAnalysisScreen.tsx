@@ -31,17 +31,21 @@ function buildTranscriptString(messages: TranscriptMessage[] | null): string {
         (m.content?.trim() ?? '').length > 0
     )
     .map((m) => {
-      const speaker = m.role === 'assistant' ? 'Aira' : 'You';
+      const speaker = m.role === 'assistant' ? 'Amoraea' : 'You';
       return `${speaker}: ${(m.content ?? '').trim()}`;
     })
     .join('\n\n');
 }
 
 const CONSTRUCTS = [
-  { key: 'conflict_repair', label: 'Conflict & Repair', pillarId: '1' },
-  { key: 'accountability', label: 'Accountability', pillarId: '3' },
-  { key: 'responsiveness', label: 'Responsiveness', pillarId: '5' },
-  { key: 'desire_limits', label: 'Desire & Limits', pillarId: '6' },
+  { key: 'mentalizing', label: 'Mentalizing', pillarId: 'mentalizing' },
+  { key: 'accountability', label: 'Accountability / Defensiveness', pillarId: 'accountability' },
+  { key: 'contempt', label: 'Contempt / Criticism', pillarId: 'contempt' },
+  { key: 'repair', label: 'Repair', pillarId: 'repair' },
+  { key: 'regulation', label: 'Emotional Regulation', pillarId: 'regulation' },
+  { key: 'attunement', label: 'Attunement', pillarId: 'attunement' },
+  { key: 'appreciation', label: 'Appreciation', pillarId: 'appreciation' },
+  { key: 'commitment_threshold', label: 'Commitment Threshold', pillarId: 'commitment_threshold' },
 ] as const;
 
 type AttemptRow = {
@@ -519,7 +523,7 @@ export function InterviewAnalysisScreen({
                     ]}
                   >
                     <Text style={styles.transcriptSpeakerLabel}>
-                      {message.role === 'user' ? 'You' : 'Aira'}
+                      {message.role === 'user' ? 'You' : 'Amoraea'}
                     </Text>
                     <Text style={styles.transcriptMessageText}>{message.content}</Text>
                   </View>

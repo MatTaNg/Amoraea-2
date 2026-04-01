@@ -13,6 +13,11 @@ const DEFAULT_VOICE_ID = 'cgSgspJ2msm6clMCkdW9'; // Jessica — warm, friendly
 
 let activeWebAudio: { pause(): void; currentTime: number } | null = null;
 
+function applyAmoraeaPronunciation(text: string): string {
+  // Custom pronunciation dictionary fallback: enforce consistent spoken rendering.
+  return text.replace(/\bamoraea\b/gi, 'Ah-mor-AY-ah');
+}
+
 const getApiKey = (): string => {
   const fromExtra = Constants.expoConfig?.extra as { elevenLabsApiKey?: string } | undefined;
   if (fromExtra?.elevenLabsApiKey) return fromExtra.elevenLabsApiKey;
@@ -44,16 +49,17 @@ export async function speakWithElevenLabs(
   text: string,
   onFallback?: () => void
 ): Promise<void> {
+  const spokenText = applyAmoraeaPronunciation(text ?? '');
   const apiKey = getApiKey();
   const fromExtra = Constants.expoConfig?.extra as { elevenLabsVoiceId?: string } | undefined;
   const voiceId = fromExtra?.elevenLabsVoiceId
     || (typeof process !== 'undefined' && process.env?.EXPO_PUBLIC_ELEVENLABS_VOICE_ID)
     || DEFAULT_VOICE_ID;
-  if (!apiKey || !text.trim()) {
+  if (!apiKey || !spokenText.trim()) {
     if (!apiKey) {
       console.warn('ElevenLabs: No API key (EXPO_PUBLIC_ELEVENLABS_API_KEY or app config). Using fallback TTS — set the key for natural voice.');
     }
-    await speakFallback(text, onFallback);
+    await speakFallback(spokenText, onFallback);
     return;
   }
 
@@ -70,7 +76,7 @@ export async function speakWithElevenLabs(
           Accept: 'audio/mpeg',
         },
         body: JSON.stringify({
-          text: text.trim(),
+          text: spokenText.trim(),
           model_id: modelId,
           voice_settings: {
             stability: 0.22,
@@ -85,7 +91,7 @@ export async function speakWithElevenLabs(
     if (!res.ok) {
       const errText = await res.text();
       console.warn('ElevenLabs TTS error:', res.status, errText);
-      await speakFallback(text, onFallback);
+      await speakFallback(spokenText, onFallback);
       return;
     }
 
@@ -99,7 +105,7 @@ export async function speakWithElevenLabs(
         : undefined;
       if (!AudioCtor) {
         URL.revokeObjectURL(url);
-        await speakFallback(text, onFallback);
+        await speakFallback(spokenText, onFallback);
         return;
       }
       const audio = new AudioCtor(url);
@@ -124,7 +130,7 @@ export async function speakWithElevenLabs(
     const base64 = arrayBufferToBase64(arrayBuffer);
     const dir = FileSystem.cacheDirectory ?? FileSystem.documentDirectory;
     if (!dir) {
-      await speakFallback(text, onFallback);
+      await speakFallback(spokenText, onFallback);
       return;
     }
     const fileUri = `${dir}tts_${Date.now()}.mp3`;
@@ -152,7 +158,7 @@ export async function speakWithElevenLabs(
     }
   } catch (err) {
     console.warn('ElevenLabs TTS failed, using fallback:', err);
-    await speakFallback(text, onFallback);
+    await speakFallback(spokenText, onFallback);
   }
 }
 

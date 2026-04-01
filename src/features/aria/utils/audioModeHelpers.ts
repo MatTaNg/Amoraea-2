@@ -5,7 +5,7 @@
 import { Platform } from 'react-native';
 import { Audio } from 'expo-av';
 
-/** Call BEFORE every TTS playback so Aira speaks through the speaker at full volume. */
+/** Call BEFORE every TTS playback so Amoraea speaks through the speaker at full volume. */
 export async function setPlaybackMode(): Promise<void> {
   if (Platform.OS === 'web') return;
   await Audio.setAudioModeAsync({

@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { View, StyleSheet, Text, ScrollView, TouchableOpacity, Image, Alert } from 'react-native';
 import * as Clipboard from 'expo-clipboard';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
@@ -16,13 +16,48 @@ const profileRepository = new ProfileRepository();
 export const HomeScreen: React.FC<{ navigation: any; userId: string }> = ({ navigation, userId }) => {
   const [editModalVisible, setEditModalVisible] = useState(false);
   const queryClient = useQueryClient();
+  const profileLog = (...args: unknown[]) => {
+    if (__DEV__) console.log('[HomeProfile]', ...args);
+  };
 
-  const { data: profile } = useQuery({
+  const {
+    data: profile,
+    isLoading: isProfileLoading,
+    isFetching: isProfileFetching,
+    error: profileError,
+  } = useQuery({
     queryKey: ['profile', userId],
     queryFn: () => profileRepository.getProfile(userId),
   });
-  const { data: completion } = useProfileCompletion(userId);
+  const {
+    data: completion,
+    isLoading: isCompletionLoading,
+    isFetching: isCompletionFetching,
+    error: completionError,
+  } = useProfileCompletion(userId);
   const isComplete = completion?.isComplete ?? false;
+
+  useEffect(() => {
+    profileLog('query state', {
+      userId,
+      isProfileLoading,
+      isProfileFetching,
+      hasProfile: !!profile,
+      onboardingStage: profile?.onboardingStage ?? null,
+      profileError: profileError instanceof Error ? profileError.message : profileError ? String(profileError) : null,
+    });
+  }, [userId, isProfileLoading, isProfileFetching, profile, profileError]);
+
+  useEffect(() => {
+    profileLog('completion state', {
+      isCompletionLoading,
+      isCompletionFetching,
+      isComplete,
+      completedCount: completion?.completedCount ?? null,
+      totalCount: completion?.totalCount ?? null,
+      completionError: completionError instanceof Error ? completionError.message : completionError ? String(completionError) : null,
+    });
+  }, [isCompletionLoading, isCompletionFetching, isComplete, completion?.completedCount, completion?.totalCount, completionError]);
 
   const handleCopyInviteCode = async () => {
     if (profile?.inviteCode) {

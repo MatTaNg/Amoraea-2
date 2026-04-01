@@ -3,14 +3,10 @@
  * Remove before production.
  */
 
-export const CONSTRUCT_IDS = ['1', '3', '5', '6'] as const;
-export const CONSTRUCT_NAMES = ['conflict_repair', 'accountability', 'responsiveness', 'desire_limits'] as const;
-const PILLAR_TO_CONSTRUCT: Record<string, (typeof CONSTRUCT_NAMES)[number]> = {
-  '1': 'conflict_repair',
-  '3': 'accountability',
-  '5': 'responsiveness',
-  '6': 'desire_limits',
-};
+import { INTERVIEW_MARKER_IDS, type InterviewMarkerId } from '@features/aria/interviewMarkers';
+
+export const CONSTRUCT_IDS = [...INTERVIEW_MARKER_IDS] as InterviewMarkerId[];
+export const CONSTRUCT_NAMES = CONSTRUCT_IDS;
 
 export type ScenarioScoresMap = Record<number, { pillarScores: Record<string, number> } | undefined>;
 
@@ -21,10 +17,9 @@ export function calculateScoreConsistency(
 ): Record<string, { s1: number | null; s2: number | null; s3: number | null; mean: number; std_dev: number }> {
   const result: Record<string, { s1: number | null; s2: number | null; s3: number | null; mean: number; std_dev: number }> = {};
   for (const name of CONSTRUCT_NAMES) {
-    const pillarId = CONSTRUCT_IDS[CONSTRUCT_NAMES.indexOf(name)];
-    const v1 = s1?.[pillarId] ?? null;
-    const v2 = s2?.[pillarId] ?? null;
-    const v3 = s3?.[pillarId] ?? null;
+    const v1 = s1?.[name] ?? null;
+    const v2 = s2?.[name] ?? null;
+    const v3 = s3?.[name] ?? null;
     const vals = [v1, v2, v3].filter((v): v is number => v !== null && v !== undefined);
     const mean = vals.length ? vals.reduce((a, b) => a + b, 0) / vals.length : 0;
     const variance = vals.length ? vals.reduce((a, b) => a + Math.pow(b - mean, 2), 0) / vals.length : 0;
@@ -47,10 +42,7 @@ export function calculateConstructAsymmetry(pillarScores: Record<string, number>
   gap: number;
   profile_type: string;
 } {
-  const entries = CONSTRUCT_NAMES.map((name) => {
-    const id = CONSTRUCT_IDS[CONSTRUCT_NAMES.indexOf(name)];
-    return [name, pillarScores[id] ?? 0] as [string, number];
-  });
+  const entries = CONSTRUCT_NAMES.map((name) => [name, pillarScores[name] ?? 0] as [string, number]);
   const values = entries.map(([, v]) => v);
   const mean = values.length ? values.reduce((a, b) => a + b, 0) / values.length : 0;
   const strongest = entries.reduce((a, b) => (a[1] > b[1] ? a : b));
@@ -96,6 +88,28 @@ export function analyzeLanguageMarkers(
   const accountabilityPhrases = [
     'my fault', 'i should have', 'i was wrong', 'i messed up',
     'i take responsibility', 'i could have', "that's on me",
+    'i was partly protecting myself',
+    "i hadn't been paying attention",
+    'i missed what you actually needed',
+    'i can see i contributed',
+    'i contributed',
+    'i cut them off without saying why',
+    'i cut her off without saying why',
+    'i cut him off without saying why',
+  ];
+  const accountabilityRegexes = [
+    /\bi was partly (protecting|defending) myself\b/i,
+    /\bi (had not|hadn't|was not|wasn't) (really )?(paying attention|showing up)\b/i,
+    /\bi missed (what|that|the fact that) (you|they|he|she) (needed|were asking|was asking)\b/i,
+    /\bi can see (that )?i contributed\b/i,
+    /\bi contributed (to|here|there|in this)\b/i,
+    /\bi cut (them|her|him) off without (saying|explaining) why\b/i,
+    /\bi (withdrew|shut down|pulled away|avoided)\b/i,
+    /\bmy role in (this|it|the conflict|the breakdown)\b/i,
+    /\bi made (it|things) worse\b/i,
+    /\bi escalated (it|things|the conflict)\b/i,
+    /\bi own (my|that) part\b/i,
+    /\bi should have (listened|asked|paused|checked in)\b/i,
   ];
   const deflectionPhrases = [
     'they always', 'they never', "it's just that", 'but they',
@@ -116,8 +130,12 @@ export function analyzeLanguageMarkers(
   const theyCount = words.filter((w) => w === 'they' || w === "they're").length;
   const totalPronouns = iCount + weCount + theyCount || 1;
 
-  const countPhrases = (phrases: string[]) =>
-    phrases.reduce((acc, p) => acc + (fullText.split(p).length - 1), 0);
+  const countPhrasesInText = (text: string, phrases: string[]) =>
+    phrases.reduce((acc, p) => acc + (text.split(p).length - 1), 0);
+  const countRegexesInText = (text: string, patterns: RegExp[]) =>
+    patterns.reduce((acc, re) => acc + (re.test(text) ? 1 : 0), 0);
+  const accountabilityCountForText = (text: string) =>
+    countPhrasesInText(text, accountabilityPhrases) + countRegexesInText(text, accountabilityRegexes);
 
   const emotionalVocabCount = [...new Set(emotionWords.filter((w) => fullText.includes(w)))].length;
 
@@ -132,17 +150,17 @@ export function analyzeLanguageMarkers(
     const sText = slice.map((m) => (m.content ?? '').toLowerCase()).join(' ');
     perScenario[s] = {
       word_count: sText.split(/\s+/).filter(Boolean).length,
-      qualifier_count: countPhrases(qualifierPhrases.slice(0, 3)),
-      accountability_phrases: accountabilityPhrases.filter((p) => sText.includes(p)).length,
+      qualifier_count: countPhrasesInText(sText, qualifierPhrases.slice(0, 3)),
+      accountability_phrases: accountabilityCountForText(sText),
     };
   }
 
   return {
     first_person_ratio: Math.round((iCount / totalPronouns) * 100) / 100,
-    qualifier_count: countPhrases(qualifierPhrases),
+    qualifier_count: countPhrasesInText(fullText, qualifierPhrases),
     emotional_vocab_count: emotionalVocabCount,
-    accountability_phrases: countPhrases(accountabilityPhrases),
-    deflection_phrases: countPhrases(deflectionPhrases),
+    accountability_phrases: accountabilityCountForText(fullText),
+    deflection_phrases: countPhrasesInText(fullText, deflectionPhrases),
     per_scenario: perScenario,
   };
 }

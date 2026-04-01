@@ -12,6 +12,9 @@ const onboardingUseCase = new OnboardingUseCase(profileRepository, storageServic
 
 export const useOnboarding = (userId: string | undefined) => {
   const queryClient = useQueryClient();
+  const onboardingLog = (...args: unknown[]) => {
+    if (__DEV__) console.log('[useOnboarding]', ...args);
+  };
   const [localState, setLocalState] = useState<OnboardingState>({
     step: 1,
     name: null,
@@ -24,11 +27,28 @@ export const useOnboarding = (userId: string | undefined) => {
     photoUris: [],
   });
 
-  const { data: profile } = useQuery<Profile | null>({
+  const {
+    data: profile,
+    isLoading: isProfileLoading,
+    isFetching: isProfileFetching,
+    error: profileError,
+  } = useQuery<Profile | null>({
     queryKey: ['profile', userId],
     queryFn: () => (userId ? profileRepository.getProfile(userId) : Promise.resolve(null)),
     enabled: !!userId,
   });
+
+  useEffect(() => {
+    onboardingLog('profile query state', {
+      userId,
+      isProfileLoading,
+      isProfileFetching,
+      hasProfile: !!profile,
+      onboardingStage: profile?.onboardingStage ?? null,
+      onboardingStep: profile?.onboardingStep ?? null,
+      error: profileError instanceof Error ? profileError.message : profileError ? String(profileError) : null,
+    });
+  }, [userId, isProfileLoading, isProfileFetching, profile, profileError]);
 
   useEffect(() => {
     const loadState = async () => {
@@ -56,21 +76,33 @@ export const useOnboarding = (userId: string | undefined) => {
 
   const updateStep = useMutation({
     mutationFn: async ({ step, update }: { step: number; update: Partial<OnboardingState> }) => {
+      onboardingLog('updateStep start', { userId, step, updateKeys: Object.keys(update) });
       if (!userId) throw new Error('User not authenticated');
       const newState = { ...localState, ...update, step };
       await onboardingUseCase.saveOnboardingStep(userId, newState, update as any);
       setLocalState(newState);
       queryClient.invalidateQueries({ queryKey: ['profile', userId] });
+      onboardingLog('updateStep success', { userId, step });
     },
   });
 
   const completeOnboarding = useMutation({
     mutationFn: async () => {
+      onboardingLog('completeOnboarding start', { userId, step: localState.step });
       if (!userId) throw new Error('User not authenticated');
       await onboardingUseCase.completeOnboarding(userId, localState);
       queryClient.invalidateQueries({ queryKey: ['profile', userId] });
+      onboardingLog('completeOnboarding success', { userId });
     },
   });
+
+  useEffect(() => {
+    onboardingLog('mutation flags', {
+      updateStepPending: updateStep.isPending,
+      completeOnboardingPending: completeOnboarding.isPending,
+      currentStep: localState.step,
+    });
+  }, [updateStep.isPending, completeOnboarding.isPending, localState.step]);
 
   return {
     state: localState,
