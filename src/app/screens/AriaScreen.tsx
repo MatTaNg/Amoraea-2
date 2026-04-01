@@ -3991,33 +3991,47 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
         console.log('=== TRANSCRIPTION DEBUG ===', 'Platform:', Platform.OS, 'Native URI:', nativeUri ?? 'none', 'Blob size:', audioBlob?.size ?? 0, 'Endpoint:', OPENAI_WHISPER_PROXY_URL || 'openai');
       }
       try {
+        const transcriptUrl = OPENAI_WHISPER_PROXY_URL || 'https://api.openai.com/v1/audio/transcriptions';
+        const authHeaders: Record<string, string> = OPENAI_WHISPER_PROXY_URL
+          ? {}
+          : { Authorization: `Bearer ${OPENAI_API_KEY}` };
+
         const transcript = await withRetry(
           async (): Promise<string> => {
-            const form = new FormData();
-            const transcriptUrl = OPENAI_WHISPER_PROXY_URL || 'https://api.openai.com/v1/audio/transcriptions';
-            const headers: Record<string, string> = {};
-            if (!OPENAI_WHISPER_PROXY_URL) headers.Authorization = `Bearer ${OPENAI_API_KEY}`;
-
-            // Native: use RN's native file URI FormData format — blob-from-base64 doesn't serialize correctly in RN's fetch
+            // Native: FileSystem.uploadAsync uses iOS NSURLSession directly — avoids all RN fetch/FormData blob issues
             if (Platform.OS !== 'web' && nativeUri) {
-              (form as unknown as { append: (k: string, v: { uri: string; type: string; name: string }) => void }).append('file', {
-                uri: nativeUri,
-                type: 'audio/mp4',
-                name: 'recording.m4a',
+              const uploadResult = await FileSystem.uploadAsync(transcriptUrl, nativeUri, {
+                httpMethod: 'POST',
+                uploadType: FileSystem.FileSystemUploadType.MULTIPART,
+                fieldName: 'file',
+                mimeType: 'audio/mp4',
+                parameters: { model: 'whisper-1' },
+                headers: authHeaders,
               });
-            } else if (audioBlob && audioBlob.size > 0) {
-              const filename = 'recording.webm';
-              const typeOk = audioBlob.type === 'audio/webm' || audioBlob.type?.startsWith('audio/webm') || !audioBlob.type;
-              let blobToSend: Blob = audioBlob;
-              if (!typeOk && typeof audioBlob.arrayBuffer === 'function') {
-                blobToSend = new Blob([await audioBlob.arrayBuffer()], { type: 'audio/webm' });
+              if (__DEV__) console.log('Transcription response status:', uploadResult.status);
+              if (uploadResult.status < 200 || uploadResult.status >= 300) {
+                const err = new Error(uploadResult.body?.slice(0, 200) || `HTTP ${uploadResult.status}`);
+                Object.assign(err, { status: uploadResult.status });
+                throw err;
               }
-              form.append('file', blobToSend, filename);
-            } else {
-              throw new Error('No audio data');
+              const data = JSON.parse(uploadResult.body) as { text?: string };
+              const text = (data.text ?? '').trim();
+              if (__DEV__) console.log('Transcription result length:', text.length, '=== END DEBUG ===');
+              if (text.length < 2) throw new Error('Empty transcription result');
+              return text;
             }
+
+            // Web: use FormData + fetch
+            if (!audioBlob || audioBlob.size === 0) throw new Error('No audio data');
+            const form = new FormData();
+            const typeOk = audioBlob.type === 'audio/webm' || audioBlob.type?.startsWith('audio/webm') || !audioBlob.type;
+            let blobToSend: Blob = audioBlob;
+            if (!typeOk && typeof audioBlob.arrayBuffer === 'function') {
+              blobToSend = new Blob([await audioBlob.arrayBuffer()], { type: 'audio/webm' });
+            }
+            form.append('file', blobToSend, 'recording.webm');
             form.append('model', 'whisper-1');
-            const res = await fetch(transcriptUrl, { method: 'POST', headers, body: form });
+            const res = await fetch(transcriptUrl, { method: 'POST', headers: authHeaders, body: form });
             if (__DEV__) console.log('Transcription response status:', res.status);
             if (!res.ok) throw new Error(await res.text());
             const data = (await res.json()) as { text?: string };
