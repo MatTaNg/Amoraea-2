@@ -34,4 +34,8 @@ export async function setRecordingMode(): Promise<void> {
     shouldDuckAndroid: true,
     playThroughEarpieceAndroid: false,
   });
+  // Give iOS time to commit the audio session route change to the mic before recording starts
+  if (Platform.OS === 'ios') {
+    await new Promise(resolve => setTimeout(resolve, 150));
+  }
 }
