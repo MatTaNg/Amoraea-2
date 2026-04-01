@@ -3998,24 +3998,13 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
             const headers: Record<string, string> = {};
             if (!OPENAI_WHISPER_PROXY_URL) headers.Authorization = `Bearer ${OPENAI_API_KEY}`;
 
-            // Native: always build from file URI so we send explicit audio/mp4 (fetch(uri).blob() often has wrong type and Whisper rejects it)
+            // Native: use RN's native file URI FormData format — blob-from-base64 doesn't serialize correctly in RN's fetch
             if (Platform.OS !== 'web' && nativeUri) {
-              try {
-                const base64 = await FileSystem.readAsStringAsync(nativeUri, {
-                  encoding: 'base64' as unknown as never,
-                });
-                const byteChars = atob(base64);
-                const byteNumbers = new Array(byteChars.length);
-                for (let i = 0; i < byteChars.length; i++) byteNumbers[i] = byteChars.charCodeAt(i);
-                const blob = new Blob([new Uint8Array(byteNumbers)], { type: 'audio/mp4' });
-                form.append('file', blob, 'recording.m4a');
-              } catch (e) {
-                (form as unknown as { append: (k: string, v: { uri: string; type: string; name: string }) => void }).append('file', {
-                  uri: nativeUri,
-                  type: 'audio/mp4',
-                  name: 'recording.m4a',
-                });
-              }
+              (form as unknown as { append: (k: string, v: { uri: string; type: string; name: string }) => void }).append('file', {
+                uri: nativeUri,
+                type: 'audio/mp4',
+                name: 'recording.m4a',
+              });
             } else if (audioBlob && audioBlob.size > 0) {
               const filename = 'recording.webm';
               const typeOk = audioBlob.type === 'audio/webm' || audioBlob.type?.startsWith('audio/webm') || !audioBlob.type;
