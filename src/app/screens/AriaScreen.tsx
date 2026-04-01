@@ -57,6 +57,11 @@ import {
   shouldForceMoment4ThresholdProbe as shouldForceMoment4ThresholdProbeByType,
 } from '@features/aria/moment4ProbeLogic';
 import { applyMoment4RepairCalibrationRule } from '@features/aria/moment4RepairCalibration';
+import {
+  evaluateMoment5AppreciationSpecificity,
+  isLikelyMisplacedPersonalNarrativeForScenarioCThreshold,
+  normalizeScoresByEvidence,
+} from '@features/aria/probeAndScoringUtils';
 import * as FileSystem from 'expo-file-system';
 
 const FALLBACK_MARKER_SCORES_MID: Record<string, number> = {
@@ -529,22 +534,6 @@ function looksLikeMoment5Probe(text: string): boolean {
   );
 }
 
-function isGenericAppreciationAnswer(text: string): boolean {
-  const t = text.toLowerCase().trim();
-  if (!t || t.length < 12) return true;
-  const hasSpecificPerson = /\b(my|our)\s+(partner|wife|husband|boyfriend|girlfriend|friend|mom|mother|dad|father|sister|brother|cousin|aunt|uncle|daughter|son|teammate|roommate)\b|\b(he|she|they)\b/.test(t);
-  const hasSpecificMoment = /\b(last|yesterday|today|week|month|birthday|anniversary|graduation|after|when|that time|once|on \w+day|at dinner|at work)\b/.test(t);
-  const hasAttunement = /\bneeded|was going through|felt|feeling|stressed|upset|overwhelmed|encourag|support|noticed|because they\b/.test(t);
-  const hasConnectionMoment =
-    /\b(in that moment|when (she|he|they) (opened it|saw it|heard it|responded)|we hugged|teared up|started crying|smiled and|it landed)\b/.test(t);
-  const hasWordsExchanged =
-    /"(.*?)"|\b(she said|he said|they said|i said|i told (her|him|them)|they told me)\b/.test(t);
-  const hasMeaningDetail =
-    /\b(meaningful|mattered|why it mattered|what made it meaningful|because (she|he|they) (had|were|was)|for (her|him|them) specifically)\b/.test(t);
-  const hasRelationalSpecificity = hasConnectionMoment || hasWordsExchanged || hasMeaningDetail;
-  return !(hasSpecificPerson && hasSpecificMoment && hasAttunement && hasRelationalSpecificity);
-}
-
 function chooseMoment5Probe(userText: string): string {
   const t = userText.toLowerCase();
   if (/\b(always|usually|generally|typically)\b/.test(t)) {
@@ -888,11 +877,20 @@ async function generateAIReasoningSafe(
   transcript: Array<{ role: string; content?: string }>,
   weightedScore: number | null,
   passed: boolean,
+  unassessedMarkers: string[],
   options?: GenerateAIReasoningSafeOptions
 ): Promise<import('@features/aria/generateAIReasoning').AIReasoningResult & { _generationFailed?: boolean; _error?: string }> {
   try {
     return await withRetry(
-      () => generateAIReasoning(pillarScores, scenarioScores, transcript, weightedScore, passed),
+      () =>
+        generateAIReasoning(
+          pillarScores,
+          scenarioScores,
+          transcript,
+          weightedScore,
+          passed,
+          unassessedMarkers
+        ),
       {
         retries: 4,
         baseDelay: 10000,
@@ -1579,6 +1577,8 @@ function computeGateResult(
   weightedScore: number | null;
   failingConstruct: string | null;
   failingScore: number | null;
+  assessedMarkerCount: number;
+  excludedMarkers: string[];
 } {
   const weightEach = 1 / INTERVIEW_MARKER_IDS.length;
   const weights = Object.fromEntries(INTERVIEW_MARKER_IDS.map((id) => [id, weightEach])) as Record<string, number>;
@@ -1592,7 +1592,12 @@ function computeGateResult(
     }
   }
 
-  const floorFail = INTERVIEW_MARKER_IDS.find((id) => {
+  const assessedMarkerIds = INTERVIEW_MARKER_IDS.filter(
+    (id) => typeof adjustedScores[id] === 'number' && Number.isFinite(adjustedScores[id] as number)
+  );
+  const excludedMarkers = INTERVIEW_MARKER_IDS.filter((id) => !assessedMarkerIds.includes(id));
+
+  const floorFail = assessedMarkerIds.find((id) => {
     const score = adjustedScores[id];
     return score !== undefined && score < 3;
   });
@@ -1604,6 +1609,8 @@ function computeGateResult(
       weightedScore: null,
       failingConstruct: INTERVIEW_MARKER_LABELS[floorFail] ?? floorFail,
       failingScore: adjustedScores[floorFail],
+      assessedMarkerCount: assessedMarkerIds.length,
+      excludedMarkers,
     };
   }
 
@@ -1615,7 +1622,7 @@ function computeGateResult(
     weight: number;
     weightedContribution: number;
   }> = [];
-  INTERVIEW_MARKER_IDS.forEach((id) => {
+  assessedMarkerIds.forEach((id) => {
     const w = weights[id];
     const raw = adjustedScores[id];
     const score = typeof raw === 'number' && Number.isFinite(raw) ? raw : 0;
@@ -1625,7 +1632,19 @@ function computeGateResult(
     contributions.push({ marker: id, score, weight: w, weightedContribution });
   });
 
-  const simpleAverage = simpleSum / INTERVIEW_MARKER_IDS.length;
+  if (assessedMarkerIds.length === 0) {
+    return {
+      pass: false,
+      reason: 'weighted_average',
+      weightedScore: null,
+      failingConstruct: null,
+      failingScore: null,
+      assessedMarkerCount: 0,
+      excludedMarkers,
+    };
+  }
+
+  const simpleAverage = simpleSum / assessedMarkerIds.length;
   const weightedScore = Math.round(weightedSum * 10) / 10;
   const weightedVsSimpleDelta = Math.round((weightedScore - simpleAverage) * 1000) / 1000;
   if (__DEV__) {
@@ -1640,6 +1659,8 @@ function computeGateResult(
   void remoteLog('[WEIGHTED_SCORE_BREAKDOWN]', {
     contributions,
     weightedSum,
+    assessedMarkerCount: assessedMarkerIds.length,
+    excludedMarkers,
     simpleAverage: Math.round(simpleAverage * 1000) / 1000,
     weightedScore,
     weightedVsSimpleDelta,
@@ -1651,11 +1672,18 @@ function computeGateResult(
     weightedScore,
     failingConstruct: null,
     failingScore: null,
+    assessedMarkerCount: assessedMarkerIds.length,
+    excludedMarkers,
   };
 }
 
+type MarkerScoreSlice = {
+  pillarScores?: Record<string, number> | null;
+  keyEvidence?: Record<string, string> | null;
+} | null | undefined;
+
 function aggregateMarkerScoresFromSlices(
-  slices: Array<Record<string, number> | null | undefined>
+  slices: MarkerScoreSlice[]
 ): Record<string, number> {
   const totals: Record<string, number> = {};
   const counts: Record<string, number> = {};
@@ -1664,9 +1692,10 @@ function aggregateMarkerScoresFromSlices(
     counts[id] = 0;
   });
   slices.forEach((slice) => {
-    if (!slice) return;
+    if (!slice?.pillarScores) return;
+    const filteredScores = normalizeScoresByEvidence(slice.pillarScores, slice.keyEvidence);
     INTERVIEW_MARKER_IDS.forEach((id) => {
-      const raw = slice[id];
+      const raw = filteredScores[id];
       if (typeof raw !== 'number' || !Number.isFinite(raw)) return;
       totals[id] += raw;
       counts[id] += 1;
@@ -1701,7 +1730,7 @@ interface PersonalMomentScoreResult {
 
 function buildScenarioScoringPrompt(
   scenarioNumber: 1 | 2 | 3,
-  transcript: { role: string; content: string }[]
+  transcript: Array<{ role: string; content: string; scenarioNumber?: number }>
 ): string {
   const scenarioMeta = {
     1: {
@@ -1722,7 +1751,11 @@ function buildScenarioScoringPrompt(
     },
   }[scenarioNumber];
 
-  const turns = transcript
+  const taggedSlice = transcript.filter(
+    (m) => typeof m.scenarioNumber === 'number' && m.scenarioNumber === scenarioNumber
+  );
+  const scoringSlice = taggedSlice.length >= 2 ? taggedSlice : transcript;
+  const turns = scoringSlice
     .map((m) => `${m.role === 'user' ? 'User' : 'Interviewer'}: ${m.content}`)
     .join('\n\n');
   const ids = [...scenarioMeta.markerIds];
@@ -1941,6 +1974,8 @@ interface GateResult {
   weightedScore: number | null;
   failingConstruct: string | null;
   failingScore: number | null;
+  assessedMarkerCount?: number;
+  excludedMarkers?: string[];
 }
 
 interface InterviewResults {
@@ -2094,6 +2129,7 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
   const moment5ProbeAskedRef = useRef(false);
   const moment5ProbePendingRef = useRef(false);
   const moment4ThresholdProbeAskedRef = useRef(false);
+  const deferredMoment4NarrativeRef = useRef<string | null>(null);
   const scenarioAContemptProbeAskedRef = useRef(false);
   const interviewSessionIdRef = useRef<string>(newInterviewSessionId(userId));
   const turnAudioIndexRef = useRef(0);
@@ -2107,6 +2143,7 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
     moment5ProbeAskedRef.current = false;
     moment5ProbePendingRef.current = false;
     moment4ThresholdProbeAskedRef.current = false;
+    deferredMoment4NarrativeRef.current = null;
     scenarioAContemptProbeAskedRef.current = false;
     turnAudioIndexRef.current = 0;
     interviewSessionIdRef.current = newInterviewSessionId(userId);
@@ -2841,7 +2878,12 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
               (e as Error & { status?: number }).status = res.status;
               throw e;
             }
-            return JSON.parse(raw) as ScenarioScoreResult;
+            const parsedScenario = JSON.parse(raw) as ScenarioScoreResult;
+            parsedScenario.pillarScores = normalizeScoresByEvidence(
+              parsedScenario.pillarScores,
+              parsedScenario.keyEvidence
+            );
+            return parsedScenario;
           },
           {
             retries: 3,
@@ -3154,6 +3196,38 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
       return;
     }
 
+    const latestAssistantBeforeAppend = [...messages].reverse().find((m) => m.role === 'assistant');
+    const latestAssistantBeforeAppendText = latestAssistantBeforeAppend?.content ?? '';
+    const replyingToScenarioCThresholdPrompt =
+      currentInterviewMomentRef.current === 3 &&
+      looksLikeScenarioCThresholdQuestion(latestAssistantBeforeAppendText);
+    const misplacedScenarioCThresholdAnswer =
+      replyingToScenarioCThresholdPrompt &&
+      !isDecline(trimmed) &&
+      isLikelyMisplacedPersonalNarrativeForScenarioCThreshold(trimmed);
+    if (misplacedScenarioCThresholdAnswer) {
+      deferredMoment4NarrativeRef.current = trimmed;
+      const userMsgMisplaced: MessageWithScenario = {
+        role: 'user',
+        content: trimmed,
+        // Tag as moment-4 context so scenario scoring excludes it.
+        scenarioNumber: 4,
+      };
+      const redirectText =
+        "I think that one was about Theo and Morgan specifically - what would you say for them?";
+      const thresholdQuestion =
+        "At what point would you say Theo or Morgan should decide this relationship isn't working?";
+      const redirectMsg: MessageWithScenario = {
+        role: 'assistant',
+        content: `${redirectText}\n\n${thresholdQuestion}`,
+        scenarioNumber: currentScenarioRef.current ?? 3,
+      };
+      setMessages([...messages, userMsgMisplaced, redirectMsg]);
+      await speakTextSafe(redirectMsg.content);
+      setVoiceState('idle');
+      return;
+    }
+
     const userMsg: MessageWithScenario = {
       role: 'user',
       content: trimmed,
@@ -3193,11 +3267,44 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
       // User has answered the one allowed Moment 5 probe; do not ask another.
       moment5ProbePendingRef.current = false;
     }
+    const moment5Specificity = evaluateMoment5AppreciationSpecificity(trimmed);
     const shouldForceMoment5Probe =
       replyingToMoment5Prompt &&
       !moment5ProbeAskedRef.current &&
       !isDecline(trimmed) &&
-      isGenericAppreciationAnswer(trimmed);
+      moment5Specificity.isGeneric;
+    if (replyingToMoment5Prompt) {
+      if (__DEV__) {
+        console.log('[M5_PROBE_EVAL]', {
+          fullAnswerText: trimmed,
+          conditions: {
+            replyingToMoment5Prompt,
+            probeAlreadyAsked: moment5ProbeAskedRef.current,
+            isDecline: isDecline(trimmed),
+            hasSpecificPerson: moment5Specificity.hasSpecificPerson,
+            hasSpecificMoment: moment5Specificity.hasSpecificMoment,
+            hasAttunement: moment5Specificity.hasAttunement,
+            hasRelationalSpecificity: moment5Specificity.hasRelationalSpecificity,
+            isGeneric: moment5Specificity.isGeneric,
+          },
+          shouldForceMoment5Probe,
+        });
+      }
+      void remoteLog('[M5_PROBE_EVAL]', {
+        fullAnswerText: trimmed.slice(0, 500),
+        conditions: {
+          replyingToMoment5Prompt,
+          probeAlreadyAsked: moment5ProbeAskedRef.current,
+          isDecline: isDecline(trimmed),
+          hasSpecificPerson: moment5Specificity.hasSpecificPerson,
+          hasSpecificMoment: moment5Specificity.hasSpecificMoment,
+          hasAttunement: moment5Specificity.hasAttunement,
+          hasRelationalSpecificity: moment5Specificity.hasRelationalSpecificity,
+          isGeneric: moment5Specificity.isGeneric,
+        },
+        shouldForceMoment5Probe,
+      });
+    }
     const relationshipEval = evaluateMoment4RelationshipType(trimmed);
     const thresholdAlreadyProvided = hasCommitmentThresholdSignal(trimmed);
     const shouldForceMoment4ThresholdProbe = shouldForceMoment4ThresholdProbeByType({
@@ -4516,6 +4623,16 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
             slice: { role: string; content: string }[]
           ): Promise<PersonalMomentScoreResult | null> => {
             if (slice.filter((m) => m.role === 'user').length < 1) return null;
+            const deferredMoment4Narrative =
+              momentNumber === 4 ? deferredMoment4NarrativeRef.current : null;
+            const scoringSlice =
+              momentNumber === 4 && deferredMoment4Narrative
+                ? [
+                    slice[0] ?? { role: 'assistant', content: MOMENT_4_HANDOFF },
+                    { role: 'user', content: deferredMoment4Narrative },
+                    ...slice.slice(1),
+                  ]
+                : slice;
             try {
               const scored = await withRetry(
                 async (): Promise<PersonalMomentScoreResult> => {
@@ -4525,7 +4642,7 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
                     body: JSON.stringify({
                       model: 'claude-sonnet-4-20250514',
                       max_tokens: 900,
-                      messages: [{ role: 'user', content: buildPersonalMomentScoringPrompt(momentNumber, slice) }],
+                      messages: [{ role: 'user', content: buildPersonalMomentScoringPrompt(momentNumber, scoringSlice) }],
                     }),
                   });
                   const data = await res.json();
@@ -4536,8 +4653,9 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
                   }
                   const raw = (data.content?.[0]?.text ?? '{}').replace(/```json|```/g, '').trim();
                   const parsed = JSON.parse(raw) as PersonalMomentScoreResult;
+                  parsed.pillarScores = normalizeScoresByEvidence(parsed.pillarScores, parsed.keyEvidence);
                   if (momentNumber !== 4) return parsed;
-                  const moment4UserAnswer = slice
+                  const moment4UserAnswer = scoringSlice
                     .filter((m) => m.role === 'user')
                     .map((m) => m.content)
                     .join(' ')
@@ -4551,6 +4669,9 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
                   context: `scoring personal moment ${momentNumber}`,
                 }
               );
+              if (momentNumber === 4 && deferredMoment4NarrativeRef.current) {
+                deferredMoment4NarrativeRef.current = null;
+              }
               return scored;
             } catch (err) {
               if (__DEV__) console.warn(`Personal moment ${momentNumber} scoring failed:`, err);
@@ -4560,16 +4681,48 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
           const moment4Score = await scorePersonalMoment(4, personalSlices.moment4);
           const moment5Score = await scorePersonalMoment(5, personalSlices.moment5);
           const aggregatedPillarScores = aggregateMarkerScoresFromSlices([
-            scenarioScoresRef.current[1]?.pillarScores,
-            scenarioScoresRef.current[2]?.pillarScores,
-            scenarioScoresRef.current[3]?.pillarScores,
-            moment4Score?.pillarScores,
-            moment5Score?.pillarScores,
+            scenarioScoresRef.current[1]
+              ? {
+                  pillarScores: scenarioScoresRef.current[1]?.pillarScores,
+                  keyEvidence: scenarioScoresRef.current[1]?.keyEvidence,
+                }
+              : null,
+            scenarioScoresRef.current[2]
+              ? {
+                  pillarScores: scenarioScoresRef.current[2]?.pillarScores,
+                  keyEvidence: scenarioScoresRef.current[2]?.keyEvidence,
+                }
+              : null,
+            scenarioScoresRef.current[3]
+              ? {
+                  pillarScores: scenarioScoresRef.current[3]?.pillarScores,
+                  keyEvidence: scenarioScoresRef.current[3]?.keyEvidence,
+                }
+              : null,
+            moment4Score
+              ? {
+                  pillarScores: moment4Score.pillarScores,
+                  keyEvidence: moment4Score.keyEvidence,
+                }
+              : null,
+            moment5Score
+              ? {
+                  pillarScores: moment5Score.pillarScores,
+                  keyEvidence: moment5Score.keyEvidence,
+                }
+              : null,
           ]);
           const pillarScores =
             Object.keys(aggregatedPillarScores).length > 0
               ? aggregatedPillarScores
               : parsedPillarScores;
+          const finalGateResult = computeGateResult(
+            pillarScores,
+            parsed.skepticismModifier ?? null
+          );
+          parsed.pillarScores = pillarScores;
+          parsed.gateResult = finalGateResult;
+          setResults({ ...parsed });
           constructAsymmetry = calculateConstructAsymmetry(pillarScores);
           setReasoningProgress('generating');
           if (__DEV__) console.log('=== [3] Generating reasoning ===');
@@ -4583,8 +4736,9 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
               3: scenarioScoresRef.current[3],
             },
             finalMessages,
-            gateResult.weightedScore,
-            gateResult.pass,
+            finalGateResult.weightedScore,
+            finalGateResult.pass,
+            finalGateResult.excludedMarkers ?? [],
             {
               onRetry: (attempt) => {
                 if (attempt === 1) setReasoningProgress('slow');
@@ -4611,8 +4765,8 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
             user_id: userId,
             attempt_number: attemptNum,
             completed_at: new Date().toISOString(),
-            weighted_score: gateResult.weightedScore,
-            passed: gateResult.pass,
+            weighted_score: finalGateResult.weightedScore,
+            passed: finalGateResult.pass,
             pillar_scores: pillarScores,
             scenario_1_scores: scenarioScoresRef.current[1]
               ? {
@@ -4671,8 +4825,8 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
           };
           updatePayload = {
             interview_completed: true,
-            interview_passed: gateResult.pass,
-            interview_weighted_score: gateResult.weightedScore,
+            interview_passed: finalGateResult.pass,
+            interview_weighted_score: finalGateResult.weightedScore,
             interview_completed_at: new Date().toISOString(),
             interview_attempt_count: attemptNum,
             latest_attempt_id: null as string | null,
@@ -4704,8 +4858,8 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
             console.log('=== [5] DB save ===', { id: attemptId ?? undefined, error: null });
           }
           setAnalysisAttemptId(attemptId);
-          void runPostInterviewTextStyleAnalysis(userId, gateResult.pass);
-          await finalizeAudioProfile(userId, attemptId, gateResult.pass);
+          void runPostInterviewTextStyleAnalysis(userId, finalGateResult.pass);
+          await finalizeAudioProfile(userId, attemptId, finalGateResult.pass);
           await remoteLog('[6] setAnalysisAttemptId called', { id: attemptId ?? null });
           if (__DEV__) console.log('=== [6] latestAttemptId set ===', attemptId ?? 'null');
           alphaSaveOk = true;
@@ -5524,6 +5678,15 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
                           ? `${results.gateResult.failingConstruct} scored ${results.gateResult.failingScore}/10 — below the minimum required score.`
                           : `Weighted score: ${results.gateResult.weightedScore}/10 — below the threshold of 5.0 required for profile creation.`}
                     </Text>
+                    {(results.gateResult.excludedMarkers?.length ?? 0) > 0 ? (
+                      <Text style={styles.gateResultText}>
+                        Unassessed markers (shown as "—") were excluded from weighted score calculation:{' '}
+                        {results.gateResult.excludedMarkers
+                          ?.map((id) => INTERVIEW_MARKER_LABELS[id as keyof typeof INTERVIEW_MARKER_LABELS] ?? id)
+                          .join(', ')}
+                        .
+                      </Text>
+                    ) : null}
                   </View>
                 ) : null}
                 {results.interviewSummary ? (
@@ -5532,22 +5695,26 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
                 <View style={styles.resultsPanelPillars}>
                   {INTERVIEW_MARKER_IDS.map((id) => {
                     const score = results.pillarScores?.[id];
-                    if (score == null) return null;
                     const meta = PILLAR_META[id] ?? { name: id, color: colors.primary };
+                    const hasNumericScore = typeof score === 'number' && Number.isFinite(score);
                     return (
                       <View key={id} style={styles.resultsPillarRow}>
                         <View style={styles.resultsPillarHeader}>
                           <Text style={styles.resultsPillarName}>{meta.name}</Text>
-                          <Text style={[styles.resultsPillarScore, { color: meta.color }]}>{score}/10</Text>
+                          <Text style={[styles.resultsPillarScore, { color: meta.color }]}>
+                            {hasNumericScore ? `${score}/10` : '—'}
+                          </Text>
                         </View>
-                        <View style={styles.resultsPillarBar}>
-                          <View
-                            style={[
-                              styles.resultsPillarBarFill,
-                              { width: `${score * 10}%`, backgroundColor: meta.color },
-                            ]}
-                          />
-                        </View>
+                        {hasNumericScore ? (
+                          <View style={styles.resultsPillarBar}>
+                            <View
+                              style={[
+                                styles.resultsPillarBarFill,
+                                { width: `${score * 10}%`, backgroundColor: meta.color },
+                              ]}
+                            />
+                          </View>
+                        ) : null}
                       </View>
                     );
                   })}

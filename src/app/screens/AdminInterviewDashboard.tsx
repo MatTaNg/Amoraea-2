@@ -14,6 +14,7 @@ import {
   Platform,
 } from 'react-native';
 import { supabase } from '@data/supabase/client';
+import { normalizeScoresByEvidence } from '@features/aria/probeAndScoringUtils';
 
 // Marker ids as stored in DB; construct keys match ai_reasoning.construct_breakdown
 const PILLAR_ROWS = [
@@ -239,12 +240,20 @@ function markerIsAssessedInSection(sectionKey: string, markerId: string): boolea
 function computeMarkerAggregateFromAttempt(
   attempt: AttemptRow
 ): { scores: Record<string, number>; counts: Record<string, number> } {
-  const sectionScores: Record<string, Record<string, number> | null> = {
-    scenario_1: getScoreBundleDetails(attempt.scenario_1_scores).scores,
-    scenario_2: getScoreBundleDetails(attempt.scenario_2_scores).scores,
-    scenario_3: getScoreBundleDetails(attempt.scenario_3_scores).scores,
-    moment_4: getMomentScoreBundle(attempt, 4).scores,
-    moment_5: getMomentScoreBundle(attempt, 5).scores,
+  const scenario1Details = getScoreBundleDetails(attempt.scenario_1_scores);
+  const scenario2Details = getScoreBundleDetails(attempt.scenario_2_scores);
+  const scenario3Details = getScoreBundleDetails(attempt.scenario_3_scores);
+  const moment4Bundle = getMomentScoreBundle(attempt, 4);
+  const moment5Bundle = getMomentScoreBundle(attempt, 5);
+  const moment4Details = getScoreBundleDetails(parseObject(parseObject(attempt.scenario_specific_patterns)?.moment_4_scores));
+  const moment5Details = getScoreBundleDetails(parseObject(parseObject(attempt.scenario_specific_patterns)?.moment_5_scores));
+
+  const sectionScores: Record<string, Record<string, number>> = {
+    scenario_1: normalizeScoresByEvidence(scenario1Details.scores, scenario1Details.evidence),
+    scenario_2: normalizeScoresByEvidence(scenario2Details.scores, scenario2Details.evidence),
+    scenario_3: normalizeScoresByEvidence(scenario3Details.scores, scenario3Details.evidence),
+    moment_4: normalizeScoresByEvidence(moment4Bundle.scores, moment4Details.evidence),
+    moment_5: normalizeScoresByEvidence(moment5Bundle.scores, moment5Details.evidence),
   };
   const totals: Record<string, number> = {};
   const counts: Record<string, number> = {};
@@ -253,7 +262,6 @@ function computeMarkerAggregateFromAttempt(
     counts[id] = 0;
   });
   Object.entries(sectionScores).forEach(([sectionKey, scores]) => {
-    if (!scores) return;
     MARKER_IDS.forEach((id) => {
       if (!markerIsAssessedInSection(sectionKey, id)) return;
       const n = coerceScoreNumber(scores[id]);

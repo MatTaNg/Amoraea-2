@@ -54,7 +54,8 @@ function buildUserPrompt(
   scenarioScores: Record<number, { pillarScores: Record<string, number>; scenarioName?: string } | undefined>,
   transcript: Array<{ role: string; content?: string }>,
   weightedScore: number | null,
-  passed: boolean
+  passed: boolean,
+  unassessedMarkers: string[]
 ): string {
   const userTurns = transcript
     .filter((m) => m.role === 'user')
@@ -75,6 +76,9 @@ Result: ${passed ? 'PASS' : 'NEEDS WORK'}
 
 MARKER SCORES (eight markers):
 ${JSON.stringify(pillarScores, null, 2)}
+
+UNASSESSED MARKERS (no direct evidence in this interview; do not speculate):
+${JSON.stringify(unassessedMarkers, null, 2)}
 
 SCENARIO SCORES:
 ${JSON.stringify(scenarioPayload, null, 2)}
@@ -182,7 +186,8 @@ export async function generateAIReasoning(
   scenarioScores: Record<number, { pillarScores: Record<string, number>; scenarioName?: string } | undefined>,
   transcript: Array<{ role: string; content?: string }>,
   weightedScore: number | null,
-  passed: boolean
+  passed: boolean,
+  unassessedMarkers: string[] = []
 ): Promise<AIReasoningResult> {
   const apiUrl = getAnthropicEndpoint();
   const useProxy = apiUrl !== 'https://api.anthropic.com/v1/messages';
@@ -199,7 +204,8 @@ export async function generateAIReasoning(
     scenarioScores,
     transcript,
     weightedScore,
-    passed
+    passed,
+    unassessedMarkers
   );
 
   const body: Record<string, unknown> = {
@@ -236,6 +242,27 @@ export async function generateAIReasoning(
     ) {
       construct.where_you_struggled = `Potential growth edge (not a demonstrated struggle in this interview): ${struggled}`;
     }
+  });
+  const noEvidenceConstructTemplate = {
+    headline: 'Not directly assessed in this interview',
+    summary:
+      'This marker did not surface with enough direct evidence in the scored moments, so this interview cannot support a confident interpretation for it.',
+    what_you_did_well: 'No direct evidence available.',
+    where_you_struggled: 'No direct evidence available.',
+    key_pattern: 'Insufficient direct data in this interview.',
+    nuance_and_context:
+      'A low or missing value here reflects missing evidence, not a demonstrated deficit.',
+    growth_edge:
+      'If you want this area evaluated, it would need additional prompts that directly test this construct.',
+  };
+  unassessedMarkers.forEach((id) => {
+    if (!parsed.construct_breakdown) parsed.construct_breakdown = {};
+    const existing = parsed.construct_breakdown[id] ?? {};
+    parsed.construct_breakdown[id] = {
+      ...existing,
+      score: existing.score,
+      ...noEvidenceConstructTemplate,
+    };
   });
   return parsed;
 }
