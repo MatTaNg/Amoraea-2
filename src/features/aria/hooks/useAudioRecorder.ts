@@ -84,16 +84,6 @@ export function useAudioRecorder({
   const startNativeRecording = useCallback(async () => {
     try {
       await setRecordingMode();
-      // Force recording mode on iOS immediately before starting (so playback can switch back after)
-      if (Platform.OS === 'ios') {
-        await Audio.setAudioModeAsync({
-          allowsRecordingIOS: true,
-          playsInSilentModeIOS: true,
-          interruptionModeIOS: 1,
-          shouldDuckAndroid: true,
-          playThroughEarpieceAndroid: false,
-        });
-      }
 
       const { recording } = await Audio.Recording.createAsync(RECORDING_OPTIONS);
 
