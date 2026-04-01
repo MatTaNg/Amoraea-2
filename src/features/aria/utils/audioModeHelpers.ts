@@ -25,6 +25,20 @@ export async function setPlaybackMode(): Promise<void> {
 /** Call BEFORE every mic recording so input is captured correctly. */
 export async function setRecordingMode(): Promise<void> {
   if (Platform.OS === 'web') return;
+  if (Platform.OS === 'ios') {
+    // Explicitly deactivate the current session first so AVAudioSession fully commits the route change.
+    // Without this, the microphone may not activate and the recording captures silence.
+    await Audio.setAudioModeAsync({
+      allowsRecordingIOS: false,
+      playsInSilentModeIOS: true,
+      staysActiveInBackground: false,
+      interruptionModeIOS: 1,
+      interruptionModeAndroid: 1,
+      shouldDuckAndroid: true,
+      playThroughEarpieceAndroid: false,
+    });
+    await new Promise(resolve => setTimeout(resolve, 100));
+  }
   await Audio.setAudioModeAsync({
     allowsRecordingIOS: true,
     playsInSilentModeIOS: true,
@@ -34,8 +48,7 @@ export async function setRecordingMode(): Promise<void> {
     shouldDuckAndroid: true,
     playThroughEarpieceAndroid: false,
   });
-  // Give iOS time to commit the audio session route change to the mic before recording starts
   if (Platform.OS === 'ios') {
-    await new Promise(resolve => setTimeout(resolve, 150));
+    await new Promise(resolve => setTimeout(resolve, 200));
   }
 }
