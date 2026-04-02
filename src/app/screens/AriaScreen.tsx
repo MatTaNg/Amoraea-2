@@ -63,6 +63,7 @@ import {
   normalizeScoresByEvidence,
 } from '@features/aria/probeAndScoringUtils';
 import * as FileSystem from 'expo-file-system';
+import * as FileSystemLegacy from 'expo-file-system/legacy';
 
 const FALLBACK_MARKER_SCORES_MID: Record<string, number> = {
   mentalizing: 6,
@@ -257,14 +258,41 @@ function applyInterviewProgressFromAssistantText(rawDisplayText: string, refs: I
 function getPublicEnv(varName: string, extraKey?: string): string {
   const fromProcess =
     typeof process !== 'undefined' && process.env ? (process.env[varName] as string | undefined) : undefined;
-  const fromExtra =
-    (Constants.expoConfig?.extra?.[extraKey ?? ''] as string | undefined) ??
-    (Constants.expoConfig?.extra?.[varName] as string | undefined);
-  return (fromProcess || fromExtra || '').trim();
+  const expoConfigExtra = Constants.expoConfig?.extra as Record<string, unknown> | undefined;
+  const legacyManifestExtra =
+    (Constants as unknown as { manifest?: { extra?: Record<string, unknown> } }).manifest?.extra;
+  const manifest2Extra =
+    (
+      Constants as unknown as {
+        manifest2?: { extra?: { expoClient?: { extra?: Record<string, unknown> } } };
+      }
+    ).manifest2?.extra?.expoClient?.extra;
+  const easConfig = (Constants as unknown as { easConfig?: Record<string, unknown> }).easConfig;
+  const key = extraKey ?? '';
+  const fromConfig =
+    (typeof key === 'string' && key ? (expoConfigExtra?.[key] as string | undefined) : undefined) ??
+    (expoConfigExtra?.[varName] as string | undefined) ??
+    (typeof key === 'string' && key ? (legacyManifestExtra?.[key] as string | undefined) : undefined) ??
+    (legacyManifestExtra?.[varName] as string | undefined) ??
+    (typeof key === 'string' && key ? (manifest2Extra?.[key] as string | undefined) : undefined) ??
+    (manifest2Extra?.[varName] as string | undefined) ??
+    (typeof key === 'string' && key ? (easConfig?.[key] as string | undefined) : undefined) ??
+    (easConfig?.[varName] as string | undefined);
+  return (fromProcess || fromConfig || '').trim();
 }
 
 function getResolvedSupabaseUrl(): string {
-  return getPublicEnv('EXPO_PUBLIC_SUPABASE_URL', 'supabaseUrl');
+  const configured = getPublicEnv('EXPO_PUBLIC_SUPABASE_URL', 'supabaseUrl');
+  if (configured) return configured;
+  const maybeSupabase = supabase as unknown as { supabaseUrl?: string; rest?: { url?: string } };
+  if (typeof maybeSupabase.supabaseUrl === 'string' && maybeSupabase.supabaseUrl.trim()) {
+    return maybeSupabase.supabaseUrl.trim();
+  }
+  const restUrl = maybeSupabase.rest?.url;
+  if (typeof restUrl === 'string' && restUrl.trim()) {
+    return restUrl.replace(/\/rest\/v1\/?$/, '').trim();
+  }
+  return '';
 }
 
 function getResolvedAnthropicProxyUrl(): string {
@@ -272,6 +300,27 @@ function getResolvedAnthropicProxyUrl(): string {
   if (configured) return configured;
   const supabaseUrl = getResolvedSupabaseUrl().replace(/\/+$/, '');
   return supabaseUrl ? `${supabaseUrl}/functions/v1/anthropic-proxy` : '';
+}
+
+function getResolvedWhisperProxyUrl(): string {
+  const configured = getPublicEnv('EXPO_PUBLIC_OPENAI_WHISPER_PROXY_URL', 'openaiWhisperProxyUrl');
+  if (configured) return configured;
+  const supabaseUrl = getResolvedSupabaseUrl().replace(/\/+$/, '');
+  return supabaseUrl ? `${supabaseUrl}/functions/v1/openai-whisper-proxy` : '';
+}
+
+function getResolvedSupabaseAnonKey(): string {
+  const configured = getPublicEnv('EXPO_PUBLIC_SUPABASE_ANON_KEY', 'supabaseAnonKey');
+  if (configured) return configured;
+  const maybeSupabase = supabase as unknown as {
+    supabaseKey?: string;
+    rest?: { headers?: Record<string, string> };
+  };
+  const fromClientKey = typeof maybeSupabase.supabaseKey === 'string' ? maybeSupabase.supabaseKey.trim() : '';
+  if (fromClientKey) return fromClientKey;
+  const fromRestHeader =
+    (maybeSupabase.rest?.headers?.apikey ?? maybeSupabase.rest?.headers?.Authorization ?? '').replace(/^Bearer\s+/i, '').trim();
+  return fromRestHeader;
 }
 
 function getAnthropicEndpoint(): string {
@@ -1993,12 +2042,13 @@ interface InterviewResults {
 
 const ANTHROPIC_API_KEY = getPublicEnv('EXPO_PUBLIC_ANTHROPIC_API_KEY', 'anthropicApiKey');
 const ANTHROPIC_PROXY_URL = getResolvedAnthropicProxyUrl();
-const SUPABASE_ANON_KEY = getPublicEnv('EXPO_PUBLIC_SUPABASE_ANON_KEY', 'supabaseAnonKey');
+const SUPABASE_ANON_KEY = getResolvedSupabaseAnonKey();
+const AUDIO_ROUTE_DEBUG_BUILD = 'audio-route-debug-11-auth-fallback';
 
 const OPENAI_API_KEY =
-  (typeof process !== 'undefined' && process.env?.EXPO_PUBLIC_OPENAI_API_KEY) || '';
+  getPublicEnv('EXPO_PUBLIC_OPENAI_API_KEY', 'openaiApiKey');
 const OPENAI_WHISPER_PROXY_URL =
-  (typeof process !== 'undefined' && process.env?.EXPO_PUBLIC_OPENAI_WHISPER_PROXY_URL) || '';
+  getResolvedWhisperProxyUrl();
 
 function buildGate1ScoreFromResults(results: InterviewResults): Gate1Score {
   const pillarScores = results.pillarScores ?? {};
@@ -2685,6 +2735,15 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
   }, []);
 
   const speak = useCallback(async (text: string) => {
+    // #region agent log
+    fetch('http://127.0.0.1:7789/ingest/668e0bd5-3283-4492-9f48-e33846c18218',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'062597'},body:JSON.stringify({sessionId:'062597',runId:'audio-route-debug-2',hypothesisId:'H1',location:'AriaScreen.tsx:speak:entry',message:'speak invoked',data:{platform:Platform.OS,textLength:text?.length??0,voiceStateBefore:voiceState},timestamp:Date.now()})}).catch(()=>{});
+    // #endregion
+    void remoteLog('[AUDIO_ROUTE] speak entry', {
+      runId: 'audio-route-debug-2',
+      platform: Platform.OS,
+      textLength: text?.length ?? 0,
+      voiceStateBefore: voiceState,
+    });
     stopElevenLabsSpeech();
     lastQuestionTextRef.current = text;
     setVoiceState('speaking');
@@ -2692,7 +2751,12 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
     try {
       // Ensure playback route is reset immediately before TTS (fixes low-volume-after-recording on iOS).
       await setPlaybackMode();
+      // #region agent log
+      fetch('http://127.0.0.1:7789/ingest/668e0bd5-3283-4492-9f48-e33846c18218',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'062597'},body:JSON.stringify({sessionId:'062597',runId:'audio-route-debug-2',hypothesisId:'H1',location:'AriaScreen.tsx:speak:afterSetPlaybackMode',message:'setPlaybackMode finished in speak',data:{platform:Platform.OS},timestamp:Date.now()})}).catch(()=>{});
+      // #endregion
+      void remoteLog('[AUDIO_ROUTE] speak after setPlaybackMode', { runId: 'audio-route-debug-2', platform: Platform.OS });
       await speakWithElevenLabs(text);
+      void remoteLog('[AUDIO_ROUTE] speak after tts', { runId: 'audio-route-debug-2', platform: Platform.OS });
     } finally {
       isSpeakingRef.current = false;
       timingRef.current.questionEndTime = Date.now();
@@ -4094,29 +4158,67 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
   /** Transcribe audio (blob on web; on native prefer blob from hook, else URI or base64). Returns null on failure. */
   const transcribeSafe = useCallback(
     async (audioBlob: Blob | null, nativeUri: string | null): Promise<string | null> => {
+      void remoteLog('[TRANSCRIBE] entry', {
+        runId: 'audio-route-debug-10',
+        platform: Platform.OS,
+        blobSize: audioBlob?.size ?? 0,
+        hasNativeUri: !!nativeUri,
+        hasOpenAIKey: !!OPENAI_API_KEY,
+        hasWhisperProxy: !!OPENAI_WHISPER_PROXY_URL,
+        hasSupabaseAnonKey: !!SUPABASE_ANON_KEY,
+      });
       if (__DEV__) {
         console.log('=== TRANSCRIPTION DEBUG ===', 'Platform:', Platform.OS, 'Native URI:', nativeUri ?? 'none', 'Blob size:', audioBlob?.size ?? 0, 'Endpoint:', OPENAI_WHISPER_PROXY_URL || 'openai');
       }
       try {
         const transcriptUrl = OPENAI_WHISPER_PROXY_URL || 'https://api.openai.com/v1/audio/transcriptions';
         const authHeaders: Record<string, string> = OPENAI_WHISPER_PROXY_URL
-          ? {}
+          ? (SUPABASE_ANON_KEY
+              ? { Authorization: `Bearer ${SUPABASE_ANON_KEY}`, apikey: SUPABASE_ANON_KEY }
+              : {})
           : { Authorization: `Bearer ${OPENAI_API_KEY}` };
 
         const transcript = await withRetry(
           async (): Promise<string> => {
             // Native: FileSystem.uploadAsync uses iOS NSURLSession directly — avoids all RN fetch/FormData blob issues
             if (Platform.OS !== 'web' && nativeUri) {
-              const uploadResult = await FileSystem.uploadAsync(transcriptUrl, nativeUri, {
+              let nativeAuthHeaders = authHeaders;
+              if (OPENAI_WHISPER_PROXY_URL && !nativeAuthHeaders.Authorization) {
+                const sessionResult = await supabase.auth.getSession().catch(() => null);
+                const accessToken = sessionResult?.data?.session?.access_token?.trim();
+                if (accessToken) {
+                  nativeAuthHeaders = {
+                    Authorization: `Bearer ${accessToken}`,
+                  };
+                }
+                void remoteLog('[TRANSCRIBE] proxy_auth_fallback', {
+                  runId: 'audio-route-debug-10',
+                  hasSessionToken: !!accessToken,
+                  usedFallbackToken: !!accessToken,
+                });
+              }
+              const legacyUploadType = (
+                FileSystemLegacy as unknown as { FileSystemUploadType?: { MULTIPART?: number } }
+              ).FileSystemUploadType?.MULTIPART;
+              // #region agent log
+              fetch('http://127.0.0.1:7789/ingest/668e0bd5-3283-4492-9f48-e33846c18218',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'062597'},body:JSON.stringify({sessionId:'062597',runId:'audio-route-debug-10',hypothesisId:'H-TX-1',location:'AriaScreen.tsx:transcribeSafe:nativeUpload',message:'native upload options resolved',data:{hasLegacyMultipart:typeof legacyUploadType==='number',legacyMultipartValue:legacyUploadType??null,endpointUsed:OPENAI_WHISPER_PROXY_URL?'proxy':'openai'},timestamp:Date.now()})}).catch(()=>{});
+              // #endregion
+              const uploadResult = await FileSystemLegacy.uploadAsync(transcriptUrl, nativeUri, {
                 httpMethod: 'POST',
-                uploadType: FileSystem.FileSystemUploadType.MULTIPART,
+                uploadType: (legacyUploadType ?? 1) as unknown as never,
                 fieldName: 'file',
                 mimeType: 'audio/mp4',
                 parameters: { model: 'whisper-1' },
-                headers: authHeaders,
+                headers: nativeAuthHeaders,
               });
               if (__DEV__) console.log('Transcription response status:', uploadResult.status);
               if (uploadResult.status < 200 || uploadResult.status >= 300) {
+                void remoteLog('[TRANSCRIBE] non_ok_response', {
+                  runId: 'audio-route-debug-10',
+                  endpointUsed: OPENAI_WHISPER_PROXY_URL ? 'proxy' : 'openai',
+                  status: uploadResult.status,
+                  bodyPreview: (uploadResult.body ?? '').slice(0, 160),
+                });
                 const err = new Error(uploadResult.body?.slice(0, 200) || `HTTP ${uploadResult.status}`);
                 Object.assign(err, { status: uploadResult.status });
                 throw err;
@@ -4125,6 +4227,11 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
               const text = (data.text ?? '').trim();
               if (__DEV__) console.log('Transcription result length:', text.length, '=== END DEBUG ===');
               if (text.length < 2) throw new Error('Empty transcription result');
+              void remoteLog('[TRANSCRIBE] success', {
+                runId: 'audio-route-debug-10',
+                endpointUsed: OPENAI_WHISPER_PROXY_URL ? 'proxy' : 'openai',
+                transcriptLength: text.length,
+              });
               return text;
             }
 
@@ -4140,17 +4247,40 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
             form.append('model', 'whisper-1');
             const res = await fetch(transcriptUrl, { method: 'POST', headers: authHeaders, body: form });
             if (__DEV__) console.log('Transcription response status:', res.status);
-            if (!res.ok) throw new Error(await res.text());
+            if (!res.ok) {
+              const errText = await res.text();
+              void remoteLog('[TRANSCRIBE] non_ok_response', {
+                runId: 'audio-route-debug-10',
+                endpointUsed: OPENAI_WHISPER_PROXY_URL ? 'proxy' : 'openai',
+                status: res.status,
+                bodyPreview: errText.slice(0, 160),
+              });
+              throw new Error(errText);
+            }
             const data = (await res.json()) as { text?: string };
             const text = (data.text ?? '').trim();
             if (__DEV__) console.log('Transcription result length:', text.length, '=== END DEBUG ===');
             if (text.length < 2) throw new Error('Empty transcription result');
+            void remoteLog('[TRANSCRIBE] success', {
+              runId: 'audio-route-debug-10',
+              endpointUsed: OPENAI_WHISPER_PROXY_URL ? 'proxy' : 'openai',
+              transcriptLength: text.length,
+            });
             return text;
           },
           { retries: 2, baseDelay: 4000, context: 'transcription' }
         );
         return transcript;
       } catch (err) {
+        void remoteLog('[TRANSCRIBE] catch', {
+          runId: 'audio-route-debug-10',
+          errorName: err instanceof Error ? err.name : 'unknown',
+          errorMessage: err instanceof Error ? err.message : String(err),
+          hasOpenAIKey: !!OPENAI_API_KEY,
+          hasWhisperProxy: !!OPENAI_WHISPER_PROXY_URL,
+          hasNativeUri: !!nativeUri,
+          blobSize: audioBlob?.size ?? 0,
+        });
         if (__DEV__) console.error('Transcription failed:', err instanceof Error ? err.message : err);
         await deleteTurnAudioFile(nativeUri);
         const retryMessages = Platform.OS === 'web'
@@ -4169,6 +4299,15 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
 
   const audioRecorder = useAudioRecorder({
     onRecordingComplete: async (blob, nativeUri) => {
+      // #region agent log
+      fetch('http://127.0.0.1:7789/ingest/668e0bd5-3283-4492-9f48-e33846c18218',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'062597'},body:JSON.stringify({sessionId:'062597',runId:'audio-route-debug-2',hypothesisId:'H2',location:'AriaScreen.tsx:onRecordingComplete:entry',message:'recording completed callback fired',data:{platform:Platform.OS,blobSize:blob?.size??0,hasNativeUri:!!nativeUri},timestamp:Date.now()})}).catch(()=>{});
+      // #endregion
+      void remoteLog('[AUDIO_ROUTE] onRecordingComplete', {
+        runId: 'audio-route-debug-2',
+        platform: Platform.OS,
+        blobSize: blob?.size ?? 0,
+        hasNativeUri: !!nativeUri,
+      });
       setVoiceState('processing');
       const userText = await transcribeSafe(blob, nativeUri);
       if (userText) {
@@ -4188,11 +4327,22 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
   });
 
   const handleNativeOrWhisperMicPress = useCallback(async () => {
+    void remoteLog('[AUDIO_ROUTE] mic press', {
+      runId: 'audio-route-debug-2',
+      platform: Platform.OS,
+      voiceState,
+      useNativeOrWhisperRecording,
+      isRecording: audioRecorder.isRecording,
+    });
     if (voiceState === 'speaking' || voiceState === 'processing') return;
     if (!useNativeOrWhisperRecording) return;
     if (__DEV__) console.log('[Aria] MIC PRESSED, isRecording:', audioRecorder.isRecording);
     try {
       if (audioRecorder.isRecording) {
+        void remoteLog('[AUDIO_ROUTE] stop recording requested', {
+          runId: 'audio-route-debug-2',
+          platform: Platform.OS,
+        });
         await audioRecorder.stopRecording();
         if (__DEV__) console.log('[Aria] RECORDING STOPPED');
       } else {
@@ -4200,6 +4350,10 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
         if (__DEV__) console.log('[Aria] MIC PERMISSION:', granted ? 'granted' : 'denied');
         if (!granted) return;
         setVoiceState('recording');
+        void remoteLog('[AUDIO_ROUTE] start recording requested', {
+          runId: 'audio-route-debug-2',
+          platform: Platform.OS,
+        });
         await audioRecorder.startRecording();
         if (__DEV__) console.log('[Aria] RECORDING STARTED');
       }
@@ -4398,6 +4552,7 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
       const hasKey = !!ANTHROPIC_API_KEY;
       const hasProxy = !!ANTHROPIC_PROXY_URL;
       await remoteLog('[START] API check', {
+        audioRouteDebugBuild: AUDIO_ROUTE_DEBUG_BUILD,
         hasAnthropicKey: hasKey,
         hasProxyUrl: hasProxy,
         willUseFallback: !hasKey && !hasProxy,
@@ -5450,6 +5605,7 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
           <Text style={styles.introNote}>
             For best transcription reliability: use a stable connection, speak in a quieter space, and pause briefly before releasing the mic.
           </Text>
+          <Text style={styles.introNote}>Build marker: {AUDIO_ROUTE_DEBUG_BUILD}</Text>
           {micError ? (
             <View style={styles.micErrorBlock}>
               <Text style={styles.micErrorText}>{micError}</Text>

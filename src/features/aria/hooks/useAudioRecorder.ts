@@ -101,6 +101,9 @@ export function useAudioRecorder({
     if (!recording) return;
 
     try {
+      // #region agent log
+      fetch('http://127.0.0.1:7789/ingest/668e0bd5-3283-4492-9f48-e33846c18218',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'062597'},body:JSON.stringify({sessionId:'062597',runId:'audio-route-debug-1',hypothesisId:'H2',location:'useAudioRecorder.ts:stopNativeRecording:entry',message:'stop native recording called',data:{platform:Platform.OS},timestamp:Date.now()})}).catch(()=>{});
+      // #endregion
       await recording.stopAndUnloadAsync();
 
       const uri = recording.getURI();
@@ -110,6 +113,9 @@ export function useAudioRecorder({
       if (uri) {
         const response = await fetch(uri);
         const blob = await response.blob();
+        // #region agent log
+        fetch('http://127.0.0.1:7789/ingest/668e0bd5-3283-4492-9f48-e33846c18218',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'062597'},body:JSON.stringify({sessionId:'062597',runId:'audio-route-debug-1',hypothesisId:'H2',location:'useAudioRecorder.ts:stopNativeRecording:afterBlob',message:'native recording blob ready',data:{blobSize:blob?.size??0,hasUri:!!uri},timestamp:Date.now()})}).catch(()=>{});
+        // #endregion
         await onRecordingComplete?.(blob, uri);
       }
     } catch (err) {
