@@ -1,9 +1,79 @@
-diff --git a/node_modules/expo-av/ios/EXAV/EXAV.m b/node_modules/expo-av/ios/EXAV/EXAV.m
---- a/node_modules/expo-av/ios/EXAV/EXAV.m
-+++ b/node_modules/expo-av/ios/EXAV/EXAV.m
-@@ -324,8 +324,12 @@
+diff --git a/node_modules/expo-av/android/src/main/java/expo/modules/av/AVManager.java b/node_modules/expo-av/android/src/main/java/expo/modules/av/AVManager.java
+index 964af5d..78919dd 100644
+--- a/node_modules/expo-av/android/src/main/java/expo/modules/av/AVManager.java
++++ b/node_modules/expo-av/android/src/main/java/expo/modules/av/AVManager.java
+@@ -390,6 +390,22 @@ public class AVManager implements LifecycleEventListener, AudioManager.OnAudioFo
    }
  
+   private void updatePlaySoundThroughEarpiece(boolean playThroughEarpiece) {
++    // After recording/voice routing, Bluetooth SCO or communication device can keep output on earpiece-like path.
++    if (!playThroughEarpiece) {
++      try {
++        mAudioManager.stopBluetoothSco();
++        mAudioManager.setBluetoothScoOn(false);
++      } catch (Exception e) {
++        Log.w("ExpoAV", "updatePlaySoundThroughEarpiece bluetooth reset", e);
++      }
++      if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
++        try {
++          mAudioManager.clearCommunicationDevice();
++        } catch (Exception e) {
++          Log.w("ExpoAV", "clearCommunicationDevice", e);
++        }
++      }
++    }
+     mAudioManager.setMode(playThroughEarpiece ? AudioManager.MODE_IN_COMMUNICATION : AudioManager.MODE_NORMAL);
+     mAudioManager.setSpeakerphoneOn(!playThroughEarpiece);
+   }
+diff --git a/node_modules/expo-av/ios/EXAV/EXAV.h b/node_modules/expo-av/ios/EXAV/EXAV.h
+index 42a79e1..24ff737 100644
+--- a/node_modules/expo-av/ios/EXAV/EXAV.h
++++ b/node_modules/expo-av/ios/EXAV/EXAV.h
+@@ -62,4 +62,7 @@ typedef NS_OPTIONS(NSUInteger, EXAudioRecordingOptionBitRateStrategy)
+ - (void)handleMediaServicesReset:(NSNotification *)notification;
+ - (void)handleAudioSessionInterruption:(NSNotification *)notification;
+ 
++/** patch-package (Amoraea): re-apply speaker port right before AVPlayer starts. */
++- (void)amoraeaReassertPlaybackSpeakerRoute;
++
+ @end
+diff --git a/node_modules/expo-av/ios/EXAV/EXAV.m b/node_modules/expo-av/ios/EXAV/EXAV.m
+index 7153d28..212931b 100644
+--- a/node_modules/expo-av/ios/EXAV/EXAV.m
++++ b/node_modules/expo-av/ios/EXAV/EXAV.m
+@@ -283,8 +283,22 @@ EX_EXPORT_MODULE(ExponentAV);
+     _allowsAudioRecording = allowsRecording;
+     _staysActiveInBackground = shouldPlayInBackground;
+     
+-    if (_currentAudioSessionMode != EXAVAudioSessionModeInactive) {
+-      return [self _updateAudioSessionCategoryForAudioSessionMode:[self _getAudioSessionModeRequired]];
++    // Stock behavior skipped category updates while inactive — after stopAndUnloadAsync the session
++    // often demotes to Inactive, so setPlaybackMode(allowsRecording:NO) never moved AVAudioSession off
++    // PlayAndRecord/receiver; TTS stayed earpiece-quiet until something re-promoted audio.
++    NSError *categoryError = [self _updateAudioSessionCategoryForAudioSessionMode:[self _getAudioSessionModeRequired]];
++    if (categoryError) {
++      return categoryError;
++    }
++    if (_currentAudioSessionMode == EXAVAudioSessionModeInactive && _playsInSilentMode && !_allowsAudioRecording) {
++      void (^applySpeaker)(void) = ^{
++        [self _amoraeaApplyOutputPortOverrideAfterActivation];
++      };
++      if ([NSThread isMainThread]) {
++        applySpeaker();
++      } else {
++        dispatch_sync(dispatch_get_main_queue(), applySpeaker);
++      }
+     }
+     return nil;
+   }
+@@ -319,16 +333,52 @@ EX_EXPORT_MODULE(ExponentAV);
+     }
+   }
+ 
+-  if ([[_kernelAudioSessionManagerDelegate activeCategory] isEqual:requiredAudioCategory] && [_kernelAudioSessionManagerDelegate activeCategoryOptions] == requiredAudioCategoryOptions) {
+-    return nil;
+-  }
+-    
    if (_allowsAudioRecording) {
      // Bluetooth input is only available when recording is allowed
      requiredAudioCategoryOptions = requiredAudioCategoryOptions | AVAudioSessionCategoryOptionAllowBluetooth;
@@ -11,6 +81,75 @@ diff --git a/node_modules/expo-av/ios/EXAV/EXAV.m b/node_modules/expo-av/ios/EXA
 +    // Playback: use PlayAndRecord + DefaultToSpeaker so TTS routes to loudspeaker, not earpiece (fixes quiet speaker after first mic use)
 +    requiredAudioCategory = AVAudioSessionCategoryPlayAndRecord;
 +    requiredAudioCategoryOptions = requiredAudioCategoryOptions | AVAudioSessionCategoryOptionDefaultToSpeaker;
++  }
++
++  // Compare *after* applying Bluetooth / DefaultToSpeaker. Otherwise Playback+Mix matches active session and we skip upgrading to speaker-capable PlayAndRecord (earpiece TTS).
++  NSError *categoryError = nil;
++  if (!([[_kernelAudioSessionManagerDelegate activeCategory] isEqual:requiredAudioCategory] && [_kernelAudioSessionManagerDelegate activeCategoryOptions] == requiredAudioCategoryOptions)) {
++    categoryError = [_kernelAudioSessionManagerDelegate setCategory:requiredAudioCategory withOptions:requiredAudioCategoryOptions forModule:self];
++    if (categoryError) {
++      return categoryError;
++    }
++  }
++
++  return nil;
++}
++
++- (void)_amoraeaApplyOutputPortOverrideAfterActivation
++{
++  if (!_playsInSilentMode) {
++    return;
++  }
++  AVAudioSession *session = [AVAudioSession sharedInstance];
++  NSError *err = nil;
++  if (_allowsAudioRecording) {
++    [session overrideOutputAudioPort:AVAudioSessionPortOverrideNone error:&err];
++  } else {
++    [session overrideOutputAudioPort:AVAudioSessionPortOverrideSpeaker error:&err];
+   }
++  (void)err;
++}
+ 
+-  return [_kernelAudioSessionManagerDelegate setCategory:requiredAudioCategory withOptions:requiredAudioCategoryOptions forModule:self];
++- (void)amoraeaReassertPlaybackSpeakerRoute
++{
++  void (^apply)(void) = ^{
++    [self _amoraeaApplyOutputPortOverrideAfterActivation];
++  };
++  if ([NSThread isMainThread]) {
++    apply();
++  } else {
++    dispatch_sync(dispatch_get_main_queue(), apply);
++  }
+ }
+ 
+ - (EXAVAudioSessionMode)_getAudioSessionModeRequired
+@@ -380,6 +430,16 @@ EX_EXPORT_MODULE(ExponentAV);
+     return error;
    }
  
-   return [_kernelAudioSessionManagerDelegate setCategory:requiredAudioCategory withOptions:requiredAudioCategoryOptions forModule:self];
++  // DefaultToSpeaker + category can still leave output on receiver until after setActive; override must run on main (Apple session APIs are main-thread affinity).
++  void (^applySpeaker)(void) = ^{
++    [self _amoraeaApplyOutputPortOverrideAfterActivation];
++  };
++  if ([NSThread isMainThread]) {
++    applySpeaker();
++  } else {
++    dispatch_sync(dispatch_get_main_queue(), applySpeaker);
++  }
++
+   _currentAudioSessionMode = audioSessionModeRequired;
+   return nil;
+ }
+diff --git a/node_modules/expo-av/ios/EXAV/EXAVPlayerData.m b/node_modules/expo-av/ios/EXAV/EXAVPlayerData.m
+index 6f6998d..97831f4 100644
+--- a/node_modules/expo-av/ios/EXAV/EXAVPlayerData.m
++++ b/node_modules/expo-av/ios/EXAV/EXAVPlayerData.m
+@@ -251,6 +251,7 @@ NSString *const EXAVPlayerDataObserverMetadataKeyPath = @"timedMetadata";
+   if (_player && [self _shouldPlayerPlay]) {
+     NSError *error = [_exAV promoteAudioSessionIfNecessary];
+     if (!error) {
++      [_exAV amoraeaReassertPlaybackSpeakerRoute];
+       _player.muted = _isMuted;
+       _player.rate = [_rate doubleValue];
+     }

@@ -24,7 +24,8 @@ import Constants from 'expo-constants';
 import { INTERVIEWER_SYSTEM_FRAMEWORK } from '@features/aria/interviewerFrameworkPrompt';
 import { INTERVIEW_MARKER_IDS, INTERVIEW_MARKER_LABELS } from '@features/aria/interviewMarkers';
 import { setPlaybackMode } from '@features/aria/utils/audioModeHelpers';
-import { speakWithElevenLabs, stopElevenLabsSpeech } from '@features/aria/utils/elevenLabsTts';
+import { speakWithElevenLabs, stopElevenLabsPlayback, stopElevenLabsSpeech } from '@features/aria/utils/elevenLabsTts';
+import { AUDIO_ROUTE_DEBUG_BUILD, withAudioRouteDebugBuild } from '@features/aria/utils/audioRouteDebugBuild';
 import { ProfileRepository } from '@data/repositories/ProfileRepository';
 import { evaluateGate1 } from '@features/onboarding/evaluateGate1';
 import type { Gate1Score } from '@domain/models/OnboardingGates';
@@ -40,10 +41,13 @@ import {
 import { requestMicPermissionForPWA } from '@utilities/permissions/requestMicPermission';
 import { withRetry, classifyError } from '@utilities/withRetry';
 import { remoteLog } from '@utilities/remoteLog';
+import { waitForInterviewAttemptScoringReady } from '@utilities/waitForInterviewAttemptScoringReady';
+import { runCommunicationStylePipelineAfterSave } from '@utilities/runCommunicationStylePipeline';
 import { FlameOrb } from '@app/screens/FlameOrb';
 import { UserInterviewLayout, type ActiveScenario } from '@app/screens/UserInterviewLayout';
 import { InterviewAnalysisScreen } from '@app/screens/InterviewAnalysisScreen';
 import { AdminInterviewDashboard, AdminAttemptTabsView } from '@app/screens/AdminInterviewDashboard';
+import { UserCommunicationStyleSection } from '@ui/components/UserCommunicationStyleSection';
 import {
   calculateScoreConsistency,
   calculateConstructAsymmetry,
@@ -59,7 +63,16 @@ import {
 import { applyMoment4RepairCalibrationRule } from '@features/aria/moment4RepairCalibration';
 import {
   evaluateMoment5AppreciationSpecificity,
+  hasMoment4PersonalNarrativeEngagement,
+  hasScenarioAQ1VignetteEngagement,
+  hasScenarioBQ1OnTopicEngagement,
   isLikelyMisplacedPersonalNarrativeForScenarioCThreshold,
+  isMoment5AppreciationAbsenceOfSignal,
+  isMoment5InexperienceFallbackPrompt,
+  MOMENT_5_INEXPERIENCE_FALLBACK_QUESTION,
+  moment5AcknowledgesLimitedCloseRelationshipExperience,
+  moment5HasHighInformationBehavioralExample,
+  moment5HasSubstantiveCelebrationValuesReflection,
   normalizeScoresByEvidence,
 } from '@features/aria/probeAndScoringUtils';
 import * as FileSystem from 'expo-file-system';
@@ -575,20 +588,13 @@ function isAppreciationPromptText(text: string): boolean {
 }
 
 function looksLikeMoment5Probe(text: string): boolean {
-  const t = text.toLowerCase();
+  const t = text.toLowerCase().trim();
   return (
     t.includes('particular moment that comes to mind') ||
     t.includes('what made you decide on that specifically') ||
+    (/\bwhat made you decide to\b/.test(t) && t.endsWith('?')) ||
     t.includes('what do you remember about how they responded')
   );
-}
-
-function chooseMoment5Probe(userText: string): string {
-  const t = userText.toLowerCase();
-  if (/\b(always|usually|generally|typically)\b/.test(t)) {
-    return 'Is there a particular moment that comes to mind?';
-  }
-  return 'What made you decide on that specifically?';
 }
 
 function looksLikeMoment4ThresholdQuestion(text: string): boolean {
@@ -672,7 +678,9 @@ function hasSpecificSamLineContemptRecognition(text: string): boolean {
     t.includes('you have made that very clear') ||
     (t.includes('very clear') && t.includes('sam'));
   const namesContemptQuality =
-    /\b(cont(empt|emptuous)|cold|passive[- ]aggressive|dismissive|superior|biting|sarcastic|verdict)\b/.test(t);
+    /\b(cont(empt|emptuous)|cold|passive[- ]aggressive|dismissive|superior|biting|sarcastic|verdict|mean|shuts?\s+down|shutting\s+down|(closes?|closing|closed)\s+(things?\s+)?off|slightly\s+mean|sounds?\s+mean)\b/.test(
+      t
+    );
   return referencesSpecificLine && namesContemptQuality;
 }
 
@@ -681,15 +689,6 @@ function userSidesEntirelyWithJordan(text: string): boolean {
   const blamesAlex = /\b(alex (is|was) (too|overly)? ?(sensitive|dramatic|overreacting)|alex should( have)? just|alex is the problem)\b/.test(t);
   const jordanOnlyRight = /\b(jordan (did nothing wrong|was right|handled it fine)|nothing jordan could do|jordan was fine)\b/.test(t);
   return blamesAlex || jordanOnlyRight;
-}
-
-function naturallyRecognizesAlexNeed(text: string): boolean {
-  const t = text.toLowerCase();
-  const emotionalBidRecognition =
-    /\b(trail(ed|ing) off|needed to feel (seen|heard|understood)|emotional bid|honor(ing)? the emotional|logistics alone|salary alone|commute alone)\b/.test(t);
-  const attunedRecognition =
-    /\b(alex needed|he needed|he wanted)\b.*\b(comfort|validation|acknowledg|empathy|care|attunement)\b/.test(t);
-  return emotionalBidRecognition || attunedRecognition;
 }
 
 function hasMoment5TransitionSignal(text: string): boolean {
@@ -710,10 +709,13 @@ function buildClosingLinePrompt(messages: { role: string; content: string }[]): 
     .map((m) => m.content)
     .join('\n');
   return `Based on this interview, write ONE closing line for the interviewer to deliver. It should:
-- Integrate multiple moments: reference specific content from at least two of the fictional scenarios AND connect to the personal questions where relevant (not only the final answer).
-- Be specific and warm, and reflect the arc of the conversation without diagnosing personal limitations or unresolved failures.
+- Include at least TWO distinct concrete references to specific content the user actually said (people, lines, moments, or decisions they named). Each reference must be something that has NOT already been echoed back in a prior assistant/reflection turn in this transcript — scan assistant turns and choose fresh details.
+- Do not invent through-lines, thematic summaries, or interpretive claims the user did not make (e.g. "there's something about recognizing when someone needs…" unless they said that).
+- Do not use evaluative or performance language about the user (no grades, no "you did well," "strong," "clearly," "great job," trait praise, or interview performance comments).
+- Be specific and warm without diagnosing personal limitations or unresolved failures.
 - NOT be a question; 1-2 sentences maximum.
 - NOT start with "Thank you"
+- NOT start with "Sure" or "Okay" or "Absolutely" or "That makes sense" or "That checks out" or "That lands"
 - NOT mention the word "journey" or "foundation"
 
 Banned closing phrases:
@@ -739,7 +741,9 @@ Write only the closing line. No preamble.`;
 const CLOSING_LINE_INSTRUCTIONS = `
 CLOSING LINE — CONCRETE, BRIEF, HUMAN:
 
-The closing line before [INTERVIEW_COMPLETE] should reference at most TWO specific moments from the conversation. Choose the most revealing concrete moments the user actually named. Do not list many moments like a report.
+The closing line before [INTERVIEW_COMPLETE] must name at least TWO distinct concrete details from this interview that the user actually said, and those details must NOT have already been reflected back earlier in any assistant turn (read prior assistant messages; pick fresh specifics). Do not list many moments like a report. Do not start the closing with "Sure," "Okay," "Absolutely," "That makes sense," "That checks out," or "That lands."
+
+Do not invent through-lines, synthesized themes, or interpretive summaries the user did not offer. Do not use evaluative language about how they performed in the interview or as a person (no "you did well," trait labels, "clearly," performance praise).
 
 BANNED PHRASES — never use these:
 - "You've worked through all three of those clearly" / "You worked through all three clearly"
@@ -748,19 +752,22 @@ BANNED PHRASES — never use these:
 - Any variation of "clearly" used as filler praise
 - "A lot of self-awareness"
 - "You handled that well"
+- Templated closings that reuse the same sentence across interviews — e.g. phrases like "those moments both stayed with me," "stuck with me," or "I'm holding both of those" as a fixed formula. Wording must be unique to this transcript's actual content.
 
 REQUIRED: Before writing the closing line, identify:
-1. One or two concrete details you can quote or closely echo.
-2. Why those details mattered in the flow of conversation (without evaluative labels).
-3. A grounded reflection that stays in those details.
+1. One or two concrete details you can quote or closely echo (only from user turns).
+2. Write 1-2 sentences that stay on those details only — no new thesis about their style, pattern, or "what that says about them."
 
-Then write 1-2 sentences that name those details directly (by content, not by number).
+Then write 1-2 sentences that name those details directly (by content, not by number). Do not add thematic synthesis the user did not offer.
 
-EXAMPLES OF SPECIFIC CLOSING LINES:
+CLOSING — STRENGTH ATTRIBUTION:
+Do not describe a quality as how they handled "the scenarios" or the interview overall when it only showed up in one part (e.g. only Moment 5 appreciation). Either show that strength across multiple named beats or attribute it clearly to the single moment where it appeared.
 
-User with concrete specifics: "When you described Alex trailing off and then shared the part about your brother's toast, those moments both stayed with me."
+EXAMPLES OF SPECIFIC CLOSING LINES (illustrative only — do not copy phrasing; echo this user's exact topics):
 
-User with grounded continuity: "The way you spoke about Sam's 'very clear' line and the grudge story had the same kind of emotional temperature."
+User with concrete specifics: "The image of Alex trailing off — and the story about your brother's toast — those are what I'm walking away with."
+
+User with two scenario beats (no invented through-line): "Sam's 'very clear' line landed one way for you, and the way you read Morgan and Theo came through differently — I'm sitting with both."
 
 The closing line is honest and specific. It is not a grade. It is not broad praise. Keep it human and warm; do NOT end by highlighting what the user couldn't do or hasn't resolved.
 Do not use evaluative characterizations of the user (for example: "grounded," "mature," "self-aware," "clear-headed," "strong"). Stay with what happened, not trait labels.
@@ -775,17 +782,22 @@ Do NOT use clinical/theoretical labels in the closing (e.g. "attunement," "menta
 `;
 
 const PERSONAL_CLOSING_INSTRUCTION = `
-CLOSING: The user shared real personal experiences in moments four and/or five. Close with warmth that acknowledges their openness — something genuine but not effusive. Reference no more than one or two specific moments total. Do not evaluate the user or name traits; reflect concrete moments only. Do not reframe low-scoring signals as positives. Do not use clinical/theoretical labels in the closing. Then "Thank you for being so open with me" or similar. Then output [INTERVIEW_COMPLETE].`;
+CLOSING: The user shared real personal experiences in moments four and/or five. Close with warmth that acknowledges their openness — something genuine but not effusive. Name at least two concrete details they gave that you have not already echoed in a prior assistant turn; echo what they said without new thematic synthesis or through-lines they did not offer. Do not start the closing with "Sure," "Okay," "Absolutely," "That makes sense," "That checks out," or "That lands." Do not evaluate the user or name traits; reflect concrete moments only. Do not reframe low-scoring signals as positives. Do not use clinical/theoretical labels in the closing. Then "Thank you for being so open with me" or similar. Then output [INTERVIEW_COMPLETE].`;
 
 const SCENARIO_ONLY_CLOSING_INSTRUCTION = `
-CLOSING: The user stayed mostly in analytical mode on the personal moments or gave very little personal detail. Do NOT over-thank for vulnerability. Keep the closing brief and reference only one or two specific moments. Do not evaluate the user or frame behavior as traits. Then output [INTERVIEW_COMPLETE].`;
+CLOSING: The user stayed mostly in analytical mode on the personal moments or gave very little personal detail. Do NOT over-thank for vulnerability. Keep the closing brief; name at least two concrete details from user turns that you have not already echoed in a prior assistant message, or one detail if only one strong unused detail exists — never invent a second. Echo content without thematic synthesis they did not offer. Do not start with "Sure," "Okay," "Absolutely," "That makes sense," "That checks out," or "That lands." Do not evaluate the user or frame behavior as traits. Then output [INTERVIEW_COMPLETE].`;
 
 function sanitizeClosingLanguage(text: string): string {
   if (!text) return text;
   let out = text
+    .replace(/^\s*Sure[.,]?\s+/i, '')
+    .replace(/^\s*Okay[.,]?\s+/i, '')
+    .replace(/^\s*Absolutely[.,]?\s+/i, '')
+    .replace(/^\s*That makes sense[.,]?\s+/i, '')
+    .replace(/^\s*That checks out[.,]?\s+/i, '')
+    .replace(/^\s*That lands[.,]?\s+/i, '')
     .replace(/\brather\s+than\s+just\s+saying\b/gi, '')
     .replace(/\brather\s+than\s+just\b/gi, '')
-    .replace(/\brather\s+than\b/gi, 'and')
     .replace(/\byou(?:'ve| have)\s+stayed grounded throughout this whole conversation[.,]?/gi, '')
     .replace(/\byou stayed grounded throughout this whole conversation[.,]?/gi, '')
     .replace(/\s{2,}/g, ' ')
@@ -816,36 +828,119 @@ function sanitizeClosingLanguage(text: string): string {
   return out;
 }
 
+/**
+ * Hard blocklist: empty acknowledgments before the real reflection (applied on every assistant line before TTS/display).
+ * Does not remove phrases that are integrated into one idea (e.g. "That makes sense that you'd feel…").
+ */
+function stripFlatReflectionAcknowledgmentOpeners(text: string): string {
+  const original = text.trim();
+  if (!original) return original;
+  const MIN_REMAINDER = 14;
+  const orderedPhrases = [
+    'That makes sense',
+    'That checks out',
+    'That lands',
+    'Absolutely',
+    'Sure',
+  ];
+  let t = original;
+  let guard = 0;
+  let changed = true;
+  while (changed && guard++ < 4) {
+    changed = false;
+    for (const phrase of orderedPhrases) {
+      const esc = phrase.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+      const reComma = new RegExp(`^${esc}\\s*[,;.]\\s+`, 'i');
+      const reDash = new RegExp(`^${esc}\\s*[—–]\\s*`, 'i');
+      const reSpaceClause = new RegExp(
+        `^${esc}\\s+(?=[IY]|I'm\\b|I've\\b|You're\\b|That\\s|What\\s|So\\s|It\\s|This\\s|The\\s|When\\s|If\\s|Here\\b|There\\b|For\\s|From\\s)`,
+        'i'
+      );
+      for (const re of [reComma, reDash, reSpaceClause]) {
+        const next = t.replace(re, '').trim();
+        if (next !== t && next.length >= MIN_REMAINDER) {
+          t = next;
+          changed = true;
+          break;
+        }
+      }
+      if (changed) break;
+    }
+  }
+  return t || original;
+}
+
+function userUtteranceHasContrastMarkers(userText: string): boolean {
+  const u = userText.toLowerCase();
+  return (
+    /\binstead\s+of\b/.test(u) ||
+    /\brather\s+than\b/.test(u) ||
+    /\bnot\s+[^.,!?]{1,100}\s+but\s+/i.test(userText) ||
+    /\bmore\s+[^.,!?]{1,60}\s+than\b/.test(u)
+  );
+}
+
+function reflectionKeepsContrastLanguage(reflection: string): boolean {
+  const r = reflection.toLowerCase();
+  return (
+    /\binstead\s+of\b/.test(r) ||
+    /\brather\s+than\b/.test(r) ||
+    /\bnot\s+.+\s+but\b/.test(r) ||
+    /\bover\b/.test(r) ||
+    /\bversus\b/.test(r) ||
+    /\bvs\.?\b/.test(r) ||
+    /\bwithout\b/.test(r) ||
+    /\bmore\s+.+\s+than\b/.test(r)
+  );
+}
+
+/** If user used explicit contrast and the model likely collapsed it (e.g. "and" for "rather than"), drop the first sentence. */
+function applyReflectionContrastFidelityRepair(userTurn: string, reflection: string): string {
+  if (!userUtteranceHasContrastMarkers(userTurn)) return reflection;
+  if (reflectionKeepsContrastLanguage(reflection)) return reflection;
+  const r = reflection.toLowerCase();
+  const u = userTurn.toLowerCase();
+  const likelyCollapsed =
+    (/\s\band\s/.test(r) && (/\brather\s+than\b/.test(u) || /\binstead\s+of\b/.test(u))) ||
+    (!reflectionKeepsContrastLanguage(reflection) && /\brather\s+than\b|\binstead\s+of\b/.test(u));
+  if (!likelyCollapsed) return reflection;
+  const sentences = reflection.split(/(?<=[.!?])\s+/).map((s) => s.trim()).filter(Boolean);
+  if (sentences.length <= 1) return reflection;
+  const tail = sentences.slice(1).join(' ').trim();
+  if (tail.length < 14) return reflection;
+  void remoteLog('[REFLECTION_CONTRAST_REPAIR]', {
+    droppedPrefix: sentences[0]?.slice(0, 220),
+  });
+  if (__DEV__) {
+    console.warn('[Aria] Dropped likely contrast-collapsed reflection lead; kept remainder.');
+  }
+  return tail;
+}
+
 function sanitizeInterviewSpeech(text: string): string {
   if (!text) return text;
   return text
-    .replace(/\brather\s+than\b/gi, 'and')
-    .replace(/\binstead\s+of\b/gi, 'and')
-    .replace(/\bas\s+opposed\s+to\b/gi, 'and')
-    .replace(/\bnot\s+just\b/gi, '')
-    .replace(/\bbeyond\s+just\b/gi, '')
-    .replace(/\bmore\s+than\s+just\b/gi, '')
+    .replace(/^\s*Sure[.,]?\s+/i, '')
+    .replace(/^\s*Okay[.,]?\s+/i, '')
+    .replace(/^\s*Absolutely[.,]?\s+/i, '')
+    .replace(/^\s*That makes sense[.,]?\s+/i, '')
+    .replace(/^\s*That checks out[.,]?\s+/i, '')
+    .replace(/^\s*That lands[.,]?\s+/i, '')
     .replace(/\s{2,}/g, ' ')
     .trim();
 }
 
 const REFLECTION_OPENERS_SHORT = [
   'Yeah',
-  'Okay',
-  'Sure',
   'Mm',
   'Fair',
   'Noted',
 ];
 const REFLECTION_OPENERS_WARM = [
-  'That makes sense',
   'I hear you',
-  'That lands',
   'I see what you mean',
   'Yeah, I can see that',
   "That's a real read",
-  'Absolutely',
-  'That checks out',
 ];
 const REFLECTION_OPENERS_ALL = [...REFLECTION_OPENERS_SHORT, ...REFLECTION_OPENERS_WARM];
 
@@ -975,6 +1070,12 @@ const SCENARIO_3_LABEL = 'Situation 3';
 const SCENARIO_3_TEXT =
   "Morgan and Theo have had the same argument for the third time. Morgan feels unheard because Theo goes silent or leaves, so the issue is never resolved. This time Morgan says 'we need to finish this.' Theo tries to avoid the conversation again. Morgan says 'you can't just keep avoiding this.' Theo's voice goes flat. He says 'I need ten minutes' and leaves. Morgan calls after him: 'that's exactly what I mean.' Thirty minutes later Theo comes back and says 'okay, I'm ready. I should have come back sooner the other times. I didn't know how.' Morgan is still upset.\n\nWhen Theo comes back and says 'I didn't know how' — what do you make of that?";
 
+/** Misplaced personal answer to Scenario C commitment probe — two-step redirect + explicit re-ask (see SC3_MISPLACED_THRESHOLD_SEQUENCE logs). */
+const SCENARIO_C_MISPLACED_THRESHOLD_REDIRECT =
+  'I think that one was about Theo and Morgan specifically — what would you say for them?';
+const SCENARIO_C_COMMITMENT_THRESHOLD_QUESTION =
+  "At what point would you say Theo or Morgan should decide this relationship isn't working?";
+
 const MOMENT_4_PERSONAL_LABEL = 'Personal reflection';
 const MOMENT_4_PERSONAL_CARD =
   "Have you ever held a grudge against someone, or had someone in your life you really didn't like? How did that happen, and where are you with it now?";
@@ -1030,7 +1131,7 @@ First line must introduce the interviewer directly by name, not the product:
 "Hi, I'm Amoraea. What can I call you?"
 Do not say "welcome to Amoraea."
 
-Your first message after learning the user's name should be the briefing. Weave the privacy recommendation naturally into it — not as a separate sentence at the end, but as part of the flow before asking if they're ready.
+Your first message after learning the user's name should be the briefing only — do NOT repeat data-use, audio processing, or legal-style disclosure here; the participant already saw that on the consent screen before the interview began.
 
 The briefing must include ALL of the following:
 - This is just a conversation, not a test to perform
@@ -1038,15 +1139,13 @@ The briefing must include ALL of the following:
 - The more specific the better, but no pressure
 - Five parts total: three short described situations, then two personal questions — all are required
 - The three situations are fictional vignettes (not optional personal substitutes)
-- A brief natural privacy note
-- A clearly readable disclosure before starting:
-  "Your interview responses — including audio and transcript — will be used to assess your relational readiness and to find you compatible matches. Audio is analyzed for communication style only. Raw audio is never shared with other users or third parties."
+- A brief natural privacy note about finding a private space to talk if helpful (practical only — not the full data-use disclosure)
 - "Ready when you are" or similar
 
-Example of how to weave it in:
-"Good to meet you, [name]. Before we get into it — this is really just a conversation. Real examples are great, small moments are fine, nothing needs to be dramatic. The more specific you can be about actual moments and actual words, the more useful this is — but there's no pressure to have a story ready. We'll do three short described situations, then two personal questions — all five parts matter. One thing worth mentioning — some of what we cover can get personal, so if you're somewhere you can have a bit of privacy, that helps. Your interview responses — including audio and transcript — will be used to assess your relational readiness and to find you compatible matches. Audio is analyzed for communication style only. Raw audio is never shared with other users or third parties. Ready when you are?"
+Example tone (no disclosure paragraph):
+"Good to meet you, [name]. Before we get into it — this is really just a conversation. Real examples are great, small moments are fine, nothing needs to be dramatic. The more specific you can be about actual moments and actual words, the more useful this is — but there's no pressure to have a story ready. We'll do three short described situations, then two personal questions — all five parts matter. One thing worth mentioning — some of what we cover can get personal, so if you're somewhere you can have a bit of privacy, that helps. Ready when you are?"
 
-Keep it conversational. The privacy note should feel like practical advice from a person, not a disclaimer.
+Keep it conversational.
 `;
 
 const SCENARIO_SWITCHING_INSTRUCTIONS = `
@@ -1064,9 +1163,9 @@ TRANSITION AFTER PERSONAL EXAMPLE — ACKNOWLEDGE THE DISCLOSURE:
 
 When the user has shared a real personal story (not a reaction to a fictional scenario), keep the transition reflection neutral and paraphrase-only.
 
-Use one short human acknowledgment phrase first, then one-sentence paraphrase of only what they explicitly said.
-The acknowledgment is mandatory and must come first; do not begin directly with paraphrase.
-Use a broader conversational acknowledgment pool (e.g. "Yeah," "That makes sense," "I hear you," "Sure," "Mm," "Okay," "Fair," "That's a real read," "Yeah, I can see that," "That lands," "Noted," "Absolutely," "I see what you mean," "That checks out").
+Begin with substantive paraphrase of only what they explicitly said; you may prefix one short non-filler acknowledgment ("Yeah," "Mm," "Fair," "I hear you," "Noted," "I see what you mean," "That's a real read," "Yeah, I can see that"). Do not use "Sure," "Okay," "Absolutely," "That makes sense," "That lands," or "That checks out" as leading fillers — the client strips them and they read hollow.
+Follow REFLECTION_PARAPHRASE_FIDELITY: preserve "instead of / rather than / not" contrasts; never invert what they ruled out vs what they affirmed.
+Prefer weaving the most substantive part of their answer into the first spoken line.
 Avoid predictable opener rotation. No single acknowledgment phrase should recur more than once every 4 reflective turns.
 
 Do NOT add interpretation, approval, coaching, or "what it shows about them."
@@ -1114,22 +1213,44 @@ No scenario closing-question tokens are needed. Do not emit [CLOSING_QUESTION:N]
 const SCENARIO_TRANSITION_CLOSING = `
 SCENARIO TRANSITION — PARAPHRASE ONLY, NEUTRAL TONE:
 
-Before delivering the next scenario, include one brief transition reflection. It must start with a short acknowledgment and then paraphrase only what the user explicitly said in their last response. Do not add interpretation, evaluation, coaching, or implied conclusions.
+Before delivering the next scenario, include one brief transition reflection: lead with substantive paraphrase of what the user explicitly said (you may prefix one short non-filler token: "Yeah," "Mm," "Fair," "I hear you," "Noted"). Do not lead with hollow fillers ("Sure," "Absolutely," "That makes sense," "That checks out," "That lands") — the client strips them. Do not add interpretation, evaluation, coaching, or implied conclusions.
 
 FORMAT:
-"[Acknowledgment], [neutral paraphrase of what they said]. [Next scenario opener]."
+"[Optional short non-filler token, ] [neutral paraphrase preserving any instead-of / rather-than contrasts]. [Next scenario opener]."
 
 RULES:
 - One sentence maximum before the transition.
 - Same calm tone regardless of answer quality.
 - No approval-coded language ("that came through clearly," "you stayed consistent," "great point", etc.).
 - Do not infer motives, traits, or deeper meaning not explicitly stated.
-- Acknowledgment is mandatory and comes first every time.
-- Use varied acknowledgments from a broad conversational pool; no single phrase should recur more than once every 4 reflective turns.
-- No contrastive coaching language (comparative framing, "not X but Y", or implied better alternatives).
+- If their answer mixes a vivid emotional or imagistic moment with a general repair plan, anchor your paraphrase on the vivid moment — not only the logistics.
+- Vary short openers; no single opener phrase should recur more than once every 4 reflective turns (never use the stripped filler list above as openers).
+- No contrastive coaching language (comparative framing that reframes their answer, or implied better alternatives they did not state).
 - No clinical/theoretical terminology.
 - Flow directly into "On to the second situation" or a third-scenario opener that does NOT imply the interview is ending (never "final scenario").
 - After Scenario B Q2 specifically, this reflection beat is required before starting Scenario C.
+`;
+
+const REFLECTION_PARAPHRASE_FIDELITY = `
+REFLECTION PARAPHRASE — PRESERVE CONTRASTS AND LOGIC (mandatory for every scenario transition reflection and every personal-moment transition):
+
+Before you write the paraphrase part of a reflection, check that you preserve the user's explicit contrasts, negations, and "instead of / rather than / not" structure. Do not collapse a choice between X and Y into "X and Y" when the user said one excludes or replaces the other.
+
+Examples of failure to avoid:
+- User: "Sam is expressing unmet needs through criticism rather than vulnerability."
+- WRONG: "So you're seeing Sam using criticism and vulnerability…" (inverts the contrast — they said not vulnerability-first).
+- RIGHT: "So you're reading Sam as carrying unmet needs through criticism instead of opening with vulnerable feeling…" (or a shorter accurate echo).
+
+Rules:
+- If the user framed A instead of B, or not B, your reflection must not imply they equated or combined A and B as co-equal descriptions.
+- If you cannot paraphrase without risking inversion, use only a brief acknowledgment (from the allowed pool) and move on — omit the paraphrase sentence rather than misstate their meaning.
+- This applies equally whether their style is colloquial or analytical.
+- Runtime safeguard: if a generated reflection still collapses a user contrast into "and" or drops "instead of / rather than," the client may drop the misleading lead sentence — write the paraphrase accurately the first time so nothing is removed.
+`;
+
+const ASSISTANT_SPEECH_POSTPROCESS_NOTICE = `
+ASSISTANT OUTPUT — CLIENT HARD FILTER (always applied before TTS/display):
+The app strips leading standalone empty fillers — "Sure," "Absolutely," "That makes sense," "That checks out," "That lands," — when they appear as hollow prefaces before substantive content. Do not rely on those openers. Prefer starting with substantive paraphrase or a short non-filler token ("Yeah," "Mm," "Fair," "I hear you," "Noted," "I see what you mean").
 `;
 
 const SKIP_HANDLING_INSTRUCTIONS = `
@@ -1207,7 +1328,7 @@ If the user asks you to repeat something:
 Acknowledge the request briefly first, then repeat. Do NOT score or react to the repeat request as a response.
 
 Use phrases like:
-- "Sure — [repeat scenario or question]"
+- "Got it — [repeat scenario or question]"
 - "Of course — [repeat]"
 - "No problem — [repeat]"
 
@@ -1260,6 +1381,13 @@ If the user misremembers or misidentifies scenario details (who said what, wrong
 MISPLACED ANSWERS RULE:
 If the user answers a different question than the active one (for example: personal narrative during a scenario question, or commitment-threshold criteria while you're asking the grudge story), acknowledge briefly and redirect to the active question. Once they are re-oriented, ask the original active question again. Do not skip required questions because another moment was partially answered out of order.
 Keep redirect language neutral and brief. Do NOT praise the misplaced answer (no "great answer for earlier question" style phrasing).
+
+SCENARIO A — WRONG CONTENT TYPE FOR THE ACTIVE QUESTION:
+If you asked the repair question ("How would you repair… as Reese?") and the user answers with analysis of a specific line, contempt dynamics, or vignette interpretation instead of repair-as-Reese, do not treat that as satisfying the repair prompt. Briefly acknowledge what they said, then re-orient in one short conversational bridge and ask for repair in character. Example shape (adapt to their words): "I hear you on that line — before we move on, how would you make that repair actually happen as Reese?" Keep it light, not mechanical.
+If you asked the contempt probe and they already gave contempt-probe-quality content in an earlier turn (e.g. in answer to "what's going on"), treat the probe as satisfied — do not re-ask it; move on in the sequence.
+
+PROBE ALREADY ANSWERED (ALL SCENARIOS):
+Before any scripted follow-up, check whether the user's prior turns in this scenario already substantively answered that follow-up. If yes, skip the follow-up and advance.
 
 PERSONAL MOMENTS 4–5: After the user gives a personal response, check whether it addresses the question (grudge/contempt narrative; celebrating someone specifically). If it doesn't, redirect ONCE — gently and without making the user feel wrong. Use SCENARIO_REDIRECT_QUESTIONS.
 
@@ -1335,18 +1463,18 @@ This redirect policy is for off-topic content only. It is NOT for correcting fac
 `;
 
 const MOMENT_5_APPRECIATION_FALLBACK_INSTRUCTIONS = `
-MOMENT 5 — PERSONAL APPRECIATION (nothing comes to mind):
+MOMENT 5 — PERSONAL APPRECIATION (thin answer / no strong example):
 
 After Moment 4, the main instructions require a brief natural bridge (e.g. one more question / last one) before the appreciation prompt — do not skip straight from their grudge answer into the celebration question.
 
-If the user cannot think of a time they celebrated someone, say once: "It can be anything — even something small. But if nothing comes to mind, that's okay too and we can move on." If they still have nothing, move on. Score neutral. Do not shame or probe further.
+If the user signals they do not have a strong behavioral example — including a very generic on-topic line (e.g. only "I go to birthdays") — ask once, verbatim: "${MOMENT_5_INEXPERIENCE_FALLBACK_QUESTION}" Do not substitute older "specific moment" or "what made you decide to…" probe wording; the runtime may enforce this pivot. If they already gave a specific, behaviorally rich example, do not ask this. If they already answered with substantive reflection on what meaningful celebration would mean (without needing that exact question), accept and move on.
 
-SCORING / PROBE CALIBRATION:
-- Do NOT penalize concise answers when the act described is clearly attuned to what the other person needed.
-- Score the quality of the act, not the length of description.
-- Probe for more detail only when the act itself is generic/undifferentiated (no specific person, no specific moment, and no attunement cue).
-- If probing, use invitational wording such as: "Is there a particular moment that comes to mind?" or "What made you decide on that specifically?"
-- Probe once maximum. If they provide a concrete example, score that. If they do not, score the generic answer as given.
+If they still have nothing substantive after that single pivot, move on. Do not shame or stack additional probes.
+
+SCORING CALIBRATION (for the holistic scorer, not you):
+- Concrete behavioral example → score appreciation, attunement, and mentalizing from the act.
+- Explicit limited close-relationship experience without a lived example → do not treat missing example as low appreciation; attunement and mentalizing may still be scored from values/reflection.
+- Pure deflection with no content → all three markers appropriately low.
 `;
 
 const COMMUNICATION_QUESTION_CHECK = `
@@ -1407,9 +1535,9 @@ const SCENARIO_COMPLETE_TOKEN_INSTRUCTIONS = `
 The token fires when that scenario's required questions are complete.
 
 Required sequence (no end-of-scenario closing question):
-- Scenario A: Q1, contempt probe only if Sam's "you've made that very clear" line has NOT already been directly addressed as cold/passive-aggressive/superior/dismissive, Q2.
-- Scenario B: Q1, appreciation probe path if needed, Q2, then one brief acknowledgment + paraphrase reflection before starting Scenario C.
-- Scenario C: Q1, Q2, commitment-threshold probe only if commitment-threshold signal did not already surface in Q2.
+- Scenario A: Q1, contempt probe unless Sam's "you've made that very clear" was already addressed as a character verdict / superiority / finality — not merely as pain or frustration, Q2.
+- Scenario B: Q1, appreciation probe only when Q1 lacked specific attuned behavior; Q2, then one brief acknowledgment + paraphrase reflection before starting Scenario C.
+- Scenario C: Q1, Q2, commitment-threshold probe unless the user already gave irrecoverability / when-it's-not-workable criteria (repair-only Q2 is not enough).
 
 Do NOT ask "anything you'd want me to know?" style closing checks at the end of scenarios.
 
@@ -1426,12 +1554,32 @@ Scores below 7 are reserved for genuine marker failures: e.g. active contempt; c
 
 Scores of 8–10 should reflect increasing sophistication, nuance, and specificity in how the competency appears — not increasing distance from a hypothetical flawless answer no real participant would produce. Use the top of the range when the response is clearly strong on that marker; use 8 vs 9 vs 10 to separate thin-but-competent from richly illustrated answers.
 
-Commitment-threshold anchors:
-- Mid-range anchor: A vague answer like "keep trying for a while, and if this keeps happening for months maybe that's a sign, but I wouldn't give up yet" belongs in the mid range (about 5–6), not high range.
-- Low-threshold anchor (score about 3–4): exiting based on repetition count alone without describing what was tried; framing departure as self-evident ("life is too short", "you can only try so many times") without process; no bilateral reasoning about repair limits.
-- Reserve 7–10 for answers with specific attempts before conclusion, explicit irrecoverability conditions, or clear bilateral reasoning about when repair is no longer possible.
+Commitment-threshold anchors (structure beats procedural verbosity):
+- The healthy ceiling is: persist through real difficulty while keeping healthy limits. Unconditional staying without limits scores low; exiting at first difficulty scores low.
+- Do NOT treat lack of granular process (timelines, therapy modalities, step-by-step checklists) as low commitment capacity. The scoring question is whether the answer contains a complete decision structure: invest effort → communicate clearly about what's not working → assess whether the pattern changes → decide to stay or go. That structure alone can justify 6–7 without extra detail.
+- 1–2: Exit immediately or unconditionally at first/minor difficulty; OR endorse staying no matter what in clearly harmful dynamics; OR no coherent threshold.
+- 3–4: Vague persistence or unconditional staying without a workable framework ("just keep trying / stick it out" with no invest→communicate→assess structure), OR exit framing without effort/communicate/assess logic.
+- 6–7: Structurally sound path even without specificity — e.g. genuinely try, communicate openly, and exit (or call it done) if the pattern continues without meaningful change. No requirement to name timelines or interventions.
+- 7–8: Same structural completeness plus some concrete specificity about what would constitute irrecoverable breakdown or "not workable anymore" (patterns, betrayal, harm, repeated failure after real effort — need not be exhaustive).
+- 9–10: Demonstrated or richly described persistence through significant relational challenge with healthy limits and clear criteria; still not gated on procedural detail.
+- Unconditional commitment with no limits ("never give up no matter what," "stick it out forever") remains about 2–3, not 6+.
 
-Every score must still be tied to explicit evidence in the transcript. Do not inflate without evidence; do not withhold 8–10 when evidence for full competency is present.
+Every score must still be tied to explicit evidence in the transcript. Do not inflate without evidence; do not withhold 6–8 when a sound structure is present just because the answer is brief or non-procedural.
+`;
+
+/** Accountability: blame-shift vs ownership paired with a clarity/repair bid — used in full + scenario + Moment 4 scoring. */
+const ACCOUNTABILITY_BLAME_SHIFT_VS_CLARITY_REQUEST = `
+ACCOUNTABILITY — BLAME-SHIFT VS. GENUINE REQUEST FOR CLARITY (apply everywhere accountability is scored: all scenario slices, full-interview pass, and personal moments):
+
+These patterns can look alike but differ in relational meaning:
+
+• BLAME-SHIFT (score accountability LOW — typically mid-low or lower when this is the main move): Responsibility is redirected onto the other person; the user does not own their impact or contribution. The partner is framed as owing clearer communication, mind-reading, or fixing the dynamic alone. Example: "Alex should have just told me what they needed instead of expecting me to read their mind" — no ownership; the problem is placed on the partner.
+
+• GENUINE REQUEST FOR CLARITY AFTER OWNERSHIP (do NOT treat as deflection; do not reduce accountability for the ask alone): The user takes clear ownership of their own gap, mistake, or impact, and asks for specific information so they can show up better. That request is a repair bid layered on ownership, not a substitute for it. Example: "I could do a better job of appreciating you — can you help me understand what that looks like for you?"
+
+DECISION TEST: Does the accountability-relevant stretch include genuine ownership of the user's own contribution (behavior, miss, or impact) before or alongside the request? If yes, the request for clarity is additive — score ownership at full strength and do not penalize accountability for asking how to follow through. If no ownership is present and the request functions mainly to shift the burden entirely onto the partner, score as blame-shift.
+
+Apply this distinction consistently across fictional scenarios and personal narrative answers.
 `;
 
 const SCORING_CONFIDENCE_INSTRUCTIONS = `
@@ -1448,6 +1596,9 @@ LOW confidence: User's personal story was off-target or too thin to score proper
 NEVER score HIGH confidence on a response that:
 - Is fewer than two sentences of real content where specificity was required
 - Describes only what the other person did with no reflective or relational insight when the moment required it
+
+COMMITMENT_THRESHOLD — FICTIONAL VS PERSONAL (full interview scoring):
+If commitment_threshold is informed only by third-party reasoning about Morgan/Theo (Scenario C) and there is no substantive first-person threshold content from Moment 4 (the grudge answer and/or the "work through versus walk away" follow-up with scorable criteria in the user's own relationship terms), set pillarConfidence for commitment_threshold to "moderate" or "low" — not "high." Reserve "high" when first-person threshold reasoning appears in the transcript (clear work-through vs walk-away structure or criteria in their own terms — concise structural answers count; they need not be procedurally detailed), or when fictional and personal evidence jointly support the score with strong clarity.
 `;
 
 function buildScoringPrompt(
@@ -1469,7 +1620,9 @@ GLOBAL CALIBRATION RULES
 
 1. Absence of clinical language is not a deficit. A user who says "I'd want to understand what was going on for her" scores as high as one who says "I'm mentalizing her experience." The insight matters, not the vocabulary.
 
-2. Commitment threshold specifically: a non-prescriptive, process-oriented answer ("try everything, get help, see if the pattern can change") scores 9-10. A rigid checklist answer scores lower, not higher. Psychological health here looks like nuance, not precision.
+1b. MENTALIZING and CONTEMPT / CRITICISM — register-neutral: Score these markers on accuracy of relational insight (perspective-taking, distinguishing hurt from contempt, bilateral dynamics), not on warmth, emotional expressiveness, or everyday vs clinical wording. A cool, analytical, or technical register that still demonstrates correct inference must receive the same scores as a warm or colloquial answer with the same insight. Do not penalize mentalizing or contempt scores because the user sounds "clinical" or detached if the content meets the rubric.
+
+2. Commitment threshold: Unconditional staying with no limits scores low (about 2–3); exit at first difficulty scores low (1–2). A structurally complete answer — invest effort, communicate about what's wrong, reassess, leave if the pattern doesn't change — scores 6–7 even without timelines or therapy steps; add specificity about irrecoverability for 7–8; reserve 9–10 for strong evidence of persistence through serious difficulty with healthy limits. Do not cap commitment_threshold below 6 solely because the user omitted granular procedural detail.
 
 3. These anchors reflect what a healthy, self-aware person in a good relationship would actually say - not clinical perfection. Reserve scores below 5 for actual red flags, not absence of textbook precision. A 9-10 requires genuine insight and specificity. An 8 implies something meaningful is missing.
 
@@ -1495,8 +1648,11 @@ Does the user take genuine ownership of their part without deflecting, minimizin
 3-4 - Primarily defensive. Acknowledges fault only minimally or only when the other party is also implicated.
 1-2 - No accountability. Justifies, blames, or dismisses.
 
+${ACCOUNTABILITY_BLAME_SHIFT_VS_CLARITY_REQUEST}
 CONTEMPT / CRITICISM
 Does the user recognize contempt and criticism as distinct from legitimate complaint? Can they identify when communication crosses from expressing hurt into attacking character?
+
+WHO YOU ARE SCORING: Measure the participant's own contemptuous stance (derogation, dismissiveness, superiority, mockery, or character-level verdicts toward people in the scenarios or in their personal narrative) — not whether they accurately describe a fictional character's harsh or contemptuous behavior. Accurate observation that a line is mean, cold, dismissive, or closes the conversation off is attunement and relational accuracy; do not treat that as the participant expressing contempt or downgrade scores for it. Reserve low scores for the participant's own verdicts and contemptuous attitudes (e.g. "Sam is just manipulative," "Theo obviously isn't ready," "some people are bad people").
 
 10 - Identifies contempt precisely. Understands that contempt is a verdict on character, not an expression of pain. Distinguishes it clearly from anger or hurt.
 9  - Clearly identifies contemptuous language and understands its relational impact. May not use the word "contempt" but captures the distinction accurately.
@@ -1504,6 +1660,8 @@ Does the user recognize contempt and criticism as distinct from legitimate compl
 5-6 - Notices the tone is hurtful but treats it as equivalent to regular conflict escalation. Does not distinguish contempt from criticism.
 3-4 - Normalizes or minimizes contemptuous language. May sympathize with the person expressing it without noting the problem.
 1-2 - Endorses or models contemptuous communication. Does not recognize it as a problem.
+
+(Register reminder: mentalizing and contempt scores follow section 1b — insight accuracy over communication style.)
 
 REPAIR
 Does the user understand what genuine repair requires - specific acknowledgment, behavioral commitment, and attending to the relationship rather than just resolving the incident?
@@ -1546,14 +1704,16 @@ Does the user understand the difference between acknowledging an achievement and
 1-2 - No appreciation or positive regard demonstrated.
 
 COMMITMENT THRESHOLD
-Does the user have a healthy, realistic framework for when to persist versus when to leave - neither giving up too easily nor staying in genuinely harmful dynamics?
+Does the user have a healthy framework for when to persist versus when to leave — neither exiting at the first strain nor staying without limits?
 
-10 - Articulates a thoughtful, non-prescriptive threshold grounded in effort, pattern change, and outside help. Understands that commitment means genuinely trying before leaving. Does not require a specific checklist - process-oriented answers score highest here.
-9  - Healthy threshold with clear reasoning. Reflects genuine relational maturity - neither avoidant of difficulty nor dismissive of genuine dysfunction.
-7-8 - Generally healthy but threshold is either slightly too low (gives up at recurring conflict) or slightly too high (tolerates clearly harmful dynamics out of commitment).
-5-6 - Threshold is noticeably off in one direction. Some awareness but not enough to self-correct.
-3-4 - Threshold reflects a problematic pattern - either "relationships shouldn't be this hard" (avoidant) or "you work through everything no matter what" (enmeshed).
-1-2 - No coherent threshold. Exits immediately at conflict, or endorses staying in genuinely abusive situations.
+Score on structural completeness (invest → communicate about the problem → assess change → decide), not on how many procedural details they list. Absence of timelines, therapy, or step-by-step plans is NOT evidence of low capacity if the four-part structure is clearly implied or stated.
+
+10 - Strong limits plus meaningful evidence or description of persisting through significant difficulty while protecting wellbeing; may be concise; not gated on exhaustive process.
+9  - Clear healthy threshold with real specificity about when a relationship is no longer workable; procedural detail still optional.
+7-8 - Sound structure plus at least some concrete sense of irrecoverability or "pattern continues without change after serious effort"; OR very clear structure with lighter specificity (use high 7 band).
+6-7 - Structurally sound path without fine-grained detail: real effort, honest communication about what's not working, willingness to end if things don't change — sufficient for this band.
+3-4 - Unconditional staying without limits, vague "keep trying" with no structure, OR brittle exit logic without effort/communication/assess pattern.
+1-2 - Exit immediately or unconditionally at minor difficulty; OR incoherent threshold; OR staying regardless of serious harm.
 
 UNIVERSAL PASSIVE SIGNAL RULE: Score a marker whenever it surfaces in any moment. Do not penalize absence unless that moment's primary targets included that marker and the user had a clear opportunity.
 
@@ -1568,6 +1728,7 @@ EVIDENCE QUALITY HIERARCHY
 1. Personal behavioral example with specifics: full range (subject to calibration).
 2. First-person scenario response with specific words/actions: full range.
 3. Vague scenario response ("just communicate"): cap that marker at 6 until specificity appears in the transcript — lack of demonstrated specificity is not the same as active contempt or defensiveness, but it is not yet full competency for that moment.
+EXCEPTION — COMMITMENT_THRESHOLD: Do not apply this cap to commitment_threshold. A structurally complete threshold answer (invest, communicate, assess pattern, decide) can score 6–8+ without granular procedural detail; see commitment-threshold anchors above.
 
 CROSS-MOMENT WEIGHTING: Do not average mechanically across moments. Weight strongest specific evidence; note inconsistency in notableInconsistencies when high in one moment and low in another for the same marker.
 
@@ -1577,6 +1738,7 @@ CLARIFICATION-ONLY: Unprompted insights count more than dragged-out answers.
 
 GENERIC RESPONSE PENALTY: If user stayed generic after clarification for a moment, cap markers primarily informed by that moment at 5 and note in keyEvidence.
 EXCEPTION FOR APPRECIATION: Do not apply this cap when the described act is concise but clearly attuned and relationally specific; concise-but-clear appreciation can still score high.
+EXCEPTION FOR COMMITMENT_THRESHOLD: Do not cap commitment_threshold at 5 solely for "generic" wording when the answer still expresses a complete invest / communicate / assess / decide structure; apply the commitment-threshold anchors instead.
 
 ─────────────────────────────────────────
 COMMUNICATION QUALITY (separate from the eight markers)
@@ -1612,7 +1774,7 @@ Return ONLY valid JSON. Keys for pillarScores, keyEvidence, and pillarConfidence
   "skepticismModifier": { "pillarId": null, "adjustment": 0, "reason": "n/a — legacy field" }
 }
 
-pillarConfidence: per marker; same rules as before. Do not lower confidence solely because evidence came from a scenario.
+pillarConfidence: per marker; apply SCORING_CONFIDENCE_INSTRUCTIONS and the commitment_threshold fictional-vs-personal rule above.
 
 ${SCORING_CONFIDENCE_INSTRUCTIONS}`;
 }
@@ -1641,9 +1803,10 @@ function computeGateResult(
     }
   }
 
-  const assessedMarkerIds = INTERVIEW_MARKER_IDS.filter(
-    (id) => typeof adjustedScores[id] === 'number' && Number.isFinite(adjustedScores[id] as number)
-  );
+  const assessedMarkerIds = INTERVIEW_MARKER_IDS.filter((id) => {
+    const s = adjustedScores[id];
+    return typeof s === 'number' && Number.isFinite(s) && s > 0;
+  });
   const excludedMarkers = INTERVIEW_MARKER_IDS.filter((id) => !assessedMarkerIds.includes(id));
 
   const floorFail = assessedMarkerIds.find((id) => {
@@ -1727,7 +1890,7 @@ function computeGateResult(
 }
 
 type MarkerScoreSlice = {
-  pillarScores?: Record<string, number> | null;
+  pillarScores?: Record<string, number | null> | null;
   keyEvidence?: Record<string, string> | null;
 } | null | undefined;
 
@@ -1770,7 +1933,7 @@ interface ScenarioScoreResult {
 interface PersonalMomentScoreResult {
   momentNumber: 4 | 5;
   momentName: string;
-  pillarScores: Record<string, number>;
+  pillarScores: Record<string, number | null>;
   pillarConfidence: Record<string, string>;
   keyEvidence: Record<string, string>;
   summary: string;
@@ -1779,7 +1942,9 @@ interface PersonalMomentScoreResult {
 
 function buildScenarioScoringPrompt(
   scenarioNumber: 1 | 2 | 3,
-  transcript: Array<{ role: string; content: string; scenarioNumber?: number }>
+  transcript: Array<{ role: string; content: string; scenarioNumber?: number }>,
+  commitmentThresholdFocusAnswer?: string | null,
+  priorScenarioMentalizing?: { s1?: number; s2?: number } | null
 ): string {
   const scenarioMeta = {
     1: {
@@ -1808,12 +1973,62 @@ function buildScenarioScoringPrompt(
     .map((m) => `${m.role === 'user' ? 'User' : 'Interviewer'}: ${m.content}`)
     .join('\n\n');
   const ids = [...scenarioMeta.markerIds];
+  const commitmentThresholdSoleSourceBlock =
+    scenarioNumber === 3 && commitmentThresholdFocusAnswer?.trim()
+      ? `
+COMMITMENT_THRESHOLD SOLE SOURCE (Scenario C):
+The participant first replied to the Theo/Morgan commitment question with a personal narrative and was redirected. For the "commitment_threshold" marker ONLY, base the score and keyEvidence solely on the following answer about the fictional couple. Do not use unrelated personal narrative content from elsewhere in the transcript for commitment_threshold. Score all other markers using the full transcript as usual.
+
+Authoritative answer for commitment_threshold:
+"""${commitmentThresholdFocusAnswer.trim()}"""
+`
+      : '';
+  const scenario1ContemptCalibration =
+    scenarioNumber === 1
+      ? `
+Scenario A — CONTEMPT / CRITICISM (this slice):
+Distinguish (A) the participant accurately reading Sam's line as harsh, mean, cold, dismissive, shutting things down, or painful for Reese — which is appropriate attunement and may support strong scores when the rubric is about recognizing contemptuous dynamics in others' speech — from (B) the participant themselves issuing character verdicts, mockery, or superiority toward Sam, Reese, or others. Do not penalize (A) as if it were participant contempt.
+If they only frame the line as generic hurt with no read on how it lands relationally, partial recognition is fine; do not cap scores merely because they avoid clinical words like "contempt" when they clearly name the shutting-down or mean quality of the specific line.
+`
+      : '';
   const scenario3CommitmentCalibration =
     scenarioNumber === 3
       ? `
 Scenario C commitment-threshold calibration:
-- Score 3-4 when the answer exits based on repetition count alone (e.g., "three times is enough"), uses self-protective closure phrases ("life is too short", "you can only try so many times"), and does not describe what was tried or what irrecoverability specifically means.
-- Score 7+ only when the answer describes concrete attempts/process before leaving, explicit irrecoverability criteria, or bilateral reasoning about repair limits.
+- Score 1-2 when the answer exits at first difficulty or endorses staying no matter what with no limits in harmful dynamics.
+- Score 2-3 when the answer expresses unconditional commitment with no framework for irrecoverability — e.g. "never give up," "just keep trying no matter what," "they shouldn't ever walk away," "stick it out forever." Do not score that pattern 6+.
+- Score 3-4 for vague "keep trying" with no assessable structure, OR exit-only framing ("life is too short") without effort/communicate/assess logic.
+- Score 6-7 when the answer has a complete structure for Theo/Morgan (or the couple): genuine effort, clear communication about what's wrong, reassessment, willingness to end if the pattern persists without change — even if the user names no timelines, therapy, or step lists.
+- Score 7-8 when that structure is present plus some concrete specificity about what would make the relationship no longer workable (not necessarily exhaustive).
+- Score 9-10 only when the answer strongly demonstrates or describes persistence through serious difficulty with healthy limits; still not gated on procedural verbosity.
+- Do not cap commitment_threshold below 6 solely because the answer lacks granular process detail when the four-part structure is clearly there.
+
+COMMITMENT_THRESHOLD — NOT ASSESSED (Scenario C):
+If this slice has no user response to the interviewer's commitment-threshold follow-up (when the relationship isn't working / when to call it) AND no user turn in Scenario C spontaneously gives irrecoverability or "not worth continuing" criteria, set pillarScores.commitment_threshold to JSON null — never 0. Set keyEvidence.commitment_threshold to exactly: "No commitment threshold content assessed in this scenario slice." Set pillarConfidence.commitment_threshold to "low". Use numeric scores only when there is actual threshold content to evaluate; 0 is reserved for assessed answers that actively fail the construct, not for missing evidence.
+
+COMMITMENT_THRESHOLD CONFIDENCE (this scenario slice only):
+When commitment_threshold is scored (non-null), evidence is third-party reasoning about Theo/Morgan only. Set pillarConfidence for commitment_threshold to "moderate" or "low" only — never "high" for this scenario, because personal first-person threshold criteria are not elicited in this moment. (Full-interview scoring may raise effective confidence later if Moment 4 adds first-person threshold evidence.) When commitment_threshold is null, confidence is already "low" per above.
+`
+      : '';
+  const scenario3MentalizingCalibration =
+    scenarioNumber === 3
+      ? `
+Scenario C mentalizing calibration:
+- Accurately noting an obvious on-vignette dynamic (e.g. Theo acknowledging a communication problem or taking partial responsibility for avoidance) is competent basic perspective-taking, not strong mentalizing by itself: prefer the 5-6 range unless the answer adds clearly richer inference (Morgan's inner experience beyond the script, bilateral curiosity about both people's states, nuanced uncertainty).
+- Reserve 7+ only when mentalizing in this answer is markedly more sophisticated than restating what the situation already displayed.
+`
+      : '';
+  const priorM1 = priorScenarioMentalizing?.s1;
+  const priorM2 = priorScenarioMentalizing?.s2;
+  const scenario3MentalizingInterviewPatternCalibration =
+    scenarioNumber === 3 &&
+    priorScenarioMentalizing &&
+    ((priorM1 != null && Number.isFinite(priorM1) && priorM1 < 4) ||
+      (priorM2 != null && Number.isFinite(priorM2) && priorM2 < 4))
+      ? `
+Scenario C mentalizing — interview pattern calibration:
+Prior mentalizing scores in this same interview: Scenario 1 = ${priorM1 != null && Number.isFinite(priorM1) ? priorM1.toFixed(1) : 'n/a'}, Scenario 2 = ${priorM2 != null && Number.isFinite(priorM2) ? priorM2.toFixed(1) : 'n/a'}.
+Earlier scenario(s) showed limited mentalizing. Do not assign Scenario C mentalizing 7+ for a single balanced observation that merely labels what the vignette made visible (e.g. "Theo is acknowledging they have a communication problem") without clearly stronger perspective-taking. In that pattern, 5-6 is appropriate for that level of evidence. Reserve 7+ only if this answer demonstrates a clear step up in sophistication versus those prior moments.
 `
       : '';
 
@@ -1826,18 +2041,26 @@ ${SCORE_CALIBRATION_0_10}
 
 TRANSCRIPT OF THIS SCENARIO ONLY:
 ${turns}
+${commitmentThresholdSoleSourceBlock}
 
 SCORING INSTRUCTIONS:
 Score only the listed markers, based only on this transcript slice.
 For each marker: quote or paraphrase the response that most informed the score; behavioral > attitudinal.
 GENERIC responses: cap at 5 for that marker.
 
+${ACCOUNTABILITY_BLAME_SHIFT_VS_CLARITY_REQUEST}
+
+MENTALIZING and CONTEMPT in this slice — register-neutral: Judge only whether the answer demonstrates accurate perspective-taking and (where scored) correct distinction of contempt/criticism from hurt or legitimate complaint. Do not down-score because the user uses formal, analytical, or clinical-sounding language when the inference quality matches the rubric.
+
 REPAIR COHERENCE: If repair attempt repeats the failure they diagnosed, lower accountability 1-2 points.
 Scenario A repair calibration:
 - If the repair answer contains significant deflection onto Sam's communication failures (e.g. "Sam needs to communicate better", centering what Sam should change, or framing repair primarily around Sam's behavior), score Repair in the 4-5 range.
 - Reserve 6+ for answers that keep clear ownership of Reese's contribution without significant deflection.
 - Reserve 9-10 for strong bilateral repair with explicit ownership and no meaningful accountability deflection.
+${scenario1ContemptCalibration}
 ${scenario3CommitmentCalibration}
+${scenario3MentalizingCalibration}
+${scenario3MentalizingInterviewPatternCalibration}
 
 CONFIDENCE: high / moderate / low per scored marker.
 ${SCORING_CONFIDENCE_INSTRUCTIONS}
@@ -1875,13 +2098,37 @@ function buildPersonalMomentScoringPrompt(
     .join('\n\n');
   const ids = [...momentMeta.markerIds];
   const momentSpecificCalibration =
-    momentNumber === 4
+    momentNumber === 5
       ? `
-MOMENT 4 CALIBRATION ANCHORS:
+MOMENT 5 — ANSWER-TYPE BRANCHES (use the full user slice, including any follow-up pivot and response):
+
+1) CONCRETE BEHAVIORAL EXAMPLE: The user describes a specific relational act they did (or clearly recall doing) to celebrate or appreciate someone — enough behavioral and contextual detail that you could picture the scene (specific person, moment or occasion, attunement to the other's state, and how it landed relationally). Score appreciation, attunement, and mentalizing normally from that content.
+
+2) LIMITED CLOSE-RELATIONSHIP EXPERIENCE / NO LIVED EXAMPLE (explicit framing): The user clearly signals sparse opportunity or a non-demonstrative background (e.g. few close relationships, family not big on showing affection, no great example, hard to think of something specific) and is not purely deflecting with zero reflective content. In this branch: set appreciation in pillarScores to JSON null (not 0). In keyEvidence for appreciation, briefly state that appreciation was not assessed from this slice because the user framed limited lived opportunity — absence of a behavioral example must not be scored as low appreciation capacity. Score attunement and mentalizing from what they say about what meaningful celebration would look like, others' needs, or self-reflection (including after a values pivot question if present). Set pillarConfidence for appreciation to "low".
+
+3) PURE DEFLECTION / NO REAL REFLECTION: Brief dodge, empty, or off-topic with no substantive content about celebration, values, or relationships — score appreciation, attunement, and mentalizing low with numeric scores (not null for appreciation).
+
+4) MIXED: If they both frame limited experience AND give a concrete behavioral example, use branch (1).
+
+When appreciation is JSON null per branch (2), output null (not 0) for appreciation in pillarScores.
+`
+      : momentNumber === 4
+      ? `
+MOMENT 4 — NON-ENGAGEMENT / DEFLECTION (entire moment):
+If the user does not substantively engage with the grudge/dislike question — topic switching, philosophical deflection, vague non-answers with no real person or situation, "I don't hold grudges" without a concrete story when pushed, or other absence of signal — set EVERY listed marker in pillarScores to JSON null (not 0, not 1). Use the SAME keyEvidence string for all markers: "No substantive engagement with grudge/dislike question in this slice — deflection, avoidance, or absent signal." Set pillarConfidence to "low" for each. Numeric scores apply only when there is assessable content.
+
+MOMENT 4 — SCORE 1 ONLY FOR ACTIVE FAILURE (when there IS engagement):
+Reserve score 1 for active construct failure: e.g. unreflective contempt, explicit refusal of any responsibility, or hostile framing. Do NOT use 1 for mere absence of signal — that is null as above.
+
+MOMENT 4 CALIBRATION ANCHORS (when engagement exists):
 - Repair: Distancing/stepping back without attempted repair is neutral (score about 4-5), not anti-repair. Reserve <=2 for active sabotage/escalation or explicit refusal of reconciliation when offered.
 - Contempt: If contempt is acknowledged with self-awareness language (e.g., "if I'm honest", "I know I probably still"), score at least 5-6 (below neutral is inappropriate).
 - Accountability: Unprompted acknowledgment of avoidant behavior (e.g., "I never confronted it and just distanced myself") is partial accountability and should score around 4-5 minimum. Reserve <=3 for fully externalized blame with no self-awareness.
+${ACCOUNTABILITY_BLAME_SHIFT_VS_CLARITY_REQUEST}
 - Mentalizing: Limited but present self-awareness/perspective-taking should score at least 3-4; reserve <=2 for zero self-reflection and pure external blame.
+
+COMMITMENT_THRESHOLD CONFIDENCE (this moment slice):
+Reserve "high" pillarConfidence for commitment_threshold when this slice includes clear first-person work-through versus walk-away reasoning (from the follow-up or embedded in the grudge answer) — including a concise but complete invest/communicate/assess/decide structure without procedural detail. If threshold signal is absent or purely vague ("just try harder"), use "moderate" or "low".
 `
       : '';
   return `You are scoring one personal moment from a relationship assessment interview.
@@ -1899,6 +2146,8 @@ Score only the listed markers using only this moment transcript slice.
 For each marker: quote or paraphrase the response that most informed the score.
 If responses are generic and unspecific, cap that marker at 5.
 ${momentSpecificCalibration}
+
+When any marker uses JSON null per instructions above, output null (not 0) for that key.
 
 Return ONLY valid JSON:
 {
@@ -1938,13 +2187,25 @@ function inferPersonalMomentSlices(
   return { moment4, moment5 };
 }
 
+/** Fixed column order for scenario scorecards so unassessed markers (e.g. commitment_threshold) still show as — */
+const SCENARIO_SCORE_DISPLAY_ORDER: Record<number, readonly string[]> = {
+  1: ['mentalizing', 'accountability', 'contempt', 'repair', 'attunement'],
+  2: ['appreciation', 'attunement', 'mentalizing', 'repair', 'accountability'],
+  3: ['regulation', 'repair', 'mentalizing', 'attunement', 'accountability', 'commitment_threshold'],
+};
+
 function formatScoreMessage(scenarioResult: ScenarioScoreResult): string {
   const label = (id: string) => INTERVIEW_MARKER_LABELS[id as keyof typeof INTERVIEW_MARKER_LABELS] ?? id;
-  const scores = Object.entries(scenarioResult.pillarScores)
-    .map(([id, score]) => {
+  const order =
+    SCENARIO_SCORE_DISPLAY_ORDER[scenarioResult.scenarioNumber] ??
+    Object.keys(scenarioResult.pillarScores ?? {});
+  const scores = order
+    .map((id) => {
+      const raw = scenarioResult.pillarScores?.[id];
+      const scoreText = typeof raw === 'number' && Number.isFinite(raw) ? `${raw}/10` : '—';
       const confidence = scenarioResult.pillarConfidence[id] ?? 'moderate';
       const evidence = scenarioResult.keyEvidence[id] ?? '—';
-      return `${label(id)}: ${score}/10 (${confidence} confidence)\n   "${evidence}"`;
+      return `${label(id)}: ${scoreText} (${confidence} confidence)\n   "${evidence}"`;
     })
     .join('\n\n');
   const flags: string[] = [];
@@ -2007,7 +2268,7 @@ function extractLastInterviewerMessage(messages: Array<{ role: string; content: 
 }
 
 type VoiceState = 'idle' | 'listening' | 'processing' | 'speaking' | 'recording';
-type Status = 'intro' | 'active' | 'scoring' | 'results';
+type Status = 'intro' | 'consent' | 'active' | 'scoring' | 'results';
 
 interface CommunicationQuality {
   ownershipLanguage: number;
@@ -2043,8 +2304,6 @@ interface InterviewResults {
 const ANTHROPIC_API_KEY = getPublicEnv('EXPO_PUBLIC_ANTHROPIC_API_KEY', 'anthropicApiKey');
 const ANTHROPIC_PROXY_URL = getResolvedAnthropicProxyUrl();
 const SUPABASE_ANON_KEY = getResolvedSupabaseAnonKey();
-const AUDIO_ROUTE_DEBUG_BUILD = 'audio-route-debug-11-auth-fallback';
-
 const OPENAI_API_KEY =
   getPublicEnv('EXPO_PUBLIC_OPENAI_API_KEY', 'openaiApiKey');
 const OPENAI_WHISPER_PROXY_URL =
@@ -2083,6 +2342,8 @@ function newInterviewSessionId(userId: string): string {
 
 /** Navigation lock: set when interview completes and we navigate to analysis; prevents other effects from overriding. Survives remount. */
 let interviewJustCompletedInSession = false;
+/** Latest attempt id written in this session — avoids stale `users.latest_attempt_id` when the profile refetch races the update. */
+let interviewLastCommittedAttemptId: string | null = null;
 
 export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigation, route }) => {
   const { user, signOut } = useAuth();
@@ -2105,6 +2366,8 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
   const [userEmail, setUserEmail] = useState<string | null>(null);
   const [interviewStatus, setInterviewStatus] = useState<'loading' | 'not_started' | 'in_progress' | 'preparing_results' | 'under_review' | 'congratulations' | 'analysis'>('loading');
   const [analysisAttemptId, setAnalysisAttemptId] = useState<string | null>(null);
+  /** Insert succeeded but interview_attempts row is not yet readable with full scores — stay on preparing_results and poll until ready before congratulations / results. */
+  const [pendingScoringSyncAttemptId, setPendingScoringSyncAttemptId] = useState<string | null>(null);
   const isInterviewCompleteRef = useRef(false);
   /** When true, transition to loading screen will run once voiceState becomes 'idle' (after TTS finishes). */
   const [pendingCompletion, setPendingCompletion] = useState(false);
@@ -2178,11 +2441,18 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
   const appreciationQuestionSeenRef = useRef(false);
   const moment5ProbeAskedRef = useRef(false);
   const moment5ProbePendingRef = useRef(false);
+  const moment5InexperienceFallbackAskedRef = useRef(false);
+  const moment5InexperienceFallbackPendingRef = useRef(false);
   const moment4ThresholdProbeAskedRef = useRef(false);
   const deferredMoment4NarrativeRef = useRef<string | null>(null);
+  /** After misplaced Scenario C threshold answer: we re-ask Theo/Morgan; next user turn is scored for commitment_threshold from this ref. */
+  const expectingScenarioCThresholdAnswerAfterMisplaceRef = useRef(false);
+  const scenarioCCommitmentOnlyEvidenceRef = useRef<string | null>(null);
   const scenarioAContemptProbeAskedRef = useRef(false);
   const interviewSessionIdRef = useRef<string>(newInterviewSessionId(userId));
   const turnAudioIndexRef = useRef(0);
+  /** Debug: correlates TTS invocations with audio-route logs (speaker vs earpiece). */
+  const ttsSpeakInvocationRef = useRef(0);
   const [networkStatus, setNetworkStatus] = useState<'checking' | 'good' | 'poor'>('checking');
 
   const resetInterviewProgressRefs = useCallback(() => {
@@ -2192,8 +2462,12 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
     appreciationQuestionSeenRef.current = false;
     moment5ProbeAskedRef.current = false;
     moment5ProbePendingRef.current = false;
+    moment5InexperienceFallbackAskedRef.current = false;
+    moment5InexperienceFallbackPendingRef.current = false;
     moment4ThresholdProbeAskedRef.current = false;
     deferredMoment4NarrativeRef.current = null;
+    expectingScenarioCThresholdAnswerAfterMisplaceRef.current = false;
+    scenarioCCommitmentOnlyEvidenceRef.current = null;
     scenarioAContemptProbeAskedRef.current = false;
     turnAudioIndexRef.current = 0;
     interviewSessionIdRef.current = newInterviewSessionId(userId);
@@ -2307,61 +2581,27 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
     [deleteTurnAudioFile, userId]
   );
 
-  const finalizeAudioProfile = useCallback(async (uid: string, attemptId: string | null, passed: boolean) => {
-    if (!uid || !passed || !attemptId) return;
-    const supabaseUrl = getResolvedSupabaseUrl();
-    if (!supabaseUrl || !SUPABASE_ANON_KEY) return;
-    try {
-      await fetch(`${supabaseUrl.replace(/\/+$/, '')}/functions/v1/analyze-interview-audio`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${SUPABASE_ANON_KEY}`,
-          apikey: SUPABASE_ANON_KEY,
-        },
-        body: JSON.stringify({
-          action: 'finalize_session',
-          user_id: uid,
-          attempt_id: attemptId,
-          session_id: interviewSessionIdRef.current,
-        }),
-      });
-    } catch (err) {
-      if (__DEV__) console.warn('[AUDIO_STYLE_FINALIZE] failed', err);
-    }
-  }, []);
-
-  const runPostInterviewTextStyleAnalysis = useCallback(async (uid: string, passed: boolean) => {
-    if (!uid || !passed) return;
-    const supabaseUrl = getResolvedSupabaseUrl();
-    if (!supabaseUrl || !SUPABASE_ANON_KEY) return;
-    try {
-      await fetch(`${supabaseUrl.replace(/\/+$/, '')}/functions/v1/analyze-interview-text`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${SUPABASE_ANON_KEY}`,
-          apikey: SUPABASE_ANON_KEY,
-        },
-        body: JSON.stringify({ user_id: uid }),
-      });
-    } catch (err) {
-      if (__DEV__) console.warn('[TEXT_STYLE] background processing failed', err);
-    }
-  }, []);
-
   useEffect(() => {
     const run = async () => {
       const supabaseUrl = getResolvedSupabaseUrl();
-      if (!supabaseUrl) {
+      const anonKey = getResolvedSupabaseAnonKey();
+      if (!supabaseUrl || !anonKey) {
         setNetworkStatus('poor');
         return;
       }
       try {
         const timeout = setTimeout(() => setNetworkStatus((prev) => (prev === 'checking' ? 'poor' : prev)), 4000);
-        await fetch(supabaseUrl, { method: 'GET' });
+        const base = supabaseUrl.replace(/\/+$/, '');
+        // Project URL root returns 404 and often no CORS — use PostgREST, which allows browser origins.
+        const res = await fetch(`${base}/rest/v1/`, {
+          method: 'GET',
+          headers: {
+            apikey: anonKey,
+            Authorization: `Bearer ${anonKey}`,
+          },
+        });
         clearTimeout(timeout);
-        setNetworkStatus('good');
+        setNetworkStatus(res.status < 500 ? 'good' : 'poor');
       } catch {
         setNetworkStatus('poor');
       }
@@ -2591,7 +2831,13 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
       if (interviewJustCompletedInSession) {
         interviewJustCompletedInSession = false;
         setInterviewStatus('congratulations');
-        if (data?.latest_attempt_id) setAnalysisAttemptId(data.latest_attempt_id as string);
+        const attemptFromSession = interviewLastCommittedAttemptId;
+        interviewLastCommittedAttemptId = null;
+        const resolvedId =
+          (typeof attemptFromSession === 'string' && attemptFromSession.length > 0
+            ? attemptFromSession
+            : null) ?? (data?.latest_attempt_id as string | undefined);
+        if (resolvedId) setAnalysisAttemptId(resolvedId);
         return;
       }
       // Never overwrite active scoring states
@@ -2604,12 +2850,49 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
       if (!data.interview_completed) {
         setInterviewStatus('not_started');
       } else {
-        setInterviewStatus('congratulations');
-        if (data.latest_attempt_id) setAnalysisAttemptId(data.latest_attempt_id as string);
+        const aid = data.latest_attempt_id as string | null | undefined;
+        if (typeof aid === 'string' && aid.length > 0) {
+          setInterviewStatus('preparing_results');
+          const ready = await waitForInterviewAttemptScoringReady(supabase, aid, {
+            maxMs: 90_000,
+            intervalMs: 500,
+          });
+          if (ready) {
+            setPendingScoringSyncAttemptId(null);
+            setAnalysisAttemptId(aid);
+            setInterviewStatus('congratulations');
+          } else {
+            setPendingScoringSyncAttemptId(aid);
+            setInterviewStatus('preparing_results');
+          }
+        } else {
+          setInterviewStatus('congratulations');
+        }
       }
     };
     checkInterviewStatus();
   }, [userId]);
+
+  useEffect(() => {
+    if (!pendingScoringSyncAttemptId || !userId) return;
+    let cancelled = false;
+    const id = pendingScoringSyncAttemptId;
+    (async () => {
+      const ok = await waitForInterviewAttemptScoringReady(supabase, id, {
+        maxMs: 600_000,
+        intervalMs: 600,
+      });
+      if (cancelled || !ok) return;
+      setPendingScoringSyncAttemptId(null);
+      setAnalysisAttemptId(id);
+      await runCommunicationStylePipelineAfterSave(userId, id, interviewSessionIdRef.current);
+      setInterviewStatus('congratulations');
+      await remoteLog('[8] setInterviewStatus called', { screen: 'congratulations', via: 'pending_scoring_sync' });
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [pendingScoringSyncAttemptId, userId]);
 
   // Failsafe: never stay on "Loading..." forever (e.g. slow auth in incognito)
   useEffect(() => {
@@ -2630,13 +2913,12 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
     setInterviewStatus('congratulations');
   }, [ALPHA_MODE, userId, status, results, interviewStatus]);
 
-  // Timeout: if we stay on preparing_results too long, force navigation to congratulations.
+  // Long scoring + DB confirmation can exceed 90s; do not navigate away from preparing without a completed scoreInterview path.
   useEffect(() => {
     if (interviewStatus !== 'preparing_results') return;
     const t = setTimeout(() => {
-      if (__DEV__) console.warn('[Aria] Preparing timeout — forcing navigation to congratulations');
-      setInterviewStatus('congratulations');
-    }, 90000);
+      if (__DEV__) console.warn('[Aria] Preparing_results still active after 3m — check scoring / network if stuck');
+    }, 180000);
     return () => clearTimeout(t);
   }, [interviewStatus]);
 
@@ -2653,6 +2935,10 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
         const update = { ...payload.update, latest_attempt_id: insertData?.id ?? null };
         const { error: updateErr } = await supabase.from('users').update(update).eq('id', userId);
         if (updateErr) throw new Error(updateErr.message);
+        const recoveredAttemptId = insertData?.id;
+        if (recoveredAttemptId) {
+          await runCommunicationStylePipelineAfterSave(userId, recoveredAttemptId, interviewSessionIdRef.current);
+        }
         const next = { ...saved };
         delete next.pendingDatabaseSave;
         delete next.saveFailedAt;
@@ -2735,8 +3021,10 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
   }, []);
 
   const speak = useCallback(async (text: string) => {
+    ttsSpeakInvocationRef.current += 1;
+    const speakIndex = ttsSpeakInvocationRef.current;
     // #region agent log
-    fetch('http://127.0.0.1:7789/ingest/668e0bd5-3283-4492-9f48-e33846c18218',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'062597'},body:JSON.stringify({sessionId:'062597',runId:'audio-route-debug-2',hypothesisId:'H1',location:'AriaScreen.tsx:speak:entry',message:'speak invoked',data:{platform:Platform.OS,textLength:text?.length??0,voiceStateBefore:voiceState},timestamp:Date.now()})}).catch(()=>{});
+    fetch('http://127.0.0.1:7789/ingest/668e0bd5-3283-4492-9f48-e33846c18218',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'062597'},body:JSON.stringify(withAudioRouteDebugBuild({sessionId:'062597',runId:'pre-fix',hypothesisId:'H_ORDER',location:'AriaScreen.tsx:speak:entry',message:'speak invoked',data:{platform:Platform.OS,speakIndex,textLength:text?.length??0,textPreview:(text??'').slice(0,48),voiceStateBefore:voiceState},timestamp:Date.now()}))}).catch(()=>{});
     // #endregion
     void remoteLog('[AUDIO_ROUTE] speak entry', {
       runId: 'audio-route-debug-2',
@@ -2744,7 +3032,7 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
       textLength: text?.length ?? 0,
       voiceStateBefore: voiceState,
     });
-    stopElevenLabsSpeech();
+    await stopElevenLabsPlayback();
     lastQuestionTextRef.current = text;
     setVoiceState('speaking');
     isSpeakingRef.current = true;
@@ -2752,9 +3040,13 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
       // Ensure playback route is reset immediately before TTS (fixes low-volume-after-recording on iOS).
       await setPlaybackMode();
       // #region agent log
-      fetch('http://127.0.0.1:7789/ingest/668e0bd5-3283-4492-9f48-e33846c18218',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'062597'},body:JSON.stringify({sessionId:'062597',runId:'audio-route-debug-2',hypothesisId:'H1',location:'AriaScreen.tsx:speak:afterSetPlaybackMode',message:'setPlaybackMode finished in speak',data:{platform:Platform.OS},timestamp:Date.now()})}).catch(()=>{});
+      fetch('http://127.0.0.1:7789/ingest/668e0bd5-3283-4492-9f48-e33846c18218',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'062597'},body:JSON.stringify(withAudioRouteDebugBuild({sessionId:'062597',runId:'audio-route-debug-2',hypothesisId:'H1',location:'AriaScreen.tsx:speak:afterSetPlaybackMode',message:'setPlaybackMode finished in speak',data:{platform:Platform.OS},timestamp:Date.now()}))}).catch(()=>{});
       // #endregion
       void remoteLog('[AUDIO_ROUTE] speak after setPlaybackMode', { runId: 'audio-route-debug-2', platform: Platform.OS });
+      console.log('[Audio/TTS] AriaScreen.speak → speakWithElevenLabs', {
+        platform: Platform.OS,
+        textLength: text?.length ?? 0,
+      });
       await speakWithElevenLabs(text);
       void remoteLog('[AUDIO_ROUTE] speak after tts', { runId: 'audio-route-debug-2', platform: Platform.OS });
     } finally {
@@ -2923,6 +3215,15 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
         headers['x-api-key'] = ANTHROPIC_API_KEY;
         headers['anthropic-version'] = '2023-06-01';
       }
+      const commitmentFocusSnapshot =
+        scenarioNumber === 3 ? scenarioCCommitmentOnlyEvidenceRef.current : null;
+      const priorMentalizingForScenario3 =
+        scenarioNumber === 3
+          ? {
+              s1: scenarioScoresRef.current[1]?.pillarScores?.mentalizing,
+              s2: scenarioScoresRef.current[2]?.pillarScores?.mentalizing,
+            }
+          : null;
       try {
         const scenarioResult = await withRetry(
           async (): Promise<ScenarioScoreResult> => {
@@ -2932,7 +3233,17 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
               body: JSON.stringify({
                 model: 'claude-sonnet-4-20250514',
                 max_tokens: 800,
-                messages: [{ role: 'user', content: buildScenarioScoringPrompt(scenarioNumber, allMessages) }],
+                messages: [
+                  {
+                    role: 'user',
+                    content: buildScenarioScoringPrompt(
+                      scenarioNumber,
+                      allMessages,
+                      commitmentFocusSnapshot,
+                      priorMentalizingForScenario3
+                    ),
+                  },
+                ],
               }),
             });
             const data = await res.json();
@@ -2962,6 +3273,14 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
             },
           }
         );
+        if (scenarioNumber === 3 && commitmentFocusSnapshot?.trim()) {
+          void remoteLog('[SC3_MISPLACED_THRESHOLD_SEQUENCE]', {
+            phase: 'scenario_3_scored_with_commitment_focus',
+            interviewSessionId: interviewSessionIdRef.current,
+            usedCommitmentFocus: true,
+          });
+          scenarioCCommitmentOnlyEvidenceRef.current = null;
+        }
         const scoreMessage = formatScoreMessage(scenarioResult);
         if (__DEV__) {
           console.log('[SCORECARD_FETCH_RESULT]', {
@@ -2982,7 +3301,7 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
         scenarioScoresRef.current = { ...scenarioScoresRef.current, [scenarioNumber]: scenarioResult };
         if (ALPHA_MODE) {
           const ps = scenarioResult.pillarScores ?? {};
-          const vals = Object.values(ps);
+          const vals = Object.values(ps).filter((v): v is number => typeof v === 'number' && Number.isFinite(v));
           const postScore = vals.length ? vals.reduce((a, b) => a + b, 0) / vals.length : 0;
           probeLogRef.current.push({
             scenario: scenarioNumber,
@@ -3265,10 +3584,13 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
     const replyingToScenarioCThresholdPrompt =
       currentInterviewMomentRef.current === 3 &&
       looksLikeScenarioCThresholdQuestion(latestAssistantBeforeAppendText);
+    const skipMisplacedScenarioCThresholdBecauseAwaitingRedo =
+      expectingScenarioCThresholdAnswerAfterMisplaceRef.current;
     const misplacedScenarioCThresholdAnswer =
       replyingToScenarioCThresholdPrompt &&
       !isDecline(trimmed) &&
-      isLikelyMisplacedPersonalNarrativeForScenarioCThreshold(trimmed);
+      isLikelyMisplacedPersonalNarrativeForScenarioCThreshold(trimmed) &&
+      !skipMisplacedScenarioCThresholdBecauseAwaitingRedo;
     if (misplacedScenarioCThresholdAnswer) {
       deferredMoment4NarrativeRef.current = trimmed;
       const userMsgMisplaced: MessageWithScenario = {
@@ -3277,19 +3599,48 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
         // Tag as moment-4 context so scenario scoring excludes it.
         scenarioNumber: 4,
       };
-      const redirectText =
-        "I think that one was about Theo and Morgan specifically - what would you say for them?";
-      const thresholdQuestion =
-        "At what point would you say Theo or Morgan should decide this relationship isn't working?";
+      const scenarioTag = currentScenarioRef.current ?? 3;
       const redirectMsg: MessageWithScenario = {
         role: 'assistant',
-        content: `${redirectText}\n\n${thresholdQuestion}`,
-        scenarioNumber: currentScenarioRef.current ?? 3,
+        content: SCENARIO_C_MISPLACED_THRESHOLD_REDIRECT,
+        scenarioNumber: scenarioTag,
       };
-      setMessages([...messages, userMsgMisplaced, redirectMsg]);
-      await speakTextSafe(redirectMsg.content);
+      const thresholdMsg: MessageWithScenario = {
+        role: 'assistant',
+        content: SCENARIO_C_COMMITMENT_THRESHOLD_QUESTION,
+        scenarioNumber: scenarioTag,
+      };
+      void remoteLog('[SC3_MISPLACED_THRESHOLD_SEQUENCE]', {
+        phase: 'step1_redirect',
+        interviewSessionId: interviewSessionIdRef.current,
+        content: SCENARIO_C_MISPLACED_THRESHOLD_REDIRECT,
+      });
+      void remoteLog('[SC3_MISPLACED_THRESHOLD_SEQUENCE]', {
+        phase: 'step2_threshold_question',
+        interviewSessionId: interviewSessionIdRef.current,
+        content: SCENARIO_C_COMMITMENT_THRESHOLD_QUESTION,
+      });
+      setMessages([...messages, userMsgMisplaced, redirectMsg, thresholdMsg]);
+      await speakTextSafe(SCENARIO_C_MISPLACED_THRESHOLD_REDIRECT);
+      await speakTextSafe(SCENARIO_C_COMMITMENT_THRESHOLD_QUESTION);
+      expectingScenarioCThresholdAnswerAfterMisplaceRef.current = true;
+      void remoteLog('[SC3_MISPLACED_THRESHOLD_SEQUENCE]', {
+        phase: 'awaiting_user_answer_after_reask',
+        interviewSessionId: interviewSessionIdRef.current,
+        deferredPersonalNarrativeChars: trimmed.length,
+      });
       setVoiceState('idle');
       return;
+    }
+
+    if (expectingScenarioCThresholdAnswerAfterMisplaceRef.current) {
+      scenarioCCommitmentOnlyEvidenceRef.current = trimmed;
+      expectingScenarioCThresholdAnswerAfterMisplaceRef.current = false;
+      void remoteLog('[SC3_MISPLACED_THRESHOLD_SEQUENCE]', {
+        phase: 'captured_answer_for_commitment_scoring',
+        interviewSessionId: interviewSessionIdRef.current,
+        answerPreview: trimmed.slice(0, 400),
+      });
     }
 
     const userMsg: MessageWithScenario = {
@@ -3320,63 +3671,86 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
     if (isPersonalOpening && !isDecline(trimmed)) setUsedPersonalExamples(true);
     const replyingToMoment5Prompt =
       currentInterviewMomentRef.current === 5 &&
-      (isAppreciationPromptText(lastAssistantContent) || moment5ProbePendingRef.current);
+      (isAppreciationPromptText(lastAssistantContent) ||
+        moment5ProbePendingRef.current ||
+        moment5InexperienceFallbackPendingRef.current ||
+        isMoment5InexperienceFallbackPrompt(lastAssistantContent));
     const replyingToScenarioAQ1 =
       currentInterviewMomentRef.current === 1 && isScenarioAQ1Prompt(lastAssistantContent);
     const replyingToScenarioBQ1 =
       currentInterviewMomentRef.current === 2 && isScenarioBQ1Prompt(lastAssistantContent);
     const replyingToScenarioCQ2 =
       currentInterviewMomentRef.current === 3 && isScenarioCQ2Prompt(lastAssistantContent);
+    if (moment5InexperienceFallbackPendingRef.current && !isDecline(trimmed)) {
+      moment5InexperienceFallbackPendingRef.current = false;
+    }
     if (moment5ProbePendingRef.current && !isDecline(trimmed)) {
       // User has answered the one allowed Moment 5 probe; do not ask another.
       moment5ProbePendingRef.current = false;
     }
     const moment5Specificity = evaluateMoment5AppreciationSpecificity(trimmed);
-    const shouldForceMoment5Probe =
+    const moment5AbsenceOnly = isMoment5AppreciationAbsenceOfSignal(trimmed);
+    const moment5Hi = moment5HasHighInformationBehavioralExample(trimmed);
+    const moment5ValuesReflection = moment5HasSubstantiveCelebrationValuesReflection(trimmed);
+    const moment5LimitedExp = moment5AcknowledgesLimitedCloseRelationshipExperience(trimmed);
+    const moment5NeedInexperienceFallback =
+      !moment5Hi &&
+      !moment5ValuesReflection &&
+      (moment5LimitedExp || moment5Specificity.isGeneric || moment5AbsenceOnly);
+    const shouldForceMoment5InexperienceFallback =
       replyingToMoment5Prompt &&
-      !moment5ProbeAskedRef.current &&
+      !moment5InexperienceFallbackAskedRef.current &&
       !isDecline(trimmed) &&
-      moment5Specificity.isGeneric;
+      moment5NeedInexperienceFallback;
     if (replyingToMoment5Prompt) {
       if (__DEV__) {
-        console.log('[M5_PROBE_EVAL]', {
+        console.log('[M5_INEXPERIENCE_FALLBACK_EVAL]', {
           fullAnswerText: trimmed,
           conditions: {
             replyingToMoment5Prompt,
-            probeAlreadyAsked: moment5ProbeAskedRef.current,
+            inexperienceFallbackAlreadyAsked: moment5InexperienceFallbackAskedRef.current,
             isDecline: isDecline(trimmed),
+            moment5Hi,
+            moment5ValuesReflection,
+            moment5LimitedExp,
             hasSpecificPerson: moment5Specificity.hasSpecificPerson,
             hasSpecificMoment: moment5Specificity.hasSpecificMoment,
             hasAttunement: moment5Specificity.hasAttunement,
             hasRelationalSpecificity: moment5Specificity.hasRelationalSpecificity,
             isGeneric: moment5Specificity.isGeneric,
+            moment5AbsenceOnly,
           },
-          shouldForceMoment5Probe,
+          shouldForceMoment5InexperienceFallback,
         });
       }
-      void remoteLog('[M5_PROBE_EVAL]', {
+      void remoteLog('[M5_INEXPERIENCE_FALLBACK_EVAL]', {
         fullAnswerText: trimmed.slice(0, 500),
         conditions: {
           replyingToMoment5Prompt,
-          probeAlreadyAsked: moment5ProbeAskedRef.current,
+          inexperienceFallbackAlreadyAsked: moment5InexperienceFallbackAskedRef.current,
           isDecline: isDecline(trimmed),
+          moment5Hi,
+          moment5ValuesReflection,
+          moment5LimitedExp,
           hasSpecificPerson: moment5Specificity.hasSpecificPerson,
           hasSpecificMoment: moment5Specificity.hasSpecificMoment,
           hasAttunement: moment5Specificity.hasAttunement,
           hasRelationalSpecificity: moment5Specificity.hasRelationalSpecificity,
           isGeneric: moment5Specificity.isGeneric,
+          moment5AbsenceOnly,
         },
-        shouldForceMoment5Probe,
+        shouldForceMoment5InexperienceFallback,
       });
     }
     const relationshipEval = evaluateMoment4RelationshipType(trimmed);
     const thresholdAlreadyProvided = hasCommitmentThresholdSignal(trimmed);
-    const shouldForceMoment4ThresholdProbe = shouldForceMoment4ThresholdProbeByType({
-      isMoment4: currentInterviewMomentRef.current === 4,
-      relationshipType: relationshipEval.relationshipType,
-      thresholdAlreadyProvided,
-      probeAlreadyAsked: moment4ThresholdProbeAskedRef.current,
-    });
+    const shouldForceMoment4ThresholdProbe =
+      shouldForceMoment4ThresholdProbeByType({
+        isMoment4: currentInterviewMomentRef.current === 4,
+        relationshipType: relationshipEval.relationshipType,
+        thresholdAlreadyProvided,
+        probeAlreadyAsked: moment4ThresholdProbeAskedRef.current,
+      }) && !hasMoment4PersonalNarrativeEngagement(trimmed);
     if (currentInterviewMomentRef.current === 4 && !isDecline(trimmed)) {
       if (__DEV__) {
         console.log('[M4_THRESHOLD_EVAL]', {
@@ -3400,16 +3774,16 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
       });
     }
     const specificSamLineAlreadyAddressed = hasSpecificSamLineContemptRecognition(trimmed);
+    const scenarioAQ1Engaged = hasScenarioAQ1VignetteEngagement(trimmed);
     const shouldForceScenarioAContemptProbe =
-      replyingToScenarioAQ1 &&
-      !isDecline(trimmed);
+      replyingToScenarioAQ1 && !isDecline(trimmed) && !scenarioAQ1Engaged;
     const sidedEntirelyWithJordan = userSidesEntirelyWithJordan(trimmed);
-    const recognizedAlexNeedNaturally = naturallyRecognizesAlexNeed(trimmed);
+    const scenarioBQ1Engaged = hasScenarioBQ1OnTopicEngagement(trimmed);
     const shouldForceScenarioBFullAppreciationProbe =
       replyingToScenarioBQ1 &&
       !isDecline(trimmed) &&
-      recognizedAlexNeedNaturally &&
-      !sidedEntirelyWithJordan;
+      !sidedEntirelyWithJordan &&
+      !scenarioBQ1Engaged;
     const shouldForceScenarioCThresholdProbe =
       replyingToScenarioCQ2 &&
       !isDecline(trimmed) &&
@@ -3445,8 +3819,11 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
       const replyingToAppreciationPrompt =
         lastAsstForTokens.includes('celebrated someone') ||
         (lastAsstForTokens.includes('really celebrated') && lastAsstForTokens.includes('your life'));
+      const replyingToMoment5InexperienceFallback = isMoment5InexperienceFallbackPrompt(
+        lastAssistant?.content ?? ''
+      );
       let maxTok = isNoExample ? 600 : 200;
-      if (replyingToAppreciationPrompt) maxTok = 2800;
+      if (replyingToAppreciationPrompt || replyingToMoment5InexperienceFallback) maxTok = 2800;
       const closingInstruction = usedPersonalExamples ? PERSONAL_CLOSING_INSTRUCTION : SCENARIO_ONLY_CLOSING_INSTRUCTION;
       const progressSuffix = buildInterviewProgressSystemSuffix({
         momentsComplete: { ...interviewMomentsCompleteRef.current },
@@ -3471,6 +3848,8 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
           SCENARIO_CLOSING_INSTRUCTIONS +
           CLOSING_QUESTION_HANDLING +
           SCENARIO_TRANSITION_CLOSING +
+          REFLECTION_PARAPHRASE_FIDELITY +
+          ASSISTANT_SPEECH_POSTPROCESS_NOTICE +
           PERSONAL_DISCLOSURE_TRANSITION +
           SKIP_HANDLING_INSTRUCTIONS +
           SCORE_REQUEST_INSTRUCTIONS +
@@ -3572,7 +3951,10 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
     }
 
     const text = (data.content?.[0]?.text ?? '').trim();
-    let strippedText = sanitizeInterviewSpeech(stripControlTokens(text));
+    let strippedText = stripControlTokens(text);
+    strippedText = stripFlatReflectionAcknowledgmentOpeners(strippedText);
+    strippedText = sanitizeInterviewSpeech(strippedText);
+    strippedText = applyReflectionContrastFidelityRepair(trimmed, strippedText);
     strippedText = enforceAcknowledgmentVariation(
       strippedText,
       messagesToUse.filter((m) => m.role === 'assistant') as MessageWithScenario[],
@@ -3586,6 +3968,7 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
       strippedText = `Last one — this one's a little warmer.\n\n${strippedText}`;
     }
     const assistantIssuedMoment5Probe = looksLikeMoment5Probe(strippedText);
+    const assistantIssuedMoment5InexperienceFallback = isMoment5InexperienceFallbackPrompt(strippedText);
     let assistantIssuedMoment4ThresholdProbe = looksLikeMoment4ThresholdQuestion(strippedText);
     if (
       currentInterviewMomentRef.current === 4 &&
@@ -3645,6 +4028,10 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
     if (assistantIssuedMoment5Probe) {
       moment5ProbeAskedRef.current = true;
       moment5ProbePendingRef.current = true;
+    }
+    if (assistantIssuedMoment5InexperienceFallback) {
+      moment5InexperienceFallbackAskedRef.current = true;
+      moment5InexperienceFallbackPendingRef.current = true;
     }
     if (assistantIssuedMoment4ThresholdProbe) {
       moment4ThresholdProbeAskedRef.current = true;
@@ -3750,13 +4137,13 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
       if (__DEV__) {
         console.log('[S2_APPRECIATION_FORCED]', {
           sidedEntirelyWithJordan,
-          recognizedAlexNeedNaturally,
+          scenarioBQ1Engaged,
           assistantIssuedScenarioBFullProbe,
         });
       }
       void remoteLog('[S2_APPRECIATION_FORCED]', {
         sidedEntirelyWithJordan,
-        recognizedAlexNeedNaturally,
+        scenarioBQ1Engaged,
         assistantIssuedScenarioBFullProbe,
       });
       const probeMsg: MessageWithScenario = {
@@ -3822,17 +4209,22 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
       setVoiceState('idle');
       return;
     }
-    if (shouldForceMoment5Probe && !assistantIssuedMoment5Probe) {
-      const forcedProbe = chooseMoment5Probe(trimmed);
-      moment5ProbeAskedRef.current = true;
-      moment5ProbePendingRef.current = true;
+    if (
+      shouldForceMoment5InexperienceFallback &&
+      !assistantIssuedMoment5InexperienceFallback &&
+      !text.includes('[INTERVIEW_COMPLETE]')
+    ) {
+      const forcedFallback = MOMENT_5_INEXPERIENCE_FALLBACK_QUESTION;
+      moment5InexperienceFallbackAskedRef.current = true;
+      moment5InexperienceFallbackPendingRef.current = true;
       const probeMsg: MessageWithScenario = {
         role: 'assistant',
-        content: forcedProbe,
-        scenarioNumber: currentScenarioRef.current ?? getScenarioNumberForNewMessage(messagesToUse, 'assistant', forcedProbe),
+        content: forcedFallback,
+        scenarioNumber:
+          currentScenarioRef.current ?? getScenarioNumberForNewMessage(messagesToUse, 'assistant', forcedFallback),
       };
       setMessages([...messagesToUse, probeMsg]);
-      await speakTextSafe(forcedProbe);
+      await speakTextSafe(forcedFallback);
       setVoiceState('idle');
       return;
     }
@@ -4011,9 +4403,11 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
         }
         interviewMomentsCompleteRef.current[5] = true;
         currentInterviewMomentRef.current = 5;
-        const displayText = sanitizeClosingLanguage(
-          sanitizeInterviewSpeech(stripControlTokens(text) || 'Thank you. That was really helpful.')
-        );
+        let closingRaw = stripControlTokens(text) || 'Thank you. That was really helpful.';
+        closingRaw = stripFlatReflectionAcknowledgmentOpeners(closingRaw);
+        closingRaw = sanitizeInterviewSpeech(closingRaw);
+        closingRaw = applyReflectionContrastFidelityRepair(trimmed, closingRaw);
+        const displayText = sanitizeClosingLanguage(closingRaw);
         const finalAssistant: MessageWithScenario = {
           role: 'assistant',
           content: displayText,
@@ -4035,7 +4429,11 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
       if (scenarioMatch) {
         lastAnsweredClosingScenarioRef.current = null;
         const scenarioNumber = parseInt(scenarioMatch[1], 10) as 1 | 2 | 3;
-        const displayText = sanitizeInterviewSpeech(stripControlTokens(text) || "Good, that's helpful.");
+        let transitionDisplay = stripControlTokens(text) || "Good, that's helpful.";
+        transitionDisplay = stripFlatReflectionAcknowledgmentOpeners(transitionDisplay);
+        transitionDisplay = sanitizeInterviewSpeech(transitionDisplay);
+        transitionDisplay = applyReflectionContrastFidelityRepair(trimmed, transitionDisplay);
+        const displayText = transitionDisplay;
         applyInterviewProgressFromAssistantText(displayText, progressRefsPayload);
         const transitionMsg: MessageWithScenario = { role: 'assistant', content: displayText, scenarioNumber };
         const nextScenarioNum = scenarioNumber < 3 ? (scenarioNumber + 1) as 2 | 3 : 3;
@@ -4059,7 +4457,10 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
       const stageCompleteMatch = text.match(/\[STAGE_([123])_COMPLETE\]/);
       if (stageCompleteMatch) {
         const stageNum = parseInt(stageCompleteMatch[1], 10);
-        const displayText = sanitizeInterviewSpeech(stripControlTokens(text) || "Good, that's helpful.");
+        let stageDisplay = stripControlTokens(text) || "Good, that's helpful.";
+        stageDisplay = stripFlatReflectionAcknowledgmentOpeners(stageDisplay);
+        stageDisplay = sanitizeInterviewSpeech(stageDisplay);
+        const displayText = stageDisplay;
         const finalMessages = [...messagesToUse, { role: 'assistant', content: displayText || 'Good, that’s helpful.' }];
         setMessages(finalMessages);
         await speakTextSafe(displayText || 'Good, that’s helpful.');
@@ -4099,7 +4500,7 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
         setClosingQuestionScenario(n);
       }
 
-      const displayText = sanitizeInterviewSpeech(stripControlTokens(text));
+      const displayText = strippedText;
       const detectedScenario = detectScenarioFromResponse(displayText);
       if (detectedScenario !== null) currentScenarioRef.current = detectedScenario;
       const scenarioNum = currentScenarioRef.current ?? detectedScenario ?? getScenarioNumberForNewMessage(messagesToUse, 'assistant', displayText);
@@ -4201,7 +4602,7 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
                 FileSystemLegacy as unknown as { FileSystemUploadType?: { MULTIPART?: number } }
               ).FileSystemUploadType?.MULTIPART;
               // #region agent log
-              fetch('http://127.0.0.1:7789/ingest/668e0bd5-3283-4492-9f48-e33846c18218',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'062597'},body:JSON.stringify({sessionId:'062597',runId:'audio-route-debug-10',hypothesisId:'H-TX-1',location:'AriaScreen.tsx:transcribeSafe:nativeUpload',message:'native upload options resolved',data:{hasLegacyMultipart:typeof legacyUploadType==='number',legacyMultipartValue:legacyUploadType??null,endpointUsed:OPENAI_WHISPER_PROXY_URL?'proxy':'openai'},timestamp:Date.now()})}).catch(()=>{});
+              fetch('http://127.0.0.1:7789/ingest/668e0bd5-3283-4492-9f48-e33846c18218',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'062597'},body:JSON.stringify(withAudioRouteDebugBuild({sessionId:'062597',runId:'audio-route-debug-10',hypothesisId:'H-TX-1',location:'AriaScreen.tsx:transcribeSafe:nativeUpload',message:'native upload options resolved',data:{hasLegacyMultipart:typeof legacyUploadType==='number',legacyMultipartValue:legacyUploadType??null,endpointUsed:OPENAI_WHISPER_PROXY_URL?'proxy':'openai'},timestamp:Date.now()}))}).catch(()=>{});
               // #endregion
               const uploadResult = await FileSystemLegacy.uploadAsync(transcriptUrl, nativeUri, {
                 httpMethod: 'POST',
@@ -4300,7 +4701,7 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
   const audioRecorder = useAudioRecorder({
     onRecordingComplete: async (blob, nativeUri) => {
       // #region agent log
-      fetch('http://127.0.0.1:7789/ingest/668e0bd5-3283-4492-9f48-e33846c18218',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'062597'},body:JSON.stringify({sessionId:'062597',runId:'audio-route-debug-2',hypothesisId:'H2',location:'AriaScreen.tsx:onRecordingComplete:entry',message:'recording completed callback fired',data:{platform:Platform.OS,blobSize:blob?.size??0,hasNativeUri:!!nativeUri},timestamp:Date.now()})}).catch(()=>{});
+      fetch('http://127.0.0.1:7789/ingest/668e0bd5-3283-4492-9f48-e33846c18218',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'062597'},body:JSON.stringify(withAudioRouteDebugBuild({sessionId:'062597',runId:'audio-route-debug-2',hypothesisId:'H2',location:'AriaScreen.tsx:onRecordingComplete:entry',message:'recording completed callback fired',data:{platform:Platform.OS,blobSize:blob?.size??0,hasNativeUri:!!nativeUri},timestamp:Date.now()}))}).catch(()=>{});
       // #endregion
       void remoteLog('[AUDIO_ROUTE] onRecordingComplete', {
         runId: 'audio-route-debug-2',
@@ -4395,6 +4796,12 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
       appreciationQuestionSeenRef.current = syncedMoments.appreciationQuestionSeen;
       moment5ProbeAskedRef.current = false;
       moment5ProbePendingRef.current = false;
+      moment5InexperienceFallbackAskedRef.current = restoredMessages.some(
+        (m) =>
+          m.role === 'assistant' &&
+          isMoment5InexperienceFallbackPrompt((m as { content?: string }).content ?? '')
+      );
+      moment5InexperienceFallbackPendingRef.current = false;
       moment4ThresholdProbeAskedRef.current = false;
       scenarioAContemptProbeAskedRef.current = restoredMessages.some(
         (m) =>
@@ -4766,7 +5173,6 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
           const s3 = scenarioScoresRef.current[3]?.pillarScores;
           const scoreConsistency = calculateScoreConsistency(s1, s2, s3);
           const parsedPillarScores = parsed.pillarScores ?? {};
-          let constructAsymmetry = calculateConstructAsymmetry(parsedPillarScores);
           const scenarioBoundaries = buildScenarioBoundaries(
             finalMessages,
             Array.from(scoredScenariosRef.current)
@@ -4808,7 +5214,12 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
                   }
                   const raw = (data.content?.[0]?.text ?? '{}').replace(/```json|```/g, '').trim();
                   const parsed = JSON.parse(raw) as PersonalMomentScoreResult;
+                  const appreciationBeforeNorm =
+                    momentNumber === 5 ? parsed.pillarScores?.appreciation : undefined;
                   parsed.pillarScores = normalizeScoresByEvidence(parsed.pillarScores, parsed.keyEvidence);
+                  if (momentNumber === 5 && appreciationBeforeNorm === null) {
+                    parsed.pillarScores = { ...parsed.pillarScores, appreciation: null };
+                  }
                   if (momentNumber !== 4) return parsed;
                   const moment4UserAnswer = scoringSlice
                     .filter((m) => m.role === 'user')
@@ -4878,7 +5289,10 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
           parsed.pillarScores = pillarScores;
           parsed.gateResult = finalGateResult;
           setResults({ ...parsed });
-          constructAsymmetry = calculateConstructAsymmetry(pillarScores);
+          const constructAsymmetry = calculateConstructAsymmetry(
+            pillarScores,
+            finalGateResult.excludedMarkers ?? []
+          );
           setReasoningProgress('generating');
           if (__DEV__) console.log('=== [3] Generating reasoning ===');
           const slowTimer = setTimeout(() => setReasoningProgress('slow'), 10000);
@@ -5012,12 +5426,42 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
           if (__DEV__) {
             console.log('=== [5] DB save ===', { id: attemptId ?? undefined, error: null });
           }
-          setAnalysisAttemptId(attemptId);
-          void runPostInterviewTextStyleAnalysis(userId, finalGateResult.pass);
-          await finalizeAudioProfile(userId, attemptId, finalGateResult.pass);
-          await remoteLog('[6] setAnalysisAttemptId called', { id: attemptId ?? null });
-          if (__DEV__) console.log('=== [6] latestAttemptId set ===', attemptId ?? 'null');
-          alphaSaveOk = true;
+          if (attemptId) {
+            interviewLastCommittedAttemptId = attemptId;
+            // Style pipeline only needs the attempt row (transcript + scores on insert). Do not wait for
+            // read-replica polling; otherwise analyze-interview-text may never run when scoringVisible is false.
+            void runCommunicationStylePipelineAfterSave(
+              userId,
+              attemptId,
+              interviewSessionIdRef.current
+            );
+            const scoringVisible = await waitForInterviewAttemptScoringReady(supabase, attemptId, {
+              maxMs: 180_000,
+              intervalMs: 400,
+            });
+            if (scoringVisible) {
+              setPendingScoringSyncAttemptId(null);
+              setAnalysisAttemptId(attemptId);
+              await remoteLog('[6] setAnalysisAttemptId called', { id: attemptId });
+              if (__DEV__) console.log('=== [6] latestAttemptId set ===', attemptId);
+              interviewJustCompletedInSession = true;
+              await new Promise((resolve) => setTimeout(resolve, 100));
+              setInterviewStatus('congratulations');
+              await remoteLog('[8] setInterviewStatus called', { screen: 'congratulations' });
+              if (__DEV__) console.log('=== [8] Navigation complete ===');
+            } else {
+              setPendingScoringSyncAttemptId(attemptId);
+              await remoteLog('[WARN] Attempt row scoring fields not confirmed after extended wait — background sync', {
+                attemptId,
+              });
+              console.warn('[Aria] Staying on preparing_results until scoring row is readable', { attemptId });
+            }
+          } else {
+            await remoteLog('[ERROR] Alpha save missing attempt id after insert', {});
+          }
+          if (attemptId) {
+            alphaSaveOk = true;
+          }
         } catch (err) {
           await remoteLog('[ERROR] Completion handler threw', {
             message: err instanceof Error ? err.message : String(err),
@@ -5028,6 +5472,8 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
             console.error('=== [4] Alpha save failed ===', err);
           }
           setAnalysisAttemptId(null);
+          setPendingScoringSyncAttemptId(null);
+          interviewLastCommittedAttemptId = null;
           const saved = await loadInterviewFromStorage(userId);
           if (saved && insertPayload != null && updatePayload != null) {
             await saveInterviewProgress(userId, {
@@ -5038,20 +5484,6 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
             });
           }
           await saveInterviewResults(parsed, gateResult, userId);
-        } finally {
-          if (ALPHA_MODE) {
-            const routeTarget: 'congratulations' = 'congratulations';
-            await remoteLog('[7] About to navigate', {
-              ALPHA_MODE: true,
-              destination: routeTarget,
-            });
-            if (__DEV__) console.log(`=== [7] Navigating to ${routeTarget} ===`);
-            interviewJustCompletedInSession = true;
-            await new Promise((resolve) => setTimeout(resolve, 100));
-            setInterviewStatus(routeTarget);
-            await remoteLog('[8] setInterviewStatus called', { screen: routeTarget });
-            if (__DEV__) console.log('=== [8] Navigation complete ===');
-          }
         }
         if (!alphaSaveOk) {
           setStatus('results');
@@ -5092,7 +5524,7 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
       setInterviewStatus('congratulations');
       setStatus('results');
     }
-  }, [typologyContext, route.name, userId, navigation, queryClient, saveInterviewResults, ensureValidSession, scoreScenario, finalizeAudioProfile, runPostInterviewTextStyleAnalysis]);
+  }, [typologyContext, route.name, userId, navigation, queryClient, saveInterviewResults, ensureValidSession, scoreScenario]);
 
   // When INTERVIEW_COMPLETE was detected while TTS was still playing, transition to loading once TTS finishes
   useEffect(() => {
@@ -5143,6 +5575,8 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
     responseTimingsRef.current = [];
     probeLogRef.current = [];
     setAnalysisAttemptId(null);
+    setPendingScoringSyncAttemptId(null);
+    interviewLastCommittedAttemptId = null;
     setShowPostInterviewFeedback(false);
     setPostInterviewRatings({
       conversation_quality: null,
@@ -5352,6 +5786,11 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
           }}>
             Preparing your results
           </Text>
+          {pendingScoringSyncAttemptId ? (
+            <Text style={[styles.introHint, { marginTop: 16, textAlign: 'center', color: '#6B8AA8', maxWidth: 320 }]}>
+              Confirming your scores in our system. This usually takes a few seconds.
+            </Text>
+          ) : null}
         </View>
       </SafeAreaContainer>
     );
@@ -5472,6 +5911,7 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
                 You may review your interview results below. Please use the feedback button to let me know if you feel this information is a fair assessment of you.
               </Text>
               <AdminAttemptTabsView attemptId={analysisAttemptId} userId={userId} showFeedbackTab={false} />
+              <UserCommunicationStyleSection userId={userId} />
             </View>
           </View>
         </ScrollView>
@@ -5617,11 +6057,67 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
             </View>
           ) : null}
           <Button
-            title="Begin Voice Interview"
-            onPress={startInterview}
+            title="Continue"
+            onPress={() => setStatus('consent')}
             disabled={!!micError}
             style={styles.introButton}
           />
+        </ScrollView>
+      </SafeAreaContainer>
+    );
+  }
+
+  if (status === 'consent') {
+    return (
+      <SafeAreaContainer style={{ position: 'relative' }}>
+        {ALPHA_MODE && isAdmin && (
+          <TouchableOpacity
+            style={styles.adminPanelButton}
+            onPress={() => setShowAdminPanel(true)}
+            activeOpacity={0.8}
+          >
+            <Text style={styles.adminPanelButtonText}>◆ Panel</Text>
+          </TouchableOpacity>
+        )}
+        <TouchableOpacity
+          style={styles.introLogoutButton}
+          onPress={handleInterviewSignOut}
+          activeOpacity={0.8}
+          accessibilityRole="button"
+          accessibilityLabel="Log out"
+        >
+          <Ionicons name="log-out-outline" size={16} color="#5BA8E8" />
+          <Text style={styles.introLogoutButtonText}>Log out</Text>
+        </TouchableOpacity>
+        <ScrollView style={styles.container} contentContainerStyle={styles.introContent}>
+          <View style={styles.ariaBadge}>
+            <Ionicons name="document-text-outline" size={36} color={colors.primary} />
+            <Text style={styles.ariaName}>Data & audio</Text>
+            <Text style={styles.ariaTagline}>Consent</Text>
+          </View>
+          <Text style={styles.introTitle}>How we use your interview</Text>
+          <Text style={[styles.introHint, { marginBottom: 16 }]}>
+            Your interview responses — including audio and transcript — will be used to assess your relational readiness and
+            to find you compatible matches. Audio is analyzed for communication style only. Raw audio is never shared with
+            other users or third parties.
+          </Text>
+          <Text style={styles.introNote}>
+            By starting the voice interview, you acknowledge this use of your responses. The interviewer will not repeat
+            this full disclosure in the opening conversation.
+          </Text>
+          <View style={{ flexDirection: 'row', gap: 12, marginTop: 24, width: '100%' }}>
+            <Button
+              title="Back"
+              onPress={() => setStatus('intro')}
+              style={StyleSheet.flatten([styles.introButton, { flex: 1 }])}
+            />
+            <Button
+              title="Start voice interview"
+              onPress={startInterview}
+              disabled={!!micError}
+              style={StyleSheet.flatten([styles.introButton, { flex: 2 }])}
+            />
+          </View>
         </ScrollView>
       </SafeAreaContainer>
     );

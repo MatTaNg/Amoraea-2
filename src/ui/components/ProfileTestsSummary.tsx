@@ -1,10 +1,12 @@
-import React from 'react';
+import React, { useEffect, useState } from 'react';
 import { View, StyleSheet, Text } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { colors } from '@ui/theme/colors';
 import { spacing } from '@ui/theme/spacing';
 import type { Profile } from '@domain/models/Profile';
 import type { BasicInfo, Gate1Score, Gate2Psychometrics, Gate3Compatibility } from '@domain/models/OnboardingGates';
+import { supabase } from '@data/supabase/client';
+import { CommunicationStyleSection } from '@ui/components/CommunicationStyleSection';
 
 function formatLabel(key: string): string {
   return key
@@ -49,6 +51,13 @@ export const ProfileTestsSummary: React.FC<{ profile: Profile | null | undefined
   const gate2: Gate2Psychometrics | null = profile?.gate2Psychometrics ?? null;
   const gate3: Gate3Compatibility | null = profile?.gate3Compatibility ?? null;
 
+  const [styleLabels, setStyleLabels] = useState<{
+    primary: string[] | null;
+    secondary: string[] | null;
+    lowConfidenceNote: string | null;
+  } | null>(null);
+  const [styleLoading, setStyleLoading] = useState(false);
+
   const hasBasic = !!(
     basicInfo?.firstName ||
     profile?.name ||
@@ -60,6 +69,40 @@ export const ProfileTestsSummary: React.FC<{ profile: Profile | null | undefined
   const hasInterview = !!gate1;
   const hasPsychometrics = !!gate2;
   const hasCompatibility = !!(gate3 && (Object.keys(gate3).length > 0 || (gate3.profilePrompts?.length ?? 0) > 0));
+
+  useEffect(() => {
+    const uid = profile?.id;
+    if (!uid || !hasInterview) {
+      setStyleLabels(null);
+      return;
+    }
+    let cancelled = false;
+    setStyleLoading(true);
+    void supabase
+      .from('communication_style_profiles')
+      .select('style_labels_primary, style_labels_secondary, low_confidence_note')
+      .eq('user_id', uid)
+      .maybeSingle()
+      .then(({ data }) => {
+        if (cancelled) return;
+        setStyleLabels(
+          data
+            ? {
+                primary: (data.style_labels_primary as string[] | null) ?? null,
+                secondary: (data.style_labels_secondary as string[] | null) ?? null,
+                lowConfidenceNote: (data.low_confidence_note as string | null) ?? null,
+              }
+            : null
+        );
+        setStyleLoading(false);
+      })
+      .catch(() => {
+        if (!cancelled) setStyleLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [profile?.id, hasInterview]);
 
   if (!hasBasic && !hasInterview && !hasPsychometrics && !hasCompatibility) return null;
 
@@ -137,6 +180,12 @@ export const ProfileTestsSummary: React.FC<{ profile: Profile | null | undefined
                 ))}
               </View>
             )}
+            <CommunicationStyleSection
+              primary={styleLabels?.primary}
+              secondary={styleLabels?.secondary}
+              lowConfidenceNote={styleLabels?.lowConfidenceNote}
+              loading={styleLoading}
+            />
           </>
         )}
       </SummaryBlock>

@@ -10,11 +10,16 @@ CREATE TABLE IF NOT EXISTS aria_sessions (
 CREATE INDEX IF NOT EXISTS idx_aria_sessions_profile_id ON aria_sessions(profile_id);
 CREATE INDEX IF NOT EXISTS idx_aria_sessions_created_at ON aria_sessions(profile_id, created_at DESC);
 
+DROP TRIGGER IF EXISTS update_aria_sessions_updated_at ON aria_sessions;
 CREATE TRIGGER update_aria_sessions_updated_at BEFORE UPDATE ON aria_sessions
   FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
 
 ALTER TABLE aria_sessions ENABLE ROW LEVEL SECURITY;
 
+DROP POLICY IF EXISTS "Users can view own aria_sessions" ON aria_sessions;
+DROP POLICY IF EXISTS "Users can insert own aria_sessions" ON aria_sessions;
+DROP POLICY IF EXISTS "Users can update own aria_sessions" ON aria_sessions;
+DROP POLICY IF EXISTS "Users can delete own aria_sessions" ON aria_sessions;
 CREATE POLICY "Users can view own aria_sessions"
   ON aria_sessions FOR SELECT USING (auth.uid() = profile_id);
 CREATE POLICY "Users can insert own aria_sessions"

@@ -34,11 +34,15 @@ CREATE TABLE IF NOT EXISTS users (
 
 CREATE INDEX IF NOT EXISTS idx_users_onboarding_completed ON users(onboarding_completed);
 
+DROP TRIGGER IF EXISTS update_users_updated_at ON users;
 CREATE TRIGGER update_users_updated_at BEFORE UPDATE ON users
   FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
 
 ALTER TABLE users ENABLE ROW LEVEL SECURITY;
 
+DROP POLICY IF EXISTS "Users can view own record" ON users;
+DROP POLICY IF EXISTS "Users can insert own record" ON users;
+DROP POLICY IF EXISTS "Users can update own record" ON users;
 CREATE POLICY "Users can view own record"
   ON users FOR SELECT USING (auth.uid() = id);
 CREATE POLICY "Users can insert own record"
@@ -60,10 +64,15 @@ CREATE TABLE IF NOT EXISTS typologies (
 CREATE INDEX IF NOT EXISTS idx_typologies_profile_id ON typologies(profile_id);
 CREATE INDEX IF NOT EXISTS idx_typologies_type ON typologies(typology_type);
 
+DROP TRIGGER IF EXISTS update_typologies_updated_at ON typologies;
 CREATE TRIGGER update_typologies_updated_at BEFORE UPDATE ON typologies
   FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
 
 ALTER TABLE typologies ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS "Users can view own typologies" ON typologies;
+DROP POLICY IF EXISTS "Users can insert own typologies" ON typologies;
+DROP POLICY IF EXISTS "Users can update own typologies" ON typologies;
+DROP POLICY IF EXISTS "Users can delete own typologies" ON typologies;
 CREATE POLICY "Users can view own typologies" ON typologies FOR SELECT USING (auth.uid() = profile_id);
 CREATE POLICY "Users can insert own typologies" ON typologies FOR INSERT WITH CHECK (auth.uid() = profile_id);
 CREATE POLICY "Users can update own typologies" ON typologies FOR UPDATE USING (auth.uid() = profile_id) WITH CHECK (auth.uid() = profile_id);
@@ -80,10 +89,15 @@ CREATE TABLE IF NOT EXISTS compatibility (
 
 CREATE INDEX IF NOT EXISTS idx_compatibility_profile_id ON compatibility(profile_id);
 
+DROP TRIGGER IF EXISTS update_compatibility_updated_at ON compatibility;
 CREATE TRIGGER update_compatibility_updated_at BEFORE UPDATE ON compatibility
   FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
 
 ALTER TABLE compatibility ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS "Users can view own compatibility" ON compatibility;
+DROP POLICY IF EXISTS "Users can insert own compatibility" ON compatibility;
+DROP POLICY IF EXISTS "Users can update own compatibility" ON compatibility;
+DROP POLICY IF EXISTS "Users can delete own compatibility" ON compatibility;
 CREATE POLICY "Users can view own compatibility" ON compatibility FOR SELECT USING (auth.uid() = profile_id);
 CREATE POLICY "Users can insert own compatibility" ON compatibility FOR INSERT WITH CHECK (auth.uid() = profile_id);
 CREATE POLICY "Users can update own compatibility" ON compatibility FOR UPDATE USING (auth.uid() = profile_id) WITH CHECK (auth.uid() = profile_id);
@@ -103,6 +117,10 @@ CREATE INDEX IF NOT EXISTS idx_profile_photos_profile_id ON profile_photos(profi
 CREATE INDEX IF NOT EXISTS idx_profile_photos_display_order ON profile_photos(profile_id, display_order);
 
 ALTER TABLE profile_photos ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS "Users can view own photos" ON profile_photos;
+DROP POLICY IF EXISTS "Users can insert own photos" ON profile_photos;
+DROP POLICY IF EXISTS "Users can update own photos" ON profile_photos;
+DROP POLICY IF EXISTS "Users can delete own photos" ON profile_photos;
 CREATE POLICY "Users can view own photos" ON profile_photos FOR SELECT USING (auth.uid() = profile_id);
 CREATE POLICY "Users can insert own photos" ON profile_photos FOR INSERT WITH CHECK (auth.uid() = profile_id);
 CREATE POLICY "Users can update own photos" ON profile_photos FOR UPDATE USING (auth.uid() = profile_id) WITH CHECK (auth.uid() = profile_id);

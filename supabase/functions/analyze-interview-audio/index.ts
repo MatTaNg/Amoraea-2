@@ -1,4 +1,15 @@
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
+import { styleProfileFromDbRow, translateStyleProfile } from '../_shared/styleTranslations.ts';
+
+function styleLabelsColumnsFromRow(row: Record<string, unknown>) {
+  const t = translateStyleProfile(styleProfileFromDbRow(row));
+  return {
+    style_labels_primary: t.primary,
+    style_labels_secondary: t.secondary,
+    matchmaker_summary: t.matchmaker_summary,
+    low_confidence_note: t.low_confidence_note,
+  };
+}
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -137,14 +148,22 @@ async function setAudioConfidenceZero(
   const overallConfidence = (textConfidence * 0.5);
   const merged = { ...(existing ?? {}), audio_confidence: 0 };
   const styleVector = buildStyleVector(merged);
-  await admin.from('communication_style_profiles').upsert({
+  const upsertPayload = {
     user_id: userId,
     audio_confidence: 0,
     overall_confidence: overallConfidence,
     style_vector: `[${styleVector.map((n) => Number.isFinite(n) ? n.toFixed(6) : '0.500000').join(',')}]`,
     processed_at: new Date().toISOString(),
     updated_at: new Date().toISOString(),
-  }, { onConflict: 'user_id' });
+    ...styleLabelsColumnsFromRow(merged),
+  };
+  const { error: zeroUpsertErr } = await admin
+    .from('communication_style_profiles')
+    .upsert(upsertPayload, { onConflict: 'user_id' });
+  if (zeroUpsertErr) {
+    console.error(`[analyze-interview-audio] setAudioConfidenceZero upsert FAILED user_id=${userId}:`, zeroUpsertErr.message);
+    throw new Error(zeroUpsertErr.message);
+  }
   await logStyle(admin, userId, 'audio', 'partial', reason, { audio_confidence: 0 });
 }
 
@@ -359,15 +378,28 @@ async function finalizeSession(body: Body, admin: ReturnType<typeof createClient
   const styleVector = buildStyleVector(merged);
   const overallConfidence = (textConfidence * 0.5) + (audioConfidence * 0.5);
 
-  await admin.from('communication_style_profiles').upsert({
-    user_id: userId,
-    ...averaged,
-    audio_confidence: audioConfidence,
-    overall_confidence: overallConfidence,
-    style_vector: `[${styleVector.map((n) => Number.isFinite(n) ? n.toFixed(6) : '0.500000').join(',')}]`,
-    processed_at: new Date().toISOString(),
-    updated_at: new Date().toISOString(),
-  }, { onConflict: 'user_id' });
+  const { error: finalizeUpsertErr } = await admin.from('communication_style_profiles').upsert(
+    {
+      user_id: userId,
+      source_attempt_id: attemptId,
+      ...averaged,
+      audio_confidence: audioConfidence,
+      overall_confidence: overallConfidence,
+      style_vector: `[${styleVector.map((n) => Number.isFinite(n) ? n.toFixed(6) : '0.500000').join(',')}]`,
+      processed_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+      ...styleLabelsColumnsFromRow(merged),
+    },
+    { onConflict: 'user_id' },
+  );
+  if (finalizeUpsertErr) {
+    console.error(
+      `[analyze-interview-audio] finalize upsert FAILED user_id=${userId} attempt_id=${attemptId}:`,
+      finalizeUpsertErr.message
+    );
+    throw new Error(finalizeUpsertErr.message);
+  }
+  console.log(`[analyze-interview-audio] communication_style_profiles upsert OK user_id=${userId} attempt_id=${attemptId}`);
 
   await logStyle(admin, userId, 'audio_session_finalized', 'success', null, {
     turns_processed: turns.length,

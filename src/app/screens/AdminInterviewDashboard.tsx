@@ -15,6 +15,16 @@ import {
 } from 'react-native';
 import { supabase } from '@data/supabase/client';
 import { normalizeScoresByEvidence } from '@features/aria/probeAndScoringUtils';
+import {
+  describeCertaintyAmbiguityAxis,
+  describeEmotionalAnalyticalAxis,
+  describeExpressivenessAxis,
+  describeNarrativeConceptualAxis,
+  describeRelationalIndividualAxis,
+  describeWarmthAxis,
+  styleProfileFromDbRow,
+  translateStyleProfile,
+} from '@utilities/styleTranslations';
 
 // Marker ids as stored in DB; construct keys match ai_reasoning.construct_breakdown
 const PILLAR_ROWS = [
@@ -76,6 +86,7 @@ type AttemptRow = {
   transcript: Array<{ role: string; content?: string }> | null;
   scenario_specific_patterns?: Record<string, unknown> | null;
   probe_log?: unknown;
+  communication_style_error?: string | null;
 };
 
 type CommunicationStyleProfileRow = {
@@ -99,6 +110,11 @@ type CommunicationStyleProfileRow = {
   audio_confidence: number | null;
   overall_confidence: number | null;
   updated_at: string | null;
+  style_labels_primary?: string[] | null;
+  style_labels_secondary?: string[] | null;
+  matchmaker_summary?: string | null;
+  low_confidence_note?: string | null;
+  source_attempt_id?: string | null;
 };
 
 function coerceScoreNumber(v: unknown): number | undefined {
@@ -359,7 +375,8 @@ async function fetchAllAdminData(): Promise<UserGroup[]> {
       user_analysis_rating,
       user_analysis_comment,
       per_construct_ratings,
-      transcript
+      transcript,
+      communication_style_error
     `
     )
     .order('created_at', { ascending: false });
@@ -455,7 +472,8 @@ function SummaryTab({ attempt }: { attempt: AttemptRow }) {
       .select('*')
       .eq('user_id', attempt.user_id)
       .maybeSingle();
-    setStyleProfile((data as CommunicationStyleProfileRow | null) ?? null);
+    const row = data as CommunicationStyleProfileRow | null | undefined;
+    setStyleProfile(row ?? null);
     setStyleStatus('idle');
   };
 
@@ -466,14 +484,22 @@ function SummaryTab({ attempt }: { attempt: AttemptRow }) {
   const reprocessStyle = async () => {
     setStyleStatus('reprocessing');
     try {
-      await Promise.all([
-        supabase.functions.invoke('analyze-interview-text', {
-          body: { user_id: attempt.user_id },
-        }),
-        supabase.functions.invoke('analyze-interview-audio', {
-          body: { action: 'finalize_session', user_id: attempt.user_id, attempt_id: attempt.id },
-        }),
-      ]);
+      const textRes = await supabase.functions.invoke('analyze-interview-text', {
+        body: { user_id: attempt.user_id, attempt_id: attempt.id },
+      });
+      if (textRes.error) {
+        console.error('[Admin] analyze-interview-text invoke failed', textRes.error);
+      }
+      const audioRes = await supabase.functions.invoke('analyze-interview-audio', {
+        body: {
+          action: 'finalize_session',
+          user_id: attempt.user_id,
+          attempt_id: attempt.id,
+        },
+      });
+      if (audioRes.error) {
+        console.error('[Admin] analyze-interview-audio invoke failed', audioRes.error);
+      }
       await loadStyleProfile();
     } finally {
       setStyleStatus('idle');
@@ -545,7 +571,17 @@ function SummaryTab({ attempt }: { attempt: AttemptRow }) {
         </View>
       ))}
       <Text style={styles.sectionTitle}>Communication Style</Text>
+      {attempt.communication_style_error ? (
+        <View style={[styles.block, { borderLeftWidth: 3, borderLeftColor: '#E87A7A', paddingLeft: 10 }]}>
+          <Text style={[styles.blockTitle, { color: '#B33A3A' }]}>Style pipeline error (stored on attempt)</Text>
+          <Text style={styles.blockText}>{attempt.communication_style_error}</Text>
+        </View>
+      ) : null}
       <View style={styles.block}>
+        <Text style={[styles.blockText, styles.styleTranslationNote]}>
+          Translation thresholds are defined in src/utilities/styleTranslations.ts and can be adjusted as calibration
+          data accumulates.
+        </Text>
         <Text style={styles.blockText}>
           Processing status:{' '}
           {styleProfile
@@ -560,22 +596,82 @@ function SummaryTab({ attempt }: { attempt: AttemptRow }) {
         <Text style={styles.blockText}>Audio confidence: {formatScoreCell((styleProfile?.audio_confidence ?? null) !== null ? Number(styleProfile?.audio_confidence) * 10 : null)}</Text>
         <Text style={styles.blockText}>Overall confidence: {formatScoreCell((styleProfile?.overall_confidence ?? null) !== null ? Number(styleProfile?.overall_confidence) * 10 : null)}</Text>
 
+        {(() => {
+          const live =
+            styleProfile != null
+              ? translateStyleProfile(styleProfileFromDbRow(styleProfile as unknown as Record<string, unknown>))
+              : null;
+          const primaryStored = styleProfile?.style_labels_primary;
+          const secondaryStored = styleProfile?.style_labels_secondary;
+          const summaryStored = styleProfile?.matchmaker_summary;
+          const lowNoteStored = styleProfile?.low_confidence_note;
+          return (
+            <>
+              {(primaryStored?.length || live?.primary?.length) ? (
+                <Text style={styles.blockText}>
+                  Primary labels: {(primaryStored?.length ? primaryStored : live?.primary)?.join(', ')}
+                </Text>
+              ) : null}
+              {(secondaryStored?.length || live?.secondary?.length) ? (
+                <Text style={styles.blockText}>
+                  Secondary labels: {(secondaryStored?.length ? secondaryStored : live?.secondary)?.join(', ')}
+                </Text>
+              ) : null}
+              {(summaryStored || live?.matchmaker_summary) ? (
+                <Text style={styles.blockText}>
+                  Matchmaker summary: {summaryStored ?? live?.matchmaker_summary}
+                </Text>
+              ) : null}
+              {(lowNoteStored || live?.low_confidence_note) ? (
+                <Text style={styles.blockText}>Low confidence: {lowNoteStored ?? live?.low_confidence_note}</Text>
+              ) : null}
+            </>
+          );
+        })()}
+
+        {(
+          [
+            ['Emotional vs Analytical', styleProfile?.emotional_analytical_score, describeEmotionalAnalyticalAxis],
+            ['Narrative vs Conceptual', styleProfile?.narrative_conceptual_score, describeNarrativeConceptualAxis],
+            ['Certainty vs Ambiguity', styleProfile?.certainty_ambiguity_score, describeCertaintyAmbiguityAxis],
+            ['Relational vs Individual', styleProfile?.relational_individual_score, describeRelationalIndividualAxis],
+          ] as const
+        ).map(([label, value, describe]) => {
+          const n = coerceScoreNumber(value) ?? null;
+          const exp = n == null ? '' : describe(n);
+          return (
+            <View key={label} style={styles.styleBarRow}>
+              <Text style={styles.scoreLabel}>{label}</Text>
+              <View style={styles.styleBarTrack}>
+                <View style={[styles.styleBarFill, { width: `${Math.max(0, Math.min(100, (n ?? 0) * 100))}%` }]} />
+              </View>
+              <View style={styles.styleBarValueCol}>
+                <Text style={styles.scoreValue}>{n == null ? '—' : n.toFixed(2)}</Text>
+                {n != null ? <Text style={styles.styleExperienceLabel}>→ {exp}</Text> : null}
+              </View>
+            </View>
+          );
+        })}
         {[
-          ['Emotional vs Analytical', styleProfile?.emotional_analytical_score],
-          ['Narrative vs Conceptual', styleProfile?.narrative_conceptual_score],
-          ['Certainty vs Ambiguity', styleProfile?.certainty_ambiguity_score],
-          ['Relational vs Individual', styleProfile?.relational_individual_score],
           ['Warmth', styleProfile?.warmth_score],
           ['Expressiveness', styleProfile?.emotional_expressiveness],
         ].map(([label, value]) => {
-          const n = typeof value === 'number' ? value : null;
+          const n = coerceScoreNumber(value) ?? null;
+          const ac = coerceScoreNumber(styleProfile?.audio_confidence) ?? null;
+          const exp =
+            label === 'Warmth'
+              ? describeWarmthAxis(n, ac ?? null)
+              : describeExpressivenessAxis(n, ac ?? null);
           return (
             <View key={String(label)} style={styles.styleBarRow}>
               <Text style={styles.scoreLabel}>{label}</Text>
               <View style={styles.styleBarTrack}>
                 <View style={[styles.styleBarFill, { width: `${Math.max(0, Math.min(100, (n ?? 0) * 100))}%` }]} />
               </View>
-              <Text style={styles.scoreValue}>{n == null ? '—' : n.toFixed(2)}</Text>
+              <View style={styles.styleBarValueCol}>
+                <Text style={styles.scoreValue}>{n == null ? '—' : n.toFixed(2)}</Text>
+                {n != null ? <Text style={styles.styleExperienceLabel}>→ {exp}</Text> : null}
+              </View>
             </View>
           );
         })}
@@ -1159,8 +1255,23 @@ const styles = StyleSheet.create({
     color: '#7A9ABE',
     fontSize: 13,
   },
+  styleTranslationNote: {
+    marginBottom: 8,
+    fontStyle: 'italic',
+    opacity: 0.95,
+  },
   styleBarRow: {
     marginTop: 8,
+  },
+  styleBarValueCol: {
+    marginTop: 4,
+    alignItems: 'flex-start',
+  },
+  styleExperienceLabel: {
+    fontSize: 11,
+    color: '#9BB8D9',
+    marginTop: 2,
+    flexShrink: 1,
   },
   styleBarTrack: {
     marginTop: 4,

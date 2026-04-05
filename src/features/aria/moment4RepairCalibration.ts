@@ -1,6 +1,6 @@
 export type PersonalMomentScoreLike = {
   momentNumber: 4 | 5;
-  pillarScores: Record<string, number>;
+  pillarScores: Record<string, number | null>;
   pillarConfidence?: Record<string, string>;
   keyEvidence?: Record<string, string>;
   summary?: string;

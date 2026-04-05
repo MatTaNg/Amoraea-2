@@ -1,33 +1,14 @@
 import React, { useEffect, useRef } from 'react';
 import { Platform } from 'react-native';
 import FlameOrbNative, { type FlameOrbNativeState } from './FlameOrbNative';
+import {
+  FLAME_PATH,
+  INNER_FLAME_PATH,
+  FLAME_VIEWBOX_H,
+  FLAME_VIEWBOX_W,
+} from './flameOrbGeometry';
 
 export type FlameState = 'idle' | 'speaking' | 'listening' | 'processing' | 'recording';
-
-// OUTER FLAME — smooth continuous outline, no side bumps
-// One clean path: tip → right side → wide smooth base → left side → back to tip
-const FLAME_PATH = `
-  M 140 12
-  C 175 50,  240 90,  248 140
-  C 255 180, 245 220, 220 248
-  C 200 268, 175 280, 140 282
-  C 105 280,  80 268,  60 248
-  C  35 220,  25 180,  32 140
-  C  40  90, 105  50, 140  12
-  Z
-`;
-
-// INNER FLAME — clean teardrop, no bumps
-const INNER_FLAME_PATH = `
-  M 140 55
-  C 165 80,  200 112, 205 152
-  C 210 186, 198 216, 180 236
-  C 165 252, 152 260, 140 262
-  C 128 260, 115 252, 100 236
-  C  82 216,  70 186,  75 152
-  C  80 112, 115  80, 140  55
-  Z
-`;
 
 const CONFIG = {
   idle: {
@@ -72,10 +53,10 @@ const CONFIG = {
   },
 } as const;
 
-const W = 280;
-const H = 300;
-const VIEWBOX_W = 280;
-const VIEWBOX_H = 300;
+const W = FLAME_VIEWBOX_W;
+const H = FLAME_VIEWBOX_H;
+const VIEWBOX_W = FLAME_VIEWBOX_W;
+const VIEWBOX_H = FLAME_VIEWBOX_H;
 const ID = 'amoraea-flame';
 
 export const FlameOrb: React.FC<{ state: FlameState; size?: number }> = ({

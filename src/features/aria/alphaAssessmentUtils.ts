@@ -35,16 +35,39 @@ export function calculateScoreConsistency(
   return result;
 }
 
-export function calculateConstructAsymmetry(pillarScores: Record<string, number>): {
+export function calculateConstructAsymmetry(
+  pillarScores: Record<string, number>,
+  excludedMarkerIds: readonly string[] = []
+): {
   user_mean: number;
   strongest_construct: string;
   weakest_construct: string;
   gap: number;
   profile_type: string;
 } {
-  const entries = CONSTRUCT_NAMES.map((name) => [name, pillarScores[name] ?? 0] as [string, number]);
+  const excluded = new Set(excludedMarkerIds);
+  const entries = CONSTRUCT_NAMES.map((name) => [name, pillarScores[name]] as const)
+    .filter(
+      ([name, v]) =>
+        !excluded.has(name) &&
+        typeof v === 'number' &&
+        Number.isFinite(v) &&
+        v > 0
+    )
+    .map(([name, v]) => [name, v as number] as [string, number]);
+
+  if (entries.length < 2) {
+    return {
+      user_mean: 0,
+      strongest_construct: '',
+      weakest_construct: '',
+      gap: 0,
+      profile_type: '',
+    };
+  }
+
   const values = entries.map(([, v]) => v);
-  const mean = values.length ? values.reduce((a, b) => a + b, 0) / values.length : 0;
+  const mean = values.reduce((a, b) => a + b, 0) / values.length;
   const strongest = entries.reduce((a, b) => (a[1] > b[1] ? a : b));
   const weakest = entries.reduce((a, b) => (a[1] < b[1] ? a : b));
   const gap = strongest[1] - weakest[1];
@@ -116,10 +139,58 @@ export function analyzeLanguageMarkers(
     'because they', "if they hadn't",
   ];
   const emotionWords = [
-    'frustrated', 'hurt', 'angry', 'sad', 'confused', 'scared',
-    'anxious', 'lonely', 'disconnected', 'overwhelmed', 'grateful',
-    'happy', 'excited', 'afraid', 'ashamed', 'guilty', 'proud',
-    'embarrassed', 'nervous', 'disappointed',
+    'frustrated',
+    'hurt',
+    'hurting',
+    'angry',
+    'sad',
+    'confused',
+    'scared',
+    'anxious',
+    'lonely',
+    'disconnected',
+    'overwhelmed',
+    'flooded',
+    'grateful',
+    'happy',
+    'excited',
+    'afraid',
+    'ashamed',
+    'guilty',
+    'proud',
+    'embarrassed',
+    'nervous',
+    'disappointed',
+    'devastated',
+    'tender',
+    'vulnerable',
+    'healing',
+    'resentment',
+    'resentful',
+    'contempt',
+    'grief',
+    'shame',
+    'warmth',
+    'dread',
+    'longing',
+    'raw',
+    'exhausted',
+    'invisible',
+    'heartbroken',
+    'numb',
+    'aching',
+    'ache',
+    'hopeless',
+    'hopeful',
+    'bitter',
+    'tears',
+    'crying',
+    'pain',
+    'joy',
+    'sinking',
+    'tightness',
+    'weight',
+    'heavy',
   ];
 
   const fullText = userMessages.map((m) => (m.content ?? '').toLowerCase()).join(' ');
@@ -137,6 +208,7 @@ export function analyzeLanguageMarkers(
   const accountabilityCountForText = (text: string) =>
     countPhrasesInText(text, accountabilityPhrases) + countRegexesInText(text, accountabilityRegexes);
 
+  // Distinct emotion lexicon hits across all user turns (full interview), not per-scenario slices.
   const emotionalVocabCount = [...new Set(emotionWords.filter((w) => fullText.includes(w)))].length;
 
   const perScenario: Record<number, { word_count: number; qualifier_count: number; accountability_phrases: number }> = {};

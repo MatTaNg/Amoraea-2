@@ -1,7 +1,8 @@
 import { useState, useRef, useCallback } from 'react';
 import { Platform } from 'react-native';
 import { Audio } from 'expo-av';
-import { setRecordingMode } from '@features/aria/utils/audioModeHelpers';
+import { setPlaybackMode, setRecordingMode } from '@features/aria/utils/audioModeHelpers';
+import { withAudioRouteDebugBuild } from '@features/aria/utils/audioRouteDebugBuild';
 export type AudioRecorderPermissionStatus = 'granted' | 'denied' | null;
 
 const RECORDING_OPTIONS = {
@@ -66,6 +67,9 @@ export function useAudioRecorder({
       }
     }
     const { status } = await Audio.requestPermissionsAsync();
+    // #region agent log
+    fetch('http://127.0.0.1:7789/ingest/668e0bd5-3283-4492-9f48-e33846c18218',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'062597'},body:JSON.stringify(withAudioRouteDebugBuild({sessionId:'062597',runId:'pre-fix',hypothesisId:'H5',location:'useAudioRecorder.ts:requestPermission:after',message:'Audio.requestPermissionsAsync completed',data:{platform:Platform.OS,status},timestamp:Date.now()}))}).catch(()=>{});
+    // #endregion
     setPermissionStatus(status === 'granted' ? 'granted' : 'denied');
     return status === 'granted';
   }, []);
@@ -102,9 +106,19 @@ export function useAudioRecorder({
 
     try {
       // #region agent log
-      fetch('http://127.0.0.1:7789/ingest/668e0bd5-3283-4492-9f48-e33846c18218',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'062597'},body:JSON.stringify({sessionId:'062597',runId:'audio-route-debug-1',hypothesisId:'H2',location:'useAudioRecorder.ts:stopNativeRecording:entry',message:'stop native recording called',data:{platform:Platform.OS},timestamp:Date.now()})}).catch(()=>{});
+      fetch('http://127.0.0.1:7789/ingest/668e0bd5-3283-4492-9f48-e33846c18218',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'062597'},body:JSON.stringify(withAudioRouteDebugBuild({sessionId:'062597',runId:'audio-route-debug-1',hypothesisId:'H2',location:'useAudioRecorder.ts:stopNativeRecording:entry',message:'stop native recording called',data:{platform:Platform.OS},timestamp:Date.now()}))}).catch(()=>{});
       // #endregion
       await recording.stopAndUnloadAsync();
+      // #region agent log
+      fetch('http://127.0.0.1:7789/ingest/668e0bd5-3283-4492-9f48-e33846c18218',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'062597'},body:JSON.stringify(withAudioRouteDebugBuild({sessionId:'062597',runId:'pre-fix',hypothesisId:'H2',location:'useAudioRecorder.ts:stopNativeRecording:afterStopAndUnload',message:'native recording stopped',data:{platform:Platform.OS},timestamp:Date.now()}))}).catch(()=>{});
+      // #endregion
+      // iOS: PlayAndRecord without DefaultToSpeaker while recording; restore playback-only session ASAP so next TTS uses loudspeaker (expo-av applies DefaultToSpeaker when allowsRecordingIOS is false).
+      if (Platform.OS !== 'web') {
+        await setPlaybackMode();
+        // #region agent log
+        fetch('http://127.0.0.1:7789/ingest/668e0bd5-3283-4492-9f48-e33846c18218',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'062597'},body:JSON.stringify(withAudioRouteDebugBuild({sessionId:'062597',runId:'post-fix-verify',hypothesisId:'H2',location:'useAudioRecorder.ts:stopNativeRecording:afterSetPlaybackMode',message:'setPlaybackMode after recording stop',data:{platform:Platform.OS},timestamp:Date.now()}))}).catch(()=>{});
+        // #endregion
+      }
 
       const uri = recording.getURI();
       recordingRef.current = null;
@@ -114,13 +128,16 @@ export function useAudioRecorder({
         const response = await fetch(uri);
         const blob = await response.blob();
         // #region agent log
-        fetch('http://127.0.0.1:7789/ingest/668e0bd5-3283-4492-9f48-e33846c18218',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'062597'},body:JSON.stringify({sessionId:'062597',runId:'audio-route-debug-1',hypothesisId:'H2',location:'useAudioRecorder.ts:stopNativeRecording:afterBlob',message:'native recording blob ready',data:{blobSize:blob?.size??0,hasUri:!!uri},timestamp:Date.now()})}).catch(()=>{});
+        fetch('http://127.0.0.1:7789/ingest/668e0bd5-3283-4492-9f48-e33846c18218',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'062597'},body:JSON.stringify(withAudioRouteDebugBuild({sessionId:'062597',runId:'audio-route-debug-1',hypothesisId:'H2',location:'useAudioRecorder.ts:stopNativeRecording:afterBlob',message:'native recording blob ready',data:{blobSize:blob?.size??0,hasUri:!!uri},timestamp:Date.now()}))}).catch(()=>{});
         // #endregion
         await onRecordingComplete?.(blob, uri);
       }
     } catch (err) {
       if (__DEV__) console.error('Native recording stop failed:', err);
       setIsRecording(false);
+      if (Platform.OS !== 'web') {
+        await setPlaybackMode().catch(() => {});
+      }
       onError?.(err instanceof Error ? err : new Error(String(err)));
     }
   }, [onRecordingComplete, onError]);

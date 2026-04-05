@@ -38,13 +38,22 @@ Do not include any behavior tied to a marker below 6.0, regardless of framing.
 If the user fails, do not reframe low-scoring patterns as strengths.
 If no markers are >= 6.0, return an empty overall_strengths array.
 Apply this gating consistently across all eight markers.
+Strengths evidence quality (strict): Before writing each overall_strength, verify the quoted or paraphrased evidence actually demonstrates the positive capacity you attribute (regulation, mentalizing, attunement, repair, etc.). Do not use contemptuous, dismissive, devaluing, contempt-adjacent, or judgmental language about another person as supporting evidence for a positive marker — including rationalized contempt framed as clarity (e.g. "I don't hold a grudge — I just see them clearly for who they are" must not be cited as emotional regulation). If the best available quote fails this test, find different evidence or omit that strength entirely.
 For construct_breakdown.where_you_struggled, report only evidence observed in this interview.
 If a marker scored 8.0 or above and there is no specific struggle evidence in the transcript, use either an empty string or explicitly frame it as a potential future growth edge (not an observed pattern).
 Do not invent hypothetical struggle patterns and present them as observed facts.
 
-Commitment-threshold calibration anchor: a vague answer like "keep trying for a while, and if this keeps happening for months maybe that's a sign, but I wouldn't give up yet" belongs in the mid range (about 5-6), not high range. Reserve 7-10 for specific process, explicit irrecoverability criteria, or clear bilateral reasoning about repair limits.
+Accountability — growth_edge and "over-functioning" inferences: If you describe over-functioning in accountability, taking responsibility for things outside the user's control, or similar, only do so when the transcript shows a concrete instance. If the idea is inferred mainly from thoroughness, careful wording, or general style (not from an observed pattern of misplaced self-blame or over-ownership), you MUST label it clearly as speculative or hypothetical and use tentative language (e.g. "one possible read," "may warrant watching for") — never the same confident tone as a demonstrated behavioral pattern.
+
+Accountability — blame-shift vs. request for clarity: Do not describe as deflection or blame-shift a turn where the user first owns their part (gap, miss, or impact) and then asks the partner for concrete guidance to follow through (e.g. what "showing appreciation" would look like for them). That pattern is a repair bid on top of ownership. Reserve harsh accountability framing for cases where the partner is assigned sole responsibility with no sincere self-attribution (e.g. "they should have just told me what they needed").
+
+Commitment_threshold narrative: If the score rests primarily on third-party reasoning about Morgan/Theo with little or no first-person threshold content in the transcript, say so in nuance_and_context or summary and keep claims proportionate — do not write as if they gave rich personal walk-away criteria unless they did.
+
+Commitment-threshold calibration: Do not describe structurally sound answers as weak merely because they lack procedural detail (timelines, therapy, step lists). A complete path — real effort, honest communication about problems, reassessment, willingness to leave if the pattern doesn't change — supports a solid score (6–7+) even when brief. Unconditional staying with no limits ("never give up no matter what") belongs around 2–3. Exit at first difficulty belongs around 1–2. Reserve 7–8 for that structure plus some concrete irrecoverability specificity; 9–10 for strong evidence of persisting through serious difficulty with healthy limits.
 
 Scores use eight markers: mentalizing, accountability, contempt, repair, regulation, attunement, appreciation, commitment_threshold. Map each construct_breakdown key to the matching score from the payload.
+
+UNASSESSED MARKERS (listed in the user payload): Treat these as not measured in this interview — missing or zero scores mean insufficient evidence, not a demonstrated deficit. For each such marker, construct_breakdown should state clearly that it was not directly assessed; do not frame it as a weakness. Do NOT include those markers in overall_growth_areas, readiness_assessment, or what_a_partner_would_experience as skills to build or relational deficits. Omit them from those sections entirely when possible.
 
 Respond ONLY with valid JSON. No preamble, no markdown, no backticks.
 Do not truncate any field. Do not write placeholder text.`;
@@ -99,11 +108,11 @@ For each construct_breakdown.where_you_struggled entry: include only observed ev
   "overall_summary": "A rich, multi-paragraph introduction to this person's relational profile. Cover: how they show up across the full interview (three fictional scenarios plus two personal questions), what kind of relational style they appear to have developed, what their scores collectively suggest about their readiness for intimacy, and any overarching pattern that connects their strengths and struggles. Be warm and honest. Be specific — reference actual things they said. This is the first thing they read. It should feel like being truly seen.",
 
   "overall_strengths": [
-    "Full paragraph per strength - not a label, a real description of what you observed, why it matters in relationships, and where in the transcript it appeared. Include only strengths tied to construct_breakdown markers with score >= 6. Never present behaviors from markers below 6 as strengths. If all markers are below 6, return an empty array."
+    "Full paragraph per strength — evidence must genuinely support the positive marker (no contemptuous/dismissive quotes as regulation or attunement). Include only strengths tied to construct_breakdown markers with score >= 6. Never present behaviors from markers below 6 as strengths. If all markers are below 6, return an empty array."
   ],
 
   "overall_growth_areas": [
-    "Full paragraph per growth area — describe the pattern clearly, what it likely costs them in relationships, where it showed up in the transcript, and what it might look like to move through it. Include at least 3-4 distinct growth areas."
+    "Full paragraph per growth area — describe the pattern clearly, what it likely costs them in relationships, where it showed up in the transcript, and what it might look like to move through it. Include at least 3-4 distinct growth areas when enough markers were assessed; never use this section to invent deficits for markers listed in UNASSESSED MARKERS."
   ],
 
   "construct_breakdown": {
@@ -140,7 +149,7 @@ For each construct_breakdown.where_you_struggled entry: include only observed ev
 
   "cross_scenario_patterns": "A full, rich paragraph describing patterns that appeared across multiple parts of the interview (scenarios and personal moments).",
 
-  "consistency_note": "A thorough paragraph analysing score consistency across the interview segments for each construct.",
+  "consistency_note": "A thorough paragraph analysing score consistency across the interview segments for each construct. If mentalizing (or similar) was low in earlier scenarios but higher in Scenario C, say whether the jump is justified by clearly stronger evidence in the transcript or whether it looks like inflation from a single baseline observation about the vignette.",
 
   "language_and_style_observations": "A paragraph analysing how this person communicated — qualifiers, pronoun choices, emotional vocabulary, specificity or vagueness.",
 
@@ -148,7 +157,7 @@ For each construct_breakdown.where_you_struggled entry: include only observed ev
 
   "readiness_assessment": "A candid paragraph on their overall readiness for the kind of intimacy Amoraea is designed to support.",
 
-  "closing_reflection": "A final paragraph that references no more than two specific moments from the transcript (by content). Keep it concrete and human. Do not use evaluative trait language about the user. Keep tone warm but do not spin low-scoring signals as strengths. If scores are broadly low, keep this brief, neutral, and kind without turning it into a compliment."
+  "closing_reflection": "A final paragraph that references no more than two specific moments from the transcript (by content only — quote or echo what they said). Do not synthesize themes, draw through-lines, or connect moments in ways they never articulated. Do not invent interpretive claims ('there's something about recognizing when…') unless they said it. Do not attribute a strength to the whole interview or to 'the scenarios' when it only appeared in one moment — name the moment or show cross-moment evidence. No evaluative trait language. Warm but do not spin low-scoring signals as strengths; if scores are broadly low, keep brief, neutral, and kind."
 }`;
 }
 

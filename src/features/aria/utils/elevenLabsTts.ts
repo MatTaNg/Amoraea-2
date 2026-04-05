@@ -3,7 +3,8 @@ import Constants from 'expo-constants';
 import * as FileSystem from 'expo-file-system';
 import { Audio } from 'expo-av';
 import * as Speech from 'expo-speech';
-import { setPlaybackMode } from './audioModeHelpers';
+import { logAndApplyPlaybackModeForTts } from './audioModeHelpers';
+import { AUDIO_ROUTE_DEBUG_BUILD, withAudioRouteDebugBuild } from './audioRouteDebugBuild';
 import { remoteLog } from '@utilities/remoteLog';
 import { supabase } from '@data/supabase/client';
 
@@ -13,7 +14,19 @@ import { supabase } from '@data/supabase/client';
  */
 const DEFAULT_VOICE_ID = 'cgSgspJ2msm6clMCkdW9'; // Jessica — warm, friendly
 
+/** When false on iOS (default), use expo-speech so output stays on loudspeaker after recording (expo-av MP3 regresses to earpiece). Set EXPO_PUBLIC_IOS_ELEVENLABS_TTS_PLAYBACK=1 to force ElevenLabs MP3 on iOS. */
+function iosUseElevenLabsMp3Playback(): boolean {
+  const v =
+    (typeof process !== 'undefined' && process.env?.EXPO_PUBLIC_IOS_ELEVENLABS_TTS_PLAYBACK) || '';
+  const s = String(v).trim().toLowerCase();
+  return s === '1' || s === 'true' || s === 'yes';
+}
+
 let activeWebAudio: { pause(): void; currentTime: number } | null = null;
+
+/** Native ElevenLabs MP3 playback; must be stopped/unloaded before starting another clip. */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any -- expo-av Sound instance
+let activeNativeTtsSound: any = null;
 
 function applyAmoraeaPronunciation(text: string): string {
   // Custom pronunciation dictionary fallback: enforce consistent spoken rendering.
@@ -67,6 +80,61 @@ function getTtsProxyUrl(): string {
   return supabaseUrl ? `${supabaseUrl}/functions/v1/elevenlabs-tts-proxy` : '';
 }
 
+/** Same pattern as AriaScreen whisper proxy — Supabase gateway requires Bearer anon or session JWT. */
+function getResolvedSupabaseAnonKey(): string {
+  const extra = Constants.expoConfig?.extra as Record<string, unknown> | undefined;
+  const legacy =
+    (Constants as unknown as { manifest?: { extra?: Record<string, unknown> } }).manifest?.extra;
+  const manifest2 =
+    (
+      Constants as unknown as {
+        manifest2?: { extra?: { expoClient?: { extra?: Record<string, unknown> } } };
+      }
+    ).manifest2?.extra?.expoClient?.extra;
+  const easConfig = (Constants as unknown as { easConfig?: Record<string, unknown> }).easConfig;
+  const fromProcess =
+    (typeof process !== 'undefined' && process.env?.EXPO_PUBLIC_SUPABASE_ANON_KEY) || '';
+  const fromConfig =
+    (extra?.supabaseAnonKey as string | undefined) ??
+    (extra?.EXPO_PUBLIC_SUPABASE_ANON_KEY as string | undefined) ??
+    (legacy?.supabaseAnonKey as string | undefined) ??
+    (legacy?.EXPO_PUBLIC_SUPABASE_ANON_KEY as string | undefined) ??
+    (manifest2?.supabaseAnonKey as string | undefined) ??
+    (manifest2?.EXPO_PUBLIC_SUPABASE_ANON_KEY as string | undefined) ??
+    (easConfig?.supabaseAnonKey as string | undefined) ??
+    (easConfig?.EXPO_PUBLIC_SUPABASE_ANON_KEY as string | undefined) ??
+    '';
+  const fromEnv = (fromProcess || fromConfig).trim();
+  if (fromEnv) return fromEnv;
+  const maybeSupabase = supabase as unknown as {
+    supabaseKey?: string;
+    rest?: { headers?: Record<string, string> };
+  };
+  const fromClientKey = typeof maybeSupabase.supabaseKey === 'string' ? maybeSupabase.supabaseKey.trim() : '';
+  if (fromClientKey) return fromClientKey;
+  const fromRestHeader = (
+    maybeSupabase.rest?.headers?.apikey ??
+    maybeSupabase.rest?.headers?.Authorization ??
+    ''
+  )
+    .replace(/^Bearer\s+/i, '')
+    .trim();
+  return fromRestHeader;
+}
+
+async function buildSupabaseEdgeFunctionAuthHeaders(): Promise<Record<string, string>> {
+  const anon = getResolvedSupabaseAnonKey();
+  if (anon) {
+    return { Authorization: `Bearer ${anon}`, apikey: anon };
+  }
+  const sessionResult = await supabase.auth.getSession().catch(() => null);
+  const token = sessionResult?.data?.session?.access_token?.trim();
+  if (token) {
+    return { Authorization: `Bearer ${token}` };
+  }
+  return {};
+}
+
 const getApiKey = (): string => {
   const fromProcess =
     (typeof process !== 'undefined' && process.env?.EXPO_PUBLIC_ELEVENLABS_API_KEY) || '';
@@ -92,7 +160,7 @@ const getApiKey = (): string => {
     '';
   const resolved = (fromProcess || fromConfig).trim();
   // #region agent log
-  fetch('http://127.0.0.1:7789/ingest/668e0bd5-3283-4492-9f48-e33846c18218',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'062597'},body:JSON.stringify({sessionId:'062597',runId:'audio-route-debug-10',hypothesisId:'H-TTS-1',location:'elevenLabsTts.ts:getApiKey',message:'resolved elevenlabs key availability',data:{hasFromProcess:!!(fromProcess||'').trim(),hasFromConfig:!!(fromConfig||'').trim(),hasExpoConfigExtra:!!expoConfigExtra,hasLegacyManifestExtra:!!legacyManifestExtra,hasManifest2Extra:!!manifest2Extra,hasEasConfig:!!easConfig,resolved:!!resolved},timestamp:Date.now()})}).catch(()=>{});
+  fetch('http://127.0.0.1:7789/ingest/668e0bd5-3283-4492-9f48-e33846c18218',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'062597'},body:JSON.stringify(withAudioRouteDebugBuild({sessionId:'062597',runId:'audio-route-debug-10',hypothesisId:'H-TTS-1',location:'elevenLabsTts.ts:getApiKey',message:'resolved elevenlabs key availability',data:{hasFromProcess:!!(fromProcess||'').trim(),hasFromConfig:!!(fromConfig||'').trim(),hasExpoConfigExtra:!!expoConfigExtra,hasLegacyManifestExtra:!!legacyManifestExtra,hasManifest2Extra:!!manifest2Extra,hasEasConfig:!!easConfig,resolved:!!resolved},timestamp:Date.now()}))}).catch(()=>{});
   // #endregion
   return resolved;
 };
@@ -114,6 +182,39 @@ function arrayBufferToBase64(buffer: ArrayBuffer): string {
 }
 
 /**
+ * Stop web audio, expo-speech, and any in-progress native MP3 from a prior TTS call.
+ * Await this before starting new playback so clips cannot overlap.
+ */
+export async function stopElevenLabsPlayback(): Promise<void> {
+  if (Platform.OS === 'web' && activeWebAudio) {
+    try {
+      activeWebAudio.pause();
+      activeWebAudio.currentTime = 0;
+    } catch {
+      /* ignore */
+    }
+    activeWebAudio = null;
+  }
+  Speech.stop();
+  if (Platform.OS !== 'web') {
+    const s = activeNativeTtsSound;
+    activeNativeTtsSound = null;
+    if (s) {
+      try {
+        await s.stopAsync();
+      } catch {
+        /* ignore */
+      }
+      try {
+        await s.unloadAsync();
+      } catch {
+        /* ignore */
+      }
+    }
+  }
+}
+
+/**
  * Speak text using ElevenLabs TTS (warm, natural voice).
  * Falls back to expo-speech if API key is missing or request fails.
  * Returns a promise that resolves when playback finishes (or fallback completes).
@@ -122,6 +223,9 @@ export async function speakWithElevenLabs(
   text: string,
   onFallback?: () => void
 ): Promise<void> {
+  await stopElevenLabsPlayback();
+  await logAndApplyPlaybackModeForTts('speakWithElevenLabs:afterStop');
+
   const spokenText = applyAmoraeaPronunciation(text ?? '');
   const apiKey = getApiKey();
   const proxyUrl = getTtsProxyUrl();
@@ -131,7 +235,7 @@ export async function speakWithElevenLabs(
     || (typeof process !== 'undefined' && process.env?.EXPO_PUBLIC_ELEVENLABS_VOICE_ID)
     || DEFAULT_VOICE_ID;
   void remoteLog('[AUDIO_ROUTE] tts provider entry', {
-    runId: 'audio-route-debug-10',
+    runId: 'audio-route-debug-12',
     platform: Platform.OS,
     hasApiKey: !!apiKey,
     hasProxyUrl: !!proxyUrl,
@@ -139,11 +243,14 @@ export async function speakWithElevenLabs(
     textLength: spokenText.length,
   });
   // #region agent log
-  fetch('http://127.0.0.1:7789/ingest/668e0bd5-3283-4492-9f48-e33846c18218',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'062597'},body:JSON.stringify({sessionId:'062597',runId:'audio-route-debug-1',hypothesisId:'H3',location:'elevenLabsTts.ts:speakWithElevenLabs:entry',message:'tts start',data:{platform:Platform.OS,textLength:spokenText.length,hasApiKey:!!apiKey,voiceId},timestamp:Date.now()})}).catch(()=>{});
+  fetch('http://127.0.0.1:7789/ingest/668e0bd5-3283-4492-9f48-e33846c18218',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'062597'},body:JSON.stringify(withAudioRouteDebugBuild({sessionId:'062597',runId:'audio-route-debug-1',hypothesisId:'H3',location:'elevenLabsTts.ts:speakWithElevenLabs:entry',message:'tts start',data:{platform:Platform.OS,textLength:spokenText.length,hasApiKey:!!apiKey,voiceId},timestamp:Date.now()}))}).catch(()=>{});
   // #endregion
   if ((!apiKey && !useProxy) || !spokenText.trim()) {
+    // #region agent log
+    fetch('http://127.0.0.1:7789/ingest/668e0bd5-3283-4492-9f48-e33846c18218',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'062597'},body:JSON.stringify(withAudioRouteDebugBuild({sessionId:'062597',runId:'pre-fix',hypothesisId:'H4',location:'elevenLabsTts.ts:noKeyOrText',message:'TTS using expo-speech fallback (no key/proxy or empty text)',data:{platform:Platform.OS,useProxy,hasApiKey:!!apiKey},timestamp:Date.now()}))}).catch(()=>{});
+    // #endregion
     void remoteLog('[AUDIO_ROUTE] tts fallback no_key_or_text', {
-      runId: 'audio-route-debug-10',
+      runId: 'audio-route-debug-12',
       platform: Platform.OS,
       hasApiKey: !!apiKey,
       hasProxyUrl: !!proxyUrl,
@@ -154,6 +261,25 @@ export async function speakWithElevenLabs(
     }
     await speakFallback(spokenText, onFallback);
     return;
+  }
+
+  if (Platform.OS === 'ios' && !iosUseElevenLabsMp3Playback()) {
+    void remoteLog('[TTS_IOS] branch ios_expo_speech_policy', {
+      hypothesisId: 'H3',
+      textLength: spokenText.trim().length,
+      iosElevenLabsMp3EnvSet: iosUseElevenLabsMp3Playback(),
+      debugBuild: AUDIO_ROUTE_DEBUG_BUILD,
+    });
+    await speakFallback(spokenText, onFallback);
+    return;
+  }
+
+  if (Platform.OS === 'ios' && iosUseElevenLabsMp3Playback()) {
+    void remoteLog('[TTS_IOS] branch ios_elevenlabs_mp3_env', {
+      hypothesisId: 'H4',
+      textLength: spokenText.trim().length,
+      debugBuild: AUDIO_ROUTE_DEBUG_BUILD,
+    });
   }
 
   try {
@@ -169,6 +295,15 @@ export async function speakWithElevenLabs(
         use_speaker_boost: true,
       },
     };
+    const proxyAuth = useProxy ? await buildSupabaseEdgeFunctionAuthHeaders() : {};
+    if (useProxy) {
+      void remoteLog('[AUDIO_ROUTE] tts proxy auth headers', {
+        runId: 'audio-route-debug-12',
+        platform: Platform.OS,
+        hasAuthorization: !!proxyAuth.Authorization,
+        hasApikey: !!proxyAuth.apikey,
+      });
+    }
     const res = await fetch(
       useProxy ? proxyUrl : `https://api.elevenlabs.io/v1/text-to-speech/${voiceId}/stream`,
       useProxy
@@ -177,6 +312,7 @@ export async function speakWithElevenLabs(
             headers: {
               'Content-Type': 'application/json',
               Accept: 'audio/mpeg',
+              ...proxyAuth,
             },
             body: JSON.stringify({
               text: bodyPayload.text,
@@ -200,7 +336,7 @@ export async function speakWithElevenLabs(
       const errText = await res.text();
       console.warn('ElevenLabs TTS error:', res.status, errText);
       void remoteLog('[AUDIO_ROUTE] tts fallback non_ok', {
-        runId: 'audio-route-debug-10',
+        runId: 'audio-route-debug-12',
         platform: Platform.OS,
         status: res.status,
         source: useProxy ? 'proxy' : 'direct',
@@ -249,29 +385,45 @@ export async function speakWithElevenLabs(
     }
     const fileUri = `${dir}tts_${Date.now()}.mp3`;
     await FileSystem.writeAsStringAsync(fileUri, base64, { encoding: FileSystem.EncodingType.Base64 });
-    // Force speaker route on iOS immediately before playback (fixes low volume after first mic use)
-    await setPlaybackMode();
+    await logAndApplyPlaybackModeForTts('speakWithElevenLabs:nativeBeforeSoundCreate');
     void remoteLog('[AUDIO_ROUTE] tts native before play', {
-      runId: 'audio-route-debug-10',
+      runId: 'audio-route-debug-12',
       platform: Platform.OS,
     });
     // #region agent log
-    fetch('http://127.0.0.1:7789/ingest/668e0bd5-3283-4492-9f48-e33846c18218',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'062597'},body:JSON.stringify({sessionId:'062597',runId:'audio-route-debug-1',hypothesisId:'H1',location:'elevenLabsTts.ts:speakWithElevenLabs:beforePlayAsync',message:'native tts playback about to start',data:{platform:Platform.OS,fileUriSuffix:fileUri.slice(-24)},timestamp:Date.now()})}).catch(()=>{});
+    fetch('http://127.0.0.1:7789/ingest/668e0bd5-3283-4492-9f48-e33846c18218',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'062597'},body:JSON.stringify(withAudioRouteDebugBuild({sessionId:'062597',runId:'audio-route-debug-1',hypothesisId:'H1',location:'elevenLabsTts.ts:speakWithElevenLabs:beforePlayAsync',message:'native tts playback about to start',data:{platform:Platform.OS,fileUriSuffix:fileUri.slice(-24)},timestamp:Date.now()}))}).catch(()=>{});
     // #endregion
     const { sound } = await Audio.Sound.createAsync(
       { uri: fileUri },
       { shouldPlay: false, volume: 1.0, isMuted: false } // shouldPlay: false, play manually below
     );
-    
-    await new Promise<void>((resolve, reject) => {
-      sound.setOnPlaybackStatusUpdate((status) => {
-        if (status.isLoaded && status.didJustFinishAndNotifyPlaying) {
-          resolve();
-        }
+    activeNativeTtsSound = sound;
+    // #region agent log
+    fetch('http://127.0.0.1:7789/ingest/668e0bd5-3283-4492-9f48-e33846c18218',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'062597'},body:JSON.stringify(withAudioRouteDebugBuild({sessionId:'062597',runId:'pre-fix',hypothesisId:'H4',location:'elevenLabsTts.ts:nativeSoundPath',message:'using expo-av Sound for TTS',data:{platform:Platform.OS},timestamp:Date.now()}))}).catch(()=>{});
+    // #endregion
+
+    try {
+      await new Promise<void>((resolve, reject) => {
+        sound.setOnPlaybackStatusUpdate((status) => {
+          if (status.isLoaded && status.didJustFinish) {
+            resolve();
+          }
+        });
+        sound.playAsync().catch(reject);
       });
-      sound.playAsync().catch(reject); // clean, no second ensurePlaybackMode
-    });
-    await sound.unloadAsync();
+    } finally {
+      if (activeNativeTtsSound === sound) {
+        activeNativeTtsSound = null;
+      }
+      try {
+        await sound.unloadAsync();
+      } catch {
+        /* ignore */
+      }
+      // #region agent log
+      fetch('http://127.0.0.1:7789/ingest/668e0bd5-3283-4492-9f48-e33846c18218',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'062597'},body:JSON.stringify(withAudioRouteDebugBuild({sessionId:'062597',runId:'post-fix-v21',hypothesisId:'H7',location:'elevenLabsTts.ts:nativeAfterUnload',message:'native tts finished and sound unloaded',data:{platform:Platform.OS,textLength:spokenText.length},timestamp:Date.now()}))}).catch(()=>{});
+      // #endregion
+    }
     try {
       await FileSystem.deleteAsync(fileUri, { idempotent: true });
     } catch {
@@ -280,13 +432,13 @@ export async function speakWithElevenLabs(
   } catch (err) {
     console.warn('ElevenLabs TTS failed, using fallback:', err);
     void remoteLog('[AUDIO_ROUTE] tts fallback catch', {
-      runId: 'audio-route-debug-10',
+      runId: 'audio-route-debug-12',
       platform: Platform.OS,
       errorName: err instanceof Error ? err.name : 'unknown',
       errorMessage: err instanceof Error ? err.message : String(err),
     });
     // #region agent log
-    fetch('http://127.0.0.1:7789/ingest/668e0bd5-3283-4492-9f48-e33846c18218',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'062597'},body:JSON.stringify({sessionId:'062597',runId:'audio-route-debug-1',hypothesisId:'H3',location:'elevenLabsTts.ts:speakWithElevenLabs:catch',message:'tts threw, falling back',data:{errorName:err instanceof Error?err.name:'unknown',errorMessage:err instanceof Error?err.message:String(err)},timestamp:Date.now()})}).catch(()=>{});
+    fetch('http://127.0.0.1:7789/ingest/668e0bd5-3283-4492-9f48-e33846c18218',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'062597'},body:JSON.stringify(withAudioRouteDebugBuild({sessionId:'062597',runId:'audio-route-debug-1',hypothesisId:'H3',location:'elevenLabsTts.ts:speakWithElevenLabs:catch',message:'tts threw, falling back',data:{errorName:err instanceof Error?err.name:'unknown',errorMessage:err instanceof Error?err.message:String(err)},timestamp:Date.now()}))}).catch(()=>{});
     // #endregion
     await speakFallback(spokenText, onFallback);
   }
@@ -296,17 +448,31 @@ function speakFallback(text: string, onFallback?: () => void): Promise<void> {
   onFallback?.();
   return new Promise((resolve) => {
     const run = async () => {
+      await stopElevenLabsPlayback();
+      // #region agent log
+      fetch('http://127.0.0.1:7789/ingest/668e0bd5-3283-4492-9f48-e33846c18218',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'062597'},body:JSON.stringify(withAudioRouteDebugBuild({sessionId:'062597',runId:'pre-fix',hypothesisId:'H4',location:'elevenLabsTts.ts:speakFallback',message:'expo-speech fallback playback',data:{platform:Platform.OS,textLength:text?.length??0},timestamp:Date.now()}))}).catch(()=>{});
+      // #endregion
       if (Platform.OS !== 'web') {
-        await setPlaybackMode().catch(() => {});
+        await logAndApplyPlaybackModeForTts('speakFallback:before_expo_speech').catch(() => {});
         void remoteLog('[AUDIO_ROUTE] tts fallback setPlaybackMode', {
-          runId: 'audio-route-debug-10',
+          runId: 'audio-route-debug-12',
           platform: Platform.OS,
         });
       }
+      // iOS: false = AVSpeechSynthesizer uses its own playback session (speaker). true inherits app session (often earpiece after PlayAndRecord/mic).
+      const iosSpeechSession = Platform.OS === 'ios' ? { useApplicationAudioSession: false as const } : {};
+      void remoteLog('[TTS_ROUTE] expo-speech speak', {
+        hypothesisId: 'H5',
+        platform: Platform.OS,
+        useApplicationAudioSession: Platform.OS === 'ios' ? false : undefined,
+        textLength: text?.length ?? 0,
+        debugBuild: AUDIO_ROUTE_DEBUG_BUILD,
+      });
       Speech.speak(text, {
         language: 'en-US',
         rate: 0.78,
         pitch: 0.92,
+        ...iosSpeechSession,
         onDone: resolve,
         onStopped: resolve,
         onError: () => resolve(),
@@ -316,14 +482,7 @@ function speakFallback(text: string, onFallback?: () => void): Promise<void> {
   });
 }
 
-/** Stop any current ElevenLabs or fallback speech. */
+/** Stop any current TTS (including native MP3). Safe to fire-and-forget from UI handlers. */
 export function stopElevenLabsSpeech(): void {
-  if (Platform.OS === 'web' && activeWebAudio) {
-    try {
-      activeWebAudio.pause();
-      activeWebAudio.currentTime = 0;
-    } catch {}
-    activeWebAudio = null;
-  }
-  Speech.stop();
+  void stopElevenLabsPlayback();
 }

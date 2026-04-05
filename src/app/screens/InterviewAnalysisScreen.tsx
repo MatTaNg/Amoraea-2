@@ -14,7 +14,9 @@ import {
 } from 'react-native';
 import * as Clipboard from 'expo-clipboard';
 import { SafeAreaContainer } from '@ui/components/SafeAreaContainer';
+import { UserCommunicationStyleSection } from '@ui/components/UserCommunicationStyleSection';
 import { supabase } from '@data/supabase/client';
+import { waitForInterviewAttemptScoringReady } from '@utilities/waitForInterviewAttemptScoringReady';
 import { FlameOrb } from '@app/screens/FlameOrb';
 
 type TranscriptMessage = { role: string; content?: string; isScoreCard?: boolean; isWaiting?: boolean; isSwitchDivider?: boolean };
@@ -50,6 +52,7 @@ const CONSTRUCTS = [
 
 type AttemptRow = {
   id: string;
+  user_id?: string;
   weighted_score: number | null;
   passed: boolean | null;
   pillar_scores: Record<string, number> | null;
@@ -299,6 +302,11 @@ export function InterviewAnalysisScreen({
     if (!attemptId) return;
     let cancelled = false;
     (async () => {
+      await waitForInterviewAttemptScoringReady(supabase, attemptId, {
+        maxMs: 600_000,
+        intervalMs: 500,
+      });
+      if (cancelled) return;
       const { data, error } = await supabase
         .from('interview_attempts')
         .select('*')
@@ -415,9 +423,11 @@ export function InterviewAnalysisScreen({
             )}
 
             {CONSTRUCTS.map((c) => {
-              const score = scores[c.pillarId] != null ? Number(scores[c.pillarId]) : undefined;
+              const raw = scores[c.pillarId];
+              const score = raw != null && Number.isFinite(Number(raw)) ? Number(raw) : undefined;
               const breakdown = (r?.construct_breakdown as Record<string, { headline?: string; summary?: string }> | undefined)?.[c.key];
-              const scorePct = ((score ?? 0) / 10) * 100;
+              const unassessedScore = score === undefined || score === 0;
+              const scorePct = unassessedScore ? 0 : (score / 10) * 100;
               return (
                 <View key={c.key} style={styles.constructCard}>
                   <View style={styles.constructCardHeader}>
@@ -430,12 +440,13 @@ export function InterviewAnalysisScreen({
                     <Text
                       style={[
                         styles.constructCardScore,
-                        score != null && score >= 7 && styles.constructScoreHigh,
-                        score != null && score >= 5 && score < 7 && styles.constructScoreMid,
-                        score != null && score < 5 && styles.constructScoreLow,
+                        !unassessedScore && score >= 7 && styles.constructScoreHigh,
+                        !unassessedScore && score >= 5 && score < 7 && styles.constructScoreMid,
+                        !unassessedScore && score < 5 && styles.constructScoreLow,
+                        unassessedScore && styles.constructScoreUnassessed,
                       ]}
                     >
-                      {score != null ? score.toFixed(1) : '—'}
+                      {unassessedScore ? '—' : score.toFixed(1)}
                     </Text>
                   </View>
                   <View style={styles.scoreBarBg}>
@@ -443,18 +454,25 @@ export function InterviewAnalysisScreen({
                       style={[
                         styles.scoreBarFill,
                         { width: `${scorePct}%` },
-                        score != null && score >= 7 && styles.scoreBarFillHigh,
-                        score != null && score >= 5 && score < 7 && styles.scoreBarFillMid,
-                        score != null && score < 5 && styles.scoreBarFillLow,
+                        !unassessedScore && score >= 7 && styles.scoreBarFillHigh,
+                        !unassessedScore && score >= 5 && score < 7 && styles.scoreBarFillMid,
+                        !unassessedScore && score < 5 && styles.scoreBarFillLow,
+                        unassessedScore && styles.scoreBarFillUnassessed,
                       ]}
                     />
                   </View>
-                  {breakdown?.summary && (
+                  {breakdown?.summary ? (
                     <Text style={styles.constructCardSummary}>{breakdown.summary}</Text>
-                  )}
+                  ) : unassessedScore ? (
+                    <Text style={styles.constructCardSummaryMuted}>
+                      This construct was not directly assessed in this interview. A missing or zero score means there was not enough scored evidence — not a demonstrated weakness.
+                    </Text>
+                  ) : null}
                 </View>
               );
             })}
+
+            <UserCommunicationStyleSection userId={attempt?.user_id} />
 
             {r?.closing_reflection && (
               <View style={styles.fullReasoningBlock}>
@@ -711,6 +729,7 @@ const styles = StyleSheet.create({
   constructScoreHigh: { color: '#C8E4FF' },
   constructScoreMid: { color: '#7A9ABE' },
   constructScoreLow: { color: '#E87A7A' },
+  constructScoreUnassessed: { color: '#5C6B7E', fontSize: 22 },
   scoreBarBg: {
     height: 2,
     backgroundColor: 'rgba(82,142,220,0.08)',
@@ -723,6 +742,7 @@ const styles = StyleSheet.create({
   scoreBarFillHigh: { backgroundColor: '#1E6FD9' },
   scoreBarFillMid: { backgroundColor: '#7A9ABE' },
   scoreBarFillLow: { backgroundColor: '#E87A7A' },
+  scoreBarFillUnassessed: { backgroundColor: 'rgba(92,107,126,0.35)' },
   constructCardSummary: {
     fontFamily: 'Jost_300Light',
     fontSize: 13,
@@ -730,6 +750,15 @@ const styles = StyleSheet.create({
     lineHeight: 20,
     padding: 16,
     paddingTop: 12,
+  },
+  constructCardSummaryMuted: {
+    fontFamily: 'Jost_300Light',
+    fontSize: 12,
+    color: '#5C6B7E',
+    lineHeight: 18,
+    padding: 16,
+    paddingTop: 12,
+    fontStyle: 'italic',
   },
   fullReasoningBlock: { marginBottom: 24 },
   fullReasoningToggle: {

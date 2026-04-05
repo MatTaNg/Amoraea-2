@@ -1,4 +1,15 @@
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
+import { styleProfileFromDbRow, translateStyleProfile } from '../_shared/styleTranslations.ts';
+
+function styleLabelsColumnsFromRow(row: Record<string, unknown>) {
+  const t = translateStyleProfile(styleProfileFromDbRow(row));
+  return {
+    style_labels_primary: t.primary,
+    style_labels_secondary: t.secondary,
+    matchmaker_summary: t.matchmaker_summary,
+    low_confidence_note: t.low_confidence_note,
+  };
+}
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -8,13 +19,110 @@ const corsHeaders = {
 };
 
 const EMOTIONAL_WORDS = [
-  'felt', 'feel', 'feeling', 'hurt', 'scared', 'warm', 'excited', 'sad',
-  'angry', 'afraid', 'happy', 'love', 'pain', 'joy', 'grief', 'shame',
-  'guilt', 'proud', 'lonely', 'confused', 'overwhelmed', 'moved', 'touched',
-  'heartbroken', 'relieved', 'anxious', 'nervous', 'tender', 'vulnerable',
-  'connected', 'distant', 'numb', 'alive', 'empty', 'full', 'aching',
-  'longing', 'hopeful', 'devastated', 'grateful', 'resentful', 'bitter',
+  'felt',
+  'feel',
+  'feeling',
+  'feelings',
+  'hurt',
+  'hurting',
+  'hurts',
+  'scared',
+  'afraid',
+  'fear',
+  'fearful',
+  'warm',
+  'warmth',
+  'excited',
+  'sad',
+  'sadness',
+  'angry',
+  'anger',
+  'happy',
+  'happiness',
+  'love',
+  'loved',
+  'pain',
+  'painful',
+  'joy',
+  'grief',
+  'grieving',
+  'shame',
+  'ashamed',
+  'guilt',
+  'guilty',
+  'proud',
+  'lonely',
+  'loneliness',
+  'confused',
+  'overwhelmed',
+  'overwhelm',
+  'flooded',
+  'flooding',
+  'moved',
+  'touched',
+  'heartbroken',
+  'relieved',
+  'anxious',
+  'anxiety',
+  'nervous',
+  'tender',
+  'tenderness',
+  'vulnerable',
+  'vulnerability',
+  'connected',
+  'disconnected',
+  'distant',
+  'numb',
+  'alive',
+  'empty',
+  'full',
+  'aching',
+  'ache',
+  'aches',
+  'longing',
+  'hopeful',
+  'hopeless',
+  'devastated',
+  'devastating',
+  'grateful',
+  'resentful',
+  'resentment',
+  'bitter',
+  'bitterness',
+  'healing',
+  'healed',
+  'raw',
+  'exhausted',
+  'exhaustion',
+  'invisible',
+  'dread',
+  'dreading',
+  'contempt',
+  'rage',
+  'furious',
+  'crushed',
+  'broken',
+  'sinking',
+  'sank',
+  'sunk',
+  'tightness',
+  'tight',
+  'weight',
+  'heavy',
+  'heaviness',
+  'lit',
+  'lit up',
+  'crying',
+  'cried',
+  'tears',
+  'tearful',
+  'sobbing',
 ];
+
+/** Strip leading/trailing punctuation so "hurt," and "hurt" both match lexicon. */
+function lexiconToken(raw: string): string {
+  return raw.replace(/^[^a-z]+/gi, '').replace(/[^a-z]+$/gi, '').toLowerCase();
+}
 
 const ANALYTICAL_WORDS = [
   'because', 'therefore', 'structure', 'framework', 'logically', 'pattern',
@@ -121,13 +229,14 @@ Deno.serve(async (req) => {
   }
   const admin = createClient(supabaseUrl, serviceRole);
 
-  let body: { user_id?: string } = {};
+  let body: { user_id?: string; attempt_id?: string } = {};
   try {
     body = await req.json();
   } catch {
     // keep default
   }
   const userId = (body.user_id ?? '').trim();
+  const requestedAttemptId = (body.attempt_id ?? '').trim();
   if (!userId) {
     return new Response(JSON.stringify({ error: 'user_id is required' }), {
       status: 400,
@@ -150,28 +259,66 @@ Deno.serve(async (req) => {
   };
 
   try {
-    const { data: attempt, error } = await admin
-      .from('interview_attempts')
-      .select('id, transcript, passed, scenario_1_scores, scenario_2_scores, scenario_3_scores, scenario_specific_patterns')
-      .eq('user_id', userId)
-      .eq('passed', true)
-      .order('completed_at', { ascending: false })
-      .limit(1)
-      .maybeSingle();
-    if (error) throw new Error(error.message);
+    let attempt: {
+      id: string;
+      transcript: unknown;
+      passed: boolean | null;
+      scenario_1_scores: unknown;
+      scenario_2_scores: unknown;
+      scenario_3_scores: unknown;
+      scenario_specific_patterns: unknown;
+    } | null = null;
+    let attemptError: Error | null = null;
+
+    if (requestedAttemptId) {
+      const { data, error } = await admin
+        .from('interview_attempts')
+        .select('id, transcript, passed, scenario_1_scores, scenario_2_scores, scenario_3_scores, scenario_specific_patterns')
+        .eq('id', requestedAttemptId)
+        .eq('user_id', userId)
+        .maybeSingle();
+      if (error) attemptError = new Error(error.message);
+      else attempt = data as typeof attempt;
+    } else {
+      const { data, error } = await admin
+        .from('interview_attempts')
+        .select('id, transcript, passed, scenario_1_scores, scenario_2_scores, scenario_3_scores, scenario_specific_patterns')
+        .eq('user_id', userId)
+        .order('completed_at', { ascending: false })
+        .limit(1)
+        .maybeSingle();
+      if (error) attemptError = new Error(error.message);
+      else attempt = data as typeof attempt;
+    }
+
+    if (attemptError) throw attemptError;
     if (!attempt) {
-      const failFeatures = { text_confidence: 0, reason: 'no-passed-attempt' };
+      const failFeatures = { text_confidence: 0, reason: 'no-attempt-for-user' };
+      const partialRow = {
+        user_id: userId,
+        text_confidence: 0,
+        audio_confidence: 0,
+        processed_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+      };
       await admin
         .from('communication_style_profiles')
-        .upsert({
-          user_id: userId,
-          text_confidence: 0,
-          processed_at: new Date().toISOString(),
-          updated_at: new Date().toISOString(),
-        }, { onConflict: 'user_id' });
-      await log('partial', 'No passed interview attempt found.', failFeatures);
-      return new Response(JSON.stringify({ ok: true, partial: true, reason: 'no-passed-attempt' }), {
-        status: 200,
+        .upsert(
+          {
+            ...partialRow,
+            ...styleLabelsColumnsFromRow(partialRow),
+          },
+          { onConflict: 'user_id' },
+        );
+      await log('partial', 'No interview attempt found for text style analysis.', failFeatures);
+      const noAttemptBody = JSON.stringify({
+        ok: false,
+        partial: true,
+        reason: 'no-attempt',
+        error: 'No interview attempt found for text style analysis.',
+      });
+      return new Response(noAttemptBody, {
+        status: requestedAttemptId ? 404 : 200,
         headers: { ...corsHeaders, 'Content-Type': 'application/json' },
       });
     }
@@ -183,10 +330,23 @@ Deno.serve(async (req) => {
       .filter(Boolean);
     const corpus = userTurns.join(' ').toLowerCase();
     const words = corpus.split(/\s+/).filter(Boolean);
-    const totalWords = words.length || 1;
+    const tokens = words.map((w) => lexiconToken(w)).filter(Boolean);
+    const totalWords = tokens.length || 1;
 
-    const emotionalWords = words.filter((w) => EMOTIONAL_WORDS.includes(w)).length;
-    const analyticalWords = words.filter((w) => ANALYTICAL_WORDS.includes(w)).length;
+    const emotionalPhraseHits = [
+      'lit up',
+      'worn down',
+      'wearing thin',
+      'wore me down',
+      'chewed up',
+      'ripped open',
+      'wearing on',
+      'broke me',
+      'broke open',
+    ].reduce((acc, p) => acc + Math.max(0, corpus.split(p).length - 1), 0);
+    const emotionalWords =
+      tokens.filter((w) => EMOTIONAL_WORDS.includes(w)).length + emotionalPhraseHits;
+    const analyticalWords = tokens.filter((w) => ANALYTICAL_WORDS.includes(w)).length;
     const qualifierCount = countPhraseHits(corpus, QUALIFIER_WORDS);
     const closureCount = countPhraseHits(corpus, CLOSURE_WORDS);
 
@@ -194,19 +354,22 @@ Deno.serve(async (req) => {
       'we', 'us', 'together', 'both', 'each other', 'between them',
       'their relationship', 'the dynamic', 'how they',
     ]);
-    const individualMarkers = words.filter((w) => w === 'i' || w === 'me' || w === 'my' || w === 'myself').length;
+    const individualMarkers = tokens.filter((w) => w === 'i' || w === 'me' || w === 'my' || w === 'myself').length;
 
-    const pronounsTotal = words.filter((w) => ['i', 'me', 'my', 'myself', 'we', 'us', 'they', 'them'].includes(w)).length || 1;
-    const firstPersonSingular = words.filter((w) => ['i', 'me', 'my', 'myself'].includes(w)).length;
+    const pronounsTotal =
+      tokens.filter((w) => ['i', 'me', 'my', 'myself', 'we', 'us', 'they', 'them'].includes(w)).length || 1;
+    const firstPersonSingular = tokens.filter((w) => ['i', 'me', 'my', 'myself'].includes(w)).length;
 
     const storyMarkers = storyMarkerCount(corpus);
     const conceptMarkers = conceptualMarkerCount(corpus);
 
+    const relationalShare = clamp01(safeRatio(relationalMarkers, relationalMarkers + individualMarkers, 0.5));
     const styleFeatures = {
       emotional_analytical_score: clamp01(safeRatio(emotionalWords, emotionalWords + analyticalWords, 0.5)),
       narrative_conceptual_score: clamp01(safeRatio(storyMarkers, storyMarkers + conceptMarkers, 0.5)),
       certainty_ambiguity_score: clamp01(safeRatio(qualifierCount, qualifierCount + closureCount, 0.5)),
-      relational_individual_score: clamp01(safeRatio(relationalMarkers, relationalMarkers + individualMarkers, 0.5)),
+      // Store individual-orientation: 0 = strongly relational (we-language), 1 = strongly individual (I/me).
+      relational_individual_score: clamp01(1 - relationalShare),
       emotional_vocab_density: (emotionalWords / totalWords) * 100,
       qualifier_density: (qualifierCount / totalWords) * 100,
       first_person_ratio: safeRatio(firstPersonSingular, pronounsTotal, 0.5),
@@ -242,20 +405,32 @@ Deno.serve(async (req) => {
       ((Number(merged.text_confidence ?? 0) * 0.5) + (Number(merged.audio_confidence ?? 0) * 0.5));
     const styleVector = buildStyleVector(merged);
 
+    const rowForLabels = { ...merged, ...styleFeatures, text_confidence: textConfidence };
     const upsertRow = {
       user_id: userId,
+      source_attempt_id: attempt.id,
       ...styleFeatures,
       text_confidence: textConfidence,
       overall_confidence: overallConfidence,
       style_vector: `[${styleVector.map((n) => Number.isFinite(n) ? n.toFixed(6) : '0.500000').join(',')}]`,
       processed_at: merged.processed_at,
       updated_at: merged.updated_at,
+      ...styleLabelsColumnsFromRow(rowForLabels),
     };
 
     const { error: upsertErr } = await admin
       .from('communication_style_profiles')
       .upsert(upsertRow, { onConflict: 'user_id' });
-    if (upsertErr) throw new Error(upsertErr.message);
+    if (upsertErr) {
+      console.error(
+        `[analyze-interview-text] communication_style_profiles upsert FAILED user_id=${userId} attempt_id=${attempt.id}:`,
+        upsertErr.message
+      );
+      throw new Error(upsertErr.message);
+    }
+    console.log(
+      `[analyze-interview-text] communication_style_profiles upsert OK user_id=${userId} attempt_id=${attempt.id}`
+    );
 
     await log('success', null, {
       attempt_id: attempt.id,
