@@ -5,8 +5,14 @@ import { useAuth } from '@features/authentication/hooks/useAuth';
 import { colors } from '@ui/theme/colors';
 import { spacing } from '@ui/theme/spacing';
 
-export const OnboardingHeader: React.FC = () => {
+type OnboardingHeaderProps = {
+  /** Dark navy bar to match auth / pre-interview screens */
+  variant?: 'default' | 'dark';
+};
+
+export const OnboardingHeader: React.FC<OnboardingHeaderProps> = ({ variant = 'default' }) => {
   const { signOut } = useAuth();
+  const dark = variant === 'dark';
 
   const handleLogOut = () => {
     if (Platform.OS === 'web') {
@@ -25,16 +31,16 @@ export const OnboardingHeader: React.FC = () => {
   };
 
   return (
-    <View style={styles.banner}>
+    <View style={[styles.banner, dark && styles.bannerDark]}>
       <View style={styles.placeholder} />
-      <Text style={styles.title}>Amoraea</Text>
+      <Text style={[styles.title, dark && styles.titleDark]}>Amoraea</Text>
       <TouchableOpacity
         onPress={handleLogOut}
         style={styles.button}
         hitSlop={12}
         accessibilityLabel="Log out"
       >
-        <Ionicons name="log-out-outline" size={24} color={colors.primary} />
+        <Ionicons name="log-out-outline" size={24} color={dark ? '#5BA8E8' : colors.primary} />
       </TouchableOpacity>
     </View>
   );
@@ -63,5 +69,12 @@ const styles = StyleSheet.create({
   },
   button: {
     padding: spacing.sm,
+  },
+  bannerDark: {
+    backgroundColor: '#05060D',
+    borderBottomColor: 'rgba(82,142,220,0.15)',
+  },
+  titleDark: {
+    color: '#E8F0F8',
   },
 });

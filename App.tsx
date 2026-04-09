@@ -121,14 +121,14 @@ const ALPHA_MODE = true;
 function getOnboardingInitialRoute(profile: { onboardingStage?: string; applicationStatus?: string; gate1Score?: unknown }): string {
   const stage = profile.onboardingStage ?? 'interview';
   if (stage === 'basic_info') {
-    if (ALPHA_MODE) return 'OnboardingInterview';
+    if (ALPHA_MODE) return 'InterviewFraming';
     if (profile.gate1Score && profile.applicationStatus === 'approved') return 'Stage1BasicInfo';
-    return 'OnboardingInterview';
+    return 'InterviewFraming';
   }
   if (stage === 'interview') {
     if (!ALPHA_MODE && profile.applicationStatus === 'approved') return 'Stage1BasicInfo';
     if (!ALPHA_MODE && profile.gate1Score) return 'PostInterview';
-    return 'OnboardingInterview';
+    return 'InterviewFraming';
   }
   if (stage === 'psychometrics') {
     if (profile.applicationStatus === 'approved') return 'Gate2Reentry';
@@ -137,7 +137,7 @@ function getOnboardingInitialRoute(profile: { onboardingStage?: string; applicat
   }
   if (stage === 'compatibility') return 'Stage4Compatibility';
   if (stage === 'complete') return 'Stage1BasicInfo'; // should not be used; main app shown
-  return 'OnboardingInterview';
+  return 'InterviewFraming';
 }
 
 const GatesOnboardingNavigator = ({ userId }: { userId: string }) => {
@@ -157,7 +157,15 @@ const GatesOnboardingNavigator = ({ userId }: { userId: string }) => {
       }}
     >
       <Stack.Screen name="Stage1BasicInfo" component={Stage1BasicInfoScreen} initialParams={{ userId }} />
-      <Stack.Screen name="InterviewFraming" component={InterviewFramingScreen} initialParams={{ userId }} />
+      <Stack.Screen
+        name="InterviewFraming"
+        component={InterviewFramingScreen}
+        initialParams={{ userId }}
+        options={{
+          gestureEnabled: false,
+          header: () => <OnboardingHeader variant="dark" />,
+        }}
+      />
       <Stack.Screen
         name="OnboardingInterview"
         component={AriaScreenWithSuspense}

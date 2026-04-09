@@ -10,10 +10,13 @@
  * where `labelsFromDb` matches `translateStyleProfile(styleProfileFromDbRow(row))` or the stored
  * `style_labels_*` / `matchmaker_summary` / `low_confidence_note` columns from `communication_style_profiles`.
  */
-export type { StyleLabels } from '@utilities/styleTranslations';
+export type { StyleLabels, TranslateStyleProfileOptions } from '@utilities/styleTranslations';
 export {
   MATCHMAKER_STYLE_VOCABULARY_BLOCK,
+  countMatchmakerSummaryTemplateSentences,
   formatCommunicationStyleForMatchmakerPrompt,
+  matchmakerSummaryReadsAsChipRestatement,
   translateStyleProfile,
   styleProfileFromDbRow,
 } from '@utilities/styleTranslations';
+export { buildMatchmakerSummaryFromProfile } from '../../../supabase/functions/_shared/matchmakerSummaryFromProfile';

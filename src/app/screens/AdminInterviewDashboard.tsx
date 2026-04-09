@@ -14,7 +14,12 @@ import {
   Platform,
 } from 'react-native';
 import { supabase } from '@data/supabase/client';
-import { normalizeScoresByEvidence } from '@features/aria/probeAndScoringUtils';
+import {
+  aggregatePillarScoresWithCommitmentMergeDetailed,
+  type MarkerScoreSlice,
+} from '@features/aria/aggregateMarkerScoresFromSlices';
+import { enrichScenarioSliceWithContemptHeuristic } from '@features/aria/contemptExpressionScenarioHeuristic';
+import { sanitizePersonalMomentScoresForAggregate } from '@features/aria/personalMomentSliceSanitize';
 import {
   describeCertaintyAmbiguityAxis,
   describeEmotionalAnalyticalAxis,
@@ -41,11 +46,25 @@ const PILLAR_ROWS = [
 const MARKER_IDS = PILLAR_ROWS.map((p) => p.id);
 const ASSESSED_MARKERS_BY_SECTION: Record<string, string[]> = {
   scenario_1: ['mentalizing', 'accountability', 'contempt', 'repair', 'attunement'],
-  scenario_2: ['appreciation', 'attunement', 'mentalizing', 'repair', 'accountability'],
-  scenario_3: ['regulation', 'repair', 'mentalizing', 'attunement', 'accountability', 'commitment_threshold'],
-  moment_4: ['contempt', 'commitment_threshold', 'accountability', 'mentalizing', 'repair'],
-  moment_5: ['appreciation', 'attunement', 'mentalizing'],
+  scenario_2: ['appreciation', 'attunement', 'mentalizing', 'repair', 'accountability', 'contempt'],
+  scenario_3: ['regulation', 'repair', 'mentalizing', 'attunement', 'accountability', 'commitment_threshold', 'contempt'],
+  moment_4: ['contempt', 'commitment_threshold', 'accountability', 'mentalizing'],
+  moment_5: ['appreciation', 'attunement', 'mentalizing', 'contempt'],
 };
+
+const SLICE_CONTEMPT_EXTRA_KEYS = ['contempt_recognition', 'contempt_expression'] as const;
+
+/** Preview contempt for a single slice (sub-keys or legacy `contempt`), aligned with 70/30 pillar weighting when both strands exist. */
+function sliceContemptDisplayValue(scores: Record<string, number> | null | undefined): number | undefined {
+  if (!scores) return undefined;
+  const exp = coerceScoreNumber(scores.contempt_expression);
+  const recOnly = coerceScoreNumber(scores.contempt_recognition);
+  const legacy = coerceScoreNumber(scores.contempt);
+  const e = exp ?? legacy;
+  const r = recOnly ?? (legacy != null && exp == null && recOnly == null ? legacy : undefined);
+  if (e != null && r != null) return Math.round((0.6 * e + 0.4 * r) * 10) / 10;
+  return e ?? r;
+}
 const USER_FEEDBACK_LABELS: Record<string, string> = {
   conversation_quality: 'Conversation Quality',
   clarity_flow: 'Clarity and Flow',
@@ -154,6 +173,10 @@ function normalizePillarScoresMap(raw: unknown): Record<string, number> | null {
     const n = coerceScoreNumber(source[id]);
     if (n !== undefined) out[id] = n;
   }
+  for (const id of SLICE_CONTEMPT_EXTRA_KEYS) {
+    const n = coerceScoreNumber(source[id]);
+    if (n !== undefined) out[id] = n;
+  }
   return Object.keys(out).length > 0 ? out : null;
 }
 
@@ -253,44 +276,73 @@ function markerIsAssessedInSection(sectionKey: string, markerId: string): boolea
   return (ASSESSED_MARKERS_BY_SECTION[sectionKey] ?? []).includes(markerId);
 }
 
+function extractAggregateSlice(raw: unknown): MarkerScoreSlice {
+  const obj = parseObject(raw);
+  if (!obj) return null;
+  const ps = obj.pillarScores;
+  const ke = obj.keyEvidence;
+  if (ps == null && ke == null) return null;
+  return {
+    pillarScores:
+      typeof ps === 'object' && ps != null && !Array.isArray(ps)
+        ? (ps as Record<string, number | null>)
+        : undefined,
+    keyEvidence:
+      typeof ke === 'object' && ke != null && !Array.isArray(ke)
+        ? (ke as Record<string, string>)
+        : undefined,
+  };
+}
+
+type TranscriptMsg = { role?: string; content?: string; scenarioNumber?: number };
+
+function userTextForAdminScenario(
+  transcript: AttemptRow['transcript'],
+  scenarioNum: 1 | 2 | 3,
+): string {
+  if (!Array.isArray(transcript)) return '';
+  return (transcript as TranscriptMsg[])
+    .filter(
+      (m) =>
+        m.role === 'user' &&
+        m.scenarioNumber === scenarioNum &&
+        typeof m.content === 'string',
+    )
+    .map((m) => String(m.content).trim())
+    .filter(Boolean)
+    .join(' ');
+}
+
+/** Strip non-assessed keys from personal moments before pillar math (matches live interview + recompute script). */
+function extractSanitizedMomentSlice(raw: unknown, momentNumber: 4 | 5): MarkerScoreSlice {
+  const slice = extractAggregateSlice(raw);
+  if (!slice?.pillarScores) return slice;
+  const sanitized = sanitizePersonalMomentScoresForAggregate(
+    {
+      pillarScores: slice.pillarScores as Record<string, number | null>,
+      keyEvidence: slice.keyEvidence,
+    },
+    momentNumber,
+  );
+  if (!sanitized?.pillarScores) return slice;
+  return { pillarScores: sanitized.pillarScores, keyEvidence: sanitized.keyEvidence };
+}
+
 function computeMarkerAggregateFromAttempt(
   attempt: AttemptRow
 ): { scores: Record<string, number>; counts: Record<string, number> } {
-  const scenario1Details = getScoreBundleDetails(attempt.scenario_1_scores);
-  const scenario2Details = getScoreBundleDetails(attempt.scenario_2_scores);
-  const scenario3Details = getScoreBundleDetails(attempt.scenario_3_scores);
-  const moment4Bundle = getMomentScoreBundle(attempt, 4);
-  const moment5Bundle = getMomentScoreBundle(attempt, 5);
-  const moment4Details = getScoreBundleDetails(parseObject(parseObject(attempt.scenario_specific_patterns)?.moment_4_scores));
-  const moment5Details = getScoreBundleDetails(parseObject(parseObject(attempt.scenario_specific_patterns)?.moment_5_scores));
-
-  const sectionScores: Record<string, Record<string, number>> = {
-    scenario_1: normalizeScoresByEvidence(scenario1Details.scores, scenario1Details.evidence),
-    scenario_2: normalizeScoresByEvidence(scenario2Details.scores, scenario2Details.evidence),
-    scenario_3: normalizeScoresByEvidence(scenario3Details.scores, scenario3Details.evidence),
-    moment_4: normalizeScoresByEvidence(moment4Bundle.scores, moment4Details.evidence),
-    moment_5: normalizeScoresByEvidence(moment5Bundle.scores, moment5Details.evidence),
-  };
-  const totals: Record<string, number> = {};
-  const counts: Record<string, number> = {};
-  MARKER_IDS.forEach((id) => {
-    totals[id] = 0;
-    counts[id] = 0;
-  });
-  Object.entries(sectionScores).forEach(([sectionKey, scores]) => {
-    MARKER_IDS.forEach((id) => {
-      if (!markerIsAssessedInSection(sectionKey, id)) return;
-      const n = coerceScoreNumber(scores[id]);
-      if (n == null) return;
-      totals[id] += n;
-      counts[id] += 1;
-    });
-  });
-  const out: Record<string, number> = {};
-  MARKER_IDS.forEach((id) => {
-    if (counts[id] > 0) out[id] = Math.round((totals[id] / counts[id]) * 10) / 10;
-  });
-  return { scores: out, counts };
+  const patterns = parseObject(attempt.scenario_specific_patterns);
+  const m4Raw = parseObject(patterns?.moment_4_scores);
+  const m5Raw = parseObject(patterns?.moment_5_scores);
+  const tx = attempt.transcript;
+  const slices: MarkerScoreSlice[] = [
+    enrichScenarioSliceWithContemptHeuristic(extractAggregateSlice(attempt.scenario_1_scores), userTextForAdminScenario(tx, 1)),
+    enrichScenarioSliceWithContemptHeuristic(extractAggregateSlice(attempt.scenario_2_scores), userTextForAdminScenario(tx, 2)),
+    enrichScenarioSliceWithContemptHeuristic(extractAggregateSlice(attempt.scenario_3_scores), userTextForAdminScenario(tx, 3)),
+    extractSanitizedMomentSlice(m4Raw, 4),
+    extractSanitizedMomentSlice(m5Raw, 5),
+  ];
+  return aggregatePillarScoresWithCommitmentMergeDetailed(slices);
 }
 
 function buildMomentOrScenarioSummary(
@@ -438,7 +490,8 @@ function formatAttemptTabLabel(attempt: AttemptRow): string {
   });
 }
 
-function getAttemptsSorted(attempts: AttemptRow[]): AttemptRow[] {
+function getAttemptsSorted(attempts: AttemptRow[] | null | undefined): AttemptRow[] {
+  if (!Array.isArray(attempts)) return [];
   return [...attempts].sort((a, b) => a.attempt_number - b.attempt_number);
 }
 
@@ -455,7 +508,7 @@ function UserCard({ userData, onPress }: { userData: UserGroup; onPress: () => v
       <Text style={styles.userCardEmail}>{userData.user.email ?? '—'}</Text>
       <View style={styles.userCardMetaRow}>
         <Text style={[styles.userCardStatus, { color: getPassColor(passWord) }]}>{passWord}</Text>
-        <Text style={styles.userCardTests}>{userData.attempts.length} tests</Text>
+        <Text style={styles.userCardTests}>{userData.attempts?.length ?? 0} tests</Text>
       </View>
     </Pressable>
   );
@@ -467,14 +520,25 @@ function SummaryTab({ attempt }: { attempt: AttemptRow }) {
 
   const loadStyleProfile = async () => {
     setStyleStatus('loading');
-    const { data } = await supabase
-      .from('communication_style_profiles')
-      .select('*')
-      .eq('user_id', attempt.user_id)
-      .maybeSingle();
-    const row = data as CommunicationStyleProfileRow | null | undefined;
-    setStyleProfile(row ?? null);
-    setStyleStatus('idle');
+    try {
+      const { data, error } = await supabase
+        .from('communication_style_profiles')
+        .select('*')
+        .eq('user_id', attempt.user_id)
+        .maybeSingle();
+      if (error) {
+        console.error('[Admin] loadStyleProfile', error);
+        setStyleProfile(null);
+        return;
+      }
+      const row = data as CommunicationStyleProfileRow | null | undefined;
+      setStyleProfile(row ?? null);
+    } catch (e) {
+      console.error('[Admin] loadStyleProfile failed', e);
+      setStyleProfile(null);
+    } finally {
+      setStyleStatus('idle');
+    }
   };
 
   useEffect(() => {
@@ -501,6 +565,8 @@ function SummaryTab({ attempt }: { attempt: AttemptRow }) {
         console.error('[Admin] analyze-interview-audio invoke failed', audioRes.error);
       }
       await loadStyleProfile();
+    } catch (e) {
+      console.error('[Admin] reprocessStyle failed', e);
     } finally {
       setStyleStatus('idle');
     }
@@ -549,7 +615,10 @@ function SummaryTab({ attempt }: { attempt: AttemptRow }) {
           <Text style={styles.scoreLabel}>{p.label}</Text>
           <Text style={styles.scoreValue}>
             {formatScoreCell(totalScores[p.id])}
-            {aggregate.counts[p.id] > 0 && aggregate.counts[p.id] < 2 ? ' *' : ''}
+            {(aggregate.contributorCounts[p.id] ?? 0) > 0 &&
+            (aggregate.contributorCounts[p.id] ?? 0) < 2
+              ? ' *'
+              : ''}
           </Text>
         </View>
       ))}
@@ -564,7 +633,13 @@ function SummaryTab({ attempt }: { attempt: AttemptRow }) {
             <View key={`${item.label}-${p.id}`} style={styles.scoreRow}>
               <Text style={styles.scoreLabel}>{p.short}</Text>
               <Text style={styles.scoreValue}>
-                {markerIsAssessedInSection(item.key, p.id) ? formatScoreCell(item.scores?.[p.id]) : '—'}
+                {markerIsAssessedInSection(item.key, p.id)
+                  ? formatScoreCell(
+                      p.id === 'contempt'
+                        ? sliceContemptDisplayValue(item.scores)
+                        : item.scores?.[p.id],
+                    )
+                  : '—'}
               </Text>
             </View>
           ))}
@@ -605,21 +680,27 @@ function SummaryTab({ attempt }: { attempt: AttemptRow }) {
           const secondaryStored = styleProfile?.style_labels_secondary;
           const summaryStored = styleProfile?.matchmaker_summary;
           const lowNoteStored = styleProfile?.low_confidence_note;
+          const primaryForDisplay = Array.isArray(primaryStored)
+            ? primaryStored
+            : Array.isArray(live?.primary)
+              ? live.primary
+              : [];
+          const secondaryForDisplay = Array.isArray(secondaryStored)
+            ? secondaryStored
+            : Array.isArray(live?.secondary)
+              ? live.secondary
+              : [];
           return (
             <>
-              {(primaryStored?.length || live?.primary?.length) ? (
-                <Text style={styles.blockText}>
-                  Primary labels: {(primaryStored?.length ? primaryStored : live?.primary)?.join(', ')}
-                </Text>
+              {primaryForDisplay.length > 0 ? (
+                <Text style={styles.blockText}>Primary labels: {primaryForDisplay.join(', ')}</Text>
               ) : null}
-              {(secondaryStored?.length || live?.secondary?.length) ? (
-                <Text style={styles.blockText}>
-                  Secondary labels: {(secondaryStored?.length ? secondaryStored : live?.secondary)?.join(', ')}
-                </Text>
+              {secondaryForDisplay.length > 0 ? (
+                <Text style={styles.blockText}>Secondary labels: {secondaryForDisplay.join(', ')}</Text>
               ) : null}
-              {(summaryStored || live?.matchmaker_summary) ? (
+              {(live?.matchmaker_summary || summaryStored) ? (
                 <Text style={styles.blockText}>
-                  Matchmaker summary: {summaryStored ?? live?.matchmaker_summary}
+                  Matchmaker summary: {live?.matchmaker_summary ?? summaryStored}
                 </Text>
               ) : null}
               {(lowNoteStored || live?.low_confidence_note) ? (
@@ -638,7 +719,12 @@ function SummaryTab({ attempt }: { attempt: AttemptRow }) {
           ] as const
         ).map(([label, value, describe]) => {
           const n = coerceScoreNumber(value) ?? null;
-          const exp = n == null ? '' : describe(n);
+          const exp =
+            n == null
+              ? ''
+              : label === 'Emotional vs Analytical'
+                ? describeEmotionalAnalyticalAxis(n, styleProfile as unknown as Record<string, unknown> | null)
+                : describe(n);
           return (
             <View key={label} style={styles.styleBarRow}>
               <Text style={styles.scoreLabel}>{label}</Text>

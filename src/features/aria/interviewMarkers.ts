@@ -27,6 +27,12 @@ export const INTERVIEW_MARKER_LABELS: Record<InterviewMarkerId, string> = {
   commitment_threshold: 'Commitment Threshold',
 };
 
+/** Slice-level JSON keys (not final pillars); shown on scenario scorecards only. */
+export const SLICE_ONLY_MARKER_LABELS: Record<string, string> = {
+  contempt_recognition: "Contempt — recognition (others' dynamics)",
+  contempt_expression: 'Contempt — expression (participant framing)',
+};
+
 /** Used for gate minimums (maps old Conflict/Repair + Accountability floors). */
 export const GATE_MIN_REPAIR_MARKER: InterviewMarkerId = 'repair';
 export const GATE_MIN_ACCOUNTABILITY_MARKER: InterviewMarkerId = 'accountability';

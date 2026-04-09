@@ -70,7 +70,23 @@ export async function runCommunicationStylePipelineAfterSave(
         }
       }
       if (errs.length === 0) {
-        console.log('[COMMUNICATION_STYLE] analyze-interview-text invoke finished without client-side error', { attemptId });
+        const dbg = body as {
+          narrative_conceptual_score?: number;
+          user_corpus_char_count?: number;
+          user_turn_count?: number;
+          nc_lexicon_debug?: Record<string, number>;
+          matchmaker_fog_runon?: boolean;
+        };
+        const payload = {
+          attemptId,
+          narrative_conceptual_score: dbg.narrative_conceptual_score,
+          user_corpus_char_count: dbg.user_corpus_char_count,
+          user_turn_count: dbg.user_turn_count,
+          nc_lexicon_debug: dbg.nc_lexicon_debug,
+          matchmaker_fog_runon: dbg.matchmaker_fog_runon,
+        };
+        console.log('[COMMUNICATION_STYLE] analyze-interview-text ok', payload);
+        void remoteLog('[COMMUNICATION_STYLE] analyze-interview-text ok', payload);
       }
     }
   } catch (e) {
@@ -89,9 +105,24 @@ export async function runCommunicationStylePipelineAfterSave(
     if (audioResult.error) {
       errs.push(`analyze-interview-audio: ${audioResult.error.message}`);
     } else {
-      const body = audioResult.data as { error?: string } | null;
+      const body = audioResult.data as {
+        error?: string;
+        narrative_conceptual_score?: number;
+        nc_lexicon_debug?: Record<string, number>;
+        matchmaker_fog_runon?: boolean;
+        audio_confidence?: number;
+      } | null;
       if (body && typeof body === 'object' && body.error) {
         errs.push(`analyze-interview-audio: ${body.error}`);
+      } else if (body && typeof body === 'object' && !body.error) {
+        const audioPayload = {
+          attemptId,
+          narrative_conceptual_score: body.narrative_conceptual_score,
+          audio_confidence: body.audio_confidence,
+          nc_lexicon_debug: body.nc_lexicon_debug,
+          matchmaker_fog_runon: body.matchmaker_fog_runon,
+        };
+        console.log('[COMMUNICATION_STYLE] analyze-interview-audio finalize ok', audioPayload);
       }
     }
   } catch (e) {

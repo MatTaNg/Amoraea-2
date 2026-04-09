@@ -14,7 +14,17 @@
     "test": "jest",
     "test:watch": "jest --watch",
     "db:push": "supabase db push",
-    "reprocess-style-labels": "deno run --allow-net --allow-env --allow-read scripts/reprocess-style-labels.ts"
+    "reprocess-style-labels": "npx tsx --env-file=.env scripts/reprocess-style-labels.node.ts",
+    "reprocess-style-labels:deno": "deno run --allow-net --allow-env --allow-read scripts/reprocess-style-labels.ts",
+    "reprocess-narrative-conceptual": "npx tsx --env-file=.env scripts/reprocess-narrative-conceptual-from-transcripts.node.ts",
+    "reprocess-narrative-conceptual:deno": "deno run --allow-net --allow-env --allow-read scripts/reprocess-narrative-conceptual-from-transcripts.ts",
+    "reprocess-moment5-scores": "npx tsx --env-file=.env scripts/reprocess-moment5-scores.ts",
+    "recompute-pillar-scores": "npx tsx --env-file=.env scripts/recompute-pillar-scores-from-stored-slices.ts",
+    "audit-narrative-conceptual-extremes": "deno run --allow-net --allow-env --allow-read scripts/audit-narrative-conceptual-extremes.ts",
+    "test:communication-style": "jest --testPathPattern=interviewStyleMarkers --no-cache",
+    "deploy:fn:analyze-interview-text": "npx supabase functions deploy analyze-interview-text",
+    "deploy:fn:analyze-interview-audio": "npx supabase functions deploy analyze-interview-audio",
+    "deploy:fn:communication-style": "npx supabase functions deploy analyze-interview-text && npx supabase functions deploy analyze-interview-audio"
   },
   "dependencies": {
     "@expo/vector-icons": "^15.0.3",

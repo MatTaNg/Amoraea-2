@@ -3,12 +3,32 @@
  * Pure functions — no Supabase or React Native. Thresholds are tuned here as calibration data accumulates.
  */
 
+import {
+  buildMatchmakerSummaryFromProfile,
+  type BuildMatchmakerSummaryOptions,
+} from '../../supabase/functions/_shared/matchmakerSummaryFromProfile';
+import {
+  countPersonalNarrativeEpisodesAcrossTranscript,
+  hasTranscriptSignalForStyleLabels,
+  normalizeInterviewStyleCorpus,
+  qualifiesForLeadsWithFeelingPrimary,
+  qualifiesForMoreHeartThanHeadSecondary,
+  strongConceptualMarkerCount,
+} from '../../supabase/functions/_shared/interviewStyleMarkers';
+
 export interface StyleProfile {
   emotional_analytical_score: number;
+  /**
+   * Narrative–conceptual axis: **1** = stronger episodic / personal-story lexicon; **0** = stronger
+   * pattern / framework / analytic lexicon (`interviewStyleMarkers.ts`). Labels: high → storyteller,
+   * low → conceptual thinker — do not invert when persisting or displaying.
+   */
   narrative_conceptual_score: number;
   certainty_ambiguity_score: number;
   relational_individual_score: number;
   emotional_vocab_density: number;
+  /** Share of I/me/my among common pronouns — from `communication_style_profiles.first_person_ratio`. */
+  first_person_ratio: number;
   qualifier_density: number;
   avg_response_length: number;
   warmth_score: number;
@@ -26,6 +46,27 @@ export interface StyleLabels {
   secondary: string[];
   matchmaker_summary: string;
   low_confidence_note: string | null;
+}
+
+/**
+ * Optional transcript signal for `matchmaker_summary` and primary-label guards (storyteller episodes,
+ * **leads with feeling** opening language). Prefer `userTurns` when available; else `userCorpus`.
+ */
+export type TranslateStyleProfileOptions = {
+  userCorpus?: string | null;
+  userTurns?: string[] | null;
+  scenarioUserCorpus?: string | null;
+  /** Full fiction-segment user turns (before handoff); fallback for more-heart guard if main analysis is empty. */
+  scenarioUserTurns?: string[] | null;
+  /** The three vignette "what's going on" answers — preferred for the more-heart opening guard. */
+  scenarioMainAnalysisUserTurns?: string[] | null;
+  personalUserCorpus?: string | null;
+};
+
+function combinedUserTextForStyleGuards(options?: TranslateStyleProfileOptions): string {
+  const turns = options?.userTurns?.filter((t) => String(t).trim().length > 0) ?? [];
+  if (turns.length > 0) return turns.join('\n');
+  return (options?.userCorpus ?? '').trim();
 }
 
 /** One-line explanations for chips (primary + secondary). */
@@ -59,8 +100,76 @@ export const STYLE_LABEL_TOOLTIPS: Record<string, string> = {
   'moderate vocal range': 'Expressiveness is in the middle — not flat, not highly animated.',
 };
 
+/**
+ * If a stored or LLM-produced summary matches these, it is not acceptable for DB or display:
+ * it restates internal chips instead of describing behavior (data integrity / UX).
+ */
+export function matchmakerSummaryReadsAsChipRestatement(text: string): boolean {
+  const t = text.trim();
+  if (!t) return true;
+  const patterns: RegExp[] = [
+    /\bcome across as\b/i,
+    /\bcomes across as\b/i,
+    /\breads as a\b/i,
+    /\bregisters as a\b/i,
+    /\bthey are a storyteller\b/i,
+    /\bthey'?re a storyteller\b/i,
+    /\bstoryteller\b/i,
+    /\bconceptual thinker\b/i,
+    /\bleads with feeling\b/i,
+    /\bheady\b/i,
+    /\banalytical\b/i,
+    /\banalytical style\b/i,
+    /\bas analytical\b/i,
+    /\bexpressive\b/i,
+    /\bwarm\b/i,
+    /\bmore reserved in tone\b/i,
+    /\beven-keeled delivery\b/i,
+    /\bmeasured warmth\b/i,
+    /\bfast-paced speaker\b/i,
+    /\bunhurried speaker\b/i,
+    /\bhigh energy\b/i,
+    /\bgoes deep in conversation\b/i,
+    /\bprimary style\b/i,
+    /\bstyle label\b/i,
+    /\bprocess and express experience\b/i,
+    /\bprocess and express\b/i,
+    /\bas leads\b/i,
+    /\bclassified as\b/i,
+    /\btheir primary (style|label)\b/i,
+    /\bmore heart than head\b/i,
+    /\bbalanced head and heart\b/i,
+    /\bmoves between stories and ideas\b/i,
+    /\bcomfortable with uncertainty\b/i,
+    /\bvalues clarity and resolution\b/i,
+  ];
+  return patterns.some((p) => p.test(t));
+}
+
+const MIN_CHARS_PER_MATCHMAKER_SENTENCE = 28;
+
+/**
+ * Counts substantive sentences in the matchmaker template (split on . ! ?).
+ * `translateStyleProfile` requires exactly **three** for DB / matchmaker context.
+ */
+export function countMatchmakerSummaryTemplateSentences(text: string | null | undefined): number {
+  if (text == null || typeof text !== 'string') return 0;
+  return text
+    .trim()
+    .split(/(?<=[.!?])\s+/)
+    .map((s) => s.trim())
+    .filter((s) => s.replace(/\s+/g, ' ').length >= MIN_CHARS_PER_MATCHMAKER_SENTENCE)
+    .length;
+}
+
+/** Safe fallback if a legacy row or bad pipeline ever stores label-echo text (should not trigger for current build). */
+const NEUTRAL_MATCHMAKER_SUMMARY_FALLBACK =
+  'They mix reflection and structure without a single fixed default, and context usually pulls whether heart or head goes first. They are most understood when a partner balances warmth with specificity—neither pure venting nor cold cross-examination. Most friction shows up when pace, directness, or how much feeling to surface first stay unstated; making those defaults explicit keeps things repairable.';
+
 export const MATCHMAKER_STYLE_VOCABULARY_BLOCK = `
 STYLE VOCABULARY MAPPING:
+
+When describing a candidate to a seeker, use the precomputed behavioral Summary from their profile (three sentences: texture, partner needs, friction). Do **not** open with "they come across as [label]" or substitute chip names like "storyteller," "heady," or "analytical" for that Summary — translate into concrete communication behavior instead.
 
 When a user describes what they want using experiential language,
 interpret it as follows and check it against the candidate's style labels:
@@ -81,7 +190,7 @@ interpret it as follows and check it against the candidate's style labels:
                    acknowledge this gap honestly if raised
 "intellectual"   → style label: heady, conceptual thinker,
                    high avg_response_length
-"storyteller"    → style label: storyteller
+"storyteller"    → internal label only; in user-facing copy describe specific-moment, episodic reasoning (never say "storyteller")
 "present"        → partially: unhurried speaker, measured warmth —
                    acknowledge this is not fully captured
 "masculine energy" → do not infer — ask the user what they mean
@@ -110,17 +219,10 @@ function n(v: unknown, fallback: number): number {
 }
 
 /**
- * Map a DB row (partial) into a StyleProfile with safe defaults for translation.
+ * DB `narrative_conceptual_score`: **0 = conceptual pole**, **1 = narrative pole**
+ * (narrativeHits / (narrative + conceptual) — same direction as storage, not inverted).
+ * **Higher → storyteller; lower → conceptual thinker.**
  */
-/** Single-axis experiential label for admin calibration (same thresholds as translateStyleProfile). */
-export function describeEmotionalAnalyticalAxis(score: number | null | undefined): string {
-  const s = clamp01(n(score, 0.5));
-  if (s >= 0.68) return 'leads with feeling';
-  if (s <= 0.35) return 'analytical';
-  if (s >= 0.55) return 'more heart than head';
-  return 'balanced head and heart';
-}
-
 export function describeNarrativeConceptualAxis(score: number | null | undefined): string {
   const s = clamp01(n(score, 0.5));
   if (s >= 0.68) return 'storyteller';
@@ -128,6 +230,10 @@ export function describeNarrativeConceptualAxis(score: number | null | undefined
   return 'moves between stories and ideas';
 }
 
+/**
+ * DB `certainty_ambiguity_score`: **higher → more hedging / comfort with ambiguity**;
+ * **lower → more definitive / closure-oriented wording** (not a raw "certainty index").
+ */
 export function describeCertaintyAmbiguityAxis(score: number | null | undefined): string {
   const s = clamp01(n(score, 0.5));
   if (s >= 0.65) return 'comfortable with uncertainty';
@@ -169,10 +275,12 @@ export function styleProfileFromDbRow(row: Record<string, unknown> | null | unde
   const r = row ?? {};
   return {
     emotional_analytical_score: clamp01(n(r.emotional_analytical_score, 0.5)),
+    // 0 = conceptual pole, 1 = narrative pole (see interviewStyleMarkers.narrativeConceptualRatioFromCorpus).
     narrative_conceptual_score: clamp01(n(r.narrative_conceptual_score, 0.5)),
     certainty_ambiguity_score: clamp01(n(r.certainty_ambiguity_score, 0.5)),
     relational_individual_score: clamp01(n(r.relational_individual_score, 0.5)),
     emotional_vocab_density: n(r.emotional_vocab_density, 5),
+    first_person_ratio: clamp01(n(r.first_person_ratio, 0.5)),
     qualifier_density: n(r.qualifier_density, 5),
     avg_response_length: n(r.avg_response_length, 80),
     warmth_score: clamp01(n(r.warmth_score, 0.5)),
@@ -186,23 +294,86 @@ export function styleProfileFromDbRow(row: Record<string, unknown> | null | unde
   };
 }
 
-export function translateStyleProfile(profile: StyleProfile): StyleLabels {
+/**
+ * Single-axis experiential label for admin calibration.
+ * In the 0.55–0.67 band, "more heart than head" is not inferred from numeric row fields alone; without
+ * transcript context the secondary qualifier rejects (aligned with `translateStyleProfile`).
+ */
+export function describeEmotionalAnalyticalAxis(
+  score: number | null | undefined,
+  profileRow?: Record<string, unknown> | null,
+): string {
+  const s = clamp01(n(score, 0.5));
+  // Without transcript, opening guards cannot run — use 0.68 so the 0.55–0.67 band stays descriptive.
+  if (s >= 0.68) return 'leads with feeling';
+  if (s <= 0.35) return 'analytical';
+  if (s >= 0.55) {
+    if (profileRow != null && Object.keys(profileRow).length > 0) {
+      const p = styleProfileFromDbRow(profileRow);
+      if (
+        !qualifiesForMoreHeartThanHeadSecondary(
+          {
+            emotional_vocab_density: p.emotional_vocab_density,
+            first_person_ratio: p.first_person_ratio,
+            narrative_conceptual_score: p.narrative_conceptual_score,
+          },
+          undefined,
+          null,
+        )
+      ) {
+        return 'balanced head and heart';
+      }
+    }
+    return 'more heart than head';
+  }
+  return 'balanced head and heart';
+}
+
+export function translateStyleProfile(
+  profile: StyleProfile,
+  options?: TranslateStyleProfileOptions
+): StyleLabels {
   const labels: string[] = [];
   const secondary: string[] = [];
 
-  if (profile.emotional_analytical_score >= 0.68) {
+  const narrativeEpisodes = countPersonalNarrativeEpisodesAcrossTranscript({
+    userCorpus: options?.userCorpus,
+    userTurns: options?.userTurns,
+  });
+  const hasTx = hasTranscriptSignalForStyleLabels(options);
+  /** Storyteller primary only with transcript + ≥2 distinct narrative episodes (never score-only). */
+  const storytellerEpisodeOk = hasTx && narrativeEpisodes !== null && narrativeEpisodes >= 2;
+  /** "Conceptual thinker" only with transcript + ≥1 strong framework hit — same bar as storyteller episode guard (Prompt 5). */
+  const frameworkEvidenceForConceptualThinker =
+    hasTx &&
+    strongConceptualMarkerCount(normalizeInterviewStyleCorpus(combinedUserTextForStyleGuards(options))) >= 1;
+
+  const qualifiesLeadsWithFeeling = qualifiesForLeadsWithFeelingPrimary(profile, options);
+  // 0.65 + opening-snippet guard or high-axis fallback (`qualifiesForLeadsWithFeelingPrimary`).
+  if (profile.emotional_analytical_score >= 0.65 && qualifiesLeadsWithFeeling) {
     labels.push('leads with feeling');
   } else if (profile.emotional_analytical_score <= 0.35) {
     labels.push('analytical');
-  } else if (profile.emotional_analytical_score >= 0.55) {
+  } else if (
+    profile.emotional_analytical_score >= 0.55 &&
+    qualifiesForMoreHeartThanHeadSecondary(
+      {
+        emotional_vocab_density: profile.emotional_vocab_density,
+        first_person_ratio: profile.first_person_ratio,
+        narrative_conceptual_score: profile.narrative_conceptual_score,
+      },
+      options,
+      narrativeEpisodes,
+    )
+  ) {
     secondary.push('more heart than head');
   } else {
     secondary.push('balanced head and heart');
   }
 
-  if (profile.narrative_conceptual_score >= 0.68) {
+  if (profile.narrative_conceptual_score >= 0.68 && storytellerEpisodeOk) {
     labels.push('storyteller');
-  } else if (profile.narrative_conceptual_score <= 0.35) {
+  } else if (profile.narrative_conceptual_score <= 0.35 && frameworkEvidenceForConceptualThinker) {
     labels.push('conceptual thinker');
   } else {
     secondary.push('moves between stories and ideas');
@@ -281,7 +452,21 @@ export function translateStyleProfile(profile: StyleProfile): StyleLabels {
   }
 
   const primary = labels.slice(0, 3);
-  const matchmakerSummary = buildMatchmakerSummary(profile);
+  const summaryOpts: BuildMatchmakerSummaryOptions | undefined =
+    options?.userCorpus != null && options.userCorpus !== ''
+      ? {
+          userCorpus: options.userCorpus,
+          scenarioUserCorpus: options.scenarioUserCorpus ?? undefined,
+          personalUserCorpus: options.personalUserCorpus ?? undefined,
+        }
+      : undefined;
+  let matchmakerSummary = buildMatchmakerSummaryFromProfile(profile, summaryOpts);
+  if (matchmakerSummaryReadsAsChipRestatement(matchmakerSummary)) {
+    matchmakerSummary = NEUTRAL_MATCHMAKER_SUMMARY_FALLBACK;
+  }
+  if (countMatchmakerSummaryTemplateSentences(matchmakerSummary) !== 3) {
+    matchmakerSummary = NEUTRAL_MATCHMAKER_SUMMARY_FALLBACK;
+  }
 
   const overallConfidence = profile.text_confidence * 0.5 + profile.audio_confidence * 0.5;
   const lowConfidenceNote =
@@ -298,137 +483,36 @@ export function translateStyleProfile(profile: StyleProfile): StyleLabels {
 }
 
 /**
- * Matchmaker-facing prose derived from feature scores only — no label chip names.
- * Third person, present tense; three sentences: texture, partner needs, plausible friction.
+ * Production path: append this block when the matchmaker LLM discusses a candidate's communication.
+ * The Summary is authoritative prose; chips are internal metadata the model must not quote to users.
  */
-function buildMatchmakerSummary(profile: StyleProfile): string {
-  const ea = profile.emotional_analytical_score;
-  const nc = profile.narrative_conceptual_score;
-  const ca = profile.certainty_ambiguity_score;
-  const ri = profile.relational_individual_score;
-  const audioOk = profile.audio_confidence > 0.4;
-  const warmth = profile.warmth_score;
-  const expr = profile.emotional_expressiveness;
-  const rate = profile.speech_rate;
-
-  const headyScore =
-    (1 - ea) * 0.4 + (1 - nc) * 0.4 + (audioOk && rate >= 155 ? 0.2 : 0);
-
-  const feelingForward = ea >= 0.58;
-  const narrativeForward = nc >= 0.58;
-  const analyticalForward = ea <= 0.4;
-  const conceptualForward = nc <= 0.4;
-  const relationalForward = ri <= 0.38;
-  const individualForward = ri >= 0.62;
-  const ambiguityForward = ca >= 0.58;
-  const closureForward = ca <= 0.35;
-
-  // --- Sentence 1: dominant texture (optional relational / individual tail in same sentence)
-  let s1 = '';
-  if (headyScore >= 0.62) {
-    s1 =
-      'They tend to organize experience through patterns, causes, and frameworks, reaching for coherent explanation early';
-  } else if (feelingForward && narrativeForward) {
-    s1 =
-      'They process experiences through emotion and narrative first, often sharing the felt texture of a situation before—or instead of—stripping it to logic alone';
-  } else if (feelingForward) {
-    s1 =
-      'Feeling and impact tend to lead, and they track tone and emotional meaning even when the storyline is still forming';
-  } else if (narrativeForward) {
-    s1 =
-      'Concrete moments and sequences carry weight, and they often reason from what happened before they generalize';
-  } else if (analyticalForward && conceptualForward) {
-    s1 =
-      'They lean toward clear categories, reasons, and principles, and order with precision is a comfortable entry point';
-  } else {
-    s1 =
-      'They mix reflection and structure without a single fixed default, and context usually pulls whether heart or head goes first';
-  }
-
-  if (relationalForward) {
-    s1 +=
-      ', and their language often holds how something lands between people—not only a private verdict';
-  } else if (individualForward) {
-    s1 += ', and their own vantage point with interior detail comes through readily';
-  }
-  s1 += '.';
-
-  // --- Sentence 2: one combined “needs” sentence (one extra clause by priority)
-  let s2Core = '';
-  if (feelingForward && headyScore < 0.58) {
-    s2Core =
-      'They are most understood when a partner meets them in the feeling before moving to analysis, solutions, or debate';
-  } else if (headyScore >= 0.58 && !feelingForward) {
-    s2Core =
-      'They are most understood when a partner follows reasoning and definition first, then layers care without collapsing into vague reassurance alone';
-  } else {
-    s2Core =
-      'They are most understood when a partner balances warmth with specificity—neither pure venting nor cold cross-examination';
-  }
-
-  let s2Extra: string | null = null;
-  if (relationalForward) {
-    s2Extra =
-      'it helps when the other person can join the shared impact between them—not only parallel solo positions';
-  } else if (individualForward) {
-    s2Extra =
-      'they need space to name their own lens accurately before being nudged into instant alignment or compromise language';
-  } else if (ambiguityForward) {
-    s2Extra =
-      'room for revisiting and not-knowing matters, because forced premature closure can feel dismissive';
-  } else if (closureForward) {
-    s2Extra =
-      'clear expectations and dependable follow-through read as care, while open-ended drift can read as avoidance';
-  }
-
-  const s2 = s2Extra ? `${s2Core}, and ${s2Extra}.` : `${s2Core}.`;
-
-  // --- Sentence 3: plausible friction (bridgeable)
-  let s3 = '';
-  if (feelingForward && headyScore < 0.55) {
-    s3 =
-      'A partner who habitually leads with frameworks or facts may feel misaligned at first, though the gap is usually bridgeable when both name pace and sequence explicitly.';
-  } else if (headyScore >= 0.58 && ea < 0.52) {
-    s3 =
-      'A partner who needs heavy emotional mirroring before any structure may feel briefly unseen; agreeing on order—comfort then clarity, or the reverse—reduces friction.';
-  } else if (relationalForward) {
-    s3 =
-      'Someone who treats every exchange as individual positioning can miss the shared layer they are holding; slowing down to name what sits between them eases tension.';
-  } else if (individualForward) {
-    s3 =
-      'A partner who expects joint framing before inner clarity feels finished may read patience as distance; timing that distinction helps.';
-  } else if (ambiguityForward && !closureForward) {
-    s3 =
-      'Partners who need fast closure may find the pace uneven; naming tolerance for ambiguity versus decisiveness prevents small pile-ups.';
-  } else if (closureForward && !ambiguityForward) {
-    s3 =
-      'Partners who live comfortably in gray zones may feel pressed; negotiating when closure is needed versus exploratory space prevents drift into criticism.';
-  } else if (audioOk && expr >= 0.7 && warmth <= 0.48) {
-    s3 =
-      'Vocal intensity can outrun how warm they sound; partners tuned to low affect may misread energy as conflict until baseline is calibrated.';
-  } else if (audioOk && rate >= 158) {
-    s3 =
-      'A slower-paced partner may need explicit pauses that are not withdrawal; naming tempo prevents mistaken disinterest.';
-  } else {
-    s3 =
-      'Most friction shows up when pace, directness, or how much feeling to surface first stay unstated; making those defaults explicit keeps things repairable.';
-  }
-
-  return `${s1} ${s2} ${s3}`.replace(/\s+/g, ' ').trim();
-}
-
-/**
- * Block for matchmaker / LLM system prompt: experiential labels (not raw numbers).
- */
-export function formatCommunicationStyleForMatchmakerPrompt(labels: StyleLabels): string {
-  const lines = [
-    'Communication style:',
-    `- Primary: ${labels.primary.length ? labels.primary.join(', ') : '(none — balanced / insufficient signal)'}`,
-    `- Secondary: ${labels.secondary.length ? labels.secondary.join(', ') : '(none)'}`,
-    `- Summary: ${labels.matchmaker_summary}`,
-  ];
-  if (labels.low_confidence_note) {
-    lines.push(`- Note: ${labels.low_confidence_note}`);
-  }
-  return lines.join('\n');
+export function formatCommunicationStyleForMatchmakerPrompt(labels: StyleLabels | null | undefined): string {
+  const primary = Array.isArray(labels?.primary) ? labels.primary : [];
+  const secondary = Array.isArray(labels?.secondary) ? labels.secondary : [];
+  const primaryStr = primary.length ? primary.join(', ') : '(none — balanced / insufficient signal)';
+  const secondaryStr = secondary.length ? secondary.join(', ') : '(none)';
+  return [
+    'COMMUNICATION STYLE — candidate reference',
+    '',
+    'AUTHORITATIVE SUMMARY — exactly three sentences (dominant texture → what a partner must do communicatively → one plausible friction).',
+    'PRODUCTION SOURCE: This text is produced only by `buildMatchmakerSummaryFromProfile` inside `translateStyleProfile`, which runs in Supabase edge functions `analyze-interview-text` and `analyze-interview-audio` when persisting `communication_style_profiles`. It is not a model guess and not derived from Primary/Secondary chip strings.',
+    labels?.matchmaker_summary ?? '',
+    '',
+    'MANDATORY FOR ANY USER-FACING COPY (seekers, profiles, chat):',
+    '- Expand or lightly paraphrase ONLY the three sentences above if needed — never replace them with a one-liner invented from Primary/Secondary tags.',
+    '- Do NOT write "They come across as …", "They are a …", or list internal labels (e.g. leads with feeling, storyteller, analytical, heady, warm, expressive, conceptual thinker, or any chip string below).',
+    '- If you mention communication style at all, ground every clause in behavioral detail from the Summary — not label names.',
+    '',
+    'HARD RULES FOR ANY USER-FACING PARAPHRASE:',
+    '- Do not write "They come across as [X]", "[X] style", "They are a [X]", or "reads as a [X]" where X is a category label.',
+    '- Never paste or restate the internal chip names below as standalone identity descriptors (including: storyteller, conceptual thinker, leads with feeling, analytical, heady, warm, expressive, or other Primary/Secondary strings).',
+    '- Describe behavior: sequencing (feelings vs frameworks), pacing, specificity vs abstraction, joint vs individual framing — using the Summary sentences above.',
+    '',
+    'INTERNAL TAGS — calibration only; do not quote to seekers unless you are explicitly debugging with staff:',
+    `- Primary: ${primaryStr}`,
+    `- Secondary: ${secondaryStr}`,
+    labels?.low_confidence_note ? `- Low-signal note: ${labels.low_confidence_note}` : '',
+  ]
+    .filter(Boolean)
+    .join('\n');
 }

@@ -1,14 +1,63 @@
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
-import { styleProfileFromDbRow, translateStyleProfile } from '../_shared/styleTranslations.ts';
+import {
+  conceptualMarkerCount,
+  narrativeConceptualRatioFromCorpus,
+  normalizeInterviewStyleCorpus,
+  storyMarkerCount,
+  strongConceptualMarkerCount,
+  strongConceptualPatternFamilyCount,
+  userTurnContentsFromInterviewTranscript,
+} from '../_shared/interviewStyleMarkers.ts';
+import {
+  countMatchmakerSummaryTemplateSentences,
+  styleProfileFromDbRow,
+  translateStyleProfile,
+  type TranslateStyleProfileOptions,
+} from '../_shared/styleTranslations.ts';
+import {
+  parseInterviewTranscriptMessages,
+  splitUserCorpusScenarioVsPersonal,
+  userTurnStringsScenarioMainAnalysis,
+  userTurnStringsScenarioSegment,
+} from '../_shared/splitInterviewUserCorpus.ts';
 
-function styleLabelsColumnsFromRow(row: Record<string, unknown>) {
-  const t = translateStyleProfile(styleProfileFromDbRow(row));
+function styleLabelsColumnsFromRow(row: Record<string, unknown>, opts?: TranslateStyleProfileOptions) {
+  const t = translateStyleProfile(styleProfileFromDbRow(row), opts);
   return {
     style_labels_primary: t.primary,
     style_labels_secondary: t.secondary,
     matchmaker_summary: t.matchmaker_summary,
     low_confidence_note: t.low_confidence_note,
   };
+}
+
+type StyleLabelColumns = ReturnType<typeof styleLabelsColumnsFromRow>;
+
+/**
+ * `analyze-interview-text` runs before finalize; when there is no real audio signal, finalize used to
+ * re-bundle stale `_shared` and overwrite a freshly written matchmaker_summary. Keep text pipeline labels.
+ */
+function styleLabelColumnsRespectingTextPipeline(
+  existing: Record<string, unknown> | null | undefined,
+  mergedRow: Record<string, unknown>,
+  transcriptOpts: Parameters<typeof styleLabelsColumnsFromRow>[1] | undefined,
+  audioConfidence: number,
+): StyleLabelColumns {
+  const computed = styleLabelsColumnsFromRow(mergedRow, transcriptOpts);
+  if (
+    audioConfidence <= 0 &&
+    existing &&
+    typeof existing.matchmaker_summary === 'string' &&
+    existing.matchmaker_summary.trim().length > 20
+  ) {
+    return {
+      style_labels_primary: existing.style_labels_primary ?? computed.style_labels_primary,
+      style_labels_secondary: existing.style_labels_secondary ?? computed.style_labels_secondary,
+      matchmaker_summary: existing.matchmaker_summary,
+      low_confidence_note: existing.low_confidence_note ?? computed.low_confidence_note,
+    };
+  }
+  return computed;
 }
 
 const corsHeaders = {
@@ -137,25 +186,66 @@ async function logStyle(
 async function setAudioConfidenceZero(
   admin: ReturnType<typeof createClient>,
   userId: string,
-  reason: string
+  attemptId: string | null,
+  reason: string,
 ) {
   const { data: existing } = await admin
     .from('communication_style_profiles')
-    .select('text_confidence, emotional_analytical_score, narrative_conceptual_score, certainty_ambiguity_score, relational_individual_score')
+    .select('*')
     .eq('user_id', userId)
     .maybeSingle();
   const textConfidence = Number(existing?.text_confidence ?? 0);
-  const overallConfidence = (textConfidence * 0.5);
-  const merged = { ...(existing ?? {}), audio_confidence: 0 };
+  const overallConfidence = textConfidence * 0.5;
+  const aid =
+    (attemptId && String(attemptId).trim()) ||
+    (typeof existing?.source_attempt_id === 'string' ? existing.source_attempt_id.trim() : '');
+  let styleLabelTranscriptOpts: {
+    userCorpus: string;
+    userTurns: string[];
+    scenarioUserCorpus?: string;
+    personalUserCorpus?: string;
+  } | undefined;
+  let narrativeFromCorpus: number | null = null;
+  let userCorpusForLog = '';
+  if (aid) {
+    const { data: attemptRow } = await admin
+      .from('interview_attempts')
+      .select('transcript')
+      .eq('id', aid)
+      .eq('user_id', userId)
+      .maybeSingle();
+    const userTurns = userTurnContentsFromInterviewTranscript(attemptRow?.transcript);
+    const userCorpus = userTurns.length > 0 ? userTurns.join(' ').toLowerCase() : '';
+    userCorpusForLog = userCorpus;
+    if (userCorpus.length > 0) {
+      const transcript = parseInterviewTranscriptMessages(attemptRow?.transcript);
+      const { scenarioCorpus, personalCorpus } = splitUserCorpusScenarioVsPersonal(transcript);
+      const scenarioUserTurns = userTurnStringsScenarioSegment(transcript);
+      styleLabelTranscriptOpts = {
+        userCorpus,
+        userTurns,
+        scenarioUserCorpus: scenarioCorpus.length > 0 ? scenarioCorpus : undefined,
+        scenarioUserTurns: scenarioUserTurns.length > 0 ? scenarioUserTurns : undefined,
+        personalUserCorpus: personalCorpus.length > 0 ? personalCorpus : undefined,
+      };
+      narrativeFromCorpus = narrativeConceptualRatioFromCorpus(userCorpus);
+    }
+  }
+  const merged = {
+    ...(existing ?? {}),
+    audio_confidence: 0,
+    ...(narrativeFromCorpus != null ? { narrative_conceptual_score: narrativeFromCorpus } : {}),
+  };
   const styleVector = buildStyleVector(merged);
   const upsertPayload = {
     user_id: userId,
+    ...(narrativeFromCorpus != null ? { narrative_conceptual_score: narrativeFromCorpus } : {}),
     audio_confidence: 0,
     overall_confidence: overallConfidence,
     style_vector: `[${styleVector.map((n) => Number.isFinite(n) ? n.toFixed(6) : '0.500000').join(',')}]`,
     processed_at: new Date().toISOString(),
     updated_at: new Date().toISOString(),
-    ...styleLabelsColumnsFromRow(merged),
+    ...styleLabelColumnsRespectingTextPipeline(existing, merged, styleLabelTranscriptOpts, 0),
   };
   const { error: zeroUpsertErr } = await admin
     .from('communication_style_profiles')
@@ -164,6 +254,30 @@ async function setAudioConfidenceZero(
     console.error(`[analyze-interview-audio] setAudioConfidenceZero upsert FAILED user_id=${userId}:`, zeroUpsertErr.message);
     throw new Error(zeroUpsertErr.message);
   }
+  const mmZero = upsertPayload as { matchmaker_summary?: string };
+  const fogZero =
+    typeof mmZero.matchmaker_summary === 'string' && mmZero.matchmaker_summary.includes('fog Forced');
+  let lexZero: Record<string, number> = {};
+  if (userCorpusForLog.length > 0) {
+    const normZ = normalizeInterviewStyleCorpus(userCorpusForLog);
+    lexZero = {
+      story: storyMarkerCount(normZ),
+      concept: conceptualMarkerCount(normZ),
+      strongHits: strongConceptualMarkerCount(normZ),
+      strongFamilies: strongConceptualPatternFamilyCount(normZ),
+    };
+  }
+  console.log(
+    '[analyze-interview-audio] setAudioConfidenceZero nc_lexicon',
+    JSON.stringify({
+      hypothesisId: 'H_audio_zero',
+      userId,
+      aid,
+      nc: narrativeFromCorpus,
+      ...lexZero,
+      matchmaker_fog_runon: fogZero,
+    }),
+  );
   await logStyle(admin, userId, 'audio', 'partial', reason, { audio_confidence: 0 });
 }
 
@@ -341,7 +455,7 @@ async function finalizeSession(body: Body, admin: ReturnType<typeof createClient
     .eq('attempt_id', attemptId);
 
   if (!turns || turns.length === 0) {
-    await setAudioConfidenceZero(admin, userId, 'No successful turn audio features for this session.');
+    await setAudioConfidenceZero(admin, userId, attemptId, 'No successful turn audio features for this session.');
     return new Response(JSON.stringify({ ok: true, partial: true, audio_confidence: 0 }), {
       status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' },
     });
@@ -368,27 +482,71 @@ async function finalizeSession(body: Body, admin: ReturnType<typeof createClient
   const confidenceDen = Number(totalTurns ?? turns.length) || turns.length;
   const audioConfidence = confidenceDen > 0 ? turns.length / confidenceDen : 0;
 
+  const { data: attemptRow } = await admin
+    .from('interview_attempts')
+    .select('transcript')
+    .eq('id', attemptId)
+    .eq('user_id', userId)
+    .maybeSingle();
+  const userTurns = userTurnContentsFromInterviewTranscript(attemptRow?.transcript);
+  const userCorpus = userTurns.length > 0 ? userTurns.join(' ').toLowerCase() : '';
+  const transcript = parseInterviewTranscriptMessages(attemptRow?.transcript);
+  const { scenarioCorpus, personalCorpus } = splitUserCorpusScenarioVsPersonal(transcript);
+  const scenarioUserTurns = userTurnStringsScenarioSegment(transcript);
+  const scenarioMainAnalysisUserTurns = userTurnStringsScenarioMainAnalysis(transcript);
+  const styleLabelTranscriptOpts =
+    userCorpus.length > 0
+      ? {
+          userCorpus,
+          userTurns,
+          scenarioUserCorpus: scenarioCorpus.length > 0 ? scenarioCorpus : undefined,
+          scenarioUserTurns: scenarioUserTurns.length > 0 ? scenarioUserTurns : undefined,
+          scenarioMainAnalysisUserTurns:
+            scenarioMainAnalysisUserTurns.length > 0 ? scenarioMainAnalysisUserTurns : undefined,
+          personalUserCorpus: personalCorpus.length > 0 ? personalCorpus : undefined,
+        }
+      : undefined;
+
   const { data: existing } = await admin
     .from('communication_style_profiles')
-    .select('text_confidence, emotional_analytical_score, narrative_conceptual_score, certainty_ambiguity_score, relational_individual_score')
+    .select('*')
     .eq('user_id', userId)
     .maybeSingle();
   const textConfidence = Number(existing?.text_confidence ?? 0);
-  const merged = { ...(existing ?? {}), ...averaged, audio_confidence: audioConfidence };
+  const narrativeFromCorpus =
+    userCorpus.length > 0
+      ? narrativeConceptualRatioFromCorpus(userCorpus)
+      : clamp01(Number(existing?.narrative_conceptual_score ?? 0.5));
+  const merged = {
+    ...(existing ?? {}),
+    ...averaged,
+    audio_confidence: audioConfidence,
+    narrative_conceptual_score: narrativeFromCorpus,
+  };
   const styleVector = buildStyleVector(merged);
   const overallConfidence = (textConfidence * 0.5) + (audioConfidence * 0.5);
 
+  const styleLabelFinalize = styleLabelColumnsRespectingTextPipeline(
+    existing,
+    merged,
+    styleLabelTranscriptOpts,
+    audioConfidence,
+  );
+  console.log(
+    `[analyze-interview-audio] finalize nc_from_transcript=${narrativeFromCorpus} corpus_chars=${userCorpus.length} user_id=${userId} attempt_id=${attemptId}`,
+  );
   const { error: finalizeUpsertErr } = await admin.from('communication_style_profiles').upsert(
     {
       user_id: userId,
       source_attempt_id: attemptId,
+      narrative_conceptual_score: narrativeFromCorpus,
       ...averaged,
       audio_confidence: audioConfidence,
       overall_confidence: overallConfidence,
       style_vector: `[${styleVector.map((n) => Number.isFinite(n) ? n.toFixed(6) : '0.500000').join(',')}]`,
       processed_at: new Date().toISOString(),
       updated_at: new Date().toISOString(),
-      ...styleLabelsColumnsFromRow(merged),
+      ...styleLabelFinalize,
     },
     { onConflict: 'user_id' },
   );
@@ -399,7 +557,34 @@ async function finalizeSession(body: Body, admin: ReturnType<typeof createClient
     );
     throw new Error(finalizeUpsertErr.message);
   }
-  console.log(`[analyze-interview-audio] communication_style_profiles upsert OK user_id=${userId} attempt_id=${attemptId}`);
+  const mmSentAudio = countMatchmakerSummaryTemplateSentences(styleLabelFinalize.matchmaker_summary);
+  console.log(
+    `[analyze-interview-audio] communication_style_profiles upsert OK user_id=${userId} attempt_id=${attemptId}; matchmaker_summary sentences=${mmSentAudio} len=${styleLabelFinalize.matchmaker_summary.length} preview=${JSON.stringify(styleLabelFinalize.matchmaker_summary.slice(0, 100))}`,
+  );
+  const matchmakerFogRunonFinalize = styleLabelFinalize.matchmaker_summary.includes('fog Forced');
+  const finalizeNcLex =
+    userCorpus.length > 0
+      ? (() => {
+          const normF = normalizeInterviewStyleCorpus(userCorpus);
+          return {
+            story: storyMarkerCount(normF),
+            concept: conceptualMarkerCount(normF),
+            strongHits: strongConceptualMarkerCount(normF),
+            strongFamilies: strongConceptualPatternFamilyCount(normF),
+          };
+        })()
+      : {};
+  console.log(
+    '[analyze-interview-audio] finalize nc_lexicon',
+    JSON.stringify({
+      hypothesisId: 'H_finalize',
+      attempt_id: attemptId,
+      user_id: userId,
+      ...finalizeNcLex,
+      nc: narrativeFromCorpus,
+      matchmaker_fog_runon: matchmakerFogRunonFinalize,
+    }),
+  );
 
   await logStyle(admin, userId, 'audio_session_finalized', 'success', null, {
     turns_processed: turns.length,
@@ -407,9 +592,19 @@ async function finalizeSession(body: Body, admin: ReturnType<typeof createClient
     audio_confidence: audioConfidence,
     ...averaged,
   });
-  return new Response(JSON.stringify({ ok: true, audio_confidence: audioConfidence }), {
-    status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-  });
+  return new Response(
+    JSON.stringify({
+      ok: true,
+      audio_confidence: audioConfidence,
+      narrative_conceptual_score: narrativeFromCorpus,
+      matchmaker_fog_runon: matchmakerFogRunonFinalize,
+      nc_lexicon_debug: finalizeNcLex,
+    }),
+    {
+      status: 200,
+      headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+    },
+  );
 }
 
 Deno.serve(async (req) => {

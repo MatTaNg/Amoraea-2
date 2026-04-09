@@ -4,22 +4,28 @@
  */
 
 import { INTERVIEW_MARKER_IDS, type InterviewMarkerId } from '@features/aria/interviewMarkers';
+import { combinedContemptFromScenarioPillarScores } from '@features/aria/aggregateMarkerScoresFromSlices';
 
 export const CONSTRUCT_IDS = [...INTERVIEW_MARKER_IDS] as InterviewMarkerId[];
 export const CONSTRUCT_NAMES = CONSTRUCT_IDS;
 
 export type ScenarioScoresMap = Record<number, { pillarScores: Record<string, number> } | undefined>;
 
+type ScenarioPillarSnapshot = Record<string, number | null | undefined> | undefined;
+
 export function calculateScoreConsistency(
-  s1: Record<string, number> | undefined,
-  s2: Record<string, number> | undefined,
-  s3: Record<string, number> | undefined
+  s1: ScenarioPillarSnapshot,
+  s2: ScenarioPillarSnapshot,
+  s3: ScenarioPillarSnapshot
 ): Record<string, { s1: number | null; s2: number | null; s3: number | null; mean: number; std_dev: number }> {
   const result: Record<string, { s1: number | null; s2: number | null; s3: number | null; mean: number; std_dev: number }> = {};
   for (const name of CONSTRUCT_NAMES) {
-    const v1 = s1?.[name] ?? null;
-    const v2 = s2?.[name] ?? null;
-    const v3 = s3?.[name] ?? null;
+    const v1 =
+      name === 'contempt' ? combinedContemptFromScenarioPillarScores(s1 ?? null) : (s1?.[name] ?? null);
+    const v2 =
+      name === 'contempt' ? combinedContemptFromScenarioPillarScores(s2 ?? null) : (s2?.[name] ?? null);
+    const v3 =
+      name === 'contempt' ? combinedContemptFromScenarioPillarScores(s3 ?? null) : (s3?.[name] ?? null);
     const vals = [v1, v2, v3].filter((v): v is number => v !== null && v !== undefined);
     const mean = vals.length ? vals.reduce((a, b) => a + b, 0) / vals.length : 0;
     const variance = vals.length ? vals.reduce((a, b) => a + Math.pow(b - mean, 2), 0) / vals.length : 0;
@@ -109,23 +115,62 @@ export function analyzeLanguageMarkers(
     'probably', "i don't know", 'i suppose', 'like,',
   ];
   const accountabilityPhrases = [
-    'my fault', 'i should have', 'i was wrong', 'i messed up',
-    'i take responsibility', 'i could have', "that's on me",
-    'i was partly protecting myself',
+    "i'd own",
+    "i'll own",
+    'i own up',
+    'i own it',
+    'i was wrong',
+    'i am wrong',
+    "i've been wrong",
+    'my fault',
+    'my mistake',
+    'my bad',
+    'i should have',
+    "i should've",
+    'i could have',
+    "i could've",
+    'i messed up',
+    'i screwed up',
+    'i blew it',
+    "that's on me",
+    'this is on me',
+    'i dropped the ball',
+    'i let them down',
+    'i let him down',
+    'i let her down',
+    'i let you down',
+    'i overreacted',
+    'i was unfair',
+    "i wasn't fair",
     "i hadn't been paying attention",
     'i missed what you actually needed',
-    'i can see i contributed',
-    'i contributed',
     'i cut them off without saying why',
     'i cut her off without saying why',
     'i cut him off without saying why',
   ];
   const accountabilityRegexes = [
-    /\bi was partly (protecting|defending) myself\b/i,
+    /\bi\s+would\s+own\b/i,
+    /\bi\s+own\s+that\b/i,
+    /\b(?:that|this)\s+was\s+my\s+fault\b/i,
+    /\bi\s+(?:take|taking|took)\s+(?:full\s+)?responsibility\b/i,
+    /\bi\s+accept\s+(?:full\s+)?responsibility\b/i,
+    /\bi\s+accept\s+that\s+i\b/i,
+    /\bi\s+acknowledge\s+that\s+i\b/i,
+    /\bi\s+admit\s+(?:that\s+)?i\b/i,
+    /\bi\s+was\s+partly\s+(?:to\s+blame|at\s+fault|responsible)\b/i,
+    /\bi\s+had\s+a\s+hand\s+in\b/i,
+    /\bi\s+had\s+it\s+wrong\b/i,
+    /\bi\s+missed\s+(?:what|how)\b/i,
+    /\bi\s+missed\s+it\b/i,
+    /\bi\s+missed\s+that\s+(?:you|they|he|she|we)\b/i,
+    /\bi\s+missed\s+the\s+(?:cue|signal|point|mark)\b/i,
+    /\bi\s+missed\s+the\s+fact\s+that\b/i,
+    /\bi\s+failed\s+(?:to|him|her|them)\b/i,
+    /\bi\s+fell\s+short\b/i,
+    /\bi\s+was\s+partly (protecting|defending) myself\b/i,
     /\bi (had not|hadn't|was not|wasn't) (really )?(paying attention|showing up)\b/i,
     /\bi missed (what|that|the fact that) (you|they|he|she) (needed|were asking|was asking)\b/i,
-    /\bi can see (that )?i contributed\b/i,
-    /\bi contributed (to|here|there|in this)\b/i,
+    /\bi contributed(?:\s+(?:to|here|there|in this))?\b/i,
     /\bi cut (them|her|him) off without (saying|explaining) why\b/i,
     /\bi (withdrew|shut down|pulled away|avoided)\b/i,
     /\bmy role in (this|it|the conflict|the breakdown)\b/i,
@@ -203,10 +248,18 @@ export function analyzeLanguageMarkers(
 
   const countPhrasesInText = (text: string, phrases: string[]) =>
     phrases.reduce((acc, p) => acc + (text.split(p).length - 1), 0);
-  const countRegexesInText = (text: string, patterns: RegExp[]) =>
-    patterns.reduce((acc, re) => acc + (re.test(text) ? 1 : 0), 0);
-  const accountabilityCountForText = (text: string) =>
-    countPhrasesInText(text, accountabilityPhrases) + countRegexesInText(text, accountabilityRegexes);
+  /** Count every match (same as phrase split counting), not one hit per pattern. */
+  const countRegexMatchesInText = (text: string, patterns: readonly RegExp[]) =>
+    patterns.reduce((acc, re) => {
+      const flags = re.flags.includes('g') ? re.flags : `${re.flags}g`;
+      const globalRe = new RegExp(re.source, flags);
+      const matches = text.match(globalRe);
+      return acc + (matches?.length ?? 0);
+    }, 0);
+  const accountabilityCountForText = (text: string) => {
+    const t = text.toLowerCase().replace(/\u2019/g, "'");
+    return countPhrasesInText(t, accountabilityPhrases) + countRegexMatchesInText(t, accountabilityRegexes);
+  };
 
   // Distinct emotion lexicon hits across all user turns (full interview), not per-scenario slices.
   const emotionalVocabCount = [...new Set(emotionWords.filter((w) => fullText.includes(w)))].length;

@@ -1,4 +1,4 @@
-import React, { useEffect, useRef } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import {
   View,
   Text,
@@ -8,6 +8,8 @@ import {
   Platform,
   Animated,
   Linking,
+  Modal,
+  ScrollView,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { FlameOrb, type FlameState } from './FlameOrb';
@@ -35,8 +37,12 @@ export interface ActiveScenario {
 
 interface UserInterviewLayoutProps {
   flameState: FlameState;
-  activeScenario: ActiveScenario | null;
-  interviewerText: string;
+  /** Press-and-hold scenario reference: only enabled when parent sets true (scenario fully delivered, not during intro/transition). */
+  showScenarioReferenceEnabled: boolean;
+  /** Scenario vignette text committed after delivery (modal body). */
+  referenceCardScenario: ActiveScenario | null;
+  /** Last interrogative sentence for this scenario (reflection stripped upstream in AriaScreen); null hides separator and question. */
+  referenceCardPrompt: string | null;
   onPressStart: () => void;
   onPressEnd: () => void;
   voiceState: 'idle' | 'listening' | 'processing' | 'speaking' | 'recording';
@@ -56,8 +62,6 @@ interface UserInterviewLayoutProps {
   onMicPress?: () => void;
   /** Override mic label when micToggleMode is true (e.g. "Tap to speak" / "Tap to stop") */
   micLabelOverride?: string;
-  /** When true, the current interviewer line is an error message — style it distinctly (red tint) */
-  interviewerLineIsError?: boolean;
 }
 
 const GOOGLE_FONTS_URL =
@@ -65,8 +69,9 @@ const GOOGLE_FONTS_URL =
 
 export const UserInterviewLayout: React.FC<UserInterviewLayoutProps> = ({
   flameState,
-  activeScenario,
-  interviewerText,
+  showScenarioReferenceEnabled,
+  referenceCardScenario,
+  referenceCardPrompt,
   onPressStart,
   onPressEnd,
   voiceState,
@@ -80,8 +85,8 @@ export const UserInterviewLayout: React.FC<UserInterviewLayoutProps> = ({
   micToggleMode = false,
   onMicPress,
   micLabelOverride,
-  interviewerLineIsError = false,
 }) => {
+  const [refCardOpen, setRefCardOpen] = useState(false);
   const rippleAnim = useRef(new Animated.Value(0)).current;
 
   useEffect(() => {
@@ -192,8 +197,10 @@ export const UserInterviewLayout: React.FC<UserInterviewLayoutProps> = ({
 
       {/* Main content */}
       <View style={styles.main}>
-        {/* Ambient glow behind flame */}
-        <View style={styles.ambientGlow} pointerEvents="none" />
+        {/* Soft blur behind flame — web only; native shadow reads as a misaligned circle behind the orb */}
+        {Platform.OS === 'web' ? (
+          <View style={styles.ambientGlow} pointerEvents="none" />
+        ) : null}
 
         {/* FlameOrb — existing component, no changes */}
         <View style={styles.flameSection}>
@@ -202,33 +209,16 @@ export const UserInterviewLayout: React.FC<UserInterviewLayoutProps> = ({
 
         {/* Bottom section */}
         <View style={styles.bottomSection}>
-          {activeScenario && (
-            <View style={styles.scenarioCard}>
-              <Text style={styles.scenarioCardLabel}>◆ {activeScenario.label}</Text>
-              <Text style={styles.scenarioCardText} numberOfLines={6} ellipsizeMode="tail">
-                {activeScenario.text}
-              </Text>
-            </View>
-          )}
-
           {isWaiting ? (
             <View style={styles.waitingRow}>
               <Text style={styles.waitingDot}>◆</Text>
               <Text style={styles.waitingText}>Amoraea is thinking...</Text>
             </View>
-          ) : interviewerText ? (
-            <Text
-              style={[styles.interviewerQuote, interviewerLineIsError && styles.interviewerQuoteError]}
-              numberOfLines={4}
-              ellipsizeMode="tail"
-            >
-              "{interviewerText}"
-            </Text>
           ) : null}
 
           {ttsFallbackActive ? (
             <Text style={styles.ttsFallbackNotice}>
-              ◆ Audio unavailable — read above, then speak when ready
+              ◆ Audio unavailable — hold Show scenario to read the question, then speak when ready
             </Text>
           ) : null}
 
@@ -266,7 +256,7 @@ export const UserInterviewLayout: React.FC<UserInterviewLayoutProps> = ({
             ) : (
               <>
                 <View style={styles.micButtonWrapper}>
-                  {isListeningOrRecording && (
+                  {Platform.OS === 'web' && isListeningOrRecording && (
                     <Animated.View
                       style={[
                         styles.rippleRing,
@@ -315,6 +305,65 @@ export const UserInterviewLayout: React.FC<UserInterviewLayoutProps> = ({
               </>
             )}
           </View>
+
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel="Show scenario"
+            accessibilityHint="Press and hold to view the current scenario reference"
+            accessibilityState={{ disabled: !showScenarioReferenceEnabled }}
+            disabled={!showScenarioReferenceEnabled}
+            delayLongPress={450}
+            onLongPress={() => {
+              if (!showScenarioReferenceEnabled || !referenceCardScenario) return;
+              setRefCardOpen(true);
+            }}
+            onPress={() => {
+              /* tap intentionally does nothing */
+            }}
+            onPressOut={() => {
+              setRefCardOpen(false);
+            }}
+            style={({ pressed }) => [
+              styles.showScenarioButton,
+              !showScenarioReferenceEnabled && styles.showScenarioButtonDisabled,
+              showScenarioReferenceEnabled && pressed && styles.showScenarioButtonPressed,
+            ]}
+          >
+            <Text
+              style={[
+                styles.showScenarioButtonLabel,
+                !showScenarioReferenceEnabled && styles.showScenarioButtonLabelDisabled,
+              ]}
+            >
+              SHOW SCENARIO
+            </Text>
+          </Pressable>
+
+          <Modal
+            visible={refCardOpen && !!referenceCardScenario}
+            transparent
+            animationType="fade"
+            onRequestClose={() => setRefCardOpen(false)}
+          >
+            <View style={styles.refModalOverlay}>
+              <View style={styles.refModalCard}>
+                <Text style={styles.refModalLabel}>◆ {referenceCardScenario?.label ?? ''}</Text>
+                <ScrollView
+                  style={styles.refModalScroll}
+                  contentContainerStyle={styles.refModalScrollContent}
+                  showsVerticalScrollIndicator={false}
+                >
+                  <Text style={styles.refModalScenarioText}>{referenceCardScenario?.text ?? ''}</Text>
+                </ScrollView>
+                {referenceCardPrompt ? (
+                  <>
+                    <View style={styles.refModalSeparator} />
+                    <Text style={styles.refModalPromptText}>{referenceCardPrompt}</Text>
+                  </>
+                ) : null}
+              </View>
+            </View>
+          </Modal>
         </View>
       </View>
 
@@ -445,54 +494,92 @@ const styles = StyleSheet.create({
     gap: 16,
     zIndex: 1,
   },
-  scenarioCard: {
-    width: '100%',
-    paddingVertical: 12,
-    paddingHorizontal: 16,
-    backgroundColor: Platform.OS === 'web' ? 'rgba(13, 17, 32, 0.9)' : SURFACE,
+  showScenarioButton: {
+    paddingVertical: 10,
+    paddingHorizontal: 20,
+    borderRadius: 8,
     borderWidth: 1,
-    borderColor: 'rgba(82, 142, 220, 0.1)',
-    borderRadius: 12,
-    ...(Platform.OS === 'web' ? { backdropFilter: 'blur(8px)' } : {}),
+    borderColor: 'rgba(82, 142, 220, 0.35)',
+    backgroundColor: 'rgba(30, 111, 217, 0.08)',
+    minWidth: 200,
+    alignItems: 'center',
   },
-  scenarioCardLabel: {
+  showScenarioButtonPressed: {
+    backgroundColor: 'rgba(30, 111, 217, 0.18)',
+  },
+  showScenarioButtonDisabled: {
+    opacity: 0.38,
+    borderColor: 'rgba(82, 142, 220, 0.12)',
+    backgroundColor: 'rgba(13, 17, 32, 0.5)',
+  },
+  showScenarioButtonLabel: {
+    fontFamily: FONT_UI,
+    fontSize: 10,
+    fontWeight: '400',
+    letterSpacing: 2.4,
+    textTransform: 'uppercase',
+    color: FLAME_MID,
+  },
+  showScenarioButtonLabelDisabled: {
+    color: TEXT_DIM,
+  },
+  refModalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0, 0, 0, 0.78)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    paddingHorizontal: 24,
+    paddingVertical: 40,
+  },
+  refModalCard: {
+    width: '100%',
+    maxWidth: 420,
+    maxHeight: '78%',
+    backgroundColor: SURFACE,
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: BORDER,
+    paddingVertical: 20,
+    paddingHorizontal: 20,
+    ...(Platform.OS === 'web'
+      ? { boxShadow: '0 24px 80px rgba(0,0,0,0.55)' }
+      : { shadowColor: '#000', shadowOffset: { width: 0, height: 12 }, shadowOpacity: 0.45, shadowRadius: 24, elevation: 16 }),
+  },
+  refModalLabel: {
     fontFamily: FONT_UI,
     fontSize: 9,
     fontWeight: '300',
     letterSpacing: 2,
     textTransform: 'uppercase',
     color: TEXT_DIM,
-    marginBottom: 6,
+    marginBottom: 10,
   },
-  scenarioCardText: {
+  refModalScroll: {
+    maxHeight: 280,
+  },
+  refModalScrollContent: {
+    paddingBottom: 4,
+  },
+  refModalScenarioText: {
     fontFamily: FONT_DISPLAY,
-    fontSize: 14,
+    fontSize: 15,
     fontWeight: '300',
-    lineHeight: 22,
+    lineHeight: 24,
     color: TEXT_SECONDARY,
     fontStyle: 'italic',
   },
-  interviewerQuote: {
-    textAlign: 'center',
-    maxWidth: 480,
-    paddingHorizontal: 8,
-    fontFamily: FONT_DISPLAY,
-    fontSize: 19,
-    fontWeight: '300',
-    lineHeight: 32,
-    color: FLAME_BRIGHT,
-    fontStyle: 'italic',
-    letterSpacing: 0.4,
-    ...(Platform.OS === 'web'
-      ? { textShadow: '0 0 40px rgba(30,111,217,0.3)' }
-      : { textShadowColor: 'rgba(30,111,217,0.3)', textShadowOffset: { width: 0, height: 0 }, textShadowRadius: 40 }),
+  refModalSeparator: {
+    height: 1,
+    backgroundColor: 'rgba(82, 142, 220, 0.2)',
+    marginVertical: 16,
+    width: '100%',
   },
-  interviewerQuoteError: {
-    color: '#E87A7A',
-    fontStyle: 'normal',
-    ...(Platform.OS === 'web'
-      ? { textShadow: 'none' }
-      : { textShadowColor: 'transparent', textShadowOffset: { width: 0, height: 0 }, textShadowRadius: 0 }),
+  refModalPromptText: {
+    fontFamily: FONT_DISPLAY,
+    fontSize: 16,
+    fontWeight: '300',
+    lineHeight: 26,
+    color: FLAME_BRIGHT,
   },
   ttsFallbackNotice: {
     fontFamily: FONT_UI,

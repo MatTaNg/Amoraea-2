@@ -59,10 +59,12 @@ const VIEWBOX_W = FLAME_VIEWBOX_W;
 const VIEWBOX_H = FLAME_VIEWBOX_H;
 const ID = 'amoraea-flame';
 
-export const FlameOrb: React.FC<{ state: FlameState; size?: number }> = ({
-  state = 'idle',
-  size = 200,
-}) => {
+export const FlameOrb: React.FC<{
+  state: FlameState;
+  size?: number;
+  /** Web: omit the circular blurred glow + heavy drop-shadow (e.g. login). Native: unchanged. */
+  minimalGlow?: boolean;
+}> = ({ state = 'idle', size = 200, minimalGlow = false }) => {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const config = CONFIG[state] ?? CONFIG.idle;
 
@@ -85,6 +87,10 @@ export const FlameOrb: React.FC<{ state: FlameState; size?: number }> = ({
     return <FlameOrbNative state={nativeState} size={size} />;
   }
 
+  const svgDropShadow = minimalGlow
+    ? 'drop-shadow(0 0 10px rgba(30,111,217,0.35))'
+    : 'drop-shadow(0 0 22px rgba(30,111,217,0.8))';
+
   return (
     <div
       ref={containerRef}
@@ -98,23 +104,25 @@ export const FlameOrb: React.FC<{ state: FlameState; size?: number }> = ({
         justifyContent: 'center',
       }}
     >
-      <div
-        style={{
-          position: 'absolute',
-          bottom: 0,
-          left: '50%',
-          transform: 'translateX(-50%)',
-          width: 240,
-          height: 240,
-          borderRadius: '50%',
-          background:
-            'radial-gradient(ellipse, rgba(30,111,217,0.5) 0%, rgba(10,58,140,0.25) 50%, transparent 70%)',
-          filter: `blur(${config.glowSize})`,
-          opacity: config.glowOpacity,
-          transition: 'opacity 0.4s ease, filter 0.4s ease',
-          pointerEvents: 'none',
-        }}
-      />
+      {!minimalGlow && (
+        <div
+          style={{
+            position: 'absolute',
+            bottom: 0,
+            left: '50%',
+            transform: 'translateX(-50%)',
+            width: 240,
+            height: 240,
+            borderRadius: '50%',
+            background:
+              'radial-gradient(ellipse, rgba(30,111,217,0.5) 0%, rgba(10,58,140,0.25) 50%, transparent 70%)',
+            filter: `blur(${config.glowSize})`,
+            opacity: config.glowOpacity,
+            transition: 'opacity 0.4s ease, filter 0.4s ease',
+            pointerEvents: 'none',
+          }}
+        />
+      )}
       <svg
         viewBox={`0 0 ${VIEWBOX_W} ${VIEWBOX_H}`}
         width={W}
@@ -126,7 +134,7 @@ export const FlameOrb: React.FC<{ state: FlameState; size?: number }> = ({
           overflow: 'visible',
           position: 'relative',
           zIndex: 1,
-          filter: 'drop-shadow(0 0 22px rgba(30,111,217,0.8))',
+          filter: svgDropShadow,
         }}
       >
         <defs>

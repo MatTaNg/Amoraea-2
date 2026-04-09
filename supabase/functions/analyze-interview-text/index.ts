@@ -1,8 +1,33 @@
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
-import { styleProfileFromDbRow, translateStyleProfile } from '../_shared/styleTranslations.ts';
+import {
+  conceptualMarkerCount,
+  narrativeConceptualRatioFromCorpus,
+  normalizeInterviewStyleCorpus,
+  storyMarkerCount,
+  strongConceptualMarkerCount,
+  strongConceptualPatternFamilyCount,
+} from '../_shared/interviewStyleMarkers.ts';
+// certainty_ambiguity_score: redeploy this function after edits to _shared/certaintyAmbiguityText.ts
+import {
+  certaintyAmbiguityFromUserCorpus,
+  certaintyAmbiguityQualifierAndClosureCounts,
+} from '../_shared/certaintyAmbiguityText.ts';
+import {
+  countMatchmakerSummaryTemplateSentences,
+  styleProfileFromDbRow,
+  translateStyleProfile,
+  type TranslateStyleProfileOptions,
+} from '../_shared/styleTranslations.ts';
+import {
+  findHandoffAssistantIndex,
+  parseInterviewTranscriptMessages,
+  splitUserCorpusScenarioVsPersonal,
+  userTurnStringsScenarioMainAnalysis,
+  userTurnStringsScenarioSegment,
+} from '../_shared/splitInterviewUserCorpus.ts';
 
-function styleLabelsColumnsFromRow(row: Record<string, unknown>) {
-  const t = translateStyleProfile(styleProfileFromDbRow(row));
+function styleLabelsColumnsFromRow(row: Record<string, unknown>, opts?: TranslateStyleProfileOptions) {
+  const t = translateStyleProfile(styleProfileFromDbRow(row), opts);
   return {
     style_labels_primary: t.primary,
     style_labels_secondary: t.secondary,
@@ -133,18 +158,6 @@ const ANALYTICAL_WORDS = [
   'notably', 'effectively', 'fundamentally', 'essentially', 'categorically',
 ];
 
-const QUALIFIER_WORDS = [
-  'maybe', 'perhaps', 'possibly', 'i think', 'i guess',
-  'sort of', 'kind of', 'not sure', 'might', 'could be', 'it depends',
-  'both things', 'at the same time', 'complicated', 'nuanced', 'complex',
-];
-
-const CLOSURE_WORDS = [
-  'clearly', 'obviously', 'definitely', 'certainly',
-  'absolutely', 'without doubt', 'the problem is', 'the issue is',
-  'they need to', 'should have', 'wrong', 'right', 'always', 'never',
-];
-
 function countPhraseHits(text: string, phrases: string[]): number {
   return phrases.reduce((acc, phrase) => acc + (text.split(phrase).length - 1), 0);
 }
@@ -163,36 +176,6 @@ function normalizeRate(value: number, low: number, high: number): number {
   if (!Number.isFinite(value)) return 0.5;
   if (high <= low) return 0.5;
   return clamp01((value - low) / (high - low));
-}
-
-function storyMarkerCount(text: string): number {
-  const markers = [
-    /\bone time\b/g,
-    /\bi remember\b/g,
-    /\bthere was a moment\b/g,
-    /\bwhat happened was\b/g,
-    /\blast year\b/g,
-    /\bthat night\b/g,
-    /\blast (week|month)\b/g,
-    /\b(yesterday|earlier)\b/g,
-    /\b(then|after that|when that happened)\b/g,
-  ];
-  return markers.reduce((acc, re) => acc + (text.match(re)?.length ?? 0), 0);
-}
-
-function conceptualMarkerCount(text: string): number {
-  const markers = [
-    /\bin general\b/g,
-    /\bpeople tend to\b/g,
-    /\brelationships often\b/g,
-    /\btypically\b/g,
-    /\busually\b/g,
-    /\bthe thing about\b/g,
-    /\bwhat matters is\b/g,
-    /\bthe key is\b/g,
-    /\bin principle\b/g,
-  ];
-  return markers.reduce((acc, re) => acc + (text.match(re)?.length ?? 0), 0);
 }
 
 function buildStyleVector(row: Record<string, unknown>): number[] {
@@ -323,12 +306,35 @@ Deno.serve(async (req) => {
       });
     }
 
-    const transcript = Array.isArray(attempt.transcript) ? attempt.transcript : [];
+    const transcript = parseInterviewTranscriptMessages(attempt.transcript);
+    const handoffMeta = findHandoffAssistantIndex(transcript);
+    const { scenarioCorpus, personalCorpus } = splitUserCorpusScenarioVsPersonal(transcript);
+    const scenarioUserTurns = userTurnStringsScenarioSegment(transcript);
+    const scenarioMainAnalysisUserTurns = userTurnStringsScenarioMainAnalysis(transcript);
     const userTurns = transcript
-      .filter((m: Record<string, unknown>) => m?.role === 'user' && typeof m?.content === 'string')
+      .filter(
+        (m: Record<string, unknown>) =>
+          String(m?.role ?? '').toLowerCase() === 'user' && typeof m?.content === 'string',
+      )
       .map((m: Record<string, unknown>) => String(m.content).trim())
       .filter(Boolean);
     const corpus = userTurns.join(' ').toLowerCase();
+    const normNc = normalizeInterviewStyleCorpus(corpus);
+    const ncLexiconDebug = {
+      story: storyMarkerCount(normNc),
+      concept: conceptualMarkerCount(normNc),
+      strongHits: strongConceptualMarkerCount(normNc),
+      strongFamilies: strongConceptualPatternFamilyCount(normNc),
+    };
+    const styleLabelTranscriptOpts: TranslateStyleProfileOptions = {
+      userCorpus: corpus,
+      userTurns,
+      scenarioUserCorpus: scenarioCorpus.length > 0 ? scenarioCorpus : undefined,
+      scenarioUserTurns: scenarioUserTurns.length > 0 ? scenarioUserTurns : undefined,
+      scenarioMainAnalysisUserTurns:
+        scenarioMainAnalysisUserTurns.length > 0 ? scenarioMainAnalysisUserTurns : undefined,
+      personalUserCorpus: personalCorpus.length > 0 ? personalCorpus : undefined,
+    };
     const words = corpus.split(/\s+/).filter(Boolean);
     const tokens = words.map((w) => lexiconToken(w)).filter(Boolean);
     const totalWords = tokens.length || 1;
@@ -347,8 +353,13 @@ Deno.serve(async (req) => {
     const emotionalWords =
       tokens.filter((w) => EMOTIONAL_WORDS.includes(w)).length + emotionalPhraseHits;
     const analyticalWords = tokens.filter((w) => ANALYTICAL_WORDS.includes(w)).length;
-    const qualifierCount = countPhraseHits(corpus, QUALIFIER_WORDS);
-    const closureCount = countPhraseHits(corpus, CLOSURE_WORDS);
+    const { qualifierCount, closureCount } = certaintyAmbiguityQualifierAndClosureCounts(corpus);
+
+    // Text axis semantics (keep aligned with styleTranslations describe* helpers):
+    // emotional_analytical_score: emotional / (emotional + analytical tokens) — high = feeling language.
+    // narrative_conceptual_score: narrativeConceptualRatioFromCorpus — high = episodic/personal-story lexicon.
+    // certainty_ambiguity_score: see certaintyAmbiguityText.ts — **higher = more hedging / comfort with ambiguity** (NOT "certainty magnitude"); smoothed ratio of qualifier vs closure phrase hits.
+    // relational_individual_score: 1 − relational/(relational + I/me) — high = individual (I/me) vs we/us.
 
     const relationalMarkers = countPhraseHits(corpus, [
       'we', 'us', 'together', 'both', 'each other', 'between them',
@@ -360,14 +371,19 @@ Deno.serve(async (req) => {
       tokens.filter((w) => ['i', 'me', 'my', 'myself', 'we', 'us', 'they', 'them'].includes(w)).length || 1;
     const firstPersonSingular = tokens.filter((w) => ['i', 'me', 'my', 'myself'].includes(w)).length;
 
-    const storyMarkers = storyMarkerCount(corpus);
-    const conceptMarkers = conceptualMarkerCount(corpus);
-
     const relationalShare = clamp01(safeRatio(relationalMarkers, relationalMarkers + individualMarkers, 0.5));
+    const narrativeConceptualScore = narrativeConceptualRatioFromCorpus(corpus);
     const styleFeatures = {
       emotional_analytical_score: clamp01(safeRatio(emotionalWords, emotionalWords + analyticalWords, 0.5)),
-      narrative_conceptual_score: clamp01(safeRatio(storyMarkers, storyMarkers + conceptMarkers, 0.5)),
-      certainty_ambiguity_score: clamp01(safeRatio(qualifierCount, qualifierCount + closureCount, 0.5)),
+      /**
+       * narrative_conceptual_score — DIRECTION (must match DB + styleTranslations):
+       * `storyHits / (storyHits + conceptHits)` from `narrativeConceptualRatioFromCorpus`.
+       * **0 = conceptual pole**, **1 = narrative pole** (continuous [0,1]).
+       * Higher → "storyteller" label; lower → "conceptual thinker". NOT (1 − ratio).
+       * See `supabase/functions/_shared/interviewStyleMarkers.ts`.
+       */
+      narrative_conceptual_score: narrativeConceptualScore,
+      certainty_ambiguity_score: certaintyAmbiguityFromUserCorpus(corpus),
       // Store individual-orientation: 0 = strongly relational (we-language), 1 = strongly individual (I/me).
       relational_individual_score: clamp01(1 - relationalShare),
       emotional_vocab_density: (emotionalWords / totalWords) * 100,
@@ -406,6 +422,7 @@ Deno.serve(async (req) => {
     const styleVector = buildStyleVector(merged);
 
     const rowForLabels = { ...merged, ...styleFeatures, text_confidence: textConfidence };
+    const styleLabelBlock = styleLabelsColumnsFromRow(rowForLabels, styleLabelTranscriptOpts);
     const upsertRow = {
       user_id: userId,
       source_attempt_id: attempt.id,
@@ -415,7 +432,7 @@ Deno.serve(async (req) => {
       style_vector: `[${styleVector.map((n) => Number.isFinite(n) ? n.toFixed(6) : '0.500000').join(',')}]`,
       processed_at: merged.processed_at,
       updated_at: merged.updated_at,
-      ...styleLabelsColumnsFromRow(rowForLabels),
+      ...styleLabelBlock,
     };
 
     const { error: upsertErr } = await admin
@@ -428,8 +445,21 @@ Deno.serve(async (req) => {
       );
       throw new Error(upsertErr.message);
     }
+    const mmSent = countMatchmakerSummaryTemplateSentences(styleLabelBlock.matchmaker_summary);
+    const matchmakerFogRunon = styleLabelBlock.matchmaker_summary.includes('fog Forced');
     console.log(
-      `[analyze-interview-text] communication_style_profiles upsert OK user_id=${userId} attempt_id=${attempt.id}`
+      `[analyze-interview-text] communication_style_profiles upsert OK user_id=${userId} attempt_id=${attempt.id}; matchmaker_summary sentences=${mmSent} len=${styleLabelBlock.matchmaker_summary.length} preview=${JSON.stringify(styleLabelBlock.matchmaker_summary.slice(0, 100))}`,
+    );
+    console.log(
+      '[analyze-interview-text] nc_lexicon',
+      JSON.stringify({
+        hypothesisId: 'H_nc_families',
+        attempt_id: attempt.id,
+        user_id: userId,
+        ...ncLexiconDebug,
+        nc: narrativeConceptualScore,
+        matchmaker_fog_runon: matchmakerFogRunon,
+      }),
     );
 
     await log('success', null, {
@@ -439,7 +469,25 @@ Deno.serve(async (req) => {
       ...styleFeatures,
     });
 
-    return new Response(JSON.stringify({ ok: true, user_id: userId, attempt_id: attempt.id, text_confidence: textConfidence }), {
+    const responsePayload = {
+      ok: true as const,
+      user_id: userId,
+      attempt_id: attempt.id,
+      text_confidence: textConfidence,
+      narrative_conceptual_score: styleFeatures.narrative_conceptual_score,
+      user_corpus_char_count: corpus.length,
+      user_turn_count: userTurns.length,
+      nc_lexicon_debug: ncLexiconDebug,
+      matchmaker_fog_runon: matchmakerFogRunon,
+      style_handoff: {
+        reason: handoffMeta.reason,
+        scenario_user_chars: scenarioCorpus.length,
+        personal_user_chars: personalCorpus.length,
+        transcript_messages: transcript.length,
+      },
+    };
+    console.log('[analyze-interview-text] response', JSON.stringify(responsePayload));
+    return new Response(JSON.stringify(responsePayload), {
       status: 200,
       headers: { ...corsHeaders, 'Content-Type': 'application/json' },
     });

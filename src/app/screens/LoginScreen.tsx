@@ -92,7 +92,8 @@ export const LoginScreen: React.FC<{ navigation: any; route?: { params?: { confi
         >
           <View style={styles.contentWrap}>
             {Platform.OS === 'web' && <View style={[StyleSheet.absoluteFill, authStyles.grainOverlay]} pointerEvents="none" />}
-            <View style={authStyles.ambientGlow} pointerEvents="none" />
+            {/* Web: soft page glow. Native: omit — bordered circle + shadow reads as a ring behind the flame. */}
+            {Platform.OS === 'web' && <View style={authStyles.ambientGlow} pointerEvents="none" />}
 
             <View style={[authStyles.inner, styles.innerCentered]}>
               <Text style={[authStyles.wordmark, styles.wordmarkTight]}>
@@ -101,7 +102,7 @@ export const LoginScreen: React.FC<{ navigation: any; route?: { params?: { confi
 
               <View style={styles.flameWrap}>
                 <View style={styles.flameScale}>
-                  <FlameOrb state="idle" />
+                  <FlameOrb state="idle" minimalGlow />
                 </View>
               </View>
 

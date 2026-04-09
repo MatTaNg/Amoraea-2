@@ -4,8 +4,6 @@ import * as FileSystem from 'expo-file-system';
 import { Audio } from 'expo-av';
 import * as Speech from 'expo-speech';
 import { logAndApplyPlaybackModeForTts } from './audioModeHelpers';
-import { AUDIO_ROUTE_DEBUG_BUILD, withAudioRouteDebugBuild } from './audioRouteDebugBuild';
-import { remoteLog } from '@utilities/remoteLog';
 import { supabase } from '@data/supabase/client';
 
 /**
@@ -159,9 +157,6 @@ const getApiKey = (): string => {
     (easConfig?.EXPO_PUBLIC_ELEVENLABS_API_KEY as string | undefined) ??
     '';
   const resolved = (fromProcess || fromConfig).trim();
-  // #region agent log
-  fetch('http://127.0.0.1:7789/ingest/668e0bd5-3283-4492-9f48-e33846c18218',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'062597'},body:JSON.stringify(withAudioRouteDebugBuild({sessionId:'062597',runId:'audio-route-debug-10',hypothesisId:'H-TTS-1',location:'elevenLabsTts.ts:getApiKey',message:'resolved elevenlabs key availability',data:{hasFromProcess:!!(fromProcess||'').trim(),hasFromConfig:!!(fromConfig||'').trim(),hasExpoConfigExtra:!!expoConfigExtra,hasLegacyManifestExtra:!!legacyManifestExtra,hasManifest2Extra:!!manifest2Extra,hasEasConfig:!!easConfig,resolved:!!resolved},timestamp:Date.now()}))}).catch(()=>{});
-  // #endregion
   return resolved;
 };
 
@@ -234,28 +229,7 @@ export async function speakWithElevenLabs(
   const voiceId = fromExtra?.elevenLabsVoiceId
     || (typeof process !== 'undefined' && process.env?.EXPO_PUBLIC_ELEVENLABS_VOICE_ID)
     || DEFAULT_VOICE_ID;
-  void remoteLog('[AUDIO_ROUTE] tts provider entry', {
-    runId: 'audio-route-debug-12',
-    platform: Platform.OS,
-    hasApiKey: !!apiKey,
-    hasProxyUrl: !!proxyUrl,
-    useProxy,
-    textLength: spokenText.length,
-  });
-  // #region agent log
-  fetch('http://127.0.0.1:7789/ingest/668e0bd5-3283-4492-9f48-e33846c18218',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'062597'},body:JSON.stringify(withAudioRouteDebugBuild({sessionId:'062597',runId:'audio-route-debug-1',hypothesisId:'H3',location:'elevenLabsTts.ts:speakWithElevenLabs:entry',message:'tts start',data:{platform:Platform.OS,textLength:spokenText.length,hasApiKey:!!apiKey,voiceId},timestamp:Date.now()}))}).catch(()=>{});
-  // #endregion
   if ((!apiKey && !useProxy) || !spokenText.trim()) {
-    // #region agent log
-    fetch('http://127.0.0.1:7789/ingest/668e0bd5-3283-4492-9f48-e33846c18218',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'062597'},body:JSON.stringify(withAudioRouteDebugBuild({sessionId:'062597',runId:'pre-fix',hypothesisId:'H4',location:'elevenLabsTts.ts:noKeyOrText',message:'TTS using expo-speech fallback (no key/proxy or empty text)',data:{platform:Platform.OS,useProxy,hasApiKey:!!apiKey},timestamp:Date.now()}))}).catch(()=>{});
-    // #endregion
-    void remoteLog('[AUDIO_ROUTE] tts fallback no_key_or_text', {
-      runId: 'audio-route-debug-12',
-      platform: Platform.OS,
-      hasApiKey: !!apiKey,
-      hasProxyUrl: !!proxyUrl,
-      textLength: spokenText.trim().length,
-    });
     if (!apiKey && !useProxy) {
       console.warn('ElevenLabs: No API key (EXPO_PUBLIC_ELEVENLABS_API_KEY or app config). Using fallback TTS — set the key for natural voice.');
     }
@@ -264,22 +238,8 @@ export async function speakWithElevenLabs(
   }
 
   if (Platform.OS === 'ios' && !iosUseElevenLabsMp3Playback()) {
-    void remoteLog('[TTS_IOS] branch ios_expo_speech_policy', {
-      hypothesisId: 'H3',
-      textLength: spokenText.trim().length,
-      iosElevenLabsMp3EnvSet: iosUseElevenLabsMp3Playback(),
-      debugBuild: AUDIO_ROUTE_DEBUG_BUILD,
-    });
     await speakFallback(spokenText, onFallback);
     return;
-  }
-
-  if (Platform.OS === 'ios' && iosUseElevenLabsMp3Playback()) {
-    void remoteLog('[TTS_IOS] branch ios_elevenlabs_mp3_env', {
-      hypothesisId: 'H4',
-      textLength: spokenText.trim().length,
-      debugBuild: AUDIO_ROUTE_DEBUG_BUILD,
-    });
   }
 
   try {
@@ -296,14 +256,6 @@ export async function speakWithElevenLabs(
       },
     };
     const proxyAuth = useProxy ? await buildSupabaseEdgeFunctionAuthHeaders() : {};
-    if (useProxy) {
-      void remoteLog('[AUDIO_ROUTE] tts proxy auth headers', {
-        runId: 'audio-route-debug-12',
-        platform: Platform.OS,
-        hasAuthorization: !!proxyAuth.Authorization,
-        hasApikey: !!proxyAuth.apikey,
-      });
-    }
     const res = await fetch(
       useProxy ? proxyUrl : `https://api.elevenlabs.io/v1/text-to-speech/${voiceId}/stream`,
       useProxy
@@ -335,12 +287,6 @@ export async function speakWithElevenLabs(
     if (!res.ok) {
       const errText = await res.text();
       console.warn('ElevenLabs TTS error:', res.status, errText);
-      void remoteLog('[AUDIO_ROUTE] tts fallback non_ok', {
-        runId: 'audio-route-debug-12',
-        platform: Platform.OS,
-        status: res.status,
-        source: useProxy ? 'proxy' : 'direct',
-      });
       await speakFallback(spokenText, onFallback);
       return;
     }
@@ -386,21 +332,11 @@ export async function speakWithElevenLabs(
     const fileUri = `${dir}tts_${Date.now()}.mp3`;
     await FileSystem.writeAsStringAsync(fileUri, base64, { encoding: FileSystem.EncodingType.Base64 });
     await logAndApplyPlaybackModeForTts('speakWithElevenLabs:nativeBeforeSoundCreate');
-    void remoteLog('[AUDIO_ROUTE] tts native before play', {
-      runId: 'audio-route-debug-12',
-      platform: Platform.OS,
-    });
-    // #region agent log
-    fetch('http://127.0.0.1:7789/ingest/668e0bd5-3283-4492-9f48-e33846c18218',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'062597'},body:JSON.stringify(withAudioRouteDebugBuild({sessionId:'062597',runId:'audio-route-debug-1',hypothesisId:'H1',location:'elevenLabsTts.ts:speakWithElevenLabs:beforePlayAsync',message:'native tts playback about to start',data:{platform:Platform.OS,fileUriSuffix:fileUri.slice(-24)},timestamp:Date.now()}))}).catch(()=>{});
-    // #endregion
     const { sound } = await Audio.Sound.createAsync(
       { uri: fileUri },
       { shouldPlay: false, volume: 1.0, isMuted: false } // shouldPlay: false, play manually below
     );
     activeNativeTtsSound = sound;
-    // #region agent log
-    fetch('http://127.0.0.1:7789/ingest/668e0bd5-3283-4492-9f48-e33846c18218',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'062597'},body:JSON.stringify(withAudioRouteDebugBuild({sessionId:'062597',runId:'pre-fix',hypothesisId:'H4',location:'elevenLabsTts.ts:nativeSoundPath',message:'using expo-av Sound for TTS',data:{platform:Platform.OS},timestamp:Date.now()}))}).catch(()=>{});
-    // #endregion
 
     try {
       await new Promise<void>((resolve, reject) => {
@@ -420,9 +356,6 @@ export async function speakWithElevenLabs(
       } catch {
         /* ignore */
       }
-      // #region agent log
-      fetch('http://127.0.0.1:7789/ingest/668e0bd5-3283-4492-9f48-e33846c18218',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'062597'},body:JSON.stringify(withAudioRouteDebugBuild({sessionId:'062597',runId:'post-fix-v21',hypothesisId:'H7',location:'elevenLabsTts.ts:nativeAfterUnload',message:'native tts finished and sound unloaded',data:{platform:Platform.OS,textLength:spokenText.length},timestamp:Date.now()}))}).catch(()=>{});
-      // #endregion
     }
     try {
       await FileSystem.deleteAsync(fileUri, { idempotent: true });
@@ -431,15 +364,6 @@ export async function speakWithElevenLabs(
     }
   } catch (err) {
     console.warn('ElevenLabs TTS failed, using fallback:', err);
-    void remoteLog('[AUDIO_ROUTE] tts fallback catch', {
-      runId: 'audio-route-debug-12',
-      platform: Platform.OS,
-      errorName: err instanceof Error ? err.name : 'unknown',
-      errorMessage: err instanceof Error ? err.message : String(err),
-    });
-    // #region agent log
-    fetch('http://127.0.0.1:7789/ingest/668e0bd5-3283-4492-9f48-e33846c18218',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'062597'},body:JSON.stringify(withAudioRouteDebugBuild({sessionId:'062597',runId:'audio-route-debug-1',hypothesisId:'H3',location:'elevenLabsTts.ts:speakWithElevenLabs:catch',message:'tts threw, falling back',data:{errorName:err instanceof Error?err.name:'unknown',errorMessage:err instanceof Error?err.message:String(err)},timestamp:Date.now()}))}).catch(()=>{});
-    // #endregion
     await speakFallback(spokenText, onFallback);
   }
 }
@@ -449,25 +373,11 @@ function speakFallback(text: string, onFallback?: () => void): Promise<void> {
   return new Promise((resolve) => {
     const run = async () => {
       await stopElevenLabsPlayback();
-      // #region agent log
-      fetch('http://127.0.0.1:7789/ingest/668e0bd5-3283-4492-9f48-e33846c18218',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'062597'},body:JSON.stringify(withAudioRouteDebugBuild({sessionId:'062597',runId:'pre-fix',hypothesisId:'H4',location:'elevenLabsTts.ts:speakFallback',message:'expo-speech fallback playback',data:{platform:Platform.OS,textLength:text?.length??0},timestamp:Date.now()}))}).catch(()=>{});
-      // #endregion
       if (Platform.OS !== 'web') {
         await logAndApplyPlaybackModeForTts('speakFallback:before_expo_speech').catch(() => {});
-        void remoteLog('[AUDIO_ROUTE] tts fallback setPlaybackMode', {
-          runId: 'audio-route-debug-12',
-          platform: Platform.OS,
-        });
       }
       // iOS: false = AVSpeechSynthesizer uses its own playback session (speaker). true inherits app session (often earpiece after PlayAndRecord/mic).
       const iosSpeechSession = Platform.OS === 'ios' ? { useApplicationAudioSession: false as const } : {};
-      void remoteLog('[TTS_ROUTE] expo-speech speak', {
-        hypothesisId: 'H5',
-        platform: Platform.OS,
-        useApplicationAudioSession: Platform.OS === 'ios' ? false : undefined,
-        textLength: text?.length ?? 0,
-        debugBuild: AUDIO_ROUTE_DEBUG_BUILD,
-      });
       Speech.speak(text, {
         language: 'en-US',
         rate: 0.78,
