@@ -241,7 +241,7 @@ function syncInterviewMomentsFromTranscript(
     }
     if (
       (c.includes("we've covered those three") || c.includes('three situations')) &&
-      (c.includes('held a grudge') || c.includes('more personal'))
+      c.includes('held a grudge')
     ) {
       personalHandoffInjected = true;
       momentsComplete[3] = true;
@@ -281,9 +281,11 @@ type InterviewProgressRefs = {
 /** Infer M3→M4/M4→M5 progression from assistant visible text (model outputs). */
 function applyInterviewProgressFromAssistantText(rawDisplayText: string, refs: InterviewProgressRefs) {
   const dt = (rawDisplayText ?? '').toLowerCase();
+  // Require the real grudge ask — do not use "more personal" alone: S2→S3 copy says "something more personal"
+  // and would false-trigger M4 (breaks Scenario C repair → Theo/Morgan threshold forcing).
   if (
     (dt.includes("we've covered those three") || dt.includes('three situations')) &&
-    (dt.includes('held a grudge') || dt.includes('more personal'))
+    dt.includes('held a grudge')
   ) {
     refs.personalHandoffInjectedRef.current = true;
     refs.interviewMomentsCompleteRef.current[3] = true;
@@ -856,8 +858,8 @@ function userSidesEntirelyWithJordan(text: string): boolean {
   return blamesAlex || jordanOnlyRight;
 }
 
-/** Max chars to keep as M4→M5 pivot before the scripted appreciation body (mirrors / long rambles still dropped). */
-const MOMENT5_ALLOWED_BRIDGE_MAX_CHARS = 200;
+/** Max chars to keep as M4→M5 pivot before the scripted appreciation body (1–2 sentence boundary reflection + transition). */
+const MOMENT5_ALLOWED_BRIDGE_MAX_CHARS = 420;
 
 /** True when the appreciation scripted body begins the assistant text (no leading bridge yet). */
 function appreciationBodyStartsAssistantTurn(text: string): boolean {
@@ -1004,12 +1006,47 @@ function sanitizeClosingLanguage(text: string): string {
 }
 
 /**
+ * Scenario A repair prompt often leads with "That makes (a lot of) sense" before the scripted Reese question.
+ * {@link stripFlatReflectionAcknowledgmentOpeners} would otherwise strip "That makes sense." via the comma rule
+ * because "What if…" looks like a new clause — keep the full lead-in for TTS/display.
+ */
+function isPreservedAckBeforeScenarioARepairLead(text: string): boolean {
+  const t = text.trim();
+  if (!/^that makes (?:a lot of )?sense\b/i.test(t)) return false;
+  const rest = t.replace(/^that makes (?:a lot of )?sense\s*[.,;—–-]?\s*/i, '').trim();
+  return (
+    /^what if you were reese\b/i.test(rest) ||
+    /^how would you repair this relationship if you were reese\b/i.test(rest) ||
+    (/^if you were reese\b/i.test(rest) && /\brepair\b/i.test(rest))
+  );
+}
+
+/**
+ * Scenario B Jordan-differently Q2: prompt requires a short ack ("Got it.") before the question; stripper would
+ * otherwise remove "Sure." / "Absolutely." via {@link stripFlatReflectionAcknowledgmentOpeners} reComma.
+ */
+function isPreservedAckBeforeScenarioBJordanQ2(text: string): boolean {
+  const t = text.trim();
+  const afterAck = t.replace(/^(got it|okay|fair|thanks|sure|absolutely)\s*[.,;—–-]?\s*/i, '').trim();
+  if (afterAck === t) return false;
+  const low = afterAck.toLowerCase();
+  return (
+    /\bjordan\b/.test(low) &&
+    /\b(done differently|could'?ve done differently|could have done differently|might have helped|feel appreciated)\b/.test(
+      low
+    )
+  );
+}
+
+/**
  * Hard blocklist: empty acknowledgments before the real reflection (applied on every assistant line before TTS/display).
  * Does not remove phrases that are integrated into one idea (e.g. "That makes sense that you'd feel…").
  */
 function stripFlatReflectionAcknowledgmentOpeners(text: string): string {
   const original = text.trim();
   if (!original) return original;
+  if (isPreservedAckBeforeScenarioARepairLead(original)) return original;
+  if (isPreservedAckBeforeScenarioBJordanQ2(original)) return original;
   const MIN_REMAINDER = 14;
   const orderedPhrases = [
     'That makes sense',
@@ -1048,6 +1085,8 @@ function stripFlatReflectionAcknowledgmentOpeners(text: string): string {
 /** Removes recurring hollow acknowledgment tails/leads from the first paragraph (pre-TTS). Does not touch later paragraphs (e.g. final thanks). */
 function stripGenericReflectionFillersFirstParagraph(text: string): string {
   if (!text?.trim()) return text;
+  /** Scripted M4 commitment follow-up — framework requires verbatim "Thanks for sharing that." before the question. */
+  if (looksLikeMoment4ThresholdQuestion(text)) return text;
   const parts = text.split(/\n\n/);
   const first = parts[0] ?? '';
   let t = first;
@@ -1242,19 +1281,6 @@ function chooseMandatoryValidationLead(recentAssistant: MessageWithScenario[]): 
 function wrapMandatoryAckBodyWithValidationLead(body: string, recentAssistant: MessageWithScenario[]): string {
   const v = chooseMandatoryValidationLead(recentAssistant);
   return `${v} — ${body.trim()}`.trim();
-}
-
-function sanitizeInterviewSpeech(text: string): string {
-  if (!text) return text;
-  return text
-    .replace(/^\s*Sure[.,]?\s+/i, '')
-    .replace(/^\s*Okay[.,]?\s+/i, '')
-    .replace(/^\s*Absolutely[.,]?\s+/i, '')
-    .replace(/^\s*That makes sense[.,]?\s+/i, '')
-    .replace(/^\s*That checks out[.,]?\s+/i, '')
-    .replace(/^\s*That lands[.,]?\s+/i, '')
-    .replace(/\s{2,}/g, ' ')
-    .trim();
 }
 
 /**
@@ -1929,7 +1955,7 @@ const SCENARIO_2_VIGNETTE =
 const SCENARIO_2_OPENING = 'What do you think is going on here?';
 const SCENARIO_2_TEXT = `${SCENARIO_2_VIGNETTE}\n\n${SCENARIO_2_OPENING}`;
 
-/** Acknowledges the finished scenario before the next vignette — no recap of their answers. */
+/** Fallback lead when repairing stripped Scenario B vignette (live model should use BOUNDARY CLOSURE + reflection first). */
 const SCENARIO_1_TO_2_TRANSITION =
   "Great work — that's the end of that scenario. Here's the next situation.";
 const SCENARIO_1_TO_2_BUNDLE = `${SCENARIO_1_TO_2_TRANSITION}\n\n${SCENARIO_2_TEXT}`;
@@ -2232,7 +2258,7 @@ Avoid predictable opener rotation. No single acknowledgment phrase should recur 
 
 Do NOT use clinical/theoretical terms in reflection language.
 
-This only applies when a personal example was given. For fictional scenario responses, the normal transition summary applies.
+This only applies when a personal example was given mid-scenario. At **scenario/moment boundaries**, use **BOUNDARY CLOSURE** from the main framework (fictional segments included).
 `;
 
 const SCENARIO_BOUNDARY_INSTRUCTIONS = `
@@ -2258,11 +2284,9 @@ SCENARIO TRANSITIONS — NO CLOSING CHECK PROMPT:
 
 Do NOT ask repetitive end-of-scenario wrap-up prompts (for example "Before we move on — is there anything about that situation you'd want me to know?"). These closing prompts are removed from scenarios 1, 2, and 3.
 
-After you complete the required questions for a scenario, transition forward naturally and continue the interview.
+After you complete the required questions for a scenario, use **BOUNDARY CLOSURE** from the main framework: **segment close** (this scenario/situation is over + warm line) **first**, then **at most two sentences** summarizing what they said, then transition + next vignette — **same** assistant message.
 
 There is NO separate "looking at both characters / anything either could have handled better" step in any scenario.
-
-When transitioning from one scenario to the next, keep momentum and include the transition + next scenario opener in the same response.
 `;
 
 const CLOSING_QUESTION_HANDLING = `
@@ -2275,23 +2299,23 @@ No scenario closing-question tokens are needed. Do not emit [CLOSING_QUESTION:N]
 // - Do not infer motives, traits, or deeper meaning not explicitly stated.
 
 const SCENARIO_TRANSITION_CLOSING = `
-SCENARIO TRANSITION — NO SPOKEN REFLECTION (main framework NO SPOKEN REFLECTION):
+SCENARIO / MOMENT BOUNDARY — BOUNDARY CLOSURE (see main framework):
 
-**Scenario boundaries (S1→S2, S2→S3, end of Scenario C):** Brief close-out that the scenario is finished (e.g. "Great work — that's the end of that scenario.") **then** introduce the next vignette — **no** recap of their answers. **Banned:** cross-scenario pattern talk, **"I'm holding two things you said,"** **"help me see how you think about that."** Third-scenario openers must NOT imply the interview is ending (never "final scenario").
+**Scenario boundaries (S1→S2, S2→S3, Scenario C→Moment 4, Moment 4 threshold→Moment 5):** **segment close** (explicitly end the segment + warm line) **first**, then **1–2 sentence** factual summary, then transition + next vignette or question — **same** turn. **Banned:** cross-scenario "pattern" psychoanalysis, **"I'm holding two things you said,"** **"help me see how you think about that."** Third-scenario openers must NOT imply the interview is ending (never "final scenario").
 
-**Mid-scenario:** Ask the **next required question** after check-before-asking — no mirror paragraph.
+**Mid-scenario:** Ask the **next required question** after check-before-asking — no boundary-style recap.
 
-**Scenario B Q3 → Scenario C:** Transition line **then** Morgan/Theo vignette — **no** Scenario B recap.
+**After grudge, before Moment 4 threshold:** required threshold question only — **no** boundary recap (same moment).
 `;
 
 const REFLECTION_PARAPHRASE_FIDELITY = `
-PARAPHRASE / CONTRAST (rare use only — prefer no paraphrase):
-If you ever echo the user's wording, preserve explicit "instead of / rather than / not" structure — do not collapse into "X and Y" when they ruled one out. When in doubt, skip the echo and ask the next question.
+PARAPHRASE / CONTRAST (boundary reflections):
+Do **not** add interviewer-authored **"rather than …"** or **"instead of …"** clauses that contrast their answer with an implied better move — that reads as leading (e.g. "…rather than Reese taking ownership"). Summarize in **neutral descriptive** terms. If the user explicitly said "rather than X, Y" in their own words, you may reflect that without appending a corrective second clause. No clinical labels.
 `;
 
 const ASSISTANT_SPEECH_POSTPROCESS_NOTICE = `
 ASSISTANT OUTPUT — CLIENT HARD FILTER (always applied before TTS/display):
-The app strips leading standalone empty fillers — "Sure," "Absolutely," "That makes sense," "That checks out," "That lands," — when they appear as hollow prefaces. Prefer moving to the **next question or vignette** without a long paraphrase of their answer.
+The app strips leading standalone empty fillers — "Sure," "Absolutely," "That makes sense," "That checks out," "That lands," — when they appear as hollow prefaces. **Boundary** transitions may include **segment close** + 1–2 sentences of summary (see main framework); avoid meta-thanks without substance.
 
 The app also strips generic acknowledgment filler from the **first paragraph** when it matches a recurring hollow pattern — e.g. "I appreciate you laying it out," "thank you for sharing," "that's helpful." Avoid those; do not rely on meta-thanks.
 `;
@@ -2378,19 +2402,25 @@ One word acknowledgment, then the content. Keep it simple.
 `;
 
 const UNIVERSAL_ACK_BEFORE_MOVE_INSTRUCTIONS = `
-NO SPOKEN REFLECTION (main framework):
-Do **not** add mirror paragraphs, "I hear you — [paraphrase]," **"I'm holding two things you said,"** **"help me see how you think about that,"** or cross-answer contradiction invites. The **client does not** prepend mandatory acknowledgment to assistant turns. Proceed to the **next required question**, transition line, or closing.
+MID-TURN (not at scenario/moment boundaries):
+Do **not** add mirror paragraphs before the next required question — no "I hear you — [long paraphrase]," **"I'm holding two things you said,"** **"help me see how you think about that,"** or cross-answer contradiction invites. Proceed to the **next required question** after check-before-asking.
+
+**At scenario/moment boundaries:** follow **BOUNDARY CLOSURE** in the main framework (**segment close** first, then 1–2 sentence summary, then transition).
 
 **Banned (stripped client-side when possible):** "I'm tracking you," inventory "I'm with you on… and …," procedural "continuing," hollow standalone "that makes sense / absolutely," meta-thanks as filler.
 
-After Moment 5: **one** closing message only (synthesis + thanks + [INTERVIEW_COMPLETE]) — **no** separate mirror sentence before it.
+After Moment 5: **one** closing message only (synthesis + thanks + [INTERVIEW_COMPLETE]) — **no** recap of their appreciation answer before it (per main framework).
 `;
 
 const PER_REQUEST_REFLECTION_LOCK = `
 ─────────────────────────────────────────
 ACTIVE TURN LOCK (read immediately before you write — this response only)
 ─────────────────────────────────────────
-The participant's **last message** is their newest answer. **No spoken reflection:** go to the **next required question**, boundary transition + vignette, threshold question, appreciation question, or final closing — **without** paraphrase-mirror beats. **Never** verbalize tension between fiction (Scenario C) and personal answers.
+The participant's **last message** is their newest answer.
+
+If your **next move** is a **scenario or moment boundary** (see main framework **BOUNDARY CLOSURE**), include **segment close** + **at most two sentences** of summary + transition + next content — **no** therapist-register reconciliation across fiction vs personal.
+
+If your **next move** is **not** a boundary (mid-scenario follow-up, grudge→threshold only): **no** long paraphrase-mirror — go to the **next required question** per check-before-asking. **Never** verbalize tension between fiction (Scenario C) and personal answers in a reconcile frame.
 `;
 
 const THIN_RESPONSE_INSTRUCTIONS = `
@@ -2523,19 +2553,17 @@ This redirect policy is for off-topic content only. It is NOT for correcting fac
 `;
 
 const MOMENT_4_TO_5_BRIDGE_INSTRUCTIONS = `
-MOMENT 4 → MOMENT 5 — APPRECIATION (SAME TURN, NO PREAMBLE):
+MOMENT 4 → MOMENT 5 — APPRECIATION (SAME TURN, BOUNDARY CLOSURE):
 
-After the user's answer to the Moment 4 commitment-threshold follow-up ("work through versus walk away"), your **next** turn must go **directly** to the appreciation question below — **no** tonal bridge, **no** "one more question" pivot, **no** paraphrase or summary of their threshold answer, **no** "I'm holding two things," **no** contrast between fictional Scenario C and their personal grudge story, **no** therapist-register processing. (Hand-tuned scenario transitions are provided separately in the script.)
+After the user's answer to the Moment 4 commitment-threshold follow-up ("work through versus walk away"), your **next** turn uses **BOUNDARY CLOSURE** from the main framework: **segment close** (warm line that this part is done) + **1–2 sentence reflection** on Moment 4 + transition + appreciation question below. **Forbidden:** "I'm holding two things," cross-answer reconcile between Scenario C and personal Moment 4, therapist-register processing, **On a lighter note,** **Taking that in** + echo, inventory-only ("one more question," "last one") **standing alone**.
 
-Ask the appreciation question so the line beginning **Think of a time you really celebrated someone** is still clear — not buried in a long preamble.
-
-**Forbidden:** "On a lighter note," **Taking that in** with echo of their answer, inventory-only ("one more question," "last one") **standing alone**, checklist meta ("different side of you with people you care about"). **Contradictions:** no cross-answer "scenario vs personal" reconcile beats.
+Ask the appreciation question so the line beginning **Think of a time you really celebrated someone** is still clear.
 `;
 
 const MOMENT_5_APPRECIATION_FALLBACK_INSTRUCTIONS = `
 MOMENT 5 — PERSONAL APPRECIATION (thin answer / no strong example):
 
-After Moment 4 threshold is answered, go **directly** to the appreciation question — **no** bridge line, **no** long mirror, **no** paragraph tying their threshold answer to the new prompt. Do not use procedural "one more / last one / still personal" lines **alone**.
+After Moment 4 threshold is answered, use **BOUNDARY CLOSURE** then the appreciation question (see main framework). Do not use procedural "one more / last one / still personal" lines **alone** as the whole message.
 
 If the user signals they do not have a strong behavioral example — including a very generic on-topic line (e.g. only "I go to birthdays") — ask once, verbatim: "${MOMENT_5_INEXPERIENCE_FALLBACK_QUESTION}" Do not substitute older "specific moment" or "what made you decide to…" probe wording; the runtime may enforce this pivot. If they already gave a specific, behaviorally rich example, do not ask this. If they already answered with substantive reflection on what meaningful celebration would mean (without needing that exact question), accept and move on.
 
@@ -2606,7 +2634,7 @@ The token fires when that scenario's required questions are complete.
 
 Required sequence (no end-of-scenario closing question):
 - Scenario A: Q1, contempt probe unless Sam's "you've made that very clear" was already read as contemptuous/hostile/dismissive (not passive-aggressive-only, not "stating a fact" / venting-only minimizations), Q2.
-- Scenario B: Q1; optional appreciation probe only when Q1 had no on-topic engagement with the scenario; mandatory Q2 (what Jordan could have done differently before the fight); Q3 (repair as Jordan); then one brief acknowledgment + paraphrase reflection before starting Scenario C. Do not skip Q2 because Q1 was sophisticated. Before Q2, always include a one-sentence specific acknowledgment of Q1 — including short verdict-style analysis answers.
+- Scenario B: Q1; optional appreciation probe only when Q1 had no on-topic engagement with the scenario; mandatory Q2 (what Jordan could have done differently before the fight); Q3 (repair as Jordan); then **BOUNDARY CLOSURE** (segment close + reflection + transition) before Scenario C. Do not skip Q2 because Q1 was sophisticated. Before Q2, always include a one-sentence specific acknowledgment of Q1 — including short verdict-style analysis answers.
 - Scenario C: **Q1 (Theo line) always before Q2** — client enforces; never put Q2 or threshold in the same turn as the vignette without Q1. Then Q2, then commitment-threshold probe unless the user already gave irrecoverability / when-it's-not-workable criteria (repair-only Q2 is not enough).
 
 Do NOT ask "anything you'd want me to know?" style closing checks at the end of scenarios.
@@ -4718,6 +4746,30 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
       cq2PromptMatches &&
       (currentInterviewMomentRef.current === 3 ||
         (currentScenarioRef.current === 3 && !personalHandoffInjectedRef.current));
+    // #region agent log
+    {
+      const _lp = 'AriaScreen.tsx:CQ2_GATE';
+      fetch('http://127.0.0.1:7789/ingest/668e0bd5-3283-4492-9f48-e33846c18218', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'X-Debug-Session-Id': 'e70f17' },
+        body: JSON.stringify({
+          sessionId: 'e70f17',
+          hypothesisId: 'A',
+          location: _lp,
+          message: 'CQ2 gate after user message',
+          data: {
+            cq2PromptMatches,
+            replyingToScenarioCQ2,
+            moment: currentInterviewMomentRef.current,
+            scenario: currentScenarioRef.current,
+            personalHandoffInjected: personalHandoffInjectedRef.current,
+            lastAssistantPreview: lastAssistantContent.slice(0, 260),
+          },
+          timestamp: Date.now(),
+        }),
+      }).catch(() => {});
+    }
+    // #endregion
     if (moment5InexperienceFallbackPendingRef.current && !isDecline(trimmed)) {
       moment5InexperienceFallbackPendingRef.current = false;
     }
@@ -4840,6 +4892,34 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
     const scenarioCThresholdLegacy = hasCommitmentThresholdSignal(scenarioCUserCorpusForThreshold);
     const shouldForceScenarioCThresholdProbe =
       replyingToScenarioCQ2 && !isDecline(trimmed) && !scenarioCThresholdStrict;
+    // #region agent log
+    {
+      const _lp = 'AriaScreen.tsx:S3_THRESHOLD_FORCE';
+      const repairButNoReply =
+        isScenarioCQ2Prompt(lastAssistantContent) &&
+        !looksLikeScenarioCThresholdQuestion(lastAssistantContent) &&
+        !replyingToScenarioCQ2;
+      fetch('http://127.0.0.1:7789/ingest/668e0bd5-3283-4492-9f48-e33846c18218', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'X-Debug-Session-Id': 'e70f17' },
+        body: JSON.stringify({
+          sessionId: 'e70f17',
+          hypothesisId: 'B',
+          location: _lp,
+          message: 'S3 threshold force eval',
+          data: {
+            repairButNoReply,
+            shouldForceScenarioCThresholdProbe,
+            scenarioCThresholdStrict,
+            isDecline: isDecline(trimmed),
+            postRepairCorpus: scenarioCPostRepairCorpus.slice(0, 400),
+            userLastPreview: trimmed.slice(0, 220),
+          },
+          timestamp: Date.now(),
+        }),
+      }).catch(() => {});
+    }
+    // #endregion
     if (replyingToScenarioCQ2) {
       const skipReason = scenarioCThresholdStrict
         ? 'vignette-threshold-signal-already-present-post-repair'
@@ -5025,7 +5105,6 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
     strippedText = stripFlatReflectionAcknowledgmentOpeners(strippedText);
     strippedText = stripGenericReflectionFillersFirstParagraph(strippedText);
     strippedText = stripHollowSystemInterviewerPhrases(strippedText);
-    strippedText = sanitizeInterviewSpeech(strippedText);
     strippedText = applyReflectionContrastFidelityRepair(trimmed, strippedText);
     strippedText = collapseStackedEmpathyIHearYouInFirstParagraph(strippedText);
     strippedText = enforceAcknowledgmentVariation(
@@ -5083,6 +5162,58 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
         });
       }
     }
+    // #region agent log
+    {
+      const prem = assistantTextIsPrematureMoment4HandoffDuringScenarioC(strippedText);
+      if (prem || shouldForceScenarioCThresholdProbe) {
+        fetch('http://127.0.0.1:7789/ingest/668e0bd5-3283-4492-9f48-e33846c18218', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'X-Debug-Session-Id': 'e70f17' },
+          body: JSON.stringify({
+            sessionId: 'e70f17',
+            hypothesisId: 'C',
+            location: 'AriaScreen.tsx:S3_ASSISTANT_BRANCH',
+            message: 'Premature M4 handoff or S3 force expected',
+            data: {
+              shouldForceScenarioCThresholdProbe,
+              assistantIssuedScenarioCThresholdProbe,
+              prematureMoment4Handoff: prem,
+              strippedPreview: strippedText.slice(0, 320),
+            },
+            timestamp: Date.now(),
+          }),
+        }).catch(() => {});
+      }
+    }
+    // #endregion
+    // #region agent log
+    {
+      const _raw = text;
+      const _st = strippedText;
+      if (
+        /^\s*that\.?\s/i.test(_st) ||
+        (/at what point do you decide/i.test(_raw) && /^\s*that\.?\s/i.test(_st)) ||
+        (/that makes sense\s+that\b/i.test(_raw) && /at what point/i.test(_raw))
+      ) {
+        fetch('http://127.0.0.1:7789/ingest/668e0bd5-3283-4492-9f48-e33846c18218', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'X-Debug-Session-Id': 'e70f17' },
+          body: JSON.stringify({
+            sessionId: 'e70f17',
+            hypothesisId: 'F',
+            location: 'AriaScreen.tsx:M4_STRIP_PIPELINE',
+            message: 'Possible that. fragment before M4 threshold',
+            data: {
+              moment: currentInterviewMomentRef.current,
+              rawHead: _raw.slice(0, 320),
+              strippedHead: _st.slice(0, 320),
+            },
+            timestamp: Date.now(),
+          }),
+        }).catch(() => {});
+      }
+    }
+    // #endregion
     if (shouldForceScenarioAContemptProbe && assistantIssuedScenarioARepairQuestion) {
       strippedText = stripScenarioARepairQuestion(strippedText);
       assistantIssuedScenarioARepairQuestion = false;
@@ -5371,7 +5502,7 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
       !isAppreciationPromptText(strippedText)
     ) {
       const forcedThresholdProbe =
-        '"At what point do you decide when a relationship is something to work through versus something you need to walk away from?"';
+        'Thanks for sharing that. At what point do you decide when a relationship is something to work through versus something you need to walk away from?';
       let stagedMessages = messagesToUse;
       if (strippedText) {
         const detectedScenario = detectScenarioFromResponse(strippedText);
@@ -5532,7 +5663,6 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
         closingRaw = stripFlatReflectionAcknowledgmentOpeners(closingRaw);
         closingRaw = stripGenericReflectionFillersFirstParagraph(closingRaw);
         closingRaw = stripHollowSystemInterviewerPhrases(closingRaw);
-        closingRaw = sanitizeInterviewSpeech(closingRaw);
         closingRaw = applyReflectionContrastFidelityRepair(trimmed, closingRaw);
         closingRaw = collapseStackedEmpathyIHearYouInFirstParagraph(closingRaw);
         closingRaw = stripForbiddenReflectionLead(closingRaw);
@@ -5567,7 +5697,6 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
         transitionDisplay = stripFlatReflectionAcknowledgmentOpeners(transitionDisplay);
         transitionDisplay = stripGenericReflectionFillersFirstParagraph(transitionDisplay);
         transitionDisplay = stripHollowSystemInterviewerPhrases(transitionDisplay);
-        transitionDisplay = sanitizeInterviewSpeech(transitionDisplay);
         transitionDisplay = applyReflectionContrastFidelityRepair(trimmed, transitionDisplay);
         transitionDisplay = collapseStackedEmpathyIHearYouInFirstParagraph(transitionDisplay);
         transitionDisplay = stripForbiddenReflectionLead(transitionDisplay);
@@ -5620,7 +5749,6 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
         stageDisplay = stripFlatReflectionAcknowledgmentOpeners(stageDisplay);
         stageDisplay = stripGenericReflectionFillersFirstParagraph(stageDisplay);
         stageDisplay = stripHollowSystemInterviewerPhrases(stageDisplay);
-        stageDisplay = sanitizeInterviewSpeech(stageDisplay);
         stageDisplay = applyReflectionContrastFidelityRepair(trimmed, stageDisplay);
         stageDisplay = collapseStackedEmpathyIHearYouInFirstParagraph(stageDisplay);
         stageDisplay = stripForbiddenReflectionLead(stageDisplay);
