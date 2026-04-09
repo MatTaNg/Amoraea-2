@@ -121,7 +121,7 @@ export const UserInterviewLayout: React.FC<UserInterviewLayoutProps> = ({
           ? 'Speaking...'
           : voiceState === 'processing'
             ? '...'
-            : 'Hold to speak';
+            : 'Tap to speak';
 
   const statusLabelOpacity =
     voiceState === 'speaking' || voiceState === 'processing' ? 0.35 : 0.7;

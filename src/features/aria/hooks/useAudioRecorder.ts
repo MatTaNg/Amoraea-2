@@ -162,7 +162,39 @@ export function useAudioRecorder({
       mediaRecorder.start(1000);
       recordingStartTimeRef.current = Date.now();
       setIsRecording(true);
+      // #region agent log
+      fetch('http://127.0.0.1:7789/ingest/668e0bd5-3283-4492-9f48-e33846c18218', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'X-Debug-Session-Id': 'e70f17' },
+        body: JSON.stringify({
+          sessionId: 'e70f17',
+          location: 'useAudioRecorder.ts:startWebRecording',
+          message: 'web_record_started',
+          data: { hypothesisId: 'B', mimeType: webMimeRef.current },
+          timestamp: Date.now(),
+          runId: 'pre-fix',
+        }),
+      }).catch(() => {});
+      // #endregion
     } catch (err) {
+      // #region agent log
+      fetch('http://127.0.0.1:7789/ingest/668e0bd5-3283-4492-9f48-e33846c18218', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'X-Debug-Session-Id': 'e70f17' },
+        body: JSON.stringify({
+          sessionId: 'e70f17',
+          location: 'useAudioRecorder.ts:startWebRecording',
+          message: 'web_record_failed',
+          data: {
+            hypothesisId: 'B',
+            errName: err instanceof Error ? err.name : 'unknown',
+            errMessage: err instanceof Error ? err.message : String(err),
+          },
+          timestamp: Date.now(),
+          runId: 'pre-fix',
+        }),
+      }).catch(() => {});
+      // #endregion
       if (__DEV__) console.error('Web recording failed:', err);
       onError?.(err instanceof Error ? err : new Error(String(err)));
     }

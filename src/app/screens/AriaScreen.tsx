@@ -403,7 +403,7 @@ const AMORAEA_ERROR_MESSAGES = {
   ],
   recordingOrTranscriptionRetry: [
     "I didn't quite catch that — could you say it again?",
-    "Something interrupted me there. Would you mind repeating that?",
+    "Seems like an interruption happened. Would you mind repeating that?",
     "I missed that — can you say it once more?",
   ],
   recordingOrTranscriptionRetryNative: [
@@ -3279,10 +3279,35 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
   const recognitionRef = useRef<{ start(): void; stop(): void } | null>(null);
   const transcriptAtReleaseRef = useRef('');
   const isSpeakingRef = useRef(false);
-  // Use Whisper on web only when a proxy is set; direct OpenAI calls from the browser fail (CORS).
-  const useWhisperOnWeb = Platform.OS === 'web' && !!OPENAI_API_KEY && !!OPENAI_WHISPER_PROXY_URL;
+  // Web: use Whisper proxy + MediaRecorder when the proxy URL resolves (defaults to Supabase Functions URL).
+  // Auth: anon key or session token in transcribeSafe — do not gate on EXPO_PUBLIC_OPENAI_API_KEY (CORS blocks direct OpenAI).
+  const useWhisperOnWeb = Platform.OS === 'web' && !!OPENAI_WHISPER_PROXY_URL;
   /** Native (expo-av) or web with Whisper (MediaRecorder) — use unified hook; else web hold-to-talk + speech recognition. */
   const useNativeOrWhisperRecording = Platform.OS !== 'web' || useWhisperOnWeb;
+  useEffect(() => {
+    if (Platform.OS !== 'web') return;
+    // #region agent log
+    fetch('http://127.0.0.1:7789/ingest/668e0bd5-3283-4492-9f48-e33846c18218', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'X-Debug-Session-Id': 'e70f17' },
+      body: JSON.stringify({
+        sessionId: 'e70f17',
+        location: 'AriaScreen.tsx:recordingPath',
+        message: 'web_recording_path_flags',
+        data: {
+          hypothesisId: 'A',
+          useWhisperOnWeb,
+          useNativeOrWhisperRecording,
+          hasOpenAIKey: !!OPENAI_API_KEY,
+          hasWhisperProxy: !!OPENAI_WHISPER_PROXY_URL,
+          hasSupabaseAnon: !!SUPABASE_ANON_KEY,
+        },
+        timestamp: Date.now(),
+        runId: 'pre-fix',
+      }),
+    }).catch(() => {});
+    // #endregion
+  }, [useWhisperOnWeb, useNativeOrWhisperRecording]);
   const scrollViewRef = useRef<ScrollView | null>(null);
   const hasResumedRef = useRef(false);
 
@@ -3986,9 +4011,15 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
     [speak, applyInterviewSpeechComplete]
   );
 
-  // ── Web: use browser SpeechRecognition (reliable result events)
+  // ── Web: browser SpeechRecognition (hold-to-talk fallback when Whisper/MediaRecorder is off)
   useEffect(() => {
     if (Platform.OS !== 'web' || typeof window === 'undefined') return;
+    if (useNativeOrWhisperRecording) {
+      setMicError((prev) =>
+        prev === 'Speech recognition is not supported. Please use Chrome or Safari.' ? null : prev
+      );
+      return;
+    }
     const SR = (window as unknown as { SpeechRecognition?: new () => unknown }).SpeechRecognition
       || (window as unknown as { webkitSpeechRecognition?: new () => unknown }).webkitSpeechRecognition;
     if (!SR) {
@@ -4023,6 +4054,20 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
       transcriptAtReleaseRef.current = (final || interim).trim();
     };
     rec.onerror = (e) => {
+      // #region agent log
+      fetch('http://127.0.0.1:7789/ingest/668e0bd5-3283-4492-9f48-e33846c18218', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'X-Debug-Session-Id': 'e70f17' },
+        body: JSON.stringify({
+          sessionId: 'e70f17',
+          location: 'AriaScreen.tsx:SpeechRecognition.onerror',
+          message: 'speech_recognition_error',
+          data: { hypothesisId: 'D', speechError: e.error },
+          timestamp: Date.now(),
+          runId: 'pre-fix',
+        }),
+      }).catch(() => {});
+      // #endregion
       console.log('<---e', e);
       if (e.error === 'not-allowed') {
         setMicError('Microphone access was denied.');
@@ -4040,7 +4085,7 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
     };
     recognitionRef.current = rec;
     return () => { try { rec.stop(); } catch {} };
-  }, []);
+  }, [useNativeOrWhisperRecording]);
 
   const fetchStageScore = useCallback(async (finalMessages: { role: string; content: string }[]): Promise<InterviewResults> => {
     const context = typologyContext || 'No typology context — score from transcript only.';
@@ -5667,6 +5712,20 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
     timingRef.current.recordingStartTime = Date.now();
     setVoiceState('listening');
     if (Platform.OS === 'web' && recognitionRef.current) {
+      // #region agent log
+      fetch('http://127.0.0.1:7789/ingest/668e0bd5-3283-4492-9f48-e33846c18218', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'X-Debug-Session-Id': 'e70f17' },
+        body: JSON.stringify({
+          sessionId: 'e70f17',
+          location: 'AriaScreen.tsx:handlePressStart',
+          message: 'hold_to_talk_recognition_start',
+          data: { hypothesisId: 'E', useNativeOrWhisperRecording },
+          timestamp: Date.now(),
+          runId: 'pre-fix',
+        }),
+      }).catch(() => {});
+      // #endregion
       try { recognitionRef.current.start(); } catch {}
     }
   }, [voiceState, useNativeOrWhisperRecording]);
@@ -5707,6 +5766,15 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
               ? { Authorization: `Bearer ${SUPABASE_ANON_KEY}`, apikey: SUPABASE_ANON_KEY }
               : {})
           : { Authorization: `Bearer ${OPENAI_API_KEY}` };
+
+        let webTranscribeHeaders = authHeaders;
+        if (Platform.OS === 'web' && OPENAI_WHISPER_PROXY_URL && !webTranscribeHeaders.Authorization) {
+          const sessionResult = await supabase.auth.getSession().catch(() => null);
+          const accessToken = sessionResult?.data?.session?.access_token?.trim();
+          if (accessToken) {
+            webTranscribeHeaders = { Authorization: `Bearer ${accessToken}` };
+          }
+        }
 
         const transcript = await withRetry(
           async (): Promise<string> => {
@@ -5772,7 +5840,7 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
             }
             form.append('file', blobToSend, 'recording.webm');
             form.append('model', 'whisper-1');
-            const res = await fetch(transcriptUrl, { method: 'POST', headers: authHeaders, body: form });
+            const res = await fetch(transcriptUrl, { method: 'POST', headers: webTranscribeHeaders, body: form });
             if (__DEV__) console.log('Transcription response status:', res.status);
             if (!res.ok) {
               const errText = await res.text();
@@ -5799,6 +5867,26 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
         );
         return transcript;
       } catch (err) {
+        // #region agent log
+        fetch('http://127.0.0.1:7789/ingest/668e0bd5-3283-4492-9f48-e33846c18218', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'X-Debug-Session-Id': 'e70f17' },
+          body: JSON.stringify({
+            sessionId: 'e70f17',
+            location: 'AriaScreen.tsx:transcribeSafe',
+            message: 'transcribe_failed',
+            data: {
+              hypothesisId: 'C',
+              errorName: err instanceof Error ? err.name : 'unknown',
+              errorMessage: (err instanceof Error ? err.message : String(err)).slice(0, 200),
+              hasWhisperProxy: !!OPENAI_WHISPER_PROXY_URL,
+              blobSize: audioBlob?.size ?? 0,
+            },
+            timestamp: Date.now(),
+            runId: 'pre-fix',
+          }),
+        }).catch(() => {});
+        // #endregion
         void remoteLog('[TRANSCRIBE] catch', {
           runId: 'audio-route-debug-10',
           errorName: err instanceof Error ? err.name : 'unknown',
@@ -5847,6 +5935,22 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
   const handleNativeOrWhisperMicPress = useCallback(async () => {
     if (voiceState === 'speaking' || voiceState === 'processing') return;
     if (!useNativeOrWhisperRecording) return;
+    if (Platform.OS === 'web') {
+      // #region agent log
+      fetch('http://127.0.0.1:7789/ingest/668e0bd5-3283-4492-9f48-e33846c18218', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'X-Debug-Session-Id': 'e70f17' },
+        body: JSON.stringify({
+          sessionId: 'e70f17',
+          location: 'AriaScreen.tsx:handleNativeOrWhisperMicPress',
+          message: 'whisper_path_mic_press',
+          data: { hypothesisId: 'B', useWhisperOnWeb, isRecording: audioRecorder.isRecording },
+          timestamp: Date.now(),
+          runId: 'pre-fix',
+        }),
+      }).catch(() => {});
+      // #endregion
+    }
     if (__DEV__) console.log('[Aria] MIC PRESSED, isRecording:', audioRecorder.isRecording);
     try {
       if (audioRecorder.isRecording) {
@@ -7764,10 +7868,10 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
               )}
             </Pressable>
             <Text style={[styles.voiceLabel, isAdmin && styles.adminVoiceLabel]}>
-              {voiceState === 'listening' && 'Release to send'}
+              {voiceState === 'listening' && 'Listening…'}
               {voiceState === 'processing' && 'Thinking…'}
               {voiceState === 'speaking' && 'Interviewer speaking'}
-              {voiceState === 'idle' && 'Hold to speak'}
+              {voiceState === 'idle' && 'Tap to speak'}
             </Text>
             {isAdmin && (
               <View style={styles.typeFallback}>
