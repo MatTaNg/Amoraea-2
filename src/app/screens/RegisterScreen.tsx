@@ -96,7 +96,9 @@ export const RegisterScreen: React.FC<{ navigation: any }> = ({ navigation }) =>
         {Platform.OS === 'web' && (
           <View style={[StyleSheet.absoluteFill, authStyles.grainOverlay]} pointerEvents="none" />
         )}
-        <View style={[authStyles.ambientGlow, authStyles.ambientGlowRegister]} pointerEvents="none" />
+        {Platform.OS === 'web' ? (
+          <View style={[authStyles.ambientGlow, authStyles.ambientGlowRegister]} pointerEvents="none" />
+        ) : null}
 
         <View style={styles.staticHeader}>
           <Text style={[authStyles.wordmark, styles.wordmarkTight]}>
@@ -104,7 +106,7 @@ export const RegisterScreen: React.FC<{ navigation: any }> = ({ navigation }) =>
           </Text>
           <View style={styles.flameWrap}>
             <View style={styles.flameScale}>
-              <FlameOrb state="idle" />
+              <FlameOrb state="idle" minimalGlow />
             </View>
           </View>
           <Text style={[authStyles.tagline, styles.taglineTight]}>Begin with honesty.</Text>
@@ -205,11 +207,14 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   staticHeader: {
+    position: 'relative',
+    zIndex: 2,
     width: '100%',
     alignItems: 'center',
     paddingTop: 24,
     paddingHorizontal: 24,
     paddingBottom: 16,
+    flexShrink: 0,
   },
   wordmarkTight: {
     marginBottom: 18,
@@ -248,13 +253,18 @@ const styles = StyleSheet.create({
         } as const)
       : { alignSelf: 'center' }),
   },
+  /** minHeight avoids RN Web collapsing the row when a web <div> flame is scaled inside Views. */
   flameWrap: {
     marginBottom: 12,
     alignItems: 'center',
     justifyContent: 'center',
+    minHeight: 120,
+    width: '100%',
+    overflow: 'visible',
   },
+  /** Match LoginScreen scale so the flame stays visible on narrow / mobile web. */
   flameScale: {
-    transform: [{ scale: 0.4 }],
+    transform: [{ scale: 0.52 }],
   },
   button: {
     marginBottom: 0,
