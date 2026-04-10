@@ -66,7 +66,11 @@ export const RegisterScreen: React.FC<{ navigation: any }> = ({ navigation }) =>
   if (sent) {
     return (
       <SafeAreaContainer style={styles.safeBg}>
-        <View style={authStyles.fullScreen}>
+        <ScrollView
+          style={styles.scroll}
+          contentContainerStyle={styles.sentScrollContent}
+          keyboardShouldPersistTaps="handled"
+        >
           {Platform.OS === 'web' && (
             <View style={[StyleSheet.absoluteFill, authStyles.grainOverlay]} pointerEvents="none" />
           )}
@@ -74,8 +78,9 @@ export const RegisterScreen: React.FC<{ navigation: any }> = ({ navigation }) =>
             <Text style={styles.sentIcon}>✦</Text>
             <Text style={authStyles.sentScreenTitle}>Check your email.</Text>
             <Text style={authStyles.sentScreenBody}>
-              We've sent a confirmation link to <Text style={{ color: '#C8E4FF' }}>{email}</Text>. Open it to
-              complete your registration and begin your interview.
+              {`We've sent a confirmation link to `}
+              <Text style={{ color: '#C8E4FF' }}>{email}</Text>
+              {`. Open it to complete your registration and begin your interview.`}
             </Text>
             <View style={authStyles.divider} />
             <Text style={authStyles.footerText}>
@@ -85,14 +90,18 @@ export const RegisterScreen: React.FC<{ navigation: any }> = ({ navigation }) =>
               </Text>
             </Text>
           </View>
-        </View>
+        </ScrollView>
       </SafeAreaContainer>
     );
   }
 
   return (
     <SafeAreaContainer style={styles.safeBg}>
-      <View style={styles.outerLock}>
+      <KeyboardAvoidingView
+        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+        style={styles.keyboard}
+        keyboardVerticalOffset={Platform.OS === 'ios' ? 8 : 0}
+      >
         {Platform.OS === 'web' && (
           <View style={[StyleSheet.absoluteFill, authStyles.grainOverlay]} pointerEvents="none" />
         )}
@@ -100,7 +109,13 @@ export const RegisterScreen: React.FC<{ navigation: any }> = ({ navigation }) =>
           <View style={[authStyles.ambientGlow, authStyles.ambientGlowRegister]} pointerEvents="none" />
         ) : null}
 
-        <View style={styles.staticHeader}>
+        <ScrollView
+          style={styles.scroll}
+          contentContainerStyle={styles.scrollContent}
+          keyboardShouldPersistTaps="handled"
+          showsVerticalScrollIndicator
+          nestedScrollEnabled
+        >
           <Text style={[authStyles.wordmark, styles.wordmarkTight]}>
             amor<Text style={authStyles.wordmarkAe}>æ</Text>a
           </Text>
@@ -110,87 +125,72 @@ export const RegisterScreen: React.FC<{ navigation: any }> = ({ navigation }) =>
             </View>
           </View>
           <Text style={[authStyles.tagline, styles.taglineTight]}>Begin with honesty.</Text>
-        </View>
 
-        <KeyboardAvoidingView
-          behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-          style={styles.keyboard}
-        >
-          {/* Full-width row so RN Web ScrollView content isn’t shrink-wrapped left */}
-          <View style={styles.formRow}>
-            <ScrollView
-              style={styles.formScroll}
-              keyboardShouldPersistTaps="handled"
-              showsVerticalScrollIndicator={false}
-              contentContainerStyle={styles.formScrollContent}
+          <View style={[authStyles.inner, styles.innerCentered]}>
+            <TextInput
+              placeholder="Email"
+              placeholderTextColor="#5B6B80"
+              value={email}
+              onChangeText={setEmail}
+              keyboardType="email-address"
+              autoCapitalize="none"
+              autoCorrect={false}
+              style={authStyles.input}
+            />
+
+            <TextInput
+              placeholder="Password"
+              placeholderTextColor="#5B6B80"
+              value={password}
+              onChangeText={setPassword}
+              secureTextEntry
+              style={authStyles.input}
+            />
+
+            <TextInput
+              placeholder="Confirm password"
+              placeholderTextColor="#5B6B80"
+              value={confirm}
+              onChangeText={setConfirm}
+              secureTextEntry
+              style={authStyles.input}
+            />
+
+            <TextInput
+              placeholder="Invite code (optional)"
+              placeholderTextColor="#5B6B80"
+              value={inviteCode}
+              onChangeText={setInviteCode}
+              style={[authStyles.input, authStyles.inputOptional, { marginBottom: 18 }]}
+            />
+
+            {error ? <Text style={authStyles.errorText}>{error}</Text> : null}
+
+            <Pressable
+              onPress={handleRegister}
+              disabled={loading}
+              style={[authStyles.primaryButton, styles.button]}
             >
-              <View style={[authStyles.inner, styles.innerCentered]}>
-              <TextInput
-                placeholder="Email"
-                placeholderTextColor="#5B6B80"
-                value={email}
-                onChangeText={setEmail}
-                keyboardType="email-address"
-                autoCapitalize="none"
-                autoCorrect={false}
-                style={authStyles.input}
-              />
-
-              <TextInput
-                placeholder="Password"
-                placeholderTextColor="#5B6B80"
-                value={password}
-                onChangeText={setPassword}
-                secureTextEntry
-                style={authStyles.input}
-              />
-
-              <TextInput
-                placeholder="Confirm password"
-                placeholderTextColor="#5B6B80"
-                value={confirm}
-                onChangeText={setConfirm}
-                secureTextEntry
-                style={authStyles.input}
-              />
-
-              <TextInput
-                placeholder="Invite code (optional)"
-                placeholderTextColor="#5B6B80"
-                value={inviteCode}
-                onChangeText={setInviteCode}
-                style={[authStyles.input, authStyles.inputOptional, { marginBottom: 18 }]}
-              />
-
-              {error ? <Text style={authStyles.errorText}>{error}</Text> : null}
-
-              <Pressable
-                onPress={handleRegister}
-                disabled={loading}
-                style={[authStyles.primaryButton, styles.button]}
-              >
-                <Text style={authStyles.primaryButtonText}>
-                  {loading ? '...' : 'Create Account →'}
-                </Text>
-              </Pressable>
-
-              <Text style={authStyles.confirmationNote}>
-                You'll receive a confirmation email to verify your address.
+              <Text style={authStyles.primaryButtonText}>
+                {loading ? '...' : 'Create Account →'}
               </Text>
+            </Pressable>
 
-              <View style={authStyles.divider} />
+            <Text style={authStyles.confirmationNote}>
+              {"You'll receive a confirmation email to verify your address."}
+            </Text>
 
-              <Text style={authStyles.footerText}>
-                Already have an account?{' '}
-                <Text style={authStyles.link} onPress={() => navigation.navigate('Login')}>
-                  Sign in
-                </Text>
+            <View style={authStyles.divider} />
+
+            <Text style={authStyles.footerText}>
+              Already have an account?{' '}
+              <Text style={authStyles.link} onPress={() => navigation.navigate('Login')}>
+                Sign in
               </Text>
-            </View>
-            </ScrollView>
+            </Text>
           </View>
-        </KeyboardAvoidingView>
-      </View>
+        </ScrollView>
+      </KeyboardAvoidingView>
     </SafeAreaContainer>
   );
 };
@@ -198,60 +198,53 @@ export const RegisterScreen: React.FC<{ navigation: any }> = ({ navigation }) =>
 const styles = StyleSheet.create({
   safeBg: {
     backgroundColor: '#05060D',
-  },
-  outerLock: {
     flex: 1,
-    height: '100%',
-    overflow: 'hidden',
-    backgroundColor: '#05060D',
-    alignItems: 'center',
-  },
-  staticHeader: {
-    position: 'relative',
-    zIndex: 2,
-    width: '100%',
-    alignItems: 'center',
-    paddingTop: 24,
-    paddingHorizontal: 24,
-    paddingBottom: 16,
-    flexShrink: 0,
-  },
-  wordmarkTight: {
-    marginBottom: 18,
-  },
-  taglineTight: {
-    marginBottom: 20,
   },
   keyboard: {
     flex: 1,
     width: '100%',
-    alignSelf: 'stretch',
+    backgroundColor: '#05060D',
   },
-  /** Stretch to viewport width so nested ScrollView isn’t content-sized (fixes web left alignment). */
-  formRow: {
+  scroll: {
     flex: 1,
     width: '100%',
-    alignItems: 'stretch',
   },
-  formScroll: {
+  scrollContent: {
     flexGrow: 1,
+    paddingTop: 24,
+    paddingHorizontal: 24,
+    paddingBottom: 48,
+    alignItems: 'center',
     width: '100%',
   },
-  formScrollContent: {
+  sentScrollContent: {
     flexGrow: 1,
+    paddingVertical: 32,
     paddingHorizontal: 24,
-    paddingBottom: 40,
+    justifyContent: 'center',
     alignItems: 'center',
+  },
+  wordmarkTight: {
+    marginBottom: 18,
+    textAlign: 'center',
+    width: '100%',
+  },
+  taglineTight: {
+    marginBottom: 24,
+    textAlign: 'center',
     width: '100%',
   },
   innerCentered: {
     alignItems: 'center',
+    width: '100%',
+    maxWidth: 380,
+    alignSelf: 'center',
     ...(Platform.OS === 'web'
       ? ({
           marginLeft: 'auto',
           marginRight: 'auto',
         } as const)
-      : { alignSelf: 'center' }),
+      : {}),
   },
   /** minHeight avoids RN Web collapsing the row when a web <div> flame is scaled inside Views. */
   flameWrap: {

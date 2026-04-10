@@ -7,6 +7,7 @@ import {
   Pressable,
   KeyboardAvoidingView,
   Platform,
+  ScrollView,
 } from 'react-native';
 import { useAuth } from '@features/authentication/hooks/useAuth';
 import { SafeAreaContainer } from '@ui/components/SafeAreaContainer';
@@ -26,8 +27,9 @@ export const LoginScreen: React.FC<{ navigation: any; route?: { params?: { confi
   navigation,
   route,
 }) => {
-  const [email, setEmail] = useState('mattang5280@gmail.com');
-  const [password, setPassword] = useState('Ab#3dragons');
+  /** Dev-only convenience; production bundles (__DEV__ false) start empty. */
+  const [email, setEmail] = useState(__DEV__ ? 'mattang5280@gmail.com' : '');
+  const [password, setPassword] = useState(__DEV__ ? 'Ab#3dragons' : '');
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [resendSent, setResendSent] = useState(false);
@@ -85,92 +87,96 @@ export const LoginScreen: React.FC<{ navigation: any; route?: { params?: { confi
 
   return (
     <SafeAreaContainer style={styles.safeBg}>
-      <View style={styles.outerLock}>
-        <KeyboardAvoidingView
-          behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-          style={styles.keyboard}
+      <KeyboardAvoidingView
+        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+        style={styles.keyboard}
+        keyboardVerticalOffset={Platform.OS === 'ios' ? 8 : 0}
+      >
+        <ScrollView
+          style={styles.scroll}
+          contentContainerStyle={styles.scrollContent}
+          keyboardShouldPersistTaps="handled"
+          showsVerticalScrollIndicator
+          bounces
         >
-          <View style={styles.contentWrap}>
-            {Platform.OS === 'web' && <View style={[StyleSheet.absoluteFill, authStyles.grainOverlay]} pointerEvents="none" />}
-            {/* Web: soft page glow. Native: omit — bordered circle + shadow reads as a ring behind the flame. */}
-            {Platform.OS === 'web' && <View style={authStyles.ambientGlow} pointerEvents="none" />}
+          {Platform.OS === 'web' && (
+            <View style={[StyleSheet.absoluteFill, authStyles.grainOverlay]} pointerEvents="none" />
+          )}
+          {Platform.OS === 'web' && <View style={authStyles.ambientGlow} pointerEvents="none" />}
 
-            <View style={[authStyles.inner, styles.innerCentered]}>
-              <Text style={[authStyles.wordmark, styles.wordmarkTight]}>
-                amor<Text style={authStyles.wordmarkAe}>æ</Text>a
-              </Text>
+          <View style={[authStyles.inner, styles.innerCentered]}>
+            <Text style={[authStyles.wordmark, styles.wordmarkTight]}>
+              amor<Text style={authStyles.wordmarkAe}>æ</Text>a
+            </Text>
 
-              <View style={styles.flameWrap}>
-                <View style={styles.flameScale}>
-                  <FlameOrb state="idle" minimalGlow />
-                </View>
+            <View style={styles.flameWrap}>
+              <View style={styles.flameScale}>
+                <FlameOrb state="idle" minimalGlow />
               </View>
+            </View>
 
-              <Text style={[authStyles.tagline, styles.taglineTight]}>Enter to continue your journey.</Text>
+            <Text style={[authStyles.tagline, styles.taglineTight]}>Enter to continue your journey.</Text>
 
-              <TextInput
-                placeholder="Email"
-                placeholderTextColor="#5B6B80"
-                value={email}
-                onChangeText={setEmail}
-                keyboardType="email-address"
-                autoCapitalize="none"
-                autoCorrect={false}
-                style={authStyles.input}
-              />
+            <TextInput
+              placeholder="Email"
+              placeholderTextColor="#5B6B80"
+              value={email}
+              onChangeText={setEmail}
+              keyboardType="email-address"
+              autoCapitalize="none"
+              autoCorrect={false}
+              style={authStyles.input}
+            />
 
-              <TextInput
-                placeholder="Password"
-                placeholderTextColor="#5B6B80"
-                value={password}
-                onChangeText={setPassword}
-                secureTextEntry
-                style={[authStyles.input, { marginBottom: 18 }]}
-                onSubmitEditing={handleLogin}
-              />
+            <TextInput
+              placeholder="Password"
+              placeholderTextColor="#5B6B80"
+              value={password}
+              onChangeText={setPassword}
+              secureTextEntry
+              style={[authStyles.input, { marginBottom: 18 }]}
+              onSubmitEditing={handleLogin}
+            />
 
-              {confirmEmailMessage && (
-                <Text style={styles.successText}>
-                  Check your email to confirm your account, then sign in below.
-                </Text>
-              )}
+            {confirmEmailMessage && (
+              <Text style={styles.successText}>
+                Check your email to confirm your account, then sign in below.
+              </Text>
+            )}
 
-              {error ? <Text style={authStyles.errorText}>{error}</Text> : null}
+            {error ? <Text style={authStyles.errorText}>{error}</Text> : null}
 
-              {error && error.includes('confirm your email') && email?.trim() ? (
-                <Pressable
-                  onPress={handleResendConfirmation}
-                  disabled={resendSent || resending}
-                  style={[authStyles.primaryButton, styles.button]}
-                >
-                  <Text style={authStyles.primaryButtonText}>
-                    {resendSent ? 'Confirmation email sent' : resending ? '...' : 'Resend confirmation email'}
-                  </Text>
-                </Pressable>
-              ) : null}
-
+            {error && error.includes('confirm your email') && email?.trim() ? (
               <Pressable
-                onPress={handleLogin}
-                disabled={loading}
+                onPress={handleResendConfirmation}
+                disabled={resendSent || resending}
                 style={[authStyles.primaryButton, styles.button]}
               >
                 <Text style={authStyles.primaryButtonText}>
-                  {loading ? '...' : 'Sign In →'}
+                  {resendSent ? 'Confirmation email sent' : resending ? '...' : 'Resend confirmation email'}
                 </Text>
               </Pressable>
+            ) : null}
 
-              <View style={authStyles.divider} />
+            <Pressable
+              onPress={handleLogin}
+              disabled={loading}
+              style={[authStyles.primaryButton, styles.button]}
+            >
+              <Text style={authStyles.primaryButtonText}>{loading ? '...' : 'Sign In →'}</Text>
+            </Pressable>
 
-              <Text style={authStyles.footerText}>
-                Don't have an account?{' '}
-                <Text style={authStyles.link} onPress={() => navigation.navigate('Register')}>
-                  Apply to join
-                </Text>
+            <View style={authStyles.divider} />
+
+            <Text style={authStyles.footerText}>
+              {"Don't have an account? "}
+              <Text style={authStyles.link} onPress={() => navigation.navigate('Register')}>
+                Apply to join
               </Text>
-            </View>
+            </Text>
           </View>
-        </KeyboardAvoidingView>
-      </View>
+        </ScrollView>
+      </KeyboardAvoidingView>
     </SafeAreaContainer>
   );
 };
@@ -178,24 +184,24 @@ export const LoginScreen: React.FC<{ navigation: any; route?: { params?: { confi
 const styles = StyleSheet.create({
   safeBg: {
     backgroundColor: '#05060D',
-  },
-  outerLock: {
     flex: 1,
-    height: '100%',
-    overflow: 'hidden',
-    backgroundColor: '#05060D',
-    justifyContent: 'center',
-    alignItems: 'center',
   },
   keyboard: {
     flex: 1,
     width: '100%',
+    backgroundColor: '#05060D',
   },
-  contentWrap: {
+  scroll: {
     flex: 1,
-    ...authStyles.fullScreen,
+    width: '100%',
+  },
+  scrollContent: {
+    flexGrow: 1,
     paddingVertical: 24,
     paddingHorizontal: 24,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingBottom: 40,
   },
   innerCentered: {
     alignItems: 'center',

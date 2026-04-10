@@ -9,8 +9,36 @@ import { supabase } from '@data/supabase/client';
 /**
  * Jessica — warm, friendly, conversational (ElevenLabs). Override with
  * EXPO_PUBLIC_ELEVENLABS_VOICE_ID or app config elevenLabsVoiceId if needed.
+ *
+ * **Credits / environment:** ElevenLabs is off in local dev (`__DEV__`) so Metro / `expo start`
+ * does not spend API credits. Production/release builds use ElevenLabs when configured.
+ * - `EXPO_PUBLIC_ELEVENLABS_TTS_IN_DEV=1` — force ElevenLabs while developing (optional).
+ * - `EXPO_PUBLIC_ELEVENLABS_TTS=0` — disable in any build (e.g. staging preview).
  */
 const DEFAULT_VOICE_ID = 'cgSgspJ2msm6clMCkdW9'; // Jessica — warm, friendly
+
+function parseEnvBool(v: string | undefined): boolean | undefined {
+  const s = String(v ?? '').trim().toLowerCase();
+  if (s === '1' || s === 'true' || s === 'yes') return true;
+  if (s === '0' || s === 'false' || s === 'no') return false;
+  return undefined;
+}
+
+/** True when ElevenLabs network TTS is allowed (production builds; not default __DEV__). */
+function isElevenLabsEnabledForEnvironment(): boolean {
+  const forceInDev = parseEnvBool(
+    typeof process !== 'undefined' ? process.env?.EXPO_PUBLIC_ELEVENLABS_TTS_IN_DEV : undefined
+  );
+  if (forceInDev === true) return true;
+
+  if (typeof __DEV__ !== 'undefined' && __DEV__) return false;
+
+  const explicit = parseEnvBool(
+    typeof process !== 'undefined' ? process.env?.EXPO_PUBLIC_ELEVENLABS_TTS : undefined
+  );
+  if (explicit === false) return false;
+  return true;
+}
 
 /** When false on iOS (default), use expo-speech so output stays on loudspeaker after recording (expo-av MP3 regresses to earpiece). Set EXPO_PUBLIC_IOS_ELEVENLABS_TTS_PLAYBACK=1 to force ElevenLabs MP3 on iOS. */
 function iosUseElevenLabsMp3Playback(): boolean {
@@ -222,6 +250,16 @@ export async function speakWithElevenLabs(
   await logAndApplyPlaybackModeForTts('speakWithElevenLabs:afterStop');
 
   const spokenText = applyAmoraeaPronunciation(text ?? '');
+  if (!spokenText.trim()) {
+    await speakFallback(spokenText, onFallback);
+    return;
+  }
+
+  if (!isElevenLabsEnabledForEnvironment()) {
+    await speakFallback(spokenText, onFallback);
+    return;
+  }
+
   const apiKey = getApiKey();
   const proxyUrl = getTtsProxyUrl();
   const useProxy = !apiKey && !!proxyUrl;
@@ -229,10 +267,8 @@ export async function speakWithElevenLabs(
   const voiceId = fromExtra?.elevenLabsVoiceId
     || (typeof process !== 'undefined' && process.env?.EXPO_PUBLIC_ELEVENLABS_VOICE_ID)
     || DEFAULT_VOICE_ID;
-  if ((!apiKey && !useProxy) || !spokenText.trim()) {
-    if (!apiKey && !useProxy) {
-      console.warn('ElevenLabs: No API key (EXPO_PUBLIC_ELEVENLABS_API_KEY or app config). Using fallback TTS — set the key for natural voice.');
-    }
+  if (!apiKey && !useProxy) {
+    console.warn('ElevenLabs: No API key (EXPO_PUBLIC_ELEVENLABS_API_KEY or app config). Using fallback TTS — set the key for natural voice.');
     await speakFallback(spokenText, onFallback);
     return;
   }
