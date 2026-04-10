@@ -1,11 +1,10 @@
 import React, { useEffect, useState } from 'react';
-import { View, StyleSheet, Text, ScrollView, Pressable, Platform, Linking } from 'react-native';
+import { View, StyleSheet, Text, ScrollView, Pressable, Platform } from 'react-native';
 import { SafeAreaContainer } from '@ui/components/SafeAreaContainer';
 import { Button } from '@ui/components/Button';
 import { FlameOrb } from '@app/screens/FlameOrb';
 import { authStyles } from '@app/screens/authStyles';
 import { Ionicons } from '@expo/vector-icons';
-import { LEGAL_PRIVACY_POLICY_URL, LEGAL_TERMS_OF_SERVICE_URL } from '../../../constants/legalUrls';
 
 const GOOGLE_FONTS_URL =
   'https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,300;0,400;1,300&family=Jost:wght@200;300;400&display=swap';
@@ -16,9 +15,7 @@ const BORDER = 'rgba(82,142,220,0.2)';
 const FLAME_MID = '#5BA8E8';
 const TEXT_PRIMARY = '#E8F0F8';
 const TEXT_SECONDARY = '#7A9ABE';
-const TEXT_MUTED = '#5A7394';
 const DOT = '#5BA8E8';
-const LINK = '#7AB8F0';
 
 const WHAT_TO_EXPECT = [
   'The interview takes approximately 20–30 minutes — three scenarios and two personal questions.',
@@ -31,12 +28,7 @@ const DATA_PRIVACY = [
   'This conversation will be recorded and processed by AI.',
   'Your voice is analyzed for communication style alongside your words.',
   'Your responses are stored and used to generate your profile and match you with others.',
-  'You can request deletion of your data at any time from account settings.',
 ] as const;
-
-function openUrl(url: string) {
-  Linking.openURL(url).catch(() => {});
-}
 
 function BulletRow({ children }: { children: React.ReactNode }) {
   return (
@@ -56,9 +48,8 @@ export const InterviewFramingScreen: React.FC<{ navigation: any; route: { params
   route,
 }) => {
   const { userId } = route.params;
-  const [agreeLegal, setAgreeLegal] = useState(false);
   const [confirmAge, setConfirmAge] = useState(false);
-  const canBegin = agreeLegal && confirmAge;
+  const canBegin = confirmAge;
 
   useEffect(() => {
     if (Platform.OS !== 'web' || typeof document === 'undefined') return;
@@ -104,28 +95,6 @@ export const InterviewFramingScreen: React.FC<{ navigation: any; route: { params
           <View style={styles.consentCard}>
             <Pressable
               style={styles.checkboxRow}
-              onPress={() => setAgreeLegal((v) => !v)}
-              accessibilityRole="checkbox"
-              accessibilityState={{ checked: agreeLegal }}
-            >
-              <View style={[styles.checkboxBox, agreeLegal && styles.checkboxBoxChecked]}>
-                {agreeLegal ? <Ionicons name="checkmark" size={16} color={BG} /> : null}
-              </View>
-              <Text style={styles.checkboxLabel}>
-                I agree to the{' '}
-                <Text style={styles.inlineLink} onPress={() => openUrl(LEGAL_PRIVACY_POLICY_URL)}>
-                  Privacy Policy
-                </Text>{' '}
-                and{' '}
-                <Text style={styles.inlineLink} onPress={() => openUrl(LEGAL_TERMS_OF_SERVICE_URL)}>
-                  Terms of Service
-                </Text>
-                , including recording and AI processing of my interview.
-              </Text>
-            </Pressable>
-
-            <Pressable
-              style={[styles.checkboxRow, styles.checkboxRowSecond]}
               onPress={() => setConfirmAge((v) => !v)}
               accessibilityRole="checkbox"
               accessibilityState={{ checked: confirmAge }}
@@ -144,14 +113,6 @@ export const InterviewFramingScreen: React.FC<{ navigation: any; route: { params
             style={styles.beginButton}
           />
 
-          <View style={styles.footerLinks}>
-            <Text style={styles.footerLink} onPress={() => openUrl(LEGAL_PRIVACY_POLICY_URL)}>
-              Privacy policy
-            </Text>
-            <Text style={styles.footerLink} onPress={() => openUrl(LEGAL_TERMS_OF_SERVICE_URL)}>
-              Terms of service
-            </Text>
-          </View>
         </ScrollView>
       </View>
     </SafeAreaContainer>
@@ -252,12 +213,6 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'flex-start',
   },
-  checkboxRowSecond: {
-    marginTop: 16,
-    paddingTop: 16,
-    borderTopWidth: 1,
-    borderTopColor: 'rgba(82,142,220,0.12)',
-  },
   checkboxBox: {
     width: 22,
     height: 22,
@@ -282,27 +237,8 @@ const styles = StyleSheet.create({
     color: TEXT_PRIMARY,
     lineHeight: 22,
   },
-  inlineLink: {
-    color: LINK,
-    textDecorationLine: Platform.OS === 'web' ? 'underline' : undefined,
-    fontWeight: '400',
-  },
   beginButton: {
     width: '100%',
     alignSelf: 'stretch',
-  },
-  footerLinks: {
-    flexDirection: 'row',
-    justifyContent: 'center',
-    alignItems: 'center',
-    marginTop: 20,
-  },
-  footerLink: {
-    fontFamily: FONT_UI,
-    fontSize: 13,
-    fontWeight: '300',
-    color: LINK,
-    marginHorizontal: 16,
-    textDecorationLine: Platform.OS === 'web' ? 'underline' : undefined,
   },
 });

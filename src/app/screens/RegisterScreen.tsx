@@ -114,12 +114,15 @@ export const RegisterScreen: React.FC<{ navigation: any }> = ({ navigation }) =>
           behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
           style={styles.keyboard}
         >
-          <ScrollView
-            keyboardShouldPersistTaps="handled"
-            showsVerticalScrollIndicator={false}
-            contentContainerStyle={styles.formScrollContent}
-          >
-            <View style={[authStyles.inner, styles.innerCentered]}>
+          {/* Full-width row so RN Web ScrollView content isn’t shrink-wrapped left */}
+          <View style={styles.formRow}>
+            <ScrollView
+              style={styles.formScroll}
+              keyboardShouldPersistTaps="handled"
+              showsVerticalScrollIndicator={false}
+              contentContainerStyle={styles.formScrollContent}
+            >
+              <View style={[authStyles.inner, styles.innerCentered]}>
               <TextInput
                 placeholder="Email"
                 placeholderTextColor="#5B6B80"
@@ -182,7 +185,8 @@ export const RegisterScreen: React.FC<{ navigation: any }> = ({ navigation }) =>
                 </Text>
               </Text>
             </View>
-          </ScrollView>
+            </ScrollView>
+          </View>
         </KeyboardAvoidingView>
       </View>
     </SafeAreaContainer>
@@ -198,8 +202,10 @@ const styles = StyleSheet.create({
     height: '100%',
     overflow: 'hidden',
     backgroundColor: '#05060D',
+    alignItems: 'center',
   },
   staticHeader: {
+    width: '100%',
     alignItems: 'center',
     paddingTop: 24,
     paddingHorizontal: 24,
@@ -214,13 +220,33 @@ const styles = StyleSheet.create({
   keyboard: {
     flex: 1,
     width: '100%',
+    alignSelf: 'stretch',
+  },
+  /** Stretch to viewport width so nested ScrollView isn’t content-sized (fixes web left alignment). */
+  formRow: {
+    flex: 1,
+    width: '100%',
+    alignItems: 'stretch',
+  },
+  formScroll: {
+    flexGrow: 1,
+    width: '100%',
   },
   formScrollContent: {
+    flexGrow: 1,
     paddingHorizontal: 24,
     paddingBottom: 40,
+    alignItems: 'center',
+    width: '100%',
   },
   innerCentered: {
     alignItems: 'center',
+    ...(Platform.OS === 'web'
+      ? ({
+          marginLeft: 'auto',
+          marginRight: 'auto',
+        } as const)
+      : { alignSelf: 'center' }),
   },
   flameWrap: {
     marginBottom: 12,

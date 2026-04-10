@@ -3925,6 +3925,7 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
   const { data: profile } = useQuery({
     queryKey: ['profile', userId],
     queryFn: () => profileRepository.getProfile(userId),
+    enabled: !!userId,
   });
   const queryClient = useQueryClient();
 
@@ -6415,6 +6416,12 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
         queryClient.invalidateQueries({ queryKey: ['profile', userId] });
       }
       await saveInterviewResults(fallbackResults, fallbackResults.gateResult!, userId);
+      const standardNoApi = isOnboarding && !!userId && !!profile && !profile.isAlphaTester;
+      if (standardNoApi) {
+        navigation.replace('PostInterview', { userId });
+        setStatus('results');
+        return;
+      }
       setInterviewStatus('congratulations');
       setStatus('results');
       return;
@@ -6457,6 +6464,22 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
       const gateResult = computeGateResult(parsed.pillarScores ?? {}, parsed.skepticismModifier ?? null);
       parsed.gateResult = gateResult;
       setResults(parsed);
+      /** Non–alpha testers: no in-app scores or analysis — branded PostInterview only. */
+      const isStandardOnboardingApplicant =
+        isOnboarding && !!userId && !!profile && !profile.isAlphaTester;
+      if (isStandardOnboardingApplicant) {
+        const gate1Score = buildGate1ScoreFromResults(parsed);
+        await profileRepository.upsertProfile(userId, {
+          gate1Score,
+          applicationStatus: gate1Score.passed ? 'approved' : 'under_review',
+          ...(gate1Score.passed ? { onboardingStage: 'basic_info' as const } : {}),
+        });
+        queryClient.invalidateQueries({ queryKey: ['profile', userId] });
+        await saveInterviewResults(parsed, gateResult, userId);
+        navigation.replace('PostInterview', { userId });
+        setStatus('results');
+        return;
+      }
       await remoteLog('[3] Scoring complete', {
         weightedScore: gateResult?.weightedScore,
         passed: gateResult?.pass,
@@ -6938,10 +6961,26 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
         queryClient.invalidateQueries({ queryKey: ['profile', userId] });
       }
       await saveInterviewResults(fallbackResults, fallbackResults.gateResult!, userId);
+      const standardCatch = isOnboarding && !!userId && !!profile && !profile.isAlphaTester;
+      if (standardCatch) {
+        navigation.replace('PostInterview', { userId });
+        setStatus('results');
+        return;
+      }
       setInterviewStatus('congratulations');
       setStatus('results');
     }
-  }, [typologyContext, route.name, userId, navigation, queryClient, saveInterviewResults, ensureValidSession, scoreScenario]);
+  }, [
+    typologyContext,
+    route.name,
+    userId,
+    navigation,
+    queryClient,
+    saveInterviewResults,
+    ensureValidSession,
+    scoreScenario,
+    profile,
+  ]);
 
   // When INTERVIEW_COMPLETE was detected while TTS was still playing, transition to loading once TTS finishes
   useEffect(() => {

@@ -32,6 +32,8 @@ export interface Profile {
   location: Location | null;
   primaryPhotoUrl: string | null;
   inviteCode: string | null;
+  /** True when account used the alpha tester referral code — sees scoring/analysis UX after interview. */
+  isAlphaTester: boolean;
   /** Up to 3 prompt answers (UX only). */
   prompts: ProfilePromptAnswer[];
 

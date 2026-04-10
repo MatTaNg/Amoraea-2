@@ -301,6 +301,7 @@ export class ProfileRepository {
     location_label: string | null;
     primary_photo_url: string | null;
     invite_code?: string | null;
+    is_alpha_tester?: boolean | null;
     profile_prompts?: unknown;
     onboarding_stage?: string | null;
     application_status?: string | null;
@@ -337,6 +338,7 @@ export class ProfileRepository {
       location,
       primaryPhotoUrl: data.primary_photo_url,
       inviteCode: data.invite_code ?? null,
+      isAlphaTester: data.is_alpha_tester === true,
       prompts: parseProfilePrompts(data.profile_prompts),
       onboardingStage: parseOnboardingStage(data.onboarding_stage),
       applicationStatus: parseApplicationStatus(data.application_status),

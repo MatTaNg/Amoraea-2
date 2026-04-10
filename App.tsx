@@ -9,7 +9,7 @@ import { LoginScreen } from './src/app/screens/LoginScreen';
 import { RegisterScreen } from './src/app/screens/RegisterScreen';
 import { Stage1BasicInfoScreen } from './src/app/screens/onboarding/Stage1BasicInfoScreen';
 import { InterviewFramingScreen } from './src/app/screens/onboarding/InterviewFramingScreen';
-import { PostInterviewScreen } from './src/app/screens/onboarding/PostInterviewScreen';
+import { PostInterviewScreen } from '@app/screens/onboarding/PostInterviewScreen';
 import { UnderReviewScreen } from './src/app/screens/onboarding/UnderReviewScreen';
 import { Gate2ReentryScreen } from './src/app/screens/onboarding/Gate2ReentryScreen';
 import { Stage3PsychometricsScreen } from './src/app/screens/onboarding/Stage3PsychometricsScreen';
@@ -149,6 +149,7 @@ const GatesOnboardingNavigator = ({ userId }: { userId: string }) => {
   const initialRoute = useMemo(() => getOnboardingInitialRoute(profile ?? {}), [profile]);
   return (
     <Stack.Navigator
+      key={initialRoute}
       initialRouteName={initialRoute}
       screenOptions={{
         headerShown: true,
