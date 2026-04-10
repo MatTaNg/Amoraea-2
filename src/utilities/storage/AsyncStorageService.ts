@@ -4,6 +4,7 @@ import { OnboardingState } from '@domain/models/OnboardingState';
 const ONBOARDING_STATE_KEY = '@amoraea:onboarding_state';
 const RETRY_QUEUE_KEY = '@amoraea:retry_queue';
 const CONNECTED_NETWORKS_KEY = '@amoraea:connected_networks';
+const INTERVIEW_FRAMING_ACK_KEY = '@amoraea:interview_framing_ack';
 
 export interface RetryQueueItem {
   userId: string;
@@ -97,6 +98,24 @@ export class AsyncStorageService {
       return data ? JSON.parse(data) : [];
     } catch (error) {
       return [];
+    }
+  }
+
+  /** Set after the user taps "Begin interview" on Interview Framing so that screen is not shown again on next launch. */
+  async setInterviewFramingAcknowledged(userId: string): Promise<void> {
+    try {
+      await AsyncStorage.setItem(`${INTERVIEW_FRAMING_ACK_KEY}:${userId}`, '1');
+    } catch {
+      // best-effort
+    }
+  }
+
+  async getInterviewFramingAcknowledged(userId: string): Promise<boolean> {
+    try {
+      const v = await AsyncStorage.getItem(`${INTERVIEW_FRAMING_ACK_KEY}:${userId}`);
+      return v === '1';
+    } catch {
+      return false;
     }
   }
 }

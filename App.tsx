@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, Suspense, lazy } from 'react';
+import React, { useEffect, useMemo, useState, Suspense, lazy } from 'react';
 import { Platform } from 'react-native';
 import { NavigationContainer, DarkTheme } from '@react-navigation/native';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
@@ -118,26 +118,33 @@ const ALPHA_MODE = true;
 /** Gate-based onboarding: Interview first → (when approved) Basic Info → Psychometrics → Compatibility → Complete.
  *  Skip basic info modals for now — go straight to AI interview; basic info screens remain available for later use.
  *  When ALPHA_MODE, keep users on OnboardingInterview after completion so they see the analysis screen. */
-function getOnboardingInitialRoute(profile: { onboardingStage?: string; applicationStatus?: string; gate1Score?: unknown }): string {
+function getOnboardingInitialRoute(
+  profile: { onboardingStage?: string; applicationStatus?: string; gate1Score?: unknown },
+  hasAcknowledgedInterviewFraming: boolean
+): string {
   const stage = profile.onboardingStage ?? 'interview';
+  let route: string;
   if (stage === 'basic_info') {
-    if (ALPHA_MODE) return 'InterviewFraming';
-    if (profile.gate1Score && profile.applicationStatus === 'approved') return 'Stage1BasicInfo';
-    return 'InterviewFraming';
+    if (ALPHA_MODE) route = 'InterviewFraming';
+    else if (profile.gate1Score && profile.applicationStatus === 'approved') route = 'Stage1BasicInfo';
+    else route = 'InterviewFraming';
+  } else if (stage === 'interview') {
+    if (!ALPHA_MODE && profile.applicationStatus === 'approved') route = 'Stage1BasicInfo';
+    else if (!ALPHA_MODE && profile.gate1Score) route = 'PostInterview';
+    else route = 'InterviewFraming';
+  } else if (stage === 'psychometrics') {
+    if (profile.applicationStatus === 'approved') route = 'Gate2Reentry';
+    else if (profile.applicationStatus === 'under_review') route = 'UnderReview';
+    else route = 'PostInterview';
+  } else if (stage === 'compatibility') route = 'Stage4Compatibility';
+  else if (stage === 'complete') route = 'Stage1BasicInfo'; // should not be used; main app shown
+  else route = 'InterviewFraming';
+
+  if (route === 'InterviewFraming' && hasAcknowledgedInterviewFraming) {
+    if (stage === 'basic_info') return 'Stage1BasicInfo';
+    return 'OnboardingInterview';
   }
-  if (stage === 'interview') {
-    if (!ALPHA_MODE && profile.applicationStatus === 'approved') return 'Stage1BasicInfo';
-    if (!ALPHA_MODE && profile.gate1Score) return 'PostInterview';
-    return 'InterviewFraming';
-  }
-  if (stage === 'psychometrics') {
-    if (profile.applicationStatus === 'approved') return 'Gate2Reentry';
-    if (profile.applicationStatus === 'under_review') return 'UnderReview';
-    return 'PostInterview';
-  }
-  if (stage === 'compatibility') return 'Stage4Compatibility';
-  if (stage === 'complete') return 'Stage1BasicInfo'; // should not be used; main app shown
-  return 'InterviewFraming';
+  return route;
 }
 
 const GatesOnboardingNavigator = ({ userId }: { userId: string }) => {
@@ -146,7 +153,25 @@ const GatesOnboardingNavigator = ({ userId }: { userId: string }) => {
     queryFn: () => profileRepository.getProfile(userId),
     enabled: !!userId,
   });
-  const initialRoute = useMemo(() => getOnboardingInitialRoute(profile ?? {}), [profile]);
+  const [interviewFramingAck, setInterviewFramingAck] = useState<boolean | null>(null);
+  useEffect(() => {
+    let cancelled = false;
+    setInterviewFramingAck(null);
+    if (!userId) return;
+    void storageService.getInterviewFramingAcknowledged(userId).then((ack) => {
+      if (!cancelled) setInterviewFramingAck(ack);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [userId]);
+  const initialRoute = useMemo(
+    () => getOnboardingInitialRoute(profile ?? {}, interviewFramingAck ?? false),
+    [profile, interviewFramingAck]
+  );
+  if (interviewFramingAck === null) {
+    return <LoadingScreen />;
+  }
   return (
     <Stack.Navigator
       key={initialRoute}

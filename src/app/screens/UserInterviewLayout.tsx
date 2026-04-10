@@ -10,6 +10,7 @@ import {
   Linking,
   Modal,
   ScrollView,
+  type ViewStyle,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { FlameOrb, type FlameState } from './FlameOrb';
@@ -37,7 +38,7 @@ export interface ActiveScenario {
 
 interface UserInterviewLayoutProps {
   flameState: FlameState;
-  /** Press-and-hold scenario reference: only enabled when parent sets true (scenario fully delivered, not during intro/transition). */
+  /** Web: hover Show scenario to peek (modal only while pointer is on the button). Native: press-and-hold. Only when parent sets true (scenario delivered, not during intro/transition). */
   showScenarioReferenceEnabled: boolean;
   /** Scenario vignette text committed after delivery (modal body). */
   referenceCardScenario: ActiveScenario | null;
@@ -67,6 +68,11 @@ interface UserInterviewLayoutProps {
 const GOOGLE_FONTS_URL =
   "https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,300;0,400;1,300&family=Jost:wght@200;300;400&display=swap";
 
+/** Web only: scenario reference modal text should not be selectable/copyable. */
+const WEB_MODAL_NO_COPY = (Platform.OS === 'web'
+  ? { userSelect: 'none', WebkitUserSelect: 'none' }
+  : {}) as ViewStyle;
+
 export const UserInterviewLayout: React.FC<UserInterviewLayoutProps> = ({
   flameState,
   showScenarioReferenceEnabled,
@@ -88,6 +94,7 @@ export const UserInterviewLayout: React.FC<UserInterviewLayoutProps> = ({
 }) => {
   const [refCardOpen, setRefCardOpen] = useState(false);
   const rippleAnim = useRef(new Animated.Value(0)).current;
+  const dbgHoverSeq = useRef(0);
 
   useEffect(() => {
     if (Platform.OS !== 'web' || typeof document === 'undefined') return;
@@ -99,6 +106,42 @@ export const UserInterviewLayout: React.FC<UserInterviewLayoutProps> = ({
       if (link.parentNode) link.parentNode.removeChild(link);
     };
   }, []);
+
+  // #region agent log
+  useEffect(() => {
+    if (Platform.OS !== 'web') return;
+    fetch('http://127.0.0.1:7789/ingest/668e0bd5-3283-4492-9f48-e33846c18218', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'X-Debug-Session-Id': 'e70f17' },
+      body: JSON.stringify({
+        sessionId: 'e70f17',
+        location: 'UserInterviewLayout.tsx:refCardOpen',
+        message: 'refCardOpen changed',
+        data: { refCardOpen, hypothesisId: 'C' },
+        timestamp: Date.now(),
+      }),
+    }).catch(() => {});
+  }, [refCardOpen]);
+
+  useEffect(() => {
+    if (Platform.OS !== 'web') return;
+    fetch('http://127.0.0.1:7789/ingest/668e0bd5-3283-4492-9f48-e33846c18218', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'X-Debug-Session-Id': 'e70f17' },
+      body: JSON.stringify({
+        sessionId: 'e70f17',
+        location: 'UserInterviewLayout.tsx:scenarioContent',
+        message: 'scenario label/text deps changed',
+        data: {
+          label: referenceCardScenario?.label ?? null,
+          textLen: referenceCardScenario?.text?.length ?? 0,
+          hypothesisId: 'D',
+        },
+        timestamp: Date.now(),
+      }),
+    }).catch(() => {});
+  }, [referenceCardScenario?.label, referenceCardScenario?.text]);
+  // #endregion
 
   useEffect(() => {
     if (voiceState !== 'listening' && voiceState !== 'recording') return;
@@ -218,7 +261,9 @@ export const UserInterviewLayout: React.FC<UserInterviewLayoutProps> = ({
 
           {ttsFallbackActive ? (
             <Text style={styles.ttsFallbackNotice}>
-              ◆ Audio unavailable — hold Show scenario to read the question, then speak when ready
+              {Platform.OS === 'web'
+                ? '◆ Audio unavailable — hover Show scenario to read the question, then speak when ready'
+                : '◆ Audio unavailable — hold Show scenario to read the question, then speak when ready'}
             </Text>
           ) : null}
 
@@ -309,25 +354,74 @@ export const UserInterviewLayout: React.FC<UserInterviewLayoutProps> = ({
           <Pressable
             accessibilityRole="button"
             accessibilityLabel="Show scenario"
-            accessibilityHint="Press and hold to view the current scenario reference"
+            accessibilityHint={
+              Platform.OS === 'web'
+                ? 'Hover to view the scenario reference; it closes when the pointer leaves this button'
+                : 'Press and hold to view the current scenario reference'
+            }
             accessibilityState={{ disabled: !showScenarioReferenceEnabled }}
             disabled={!showScenarioReferenceEnabled}
-            delayLongPress={450}
-            onLongPress={() => {
-              if (!showScenarioReferenceEnabled || !referenceCardScenario) return;
-              setRefCardOpen(true);
+            {...(Platform.OS === 'web'
+              ? {
+                  onHoverIn: () => {
+                    // #region agent log
+                    const n = ++dbgHoverSeq.current;
+                    fetch('http://127.0.0.1:7789/ingest/668e0bd5-3283-4492-9f48-e33846c18218', {
+                      method: 'POST',
+                      headers: { 'Content-Type': 'application/json', 'X-Debug-Session-Id': 'e70f17' },
+                      body: JSON.stringify({
+                        sessionId: 'e70f17',
+                        location: 'UserInterviewLayout.tsx:hoverIn',
+                        message: 'showScenario hoverIn',
+                        data: {
+                          seq: n,
+                          enabled: showScenarioReferenceEnabled,
+                          hasScenario: !!referenceCardScenario,
+                          hypothesisId: 'B',
+                        },
+                        timestamp: Date.now(),
+                      }),
+                    }).catch(() => {});
+                    // #endregion
+                    if (!showScenarioReferenceEnabled || !referenceCardScenario) return;
+                    setRefCardOpen(true);
+                  },
+                  onHoverOut: () => {
+                    // #region agent log
+                    const n = ++dbgHoverSeq.current;
+                    fetch('http://127.0.0.1:7789/ingest/668e0bd5-3283-4492-9f48-e33846c18218', {
+                      method: 'POST',
+                      headers: { 'Content-Type': 'application/json', 'X-Debug-Session-Id': 'e70f17' },
+                      body: JSON.stringify({
+                        sessionId: 'e70f17',
+                        location: 'UserInterviewLayout.tsx:hoverOut',
+                        message: 'showScenario hoverOut',
+                        data: { seq: n, hypothesisId: 'A' },
+                        timestamp: Date.now(),
+                      }),
+                    }).catch(() => {});
+                    // #endregion
+                    setRefCardOpen(false);
+                  },
+                }
+              : {
+                  delayLongPress: 450,
+                  onLongPress: () => {
+                    if (!showScenarioReferenceEnabled || !referenceCardScenario) return;
+                    setRefCardOpen(true);
+                  },
+                  onPressOut: () => {
+                    setRefCardOpen(false);
+                  },
+                })}
+            style={(state) => {
+              const hovered = Platform.OS === 'web' && (state as { hovered?: boolean }).hovered;
+              return [
+                styles.showScenarioButton,
+                !showScenarioReferenceEnabled && styles.showScenarioButtonDisabled,
+                showScenarioReferenceEnabled && (state.pressed || hovered) && styles.showScenarioButtonPressed,
+              ];
             }}
-            onPress={() => {
-              /* tap intentionally does nothing */
-            }}
-            onPressOut={() => {
-              setRefCardOpen(false);
-            }}
-            style={({ pressed }) => [
-              styles.showScenarioButton,
-              !showScenarioReferenceEnabled && styles.showScenarioButtonDisabled,
-              showScenarioReferenceEnabled && pressed && styles.showScenarioButtonPressed,
-            ]}
           >
             <Text
               style={[
@@ -339,33 +433,81 @@ export const UserInterviewLayout: React.FC<UserInterviewLayoutProps> = ({
             </Text>
           </Pressable>
 
-          <Modal
-            visible={refCardOpen && !!referenceCardScenario}
-            transparent
-            animationType="fade"
-            onRequestClose={() => setRefCardOpen(false)}
-          >
-            <View style={styles.refModalOverlay}>
-              <View style={styles.refModalCard}>
-                <Text style={styles.refModalLabel}>◆ {referenceCardScenario?.label ?? ''}</Text>
-                <ScrollView
-                  style={styles.refModalScroll}
-                  contentContainerStyle={styles.refModalScrollContent}
-                  showsVerticalScrollIndicator={false}
+          {/* Native only: RN Modal. Web uses inline overlay — Modal portal breaks hover on Show scenario (logs e70f17 ~20ms hoverOut after hoverIn). */}
+          {Platform.OS !== 'web' ? (
+            <Modal
+              visible={refCardOpen && !!referenceCardScenario}
+              transparent
+              animationType="fade"
+              onRequestClose={() => {
+                // #region agent log
+                fetch('http://127.0.0.1:7789/ingest/668e0bd5-3283-4492-9f48-e33846c18218', {
+                  method: 'POST',
+                  headers: { 'Content-Type': 'application/json', 'X-Debug-Session-Id': 'e70f17' },
+                  body: JSON.stringify({
+                    sessionId: 'e70f17',
+                    location: 'UserInterviewLayout.tsx:onRequestClose',
+                    message: 'Modal onRequestClose',
+                    data: { hypothesisId: 'E' },
+                    timestamp: Date.now(),
+                  }),
+                }).catch(() => {});
+                // #endregion
+                setRefCardOpen(false);
+              }}
+            >
+              <View style={styles.refModalRoot} pointerEvents="auto">
+                <Pressable
+                  style={[styles.refModalOverlay, WEB_MODAL_NO_COPY]}
+                  onPress={() => setRefCardOpen(false)}
                 >
-                  <Text style={styles.refModalScenarioText}>{referenceCardScenario?.text ?? ''}</Text>
-                </ScrollView>
-                {referenceCardPrompt ? (
-                  <>
-                    <View style={styles.refModalSeparator} />
-                    <Text style={styles.refModalPromptText}>{referenceCardPrompt}</Text>
-                  </>
-                ) : null}
+                  <Pressable style={[styles.refModalCard, WEB_MODAL_NO_COPY]} onPress={() => {}} accessible={false}>
+                    <Text style={[styles.refModalLabel, WEB_MODAL_NO_COPY]}>◆ {referenceCardScenario?.label ?? ''}</Text>
+                    <ScrollView
+                      style={[styles.refModalScroll, WEB_MODAL_NO_COPY]}
+                      contentContainerStyle={[styles.refModalScrollContent, WEB_MODAL_NO_COPY]}
+                      showsVerticalScrollIndicator={false}
+                    >
+                      <Text style={[styles.refModalScenarioText, WEB_MODAL_NO_COPY]}>
+                        {referenceCardScenario?.text ?? ''}
+                      </Text>
+                    </ScrollView>
+                    {referenceCardPrompt ? (
+                      <>
+                        <View style={styles.refModalSeparator} />
+                        <Text style={[styles.refModalPromptText, WEB_MODAL_NO_COPY]}>{referenceCardPrompt}</Text>
+                      </>
+                    ) : null}
+                  </Pressable>
+                </Pressable>
               </View>
-            </View>
-          </Modal>
+            </Modal>
+          ) : null}
         </View>
       </View>
+
+      {Platform.OS === 'web' && refCardOpen && referenceCardScenario ? (
+        <View style={styles.refModalWebLayer} pointerEvents="none">
+          <View style={[styles.refModalOverlay, WEB_MODAL_NO_COPY]}>
+            <Pressable style={[styles.refModalCard, WEB_MODAL_NO_COPY]} onPress={() => {}} accessible={false}>
+              <Text style={[styles.refModalLabel, WEB_MODAL_NO_COPY]}>◆ {referenceCardScenario?.label ?? ''}</Text>
+              <ScrollView
+                style={[styles.refModalScroll, WEB_MODAL_NO_COPY]}
+                contentContainerStyle={[styles.refModalScrollContent, WEB_MODAL_NO_COPY]}
+                showsVerticalScrollIndicator={false}
+              >
+                <Text style={[styles.refModalScenarioText, WEB_MODAL_NO_COPY]}>{referenceCardScenario?.text ?? ''}</Text>
+              </ScrollView>
+              {referenceCardPrompt ? (
+                <>
+                  <View style={styles.refModalSeparator} />
+                  <Text style={[styles.refModalPromptText, WEB_MODAL_NO_COPY]}>{referenceCardPrompt}</Text>
+                </>
+              ) : null}
+            </Pressable>
+          </View>
+        </View>
+      ) : null}
 
       {Platform.OS === 'web' && (
         <style>{`
@@ -522,6 +664,14 @@ const styles = StyleSheet.create({
   },
   showScenarioButtonLabelDisabled: {
     color: TEXT_DIM,
+  },
+  /** Web: scenario layer lives in pageWrapper (not Modal) so hover is not lost to a portal. */
+  refModalWebLayer: {
+    ...StyleSheet.absoluteFillObject,
+    zIndex: 10000,
+  },
+  refModalRoot: {
+    flex: 1,
   },
   refModalOverlay: {
     flex: 1,

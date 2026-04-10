@@ -5,6 +5,9 @@ import { Button } from '@ui/components/Button';
 import { FlameOrb } from '@app/screens/FlameOrb';
 import { authStyles } from '@app/screens/authStyles';
 import { Ionicons } from '@expo/vector-icons';
+import { AsyncStorageService } from '@utilities/storage/AsyncStorageService';
+
+const storageService = new AsyncStorageService();
 
 const GOOGLE_FONTS_URL =
   'https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,300;0,400;1,300&family=Jost:wght@200;300;400&display=swap';
@@ -40,7 +43,8 @@ function BulletRow({ children }: { children: React.ReactNode }) {
 }
 
 /**
- * Pre-interview consent and expectations. Required before `OnboardingInterview`; not skippable via routing.
+ * Pre-interview consent and expectations. Required before the first `OnboardingInterview` session.
+ * After the user taps "Begin interview", acknowledgment is stored locally so this screen is not used again on cold start.
  * `AriaScreen` skips its legacy intro + consent for `OnboardingInterview` only (this screen replaces them).
  */
 export const InterviewFramingScreen: React.FC<{ navigation: any; route: { params: { userId: string } } }> = ({
@@ -108,7 +112,10 @@ export const InterviewFramingScreen: React.FC<{ navigation: any; route: { params
 
           <Button
             title="Begin interview"
-            onPress={() => navigation.replace('OnboardingInterview', { userId })}
+            onPress={async () => {
+              await storageService.setInterviewFramingAcknowledged(userId);
+              navigation.replace('OnboardingInterview', { userId });
+            }}
             disabled={!canBegin}
             style={styles.beginButton}
           />

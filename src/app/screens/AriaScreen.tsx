@@ -6216,7 +6216,7 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
 
       const lastMessage = extractLastInterviewerMessage(restoredMessages);
       const welcomeBack = lastMessage
-        ? `Welcome back. Let's pick up where we left off. When we left off, I said — ${lastMessage}`
+        ? `Welcome back. Let's pick up where we left off. ${lastMessage}`
         : "Welcome back. Let's pick up where we left off.";
       const welcomeMsg = { role: 'assistant', content: welcomeBack, isWelcomeBack: true };
       setMessages([...fullMessages, welcomeMsg]);
