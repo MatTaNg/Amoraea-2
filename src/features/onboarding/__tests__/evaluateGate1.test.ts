@@ -33,6 +33,29 @@ describe('evaluateGate1', () => {
     expect(r.averageScore).toBe(6);
   });
 
+  it('passes when average exactly at threshold 6.5', () => {
+    const r = evaluateGate1({
+      pillarScores: mk(6.5),
+    });
+    expect(r.passed).toBe(true);
+    expect(r.averageScore).toBe(6.5);
+  });
+
+  it('fails when average just below 6.5', () => {
+    const r = evaluateGate1({
+      pillarScores: mk(6.49),
+    });
+    expect(r.passed).toBe(false);
+    expect(r.failReasons.some((s) => s.includes('averageScore'))).toBe(true);
+  });
+
+  it('passes when Repair exactly at minimum 6', () => {
+    const r = evaluateGate1({
+      pillarScores: { ...mk(7), repair: 6 },
+    });
+    expect(r.passed).toBe(true);
+  });
+
   it('fails when Repair below 6', () => {
     const r = evaluateGate1({
       pillarScores: { ...mk(7), repair: 5 },

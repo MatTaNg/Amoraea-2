@@ -58,6 +58,7 @@ import { ProfileRepository } from './src/data/repositories/ProfileRepository';
 import { InviteCodeRepository } from './src/data/repositories/InviteCodeRepository';
 import { OnboardingUseCase } from './src/domain/useCases/OnboardingUseCase';
 import { AsyncStorageService } from './src/utilities/storage/AsyncStorageService';
+import { getOnboardingInitialRoute } from './src/app/navigation/onboardingInitialRoute';
 import { supabase } from './src/data/supabase/client';
 import { useQuery } from '@tanstack/react-query';
 import { StyleSheet, View, Text, ActivityIndicator } from 'react-native';
@@ -113,40 +114,6 @@ const OnboardingNavigator = ({ userId }: { userId: string }) => (
   </Stack.Navigator>
 );
 
-const ALPHA_MODE = true;
-
-/** Gate-based onboarding: Interview first → (when approved) Basic Info → Psychometrics → Compatibility → Complete.
- *  Skip basic info modals for now — go straight to AI interview; basic info screens remain available for later use.
- *  When ALPHA_MODE, keep users on OnboardingInterview after completion so they see the analysis screen. */
-function getOnboardingInitialRoute(
-  profile: { onboardingStage?: string; applicationStatus?: string; gate1Score?: unknown },
-  hasAcknowledgedInterviewFraming: boolean
-): string {
-  const stage = profile.onboardingStage ?? 'interview';
-  let route: string;
-  if (stage === 'basic_info') {
-    if (ALPHA_MODE) route = 'InterviewFraming';
-    else if (profile.gate1Score && profile.applicationStatus === 'approved') route = 'Stage1BasicInfo';
-    else route = 'InterviewFraming';
-  } else if (stage === 'interview') {
-    if (!ALPHA_MODE && profile.applicationStatus === 'approved') route = 'Stage1BasicInfo';
-    else if (!ALPHA_MODE && profile.gate1Score) route = 'PostInterview';
-    else route = 'InterviewFraming';
-  } else if (stage === 'psychometrics') {
-    if (profile.applicationStatus === 'approved') route = 'Gate2Reentry';
-    else if (profile.applicationStatus === 'under_review') route = 'UnderReview';
-    else route = 'PostInterview';
-  } else if (stage === 'compatibility') route = 'Stage4Compatibility';
-  else if (stage === 'complete') route = 'Stage1BasicInfo'; // should not be used; main app shown
-  else route = 'InterviewFraming';
-
-  if (route === 'InterviewFraming' && hasAcknowledgedInterviewFraming) {
-    if (stage === 'basic_info') return 'Stage1BasicInfo';
-    return 'OnboardingInterview';
-  }
-  return route;
-}
-
 const GatesOnboardingNavigator = ({ userId }: { userId: string }) => {
   const { data: profile } = useQuery({
     queryKey: ['profile', userId],
@@ -166,7 +133,10 @@ const GatesOnboardingNavigator = ({ userId }: { userId: string }) => {
     };
   }, [userId]);
   const initialRoute = useMemo(
-    () => getOnboardingInitialRoute(profile ?? {}, interviewFramingAck ?? false),
+    () =>
+      getOnboardingInitialRoute(profile ?? {}, {
+        hasAcknowledgedInterviewFraming: interviewFramingAck ?? false,
+      }),
     [profile, interviewFramingAck]
   );
   if (interviewFramingAck === null) {

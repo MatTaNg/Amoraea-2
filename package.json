@@ -13,6 +13,7 @@
     "build:web": "expo export -p web",
     "test": "jest",
     "test:watch": "jest --watch",
+    "test:coverage": "jest --coverage",
     "db:push": "supabase db push",
     "reprocess-style-labels": "npx tsx --env-file=.env scripts/reprocess-style-labels.node.ts",
     "reprocess-style-labels:deno": "deno run --allow-net --allow-env --allow-read scripts/reprocess-style-labels.ts",

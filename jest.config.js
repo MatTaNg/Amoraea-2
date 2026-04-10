@@ -18,5 +18,7 @@ module.exports = {
     '!src/**/*.stories.{ts,tsx}',
     '!src/**/__tests__/**',
   ],
+  coverageDirectory: 'coverage',
+  coverageReporters: ['text', 'text-summary', 'lcov', 'html'],
 };
 

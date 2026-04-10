@@ -4,6 +4,7 @@ import * as FileSystem from 'expo-file-system';
 import { Audio } from 'expo-av';
 import * as Speech from 'expo-speech';
 import { logAndApplyPlaybackModeForTts } from './audioModeHelpers';
+import { computeElevenLabsEnabled } from './elevenLabsEnvGating';
 import { supabase } from '@data/supabase/client';
 
 /**
@@ -17,27 +18,17 @@ import { supabase } from '@data/supabase/client';
  */
 const DEFAULT_VOICE_ID = 'cgSgspJ2msm6clMCkdW9'; // Jessica — warm, friendly
 
-function parseEnvBool(v: string | undefined): boolean | undefined {
-  const s = String(v ?? '').trim().toLowerCase();
-  if (s === '1' || s === 'true' || s === 'yes') return true;
-  if (s === '0' || s === 'false' || s === 'no') return false;
-  return undefined;
-}
-
 /** True when ElevenLabs network TTS is allowed (production builds; not default __DEV__). */
 function isElevenLabsEnabledForEnvironment(): boolean {
-  const forceInDev = parseEnvBool(
-    typeof process !== 'undefined' ? process.env?.EXPO_PUBLIC_ELEVENLABS_TTS_IN_DEV : undefined
-  );
-  if (forceInDev === true) return true;
-
-  if (typeof __DEV__ !== 'undefined' && __DEV__) return false;
-
-  const explicit = parseEnvBool(
-    typeof process !== 'undefined' ? process.env?.EXPO_PUBLIC_ELEVENLABS_TTS : undefined
-  );
-  if (explicit === false) return false;
-  return true;
+  return computeElevenLabsEnabled({
+    isDevBundle: typeof __DEV__ !== 'undefined' && __DEV__,
+    env: {
+      EXPO_PUBLIC_ELEVENLABS_TTS_IN_DEV:
+        typeof process !== 'undefined' ? process.env?.EXPO_PUBLIC_ELEVENLABS_TTS_IN_DEV : undefined,
+      EXPO_PUBLIC_ELEVENLABS_TTS:
+        typeof process !== 'undefined' ? process.env?.EXPO_PUBLIC_ELEVENLABS_TTS : undefined,
+    },
+  });
 }
 
 /** When false on iOS (default), use expo-speech so output stays on loudspeaker after recording (expo-av MP3 regresses to earpiece). Set EXPO_PUBLIC_IOS_ELEVENLABS_TTS_PLAYBACK=1 to force ElevenLabs MP3 on iOS. */
