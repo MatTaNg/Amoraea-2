@@ -1,0 +1,15 @@
+# Requires a dev build with Metro or a release build; Maestro CLI installed.
+# iOS: maestro test maestro/login-smoke.yaml
+appId: com.amoraea.app
+---
+- launchApp
+- assertVisible:
+    id: login-email-input
+- tapOn:
+    id: login-email-input
+- inputText: "e2e-smoke@example.com"
+- tapOn:
+    id: login-password-input
+- inputText: "test-password-placeholder"
+- tapOn:
+    id: login-submit-button

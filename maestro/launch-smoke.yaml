@@ -1,0 +1,6 @@
+# Requires Maestro CLI and a built app: https://maestro.mobile.dev/
+# iOS: maestro test maestro/launch-smoke.yaml
+# Android: same with dev build installed (package com.amoraea.app).
+appId: com.amoraea.app
+---
+- launchApp

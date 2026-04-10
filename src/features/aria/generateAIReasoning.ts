@@ -70,7 +70,8 @@ COMMITMENT_THRESHOLD INTERNAL INCONSISTENCY (when present in user payload): When
 Respond ONLY with valid JSON. No preamble, no markdown, no backticks.
 Do not truncate any field. Do not write placeholder text.`;
 
-function buildUserPrompt(
+/** Exported for unit tests (prompt shape / transcript formatting). */
+export function buildUserPrompt(
   pillarScores: Record<string, number>,
   scenarioScores: Record<number, { pillarScores: Record<string, number>; scenarioName?: string } | undefined>,
   transcript: Array<{ role: string; content?: string }>,

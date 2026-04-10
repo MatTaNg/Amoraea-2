@@ -118,6 +118,7 @@ export const LoginScreen: React.FC<{ navigation: any; route?: { params?: { confi
             <Text style={[authStyles.tagline, styles.taglineTight]}>Enter to continue your journey.</Text>
 
             <TextInput
+              testID="login-email-input"
               placeholder="Email"
               placeholderTextColor="#5B6B80"
               value={email}
@@ -129,6 +130,7 @@ export const LoginScreen: React.FC<{ navigation: any; route?: { params?: { confi
             />
 
             <TextInput
+              testID="login-password-input"
               placeholder="Password"
               placeholderTextColor="#5B6B80"
               value={password}
@@ -159,6 +161,7 @@ export const LoginScreen: React.FC<{ navigation: any; route?: { params?: { confi
             ) : null}
 
             <Pressable
+              testID="login-submit-button"
               onPress={handleLogin}
               disabled={loading}
               style={[authStyles.primaryButton, styles.button]}

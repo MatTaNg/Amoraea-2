@@ -1,5 +1,6 @@
 module.exports = {
   preset: 'jest-expo',
+  setupFilesAfterEnv: ['<rootDir>/jest.setup.js'],
   transformIgnorePatterns: [
     'node_modules/(?!((jest-)?react-native|@react-native(-community)?)|expo(nent)?|@expo(nent)?/.*|@expo-google-fonts/.*|react-navigation|@react-navigation/.*|@unimodules/.*|unimodules|sentry-expo|native-base|react-native-svg)',
   ],
@@ -20,5 +21,44 @@ module.exports = {
   ],
   coverageDirectory: 'coverage',
   coverageReporters: ['text', 'text-summary', 'lcov', 'html'],
+  /** Guardrails for high-value pure logic; full-app % stays low. */
+  coverageThreshold: {
+    'src/features/onboarding/evaluateGate1.ts': {
+      statements: 95,
+      branches: 90,
+      functions: 100,
+      lines: 95,
+    },
+    'src/app/navigation/onboardingInitialRoute.ts': {
+      statements: 85,
+      branches: 85,
+      functions: 100,
+      lines: 85,
+    },
+    'src/data/repositories/CompatibilityRepository.ts': {
+      statements: 100,
+      branches: 100,
+      functions: 100,
+      lines: 100,
+    },
+    'src/features/aria/utils/elevenLabsEnvGating.ts': {
+      statements: 100,
+      branches: 100,
+      functions: 100,
+      lines: 100,
+    },
+    'src/features/aria/computeGateResultCore.ts': {
+      statements: 90,
+      branches: 80,
+      functions: 100,
+      lines: 90,
+    },
+    'src/features/compatibility/styleCompatibilityScore.ts': {
+      statements: 100,
+      branches: 100,
+      functions: 100,
+      lines: 100,
+    },
+  },
 };
 
