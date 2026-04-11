@@ -13,6 +13,9 @@ export type ErrorClassification = 'retryable' | 'unrecoverable' | 'unknown';
  * - unknown: treat as retry once then unrecoverable
  */
 export function classifyError(err: unknown): ErrorClassification {
+  if (err instanceof Error && err.name === 'WebTtsRequiresUserGestureError') {
+    return 'unrecoverable';
+  }
   const status = (err as { status?: number; statusCode?: number })?.status
     ?? (err as { status?: number; statusCode?: number })?.statusCode
     ?? null;

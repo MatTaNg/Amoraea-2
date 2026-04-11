@@ -29,7 +29,17 @@ import {
 } from '@features/aria/interviewMarkers';
 import { computeGateResult, GATE_PASS_WEIGHTED_MIN, type GateResult } from '@features/aria/computeGateResult';
 import { setPlaybackMode } from '@features/aria/utils/audioModeHelpers';
-import { speakWithElevenLabs, stopElevenLabsPlayback, stopElevenLabsSpeech } from '@features/aria/utils/elevenLabsTts';
+import {
+  speakWithElevenLabs,
+  stopElevenLabsPlayback,
+  stopElevenLabsSpeech,
+  tryPlayPendingWebTtsAudioInUserGesture,
+  hasPendingWebGestureBlobUrl,
+  trySpeakWebSpeechInUserGesture,
+  isWebTtsRequiresUserGestureError,
+  unlockWebAudioForAutoplay,
+  WebTtsRequiresUserGestureError,
+} from '@features/aria/utils/elevenLabsTts';
 import { ProfileRepository } from '@data/repositories/ProfileRepository';
 import { evaluateGate1 } from '@features/onboarding/evaluateGate1';
 import type { Gate1Score } from '@domain/models/OnboardingGates';
@@ -45,6 +55,7 @@ import {
 import { requestMicPermissionForPWA } from '@utilities/permissions/requestMicPermission';
 import { withRetry, classifyError } from '@utilities/withRetry';
 import { remoteLog } from '@utilities/remoteLog';
+import { isWebInsecureDevUrl, webInsecureContextHelpMessage } from '@utilities/webSecureContext';
 import { waitForInterviewAttemptScoringReady } from '@utilities/waitForInterviewAttemptScoringReady';
 import { runCommunicationStylePipelineAfterSave } from '@utilities/runCommunicationStylePipeline';
 import { FlameOrb } from '@app/screens/FlameOrb';
@@ -3263,6 +3274,41 @@ function newInterviewSessionId(userId: string): string {
 let interviewJustCompletedInSession = false;
 /** Latest attempt id written in this session — avoids stale `users.latest_attempt_id` when the profile refetch races the update. */
 let interviewLastCommittedAttemptId: string | null = null;
+/** Web gesture TTS queue: mirrors `pendingWebSpeechForGestureRef` so React Strict Mode remount does not drop queued text. */
+let pendingWebSpeechForGestureModule: string | null = null;
+
+const WEB_GESTURE_TTS_STORAGE_KEY = 'aria_v1_pending_gesture_tts';
+
+function readStoredPendingGestureTts(): string | null {
+  if (typeof sessionStorage === 'undefined') return null;
+  try {
+    return sessionStorage.getItem(WEB_GESTURE_TTS_STORAGE_KEY);
+  } catch {
+    return null;
+  }
+}
+
+function setPendingWebSpeechGesturePair(ref: React.MutableRefObject<string | null>, text: string) {
+  ref.current = text;
+  pendingWebSpeechForGestureModule = text;
+  try {
+    if (typeof sessionStorage !== 'undefined') sessionStorage.setItem(WEB_GESTURE_TTS_STORAGE_KEY, text);
+  } catch {
+    /* private mode / quota */
+  }
+}
+function clearPendingWebSpeechGesturePair(ref: React.MutableRefObject<string | null>) {
+  ref.current = null;
+  pendingWebSpeechForGestureModule = null;
+  try {
+    if (typeof sessionStorage !== 'undefined') sessionStorage.removeItem(WEB_GESTURE_TTS_STORAGE_KEY);
+  } catch {
+    /* ignore */
+  }
+}
+function peekPendingWebSpeechGesture(ref: React.MutableRefObject<string | null>): string | null {
+  return ref.current ?? pendingWebSpeechForGestureModule ?? readStoredPendingGestureTts();
+}
 
 export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigation, route }) => {
   const { user, signOut } = useAuth();
@@ -3302,41 +3348,39 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
   const [referenceCardPrompt, setReferenceCardPrompt] = useState<string | null>(null);
   const [scenarioIntroTtsPlaying, setScenarioIntroTtsPlaying] = useState(false);
   const [tTSFallbackActive, setTTSFallbackActive] = useState(false);
+  /** Web (iOS Safari): speechSynthesis was blocked; user must tap mic to speak queued line in-gesture. */
+  const [webSpeechGestureHint, setWebSpeechGestureHint] = useState(false);
+  /** HTTP://LAN is not a secure context — browser blocks mic; show fix copy */
+  const [webInsecureContextMessage, setWebInsecureContextMessage] = useState<string | null>(null);
+  const pendingWebSpeechForGestureRef = useRef<string | null>(null);
+  /** Web: onPressIn/touchstart ran gesture-TTS this touch; skip onPress so we do not start recording on the same tap. */
+  const webGestureTtsConsumedPressRef = useRef(false);
+  const webGestureConsumeClearTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   type MicPermissionState = 'granted' | 'denied' | 'prompt' | 'unavailable';
   const [micPermission, setMicPermission] = useState<MicPermissionState>('prompt');
 
   const recognitionRef = useRef<{ start(): void; stop(): void } | null>(null);
   const transcriptAtReleaseRef = useRef('');
   const isSpeakingRef = useRef(false);
-  // Web: use Whisper proxy + MediaRecorder when the proxy URL resolves (defaults to Supabase Functions URL).
+  // Web: Whisper proxy URL is for transcription (CORS); do not use it to choose tap vs hold — mobile Safari always has MediaRecorder.
   // Auth: anon key or session token in transcribeSafe — do not gate on EXPO_PUBLIC_OPENAI_API_KEY (CORS blocks direct OpenAI).
   const useWhisperOnWeb = Platform.OS === 'web' && !!OPENAI_WHISPER_PROXY_URL;
-  /** Native (expo-av) or web with Whisper (MediaRecorder) — use unified hook; else web hold-to-talk + speech recognition. */
-  const useNativeOrWhisperRecording = Platform.OS !== 'web' || useWhisperOnWeb;
+  const webTapRecordingSupported =
+    Platform.OS === 'web' &&
+    typeof navigator !== 'undefined' &&
+    typeof MediaRecorder !== 'undefined';
+  /** Native expo-av or web MediaRecorder — actual blob recording. If false on web, fall back to SpeechRecognition (still tap UI). */
+  const useMediaRecorderPath = Platform.OS !== 'web' || webTapRecordingSupported;
+  /** Interview mic is always tap-to-speak / tap-to-stop (web without MediaRecorder uses SpeechRecognition with tap). */
+  const useTapMicUi =
+    Platform.OS !== 'web' || useMediaRecorderPath || Platform.OS === 'web';
+
   useEffect(() => {
-    if (Platform.OS !== 'web') return;
-    // #region agent log
-    fetch('http://127.0.0.1:7789/ingest/668e0bd5-3283-4492-9f48-e33846c18218', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'X-Debug-Session-Id': 'e70f17' },
-      body: JSON.stringify({
-        sessionId: 'e70f17',
-        location: 'AriaScreen.tsx:recordingPath',
-        message: 'web_recording_path_flags',
-        data: {
-          hypothesisId: 'A',
-          useWhisperOnWeb,
-          useNativeOrWhisperRecording,
-          hasOpenAIKey: !!OPENAI_API_KEY,
-          hasWhisperProxy: !!OPENAI_WHISPER_PROXY_URL,
-          hasSupabaseAnon: !!SUPABASE_ANON_KEY,
-        },
-        timestamp: Date.now(),
-        runId: 'pre-fix',
-      }),
-    }).catch(() => {});
-    // #endregion
-  }, [useWhisperOnWeb, useNativeOrWhisperRecording]);
+    if (Platform.OS !== 'web' || typeof window === 'undefined') return;
+    if (!isWebInsecureDevUrl()) return;
+    setWebInsecureContextMessage(webInsecureContextHelpMessage());
+  }, []);
+
   const scrollViewRef = useRef<ScrollView | null>(null);
   const hasResumedRef = useRef(false);
 
@@ -3991,7 +4035,8 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
   const speak = useCallback(async (text: string) => {
     await stopElevenLabsPlayback();
     lastQuestionTextRef.current = text;
-    setVoiceState('speaking');
+    // Keep "processing" until audio is actually audible — avoids large flame + "Speaking..." during fetch / autoplay wait.
+    setVoiceState('processing');
     isSpeakingRef.current = true;
     try {
       // Ensure playback route is reset immediately before TTS (fixes low-volume-after-recording on iOS).
@@ -4000,7 +4045,13 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
         platform: Platform.OS,
         textLength: text?.length ?? 0,
       });
-      await speakWithElevenLabs(text);
+      await speakWithElevenLabs(text, undefined, {
+        onPlaybackStarted: () => {
+          setVoiceState('speaking');
+        },
+      });
+    } catch (speakErr) {
+      throw speakErr;
     } finally {
       isSpeakingRef.current = false;
       timingRef.current.questionEndTime = Date.now();
@@ -4023,16 +4074,27 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
           context: 'TTS',
         });
         setTTSFallbackActive(false);
+        setWebSpeechGestureHint(false);
         if (interviewSpeechRole === 'assistant_response') {
           applyInterviewSpeechComplete(text);
         }
       } catch (err) {
-        if (__DEV__) console.warn('TTS failed, falling back to visual display:', err instanceof Error ? err.message : err);
-        if (!silent) setTTSFallbackActive(true);
-        setVoiceState('idle');
-        // Same advance as success path so reference card + SHOW SCENARIO work when user reads the line on screen.
-        if (interviewSpeechRole === 'assistant_response') {
-          applyInterviewSpeechComplete(text);
+        if (isWebTtsRequiresUserGestureError(err)) {
+          setPendingWebSpeechGesturePair(pendingWebSpeechForGestureRef, err.text);
+          setWebSpeechGestureHint(true);
+          setVoiceState('idle');
+          if (!silent) setTTSFallbackActive(false);
+          if (interviewSpeechRole === 'assistant_response') {
+            applyInterviewSpeechComplete(text);
+          }
+        } else {
+          if (__DEV__) console.warn('TTS failed, falling back to visual display:', err instanceof Error ? err.message : err);
+          if (!silent) setTTSFallbackActive(true);
+          setVoiceState('idle');
+          // Same advance as success path so reference card + SHOW SCENARIO work when user reads the line on screen.
+          if (interviewSpeechRole === 'assistant_response') {
+            applyInterviewSpeechComplete(text);
+          }
         }
       } finally {
         if (markIntro) setScenarioIntroTtsPlaying(false);
@@ -4044,7 +4106,7 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
   // ── Web: browser SpeechRecognition (hold-to-talk fallback when Whisper/MediaRecorder is off)
   useEffect(() => {
     if (Platform.OS !== 'web' || typeof window === 'undefined') return;
-    if (useNativeOrWhisperRecording) {
+    if (useMediaRecorderPath) {
       setMicError((prev) =>
         prev === 'Speech recognition is not supported. Please use Chrome or Safari.' ? null : prev
       );
@@ -4084,20 +4146,6 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
       transcriptAtReleaseRef.current = (final || interim).trim();
     };
     rec.onerror = (e) => {
-      // #region agent log
-      fetch('http://127.0.0.1:7789/ingest/668e0bd5-3283-4492-9f48-e33846c18218', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'X-Debug-Session-Id': 'e70f17' },
-        body: JSON.stringify({
-          sessionId: 'e70f17',
-          location: 'AriaScreen.tsx:SpeechRecognition.onerror',
-          message: 'speech_recognition_error',
-          data: { hypothesisId: 'D', speechError: e.error },
-          timestamp: Date.now(),
-          runId: 'pre-fix',
-        }),
-      }).catch(() => {});
-      // #endregion
       console.log('<---e', e);
       if (e.error === 'not-allowed') {
         setMicError('Microphone access was denied.');
@@ -4115,7 +4163,7 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
     };
     recognitionRef.current = rec;
     return () => { try { rec.stop(); } catch {} };
-  }, [useNativeOrWhisperRecording]);
+  }, [useMediaRecorderPath]);
 
   const fetchStageScore = useCallback(async (finalMessages: { role: string; content: string }[]): Promise<InterviewResults> => {
     const context = typologyContext || 'No typology context — score from transcript only.';
@@ -4758,30 +4806,6 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
       cq2PromptMatches &&
       (currentInterviewMomentRef.current === 3 ||
         (currentScenarioRef.current === 3 && !personalHandoffInjectedRef.current));
-    // #region agent log
-    {
-      const _lp = 'AriaScreen.tsx:CQ2_GATE';
-      fetch('http://127.0.0.1:7789/ingest/668e0bd5-3283-4492-9f48-e33846c18218', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'X-Debug-Session-Id': 'e70f17' },
-        body: JSON.stringify({
-          sessionId: 'e70f17',
-          hypothesisId: 'A',
-          location: _lp,
-          message: 'CQ2 gate after user message',
-          data: {
-            cq2PromptMatches,
-            replyingToScenarioCQ2,
-            moment: currentInterviewMomentRef.current,
-            scenario: currentScenarioRef.current,
-            personalHandoffInjected: personalHandoffInjectedRef.current,
-            lastAssistantPreview: lastAssistantContent.slice(0, 260),
-          },
-          timestamp: Date.now(),
-        }),
-      }).catch(() => {});
-    }
-    // #endregion
     if (moment5InexperienceFallbackPendingRef.current && !isDecline(trimmed)) {
       moment5InexperienceFallbackPendingRef.current = false;
     }
@@ -4904,34 +4928,6 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
     const scenarioCThresholdLegacy = hasCommitmentThresholdSignal(scenarioCUserCorpusForThreshold);
     const shouldForceScenarioCThresholdProbe =
       replyingToScenarioCQ2 && !isDecline(trimmed) && !scenarioCThresholdStrict;
-    // #region agent log
-    {
-      const _lp = 'AriaScreen.tsx:S3_THRESHOLD_FORCE';
-      const repairButNoReply =
-        isScenarioCQ2Prompt(lastAssistantContent) &&
-        !looksLikeScenarioCThresholdQuestion(lastAssistantContent) &&
-        !replyingToScenarioCQ2;
-      fetch('http://127.0.0.1:7789/ingest/668e0bd5-3283-4492-9f48-e33846c18218', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'X-Debug-Session-Id': 'e70f17' },
-        body: JSON.stringify({
-          sessionId: 'e70f17',
-          hypothesisId: 'B',
-          location: _lp,
-          message: 'S3 threshold force eval',
-          data: {
-            repairButNoReply,
-            shouldForceScenarioCThresholdProbe,
-            scenarioCThresholdStrict,
-            isDecline: isDecline(trimmed),
-            postRepairCorpus: scenarioCPostRepairCorpus.slice(0, 400),
-            userLastPreview: trimmed.slice(0, 220),
-          },
-          timestamp: Date.now(),
-        }),
-      }).catch(() => {});
-    }
-    // #endregion
     if (replyingToScenarioCQ2) {
       const skipReason = scenarioCThresholdStrict
         ? 'vignette-threshold-signal-already-present-post-repair'
@@ -5083,7 +5079,6 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
           setVoiceState('idle');
         },
       });
-      setIsWaiting(false);
     } catch (err) {
       setIsWaiting(false);
       setVoiceState('idle');
@@ -5110,6 +5105,7 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
       return;
     }
 
+    try {
     const text = (data.content?.[0]?.text ?? '').trim();
     const priorAssistantContentS3 =
       [...messagesToUse].reverse().find((m) => m.role === 'assistant')?.content ?? '';
@@ -5174,58 +5170,6 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
         });
       }
     }
-    // #region agent log
-    {
-      const prem = assistantTextIsPrematureMoment4HandoffDuringScenarioC(strippedText);
-      if (prem || shouldForceScenarioCThresholdProbe) {
-        fetch('http://127.0.0.1:7789/ingest/668e0bd5-3283-4492-9f48-e33846c18218', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json', 'X-Debug-Session-Id': 'e70f17' },
-          body: JSON.stringify({
-            sessionId: 'e70f17',
-            hypothesisId: 'C',
-            location: 'AriaScreen.tsx:S3_ASSISTANT_BRANCH',
-            message: 'Premature M4 handoff or S3 force expected',
-            data: {
-              shouldForceScenarioCThresholdProbe,
-              assistantIssuedScenarioCThresholdProbe,
-              prematureMoment4Handoff: prem,
-              strippedPreview: strippedText.slice(0, 320),
-            },
-            timestamp: Date.now(),
-          }),
-        }).catch(() => {});
-      }
-    }
-    // #endregion
-    // #region agent log
-    {
-      const _raw = text;
-      const _st = strippedText;
-      if (
-        /^\s*that\.?\s/i.test(_st) ||
-        (/at what point do you decide/i.test(_raw) && /^\s*that\.?\s/i.test(_st)) ||
-        (/that makes sense\s+that\b/i.test(_raw) && /at what point/i.test(_raw))
-      ) {
-        fetch('http://127.0.0.1:7789/ingest/668e0bd5-3283-4492-9f48-e33846c18218', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json', 'X-Debug-Session-Id': 'e70f17' },
-          body: JSON.stringify({
-            sessionId: 'e70f17',
-            hypothesisId: 'F',
-            location: 'AriaScreen.tsx:M4_STRIP_PIPELINE',
-            message: 'Possible that. fragment before M4 threshold',
-            data: {
-              moment: currentInterviewMomentRef.current,
-              rawHead: _raw.slice(0, 320),
-              strippedHead: _st.slice(0, 320),
-            },
-            timestamp: Date.now(),
-          }),
-        }).catch(() => {});
-      }
-    }
-    // #endregion
     if (shouldForceScenarioAContemptProbe && assistantIssuedScenarioARepairQuestion) {
       strippedText = stripScenarioARepairQuestion(strippedText);
       assistantIssuedScenarioARepairQuestion = false;
@@ -5837,11 +5781,23 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
       const aiDetected = detectConstructs(text);
       setTouchedConstructs((prev) => [...new Set([...prev, ...aiDetected])]);
       await speakTextSafe(displayText, ASSISTANT_INTERVIEW_SPEECH);
+    } finally {
+      setIsWaiting(false);
+    }
   }, [messages, speakTextSafe, route?.name, userId, navigation, queryClient, profile?.name, fetchStageScore, scoreScenario, usedPersonalExamples, markClosingQuestionAsked, markClosingQuestionAnswered]);
 
   const handlePressStart = useCallback(async () => {
+    /** Hold-to-talk web: flush pending TTS before any guard that returns (Whisper path uses mic onMicPressIn only). */
+    if (Platform.OS === 'web') {
+      const t = peekPendingWebSpeechGesture(pendingWebSpeechForGestureRef);
+      if (t) {
+        clearPendingWebSpeechGesturePair(pendingWebSpeechForGestureRef);
+        trySpeakWebSpeechInUserGesture(t, () => setWebSpeechGestureHint(false));
+        return;
+      }
+    }
     if (voiceState !== 'idle') return;
-    if (useNativeOrWhisperRecording) return; // native or web Whisper use hook (tap-to-toggle)
+    if (useMediaRecorderPath) return; // expo-av / MediaRecorder — mic uses tap handler, not press-in
     setMicWarning(null);
     stopElevenLabsSpeech();
     setCurrentTranscript('');
@@ -5852,23 +5808,9 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
     timingRef.current.recordingStartTime = Date.now();
     setVoiceState('listening');
     if (Platform.OS === 'web' && recognitionRef.current) {
-      // #region agent log
-      fetch('http://127.0.0.1:7789/ingest/668e0bd5-3283-4492-9f48-e33846c18218', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'X-Debug-Session-Id': 'e70f17' },
-        body: JSON.stringify({
-          sessionId: 'e70f17',
-          location: 'AriaScreen.tsx:handlePressStart',
-          message: 'hold_to_talk_recognition_start',
-          data: { hypothesisId: 'E', useNativeOrWhisperRecording },
-          timestamp: Date.now(),
-          runId: 'pre-fix',
-        }),
-      }).catch(() => {});
-      // #endregion
       try { recognitionRef.current.start(); } catch {}
     }
-  }, [voiceState, useNativeOrWhisperRecording]);
+  }, [voiceState, useMediaRecorderPath]);
 
   const handleRecordingError = useCallback(
     (err: Error) => {
@@ -5980,6 +5922,7 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
             }
             form.append('file', blobToSend, 'recording.webm');
             form.append('model', 'whisper-1');
+            form.append('language', 'en');
             const res = await fetch(transcriptUrl, { method: 'POST', headers: webTranscribeHeaders, body: form });
             if (__DEV__) console.log('Transcription response status:', res.status);
             if (!res.ok) {
@@ -5995,7 +5938,18 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
             const data = (await res.json()) as { text?: string };
             const text = (data.text ?? '').trim();
             if (__DEV__) console.log('Transcription result length:', text.length, '=== END DEBUG ===');
-            if (text.length < 2) throw new Error('Empty transcription result');
+            if (text.length < 2) {
+              void remoteLog('[TRANSCRIBE] whisper_empty_text', {
+                hypothesisId: 'T18',
+                runId: 'audio-route-debug-10',
+                blobType: audioBlob.type || '(none)',
+                blobSize: audioBlob.size,
+                rawTextLen: (data.text ?? '').length,
+                responseKeys: Object.keys(data as object),
+                responsePreview: JSON.stringify(data).slice(0, 400),
+              });
+              throw new Error('Empty transcription result');
+            }
             void remoteLog('[TRANSCRIBE] success', {
               runId: 'audio-route-debug-10',
               endpointUsed: OPENAI_WHISPER_PROXY_URL ? 'proxy' : 'openai',
@@ -6007,26 +5961,6 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
         );
         return transcript;
       } catch (err) {
-        // #region agent log
-        fetch('http://127.0.0.1:7789/ingest/668e0bd5-3283-4492-9f48-e33846c18218', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json', 'X-Debug-Session-Id': 'e70f17' },
-          body: JSON.stringify({
-            sessionId: 'e70f17',
-            location: 'AriaScreen.tsx:transcribeSafe',
-            message: 'transcribe_failed',
-            data: {
-              hypothesisId: 'C',
-              errorName: err instanceof Error ? err.name : 'unknown',
-              errorMessage: (err instanceof Error ? err.message : String(err)).slice(0, 200),
-              hasWhisperProxy: !!OPENAI_WHISPER_PROXY_URL,
-              blobSize: audioBlob?.size ?? 0,
-            },
-            timestamp: Date.now(),
-            runId: 'pre-fix',
-          }),
-        }).catch(() => {});
-        // #endregion
         void remoteLog('[TRANSCRIBE] catch', {
           runId: 'audio-route-debug-10',
           errorName: err instanceof Error ? err.name : 'unknown',
@@ -6052,6 +5986,47 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
     [speakTextSafe, deleteTurnAudioFile]
   );
 
+  /** iOS Safari: speechSynthesis must run during pointerdown; RN-web onPress fires too late for autoplay policy. */
+  const handleWebMicPressIn = useCallback(() => {
+    if (Platform.OS !== 'web') return;
+    unlockWebAudioForAutoplay();
+    /** ElevenLabs MP3 was blocked by autoplay — same tap must call `Audio.play()` inside the gesture stack. */
+    if (
+      tryPlayPendingWebTtsAudioInUserGesture(
+        () => setWebSpeechGestureHint(false),
+        () => clearPendingWebSpeechGesturePair(pendingWebSpeechForGestureRef)
+      )
+    ) {
+      webGestureTtsConsumedPressRef.current = true;
+      if (webGestureConsumeClearTimeoutRef.current) {
+        clearTimeout(webGestureConsumeClearTimeoutRef.current);
+        webGestureConsumeClearTimeoutRef.current = null;
+      }
+      webGestureConsumeClearTimeoutRef.current = setTimeout(() => {
+        webGestureConsumeClearTimeoutRef.current = null;
+        webGestureTtsConsumedPressRef.current = false;
+      }, 1800);
+      return;
+    }
+    const fromRef = pendingWebSpeechForGestureRef.current;
+    const fromMod = pendingWebSpeechForGestureModule;
+    const fromStore = readStoredPendingGestureTts();
+    const t = fromRef ?? fromMod ?? fromStore;
+    if (!t) return;
+    clearPendingWebSpeechGesturePair(pendingWebSpeechForGestureRef);
+    webGestureTtsConsumedPressRef.current = true;
+    if (webGestureConsumeClearTimeoutRef.current) {
+      clearTimeout(webGestureConsumeClearTimeoutRef.current);
+      webGestureConsumeClearTimeoutRef.current = null;
+    }
+    /** If onPress never fires (Safari), ref stayed true and the mic looked permanently dead. */
+    webGestureConsumeClearTimeoutRef.current = setTimeout(() => {
+      webGestureConsumeClearTimeoutRef.current = null;
+      webGestureTtsConsumedPressRef.current = false;
+    }, 1800);
+    trySpeakWebSpeechInUserGesture(t, () => setWebSpeechGestureHint(false));
+  }, []);
+
   const audioRecorder = useAudioRecorder({
     onRecordingComplete: async (blob, nativeUri) => {
       setVoiceState('processing');
@@ -6072,44 +6047,6 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
     onError: (err) => handleRecordingError(err),
   });
 
-  const handleNativeOrWhisperMicPress = useCallback(async () => {
-    if (voiceState === 'speaking' || voiceState === 'processing') return;
-    if (!useNativeOrWhisperRecording) return;
-    if (Platform.OS === 'web') {
-      // #region agent log
-      fetch('http://127.0.0.1:7789/ingest/668e0bd5-3283-4492-9f48-e33846c18218', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'X-Debug-Session-Id': 'e70f17' },
-        body: JSON.stringify({
-          sessionId: 'e70f17',
-          location: 'AriaScreen.tsx:handleNativeOrWhisperMicPress',
-          message: 'whisper_path_mic_press',
-          data: { hypothesisId: 'B', useWhisperOnWeb, isRecording: audioRecorder.isRecording },
-          timestamp: Date.now(),
-          runId: 'pre-fix',
-        }),
-      }).catch(() => {});
-      // #endregion
-    }
-    if (__DEV__) console.log('[Aria] MIC PRESSED, isRecording:', audioRecorder.isRecording);
-    try {
-      if (audioRecorder.isRecording) {
-        await audioRecorder.stopRecording();
-        if (__DEV__) console.log('[Aria] RECORDING STOPPED');
-      } else {
-        const granted = await audioRecorder.requestPermission();
-        if (__DEV__) console.log('[Aria] MIC PERMISSION:', granted ? 'granted' : 'denied');
-        if (!granted) return;
-        setVoiceState('recording');
-        await audioRecorder.startRecording();
-        if (__DEV__) console.log('[Aria] RECORDING STARTED');
-      }
-    } catch (err) {
-      if (__DEV__) console.error('[Aria] MIC ERROR:', err instanceof Error ? err.message : err);
-      handleRecordingError(err instanceof Error ? err : new Error(String(err)));
-    }
-  }, [voiceState, useNativeOrWhisperRecording, audioRecorder.isRecording, audioRecorder.stopRecording, audioRecorder.startRecording, audioRecorder.requestPermission, handleRecordingError]);
-
   const handleSendTyped = useCallback(() => {
     const text = typedAnswer.trim();
     if (!text) return;
@@ -6121,7 +6058,7 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
 
   const handlePressEnd = useCallback(async () => {
     if (voiceState !== 'listening') return;
-    if (useNativeOrWhisperRecording) return; // native or web Whisper use hook
+    if (useMediaRecorderPath) return; // SpeechRecognition path stops via tap (handlePressEnd)
     if (Platform.OS === 'web' && recognitionRef.current) {
       recognitionRef.current.stop();
     }
@@ -6130,7 +6067,92 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
       const text = transcriptAtReleaseRef.current?.trim() ?? currentTranscript.trim();
       processUserSpeech(text);
     }, 400);
-  }, [voiceState, currentTranscript, processUserSpeech, useNativeOrWhisperRecording, handleRecordingError, transcribeSafe]);
+  }, [voiceState, currentTranscript, processUserSpeech, useMediaRecorderPath, handleRecordingError, transcribeSafe]);
+
+  const handleNativeOrWhisperMicPress = useCallback(async () => {
+    if (Platform.OS === 'web') {
+      unlockWebAudioForAutoplay();
+    }
+    if (voiceState === 'speaking' || voiceState === 'processing') return;
+    if (!useTapMicUi) return;
+    if (
+      Platform.OS === 'web' &&
+      tryPlayPendingWebTtsAudioInUserGesture(
+        () => setWebSpeechGestureHint(false),
+        () => clearPendingWebSpeechGesturePair(pendingWebSpeechForGestureRef)
+      )
+    ) {
+      return;
+    }
+    if (Platform.OS === 'web' && webGestureTtsConsumedPressRef.current) {
+      webGestureTtsConsumedPressRef.current = false;
+      if (webGestureConsumeClearTimeoutRef.current) {
+        clearTimeout(webGestureConsumeClearTimeoutRef.current);
+        webGestureConsumeClearTimeoutRef.current = null;
+      }
+      return;
+    }
+    if (Platform.OS === 'web') {
+      const fromRef = pendingWebSpeechForGestureRef.current;
+      const fromMod = pendingWebSpeechForGestureModule;
+      const fromStore = readStoredPendingGestureTts();
+      const t = fromRef ?? fromMod ?? fromStore;
+      if (t) {
+        clearPendingWebSpeechGesturePair(pendingWebSpeechForGestureRef);
+        trySpeakWebSpeechInUserGesture(t, () => setWebSpeechGestureHint(false));
+        return;
+      }
+    }
+    if (Platform.OS === 'web' && !useMediaRecorderPath) {
+      if (voiceState === 'listening') {
+        await handlePressEnd();
+        return;
+      }
+      if (voiceState === 'idle') {
+        await handlePressStart();
+        return;
+      }
+      return;
+    }
+    if (Platform.OS === 'web') {
+    }
+    if (__DEV__) console.log('[Aria] MIC PRESSED, isRecording:', audioRecorder.isRecording);
+    try {
+      if (audioRecorder.isRecording) {
+        await audioRecorder.stopRecording();
+        if (__DEV__) console.log('[Aria] RECORDING STOPPED');
+      } else {
+        /** Mobile Brave/WebKit: HTMLAudio (ElevenLabs MP3 from tryPlay) can starve or block MediaRecorder; stop playback before opening the mic. */
+        if (Platform.OS === 'web') {
+          await stopElevenLabsPlayback();
+          await new Promise<void>((resolve) => {
+            requestAnimationFrame(() => requestAnimationFrame(() => resolve()));
+          });
+        }
+        const granted = await audioRecorder.requestPermission();
+        if (__DEV__) console.log('[Aria] MIC PERMISSION:', granted ? 'granted' : 'denied');
+        if (!granted) return;
+        setVoiceState('recording');
+        await audioRecorder.startRecording();
+        if (__DEV__) console.log('[Aria] RECORDING STARTED');
+      }
+    } catch (err) {
+      if (__DEV__) console.error('[Aria] MIC ERROR:', err instanceof Error ? err.message : err);
+      handleRecordingError(err instanceof Error ? err : new Error(String(err)));
+    }
+  }, [
+    voiceState,
+    useTapMicUi,
+    useMediaRecorderPath,
+    handlePressStart,
+    handlePressEnd,
+    audioRecorder.isRecording,
+    audioRecorder.stopRecording,
+    audioRecorder.startRecording,
+    audioRecorder.requestPermission,
+    handleRecordingError,
+    stopElevenLabsPlayback,
+  ]);
 
   const handleResume = useCallback(
     async (saved: NonNullable<Awaited<ReturnType<typeof loadInterviewFromStorage>>>) => {
@@ -6272,6 +6294,10 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
   }, [userId, isAdmin, handleResume]);
 
   const startInterview = useCallback(async () => {
+    /** Must run before any `await` so mobile browsers still treat this as the same user gesture as "Start". */
+    if (Platform.OS === 'web') {
+      unlockWebAudioForAutoplay();
+    }
     await remoteLog('[START] startInterview called', {
       userId: userId ?? null,
       isAdmin,
@@ -6287,7 +6313,7 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
       if (Platform.OS === 'web') {
         await requestMicPermissionForPWA();
         await remoteLog('[START] Mic permission (PWA) requested');
-      } else if (useNativeOrWhisperRecording) {
+      } else {
         const granted = await audioRecorder.requestPermission();
         setMicPermission(granted ? 'granted' : 'denied');
         await remoteLog('[START] Mic permission result', { granted });
@@ -6356,7 +6382,7 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
       setMessages([{ role: 'assistant', content: fallbackMsg, scenarioNumber: 1 } as MessageWithScenario]);
       await speakTextSafe(fallbackMsg).catch(() => {});
     }
-  }, [speakTextSafe, isAdmin, userId, useNativeOrWhisperRecording, audioRecorder, resetInterviewProgressRefs]);
+  }, [speakTextSafe, isAdmin, userId, audioRecorder, resetInterviewProgressRefs]);
 
   useEffect(() => {
     if (!isInterviewAppRoute) return;
@@ -7084,7 +7110,7 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
     }
     await stopElevenLabsPlayback();
     stopElevenLabsSpeech();
-    if (useNativeOrWhisperRecording && audioRecorder.isRecording) {
+    if (useMediaRecorderPath && audioRecorder.isRecording) {
       try {
         await audioRecorder.stopRecording();
       } catch {
@@ -7160,7 +7186,7 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
     setVoiceState('idle');
     resetInterviewProgressRefs();
     void startInterview();
-  }, [userId, isAdmin, useNativeOrWhisperRecording, audioRecorder, resetInterviewProgressRefs, startInterview]);
+  }, [userId, isAdmin, useMediaRecorderPath, audioRecorder, resetInterviewProgressRefs, startInterview]);
 
   const handleAdminResetInterview = useCallback(() => {
     const warningMessage =
@@ -7783,24 +7809,41 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
         {isInterviewerView ? (
           <View style={{ flex: 1, backgroundColor: '#05060D' }}>
             <UserInterviewLayout
-              flameState={useNativeOrWhisperRecording && audioRecorder.isRecording ? 'recording' : voiceState}
+              flameState={
+                useMediaRecorderPath && audioRecorder.isRecording ? 'recording' : voiceState
+              }
               showScenarioReferenceEnabled={
                 interviewUiPhase === 'scenario_active' && !scenarioIntroTtsPlaying && !!referenceCardScenario
               }
               referenceCardScenario={referenceCardScenario}
               referenceCardPrompt={referenceCardPrompt}
               ttsFallbackActive={tTSFallbackActive}
+              webSpeechGestureHint={webSpeechGestureHint}
+              webInsecureContextMessage={webInsecureContextMessage}
               micPermissionDenied={micPermission === 'denied'}
               isWaiting={isWaiting}
               onPressStart={handlePressStart}
               onPressEnd={handlePressEnd}
-              voiceState={useNativeOrWhisperRecording && audioRecorder.isRecording ? 'recording' : voiceState}
+              voiceState={
+                useMediaRecorderPath && audioRecorder.isRecording ? 'recording' : voiceState
+              }
               micError={micError}
               micWarning={micWarning}
               inputDisabled={inputDisabled}
-              micToggleMode={useNativeOrWhisperRecording}
-              onMicPress={useNativeOrWhisperRecording ? handleNativeOrWhisperMicPress : undefined}
-              micLabelOverride={useNativeOrWhisperRecording ? (audioRecorder.isRecording ? 'Tap to stop' : 'Tap to speak') : undefined}
+              micToggleMode={useTapMicUi}
+              onMicPress={useTapMicUi ? handleNativeOrWhisperMicPress : undefined}
+              onMicPressIn={Platform.OS === 'web' ? handleWebMicPressIn : undefined}
+              micLabelOverride={
+                useTapMicUi
+                  ? useMediaRecorderPath
+                    ? audioRecorder.isRecording
+                      ? 'Tap to stop'
+                      : 'Tap to speak'
+                    : voiceState === 'listening'
+                      ? 'Tap to stop'
+                      : 'Tap to speak'
+                  : undefined
+              }
               onExit={handleInterviewSignOut}
             />
           </View>

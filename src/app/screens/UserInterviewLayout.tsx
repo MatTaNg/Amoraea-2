@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
   View,
   Text,
@@ -10,16 +10,16 @@ import {
   Linking,
   Modal,
   ScrollView,
+  useWindowDimensions,
   type ViewStyle,
 } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { FlameOrb, type FlameState } from './FlameOrb';
-
 // Design tokens — Amoraea interviewer
 const BG = '#05060D';
 const SURFACE = '#0D1120';
 const BORDER = 'rgba(82, 142, 220, 0.12)';
-const FLAME_WHITE = '#EEF6FF';
 const FLAME_BRIGHT = '#C8E4FF';
 const FLAME_MID = '#5BA8E8';
 const FLAME_CORE = '#1E6FD9';
@@ -53,6 +53,8 @@ interface UserInterviewLayoutProps {
   onExit?: () => void;
   /** When true, show "Audio unavailable — read above, then speak when ready" */
   ttsFallbackActive?: boolean;
+  /** Web: iOS Safari blocked auto TTS — prompt user to tap mic to play voice */
+  webSpeechGestureHint?: boolean;
   /** When true, show mic-denied state with "Enable in browser settings" / open app settings */
   micPermissionDenied?: boolean;
   /** When true, show "Amoraea is thinking..." (visual only, no TTS) */
@@ -61,8 +63,12 @@ interface UserInterviewLayoutProps {
   micToggleMode?: boolean;
   /** Used when micToggleMode is true */
   onMicPress?: () => void;
+  /** Web (tap-to-speak): runs on press in — use for gesture-gated audio (e.g. iOS Safari speechSynthesis). */
+  onMicPressIn?: () => void;
   /** Override mic label when micToggleMode is true (e.g. "Tap to speak" / "Tap to stop") */
   micLabelOverride?: string;
+  /** Web: HTTP on LAN (not a secure context) — mic/TTS blocked by browser; show fix instructions */
+  webInsecureContextMessage?: string | null;
 }
 
 const GOOGLE_FONTS_URL =
@@ -86,15 +92,35 @@ export const UserInterviewLayout: React.FC<UserInterviewLayoutProps> = ({
   inputDisabled,
   onExit,
   ttsFallbackActive = false,
+  webSpeechGestureHint = false,
   micPermissionDenied = false,
   isWaiting = false,
   micToggleMode = false,
   onMicPress,
+  onMicPressIn,
   micLabelOverride,
+  webInsecureContextMessage = null,
 }) => {
   const [refCardOpen, setRefCardOpen] = useState(false);
   const rippleAnim = useRef(new Animated.Value(0)).current;
-  const dbgHoverSeq = useRef(0);
+  const { width: windowWidth, height: windowHeight } = useWindowDimensions();
+  const safeInsets = useSafeAreaInsets();
+  /** Mobile Safari: `useWindowDimensions` can exceed the visible viewport (URL bar / home indicator). */
+  const [visualViewportH, setVisualViewportH] = useState<number | null>(null);
+  useEffect(() => {
+    if (Platform.OS !== 'web' || typeof window === 'undefined') return;
+    const vv = window.visualViewport;
+    if (!vv) return;
+    const sync = () => setVisualViewportH(vv.height);
+    sync();
+    vv.addEventListener('resize', sync);
+    vv.addEventListener('scroll', sync);
+    return () => {
+      vv.removeEventListener('resize', sync);
+      vv.removeEventListener('scroll', sync);
+    };
+  }, []);
+  const layoutHeight = visualViewportH != null ? Math.min(windowHeight, visualViewportH) : windowHeight;
 
   useEffect(() => {
     if (Platform.OS !== 'web' || typeof document === 'undefined') return;
@@ -107,41 +133,6 @@ export const UserInterviewLayout: React.FC<UserInterviewLayoutProps> = ({
     };
   }, []);
 
-  // #region agent log
-  useEffect(() => {
-    if (Platform.OS !== 'web') return;
-    fetch('http://127.0.0.1:7789/ingest/668e0bd5-3283-4492-9f48-e33846c18218', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'X-Debug-Session-Id': 'e70f17' },
-      body: JSON.stringify({
-        sessionId: 'e70f17',
-        location: 'UserInterviewLayout.tsx:refCardOpen',
-        message: 'refCardOpen changed',
-        data: { refCardOpen, hypothesisId: 'C' },
-        timestamp: Date.now(),
-      }),
-    }).catch(() => {});
-  }, [refCardOpen]);
-
-  useEffect(() => {
-    if (Platform.OS !== 'web') return;
-    fetch('http://127.0.0.1:7789/ingest/668e0bd5-3283-4492-9f48-e33846c18218', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'X-Debug-Session-Id': 'e70f17' },
-      body: JSON.stringify({
-        sessionId: 'e70f17',
-        location: 'UserInterviewLayout.tsx:scenarioContent',
-        message: 'scenario label/text deps changed',
-        data: {
-          label: referenceCardScenario?.label ?? null,
-          textLen: referenceCardScenario?.text?.length ?? 0,
-          hypothesisId: 'D',
-        },
-        timestamp: Date.now(),
-      }),
-    }).catch(() => {});
-  }, [referenceCardScenario?.label, referenceCardScenario?.text]);
-  // #endregion
 
   useEffect(() => {
     if (voiceState !== 'listening' && voiceState !== 'recording') return;
@@ -177,6 +168,26 @@ export const UserInterviewLayout: React.FC<UserInterviewLayoutProps> = ({
   const isListeningOrRecording = voiceState === 'listening' || voiceState === 'recording';
   const isRecording = voiceState === 'recording';
 
+  /** Shrink orb on short viewports so mic + SHOW SCENARIO stay above the fold (esp. mobile Safari + home indicator). */
+  const flameOrbSize = useMemo(
+    () => Math.round(Math.min(170, Math.max(96, layoutHeight * 0.2))),
+    [layoutHeight]
+  );
+
+  const mainDynamicStyle = useMemo(() => {
+    const topPad = layoutHeight < 720 ? 10 : 24;
+    if (Platform.OS === 'web') {
+      return {
+        paddingTop: topPad,
+        paddingBottom: 'max(40px, env(safe-area-inset-bottom, 0px))' as unknown as number,
+      };
+    }
+    return {
+      paddingTop: topPad,
+      paddingBottom: Math.max(40, 24 + safeInsets.bottom),
+    };
+  }, [layoutHeight, safeInsets.bottom]);
+
   // Pulse animation for mic button when recording/listening
   const micPulseAnim = useRef(new Animated.Value(1)).current;
   useEffect(() => {
@@ -204,8 +215,250 @@ export const UserInterviewLayout: React.FC<UserInterviewLayoutProps> = ({
     micPulseAnim.setValue(1);
   }, [isListeningOrRecording, micPulseAnim]);
 
+  const interviewMainColumn = (
+    <View style={styles.interviewMainColumnRoot}>
+      {/* Soft blur behind flame — web only; native shadow reads as a misaligned circle behind the orb */}
+      {Platform.OS === 'web' ? (
+        <View style={styles.ambientGlow} pointerEvents="none" />
+      ) : null}
+
+      {/* FlameOrb — existing component, no changes */}
+      <View style={styles.flameSection}>
+        <FlameOrb state={flameState} size={flameOrbSize} />
+      </View>
+
+      {/* Bottom section */}
+      <View style={styles.bottomSection}>
+        {isWaiting ? (
+          <View style={styles.waitingRow}>
+            <Text style={styles.waitingDot}>◆</Text>
+            <Text style={styles.waitingText}>Amoraea is thinking...</Text>
+          </View>
+        ) : null}
+
+        {webInsecureContextMessage && Platform.OS === 'web' ? (
+          <Text style={styles.insecureContextBanner}>{webInsecureContextMessage}</Text>
+        ) : null}
+
+        {webSpeechGestureHint ? (
+          <Text style={styles.ttsFallbackNotice}>
+            ◆ Tap the microphone to hear Amoraea (mobile browsers only play voice right after you tap).
+          </Text>
+        ) : null}
+
+        {ttsFallbackActive ? (
+          <Text style={styles.ttsFallbackNotice}>
+            {Platform.OS === 'web'
+              ? '◆ Audio unavailable — hover Show scenario to read the question, then speak when ready'
+              : '◆ Audio unavailable — hold Show scenario to read the question, then speak when ready'}
+          </Text>
+        ) : null}
+
+        <View style={styles.micSection}>
+          {micError ? <Text style={styles.dockError}>{micError}</Text> : null}
+          {micWarning && !micError ? <Text style={styles.dockWarning}>{micWarning}</Text> : null}
+          {micPermissionDenied ? (
+            <View style={styles.micDeniedBlock}>
+              <View style={styles.micDeniedIconWrap}>
+                <Ionicons name="mic-off" size={24} color="#E87A7A" />
+              </View>
+              <Text style={styles.micDeniedText}>
+                Microphone access is required for this interview.
+              </Text>
+              <Pressable
+                onPress={() => {
+                  if (Platform.OS === 'web' && typeof window !== 'undefined' && window.location?.reload) {
+                    window.location.reload();
+                  } else {
+                    Linking.openSettings();
+                  }
+                }}
+                style={styles.micDeniedButton}
+              >
+                <Text style={styles.micDeniedButtonLabel}>
+                  {Platform.OS === 'web' ? 'Enable in browser settings →' : 'Open app settings →'}
+                </Text>
+              </Pressable>
+              <Text style={styles.micDeniedHint}>
+                {Platform.OS === 'web'
+                  ? 'Open your browser settings, find this site under permissions, and allow microphone access. Then refresh the page.'
+                  : 'Allow microphone access in your device settings, then return here.'}
+              </Text>
+            </View>
+          ) : (
+            <>
+              <View style={styles.micButtonWrapper}>
+                {Platform.OS === 'web' && isListeningOrRecording && (
+                  <Animated.View
+                    style={[
+                      styles.rippleRing,
+                      {
+                        opacity: rippleOpacity,
+                        transform: [{ scale: rippleScale }],
+                      },
+                      isRecording && styles.rippleRingRecording,
+                    ]}
+                    pointerEvents="none"
+                  />
+                )}
+                <Animated.View style={{ transform: [{ scale: isListeningOrRecording ? micPulseAnim : 1 }] }}>
+                  <Pressable
+                    /**
+                     * Mobile browsers (e.g. Brave on Android/iOS) often fail to synthesize `click` / `onPress`
+                     * from touch; `onPressIn` still fires. For tap-to-speak, run the mic action on pressIn on web
+                     * and omit onPress to avoid double-toggle when both fire on desktop.
+                     */
+                    onPress={
+                      Platform.OS === 'web' && micToggleMode && onMicPress
+                        ? undefined
+                        : micToggleMode && onMicPress
+                          ? onMicPress
+                          : undefined
+                    }
+                    onPressIn={
+                      Platform.OS === 'web' && micToggleMode && onMicPress
+                        ? () => {
+                            onMicPressIn?.();
+                            onMicPress();
+                          }
+                        : Platform.OS === 'web' && micToggleMode && onMicPressIn
+                          ? () => onMicPressIn()
+                          : micToggleMode
+                            ? onMicPressIn ?? undefined
+                            : onPressStart
+                    }
+                    onTouchStart={
+                      Platform.OS === 'web' && micToggleMode && onMicPress
+                        ? undefined
+                        : Platform.OS === 'web' && micToggleMode && onMicPressIn
+                          ? () => onMicPressIn()
+                          : undefined
+                    }
+                    onPressOut={micToggleMode ? undefined : onPressEnd}
+                    disabled={isMicDisabled}
+                    style={[
+                      styles.micButton,
+                      isListeningOrRecording && (isRecording ? styles.micButtonRecording : styles.micButtonListening),
+                      { opacity: micOpacity },
+                    ]}
+                  >
+                    {voiceState === 'processing' ? (
+                      <ActivityIndicator size="small" color={FLAME_MID} />
+                    ) : (
+                      <Ionicons
+                        name="mic"
+                        size={24}
+                        color={isRecording ? '#E84444' : FLAME_MID}
+                      />
+                    )}
+                  </Pressable>
+                </Animated.View>
+              </View>
+              <Text
+                style={[
+                  styles.micLabel,
+                  { opacity: statusLabelOpacity },
+                  isRecording && styles.micLabelRecording,
+                ]}
+              >
+                {micLabel}
+              </Text>
+            </>
+          )}
+        </View>
+
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel="Show scenario"
+          accessibilityHint={
+            Platform.OS === 'web'
+              ? 'Hover to view the scenario reference; it closes when the pointer leaves this button'
+              : 'Press and hold to view the current scenario reference'
+          }
+          accessibilityState={{ disabled: !showScenarioReferenceEnabled }}
+          disabled={!showScenarioReferenceEnabled}
+          {...(Platform.OS === 'web'
+            ? {
+                onHoverIn: () => {
+                  if (!showScenarioReferenceEnabled || !referenceCardScenario) return;
+                  setRefCardOpen(true);
+                },
+                onHoverOut: () => {
+                  setRefCardOpen(false);
+                },
+              }
+            : {
+                delayLongPress: 450,
+                onLongPress: () => {
+                  if (!showScenarioReferenceEnabled || !referenceCardScenario) return;
+                  setRefCardOpen(true);
+                },
+                onPressOut: () => {
+                  setRefCardOpen(false);
+                },
+              })}
+          style={(state) => {
+            const hovered = Platform.OS === 'web' && (state as { hovered?: boolean }).hovered;
+            return [
+              styles.showScenarioButton,
+              !showScenarioReferenceEnabled && styles.showScenarioButtonDisabled,
+              showScenarioReferenceEnabled && (state.pressed || hovered) && styles.showScenarioButtonPressed,
+            ];
+          }}
+        >
+          <Text
+            style={[
+              styles.showScenarioButtonLabel,
+              !showScenarioReferenceEnabled && styles.showScenarioButtonLabelDisabled,
+            ]}
+          >
+            SHOW SCENARIO
+          </Text>
+        </Pressable>
+
+        {/* Native only: RN Modal. Web uses inline overlay — Modal portal breaks hover on Show scenario. */}
+        {Platform.OS !== 'web' ? (
+          <Modal
+            visible={refCardOpen && !!referenceCardScenario}
+            transparent
+            animationType="fade"
+            onRequestClose={() => {
+              setRefCardOpen(false);
+            }}
+          >
+            <View style={styles.refModalRoot} pointerEvents="auto">
+              <Pressable
+                style={[styles.refModalOverlay, WEB_MODAL_NO_COPY]}
+                onPress={() => setRefCardOpen(false)}
+              >
+                <Pressable style={[styles.refModalCard, WEB_MODAL_NO_COPY]} onPress={() => {}} accessible={false}>
+                  <Text style={[styles.refModalLabel, WEB_MODAL_NO_COPY]}>◆ {referenceCardScenario?.label ?? ''}</Text>
+                  <ScrollView
+                    style={[styles.refModalScroll, WEB_MODAL_NO_COPY]}
+                    contentContainerStyle={[styles.refModalScrollContent, WEB_MODAL_NO_COPY]}
+                    showsVerticalScrollIndicator={false}
+                  >
+                    <Text style={[styles.refModalScenarioText, WEB_MODAL_NO_COPY]}>
+                      {referenceCardScenario?.text ?? ''}
+                    </Text>
+                  </ScrollView>
+                  {referenceCardPrompt ? (
+                    <>
+                      <View style={styles.refModalSeparator} />
+                      <Text style={[styles.refModalPromptText, WEB_MODAL_NO_COPY]}>{referenceCardPrompt}</Text>
+                    </>
+                  ) : null}
+                </Pressable>
+              </Pressable>
+            </View>
+          </Modal>
+        ) : null}
+      </View>
+    </View>
+  );
+
   return (
-    <View style={styles.pageWrapper}>
+    <View style={[styles.pageWrapper, Platform.OS === 'web' && styles.pageWrapperWeb]}>
       {/* Grain overlay */}
       {Platform.OS === 'web' && (
         <View
@@ -239,252 +492,20 @@ export const UserInterviewLayout: React.FC<UserInterviewLayoutProps> = ({
       </View>
 
       {/* Main content */}
-      <View style={styles.main}>
-        {/* Soft blur behind flame — web only; native shadow reads as a misaligned circle behind the orb */}
-        {Platform.OS === 'web' ? (
-          <View style={styles.ambientGlow} pointerEvents="none" />
-        ) : null}
-
-        {/* FlameOrb — existing component, no changes */}
-        <View style={styles.flameSection}>
-          <FlameOrb state={flameState} size={180} />
+      {Platform.OS === 'web' ? (
+        <ScrollView
+          style={styles.mainScroll}
+          contentContainerStyle={[styles.main, mainDynamicStyle, styles.mainScrollContent]}
+          keyboardShouldPersistTaps="handled"
+          showsVerticalScrollIndicator={false}
+        >
+          {interviewMainColumn}
+        </ScrollView>
+      ) : (
+        <View style={[styles.main, mainDynamicStyle]}>
+          {interviewMainColumn}
         </View>
-
-        {/* Bottom section */}
-        <View style={styles.bottomSection}>
-          {isWaiting ? (
-            <View style={styles.waitingRow}>
-              <Text style={styles.waitingDot}>◆</Text>
-              <Text style={styles.waitingText}>Amoraea is thinking...</Text>
-            </View>
-          ) : null}
-
-          {ttsFallbackActive ? (
-            <Text style={styles.ttsFallbackNotice}>
-              {Platform.OS === 'web'
-                ? '◆ Audio unavailable — hover Show scenario to read the question, then speak when ready'
-                : '◆ Audio unavailable — hold Show scenario to read the question, then speak when ready'}
-            </Text>
-          ) : null}
-
-          <View style={styles.micSection}>
-            {micError ? <Text style={styles.dockError}>{micError}</Text> : null}
-            {micWarning && !micError ? <Text style={styles.dockWarning}>{micWarning}</Text> : null}
-            {micPermissionDenied ? (
-              <View style={styles.micDeniedBlock}>
-                <View style={styles.micDeniedIconWrap}>
-                  <Ionicons name="mic-off" size={24} color="#E87A7A" />
-                </View>
-                <Text style={styles.micDeniedText}>
-                  Microphone access is required for this interview.
-                </Text>
-                <Pressable
-                  onPress={() => {
-                    if (Platform.OS === 'web' && typeof window !== 'undefined' && window.location?.reload) {
-                      window.location.reload();
-                    } else {
-                      Linking.openSettings();
-                    }
-                  }}
-                  style={styles.micDeniedButton}
-                >
-                  <Text style={styles.micDeniedButtonLabel}>
-                    {Platform.OS === 'web' ? 'Enable in browser settings →' : 'Open app settings →'}
-                  </Text>
-                </Pressable>
-                <Text style={styles.micDeniedHint}>
-                  {Platform.OS === 'web'
-                    ? 'Open your browser settings, find this site under permissions, and allow microphone access. Then refresh the page.'
-                    : 'Allow microphone access in your device settings, then return here.'}
-                </Text>
-              </View>
-            ) : (
-              <>
-                <View style={styles.micButtonWrapper}>
-                  {Platform.OS === 'web' && isListeningOrRecording && (
-                    <Animated.View
-                      style={[
-                        styles.rippleRing,
-                        {
-                          opacity: rippleOpacity,
-                          transform: [{ scale: rippleScale }],
-                        },
-                        isRecording && styles.rippleRingRecording,
-                      ]}
-                      pointerEvents="none"
-                    />
-                  )}
-                  <Animated.View style={{ transform: [{ scale: isListeningOrRecording ? micPulseAnim : 1 }] }}>
-                    <Pressable
-                      onPress={micToggleMode && onMicPress ? onMicPress : undefined}
-                      onPressIn={micToggleMode ? undefined : onPressStart}
-                      onPressOut={micToggleMode ? undefined : onPressEnd}
-                      disabled={isMicDisabled}
-                      style={[
-                        styles.micButton,
-                        isListeningOrRecording && (isRecording ? styles.micButtonRecording : styles.micButtonListening),
-                        { opacity: micOpacity },
-                      ]}
-                    >
-                      {voiceState === 'processing' ? (
-                        <ActivityIndicator size="small" color={FLAME_MID} />
-                      ) : (
-                        <Ionicons
-                          name="mic"
-                          size={24}
-                          color={isRecording ? '#E84444' : FLAME_MID}
-                        />
-                      )}
-                    </Pressable>
-                  </Animated.View>
-                </View>
-                <Text
-                  style={[
-                    styles.micLabel,
-                    { opacity: statusLabelOpacity },
-                    isRecording && styles.micLabelRecording,
-                  ]}
-                >
-                  {micLabel}
-                </Text>
-              </>
-            )}
-          </View>
-
-          <Pressable
-            accessibilityRole="button"
-            accessibilityLabel="Show scenario"
-            accessibilityHint={
-              Platform.OS === 'web'
-                ? 'Hover to view the scenario reference; it closes when the pointer leaves this button'
-                : 'Press and hold to view the current scenario reference'
-            }
-            accessibilityState={{ disabled: !showScenarioReferenceEnabled }}
-            disabled={!showScenarioReferenceEnabled}
-            {...(Platform.OS === 'web'
-              ? {
-                  onHoverIn: () => {
-                    // #region agent log
-                    const n = ++dbgHoverSeq.current;
-                    fetch('http://127.0.0.1:7789/ingest/668e0bd5-3283-4492-9f48-e33846c18218', {
-                      method: 'POST',
-                      headers: { 'Content-Type': 'application/json', 'X-Debug-Session-Id': 'e70f17' },
-                      body: JSON.stringify({
-                        sessionId: 'e70f17',
-                        location: 'UserInterviewLayout.tsx:hoverIn',
-                        message: 'showScenario hoverIn',
-                        data: {
-                          seq: n,
-                          enabled: showScenarioReferenceEnabled,
-                          hasScenario: !!referenceCardScenario,
-                          hypothesisId: 'B',
-                        },
-                        timestamp: Date.now(),
-                      }),
-                    }).catch(() => {});
-                    // #endregion
-                    if (!showScenarioReferenceEnabled || !referenceCardScenario) return;
-                    setRefCardOpen(true);
-                  },
-                  onHoverOut: () => {
-                    // #region agent log
-                    const n = ++dbgHoverSeq.current;
-                    fetch('http://127.0.0.1:7789/ingest/668e0bd5-3283-4492-9f48-e33846c18218', {
-                      method: 'POST',
-                      headers: { 'Content-Type': 'application/json', 'X-Debug-Session-Id': 'e70f17' },
-                      body: JSON.stringify({
-                        sessionId: 'e70f17',
-                        location: 'UserInterviewLayout.tsx:hoverOut',
-                        message: 'showScenario hoverOut',
-                        data: { seq: n, hypothesisId: 'A' },
-                        timestamp: Date.now(),
-                      }),
-                    }).catch(() => {});
-                    // #endregion
-                    setRefCardOpen(false);
-                  },
-                }
-              : {
-                  delayLongPress: 450,
-                  onLongPress: () => {
-                    if (!showScenarioReferenceEnabled || !referenceCardScenario) return;
-                    setRefCardOpen(true);
-                  },
-                  onPressOut: () => {
-                    setRefCardOpen(false);
-                  },
-                })}
-            style={(state) => {
-              const hovered = Platform.OS === 'web' && (state as { hovered?: boolean }).hovered;
-              return [
-                styles.showScenarioButton,
-                !showScenarioReferenceEnabled && styles.showScenarioButtonDisabled,
-                showScenarioReferenceEnabled && (state.pressed || hovered) && styles.showScenarioButtonPressed,
-              ];
-            }}
-          >
-            <Text
-              style={[
-                styles.showScenarioButtonLabel,
-                !showScenarioReferenceEnabled && styles.showScenarioButtonLabelDisabled,
-              ]}
-            >
-              SHOW SCENARIO
-            </Text>
-          </Pressable>
-
-          {/* Native only: RN Modal. Web uses inline overlay — Modal portal breaks hover on Show scenario (logs e70f17 ~20ms hoverOut after hoverIn). */}
-          {Platform.OS !== 'web' ? (
-            <Modal
-              visible={refCardOpen && !!referenceCardScenario}
-              transparent
-              animationType="fade"
-              onRequestClose={() => {
-                // #region agent log
-                fetch('http://127.0.0.1:7789/ingest/668e0bd5-3283-4492-9f48-e33846c18218', {
-                  method: 'POST',
-                  headers: { 'Content-Type': 'application/json', 'X-Debug-Session-Id': 'e70f17' },
-                  body: JSON.stringify({
-                    sessionId: 'e70f17',
-                    location: 'UserInterviewLayout.tsx:onRequestClose',
-                    message: 'Modal onRequestClose',
-                    data: { hypothesisId: 'E' },
-                    timestamp: Date.now(),
-                  }),
-                }).catch(() => {});
-                // #endregion
-                setRefCardOpen(false);
-              }}
-            >
-              <View style={styles.refModalRoot} pointerEvents="auto">
-                <Pressable
-                  style={[styles.refModalOverlay, WEB_MODAL_NO_COPY]}
-                  onPress={() => setRefCardOpen(false)}
-                >
-                  <Pressable style={[styles.refModalCard, WEB_MODAL_NO_COPY]} onPress={() => {}} accessible={false}>
-                    <Text style={[styles.refModalLabel, WEB_MODAL_NO_COPY]}>◆ {referenceCardScenario?.label ?? ''}</Text>
-                    <ScrollView
-                      style={[styles.refModalScroll, WEB_MODAL_NO_COPY]}
-                      contentContainerStyle={[styles.refModalScrollContent, WEB_MODAL_NO_COPY]}
-                      showsVerticalScrollIndicator={false}
-                    >
-                      <Text style={[styles.refModalScenarioText, WEB_MODAL_NO_COPY]}>
-                        {referenceCardScenario?.text ?? ''}
-                      </Text>
-                    </ScrollView>
-                    {referenceCardPrompt ? (
-                      <>
-                        <View style={styles.refModalSeparator} />
-                        <Text style={[styles.refModalPromptText, WEB_MODAL_NO_COPY]}>{referenceCardPrompt}</Text>
-                      </>
-                    ) : null}
-                  </Pressable>
-                </Pressable>
-              </View>
-            </Modal>
-          ) : null}
-        </View>
-      </View>
+      )}
 
       {Platform.OS === 'web' && refCardOpen && referenceCardScenario ? (
         <View style={styles.refModalWebLayer} pointerEvents="none">
@@ -530,6 +551,11 @@ const styles = StyleSheet.create({
     flexDirection: 'column',
     overflow: 'hidden',
     position: 'relative',
+  },
+  /** Avoid clipping bottom controls when the visual viewport is shorter than window dimensions (mobile browsers). */
+  pageWrapperWeb: {
+    overflow: 'visible',
+    minHeight: '100%' as unknown as number,
   },
   grainOverlay: {
     position: 'absolute',
@@ -602,12 +628,26 @@ const styles = StyleSheet.create({
   main: {
     flex: 1,
     paddingHorizontal: 24,
-    paddingBottom: 40,
-    paddingTop: 24,
     overflow: 'hidden',
     position: 'relative',
     justifyContent: 'space-between',
     alignItems: 'center',
+  },
+  mainWeb: {
+    overflow: 'visible',
+  },
+  mainScroll: {
+    flex: 1,
+    minHeight: 0,
+  },
+  mainScrollContent: {
+    flexGrow: 1,
+    overflow: 'visible',
+  },
+  interviewMainColumnRoot: {
+    width: '100%',
+    minHeight: 0,
+    flex: 1,
   },
   ambientGlow: {
     position: 'absolute',
@@ -625,6 +665,8 @@ const styles = StyleSheet.create({
   },
   flameSection: {
     flex: 1,
+    minHeight: 0,
+    flexShrink: 1,
     justifyContent: 'center',
     alignItems: 'center',
     width: '100%',
@@ -632,8 +674,9 @@ const styles = StyleSheet.create({
   },
   bottomSection: {
     width: '100%',
+    flexShrink: 0,
     alignItems: 'center',
-    gap: 16,
+    gap: 12,
     zIndex: 1,
   },
   showScenarioButton: {
@@ -740,6 +783,17 @@ const styles = StyleSheet.create({
     color: TEXT_DIM,
     textAlign: 'center',
     marginTop: 8,
+  },
+  insecureContextBanner: {
+    fontFamily: FONT_UI,
+    fontSize: 12,
+    fontWeight: '400',
+    lineHeight: 18,
+    color: '#E8A060',
+    textAlign: 'center',
+    marginTop: 10,
+    marginHorizontal: 12,
+    paddingHorizontal: 8,
   },
   waitingRow: {
     flexDirection: 'row',

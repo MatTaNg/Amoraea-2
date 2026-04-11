@@ -56,30 +56,6 @@ export class InviteCodeRepository {
       inviteCode = generateCode();
     }
 
-    // #region agent log
-    {
-      const { data: sessWrap } = await supabase.auth.getSession();
-      const sid = sessWrap?.session?.user?.id ?? null;
-      fetch('http://127.0.0.1:7789/ingest/668e0bd5-3283-4492-9f48-e33846c18218', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'X-Debug-Session-Id': 'e70f17' },
-        body: JSON.stringify({
-          sessionId: 'e70f17',
-          hypothesisId: 'A',
-          location: 'InviteCodeRepository.ts:ensureUserWithInviteCode:preInsert',
-          message: 'before users insert',
-          data: {
-            userIdLen: userId?.length ?? 0,
-            sessionUserIdLen: sid?.length ?? 0,
-            idsMatch: sid === userId,
-            referredByIdSet: referredById != null,
-            referralCodeTrimmed: !!options.referralCode?.trim(),
-          },
-          timestamp: Date.now(),
-        }),
-      }).catch(() => {});
-    }
-    // #endregion
 
     const { error } = await supabase.from('users').insert({
       id: userId,
@@ -88,27 +64,6 @@ export class InviteCodeRepository {
       referred_by_id: referredById,
     });
 
-    // #region agent log
-    if (error) {
-      const err = error as { code?: string; message?: string; details?: string };
-      fetch('http://127.0.0.1:7789/ingest/668e0bd5-3283-4492-9f48-e33846c18218', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'X-Debug-Session-Id': 'e70f17' },
-        body: JSON.stringify({
-          sessionId: 'e70f17',
-          hypothesisId: 'B',
-          location: 'InviteCodeRepository.ts:ensureUserWithInviteCode:insertError',
-          message: 'users insert failed',
-          data: {
-            code: err.code ?? null,
-            pgMessage: err.message ?? null,
-            details: err.details ?? null,
-          },
-          timestamp: Date.now(),
-        }),
-      }).catch(() => {});
-    }
-    // #endregion
 
     if (error) throw new Error(`Failed to create user: ${error.message}`);
     return { inviteCode };

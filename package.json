@@ -5,11 +5,11 @@
   "scripts": {
     "postinstall": "patch-package",
     "eas-build-post-install": "node scripts/verify-expo-av-patch.js",
-    "fix-icon-background": "node scripts/fix-icon-white-background.js",
     "start": "expo start",
     "android": "expo start --android",
     "ios": "expo start --ios",
     "web": "expo start --web",
+    "web:tunnel": "expo start --web --tunnel",
     "build:web": "expo export -p web",
     "test": "jest",
     "test:watch": "jest --watch",
