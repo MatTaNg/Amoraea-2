@@ -3267,10 +3267,11 @@ let interviewLastCommittedAttemptId: string | null = null;
 export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigation, route }) => {
   const { user, signOut } = useAuth();
   const userId = (route.params as { userId?: string } | undefined)?.userId ?? user?.id ?? '';
-  const isOnboardingInterviewRoute = route?.name === 'OnboardingInterview';
+  /** Main interview route in the app stack (`Aria`) or legacy `OnboardingInterview`. */
+  const isInterviewAppRoute = route?.name === 'Aria' || route?.name === 'OnboardingInterview';
   const [messages, setMessages] = useState<{ role: string; content: string; isScoreCard?: boolean }[]>([]);
   const [voiceState, setVoiceState] = useState<VoiceState>('idle');
-  const [status, setStatus] = useState<Status>(() => (isOnboardingInterviewRoute ? 'starting_interview' : 'intro'));
+  const [status, setStatus] = useState<Status>(() => (isInterviewAppRoute ? 'starting_interview' : 'intro'));
   /** Onboarding: auto-run startInterview once after profile gate; reset on retake / retry. */
   const onboardingAutoStartRef = useRef(false);
   const [touchedConstructs, setTouchedConstructs] = useState<number[]>([]);
@@ -4363,8 +4364,7 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
     }
 
     // Admin secret pass: skip interview and auto-approve for configured email (onboarding only)
-    const isOnboardingInterview = route?.name === 'OnboardingInterview';
-    if (isOnboardingInterview && trimmed === ADMIN_PASS_PHRASE) {
+    if (isInterviewAppRoute && trimmed === ADMIN_PASS_PHRASE) {
       try {
         const { data: { session } } = await supabase.auth.getSession();
         const email = (session?.user?.email ?? '').toLowerCase();
@@ -4385,7 +4385,18 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
           });
           queryClient.invalidateQueries({ queryKey: ['profile', userId] });
           setVoiceState('idle');
-          navigation.replace('PostInterview', { userId });
+          const adminPassGate = computeGateResult({ ...FALLBACK_MARKER_SCORES_ALL_MARKERS });
+          setResults({
+            pillarScores: { ...FALLBACK_MARKER_SCORES_ALL_MARKERS },
+            keyEvidence: {},
+            narrativeCoherence: 'high',
+            behavioralSpecificity: 'high',
+            notableInconsistencies: [],
+            interviewSummary: 'Admin pass — interview skipped. Scores are illustrative.',
+            gateResult: adminPassGate,
+          });
+          setInterviewStatus('congratulations');
+          setStatus('results');
           return;
         }
       } catch (err) {
@@ -4400,7 +4411,7 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
       }
     }
 
-    if (isOnboardingInterview && messages.length === 0 && !profile?.name?.trim() && looksLikeName(trimmed)) {
+    if (isInterviewAppRoute && messages.length === 0 && !profile?.name?.trim() && looksLikeName(trimmed)) {
       try {
         await profileRepository.upsertProfile(userId, { name: trimmed });
         queryClient.invalidateQueries({ queryKey: ['profile', userId] });
@@ -6348,13 +6359,13 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
   }, [speakTextSafe, isAdmin, userId, useNativeOrWhisperRecording, audioRecorder, resetInterviewProgressRefs]);
 
   useEffect(() => {
-    if (!isOnboardingInterviewRoute) return;
+    if (!isInterviewAppRoute) return;
     if (status !== 'starting_interview') return;
     if (interviewStatus !== 'not_started') return;
     if (onboardingAutoStartRef.current) return;
     onboardingAutoStartRef.current = true;
     void startInterview();
-  }, [isOnboardingInterviewRoute, status, interviewStatus, startInterview]);
+  }, [isInterviewAppRoute, status, interviewStatus, startInterview]);
 
   const saveInterviewResults = useCallback(
     async (results: InterviewResults, gateResult: GateResult, uid: string) => {
@@ -6391,7 +6402,7 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
       console.log('=== [2] Entering completion handler ===');
       console.log('interviewStatus:', interviewStatusRef.current);
     }
-    const isOnboarding = route.name === 'OnboardingInterview';
+    const isOnboardingFlow = route.name === 'Aria' || route.name === 'OnboardingInterview';
     setStatus('scoring');
     await remoteLog('[2] Screen set to scoring');
     const context = typologyContext || 'No typology context — score from transcript only.';
@@ -6406,7 +6417,7 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
         gateResult: computeGateResult({ ...FALLBACK_MARKER_SCORES_MID }),
       };
       setResults(fallbackResults);
-      if (isOnboarding) {
+      if (isOnboardingFlow) {
         const gate1Score = buildGate1ScoreFromResults(fallbackResults);
         await profileRepository.upsertProfile(userId, {
           gate1Score,
@@ -6416,7 +6427,8 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
         queryClient.invalidateQueries({ queryKey: ['profile', userId] });
       }
       await saveInterviewResults(fallbackResults, fallbackResults.gateResult!, userId);
-      const standardNoApi = isOnboarding && !!userId && !!profile && !profile.isAlphaTester;
+      const standardNoApi =
+        isOnboardingFlow && !!userId && !!profile && !profile.isAlphaTester && !isAdmin;
       if (standardNoApi) {
         navigation.replace('PostInterview', { userId });
         setStatus('results');
@@ -6466,7 +6478,7 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
       setResults(parsed);
       /** Non–alpha testers: no in-app scores or analysis — branded PostInterview only. */
       const isStandardOnboardingApplicant =
-        isOnboarding && !!userId && !!profile && !profile.isAlphaTester;
+        isOnboardingFlow && !!userId && !!profile && !profile.isAlphaTester && !isAdmin;
       if (isStandardOnboardingApplicant) {
         const gate1Score = buildGate1ScoreFromResults(parsed);
         await profileRepository.upsertProfile(userId, {
@@ -6488,7 +6500,7 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
       if (__DEV__) {
         console.log('=== Scoring API complete ===', 'passed:', gateResult?.pass);
       }
-      if (isOnboarding) {
+      if (isOnboardingFlow) {
         const gate1Score = buildGate1ScoreFromResults(parsed);
         await profileRepository.upsertProfile(userId, {
           gate1Score,
@@ -6951,7 +6963,7 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
         gateResult: computeGateResult({ ...FALLBACK_MARKER_SCORES_MID }),
       };
       setResults(fallbackResults);
-      if (isOnboarding) {
+      if (isOnboardingFlow) {
         const gate1Score = buildGate1ScoreFromResults(fallbackResults);
         await profileRepository.upsertProfile(userId, {
           gate1Score,
@@ -6961,7 +6973,8 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
         queryClient.invalidateQueries({ queryKey: ['profile', userId] });
       }
       await saveInterviewResults(fallbackResults, fallbackResults.gateResult!, userId);
-      const standardCatch = isOnboarding && !!userId && !!profile && !profile.isAlphaTester;
+      const standardCatch =
+        isOnboardingFlow && !!userId && !!profile && !profile.isAlphaTester && !isAdmin;
       if (standardCatch) {
         navigation.replace('PostInterview', { userId });
         setStatus('results');
@@ -6980,6 +6993,7 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
     ensureValidSession,
     scoreScenario,
     profile,
+    isAdmin,
   ]);
 
   // When INTERVIEW_COMPLETE was detected while TTS was still playing, transition to loading once TTS finishes
@@ -7028,7 +7042,7 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
     lastAnsweredClosingScenarioRef.current = null;
     onboardingAutoStartRef.current = false;
     setMicError(null);
-    setStatus(route.name === 'OnboardingInterview' ? 'starting_interview' : 'intro');
+    setStatus(route.name === 'Aria' || route.name === 'OnboardingInterview' ? 'starting_interview' : 'intro');
     setResults(null);
     responseTimingsRef.current = [];
     probeLogRef.current = [];
@@ -7327,8 +7341,7 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
             const { error } = await supabase.auth.refreshSession();
             if (!error) setSessionExpired(false);
             else {
-              await supabase.auth.signOut();
-              navigation.replace('Login');
+              await signOut();
             }
           }}
           style={styles.sessionExpiredButton}
@@ -7929,6 +7942,9 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
                   title="Continue"
                   onPress={() => {
                     setInterviewStatus('congratulations');
+                    if (userId && (route.name === 'Aria' || route.name === 'OnboardingInterview')) {
+                      navigation.replace('PostInterview', { userId });
+                    }
                   }}
                   style={styles.resultsPanelButton}
                 />
@@ -8000,7 +8016,6 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
                   onPress={() => {
                     const onComplete = (route.params as { onComplete?: (r: InterviewResults) => void })?.onComplete;
                     if (onComplete) onComplete({ ...results, gateResult: results?.gateResult });
-                    else navigation.navigate('Home');
                   }}
                   style={styles.resultsPanelButton}
                 />

@@ -29,12 +29,6 @@ module.exports = {
       functions: 100,
       lines: 95,
     },
-    'src/app/navigation/onboardingInitialRoute.ts': {
-      statements: 85,
-      branches: 85,
-      functions: 100,
-      lines: 85,
-    },
     'src/data/repositories/CompatibilityRepository.ts': {
       statements: 100,
       branches: 100,

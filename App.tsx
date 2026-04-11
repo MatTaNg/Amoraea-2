@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState, Suspense, lazy } from 'react';
+import React, { useEffect, Suspense, lazy } from 'react';
 import { Platform } from 'react-native';
 import { NavigationContainer, DarkTheme } from '@react-navigation/native';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
@@ -7,31 +7,16 @@ import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { useAuth } from './src/features/authentication/hooks/useAuth';
 import { LoginScreen } from './src/app/screens/LoginScreen';
 import { RegisterScreen } from './src/app/screens/RegisterScreen';
-import { Stage1BasicInfoScreen } from './src/app/screens/onboarding/Stage1BasicInfoScreen';
-import { InterviewFramingScreen } from './src/app/screens/onboarding/InterviewFramingScreen';
 import { PostInterviewScreen } from '@app/screens/onboarding/PostInterviewScreen';
-import { UnderReviewScreen } from './src/app/screens/onboarding/UnderReviewScreen';
-import { Gate2ReentryScreen } from './src/app/screens/onboarding/Gate2ReentryScreen';
-import { Stage3PsychometricsScreen } from './src/app/screens/onboarding/Stage3PsychometricsScreen';
-import { Stage4CompatibilityScreen } from './src/app/screens/onboarding/Stage4CompatibilityScreen';
-import { OnboardingNameScreen } from './src/app/screens/onboarding/OnboardingNameScreen';
-import { OnboardingAgeScreen } from './src/app/screens/onboarding/OnboardingAgeScreen';
-import { OnboardingGenderScreen } from './src/app/screens/onboarding/OnboardingGenderScreen';
-import { OnboardingAttractedToScreen } from './src/app/screens/onboarding/OnboardingAttractedToScreen';
-import { OnboardingHeightScreen } from './src/app/screens/onboarding/OnboardingHeightScreen';
-import { OnboardingOccupationScreen } from './src/app/screens/onboarding/OnboardingOccupationScreen';
-import { OnboardingLocationScreen } from './src/app/screens/onboarding/OnboardingLocationScreen';
-import { OnboardingPhotosScreen } from './src/app/screens/onboarding/OnboardingPhotosScreen';
-import { HomeScreen } from './src/app/screens/HomeScreen';
-import { TypologyDetailScreen } from './src/app/screens/TypologyDetailScreen';
-import { CompatibilityScreen } from './src/app/screens/CompatibilityScreen';
-import { EditProfileScreen } from './src/app/screens/EditProfileScreen';
-import { ContactsScreen } from './src/app/screens/ContactsScreen';
-import { HumanDesignScreen } from './src/app/screens/HumanDesignScreen';
-import { FullAssessmentScreen } from './src/app/screens/FullAssessmentScreen';
+import { OnboardingHeader } from './src/ui/components/OnboardingHeader';
+import { ProfileRepository } from './src/data/repositories/ProfileRepository';
+import { InviteCodeRepository } from './src/data/repositories/InviteCodeRepository';
+import { OnboardingUseCase } from './src/domain/useCases/OnboardingUseCase';
+import { AsyncStorageService } from './src/utilities/storage/AsyncStorageService';
+import { supabase } from './src/data/supabase/client';
+import { useQuery } from '@tanstack/react-query';
+import { StyleSheet, View, Text, ActivityIndicator } from 'react-native';
 
-// Lazy-load AriaScreen so expo-speech-recognition is only required when user opens Aria.
-// If the module fails to load (e.g. Expo Go / native module missing), show a fallback instead of crashing.
 const AriaScreenLazy = lazy(() =>
   import('./src/app/screens/AriaScreen').catch(() => ({
     default: function AriaUnavailable() {
@@ -51,17 +36,6 @@ const AriaScreenWithSuspense = (props: { navigation: unknown; route: unknown }) 
     <AriaScreenLazy {...props} />
   </Suspense>
 );
-
-import { AppHeader } from './src/ui/components/AppHeader';
-import { OnboardingHeader } from './src/ui/components/OnboardingHeader';
-import { ProfileRepository } from './src/data/repositories/ProfileRepository';
-import { InviteCodeRepository } from './src/data/repositories/InviteCodeRepository';
-import { OnboardingUseCase } from './src/domain/useCases/OnboardingUseCase';
-import { AsyncStorageService } from './src/utilities/storage/AsyncStorageService';
-import { getOnboardingInitialRoute } from './src/app/navigation/onboardingInitialRoute';
-import { supabase } from './src/data/supabase/client';
-import { useQuery } from '@tanstack/react-query';
-import { StyleSheet, View, Text, ActivityIndicator } from 'react-native';
 
 const ROOT_STYLE = {
   flex: 1,
@@ -85,105 +59,41 @@ const AuthNavigator = () => (
   </Stack.Navigator>
 );
 
-const OnboardingNavigator = ({ userId }: { userId: string }) => (
-  <Stack.Navigator screenOptions={{ headerShown: false }}>
-    <Stack.Screen name="OnboardingName">
-      {(props) => <OnboardingNameScreen {...props} userId={userId} />}
-    </Stack.Screen>
-    <Stack.Screen name="OnboardingAge">
-      {(props) => <OnboardingAgeScreen {...props} userId={userId} />}
-    </Stack.Screen>
-    <Stack.Screen name="OnboardingGender">
-      {(props) => <OnboardingGenderScreen {...props} userId={userId} />}
-    </Stack.Screen>
-    <Stack.Screen name="OnboardingAttractedTo">
-      {(props) => <OnboardingAttractedToScreen {...props} userId={userId} />}
-    </Stack.Screen>
-    <Stack.Screen name="OnboardingHeight">
-      {(props) => <OnboardingHeightScreen {...props} userId={userId} />}
-    </Stack.Screen>
-    <Stack.Screen name="OnboardingOccupation">
-      {(props) => <OnboardingOccupationScreen {...props} userId={userId} />}
-    </Stack.Screen>
-    <Stack.Screen name="OnboardingLocation">
-      {(props) => <OnboardingLocationScreen {...props} userId={userId} />}
-    </Stack.Screen>
-    <Stack.Screen name="OnboardingPhotos">
-      {(props) => <OnboardingPhotosScreen {...props} userId={userId} />}
-    </Stack.Screen>
+/** Logged-in experience: AI interview only, plus PostInterview for non-admin completion handoff. */
+const InterviewAppNavigator = ({ userId }: { userId: string }) => (
+  <Stack.Navigator
+    initialRouteName="Aria"
+    screenOptions={{
+      title: '',
+    }}
+  >
+    <Stack.Screen
+      name="Aria"
+      component={AriaScreenWithSuspense}
+      initialParams={{ userId }}
+      options={{ headerShown: false }}
+    />
+    <Stack.Screen
+      name="PostInterview"
+      component={PostInterviewScreen}
+      initialParams={{ userId }}
+      options={{
+        headerShown: true,
+        header: () => <OnboardingHeader />,
+      }}
+    />
   </Stack.Navigator>
 );
 
-const GatesOnboardingNavigator = ({ userId }: { userId: string }) => {
-  const { data: profile } = useQuery({
-    queryKey: ['profile', userId],
-    queryFn: () => profileRepository.getProfile(userId),
-    enabled: !!userId,
-  });
-  const [interviewFramingAck, setInterviewFramingAck] = useState<boolean | null>(null);
-  useEffect(() => {
-    let cancelled = false;
-    setInterviewFramingAck(null);
-    if (!userId) return;
-    void storageService.getInterviewFramingAcknowledged(userId).then((ack) => {
-      if (!cancelled) setInterviewFramingAck(ack);
-    });
-    return () => {
-      cancelled = true;
-    };
-  }, [userId]);
-  const initialRoute = useMemo(
-    () =>
-      getOnboardingInitialRoute(profile ?? {}, {
-        hasAcknowledgedInterviewFraming: interviewFramingAck ?? false,
-      }),
-    [profile, interviewFramingAck]
-  );
-  if (interviewFramingAck === null) {
-    return <LoadingScreen />;
-  }
-  return (
-    <Stack.Navigator
-      key={initialRoute}
-      initialRouteName={initialRoute}
-      screenOptions={{
-        headerShown: true,
-        header: () => <OnboardingHeader />,
-        title: '',
-      }}
-    >
-      <Stack.Screen name="Stage1BasicInfo" component={Stage1BasicInfoScreen} initialParams={{ userId }} />
-      <Stack.Screen
-        name="InterviewFraming"
-        component={InterviewFramingScreen}
-        initialParams={{ userId }}
-        options={{
-          gestureEnabled: false,
-          header: () => <OnboardingHeader variant="dark" />,
-        }}
-      />
-      <Stack.Screen
-        name="OnboardingInterview"
-        component={AriaScreenWithSuspense}
-        initialParams={{ userId }}
-        options={{ headerShown: false }}
-      />
-      <Stack.Screen name="PostInterview" component={PostInterviewScreen} initialParams={{ userId }} />
-      <Stack.Screen name="UnderReview" component={UnderReviewScreen} initialParams={{ userId }} />
-      <Stack.Screen name="Gate2Reentry" component={Gate2ReentryScreen} initialParams={{ userId }} />
-      <Stack.Screen name="Stage3Psychometrics" component={Stage3PsychometricsScreen} initialParams={{ userId }} />
-      <Stack.Screen name="Stage4Compatibility" component={Stage4CompatibilityScreen} initialParams={{ userId }} />
-    </Stack.Navigator>
-  );
-};
-
 const AppNavigator = ({ userId }: { userId: string }) => {
-  const { data: profile, isLoading } = useQuery({
+  const { data: profile, isPending } = useQuery({
     queryKey: ['profile', userId],
     queryFn: async () => {
       let p = await profileRepository.getProfile(userId);
       if (!p) {
-        const { data: { session } } = await supabase.auth.getSession();
+        const {
+          data: { session },
+        } = await supabase.auth.getSession();
         const metadata = session?.user?.user_metadata as { referral_code?: string } | undefined;
         await inviteCodeRepository.ensureUserWithInviteCode(userId, {
           email: session?.user?.email ?? undefined,
@@ -202,42 +112,11 @@ const AppNavigator = ({ userId }: { userId: string }) => {
     }
   }, [userId]);
 
-  if (isLoading || !profile) {
+  if (isPending || !profile) {
     return <LoadingScreen />;
   }
 
-  const stage = profile.onboardingStage ?? 'interview';
-  const showMainApp = stage === 'complete' || profile.profileVisible === true;
-
-  if (!showMainApp) {
-    return <GatesOnboardingNavigator userId={userId} />;
-  }
-
-  return (
-    <Stack.Navigator
-      screenOptions={{
-        header: () => <AppHeader />,
-        headerShown: true,
-        title: '',
-      }}
-    >
-      <Stack.Screen name="Home">
-        {(props) => <HomeScreen {...props} userId={userId} />}
-      </Stack.Screen>
-      <Stack.Screen name="TypologyDetail" component={TypologyDetailScreen} />
-      <Stack.Screen name="Compatibility" component={CompatibilityScreen} />
-      <Stack.Screen name="FullAssessment" component={FullAssessmentScreen} />
-      <Stack.Screen name="EditProfile" component={EditProfileScreen} />
-      <Stack.Screen name="Contacts" component={ContactsScreen} />
-      <Stack.Screen name="HumanDesign" component={HumanDesignScreen} />
-      <Stack.Screen
-        name="Aria"
-        component={AriaScreenWithSuspense}
-        initialParams={{ userId }}
-        options={{ headerShown: false }}
-      />
-    </Stack.Navigator>
-  );
+  return <InterviewAppNavigator userId={userId} />;
 };
 
 const LoadingScreen = () => (
@@ -250,17 +129,15 @@ const LoadingScreen = () => (
 const RootNavigator = () => {
   const { user, loading } = useAuth();
 
-  // Only show app/onboarding when user has a real session with email (signed in or signed up)
   const isLoggedIn = user?.email != null && user.email !== '';
 
-  // At app start for this user: clear any previous debug_logs rows for them, then log INIT.
   useEffect(() => {
     if (isLoggedIn && user?.id) {
       import('@data/supabase/client').then(async ({ supabase }) => {
         try {
           await supabase.from('debug_logs').delete().eq('user_id', user.id);
         } catch {
-          // best-effort only
+          /* best-effort */
         }
       });
       import('@utilities/remoteLog').then(({ remoteLog }) => {
@@ -292,13 +169,14 @@ const RootNavigator = () => {
   );
 };
 
-/** On web (iOS Safari PWA), unlock audio on first user gesture so Aira TTS is not blocked. */
 function useWebAudioUnlock() {
   useEffect(() => {
     if (Platform.OS !== 'web' || typeof document === 'undefined') return;
     const unlockAudio = () => {
-      const AudioContext = (window as unknown as { AudioContext?: typeof globalThis.AudioContext; webkitAudioContext?: typeof globalThis.AudioContext }).AudioContext
-        || (window as unknown as { webkitAudioContext?: typeof globalThis.AudioContext }).webkitAudioContext;
+      const AudioContext =
+        (window as unknown as { AudioContext?: typeof globalThis.AudioContext; webkitAudioContext?: typeof globalThis.AudioContext })
+          .AudioContext ||
+        (window as unknown as { webkitAudioContext?: typeof globalThis.AudioContext }).webkitAudioContext;
       if (AudioContext) {
         const ctx = new (AudioContext as new () => AudioContext)();
         ctx.resume().then(() => {});
@@ -357,4 +235,3 @@ export default function App() {
     </View>
   );
 }
-
