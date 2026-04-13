@@ -44,9 +44,12 @@ const RECORDING_OPTIONS = {
 export function useAudioRecorder({
   onRecordingComplete,
   onError,
+  onBeforeWebRecorderStop,
 }: {
   onRecordingComplete?: (blob: Blob, nativeUri: string | null) => void | Promise<void>;
   onError?: (err: Error) => void;
+  /** Web: run synchronously in the same user-gesture stack as `MediaRecorder.stop()` (e.g. resume AudioContext for later TTS). */
+  onBeforeWebRecorderStop?: () => void;
 }) {
   const [isRecording, setIsRecording] = useState(false);
   const [permissionStatus, setPermissionStatus] = useState<AudioRecorderPermissionStatus>(null);
@@ -137,7 +140,7 @@ export function useAudioRecorder({
         audio: {
           echoCancellation: true,
           noiseSuppression: true,
-          sampleRate: 44100,
+          // Omit sampleRate — not widely supported as a constraint; desktop Safari/Chrome can misbehave.
         },
       });
 
@@ -171,8 +174,11 @@ export function useAudioRecorder({
         await onRecordingComplete?.(blob, null);
       };
 
-      /** No timeslice: one `dataavailable` + final blob on `stop()` — mobile Brave often produced empty blobs with `start(1000)` when stop fired before the first slice. */
-      mediaRecorder.start();
+      /**
+       * Short timeslice so Safari desktop and other browsers emit `dataavailable` chunks reliably.
+       * (No timeslice can yield empty `audioChunksRef` on some desktop MediaRecorder implementations.)
+       */
+      mediaRecorder.start(100);
       recordingStartTimeRef.current = Date.now();
       setIsRecording(true);
     } catch (err) {
@@ -184,6 +190,7 @@ export function useAudioRecorder({
   const stopWebRecording = useCallback(() => {
     const elapsed = Date.now() - (recordingStartTimeRef.current ?? 0);
     const stop = () => {
+      onBeforeWebRecorderStop?.();
       const rec = mediaRecorderRef.current;
       if (rec?.state !== 'inactive') rec?.stop();
     };
@@ -192,7 +199,7 @@ export function useAudioRecorder({
     } else {
       stop();
     }
-  }, []);
+  }, [onBeforeWebRecorderStop]);
 
   const startRecording = useCallback(async () => {
     const granted =

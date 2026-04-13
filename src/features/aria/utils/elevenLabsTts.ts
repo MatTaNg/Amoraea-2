@@ -45,11 +45,24 @@ function iosUseElevenLabsMp3Playback(): boolean {
 
 let activeWebAudio: { pause(): void; currentTime: number } | null = null;
 
+/** Web Audio API playback (decode + BufferSource) — often allowed after `unlockWebAudioForAutoplay` without a second tap, unlike HTMLAudio after async fetch. */
+let activeWebBufferSource: AudioBufferSourceNode | null = null;
+
 /** After `unlockWebAudioForAutoplay()` runs in a tap handler — primes AudioContext (silent tick). */
 let sharedWebAudioContext: AudioContext | null = null;
 
 /** ElevenLabs MP3 `blob:` URL kept when `play()` hits autoplay policy; replay from mic tap in the user-gesture stack. */
 let pendingWebGestureBlobUrl: string | null = null;
+
+/** Minimal silent WAV — used to unlock a shared HTMLAudioElement in the mic-stop gesture so later async TTS can `play()` without a second tap. */
+const SILENT_WAV_DATA_URL =
+  'data:audio/wav;base64,UklGRigAAABXQVZFZm10IBAAAAABAAEAQB8AAEAfAAABAAgAZGF0YQQAAAAAAA==';
+
+/**
+ * Shared element for mobile web MP3: primed with `primeHtmlAudioForMobileTtsFromMicGesture` (mic release / press)
+ * so `play()` after async ElevenLabs fetch is not blocked as a new gesture.
+ */
+let sharedHtmlAudioForMobileTts: HTMLAudioElement | null = null;
 
 /** iOS Safari blocks speechSynthesis unless speak() runs in a user-gesture stack; async LLM/TTS loses the gesture. */
 export class WebTtsRequiresUserGestureError extends Error {
@@ -261,6 +274,14 @@ export async function stopElevenLabsPlayback(): Promise<void> {
     }
     pendingWebGestureBlobUrl = null;
   }
+  if (Platform.OS === 'web' && activeWebBufferSource) {
+    try {
+      activeWebBufferSource.stop(0);
+    } catch {
+      /* ignore */
+    }
+    activeWebBufferSource = null;
+  }
   if (Platform.OS === 'web' && activeWebAudio) {
     try {
       activeWebAudio.pause();
@@ -320,6 +341,184 @@ export function unlockWebAudioForAutoplay(): void {
     src.start(0);
   } catch {
     /* ignore */
+  }
+}
+
+/**
+ * Call synchronously from the same user-gesture stack as mic stop (`onBeforeWebRecorderStop`) or mic press.
+ * Plays a silent clip on a shared `HTMLAudioElement` so a later async MP3 `play()` is allowed without an extra tap.
+ */
+export function primeHtmlAudioForMobileTtsFromMicGesture(): void {
+  if (Platform.OS !== 'web' || typeof window === 'undefined') return;
+  if (!webSpeechShouldDeferToUserGesture()) return;
+  const AudioCtor = (globalThis as unknown as { Audio?: new (src?: string) => HTMLAudioElement }).Audio;
+  if (!AudioCtor) return;
+  try {
+    if (!sharedHtmlAudioForMobileTts) {
+      sharedHtmlAudioForMobileTts = new AudioCtor();
+      const el = sharedHtmlAudioForMobileTts;
+      el.setAttribute('playsinline', '');
+      if ('playsInline' in el) {
+        (el as { playsInline: boolean }).playsInline = true;
+      }
+      el.preload = 'auto';
+    }
+    sharedHtmlAudioForMobileTts.src = SILENT_WAV_DATA_URL;
+    void sharedHtmlAudioForMobileTts.play().catch(() => {});
+  } catch {
+    /* ignore */
+  }
+}
+
+/**
+ * ElevenLabs MP3 via `decodeAudioData` + `AudioBufferSourceNode` on the shared `AudioContext`
+ * primed by `unlockWebAudioForAutoplay()` (mic / start interview). Often survives mobile autoplay
+ * policy better than `HTMLAudioElement.play()` after async fetch.
+ */
+async function tryPlayElevenLabsMp3WithWebAudio(
+  arrayBuffer: ArrayBuffer,
+  onPlaybackStarted: (() => void) | undefined,
+  telemetrySource: TtsTelemetrySource
+): Promise<boolean> {
+  if (Platform.OS !== 'web' || typeof window === 'undefined') return false;
+  unlockWebAudioForAutoplay();
+  const ctx = sharedWebAudioContext;
+  if (!ctx) return false;
+  const decodeTimeoutMs = 15000;
+  let decoded: AudioBuffer;
+  try {
+    decoded = await Promise.race([
+      ctx.decodeAudioData(arrayBuffer.slice(0)),
+      new Promise<AudioBuffer>((_, reject) => {
+        setTimeout(() => reject(new Error('decode-timeout')), decodeTimeoutMs);
+      }),
+    ]);
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    logTtsAutoplayPlayOutcome({
+      pipeline: 'elevenlabs_web_audio_context',
+      outcome: 'play_error',
+      telemetrySource,
+      errorName: 'decode',
+      errorMessagePreview: msg.slice(0, 120),
+    });
+    return false;
+  }
+  let src: AudioBufferSourceNode | null = null;
+  try {
+    await Promise.race([
+      ctx.resume(),
+      new Promise<void>((_, reject) => {
+        setTimeout(() => reject(new Error('resume-timeout')), 5000);
+      }),
+    ]);
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    logTtsAutoplayPlayOutcome({
+      pipeline: 'elevenlabs_web_audio_context',
+      outcome: 'play_error',
+      telemetrySource,
+      errorName: 'resume',
+      errorMessagePreview: msg.slice(0, 120),
+    });
+    return false;
+  }
+  try {
+    src = ctx.createBufferSource();
+    src.buffer = decoded;
+    const durSec = decoded.duration;
+    const playbackCapMs = Math.min(120_000, Math.max(4_000, Math.ceil((Number.isFinite(durSec) ? durSec : 30) * 1000) + 2_000));
+
+    const handlePlaybackRaceError = (raceErr: unknown): false => {
+      const msg = raceErr instanceof Error ? raceErr.message : String(raceErr);
+      if (msg === 'playback-timeout' && src) {
+        try {
+          src.stop(0);
+        } catch {
+          /* ignore */
+        }
+        if (activeWebBufferSource === src) activeWebBufferSource = null;
+        logTtsAutoplayPlayOutcome({
+          pipeline: 'elevenlabs_web_audio_context',
+          outcome: 'play_error',
+          telemetrySource,
+          errorName: 'playback-timeout',
+          errorMessagePreview: `capMs=${playbackCapMs}`,
+        });
+        // #region agent log
+        fetch('http://127.0.0.1:7789/ingest/668e0bd5-3283-4492-9f48-e33846c18218', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'X-Debug-Session-Id': 'e70f17' },
+          body: JSON.stringify({
+            sessionId: 'e70f17',
+            location: 'elevenLabsTts.ts:tryPlayElevenLabsMp3WithWebAudio',
+            message: 'web_audio_playback_timeout',
+            data: { hypothesisId: 'H12', playbackCapMs },
+            timestamp: Date.now(),
+            runId: 'post-fix',
+          }),
+        }).catch(() => {});
+        // #endregion
+        return false;
+      }
+      throw raceErr;
+    };
+
+    src.connect(ctx.destination);
+    activeWebBufferSource = src;
+    try {
+      await Promise.race([
+        new Promise<void>((resolve, reject) => {
+          src!.onended = () => {
+            if (activeWebBufferSource === src) activeWebBufferSource = null;
+            resolve();
+          };
+          try {
+            src!.start(0);
+            onPlaybackStarted?.();
+            logTtsAutoplayPlayOutcome({
+              pipeline: 'elevenlabs_web_audio_context',
+              outcome: 'play_ok',
+              telemetrySource,
+            });
+            // #region agent log
+            fetch('http://127.0.0.1:7789/ingest/668e0bd5-3283-4492-9f48-e33846c18218', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json', 'X-Debug-Session-Id': 'e70f17' },
+              body: JSON.stringify({
+                sessionId: 'e70f17',
+                location: 'elevenLabsTts.ts:tryPlayElevenLabsMp3WithWebAudio',
+                message: 'web_audio_context_play_ok',
+                data: { hypothesisId: 'H11' },
+                timestamp: Date.now(),
+                runId: 'post-fix',
+              }),
+            }).catch(() => {});
+            // #endregion
+          } catch (e) {
+            if (activeWebBufferSource === src) activeWebBufferSource = null;
+            reject(e instanceof Error ? e : new Error(String(e)));
+          }
+        }),
+        new Promise<void>((_, reject) => {
+          setTimeout(() => reject(new Error('playback-timeout')), playbackCapMs);
+        }),
+      ]);
+      return true;
+    } catch (raceErr) {
+      return handlePlaybackRaceError(raceErr);
+    }
+  } catch (err) {
+    if (src && activeWebBufferSource === src) activeWebBufferSource = null;
+    const e = err instanceof Error ? err : new Error(String(err));
+    logTtsAutoplayPlayOutcome({
+      pipeline: 'elevenlabs_web_audio_context',
+      outcome: 'play_error',
+      telemetrySource,
+      errorName: e.name,
+      errorMessagePreview: e.message?.slice(0, 120),
+    });
+    return false;
   }
 }
 
@@ -399,33 +598,65 @@ export async function speakWithElevenLabs(
       },
     };
     const proxyAuth = useProxy ? await buildSupabaseEdgeFunctionAuthHeaders() : {};
-    const res = await fetch(
-      useProxy ? proxyUrl : `https://api.elevenlabs.io/v1/text-to-speech/${voiceId}/stream`,
-      useProxy
-        ? {
-            method: 'POST',
-            headers: {
-              'Content-Type': 'application/json',
-              Accept: 'audio/mpeg',
-              ...proxyAuth,
-            },
-            body: JSON.stringify({
-              text: bodyPayload.text,
-              voiceId,
-              modelId: bodyPayload.model_id,
-              voiceSettings: bodyPayload.voice_settings,
-            }),
-          }
-        : {
-            method: 'POST',
-            headers: {
-              'xi-api-key': apiKey,
-              'Content-Type': 'application/json',
-              Accept: 'audio/mpeg',
-            },
-            body: JSON.stringify(bodyPayload),
-          }
-    );
+    const fetchTimeoutMs = 45000;
+    const ac = new AbortController();
+    const fetchTimer = setTimeout(() => ac.abort(), fetchTimeoutMs);
+    let res: Response;
+    try {
+      res = await fetch(
+        useProxy ? proxyUrl : `https://api.elevenlabs.io/v1/text-to-speech/${voiceId}/stream`,
+        useProxy
+          ? {
+              signal: ac.signal,
+              method: 'POST',
+              headers: {
+                'Content-Type': 'application/json',
+                Accept: 'audio/mpeg',
+                ...proxyAuth,
+              },
+              body: JSON.stringify({
+                text: bodyPayload.text,
+                voiceId,
+                modelId: bodyPayload.model_id,
+                voiceSettings: bodyPayload.voice_settings,
+              }),
+            }
+          : {
+              signal: ac.signal,
+              method: 'POST',
+              headers: {
+                'xi-api-key': apiKey,
+                'Content-Type': 'application/json',
+                Accept: 'audio/mpeg',
+              },
+              body: JSON.stringify(bodyPayload),
+            }
+      );
+    } catch (e) {
+      clearTimeout(fetchTimer);
+      const name = typeof e === 'object' && e !== null && 'name' in e ? String((e as { name: string }).name) : '';
+      if (name === 'AbortError') {
+        // #region agent log
+        fetch('http://127.0.0.1:7789/ingest/668e0bd5-3283-4492-9f48-e33846c18218', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'X-Debug-Session-Id': 'e70f17' },
+          body: JSON.stringify({
+            sessionId: 'e70f17',
+            location: 'elevenLabsTts.ts:tts_fetch',
+            message: 'tts_fetch_aborted',
+            data: { hypothesisId: 'H15', fetchTimeoutMs },
+            timestamp: Date.now(),
+            runId: 'post-fix',
+          }),
+        }).catch(() => {});
+        // #endregion
+        console.warn('ElevenLabs TTS fetch timed out');
+        await speakFallback(spokenText, onFallback, options);
+        return;
+      }
+      throw e;
+    }
+    clearTimeout(fetchTimer);
 
     if (!res.ok) {
       const errText = await res.text();
@@ -434,11 +665,75 @@ export async function speakWithElevenLabs(
       return;
     }
 
-    const arrayBuffer = await res.arrayBuffer();
+    let arrayBuffer: ArrayBuffer;
+    try {
+      arrayBuffer = await Promise.race([
+        res.arrayBuffer(),
+        new Promise<ArrayBuffer>((_, reject) => {
+          setTimeout(() => reject(new Error('arraybuffer-timeout')), 90000);
+        }),
+      ]);
+    } catch {
+      // #region agent log
+      fetch('http://127.0.0.1:7789/ingest/668e0bd5-3283-4492-9f48-e33846c18218', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'X-Debug-Session-Id': 'e70f17' },
+        body: JSON.stringify({
+          sessionId: 'e70f17',
+          location: 'elevenLabsTts.ts:tts_body',
+          message: 'tts_arraybuffer_timeout',
+          data: { hypothesisId: 'H16' },
+          timestamp: Date.now(),
+          runId: 'post-fix',
+        }),
+      }).catch(() => {});
+      // #endregion
+      console.warn('ElevenLabs TTS response body read timed out');
+      await speakFallback(spokenText, onFallback, options);
+      return;
+    }
 
     if (Platform.OS === 'web') {
-      // Web Audio decode/play was removed: `await ctx.resume()` / decode could hang forever on some mobile browsers; HTMLAudio + T12/gesture is reliable.
-      const blob = new Blob([arrayBuffer], { type: 'audio/mpeg' });
+      const abForWebAudio = arrayBuffer.slice(0);
+      const abForHtmlAudio = arrayBuffer.slice(0);
+      /**
+       * Skip Web Audio when: (1) greeting — decode can hang on some mobile browsers.
+       * (2) Any mobile web session with deferred gesture (Brave/Android/iOS web) — telemetry shows
+       * `ctx.resume()` can hit `resume-timeout` in `tryPlayElevenLabsMp3WithWebAudio` when `telemetrySource`
+       * is `other` (e.g. welcome-back without explicit source). Desktop web keeps Web Audio for non-greeting.
+       */
+      const skipWebAudioDecode =
+        telemetrySource === 'greeting' || webSpeechShouldDeferToUserGesture();
+      // #region agent log
+      fetch('http://127.0.0.1:7789/ingest/668e0bd5-3283-4492-9f48-e33846c18218', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'X-Debug-Session-Id': 'e70f17' },
+        body: JSON.stringify({
+          sessionId: 'e70f17',
+          location: 'elevenLabsTts.ts:web_tts_branch',
+          message: 'web_tts_skip_web_audio',
+          data: {
+            hypothesisId: 'H_SKIP_WA_MOBILE_TURN',
+            skipWebAudioDecode,
+            telemetrySource,
+            deferGesture: webSpeechShouldDeferToUserGesture(),
+          },
+          timestamp: Date.now(),
+          runId: 'post-fix',
+        }),
+      }).catch(() => {});
+      // #endregion
+      const playedViaCtx = skipWebAudioDecode
+        ? false
+        : await tryPlayElevenLabsMp3WithWebAudio(
+            abForWebAudio,
+            onPlaybackStarted,
+            telemetrySource
+          );
+      if (playedViaCtx) {
+        return;
+      }
+      const blob = new Blob([abForHtmlAudio], { type: 'audio/mpeg' });
       const url = URL.createObjectURL(blob);
       const AudioCtor = typeof (globalThis as unknown as { Audio?: new (src?: string) => HTMLAudioElement }).Audio !== 'undefined'
         ? (globalThis as unknown as { Audio: new (src?: string) => HTMLAudioElement }).Audio
@@ -448,21 +743,44 @@ export async function speakWithElevenLabs(
         await speakFallback(spokenText, onFallback, options);
         return;
       }
-      const audio = new AudioCtor(url);
-      activeWebAudio = audio;
-      const htmlAudio = audio as HTMLAudioElement;
-      htmlAudio.setAttribute('playsinline', '');
-      if ('playsInline' in htmlAudio) {
-        (htmlAudio as { playsInline: boolean }).playsInline = true;
+      const useSharedPrimed =
+        webSpeechShouldDeferToUserGesture() && sharedHtmlAudioForMobileTts !== null;
+      let htmlAudio: HTMLAudioElement;
+      if (useSharedPrimed && sharedHtmlAudioForMobileTts) {
+        htmlAudio = sharedHtmlAudioForMobileTts;
+        htmlAudio.src = url;
+        htmlAudio.volume = 1;
+      } else {
+        const audio = new AudioCtor(url);
+        htmlAudio = audio as HTMLAudioElement;
+        htmlAudio.setAttribute('playsinline', '');
+        if ('playsInline' in htmlAudio) {
+          (htmlAudio as { playsInline: boolean }).playsInline = true;
+        }
+        htmlAudio.preload = 'auto';
       }
-      htmlAudio.preload = 'auto';
+      activeWebAudio = htmlAudio;
+      // #region agent log
+      fetch('http://127.0.0.1:7789/ingest/668e0bd5-3283-4492-9f48-e33846c18218', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'X-Debug-Session-Id': 'e70f17' },
+        body: JSON.stringify({
+          sessionId: 'e70f17',
+          location: 'elevenLabsTts.ts:html_audio_element',
+          message: 'html_audio_use_shared_primed',
+          data: { hypothesisId: 'H_HTML_SHARED_PRIME', useSharedPrimed },
+          timestamp: Date.now(),
+          runId: 'post-fix',
+        }),
+      }).catch(() => {});
+      // #endregion
       await new Promise<void>((resolve, reject) => {
-        audio.onended = () => {
+        htmlAudio.onended = () => {
           activeWebAudio = null;
           URL.revokeObjectURL(url);
           resolve();
         };
-        audio.onerror = () => {
+        htmlAudio.onerror = () => {
           activeWebAudio = null;
           URL.revokeObjectURL(url);
           reject(new Error('Audio playback failed'));
@@ -477,7 +795,7 @@ export async function speakWithElevenLabs(
               telemetrySource,
             });
           })
-          .catch((playErr: unknown) => {
+          .catch(async (playErr: unknown) => {
             if (isWebAudioAutoplayBlockedError(playErr)) {
               activeWebAudio = null;
               pendingWebGestureBlobUrl = url;
@@ -486,6 +804,73 @@ export async function speakWithElevenLabs(
                 outcome: 'play_blocked_autoplay',
                 telemetrySource,
               });
+              // #region agent log
+              fetch('http://127.0.0.1:7789/ingest/668e0bd5-3283-4492-9f48-e33846c18218', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json', 'X-Debug-Session-Id': 'e70f17' },
+                body: JSON.stringify({
+                  sessionId: 'e70f17',
+                  location: 'elevenLabsTts.ts:mp3_blocked',
+                  message: 'mp3_autoplay_blocked_trying_web_speech',
+                  data: { hypothesisId: 'H6' },
+                  timestamp: Date.now(),
+                  runId: 'post-fix',
+                }),
+              }).catch(() => {});
+              // #endregion
+              try {
+                const webRes = await speakWithWebSpeechSynthesis(spokenText, onPlaybackStarted);
+                if (webRes.ok) {
+                  try {
+                    htmlAudio.pause();
+                  } catch {
+                    /* ignore */
+                  }
+                  try {
+                    URL.revokeObjectURL(url);
+                  } catch {
+                    /* ignore */
+                  }
+                  pendingWebGestureBlobUrl = null;
+                  logTtsAutoplayPlayOutcome({
+                    pipeline: 'web_speech_after_mp3_blocked',
+                    outcome: 'play_ok',
+                    telemetrySource,
+                  });
+                  // #region agent log
+                  fetch('http://127.0.0.1:7789/ingest/668e0bd5-3283-4492-9f48-e33846c18218', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json', 'X-Debug-Session-Id': 'e70f17' },
+                    body: JSON.stringify({
+                      sessionId: 'e70f17',
+                      location: 'elevenLabsTts.ts:web_speech_fallback',
+                      message: 'web_speech_fallback_ok',
+                      data: { hypothesisId: 'H6' },
+                      timestamp: Date.now(),
+                      runId: 'post-fix',
+                    }),
+                  }).catch(() => {});
+                  // #endregion
+                  resolve();
+                  return;
+                }
+              } catch {
+                /* fall through to gesture error */
+              }
+              // #region agent log
+              fetch('http://127.0.0.1:7789/ingest/668e0bd5-3283-4492-9f48-e33846c18218', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json', 'X-Debug-Session-Id': 'e70f17' },
+                body: JSON.stringify({
+                  sessionId: 'e70f17',
+                  location: 'elevenLabsTts.ts:web_speech_fallback',
+                  message: 'web_speech_fallback_failed_gesture_queue',
+                  data: { hypothesisId: 'H6' },
+                  timestamp: Date.now(),
+                  runId: 'post-fix',
+                }),
+              }).catch(() => {});
+              // #endregion
               reject(new WebTtsRequiresUserGestureError(spokenText));
               return;
             }
@@ -586,6 +971,40 @@ function speakWithWebSpeechSynthesis(
       resolve({ ok: false, error: 'no-api' });
       return;
     }
+
+    let settled = false;
+    const timeoutMs = Math.min(120_000, Math.max(5_000, spokenText.length * 100));
+    /** DOM `setTimeout` id is a number; avoid `NodeJS.Timeout` mismatch in mixed typings. */
+    let timeoutId: number;
+    const settle = (result: WebSpeechResult) => {
+      if (settled) return;
+      settled = true;
+      window.clearTimeout(timeoutId);
+      resolve(result);
+    };
+    timeoutId = window.setTimeout(() => {
+      try {
+        window.speechSynthesis.cancel();
+      } catch {
+        /* ignore */
+      }
+      // #region agent log
+      fetch('http://127.0.0.1:7789/ingest/668e0bd5-3283-4492-9f48-e33846c18218', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'X-Debug-Session-Id': 'e70f17' },
+        body: JSON.stringify({
+          sessionId: 'e70f17',
+          location: 'elevenLabsTts.ts:speakWithWebSpeechSynthesis',
+          message: 'web_speech_timeout',
+          data: { hypothesisId: 'H_LOAD', timeoutMs, textLen: spokenText.length },
+          timestamp: Date.now(),
+          runId: 'post-fix',
+        }),
+      }).catch(() => {});
+      // #endregion
+      settle({ ok: false, error: 'timeout' });
+    }, timeoutMs);
+
     try {
       window.speechSynthesis.cancel();
     } catch {
@@ -599,20 +1018,20 @@ function speakWithWebSpeechSynthesis(
       onPlaybackStarted?.();
     };
     utter.onend = () => {
-      resolve({ ok: true });
+      settle({ ok: true });
     };
     utter.onerror = (ev) => {
       const code =
         typeof ev === 'object' && ev !== null && 'error' in ev
           ? String((ev as SpeechSynthesisErrorEvent).error)
           : 'unknown';
-      resolve({ ok: false, error: code });
+      settle({ ok: false, error: code });
     };
     const speakNow = () => {
       try {
         window.speechSynthesis.speak(utter);
       } catch {
-        resolve({ ok: false, error: 'throw' });
+        settle({ ok: false, error: 'throw' });
       }
     };
     const applyVoiceAndSpeak = () => {
@@ -624,17 +1043,17 @@ function speakWithWebSpeechSynthesis(
     if (window.speechSynthesis.getVoices().length > 0) {
       applyVoiceAndSpeak();
     } else {
-      let done = false;
-      const finish = () => {
-        if (done) return;
-        done = true;
+      let voicesReady = false;
+      const finishVoices = () => {
+        if (voicesReady) return;
+        voicesReady = true;
         window.speechSynthesis.removeEventListener?.('voiceschanged', onVc);
         applyVoiceAndSpeak();
       };
-      const onVc = () => finish();
+      const onVc = () => finishVoices();
       window.speechSynthesis.addEventListener?.('voiceschanged', onVc);
       setTimeout(() => {
-        finish();
+        finishVoices();
       }, 400);
     }
   });

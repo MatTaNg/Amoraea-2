@@ -38,6 +38,8 @@ import {
   trySpeakWebSpeechInUserGesture,
   isWebTtsRequiresUserGestureError,
   unlockWebAudioForAutoplay,
+  primeHtmlAudioForMobileTtsFromMicGesture,
+  webSpeechShouldDeferToUserGesture,
   WebTtsRequiresUserGestureError,
 } from '@features/aria/utils/elevenLabsTts';
 import { ProfileRepository } from '@data/repositories/ProfileRepository';
@@ -450,6 +452,16 @@ function getErrorMessage(err: unknown, retriesExhausted = false): string {
 }
 function randomFrom<T>(arr: T[]): T {
   return arr[Math.floor(Math.random() * arr.length)];
+}
+
+/** Whisper upload filename must match actual container (Safari/desktop often records MP4, not WebM). */
+function pickWhisperUploadFilename(blob: Blob): string {
+  const t = (blob.type || '').toLowerCase();
+  if (t.includes('mp4') || t.includes('m4a') || t.includes('mp4a') || t.includes('x-m4a')) return 'recording.m4a';
+  if (t.includes('ogg')) return 'recording.ogg';
+  if (t.includes('wav')) return 'recording.wav';
+  if (t.includes('mpeg') || t.includes('mp3')) return 'recording.mp3';
+  return 'recording.webm';
 }
 
 /**
@@ -3321,9 +3333,19 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
   const isInterviewAppRoute = route?.name === 'Aria' || route?.name === 'OnboardingInterview';
   const [messages, setMessages] = useState<{ role: string; content: string; isScoreCard?: boolean }[]>([]);
   const [voiceState, setVoiceState] = useState<VoiceState>('idle');
+  const voiceStateRef = useRef<VoiceState>(voiceState);
+  voiceStateRef.current = voiceState;
   const [status, setStatus] = useState<Status>(() => (isInterviewAppRoute ? 'starting_interview' : 'intro'));
   /** Onboarding: auto-run startInterview once after profile gate; reset on retake / retry. */
   const onboardingAutoStartRef = useRef(false);
+  /**
+   * Mobile web: browsers require a user gesture before audio (TTS) can play. Auto-start breaks that chain.
+   * Full-screen tap overlay unlocks audio; consent / manual Start passes `fromUserGesture` into startInterview instead.
+   */
+  const [mobileWebTapToBeginDone, setMobileWebTapToBeginDone] = useState(() => {
+    if (Platform.OS !== 'web') return true;
+    return !webSpeechShouldDeferToUserGesture();
+  });
   const [touchedConstructs, setTouchedConstructs] = useState<number[]>([]);
   const [results, setResults] = useState<InterviewResults | null>(null);
   const [stageResults, setStageResults] = useState<Array<{ stage: number; results: InterviewResults }>>([]);
@@ -3357,6 +3379,8 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
   const pendingWebSpeechForGestureRef = useRef<string | null>(null);
   /** Web: onPressIn/touchstart ran gesture-TTS this touch; skip onPress so we do not start recording on the same tap. */
   const webGestureTtsConsumedPressRef = useRef(false);
+  /** Web: mic pressed while idle with pending interviewer TTS — start recording after that audio finishes (one press, not two). */
+  const pendingMicStartAfterIdleFlushRef = useRef(false);
   const webGestureConsumeClearTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   /** Web: one-shot window listener flushes blocked TTS on any pointerdown (not mic-only). */
   const webGestureFlushListenerAttachedRef = useRef(false);
@@ -6003,7 +6027,11 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
     (err: Error) => {
       if (__DEV__) console.error('Recording error:', err.message);
       setVoiceState('idle');
-      const msg = randomFrom(AMORAEA_ERROR_MESSAGES.recordingOrTranscriptionRetry);
+      const msg = randomFrom(
+        Platform.OS === 'web'
+          ? AMORAEA_ERROR_MESSAGES.recordingOrTranscriptionRetry
+          : AMORAEA_ERROR_MESSAGES.recordingOrTranscriptionRetryNative
+      );
       setMessages((prev) => [
         ...prev,
         { role: 'assistant', content: msg },
@@ -6099,15 +6127,11 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
               return text;
             }
 
-            // Web: use FormData + fetch
+            // Web: use FormData + fetch — never relabel MP4/AAC bytes as webm (breaks Whisper on Safari desktop, etc.).
             if (!audioBlob || audioBlob.size === 0) throw new Error('No audio data');
             const form = new FormData();
-            const typeOk = audioBlob.type === 'audio/webm' || audioBlob.type?.startsWith('audio/webm') || !audioBlob.type;
-            let blobToSend: Blob = audioBlob;
-            if (!typeOk && typeof audioBlob.arrayBuffer === 'function') {
-              blobToSend = new Blob([await audioBlob.arrayBuffer()], { type: 'audio/webm' });
-            }
-            form.append('file', blobToSend, 'recording.webm');
+            const blobToSend = audioBlob;
+            form.append('file', blobToSend, pickWhisperUploadFilename(blobToSend));
             form.append('model', 'whisper-1');
             form.append('language', 'en');
             const res = await fetch(transcriptUrl, { method: 'POST', headers: webTranscribeHeaders, body: form });
@@ -6179,6 +6203,13 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
   }, [runWebGestureTtsFlush]);
 
   const audioRecorder = useAudioRecorder({
+    onBeforeWebRecorderStop:
+      Platform.OS === 'web'
+        ? () => {
+            unlockWebAudioForAutoplay();
+            primeHtmlAudioForMobileTtsFromMicGesture();
+          }
+        : undefined,
     onRecordingComplete: async (blob, nativeUri) => {
       setVoiceState('processing');
       const userText = await transcribeSafe(blob, nativeUri);
@@ -6197,6 +6228,38 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
     },
     onError: (err) => handleRecordingError(err),
   });
+
+  const startRecordingAfterPendingTts = useCallback(async () => {
+    if (Platform.OS !== 'web') return;
+    if (voiceStateRef.current !== 'idle') return;
+    if (audioRecorder.isRecording) return;
+    // #region agent log
+    fetch('http://127.0.0.1:7789/ingest/668e0bd5-3283-4492-9f48-e33846c18218', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'X-Debug-Session-Id': 'e70f17' },
+      body: JSON.stringify({
+        sessionId: 'e70f17',
+        location: 'AriaScreen.tsx:startRecordingAfterPendingTts',
+        message: 'auto_start_recording_after_pending_tts',
+        data: { hypothesisId: 'H10' },
+        timestamp: Date.now(),
+        runId: 'post-fix',
+      }),
+    }).catch(() => {});
+    // #endregion
+    try {
+      await stopElevenLabsPlayback();
+      await new Promise<void>((resolve) => {
+        requestAnimationFrame(() => requestAnimationFrame(() => resolve()));
+      });
+      const granted = await audioRecorder.requestPermission();
+      if (!granted) return;
+      setVoiceState('recording');
+      await audioRecorder.startRecording();
+    } catch (err) {
+      handleRecordingError(err instanceof Error ? err : new Error(String(err)));
+    }
+  }, [audioRecorder, stopElevenLabsPlayback, handleRecordingError]);
 
   const handleSendTyped = useCallback(() => {
     const text = typedAnswer.trim();
@@ -6223,13 +6286,23 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
   const handleNativeOrWhisperMicPress = useCallback(async () => {
     if (Platform.OS === 'web') {
       unlockWebAudioForAutoplay();
+      primeHtmlAudioForMobileTtsFromMicGesture();
     }
     if (voiceState === 'speaking' || voiceState === 'processing') return;
     if (!useTapMicUi) return;
+    if (Platform.OS === 'web' && voiceState === 'idle' && !audioRecorder.isRecording) {
+      pendingMicStartAfterIdleFlushRef.current = true;
+    } else {
+      pendingMicStartAfterIdleFlushRef.current = false;
+    }
     if (
       Platform.OS === 'web' &&
       tryPlayPendingWebTtsAudioInUserGesture(
-        () => {},
+        () => {
+          const shouldStartMic = pendingMicStartAfterIdleFlushRef.current;
+          pendingMicStartAfterIdleFlushRef.current = false;
+          if (shouldStartMic) void startRecordingAfterPendingTts();
+        },
         () => clearPendingWebSpeechGesturePair(pendingWebSpeechForGestureRef),
         { source: 'turn' }
       )
@@ -6237,6 +6310,7 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
       return;
     }
     if (Platform.OS === 'web' && webGestureTtsConsumedPressRef.current) {
+      pendingMicStartAfterIdleFlushRef.current = false;
       webGestureTtsConsumedPressRef.current = false;
       if (webGestureConsumeClearTimeoutRef.current) {
         clearTimeout(webGestureConsumeClearTimeoutRef.current);
@@ -6250,10 +6324,26 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
       const fromStore = readStoredPendingGestureTts();
       const t = fromRef ?? fromMod ?? fromStore;
       if (t) {
+        const shouldStartMic = pendingMicStartAfterIdleFlushRef.current;
+        pendingMicStartAfterIdleFlushRef.current = false;
         clearPendingWebSpeechGesturePair(pendingWebSpeechForGestureRef);
-        trySpeakWebSpeechInUserGesture(t, () => {});
+        webGestureTtsConsumedPressRef.current = true;
+        if (webGestureConsumeClearTimeoutRef.current) {
+          clearTimeout(webGestureConsumeClearTimeoutRef.current);
+          webGestureConsumeClearTimeoutRef.current = null;
+        }
+        webGestureConsumeClearTimeoutRef.current = setTimeout(() => {
+          webGestureConsumeClearTimeoutRef.current = null;
+          webGestureTtsConsumedPressRef.current = false;
+        }, 1800);
+        trySpeakWebSpeechInUserGesture(t, () => {
+          if (shouldStartMic) void startRecordingAfterPendingTts();
+        });
         return;
       }
+    }
+    if (Platform.OS === 'web') {
+      pendingMicStartAfterIdleFlushRef.current = false;
     }
     if (Platform.OS === 'web' && !useMediaRecorderPath) {
       if (voiceState === 'listening') {
@@ -6304,6 +6394,7 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
     audioRecorder.requestPermission,
     handleRecordingError,
     stopElevenLabsPlayback,
+    startRecordingAfterPendingTts,
   ]);
 
   const handleResume = useCallback(
@@ -6405,7 +6496,7 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
         : "Welcome back. Let's pick up where we left off.";
       const welcomeMsg = { role: 'assistant', content: welcomeBack, isWelcomeBack: true };
       setMessages([...fullMessages, welcomeMsg]);
-      setTimeout(() => speakTextSafe(welcomeBack), 500);
+      setTimeout(() => void speakTextSafe(welcomeBack, { telemetrySource: 'greeting' }), 500);
 
       setStatus('active');
     },
@@ -6445,10 +6536,15 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
     return () => { cancelled = true; };
   }, [userId, isAdmin, handleResume]);
 
-  const startInterview = useCallback(async () => {
+  const startInterview = useCallback(async (opts?: { fromUserGesture?: boolean }) => {
+    /** Manual Start / consent: same gesture as button — skip tap overlay. */
+    if (opts?.fromUserGesture && Platform.OS === 'web' && webSpeechShouldDeferToUserGesture()) {
+      setMobileWebTapToBeginDone(true);
+    }
     /** Must run before any `await` so mobile browsers still treat this as the same user gesture as "Start". */
     if (Platform.OS === 'web') {
       unlockWebAudioForAutoplay();
+      primeHtmlAudioForMobileTtsFromMicGesture();
     }
     await remoteLog('[START] startInterview called', {
       userId: userId ?? null,
@@ -6540,10 +6636,88 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
     if (!isInterviewAppRoute) return;
     if (status !== 'starting_interview') return;
     if (interviewStatus !== 'not_started') return;
-    if (onboardingAutoStartRef.current) return;
+    if (onboardingAutoStartRef.current) {
+      // #region agent log
+      fetch('http://127.0.0.1:7789/ingest/668e0bd5-3283-4492-9f48-e33846c18218', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'X-Debug-Session-Id': 'e70f17' },
+        body: JSON.stringify({
+          sessionId: 'e70f17',
+          location: 'AriaScreen.tsx:autoStartEffect',
+          message: 'skip_ref_already_true',
+          data: { status, interviewStatus },
+          timestamp: Date.now(),
+          hypothesisId: 'H2',
+        }),
+      }).catch(() => {});
+      // #endregion
+      return;
+    }
+    if (Platform.OS === 'web' && webSpeechShouldDeferToUserGesture() && !mobileWebTapToBeginDone) {
+      // #region agent log
+      fetch('http://127.0.0.1:7789/ingest/668e0bd5-3283-4492-9f48-e33846c18218', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'X-Debug-Session-Id': 'e70f17' },
+        body: JSON.stringify({
+          sessionId: 'e70f17',
+          location: 'AriaScreen.tsx:autoStartEffect',
+          message: 'skip_waiting_mobile_tap',
+          data: { mobileWebTapToBeginDone },
+          timestamp: Date.now(),
+          hypothesisId: 'H3',
+        }),
+      }).catch(() => {});
+      // #endregion
+      return;
+    }
+    // #region agent log
+    fetch('http://127.0.0.1:7789/ingest/668e0bd5-3283-4492-9f48-e33846c18218', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'X-Debug-Session-Id': 'e70f17' },
+      body: JSON.stringify({
+        sessionId: 'e70f17',
+        location: 'AriaScreen.tsx:autoStartEffect',
+        message: 'effect_calls_startInterview_no_gesture',
+        data: {},
+        timestamp: Date.now(),
+        hypothesisId: 'H4',
+      }),
+    }).catch(() => {});
+    // #endregion
     onboardingAutoStartRef.current = true;
     void startInterview();
-  }, [isInterviewAppRoute, status, interviewStatus, startInterview]);
+  }, [isInterviewAppRoute, status, interviewStatus, startInterview, mobileWebTapToBeginDone]);
+
+  /**
+   * Mobile web: tap overlay must call `startInterview({ fromUserGesture: true })` in the same press handler.
+   * If we only set state and let `useEffect` call `startInterview`, the gesture chain is lost and TTS may not run.
+   */
+  const handleMobileWebTapToBegin = useCallback(
+    (shouldStartInterview: boolean) => {
+      // #region agent log
+      fetch('http://127.0.0.1:7789/ingest/668e0bd5-3283-4492-9f48-e33846c18218', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'X-Debug-Session-Id': 'e70f17' },
+        body: JSON.stringify({
+          sessionId: 'e70f17',
+          location: 'AriaScreen.tsx:handleMobileWebTapToBegin',
+          message: 'overlay_press',
+          data: { shouldStartInterview },
+          timestamp: Date.now(),
+          hypothesisId: 'H1',
+        }),
+      }).catch(() => {});
+      // #endregion
+      unlockWebAudioForAutoplay();
+      primeHtmlAudioForMobileTtsFromMicGesture();
+      setMobileWebTapToBeginDone(true);
+      if (shouldStartInterview) {
+        onboardingAutoStartRef.current = true;
+        void startInterview({ fromUserGesture: true });
+      }
+    },
+    [startInterview],
+  );
 
   const saveInterviewResults = useCallback(
     async (results: InterviewResults, gateResult: GateResult, uid: string) => {
@@ -7337,7 +7511,7 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
     isSpeakingRef.current = false;
     setVoiceState('idle');
     resetInterviewProgressRefs();
-    void startInterview();
+    void startInterview({ fromUserGesture: true });
   }, [userId, isAdmin, useMediaRecorderPath, audioRecorder, resetInterviewProgressRefs, startInterview]);
 
   const handleAdminResetInterview = useCallback(() => {
@@ -7830,12 +8004,28 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
               onPress={() => {
                 onboardingAutoStartRef.current = false;
                 setMicError(null);
-                void startInterview();
+                void startInterview({ fromUserGesture: true });
               }}
               style={StyleSheet.flatten([styles.introButton, { marginTop: 24, alignSelf: 'stretch' as const, maxWidth: 360 }])}
             />
           ) : null}
         </View>
+        {Platform.OS === 'web' &&
+        webSpeechShouldDeferToUserGesture() &&
+        !mobileWebTapToBeginDone &&
+        status === 'starting_interview' ? (
+          <Pressable
+            style={styles.mobileWebTapToBeginOverlay}
+            onPress={() => handleMobileWebTapToBegin(true)}
+            accessibilityRole="button"
+            accessibilityLabel="Tap the screen to begin"
+          >
+            <Text style={styles.mobileWebTapToBeginTitle}>Tap the screen to begin</Text>
+            <Text style={styles.mobileWebTapToBeginSubtitle}>
+              One quick tap unlocks audio for the interviewer on this device.
+            </Text>
+          </Pressable>
+        ) : null}
       </SafeAreaContainer>
     );
   }
@@ -7930,7 +8120,7 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
             />
             <Button
               title="Start voice interview"
-              onPress={startInterview}
+              onPress={() => void startInterview({ fromUserGesture: true })}
               disabled={!!micError}
               style={StyleSheet.flatten([styles.introButton, { flex: 2 }])}
             />
@@ -7955,7 +8145,7 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
 
   const isInterviewerView = status === 'active' && !isAdmin;
   return (
-    <SafeAreaContainer style={{ backgroundColor: '#05060D' }}>
+    <SafeAreaContainer style={{ position: 'relative', backgroundColor: '#05060D' }}>
       {adminInterviewTopBar}
       <View style={[styles.activeContainer, isAdmin ? styles.adminActiveContainer : undefined]}>
         {isInterviewerView ? (
@@ -7972,7 +8162,7 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
               ttsFallbackActive={tTSFallbackActive}
               webInsecureContextMessage={webInsecureContextMessage}
               micPermissionDenied={micPermission === 'denied'}
-              isWaiting={isWaiting}
+              isWaiting={isWaiting && voiceState === 'processing'}
               onPressStart={handlePressStart}
               onPressEnd={handlePressEnd}
               voiceState={
@@ -8287,6 +8477,22 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
         )}
       </View>
       {/* Low-storage fallback is silent — no user-facing message; progress still saved to server */}
+      {Platform.OS === 'web' &&
+      webSpeechShouldDeferToUserGesture() &&
+      !mobileWebTapToBeginDone &&
+      status === 'active' ? (
+        <Pressable
+          style={styles.mobileWebTapToBeginOverlay}
+          onPress={() => handleMobileWebTapToBegin(false)}
+          accessibilityRole="button"
+          accessibilityLabel="Tap the screen to begin"
+        >
+          <Text style={styles.mobileWebTapToBeginTitle}>Tap the screen to begin</Text>
+          <Text style={styles.mobileWebTapToBeginSubtitle}>
+            One quick tap unlocks audio for the interviewer on this device.
+          </Text>
+        </Pressable>
+      ) : null}
     </SafeAreaContainer>
   );
 };
@@ -8341,6 +8547,42 @@ const styles = StyleSheet.create({
     letterSpacing: 2.5,
     textTransform: 'uppercase',
     color: '#EEF6FF',
+  },
+  /** Mobile web: semi-transparent full-screen hint before first user gesture unlocks audio */
+  mobileWebTapToBeginOverlay: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    zIndex: 10000,
+    backgroundColor: 'rgba(5, 6, 13, 0.28)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: 28,
+  },
+  mobileWebTapToBeginTitle: {
+    fontFamily: Platform.OS === 'web' ? "'Cormorant Garamond', serif" : undefined,
+    fontSize: 22,
+    fontWeight: '300',
+    color: '#EEF6FF',
+    textAlign: 'center',
+    textShadowColor: 'rgba(0,0,0,0.55)',
+    textShadowOffset: { width: 0, height: 1 },
+    textShadowRadius: 10,
+  },
+  mobileWebTapToBeginSubtitle: {
+    fontFamily: Platform.OS === 'web' ? "'Jost', sans-serif" : undefined,
+    fontSize: 13,
+    fontWeight: '300',
+    color: 'rgba(210, 228, 250, 0.95)',
+    textAlign: 'center',
+    marginTop: 10,
+    maxWidth: 320,
+    lineHeight: 20,
+    textShadowColor: 'rgba(0,0,0,0.45)',
+    textShadowOffset: { width: 0, height: 1 },
+    textShadowRadius: 8,
   },
   memoryFallbackBanner: {
     position: 'absolute',

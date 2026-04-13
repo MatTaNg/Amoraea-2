@@ -38,7 +38,7 @@ export interface ActiveScenario {
 
 interface UserInterviewLayoutProps {
   flameState: FlameState;
-  /** Web: hover Show scenario to peek (modal only while pointer is on the button). Native: press-and-hold. Only when parent sets true (scenario delivered, not during intro/transition). */
+  /** Web desktop: hover Show scenario (closes on pointer leave). Web mobile + native: press-and-hold. Only when parent sets true (scenario delivered, not during intro/transition). */
   showScenarioReferenceEnabled: boolean;
   /** Scenario vignette text committed after delivery (modal body). */
   referenceCardScenario: ActiveScenario | null;
@@ -75,6 +75,16 @@ const GOOGLE_FONTS_URL =
 /** Web only: scenario reference modal text should not be selectable/copyable. */
 const WEB_MODAL_NO_COPY = (Platform.OS === 'web'
   ? { userSelect: 'none', WebkitUserSelect: 'none' }
+  : {}) as ViewStyle;
+
+/** Web touch: long-press on label triggers selection + touchcancel → Pressable fires out → modal closes. */
+const WEB_SHOW_SCENARIO_NO_SELECT = (Platform.OS === 'web'
+  ? {
+      userSelect: 'none',
+      WebkitUserSelect: 'none',
+      WebkitTouchCallout: 'none',
+      touchAction: 'manipulation',
+    }
   : {}) as ViewStyle;
 
 export const UserInterviewLayout: React.FC<UserInterviewLayoutProps> = ({
@@ -118,6 +128,25 @@ export const UserInterviewLayout: React.FC<UserInterviewLayoutProps> = ({
     };
   }, []);
   const layoutHeight = visualViewportH != null ? Math.min(windowHeight, visualViewportH) : windowHeight;
+
+  /**
+   * Web is one platform for both desktop and mobile browsers. Touch phones report no hover — only
+   * `(hover: hover) and (pointer: fine)` should use hover; otherwise use press-and-hold like native.
+   */
+  const [webShowScenarioHoverMode, setWebShowScenarioHoverMode] = useState(() => {
+    if (Platform.OS !== 'web' || typeof window === 'undefined') return false;
+    return window.matchMedia('(hover: hover) and (pointer: fine)').matches;
+  });
+  useEffect(() => {
+    if (Platform.OS !== 'web' || typeof window === 'undefined') return;
+    const mq = window.matchMedia('(hover: hover) and (pointer: fine)');
+    const sync = () => setWebShowScenarioHoverMode(mq.matches);
+    mq.addEventListener('change', sync);
+    return () => mq.removeEventListener('change', sync);
+  }, []);
+
+  /** Native + mobile web: long-press; desktop web with mouse: hover (no hint). */
+  const showScenarioPressAndHoldHint = Platform.OS !== 'web' || !webShowScenarioHoverMode;
 
   useEffect(() => {
     if (Platform.OS !== 'web' || typeof document === 'undefined') return;
@@ -363,12 +392,14 @@ export const UserInterviewLayout: React.FC<UserInterviewLayoutProps> = ({
           accessibilityLabel="Show scenario"
           accessibilityHint={
             Platform.OS === 'web'
-              ? 'Hover to view the scenario reference; it closes when the pointer leaves this button'
+              ? webShowScenarioHoverMode
+                ? 'Hover to view the scenario reference; it closes when the pointer leaves this button'
+                : 'Press and hold to view the current scenario reference'
               : 'Press and hold to view the current scenario reference'
           }
           accessibilityState={{ disabled: !showScenarioReferenceEnabled }}
           disabled={!showScenarioReferenceEnabled}
-          {...(Platform.OS === 'web'
+          {...(Platform.OS === 'web' && webShowScenarioHoverMode
             ? {
                 onHoverIn: () => {
                   if (!showScenarioReferenceEnabled || !referenceCardScenario) return;
@@ -388,23 +419,48 @@ export const UserInterviewLayout: React.FC<UserInterviewLayoutProps> = ({
                   setRefCardOpen(false);
                 },
               })}
+          {...(Platform.OS === 'web' && !webShowScenarioHoverMode
+            ? {
+                onContextMenu: (e: { preventDefault?: () => void }) => {
+                  e.preventDefault?.();
+                },
+              }
+            : {})}
           style={(state) => {
-            const hovered = Platform.OS === 'web' && (state as { hovered?: boolean }).hovered;
+            const hovered =
+              Platform.OS === 'web' && webShowScenarioHoverMode && (state as { hovered?: boolean }).hovered;
             return [
               styles.showScenarioButton,
+              WEB_SHOW_SCENARIO_NO_SELECT,
               !showScenarioReferenceEnabled && styles.showScenarioButtonDisabled,
               showScenarioReferenceEnabled && (state.pressed || hovered) && styles.showScenarioButtonPressed,
             ];
           }}
         >
-          <Text
-            style={[
-              styles.showScenarioButtonLabel,
-              !showScenarioReferenceEnabled && styles.showScenarioButtonLabelDisabled,
-            ]}
-          >
-            SHOW SCENARIO
-          </Text>
+          <View style={styles.showScenarioButtonInner}>
+            <Text
+              selectable={false}
+              style={[
+                styles.showScenarioButtonLabel,
+                WEB_SHOW_SCENARIO_NO_SELECT,
+                !showScenarioReferenceEnabled && styles.showScenarioButtonLabelDisabled,
+              ]}
+            >
+              SHOW SCENARIO
+            </Text>
+            {showScenarioPressAndHoldHint ? (
+              <Text
+                selectable={false}
+                style={[
+                  styles.showScenarioButtonHint,
+                  WEB_SHOW_SCENARIO_NO_SELECT,
+                  !showScenarioReferenceEnabled && styles.showScenarioButtonHintDisabled,
+                ]}
+              >
+                (Press and hold)
+              </Text>
+            ) : null}
+          </View>
         </Pressable>
 
         {/* Native only: RN Modal. Web uses inline overlay — Modal portal breaks hover on Show scenario. */}
@@ -680,6 +736,10 @@ const styles = StyleSheet.create({
     minWidth: 200,
     alignItems: 'center',
   },
+  showScenarioButtonInner: {
+    alignItems: 'center',
+    gap: 4,
+  },
   showScenarioButtonPressed: {
     backgroundColor: 'rgba(30, 111, 217, 0.18)',
   },
@@ -698,6 +758,17 @@ const styles = StyleSheet.create({
   },
   showScenarioButtonLabelDisabled: {
     color: TEXT_DIM,
+  },
+  showScenarioButtonHint: {
+    fontFamily: FONT_UI,
+    fontSize: 9,
+    fontWeight: '300',
+    letterSpacing: 0.8,
+    color: TEXT_SECONDARY,
+  },
+  showScenarioButtonHintDisabled: {
+    color: TEXT_DIM,
+    opacity: 0.7,
   },
   /** Web: scenario layer lives in pageWrapper (not Modal) so hover is not lost to a portal. */
   refModalWebLayer: {
