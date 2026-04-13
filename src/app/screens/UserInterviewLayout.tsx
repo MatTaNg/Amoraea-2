@@ -53,8 +53,6 @@ interface UserInterviewLayoutProps {
   onExit?: () => void;
   /** When true, show "Audio unavailable — read above, then speak when ready" */
   ttsFallbackActive?: boolean;
-  /** Web: iOS Safari blocked auto TTS — prompt user to tap mic to play voice */
-  webSpeechGestureHint?: boolean;
   /** When true, show mic-denied state with "Enable in browser settings" / open app settings */
   micPermissionDenied?: boolean;
   /** When true, show "Amoraea is thinking..." (visual only, no TTS) */
@@ -92,7 +90,6 @@ export const UserInterviewLayout: React.FC<UserInterviewLayoutProps> = ({
   inputDisabled,
   onExit,
   ttsFallbackActive = false,
-  webSpeechGestureHint = false,
   micPermissionDenied = false,
   isWaiting = false,
   micToggleMode = false,
@@ -238,12 +235,6 @@ export const UserInterviewLayout: React.FC<UserInterviewLayoutProps> = ({
 
         {webInsecureContextMessage && Platform.OS === 'web' ? (
           <Text style={styles.insecureContextBanner}>{webInsecureContextMessage}</Text>
-        ) : null}
-
-        {webSpeechGestureHint ? (
-          <Text style={styles.ttsFallbackNotice}>
-            ◆ Tap the microphone to hear Amoraea (mobile browsers only play voice right after you tap).
-          </Text>
         ) : null}
 
         {ttsFallbackActive ? (

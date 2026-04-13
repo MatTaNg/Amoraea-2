@@ -6,6 +6,10 @@ import * as Speech from 'expo-speech';
 import { logAndApplyPlaybackModeForTts } from './audioModeHelpers';
 import { computeElevenLabsEnabled } from './elevenLabsEnvGating';
 import { supabase } from '@data/supabase/client';
+import {
+  logTtsAutoplayPlayOutcome,
+  type TtsTelemetrySource,
+} from '@features/aria/telemetry/tsAutoplayTelemetry';
 
 /**
  * Jessica — warm, friendly, conversational (ElevenLabs). Override with
@@ -327,6 +331,8 @@ export function unlockWebAudioForAutoplay(): void {
 export type ElevenLabsSpeakOptions = {
   /** Called once when audio actually starts (MP3 play() resolved, native playAsync, or fallback speech start). */
   onPlaybackStarted?: () => void;
+  /** Baseline: which interviewer line this is (greeting vs mid-interview turn). */
+  telemetry?: { source?: TtsTelemetrySource };
 };
 
 export async function speakWithElevenLabs(
@@ -335,6 +341,7 @@ export async function speakWithElevenLabs(
   options?: ElevenLabsSpeakOptions
 ): Promise<void> {
   const onPlaybackStarted = options?.onPlaybackStarted;
+  const telemetrySource = options?.telemetry?.source ?? 'other';
   await stopElevenLabsPlayback();
   await logAndApplyPlaybackModeForTts('speakWithElevenLabs:afterStop');
 
@@ -464,15 +471,33 @@ export async function speakWithElevenLabs(
           .play()
           .then(() => {
             onPlaybackStarted?.();
+            logTtsAutoplayPlayOutcome({
+              pipeline: 'elevenlabs_web_html_audio',
+              outcome: 'play_ok',
+              telemetrySource,
+            });
           })
           .catch((playErr: unknown) => {
             if (isWebAudioAutoplayBlockedError(playErr)) {
               activeWebAudio = null;
               pendingWebGestureBlobUrl = url;
+              logTtsAutoplayPlayOutcome({
+                pipeline: 'elevenlabs_web_html_audio',
+                outcome: 'play_blocked_autoplay',
+                telemetrySource,
+              });
               reject(new WebTtsRequiresUserGestureError(spokenText));
               return;
             }
-            reject(playErr instanceof Error ? playErr : new Error(String(playErr)));
+            const err = playErr instanceof Error ? playErr : new Error(String(playErr));
+            logTtsAutoplayPlayOutcome({
+              pipeline: 'elevenlabs_web_html_audio',
+              outcome: 'play_error',
+              telemetrySource,
+              errorName: err.name,
+              errorMessagePreview: err.message?.slice(0, 120),
+            });
+            reject(err);
           });
       });
       return;
@@ -506,9 +531,24 @@ export async function speakWithElevenLabs(
           .then((st) => {
             if (st.isLoaded) {
               onPlaybackStarted?.();
+              logTtsAutoplayPlayOutcome({
+                pipeline: 'native_expo_av',
+                outcome: 'play_ok',
+                telemetrySource,
+              });
             }
           })
-          .catch(reject);
+          .catch((e: unknown) => {
+            const err = e instanceof Error ? e : new Error(String(e));
+            logTtsAutoplayPlayOutcome({
+              pipeline: 'native_expo_av',
+              outcome: 'play_error',
+              telemetrySource,
+              errorName: err.name,
+              errorMessagePreview: err.message?.slice(0, 120),
+            });
+            reject(err);
+          });
       });
     } finally {
       if (activeNativeTtsSound === sound) {
@@ -609,8 +649,10 @@ function speakWithWebSpeechSynthesis(
  */
 export function tryPlayPendingWebTtsAudioInUserGesture(
   onDone?: () => void,
-  onPlaybackStarted?: () => void
+  onPlaybackStarted?: () => void,
+  telemetry?: { source?: TtsTelemetrySource }
 ): boolean {
+  const telemetrySource = telemetry?.source ?? 'other';
   if (Platform.OS !== 'web' || typeof window === 'undefined' || !pendingWebGestureBlobUrl) return false;
   const url = pendingWebGestureBlobUrl;
   pendingWebGestureBlobUrl = null;
@@ -641,15 +683,30 @@ export function tryPlayPendingWebTtsAudioInUserGesture(
   audio.onerror = () => {
     pendingWebGestureBlobUrl = url;
     if (activeWebAudio === audio) activeWebAudio = null;
+    logTtsAutoplayPlayOutcome({
+      pipeline: 'elevenlabs_gesture_flush',
+      outcome: 'gesture_flush_rejected',
+      telemetrySource,
+    });
     onDone?.();
   };
   void htmlAudio.play().then(
     () => {
       onPlaybackStarted?.();
+      logTtsAutoplayPlayOutcome({
+        pipeline: 'elevenlabs_gesture_flush',
+        outcome: 'gesture_flush_ok',
+        telemetrySource,
+      });
     },
     () => {
       pendingWebGestureBlobUrl = url;
       if (activeWebAudio === audio) activeWebAudio = null;
+      logTtsAutoplayPlayOutcome({
+        pipeline: 'elevenlabs_gesture_flush',
+        outcome: 'gesture_flush_rejected',
+        telemetrySource,
+      });
       onDone?.();
     }
   );

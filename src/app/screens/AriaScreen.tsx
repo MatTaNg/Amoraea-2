@@ -70,6 +70,7 @@ import {
   buildScenarioBoundaries,
 } from '@features/aria/alphaAssessmentUtils';
 import { generateAIReasoning } from '@features/aria/generateAIReasoning';
+import type { TtsTelemetrySource } from '@features/aria/telemetry/tsAutoplayTelemetry';
 import { useAudioRecorder } from '@features/aria/hooks/useAudioRecorder';
 import {
   evaluateMoment4RelationshipType,
@@ -2129,7 +2130,10 @@ function detectActiveScenarioFromMessage(content: string): ActiveScenario | null
 }
 
 /** Passed to speakTextSafe for interviewer lines that should advance scenario-reference UI state. */
-const ASSISTANT_INTERVIEW_SPEECH = { interviewSpeechRole: 'assistant_response' as const };
+const ASSISTANT_INTERVIEW_SPEECH = {
+  interviewSpeechRole: 'assistant_response' as const,
+  telemetrySource: 'turn' as const,
+};
 
 function isAssistantBubbleForTranscript(
   m: { role: string; content?: string; isScoreCard?: boolean; isWelcomeBack?: boolean }
@@ -3348,14 +3352,15 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
   const [referenceCardPrompt, setReferenceCardPrompt] = useState<string | null>(null);
   const [scenarioIntroTtsPlaying, setScenarioIntroTtsPlaying] = useState(false);
   const [tTSFallbackActive, setTTSFallbackActive] = useState(false);
-  /** Web (iOS Safari): speechSynthesis was blocked; user must tap mic to speak queued line in-gesture. */
-  const [webSpeechGestureHint, setWebSpeechGestureHint] = useState(false);
   /** HTTP://LAN is not a secure context — browser blocks mic; show fix copy */
   const [webInsecureContextMessage, setWebInsecureContextMessage] = useState<string | null>(null);
   const pendingWebSpeechForGestureRef = useRef<string | null>(null);
   /** Web: onPressIn/touchstart ran gesture-TTS this touch; skip onPress so we do not start recording on the same tap. */
   const webGestureTtsConsumedPressRef = useRef(false);
   const webGestureConsumeClearTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  /** Web: one-shot window listener flushes blocked TTS on any pointerdown (not mic-only). */
+  const webGestureFlushListenerAttachedRef = useRef(false);
+  const webGestureFlushHandlerRef = useRef<(() => void) | null>(null);
   type MicPermissionState = 'granted' | 'denied' | 'prompt' | 'unavailable';
   const [micPermission, setMicPermission] = useState<MicPermissionState>('prompt');
 
@@ -4032,12 +4037,13 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
     }
   }, []);
 
-  const speak = useCallback(async (text: string) => {
+  const speak = useCallback(async (text: string, speakOpts?: { telemetrySource?: TtsTelemetrySource }) => {
     await stopElevenLabsPlayback();
     lastQuestionTextRef.current = text;
     // Keep "processing" until audio is actually audible — avoids large flame + "Speaking..." during fetch / autoplay wait.
     setVoiceState('processing');
     isSpeakingRef.current = true;
+    const telemetrySource = speakOpts?.telemetrySource ?? 'other';
     try {
       // Ensure playback route is reset immediately before TTS (fixes low-volume-after-recording on iOS).
       await setPlaybackMode();
@@ -4049,6 +4055,7 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
         onPlaybackStarted: () => {
           setVoiceState('speaking');
         },
+        telemetry: { source: telemetrySource },
       });
     } catch (speakErr) {
       throw speakErr;
@@ -4059,29 +4066,209 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
     }
   }, []);
 
+  /**
+   * Web: flush ElevenLabs blob or Web Speech queue inside a user gesture (pointer/mic).
+   * Used from mic pressIn and from a one-time window listener so any tap can unblock audio — not mic-only.
+   */
+  const runWebGestureTtsFlush = useCallback((debugSource?: string) => {
+    if (Platform.OS !== 'web') return;
+    unlockWebAudioForAutoplay();
+    // #region agent log
+    const _peekLen = (pendingWebSpeechForGestureRef.current ?? pendingWebSpeechForGestureModule ?? readStoredPendingGestureTts() ?? '').length;
+    fetch('http://127.0.0.1:7789/ingest/668e0bd5-3283-4492-9f48-e33846c18218', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'X-Debug-Session-Id': 'e70f17' },
+      body: JSON.stringify({
+        sessionId: 'e70f17',
+        location: 'AriaScreen.tsx:runWebGestureTtsFlush',
+        message: 'flush_entry',
+        data: {
+          hypothesisId: 'H5',
+          hasPendingBlob: hasPendingWebGestureBlobUrl(),
+          peekTextLen: _peekLen,
+          debugSource: debugSource ?? 'unknown',
+        },
+        timestamp: Date.now(),
+      }),
+    }).catch(() => {});
+    // #endregion
+    const tryPlayed = tryPlayPendingWebTtsAudioInUserGesture(
+      () => {},
+      () => clearPendingWebSpeechGesturePair(pendingWebSpeechForGestureRef),
+      { source: 'turn' }
+    );
+    // #region agent log
+    fetch('http://127.0.0.1:7789/ingest/668e0bd5-3283-4492-9f48-e33846c18218', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'X-Debug-Session-Id': 'e70f17' },
+      body: JSON.stringify({
+        sessionId: 'e70f17',
+        location: 'AriaScreen.tsx:runWebGestureTtsFlush',
+        message: 'tryPlayPending_result',
+        data: { hypothesisId: 'H5', tryPlayed },
+        timestamp: Date.now(),
+      }),
+    }).catch(() => {});
+    // #endregion
+    if (tryPlayed) {
+      webGestureTtsConsumedPressRef.current = true;
+      if (webGestureConsumeClearTimeoutRef.current) {
+        clearTimeout(webGestureConsumeClearTimeoutRef.current);
+        webGestureConsumeClearTimeoutRef.current = null;
+      }
+      webGestureConsumeClearTimeoutRef.current = setTimeout(() => {
+        webGestureConsumeClearTimeoutRef.current = null;
+        webGestureTtsConsumedPressRef.current = false;
+      }, 1800);
+      return;
+    }
+    const fromRef = pendingWebSpeechForGestureRef.current;
+    const fromMod = pendingWebSpeechForGestureModule;
+    const fromStore = readStoredPendingGestureTts();
+    const t = fromRef ?? fromMod ?? fromStore;
+    if (!t) return;
+    clearPendingWebSpeechGesturePair(pendingWebSpeechForGestureRef);
+    webGestureTtsConsumedPressRef.current = true;
+    if (webGestureConsumeClearTimeoutRef.current) {
+      clearTimeout(webGestureConsumeClearTimeoutRef.current);
+      webGestureConsumeClearTimeoutRef.current = null;
+    }
+    webGestureConsumeClearTimeoutRef.current = setTimeout(() => {
+      webGestureConsumeClearTimeoutRef.current = null;
+      webGestureTtsConsumedPressRef.current = false;
+    }, 1800);
+    trySpeakWebSpeechInUserGesture(t, () => {});
+  }, []);
+
+  const ensureWebGestureFlushListener = useCallback(() => {
+    if (Platform.OS !== 'web' || typeof window === 'undefined') return;
+    if (webGestureFlushListenerAttachedRef.current) {
+      // #region agent log
+      fetch('http://127.0.0.1:7789/ingest/668e0bd5-3283-4492-9f48-e33846c18218', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'X-Debug-Session-Id': 'e70f17' },
+        body: JSON.stringify({
+          sessionId: 'e70f17',
+          location: 'AriaScreen.tsx:ensureWebGestureFlushListener',
+          message: 'ensure_skip_already_attached',
+          data: { hypothesisId: 'H1' },
+          timestamp: Date.now(),
+        }),
+      }).catch(() => {});
+      // #endregion
+      return;
+    }
+    webGestureFlushListenerAttachedRef.current = true;
+    const fn = () => {
+      // #region agent log
+      fetch('http://127.0.0.1:7789/ingest/668e0bd5-3283-4492-9f48-e33846c18218', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'X-Debug-Session-Id': 'e70f17' },
+        body: JSON.stringify({
+          sessionId: 'e70f17',
+          location: 'AriaScreen.tsx:ensureWebGestureFlushListener:fn',
+          message: 'window_pointerdown_before_flush',
+          data: { hypothesisId: 'H3' },
+          timestamp: Date.now(),
+        }),
+      }).catch(() => {});
+      // #endregion
+      webGestureFlushListenerAttachedRef.current = false;
+      webGestureFlushHandlerRef.current = null;
+      window.removeEventListener('pointerdown', fn, { capture: true });
+      runWebGestureTtsFlush('window');
+    };
+    webGestureFlushHandlerRef.current = fn;
+    window.addEventListener('pointerdown', fn, { capture: true });
+    // #region agent log
+    fetch('http://127.0.0.1:7789/ingest/668e0bd5-3283-4492-9f48-e33846c18218', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'X-Debug-Session-Id': 'e70f17' },
+      body: JSON.stringify({
+        sessionId: 'e70f17',
+        location: 'AriaScreen.tsx:ensureWebGestureFlushListener',
+        message: 'listener_registered',
+        data: { hypothesisId: 'H1' },
+        timestamp: Date.now(),
+      }),
+    }).catch(() => {});
+    // #endregion
+  }, [runWebGestureTtsFlush]);
+
+  useEffect(() => {
+    return () => {
+      if (Platform.OS !== 'web' || typeof window === 'undefined') return;
+      const h = webGestureFlushHandlerRef.current;
+      if (h) {
+        // #region agent log
+        fetch('http://127.0.0.1:7789/ingest/668e0bd5-3283-4492-9f48-e33846c18218', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'X-Debug-Session-Id': 'e70f17' },
+          body: JSON.stringify({
+            sessionId: 'e70f17',
+            location: 'AriaScreen.tsx:gestureFlushUnmount',
+            message: 'cleanup_remove_listener',
+            data: { hypothesisId: 'H4' },
+            timestamp: Date.now(),
+          }),
+        }).catch(() => {});
+        // #endregion
+        window.removeEventListener('pointerdown', h, { capture: true });
+        webGestureFlushHandlerRef.current = null;
+      }
+      webGestureFlushListenerAttachedRef.current = false;
+    };
+  }, []);
+
   /** Attempts TTS; on failure shows text visually and continues (no stall). */
   const speakTextSafe = useCallback(
-    async (text: string, options: { silent?: boolean; interviewSpeechRole?: 'assistant_response' } = {}) => {
-      const { silent = false, interviewSpeechRole } = options;
+    async (
+      text: string,
+      options: {
+        silent?: boolean;
+        interviewSpeechRole?: 'assistant_response';
+        telemetrySource?: TtsTelemetrySource;
+      } = {}
+    ) => {
+      const { silent = false, interviewSpeechRole, telemetrySource: telemetrySourceOpt } = options;
+      const telemetrySource =
+        telemetrySourceOpt ?? (interviewSpeechRole === 'assistant_response' ? 'turn' : 'other');
       const markIntro =
         interviewSpeechRole === 'assistant_response' &&
         detectActiveScenarioFromMessage(stripControlTokens(text).trim()) !== null;
       if (markIntro) setScenarioIntroTtsPlaying(true);
       try {
-        await withRetry(() => speak(text), {
+        await withRetry(() => speak(text, { telemetrySource }), {
           retries: 1,
           baseDelay: 3000,
           context: 'TTS',
         });
         setTTSFallbackActive(false);
-        setWebSpeechGestureHint(false);
         if (interviewSpeechRole === 'assistant_response') {
           applyInterviewSpeechComplete(text);
         }
       } catch (err) {
         if (isWebTtsRequiresUserGestureError(err)) {
+          // #region agent log
+          fetch('http://127.0.0.1:7789/ingest/668e0bd5-3283-4492-9f48-e33846c18218', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'X-Debug-Session-Id': 'e70f17' },
+            body: JSON.stringify({
+              sessionId: 'e70f17',
+              location: 'AriaScreen.tsx:speakTextSafe',
+              message: 'gesture_error_caught',
+              data: {
+                hypothesisId: 'H2',
+                instanceofOk: err instanceof WebTtsRequiresUserGestureError,
+                duckOk: isWebTtsRequiresUserGestureError(err),
+                errName: err instanceof Error ? err.name : 'unknown',
+              },
+              timestamp: Date.now(),
+            }),
+          }).catch(() => {});
+          // #endregion
           setPendingWebSpeechGesturePair(pendingWebSpeechForGestureRef, err.text);
-          setWebSpeechGestureHint(true);
+          ensureWebGestureFlushListener();
           setVoiceState('idle');
           if (!silent) setTTSFallbackActive(false);
           if (interviewSpeechRole === 'assistant_response') {
@@ -4100,7 +4287,7 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
         if (markIntro) setScenarioIntroTtsPlaying(false);
       }
     },
-    [speak, applyInterviewSpeechComplete]
+    [speak, applyInterviewSpeechComplete, ensureWebGestureFlushListener]
   );
 
   // ── Web: browser SpeechRecognition (hold-to-talk fallback when Whisper/MediaRecorder is off)
@@ -5792,7 +5979,7 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
       const t = peekPendingWebSpeechGesture(pendingWebSpeechForGestureRef);
       if (t) {
         clearPendingWebSpeechGesturePair(pendingWebSpeechForGestureRef);
-        trySpeakWebSpeechInUserGesture(t, () => setWebSpeechGestureHint(false));
+        trySpeakWebSpeechInUserGesture(t, () => {});
         return;
       }
     }
@@ -5986,46 +6173,10 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
     [speakTextSafe, deleteTurnAudioFile]
   );
 
-  /** iOS Safari: speechSynthesis must run during pointerdown; RN-web onPress fires too late for autoplay policy. */
+  /** Web mic pressIn: same gesture flush as any-page tap (see ensureWebGestureFlushListener). */
   const handleWebMicPressIn = useCallback(() => {
-    if (Platform.OS !== 'web') return;
-    unlockWebAudioForAutoplay();
-    /** ElevenLabs MP3 was blocked by autoplay — same tap must call `Audio.play()` inside the gesture stack. */
-    if (
-      tryPlayPendingWebTtsAudioInUserGesture(
-        () => setWebSpeechGestureHint(false),
-        () => clearPendingWebSpeechGesturePair(pendingWebSpeechForGestureRef)
-      )
-    ) {
-      webGestureTtsConsumedPressRef.current = true;
-      if (webGestureConsumeClearTimeoutRef.current) {
-        clearTimeout(webGestureConsumeClearTimeoutRef.current);
-        webGestureConsumeClearTimeoutRef.current = null;
-      }
-      webGestureConsumeClearTimeoutRef.current = setTimeout(() => {
-        webGestureConsumeClearTimeoutRef.current = null;
-        webGestureTtsConsumedPressRef.current = false;
-      }, 1800);
-      return;
-    }
-    const fromRef = pendingWebSpeechForGestureRef.current;
-    const fromMod = pendingWebSpeechForGestureModule;
-    const fromStore = readStoredPendingGestureTts();
-    const t = fromRef ?? fromMod ?? fromStore;
-    if (!t) return;
-    clearPendingWebSpeechGesturePair(pendingWebSpeechForGestureRef);
-    webGestureTtsConsumedPressRef.current = true;
-    if (webGestureConsumeClearTimeoutRef.current) {
-      clearTimeout(webGestureConsumeClearTimeoutRef.current);
-      webGestureConsumeClearTimeoutRef.current = null;
-    }
-    /** If onPress never fires (Safari), ref stayed true and the mic looked permanently dead. */
-    webGestureConsumeClearTimeoutRef.current = setTimeout(() => {
-      webGestureConsumeClearTimeoutRef.current = null;
-      webGestureTtsConsumedPressRef.current = false;
-    }, 1800);
-    trySpeakWebSpeechInUserGesture(t, () => setWebSpeechGestureHint(false));
-  }, []);
+    runWebGestureTtsFlush('mic');
+  }, [runWebGestureTtsFlush]);
 
   const audioRecorder = useAudioRecorder({
     onRecordingComplete: async (blob, nativeUri) => {
@@ -6078,8 +6229,9 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
     if (
       Platform.OS === 'web' &&
       tryPlayPendingWebTtsAudioInUserGesture(
-        () => setWebSpeechGestureHint(false),
-        () => clearPendingWebSpeechGesturePair(pendingWebSpeechForGestureRef)
+        () => {},
+        () => clearPendingWebSpeechGesturePair(pendingWebSpeechForGestureRef),
+        { source: 'turn' }
       )
     ) {
       return;
@@ -6099,7 +6251,7 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
       const t = fromRef ?? fromMod ?? fromStore;
       if (t) {
         clearPendingWebSpeechGesturePair(pendingWebSpeechForGestureRef);
-        trySpeakWebSpeechInUserGesture(t, () => setWebSpeechGestureHint(false));
+        trySpeakWebSpeechInUserGesture(t, () => {});
         return;
       }
     }
@@ -6351,7 +6503,7 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
         currentScenarioRef.current = 1;
         setMessages([{ role: 'assistant', content: welcomeFallback, scenarioNumber: 1 } as MessageWithScenario]);
         setVoiceState('idle');
-        await speakTextSafe(welcomeFallback).catch(() => {});
+        await speakTextSafe(welcomeFallback, { telemetrySource: 'greeting' }).catch(() => {});
         return;
       }
 
@@ -6360,7 +6512,7 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
       currentScenarioRef.current = 1;
       const openingLine = "Hi, I'm Amoraea. What can I call you?";
       setMessages([{ role: 'assistant', content: openingLine, scenarioNumber: 1 } as MessageWithScenario]);
-      await speakTextSafe(openingLine);
+      await speakTextSafe(openingLine, { telemetrySource: 'greeting' });
       await remoteLog('[START] Real greeting sent');
     } catch (err) {
       await remoteLog('[START] INIT ERROR causing fallback', {
@@ -6380,7 +6532,7 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
       setInterviewStatus('in_progress');
       const fallbackMsg = "Hi, I'm Amoraea. I'll be with you in just a moment.";
       setMessages([{ role: 'assistant', content: fallbackMsg, scenarioNumber: 1 } as MessageWithScenario]);
-      await speakTextSafe(fallbackMsg).catch(() => {});
+      await speakTextSafe(fallbackMsg, { telemetrySource: 'greeting' }).catch(() => {});
     }
   }, [speakTextSafe, isAdmin, userId, audioRecorder, resetInterviewProgressRefs]);
 
@@ -7818,7 +7970,6 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
               referenceCardScenario={referenceCardScenario}
               referenceCardPrompt={referenceCardPrompt}
               ttsFallbackActive={tTSFallbackActive}
-              webSpeechGestureHint={webSpeechGestureHint}
               webInsecureContextMessage={webInsecureContextMessage}
               micPermissionDenied={micPermission === 'denied'}
               isWaiting={isWaiting}

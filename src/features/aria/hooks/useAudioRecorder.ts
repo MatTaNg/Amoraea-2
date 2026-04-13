@@ -2,6 +2,10 @@ import { useState, useRef, useCallback } from 'react';
 import { Platform } from 'react-native';
 import { Audio } from 'expo-av';
 import { setPlaybackMode, setRecordingMode } from '@features/aria/utils/audioModeHelpers';
+import {
+  logNativeMicRecordingStopped,
+  logWebMicRecordingStopped,
+} from '@features/aria/telemetry/tsAutoplayTelemetry';
 export type AudioRecorderPermissionStatus = 'granted' | 'denied' | null;
 
 const RECORDING_OPTIONS = {
@@ -114,6 +118,7 @@ export function useAudioRecorder({
       if (uri) {
         const response = await fetch(uri);
         const blob = await response.blob();
+        logNativeMicRecordingStopped({ blobBytes: blob.size, platformOs: Platform.OS });
         await onRecordingComplete?.(blob, uri);
       }
     } catch (err) {
@@ -152,6 +157,13 @@ export function useAudioRecorder({
       mediaRecorder.onstop = async () => {
         const blob = new Blob(audioChunksRef.current, {
           type: webMimeRef.current,
+        });
+        const start = recordingStartTimeRef.current;
+        const elapsedMs = start != null ? Date.now() - start : undefined;
+        logWebMicRecordingStopped({
+          blobBytes: blob.size,
+          mime: webMimeRef.current,
+          elapsedMs,
         });
         stream.getTracks().forEach((t) => t.stop());
         mediaRecorderRef.current = null;
