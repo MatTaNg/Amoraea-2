@@ -60,9 +60,15 @@ const AuthNavigator = () => (
 );
 
 /** Logged-in experience: AI interview only, plus PostInterview for non-admin completion handoff. */
-const InterviewAppNavigator = ({ userId }: { userId: string }) => (
+const InterviewAppNavigator = ({
+  userId,
+  initialRouteName,
+}: {
+  userId: string;
+  initialRouteName: 'Aria' | 'PostInterview';
+}) => (
   <Stack.Navigator
-    initialRouteName="Aria"
+    initialRouteName={initialRouteName}
     screenOptions={{
       title: '',
     }}
@@ -79,13 +85,14 @@ const InterviewAppNavigator = ({ userId }: { userId: string }) => (
       initialParams={{ userId }}
       options={{
         headerShown: true,
-        header: () => <OnboardingHeader />,
+        header: () => <OnboardingHeader variant="dark" />,
       }}
     />
   </Stack.Navigator>
 );
 
 const AppNavigator = ({ userId }: { userId: string }) => {
+  const { user } = useAuth();
   const { data: profile, isPending } = useQuery({
     queryKey: ['profile', userId],
     queryFn: async () => {
@@ -116,7 +123,12 @@ const AppNavigator = ({ userId }: { userId: string }) => {
     return <LoadingScreen />;
   }
 
-  return <InterviewAppNavigator userId={userId} />;
+  const isAdminEmail = (user?.email ?? '').toLowerCase() === 'admin@amoraea.com';
+  /** Match `scoreInterview` handoff: standard applicants only; alpha/admin stay on Aria (thank-you / analysis). */
+  const initialRouteName: 'Aria' | 'PostInterview' =
+    profile.interviewCompleted && !profile.isAlphaTester && !isAdminEmail ? 'PostInterview' : 'Aria';
+
+  return <InterviewAppNavigator userId={userId} initialRouteName={initialRouteName} />;
 };
 
 const LoadingScreen = () => (

@@ -34,6 +34,8 @@ export interface Profile {
   inviteCode: string | null;
   /** True when account used the alpha tester referral code — sees scoring/analysis UX after interview. */
   isAlphaTester: boolean;
+  /** From `users.interview_completed` — used to restore PostInterview route after refresh for standard applicants. */
+  interviewCompleted: boolean;
   /** Up to 3 prompt answers (UX only). */
   prompts: ProfilePromptAnswer[];
 

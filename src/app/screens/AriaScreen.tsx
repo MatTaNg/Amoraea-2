@@ -3364,7 +3364,7 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
   /** Insert succeeded but interview_attempts row is not yet readable with full scores — stay on preparing_results and poll until ready before congratulations / results. */
   const [pendingScoringSyncAttemptId, setPendingScoringSyncAttemptId] = useState<string | null>(null);
   const isInterviewCompleteRef = useRef(false);
-  /** When true, transition to loading screen will run once voiceState becomes 'idle' (after TTS finishes). */
+  /** Set after closing-line TTS is awaited; effect after `scoreInterview` moves to preparing_results when `voiceState` is idle. */
   const [pendingCompletion, setPendingCompletion] = useState(false);
   const pendingCompletionTranscriptRef = useRef<{ role: string; content: string }[] | null>(null);
   const committedScenarioRef = useRef<ActiveScenario | null>(null);
@@ -5846,10 +5846,13 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
         };
         const finalMessages = [...messagesToUse, finalAssistant];
         setMessages(finalMessages);
-        speakTextSafe(displayText).catch(() => {});
         isInterviewCompleteRef.current = true;
         const transcriptForScoring = finalMessages.filter((m) => m.role === 'user' || m.role === 'assistant');
-        // Always wait for closing TTS to finish before showing loading screen
+        try {
+          await speakTextSafe(displayText, { telemetrySource: 'turn' });
+        } catch {
+          /* proceed to scoring even if TTS fails */
+        }
         pendingCompletionTranscriptRef.current = transcriptForScoring;
         setPendingCompletion(true);
         return;
@@ -7348,7 +7351,6 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
     isAdmin,
   ]);
 
-  // When INTERVIEW_COMPLETE was detected while TTS was still playing, transition to loading once TTS finishes
   useEffect(() => {
     if (!pendingCompletion || voiceState !== 'idle') return;
     const transcript = pendingCompletionTranscriptRef.current;
@@ -7356,7 +7358,7 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
     setPendingCompletion(false);
     if (!transcript || transcript.length === 0) return;
     setInterviewStatus('preparing_results');
-    scoreInterview(transcript);
+    void scoreInterview(transcript);
   }, [pendingCompletion, voiceState, scoreInterview]);
 
   const performRetake = useCallback(async () => {

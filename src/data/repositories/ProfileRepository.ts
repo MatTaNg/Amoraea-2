@@ -311,6 +311,7 @@ export class ProfileRepository {
     gate2_psychometrics?: unknown;
     gate3_compatibility?: unknown;
     psychometrics_progress?: unknown;
+    interview_completed?: boolean | null;
   }): Profile {
     const location: Location | null =
       data.location_latitude != null && data.location_longitude != null
@@ -339,6 +340,7 @@ export class ProfileRepository {
       primaryPhotoUrl: data.primary_photo_url,
       inviteCode: data.invite_code ?? null,
       isAlphaTester: data.is_alpha_tester === true,
+      interviewCompleted: data.interview_completed === true,
       prompts: parseProfilePrompts(data.profile_prompts),
       onboardingStage: parseOnboardingStage(data.onboarding_stage),
       applicationStatus: parseApplicationStatus(data.application_status),
