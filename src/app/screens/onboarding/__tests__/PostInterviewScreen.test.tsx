@@ -35,9 +35,14 @@ jest.mock('@data/supabase/client', () => ({
   supabase: {
     auth: {
       getUser: jest.fn(),
+      getSession: jest.fn().mockResolvedValue({ data: { session: null } }),
     },
     from: jest.fn(),
   },
+}));
+
+jest.mock('@features/authentication/hooks/useAuth', () => ({
+  useAuth: () => ({ user: { email: 'applicant@example.com', id: 'applicant' } }),
 }));
 
 const getUserMock = supabase.auth.getUser as jest.Mock;

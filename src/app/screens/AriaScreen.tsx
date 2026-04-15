@@ -124,6 +124,7 @@ import {
   hasScenarioBQ1OnTopicEngagement,
   hasScenarioCCommitmentThresholdInUserAnswer,
   hasScenarioCVignetteCommitmentThresholdSignal,
+  scenarioCCommitmentThresholdMatchDetail,
   extractScenario3CommitmentThresholdUserAnswerAfterPrompt,
   extractScenario3UserCorpusAfterLastRepairPrompt,
   type ScenarioCorpusMessageSlice,
@@ -150,6 +151,7 @@ import { buildPersonalMomentScoringPrompt } from '@features/aria/personalMomentS
 import { inferPersonalMomentSlices } from '@features/aria/personalMomentSlices';
 import * as FileSystem from 'expo-file-system';
 import * as FileSystemLegacy from 'expo-file-system/legacy';
+import { isAmoraeaAdminConsoleEmail } from '@/constants/adminConsole';
 
 // #region agent log
 if (typeof fetch !== 'undefined') {
@@ -3842,8 +3844,17 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
   }, [signOut]);
 
   /** Admin from auth user (available on first render). */
-  const isAdminUser = user?.email === 'admin@amoraea.com';
+  const isAdminUser = isAmoraeaAdminConsoleEmail(user?.email);
   const shouldShowAdminPanel = showAdminPanel && (isAdmin || isAdminUser);
+
+  const openAdminPanelParam = (route.params as { openAdminPanel?: boolean } | undefined)?.openAdminPanel;
+  useEffect(() => {
+    if (!ALPHA_MODE || !openAdminPanelParam) return;
+    setShowAdminPanel(true);
+    if (typeof navigation.setParams === 'function') {
+      navigation.setParams({ openAdminPanel: undefined });
+    }
+  }, [openAdminPanelParam, navigation]);
 
   /** Once we move to scenario N, scenarios 1..N-1 are locked. */
   const [highestScenarioReached, setHighestScenarioReached] = useState(1);
@@ -3987,8 +3998,7 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
     const getSession = async () => {
       const { data: { session } } = await supabase.auth.getSession();
       const email = session?.user?.email ?? null;
-      const admin = email === 'admin@amoraea.com';
-      setIsAdmin(admin);
+      setIsAdmin(isAmoraeaAdminConsoleEmail(email));
       setUserEmail(email ?? null);
     };
     getSession();
@@ -3997,6 +4007,8 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
   useEffect(() => {
     const checkInterviewStatus = async () => {
       if (!userId) return;
+      const { data: sessionData } = await supabase.auth.getSession();
+      const sessionEmail = sessionData.session?.user?.email ?? null;
       const { data, error } = await supabase
         .from('users')
         .select('interview_completed, interview_passed, interview_reviewed_at, latest_attempt_id, is_alpha_tester')
@@ -4023,7 +4035,8 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
       }).catch(() => {});
       // #endregion
 
-      const isAdminEmail = (user?.email ?? '').toLowerCase() === 'admin@amoraea.com';
+      /** Session email is reliable on cold start; `user` from useAuth can be null for a frame and caused PostInterview ↔ Aria loops for admin. */
+      const isAdminEmail = isAmoraeaAdminConsoleEmail(sessionEmail ?? user?.email);
       /** Same cohort as `scoreInterview` → PostInterview: not alpha, not admin — never show in-app thank-you / scores. */
       const shouldHandOffToPostInterview =
         isInterviewAppRoute &&
@@ -5582,6 +5595,31 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
       cq2PromptMatches &&
       (currentInterviewMomentRef.current === 3 ||
         (currentScenarioRef.current === 3 && !personalHandoffInjectedRef.current));
+    // #region agent log
+    if (currentScenarioRef.current === 3 && !personalHandoffInjectedRef.current) {
+      fetch('http://127.0.0.1:7789/ingest/668e0bd5-3283-4492-9f48-e33846c18218', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'X-Debug-Session-Id': 'c61a43' },
+        body: JSON.stringify({
+          sessionId: 'c61a43',
+          location: 'AriaScreen.tsx:user_send_scenario3',
+          message: 'cq2_reply_detection',
+          hypothesisId: 'H2',
+          data: {
+            replyingToScenarioCQ2,
+            cq2PromptMatches,
+            moment: currentInterviewMomentRef.current,
+            scenario: currentScenarioRef.current,
+            personalHandoffInjected: personalHandoffInjectedRef.current,
+            lastAsstIsCQ2: isScenarioCQ2Prompt(lastAssistantContent),
+            lastAsstIsThreshold: looksLikeScenarioCThresholdQuestion(lastAssistantContent),
+            lastAssistantPreview: lastAssistantContent.slice(0, 320),
+          },
+          timestamp: Date.now(),
+        }),
+      }).catch(() => {});
+    }
+    // #endregion
     if (moment5InexperienceFallbackPendingRef.current && !isDecline(trimmed)) {
       moment5InexperienceFallbackPendingRef.current = false;
     }
@@ -5697,6 +5735,8 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
       !scenarioBQ1Engaged;
     const scenarioCUserCorpusForThreshold = extractScenario3UserCorpus(messagesToUse);
     const scenarioCPostRepairCorpus = extractScenario3UserCorpusAfterLastRepairPrompt(messagesToUse);
+    const scenarioCPostRepairThresholdMatchDetail =
+      scenarioCCommitmentThresholdMatchDetail(scenarioCPostRepairCorpus);
     const scenarioCThresholdStrictFullCorpus =
       hasScenarioCCommitmentThresholdInUserAnswer(scenarioCUserCorpusForThreshold);
     const scenarioCThresholdStrict =
@@ -5730,6 +5770,29 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
         postRepairCorpusPreview: scenarioCPostRepairCorpus.slice(0, 500),
         fullCorpusPreview: scenarioCUserCorpusForThreshold.slice(0, 500),
       });
+      // #region agent log
+      fetch('http://127.0.0.1:7789/ingest/668e0bd5-3283-4492-9f48-e33846c18218', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'X-Debug-Session-Id': 'c61a43' },
+        body: JSON.stringify({
+          sessionId: 'c61a43',
+          location: 'AriaScreen.tsx:S3_THRESHOLD_EVAL',
+          message: 'scenario_c_threshold_pre_api',
+          hypothesisId: 'H1',
+          data: {
+            shouldForceScenarioCThresholdProbe,
+            scenarioCThresholdStrict,
+            scenarioCThresholdStrictFullCorpus,
+            isDecline: isDecline(trimmed),
+            userReplyLen: trimmed.length,
+            postRepairCorpusLen: scenarioCPostRepairCorpus.length,
+            postRepairThresholdMatchDetail: scenarioCPostRepairThresholdMatchDetail,
+            namedDanielSophieInPostRepair: /\b(daniel|sophie)\b/i.test(scenarioCPostRepairCorpus),
+          },
+          timestamp: Date.now(),
+        }),
+      }).catch(() => {});
+      // #endregion
     }
 
     if (!ANTHROPIC_API_KEY && !ANTHROPIC_PROXY_URL) {
@@ -5987,6 +6050,31 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
       }).catch(() => {});
     }
     // #endregion
+    // #region agent log
+    if (replyingToScenarioCQ2) {
+      fetch('http://127.0.0.1:7789/ingest/668e0bd5-3283-4492-9f48-e33846c18218', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'X-Debug-Session-Id': 'c61a43' },
+        body: JSON.stringify({
+          sessionId: 'c61a43',
+          location: 'AriaScreen.tsx:s3_post_sanitize_threshold_gate',
+          message: 'post_sanitize_assistant_threshold_flags',
+          hypothesisId: 'H5',
+          data: {
+            shouldForceScenarioCThresholdProbe,
+            assistantIssuedScenarioCThresholdProbe,
+            assistantIssuedAfterSanitize: looksLikeScenarioCThresholdQuestion(strippedText),
+            strippedPreview: strippedText.slice(0, 360),
+            willAttemptS3Force:
+              shouldForceScenarioCThresholdProbe &&
+              !assistantIssuedScenarioCThresholdProbe &&
+              !text.includes('[INTERVIEW_COMPLETE]'),
+          },
+          timestamp: Date.now(),
+        }),
+      }).catch(() => {});
+    }
+    // #endregion
     if (assistantIssuedMoment5Probe) {
       moment5ProbeAskedRef.current = true;
       moment5ProbePendingRef.current = true;
@@ -6132,6 +6220,30 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
       scenarioBSkippedJamesIntermediate &&
       !assistantIssuedScenarioBJamesDifferently &&
       !text.includes('[INTERVIEW_COMPLETE]');
+    // #region agent log
+    if (currentScenarioRef.current === 3 && currentInterviewMomentRef.current === 3) {
+      fetch('http://127.0.0.1:7789/ingest/668e0bd5-3283-4492-9f48-e33846c18218', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'X-Debug-Session-Id': 'c61a43' },
+        body: JSON.stringify({
+          sessionId: 'c61a43',
+          location: 'AriaScreen.tsx:before_forced_branches',
+          message: 'forced_probe_branch_order',
+          hypothesisId: 'H3',
+          data: {
+            shouldForceS1: shouldForceScenarioAContemptProbe,
+            shouldForceS2App: shouldForceScenarioBFullAppreciationProbe,
+            needsS2James: needsScenarioBJamesDifferentlyInsert,
+            shouldForceS3Threshold: shouldForceScenarioCThresholdProbe,
+            assistantIssuedS3Threshold: assistantIssuedScenarioCThresholdProbe,
+            moment: currentInterviewMomentRef.current,
+            scenario: currentScenarioRef.current,
+          },
+          timestamp: Date.now(),
+        }),
+      }).catch(() => {});
+    }
+    // #endregion
     if (needsScenarioBJamesDifferentlyInsert) {
       const forcedJamesDifferentlyProbe =
         'Before things blew up, what do you think James could have done differently that might have helped Sarah feel appreciated?';
@@ -6187,6 +6299,23 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
       !assistantIssuedScenarioCThresholdProbe &&
       !text.includes('[INTERVIEW_COMPLETE]')
     ) {
+      // #region agent log
+      fetch('http://127.0.0.1:7789/ingest/668e0bd5-3283-4492-9f48-e33846c18218', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'X-Debug-Session-Id': 'c61a43' },
+        body: JSON.stringify({
+          sessionId: 'c61a43',
+          location: 'AriaScreen.tsx:S3_THRESHOLD_FORCE',
+          message: 'entered_s3_threshold_injection',
+          hypothesisId: 'H4',
+          data: {
+            assistantIssuedScenarioCThresholdProbe,
+            prematureMoment4: assistantTextIsPrematureMoment4HandoffDuringScenarioC(strippedText),
+          },
+          timestamp: Date.now(),
+        }),
+      }).catch(() => {});
+      // #endregion
       const forcedThresholdProbe =
         "At what point would you say Daniel or Sophie should decide this relationship isn't working?";
       const prematureMoment4Handoff = assistantTextIsPrematureMoment4HandoffDuringScenarioC(strippedText);
@@ -7847,6 +7976,13 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
       console.log('interviewStatus:', interviewStatusRef.current);
     }
     const isOnboardingFlow = route.name === 'Aria' || route.name === 'OnboardingInterview';
+    const { data: authSessionForScore } = await supabase.auth.getSession();
+    const sessionEmailForScore = authSessionForScore.session?.user?.email ?? null;
+    /** Session email is authoritative at completion time; without it, admin can be misclassified and skip DB insert (PostInterview early return). */
+    const isAdminConsoleAccount =
+      isAmoraeaAdminConsoleEmail(sessionEmailForScore) ||
+      isAmoraeaAdminConsoleEmail(user?.email) ||
+      isAdmin;
     setStatus('scoring');
     await remoteLog('[2] Screen set to scoring');
     const context = typologyContext || 'No typology context — score from transcript only.';
@@ -7876,7 +8012,7 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
       }
       await saveInterviewResults(fallbackResults, fallbackResults.gateResult!, userId);
       const standardNoApi =
-        isOnboardingFlow && !!userId && !!profile && !profile.isAlphaTester && !isAdmin;
+        isOnboardingFlow && !!userId && !!profile && !profile.isAlphaTester && !isAdminConsoleAccount;
       if (standardNoApi) {
         await ensureShareableReferralCodeForReferrer(userId);
         navigation.replace('PostInterview', { userId });
@@ -7935,23 +8071,9 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
       });
       parsed.gateResult = gateResult;
       setResults(parsed);
-      /** Non–alpha testers: no in-app scores or analysis — branded PostInterview only. */
+      /** Non–alpha testers: after persistence, navigate to branded PostInterview (no in-app scores UI). */
       const isStandardOnboardingApplicant =
-        isOnboardingFlow && !!userId && !!profile && !profile.isAlphaTester && !isAdmin;
-      if (isStandardOnboardingApplicant) {
-        const gate1Score = buildGate1ScoreFromResults(parsed);
-        await profileRepository.upsertProfile(userId, {
-          gate1Score,
-          applicationStatus: 'under_review',
-          onboardingStage: 'complete',
-        });
-        queryClient.invalidateQueries({ queryKey: ['profile', userId] });
-        await saveInterviewResults(parsed, gateResult, userId);
-        await ensureShareableReferralCodeForReferrer(userId);
-        navigation.replace('PostInterview', { userId });
-        setStatus('results');
-        return;
-      }
+        isOnboardingFlow && !!userId && !!profile && !profile.isAlphaTester && !isAdminConsoleAccount;
       await remoteLog('[3] Scoring complete', {
         weightedScore: gateResult?.weightedScore,
         passed: gateResult?.pass,
@@ -8285,7 +8407,6 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
             transcript: finalMessages,
             response_timings: responseTimingsRef.current,
             probe_log: probeLogRef.current,
-            switch_log: [],
             score_consistency: scoreConsistency,
             construct_asymmetry: constructAsymmetry,
             language_markers: languageMarkers,
@@ -8384,50 +8505,69 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
               interviewSessionIdRef.current,
               { platform: rtp.platform }
             );
-            const scoringVisible = await waitForInterviewAttemptScoringReady(supabase, attemptId, {
-              maxMs: 180_000,
-              intervalMs: 400,
-            });
-            if (scoringVisible) {
-              setPendingScoringSyncAttemptId(null);
-              setAnalysisAttemptId(attemptId);
-              await remoteLog('[6] setAnalysisAttemptId called', { id: attemptId });
-              if (__DEV__) console.log('=== [6] latestAttemptId set ===', attemptId);
+            if (isStandardOnboardingApplicant) {
+              await saveInterviewResults(parsed, finalGateResult, userId);
+              await ensureShareableReferralCodeForReferrer(userId);
+              queryClient.invalidateQueries({ queryKey: ['profile', userId] });
               interviewJustCompletedInSession = true;
               await new Promise((resolve) => setTimeout(resolve, 100));
               writeSessionLog({
                 userId,
                 attemptId,
                 eventType: 'session_complete',
-                eventData: { session_correlation_id: interviewSessionIdRef.current },
+                eventData: { session_correlation_id: interviewSessionIdRef.current, path: 'standard_onboarding_post_insert' },
                 platform: getSessionLogRuntime().platform,
               });
-              setInterviewStatus('congratulations');
-              await remoteLog('[8] setInterviewStatus called', { screen: 'congratulations' });
-              if (__DEV__) console.log('=== [8] Navigation complete ===');
-            } else {
-              await remoteLog('[WARN] Attempt row scoring fields not confirmed after extended wait — advancing anyway', {
+              navigation.replace('PostInterview', { userId });
+              await remoteLog('[8] standard_onboarding → PostInterview after interview_attempts insert', {
                 attemptId,
               });
-              if (__DEV__) {
-                console.warn('[Aria] Scoring row poll inconclusive; leaving preparing_results → congratulations', {
+            } else {
+              const scoringVisible = await waitForInterviewAttemptScoringReady(supabase, attemptId, {
+                maxMs: 180_000,
+                intervalMs: 400,
+              });
+              if (scoringVisible) {
+                setPendingScoringSyncAttemptId(null);
+                setAnalysisAttemptId(attemptId);
+                await remoteLog('[6] setAnalysisAttemptId called', { id: attemptId });
+                if (__DEV__) console.log('=== [6] latestAttemptId set ===', attemptId);
+                interviewJustCompletedInSession = true;
+                await new Promise((resolve) => setTimeout(resolve, 100));
+                writeSessionLog({
+                  userId,
+                  attemptId,
+                  eventType: 'session_complete',
+                  eventData: { session_correlation_id: interviewSessionIdRef.current },
+                  platform: getSessionLogRuntime().platform,
+                });
+                setInterviewStatus('congratulations');
+                await remoteLog('[8] setInterviewStatus called', { screen: 'congratulations' });
+                if (__DEV__) console.log('=== [8] Navigation complete ===');
+              } else {
+                await remoteLog('[WARN] Attempt row scoring fields not confirmed after extended wait — advancing anyway', {
                   attemptId,
                 });
+                if (__DEV__) {
+                  console.warn('[Aria] Scoring row poll inconclusive; leaving preparing_results → congratulations', {
+                    attemptId,
+                  });
+                }
+                setPendingScoringSyncAttemptId(null);
+                setAnalysisAttemptId(attemptId);
+                await remoteLog('[6] setAnalysisAttemptId called', { id: attemptId, via: 'scoring_ready_fallback' });
+                interviewJustCompletedInSession = true;
+                await new Promise((resolve) => setTimeout(resolve, 100));
+                writeSessionLog({
+                  userId,
+                  attemptId,
+                  eventType: 'session_complete',
+                  eventData: { session_correlation_id: interviewSessionIdRef.current, via: 'scoring_ready_fallback' },
+                  platform: getSessionLogRuntime().platform,
+                });
+                setInterviewStatus('congratulations');
+                await remoteLog('[8] setInterviewStatus called', { screen: 'congratulations', via: 'scoring_ready_fallback' });
               }
-              setPendingScoringSyncAttemptId(null);
-              setAnalysisAttemptId(attemptId);
-              await remoteLog('[6] setAnalysisAttemptId called', { id: attemptId, via: 'scoring_ready_fallback' });
-              interviewJustCompletedInSession = true;
-              await new Promise((resolve) => setTimeout(resolve, 100));
-              writeSessionLog({
-                userId,
-                attemptId,
-                eventType: 'session_complete',
-                eventData: { session_correlation_id: interviewSessionIdRef.current, via: 'scoring_ready_fallback' },
-                platform: getSessionLogRuntime().platform,
-              });
-              setInterviewStatus('congratulations');
-              await remoteLog('[8] setInterviewStatus called', { screen: 'congratulations', via: 'scoring_ready_fallback' });
             }
           } else {
             await remoteLog('[ERROR] Alpha save missing attempt id after insert', {});
@@ -8527,7 +8667,7 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
       }
       await saveInterviewResults(fallbackResults, fallbackResults.gateResult!, userId);
       const standardCatch =
-        isOnboardingFlow && !!userId && !!profile && !profile.isAlphaTester && !isAdmin;
+        isOnboardingFlow && !!userId && !!profile && !profile.isAlphaTester && !isAdminConsoleAccount;
       if (standardCatch) {
         await ensureShareableReferralCodeForReferrer(userId);
         navigation.replace('PostInterview', { userId });
@@ -8548,6 +8688,7 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
     scoreScenario,
     profile,
     isAdmin,
+    user?.email,
   ]);
 
   useEffect(() => {
@@ -9030,6 +9171,38 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
             <Text style={[styles.introHint, { textAlign: 'left' }]}>
               We'll have your results ready soon.
             </Text>
+
+            {ALPHA_MODE && isAdminUser ? (
+              <Pressable
+                onPress={() => setShowAdminPanel(true)}
+                accessibilityRole="button"
+                accessibilityLabel="Open admin panel"
+                style={({ pressed }) => [
+                  styles.retakeButtonUnderReview,
+                  {
+                    marginTop: 16,
+                    paddingVertical: 12,
+                    borderRadius: 12,
+                    backgroundColor: 'rgba(91,168,232,0.12)',
+                    borderColor: 'rgba(107,185,255,0.45)',
+                    borderWidth: 1,
+                    opacity: pressed ? 0.85 : 1,
+                  },
+                ]}
+              >
+                <Text
+                  style={{
+                    fontSize: 14,
+                    fontWeight: '700',
+                    letterSpacing: 1,
+                    color: '#8EC6FF',
+                    textAlign: 'center',
+                  }}
+                >
+                  ◆ Admin panel
+                </Text>
+              </Pressable>
+            ) : null}
 
             <Text style={[styles.introHint, { textAlign: 'left', marginTop: 16, marginBottom: 8, color: '#D6E6F7' }]}>
               Retaking the interview will not replace these scores.
@@ -9561,7 +9734,7 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
         {status === 'results' && results && (
           <ScrollView key="final-results" style={[styles.resultsPanel, styles.resultsPanelHighlight]} contentContainerStyle={styles.resultsPanelContent}>
             <Text style={styles.resultsPanelTitle}>✦ Interview complete</Text>
-            {!isAdmin ? (
+            {!(isAmoraeaAdminConsoleEmail(user?.email) || isAdmin) ? (
               <>
                 <Text style={styles.resultsPanelSummary}>
                   Thank you for completing your interview. Your application is now being reviewed — this usually takes up to 24 hours.

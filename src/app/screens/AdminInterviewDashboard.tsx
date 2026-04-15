@@ -31,6 +31,7 @@ import {
   styleProfileFromDbRow,
   translateStyleProfile,
 } from '@utilities/styleTranslations';
+import { ADMIN_CONSOLE_EMAIL } from '@/constants/adminConsole';
 
 // Marker ids as stored in DB; construct keys match ai_reasoning.construct_breakdown
 const PILLAR_ROWS = [
@@ -73,8 +74,7 @@ const USER_FEEDBACK_LABELS: Record<string, string> = {
   other_feedback: 'Additional Feedback',
 };
 
-/** Single source for admin gate (matches Edge Function `admin-delete-user`). */
-export const ADMIN_CONSOLE_EMAIL = 'admin@amoraea.com';
+export { ADMIN_CONSOLE_EMAIL };
 
 async function confirmDeleteAccount(message: string): Promise<boolean> {
   if (Platform.OS === 'web' && typeof window !== 'undefined') {
@@ -112,6 +112,9 @@ type UserRow = {
   name?: string | null;
   display_name?: string | null;
   created_at?: string;
+  /** When set, user completed at least one attempt row in DB (even if admin cannot read attempts yet). */
+  latest_attempt_id?: string | null;
+  interview_completed?: boolean | null;
 };
 
 type AttemptRow = {
@@ -413,7 +416,9 @@ function getUserDisplayName(user: UserRow | null | undefined): string {
   return user.full_name ?? user.name ?? user.display_name ?? user.email ?? 'Unknown';
 }
 
-async function fetchAllAdminData(): Promise<UserGroup[]> {
+type FetchAllAdminDataResult = { groups: UserGroup[]; errorMessage: string | null };
+
+async function fetchAllAdminData(): Promise<FetchAllAdminDataResult> {
   // Return ALL registered users (no filter) — include those who haven't started, in progress, completed, or passed
   const { data: allUsers, error: usersError } = await supabase
     .from('users')
@@ -424,15 +429,19 @@ async function fetchAllAdminData(): Promise<UserGroup[]> {
       full_name,
       name,
       display_name,
-      created_at
+      created_at,
+      latest_attempt_id,
+      interview_completed
     `
     )
     .order('created_at', { ascending: false });
 
   if (usersError) {
     console.error('Admin panel users fetch error:', usersError);
-    return [];
+    return { groups: [], errorMessage: usersError.message };
   }
+
+  const users = (allUsers ?? []) as UserRow[];
 
   const { data: allAttempts, error: attemptsError } = await supabase
     .from('interview_attempts')
@@ -468,12 +477,19 @@ async function fetchAllAdminData(): Promise<UserGroup[]> {
 
   if (attemptsError) {
     console.error('Admin panel attempts fetch error:', attemptsError);
+    return {
+      groups: users.map((user) => ({
+        user,
+        attempts: [] as AttemptRow[],
+        latestAttempt: null,
+      })),
+      errorMessage: `Could not load interview_attempts: ${attemptsError.message}`,
+    };
   }
 
   const attempts = (allAttempts ?? []) as AttemptRow[];
-  const users = (allUsers ?? []) as UserRow[];
 
-  return users.map((user) => {
+  const groups = users.map((user) => {
     const userAttempts = attempts.filter((a) => a.user_id === user.id);
     const latestAttempt =
       userAttempts.length > 0
@@ -487,6 +503,7 @@ async function fetchAllAdminData(): Promise<UserGroup[]> {
       latestAttempt,
     };
   });
+  return { groups, errorMessage: null };
 }
 
 function formatConstruct(key: string): string {
@@ -1046,6 +1063,16 @@ function UserDetails({
       {attempts.length === 0 ? (
         <View style={styles.emptyState}>
           <Text style={styles.emptyText}>No tests found for this user.</Text>
+          {userData.user.latest_attempt_id || userData.user.interview_completed ? (
+            <Text style={styles.emptyHint}>
+              Interview data exists for this account — a retake is usually not needed. If attempts stay empty after
+              refreshing, apply{' '}
+              <Text style={styles.emptyHintMono}>20260423150000_admin_rls_is_amoraea_admin_function.sql</Text> (admin
+              check via <Text style={styles.emptyHintMono}>auth.users</Text> email — JWT email in RLS is unreliable), and
+              ensure <Text style={styles.emptyHintMono}>20260423140000_interview_attempts_rls_admin_and_own.sql</Text>{' '}
+              policies exist for <Text style={styles.emptyHintMono}>interview_attempts</Text>.
+            </Text>
+          ) : null}
         </View>
       ) : (
         <View style={styles.detailsLayout}>
@@ -1187,17 +1214,20 @@ export function AdminAttemptTabsView({
 export function AdminInterviewDashboard({ onClose }: { onClose: () => void }) {
   const [users, setUsers] = useState<UserGroup[]>([]);
   const [loading, setLoading] = useState(true);
+  const [listError, setListError] = useState<string | null>(null);
   const [selectedUser, setSelectedUser] = useState<UserGroup | null>(null);
   const [currentUserId, setCurrentUserId] = useState<string | null>(null);
   const [deletingUserId, setDeletingUserId] = useState<string | null>(null);
 
   const refreshUsers = useCallback(async () => {
     try {
-      const data = await fetchAllAdminData();
-      setUsers(data);
+      const { groups, errorMessage } = await fetchAllAdminData();
+      setUsers(groups);
+      setListError(errorMessage);
     } catch (err) {
       console.error('Admin panel fetch failed:', err);
       setUsers([]);
+      setListError(err instanceof Error ? err.message : 'Fetch failed');
     }
   }, []);
 
@@ -1215,12 +1245,16 @@ export function AdminInterviewDashboard({ onClose }: { onClose: () => void }) {
     let cancelled = false;
     (async () => {
       try {
-        const data = await fetchAllAdminData();
-        if (!cancelled) setUsers(data);
+        const { groups, errorMessage } = await fetchAllAdminData();
+        if (!cancelled) {
+          setUsers(groups);
+          setListError(errorMessage);
+        }
       } catch (err) {
         if (!cancelled) {
           console.error('Admin panel fetch failed:', err);
           setUsers([]);
+          setListError(err instanceof Error ? err.message : 'Fetch failed');
         }
       } finally {
         if (!cancelled) setLoading(false);
@@ -1292,6 +1326,18 @@ export function AdminInterviewDashboard({ onClose }: { onClose: () => void }) {
       <ScrollView contentContainerStyle={styles.cardsContainer}>
         {loading ? (
           <Text style={styles.emptyText}>Loading users...</Text>
+        ) : listError ? (
+          <View style={styles.listErrorBlock}>
+            <Text style={styles.listErrorTitle}>Could not load data</Text>
+            <Text style={styles.listErrorDetail} selectable>
+              {listError}
+            </Text>
+            <Text style={styles.listErrorHint}>
+              If the list is empty but users exist in the database, apply the Supabase migration that grants
+              admin@amoraea.com SELECT on public.users (see migrations/20260423120000_admin_select_all_users.sql),
+              then refresh.
+            </Text>
+          </View>
         ) : users.length === 0 ? (
           <Text style={styles.emptyText}>No users found.</Text>
         ) : (
@@ -1540,6 +1586,42 @@ const styles = StyleSheet.create({
   emptyText: {
     color: '#7A9ABE',
     fontSize: 13,
+  },
+  emptyHint: {
+    color: '#9BB8D9',
+    fontSize: 12,
+    lineHeight: 18,
+    marginTop: 14,
+    maxWidth: 520,
+  },
+  emptyHintMono: {
+    fontFamily: Platform.OS === 'web' ? 'ui-monospace, monospace' : 'monospace',
+    fontSize: 11,
+    color: '#C8E4FF',
+  },
+  listErrorBlock: {
+    padding: 16,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: 'rgba(248,113,113,0.35)',
+    backgroundColor: 'rgba(248,113,113,0.08)',
+    gap: 10,
+  },
+  listErrorTitle: {
+    color: '#fecaca',
+    fontSize: 15,
+    fontWeight: '600',
+  },
+  listErrorDetail: {
+    color: 'rgba(254,226,226,0.92)',
+    fontSize: 12,
+    lineHeight: 18,
+  },
+  listErrorHint: {
+    color: '#7A9ABE',
+    fontSize: 12,
+    lineHeight: 18,
+    marginTop: 4,
   },
   styleTranslationNote: {
     marginBottom: 8,

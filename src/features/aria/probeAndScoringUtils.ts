@@ -407,13 +407,14 @@ export function hasScenarioAQ1VignetteEngagement(text: string): boolean {
   return t.length >= 28;
 }
 
-/**
- * Scenario C: true only when the user named relationship-level exit / unworkability criteria — not vignette motion
- * alone ("Daniel leaves", "walk away" from the room) or generic repair language.
- */
-export function hasScenarioCCommitmentThresholdInUserAnswer(text: string): boolean {
+/** Debug/instrumentation: which Scenario C commitment-threshold regex bucket matched (if any). */
+export function scenarioCCommitmentThresholdMatchDetail(text: string): {
+  irrecoverable: boolean;
+  relationshipOutcome: boolean;
+  decisionProcess: boolean;
+} {
   const t = text.replace(/\s+/g, ' ').trim().toLowerCase();
-  if (t.length < 12) return false;
+  if (t.length < 12) return { irrecoverable: false, relationshipOutcome: false, decisionProcess: false };
   const irrecoverable =
     /\b(irrecover|unworkable|incompatib|deal[- ]?breaker|isn't working|isnt working|is not working|relationship is not working|not worth (it|continuing)|should (end|split)|break up|breakup|divorce|call it quits|done with (the relationship|them|him|her))\b/.test(
       t
@@ -426,7 +427,16 @@ export function hasScenarioCCommitmentThresholdInUserAnswer(text: string): boole
     /\b(at what point (would|do) (you|they|i|we)|when (i|we) would (end|leave|quit)|when to (end|leave|call it)|before (i|we) give up|last straw|line in the sand|non[- ]?negotiable|if (it|they) keeps? happening|this pattern keeps? happening|pattern keeps? happening|pattern (never|doesn't|does not) change|after (multiple|repeated)|years of the same)\b/.test(
       t
     );
-  return irrecoverable || relationshipOutcome || decisionProcess;
+  return { irrecoverable, relationshipOutcome, decisionProcess };
+}
+
+/**
+ * Scenario C: true only when the user named relationship-level exit / unworkability criteria — not vignette motion
+ * alone ("Daniel leaves", "walk away" from the room) or generic repair language.
+ */
+export function hasScenarioCCommitmentThresholdInUserAnswer(text: string): boolean {
+  const f = scenarioCCommitmentThresholdMatchDetail(text);
+  return f.irrecoverable || f.relationshipOutcome || f.decisionProcess;
 }
 
 /**

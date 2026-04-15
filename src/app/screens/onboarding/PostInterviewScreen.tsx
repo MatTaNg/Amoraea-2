@@ -23,6 +23,8 @@ import {
   isQaRetakeSignupCode,
   resetInterviewForQaRetake,
 } from '@features/onboarding/qaRetake';
+import { useAuth } from '@features/authentication/hooks/useAuth';
+import { isAmoraeaAdminConsoleEmail } from '@/constants/adminConsole';
 
 const BG = '#0a0a0f';
 const ACCENT = '#3b82f6';
@@ -159,6 +161,7 @@ export const PostInterviewScreen: React.FC<{ navigation: any; route: { params: {
   navigation,
 }) => {
   const queryClient = useQueryClient();
+  const { user } = useAuth();
   const userId = route.params?.userId ?? '';
   const [phone, setPhone] = useState('');
   const [submitted, setSubmitted] = useState(false);
@@ -178,6 +181,21 @@ export const PostInterviewScreen: React.FC<{ navigation: any; route: { params: {
   useEffect(() => {
     loadWebFontsOnce();
   }, []);
+
+  /** Admin account uses cohort tools on Aria, not this branded applicant screen. */
+  useEffect(() => {
+    if (!userId) return;
+    let cancelled = false;
+    void (async () => {
+      const { data: { session } } = await supabase.auth.getSession();
+      const email = session?.user?.email ?? user?.email ?? null;
+      if (cancelled || !isAmoraeaAdminConsoleEmail(email)) return;
+      navigation.replace('Aria', { userId, openAdminPanel: true });
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [userId, user?.email, navigation]);
 
   useEffect(() => {
     let cancelled = false;
