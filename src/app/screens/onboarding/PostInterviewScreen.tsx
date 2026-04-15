@@ -9,6 +9,8 @@ import {
   Platform,
   Animated,
   Easing,
+  Alert,
+  ActivityIndicator,
 } from 'react-native';
 import { SafeAreaContainer } from '@ui/components/SafeAreaContainer';
 import { Ionicons } from '@expo/vector-icons';
@@ -17,6 +19,10 @@ import { supabase } from '@data/supabase/client';
 import { FlameOrb } from '@app/screens/FlameOrb';
 import * as Clipboard from 'expo-clipboard';
 import { useQueryClient } from '@tanstack/react-query';
+import {
+  isQaRetakeSignupCode,
+  resetInterviewForQaRetake,
+} from '@features/onboarding/qaRetake';
 
 const BG = '#0a0a0f';
 const ACCENT = '#3b82f6';
@@ -146,6 +152,7 @@ function PulsingDot() {
  */
 export const PostInterviewScreen: React.FC<{ navigation: any; route: { params: { userId: string } } }> = ({
   route,
+  navigation,
 }) => {
   const queryClient = useQueryClient();
   const userId = route.params?.userId ?? '';
@@ -159,6 +166,8 @@ export const PostInterviewScreen: React.FC<{ navigation: any; route: { params: {
   const [myReferralCode, setMyReferralCode] = useState<string | null>(null);
   const [referralNotice, setReferralNotice] = useState<string | null>(null);
   const [copyFeedback, setCopyFeedback] = useState(false);
+  const [showPostInterviewRetake, setShowPostInterviewRetake] = useState(false);
+  const [retakeBusy, setRetakeBusy] = useState(false);
 
   useEffect(() => {
     loadWebFontsOnce();
@@ -170,6 +179,8 @@ export const PostInterviewScreen: React.FC<{ navigation: any; route: { params: {
       const { data: auth } = await supabase.auth.getUser();
       const uid = auth.user?.id ?? userId;
       if (!uid) return;
+      const meta = auth.user?.user_metadata as { referral_code?: string } | undefined;
+      if (!cancelled) setShowPostInterviewRetake(isQaRetakeSignupCode(meta?.referral_code));
       const [{ data: codeRow }, { data: userRow }] = await Promise.all([
         supabase.from('referral_codes').select('code').eq('referrer_user_id', uid).maybeSingle(),
         supabase.from('users').select('referral_notice_pending').eq('id', uid).maybeSingle(),
@@ -182,6 +193,43 @@ export const PostInterviewScreen: React.FC<{ navigation: any; route: { params: {
       cancelled = true;
     };
   }, [userId]);
+
+  const confirmAndRetakeInterview = () => {
+    const msg =
+      'Start a new interview run? Your previous scores stay on the server for review; you will go through the interview again.';
+    const run = () => {
+      void (async () => {
+        const { data: auth } = await supabase.auth.getUser();
+        const uid = auth.user?.id ?? userId;
+        if (!uid) return;
+        setRetakeBusy(true);
+        try {
+          await resetInterviewForQaRetake(uid);
+          await queryClient.invalidateQueries({ queryKey: ['profile', uid] });
+          navigation.replace('Aria', { userId: uid });
+        } catch (e) {
+          if (__DEV__) console.warn('[PostInterview] QA retake failed', e);
+          const detail =
+            e instanceof Error ? e.message : typeof e === 'string' ? e : 'Could not reset the interview.';
+          if (Platform.OS === 'web' && typeof window !== 'undefined') {
+            window.alert(`Could not reset: ${detail}`);
+          } else {
+            Alert.alert('Could not reset', detail);
+          }
+        } finally {
+          setRetakeBusy(false);
+        }
+      })();
+    };
+    if (Platform.OS === 'web' && typeof window !== 'undefined') {
+      if (window.confirm(msg)) run();
+      return;
+    }
+    Alert.alert('Retake test?', msg, [
+      { text: 'Cancel', style: 'cancel' },
+      { text: 'Retake', style: 'destructive', onPress: run },
+    ]);
+  };
 
   /** Email-only path: no phone validation; shows the email confirmation message. */
   const onEmailOnly = () => {
@@ -421,6 +469,29 @@ export const PostInterviewScreen: React.FC<{ navigation: any; route: { params: {
             <Text style={styles.privacy}>Your number is private. No spam. No sharing. Ever.</Text>
           </View>
         </View>
+
+        {showPostInterviewRetake ? (
+          <View style={styles.retakeSection}>
+            <Pressable
+              onPress={confirmAndRetakeInterview}
+              disabled={retakeBusy}
+              style={({ pressed }) => [
+                styles.retakeButton,
+                pressed && !retakeBusy && { opacity: 0.88 },
+                retakeBusy && { opacity: 0.55 },
+              ]}
+            >
+              {retakeBusy ? (
+                <ActivityIndicator color="#93c5fd" />
+              ) : (
+                <Text style={styles.retakeButtonLabel}>Retake test</Text>
+              )}
+            </Pressable>
+            <Text style={styles.retakeHint}>
+              Starts a new interview run. Your prior scores stay on file for review.
+            </Text>
+          </View>
+        ) : null}
       </ScrollView>
     </SafeAreaContainer>
   );
@@ -697,5 +768,39 @@ const styles = StyleSheet.create({
     fontSize: 13,
     fontWeight: '600',
     color: '#93c5fd',
+  },
+  retakeSection: {
+    width: '100%',
+    maxWidth: 440,
+    alignSelf: 'center',
+    marginTop: 28,
+    paddingHorizontal: 4,
+    alignItems: 'center',
+  },
+  retakeButton: {
+    width: '100%',
+    borderWidth: 1,
+    borderColor: 'rgba(59,130,246,0.55)',
+    backgroundColor: 'rgba(59,130,246,0.12)',
+    borderRadius: 10,
+    paddingVertical: 14,
+    alignItems: 'center',
+    justifyContent: 'center',
+    minHeight: 48,
+  },
+  retakeButtonLabel: {
+    fontFamily: FONT_BODY,
+    fontSize: 15,
+    fontWeight: '600',
+    color: '#93c5fd',
+  },
+  retakeHint: {
+    fontFamily: FONT_BODY,
+    fontSize: 12,
+    lineHeight: 17,
+    color: 'rgba(255,255,255,0.45)',
+    textAlign: 'center',
+    marginTop: 10,
+    paddingHorizontal: 8,
   },
 });

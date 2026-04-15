@@ -80,6 +80,8 @@ export interface StoredInterviewData {
   scoringFailed?: Array<{ scenario: number; failedAt: string; error: string }>;
   /** Set when auth session expired so UI can show "session timed out" and re-auth */
   sessionExpired?: boolean;
+  /** True when final prompt was answered and scoring/preparing-results was pending on refresh. */
+  pendingCompletion?: boolean;
   /** Set by unhandled-rejection safety net */
   emergencySave?: boolean;
   savedAt?: string;

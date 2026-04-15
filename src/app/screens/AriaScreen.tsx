@@ -4002,6 +4002,26 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
         .select('interview_completed, interview_passed, interview_reviewed_at, latest_attempt_id, is_alpha_tester')
         .eq('id', userId)
         .maybeSingle();
+      // #region agent log
+      fetch('http://127.0.0.1:7789/ingest/668e0bd5-3283-4492-9f48-e33846c18218', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'X-Debug-Session-Id': 'c61a43' },
+        body: JSON.stringify({
+          sessionId: 'c61a43',
+          runId: 'pre-fix',
+          hypothesisId: 'H2',
+          location: 'AriaScreen.tsx:checkInterviewStatus',
+          message: 'users_row_after_refresh_check',
+          data: {
+            hasError: !!error,
+            interviewCompleted: data?.interview_completed ?? null,
+            latestAttemptIdPresent: typeof data?.latest_attempt_id === 'string' && data.latest_attempt_id.length > 0,
+            interviewStatusBeforeBranch: interviewStatusRef.current,
+          },
+          timestamp: Date.now(),
+        }),
+      }).catch(() => {});
+      // #endregion
 
       const isAdminEmail = (user?.email ?? '').toLowerCase() === 'admin@amoraea.com';
       /** Same cohort as `scoreInterview` → PostInterview: not alpha, not admin — never show in-app thank-you / scores. */
@@ -4159,8 +4179,32 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
       scenariosCompleted: completed,
       scenarioScores: scenarioScoresPayload,
       currentScenario: getCurrentScenario(scoredScenariosRef.current),
+      pendingCompletion:
+        pendingCompletion ||
+        interviewStatusRef.current === 'preparing_results',
     });
-  }, [messages, status, userId, isAdmin, scenarioScores]);
+    // #region agent log
+    fetch('http://127.0.0.1:7789/ingest/668e0bd5-3283-4492-9f48-e33846c18218', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'X-Debug-Session-Id': 'c61a43' },
+      body: JSON.stringify({
+        sessionId: 'c61a43',
+        runId: 'pre-fix',
+        hypothesisId: 'H1',
+        location: 'AriaScreen.tsx:saveInterviewProgressEffect',
+        message: 'saved_progress_snapshot',
+        data: {
+          status,
+          interviewStatus: interviewStatusRef.current,
+          completedCount: completed.length,
+          currentScenario: getCurrentScenario(scoredScenariosRef.current),
+          userMessageCount: messages.filter((m) => m.role === 'user').length,
+        },
+        timestamp: Date.now(),
+      }),
+    }).catch(() => {});
+    // #endregion
+  }, [messages, status, userId, isAdmin, scenarioScores, pendingCompletion]);
 
   const { data: profile } = useQuery({
     queryKey: ['profile', userId],
@@ -6427,6 +6471,50 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
           /* proceed to scoring even if TTS fails */
         }
         pendingCompletionTranscriptRef.current = transcriptForScoring;
+        if (userId) {
+          const completed = Array.from(scoredScenariosRef.current);
+          const scenarioScoresPayload: Record<
+            number,
+            { pillarScores: Record<string, number>; pillarConfidence: Record<string, string>; keyEvidence: Record<string, string>; scenarioName?: string }
+          > = {};
+          [1, 2, 3].forEach((n) => {
+            const s = scenarioScoresRef.current[n];
+            if (s) {
+              scenarioScoresPayload[n] = {
+                pillarScores: s.pillarScores,
+                pillarConfidence: s.pillarConfidence,
+                keyEvidence: s.keyEvidence,
+                scenarioName: s.scenarioName,
+              };
+            }
+          });
+          await saveInterviewProgress(userId, {
+            messages: transcriptForScoring,
+            scenariosCompleted: completed,
+            scenarioScores: scenarioScoresPayload,
+            currentScenario: getCurrentScenario(scoredScenariosRef.current),
+            pendingCompletion: true,
+          });
+        }
+        // #region agent log
+        fetch('http://127.0.0.1:7789/ingest/668e0bd5-3283-4492-9f48-e33846c18218', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'X-Debug-Session-Id': 'c61a43' },
+          body: JSON.stringify({
+            sessionId: 'c61a43',
+            runId: 'pre-fix',
+            hypothesisId: 'H3',
+            location: 'AriaScreen.tsx:INTERVIEW_COMPLETE',
+            message: 'pending_completion_set_true',
+            data: {
+              completedCount: scoredScenariosRef.current.size,
+              transcriptLen: transcriptForScoring.length,
+              statusBeforeSet: statusRef.current,
+            },
+            timestamp: Date.now(),
+          }),
+        }).catch(() => {});
+        // #endregion
         setPendingCompletion(true);
         return;
       }
@@ -7361,8 +7449,54 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
     let cancelled = false;
     (async () => {
       const saved = await loadInterviewFromStorage(userId);
+      // #region agent log
+      fetch('http://127.0.0.1:7789/ingest/668e0bd5-3283-4492-9f48-e33846c18218', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'X-Debug-Session-Id': 'c61a43' },
+        body: JSON.stringify({
+          sessionId: 'c61a43',
+          runId: 'pre-fix',
+          hypothesisId: 'H4',
+          location: 'AriaScreen.tsx:resumeEffect',
+          message: 'saved_payload_loaded',
+          data: {
+            hasSaved: !!saved,
+            savedMessageCount: saved?.messages?.length ?? 0,
+            savedCompletedCount: saved?.scenariosCompleted?.length ?? 0,
+            savedCurrentScenario: saved?.currentScenario ?? null,
+          },
+          timestamp: Date.now(),
+        }),
+      }).catch(() => {});
+      // #endregion
       if (cancelled) return;
       if (!saved?.messages?.length) return;
+      if (saved.pendingCompletion) {
+        hasResumedRef.current = true;
+        const transcript = saved.messages.filter((m) => m.role === 'user' || m.role === 'assistant');
+        // #region agent log
+        fetch('http://127.0.0.1:7789/ingest/668e0bd5-3283-4492-9f48-e33846c18218', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'X-Debug-Session-Id': 'c61a43' },
+          body: JSON.stringify({
+            sessionId: 'c61a43',
+            runId: 'post-fix',
+            hypothesisId: 'H7',
+            location: 'AriaScreen.tsx:resumeEffect',
+            message: 'resume_pending_completion_branch',
+            data: {
+              transcriptLen: transcript.length,
+              savedMessageCount: saved.messages.length,
+            },
+            timestamp: Date.now(),
+          }),
+        }).catch(() => {});
+        // #endregion
+        pendingCompletionTranscriptRef.current = transcript;
+        setPendingCompletion(true);
+        setInterviewStatus('preparing_results');
+        return;
+      }
       // Don't resume from greeting-only state (avoids infinite resume loop)
       if (isGreetingOnly(saved.messages)) {
         await clearInterviewFromStorage(userId);
@@ -7374,6 +7508,26 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
       const hasCompletedScenario = (saved.scenariosCompleted?.length ?? 0) > 0;
       if (hasScenarioProgress || hasCompletedScenario) {
         const completedCount = saved.scenariosCompleted?.length ?? 0;
+        // #region agent log
+        fetch('http://127.0.0.1:7789/ingest/668e0bd5-3283-4492-9f48-e33846c18218', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'X-Debug-Session-Id': 'c61a43' },
+          body: JSON.stringify({
+            sessionId: 'c61a43',
+            runId: 'pre-fix',
+            hypothesisId: 'H4',
+            location: 'AriaScreen.tsx:resumeEffect',
+            message: 'resume_decision',
+            data: {
+              hasScenarioProgress,
+              hasCompletedScenario,
+              completedCount,
+              willResume: completedCount < 3,
+            },
+            timestamp: Date.now(),
+          }),
+        }).catch(() => {});
+        // #endregion
         if (completedCount < 3) {
           hasResumedRef.current = true;
           handleResume(saved);
