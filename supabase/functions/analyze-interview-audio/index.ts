@@ -67,6 +67,20 @@ const corsHeaders = {
   'Access-Control-Max-Age': '86400',
 };
 
+/** PostgREST/Supabase client errors are often plain objects; `String(err)` becomes "[object Object]". */
+function thrownValueToMessage(err: unknown): string {
+  if (err instanceof Error) return err.message;
+  if (err && typeof err === 'object' && 'message' in err) {
+    const m = (err as { message?: unknown }).message;
+    if (typeof m === 'string' && m.length > 0) return m;
+  }
+  try {
+    return JSON.stringify(err);
+  } catch {
+    return String(err);
+  }
+}
+
 function clamp01(v: number): number {
   if (!Number.isFinite(v)) return 0.5;
   return Math.max(0, Math.min(1, v));
@@ -447,7 +461,7 @@ async function finalizeSession(body: Body, admin: ReturnType<typeof createClient
     .select('*')
     .eq('attempt_id', attemptId)
     .eq('processing_status', 'success');
-  if (turnsErr) throw turnsErr;
+  if (turnsErr) throw new Error(thrownValueToMessage(turnsErr));
 
   const { count: totalTurns } = await admin
     .from('interview_turn_audio_features')
@@ -643,7 +657,7 @@ Deno.serve(async (req) => {
       status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' },
     });
   } catch (err) {
-    const msg = err instanceof Error ? err.message : String(err);
+    const msg = thrownValueToMessage(err);
     return new Response(JSON.stringify({ error: msg }), {
       status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' },
     });

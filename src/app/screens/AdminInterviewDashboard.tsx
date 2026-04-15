@@ -15,6 +15,7 @@ import {
   Alert,
 } from 'react-native';
 import { supabase } from '@data/supabase/client';
+import { formatEdgeFunctionInvokeFailure } from '@utilities/runCommunicationStylePipeline';
 import {
   aggregatePillarScoresWithCommitmentMergeDetailed,
   type MarkerScoreSlice,
@@ -594,9 +595,24 @@ function UserCard({
   );
 }
 
+function functionInvokeBodyError(data: unknown): string | null {
+  if (data && typeof data === 'object' && data !== null && 'error' in data) {
+    const e = (data as { error?: unknown }).error;
+    if (typeof e === 'string' && e.trim()) return e.trim();
+  }
+  return null;
+}
+
 function SummaryTab({ attempt }: { attempt: AttemptRow }) {
   const [styleProfile, setStyleProfile] = useState<CommunicationStyleProfileRow | null>(null);
   const [styleStatus, setStyleStatus] = useState<'idle' | 'loading' | 'reprocessing'>('idle');
+  const [stylePipelineErrorDisplay, setStylePipelineErrorDisplay] = useState<string | null>(
+    attempt.communication_style_error ?? null
+  );
+
+  useEffect(() => {
+    setStylePipelineErrorDisplay(attempt.communication_style_error ?? null);
+  }, [attempt.id, attempt.communication_style_error]);
 
   const loadStyleProfile = async () => {
     setStyleStatus('loading');
@@ -627,12 +643,17 @@ function SummaryTab({ attempt }: { attempt: AttemptRow }) {
 
   const reprocessStyle = async () => {
     setStyleStatus('reprocessing');
+    const errs: string[] = [];
     try {
       const textRes = await supabase.functions.invoke('analyze-interview-text', {
         body: { user_id: attempt.user_id, attempt_id: attempt.id },
       });
       if (textRes.error) {
         console.error('[Admin] analyze-interview-text invoke failed', textRes.error);
+        errs.push(formatEdgeFunctionInvokeFailure('analyze-interview-text', textRes));
+      } else {
+        const be = functionInvokeBodyError(textRes.data);
+        if (be) errs.push(`analyze-interview-text: ${be}`);
       }
       const audioRes = await supabase.functions.invoke('analyze-interview-audio', {
         body: {
@@ -643,7 +664,24 @@ function SummaryTab({ attempt }: { attempt: AttemptRow }) {
       });
       if (audioRes.error) {
         console.error('[Admin] analyze-interview-audio invoke failed', audioRes.error);
+        errs.push(formatEdgeFunctionInvokeFailure('analyze-interview-audio', audioRes));
+      } else {
+        const be = functionInvokeBodyError(audioRes.data);
+        if (be) errs.push(`analyze-interview-audio: ${be}`);
       }
+
+      const errorText = errs.length > 0 ? errs.join(' | ') : null;
+      const { error: updateErr } = await supabase
+        .from('interview_attempts')
+        .update({ communication_style_error: errorText })
+        .eq('id', attempt.id)
+        .eq('user_id', attempt.user_id);
+      if (updateErr) {
+        console.error('[Admin] communication_style_error update failed', updateErr);
+      } else {
+        setStylePipelineErrorDisplay(errorText);
+      }
+
       await loadStyleProfile();
     } catch (e) {
       console.error('[Admin] reprocessStyle failed', e);
@@ -726,10 +764,10 @@ function SummaryTab({ attempt }: { attempt: AttemptRow }) {
         </View>
       ))}
       <Text style={styles.sectionTitle}>Communication Style</Text>
-      {attempt.communication_style_error ? (
+      {stylePipelineErrorDisplay ? (
         <View style={[styles.block, { borderLeftWidth: 3, borderLeftColor: '#E87A7A', paddingLeft: 10 }]}>
           <Text style={[styles.blockTitle, { color: '#B33A3A' }]}>Style pipeline error (stored on attempt)</Text>
-          <Text style={styles.blockText}>{attempt.communication_style_error}</Text>
+          <Text style={styles.blockText}>{stylePipelineErrorDisplay}</Text>
         </View>
       ) : null}
       <View style={styles.block}>

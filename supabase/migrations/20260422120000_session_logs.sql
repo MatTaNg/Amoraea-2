@@ -21,6 +21,9 @@ CREATE INDEX IF NOT EXISTS idx_session_logs_platform ON public.session_logs(plat
 
 ALTER TABLE public.session_logs ENABLE ROW LEVEL SECURITY;
 
+DROP POLICY IF EXISTS "session_logs_insert_own" ON public.session_logs;
+DROP POLICY IF EXISTS "session_logs_select_own" ON public.session_logs;
+
 CREATE POLICY "session_logs_insert_own"
   ON public.session_logs
   FOR INSERT

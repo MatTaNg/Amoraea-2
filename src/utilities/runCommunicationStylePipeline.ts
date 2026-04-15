@@ -7,6 +7,22 @@ import { remoteLog } from '@utilities/remoteLog';
 import { logCommunicationStylePipelineOutcome } from '@utilities/sessionLogging/sessionLogInterview';
 import type { SessionPlatform } from '@utilities/sessionLogging/writeSessionLog';
 
+/** Prefer server JSON `{ error: string }` over the generic invoke message ("non-2xx status code"). */
+export function formatEdgeFunctionInvokeFailure(
+  label: string,
+  result: { error: { message: string } | null; data: unknown }
+): string {
+  if (!result.error) return '';
+  const d = result.data;
+  if (d && typeof d === 'object' && d !== null && 'error' in d) {
+    const e = (d as { error: unknown }).error;
+    if (typeof e === 'string' && e.trim()) {
+      return `${label}: ${e.trim()}`;
+    }
+  }
+  return `${label}: ${result.error.message}`;
+}
+
 /** Browser CORS on preflight often means the gateway returned non-2xx (e.g. 404 if the function is not deployed). */
 function warnIfEdgeFunctionsProbablyMissing(errs: string[]): void {
   const joined = errs.join(' ');
@@ -63,7 +79,7 @@ export async function runCommunicationStylePipelineAfterSave(
       body: { user_id: uid, attempt_id: attemptId },
     });
     if (textResult.error) {
-      errs.push(`analyze-interview-text: ${textResult.error.message}`);
+      errs.push(formatEdgeFunctionInvokeFailure('analyze-interview-text', textResult));
     } else {
       const body = textResult.data as { ok?: boolean; error?: string; partial?: boolean; reason?: string } | null;
       if (body && typeof body === 'object') {
@@ -106,7 +122,7 @@ export async function runCommunicationStylePipelineAfterSave(
       },
     });
     if (audioResult.error) {
-      errs.push(`analyze-interview-audio: ${audioResult.error.message}`);
+      errs.push(formatEdgeFunctionInvokeFailure('analyze-interview-audio', audioResult));
     } else {
       const body = audioResult.data as {
         error?: string;
