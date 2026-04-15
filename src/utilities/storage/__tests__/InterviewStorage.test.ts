@@ -37,6 +37,21 @@ describe('InterviewStorage', () => {
     expect(loaded!.messages).toEqual([{ role: 'user', content: 'hi' }]);
   });
 
+  it('round-trips pendingCompletion flag (post-interview refresh / scoring resume)', async () => {
+    await saveInterviewToStorage('user-2', {
+      messages: [
+        { role: 'user', content: 'a' },
+        { role: 'assistant', content: 'b' },
+      ],
+      scenariosCompleted: [],
+      scenarioScores: {},
+      currentScenario: 1,
+      pendingCompletion: true,
+    });
+    const loaded = await loadInterviewFromStorage('user-2');
+    expect(loaded?.pendingCompletion).toBe(true);
+  });
+
   it('loadInterviewFromStorage returns null for wrong version', async () => {
     const key = getStorageKey('user-1');
     const bad: StoredInterviewData = {

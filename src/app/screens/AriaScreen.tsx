@@ -4092,14 +4092,23 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
         maxMs: 600_000,
         intervalMs: 600,
       });
-      if (cancelled || !ok) return;
+      if (cancelled) return;
+      if (!ok) {
+        await remoteLog('[WARN] pending_scoring_sync_poll_exhausted', {
+          attemptId: id,
+          action: 'advance_anyway',
+        });
+      }
       setPendingScoringSyncAttemptId(null);
       setAnalysisAttemptId(id);
       await runCommunicationStylePipelineAfterSave(userId, id, interviewSessionIdRef.current, {
         platform: getSessionLogRuntime().platform,
       });
       setInterviewStatus('congratulations');
-      await remoteLog('[8] setInterviewStatus called', { screen: 'congratulations', via: 'pending_scoring_sync' });
+      await remoteLog('[8] setInterviewStatus called', {
+        screen: 'congratulations',
+        via: ok ? 'pending_scoring_sync' : 'pending_scoring_sync_timeout',
+      });
     })();
     return () => {
       cancelled = true;
@@ -8397,11 +8406,28 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
               await remoteLog('[8] setInterviewStatus called', { screen: 'congratulations' });
               if (__DEV__) console.log('=== [8] Navigation complete ===');
             } else {
-              setPendingScoringSyncAttemptId(attemptId);
-              await remoteLog('[WARN] Attempt row scoring fields not confirmed after extended wait — background sync', {
+              await remoteLog('[WARN] Attempt row scoring fields not confirmed after extended wait — advancing anyway', {
                 attemptId,
               });
-              console.warn('[Aria] Staying on preparing_results until scoring row is readable', { attemptId });
+              if (__DEV__) {
+                console.warn('[Aria] Scoring row poll inconclusive; leaving preparing_results → congratulations', {
+                  attemptId,
+                });
+              }
+              setPendingScoringSyncAttemptId(null);
+              setAnalysisAttemptId(attemptId);
+              await remoteLog('[6] setAnalysisAttemptId called', { id: attemptId, via: 'scoring_ready_fallback' });
+              interviewJustCompletedInSession = true;
+              await new Promise((resolve) => setTimeout(resolve, 100));
+              writeSessionLog({
+                userId,
+                attemptId,
+                eventType: 'session_complete',
+                eventData: { session_correlation_id: interviewSessionIdRef.current, via: 'scoring_ready_fallback' },
+                platform: getSessionLogRuntime().platform,
+              });
+              setInterviewStatus('congratulations');
+              await remoteLog('[8] setInterviewStatus called', { screen: 'congratulations', via: 'scoring_ready_fallback' });
             }
           } else {
             await remoteLog('[ERROR] Alpha save missing attempt id after insert', {});

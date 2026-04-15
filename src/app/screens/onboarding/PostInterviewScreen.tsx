@@ -26,6 +26,10 @@ import {
 
 const BG = '#0a0a0f';
 const ACCENT = '#3b82f6';
+/** Success callout for launch-notification confirmation (readable on dark BG). */
+const LAUNCH_CONFIRM_TEXT = '#86efac';
+const LAUNCH_CONFIRM_BORDER = 'rgba(74, 222, 128, 0.38)';
+const LAUNCH_CONFIRM_BG = 'rgba(34, 197, 94, 0.14)';
 const GLASS_BG = 'rgba(255,255,255,0.06)';
 const GLASS_BORDER = 'rgba(255,255,255,0.12)';
 
@@ -168,6 +172,8 @@ export const PostInterviewScreen: React.FC<{ navigation: any; route: { params: {
   const [copyFeedback, setCopyFeedback] = useState(false);
   const [showPostInterviewRetake, setShowPostInterviewRetake] = useState(false);
   const [retakeBusy, setRetakeBusy] = useState(false);
+  /** False until `users` launch-notification fields are read — avoids flashing the phone field then the confirmation. */
+  const [launchContactPrefsLoaded, setLaunchContactPrefsLoaded] = useState(false);
 
   useEffect(() => {
     loadWebFontsOnce();
@@ -176,18 +182,41 @@ export const PostInterviewScreen: React.FC<{ navigation: any; route: { params: {
   useEffect(() => {
     let cancelled = false;
     (async () => {
-      const { data: auth } = await supabase.auth.getUser();
-      const uid = auth.user?.id ?? userId;
-      if (!uid) return;
-      const meta = auth.user?.user_metadata as { referral_code?: string } | undefined;
-      if (!cancelled) setShowPostInterviewRetake(isQaRetakeSignupCode(meta?.referral_code));
-      const [{ data: codeRow }, { data: userRow }] = await Promise.all([
-        supabase.from('referral_codes').select('code').eq('referrer_user_id', uid).maybeSingle(),
-        supabase.from('users').select('referral_notice_pending').eq('id', uid).maybeSingle(),
-      ]);
-      if (cancelled) return;
-      setMyReferralCode(codeRow?.code ?? null);
-      setReferralNotice(userRow?.referral_notice_pending ?? null);
+      try {
+        const { data: auth } = await supabase.auth.getUser();
+        const uid = auth.user?.id ?? userId;
+        if (!uid) return;
+        const meta = auth.user?.user_metadata as { referral_code?: string } | undefined;
+        if (!cancelled) setShowPostInterviewRetake(isQaRetakeSignupCode(meta?.referral_code));
+        const [{ data: codeRow }, { data: userRow }] = await Promise.all([
+          supabase.from('referral_codes').select('code').eq('referrer_user_id', uid).maybeSingle(),
+          supabase
+            .from('users')
+            .select('referral_notice_pending, launch_notification_phone, launch_notification_submitted_at')
+            .eq('id', uid)
+            .maybeSingle(),
+        ]);
+        if (cancelled) return;
+        setMyReferralCode(codeRow?.code ?? null);
+        setReferralNotice(userRow?.referral_notice_pending ?? null);
+        const storedPhone =
+          typeof userRow?.launch_notification_phone === 'string'
+            ? userRow.launch_notification_phone.trim()
+            : '';
+        const submittedAt =
+          typeof userRow?.launch_notification_submitted_at === 'string'
+            ? userRow.launch_notification_submitted_at.trim()
+            : '';
+        if (storedPhone.length > 0) {
+          setSubmitted(true);
+          setSavedPhone(true);
+        } else if (submittedAt.length > 0) {
+          setSubmitted(true);
+          setSavedPhone(false);
+        }
+      } finally {
+        if (!cancelled) setLaunchContactPrefsLoaded(true);
+      }
     })();
     return () => {
       cancelled = true;
@@ -231,16 +260,7 @@ export const PostInterviewScreen: React.FC<{ navigation: any; route: { params: {
     ]);
   };
 
-  /** Email-only path: no phone validation; shows the email confirmation message. */
-  const onEmailOnly = () => {
-    setFieldError(null);
-    setSaveError(false);
-    setSaveErrorDetail(null);
-    setSavedPhone(false);
-    setSubmitted(true);
-  };
-
-  /** Validate + save phone; empty field shows inline error (must use Email only or enter digits). */
+  /** Validate + save phone to `users.launch_notification_phone`. Omitting SMS is fine — sign-in email is used for updates. */
   const onSavePhone = async () => {
     const trimmed = phone.trim();
     setFieldError(null);
@@ -248,7 +268,7 @@ export const PostInterviewScreen: React.FC<{ navigation: any; route: { params: {
     setSaveErrorDetail(null);
 
     if (!trimmed) {
-      setFieldError('Enter a valid phone number, or tap Email only below.');
+      setFieldError('Enter a valid phone number to save SMS updates.');
       return;
     }
 
@@ -387,7 +407,8 @@ export const PostInterviewScreen: React.FC<{ navigation: any; route: { params: {
             We will email you once your application has been reviewed or when the app goes live!
           </Text>
           <Text style={styles.staySub}>
-            If you would like us to text you instead, enter your number here.
+            If you would like SMS updates, enter your number below and tap Save. Otherwise we&apos;ll use your sign-in
+            email for launch and review news.
           </Text>
 
           {saveError ? (
@@ -401,12 +422,18 @@ export const PostInterviewScreen: React.FC<{ navigation: any; route: { params: {
             </View>
           ) : null}
 
-          {submitted ? (
-            <Text style={styles.confirm}>
-              {savedPhone
-                ? "You're all set, we'll text you when the app is close to launch!"
-                : "You're all set — we'll email you at the address you used to sign in when there's news."}
-            </Text>
+          {!launchContactPrefsLoaded ? (
+            <View style={styles.launchPrefsPlaceholder} accessibilityLabel="Loading">
+              <ActivityIndicator color={ACCENT} />
+            </View>
+          ) : submitted ? (
+            <View style={styles.confirmBox}>
+              <Text style={styles.confirm}>
+                {savedPhone
+                  ? "You're all set, we'll text you when the app is close to launch!"
+                  : "You're all set — we'll email you at the address you used to sign in when there's news."}
+              </Text>
+            </View>
           ) : (
             <>
               <TextInput
@@ -432,15 +459,13 @@ export const PostInterviewScreen: React.FC<{ navigation: any; route: { params: {
               >
                 <Text style={styles.buttonLabel}>{submitting ? '…' : 'Save my number'}</Text>
               </Pressable>
-              <Pressable
-                onPress={onEmailOnly}
-                disabled={submitting}
-                style={({ pressed }) => [styles.emailOnlyBtn, pressed && { opacity: 0.88 }]}
-              >
-                <Text style={styles.emailOnlyLabel}>Email only — no SMS updates</Text>
-              </Pressable>
             </>
           )}
+
+          <View style={styles.privacyRow}>
+            <Ionicons name="lock-closed-outline" size={14} color="rgba(255,255,255,0.45)" />
+            <Text style={styles.privacy}>Your number is private. No spam. No sharing. Ever.</Text>
+          </View>
 
           {myReferralCode ? (
             <View style={styles.referFriendSection}>
@@ -463,11 +488,6 @@ export const PostInterviewScreen: React.FC<{ navigation: any; route: { params: {
               </View>
             </View>
           ) : null}
-
-          <View style={styles.privacyRow}>
-            <Ionicons name="lock-closed-outline" size={14} color="rgba(255,255,255,0.45)" />
-            <Text style={styles.privacy}>Your number is private. No spam. No sharing. Ever.</Text>
-          </View>
         </View>
 
         {showPostInterviewRetake ? (
@@ -642,24 +662,22 @@ const styles = StyleSheet.create({
     fontWeight: '600',
     color: '#fff',
   },
-  emailOnlyBtn: {
-    paddingVertical: 10,
-    alignItems: 'center',
-    marginBottom: 4,
-  },
-  emailOnlyLabel: {
-    fontFamily: FONT_BODY,
-    fontSize: 14,
-    fontWeight: '500',
-    color: 'rgba(147,197,253,0.95)',
-    textDecorationLine: 'underline',
+  confirmBox: {
+    width: '100%',
+    backgroundColor: LAUNCH_CONFIRM_BG,
+    borderWidth: 1,
+    borderColor: LAUNCH_CONFIRM_BORDER,
+    borderRadius: 12,
+    paddingVertical: 14,
+    paddingHorizontal: 16,
+    marginBottom: 16,
   },
   confirm: {
     fontFamily: FONT_BODY,
-    fontSize: 15,
-    lineHeight: 22,
-    color: 'rgba(255,255,255,0.9)',
-    marginBottom: 16,
+    fontSize: 16,
+    lineHeight: 24,
+    fontWeight: '600',
+    color: LAUNCH_CONFIRM_TEXT,
   },
   saveErr: {
     fontFamily: FONT_BODY,
@@ -677,10 +695,19 @@ const styles = StyleSheet.create({
     lineHeight: 16,
     color: 'rgba(248,113,113,0.85)',
   },
+  launchPrefsPlaceholder: {
+    width: '100%',
+    minHeight: 140,
+    justifyContent: 'center',
+    alignItems: 'center',
+    paddingVertical: 24,
+  },
   privacyRow: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 8,
+    marginTop: 14,
+    width: '100%',
   },
   privacy: {
     flex: 1,

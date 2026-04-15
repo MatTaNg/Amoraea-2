@@ -36,15 +36,21 @@ function scenarioScoresMeaningful(raw: unknown): boolean {
   return Object.keys(inner as object).length > 0;
 }
 
+/** Inserts use `null` when a scenario slice was missing; those rows must not block readiness forever. */
+function scenarioScoresMeaningfulOrAbsent(raw: unknown): boolean {
+  if (raw == null) return true;
+  return scenarioScoresMeaningful(raw);
+}
+
 function rowHasFullScoringPayload(row: AttemptScoringRow | null | undefined): boolean {
   if (!row) return false;
   if (row.completed_at == null || row.completed_at === '') return false;
   const w = row.weighted_score;
   if (w != null && !Number.isFinite(Number(w))) return false;
   if (!pillarScoresMeaningful(row.pillar_scores)) return false;
-  if (!scenarioScoresMeaningful(row.scenario_1_scores)) return false;
-  if (!scenarioScoresMeaningful(row.scenario_2_scores)) return false;
-  if (!scenarioScoresMeaningful(row.scenario_3_scores)) return false;
+  if (!scenarioScoresMeaningfulOrAbsent(row.scenario_1_scores)) return false;
+  if (!scenarioScoresMeaningfulOrAbsent(row.scenario_2_scores)) return false;
+  if (!scenarioScoresMeaningfulOrAbsent(row.scenario_3_scores)) return false;
   return true;
 }
 
