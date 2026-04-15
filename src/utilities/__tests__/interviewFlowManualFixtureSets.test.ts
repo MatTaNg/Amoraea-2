@@ -61,7 +61,7 @@ const SET1_USER_TURNS = [
 const SET2_USER_TURNS = [
   "Oh, Emma is hurting. That 'you've made that very clear' — there's so much pain packed into that line.",
   'This one actually made me a little sad. Sarah was so excited — called from the street — and then spent the evening feeling invisible.',
-  "When Daniel came back I felt something shift. There's something so vulnerable about 'I didn't know how'.",
+  "When Daniel came back I felt something shift. There's something so vulnerable about 'I didn't know what to say'.",
   'Yeah, I held a grudge against my sister for almost a year after she said something that cut really deep at a family dinner. I was devastated. I cried about it for days.',
   "My partner got a promotion they'd been working toward for two years. I cried when they told me — happy tears, just so proud.",
 ];

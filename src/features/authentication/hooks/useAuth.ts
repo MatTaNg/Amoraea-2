@@ -44,6 +44,10 @@ export const useAuth = () => {
   const [session, setSession] = useState<Session | null>(null);
   const [user, setUser] = useState<User | null>(null);
   const [loading, setLoading] = useState(true);
+  const authEmailRedirectTo =
+    process.env.NODE_ENV === 'development'
+      ? process.env.EXPO_PUBLIC_AUTH_REDIRECT_URL_DEV?.trim() || 'http://localhost:3000/auth/callback'
+      : process.env.EXPO_PUBLIC_AUTH_REDIRECT_URL?.trim() || 'https://www.amoraea.com/auth/callback';
 
   useEffect(() => {
     let cancelled = false;
@@ -85,10 +89,7 @@ export const useAuth = () => {
       password,
       options: {
         data: options?.inviteCode ? { referral_code: options.inviteCode.trim() } : undefined,
-        emailRedirectTo:
-          typeof window !== 'undefined' && window.location?.origin
-            ? `${window.location.origin}`
-            : undefined,
+        emailRedirectTo: authEmailRedirectTo,
       },
     });
     if (error) throw error;

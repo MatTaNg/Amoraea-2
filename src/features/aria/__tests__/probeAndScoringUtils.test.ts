@@ -99,7 +99,7 @@ describe('probeAndScoringUtils', () => {
     ).toBe(false);
     expect(
       isScenarioCRepairAssistantPrompt(
-        'When Daniel comes back and says "I didn\'t know how" — what do you make of that?'
+        'When Daniel comes back and says "I didn\'t know what to say" — what do you make of that?'
       )
     ).toBe(false);
   });

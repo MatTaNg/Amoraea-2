@@ -1078,6 +1078,21 @@ export function tryPlayPendingWebTtsAudioInUserGesture(
 ): boolean {
   const telemetrySource = telemetry?.source ?? 'other';
   if (Platform.OS !== 'web' || typeof window === 'undefined' || !pendingWebGestureBlobUrl) return false;
+  // #region agent log
+  fetch('http://127.0.0.1:7789/ingest/668e0bd5-3283-4492-9f48-e33846c18218', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'X-Debug-Session-Id': 'c61a43' },
+    body: JSON.stringify({
+      sessionId: 'c61a43',
+      hypothesisId: 'H4',
+      location: 'elevenLabsTts.ts:tryPlayPendingWebTtsAudioInUserGesture',
+      message: 'pending_elevenlabs_blob_flush',
+      data: { telemetrySource },
+      timestamp: Date.now(),
+      runId: 'pre-fix',
+    }),
+  }).catch(() => {});
+  // #endregion
   const url = pendingWebGestureBlobUrl;
   pendingWebGestureBlobUrl = null;
   const AudioCtor = typeof (globalThis as unknown as { Audio?: new (src?: string) => HTMLAudioElement }).Audio !== 'undefined'

@@ -9,7 +9,7 @@ import { remoteLog } from '@utilities/remoteLog';
 export const TTS_AUTOPLAY_MESSAGE = '[TTS_AUTOPLAY]';
 export const TTS_AUTOPLAY_MIC_STOP_MESSAGE = '[TTS_AUTOPLAY_MIC_STOP]';
 
-export type TtsTelemetrySource = 'greeting' | 'turn' | 'other';
+export type TtsTelemetrySource = 'greeting' | 'turn' | 'replay' | 'other';
 
 export type TtsAutoplayPipeline =
   | 'elevenlabs_web_html_audio'

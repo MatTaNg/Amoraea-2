@@ -590,7 +590,7 @@ function detectScenarioFromResponse(responseText: string): 1 | 2 | 3 | null {
   const c = responseText.toLowerCase();
   if (/emma and ryan|ryan takes a call|first situation|here's the first/.test(c)) return 1;
   if (/sarah has been job hunting|second situation|on to the second|here's the next situation/.test(c)) return 2;
-  if (/sophie and daniel|daniel.*didn't know how|here's the third situation|third situation|last one.*situation three|situation three/.test(c)) return 3;
+  if (/sophie and daniel|daniel.*didn't know what to say|daniel.*didn't know how|here's the third situation|third situation|last one.*situation three|situation three/.test(c)) return 3;
   return null;
 }
 
@@ -880,7 +880,7 @@ function looksLikeAssistantSkipsScenarioBJamesIntermediateQuestion(text: string)
   if (/\[scenario_complete:2\]/i.test(text)) return true;
   return (
     t.includes('sophie and daniel') ||
-    (t.includes("i didn't know how") && t.includes('sophie')) ||
+    ((t.includes("i didn't know what to say") || t.includes("i didn't know how")) && t.includes('sophie')) ||
     (t.includes('third situation') && t.includes('sophie')) ||
     (t.includes("here's the third situation") && t.includes('personal'))
   );
@@ -2045,8 +2045,8 @@ function ensureScenario2BundleWhenOpeningWithoutVignette(text: string, interview
 
 const SCENARIO_3_LABEL = 'Situation 3';
 const SCENARIO_3_VIGNETTE =
-  "Sophie and Daniel have had the same argument for the third time. Sophie feels unheard because Daniel goes silent or leaves, so the issue is never resolved. This time Sophie says 'we need to finish this.' Daniel tries to avoid the conversation again. Sophie says 'you can't just keep avoiding this.' Daniel's voice goes flat. He says 'I need ten minutes' and leaves. Sophie calls after him: 'that's exactly what I mean.' Thirty minutes later Daniel comes back and says 'okay, I'm ready. I should have come back sooner the other times. I didn't know how.' Sophie is still upset.";
-const SCENARIO_3_OPENING = "When Daniel comes back and says 'I didn't know how' — what do you make of that?";
+  "Sophie and Daniel have had the same argument for the third time. Sophie feels unheard because Daniel goes silent or leaves, so the issue is never resolved. This time Sophie says 'we need to finish this.' Daniel tries to avoid the conversation again. Sophie says 'you can't just keep avoiding this.' Daniel's voice goes flat. He says 'I need ten minutes' and leaves. Sophie calls after him: 'that's exactly what I mean.' Thirty minutes later Daniel comes back and says 'okay, I'm ready. I should have come back sooner the other times. I didn't know what to say.' Sophie is still upset.";
+const SCENARIO_3_OPENING = "When Daniel comes back and says 'I didn't know what to say' — what do you make of that?";
 const SCENARIO_3_TEXT = `${SCENARIO_3_VIGNETTE}\n\n${SCENARIO_3_OPENING}`;
 
 function textContainsScenarioCVignetteBody(text: string): boolean {
@@ -2055,7 +2055,8 @@ function textContainsScenarioCVignetteBody(text: string): boolean {
   return (
     /\bsophie and daniel\b/.test(t) &&
     /i need ten minutes/.test(t) &&
-    (/i didn'?t know how|did not know how/.test(t) || /\bstill upset\b/.test(t))
+    (/i didn'?t know what to say|did not know what to say|i didn'?t know how|did not know how/.test(t) ||
+      /\bstill upset\b/.test(t))
   );
 }
 
@@ -2129,7 +2130,7 @@ const SCENARIO_C_MISPLACED_THRESHOLD_REDIRECT =
 const SCENARIO_C_COMMITMENT_THRESHOLD_QUESTION =
   "At what point would you say Daniel or Sophie should decide this relationship isn't working?";
 const SCENARIO_C_MISPLACED_Q1_REDIRECT =
-  "I was asking specifically about what you make of Daniel saying 'I didn't know how', what does that line tell you about where he's at?";
+  "I was asking specifically about what you make of Daniel saying 'I didn't know what to say', what does that line tell you about where he's at?";
 
 const MOMENT_4_PERSONAL_LABEL = 'Personal reflection';
 const MOMENT_4_PERSONAL_CARD =
@@ -2184,7 +2185,7 @@ function detectActiveScenarioFromMessage(content: string): ActiveScenario | null
   if (
     c.includes('Sophie and Daniel') ||
     (c.includes('Daniel') && c.includes('I need ten minutes')) ||
-    (c.includes('Sophie') && c.includes("didn't know how"))
+    (c.includes('Sophie') && (c.includes("didn't know what to say") || c.includes("didn't know how")))
   ) {
     return { label: SCENARIO_3_LABEL, text: SCENARIO_3_VIGNETTE };
   }
@@ -2270,8 +2271,9 @@ function syncReferenceCardStateFromAssistantMessages(
   if (lastIdx > anchorIdx) {
     for (let i = lastIdx; i > anchorIdx; i--) {
       const raw = stripControlTokens(assistantMessages[i].content ?? '').trim();
+      if (isResumeOrScenarioReplayUiPrompt(raw)) continue;
       const q = extractModalQuestionFromAssistantText(raw);
-      if (q) {
+      if (q && !isResumeOrScenarioReplayUiPrompt(q)) {
         prompt = q;
         break;
       }
@@ -3262,6 +3264,17 @@ function detectConstructs(text: string): number[] {
   return [...hits];
 }
 
+/** Resume / replay helper lines — must not appear as reference-card modal text or repeat target. */
+function isResumeOrScenarioReplayUiPrompt(content: string): boolean {
+  const t = content.trim().toLowerCase();
+  if (!t) return false;
+  return (
+    /\b(would it help to (hear|repeat|go over)\s+(the\s+)?scenario\s+again)\b/.test(t) ||
+    /\b(would you like me to repeat|if you'd like me to repeat what i said)\b/.test(t) ||
+    /\b(i can repeat it or continue|feel free to respond whenever you're ready)\b/.test(t)
+  );
+}
+
 /** Returns the last real assistant message before the session ended, excluding score cards (for resume welcome). */
 function extractLastInterviewerMessage(messages: Array<{ role: string; content: string; isScoreCard?: boolean; isWelcomeBack?: boolean }> | null): string | null {
   if (!messages || messages.length === 0) return null;
@@ -3270,9 +3283,63 @@ function extractLastInterviewerMessage(messages: Array<{ role: string; content: 
     .reverse();
   for (const msg of assistantMessages) {
     const content = (msg.content ?? '').trim();
-    if (content) return content;
+    if (!content) continue;
+    if (isResumeOrScenarioReplayUiPrompt(content)) continue;
+    return content;
   }
   return null;
+}
+
+/** After re-entry prompt: user wants verbatim replay vs continue without replay. Ambiguous → repeat (more context). */
+function classifyResumeRepeatIntent(text: string): 'repeat' | 'continue' | 'ambiguous' {
+  const t = text.trim().toLowerCase();
+  if (!t) return 'ambiguous';
+  const repeatHints =
+    /\b(yes|yeah|yep|sure|please|ok|okay|repeat|again|say it|remind|recap|tell me (again|one more)|what you (just )?said|last said|re-?say|replay|hear (it |that )?again)\b/;
+  const continueHints =
+    /\b(no|nope|nah|continue|skip|i'?m good|(i am|we'?re) good|ready|go on|let'?s (go|continue)|keep going|don'?t|dont need|no thanks|i remember|we can continue|move on|next)\b/;
+  const wantsRepeat = repeatHints.test(t);
+  const wantsContinue = continueHints.test(t);
+  if (wantsRepeat && wantsContinue) return 'ambiguous';
+  if (wantsRepeat) return 'repeat';
+  if (wantsContinue) return 'continue';
+  return 'ambiguous';
+}
+
+function looksLikeRepeatCueInAmbiguousReply(text: string): boolean {
+  const t = text.trim().toLowerCase();
+  if (!t) return false;
+  return /\b(said|you said|what you said|say that|said that|again)\b/.test(t);
+}
+
+function looksLikeDirectResumeAnswer(userText: string, lastQuestionText: string | null): boolean {
+  const t = userText.trim();
+  if (!t) return false;
+  const lowered = t.toLowerCase();
+  const words = lowered.split(/\s+/).filter(Boolean);
+  if (words.length < 6) return false;
+  const metaOnly =
+    /\b(repeat|again|continue|ready|i'?m good|im good|no thanks|yes please|say that again|what did you say)\b/i;
+  if (metaOnly.test(lowered)) return false;
+  const hasAnswerShape =
+    /\b(i|we|he|she|they|because|would|should|could|if|when|then|feel|felt|think|believe|probably|maybe)\b/i.test(
+      lowered
+    );
+  if (!hasAnswerShape) return false;
+  const lastQ = (lastQuestionText ?? '').toLowerCase().trim();
+  if (!lastQ) return words.length >= 8;
+  const stop = new Set([
+    'what', 'when', 'where', 'which', 'would', 'could', 'should', 'have', 'from', 'with', 'that', 'this', 'your',
+    'their', 'about', 'into', 'just', 'then', 'than', 'them', 'they', 'been', 'were', 'because', 'there', 'after',
+    'before', 'while', 'ready', 'continue', 'repeat', 'said', 'last', 'like', 'does', 'did', 'feel', 'felt',
+  ]);
+  const qTokens = lastQ
+    .replace(/[^a-z0-9\s]/g, ' ')
+    .split(/\s+/)
+    .filter((w) => w.length >= 4 && !stop.has(w));
+  if (qTokens.length === 0) return words.length >= 8;
+  const overlap = qTokens.filter((w) => lowered.includes(w)).length;
+  return overlap >= 1;
 }
 
 type VoiceState = 'idle' | 'listening' | 'processing' | 'speaking' | 'recording';
@@ -3359,6 +3426,21 @@ function readStoredPendingGestureTts(): string | null {
 function setPendingWebSpeechGesturePair(ref: React.MutableRefObject<string | null>, text: string) {
   ref.current = text;
   pendingWebSpeechForGestureModule = text;
+  // #region agent log
+  fetch('http://127.0.0.1:7789/ingest/668e0bd5-3283-4492-9f48-e33846c18218', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'X-Debug-Session-Id': 'c61a43' },
+    body: JSON.stringify({
+      sessionId: 'c61a43',
+      hypothesisId: 'H3',
+      location: 'AriaScreen.tsx:setPendingWebSpeechGesturePair',
+      message: 'pending_gesture_tts_queued',
+      data: { pendingLen: text.length, pendingPreview: text.slice(0, 140) },
+      timestamp: Date.now(),
+      runId: 'pre-fix',
+    }),
+  }).catch(() => {});
+  // #endregion
   try {
     if (typeof sessionStorage !== 'undefined') sessionStorage.setItem(WEB_GESTURE_TTS_STORAGE_KEY, text);
   } catch {
@@ -3542,7 +3624,12 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
   const turnAudioIndexRef = useRef(0);
   const [networkStatus, setNetworkStatus] = useState<'checking' | 'good' | 'poor'>('checking');
 
+  const resumeRepeatChoicePendingRef = useRef(false);
+  const resumeLastAssistantTextRef = useRef<string | null>(null);
+
   const resetInterviewProgressRefs = useCallback(() => {
+    resumeRepeatChoicePendingRef.current = false;
+    resumeLastAssistantTextRef.current = null;
     interviewMomentsCompleteRef.current = createInitialMomentCompletion();
     currentInterviewMomentRef.current = 1;
     personalHandoffInjectedRef.current = false;
@@ -4134,15 +4221,20 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
       setInterviewUiPhase('scenario_active');
     } else if (committedScenarioRef.current) {
       const q = extractModalQuestionFromAssistantText(cleaned);
-      if (q !== null) {
+      if (q !== null && !isResumeOrScenarioReplayUiPrompt(q)) {
         setReferenceCardPrompt(q);
       }
     }
   }, []);
 
-  const speak = useCallback(async (text: string, speakOpts?: { telemetrySource?: TtsTelemetrySource }) => {
+  const speak = useCallback(async (
+    text: string,
+    speakOpts?: { telemetrySource?: TtsTelemetrySource; skipQuestionTiming?: boolean; skipLastQuestionRef?: boolean }
+  ) => {
     await stopElevenLabsPlayback();
-    lastQuestionTextRef.current = text;
+    if (!speakOpts?.skipLastQuestionRef) {
+      lastQuestionTextRef.current = text;
+    }
     // Keep "processing" until audio is actually audible — avoids large flame + "Speaking..." during fetch / autoplay wait.
     setVoiceState('processing');
     isSpeakingRef.current = true;
@@ -4164,8 +4256,10 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
       throw speakErr;
     } finally {
       isSpeakingRef.current = false;
-      timingRef.current.questionEndTime = Date.now();
-      markQuestionDelivered(new Date().toISOString());
+      if (!speakOpts?.skipQuestionTiming) {
+        timingRef.current.questionEndTime = Date.now();
+        markQuestionDelivered(new Date().toISOString());
+      }
       setVoiceState('idle');
     }
   }, []);
@@ -4215,6 +4309,21 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
     }).catch(() => {});
     // #endregion
     if (tryPlayed) {
+      // #region agent log
+      fetch('http://127.0.0.1:7789/ingest/668e0bd5-3283-4492-9f48-e33846c18218', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'X-Debug-Session-Id': 'c61a43' },
+        body: JSON.stringify({
+          sessionId: 'c61a43',
+          hypothesisId: 'H4',
+          location: 'AriaScreen.tsx:runWebGestureTtsFlush',
+          message: 'flush_played_pending_blob',
+          data: { debugSource: debugSource ?? 'unknown' },
+          timestamp: Date.now(),
+          runId: 'pre-fix',
+        }),
+      }).catch(() => {});
+      // #endregion
       setWebDesktopPendingTtsGestureOverlay(false);
       webGestureTtsConsumedPressRef.current = true;
       if (webGestureConsumeClearTimeoutRef.current) {
@@ -4245,6 +4354,21 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
       webGestureConsumeClearTimeoutRef.current = null;
       webGestureTtsConsumedPressRef.current = false;
     }, 1800);
+    // #region agent log
+    fetch('http://127.0.0.1:7789/ingest/668e0bd5-3283-4492-9f48-e33846c18218', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'X-Debug-Session-Id': 'c61a43' },
+      body: JSON.stringify({
+        sessionId: 'c61a43',
+        hypothesisId: 'H3',
+        location: 'AriaScreen.tsx:runWebGestureTtsFlush',
+        message: 'flush_web_speech_text',
+        data: { flushPreview: t.slice(0, 140), flushLen: t.length, debugSource: debugSource ?? 'unknown' },
+        timestamp: Date.now(),
+        runId: 'pre-fix',
+      }),
+    }).catch(() => {});
+    // #endregion
     trySpeakWebSpeechInUserGesture(t, () => {});
     setWebDesktopPendingTtsGestureOverlay(false);
   }, []);
@@ -4337,9 +4461,25 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
         silent?: boolean;
         interviewSpeechRole?: 'assistant_response';
         telemetrySource?: TtsTelemetrySource;
+        /** Skip question_delivered session log (e.g. verbatim resume replay). */
+        skipQuestionDeliveredTelemetry?: boolean;
+        /** Do not advance reference-card state from this line. */
+        skipInterviewSpeechAdvance?: boolean;
+        /** Do not update question-end timing / markQuestionDelivered (replay is not a new question). */
+        skipQuestionTiming?: boolean;
+        /** Do not overwrite lastQuestionTextRef (replay is not the active question). */
+        skipLastQuestionRef?: boolean;
       } = {}
     ) => {
-      const { silent = false, interviewSpeechRole, telemetrySource: telemetrySourceOpt } = options;
+      const {
+        silent = false,
+        interviewSpeechRole,
+        telemetrySource: telemetrySourceOpt,
+        skipQuestionDeliveredTelemetry = false,
+        skipInterviewSpeechAdvance = false,
+        skipQuestionTiming = false,
+        skipLastQuestionRef = false,
+      } = options;
       const telemetrySource =
         telemetrySourceOpt ?? (interviewSpeechRole === 'assistant_response' ? 'turn' : 'other');
       const markIntro =
@@ -4365,13 +4505,21 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
         });
       }
       try {
-        await withRetry(() => speak(text, { telemetrySource }), {
-          retries: 1,
-          baseDelay: 3000,
-          context: 'TTS',
-          sessionLog:
-            userId ? { userId, attemptId: rt0.attemptId, platform: rt0.platform } : undefined,
-        });
+        await withRetry(
+          () =>
+            speak(text, {
+              telemetrySource,
+              skipQuestionTiming,
+              skipLastQuestionRef,
+            }),
+          {
+            retries: 1,
+            baseDelay: 3000,
+            context: 'TTS',
+            sessionLog:
+              userId ? { userId, attemptId: rt0.attemptId, platform: rt0.platform } : undefined,
+          }
+        );
         setTTSFallbackActive(false);
         if (userId) {
           const rtp = getSessionLogRuntime();
@@ -4385,7 +4533,8 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
           });
         }
         const isInterviewLine =
-          interviewSpeechRole === 'assistant_response' || telemetrySource === 'turn';
+          !skipQuestionDeliveredTelemetry &&
+          (interviewSpeechRole === 'assistant_response' || telemetrySource === 'turn');
         if (isInterviewLine && userId) {
           const rtd = getSessionLogRuntime();
           writeSessionLog({
@@ -4401,7 +4550,7 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
             platform: rtd.platform,
           });
         }
-        if (interviewSpeechRole === 'assistant_response') {
+        if (interviewSpeechRole === 'assistant_response' && !skipInterviewSpeechAdvance) {
           applyInterviewSpeechComplete(text);
         }
       } catch (err) {
@@ -4431,7 +4580,7 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
           }
           setVoiceState('idle');
           if (!silent) setTTSFallbackActive(false);
-          if (interviewSpeechRole === 'assistant_response') {
+          if (interviewSpeechRole === 'assistant_response' && !skipInterviewSpeechAdvance) {
             applyInterviewSpeechComplete(text);
           }
         } else {
@@ -4439,7 +4588,7 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
           if (!silent) setTTSFallbackActive(true);
           setVoiceState('idle');
           // Same advance as success path so reference card + SHOW SCENARIO work when user reads the line on screen.
-          if (interviewSpeechRole === 'assistant_response') {
+          if (interviewSpeechRole === 'assistant_response' && !skipInterviewSpeechAdvance) {
             applyInterviewSpeechComplete(text);
           }
         }
@@ -4771,6 +4920,168 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
       return;
     }
     const trimmed = spokenText.trim();
+    let reentryTypeForLogging: 'repeat_requested' | 'continue_requested' | 'direct_answer' | null = null;
+    // #region agent log
+    fetch('http://127.0.0.1:7789/ingest/668e0bd5-3283-4492-9f48-e33846c18218', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'X-Debug-Session-Id': 'c61a43' },
+      body: JSON.stringify({
+        sessionId: 'c61a43',
+        runId: 'pre-fix',
+        hypothesisId: 'H6',
+        location: 'AriaScreen.tsx:processUserSpeech',
+        message: 'process_user_speech_entry',
+        data: {
+          spokenText: trimmed.slice(0, 120),
+          resumeGatePending: resumeRepeatChoicePendingRef.current,
+        },
+        timestamp: Date.now(),
+      }),
+    }).catch(() => {});
+    // #endregion
+
+    if (resumeRepeatChoicePendingRef.current) {
+      // #region agent log
+      fetch('http://127.0.0.1:7789/ingest/668e0bd5-3283-4492-9f48-e33846c18218', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'X-Debug-Session-Id': 'c61a43' },
+        body: JSON.stringify({
+          sessionId: 'c61a43',
+          runId: 'pre-fix',
+          hypothesisId: 'H1',
+          location: 'AriaScreen.tsx:processUserSpeech',
+          message: 'resume_gate_entry',
+          data: {
+            spokenText: trimmed.slice(0, 120),
+            pendingBefore: true,
+            lastAssistantPreview: (resumeLastAssistantTextRef.current ?? '').slice(0, 120),
+          },
+          timestamp: Date.now(),
+        }),
+      }).catch(() => {});
+      // #endregion
+      resumeRepeatChoicePendingRef.current = false;
+      const intent = classifyResumeRepeatIntent(trimmed);
+      const directAnswer = intent === 'ambiguous' && looksLikeDirectResumeAnswer(trimmed, resumeLastAssistantTextRef.current);
+      const inferredRepeatFromAmbiguous = intent === 'ambiguous' && !directAnswer && looksLikeRepeatCueInAmbiguousReply(trimmed);
+      // #region agent log
+      fetch('http://127.0.0.1:7789/ingest/668e0bd5-3283-4492-9f48-e33846c18218', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'X-Debug-Session-Id': 'c61a43' },
+        body: JSON.stringify({
+          sessionId: 'c61a43',
+          runId: 'pre-fix',
+          hypothesisId: 'H2',
+          location: 'AriaScreen.tsx:processUserSpeech',
+          message: 'resume_gate_classification',
+          data: { intent, directAnswer, inferredRepeatFromAmbiguous },
+          timestamp: Date.now(),
+        }),
+      }).catch(() => {});
+      // #endregion
+      if (intent === 'repeat' || inferredRepeatFromAmbiguous) {
+        // #region agent log
+        fetch('http://127.0.0.1:7789/ingest/668e0bd5-3283-4492-9f48-e33846c18218', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'X-Debug-Session-Id': 'c61a43' },
+          body: JSON.stringify({
+            sessionId: 'c61a43',
+            runId: 'pre-fix',
+            hypothesisId: 'H3',
+            location: 'AriaScreen.tsx:processUserSpeech',
+            message: 'resume_gate_branch_repeat',
+            data: {},
+            timestamp: Date.now(),
+          }),
+        }).catch(() => {});
+        // #endregion
+        reentryTypeForLogging = 'repeat_requested';
+        if (userId) {
+          const r = getSessionLogRuntime();
+          const deliveredAt = r.lastQuestionDeliveredAt;
+          let latencyMs: number | null = null;
+          if (deliveredAt) {
+            const t = Date.parse(deliveredAt);
+            if (!Number.isNaN(t)) latencyMs = Math.max(0, Date.now() - t);
+          }
+          writeSessionLog({
+            userId,
+            attemptId: r.attemptId,
+            eventType: 'response_received',
+            eventData: {
+              moment_number: currentInterviewMomentRef.current,
+              word_count: countSpokenWords(trimmed),
+              response_latency_ms: latencyMs,
+              detected_language: lastVoiceTurnLanguageRef.current,
+              transcription_confidence: lastVoiceTurnConfidenceRef.current,
+              reentry_type: reentryTypeForLogging,
+            },
+            platform: r.platform,
+          });
+        }
+        const last = resumeLastAssistantTextRef.current;
+        if (last?.trim()) {
+          await speakTextSafe(stripControlTokens(last), {
+            telemetrySource: 'replay',
+            skipQuestionDeliveredTelemetry: true,
+            skipInterviewSpeechAdvance: true,
+            skipQuestionTiming: true,
+            skipLastQuestionRef: true,
+          });
+        }
+      } else if (intent === 'continue') {
+        // #region agent log
+        fetch('http://127.0.0.1:7789/ingest/668e0bd5-3283-4492-9f48-e33846c18218', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'X-Debug-Session-Id': 'c61a43' },
+          body: JSON.stringify({
+            sessionId: 'c61a43',
+            runId: 'pre-fix',
+            hypothesisId: 'H4',
+            location: 'AriaScreen.tsx:processUserSpeech',
+            message: 'resume_gate_branch_continue',
+            data: {},
+            timestamp: Date.now(),
+          }),
+        }).catch(() => {});
+        // #endregion
+        reentryTypeForLogging = 'continue_requested';
+        if (userId) {
+          const r = getSessionLogRuntime();
+          const deliveredAt = r.lastQuestionDeliveredAt;
+          let latencyMs: number | null = null;
+          if (deliveredAt) {
+            const t = Date.parse(deliveredAt);
+            if (!Number.isNaN(t)) latencyMs = Math.max(0, Date.now() - t);
+          }
+          writeSessionLog({
+            userId,
+            attemptId: r.attemptId,
+            eventType: 'response_received',
+            eventData: {
+              moment_number: currentInterviewMomentRef.current,
+              word_count: countSpokenWords(trimmed),
+              response_latency_ms: latencyMs,
+              detected_language: lastVoiceTurnLanguageRef.current,
+              transcription_confidence: lastVoiceTurnConfidenceRef.current,
+              reentry_type: reentryTypeForLogging,
+            },
+            platform: r.platform,
+          });
+        }
+        setVoiceState('idle');
+        return;
+      } else {
+        reentryTypeForLogging = 'direct_answer';
+        // Proceed through normal answer pipeline (scoring + state advance) below.
+        resumeLastAssistantTextRef.current = null;
+      }
+      if (reentryTypeForLogging !== 'direct_answer') {
+        setVoiceState('idle');
+        return;
+      }
+    }
+
     if (userId) {
       logTouchActivityForPause(
         {
@@ -4798,6 +5109,7 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
           response_latency_ms: latencyMs,
           detected_language: lastVoiceTurnLanguageRef.current,
           transcription_confidence: lastVoiceTurnConfidenceRef.current,
+          reentry_type: reentryTypeForLogging,
         },
         platform: r.platform,
       });
@@ -5771,9 +6083,12 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
       const forcedJamesDifferentlyProbe =
         'Before things blew up, what do you think James could have done differently that might have helped Sarah feel appreciated?';
       const repairStripped = stripScenarioBRepairAsJamesQuestion(strippedText).trim();
+      const sophieLeakMiddle =
+        (/i didn't know what to say/i.test(repairStripped) || /i didn't know how/i.test(repairStripped)) &&
+        /sophie/i.test(repairStripped);
       const leaksScenarioCIntoLeadIn =
         /sophie and daniel/i.test(repairStripped) ||
-        (/i didn't know how/i.test(repairStripped) && /sophie/i.test(repairStripped)) ||
+        sophieLeakMiddle ||
         /\[scenario_complete:2\]/i.test(strippedText);
       const bLeadIn = leaksScenarioCIntoLeadIn || !repairStripped ? '' : repairStripped;
       let stagedMessages = messagesToUse;
@@ -6986,10 +7301,53 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
         .flatMap((m) => detectConstructs(m.content));
       setTouchedConstructs([...new Set(allDetected)]);
 
-      const welcomeBack = "Welcome back. Let's pick up where we left off.";
+      resumeLastAssistantTextRef.current = extractLastInterviewerMessage(fullMessages);
+
+      const welcomeBack =
+        "Welcome back! Lets continue where we left off. If you'd like me to repeat what I said, let me know. Otherwise, I'm ready for your response.";
       const welcomeMsg = { role: 'assistant', content: welcomeBack, isWelcomeBack: true };
       setMessages([...fullMessages, welcomeMsg]);
-      setTimeout(() => void speakTextSafe(welcomeBack, { telemetrySource: 'greeting' }), 500);
+
+      resumeRepeatChoicePendingRef.current = false;
+      setTimeout(() => {
+        void (async () => {
+          // #region agent log
+          fetch('http://127.0.0.1:7789/ingest/668e0bd5-3283-4492-9f48-e33846c18218', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'X-Debug-Session-Id': 'c61a43' },
+            body: JSON.stringify({
+              sessionId: 'c61a43',
+              runId: 'pre-fix',
+              hypothesisId: 'H5',
+              location: 'AriaScreen.tsx:handleResume',
+              message: 'resume_prompt_speaking_start',
+              data: { pendingFlag: resumeRepeatChoicePendingRef.current },
+              timestamp: Date.now(),
+            }),
+          }).catch(() => {});
+          // #endregion
+          try {
+            await speakTextSafe(welcomeBack, { telemetrySource: 'greeting' });
+          } finally {
+            resumeRepeatChoicePendingRef.current = true;
+            // #region agent log
+            fetch('http://127.0.0.1:7789/ingest/668e0bd5-3283-4492-9f48-e33846c18218', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json', 'X-Debug-Session-Id': 'c61a43' },
+              body: JSON.stringify({
+                sessionId: 'c61a43',
+                runId: 'pre-fix',
+                hypothesisId: 'H5',
+                location: 'AriaScreen.tsx:handleResume',
+                message: 'resume_prompt_gate_enabled',
+                data: { pendingFlag: resumeRepeatChoicePendingRef.current },
+                timestamp: Date.now(),
+              }),
+            }).catch(() => {});
+            // #endregion
+          }
+        })();
+      }, 500);
 
       setStatus('active');
     },
@@ -9226,7 +9584,7 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
         >
           <Text style={styles.mobileWebTapToBeginTitle}>Click to play audio</Text>
           <Text style={styles.mobileWebTapToBeginSubtitle}>
-            Your browser needs one click to start this line of interviewer audio.
+            When you're ready, click anywhere to start!
           </Text>
         </Pressable>
       ) : null}

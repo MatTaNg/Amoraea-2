@@ -441,7 +441,7 @@ export function hasScenarioCVignetteCommitmentThresholdSignal(text: string): boo
 }
 
 /**
- * Assistant turn: Scenario C Q2 (repair) — not Q1 (make of "I didn't know how"), not commitment threshold.
+ * Assistant turn: Scenario C Q2 (repair) — not Q1 (make of Daniel's "I didn't know what to say" line), not commitment threshold.
  * Models paraphrase; keep in sync with AriaScreen `replyingToScenarioCQ2` / forced threshold injection.
  */
 export function isScenarioCRepairAssistantPrompt(text: string): boolean {
@@ -619,15 +619,17 @@ export function isScenarioCQ1Prompt(text: string): boolean {
   if (/\bhow do you think this situation could be repaired\b/.test(t)) return false;
   if (/\bat what point would you say daniel or sophie\b/.test(t)) return false;
   if (t.includes("isn't working") && t.includes('daniel') && t.includes('sophie')) return false;
-  return (
-    t.includes('what do you make of') &&
-    (t.includes("didn't know how") || t.includes('did not know how'))
-  );
+  const quotesDanielReturnLine =
+    t.includes("didn't know what to say") ||
+    t.includes('did not know what to say') ||
+    t.includes("didn't know how") ||
+    t.includes('did not know how');
+  return t.includes('what do you make of') && quotesDanielReturnLine;
 }
 
 /**
  * User answered Q1 with repair/logistics/next-steps rather than interpreting Daniel's internal state
- * or the meaning of "I didn't know how."
+ * or the meaning of his return line ("I didn't know what to say"; legacy transcripts may say "I didn't know how").
  */
 export function isMisplacedScenarioCQ1Answer(text: string): boolean {
   const t = normalizeInterviewTypography(text).replace(/\s+/g, ' ').trim();
@@ -635,6 +637,7 @@ export function isMisplacedScenarioCQ1Answer(text: string): boolean {
 
   /** User engaged the quoted prompt line or a clear "what that line means" read — not only prescriptions. */
   const referencesDanielPromptLine =
+    /\b(i |he |she |they )?didn'?t know what to say\b/i.test(t) ||
     /\b(i |he |she |they )?didn'?t know how\b/i.test(t) ||
     /\bwhat (that |he |daniel )?(line|said|means?|meant)\b/i.test(t) ||
     /\bwhen (daniel |he )(comes back |says|said )\b/i.test(t) ||
@@ -652,7 +655,7 @@ export function isMisplacedScenarioCQ1Answer(text: string): boolean {
     /\b(overwhelmed|ashamed|embarrassed|stuck|lost|flooded|shut down|shutdown|vulnerable|raw|defensive|avoidant|withdraw|withdrawing)\b/i.test(
       t
     ) ||
-    /\b(didn'?t know how (to|what)|lack(ed|s)? (the )?(skills|tools|words)|capacity|limitation|learning|growth|trying|effort|intent)\b/i.test(
+    /\b(didn'?t know what to say|didn'?t know how (to|what)|lack(ed|s)? (the )?(skills|tools|words)|capacity|limitation|learning|growth|trying|effort|intent)\b/i.test(
       t
     ) ||
     /\b(remorse|guilt|shame)\b/i.test(t);

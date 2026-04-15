@@ -4,13 +4,21 @@ describe('Scenario C Q1 misplaced answer detection', () => {
   it('isScenarioCQ1Prompt matches Daniel opening', () => {
     expect(
       isScenarioCQ1Prompt(
+        "When Daniel comes back and says 'I didn't know what to say' — what do you make of that?"
+      )
+    ).toBe(true);
+  });
+
+  it('isScenarioCQ1Prompt still matches legacy scripted line for older transcripts', () => {
+    expect(
+      isScenarioCQ1Prompt(
         "When Daniel comes back and says 'I didn't know how' — what do you make of that?"
       )
     ).toBe(true);
   });
 
   it('isScenarioCQ1Prompt matches when model uses typographic apostrophe in didn’t', () => {
-    const withCurly = "When Daniel comes back and says 'I didn\u2019t know how' — what do you make of that?";
+    const withCurly = "When Daniel comes back and says 'I didn\u2019t know what to say' — what do you make of that?";
     expect(isScenarioCQ1Prompt(withCurly)).toBe(true);
   });
 
