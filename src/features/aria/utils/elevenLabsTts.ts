@@ -1,7 +1,6 @@
 import { Platform } from 'react-native';
 import Constants from 'expo-constants';
 import * as FileSystem from 'expo-file-system';
-import { Audio } from 'expo-av';
 import * as Speech from 'expo-speech';
 import { logAndApplyPlaybackModeForTts } from './audioModeHelpers';
 import { computeElevenLabsEnabled } from './elevenLabsEnvGating';
@@ -10,6 +9,12 @@ import {
   logTtsAutoplayPlayOutcome,
   type TtsTelemetrySource,
 } from '@features/aria/telemetry/tsAutoplayTelemetry';
+
+/** Avoid top-level `expo-av` import — it breaks web lazy-load of the interview chunk (SDK 53+). */
+function getExpoAvAudio(): typeof import('expo-av').Audio {
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  return require('expo-av').Audio;
+}
 
 /**
  * Jessica — warm, friendly, conversational (ElevenLabs). Override with
@@ -697,13 +702,12 @@ export async function speakWithElevenLabs(
       const abForWebAudio = arrayBuffer.slice(0);
       const abForHtmlAudio = arrayBuffer.slice(0);
       /**
-       * Skip Web Audio when: (1) greeting — decode can hang on some mobile browsers.
-       * (2) Any mobile web session with deferred gesture (Brave/Android/iOS web) — telemetry shows
-       * `ctx.resume()` can hit `resume-timeout` in `tryPlayElevenLabsMp3WithWebAudio` when `telemetrySource`
-       * is `other` (e.g. welcome-back without explicit source). Desktop web keeps Web Audio for non-greeting.
+       * Skip Web Audio decode when mobile web defers gesture (decode/`resume` can be flaky there).
+       * Do **not** skip for desktop greeting: that path used to force HTMLAudio after async fetch,
+       * which hits autoplay policy (no user gesture) — user must tap. Desktop should use Web Audio
+       * after `unlockWebAudioForAutoplay()` in `startInterview` so the first line can speak without a tap.
        */
-      const skipWebAudioDecode =
-        telemetrySource === 'greeting' || webSpeechShouldDeferToUserGesture();
+      const skipWebAudioDecode = webSpeechShouldDeferToUserGesture();
       // #region agent log
       fetch('http://127.0.0.1:7789/ingest/668e0bd5-3283-4492-9f48-e33846c18218', {
         method: 'POST',
@@ -898,6 +902,7 @@ export async function speakWithElevenLabs(
     const fileUri = `${dir}tts_${Date.now()}.mp3`;
     await FileSystem.writeAsStringAsync(fileUri, base64, { encoding: FileSystem.EncodingType.Base64 });
     await logAndApplyPlaybackModeForTts('speakWithElevenLabs:nativeBeforeSoundCreate');
+    const Audio = getExpoAvAudio();
     const { sound } = await Audio.Sound.createAsync(
       { uri: fileUri },
       { shouldPlay: false, volume: 1.0, isMuted: false } // shouldPlay: false, play manually below

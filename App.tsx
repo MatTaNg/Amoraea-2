@@ -17,19 +17,68 @@ import { supabase } from './src/data/supabase/client';
 import { useQuery } from '@tanstack/react-query';
 import { StyleSheet, View, Text, ActivityIndicator } from 'react-native';
 
-const AriaScreenLazy = lazy(() =>
-  import('./src/app/screens/AriaScreen').catch(() => ({
-    default: function AriaUnavailable() {
-      return (
-        <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: '#05060D', padding: 24 }}>
-          <Text style={{ color: '#E8F0F8', fontSize: 16, textAlign: 'center' }}>
-            Speech recognition is not available in this build. Use a development or production build (not Expo Go) for the full interview.
-          </Text>
-        </View>
-      );
-    },
-  }))
-);
+const AriaScreenLazy = lazy(async () => {
+  try {
+    const mod = await import('./src/app/screens/AriaScreen');
+    // #region agent log
+    fetch('http://127.0.0.1:7789/ingest/668e0bd5-3283-4492-9f48-e33846c18218', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'X-Debug-Session-Id': 'e70f17' },
+      body: JSON.stringify({
+        sessionId: 'e70f17',
+        location: 'App.tsx:AriaScreenLazy',
+        message: 'AriaScreen dynamic import resolved',
+        data: { hasDefault: !!mod?.default },
+        timestamp: Date.now(),
+        hypothesisId: 'H2',
+        runId: 'pre-fix',
+      }),
+    }).catch(() => {});
+    // #endregion
+    return mod;
+  } catch (err) {
+    const e = err as Error;
+    const fallbackErrorMessage = String(e?.message ?? err);
+    console.error('[ARIA_LAZY_IMPORT_FAILED]', {
+      name: e?.name,
+      message: fallbackErrorMessage,
+      stack: e?.stack,
+    });
+    // #region agent log
+    fetch('http://127.0.0.1:7789/ingest/668e0bd5-3283-4492-9f48-e33846c18218', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'X-Debug-Session-Id': 'e70f17' },
+      body: JSON.stringify({
+        sessionId: 'e70f17',
+        location: 'App.tsx:AriaScreenLazy:catch',
+        message: 'AriaScreen dynamic import FAILED',
+        data: {
+          name: e?.name,
+          msg: fallbackErrorMessage,
+          stack: (e?.stack ?? '').slice(0, 4000),
+        },
+        timestamp: Date.now(),
+        hypothesisId: 'H1',
+        runId: 'pre-fix',
+      }),
+    }).catch(() => {});
+    // #endregion
+    return {
+      default: function AriaUnavailable() {
+        return (
+          <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: '#05060D', padding: 24 }}>
+            <Text style={{ color: '#E8F0F8', fontSize: 16, textAlign: 'center' }}>
+              Speech recognition is not available in this build. Use a development or production build (not Expo Go) for the full interview.
+            </Text>
+            <Text style={{ color: '#95A8BD', fontSize: 12, textAlign: 'center', marginTop: 10 }}>
+              Debug: {fallbackErrorMessage}
+            </Text>
+          </View>
+        );
+      },
+    };
+  }
+});
 
 const AriaScreenWithSuspense = (props: { navigation: unknown; route: unknown }) => (
   <Suspense fallback={<LoadingScreen />}>

@@ -326,7 +326,7 @@ export function isMoment5AppreciationAbsenceOfSignal(text: string): boolean {
 }
 
 const SCENARIO_B_TOPIC_RE =
-  /\b(alex|jordan|job|offer|celebrat|salary|commute|fight|blindsided|appreciat|trails? off|promotion|hunt)\b/i;
+  /\b(sarah|james|job|offer|celebrat|salary|commute|fight|blindsided|appreciat|trails? off|promotion|hunt)\b/i;
 
 /** Scenario B Q1: any on-topic engagement counts — shallow answers are scorable; do not force probes for depth. */
 export function hasScenarioBQ1OnTopicEngagement(text: string): boolean {
@@ -336,12 +336,14 @@ export function hasScenarioBQ1OnTopicEngagement(text: string): boolean {
   const lower = t.toLowerCase();
   return (
     /\b(trail(ed|ing) off|needed to feel|emotional bid|logistics alone|salary alone|commute alone)\b/.test(lower) ||
-    /\b(alex needed|he needed|he wanted)\b.*\b(comfort|validation|acknowledg|empathy|care|attunement)\b/.test(lower)
+    /\b(sarah needed|she needed|she wanted|he needed|he wanted)\b.*\b(comfort|validation|acknowledg|empathy|care|attunement)\b/.test(
+      lower
+    )
   );
 }
 
 const SCENARIO_C_TOPIC_RE =
-  /\b(morgan|theo|repair|argument|silent|avoid|come back|relationship|communicat|boundary|listen|upset|resolved)\b/i;
+  /\b(sophie|daniel|repair|argument|silent|avoid|come back|relationship|communicat|boundary|listen|upset|resolved)\b/i;
 
 /** Scenario C Q2: on-topic repair engagement (separate from commitment-threshold probe forcing). */
 export function hasScenarioCQ2OnTopicEngagement(text: string): boolean {
@@ -351,14 +353,14 @@ export function hasScenarioCQ2OnTopicEngagement(text: string): boolean {
 }
 
 const SCENARIO_A_TOPIC_RE =
-  /\b(sam|reese|dinner|mother|mom|bill|call|family|first|wrong|tension|hurt|frustrat|angry|upset|clear)\b/i;
+  /\b(emma|ryan|dinner|mother|mom|bill|call|family|first|wrong|tension|hurt|frustrat|angry|upset|clear)\b/i;
 
 /**
- * Scenario A Q1: user already showed a **contempt-quality** read of Sam's "you've made that very clear" line —
+ * Scenario A Q1: user already showed a **contempt-quality** read of Emma's "you've made that very clear" line —
  * hostile, dismissive, verdict-issuing, or relationally closing — not mere indirectness or minimization.
  *
  * Does **not** skip the probe for: passive-aggressive-only, "stating a fact," "just upset/venting," or
- * Sam's hurt without a dismissive/hostile read of that line. Long Reese-only answers never qualify.
+ * Emma's hurt without a dismissive/hostile read of that line. Long Ryan-only answers never qualify.
  */
 export function hasScenarioAQ1ContemptProbeCoverage(text: string): boolean {
   const t = text.replace(/\s+/g, ' ').trim();
@@ -366,10 +368,10 @@ export function hasScenarioAQ1ContemptProbeCoverage(text: string): boolean {
   if (!SCENARIO_A_TOPIC_RE.test(t)) return false;
   const lower = t.replace(/\u2019/g, "'").replace(/\u2018/g, "'").toLowerCase();
 
-  const referencesSamFinalLine =
+  const referencesEmmaFinalLine =
     lower.includes("you've made that very clear") ||
     lower.includes('you have made that very clear') ||
-    (lower.includes('very clear') && /\bsam\b/.test(lower));
+    (lower.includes('very clear') && /\bemma\b/.test(lower));
 
   /** Hostile / verdict / relational-sting reads — not indirectness alone (see passive-aggressive rule below). */
   const hasStrongContemptQualityRead =
@@ -381,21 +383,21 @@ export function hasScenarioAQ1ContemptProbeCoverage(text: string): boolean {
   /** PA names delivery style, not necessarily contempt — insufficient alone to skip the probe. */
   const onlyPassiveAggressive = hasPassiveAggressive && !hasStrongContemptQualityRead;
 
-  const minimizesSamLineRead =
-    /\b(just\s+)?stating\s+a\s+fact\b|\bsam\s+is\s+just\s+stating\b|\bjust\s+(upset|venting)\b|\bonly\s+(saying|stating)\s+a\s+fact\b/i.test(
+  const minimizesEmmaLineRead =
+    /\b(just\s+)?stating\s+a\s+fact\b|\bemma\s+is\s+just\s+stating\b|\bjust\s+(upset|venting)\b|\bonly\s+(saying|stating)\s+a\s+fact\b/i.test(
       lower
     );
 
-  if (!referencesSamFinalLine) return false;
+  if (!referencesEmmaFinalLine) return false;
   if (onlyPassiveAggressive) return false;
-  if (minimizesSamLineRead && !hasStrongContemptQualityRead) return false;
+  if (minimizesEmmaLineRead && !hasStrongContemptQualityRead) return false;
 
   return hasStrongContemptQualityRead;
 }
 
 /**
  * Scenario A Q1: broad on-topic engagement (e.g. scoring / analytics). Includes long answers that
- * only center Reese — use {@link hasScenarioAQ1ContemptProbeCoverage} to decide contempt-probe forcing.
+ * only center Ryan — use {@link hasScenarioAQ1ContemptProbeCoverage} to decide contempt-probe forcing.
  */
 export function hasScenarioAQ1VignetteEngagement(text: string): boolean {
   if (hasScenarioAQ1ContemptProbeCoverage(text)) return true;
@@ -407,7 +409,7 @@ export function hasScenarioAQ1VignetteEngagement(text: string): boolean {
 
 /**
  * Scenario C: true only when the user named relationship-level exit / unworkability criteria — not vignette motion
- * alone ("Theo leaves", "walk away" from the room) or generic repair language.
+ * alone ("Daniel leaves", "walk away" from the room) or generic repair language.
  */
 export function hasScenarioCCommitmentThresholdInUserAnswer(text: string): boolean {
   const t = text.replace(/\s+/g, ' ').trim().toLowerCase();
@@ -428,13 +430,13 @@ export function hasScenarioCCommitmentThresholdInUserAnswer(text: string): boole
 }
 
 /**
- * Threshold-style language **and** Theo/Morgan named — satisfies the scripted Scenario C commitment probe.
+ * Threshold-style language **and** Daniel/Sophie named — satisfies the scripted Scenario C commitment probe.
  * Repair-only answers ("they're incompatible") without naming the characters do **not** skip forcing the question.
  */
 export function hasScenarioCVignetteCommitmentThresholdSignal(text: string): boolean {
   const t = text.replace(/\s+/g, ' ').trim();
   if (t.length < 12) return false;
-  if (!/\b(theo|morgan)\b/i.test(t)) return false;
+  if (!/\b(daniel|sophie)\b/i.test(t)) return false;
   return hasScenarioCCommitmentThresholdInUserAnswer(t);
 }
 
@@ -455,20 +457,20 @@ export function isScenarioCRepairAssistantPrompt(text: string): boolean {
     /\bhow (might|could|would) this be repaired\b/.test(t);
   const canBeRepaired =
     /\bhow (can|could) (this situation|this|they|things) be repaired\b/.test(t) ||
-    /\bhow (can|could) (they|theo and morgan) repair\b/.test(t);
+    /\bhow (can|could) (they|daniel and sophie) repair\b/.test(t);
   const repairIng =
     /\bhow would you (approach|begin) repair(ing)?\b/.test(t) ||
     /\bhow (might|should) (they|the couple) repair\b/.test(t);
   return canonical || dropSituation || modalShort || canBeRepaired || repairIng;
 }
 
-/** Scenario C follow-up: when Theo/Morgan should decide the relationship is not working (not the repair prompt). */
+/** Scenario C follow-up: when Daniel/Sophie should decide the relationship is not working (not the repair prompt). */
 export function looksLikeScenarioCCommitmentThresholdAssistantPrompt(text: string): boolean {
   const t = (text ?? '').toLowerCase();
   return (
-    t.includes("at what point would you say theo or morgan should decide this relationship isn't working") ||
-    (t.includes('theo') &&
-      t.includes('morgan') &&
+    t.includes("at what point would you say daniel or sophie should decide this relationship isn't working") ||
+    (t.includes('daniel') &&
+      t.includes('sophie') &&
       t.includes("isn't working") &&
       /\b(at what point|what point)\b/.test(t))
   );
@@ -554,7 +556,7 @@ export function extractScenario3UserCorpusAfterLastRepairPrompt(
   return parts.join(' ');
 }
 
-/** User answer(s) to the Scenario C commitment-threshold follow-up only (Theo/Morgan), for sole-source scoring. */
+/** User answer(s) to the Scenario C commitment-threshold follow-up only (Daniel/Sophie), for sole-source scoring. */
 export function extractScenario3CommitmentThresholdUserAnswerAfterPrompt(
   msgs: readonly ScenarioCorpusMessageSlice[],
 ): string {
@@ -600,7 +602,7 @@ export function normalizeInterviewTypography(text: string): string {
 
 export function isLikelyMisplacedPersonalNarrativeForScenarioCThreshold(text: string): boolean {
   const t = text.toLowerCase();
-  const referencesScenarioCharacters = /\b(theo|morgan|they)\b/.test(t) && /\b(should|would|relationship|not working|walk away|end)\b/.test(t);
+  const referencesScenarioCharacters = /\b(daniel|sophie|they)\b/.test(t) && /\b(should|would|relationship|not working|walk away|end)\b/.test(t);
   if (referencesScenarioCharacters) return false;
   const hasPersonalNarrativeSignals =
     /\b(i|my|me|we|our|us)\b/.test(t) &&
@@ -610,13 +612,13 @@ export function isLikelyMisplacedPersonalNarrativeForScenarioCThreshold(text: st
   return hasPersonalNarrativeSignals;
 }
 
-/** True when the assistant turn is Scenario C Q1 (interpret Theo's line), not Q2/repair/threshold. */
+/** True when the assistant turn is Scenario C Q1 (interpret Daniel's line), not Q2/repair/threshold. */
 export function isScenarioCQ1Prompt(text: string): boolean {
   const t = normalizeInterviewTypography(text).replace(/\s+/g, ' ').trim().toLowerCase();
   if (t.length < 12) return false;
   if (/\bhow do you think this situation could be repaired\b/.test(t)) return false;
-  if (/\bat what point would you say theo or morgan\b/.test(t)) return false;
-  if (t.includes("isn't working") && t.includes('theo') && t.includes('morgan')) return false;
+  if (/\bat what point would you say daniel or sophie\b/.test(t)) return false;
+  if (t.includes("isn't working") && t.includes('daniel') && t.includes('sophie')) return false;
   return (
     t.includes('what do you make of') &&
     (t.includes("didn't know how") || t.includes('did not know how'))
@@ -624,7 +626,7 @@ export function isScenarioCQ1Prompt(text: string): boolean {
 }
 
 /**
- * User answered Q1 with repair/logistics/next-steps rather than interpreting Theo's internal state
+ * User answered Q1 with repair/logistics/next-steps rather than interpreting Daniel's internal state
  * or the meaning of "I didn't know how."
  */
 export function isMisplacedScenarioCQ1Answer(text: string): boolean {
@@ -632,14 +634,14 @@ export function isMisplacedScenarioCQ1Answer(text: string): boolean {
   if (t.length < 40) return false;
 
   /** User engaged the quoted prompt line or a clear "what that line means" read — not only prescriptions. */
-  const referencesTheoPromptLine =
+  const referencesDanielPromptLine =
     /\b(i |he |she |they )?didn'?t know how\b/i.test(t) ||
-    /\bwhat (that |he |theo )?(line|said|means?|meant)\b/i.test(t) ||
-    /\bwhen (theo |he )(comes back |says|said )\b/i.test(t) ||
+    /\bwhat (that |he |daniel )?(line|said|means?|meant)\b/i.test(t) ||
+    /\bwhen (daniel |he )(comes back |says|said )\b/i.test(t) ||
     /\b(that|those) words\b/i.test(t);
 
-  const theoInternalRead =
-    /\b(theo|he)('?s| is| was| felt| seems| sounds| means| meant)\b/i.test(t) ||
+  const danielInternalRead =
+    /\b(daniel|he)('?s| is| was| felt| seems| sounds| means| meant)\b/i.test(t) ||
     /\b(his|him) (own|inner|shame|fear|anxiety|avoidance|struggle|vulnerability|emotion|state|head|heart)\b/i.test(
       t
     ) ||
@@ -655,22 +657,22 @@ export function isMisplacedScenarioCQ1Answer(text: string): boolean {
     ) ||
     /\b(remorse|guilt|shame)\b/i.test(t);
 
-  if (theoInternalRead) return false;
+  if (danielInternalRead) return false;
 
-  const prescriptiveTheoMorgan =
-    /\b(theo|morgan)\s+(needs? to|has to|must)\b/i.test(t) || /\btheo should\b/i.test(t);
+  const prescriptiveDanielSophie =
+    /\b(daniel|sophie)\s+(needs? to|has to|must)\b/i.test(t) || /\bdaniel should\b/i.test(t);
 
   const relationshipVerdictOrThreshold =
     /\b(relationship (is )?(not )?working|whether (this |the )?relationship|walk away|end (the relationship|it)|seriously consider|fourth time|third time|one more time|without real change|deal[- ]?breaker)\b/i.test(
       t
     );
 
-  if (!referencesTheoPromptLine && (prescriptiveTheoMorgan || relationshipVerdictOrThreshold)) {
+  if (!referencesDanielPromptLine && (prescriptiveDanielSophie || relationshipVerdictOrThreshold)) {
     return true;
   }
 
   const logisticsOrRepairNextSteps =
-    /\b(they should|the couple (should|needs to)|both (need|should) to|morgan and theo should|next step|action plan|ground rules|start by|begin by|sit down (and|to)|schedule|couples therapy|therapy|mediat|take turns|check[- ]?ins?\b|communicate better|talk it out|work (it|this) out|resolve (this|it)|repair (this|the|their)|how (they|we) (could|should|can) (fix|repair|handle)|patch things|make a plan|come up with|agree on|structure|boundar(y|ies))\b/i.test(
+    /\b(they should|the couple (should|needs to)|both (need|should) to|sophie and daniel should|next step|action plan|ground rules|start by|begin by|sit down (and|to)|schedule|couples therapy|therapy|mediat|take turns|check[- ]?ins?\b|communicate better|talk it out|work (it|this) out|resolve (this|it)|repair (this|the|their)|how (they|we) (could|should|can) (fix|repair|handle)|patch things|make a plan|come up with|agree on|structure|boundar(y|ies))\b/i.test(
       t
     );
 

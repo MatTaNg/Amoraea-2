@@ -83,7 +83,7 @@ describe('buildMatchmakerSummaryFromProfile — production matchmaker_summary te
 
   it('when scenario vs personal register diverges, sentence 1 leads with cross-interview register shift', () => {
     const scenario =
-      'reese is emotionally immature and too sensitive. not an acceptable explanation. never had to put their partner first.';
+      'ryan is emotionally immature and too sensitive. not an acceptable explanation. never had to put their partner first.';
     const personal =
       'i am working on this in therapy. i tend to hold on too long. i am not fully there yet. i find it hard to walk away.';
     const s = buildMatchmakerSummaryFromProfile(

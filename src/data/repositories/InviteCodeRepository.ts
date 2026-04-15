@@ -1,4 +1,6 @@
 import { supabase } from '../supabase/client';
+import { isAlphaTesterReferralCode } from '@/constants/alphaReferral';
+import { normalizeShareableReferralCode } from '@features/referrals/shareableReferralCode';
 
 const INVITE_CODE_LENGTH = 6;
 const ALPHABET = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789'; // Excluded I,O,0,1 for clarity
@@ -40,9 +42,26 @@ export class InviteCodeRepository {
 
     let inviteCode = generateCode();
     let referredById: string | null = null;
+    let pendingReferralCode: string | null = null;
+    let isAlphaTester = false;
 
-    if (options.referralCode?.trim()) {
-      referredById = await this.findUserIdByCode(options.referralCode.trim());
+    const raw = options.referralCode?.trim() ?? '';
+    if (raw) {
+      if (isAlphaTesterReferralCode(raw)) {
+        isAlphaTester = true;
+      } else {
+        const normalizedShareable = normalizeShareableReferralCode(raw);
+        if (normalizedShareable) {
+          const { data: available, error: rpcErr } = await supabase.rpc('referral_code_is_available', {
+            p_raw: raw,
+          });
+          if (!rpcErr && available === true) {
+            pendingReferralCode = normalizedShareable;
+          }
+        } else {
+          referredById = await this.findUserIdByCode(raw);
+        }
+      }
     }
 
     for (let attempt = 0; attempt < 10; attempt++) {
@@ -56,14 +75,14 @@ export class InviteCodeRepository {
       inviteCode = generateCode();
     }
 
-
     const { error } = await supabase.from('users').insert({
       id: userId,
       email: options.email ?? null,
       invite_code: inviteCode,
       referred_by_id: referredById,
+      is_alpha_tester: isAlphaTester,
+      pending_referral_code: pendingReferralCode,
     });
-
 
     if (error) throw new Error(`Failed to create user: ${error.message}`);
     return { inviteCode };

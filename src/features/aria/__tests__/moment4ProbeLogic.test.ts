@@ -73,7 +73,7 @@ describe('moment4ProbeLogic', () => {
 
   it('does not force threshold when user answers Scenario C fiction instead of the grudge prompt (attempt 153)', () => {
     const misplaced =
-      "I think they'd need to genuinely try everything first — probably including couples therapy — before calling it. One recurring argument isn't enough. But if Theo kept leaving and never came back, or if Morgan kept escalating every time Theo needed space and neither of them could shift their pattern even with help, that's when I'd say it's not working.";
+      "I think they'd need to genuinely try everything first — probably including couples therapy — before calling it. One recurring argument isn't enough. But if Daniel kept leaving and never came back, or if Sophie kept escalating every time Daniel needed space and neither of them could shift their pattern even with help, that's when I'd say it's not working.";
     expect(looksLikeMisplacedNonGrudgeMoment4Answer(misplaced)).toBe(true);
     expect(
       shouldForceMoment4ThresholdProbe({

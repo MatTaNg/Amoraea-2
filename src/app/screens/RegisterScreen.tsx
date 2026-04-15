@@ -13,6 +13,9 @@ import { useAuth } from '@features/authentication/hooks/useAuth';
 import { SafeAreaContainer } from '@ui/components/SafeAreaContainer';
 import { FlameOrb } from '@app/screens/FlameOrb';
 import { authStyles } from '@app/screens/authStyles';
+import { supabase } from '@data/supabase/client';
+import { isAlphaTesterReferralCode } from '@/constants/alphaReferral';
+import { normalizeShareableReferralCode } from '@features/referrals/shareableReferralCode';
 
 const GOOGLE_FONTS_URL =
   "https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,300;0,400;1,300&family=Jost:wght@200;300;400&display=swap";
@@ -22,6 +25,7 @@ export const RegisterScreen: React.FC<{ navigation: any }> = ({ navigation }) =>
   const [password, setPassword] = useState('');
   const [confirm, setConfirm] = useState('');
   const [inviteCode, setInviteCode] = useState('');
+  const [referralHint, setReferralHint] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [sent, setSent] = useState(false);
@@ -52,9 +56,36 @@ export const RegisterScreen: React.FC<{ navigation: any }> = ({ navigation }) =>
       return;
     }
     setError(null);
+    setReferralHint(null);
     setLoading(true);
     try {
-      await signUp(email.trim(), password, inviteCode.trim() ? { inviteCode: inviteCode.trim() } : undefined);
+      const raw = inviteCode.trim();
+      let codeToSend: string | undefined;
+      if (raw) {
+        if (isAlphaTesterReferralCode(raw)) {
+          codeToSend = raw;
+        } else {
+          const normalizedShareable = normalizeShareableReferralCode(raw);
+          if (normalizedShareable) {
+            const { data: available, error: rpcErr } = await supabase.rpc('referral_code_is_available', {
+              p_raw: raw,
+            });
+            if (rpcErr) {
+              setError('Could not verify referral code. Try again or continue without one.');
+              setLoading(false);
+              return;
+            }
+            if (available === true) {
+              codeToSend = raw;
+            } else {
+              setReferralHint("That code doesn't look right or has already been used.");
+            }
+          } else {
+            codeToSend = raw;
+          }
+        }
+      }
+      await signUp(email.trim(), password, codeToSend ? { inviteCode: codeToSend } : undefined);
       setSent(true);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Something went wrong. Please try again.');
@@ -157,12 +188,23 @@ export const RegisterScreen: React.FC<{ navigation: any }> = ({ navigation }) =>
             />
 
             <TextInput
-              placeholder="Invite code (optional)"
+              placeholder="Have a referral code? Enter it here."
               placeholderTextColor="#5B6B80"
               value={inviteCode}
-              onChangeText={setInviteCode}
-              style={[authStyles.input, authStyles.inputOptional, { marginBottom: 18 }]}
+              onChangeText={(t) => {
+                setInviteCode(t);
+                if (referralHint) setReferralHint(null);
+              }}
+              autoCapitalize="characters"
+              style={[authStyles.input, authStyles.inputOptional, { marginBottom: referralHint ? 8 : 18 }]}
             />
+            {referralHint ? (
+              <Text
+                style={[authStyles.footerText, { color: 'rgba(248,180,140,0.95)', marginBottom: 18, lineHeight: 20 }]}
+              >
+                {referralHint}
+              </Text>
+            ) : null}
 
             {error ? <Text style={authStyles.errorText}>{error}</Text> : null}
 

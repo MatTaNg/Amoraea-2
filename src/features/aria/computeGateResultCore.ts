@@ -46,7 +46,12 @@ export interface GateResult {
 export type ComputeGateResultOptions = {
   /** App-only: e.g. remote logging. Omitted in Node scripts. */
   onWeightedBreakdown?: (data: Record<string, unknown>) => void;
+  /** Overrides {@link GATE_PASS_WEIGHTED_MIN} for weighted average only (e.g. referral boost). Floors unchanged. */
+  weightedPassMin?: number;
 };
+
+/** Weighted pass threshold when referral boost is active (floors unchanged). */
+export const REFERRAL_WEIGHTED_PASS_MIN = 5.5;
 
 function isAssessedScore(v: unknown): v is number {
   return typeof v === 'number' && Number.isFinite(v) && v > 0;
@@ -140,7 +145,8 @@ export function computeGateResultCore(
   });
 
   const weightedScore = Math.round(weightedSum * 10) / 10;
-  const meetsWeightedThreshold = weightedSum >= GATE_PASS_WEIGHTED_MIN;
+  const weightedMin = options?.weightedPassMin ?? GATE_PASS_WEIGHTED_MIN;
+  const meetsWeightedThreshold = weightedSum >= weightedMin;
   let simpleSum = 0;
   assessedMarkerIds.forEach((id) => {
     simpleSum += (adjustedScores[id] as number) ?? 0;
@@ -190,7 +196,7 @@ export function computeGateResultCore(
       failingScore: null,
       assessedMarkerCount: assessedMarkerIds.length,
       excludedMarkers,
-      failReason: `weighted_below_threshold: ${weightedScore.toFixed(1)} (required ${GATE_PASS_WEIGHTED_MIN.toFixed(1)})`,
+      failReason: `weighted_below_threshold: ${weightedScore.toFixed(1)} (required ${weightedMin.toFixed(1)})`,
     };
   }
 

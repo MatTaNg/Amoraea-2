@@ -51,7 +51,7 @@ Accountability — growth_edge and "over-functioning" inferences: If you describ
 
 Accountability — blame-shift vs. request for clarity: Do not describe as deflection or blame-shift a turn where the user first owns their part (gap, miss, or impact) and then asks the partner for concrete guidance to follow through (e.g. what "showing appreciation" would look like for them). That pattern is a repair bid on top of ownership. Reserve harsh accountability framing for cases where the partner is assigned sole responsibility with no sincere self-attribution (e.g. "they should have just told me what they needed").
 
-Commitment_threshold narrative: If the score rests primarily on third-party reasoning about Morgan/Theo with little or no first-person threshold content in the transcript, say so in nuance_and_context or summary and keep claims proportionate — do not write as if they gave rich personal walk-away criteria unless they did.
+Commitment_threshold narrative: If the score rests primarily on third-party reasoning about Sophie/Daniel with little or no first-person threshold content in the transcript, say so in nuance_and_context or summary and keep claims proportionate — do not write as if they gave rich personal walk-away criteria unless they did.
 
 Commitment-threshold calibration: Do not describe structurally sound answers as weak merely because they lack procedural detail (timelines, therapy, step lists). A complete path — real effort, honest communication about problems, reassessment, willingness to leave if the pattern doesn't change — supports a solid score (6–7+) even when brief. Unconditional staying with no limits ("never give up no matter what") belongs around 2–3. Exit at first difficulty belongs around 1–2. Reserve 7–8 for that structure plus some concrete irrecoverability specificity; 9–10 for strong evidence of persisting through serious difficulty with healthy limits.
 
@@ -163,19 +163,19 @@ For each construct_breakdown.where_you_struggled entry: include only observed ev
 
   "scenario_observations": {
     "scenario_1": {
-      "name": "Scenario A (Sam/Reese)",
+      "name": "Scenario A (Emma/Ryan)",
       "what_happened": "A detailed paragraph describing how this person navigated this scenario.",
       "standout_moments": ["Quote or close paraphrase with analysis.", "Second moment if warranted."],
       "what_it_revealed": "A full paragraph synthesising what this scenario unlocked about this person."
     },
     "scenario_2": {
-      "name": "Scenario B (Alex/Jordan)",
+      "name": "Scenario B (Sarah/James)",
       "what_happened": "...",
       "standout_moments": ["...", "..."],
       "what_it_revealed": "..."
     },
     "scenario_3": {
-      "name": "Scenario C (Morgan/Theo)",
+      "name": "Scenario C (Sophie/Daniel)",
       "what_happened": "...",
       "standout_moments": ["...", "..."],
       "what_it_revealed": "..."

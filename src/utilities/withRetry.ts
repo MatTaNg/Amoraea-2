@@ -4,6 +4,8 @@
  * Exhausted retries throw with retriesExhausted: true.
  */
 
+import { writeSessionLog, type SessionPlatform } from '@utilities/sessionLogging/writeSessionLog';
+
 export type ErrorClassification = 'retryable' | 'unrecoverable' | 'unknown';
 
 /**
@@ -54,6 +56,12 @@ export interface WithRetryOptions {
   context?: string;
   onRetry?: (attempt: number) => void;
   onUnrecoverable?: (err: unknown) => void;
+  /** When set, logs api_call_slow (>3000ms) and api_call_failed (exhausted / unrecoverable). */
+  sessionLog?: {
+    userId: string | null;
+    attemptId: string | null;
+    platform: SessionPlatform | null;
+  };
 }
 
 export async function withRetry<T>(
@@ -67,13 +75,33 @@ export async function withRetry<T>(
     context = 'API call',
     onRetry,
     onUnrecoverable,
+    sessionLog,
   } = options;
 
   let lastError: unknown;
+  const logApi = sessionLog?.userId
+    ? (type: 'api_call_slow' | 'api_call_failed', payload: Record<string, unknown>, durationMs?: number, err?: string) => {
+        writeSessionLog({
+          userId: sessionLog.userId!,
+          attemptId: sessionLog.attemptId,
+          eventType: type,
+          eventData: { endpoint: context, user_id: sessionLog.userId, ...payload },
+          durationMs: durationMs ?? null,
+          error: err ?? null,
+          platform: sessionLog.platform,
+        });
+      }
+    : null;
 
   for (let attempt = 0; attempt <= retries; attempt++) {
     try {
-      return await fn();
+      const t0 = Date.now();
+      const result = await fn();
+      const ms = Date.now() - t0;
+      if (logApi && ms > 3000) {
+        logApi('api_call_slow', { duration_ms: ms }, ms);
+      }
+      return result;
     } catch (err) {
       lastError = err;
       const errorType = classifyError(err);
@@ -84,6 +112,17 @@ export async function withRetry<T>(
           console.error(`[${context}] unrecoverable error (${status}):`, err instanceof Error ? err.message : err);
         }
         onUnrecoverable?.(err);
+        const status = (err as { status?: number })?.status ?? null;
+        logApi?.(
+          'api_call_failed',
+          {
+            status_code: status,
+            error_message: err instanceof Error ? err.message : String(err),
+            retry_count: 0,
+          },
+          undefined,
+          err instanceof Error ? err.message : String(err)
+        );
         throw Object.assign(err instanceof Error ? err : new Error(String(err)), { unrecoverable: true });
       }
 
@@ -91,6 +130,17 @@ export async function withRetry<T>(
         if (__DEV__) {
           console.error(`[${context}] failed after ${attempt + 1} attempt(s):`, err instanceof Error ? err.message : err);
         }
+        const status = (err as { status?: number })?.status ?? null;
+        logApi?.(
+          'api_call_failed',
+          {
+            status_code: status,
+            error_message: err instanceof Error ? err.message : String(err),
+            retry_count: retries,
+          },
+          undefined,
+          err instanceof Error ? err.message : String(err)
+        );
         throw Object.assign(lastError instanceof Error ? lastError : new Error(String(lastError)), { retriesExhausted: true });
       }
 

@@ -39,9 +39,9 @@ function baseProfile(over: Partial<StyleProfile> = {}): StyleProfile {
 /** Test Set 1 — analytical / framework voice (manual: heady, conceptual, values clarity). */
 const SET1_SCENARIO_CORPUS =
   [
-    "What's happening here is a classic demand-withdraw pattern. Sam is expressing unmet needs through criticism rather than vulnerability, and Reese is defending rather than acknowledging impact.",
-    'Jordan made a category error — conflating celebration with information processing. Alex needed co-regulation and emotional mirroring, not logistical support.',
-    "This is a textbook pursue-withdraw cycle. Morgan's pursuit triggers Theo's flooding which triggers more pursuit. Theo's return with vulnerability is structurally significant.",
+    "What's happening here is a classic demand-withdraw pattern. Emma is expressing unmet needs through criticism rather than vulnerability, and Ryan is defending rather than acknowledging impact.",
+    'James made a category error — conflating celebration with information processing. Sarah needed co-regulation and emotional mirroring, not logistical support.',
+    "This is a textbook pursue-withdraw cycle. Sophie's pursuit triggers Daniel's flooding which triggers more pursuit. Daniel's return with vulnerability is structurally significant.",
     "I've analyzed this pattern in myself — I tend to exit relationships where the cost-benefit ratio of repair exceeds the perceived value of the connection.",
     'I itemized the interventions and their outcomes. They said it was the most meaningful thing a mentee had ever given them.',
   ]
@@ -50,18 +50,18 @@ const SET1_SCENARIO_CORPUS =
 
 /** Episodic turns would inflate narrative episodes; Set 1 is scored as conceptual-heavy in manual tests. */
 const SET1_USER_TURNS = [
-  "What's happening here is a classic demand-withdraw pattern. Sam is expressing unmet needs through criticism rather than vulnerability.",
-  'Jordan made a category error — conflating celebration with information processing.',
-  "This is a textbook pursue-withdraw cycle. Morgan's pursuit triggers Theo's flooding.",
+  "What's happening here is a classic demand-withdraw pattern. Emma is expressing unmet needs through criticism rather than vulnerability.",
+  'James made a category error — conflating celebration with information processing.',
+  "This is a textbook pursue-withdraw cycle. Sophie's pursuit triggers Daniel's flooding.",
   'I tend to exit relationships where the cost-benefit ratio of repair exceeds the perceived value.',
   'I itemized the interventions and their outcomes in a letter to a mentor.',
 ];
 
 /** Test Set 2 — warm / expressive / feeling-first (manual). */
 const SET2_USER_TURNS = [
-  "Oh, Sam is hurting. That 'you've made that very clear' — there's so much pain packed into that line.",
-  'This one actually made me a little sad. Alex was so excited — called from the street — and then spent the evening feeling invisible.',
-  "When Theo came back I felt something shift. There's something so vulnerable about 'I didn't know how'.",
+  "Oh, Emma is hurting. That 'you've made that very clear' — there's so much pain packed into that line.",
+  'This one actually made me a little sad. Sarah was so excited — called from the street — and then spent the evening feeling invisible.',
+  "When Daniel came back I felt something shift. There's something so vulnerable about 'I didn't know how'.",
   'Yeah, I held a grudge against my sister for almost a year after she said something that cut really deep at a family dinner. I was devastated. I cried about it for days.',
   "My partner got a promotion they'd been working toward for two years. I cried when they told me — happy tears, just so proud.",
 ];
@@ -81,8 +81,8 @@ const SET3_CORPUS = SET3_USER_TURNS.join(' ').toLowerCase();
 
 /** Test Set 4 — ambiguity-tolerant (manual: high certainty_ambiguity, qualifiers). */
 const SET4_USER_TURNS = [
-    "I'm not sure there's a clean read on this one. Sam might be expressing something real or might be displacing frustration from somewhere else entirely.",
-    "I keep going back and forth on Jordan. Part of me thinks Jordan genuinely thought that's what celebration looks like.",
+    "I'm not sure there's a clean read on this one. Emma might be expressing something real or might be displacing frustration from somewhere else entirely.",
+    "I keep going back and forth on James. Part of me thinks James genuinely thought that's what celebration looks like.",
     "I don't think there's a formula for when to leave. I've sat with that question for a long time in my own life and I keep arriving at something like — you know when you know.",
     "I've been thinking about this more lately and I'm genuinely not sure I've resolved it. I think I've made peace with the situation but I don't know if I've made peace with the person.",
     "I'm not sure I do this as well as I'd like to. I notice appreciation in myself and sometimes I express it and sometimes it stays internal.",
@@ -92,9 +92,9 @@ const SET4_CORPUS = SET4_USER_TURNS.join(' ').toLowerCase();
 
 /** Test Set 5 — closure-oriented (manual: definitive language). */
 const SET5_USER_TURNS = [
-  "Sam is being contemptuous. That's the problem. Reese made a mistake but Sam's response is the bigger issue here.",
-  'Jordan dropped the ball. Simple as that. Alex needed to feel celebrated and Jordan made it about logistics.',
-  "Theo needs to stop leaving. That's the core issue. You can't keep walking out on someone and expect the relationship to work.",
+  "Emma is being contemptuous. That's the problem. Ryan made a mistake but Emma's response is the bigger issue here.",
+  'James dropped the ball. Simple as that. Sarah needed to feel celebrated and James made it about logistics.',
+  "Daniel needs to stop leaving. That's the core issue. You can't keep walking out on someone and expect the relationship to work.",
   "I ended the friendship. We'd been friends for six years but what they did was a clear violation and I wasn't willing to minimize it.",
   'I threw my brother a surprise party for his 40th. Organized everything, got the people there, made sure it went smoothly.',
 ];
@@ -103,9 +103,9 @@ const SET5_CORPUS = SET5_USER_TURNS.join(' ').toLowerCase();
 
 /** Test Set 6 — relational depth (manual: we-frame, long arc). */
 const SET6_USER_TURNS = [
-  'What strikes me is that neither of them is actually talking about what is between them. Sam line lands as contemptuous but underneath it is probably fear.',
-  'The thing that gets me is that Alex and Jordan probably both care deeply about each other — otherwise this would not hurt.',
-  "What I keep thinking about is what it costs Theo to come back. Not just this time but every time. There's something in Theo that wants connection badly enough to return despite not knowing how.",
+  'What strikes me is that neither of them is actually talking about what is between them. Emma line lands as contemptuous but underneath it is probably fear.',
+  'The thing that gets me is that Sarah and James probably both care deeply about each other — otherwise this would not hurt.',
+  "What I keep thinking about is what it costs Daniel to come back. Not just this time but every time. There's something in Daniel that wants connection badly enough to return despite not knowing how.",
   'What changed for me was realizing that the grudge was about something much older than this particular person.',
   'The most important thing I have ever done for someone was just staying. My closest friend went through something really dark a few years ago and I just stayed present through all of it.',
 ];
@@ -242,26 +242,26 @@ describe('Manual calibration Test Sets 1–6 — translateStyleProfile', () => {
   });
 });
 
-/** Strings from the calibration doc — Scenario A Sam/Reese. */
+/** Strings from the calibration doc — Scenario A Emma/Ryan. */
 const MOMENT1_A1_HIGH_MENTALIZING =
-  "I think Sam has been sitting on this frustration for a while and it finally came out — but in a way that was more like a jab than an honest conversation. The 'you've made that very clear' line has this cold, superior quality to it, like Sam has already decided Reese is guilty and there's no room for a real conversation.";
+  "I think Emma has been sitting on this frustration for a while and it finally came out — but in a way that was more like a jab than an honest conversation. The 'you've made that very clear' line has this cold, superior quality to it, like Emma has already decided Ryan is guilty and there's no room for a real conversation.";
 
 const MOMENT1_CONTEMPT_PROBE_B1 =
-  "Sam's line when she says you've made that very clear — it's a contemptuous line. There's a coldness and superiority in it — it's not an expression of hurt, it's a verdict. Sam has already decided Reese is guilty and that line is designed to sting rather than open a conversation.";
+  "Emma's line when she says you've made that very clear — it's a contemptuous line. There's a coldness and superiority in it — it's not an expression of hurt, it's a verdict. Emma has already decided Ryan is guilty and that line is designed to sting rather than open a conversation.";
 
 describe('Manual calibration — Scenario A probe helpers', () => {
-  it('Q1 high mentalizing answer engages vignette (Sam/Reese)', () => {
+  it('Q1 high mentalizing answer engages vignette (Emma/Ryan)', () => {
     expect(hasScenarioAQ1VignetteEngagement(MOMENT1_A1_HIGH_MENTALIZING)).toBe(true);
   });
 
-  it('Contempt probe B1 names contempt + references Sam line — counts as contempt coverage (skips redundant probe)', () => {
+  it('Contempt probe B1 names contempt + references Emma line — counts as contempt coverage (skips redundant probe)', () => {
     expect(hasScenarioAQ1ContemptProbeCoverage(MOMENT1_CONTEMPT_PROBE_B1)).toBe(true);
   });
 
   it('Low-insight B6 does not satisfy contempt probe coverage', () => {
     expect(
       hasScenarioAQ1ContemptProbeCoverage(
-        "Sam is just upset and saying something in the heat of the moment. You've made that very clear — that phrasing doesn't land as much more than venting.",
+        "Emma is just upset and saying something in the heat of the moment. You've made that very clear — that phrasing doesn't land as much more than venting.",
       ),
     ).toBe(false);
   });
@@ -269,10 +269,10 @@ describe('Manual calibration — Scenario A probe helpers', () => {
 
 /** Must match `hasScenarioCCommitmentThresholdInUserAnswer` (relationship outcome / irrecoverability). */
 const SCENARIO_C_THRESHOLD_HIGH =
-  "If this pattern keeps happening after they have really tried therapy, I would say the relationship is not working. Theo and Morgan would need to see real change.";
+  "If this pattern keeps happening after they have really tried therapy, I would say the relationship is not working. Daniel and Sophie would need to see real change.";
 
 describe('Manual calibration — Scenario C commitment threshold', () => {
-  it('names Theo/Morgan + irrecoverability path (high process + boundaries)', () => {
+  it('names Daniel/Sophie + irrecoverability path (high process + boundaries)', () => {
     expect(hasScenarioCCommitmentThresholdInUserAnswer(SCENARIO_C_THRESHOLD_HIGH)).toBe(true);
   });
 });

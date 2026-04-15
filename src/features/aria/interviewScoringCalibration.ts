@@ -35,7 +35,7 @@ ACCOUNTABILITY — BLAME-SHIFT VS. GENUINE REQUEST FOR CLARITY (apply everywhere
 
 These patterns can look alike but differ in relational meaning:
 
-• BLAME-SHIFT (score accountability LOW — typically mid-low or lower when this is the main move): Responsibility is redirected onto the other person; the user does not own their impact or contribution. The partner is framed as owing clearer communication, mind-reading, or fixing the dynamic alone. Example: "Alex should have just told me what they needed instead of expecting me to read their mind" — no ownership; the problem is placed on the partner.
+• BLAME-SHIFT (score accountability LOW — typically mid-low or lower when this is the main move): Responsibility is redirected onto the other person; the user does not own their impact or contribution. The partner is framed as owing clearer communication, mind-reading, or fixing the dynamic alone. Example: "Sarah should have just told me what they needed instead of expecting me to read their mind" — no ownership; the problem is placed on the partner.
 
 • GENUINE REQUEST FOR CLARITY AFTER OWNERSHIP (do NOT treat as deflection; do not reduce accountability for the ask alone): The user takes clear ownership of their own gap, mistake, or impact, and asks for specific information so they can show up better. That request is a repair bid layered on ownership, not a substitute for it. Example: "I could do a better job of appreciating you — can you help me understand what that looks like for you?"
 

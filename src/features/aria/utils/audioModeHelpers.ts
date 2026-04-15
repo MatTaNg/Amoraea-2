@@ -3,11 +3,28 @@
  * and recording uses the mic correctly. Call before every TTS and before/after recording.
  */
 import { Platform } from 'react-native';
-import { Audio } from 'expo-av';
+
+/** Avoid top-level `import 'expo-av'` — it breaks web lazy-loading of interview (SDK 53+ deprecation / init). */
+function getExpoAvAudio(): typeof import('expo-av').Audio {
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  return require('expo-av').Audio;
+}
+
+/** Last mode applied via `setPlaybackMode` / `setRecordingMode` — for session_logs telemetry only. */
+let lastAppliedAudioModeLabel: 'playback' | 'recording' | 'web' = 'web';
+
+export function getLastAppliedAudioModeLabel(): typeof lastAppliedAudioModeLabel {
+  return lastAppliedAudioModeLabel;
+}
 
 /** Call BEFORE every TTS playback so Amoraea speaks through the speaker at full volume. */
 export async function setPlaybackMode(): Promise<void> {
-  if (Platform.OS === 'web') return;
+  if (Platform.OS === 'web') {
+    lastAppliedAudioModeLabel = 'web';
+    return;
+  }
+  lastAppliedAudioModeLabel = 'playback';
+  const Audio = getExpoAvAudio();
   const playbackMode = {
     allowsRecordingIOS: false,
     playsInSilentModeIOS: true,
@@ -42,7 +59,12 @@ export async function logAndApplyPlaybackModeForTts(context: string): Promise<vo
 
 /** Call BEFORE every mic recording so input is captured correctly. */
 export async function setRecordingMode(): Promise<void> {
-  if (Platform.OS === 'web') return;
+  if (Platform.OS === 'web') {
+    lastAppliedAudioModeLabel = 'web';
+    return;
+  }
+  lastAppliedAudioModeLabel = 'recording';
+  const Audio = getExpoAvAudio();
   await Audio.setAudioModeAsync({
     allowsRecordingIOS: true,
     playsInSilentModeIOS: true,

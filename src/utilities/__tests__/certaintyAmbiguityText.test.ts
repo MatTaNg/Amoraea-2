@@ -28,7 +28,7 @@ describe('certaintyAmbiguityFromUserCorpus (production text axis)', () => {
   });
 
   it('single weak hedge without closure does not snap to 1.0 (smoothing)', () => {
-    const s = certaintyAmbiguityFromUserCorpus('i think sam was upset.');
+    const s = certaintyAmbiguityFromUserCorpus('i think emma was upset.');
     expect(s).toBeLessThan(0.95);
     expect(s).toBeGreaterThan(0.45);
   });

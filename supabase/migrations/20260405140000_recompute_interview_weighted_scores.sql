@@ -80,12 +80,30 @@ $function$;
 COMMENT ON FUNCTION public.recompute_interview_gate_from_pillar_scores(jsonb) IS
   'Gate helper: mean of assessed constructs only (score > 0); floor fail if any assessed < 3.';
 
+-- Idempotent: some remotes skipped 20260228100000_interview_completion_columns.sql
+ALTER TABLE users
+  ADD COLUMN IF NOT EXISTS interview_completed BOOLEAN DEFAULT FALSE,
+  ADD COLUMN IF NOT EXISTS interview_passed BOOLEAN DEFAULT NULL,
+  ADD COLUMN IF NOT EXISTS interview_weighted_score DECIMAL(4,2) DEFAULT NULL,
+  ADD COLUMN IF NOT EXISTS interview_pillar_scores JSONB DEFAULT NULL,
+  ADD COLUMN IF NOT EXISTS interview_completed_at TIMESTAMPTZ DEFAULT NULL,
+  ADD COLUMN IF NOT EXISTS interview_reviewed_at TIMESTAMPTZ DEFAULT NULL;
+
+-- Subquery form: PostgreSQL rejects UPDATE target alias inside FROM LATERAL (42P10).
 UPDATE public.interview_attempts ia
 SET
-  weighted_score = r.weighted_score,
-  passed = r.passed
-FROM LATERAL public.recompute_interview_gate_from_pillar_scores(ia.pillar_scores) AS r
-WHERE ia.pillar_scores IS NOT NULL;
+  weighted_score = sub.weighted_score,
+  passed = sub.passed
+FROM (
+  SELECT
+    t.id,
+    r.weighted_score,
+    r.passed
+  FROM public.interview_attempts t,
+  LATERAL public.recompute_interview_gate_from_pillar_scores(t.pillar_scores) AS r
+  WHERE t.pillar_scores IS NOT NULL
+) AS sub
+WHERE ia.id = sub.id;
 
 UPDATE public.users u
 SET
@@ -97,12 +115,20 @@ WHERE u.latest_attempt_id = ia.id
 
 UPDATE public.users u
 SET
-  interview_weighted_score = r.weighted_score,
-  interview_passed = r.passed
-FROM LATERAL public.recompute_interview_gate_from_pillar_scores(u.interview_pillar_scores) AS r
-WHERE u.interview_completed IS TRUE
-  AND u.latest_attempt_id IS NULL
-  AND u.interview_pillar_scores IS NOT NULL;
+  interview_weighted_score = sub.weighted_score,
+  interview_passed = sub.passed
+FROM (
+  SELECT
+    t.id,
+    r.weighted_score,
+    r.passed
+  FROM public.users t,
+  LATERAL public.recompute_interview_gate_from_pillar_scores(t.interview_pillar_scores) AS r
+  WHERE t.interview_completed IS TRUE
+    AND t.latest_attempt_id IS NULL
+    AND t.interview_pillar_scores IS NOT NULL
+) AS sub
+WHERE u.id = sub.id;
 
 COMMENT ON COLUMN public.users.interview_weighted_score IS
   'Mean of assessed relationship markers at completion (unassessed / 0 excluded from average); threshold 5.0';

@@ -15,6 +15,8 @@ import { Ionicons } from '@expo/vector-icons';
 import { parsePhoneNumberFromString } from 'libphonenumber-js';
 import { supabase } from '@data/supabase/client';
 import { FlameOrb } from '@app/screens/FlameOrb';
+import * as Clipboard from 'expo-clipboard';
+import { useQueryClient } from '@tanstack/react-query';
 
 const BG = '#0a0a0f';
 const ACCENT = '#3b82f6';
@@ -145,6 +147,7 @@ function PulsingDot() {
 export const PostInterviewScreen: React.FC<{ navigation: any; route: { params: { userId: string } } }> = ({
   route,
 }) => {
+  const queryClient = useQueryClient();
   const userId = route.params?.userId ?? '';
   const [phone, setPhone] = useState('');
   const [submitted, setSubmitted] = useState(false);
@@ -153,10 +156,32 @@ export const PostInterviewScreen: React.FC<{ navigation: any; route: { params: {
   const [fieldError, setFieldError] = useState<string | null>(null);
   const [saveError, setSaveError] = useState(false);
   const [saveErrorDetail, setSaveErrorDetail] = useState<string | null>(null);
+  const [myReferralCode, setMyReferralCode] = useState<string | null>(null);
+  const [referralNotice, setReferralNotice] = useState<string | null>(null);
+  const [copyFeedback, setCopyFeedback] = useState(false);
 
   useEffect(() => {
     loadWebFontsOnce();
   }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      const { data: auth } = await supabase.auth.getUser();
+      const uid = auth.user?.id ?? userId;
+      if (!uid) return;
+      const [{ data: codeRow }, { data: userRow }] = await Promise.all([
+        supabase.from('referral_codes').select('code').eq('referrer_user_id', uid).maybeSingle(),
+        supabase.from('users').select('referral_notice_pending').eq('id', uid).maybeSingle(),
+      ]);
+      if (cancelled) return;
+      setMyReferralCode(codeRow?.code ?? null);
+      setReferralNotice(userRow?.referral_notice_pending ?? null);
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [userId]);
 
   /** Email-only path: no phone validation; shows the email confirmation message. */
   const onEmailOnly = () => {
@@ -244,6 +269,27 @@ export const PostInterviewScreen: React.FC<{ navigation: any; route: { params: {
     }
   };
 
+  const dismissReferralNotice = async () => {
+    const { data: auth } = await supabase.auth.getUser();
+    const uid = auth.user?.id ?? userId;
+    if (!uid || !referralNotice) return;
+    const { error } = await supabase.from('users').update({ referral_notice_pending: null }).eq('id', uid);
+    if (error && __DEV__) console.warn('[PostInterview] clear referral notice', error.message);
+    setReferralNotice(null);
+    queryClient.invalidateQueries({ queryKey: ['profile', uid] });
+  };
+
+  const copyReferralCode = async () => {
+    if (!myReferralCode) return;
+    try {
+      await Clipboard.setStringAsync(myReferralCode);
+      setCopyFeedback(true);
+      setTimeout(() => setCopyFeedback(false), 2000);
+    } catch (e) {
+      if (__DEV__) console.warn('[PostInterview] clipboard', e);
+    }
+  };
+
   return (
     <SafeAreaContainer style={{ backgroundColor: BG, flex: 1 }}>
       <ScrollView
@@ -263,6 +309,15 @@ export const PostInterviewScreen: React.FC<{ navigation: any; route: { params: {
               <Text style={styles.badgeText}>Launching Winter 2026</Text>
             </View>
           </View>
+
+          {referralNotice ? (
+            <View style={styles.referralNoticeBanner}>
+              <Text style={styles.referralNoticeText}>{referralNotice}</Text>
+              <Pressable onPress={dismissReferralNotice} style={styles.referralNoticeDismiss} hitSlop={8}>
+                <Text style={styles.referralNoticeDismissLabel}>Dismiss</Text>
+              </Pressable>
+            </View>
+          ) : null}
 
           <View style={styles.bullets}>
             {[
@@ -334,9 +389,32 @@ export const PostInterviewScreen: React.FC<{ navigation: any; route: { params: {
                 disabled={submitting}
                 style={({ pressed }) => [styles.emailOnlyBtn, pressed && { opacity: 0.88 }]}
               >
+                <Text style={styles.emailOnlyLabel}>Email only — no SMS updates</Text>
               </Pressable>
             </>
           )}
+
+          {myReferralCode ? (
+            <View style={styles.referFriendSection}>
+              <View style={styles.referFriendDivider} />
+              <Text style={styles.referFriendTitle}>Give a friend a better shot.</Text>
+              <Text style={styles.referFriendBody}>
+                Share your personal code with someone you think is ready. If they complete the full interview,
+                you&apos;ll both have a better chance of getting in.
+              </Text>
+              <View style={styles.codeBlockRow}>
+                <Text style={styles.codeBlockText} selectable>
+                  {myReferralCode}
+                </Text>
+                <Pressable
+                  onPress={copyReferralCode}
+                  style={({ pressed }) => [styles.copyCodeBtn, pressed && { opacity: 0.85 }]}
+                >
+                  <Text style={styles.copyCodeBtnLabel}>{copyFeedback ? 'Copied' : 'Copy'}</Text>
+                </Pressable>
+              </View>
+            </View>
+          ) : null}
 
           <View style={styles.privacyRow}>
             <Ionicons name="lock-closed-outline" size={14} color="rgba(255,255,255,0.45)" />
@@ -539,5 +617,85 @@ const styles = StyleSheet.create({
     fontSize: 12,
     lineHeight: 17,
     color: 'rgba(255,255,255,0.45)',
+  },
+  referralNoticeBanner: {
+    width: '100%',
+    backgroundColor: 'rgba(59,130,246,0.12)',
+    borderWidth: 1,
+    borderColor: 'rgba(59,130,246,0.35)',
+    borderRadius: 12,
+    padding: 14,
+    marginBottom: 18,
+  },
+  referralNoticeText: {
+    fontFamily: FONT_BODY,
+    fontSize: 14,
+    lineHeight: 21,
+    color: 'rgba(255,255,255,0.92)',
+    marginBottom: 10,
+  },
+  referralNoticeDismiss: {
+    alignSelf: 'flex-end',
+  },
+  referralNoticeDismissLabel: {
+    fontFamily: FONT_BODY,
+    fontSize: 13,
+    fontWeight: '600',
+    color: ACCENT,
+  },
+  referFriendSection: {
+    width: '100%',
+    marginTop: 8,
+    marginBottom: 4,
+  },
+  referFriendDivider: {
+    height: 1,
+    backgroundColor: 'rgba(255,255,255,0.08)',
+    marginBottom: 20,
+  },
+  referFriendTitle: {
+    fontFamily: FONT_DISPLAY,
+    fontSize: 19,
+    fontWeight: '600',
+    color: '#f4f4f5',
+    marginBottom: 10,
+  },
+  referFriendBody: {
+    fontFamily: FONT_BODY,
+    fontSize: 14,
+    lineHeight: 21,
+    color: 'rgba(255,255,255,0.78)',
+    marginBottom: 14,
+  },
+  codeBlockRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    backgroundColor: 'rgba(0,0,0,0.35)',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.12)',
+    borderRadius: 10,
+    paddingVertical: 12,
+    paddingHorizontal: 14,
+  },
+  codeBlockText: {
+    flex: 1,
+    fontFamily: Platform.OS === 'ios' ? 'Menlo' : 'monospace',
+    fontSize: 17,
+    fontWeight: '600',
+    letterSpacing: 1.2,
+    color: '#f8fafc',
+  },
+  copyCodeBtn: {
+    backgroundColor: 'rgba(59,130,246,0.25)',
+    borderRadius: 8,
+    paddingVertical: 8,
+    paddingHorizontal: 14,
+  },
+  copyCodeBtnLabel: {
+    fontFamily: FONT_BODY,
+    fontSize: 13,
+    fontWeight: '600',
+    color: '#93c5fd',
   },
 });

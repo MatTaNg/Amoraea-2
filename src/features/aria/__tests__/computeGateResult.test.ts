@@ -6,6 +6,7 @@ import {
   computeGateResult,
   GATE_MARKER_BASE_WEIGHTS,
   GATE_PASS_WEIGHTED_MIN,
+  REFERRAL_WEIGHTED_PASS_MIN,
 } from '../computeGateResult';
 import { INTERVIEW_MARKER_IDS } from '../interviewMarkers';
 
@@ -132,5 +133,20 @@ describe('computeGateResult — research weights & floors', () => {
     expect(r.assessedMarkerCount).toBe(4);
     expect(r.weightedScore).toBe(10);
     expect(r.pass).toBe(true);
+  });
+
+  it('referral boost: weightedPassMin 5.5 passes uniform 5.8 (would fail at 6.0)', () => {
+    const scores = allAssessed(5.8);
+    const r = computeGateResult(scores, null, { weightedPassMin: REFERRAL_WEIGHTED_PASS_MIN });
+    expect(r.pass).toBe(true);
+    expect(r.reason).toBe('pass');
+  });
+
+  it('referral boost: weightedPassMin 5.5 still fails uniform 5.4', () => {
+    const scores = allAssessed(5.4);
+    const r = computeGateResult(scores, null, { weightedPassMin: REFERRAL_WEIGHTED_PASS_MIN });
+    expect(r.pass).toBe(false);
+    expect(r.reason).toBe('weighted_below_threshold');
+    expect(r.failReason).toContain('5.5');
   });
 });

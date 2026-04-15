@@ -6,7 +6,7 @@ import {
 describe('splitUserCorpusScenarioVsPersonal', () => {
   it('splits when handoff uses Unicode apostrophe in We’ve', () => {
     const transcript = [
-      { role: 'user', content: 'Reese is emotionally immature.' },
+      { role: 'user', content: 'Ryan is emotionally immature.' },
       {
         role: 'assistant',
         content:

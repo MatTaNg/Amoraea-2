@@ -173,6 +173,7 @@ export class ProfileRepository {
     if (update.gate2Psychometrics !== undefined) updateData.gate2_psychometrics = update.gate2Psychometrics;
     if (update.gate3Compatibility !== undefined) updateData.gate3_compatibility = update.gate3Compatibility;
     if (update.psychometricsProgress !== undefined) updateData.psychometrics_progress = update.psychometricsProgress;
+    if (update.referralNoticePending !== undefined) updateData.referral_notice_pending = update.referralNoticePending;
 
     // Remove undefined values so we don't send them to PostgREST (can cause 400)
     const payload: Record<string, unknown> = {};
@@ -312,6 +313,8 @@ export class ProfileRepository {
     gate3_compatibility?: unknown;
     psychometrics_progress?: unknown;
     interview_completed?: boolean | null;
+    referral_boost_active?: boolean | null;
+    referral_notice_pending?: string | null;
   }): Profile {
     const location: Location | null =
       data.location_latitude != null && data.location_longitude != null
@@ -340,6 +343,8 @@ export class ProfileRepository {
       primaryPhotoUrl: data.primary_photo_url,
       inviteCode: data.invite_code ?? null,
       isAlphaTester: data.is_alpha_tester === true,
+      referralBoostActive: data.referral_boost_active === true,
+      referralNoticePending: data.referral_notice_pending ?? null,
       interviewCompleted: data.interview_completed === true,
       prompts: parseProfilePrompts(data.profile_prompts),
       onboardingStage: parseOnboardingStage(data.onboarding_stage),

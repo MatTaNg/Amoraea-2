@@ -53,17 +53,17 @@ export function looksLikeMoment4GrudgePrompt(text: string): boolean {
 }
 
 /**
- * User answered as if still in Scenario C (Theo/Morgan / couples therapy) instead of the personal grudge prompt.
+ * User answered as if still in Scenario C (Daniel/Sophie / couples therapy) instead of the personal grudge prompt.
  * Do not inject the commitment follow-up until they address the grudge question — let the model redirect.
  */
 export function looksLikeMisplacedNonGrudgeMoment4Answer(text: string): boolean {
   const t = (text ?? '').toLowerCase().trim();
   if (t.length < 35) return false;
-  const hasTheo = /\btheo\b/.test(t);
-  const hasMorgan = /\bmorgan\b/.test(t);
+  const hasDaniel = /\bdaniel\b/.test(t);
+  const hasSophie = /\bsophie\b/.test(t);
   const scenarioCStyleMisread =
-    (hasTheo && hasMorgan) ||
-    ((hasTheo || hasMorgan) && /\b(couples therapy|recurring argument)\b/.test(t));
+    (hasDaniel && hasSophie) ||
+    ((hasDaniel || hasSophie) && /\b(couples therapy|recurring argument)\b/.test(t));
   if (!scenarioCStyleMisread) return false;
   const personalGrudgeOrDislikeStory =
     /\b(grudge|really didn't like|didn't like someone|someone in my|close friend|betray|confid|resentment toward|for two years|cut (him|her|them) off)\b/i.test(

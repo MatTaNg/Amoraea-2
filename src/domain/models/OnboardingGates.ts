@@ -1,6 +1,7 @@
 /**
- * Onboarding gates: stages, application status, and gate payloads.
- * Used for routing and storing Stage 1–4 data.
+ * Onboarding stages stored on `users.onboarding_stage`.
+ * The post-interview multi-step flow (basic_info → psychometrics → compatibility) is no longer in the app;
+ * new interview completions set `complete`. Legacy DB values are still parsed for old accounts.
  */
 
 export type OnboardingStage =

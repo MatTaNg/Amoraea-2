@@ -57,7 +57,7 @@ describe('translateStyleProfile', () => {
 
   it('Prompt 5: low narrative_conceptual score with verdict-only transcript does not assign conceptual thinker', () => {
     const corpus =
-      'jordan dropped the ball sam was contemptuous that is the problem reese should apologize for the long call';
+      'james dropped the ball emma was contemptuous that is the problem ryan should apologize for the long call';
     const t = translateStyleProfile(
       baseProfile({
         narrative_conceptual_score: 0.15,
@@ -252,7 +252,7 @@ describe('translateStyleProfile', () => {
 
   it('does not assign "more heart than head" for direct verdict register at moderate emotional_analytical_score', () => {
     const verdictCorpus =
-      "sam is being contemptuous. that's the problem. jordan dropped the ball. simple as that. some people just aren't worth the energy."
+      "emma is being contemptuous. that's the problem. james dropped the ball. simple as that. some people just aren't worth the energy."
         .toLowerCase();
     const t = translateStyleProfile(
       baseProfile({
@@ -271,7 +271,7 @@ describe('translateStyleProfile', () => {
 
   it('assigns "more heart than head" when score is moderate but transcript has felt-forward language', () => {
     const feltCorpus =
-      "oh i feel so sad for sam when he says that line — it hurts to watch. i was really moved when they tried to repair."
+      "oh i feel so sad for emma when he says that line — it hurts to watch. i was really moved when they tried to repair."
         .toLowerCase();
     const t = translateStyleProfile(
       baseProfile({
@@ -290,10 +290,10 @@ describe('translateStyleProfile', () => {
   it('does not assign "more heart than head" when felt-forward opens only in personal segment (scenario main analysis)', () => {
     const mainAnalysis = [
       'This seems like a communication breakdown. They should set ground rules.',
-      'Alex is being unreasonable. Jordan tried their best.',
+      'Sarah is being unreasonable. James tried their best.',
     ];
     const personalTurns = [
-      "Oh, I feel so sad for Alex when they trail off — it hurts to watch.",
+      "Oh, I feel so sad for Sarah when they trail off — it hurts to watch.",
     ];
     const userTurns = [...mainAnalysis, ...personalTurns];
     const corpus = userTurns.join(' ').toLowerCase();
@@ -320,7 +320,7 @@ describe('translateStyleProfile', () => {
 
   it('assigns "more heart than head" when felt-forward opening appears in a main vignette analysis answer', () => {
     const mainAnalysis = [
-      "Oh, I feel for Sam when the dinner runs long — it's painful to watch them disconnect.",
+      "Oh, I feel for Emma when the dinner runs long — it's painful to watch them disconnect.",
     ];
     const t = translateStyleProfile(
       baseProfile({
@@ -344,11 +344,11 @@ describe('translateStyleProfile', () => {
   it('does not assign "more heart than head" when "I feel" appears only in a fiction repair line, not main analysis', () => {
     const mainAnalysis = [
       'This seems like a communication breakdown.',
-      'Alex is being unreasonable.',
-      'Morgan needs to let it go.',
+      'Sarah is being unreasonable.',
+      'Sophie needs to let it go.',
     ];
     const fictionFollowUps = [
-      "I would tell Alex that I feel like I can't win — I showed up, I made plans, and it still wasn't enough.",
+      "I would tell Sarah that I feel like I can't win — I showed up, I made plans, and it still wasn't enough.",
     ];
     const personalTurns = ["I'm actually the kind of person who finds it hard to celebrate others."];
     const userTurns = [...mainAnalysis, ...fictionFollowUps, ...personalTurns];
@@ -388,7 +388,7 @@ describe('translateStyleProfile', () => {
 
   it('Prompt 5: verdict S1 + generic S3 with high emotional_vocab_density does not get "more heart than head"', () => {
     const turns = [
-      'jordan dropped the ball. simple as that',
+      'james dropped the ball. simple as that',
       'relationships are hard and you have to push through the difficult parts',
     ];
     const t = translateStyleProfile(
@@ -424,7 +424,7 @@ describe('translateStyleProfile', () => {
 
   it('Prompt 6: verdict-oriented transcript does not get leads with feeling or storyteller despite inflated axis scores', () => {
     const turns = [
-      'jordan dropped the ball simple as that alex needed to feel celebrated not logistics',
+      'james dropped the ball simple as that sarah needed to feel celebrated not logistics',
       'in general the demand withdraw pattern is obvious and clearly they both missed the bid',
     ];
     const corpus = turns.join(' ').toLowerCase();

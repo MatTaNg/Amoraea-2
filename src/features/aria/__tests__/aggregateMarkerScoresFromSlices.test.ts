@@ -41,7 +41,7 @@ describe('mergeCommitmentThresholdWeighted', () => {
     const base = { mentalizing: 7 };
     const s3 = {
       pillarScores: { commitment_threshold: 5 },
-      keyEvidence: { commitment_threshold: 'Theo/Morgan: generic stay.' },
+      keyEvidence: { commitment_threshold: 'Daniel/Sophie: generic stay.' },
     };
     const m4 = {
       pillarScores: { commitment_threshold: 8 },

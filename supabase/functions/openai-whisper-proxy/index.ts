@@ -39,6 +39,10 @@ Deno.serve(async (req) => {
     const outgoing = new FormData();
     outgoing.set('model', model);
     outgoing.set('file', file, file.name || 'recording.m4a');
+    const responseFormat = incoming.get('response_format')?.toString();
+    if (responseFormat) outgoing.set('response_format', responseFormat);
+    const language = incoming.get('language')?.toString();
+    if (language) outgoing.set('language', language);
 
     const openAiRes = await fetch('https://api.openai.com/v1/audio/transcriptions', {
       method: 'POST',

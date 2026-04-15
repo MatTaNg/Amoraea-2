@@ -27,8 +27,8 @@
  *
  * Story markers intentionally **exclude** phrasing people use when retelling **fictional vignettes**
  * ("that night," "one time [character]…," "what happened was" in third-person scenario talk),
- * and **bare** "when i was …" / "i remember …" used for hypotheticals ("when i was thinking about reese,"
- * "i remember jordan said…") — those produced storyHits with **zero** conceptual lexicon hits and false **1.0**.
+ * and **bare** "when i was …" / "i remember …" used for hypotheticals ("when i was thinking about Ryan,"
+ * "i remember James said…") — those produced storyHits with **zero** conceptual lexicon hits and false **1.0**.
  * See `STORY_MARKER_PATTERNS` (tight episodic cues only).
  *
  * DEBUG / QA — extreme narrative_conceptual_score (e.g. 0 for verdict-only speakers):
@@ -45,7 +45,7 @@ export function normalizeInterviewStyleCorpus(corpus: string): string {
 
 /**
  * Episodic / autobiographical cues only. Bare `when i was` and bare `i remember` are **excluded**:
- * they match hypothetical and vignette walkthroughs ("when i was thinking about reese", "i remember sam said…")
+ * they match hypothetical and vignette walkthroughs ("when i was thinking about Ryan", "i remember Emma said…")
  * with **zero** conceptual lexicon hits → false **narrative_conceptual_score = 1.0**.
  */
 export const STORY_MARKER_PATTERNS: readonly RegExp[] = [
@@ -235,7 +235,7 @@ export function countNarrativeEpisodeClustersInTurn(turn: string): number {
   if (!/\b(i|me|my|myself)\b/.test(norm)) return 0;
 
   const hasStoryMarkers = storyMarkerCount(norm) >= 1;
-  const scenarioNames = (norm.match(/\b(sam|reese|jordan|alex|theo|morgan)\b/g) ?? []).length;
+  const scenarioNames = (norm.match(/\b(emma|ryan|james|sarah|daniel|sophie)\b/g) ?? []).length;
   const personalKinOrPeer =
     /\b(my (mom|dad|mother|father|partner|friend|family|ex|wife|husband|sister|brother|kids?|aunt|uncle|cousin))\b/.test(
       norm,
@@ -327,7 +327,7 @@ const DIRECT_VERDICT_REGISTER_PATTERNS: RegExp[] = [
   /bottom line\b/i,
   /dropped the ball\b/i,
   /the problem is\b/i,
-  /obviously\s+(he|she|they|sam|jordan|alex)\b/i,
+  /obviously\s+(he|she|they|emma|james|sarah)\b/i,
   /clearly\s+(he|she|they)\b/i,
 ];
 

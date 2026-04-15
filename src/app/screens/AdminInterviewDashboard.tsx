@@ -3,7 +3,7 @@
  * Visible only to admin@amoraea.com. Remove before production.
  */
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import {
   View,
   Text,
@@ -12,6 +12,7 @@ import {
   Pressable,
   StyleSheet,
   Platform,
+  Alert,
 } from 'react-native';
 import { supabase } from '@data/supabase/client';
 import {
@@ -71,6 +72,38 @@ const USER_FEEDBACK_LABELS: Record<string, string> = {
   trust_accuracy: 'Trust and Accuracy',
   other_feedback: 'Additional Feedback',
 };
+
+/** Single source for admin gate (matches Edge Function `admin-delete-user`). */
+export const ADMIN_CONSOLE_EMAIL = 'admin@amoraea.com';
+
+async function confirmDeleteAccount(message: string): Promise<boolean> {
+  if (Platform.OS === 'web' && typeof window !== 'undefined') {
+    return window.confirm(message);
+  }
+  return new Promise((resolve) => {
+    Alert.alert('Delete account', message, [
+      { text: 'Cancel', style: 'cancel', onPress: () => resolve(false) },
+      { text: 'Delete', style: 'destructive', onPress: () => resolve(true) },
+    ]);
+  });
+}
+
+async function deleteUserAccountViaEdge(userId: string): Promise<{ ok: true } | { error: string }> {
+  const { data, error } = await supabase.functions.invoke('admin-delete-user', {
+    body: { userId },
+  });
+  const body = data as { ok?: boolean; error?: string } | null;
+  if (body && typeof body === 'object' && typeof body.error === 'string') {
+    return { error: body.error };
+  }
+  if (error) {
+    return { error: error.message };
+  }
+  if (body && typeof body === 'object' && body.ok === true) {
+    return { ok: true };
+  }
+  return { error: 'Unexpected response from server' };
+}
 
 type UserRow = {
   id: string;
@@ -499,18 +532,48 @@ function getString(v: unknown): string | null {
   return typeof v === 'string' && v.trim().length > 0 ? v.trim() : null;
 }
 
-function UserCard({ userData, onPress }: { userData: UserGroup; onPress: () => void }) {
+function UserCard({
+  userData,
+  onPress,
+  onDelete,
+  canDelete,
+  deleting,
+}: {
+  userData: UserGroup;
+  onPress: () => void;
+  onDelete: () => void;
+  canDelete: boolean;
+  deleting: boolean;
+}) {
   const latest = userData.latestAttempt;
   const passWord = getPassWord(latest);
   return (
-    <Pressable onPress={onPress} style={({ pressed }) => [styles.userCard, pressed && styles.userCardPressed]}>
-      <Text style={styles.userCardName}>{getUserDisplayName(userData.user)}</Text>
-      <Text style={styles.userCardEmail}>{userData.user.email ?? '—'}</Text>
-      <View style={styles.userCardMetaRow}>
-        <Text style={[styles.userCardStatus, { color: getPassColor(passWord) }]}>{passWord}</Text>
-        <Text style={styles.userCardTests}>{userData.attempts?.length ?? 0} tests</Text>
-      </View>
-    </Pressable>
+    <View style={styles.userCardRow}>
+      <Pressable
+        onPress={onPress}
+        style={({ pressed }) => [styles.userCard, styles.userCardFlex, pressed && styles.userCardPressed]}
+      >
+        <Text style={styles.userCardName}>{getUserDisplayName(userData.user)}</Text>
+        <Text style={styles.userCardEmail}>{userData.user.email ?? '—'}</Text>
+        <View style={styles.userCardMetaRow}>
+          <Text style={[styles.userCardStatus, { color: getPassColor(passWord) }]}>{passWord}</Text>
+          <Text style={styles.userCardTests}>{userData.attempts?.length ?? 0} tests</Text>
+        </View>
+      </Pressable>
+      {canDelete ? (
+        <TouchableOpacity
+          style={styles.userCardDelete}
+          onPress={() => void onDelete()}
+          disabled={deleting}
+          accessibilityRole="button"
+          accessibilityLabel="Delete account"
+        >
+          <Text style={[styles.userCardDeleteText, deleting && styles.userCardDeleteTextDisabled]}>
+            {deleting ? '…' : 'Delete'}
+          </Text>
+        </TouchableOpacity>
+      ) : null}
+    </View>
   );
 }
 
@@ -933,7 +996,19 @@ function FeedbackTab({ attempt }: { attempt: AttemptRow }) {
   );
 }
 
-function UserDetails({ userData, onBack }: { userData: UserGroup; onBack: () => void }) {
+function UserDetails({
+  userData,
+  onBack,
+  onDeleteAccount,
+  canDelete,
+  deleting,
+}: {
+  userData: UserGroup;
+  onBack: () => void;
+  onDeleteAccount: () => void;
+  canDelete: boolean;
+  deleting: boolean;
+}) {
   const attempts = getAttemptsSorted(userData.attempts);
   const [selectedAttemptId, setSelectedAttemptId] = useState<string | null>(attempts[0]?.id ?? null);
   const [activeInnerTab, setActiveInnerTab] = useState<'summary' | 'reasoning' | 'transcript' | 'feedback'>('summary');
@@ -947,9 +1022,23 @@ function UserDetails({ userData, onBack }: { userData: UserGroup; onBack: () => 
   return (
     <View style={styles.fullScreen}>
       <View style={styles.header}>
-        <TouchableOpacity onPress={onBack}>
-          <Text style={styles.backText}>← Back</Text>
-        </TouchableOpacity>
+        <View style={styles.headerTopRow}>
+          <TouchableOpacity onPress={onBack}>
+            <Text style={styles.backText}>← Back</Text>
+          </TouchableOpacity>
+          {canDelete ? (
+            <TouchableOpacity
+              onPress={() => void onDeleteAccount()}
+              disabled={deleting}
+              accessibilityRole="button"
+              accessibilityLabel="Delete account"
+            >
+              <Text style={[styles.headerDeleteText, deleting && styles.userCardDeleteTextDisabled]}>
+                {deleting ? 'Deleting…' : 'Delete account'}
+              </Text>
+            </TouchableOpacity>
+          ) : null}
+        </View>
         <Text style={styles.headerTitle}>{getUserDisplayName(userData.user)}</Text>
         <Text style={styles.headerSub}>{userData.user.email ?? '—'}</Text>
       </View>
@@ -1099,6 +1188,28 @@ export function AdminInterviewDashboard({ onClose }: { onClose: () => void }) {
   const [users, setUsers] = useState<UserGroup[]>([]);
   const [loading, setLoading] = useState(true);
   const [selectedUser, setSelectedUser] = useState<UserGroup | null>(null);
+  const [currentUserId, setCurrentUserId] = useState<string | null>(null);
+  const [deletingUserId, setDeletingUserId] = useState<string | null>(null);
+
+  const refreshUsers = useCallback(async () => {
+    try {
+      const data = await fetchAllAdminData();
+      setUsers(data);
+    } catch (err) {
+      console.error('Admin panel fetch failed:', err);
+      setUsers([]);
+    }
+  }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+    void supabase.auth.getSession().then(({ data: { session } }) => {
+      if (!cancelled) setCurrentUserId(session?.user?.id ?? null);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   useEffect(() => {
     let cancelled = false;
@@ -1120,7 +1231,55 @@ export function AdminInterviewDashboard({ onClose }: { onClose: () => void }) {
     };
   }, []);
 
-  if (selectedUser) return <UserDetails userData={selectedUser} onBack={() => setSelectedUser(null)} />;
+  const canDeleteUser = useCallback(
+    (row: UserRow) => {
+      if (!row?.id) return false;
+      if (currentUserId != null && row.id === currentUserId) return false;
+      if ((row.email ?? '').toLowerCase() === ADMIN_CONSOLE_EMAIL) return false;
+      return true;
+    },
+    [currentUserId],
+  );
+
+  const handleDeleteUser = useCallback(
+    async (row: UserRow) => {
+      if (!canDeleteUser(row)) return;
+      const label = row.email ?? row.id;
+      const ok = await confirmDeleteAccount(
+        `Permanently delete account ${label}? All interview data for this user will be removed. This cannot be undone.`,
+      );
+      if (!ok) return;
+      setDeletingUserId(row.id);
+      try {
+        const result = await deleteUserAccountViaEdge(row.id);
+        if ('error' in result) {
+          if (Platform.OS === 'web' && typeof window !== 'undefined') {
+            window.alert(result.error);
+          } else {
+            Alert.alert('Delete failed', result.error);
+          }
+          return;
+        }
+        await refreshUsers();
+        setSelectedUser((prev) => (prev?.user.id === row.id ? null : prev));
+      } finally {
+        setDeletingUserId(null);
+      }
+    },
+    [canDeleteUser, refreshUsers],
+  );
+
+  if (selectedUser) {
+    return (
+      <UserDetails
+        userData={selectedUser}
+        onBack={() => setSelectedUser(null)}
+        canDelete={canDeleteUser(selectedUser.user)}
+        deleting={deletingUserId === selectedUser.user.id}
+        onDeleteAccount={() => void handleDeleteUser(selectedUser.user)}
+      />
+    );
+  }
 
   return (
     <View style={styles.fullScreen}>
@@ -1137,7 +1296,14 @@ export function AdminInterviewDashboard({ onClose }: { onClose: () => void }) {
           <Text style={styles.emptyText}>No users found.</Text>
         ) : (
           users.map((userData) => (
-            <UserCard key={userData.user.id} userData={userData} onPress={() => setSelectedUser(userData)} />
+            <UserCard
+              key={userData.user.id}
+              userData={userData}
+              onPress={() => setSelectedUser(userData)}
+              canDelete={canDeleteUser(userData.user)}
+              deleting={deletingUserId === userData.user.id}
+              onDelete={() => void handleDeleteUser(userData.user)}
+            />
           ))
         )}
       </ScrollView>
@@ -1174,6 +1340,40 @@ const styles = StyleSheet.create({
   cardsContainer: {
     padding: 20,
     gap: 12,
+  },
+  userCardRow: {
+    flexDirection: 'row',
+    alignItems: 'stretch',
+  },
+  userCardFlex: {
+    flex: 1,
+    minWidth: 0,
+  },
+  userCardDelete: {
+    justifyContent: 'center',
+    paddingHorizontal: 12,
+    borderLeftWidth: 1,
+    borderLeftColor: 'rgba(82,142,220,0.12)',
+  },
+  userCardDeleteText: {
+    color: '#E87A7A',
+    fontSize: 12,
+    fontWeight: '600',
+  },
+  userCardDeleteTextDisabled: {
+    opacity: 0.5,
+  },
+  headerTopRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    alignSelf: 'stretch',
+    marginBottom: 4,
+  },
+  headerDeleteText: {
+    color: '#E87A7A',
+    fontSize: 12,
+    fontWeight: '600',
   },
   userCard: {
     backgroundColor: 'rgba(13,17,32,0.8)',

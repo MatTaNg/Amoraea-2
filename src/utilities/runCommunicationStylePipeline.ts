@@ -4,6 +4,8 @@
  */
 import { supabase } from '@data/supabase/client';
 import { remoteLog } from '@utilities/remoteLog';
+import { logCommunicationStylePipelineOutcome } from '@utilities/sessionLogging/sessionLogInterview';
+import type { SessionPlatform } from '@utilities/sessionLogging/writeSessionLog';
 
 /** Browser CORS on preflight often means the gateway returned non-2xx (e.g. 404 if the function is not deployed). */
 function warnIfEdgeFunctionsProbablyMissing(errs: string[]): void {
@@ -49,7 +51,8 @@ async function safeUpdateCommunicationStyleError(
 export async function runCommunicationStylePipelineAfterSave(
   uid: string,
   attemptId: string,
-  sessionId: string
+  sessionId: string,
+  sessionLog?: { platform: SessionPlatform | null }
 ): Promise<void> {
   const errs: string[] = [];
   console.log('[COMMUNICATION_STYLE] pipeline start', { attemptId, sessionIdPresent: Boolean(sessionId?.trim()) });
@@ -140,4 +143,31 @@ export async function runCommunicationStylePipelineAfterSave(
   }
 
   await safeUpdateCommunicationStyleError(attemptId, uid, errorText);
+
+  let matchmakerSummary: string | null = null;
+  try {
+    const { data: row } = await supabase
+      .from('communication_style_profiles')
+      .select('matchmaker_summary, source_attempt_id')
+      .eq('user_id', uid)
+      .eq('source_attempt_id', attemptId)
+      .maybeSingle();
+    const raw = row as { matchmaker_summary?: string | null; source_attempt_id?: string | null } | null;
+    matchmakerSummary = typeof raw?.matchmaker_summary === 'string' ? raw.matchmaker_summary : null;
+  } catch {
+    matchmakerSummary = null;
+  }
+  const summaryLen = matchmakerSummary?.trim().length ?? 0;
+  logCommunicationStylePipelineOutcome(
+    { userId: uid, attemptId, platform: sessionLog?.platform ?? null },
+    {
+      source_attempt_id: attemptId,
+      matchmaker_summary_generated: summaryLen > 0,
+      matchmaker_summary_length: summaryLen,
+      pipeline_error: errorText,
+    }
+  );
+  if (summaryLen > 0) {
+    void remoteLog('[COMMUNICATION_STYLE] matchmaker_summary', { attemptId, length: summaryLen });
+  }
 }

@@ -57,13 +57,13 @@ const GOLD_PURE_NARRATIVE_EXTENDED =
 
 /** Would match legacy bare `when i was` / `i remember` and score 1.0 with no conceptual tokens. */
 const REGRESSION_VIGNETTE_HYPOTHETICAL_VOICE =
-  'when i was thinking about the fight i remember reese was pretty harsh and jordan could have listened better';
+  'when i was thinking about the fight i remember ryan was pretty harsh and james could have listened better';
 
 describe('leads with feeling primary (transcript + emotional_analytical_score)', () => {
   it('qualifies when opening is felt-forward and EA ≥ 0.65 even if corpus has many verdict phrases', () => {
     const turns = [
-      'Oh, that line from Sam really landed for me — it felt harsh.',
-      "Jordan dropped the ball. That's the problem. The problem is he never showed up. Bottom line, he failed the repair.",
+      'Oh, that line from Emma really landed for me — it felt harsh.',
+      "James dropped the ball. That's the problem. The problem is he never showed up. Bottom line, he failed the repair.",
     ];
     const corpus = turns.join(' ').toLowerCase();
     expect(
@@ -96,7 +96,7 @@ describe('leads with feeling primary (transcript + emotional_analytical_score)',
       text_confidence: 1,
       audio_confidence: 0,
     };
-    const turns = ['Matt', 'yes', '"I think Sam has been sitting on this frustration for a while and it finally came out.'];
+    const turns = ['Matt', 'yes', '"I think Emma has been sitting on this frustration for a while and it finally came out.'];
     const corpus = turns.join(' ').toLowerCase();
     const t = translateStyleProfile(baseProfile(row), { userTurns: turns, userCorpus: corpus });
     expect(t.primary).toContain('leads with feeling');
@@ -104,8 +104,8 @@ describe('leads with feeling primary (transcript + emotional_analytical_score)',
 
   it('qualifies via high-axis fallback when openings are analytical but EA and emotional_vocab_density are high (attempt 153 shape)', () => {
     const turns = [
-      'I think Sam has been sitting on this frustration for a while and it finally came out.',
-      'I think Jordan genuinely tried but missed the point entirely.',
+      'I think Emma has been sitting on this frustration for a while and it finally came out.',
+      'I think James genuinely tried but missed the point entirely.',
     ];
     const corpus = turns.join(' ').toLowerCase();
     expect(
@@ -218,7 +218,7 @@ describe('interviewStyleMarkers narrative vs conceptual (production scoring)', (
 
   it('treats mixed clinical + vignette deixis as conceptual (low narrative ratio)', () => {
     const corpus =
-      `${GOLD_CONCEPTUAL_TRANSCRIPT} earlier when alex said jordan needed repair mentalizing attunement`.toLowerCase();
+      `${GOLD_CONCEPTUAL_TRANSCRIPT} earlier when sarah said james needed repair mentalizing attunement`.toLowerCase();
     const r = narrativeConceptualRatioFromCorpus(corpus);
     expect(r).toBeLessThan(0.35);
     expect(storyMarkerCount(normalizeInterviewStyleCorpus(corpus))).toBe(0);
@@ -282,7 +282,7 @@ describe('interviewStyleMarkers narrative vs conceptual (production scoring)', (
 
   /** Verdict-oriented scenario analysis without framework lexicon — not the conceptual pole (Prompt 4). */
   const VERDICT_SCENARIO_VOICE =
-    'jordan dropped the ball sam was contemptuous reese needs to apologize the pattern keeps repeating';
+    'james dropped the ball emma was contemptuous ryan needs to apologize the pattern keeps repeating';
 
   it('verdict-oriented scenario voice uses mid-band floor when ratio would be 0 with only weak conceptual hits', () => {
     const norm = normalizeInterviewStyleCorpus(VERDICT_SCENARIO_VOICE.toLowerCase());
@@ -296,7 +296,7 @@ describe('interviewStyleMarkers narrative vs conceptual (production scoring)', (
 
   it('mid-band floor applies when raw ratio is small but non-zero and strong framework count is 0 (Prompt 4)', () => {
     const corpus =
-      'last year jordan dropped the ball sam was contemptuous reese should apologize the thing about repair is people tend to listen when you pattern the dynamic'
+      'last year james dropped the ball emma was contemptuous ryan should apologize the thing about repair is people tend to listen when you pattern the dynamic'
         .toLowerCase();
     const norm = normalizeInterviewStyleCorpus(corpus);
     expect(storyMarkerCount(norm)).toBeGreaterThanOrEqual(1);
@@ -308,7 +308,7 @@ describe('interviewStyleMarkers narrative vs conceptual (production scoring)', (
 
   it('mid-band floor still applies with exactly one strong framework token (verdict-heavy interview)', () => {
     const corpus =
-      'sam is being contemptuous that is the problem jordan dropped the ball theo needs to stop leaving frustrating the pattern for morgan one stray hypothesis about repair'
+      'emma is being contemptuous that is the problem james dropped the ball daniel needs to stop leaving frustrating the pattern for sophie one stray hypothesis about repair'
         .toLowerCase();
     const norm = normalizeInterviewStyleCorpus(corpus);
     expect(strongConceptualMarkerCount(norm)).toBe(1);
@@ -320,7 +320,7 @@ describe('interviewStyleMarkers narrative vs conceptual (production scoring)', (
 
   it('two or more distinct strong framework families keep raw ratio at conceptual pole (no floor)', () => {
     const corpus =
-      'demand-withdraw dynamic and co-regulation framing sam was wrong category error pursue-withdrawal cycle'
+      'demand-withdraw dynamic and co-regulation framing emma was wrong category error pursue-withdrawal cycle'
         .toLowerCase();
     const norm = normalizeInterviewStyleCorpus(corpus);
     expect(strongConceptualPatternFamilyCount(norm)).toBeGreaterThanOrEqual(2);
@@ -330,7 +330,7 @@ describe('interviewStyleMarkers narrative vs conceptual (production scoring)', (
 
   it('repeated mentions of one framework token count as one family so mid-band floor still applies', () => {
     const corpus =
-      'sam was wrong jordan failed hypothesis hypothesis hypothesis reese should apologize the pattern keeps repeating'
+      'emma was wrong james failed hypothesis hypothesis hypothesis ryan should apologize the pattern keeps repeating'
         .toLowerCase();
     const norm = normalizeInterviewStyleCorpus(corpus);
     expect(strongConceptualMarkerCount(norm)).toBeGreaterThanOrEqual(2);
@@ -343,10 +343,10 @@ describe('interviewStyleMarkers narrative vs conceptual (production scoring)', (
 
 /** Prompt 5 — production validation transcripts (opposite poles on 0 = conceptual, 1 = narrative). */
 const PROMPT5_CONCEPTUAL_USER_TRANSCRIPT =
-  'demand-withdraw pattern category error pursue-withdraw cycle behavioral contract. verdict-oriented: sam blew it jordan failed the repair. no story just the frame.';
+  'demand-withdraw pattern category error pursue-withdraw cycle behavioral contract. verdict-oriented: emma blew it james failed the repair. no story just the frame.';
 
 const PROMPT5_NARRATIVE_USER_TRANSCRIPT =
-  'oh sam is hurting when he says that line. this one actually made me a little sad. i had a grudge with my sister for years after she bailed on my birthday. when my partner got their promotion i remember how lit up they were we went out to celebrate growing up we never said proud out loud but that night i told them.';
+  'oh emma is hurting when he says that line. this one actually made me a little sad. i had a grudge with my sister for years after she bailed on my birthday. when my partner got their promotion i remember how lit up they were we went out to celebrate growing up we never said proud out loud but that night i told them.';
 
 describe('Prompt 5 — narrative_conceptual_score validation corpora', () => {
   it('conceptual user transcript stays near conceptual pole; narrative transcript near narrative pole', () => {
@@ -373,7 +373,7 @@ describe('Prompt 5 — narrative_conceptual_score validation corpora', () => {
     expect(tConcept.primary).toContain('conceptual thinker');
 
     const turns = [
-      'oh sam is hurting when he says that this one actually made me a little sad. i remember last year when i was home my sister and i had a rough patch after she bailed on my birthday.',
+      'oh emma is hurting when he says that this one actually made me a little sad. i remember last year when i was home my sister and i had a rough patch after she bailed on my birthday.',
       'the other day i called my aunt growing up we never said proud out loud but i told her i was proud of her.',
       'when my partner got promoted i remember how lit up they were we went out to celebrate that night.',
     ];

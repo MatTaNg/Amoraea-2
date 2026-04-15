@@ -24,8 +24,8 @@ narrative_conceptual_score near 0 — sanity check (example: direct, verdict-ori
 Expected band for this voice: ~0.3–0.4 (toward conceptual, not the extreme pole).
 
 Reasoning:
-- Language is direct and verdict-oriented (“Sam is being contemptuous. That's the problem.”,
-  “Jordan dropped the ball. Simple as that.”, “Theo needs to stop leaving.”) — declarative,
+- Language is direct and verdict-oriented (“Emma is being contemptuous. That's the problem.”,
+  “James dropped the ball. Simple as that.”, “Daniel needs to stop leaving.”) — declarative,
   not episodic scene-setting; scenario answers are not personal stories.
 - It is also not deeply “conceptual” in the framework sense: no heavy analytical terminology
   (e.g. demand-withdraw pattern, category error, co-regulation, pursue-withdraw cycle).

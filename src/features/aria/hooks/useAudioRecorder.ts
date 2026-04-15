@@ -1,38 +1,45 @@
 import { useState, useRef, useCallback } from 'react';
 import { Platform } from 'react-native';
-import { Audio } from 'expo-av';
 import { setPlaybackMode, setRecordingMode } from '@features/aria/utils/audioModeHelpers';
+
+/** Do not top-level import expo-av — it breaks web lazy-load of the interview screen. */
+function getExpoAvAudio(): typeof import('expo-av').Audio {
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  return require('expo-av').Audio;
+}
+
+function buildRecordingPreset(Audio: ReturnType<typeof getExpoAvAudio>) {
+  return {
+    android: {
+      extension: '.m4a',
+      outputFormat: Audio.AndroidOutputFormat.MPEG_4,
+      audioEncoder: Audio.AndroidAudioEncoder.AAC,
+      sampleRate: 44100,
+      numberOfChannels: 1,
+      bitRate: 128000,
+    },
+    ios: {
+      extension: '.m4a',
+      outputFormat: Audio.IOSOutputFormat.MPEG4AAC,
+      audioQuality: Audio.IOSAudioQuality.HIGH,
+      sampleRate: 44100,
+      numberOfChannels: 1,
+      bitRate: 128000,
+      linearPCMBitDepth: 16,
+      linearPCMIsBigEndian: false,
+      linearPCMIsFloat: false,
+    },
+    web: {
+      mimeType: 'audio/webm',
+      bitsPerSecond: 128000,
+    },
+  } as const;
+}
 import {
   logNativeMicRecordingStopped,
   logWebMicRecordingStopped,
 } from '@features/aria/telemetry/tsAutoplayTelemetry';
 export type AudioRecorderPermissionStatus = 'granted' | 'denied' | null;
-
-const RECORDING_OPTIONS = {
-  android: {
-    extension: '.m4a',
-    outputFormat: Audio.AndroidOutputFormat.MPEG_4,
-    audioEncoder: Audio.AndroidAudioEncoder.AAC,
-    sampleRate: 44100,
-    numberOfChannels: 1,
-    bitRate: 128000,
-  },
-  ios: {
-    extension: '.m4a',
-    outputFormat: Audio.IOSOutputFormat.MPEG4AAC,
-    audioQuality: Audio.IOSAudioQuality.HIGH,
-    sampleRate: 44100,
-    numberOfChannels: 1,
-    bitRate: 128000,
-    linearPCMBitDepth: 16,
-    linearPCMIsBigEndian: false,
-    linearPCMIsFloat: false,
-  },
-  web: {
-    mimeType: 'audio/webm',
-    bitsPerSecond: 128000,
-  },
-};
 
 /**
  * useAudioRecorder
@@ -54,7 +61,9 @@ export function useAudioRecorder({
   const [isRecording, setIsRecording] = useState(false);
   const [permissionStatus, setPermissionStatus] = useState<AudioRecorderPermissionStatus>(null);
 
-  const recordingRef = useRef<Audio.Recording | null>(null);
+  const recordingRef = useRef<ReturnType<typeof getExpoAvAudio>['Recording'] extends { prototype: infer P }
+    ? P
+    : never | null>(null);
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const audioChunksRef = useRef<Blob[]>([]);
   const recordingStartTimeRef = useRef<number | null>(null);
@@ -72,6 +81,7 @@ export function useAudioRecorder({
         return false;
       }
     }
+    const Audio = getExpoAvAudio();
     const { status } = await Audio.requestPermissionsAsync();
     setPermissionStatus(status === 'granted' ? 'granted' : 'denied');
     return status === 'granted';
@@ -92,7 +102,8 @@ export function useAudioRecorder({
     try {
       await setRecordingMode();
 
-      const { recording } = await Audio.Recording.createAsync(RECORDING_OPTIONS);
+      const Audio = getExpoAvAudio();
+      const { recording } = await Audio.Recording.createAsync(buildRecordingPreset(Audio));
 
       recordingRef.current = recording;
       recordingStartTimeRef.current = Date.now();

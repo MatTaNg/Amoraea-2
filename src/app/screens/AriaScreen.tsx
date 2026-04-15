@@ -11,9 +11,9 @@ import {
   Alert,
   Platform,
   Modal,
+  AppState,
 } from 'react-native';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { Audio } from 'expo-av';
 import { useAuth } from '@features/authentication/hooks/useAuth';
 import { SafeAreaContainer } from '@ui/components/SafeAreaContainer';
 import { Button } from '@ui/components/Button';
@@ -23,11 +23,25 @@ import { Ionicons } from '@expo/vector-icons';
 import Constants from 'expo-constants';
 import { INTERVIEWER_SYSTEM_FRAMEWORK } from '@features/aria/interviewerFrameworkPrompt';
 import {
+  interviewAssistantTextHasDisallowedNameMarker,
+  sanitizeAssistantInterviewerCharacterNames,
+} from '@/constants/interviewCharacterNames';
+import {
   INTERVIEW_MARKER_IDS,
   INTERVIEW_MARKER_LABELS,
   SLICE_ONLY_MARKER_LABELS,
 } from '@features/aria/interviewMarkers';
 import { computeGateResult, GATE_PASS_WEIGHTED_MIN, type GateResult } from '@features/aria/computeGateResult';
+import {
+  NON_ENGLISH_VOICE_PROMPT,
+  parseWhisperTranscriptionPayload,
+  shouldRejectVoiceForNonEnglish,
+  countSpokenWords,
+} from '@features/aria/interviewLanguageGate';
+import {
+  resolveWeightedPassMinAfterReferralFulfillment,
+  ensureShareableReferralCodeForReferrer,
+} from '@features/referrals/referralInterview';
 import { setPlaybackMode } from '@features/aria/utils/audioModeHelpers';
 import {
   speakWithElevenLabs,
@@ -60,6 +74,23 @@ import { remoteLog } from '@utilities/remoteLog';
 import { isWebInsecureDevUrl, webInsecureContextHelpMessage } from '@utilities/webSecureContext';
 import { waitForInterviewAttemptScoringReady } from '@utilities/waitForInterviewAttemptScoringReady';
 import { runCommunicationStylePipelineAfterSave } from '@utilities/runCommunicationStylePipeline';
+import { writeSessionLog, logSupabaseWriteFailed } from '@utilities/sessionLogging/writeSessionLog';
+import {
+  resetSessionLogRuntime,
+  setSessionLogPlatform,
+  markQuestionDelivered,
+  setRecordingSessionActive,
+  setTtsPlaybackActive,
+  touchActivity,
+  setLastHiddenAtMs,
+  setNavigationAwayAtMs,
+  getSessionLogRuntime,
+  assignAttemptIdForSessionLogs,
+  logGateAnalyticsToSession,
+  logTouchActivityForPause,
+} from '@utilities/sessionLogging';
+import { collectDeviceContext } from '@utilities/sessionLogging/collectDeviceContext';
+import { gatherRecordingStartTelemetry, gatherTtsPlaybackTelemetry } from '@utilities/sessionLogging/sessionAudioTelemetry';
 import { FlameOrb } from '@app/screens/FlameOrb';
 import { UserInterviewLayout, type ActiveScenario } from '@app/screens/UserInterviewLayout';
 import { InterviewAnalysisScreen } from '@app/screens/InterviewAnalysisScreen';
@@ -119,6 +150,25 @@ import { buildPersonalMomentScoringPrompt } from '@features/aria/personalMomentS
 import { inferPersonalMomentSlices } from '@features/aria/personalMomentSlices';
 import * as FileSystem from 'expo-file-system';
 import * as FileSystemLegacy from 'expo-file-system/legacy';
+
+// #region agent log
+if (typeof fetch !== 'undefined') {
+  console.info('[ARIA_MODULE_EVALUATED]');
+  fetch('http://127.0.0.1:7789/ingest/668e0bd5-3283-4492-9f48-e33846c18218', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'X-Debug-Session-Id': 'e70f17' },
+    body: JSON.stringify({
+      sessionId: 'e70f17',
+      location: 'AriaScreen.tsx:after-imports',
+      message: 'AriaScreen module body executing (imports completed)',
+      data: { platform: typeof navigator !== 'undefined' ? String(navigator.userAgent).slice(0, 160) : 'no-ua' },
+      timestamp: Date.now(),
+      hypothesisId: 'H3',
+      runId: 'pre-fix',
+    }),
+  }).catch(() => {});
+}
+// #endregion
 
 const FALLBACK_MARKER_SCORES_MID: Record<string, number> = {
   mentalizing: 6,
@@ -262,15 +312,15 @@ function syncInterviewMomentsFromTranscript(
       currentMoment = 4;
       break;
     }
-    if (c.includes('morgan and theo') && c.includes('i need ten minutes')) {
+    if (c.includes('sophie and daniel') && c.includes('i need ten minutes')) {
       currentMoment = 3;
       break;
     }
-    if (c.includes('alex has been job hunting')) {
+    if (c.includes('sarah has been job hunting')) {
       currentMoment = 2;
       break;
     }
-    if (c.includes('sam and reese') || c.includes('reese takes a call')) {
+    if (c.includes('emma and ryan') || c.includes('ryan takes a call')) {
       currentMoment = 1;
       break;
     }
@@ -296,7 +346,7 @@ type InterviewProgressRefs = {
 function applyInterviewProgressFromAssistantText(rawDisplayText: string, refs: InterviewProgressRefs) {
   const dt = (rawDisplayText ?? '').toLowerCase();
   // Require the real grudge ask — do not use "more personal" alone: S2→S3 copy says "something more personal"
-  // and would false-trigger M4 (breaks Scenario C repair → Theo/Morgan threshold forcing).
+  // and would false-trigger M4 (breaks Scenario C repair → Daniel/Sophie threshold forcing).
   if (
     (dt.includes("we've covered those three") || dt.includes('three situations')) &&
     dt.includes('held a grudge')
@@ -528,9 +578,9 @@ function getScenarioNumberForNewMessage(
   if (role === 'user') return lastNum ?? 1;
   if (!newContent) return lastNum ?? 1;
   const c = newContent.toLowerCase();
-  if (/sam and reese|reese takes a call|first situation|here's the first|situation 1/.test(c)) return 1;
-  if (/alex has been job hunting|alex.*jordan|on to the second|second situation|here's the next situation/.test(c)) return 2;
-  if (/morgan and theo|i need ten minutes|here's the third situation|third situation|last one.*situation three|situation three/.test(c)) return 3;
+  if (/emma and ryan|ryan takes a call|first situation|here's the first|situation 1/.test(c)) return 1;
+  if (/sarah has been job hunting|sarah.*james|on to the second|second situation|here's the next situation/.test(c)) return 2;
+  if (/sophie and daniel|i need ten minutes|here's the third situation|third situation|last one.*situation three|situation three/.test(c)) return 3;
   return lastNum ?? 1;
 }
 
@@ -538,9 +588,9 @@ function getScenarioNumberForNewMessage(
 function detectScenarioFromResponse(responseText: string): 1 | 2 | 3 | null {
   if (!responseText?.trim()) return null;
   const c = responseText.toLowerCase();
-  if (/sam and reese|reese takes a call|first situation|here's the first/.test(c)) return 1;
-  if (/alex has been job hunting|second situation|on to the second|here's the next situation/.test(c)) return 2;
-  if (/morgan and theo|theo.*didn't know how|here's the third situation|third situation|last one.*situation three|situation three/.test(c)) return 3;
+  if (/emma and ryan|ryan takes a call|first situation|here's the first/.test(c)) return 1;
+  if (/sarah has been job hunting|second situation|on to the second|here's the next situation/.test(c)) return 2;
+  if (/sophie and daniel|daniel.*didn't know how|here's the third situation|third situation|last one.*situation three|situation three/.test(c)) return 3;
   return null;
 }
 
@@ -551,16 +601,16 @@ function inferScenarioMessages(
 ): { role: string; content: string }[] {
   const scenarioAnchors: Record<number, string[]> = {
     1: [
-      'sam and reese',
-      'reese takes a call',
+      'emma and ryan',
+      'ryan takes a call',
       "here's the first",
       'first situation',
       "what can i call you",
       "i'm aira",
       "welcome to amoraea",
     ],
-    2: ['alex has been job hunting', 'on to the second', 'second situation', "here's the next situation"],
-    3: ['morgan and theo', 'i need ten minutes', "here's the third situation", 'third situation', 'last one', 'situation three'],
+    2: ['sarah has been job hunting', 'on to the second', 'second situation', "here's the next situation"],
+    3: ['sophie and daniel', 'i need ten minutes', "here's the third situation", 'third situation', 'last one', 'situation three'],
   };
   const anchors = scenarioAnchors[scenarioNum].map((a) => a.toLowerCase());
   const startIdx = allMessages.findIndex((m) => {
@@ -748,9 +798,9 @@ function hasCommitmentThresholdSignal(text: string): boolean {
 function looksLikeScenarioCThresholdQuestion(text: string): boolean {
   const t = text.toLowerCase();
   return (
-    t.includes("at what point would you say theo or morgan should decide this relationship isn't working") ||
-    (t.includes('theo') &&
-      t.includes('morgan') &&
+    t.includes("at what point would you say daniel or sophie should decide this relationship isn't working") ||
+    (t.includes('daniel') &&
+      t.includes('sophie') &&
       t.includes("isn't working") &&
       /\b(at what point|what point)\b/.test(t))
   );
@@ -759,7 +809,7 @@ function looksLikeScenarioCThresholdQuestion(text: string): boolean {
 function looksLikeScenarioAContemptProbeQuestion(text: string): boolean {
   const t = text.toLowerCase();
   return (
-    t.includes("what do you make of sam's statement") &&
+    t.includes("what do you make of emma's statement") &&
     t.includes("you've made that very clear")
   );
 }
@@ -767,15 +817,15 @@ function looksLikeScenarioAContemptProbeQuestion(text: string): boolean {
 function looksLikeScenarioARepairQuestion(text: string): boolean {
   const t = text.toLowerCase();
   return (
-    t.includes('how would you repair this relationship if you were reese') ||
-    (t.includes('if you were reese') && t.includes('repair this relationship'))
+    t.includes('how would you repair this relationship if you were ryan') ||
+    (t.includes('if you were ryan') && t.includes('repair this relationship'))
   );
 }
 
 function stripScenarioARepairQuestion(text: string): string {
   const cleaned = text
-    .replace(/(?:^|\n)\s*How would you repair this relationship if you were Reese\?\s*/gi, '\n')
-    .replace(/(?:^|\n)\s*If you were Reese[^?.!]*repair[^?.!]*[?.!]\s*/gi, '\n')
+    .replace(/(?:^|\n)\s*How would you repair this relationship if you were Ryan\?\s*/gi, '\n')
+    .replace(/(?:^|\n)\s*If you were Ryan[^?.!]*repair[^?.!]*[?.!]\s*/gi, '\n')
     .replace(/\n{3,}/g, '\n\n')
     .trim();
   return cleaned;
@@ -783,55 +833,55 @@ function stripScenarioARepairQuestion(text: string): string {
 
 function looksLikeScenarioBFullAppreciationProbeQuestion(text: string): boolean {
   const t = text.toLowerCase();
-  return t.includes("what do you think jordan could've done differently so alex feels better");
+  return t.includes("what do you think james could've done differently so sarah feels better");
 }
 
-/** Scenario B Q2 — what Jordan could have done before the rupture (not repair-as-Jordan). */
-function looksLikeScenarioBJordanDifferentlyQuestion(text: string): boolean {
+/** Scenario B Q2 — what James could have done before the rupture (not repair-as-James). */
+function looksLikeScenarioBJamesDifferentlyQuestion(text: string): boolean {
   const t = text.toLowerCase();
   if (looksLikeScenarioBFullAppreciationProbeQuestion(text)) return true;
-  const jordanCtx = /\bjordan\b/.test(t);
+  const jamesCtx = /\bjames\b/.test(t);
   const differently =
-    /\b(could'?ve done differently|could have done differently|done differently|anything jordan could|what jordan could)\b/.test(
+    /\b(could'?ve done differently|could have done differently|done differently|anything james could|what james could)\b/.test(
       t
     );
   const beforeFight =
-    jordanCtx &&
-    /\b(before (the )?(fight|blow|blow-?up)|might have helped|so alex feels|feel appreciated|helped alex)\b/.test(t);
-  const leanJordanProbe =
-    /\bis there anything jordan could have done\b/.test(t) && /\bhelp(ed)?\b/.test(t);
-  return (jordanCtx && differently) || beforeFight || leanJordanProbe;
+    jamesCtx &&
+    /\b(before (the )?(fight|blow|blow-?up)|might have helped|so sarah feels|feel appreciated|helped sarah)\b/.test(t);
+  const leanJamesProbe =
+    /\bis there anything james could have done\b/.test(t) && /\bhelp(ed)?\b/.test(t);
+  return (jamesCtx && differently) || beforeFight || leanJamesProbe;
 }
 
-/** Scenario B Q3 — repair in Jordan's shoes. */
-function looksLikeScenarioBRepairAsJordanQuestion(text: string): boolean {
+/** Scenario B Q3 — repair in James's shoes. */
+function looksLikeScenarioBRepairAsJamesQuestion(text: string): boolean {
   const t = text.toLowerCase();
-  const asJordan =
-    /\bif you were jordan\b/.test(t) &&
+  const asJames =
+    /\bif you were james\b/.test(t) &&
     /\b(repair|fix|make it right|apologize|patch things|make up|mend|handle|approach|smooth|sort (this|it) out|navigate|move forward)\b/.test(
       t
     );
-  const howRepairJordan =
+  const howRepairJames =
     /\bhow would you\b/.test(t) &&
-    /\bjordan\b/.test(t) &&
+    /\bjames\b/.test(t) &&
     /\b(repair|fix|handle|approach|make things right|make it right)\b/.test(t);
   const compact =
     t.length < 200 &&
-    /\bjordan\b/.test(t) &&
-    /\b(you were|as jordan|if you were)\b/.test(t) &&
+    /\bjames\b/.test(t) &&
+    /\b(you were|as james|if you were)\b/.test(t) &&
     /\b(repair|fix|handle|approach)\b/.test(t);
-  return asJordan || howRepairJordan || compact;
+  return asJames || howRepairJames || compact;
 }
 
-/** Model jumped to Scenario C (or completion) without asking what Jordan could have done differently first. */
-function looksLikeAssistantSkipsScenarioBJordanIntermediateQuestion(text: string): boolean {
-  if (looksLikeScenarioBJordanDifferentlyQuestion(text)) return false;
+/** Model jumped to Scenario C (or completion) without asking what James could have done differently first. */
+function looksLikeAssistantSkipsScenarioBJamesIntermediateQuestion(text: string): boolean {
+  if (looksLikeScenarioBJamesDifferentlyQuestion(text)) return false;
   const t = text.toLowerCase();
   if (/\[scenario_complete:2\]/i.test(text)) return true;
   return (
-    t.includes('morgan and theo') ||
-    (t.includes("i didn't know how") && t.includes('morgan')) ||
-    (t.includes('third situation') && t.includes('morgan')) ||
+    t.includes('sophie and daniel') ||
+    (t.includes("i didn't know how") && t.includes('sophie')) ||
+    (t.includes('third situation') && t.includes('sophie')) ||
     (t.includes("here's the third situation") && t.includes('personal'))
   );
 }
@@ -844,11 +894,11 @@ function extractScenario3UserCorpus(msgs: MessageWithScenario[]): string {
     .join(' ');
 }
 
-function stripScenarioBRepairAsJordanQuestion(text: string): string {
+function stripScenarioBRepairAsJamesQuestion(text: string): string {
   return text
-    .replace(/(?:^|\n)\s*If you were Jordan,?\s+how would you repair\??\s*/gi, '\n')
+    .replace(/(?:^|\n)\s*If you were James,?\s+how would you repair\??\s*/gi, '\n')
     .replace(
-      /(?:^|\n)\s*How would you repair[^?.!\n]*if you were Jordan[^?.!\n]*[?.!]?\s*/gi,
+      /(?:^|\n)\s*How would you repair[^?.!\n]*if you were James[^?.!\n]*[?.!]?\s*/gi,
       '\n'
     )
     .replace(/\n{3,}/g, '\n\n')
@@ -875,11 +925,11 @@ function isScenarioCQ2Prompt(text: string): boolean {
   return isScenarioCRepairAssistantPrompt(text);
 }
 
-function userSidesEntirelyWithJordan(text: string): boolean {
+function userSidesEntirelyWithJames(text: string): boolean {
   const t = text.toLowerCase();
-  const blamesAlex = /\b(alex (is|was) (too|overly)? ?(sensitive|dramatic|overreacting)|alex should( have)? just|alex is the problem)\b/.test(t);
-  const jordanOnlyRight = /\b(jordan (did nothing wrong|was right|handled it fine)|nothing jordan could do|jordan was fine)\b/.test(t);
-  return blamesAlex || jordanOnlyRight;
+  const blamesSarah = /\b(sarah (is|was) (too|overly)? ?(sensitive|dramatic|overreacting)|sarah should( have)? just|sarah is the problem)\b/.test(t);
+  const jamesOnlyRight = /\b(james (did nothing wrong|was right|handled it fine)|nothing james could do|james was fine)\b/.test(t);
+  return blamesSarah || jamesOnlyRight;
 }
 
 /** Max chars to keep as M4→M5 pivot before the scripted appreciation body (1–2 sentence boundary reflection + transition). */
@@ -924,7 +974,7 @@ function buildClosingLinePrompt(messages: { role: string; content: string }[]): 
     .map((m) => m.content)
     .join('\n');
   return `Based on this interview transcript (user turns below are from THIS session only), write ONE OR TWO short sentences for the interviewer to deliver before the scripted thanks (see below). It should:
-- **Anchor on something specific they actually said** in this session — e.g. Moment 5 (how they celebrated someone), Moment 4 (grudge / walk-away), or one concrete scenario read (Sam/Reese contempt, Alex/Jordan appreciation miss, Morgan/Theo leaving). Name the beat in plain language so it feels remembered, not like a form letter.
+- **Anchor on something specific they actually said** in this session — e.g. Moment 5 (how they celebrated someone), Moment 4 (grudge / walk-away), or one concrete scenario read (Emma/Ryan contempt, Sarah/James appreciation miss, Sophie/Daniel leaving). Name the beat in plain language so it feels remembered, not like a form letter.
 - You may pair that anchor with brief **task** acknowledgement (good work / thanks for sticking with this / appreciation for their time). The anchor must be **substantive** — a generic sign-off alone is not acceptable.
 - Stay accurate: only people, events, and lines that appear in the user turns below. Do not invent biographical detail.
 - Do not use evaluative performance language about the user as a whole (no "direct and thoughtful throughout," "really grounded," "very clear," grades, or how well they "handled" the interview).
@@ -959,11 +1009,11 @@ Write only the closing line(s) before thanks (no "Thank you" in your output). No
 const CLOSING_LINE_INSTRUCTIONS = `
 CLOSING — ONE MESSAGE, ANCHORED (THIS TRANSCRIPT ONLY):
 
-After Moment 5, the closing is often the **only** place that shows you were listening — it must **reference something specific** from this user's turns: their appreciation example, grudge/threshold story, or a concrete scenario stance (e.g. how they read Sam and Reese, Alex and Jordan, or Morgan and Theo). **Generic sign-offs alone are not acceptable** (e.g. only "thanks for your time" / "direct and thoughtful throughout" with no callback).
+After Moment 5, the closing is often the **only** place that shows you were listening — it must **reference something specific** from this user's turns: their appreciation example, grudge/threshold story, or a concrete scenario stance (e.g. how they read Emma and Ryan, Sarah and James, or Sophie and Daniel). **Generic sign-offs alone are not acceptable** (e.g. only "thanks for your time" / "direct and thoughtful throughout" with no callback).
 
 Structure (flexible): optional brief task acknowledgement (good work / thanks for sticking with this) **plus** one concrete remembered detail — or weave both into one or two tight sentences. Then "Thank you for being so open with me." (or close variant) and [INTERVIEW_COMPLETE].
 
-The anchor should be **plain-language and accurate** — a short paraphrase of what they said, not a clinical label. You may name first names that appear in **their** answers (e.g. brother, Sam) when those appear in user turns.
+The anchor should be **plain-language and accurate** — a short paraphrase of what they said, not a clinical label. You may name first names that appear in **their** answers (e.g. brother, Emma) when those appear in user turns.
 
 **Banned:** hollow trait praise ("direct and thoughtful throughout," "really self-aware," "very clear" as filler), invented biographical content, clinical/theoretical labels ("attunement," "mentalizing," "repair cycle," "flooding," "dysregulation," "reflective functioning," "pursue-withdraw cycle").
 
@@ -983,7 +1033,7 @@ Do NOT reframe low-scoring signals as strengths. If signals were broadly low, st
 
 EXAMPLES (illustrative only — do not copy verbatim):
 
-Good: "Good work getting through all of this — what you said about pulling off that surprise for your brother really stuck with me." Good: "Thanks for sticking with it; naming Sam's line as contempt while still seeing a path for Reese is specific in a way most people gloss over."
+Good: "Good work getting through all of this — what you said about pulling off that surprise for your brother really stuck with me." Good: "Thanks for sticking with it; naming Emma's line as contempt while still seeing a path for Ryan is specific in a way most people gloss over."
 
 Bad: "I appreciate you walking through all of this — you've been direct and thoughtful throughout." (generic / trait-only, no concrete anchor)
 `;
@@ -1030,7 +1080,7 @@ function sanitizeClosingLanguage(text: string): string {
 }
 
 /**
- * Scenario A repair prompt often leads with "That makes (a lot of) sense" before the scripted Reese question.
+ * Scenario A repair prompt often leads with "That makes (a lot of) sense" before the scripted Ryan question.
  * {@link stripFlatReflectionAcknowledgmentOpeners} would otherwise strip "That makes sense." via the comma rule
  * because "What if…" looks like a new clause — keep the full lead-in for TTS/display.
  */
@@ -1039,23 +1089,23 @@ function isPreservedAckBeforeScenarioARepairLead(text: string): boolean {
   if (!/^that makes (?:a lot of )?sense\b/i.test(t)) return false;
   const rest = t.replace(/^that makes (?:a lot of )?sense\s*[.,;—–-]?\s*/i, '').trim();
   return (
-    /^what if you were reese\b/i.test(rest) ||
-    /^how would you repair this relationship if you were reese\b/i.test(rest) ||
-    (/^if you were reese\b/i.test(rest) && /\brepair\b/i.test(rest))
+    /^what if you were ryan\b/i.test(rest) ||
+    /^how would you repair this relationship if you were ryan\b/i.test(rest) ||
+    (/^if you were ryan\b/i.test(rest) && /\brepair\b/i.test(rest))
   );
 }
 
 /**
- * Scenario B Jordan-differently Q2: prompt requires a short ack ("Got it.") before the question; stripper would
+ * Scenario B James-differently Q2: prompt requires a short ack ("Got it.") before the question; stripper would
  * otherwise remove "Sure." / "Absolutely." via {@link stripFlatReflectionAcknowledgmentOpeners} reComma.
  */
-function isPreservedAckBeforeScenarioBJordanQ2(text: string): boolean {
+function isPreservedAckBeforeScenarioBJamesQ2(text: string): boolean {
   const t = text.trim();
   const afterAck = t.replace(/^(got it|okay|fair|thanks|sure|absolutely)\s*[.,;—–-]?\s*/i, '').trim();
   if (afterAck === t) return false;
   const low = afterAck.toLowerCase();
   return (
-    /\bjordan\b/.test(low) &&
+    /\bjames\b/.test(low) &&
     /\b(done differently|could'?ve done differently|could have done differently|might have helped|feel appreciated)\b/.test(
       low
     )
@@ -1070,7 +1120,7 @@ function stripFlatReflectionAcknowledgmentOpeners(text: string): string {
   const original = text.trim();
   if (!original) return original;
   if (isPreservedAckBeforeScenarioARepairLead(original)) return original;
-  if (isPreservedAckBeforeScenarioBJordanQ2(original)) return original;
+  if (isPreservedAckBeforeScenarioBJamesQ2(original)) return original;
   const MIN_REMAINDER = 14;
   const orderedPhrases = [
     'That makes sense',
@@ -1200,9 +1250,9 @@ function stripHollowSystemInterviewerPhrases(text: string): string {
 function assistantTextContainsAnchoredScenarioBody(text: string): boolean {
   const t = (text ?? '').toLowerCase();
   return (
-    t.includes('alex has been job hunting') ||
-    t.includes('sam and reese have dinner') ||
-    t.includes('morgan and theo have had') ||
+    t.includes('sarah has been job hunting') ||
+    t.includes('emma and ryan have dinner') ||
+    t.includes('sophie and daniel have had') ||
     /\blet'?s move on to the next scenario\b/.test(t) ||
     t.includes("that's the end of that scenario") ||
     t.includes("here's the next situation") ||
@@ -1420,40 +1470,40 @@ function recentAssistantMessagesForAck(msgs: MessageWithScenario[]): MessageWith
   return msgs.filter((m) => m.role === 'assistant').slice(-4) as MessageWithScenario[];
 }
 
-/** Fiction first names — good for echo *detection* on scripted questions, bad as mandatory-prefix *anchors* ("Jordan and dropped"). */
-const SCENARIO_VIGNETTE_FIRST_NAMES = new Set(['jordan', 'alex', 'sam', 'reese', 'morgan', 'theo']);
+/** Fiction first names — good for echo *detection* on scripted questions, bad as mandatory-prefix *anchors* ("James and dropped"). */
+const SCENARIO_VIGNETTE_FIRST_NAMES = new Set(['james', 'sarah', 'emma', 'ryan', 'sophie', 'daniel']);
 
 /**
- * Scenario B mandatory Jordan-differently prompt (wording may vary slightly).
+ * Scenario B mandatory James-differently prompt (wording may vary slightly).
  * It repeats vignette names — must not satisfy "echo" checks by itself (false positive vs user analysis).
  */
-function isLikelyScenarioBJordanDifferentlyQuestionBody(text: string): boolean {
+function isLikelyScenarioBJamesDifferentlyQuestionBody(text: string): boolean {
   const t = (text ?? '').toLowerCase().replace(/\s+/g, ' ').trim();
   if (t.length > 320) return false;
-  const hasJordanProbe =
-    /jordan could have done (?:something )?differently/i.test(t) ||
-    /what do you think jordan could have done/i.test(t);
-  const hasAppreciatedCue = /feel appreciated|helped alex/i.test(t);
+  const hasJamesProbe =
+    /james could have done (?:something )?differently/i.test(t) ||
+    /what do you think james could have done/i.test(t);
+  const hasAppreciatedCue = /feel appreciated|helped sarah/i.test(t);
   const hasOpeningCue = /before things blew up/i.test(t);
   const looksReflective = /\b(you're|you are|i hear|sounds like|so you|reading|centering|named)\b/i.test(t);
-  return hasJordanProbe && hasAppreciatedCue && (hasOpeningCue || t.length < 200) && !looksReflective;
+  return hasJamesProbe && hasAppreciatedCue && (hasOpeningCue || t.length < 200) && !looksReflective;
 }
 
 /**
- * Short scripted Scenario B Q3 — not a paraphrase of the user's Jordan-differently answer even when they said "Jordan…"
+ * Short scripted Scenario B Q3 — not a paraphrase of the user's James-differently answer even when they said "James…"
  * (attempt 85: echo detector false positive skipped mandatory ack).
  */
-function looksLikeBareScenarioBRepairAsJordanProbe(text: string): boolean {
+function looksLikeBareScenarioBRepairAsJamesProbe(text: string): boolean {
   const t = (text ?? '').replace(/\s+/g, ' ').trim();
   if (t.length > 220) return false;
   const low = t.toLowerCase();
-  if (!/\bjordan\b/.test(low)) return false;
+  if (!/\bjames\b/.test(low)) return false;
   if (!/\b(repair|fix|handle|approach|make it right|make things right|mend|patch)\b/.test(low)) return false;
   return (
-    /\bif you were jordan\b/.test(low) ||
-    (/\bhow would you\b/.test(low) && /\bjordan\b/.test(low)) ||
-    /\bhow would you repair\b.*\bjordan\b/.test(low) ||
-    /\bjordan\b.*\bhow would you repair\b/.test(low)
+    /\bif you were james\b/.test(low) ||
+    (/\bhow would you\b/.test(low) && /\bjames\b/.test(low)) ||
+    /\bhow would you repair\b.*\bjames\b/.test(low) ||
+    /\bjames\b.*\bhow would you repair\b/.test(low)
   );
 }
 
@@ -1492,10 +1542,10 @@ function assistantTurnEchoesUserLastAnswer(userAnswer: string, assistantText: st
   const echoOutsideNames = words.some((w) => !SCENARIO_VIGNETTE_FIRST_NAMES.has(w) && a.includes(w));
   if (echoOutsideNames) return true;
   const echoNameOnly = words.some((w) => SCENARIO_VIGNETTE_FIRST_NAMES.has(w) && a.includes(w));
-  if (echoNameOnly && isLikelyScenarioBJordanDifferentlyQuestionBody(assistantText)) {
+  if (echoNameOnly && isLikelyScenarioBJamesDifferentlyQuestionBody(assistantText)) {
     return false;
   }
-  if (echoNameOnly && looksLikeBareScenarioBRepairAsJordanProbe(assistantText)) {
+  if (echoNameOnly && looksLikeBareScenarioBRepairAsJamesProbe(assistantText)) {
     return false;
   }
   return echoNameOnly;
@@ -1737,15 +1787,15 @@ function scenario3VignetteMissingOpeningLead(text: string): boolean {
   const raw = (text ?? '').trim();
   if (!raw) return false;
   const t = raw.toLowerCase();
-  if (!/\bmorgan\b/.test(t) || !/\btheo\b/.test(t)) return false;
+  if (!/\bsophie\b/.test(t) || !/\bdaniel\b/.test(t)) return false;
   if (/same argument for the third|for the third time|third time they|had the same argument/i.test(raw)) return false;
-  return /\bmorgan feels unheard\b/i.test(raw);
+  return /\bsophie feels unheard\b/i.test(raw);
 }
 
 function ensureScenario3VignetteOpening(text: string): string {
   if (!scenario3VignetteMissingOpeningLead(text)) return text;
   const insert = SCENARIO_3_REPETITION_OPENING_LINE;
-  const idx = text.search(/\bMorgan feels unheard\b/i);
+  const idx = text.search(/\bSophie feels unheard\b/i);
   if (idx >= 0) {
     const before = text.slice(0, idx).trimEnd();
     const after = text.slice(idx);
@@ -1971,11 +2021,11 @@ async function generateAIReasoningSafe(
 const SCENARIO_1_LABEL = 'Situation 1';
 /** Vignette only — opening question lives in reference-card “current question” state, not duplicated here. */
 const SCENARIO_1_VIGNETTE =
-  "Sam and Reese have dinner plans. Reese takes a call from his mother halfway through. It runs 25 minutes. Sam pays the bill but seems flustered. Later Reese asks what's wrong. Sam says 'I just think you always put your family first before us.' Reese says 'I can't just ignore my mother.' Sam says 'I know, you've made that very clear.'";
+  "Emma and Ryan have dinner plans. Ryan takes a call from his mother halfway through. It runs 25 minutes. Emma pays the bill but seems flustered. Later Ryan asks what's wrong. Emma says 'I just think you always put your family first before us.' Ryan says 'I can't just ignore my mother.' Emma says 'I know, you've made that very clear.'";
 const SCENARIO_1_OPENING = "What's going on between these two?";
 const SCENARIO_2_LABEL = 'Situation 2';
 const SCENARIO_2_VIGNETTE =
-  "Alex has been job hunting for four months. He gets an offer and calls Jordan from the street, too excited to wait. Jordan is on a deadline, says 'that's amazing — let's celebrate tonight.' That evening Jordan asks about the salary, the start date, and the commute.  At one point Alex says 'I keep thinking about how long this took' and trails off. Jordan says 'well it was worth it'.  The next day Alex tells Jordan he never feels appreciated. Jordan is blindsided, they just celebrated his new job offer last night. A fight starts.";
+  "Sarah has been job hunting for four months. She gets an offer and calls James from the street, too excited to wait. James is on a deadline, says 'that's amazing — let's celebrate tonight.' That evening James asks about the salary, the start date, and the commute.  At one point Sarah says 'I keep thinking about how long this took' and trails off. James says 'well it was worth it'.  The next day Sarah tells James she never feels appreciated. James is blindsided, they just celebrated her new job offer last night. A fight starts.";
 const SCENARIO_2_OPENING = 'What do you think is going on here?';
 const SCENARIO_2_TEXT = `${SCENARIO_2_VIGNETTE}\n\n${SCENARIO_2_OPENING}`;
 
@@ -1988,22 +2038,22 @@ const SCENARIO_1_TO_2_BUNDLE = `${SCENARIO_1_TO_2_TRANSITION}\n\n${SCENARIO_2_TE
 function ensureScenario2BundleWhenOpeningWithoutVignette(text: string, interviewMoment: number): string {
   if (interviewMoment !== 1) return text;
   const raw = text.trim();
-  if (!raw || /alex has been job hunting/i.test(raw)) return text;
+  if (!raw || /sarah has been job hunting/i.test(raw)) return text;
   if (!/what do you think is going on here\??\s*$/i.test(raw)) return text;
   return SCENARIO_1_TO_2_BUNDLE.trim();
 }
 
 const SCENARIO_3_LABEL = 'Situation 3';
 const SCENARIO_3_VIGNETTE =
-  "Morgan and Theo have had the same argument for the third time. Morgan feels unheard because Theo goes silent or leaves, so the issue is never resolved. This time Morgan says 'we need to finish this.' Theo tries to avoid the conversation again. Morgan says 'you can't just keep avoiding this.' Theo's voice goes flat. He says 'I need ten minutes' and leaves. Morgan calls after him: 'that's exactly what I mean.' Thirty minutes later Theo comes back and says 'okay, I'm ready. I should have come back sooner the other times. I didn't know how.' Morgan is still upset.";
-const SCENARIO_3_OPENING = "When Theo comes back and says 'I didn't know how' — what do you make of that?";
+  "Sophie and Daniel have had the same argument for the third time. Sophie feels unheard because Daniel goes silent or leaves, so the issue is never resolved. This time Sophie says 'we need to finish this.' Daniel tries to avoid the conversation again. Sophie says 'you can't just keep avoiding this.' Daniel's voice goes flat. He says 'I need ten minutes' and leaves. Sophie calls after him: 'that's exactly what I mean.' Thirty minutes later Daniel comes back and says 'okay, I'm ready. I should have come back sooner the other times. I didn't know how.' Sophie is still upset.";
+const SCENARIO_3_OPENING = "When Daniel comes back and says 'I didn't know how' — what do you make of that?";
 const SCENARIO_3_TEXT = `${SCENARIO_3_VIGNETTE}\n\n${SCENARIO_3_OPENING}`;
 
 function textContainsScenarioCVignetteBody(text: string): boolean {
   const t = (text ?? '').trim().toLowerCase();
   if (!t) return false;
   return (
-    /\bmorgan and theo\b/.test(t) &&
+    /\bsophie and daniel\b/.test(t) &&
     /i need ten minutes/.test(t) &&
     (/i didn'?t know how|did not know how/.test(t) || /\bstill upset\b/.test(t))
   );
@@ -2020,11 +2070,11 @@ function stripScenarioCRepairQuestionFromText(text: string): string {
 
 function stripScenarioCThresholdQuestionFromText(text: string): string {
   let out = text.replace(
-    /\n*\s*At what point would you say Theo or Morgan should decide this relationship isn't working\??\s*/gi,
+    /\n*\s*At what point would you say Daniel or Sophie should decide this relationship isn't working\??\s*/gi,
     '\n\n'
   );
   out = out.replace(
-    /\n*\s*At what point would you say (Theo|Morgan) or (Theo|Morgan) should decide[^?\n]*\??\s*/gi,
+    /\n*\s*At what point would you say (Daniel|Sophie) or (Daniel|Sophie) should decide[^?\n]*\??\s*/gi,
     '\n\n'
   );
   return out.replace(/\n{3,}/g, '\n\n').trim();
@@ -2037,7 +2087,7 @@ function appendCanonicalScenarioCAnalysisQuestion(text: string): string {
 }
 
 /**
- * Scenario C: vignette → Q1 (Theo line) → Q2 repair → threshold. Never Q2/threshold in the same turn as the vignette without Q1.
+ * Scenario C: vignette → Q1 (Daniel line) → Q2 repair → threshold. Never Q2/threshold in the same turn as the vignette without Q1.
  */
 function ensureScenarioCQ1SequenceAfterVignette(text: string): string {
   if (!textContainsScenarioCVignetteBody(text)) return text;
@@ -2075,11 +2125,11 @@ const SCENARIO_3_REPETITION_OPENING_LINE = SCENARIO_3_VIGNETTE.slice(0, SCENARIO
 
 /** Misplaced personal answer to Scenario C commitment probe — two-step redirect + explicit re-ask (see SC3_MISPLACED_THRESHOLD_SEQUENCE logs). */
 const SCENARIO_C_MISPLACED_THRESHOLD_REDIRECT =
-  'I think that one was about Theo and Morgan specifically — what would you say for them?';
+  'I think that one was about Daniel and Sophie specifically — what would you say for them?';
 const SCENARIO_C_COMMITMENT_THRESHOLD_QUESTION =
-  "At what point would you say Theo or Morgan should decide this relationship isn't working?";
+  "At what point would you say Daniel or Sophie should decide this relationship isn't working?";
 const SCENARIO_C_MISPLACED_Q1_REDIRECT =
-  "I was asking specifically about what you make of Theo saying 'I didn't know how', what does that line tell you about where he's at?";
+  "I was asking specifically about what you make of Daniel saying 'I didn't know how', what does that line tell you about where he's at?";
 
 const MOMENT_4_PERSONAL_LABEL = 'Personal reflection';
 const MOMENT_4_PERSONAL_CARD =
@@ -2125,16 +2175,16 @@ function detectActiveScenarioFromMessage(content: string): ActiveScenario | null
   if (c.includes('celebrated someone') || c.includes('really celebrated')) {
     return { label: 'Personal reflection', text: 'Think of a time you really celebrated someone in your life — what did you do to show them that?' };
   }
-  if (c.includes('Sam and Reese') || c.includes('Reese takes a call from his mother')) {
+  if (c.includes('Emma and Ryan') || c.includes('Ryan takes a call from his mother')) {
     return { label: SCENARIO_1_LABEL, text: SCENARIO_1_VIGNETTE };
   }
-  if (c.includes('Alex has been job hunting') || (c.includes('Alex') && c.includes('Jordan') && c.includes('job'))) {
+  if (c.includes('Sarah has been job hunting') || (c.includes('Sarah') && c.includes('James') && c.includes('job'))) {
     return { label: SCENARIO_2_LABEL, text: SCENARIO_2_VIGNETTE };
   }
   if (
-    c.includes('Morgan and Theo') ||
-    (c.includes('Theo') && c.includes('I need ten minutes')) ||
-    (c.includes('Morgan') && c.includes("didn't know how"))
+    c.includes('Sophie and Daniel') ||
+    (c.includes('Daniel') && c.includes('I need ten minutes')) ||
+    (c.includes('Sophie') && c.includes("didn't know how"))
   ) {
     return { label: SCENARIO_3_LABEL, text: SCENARIO_3_VIGNETTE };
   }
@@ -2265,7 +2315,7 @@ Keep it conversational.
 const SCENARIO_SWITCHING_INSTRUCTIONS = `
 FICTIONAL SCENARIOS 1–3 — NO SUBSTITUTION:
 
-The first three situations are always the Sam/Reese, Alex/Jordan, and Morgan/Theo vignettes from your main instructions. Do not offer to replace them with the user's personal stories. If the user asks to skip or use only personal examples, acknowledge warmly and explain these three are part of the process; stay with the scenario text.
+The first three situations are always the Emma/Ryan, Sarah/James, and Sophie/Daniel vignettes from your main instructions. Use **only** those six names when you refer to characters in the situations — never substitute alternate names (e.g. "Reese" or any name not in the vignette text). Do not offer to replace them with the user's personal stories. If the user asks to skip or use only personal examples, acknowledge warmly and explain these three are part of the process; stay with the scenario text.
 
 Moments 4–5 are the designated personal questions — that is where personal disclosure belongs.
 
@@ -2337,7 +2387,7 @@ SCENARIO / MOMENT BOUNDARY — BOUNDARY CLOSURE (see main framework):
 
 const REFLECTION_PARAPHRASE_FIDELITY = `
 PARAPHRASE / CONTRAST (boundary reflections):
-Do **not** add interviewer-authored **"rather than …"** or **"instead of …"** clauses that contrast their answer with an implied better move — that reads as leading (e.g. "…rather than Reese taking ownership"). Summarize in **neutral descriptive** terms. If the user explicitly said "rather than X, Y" in their own words, you may reflect that without appending a corrective second clause. No clinical labels.
+Do **not** add interviewer-authored **"rather than …"** or **"instead of …"** clauses that contrast their answer with an implied better move — that reads as leading (e.g. "…rather than Ryan taking ownership"). Summarize in **neutral descriptive** terms. If the user explicitly said "rather than X, Y" in their own words, you may reflect that without appending a corrective second clause. No clinical labels.
 `;
 
 const ASSISTANT_SPEECH_POSTPROCESS_NOTICE = `
@@ -2345,6 +2395,8 @@ ASSISTANT OUTPUT — CLIENT HARD FILTER (always applied before TTS/display):
 The app strips leading standalone empty fillers — "Sure," "Absolutely," "That makes sense," "That checks out," "That lands," — when they appear as hollow prefaces. **Boundary** transitions may include **segment close** + 1–2 sentences of summary (see main framework); avoid meta-thanks without substance.
 
 The app also strips generic acknowledgment filler from the **first paragraph** when it matches a recurring hollow pattern — e.g. "I appreciate you laying it out," "thank you for sharing," "that's helpful." Avoid those; do not rely on meta-thanks.
+
+The app **rewrites** common wrong first-name hallucinations (e.g. "Reese" for James) to the **canonical** vignette names before speech — you must still output only the correct names; do not rely on client repair.
 `;
 
 const SKIP_HANDLING_INSTRUCTIONS = `
@@ -2498,13 +2550,13 @@ If the user answers a different question than the active one (for example: perso
 Keep redirect language neutral and brief. Do NOT praise the misplaced answer (no "great answer for earlier question" style phrasing).
 
 SCENARIO A — WRONG CONTENT TYPE FOR THE ACTIVE QUESTION:
-If you asked the repair question ("How would you repair… as Reese?") and the user answers with analysis of a specific line, contempt dynamics, or vignette interpretation instead of repair-as-Reese, do not treat that as satisfying the repair prompt. Re-orient in one short clause **without** mirroring their analysis, then ask for repair in character — e.g. "Got it — how would you make that repair actually happen as Reese?"
-If you asked the contempt probe and they already gave contempt-probe-quality content in an earlier turn (hostile/dismissive read of Sam's line — not passive-aggressive-only or "stating a fact" minimization), treat the probe as satisfied — do not re-ask it; move on in the sequence.
+If you asked the repair question ("How would you repair… as Ryan?") and the user answers with analysis of a specific line, contempt dynamics, or vignette interpretation instead of repair-as-Ryan, do not treat that as satisfying the repair prompt. Re-orient in one short clause **without** mirroring their analysis, then ask for repair in character — e.g. "Got it — how would you make that repair actually happen as Ryan?"
+If you asked the contempt probe and they already gave contempt-probe-quality content in an earlier turn (hostile/dismissive read of Emma's line — not passive-aggressive-only or "stating a fact" minimization), treat the probe as satisfied — do not re-ask it; move on in the sequence.
 
 PROBE ALREADY ANSWERED (ALL SCENARIOS):
 Before any scripted follow-up, check whether the user's prior turns in this scenario already substantively answered that follow-up. If yes, skip the follow-up and advance.
 
-Exception — Scenario B structural Q2: The "what could Jordan have done differently before the fight" question is mandatory after Q1 (and after the optional appreciation branch when it fires). Do not skip it because Q1 already mentioned Jordan's alternatives in passing — only skip if the user's immediately preceding answer already fully addressed that exact prompt. **No** mandatory mirror of Q1 before Q2.
+Exception — Scenario B structural Q2: The "what could James have done differently before the fight" question is mandatory after Q1 (and after the optional appreciation branch when it fires). Do not skip it because Q1 already mentioned James's alternatives in passing — only skip if the user's immediately preceding answer already fully addressed that exact prompt. **No** mandatory mirror of Q1 before Q2.
 
 PERSONAL MOMENTS 4–5: After the user gives a personal response, check whether it addresses the question (grudge/contempt narrative; celebrating someone specifically). If it doesn't, redirect ONCE — gently and without making the user feel wrong. Use SCENARIO_REDIRECT_QUESTIONS.
 
@@ -2530,7 +2582,7 @@ SCORING NOTE: Off-target personal content may still yield lower-confidence pilla
 const SCENARIO_REDIRECT_QUESTIONS = `
 REDIRECT — FICTIONAL SCENARIOS 1–3:
 
-These segments are always the Sam/Reese, Alex/Jordan, and Morgan/Theo vignettes. If the user goes far off-topic, acknowledge briefly and return to the scenario text — do not substitute a personal story for the fiction.
+These segments are always the Emma/Ryan, Sarah/James, and Sophie/Daniel vignettes — use only those character names; never invent or substitute names (e.g. "Reese"). If the user goes far off-topic, acknowledge briefly and return to the scenario text — do not substitute a personal story for the fiction.
 
 REDIRECT — PERSONAL MOMENT 4 (grudge / dislike):
 
@@ -2620,7 +2672,7 @@ SKIP THE QUESTION if ANY of these are true:
 ASK THE QUESTION only if:
 ✗ Response describes an intention without words: "I would acknowledge her feelings" (no words given)
 ✗ Response describes an action without words: "I'd apologise" (no words given)
-✗ Response is purely analytical: "Jordan should have asked more about how Alex felt"
+✗ Response is purely analytical: "James should have asked more about how Sarah felt"
 ✗ Response is very short and abstract: "I'd be honest with them"
 
 WHEN IN DOUBT — SKIP IT.
@@ -2660,9 +2712,9 @@ const SCENARIO_COMPLETE_TOKEN_INSTRUCTIONS = `
 The token fires when that scenario's required questions are complete.
 
 Required sequence (no end-of-scenario closing question):
-- Scenario A: Q1, contempt probe unless Sam's "you've made that very clear" was already read as contemptuous/hostile/dismissive (not passive-aggressive-only, not "stating a fact" / venting-only minimizations), Q2.
-- Scenario B: Q1; optional appreciation probe only when Q1 had no on-topic engagement with the scenario; mandatory Q2 (what Jordan could have done differently before the fight); Q3 (repair as Jordan); then **BOUNDARY CLOSURE** (segment close + reflection + transition) before Scenario C. Do not skip Q2 because Q1 was sophisticated. Before Q2, always include a one-sentence specific acknowledgment of Q1 — including short verdict-style analysis answers.
-- Scenario C: **Q1 (Theo line) always before Q2** — client enforces; never put Q2 or threshold in the same turn as the vignette without Q1. Then Q2, then commitment-threshold probe unless the user already gave irrecoverability / when-it's-not-workable criteria (repair-only Q2 is not enough).
+- Scenario A: Q1, contempt probe unless Emma's "you've made that very clear" was already read as contemptuous/hostile/dismissive (not passive-aggressive-only, not "stating a fact" / venting-only minimizations), Q2.
+- Scenario B: Q1; optional appreciation probe only when Q1 had no on-topic engagement with the scenario; mandatory Q2 (what James could have done differently before the fight); Q3 (repair as James); then **BOUNDARY CLOSURE** (segment close + reflection + transition) before Scenario C. Do not skip Q2 because Q1 was sophisticated. Before Q2, always include a one-sentence specific acknowledgment of Q1 — including short verdict-style analysis answers.
+- Scenario C: **Q1 (Daniel line) always before Q2** — client enforces; never put Q2 or threshold in the same turn as the vignette without Q1. Then Q2, then commitment-threshold probe unless the user already gave irrecoverability / when-it's-not-workable criteria (repair-only Q2 is not enough).
 
 Do NOT ask "anything you'd want me to know?" style closing checks at the end of scenarios.
 
@@ -2685,7 +2737,7 @@ NEVER score HIGH confidence on a response that:
 - Describes only what the other person did with no reflective or relational insight when the moment required it
 
 COMMITMENT_THRESHOLD — FICTIONAL VS PERSONAL (full interview scoring):
-If commitment_threshold is informed only by third-party reasoning about Morgan/Theo (Scenario C) and there is no substantive first-person threshold content from Moment 4 (the grudge answer and/or the "work through versus walk away" follow-up with scorable criteria in the user's own relationship terms), set pillarConfidence for commitment_threshold to "moderate" or "low" — not "high." Reserve "high" when first-person threshold reasoning appears in the transcript (clear work-through vs walk-away structure or criteria in their own terms — concise structural answers count; they need not be procedurally detailed), or when fictional and personal evidence jointly support the score with strong clarity.
+If commitment_threshold is informed only by third-party reasoning about Sophie/Daniel (Scenario C) and there is no substantive first-person threshold content from Moment 4 (the grudge answer and/or the "work through versus walk away" follow-up with scorable criteria in the user's own relationship terms), set pillarConfidence for commitment_threshold to "moderate" or "low" — not "high." Reserve "high" when first-person threshold reasoning appears in the transcript (clear work-through vs walk-away structure or criteria in their own terms — concise structural answers count; they need not be procedurally detailed), or when fictional and personal evidence jointly support the score with strong clarity.
 `;
 
 function buildScoringPrompt(
@@ -2739,7 +2791,7 @@ ${ACCOUNTABILITY_BLAME_SHIFT_VS_CLARITY_REQUEST}
 CONTEMPT / CRITICISM
 Does the user recognize contempt and criticism as distinct from legitimate complaint? Can they identify when communication crosses from expressing hurt into attacking character?
 
-WHO YOU ARE SCORING: Measure the participant's own contemptuous stance (derogation, dismissiveness, superiority, mockery, or character-level verdicts toward people in the scenarios or in their personal narrative) — not whether they accurately describe a fictional character's harsh or contemptuous behavior. Accurate observation that a line is mean, cold, dismissive, or closes the conversation off is attunement and relational accuracy; do not treat that as the participant expressing contempt or downgrade scores for it. Reserve low scores for the participant's own verdicts and contemptuous attitudes (e.g. "Sam is just manipulative," "Theo obviously isn't ready," "some people are bad people").
+WHO YOU ARE SCORING: Measure the participant's own contemptuous stance (derogation, dismissiveness, superiority, mockery, or character-level verdicts toward people in the scenarios or in their personal narrative) — not whether they accurately describe a fictional character's harsh or contemptuous behavior. Accurate observation that a line is mean, cold, dismissive, or closes the conversation off is attunement and relational accuracy; do not treat that as the participant expressing contempt or downgrade scores for it. Reserve low scores for the participant's own verdicts and contemptuous attitudes (e.g. "Emma is just manipulative," "Daniel obviously isn't ready," "some people are bad people").
 
 10 - Identifies contempt precisely. Understands that contempt is a verdict on character, not an expression of pain. Distinguishes it clearly from anger or hurt.
 9  - Clearly identifies contemptuous language and understands its relational impact. May not use the word "contempt" but captures the distinction accurately.
@@ -2840,9 +2892,9 @@ Score four dimensions 0–10 and communicationSummary as before. Use the same hu
 REPAIR COHERENCE: If diagnosed failure reappears in their repair attempt, lower accountability (and ownership language in communication quality) by 1–2 points.
 
 DIAGNOSTIC EMPHASIS:
-- Scenario A: contempt in Sam's lines; bilateral ownership; Reese repair. Per-scenario slice scoring uses the same 10 = real-human ceiling and slice-independence rules as scenario JSON scoring — strong demand-withdraw / power-bid / implicit-priority mentalizing and pattern-level, behavioral Reese repair can reach **10** when complete; do not cap Scenario A at 9 to leave room for later scenarios.
-- Scenario B: Alex's emotional journey vs logistics; appreciation/attunement.
-- Scenario C: regulation, Theo's return, Morgan's legitimacy; bilateral repair; commitment threshold (especially if they address when the relationship may no longer be workable).
+- Scenario A: contempt in Emma's lines; bilateral ownership; Ryan repair. Per-scenario slice scoring uses the same 10 = real-human ceiling and slice-independence rules as scenario JSON scoring — strong demand-withdraw / power-bid / implicit-priority mentalizing and pattern-level, behavioral Ryan repair can reach **10** when complete; do not cap Scenario A at 9 to leave room for later scenarios.
+- Scenario B: Sarah's emotional journey vs logistics; appreciation/attunement.
+- Scenario C: regulation, Daniel's return, Sophie's legitimacy; bilateral repair; commitment threshold (especially if they address when the relationship may no longer be workable).
 - Personal grudge moment: contempt + metacognition + commitment threshold when they distinguish work-through vs walk-away conditions.
 - Personal celebration: appreciation specificity.
 
@@ -2900,7 +2952,7 @@ function buildScenarioScoringPrompt(
 ): string {
   const scenarioMeta = {
     1: {
-      name: 'Scenario A (Sam/Reese)',
+      name: 'Scenario A (Emma/Ryan)',
       constructs:
         'mentalizing, accountability, contempt_recognition, contempt_expression, repair, attunement (score only these keys in this scenario JSON; contempt is split: recognition = identifying contemptuous dynamics in the vignette; expression = participant’s own dismissive/derogatory framing)',
       markerIds: [
@@ -2913,7 +2965,7 @@ function buildScenarioScoringPrompt(
       ] as const,
     },
     2: {
-      name: 'Scenario B (Alex/Jordan)',
+      name: 'Scenario B (Sarah/James)',
       constructs:
         'appreciation, attunement, mentalizing, repair, accountability, contempt_expression (score contempt_expression for any dismissive or derogatory framing in the participant’s own words; omit contempt_recognition here)',
       markerIds: [
@@ -2926,7 +2978,7 @@ function buildScenarioScoringPrompt(
       ] as const,
     },
     3: {
-      name: 'Scenario C (Morgan/Theo)',
+      name: 'Scenario C (Sophie/Daniel)',
       constructs:
         'regulation, repair, mentalizing, attunement, accountability, commitment_threshold, contempt_expression',
       markerIds: [
@@ -2955,7 +3007,7 @@ function buildScenarioScoringPrompt(
     scenarioNumber === 3 && commitmentThresholdFocusAnswer?.trim()
       ? `
 COMMITMENT_THRESHOLD SOLE SOURCE (Scenario C):
-The participant first replied to the Theo/Morgan commitment question with a personal narrative and was redirected. For the "commitment_threshold" marker ONLY, base the score and keyEvidence solely on the following answer about the fictional couple. Do not use unrelated personal narrative content from elsewhere in the transcript for commitment_threshold. Score all other markers using the full transcript as usual.
+The participant first replied to the Daniel/Sophie commitment question with a personal narrative and was redirected. For the "commitment_threshold" marker ONLY, base the score and keyEvidence solely on the following answer about the fictional couple. Do not use unrelated personal narrative content from elsewhere in the transcript for commitment_threshold. Score all other markers using the full transcript as usual.
 
 Authoritative answer for commitment_threshold:
 """${commitmentThresholdFocusAnswer.trim()}"""
@@ -2965,7 +3017,7 @@ Authoritative answer for commitment_threshold:
     scenarioNumber === 3 && scenario3RepairFocusAnswer?.trim()
       ? `
 REPAIR SOLE SOURCE (Scenario C):
-For pillarScores.repair ONLY, base the score and keyEvidence solely on the following user answer to the repair question in this scenario (how the situation could be repaired / fixing the dynamic for Theo and Morgan). Do not use the separate commitment-threshold follow-up (when the relationship is not working / when to walk away) for repair — that content informs commitment_threshold only.
+For pillarScores.repair ONLY, base the score and keyEvidence solely on the following user answer to the repair question in this scenario (how the situation could be repaired / fixing the dynamic for Daniel and Sophie). Do not use the separate commitment-threshold follow-up (when the relationship is not working / when to walk away) for repair — that content informs commitment_threshold only.
 
 Authoritative answer for repair:
 """${scenario3RepairFocusAnswer.trim()}"""
@@ -2976,36 +3028,36 @@ Authoritative answer for repair:
       ? `
 Scenario C — REPAIR isolated from COMMITMENT_THRESHOLD:
 - Score **repair** only from user turns responding to the **repair** prompt ("How do you think this situation could be repaired?" or equivalent). Exit-only, incompatibility, or "when to leave" framing in the **threshold** answer must **not** raise repair; if the repair-targeted answer is thin or exit-heavy, keep repair in the **3–5** range even when a later threshold answer sounds relationally mature or workable.
-- Score **commitment_threshold** only from threshold-targeted turns (see COMMITMENT_THRESHOLD sole-source block when present). Do not lift commitment_threshold from repair-logistics-only content unless it clearly states walk-away or irrecoverability criteria for Theo/Morgan.
+- Score **commitment_threshold** only from threshold-targeted turns (see COMMITMENT_THRESHOLD sole-source block when present). Do not lift commitment_threshold from repair-logistics-only content unless it clearly states walk-away or irrecoverability criteria for Daniel/Sophie.
 `
       : '';
   const scenario1ContemptCalibration =
     scenarioNumber === 1
       ? `
 Scenario A — CONTEMPT (this slice — two keys):
-- **contempt_recognition:** Whether they identify contemptuous or harsh dynamics in the fiction (Sam’s line, the exchange). Accurate reads of coldness, dismissal, shutting down, or relational sting support strong recognition scores. Generic hurt with no relational read → partial recognition is fine; do not require the word “contempt.”
+- **contempt_recognition:** Whether they identify contemptuous or harsh dynamics in the fiction (Emma’s line, the exchange). Accurate reads of coldness, dismissal, shutting down, or relational sting support strong recognition scores. Generic hurt with no relational read → partial recognition is fine; do not require the word “contempt.”
 - **contempt_expression:** Whether **they** use contemptuous, dismissive, or derogatory framing about anyone in the scenario (or beyond it). Penalize participant contempt — mockery, superiority, broad character verdicts — not accurate description of a character’s behavior. Score **contempt_expression** independently of **contempt_recognition** (a user can score high on recognition and low on expression, or the reverse).
 `
       : '';
   const scenario1MentalizingRepairCeiling =
     scenarioNumber === 1
       ? `
-Scenario A (Sam/Reese) — MENTALIZING & REPAIR: REAL-HUMAN 10 CEILING (this slice only):
+Scenario A (Emma/Ryan) — MENTALIZING & REPAIR: REAL-HUMAN 10 CEILING (this slice only):
 
 Re-read SCORE CALIBRATION above: **10** = best a thoughtful real person could reasonably do here, with **no material gap**; **slice independence** — never cap this scenario lower because Scenario B or C might later look “even richer” in another transcript slice you are not scoring now.
 
 MENTALIZING — examples of **complete** inference (when accurate to the vignette and prompts), not an exhaustive list:
-- Naming an interactional pattern (e.g. demand–withdraw) that fits Sam/Reese’s exchange.
+- Naming an interactional pattern (e.g. demand–withdraw) that fits Emma/Ryan’s exchange.
 - Reading contempt or harshness as functioning as a **bid for power or control** after **feeling powerless** (or an equivalent accurate relational read).
 - Surfacing an **implicit or unspoken agreement about priorities** that was never openly negotiated, when the participant grounds it in the scenario.
 
 When that level of inference is **accurate** and **sufficient for the moment** and you **cannot** name a meaningful perspective-taking omission, assign **10**. Use **9** only if you can state a **concrete minor gap**. **Do not** systematically assign **9** for “strong Scenario A” to reserve **10** for later scenarios — **forbidden**.
 
-REPAIR (as Reese) — examples of **ceiling-level** repair (when actually present in the user’s words), not a checklist:
+REPAIR (as Ryan) — examples of **ceiling-level** repair (when actually present in the user’s words), not a checklist:
 - Owning not only the **incident** (e.g. the phone call) but the **pattern** it represents, with a **specific behavioral** commitment (not vague intent alone).
-- **Correct sequencing** when present in the answer: e.g. clear ownership of Reese’s part **before** or alongside addressing how Sam’s contempt or dismissal landed — without using that ordering as a pretext to score down when the answer already satisfies bilateral repair at ceiling.
+- **Correct sequencing** when present in the answer: e.g. clear ownership of Ryan’s part **before** or alongside addressing how Emma’s contempt or dismissal landed — without using that ordering as a pretext to score down when the answer already satisfies bilateral repair at ceiling.
 
-When repair is **bilateral where appropriate**, **pattern-aware**, **behaviorally specific**, and **not** primarily deflected onto Sam’s failings (see Scenario A repair calibration below), assign **9–10**; **10** when there is **no meaningful omission** for this prompt. **Do not** withhold **10** because a hypothetical “even better” repair could exist or because Scenario B’s Jordan repair might be longer.
+When repair is **bilateral where appropriate**, **pattern-aware**, **behaviorally specific**, and **not** primarily deflected onto Emma’s failings (see Scenario A repair calibration below), assign **9–10**; **10** when there is **no meaningful omission** for this prompt. **Do not** withhold **10** because a hypothetical “even better” repair could exist or because Scenario B’s James repair might be longer.
 
 **Forbidden:** Applying a standing one-point penalty to Scenario A mentalizing or repair relative to Scenario B/C, or capping at **9** to “leave room” on the scale across the interview.
 `
@@ -3013,12 +3065,12 @@ When repair is **bilateral where appropriate**, **pattern-aware**, **behaviorall
   const scenario2AccountabilityCalibration =
     scenarioNumber === 2
       ? `
-Scenario B (Alex/Jordan) — ACCOUNTABILITY CEILING (repair as Jordan and comparable ownership turns in this slice):
+Scenario B (Sarah/James) — ACCOUNTABILITY CEILING (repair as James and comparable ownership turns in this slice):
 
 NAMED CALIBRATION — **OWNERSHIP + "BUT I ALSO NEED THEM"** (accountability **6–7 maximum**; **not 8–10**):
-When the user shows **genuine ownership** or care in an apology **and then** uses **"but I also need them to…"**, **"but I need Alex to…"**, **"but they need to…"**, or **functionally equivalent** wording that **shifts responsibility back to the partner** right after the apology (making the partner's future behavior the hinge), treat that as **meaningful deflection**. **Cap accountability at 6–7.** **8+** requires **clean ownership without** that partner-conditional pivot.
+When the user shows **genuine ownership** or care in an apology **and then** uses **"but I also need them to…"**, **"but I need Sarah to…"**, **"but they need to…"**, or **functionally equivalent** wording that **shifts responsibility back to the partner** right after the apology (making the partner's future behavior the hinge), treat that as **meaningful deflection**. **Cap accountability at 6–7.** **8+** requires **clean ownership without** that partner-conditional pivot.
 
-Example (**6–7, not 8**): "I would tell Alex I'm sorry they felt unappreciated — that wasn't my intention at all. I'd explain that I was asking about the practical stuff because I care about their future... but I also need them to be clearer with me about what they're looking for."
+Example (**6–7, not 8**): "I would tell Sarah I'm sorry she felt unappreciated — that wasn't my intention at all. I'd explain that I was asking about the practical stuff because I care about her future... but I also need her to be clearer with me about what she's looking for."
 
 Contrast (often still **8+** when otherwise clean): ownership followed by a **specific information ask** so the user can follow through ("what would appreciation look like for you?") — see ACCOUNTABILITY — BLAME-SHIFT VS. GENUINE REQUEST FOR CLARITY.
 `
@@ -3026,15 +3078,15 @@ Contrast (often still **8+** when otherwise clean): ownership followed by a **sp
   const scenario2ContemptExpressionCalibration =
     scenarioNumber === 2
       ? `
-Scenario B (Alex/Jordan) — CONTEMPT_EXPRESSION (this slice):
-Score **contempt_expression** from how the participant talks **in their own voice** about Alex, Jordan, or the situation. Dismissive or derogatory framing of fictional characters — e.g. "too sensitive," blaming Alex for not stating needs, treating Jordan as the only reasonable party, verdict-like capability claims — counts as **participant contempt expression** at the **same severity** as if the target were a real person (often **higher** signal because there is no incentive to protect a fictional character). Keep this key separate from appreciation, repair, and accountability.
+Scenario B (Sarah/James) — CONTEMPT_EXPRESSION (this slice):
+Score **contempt_expression** from how the participant talks **in their own voice** about Sarah, James, or the situation. Dismissive or derogatory framing of fictional characters — e.g. "too sensitive," blaming Sarah for not stating needs, treating James as the only reasonable party, verdict-like capability claims — counts as **participant contempt expression** at the **same severity** as if the target were a real person (often **higher** signal because there is no incentive to protect a fictional character). Keep this key separate from appreciation, repair, and accountability.
 `
       : '';
   const scenario3ContemptExpressionCalibration =
     scenarioNumber === 3
       ? `
-Scenario C (Morgan/Theo) — CONTEMPT_EXPRESSION (this slice):
-Score **contempt_expression** from harsh or contemptuous **participant** framing toward Theo, Morgan, or the couple (e.g. "emotionally immature," "a lot of growing up to do," "not an acceptable explanation for an adult"). Do **not** treat fiction as lower-stakes: verdict language about characters is a primary contempt-expression signal. Distinct from mentalizing quality alone — a user can mentalize poorly without contempt, or show contempt through character attacks.
+Scenario C (Sophie/Daniel) — CONTEMPT_EXPRESSION (this slice):
+Score **contempt_expression** from harsh or contemptuous **participant** framing toward Daniel, Sophie, or the couple (e.g. "emotionally immature," "a lot of growing up to do," "not an acceptable explanation for an adult"). Do **not** treat fiction as lower-stakes: verdict language about characters is a primary contempt-expression signal. Distinct from mentalizing quality alone — a user can mentalize poorly without contempt, or show contempt through character attacks.
 `
       : '';
   const scenario3CommitmentCalibration =
@@ -3044,24 +3096,24 @@ Scenario C commitment-threshold calibration:
 - Score 1-2 when the answer exits at first difficulty or endorses staying no matter what with no limits in harmful dynamics.
 - Score 2-3 when the answer expresses unconditional commitment with no framework for irrecoverability — e.g. "never give up," "just keep trying no matter what," "they shouldn't ever walk away," "stick it out forever." Do not score that pattern 6+.
 - Score 3-4 for vague "keep trying" with no assessable structure, OR exit-only framing ("life is too short") without effort/communicate/assess logic.
-- Score 6-7 when the answer has a complete structure for Theo/Morgan (or the couple): genuine effort, clear communication about what's wrong, reassessment, willingness to end if the pattern persists without change — even if the user names no timelines, therapy, or step lists.
+- Score 6-7 when the answer has a complete structure for Daniel/Sophie (or the couple): genuine effort, clear communication about what's wrong, reassessment, willingness to end if the pattern persists without change — even if the user names no timelines, therapy, or step lists.
 - Score 7-8 when that structure is present plus some concrete specificity about what would make the relationship no longer workable (not necessarily exhaustive).
 - Score 9-10 only when the answer strongly demonstrates or describes persistence through serious difficulty with healthy limits; still not gated on procedural verbosity.
 - Do not cap commitment_threshold below 6 solely because the answer lacks granular process detail when the four-part structure is clearly there.
-- If the answer (about Theo/Morgan) **explicitly** distinguishes unhealthy persistence from justified boundaries, fear-driven staying from irrecoverability, or "when it's actually over" vs "when someone is just conflict-avoidant," treat that as **sound threshold reasoning** (typically **6–8+**), not as unconditional staying. Same logic as first-person self-awareness anchors in SCORE CALIBRATION.
+- If the answer (about Daniel/Sophie) **explicitly** distinguishes unhealthy persistence from justified boundaries, fear-driven staying from irrecoverability, or "when it's actually over" vs "when someone is just conflict-avoidant," treat that as **sound threshold reasoning** (typically **6–8+**), not as unconditional staying. Same logic as first-person self-awareness anchors in SCORE CALIBRATION.
 
 COMMITMENT_THRESHOLD — NOT ASSESSED (Scenario C):
 If this slice has no user response to the interviewer's commitment-threshold follow-up (when the relationship isn't working / when to call it) AND no user turn in Scenario C spontaneously gives irrecoverability or "not worth continuing" criteria, set pillarScores.commitment_threshold to JSON null — never 0. Set keyEvidence.commitment_threshold to exactly: "No commitment threshold content assessed in this scenario slice." Set pillarConfidence.commitment_threshold to "low". Use numeric scores only when there is actual threshold content to evaluate; 0 is reserved for assessed answers that actively fail the construct, not for missing evidence.
 
 COMMITMENT_THRESHOLD CONFIDENCE (this scenario slice only):
-When commitment_threshold is scored (non-null), evidence is third-party reasoning about Theo/Morgan only. Set pillarConfidence for commitment_threshold to "moderate" or "low" only — never "high" for this scenario, because personal first-person threshold criteria are not elicited in this moment. (Full-interview scoring may raise effective confidence later if Moment 4 adds first-person threshold evidence.) When commitment_threshold is null, confidence is already "low" per above.
+When commitment_threshold is scored (non-null), evidence is third-party reasoning about Daniel/Sophie only. Set pillarConfidence for commitment_threshold to "moderate" or "low" only — never "high" for this scenario, because personal first-person threshold criteria are not elicited in this moment. (Full-interview scoring may raise effective confidence later if Moment 4 adds first-person threshold evidence.) When commitment_threshold is null, confidence is already "low" per above.
 `
       : '';
   const scenario3MentalizingCalibration =
     scenarioNumber === 3
       ? `
 Scenario C mentalizing calibration:
-- Accurately noting an obvious on-vignette dynamic (e.g. Theo acknowledging a communication problem or taking partial responsibility for avoidance) is competent basic perspective-taking, not strong mentalizing by itself: prefer the 5-6 range unless the answer adds clearly richer inference (Morgan's inner experience beyond the script, bilateral curiosity about both people's states, nuanced uncertainty).
+- Accurately noting an obvious on-vignette dynamic (e.g. Daniel acknowledging a communication problem or taking partial responsibility for avoidance) is competent basic perspective-taking, not strong mentalizing by itself: prefer the 5-6 range unless the answer adds clearly richer inference (Sophie's inner experience beyond the script, bilateral curiosity about both people's states, nuanced uncertainty).
 - Reserve 7+ only when mentalizing in this answer is markedly more sophisticated than restating what the situation already displayed.
 `
       : '';
@@ -3075,7 +3127,7 @@ Scenario C mentalizing calibration:
       ? `
 Scenario C mentalizing — interview pattern calibration:
 Prior mentalizing scores in this same interview: Scenario 1 = ${priorM1 != null && Number.isFinite(priorM1) ? priorM1.toFixed(1) : 'n/a'}, Scenario 2 = ${priorM2 != null && Number.isFinite(priorM2) ? priorM2.toFixed(1) : 'n/a'}.
-Earlier scenario(s) showed limited mentalizing. Do not assign Scenario C mentalizing 7+ for a single balanced observation that merely labels what the vignette made visible (e.g. "Theo is acknowledging they have a communication problem") without clearly stronger perspective-taking. In that pattern, 5-6 is appropriate for that level of evidence. Reserve 7+ only if this answer demonstrates a clear step up in sophistication versus those prior moments.
+Earlier scenario(s) showed limited mentalizing. Do not assign Scenario C mentalizing 7+ for a single balanced observation that merely labels what the vignette made visible (e.g. "Daniel is acknowledging they have a communication problem") without clearly stronger perspective-taking. In that pattern, 5-6 is appropriate for that level of evidence. Reserve 7+ only if this answer demonstrates a clear step up in sophistication versus those prior moments.
 `
       : '';
 
@@ -3104,8 +3156,8 @@ MENTALIZING and CONTEMPT (where scored) — register-neutral: Judge perspective-
 
 REPAIR COHERENCE: If repair attempt repeats the failure they diagnosed, lower accountability 1-2 points.
 Scenario A repair calibration:
-- If the repair answer contains significant deflection onto Sam's communication failures (e.g. "Sam needs to communicate better", centering what Sam should change, or framing repair primarily around Sam's behavior), score Repair in the 4-5 range.
-- Reserve 6+ for answers that keep clear ownership of Reese's contribution without significant deflection.
+- If the repair answer contains significant deflection onto Emma's communication failures (e.g. "Emma needs to communicate better", centering what Emma should change, or framing repair primarily around Emma's behavior), score Repair in the 4-5 range.
+- Reserve 6+ for answers that keep clear ownership of Ryan's contribution without significant deflection.
 - Reserve 9-10 for strong bilateral repair with explicit ownership and no meaningful accountability deflection.
 ${scenario1ContemptCalibration}
 ${scenario1MentalizingRepairCeiling}
@@ -3339,13 +3391,15 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
   /** Onboarding: auto-run startInterview once after profile gate; reset on retake / retry. */
   const onboardingAutoStartRef = useRef(false);
   /**
-   * Mobile web: browsers require a user gesture before audio (TTS) can play. Auto-start breaks that chain.
-   * Full-screen tap overlay unlocks audio; consent / manual Start passes `fromUserGesture` into startInterview instead.
+   * Web: autoplay policy requires a user gesture before audio/TTS. We never auto-call `startInterview` from
+   * useEffect on web — mobile uses the tap overlay; desktop waits for the first `pointerdown` (see effect below).
+   * Consent / manual Start passes `fromUserGesture` into `startInterview`.
    */
-  const [mobileWebTapToBeginDone, setMobileWebTapToBeginDone] = useState(() => {
-    if (Platform.OS !== 'web') return true;
-    return !webSpeechShouldDeferToUserGesture();
-  });
+  const [mobileWebTapToBeginDone, setMobileWebTapToBeginDone] = useState(() => Platform.OS !== 'web');
+  /** Desktop web only: show tap-to-unlock overlay when session cannot auto-start (e.g. cold refresh). Hidden when userActivation allows auto-start (e.g. after Sign in). */
+  const [webDesktopAwaitingStartOverlay, setWebDesktopAwaitingStartOverlay] = useState(false);
+  /** Desktop web only: TTS queued for user gesture (autoplay blocked mid-session). */
+  const [webDesktopPendingTtsGestureOverlay, setWebDesktopPendingTtsGestureOverlay] = useState(false);
   const [touchedConstructs, setTouchedConstructs] = useState<number[]>([]);
   const [results, setResults] = useState<InterviewResults | null>(null);
   const [stageResults, setStageResults] = useState<Array<{ stage: number; results: InterviewResults }>>([]);
@@ -3471,13 +3525,20 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
   /** Ensures at most one client-injected M4→M5 bridge per session (backup when model omits). */
   const moment5TransitionBridgeInjectedRef = useRef(false);
   const deferredMoment4NarrativeRef = useRef<string | null>(null);
-  /** After misplaced Scenario C threshold answer: we re-ask Theo/Morgan; next user turn is scored for commitment_threshold from this ref. */
+  /** After misplaced Scenario C threshold answer: we re-ask Daniel/Sophie; next user turn is scored for commitment_threshold from this ref. */
   const expectingScenarioCThresholdAnswerAfterMisplaceRef = useRef(false);
   const scenarioCCommitmentOnlyEvidenceRef = useRef<string | null>(null);
   /** User answer to Scenario C repair prompt only — isolates repair from commitment-threshold scoring. */
   const scenarioCRepairOnlyEvidenceRef = useRef<string | null>(null);
   const scenarioAContemptProbeAskedRef = useRef(false);
   const interviewSessionIdRef = useRef<string>(newInterviewSessionId(userId));
+  /** Whisper turn ended; next TTS should log recording_session_active for iOS volume diagnostics. */
+  const recordingJustFinishedBeforeNextTtsRef = useRef(false);
+  /** True while `speak()` / speakTextSafe await is in flight (for tts_interrupted). */
+  const ttsLineInFlightRef = useRef(false);
+  /** Last voice turn only — cleared on typed send. */
+  const lastVoiceTurnLanguageRef = useRef<string | null>(null);
+  const lastVoiceTurnConfidenceRef = useRef<number | null>(null);
   const turnAudioIndexRef = useRef(0);
   const [networkStatus, setNetworkStatus] = useState<'checking' | 'good' | 'poor'>('checking');
 
@@ -3851,9 +3912,17 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
       if (!userId) return;
       const { data, error } = await supabase
         .from('users')
-        .select('interview_completed, interview_passed, interview_reviewed_at, latest_attempt_id')
+        .select('interview_completed, interview_passed, interview_reviewed_at, latest_attempt_id, is_alpha_tester')
         .eq('id', userId)
         .maybeSingle();
+
+      const isAdminEmail = (user?.email ?? '').toLowerCase() === 'admin@amoraea.com';
+      /** Same cohort as `scoreInterview` → PostInterview: not alpha, not admin — never show in-app thank-you / scores. */
+      const shouldHandOffToPostInterview =
+        isInterviewAppRoute &&
+        data?.interview_completed === true &&
+        data?.is_alpha_tester !== true &&
+        !isAdminEmail;
 
       // Navigation lock: interview just completed in this session — stay on congratulations and set attempt id
       if (interviewJustCompletedInSession) {
@@ -3875,6 +3944,12 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
         setInterviewStatus('not_started');
         return;
       }
+
+      if (shouldHandOffToPostInterview) {
+        navigation.replace('PostInterview', { userId });
+        return;
+      }
+
       if (!data.interview_completed) {
         setInterviewStatus('not_started');
       } else {
@@ -3899,7 +3974,7 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
       }
     };
     checkInterviewStatus();
-  }, [userId]);
+  }, [userId, user?.email, navigation, isInterviewAppRoute]);
 
   useEffect(() => {
     if (!pendingScoringSyncAttemptId || !userId) return;
@@ -3913,7 +3988,9 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
       if (cancelled || !ok) return;
       setPendingScoringSyncAttemptId(null);
       setAnalysisAttemptId(id);
-      await runCommunicationStylePipelineAfterSave(userId, id, interviewSessionIdRef.current);
+      await runCommunicationStylePipelineAfterSave(userId, id, interviewSessionIdRef.current, {
+        platform: getSessionLogRuntime().platform,
+      });
       setInterviewStatus('congratulations');
       await remoteLog('[8] setInterviewStatus called', { screen: 'congratulations', via: 'pending_scoring_sync' });
     })();
@@ -3965,7 +4042,9 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
         if (updateErr) throw new Error(updateErr.message);
         const recoveredAttemptId = insertData?.id;
         if (recoveredAttemptId) {
-          await runCommunicationStylePipelineAfterSave(userId, recoveredAttemptId, interviewSessionIdRef.current);
+          await runCommunicationStylePipelineAfterSave(userId, recoveredAttemptId, interviewSessionIdRef.current, {
+            platform: getSessionLogRuntime().platform,
+          });
         }
         const next = { ...saved };
         delete next.pendingDatabaseSave;
@@ -4086,6 +4165,7 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
     } finally {
       isSpeakingRef.current = false;
       timingRef.current.questionEndTime = Date.now();
+      markQuestionDelivered(new Date().toISOString());
       setVoiceState('idle');
     }
   }, []);
@@ -4135,6 +4215,7 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
     }).catch(() => {});
     // #endregion
     if (tryPlayed) {
+      setWebDesktopPendingTtsGestureOverlay(false);
       webGestureTtsConsumedPressRef.current = true;
       if (webGestureConsumeClearTimeoutRef.current) {
         clearTimeout(webGestureConsumeClearTimeoutRef.current);
@@ -4150,7 +4231,10 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
     const fromMod = pendingWebSpeechForGestureModule;
     const fromStore = readStoredPendingGestureTts();
     const t = fromRef ?? fromMod ?? fromStore;
-    if (!t) return;
+    if (!t) {
+      setWebDesktopPendingTtsGestureOverlay(false);
+      return;
+    }
     clearPendingWebSpeechGesturePair(pendingWebSpeechForGestureRef);
     webGestureTtsConsumedPressRef.current = true;
     if (webGestureConsumeClearTimeoutRef.current) {
@@ -4162,6 +4246,7 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
       webGestureTtsConsumedPressRef.current = false;
     }, 1800);
     trySpeakWebSpeechInUserGesture(t, () => {});
+    setWebDesktopPendingTtsGestureOverlay(false);
   }, []);
 
   const ensureWebGestureFlushListener = useCallback(() => {
@@ -4261,13 +4346,61 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
         interviewSpeechRole === 'assistant_response' &&
         detectActiveScenarioFromMessage(stripControlTokens(text).trim()) !== null;
       if (markIntro) setScenarioIntroTtsPlaying(true);
+      const rt0 = getSessionLogRuntime();
+      const priorRec = recordingJustFinishedBeforeNextTtsRef.current;
+      recordingJustFinishedBeforeNextTtsRef.current = false;
+      const ttsStart = Date.now();
+      if (userId) {
+        setTtsPlaybackActive(true);
+        ttsLineInFlightRef.current = true;
+        writeSessionLog({
+          userId,
+          attemptId: rt0.attemptId,
+          eventType: 'tts_playback_start',
+          eventData: {
+            ...gatherTtsPlaybackTelemetry(priorRec),
+            telemetry_source: telemetrySource,
+          },
+          platform: rt0.platform,
+        });
+      }
       try {
         await withRetry(() => speak(text, { telemetrySource }), {
           retries: 1,
           baseDelay: 3000,
           context: 'TTS',
+          sessionLog:
+            userId ? { userId, attemptId: rt0.attemptId, platform: rt0.platform } : undefined,
         });
         setTTSFallbackActive(false);
+        if (userId) {
+          const rtp = getSessionLogRuntime();
+          writeSessionLog({
+            userId,
+            attemptId: rtp.attemptId,
+            eventType: 'tts_playback_complete',
+            eventData: { telemetry_source: telemetrySource },
+            durationMs: Date.now() - ttsStart,
+            platform: rtp.platform,
+          });
+        }
+        const isInterviewLine =
+          interviewSpeechRole === 'assistant_response' || telemetrySource === 'turn';
+        if (isInterviewLine && userId) {
+          const rtd = getSessionLogRuntime();
+          writeSessionLog({
+            userId,
+            attemptId: rtd.attemptId,
+            eventType: 'question_delivered',
+            eventData: {
+              moment_number: currentInterviewMomentRef.current,
+              scenario_number: currentScenarioRef.current,
+              question_text: stripControlTokens(text).trim().slice(0, 2000),
+              delivered_at: new Date().toISOString(),
+            },
+            platform: rtd.platform,
+          });
+        }
         if (interviewSpeechRole === 'assistant_response') {
           applyInterviewSpeechComplete(text);
         }
@@ -4293,6 +4426,9 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
           // #endregion
           setPendingWebSpeechGesturePair(pendingWebSpeechForGestureRef, err.text);
           ensureWebGestureFlushListener();
+          if (Platform.OS === 'web' && !webSpeechShouldDeferToUserGesture()) {
+            setWebDesktopPendingTtsGestureOverlay(true);
+          }
           setVoiceState('idle');
           if (!silent) setTTSFallbackActive(false);
           if (interviewSpeechRole === 'assistant_response') {
@@ -4308,10 +4444,14 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
           }
         }
       } finally {
+        if (userId) {
+          setTtsPlaybackActive(false);
+          ttsLineInFlightRef.current = false;
+        }
         if (markIntro) setScenarioIntroTtsPlaying(false);
       }
     },
-    [speak, applyInterviewSpeechComplete, ensureWebGestureFlushListener]
+    [speak, applyInterviewSpeechComplete, ensureWebGestureFlushListener, userId, webSpeechShouldDeferToUserGesture]
   );
 
   // ── Web: browser SpeechRecognition (hold-to-talk fallback when Whisper/MediaRecorder is off)
@@ -4478,6 +4618,17 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
               s2: scenarioScoresRef.current[2]?.pillarScores?.mentalizing,
             }
           : null;
+      const scoringT0 = Date.now();
+      if (userId) {
+        const r = getSessionLogRuntime();
+        writeSessionLog({
+          userId,
+          attemptId: r.attemptId,
+          eventType: 'scoring_start',
+          eventData: { scenario_number: scenarioNumber },
+          platform: r.platform,
+        });
+      }
       try {
         const scenarioResult = await withRetry(
           async (): Promise<ScenarioScoreResult> => {
@@ -4534,8 +4685,26 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
                 console.error(`Scoring unrecoverable error (scenario ${scenarioNumber}):`, status);
               }
             },
+            sessionLog: userId
+              ? {
+                  userId,
+                  attemptId: getSessionLogRuntime().attemptId,
+                  platform: getSessionLogRuntime().platform,
+                }
+              : undefined,
           }
         );
+        if (userId) {
+          const r = getSessionLogRuntime();
+          writeSessionLog({
+            userId,
+            attemptId: r.attemptId,
+            eventType: 'scoring_complete',
+            eventData: { scenario_number: scenarioNumber },
+            durationMs: Date.now() - scoringT0,
+            platform: r.platform,
+          });
+        }
         if (scenarioNumber === 3) {
           if (commitmentFocusForPrompt?.trim()) {
             void remoteLog('[SC3_MISPLACED_THRESHOLD_SEQUENCE]', {
@@ -4602,6 +4771,37 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
       return;
     }
     const trimmed = spokenText.trim();
+    if (userId) {
+      logTouchActivityForPause(
+        {
+          userId,
+          attemptId: getSessionLogRuntime().attemptId,
+          platform: getSessionLogRuntime().platform,
+        },
+        currentInterviewMomentRef.current
+      );
+      touchActivity();
+      const r = getSessionLogRuntime();
+      const deliveredAt = r.lastQuestionDeliveredAt;
+      let latencyMs: number | null = null;
+      if (deliveredAt) {
+        const t = Date.parse(deliveredAt);
+        if (!Number.isNaN(t)) latencyMs = Math.max(0, Date.now() - t);
+      }
+      writeSessionLog({
+        userId,
+        attemptId: r.attemptId,
+        eventType: 'response_received',
+        eventData: {
+          moment_number: currentInterviewMomentRef.current,
+          word_count: countSpokenWords(trimmed),
+          response_latency_ms: latencyMs,
+          detected_language: lastVoiceTurnLanguageRef.current,
+          transcription_confidence: lastVoiceTurnConfidenceRef.current,
+        },
+        platform: r.platform,
+      });
+    }
 
     if (ALPHA_MODE && timingRef.current.recordingStartTime != null) {
       timingRef.current.recordingEndTime = Date.now();
@@ -4640,7 +4840,7 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
           await profileRepository.upsertProfile(userId, {
             gate1Score: adminGate1Score,
             applicationStatus: 'approved',
-            onboardingStage: 'basic_info',
+            onboardingStage: 'complete',
           });
           queryClient.invalidateQueries({ queryKey: ['profile', userId] });
           setVoiceState('idle');
@@ -5010,7 +5210,7 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
       currentInterviewMomentRef.current === 1 && isScenarioAQ1Prompt(lastAssistantContent);
     const replyingToScenarioBQ1 =
       currentInterviewMomentRef.current === 2 && isScenarioBQ1Prompt(lastAssistantContent);
-    /** CQ2 detection must not depend on interview-moment ref alone — ref can desync (e.g. resume) while the last assistant turn is still the repair prompt; skipping breaks the scripted Theo/Morgan threshold probe. */
+    /** CQ2 detection must not depend on interview-moment ref alone — ref can desync (e.g. resume) while the last assistant turn is still the repair prompt; skipping breaks the scripted Daniel/Sophie threshold probe. */
     const cq2PromptMatches =
       isScenarioCQ2Prompt(lastAssistantContent) && !looksLikeScenarioCThresholdQuestion(lastAssistantContent);
     const replyingToScenarioCQ2 =
@@ -5120,15 +5320,15 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
       void remoteLog('[M4_COMMITMENT_FOLLOWUP_CONDITION]', payload);
     }
     const scenarioAContemptProbeCoverage = hasScenarioAQ1ContemptProbeCoverage(trimmed);
-    const specificSamLineAlreadyAddressed = scenarioAContemptProbeCoverage;
+    const specificEmmaLineAlreadyAddressed = scenarioAContemptProbeCoverage;
     const shouldForceScenarioAContemptProbe =
       replyingToScenarioAQ1 && !isDecline(trimmed) && !scenarioAContemptProbeCoverage;
-    const sidedEntirelyWithJordan = userSidesEntirelyWithJordan(trimmed);
+    const sidedEntirelyWithJames = userSidesEntirelyWithJames(trimmed);
     const scenarioBQ1Engaged = hasScenarioBQ1OnTopicEngagement(trimmed);
     const shouldForceScenarioBFullAppreciationProbe =
       replyingToScenarioBQ1 &&
       !isDecline(trimmed) &&
-      !sidedEntirelyWithJordan &&
+      !sidedEntirelyWithJames &&
       !scenarioBQ1Engaged;
     const scenarioCUserCorpusForThreshold = extractScenario3UserCorpus(messagesToUse);
     const scenarioCPostRepairCorpus = extractScenario3UserCorpusAfterLastRepairPrompt(messagesToUse);
@@ -5357,10 +5557,10 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
     let assistantIssuedScenarioARepairQuestion =
       currentInterviewMomentRef.current === 1 && looksLikeScenarioARepairQuestion(strippedText);
     const assistantIssuedScenarioBFullProbe = looksLikeScenarioBFullAppreciationProbeQuestion(strippedText);
-    const assistantIssuedScenarioBJordanDifferently =
-      currentInterviewMomentRef.current === 2 && looksLikeScenarioBJordanDifferentlyQuestion(strippedText);
-    const assistantIssuedScenarioBRepairAsJordan =
-      currentInterviewMomentRef.current === 2 && looksLikeScenarioBRepairAsJordanQuestion(strippedText);
+    const assistantIssuedScenarioBJamesDifferently =
+      currentInterviewMomentRef.current === 2 && looksLikeScenarioBJamesDifferentlyQuestion(strippedText);
+    const assistantIssuedScenarioBRepairAsJames =
+      currentInterviewMomentRef.current === 2 && looksLikeScenarioBRepairAsJamesQuestion(strippedText);
     let assistantIssuedScenarioCThresholdProbe = looksLikeScenarioCThresholdQuestion(strippedText);
     {
       const beforeS3 = strippedText;
@@ -5387,14 +5587,41 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
       if (__DEV__) {
         console.log('[S1_SEQUENCE_BLOCKED_REPAIR_BEFORE_CONTEMPT]', {
           shouldForceScenarioAContemptProbe,
-          specificSamLineAlreadyAddressed,
+          specificEmmaLineAlreadyAddressed,
         });
       }
       void remoteLog('[S1_SEQUENCE_BLOCKED_REPAIR_BEFORE_CONTEMPT]', {
         shouldForceScenarioAContemptProbe,
-        specificSamLineAlreadyAddressed,
+        specificEmmaLineAlreadyAddressed,
       });
     }
+    const preNameSanitize = strippedText;
+    strippedText = sanitizeAssistantInterviewerCharacterNames(strippedText);
+    // #region agent log
+    if (
+      interviewAssistantTextHasDisallowedNameMarker(text) ||
+      interviewAssistantTextHasDisallowedNameMarker(preNameSanitize) ||
+      interviewAssistantTextHasDisallowedNameMarker(strippedText)
+    ) {
+      fetch('http://127.0.0.1:7789/ingest/668e0bd5-3283-4492-9f48-e33846c18218', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'X-Debug-Session-Id': 'e70f17' },
+        body: JSON.stringify({
+          sessionId: 'e70f17',
+          location: 'AriaScreen.tsx:sendMessage',
+          message: 'name_sanitize_main_turn',
+          data: {
+            hypothesisId: 'H1-H3',
+            rawHas: interviewAssistantTextHasDisallowedNameMarker(text),
+            preSanitizeHas: interviewAssistantTextHasDisallowedNameMarker(preNameSanitize),
+            postSanitizeHas: interviewAssistantTextHasDisallowedNameMarker(strippedText),
+            changed: preNameSanitize !== strippedText,
+          },
+          timestamp: Date.now(),
+        }),
+      }).catch(() => {});
+    }
+    // #endregion
     if (assistantIssuedMoment5Probe) {
       moment5ProbeAskedRef.current = true;
       moment5ProbePendingRef.current = true;
@@ -5438,7 +5665,7 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
       !assistantIssuedScenarioAContemptProbe &&
       !text.includes('[INTERVIEW_COMPLETE]')
     ) {
-      const forcedContemptProbe = "What do you make of Sam's statement when she says 'you've made that very clear'?";
+      const forcedContemptProbe = "What do you make of Emma's statement when she says 'you've made that very clear'?";
       let stagedMessages = messagesToUse;
       if (strippedText) {
         const detectedScenario = detectScenarioFromResponse(strippedText);
@@ -5459,12 +5686,12 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
       }
       if (__DEV__) {
         console.log('[S1_CONTEMPT_FORCED]', {
-          specificSamLineAlreadyAddressed,
+          specificEmmaLineAlreadyAddressed,
           assistantIssuedScenarioAContemptProbe,
         });
       }
       void remoteLog('[S1_CONTEMPT_FORCED]', {
-        specificSamLineAlreadyAddressed,
+        specificEmmaLineAlreadyAddressed,
         assistantIssuedScenarioAContemptProbe,
       });
       scenarioAContemptProbeAskedRef.current = true;
@@ -5486,7 +5713,7 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
       !assistantIssuedScenarioBFullProbe &&
       !text.includes('[INTERVIEW_COMPLETE]')
     ) {
-      const forcedAppreciationProbe = "What do you think Jordan could've done differently so Alex feels better?";
+      const forcedAppreciationProbe = "What do you think James could've done differently so Sarah feels better?";
       let stagedMessages = messagesToUse;
       if (strippedText) {
         const detectedScenario = detectScenarioFromResponse(strippedText);
@@ -5507,13 +5734,13 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
       }
       if (__DEV__) {
         console.log('[S2_APPRECIATION_FORCED]', {
-          sidedEntirelyWithJordan,
+          sidedEntirelyWithJames,
           scenarioBQ1Engaged,
           assistantIssuedScenarioBFullProbe,
         });
       }
       void remoteLog('[S2_APPRECIATION_FORCED]', {
-        sidedEntirelyWithJordan,
+        sidedEntirelyWithJames,
         scenarioBQ1Engaged,
         assistantIssuedScenarioBFullProbe,
       });
@@ -5530,23 +5757,23 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
       setVoiceState('idle');
       return;
     }
-    const scenarioBSkippedJordanIntermediate =
-      assistantIssuedScenarioBRepairAsJordan ||
-      looksLikeAssistantSkipsScenarioBJordanIntermediateQuestion(strippedText);
-    const needsScenarioBJordanDifferentlyInsert =
+    const scenarioBSkippedJamesIntermediate =
+      assistantIssuedScenarioBRepairAsJames ||
+      looksLikeAssistantSkipsScenarioBJamesIntermediateQuestion(strippedText);
+    const needsScenarioBJamesDifferentlyInsert =
       replyingToScenarioBQ1 &&
       !isDecline(trimmed) &&
       !shouldForceScenarioBFullAppreciationProbe &&
-      scenarioBSkippedJordanIntermediate &&
-      !assistantIssuedScenarioBJordanDifferently &&
+      scenarioBSkippedJamesIntermediate &&
+      !assistantIssuedScenarioBJamesDifferently &&
       !text.includes('[INTERVIEW_COMPLETE]');
-    if (needsScenarioBJordanDifferentlyInsert) {
-      const forcedJordanDifferentlyProbe =
-        'Before things blew up, what do you think Jordan could have done differently that might have helped Alex feel appreciated?';
-      const repairStripped = stripScenarioBRepairAsJordanQuestion(strippedText).trim();
+    if (needsScenarioBJamesDifferentlyInsert) {
+      const forcedJamesDifferentlyProbe =
+        'Before things blew up, what do you think James could have done differently that might have helped Sarah feel appreciated?';
+      const repairStripped = stripScenarioBRepairAsJamesQuestion(strippedText).trim();
       const leaksScenarioCIntoLeadIn =
-        /morgan and theo/i.test(repairStripped) ||
-        (/i didn't know how/i.test(repairStripped) && /morgan/i.test(repairStripped)) ||
+        /sophie and daniel/i.test(repairStripped) ||
+        (/i didn't know how/i.test(repairStripped) && /sophie/i.test(repairStripped)) ||
         /\[scenario_complete:2\]/i.test(strippedText);
       const bLeadIn = leaksScenarioCIntoLeadIn || !repairStripped ? '' : repairStripped;
       let stagedMessages = messagesToUse;
@@ -5568,22 +5795,22 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
         await speakTextSafe(bLeadIn, ASSISTANT_INTERVIEW_SPEECH);
       }
       if (__DEV__) {
-        console.log('[S2_JORDAN_DIFF_FORCED]', { scenarioBQ1Engaged, sidedEntirelyWithJordan });
+        console.log('[S2_JAMES_DIFF_FORCED]', { scenarioBQ1Engaged, sidedEntirelyWithJames });
       }
-      void remoteLog('[S2_JORDAN_DIFF_FORCED]', {
+      void remoteLog('[S2_JAMES_DIFF_FORCED]', {
         scenarioBQ1Engaged,
-        sidedEntirelyWithJordan,
+        sidedEntirelyWithJames,
       });
-      const wrappedJordanProbe = wrapForcedProbeWithAck(trimmed, bLeadIn || strippedText, forcedJordanDifferentlyProbe, recentAsstForAck);
+      const wrappedJamesProbe = wrapForcedProbeWithAck(trimmed, bLeadIn || strippedText, forcedJamesDifferentlyProbe, recentAsstForAck);
       const probeMsg: MessageWithScenario = {
         role: 'assistant',
-        content: wrappedJordanProbe,
+        content: wrappedJamesProbe,
         scenarioNumber:
           currentScenarioRef.current ??
-          getScenarioNumberForNewMessage(stagedMessages, 'assistant', wrappedJordanProbe),
+          getScenarioNumberForNewMessage(stagedMessages, 'assistant', wrappedJamesProbe),
       };
       setMessages([...stagedMessages, probeMsg]);
-      await speakTextSafe(wrappedJordanProbe, ASSISTANT_INTERVIEW_SPEECH);
+      await speakTextSafe(wrappedJamesProbe, ASSISTANT_INTERVIEW_SPEECH);
       setVoiceState('idle');
       return;
     }
@@ -5593,7 +5820,7 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
       !text.includes('[INTERVIEW_COMPLETE]')
     ) {
       const forcedThresholdProbe =
-        "At what point would you say Theo or Morgan should decide this relationship isn't working?";
+        "At what point would you say Daniel or Sophie should decide this relationship isn't working?";
       const prematureMoment4Handoff = assistantTextIsPrematureMoment4HandoffDuringScenarioC(strippedText);
       let stagedMessages = messagesToUse;
       if (strippedText && !prematureMoment4Handoff) {
@@ -5619,7 +5846,7 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
           scenarioCThresholdLegacy,
           shouldForceScenarioCThresholdProbe,
           assistantIssuedScenarioCThresholdProbe,
-          reason: 'Scenario C post-repair corpus lacked Theo/Morgan-anchored commitment-threshold criteria',
+          reason: 'Scenario C post-repair corpus lacked Daniel/Sophie-anchored commitment-threshold criteria',
         });
       }
       void remoteLog('[S3_THRESHOLD_FORCED]', {
@@ -5627,7 +5854,7 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
         scenarioCThresholdLegacy,
         shouldForceScenarioCThresholdProbe,
         assistantIssuedScenarioCThresholdProbe,
-        reason: 'Scenario C post-repair corpus lacked Theo/Morgan-anchored commitment-threshold criteria',
+        reason: 'Scenario C post-repair corpus lacked Daniel/Sophie-anchored commitment-threshold criteria',
       });
       const wrappedS3ThresholdProbe = wrapForcedProbeWithAck(trimmed, strippedText, forcedThresholdProbe, recentAsstForAck);
       const probeMsg: MessageWithScenario = {
@@ -5738,7 +5965,9 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
             currentInterviewMomentRef.current = 4;
           }
         }
-        const fullDisplay = nextContent || (stripControlTokens(text) || 'Got it.');
+        const fullDisplay = sanitizeAssistantInterviewerCharacterNames(
+          nextContent || (stripControlTokens(text) || 'Got it.')
+        );
         const nextScenarioNum = scenarioNumber === 1 ? 2 : scenarioNumber === 2 ? 3 : 3;
         const newAssistantMsg: MessageWithScenario = { role: 'assistant', content: fullDisplay, scenarioNumber: nextScenarioNum };
         currentScenarioRef.current = nextScenarioNum;
@@ -5788,7 +6017,7 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
               currentInterviewMomentRef.current = 4;
             }
           }
-          const fullDisplay = nextContent || 'Got it.';
+          const fullDisplay = sanitizeAssistantInterviewerCharacterNames(nextContent || 'Got it.');
           const nextScenarioNum = scenarioNumber === 1 ? 2 : scenarioNumber === 2 ? 3 : 3;
           const newAssistantMsg: MessageWithScenario = { role: 'assistant', content: fullDisplay, scenarioNumber: nextScenarioNum };
           currentScenarioRef.current = nextScenarioNum;
@@ -5839,6 +6068,35 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
           trimmed,
           recentAssistantMessagesForAck(messagesToUse)
         );
+        {
+          const preNameClose = displayText;
+          displayText = sanitizeAssistantInterviewerCharacterNames(displayText);
+          // #region agent log
+          if (
+            interviewAssistantTextHasDisallowedNameMarker(closingRaw) ||
+            interviewAssistantTextHasDisallowedNameMarker(preNameClose) ||
+            interviewAssistantTextHasDisallowedNameMarker(displayText)
+          ) {
+            fetch('http://127.0.0.1:7789/ingest/668e0bd5-3283-4492-9f48-e33846c18218', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json', 'X-Debug-Session-Id': 'e70f17' },
+              body: JSON.stringify({
+                sessionId: 'e70f17',
+                location: 'AriaScreen.tsx:INTERVIEW_COMPLETE',
+                message: 'name_sanitize_interview_complete',
+                data: {
+                  hypothesisId: 'H4',
+                  path: 'interview_complete',
+                  preSanitizeHas: interviewAssistantTextHasDisallowedNameMarker(preNameClose),
+                  postSanitizeHas: interviewAssistantTextHasDisallowedNameMarker(displayText),
+                  changed: preNameClose !== displayText,
+                },
+                timestamp: Date.now(),
+              }),
+            }).catch(() => {});
+          }
+          // #endregion
+        }
         const finalAssistant: MessageWithScenario = {
           role: 'assistant',
           content: displayText,
@@ -5877,12 +6135,41 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
             void remoteLog('[S3_VIGNETTE_OPENING_REPAIRED]', { path: 'scenario_complete', preview: transitionDisplay.slice(0, 200) });
           }
         }
-        const displayText = ensureAcknowledgmentBeforeMove(
+        let displayText = ensureAcknowledgmentBeforeMove(
           transitionDisplay,
           trimmed,
           recentAssistantMessagesForAck(messagesToUse),
           currentInterviewMomentRef.current
         );
+        {
+          const preNameSc = displayText;
+          displayText = sanitizeAssistantInterviewerCharacterNames(displayText);
+          // #region agent log
+          if (
+            interviewAssistantTextHasDisallowedNameMarker(transitionDisplay) ||
+            interviewAssistantTextHasDisallowedNameMarker(preNameSc) ||
+            interviewAssistantTextHasDisallowedNameMarker(displayText)
+          ) {
+            fetch('http://127.0.0.1:7789/ingest/668e0bd5-3283-4492-9f48-e33846c18218', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json', 'X-Debug-Session-Id': 'e70f17' },
+              body: JSON.stringify({
+                sessionId: 'e70f17',
+                location: 'AriaScreen.tsx:SCENARIO_COMPLETE',
+                message: 'name_sanitize_scenario_complete',
+                data: {
+                  hypothesisId: 'H4',
+                  path: 'scenario_complete',
+                  preSanitizeHas: interviewAssistantTextHasDisallowedNameMarker(preNameSc),
+                  postSanitizeHas: interviewAssistantTextHasDisallowedNameMarker(displayText),
+                  changed: preNameSc !== displayText,
+                },
+                timestamp: Date.now(),
+              }),
+            }).catch(() => {});
+          }
+          // #endregion
+        }
         applyInterviewProgressFromAssistantText(displayText, progressRefsPayload);
         const transitionMsg: MessageWithScenario = { role: 'assistant', content: displayText, scenarioNumber };
         const nextScenarioNum = scenarioNumber < 3 ? (scenarioNumber + 1) as 2 | 3 : 3;
@@ -5922,12 +6209,13 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
         stageDisplay = applyReflectionContrastFidelityRepair(trimmed, stageDisplay);
         stageDisplay = collapseStackedEmpathyIHearYouInFirstParagraph(stageDisplay);
         stageDisplay = stripForbiddenReflectionLead(stageDisplay);
-        const displayText = ensureAcknowledgmentBeforeMove(
+        let displayText = ensureAcknowledgmentBeforeMove(
           stageDisplay,
           trimmed,
           recentAssistantMessagesForAck(messagesToUse),
           currentInterviewMomentRef.current
         );
+        displayText = sanitizeAssistantInterviewerCharacterNames(displayText);
         const finalMessages = [...messagesToUse, { role: 'assistant', content: displayText || 'Good, that’s helpful.' }];
         setMessages(finalMessages);
         await speakTextSafe(displayText || 'Good, that’s helpful.', ASSISTANT_INTERVIEW_SPEECH);
@@ -6046,7 +6334,10 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
 
   /** Transcribe audio (blob on web; on native prefer blob from hook, else URI or base64). Returns null on failure. */
   const transcribeSafe = useCallback(
-    async (audioBlob: Blob | null, nativeUri: string | null): Promise<string | null> => {
+    async (
+      audioBlob: Blob | null,
+      nativeUri: string | null
+    ): Promise<{ text: string; language: string | null; confidence: number | null } | null> => {
       void remoteLog('[TRANSCRIBE] entry', {
         runId: 'audio-route-debug-10',
         platform: Platform.OS,
@@ -6076,8 +6367,9 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
           }
         }
 
+        const transcribeStarted = Date.now();
         const transcript = await withRetry(
-          async (): Promise<string> => {
+          async (): Promise<{ text: string; language: string | null; confidence: number | null }> => {
             // Native: FileSystem.uploadAsync uses iOS NSURLSession directly — avoids all RN fetch/FormData blob issues
             if (Platform.OS !== 'web' && nativeUri) {
               let nativeAuthHeaders = authHeaders;
@@ -6103,7 +6395,7 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
                 uploadType: (legacyUploadType ?? 1) as unknown as never,
                 fieldName: 'file',
                 mimeType: 'audio/mp4',
-                parameters: { model: 'whisper-1' },
+                parameters: { model: 'whisper-1', response_format: 'verbose_json' },
                 headers: nativeAuthHeaders,
               });
               if (__DEV__) console.log('Transcription response status:', uploadResult.status);
@@ -6118,16 +6410,17 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
                 Object.assign(err, { status: uploadResult.status });
                 throw err;
               }
-              const data = JSON.parse(uploadResult.body) as { text?: string };
-              const text = (data.text ?? '').trim();
+              const parsed = JSON.parse(uploadResult.body) as unknown;
+              const { text, language, confidence } = parseWhisperTranscriptionPayload(parsed);
               if (__DEV__) console.log('Transcription result length:', text.length, '=== END DEBUG ===');
               if (text.length < 2) throw new Error('Empty transcription result');
               void remoteLog('[TRANSCRIBE] success', {
                 runId: 'audio-route-debug-10',
                 endpointUsed: OPENAI_WHISPER_PROXY_URL ? 'proxy' : 'openai',
                 transcriptLength: text.length,
+                whisperLanguage: language,
               });
-              return text;
+              return { text, language, confidence };
             }
 
             // Web: use FormData + fetch — never relabel MP4/AAC bytes as webm (breaks Whisper on Safari desktop, etc.).
@@ -6136,7 +6429,7 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
             const blobToSend = audioBlob;
             form.append('file', blobToSend, pickWhisperUploadFilename(blobToSend));
             form.append('model', 'whisper-1');
-            form.append('language', 'en');
+            form.append('response_format', 'verbose_json');
             const res = await fetch(transcriptUrl, { method: 'POST', headers: webTranscribeHeaders, body: form });
             if (__DEV__) console.log('Transcription response status:', res.status);
             if (!res.ok) {
@@ -6149,8 +6442,8 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
               });
               throw new Error(errText);
             }
-            const data = (await res.json()) as { text?: string };
-            const text = (data.text ?? '').trim();
+            const rawJson = await res.json();
+            const { text, language, confidence } = parseWhisperTranscriptionPayload(rawJson);
             if (__DEV__) console.log('Transcription result length:', text.length, '=== END DEBUG ===');
             if (text.length < 2) {
               void remoteLog('[TRANSCRIBE] whisper_empty_text', {
@@ -6158,9 +6451,9 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
                 runId: 'audio-route-debug-10',
                 blobType: audioBlob.type || '(none)',
                 blobSize: audioBlob.size,
-                rawTextLen: (data.text ?? '').length,
-                responseKeys: Object.keys(data as object),
-                responsePreview: JSON.stringify(data).slice(0, 400),
+                rawTextLen: text.length,
+                responseKeys: Object.keys((rawJson && typeof rawJson === 'object' ? rawJson : {}) as object),
+                responsePreview: JSON.stringify(rawJson).slice(0, 400),
               });
               throw new Error('Empty transcription result');
             }
@@ -6168,11 +6461,36 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
               runId: 'audio-route-debug-10',
               endpointUsed: OPENAI_WHISPER_PROXY_URL ? 'proxy' : 'openai',
               transcriptLength: text.length,
+              whisperLanguage: language,
             });
-            return text;
+            return { text, language, confidence };
           },
-          { retries: 2, baseDelay: 4000, context: 'transcription' }
+          {
+            retries: 2,
+            baseDelay: 4000,
+            context: 'transcription',
+            sessionLog: userId
+              ? {
+                  userId,
+                  attemptId: getSessionLogRuntime().attemptId,
+                  platform: getSessionLogRuntime().platform,
+                }
+              : undefined,
+          }
         );
+        if (userId) {
+          const r = getSessionLogRuntime();
+          writeSessionLog({
+            userId,
+            attemptId: r.attemptId,
+            eventType: 'transcription_complete',
+            eventData: {
+              detected_language: transcript.language,
+            },
+            durationMs: Date.now() - transcribeStarted,
+            platform: r.platform,
+          });
+        }
         return transcript;
       } catch (err) {
         void remoteLog('[TRANSCRIBE] catch', {
@@ -6185,6 +6503,7 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
           blobSize: audioBlob?.size ?? 0,
         });
         if (__DEV__) console.error('Transcription failed:', err instanceof Error ? err.message : err);
+        recordingJustFinishedBeforeNextTtsRef.current = false;
         await deleteTurnAudioFile(nativeUri);
         const retryMessages = Platform.OS === 'web'
           ? AMORAEA_ERROR_MESSAGES.recordingOrTranscriptionRetry
@@ -6197,7 +6516,7 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
         return null;
       }
     },
-    [speakTextSafe, deleteTurnAudioFile]
+    [speakTextSafe, deleteTurnAudioFile, userId]
   );
 
   /** Web mic pressIn: same gesture flush as any-page tap (see ensureWebGestureFlushListener). */
@@ -6214,23 +6533,150 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
           }
         : undefined,
     onRecordingComplete: async (blob, nativeUri) => {
+      setRecordingSessionActive(false);
+      recordingJustFinishedBeforeNextTtsRef.current = true;
       setVoiceState('processing');
-      const userText = await transcribeSafe(blob, nativeUri);
-      if (userText) {
-        const turnIndex = turnAudioIndexRef.current;
-        turnAudioIndexRef.current += 1;
-        const scenarioNumber = currentScenarioRef.current ?? null;
-        void processTurnAudioWithRetry({
-          audioBlob: blob,
-          nativeUri,
-          turnIndex,
-          scenarioNumber,
-        });
-        processUserSpeech(userText);
+      const transcribed = await transcribeSafe(blob, nativeUri);
+      if (!transcribed) return;
+      const { text: userText, language, confidence } = transcribed;
+      lastVoiceTurnLanguageRef.current = language;
+      lastVoiceTurnConfidenceRef.current = confidence;
+      if (shouldRejectVoiceForNonEnglish(userText, language)) {
+        void deleteTurnAudioFile(nativeUri);
+        setMessages((prev) => [
+          ...prev,
+          { role: 'user', content: userText },
+          { role: 'assistant', content: NON_ENGLISH_VOICE_PROMPT },
+        ]);
+        setVoiceState('speaking');
+        await speakTextSafe(NON_ENGLISH_VOICE_PROMPT).catch(() => {});
+        setVoiceState('idle');
+        return;
       }
+      const turnIndex = turnAudioIndexRef.current;
+      turnAudioIndexRef.current += 1;
+      const scenarioNumber = currentScenarioRef.current ?? null;
+      void processTurnAudioWithRetry({
+        audioBlob: blob,
+        nativeUri,
+        turnIndex,
+        scenarioNumber,
+      });
+      processUserSpeech(userText);
     },
     onError: (err) => handleRecordingError(err),
   });
+
+  const audioRecorderRefForLeave = useRef(audioRecorder);
+  audioRecorderRefForLeave.current = audioRecorder;
+
+  /** Stop interviewer TTS and mic capture when navigating away or the screen unmounts (tab switches do not stop audio). */
+  useEffect(() => {
+    const stopInterviewAudio = () => {
+      void stopElevenLabsPlayback();
+      stopElevenLabsSpeech();
+      try {
+        if (audioRecorderRefForLeave.current.isRecording) {
+          audioRecorderRefForLeave.current.stopRecording();
+        }
+      } catch {
+        /* ignore */
+      }
+      if (Platform.OS === 'web' && recognitionRef.current) {
+        try {
+          recognitionRef.current.stop();
+        } catch {
+          /* ignore */
+        }
+      }
+    };
+
+    const unsubBlur = navigation.addListener('blur', stopInterviewAudio);
+    const unsubBeforeRemove = navigation.addListener('beforeRemove', stopInterviewAudio);
+
+    return () => {
+      unsubBlur();
+      unsubBeforeRemove();
+      stopInterviewAudio();
+    };
+  }, [navigation]);
+
+  const navSessionBlurRef = useRef(false);
+  useEffect(() => {
+    const unsubFocus = navigation.addListener('focus', () => {
+      if (!userId || !navSessionBlurRef.current) return;
+      navSessionBlurRef.current = false;
+      const r = getSessionLogRuntime();
+      writeSessionLog({
+        userId,
+        attemptId: r.attemptId,
+        eventType: 'navigation_return',
+        eventData: { moment_number: currentInterviewMomentRef.current },
+        platform: r.platform,
+      });
+    });
+    const unsubBlurNav = navigation.addListener('blur', () => {
+      if (!userId || interviewStatusRef.current !== 'in_progress') return;
+      navSessionBlurRef.current = true;
+      const r = getSessionLogRuntime();
+      writeSessionLog({
+        userId,
+        attemptId: r.attemptId,
+        eventType: 'navigation_away',
+        eventData: { moment_number: currentInterviewMomentRef.current },
+        platform: r.platform,
+      });
+    });
+    return () => {
+      unsubFocus();
+      unsubBlurNav();
+    };
+  }, [navigation, userId]);
+
+  useEffect(() => {
+    const sub = AppState.addEventListener('change', (next) => {
+      if (!userId) return;
+      if (next === 'active') {
+        const r = getSessionLogRuntime();
+        writeSessionLog({
+          userId,
+          attemptId: r.attemptId,
+          eventType: 'tab_visibility_change',
+          eventData: { visible: true, moment_number: currentInterviewMomentRef.current },
+          platform: r.platform,
+        });
+      } else {
+        setLastHiddenAtMs(Date.now());
+        const r = getSessionLogRuntime();
+        writeSessionLog({
+          userId,
+          attemptId: r.attemptId,
+          eventType: 'tab_visibility_change',
+          eventData: { visible: false, moment_number: currentInterviewMomentRef.current },
+          platform: r.platform,
+        });
+      }
+    });
+    return () => sub.remove();
+  }, [userId]);
+
+  useEffect(() => {
+    if (Platform.OS !== 'web' || typeof document === 'undefined') return;
+    const fn = () => {
+      if (!userId) return;
+      const vis = document.visibilityState === 'visible';
+      const r = getSessionLogRuntime();
+      writeSessionLog({
+        userId,
+        attemptId: r.attemptId,
+        eventType: 'tab_visibility_change',
+        eventData: { visible: vis, moment_number: currentInterviewMomentRef.current },
+        platform: r.platform,
+      });
+    };
+    document.addEventListener('visibilitychange', fn);
+    return () => document.removeEventListener('visibilitychange', fn);
+  }, [userId]);
 
   const startRecordingAfterPendingTts = useCallback(async () => {
     if (Platform.OS !== 'web') return;
@@ -6251,6 +6697,16 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
     }).catch(() => {});
     // #endregion
     try {
+      if (userId && getSessionLogRuntime().ttsPlaybackActive) {
+        const r = getSessionLogRuntime();
+        writeSessionLog({
+          userId,
+          attemptId: r.attemptId,
+          eventType: 'tts_interrupted',
+          eventData: { source: 'start_recording_after_pending_tts' },
+          platform: r.platform,
+        });
+      }
       await stopElevenLabsPlayback();
       await new Promise<void>((resolve) => {
         requestAnimationFrame(() => requestAnimationFrame(() => resolve()));
@@ -6259,19 +6715,43 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
       if (!granted) return;
       setVoiceState('recording');
       await audioRecorder.startRecording();
+      setRecordingSessionActive(true);
+      if (userId) {
+        const r = getSessionLogRuntime();
+        writeSessionLog({
+          userId,
+          attemptId: r.attemptId,
+          eventType: 'recording_start',
+          eventData: gatherRecordingStartTelemetry(),
+          platform: r.platform,
+        });
+      }
     } catch (err) {
       handleRecordingError(err instanceof Error ? err : new Error(String(err)));
     }
-  }, [audioRecorder, stopElevenLabsPlayback, handleRecordingError]);
+  }, [audioRecorder, stopElevenLabsPlayback, handleRecordingError, userId]);
 
   const handleSendTyped = useCallback(() => {
     const text = typedAnswer.trim();
     if (!text) return;
+    touchActivity();
     setTypedAnswer('');
     setMicWarning(null);
+    lastVoiceTurnLanguageRef.current = null;
+    lastVoiceTurnConfidenceRef.current = null;
+    if (userId && ttsLineInFlightRef.current) {
+      const r = getSessionLogRuntime();
+      writeSessionLog({
+        userId,
+        attemptId: r.attemptId,
+        eventType: 'tts_interrupted',
+        eventData: { source: 'typed_send' },
+        platform: r.platform,
+      });
+    }
     stopElevenLabsSpeech(); // interrupt if interviewer is still speaking
     processUserSpeech(text);
-  }, [typedAnswer, processUserSpeech]);
+  }, [typedAnswer, processUserSpeech, userId]);
 
   const handlePressEnd = useCallback(async () => {
     if (voiceState !== 'listening') return;
@@ -6287,6 +6767,7 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
   }, [voiceState, currentTranscript, processUserSpeech, useMediaRecorderPath, handleRecordingError, transcribeSafe]);
 
   const handleNativeOrWhisperMicPress = useCallback(async () => {
+    touchActivity();
     if (Platform.OS === 'web') {
       unlockWebAudioForAutoplay();
       primeHtmlAudioForMobileTtsFromMicGesture();
@@ -6379,6 +6860,17 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
         if (!granted) return;
         setVoiceState('recording');
         await audioRecorder.startRecording();
+        setRecordingSessionActive(true);
+        if (userId) {
+          const r = getSessionLogRuntime();
+          writeSessionLog({
+            userId,
+            attemptId: r.attemptId,
+            eventType: 'recording_start',
+            eventData: gatherRecordingStartTelemetry(),
+            platform: r.platform,
+          });
+        }
         if (__DEV__) console.log('[Aria] RECORDING STARTED');
       }
     } catch (err) {
@@ -6398,6 +6890,7 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
     handleRecordingError,
     stopElevenLabsPlayback,
     startRecordingAfterPendingTts,
+    userId,
   ]);
 
   const handleResume = useCallback(
@@ -6493,10 +6986,7 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
         .flatMap((m) => detectConstructs(m.content));
       setTouchedConstructs([...new Set(allDetected)]);
 
-      const lastMessage = extractLastInterviewerMessage(restoredMessages);
-      const welcomeBack = lastMessage
-        ? `Welcome back. Let's pick up where we left off. ${lastMessage}`
-        : "Welcome back. Let's pick up where we left off.";
+      const welcomeBack = "Welcome back. Let's pick up where we left off.";
       const welcomeMsg = { role: 'assistant', content: welcomeBack, isWelcomeBack: true };
       setMessages([...fullMessages, welcomeMsg]);
       setTimeout(() => void speakTextSafe(welcomeBack, { telemetrySource: 'greeting' }), 500);
@@ -6540,8 +7030,8 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
   }, [userId, isAdmin, handleResume]);
 
   const startInterview = useCallback(async (opts?: { fromUserGesture?: boolean }) => {
-    /** Manual Start / consent: same gesture as button — skip tap overlay. */
-    if (opts?.fromUserGesture && Platform.OS === 'web' && webSpeechShouldDeferToUserGesture()) {
+    /** Any web path that begins inside a real user gesture (overlay, first pointerdown, consent button). */
+    if (opts?.fromUserGesture && Platform.OS === 'web') {
       setMobileWebTapToBeginDone(true);
     }
     /** Must run before any `await` so mobile browsers still treat this as the same user gesture as "Start". */
@@ -6586,6 +7076,46 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
       setInterviewStatus('in_progress');
       setVoiceState('processing');
       resetInterviewProgressRefs();
+      recordingJustFinishedBeforeNextTtsRef.current = false;
+      lastVoiceTurnLanguageRef.current = null;
+      lastVoiceTurnConfidenceRef.current = null;
+      resetSessionLogRuntime({ sessionCorrelationId: interviewSessionIdRef.current, attemptId: null });
+      void (async () => {
+        if (!userId) return;
+        try {
+          const device = await collectDeviceContext();
+          setSessionLogPlatform(device.platform);
+          const { data: urow } = await supabase
+            .from('users')
+            .select('interview_attempt_count')
+            .eq('id', userId)
+            .maybeSingle();
+          const attemptNumber = (urow?.interview_attempt_count ?? 0) + 1;
+          const baseData = {
+            ...device,
+            is_alpha_tester: !!profile?.isAlphaTester,
+            referral_code_used: profile?.inviteCode ?? null,
+            attempt_number: attemptNumber,
+            session_correlation_id: interviewSessionIdRef.current,
+          };
+          writeSessionLog({
+            userId,
+            attemptId: null,
+            eventType: 'session_start',
+            eventData: baseData,
+            platform: device.platform,
+          });
+          writeSessionLog({
+            userId,
+            attemptId: null,
+            eventType: 'build_version',
+            eventData: { build_version: device.build_version },
+            platform: device.platform,
+          });
+        } catch (e) {
+          if (__DEV__) console.warn('[session_logs] session_start logging failed', e);
+        }
+      })();
 
       const hasKey = !!ANTHROPIC_API_KEY;
       const hasProxy = !!ANTHROPIC_PROXY_URL;
@@ -6633,7 +7163,7 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
       setMessages([{ role: 'assistant', content: fallbackMsg, scenarioNumber: 1 } as MessageWithScenario]);
       await speakTextSafe(fallbackMsg, { telemetrySource: 'greeting' }).catch(() => {});
     }
-  }, [speakTextSafe, isAdmin, userId, audioRecorder, resetInterviewProgressRefs]);
+  }, [speakTextSafe, isAdmin, userId, audioRecorder, resetInterviewProgressRefs, profile?.isAlphaTester, profile?.inviteCode]);
 
   useEffect(() => {
     if (!isInterviewAppRoute) return;
@@ -6656,21 +7186,8 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
       // #endregion
       return;
     }
-    if (Platform.OS === 'web' && webSpeechShouldDeferToUserGesture() && !mobileWebTapToBeginDone) {
-      // #region agent log
-      fetch('http://127.0.0.1:7789/ingest/668e0bd5-3283-4492-9f48-e33846c18218', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'X-Debug-Session-Id': 'e70f17' },
-        body: JSON.stringify({
-          sessionId: 'e70f17',
-          location: 'AriaScreen.tsx:autoStartEffect',
-          message: 'skip_waiting_mobile_tap',
-          data: { mobileWebTapToBeginDone },
-          timestamp: Date.now(),
-          hypothesisId: 'H3',
-        }),
-      }).catch(() => {});
-      // #endregion
+    /** Web: never start from this effect — no user gesture after refresh; use overlay (mobile) or pointerdown (desktop). */
+    if (Platform.OS === 'web') {
       return;
     }
     // #region agent log
@@ -6680,7 +7197,7 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
       body: JSON.stringify({
         sessionId: 'e70f17',
         location: 'AriaScreen.tsx:autoStartEffect',
-        message: 'effect_calls_startInterview_no_gesture',
+        message: 'effect_calls_startInterview_native',
         data: {},
         timestamp: Date.now(),
         hypothesisId: 'H4',
@@ -6689,7 +7206,58 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
     // #endregion
     onboardingAutoStartRef.current = true;
     void startInterview();
-  }, [isInterviewAppRoute, status, interviewStatus, startInterview, mobileWebTapToBeginDone]);
+  }, [isInterviewAppRoute, status, interviewStatus, startInterview]);
+
+  /**
+   * Desktop web: cannot call `startInterview` from a bare useEffect (no gesture after hard refresh).
+   * - If the tab already has user activation (e.g. SPA navigation right after Sign in), start once after priming AudioContext — no overlay.
+   * Otherwise show `webDesktopAwaitingStartOverlay` and wait for the first pointerdown.
+   */
+  useEffect(() => {
+    if (Platform.OS !== 'web' || typeof window === 'undefined') {
+      setWebDesktopAwaitingStartOverlay(false);
+      return;
+    }
+    if (webSpeechShouldDeferToUserGesture()) {
+      setWebDesktopAwaitingStartOverlay(false);
+      return;
+    }
+    if (!isInterviewAppRoute) {
+      setWebDesktopAwaitingStartOverlay(false);
+      return;
+    }
+    if (status !== 'starting_interview' || interviewStatus !== 'not_started') {
+      setWebDesktopAwaitingStartOverlay(false);
+      return;
+    }
+    if (onboardingAutoStartRef.current) {
+      setWebDesktopAwaitingStartOverlay(false);
+      return;
+    }
+
+    const nav = navigator as Navigator & { userActivation?: { hasBeenActive?: boolean } };
+    if (nav.userActivation?.hasBeenActive) {
+      setWebDesktopAwaitingStartOverlay(false);
+      unlockWebAudioForAutoplay();
+      onboardingAutoStartRef.current = true;
+      void startInterview({ fromUserGesture: true });
+      return;
+    }
+
+    setWebDesktopAwaitingStartOverlay(true);
+    const onFirstPointer = () => {
+      if (onboardingAutoStartRef.current) return;
+      setWebDesktopAwaitingStartOverlay(false);
+      unlockWebAudioForAutoplay();
+      onboardingAutoStartRef.current = true;
+      void startInterview({ fromUserGesture: true });
+    };
+    window.addEventListener('pointerdown', onFirstPointer, { capture: true, once: true });
+    return () => {
+      setWebDesktopAwaitingStartOverlay(false);
+      window.removeEventListener('pointerdown', onFirstPointer, { capture: true });
+    };
+  }, [isInterviewAppRoute, status, interviewStatus, startInterview, webSpeechShouldDeferToUserGesture]);
 
   /**
    * Mobile web: tap overlay must call `startInterview({ fromUserGesture: true })` in the same press handler.
@@ -6762,6 +7330,10 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
     await remoteLog('[2] Screen set to scoring');
     const context = typologyContext || 'No typology context — score from transcript only.';
     if (!ANTHROPIC_API_KEY && !ANTHROPIC_PROXY_URL) {
+      const weightedMinFallback = await resolveWeightedPassMinAfterReferralFulfillment(userId);
+      const fallbackGate = computeGateResult({ ...FALLBACK_MARKER_SCORES_MID }, null, {
+        weightedPassMin: weightedMinFallback,
+      });
       const fallbackResults: InterviewResults = {
         pillarScores: { ...FALLBACK_MARKER_SCORES_MID },
         keyEvidence: {},
@@ -6769,15 +7341,15 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
         behavioralSpecificity: 'moderate',
         notableInconsistencies: [],
         interviewSummary: 'Interview completed. Scoring was unavailable.',
-        gateResult: computeGateResult({ ...FALLBACK_MARKER_SCORES_MID }),
+        gateResult: fallbackGate,
       };
       setResults(fallbackResults);
       if (isOnboardingFlow) {
         const gate1Score = buildGate1ScoreFromResults(fallbackResults);
         await profileRepository.upsertProfile(userId, {
           gate1Score,
-          applicationStatus: gate1Score.passed ? 'approved' : 'under_review',
-          ...(gate1Score.passed ? { onboardingStage: 'basic_info' as const } : {}),
+          applicationStatus: 'under_review',
+          onboardingStage: 'complete',
         });
         queryClient.invalidateQueries({ queryKey: ['profile', userId] });
       }
@@ -6785,6 +7357,7 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
       const standardNoApi =
         isOnboardingFlow && !!userId && !!profile && !profile.isAlphaTester && !isAdmin;
       if (standardNoApi) {
+        await ensureShareableReferralCodeForReferrer(userId);
         navigation.replace('PostInterview', { userId });
         setStatus('results');
         return;
@@ -6827,8 +7400,18 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
         baseDelay: 12000,
         maxDelay: 45000,
         context: 'scoring',
+        sessionLog: userId
+          ? {
+              userId,
+              attemptId: getSessionLogRuntime().attemptId,
+              platform: getSessionLogRuntime().platform,
+            }
+          : undefined,
       });
-      const gateResult = computeGateResult(parsed.pillarScores ?? {}, parsed.skepticismModifier ?? null);
+      const weightedMin = await resolveWeightedPassMinAfterReferralFulfillment(userId);
+      const gateResult = computeGateResult(parsed.pillarScores ?? {}, parsed.skepticismModifier ?? null, {
+        weightedPassMin: weightedMin,
+      });
       parsed.gateResult = gateResult;
       setResults(parsed);
       /** Non–alpha testers: no in-app scores or analysis — branded PostInterview only. */
@@ -6838,11 +7421,12 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
         const gate1Score = buildGate1ScoreFromResults(parsed);
         await profileRepository.upsertProfile(userId, {
           gate1Score,
-          applicationStatus: gate1Score.passed ? 'approved' : 'under_review',
-          ...(gate1Score.passed ? { onboardingStage: 'basic_info' as const } : {}),
+          applicationStatus: 'under_review',
+          onboardingStage: 'complete',
         });
         queryClient.invalidateQueries({ queryKey: ['profile', userId] });
         await saveInterviewResults(parsed, gateResult, userId);
+        await ensureShareableReferralCodeForReferrer(userId);
         navigation.replace('PostInterview', { userId });
         setStatus('results');
         return;
@@ -6859,8 +7443,8 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
         const gate1Score = buildGate1ScoreFromResults(parsed);
         await profileRepository.upsertProfile(userId, {
           gate1Score,
-          applicationStatus: gate1Score.passed ? 'approved' : 'under_review',
-          ...(gate1Score.passed ? { onboardingStage: 'basic_info' as const } : {}),
+          applicationStatus: 'under_review',
+          onboardingStage: 'complete',
         });
         if (!ALPHA_MODE) {
           queryClient.invalidateQueries({ queryKey: ['profile', userId] });
@@ -6973,6 +7557,13 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
                   baseDelay: 5000,
                   maxDelay: 20000,
                   context: `scoring personal moment ${momentNumber}`,
+                  sessionLog: userId
+                    ? {
+                        userId,
+                        attemptId: getSessionLogRuntime().attemptId,
+                        platform: getSessionLogRuntime().platform,
+                      }
+                    : undefined,
                 }
               );
               if (momentNumber === 4 && deferredMoment4NarrativeRef.current) {
@@ -7010,7 +7601,10 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
             const prev = scenarioScoresRef.current[n]!;
             scenarioScoresRef.current[n] = {
               ...prev,
-              pillarScores: { ...prev.pillarScores, ...(enr.pillarScores as Record<string, number | null>) },
+              pillarScores: {
+                ...prev.pillarScores,
+                ...(enr.pillarScores as Record<string, number | null>),
+              } as typeof prev.pillarScores,
               keyEvidence: { ...prev.keyEvidence, ...enr.keyEvidence },
             };
           };
@@ -7087,10 +7681,9 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
               weightedCommitmentScore: pillarScores.commitment_threshold,
             });
           }
-          const finalGateResult = computeGateResult(
-            pillarScores,
-            parsed.skepticismModifier ?? null
-          );
+          const finalGateResult = computeGateResult(pillarScores, parsed.skepticismModifier ?? null, {
+            weightedPassMin: weightedMin,
+          });
           parsed.pillarScores = pillarScores;
           parsed.gateResult = finalGateResult;
           setResults({ ...parsed });
@@ -7207,13 +7800,24 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
             interview_attempt_count: attemptNum,
             latest_attempt_id: null as string | null,
           };
+          const slBase = {
+            userId,
+            attemptId: getSessionLogRuntime().attemptId,
+            platform: getSessionLogRuntime().platform,
+          };
           const { data: insertData } = await withRetry(
             async () => {
               const result = await supabase.from('interview_attempts').insert(insertPayload).select('id').single();
               if (result.error) throw new Error(result.error.message);
               return result;
             },
-            { retries: 3, baseDelay: 3000, maxDelay: 15000, context: 'database interview_attempts insert' }
+            {
+              retries: 3,
+              baseDelay: 3000,
+              maxDelay: 15000,
+              context: 'database interview_attempts insert',
+              sessionLog: userId ? slBase : undefined,
+            }
           );
           (updatePayload as Record<string, unknown>).latest_attempt_id = insertData?.id ?? null;
           await withRetry(
@@ -7221,7 +7825,13 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
               const { error } = await supabase.from('users').update(updatePayload).eq('id', userId);
               if (error) throw new Error(error.message);
             },
-            { retries: 3, baseDelay: 3000, maxDelay: 15000, context: 'database users update' }
+            {
+              retries: 3,
+              baseDelay: 3000,
+              maxDelay: 15000,
+              context: 'database users update',
+              sessionLog: userId ? slBase : undefined,
+            }
           );
           await clearInterviewFromStorage(userId);
           const attemptId = insertData?.id ?? null;
@@ -7235,12 +7845,23 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
           }
           if (attemptId) {
             interviewLastCommittedAttemptId = attemptId;
+            assignAttemptIdForSessionLogs(attemptId);
+            const rtp = getSessionLogRuntime();
+            logGateAnalyticsToSession({
+              base: { userId, attemptId: rtp.attemptId, platform: rtp.platform },
+              gateReason: finalGateResult.reason,
+              failingConstruct: finalGateResult.failingConstruct,
+              failingScore: finalGateResult.failingScore,
+              weightedScore: finalGateResult.weightedScore,
+              pillarScores,
+            });
             // Style pipeline only needs the attempt row (transcript + scores on insert). Do not wait for
             // read-replica polling; otherwise analyze-interview-text may never run when scoringVisible is false.
             void runCommunicationStylePipelineAfterSave(
               userId,
               attemptId,
-              interviewSessionIdRef.current
+              interviewSessionIdRef.current,
+              { platform: rtp.platform }
             );
             const scoringVisible = await waitForInterviewAttemptScoringReady(supabase, attemptId, {
               maxMs: 180_000,
@@ -7253,6 +7874,13 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
               if (__DEV__) console.log('=== [6] latestAttemptId set ===', attemptId);
               interviewJustCompletedInSession = true;
               await new Promise((resolve) => setTimeout(resolve, 100));
+              writeSessionLog({
+                userId,
+                attemptId,
+                eventType: 'session_complete',
+                eventData: { session_correlation_id: interviewSessionIdRef.current },
+                platform: getSessionLogRuntime().platform,
+              });
               setInterviewStatus('congratulations');
               await remoteLog('[8] setInterviewStatus called', { screen: 'congratulations' });
               if (__DEV__) console.log('=== [8] Navigation complete ===');
@@ -7270,6 +7898,16 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
             alphaSaveOk = true;
           }
         } catch (err) {
+          if (userId) {
+            logSupabaseWriteFailed({
+              userId,
+              attemptId: getSessionLogRuntime().attemptId,
+              platform: getSessionLogRuntime().platform,
+              table: 'interview_attempts / users',
+              operation: 'alpha_completion_save',
+              errorMessage: err instanceof Error ? err.message : String(err),
+            });
+          }
           await remoteLog('[ERROR] Completion handler threw', {
             message: err instanceof Error ? err.message : String(err),
             name: err instanceof Error ? err.name : 'unknown',
@@ -7298,6 +7936,24 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
         }
       } else {
         await saveInterviewResults(parsed, gateResult, userId);
+        if (userId) {
+          const r = getSessionLogRuntime();
+          logGateAnalyticsToSession({
+            base: { userId, attemptId: r.attemptId, platform: r.platform },
+            gateReason: gateResult.reason,
+            failingConstruct: gateResult.failingConstruct,
+            failingScore: gateResult.failingScore,
+            weightedScore: gateResult.weightedScore,
+            pillarScores: parsed.pillarScores ?? {},
+          });
+          writeSessionLog({
+            userId,
+            attemptId: r.attemptId,
+            eventType: 'session_complete',
+            eventData: { session_correlation_id: interviewSessionIdRef.current, path: 'non_alpha_results' },
+            platform: r.platform,
+          });
+        }
         setInterviewStatus('congratulations');
       }
       setStatus('results');
@@ -7308,6 +7964,7 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
         stack: err instanceof Error ? err.stack?.slice(0, 500) : undefined,
       });
       if (__DEV__) console.error('=== COMPLETION ERROR ===', err);
+      const weightedMinErr = await resolveWeightedPassMinAfterReferralFulfillment(userId);
       const fallbackResults: InterviewResults = {
         pillarScores: { ...FALLBACK_MARKER_SCORES_MID },
         keyEvidence: {},
@@ -7315,15 +7972,18 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
         behavioralSpecificity: 'moderate',
         notableInconsistencies: [],
         interviewSummary: 'A grounded spoken profile. See individual construct scores for detail.',
-        gateResult: computeGateResult({ ...FALLBACK_MARKER_SCORES_MID }),
+        gateResult: computeGateResult({ ...FALLBACK_MARKER_SCORES_MID }, null, {
+          weightedPassMin: weightedMinErr,
+        }),
       };
       setResults(fallbackResults);
       if (isOnboardingFlow) {
         const gate1Score = buildGate1ScoreFromResults(fallbackResults);
+        const g = fallbackResults.gateResult!;
         await profileRepository.upsertProfile(userId, {
           gate1Score,
-          applicationStatus: gate1Score.passed ? 'approved' : 'under_review',
-          ...(gate1Score.passed ? { onboardingStage: 'basic_info' as const } : {}),
+          applicationStatus: 'under_review',
+          onboardingStage: 'complete',
         });
         queryClient.invalidateQueries({ queryKey: ['profile', userId] });
       }
@@ -7331,6 +7991,7 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
       const standardCatch =
         isOnboardingFlow && !!userId && !!profile && !profile.isAlphaTester && !isAdmin;
       if (standardCatch) {
+        await ensureShareableReferralCodeForReferrer(userId);
         navigation.replace('PostInterview', { userId });
         setStatus('results');
         return;
@@ -7363,6 +8024,24 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
 
   const performRetake = useCallback(async () => {
     if (!userId) return;
+    if (
+      interviewStatusRef.current === 'in_progress' ||
+      interviewStatusRef.current === 'preparing_results'
+    ) {
+      const r = getSessionLogRuntime();
+      writeSessionLog({
+        userId,
+        attemptId: r.attemptId,
+        eventType: 'session_dropout',
+        eventData: {
+          dropout_point: {
+            moment_number: currentInterviewMomentRef.current,
+            last_question_delivered: lastQuestionTextRef.current.slice(0, 500),
+          },
+        },
+        platform: r.platform,
+      });
+    }
     const { data: userData } = await supabase
       .from('users')
       .select('interview_attempt_count')
@@ -7678,6 +8357,15 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
         accessibilityLabel="Reset interview from start"
       >
         <Text style={styles.adminResetButtonText}>Reset</Text>
+      </TouchableOpacity>
+      <TouchableOpacity
+        style={styles.adminBarButtonLogout}
+        onPress={handleInterviewSignOut}
+        activeOpacity={0.8}
+        accessibilityRole="button"
+        accessibilityLabel="Log out"
+      >
+        <Text style={styles.adminLogoutButtonText}>Log out</Text>
       </TouchableOpacity>
     </View>
   ) : null;
@@ -8025,6 +8713,22 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
             <Text style={styles.mobileWebTapToBeginTitle}>Tap the screen to begin</Text>
             <Text style={styles.mobileWebTapToBeginSubtitle}>
               One quick tap unlocks audio for the interviewer on this device.
+            </Text>
+          </Pressable>
+        ) : null}
+        {Platform.OS === 'web' &&
+        !webSpeechShouldDeferToUserGesture() &&
+        webDesktopAwaitingStartOverlay &&
+        status === 'starting_interview' &&
+        interviewStatus === 'not_started' ? (
+          <Pressable
+            style={styles.mobileWebTapToBeginOverlay}
+            accessibilityRole="button"
+            accessibilityLabel="Click anywhere to begin the interview audio"
+          >
+            <Text style={styles.mobileWebTapToBeginTitle}>Click anywhere to begin</Text>
+            <Text style={styles.mobileWebTapToBeginSubtitle}>
+              One quick click unlocks audio for the interviewer (for example after refreshing the page).
             </Text>
           </Pressable>
         ) : null}
@@ -8453,6 +9157,21 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
                   editable={!inputDisabled && voiceState !== 'processing'}
                   multiline
                   maxLength={2000}
+                  {...(Platform.OS === 'web'
+                    ? {
+                        onPaste: () => {
+                          if (!userId) return;
+                          const r = getSessionLogRuntime();
+                          writeSessionLog({
+                            userId,
+                            attemptId: r.attemptId,
+                            eventType: 'copy_paste_detected',
+                            eventData: { field_name: 'admin_typed_answer' },
+                            platform: r.platform,
+                          });
+                        },
+                      }
+                    : {})}
                   onKeyPress={(e) => {
                     const key = (e.nativeEvent?.key ?? (e as { key?: string }).key) ?? '';
                     const shiftKey = (e.nativeEvent as { shiftKey?: boolean } | undefined)?.shiftKey ?? (e as { shiftKey?: boolean }).shiftKey ?? false;
@@ -8492,6 +9211,22 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
           <Text style={styles.mobileWebTapToBeginTitle}>Tap the screen to begin</Text>
           <Text style={styles.mobileWebTapToBeginSubtitle}>
             One quick tap unlocks audio for the interviewer on this device.
+          </Text>
+        </Pressable>
+      ) : null}
+      {Platform.OS === 'web' &&
+      !webSpeechShouldDeferToUserGesture() &&
+      webDesktopPendingTtsGestureOverlay &&
+      status === 'active' ? (
+        <Pressable
+          style={styles.mobileWebTapToBeginOverlay}
+          onPress={() => runWebGestureTtsFlush('desktop_pending_tts_overlay')}
+          accessibilityRole="button"
+          accessibilityLabel="Click to play interviewer audio"
+        >
+          <Text style={styles.mobileWebTapToBeginTitle}>Click to play audio</Text>
+          <Text style={styles.mobileWebTapToBeginSubtitle}>
+            Your browser needs one click to start this line of interviewer audio.
           </Text>
         </Pressable>
       ) : null}
@@ -9004,6 +9739,14 @@ const styles = StyleSheet.create({
     borderColor: 'rgba(232,120,120,0.35)',
     borderRadius: 6,
   },
+  adminBarButtonLogout: {
+    paddingVertical: 6,
+    paddingHorizontal: 12,
+    backgroundColor: 'rgba(30,111,217,0.1)',
+    borderWidth: 1,
+    borderColor: 'rgba(82,142,220,0.2)',
+    borderRadius: 6,
+  },
   adminPanelButtonText: {
     fontFamily: Platform.OS === 'web' ? 'Jost, sans-serif' : undefined,
     fontSize: 10,
@@ -9019,6 +9762,14 @@ const styles = StyleSheet.create({
     letterSpacing: 2,
     textTransform: 'uppercase',
     color: '#E8A0A0',
+  },
+  adminLogoutButtonText: {
+    fontFamily: Platform.OS === 'web' ? 'Jost, sans-serif' : undefined,
+    fontSize: 10,
+    fontWeight: '400',
+    letterSpacing: 2,
+    textTransform: 'uppercase',
+    color: '#5BA8E8',
   },
   adminWrap: { flex: 1, backgroundColor: '#05060D' },
   adminStageScoresContainer: { backgroundColor: '#0D1120', borderBottomColor: 'rgba(82,142,220,0.12)' },
