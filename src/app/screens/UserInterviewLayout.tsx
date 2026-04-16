@@ -70,7 +70,14 @@ interface UserInterviewLayoutProps {
 }
 
 const GOOGLE_FONTS_URL =
-  "https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,300;0,400;1,300&family=Jost:wght@200;300;400&display=swap";
+  "https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,300;0,400;1,300&family=Jost:wght@200;300;400;500&display=swap";
+
+/** Break fiction into lines between sentences for scanning (single newline saves vertical space vs double). */
+function formatScenarioModalBody(raw: string): string {
+  const t = (raw ?? '').trim();
+  if (!t) return '';
+  return t.replace(/(\.\s+)(?=[A-Z])/g, '$1\n');
+}
 
 /** Web only: scenario reference modal text should not be selectable/copyable. */
 const WEB_MODAL_NO_COPY = (Platform.OS === 'web'
@@ -128,6 +135,19 @@ export const UserInterviewLayout: React.FC<UserInterviewLayoutProps> = ({
     };
   }, []);
   const layoutHeight = visualViewportH != null ? Math.min(windowHeight, visualViewportH) : windowHeight;
+
+  /** Card caps at viewport; vignette ScrollView caps so long text scrolls without forcing a tall empty card. */
+  const { refModalCardMaxHeight, refModalScrollMaxHeight } = useMemo(() => {
+    const overlayPadY = 80;
+    const innerH = Math.max(0, layoutHeight - overlayPadY);
+    const cardMax = Math.min(innerH * 0.82, 580);
+    const labelChrome = 48;
+    const footerChrome = referenceCardPrompt ? 168 : 8;
+    return {
+      refModalCardMaxHeight: cardMax,
+      refModalScrollMaxHeight: Math.max(96, cardMax - labelChrome - footerChrome),
+    };
+  }, [layoutHeight, referenceCardPrompt]);
 
   /**
    * Web is one platform for both desktop and mobile browsers. Touch phones report no hover — only
@@ -478,15 +498,19 @@ export const UserInterviewLayout: React.FC<UserInterviewLayoutProps> = ({
                 style={[styles.refModalOverlay, WEB_MODAL_NO_COPY]}
                 onPress={() => setRefCardOpen(false)}
               >
-                <Pressable style={[styles.refModalCard, WEB_MODAL_NO_COPY]} onPress={() => {}} accessible={false}>
+                <Pressable
+                  style={[styles.refModalCard, { maxHeight: refModalCardMaxHeight }, WEB_MODAL_NO_COPY]}
+                  onPress={() => {}}
+                  accessible={false}
+                >
                   <Text style={[styles.refModalLabel, WEB_MODAL_NO_COPY]}>◆ {referenceCardScenario?.label ?? ''}</Text>
                   <ScrollView
-                    style={[styles.refModalScroll, WEB_MODAL_NO_COPY]}
+                    style={[{ maxHeight: refModalScrollMaxHeight }, WEB_MODAL_NO_COPY]}
                     contentContainerStyle={[styles.refModalScrollContent, WEB_MODAL_NO_COPY]}
-                    showsVerticalScrollIndicator={false}
+                    showsVerticalScrollIndicator
                   >
                     <Text style={[styles.refModalScenarioText, WEB_MODAL_NO_COPY]}>
-                      {referenceCardScenario?.text ?? ''}
+                      {formatScenarioModalBody(referenceCardScenario?.text ?? '')}
                     </Text>
                   </ScrollView>
                   {referenceCardPrompt ? (
@@ -557,14 +581,20 @@ export const UserInterviewLayout: React.FC<UserInterviewLayoutProps> = ({
       {Platform.OS === 'web' && refCardOpen && referenceCardScenario ? (
         <View style={styles.refModalWebLayer} pointerEvents="none">
           <View style={[styles.refModalOverlay, WEB_MODAL_NO_COPY]}>
-            <Pressable style={[styles.refModalCard, WEB_MODAL_NO_COPY]} onPress={() => {}} accessible={false}>
+            <Pressable
+              style={[styles.refModalCard, { maxHeight: refModalCardMaxHeight }, WEB_MODAL_NO_COPY]}
+              onPress={() => {}}
+              accessible={false}
+            >
               <Text style={[styles.refModalLabel, WEB_MODAL_NO_COPY]}>◆ {referenceCardScenario?.label ?? ''}</Text>
               <ScrollView
-                style={[styles.refModalScroll, WEB_MODAL_NO_COPY]}
+                style={[{ maxHeight: refModalScrollMaxHeight }, WEB_MODAL_NO_COPY]}
                 contentContainerStyle={[styles.refModalScrollContent, WEB_MODAL_NO_COPY]}
-                showsVerticalScrollIndicator={false}
+                showsVerticalScrollIndicator
               >
-                <Text style={[styles.refModalScenarioText, WEB_MODAL_NO_COPY]}>{referenceCardScenario?.text ?? ''}</Text>
+                <Text style={[styles.refModalScenarioText, WEB_MODAL_NO_COPY]}>
+                  {formatScenarioModalBody(referenceCardScenario?.text ?? '')}
+                </Text>
               </ScrollView>
               {referenceCardPrompt ? (
                 <>
@@ -788,52 +818,70 @@ const styles = StyleSheet.create({
   },
   refModalCard: {
     width: '100%',
-    maxWidth: 420,
-    maxHeight: '78%',
+    maxWidth: 460,
+    flexDirection: 'column',
     backgroundColor: SURFACE,
     borderRadius: 16,
     borderWidth: 1,
     borderColor: BORDER,
-    paddingVertical: 20,
-    paddingHorizontal: 20,
+    paddingVertical: 14,
+    paddingHorizontal: 16,
+    overflow: 'hidden',
     ...(Platform.OS === 'web'
       ? { boxShadow: '0 24px 80px rgba(0,0,0,0.55)' }
-      : { shadowColor: '#000', shadowOffset: { width: 0, height: 12 }, shadowOpacity: 0.45, shadowRadius: 24, elevation: 16 }),
+      : {
+          shadowColor: '#000',
+          shadowOffset: { width: 0, height: 12 },
+          shadowOpacity: 0.45,
+          shadowRadius: 24,
+          elevation: 16,
+        }),
   },
   refModalLabel: {
     fontFamily: FONT_UI,
-    fontSize: 9,
+    fontSize: 8,
     fontWeight: '300',
     letterSpacing: 2,
     textTransform: 'uppercase',
     color: TEXT_DIM,
-    marginBottom: 10,
-  },
-  refModalScroll: {
-    maxHeight: 280,
+    marginBottom: 6,
   },
   refModalScrollContent: {
-    paddingBottom: 4,
+    paddingBottom: 6,
+    flexGrow: 0,
   },
+  /**
+   * Vignette body: Jost (sans) reads more clearly on screen than long italic serif blocks.
+   * Web: slightly narrower measure. Native: system UI font when FONT_UI is unset.
+   */
   refModalScenarioText: {
-    fontFamily: FONT_DISPLAY,
-    fontSize: 15,
-    fontWeight: '300',
-    lineHeight: 24,
-    color: TEXT_SECONDARY,
-    fontStyle: 'italic',
+    fontFamily: FONT_UI,
+    fontSize: 13,
+    fontWeight: '400',
+    lineHeight: 20,
+    letterSpacing: 0.12,
+    color: '#EEF6FC',
+    fontStyle: 'normal',
+    ...(Platform.OS === 'web'
+      ? {
+          fontWeight: '500',
+          maxWidth: 428,
+          alignSelf: 'center',
+        }
+      : {}),
   },
   refModalSeparator: {
     height: 1,
     backgroundColor: 'rgba(82, 142, 220, 0.2)',
-    marginVertical: 16,
+    marginVertical: 10,
     width: '100%',
   },
   refModalPromptText: {
     fontFamily: FONT_DISPLAY,
-    fontSize: 16,
-    fontWeight: '300',
-    lineHeight: 26,
+    fontSize: 14,
+    fontWeight: '400',
+    lineHeight: 22,
+    letterSpacing: 0.1,
     color: FLAME_BRIGHT,
   },
   ttsFallbackNotice: {

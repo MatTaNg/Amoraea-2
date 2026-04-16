@@ -35,11 +35,25 @@ ACCOUNTABILITY — BLAME-SHIFT VS. GENUINE REQUEST FOR CLARITY (apply everywhere
 
 These patterns can look alike but differ in relational meaning:
 
-• BLAME-SHIFT (score accountability LOW — typically mid-low or lower when this is the main move): Responsibility is redirected onto the other person; the user does not own their impact or contribution. The partner is framed as owing clearer communication, mind-reading, or fixing the dynamic alone. Example: "Sarah should have just told me what they needed instead of expecting me to read their mind" — no ownership; the problem is placed on the partner.
+• BLAME-SHIFT (score accountability LOW — typically mid-low or lower when this is the main move): Responsibility is redirected onto the other person; the user does not own their impact or contribution. The partner is framed as owing clearer communication, mind-reading, or fixing the dynamic alone. Example: "Sarah should have just told me what she needed instead of expecting me to read her mind" — no ownership; the problem is placed on the partner.
 
 • GENUINE REQUEST FOR CLARITY AFTER OWNERSHIP (do NOT treat as deflection; do not reduce accountability for the ask alone): The user takes clear ownership of their own gap, mistake, or impact, and asks for specific information so they can show up better. That request is a repair bid layered on ownership, not a substitute for it. Example: "I could do a better job of appreciating you — can you help me understand what that looks like for you?"
 
 DECISION TEST: Does the accountability-relevant stretch include genuine ownership of the user's own contribution (behavior, miss, or impact) before or alongside the request? If yes, the request for clarity is additive — score ownership at full strength and do not penalize accountability for asking how to follow through. If no ownership is present and the request functions mainly to shift the burden entirely onto the partner, score as blame-shift.
 
 Apply this distinction consistently across fictional scenarios and personal narrative answers.
+`;
+
+/** Scenario B (Sarah/James) — attunement/appreciation anchors for slice + holistic scoring models. */
+export const SCENARIO_B_ATTUNEMENT_APPRECIATION_ANCHORS = `
+SCENARIO B (Sarah/James) — ATTUNEMENT & APPRECIATION (canonical vignette):
+Sarah tears up during the celebration; James says "hey don't cry, this is a good thing." James also led with logistics (salary, start date, commute) at the start of the evening.
+
+• **Attunement — primary:** Does the participant recognize that James **redirecting** Sarah's tears — treating them as something to stop or fix ("don't cry," "this is a good thing") — is a **failure to receive** her emotional response: her feeling is framed as a **problem to solve** rather than **witnessed** or **stayed with**? Strong attunement names that miss. Weaker answers read James as merely positive, reassuring, or "trying to help" without naming the attunement failure.
+
+• **Attunement / appreciation — secondary:** Does the participant notice James **led with logistics** at the celebration rather than emotional presence first?
+
+• **Appreciation:** Does the participant distinguish **honoring Sarah's experience** from **processing the outcome logistically** — consistent with the signals above?
+
+Do **not** use deprecated fiction beats (Sarah trailing off mid-sentence; James saying "well it was worth it") as primary scoring anchors — they are not in the current vignette.
 `;

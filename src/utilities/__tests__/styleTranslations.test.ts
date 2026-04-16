@@ -293,7 +293,7 @@ describe('translateStyleProfile', () => {
       'Sarah is being unreasonable. James tried their best.',
     ];
     const personalTurns = [
-      "Oh, I feel so sad for Sarah when they trail off — it hurts to watch.",
+      "Oh, I feel so sad for Sarah when she tears up — it hurts to watch.",
     ];
     const userTurns = [...mainAnalysis, ...personalTurns];
     const corpus = userTurns.join(' ').toLowerCase();

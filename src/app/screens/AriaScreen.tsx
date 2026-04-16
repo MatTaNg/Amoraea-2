@@ -146,7 +146,12 @@ import {
   aggregatePillarScoresWithCommitmentMerge,
   type MarkerScoreSlice,
 } from '@features/aria/aggregateMarkerScoresFromSlices';
-import { ACCOUNTABILITY_BLAME_SHIFT_VS_CLARITY_REQUEST, SCORE_CALIBRATION_0_10 } from '@features/aria/interviewScoringCalibration';
+import {
+  ACCOUNTABILITY_BLAME_SHIFT_VS_CLARITY_REQUEST,
+  SCENARIO_B_ATTUNEMENT_APPRECIATION_ANCHORS,
+  SCORE_CALIBRATION_0_10,
+} from '@features/aria/interviewScoringCalibration';
+import { SCENARIO_B_VIGNETTE as SCENARIO_2_VIGNETTE } from '@/constants/scenarioBVignette';
 import { buildPersonalMomentScoringPrompt } from '@features/aria/personalMomentScoringPrompt';
 import { inferPersonalMomentSlices } from '@features/aria/personalMomentSlices';
 import * as FileSystem from 'expo-file-system';
@@ -2026,8 +2031,6 @@ const SCENARIO_1_VIGNETTE =
   "Emma and Ryan have dinner plans. Ryan takes a call from his mother halfway through. It runs 25 minutes. Emma pays the bill but seems flustered. Later Ryan asks what's wrong. Emma says 'I just think you always put your family first before us.' Ryan says 'I can't just ignore my mother.' Emma says 'I know, you've made that very clear.'";
 const SCENARIO_1_OPENING = "What's going on between these two?";
 const SCENARIO_2_LABEL = 'Situation 2';
-const SCENARIO_2_VIGNETTE =
-  "Sarah has been job hunting for four months. She gets an offer and calls James from the street, too excited to wait. James is on a deadline, says 'that's amazing — let's celebrate tonight.' That evening James asks about the salary, the start date, and the commute.  At one point Sarah says 'I keep thinking about how long this took' and trails off. James says 'well it was worth it'.  The next day Sarah tells James she never feels appreciated. James is blindsided, they just celebrated her new job offer last night. A fight starts.";
 const SCENARIO_2_OPENING = 'What do you think is going on here?';
 const SCENARIO_2_TEXT = `${SCENARIO_2_VIGNETTE}\n\n${SCENARIO_2_OPENING}`;
 
@@ -2676,7 +2679,7 @@ SKIP THE QUESTION if ANY of these are true:
 ASK THE QUESTION only if:
 ✗ Response describes an intention without words: "I would acknowledge her feelings" (no words given)
 ✗ Response describes an action without words: "I'd apologise" (no words given)
-✗ Response is purely analytical: "James should have asked more about how Sarah felt"
+✗ Response is purely analytical: "James should have noticed she needed emotional presence before logistics"
 ✗ Response is very short and abstract: "I'd be honest with them"
 
 WHEN IN DOUBT — SKIP IT.
@@ -2897,8 +2900,10 @@ REPAIR COHERENCE: If diagnosed failure reappears in their repair attempt, lower 
 
 DIAGNOSTIC EMPHASIS:
 - Scenario A: contempt in Emma's lines; bilateral ownership; Ryan repair. Per-scenario slice scoring uses the same 10 = real-human ceiling and slice-independence rules as scenario JSON scoring — strong demand-withdraw / power-bid / implicit-priority mentalizing and pattern-level, behavioral Ryan repair can reach **10** when complete; do not cap Scenario A at 9 to leave room for later scenarios.
-- Scenario B: Sarah's emotional journey vs logistics; appreciation/attunement.
+- Scenario B: attunement to James redirecting Sarah's tears vs receiving her emotion; James leading with logistics vs emotional presence; appreciation (honoring Sarah vs transactional celebration). See SCENARIO B anchors below.
 - Scenario C: regulation, Daniel's return, Sophie's legitimacy; bilateral repair; commitment threshold (especially if they address when the relationship may no longer be workable).
+
+${SCENARIO_B_ATTUNEMENT_APPRECIATION_ANCHORS}
 - Personal grudge moment: contempt + metacognition + commitment threshold when they distinguish work-through vs walk-away conditions.
 - Personal celebration: appreciation specificity.
 
@@ -3086,6 +3091,12 @@ Scenario B (Sarah/James) — CONTEMPT_EXPRESSION (this slice):
 Score **contempt_expression** from how the participant talks **in their own voice** about Sarah, James, or the situation. Dismissive or derogatory framing of fictional characters — e.g. "too sensitive," blaming Sarah for not stating needs, treating James as the only reasonable party, verdict-like capability claims — counts as **participant contempt expression** at the **same severity** as if the target were a real person (often **higher** signal because there is no incentive to protect a fictional character). Keep this key separate from appreciation, repair, and accountability.
 `
       : '';
+  const scenario2AttunementAppreciationCalibration =
+    scenarioNumber === 2
+      ? `
+${SCENARIO_B_ATTUNEMENT_APPRECIATION_ANCHORS}
+`
+      : '';
   const scenario3ContemptExpressionCalibration =
     scenarioNumber === 3
       ? `
@@ -3167,6 +3178,7 @@ ${scenario1ContemptCalibration}
 ${scenario1MentalizingRepairCeiling}
 ${scenario2AccountabilityCalibration}
 ${scenario2ContemptExpressionCalibration}
+${scenario2AttunementAppreciationCalibration}
 ${scenario3ContemptExpressionCalibration}
 ${scenario3RepairIsolationCalibration}
 ${scenario3CommitmentCalibration}
@@ -7313,8 +7325,38 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
       unlockWebAudioForAutoplay();
       primeHtmlAudioForMobileTtsFromMicGesture();
     }
-    if (voiceState === 'speaking' || voiceState === 'processing') return;
     if (!useTapMicUi) return;
+    /** Tap-to-record: stop capture before any web TTS gesture flush or voice-state gate; otherwise the tap can be consumed and MediaRecorder never stops. */
+    if (useMediaRecorderPath && audioRecorder.isRecording) {
+      // #region agent log
+      fetch('http://127.0.0.1:7789/ingest/668e0bd5-3283-4492-9f48-e33846c18218', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'X-Debug-Session-Id': 'c61a43' },
+        body: JSON.stringify({
+          sessionId: 'c61a43',
+          location: 'AriaScreen.tsx:handleNativeOrWhisperMicPress',
+          message: 'mic_stop_priority',
+          data: {
+            hypothesisId: 'H1',
+            voiceState,
+            hasPendingBlob: hasPendingWebGestureBlobUrl(),
+          },
+          timestamp: Date.now(),
+          runId: 'post-fix',
+        }),
+      }).catch(() => {});
+      // #endregion
+      if (__DEV__) console.log('[Aria] MIC PRESSED, isRecording: true → stop priority');
+      try {
+        await audioRecorder.stopRecording();
+        if (__DEV__) console.log('[Aria] RECORDING STOPPED (priority)');
+      } catch (err) {
+        if (__DEV__) console.error('[Aria] MIC ERROR:', err instanceof Error ? err.message : err);
+        handleRecordingError(err instanceof Error ? err : new Error(String(err)));
+      }
+      return;
+    }
+    if (voiceState === 'speaking' || voiceState === 'processing') return;
     if (Platform.OS === 'web' && voiceState === 'idle' && !audioRecorder.isRecording) {
       pendingMicStartAfterIdleFlushRef.current = true;
     } else {
