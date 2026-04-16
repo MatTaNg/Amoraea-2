@@ -44,10 +44,11 @@ export const useAuth = () => {
   const [session, setSession] = useState<Session | null>(null);
   const [user, setUser] = useState<User | null>(null);
   const [loading, setLoading] = useState(true);
+  /** Site root (or any path you deploy + whitelist in Supabase). Avoid /auth/callback unless that route exists. */
   const authEmailRedirectTo =
     process.env.NODE_ENV === 'development'
-      ? process.env.EXPO_PUBLIC_AUTH_REDIRECT_URL_DEV?.trim() || 'http://localhost:3000/auth/callback'
-      : process.env.EXPO_PUBLIC_AUTH_REDIRECT_URL?.trim() || 'https://www.amoraea.com/auth/callback';
+      ? process.env.EXPO_PUBLIC_AUTH_REDIRECT_URL_DEV?.trim() || 'http://localhost:8081/'
+      : process.env.EXPO_PUBLIC_AUTH_REDIRECT_URL?.trim() || 'https://www.amoraea.com/';
 
   useEffect(() => {
     let cancelled = false;
@@ -93,6 +94,17 @@ export const useAuth = () => {
       },
     });
     if (error) throw error;
+    /**
+     * Duplicate email: Supabase often returns no AuthApiError (enumeration protection) but either
+     * `user: null` or a user row with an empty `identities` array — see auth signUp docs / GitHub issues.
+     * Only treat **empty array** as duplicate, not missing `identities` (avoid blocking valid signups).
+     */
+    if (data.user == null) {
+      throw new Error('An account with this email already exists. Sign in instead.');
+    }
+    if (Array.isArray(data.user.identities) && data.user.identities.length === 0) {
+      throw new Error('An account with this email already exists. Sign in instead.');
+    }
     return data;
   };
 
@@ -105,6 +117,9 @@ export const useAuth = () => {
     const { error } = await supabase.auth.resend({
       type: 'signup',
       email: email.trim(),
+      options: {
+        emailRedirectTo: authEmailRedirectTo,
+      },
     });
     if (error) throw error;
   };
