@@ -1,0 +1,9 @@
+# SPA: all routes serve index.html (required for email-confirm / hash routes on static hosting).
+[build]
+  command = "npm run build:web"
+  publish = "dist"
+
+[[redirects]]
+  from = "/*"
+  to = "/index.html"
+  status = 200

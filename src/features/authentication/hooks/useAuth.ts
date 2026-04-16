@@ -40,15 +40,29 @@ const applySessionForApp = async (session: Session | null) => {
   return { session, user: verifiedUser };
 };
 
+/**
+ * Where Supabase sends the user after clicking the email confirmation link.
+ * - Dev: localhost default or EXPO_PUBLIC_AUTH_REDIRECT_URL_DEV.
+ * - Prod: EXPO_PUBLIC_AUTH_REDIRECT_URL if set; else on **web** use `window.location.origin` so Netlify/custom
+ *   domains match the URL users signed up on (avoid hardcoding www when production is *.netlify.app).
+ * - Fallback: canonical site (native / no window at call time).
+ */
+function getAuthEmailRedirectTo(): string {
+  if (process.env.NODE_ENV === 'development') {
+    return process.env.EXPO_PUBLIC_AUTH_REDIRECT_URL_DEV?.trim() || 'http://localhost:8081/';
+  }
+  const fromEnv = process.env.EXPO_PUBLIC_AUTH_REDIRECT_URL?.trim();
+  if (fromEnv) return fromEnv;
+  if (typeof window !== 'undefined' && window.location?.origin) {
+    return `${window.location.origin}/`;
+  }
+  return 'https://www.amoraea.com/';
+}
+
 export const useAuth = () => {
   const [session, setSession] = useState<Session | null>(null);
   const [user, setUser] = useState<User | null>(null);
   const [loading, setLoading] = useState(true);
-  /** Site root (or any path you deploy + whitelist in Supabase). Avoid /auth/callback unless that route exists. */
-  const authEmailRedirectTo =
-    process.env.NODE_ENV === 'development'
-      ? process.env.EXPO_PUBLIC_AUTH_REDIRECT_URL_DEV?.trim() || 'http://localhost:8081/'
-      : process.env.EXPO_PUBLIC_AUTH_REDIRECT_URL?.trim() || 'https://www.amoraea.com/';
 
   useEffect(() => {
     let cancelled = false;
@@ -90,7 +104,7 @@ export const useAuth = () => {
       password,
       options: {
         data: options?.inviteCode ? { referral_code: options.inviteCode.trim() } : undefined,
-        emailRedirectTo: authEmailRedirectTo,
+        emailRedirectTo: getAuthEmailRedirectTo(),
       },
     });
     if (error) throw error;
@@ -118,7 +132,7 @@ export const useAuth = () => {
       type: 'signup',
       email: email.trim(),
       options: {
-        emailRedirectTo: authEmailRedirectTo,
+        emailRedirectTo: getAuthEmailRedirectTo(),
       },
     });
     if (error) throw error;
