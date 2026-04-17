@@ -30,23 +30,32 @@ export async function collectDeviceContext(): Promise<DeviceContextPayload> {
     Platform.OS === 'ios' ? 'ios' : Platform.OS === 'android' ? 'android' : 'web';
 
   let device_model: string | null = null;
+  let os_version: string | null = null;
   try {
     // eslint-disable-next-line @typescript-eslint/no-require-imports
     const Device = require('expo-device') as typeof import('expo-device');
     device_model = Device.modelName ?? Device.modelId ?? null;
+    if (Platform.OS !== 'web') {
+      os_version = Device.osVersion != null && String(Device.osVersion).trim() !== '' ? String(Device.osVersion) : null;
+    }
   } catch {
     device_model = Constants.deviceName ?? null;
   }
 
-  const os_version =
-    Platform.OS === 'web'
-      ? typeof navigator !== 'undefined'
-        ? (navigator as unknown as { userAgent?: string }).userAgent ?? null
-        : null
-      : String(Constants.systemVersion ?? '');
+  if (os_version == null) {
+    if (Platform.OS === 'web') {
+      os_version =
+        typeof navigator !== 'undefined'
+          ? (navigator as unknown as { userAgent?: string }).userAgent ?? null
+          : null;
+    } else {
+      os_version = String(Constants.systemVersion ?? '');
+    }
+  }
 
   const app_version =
     (Constants.expoConfig?.version as string | undefined) ??
+    ((Constants as { manifest?: { version?: string } }).manifest?.version as string | undefined) ??
     (Constants.nativeAppVersion as string | undefined) ??
     null;
 

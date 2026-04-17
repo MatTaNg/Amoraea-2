@@ -82,6 +82,8 @@ export interface StoredInterviewData {
   sessionExpired?: boolean;
   /** True when final prompt was answered and scoring/preparing-results was pending on refresh. */
   pendingCompletion?: boolean;
+  /** `interview_attempts.id` for this in-progress session (created at interview start). */
+  sessionAttemptId?: string;
   /** Set by unhandled-rejection safety net */
   emergencySave?: boolean;
   savedAt?: string;

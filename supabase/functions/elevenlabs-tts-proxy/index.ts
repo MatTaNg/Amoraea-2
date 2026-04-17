@@ -47,7 +47,8 @@ Deno.serve(async (req) => {
       );
     }
 
-    const elevenRes = await fetch(`https://api.elevenlabs.io/v1/text-to-speech/${voiceId}/stream`, {
+    /** Non-streaming endpoint: full MP3 in response body before client playback. */
+    const elevenRes = await fetch(`https://api.elevenlabs.io/v1/text-to-speech/${voiceId}`, {
       method: 'POST',
       headers: {
         'xi-api-key': apiKey,

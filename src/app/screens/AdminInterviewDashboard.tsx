@@ -149,6 +149,47 @@ type AttemptRow = {
   reasoning_pending?: boolean | null;
 };
 
+/** List/overview only — loaded once for all users (small payload). Full rows load per user on drill-down. */
+type AttemptSummary = Pick<
+  AttemptRow,
+  | 'id'
+  | 'user_id'
+  | 'attempt_number'
+  | 'created_at'
+  | 'completed_at'
+  | 'weighted_score'
+  | 'passed'
+  | 'reasoning_pending'
+>;
+
+const INTERVIEW_ATTEMPTS_FULL_SELECT = `
+      id,
+      user_id,
+      attempt_number,
+      created_at,
+      completed_at,
+      weighted_score,
+      passed,
+      pillar_scores,
+      scenario_1_scores,
+      scenario_2_scores,
+      scenario_3_scores,
+      score_consistency,
+      construct_asymmetry,
+      response_timings,
+      probe_log,
+      dropout_point,
+      language_markers,
+      scenario_specific_patterns,
+      ai_reasoning,
+      user_analysis_rating,
+      user_analysis_comment,
+      per_construct_ratings,
+      transcript,
+      communication_style_error,
+      reasoning_pending
+    ` as const;
+
 type CommunicationStyleProfileRow = {
   user_id: string;
   emotional_analytical_score: number | null;
@@ -412,8 +453,8 @@ function formatAdminAttemptElapsed(start: string, end: string): string {
 
 type UserGroup = {
   user: UserRow;
-  attempts: AttemptRow[];
-  latestAttempt: AttemptRow | null;
+  attempts: AttemptSummary[];
+  latestAttempt: AttemptSummary | null;
 };
 
 function getUserDisplayName(user: UserRow | null | undefined): string {
@@ -421,10 +462,10 @@ function getUserDisplayName(user: UserRow | null | undefined): string {
   return user.full_name ?? user.name ?? user.display_name ?? user.email ?? 'Unknown';
 }
 
-type FetchAllAdminDataResult = { groups: UserGroup[]; errorMessage: string | null };
+type FetchAdminUsersListResult = { groups: UserGroup[]; errorMessage: string | null };
 
-async function fetchAllAdminData(): Promise<FetchAllAdminDataResult> {
-  // Return ALL registered users (no filter) — include those who haven't started, in progress, completed, or passed
+/** Users + lightweight attempt rows for list (counts, pass badge, tab labels). No transcript / scores jsonb. */
+async function fetchAdminUsersList(): Promise<FetchAdminUsersListResult> {
   const { data: allUsers, error: usersError } = await supabase
     .from('users')
     .select(
@@ -460,23 +501,6 @@ async function fetchAllAdminData(): Promise<FetchAllAdminDataResult> {
       completed_at,
       weighted_score,
       passed,
-      pillar_scores,
-      scenario_1_scores,
-      scenario_2_scores,
-      scenario_3_scores,
-      score_consistency,
-      construct_asymmetry,
-      response_timings,
-      probe_log,
-      dropout_point,
-      language_markers,
-      scenario_specific_patterns,
-      ai_reasoning,
-      user_analysis_rating,
-      user_analysis_comment,
-      per_construct_ratings,
-      transcript,
-      communication_style_error,
       reasoning_pending
     `
     )
@@ -487,22 +511,20 @@ async function fetchAllAdminData(): Promise<FetchAllAdminDataResult> {
     return {
       groups: users.map((user) => ({
         user,
-        attempts: [] as AttemptRow[],
+        attempts: [] as AttemptSummary[],
         latestAttempt: null,
       })),
       errorMessage: `Could not load interview_attempts: ${attemptsError.message}`,
     };
   }
 
-  const attempts = (allAttempts ?? []) as AttemptRow[];
+  const attempts = (allAttempts ?? []) as AttemptSummary[];
 
   const groups = users.map((user) => {
     const userAttempts = attempts.filter((a) => a.user_id === user.id);
     const latestAttempt =
       userAttempts.length > 0
-        ? userAttempts.reduce((latest, a) =>
-            a.attempt_number > latest.attempt_number ? a : latest
-          )
+        ? userAttempts.reduce((latest, a) => (a.attempt_number > latest.attempt_number ? a : latest))
         : null;
     return {
       user,
@@ -513,12 +535,27 @@ async function fetchAllAdminData(): Promise<FetchAllAdminDataResult> {
   return { groups, errorMessage: null };
 }
 
+/** Full `interview_attempts` row(s) for one user — called when admin opens that user. */
+async function fetchFullAttemptsForUser(userId: string): Promise<{ attempts: AttemptRow[]; errorMessage: string | null }> {
+  const { data, error } = await supabase
+    .from('interview_attempts')
+    .select(INTERVIEW_ATTEMPTS_FULL_SELECT)
+    .eq('user_id', userId)
+    .order('attempt_number', { ascending: true });
+
+  if (error) {
+    console.error('Admin panel fetchFullAttemptsForUser:', error);
+    return { attempts: [], errorMessage: error.message };
+  }
+  return { attempts: (data ?? []) as AttemptRow[], errorMessage: null };
+}
+
 function formatConstruct(key: string): string {
   const row = PILLAR_ROWS.find((r) => r.id === key || r.constructKey === key);
   return row?.label ?? key?.replace(/_/g, ' ') ?? '—';
 }
 
-function getPassWord(attempt: AttemptRow | null): 'pass' | 'fail' | 'none' {
+function getPassWord(attempt: AttemptSummary | AttemptRow | null): 'pass' | 'fail' | 'none' {
   if (!attempt || attempt.passed == null) return 'none';
   return attempt.passed ? 'pass' : 'fail';
 }
@@ -529,13 +566,13 @@ function getPassColor(value: 'pass' | 'fail' | 'none'): string {
   return '#7A9ABE';
 }
 
-function formatAttemptDate(attempt: AttemptRow): string {
+function formatAttemptDate(attempt: AttemptSummary | AttemptRow): string {
   const raw = attempt.completed_at ?? attempt.created_at;
   if (!raw) return '—';
   return new Date(raw).toLocaleString('en-GB');
 }
 
-function formatAttemptTabLabel(attempt: AttemptRow): string {
+function formatAttemptTabLabel(attempt: AttemptSummary | AttemptRow): string {
   const raw = attempt.completed_at ?? attempt.created_at;
   const pending =
     attempt.reasoning_pending === true ||
@@ -1199,6 +1236,9 @@ function FeedbackTab({ attempt }: { attempt: AttemptRow }) {
 
 function UserDetails({
   userData,
+  fullAttempts,
+  attemptsLoading,
+  attemptsError,
   onBack,
   onDeleteAccount,
   canDelete,
@@ -1206,19 +1246,27 @@ function UserDetails({
   onRefreshData,
 }: {
   userData: UserGroup;
+  /** Full rows loaded on drill-down; tabs need transcript, scores, ai_reasoning, etc. */
+  fullAttempts: AttemptRow[];
+  attemptsLoading: boolean;
+  attemptsError: string | null;
   onBack: () => void;
   onDeleteAccount: () => void;
   canDelete: boolean;
   deleting: boolean;
   onRefreshData: () => void;
 }) {
-  const attempts = getAttemptsSorted(userData.attempts);
-  const [selectedAttemptId, setSelectedAttemptId] = useState<string | null>(attempts[0]?.id ?? null);
+  const attempts = getAttemptsSorted(fullAttempts);
+  const [selectedAttemptId, setSelectedAttemptId] = useState<string | null>(null);
   const [activeInnerTab, setActiveInnerTab] = useState<'summary' | 'reasoning' | 'transcript' | 'feedback'>('summary');
 
   useEffect(() => {
-    if (!selectedAttemptId && attempts[0]?.id) setSelectedAttemptId(attempts[0].id);
-  }, [selectedAttemptId, attempts]);
+    if (attemptsLoading || attempts.length === 0) return;
+    setSelectedAttemptId((prev) => {
+      if (prev && attempts.some((a) => a.id === prev)) return prev;
+      return attempts[0].id;
+    });
+  }, [attemptsLoading, attempts]);
 
   const selectedAttempt = attempts.find((a) => a.id === selectedAttemptId) ?? attempts[0] ?? null;
 
@@ -1248,7 +1296,18 @@ function UserDetails({
 
       <InProgressTranscriptSection user={userData.user} onRefresh={onRefreshData} />
 
-      {attempts.length === 0 ? (
+      {attemptsLoading ? (
+        <View style={styles.emptyState}>
+          <Text style={styles.emptyText}>Loading interview data…</Text>
+        </View>
+      ) : attemptsError ? (
+        <View style={styles.emptyState}>
+          <Text style={styles.listErrorTitle}>Could not load tests</Text>
+          <Text style={styles.listErrorDetail} selectable>
+            {attemptsError}
+          </Text>
+        </View>
+      ) : attempts.length === 0 ? (
         <View style={styles.emptyState}>
           <Text style={styles.emptyText}>
             {userHasInProgressInterview(userData.user)
@@ -1429,21 +1488,34 @@ export function AdminInterviewDashboard({ onClose }: { onClose: () => void }) {
   const [users, setUsers] = useState<UserGroup[]>([]);
   const [loading, setLoading] = useState(true);
   const [listError, setListError] = useState<string | null>(null);
-  const [selectedUser, setSelectedUser] = useState<UserGroup | null>(null);
+  const [selectedUserId, setSelectedUserId] = useState<string | null>(null);
+  const [detailAttempts, setDetailAttempts] = useState<AttemptRow[] | null>(null);
+  const [detailAttemptsLoading, setDetailAttemptsLoading] = useState(false);
+  const [detailAttemptsError, setDetailAttemptsError] = useState<string | null>(null);
   const [currentUserId, setCurrentUserId] = useState<string | null>(null);
   const [deletingUserId, setDeletingUserId] = useState<string | null>(null);
 
   const refreshUsers = useCallback(async () => {
     try {
-      const { groups, errorMessage } = await fetchAllAdminData();
+      const { groups, errorMessage } = await fetchAdminUsersList();
       setUsers(groups);
       setListError(errorMessage);
+      if (selectedUserId) {
+        const { attempts, errorMessage: detailErr } = await fetchFullAttemptsForUser(selectedUserId);
+        if (detailErr) {
+          setDetailAttemptsError(detailErr);
+          setDetailAttempts([]);
+        } else {
+          setDetailAttemptsError(null);
+          setDetailAttempts(attempts);
+        }
+      }
     } catch (err) {
       console.error('Admin panel fetch failed:', err);
       setUsers([]);
       setListError(err instanceof Error ? err.message : 'Fetch failed');
     }
-  }, []);
+  }, [selectedUserId]);
 
   useEffect(() => {
     let cancelled = false;
@@ -1459,7 +1531,7 @@ export function AdminInterviewDashboard({ onClose }: { onClose: () => void }) {
     let cancelled = false;
     (async () => {
       try {
-        const { groups, errorMessage } = await fetchAllAdminData();
+        const { groups, errorMessage } = await fetchAdminUsersList();
         if (!cancelled) {
           setUsers(groups);
           setListError(errorMessage);
@@ -1509,7 +1581,14 @@ export function AdminInterviewDashboard({ onClose }: { onClose: () => void }) {
           return;
         }
         await refreshUsers();
-        setSelectedUser((prev) => (prev?.user.id === row.id ? null : prev));
+        setSelectedUserId((prev) => {
+          if (prev === row.id) {
+            setDetailAttempts(null);
+            setDetailAttemptsError(null);
+            return null;
+          }
+          return prev;
+        });
       } finally {
         setDeletingUserId(null);
       }
@@ -1518,21 +1597,56 @@ export function AdminInterviewDashboard({ onClose }: { onClose: () => void }) {
   );
 
   useEffect(() => {
-    setSelectedUser((prev) => {
-      if (!prev) return prev;
-      const next = users.find((g) => g.user.id === prev.user.id);
-      return next ?? prev;
-    });
-  }, [users]);
+    if (selectedUserId && !users.some((g) => g.user.id === selectedUserId)) {
+      setSelectedUserId(null);
+      setDetailAttempts(null);
+      setDetailAttemptsError(null);
+    }
+  }, [users, selectedUserId]);
 
-  if (selectedUser) {
+  useEffect(() => {
+    if (!selectedUserId) {
+      setDetailAttempts(null);
+      setDetailAttemptsError(null);
+      setDetailAttemptsLoading(false);
+      return;
+    }
+    let cancelled = false;
+    setDetailAttemptsError(null);
+    void fetchFullAttemptsForUser(selectedUserId).then(({ attempts, errorMessage: detailErr }) => {
+      if (cancelled) return;
+      setDetailAttemptsLoading(false);
+      if (detailErr) {
+        setDetailAttemptsError(detailErr);
+        setDetailAttempts([]);
+      } else {
+        setDetailAttemptsError(null);
+        setDetailAttempts(attempts);
+      }
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [selectedUserId]);
+
+  const selectedGroup = selectedUserId ? users.find((g) => g.user.id === selectedUserId) : null;
+
+  if (selectedUserId && selectedGroup) {
     return (
       <UserDetails
-        userData={selectedUser}
-        onBack={() => setSelectedUser(null)}
-        canDelete={canDeleteUser(selectedUser.user)}
-        deleting={deletingUserId === selectedUser.user.id}
-        onDeleteAccount={() => void handleDeleteUser(selectedUser.user)}
+        userData={selectedGroup}
+        fullAttempts={detailAttempts ?? []}
+        attemptsLoading={detailAttemptsLoading}
+        attemptsError={detailAttemptsError}
+        onBack={() => {
+          setSelectedUserId(null);
+          setDetailAttempts(null);
+          setDetailAttemptsError(null);
+          setDetailAttemptsLoading(false);
+        }}
+        canDelete={canDeleteUser(selectedGroup.user)}
+        deleting={deletingUserId === selectedGroup.user.id}
+        onDeleteAccount={() => void handleDeleteUser(selectedGroup.user)}
         onRefreshData={() => void refreshUsers()}
       />
     );
@@ -1568,7 +1682,12 @@ export function AdminInterviewDashboard({ onClose }: { onClose: () => void }) {
             <UserCard
               key={userData.user.id}
               userData={userData}
-              onPress={() => setSelectedUser(userData)}
+              onPress={() => {
+                setSelectedUserId(userData.user.id);
+                setDetailAttempts(null);
+                setDetailAttemptsError(null);
+                setDetailAttemptsLoading(true);
+              }}
               canDelete={canDeleteUser(userData.user)}
               deleting={deletingUserId === userData.user.id}
               onDelete={() => void handleDeleteUser(userData.user)}

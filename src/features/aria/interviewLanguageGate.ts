@@ -61,3 +61,104 @@ export function parseWhisperTranscriptionPayload(data: unknown): {
   }
   return { text, language, confidence };
 }
+
+export type WhisperVerboseStats = {
+  segment_count: number;
+  /** Mean of per-segment `Math.exp(avg_logprob)` when segments carry logprobs. */
+  overall_confidence: number | null;
+  min_segment_confidence: number | null;
+  max_segment_confidence: number | null;
+  avg_segment_confidence: number | null;
+};
+
+function logprobToProb(lp: number): number {
+  const p = Math.exp(lp);
+  if (!Number.isFinite(p)) return 0;
+  return Math.max(0, Math.min(1, p));
+}
+
+/** Segment-level stats from Whisper `verbose_json` (best-effort). */
+export function parseWhisperVerboseStats(data: unknown): WhisperVerboseStats {
+  if (typeof data !== 'object' || data === null) {
+    return {
+      segment_count: 0,
+      overall_confidence: null,
+      min_segment_confidence: null,
+      max_segment_confidence: null,
+      avg_segment_confidence: null,
+    };
+  }
+  const o = data as { segments?: Array<{ avg_logprob?: number }> };
+  const segs = Array.isArray(o.segments) ? o.segments : [];
+  const confs = segs
+    .map((s) => (typeof s?.avg_logprob === 'number' && Number.isFinite(s.avg_logprob) ? logprobToProb(s.avg_logprob) : null))
+    .filter((x): x is number => x != null);
+  if (confs.length === 0) {
+    return {
+      segment_count: segs.length,
+      overall_confidence: null,
+      min_segment_confidence: null,
+      max_segment_confidence: null,
+      avg_segment_confidence: null,
+    };
+  }
+  const minC = Math.min(...confs);
+  const maxC = Math.max(...confs);
+  const avgC = confs.reduce((a, b) => a + b, 0) / confs.length;
+  const overall = avgC;
+  return {
+    segment_count: segs.length,
+    overall_confidence: Math.round(overall * 1000) / 1000,
+    min_segment_confidence: Math.round(minC * 1000) / 1000,
+    max_segment_confidence: Math.round(maxC * 1000) / 1000,
+    avg_segment_confidence: Math.round(avgC * 1000) / 1000,
+  };
+}
+
+/** Heuristic: moment is likely a short confirmation (yes/no / ready). */
+export function isSimpleYesNoInterviewMoment(lastQuestionText: string | null | undefined): boolean {
+  const q = (lastQuestionText ?? '').toLowerCase().trim();
+  if (!q) return false;
+  if (/are you ready\b/.test(q)) return true;
+  if (/\bready to (get )?started\b/.test(q)) return true;
+  if (/\bready\?\s*$/.test(q) && q.length < 80) return true;
+  if (/\byes or no\b/i.test(q)) return true;
+  if (/\b(yes|no)\b/.test(q) && q.length < 160) return true;
+  return false;
+}
+
+/** Resume / re-entry copy — user may answer briefly (yes / repeat / continue). */
+export function isResumeReentryWelcomePrompt(lastQuestionText: string | null | undefined): boolean {
+  const q = (lastQuestionText ?? '').toLowerCase();
+  if (/welcome back\b/.test(q) && /continue where we left off\b/.test(q)) return true;
+  if (/repeat what i said\b/.test(q) && /ready for your response\b/.test(q)) return true;
+  return false;
+}
+
+/** Client recovery lines must not become the "question" for ratio gating (avoids re-ask loops). */
+export function isClientAudioRecoveryAssistantLine(lastQuestionText: string | null | undefined): boolean {
+  const q = (lastQuestionText ?? '').trim();
+  if (!q) return false;
+  if (/^i only caught part of that\b/i.test(q)) return true;
+  if (/^i didn't catch any speech on that try\b/i.test(q)) return true;
+  if (/^i'm having a little trouble on my end\b/i.test(q)) return true;
+  return false;
+}
+
+/** Name / identity prompts — one or two words are valid. */
+export function isNamePromptInterviewMoment(lastQuestionText: string | null | undefined): boolean {
+  const q = (lastQuestionText ?? '').toLowerCase();
+  if (/what('?s|\s+is)\s+your\s+name\b/.test(q)) return true;
+  if (/\bhow\s+(do\s+you|should\s+i)\s+(call\s+you|address\s+you)\b/.test(q)) return true;
+  return false;
+}
+
+/** Use for whisper ratio re-ask: short answers are OK (do not require a full sentence). */
+export function isShortAnswerOkForWhisperRatioGate(lastQuestionText: string | null | undefined): boolean {
+  return (
+    isSimpleYesNoInterviewMoment(lastQuestionText) ||
+    isResumeReentryWelcomePrompt(lastQuestionText) ||
+    isClientAudioRecoveryAssistantLine(lastQuestionText) ||
+    isNamePromptInterviewMoment(lastQuestionText)
+  );
+}

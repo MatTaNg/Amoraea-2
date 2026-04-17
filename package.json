@@ -9,6 +9,7 @@
     "android": "expo start --android",
     "ios": "expo start --ios",
     "web": "expo start --web",
+    "web:lan": "expo start --web --lan",
     "web:tunnel": "expo start --web --tunnel",
     "build:web": "expo export -p web",
     "test": "jest",

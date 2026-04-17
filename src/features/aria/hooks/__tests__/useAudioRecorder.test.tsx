@@ -28,6 +28,7 @@ jest.mock('@features/aria/utils/audioModeHelpers', () => ({
   setPlaybackMode: jest.fn(() => Promise.resolve()),
   transitionFromRecordingToPlaybackNative: jest.fn(() => Promise.resolve()),
   logAndApplyPlaybackModeForTts: jest.fn(() => Promise.resolve()),
+  getLastAppliedAudioModeLabel: jest.fn(() => 'recording'),
 }));
 
 global.fetch = jest.fn(() =>
@@ -77,7 +78,7 @@ describe('useAudioRecorder', () => {
       await result.current.requestPermission();
     });
     await act(async () => {
-      await result.current.startRecording();
+      await result.current.startRecording({ postAudioSessionDelayMs: 0 });
     });
     expect(result.current.isRecording).toBe(true);
     expect(createAsync).toHaveBeenCalled();
@@ -99,7 +100,7 @@ describe('useAudioRecorder', () => {
       await result.current.requestPermission();
     });
     await act(async () => {
-      await result.current.startRecording();
+      await result.current.startRecording({ postAudioSessionDelayMs: 0 });
     });
     expect(result.current.isRecording).toBe(true);
     await act(async () => {

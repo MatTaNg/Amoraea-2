@@ -31,3 +31,31 @@ export {
   logCommunicationStylePipelineOutcome,
 } from './sessionLogInterview';
 export { gatherRecordingStartTelemetry, gatherTtsPlaybackTelemetry } from './sessionAudioTelemetry';
+export {
+  writeAudioSessionLog,
+  mergeAudioSessionEventData,
+  setAudioSessionDeviceSnapshot,
+  setLastInterviewDeviceEnvironment,
+  setSessionAudioRoutes,
+  markInterviewSessionClockStart,
+  markLastAudioSessionEventType,
+  getInterviewWallClockStartMs,
+  getLastAudioSessionEventType,
+  getLastTtsCompletionCallbackMs,
+  setLastTtsCompletionCallbackMs,
+  peekRecordingDelayExtraFromEarlyCutoffMs,
+  takeRecordingDelayExtraFromEarlyCutoffMs,
+  addRecordingDelayExtraFromEarlyCutoffMs,
+  incrementReAskCountThisSession,
+  getReAskCountThisSession,
+  resetAudioInterviewTurnCounters,
+  setLastWhisperRatioTelemetry,
+  getLastWhisperRatioFlag,
+  getLastWhisperAudioDurationMs,
+  getLastWhisperWordCount,
+} from './audioSessionLogEnvelope';
+export {
+  collectInterviewDeviceEnvironment,
+  mapHeadphoneProbeToSessionInputRoute,
+  shouldWarnHighThermal,
+} from './interviewDeviceEnvironment';

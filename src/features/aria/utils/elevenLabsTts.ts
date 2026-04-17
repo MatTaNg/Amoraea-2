@@ -3,6 +3,9 @@ import Constants from 'expo-constants';
 import * as FileSystem from 'expo-file-system';
 import * as Speech from 'expo-speech';
 import { logAndApplyPlaybackModeForTts } from './audioModeHelpers';
+import { runWithThreeAttemptsFixedBackoff } from '@utilities/networkRetry';
+import { classifyError } from '@utilities/withRetry';
+import { setTtsBufferCompleteBeforePlaybackForNextPlayback } from '@features/aria/telemetry/ttsBufferTelemetry';
 import { computeElevenLabsEnabled } from './elevenLabsEnvGating';
 import { supabase } from '@data/supabase/client';
 import {
@@ -20,9 +23,9 @@ function getExpoAvAudio(): typeof import('expo-av').Audio {
  * Jessica — warm, friendly, conversational (ElevenLabs). Override with
  * EXPO_PUBLIC_ELEVENLABS_VOICE_ID or app config elevenLabsVoiceId if needed.
  *
- * **Credits / environment:** ElevenLabs is off in local dev (`__DEV__`) so Metro / `expo start`
- * does not spend API credits. Production/release builds use ElevenLabs when configured.
- * - `EXPO_PUBLIC_ELEVENLABS_TTS_IN_DEV=1` — force ElevenLabs while developing (optional).
+ * **Credits / environment:** ElevenLabs network TTS is off in dev bundles (`__DEV__`, including
+ * `expo start` / localhost web) so no credits are used. Release/production builds use ElevenLabs when configured.
+ * - `EXPO_PUBLIC_ELEVENLABS_TTS_IN_DEV=1` — allow ElevenLabs while developing (optional).
  * - `EXPO_PUBLIC_ELEVENLABS_TTS=0` — disable in any build (e.g. staging preview).
  */
 const DEFAULT_VOICE_ID = 'cgSgspJ2msm6clMCkdW9'; // Jessica — warm, friendly
@@ -56,6 +59,12 @@ let activeWebBufferSource: AudioBufferSourceNode | null = null;
 /** After `unlockWebAudioForAutoplay()` runs in a tap handler — primes AudioContext (silent tick). */
 let sharedWebAudioContext: AudioContext | null = null;
 
+/**
+ * Web interview session: true only after a successful `unlockWebAudioForAutoplay()` in this session.
+ * TTS must not run until set — avoids WEB_TTS_GESTURE when autoplay unlock never ran in a user gesture.
+ */
+let webInterviewAudioUnlocked = false;
+
 /** ElevenLabs MP3 `blob:` URL kept when `play()` hits autoplay policy; replay from mic tap in the user-gesture stack. */
 let pendingWebGestureBlobUrl: string | null = null;
 
@@ -68,6 +77,84 @@ const SILENT_WAV_DATA_URL =
  * so `play()` after async ElevenLabs fetch is not blocked as a new gesture.
  */
 let sharedHtmlAudioForMobileTts: HTMLAudioElement | null = null;
+
+/** One listener: resume shared `AudioContext` / reprime HTML audio when the tab becomes visible again (Safari suspends on hide). */
+let webInterviewAudioVisibilityListenerAttached = false;
+
+function attachWebInterviewAudioVisibilityHandler(): void {
+  if (Platform.OS !== 'web' || typeof document === 'undefined') return;
+  if (webInterviewAudioVisibilityListenerAttached) return;
+  webInterviewAudioVisibilityListenerAttached = true;
+  document.addEventListener('visibilitychange', () => {
+    void handleWebInterviewDocumentVisibilityChange();
+  });
+}
+
+async function handleWebInterviewDocumentVisibilityChange(): Promise<void> {
+  if (typeof document === 'undefined' || document.visibilityState !== 'visible') return;
+  const ctx = sharedWebAudioContext;
+  if (ctx && ctx.state === 'suspended') {
+    try {
+      await ctx.resume();
+    } catch {
+      /* log but do not block */
+    }
+  }
+  reprimeSharedHtmlAudioSilentPlay();
+}
+
+/** Silent tick on the shared HTMLAudio element — does not replace `src` while that element is playing real TTS. */
+function reprimeSharedHtmlAudioSilentPlay(): void {
+  if (Platform.OS !== 'web' || typeof window === 'undefined') return;
+  if (!sharedHtmlAudioForMobileTts) return;
+  try {
+    if (activeWebAudio === sharedHtmlAudioForMobileTts) {
+      void sharedHtmlAudioForMobileTts.play().catch(() => {});
+      return;
+    }
+    sharedHtmlAudioForMobileTts.src = SILENT_WAV_DATA_URL;
+    void sharedHtmlAudioForMobileTts.play().catch(() => {});
+  } catch {
+    /* ignore */
+  }
+}
+
+/**
+ * Safari and some browsers suspend `AudioContext` when the tab is hidden. Call before web playback
+ * (and after any await) so TTS does not fail with autoplay/gesture errors on the next line.
+ */
+async function ensureSharedWebAudioContextResumedForPlayback(
+  telemetrySource: TtsTelemetrySource
+): Promise<boolean> {
+  if (Platform.OS !== 'web' || typeof window === 'undefined') return true;
+  const ctx = sharedWebAudioContext;
+  if (!ctx || !webInterviewAudioUnlocked) return true;
+  if (ctx.state !== 'suspended') return true;
+  try {
+    await Promise.race([
+      ctx.resume(),
+      new Promise<void>((_, reject) => {
+        setTimeout(() => reject(new Error('resume-timeout')), 5000);
+      }),
+    ]);
+    return true;
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    logTtsAutoplayPlayOutcome({
+      pipeline: 'elevenlabs_web_audio_context',
+      outcome: 'play_error',
+      telemetrySource,
+      errorName: 'resume',
+      errorMessagePreview: msg.slice(0, 120),
+    });
+    return false;
+  }
+}
+
+async function ensureWebPlaybackPrimedForNextTurn(telemetrySource: TtsTelemetrySource): Promise<void> {
+  await ensureSharedWebAudioContextResumedForPlayback(telemetrySource);
+  reprimeSharedHtmlAudioSilentPlay();
+}
 
 /** iOS Safari blocks speechSynthesis unless speak() runs in a user-gesture stack; async LLM/TTS loses the gesture. */
 export class WebTtsRequiresUserGestureError extends Error {
@@ -323,9 +410,10 @@ export async function stopElevenLabsPlayback(): Promise<void> {
 }
 
 /**
- * Call **synchronously** from a real user gesture (Start interview, mic `onPressIn`, etc.).
- * Creates/resumes a shared `AudioContext` and plays a silent buffer so later MP3 playback via
+ * Call **synchronously** from a real user gesture (Start interview, mic `onPressIn`, mic permission, etc.).
+ * Creates/resumes a shared `AudioContext` and plays a minimal silent buffer so later MP3 playback via
  * `decodeAudioData` + `AudioBufferSourceNode` is allowed without another tap (avoids HTMLAudio T12 on Brave/Chrome).
+ * Sets {@link webInterviewAudioUnlocked} on success so `speakWithElevenLabs` / `speakFallback` may run.
  */
 export function unlockWebAudioForAutoplay(): void {
   if (Platform.OS !== 'web' || typeof window === 'undefined') return;
@@ -339,14 +427,26 @@ export function unlockWebAudioForAutoplay(): void {
     }
     void sharedWebAudioContext.resume();
     const ctx = sharedWebAudioContext;
-    const buf = ctx.createBuffer(1, 1, 8000);
+    const buf = ctx.createBuffer(1, 1, ctx.sampleRate);
     const src = ctx.createBufferSource();
     src.buffer = buf;
     src.connect(ctx.destination);
     src.start(0);
+    webInterviewAudioUnlocked = true;
+    attachWebInterviewAudioVisibilityHandler();
   } catch {
-    /* ignore */
+    /* ignore — TTS will throw WebTtsRequiresUserGestureError until a successful unlock */
   }
+}
+
+/** Reset at each new interview session so the first gesture in that session must unlock again. */
+export function resetWebInterviewAudioSession(): void {
+  webInterviewAudioUnlocked = false;
+}
+
+/** Whether web audio has been unlocked in the current interview session (shared context is ready). */
+export function isWebInterviewAudioUnlocked(): boolean {
+  return Platform.OS !== 'web' || webInterviewAudioUnlocked;
 }
 
 /**
@@ -386,9 +486,9 @@ async function tryPlayElevenLabsMp3WithWebAudio(
   telemetrySource: TtsTelemetrySource
 ): Promise<boolean> {
   if (Platform.OS !== 'web' || typeof window === 'undefined') return false;
-  unlockWebAudioForAutoplay();
   const ctx = sharedWebAudioContext;
-  if (!ctx) return false;
+  if (!ctx || !webInterviewAudioUnlocked) return false;
+  if (!(await ensureSharedWebAudioContextResumedForPlayback(telemetrySource))) return false;
   const decodeTimeoutMs = 15000;
   let decoded: AudioBuffer;
   try {
@@ -409,25 +509,8 @@ async function tryPlayElevenLabsMp3WithWebAudio(
     });
     return false;
   }
+  if (!(await ensureSharedWebAudioContextResumedForPlayback(telemetrySource))) return false;
   let src: AudioBufferSourceNode | null = null;
-  try {
-    await Promise.race([
-      ctx.resume(),
-      new Promise<void>((_, reject) => {
-        setTimeout(() => reject(new Error('resume-timeout')), 5000);
-      }),
-    ]);
-  } catch (err) {
-    const msg = err instanceof Error ? err.message : String(err);
-    logTtsAutoplayPlayOutcome({
-      pipeline: 'elevenlabs_web_audio_context',
-      outcome: 'play_error',
-      telemetrySource,
-      errorName: 'resume',
-      errorMessagePreview: msg.slice(0, 120),
-    });
-    return false;
-  }
   try {
     src = ctx.createBufferSource();
     src.buffer = decoded;
@@ -558,20 +641,31 @@ export async function speakWithElevenLabs(
     return;
   }
 
-  const proxyUrl = getTtsProxyUrl();
-  /** __DEV__ normally disables ElevenLabs to save credits; on web we still have a Supabase TTS proxy — use it so mobile browsers get MP3 + tryPlay instead of gesture-only Web Speech for every line. */
-  const useElevenLabsInDevWeb =
-    typeof __DEV__ !== 'undefined' &&
-    __DEV__ &&
-    Platform.OS === 'web' &&
-    typeof proxyUrl === 'string' &&
-    proxyUrl.trim().length > 0;
-
-  if (!envAllowsEleven && !useElevenLabsInDevWeb) {
+  if (!envAllowsEleven) {
+    // #region agent log
+    if (Platform.OS === 'web') {
+      fetch('http://127.0.0.1:7789/ingest/668e0bd5-3283-4492-9f48-e33846c18218', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'X-Debug-Session-Id': 'c61a43' },
+        body: JSON.stringify({
+          sessionId: 'c61a43',
+          location: 'elevenLabsTts.ts:speakWithElevenLabs',
+          message: 'elevenlabs_disabled_using_fallback',
+          data: {
+            hypothesisId: 'H3',
+            isDevBundle: typeof __DEV__ !== 'undefined' && __DEV__,
+          },
+          timestamp: Date.now(),
+          runId: 'debug-desktop-tap',
+        }),
+      }).catch(() => {});
+    }
+    // #endregion
     await speakFallback(spokenText, onFallback, options);
     return;
   }
 
+  const proxyUrl = getTtsProxyUrl();
   const apiKey = getApiKey();
   const useProxy = !apiKey && !!proxyUrl;
   const fromExtra = Constants.expoConfig?.extra as { elevenLabsVoiceId?: string } | undefined;
@@ -589,6 +683,25 @@ export async function speakWithElevenLabs(
     return;
   }
 
+  /** Web Audio / MP3 path only — dev `speakFallback` (expo-speech / web speech) must not require prior unlock. */
+  if (Platform.OS === 'web' && !webInterviewAudioUnlocked) {
+    // #region agent log
+    fetch('http://127.0.0.1:7789/ingest/668e0bd5-3283-4492-9f48-e33846c18218', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'X-Debug-Session-Id': 'c61a43' },
+      body: JSON.stringify({
+        sessionId: 'c61a43',
+        location: 'elevenLabsTts.ts:speakWithElevenLabs',
+        message: 'throw_web_not_unlocked',
+        data: { hypothesisId: 'H2', reason: 'webInterviewAudioUnlocked_false_elevenlabs_path' },
+        timestamp: Date.now(),
+        runId: 'debug-desktop-tap',
+      }),
+    }).catch(() => {});
+    // #endregion
+    throw new WebTtsRequiresUserGestureError(spokenText);
+  }
+
   try {
     // Use multilingual v2 for more natural, expressive speech (less robotic than flash).
     const modelId = 'eleven_multilingual_v2';
@@ -604,68 +717,81 @@ export async function speakWithElevenLabs(
     };
     const proxyAuth = useProxy ? await buildSupabaseEdgeFunctionAuthHeaders() : {};
     const fetchTimeoutMs = 45000;
-    const ac = new AbortController();
-    const fetchTimer = setTimeout(() => ac.abort(), fetchTimeoutMs);
+    const ttsShouldRetry = (err: unknown): boolean => classifyError(err) !== 'unrecoverable';
+
+    const doOneTtsFetch = async (): Promise<Response> => {
+      const ac = new AbortController();
+      const fetchTimer = setTimeout(() => ac.abort(), fetchTimeoutMs);
+      try {
+        const r = await fetch(
+          useProxy ? proxyUrl : `https://api.elevenlabs.io/v1/text-to-speech/${voiceId}`,
+          useProxy
+            ? {
+                signal: ac.signal,
+                method: 'POST',
+                headers: {
+                  'Content-Type': 'application/json',
+                  Accept: 'audio/mpeg',
+                  ...proxyAuth,
+                },
+                body: JSON.stringify({
+                  text: bodyPayload.text,
+                  voiceId,
+                  modelId: bodyPayload.model_id,
+                  voiceSettings: bodyPayload.voice_settings,
+                }),
+              }
+            : {
+                signal: ac.signal,
+                method: 'POST',
+                headers: {
+                  'xi-api-key': apiKey,
+                  'Content-Type': 'application/json',
+                  Accept: 'audio/mpeg',
+                },
+                body: JSON.stringify(bodyPayload),
+              }
+        );
+        if (!r.ok) {
+          const errText = await r.text();
+          const err = new Error(errText.slice(0, 200));
+          Object.assign(err, { status: r.status });
+          throw err;
+        }
+        return r;
+      } catch (e) {
+        const name = typeof e === 'object' && e !== null && 'name' in e ? String((e as { name: string }).name) : '';
+        if (name === 'AbortError') {
+          console.warn('ElevenLabs TTS fetch timed out');
+          const err = new Error('tts_fetch_timeout');
+          Object.assign(err, { status: 504 });
+          throw err;
+        }
+        throw e;
+      } finally {
+        clearTimeout(fetchTimer);
+      }
+    };
+
     let res: Response;
     try {
-      res = await fetch(
-        useProxy ? proxyUrl : `https://api.elevenlabs.io/v1/text-to-speech/${voiceId}/stream`,
-        useProxy
-          ? {
-              signal: ac.signal,
-              method: 'POST',
-              headers: {
-                'Content-Type': 'application/json',
-                Accept: 'audio/mpeg',
-                ...proxyAuth,
-              },
-              body: JSON.stringify({
-                text: bodyPayload.text,
-                voiceId,
-                modelId: bodyPayload.model_id,
-                voiceSettings: bodyPayload.voice_settings,
-              }),
-            }
-          : {
-              signal: ac.signal,
-              method: 'POST',
-              headers: {
-                'xi-api-key': apiKey,
-                'Content-Type': 'application/json',
-                Accept: 'audio/mpeg',
-              },
-              body: JSON.stringify(bodyPayload),
-            }
-      );
+      res = await runWithThreeAttemptsFixedBackoff({
+        delaysMs: [1000, 2000],
+        shouldRetry: (err) => ttsShouldRetry(err),
+        onRetry: ({ nextAttempt, delayMs, error }) => {
+          if (__DEV__) {
+            console.warn('[TTS] ElevenLabs fetch retry', { nextAttempt, delayMs, error });
+          }
+        },
+        run: async () => doOneTtsFetch(),
+      });
     } catch (e) {
-      clearTimeout(fetchTimer);
       const name = typeof e === 'object' && e !== null && 'name' in e ? String((e as { name: string }).name) : '';
       if (name === 'AbortError') {
-        // #region agent log
-        fetch('http://127.0.0.1:7789/ingest/668e0bd5-3283-4492-9f48-e33846c18218', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json', 'X-Debug-Session-Id': 'e70f17' },
-          body: JSON.stringify({
-            sessionId: 'e70f17',
-            location: 'elevenLabsTts.ts:tts_fetch',
-            message: 'tts_fetch_aborted',
-            data: { hypothesisId: 'H15', fetchTimeoutMs },
-            timestamp: Date.now(),
-            runId: 'post-fix',
-          }),
-        }).catch(() => {});
-        // #endregion
-        console.warn('ElevenLabs TTS fetch timed out');
         await speakFallback(spokenText, onFallback, options);
         return;
       }
-      throw e;
-    }
-    clearTimeout(fetchTimer);
-
-    if (!res.ok) {
-      const errText = await res.text();
-      console.warn('ElevenLabs TTS error:', res.status, errText);
+      console.warn('ElevenLabs TTS fetch failed after retries:', e);
       await speakFallback(spokenText, onFallback, options);
       return;
     }
@@ -698,7 +824,11 @@ export async function speakWithElevenLabs(
       return;
     }
 
+    /** Full MP3 in memory before any playback path (non-streaming fetch + full arrayBuffer). */
+    setTtsBufferCompleteBeforePlaybackForNextPlayback(arrayBuffer.byteLength > 0);
+
     if (Platform.OS === 'web') {
+      await ensureWebPlaybackPrimedForNextTurn(telemetrySource);
       const abForWebAudio = arrayBuffer.slice(0);
       const abForHtmlAudio = arrayBuffer.slice(0);
       /**
@@ -708,6 +838,29 @@ export async function speakWithElevenLabs(
        * after `unlockWebAudioForAutoplay()` in `startInterview` so the first line can speak without a tap.
        */
       const skipWebAudioDecode = webSpeechShouldDeferToUserGesture();
+      // #region agent log
+      fetch('http://127.0.0.1:7789/ingest/668e0bd5-3283-4492-9f48-e33846c18218', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'X-Debug-Session-Id': 'c61a43' },
+        body: JSON.stringify({
+          sessionId: 'c61a43',
+          location: 'elevenLabsTts.ts:web_tts_branch',
+          message: 'desktop_tts_branch_state',
+          data: {
+            hypothesisId: 'H1',
+            skipWebAudioDecode,
+            deferGesture: webSpeechShouldDeferToUserGesture(),
+            maxTouchPoints: typeof navigator !== 'undefined' ? navigator.maxTouchPoints : null,
+            navPlatform: typeof navigator !== 'undefined' ? navigator.platform : null,
+            uaSnippet: (typeof navigator !== 'undefined' ? navigator.userAgent : '').slice(0, 120),
+            envAllowsEleven,
+            isDevBundle: typeof __DEV__ !== 'undefined' && __DEV__,
+          },
+          timestamp: Date.now(),
+          runId: 'debug-desktop-tap',
+        }),
+      }).catch(() => {});
+      // #endregion
       // #region agent log
       fetch('http://127.0.0.1:7789/ingest/668e0bd5-3283-4492-9f48-e33846c18218', {
         method: 'POST',
@@ -734,6 +887,25 @@ export async function speakWithElevenLabs(
             onPlaybackStarted,
             telemetrySource
           );
+      // #region agent log
+      fetch('http://127.0.0.1:7789/ingest/668e0bd5-3283-4492-9f48-e33846c18218', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'X-Debug-Session-Id': 'c61a43' },
+        body: JSON.stringify({
+          sessionId: 'c61a43',
+          location: 'elevenLabsTts.ts:web_after_web_audio_attempt',
+          message: 'played_via_web_audio_context',
+          data: {
+            hypothesisId: 'H5',
+            playedViaCtx,
+            skipWebAudioDecode,
+            nextPath: playedViaCtx ? 'done' : 'html_audio',
+          },
+          timestamp: Date.now(),
+          runId: 'debug-desktop-tap',
+        }),
+      }).catch(() => {});
+      // #endregion
       if (playedViaCtx) {
         return;
       }
@@ -778,6 +950,13 @@ export async function speakWithElevenLabs(
         }),
       }).catch(() => {});
       // #endregion
+      /** Context only — do not reprime shared HTMLAudio here; `src` is already the MP3 blob URL. */
+      if (!(await ensureSharedWebAudioContextResumedForPlayback(telemetrySource))) {
+        activeWebAudio = null;
+        URL.revokeObjectURL(url);
+        await speakFallback(spokenText, onFallback, options);
+        return;
+      }
       await new Promise<void>((resolve, reject) => {
         htmlAudio.onended = () => {
           activeWebAudio = null;
@@ -1065,19 +1244,20 @@ function speakWithWebSpeechSynthesis(
 }
 
 /**
- * If ElevenLabs MP3 was fetched but `play()` was blocked, the blob URL is stored here — call from the same
- * synchronous path as `onPressIn` / mic tap so `play()` succeeds (Brave often blocks `speechSynthesis` too).
+ * If ElevenLabs MP3 was fetched but `play()` was blocked, the blob URL is stored here — call from a user-gesture
+ * handler (`onPressIn` / mic tap) so `play()` succeeds (Brave often blocks `speechSynthesis` too).
  *
  * **onPlaybackStarted** runs only when `HTMLAudioElement.play()` resolves — do not clear duplicate text queues
  * before this; if play() rejects, we restore the blob URL for the next tap and text fallback stays available.
  */
-export function tryPlayPendingWebTtsAudioInUserGesture(
+export async function tryPlayPendingWebTtsAudioInUserGesture(
   onDone?: () => void,
   onPlaybackStarted?: () => void,
   telemetry?: { source?: TtsTelemetrySource }
-): boolean {
+): Promise<boolean> {
   const telemetrySource = telemetry?.source ?? 'other';
   if (Platform.OS !== 'web' || typeof window === 'undefined' || !pendingWebGestureBlobUrl) return false;
+  await ensureWebPlaybackPrimedForNextTurn(telemetrySource);
   // #region agent log
   fetch('http://127.0.0.1:7789/ingest/668e0bd5-3283-4492-9f48-e33846c18218', {
     method: 'POST',
@@ -1204,11 +1384,34 @@ function speakFallback(
     const run = async () => {
       await stopElevenLabsPlayback();
       if (Platform.OS === 'web') {
-        if (webSpeechShouldDeferToUserGesture()) {
+        /** `speechSynthesis` does not use the shared `AudioContext`; do not require `unlockWebAudioForAutoplay` here. */
+        const webRes = await speakWithWebSpeechSynthesis(text, onPlaybackStarted);
+        if (webRes.ok) {
+          resolve();
+          return;
+        }
+        // #region agent log
+        fetch('http://127.0.0.1:7789/ingest/668e0bd5-3283-4492-9f48-e33846c18218', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'X-Debug-Session-Id': 'c61a43' },
+          body: JSON.stringify({
+            sessionId: 'c61a43',
+            location: 'elevenLabsTts.ts:speakFallback',
+            message: 'web_speech_synthesis_result',
+            data: {
+              hypothesisId: 'H1',
+              error: webRes.ok ? null : webRes.error,
+              deferGesture: webSpeechShouldDeferToUserGesture(),
+            },
+            timestamp: Date.now(),
+            runId: 'debug-desktop-tap',
+          }),
+        }).catch(() => {});
+        // #endregion
+        if (!webRes.ok && webRes.error === 'not-allowed') {
           throw new WebTtsRequiresUserGestureError(text);
         }
-        const webRes = await speakWithWebSpeechSynthesis(text, onPlaybackStarted);
-        if (!webRes.ok && webRes.error === 'not-allowed') {
+        if (!webRes.ok && webSpeechShouldDeferToUserGesture()) {
           throw new WebTtsRequiresUserGestureError(text);
         }
         resolve();

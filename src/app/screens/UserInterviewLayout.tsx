@@ -67,12 +67,16 @@ interface UserInterviewLayoutProps {
   micLabelOverride?: string;
   /** Web: HTTP on LAN (not a secure context) — mic/TTS blocked by browser; show fix instructions */
   webInsecureContextMessage?: string | null;
+  /** One-time device / thermal / routing notice at interview start (cleared when mic is used). */
+  sessionAudioHealthNotice?: string | null;
   /** 0–1 live mic level while recording (expo metering / web analyser). */
   micInputLevel?: number;
   /** After resume from background / interruption — mic session is being re-established. */
   micSessionRecovering?: boolean;
   /** Hardware route lost — show manual reconnect. */
   micReconnectPrompt?: { message: string; onReconnect: () => void } | null;
+  /** Rare escape hatch when capture/transcription likely failed — secondary text control. */
+  micFailureEscape?: { onPress: () => void } | null;
 }
 
 const GOOGLE_FONTS_URL =
@@ -120,9 +124,11 @@ export const UserInterviewLayout: React.FC<UserInterviewLayoutProps> = ({
   onMicPressIn,
   micLabelOverride,
   webInsecureContextMessage = null,
+  sessionAudioHealthNotice = null,
   micInputLevel = 0,
   micSessionRecovering = false,
   micReconnectPrompt = null,
+  micFailureEscape = null,
 }) => {
   const [refCardOpen, setRefCardOpen] = useState(false);
   const rippleAnim = useRef(new Animated.Value(0)).current;
@@ -295,6 +301,10 @@ export const UserInterviewLayout: React.FC<UserInterviewLayoutProps> = ({
           <Text style={styles.insecureContextBanner}>{webInsecureContextMessage}</Text>
         ) : null}
 
+        {sessionAudioHealthNotice && !micError ? (
+          <Text style={styles.insecureContextBanner}>{sessionAudioHealthNotice}</Text>
+        ) : null}
+
         {ttsFallbackActive ? (
           <Text style={styles.ttsFallbackNotice}>
             {Platform.OS === 'web'
@@ -449,6 +459,17 @@ export const UserInterviewLayout: React.FC<UserInterviewLayoutProps> = ({
               >
                 {micLabel}
               </Text>
+              {micFailureEscape ? (
+                <Pressable
+                  onPress={micFailureEscape.onPress}
+                  accessibilityRole="button"
+                  accessibilityLabel="Amoraea did not hear me"
+                  hitSlop={8}
+                  style={styles.micFailureEscapePressable}
+                >
+                  <Text style={styles.micFailureEscapeLabel}>Amoraea didn&apos;t hear me.</Text>
+                </Pressable>
+              ) : null}
             </>
           )}
         </View>
@@ -1075,6 +1096,20 @@ const styles = StyleSheet.create({
   },
   micLabelRecording: {
     color: '#E84444',
+  },
+  micFailureEscapePressable: {
+    marginTop: 10,
+    paddingVertical: 4,
+    paddingHorizontal: 6,
+    alignSelf: 'center',
+  },
+  micFailureEscapeLabel: {
+    fontFamily: FONT_UI,
+    fontSize: 11,
+    fontWeight: '300',
+    color: TEXT_DIM,
+    textAlign: 'center',
+    textDecorationLine: 'underline',
   },
   micRecoveringHint: {
     fontFamily: FONT_UI,

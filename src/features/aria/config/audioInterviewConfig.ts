@@ -70,6 +70,16 @@ export function getAudioWhisperTimeoutMs(): number {
   return Math.max(3000, Math.min(120_000, v));
 }
 
+/** Hard cap: auto-stop recording and send buffer to Whisper (no user message). */
+export function getAudioMaxRecordingDurationMs(): number {
+  return 120_000;
+}
+
+/** Logged with `recording_duration_cap_hit` when only timer cap applies (no separate silence endpoint). */
+export function getAudioSilenceDetectionThresholdMsForLogs(): number | null {
+  return null;
+}
+
 /** RMS floor (0–1) for web AudioContext energy probe — below this, likely silent. */
 export function getAudioWebRmsEnergyFloor(): number {
   return envNum('AUDIO_WEB_RMS_ENERGY_FLOOR', 0.012);

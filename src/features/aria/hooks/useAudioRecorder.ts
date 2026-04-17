@@ -1,10 +1,12 @@
 import { useState, useRef, useCallback, useEffect } from 'react';
 import { Platform } from 'react-native';
 import {
+  getLastAppliedAudioModeLabel,
   setRecordingMode,
   transitionFromRecordingToPlaybackNative,
 } from '@features/aria/utils/audioModeHelpers';
 import {
+  getAudioMaxRecordingDurationMs,
   getAudioMeteringPollIntervalMs,
   getAudioMinRecordingDurationMs,
   logAudioInterviewConfigOnce,
@@ -69,19 +71,27 @@ export function useAudioRecorder({
   onError,
   onBeforeWebRecorderStop,
   onMediaServicesReset,
+  onRecordingEnginePrimed,
 }: {
   onRecordingComplete?: (
     blob: Blob,
     nativeUri: string | null,
-    meta?: { peakMeteringDb: number | null }
+    meta?: { peakMeteringDb: number | null; recordingCapped?: boolean }
   ) => void | Promise<void>;
   onError?: (err: Error) => void;
   /** Web: run synchronously in the same user-gesture stack as `MediaRecorder.stop()` (e.g. resume AudioContext for later TTS). */
   onBeforeWebRecorderStop?: () => void;
   /** iOS: media services reset (e.g. route change) — caller should prompt reconnect. */
   onMediaServicesReset?: () => void;
+  /** After audio session (native) or stream acquisition (web) is ready, post-delay, when recording engine is initialized. */
+  onRecordingEnginePrimed?: (info: {
+    modeCompleteAtMs: number;
+    recordingInitializedAtMs: number;
+  }) => void;
 }) {
   logAudioInterviewConfigOnce();
+
+  const sleep = useCallback((ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms)), []);
 
   const [isRecording, setIsRecording] = useState(false);
   const [permissionStatus, setPermissionStatus] = useState<AudioRecorderPermissionStatus>(null);
@@ -99,6 +109,15 @@ export function useAudioRecorder({
   const webAudioCtxRef = useRef<AudioContext | null>(null);
   const webAnalyserRef = useRef<AnalyserNode | null>(null);
   const webMeterIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const maxDurationTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const recordingCappedThisTurnRef = useRef(false);
+
+  const clearMaxDurationTimer = useCallback(() => {
+    if (maxDurationTimerRef.current != null) {
+      clearTimeout(maxDurationTimerRef.current);
+      maxDurationTimerRef.current = null;
+    }
+  }, []);
 
   const stopWebMetering = useCallback(() => {
     if (webMeterIntervalRef.current != null) {
@@ -150,39 +169,8 @@ export function useAudioRecorder({
     return types.find((t) => MediaRecorder.isTypeSupported(t)) ?? null;
   }, []);
 
-  const startNativeRecording = useCallback(async () => {
-    try {
-      maxMeteringDbRef.current = null;
-      await setRecordingMode();
-
-      const Audio = getExpoAvAudio();
-      const pollMs = getAudioMeteringPollIntervalMs();
-      const onStatus = (status: RecordingStatusLike) => {
-        if (status.mediaServicesDidReset) {
-          onMediaServicesReset?.();
-        }
-        const m = status.metering;
-        if (typeof m === 'number' && Number.isFinite(m)) {
-          if (maxMeteringDbRef.current == null || m > maxMeteringDbRef.current) {
-            maxMeteringDbRef.current = m;
-          }
-          const n = Math.max(0, Math.min(1, (m + 160) / 160));
-          setInputMeterLevel(n);
-        }
-      };
-
-      const { recording } = await Audio.Recording.createAsync(buildRecordingPreset(Audio), onStatus, pollMs);
-
-      recordingRef.current = recording;
-      recordingStartTimeRef.current = Date.now();
-      setIsRecording(true);
-    } catch (err) {
-      if (__DEV__) console.error('Native recording failed:', err);
-      onError?.(err instanceof Error ? err : new Error(String(err)));
-    }
-  }, [onError, onMediaServicesReset]);
-
   const stopNativeRecording = useCallback(async () => {
+    clearMaxDurationTimer();
     const recording = recordingRef.current;
     if (!recording) return;
 
@@ -201,7 +189,11 @@ export function useAudioRecorder({
         const response = await fetch(uri);
         const blob = await response.blob();
         logNativeMicRecordingStopped({ blobBytes: blob.size, platformOs: Platform.OS });
-        await onRecordingComplete?.(blob, uri, { peakMeteringDb: maxMeteringDbRef.current });
+        await onRecordingComplete?.(blob, uri, {
+          peakMeteringDb: maxMeteringDbRef.current,
+          recordingCapped: recordingCappedThisTurnRef.current,
+        });
+        recordingCappedThisTurnRef.current = false;
       }
     } catch (err) {
       if (__DEV__) console.error('Native recording stop failed:', err);
@@ -212,10 +204,65 @@ export function useAudioRecorder({
       }
       onError?.(err instanceof Error ? err : new Error(String(err)));
     }
-  }, [onRecordingComplete, onError]);
+  }, [onRecordingComplete, onError, clearMaxDurationTimer]);
 
-  const startWebRecording = useCallback(async () => {
+  const startNativeRecording = useCallback(
+    async (opts?: { postAudioSessionDelayMs?: number }) => {
     try {
+      maxMeteringDbRef.current = null;
+      recordingCappedThisTurnRef.current = false;
+      clearMaxDurationTimer();
+      await setRecordingMode();
+      const modeCompleteAtMs = Date.now();
+      if (getLastAppliedAudioModeLabel() !== 'recording') {
+        if (__DEV__) {
+          console.warn('[useAudioRecorder] expected recording audio mode after setRecordingMode');
+        }
+      }
+      const delayMs = Math.max(0, opts?.postAudioSessionDelayMs ?? 500);
+      await sleep(delayMs);
+
+      const Audio = getExpoAvAudio();
+      const pollMs = getAudioMeteringPollIntervalMs();
+      const onStatus = (status: RecordingStatusLike) => {
+        if (status.mediaServicesDidReset) {
+          onMediaServicesReset?.();
+        }
+        const m = status.metering;
+        if (typeof m === 'number' && Number.isFinite(m)) {
+          if (maxMeteringDbRef.current == null || m > maxMeteringDbRef.current) {
+            maxMeteringDbRef.current = m;
+          }
+          const n = Math.max(0, Math.min(1, (m + 160) / 160));
+          setInputMeterLevel(n);
+        }
+      };
+
+      const { recording } = await Audio.Recording.createAsync(buildRecordingPreset(Audio), onStatus, pollMs);
+      const recordingInitializedAtMs = Date.now();
+      onRecordingEnginePrimed?.({ modeCompleteAtMs, recordingInitializedAtMs });
+
+      recordingRef.current = recording;
+      recordingStartTimeRef.current = Date.now();
+      setIsRecording(true);
+      const capMs = getAudioMaxRecordingDurationMs();
+      maxDurationTimerRef.current = setTimeout(() => {
+        maxDurationTimerRef.current = null;
+        recordingCappedThisTurnRef.current = true;
+        void stopNativeRecording();
+      }, capMs);
+    } catch (err) {
+      if (__DEV__) console.error('Native recording failed:', err);
+      onError?.(err instanceof Error ? err : new Error(String(err)));
+    }
+  },
+    [onError, onMediaServicesReset, onRecordingEnginePrimed, clearMaxDurationTimer, stopNativeRecording, sleep]
+  );
+
+  const startWebRecording = useCallback(async (opts?: { postAudioSessionDelayMs?: number }) => {
+    try {
+      recordingCappedThisTurnRef.current = false;
+      clearMaxDurationTimer();
       const stream = await navigator.mediaDevices.getUserMedia({
         audio: {
           echoCancellation: true,
@@ -223,6 +270,9 @@ export function useAudioRecorder({
         },
       });
       webStreamRef.current = stream;
+      const modeCompleteAtMs = Date.now();
+      const delayMs = Math.max(0, opts?.postAudioSessionDelayMs ?? 500);
+      await sleep(delayMs);
 
       try {
         const Ctx =
@@ -288,20 +338,46 @@ export function useAudioRecorder({
         stream.getTracks().forEach((t) => t.stop());
         mediaRecorderRef.current = null;
         setIsRecording(false);
-        await onRecordingComplete?.(blob, null, { peakMeteringDb: null });
+        await onRecordingComplete?.(blob, null, {
+          peakMeteringDb: null,
+          recordingCapped: recordingCappedThisTurnRef.current,
+        });
+        recordingCappedThisTurnRef.current = false;
       };
 
       mediaRecorder.start(100);
-      recordingStartTimeRef.current = Date.now();
+      const recordingInitializedAtMs = Date.now();
+      onRecordingEnginePrimed?.({ modeCompleteAtMs, recordingInitializedAtMs });
+      recordingStartTimeRef.current = recordingInitializedAtMs;
       setIsRecording(true);
+      const capMs = getAudioMaxRecordingDurationMs();
+      maxDurationTimerRef.current = setTimeout(() => {
+        maxDurationTimerRef.current = null;
+        recordingCappedThisTurnRef.current = true;
+        clearMaxDurationTimer();
+        onBeforeWebRecorderStop?.();
+        const rec = mediaRecorderRef.current;
+        if (rec?.state !== 'inactive') rec?.stop();
+      }, capMs);
     } catch (err) {
       stopWebMetering();
       if (__DEV__) console.error('Web recording failed:', err);
       onError?.(err instanceof Error ? err : new Error(String(err)));
     }
-  }, [getSupportedMimeType, onRecordingComplete, onError, stopWebMetering]);
+  }, [
+    getSupportedMimeType,
+    onRecordingComplete,
+    onError,
+    stopWebMetering,
+    onRecordingEnginePrimed,
+    onBeforeWebRecorderStop,
+    clearMaxDurationTimer,
+    sleep,
+  ]);
 
-  const stopWebRecording = useCallback(() => {
+  const stopWebRecording = useCallback((opts?: { bypassMinDuration?: boolean }) => {
+    const bypass = opts?.bypassMinDuration === true;
+    clearMaxDurationTimer();
     const minMs = getAudioMinRecordingDurationMs();
     const elapsed = Date.now() - (recordingStartTimeRef.current ?? 0);
     const stop = () => {
@@ -309,12 +385,12 @@ export function useAudioRecorder({
       const rec = mediaRecorderRef.current;
       if (rec?.state !== 'inactive') rec?.stop();
     };
-    if (elapsed < minMs) {
+    if (!bypass && elapsed < minMs) {
       setTimeout(stop, minMs - elapsed);
     } else {
       stop();
     }
-  }, [onBeforeWebRecorderStop]);
+  }, [onBeforeWebRecorderStop, clearMaxDurationTimer]);
 
   useEffect(
     () => () => {
@@ -323,7 +399,47 @@ export function useAudioRecorder({
     [stopWebMetering]
   );
 
-  const startRecording = useCallback(async () => {
+  const releaseRecordingInstance = useCallback(
+    async (opts?: { momentNumber?: number; logCleanupFailed?: (payload: { message: string; moment_number?: number }) => void }) => {
+      clearMaxDurationTimer();
+      if (Platform.OS === 'web') {
+        try {
+          const rec = mediaRecorderRef.current;
+          if (rec && rec.state !== 'inactive') {
+            rec.stop();
+          }
+        } catch (e) {
+          opts?.logCleanupFailed?.({
+            message: e instanceof Error ? e.message : String(e),
+            moment_number: opts.momentNumber,
+          });
+        }
+        stopWebMetering();
+        mediaRecorderRef.current = null;
+        setIsRecording(false);
+        setInputMeterLevel(0);
+        return;
+      }
+      const rec = recordingRef.current;
+      if (rec) {
+        try {
+          await rec.stopAndUnloadAsync();
+        } catch (e) {
+          opts?.logCleanupFailed?.({
+            message: e instanceof Error ? e.message : String(e),
+            moment_number: opts.momentNumber,
+          });
+        }
+        recordingRef.current = null;
+      }
+      setIsRecording(false);
+      setInputMeterLevel(0);
+    },
+    [clearMaxDurationTimer, stopWebMetering]
+  );
+
+  const startRecording = useCallback(
+    async (opts?: { postAudioSessionDelayMs?: number }) => {
     const granted = permissionStatus === 'granted' || (await requestPermission());
     if (!granted) {
       onError?.(new Error('Microphone permission denied'));
@@ -331,15 +447,17 @@ export function useAudioRecorder({
     }
 
     if (Platform.OS === 'web') {
-      await startWebRecording();
+      await startWebRecording(opts);
     } else {
-      await startNativeRecording();
+      await startNativeRecording(opts);
     }
-  }, [permissionStatus, requestPermission, startWebRecording, startNativeRecording, onError]);
+  },
+    [permissionStatus, requestPermission, startWebRecording, startNativeRecording, onError]
+  );
 
-  const stopRecording = useCallback(() => {
+  const stopRecording = useCallback((opts?: { bypassMinDuration?: boolean }) => {
     if (Platform.OS === 'web') {
-      stopWebRecording();
+      stopWebRecording(opts);
     } else {
       void stopNativeRecording();
     }
@@ -370,6 +488,8 @@ export function useAudioRecorder({
     toggleRecording,
     startRecording,
     stopRecording,
+    /** Ensures native `Recording` / web `MediaRecorder` is fully released (call before next turn). */
+    releaseRecordingInstance,
     requestPermission,
     /** Smoothed 0–1 for UI meter */
     inputMeterLevel,

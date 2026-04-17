@@ -13,6 +13,16 @@ function getExpoAvAudio(): typeof import('expo-av').Audio {
 /** Last mode applied via `setPlaybackMode` / `setRecordingMode` — for session_logs telemetry only. */
 let lastAppliedAudioModeLabel: 'playback' | 'recording' | 'web' = 'web';
 
+type RecordingPlaybackTransitionInfo = { succeeded: boolean; errorMessage?: string };
+let recordingPlaybackTransitionHook: ((info: RecordingPlaybackTransitionInfo) => void) | undefined;
+
+/** Optional session_logs hook (registered from AriaScreen) — must not throw. */
+export function setRecordingPlaybackTransitionTelemetryHook(
+  fn: ((info: RecordingPlaybackTransitionInfo) => void) | undefined
+): void {
+  recordingPlaybackTransitionHook = fn;
+}
+
 export function getLastAppliedAudioModeLabel(): typeof lastAppliedAudioModeLabel {
   return lastAppliedAudioModeLabel;
 }
@@ -63,10 +73,12 @@ export async function transitionFromRecordingToPlaybackNative(context: string): 
   if (Platform.OS === 'web') return;
   const Audio = getExpoAvAudio();
   logSessionTransition('recording_ended', context, { next: 'deactivate_audio_module' });
+  let deactivateOk = true;
   try {
     await Audio.setIsEnabledAsync(false);
     logSessionTransition('session_deactivated', context);
   } catch (e) {
+    deactivateOk = false;
     console.warn('[Audio/session] setIsEnabledAsync(false) failed', e);
   }
   await new Promise((r) => setTimeout(r, 300));
@@ -74,12 +86,21 @@ export async function transitionFromRecordingToPlaybackNative(context: string): 
     await Audio.setIsEnabledAsync(true);
     logSessionTransition('session_reactivated', context);
   } catch (e) {
+    deactivateOk = false;
     console.warn('[Audio/session] setIsEnabledAsync(true) failed', e);
   }
   await setPlaybackMode();
   logSessionTransition('playback_mode_after_transition', context, {
     allowsRecordingIOS: false,
   });
+  try {
+    recordingPlaybackTransitionHook?.({
+      succeeded: deactivateOk,
+      errorMessage: deactivateOk ? undefined : 'setIsEnabledAsync_failed',
+    });
+  } catch {
+    /* ignore telemetry */
+  }
 }
 
 /**

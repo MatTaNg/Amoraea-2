@@ -5,6 +5,40 @@ const corsHeaders = {
   'Access-Control-Max-Age': '86400',
 };
 
+function formFieldString(fd: FormData, key: string): string | undefined {
+  const v = fd.get(key);
+  if (v == null) return undefined;
+  if (typeof v === 'string') {
+    const t = v.trim();
+    return t !== '' ? t : undefined;
+  }
+  if (v instanceof File) return undefined;
+  const s = String(v).trim();
+  return s !== '' ? s : undefined;
+}
+
+/** Merge `language` from multipart fields, alternate keys, and query string — forward a single value to OpenAI. */
+function resolveIncomingLanguage(incoming: FormData, req: Request): string | undefined {
+  const url = new URL(req.url);
+  const fromQuery =
+    url.searchParams.get('language')?.trim() ||
+    url.searchParams.get('language_parameter')?.trim() ||
+    url.searchParams.get('lang')?.trim();
+  if (fromQuery) return fromQuery;
+  for (const key of ['language', 'language_parameter', 'lang', 'locale'] as const) {
+    const s = formFieldString(incoming, key);
+    if (s) return s;
+  }
+  for (const [k, v] of incoming.entries()) {
+    if (typeof v !== 'string' || v.trim() === '') continue;
+    const kl = k.toLowerCase();
+    if (kl === 'language' || kl === 'language_parameter' || kl === 'lang' || kl === 'locale') {
+      return v.trim();
+    }
+  }
+  return undefined;
+}
+
 Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') {
     return new Response(null, { status: 204, headers: corsHeaders });
@@ -41,8 +75,10 @@ Deno.serve(async (req) => {
     outgoing.set('file', file, file.name || 'recording.m4a');
     const responseFormat = incoming.get('response_format')?.toString();
     if (responseFormat) outgoing.set('response_format', responseFormat);
-    const language = incoming.get('language')?.toString();
+    const language = resolveIncomingLanguage(incoming, req);
     if (language) outgoing.set('language', language);
+    const temperature = incoming.get('temperature')?.toString();
+    if (temperature !== undefined && temperature !== '') outgoing.set('temperature', temperature);
 
     const openAiRes = await fetch('https://api.openai.com/v1/audio/transcriptions', {
       method: 'POST',

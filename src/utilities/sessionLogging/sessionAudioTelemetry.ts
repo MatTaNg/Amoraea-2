@@ -1,6 +1,7 @@
 import { Platform } from 'react-native';
 import { getLastAppliedAudioModeLabel } from '@features/aria/utils/audioModeHelpers';
 import { getSessionLogRuntime } from './sessionLogContext';
+import { getAudioCorrelationFields } from './audioSessionLogEnvelope';
 
 export type AudioOutputRoute = 'speaker' | 'headphones' | 'bluetooth' | 'unknown';
 
@@ -21,7 +22,7 @@ export type AudioSessionTelemetryPayload = {
   recording_session_active: boolean;
   tts_playback_active_immediately_prior: boolean;
   volume_level: number | null;
-};
+} & Record<string, unknown>;
 
 /** For `tts_playback_start` — recording_session_active means Whisper just ended before this TTS. */
 export function gatherTtsPlaybackTelemetry(whisperJustEndedBeforePlayback: boolean): AudioSessionTelemetryPayload {
@@ -32,6 +33,7 @@ export function gatherTtsPlaybackTelemetry(whisperJustEndedBeforePlayback: boole
     recording_session_active: whisperJustEndedBeforePlayback,
     tts_playback_active_immediately_prior: ctx.ttsPlaybackActive,
     volume_level: null,
+    ...getAudioCorrelationFields(),
   };
 }
 
@@ -44,5 +46,6 @@ export function gatherRecordingStartTelemetry(): AudioSessionTelemetryPayload {
     recording_session_active: ctx.recordingSessionActive,
     tts_playback_active_immediately_prior: ctx.ttsPlaybackActive,
     volume_level: null,
+    ...getAudioCorrelationFields(),
   };
 }
