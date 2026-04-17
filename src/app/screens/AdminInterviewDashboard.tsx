@@ -34,6 +34,7 @@ import {
 } from '@utilities/styleTranslations';
 import { ADMIN_CONSOLE_EMAIL } from '@/constants/adminConsole';
 import { adminRetryAIReasoningForAttempt } from '@utilities/adminRetryAIReasoning';
+import { confirmAsync } from '@utilities/alerts/confirmDialog';
 
 // Marker ids as stored in DB; construct keys match ai_reasoning.construct_breakdown
 const PILLAR_ROWS = [
@@ -79,14 +80,10 @@ const USER_FEEDBACK_LABELS: Record<string, string> = {
 export { ADMIN_CONSOLE_EMAIL };
 
 async function confirmDeleteAccount(message: string): Promise<boolean> {
-  if (Platform.OS === 'web' && typeof window !== 'undefined') {
-    return window.confirm(message);
-  }
-  return new Promise((resolve) => {
-    Alert.alert('Delete account', message, [
-      { text: 'Cancel', style: 'cancel', onPress: () => resolve(false) },
-      { text: 'Delete', style: 'destructive', onPress: () => resolve(true) },
-    ]);
+  return confirmAsync({
+    title: 'Delete account',
+    message,
+    confirmText: 'Delete',
   });
 }
 
@@ -1573,11 +1570,7 @@ export function AdminInterviewDashboard({ onClose }: { onClose: () => void }) {
       try {
         const result = await deleteUserAccountViaEdge(row.id);
         if ('error' in result) {
-          if (Platform.OS === 'web' && typeof window !== 'undefined') {
-            window.alert(result.error);
-          } else {
-            Alert.alert('Delete failed', result.error);
-          }
+          Alert.alert('Delete failed', result.error);
           return;
         }
         await refreshUsers();

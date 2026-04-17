@@ -9,7 +9,6 @@ import {
   Platform,
   Animated,
   Easing,
-  Alert,
   ActivityIndicator,
 } from 'react-native';
 import { SafeAreaContainer } from '@ui/components/SafeAreaContainer';
@@ -25,6 +24,7 @@ import {
 } from '@features/onboarding/qaRetake';
 import { useAuth } from '@features/authentication/hooks/useAuth';
 import { isAmoraeaAdminConsoleEmail } from '@/constants/adminConsole';
+import { showConfirmDialog, showSimpleAlert } from '@utilities/alerts/confirmDialog';
 
 const BG = '#0a0a0f';
 const ACCENT = '#3b82f6';
@@ -258,24 +258,20 @@ export const PostInterviewScreen: React.FC<{ navigation: any; route: { params: {
           if (__DEV__) console.warn('[PostInterview] QA retake failed', e);
           const detail =
             e instanceof Error ? e.message : typeof e === 'string' ? e : 'Could not reset the interview.';
-          if (Platform.OS === 'web' && typeof window !== 'undefined') {
-            window.alert(`Could not reset: ${detail}`);
-          } else {
-            Alert.alert('Could not reset', detail);
-          }
+          showSimpleAlert('Could not reset', detail);
         } finally {
           setRetakeBusy(false);
         }
       })();
     };
-    if (Platform.OS === 'web' && typeof window !== 'undefined') {
-      if (window.confirm(msg)) run();
-      return;
-    }
-    Alert.alert('Retake test?', msg, [
-      { text: 'Cancel', style: 'cancel' },
-      { text: 'Retake', style: 'destructive', onPress: run },
-    ]);
+    showConfirmDialog(
+      {
+        title: 'Retake test?',
+        message: msg,
+        confirmText: 'Retake',
+      },
+      run,
+    );
   };
 
   /** Validate + save phone to `users.launch_notification_phone`. Omitting SMS is fine — sign-in email is used for updates. */

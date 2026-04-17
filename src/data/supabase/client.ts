@@ -2,6 +2,7 @@ import { createClient } from '@supabase/supabase-js';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import Constants from 'expo-constants';
 import { Platform } from 'react-native';
+import { webAuthNoopLock } from './webAuthNoopLock';
 
 const supabaseUrl = Constants.expoConfig?.extra?.supabaseUrl || process.env.EXPO_PUBLIC_SUPABASE_URL;
 const supabaseAnonKey = Constants.expoConfig?.extra?.supabaseAnonKey || process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY;
@@ -16,11 +17,6 @@ if (!supabaseUrl || !supabaseAnonKey) {
  * contention. A no-op lock is supported by GoTrue (see `lock` in auth options) and is acceptable when
  * only one tab is the primary session writer (typical for this app).
  */
-const webAuthNoopLock = async <R>(
-  _name: string,
-  _acquireTimeout: number,
-  fn: () => Promise<R>
-): Promise<R> => fn();
 
 export const supabase = createClient(supabaseUrl, supabaseAnonKey, {
   auth: {

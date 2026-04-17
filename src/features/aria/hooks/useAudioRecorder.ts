@@ -15,6 +15,7 @@ import {
   logNativeMicRecordingStopped,
   logWebMicRecordingStopped,
 } from '@features/aria/telemetry/tsAutoplayTelemetry';
+import { remoteLog } from '@utilities/remoteLog';
 
 /** Do not top-level import expo-av — it breaks web lazy-load of the interview screen. */
 function getExpoAvAudio(): typeof import('expo-av').Audio {
@@ -160,13 +161,23 @@ export function useAudioRecorder({
 
   const getSupportedMimeType = useCallback((): string | null => {
     if (typeof MediaRecorder === 'undefined') return null;
-    const types = [
-      'audio/webm;codecs=opus',
-      'audio/webm',
-      'audio/mp4',
-      'audio/ogg;codecs=opus',
-    ];
-    return types.find((t) => MediaRecorder.isTypeSupported(t)) ?? null;
+    const ua = typeof navigator !== 'undefined' ? navigator.userAgent : '';
+    /** iOS/iPadOS WebKit: WebM/Opus often passes isTypeSupported but Whisper returns 400 invalid format on some blobs. Prefer MP4/AAC when available. */
+    const preferMp4First = /iPhone|iPad|iPod/i.test(ua);
+    const types = preferMp4First
+      ? ['audio/mp4', 'audio/webm;codecs=opus', 'audio/webm', 'audio/ogg;codecs=opus']
+      : ['audio/webm;codecs=opus', 'audio/webm', 'audio/mp4', 'audio/ogg;codecs=opus'];
+    const supported = types.filter((t) => MediaRecorder.isTypeSupported(t));
+    const chosen = supported[0] ?? null;
+    // #region agent log
+    void remoteLog('[MEDIARECORDER] mime_priority', {
+      hypothesisId: 'H_ios_mp4_first',
+      preferMp4First,
+      chosen,
+      supportedListed: supported,
+    });
+    // #endregion
+    return chosen;
   }, []);
 
   const stopNativeRecording = useCallback(async () => {

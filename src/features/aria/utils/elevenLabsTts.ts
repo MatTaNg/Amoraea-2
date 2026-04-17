@@ -7,6 +7,8 @@ import { runWithThreeAttemptsFixedBackoff } from '@utilities/networkRetry';
 import { classifyError } from '@utilities/withRetry';
 import { setTtsBufferCompleteBeforePlaybackForNextPlayback } from '@features/aria/telemetry/ttsBufferTelemetry';
 import { computeElevenLabsEnabled } from './elevenLabsEnvGating';
+import { getWebSpeechDeferFromNavigatorSnapshot } from './webSpeechDeferPolicy';
+import { WebTtsRequiresUserGestureError } from './webTtsGestureErrors';
 import { supabase } from '@data/supabase/client';
 import {
   logTtsAutoplayPlayOutcome,
@@ -156,24 +158,7 @@ async function ensureWebPlaybackPrimedForNextTurn(telemetrySource: TtsTelemetryS
   reprimeSharedHtmlAudioSilentPlay();
 }
 
-/** iOS Safari blocks speechSynthesis unless speak() runs in a user-gesture stack; async LLM/TTS loses the gesture. */
-export class WebTtsRequiresUserGestureError extends Error {
-  constructor(public readonly text: string) {
-    super('WEB_TTS_GESTURE');
-    this.name = 'WebTtsRequiresUserGestureError';
-  }
-}
-
-/**
- * Metro/web may duplicate module scope so `instanceof WebTtsRequiresUserGestureError` is false even for the same
- * logical error — `speakTextSafe` would skip `pendingWebSpeechForGestureRef` and mic tap would do nothing (no T9 logs).
- */
-export function isWebTtsRequiresUserGestureError(err: unknown): err is WebTtsRequiresUserGestureError {
-  if (err instanceof WebTtsRequiresUserGestureError) return true;
-  if (typeof err !== 'object' || err === null) return false;
-  const o = err as { name?: string; text?: unknown };
-  return o.name === 'WebTtsRequiresUserGestureError' && typeof o.text === 'string';
-}
+export { WebTtsRequiresUserGestureError, isWebTtsRequiresUserGestureError } from './webTtsGestureErrors';
 
 /** Chromium blocks `HTMLAudioElement.play()` without a prior user gesture (mobile Brave, Chrome, etc.). */
 function isWebAudioAutoplayBlockedError(err: unknown): boolean {
@@ -191,12 +176,11 @@ function isWebAudioAutoplayBlockedError(err: unknown): boolean {
  */
 export function webSpeechShouldDeferToUserGesture(): boolean {
   if (Platform.OS !== 'web' || typeof navigator === 'undefined') return false;
-  const ua = navigator.userAgent || '';
-  if (/iPhone|iPod/i.test(ua)) return true;
-  if (/iPad/i.test(ua)) return true;
-  if (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1) return true;
-  if (/Android/i.test(ua)) return true;
-  return false;
+  return getWebSpeechDeferFromNavigatorSnapshot({
+    userAgent: navigator.userAgent || '',
+    platform: navigator.platform,
+    maxTouchPoints: navigator.maxTouchPoints,
+  });
 }
 
 /** Native ElevenLabs MP3 playback; must be stopped/unloaded before starting another clip. */

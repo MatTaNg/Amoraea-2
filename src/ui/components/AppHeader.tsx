@@ -1,5 +1,5 @@
 import React from 'react';
-import { View, Text, TouchableOpacity, StyleSheet, Alert, Platform } from 'react-native';
+import { View, Text, TouchableOpacity, StyleSheet } from 'react-native';
 import { useNavigation } from '@react-navigation/native';
 import { Ionicons } from '@expo/vector-icons';
 import { useAuth } from '@features/authentication/hooks/useAuth';
@@ -12,18 +12,13 @@ export const AppHeader: React.FC = () => {
   const canGoBack = navigation.canGoBack();
 
   const handleLogOut = () => {
-    if (Platform.OS === 'web') {
-      const ok = typeof window !== 'undefined' && window.confirm('Are you sure you want to log out?');
-      if (ok) signOut();
-      return;
-    }
-    Alert.alert(
-      'Log out',
-      'Are you sure you want to log out?',
-      [
-        { text: 'Cancel', style: 'cancel' },
-        { text: 'Log out', style: 'destructive', onPress: () => signOut() },
-      ]
+    showConfirmDialog(
+      {
+        title: 'Log out',
+        message: 'Are you sure you want to log out?',
+        confirmText: 'Log out',
+      },
+      () => signOut(),
     );
   };
 

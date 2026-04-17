@@ -134,15 +134,20 @@ describe('PostInterviewScreen', () => {
     invalidateSpy.mockRestore();
   });
 
-  it('web: uses window.confirm before running retake', async () => {
+  it('web: uses Alert.alert for retake confirmation (not window.confirm)', async () => {
     const prevOs = Platform.OS;
     // @ts-expect-error test override
     Platform.OS = 'web';
 
     const confirmMock = jest.fn(() => true);
     const prevWindow = global.window;
-    // @ts-expect-error minimal window for branch under test
+    // @ts-expect-error minimal window — retake must not rely on this on mobile web
     global.window = { ...global.window, confirm: confirmMock };
+
+    const alertSpy = jest.spyOn(Alert, 'alert').mockImplementation((_title, _message, buttons) => {
+      const retake = buttons?.find((b) => 'text' in b && b.text === 'Retake');
+      (retake as { onPress?: () => void } | undefined)?.onPress?.();
+    });
 
     getUserMock.mockResolvedValue({
       data: {
@@ -167,11 +172,13 @@ describe('PostInterviewScreen', () => {
     fireEvent.press(getByText(/Retake test/i));
 
     await waitFor(() => {
-      expect(confirmMock).toHaveBeenCalled();
+      expect(confirmMock).not.toHaveBeenCalled();
+      expect(alertSpy).toHaveBeenCalled();
       expect(qaRetake.resetInterviewForQaRetake).toHaveBeenCalledWith('web-user');
       expect(navigation.replace).toHaveBeenCalledWith('Aria', { userId: 'web-user' });
     });
 
+    alertSpy.mockRestore();
     global.window = prevWindow;
     // @ts-expect-error restore
     Platform.OS = prevOs;

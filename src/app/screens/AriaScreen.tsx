@@ -62,6 +62,7 @@ import {
   getAudioSilenceDetectionThresholdMsForLogs,
 } from '@features/aria/config/audioInterviewConfig';
 import { WHISPER_LANGUAGE, WHISPER_MODEL, WHISPER_TEMPERATURE } from '@features/aria/config/whisperApiConstants';
+import { isTtsDurationMatchWithinOverrunTolerance } from '@features/aria/utils/interviewTtsDurationMatch';
 import { runWithThreeAttemptsFixedBackoff } from '@utilities/networkRetry';
 import { hasLikelySpeechAfterRecording } from '@features/aria/utils/audioEnergy';
 import { analyzeRecordingBuffer } from '@features/aria/utils/recordingBufferAnalysis';
@@ -114,6 +115,7 @@ import {
   logTouchActivityForPause,
 } from '@utilities/sessionLogging';
 import { collectDeviceContext } from '@utilities/sessionLogging/collectDeviceContext';
+import { showConfirmDialog, showSimpleAlert } from '@utilities/alerts/confirmDialog';
 import { gatherRecordingStartTelemetry, gatherTtsPlaybackTelemetry } from '@utilities/sessionLogging/sessionAudioTelemetry';
 import { consumeTtsBufferCompleteBeforePlaybackFlag } from '@features/aria/telemetry/ttsBufferTelemetry';
 import {
@@ -3978,14 +3980,14 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
 
   const handleInterviewSignOut = useCallback(() => {
     const confirmMessage = 'Are you sure you want to log out?';
-    if (Platform.OS === 'web' && typeof window !== 'undefined') {
-      if (window.confirm(confirmMessage)) void signOut();
-    } else {
-      Alert.alert('Log out', confirmMessage, [
-        { text: 'Cancel', style: 'cancel' },
-        { text: 'Log out', style: 'destructive', onPress: () => void signOut() },
-      ]);
-    }
+    showConfirmDialog(
+      {
+        title: 'Log out',
+        message: confirmMessage,
+        confirmText: 'Log out',
+      },
+      () => void signOut(),
+    );
   }, [signOut]);
 
   /** Admin from auth user (available on first render). */
@@ -4764,7 +4766,7 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
         const expectedTtsMs = Math.round(
           Math.min(180_000, Math.max(400, stripControlTokens(text).trim().length * 65))
         );
-        const durationMatch = actualTtsMs <= expectedTtsMs * 1.1;
+        const durationMatch = isTtsDurationMatchWithinOverrunTolerance(actualTtsMs, expectedTtsMs);
         /** Playback ended well short of estimate — add mic delay; distinct from `duration_match` (overrun vs expected). */
         const ttsEndedEarlyVsEstimate = actualTtsMs < expectedTtsMs * 0.9;
         if (userId) {
@@ -5506,11 +5508,7 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
         }
       } catch (err) {
         const msg = err instanceof Error ? err.message : 'Could not skip interview.';
-        if (Platform.OS === 'web') {
-          window.alert(`Admin pass failed: ${msg}`);
-        } else {
-          Alert.alert('Admin pass failed', msg);
-        }
+        showSimpleAlert('Admin pass failed', msg);
         setVoiceState('idle');
         return;
       }
@@ -9993,14 +9991,14 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
 
   const handleRetake = useCallback(() => {
     const warningMessage = 'Are you sure you want to retest? You will not be able to return to this results screen after starting a new retest.';
-    if (Platform.OS === 'web' && typeof window !== 'undefined') {
-      if (window.confirm(warningMessage)) void performRetake();
-      return;
-    }
-    Alert.alert('Start retest?', warningMessage, [
-      { text: 'Cancel', style: 'cancel' },
-      { text: 'Retest', style: 'destructive', onPress: () => void performRetake() },
-    ]);
+    showConfirmDialog(
+      {
+        title: 'Start retest?',
+        message: warningMessage,
+        confirmText: 'Retest',
+      },
+      () => void performRetake(),
+    );
   }, [performRetake]);
 
   /** Admin-only: full local reset + restart opening line. Does not update `users` (unlike retake). */
@@ -10091,22 +10089,18 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
   const handleAdminResetInterview = useCallback(() => {
     const warningMessage =
       'Reset the entire interview from the beginning? Local progress and transcript will be cleared (admin only; does not change your account retake counters).';
-    if (Platform.OS === 'web' && typeof window !== 'undefined') {
-      if (window.confirm(warningMessage)) void performAdminInterviewReset();
-      return;
-    }
-    Alert.alert('Reset interview?', warningMessage, [
-      { text: 'Cancel', style: 'cancel' },
-      { text: 'Reset', style: 'destructive', onPress: () => void performAdminInterviewReset() },
-    ]);
+    showConfirmDialog(
+      {
+        title: 'Reset interview?',
+        message: warningMessage,
+        confirmText: 'Reset',
+      },
+      () => void performAdminInterviewReset(),
+    );
   }, [performAdminInterviewReset]);
 
   const showFeedbackNotice = useCallback((title: string, message: string) => {
-    if (Platform.OS === 'web' && typeof window !== 'undefined') {
-      window.alert(`${title}\n\n${message}`);
-      return;
-    }
-    Alert.alert(title, message);
+    showSimpleAlert(title, message);
   }, []);
 
   const handleSubmitPostInterviewFeedback = useCallback(async () => {
