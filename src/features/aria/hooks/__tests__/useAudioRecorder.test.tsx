@@ -4,6 +4,7 @@ import { useAudioRecorder } from '../useAudioRecorder';
 
 jest.mock('expo-av', () => ({
   Audio: {
+    setIsEnabledAsync: jest.fn(() => Promise.resolve()),
     requestPermissionsAsync: jest.fn(() => Promise.resolve({ status: 'granted' })),
     Recording: {
       createAsync: jest.fn(() =>
@@ -25,6 +26,7 @@ jest.mock('expo-av', () => ({
 jest.mock('@features/aria/utils/audioModeHelpers', () => ({
   setRecordingMode: jest.fn(() => Promise.resolve()),
   setPlaybackMode: jest.fn(() => Promise.resolve()),
+  transitionFromRecordingToPlaybackNative: jest.fn(() => Promise.resolve()),
   logAndApplyPlaybackModeForTts: jest.fn(() => Promise.resolve()),
 }));
 

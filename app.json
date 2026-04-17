@@ -57,7 +57,7 @@
         "android.permission.MODIFY_AUDIO_SETTINGS",
         "android.permission.WRITE_CONTACTS"
       ],
-      "versionCode": 1,
+      "versionCode": 1
     },
     "web": {
       "favicon": "./public/icons/favicon-32x32.png",
@@ -100,7 +100,8 @@
         {
           "microphonePermission": "Amoraea uses your microphone to record your responses during the interview."
         }
-      ]
+      ],
+      "expo-audio"
     ],
     "extra": {
       "eas": {

@@ -33,6 +33,7 @@ import {
   translateStyleProfile,
 } from '@utilities/styleTranslations';
 import { ADMIN_CONSOLE_EMAIL } from '@/constants/adminConsole';
+import { adminRetryAIReasoningForAttempt } from '@utilities/adminRetryAIReasoning';
 
 // Marker ids as stored in DB; construct keys match ai_reasoning.construct_breakdown
 const PILLAR_ROWS = [
@@ -116,6 +117,8 @@ type UserRow = {
   /** When set, user completed at least one attempt row in DB (even if admin cannot read attempts yet). */
   latest_attempt_id?: string | null;
   interview_completed?: boolean | null;
+  /** Live or checkpoint snapshot of messages (same shape as interview_attempts.transcript). */
+  interview_transcript?: unknown;
 };
 
 type AttemptRow = {
@@ -143,6 +146,7 @@ type AttemptRow = {
   scenario_specific_patterns?: Record<string, unknown> | null;
   probe_log?: unknown;
   communication_style_error?: string | null;
+  reasoning_pending?: boolean | null;
 };
 
 type CommunicationStyleProfileRow = {
@@ -432,7 +436,8 @@ async function fetchAllAdminData(): Promise<FetchAllAdminDataResult> {
       display_name,
       created_at,
       latest_attempt_id,
-      interview_completed
+      interview_completed,
+      interview_transcript
     `
     )
     .order('created_at', { ascending: false });
@@ -471,7 +476,8 @@ async function fetchAllAdminData(): Promise<FetchAllAdminDataResult> {
       user_analysis_comment,
       per_construct_ratings,
       transcript,
-      communication_style_error
+      communication_style_error,
+      reasoning_pending
     `
     )
     .order('created_at', { ascending: false });
@@ -531,14 +537,20 @@ function formatAttemptDate(attempt: AttemptRow): string {
 
 function formatAttemptTabLabel(attempt: AttemptRow): string {
   const raw = attempt.completed_at ?? attempt.created_at;
-  if (!raw) return `Test ${attempt.attempt_number}`;
-  return new Date(raw).toLocaleString('en-GB', {
-    day: '2-digit',
-    month: 'short',
-    year: 'numeric',
-    hour: '2-digit',
-    minute: '2-digit',
-  });
+  const pending =
+    attempt.reasoning_pending === true ||
+    !!(parseObject(attempt.ai_reasoning) as { _reasoningPending?: boolean } | null)?._reasoningPending;
+  const suffix = pending ? ' · AI narrative pending' : '';
+  if (!raw) return `Test ${attempt.attempt_number}${suffix}`;
+  return (
+    new Date(raw).toLocaleString('en-GB', {
+      day: '2-digit',
+      month: 'short',
+      year: 'numeric',
+      hour: '2-digit',
+      minute: '2-digit',
+    }) + suffix
+  );
 }
 
 function getAttemptsSorted(attempts: AttemptRow[] | null | undefined): AttemptRow[] {
@@ -548,6 +560,81 @@ function getAttemptsSorted(attempts: AttemptRow[] | null | undefined): AttemptRo
 
 function getString(v: unknown): string | null {
   return typeof v === 'string' && v.trim().length > 0 ? v.trim() : null;
+}
+
+type LiveTranscriptMsg = { role: string; content?: string; scenarioNumber?: number };
+
+function parseUserTranscript(raw: unknown): LiveTranscriptMsg[] {
+  if (!raw) return [];
+  if (Array.isArray(raw)) return raw as LiveTranscriptMsg[];
+  if (typeof raw === 'string') {
+    try {
+      const p = JSON.parse(raw);
+      return Array.isArray(p) ? (p as LiveTranscriptMsg[]) : [];
+    } catch {
+      return [];
+    }
+  }
+  return [];
+}
+
+/** True when the account has an unfinished interview with a transcript snapshot on `users` (live sync or checkpoint). */
+function userHasInProgressInterview(user: UserRow): boolean {
+  if (user.interview_completed === true) return false;
+  return parseUserTranscript(user.interview_transcript).length > 0;
+}
+
+/** Best-effort scenario indicator when `interview_last_checkpoint` is not selected or missing on older DBs. */
+function inferLatestScenarioFromTranscript(lines: LiveTranscriptMsg[]): number | null {
+  let max: number | null = null;
+  for (const m of lines) {
+    const n = m.scenarioNumber;
+    if (typeof n === 'number' && n >= 1 && n <= 3) {
+      max = max == null ? n : Math.max(max, n);
+    }
+  }
+  return max;
+}
+
+function InProgressTranscriptSection({
+  user,
+  onRefresh,
+}: {
+  user: UserRow;
+  onRefresh: () => void;
+}) {
+  if (!userHasInProgressInterview(user)) return null;
+  const lines = parseUserTranscript(user.interview_transcript);
+  const inferredScenario = inferLatestScenarioFromTranscript(lines);
+  return (
+    <View style={styles.inProgressSection}>
+      <View style={styles.inProgressHeaderRow}>
+        <Text style={styles.inProgressTitle}>In-progress interview</Text>
+        <TouchableOpacity onPress={onRefresh} accessibilityRole="button" accessibilityLabel="Refresh transcript">
+          <Text style={styles.refreshLink}>Refresh</Text>
+        </TouchableOpacity>
+      </View>
+      <Text style={styles.inProgressMeta}>
+        {inferredScenario != null ? `Latest scenario in snapshot: ${inferredScenario} · ` : ''}
+        {lines.length} message{lines.length === 1 ? '' : 's'}
+      </Text>
+      {lines.length === 0 ? (
+        <Text style={styles.blockText}>
+          No transcript rows yet — live sync runs every few seconds during the interview, or appears after the first
+          scenario checkpoint.
+        </Text>
+      ) : (
+        <ScrollView style={styles.inProgressScroll} nestedScrollEnabled keyboardShouldPersistTaps="handled">
+          {lines.map((m, idx) => (
+            <Text key={`live-${m.role}-${idx}`} style={styles.transcriptLine}>
+              {m.role}
+              {m.scenarioNumber != null ? ` (s${m.scenarioNumber})` : ''}: {m.content ?? ''}
+            </Text>
+          ))}
+        </ScrollView>
+      )}
+    </View>
+  );
 }
 
 function UserCard({
@@ -574,7 +661,12 @@ function UserCard({
         <Text style={styles.userCardName}>{getUserDisplayName(userData.user)}</Text>
         <Text style={styles.userCardEmail}>{userData.user.email ?? '—'}</Text>
         <View style={styles.userCardMetaRow}>
-          <Text style={[styles.userCardStatus, { color: getPassColor(passWord) }]}>{passWord}</Text>
+          <View style={styles.userCardMetaLeft}>
+            <Text style={[styles.userCardStatus, { color: getPassColor(passWord) }]}>{passWord}</Text>
+            {userHasInProgressInterview(userData.user) ? (
+              <Text style={styles.userCardInProgress}>In progress</Text>
+            ) : null}
+          </View>
           <Text style={styles.userCardTests}>{userData.attempts?.length ?? 0} tests</Text>
         </View>
       </Pressable>
@@ -711,8 +803,20 @@ function SummaryTab({ attempt }: { attempt: AttemptRow }) {
     { key: 'moment_5', label: 'Moment 5', scores: moment5Bundle.scores, summary: buildMomentOrScenarioSummary('Moment 5', moment5Details, moment5Bundle.summary) },
   ];
   const passWord = getPassWord(attempt);
+  const reasoningPendingSummary =
+    attempt.reasoning_pending === true ||
+    !!(parseObject(attempt.ai_reasoning) as { _reasoningPending?: boolean } | null)?._reasoningPending;
   return (
     <ScrollView style={styles.innerTabContent}>
+      {reasoningPendingSummary ? (
+        <View style={[styles.block, { borderLeftWidth: 3, borderLeftColor: '#D4A84B', marginBottom: 12 }]}>
+          <Text style={[styles.blockTitle, { color: '#E8D49A' }]}>AI narrative not ready</Text>
+          <Text style={styles.blockText}>
+            Scores are saved; long-form AI reasoning is still pending or failed. Open Tab 2 (AI Reasoning) to retry
+            generation.
+          </Text>
+        </View>
+      ) : null}
       <Text style={styles.sectionTitle}>Overall</Text>
       <View style={styles.metaRow}>
         <Text style={styles.metaLabel}>Date</Text>
@@ -894,17 +998,29 @@ function SummaryTab({ attempt }: { attempt: AttemptRow }) {
   );
 }
 
-function ReasoningTab({ attempt }: { attempt: AttemptRow }) {
+function ReasoningTab({
+  attempt,
+  onRefreshAfterReasoning,
+}: {
+  attempt: AttemptRow;
+  onRefreshAfterReasoning?: () => void;
+}) {
+  const [reasoningRetrying, setReasoningRetrying] = useState(false);
+  const [reasoningRetryError, setReasoningRetryError] = useState<string | null>(null);
+  const reasoningPending =
+    attempt.reasoning_pending === true ||
+    !!(parseObject(attempt.ai_reasoning) as { _reasoningPending?: boolean } | null)?._reasoningPending;
+
   const reasoning = parseObject(attempt.ai_reasoning);
-  if (!reasoning) {
+  if (!reasoning && !reasoningPending) {
     return (
       <View style={styles.emptyState}>
         <Text style={styles.emptyText}>AI reasoning is not available for this test.</Text>
       </View>
     );
   }
-  const scenarioObservations = parseObject(reasoning.scenario_observations);
-  const breakdown = parseObject(reasoning.construct_breakdown);
+  const scenarioObservations = parseObject(reasoning?.scenario_observations);
+  const breakdown = parseObject(reasoning?.construct_breakdown);
   const scenarioBundles = [
     {
       key: 'scenario_1',
@@ -935,6 +1051,36 @@ function ReasoningTab({ attempt }: { attempt: AttemptRow }) {
 
   return (
     <ScrollView style={styles.innerTabContent}>
+      {reasoningPending ? (
+        <View style={[styles.block, { borderLeftWidth: 3, borderLeftColor: '#D4A84B', marginBottom: 12 }]}>
+          <Text style={[styles.blockTitle, { color: '#E8D49A' }]}>Narrative reasoning pending or failed</Text>
+          <Text style={styles.blockText}>
+            Scores and transcript were saved, but the full AI narrative was not generated in-session
+            {reasoning?.last_error != null ? ` (${String(reasoning.last_error)})` : ''}. Retry to call the model again
+            from this dashboard.
+          </Text>
+          <TouchableOpacity
+            disabled={reasoningRetrying}
+            onPress={() => {
+              setReasoningRetryError(null);
+              setReasoningRetrying(true);
+              void (async () => {
+                const r = await adminRetryAIReasoningForAttempt(attempt.id);
+                setReasoningRetrying(false);
+                if ('error' in r) setReasoningRetryError(r.error);
+                else onRefreshAfterReasoning?.();
+              })();
+            }}
+            style={styles.reprocessButton}
+          >
+            <Text style={styles.reprocessButtonText}>{reasoningRetrying ? 'Generating…' : 'Retry AI reasoning'}</Text>
+          </TouchableOpacity>
+          {reasoningRetryError ? (
+            <Text style={[styles.blockText, { color: '#E87A7A', marginTop: 8 }]}>{reasoningRetryError}</Text>
+          ) : null}
+        </View>
+      ) : null}
+
       <Text style={styles.sectionTitle}>Scenario Reasoning</Text>
       {['scenario_1', 'scenario_2', 'scenario_3'].map((key, idx) => {
         const obs = parseObject(scenarioObservations?.[key]);
@@ -1057,12 +1203,14 @@ function UserDetails({
   onDeleteAccount,
   canDelete,
   deleting,
+  onRefreshData,
 }: {
   userData: UserGroup;
   onBack: () => void;
   onDeleteAccount: () => void;
   canDelete: boolean;
   deleting: boolean;
+  onRefreshData: () => void;
 }) {
   const attempts = getAttemptsSorted(userData.attempts);
   const [selectedAttemptId, setSelectedAttemptId] = useState<string | null>(attempts[0]?.id ?? null);
@@ -1098,9 +1246,15 @@ function UserDetails({
         <Text style={styles.headerSub}>{userData.user.email ?? '—'}</Text>
       </View>
 
+      <InProgressTranscriptSection user={userData.user} onRefresh={onRefreshData} />
+
       {attempts.length === 0 ? (
         <View style={styles.emptyState}>
-          <Text style={styles.emptyText}>No tests found for this user.</Text>
+          <Text style={styles.emptyText}>
+            {userHasInProgressInterview(userData.user)
+              ? 'No completed tests yet — transcript above updates while they interview.'
+              : 'No tests found for this user.'}
+          </Text>
           {userData.user.latest_attempt_id || userData.user.interview_completed ? (
             <Text style={styles.emptyHint}>
               Interview data exists for this account — a retake is usually not needed. If attempts stay empty after
@@ -1148,7 +1302,9 @@ function UserDetails({
             </View>
 
             {selectedAttempt && activeInnerTab === 'summary' && <SummaryTab attempt={selectedAttempt} />}
-            {selectedAttempt && activeInnerTab === 'reasoning' && <ReasoningTab attempt={selectedAttempt} />}
+            {selectedAttempt && activeInnerTab === 'reasoning' && (
+              <ReasoningTab attempt={selectedAttempt} onRefreshAfterReasoning={onRefreshData} />
+            )}
             {selectedAttempt && activeInnerTab === 'transcript' && <TranscriptTab attempt={selectedAttempt} />}
             {selectedAttempt && activeInnerTab === 'feedback' && <FeedbackTab attempt={selectedAttempt} />}
           </View>
@@ -1170,6 +1326,26 @@ export function AdminAttemptTabsView({
   const [attempt, setAttempt] = useState<AttemptRow | null>(null);
   const [loading, setLoading] = useState(true);
   const [activeInnerTab, setActiveInnerTab] = useState<'summary' | 'reasoning' | 'transcript' | 'feedback'>('summary');
+
+  const refreshAttempt = useCallback(async () => {
+    try {
+      if (attemptId) {
+        const { data } = await supabase.from('interview_attempts').select('*').eq('id', attemptId).maybeSingle();
+        setAttempt((data as AttemptRow | null) ?? null);
+      } else if (userId) {
+        const { data } = await supabase
+          .from('interview_attempts')
+          .select('*')
+          .eq('user_id', userId)
+          .order('created_at', { ascending: false })
+          .limit(1)
+          .maybeSingle();
+        setAttempt((data as AttemptRow | null) ?? null);
+      }
+    } catch {
+      setAttempt(null);
+    }
+  }, [attemptId, userId]);
 
   useEffect(() => {
     let cancelled = false;
@@ -1242,7 +1418,7 @@ export function AdminAttemptTabsView({
       </View>
 
       {activeInnerTab === 'summary' && <SummaryTab attempt={attempt} />}
-      {activeInnerTab === 'reasoning' && <ReasoningTab attempt={attempt} />}
+      {activeInnerTab === 'reasoning' && <ReasoningTab attempt={attempt} onRefreshAfterReasoning={refreshAttempt} />}
       {activeInnerTab === 'transcript' && <TranscriptTab attempt={attempt} />}
       {showFeedbackTab && activeInnerTab === 'feedback' && <FeedbackTab attempt={attempt} />}
     </View>
@@ -1341,6 +1517,14 @@ export function AdminInterviewDashboard({ onClose }: { onClose: () => void }) {
     [canDeleteUser, refreshUsers],
   );
 
+  useEffect(() => {
+    setSelectedUser((prev) => {
+      if (!prev) return prev;
+      const next = users.find((g) => g.user.id === prev.user.id);
+      return next ?? prev;
+    });
+  }, [users]);
+
   if (selectedUser) {
     return (
       <UserDetails
@@ -1349,6 +1533,7 @@ export function AdminInterviewDashboard({ onClose }: { onClose: () => void }) {
         canDelete={canDeleteUser(selectedUser.user)}
         deleting={deletingUserId === selectedUser.user.id}
         onDeleteAccount={() => void handleDeleteUser(selectedUser.user)}
+        onRefreshData={() => void refreshUsers()}
       />
     );
   }
@@ -1485,6 +1670,21 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     alignItems: 'center',
   },
+  userCardMetaLeft: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    flexWrap: 'wrap',
+    gap: 8,
+    flex: 1,
+    minWidth: 0,
+  },
+  userCardInProgress: {
+    color: '#D4A84B',
+    fontSize: 11,
+    fontWeight: '600',
+    textTransform: 'uppercase',
+    letterSpacing: 0.5,
+  },
   userCardStatus: {
     fontSize: 13,
     fontWeight: '600',
@@ -1614,6 +1814,42 @@ const styles = StyleSheet.create({
     fontSize: 12,
     lineHeight: 18,
     marginBottom: 6,
+  },
+  inProgressSection: {
+    marginHorizontal: 16,
+    marginTop: 8,
+    marginBottom: 4,
+    padding: 14,
+    borderWidth: 1,
+    borderColor: 'rgba(212,168,75,0.35)',
+    borderRadius: 10,
+    backgroundColor: 'rgba(212,168,75,0.06)',
+    maxHeight: Platform.OS === 'web' ? 360 : 400,
+  },
+  inProgressHeaderRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 6,
+  },
+  inProgressTitle: {
+    color: '#E8D49A',
+    fontSize: 13,
+    fontWeight: '600',
+    letterSpacing: 0.3,
+  },
+  refreshLink: {
+    color: '#7A9ABE',
+    fontSize: 12,
+    textDecorationLine: 'underline',
+  },
+  inProgressMeta: {
+    color: '#7A9ABE',
+    fontSize: 11,
+    marginBottom: 8,
+  },
+  inProgressScroll: {
+    maxHeight: 260,
   },
   emptyState: {
     flex: 1,

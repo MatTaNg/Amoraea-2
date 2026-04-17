@@ -1,21 +1,21 @@
 /**
- * Alpha-only: Generate detailed AI reasoning for interview results.
- * Calls Claude to produce structured explanation of scores. Remove before production.
+ * Deno copy for Edge Functions — keep aligned with src/features/aria/generateAIReasoning.ts
+ * (prompt + post-processing must stay in sync when either file changes).
  */
 
-import type { CommitmentThresholdInconsistencyPayload } from './commitmentThresholdSliceAnalysis';
+export type CommitmentThresholdInconsistencyPayload = {
+  standardDeviation: number;
+  sliceScores: number[];
+  evidenceSnippets: { label: string; text: string }[];
+};
 
-export type { CommitmentThresholdInconsistencyPayload } from './commitmentThresholdSliceAnalysis';
-
-const ANTHROPIC_API_KEY =
-  (typeof process !== 'undefined' && process.env?.EXPO_PUBLIC_ANTHROPIC_API_KEY) || '';
-const ANTHROPIC_PROXY_URL =
-  (typeof process !== 'undefined' && process.env?.EXPO_PUBLIC_ANTHROPIC_PROXY_URL) || '';
+const ANTHROPIC_API_KEY = Deno.env.get('ANTHROPIC_API_KEY') ?? '';
+/** Full URL to anthropic-proxy, e.g. https://<ref>.supabase.co/functions/v1/anthropic-proxy */
+const ANTHROPIC_PROXY_URL = Deno.env.get('ANTHROPIC_PROXY_URL') ?? '';
 function getAnthropicEndpoint(): string {
   return ANTHROPIC_PROXY_URL || 'https://api.anthropic.com/v1/messages';
 }
-const SUPABASE_ANON_KEY =
-  (typeof process !== 'undefined' && process.env?.EXPO_PUBLIC_SUPABASE_ANON_KEY) || '';
+const SUPABASE_ANON_KEY = Deno.env.get('SUPABASE_ANON_KEY') ?? '';
 
 const SYSTEM_PROMPT = `You are a senior clinical assessment analyst and
 relationship psychologist reviewing a relationship readiness interview.

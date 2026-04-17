@@ -12,6 +12,7 @@ import {
   Platform,
   Modal,
   AppState,
+  Linking,
 } from 'react-native';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useAuth } from '@features/authentication/hooks/useAuth';
@@ -42,7 +43,15 @@ import {
   resolveWeightedPassMinAfterReferralFulfillment,
   ensureShareableReferralCodeForReferrer,
 } from '@features/referrals/referralInterview';
-import { setPlaybackMode } from '@features/aria/utils/audioModeHelpers';
+import {
+  setPlaybackMode,
+  applyPlaybackBridgeBeforeTtsIfIos,
+  refreshAudioSessionAfterRouteChange,
+} from '@features/aria/utils/audioModeHelpers';
+import { probeHeadphoneRoute } from '@features/aria/utils/audioRouteHeadphones';
+import { setAudioRouteKind } from '@features/aria/config/audioRouteRuntime';
+import { getAudioWhisperTimeoutMs } from '@features/aria/config/audioInterviewConfig';
+import { hasLikelySpeechAfterRecording } from '@features/aria/utils/audioEnergy';
 import {
   speakWithElevenLabs,
   stopElevenLabsPlayback,
@@ -157,6 +166,7 @@ import { inferPersonalMomentSlices } from '@features/aria/personalMomentSlices';
 import * as FileSystem from 'expo-file-system';
 import * as FileSystemLegacy from 'expo-file-system/legacy';
 import { isAmoraeaAdminConsoleEmail } from '@/constants/adminConsole';
+import { LEGAL_PRIVACY_POLICY_URL, LEGAL_TERMS_OF_SERVICE_URL } from '@/constants/legalUrls';
 
 // #region agent log
 if (typeof fetch !== 'undefined') {
@@ -342,6 +352,18 @@ function messageLooksLikeScoreCard(msg: { role?: string; content?: string; isSco
   return t.includes('── Scenario ') && /\d\/10/.test(t);
 }
 
+async function raceTranscribeWithTimeout<T>(p: Promise<T>, ms: number, label: string): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const timeoutPromise = new Promise<never>((_, rej) => {
+    timer = setTimeout(() => rej(new Error(`${label}_timeout`)), ms);
+  });
+  try {
+    return await Promise.race([p, timeoutPromise]);
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
+}
+
 type InterviewProgressRefs = {
   interviewMomentsCompleteRef: { current: Record<InterviewMomentIndex, boolean> };
   currentInterviewMomentRef: { current: InterviewMomentIndex };
@@ -509,6 +531,26 @@ function getErrorMessage(err: unknown, retriesExhausted = false): string {
 }
 function randomFrom<T>(arr: T[]): T {
   return arr[Math.floor(Math.random() * arr.length)];
+}
+
+/** Escalating copy for empty/bad transcription — avoids dozens of identical retry lines. */
+function assistantMessageForRecordingOrTranscriptionFailure(streak: number, useWebCopy: boolean): string {
+  const shortPool = useWebCopy
+    ? AMORAEA_ERROR_MESSAGES.recordingOrTranscriptionRetry
+    : AMORAEA_ERROR_MESSAGES.recordingOrTranscriptionRetryNative;
+  if (streak >= 6) {
+    return (
+      "I'm still having trouble hearing you. You may want to try again in a quieter place with a more stable connection. " +
+      'You can close the app and pick up later when you are ready.'
+    );
+  }
+  if (streak === 3) {
+    return (
+      "It sounds like I might be having trouble hearing you clearly. Would you like to check your microphone, " +
+      'or try moving somewhere quieter, then try again?'
+    );
+  }
+  return randomFrom(shortPool);
 }
 
 /** Whisper upload filename must match actual container (Safari/desktop often records MP4, not WebM). */
@@ -814,11 +856,17 @@ function looksLikeScenarioCThresholdQuestion(text: string): boolean {
 }
 
 function looksLikeScenarioAContemptProbeQuestion(text: string): boolean {
-  const t = text.toLowerCase();
-  return (
-    t.includes("what do you make of emma's statement") &&
-    t.includes("you've made that very clear")
-  );
+  const t = text.toLowerCase().replace(/\u2019/g, "'");
+  const mentionsEmmaLine = t.includes("you've made that very clear");
+  /** Canonical framework copy (interviewerFrameworkPrompt): "What about when Emma says … what do you make of that?" */
+  const canonicalFrameworkProbe =
+    mentionsEmmaLine &&
+    /what about when emma says/.test(t) &&
+    /\bwhat do you make of (that|it)\b/.test(t);
+  /** Legacy client inject when forcing the probe */
+  const alternateInjectProbe =
+    mentionsEmmaLine && t.includes("what do you make of emma's statement");
+  return canonicalFrameworkProbe || alternateInjectProbe;
 }
 
 function looksLikeScenarioARepairQuestion(text: string): boolean {
@@ -1492,7 +1540,7 @@ function isLikelyScenarioBJamesDifferentlyQuestionBody(text: string): boolean {
     /what do you think james could have done/i.test(t);
   const hasAppreciatedCue = /feel appreciated|helped sarah/i.test(t);
   const hasOpeningCue = /before things blew up/i.test(t);
-  const looksReflective = /\b(you're|you are|i hear|sounds like|so you|reading|centering|named)\b/i.test(t);
+  const looksReflective = /\b(you'?re|you are|i hear|sounds like|so you|reading|centering|named)\b/i.test(t);
   return hasJamesProbe && hasAppreciatedCue && (hasOpeningCue || t.length < 200) && !looksReflective;
 }
 
@@ -1987,32 +2035,32 @@ async function generateAIReasoningSafe(
   passed: boolean,
   unassessedMarkers: string[],
   options?: GenerateAIReasoningSafeOptions
-): Promise<import('@features/aria/generateAIReasoning').AIReasoningResult & { _generationFailed?: boolean; _error?: string }> {
+): Promise<
+  import('@features/aria/generateAIReasoning').AIReasoningResult & {
+    _generationFailed?: boolean;
+    _reasoningPending?: boolean;
+    _error?: string;
+  }
+> {
+  /** `generateAIReasoning` already retries the HTTP call with backoff; one outer attempt only. */
   try {
-    return await withRetry(
-      () =>
-        generateAIReasoning(
-          pillarScores,
-          scenarioScores,
-          transcript,
-          weightedScore,
-          passed,
-          unassessedMarkers,
-          options?.commitmentThresholdInconsistency ?? null
-        ),
-      {
-        retries: 4,
-        baseDelay: 10000,
-        maxDelay: 40000,
-        context: 'AI reasoning generation',
-        onRetry: options?.onRetry,
-        onUnrecoverable: options?.onUnrecoverable,
-      }
+    return await generateAIReasoning(
+      pillarScores,
+      scenarioScores,
+      transcript,
+      weightedScore,
+      passed,
+      unassessedMarkers,
+      options?.commitmentThresholdInconsistency ?? null
     );
   } catch (err) {
     if (__DEV__) console.error('AI reasoning generation failed:', err instanceof Error ? err.message : err);
+    void remoteLog('[AI_REASONING_PENDING]', {
+      error: err instanceof Error ? err.message : String(err),
+      pillarKeys: Object.keys(pillarScores ?? {}),
+    });
     return {
-      _generationFailed: true,
+      _reasoningPending: true,
       _error: err instanceof Error ? err.message : String(err),
       overall_summary: undefined,
       overall_strengths: [],
@@ -2311,10 +2359,10 @@ First line must introduce the interviewer directly by name, not the product:
 "Hi, I'm Amoraea. What can I call you?"
 Do not say "welcome to Amoraea."
 
-Your first message after learning the user's name should be the briefing only — do NOT repeat data-use, audio processing, or legal-style disclosure here; the participant already saw that on the consent screen before the interview began.
+Your first message after learning the user's name should be the briefing only — do NOT repeat data-use, audio processing, or legal-style disclosure here; the participant already saw that on the pre-interview screen before the interview began.
 
 Example tone (no disclosure paragraph):
-"Good to meet you, [name]. The way this works is i’ll first give you three situations, and you just tell me what you’d do in each situation. Then, i’ll give you two personal questions. Its recommended you do all of it in one sitting but if you need to leave in the middle, don’t worry, your progress will be saved. Just do the best you can, there are no right or wrong answers. Are you ready?"
+"Good to meet you, [name]. The way this works is i’ll first give you three situations, and you just tell me what you’d do in each situation. Then, i’ll give you two personal questions. Its recommended you do all of it in one sitting when you can. Just do the best you can, there are no right or wrong answers. Are you ready?"
 
 Keep it conversational.
 `;
@@ -3357,7 +3405,7 @@ function looksLikeDirectResumeAnswer(userText: string, lastQuestionText: string 
 }
 
 type VoiceState = 'idle' | 'listening' | 'processing' | 'speaking' | 'recording';
-type Status = 'intro' | 'consent' | 'starting_interview' | 'active' | 'scoring' | 'results';
+type Status = 'intro' | 'starting_interview' | 'active' | 'scoring' | 'results';
 
 interface CommunicationQuality {
   ownershipLanguage: number;
@@ -3477,13 +3525,16 @@ function peekPendingWebSpeechGesture(ref: React.MutableRefObject<string | null>)
 export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigation, route }) => {
   const { user, signOut } = useAuth();
   const userId = (route.params as { userId?: string } | undefined)?.userId ?? user?.id ?? '';
+  const userIdRef = useRef(userId);
+  userIdRef.current = userId;
   /** Main interview route in the app stack (`Aria`) or legacy `OnboardingInterview`. */
   const isInterviewAppRoute = route?.name === 'Aria' || route?.name === 'OnboardingInterview';
   const [messages, setMessages] = useState<{ role: string; content: string; isScoreCard?: boolean }[]>([]);
   const [voiceState, setVoiceState] = useState<VoiceState>('idle');
   const voiceStateRef = useRef<VoiceState>(voiceState);
   voiceStateRef.current = voiceState;
-  const [status, setStatus] = useState<Status>(() => (isInterviewAppRoute ? 'starting_interview' : 'intro'));
+  /** Pre-interview (`intro`) before `startInterview`; `starting_interview` is only for mic-retry / legacy auto-start paths. */
+  const [status, setStatus] = useState<Status>(() => 'intro');
   /** Onboarding: auto-run startInterview once after profile gate; reset on retake / retry. */
   const onboardingAutoStartRef = useRef(false);
   /**
@@ -3502,7 +3553,13 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
   const [exchangeCount, setExchangeCount] = useState(0);
   const [currentTranscript, setCurrentTranscript] = useState('');
   const [micError, setMicError] = useState<string | null>(null);
+  const [micSessionRecovering, setMicSessionRecovering] = useState(false);
+  const [micNeedsReconnect, setMicNeedsReconnect] = useState(false);
+  const lastAudioRouteFingerprintRef = useRef<string | null>(null);
   const [micWarning, setMicWarning] = useState<string | null>(null);
+  /** Pre-interview consent — both required before Begin interview. */
+  const [preInterviewConsentAge, setPreInterviewConsentAge] = useState(false);
+  const [preInterviewConsentData, setPreInterviewConsentData] = useState(false);
   const [typedAnswer, setTypedAnswer] = useState('');
   const scoredScenariosRef = useRef<Set<number>>(new Set());
   const [scenarioScores, setScenarioScores] = useState<Record<number, ScenarioScoreResult>>({});
@@ -3605,6 +3662,8 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
   const lastAnsweredClosingScenarioRef = useRef<number | null>(null);
   /** Current scenario number for tagging new messages; avoids stale state in callbacks. Starts at 1 (first scenario). Updated on SCENARIO_COMPLETE and when injecting next scenario. */
   const currentScenarioRef = useRef<1 | 2 | 3>(1);
+  /** Consecutive failed transcription (or recording) recovery lines for the same turn — reset on success. */
+  const transcriptionFailureStreakRef = useRef(0);
   /** When user said "yes" to closing question; next message is their addition. null | 1 | 2 | 3 */
   const waitingForClosingAdditionRef = useRef<number | null>(null);
   const waitingMessageIdRef = useRef<string | null>(null);
@@ -3630,6 +3689,8 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
   const interviewSessionIdRef = useRef<string>(newInterviewSessionId(userId));
   /** Whisper turn ended; next TTS should log recording_session_active for iOS volume diagnostics. */
   const recordingJustFinishedBeforeNextTtsRef = useRef(false);
+  /** Native expo-av peak metering (dBFS) for the last completed recording — used before Whisper retry messaging. */
+  const recordingPeakMeteringRef = useRef<number | null>(null);
   /** True while `speak()` / speakTextSafe await is in flight (for tts_interrupted). */
   const ttsLineInFlightRef = useRef(false);
   /** Last voice turn only — cleared on typed send. */
@@ -3822,7 +3883,7 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
 
   const [sessionExpired, setSessionExpired] = useState(false);
   const [usingMemoryFallback, setUsingMemoryFallback] = useState(false);
-  type ReasoningProgress = 'generating' | 'slow' | 'very_slow' | 'done' | 'failed' | null;
+  type ReasoningProgress = 'generating' | 'slow' | 'very_slow' | 'done' | 'pending' | 'failed' | null;
   const [reasoningProgress, setReasoningProgress] = useState<ReasoningProgress>(null);
   const [usedPersonalExamples, setUsedPersonalExamples] = useState(false);
   const [isWaiting, setIsWaiting] = useState(false);
@@ -4240,6 +4301,27 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
     // #endregion
   }, [messages, status, userId, isAdmin, scenarioScores, pendingCompletion]);
 
+  /** Debounced sync of live transcript to `users.interview_transcript` so the admin panel can follow in-progress interviews (scenario checkpoints also update this). */
+  useEffect(() => {
+    if (!userId || isAdmin || status !== 'active') return;
+    if (interviewStatusRef.current !== 'in_progress' && interviewStatusRef.current !== 'preparing_results') return;
+    if (messages.length === 0) return;
+    const transcriptSnapshot = messages.filter(
+      (m) => !(m as { isScoreCard?: boolean }).isScoreCard && !(m as { isWelcomeBack?: boolean }).isWelcomeBack,
+    );
+    const t = setTimeout(() => {
+      if (interviewStatusRef.current !== 'in_progress' && interviewStatusRef.current !== 'preparing_results') return;
+      void supabase
+        .from('users')
+        .update({ interview_transcript: transcriptSnapshot })
+        .eq('id', userId)
+        .then(({ error }) => {
+          if (error && __DEV__) console.warn('[live_transcript]', error.message);
+        });
+    }, 7000);
+    return () => clearTimeout(t);
+  }, [messages, userId, isAdmin, status, interviewStatus]);
+
   const { data: profile } = useQuery({
     queryKey: ['profile', userId],
     queryFn: () => profileRepository.getProfile(userId),
@@ -4567,6 +4649,9 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
       const rt0 = getSessionLogRuntime();
       const priorRec = recordingJustFinishedBeforeNextTtsRef.current;
       recordingJustFinishedBeforeNextTtsRef.current = false;
+      if (priorRec) {
+        await applyPlaybackBridgeBeforeTtsIfIos('speakTextSafe');
+      }
       const ttsStart = Date.now();
       if (userId) {
         setTtsPlaybackActive(true);
@@ -5564,10 +5649,16 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
       scenarioCRepairOnlyEvidenceRef.current = trimmed;
     }
 
+    const momentN = currentInterviewMomentRef.current;
+    let userScenarioTag =
+      (currentScenarioRef.current as number | undefined) ?? getScenarioNumberForNewMessage(messages, 'user');
+    if (momentN >= 4) {
+      userScenarioTag = 3;
+    }
     const userMsg: MessageWithScenario = {
       role: 'user',
       content: trimmed,
-      scenarioNumber: currentScenarioRef.current ?? getScenarioNumberForNewMessage(messages, 'user'),
+      scenarioNumber: userScenarioTag as 1 | 2 | 3,
     };
     const newMessages: MessageWithScenario[] = [...messages, userMsg];
 
@@ -6871,10 +6962,10 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
     (err: Error) => {
       if (__DEV__) console.error('Recording error:', err.message);
       setVoiceState('idle');
-      const msg = randomFrom(
+      transcriptionFailureStreakRef.current += 1;
+      const msg = assistantMessageForRecordingOrTranscriptionFailure(
+        transcriptionFailureStreakRef.current,
         Platform.OS === 'web'
-          ? AMORAEA_ERROR_MESSAGES.recordingOrTranscriptionRetry
-          : AMORAEA_ERROR_MESSAGES.recordingOrTranscriptionRetryNative
       );
       setMessages((prev) => [
         ...prev,
@@ -6920,94 +7011,105 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
           }
         }
 
+        const whisperTimeoutMs = getAudioWhisperTimeoutMs();
+
         const transcribeStarted = Date.now();
         const transcript = await withRetry(
           async (): Promise<{ text: string; language: string | null; confidence: number | null }> => {
-            // Native: FileSystem.uploadAsync uses iOS NSURLSession directly — avoids all RN fetch/FormData blob issues
-            if (Platform.OS !== 'web' && nativeUri) {
-              let nativeAuthHeaders = authHeaders;
-              if (OPENAI_WHISPER_PROXY_URL && !nativeAuthHeaders.Authorization) {
-                const sessionResult = await supabase.auth.getSession().catch(() => null);
-                const accessToken = sessionResult?.data?.session?.access_token?.trim();
-                if (accessToken) {
-                  nativeAuthHeaders = {
-                    Authorization: `Bearer ${accessToken}`,
-                  };
+            const performWhisperOnce = async (): Promise<{
+              text: string;
+              language: string | null;
+              confidence: number | null;
+            }> => {
+              if (Platform.OS !== 'web' && nativeUri) {
+                let nativeAuthHeaders = authHeaders;
+                if (OPENAI_WHISPER_PROXY_URL && !nativeAuthHeaders.Authorization) {
+                  const sessionResult = await supabase.auth.getSession().catch(() => null);
+                  const accessToken = sessionResult?.data?.session?.access_token?.trim();
+                  if (accessToken) {
+                    nativeAuthHeaders = {
+                      Authorization: `Bearer ${accessToken}`,
+                    };
+                  }
+                  void remoteLog('[TRANSCRIBE] proxy_auth_fallback', {
+                    runId: 'audio-route-debug-10',
+                    hasSessionToken: !!accessToken,
+                    usedFallbackToken: !!accessToken,
+                  });
                 }
-                void remoteLog('[TRANSCRIBE] proxy_auth_fallback', {
-                  runId: 'audio-route-debug-10',
-                  hasSessionToken: !!accessToken,
-                  usedFallbackToken: !!accessToken,
-                });
+                const legacyUploadType = (
+                  FileSystemLegacy as unknown as { FileSystemUploadType?: { MULTIPART?: number } }
+                ).FileSystemUploadType?.MULTIPART;
+                const uploadResult = await raceTranscribeWithTimeout(
+                  FileSystemLegacy.uploadAsync(transcriptUrl, nativeUri, {
+                    httpMethod: 'POST',
+                    uploadType: (legacyUploadType ?? 1) as unknown as never,
+                    fieldName: 'file',
+                    mimeType: 'audio/mp4',
+                    parameters: { model: 'whisper-1', response_format: 'verbose_json' },
+                    headers: nativeAuthHeaders,
+                  }),
+                  whisperTimeoutMs,
+                  'whisper_upload'
+                );
+                if (__DEV__) console.log('Transcription response status:', uploadResult.status);
+                if (uploadResult.status < 200 || uploadResult.status >= 300) {
+                  void remoteLog('[TRANSCRIBE] non_ok_response', {
+                    runId: 'audio-route-debug-10',
+                    endpointUsed: OPENAI_WHISPER_PROXY_URL ? 'proxy' : 'openai',
+                    status: uploadResult.status,
+                    bodyPreview: (uploadResult.body ?? '').slice(0, 160),
+                  });
+                  const err = new Error(uploadResult.body?.slice(0, 200) || `HTTP ${uploadResult.status}`);
+                  Object.assign(err, { status: uploadResult.status });
+                  throw err;
+                }
+                const parsed = JSON.parse(uploadResult.body) as unknown;
+                return parseWhisperTranscriptionPayload(parsed);
               }
-              const legacyUploadType = (
-                FileSystemLegacy as unknown as { FileSystemUploadType?: { MULTIPART?: number } }
-              ).FileSystemUploadType?.MULTIPART;
-              const uploadResult = await FileSystemLegacy.uploadAsync(transcriptUrl, nativeUri, {
-                httpMethod: 'POST',
-                uploadType: (legacyUploadType ?? 1) as unknown as never,
-                fieldName: 'file',
-                mimeType: 'audio/mp4',
-                parameters: { model: 'whisper-1', response_format: 'verbose_json' },
-                headers: nativeAuthHeaders,
-              });
-              if (__DEV__) console.log('Transcription response status:', uploadResult.status);
-              if (uploadResult.status < 200 || uploadResult.status >= 300) {
+
+              if (!audioBlob || audioBlob.size === 0) throw new Error('No audio data');
+              const form = new FormData();
+              form.append('file', audioBlob, pickWhisperUploadFilename(audioBlob));
+              form.append('model', 'whisper-1');
+              form.append('response_format', 'verbose_json');
+              const res = await raceTranscribeWithTimeout(
+                fetch(transcriptUrl, { method: 'POST', headers: webTranscribeHeaders, body: form }),
+                whisperTimeoutMs,
+                'whisper_fetch'
+              );
+              if (__DEV__) console.log('Transcription response status:', res.status);
+              if (!res.ok) {
+                const errText = await res.text();
                 void remoteLog('[TRANSCRIBE] non_ok_response', {
                   runId: 'audio-route-debug-10',
                   endpointUsed: OPENAI_WHISPER_PROXY_URL ? 'proxy' : 'openai',
-                  status: uploadResult.status,
-                  bodyPreview: (uploadResult.body ?? '').slice(0, 160),
+                  status: res.status,
+                  bodyPreview: errText.slice(0, 160),
                 });
-                const err = new Error(uploadResult.body?.slice(0, 200) || `HTTP ${uploadResult.status}`);
-                Object.assign(err, { status: uploadResult.status });
-                throw err;
+                throw new Error(errText);
               }
-              const parsed = JSON.parse(uploadResult.body) as unknown;
-              const { text, language, confidence } = parseWhisperTranscriptionPayload(parsed);
-              if (__DEV__) console.log('Transcription result length:', text.length, '=== END DEBUG ===');
-              if (text.length < 2) throw new Error('Empty transcription result');
-              void remoteLog('[TRANSCRIBE] success', {
-                runId: 'audio-route-debug-10',
-                endpointUsed: OPENAI_WHISPER_PROXY_URL ? 'proxy' : 'openai',
-                transcriptLength: text.length,
-                whisperLanguage: language,
-              });
-              return { text, language, confidence };
-            }
+              const rawJson = await res.json();
+              return parseWhisperTranscriptionPayload(rawJson);
+            };
 
-            // Web: use FormData + fetch — never relabel MP4/AAC bytes as webm (breaks Whisper on Safari desktop, etc.).
-            if (!audioBlob || audioBlob.size === 0) throw new Error('No audio data');
-            const form = new FormData();
-            const blobToSend = audioBlob;
-            form.append('file', blobToSend, pickWhisperUploadFilename(blobToSend));
-            form.append('model', 'whisper-1');
-            form.append('response_format', 'verbose_json');
-            const res = await fetch(transcriptUrl, { method: 'POST', headers: webTranscribeHeaders, body: form });
-            if (__DEV__) console.log('Transcription response status:', res.status);
-            if (!res.ok) {
-              const errText = await res.text();
-              void remoteLog('[TRANSCRIBE] non_ok_response', {
-                runId: 'audio-route-debug-10',
-                endpointUsed: OPENAI_WHISPER_PROXY_URL ? 'proxy' : 'openai',
-                status: res.status,
-                bodyPreview: errText.slice(0, 160),
-              });
-              throw new Error(errText);
-            }
-            const rawJson = await res.json();
-            const { text, language, confidence } = parseWhisperTranscriptionPayload(rawJson);
+            const { text, language, confidence } = await performWhisperOnce();
             if (__DEV__) console.log('Transcription result length:', text.length, '=== END DEBUG ===');
             if (text.length < 2) {
               void remoteLog('[TRANSCRIBE] whisper_empty_text', {
                 hypothesisId: 'T18',
                 runId: 'audio-route-debug-10',
-                blobType: audioBlob.type || '(none)',
-                blobSize: audioBlob.size,
+                blobType: audioBlob?.type || '(none)',
+                blobSize: audioBlob?.size ?? 0,
                 rawTextLen: text.length,
-                responseKeys: Object.keys((rawJson && typeof rawJson === 'object' ? rawJson : {}) as object),
-                responsePreview: JSON.stringify(rawJson).slice(0, 400),
               });
+              const likelySpeech = await hasLikelySpeechAfterRecording({
+                peakMeteringDb: recordingPeakMeteringRef.current,
+                audioBlob,
+              });
+              if (likelySpeech) {
+                throw new Error('empty_transcription_retryable');
+              }
               throw new Error('Empty transcription result');
             }
             void remoteLog('[TRANSCRIBE] success', {
@@ -7019,7 +7121,7 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
             return { text, language, confidence };
           },
           {
-            retries: 2,
+            retries: 1,
             baseDelay: 4000,
             context: 'transcription',
             sessionLog: userId
@@ -7044,6 +7146,7 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
             platform: r.platform,
           });
         }
+        transcriptionFailureStreakRef.current = 0;
         return transcript;
       } catch (err) {
         void remoteLog('[TRANSCRIBE] catch', {
@@ -7058,10 +7161,11 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
         if (__DEV__) console.error('Transcription failed:', err instanceof Error ? err.message : err);
         recordingJustFinishedBeforeNextTtsRef.current = false;
         await deleteTurnAudioFile(nativeUri);
-        const retryMessages = Platform.OS === 'web'
-          ? AMORAEA_ERROR_MESSAGES.recordingOrTranscriptionRetry
-          : AMORAEA_ERROR_MESSAGES.recordingOrTranscriptionRetryNative;
-        const msg = randomFrom(retryMessages);
+        transcriptionFailureStreakRef.current += 1;
+        const msg = assistantMessageForRecordingOrTranscriptionFailure(
+          transcriptionFailureStreakRef.current,
+          Platform.OS === 'web'
+        );
         setMessages((prev) => [...prev, { role: 'assistant', content: msg }]);
         setVoiceState('speaking');
         await speakTextSafe(msg).catch(() => {});
@@ -7077,6 +7181,35 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
     runWebGestureTtsFlush('mic');
   }, [runWebGestureTtsFlush]);
 
+  /** After foreground resume or native recording `mediaServicesDidReset` — re-probe input route and refresh session if it changed. */
+  const applyRouteProbeAfterResume = useCallback(async (source: 'app_resume' | 'media_services_reset') => {
+    const uid = userIdRef.current;
+    if (!uid) return;
+    const p = await probeHeadphoneRoute();
+    const prev = lastAudioRouteFingerprintRef.current;
+    if (p.fingerprint != null && prev != null && p.fingerprint !== prev) {
+      setAudioRouteKind(p.kind);
+      lastAudioRouteFingerprintRef.current = p.fingerprint;
+      const r = getSessionLogRuntime();
+      writeSessionLog({
+        userId: uid,
+        attemptId: r.attemptId,
+        eventType: 'audio_route_changed',
+        eventData: {
+          previous_fingerprint: prev,
+          fingerprint: p.fingerprint,
+          kind: p.kind,
+          source,
+        },
+        platform: r.platform,
+      });
+      await refreshAudioSessionAfterRouteChange(source);
+    } else if (p.fingerprint != null) {
+      lastAudioRouteFingerprintRef.current = p.fingerprint;
+      setAudioRouteKind(p.kind);
+    }
+  }, []);
+
   const audioRecorder = useAudioRecorder({
     onBeforeWebRecorderStop:
       Platform.OS === 'web'
@@ -7085,7 +7218,14 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
             primeHtmlAudioForMobileTtsFromMicGesture();
           }
         : undefined,
-    onRecordingComplete: async (blob, nativeUri) => {
+    onMediaServicesReset: () => {
+      setMicNeedsReconnect(true);
+      if (Platform.OS === 'web') return;
+      if (interviewStatusRef.current !== 'in_progress') return;
+      void applyRouteProbeAfterResume('media_services_reset');
+    },
+    onRecordingComplete: async (blob, nativeUri, meta) => {
+      recordingPeakMeteringRef.current = meta?.peakMeteringDb ?? null;
       setRecordingSessionActive(false);
       recordingJustFinishedBeforeNextTtsRef.current = true;
       setVoiceState('processing');
@@ -7122,6 +7262,34 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
 
   const audioRecorderRefForLeave = useRef(audioRecorder);
   audioRecorderRefForLeave.current = audioRecorder;
+
+  useEffect(() => {
+    if (Platform.OS === 'web') return;
+    let cancelled = false;
+    const sub = AppState.addEventListener('change', (next) => {
+      if (next !== 'active') return;
+      if (interviewStatusRef.current !== 'in_progress') return;
+      void (async () => {
+        setMicSessionRecovering(true);
+        try {
+          const ok = await audioRecorder.reinitializeMicrophoneSession();
+          if (!cancelled) {
+            if (!ok) setMicNeedsReconnect(true);
+            else setMicNeedsReconnect(false);
+          }
+          if (!cancelled && userIdRef.current) {
+            await applyRouteProbeAfterResume('app_resume');
+          }
+        } finally {
+          if (!cancelled) setMicSessionRecovering(false);
+        }
+      })();
+    });
+    return () => {
+      cancelled = true;
+      sub.remove();
+    };
+  }, [audioRecorder.reinitializeMicrophoneSession, applyRouteProbeAfterResume]);
 
   /** Stop interviewer TTS and mic capture when navigating away or the screen unmounts (tab switches do not stop audio). */
   useEffect(() => {
@@ -7503,6 +7671,18 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
       const maxCompleted = completedSet.size > 0 ? Math.max(...completedSet) : 1;
       setHighestScenarioReached((prev) => Math.max(prev, maxCompleted));
 
+      const restoredScenarioNum = ((): 1 | 2 | 3 => {
+        const cs = saved.currentScenario;
+        if (cs === 1 || cs === 2 || cs === 3) return cs;
+        for (let i = restoredMessages.length - 1; i >= 0; i--) {
+          const sn = (restoredMessages[i] as MessageWithScenario).scenarioNumber;
+          if (sn === 1 || sn === 2 || sn === 3) return sn;
+        }
+        const n = getCurrentScenario(completedSet);
+        return n === null ? 3 : n;
+      })();
+      currentScenarioRef.current = syncedMoments.currentMoment >= 4 ? 3 : restoredScenarioNum;
+
       const scoreCards: { role: string; content: string; isScoreCard?: boolean }[] = (saved.scenariosCompleted ?? [])
         .slice()
         .sort((a, b) => a - b)
@@ -7573,7 +7753,12 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
 
       const welcomeBack =
         "Welcome back! Lets continue where we left off. If you'd like me to repeat what I said, let me know. Otherwise, I'm ready for your response.";
-      const welcomeMsg = { role: 'assistant', content: welcomeBack, isWelcomeBack: true };
+      const welcomeMsg = {
+        role: 'assistant',
+        content: welcomeBack,
+        isWelcomeBack: true,
+        scenarioNumber: currentScenarioRef.current,
+      } as MessageWithScenario;
       setMessages([...fullMessages, welcomeMsg]);
 
       resumeRepeatChoicePendingRef.current = false;
@@ -7758,6 +7943,25 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
         }
       }
 
+      const routeProbe = await probeHeadphoneRoute();
+      setAudioRouteKind(routeProbe.kind);
+      lastAudioRouteFingerprintRef.current = routeProbe.fingerprint;
+      if (userId) {
+        const r0 = getSessionLogRuntime();
+        writeSessionLog({
+          userId,
+          attemptId: r0.attemptId,
+          eventType: 'audio_route_probe',
+          eventData: {
+            kind: routeProbe.kind,
+            fingerprint: routeProbe.fingerprint,
+            input_type: routeProbe.input?.type ?? null,
+            input_name: routeProbe.input?.name?.slice?.(0, 120) ?? null,
+          },
+          platform: r0.platform,
+        });
+      }
+
       // 2 — Set playback mode so welcome TTS plays through speaker; mic will switch to recording mode when user holds button
       if (Platform.OS !== 'web') {
         await setPlaybackMode();
@@ -7772,6 +7976,7 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
       lastVoiceTurnLanguageRef.current = null;
       lastVoiceTurnConfidenceRef.current = null;
       resetSessionLogRuntime({ sessionCorrelationId: interviewSessionIdRef.current, attemptId: null });
+
       void (async () => {
         if (!userId) return;
         try {
@@ -8392,20 +8597,17 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
             finalGateResult.pass,
             finalGateResult.excludedMarkers ?? [],
             {
-              onRetry: (attempt) => {
-                if (attempt === 1) setReasoningProgress('slow');
-                if (attempt >= 2) setReasoningProgress('very_slow');
-              },
-              onUnrecoverable: () => setReasoningProgress('failed'),
               commitmentThresholdInconsistency,
             }
           );
-          setReasoningProgress(reasoning._generationFailed ? 'failed' : 'done');
+          const reasoningPending = !!(reasoning as { _reasoningPending?: boolean })._reasoningPending;
+          setReasoningProgress(reasoningPending ? 'pending' : 'done');
           clearTimeout(slowTimer);
           clearTimeout(verySlowTimer);
           await remoteLog('[4] Reasoning generated', {
             reasoningKeys: reasoning ? Object.keys(reasoning) : [],
-            generationFailed: reasoning?._generationFailed ?? null,
+            reasoningPending,
+            lastError: (reasoning as { _error?: string })._error ?? null,
           });
           if (__DEV__) console.log('=== [4] Reasoning complete ===');
           const { data: userRow } = await supabase
@@ -8474,7 +8676,18 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
                   }
                 : null,
             },
-            ai_reasoning: reasoning,
+            reasoning_pending: reasoningPending,
+            ai_reasoning: reasoningPending
+              ? {
+                  _reasoningPending: true,
+                  pillar_scores: pillarScores,
+                  weighted_score: finalGateResult.weightedScore,
+                  passed: finalGateResult.pass,
+                  last_error: (reasoning as { _error?: string })._error ?? null,
+                  note:
+                    'Narrative AI reasoning was not generated in this session. Scores and transcript are saved; retry from the admin panel or wait for automated processing.',
+                }
+              : reasoning,
           };
           updatePayload = {
             interview_completed: true,
@@ -8796,7 +9009,9 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
     lastAnsweredClosingScenarioRef.current = null;
     onboardingAutoStartRef.current = false;
     setMicError(null);
-    setStatus(route.name === 'Aria' || route.name === 'OnboardingInterview' ? 'starting_interview' : 'intro');
+    setPreInterviewConsentAge(false);
+    setPreInterviewConsentData(false);
+    setStatus(route.name === 'Aria' || route.name === 'OnboardingInterview' ? 'intro' : 'intro');
     setResults(null);
     responseTimingsRef.current = [];
     probeLogRef.current = [];
@@ -9490,8 +9705,27 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
   }
 
   if (status === 'intro') {
+    const preInterviewReady =
+      preInterviewConsentAge && preInterviewConsentData && !micError;
+    const openPrivacy = () => {
+      void Linking.openURL(LEGAL_PRIVACY_POLICY_URL);
+    };
+    const openTerms = () => {
+      void Linking.openURL(LEGAL_TERMS_OF_SERVICE_URL);
+    };
+    const whatToExpectItems = [
+      'The interview takes approximately 20–30 minutes — three scenarios and two personal questions.',
+      'This is a conversation, not a test. There are no right or wrong answers.',
+      'We recommend you find a private area for this interview so you are not distracted.',
+      'You can stop at any time. Progress is saved from the last completed scenario if you exit early.',
+    ];
+    const dataPrivacyItems = [
+      'This conversation will be recorded and processed by AI.',
+      'Your voice is analyzed for communication style alongside your words.',
+      'Your responses are stored and used to generate your profile and match you with others.',
+    ];
     return (
-      <SafeAreaContainer style={{ position: 'relative' }}>
+      <SafeAreaContainer style={{ position: 'relative', flex: 1, backgroundColor: '#05060D' }}>
         {adminInterviewTopBar}
         <TouchableOpacity
           style={styles.introLogoutButton}
@@ -9503,23 +9737,84 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
           <Ionicons name="log-out-outline" size={16} color="#5BA8E8" />
           <Text style={styles.introLogoutButtonText}>Log out</Text>
         </TouchableOpacity>
-        <ScrollView style={styles.container} contentContainerStyle={styles.introContent}>
-          <View style={styles.ariaBadge}>
-            <Ionicons name="mic" size={40} color={colors.primary} />
-            <Text style={styles.ariaName}>Voice Interview</Text>
-            <Text style={styles.ariaTagline}>Your Story</Text>
+        <ScrollView
+          style={[styles.container, { backgroundColor: '#05060D' }]}
+          contentContainerStyle={styles.preInterviewScrollContent}
+          keyboardShouldPersistTaps="handled"
+        >
+          <View style={styles.preInterviewLogoWrap}>
+            <FlameOrb state="idle" size={72} minimalGlow />
           </View>
-          <Text style={styles.introTitle}>A real conversation, not a form.</Text>
-          <Text style={styles.introHint}>
-            You'll speak with an AI interviewer about how you show up in relationships. Hold the button to talk — release when you're done. About 15 minutes.
-          </Text>
-          <Text style={styles.introNote}>Small examples are fine — nothing needs to be dramatic.</Text>
-          <Text style={styles.introHint}>
-            Connection status: {networkStatus === 'good' ? 'Stable' : networkStatus === 'poor' ? 'Weak' : 'Checking...'}
-          </Text>
-          <Text style={styles.introNote}>
-            For best transcription reliability: use a stable connection, speak in a quieter space, and pause briefly before releasing the mic.
-          </Text>
+          <Text style={styles.preInterviewMainTitle}>Before we begin</Text>
+          <Text style={styles.preInterviewSubtitle}>A few things to know before your interview starts.</Text>
+
+          <Text style={styles.preInterviewSectionHeading}>What to expect</Text>
+          {whatToExpectItems.map((line) => (
+            <View key={line} style={styles.preInterviewBulletRow}>
+              <View style={styles.preInterviewBulletDot} />
+              <Text style={styles.preInterviewBulletText}>{line}</Text>
+            </View>
+          ))}
+
+          <View style={styles.headphoneRecommendCard} accessibilityRole="summary">
+            <Ionicons name="headset-outline" size={28} color="#5BA8E8" style={styles.headphoneRecommendIcon} />
+            <View style={styles.headphoneRecommendTextCol}>
+              <Text style={styles.headphoneRecommendTitle}>
+                For the best experience, use headphones with a microphone. This helps Amoraea hear you clearly and reduces
+                background noise.
+              </Text>
+              <Text style={styles.headphoneRecommendSub}>
+                No headphones? The interview still works — just find a quiet space.
+              </Text>
+            </View>
+          </View>
+
+          <Text style={[styles.preInterviewSectionHeading, styles.preInterviewSectionHeadingSpaced]}>Data & privacy</Text>
+          {dataPrivacyItems.map((line) => (
+            <View key={line} style={styles.preInterviewBulletRow}>
+              <View style={styles.preInterviewBulletDot} />
+              <Text style={styles.preInterviewBulletText}>{line}</Text>
+            </View>
+          ))}
+
+          <View style={styles.preInterviewConsentCard}>
+            <Pressable
+              style={styles.preInterviewCheckboxRow}
+              onPress={() => setPreInterviewConsentAge((v) => !v)}
+              accessibilityRole="checkbox"
+              accessibilityState={{ checked: preInterviewConsentAge }}
+            >
+              <View
+                style={[
+                  styles.preInterviewCheckboxBox,
+                  preInterviewConsentAge && styles.preInterviewCheckboxBoxChecked,
+                ]}
+              >
+                {preInterviewConsentAge ? <Ionicons name="checkmark" size={18} color="#EEF6FF" /> : null}
+              </View>
+              <Text style={styles.preInterviewCheckboxLabel}>I confirm I am 18 years of age or older.</Text>
+            </Pressable>
+            <Pressable
+              style={styles.preInterviewCheckboxRow}
+              onPress={() => setPreInterviewConsentData((v) => !v)}
+              accessibilityRole="checkbox"
+              accessibilityState={{ checked: preInterviewConsentData }}
+            >
+              <View
+                style={[
+                  styles.preInterviewCheckboxBox,
+                  preInterviewConsentData && styles.preInterviewCheckboxBoxChecked,
+                ]}
+              >
+                {preInterviewConsentData ? <Ionicons name="checkmark" size={18} color="#EEF6FF" /> : null}
+              </View>
+              <Text style={styles.preInterviewCheckboxLabel}>
+                I understand and agree to the recording, processing, and use of my interview as described in Data & privacy
+                above.
+              </Text>
+            </Pressable>
+          </View>
+
           {micError ? (
             <View style={styles.micErrorBlock}>
               <Text style={styles.micErrorText}>{micError}</Text>
@@ -9530,60 +9825,14 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
               <Text style={styles.micWarningText}>{micWarning}</Text>
             </View>
           ) : null}
-          <Button
-            title="Continue"
-            onPress={() => setStatus('consent')}
-            disabled={!!micError}
-            style={styles.introButton}
-          />
-        </ScrollView>
-      </SafeAreaContainer>
-    );
-  }
 
-  if (status === 'consent') {
-    return (
-      <SafeAreaContainer style={{ position: 'relative' }}>
-        {adminInterviewTopBar}
-        <TouchableOpacity
-          style={styles.introLogoutButton}
-          onPress={handleInterviewSignOut}
-          activeOpacity={0.8}
-          accessibilityRole="button"
-          accessibilityLabel="Log out"
-        >
-          <Ionicons name="log-out-outline" size={16} color="#5BA8E8" />
-          <Text style={styles.introLogoutButtonText}>Log out</Text>
-        </TouchableOpacity>
-        <ScrollView style={styles.container} contentContainerStyle={styles.introContent}>
-          <View style={styles.ariaBadge}>
-            <Ionicons name="document-text-outline" size={36} color={colors.primary} />
-            <Text style={styles.ariaName}>Data & audio</Text>
-            <Text style={styles.ariaTagline}>Consent</Text>
-          </View>
-          <Text style={styles.introTitle}>How we use your interview</Text>
-          <Text style={[styles.introHint, { marginBottom: 16 }]}>
-            Your interview responses — including audio and transcript — will be used to assess your relational readiness and
-            to find you compatible matches. Audio is analyzed for communication style only. Raw audio is never shared with
-            other users or third parties.
-          </Text>
-          <Text style={styles.introNote}>
-            By starting the voice interview, you acknowledge this use of your responses. The interviewer will not repeat
-            this full disclosure in the opening conversation.
-          </Text>
-          <View style={{ flexDirection: 'row', gap: 12, marginTop: 24, width: '100%' }}>
-            <Button
-              title="Back"
-              onPress={() => setStatus('intro')}
-              style={StyleSheet.flatten([styles.introButton, { flex: 1 }])}
-            />
-            <Button
-              title="Start voice interview"
-              onPress={() => void startInterview({ fromUserGesture: true })}
-              disabled={!!micError}
-              style={StyleSheet.flatten([styles.introButton, { flex: 2 }])}
-            />
-          </View>
+          <Button
+            title="Begin interview"
+            onPress={() => void startInterview({ fromUserGesture: true })}
+            disabled={!preInterviewReady}
+            style={styles.preInterviewBeginButton}
+          />
+
         </ScrollView>
       </SafeAreaContainer>
     );
@@ -9645,6 +9894,21 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
                   : undefined
               }
               onExit={handleInterviewSignOut}
+              micInputLevel={useMediaRecorderPath && audioRecorder.isRecording ? audioRecorder.inputMeterLevel : 0}
+              micSessionRecovering={micSessionRecovering}
+              micReconnectPrompt={
+                micNeedsReconnect
+                  ? {
+                      message: 'Your microphone disconnected. Tap to reconnect.',
+                      onReconnect: () => {
+                        setMicNeedsReconnect(false);
+                        void audioRecorder.reinitializeMicrophoneSession().then((ok) => {
+                          if (!ok) setMicNeedsReconnect(true);
+                        });
+                      },
+                    }
+                  : null
+              }
             />
           </View>
         ) : (
@@ -9745,9 +10009,11 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
                   ? 'This is taking a moment...'
                   : reasoningProgress === 'very_slow'
                     ? 'Almost there...'
-                    : reasoningProgress === 'failed'
-                      ? 'Something went wrong.'
-                      : 'Preparing your analysis...'}
+                    : reasoningProgress === 'pending'
+                      ? 'Saving your results…'
+                      : reasoningProgress === 'failed'
+                        ? 'Something went wrong.'
+                        : 'Preparing your analysis...'}
               </Text>
               {(reasoningProgress === 'slow' || reasoningProgress === 'very_slow') && (
                 <Text style={styles.scoringIndicatorSub}>
@@ -9755,6 +10021,17 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
                     ? 'Detailed analyses take a little longer.'
                     : 'Your transcript is being read carefully.'}
                 </Text>
+              )}
+              {reasoningProgress === 'pending' && (
+                <>
+                  <Text style={styles.scoringIndicatorSub}>
+                    Your scores are saved. Full narrative analysis will finish when the connection allows — you can open
+                    your results now.
+                  </Text>
+                  <Pressable onPress={() => setStatus('results')} style={styles.scoringViewScoresButton}>
+                    <Text style={styles.scoringViewScoresButtonLabel}>View Scores →</Text>
+                  </Pressable>
+                </>
               )}
               {reasoningProgress === 'failed' && (
                 <>
@@ -10098,6 +10375,141 @@ const styles = StyleSheet.create({
     letterSpacing: 0.5,
   },
   introContent: { padding: spacing.lg, paddingTop: spacing.xxl },
+  preInterviewScrollContent: {
+    padding: spacing.lg,
+    paddingTop: spacing.lg,
+    paddingBottom: spacing.xxl * 2,
+    maxWidth: 560,
+    width: '100%',
+    alignSelf: 'center',
+  },
+  preInterviewLogoWrap: { alignItems: 'center', marginBottom: spacing.md },
+  preInterviewMainTitle: {
+    fontSize: 24,
+    fontWeight: '700',
+    color: '#F4F8FC',
+    textAlign: 'center',
+    marginBottom: spacing.sm,
+  },
+  preInterviewSubtitle: {
+    fontSize: 15,
+    color: '#7A9ABE',
+    textAlign: 'center',
+    lineHeight: 22,
+    marginBottom: spacing.xl,
+  },
+  preInterviewSectionHeading: {
+    fontSize: 17,
+    fontWeight: '600',
+    color: '#E8F0F8',
+    marginBottom: spacing.md,
+    textAlign: 'left',
+    alignSelf: 'stretch',
+  },
+  preInterviewSectionHeadingSpaced: {
+    marginTop: spacing.xl,
+  },
+  preInterviewBulletRow: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    marginBottom: spacing.sm,
+    gap: 10,
+    alignSelf: 'stretch',
+  },
+  preInterviewBulletDot: {
+    width: 6,
+    height: 6,
+    borderRadius: 3,
+    backgroundColor: '#1E6FD9',
+    marginTop: 8,
+    flexShrink: 0,
+  },
+  preInterviewBulletText: {
+    flex: 1,
+    fontSize: 15,
+    color: '#B8C9DC',
+    lineHeight: 22,
+  },
+  preInterviewConsentCard: {
+    marginTop: spacing.xl,
+    padding: spacing.md,
+    borderRadius: 12,
+    backgroundColor: 'rgba(13, 17, 32, 0.95)',
+    borderWidth: 1,
+    borderColor: 'rgba(91, 168, 232, 0.22)',
+    alignSelf: 'stretch',
+    gap: spacing.md,
+  },
+  preInterviewCheckboxRow: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: 12,
+  },
+  preInterviewCheckboxBox: {
+    width: 24,
+    height: 24,
+    borderRadius: 6,
+    borderWidth: 2,
+    borderColor: 'rgba(91, 168, 232, 0.5)',
+    backgroundColor: 'transparent',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginTop: 2,
+    flexShrink: 0,
+  },
+  preInterviewCheckboxBoxChecked: {
+    backgroundColor: '#1E6FD9',
+    borderColor: '#1E6FD9',
+  },
+  preInterviewCheckboxLabel: {
+    flex: 1,
+    fontSize: 15,
+    color: '#E8F0F8',
+    lineHeight: 22,
+  },
+  preInterviewBeginButton: {
+    marginTop: spacing.lg,
+    alignSelf: 'stretch',
+    width: '100%',
+  },
+  preInterviewLegalRow: {
+    flexDirection: 'row',
+    justifyContent: 'center',
+    alignItems: 'center',
+    gap: 32,
+    marginTop: spacing.lg,
+    flexWrap: 'wrap',
+  },
+  preInterviewLegalLink: {
+    fontSize: 13,
+    color: '#5BA8E8',
+    textDecorationLine: 'underline',
+  },
+  headphoneRecommendCard: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    padding: spacing.md,
+    marginTop: spacing.lg,
+    marginBottom: spacing.xl,
+    borderRadius: 12,
+    borderLeftWidth: 4,
+    borderLeftColor: '#1E6FD9',
+    backgroundColor: 'rgba(30, 111, 217, 0.12)',
+  },
+  headphoneRecommendIcon: { marginRight: 12, marginTop: 2 },
+  headphoneRecommendTextCol: { flex: 1 },
+  headphoneRecommendTitle: {
+    fontSize: 15,
+    color: '#E8F0F8',
+    lineHeight: 22,
+    fontWeight: '500',
+  },
+  headphoneRecommendSub: {
+    fontSize: 13,
+    color: '#7A9ABE',
+    lineHeight: 20,
+    marginTop: 8,
+  },
   ariaBadge: { alignItems: 'center', marginBottom: spacing.xl },
   ariaName: { fontSize: 26, fontWeight: '700', color: colors.text, marginTop: spacing.sm },
   ariaTagline: { fontSize: 15, color: colors.textSecondary, marginTop: spacing.xs },

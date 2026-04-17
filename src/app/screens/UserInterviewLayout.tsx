@@ -67,6 +67,12 @@ interface UserInterviewLayoutProps {
   micLabelOverride?: string;
   /** Web: HTTP on LAN (not a secure context) — mic/TTS blocked by browser; show fix instructions */
   webInsecureContextMessage?: string | null;
+  /** 0–1 live mic level while recording (expo metering / web analyser). */
+  micInputLevel?: number;
+  /** After resume from background / interruption — mic session is being re-established. */
+  micSessionRecovering?: boolean;
+  /** Hardware route lost — show manual reconnect. */
+  micReconnectPrompt?: { message: string; onReconnect: () => void } | null;
 }
 
 const GOOGLE_FONTS_URL =
@@ -114,6 +120,9 @@ export const UserInterviewLayout: React.FC<UserInterviewLayoutProps> = ({
   onMicPressIn,
   micLabelOverride,
   webInsecureContextMessage = null,
+  micInputLevel = 0,
+  micSessionRecovering = false,
+  micReconnectPrompt = null,
 }) => {
   const [refCardOpen, setRefCardOpen] = useState(false);
   const rippleAnim = useRef(new Animated.Value(0)).current;
@@ -327,6 +336,43 @@ export const UserInterviewLayout: React.FC<UserInterviewLayoutProps> = ({
             </View>
           ) : (
             <>
+              {micSessionRecovering ? (
+                <Text style={styles.micRecoveringHint}>Reconnecting microphone…</Text>
+              ) : null}
+              {micReconnectPrompt ? (
+                <View style={styles.micReconnectBox}>
+                  <Text style={styles.micReconnectText}>{micReconnectPrompt.message}</Text>
+                  <Pressable
+                    onPress={() => micReconnectPrompt.onReconnect()}
+                    style={styles.micReconnectButton}
+                    accessibilityRole="button"
+                    accessibilityLabel="Reconnect microphone"
+                  >
+                    <Text style={styles.micReconnectButtonLabel}>Tap to reconnect</Text>
+                  </Pressable>
+                </View>
+              ) : null}
+              {(isRecording || micInputLevel > 0.02) && (
+                <View style={styles.micMeterRow} accessibilityLabel="Microphone input level">
+                  {[0, 1, 2, 3, 4].map((i) => {
+                    const active = micInputLevel > i * 0.22;
+                    return (
+                      <View
+                        key={i}
+                        style={[
+                          styles.micMeterSegment,
+                          {
+                            height: 6 + i * 4,
+                            marginRight: i < 4 ? 4 : 0,
+                            backgroundColor: active ? FLAME_MID : TEXT_DIM,
+                            opacity: active ? 0.85 + i * 0.03 : 0.35,
+                          },
+                        ]}
+                      />
+                    );
+                  })}
+                </View>
+              )}
               <View style={styles.micButtonWrapper}>
                 {Platform.OS === 'web' && isListeningOrRecording && (
                   <Animated.View
@@ -1029,6 +1075,53 @@ const styles = StyleSheet.create({
   },
   micLabelRecording: {
     color: '#E84444',
+  },
+  micRecoveringHint: {
+    fontFamily: FONT_UI,
+    fontSize: 12,
+    color: TEXT_SECONDARY,
+    marginBottom: 8,
+    textAlign: 'center',
+  },
+  micReconnectBox: {
+    marginBottom: 10,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    borderRadius: 8,
+    backgroundColor: 'rgba(232, 122, 90, 0.12)',
+    borderWidth: 1,
+    borderColor: 'rgba(232, 122, 90, 0.35)',
+    alignItems: 'center',
+    maxWidth: 280,
+  },
+  micReconnectText: {
+    fontFamily: FONT_UI,
+    fontSize: 13,
+    color: TEXT_PRIMARY,
+    textAlign: 'center',
+    marginBottom: 8,
+  },
+  micReconnectButton: {
+    paddingVertical: 8,
+    paddingHorizontal: 16,
+    borderRadius: 8,
+    backgroundColor: FLAME_CORE,
+  },
+  micReconnectButtonLabel: {
+    fontFamily: FONT_UI,
+    fontSize: 13,
+    fontWeight: '500',
+    color: '#E8F0F8',
+  },
+  micMeterRow: {
+    flexDirection: 'row',
+    alignItems: 'flex-end',
+    justifyContent: 'center',
+    marginBottom: 8,
+  },
+  micMeterSegment: {
+    width: 6,
+    borderRadius: 2,
   },
   dockError: {
     fontSize: 13,
