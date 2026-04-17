@@ -51,7 +51,13 @@ export function getWebAutoplayContext(): {
 /** Fire-and-forget: TTS play attempt outcome (web + native where applicable). */
 export function logTtsAutoplayPlayOutcome(payload: {
   pipeline: TtsAutoplayPipeline;
-  outcome: 'play_ok' | 'play_blocked_autoplay' | 'play_error' | 'gesture_flush_ok' | 'gesture_flush_rejected';
+  outcome:
+    | 'play_ok'
+    | 'play_blocked_autoplay'
+    | 'play_error'
+    | 'playback_timeout'
+    | 'gesture_flush_ok'
+    | 'gesture_flush_rejected';
   telemetrySource?: TtsTelemetrySource;
   errorName?: string;
   errorMessagePreview?: string;

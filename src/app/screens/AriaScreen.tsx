@@ -6218,6 +6218,8 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
 
     try {
     const text = (data.content?.[0]?.text ?? '').trim();
+    /** LLM done — do not keep "Amoraea is thinking" (or isWaiting-gated UI) until TTS finishes; HTML audio can hang without `onended` on some mobile browsers. */
+    setIsWaiting(false);
     const priorAssistantContentS3 =
       [...messagesToUse].reverse().find((m) => m.role === 'assistant')?.content ?? '';
     let strippedText = stripControlTokens(text);

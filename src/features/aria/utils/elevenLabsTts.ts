@@ -942,15 +942,46 @@ export async function speakWithElevenLabs(
         return;
       }
       await new Promise<void>((resolve, reject) => {
+        /** Without this, iOS/WebKit sometimes never fires `ended` and `speak()` never completes — UI stays on processing + thinking gated elsewhere. */
+        let settled = false;
+        let timeoutId: ReturnType<typeof setTimeout> | null = null;
+        const capMs = Math.min(180_000, Math.max(14_000, spokenText.length * 95 + 12_000));
+        const finish = (action: 'resolve' | 'reject', err?: Error) => {
+          if (settled) return;
+          settled = true;
+          if (timeoutId != null) clearTimeout(timeoutId);
+          if (action === 'resolve') resolve();
+          else reject(err ?? new Error('Audio playback failed'));
+        };
+        timeoutId = setTimeout(() => {
+          try {
+            htmlAudio.pause();
+          } catch {
+            /* ignore */
+          }
+          try {
+            activeWebAudio = null;
+            URL.revokeObjectURL(url);
+          } catch {
+            /* ignore */
+          }
+          logTtsAutoplayPlayOutcome({
+            pipeline: 'elevenlabs_web_html_audio',
+            outcome: 'playback_timeout',
+            telemetrySource,
+            errorMessagePreview: `capMs=${capMs}`,
+          });
+          finish('resolve');
+        }, capMs);
         htmlAudio.onended = () => {
           activeWebAudio = null;
           URL.revokeObjectURL(url);
-          resolve();
+          finish('resolve');
         };
         htmlAudio.onerror = () => {
           activeWebAudio = null;
           URL.revokeObjectURL(url);
-          reject(new Error('Audio playback failed'));
+          finish('reject', new Error('Audio playback failed'));
         };
         void htmlAudio
           .play()
@@ -1018,7 +1049,7 @@ export async function speakWithElevenLabs(
                     }),
                   }).catch(() => {});
                   // #endregion
-                  resolve();
+                  finish('resolve');
                   return;
                 }
               } catch {
@@ -1038,7 +1069,7 @@ export async function speakWithElevenLabs(
                 }),
               }).catch(() => {});
               // #endregion
-              reject(new WebTtsRequiresUserGestureError(spokenText));
+              finish('reject', new WebTtsRequiresUserGestureError(spokenText));
               return;
             }
             const err = playErr instanceof Error ? playErr : new Error(String(playErr));
@@ -1049,7 +1080,7 @@ export async function speakWithElevenLabs(
               errorName: err.name,
               errorMessagePreview: err.message?.slice(0, 120),
             });
-            reject(err);
+            finish('reject', err);
           });
       });
       return;
