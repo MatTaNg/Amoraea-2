@@ -7,6 +7,8 @@ import type { SessionPlatform } from './writeSessionLog';
 export type SessionLogRuntimeContext = {
   sessionCorrelationId: string;
   attemptId: string | null;
+  /** After a successful interview attempt row is created, logs should include attempt_id — dev guard if missing. */
+  sessionLogsRequireAttemptId: boolean;
   platform: SessionPlatform | null;
   /** ISO timestamp of last assistant question delivery (for latency). */
   lastQuestionDeliveredAt: string | null;
@@ -24,6 +26,7 @@ export type SessionLogRuntimeContext = {
 const ctx: SessionLogRuntimeContext = {
   sessionCorrelationId: '',
   attemptId: null,
+  sessionLogsRequireAttemptId: false,
   platform: null,
   lastQuestionDeliveredAt: null,
   recordingSessionActive: false,
@@ -37,6 +40,7 @@ const ctx: SessionLogRuntimeContext = {
 export function resetSessionLogRuntime(partial?: Partial<SessionLogRuntimeContext>): void {
   ctx.sessionCorrelationId = partial?.sessionCorrelationId ?? ctx.sessionCorrelationId;
   ctx.attemptId = partial?.attemptId ?? null;
+  ctx.sessionLogsRequireAttemptId = partial?.sessionLogsRequireAttemptId ?? false;
   ctx.platform = partial?.platform ?? ctx.platform;
   ctx.lastQuestionDeliveredAt = partial?.lastQuestionDeliveredAt ?? null;
   ctx.recordingSessionActive = partial?.recordingSessionActive ?? false;
@@ -53,6 +57,10 @@ export function getSessionLogRuntime(): Readonly<SessionLogRuntimeContext> {
 
 export function setSessionLogAttemptId(attemptId: string | null): void {
   ctx.attemptId = attemptId;
+}
+
+export function setSessionLogsRequireAttemptId(require: boolean): void {
+  ctx.sessionLogsRequireAttemptId = require;
 }
 
 export function setSessionLogPlatform(platform: SessionPlatform | null): void {

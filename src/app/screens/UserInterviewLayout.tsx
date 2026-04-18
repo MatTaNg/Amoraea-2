@@ -77,6 +77,8 @@ interface UserInterviewLayoutProps {
   micReconnectPrompt?: { message: string; onReconnect: () => void } | null;
   /** Rare escape hatch when capture/transcription likely failed — secondary text control. */
   micFailureEscape?: { onPress: () => void } | null;
+  /** After TTS, if the user has not tapped record for a long time — gentle visual-only reminder. */
+  lateStartRecordingCue?: boolean;
 }
 
 const GOOGLE_FONTS_URL =
@@ -129,6 +131,7 @@ export const UserInterviewLayout: React.FC<UserInterviewLayoutProps> = ({
   micSessionRecovering = false,
   micReconnectPrompt = null,
   micFailureEscape = null,
+  lateStartRecordingCue = false,
 }) => {
   const [refCardOpen, setRefCardOpen] = useState(false);
   const rippleAnim = useRef(new Animated.Value(0)).current;
@@ -284,7 +287,7 @@ export const UserInterviewLayout: React.FC<UserInterviewLayoutProps> = ({
       ) : null}
 
       {/* FlameOrb — existing component, no changes */}
-      <View style={styles.flameSection}>
+      <View style={[styles.flameSection, lateStartRecordingCue && voiceState === 'idle' ? styles.flameSectionLateCue : null]}>
         <FlameOrb state={flameState} size={flameOrbSize} />
       </View>
 
@@ -310,6 +313,12 @@ export const UserInterviewLayout: React.FC<UserInterviewLayoutProps> = ({
             {Platform.OS === 'web'
               ? '◆ Audio unavailable — hover Show scenario to read the question, then speak when ready'
               : '◆ Audio unavailable — hold Show scenario to read the question, then speak when ready'}
+          </Text>
+        ) : null}
+
+        {lateStartRecordingCue && voiceState === 'idle' && !ttsFallbackActive ? (
+          <Text style={styles.lateStartCue} accessibilityLiveRegion="polite">
+            Take your time — tap when ready
           </Text>
         ) : null}
 
@@ -815,6 +824,20 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     width: '100%',
     zIndex: 1,
+  },
+  /** Subtle de-emphasis when idle long after TTS — pairs with `lateStartRecordingCue` copy below. */
+  flameSectionLateCue: {
+    opacity: 0.9,
+  },
+  lateStartCue: {
+    fontFamily: FONT_UI,
+    fontSize: 12,
+    color: TEXT_DIM,
+    textAlign: 'center',
+    maxWidth: 300,
+    paddingHorizontal: 16,
+    letterSpacing: 0.4,
+    lineHeight: 18,
   },
   bottomSection: {
     width: '100%',

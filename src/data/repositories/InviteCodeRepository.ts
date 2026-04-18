@@ -1,4 +1,5 @@
 import { supabase } from '../supabase/client';
+import { signOutIfUsersAuthFkViolation } from '../supabase/signOutIfUsersAuthFkViolation';
 import { isAlphaTesterReferralCode } from '@/constants/alphaReferral';
 import { normalizeShareableReferralCode } from '@features/referrals/shareableReferralCode';
 
@@ -84,7 +85,13 @@ export class InviteCodeRepository {
       pending_referral_code: pendingReferralCode,
     });
 
-    if (error) throw new Error(`Failed to create user: ${error.message}`);
+    if (error) {
+      const err = error as { code?: string; message?: string };
+      if (await signOutIfUsersAuthFkViolation(err)) {
+        throw new Error('Your session is no longer valid. Please sign in again.');
+      }
+      throw new Error(`Failed to create user: ${error.message}`);
+    }
     return { inviteCode };
   }
 }

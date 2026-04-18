@@ -148,6 +148,8 @@ export function isClientAudioRecoveryAssistantLine(lastQuestionText: string | nu
 /** Name / identity prompts — one or two words are valid. */
 export function isNamePromptInterviewMoment(lastQuestionText: string | null | undefined): boolean {
   const q = (lastQuestionText ?? '').toLowerCase();
+  /** Opening line: "Hi, I'm Amoraea. What can I call you?" — must match or whisper ratio gate re-asks one-word names. */
+  if (/\bwhat\s+(can|should)\s+i\s+call\s+you\b/.test(q)) return true;
   if (/what('?s|\s+is)\s+your\s+name\b/.test(q)) return true;
   if (/\bhow\s+(do\s+you|should\s+i)\s+(call\s+you|address\s+you)\b/.test(q)) return true;
   return false;

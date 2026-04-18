@@ -2,6 +2,7 @@
  * Non-blocking inserts into `session_logs`. One automatic retry; failures are console-only.
  */
 import { supabase } from '@data/supabase/client';
+import { getSessionLogRuntime } from './sessionLogContext';
 
 export type SessionPlatform = 'ios' | 'android' | 'web';
 
@@ -40,6 +41,20 @@ async function insertOnce(row: SessionLogInsert): Promise<{ error: Error | null 
 
 /** Fire-and-forget. Retries once on failure. Never throws to callers. */
 export function writeSessionLog(row: SessionLogInsert): void {
+  const ctx = getSessionLogRuntime();
+  if (
+    isDevBundle &&
+    ctx.sessionLogsRequireAttemptId &&
+    row.attemptId == null &&
+    row.userId &&
+    row.eventType !== 'build_version'
+  ) {
+    console.error(
+      '[session_logs] attempt_id is null after session initialization — event orphaned:',
+      row.eventType,
+      { eventDataKeys: Object.keys(row.eventData ?? {}) }
+    );
+  }
   void (async () => {
     const first = await insertOnce(row);
     if (!first.error) return;

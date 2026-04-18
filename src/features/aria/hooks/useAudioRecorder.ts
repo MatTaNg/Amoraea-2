@@ -16,6 +16,17 @@ import {
   logWebMicRecordingStopped,
 } from '@features/aria/telemetry/tsAutoplayTelemetry';
 import { remoteLog } from '@utilities/remoteLog';
+import {
+  getLastPreInitTriggerDuring,
+  rearmWebMicPreInitAfterRecordingStop,
+  tryConsumeWebPreInitRecorder,
+} from '@features/aria/utils/webInterviewMicPreInit';
+
+function isWebMicStreamLive(stream: MediaStream | null): boolean {
+  if (!stream?.active) return false;
+  const t = stream.getAudioTracks()[0];
+  return !!t && t.readyState === 'live';
+}
 
 /** Do not top-level import expo-av — it breaks web lazy-load of the interview screen. */
 function getExpoAvAudio(): typeof import('expo-av').Audio {
@@ -52,6 +63,9 @@ function buildRecordingPreset(Audio: ReturnType<typeof getExpoAvAudio>) {
   } as const;
 }
 
+/** Web: wall-clock offset for min/max timers so warm-up audio is included; `onRecordingEnginePrimed` fires after this. */
+const WEB_RECORDING_PREROLL_MS = 100;
+
 export type AudioRecorderPermissionStatus = 'granted' | 'denied' | null;
 
 type RecordingStatusLike = {
@@ -77,7 +91,24 @@ export function useAudioRecorder({
   onRecordingComplete?: (
     blob: Blob,
     nativeUri: string | null,
-    meta?: { peakMeteringDb: number | null; recordingCapped?: boolean }
+    meta?: {
+      peakMeteringDb: number | null;
+      recordingCapped?: boolean;
+      /** Web: wall-clock timing for telemetry (tap → MediaRecorder.start). */
+      webRecordingTiming?: {
+        tapIntentAtMs: number;
+        mediaRecorderStartAtMs: number;
+        recorderPreInitialized: boolean;
+        recorderStartCalledMs: number;
+        /** Wall time when `MediaRecorder.stop()` completed (blob assembled). */
+        recorderStopCalledMs?: number;
+        firstChunkReceivedMs: number | null;
+        chunkLatencyMs: number | null;
+        preInitFallbackReason: string | null;
+        streamReactivated: boolean;
+        preInitTriggeredDuring: ReturnType<typeof getLastPreInitTriggerDuring>;
+      };
+    }
   ) => void | Promise<void>;
   onError?: (err: Error) => void;
   /** Web: run synchronously in the same user-gesture stack as `MediaRecorder.stop()` (e.g. resume AudioContext for later TTS). */
@@ -110,6 +141,26 @@ export function useAudioRecorder({
   const webAudioCtxRef = useRef<AudioContext | null>(null);
   const webAnalyserRef = useRef<AnalyserNode | null>(null);
   const webMeterIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  /** Web: rAF loop for live meter — started in the same synchronous turn as `MediaRecorder.start()`. */
+  const webMeterRafRef = useRef<number | null>(null);
+  /** Web: mic stream + AudioContext + analyser acquired before tap (TTS) — MediaRecorder is created on tap only. */
+  const webMicPipelinePrimedRef = useRef(false);
+  const webPrepareCompleteAtMsRef = useRef<number | null>(null);
+  const webPrerollTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const lastWebRecordingTimingRef = useRef<{
+    tapIntentAtMs: number;
+    mediaRecorderStartAtMs: number;
+    recorderPreInitialized: boolean;
+    recorderStartCalledMs: number;
+    recorderStopCalledMs?: number;
+    firstChunkReceivedMs: number | null;
+    chunkLatencyMs: number | null;
+    preInitFallbackReason: string | null;
+    streamReactivated: boolean;
+    preInitTriggeredDuring: ReturnType<typeof getLastPreInitTriggerDuring>;
+  } | null>(null);
+  /** Web: `MediaRecorder` constructed during TTS (inactive) — tap only calls `start(100)`. */
+  const webMediaRecorderPreparedRef = useRef<MediaRecorder | null>(null);
   const maxDurationTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const recordingCappedThisTurnRef = useRef(false);
 
@@ -120,11 +171,27 @@ export function useAudioRecorder({
     }
   }, []);
 
+  const clearWebPrerollTimer = useCallback(() => {
+    if (webPrerollTimerRef.current != null) {
+      clearTimeout(webPrerollTimerRef.current);
+      webPrerollTimerRef.current = null;
+    }
+  }, []);
+
+  const stopWebMeterLoop = useCallback(() => {
+    if (webMeterRafRef.current != null) {
+      cancelAnimationFrame(webMeterRafRef.current);
+      webMeterRafRef.current = null;
+    }
+  }, []);
+
   const stopWebMetering = useCallback(() => {
+    stopWebMeterLoop();
     if (webMeterIntervalRef.current != null) {
       clearInterval(webMeterIntervalRef.current);
       webMeterIntervalRef.current = null;
     }
+    clearWebPrerollTimer();
     try {
       webAnalyserRef.current?.disconnect();
     } catch {
@@ -137,9 +204,13 @@ export function useAudioRecorder({
       /* ignore */
     }
     webAudioCtxRef.current = null;
+    webStreamRef.current?.getTracks().forEach((t) => t.stop());
     webStreamRef.current = null;
+    webMicPipelinePrimedRef.current = false;
+    webPrepareCompleteAtMsRef.current = null;
+    webMediaRecorderPreparedRef.current = null;
     setInputMeterLevel(0);
-  }, []);
+  }, [clearWebPrerollTimer, stopWebMeterLoop]);
 
   const requestPermission = useCallback(async (): Promise<boolean> => {
     if (Platform.OS === 'web') {
@@ -162,17 +233,20 @@ export function useAudioRecorder({
   const getSupportedMimeType = useCallback((): string | null => {
     if (typeof MediaRecorder === 'undefined') return null;
     const ua = typeof navigator !== 'undefined' ? navigator.userAgent : '';
-    /** iOS/iPadOS WebKit: WebM/Opus often passes isTypeSupported but Whisper returns 400 invalid format on some blobs. Prefer MP4/AAC when available. */
-    const preferMp4First = /iPhone|iPad|iPod/i.test(ua);
-    const types = preferMp4First
-      ? ['audio/mp4', 'audio/webm;codecs=opus', 'audio/webm', 'audio/ogg;codecs=opus']
-      : ['audio/webm;codecs=opus', 'audio/webm', 'audio/mp4', 'audio/ogg;codecs=opus'];
+    /** Prefer WebM/Opus whenever the browser supports it (including iOS Safari/Brave). MP4/AAC from mobile MediaRecorder can be undecodable by Web Audio + rejected by Whisper (400 invalid format); WebM is more reliable for Whisper + buffer analysis. */
+    const isMobileWebKit = /iPhone|iPad|iPod/i.test(ua);
+    const types = [
+      'audio/webm;codecs=opus',
+      'audio/webm',
+      'audio/mp4',
+      'audio/ogg;codecs=opus',
+    ];
     const supported = types.filter((t) => MediaRecorder.isTypeSupported(t));
     const chosen = supported[0] ?? null;
     // #region agent log
     void remoteLog('[MEDIARECORDER] mime_priority', {
-      hypothesisId: 'H_ios_mp4_first',
-      preferMp4First,
+      hypothesisId: 'H_prefer_webm_opus_mobile',
+      isMobileWebKit,
       chosen,
       supportedListed: supported,
     });
@@ -270,138 +344,373 @@ export function useAudioRecorder({
     [onError, onMediaServicesReset, onRecordingEnginePrimed, clearMaxDurationTimer, stopNativeRecording, sleep]
   );
 
-  const startWebRecording = useCallback(async (opts?: { postAudioSessionDelayMs?: number }) => {
-    try {
-      recordingCappedThisTurnRef.current = false;
-      clearMaxDurationTimer();
-      const stream = await navigator.mediaDevices.getUserMedia({
-        audio: {
-          echoCancellation: true,
-          noiseSuppression: true,
-        },
-      });
-      webStreamRef.current = stream;
-      const modeCompleteAtMs = Date.now();
-      const delayMs = Math.max(0, opts?.postAudioSessionDelayMs ?? 500);
-      await sleep(delayMs);
+  const ensureWebAudioAnalyserForStream = useCallback((stream: MediaStream) => {
+    const Ctx =
+      typeof window !== 'undefined' && window.AudioContext
+        ? window.AudioContext
+        : typeof window !== 'undefined' &&
+            (window as unknown as { webkitAudioContext?: typeof AudioContext }).webkitAudioContext
+          ? (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext
+          : null;
+    if (!Ctx) return;
+    const ctx = new Ctx();
+    webAudioCtxRef.current = ctx;
+    const source = ctx.createMediaStreamSource(stream);
+    const analyser = ctx.createAnalyser();
+    analyser.fftSize = 512;
+    analyser.smoothingTimeConstant = 0.5;
+    source.connect(analyser);
+    webAnalyserRef.current = analyser;
+    void ctx.resume().catch(() => {});
+  }, []);
 
+  /**
+   * Web: mic pre-init is driven by `webInterviewMicPreInit` during TTS + rearm after recording.
+   * Kept as a no-op for API compatibility with AriaScreen.
+   */
+  const prepareWebRecordingSession = useCallback(async () => {
+    if (Platform.OS !== 'web') return;
+  }, []);
+
+  /** Web: legacy abandon — optional cleanup when idle (module owns pre-init stream). */
+  const abandonPreparedWebRecording = useCallback(async () => {
+    if (Platform.OS !== 'web') return;
+    if (mediaRecorderRef.current?.state === 'recording') return;
+  }, []);
+
+  const startWebRecording = useCallback(
+    async (opts?: { postAudioSessionDelayMs?: number; tapIntentAtMs?: number }) => {
       try {
-        const Ctx =
-          typeof window !== 'undefined' && window.AudioContext
-            ? window.AudioContext
-            : typeof window !== 'undefined' && (window as unknown as { webkitAudioContext?: typeof AudioContext }).webkitAudioContext
-              ? (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext
-              : null;
-        if (Ctx) {
-          const ctx = new Ctx();
-          webAudioCtxRef.current = ctx;
-          const source = ctx.createMediaStreamSource(stream);
-          const analyser = ctx.createAnalyser();
-          analyser.fftSize = 512;
-          analyser.smoothingTimeConstant = 0.5;
-          source.connect(analyser);
-          webAnalyserRef.current = analyser;
-          const data = new Uint8Array(analyser.fftSize);
-          webMeterIntervalRef.current = setInterval(() => {
-            try {
-              analyser.getByteTimeDomainData(data);
-              let peak = 0;
-              for (let i = 0; i < data.length; i++) {
-                const v = (data[i] - 128) / 128;
-                const a = Math.abs(v);
-                if (a > peak) peak = a;
-              }
-              setInputMeterLevel(Math.min(1, peak * 2.2));
-            } catch {
-              /* ignore */
-            }
-          }, 80);
-        }
-      } catch {
-        /* metering optional */
-      }
-
-      audioChunksRef.current = [];
-      const mimeType = getSupportedMimeType();
-      webMimeRef.current = mimeType ?? 'audio/webm';
-      const mediaRecorder = mimeType
-        ? new MediaRecorder(stream, { mimeType })
-        : new MediaRecorder(stream);
-
-      mediaRecorderRef.current = mediaRecorder;
-
-      mediaRecorder.ondataavailable = (e) => {
-        if (e.data?.size > 0) audioChunksRef.current.push(e.data);
-      };
-
-      mediaRecorder.onstop = async () => {
-        stopWebMetering();
-        const blob = new Blob(audioChunksRef.current, {
-          type: webMimeRef.current,
-        });
-        const start = recordingStartTimeRef.current;
-        const elapsedMs = start != null ? Date.now() - start : undefined;
-        logWebMicRecordingStopped({
-          blobBytes: blob.size,
-          mime: webMimeRef.current,
-          elapsedMs,
-        });
-        stream.getTracks().forEach((t) => t.stop());
-        mediaRecorderRef.current = null;
-        setIsRecording(false);
-        await onRecordingComplete?.(blob, null, {
-          peakMeteringDb: null,
-          recordingCapped: recordingCappedThisTurnRef.current,
-        });
         recordingCappedThisTurnRef.current = false;
-      };
-
-      mediaRecorder.start(100);
-      const recordingInitializedAtMs = Date.now();
-      onRecordingEnginePrimed?.({ modeCompleteAtMs, recordingInitializedAtMs });
-      recordingStartTimeRef.current = recordingInitializedAtMs;
-      setIsRecording(true);
-      const capMs = getAudioMaxRecordingDurationMs();
-      maxDurationTimerRef.current = setTimeout(() => {
-        maxDurationTimerRef.current = null;
-        recordingCappedThisTurnRef.current = true;
         clearMaxDurationTimer();
+        clearWebPrerollTimer();
+        const tapIntentAtMs = opts?.tapIntentAtMs ?? Date.now();
+
+        const consumedResult = tryConsumeWebPreInitRecorder();
+        const usedWebModulePreInit = consumedResult != null;
+
+        let stream: MediaStream | null = webStreamRef.current;
+        let modeCompleteAtMs = webPrepareCompleteAtMsRef.current ?? Date.now();
+        let streamWasPrimedFromTts = false;
+        let streamReactivated = false;
+        let preInitFallbackReason: string | null = null;
+
+        if (usedWebModulePreInit && consumedResult) {
+          stream = consumedResult.stream;
+          webStreamRef.current = stream;
+          ensureWebAudioAnalyserForStream(stream);
+          webMicPipelinePrimedRef.current = true;
+          webPrepareCompleteAtMsRef.current = Date.now();
+          modeCompleteAtMs = webPrepareCompleteAtMsRef.current;
+          streamWasPrimedFromTts = true;
+        } else {
+          streamWasPrimedFromTts = !!(
+            webMicPipelinePrimedRef.current &&
+            stream &&
+            webAnalyserRef.current
+          );
+
+          if (stream && !isWebMicStreamLive(stream)) {
+            stopWebMetering();
+            stream = null;
+            streamWasPrimedFromTts = false;
+            streamReactivated = true;
+            preInitFallbackReason = 'stream_inactive_before_start';
+          }
+
+          if (!streamWasPrimedFromTts || !stream) {
+            stream = await navigator.mediaDevices.getUserMedia({
+              audio: {
+                echoCancellation: true,
+                noiseSuppression: true,
+              },
+            });
+            webStreamRef.current = stream;
+            webMicPipelinePrimedRef.current = true;
+            ensureWebAudioAnalyserForStream(stream);
+            webPrepareCompleteAtMsRef.current = Date.now();
+            modeCompleteAtMs = webPrepareCompleteAtMsRef.current;
+          }
+        }
+
+        const delayMs =
+          usedWebModulePreInit || streamWasPrimedFromTts
+            ? 0
+            : Math.max(0, opts?.postAudioSessionDelayMs ?? 500);
+        await sleep(delayMs);
+
+        const ctx = webAudioCtxRef.current;
+        if (ctx?.state === 'suspended') {
+          await ctx.resume().catch(() => {});
+        }
+
+        audioChunksRef.current = [];
+        const mimeType = getSupportedMimeType();
+        webMimeRef.current = mimeType ?? 'audio/webm';
+
+        let mediaRecorder: MediaRecorder;
+        let recorderPreInitialized = false;
+        if (usedWebModulePreInit && consumedResult) {
+          mediaRecorder = consumedResult.recorder;
+          recorderPreInitialized = true;
+        } else {
+          const preparedMr = webMediaRecorderPreparedRef.current;
+          const streamMatchesPrepared =
+            preparedMr &&
+            preparedMr.state === 'inactive' &&
+            webStreamRef.current === stream;
+
+          if (streamWasPrimedFromTts && streamMatchesPrepared && preparedMr) {
+            webMediaRecorderPreparedRef.current = null;
+            mediaRecorder = preparedMr;
+            recorderPreInitialized = true;
+          } else {
+            webMediaRecorderPreparedRef.current = null;
+            if (streamWasPrimedFromTts && !streamReactivated) {
+              if (!preparedMr) {
+                preInitFallbackReason = preInitFallbackReason ?? 'missing_prepared_mediarecorder';
+              } else if (!streamMatchesPrepared) {
+                preInitFallbackReason = preInitFallbackReason ?? 'prepared_mediarecorder_mismatch';
+              }
+            }
+            mediaRecorder = mimeType
+              ? new MediaRecorder(stream, { mimeType })
+              : new MediaRecorder(stream);
+          }
+        }
+
+        if (!recorderPreInitialized && preInitFallbackReason == null) {
+          preInitFallbackReason = 'no_preinit_before_tap';
+        }
+        if (
+          __DEV__ &&
+          !recorderPreInitialized &&
+          preInitFallbackReason != null &&
+          preInitFallbackReason !== 'no_preinit_before_tap'
+        ) {
+          console.error('PRE_INIT_FAILED: recorder was not ready at recording start');
+        }
+
+        mediaRecorderRef.current = mediaRecorder;
+
+        let firstChunkLogged = false;
+        mediaRecorder.ondataavailable = (e) => {
+          if (e.data?.size > 0) {
+            audioChunksRef.current.push(e.data);
+            if (!firstChunkLogged) {
+              firstChunkLogged = true;
+              const firstChunkReceivedMs = Date.now();
+              const timing = lastWebRecordingTimingRef.current;
+              if (timing) {
+                timing.firstChunkReceivedMs = firstChunkReceivedMs;
+                timing.chunkLatencyMs = firstChunkReceivedMs - timing.recorderStartCalledMs;
+              }
+              // #region agent log
+              fetch('http://127.0.0.1:7789/ingest/668e0bd5-3283-4492-9f48-e33846c18218', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json', 'X-Debug-Session-Id': 'c61a43' },
+                body: JSON.stringify({
+                  sessionId: 'c61a43',
+                  location: 'useAudioRecorder.ts:ondataavailable:first',
+                  message: 'first_media_chunk',
+                  data: {
+                    hypothesisId: 'H5',
+                    ms_since_tap: Date.now() - tapIntentAtMs,
+                    chunk_bytes: e.data.size,
+                    micPrimedBeforeTap: streamWasPrimedFromTts,
+                    recorder_pre_initialized: recorderPreInitialized,
+                    chunk_latency_ms: timing?.chunkLatencyMs ?? null,
+                  },
+                  timestamp: Date.now(),
+                  runId: 'post-fix',
+                }),
+              }).catch(() => {});
+              // #endregion
+            }
+          }
+        };
+
+        mediaRecorder.onstop = async () => {
+          stopWebMeterLoop();
+          const timing = lastWebRecordingTimingRef.current;
+          const recorderStopCalledMs = Date.now();
+          if (timing) {
+            timing.recorderStopCalledMs = recorderStopCalledMs;
+          }
+          const blob = new Blob(audioChunksRef.current, {
+            type: webMimeRef.current,
+          });
+          const wallStart = timing?.mediaRecorderStartAtMs;
+          const elapsedMs = wallStart != null ? Date.now() - wallStart : undefined;
+          logWebMicRecordingStopped({
+            blobBytes: blob.size,
+            mime: webMimeRef.current,
+            elapsedMs,
+          });
+          stopWebMetering();
+          mediaRecorderRef.current = null;
+          setIsRecording(false);
+          await onRecordingComplete?.(blob, null, {
+            peakMeteringDb: null,
+            recordingCapped: recordingCappedThisTurnRef.current,
+            webRecordingTiming: timing ?? undefined,
+          });
+          rearmWebMicPreInitAfterRecordingStop().catch(() => {});
+          lastWebRecordingTimingRef.current = null;
+          recordingCappedThisTurnRef.current = false;
+        };
+
+        const meterOnce = () => {
+          const analyser = webAnalyserRef.current;
+          if (!analyser) return;
+          const data = new Uint8Array(analyser.fftSize);
+          analyser.getByteTimeDomainData(data);
+          let peak = 0;
+          for (let i = 0; i < data.length; i++) {
+            const v = (data[i] - 128) / 128;
+            const a = Math.abs(v);
+            if (a > peak) peak = a;
+          }
+          setInputMeterLevel(Math.min(1, peak * 2.2));
+        };
+
+        const runMeterLoop = () => {
+          if (!webAnalyserRef.current || !mediaRecorderRef.current || mediaRecorderRef.current.state === 'inactive') {
+            webMeterRafRef.current = null;
+            return;
+          }
+          try {
+            meterOnce();
+          } catch {
+            /* ignore */
+          }
+          webMeterRafRef.current = requestAnimationFrame(runMeterLoop);
+        };
+
+        const recorderStartCalledMs = Date.now();
+        lastWebRecordingTimingRef.current = {
+          tapIntentAtMs,
+          mediaRecorderStartAtMs: recorderStartCalledMs,
+          recorderPreInitialized,
+          recorderStartCalledMs,
+          firstChunkReceivedMs: null,
+          chunkLatencyMs: null,
+          preInitFallbackReason,
+          streamReactivated,
+          preInitTriggeredDuring: getLastPreInitTriggerDuring(),
+        };
+
+        mediaRecorder.start(100);
+        // #region agent log
+        fetch('http://127.0.0.1:7789/ingest/668e0bd5-3283-4492-9f48-e33846c18218', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'X-Debug-Session-Id': 'c61a43' },
+          body: JSON.stringify({
+            sessionId: 'c61a43',
+            location: 'useAudioRecorder.ts:startWebRecording:afterStart',
+            message: 'mediarecorder_started_sync_meter',
+            data: {
+              hypothesisId: 'H1',
+              ms_since_tap: recorderStartCalledMs - tapIntentAtMs,
+              micPrimedBeforeTap: streamWasPrimedFromTts,
+              recorder_pre_initialized: recorderPreInitialized,
+              delay_ms_applied: delayMs,
+            },
+            timestamp: Date.now(),
+            runId: 'post-fix',
+          }),
+        }).catch(() => {});
+        // #endregion
+
+        meterOnce();
+        const firstMeterAt = Date.now();
+        // #region agent log
+        fetch('http://127.0.0.1:7789/ingest/668e0bd5-3283-4492-9f48-e33846c18218', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'X-Debug-Session-Id': 'c61a43' },
+          body: JSON.stringify({
+            sessionId: 'c61a43',
+            location: 'useAudioRecorder.ts:startWebRecording:first_meter',
+            message: 'first_meter_sample_after_start',
+            data: {
+              hypothesisId: 'H3',
+              ms_after_mediarecorder_start: firstMeterAt - recorderStartCalledMs,
+              ms_since_tap: firstMeterAt - tapIntentAtMs,
+            },
+            timestamp: Date.now(),
+            runId: 'post-fix',
+          }),
+        }).catch(() => {});
+        // #endregion
+        webMeterRafRef.current = requestAnimationFrame(runMeterLoop);
+
+        setIsRecording(true);
+        const prerollEndWallMs = Date.now() + WEB_RECORDING_PREROLL_MS;
+        recordingStartTimeRef.current = prerollEndWallMs;
+
+        webPrerollTimerRef.current = setTimeout(() => {
+          webPrerollTimerRef.current = null;
+          if (mediaRecorderRef.current?.state !== 'recording') return;
+          const recordingInitializedAtMs = Date.now();
+          onRecordingEnginePrimed?.({
+            modeCompleteAtMs,
+            recordingInitializedAtMs,
+          });
+        }, WEB_RECORDING_PREROLL_MS);
+
+        const capMs = getAudioMaxRecordingDurationMs();
+        maxDurationTimerRef.current = setTimeout(() => {
+          maxDurationTimerRef.current = null;
+          recordingCappedThisTurnRef.current = true;
+          clearMaxDurationTimer();
+          onBeforeWebRecorderStop?.();
+          const rec = mediaRecorderRef.current;
+          if (rec?.state !== 'inactive') rec?.stop();
+        }, capMs + WEB_RECORDING_PREROLL_MS);
+      } catch (err) {
+        stopWebMetering();
+        if (__DEV__) console.error('Web recording failed:', err);
+        onError?.(err instanceof Error ? err : new Error(String(err)));
+      }
+    },
+    [
+      getSupportedMimeType,
+      onRecordingComplete,
+      onError,
+      stopWebMetering,
+      stopWebMeterLoop,
+      onRecordingEnginePrimed,
+      onBeforeWebRecorderStop,
+      clearMaxDurationTimer,
+      clearWebPrerollTimer,
+      sleep,
+      ensureWebAudioAnalyserForStream,
+    ]
+  );
+
+  const stopWebRecording = useCallback(
+    (opts?: { bypassMinDuration?: boolean }) => {
+      const bypass = opts?.bypassMinDuration === true;
+      clearMaxDurationTimer();
+      clearWebPrerollTimer();
+      const minMs = getAudioMinRecordingDurationMs();
+      const now = Date.now();
+      const effectiveStart = recordingStartTimeRef.current ?? now;
+      /** Web pre-roll: `recordingStartTimeRef` is wall time when min-duration counting begins (after warm-up). */
+      const elapsed = now < effectiveStart ? 0 : now - effectiveStart;
+      const stop = () => {
         onBeforeWebRecorderStop?.();
         const rec = mediaRecorderRef.current;
         if (rec?.state !== 'inactive') rec?.stop();
-      }, capMs);
-    } catch (err) {
-      stopWebMetering();
-      if (__DEV__) console.error('Web recording failed:', err);
-      onError?.(err instanceof Error ? err : new Error(String(err)));
-    }
-  }, [
-    getSupportedMimeType,
-    onRecordingComplete,
-    onError,
-    stopWebMetering,
-    onRecordingEnginePrimed,
-    onBeforeWebRecorderStop,
-    clearMaxDurationTimer,
-    sleep,
-  ]);
-
-  const stopWebRecording = useCallback((opts?: { bypassMinDuration?: boolean }) => {
-    const bypass = opts?.bypassMinDuration === true;
-    clearMaxDurationTimer();
-    const minMs = getAudioMinRecordingDurationMs();
-    const elapsed = Date.now() - (recordingStartTimeRef.current ?? 0);
-    const stop = () => {
-      onBeforeWebRecorderStop?.();
-      const rec = mediaRecorderRef.current;
-      if (rec?.state !== 'inactive') rec?.stop();
-    };
-    if (!bypass && elapsed < minMs) {
-      setTimeout(stop, minMs - elapsed);
-    } else {
-      stop();
-    }
-  }, [onBeforeWebRecorderStop, clearMaxDurationTimer]);
+      };
+      if (!bypass && elapsed < minMs) {
+        setTimeout(stop, minMs - elapsed);
+      } else {
+        stop();
+      }
+    },
+    [onBeforeWebRecorderStop, clearMaxDurationTimer, clearWebPrerollTimer]
+  );
 
   useEffect(
     () => () => {
@@ -413,6 +722,7 @@ export function useAudioRecorder({
   const releaseRecordingInstance = useCallback(
     async (opts?: { momentNumber?: number; logCleanupFailed?: (payload: { message: string; moment_number?: number }) => void }) => {
       clearMaxDurationTimer();
+      clearWebPrerollTimer();
       if (Platform.OS === 'web') {
         try {
           const rec = mediaRecorderRef.current;
@@ -450,19 +760,19 @@ export function useAudioRecorder({
   );
 
   const startRecording = useCallback(
-    async (opts?: { postAudioSessionDelayMs?: number }) => {
-    const granted = permissionStatus === 'granted' || (await requestPermission());
-    if (!granted) {
-      onError?.(new Error('Microphone permission denied'));
-      return;
-    }
+    async (opts?: { postAudioSessionDelayMs?: number; tapIntentAtMs?: number }) => {
+      const granted = permissionStatus === 'granted' || (await requestPermission());
+      if (!granted) {
+        onError?.(new Error('Microphone permission denied'));
+        return;
+      }
 
-    if (Platform.OS === 'web') {
-      await startWebRecording(opts);
-    } else {
-      await startNativeRecording(opts);
-    }
-  },
+      if (Platform.OS === 'web') {
+        await startWebRecording(opts);
+      } else {
+        await startNativeRecording(opts);
+      }
+    },
     [permissionStatus, requestPermission, startWebRecording, startNativeRecording, onError]
   );
 
@@ -507,5 +817,8 @@ export function useAudioRecorder({
     /** Native: max peak metering (dBFS) for last completed recording; web: null (use blob RMS in transcribe). */
     lastRecordingPeakMeteringDb: maxMeteringDbRef,
     reinitializeMicrophoneSession,
+    /** Web: warm mic + analyser during TTS so tap does not pay getUserMedia latency. */
+    prepareWebRecordingSession,
+    abandonPreparedWebRecording,
   };
 }

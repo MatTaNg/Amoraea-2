@@ -30,6 +30,66 @@ export function normalizeScoresByEvidence(
   return out;
 }
 
+/** Named fixtures for tests — must NOT count as a temporally specific moment (habitual / values-only). */
+export const MOMENT5_SPECIFIC_MOMENT_NEGATIVE_EXAMPLES = [
+  "I try to acknowledge when people I care about do something significant, I'll send a message or take them out for a meal.",
+  'I usually get people gifts for big occasions — birthdays, promotions, graduations',
+  "I think it's important to let people know you're proud of them",
+] as const;
+
+/** Named fixtures — must count as a specific occasion / anchored narrative. */
+export const MOMENT5_SPECIFIC_MOMENT_POSITIVE_EXAMPLES = [
+  'I threw my friend a birthday party when she turned 30',
+  'I flew in as a surprise when she defended her dissertation',
+  'I wrote my partner a letter after they got the promotion',
+] as const;
+
+/**
+ * True when the answer anchors to a particular occasion or past narrative — not habitual present-tense pattern.
+ * Generic "I try to / I usually / I'll…" and values-only lines must return false.
+ */
+export function hasMoment5TemporallySpecificMoment(raw: string): boolean {
+  const t = raw.trim();
+  if (!t) return false;
+  const lower = t.toLowerCase();
+
+  if (
+    /\b(i try to|i usually|i always|i'?ll often|i tend to|i make sure to|when people i care about do something|for big occasions)\b/.test(
+      lower
+    )
+  ) {
+    return false;
+  }
+  if (/\bi think it'?s important\b/.test(lower)) {
+    const hasTemporalAnchor =
+      /\b(when|after|threw|flew|wrote|party|turned|graduated|promotion|yesterday|last week|years ago|that time)\b/i.test(t);
+    if (!hasTemporalAnchor) return false;
+  }
+
+  if (
+    /\b(i (threw|flew|wrote|organized|planned|hosted|surprised)|we (threw|hosted|celebrated)|she (opened|cried)|he (opened|read))\b/i.test(
+      lower
+    )
+  ) {
+    return true;
+  }
+  if (
+    /\b(when she (turned|graduated|defended)|when he (got|turned)|after (his|her|their) (promotion|birthday)|on (her|his|their) \d{1,2}(st|nd|rd|th)?\b|defended her dissertation|birthday party|after they got the promotion)\b/i.test(
+      lower
+    )
+  ) {
+    return true;
+  }
+  if (/\b(years ago|that time|one time|last (year|month|week)|yesterday)\b/.test(lower)) {
+    return true;
+  }
+  if (/\b(my (friend|partner|wife|husband|mom|dad|mother|father))\b/i.test(lower)) {
+    if (/\b(when|after|threw|wrote|flew|surprise|party|letter|turned)\b/i.test(t)) return true;
+  }
+
+  return false;
+}
+
 export function evaluateMoment5AppreciationSpecificity(text: string): {
   hasSpecificPerson: boolean;
   hasSpecificMoment: boolean;
@@ -51,10 +111,7 @@ export function evaluateMoment5AppreciationSpecificity(text: string): {
     /\b(my|our)\s+(partner|wife|husband|boyfriend|girlfriend|friend|mom|mother|dad|father|sister|brother|cousin|aunt|uncle|daughter|son|teammate|roommate)\b|\b(he|she|they)\b/.test(
       t
     );
-  const hasSpecificMoment =
-    /\b(last|yesterday|today|week|month|birthday|anniversary|graduation|after|when|that time|once|on \w+day|at dinner|at work|turned \d+)\b/.test(
-      t
-    );
+  const hasSpecificMoment = hasMoment5TemporallySpecificMoment(text);
   const hasAttunement =
     /\bneeded|was going through|felt|feeling|stressed|upset|overwhelmed|encourag|support|noticed|because they|hard year|hard time\b/.test(
       t

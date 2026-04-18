@@ -17,11 +17,29 @@ import {
   isMoment5InexperienceFallbackPrompt,
   isScenarioCRepairAssistantPrompt,
   MOMENT_5_INEXPERIENCE_FALLBACK_QUESTION,
+  hasMoment5TemporallySpecificMoment,
+  MOMENT5_SPECIFIC_MOMENT_NEGATIVE_EXAMPLES,
+  MOMENT5_SPECIFIC_MOMENT_POSITIVE_EXAMPLES,
   moment5AcknowledgesLimitedCloseRelationshipExperience,
   moment5HasHighInformationBehavioralExample,
   moment5HasSubstantiveCelebrationValuesReflection,
   normalizeScoresByEvidence,
 } from '../probeAndScoringUtils';
+
+describe('Moment 5 temporal specificity (named fixtures)', () => {
+  it('does not mark generic habitual / values-only lines as specific moments', () => {
+    for (const s of MOMENT5_SPECIFIC_MOMENT_NEGATIVE_EXAMPLES) {
+      expect(hasMoment5TemporallySpecificMoment(s)).toBe(false);
+      expect(evaluateMoment5AppreciationSpecificity(s).hasSpecificMoment).toBe(false);
+    }
+  });
+  it('marks anchored occasion narratives as specific moments', () => {
+    for (const s of MOMENT5_SPECIFIC_MOMENT_POSITIVE_EXAMPLES) {
+      expect(hasMoment5TemporallySpecificMoment(s)).toBe(true);
+      expect(evaluateMoment5AppreciationSpecificity(s).hasSpecificMoment).toBe(true);
+    }
+  });
+});
 
 describe('probeAndScoringUtils', () => {
   /**

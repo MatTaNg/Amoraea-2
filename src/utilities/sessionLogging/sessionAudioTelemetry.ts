@@ -1,20 +1,21 @@
-import { Platform } from 'react-native';
 import { getLastAppliedAudioModeLabel } from '@features/aria/utils/audioModeHelpers';
+import {
+  getInterviewSessionAmbientNoiseFloorDb,
+  getInterviewSessionAmbientNoiseFallback,
+  getInterviewSessionVadFirstSpeechThresholdDb,
+  getInterviewSessionVadThresholdFloored,
+  getInterviewSessionVadThresholdUnusuallyHigh,
+} from '@features/aria/utils/interviewVadSession';
+import {
+  getLastPreInitTriggerDuring,
+  takeRecorderRefreshedOnLateStartForTelemetry,
+} from '@features/aria/utils/webInterviewMicPreInit';
+import { takeRecordingStartPreauthorizedFlag } from '@features/aria/utils/webPreAuthorizedTtsAudio';
+import { takeSessionResumedForFirstRecordingStart } from '@utilities/sessionLogging/sessionResumeRecordingTelemetry';
 import { getSessionLogRuntime } from './sessionLogContext';
-import { getAudioCorrelationFields } from './audioSessionLogEnvelope';
+import { getAudioCorrelationFields, type SessionOutputRouteLabel } from './audioSessionLogEnvelope';
 
-export type AudioOutputRoute = 'speaker' | 'headphones' | 'bluetooth' | 'unknown';
-
-/** Best-effort output route; JS cannot read iOS port reliably without native modules. */
-function guessAudioOutputRoute(): AudioOutputRoute {
-  if (Platform.OS === 'web' && typeof navigator !== 'undefined') {
-    const md = (navigator as unknown as { mediaDevices?: { selectAudioOutput?: unknown } }).mediaDevices;
-    if (md && typeof md.selectAudioOutput === 'function') {
-      /* future: user-selected sink */
-    }
-  }
-  return 'unknown';
-}
+export type AudioOutputRoute = SessionOutputRouteLabel;
 
 export type AudioSessionTelemetryPayload = {
   audio_output_route: AudioOutputRoute;
@@ -24,28 +25,43 @@ export type AudioSessionTelemetryPayload = {
   volume_level: number | null;
 } & Record<string, unknown>;
 
-/** For `tts_playback_start` — recording_session_active means Whisper just ended before this TTS. */
-export function gatherTtsPlaybackTelemetry(whisperJustEndedBeforePlayback: boolean): AudioSessionTelemetryPayload {
+/** For `tts_playback_start` — `tts_playback_active_immediately_prior` is captured before this turn sets TTS active. */
+export function gatherTtsPlaybackTelemetry(args: {
+  ttsPlaybackActiveImmediatelyPrior: boolean;
+}): AudioSessionTelemetryPayload {
   const ctx = getSessionLogRuntime();
+  const corr = getAudioCorrelationFields();
+  const out = (corr.output_route as AudioOutputRoute) ?? 'unknown';
   return {
-    audio_output_route: guessAudioOutputRoute(),
+    ...corr,
+    audio_output_route: out,
     audio_session_mode: getLastAppliedAudioModeLabel(),
-    recording_session_active: whisperJustEndedBeforePlayback,
-    tts_playback_active_immediately_prior: ctx.ttsPlaybackActive,
+    recording_session_active: ctx.recordingSessionActive,
+    tts_playback_active_immediately_prior: args.ttsPlaybackActiveImmediatelyPrior,
     volume_level: null,
-    ...getAudioCorrelationFields(),
   };
 }
 
 /** For `recording_start` — recording_session_active reflects whether a session was still marked active (usually false). */
 export function gatherRecordingStartTelemetry(): AudioSessionTelemetryPayload {
   const ctx = getSessionLogRuntime();
+  const corr = getAudioCorrelationFields();
+  const out = (corr.output_route as AudioOutputRoute) ?? 'unknown';
   return {
-    audio_output_route: guessAudioOutputRoute(),
+    ...corr,
+    audio_output_route: out,
     audio_session_mode: getLastAppliedAudioModeLabel(),
     recording_session_active: ctx.recordingSessionActive,
     tts_playback_active_immediately_prior: ctx.ttsPlaybackActive,
     volume_level: null,
-    ...getAudioCorrelationFields(),
+    vad_threshold_db: getInterviewSessionVadFirstSpeechThresholdDb(),
+    ambient_noise_floor_db: getInterviewSessionAmbientNoiseFloorDb(),
+    ambient_noise_fallback: getInterviewSessionAmbientNoiseFallback(),
+    vad_threshold_floored: getInterviewSessionVadThresholdFloored(),
+    vad_threshold_unusually_high: getInterviewSessionVadThresholdUnusuallyHigh(),
+    pre_init_triggered_during: getLastPreInitTriggerDuring(),
+    audio_element_preauthorized: takeRecordingStartPreauthorizedFlag(),
+    recorder_refreshed_on_late_start: takeRecorderRefreshedOnLateStartForTelemetry(),
+    session_resumed: takeSessionResumedForFirstRecordingStart(),
   };
 }

@@ -113,16 +113,21 @@ export async function withRetry<T>(
         }
         onUnrecoverable?.(err);
         const status = (err as { status?: number })?.status ?? null;
-        logApi?.(
-          'api_call_failed',
-          {
-            status_code: status,
-            error_message: err instanceof Error ? err.message : String(err),
-            retry_count: 0,
-          },
-          undefined,
-          err instanceof Error ? err.message : String(err)
-        );
+        const msg = err instanceof Error ? err.message : String(err);
+        /** Expected browser policy — not an API failure; do not emit `api_call_failed` noise. */
+        const skipSessionLog = msg === 'WEB_TTS_GESTURE';
+        if (!skipSessionLog) {
+          logApi?.(
+            'api_call_failed',
+            {
+              status_code: status,
+              error_message: msg,
+              retry_count: 0,
+            },
+            undefined,
+            msg
+          );
+        }
         throw Object.assign(err instanceof Error ? err : new Error(String(err)), { unrecoverable: true });
       }
 

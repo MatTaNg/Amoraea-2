@@ -19,6 +19,16 @@ const applySessionForApp = async (session: Session | null) => {
   } = await supabase.auth.getUser();
 
   if (verifyError) {
+    const msg = (verifyError.message ?? '').toLowerCase();
+    /** Auth user deleted in dashboard / SQL while JWT still in storage — refresh token invalid. */
+    const isInvalidSession =
+      msg.includes('user not found') ||
+      msg.includes('invalid refresh token') ||
+      msg.includes('refresh token not found');
+    if (isInvalidSession) {
+      await supabase.auth.signOut();
+      return { session: null, user: null };
+    }
     // Offline / transient: JWT from storage may omit email_confirmed_at; keep session if email present.
     if (session.user.email) {
       return { session, user: session.user };

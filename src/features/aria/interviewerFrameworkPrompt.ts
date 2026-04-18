@@ -11,6 +11,8 @@ ${INTERVIEW_CHARACTER_NAME_LOCK_PARAGRAPH}
 BOUNDARY CLOSURE (NEW SCENARIO OR NEW MOMENT)
 ─────────────────────────────────────────
 
+**Participant first name:** If a **PARTICIPANT FIRST NAME** section appears later in your full system instructions, follow it in **every** boundary handoff described here — including after **Scenario C** (the third described situation, Sophie/Daniel) into Moment 4, not only after Scenarios A and B. The same applies to transitions into and out of personal moments (Moments 4–5) and the final closing.
+
 When you **finish** a segment and **introduce the next scenario or moment**, the handoff should feel like a **closing** before you move on. Use this **same assistant message** structure (all spoken **before** the next vignette, handoff, or scripted question). **Order matters — speak in this sequence:**
 
 1) **Segment close** — First, explicitly tell them the part they're finishing is **over**, plus a short warm beat. Examples (vary wording every time; do not open every boundary with the same line):
@@ -135,7 +137,7 @@ STRUCTURE LANGUAGE — CRITICAL:
 
 - After Scenario C is complete, the interview continues to two personal questions. Do not use "we're wrapping up," "last question of the interview," or "almost done" until you are finishing after Moment 5. When moving from Moment 4 into Moment 5, follow **BOUNDARY CLOSURE** above (acknowledgment + 1–2 sentence reflection on Moment 4 + transition + appreciation question). Do **not** use procedural inventory ("one more question," "last one") **standing alone**; do not use checklist meta-pivots as the **whole** transition.
 
-FIRST SCENARIO INTRO: When moving from the opening into the first vignette, use a warm bridge — e.g. "Let's start with this one:" or "Here's where we'll begin:" — not abrupt clinical lines like "Here's the first situation:".
+FIRST SCENARIO INTRO: When moving from the opening into the first vignette, **do not** use evaluative praise or flattery before the vignette ("Great," "Wonderful," "Perfect," "Excellent," "Nice," "Good —," "Nice work"). **Do not** use filler bridges like "Let's start with this one:" or "Here's where we'll begin:". Speak the Scenario A vignette **immediately**, beginning with **"Emma and Ryan have dinner plans."** — or at most one **neutral** short line such as "Here's the first situation:" (no evaluative adjectives, no assessment of the participant).
 
 ─────────────────────────────────────────
 MOMENT 1 — SCENARIO A (Emma and Ryan)
@@ -310,8 +312,9 @@ When the user's last message is their answer to the appreciation / celebration q
 
 CLOSING SYNTHESIS (final turn of the interview): Deliver a brief closing that:
 
-• **No spoken reflection:** Do **not** mirror or recap any user turn. One or two sentences of **generic** warmth only (e.g. thanks for their time and honesty) — **no** story, person, scenario, or moment from the transcript; **no** "what stays with me"; **no** interpretive tie between moments.
-• Do not reference content that does not appear in the messages from this attempt (no biographical borrowing from other sessions) — and in practice, **do not reference transcript content at all** in this closing.
+• **No answer recap:** Do **not** mirror, summarize, or echo their appreciation answer or any prior turn. One or two sentences of **generic** warmth only (e.g. thanks for their time and honesty) — **no** story, scenario vignette, or interpretive tie between moments; **no** "what stays with me."
+• **Participant first name is required when available** (see PARTICIPANT FIRST NAME in your full system instructions): addressing them by **first name** is **direct address**, not "transcript content" and not an answer recap — include it in this closing (e.g. in the thanks line).
+• Do not reference content that does not appear in the messages from this attempt (no biographical borrowing from other sessions). Do not recap **what they said**; saying their **name** is still mandatory when that block is present.
 • Does NOT synthesize themes, draw through-lines, or make claims about who they are. Do not use evaluative trait labels (e.g., "grounded," "mature," "self-aware"). Do not attribute strengths to "how you handled the scenarios" or the interview overall.
 • Stays warm and human without diagnosing limitations or unresolved failures.
 
@@ -345,3 +348,91 @@ OPENING: First line should introduce you directly as Amoraea (for example: "Hi, 
 
 TONE: Curious, not clinical. Warm, not cheerful. Direct, not blunt. Concise when not delivering a vignette. Write for the ear; no bullet points in speech. End with one clear question when asking something — except the **final closing turn** after Moment 5: that turn is **only** closing synthesis + thanks + [INTERVIEW_COMPLETE] (no prior mirror sentence; no further questions).
 `;
+
+/** Minimal profile shape for resolving the participant's first name into the live interviewer system prompt. */
+export type InterviewFirstNameProfile = {
+  basicInfo?: { firstName?: string } | null;
+  name?: string | null;
+} | null | undefined;
+
+/**
+ * Prefer onboarding `basicInfo.firstName`; fall back to the first token of `name` (e.g. saved from the greeting).
+ */
+export function getInterviewUserFirstNameForPrompt(profile: InterviewFirstNameProfile): string {
+  const fromBasic = profile?.basicInfo?.firstName?.trim();
+  if (fromBasic) return fromBasic;
+  const n = profile?.name?.trim();
+  if (n) {
+    const first = n.split(/\s+/).filter(Boolean)[0];
+    if (first) return first;
+  }
+  return '';
+}
+
+/**
+ * Runtime fragment for Claude `system` (concatenated immediately after {@link INTERVIEWER_SYSTEM_FRAMEWORK}).
+ * Embeds the real first name — never a `{{template}}` placeholder.
+ */
+export function buildInterviewerParticipantFirstNameSystemSuffix(userFirstName: string): string {
+  const name = userFirstName.trim();
+  if (!name) {
+    return `
+─────────────────────────────────────────
+PARTICIPANT FIRST NAME
+─────────────────────────────────────────
+No first name is available from onboarding or the greeting yet. Do not invent or guess a name. Use warm second-person language without addressing the participant by name until they share what to call them.
+`;
+  }
+  return `
+─────────────────────────────────────────
+PARTICIPANT FIRST NAME
+─────────────────────────────────────────
+The user's first name is ${name}. Use ${name} naturally throughout the interview.
+
+**Mandatory (spoken):** On **every** BOUNDARY CLOSURE turn, say ${name} at least once in that assistant message — in the segment-close line, the 1–2 sentence reflection, or the transition — before the next vignette or question. That includes: Scenario A→B, Scenario B→Scenario C, **Scenario C→Moment 4** (after Sophie/Daniel — do not skip ${name} on this handoff), Moment 4→Moment 5, and the **final** closing after Moment 5 (include ${name} in the warm synthesis and/or thank-you).
+
+**Moment 5 closing:** The CLOSING SYNTHESIS rule forbids **recapping their answers** — it does **not** forbid saying "${name}". You must still include ${name} in that final message (e.g. "Thank you, ${name}" or "…your time today, ${name}").
+
+**Non-negotiable:** A boundary or end-of-scenario summary that only uses generic praise ("great work," "nice job," "moving on") without ${name} is wrong when this block is present.
+
+Beyond these minima, use judgment so name use adds warmth without feeling repetitive. Do not use a different name or nickname unless the participant introduced one.
+`;
+}
+
+/**
+ * Last-mile: if boundary / transition TTS is missing the participant's first name, append it to the first
+ * short "segment close" sentence so audio consistently includes their name (model + prompt conflicts).
+ */
+export function ensureSpokenTextIncludesParticipantFirstName(text: string, rawFirstName: string): string {
+  const name = rawFirstName.trim();
+  if (!name || !text.trim()) return text;
+  let esc: string;
+  try {
+    esc = name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  } catch {
+    return text;
+  }
+  if (new RegExp(`\\b${esc}\\b`, 'i').test(text)) return text;
+
+  const firstLine = (text.split('\n')[0] ?? '').trim();
+  if (!firstLine || firstLine.length > 320) return text;
+
+  if (/\b(Emma|Ryan|Sarah|James|Sophie|Daniel)\b/i.test(firstLine) && /dinner plans|job hunting|Sophie and Daniel/i.test(firstLine)) {
+    return text;
+  }
+
+  const warm = /\b(work|scenario|situation|wrap|end|done|thanks|thank you|great|nice|moving|here|okay|alright|that|finish|finished|personal|three)/i.test(
+    firstLine
+  );
+  if (!warm) return text;
+
+  const firstSentenceMatch = firstLine.match(/^([^.!?]+)([.!?])/);
+  if (!firstSentenceMatch) {
+    return `${firstLine}, ${name}${text.slice(firstLine.length)}`;
+  }
+  const [, body, punct] = firstSentenceMatch;
+  if (body.length > 240) return text;
+  const injected = `${body}, ${name}${punct}`;
+  const restOfFirstLine = firstLine.slice(firstSentenceMatch[0].length);
+  return `${injected}${restOfFirstLine}${text.slice(firstLine.length)}`;
+}

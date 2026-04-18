@@ -5,6 +5,7 @@
  */
 import { Platform } from 'react-native';
 import { remoteLog } from '@utilities/remoteLog';
+import { setRecordingSessionActive } from '@utilities/sessionLogging/sessionLogContext';
 
 export const TTS_AUTOPLAY_MESSAGE = '[TTS_AUTOPLAY]';
 export const TTS_AUTOPLAY_MIC_STOP_MESSAGE = '[TTS_AUTOPLAY_MIC_STOP]';
@@ -83,6 +84,8 @@ export function logWebMicRecordingStopped(payload: {
     ...ctx,
     ts: Date.now(),
   });
+  /** Recording session ends when the mic stops and the blob is finalized — before transcription / TTS. */
+  setRecordingSessionActive(false);
 }
 
 /** Native: recording stopped and blob ready (parity for non-web sessions). */
@@ -91,4 +94,5 @@ export function logNativeMicRecordingStopped(payload: { blobBytes: number; platf
     ...payload,
     ts: Date.now(),
   });
+  setRecordingSessionActive(false);
 }

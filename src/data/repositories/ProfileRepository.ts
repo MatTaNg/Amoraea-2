@@ -1,4 +1,5 @@
 import { supabase } from '../supabase/client';
+import { signOutIfUsersAuthFkViolation } from '../supabase/signOutIfUsersAuthFkViolation';
 import {
   Profile,
   ProfileUpdate,
@@ -188,7 +189,10 @@ export class ProfileRepository {
       .single();
 
     if (error) {
-      const err = error as { message?: string; details?: string; hint?: string };
+      const err = error as { code?: string; message?: string; details?: string; hint?: string };
+      if (await signOutIfUsersAuthFkViolation(err)) {
+        throw new Error('Your session is no longer valid. Please sign in again.');
+      }
       const extra = [err.details, err.hint].filter(Boolean).join('; ');
       const fullMessage = extra ? `${error.message} — ${extra}` : error.message;
       throw new Error(`Failed to upsert profile: ${fullMessage}`);

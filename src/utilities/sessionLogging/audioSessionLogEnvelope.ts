@@ -26,7 +26,23 @@ export type InterviewDeviceEnvironmentPayload = {
 let deviceSnapshot: DeviceSnapshot = { device_model: null, os_version: null, app_version: null };
 let lastEnv: InterviewDeviceEnvironmentPayload | null = null;
 let lastInputRouteLabel = 'unknown';
-let lastOutputRouteLabel: 'speaker' | 'bluetooth' | 'wired_headset' | 'airpods' | 'unknown' = 'unknown';
+export type SessionOutputRouteLabel =
+  | 'speaker'
+  | 'bluetooth'
+  | 'wired_headset'
+  | 'airpods'
+  | 'headphones'
+  | 'unknown'
+  | 'permission_required';
+let lastOutputRouteLabel: SessionOutputRouteLabel = 'unknown';
+/** Web + best-effort: headphones / BT / wired output likely in use; null = unknown (no labels / no inference). */
+let lastHeadphonesConnected: boolean | null = null;
+/** JSON string of last enumerated devices (audit). */
+let lastDevicesAuditJson: string | null = null;
+let lastActiveTrackSettings: Record<string, unknown> | null = null;
+let lastHeadphoneDetectionStatus: string | null = null;
+let lastEnumerateDevicesResult: string | null = null;
+let lastTimeSincePermissionGrantedMs: number | null = null;
 let lastAudioEventType: string | null = null;
 let interviewWallClockStartMs: number | null = null;
 
@@ -42,9 +58,59 @@ export function getLastInterviewDeviceEnvironment(): InterviewDeviceEnvironmentP
   return lastEnv;
 }
 
-export function setSessionAudioRoutes(input: string, output: typeof lastOutputRouteLabel): void {
+export function setSessionAudioRoutes(input: string, output: SessionOutputRouteLabel): void {
   lastInputRouteLabel = input;
   lastOutputRouteLabel = output;
+}
+
+function normalizeSessionOutputRoute(s: string): SessionOutputRouteLabel {
+  const allowed: SessionOutputRouteLabel[] = [
+    'speaker',
+    'bluetooth',
+    'wired_headset',
+    'airpods',
+    'headphones',
+    'unknown',
+    'permission_required',
+  ];
+  return allowed.includes(s as SessionOutputRouteLabel) ? (s as SessionOutputRouteLabel) : 'unknown';
+}
+
+/** Web: apply inference from `enumerateDevices` + label heuristics. */
+export function setSessionAudioRoutesFromWebInference(inf: {
+  input_route: string;
+  output_route: string;
+  headphones_connected: boolean | null;
+  devices_audit: unknown;
+  active_track_settings?: Record<string, unknown> | null;
+  headphone_detection_status?: string | null;
+  enumerate_devices_result?: string | null;
+  time_since_permission_granted_ms?: number | null;
+}): void {
+  lastInputRouteLabel = inf.input_route;
+  lastOutputRouteLabel = normalizeSessionOutputRoute(inf.output_route);
+  lastHeadphonesConnected = inf.headphones_connected;
+  lastDevicesAuditJson =
+    inf.devices_audit === undefined || inf.devices_audit === null
+      ? JSON.stringify([])
+      : JSON.stringify(inf.devices_audit);
+  lastActiveTrackSettings =
+    inf.active_track_settings != null ? { ...inf.active_track_settings } : null;
+  lastHeadphoneDetectionStatus = inf.headphone_detection_status ?? null;
+  lastEnumerateDevicesResult = inf.enumerate_devices_result ?? null;
+  lastTimeSincePermissionGrantedMs = inf.time_since_permission_granted_ms ?? null;
+}
+
+export function getSessionAudioRoutesSnapshot(): {
+  input_route: string;
+  output_route: SessionOutputRouteLabel;
+  headphones_connected: boolean | null;
+} {
+  return {
+    input_route: lastInputRouteLabel,
+    output_route: lastOutputRouteLabel,
+    headphones_connected: lastHeadphonesConnected,
+  };
 }
 
 export function markInterviewSessionClockStart(): void {
@@ -71,6 +137,15 @@ export function getAudioCorrelationFields(): Record<string, unknown> {
     thermal_state: e?.thermal_state ?? 'unknown',
     input_route: lastInputRouteLabel,
     output_route: lastOutputRouteLabel,
+    /** Same as `output_route` — explicit alias for TTS / playback telemetry. */
+    audio_output_route: lastOutputRouteLabel,
+    headphones_connected: lastHeadphonesConnected,
+    /** Raw JSON array from last enumerateDevices audit (may be `[]`); never omit when web inference ran. */
+    audio_devices_enumerated_json: lastDevicesAuditJson ?? JSON.stringify([]),
+    active_track_settings: lastActiveTrackSettings,
+    headphone_detection_status: lastHeadphoneDetectionStatus,
+    enumerate_devices_result: lastEnumerateDevicesResult,
+    time_since_permission_granted_ms: lastTimeSincePermissionGrantedMs,
     bluetooth_connected: e?.bluetooth_connected ?? false,
     available_memory_mb: e?.available_memory_mb ?? null,
     low_memory_warning: e?.low_memory_warning ?? false,

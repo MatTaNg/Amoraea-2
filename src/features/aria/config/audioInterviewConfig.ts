@@ -32,7 +32,8 @@ let logged = false;
 
 /** Peak metering (dBFS, roughly -160…0 from expo-av). Louder = closer to 0. */
 export function getAudioVadSpeechMeteringMinDb(): number {
-  return envNum('AUDIO_VAD_SPEECH_METERING_MIN_DB', -52);
+  /** 6 dB more permissive for quiet microphones vs prior -52 default. */
+  return envNum('AUDIO_VAD_SPEECH_METERING_MIN_DB', -58);
 }
 
 /** Base + runtime route offset (e.g. built-in mic vs headset). */
@@ -45,7 +46,8 @@ export function getEffectiveVadSpeechMeteringMinDb(): number {
  * Typical quiet room noise: -60…-45; softer voices may peak around -50…-40.
  */
 export function getAudioAmbientNoiseCeilingDb(): number {
-  return envNum('AUDIO_AMBIENT_NOISE_CEILING_DB', -58);
+  /** 6 dB more permissive — was -58. */
+  return envNum('AUDIO_AMBIENT_NOISE_CEILING_DB', -64);
 }
 
 export function getEffectiveAmbientNoiseCeilingDb(): number {
@@ -80,9 +82,15 @@ export function getAudioSilenceDetectionThresholdMsForLogs(): number | null {
   return null;
 }
 
+/** After TTS, if the user starts recording later than this, `late_start` / `late_start_extended` apply (ms). */
+export function getLateStartThresholdMs(): number {
+  return envInt('LATE_START_THRESHOLD_MS', 10_000);
+}
+
 /** RMS floor (0–1) for web AudioContext energy probe — below this, likely silent. */
 export function getAudioWebRmsEnergyFloor(): number {
-  return envNum('AUDIO_WEB_RMS_ENERGY_FLOOR', 0.012);
+  /** ~6 dB lower linear floor than 0.012 for quiet capture paths. */
+  return envNum('AUDIO_WEB_RMS_ENERGY_FLOOR', 0.006);
 }
 
 export function logAudioInterviewConfigOnce(): void {

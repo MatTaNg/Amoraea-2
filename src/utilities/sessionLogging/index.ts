@@ -12,6 +12,7 @@ export {
   getSessionLogRuntime,
   resetSessionLogRuntime,
   setSessionLogAttemptId,
+  setSessionLogsRequireAttemptId,
   setSessionLogPlatform,
   setSessionCorrelationId,
   markQuestionDelivered,

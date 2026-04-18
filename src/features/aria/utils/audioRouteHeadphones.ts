@@ -4,6 +4,7 @@
  */
 import { Platform } from 'react-native';
 import type { RecordingInput } from 'expo-audio';
+import { inferWebAudioRoutesFromDevices } from '@utilities/sessionLogging/webMediaDeviceAudioRoute';
 
 export type HeadphoneProbeResult = {
   /** Raw input when available */
@@ -61,20 +62,22 @@ async function probeWeb(): Promise<RecordingInput | null> {
     return null;
   }
   try {
-    const devices = await navigator.mediaDevices.enumerateDevices();
-    const inputs = devices.filter((d) => d.kind === 'audioinput');
-    if (inputs.length === 0) return null;
-    const label = inputs.map((d) => d.label || '').join('|').toLowerCase();
-    const syntheticName = label || 'default inputs';
-    const looksHeadset =
-      /headphone|headset|airpod|bluetooth|usb|jabra|sony|beats|buds|earphone|wireless|logitech|hyperx|plantronics|surface|bose|sennheiser/i.test(
-        syntheticName
-      );
-    const looksBuiltInOnly = /built[- ]?in|internal|default|macbook|laptop/i.test(syntheticName) && !looksHeadset;
+    const inf = await inferWebAudioRoutesFromDevices();
+    if (inf.labels_empty && inf.input_route === 'permission_required') {
+      return null;
+    }
+    const syntheticName =
+      inf.devices_audit
+        .map((d) => d.label)
+        .filter(Boolean)
+        .join('|')
+        .slice(0, 200) || `${inf.input_route}|${inf.output_route}`;
+    const looksHeadset = inf.headphones_connected || inf.output_route === 'bluetooth' || inf.output_route === 'airpods';
+    const looksBuiltInOnly = inf.input_route === 'built_in_mic' && !looksHeadset;
     return {
-      uid: inputs[0]?.deviceId ?? 'web-default',
+      uid: inf.devices_audit.find((d) => d.kind === 'audioinput')?.deviceId ?? 'web-default',
       type: looksHeadset ? 'WebHeadsetHint' : looksBuiltInOnly ? 'WebBuiltInHint' : 'WebUnknown',
-      name: syntheticName.slice(0, 200),
+      name: syntheticName,
     };
   } catch {
     return null;

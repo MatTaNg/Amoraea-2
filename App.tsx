@@ -142,7 +142,7 @@ const InterviewAppNavigator = ({
 
 const AppNavigator = ({ userId }: { userId: string }) => {
   const { user } = useAuth();
-  const { data: profile, isPending } = useQuery({
+  const { data: profile, isPending, isError } = useQuery({
     queryKey: ['profile', userId],
     queryFn: async () => {
       let p = await profileRepository.getProfile(userId);
@@ -160,6 +160,7 @@ const AppNavigator = ({ userId }: { userId: string }) => {
       return p ?? null;
     },
     enabled: !!userId,
+    retry: false,
   });
 
   useEffect(() => {
@@ -168,7 +169,13 @@ const AppNavigator = ({ userId }: { userId: string }) => {
     }
   }, [userId]);
 
-  if (isPending || !profile) {
+  if (isPending) {
+    return <LoadingScreen />;
+  }
+  if (isError) {
+    return <LoadingScreen />;
+  }
+  if (!profile) {
     return <LoadingScreen />;
   }
 
