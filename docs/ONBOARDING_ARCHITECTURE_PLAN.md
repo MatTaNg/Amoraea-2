@@ -1,7 +1,7 @@
 # Full Onboarding Architecture — Plan & File Map
 
 ## Summary
-Four sequential stages: Basic Info → AI Interview (Gate 1) → Psychometrics (Gate 2, approved only) → Compatibility (Gate 3). Routing by `onboardingStage` and `applicationStatus`.
+Four sequential stages: Basic Info → AI Interview → Psychometrics (Gate 2, approved only) → Compatibility (Gate 3). Routing by `onboardingStage` and `applicationStatus`.
 
 ---
 
@@ -9,10 +9,8 @@ Four sequential stages: Basic Info → AI Interview (Gate 1) → Psychometrics (
 
 | File | Purpose |
 |------|---------|
-| `supabase/migrations/20260218120000_onboarding_gates.sql` | Add columns: onboarding_stage, application_status, profile_visible, basic_info, gate1_score, gate2_psychometrics, gate3_compatibility |
-| `src/domain/models/OnboardingGates.ts` | Types: OnboardingStage, ApplicationStatus, BasicInfo, Gate1Score, Gate2Psychometrics, Gate3Compatibility |
-| `src/features/onboarding/evaluateGate1.ts` | Pure function evaluateGate1(scoringResult) → { passed, averageScore, failReasons } |
-| `src/features/onboarding/__tests__/evaluateGate1.test.ts` | Unit tests for evaluateGate1 |
+| `supabase/migrations/20260218120000_onboarding_gates.sql` | Add columns: onboarding_stage, application_status, profile_visible, basic_info, gate2_psychometrics, gate3_compatibility |
+| `src/domain/models/OnboardingGates.ts` | Types: OnboardingStage, ApplicationStatus, BasicInfo, Gate2Psychometrics, Gate3Compatibility |
 | `src/app/screens/onboarding/Stage1BasicInfoScreen.tsx` | Single form: first name, age (18+), gender (+ Prefer not to say), attracted to, location (city+country / use my location), occupation, single photo, height (cm/ft-in toggle), weight (kg/lbs toggle). Submit → store metric + BMI, set stage = interview, go to Stage 2 |
 | `src/app/screens/onboarding/InterviewFramingScreen.tsx` | "Before we begin" copy + [Begin conversation →], no back |
 | `src/app/screens/onboarding/PostInterviewScreen.tsx` | "Thank you" screen for all users after interview (no score, no pass/fail) |
@@ -27,10 +25,10 @@ Four sequential stages: Basic Info → AI Interview (Gate 1) → Psychometrics (
 
 | File | Changes |
 |------|---------|
-| `src/domain/models/Profile.ts` | Add BasicInfo, Gate1Score, Gate2Psychometrics, Gate3Compatibility, onboardingStage, applicationStatus, profileVisible; extend ProfileUpdate |
-| `src/data/repositories/ProfileRepository.ts` | Map new columns in getProfile/upsertProfile; parse/serialize basic_info, gate1_score, gate2_psychometrics, gate3_compatibility |
+| `src/domain/models/Profile.ts` | Add BasicInfo, Gate2Psychometrics, Gate3Compatibility, onboardingStage, applicationStatus, profileVisible; extend ProfileUpdate |
+| `src/data/repositories/ProfileRepository.ts` | Map new columns in getProfile/upsertProfile; parse/serialize basic_info, gate2_psychometrics, gate3_compatibility |
 | `App.tsx` | Replace current onboarding vs completed check with routing by onboardingStage + applicationStatus. Routes: basic_info → Stage1; interview → framing or Aria or post-interview; psychometrics → approved ? Gate2 reentry + Stage3 : under_review or post-interview; compatibility → Stage4; complete → main app |
-| `src/app/screens/AriaScreen.tsx` | Accept optional params (e.g. fromOnboarding); after scoring call evaluateGate1, upsert gate1Score + applicationStatus; navigate to PostInterviewScreen (no results UI for onboarding flow) |
+| `src/app/screens/AriaScreen.tsx` | Accept optional params (e.g. fromOnboarding); after scoring upsert applicationStatus; navigate to PostInterviewScreen (no results UI for onboarding flow) |
 | `src/features/compatibility/compatibilityQuestions.ts` | Reorder/group COMPATIBILITY_SECTIONS into the 12 sections specified (Relationship Intent, Children, Location, Time & Lifestyle, Finances, Intimacy, Living Environment, Faith & Values, Substance Use, Pets, Physical Preference, Profile Prompts) |
 | `src/app/screens/CompatibilityScreen.tsx` | When used as Stage 4: load/save gate3Compatibility, pass userHeightCm/userWeightKg to BMI selector, enforce prompt subset and 20–300 chars; on complete set onboardingStage = complete, profileVisible = true |
 | `src/features/profile/promptsByCategory.ts` | Add onboarding prompt subset (15 prompts from spec) and validation 20–300 chars for Stage 4 |
@@ -43,10 +41,10 @@ Four sequential stages: Basic Info → AI Interview (Gate 1) → Psychometrics (
    Current flow: 8 separate screens (Name, Age, Gender, …), `onboardingCompleted` boolean, `onboardingStep` number. **Decision:** New flow replaces this. We keep `onboardingCompleted` for backward compatibility but primary routing uses `onboarding_stage`. New users get `onboarding_stage = 'basic_info'`; after Stage 1 we set `onboarding_stage = 'interview'` and can set `onboardingCompleted = false` until Stage 4 complete.
 
 2. **Profile vs users table**  
-   All new fields live on `users` table (basic_info, gate1_score, etc. as JSONB). Existing columns (name, age, gender, …) stay; Stage 1 can sync basicInfo into name, age, gender, height_centimeters, etc., so the rest of the app keeps working.
+   All new fields live on `users` table (basic_info, gate2_psychometrics, etc. as JSONB). Existing columns (name, age, gender, …) stay; Stage 1 can sync basicInfo into name, age, gender, height_centimeters, etc., so the rest of the app keeps working.
 
 3. **Interview UI**  
-   Early spec referred to a legacy web `ai_interviewer` prototype. **Decision:** The product interview lives in **AriaScreen** (React Native): system prompts in `interviewerFrameworkPrompt.ts`, `INTERVIEW_COMPLETE`, per-scenario scoring, Gate 1 (`evaluateGate1`, `gate1Score`, `applicationStatus`), and navigation to PostInterview. The old duplicate `ai_interviewer (1).jsx` asset was removed from the repo.
+   Early spec referred to a legacy web `ai_interviewer` prototype. **Decision:** The product interview lives in **AriaScreen** (React Native): system prompts in `interviewerFrameworkPrompt.ts`, `INTERVIEW_COMPLETE`, per-scenario scoring, weighted gate (`computeGateResult`), `applicationStatus`, and navigation to PostInterview. The old duplicate `ai_interviewer (1).jsx` asset was removed from the repo.
 
 4. **DSI-SF**  
    Spec: "DSI-SF — Dyadic satisfaction (4 items)". Codebase has DSI-SF as **Differentiation of Self** (20 items). **Decision:** Keep existing DSI (differentiation) for Gate 2; gate2Psychometrics.dsisf can store the DSI total/mean as `satisfactionScore` for API compatibility, or we add a separate 4-item Dyadic Satisfaction scale later. Document in code.
@@ -78,11 +76,11 @@ Four sequential stages: Basic Info → AI Interview (Gate 1) → Psychometrics (
 ## Implementation order
 
 1. Migration + domain types (OnboardingGates.ts, Profile updates, Repository)
-2. evaluateGate1 + tests
-3. App.tsx routing
-4. Stage 1 screen
-5. Interview framing + Post-interview + Under-review screens
-6. AriaScreen integration (evaluateGate1, save gate1Score/applicationStatus, navigate to post-interview)
+2. App.tsx routing
+3. Stage 1 screen
+4. Interview framing + Post-interview + Under-review screens
+5. AriaScreen integration (save applicationStatus, navigate to post-interview)
+6. Weighted gate tests (`computeGateResult` / `computeGateResultCore`)
 7. Gate 2 reentry + Stage 3 (psychometrics) reusing FullAssessmentScreen instruments
 8. Stage 4 compatibility (sectioned flow, BMI from basicInfo, prompts subset)
 9. CompatibilityScreen dual mode (standalone vs onboarding Stage 4)

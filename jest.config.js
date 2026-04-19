@@ -23,12 +23,6 @@ module.exports = {
   coverageReporters: ['text', 'text-summary', 'lcov', 'html'],
   /** Guardrails for high-value pure logic; full-app % stays low. */
   coverageThreshold: {
-    'src/features/onboarding/evaluateGate1.ts': {
-      statements: 95,
-      branches: 90,
-      functions: 100,
-      lines: 95,
-    },
     'src/data/repositories/CompatibilityRepository.ts': {
       statements: 100,
       branches: 100,

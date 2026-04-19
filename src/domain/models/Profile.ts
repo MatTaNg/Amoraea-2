@@ -9,7 +9,7 @@ export interface Location {
 }
 
 /** Onboarding gates (Stage 1–4) — re-export for convenience */
-export type { OnboardingStage, ApplicationStatus, BasicInfo, Gate1Score, Gate2Psychometrics, Gate3Compatibility } from './OnboardingGates';
+export type { OnboardingStage, ApplicationStatus, BasicInfo, Gate2Psychometrics, Gate3Compatibility } from './OnboardingGates';
 
 /** One profile prompt answer (UX only, not used by algorithm). */
 export interface ProfilePromptAnswer {
@@ -48,7 +48,6 @@ export interface Profile {
   applicationStatus: ApplicationStatus;
   profileVisible: boolean;
   basicInfo: BasicInfo | null;
-  gate1Score: Gate1Score | null;
   gate2Psychometrics: Gate2Psychometrics | null;
   gate3Compatibility: Gate3Compatibility | null;
   /** Partial ECR/TIPI/DSI/BRS/PVQ answers for Stage 3 resume. */
@@ -82,7 +81,6 @@ export interface ProfileUpdate {
   applicationStatus?: ApplicationStatus;
   profileVisible?: boolean;
   basicInfo?: BasicInfo | null;
-  gate1Score?: Gate1Score | null;
   gate2Psychometrics?: Gate2Psychometrics | null;
   gate3Compatibility?: Gate3Compatibility | null;
   psychometricsProgress?: Record<string, Record<string, number>> | null;

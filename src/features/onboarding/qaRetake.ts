@@ -11,7 +11,7 @@ export function isQaRetakeSignupCode(raw: string | null | undefined): boolean {
 
 /**
  * Reset interview progress so the user can run the interview again, without clearing
- * stored scores on `users` (weighted, pillar, pass, completion time, gate1) — for QA accounts.
+ * stored scores on `users` (weighted, pillar, pass, completion time) — for QA accounts.
  */
 export async function resetInterviewForQaRetake(userId: string): Promise<void> {
   const { data: userData } = await supabase

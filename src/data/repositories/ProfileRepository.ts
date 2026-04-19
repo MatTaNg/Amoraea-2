@@ -7,7 +7,6 @@ import {
   Location,
   ProfilePromptAnswer,
   BasicInfo,
-  Gate1Score,
   Gate2Psychometrics,
   Gate3Compatibility,
 } from '@domain/models/Profile';
@@ -52,25 +51,6 @@ function parseBasicInfo(v: unknown): BasicInfo | null {
     weightKg: typeof o.weightKg === 'number' ? o.weightKg : 0,
     bmi: typeof o.bmi === 'number' ? o.bmi : 0,
     occupation: typeof o.occupation === 'string' ? o.occupation : '',
-  };
-}
-
-function parseGate1Score(v: unknown): Gate1Score | null {
-  if (v === null || v === undefined || typeof v !== 'object') return null;
-  const o = v as Record<string, unknown>;
-  const pillarScores = o.pillarScores && typeof o.pillarScores === 'object' ? (o.pillarScores as Record<string, number>) : {};
-  const avg = typeof o.averageScore === 'number' ? o.averageScore : 0;
-  return {
-    pillarScores,
-    pillarConfidence: (o.pillarConfidence as Record<string, string>) ?? undefined,
-    averageScore: avg,
-    narrativeCoherence: typeof o.narrativeCoherence === 'string' ? o.narrativeCoherence : '',
-    behavioralSpecificity: typeof o.behavioralSpecificity === 'string' ? o.behavioralSpecificity : '',
-    noExampleConstructs: Array.isArray(o.noExampleConstructs) ? o.noExampleConstructs.filter((x): x is string => typeof x === 'string') : undefined,
-    avoidanceSignals: Array.isArray(o.avoidanceSignals) ? o.avoidanceSignals.filter((x): x is string => typeof x === 'string') : undefined,
-    passed: o.passed === true,
-    failReasons: Array.isArray(o.failReasons) ? o.failReasons.filter((x): x is string => typeof x === 'string') : [],
-    scoredAt: typeof o.scoredAt === 'string' ? o.scoredAt : new Date().toISOString(),
   };
 }
 
@@ -170,7 +150,6 @@ export class ProfileRepository {
     if (update.applicationStatus !== undefined) updateData.application_status = update.applicationStatus;
     if (update.profileVisible !== undefined) updateData.profile_visible = update.profileVisible;
     if (update.basicInfo !== undefined) updateData.basic_info = update.basicInfo;
-    if (update.gate1Score !== undefined) updateData.gate1_score = update.gate1Score;
     if (update.gate2Psychometrics !== undefined) updateData.gate2_psychometrics = update.gate2Psychometrics;
     if (update.gate3Compatibility !== undefined) updateData.gate3_compatibility = update.gate3Compatibility;
     if (update.psychometricsProgress !== undefined) updateData.psychometrics_progress = update.psychometricsProgress;
@@ -312,7 +291,6 @@ export class ProfileRepository {
     application_status?: string | null;
     profile_visible?: boolean | null;
     basic_info?: unknown;
-    gate1_score?: unknown;
     gate2_psychometrics?: unknown;
     gate3_compatibility?: unknown;
     psychometrics_progress?: unknown;
@@ -355,7 +333,6 @@ export class ProfileRepository {
       applicationStatus: parseApplicationStatus(data.application_status),
       profileVisible: data.profile_visible === true,
       basicInfo: parseBasicInfo(data.basic_info),
-      gate1Score: parseGate1Score(data.gate1_score),
       gate2Psychometrics: parseGate2Psychometrics(data.gate2_psychometrics),
       gate3Compatibility: parseGate3Compatibility(data.gate3_compatibility),
       psychometricsProgress: parsePsychometricsProgress(data.psychometrics_progress),

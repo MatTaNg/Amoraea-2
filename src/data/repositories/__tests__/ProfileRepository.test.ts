@@ -35,7 +35,6 @@ const baseUserRow = {
   application_status: 'pending',
   profile_visible: false,
   basic_info: null,
-  gate1_score: null,
   gate2_psychometrics: null,
   gate3_compatibility: null,
   psychometrics_progress: null,

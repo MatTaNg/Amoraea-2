@@ -8,6 +8,7 @@ import {
   hasScenarioCVignetteCommitmentThresholdSignal,
   extractScenario3CommitmentThresholdUserAnswerAfterPrompt,
   extractScenario3UserCorpusAfterLastRepairPrompt,
+  extractScenario3UserCorpusBeforeRepairPrompt,
   isScenarioCToPersonalHandoffAssistantContent,
   sliceTranscriptBeforeScenarioCToPersonalHandoff,
   hasScenarioCQ2OnTopicEngagement,
@@ -144,6 +145,16 @@ describe('probeAndScoringUtils', () => {
       { role: 'user' as const, content: 'They need to talk it through.', scenarioNumber: 3 },
     ];
     expect(extractScenario3UserCorpusAfterLastRepairPrompt(msgs)).toBe('They need to talk it through.');
+  });
+
+  it('extractScenario3UserCorpusBeforeRepairPrompt collects user turns before the repair prompt only', () => {
+    const msgs = [
+      { role: 'assistant' as const, content: 'When Daniel comes back — what do you make of that?', scenarioNumber: 3 },
+      { role: 'user' as const, content: 'He seems overwhelmed.', scenarioNumber: 3 },
+      { role: 'assistant' as const, content: 'How do you think this situation could be repaired?', scenarioNumber: 3 },
+      { role: 'user' as const, content: 'They should schedule a check-in.', scenarioNumber: 3 },
+    ];
+    expect(extractScenario3UserCorpusBeforeRepairPrompt(msgs)).toBe('He seems overwhelmed.');
   });
 
   it('does not treat Scenario C opening ("more personal" teaser) as Moment 4 handoff', () => {

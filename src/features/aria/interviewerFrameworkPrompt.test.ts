@@ -3,6 +3,7 @@ import {
   buildInterviewerParticipantFirstNameSystemSuffix,
   ensureSpokenTextIncludesParticipantFirstName,
   getInterviewUserFirstNameForPrompt,
+  sanitizeInterviewParticipantFirstNameForSpeech,
 } from './interviewerFrameworkPrompt';
 
 const SCENARIO_A_VIGNETTE_OPENING = 'Emma and Ryan have dinner plans.';
@@ -25,6 +26,18 @@ describe('Scenario A intro (framework copy)', () => {
   });
 });
 
+describe('sanitizeInterviewParticipantFirstNameForSpeech', () => {
+  it('rejects handles and email locals with digits', () => {
+    expect(sanitizeInterviewParticipantFirstNameForSpeech('mattang5280')).toBe('');
+    expect(sanitizeInterviewParticipantFirstNameForSpeech('user_123')).toBe('');
+  });
+
+  it('keeps normal first names', () => {
+    expect(sanitizeInterviewParticipantFirstNameForSpeech('Matt')).toBe('Matt');
+    expect(sanitizeInterviewParticipantFirstNameForSpeech('Mary Jane')).toBe('Mary');
+  });
+});
+
 describe('Participant first name for live interviewer prompt', () => {
   it('prefers basicInfo.firstName over profile.name', () => {
     expect(
@@ -33,6 +46,19 @@ describe('Participant first name for live interviewer prompt', () => {
         name: 'Alex Smith',
       })
     ).toBe('Alex');
+  });
+
+  it('uses sanitized basicInfo when profile.name is a username', () => {
+    expect(
+      getInterviewUserFirstNameForPrompt({
+        basicInfo: { firstName: 'Matt' },
+        name: 'mattang5280',
+      })
+    ).toBe('Matt');
+  });
+
+  it('does not use display_name / email-local style when it is not a real name', () => {
+    expect(getInterviewUserFirstNameForPrompt({ basicInfo: null, name: 'mattang5280' })).toBe('');
   });
 
   it('falls back to first token of name when basicInfo is empty', () => {
@@ -71,5 +97,21 @@ describe('ensureSpokenTextIncludesParticipantFirstName', () => {
   it('does not modify vignette-first lines', () => {
     const t = 'Emma and Ryan have dinner plans. Ryan takes a call.';
     expect(ensureSpokenTextIncludesParticipantFirstName(t, 'Sam')).toBe(t);
+  });
+
+  it('returns original text when raw first name is empty', () => {
+    const t = "Great work — that's the end of this scenario.";
+    expect(ensureSpokenTextIncludesParticipantFirstName(t, '')).toBe(t);
+    expect(ensureSpokenTextIncludesParticipantFirstName(t, '   ')).toBe(t);
+  });
+
+  it('does not append a username when the model already used a real first name', () => {
+    const t =
+      'Thanks for sticking with all of this, Matt — arranging that birthday surprise really shows you care. Thank you for being so open with me.';
+    expect(ensureSpokenTextIncludesParticipantFirstName(t, 'mattang5280')).toBe(t);
+  });
+
+  it('returns original when text is empty', () => {
+    expect(ensureSpokenTextIncludesParticipantFirstName('', 'Alex')).toBe('');
   });
 });

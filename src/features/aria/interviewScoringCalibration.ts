@@ -44,6 +44,30 @@ DECISION TEST: Does the accountability-relevant stretch include genuine ownershi
 Apply this distinction consistently across fictional scenarios and personal narrative answers.
 `;
 
+/**
+ * Fictional scenarios A–C: repair & accountability must weight spontaneous answers vs role-switch / structured repair asks.
+ * Used in per-scenario JSON scoring and full-interview holistic scoring (repair + accountability only).
+ */
+export const REPAIR_AND_ACCOUNTABILITY_UNPROMPTED_VS_PROMPTED_WEIGHTING = `
+REPAIR & ACCOUNTABILITY — UNPROMPTED VS. PROMPTED (fictional scenarios only; applies to **repair** and **accountability** markers — not mentalizing, attunement, contempt, appreciation, regulation, or commitment_threshold):
+
+Distinguish two response types in each scenario:
+
+1. **Unprompted initial response** — What the user said **before** any probe that asks them to step into the at-fault party’s shoes or before the scenario’s **general repair** question (Scenario C: before “How do you think this situation could be repaired?” or equivalent). This is their spontaneous reaction to the vignette and reflects instinct.
+
+2. **Prompted role-switch / structured repair response** — What they said **after** being explicitly asked to take that perspective (e.g. “If you were Ryan, how would you repair…?”, “If you were James, how would you repair…?”, or Scenario C’s general repair prompt). This answer is **scaffolded** and is **not** diagnostically equivalent to unprompted material.
+
+**Weighting (approximate, for judgment — not a formula on numbers):** The unprompted initial response should carry **about 70%** of the weight when assigning **repair** and **accountability** in that scenario slice. The prompted response is **supplementary (~30%)**. A polished repair answer that appears **only** after the role-switch / repair prompt must **not**, by itself, lift repair or accountability above what the unprompted evidence supports.
+
+**Ceiling when unprompted showed no repair instinct:** If the unprompted turn(s) show **no** repair instinct (e.g. exit the situation, condemn the person at fault, no curiosity about the other’s perspective, no ownership relevant to the dynamic), a strong prompted role-switch repair answer may **not** push **repair** or **accountability** above the **mid-range (5–6 maximum)** — they demonstrated they can answer a scaffolded question, not necessarily genuine repair capacity.
+
+**When unprompted already shows repair instinct** (empathy, curiosity, willingness to address the situation, ownership): use the prompted answer to **confirm or refine** the score **upward** within the rubric.
+
+**keyEvidence:** For **repair** and **accountability** in each scenario slice, explicitly state whether the cited evidence is **unprompted**, **prompted**, or **both** (and briefly which). This weighting must be auditable from keyEvidence alone.
+
+Do **not** change how you score other markers; do **not** alter construct definitions, floors, or cross-construct weights — only how **repair** and **accountability** evidence is weighted within each scenario’s answers.
+`;
+
 /** Scenario B (Sarah/James) — attunement/appreciation anchors for slice + holistic scoring models. */
 export const SCENARIO_B_ATTUNEMENT_APPRECIATION_ANCHORS = `
 SCENARIO B (Sarah/James) — ATTUNEMENT & APPRECIATION (canonical vignette):

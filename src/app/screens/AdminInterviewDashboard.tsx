@@ -35,6 +35,13 @@ import {
 import { ADMIN_CONSOLE_EMAIL } from '@/constants/adminConsole';
 import { adminRetryAIReasoningForAttempt } from '@utilities/adminRetryAIReasoning';
 import { confirmAsync } from '@utilities/alerts/confirmDialog';
+import { computeGateResultCore } from '@features/aria/computeGateResultCore';
+import {
+  classifyAdminGateOutcome,
+  formatGateFailureLines,
+  summarizeGateForAdmin,
+  type AdminGateOutcomeLabel,
+} from '@features/aria/adminGateDisplay';
 
 // Marker ids as stored in DB; construct keys match ai_reasoning.construct_breakdown
 const PILLAR_ROWS = [
@@ -157,6 +164,7 @@ type AttemptSummary = Pick<
   | 'weighted_score'
   | 'passed'
   | 'reasoning_pending'
+  | 'pillar_scores'
 >;
 
 const INTERVIEW_ATTEMPTS_FULL_SELECT = `
@@ -448,6 +456,13 @@ function formatAdminAttemptElapsed(start: string, end: string): string {
   return mins < 60 ? `${mins} min` : `${Math.floor(mins / 60)}h ${mins % 60}m`;
 }
 
+/** Clock time from start to completion, or elapsed so far when the attempt is still open. */
+function formatAttemptElapsedDisplay(attempt: { created_at: string; completed_at: string | null }): string {
+  const end = attempt.completed_at ?? new Date().toISOString();
+  const elapsed = formatAdminAttemptElapsed(attempt.created_at, end);
+  return attempt.completed_at ? elapsed : `${elapsed} · in progress`;
+}
+
 type UserGroup = {
   user: UserRow;
   attempts: AttemptSummary[];
@@ -498,7 +513,8 @@ async function fetchAdminUsersList(): Promise<FetchAdminUsersListResult> {
       completed_at,
       weighted_score,
       passed,
-      reasoning_pending
+      reasoning_pending,
+      pillar_scores
     `
     )
     .order('created_at', { ascending: false });
@@ -517,18 +533,30 @@ async function fetchAdminUsersList(): Promise<FetchAdminUsersListResult> {
 
   const attempts = (allAttempts ?? []) as AttemptSummary[];
 
+  const attemptFinishedMs = (a: AttemptSummary): number => {
+    const raw = a.completed_at ?? a.created_at;
+    const t = raw ? new Date(raw).getTime() : NaN;
+    return Number.isFinite(t) ? t : 0;
+  };
+
   const groups = users.map((user) => {
-    const userAttempts = attempts.filter((a) => a.user_id === user.id);
-    const latestAttempt =
-      userAttempts.length > 0
-        ? userAttempts.reduce((latest, a) => (a.attempt_number > latest.attempt_number ? a : latest))
-        : null;
+    const userAttempts = attempts
+      .filter((a) => a.user_id === user.id)
+      .sort((a, b) => attemptFinishedMs(b) - attemptFinishedMs(a));
+    const latestAttempt = userAttempts.length > 0 ? userAttempts[0] : null;
     return {
       user,
       attempts: userAttempts,
       latestAttempt,
     };
   });
+
+  groups.sort((a, b) => {
+    const ta = a.latestAttempt ? attemptFinishedMs(a.latestAttempt) : Number.NEGATIVE_INFINITY;
+    const tb = b.latestAttempt ? attemptFinishedMs(b.latestAttempt) : Number.NEGATIVE_INFINITY;
+    return tb - ta;
+  });
+
   return { groups, errorMessage: null };
 }
 
@@ -563,6 +591,63 @@ function getPassColor(value: 'pass' | 'fail' | 'none'): string {
   return '#7A9ABE';
 }
 
+function getAlmostPassColor(): string {
+  return '#D4A84B';
+}
+
+/** Pillar map for gate recompute: list rows use DB only; drill-down merges AI reasoning like the app. */
+function pillarScoresForGate(a: AttemptSummary | AttemptRow | null): Record<string, number> {
+  if (!a) return {};
+  if ('ai_reasoning' in a && (a as AttemptRow).ai_reasoning !== undefined) {
+    return getResolvedPillarScores(a as AttemptRow);
+  }
+  return normalizePillarScoresMap((a as AttemptSummary).pillar_scores) ?? {};
+}
+
+function getAdminOutcomeDisplay(attempt: AttemptSummary | AttemptRow | null): {
+  word: string;
+  color: string;
+  detail: string | null;
+  outcomeLabel: AdminGateOutcomeLabel;
+} {
+  if (!attempt) {
+    return { word: '—', color: '#7A9ABE', detail: null, outcomeLabel: 'none' };
+  }
+  const scores = pillarScoresForGate(attempt);
+  if (Object.keys(scores).length === 0) {
+    const pw = getPassWord(attempt);
+    const w = pw === 'none' ? '—' : pw;
+    return {
+      word: w,
+      color: pw === 'none' ? getPassColor('none') : getPassColor(pw),
+      detail: null,
+      outcomeLabel: 'none',
+    };
+  }
+  const gate = computeGateResultCore(scores);
+  const { label, detailLines } = classifyAdminGateOutcome(scores, gate);
+  if (label === 'pass') {
+    return { word: 'pass', color: getPassColor('pass'), detail: null, outcomeLabel: 'pass' };
+  }
+  if (label === 'almost') {
+    const detail =
+      detailLines.length > 0 ? detailLines.join(' · ') : summarizeGateForAdmin(scores, gate);
+    return { word: 'almost', color: getAlmostPassColor(), detail: detail ?? null, outcomeLabel: 'almost' };
+  }
+  if (label === 'fail') {
+    const detail = detailLines.length > 0 ? detailLines.join(' · ') : null;
+    return { word: 'fail', color: getPassColor('fail'), detail, outcomeLabel: 'fail' };
+  }
+  const pw = getPassWord(attempt);
+  const w = pw === 'none' ? '—' : pw;
+  return {
+    word: w,
+    color: pw === 'none' ? getPassColor('none') : getPassColor(pw),
+    detail: null,
+    outcomeLabel: 'none',
+  };
+}
+
 function formatAttemptDate(attempt: AttemptSummary | AttemptRow): string {
   const raw = attempt.completed_at ?? attempt.created_at;
   if (!raw) return '—';
@@ -571,9 +656,12 @@ function formatAttemptDate(attempt: AttemptSummary | AttemptRow): string {
 
 function formatAttemptTabLabel(attempt: AttemptSummary | AttemptRow): string {
   const raw = attempt.completed_at ?? attempt.created_at;
-  const pending =
-    attempt.reasoning_pending === true ||
-    !!(parseObject(attempt.ai_reasoning) as { _reasoningPending?: boolean } | null)?._reasoningPending;
+  const aiPending =
+    'ai_reasoning' in attempt
+      ? !!(parseObject((attempt as AttemptRow).ai_reasoning) as { _reasoningPending?: boolean } | null)
+          ?._reasoningPending
+      : false;
+  const pending = attempt.reasoning_pending === true || aiPending;
   const suffix = pending ? ' · AI narrative pending' : '';
   if (!raw) return `Test ${attempt.attempt_number}${suffix}`;
   return (
@@ -685,7 +773,7 @@ function UserCard({
   deleting: boolean;
 }) {
   const latest = userData.latestAttempt;
-  const passWord = getPassWord(latest);
+  const outcome = getAdminOutcomeDisplay(latest);
   return (
     <View style={styles.userCardRow}>
       <Pressable
@@ -696,7 +784,12 @@ function UserCard({
         <Text style={styles.userCardEmail}>{userData.user.email ?? '—'}</Text>
         <View style={styles.userCardMetaRow}>
           <View style={styles.userCardMetaLeft}>
-            <Text style={[styles.userCardStatus, { color: getPassColor(passWord) }]}>{passWord}</Text>
+            <Text style={[styles.userCardStatus, { color: outcome.color }]}>{outcome.word}</Text>
+            {outcome.detail ? (
+              <Text style={styles.userCardGateDetail} numberOfLines={3}>
+                {outcome.detail}
+              </Text>
+            ) : null}
             {userHasInProgressInterview(userData.user) ? (
               <Text style={styles.userCardInProgress}>In progress</Text>
             ) : null}
@@ -836,7 +929,11 @@ function SummaryTab({ attempt }: { attempt: AttemptRow }) {
     { key: 'moment_4', label: 'Moment 4', scores: moment4Bundle.scores, summary: buildMomentOrScenarioSummary('Moment 4', moment4Details, moment4Bundle.summary) },
     { key: 'moment_5', label: 'Moment 5', scores: moment5Bundle.scores, summary: buildMomentOrScenarioSummary('Moment 5', moment5Details, moment5Bundle.summary) },
   ];
-  const passWord = getPassWord(attempt);
+  const outcome = getAdminOutcomeDisplay(attempt);
+  const gateScores = pillarScoresForGate(attempt);
+  const gate = computeGateResultCore(gateScores);
+  const gateFailureLines =
+    !gate.pass && outcome.outcomeLabel !== 'none' ? formatGateFailureLines(gate, gateScores) : [];
   const reasoningPendingSummary =
     attempt.reasoning_pending === true ||
     !!(parseObject(attempt.ai_reasoning) as { _reasoningPending?: boolean } | null)?._reasoningPending;
@@ -857,9 +954,31 @@ function SummaryTab({ attempt }: { attempt: AttemptRow }) {
         <Text style={styles.metaValue}>{formatAttemptDate(attempt)}</Text>
       </View>
       <View style={styles.metaRow}>
-        <Text style={styles.metaLabel}>Result</Text>
-        <Text style={[styles.metaValue, { color: getPassColor(passWord), textTransform: 'lowercase' }]}>{passWord}</Text>
+        <Text style={styles.metaLabel}>Time elapsed</Text>
+        <Text style={styles.metaValue}>{formatAttemptElapsedDisplay(attempt)}</Text>
       </View>
+      <View style={styles.metaRow}>
+        <Text style={styles.metaLabel}>Result</Text>
+        <Text style={[styles.metaValue, { color: outcome.color, textTransform: 'lowercase' }]}>{outcome.word}</Text>
+      </View>
+      {outcome.outcomeLabel === 'almost' ? (
+        <View style={styles.metaRow}>
+          <Text style={styles.metaLabel}>Review</Text>
+          <Text style={[styles.metaValue, { color: getAlmostPassColor(), fontSize: 12 }]}>
+            Close to passing — human review suggested
+          </Text>
+        </View>
+      ) : null}
+      {gateFailureLines.length > 0 ? (
+        <View style={[styles.block, { marginTop: 4, marginBottom: 8, paddingVertical: 8 }]}>
+          <Text style={[styles.blockTitle, { marginBottom: 6 }]}>Why the gate failed</Text>
+          {gateFailureLines.map((line, i) => (
+            <Text key={`gate-${i}`} style={styles.blockText}>
+              • {line}
+            </Text>
+          ))}
+        </View>
+      ) : null}
       <View style={styles.metaRow}>
         <Text style={styles.metaLabel}>Weighted score</Text>
         <Text style={styles.metaValue}>{formatScoreCell(attempt.weighted_score)}</Text>
@@ -1325,18 +1444,23 @@ function UserDetails({
       ) : (
         <View style={styles.detailsLayout}>
           <ScrollView style={styles.attemptTabsColumn}>
-            {attempts.map((attempt) => (
-              <TouchableOpacity
-                key={attempt.id}
-                style={[styles.attemptTab, selectedAttempt?.id === attempt.id && styles.attemptTabActive]}
-                onPress={() => {
-                  setSelectedAttemptId(attempt.id);
-                  setActiveInnerTab('summary');
-                }}
-              >
-                <Text style={styles.attemptTabLabel}>{formatAttemptTabLabel(attempt)}</Text>
-              </TouchableOpacity>
-            ))}
+            {attempts.map((attempt) => {
+              const tabOutcome = getAdminOutcomeDisplay(attempt);
+              return (
+                <TouchableOpacity
+                  key={attempt.id}
+                  style={[styles.attemptTab, selectedAttempt?.id === attempt.id && styles.attemptTabActive]}
+                  onPress={() => {
+                    setSelectedAttemptId(attempt.id);
+                    setActiveInnerTab('summary');
+                  }}
+                >
+                  <Text style={styles.attemptTabLabel}>{formatAttemptTabLabel(attempt)}</Text>
+                  <Text style={[styles.attemptTabOutcome, { color: tabOutcome.color }]}>{tabOutcome.word}</Text>
+                  <Text style={styles.attemptTabElapsed}>{formatAttemptElapsedDisplay(attempt)}</Text>
+                </TouchableOpacity>
+              );
+            })}
           </ScrollView>
 
           <View style={styles.detailsPane}>
@@ -1802,6 +1926,12 @@ const styles = StyleSheet.create({
     fontWeight: '600',
     textTransform: 'lowercase',
   },
+  userCardGateDetail: {
+    marginTop: 4,
+    color: '#9BB0CC',
+    fontSize: 11,
+    lineHeight: 15,
+  },
   userCardTests: {
     color: '#7A9ABE',
     fontSize: 12,
@@ -1811,8 +1941,8 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
   },
   attemptTabsColumn: {
-    width: '25%',
-    minWidth: 220,
+    flex: 1,
+    minWidth: 0,
     borderRightWidth: 1,
     borderRightColor: 'rgba(82,142,220,0.12)',
     backgroundColor: 'rgba(13,17,32,0.6)',
@@ -1832,8 +1962,22 @@ const styles = StyleSheet.create({
     fontSize: 12,
     letterSpacing: 0.3,
   },
+  attemptTabOutcome: {
+    fontSize: 11,
+    fontWeight: '600',
+    textTransform: 'lowercase',
+    marginTop: 4,
+    letterSpacing: 0.2,
+  },
+  attemptTabElapsed: {
+    color: '#7A9ABE',
+    fontSize: 10,
+    marginTop: 4,
+    letterSpacing: 0.2,
+  },
   detailsPane: {
-    flex: 1,
+    flex: 3,
+    minWidth: 0,
   },
   innerTabsRow: {
     flexDirection: 'row',

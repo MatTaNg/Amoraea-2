@@ -20,7 +20,13 @@ import {
   getLastPreInitTriggerDuring,
   rearmWebMicPreInitAfterRecordingStop,
   tryConsumeWebPreInitRecorder,
+  replaceWebInterviewMicPreInitWithDefaultIdealDevice,
+  getPreInitAudioInputDeviceId,
 } from '@features/aria/utils/webInterviewMicPreInit';
+import {
+  buildWebMicGetUserMediaConstraints,
+  isDefaultOrCommunicationsDeviceId,
+} from '@features/aria/utils/webMicDeviceConstraints';
 
 function isWebMicStreamLive(stream: MediaStream | null): boolean {
   if (!stream?.active) return false;
@@ -163,6 +169,16 @@ export function useAudioRecorder({
   const webMediaRecorderPreparedRef = useRef<MediaRecorder | null>(null);
   const maxDurationTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const recordingCappedThisTurnRef = useRef(false);
+  /** Web: last captured `getSettings().deviceId` from the active mic stream (for default-device fallback). */
+  const lastWebMicDeviceIdRef = useRef<string | undefined>(undefined);
+  /** Web: at most one `ideal: 'default'` fallback switch per interview session (see Aria `resetWebMicInputFallbackState`). */
+  const webMicFallbackSwitchConsumedRef = useRef(false);
+
+  const captureWebMicDeviceIdFromStream = useCallback((stream: MediaStream | null) => {
+    const t = stream?.getAudioTracks?.()[0];
+    const id = t?.getSettings?.()?.deviceId;
+    lastWebMicDeviceIdRef.current = typeof id === 'string' && id.length > 0 ? id : lastWebMicDeviceIdRef.current;
+  }, []);
 
   const clearMaxDurationTimer = useCallback(() => {
     if (maxDurationTimerRef.current != null) {
@@ -215,7 +231,9 @@ export function useAudioRecorder({
   const requestPermission = useCallback(async (): Promise<boolean> => {
     if (Platform.OS === 'web') {
       try {
-        const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+        const constraints = await buildWebMicGetUserMediaConstraints();
+        const stream = await navigator.mediaDevices.getUserMedia(constraints);
+        captureWebMicDeviceIdFromStream(stream);
         stream.getTracks().forEach((t) => t.stop());
         setPermissionStatus('granted');
         return true;
@@ -228,7 +246,7 @@ export function useAudioRecorder({
     const { status } = await Audio.requestPermissionsAsync();
     setPermissionStatus(status === 'granted' ? 'granted' : 'denied');
     return status === 'granted';
-  }, []);
+  }, [captureWebMicDeviceIdFromStream]);
 
   const getSupportedMimeType = useCallback((): string | null => {
     if (typeof MediaRecorder === 'undefined') return null;
@@ -397,6 +415,7 @@ export function useAudioRecorder({
 
         if (usedWebModulePreInit && consumedResult) {
           stream = consumedResult.stream;
+          captureWebMicDeviceIdFromStream(stream);
           webStreamRef.current = stream;
           ensureWebAudioAnalyserForStream(stream);
           webMicPipelinePrimedRef.current = true;
@@ -419,12 +438,9 @@ export function useAudioRecorder({
           }
 
           if (!streamWasPrimedFromTts || !stream) {
-            stream = await navigator.mediaDevices.getUserMedia({
-              audio: {
-                echoCancellation: true,
-                noiseSuppression: true,
-              },
-            });
+            const constraints = await buildWebMicGetUserMediaConstraints();
+            stream = await navigator.mediaDevices.getUserMedia(constraints);
+            captureWebMicDeviceIdFromStream(stream);
             webStreamRef.current = stream;
             webMicPipelinePrimedRef.current = true;
             ensureWebAudioAnalyserForStream(stream);
@@ -685,6 +701,7 @@ export function useAudioRecorder({
       clearWebPrerollTimer,
       sleep,
       ensureWebAudioAnalyserForStream,
+      captureWebMicDeviceIdFromStream,
     ]
   );
 
@@ -803,6 +820,31 @@ export function useAudioRecorder({
     return ok;
   }, [requestPermission]);
 
+  /** Web: reset alongside interview session start so one default-device fallback is allowed per interview. */
+  const resetWebMicInputFallbackState = useCallback(() => {
+    webMicFallbackSwitchConsumedRef.current = false;
+    lastWebMicDeviceIdRef.current = undefined;
+  }, []);
+
+  /**
+   * Web: after repeated digital-silent buffers, switch pre-init mic to `ideal: 'default'`.
+   * No-op if already on default/communications or fallback was already consumed this session.
+   */
+  const switchWebInputToDefaultDevice = useCallback(async (): Promise<boolean> => {
+    if (Platform.OS !== 'web') return false;
+    if (webMicFallbackSwitchConsumedRef.current) return false;
+    if (isDefaultOrCommunicationsDeviceId(lastWebMicDeviceIdRef.current)) return false;
+    webMicFallbackSwitchConsumedRef.current = true;
+    const ok = await replaceWebInterviewMicPreInitWithDefaultIdealDevice();
+    if (ok) {
+      const id = getPreInitAudioInputDeviceId();
+      if (id) lastWebMicDeviceIdRef.current = id;
+    }
+    return ok;
+  }, []);
+
+  const getLastWebMicCaptureDeviceId = useCallback((): string | undefined => lastWebMicDeviceIdRef.current, []);
+
   return {
     isRecording,
     permissionStatus,
@@ -820,5 +862,11 @@ export function useAudioRecorder({
     /** Web: warm mic + analyser during TTS so tap does not pay getUserMedia latency. */
     prepareWebRecordingSession,
     abandonPreparedWebRecording,
+    /** Web: last mic `deviceId` from stream settings (permission / recording). */
+    getLastWebMicCaptureDeviceId,
+    /** Web: silent-buffer recovery — re-acquire pre-init stream with `ideal: 'default'`. */
+    switchWebInputToDefaultDevice,
+    /** Web: call when a new interview session starts (pairs with silent-buffer fallback budget). */
+    resetWebMicInputFallbackState,
   };
 }

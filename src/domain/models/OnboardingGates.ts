@@ -27,19 +27,6 @@ export interface BasicInfo {
   occupation: string;
 }
 
-export interface Gate1Score {
-  pillarScores: Record<string, number>;
-  pillarConfidence?: Record<string, string>;
-  averageScore: number;
-  narrativeCoherence: string;
-  behavioralSpecificity: string;
-  noExampleConstructs?: string[];
-  avoidanceSignals?: string[];
-  passed: boolean;
-  failReasons: string[];
-  scoredAt: string;
-}
-
 export interface Gate2Psychometrics {
   ecr12: { anxious: number; avoidant: number; classification: string };
   tipi: {

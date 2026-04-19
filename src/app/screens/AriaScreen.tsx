@@ -29,6 +29,13 @@ import {
   getInterviewUserFirstNameForPrompt,
 } from '@features/aria/interviewerFrameworkPrompt';
 import {
+  buildMoment4HandoffForInterview,
+  buildScenario1To2BundleForInterview,
+  buildScenario2To3TransitionBody,
+  ensureScenario2BundleWhenOpeningWithoutVignette,
+} from '@features/aria/interviewTransitionBundles';
+import { resolveWebActiveGestureOverlayKind, type WebActiveGestureOverlayKind } from '@features/aria/webInterviewGestureOverlay';
+import {
   interviewAssistantTextHasDisallowedNameMarker,
   sanitizeAssistantInterviewerCharacterNames,
 } from '@/constants/interviewCharacterNames';
@@ -101,8 +108,6 @@ import {
   isWebInterviewPlaybackSurfaceActive,
 } from '@features/aria/utils/elevenLabsTts';
 import { ProfileRepository } from '@data/repositories/ProfileRepository';
-import { evaluateGate1 } from '@features/onboarding/evaluateGate1';
-import type { Gate1Score } from '@domain/models/OnboardingGates';
 import { supabase } from '@data/supabase/client';
 import {
   saveInterviewToStorage,
@@ -230,6 +235,7 @@ import {
   scenarioCCommitmentThresholdMatchDetail,
   extractScenario3CommitmentThresholdUserAnswerAfterPrompt,
   extractScenario3UserCorpusAfterLastRepairPrompt,
+  extractScenario3UserCorpusBeforeRepairPrompt,
   type ScenarioCorpusMessageSlice,
   isLikelyMisplacedPersonalNarrativeForScenarioCThreshold,
   isMisplacedScenarioCQ1Answer,
@@ -251,6 +257,7 @@ import {
 } from '@features/aria/aggregateMarkerScoresFromSlices';
 import {
   ACCOUNTABILITY_BLAME_SHIFT_VS_CLARITY_REQUEST,
+  REPAIR_AND_ACCOUNTABILITY_UNPROMPTED_VS_PROMPTED_WEIGHTING,
   SCENARIO_B_ATTUNEMENT_APPRECIATION_ANCHORS,
   SCORE_CALIBRATION_0_10,
 } from '@features/aria/interviewScoringCalibration';
@@ -844,22 +851,37 @@ function stripControlTokens(text: string): string {
     .trim();
 }
 
-const DECLINE_PHRASES = [
-  "i can't think of one", "i cant think of one", "i don't know", "i dont know",
-  "nothing comes to mind", "not really", "no", "nope", "can't think of anything",
-  "don't have", "can't think", "no example",
+/** Multi-word / distinctive decline fragments — substring match is OK. Never use bare `"no"` here: `includes("no")` hits "not", "now", "know", etc. */
+const DECLINE_PHRASE_SUBSTRINGS = [
+  "i can't think of one",
+  "i cant think of one",
+  "i don't know",
+  "i dont know",
+  "nothing comes to mind",
+  "not really",
+  "nope",
+  "can't think of anything",
+  "don't have",
+  "can't think",
+  "no example",
 ];
+
+function userTextLooksLikeDecline(lower: string): boolean {
+  if (DECLINE_PHRASE_SUBSTRINGS.some((phrase) => lower.includes(phrase))) return true;
+  /** Standalone "no" / "no thanks" — `\b` avoids false positives on "not", "now", "nothing", … */
+  return /\bno\b/i.test(lower);
+}
 
 function isDecline(text: string): boolean {
   const lower = text.toLowerCase().trim();
-  return DECLINE_PHRASES.some((phrase) => lower.includes(phrase)) || lower.length < 15;
+  return lower.length < 15 || userTextLooksLikeDecline(lower);
 }
 
 /** Moment 4 commitment follow-up must still fire on short analytical answers; only explicit pass phrases or empty utterances skip. */
 function isExplicitPassForMoment4CommitmentFollowUp(text: string): boolean {
   const lower = text.toLowerCase().trim();
   if (lower.length < 2) return true;
-  return DECLINE_PHRASES.some((phrase) => lower.includes(phrase));
+  return userTextLooksLikeDecline(lower);
 }
 
 function isAppreciationPromptText(text: string): boolean {
@@ -2133,31 +2155,6 @@ const SCENARIO_2_LABEL = 'Situation 2';
 const SCENARIO_2_OPENING = 'What do you think is going on here?';
 const SCENARIO_2_TEXT = `${SCENARIO_2_VIGNETTE}\n\n${SCENARIO_2_OPENING}`;
 
-/** Fallback lead when repairing stripped Scenario B vignette (live model should use BOUNDARY CLOSURE + reflection first). */
-const SCENARIO_1_TO_2_TRANSITION =
-  "Great work — that's the end of that scenario. Here's the next situation.";
-
-function buildScenario1To2BundleForInterview(firstName: string): string {
-  const n = firstName.trim();
-  const transition = n
-    ? `Great work, ${n} — that's the end of that scenario. Here's the next situation.`
-    : SCENARIO_1_TO_2_TRANSITION;
-  return `${transition}\n\n${SCENARIO_2_TEXT}`.trim();
-}
-
-/** Situation 1 → 2: model sometimes emits only Scenario B Q1 (vignette stripped). Repair with the canonical bundle. */
-function ensureScenario2BundleWhenOpeningWithoutVignette(
-  text: string,
-  interviewMoment: number,
-  firstName: string = ''
-): string {
-  if (interviewMoment !== 1) return text;
-  const raw = text.trim();
-  if (!raw || /sarah has been job hunting/i.test(raw)) return text;
-  if (!/what do you think is going on here\??\s*$/i.test(raw)) return text;
-  return buildScenario1To2BundleForInterview(firstName).trim();
-}
-
 const SCENARIO_3_LABEL = 'Situation 3';
 const SCENARIO_3_VIGNETTE =
   "Sophie and Daniel have had the same argument for the third time. Sophie feels unheard because Daniel goes silent or leaves, so the issue is never resolved. This time Sophie says 'we need to finish this.' Daniel tries to avoid the conversation again. Sophie says 'you can't just keep avoiding this.' Daniel's voice goes flat. He says 'I need ten minutes' and leaves. Sophie calls after him: 'that's exactly what I mean.' Thirty minutes later Daniel comes back and says 'okay, I'm ready. I should have come back sooner the other times. I didn't know what to say.' Sophie is still upset.";
@@ -2228,18 +2225,6 @@ function replaceOrphanScenarioCRepairWithQ1(text: string, priorAssistantContent:
   return SCENARIO_3_OPENING;
 }
 
-const SCENARIO_2_TO_3_TRANSITION =
-  "Great work — that's the end of this one, too. Here's the third situation — after this we'll move to something more personal.";
-
-/** Client-only S2→S3 body when the local path must inject the next vignette. */
-function buildScenario2To3TransitionBody(firstName: string = ''): string {
-  const n = firstName.trim();
-  const transition = n
-    ? `Great work, ${n} — that's the end of this one, too. Here's the third situation — after this we'll move to something more personal.`
-    : SCENARIO_2_TO_3_TRANSITION;
-  return `${transition}\n\n${SCENARIO_3_TEXT}`.trim();
-}
-
 /** First sentence of Scenario C vignette — re-inserted client-side when the model drops the repetition frame (Prompt 1). */
 const SCENARIO_3_REPETITION_OPENING_LINE = SCENARIO_3_VIGNETTE.slice(0, SCENARIO_3_VIGNETTE.indexOf('.') + 1);
 
@@ -2255,15 +2240,7 @@ const MOMENT_4_PERSONAL_LABEL = 'Personal reflection';
 const MOMENT_4_PERSONAL_CARD =
   "Have you ever held a grudge against someone, or had someone in your life you really didn't like? How did that happen, and where are you with it now?";
 /** After scenario 3 closing, the app injects this handoff so the model continues Moment 4 in the same thread. */
-function buildMoment4HandoffForInterview(firstName: string): string {
-  const n = firstName.trim();
-  const lead = n
-    ? `Good work, ${n}, you just finished the three situations — there are only two questions left. These questions are more about you. Here's the first one.`
-    : `Good work — you just finished the three situations. There are only two questions left. These questions are more about you. Here's the first one.`;
-  return `${lead}\n\n${MOMENT_4_PERSONAL_CARD}`;
-}
-
-const MOMENT_4_HANDOFF = buildMoment4HandoffForInterview('');
+const MOMENT_4_HANDOFF = buildMoment4HandoffForInterview('', MOMENT_4_PERSONAL_CARD);
 
 /**
  * True when the model skipped straight to the grudge / Moment-4 opening in the same turn that should still be Scenario C (commitment probe pending).
@@ -2969,6 +2946,7 @@ Does the user take genuine ownership of their part without deflecting, minimizin
 1-2 - No accountability. Justifies, blames, or dismisses.
 
 ${ACCOUNTABILITY_BLAME_SHIFT_VS_CLARITY_REQUEST}
+${REPAIR_AND_ACCOUNTABILITY_UNPROMPTED_VS_PROMPTED_WEIGHTING}
 CONTEMPT / CRITICISM
 Does the user recognize contempt and criticism as distinct from legitimate complaint? Can they identify when communication crosses from expressing hurt into attacking character?
 
@@ -3059,7 +3037,7 @@ CROSS-MOMENT WEIGHTING: Do not average mechanically across moments. Weight stron
 
 Example: Strong bilateral repair in Scenario A, one-sided blame in Scenario B → repair might be 7 with inconsistency noted — not a flat average of 5.
 
-CLARIFICATION-ONLY: Unprompted insights count more than dragged-out answers.
+CLARIFICATION-ONLY: Unprompted insights count more than dragged-out answers (consistent with **REPAIR & ACCOUNTABILITY — UNPROMPTED VS. PROMPTED** for repair/accountability in scenarios — not a substitute for that block).
 
 GENERIC RESPONSE PENALTY: If user stayed generic after clarification for a moment, cap markers primarily informed by that moment at 5 and note in keyEvidence.
 EXCEPTION FOR APPRECIATION: Do not apply this cap when the described act is concise but clearly attuned and relationally specific; concise-but-clear appreciation can still score high.
@@ -3073,9 +3051,9 @@ Score four dimensions 0–10 and communicationSummary as before. Use the same hu
 REPAIR COHERENCE: If diagnosed failure reappears in their repair attempt, lower accountability (and ownership language in communication quality) by 1–2 points.
 
 DIAGNOSTIC EMPHASIS:
-- Scenario A: contempt in Emma's lines; bilateral ownership; Ryan repair. Per-scenario slice scoring uses the same 10 = real-human ceiling and slice-independence rules as scenario JSON scoring — strong demand-withdraw / power-bid / implicit-priority mentalizing and pattern-level, behavioral Ryan repair can reach **10** when complete; do not cap Scenario A at 9 to leave room for later scenarios.
-- Scenario B: attunement to James redirecting Sarah's tears vs receiving her emotion; James leading with logistics vs emotional presence; appreciation (honoring Sarah vs transactional celebration). See SCENARIO B anchors below.
-- Scenario C: regulation, Daniel's return, Sophie's legitimacy; bilateral repair; commitment threshold (especially if they address when the relationship may no longer be workable).
+- Scenario A: contempt in Emma's lines; bilateral ownership; Ryan repair. For **repair** and **accountability** holistically, apply **REPAIR & ACCOUNTABILITY — UNPROMPTED VS. PROMPTED** across the Scenario A turns (unprompted vs repair-as-Ryan). Per-scenario slice scoring uses the same 10 = real-human ceiling and slice-independence rules as scenario JSON scoring — strong demand-withdraw / power-bid / implicit-priority mentalizing and pattern-level, behavioral Ryan repair can reach **10** when complete; do not cap Scenario A at 9 to leave room for later scenarios.
+- Scenario B: attunement to James redirecting Sarah's tears vs receiving her emotion; James leading with logistics vs emotional presence; appreciation (honoring Sarah vs transactional celebration). For **repair** and **accountability**, weight unprompted vs repair-as-James per **REPAIR & ACCOUNTABILITY — UNPROMPTED VS. PROMPTED**. See SCENARIO B anchors below.
+- Scenario C: regulation, Daniel's return, Sophie's legitimacy; bilateral repair; commitment threshold (especially if they address when the relationship may no longer be workable). For **repair** and **accountability**, weight pre–repair-prompt vs post–repair-prompt per **REPAIR & ACCOUNTABILITY — UNPROMPTED VS. PROMPTED**; commitment_threshold uses its own rules.
 
 ${SCENARIO_B_ATTUNEMENT_APPRECIATION_ANCHORS}
 - Personal grudge moment: contempt + metacognition + commitment threshold when they distinguish work-through vs walk-away conditions.
@@ -3196,21 +3174,28 @@ Authoritative answer for commitment_threshold:
 """${commitmentThresholdFocusAnswer.trim()}"""
 `
       : '';
-  const repairSoleSourceBlock =
-    scenarioNumber === 3 && scenario3RepairFocusAnswer?.trim()
+  const scenario3BeforeRepairExcerpt = extractScenario3UserCorpusBeforeRepairPrompt(
+    transcript as ScenarioCorpusMessageSlice[]
+  );
+  const scenario3AfterRepairExcerpt =
+    scenario3RepairFocusAnswer?.trim() ||
+    extractScenario3UserCorpusAfterLastRepairPrompt(transcript as ScenarioCorpusMessageSlice[]);
+  const scenario3RepairAccountabilityEvidenceBlock =
+    scenarioNumber === 3 && (scenario3BeforeRepairExcerpt.trim() || scenario3AfterRepairExcerpt.trim())
       ? `
-REPAIR SOLE SOURCE (Scenario C):
-For pillarScores.repair ONLY, base the score and keyEvidence solely on the following user answer to the repair question in this scenario (how the situation could be repaired / fixing the dynamic for Daniel and Sophie). Do not use the separate commitment-threshold follow-up (when the relationship is not working / when to walk away) for repair — that content informs commitment_threshold only.
-
-Authoritative answer for repair:
-"""${scenario3RepairFocusAnswer.trim()}"""
+SCENARIO C — REPAIR & ACCOUNTABILITY EVIDENCE (use with REPAIR & ACCOUNTABILITY — UNPROMPTED VS. PROMPTED above):
+- **Unprompted excerpt** (primary signal for repair & accountability in this slice — typically Q1 and prior user turns before the general repair prompt):
+"""${scenario3BeforeRepairExcerpt.trim() || '(none)'}"""
+- **Prompted excerpt** (supplementary — answer after "How do you think this situation could be repaired?" or equivalent; do not use commitment-threshold content for repair):
+"""${scenario3AfterRepairExcerpt.trim() || '(none)'}"""
+Score **repair** and **accountability** using the ~70% / ~30% unprompted/prompted weighting; tag **keyEvidence** as unprompted / prompted / both. Do not use the commitment-threshold follow-up for repair or accountability — that content is for commitment_threshold only.
 `
       : '';
   const scenario3RepairIsolationCalibration =
     scenarioNumber === 3
       ? `
 Scenario C — REPAIR isolated from COMMITMENT_THRESHOLD:
-- Score **repair** only from user turns responding to the **repair** prompt ("How do you think this situation could be repaired?" or equivalent). Exit-only, incompatibility, or "when to leave" framing in the **threshold** answer must **not** raise repair; if the repair-targeted answer is thin or exit-heavy, keep repair in the **3–5** range even when a later threshold answer sounds relationally mature or workable.
+- Apply **REPAIR & ACCOUNTABILITY — UNPROMPTED VS. PROMPTED** when scoring **repair** and **accountability** (combine unprompted + prompted excerpts per weighting; see Scenario C evidence block when present). Exit-only, incompatibility, or "when to leave" framing in the **threshold** answer must **not** raise repair or accountability; if prompted repair is thin or exit-heavy, keep repair in the **3–5** range even when a later threshold answer sounds relationally mature or workable.
 - Score **commitment_threshold** only from threshold-targeted turns (see COMMITMENT_THRESHOLD sole-source block when present). Do not lift commitment_threshold from repair-logistics-only content unless it clearly states walk-away or irrecoverability criteria for Daniel/Sophie.
 `
       : '';
@@ -3236,7 +3221,7 @@ MENTALIZING — examples of **complete** inference (when accurate to the vignett
 
 When that level of inference is **accurate** and **sufficient for the moment** and you **cannot** name a meaningful perspective-taking omission, assign **10**. Use **9** only if you can state a **concrete minor gap**. **Do not** systematically assign **9** for “strong Scenario A” to reserve **10** for later scenarios — **forbidden**.
 
-REPAIR (as Ryan) — examples of **ceiling-level** repair (when actually present in the user’s words), not a checklist:
+REPAIR (as Ryan) — apply **REPAIR & ACCOUNTABILITY — UNPROMPTED VS. PROMPTED** for **repair** and **accountability** in this slice (unprompted ≈ Q1 / pre–repair-as-Ryan; prompted ≈ repair-as-Ryan). Examples of **ceiling-level** repair (when actually present in the user’s words), not a checklist:
 - Owning not only the **incident** (e.g. the phone call) but the **pattern** it represents, with a **specific behavioral** commitment (not vague intent alone).
 - **Correct sequencing** when present in the answer: e.g. clear ownership of Ryan’s part **before** or alongside addressing how Emma’s contempt or dismissal landed — without using that ordering as a pretext to score down when the answer already satisfies bilateral repair at ceiling.
 
@@ -3248,6 +3233,9 @@ When repair is **bilateral where appropriate**, **pattern-aware**, **behaviorall
   const scenario2AccountabilityCalibration =
     scenarioNumber === 2
       ? `
+Scenario B (Sarah/James) — ACCOUNTABILITY & REPAIR (unprompted vs. prompted):
+- For **repair** and **accountability**, apply **REPAIR & ACCOUNTABILITY — UNPROMPTED VS. PROMPTED**: unprompted = user turn(s) **before** the "if you were James, how would you repair" (or equivalent) prompt; prompted = repair-as-James. Weight unprompted ~70%; tag keyEvidence. Other markers in this slice use the full transcript as usual.
+
 Scenario B (Sarah/James) — ACCOUNTABILITY CEILING (repair as James and comparable ownership turns in this slice):
 
 NAMED CALIBRATION — **OWNERSHIP + "BUT I ALSO NEED THEM"** (accountability **6–7 maximum**; **not 8–10**):
@@ -3330,7 +3318,7 @@ ${SCORE_CALIBRATION_0_10}
 TRANSCRIPT OF THIS SCENARIO ONLY:
 ${turns}
 ${commitmentThresholdSoleSourceBlock}
-${repairSoleSourceBlock}
+${scenario3RepairAccountabilityEvidenceBlock}
 
 SCORING INSTRUCTIONS:
 Score only the listed markers, based only on this transcript slice.
@@ -3341,10 +3329,13 @@ GENERIC responses: cap at 5 for that marker.
 
 ${ACCOUNTABILITY_BLAME_SHIFT_VS_CLARITY_REQUEST}
 
+${REPAIR_AND_ACCOUNTABILITY_UNPROMPTED_VS_PROMPTED_WEIGHTING}
+
 MENTALIZING and CONTEMPT (where scored) — register-neutral: Judge perspective-taking quality and, for Scenario A, score **contempt_recognition** vs **contempt_expression** separately per the Scenario A block. For **contempt_expression** in **every** scenario that lists it, score dismissive or derogatory framing toward **fictional** characters as fully as toward real people — clinical wording does not get a pass when the substance is character contempt. Flag patterns like “too sensitive,” “not capable,” “immature,” “unacceptable for an adult,” broad capability verdicts. Do not down-score formal language when the inference is accurate for mentalizing — but **contempt_expression** is about participant tone toward people in the slice, not accuracy of vignette reads.
 
 REPAIR COHERENCE: If repair attempt repeats the failure they diagnosed, lower accountability 1-2 points.
 Scenario A repair calibration:
+- For **repair** and **accountability**, apply **REPAIR & ACCOUNTABILITY — UNPROMPTED VS. PROMPTED**: unprompted = user turn(s) before the repair-as-Ryan prompt; prompted = the "if you were Ryan … repair" answer. Weight unprompted ~70%; tag keyEvidence.
 - If the repair answer contains significant deflection onto Emma's communication failures (e.g. "Emma needs to communicate better", centering what Emma should change, or framing repair primarily around Emma's behavior), score Repair in the 4-5 range.
 - Reserve 6+ for answers that keep clear ownership of Ryan's contribution without significant deflection.
 - Reserve 9-10 for strong bilateral repair with explicit ownership and no meaningful accountability deflection.
@@ -3565,26 +3556,6 @@ const OPENAI_API_KEY =
   getPublicEnv('EXPO_PUBLIC_OPENAI_API_KEY', 'openaiApiKey');
 const OPENAI_WHISPER_PROXY_URL =
   getResolvedWhisperProxyUrl();
-
-function buildGate1ScoreFromResults(results: InterviewResults): Gate1Score {
-  const pillarScores = results.pillarScores ?? {};
-  const evaluation = evaluateGate1({
-    pillarScores,
-    narrativeCoherence: results.narrativeCoherence,
-    behavioralSpecificity: results.behavioralSpecificity,
-  });
-  const sum = Object.values(pillarScores).reduce((a, v) => a + v, 0);
-  const count = Object.keys(pillarScores).length || 1;
-  return {
-    pillarScores,
-    averageScore: evaluation.averageScore,
-    narrativeCoherence: results.narrativeCoherence ?? 'moderate',
-    behavioralSpecificity: results.behavioralSpecificity ?? 'moderate',
-    passed: evaluation.passed,
-    failReasons: evaluation.failReasons,
-    scoredAt: new Date().toISOString(),
-  };
-}
 
 function bytesToBase64(bytes: Uint8Array): string {
   let binary = '';
@@ -3915,6 +3886,11 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
   /** Web: resume-from-storage welcome audio must start from a tap (not a timer) for autoplay policy. */
   const [webResumeWelcomeTapPending, setWebResumeWelcomeTapPending] = useState(false);
 
+  /** Web MediaRecorder: consecutive buffers with true digital silence (no samples + peak ≤ -200 dB) — triggers default-device fallback. */
+  const consecutiveDigitalSilenceForMicFallbackRef = useRef(0);
+  /** Web: after a successful default-device rebuild, set true until a recording yields non-zero audio (success log). */
+  const micFallbackSuccessPendingRef = useRef(false);
+
   const resetInterviewProgressRefs = useCallback(() => {
     resumeRepeatChoicePendingRef.current = false;
     resumeLastAssistantTextRef.current = null;
@@ -3942,6 +3918,8 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
     resetInterviewVadSession();
     resetWebInterviewGestureContext();
     gestureContextLostAtRef.current = null;
+    consecutiveDigitalSilenceForMicFallbackRef.current = 0;
+    micFallbackSuccessPendingRef.current = false;
   }, [userId]);
 
   const deleteTurnAudioFile = useCallback(async (nativeUri: string | null) => {
@@ -6240,17 +6218,7 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
         const { data: { session } } = await supabase.auth.getSession();
         const email = (session?.user?.email ?? '').toLowerCase();
         if (email === ADMIN_PASS_EMAIL.toLowerCase()) {
-          const adminGate1Score: Gate1Score = {
-            pillarScores: { ...FALLBACK_MARKER_SCORES_ALL_MARKERS },
-            averageScore: 7,
-            narrativeCoherence: 'high',
-            behavioralSpecificity: 'high',
-            passed: true,
-            failReasons: [],
-            scoredAt: new Date().toISOString(),
-          };
           await profileRepository.upsertProfile(userId, {
-            gate1Score: adminGate1Score,
             applicationStatus: 'approved',
             onboardingStage: 'complete',
           });
@@ -6278,7 +6246,12 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
       }
     }
 
-    if (isInterviewAppRoute && messages.length === 0 && !profile?.name?.trim() && looksLikeName(trimmed)) {
+    if (
+      isInterviewAppRoute &&
+      messages.length === 0 &&
+      !getInterviewUserFirstNameForPrompt(profile) &&
+      looksLikeName(trimmed)
+    ) {
       try {
         await profileRepository.upsertProfile(userId, { name: trimmed });
         queryClient.invalidateQueries({ queryKey: ['profile', userId] });
@@ -6319,11 +6292,11 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
       if (scenarioNumber === 1) {
         interviewMomentsCompleteRef.current[1] = true;
         currentInterviewMomentRef.current = 2;
-        nextContent = buildScenario1To2BundleForInterview(participantFirstNameForSpoken);
+        nextContent = buildScenario1To2BundleForInterview(participantFirstNameForSpoken, SCENARIO_2_TEXT);
       } else if (scenarioNumber === 2) {
         interviewMomentsCompleteRef.current[2] = true;
         currentInterviewMomentRef.current = 3;
-        nextContent = buildScenario2To3TransitionBody(participantFirstNameForSpoken);
+        nextContent = buildScenario2To3TransitionBody(participantFirstNameForSpoken, SCENARIO_3_TEXT);
       }
       if (scenarioNumber === 3) {
         if (personalHandoffInjectedRef.current) {
@@ -6332,7 +6305,7 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
           personalHandoffInjectedRef.current = true;
           interviewMomentsCompleteRef.current[3] = true;
           currentInterviewMomentRef.current = 4;
-          const moment4Handoff = buildMoment4HandoffForInterview(participantFirstNameForSpoken);
+          const moment4Handoff = buildMoment4HandoffForInterview(participantFirstNameForSpoken, MOMENT_4_PERSONAL_CARD);
           const handoffMsg: MessageWithScenario = { role: 'assistant', content: moment4Handoff, scenarioNumber: 3 };
           const withHandoff = [...messagesAfterAck, handoffMsg];
           setMessages(withHandoff);
@@ -6416,11 +6389,11 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
       if (scenarioNumber === 1) {
         interviewMomentsCompleteRef.current[1] = true;
         currentInterviewMomentRef.current = 2;
-        nextClosingContent = buildScenario1To2BundleForInterview(participantFirstNameForSpoken);
+        nextClosingContent = buildScenario1To2BundleForInterview(participantFirstNameForSpoken, SCENARIO_2_TEXT);
       } else if (scenarioNumber === 2) {
         interviewMomentsCompleteRef.current[2] = true;
         currentInterviewMomentRef.current = 3;
-        nextClosingContent = buildScenario2To3TransitionBody(participantFirstNameForSpoken);
+        nextClosingContent = buildScenario2To3TransitionBody(participantFirstNameForSpoken, SCENARIO_3_TEXT);
       }
       if (scenarioNumber === 3) {
         if (personalHandoffInjectedRef.current) {
@@ -6429,7 +6402,7 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
           personalHandoffInjectedRef.current = true;
           interviewMomentsCompleteRef.current[3] = true;
           currentInterviewMomentRef.current = 4;
-          const moment4Handoff = buildMoment4HandoffForInterview(participantFirstNameForSpoken);
+          const moment4Handoff = buildMoment4HandoffForInterview(participantFirstNameForSpoken, MOMENT_4_PERSONAL_CARD);
           const handoffMsg: MessageWithScenario = { role: 'assistant', content: moment4Handoff, scenarioNumber: 3 };
           const withHandoff = [...messagesAfterClosingAnswer, handoffMsg];
           setMessages(withHandoff);
@@ -7007,7 +6980,8 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
     strippedText = ensureScenario2BundleWhenOpeningWithoutVignette(
       strippedText,
       currentInterviewMomentRef.current,
-      participantFirstNameForSpoken
+      participantFirstNameForSpoken,
+      SCENARIO_2_TEXT
     );
     if (isAppreciationPromptText(strippedText)) {
       strippedText = stripReflectiveLeadBeforeMoment5AppreciationPrompt(strippedText);
@@ -7491,16 +7465,16 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
         if (scenarioNumber === 1) {
           interviewMomentsCompleteRef.current[1] = true;
           currentInterviewMomentRef.current = 2;
-          nextContent = buildScenario1To2BundleForInterview(participantFirstNameForSpoken);
+          nextContent = buildScenario1To2BundleForInterview(participantFirstNameForSpoken, SCENARIO_2_TEXT);
         } else if (scenarioNumber === 2) {
           interviewMomentsCompleteRef.current[2] = true;
           currentInterviewMomentRef.current = 3;
-          nextContent = buildScenario2To3TransitionBody(participantFirstNameForSpoken);
+          nextContent = buildScenario2To3TransitionBody(participantFirstNameForSpoken, SCENARIO_3_TEXT);
         } else if (scenarioNumber === 3) {
           if (personalHandoffInjectedRef.current) {
             nextContent = stripControlTokens(text) || 'Got it.';
           } else {
-            nextContent = buildMoment4HandoffForInterview(participantFirstNameForSpoken);
+            nextContent = buildMoment4HandoffForInterview(participantFirstNameForSpoken, MOMENT_4_PERSONAL_CARD);
             personalHandoffInjectedRef.current = true;
             interviewMomentsCompleteRef.current[3] = true;
             currentInterviewMomentRef.current = 4;
@@ -7544,16 +7518,16 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
           if (scenarioNumber === 1) {
             interviewMomentsCompleteRef.current[1] = true;
             currentInterviewMomentRef.current = 2;
-            nextContent = buildScenario1To2BundleForInterview(participantFirstNameForSpoken);
+            nextContent = buildScenario1To2BundleForInterview(participantFirstNameForSpoken, SCENARIO_2_TEXT);
           } else if (scenarioNumber === 2) {
             interviewMomentsCompleteRef.current[2] = true;
             currentInterviewMomentRef.current = 3;
-            nextContent = buildScenario2To3TransitionBody(participantFirstNameForSpoken);
+            nextContent = buildScenario2To3TransitionBody(participantFirstNameForSpoken, SCENARIO_3_TEXT);
           } else if (scenarioNumber === 3) {
             if (personalHandoffInjectedRef.current) {
               nextContent = stripControlTokens(text) || 'Got it.';
             } else {
-              nextContent = buildMoment4HandoffForInterview(participantFirstNameForSpoken);
+              nextContent = buildMoment4HandoffForInterview(participantFirstNameForSpoken, MOMENT_4_PERSONAL_CARD);
               personalHandoffInjectedRef.current = true;
               interviewMomentsCompleteRef.current[3] = true;
               currentInterviewMomentRef.current = 4;
@@ -8603,7 +8577,66 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
           platform: r.platform,
         });
       }
+      const peakDbForMicFallback = analysis.peak_amplitude_db;
+      const isDigitalSilenceForMicFallback =
+        Platform.OS === 'web' &&
+        useMediaRecorderPath &&
+        !analysis.has_non_zero_audio &&
+        typeof peakDbForMicFallback === 'number' &&
+        Number.isFinite(peakDbForMicFallback) &&
+        peakDbForMicFallback <= -200;
+
+      if (isDigitalSilenceForMicFallback) {
+        consecutiveDigitalSilenceForMicFallbackRef.current += 1;
+      } else {
+        consecutiveDigitalSilenceForMicFallbackRef.current = 0;
+      }
+
+      if (
+        userId &&
+        Platform.OS === 'web' &&
+        useMediaRecorderPath &&
+        micFallbackSuccessPendingRef.current &&
+        analysis.has_non_zero_audio
+      ) {
+        micFallbackSuccessPendingRef.current = false;
+        const rOk = getSessionLogRuntime();
+        writeAudioSessionLog({
+          userId,
+          attemptId: rOk.attemptId,
+          eventType: 'microphone_device_fallback_succeeded',
+          eventData: { microphone_device_fallback_succeeded: true },
+          platform: rOk.platform,
+        });
+      }
+
       if (!analysis.has_non_zero_audio || blockWhisperForVadBypassNoSpeech) {
+        if (
+          Platform.OS === 'web' &&
+          useMediaRecorderPath &&
+          isDigitalSilenceForMicFallback &&
+          consecutiveDigitalSilenceForMicFallbackRef.current >= 2
+        ) {
+          const n = consecutiveDigitalSilenceForMicFallbackRef.current;
+          const previousDeviceId = audioRecorder.getLastWebMicCaptureDeviceId() ?? null;
+          const switched = await audioRecorder.switchWebInputToDefaultDevice();
+          consecutiveDigitalSilenceForMicFallbackRef.current = 0;
+          if (userId && switched) {
+            const rFb = getSessionLogRuntime();
+            writeAudioSessionLog({
+              userId,
+              attemptId: rFb.attemptId,
+              eventType: 'microphone_device_fallback_attempted',
+              eventData: {
+                previous_device_id: previousDeviceId,
+                fallback_device_id: 'default',
+                consecutive_silent_buffers: n,
+              },
+              platform: rFb.platform,
+            });
+            micFallbackSuccessPendingRef.current = true;
+          }
+        }
         if (blockWhisperForVadBypassNoSpeech) {
           pendingRecordingRestartAfterVadBypassRef.current = true;
         }
@@ -10027,6 +10060,9 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
         setInterviewStatus('in_progress');
         setVoiceState('processing');
         resetInterviewProgressRefs();
+        if (Platform.OS === 'web') {
+          audioRecorder.resetWebMicInputFallbackState();
+        }
         recordingJustFinishedBeforeNextTtsRef.current = false;
         lastVoiceTurnLanguageRef.current = null;
         lastVoiceTurnConfidenceRef.current = null;
@@ -10082,6 +10118,9 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
         setInterviewStatus('in_progress');
         setVoiceState('processing');
         resetInterviewProgressRefs();
+        if (Platform.OS === 'web') {
+          audioRecorder.resetWebMicInputFallbackState();
+        }
         recordingJustFinishedBeforeNextTtsRef.current = false;
         lastVoiceTurnLanguageRef.current = null;
         lastVoiceTurnConfidenceRef.current = null;
@@ -10513,9 +10552,7 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
       };
       setResults(fallbackResults);
       if (isOnboardingFlow) {
-        const gate1Score = buildGate1ScoreFromResults(fallbackResults);
         await profileRepository.upsertProfile(userId, {
-          gate1Score,
           applicationStatus: 'under_review',
           onboardingStage: 'complete',
         });
@@ -10594,9 +10631,7 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
         console.log('=== Scoring API complete ===', 'passed:', gateResult?.pass);
       }
       if (isOnboardingFlow) {
-        const gate1Score = buildGate1ScoreFromResults(parsed);
         await profileRepository.upsertProfile(userId, {
-          gate1Score,
           applicationStatus: 'under_review',
           onboardingStage: 'complete',
         });
@@ -11193,10 +11228,7 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
       };
       setResults(fallbackResults);
       if (isOnboardingFlow) {
-        const gate1Score = buildGate1ScoreFromResults(fallbackResults);
-        const g = fallbackResults.gateResult!;
         await profileRepository.upsertProfile(userId, {
-          gate1Score,
           applicationStatus: 'under_review',
           onboardingStage: 'complete',
         });
@@ -11410,6 +11442,9 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
     isSpeakingRef.current = false;
     setVoiceState('idle');
     resetInterviewProgressRefs();
+    if (Platform.OS === 'web') {
+      audioRecorder.resetWebMicInputFallbackState();
+    }
     void startInterview({ fromUserGesture: true });
   }, [userId, isAdmin, useMediaRecorderPath, audioRecorder, resetInterviewProgressRefs, startInterview]);
 
@@ -12147,22 +12182,14 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
 
   const isInterviewerView = status === 'active' && !isAdmin;
   /** Web: at most one full-screen gesture overlay — identical rgba layers stack and read as “double dim” on mobile. */
-  type WebActiveGestureOverlayKind =
-    | 'none'
-    | 'tab_restore'
-    | 'resume_welcome'
-    | 'pending_tts';
-  /** Active interview: only show an overlay when TTS is blocked and needs a tap (pending_tts), or tab/resume welcome — not a generic second “tap to begin” after pending_tts. */
-  const webActiveGestureOverlayKind: WebActiveGestureOverlayKind =
-    Platform.OS === 'web' && status === 'active'
-      ? webTabGestureRestoreOverlay
-        ? 'tab_restore'
-        : webResumeWelcomeTapPending && isInterviewerView
-          ? 'resume_welcome'
-          : webDesktopPendingTtsGestureOverlay
-            ? 'pending_tts'
-            : 'none'
-      : 'none';
+  const webActiveGestureOverlayKind: WebActiveGestureOverlayKind = resolveWebActiveGestureOverlayKind({
+    platformIsWeb: Platform.OS === 'web',
+    status,
+    webTabGestureRestoreOverlay,
+    webResumeWelcomeTapPending,
+    isInterviewerView,
+    webDesktopPendingTtsGestureOverlay,
+  });
   return (
     <SafeAreaContainer style={{ position: 'relative', backgroundColor: '#05060D' }}>
       {adminInterviewTopBar}

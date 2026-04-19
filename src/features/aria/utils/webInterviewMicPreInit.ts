@@ -9,6 +9,10 @@ import {
   setInterviewSessionAmbientNoiseFallback,
   resetInterviewVadAmbientSamplingState,
 } from '@features/aria/utils/interviewVadSession';
+import {
+  buildWebMicGetUserMediaConstraints,
+  buildWebMicDefaultIdealFallbackConstraints,
+} from '@features/aria/utils/webMicDeviceConstraints';
 
 const PREFERRED_MR_MIME = 'audio/webm;codecs=opus';
 
@@ -172,7 +176,8 @@ export async function beginInterviewMicPreInitDuringTts(
     }
 
     if (!preInitStream || !preInitRecorder) {
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      const constraints = await buildWebMicGetUserMediaConstraints();
+      const stream = await navigator.mediaDevices.getUserMedia(constraints);
       preInitStream = stream;
       const mime = pickMediaRecorderMimeType();
       try {
@@ -274,13 +279,48 @@ function releaseWebInterviewMicPreInitHard(): void {
 /**
  * After recording stops: release mic, then immediately re-acquire for next turn (inactive MR).
  */
+/**
+ * Replace pre-init mic with an arbitrary constraint set (e.g. default-device fallback after digital silence).
+ */
+export async function replaceWebInterviewMicPreInitWithConstraints(
+  constraints: MediaStreamConstraints
+): Promise<boolean> {
+  if (Platform.OS !== 'web' || typeof navigator === 'undefined' || !navigator.mediaDevices?.getUserMedia) {
+    return false;
+  }
+  if (typeof MediaRecorder === 'undefined') return false;
+  releaseWebInterviewMicPreInitHard();
+  lastPreInitTriggerDuring = 'response_processing';
+  try {
+    const stream = await navigator.mediaDevices.getUserMedia(constraints);
+    preInitStream = stream;
+    const mime = pickMediaRecorderMimeType();
+    try {
+      preInitRecorder = new MediaRecorder(stream, { mimeType: mime });
+    } catch {
+      preInitRecorder = new MediaRecorder(stream);
+    }
+    setupAnalyserForStream(stream);
+    return true;
+  } catch (err) {
+    if (__DEV__) console.warn('[webInterviewMicPreInit] replaceWithConstraints failed', err);
+    return false;
+  }
+}
+
+/** Silent-buffer recovery: force `ideal: 'default'` input. */
+export async function replaceWebInterviewMicPreInitWithDefaultIdealDevice(): Promise<boolean> {
+  return replaceWebInterviewMicPreInitWithConstraints(buildWebMicDefaultIdealFallbackConstraints());
+}
+
 export async function rearmWebMicPreInitAfterRecordingStop(): Promise<void> {
   if (Platform.OS !== 'web' || typeof navigator === 'undefined' || !navigator.mediaDevices?.getUserMedia) return;
   if (typeof MediaRecorder === 'undefined') return;
   releaseWebInterviewMicPreInitHard();
   lastPreInitTriggerDuring = 'response_processing';
   try {
-    const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+    const constraints = await buildWebMicGetUserMediaConstraints();
+    const stream = await navigator.mediaDevices.getUserMedia(constraints);
     preInitStream = stream;
     const mime = pickMediaRecorderMimeType();
     try {
@@ -297,4 +337,12 @@ export async function rearmWebMicPreInitAfterRecordingStop(): Promise<void> {
 /** Screen unmount or interview end */
 export function releaseWebInterviewMicPreInit(): void {
   releaseWebInterviewMicPreInitHard();
+}
+
+/** Debug / telemetry: active input deviceId from the pre-init stream (after getUserMedia). */
+export function getPreInitAudioInputDeviceId(): string | undefined {
+  if (!preInitStream) return undefined;
+  const t = preInitStream.getAudioTracks()[0];
+  const id = t?.getSettings?.()?.deviceId;
+  return typeof id === 'string' && id.length > 0 ? id : undefined;
 }

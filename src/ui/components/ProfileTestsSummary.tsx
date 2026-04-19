@@ -4,7 +4,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { colors } from '@ui/theme/colors';
 import { spacing } from '@ui/theme/spacing';
 import type { Profile } from '@domain/models/Profile';
-import type { BasicInfo, Gate1Score, Gate2Psychometrics, Gate3Compatibility } from '@domain/models/OnboardingGates';
+import type { BasicInfo, Gate2Psychometrics, Gate3Compatibility } from '@domain/models/OnboardingGates';
 import { supabase } from '@data/supabase/client';
 import { CommunicationStyleSection } from '@ui/components/CommunicationStyleSection';
 
@@ -47,7 +47,6 @@ function SummaryBlock({
 
 export const ProfileTestsSummary: React.FC<{ profile: Profile | null | undefined }> = ({ profile }) => {
   const basicInfo: BasicInfo | null = profile?.basicInfo ?? null;
-  const gate1: Gate1Score | null = profile?.gate1Score ?? null;
   const gate2: Gate2Psychometrics | null = profile?.gate2Psychometrics ?? null;
   const gate3: Gate3Compatibility | null = profile?.gate3Compatibility ?? null;
 
@@ -66,7 +65,7 @@ export const ProfileTestsSummary: React.FC<{ profile: Profile | null | undefined
     profile?.occupation ||
     profile?.location?.label
   );
-  const hasInterview = !!gate1;
+  const hasInterview = profile?.interviewCompleted === true;
   const hasPsychometrics = !!gate2;
   const hasCompatibility = !!(gate3 && (Object.keys(gate3).length > 0 || (gate3.profilePrompts?.length ?? 0) > 0));
 
@@ -125,18 +124,7 @@ export const ProfileTestsSummary: React.FC<{ profile: Profile | null | undefined
       </SummaryBlock>
 
       <SummaryBlock title="Interview" done={hasInterview}>
-        {gate1 && (
-          <>
-            <SummaryRow label="Result" value={gate1.passed ? 'Passed' : 'Did not pass'} />
-            <SummaryRow label="Average score" value={gate1.averageScore.toFixed(1)} />
-            {gate1.narrativeCoherence ? (
-              <SummaryRow label="Narrative coherence" value={gate1.narrativeCoherence} />
-            ) : null}
-            {gate1.behavioralSpecificity ? (
-              <SummaryRow label="Behavioral specificity" value={gate1.behavioralSpecificity} />
-            ) : null}
-          </>
-        )}
+        {hasInterview ? <SummaryRow label="Status" value="Completed" /> : null}
       </SummaryBlock>
 
       <SummaryBlock title="Psychometrics" done={hasPsychometrics}>

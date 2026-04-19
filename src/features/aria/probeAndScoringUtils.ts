@@ -625,6 +625,33 @@ export function extractScenario3UserCorpusAfterLastRepairPrompt(
   return parts.join(' ');
 }
 
+/**
+ * User answer(s) in Scenario C **before** the general repair assistant prompt — unprompted relative to
+ * "How do you think this situation could be repaired?" (typically Q1 and any prior user turns in this scenario).
+ */
+export function extractScenario3UserCorpusBeforeRepairPrompt(
+  msgs: readonly ScenarioCorpusMessageSlice[],
+): string {
+  let lastRepairIdx = -1;
+  for (let i = msgs.length - 1; i >= 0; i--) {
+    const m = msgs[i];
+    if (m.role === 'assistant' && typeof m.content === 'string' && isScenarioCRepairAssistantPrompt(m.content)) {
+      lastRepairIdx = i;
+      break;
+    }
+  }
+  if (lastRepairIdx < 0) return '';
+  const parts: string[] = [];
+  for (let i = 0; i < lastRepairIdx; i++) {
+    const m = msgs[i];
+    if (m.role === 'user' && m.scenarioNumber === 3) {
+      const t = String(m.content ?? '').trim();
+      if (t) parts.push(t);
+    }
+  }
+  return parts.join(' ');
+}
+
 /** User answer(s) to the Scenario C commitment-threshold follow-up only (Daniel/Sophie), for sole-source scoring. */
 export function extractScenario3CommitmentThresholdUserAnswerAfterPrompt(
   msgs: readonly ScenarioCorpusMessageSlice[],
