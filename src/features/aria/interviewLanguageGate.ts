@@ -164,3 +164,39 @@ export function isShortAnswerOkForWhisperRatioGate(lastQuestionText: string | nu
     isNamePromptInterviewMoment(lastQuestionText)
   );
 }
+
+export type WhisperReaskTurnContext =
+  | 'name_collection'
+  | 'readiness_confirmation'
+  | 'substantive';
+
+/** Turn context for Whisper re-ask gating. */
+export function getWhisperReaskTurnContext(
+  lastQuestionText: string | null | undefined
+): WhisperReaskTurnContext {
+  if (isNamePromptInterviewMoment(lastQuestionText)) return 'name_collection';
+  if (isSimpleYesNoInterviewMoment(lastQuestionText)) return 'readiness_confirmation';
+  return 'substantive';
+}
+
+type WhisperReaskEvaluationInput = {
+  turnContext: WhisperReaskTurnContext;
+  transcriptText: string;
+  wordCount: number;
+  wordsPerSecond: number;
+  shortAnswerOk: boolean;
+};
+
+/**
+ * Re-ask trigger for Whisper ratio gate.
+ * Exempt contexts (name/readiness): accept any non-empty transcript, regardless of ratio/word-count/confidence.
+ */
+export function shouldFireWhisperRatioReask(input: WhisperReaskEvaluationInput): boolean {
+  const { turnContext, transcriptText, wordCount, wordsPerSecond, shortAnswerOk } = input;
+  const hasNonEmptyTranscript = transcriptText.trim().length > 0;
+  if (!hasNonEmptyTranscript) return true;
+  if (turnContext === 'name_collection' || turnContext === 'readiness_confirmation') return false;
+
+  const ratioFlag = wordsPerSecond < 0.3 || (!shortAnswerOk && wordCount < 3);
+  return ratioFlag && wordCount < 3 && !shortAnswerOk;
+}

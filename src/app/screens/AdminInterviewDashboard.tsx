@@ -3,7 +3,7 @@
  * Visible only to admin@amoraea.com. Remove before production.
  */
 
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import {
   View,
   Text,
@@ -42,6 +42,7 @@ import {
   summarizeGateForAdmin,
   type AdminGateOutcomeLabel,
 } from '@features/aria/adminGateDisplay';
+import { AdminFeedbackPanel } from '@/components/admin/AdminFeedbackPanel';
 
 // Marker ids as stored in DB; construct keys match ai_reasoning.construct_breakdown
 const PILLAR_ROWS = [
@@ -471,7 +472,8 @@ type UserGroup = {
 
 function getUserDisplayName(user: UserRow | null | undefined): string {
   if (!user) return '—';
-  return user.full_name ?? user.name ?? user.display_name ?? user.email ?? 'Unknown';
+  /** Prefer interview-captured name (`users.name`) over auth profile display fields. */
+  return user.name ?? user.full_name ?? user.display_name ?? user.email ?? 'Unknown';
 }
 
 type FetchAdminUsersListResult = { groups: UserGroup[]; errorMessage: string | null };
@@ -592,7 +594,7 @@ function getPassColor(value: 'pass' | 'fail' | 'none'): string {
 }
 
 function getAlmostPassColor(): string {
-  return '#D4A84B';
+  return '#D97A3A';
 }
 
 /** Pillar map for gate recompute: list rows use DB only; drill-down merges AI reasoning like the app. */
@@ -677,8 +679,16 @@ function formatAttemptTabLabel(attempt: AttemptSummary | AttemptRow): string {
 
 function getAttemptsSorted(attempts: AttemptRow[] | null | undefined): AttemptRow[] {
   if (!Array.isArray(attempts)) return [];
-  return [...attempts].sort((a, b) => a.attempt_number - b.attempt_number);
+  return [...attempts].sort((a, b) => {
+    const tb = new Date(b.created_at).getTime();
+    const ta = new Date(a.created_at).getTime();
+    if (tb !== ta) return tb - ta;
+    return b.attempt_number - a.attempt_number;
+  });
 }
+
+/** Cohort list filter — derived from live interview state + latest attempt gate display. */
+type AdminUserStatusFilter = 'all' | 'in_progress' | 'pass' | 'fail' | 'almost' | 'no_result';
 
 function getString(v: unknown): string | null {
   return typeof v === 'string' && v.trim().length > 0 ? v.trim() : null;
@@ -704,6 +714,15 @@ function parseUserTranscript(raw: unknown): LiveTranscriptMsg[] {
 function userHasInProgressInterview(user: UserRow): boolean {
   if (user.interview_completed === true) return false;
   return parseUserTranscript(user.interview_transcript).length > 0;
+}
+
+function classifyAdminUserListStatus(g: UserGroup): AdminUserStatusFilter {
+  if (userHasInProgressInterview(g.user)) return 'in_progress';
+  const o = getAdminOutcomeDisplay(g.latestAttempt);
+  if (o.outcomeLabel === 'pass') return 'pass';
+  if (o.outcomeLabel === 'fail') return 'fail';
+  if (o.outcomeLabel === 'almost') return 'almost';
+  return 'no_result';
 }
 
 /** Best-effort scenario indicator when `interview_last_checkpoint` is not selected or missing on older DBs. */
@@ -1605,10 +1624,21 @@ export function AdminAttemptTabsView({
   );
 }
 
+const STATUS_FILTER_OPTIONS: { id: AdminUserStatusFilter; label: string }[] = [
+  { id: 'all', label: 'All' },
+  { id: 'in_progress', label: 'In progress' },
+  { id: 'pass', label: 'Pass' },
+  { id: 'fail', label: 'Fail' },
+  { id: 'almost', label: 'Almost' },
+  { id: 'no_result', label: 'No result' },
+];
+
 export function AdminInterviewDashboard({ onClose }: { onClose: () => void }) {
+  const [adminMainView, setAdminMainView] = useState<'cohort' | 'feedback'>('cohort');
   const [users, setUsers] = useState<UserGroup[]>([]);
   const [loading, setLoading] = useState(true);
   const [listError, setListError] = useState<string | null>(null);
+  const [statusFilter, setStatusFilter] = useState<AdminUserStatusFilter>('all');
   const [selectedUserId, setSelectedUserId] = useState<string | null>(null);
   const [detailAttempts, setDetailAttempts] = useState<AttemptRow[] | null>(null);
   const [detailAttemptsLoading, setDetailAttemptsLoading] = useState(false);
@@ -1748,6 +1778,11 @@ export function AdminInterviewDashboard({ onClose }: { onClose: () => void }) {
 
   const selectedGroup = selectedUserId ? users.find((g) => g.user.id === selectedUserId) : null;
 
+  const filteredUsers = useMemo(() => {
+    if (statusFilter === 'all') return users;
+    return users.filter((g) => classifyAdminUserListStatus(g) === statusFilter);
+  }, [users, statusFilter]);
+
   if (selectedUserId && selectedGroup) {
     return (
       <UserDetails
@@ -1772,46 +1807,104 @@ export function AdminInterviewDashboard({ onClose }: { onClose: () => void }) {
   return (
     <View style={styles.fullScreen}>
       <View style={styles.header}>
-        <Text style={styles.headerTitle}>Admin Panel</Text>
-        <TouchableOpacity onPress={onClose}>
-          <Text style={styles.backText}>← Back to interview</Text>
-        </TouchableOpacity>
+        <View style={styles.headerTopRow}>
+          <Text style={styles.headerTitle}>Admin Panel</Text>
+          <TouchableOpacity onPress={onClose}>
+            <Text style={styles.backText}>← Back to interview</Text>
+          </TouchableOpacity>
+        </View>
+        <ScrollView
+          horizontal
+          showsHorizontalScrollIndicator={false}
+          contentContainerStyle={styles.filterChipsRow}
+        >
+          <TouchableOpacity
+            style={[styles.filterChip, adminMainView === 'cohort' && styles.filterChipActive]}
+            onPress={() => setAdminMainView('cohort')}
+            accessibilityRole="button"
+            accessibilityState={{ selected: adminMainView === 'cohort' }}
+          >
+            <Text style={[styles.filterChipText, adminMainView === 'cohort' && styles.filterChipTextActive]}>
+              Cohort
+            </Text>
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={[styles.filterChip, adminMainView === 'feedback' && styles.filterChipActive]}
+            onPress={() => setAdminMainView('feedback')}
+            accessibilityRole="button"
+            accessibilityState={{ selected: adminMainView === 'feedback' }}
+          >
+            <Text style={[styles.filterChipText, adminMainView === 'feedback' && styles.filterChipTextActive]}>
+              Feedback
+            </Text>
+          </TouchableOpacity>
+        </ScrollView>
       </View>
-      <ScrollView contentContainerStyle={styles.cardsContainer}>
-        {loading ? (
-          <Text style={styles.emptyText}>Loading users...</Text>
-        ) : listError ? (
-          <View style={styles.listErrorBlock}>
-            <Text style={styles.listErrorTitle}>Could not load data</Text>
-            <Text style={styles.listErrorDetail} selectable>
-              {listError}
-            </Text>
-            <Text style={styles.listErrorHint}>
-              If the list is empty but users exist in the database, apply the Supabase migration that grants
-              admin@amoraea.com SELECT on public.users (see migrations/20260423120000_admin_select_all_users.sql),
-              then refresh.
-            </Text>
+      {adminMainView === 'feedback' ? (
+        <AdminFeedbackPanel />
+      ) : (
+        <>
+          <View style={styles.filterBar}>
+            <Text style={styles.filterBarLabel}>Status</Text>
+            <ScrollView
+              horizontal
+              showsHorizontalScrollIndicator={false}
+              contentContainerStyle={styles.filterChipsRow}
+            >
+              {STATUS_FILTER_OPTIONS.map((opt) => (
+                <TouchableOpacity
+                  key={opt.id}
+                  style={[styles.filterChip, statusFilter === opt.id && styles.filterChipActive]}
+                  onPress={() => setStatusFilter(opt.id)}
+                  accessibilityRole="button"
+                  accessibilityState={{ selected: statusFilter === opt.id }}
+                >
+                  <Text style={[styles.filterChipText, statusFilter === opt.id && styles.filterChipTextActive]}>
+                    {opt.label}
+                  </Text>
+                </TouchableOpacity>
+              ))}
+            </ScrollView>
           </View>
-        ) : users.length === 0 ? (
-          <Text style={styles.emptyText}>No users found.</Text>
-        ) : (
-          users.map((userData) => (
-            <UserCard
-              key={userData.user.id}
-              userData={userData}
-              onPress={() => {
-                setSelectedUserId(userData.user.id);
-                setDetailAttempts(null);
-                setDetailAttemptsError(null);
-                setDetailAttemptsLoading(true);
-              }}
-              canDelete={canDeleteUser(userData.user)}
-              deleting={deletingUserId === userData.user.id}
-              onDelete={() => void handleDeleteUser(userData.user)}
-            />
-          ))
-        )}
-      </ScrollView>
+          <ScrollView contentContainerStyle={styles.cardsContainer}>
+            {loading ? (
+              <Text style={styles.emptyText}>Loading users...</Text>
+            ) : listError ? (
+              <View style={styles.listErrorBlock}>
+                <Text style={styles.listErrorTitle}>Could not load data</Text>
+                <Text style={styles.listErrorDetail} selectable>
+                  {listError}
+                </Text>
+                <Text style={styles.listErrorHint}>
+                  If the list is empty but users exist in the database, apply the Supabase migration that grants
+                  admin@amoraea.com SELECT on public.users (see migrations/20260423120000_admin_select_all_users.sql),
+                  then refresh.
+                </Text>
+              </View>
+            ) : users.length === 0 ? (
+              <Text style={styles.emptyText}>No users found.</Text>
+            ) : filteredUsers.length === 0 ? (
+              <Text style={styles.emptyText}>No users match this status.</Text>
+            ) : (
+              filteredUsers.map((userData) => (
+                <UserCard
+                  key={userData.user.id}
+                  userData={userData}
+                  onPress={() => {
+                    setSelectedUserId(userData.user.id);
+                    setDetailAttempts(null);
+                    setDetailAttemptsError(null);
+                    setDetailAttemptsLoading(true);
+                  }}
+                  canDelete={canDeleteUser(userData.user)}
+                  deleting={deletingUserId === userData.user.id}
+                  onDelete={() => void handleDeleteUser(userData.user)}
+                />
+              ))
+            )}
+          </ScrollView>
+        </>
+      )}
     </View>
   );
 }
@@ -1845,6 +1938,47 @@ const styles = StyleSheet.create({
   cardsContainer: {
     padding: 20,
     gap: 12,
+  },
+  filterBar: {
+    paddingHorizontal: 20,
+    paddingTop: 4,
+    paddingBottom: 10,
+    borderBottomWidth: 1,
+    borderBottomColor: 'rgba(82,142,220,0.1)',
+    gap: 8,
+  },
+  filterBarLabel: {
+    color: '#7A9ABE',
+    fontSize: 11,
+    fontWeight: '600',
+    letterSpacing: 0.6,
+    textTransform: 'uppercase',
+  },
+  filterChipsRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8,
+    alignItems: 'center',
+    paddingBottom: 2,
+  },
+  filterChip: {
+    borderWidth: 1,
+    borderColor: 'rgba(82,142,220,0.22)',
+    borderRadius: 999,
+    paddingHorizontal: 14,
+    paddingVertical: 7,
+  },
+  filterChipActive: {
+    backgroundColor: 'rgba(30,111,217,0.2)',
+    borderColor: 'rgba(82,142,220,0.45)',
+  },
+  filterChipText: {
+    color: '#7A9ABE',
+    fontSize: 12,
+    fontWeight: '500',
+  },
+  filterChipTextActive: {
+    color: '#C8E4FF',
   },
   userCardRow: {
     flexDirection: 'row',

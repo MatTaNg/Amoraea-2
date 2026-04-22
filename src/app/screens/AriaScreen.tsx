@@ -16,6 +16,7 @@ import {
 } from 'react-native';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useAuth } from '@features/authentication/hooks/useAuth';
+import { FeedbackBubble } from '@/components/FeedbackBubble';
 import { SafeAreaContainer } from '@ui/components/SafeAreaContainer';
 import { Button } from '@ui/components/Button';
 import { colors } from '@ui/theme/colors';
@@ -28,6 +29,7 @@ import {
   ensureSpokenTextIncludesParticipantFirstName,
   getInterviewUserFirstNameForPrompt,
 } from '@features/aria/interviewerFrameworkPrompt';
+import { buildElongatingProbeStateSuffix, isApprovedElongatingProbeOnly } from '@features/aria/elongatingProbe';
 import {
   buildMoment4HandoffForInterview,
   buildScenario1To2BundleForInterview,
@@ -53,6 +55,8 @@ import {
   countSpokenWords,
   isSimpleYesNoInterviewMoment,
   isShortAnswerOkForWhisperRatioGate,
+  getWhisperReaskTurnContext,
+  shouldFireWhisperRatioReask,
   whisperLanguageIsEnglish,
 } from '@features/aria/interviewLanguageGate';
 import {
@@ -117,7 +121,7 @@ import {
   setStorageFallbackListener,
   type StoredInterviewData,
 } from '@utilities/storage/InterviewStorage';
-import { requestMicPermissionForPWA } from '@utilities/permissions/requestMicPermission';
+import { requestMicrophonePermissionForInterviewStart } from '@utilities/permissions/requestMicPermission';
 import { withRetry, classifyError } from '@utilities/withRetry';
 import { remoteLog } from '@utilities/remoteLog';
 import { isWebInsecureDevUrl, webInsecureContextHelpMessage } from '@utilities/webSecureContext';
@@ -1097,6 +1101,104 @@ function stripScenarioBRepairAsJamesQuestion(text: string): string {
     )
     .replace(/\n{3,}/g, '\n\n')
     .trim();
+}
+
+/** Exact lead when Q3 (repair-as-James) is skipped because Q2 already contained repair signal (client + framework). */
+const SCENARIO_B_REPAIR_ALREADY_COVERED_SKIP_LEAD =
+  "Got it — you've already covered how you'd approach that.";
+
+/**
+ * Last user turn in `messages` with the assistant message they were answering (may not be the final message if callers pass a prefix).
+ */
+function findLastUserWithPriorAssistantContent(messages: MessageWithScenario[]): {
+  lastUserContent: string | null;
+  priorAssistantContent: string | null;
+} {
+  for (let i = messages.length - 1; i >= 0; i -= 1) {
+    if (messages[i].role !== 'user') continue;
+    const lastUserContent = (messages[i].content ?? '').trim();
+    let priorAssistantContent: string | null = null;
+    for (let j = i - 1; j >= 0; j -= 1) {
+      if (messages[j].role === 'assistant') {
+        priorAssistantContent = messages[j].content ?? '';
+        break;
+      }
+    }
+    return { lastUserContent, priorAssistantContent };
+  }
+  return { lastUserContent: null, priorAssistantContent: null };
+}
+
+/**
+ * True when the user's answer to Scenario B Q2 (James differently) or the optional full appreciation probe
+ * already contains repair-oriented content, so Q3 (repair-as-James) should not fire (Scenario B only).
+ */
+function scenarioBJamesDifferenceOrAppreciationAnswerHasRepairContent(answer: string): boolean {
+  const t = normalizeApostrophesForPromptMatch(answer).toLowerCase().trim();
+  if (!t) return false;
+
+  const firstPersonJamesRepair =
+    /\bif i were james\b/i.test(t) ||
+    /\b(as james|being james)\b/i.test(t) ||
+    (/\b(i'?d|i would|i will)\b/i.test(t) && /\b(james|sarah|her)\b/i.test(t));
+
+  const jamesShouldSay =
+    /\b(he|james)\s+(could|should)\s+have\s+(said|told|asked|checked)\b/i.test(t) ||
+    /\bhe could have said\b/i.test(t) ||
+    /\bhe should have told her\b/i.test(t);
+
+  const addressesSarahEmotion =
+    /\b(james|he)\b[\s\S]{0,220}\b(sarah|her)\b[\s\S]{0,220}\b(feel|feelings|felt|upset|cry|cried|tears|hurt|sad|scared|anxious|alone|heard|seen|validated|comfort|reassure|support|listen|listening|apolog|sorry|hug|hold|empath|compassion)\b/i.test(
+      t
+    ) ||
+    /\b(sarah|her)\b[\s\S]{0,220}\b(feel|feelings|felt|upset|cry|cried|tears|hurt)\b[\s\S]{0,220}\b(james|he)\b[\s\S]{0,220}\b(could|should|would|needed to|need to)\b/i.test(
+      t
+    );
+
+  const careValidation =
+    /\b(acknowledge|validation|validate|validated|reassure|reassured|check in|heard her|see her side|comfort her|support her emotionally|tell her (he|that) cares|make her feel (seen|heard|loved))\b/i.test(
+      t
+    );
+
+  const behavioralNotLogisticsOnly =
+    /\b(james|he)\b/i.test(t) &&
+    /\b(sarah|her)\b/i.test(t) &&
+    /\b(listen|heard|comfort|validate|apolog|sorry|emotion|feel|feelings|tears|upset|there for|sit with|hold her|hug)\b/i.test(
+      t
+    ) &&
+    !(
+      /\b(salary|start date|commute|offer letter|logistics)\b/i.test(t) &&
+      !/\b(feel|emotion|cry|tears|hurt|sorry|listen|comfort|validate)\b/i.test(t)
+    );
+
+  return (
+    firstPersonJamesRepair ||
+    jamesShouldSay ||
+    addressesSarahEmotion ||
+    careValidation ||
+    behavioralNotLogisticsOnly
+  );
+}
+
+function shouldReplaceScenarioBRepairWithSkipAndScenario3Transition(
+  messages: MessageWithScenario[],
+  strippedAssistantDraft: string,
+  interviewMoment: number
+): boolean {
+  if (interviewMoment !== 2) return false;
+  if (!strippedAssistantDraft.trim()) return false;
+  if (!looksLikeScenarioBRepairAsJamesQuestion(strippedAssistantDraft)) return false;
+
+  const { lastUserContent, priorAssistantContent } = findLastUserWithPriorAssistantContent(messages);
+  if (!lastUserContent || !priorAssistantContent) return false;
+
+  const prior = priorAssistantContent;
+  const priorIsJamesDiffOrAppreciation =
+    (looksLikeScenarioBJamesDifferentlyQuestion(prior) || looksLikeScenarioBFullAppreciationProbeQuestion(prior)) &&
+    !looksLikeScenarioBRepairAsJamesQuestion(prior);
+
+  if (!priorIsJamesDiffOrAppreciation) return false;
+  return scenarioBJamesDifferenceOrAppreciationAnswerHasRepairContent(lastUserContent);
 }
 
 /** Model/TTS often emit U+2019 (') instead of ASCII ' in What's, could've, etc. */
@@ -3920,6 +4022,7 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
     gestureContextLostAtRef.current = null;
     consecutiveDigitalSilenceForMicFallbackRef.current = 0;
     micFallbackSuccessPendingRef.current = false;
+    elongatingProbeFiredRef.current = false;
   }, [userId]);
 
   const deleteTurnAudioFile = useCallback(async (nativeUri: string | null) => {
@@ -4074,6 +4177,8 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
     setClosingQuestionState((prev) => ({ ...prev, [scenarioNumber]: 'answered' }));
   }, []);
   const currentMessagesRef = useRef(messages);
+  /** Mirrors last assistant message: true iff it was exactly one approved elongating line (client-enforced one-per-turn). */
+  const elongatingProbeFiredRef = useRef(false);
   const statusRef = useRef(status);
   statusRef.current = status;
   const interviewStatusRef = useRef(interviewStatus);
@@ -4277,6 +4382,11 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
 
   useEffect(() => {
     currentMessagesRef.current = messages;
+  }, [messages]);
+
+  useEffect(() => {
+    const lastAsst = [...messages].reverse().find((m) => m.role === 'assistant');
+    elongatingProbeFiredRef.current = isApprovedElongatingProbeOnly(lastAsst?.content ?? '');
   }, [messages]);
 
   useEffect(() => {
@@ -6878,6 +6988,7 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
           CLOSING_LINE_INSTRUCTIONS +
           closingInstruction +
           progressSuffix +
+          buildElongatingProbeStateSuffix(elongatingProbeFiredRef.current) +
           PER_REQUEST_REFLECTION_LOCK,
         messages: messagesToUse
           .filter((m) => m.role === 'user' || m.role === 'assistant')
@@ -6960,12 +7071,25 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
     }
 
     try {
-    const text = (data.content?.[0]?.text ?? '').trim();
+    let text = (data.content?.[0]?.text ?? '').trim();
     /** LLM done — do not keep "Amoraea is thinking" (or isWaiting-gated UI) until TTS finishes; HTML audio can hang without `onended` on some mobile browsers. */
     setIsWaiting(false);
     const priorAssistantContentS3 =
       [...messagesToUse].reverse().find((m) => m.role === 'assistant')?.content ?? '';
     let strippedText = stripControlTokens(text);
+    if (
+      shouldReplaceScenarioBRepairWithSkipAndScenario3Transition(
+        messagesToUse,
+        strippedText,
+        currentInterviewMomentRef.current
+      )
+    ) {
+      text = `${SCENARIO_B_REPAIR_ALREADY_COVERED_SKIP_LEAD}\n\n[SCENARIO_COMPLETE:2]\n\n${buildScenario2To3TransitionBody(
+        participantFirstNameForSpoken,
+        SCENARIO_3_TEXT
+      )}`;
+      strippedText = stripControlTokens(text);
+    }
     strippedText = stripFlatReflectionAcknowledgmentOpeners(strippedText);
     strippedText = stripGenericReflectionFillersFirstParagraph(strippedText);
     strippedText = stripHollowSystemInterviewerPhrases(strippedText);
@@ -7065,9 +7189,11 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
           },
           timestamp: Date.now(),
         }),
-      }).catch(() => {});
+      }).catch(() => {      });
     }
     // #endregion
+    /** Elongating probe must be the sole assistant output this turn — never stack forced construct probes after it. */
+    const assistantTurnIsElongatingProbeOnly = isApprovedElongatingProbeOnly(strippedText);
     // #region agent log
     if (replyingToScenarioCQ2) {
       fetch('http://127.0.0.1:7789/ingest/668e0bd5-3283-4492-9f48-e33846c18218', {
@@ -7134,6 +7260,7 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
     if (
       shouldForceScenarioAContemptProbe &&
       !assistantIssuedScenarioAContemptProbe &&
+      !assistantTurnIsElongatingProbeOnly &&
       !text.includes('[INTERVIEW_COMPLETE]')
     ) {
       const forcedContemptProbe = "What do you make of Emma's statement when she says 'you've made that very clear'?";
@@ -7182,6 +7309,7 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
     if (
       shouldForceScenarioBFullAppreciationProbe &&
       !assistantIssuedScenarioBFullProbe &&
+      !assistantTurnIsElongatingProbeOnly &&
       !text.includes('[INTERVIEW_COMPLETE]')
     ) {
       const forcedAppreciationProbe = "What do you think James could've done differently so Sarah feels better?";
@@ -7237,6 +7365,7 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
       !shouldForceScenarioBFullAppreciationProbe &&
       scenarioBSkippedJamesIntermediate &&
       !assistantIssuedScenarioBJamesDifferently &&
+      !assistantTurnIsElongatingProbeOnly &&
       !text.includes('[INTERVIEW_COMPLETE]');
     // #region agent log
     if (currentScenarioRef.current === 3 && currentInterviewMomentRef.current === 3) {
@@ -7315,6 +7444,7 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
     if (
       shouldForceScenarioCThresholdProbe &&
       !assistantIssuedScenarioCThresholdProbe &&
+      !assistantTurnIsElongatingProbeOnly &&
       !text.includes('[INTERVIEW_COMPLETE]')
     ) {
       // #region agent log
@@ -7387,6 +7517,7 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
     if (
       shouldForceMoment5InexperienceFallback &&
       !assistantIssuedMoment5InexperienceFallback &&
+      !assistantTurnIsElongatingProbeOnly &&
       !text.includes('[INTERVIEW_COMPLETE]')
     ) {
       const forcedFallback = MOMENT_5_INEXPERIENCE_FALLBACK_QUESTION;
@@ -7407,6 +7538,7 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
     if (
       shouldForceMoment4ThresholdProbe &&
       !assistantIssuedMoment4ThresholdProbe &&
+      !assistantTurnIsElongatingProbeOnly &&
       !text.includes('[INTERVIEW_COMPLETE]') &&
       !isAppreciationPromptText(strippedText)
     ) {
@@ -8760,12 +8892,20 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
       const wc = countSpokenWords(userText);
       const durMs = analysis.audio_duration_ms;
       const wps = durMs > 0 ? wc / (durMs / 1000) : 0;
-      const shortAnswerOk = isShortAnswerOkForWhisperRatioGate(lastQuestionTextRef.current);
+      const lastQuestionText = lastQuestionTextRef.current;
+      const turnContext = getWhisperReaskTurnContext(lastQuestionText);
+      const shortAnswerOk = isShortAnswerOkForWhisperRatioGate(lastQuestionText);
       const ratioFlag = wps < 0.3 || (!shortAnswerOk && wc < 3);
+      const willRatioReask = shouldFireWhisperRatioReask({
+        turnContext,
+        transcriptText: userText,
+        wordCount: wc,
+        wordsPerSecond: wps,
+        shortAnswerOk,
+      });
       setLastWhisperRatioTelemetry(ratioFlag, durMs, wc);
       {
-        const lastQ = lastQuestionTextRef.current ?? '';
-        const willRatioReask = ratioFlag && wc < 3 && !shortAnswerOk;
+        const lastQ = lastQuestionText ?? '';
         // #region agent log
         fetch('http://127.0.0.1:7789/ingest/668e0bd5-3283-4492-9f48-e33846c18218', {
           method: 'POST',
@@ -8781,6 +8921,7 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
               lastQEmpty: lastQ.trim().length === 0,
               lastQPreview: lastQ.slice(0, 160),
               shortAnswerOk,
+              turnContext,
               userTextPreview: userText.slice(0, 120),
               wc,
               durMs,
@@ -8811,7 +8952,7 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
           platform: r.platform,
         });
       }
-      if (ratioFlag && wc < 3 && !shortAnswerOk) {
+      if (willRatioReask) {
         // #region agent log
         fetch('http://127.0.0.1:7789/ingest/668e0bd5-3283-4492-9f48-e33846c18218', {
           method: 'POST',
@@ -9998,6 +10139,7 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
   }, [userId, isAdmin, handleResume]);
 
   const startInterview = useCallback(async (opts?: { fromUserGesture?: boolean }) => {
+    const interviewStartTapClockMs = Date.now();
     /** New interview session: require a fresh web audio unlock in this gesture stack before any TTS. */
     resetWebInterviewAudioSession();
     /** Any web path that begins inside a real user gesture (overlay, first pointerdown, consent button). */
@@ -10005,11 +10147,60 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
       setMobileWebTapToBeginDone(true);
       markWebInterviewUserGestureNow();
     }
-    /** Must run before any `await` so mobile browsers still treat this as the same user gesture as "Start". */
+    /** Sync unlock, then mic permission + pre-init before any other await — preserves gesture for Chrome mobile. */
     if (Platform.OS === 'web') {
       unlockWebAudioForAutoplay();
       primeHtmlAudioForMobileTtsFromMicGesture();
-      void beginInterviewMicPreInitDuringTts('greeting');
+      const micGate = await requestMicrophonePermissionForInterviewStart();
+      const attemptIdForMicGate = interviewSessionAttemptIdRef.current;
+      const webPlat = 'web' as const;
+      if (!micGate.ok) {
+        if (userId) {
+          writeSessionLog({
+            userId,
+            attemptId: attemptIdForMicGate,
+            eventType: 'mic_permission_denied_at_start',
+            eventData: {
+              platform: webPlat,
+              attempt_id: attemptIdForMicGate,
+              error_name: micGate.errorName ?? 'unknown',
+            },
+            platform: webPlat,
+          });
+        } else {
+          void remoteLog('mic_permission_denied_at_start', {
+            platform: webPlat,
+            attempt_id: attemptIdForMicGate,
+            error_name: micGate.errorName ?? 'unknown',
+          });
+        }
+        setMicError(
+          'Microphone access is required to complete the interview. Please allow microphone access and try again.',
+        );
+        setVoiceState('idle');
+        return;
+      }
+      const timeToGrantMs = Date.now() - interviewStartTapClockMs;
+      if (userId) {
+        writeSessionLog({
+          userId,
+          attemptId: attemptIdForMicGate,
+          eventType: 'mic_permission_granted_at_start',
+          eventData: {
+            platform: webPlat,
+            attempt_id: attemptIdForMicGate,
+            time_to_grant_ms: timeToGrantMs,
+          },
+          platform: webPlat,
+        });
+      } else {
+        void remoteLog('mic_permission_granted_at_start', {
+          platform: webPlat,
+          attempt_id: attemptIdForMicGate,
+          time_to_grant_ms: timeToGrantMs,
+        });
+      }
+      await beginInterviewMicPreInitDuringTts('greeting');
     }
     if (Platform.OS === 'web' && opts?.fromUserGesture) {
       void remoteLog('[START] startInterview called', {
@@ -10054,7 +10245,7 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
         !isAdmin &&
         interviewAttemptBootstrap === 'ready';
 
-      /** Greeting before mic permission: synchronous `play()` stays in the Begin tap gesture chain. */
+      /** Greeting after mic permission (web): synchronous `play()` stays in the Begin tap gesture chain. */
       if (webGestureFirstGreeting) {
         setStatus('active');
         setInterviewStatus('in_progress');
@@ -10086,11 +10277,8 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
         }
       }
 
-      // 1 — Request mic permissions
-      if (Platform.OS === 'web') {
-        await requestMicPermissionForPWA();
-        await remoteLog('[START] Mic permission (PWA) requested');
-      } else {
+      // 1 — Request mic permissions (web: already granted in gesture stack before greeting TTS)
+      if (Platform.OS !== 'web') {
         const granted = await audioRecorder.requestPermission();
         setMicPermission(granted ? 'granted' : 'denied');
         await remoteLog('[START] Mic permission result', { granted });
@@ -12620,6 +12808,7 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
           </Text>
         </Pressable>
       ) : null}
+      <FeedbackBubble attemptId={interviewSessionAttemptIdRef.current ?? undefined} userId={userId || undefined} />
     </SafeAreaContainer>
   );
 };
