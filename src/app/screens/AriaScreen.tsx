@@ -2202,6 +2202,26 @@ type GenerateAIReasoningSafeOptions = {
   commitmentThresholdInconsistency?: import('@features/aria/generateAIReasoning').CommitmentThresholdInconsistencyPayload | null;
 };
 
+type ScoreOnlyReasoningFallback = {
+  overall_summary: null;
+  overall_strengths: null;
+  overall_growth_areas: null;
+  construct_breakdown: null;
+  scenario_observations: null;
+  closing_reflection: null;
+};
+
+function makeScoreOnlyReasoningFallback(): ScoreOnlyReasoningFallback {
+  return {
+    overall_summary: null,
+    overall_strengths: null,
+    overall_growth_areas: null,
+    construct_breakdown: null,
+    scenario_observations: null,
+    closing_reflection: null,
+  };
+}
+
 async function generateAIReasoningSafe(
   pillarScores: Record<string, number>,
   scenarioScores: Record<number, { pillarScores: Record<string, number>; scenarioName?: string } | undefined>,
@@ -5556,6 +5576,20 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
               },
               platform: rtp.platform,
             });
+            if (durRatio.calibration_escape_applied) {
+              writeAudioSessionLog({
+                userId,
+                attemptId: rtp.attemptId,
+                eventType: 'calibration_escape_applied',
+                eventData: {
+                  previous_multiplier_ms_per_char: durRatio.previous_multiplier_ms_per_char,
+                  new_multiplier_ms_per_char: durRatio.new_multiplier_ms_per_char,
+                  rolling_avg_ratio: durRatio.calibration_adjustment_detail?.rolling_avg_ratio ?? null,
+                  moment_number: currentInterviewMomentRef.current,
+                },
+                platform: rtp.platform,
+              });
+            }
           }
         }
         const isInterviewLine =
@@ -11080,28 +11114,58 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
           if (__DEV__) console.log('=== [3] Generating reasoning ===');
           const slowTimer = setTimeout(() => setReasoningProgress('slow'), 10000);
           const verySlowTimer = setTimeout(() => setReasoningProgress('very_slow'), 30000);
-          const reasoning = await generateAIReasoningSafe(
-            pillarScores,
-            {
-              1: scenarioScoresRef.current[1],
-              2: scenarioScoresRef.current[2],
-              3: scenarioScoresRef.current[3],
-            },
-            finalMessages,
-            finalGateResult.weightedScore,
-            finalGateResult.pass,
-            finalGateResult.excludedMarkers ?? [],
-            {
-              commitmentThresholdInconsistency,
-            }
-          );
-          const reasoningPending = !!(reasoning as { _reasoningPending?: boolean })._reasoningPending;
+          const reasoningOutcome = await Promise.race<
+            | {
+                kind: 'resolved';
+                value: Awaited<ReturnType<typeof generateAIReasoningSafe>>;
+              }
+            | {
+                kind: 'timeout';
+              }
+          >([
+            generateAIReasoningSafe(
+              pillarScores,
+              {
+                1: scenarioScoresRef.current[1],
+                2: scenarioScoresRef.current[2],
+                3: scenarioScoresRef.current[3],
+              },
+              finalMessages,
+              finalGateResult.weightedScore,
+              finalGateResult.pass,
+              finalGateResult.excludedMarkers ?? [],
+              {
+                commitmentThresholdInconsistency,
+              }
+            ).then((value) => ({ kind: 'resolved', value })),
+            new Promise<{ kind: 'timeout' }>((resolve) =>
+              setTimeout(() => resolve({ kind: 'timeout' }), 8000)
+            ),
+          ]);
+          const didReasoningTimeout = reasoningOutcome.kind === 'timeout';
+          const reasoning = didReasoningTimeout
+            ? (makeScoreOnlyReasoningFallback() as unknown as Awaited<ReturnType<typeof generateAIReasoningSafe>>)
+            : reasoningOutcome.value;
+          const reasoningPending = didReasoningTimeout
+            ? false
+            : !!(reasoning as { _reasoningPending?: boolean })._reasoningPending;
           setReasoningProgress(reasoningPending ? 'pending' : 'done');
           clearTimeout(slowTimer);
           clearTimeout(verySlowTimer);
+          if (didReasoningTimeout && userId) {
+            const r = getSessionLogRuntime();
+            writeSessionLog({
+              userId,
+              attemptId: r.attemptId,
+              eventType: 'ai_reasoning_timeout',
+              eventData: { attempt_id: r.attemptId ?? interviewSessionAttemptIdRef.current ?? null },
+              platform: r.platform,
+            });
+          }
           await remoteLog('[4] Reasoning generated', {
             reasoningKeys: reasoning ? Object.keys(reasoning) : [],
             reasoningPending,
+            timedOut: didReasoningTimeout,
             lastError: (reasoning as { _error?: string })._error ?? null,
           });
           if (__DEV__) console.log('=== [4] Reasoning complete ===');

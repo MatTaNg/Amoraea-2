@@ -13,6 +13,9 @@ export const MULTIPLIER_CEILING_MS_PER_CHAR = 120;
 const ROLLING_WINDOW = 3;
 /** Ratios below this rolling average suggest expected duration is too high — raise ms/char (in small steps). */
 const CALIBRATION_TRIGGER_MAX_RATIO = 0.95;
+const CALIBRATION_ESCAPE_RATIO_THRESHOLD = 0.75;
+const CALIBRATION_ESCAPE_CONSECUTIVE_TURNS = 3;
+const CALIBRATION_ESCAPE_MAX_STEP_MS_PER_CHAR = 40;
 /** Max change to multiplier in one adjustment: 10% of current value. */
 const MAX_STEP_FRACTION = 0.1;
 
@@ -21,9 +24,11 @@ let calibratedMsPerChar = Math.min(
   Math.max(MULTIPLIER_FLOOR_MS_PER_CHAR, BASE_MS_PER_CHAR)
 );
 const recentRatios: number[] = [];
+let consecutiveLowRollingAvgTurns = 0;
 
 export function resetTtsDurationCalibration(): void {
   recentRatios.length = 0;
+  consecutiveLowRollingAvgTurns = 0;
   calibratedMsPerChar = Math.min(
     MULTIPLIER_CEILING_MS_PER_CHAR,
     Math.max(MULTIPLIER_FLOOR_MS_PER_CHAR, BASE_MS_PER_CHAR)
@@ -55,6 +60,7 @@ export type TtsCalibrationAdjustmentDetail = {
 export type TtsCalibrationResult = {
   ratio: number;
   calibration_adjusted: boolean;
+  calibration_escape_applied?: boolean;
   previous_multiplier_ms_per_char: number;
   new_multiplier_ms_per_char: number;
   calibration_skip_reason:
@@ -95,6 +101,13 @@ export function recordTtsTurnDurationRatio(actualMs: number, expectedMs: number)
 
   const window = recentRatios.slice(-ROLLING_WINDOW);
   const avgRatio = window.reduce((a, b) => a + b, 0) / ROLLING_WINDOW;
+  if (ratio > CALIBRATION_ESCAPE_RATIO_THRESHOLD) {
+    consecutiveLowRollingAvgTurns = 0;
+  } else if (avgRatio < CALIBRATION_ESCAPE_RATIO_THRESHOLD) {
+    consecutiveLowRollingAvgTurns += 1;
+  } else {
+    consecutiveLowRollingAvgTurns = 0;
+  }
 
   if (avgRatio >= CALIBRATION_TRIGGER_MAX_RATIO) {
     calibration_skip_reason = 'within_threshold';
@@ -110,6 +123,50 @@ export function recordTtsTurnDurationRatio(actualMs: number, expectedMs: number)
 
   /** Full proportional target (uncapped) — audit / ideal reference only. */
   const idealUncapped = prev / avgRatio;
+  const shouldApplyEscape = consecutiveLowRollingAvgTurns >= CALIBRATION_ESCAPE_CONSECUTIVE_TURNS;
+  if (shouldApplyEscape) {
+    let next = idealUncapped;
+    next = Math.max(prev - CALIBRATION_ESCAPE_MAX_STEP_MS_PER_CHAR, Math.min(prev + CALIBRATION_ESCAPE_MAX_STEP_MS_PER_CHAR, next));
+    next = Math.round(next);
+    next = Math.min(MULTIPLIER_CEILING_MS_PER_CHAR, Math.max(MULTIPLIER_FLOOR_MS_PER_CHAR, next));
+    consecutiveLowRollingAvgTurns = 0;
+    if (next === prev) {
+      const atBound =
+        (prev <= MULTIPLIER_FLOOR_MS_PER_CHAR && idealUncapped < prev) ||
+        (prev >= MULTIPLIER_CEILING_MS_PER_CHAR && idealUncapped > prev);
+      return {
+        ratio,
+        calibration_adjusted: false,
+        calibration_escape_applied: true,
+        previous_multiplier_ms_per_char: prev,
+        new_multiplier_ms_per_char: calibratedMsPerChar,
+        calibration_skip_reason: atBound ? 'at_floor_or_ceiling' : 'rounded_no_change',
+        calibration_adjustment_detail: {
+          rolling_avg_ratio: avgRatio,
+          turns_in_window: ROLLING_WINDOW,
+          step_applied_ms: 0,
+          ideal_next_multiplier_without_step_cap: Math.round(idealUncapped * 100) / 100,
+          adjustment_reason: `rolling_window_${ROLLING_WINDOW}_avg_ratio_${avgRatio.toFixed(4)}_below_${CALIBRATION_ESCAPE_RATIO_THRESHOLD}_escape_cap_${CALIBRATION_ESCAPE_MAX_STEP_MS_PER_CHAR}ms_step_${atBound ? 'blocked_at_bounds' : 'no_change_after_round'}`,
+        },
+      };
+    }
+    calibratedMsPerChar = next;
+    return {
+      ratio,
+      calibration_adjusted: true,
+      calibration_escape_applied: true,
+      previous_multiplier_ms_per_char: prev,
+      new_multiplier_ms_per_char: calibratedMsPerChar,
+      calibration_skip_reason: 'adjusted',
+      calibration_adjustment_detail: {
+        rolling_avg_ratio: avgRatio,
+        turns_in_window: ROLLING_WINDOW,
+        step_applied_ms: next - prev,
+        ideal_next_multiplier_without_step_cap: Math.round(idealUncapped * 100) / 100,
+        adjustment_reason: `rolling_window_${ROLLING_WINDOW}_avg_ratio_${avgRatio.toFixed(4)}_below_${CALIBRATION_ESCAPE_RATIO_THRESHOLD}_escape_cap_${CALIBRATION_ESCAPE_MAX_STEP_MS_PER_CHAR}ms_step`,
+      },
+    };
+  }
   const maxStep = prev * MAX_STEP_FRACTION;
   let next = prev;
   if (idealUncapped > prev) {
