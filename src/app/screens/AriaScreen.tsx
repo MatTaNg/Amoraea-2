@@ -13,6 +13,7 @@ import {
   Modal,
   AppState,
   Linking,
+  InteractionManager,
 } from 'react-native';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useAuth } from '@features/authentication/hooks/useAuth';
@@ -95,7 +96,6 @@ import {
 } from '@features/aria/utils/webInterviewGestureContext';
 import {
   speakWithElevenLabs,
-  fetchElevenLabsMpegArrayBuffer,
   stopElevenLabsPlayback,
   stopElevenLabsSpeech,
   pauseWebInterviewHtmlAudioForDocumentHidden,
@@ -148,6 +148,7 @@ import { gatherRecordingStartTelemetry, gatherTtsPlaybackTelemetry } from '@util
 import {
   consumeTtsBufferCompleteBeforePlaybackFlag,
   consumeTtsPlaybackStrategyForNextPlayback,
+  prepareTtsPlaybackTelemetryState,
 } from '@features/aria/telemetry/ttsBufferTelemetry';
 import {
   writeAudioSessionLog,
@@ -3824,6 +3825,11 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
     reject: (reason?: unknown) => void;
   } | null>(null);
   const [webTabGestureRestoreOverlay, setWebTabGestureRestoreOverlay] = useState(false);
+  const ttsScreenReadyRef = useRef(false);
+  const pendingTtsGateResolversRef = useRef<Array<() => void>>([]);
+  const pendingScreenReadyResolversRef = useRef<Array<() => void>>([]);
+  const resumeLoadingFlowActiveRef = useRef(false);
+  const [resumeLoadingVisible, setResumeLoadingVisible] = useState(false);
   /** Next `recording_start` after VAD-gate bypass no-speech path should log `recording_restarted_after_vad_bypass`. */
   const pendingRecordingRestartAfterVadBypassRef = useRef(false);
   const takeRecordingStartEventDataWithVadBypassRestart = () => {
@@ -3890,6 +3896,58 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
   type MicPermissionState = 'granted' | 'denied' | 'prompt' | 'unavailable';
   const [micPermission, setMicPermission] = useState<MicPermissionState>('prompt');
 
+  const logTtsGateState = useCallback(
+    (state: 'held' | 'released', reason: string, pendingCount: number) => {
+      if (!userId) return;
+      const r = getSessionLogRuntime();
+      writeSessionLog({
+        userId,
+        attemptId: r.attemptId,
+        eventType: 'tts_playback_gate',
+        eventData: {
+          tts_gate: state,
+          reason,
+          pending_count: pendingCount,
+        },
+        platform: r.platform,
+      });
+    },
+    [userId],
+  );
+
+  const awaitTtsScreenReadyGate = useCallback(
+    async (reason: string) => {
+      if (ttsScreenReadyRef.current) return;
+      logTtsGateState('held', reason, pendingTtsGateResolversRef.current.length + 1);
+      await new Promise<void>((resolve) => {
+        pendingTtsGateResolversRef.current.push(resolve);
+      });
+    },
+    [logTtsGateState],
+  );
+
+  const awaitScreenReadySignal = useCallback(async () => {
+    if (ttsScreenReadyRef.current) return;
+    await new Promise<void>((resolve) => {
+      pendingScreenReadyResolversRef.current.push(resolve);
+    });
+  }, []);
+
+  const logSessionResumeState = useCallback(
+    (state: 'loading' | 'ready') => {
+      if (!userId) return;
+      const r = getSessionLogRuntime();
+      writeSessionLog({
+        userId,
+        attemptId: r.attemptId,
+        eventType: 'session_resume',
+        eventData: { session_resume: state },
+        platform: r.platform,
+      });
+    },
+    [userId],
+  );
+
   const recognitionRef = useRef<{ start(): void; stop(): void } | null>(null);
   const transcriptAtReleaseRef = useRef('');
   const isSpeakingRef = useRef(false);
@@ -3911,6 +3969,31 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
     if (!isWebInsecureDevUrl()) return;
     setWebInsecureContextMessage(webInsecureContextHelpMessage());
   }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+    const releaseGate = () => {
+      if (cancelled || ttsScreenReadyRef.current) return;
+      ttsScreenReadyRef.current = true;
+      const pending = pendingTtsGateResolversRef.current.splice(0, pendingTtsGateResolversRef.current.length);
+      const pendingScreenReady = pendingScreenReadyResolversRef.current.splice(
+        0,
+        pendingScreenReadyResolversRef.current.length
+      );
+      if (pending.length > 0) {
+        logTtsGateState('released', 'screen_ready', pending.length);
+      }
+      pending.forEach((resolve) => resolve());
+      pendingScreenReady.forEach((resolve) => resolve());
+    };
+    const interaction = InteractionManager.runAfterInteractions(() => {
+      setTimeout(releaseGate, 0);
+    });
+    return () => {
+      cancelled = true;
+      interaction.cancel();
+    };
+  }, [logTtsGateState]);
 
   const scrollViewRef = useRef<ScrollView | null>(null);
   const hasResumedRef = useRef(false);
@@ -4787,6 +4870,46 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
   });
   const queryClient = useQueryClient();
 
+  useEffect(() => {
+    if (!userId) return;
+    const resolvedFirstName = getInterviewUserFirstNameForPrompt(profile);
+    // #region agent log
+    fetch('http://127.0.0.1:7789/ingest/668e0bd5-3283-4492-9f48-e33846c18218', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'X-Debug-Session-Id': 'c61a43' },
+      body: JSON.stringify({
+        sessionId: 'c61a43',
+        runId: 'pre-fix',
+        hypothesisId: 'H12',
+        location: 'AriaScreen.tsx:profileFirstNameEffect',
+        message: 'profile_name_resolution',
+        data: {
+          hasProfile: !!profile,
+          hasBasicInfoFirstName: !!profile?.basicInfo?.firstName,
+          hasProfileName: !!profile?.name,
+          resolvedFirstName: resolvedFirstName || null,
+        },
+        timestamp: Date.now(),
+      }),
+    }).catch(() => {});
+    // #endregion
+    const rtd = getSessionLogRuntime();
+    writeSessionLog({
+      userId,
+      attemptId: rtd.attemptId,
+      eventType: 'name_source_debug',
+      eventData: {
+        stage: 'profile_effect',
+        has_profile: !!profile,
+        has_basic_info_first_name: !!profile?.basicInfo?.firstName,
+        has_profile_name: !!profile?.name,
+        resolved_first_name_present: !!resolvedFirstName,
+        resolved_first_name_length: resolvedFirstName.length,
+      },
+      platform: rtd.platform,
+    });
+  }, [profile, userId]);
+
   const typologyContext = ''; // Optional: load from profile/assessments later
 
   useEffect(() => {
@@ -4832,6 +4955,9 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
     const cleaned = stripControlTokens(rawText).trim();
     if (!cleaned) return;
     const scenario = detectActiveScenarioFromMessage(cleaned);
+    // #region agent log
+    fetch('http://127.0.0.1:7789/ingest/668e0bd5-3283-4492-9f48-e33846c18218',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'c61a43'},body:JSON.stringify({sessionId:'c61a43',runId:'pre-fix',hypothesisId:'H8',location:'AriaScreen.tsx:applyInterviewSpeechComplete:entry',message:'apply_interview_speech_complete_called',data:{hasScenario:!!scenario,detectedScenario:scenario?.label ?? null,currentPhase:interviewUiPhase,currentScenario:currentScenarioRef.current,hasReferenceScenario:!!referenceCardScenario},timestamp:Date.now()})}).catch(()=>{});
+    // #endregion
     if (scenario) {
       committedScenarioRef.current = scenario;
       setReferenceCardScenario(scenario);
@@ -4860,6 +4986,7 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
         | 'preauthorized_element';
     }
   ): Promise<{ scenarioSplitDelivery?: { segment1_expected_duration_ms: number; segment2_expected_duration_ms: number } } | void> => {
+    await awaitTtsScreenReadyGate('speak');
     await stopElevenLabsPlayback();
     if (!speakOpts?.skipLastQuestionRef) {
       lastQuestionTextRef.current = text;
@@ -4906,39 +5033,31 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
         scenarioSplit: !!split,
       });
       if (split) {
-        const [buf1, buf2] = await Promise.all([
-          fetchElevenLabsMpegArrayBuffer(split.seg1),
-          fetchElevenLabsMpegArrayBuffer(split.seg2),
-        ]);
-        if (buf1 && buf2) {
-          await speakWithElevenLabs(split.seg1, undefined, {
-            onPlaybackStarted: () => {
-              setVoiceState('speaking');
-              logWebFirstAudioPlay();
-            },
-            telemetry: { source: telemetrySource },
-            prefetchedMpegArrayBuffer: buf1,
-            skipStopElevenLabsPlaybackBeforeStart: true,
-            preInitTriggerDuring,
-          });
-          await new Promise<void>((r) => setTimeout(r, 1500));
-          await speakWithElevenLabs(split.seg2, undefined, {
-            onPlaybackStarted: () => {
-              setVoiceState('speaking');
-              logWebFirstAudioPlay();
-            },
-            telemetry: { source: telemetrySource },
-            prefetchedMpegArrayBuffer: buf2,
-            skipStopElevenLabsPlaybackBeforeStart: true,
-            preInitTriggerDuring,
-          });
-          return {
-            scenarioSplitDelivery: {
-              segment1_expected_duration_ms: split.segment1_expected_duration_ms,
-              segment2_expected_duration_ms: split.segment2_expected_duration_ms,
-            },
-          };
-        }
+        await speakWithElevenLabs(split.seg1, undefined, {
+          onPlaybackStarted: () => {
+            setVoiceState('speaking');
+            logWebFirstAudioPlay();
+          },
+          telemetry: { source: telemetrySource },
+          skipStopElevenLabsPlaybackBeforeStart: true,
+          preInitTriggerDuring,
+        });
+        await new Promise<void>((r) => setTimeout(r, 1500));
+        await speakWithElevenLabs(split.seg2, undefined, {
+          onPlaybackStarted: () => {
+            setVoiceState('speaking');
+            logWebFirstAudioPlay();
+          },
+          telemetry: { source: telemetrySource },
+          skipStopElevenLabsPlaybackBeforeStart: true,
+          preInitTriggerDuring,
+        });
+        return {
+          scenarioSplitDelivery: {
+            segment1_expected_duration_ms: split.segment1_expected_duration_ms,
+            segment2_expected_duration_ms: split.segment2_expected_duration_ms,
+          },
+        };
       }
       await speakWithElevenLabs(text, undefined, {
         onPlaybackStarted: () => {
@@ -4958,7 +5077,7 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
       }
       setVoiceState('idle');
     }
-  }, []);
+  }, [awaitTtsScreenReadyGate]);
 
   /**
    * Web: flush ElevenLabs blob or Web Speech queue inside a user gesture (pointer/mic).
@@ -5160,6 +5279,7 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
         silent?: boolean;
         interviewSpeechRole?: 'assistant_response';
         telemetrySource?: TtsTelemetrySource;
+        ttsPipeline?: 'parallel_streaming';
         /** Skip question_delivered session log (e.g. verbatim resume replay). */
         skipQuestionDeliveredTelemetry?: boolean;
         /** Do not advance reference-card state from this line. */
@@ -5184,6 +5304,7 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
         silent = false,
         interviewSpeechRole,
         telemetrySource: telemetrySourceOpt,
+        ttsPipeline,
         skipQuestionDeliveredTelemetry = false,
         skipInterviewSpeechAdvance = false,
         skipQuestionTiming = false,
@@ -5201,6 +5322,8 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
         Platform.OS === 'web' && isPreAuthorizedAudioPendingForNextTts()
           ? 'preauthorized_element'
           : ttsTriggerSource;
+
+      await awaitTtsScreenReadyGate('speak_text_safe');
 
       if (Platform.OS === 'web' && immediateWebPlaybackElement && userId) {
         /** Same as `speak()` — prefetched HTMLAudioElement path returns before `speak()`, so ratio gate would see an empty/stale `lastQuestionTextRef` on mobile "Begin Interview". */
@@ -5424,6 +5547,11 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
       if (priorRec) {
         await applyPlaybackBridgeBeforeTtsIfIos('speakTextSafe');
       }
+      prepareTtsPlaybackTelemetryState({
+        charCount: stripControlTokens(text).trim().length,
+        telemetryIsGreeting: telemetrySource === 'greeting',
+        isWeb: Platform.OS === 'web',
+      });
       const ttsStart = Date.now();
       if (userId) {
         setTtsPlaybackActive(true);
@@ -5607,6 +5735,7 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
               scenario_number: currentScenarioRef.current,
               question_text: deliveredQuestionText,
               delivered_at: new Date().toISOString(),
+              ...(ttsPipeline ? { tts_pipeline: ttsPipeline } : {}),
             },
             platform: rtd.platform,
           });
@@ -5687,6 +5816,9 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
           }
         }
       } finally {
+        // #region agent log
+        fetch('http://127.0.0.1:7789/ingest/668e0bd5-3283-4492-9f48-e33846c18218',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'c61a43'},body:JSON.stringify({sessionId:'c61a43',runId:'pre-fix',hypothesisId:'H5',location:'AriaScreen.tsx:speakTextSafe:finally',message:'speak_text_safe_finally_reached',data:{voiceStateBeforeIdleSet:voiceStateRef.current,markIntro,userIdPresent:!!userId},timestamp:Date.now()})}).catch(()=>{});
+        // #endregion
         if (userId) {
           setTtsPlaybackActive(false);
           ttsLineInFlightRef.current = false;
@@ -5720,6 +5852,7 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
       userId,
       webSpeechShouldDeferToUserGesture,
       mobileWebTapToBeginDone,
+      awaitTtsScreenReadyGate,
     ]
   );
 
@@ -6126,17 +6259,37 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
       body: JSON.stringify({
         sessionId: 'c61a43',
         runId: 'pre-fix',
-        hypothesisId: 'H6',
+        hypothesisId: 'H13',
         location: 'AriaScreen.tsx:processUserSpeech',
-        message: 'process_user_speech_entry',
+        message: 'process_user_speech_name_snapshot',
         data: {
           spokenText: trimmed.slice(0, 120),
           resumeGatePending: resumeRepeatChoicePendingRef.current,
+          participantFirstNameForSpoken: participantFirstNameForSpoken || null,
+          profileHasBasicInfoFirstName: !!profile?.basicInfo?.firstName,
+          profileHasName: !!profile?.name,
         },
         timestamp: Date.now(),
       }),
     }).catch(() => {});
     // #endregion
+    if (userId) {
+      const rtd = getSessionLogRuntime();
+      writeSessionLog({
+        userId,
+        attemptId: rtd.attemptId,
+        eventType: 'name_source_debug',
+        eventData: {
+          stage: 'process_user_speech',
+          resume_gate_pending: resumeRepeatChoicePendingRef.current,
+          profile_has_basic_info_first_name: !!profile?.basicInfo?.firstName,
+          profile_has_name: !!profile?.name,
+          participant_first_name_present: !!participantFirstNameForSpoken,
+          participant_first_name_length: participantFirstNameForSpoken.length,
+        },
+        platform: rtd.platform,
+      });
+    }
 
     if (resumeRepeatChoicePendingRef.current) {
       // #region agent log
@@ -6987,6 +7140,24 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
       const participantFirstNameSystemSuffix = buildInterviewerParticipantFirstNameSystemSuffix(
         getInterviewUserFirstNameForPrompt(profile)
       );
+      // #region agent log
+      fetch('http://127.0.0.1:7789/ingest/668e0bd5-3283-4492-9f48-e33846c18218', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'X-Debug-Session-Id': 'c61a43' },
+        body: JSON.stringify({
+          sessionId: 'c61a43',
+          runId: 'pre-fix',
+          hypothesisId: 'H14',
+          location: 'AriaScreen.tsx:sendMessage:systemPromptNameSuffix',
+          message: 'system_prompt_participant_name_resolution',
+          data: {
+            participantFirstNameForSpoken: participantFirstNameForSpoken || null,
+            promptNameFromProfile: getInterviewUserFirstNameForPrompt(profile) || null,
+          },
+          timestamp: Date.now(),
+        }),
+      }).catch(() => {});
+      // #endregion
       const requestBody = {
         model: 'claude-sonnet-4-20250514',
         max_tokens: maxTok,
@@ -7039,23 +7210,209 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
     }
 
     let data: { content?: Array<{ text?: string }>; error?: { message?: string } };
+    const textToParallelStream = { full: '', spokenStarted: false };
     const makeCall = async (): Promise<typeof data> => {
-      const res = await fetch(apiUrl, { method: 'POST', headers, body: JSON.stringify(requestBody) });
-      const raw = await res.text();
-      let parsed: typeof data;
-      try {
-        parsed = JSON.parse(raw);
-      } catch {
-        const e = new Error('Invalid response');
-        (e as Error & { status?: number }).status = res.status;
-        throw e;
-      }
+      const streamBody = { ...requestBody, stream: true };
+      const res = await fetch(apiUrl, { method: 'POST', headers, body: JSON.stringify(streamBody) });
       if (!res.ok) {
-        const e = new Error(parsed?.error?.message ?? `HTTP ${res.status}`);
+        const rawErr = await res.text();
+        let parsedErr: { error?: { message?: string } } | null = null;
+        try {
+          parsedErr = JSON.parse(rawErr) as { error?: { message?: string } };
+        } catch {
+          parsedErr = null;
+        }
+        const e = new Error(parsedErr?.error?.message ?? `HTTP ${res.status}`);
         (e as Error & { status?: number }).status = res.status;
         throw e;
       }
-      return parsed;
+      if (!res.body) {
+        const e = new Error('Invalid response stream');
+        (e as Error & { status?: number }).status = res.status;
+        throw e;
+      }
+      const reader = res.body.getReader();
+      const decoder = new TextDecoder();
+      let sseBuffer = '';
+      let sentenceBuffer = '';
+      let ttsChain = Promise.resolve();
+      let ttsCancelled = false;
+      let firstSentenceLogged = false;
+      const maybeQueueSentenceForTts = (sentence: string) => {
+        const spoken = stripControlTokens(sentence).trim();
+        if (!spoken || ttsCancelled) return;
+        ttsChain = ttsChain.then(async () => {
+          if (ttsCancelled) return;
+          try {
+            const spokenForTts = ensureSpokenTextIncludesParticipantFirstName(
+              sanitizeAssistantInterviewerCharacterNames(spoken),
+              participantFirstNameForSpoken
+            );
+            // #region agent log
+            fetch('http://127.0.0.1:7789/ingest/668e0bd5-3283-4492-9f48-e33846c18218', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json', 'X-Debug-Session-Id': 'c61a43' },
+              body: JSON.stringify({
+                sessionId: 'c61a43',
+                runId: 'pre-fix',
+                hypothesisId: 'H15',
+                location: 'AriaScreen.tsx:maybeQueueSentenceForTts:nameSourceCompare',
+                message: 'parallel_sentence_name_sources',
+                data: {
+                  participantFirstNameForSpoken: participantFirstNameForSpoken || null,
+                  freshNameFromProfile: getInterviewUserFirstNameForPrompt(profile) || null,
+                  sentencePreview: spoken.slice(0, 120),
+                },
+                timestamp: Date.now(),
+              }),
+            }).catch(() => {});
+            // #endregion
+            if (userId) {
+              const rtd = getSessionLogRuntime();
+              const freshNameFromProfile = getInterviewUserFirstNameForPrompt(profile);
+              writeSessionLog({
+                userId,
+                attemptId: rtd.attemptId,
+                eventType: 'name_source_debug',
+                eventData: {
+                  stage: 'parallel_sentence',
+                  participant_first_name_present: !!participantFirstNameForSpoken,
+                  participant_first_name_length: participantFirstNameForSpoken.length,
+                  fresh_name_present: !!freshNameFromProfile,
+                  fresh_name_length: freshNameFromProfile.length,
+                },
+                platform: rtd.platform,
+              });
+            }
+            if (userId) {
+              const rtd = getSessionLogRuntime();
+              writeSessionLog({
+                userId,
+                attemptId: rtd.attemptId,
+                eventType: 'name_injection_debug',
+                eventData: {
+                  stage: 'parallel_sentence',
+                  moment_number: currentInterviewMomentRef.current,
+                  scenario_number: currentScenarioRef.current,
+                  raw_has_name: participantFirstNameForSpoken
+                    ? spoken.toLowerCase().includes(participantFirstNameForSpoken.toLowerCase())
+                    : null,
+                  injected_has_name: participantFirstNameForSpoken
+                    ? spokenForTts.toLowerCase().includes(participantFirstNameForSpoken.toLowerCase())
+                    : null,
+                  raw_preview: spoken.slice(0, 140),
+                  injected_preview: spokenForTts.slice(0, 140),
+                },
+                platform: rtd.platform,
+              });
+            }
+            // #region agent log
+            fetch('http://127.0.0.1:7789/ingest/668e0bd5-3283-4492-9f48-e33846c18218',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'c61a43'},body:JSON.stringify({sessionId:'c61a43',runId:'post-fix',hypothesisId:'H9',location:'AriaScreen.tsx:maybeQueueSentenceForTts:nameCheck',message:'parallel_sentence_name_presence',data:{sentencePreview:spoken.slice(0,120),sentenceHasName:participantFirstNameForSpoken?spoken.toLowerCase().includes(participantFirstNameForSpoken.toLowerCase()):null,spokenForTtsPreview:spokenForTts.slice(0,120),spokenForTtsHasName:participantFirstNameForSpoken?spokenForTts.toLowerCase().includes(participantFirstNameForSpoken.toLowerCase()):null,participantFirstNameForSpoken:participantFirstNameForSpoken??null},timestamp:Date.now()})}).catch(()=>{});
+            // #endregion
+            // #region agent log
+            fetch('http://127.0.0.1:7789/ingest/668e0bd5-3283-4492-9f48-e33846c18218',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'c61a43'},body:JSON.stringify({sessionId:'c61a43',runId:'post-fix',hypothesisId:'H1',location:'AriaScreen.tsx:maybeQueueSentenceForTts:beforeSpeak',message:'parallel_tts_sentence_about_to_play',data:{sentenceLen:spokenForTts.length,voiceState:voiceStateRef.current,ttsCancelled},timestamp:Date.now()})}).catch(()=>{});
+            // #endregion
+              await awaitTtsScreenReadyGate('parallel_streaming_sentence');
+            await speakWithElevenLabs(spokenForTts, undefined, {
+              skipStopElevenLabsPlaybackBeforeStart: true,
+              telemetry: { source: 'turn' },
+              preInitTriggerDuring: 'tts_playback',
+              onPlaybackStarted: () => {
+                setVoiceState('speaking');
+                textToParallelStream.spokenStarted = true;
+                if (!firstSentenceLogged && userId) {
+                  firstSentenceLogged = true;
+                  const rtd = getSessionLogRuntime();
+                  writeSessionLog({
+                    userId,
+                    attemptId: rtd.attemptId,
+                    eventType: 'question_delivered',
+                    eventData: {
+                      moment_number: currentInterviewMomentRef.current,
+                      scenario_number: currentScenarioRef.current,
+                      question_text: stripControlTokens(spoken).trim().slice(0, 2000),
+                      delivered_at: new Date().toISOString(),
+                      tts_pipeline: 'parallel_streaming',
+                    },
+                    platform: rtd.platform,
+                  });
+                }
+              },
+            });
+            // #region agent log
+            fetch('http://127.0.0.1:7789/ingest/668e0bd5-3283-4492-9f48-e33846c18218',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'c61a43'},body:JSON.stringify({sessionId:'c61a43',runId:'pre-fix',hypothesisId:'H1',location:'AriaScreen.tsx:maybeQueueSentenceForTts:afterSpeak',message:'parallel_tts_sentence_play_resolved',data:{sentenceLen:spoken.length,voiceState:voiceStateRef.current,spokenStarted:textToParallelStream.spokenStarted},timestamp:Date.now()})}).catch(()=>{});
+            // #endregion
+          } catch {
+            // #region agent log
+            fetch('http://127.0.0.1:7789/ingest/668e0bd5-3283-4492-9f48-e33846c18218',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'c61a43'},body:JSON.stringify({sessionId:'c61a43',runId:'pre-fix',hypothesisId:'H3',location:'AriaScreen.tsx:maybeQueueSentenceForTts:catch',message:'parallel_tts_sentence_play_error_swallowed',data:{voiceState:voiceStateRef.current},timestamp:Date.now()})}).catch(()=>{});
+            // #endregion
+            // swallow tts errors for parallel pipeline
+          }
+        });
+      };
+      const processTextDelta = (deltaText: string) => {
+        if (!deltaText) return;
+        textToParallelStream.full += deltaText;
+        sentenceBuffer += deltaText;
+        for (;;) {
+          const m = sentenceBuffer.match(/[.!?](?:\s|$)/);
+          if (!m || m.index == null) break;
+          const cut = m.index + m[0].length;
+          const sentence = sentenceBuffer.slice(0, cut);
+          sentenceBuffer = sentenceBuffer.slice(cut);
+          maybeQueueSentenceForTts(sentence);
+        }
+      };
+      try {
+        for (;;) {
+          const { done, value } = await reader.read();
+          const chunk = decoder.decode(value ?? new Uint8Array(), { stream: !done });
+          sseBuffer += chunk;
+          const lines = sseBuffer.split('\n');
+          sseBuffer = lines.pop() ?? '';
+          for (const lineRaw of lines) {
+            const line = lineRaw.trim();
+            if (!line.startsWith('data:')) continue;
+            const payload = line.slice(5).trim();
+            if (!payload || payload === '[DONE]') continue;
+            let evt: { type?: string; delta?: { text?: string }; text?: string } | null = null;
+            try {
+              evt = JSON.parse(payload) as { type?: string; delta?: { text?: string }; text?: string };
+            } catch {
+              evt = null;
+            }
+            const deltaText =
+              evt?.type === 'content_block_delta'
+                ? evt.delta?.text ?? ''
+                : evt?.type === 'message_delta'
+                  ? evt.text ?? ''
+                  : '';
+            processTextDelta(deltaText);
+          }
+          if (done) break;
+        }
+        if (sentenceBuffer.trim()) {
+          maybeQueueSentenceForTts(sentenceBuffer);
+          sentenceBuffer = '';
+        }
+        await ttsChain;
+        if (textToParallelStream.spokenStarted) {
+          setVoiceState('idle');
+        }
+        // #region agent log
+        fetch('http://127.0.0.1:7789/ingest/668e0bd5-3283-4492-9f48-e33846c18218',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'c61a43'},body:JSON.stringify({sessionId:'c61a43',runId:'pre-fix',hypothesisId:'H2',location:'AriaScreen.tsx:makeCall:afterTtsChain',message:'parallel_tts_chain_completed',data:{spokenStarted:textToParallelStream.spokenStarted,voiceState:voiceStateRef.current,fullTextLen:textToParallelStream.full.length},timestamp:Date.now()})}).catch(()=>{});
+        // #endregion
+      } catch {
+        ttsCancelled = true;
+        await stopElevenLabsPlayback();
+        if (textToParallelStream.spokenStarted) {
+          setVoiceState('idle');
+        }
+        // #region agent log
+        fetch('http://127.0.0.1:7789/ingest/668e0bd5-3283-4492-9f48-e33846c18218',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'c61a43'},body:JSON.stringify({sessionId:'c61a43',runId:'pre-fix',hypothesisId:'H3',location:'AriaScreen.tsx:makeCall:catch',message:'parallel_llm_stream_or_tts_chain_failed',data:{voiceState:voiceStateRef.current,spokenStarted:textToParallelStream.spokenStarted},timestamp:Date.now()})}).catch(()=>{});
+        // #endregion
+      }
+      return { content: [{ text: textToParallelStream.full }] };
     };
 
     const numUserMessages = messagesToUse.filter((m) => m.role === 'user').length;
@@ -7106,8 +7463,41 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
 
     try {
     let text = (data.content?.[0]?.text ?? '').trim();
+    // #region agent log
+    fetch('http://127.0.0.1:7789/ingest/668e0bd5-3283-4492-9f48-e33846c18218',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'c61a43'},body:JSON.stringify({sessionId:'c61a43',runId:'pre-fix',hypothesisId:'H10',location:'AriaScreen.tsx:sendMessage:assembledTextNameCheck',message:'assembled_text_name_presence',data:{assembledPreview:text.slice(0,160),assembledHasName:participantFirstNameForSpoken?text.toLowerCase().includes(participantFirstNameForSpoken.toLowerCase()):null,participantFirstNameForSpoken:participantFirstNameForSpoken??null},timestamp:Date.now()})}).catch(()=>{});
+    // #endregion
     /** LLM done — do not keep "Amoraea is thinking" (or isWaiting-gated UI) until TTS finishes; HTML audio can hang without `onended` on some mobile browsers. */
     setIsWaiting(false);
+    const parallelStreamingPlaybackUsed = textToParallelStream.spokenStarted;
+    // #region agent log
+    fetch('http://127.0.0.1:7789/ingest/668e0bd5-3283-4492-9f48-e33846c18218',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'c61a43'},body:JSON.stringify({sessionId:'c61a43',runId:'pre-fix',hypothesisId:'H6',location:'AriaScreen.tsx:sendMessage:postStreamAssemble',message:'parallel_streaming_flag_and_ui_state',data:{parallelStreamingPlaybackUsed,interviewUiPhase,status,currentScenario:currentScenarioRef.current,hasReferenceScenario:!!referenceCardScenario,scenarioIntroTtsPlaying},timestamp:Date.now()})}).catch(()=>{});
+    // #endregion
+    const speakAssistantTurn = async (spokenText: string, opts?: {
+      silent?: boolean;
+      interviewSpeechRole?: 'assistant_response';
+      telemetrySource?: TtsTelemetrySource;
+      skipQuestionDeliveredTelemetry?: boolean;
+      skipInterviewSpeechAdvance?: boolean;
+      skipQuestionTiming?: boolean;
+      skipLastQuestionRef?: boolean;
+      skipGestureGate?: boolean;
+      ttsTriggerSource?: 'gesture_handler' | 'effect' | 'callback' | 'timeout' | 'preauthorized_element';
+      immediateWebPlaybackElement?: HTMLAudioElement;
+    }) => {
+      if (parallelStreamingPlaybackUsed) {
+        // #region agent log
+        fetch('http://127.0.0.1:7789/ingest/668e0bd5-3283-4492-9f48-e33846c18218',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'c61a43'},body:JSON.stringify({sessionId:'c61a43',runId:'pre-fix',hypothesisId:'H7',location:'AriaScreen.tsx:speakAssistantTurn:skip',message:'speak_text_safe_skipped_due_parallel_streaming',data:{spokenLen:spokenText.length,spokenPreview:spokenText.slice(0,160),spokenHasName:participantFirstNameForSpoken?spokenText.toLowerCase().includes(participantFirstNameForSpoken.toLowerCase()):null,participantFirstNameForSpoken:participantFirstNameForSpoken??null,interviewUiPhase,status,currentScenario:currentScenarioRef.current,hasReferenceScenario:!!referenceCardScenario,scenarioIntroTtsPlaying},timestamp:Date.now()})}).catch(()=>{});
+        // #endregion
+        if (opts?.interviewSpeechRole === 'assistant_response' && !opts?.skipInterviewSpeechAdvance) {
+          applyInterviewSpeechComplete(spokenText);
+          // #region agent log
+          fetch('http://127.0.0.1:7789/ingest/668e0bd5-3283-4492-9f48-e33846c18218',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'c61a43'},body:JSON.stringify({sessionId:'c61a43',runId:'post-fix',hypothesisId:'H7',location:'AriaScreen.tsx:speakAssistantTurn:parallelAdvance',message:'applied_interview_speech_complete_in_parallel_skip',data:{spokenLen:spokenText.length,interviewUiPhase,status,currentScenario:currentScenarioRef.current},timestamp:Date.now()})}).catch(()=>{});
+          // #endregion
+        }
+        return;
+      }
+      await speakTextSafe(spokenText, opts ?? ASSISTANT_INTERVIEW_SPEECH);
+    };
     const priorAssistantContentS3 =
       [...messagesToUse].reverse().find((m) => m.role === 'assistant')?.content ?? '';
     let strippedText = stripControlTokens(text);
@@ -7314,7 +7704,7 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
         stagedMessages = [...messagesToUse, aiMsg];
         setMessages(stagedMessages);
         applyInterviewProgressFromAssistantText(strippedText, progressRefsPayload);
-        await speakTextSafe(strippedText, ASSISTANT_INTERVIEW_SPEECH);
+        await speakAssistantTurn(strippedText, ASSISTANT_INTERVIEW_SPEECH);
       }
       if (__DEV__) {
         console.log('[S1_CONTEMPT_FORCED]', {
@@ -7363,7 +7753,7 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
         stagedMessages = [...messagesToUse, aiMsg];
         setMessages(stagedMessages);
         applyInterviewProgressFromAssistantText(strippedText, progressRefsPayload);
-        await speakTextSafe(strippedText, ASSISTANT_INTERVIEW_SPEECH);
+        await speakAssistantTurn(strippedText, ASSISTANT_INTERVIEW_SPEECH);
       }
       if (__DEV__) {
         console.log('[S2_APPRECIATION_FORCED]', {
@@ -7517,7 +7907,7 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
         stagedMessages = [...messagesToUse, aiMsg];
         setMessages(stagedMessages);
         applyInterviewProgressFromAssistantText(strippedText, progressRefsPayload);
-        await speakTextSafe(strippedText, ASSISTANT_INTERVIEW_SPEECH);
+        await speakAssistantTurn(strippedText, ASSISTANT_INTERVIEW_SPEECH);
       }
       if (__DEV__) {
         console.log('[S3_THRESHOLD_FORCED]', {
@@ -7594,7 +7984,7 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
         stagedMessages = [...messagesToUse, aiMsg];
         setMessages(stagedMessages);
         applyInterviewProgressFromAssistantText(strippedText, progressRefsPayload);
-        await speakTextSafe(strippedText, ASSISTANT_INTERVIEW_SPEECH);
+        await speakAssistantTurn(strippedText, ASSISTANT_INTERVIEW_SPEECH);
       }
       const combinedMsg: MessageWithScenario = {
         role: 'assistant',
@@ -7656,7 +8046,7 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
         const updatedMessages = [...messagesToUse, newAssistantMsg];
         setMessages(updatedMessages);
         applyInterviewProgressFromAssistantText(fullDisplay, progressRefsPayload);
-        await speakTextSafe(fullDisplay, ASSISTANT_INTERVIEW_SPEECH);
+        await speakAssistantTurn(fullDisplay, ASSISTANT_INTERVIEW_SPEECH);
         if (canAdvance) {
           setHighestScenarioReached((prev) => Math.max(prev, scenarioNumber));
           if (!scoredScenariosRef.current.has(scenarioNumber)) {
@@ -7709,7 +8099,7 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
           const updatedMessages = [...messagesToUse, newAssistantMsg];
           setMessages(updatedMessages);
           applyInterviewProgressFromAssistantText(fullDisplay, progressRefsPayload);
-          await speakTextSafe(fullDisplay, ASSISTANT_INTERVIEW_SPEECH);
+          await speakAssistantTurn(fullDisplay, ASSISTANT_INTERVIEW_SPEECH);
           setHighestScenarioReached((prev) => Math.max(prev, scenarioNumber));
           if (!scoredScenariosRef.current.has(scenarioNumber)) {
             scoredScenariosRef.current.add(scenarioNumber);
@@ -7793,7 +8183,7 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
         isInterviewCompleteRef.current = true;
         const transcriptForScoring = finalMessages.filter((m) => m.role === 'user' || m.role === 'assistant');
         try {
-          await speakTextSafe(displayText, { telemetrySource: 'turn' });
+          await speakAssistantTurn(displayText, { telemetrySource: 'turn' });
         } catch {
           /* proceed to scoring even if TTS fails */
         }
@@ -7900,13 +8290,16 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
           // #endregion
         }
         displayText = ensureSpokenTextIncludesParticipantFirstName(displayText, participantFirstNameForSpoken);
+        // #region agent log
+        fetch('http://127.0.0.1:7789/ingest/668e0bd5-3283-4492-9f48-e33846c18218',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'c61a43'},body:JSON.stringify({sessionId:'c61a43',runId:'pre-fix',hypothesisId:'H10',location:'AriaScreen.tsx:scenarioCompleteDisplayTextNameCheck',message:'scenario_complete_display_text_name_presence',data:{displayPreview:displayText.slice(0,160),displayHasName:participantFirstNameForSpoken?displayText.toLowerCase().includes(participantFirstNameForSpoken.toLowerCase()):null,participantFirstNameForSpoken:participantFirstNameForSpoken??null},timestamp:Date.now()})}).catch(()=>{});
+        // #endregion
         applyInterviewProgressFromAssistantText(displayText, progressRefsPayload);
         const transitionMsg: MessageWithScenario = { role: 'assistant', content: displayText, scenarioNumber };
         const nextScenarioNum = scenarioNumber < 3 ? (scenarioNumber + 1) as 2 | 3 : 3;
         currentScenarioRef.current = nextScenarioNum;
         const updatedMessages = [...messagesToUse, transitionMsg];
         setMessages(updatedMessages);
-        await speakTextSafe(displayText, ASSISTANT_INTERVIEW_SPEECH);
+        await speakAssistantTurn(displayText, ASSISTANT_INTERVIEW_SPEECH);
         setHighestScenarioReached((prev) => Math.max(prev, scenarioNumber));
         if (!scoredScenariosRef.current.has(scenarioNumber)) {
           scoredScenariosRef.current.add(scenarioNumber);
@@ -7946,9 +8339,30 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
         );
         displayText = sanitizeAssistantInterviewerCharacterNames(displayText);
         displayText = ensureSpokenTextIncludesParticipantFirstName(displayText, participantFirstNameForSpoken);
+        if (userId) {
+          const rtd = getSessionLogRuntime();
+          writeSessionLog({
+            userId,
+            attemptId: rtd.attemptId,
+            eventType: 'name_injection_debug',
+            eventData: {
+              stage: 'stage_complete_display',
+              moment_number: currentInterviewMomentRef.current,
+              scenario_number: currentScenarioRef.current,
+              display_has_name: participantFirstNameForSpoken
+                ? displayText.toLowerCase().includes(participantFirstNameForSpoken.toLowerCase())
+                : null,
+              display_preview: displayText.slice(0, 140),
+            },
+            platform: rtd.platform,
+          });
+        }
+        // #region agent log
+        fetch('http://127.0.0.1:7789/ingest/668e0bd5-3283-4492-9f48-e33846c18218',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'c61a43'},body:JSON.stringify({sessionId:'c61a43',runId:'pre-fix',hypothesisId:'H11',location:'AriaScreen.tsx:stageCompleteDisplayTextNameCheck',message:'stage_complete_display_text_name_presence',data:{stageNum,displayPreview:displayText.slice(0,180),displayHasName:participantFirstNameForSpoken?displayText.toLowerCase().includes(participantFirstNameForSpoken.toLowerCase()):null,participantFirstNameForSpoken:participantFirstNameForSpoken??null,currentMoment:currentInterviewMomentRef.current},timestamp:Date.now()})}).catch(()=>{});
+        // #endregion
         const finalMessages = [...messagesToUse, { role: 'assistant', content: displayText || 'Good, that’s helpful.' }];
         setMessages(finalMessages);
-        await speakTextSafe(displayText || 'Good, that’s helpful.', ASSISTANT_INTERVIEW_SPEECH);
+        await speakAssistantTurn(displayText || 'Good, that’s helpful.', ASSISTANT_INTERVIEW_SPEECH);
         try {
           const stageRes = await fetchStageScore(finalMessages);
           setStageResults((prev) => {
@@ -8012,7 +8426,7 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
       setMessages([...messagesToUse, aiMsg]);
       const aiDetected = detectConstructs(text);
       setTouchedConstructs((prev) => [...new Set([...prev, ...aiDetected])]);
-      await speakTextSafe(displayText, ASSISTANT_INTERVIEW_SPEECH);
+      await speakAssistantTurn(displayText, ASSISTANT_INTERVIEW_SPEECH);
     } finally {
       setIsWaiting(false);
     }
@@ -9539,6 +9953,9 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
   const handleNativeOrWhisperMicPress = useCallback(async () => {
     touchActivity();
     setSessionAudioHealthNotice(null);
+    // #region agent log
+    fetch('http://127.0.0.1:7789/ingest/668e0bd5-3283-4492-9f48-e33846c18218',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'c61a43'},body:JSON.stringify({sessionId:'c61a43',runId:'pre-fix',hypothesisId:'H4',location:'AriaScreen.tsx:handleNativeOrWhisperMicPress:entry',message:'mic_press_received',data:{voiceState,ttsPlaybackActive:getSessionLogRuntime().ttsPlaybackActive,isRecording:audioRecorder.isRecording},timestamp:Date.now()})}).catch(()=>{});
+    // #endregion
     if (Platform.OS === 'web') {
       unlockWebAudioForAutoplay();
       primeHtmlAudioForMobileTtsFromMicGesture();
@@ -9927,6 +10344,9 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
 
   const handleResume = useCallback(
     async (saved: NonNullable<Awaited<ReturnType<typeof loadInterviewFromStorage>>>) => {
+      resumeLoadingFlowActiveRef.current = true;
+      setResumeLoadingVisible(true);
+      logSessionResumeState('loading');
       const restoredMessages = saved.messages ?? [];
       const syncedMoments = syncInterviewMomentsFromTranscript(restoredMessages, saved.scenariosCompleted ?? []);
       if (saved.sessionAttemptId) {
@@ -10069,8 +10489,15 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
       }
 
       setStatus('active');
+      void (async () => {
+        await awaitScreenReadySignal();
+        if (!resumeLoadingFlowActiveRef.current) return;
+        resumeLoadingFlowActiveRef.current = false;
+        setResumeLoadingVisible(false);
+        logSessionResumeState('ready');
+      })();
     },
-    [speakTextSafe]
+    [speakTextSafe, awaitScreenReadySignal, logSessionResumeState]
   );
 
   useEffect(() => {
@@ -10161,7 +10588,10 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
         // #endregion
         if (completedCount < 3) {
           hasResumedRef.current = true;
-          handleResume(saved);
+          void handleResume(saved).catch(() => {
+            resumeLoadingFlowActiveRef.current = false;
+            setResumeLoadingVisible(false);
+          });
         } else {
           await clearInterviewFromStorage(userId);
         }
@@ -11920,6 +12350,26 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
             marginTop: 24,
           }}>
             Preparing your results
+          </Text>
+        </View>
+      </SafeAreaContainer>
+    );
+  }
+  if (resumeLoadingVisible) {
+    return (
+      <SafeAreaContainer style={{ flex: 1, backgroundColor: '#05060D' }}>
+        <View style={[styles.container, { flex: 1, backgroundColor: '#05060D', alignItems: 'center', justifyContent: 'center', padding: 24 }]}>
+          <ActivityIndicator size="small" color="#7A9ABE" />
+          <Text
+            style={{
+              fontFamily: Platform.OS === 'web' ? undefined : 'Jost_300Light',
+              fontSize: 12,
+              letterSpacing: 1.5,
+              color: '#C8E4FF',
+              marginTop: 14,
+            }}
+          >
+            Resuming your interview...
           </Text>
         </View>
       </SafeAreaContainer>

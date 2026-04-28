@@ -30,6 +30,8 @@ Deno.serve(async (req) => {
       text?: string;
       voiceId?: string;
       modelId?: string;
+      stream?: boolean;
+      outputFormat?: string;
       voiceSettings?: {
         stability?: number;
         similarity_boost?: number;
@@ -47,13 +49,25 @@ Deno.serve(async (req) => {
       );
     }
 
-    /** Non-streaming endpoint: full MP3 in response body before client playback. */
-    const elevenRes = await fetch(`https://api.elevenlabs.io/v1/text-to-speech/${voiceId}`, {
+    const useStream = payload.stream === true;
+    const outputFormat = (payload.outputFormat ?? 'mp3_44100_128').trim() || 'mp3_44100_128';
+    const query = new URLSearchParams();
+    if (useStream) {
+      query.set('output_format', outputFormat);
+      query.set('optimize_streaming_latency', '2');
+    }
+
+    const elevenPath = useStream
+      ? `https://api.elevenlabs.io/v1/text-to-speech/${voiceId}/stream?${query.toString()}`
+      : `https://api.elevenlabs.io/v1/text-to-speech/${voiceId}`;
+
+    /** Default: full MP3 before playback. When `stream: true` + `outputFormat` (e.g. pcm_24000), body streams from ElevenLabs. */
+    const elevenRes = await fetch(elevenPath, {
       method: 'POST',
       headers: {
         'xi-api-key': apiKey,
         'Content-Type': 'application/json',
-        Accept: 'audio/mpeg',
+        Accept: useStream ? 'application/octet-stream, audio/*, */*' : 'audio/mpeg',
       },
       body: JSON.stringify({
         text,
@@ -77,7 +91,10 @@ Deno.serve(async (req) => {
 
     return new Response(elevenRes.body, {
       status: 200,
-      headers: { ...corsHeaders, 'Content-Type': 'audio/mpeg' },
+      headers: {
+        ...corsHeaders,
+        'Content-Type': useStream && outputFormat.startsWith('pcm_') ? 'application/octet-stream' : 'audio/mpeg',
+      },
     });
   } catch (err) {
     return new Response(

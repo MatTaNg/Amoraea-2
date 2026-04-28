@@ -18,6 +18,30 @@ export function setTtsPlaybackStrategyForNextPlayback(s: 'streaming' | 'buffered
   pendingPlaybackStrategy = s;
 }
 
+const LONG_LINE_BUFFERED_STRATEGY_CHAR_THRESHOLD = 100;
+
+/**
+ * Set pending {@link setTtsBufferCompleteBeforePlaybackForNextPlayback} / {@link setTtsPlaybackStrategyForNextPlayback}
+ * for the line about to be spoken, so `tts_playback_start` consumes the same turn’s strategy.
+ * - ≤{LONG_LINE_BUFFERED_STRATEGY_CHAR_THRESHOLD} chars, scenario split segments, or non-web: `buffered_complete` + full buffer.
+ * - Web, &gt; threshold, not a greeting: `streaming` (ElevenLabs PCM — playback starts with first network chunk).
+ * - Greeting lines: always `buffered_complete` (prefetch/MP3 path; unchanged).
+ */
+export function prepareTtsPlaybackTelemetryState(args: {
+  charCount: number;
+  telemetryIsGreeting: boolean;
+  isWeb: boolean;
+}): void {
+  const { charCount, telemetryIsGreeting, isWeb } = args;
+  if (telemetryIsGreeting || !isWeb || charCount <= LONG_LINE_BUFFERED_STRATEGY_CHAR_THRESHOLD) {
+    setTtsBufferCompleteBeforePlaybackForNextPlayback(true);
+    setTtsPlaybackStrategyForNextPlayback('buffered_complete');
+  } else {
+    setTtsBufferCompleteBeforePlaybackForNextPlayback(false);
+    setTtsPlaybackStrategyForNextPlayback('streaming');
+  }
+}
+
 export function consumeTtsPlaybackStrategyForNextPlayback(): 'streaming' | 'buffered_complete' {
   const s = pendingPlaybackStrategy ?? 'buffered_complete';
   pendingPlaybackStrategy = null;

@@ -15,6 +15,7 @@ export type TtsTelemetrySource = 'greeting' | 'turn' | 'replay' | 'other';
 export type TtsAutoplayPipeline =
   | 'elevenlabs_web_html_audio'
   | 'elevenlabs_web_audio_context'
+  | 'elevenlabs_web_pcm_stream'
   | 'web_speech_after_mp3_blocked'
   | 'elevenlabs_gesture_flush'
   | 'native_expo_av';
