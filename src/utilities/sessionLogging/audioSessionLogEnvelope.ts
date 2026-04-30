@@ -172,9 +172,15 @@ export function mergeAudioSessionEventData(
   attemptId: string | null,
   eventSpecific: Record<string, unknown>
 ): Record<string, unknown> {
+  const base = baseEventDataFields(userId, attemptId) as Record<string, unknown>;
   return {
-    ...baseEventDataFields(userId, attemptId),
+    ...base,
     ...eventSpecific,
+    // Per-event payloads must not be able to null out session denorm fields.
+    device_model: base.device_model,
+    os_version: base.os_version,
+    app_version: base.app_version,
+    available_memory_mb: base.available_memory_mb ?? null,
   };
 }
 

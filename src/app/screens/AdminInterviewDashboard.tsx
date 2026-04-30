@@ -7,14 +7,22 @@ import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import {
   View,
   Text,
+  TextInput,
   ScrollView,
   TouchableOpacity,
   Pressable,
   StyleSheet,
   Platform,
   Alert,
+  Switch,
 } from 'react-native';
 import { supabase } from '@data/supabase/client';
+import {
+  getInterviewAttemptOverrideColumnsAbsent,
+  isInterviewAttemptsMissingOverrideColumnsError,
+  markInterviewAttemptOverrideColumnsPresent,
+  rememberInterviewAttemptOverrideColumnsAbsent,
+} from '@utilities/fetchInterviewAttemptRevealSnapshot';
 import { formatEdgeFunctionInvokeFailure } from '@utilities/runCommunicationStylePipeline';
 import {
   aggregatePillarScoresWithCommitmentMergeDetailed,
@@ -122,6 +130,14 @@ type UserRow = {
   /** When set, user completed at least one attempt row in DB (even if admin cannot read attempts yet). */
   latest_attempt_id?: string | null;
   interview_completed?: boolean | null;
+  /** Effective pass/fail for routing (gate result unless admin override is set). */
+  interview_passed?: boolean | null;
+  interview_passed_computed?: boolean | null;
+  interview_passed_admin_override?: boolean | null;
+  interview_cohort_admin_reviewed?: boolean | null;
+  interview_completed_at?: string | null;
+  /** Optional SMS number from post-interview flow (`users.launch_notification_phone`). */
+  launch_notification_phone?: string | null;
   /** Live or checkpoint snapshot of messages (same shape as interview_attempts.transcript). */
   interview_transcript?: unknown;
 };
@@ -152,6 +168,8 @@ type AttemptRow = {
   probe_log?: unknown;
   communication_style_error?: string | null;
   reasoning_pending?: boolean | null;
+  override_status?: boolean | null;
+  override_set_at?: string | null;
 };
 
 /** List/overview only — loaded once for all users (small payload). Full rows load per user on drill-down. */
@@ -166,9 +184,11 @@ type AttemptSummary = Pick<
   | 'passed'
   | 'reasoning_pending'
   | 'pillar_scores'
+  | 'override_status'
+  | 'override_set_at'
 >;
 
-const INTERVIEW_ATTEMPTS_FULL_SELECT = `
+const INTERVIEW_ATTEMPTS_FULL_SELECT_BASE = `
       id,
       user_id,
       attempt_number,
@@ -195,6 +215,26 @@ const INTERVIEW_ATTEMPTS_FULL_SELECT = `
       communication_style_error,
       reasoning_pending
     ` as const;
+
+const INTERVIEW_ATTEMPTS_FULL_SELECT = `${INTERVIEW_ATTEMPTS_FULL_SELECT_BASE},
+      override_status,
+      override_set_at` as const;
+
+const INTERVIEW_ATTEMPTS_SUMMARY_SELECT_BASE = `
+      id,
+      user_id,
+      attempt_number,
+      created_at,
+      completed_at,
+      weighted_score,
+      passed,
+      reasoning_pending,
+      pillar_scores
+    ` as const;
+
+const INTERVIEW_ATTEMPTS_SUMMARY_SELECT = `${INTERVIEW_ATTEMPTS_SUMMARY_SELECT_BASE},
+      override_status,
+      override_set_at` as const;
 
 type CommunicationStyleProfileRow = {
   user_id: string;
@@ -402,16 +442,13 @@ function userTextForAdminScenario(
 }
 
 /** Strip non-assessed keys from personal moments before pillar math (matches live interview + recompute script). */
-function extractSanitizedMomentSlice(raw: unknown, momentNumber: 4 | 5): MarkerScoreSlice {
+function extractSanitizedMomentSlice(raw: unknown): MarkerScoreSlice {
   const slice = extractAggregateSlice(raw);
   if (!slice?.pillarScores) return slice;
-  const sanitized = sanitizePersonalMomentScoresForAggregate(
-    {
-      pillarScores: slice.pillarScores as Record<string, number | null>,
-      keyEvidence: slice.keyEvidence,
-    },
-    momentNumber,
-  );
+  const sanitized = sanitizePersonalMomentScoresForAggregate({
+    pillarScores: slice.pillarScores as Record<string, number | null>,
+    keyEvidence: slice.keyEvidence,
+  });
   if (!sanitized?.pillarScores) return slice;
   return { pillarScores: sanitized.pillarScores, keyEvidence: sanitized.keyEvidence };
 }
@@ -421,14 +458,12 @@ function computeMarkerAggregateFromAttempt(
 ): { scores: Record<string, number>; counts: Record<string, number> } {
   const patterns = parseObject(attempt.scenario_specific_patterns);
   const m4Raw = parseObject(patterns?.moment_4_scores);
-  const m5Raw = parseObject(patterns?.moment_5_scores);
   const tx = attempt.transcript;
   const slices: MarkerScoreSlice[] = [
     enrichScenarioSliceWithContemptHeuristic(extractAggregateSlice(attempt.scenario_1_scores), userTextForAdminScenario(tx, 1)),
     enrichScenarioSliceWithContemptHeuristic(extractAggregateSlice(attempt.scenario_2_scores), userTextForAdminScenario(tx, 2)),
     enrichScenarioSliceWithContemptHeuristic(extractAggregateSlice(attempt.scenario_3_scores), userTextForAdminScenario(tx, 3)),
-    extractSanitizedMomentSlice(m4Raw, 4),
-    extractSanitizedMomentSlice(m5Raw, 5),
+    extractSanitizedMomentSlice(m4Raw),
   ];
   return aggregatePillarScoresWithCommitmentMergeDetailed(slices);
 }
@@ -476,6 +511,103 @@ function getUserDisplayName(user: UserRow | null | undefined): string {
   return user.name ?? user.full_name ?? user.display_name ?? user.email ?? 'Unknown';
 }
 
+function firstUserMessageFromTranscript(transcript: unknown): string | null {
+  const lines = parseUserTranscript(transcript);
+  const u = lines.find(
+    (m) =>
+      (m.role === 'user' || m.role === 'User') && typeof m.content === 'string' && m.content.trim().length > 0,
+  );
+  return u?.content?.trim() ?? null;
+}
+
+/** Intro name from first user reply or saved `users.name`. */
+function getInterviewIntroDisplayName(user: UserRow): string {
+  const n = user.name?.trim();
+  if (n) return n;
+  return firstUserMessageFromTranscript(user.interview_transcript) ?? '—';
+}
+
+function trimLaunchNotificationPhone(phone: string | null | undefined): string | null {
+  if (typeof phone !== 'string') return null;
+  const t = phone.trim();
+  return t.length > 0 ? t : null;
+}
+
+type TimeRangeFilter = 'all' | 'day' | 'week' | 'month' | 'custom';
+type ReviewedCohortFilter = 'all' | 'reviewed' | 'unreviewed';
+
+function formatYmdLocal(d: Date): string {
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${y}-${m}-${day}`;
+}
+
+/** Inclusive start/end of local calendar day for a YYYY-MM-DD string, or null if invalid. */
+function localDayRangeFromYmd(ymd: string): { start: number; end: number } | null {
+  const t = ymd.trim();
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(t);
+  if (!m) return null;
+  const y = Number(m[1]);
+  const mo = Number(m[2]);
+  const d = Number(m[3]);
+  if (mo < 1 || mo > 12 || d < 1 || d > 31) return null;
+  const s = new Date(y, mo - 1, d, 0, 0, 0, 0);
+  if (s.getFullYear() !== y || s.getMonth() !== mo - 1 || s.getDate() !== d) return null;
+  const e = new Date(y, mo - 1, d, 23, 59, 59, 999);
+  return { start: s.getTime(), end: e.getTime() };
+}
+
+function getCohortActivityTimestampMs(g: UserGroup): number {
+  if (g.user.interview_completed === true && g.user.interview_completed_at) {
+    const t = new Date(g.user.interview_completed_at).getTime();
+    if (Number.isFinite(t)) return t;
+  }
+  const a = g.latestAttempt;
+  if (a) {
+    const raw = a.completed_at ?? a.created_at;
+    const t2 = new Date(raw).getTime();
+    if (Number.isFinite(t2)) return t2;
+  }
+  return 0;
+}
+
+function userMatchesTimeRange(
+  g: UserGroup,
+  range: TimeRangeFilter,
+  customFrom: string,
+  customTo: string,
+): boolean {
+  if (range === 'all') return true;
+  const ts = getCohortActivityTimestampMs(g);
+  if (ts <= 0) return false;
+  if (range === 'day' || range === 'week' || range === 'month') {
+    const now = Date.now();
+    const dayMs = 24 * 60 * 60 * 1000;
+    const start = range === 'day' ? now - dayMs : range === 'week' ? now - 7 * dayMs : now - 30 * dayMs;
+    return ts >= start;
+  }
+  if (range === 'custom') {
+    const a = localDayRangeFromYmd(customFrom);
+    const b = localDayRangeFromYmd(customTo);
+    if (!a || !b) {
+      // While inputs are incomplete or invalid, do not apply a time window (matches prior “all time” for this cohort).
+      return true;
+    }
+    const lo = Math.min(a.start, b.start);
+    const hi = Math.max(a.end, b.end);
+    return ts >= lo && ts <= hi;
+  }
+  return true;
+}
+
+function hasStartedInterviewCohort(g: UserGroup): boolean {
+  if (userHasInProgressInterview(g.user)) return true;
+  if (g.latestAttempt != null) return true;
+  if (g.user.latest_attempt_id) return true;
+  return parseUserTranscript(g.user.interview_transcript).length > 0;
+}
+
 type FetchAdminUsersListResult = { groups: UserGroup[]; errorMessage: string | null };
 
 /** Users + lightweight attempt rows for list (counts, pass badge, tab labels). No transcript / scores jsonb. */
@@ -492,6 +624,12 @@ async function fetchAdminUsersList(): Promise<FetchAdminUsersListResult> {
       created_at,
       latest_attempt_id,
       interview_completed,
+      interview_passed,
+      interview_passed_computed,
+      interview_passed_admin_override,
+      interview_cohort_admin_reviewed,
+      interview_completed_at,
+      launch_notification_phone,
       interview_transcript
     `
     )
@@ -504,22 +642,38 @@ async function fetchAdminUsersList(): Promise<FetchAdminUsersListResult> {
 
   const users = (allUsers ?? []) as UserRow[];
 
-  const { data: allAttempts, error: attemptsError } = await supabase
+  const overrideColsAbsent = await getInterviewAttemptOverrideColumnsAbsent();
+
+  let { data: allAttempts, error: attemptsError } = await supabase
     .from('interview_attempts')
-    .select(
-      `
-      id,
-      user_id,
-      attempt_number,
-      created_at,
-      completed_at,
-      weighted_score,
-      passed,
-      reasoning_pending,
-      pillar_scores
-    `
-    )
+    .select(overrideColsAbsent ? INTERVIEW_ATTEMPTS_SUMMARY_SELECT_BASE : INTERVIEW_ATTEMPTS_SUMMARY_SELECT)
     .order('created_at', { ascending: false });
+
+  if (overrideColsAbsent && allAttempts) {
+    allAttempts = allAttempts.map((row) => ({
+      ...row,
+      override_status: null as boolean | null,
+      override_set_at: null as string | null,
+    })) as AttemptSummary[];
+  }
+
+  if (!overrideColsAbsent && attemptsError && isInterviewAttemptsMissingOverrideColumnsError(attemptsError)) {
+    await rememberInterviewAttemptOverrideColumnsAbsent();
+    const legacy = await supabase
+      .from('interview_attempts')
+      .select(INTERVIEW_ATTEMPTS_SUMMARY_SELECT_BASE)
+      .order('created_at', { ascending: false });
+    attemptsError = legacy.error;
+    allAttempts = legacy.data?.map((row) => ({
+      ...row,
+      override_status: null as boolean | null,
+      override_set_at: null as string | null,
+    })) as AttemptSummary[];
+  }
+
+  if (!overrideColsAbsent && !attemptsError) {
+    void markInterviewAttemptOverrideColumnsPresent();
+  }
 
   if (attemptsError) {
     console.error('Admin panel attempts fetch error:', attemptsError);
@@ -562,18 +716,67 @@ async function fetchAdminUsersList(): Promise<FetchAdminUsersListResult> {
   return { groups, errorMessage: null };
 }
 
-/** Full `interview_attempts` row(s) for one user — called when admin opens that user. */
-async function fetchFullAttemptsForUser(userId: string): Promise<{ attempts: AttemptRow[]; errorMessage: string | null }> {
-  const { data, error } = await supabase
-    .from('interview_attempts')
-    .select(INTERVIEW_ATTEMPTS_FULL_SELECT)
-    .eq('user_id', userId)
-    .order('attempt_number', { ascending: true });
+/** Latest run only — product treats one run per user (retake overwrites). */
+async function fetchLatestFullAttemptForUser(
+  userId: string,
+  latestAttemptId: string | null | undefined,
+): Promise<{ attempts: AttemptRow[]; errorMessage: string | null }> {
+  const absent = await getInterviewAttemptOverrideColumnsAbsent();
+  const patchOverrideNulls = (row: Record<string, unknown>): AttemptRow =>
+    ({ ...row, override_status: null, override_set_at: null }) as AttemptRow;
+  const fullSelect = absent ? INTERVIEW_ATTEMPTS_FULL_SELECT_BASE : INTERVIEW_ATTEMPTS_FULL_SELECT;
 
+  if (latestAttemptId) {
+    let { data, error } = await supabase
+      .from('interview_attempts')
+      .select(fullSelect)
+      .eq('id', latestAttemptId)
+      .eq('user_id', userId)
+      .maybeSingle();
+    if (absent && data) {
+      data = patchOverrideNulls(data as Record<string, unknown>);
+    } else if (!absent && error && isInterviewAttemptsMissingOverrideColumnsError(error)) {
+      await rememberInterviewAttemptOverrideColumnsAbsent();
+      const legacy = await supabase
+        .from('interview_attempts')
+        .select(INTERVIEW_ATTEMPTS_FULL_SELECT_BASE)
+        .eq('id', latestAttemptId)
+        .eq('user_id', userId)
+        .maybeSingle();
+      error = legacy.error;
+      data = legacy.data ? patchOverrideNulls(legacy.data as Record<string, unknown>) : null;
+    }
+    if (error) {
+      console.error('Admin panel fetchLatestFullAttemptForUser:', error);
+      return { attempts: [], errorMessage: error.message };
+    }
+    if (!absent && !error && data) void markInterviewAttemptOverrideColumnsPresent();
+    return { attempts: data ? ([data] as AttemptRow[]) : [], errorMessage: null };
+  }
+  let { data, error } = await supabase
+    .from('interview_attempts')
+    .select(fullSelect)
+    .eq('user_id', userId)
+    .order('created_at', { ascending: false })
+    .limit(1);
+  if (absent && data) {
+    data = data.map((row) => patchOverrideNulls(row as Record<string, unknown>));
+  } else if (!absent && error && isInterviewAttemptsMissingOverrideColumnsError(error)) {
+    await rememberInterviewAttemptOverrideColumnsAbsent();
+    const legacy = await supabase
+      .from('interview_attempts')
+      .select(INTERVIEW_ATTEMPTS_FULL_SELECT_BASE)
+      .eq('user_id', userId)
+      .order('created_at', { ascending: false })
+      .limit(1);
+    error = legacy.error;
+    data = legacy.data?.map((row) => patchOverrideNulls(row as Record<string, unknown>)) ?? null;
+  }
   if (error) {
-    console.error('Admin panel fetchFullAttemptsForUser:', error);
+    console.error('Admin panel fetchLatestFullAttemptForUser:', error);
     return { attempts: [], errorMessage: error.message };
   }
+  if (!absent && !error && data?.length) void markInterviewAttemptOverrideColumnsPresent();
   return { attempts: (data ?? []) as AttemptRow[], errorMessage: null };
 }
 
@@ -591,6 +794,27 @@ function getPassColor(value: 'pass' | 'fail' | 'none'): string {
   if (value === 'pass') return '#2A8C6A';
   if (value === 'fail') return '#E87A7A';
   return '#7A9ABE';
+}
+
+/** Human-readable admin pass/fail override for UI (avoids "false" / "true"). */
+function formatAdminPassFailLabel(v: boolean | null | undefined): string {
+  if (v === true) return 'Pass';
+  if (v === false) return 'Fail';
+  return 'none';
+}
+
+/**
+ * Admin Pass/Fail chips: show for any finished attempt without attempt-level `override_status`.
+ * (Previously gated to 48h after completion; that hid buttons after backdating `completed_at` for QA or when
+ * correcting accounts recreated after an admin override — profile row still gates via `interview_passed_admin_override`.)
+ */
+function adminShowEarlyRevealPassFail(a: AttemptSummary | null | undefined): boolean {
+  if (!a) return false;
+  const finishedAt = a.completed_at ?? a.created_at;
+  if (!finishedAt) return false;
+  if (a.override_status === true || a.override_status === false) return false;
+  const t = new Date(finishedAt).getTime();
+  return Number.isFinite(t);
 }
 
 function getAlmostPassColor(): string {
@@ -718,11 +942,45 @@ function userHasInProgressInterview(user: UserRow): boolean {
 
 function classifyAdminUserListStatus(g: UserGroup): AdminUserStatusFilter {
   if (userHasInProgressInterview(g.user)) return 'in_progress';
+  if (g.user.interview_passed === true) return 'pass';
+  if (g.user.interview_passed === false) {
+    const o = getAdminOutcomeDisplay(g.latestAttempt);
+    if (o.outcomeLabel === 'almost') return 'almost';
+    return 'fail';
+  }
   const o = getAdminOutcomeDisplay(g.latestAttempt);
   if (o.outcomeLabel === 'pass') return 'pass';
   if (o.outcomeLabel === 'fail') return 'fail';
   if (o.outcomeLabel === 'almost') return 'almost';
   return 'no_result';
+}
+
+function formatUserInterviewDateLine(g: UserGroup): string {
+  const u = g.user;
+  if (u.interview_completed === true && u.interview_completed_at) {
+    return `Completed ${new Date(u.interview_completed_at).toLocaleString('en-GB')}`;
+  }
+  const a = g.latestAttempt;
+  if (a) {
+    const raw = a.completed_at ?? a.created_at;
+    if (a.completed_at) {
+      return `Completed ${new Date(raw).toLocaleString('en-GB')}`;
+    }
+    return `Started ${new Date(raw).toLocaleString('en-GB')} · not completed`;
+  }
+  return '—';
+}
+
+function computeCohortHeaderStats(groups: UserGroup[]) {
+  let started = 0;
+  let passed = 0;
+  let failed = 0;
+  for (const g of groups) {
+    if (hasStartedInterviewCohort(g)) started += 1;
+    if (g.user.interview_passed === true) passed += 1;
+    else if (g.user.interview_passed === false) failed += 1;
+  }
+  return { started, passed, failed };
 }
 
 /** Best-effort scenario indicator when `interview_last_checkpoint` is not selected or missing on older DBs. */
@@ -784,23 +1042,86 @@ function UserCard({
   onDelete,
   canDelete,
   deleting,
+  reviewed,
+  onToggleReviewed,
+  onRefreshList,
 }: {
   userData: UserGroup;
   onPress: () => void;
   onDelete: () => void;
   canDelete: boolean;
   deleting: boolean;
+  reviewed: boolean;
+  onToggleReviewed: (next: boolean) => void;
+  onRefreshList: () => Promise<void>;
 }) {
+  const [overrideBusy, setOverrideBusy] = useState(false);
   const latest = userData.latestAttempt;
-  const outcome = getAdminOutcomeDisplay(latest);
+  const effectivePass = userData.user.interview_passed;
+  const outcome =
+    effectivePass === true
+      ? { word: 'pass', color: getPassColor('pass'), detail: null as string | null }
+      : effectivePass === false
+        ? getAdminOutcomeDisplay(latest)
+        : getAdminOutcomeDisplay(latest);
+  const override = userData.user.interview_passed_admin_override;
+  /** Attempt `override_status` or profile `interview_passed_admin_override` means admin already committed — hide chips until cleared (e.g. SQL / recreated user row). */
+  const showRevealButtons = adminShowEarlyRevealPassFail(latest) && typeof override !== 'boolean';
+  const launchPhone = trimLaunchNotificationPhone(userData.user.launch_notification_phone);
+
+  const applyRevealOverride = async (pass: boolean) => {
+    if (!latest?.id || !userData.user.id) return;
+    setOverrideBusy(true);
+    try {
+      const absentAtStart = await getInterviewAttemptOverrideColumnsAbsent();
+      let attemptUpdateFailedMissingColumns = false;
+      if (!absentAtStart) {
+        const nowIso = new Date().toISOString();
+        const { error: attErr } = await supabase
+          .from('interview_attempts')
+          .update({ override_status: pass, override_set_at: nowIso })
+          .eq('id', latest.id);
+        if (attErr && isInterviewAttemptsMissingOverrideColumnsError(attErr)) {
+          await rememberInterviewAttemptOverrideColumnsAbsent();
+          attemptUpdateFailedMissingColumns = true;
+        } else if (attErr) {
+          throw new Error(attErr.message);
+        }
+      }
+      const { error: userErr } = await supabase
+        .from('users')
+        .update({ interview_passed: pass, interview_passed_admin_override: pass })
+        .eq('id', userData.user.id);
+      if (userErr) throw new Error(userErr.message);
+      await onRefreshList();
+      if (attemptUpdateFailedMissingColumns) {
+        Alert.alert(
+          'Profile updated',
+          'Pass/fail was saved on the user. This project does not have interview_attempts override columns yet (apply migration 20260430220000_interview_attempts_override_reveal), so the attempt row was not updated.',
+        );
+      }
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : 'Update failed';
+      Alert.alert('Could not apply override', msg);
+    } finally {
+      setOverrideBusy(false);
+    }
+  };
+
   return (
     <View style={styles.userCardRow}>
       <Pressable
         onPress={onPress}
         style={({ pressed }) => [styles.userCard, styles.userCardFlex, pressed && styles.userCardPressed]}
       >
-        <Text style={styles.userCardName}>{getUserDisplayName(userData.user)}</Text>
+        <Text style={styles.userCardIntroName}>{getInterviewIntroDisplayName(userData.user)}</Text>
         <Text style={styles.userCardEmail}>{userData.user.email ?? '—'}</Text>
+        {launchPhone ? (
+          <Text style={styles.userCardEmail} selectable>
+            Phone: <Text style={styles.launchNotificationPhoneBold}>{launchPhone}</Text>
+          </Text>
+        ) : null}
+        <Text style={styles.userCardDateLine}>{formatUserInterviewDateLine(userData)}</Text>
         <View style={styles.userCardMetaRow}>
           <View style={styles.userCardMetaLeft}>
             <Text style={[styles.userCardStatus, { color: outcome.color }]}>{outcome.word}</Text>
@@ -809,26 +1130,63 @@ function UserCard({
                 {outcome.detail}
               </Text>
             ) : null}
+            {override != null ? (
+              <Text style={styles.userCardOverrideHint}>
+                Admin override: {formatAdminPassFailLabel(override)}
+              </Text>
+            ) : null}
             {userHasInProgressInterview(userData.user) ? (
               <Text style={styles.userCardInProgress}>In progress</Text>
             ) : null}
           </View>
-          <Text style={styles.userCardTests}>{userData.attempts?.length ?? 0} tests</Text>
         </View>
       </Pressable>
-      {canDelete ? (
-        <TouchableOpacity
-          style={styles.userCardDelete}
-          onPress={() => void onDelete()}
-          disabled={deleting}
-          accessibilityRole="button"
-          accessibilityLabel="Delete account"
-        >
-          <Text style={[styles.userCardDeleteText, deleting && styles.userCardDeleteTextDisabled]}>
-            {deleting ? '…' : 'Delete'}
-          </Text>
-        </TouchableOpacity>
-      ) : null}
+      <View style={styles.userCardSideCol}>
+        <View style={styles.reviewedToggleRow}>
+          <Text style={styles.reviewedLabel}>Reviewed</Text>
+          <Switch
+            value={reviewed}
+            onValueChange={(v) => onToggleReviewed(v)}
+            trackColor={{ false: 'rgba(82,142,220,0.2)', true: 'rgba(42,140,106,0.5)' }}
+            thumbColor={reviewed ? '#2A8C6A' : '#7A9ABE'}
+          />
+        </View>
+        {showRevealButtons ? (
+          <View style={styles.overrideButtonRow}>
+            <TouchableOpacity
+              style={[styles.overrideChip, overrideBusy && { opacity: 0.5 }]}
+              disabled={overrideBusy}
+              onPress={() => void applyRevealOverride(true)}
+              accessibilityRole="button"
+              accessibilityLabel="Pass applicant now"
+            >
+              <Text style={styles.overrideChipText}>Pass</Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={[styles.overrideChip, overrideBusy && { opacity: 0.5 }]}
+              disabled={overrideBusy}
+              onPress={() => void applyRevealOverride(false)}
+              accessibilityRole="button"
+              accessibilityLabel="Fail applicant now"
+            >
+              <Text style={styles.overrideChipText}>Fail</Text>
+            </TouchableOpacity>
+          </View>
+        ) : null}
+        {canDelete ? (
+          <TouchableOpacity
+            style={styles.userCardDelete}
+            onPress={() => void onDelete()}
+            disabled={deleting}
+            accessibilityRole="button"
+            accessibilityLabel="Delete account"
+          >
+            <Text style={[styles.userCardDeleteText, deleting && styles.userCardDeleteTextDisabled]}>
+              {deleting ? '…' : 'Delete'}
+            </Text>
+          </TouchableOpacity>
+        ) : null}
+      </View>
     </View>
   );
 }
@@ -1381,7 +1739,7 @@ function UserDetails({
   onRefreshData,
 }: {
   userData: UserGroup;
-  /** Full rows loaded on drill-down; tabs need transcript, scores, ai_reasoning, etc. */
+  /** Latest run only (full attempt row). */
   fullAttempts: AttemptRow[];
   attemptsLoading: boolean;
   attemptsError: string | null;
@@ -1392,18 +1750,52 @@ function UserDetails({
   onRefreshData: () => void;
 }) {
   const attempts = getAttemptsSorted(fullAttempts);
-  const [selectedAttemptId, setSelectedAttemptId] = useState<string | null>(null);
   const [activeInnerTab, setActiveInnerTab] = useState<'summary' | 'reasoning' | 'transcript' | 'feedback'>('summary');
+  const [overrideBusy, setOverrideBusy] = useState(false);
 
-  useEffect(() => {
-    if (attemptsLoading || attempts.length === 0) return;
-    setSelectedAttemptId((prev) => {
-      if (prev && attempts.some((a) => a.id === prev)) return prev;
-      return attempts[0].id;
-    });
-  }, [attemptsLoading, attempts]);
+  const selectedAttempt = attempts[0] ?? null;
+  const u = userData.user;
+  const detailLaunchPhone = trimLaunchNotificationPhone(u.launch_notification_phone);
 
-  const selectedAttempt = attempts.find((a) => a.id === selectedAttemptId) ?? attempts[0] ?? null;
+  const applyPassOverride = useCallback(
+    async (mode: 'pass' | 'fail' | 'clear') => {
+      if (!u.id) return;
+      setOverrideBusy(true);
+      try {
+        if (mode === 'clear') {
+          const { error } = await supabase
+            .from('users')
+            .update({
+              interview_passed_admin_override: null,
+              interview_passed: u.interview_passed_computed ?? null,
+            })
+            .eq('id', u.id);
+          if (error) {
+            Alert.alert('Update failed', error.message);
+            return;
+          }
+          onRefreshData();
+          return;
+        }
+        const pass = mode === 'pass';
+        const { error } = await supabase
+          .from('users')
+          .update({
+            interview_passed_admin_override: pass,
+            interview_passed: pass,
+          })
+          .eq('id', u.id);
+        if (error) {
+          Alert.alert('Update failed', error.message);
+          return;
+        }
+        onRefreshData();
+      } finally {
+        setOverrideBusy(false);
+      }
+    },
+    [onRefreshData, u.id, u.interview_passed_computed],
+  );
 
   return (
     <View style={styles.fullScreen}>
@@ -1425,8 +1817,48 @@ function UserDetails({
             </TouchableOpacity>
           ) : null}
         </View>
-        <Text style={styles.headerTitle}>{getUserDisplayName(userData.user)}</Text>
-        <Text style={styles.headerSub}>{userData.user.email ?? '—'}</Text>
+        <Text style={styles.headerTitle}>{getInterviewIntroDisplayName(u)}</Text>
+        <Text style={styles.headerSub}>{u.email ?? '—'}</Text>
+        {detailLaunchPhone ? (
+          <Text style={styles.headerSub} selectable>
+            Phone: <Text style={styles.launchNotificationPhoneBold}>{detailLaunchPhone}</Text>
+          </Text>
+        ) : null}
+        <Text style={styles.headerSub}>{formatUserInterviewDateLine(userData)}</Text>
+        <Text style={styles.headerPassMeta} selectable>
+          Gate (computed): {u.interview_passed_computed == null ? '—' : String(u.interview_passed_computed)} ·
+          Admin override: {formatAdminPassFailLabel(u.interview_passed_admin_override)} ·
+          Effective routing: {u.interview_passed == null ? '—' : String(u.interview_passed)}
+        </Text>
+        <View style={styles.overrideButtonRow}>
+          <TouchableOpacity
+            style={styles.overrideChip}
+            onPress={() => void applyPassOverride('pass')}
+            disabled={overrideBusy}
+            accessibilityRole="button"
+            accessibilityLabel="Force pass"
+          >
+            <Text style={styles.overrideChipText}>Force pass</Text>
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={styles.overrideChip}
+            onPress={() => void applyPassOverride('fail')}
+            disabled={overrideBusy}
+            accessibilityRole="button"
+            accessibilityLabel="Force fail"
+          >
+            <Text style={styles.overrideChipText}>Force fail</Text>
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={styles.overrideChip}
+            onPress={() => void applyPassOverride('clear')}
+            disabled={overrideBusy}
+            accessibilityRole="button"
+            accessibilityLabel="Clear override"
+          >
+            <Text style={styles.overrideChipText}>Use gate only</Text>
+          </TouchableOpacity>
+        </View>
       </View>
 
       <InProgressTranscriptSection user={userData.user} onRefresh={onRefreshData} />
@@ -1461,28 +1893,8 @@ function UserDetails({
           ) : null}
         </View>
       ) : (
-        <View style={styles.detailsLayout}>
-          <ScrollView style={styles.attemptTabsColumn}>
-            {attempts.map((attempt) => {
-              const tabOutcome = getAdminOutcomeDisplay(attempt);
-              return (
-                <TouchableOpacity
-                  key={attempt.id}
-                  style={[styles.attemptTab, selectedAttempt?.id === attempt.id && styles.attemptTabActive]}
-                  onPress={() => {
-                    setSelectedAttemptId(attempt.id);
-                    setActiveInnerTab('summary');
-                  }}
-                >
-                  <Text style={styles.attemptTabLabel}>{formatAttemptTabLabel(attempt)}</Text>
-                  <Text style={[styles.attemptTabOutcome, { color: tabOutcome.color }]}>{tabOutcome.word}</Text>
-                  <Text style={styles.attemptTabElapsed}>{formatAttemptElapsedDisplay(attempt)}</Text>
-                </TouchableOpacity>
-              );
-            })}
-          </ScrollView>
-
-          <View style={styles.detailsPane}>
+        <View style={styles.detailsLayoutSingle}>
+          <View style={styles.detailsPaneFull}>
             <View style={styles.innerTabsRow}>
               {[
                 { id: 'summary' as const, label: 'Tab 1: Summary' },
@@ -1633,12 +2045,31 @@ const STATUS_FILTER_OPTIONS: { id: AdminUserStatusFilter; label: string }[] = [
   { id: 'no_result', label: 'No result' },
 ];
 
+const TIME_RANGE_OPTIONS: { id: TimeRangeFilter; label: string }[] = [
+  { id: 'all', label: 'All' },
+  { id: 'day', label: '24h' },
+  { id: 'week', label: '7d' },
+  { id: 'month', label: '30d' },
+  { id: 'custom', label: 'Custom' },
+];
+
+const REVIEWED_COHORT_OPTIONS: { id: ReviewedCohortFilter; label: string }[] = [
+  { id: 'all', label: 'All' },
+  { id: 'reviewed', label: 'On' },
+  { id: 'unreviewed', label: 'Off' },
+];
+
 export function AdminInterviewDashboard({ onClose }: { onClose: () => void }) {
   const [adminMainView, setAdminMainView] = useState<'cohort' | 'feedback'>('cohort');
   const [users, setUsers] = useState<UserGroup[]>([]);
   const [loading, setLoading] = useState(true);
   const [listError, setListError] = useState<string | null>(null);
   const [statusFilter, setStatusFilter] = useState<AdminUserStatusFilter>('all');
+  const [timeRangeFilter, setTimeRangeFilter] = useState<TimeRangeFilter>('all');
+  const [customTimeFrom, setCustomTimeFrom] = useState('');
+  const [customTimeTo, setCustomTimeTo] = useState('');
+  const [reviewedCohortFilter, setReviewedCohortFilter] = useState<ReviewedCohortFilter>('all');
+  const [hideIncomplete, setHideIncomplete] = useState(true);
   const [selectedUserId, setSelectedUserId] = useState<string | null>(null);
   const [detailAttempts, setDetailAttempts] = useState<AttemptRow[] | null>(null);
   const [detailAttemptsLoading, setDetailAttemptsLoading] = useState(false);
@@ -1652,7 +2083,11 @@ export function AdminInterviewDashboard({ onClose }: { onClose: () => void }) {
       setUsers(groups);
       setListError(errorMessage);
       if (selectedUserId) {
-        const { attempts, errorMessage: detailErr } = await fetchFullAttemptsForUser(selectedUserId);
+        const g = groups.find((x) => x.user.id === selectedUserId);
+        const { attempts, errorMessage: detailErr } = await fetchLatestFullAttemptForUser(
+          selectedUserId,
+          g?.user.latest_attempt_id,
+        );
         if (detailErr) {
           setDetailAttemptsError(detailErr);
           setDetailAttempts([]);
@@ -1759,8 +2194,10 @@ export function AdminInterviewDashboard({ onClose }: { onClose: () => void }) {
       return;
     }
     let cancelled = false;
+    setDetailAttemptsLoading(true);
     setDetailAttemptsError(null);
-    void fetchFullAttemptsForUser(selectedUserId).then(({ attempts, errorMessage: detailErr }) => {
+    const latestId = users.find((g) => g.user.id === selectedUserId)?.user.latest_attempt_id;
+    void fetchLatestFullAttemptForUser(selectedUserId, latestId).then(({ attempts, errorMessage: detailErr }) => {
       if (cancelled) return;
       setDetailAttemptsLoading(false);
       if (detailErr) {
@@ -1774,14 +2211,40 @@ export function AdminInterviewDashboard({ onClose }: { onClose: () => void }) {
     return () => {
       cancelled = true;
     };
-  }, [selectedUserId]);
+  }, [selectedUserId, users]);
 
   const selectedGroup = selectedUserId ? users.find((g) => g.user.id === selectedUserId) : null;
 
-  const filteredUsers = useMemo(() => {
-    if (statusFilter === 'all') return users;
-    return users.filter((g) => classifyAdminUserListStatus(g) === statusFilter);
-  }, [users, statusFilter]);
+  const pipelineFiltered = useMemo(() => {
+    let list = users;
+    list = list.filter((g) => userMatchesTimeRange(g, timeRangeFilter, customTimeFrom, customTimeTo));
+    if (reviewedCohortFilter === 'reviewed') {
+      list = list.filter((g) => g.user.interview_cohort_admin_reviewed === true);
+    } else if (reviewedCohortFilter === 'unreviewed') {
+      list = list.filter((g) => !g.user.interview_cohort_admin_reviewed);
+    }
+    if (hideIncomplete) {
+      list = list.filter((g) => g.user.interview_completed === true);
+    }
+    if (statusFilter !== 'all') {
+      list = list.filter((g) => classifyAdminUserListStatus(g) === statusFilter);
+    }
+    return list;
+  }, [users, timeRangeFilter, customTimeFrom, customTimeTo, reviewedCohortFilter, hideIncomplete, statusFilter]);
+
+  const cohortStats = useMemo(() => computeCohortHeaderStats(pipelineFiltered), [pipelineFiltered]);
+
+  const setUserCohortReviewed = useCallback(async (userId: string, next: boolean) => {
+    const { error } = await supabase
+      .from('users')
+      .update({ interview_cohort_admin_reviewed: next })
+      .eq('id', userId);
+    if (error) {
+      Alert.alert('Could not save', error.message);
+      return;
+    }
+    await refreshUsers();
+  }, [refreshUsers]);
 
   if (selectedUserId && selectedGroup) {
     return (
@@ -1844,27 +2307,147 @@ export function AdminInterviewDashboard({ onClose }: { onClose: () => void }) {
         <AdminFeedbackPanel />
       ) : (
         <>
-          <View style={styles.filterBar}>
-            <Text style={styles.filterBarLabel}>Status</Text>
-            <ScrollView
-              horizontal
-              showsHorizontalScrollIndicator={false}
-              contentContainerStyle={styles.filterChipsRow}
-            >
-              {STATUS_FILTER_OPTIONS.map((opt) => (
+          <View style={styles.cohortToolbar}>
+            <View style={styles.cohortStatsRowInline}>
+              <View style={styles.cohortStatPill}>
+                <Text style={styles.cohortStatValSmall}>{cohortStats.started}</Text>
+                <Text style={styles.cohortStatLblSmall}>Started</Text>
+              </View>
+              <View style={styles.cohortStatPill}>
+                <Text style={styles.cohortStatValSmall}>{cohortStats.passed}</Text>
+                <Text style={styles.cohortStatLblSmall}>Passed</Text>
+              </View>
+              <View style={styles.cohortStatPill}>
+                <Text style={styles.cohortStatValSmall}>{cohortStats.failed}</Text>
+                <Text style={styles.cohortStatLblSmall}>Failed</Text>
+              </View>
+            </View>
+            <View style={styles.filterCluster}>
+              <Text style={styles.filterClusterLabel}>Time</Text>
+              {TIME_RANGE_OPTIONS.map((opt) => (
                 <TouchableOpacity
                   key={opt.id}
-                  style={[styles.filterChip, statusFilter === opt.id && styles.filterChipActive]}
-                  onPress={() => setStatusFilter(opt.id)}
+                  style={[styles.filterChipCompact, timeRangeFilter === opt.id && styles.filterChipActive]}
+                  onPress={() => {
+                    if (opt.id === 'custom') {
+                      setTimeRangeFilter('custom');
+                      setCustomTimeFrom((f) => {
+                        if (f) return f;
+                        const t = new Date();
+                        const from = new Date(t);
+                        from.setDate(from.getDate() - 7);
+                        return formatYmdLocal(from);
+                      });
+                      setCustomTimeTo((t) => (t ? t : formatYmdLocal(new Date())));
+                    } else {
+                      setTimeRangeFilter(opt.id);
+                    }
+                  }}
                   accessibilityRole="button"
-                  accessibilityState={{ selected: statusFilter === opt.id }}
+                  accessibilityState={{ selected: timeRangeFilter === opt.id }}
                 >
-                  <Text style={[styles.filterChipText, statusFilter === opt.id && styles.filterChipTextActive]}>
+                  <Text
+                    style={[
+                      styles.filterChipTextCompact,
+                      timeRangeFilter === opt.id && styles.filterChipTextActive,
+                    ]}
+                  >
                     {opt.label}
                   </Text>
                 </TouchableOpacity>
               ))}
-            </ScrollView>
+            </View>
+            {timeRangeFilter === 'custom' ? (
+              <View style={styles.filterCustomRangeRow}>
+                <Text style={styles.filterClusterLabel}>From</Text>
+                <TextInput
+                  value={customTimeFrom}
+                  onChangeText={setCustomTimeFrom}
+                  placeholder="YYYY-MM-DD"
+                  placeholderTextColor="rgba(122, 154, 190, 0.45)"
+                  style={styles.customDateInput}
+                  autoCapitalize="none"
+                  autoCorrect={false}
+                  accessible
+                  accessibilityLabel="Custom range start date"
+                />
+                <Text style={styles.filterClusterLabel}>To</Text>
+                <TextInput
+                  value={customTimeTo}
+                  onChangeText={setCustomTimeTo}
+                  placeholder="YYYY-MM-DD"
+                  placeholderTextColor="rgba(122, 154, 190, 0.45)"
+                  style={styles.customDateInput}
+                  autoCapitalize="none"
+                  autoCorrect={false}
+                  accessible
+                  accessibilityLabel="Custom range end date"
+                />
+                <Text style={styles.filterCustomHint}>Local dates · activity time</Text>
+              </View>
+            ) : null}
+            <View style={styles.filterCluster}>
+              <Text style={styles.filterClusterLabel}>Reviewed</Text>
+              {REVIEWED_COHORT_OPTIONS.map((opt) => (
+                <TouchableOpacity
+                  key={opt.id}
+                  style={[styles.filterChipCompact, reviewedCohortFilter === opt.id && styles.filterChipActive]}
+                  onPress={() => setReviewedCohortFilter(opt.id)}
+                  accessibilityRole="button"
+                  accessibilityState={{ selected: reviewedCohortFilter === opt.id }}
+                >
+                  <Text
+                    style={[
+                      styles.filterChipTextCompact,
+                      reviewedCohortFilter === opt.id && styles.filterChipTextActive,
+                    ]}
+                  >
+                    {opt.label}
+                  </Text>
+                </TouchableOpacity>
+              ))}
+            </View>
+            <View style={styles.filterCluster}>
+              <Text style={styles.filterClusterLabel}>Complete</Text>
+              <TouchableOpacity
+                style={[styles.filterChipCompact, !hideIncomplete && styles.filterChipActive]}
+                onPress={() => setHideIncomplete(false)}
+                accessibilityRole="button"
+                accessibilityState={{ selected: !hideIncomplete }}
+              >
+                <Text style={[styles.filterChipTextCompact, !hideIncomplete && styles.filterChipTextActive]}>
+                  Any
+                </Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={[styles.filterChipCompact, hideIncomplete && styles.filterChipActive]}
+                onPress={() => setHideIncomplete(true)}
+                accessibilityRole="button"
+                accessibilityState={{ selected: hideIncomplete }}
+              >
+                <Text style={[styles.filterChipTextCompact, hideIncomplete && styles.filterChipTextActive]}>
+                  Only done
+                </Text>
+              </TouchableOpacity>
+            </View>
+            <View style={[styles.filterCluster, styles.filterClusterGrow]}>
+              <Text style={styles.filterClusterLabel}>Status</Text>
+              {STATUS_FILTER_OPTIONS.map((opt) => (
+                <TouchableOpacity
+                  key={opt.id}
+                  style={[styles.filterChipCompact, statusFilter === opt.id && styles.filterChipActive]}
+                  onPress={() => setStatusFilter(opt.id)}
+                  accessibilityRole="button"
+                  accessibilityState={{ selected: statusFilter === opt.id }}
+                >
+                  <Text
+                    style={[styles.filterChipTextCompact, statusFilter === opt.id && styles.filterChipTextActive]}
+                  >
+                    {opt.label}
+                  </Text>
+                </TouchableOpacity>
+              ))}
+            </View>
           </View>
           <ScrollView contentContainerStyle={styles.cardsContainer}>
             {loading ? (
@@ -1883,10 +2466,10 @@ export function AdminInterviewDashboard({ onClose }: { onClose: () => void }) {
               </View>
             ) : users.length === 0 ? (
               <Text style={styles.emptyText}>No users found.</Text>
-            ) : filteredUsers.length === 0 ? (
-              <Text style={styles.emptyText}>No users match this status.</Text>
+            ) : pipelineFiltered.length === 0 ? (
+              <Text style={styles.emptyText}>No users match these filters.</Text>
             ) : (
-              filteredUsers.map((userData) => (
+              pipelineFiltered.map((userData) => (
                 <UserCard
                   key={userData.user.id}
                   userData={userData}
@@ -1899,6 +2482,9 @@ export function AdminInterviewDashboard({ onClose }: { onClose: () => void }) {
                   canDelete={canDeleteUser(userData.user)}
                   deleting={deletingUserId === userData.user.id}
                   onDelete={() => void handleDeleteUser(userData.user)}
+                  reviewed={userData.user.interview_cohort_admin_reviewed === true}
+                  onToggleReviewed={(next) => void setUserCohortReviewed(userData.user.id, next)}
+                  onRefreshList={refreshUsers}
                 />
               ))
             )}
@@ -1931,6 +2517,128 @@ const styles = StyleSheet.create({
     color: '#7A9ABE',
     fontSize: 12,
   },
+  launchNotificationPhoneBold: {
+    fontWeight: '700',
+  },
+  headerPassMeta: {
+    color: '#9BB0CC',
+    fontSize: 11,
+    lineHeight: 16,
+    marginTop: 6,
+  },
+  overrideButtonRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8,
+    marginTop: 10,
+  },
+  overrideChip: {
+    borderWidth: 1,
+    borderColor: 'rgba(82,142,220,0.35)',
+    borderRadius: 8,
+    paddingHorizontal: 12,
+    paddingVertical: 7,
+    backgroundColor: 'rgba(30,111,217,0.12)',
+  },
+  overrideChipText: {
+    color: '#C8E4FF',
+    fontSize: 12,
+    fontWeight: '600',
+  },
+  cohortToolbar: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    alignItems: 'center',
+    columnGap: 10,
+    rowGap: 8,
+    paddingHorizontal: 16,
+    paddingVertical: 8,
+    borderBottomWidth: 1,
+    borderBottomColor: 'rgba(82,142,220,0.1)',
+  },
+  cohortStatsRowInline: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    alignItems: 'center',
+    gap: 8,
+  },
+  cohortStatPill: {
+    borderWidth: 1,
+    borderColor: 'rgba(82,142,220,0.2)',
+    borderRadius: 8,
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+    minWidth: 72,
+  },
+  cohortStatValSmall: {
+    color: '#C8E4FF',
+    fontSize: 16,
+    fontWeight: '600',
+  },
+  cohortStatLblSmall: {
+    color: '#7A9ABE',
+    fontSize: 9,
+    textTransform: 'uppercase',
+    letterSpacing: 0.4,
+    marginTop: 1,
+  },
+  filterCluster: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    alignItems: 'center',
+    gap: 5,
+  },
+  filterClusterGrow: {
+    flexBasis: 220,
+    flexGrow: 1,
+  },
+  filterClusterLabel: {
+    color: '#5C7A9E',
+    fontSize: 9,
+    fontWeight: '700',
+    textTransform: 'uppercase',
+    letterSpacing: 0.5,
+    marginRight: 2,
+  },
+  filterChipCompact: {
+    borderWidth: 1,
+    borderColor: 'rgba(82,142,220,0.22)',
+    borderRadius: 999,
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+  },
+  filterChipTextCompact: {
+    color: '#7A9ABE',
+    fontSize: 11,
+    fontWeight: '500',
+  },
+  filterCustomRangeRow: {
+    width: '100%' as const,
+    flexBasis: '100%' as const,
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    alignItems: 'center',
+    columnGap: 6,
+    rowGap: 4,
+    marginTop: 1,
+  },
+  customDateInput: {
+    minWidth: 108,
+    maxWidth: 120,
+    borderWidth: 1,
+    borderColor: 'rgba(82,142,220,0.3)',
+    borderRadius: 6,
+    paddingHorizontal: 8,
+    paddingVertical: 5,
+    color: '#E8F0F8',
+    fontSize: 11,
+    backgroundColor: 'rgba(5,6,13,0.4)',
+  },
+  filterCustomHint: {
+    color: '#5C7A9E',
+    fontSize: 9,
+    flexBasis: '100%' as const,
+  },
   backText: {
     color: '#7A9ABE',
     fontSize: 12,
@@ -1938,21 +2646,6 @@ const styles = StyleSheet.create({
   cardsContainer: {
     padding: 20,
     gap: 12,
-  },
-  filterBar: {
-    paddingHorizontal: 20,
-    paddingTop: 4,
-    paddingBottom: 10,
-    borderBottomWidth: 1,
-    borderBottomColor: 'rgba(82,142,220,0.1)',
-    gap: 8,
-  },
-  filterBarLabel: {
-    color: '#7A9ABE',
-    fontSize: 11,
-    fontWeight: '600',
-    letterSpacing: 0.6,
-    textTransform: 'uppercase',
   },
   filterChipsRow: {
     flexDirection: 'row',
@@ -2029,10 +2722,45 @@ const styles = StyleSheet.create({
     fontSize: 18,
     fontFamily: Platform.OS === 'web' ? "'Cormorant Garamond', serif" : undefined,
   },
+  userCardIntroName: {
+    color: '#E8F0F8',
+    fontSize: 18,
+    fontFamily: Platform.OS === 'web' ? "'Cormorant Garamond', serif" : undefined,
+  },
   userCardEmail: {
     color: '#7A9ABE',
     fontSize: 12,
     marginTop: 2,
+  },
+  userCardDateLine: {
+    color: '#9BB0CC',
+    fontSize: 11,
+    marginTop: 4,
+  },
+  userCardOverrideHint: {
+    color: '#D4A84B',
+    fontSize: 10,
+    marginTop: 4,
+    fontWeight: '600',
+  },
+  userCardSideCol: {
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingLeft: 8,
+    borderLeftWidth: 1,
+    borderLeftColor: 'rgba(82,142,220,0.12)',
+    minWidth: 100,
+  },
+  reviewedToggleRow: {
+    alignItems: 'center',
+    paddingVertical: 6,
+  },
+  reviewedLabel: {
+    color: '#7A9ABE',
+    fontSize: 10,
+    marginBottom: 4,
+    textTransform: 'uppercase',
+    letterSpacing: 0.4,
   },
   userCardMetaRow: {
     marginTop: 10,
@@ -2073,6 +2801,14 @@ const styles = StyleSheet.create({
   detailsLayout: {
     flex: 1,
     flexDirection: 'row',
+  },
+  detailsLayoutSingle: {
+    flex: 1,
+    flexDirection: 'row',
+  },
+  detailsPaneFull: {
+    flex: 1,
+    minWidth: 0,
   },
   attemptTabsColumn: {
     flex: 1,

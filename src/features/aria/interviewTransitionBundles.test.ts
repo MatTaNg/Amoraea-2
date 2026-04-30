@@ -19,9 +19,9 @@ describe('buildScenario1To2BundleForInterview', () => {
     expect(out).toContain('\n\nSARAH_VIGNETTE');
   });
 
-  it('embeds trimmed first name in the transition lead', () => {
+  it('uses the same no-name transition when a first name is provided (name lives in model reflection)', () => {
     const out = buildScenario1To2BundleForInterview('  Alex  ', STUB_S2);
-    expect(out).toContain('Great work, Alex — that\'s the end of that scenario.');
+    expect(out.startsWith(SCENARIO_1_TO_2_TRANSITION_FALLBACK)).toBe(true);
     expect(out).toContain(STUB_S2);
   });
 });
@@ -33,9 +33,9 @@ describe('buildScenario2To3TransitionBody', () => {
     expect(out).toContain('SOPHIE_VIGNETTE');
   });
 
-  it('embeds trimmed first name in the transition lead', () => {
+  it('uses the no-name transition when a first name is provided', () => {
     const out = buildScenario2To3TransitionBody('Jordan', STUB_S3);
-    expect(out).toContain('Great work, Jordan — that\'s the end of this one, too.');
+    expect(out.startsWith(SCENARIO_2_TO_3_TRANSITION_FALLBACK)).toBe(true);
     expect(out).toContain(STUB_S3);
   });
 });
@@ -48,9 +48,9 @@ describe('buildMoment4HandoffForInterview', () => {
     expect(out).toContain(`\n\n${STUB_M4_CARD}`);
   });
 
-  it('uses first name in comma form before personal card', () => {
+  it('uses the no-name handoff lead when a first name is provided', () => {
     const out = buildMoment4HandoffForInterview('Sam', STUB_M4_CARD);
-    expect(out).toContain('Good work, Sam, you just finished the three situations');
+    expect(out.startsWith(MOMENT_4_HANDOFF_NO_NAME_LEAD)).toBe(true);
     expect(out).toContain(STUB_M4_CARD);
   });
 });
@@ -75,10 +75,10 @@ describe('ensureScenario2BundleWhenOpeningWithoutVignette', () => {
     expect(ensureScenario2BundleWhenOpeningWithoutVignette(t, 1, 'Alex', STUB_S2)).toBe(t);
   });
 
-  it('replaces stripped Scenario B-only opening with full canonical bundle including name', () => {
+  it('replaces stripped Scenario B-only opening with full canonical bundle (no name in lead)', () => {
     const t = 'What do you think is going on here?';
     const out = ensureScenario2BundleWhenOpeningWithoutVignette(t, 1, 'Riley', STUB_S2);
-    expect(out).toContain('Great work, Riley —');
+    expect(out).toContain(SCENARIO_1_TO_2_TRANSITION_FALLBACK);
     expect(out).toContain('SARAH_VIGNETTE');
   });
 

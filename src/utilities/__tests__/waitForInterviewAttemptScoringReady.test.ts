@@ -62,4 +62,18 @@ describe('waitForInterviewAttemptScoringReady', () => {
     const ok = await waitForInterviewAttemptScoringReady(client, 'a', { maxMs: 80, intervalMs: 20 });
     expect(ok).toBe(false);
   });
+
+  it('returns false immediately when attempt row is missing (no long poll)', async () => {
+    const client = {
+      from: jest.fn(() => ({
+        select: jest.fn().mockReturnThis(),
+        eq: jest.fn().mockReturnThis(),
+        maybeSingle: jest.fn(async () => ({ data: null, error: null })),
+      })),
+    } as unknown as SupabaseClient;
+    const t0 = Date.now();
+    const ok = await waitForInterviewAttemptScoringReady(client, 'deleted-attempt', { maxMs: 5000, intervalMs: 400 });
+    expect(ok).toBe(false);
+    expect(Date.now() - t0).toBeLessThan(800);
+  });
 });

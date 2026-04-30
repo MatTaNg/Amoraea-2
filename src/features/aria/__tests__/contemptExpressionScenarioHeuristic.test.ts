@@ -16,10 +16,10 @@ describe('contemptExpressionScenarioHeuristic', () => {
     expect(userTurnTextForInterviewScenario(transcript, 1)).toBe('First Second');
   });
 
-  it('Matt S1-style phrasing yields lexicon hits (attempt 125 style)', () => {
+  it('Matt S1-style moral/capability verdict does not hit character-contempt lexicon', () => {
     const t =
       "Some people just aren't capable of prioritizing their relationship over their family of origin and that's a real problem.";
-    expect(countScenarioContemptVerdictSignals(t)).toBeGreaterThanOrEqual(2);
+    expect(countScenarioContemptVerdictSignals(t)).toBe(0);
   });
 
   it('enrich adds contempt_expression when model only returned monolithic contempt on S1-shaped slice', () => {
@@ -28,18 +28,27 @@ describe('contemptExpressionScenarioHeuristic', () => {
       keyEvidence: { contempt: 'recognition-heavy evidence' },
     };
     const userText =
-      "Ryan sounds like someone who has never had to put their partner first. Some people just aren't capable of prioritizing.";
+      "What a loser. He's a toxic person. He's a narcissist. Human trash.";
     const out = enrichScenarioSliceWithContemptHeuristic(slice, userText);
     expect(typeof out?.pillarScores?.contempt_expression).toBe('number');
-    expect((out?.pillarScores?.contempt_expression as number) <= 4.5).toBe(true);
+    expect((out?.pillarScores?.contempt_expression as number) <= 3.5).toBe(true);
   });
 
-  it('applyContemptExpression uses Math.min when model set high contempt_expression', () => {
+  it('applyContemptExpression caps model score when character-contempt lexicon hits', () => {
     const out = applyContemptExpressionHeuristicToScenarioScores(
-      'Daniel sounds emotionally immature and has a lot of growing up to do.',
+      "Daniel is a toxic person and a narcissist; he's subhuman to me.",
       { contempt_expression: 8 },
       { contempt_expression: 'model too soft' },
     );
     expect(out.pillarScores.contempt_expression).toBeLessThanOrEqual(4.5);
+  });
+
+  it('does not cap contempt_expression for situation-anchored moral language only', () => {
+    const out = applyContemptExpressionHeuristicToScenarioScores(
+      "That was incredibly rude and dishonoring to Emma; inconsiderate to take a long call mid-dinner.",
+      { contempt_expression: 8.2 },
+      {},
+    );
+    expect(out.pillarScores.contempt_expression).toBe(8.2);
   });
 });

@@ -1,5 +1,5 @@
 import { INTERVIEW_MARKER_IDS } from './interviewMarkers';
-import { isNoEvidenceText, normalizeScoresByEvidence } from './probeAndScoringUtils';
+import { isNoEvidenceText, isNotAssessedDueToTechnicalInterruption, normalizeScoresByEvidence } from './probeAndScoringUtils';
 
 export type MarkerScoreSlice = {
   pillarScores?: Record<string, number | null> | null;
@@ -10,8 +10,7 @@ export type PillarMomentLabel =
   | 'scenario_1'
   | 'scenario_2'
   | 'scenario_3'
-  | 'moment_4'
-  | 'moment_5';
+  | 'moment_4';
 
 export type LabeledMarkerSlice = {
   moment: PillarMomentLabel;
@@ -19,13 +18,7 @@ export type LabeledMarkerSlice = {
   keyEvidence?: Record<string, string> | null;
 };
 
-const SLICE_LABELS: PillarMomentLabel[] = [
-  'scenario_1',
-  'scenario_2',
-  'scenario_3',
-  'moment_4',
-  'moment_5',
-];
+const SLICE_LABELS: PillarMomentLabel[] = ['scenario_1', 'scenario_2', 'scenario_3', 'moment_4'];
 
 type StandardMarkerId = Exclude<
   (typeof INTERVIEW_MARKER_IDS)[number],
@@ -35,10 +28,10 @@ type StandardMarkerId = Exclude<
 /** Which interview moments may contribute numeric evidence to each pillar aggregate. */
 const STANDARD_MARKER_ALLOWED_MOMENTS: Record<StandardMarkerId, Set<PillarMomentLabel>> = {
   repair: new Set(['scenario_1', 'scenario_2', 'scenario_3']),
-  attunement: new Set(['scenario_1', 'scenario_2', 'scenario_3', 'moment_5']),
+  attunement: new Set(['scenario_1', 'scenario_2', 'scenario_3']),
   regulation: new Set(['scenario_3']),
   mentalizing: new Set(SLICE_LABELS),
-  appreciation: new Set(['scenario_2', 'moment_5']),
+  appreciation: new Set(['scenario_2']),
   accountability: new Set(['scenario_1', 'scenario_2', 'scenario_3', 'moment_4']),
 };
 
@@ -57,6 +50,7 @@ function scoredValue(
 ): number | null {
   if (!pillarScores) return null;
   const raw = pillarScores[key];
+  if (isNotAssessedDueToTechnicalInterruption(keyEvidence?.[key])) return null;
   if (typeof raw !== 'number' || !Number.isFinite(raw)) return null;
   if (isNoEvidenceText(keyEvidence?.[key])) return null;
   return raw;
@@ -118,19 +112,20 @@ export function mergeCommitmentThresholdWeighted(
  * monolithic `contempt` (older Scenario A rows).
  */
 export function combinedContemptFromScenarioPillarScores(
-  pillarScores: Record<string, number | null | undefined> | null | undefined
+  pillarScores: Record<string, number | null | undefined> | null | undefined,
+  keyEvidence?: Record<string, string> | null
 ): number | null {
   if (!pillarScores) return null;
-  const expr =
-    typeof pillarScores.contempt_expression === 'number' && Number.isFinite(pillarScores.contempt_expression)
-      ? pillarScores.contempt_expression
-      : null;
-  const rec =
-    typeof pillarScores.contempt_recognition === 'number' && Number.isFinite(pillarScores.contempt_recognition)
-      ? pillarScores.contempt_recognition
-      : null;
-  const legacy =
-    typeof pillarScores.contempt === 'number' && Number.isFinite(pillarScores.contempt) ? pillarScores.contempt : null;
+  const numOrNull = (
+    key: 'contempt_expression' | 'contempt_recognition' | 'contempt',
+    raw: number | null | undefined
+  ): number | null => {
+    if (isNotAssessedDueToTechnicalInterruption(keyEvidence?.[key])) return null;
+    return typeof raw === 'number' && Number.isFinite(raw) ? raw : null;
+  };
+  const expr = numOrNull('contempt_expression', pillarScores.contempt_expression);
+  const rec = numOrNull('contempt_recognition', pillarScores.contempt_recognition);
+  const legacy = numOrNull('contempt', pillarScores.contempt);
 
   if (expr != null && rec != null) {
     return (
@@ -175,7 +170,7 @@ export function aggregateMarkerScoresFromLabeledSlices(
   const recognitionVals: number[] = [];
   for (const row of rows) {
     // Pooled contempt **expression** uses fictional scenario slices only — personal moments must not
-    // dilute harsh vignette framing (M4/M5 can read as low contempt for unrelated reasons).
+    // dilute harsh vignette framing (M4 can read as low contempt for unrelated reasons).
     if (
       row.moment === 'scenario_1' ||
       row.moment === 'scenario_2' ||

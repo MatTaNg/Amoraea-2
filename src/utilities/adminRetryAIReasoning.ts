@@ -18,9 +18,9 @@ type AttemptRow = {
 
 function scenarioScoresFromAttempt(row: AttemptRow): Record<
   number,
-  { pillarScores: Record<string, number>; scenarioName?: string } | undefined
+  { pillarScores: Record<string, number | null>; scenarioName?: string } | undefined
 > {
-  const out: Record<number, { pillarScores: Record<string, number>; scenarioName?: string } | undefined> = {};
+  const out: Record<number, { pillarScores: Record<string, number | null>; scenarioName?: string } | undefined> = {};
   ([1, 2, 3] as const).forEach((n) => {
     const raw = row[`scenario_${n}_scores` as keyof AttemptRow] as Record<string, unknown> | null | undefined;
     if (!raw || typeof raw !== 'object') return;

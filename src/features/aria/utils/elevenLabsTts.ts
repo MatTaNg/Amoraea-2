@@ -18,6 +18,7 @@ import {
   type TtsAutoplayPipeline,
   type TtsTelemetrySource,
 } from '@features/aria/telemetry/tsAutoplayTelemetry';
+import { getSessionLogRuntime } from '@utilities/sessionLogging/sessionLogContext';
 
 const TTS_PCM_STREAM_PIPELINE: TtsAutoplayPipeline = 'elevenlabs_web_pcm_stream';
 import {
@@ -80,6 +81,33 @@ const LONG_TTS_USE_STREAMING_MIN_CHARS = 100;
 /** After `unlockWebAudioForAutoplay()` runs in a tap handler — primes AudioContext (silent tick). */
 let sharedWebAudioContext: AudioContext | null = null;
 
+/** Debug: non-zero peak/rms indicates decoded MP3 is not silent (hypothesis H2). */
+function debugSummarizeAudioBufferPeaks(buf: AudioBuffer): {
+  durationSec: number;
+  sampleRate: number;
+  channels: number;
+  peak: number;
+  rms: number;
+} {
+  const ch0 = buf.getChannelData(0);
+  const n = Math.min(ch0.length, 96_000);
+  let peak = 0;
+  let sumSq = 0;
+  for (let i = 0; i < n; i += 1) {
+    const v = ch0[i]!;
+    const a = Math.abs(v);
+    if (a > peak) peak = a;
+    sumSq += v * v;
+  }
+  return {
+    durationSec: buf.duration,
+    sampleRate: buf.sampleRate,
+    channels: buf.numberOfChannels,
+    peak,
+    rms: Math.sqrt(sumSq / Math.max(1, n)),
+  };
+}
+
 /**
  * Web interview session: true only after a successful `unlockWebAudioForAutoplay()` in this session.
  * TTS must not run until set — avoids WEB_TTS_GESTURE when autoplay unlock never ran in a user gesture.
@@ -102,6 +130,38 @@ let sharedHtmlAudioForMobileTts: HTMLAudioElement | null = null;
 /** One listener: resume shared `AudioContext` / reprime HTML audio when the tab becomes visible again (Safari suspends on hide). */
 let webInterviewAudioVisibilityListenerAttached = false;
 
+export function debugNoteWebAudioRouteChange(source: string, routeData?: Record<string, unknown>): void {
+  if (Platform.OS !== 'web') return;
+  const ctx = sharedWebAudioContext;
+  // #region agent log
+  fetch('http://127.0.0.1:7789/ingest/668e0bd5-3283-4492-9f48-e33846c18218', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'X-Debug-Session-Id': 'c61a43' },
+    body: JSON.stringify({
+      sessionId: 'c61a43',
+      location: 'elevenLabsTts.ts:debugNoteWebAudioRouteChange',
+      message: 'web_audio_route_change_observed',
+      data: {
+        hypothesisId: 'H10',
+        source,
+        routeData: routeData ?? null,
+        hasCtx: !!ctx,
+        ctxState: ctx?.state ?? null,
+        ctxSampleRate: ctx?.sampleRate ?? null,
+        ctxBaseLatency: (ctx as AudioContext | null)?.baseLatency ?? null,
+        unlocked: webInterviewAudioUnlocked,
+        hasActiveHtmlAudio: activeWebAudio != null,
+        hasActiveWebBufferSource: activeWebBufferSource != null,
+        activePcmSources: activePcmStreamSources.length,
+        visibilityState: typeof document !== 'undefined' ? document.visibilityState : null,
+      },
+      timestamp: Date.now(),
+      runId: 'static-debug-pre',
+    }),
+  }).catch(() => {});
+  // #endregion
+}
+
 function attachWebInterviewAudioVisibilityHandler(): void {
   if (Platform.OS !== 'web' || typeof document === 'undefined') return;
   if (webInterviewAudioVisibilityListenerAttached) return;
@@ -114,13 +174,32 @@ function attachWebInterviewAudioVisibilityHandler(): void {
 async function handleWebInterviewDocumentVisibilityChange(): Promise<void> {
   if (typeof document === 'undefined' || document.visibilityState !== 'visible') return;
   const ctx = sharedWebAudioContext;
-  if (ctx && ctx.state === 'suspended') {
-    try {
-      await ctx.resume();
-    } catch {
-      /* log but do not block */
-    }
-  }
+  // #region agent log
+  fetch('http://127.0.0.1:7789/ingest/668e0bd5-3283-4492-9f48-e33846c18218', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'X-Debug-Session-Id': 'c61a43' },
+    body: JSON.stringify({
+      sessionId: 'c61a43',
+      location: 'elevenLabsTts.ts:handleWebInterviewDocumentVisibilityChange',
+      message: 'web_visibility_resume_audio_state',
+      data: {
+        hypothesisId: 'H11',
+        hasCtx: !!ctx,
+        ctxState: ctx?.state ?? null,
+        ctxSampleRate: ctx?.sampleRate ?? null,
+        unlocked: webInterviewAudioUnlocked,
+        hasSharedHtmlAudio: sharedHtmlAudioForMobileTts != null,
+        hasActiveHtmlAudio: activeWebAudio != null,
+        hasActiveWebBufferSource: activeWebBufferSource != null,
+        activePcmSources: activePcmStreamSources.length,
+      },
+      timestamp: Date.now(),
+      runId: 'static-debug-pre',
+    }),
+  }).catch(() => {});
+  // #endregion
+  /** Same path as pre-play: Chrome often suspends on tab hide; some builds use non-`suspended` states before `running`. */
+  await ensureSharedWebAudioContextResumedForPlayback('other');
   reprimeSharedHtmlAudioSilentPlay();
 }
 
@@ -149,8 +228,35 @@ async function ensureSharedWebAudioContextResumedForPlayback(
 ): Promise<boolean> {
   if (Platform.OS !== 'web' || typeof window === 'undefined') return true;
   const ctx = sharedWebAudioContext;
+  // #region agent log
+  fetch('http://127.0.0.1:7789/ingest/668e0bd5-3283-4492-9f48-e33846c18218', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'X-Debug-Session-Id': 'c61a43' },
+    body: JSON.stringify({
+      sessionId: 'c61a43',
+      location: 'elevenLabsTts.ts:ensureSharedWebAudioContextResumedForPlayback',
+      message: 'web_audio_preplay_ctx_state',
+      data: {
+        hypothesisId: 'H12',
+        telemetrySource,
+        hasCtx: !!ctx,
+        ctxState: ctx?.state ?? null,
+        ctxSampleRate: ctx?.sampleRate ?? null,
+        unlocked: webInterviewAudioUnlocked,
+        visibilityState: typeof document !== 'undefined' ? document.visibilityState : null,
+        hasActiveHtmlAudio: activeWebAudio != null,
+        hasActiveWebBufferSource: activeWebBufferSource != null,
+        activePcmSources: activePcmStreamSources.length,
+      },
+      timestamp: Date.now(),
+      runId: 'static-debug-pre',
+    }),
+  }).catch(() => {});
+  // #endregion
   if (!ctx || !webInterviewAudioUnlocked) return true;
-  if (ctx.state !== 'suspended') return true;
+  if (ctx.state === 'closed') return false;
+  /** `resume()` is a no-op when already `running`; call for `suspended` and any other non-running state (e.g. post–tab-hide Chrome). */
+  if (ctx.state === 'running') return true;
   try {
     await Promise.race([
       ctx.resume(),
@@ -556,6 +662,32 @@ async function tryPlayElevenLabsMp3WithWebAudio(
     /** Safety only: decoded buffer duration + 3000ms — never use char estimate; primary completion is `onended`. */
     const playbackCapMs = Math.min(600_000, Math.max(4_000, Math.ceil((Number.isFinite(durSec) ? durSec : 30) * 1000) + 3_000));
 
+    const decodeDbg = debugSummarizeAudioBufferPeaks(decoded);
+    const rt0 = getSessionLogRuntime();
+    // #region agent log
+    fetch('http://127.0.0.1:7789/ingest/668e0bd5-3283-4492-9f48-e33846c18218', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'X-Debug-Session-Id': 'c61a43' },
+      body: JSON.stringify({
+        sessionId: 'c61a43',
+        location: 'elevenLabsTts.ts:tryPlayElevenLabsMp3WithWebAudio',
+        message: 'mp3_decoded_buffer_summary',
+        data: {
+          hypothesisId: 'H2',
+          preInitTriggerDuring,
+          telemetrySource,
+          ctxSampleRate: ctx.sampleRate,
+          ctxState: ctx.state,
+          ...decodeDbg,
+          recordingSessionActive: rt0.recordingSessionActive,
+          ttsPlaybackActive: rt0.ttsPlaybackActive,
+        },
+        timestamp: Date.now(),
+        runId: 'static-debug-pre',
+      }),
+    }).catch(() => {});
+    // #endregion
+
     const handlePlaybackRaceError = (raceErr: unknown): false => {
       const msg = raceErr instanceof Error ? raceErr.message : String(raceErr);
       if (msg === 'playback-timeout' && src) {
@@ -591,7 +723,16 @@ async function tryPlayElevenLabsMp3WithWebAudio(
       throw raceErr;
     };
 
-    src.connect(ctx.destination);
+    let playbackAnalyser: AnalyserNode | null = null;
+    try {
+      playbackAnalyser = ctx.createAnalyser();
+      playbackAnalyser.fftSize = 512;
+      src.connect(playbackAnalyser);
+      playbackAnalyser.connect(ctx.destination);
+    } catch {
+      src.connect(ctx.destination);
+      playbackAnalyser = null;
+    }
     activeWebBufferSource = src;
     try {
       await Promise.race([
@@ -623,6 +764,46 @@ async function tryPlayElevenLabsMp3WithWebAudio(
                 runId: 'post-fix',
               }),
             }).catch(() => {});
+            const rt1 = getSessionLogRuntime();
+            if (playbackAnalyser && typeof window !== 'undefined') {
+              window.setTimeout(() => {
+                try {
+                  const arr = new Uint8Array(playbackAnalyser!.frequencyBinCount);
+                  playbackAnalyser!.getByteFrequencyData(arr);
+                  let sum = 0;
+                  let mx = 0;
+                  for (let i = 0; i < arr.length; i += 1) {
+                    sum += arr[i]!;
+                    mx = Math.max(mx, arr[i]!);
+                  }
+                  fetch('http://127.0.0.1:7789/ingest/668e0bd5-3283-4492-9f48-e33846c18218', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json', 'X-Debug-Session-Id': 'c61a43' },
+                    body: JSON.stringify({
+                      sessionId: 'c61a43',
+                      location: 'elevenLabsTts.ts:tryPlayElevenLabsMp3WithWebAudio',
+                      message: 'web_audio_post_start_spectrum',
+                      data: {
+                        hypothesisId: 'H2',
+                        freqBinAvg: arr.length ? sum / arr.length : 0,
+                        freqBinMax: mx,
+                        ctxStateAfterMs: ctx.state,
+                        decodePeak: decodeDbg.peak,
+                        decodeRms: decodeDbg.rms,
+                        recordingSessionActive: rt1.recordingSessionActive,
+                        ttsPlaybackActive: rt1.ttsPlaybackActive,
+                        visibilityState:
+                          typeof document !== 'undefined' ? document.visibilityState : null,
+                      },
+                      timestamp: Date.now(),
+                      runId: 'static-debug-pre',
+                    }),
+                  }).catch(() => {});
+                } catch {
+                  /* ignore */
+                }
+              }, 220);
+            }
             // #endregion
           } catch (e) {
             if (activeWebBufferSource === src) activeWebBufferSource = null;
@@ -964,10 +1145,44 @@ async function playElevenLabsPcmStreamFromResponse(
     for (let i = 0; i < i16.length; i += 1) {
       ch[i] = i16[i]! / 32768;
     }
+    let pcmPeak = 0;
+    let pcmSumSq = 0;
+    for (let i = 0; i < ch.length; i += 1) {
+      const v = ch[i]!;
+      pcmPeak = Math.max(pcmPeak, Math.abs(v));
+      pcmSumSq += v * v;
+    }
+    const pcmRms = Math.sqrt(pcmSumSq / Math.max(1, ch.length));
     const src = ctx.createBufferSource();
     src.buffer = abuf;
     src.connect(ctx.destination);
     const t0 = !pcmPlaybackStarted ? ctx.currentTime + 0.02 : nextScheduleTime;
+    const scheduleSlipSec = t0 - ctx.currentTime;
+    const scheduleSlipMs = scheduleSlipSec * 1000;
+    // #region agent log
+    // Large positive slip is normal while buffering ahead; negative slip means start() in the past → overlap risk.
+    if (scheduleSlipMs < -1) {
+      fetch('http://127.0.0.1:7789/ingest/668e0bd5-3283-4492-9f48-e33846c18218', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'X-Debug-Session-Id': 'c61a43' },
+        body: JSON.stringify({
+          sessionId: 'c61a43',
+          location: 'elevenLabsTts.ts:schedulePcmChunk',
+          message: 'pcm_schedule_slip_anomaly',
+          data: {
+            hypothesisId: 'H16',
+            scheduleSlipMs: Math.round(scheduleSlipMs * 1000) / 1000,
+            isFirstChunk: !pcmPlaybackStarted,
+            chunkFrames: ch.length,
+            ctxState: ctx.state,
+            visibilityState: typeof document !== 'undefined' ? document.visibilityState : null,
+          },
+          timestamp: Date.now(),
+          runId: 'static-debug-pre',
+        }),
+      }).catch(() => {});
+    }
+    // #endregion
     nextScheduleTime = t0 + abuf.duration;
     if (!pcmPlaybackStarted) {
       pcmPlaybackStarted = true;
@@ -978,6 +1193,32 @@ async function playElevenLabsPcmStreamFromResponse(
         outcome: 'play_ok',
         telemetrySource,
       });
+      const rtPcm = getSessionLogRuntime();
+      // #region agent log
+      fetch('http://127.0.0.1:7789/ingest/668e0bd5-3283-4492-9f48-e33846c18218', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'X-Debug-Session-Id': 'c61a43' },
+        body: JSON.stringify({
+          sessionId: 'c61a43',
+          location: 'elevenLabsTts.ts:schedulePcmChunk',
+          message: 'pcm_stream_first_chunk_energy',
+          data: {
+            hypothesisId: 'H3',
+            preInitTriggerDuring,
+            telemetrySource,
+            pcmPeak,
+            pcmRms,
+            pcmFrames: ch.length,
+            ctxSampleRate: ctx.sampleRate,
+            ctxState: ctx.state,
+            recordingSessionActive: rtPcm.recordingSessionActive,
+            ttsPlaybackActive: rtPcm.ttsPlaybackActive,
+          },
+          timestamp: Date.now(),
+          runId: 'static-debug-pre',
+        }),
+      }).catch(() => {});
+      // #endregion
     }
     totalSourcesScheduled += 1;
     const srcNode = src;
@@ -1091,6 +1332,34 @@ export async function speakWithElevenLabs(
   const preInitTriggerDuring: PreInitTriggerDuring =
     options?.preInitTriggerDuring ??
     (telemetrySource === 'greeting' ? 'greeting' : 'tts_playback');
+  // #region agent log
+  if (Platform.OS === 'web') {
+    fetch('http://127.0.0.1:7789/ingest/668e0bd5-3283-4492-9f48-e33846c18218', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'X-Debug-Session-Id': 'c61a43' },
+      body: JSON.stringify({
+        sessionId: 'c61a43',
+        location: 'elevenLabsTts.ts:speakWithElevenLabs',
+        message: 'tts_call_entry_overlap_state',
+        data: {
+          hypothesisId: 'H13',
+          telemetrySource,
+          textLen: (text ?? '').length,
+          skipStopBeforeStart: !!options?.skipStopElevenLabsPlaybackBeforeStart,
+          hasActiveHtmlAudio: activeWebAudio != null,
+          hasActiveWebBufferSource: activeWebBufferSource != null,
+          activePcmSources: activePcmStreamSources.length,
+          hasCtx: !!sharedWebAudioContext,
+          ctxState: sharedWebAudioContext?.state ?? null,
+          ctxSampleRate: sharedWebAudioContext?.sampleRate ?? null,
+          unlocked: webInterviewAudioUnlocked,
+        },
+        timestamp: Date.now(),
+        runId: 'static-debug-pre',
+      }),
+    }).catch(() => {});
+  }
+  // #endregion
   if (!options?.skipStopElevenLabsPlaybackBeforeStart) {
     await stopElevenLabsPlayback();
   }
@@ -1171,6 +1440,30 @@ export async function speakWithElevenLabs(
     telemetrySource !== 'greeting' &&
     !options?.prefetchedMpegArrayBuffer &&
     spokenText.trim().length > LONG_TTS_USE_STREAMING_MIN_CHARS;
+  // #region agent log
+  if (Platform.OS === 'web') {
+    fetch('http://127.0.0.1:7789/ingest/668e0bd5-3283-4492-9f48-e33846c18218', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'X-Debug-Session-Id': 'c61a43' },
+      body: JSON.stringify({
+        sessionId: 'c61a43',
+        location: 'elevenLabsTts.ts:speakWithElevenLabs',
+        message: 'tts_pipeline_selection_state',
+        data: {
+          hypothesisId: 'H14',
+          telemetrySource,
+          textLen: spokenText.trim().length,
+          shouldTryPcmStream,
+          skipStopBeforeStart: !!options?.skipStopElevenLabsPlaybackBeforeStart,
+          hasPrefetchedMpeg: !!options?.prefetchedMpegArrayBuffer,
+          preInitTriggerDuring,
+        },
+        timestamp: Date.now(),
+        runId: 'static-debug-pre',
+      }),
+    }).catch(() => {});
+  }
+  // #endregion
 
   try {
     if (shouldTryPcmStream) {
@@ -1181,6 +1474,27 @@ export async function speakWithElevenLabs(
         telemetrySource,
         preInitTriggerDuring
       );
+      // #region agent log
+      fetch('http://127.0.0.1:7789/ingest/668e0bd5-3283-4492-9f48-e33846c18218', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'X-Debug-Session-Id': 'c61a43' },
+        body: JSON.stringify({
+          sessionId: 'c61a43',
+          location: 'elevenLabsTts.ts:speakWithElevenLabs',
+          message: 'tts_pcm_attempt_result',
+          data: {
+            hypothesisId: 'H15',
+            telemetrySource,
+            playedPcm,
+            activePcmSourcesAfterAttempt: activePcmStreamSources.length,
+            hasActiveWebBufferSourceAfterAttempt: activeWebBufferSource != null,
+            hasActiveHtmlAudioAfterAttempt: activeWebAudio != null,
+          },
+          timestamp: Date.now(),
+          runId: 'static-debug-pre',
+        }),
+      }).catch(() => {});
+      // #endregion
       if (playedPcm) {
         return;
       }

@@ -1,5 +1,7 @@
 import React, { useEffect, useRef, useState } from 'react';
 import {
+  AppState,
+  AppStateStatus,
   View,
   StyleSheet,
   Text,
@@ -25,6 +27,11 @@ import {
 import { useAuth } from '@features/authentication/hooks/useAuth';
 import { isAmoraeaAdminConsoleEmail } from '@/constants/adminConsole';
 import { showConfirmDialog, showSimpleAlert } from '@utilities/alerts/confirmDialog';
+import {
+  evaluateStandardPostInterviewRevealWithUsersPassedFallback,
+  standardPostInterviewRouteFromReveal,
+} from '@utilities/postInterviewProcessingGate';
+import { fetchInterviewAttemptRevealSnapshot } from '@utilities/fetchInterviewAttemptRevealSnapshot';
 
 const BG = '#0a0a0f';
 const ACCENT = '#3b82f6';
@@ -177,10 +184,52 @@ export const PostInterviewScreen: React.FC<{ navigation: any; route: { params: {
   const [retakeBusy, setRetakeBusy] = useState(false);
   /** False until `users` launch-notification fields are read — avoids flashing the phone field then the confirmation. */
   const [launchContactPrefsLoaded, setLaunchContactPrefsLoaded] = useState(false);
+  /** `interview_passed` still null in DB while gate is computing — poll until true/false. */
+  const [pollForPassResolution, setPollForPassResolution] = useState(false);
+  /** Server scoring retry uses `users.latest_attempt_id` once it is known from the initial fetch. */
+  const scoringKickForAttemptRef = useRef<string | null>(null);
+  /** 48h reveal + users.interview_passed fallback — legacy screen otherwise only polled `users.interview_passed`. */
+  const revealNavigatedRef = useRef(false);
 
   useEffect(() => {
     loadWebFontsOnce();
   }, []);
+
+  useEffect(() => {
+    revealNavigatedRef.current = false;
+  }, [userId]);
+
+  useEffect(() => {
+    if (!userId) return;
+    const poll = async () => {
+      if (revealNavigatedRef.current) return;
+      try {
+        const [{ data: u }, snap] = await Promise.all([
+          supabase.from('users').select('interview_passed').eq('id', userId).maybeSingle(),
+          fetchInterviewAttemptRevealSnapshot(userId),
+        ]);
+        const target = standardPostInterviewRouteFromReveal(
+          evaluateStandardPostInterviewRevealWithUsersPassedFallback(snap ?? undefined, u?.interview_passed ?? undefined),
+        );
+        if (target === 'PostInterviewPassed') {
+          revealNavigatedRef.current = true;
+          queryClient.invalidateQueries({ queryKey: ['profile', userId] });
+          queryClient.invalidateQueries({ queryKey: ['standardPostInterviewDeferral', userId] });
+          navigation.replace('PostInterviewPassed', { userId });
+        } else if (target === 'PostInterviewFailed') {
+          revealNavigatedRef.current = true;
+          queryClient.invalidateQueries({ queryKey: ['profile', userId] });
+          queryClient.invalidateQueries({ queryKey: ['standardPostInterviewDeferral', userId] });
+          navigation.replace('PostInterviewFailed', { userId });
+        }
+      } catch {
+        /* ignore transient fetch errors */
+      }
+    };
+    void poll();
+    const id = setInterval(() => void poll(), 10_000);
+    return () => clearInterval(id);
+  }, [userId, navigation, queryClient]);
 
   /** Admin account uses cohort tools on Aria, not this branded applicant screen. */
   useEffect(() => {
@@ -210,11 +259,31 @@ export const PostInterviewScreen: React.FC<{ navigation: any; route: { params: {
           supabase.from('referral_codes').select('code').eq('referrer_user_id', uid).maybeSingle(),
           supabase
             .from('users')
-            .select('referral_notice_pending, launch_notification_phone, launch_notification_submitted_at')
+            .select(
+              'referral_notice_pending, launch_notification_phone, launch_notification_submitted_at, interview_passed, interview_completed, latest_attempt_id'
+            )
             .eq('id', uid)
             .maybeSingle(),
         ]);
         if (cancelled) return;
+        if (userRow?.interview_passed === true) {
+          queryClient.invalidateQueries({ queryKey: ['profile', uid] });
+          navigation.replace('PostInterviewPassed', { userId: uid });
+          return;
+        }
+        if (userRow?.interview_passed === false) {
+          queryClient.invalidateQueries({ queryKey: ['profile', uid] });
+          navigation.replace('PostInterviewFailed', { userId: uid });
+          return;
+        }
+        if (userRow?.interview_passed == null && userRow?.interview_completed !== true) {
+          queryClient.invalidateQueries({ queryKey: ['profile', uid] });
+          navigation.replace('Aria', { userId: uid });
+          return;
+        }
+        if (userRow?.interview_completed === true && userRow?.interview_passed == null) {
+          setPollForPassResolution(true);
+        }
         setMyReferralCode(codeRow?.code ?? null);
         setReferralNotice(userRow?.referral_notice_pending ?? null);
         const storedPhone =
@@ -239,7 +308,80 @@ export const PostInterviewScreen: React.FC<{ navigation: any; route: { params: {
     return () => {
       cancelled = true;
     };
-  }, [userId]);
+  }, [userId, navigation, queryClient]);
+
+  /**
+   * If server scoring never finished (edge timeout / first invoke missed), ask the edge function to run again.
+   * At most once per attempt id per mount.
+   */
+  useEffect(() => {
+    if (!pollForPassResolution || !userId) return;
+    void (async () => {
+      const { data: u } = await supabase
+        .from('users')
+        .select('latest_attempt_id')
+        .eq('id', userId)
+        .maybeSingle();
+      const aid =
+        typeof u?.latest_attempt_id === 'string' && u.latest_attempt_id.length > 0 ? u.latest_attempt_id : null;
+      if (!aid || scoringKickForAttemptRef.current === aid) return;
+      scoringKickForAttemptRef.current = aid;
+      const { error } = await supabase.functions.invoke('complete-standard-interview', {
+        body: { attempt_id: aid },
+      });
+      if (error && __DEV__) {
+        console.warn('[PostInterview] complete-standard-interview retry', error.message);
+      }
+    })();
+  }, [pollForPassResolution, userId]);
+
+  useEffect(() => {
+    if (!pollForPassResolution || !userId) return;
+    const id = setInterval(() => {
+      void (async () => {
+        const { data } = await supabase.from('users').select('interview_passed').eq('id', userId).maybeSingle();
+        if (data?.interview_passed === true) {
+          clearInterval(id);
+          setPollForPassResolution(false);
+          queryClient.invalidateQueries({ queryKey: ['profile', userId] });
+          navigation.replace('PostInterviewPassed', { userId });
+        } else if (data?.interview_passed === false) {
+          clearInterval(id);
+          setPollForPassResolution(false);
+          queryClient.invalidateQueries({ queryKey: ['profile', userId] });
+          navigation.replace('PostInterviewFailed', { userId });
+        }
+      })();
+    }, 3000);
+    return () => clearInterval(id);
+  }, [pollForPassResolution, userId, navigation, queryClient]);
+
+  useEffect(() => {
+    let cancelled = false;
+    const checkPass = async () => {
+      const { data: auth } = await supabase.auth.getUser();
+      const uid = auth.user?.id ?? userId;
+      if (!uid) return;
+      const { data: row } = await supabase.from('users').select('interview_passed').eq('id', uid).maybeSingle();
+      if (cancelled) return;
+      if (row?.interview_passed === true) {
+        queryClient.invalidateQueries({ queryKey: ['profile', uid] });
+        navigation.replace('PostInterviewPassed', { userId: uid });
+      } else if (row?.interview_passed === false) {
+        queryClient.invalidateQueries({ queryKey: ['profile', uid] });
+        navigation.replace('PostInterviewFailed', { userId: uid });
+      }
+    };
+    void checkPass();
+    const onAppState = (s: AppStateStatus) => {
+      if (s === 'active') void checkPass();
+    };
+    const sub = AppState.addEventListener('change', onAppState);
+    return () => {
+      cancelled = true;
+      sub.remove();
+    };
+  }, [userId, navigation, queryClient]);
 
   const confirmAndRetakeInterview = () => {
     const msg =
@@ -484,10 +626,10 @@ export const PostInterviewScreen: React.FC<{ navigation: any; route: { params: {
           {myReferralCode ? (
             <View style={styles.referFriendSection}>
               <View style={styles.referFriendDivider} />
-              <Text style={styles.referFriendTitle}>Give a friend a better shot.</Text>
+              <Text style={styles.referFriendTitle}>Know someone who might pass?</Text>
               <Text style={styles.referFriendBody}>
                 Share your personal code with someone you think is ready. If they complete the full interview,
-                you&apos;ll both have a better chance of getting in.
+                you&apos;ll both receive a 20% discount at our next event!.
               </Text>
               <View style={styles.codeBlockRow}>
                 <Text style={styles.codeBlockText} selectable>

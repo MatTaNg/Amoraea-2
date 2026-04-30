@@ -9,6 +9,7 @@ import { aggregatePillarScoresWithCommitmentMerge } from '../src/features/aria/a
 import { enrichScenarioSliceWithContemptHeuristic } from '../src/features/aria/contemptExpressionScenarioHeuristic';
 import { computeGateResultCore } from '../src/features/aria/computeGateResultCore';
 import { sanitizePersonalMomentScoresForAggregate } from '../src/features/aria/personalMomentSliceSanitize';
+import { fullScenarioReconciliation } from '../src/features/aria/reconcileScenarioScoresTranscript';
 
 function parseArgs(argv: string[]): number {
   const arg = argv.find((a) => a.startsWith('--attempt-number='));
@@ -100,51 +101,63 @@ async function main(): Promise<void> {
   }
   const patterns = parseObject(row.scenario_specific_patterns);
   const m4 = parseObject(patterns?.moment_4_scores);
-  const m5 = parseObject(patterns?.moment_5_scores);
   const tx = row.transcript;
+  const raw1 = extractSlice(row.scenario_1_scores);
+  const raw2 = extractSlice(row.scenario_2_scores);
+  const raw3 = extractSlice(row.scenario_3_scores);
+  const txArr = (Array.isArray(tx) ? tx : []) as TranscriptMsg[];
+  const reco1 = raw1
+    ? fullScenarioReconciliation(
+        { scenarioNumber: 1, pillarScores: raw1.pillarScores ?? {}, pillarConfidence: {}, keyEvidence: raw1.keyEvidence ?? {} },
+        txArr,
+      )
+    : null;
+  const reco2 = raw2
+    ? fullScenarioReconciliation(
+        { scenarioNumber: 2, pillarScores: raw2.pillarScores ?? {}, pillarConfidence: {}, keyEvidence: raw2.keyEvidence ?? {} },
+        txArr,
+      )
+    : null;
+  const reco3 = raw3
+    ? fullScenarioReconciliation(
+        { scenarioNumber: 3, pillarScores: raw3.pillarScores ?? {}, pillarConfidence: {}, keyEvidence: raw3.keyEvidence ?? {} },
+        txArr,
+      )
+    : null;
   const s1 = enrichScenarioSliceWithContemptHeuristic(
-    extractSlice(row.scenario_1_scores),
+    reco1
+      ? { pillarScores: reco1.pillarScores, keyEvidence: reco1.keyEvidence }
+      : raw1
+        ? { pillarScores: raw1.pillarScores, keyEvidence: raw1.keyEvidence }
+        : null,
     userTextForScenario(tx, 1),
   );
   const s2 = enrichScenarioSliceWithContemptHeuristic(
-    extractSlice(row.scenario_2_scores),
+    reco2
+      ? { pillarScores: reco2.pillarScores, keyEvidence: reco2.keyEvidence }
+      : raw2
+        ? { pillarScores: raw2.pillarScores, keyEvidence: raw2.keyEvidence }
+        : null,
     userTextForScenario(tx, 2),
   );
   const s3 = enrichScenarioSliceWithContemptHeuristic(
-    extractSlice(row.scenario_3_scores),
+    reco3
+      ? { pillarScores: reco3.pillarScores, keyEvidence: reco3.keyEvidence }
+      : raw3
+        ? { pillarScores: raw3.pillarScores, keyEvidence: raw3.keyEvidence }
+        : null,
     userTextForScenario(tx, 3),
   );
   const m4San = m4
-    ? sanitizePersonalMomentScoresForAggregate(
-        {
-          pillarScores: (m4.pillarScores as Record<string, number | null>) ?? {},
-          keyEvidence:
-            typeof m4.keyEvidence === 'object' && m4.keyEvidence != null && !Array.isArray(m4.keyEvidence)
-              ? (m4.keyEvidence as Record<string, string>)
-              : undefined,
-        },
-        4,
-      )
+    ? sanitizePersonalMomentScoresForAggregate({
+        pillarScores: (m4.pillarScores as Record<string, number | null>) ?? {},
+        keyEvidence:
+          typeof m4.keyEvidence === 'object' && m4.keyEvidence != null && !Array.isArray(m4.keyEvidence)
+            ? (m4.keyEvidence as Record<string, string>)
+            : undefined,
+      })
     : null;
-  const m5San = m5
-    ? sanitizePersonalMomentScoresForAggregate(
-        {
-          pillarScores: (m5.pillarScores as Record<string, number | null>) ?? {},
-          keyEvidence:
-            typeof m5.keyEvidence === 'object' && m5.keyEvidence != null && !Array.isArray(m5.keyEvidence)
-              ? (m5.keyEvidence as Record<string, string>)
-              : undefined,
-        },
-        5,
-      )
-    : null;
-  const slices = [
-    s1,
-    s2,
-    s3,
-    extractSlice(m4San),
-    extractSlice(m5San),
-  ];
+  const slices = [s1, s2, s3, extractSlice(m4San)];
   const pillar_scores = aggregatePillarScoresWithCommitmentMerge(slices);
   const gate = computeGateResultCore(pillar_scores, null);
   console.log('Recomputed pillar_scores', pillar_scores);

@@ -82,13 +82,12 @@ function labeled(
 }
 
 describe('aggregateMarkerScoresFromLabeledSlices (moment matrix)', () => {
-  it('averages repair from scenarios 1–3 only (ignores M4/M5)', () => {
+  it('averages repair from scenarios 1–3 only (ignores M4)', () => {
     const { scores } = aggregateMarkerScoresFromLabeledSlices([
       labeled('scenario_1', { repair: 4 }, { repair: 'a' }),
       labeled('scenario_2', { repair: 4 }, { repair: 'b' }),
       labeled('scenario_3', { repair: 4 }, { repair: 'c' }),
       labeled('moment_4', { repair: 2 }, { repair: 'm4' }),
-      labeled('moment_5', { repair: 10 }, { repair: 'm5' }),
     ]);
     expect(scores.repair).toBe(4);
   });
@@ -102,20 +101,20 @@ describe('aggregateMarkerScoresFromLabeledSlices (moment matrix)', () => {
     expect(scores.regulation).toBe(5);
   });
 
-  it('averages appreciation from scenario_2 and moment_5 only', () => {
+  it('uses appreciation from scenario_2 only', () => {
     const { scores } = aggregateMarkerScoresFromLabeledSlices([
       labeled('scenario_1', { appreciation: 10 }, { appreciation: 'n/a' }),
       labeled('scenario_2', { appreciation: 6 }, { appreciation: 's2' }),
-      labeled('moment_5', { appreciation: 8 }, { appreciation: 'm5' }),
+      labeled('moment_4', { appreciation: 9 }, { appreciation: 'ignored' }),
     ]);
-    expect(scores.appreciation).toBe(7);
+    expect(scores.appreciation).toBe(6);
   });
 
   it('excludes attunement from moment_4', () => {
     const { scores } = aggregateMarkerScoresFromLabeledSlices([
       labeled('scenario_1', { attunement: 6 }, { attunement: 's1' }),
+      labeled('scenario_2', { attunement: 8 }, { attunement: 's2' }),
       labeled('moment_4', { attunement: 2 }, { attunement: 'm4' }),
-      labeled('moment_5', { attunement: 8 }, { attunement: 'm5' }),
     ]);
     expect(scores.attunement).toBe(7);
   });

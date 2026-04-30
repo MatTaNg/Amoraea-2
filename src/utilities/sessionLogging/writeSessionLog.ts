@@ -3,6 +3,7 @@
  */
 import { supabase } from '@data/supabase/client';
 import { getSessionLogRuntime } from './sessionLogContext';
+import { getWebSessionLogDeviceContextForMerge } from './webSessionLogDeviceContext';
 
 export type SessionPlatform = 'ios' | 'android' | 'web';
 
@@ -41,27 +42,44 @@ async function insertOnce(row: SessionLogInsert): Promise<{ error: Error | null 
 
 /** Fire-and-forget. Retries once on failure. Never throws to callers. */
 export function writeSessionLog(row: SessionLogInsert): void {
+  const d =
+    row.platform === 'web' && row.eventData && typeof row.eventData === 'object'
+      ? getWebSessionLogDeviceContextForMerge()
+      : null;
+  const eventData =
+    d == null
+      ? row.eventData
+      : {
+          ...d,
+          ...row.eventData,
+          device_model: d.device_model,
+          os_version: d.os_version,
+          app_version: d.app_version,
+          available_memory_mb: d.available_memory_mb,
+        };
+  const rowOut: SessionLogInsert = d == null ? row : { ...row, eventData };
+
   const ctx = getSessionLogRuntime();
   if (
     isDevBundle &&
     ctx.sessionLogsRequireAttemptId &&
     row.attemptId == null &&
     row.userId &&
-    row.eventType !== 'build_version'
+    rowOut.eventType !== 'build_version'
   ) {
     console.error(
       '[session_logs] attempt_id is null after session initialization — event orphaned:',
-      row.eventType,
-      { eventDataKeys: Object.keys(row.eventData ?? {}) }
+      rowOut.eventType,
+      { eventDataKeys: Object.keys(rowOut.eventData ?? {}) }
     );
   }
   void (async () => {
-    const first = await insertOnce(row);
+    const first = await insertOnce(rowOut);
     if (!first.error) return;
     if (isDevBundle) {
       console.warn('[session_logs] insert failed, retrying once:', first.error.message);
     }
-    const second = await insertOnce(row);
+    const second = await insertOnce(rowOut);
     if (second.error && isDevBundle) {
       console.warn('[session_logs] insert failed after retry:', second.error.message);
     }

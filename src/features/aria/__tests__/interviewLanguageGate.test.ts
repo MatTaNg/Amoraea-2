@@ -1,6 +1,8 @@
 import {
   getWhisperReaskTurnContext,
   isNamePromptInterviewMoment,
+  isScenarioModalEligibleScenarioQuestionPrompt,
+  isScenarioModalExcludedAssistantPrompt,
   isShortAnswerOkForWhisperRatioGate,
   shouldFireWhisperRatioReask,
 } from '../interviewLanguageGate';
@@ -88,5 +90,56 @@ describe('getWhisperReaskTurnContext', () => {
     expect(getWhisperReaskTurnContext('Are you ready to begin?')).toBe(
       'readiness_confirmation'
     );
+  });
+});
+
+describe('isScenarioModalExcludedAssistantPrompt', () => {
+  it('flags whisper infra / ratio recovery copy', () => {
+    expect(
+      isScenarioModalExcludedAssistantPrompt(
+        "I'm having a little trouble on my end — could you say that one more time?"
+      )
+    ).toBe(true);
+    expect(
+      isScenarioModalExcludedAssistantPrompt(
+        'I only caught part of that — could you answer again in a full sentence?'
+      )
+    ).toBe(true);
+  });
+
+  it('does not flag a normal scenario question', () => {
+    expect(
+      isScenarioModalExcludedAssistantPrompt(
+        'When Daniel comes back and says he did not know what to say — what do you make of that?'
+      )
+    ).toBe(false);
+  });
+});
+
+describe('isScenarioModalEligibleScenarioQuestionPrompt', () => {
+  it('accepts typical scenario follow-ups', () => {
+    expect(
+      isScenarioModalEligibleScenarioQuestionPrompt(
+        'And if you were James, how would you repair?'
+      )
+    ).toBe(true);
+  });
+
+  it('rejects infra copy even when it contains a question mark', () => {
+    expect(
+      isScenarioModalEligibleScenarioQuestionPrompt(
+        "I'm having a little trouble on my end — could you say that one more time?"
+      )
+    ).toBe(false);
+  });
+
+  it('rejects non-interrogative lines', () => {
+    expect(isScenarioModalEligibleScenarioQuestionPrompt("That's the end of this scenario — nice work.")).toBe(
+      false
+    );
+  });
+
+  it('rejects name-collection prompts', () => {
+    expect(isScenarioModalEligibleScenarioQuestionPrompt("Hi, I'm Amoraea. What can I call you?")).toBe(false);
   });
 });

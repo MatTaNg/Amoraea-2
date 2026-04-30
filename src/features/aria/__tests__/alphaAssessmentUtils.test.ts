@@ -37,6 +37,15 @@ describe('alphaAssessmentUtils', () => {
       expect(r.contempt?.mean).toBeGreaterThan(6);
       expect(r.contempt?.std_dev).toBe(0);
     });
+
+    it('excludes null from mean and std (repair 7, null, 7 => mean 7, std 0)', () => {
+      const p7 = { ...pillar(5), repair: 7 } as Record<string, number | null>;
+      const pN = { ...pillar(5), repair: null } as Record<string, number | null>;
+      const r = calculateScoreConsistency(p7, pN, p7);
+      expect(r.repair?.mean).toBe(7);
+      expect(r.repair?.std_dev).toBe(0);
+      expect(r.repair?.s2).toBeNull();
+    });
   });
 
   describe('calculateConstructAsymmetry', () => {
@@ -44,6 +53,7 @@ describe('alphaAssessmentUtils', () => {
       const r = calculateConstructAsymmetry({ mentalizing: 7 });
       expect(r.profile_type).toBe('');
       expect(r.gap).toBe(0);
+      expect(r.low_data_warning.mentalizing).toBe(false);
     });
 
     it('labels balanced when gap ≤ 1.5', () => {
@@ -101,6 +111,19 @@ describe('alphaAssessmentUtils', () => {
       const full = calculateConstructAsymmetry(scores);
       const ex = calculateConstructAsymmetry(scores, ['mentalizing']);
       expect(ex.gap).toBeLessThan(full.gap);
+    });
+
+    it('flags low_data_warning and excludes single-sample construct from min/max when others have 2+ samples', () => {
+      const scores = {
+        ...pillar(6),
+        repair: 3,
+        mentalizing: 9,
+      };
+      const r = calculateConstructAsymmetry(scores, [], { contributorCounts: { repair: 1, mentalizing: 2 } });
+      expect(r.low_data_warning.repair).toBe(true);
+      expect(r.low_data_warning.mentalizing).toBe(false);
+      expect(r.weakest_construct).not.toBe('repair');
+      expect(r.strongest_construct).toBe('mentalizing');
     });
   });
 

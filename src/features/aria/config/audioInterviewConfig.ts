@@ -7,6 +7,7 @@
  * Web (SpeechRecognition fallback): browser controls endpointing — no sensitivity knob; use Chrome flags or prefer MediaRecorder+Whisper.
  *
  * Full overlapping chunk streaming to Whisper (200 ms overlap) is not wired yet; Whisper calls use a timeout + retry instead.
+ * Per-request timeout scales with recorded duration so long answers are not cut off at the default 8s floor.
  */
 
 function envNum(key: string, fallback: number): number {
@@ -66,10 +67,35 @@ export function getAudioMeteringPollIntervalMs(): number {
   return Math.max(50, Math.min(1000, v));
 }
 
-/** Whisper HTTP/upload overall timeout before retry (per request). */
+/**
+ * Minimum Whisper HTTP/upload timeout (per request). Used as a floor when scaling by clip length.
+ * Override via `EXPO_PUBLIC_AUDIO_WHISPER_TIMEOUT_MS` (clamped 3_000…120_000).
+ */
 export function getAudioWhisperTimeoutMs(): number {
   const v = envInt('AUDIO_WHISPER_TIMEOUT_MS', 8000);
   return Math.max(3000, Math.min(120_000, v));
+}
+
+const WHISPER_TIMEOUT_UNKNOWN_DURATION_MS = 45_000;
+
+/**
+ * Whisper fetch/upload timeout for one transcription attempt. Scales with `audioDurationMs` so
+ * long clips (e.g. 30–120s) do not hit `whisper_fetch_timeout` while the API is still working.
+ * When duration is unknown, uses a conservative default instead of the short env floor alone.
+ */
+export function getAudioWhisperTranscriptionTimeoutMs(
+  audioDurationMs: number | null | undefined
+): number {
+  const floor = getAudioWhisperTimeoutMs();
+  const d =
+    typeof audioDurationMs === 'number' && Number.isFinite(audioDurationMs)
+      ? Math.max(0, audioDurationMs)
+      : 0;
+  if (d <= 0) {
+    return Math.min(120_000, Math.max(floor, WHISPER_TIMEOUT_UNKNOWN_DURATION_MS));
+  }
+  const scaled = 12_000 + Math.ceil(d * 2.8);
+  return Math.min(120_000, Math.max(floor, scaled));
 }
 
 /** Hard cap: auto-stop recording and send buffer to Whisper (no user message). */
@@ -104,6 +130,7 @@ export function logAudioInterviewConfigOnce(): void {
     AUDIO_MIN_RECORDING_MS: getAudioMinRecordingDurationMs(),
     AUDIO_METERING_POLL_INTERVAL_MS: getAudioMeteringPollIntervalMs(),
     AUDIO_WHISPER_TIMEOUT_MS: getAudioWhisperTimeoutMs(),
+    AUDIO_WHISPER_TIMEOUT_MS_60S_CLIP: getAudioWhisperTranscriptionTimeoutMs(60_000),
     AUDIO_WEB_RMS_ENERGY_FLOOR: getAudioWebRmsEnergyFloor(),
   });
 }

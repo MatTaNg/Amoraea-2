@@ -1,3 +1,24 @@
+/** User-facing; when set in keyEvidence, the slice did not receive the prompt (session ended, audio, etc.). */
+export const NOT_ASSESSED_SESSION_ENDED_TECHNICAL_EVIDENCE =
+  'Not assessed — session ended due to technical difficulties before this prompt was delivered.';
+
+/**
+ * True when the evidence line marks missing data from technical interruption, not a scored “0” performance.
+ * Per-marker keyEvidence in scenario slices.
+ */
+export function isNotAssessedDueToTechnicalInterruption(text: string | null | undefined): boolean {
+  if (!text?.trim()) return false;
+  const t = text.trim().toLowerCase();
+  if (t === NOT_ASSESSED_SESSION_ENDED_TECHNICAL_EVIDENCE.trim().toLowerCase()) return true;
+  return (
+    /\bnot assessed\b/.test(t) &&
+    (/\b(session ended|ended early)\b.*\btechnical\b/.test(t) ||
+      /\btechnical (difficult|interruption|failure)\b/.test(t) ||
+      /\bbefore this prompt (was )?delivered\b/.test(t) ||
+      /\binterview (ended|terminated)\b.*\btechnical\b/.test(t))
+  );
+}
+
 export function isNoEvidenceText(text: string | null | undefined): boolean {
   if (!text) return false;
   const t = text.trim().toLowerCase();

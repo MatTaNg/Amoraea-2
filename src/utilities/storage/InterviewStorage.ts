@@ -55,7 +55,7 @@ export const getStorageKey = (userId: string) => `${KEY_PREFIX}${userId}`;
 
 export interface StoredScenarioScores {
   [key: number]: {
-    pillarScores: Record<string, number>;
+    pillarScores: Record<string, number | null>;
     pillarConfidence: Record<string, string>;
     keyEvidence: Record<string, string>;
     scenarioName?: string;

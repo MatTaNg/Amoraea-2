@@ -1,28 +1,23 @@
 /**
- * When scenario LLM scoring omits `contempt_expression`, lexicon hits on user turns still indicate
- * dismissive / verdict-like framing toward fictional characters — same signal family as expression.
- * Merges with model scores via Math.min so missed harsh framing cannot be overwritten upward.
+ * When the model is **lenient** on `contempt_expression`, **high-precision** lexicon hits on user turns
+ * can cap scores down (Math.min) for **egregious character contempt / dehumanization** only.
+ * **Not** for ordinary moral language about bad behavior (rude, wrong, hurtful) — those are not listed here;
+ * the LLM rubric handles them.
  */
-
 import { sliceTranscriptBeforeScenarioCToPersonalHandoff } from './probeAndScoringUtils';
 
+/** Insults, dehumanization, global “trash person” stance — *not* “rude / wrong / inconsiderate” re actions. */
 export const SCENARIO_CONTEMPT_VERDICT_REGEXES: readonly RegExp[] = [
-  /\bemotionally immature\b/i,
-  /\btoo immature\b/i,
-  /\bnot an acceptable\b/i,
-  /\bgrowing up to do\b/i,
-  /\ba lot of growing up\b/i,
-  /\bhas a lot of growing up\b/i,
-  /\bnot capable of prioritiz/i,
-  /\baren'?t capable\b/i,
-  /\bjust aren'?t capable\b/i,
-  /\breal problem\b/i,
-  /\btoo sensitive\b/i,
-  /\bnever had to put\b/i,
-  /\bfundamentally incompatible\b/i,
-  /\bwouldn'?t waste more time\b/i,
-  /\bnot ready for (?:a )?serious relationship\b/i,
-  /\bdeserves someone who\b/i,
+  /\b(he|she|they)('?s| is| are) (?:an? |a |the |)(?:complete |total |utter |)(?:idiot|loser|worthless|trash|garbage|a joke|disgusting|vile|subhuman)\b/i,
+  /\b(what|such) (?:a|an) (?:loser|idiot|jerk|joke|disaster|waste|pathetic|piece)\b/i,
+  /\b(he|she|they)('?s| is) (?:just |)(?:a |)(?:bad|toxic|horrible|nasty) (?:person|human|guy|man|woman|people)\b/i,
+  /\b(you'?re|u r) (?:a |)(?:loser|idiot|pathetic|worthless|garbage|trash)\b/i,
+  /\b(piece of (?:sh|trash|garbage)|human trash|subhuman|dehumaniz|sleazebag|scum)\b/i,
+  /\b(they'?re|he'?s|she'?s) (?:a |)(?:narcissist|psychopath|sociopath|monster)\b/i,
+  /\b(worthless|trash) (?:person|human)\b/i,
+  /\bpathetic (?:excuse|loser|man|woman|guy|girl|attempt)\b/i,
+  /\b(hate her|hate him|despise her|despise him) (?:as|for being|for who|)\b/i,
+  /\b(dumbass|dumb ass|moron|stupid (?:person|loser))\b/i,
 ];
 
 /** User lines for one fictional scenario (tags transcript `scenarioNumber`). */
@@ -55,14 +50,18 @@ export function countScenarioContemptVerdictSignals(text: string): number {
   return n;
 }
 
-/** Lower = worse participant contempt expression (harsher framing). Scale matches pillar 1–10. */
+/**
+ * Max allowed **good** `contempt_expression` score (higher = healthier) when egregious lexicon hits
+ * are present: lower = stricter cap (worse for participant = lower numeric result after merge with model).
+ * Scale: higher pillar score = less contempt in how they express. These caps are **only** for the
+ * character-attack lexicon above, not for moral disapproval of behavior.
+ */
 export function contemptExpressionScoreFromVerdictHitCount(hitCount: number): number {
   if (hitCount <= 0) return NaN;
-  if (hitCount >= 6) return 2;
   if (hitCount >= 4) return 2.5;
-  if (hitCount >= 3) return 3;
-  if (hitCount >= 2) return 3.5;
-  return 4.5;
+  if (hitCount === 3) return 3.5;
+  if (hitCount === 2) return 4.5;
+  return 5.5; // 1 strong hit: still a soft cap, not 2–3 unless model already low
 }
 
 export function applyContemptExpressionHeuristicToScenarioScores(

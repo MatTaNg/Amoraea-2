@@ -7,7 +7,7 @@
 
 /** Ordered checklist — keep entries self-contained for copy into repro notes. */
 export const INTERVIEW_PIPELINE_DEBUG_STEPS: readonly string[] = [
-  'Moment 5: no banned reflective bridge before the scripted appreciation question (no “Taking that in…”, etc.).',
+  'After Moment 4 threshold: final closing + [INTERVIEW_COMPLETE] only — no extra personal questions; closing should still include a specific transcript callback per CLOSING_LINE_INSTRUCTIONS.',
   'Closing: at least one **specific** callback to this transcript (personal moment or scenario detail) plus optional task thanks; no generic-only or trait-only sign-off — see CLOSING_LINE_INSTRUCTIONS in AriaScreen.',
   'communication_style_profiles: polling stops once labels exist; matchmaker_summary sentence 2 has proper punctuation (no “…fog Forced…”).',
   'narrative_conceptual_score: verify extremes — see NARRATIVE_CONCEPTUAL_SCORE_DEBUG_REFERENCE.',

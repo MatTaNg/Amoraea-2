@@ -295,6 +295,7 @@ export class ProfileRepository {
     gate3_compatibility?: unknown;
     psychometrics_progress?: unknown;
     interview_completed?: boolean | null;
+    interview_passed?: boolean | null;
     referral_boost_active?: boolean | null;
     referral_notice_pending?: string | null;
   }): Profile {
@@ -328,6 +329,8 @@ export class ProfileRepository {
       referralBoostActive: data.referral_boost_active === true,
       referralNoticePending: data.referral_notice_pending ?? null,
       interviewCompleted: data.interview_completed === true,
+      interviewPassed: data.interview_passed === true,
+      interviewFailed: data.interview_passed === false,
       prompts: parseProfilePrompts(data.profile_prompts),
       onboardingStage: parseOnboardingStage(data.onboarding_stage),
       applicationStatus: parseApplicationStatus(data.application_status),

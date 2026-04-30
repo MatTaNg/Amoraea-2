@@ -60,3 +60,8 @@ export {
   mapHeadphoneProbeToSessionInputRoute,
   shouldWarnHighThermal,
 } from './interviewDeviceEnvironment';
+export {
+  captureWebSessionLogDeviceContext,
+  getWebSessionLogDeviceContextForMerge,
+  clearWebSessionLogDeviceContextForTests,
+} from './webSessionLogDeviceContext';

@@ -5,60 +5,112 @@
 
 import { INTERVIEW_MARKER_IDS, type InterviewMarkerId } from '@features/aria/interviewMarkers';
 import { combinedContemptFromScenarioPillarScores } from '@features/aria/aggregateMarkerScoresFromSlices';
+import { isNotAssessedDueToTechnicalInterruption } from '@features/aria/probeAndScoringUtils';
 
 export const CONSTRUCT_IDS = [...INTERVIEW_MARKER_IDS] as InterviewMarkerId[];
 export const CONSTRUCT_NAMES = CONSTRUCT_IDS;
 
-export type ScenarioScoresMap = Record<number, { pillarScores: Record<string, number> } | undefined>;
+export type ScenarioScoresMap = Record<number, { pillarScores: Record<string, number | null> } | undefined>;
 
 type ScenarioPillarSnapshot = Record<string, number | null | undefined> | undefined;
+
+function effectiveConstructValueForConsistency(
+  name: (typeof CONSTRUCT_NAMES)[number],
+  pillarScores: ScenarioPillarSnapshot,
+  keyEvidence: Record<string, string> | null | undefined
+): number | null {
+  if (name === 'contempt') {
+    return combinedContemptFromScenarioPillarScores(pillarScores ?? null, keyEvidence ?? null);
+  }
+  const ev = keyEvidence?.[name];
+  if (isNotAssessedDueToTechnicalInterruption(ev)) return null;
+  const raw = pillarScores?.[name];
+  if (raw == null || raw === undefined) return null;
+  if (typeof raw !== 'number' || !Number.isFinite(raw)) return null;
+  return raw;
+}
 
 export function calculateScoreConsistency(
   s1: ScenarioPillarSnapshot,
   s2: ScenarioPillarSnapshot,
-  s3: ScenarioPillarSnapshot
-): Record<string, { s1: number | null; s2: number | null; s3: number | null; mean: number; std_dev: number }> {
-  const result: Record<string, { s1: number | null; s2: number | null; s3: number | null; mean: number; std_dev: number }> = {};
+  s3: ScenarioPillarSnapshot,
+  keyEvidence1?: Record<string, string> | null,
+  keyEvidence2?: Record<string, string> | null,
+  keyEvidence3?: Record<string, string> | null
+): Record<
+  string,
+  { s1: number | null; s2: number | null; s3: number | null; mean: number | null; std_dev: number | null }
+> {
+  const result: Record<
+    string,
+    { s1: number | null; s2: number | null; s3: number | null; mean: number | null; std_dev: number | null }
+  > = {};
   for (const name of CONSTRUCT_NAMES) {
-    const v1 =
-      name === 'contempt' ? combinedContemptFromScenarioPillarScores(s1 ?? null) : (s1?.[name] ?? null);
-    const v2 =
-      name === 'contempt' ? combinedContemptFromScenarioPillarScores(s2 ?? null) : (s2?.[name] ?? null);
-    const v3 =
-      name === 'contempt' ? combinedContemptFromScenarioPillarScores(s3 ?? null) : (s3?.[name] ?? null);
+    const v1 = effectiveConstructValueForConsistency(name, s1, keyEvidence1);
+    const v2 = effectiveConstructValueForConsistency(name, s2, keyEvidence2);
+    const v3 = effectiveConstructValueForConsistency(name, s3, keyEvidence3);
     const vals = [v1, v2, v3].filter((v): v is number => v !== null && v !== undefined);
-    const mean = vals.length ? vals.reduce((a, b) => a + b, 0) / vals.length : 0;
-    const variance = vals.length ? vals.reduce((a, b) => a + Math.pow(b - mean, 2), 0) / vals.length : 0;
-    const stdDev = Math.sqrt(variance);
+    const mean =
+      vals.length > 0 ? Math.round((vals.reduce((a, b) => a + b, 0) / vals.length) * 10) / 10 : null;
+    const variance =
+      vals.length > 0 && mean != null
+        ? vals.reduce((a, b) => a + Math.pow(b - mean, 2), 0) / vals.length
+        : null;
+    const stdDev = variance != null && variance >= 0 ? Math.round(Math.sqrt(variance) * 10) / 10 : null;
     result[name] = {
       s1: v1 ?? null,
       s2: v2 ?? null,
       s3: v3 ?? null,
-      mean: Math.round(mean * 10) / 10,
-      std_dev: Math.round(stdDev * 10) / 10,
+      mean,
+      std_dev: stdDev,
     };
   }
   return result;
 }
 
 export function calculateConstructAsymmetry(
-  pillarScores: Record<string, number>,
-  excludedMarkerIds: readonly string[] = []
+  pillarScores: Record<string, number | null | undefined>,
+  excludedMarkerIds: readonly string[] = [],
+  options?: { contributorCounts?: Record<string, number> | null }
 ): {
   user_mean: number;
   strongest_construct: string;
   weakest_construct: string;
   gap: number;
   profile_type: string;
+  low_data_warning: Record<string, boolean>;
 } {
   const excluded = new Set(excludedMarkerIds);
+  const contributorCounts = options?.contributorCounts;
+  const hasContributorInfo = contributorCounts != null;
+
+  const maxContrib = hasContributorInfo
+    ? Math.max(0, ...CONSTRUCT_NAMES.map((n) => contributorCounts![n] ?? 0))
+    : 0;
+
+  const low_data_warning: Record<string, boolean> = Object.fromEntries(
+    CONSTRUCT_NAMES.map((n) => {
+      if (!hasContributorInfo) return [n, false] as [string, boolean];
+      const c = contributorCounts![n];
+      if (c === undefined) return [n, false] as [string, boolean];
+      return [n, c === 1 && maxContrib >= 2] as [string, boolean];
+    })
+  ) as Record<string, boolean>;
+
+  const eligible = (name: string): boolean => {
+    if (excluded.has(name)) return false;
+    if (!hasContributorInfo) return true;
+    const c = contributorCounts![name];
+    if (c === undefined) return true;
+    if (c === 0) return false;
+    if (c >= 2) return true;
+    return maxContrib <= 1;
+  };
+
   const entries = CONSTRUCT_NAMES.map((name) => [name, pillarScores[name]] as const)
     .filter(
       ([name, v]) =>
-        !excluded.has(name) &&
-        typeof v === 'number' &&
-        Number.isFinite(v) &&
-        v > 0
+        eligible(name) && typeof v === 'number' && Number.isFinite(v) && (v as number) > 0
     )
     .map(([name, v]) => [name, v as number] as [string, number]);
 
@@ -69,10 +121,11 @@ export function calculateConstructAsymmetry(
       weakest_construct: '',
       gap: 0,
       profile_type: '',
+      low_data_warning,
     };
   }
 
-  const values = entries.map(([, v]) => v);
+  const values = entries.map(([, val]) => val);
   const mean = values.reduce((a, b) => a + b, 0) / values.length;
   const strongest = entries.reduce((a, b) => (a[1] > b[1] ? a : b));
   const weakest = entries.reduce((a, b) => (a[1] < b[1] ? a : b));
@@ -89,6 +142,7 @@ export function calculateConstructAsymmetry(
     weakest_construct: weakest[0],
     gap: Math.round(gap * 10) / 10,
     profile_type: profileType,
+    low_data_warning,
   };
 }
 

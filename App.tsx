@@ -8,6 +8,15 @@ import { useAuth } from './src/features/authentication/hooks/useAuth';
 import { LoginScreen } from './src/app/screens/LoginScreen';
 import { RegisterScreen } from './src/app/screens/RegisterScreen';
 import { PostInterviewScreen } from '@app/screens/onboarding/PostInterviewScreen';
+import { PostInterviewPassedScreen } from '@app/screens/onboarding/PostInterviewPassedScreen';
+import { PostInterviewFailedScreen } from '@app/screens/onboarding/PostInterviewFailedScreen';
+import { PostInterviewProcessingScreen } from '@app/screens/onboarding/PostInterviewProcessingScreen';
+import { isAmoraeaAdminConsoleEmail } from '@/constants/adminConsole';
+import {
+  evaluateStandardPostInterviewRevealWithUsersPassedFallback,
+  standardPostInterviewRouteFromReveal,
+} from '@utilities/postInterviewProcessingGate';
+import { fetchInterviewAttemptRevealSnapshot } from '@utilities/fetchInterviewAttemptRevealSnapshot';
 import { OnboardingHeader } from './src/ui/components/OnboardingHeader';
 import { ProfileRepository } from './src/data/repositories/ProfileRepository';
 import { InviteCodeRepository } from './src/data/repositories/InviteCodeRepository';
@@ -114,7 +123,12 @@ const InterviewAppNavigator = ({
   initialRouteName,
 }: {
   userId: string;
-  initialRouteName: 'Aria' | 'PostInterview';
+  initialRouteName:
+    | 'Aria'
+    | 'PostInterview'
+    | 'PostInterviewProcessing'
+    | 'PostInterviewPassed'
+    | 'PostInterviewFailed';
 }) => (
   <Stack.Navigator
     initialRouteName={initialRouteName}
@@ -130,7 +144,34 @@ const InterviewAppNavigator = ({
     />
     <Stack.Screen
       name="PostInterview"
-      component={PostInterviewScreen}
+      component={PostInterviewScreen as unknown as React.ComponentType<Record<string, never>>}
+      initialParams={{ userId }}
+      options={{
+        headerShown: true,
+        header: () => <OnboardingHeader variant="dark" />,
+      }}
+    />
+    <Stack.Screen
+      name="PostInterviewProcessing"
+      component={PostInterviewProcessingScreen as unknown as React.ComponentType<Record<string, never>>}
+      initialParams={{ userId }}
+      options={{
+        headerShown: true,
+        header: () => <OnboardingHeader variant="dark" />,
+      }}
+    />
+    <Stack.Screen
+      name="PostInterviewPassed"
+      component={PostInterviewPassedScreen as unknown as React.ComponentType<Record<string, never>>}
+      initialParams={{ userId }}
+      options={{
+        headerShown: true,
+        header: () => <OnboardingHeader variant="dark" />,
+      }}
+    />
+    <Stack.Screen
+      name="PostInterviewFailed"
+      component={PostInterviewFailedScreen as unknown as React.ComponentType<Record<string, never>>}
       initialParams={{ userId }}
       options={{
         headerShown: true,
@@ -139,6 +180,10 @@ const InterviewAppNavigator = ({
     />
   </Stack.Navigator>
 );
+
+async function fetchStandardPostInterviewDeferralSnapshot(userId: string) {
+  return fetchInterviewAttemptRevealSnapshot(userId);
+}
 
 const AppNavigator = ({ userId }: { userId: string }) => {
   const { user } = useAuth();
@@ -163,6 +208,19 @@ const AppNavigator = ({ userId }: { userId: string }) => {
     retry: false,
   });
 
+  const isAdminEmail = isAmoraeaAdminConsoleEmail(user?.email);
+  const isStandardPostInterviewCohort = !!profile && !profile.isAlphaTester && !isAdminEmail;
+  const hasDefinitiveGateInProfile = !!profile && (profile.interviewPassed || profile.interviewFailed);
+  const shouldStartOnPostInterviewFlow =
+    !!profile && isStandardPostInterviewCohort && (profile.interviewCompleted || hasDefinitiveGateInProfile);
+
+  const { data: deferralAttempt, isPending: deferralPending } = useQuery({
+    queryKey: ['standardPostInterviewDeferral', userId],
+    queryFn: () => fetchStandardPostInterviewDeferralSnapshot(userId),
+    enabled: !!userId && shouldStartOnPostInterviewFlow,
+    staleTime: 0,
+  });
+
   useEffect(() => {
     if (userId) {
       onboardingUseCase.retryFailedUpdates();
@@ -179,10 +237,32 @@ const AppNavigator = ({ userId }: { userId: string }) => {
     return <LoadingScreen />;
   }
 
-  const isAdminEmail = (user?.email ?? '').toLowerCase() === 'admin@amoraea.com';
-  /** Match `scoreInterview` handoff: standard applicants only; alpha/admin stay on Aria (thank-you / analysis). */
-  const initialRouteName: 'Aria' | 'PostInterview' =
-    profile.interviewCompleted && !profile.isAlphaTester && !isAdminEmail ? 'PostInterview' : 'Aria';
+  if (shouldStartOnPostInterviewFlow && deferralPending) {
+    return <LoadingScreen />;
+  }
+
+  /**
+   * Standard applicants: use the post-interview stack when the interview is finished *or* the gate
+   * already has a definite pass/fail in `users.interview_passed` (so we still route to
+   * `PostInterviewFailed` if `interview_completed` was never set but server scoring stored a fail).
+   * Alpha/admin stay on Aria (in-app results / admin tools).
+   */
+  const usersInterviewPassedForReveal =
+    profile.interviewPassed === true ? true : profile.interviewFailed === true ? false : null;
+
+  const initialRouteName:
+    | 'Aria'
+    | 'PostInterview'
+    | 'PostInterviewProcessing'
+    | 'PostInterviewPassed'
+    | 'PostInterviewFailed' = shouldStartOnPostInterviewFlow
+    ? standardPostInterviewRouteFromReveal(
+        evaluateStandardPostInterviewRevealWithUsersPassedFallback(
+          deferralAttempt ?? undefined,
+          usersInterviewPassedForReveal,
+        ),
+      )
+    : 'Aria';
 
   return <InterviewAppNavigator userId={userId} initialRouteName={initialRouteName} />;
 };

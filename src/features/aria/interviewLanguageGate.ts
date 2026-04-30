@@ -145,6 +145,53 @@ export function isClientAudioRecoveryAssistantLine(lastQuestionText: string | nu
   return false;
 }
 
+/**
+ * Reference-card ("Show scenario") modal: bottom line must be a real scenario question, never
+ * infra / retry / mic / connectivity copy from AriaScreen. Display layer uses this with a
+ * last-known-good fallback.
+ */
+export function isScenarioModalExcludedAssistantPrompt(text: string | null | undefined): boolean {
+  const raw = (text ?? '').trim();
+  if (!raw) return false;
+  if (isClientAudioRecoveryAssistantLine(raw)) return true;
+  const q = raw.toLowerCase();
+  const needles = [
+    "i'm having trouble starting the microphone",
+    "i'm having trouble connecting right now",
+    "having trouble reaching the server",
+    "i'm still having trouble hearing you",
+    'it sounds like i might be having trouble hearing you clearly',
+    "sounds like you're speaking a different language",
+    'i only know english',
+    'could you repeat that in english',
+    'the mic did not start cleanly',
+    "i didn't catch that — tap the mic",
+    'tap the mic and try again',
+    'give it another go',
+    'something went wrong on our end',
+    'something went wrong with that request',
+    "there's an authentication issue",
+  ];
+  for (const n of needles) {
+    if (q.includes(n)) return true;
+  }
+  return false;
+}
+
+/**
+ * True when the string is suitable as the scenario reference modal's "last question" line:
+ * must read as an interrogative (contains `?`), must not be infra/recovery/error copy, and must
+ * not be onboarding / resume / name-collection prompts unrelated to the vignette.
+ */
+export function isScenarioModalEligibleScenarioQuestionPrompt(text: string | null | undefined): boolean {
+  const raw = (text ?? '').trim();
+  if (!raw || !raw.includes('?')) return false;
+  if (isScenarioModalExcludedAssistantPrompt(raw)) return false;
+  if (isResumeReentryWelcomePrompt(raw)) return false;
+  if (isNamePromptInterviewMoment(raw)) return false;
+  return true;
+}
+
 /** Name / identity prompts — one or two words are valid. */
 export function isNamePromptInterviewMoment(lastQuestionText: string | null | undefined): boolean {
   const q = (lastQuestionText ?? '').toLowerCase();

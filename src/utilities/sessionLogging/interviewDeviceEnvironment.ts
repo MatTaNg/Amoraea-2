@@ -2,9 +2,23 @@ import { Platform } from 'react-native';
 import type { HeadphoneProbeResult } from '@features/aria/utils/audioRouteHeadphones';
 import type { InterviewDeviceEnvironmentPayload } from './audioSessionLogEnvelope';
 
-/** Free/available RAM is not exposed cross-platform in JS; log null unless a native source is added later. */
+/**
+ * Web: Chrome exposes `performance.memory` (JS heap) — not system RAM, but a stable
+ * "available" signal for client-side logs. Other browsers: null.
+ * Native: unchanged (no JS heap API in typical RN; keep null).
+ */
 function readAvailableMemoryMb(): number | null {
-  return null;
+  if (Platform.OS !== 'web' || typeof performance === 'undefined') {
+    return null;
+  }
+  const m = (performance as Performance & { memory?: { usedJSHeapSize: number; jsHeapSizeLimit: number } })
+    .memory;
+  if (m == null || typeof m.jsHeapSizeLimit !== 'number' || typeof m.usedJSHeapSize !== 'number') {
+    return null;
+  }
+  const freeBytes = m.jsHeapSizeLimit - m.usedJSHeapSize;
+  if (!Number.isFinite(freeBytes)) return null;
+  return Math.max(0, Math.round(freeBytes / 1024 / 1024));
 }
 
 /** Best-effort; never throws. */

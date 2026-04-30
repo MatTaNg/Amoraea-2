@@ -73,6 +73,11 @@ export async function waitForInterviewAttemptScoringReady(
       .eq('id', attemptId)
       .maybeSingle();
 
+    // Row gone (e.g. admin reset deleted attempts) — do not spin until maxMs.
+    if (!error && data == null) {
+      return false;
+    }
+
     if (!error && rowHasFullScoringPayload(data as AttemptScoringRow)) {
       return true;
     }

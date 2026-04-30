@@ -59,6 +59,33 @@ function truncateText(s: string, max: number) {
   return `${s.slice(0, max - 1)}…`;
 }
 
+type TranscriptLine = { role: string; content?: string };
+
+function parseFeedbackTranscript(raw: unknown): TranscriptLine[] {
+  if (!raw) return [];
+  if (Array.isArray(raw)) return raw as TranscriptLine[];
+  if (typeof raw === 'string') {
+    try {
+      const p = JSON.parse(raw);
+      return Array.isArray(p) ? (p as TranscriptLine[]) : [];
+    } catch {
+      return [];
+    }
+  }
+  return [];
+}
+
+function firstUserAnswerFromTranscript(raw: unknown): string | null {
+  const lines = parseFeedbackTranscript(raw);
+  const u = lines.find(
+    (m) =>
+      (m.role === 'user' || m.role === 'User') && typeof m.content === 'string' && m.content.trim().length > 0,
+  );
+  return u?.content?.trim() ?? null;
+}
+
+type UserEnrichRow = { email: string; intro: string };
+
 function meanRatings(ratings: (number | null)[]): number | null {
   const nums = ratings.filter((r): r is number => r != null && r >= 1 && r <= 5);
   if (nums.length === 0) return null;
@@ -82,6 +109,7 @@ export function AdminFeedbackPanel() {
   const [statCmp, setStatCmp] = useState(0);
   const [statAvg, setStatAvg] = useState<number | null>(null);
   const [statCap, setStatCap] = useState(false);
+  const [userEnrich, setUserEnrich] = useState<Record<string, UserEnrichRow>>({});
 
   const searchTrim = messageSearch.trim();
 
@@ -181,6 +209,32 @@ export function AdminFeedbackPanel() {
   useEffect(() => {
     void loadAll();
   }, [loadAll]);
+
+  useEffect(() => {
+    const ids = [...new Set(rows.map((r) => r.user_id).filter((x): x is string => typeof x === 'string' && !!x))];
+    if (ids.length === 0) {
+      setUserEnrich({});
+      return;
+    }
+    let cancelled = false;
+    void (async () => {
+      const { data, error } = await supabase
+        .from('users')
+        .select('id, email, name, interview_transcript')
+        .in('id', ids);
+      if (cancelled || error) return;
+      const next: Record<string, UserEnrichRow> = {};
+      for (const row of data ?? []) {
+        const o = row as { id: string; email: string | null; name: string | null; interview_transcript: unknown };
+        const intro = o.name?.trim() || firstUserAnswerFromTranscript(o.interview_transcript) || '—';
+        next[o.id] = { email: o.email ?? '—', intro };
+      }
+      if (!cancelled) setUserEnrich(next);
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [rows]);
 
   const onRefresh = useCallback(() => {
     setExpandedId(null);
@@ -318,16 +372,20 @@ export function AdminFeedbackPanel() {
             <View>
               <View style={styles.trHead}>
                 <Text style={[styles.th, styles.cDate]}>Date</Text>
+                <Text style={[styles.th, styles.cIntro]}>Intro name</Text>
+                <Text style={[styles.th, styles.cEmail]}>Email</Text>
                 <Text style={[styles.th, styles.cCat]}>Category</Text>
                 <Text style={[styles.th, styles.cRating]}>Rating</Text>
                 <Text style={[styles.th, styles.cMsg]}>Message</Text>
-                <Text style={[styles.th, styles.cAttempt]}>Attempt ID</Text>
+                <Text style={[styles.th, styles.cAttempt]}>Attempt</Text>
               </View>
               {rows.length === 0 ? (
                 <Text style={styles.emptyText}>No feedback rows for these filters.</Text>
               ) : (
                 rows.map((r) => {
                   const isOpen = expandedId === r.id;
+                  const uid = r.user_id ?? '';
+                  const en = uid ? userEnrich[uid] : undefined;
                   return (
                     <View key={r.id}>
                       <Pressable
@@ -342,6 +400,12 @@ export function AdminFeedbackPanel() {
                             hour: '2-digit',
                             minute: '2-digit',
                           })}
+                        </Text>
+                        <Text style={[styles.td, styles.cIntro]} numberOfLines={2}>
+                          {en?.intro ?? '—'}
+                        </Text>
+                        <Text style={[styles.td, styles.cEmail]} numberOfLines={2}>
+                          {en?.email ?? '—'}
                         </Text>
                         <View style={styles.cCat}>
                           <View style={styles.badge}>
@@ -381,6 +445,14 @@ export function AdminFeedbackPanel() {
                             <Text style={styles.metaK}>id</Text>
                             <Text style={styles.metaV} selectable>
                               {r.id}
+                            </Text>
+                            <Text style={styles.metaK}>Email</Text>
+                            <Text style={styles.metaV} selectable>
+                              {en?.email ?? '—'}
+                            </Text>
+                            <Text style={styles.metaK}>Intro (first answer / name)</Text>
+                            <Text style={styles.metaV} selectable>
+                              {en?.intro ?? '—'}
                             </Text>
                             <Text style={styles.metaK}>user_id</Text>
                             <Text style={styles.metaV} selectable>
@@ -491,13 +563,15 @@ const styles = StyleSheet.create({
   loadWrap: { padding: 32, alignItems: 'center' },
   pagerText: { color: '#7A9ABE', fontSize: 11, marginBottom: 8 },
   tableScroll: { minWidth: '100%' as unknown as number },
-  trHead: { flexDirection: 'row', borderBottomWidth: 1, borderColor: 'rgba(82,142,220,0.15)', paddingBottom: 8, marginBottom: 4, minWidth: 720 },
+  trHead: { flexDirection: 'row', borderBottomWidth: 1, borderColor: 'rgba(82,142,220,0.15)', paddingBottom: 8, marginBottom: 4, minWidth: 1000 },
   th: { color: '#7A9ABE', fontSize: 10, fontWeight: '600', textTransform: 'uppercase' },
-  tr: { flexDirection: 'row', borderBottomWidth: 1, borderColor: 'rgba(82,142,220,0.08)', paddingVertical: 10, alignItems: 'flex-start', minWidth: 720 },
+  tr: { flexDirection: 'row', borderBottomWidth: 1, borderColor: 'rgba(82,142,220,0.08)', paddingVertical: 10, alignItems: 'flex-start', minWidth: 1000 },
   trPress: { backgroundColor: 'rgba(30,111,217,0.06)' },
   td: { color: '#C8D8EC', fontSize: 12 },
   cDate: { width: 150 },
-  cCat: { width: 130, paddingRight: 6 },
+  cIntro: { width: 120, paddingRight: 6 },
+  cEmail: { width: 180, paddingRight: 6 },
+  cCat: { width: 120, paddingRight: 6 },
   cRating: { width: 110 },
   cMsg: { flex: 1, minWidth: 200, paddingRight: 8 },
   cAttempt: { width: 100 },

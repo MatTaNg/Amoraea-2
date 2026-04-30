@@ -17,6 +17,124 @@ function getAnthropicEndpoint(): string {
 }
 const SUPABASE_ANON_KEY = Deno.env.get('SUPABASE_ANON_KEY') ?? '';
 
+export type AIReasoningRequestFailureKind = 'aborted' | 'network' | 'http' | 'parse' | 'unknown';
+
+export const AI_REASONING_LOCAL_TIMEOUT = '__aiReasoningLocalTimeout' as const;
+
+export type AIReasoningErrorClassification = {
+  kind: AIReasoningRequestFailureKind;
+  message: string;
+  name?: string;
+  status?: number;
+  isClientRequestTimeout: boolean;
+  isBrowserLevelNetworkFailure: boolean;
+};
+
+const httpClassification = (status: number): AIReasoningErrorClassification => ({
+  kind: 'http',
+  message: `HTTP ${status}`,
+  status,
+  isClientRequestTimeout: false,
+  isBrowserLevelNetworkFailure: false,
+});
+
+/**
+ * Distinguish: (1) our client timeout, (2) browser network failures, (3) HTTP, (4) parse, (5) other.
+ */
+export function classifyAIReasoningRequestError(
+  e: unknown,
+  response: Response | null,
+  opts?: { localTimerAbort?: boolean }
+): AIReasoningErrorClassification {
+  const markedLocal =
+    e &&
+    typeof e === 'object' &&
+    (e as Record<string, unknown>)[AI_REASONING_LOCAL_TIMEOUT] === true;
+  const isOurAbortTimer = opts?.localTimerAbort === true || markedLocal;
+
+  if (response && !response.ok) {
+    return httpClassification(response.status);
+  }
+  if (e && typeof e === 'object' && 'name' in e) {
+    const n = (e as { name?: string }).name;
+    if (n === 'AbortError') {
+      if (isOurAbortTimer) {
+        return {
+          kind: 'aborted',
+          name: n,
+          message: (e as Error).message || 'Request aborted (client timeout)',
+          isClientRequestTimeout: true,
+          isBrowserLevelNetworkFailure: false,
+        };
+      }
+      return {
+        kind: 'aborted',
+        name: n,
+        message: (e as Error).message || 'Request aborted',
+        isClientRequestTimeout: false,
+        isBrowserLevelNetworkFailure: true,
+      };
+    }
+  }
+  if (e instanceof SyntaxError) {
+    return {
+      kind: 'parse',
+      name: 'SyntaxError',
+      message: e.message,
+      isClientRequestTimeout: false,
+      isBrowserLevelNetworkFailure: false,
+    };
+  }
+  if (e instanceof TypeError) {
+    return {
+      kind: 'network',
+      name: e.name,
+      message: e.message || 'TypeError',
+      isClientRequestTimeout: false,
+      isBrowserLevelNetworkFailure: true,
+    };
+  }
+  if (e instanceof Error) {
+    const msg = e.message || '';
+    if (/json|parse|undefined is not|unexpected token/i.test(msg)) {
+      return {
+        kind: 'parse',
+        name: e.name,
+        message: msg,
+        isClientRequestTimeout: false,
+        isBrowserLevelNetworkFailure: false,
+      };
+    }
+    if (
+      /^load failed$/i.test(msg.trim()) ||
+      /failed to fetch|network request failed|networkerror|the network connection was lost|internet connection appears to be offline|load failed|could not connect/i.test(
+        msg
+      )
+    ) {
+      return {
+        kind: 'network',
+        name: e.name,
+        message: msg,
+        isClientRequestTimeout: false,
+        isBrowserLevelNetworkFailure: true,
+      };
+    }
+    return {
+      kind: 'unknown',
+      name: e.name,
+      message: msg,
+      isClientRequestTimeout: false,
+      isBrowserLevelNetworkFailure: false,
+    };
+  }
+  return {
+    kind: 'unknown',
+    message: String(e),
+    isClientRequestTimeout: false,
+    isBrowserLevelNetworkFailure: false,
+  };
+}
+
 const SYSTEM_PROMPT = `You are a senior clinical assessment analyst and
 relationship psychologist reviewing a relationship readiness interview.
 You have access to the full scoring data and transcript.
@@ -73,7 +191,7 @@ Do not truncate any field. Do not write placeholder text.`;
 /** Exported for unit tests (prompt shape / transcript formatting). */
 export function buildUserPrompt(
   pillarScores: Record<string, number>,
-  scenarioScores: Record<number, { pillarScores: Record<string, number>; scenarioName?: string } | undefined>,
+  scenarioScores: Record<number, { pillarScores: Record<string, number | null>; scenarioName?: string } | undefined>,
   transcript: Array<{ role: string; content?: string }>,
   weightedScore: number | null,
   passed: boolean,
@@ -140,7 +258,7 @@ themselves fully through your eyes.
 For each construct_breakdown.where_you_struggled entry: include only observed evidence. If score >= 8 and no struggle was observed, set where_you_struggled to "" or explicitly label it as a potential growth edge, not an observed pattern.
 
 {
-  "overall_summary": "A rich, multi-paragraph introduction to this person's relational profile. Cover: how they show up across the full interview (three fictional scenarios plus two personal questions), what kind of relational style they appear to have developed, what their scores collectively suggest about their readiness for intimacy, and any overarching pattern that connects their strengths and struggles. Be warm and honest. Be specific — reference only actual things they said in the transcript above; do not import moments from elsewhere or imply connections they did not make. This is the first thing they read. It should feel like being truly seen.",
+  "overall_summary": "A rich, multi-paragraph introduction to this person's relational profile. Cover: how they show up across the full interview (three fictional scenarios plus one personal question), what kind of relational style they appear to have developed, what their scores collectively suggest about their readiness for intimacy, and any overarching pattern that connects their strengths and struggles. Be warm and honest. Be specific — reference only actual things they said in the transcript above; do not import moments from elsewhere or imply connections they did not make. This is the first thing they read. It should feel like being truly seen.",
 
   "overall_strengths": [
     "Full paragraph per strength — evidence must genuinely support the positive marker (no contemptuous/dismissive quotes as regulation or attunement). Include only strengths tied to construct_breakdown markers with score >= 6. Never present behaviors from markers below 6 as strengths. If all markers are below 6, return an empty array."
@@ -225,14 +343,21 @@ export interface AIReasoningResult {
   closing_reflection?: string;
 }
 
+/** Optional tighter limits for Edge Functions — platform wall clock is ~150s (free/pro default). */
+export type GenerateAIReasoningOptions = {
+  perAttemptTimeoutMs?: number;
+  maxAttempts?: number;
+};
+
 export async function generateAIReasoning(
   pillarScores: Record<string, number>,
-  scenarioScores: Record<number, { pillarScores: Record<string, number>; scenarioName?: string } | undefined>,
+  scenarioScores: Record<number, { pillarScores: Record<string, number | null>; scenarioName?: string } | undefined>,
   transcript: Array<{ role: string; content?: string }>,
   weightedScore: number | null,
   passed: boolean,
   unassessedMarkers: string[] = [],
-  commitmentThresholdInconsistency: CommitmentThresholdInconsistencyPayload | null = null
+  commitmentThresholdInconsistency: CommitmentThresholdInconsistencyPayload | null = null,
+  options?: GenerateAIReasoningOptions
 ): Promise<AIReasoningResult> {
   const apiUrl = getAnthropicEndpoint();
   const useProxy = apiUrl !== 'https://api.anthropic.com/v1/messages';
@@ -261,10 +386,18 @@ export async function generateAIReasoning(
     messages: [{ role: 'user', content: userPrompt }],
   };
 
-  const maxAttempts = 4;
+  /** One fetch attempt should not block indefinitely; proxies can hang without closing the socket. */
+  const REASONING_FETCH_PER_ATTEMPT_TIMEOUT_MS = options?.perAttemptTimeoutMs ?? 90_000;
+  const maxAttempts = options?.maxAttempts ?? 4;
   let lastErr: Error | null = null;
   let response: Response | null = null;
   for (let attempt = 0; attempt < maxAttempts; attempt++) {
+    let ourAbortTimerFired = false;
+    const abort = new AbortController();
+    const abortTimer = setTimeout(() => {
+      ourAbortTimerFired = true;
+      abort.abort();
+    }, REASONING_FETCH_PER_ATTEMPT_TIMEOUT_MS);
     try {
       if (attempt > 0) {
         const backoffMs = Math.min(30_000, 1000 * 2 ** (attempt - 1));
@@ -274,11 +407,16 @@ export async function generateAIReasoning(
         method: 'POST',
         headers,
         body: JSON.stringify(body),
+        signal: abort.signal,
       });
+      clearTimeout(abortTimer);
 
       if (!response.ok) {
         const errText = await response.text();
-        lastErr = new Error(`AI reasoning request failed: ${response.status} ${errText}`);
+        const meta = classifyAIReasoningRequestError(new Error(`HTTP ${response.status} ${errText}`), response);
+        lastErr = new Error(
+          `AI reasoning request failed: [${meta.kind}] ${response.status} ${errText.slice(0, 500)}`
+        );
         if (response.status >= 400 && response.status < 500 && response.status !== 429) {
           throw lastErr;
         }
@@ -286,7 +424,11 @@ export async function generateAIReasoning(
       }
       break;
     } catch (e) {
+      clearTimeout(abortTimer);
       lastErr = e instanceof Error ? e : new Error(String(e));
+      if (ourAbortTimerFired && lastErr.name === 'AbortError') {
+        Object.defineProperty(lastErr, AI_REASONING_LOCAL_TIMEOUT, { value: true, enumerable: true });
+      }
       if (attempt === maxAttempts - 1) throw lastErr;
     }
   }
@@ -295,9 +437,19 @@ export async function generateAIReasoning(
     throw lastErr ?? new Error('AI reasoning request failed after retries');
   }
 
-  const data = (await response.json()) as { content?: Array<{ text?: string }> };
-  const text = (data.content?.[0]?.text ?? '{}').replace(/```json|```/g, '').trim();
-  const parsed = JSON.parse(text) as AIReasoningResult;
+  let data: { content?: Array<{ text?: string }> };
+  let text: string;
+  let parsed: AIReasoningResult;
+  try {
+    data = (await response.json()) as { content?: Array<{ text?: string }> };
+    text = (data.content?.[0]?.text ?? '{}').replace(/```json|```/g, '').trim();
+    parsed = JSON.parse(text) as AIReasoningResult;
+  } catch (e) {
+    const meta = classifyAIReasoningRequestError(e, null);
+    throw new Error(
+      `AI reasoning: failed to parse model JSON [${meta.kind}] ${e instanceof Error ? e.message : String(e)}`
+    );
+  }
   const breakdown = parsed.construct_breakdown ?? {};
   Object.entries(breakdown).forEach(([, construct]) => {
     const score = construct?.score;

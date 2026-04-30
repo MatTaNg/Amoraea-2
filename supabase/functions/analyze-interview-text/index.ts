@@ -400,9 +400,8 @@ Deno.serve(async (req) => {
       ? attempt.scenario_specific_patterns as Record<string, unknown>
       : {};
     const hasMoment4 = Boolean((personal as Record<string, unknown>).moment_4_scores);
-    const hasMoment5 = Boolean((personal as Record<string, unknown>).moment_5_scores);
-    const momentsPresent = scenarioCount + (hasMoment4 ? 1 : 0) + (hasMoment5 ? 1 : 0);
-    const textConfidence = momentsPresent >= 5 ? 1.0 : momentsPresent >= 3 ? 0.7 : 0.4;
+    const momentsPresent = scenarioCount + (hasMoment4 ? 1 : 0);
+    const textConfidence = momentsPresent >= 4 ? 1.0 : momentsPresent >= 3 ? 0.7 : 0.4;
 
     const { data: existing } = await admin
       .from('communication_style_profiles')

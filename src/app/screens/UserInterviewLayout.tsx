@@ -16,6 +16,7 @@ import {
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { FlameOrb, type FlameState } from './FlameOrb';
+import { isScenarioModalEligibleScenarioQuestionPrompt } from '@features/aria/interviewLanguageGate';
 // Design tokens — Amoraea interviewer
 const BG = '#05060D';
 const SURFACE = '#0D1120';
@@ -75,8 +76,6 @@ interface UserInterviewLayoutProps {
   micSessionRecovering?: boolean;
   /** Hardware route lost — show manual reconnect. */
   micReconnectPrompt?: { message: string; onReconnect: () => void } | null;
-  /** Rare escape hatch when capture/transcription likely failed — secondary text control. */
-  micFailureEscape?: { onPress: () => void } | null;
   /** After TTS, if the user has not tapped record for a long time — gentle visual-only reminder. */
   lateStartRecordingCue?: boolean;
 }
@@ -130,10 +129,10 @@ export const UserInterviewLayout: React.FC<UserInterviewLayoutProps> = ({
   micInputLevel = 0,
   micSessionRecovering = false,
   micReconnectPrompt = null,
-  micFailureEscape = null,
   lateStartRecordingCue = false,
 }) => {
   const [refCardOpen, setRefCardOpen] = useState(false);
+  const [lastValidScenarioModalPrompt, setLastValidScenarioModalPrompt] = useState<string | null>(null);
   const rippleAnim = useRef(new Animated.Value(0)).current;
   const { width: windowWidth, height: windowHeight } = useWindowDimensions();
   const safeInsets = useSafeAreaInsets();
@@ -154,18 +153,36 @@ export const UserInterviewLayout: React.FC<UserInterviewLayoutProps> = ({
   }, []);
   const layoutHeight = visualViewportH != null ? Math.min(windowHeight, visualViewportH) : windowHeight;
 
+  useEffect(() => {
+    const p = referenceCardPrompt?.trim() ?? '';
+    if (!p) {
+      setLastValidScenarioModalPrompt(null);
+      return;
+    }
+    if (isScenarioModalEligibleScenarioQuestionPrompt(p)) {
+      setLastValidScenarioModalPrompt(p);
+    }
+  }, [referenceCardPrompt]);
+
+  const scenarioModalBottomPrompt = useMemo(() => {
+    const p = referenceCardPrompt?.trim() ?? '';
+    if (!p) return null;
+    if (isScenarioModalEligibleScenarioQuestionPrompt(p)) return p;
+    return lastValidScenarioModalPrompt?.trim() ?? null;
+  }, [referenceCardPrompt, lastValidScenarioModalPrompt]);
+
   /** Card caps at viewport; vignette ScrollView caps so long text scrolls without forcing a tall empty card. */
   const { refModalCardMaxHeight, refModalScrollMaxHeight } = useMemo(() => {
     const overlayPadY = 80;
     const innerH = Math.max(0, layoutHeight - overlayPadY);
     const cardMax = Math.min(innerH * 0.82, 580);
     const labelChrome = 48;
-    const footerChrome = referenceCardPrompt ? 168 : 8;
+    const footerChrome = scenarioModalBottomPrompt ? 168 : 8;
     return {
       refModalCardMaxHeight: cardMax,
       refModalScrollMaxHeight: Math.max(96, cardMax - labelChrome - footerChrome),
     };
-  }, [layoutHeight, referenceCardPrompt]);
+  }, [layoutHeight, scenarioModalBottomPrompt]);
 
   /**
    * Web is one platform for both desktop and mobile browsers. Touch phones report no hover — only
@@ -468,17 +485,6 @@ export const UserInterviewLayout: React.FC<UserInterviewLayoutProps> = ({
               >
                 {micLabel}
               </Text>
-              {micFailureEscape ? (
-                <Pressable
-                  onPress={micFailureEscape.onPress}
-                  accessibilityRole="button"
-                  accessibilityLabel="Amoraea did not hear me"
-                  hitSlop={8}
-                  style={styles.micFailureEscapePressable}
-                >
-                  <Text style={styles.micFailureEscapeLabel}>Amoraea didn&apos;t hear me.</Text>
-                </Pressable>
-              ) : null}
             </>
           )}
         </View>
@@ -589,10 +595,10 @@ export const UserInterviewLayout: React.FC<UserInterviewLayoutProps> = ({
                       {formatScenarioModalBody(referenceCardScenario?.text ?? '')}
                     </Text>
                   </ScrollView>
-                  {referenceCardPrompt ? (
+                  {scenarioModalBottomPrompt ? (
                     <>
                       <View style={styles.refModalSeparator} />
-                      <Text style={[styles.refModalPromptText, WEB_MODAL_NO_COPY]}>{referenceCardPrompt}</Text>
+                      <Text style={[styles.refModalPromptText, WEB_MODAL_NO_COPY]}>{scenarioModalBottomPrompt}</Text>
                     </>
                   ) : null}
                 </Pressable>
@@ -672,10 +678,10 @@ export const UserInterviewLayout: React.FC<UserInterviewLayoutProps> = ({
                   {formatScenarioModalBody(referenceCardScenario?.text ?? '')}
                 </Text>
               </ScrollView>
-              {referenceCardPrompt ? (
+              {scenarioModalBottomPrompt ? (
                 <>
                   <View style={styles.refModalSeparator} />
-                  <Text style={[styles.refModalPromptText, WEB_MODAL_NO_COPY]}>{referenceCardPrompt}</Text>
+                  <Text style={[styles.refModalPromptText, WEB_MODAL_NO_COPY]}>{scenarioModalBottomPrompt}</Text>
                 </>
               ) : null}
             </Pressable>
@@ -1119,20 +1125,6 @@ const styles = StyleSheet.create({
   },
   micLabelRecording: {
     color: '#E84444',
-  },
-  micFailureEscapePressable: {
-    marginTop: 10,
-    paddingVertical: 4,
-    paddingHorizontal: 6,
-    alignSelf: 'center',
-  },
-  micFailureEscapeLabel: {
-    fontFamily: FONT_UI,
-    fontSize: 11,
-    fontWeight: '300',
-    color: TEXT_DIM,
-    textAlign: 'center',
-    textDecorationLine: 'underline',
   },
   micRecoveringHint: {
     fontFamily: FONT_UI,

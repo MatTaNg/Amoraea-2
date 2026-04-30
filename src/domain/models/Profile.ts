@@ -40,6 +40,10 @@ export interface Profile {
   referralNoticePending: string | null;
   /** From `users.interview_completed` — used to restore PostInterview route after refresh for standard applicants. */
   interviewCompleted: boolean;
+  /** True only when `users.interview_passed` is true (weighted interview gate). */
+  interviewPassed: boolean;
+  /** True when the gate returned a definite fail (`users.interview_passed === false`), including the “almost” band. */
+  interviewFailed: boolean;
   /** Up to 3 prompt answers (UX only). */
   prompts: ProfilePromptAnswer[];
 
