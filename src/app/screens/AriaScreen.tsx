@@ -5804,8 +5804,6 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
         docVisibilityWasHiddenRef.current = true;
         if (interviewStatusRef.current === 'in_progress') {
           gestureContextLostAtRef.current = { atMs: Date.now(), reason: 'tab_visibility_change' };
-        }
-        if (interviewStatusRef.current === 'in_progress' && ttsLineInFlightRef.current) {
           pauseWebInterviewHtmlAudioForDocumentHidden();
           // #region agent log
           if (isWebInterviewPlaybackSurfaceActive()) {

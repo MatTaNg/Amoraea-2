@@ -167,6 +167,10 @@ function attachWebInterviewAudioVisibilityHandler(): void {
   if (webInterviewAudioVisibilityListenerAttached) return;
   webInterviewAudioVisibilityListenerAttached = true;
   document.addEventListener('visibilitychange', () => {
+    if (typeof document !== 'undefined' && document.visibilityState === 'hidden') {
+      pauseWebInterviewHtmlAudioForDocumentHidden();
+      return;
+    }
     void handleWebInterviewDocumentVisibilityChange();
   });
 }
@@ -467,11 +471,38 @@ function arrayBufferToBase64(buffer: ArrayBuffer): string {
  * Await this before starting new playback so clips cannot overlap.
  */
 /**
- * Pause HTML-based TTS when the tab is hidden — keeps element alive so we do not auto-resume on visibility
- * (gesture restore in AriaScreen handles the next play).
+ * Tear down active web TTS outputs when the document is hidden.
+ * Chrome suspends AudioContext in background tabs; leaving PCM stream nodes or AudioBufferSourceNode
+ * attached can produce static/noise after resume. HTML audio is paused only (ref kept like before).
  */
 export function pauseWebInterviewHtmlAudioForDocumentHidden(): void {
-  if (Platform.OS !== 'web' || !activeWebAudio) return;
+  if (Platform.OS !== 'web') return;
+  if (activePcmStreamSources.length > 0) {
+    for (const s of activePcmStreamSources) {
+      try {
+        s.stop(0);
+      } catch {
+        /* ignore */
+      }
+    }
+    activePcmStreamSources.length = 0;
+  }
+  if (activeWebBufferSource) {
+    try {
+      activeWebBufferSource.stop(0);
+    } catch {
+      /* ignore */
+    }
+    activeWebBufferSource = null;
+  }
+  if (typeof window !== 'undefined' && window.speechSynthesis) {
+    try {
+      window.speechSynthesis.cancel();
+    } catch {
+      /* ignore */
+    }
+  }
+  if (!activeWebAudio) return;
   try {
     activeWebAudio.pause();
   } catch {
