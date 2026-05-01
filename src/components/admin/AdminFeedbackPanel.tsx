@@ -11,6 +11,7 @@ import {
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { supabase } from '@data/supabase/client';
+import { resolveAdminInterviewIntroDisplayName } from '@utilities/adminInterviewIntroDisplayName';
 
 const BUG = 'Something broke';
 const SUG = 'Suggestion';
@@ -57,31 +58,6 @@ function truncateId(id: string | null | undefined, head = 8, tail = 4): string {
 function truncateText(s: string, max: number) {
   if (s.length <= max) return s;
   return `${s.slice(0, max - 1)}…`;
-}
-
-type TranscriptLine = { role: string; content?: string };
-
-function parseFeedbackTranscript(raw: unknown): TranscriptLine[] {
-  if (!raw) return [];
-  if (Array.isArray(raw)) return raw as TranscriptLine[];
-  if (typeof raw === 'string') {
-    try {
-      const p = JSON.parse(raw);
-      return Array.isArray(p) ? (p as TranscriptLine[]) : [];
-    } catch {
-      return [];
-    }
-  }
-  return [];
-}
-
-function firstUserAnswerFromTranscript(raw: unknown): string | null {
-  const lines = parseFeedbackTranscript(raw);
-  const u = lines.find(
-    (m) =>
-      (m.role === 'user' || m.role === 'User') && typeof m.content === 'string' && m.content.trim().length > 0,
-  );
-  return u?.content?.trim() ?? null;
 }
 
 type UserEnrichRow = { email: string; intro: string };
@@ -220,13 +196,21 @@ export function AdminFeedbackPanel() {
     void (async () => {
       const { data, error } = await supabase
         .from('users')
-        .select('id, email, name, interview_transcript')
+        .select('id, email, name, basic_info, full_name, display_name, interview_transcript')
         .in('id', ids);
       if (cancelled || error) return;
       const next: Record<string, UserEnrichRow> = {};
       for (const row of data ?? []) {
-        const o = row as { id: string; email: string | null; name: string | null; interview_transcript: unknown };
-        const intro = o.name?.trim() || firstUserAnswerFromTranscript(o.interview_transcript) || '—';
+        const o = row as {
+          id: string;
+          email: string | null;
+          name: string | null;
+          basic_info: unknown;
+          full_name: string | null;
+          display_name: string | null;
+          interview_transcript: unknown;
+        };
+        const intro = resolveAdminInterviewIntroDisplayName(o);
         next[o.id] = { email: o.email ?? '—', intro };
       }
       if (!cancelled) setUserEnrich(next);

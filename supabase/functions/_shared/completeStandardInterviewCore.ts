@@ -296,6 +296,10 @@ export async function runCompleteStandardInterview(
       passed: gate.pass,
       gate_fail_reason: gate.failReason,
       pillar_scores: parsed.pillarScores ?? null,
+      /** Preserve client-written slices; holistic output does not include per-scenario JSON. */
+      scenario_1_scores: row.scenario_1_scores,
+      scenario_2_scores: row.scenario_2_scores,
+      scenario_3_scores: row.scenario_3_scores,
       ai_reasoning: aiReasoningOut,
       reasoning_pending: reasoningPending,
       scoring_deferred: false,

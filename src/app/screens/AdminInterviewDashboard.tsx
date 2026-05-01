@@ -51,6 +51,7 @@ import {
   type AdminGateOutcomeLabel,
 } from '@features/aria/adminGateDisplay';
 import { AdminFeedbackPanel } from '@/components/admin/AdminFeedbackPanel';
+import { resolveAdminInterviewIntroDisplayName } from '@utilities/adminInterviewIntroDisplayName';
 
 // Marker ids as stored in DB; construct keys match ai_reasoning.construct_breakdown
 const PILLAR_ROWS = [
@@ -126,6 +127,8 @@ type UserRow = {
   full_name?: string | null;
   name?: string | null;
   display_name?: string | null;
+  /** Onboarding JSON; may include `firstName` when `users.name` is missing or corrupt. */
+  basic_info?: unknown;
   created_at?: string;
   /** When set, user completed at least one attempt row in DB (even if admin cannot read attempts yet). */
   latest_attempt_id?: string | null;
@@ -400,6 +403,20 @@ function getScoreBundleDetails(raw: unknown): {
   return { scores, evidence, confidence };
 }
 
+/**
+ * True when the attempt has merged/holistic trait scores in DB but no per-scenario slice JSON (scenario_1/2/3_scores).
+ * Typical when deferred holistic completion updated `pillar_scores` only (see `completeStandardInterviewCore`).
+ */
+function adminAttemptHasHolisticOnlyTraitScoresNoScenarioSlices(a: AttemptRow): boolean {
+  const hasScenarioSlice =
+    getScoreBundleDetails(a.scenario_1_scores).scores != null ||
+    getScoreBundleDetails(a.scenario_2_scores).scores != null ||
+    getScoreBundleDetails(a.scenario_3_scores).scores != null;
+  if (hasScenarioSlice) return false;
+  const resolved = getResolvedPillarScores(a);
+  return MARKER_IDS.some((id) => coerceScoreNumber(resolved[id]) !== undefined);
+}
+
 function markerIsAssessedInSection(sectionKey: string, markerId: string): boolean {
   return (ASSESSED_MARKERS_BY_SECTION[sectionKey] ?? []).includes(markerId);
 }
@@ -505,28 +522,6 @@ type UserGroup = {
   latestAttempt: AttemptSummary | null;
 };
 
-function getUserDisplayName(user: UserRow | null | undefined): string {
-  if (!user) return '—';
-  /** Prefer interview-captured name (`users.name`) over auth profile display fields. */
-  return user.name ?? user.full_name ?? user.display_name ?? user.email ?? 'Unknown';
-}
-
-function firstUserMessageFromTranscript(transcript: unknown): string | null {
-  const lines = parseUserTranscript(transcript);
-  const u = lines.find(
-    (m) =>
-      (m.role === 'user' || m.role === 'User') && typeof m.content === 'string' && m.content.trim().length > 0,
-  );
-  return u?.content?.trim() ?? null;
-}
-
-/** Intro name from first user reply or saved `users.name`. */
-function getInterviewIntroDisplayName(user: UserRow): string {
-  const n = user.name?.trim();
-  if (n) return n;
-  return firstUserMessageFromTranscript(user.interview_transcript) ?? '—';
-}
-
 function trimLaunchNotificationPhone(phone: string | null | undefined): string | null {
   if (typeof phone !== 'string') return null;
   const t = phone.trim();
@@ -621,6 +616,7 @@ async function fetchAdminUsersList(): Promise<FetchAdminUsersListResult> {
       full_name,
       name,
       display_name,
+      basic_info,
       created_at,
       latest_attempt_id,
       interview_completed,
@@ -733,6 +729,32 @@ async function fetchLatestFullAttemptForUser(
       .eq('id', latestAttemptId)
       .eq('user_id', userId)
       .maybeSingle();
+    // #region agent log
+    if (data && typeof data === 'object') {
+      const r = data as Record<string, unknown>;
+      fetch('http://127.0.0.1:7789/ingest/668e0bd5-3283-4492-9f48-e33846c18218', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'X-Debug-Session-Id': 'c61a43' },
+        body: JSON.stringify({
+          sessionId: 'c61a43',
+          hypothesisId: 'H3-H4',
+          location: 'AdminInterviewDashboard.tsx:fetchLatestFullAttemptForUser',
+          message: 'full attempt loaded by latest_attempt_id',
+          data: {
+            path: 'latest_id',
+            attemptId: r.id,
+            userTail: typeof userId === 'string' ? userId.slice(-8) : null,
+            s1Null: r.scenario_1_scores == null,
+            s2Null: r.scenario_2_scores == null,
+            s3Null: r.scenario_3_scores == null,
+            pillarScoresNull: r.pillar_scores == null,
+          },
+          timestamp: Date.now(),
+          runId: 'pre-fix',
+        }),
+      }).catch(() => {});
+    }
+    // #endregion
     if (absent && data) {
       data = patchOverrideNulls(data as Record<string, unknown>);
     } else if (!absent && error && isInterviewAttemptsMissingOverrideColumnsError(error)) {
@@ -759,6 +781,32 @@ async function fetchLatestFullAttemptForUser(
     .eq('user_id', userId)
     .order('created_at', { ascending: false })
     .limit(1);
+  // #region agent log
+  if (data?.[0] && typeof data[0] === 'object') {
+    const r = data[0] as Record<string, unknown>;
+    fetch('http://127.0.0.1:7789/ingest/668e0bd5-3283-4492-9f48-e33846c18218', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'X-Debug-Session-Id': 'c61a43' },
+      body: JSON.stringify({
+        sessionId: 'c61a43',
+        hypothesisId: 'H3-H4',
+        location: 'AdminInterviewDashboard.tsx:fetchLatestFullAttemptForUser',
+        message: 'full attempt loaded by newest created_at',
+        data: {
+          path: 'newest_row',
+          attemptId: r.id,
+          userTail: typeof userId === 'string' ? userId.slice(-8) : null,
+          s1Null: r.scenario_1_scores == null,
+          s2Null: r.scenario_2_scores == null,
+          s3Null: r.scenario_3_scores == null,
+          pillarScoresNull: r.pillar_scores == null,
+        },
+        timestamp: Date.now(),
+        runId: 'pre-fix',
+      }),
+    }).catch(() => {});
+  }
+  // #endregion
   if (absent && data) {
     data = data.map((row) => patchOverrideNulls(row as Record<string, unknown>));
   } else if (!absent && error && isInterviewAttemptsMissingOverrideColumnsError(error)) {
@@ -1114,7 +1162,7 @@ function UserCard({
         onPress={onPress}
         style={({ pressed }) => [styles.userCard, styles.userCardFlex, pressed && styles.userCardPressed]}
       >
-        <Text style={styles.userCardIntroName}>{getInterviewIntroDisplayName(userData.user)}</Text>
+        <Text style={styles.userCardIntroName}>{resolveAdminInterviewIntroDisplayName(userData.user)}</Text>
         <Text style={styles.userCardEmail}>{userData.user.email ?? '—'}</Text>
         {launchPhone ? (
           <Text style={styles.userCardEmail} selectable>
@@ -1237,6 +1285,36 @@ function SummaryTab({ attempt }: { attempt: AttemptRow }) {
     void loadStyleProfile();
   }, [attempt.user_id]);
 
+  useEffect(() => {
+    if (!adminAttemptHasHolisticOnlyTraitScoresNoScenarioSlices(attempt)) return;
+    // #region agent log
+    fetch('http://127.0.0.1:7789/ingest/668e0bd5-3283-4492-9f48-e33846c18218', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'X-Debug-Session-Id': 'c61a43' },
+      body: JSON.stringify({
+        sessionId: 'c61a43',
+        hypothesisId: 'verify-gap-banner',
+        location: 'AdminInterviewDashboard.tsx:SummaryTab',
+        message: 'holisticOnlyScenarioGapBannerShown',
+        data: {
+          attemptId: attempt.id,
+          userTail: attempt.user_id?.slice(-8),
+        },
+        timestamp: Date.now(),
+        runId: 'post-fix',
+      }),
+    }).catch(() => {});
+    // #endregion
+  }, [
+    attempt.id,
+    attempt.user_id,
+    attempt.scenario_1_scores,
+    attempt.scenario_2_scores,
+    attempt.scenario_3_scores,
+    attempt.pillar_scores,
+    attempt.ai_reasoning,
+  ]);
+
   const reprocessStyle = async () => {
     setStyleStatus('reprocessing');
     const errs: string[] = [];
@@ -1299,6 +1377,40 @@ function SummaryTab({ attempt }: { attempt: AttemptRow }) {
   const moment5Bundle = getMomentScoreBundle(attempt, 5);
   const moment4Details = getScoreBundleDetails(parseObject(parseObject(attempt.scenario_specific_patterns)?.moment_4_scores));
   const moment5Details = getScoreBundleDetails(parseObject(parseObject(attempt.scenario_specific_patterns)?.moment_5_scores));
+  // #region agent log
+  void (() => {
+    const rawShape = (raw: unknown): string => {
+      if (raw == null) return 'null';
+      if (typeof raw === 'string') return `string(len=${raw.length})`;
+      if (typeof raw !== 'object') return typeof raw;
+      const o = raw as Record<string, unknown>;
+      return `keys:${Object.keys(o).slice(0, 12).join(',')}`;
+    };
+    fetch('http://127.0.0.1:7789/ingest/668e0bd5-3283-4492-9f48-e33846c18218', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'X-Debug-Session-Id': 'c61a43' },
+      body: JSON.stringify({
+        sessionId: 'c61a43',
+        hypothesisId: 'H1-H2-H5',
+        location: 'AdminInterviewDashboard.tsx:SummaryTab',
+        message: 'parsed scenario score bundles',
+        data: {
+          attemptId: attempt.id,
+          userTail: attempt.user_id?.slice(-8),
+          s1Raw: rawShape(attempt.scenario_1_scores),
+          s2Raw: rawShape(attempt.scenario_2_scores),
+          s3Raw: rawShape(attempt.scenario_3_scores),
+          s1ParsedKeys: scenario1Details.scores ? Object.keys(scenario1Details.scores).length : 0,
+          s2ParsedKeys: scenario2Details.scores ? Object.keys(scenario2Details.scores).length : 0,
+          s3ParsedKeys: scenario3Details.scores ? Object.keys(scenario3Details.scores).length : 0,
+          totalPillarResolved: Object.keys(totalScores).filter((k) => totalScores[k] != null).length,
+        },
+        timestamp: Date.now(),
+        runId: 'pre-fix',
+      }),
+    }).catch(() => {});
+  })();
+  // #endregion
   const perScenario = [
     { key: 'scenario_1', label: 'Scenario 1', scores: scenario1Details.scores, summary: buildMomentOrScenarioSummary('Scenario 1', scenario1Details) },
     { key: 'scenario_2', label: 'Scenario 2', scores: scenario2Details.scores, summary: buildMomentOrScenarioSummary('Scenario 2', scenario2Details) },
@@ -1314,6 +1426,8 @@ function SummaryTab({ attempt }: { attempt: AttemptRow }) {
   const reasoningPendingSummary =
     attempt.reasoning_pending === true ||
     !!(parseObject(attempt.ai_reasoning) as { _reasoningPending?: boolean } | null)?._reasoningPending;
+  const holisticOnlyScenarioDataGap = adminAttemptHasHolisticOnlyTraitScoresNoScenarioSlices(attempt);
+
   return (
     <ScrollView style={styles.innerTabContent}>
       {reasoningPendingSummary ? (
@@ -1375,6 +1489,18 @@ function SummaryTab({ attempt }: { attempt: AttemptRow }) {
         </View>
       ))}
       <Text style={styles.blockText}>* score based on limited evidence (single contributing moment)</Text>
+
+      {holisticOnlyScenarioDataGap ? (
+        <View style={[styles.block, { borderLeftWidth: 3, borderLeftColor: '#6B8CDB', marginBottom: 12 }]}>
+          <Text style={[styles.blockTitle, { color: '#A8C4F0' }]}>Per-scenario scores not on file</Text>
+          <Text style={styles.blockText}>
+            This row has combined trait scores (holistic merge), but the per-scenario JSON columns
+            (scenario_1/2/3_scores) are empty—common after deferred completion that only persisted merged scores. The
+            breakdown below cannot show real slice-level numbers until those columns are backfilled from the stored
+            transcript (engineering) or the interview is re-run with slice persistence.
+          </Text>
+        </View>
+      ) : null}
 
       <Text style={styles.sectionTitle}>Scenario Breakdown</Text>
       {perScenario.map((item) => (
@@ -1551,6 +1677,8 @@ function ReasoningTab({
   }
   const scenarioObservations = parseObject(reasoning?.scenario_observations);
   const breakdown = parseObject(reasoning?.construct_breakdown);
+  const holisticOnlyScenarioDataGap = adminAttemptHasHolisticOnlyTraitScoresNoScenarioSlices(attempt);
+
   const scenarioBundles = [
     {
       key: 'scenario_1',
@@ -1608,6 +1736,16 @@ function ReasoningTab({
           {reasoningRetryError ? (
             <Text style={[styles.blockText, { color: '#E87A7A', marginTop: 8 }]}>{reasoningRetryError}</Text>
           ) : null}
+        </View>
+      ) : null}
+
+      {holisticOnlyScenarioDataGap ? (
+        <View style={[styles.block, { borderLeftWidth: 3, borderLeftColor: '#6B8CDB', marginBottom: 12 }]}>
+          <Text style={[styles.blockTitle, { color: '#A8C4F0' }]}>Per-scenario score data missing</Text>
+          <Text style={styles.blockText}>
+            Scenario pillar explanations below need slice scores on the attempt row. This run only has merged scores—see
+            the Summary tab for the same notice.
+          </Text>
         </View>
       ) : null}
 
@@ -1817,7 +1955,7 @@ function UserDetails({
             </TouchableOpacity>
           ) : null}
         </View>
-        <Text style={styles.headerTitle}>{getInterviewIntroDisplayName(u)}</Text>
+        <Text style={styles.headerTitle}>{resolveAdminInterviewIntroDisplayName(u)}</Text>
         <Text style={styles.headerSub}>{u.email ?? '—'}</Text>
         {detailLaunchPhone ? (
           <Text style={styles.headerSub} selectable>

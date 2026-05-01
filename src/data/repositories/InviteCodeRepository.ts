@@ -87,6 +87,18 @@ export class InviteCodeRepository {
 
     if (error) {
       const err = error as { code?: string; message?: string };
+      // Concurrent ensureUserWithInviteCode (e.g. duplicate profile query) can both pass the
+      // pre-insert select; the second insert hits users_pkey. Treat as success if row exists.
+      if (err.code === '23505') {
+        const { data: raced } = await supabase
+          .from('users')
+          .select('id, invite_code')
+          .eq('id', userId)
+          .maybeSingle();
+        if (raced?.id) {
+          return { inviteCode: raced.invite_code || '' };
+        }
+      }
       if (await signOutIfUsersAuthFkViolation(err)) {
         throw new Error('Your session is no longer valid. Please sign in again.');
       }

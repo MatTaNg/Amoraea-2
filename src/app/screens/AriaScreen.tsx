@@ -4511,26 +4511,44 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
       }
       /**
        * Skip re-entrant status sync while the live interview is running.
-       * Do **not** block when UI shows "preparing_results" but the row is not yet `interview_completed` (in-flight
-       * scoring before DB commit) — we must stay out until save finishes.
+       * While scoring commits (rescore, insert attempt, edge function), `users.interview_completed` may still be false
+       * and `latest_attempt_id` may be unset until the insert returns. If we fall through to `not_started` during that
+       * window, we drop the full-screen "Preparing your results" and flash the transcript with `status === 'scoring'`.
        * If `interview_completed` is **true** in the DB, this effect must run: recover from a stuck "preparing" screen
        * (refresh mid-flight, failed navigation) by handing off to PostInterview or re-syncing to congratulations.
        */
       if (interviewStatusRef.current === 'in_progress') return;
-      // Only skip while we may still be committing a scored attempt (latest_attempt_id set, completed not yet true).
-      // If the server reset the interview (no latest attempt), fall through so we can show `not_started`.
-      if (
-        interviewStatusRef.current === 'preparing_results' &&
+      const scoringCommitInFlight =
         data != null &&
-        data.interview_completed !== true
-      ) {
-        const aidWait = data.latest_attempt_id;
-        if (typeof aidWait === 'string' && aidWait.length > 0) {
-          return;
-        }
+        data.interview_completed !== true &&
+        (interviewStatusRef.current === 'preparing_results' || statusRef.current === 'scoring');
+      if (scoringCommitInFlight) {
+        // #region agent log
+        fetch('http://127.0.0.1:7789/ingest/668e0bd5-3283-4492-9f48-e33846c18218', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'X-Debug-Session-Id': 'c61a43' },
+          body: JSON.stringify({
+            sessionId: 'c61a43',
+            hypothesisId: 'UX-PREP',
+            location: 'AriaScreen.tsx:checkInterviewStatus',
+            message: 'hold_ui_during_scoring_commit',
+            data: {
+              preparing: interviewStatusRef.current === 'preparing_results',
+              statusScoring: statusRef.current === 'scoring',
+              latestAttemptIdPresent:
+                typeof data?.latest_attempt_id === 'string' && data.latest_attempt_id.length > 0,
+            },
+            timestamp: Date.now(),
+          }),
+        }).catch(() => {});
+        // #endregion
+        return;
       }
 
       if (error || !data) {
+        if (interviewStatusRef.current === 'preparing_results' || statusRef.current === 'scoring') {
+          return;
+        }
         setInterviewStatus('not_started');
         return;
       }
@@ -11015,11 +11033,28 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
       isAmoraeaAdminConsoleEmail(user?.email) ||
       isAdmin;
     const context = typologyContext || 'No typology context — score from transcript only.';
+    const anthropicConfigured = Boolean(ANTHROPIC_API_KEY || ANTHROPIC_PROXY_URL);
+    const apiUrl = anthropicConfigured ? getAnthropicEndpoint() : '';
+    const useProxy = apiUrl !== '' && apiUrl !== 'https://api.anthropic.com/v1/messages';
+    const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+    if (anthropicConfigured && apiUrl) {
+      if (useProxy && SUPABASE_ANON_KEY) {
+        headers['Authorization'] = `Bearer ${SUPABASE_ANON_KEY}`;
+      } else if (!useProxy && ANTHROPIC_API_KEY) {
+        headers['x-api-key'] = ANTHROPIC_API_KEY;
+        headers['anthropic-version'] = '2023-06-01';
+      }
+    }
     const isStandardOnboardingApplicant =
       isOnboardingFlow && !!userId && !!profile && !profile.isAlphaTester && !isAdminConsoleAccount;
-    if (isStandardOnboardingApplicant && (ANTHROPIC_API_KEY || ANTHROPIC_PROXY_URL)) {
+    if (isStandardOnboardingApplicant && anthropicConfigured) {
       let serverDelegateOk = false;
       try {
+        /** Show full-screen "Preparing your results" before rescore/DB/edge — avoids long awkward mic UI (rescore can take 15s+ per scenario). */
+        interviewStatusRef.current = 'preparing_results';
+        setInterviewStatus('preparing_results');
+        void persistInterviewAttemptSessionLifecycle(interviewSessionAttemptIdRef.current, 'scoring');
+        setStatus('scoring');
         await ensureValidSession();
         const { data: preAttemptUser } = await supabase
           .from('users')
@@ -11027,6 +11062,144 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
           .eq('id', userId)
           .single();
         const nextAttemptNumber = (preAttemptUser?.interview_attempt_count ?? 0) + 1;
+        /**
+         * Per-scenario slices must exist on the deferred row. ALPHA_MODE completion runs
+         * `rescoreMissingScenarios` before save; standard onboarding deferred path did not — ref gaps
+         * (e.g. weak scenarioNumber tags) left scenario_*_scores null while holistic pillar_scores still saved.
+         */
+        const msgsDeferred = finalMessages as MessageWithScenario[];
+        const missingForDeferred = ([1, 2, 3] as const).filter((n) => !scenarioScoresRef.current[n]);
+        if (missingForDeferred.length > 0) {
+          await remoteLog('[STANDARD] rescore missing scenarios before deferred DB row', {
+            missing: missingForDeferred,
+          });
+          await Promise.all(
+            missingForDeferred.map(async (scenarioNum) => {
+              const taggedMessages = msgsDeferred.filter(
+                (m) => (m as MessageWithScenario).scenarioNumber === scenarioNum,
+              );
+              const inferredMessages = inferScenarioMessages(msgsDeferred, scenarioNum);
+              const messagesToScore =
+                taggedMessages.length >= inferredMessages.length ? taggedMessages : inferredMessages;
+              if (messagesToScore.length >= 2) {
+                await scoreScenario(scenarioNum, messagesToScore);
+              } else {
+                await remoteLog('[STANDARD] deferred persist: cannot rescore scenario (insufficient messages)', {
+                  scenarioNum,
+                  tagged: taggedMessages.length,
+                  inferred: inferredMessages.length,
+                });
+              }
+            }),
+          );
+        }
+        let moment4ForAggregate: ReturnType<typeof sanitizePersonalMomentScoresForAggregate> | null = null;
+        if (apiUrl) {
+          const personalSlices = inferPersonalMomentSlices(msgsDeferred);
+          const slice = personalSlices.moment4;
+          const userTurnsM4 = slice.filter((m) => m.role === 'user').length;
+          if (userTurnsM4 >= 1) {
+            const deferredMoment4Narrative = deferredMoment4NarrativeRef.current;
+            const scoringSlice = deferredMoment4Narrative
+              ? [
+                  slice[0] ?? { role: 'assistant', content: MOMENT_4_HANDOFF },
+                  { role: 'user', content: deferredMoment4Narrative },
+                  ...slice.slice(1),
+                ]
+              : slice;
+            try {
+              const scored = await withRetry(
+                async (): Promise<PersonalMomentScoreResult> => {
+                  const res = await fetch(apiUrl, {
+                    method: 'POST',
+                    headers,
+                    body: JSON.stringify({
+                      model: 'claude-sonnet-4-20250514',
+                      max_tokens: 900,
+                      messages: [{ role: 'user', content: buildPersonalMomentScoringPrompt(scoringSlice) }],
+                    }),
+                  });
+                  const data = await res.json();
+                  if (!res.ok) {
+                    const e = new Error(
+                      (data as { error?: { message?: string } })?.error?.message ?? `HTTP ${res.status}`
+                    );
+                    (e as Error & { status?: number }).status = res.status;
+                    throw e;
+                  }
+                  const raw = (data.content?.[0]?.text ?? '{}') as string;
+                  const parsedM4 = parseJsonObjectFromModelText(raw) as PersonalMomentScoreResult;
+                  parsedM4.pillarScores = normalizeScoresByEvidence(parsedM4.pillarScores, parsedM4.keyEvidence);
+                  return parsedM4;
+                },
+                {
+                  retries: 2,
+                  baseDelay: 5000,
+                  maxDelay: 20000,
+                  context: 'standard deferred moment 4',
+                  sessionLog: userId
+                    ? {
+                        userId,
+                        attemptId: getSessionLogRuntime().attemptId,
+                        platform: getSessionLogRuntime().platform,
+                      }
+                    : undefined,
+                }
+              );
+              if (deferredMoment4NarrativeRef.current) {
+                deferredMoment4NarrativeRef.current = null;
+              }
+              moment4ForAggregate = sanitizePersonalMomentScoresForAggregate(scored);
+              // #region agent log
+              fetch('http://127.0.0.1:7789/ingest/668e0bd5-3283-4492-9f48-e33846c18218', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json', 'X-Debug-Session-Id': 'c61a43' },
+                body: JSON.stringify({
+                  sessionId: 'c61a43',
+                  location: 'AriaScreen.tsx:scoreInterview:standardM4',
+                  message: 'standard deferred moment4 scored',
+                  data: { hasMoment4: !!moment4ForAggregate, userTurnsM4 },
+                  timestamp: Date.now(),
+                  hypothesisId: 'M4-STD',
+                }),
+              }).catch(() => {});
+              // #endregion
+            } catch (err) {
+              await remoteLog('[STANDARD] moment 4 scoring failed', {
+                message: err instanceof Error ? err.message : String(err),
+              });
+              // #region agent log
+              fetch('http://127.0.0.1:7789/ingest/668e0bd5-3283-4492-9f48-e33846c18218', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json', 'X-Debug-Session-Id': 'c61a43' },
+                body: JSON.stringify({
+                  sessionId: 'c61a43',
+                  location: 'AriaScreen.tsx:scoreInterview:standardM4',
+                  message: 'standard deferred moment4 scoring error',
+                  data: { err: err instanceof Error ? err.message : String(err), userTurnsM4 },
+                  timestamp: Date.now(),
+                  hypothesisId: 'M4-STD',
+                }),
+              }).catch(() => {});
+              // #endregion
+            }
+          } else {
+            // #region agent log
+            fetch('http://127.0.0.1:7789/ingest/668e0bd5-3283-4492-9f48-e33846c18218', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json', 'X-Debug-Session-Id': 'c61a43' },
+              body: JSON.stringify({
+                sessionId: 'c61a43',
+                location: 'AriaScreen.tsx:scoreInterview:standardM4',
+                message: 'standard deferred moment4 skipped (no user turns)',
+                data: { userTurnsM4 },
+                timestamp: Date.now(),
+                hypothesisId: 'M4-STD',
+              }),
+            }).catch(() => {});
+            // #endregion
+          }
+        }
         const bundle = (n: 1 | 2 | 3) => {
           const s = scenarioScoresRef.current[n];
           if (!s) return null;
@@ -11047,9 +11220,36 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
           scenario_1_scores: bundle(1),
           scenario_2_scores: bundle(2),
           scenario_3_scores: bundle(3),
+          scenario_specific_patterns: {
+            moment_4_scores: moment4ForAggregate
+              ? {
+                  pillarScores: moment4ForAggregate.pillarScores,
+                  pillarConfidence: moment4ForAggregate.pillarConfidence,
+                  keyEvidence: moment4ForAggregate.keyEvidence,
+                  summary: moment4ForAggregate.summary,
+                  specificity: moment4ForAggregate.specificity,
+                  momentName: moment4ForAggregate.momentName,
+                }
+              : null,
+            moment_5_scores: null,
+          },
           scoring_deferred: true,
           interview_typology_context: context,
         };
+        // #region agent log
+        fetch('http://127.0.0.1:7789/ingest/668e0bd5-3283-4492-9f48-e33846c18218', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'X-Debug-Session-Id': 'c61a43' },
+          body: JSON.stringify({
+            sessionId: 'c61a43',
+            location: 'AriaScreen.tsx:scoreInterview:rowPayload',
+            message: 'standard deferred rowPayload moment4 snapshot',
+            data: { persistedMoment4: !!moment4ForAggregate },
+            timestamp: Date.now(),
+            hypothesisId: 'M4-STD',
+          }),
+        }).catch(() => {});
+        // #endregion
         let attemptId: string | null = null;
         if (existingAttemptId) {
           const { error: upe } = await supabase
@@ -11190,15 +11390,6 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
       setInterviewStatus('congratulations');
       setStatus('results');
       return;
-    }
-    const apiUrl = getAnthropicEndpoint();
-    const useProxy = apiUrl !== 'https://api.anthropic.com/v1/messages';
-    const headers: Record<string, string> = { 'Content-Type': 'application/json' };
-    if (useProxy && SUPABASE_ANON_KEY) {
-      headers['Authorization'] = `Bearer ${SUPABASE_ANON_KEY}`;
-    } else if (!useProxy) {
-      headers['x-api-key'] = ANTHROPIC_API_KEY;
-      headers['anthropic-version'] = '2023-06-01';
     }
     try {
       /** Matches reasoning timeout pattern — proxies can otherwise hang for many minutes with no `fetch` resolution. */

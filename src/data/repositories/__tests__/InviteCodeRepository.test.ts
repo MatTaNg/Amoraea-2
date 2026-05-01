@@ -107,7 +107,7 @@ describe('InviteCodeRepository', () => {
         }
         return {
           insert: jest.fn(() =>
-            Promise.resolve({ error: { message: 'duplicate' } })
+            Promise.resolve({ error: { message: 'duplicate', code: '42P01' } })
           ),
         };
       });
@@ -118,6 +118,51 @@ describe('InviteCodeRepository', () => {
       await expect(repo.ensureUserWithInviteCode('u-new', {})).rejects.toThrow(
         /Failed to create user/
       );
+    });
+
+    it('treats users_pkey race (23505) as success when row appears', async () => {
+      let fromCalls = 0;
+      (supabase.from as jest.Mock).mockImplementation(() => {
+        fromCalls += 1;
+        if (fromCalls === 1 || fromCalls === 2) {
+          return {
+            select: jest.fn(() => ({
+              eq: jest.fn(() => ({
+                maybeSingle: jest.fn(() =>
+                  Promise.resolve({ data: null, error: null })
+                ),
+              })),
+            })),
+          };
+        }
+        if (fromCalls === 3) {
+          return {
+            insert: jest.fn(() =>
+              Promise.resolve({
+                error: { message: 'duplicate key', code: '23505' },
+              })
+            ),
+          };
+        }
+        return {
+          select: jest.fn(() => ({
+            eq: jest.fn(() => ({
+              maybeSingle: jest.fn(() =>
+                Promise.resolve({
+                  data: { id: 'u-new', invite_code: 'ABCDEF' },
+                  error: null,
+                })
+              ),
+            })),
+          })),
+        };
+      });
+      (supabase.auth.getSession as jest.Mock).mockResolvedValue({
+        data: { session: null },
+      });
+
+      const r = await repo.ensureUserWithInviteCode('u-new', {});
+      expect(r.inviteCode).toBe('ABCDEF');
     });
   });
 });
