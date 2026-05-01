@@ -29,7 +29,7 @@ export const OnboardingHeader: React.FC<OnboardingHeaderProps> = ({ variant = 'd
   return (
     <View style={[styles.banner, dark && styles.bannerDark]}>
       <View style={styles.placeholder} />
-      <Text style={[styles.title, dark && styles.titleDark]}>Amoraea</Text>
+      <Text style={[styles.title, dark && styles.titleDark]}>Amoraea (BETA)</Text>
       <TouchableOpacity
         onPress={handleLogOut}
         style={styles.button}

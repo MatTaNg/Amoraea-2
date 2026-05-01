@@ -147,9 +147,12 @@ export const RegisterScreen: React.FC<{ navigation: any }> = ({ navigation }) =>
           showsVerticalScrollIndicator
           nestedScrollEnabled
         >
-          <Text style={[authStyles.wordmark, styles.wordmarkTight]}>
-            amor<Text style={authStyles.wordmarkAe}>æ</Text>a
-          </Text>
+          <View style={[styles.wordmarkRow, styles.wordmarkTight]}>
+            <Text style={[authStyles.wordmark, styles.wordmarkNoBottomMargin]}>
+              amor<Text style={authStyles.wordmarkAe}>æ</Text>a
+            </Text>
+            <Text style={styles.wordmarkBeta}>(BETA)</Text>
+          </View>
           <View style={styles.flameWrap}>
             <View style={styles.flameScale}>
               <FlameOrb state="idle" minimalGlow />
@@ -266,10 +269,26 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     alignItems: 'center',
   },
+  wordmarkRow: {
+    flexDirection: 'row',
+    alignItems: 'baseline',
+    justifyContent: 'center',
+    gap: 8,
+    width: '100%',
+  },
+  wordmarkNoBottomMargin: {
+    marginBottom: 0,
+    textAlign: 'left',
+  },
+  wordmarkBeta: {
+    fontFamily: Platform.OS === 'web' ? "'Jost', sans-serif" : undefined,
+    fontSize: 11,
+    fontWeight: '600',
+    letterSpacing: 1,
+    color: '#3D5470',
+  },
   wordmarkTight: {
     marginBottom: 18,
-    textAlign: 'center',
-    width: '100%',
   },
   taglineTight: {
     marginBottom: 24,

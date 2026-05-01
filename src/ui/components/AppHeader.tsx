@@ -5,6 +5,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { useAuth } from '@features/authentication/hooks/useAuth';
 import { colors } from '@ui/theme/colors';
 import { spacing } from '@ui/theme/spacing';
+import { showConfirmDialog } from '@utilities/alerts/confirmDialog';
 
 export const AppHeader: React.FC = () => {
   const navigation = useNavigation();
@@ -33,7 +34,7 @@ export const AppHeader: React.FC = () => {
           <View style={styles.placeholder} />
         )}
       </View>
-      <Text style={styles.title}>Amoraea</Text>
+      <Text style={styles.title}>Amoraea (BETA)</Text>
       <View style={[styles.side, styles.sideRight]}>
         <TouchableOpacity onPress={handleLogOut} style={styles.button} hitSlop={12} accessibilityLabel="Log out">
           <Ionicons name="log-out-outline" size={24} color={colors.primary} />

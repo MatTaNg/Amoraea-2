@@ -622,10 +622,11 @@ export const UserInterviewLayout: React.FC<UserInterviewLayoutProps> = ({
 
       {/* Header */}
       <View style={styles.header}>
-        <View style={styles.wordmark}>
+        <View style={styles.wordmarkRow}>
           <Text style={styles.wordmarkText}>
             amor<Text style={styles.wordmarkAe}>æ</Text>a
           </Text>
+          <Text style={styles.wordmarkBeta}>(BETA)</Text>
         </View>
         <Text style={styles.headerLabel}>Interview</Text>
         {onExit ? (
@@ -741,7 +742,11 @@ const styles = StyleSheet.create({
     backgroundColor: BG,
     zIndex: 10,
   },
-  wordmark: {},
+  wordmarkRow: {
+    flexDirection: 'row',
+    alignItems: 'baseline',
+    gap: 6,
+  },
   wordmarkText: {
     fontFamily: FONT_DISPLAY,
     fontSize: 18,
@@ -751,6 +756,13 @@ const styles = StyleSheet.create({
   },
   wordmarkAe: {
     color: FLAME_MID,
+  },
+  wordmarkBeta: {
+    fontFamily: FONT_UI,
+    fontSize: 10,
+    fontWeight: '600',
+    letterSpacing: 1,
+    color: TEXT_DIM,
   },
   headerLabel: {
     fontFamily: FONT_UI,

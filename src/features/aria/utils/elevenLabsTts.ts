@@ -74,6 +74,16 @@ let activeWebBufferSource: AudioBufferSourceNode | null = null;
 /** Web: sequential PCM stream chunks (ElevenLabs raw L16) — all stopped in {@link stopElevenLabsPlayback}. */
 const activePcmStreamSources: AudioBufferSourceNode[] = [];
 
+/**
+ * Incremented when tab hides or {@link stopElevenLabsPlayback} runs so in-flight PCM stream readers
+ * stop calling {@link AudioBufferSourceNode#start} (Chrome suspend/resume + continued scheduling → overlap/static).
+ */
+let webInterviewTtsScheduleEpoch = 0;
+
+function bumpWebInterviewTtsScheduleEpoch(): void {
+  webInterviewTtsScheduleEpoch += 1;
+}
+
 const ELEVENLABS_PCM_STREAM_SAMPLE_RATE = 24_000;
 const ELEVENLABS_PCM_MIN_START_BYTES = 4_800;
 const LONG_TTS_USE_STREAMING_MIN_CHARS = 100;
@@ -477,6 +487,7 @@ function arrayBufferToBase64(buffer: ArrayBuffer): string {
  */
 export function pauseWebInterviewHtmlAudioForDocumentHidden(): void {
   if (Platform.OS !== 'web') return;
+  bumpWebInterviewTtsScheduleEpoch();
   if (activePcmStreamSources.length > 0) {
     for (const s of activePcmStreamSources) {
       try {
@@ -522,6 +533,9 @@ export function isWebInterviewPlaybackSurfaceActive(): boolean {
 }
 
 export async function stopElevenLabsPlayback(): Promise<void> {
+  if (Platform.OS === 'web') {
+    bumpWebInterviewTtsScheduleEpoch();
+  }
   if (Platform.OS === 'web' && pendingWebGestureBlobUrl) {
     try {
       URL.revokeObjectURL(pendingWebGestureBlobUrl);
@@ -664,6 +678,8 @@ async function tryPlayElevenLabsMp3WithWebAudio(
   const ctx = sharedWebAudioContext;
   if (!ctx || !webInterviewAudioUnlocked) return false;
   if (!(await ensureSharedWebAudioContextResumedForPlayback(telemetrySource))) return false;
+  const epochCapture = webInterviewTtsScheduleEpoch;
+  const epochStale = () => epochCapture !== webInterviewTtsScheduleEpoch;
   const decodeTimeoutMs = 15000;
   let decoded: AudioBuffer;
   try {
@@ -684,7 +700,9 @@ async function tryPlayElevenLabsMp3WithWebAudio(
     });
     return false;
   }
+  if (epochStale()) return false;
   if (!(await ensureSharedWebAudioContextResumedForPlayback(telemetrySource))) return false;
+  if (epochStale()) return false;
   let src: AudioBufferSourceNode | null = null;
   try {
     src = ctx.createBufferSource();
@@ -774,6 +792,21 @@ async function tryPlayElevenLabsMp3WithWebAudio(
             resolve();
           };
           try {
+            if (epochStale()) {
+              if (activeWebBufferSource === src) activeWebBufferSource = null;
+              try {
+                src!.disconnect();
+              } catch {
+                /* ignore */
+              }
+              try {
+                playbackAnalyser?.disconnect();
+              } catch {
+                /* ignore */
+              }
+              reject(new Error('tts-schedule-aborted'));
+              return;
+            }
             src!.start(0);
             onPlaybackStarted?.();
             void beginInterviewMicPreInitDuringTts(preInitTriggerDuring);
@@ -847,6 +880,10 @@ async function tryPlayElevenLabsMp3WithWebAudio(
       ]);
       return true;
     } catch (raceErr) {
+      const msg = raceErr instanceof Error ? raceErr.message : String(raceErr);
+      if (msg === 'tts-schedule-aborted') {
+        return false;
+      }
       return handlePlaybackRaceError(raceErr);
     }
   } catch (err) {
@@ -1148,6 +1185,9 @@ async function playElevenLabsPcmStreamFromResponse(
   if (!ctx || !webInterviewAudioUnlocked) return false;
   if (!(await ensureSharedWebAudioContextResumedForPlayback(telemetrySource))) return false;
 
+  const epochCapture = webInterviewTtsScheduleEpoch;
+  const pcmEpochStale = () => epochCapture !== webInterviewTtsScheduleEpoch;
+
   const reader = res.body.getReader();
   let pending = new Uint8Array(0);
   let nextScheduleTime = 0;
@@ -1160,6 +1200,24 @@ async function playElevenLabsPcmStreamFromResponse(
     resolveAll = resolve;
   });
 
+  const cleanupPcmEpochAbort = async (): Promise<boolean> => {
+    try {
+      await reader.cancel();
+    } catch {
+      /* ignore */
+    }
+    for (const s of activePcmStreamSources) {
+      try {
+        s.stop(0);
+      } catch {
+        /* ignore */
+      }
+    }
+    activePcmStreamSources.length = 0;
+    resolveAll?.();
+    return false;
+  };
+
   const tryFinishIfDone = () => {
     if (readComplete && totalSourcesScheduled > 0 && totalSourcesCompleted >= totalSourcesScheduled) {
       resolveAll?.();
@@ -1167,6 +1225,7 @@ async function playElevenLabsPcmStreamFromResponse(
   };
 
   const schedulePcmChunk = (u8: Uint8Array) => {
+    if (pcmEpochStale()) return;
     if (u8.length < 2) return;
     const sampleCount = u8.length / 2;
     const leBuf = u8.buffer.slice(u8.byteOffset, u8.byteOffset + u8.length);
@@ -1286,6 +1345,9 @@ async function playElevenLabsPcmStreamFromResponse(
 
   try {
     for (;;) {
+      if (pcmEpochStale()) {
+        return await cleanupPcmEpochAbort();
+      }
       const { done, value } = await reader.read();
       if (value && value.length > 0) {
         const merged = new Uint8Array(pending.length + value.length);
@@ -1294,6 +1356,9 @@ async function playElevenLabsPcmStreamFromResponse(
         pending = merged;
       }
       for (;;) {
+        if (pcmEpochStale()) {
+          return await cleanupPcmEpochAbort();
+        }
         if (!pcmPlaybackStarted) {
           if (pending.length < ELEVENLABS_PCM_MIN_START_BYTES) break;
           takeEvenBytes(ELEVENLABS_PCM_MIN_START_BYTES);
@@ -1328,17 +1393,23 @@ async function playElevenLabsPcmStreamFromResponse(
 
   readComplete = true;
   while (pending.length >= 2) {
+    if (pcmEpochStale()) {
+      return await cleanupPcmEpochAbort();
+    }
     if (pending.length >= 16384) {
       takeEvenBytes(16384);
     } else {
       takeEvenBytes(pending.length);
     }
   }
+  if (pcmEpochStale()) {
+    return await cleanupPcmEpochAbort();
+  }
   if (totalSourcesScheduled === 0) {
     return false;
   }
   await Promise.race([allDone, new Promise<void>((r) => setTimeout(r, 600_000))]);
-  return true;
+  return !pcmEpochStale();
 }
 
 async function tryPlayElevenLabsPcmStream(
@@ -1466,8 +1537,10 @@ export async function speakWithElevenLabs(
     throw new WebTtsRequiresUserGestureError(spokenText);
   }
 
+  /** PCM chunks schedule many `AudioBufferSourceNode`s — desktop Chrome still hits static after tab suspend/resume; mobile keeps streaming for earlier audible output on long lines. */
   const shouldTryPcmStream =
     Platform.OS === 'web' &&
+    webSpeechShouldDeferToUserGesture() &&
     telemetrySource !== 'greeting' &&
     !options?.prefetchedMpegArrayBuffer &&
     spokenText.trim().length > LONG_TTS_USE_STREAMING_MIN_CHARS;
@@ -1484,6 +1557,7 @@ export async function speakWithElevenLabs(
           hypothesisId: 'H14',
           telemetrySource,
           textLen: spokenText.trim().length,
+          deferGesture: webSpeechShouldDeferToUserGesture(),
           shouldTryPcmStream,
           skipStopBeforeStart: !!options?.skipStopElevenLabsPlaybackBeforeStart,
           hasPrefetchedMpeg: !!options?.prefetchedMpegArrayBuffer,

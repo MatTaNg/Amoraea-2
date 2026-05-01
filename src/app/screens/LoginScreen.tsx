@@ -109,9 +109,12 @@ export const LoginScreen: React.FC<{ navigation: any; route?: { params?: { confi
           {Platform.OS === 'web' && <View style={authStyles.ambientGlow} pointerEvents="none" />}
 
           <View style={[authStyles.inner, styles.innerCentered]}>
-            <Text style={[authStyles.wordmark, styles.wordmarkTight]}>
-              amor<Text style={authStyles.wordmarkAe}>æ</Text>a
-            </Text>
+            <View style={[styles.wordmarkRow, styles.wordmarkTight]}>
+              <Text style={[authStyles.wordmark, styles.wordmarkNoBottomMargin]}>
+                amor<Text style={authStyles.wordmarkAe}>æ</Text>a
+              </Text>
+              <Text style={styles.wordmarkBeta}>(BETA)</Text>
+            </View>
 
             <View style={styles.flameWrap}>
               <View style={styles.flameScale}>
@@ -212,6 +215,23 @@ const styles = StyleSheet.create({
   },
   innerCentered: {
     alignItems: 'center',
+  },
+  wordmarkRow: {
+    flexDirection: 'row',
+    alignItems: 'baseline',
+    justifyContent: 'center',
+    gap: 8,
+  },
+  wordmarkNoBottomMargin: {
+    marginBottom: 0,
+    textAlign: 'left',
+  },
+  wordmarkBeta: {
+    fontFamily: Platform.OS === 'web' ? "'Jost', sans-serif" : undefined,
+    fontSize: 11,
+    fontWeight: '600',
+    letterSpacing: 1,
+    color: '#3D5470',
   },
   wordmarkTight: {
     marginBottom: 18,

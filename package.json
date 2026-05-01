@@ -13,6 +13,7 @@
     "web:tunnel": "expo start --web --tunnel",
     "web:cf-tunnel": "npx --yes cloudflared tunnel --url http://localhost:8081",
     "build:web": "expo export -p web",
+    "generate:pwa-icons": "node scripts/generate-pwa-icons.mjs",
     "test": "jest",
     "test:watch": "jest --watch",
     "test:coverage": "jest --coverage",
