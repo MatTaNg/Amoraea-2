@@ -15,6 +15,7 @@ import {
   Platform,
   Alert,
   Switch,
+  Share,
 } from 'react-native';
 import { supabase } from '@data/supabase/client';
 import {
@@ -1029,6 +1030,121 @@ function computeCohortHeaderStats(groups: UserGroup[]) {
     else if (g.user.interview_passed === false) failed += 1;
   }
   return { started, passed, failed };
+}
+
+function escapeCsvField(raw: string): string {
+  const s = raw ?? '';
+  // Quote if tab present so delimiter-separated parsers keep phone/email text in one column
+  if (/[",\r\n\t]/.test(s)) return `"${s.replace(/"/g, '""')}"`;
+  return s;
+}
+
+/**
+ * Phone numbers must be forced to text or Sheets/Excel show scientific notation (e.g. 6.2E+10).
+ * Uses the same `="..."` text formula pattern Excel writes for numeric-looking text cells.
+ */
+function escapeCsvPhoneForSpreadsheet(display: string): string {
+  if (display === '—') return escapeCsvField(display);
+  const innerEscaped = display.replace(/"/g, '""');
+  const excelTextFormula = `="${innerEscaped}"`;
+  return `"${excelTextFormula.replace(/"/g, '""')}"`;
+}
+
+/** Matches UserCard status line (Pass / Fail / Almost / — / In progress). */
+function adminCohortExportStatusLine(g: UserGroup): string {
+  if (userHasInProgressInterview(g.user)) return 'In progress';
+  if (g.user.interview_passed === true) return 'Pass';
+  const o = getAdminOutcomeDisplay(g.latestAttempt);
+  const w = o.word;
+  if (w === '—') return '—';
+  if (w === 'pass') return 'Pass';
+  if (w === 'fail') return 'Fail';
+  if (w === 'almost') return 'Almost';
+  return w;
+}
+
+/** Local calendar date for cohort activity (same instant as time-range filters). */
+function adminCohortExportTestDateYmd(g: UserGroup): string {
+  const ts = getCohortActivityTimestampMs(g);
+  if (ts <= 0) return '—';
+  return formatYmdLocal(new Date(ts));
+}
+
+const ADMIN_EXPORT_SCORE_KEYS = [
+  'mentalizing',
+  'accountability',
+  'contempt',
+  'repair',
+  'regulation',
+  'attunement',
+  'appreciation',
+  'commitment_threshold',
+] as const;
+
+function buildAdminCohortExportCsv(groups: UserGroup[]): string {
+  const headers = [
+    'Name',
+    'Email',
+    'Phone',
+    'Status',
+    'Date test was taken',
+    'Overall Score',
+    'Mentalizing',
+    'Accountability / Defensiveness',
+    'Contempt / Criticism',
+    'Repair',
+    'Emotional Regulation',
+    'Attunement',
+    'Appreciation',
+    'Commitment',
+  ];
+  const lines: string[] = [headers.map(escapeCsvField).join(',')];
+  for (const g of groups) {
+    const latest = g.latestAttempt;
+    const pillars = pillarScoresForGate(latest);
+    const phoneDisplay = trimLaunchNotificationPhone(g.user.launch_notification_phone) ?? '—';
+    const cells: string[] = [
+      escapeCsvField(resolveAdminInterviewIntroDisplayName(g.user)),
+      escapeCsvField(g.user.email ?? '—'),
+      escapeCsvPhoneForSpreadsheet(phoneDisplay),
+      escapeCsvField(adminCohortExportStatusLine(g)),
+      escapeCsvField(adminCohortExportTestDateYmd(g)),
+      escapeCsvField(formatScoreCell(latest?.weighted_score)),
+    ];
+    for (const key of ADMIN_EXPORT_SCORE_KEYS) {
+      cells.push(escapeCsvField(formatScoreCell(pillars[key])));
+    }
+    lines.push(cells.join(','));
+  }
+  return lines.join('\r\n');
+}
+
+function triggerAdminCohortCsvDownload(filename: string, csvBody: string): void {
+  const payload = `\uFEFF${csvBody}`;
+  if (Platform.OS === 'web' && typeof document !== 'undefined') {
+    try {
+      // UTF-8 BOM + CSV: opens cleanly in Google Sheets (File → Import) and Excel
+      const blob = new Blob([payload], {
+        type: 'text/csv;charset=utf-8',
+      });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = filename;
+      a.rel = 'noopener';
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : 'Could not download CSV.';
+      Alert.alert('Export failed', msg);
+    }
+    return;
+  }
+  void Share.share({ title: filename, message: payload }).catch(() => {
+    Alert.alert('Export failed', 'Could not share the CSV.');
+  });
 }
 
 /** Best-effort scenario indicator when `interview_last_checkpoint` is not selected or missing on older DBs. */
@@ -2372,6 +2488,16 @@ export function AdminInterviewDashboard({ onClose }: { onClose: () => void }) {
 
   const cohortStats = useMemo(() => computeCohortHeaderStats(pipelineFiltered), [pipelineFiltered]);
 
+  const handleExportCsv = useCallback(() => {
+    if (pipelineFiltered.length === 0) {
+      Alert.alert('No users to export');
+      return;
+    }
+    const body = buildAdminCohortExportCsv(pipelineFiltered);
+    const today = formatYmdLocal(new Date());
+    triggerAdminCohortCsvDownload(`amoraea_users_${today}.csv`, body);
+  }, [pipelineFiltered]);
+
   const setUserCohortReviewed = useCallback(async (userId: string, next: boolean) => {
     const { error } = await supabase
       .from('users')
@@ -2414,6 +2540,19 @@ export function AdminInterviewDashboard({ onClose }: { onClose: () => void }) {
             <Text style={styles.backText}>← Back to interview</Text>
           </TouchableOpacity>
         </View>
+        {adminMainView === 'cohort' ? (
+          <View style={styles.headerExportRow}>
+            <TouchableOpacity
+              style={[styles.exportCsvButton, (loading || !!listError) && styles.exportCsvButtonDisabled]}
+              onPress={handleExportCsv}
+              disabled={loading || !!listError}
+              accessibilityRole="button"
+              accessibilityLabel="Export CSV"
+            >
+              <Text style={styles.exportCsvButtonText}>Export CSV</Text>
+            </TouchableOpacity>
+          </View>
+        ) : null}
         <ScrollView
           horizontal
           showsHorizontalScrollIndicator={false}
@@ -2839,6 +2978,26 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     alignSelf: 'stretch',
     marginBottom: 4,
+  },
+  headerExportRow: {
+    alignSelf: 'flex-start',
+    marginBottom: 8,
+  },
+  exportCsvButton: {
+    borderWidth: 1,
+    borderColor: 'rgba(82,142,220,0.35)',
+    borderRadius: 8,
+    paddingHorizontal: 14,
+    paddingVertical: 8,
+    backgroundColor: 'rgba(30,111,217,0.15)',
+  },
+  exportCsvButtonDisabled: {
+    opacity: 0.45,
+  },
+  exportCsvButtonText: {
+    color: '#C8E4FF',
+    fontSize: 13,
+    fontWeight: '600',
   },
   headerDeleteText: {
     color: '#E87A7A',

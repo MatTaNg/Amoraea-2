@@ -137,6 +137,21 @@ const SILENT_WAV_DATA_URL =
  */
 let sharedHtmlAudioForMobileTts: HTMLAudioElement | null = null;
 
+/**
+ * Facebook / Instagram / Line / LinkedIn in-app browsers run embedded WebViews where chunked PCM +
+ * Web Audio overlaps badly with HTML audio after `visibilitychange` (garbled / static). Same pipeline
+ * as desktop: MP3 fetch → HTMLAudio or Web Audio decode only.
+ */
+function webEmbeddedInAppBrowserDiscouragesPcmStream(): boolean {
+  if (typeof navigator === 'undefined' || typeof navigator.userAgent !== 'string') return false;
+  const ua = navigator.userAgent;
+  if (/FBAN|FBAV|FBIOS|FB_IAB/i.test(ua)) return true;
+  if (/Instagram/i.test(ua)) return true;
+  if (/\bLine\//i.test(ua)) return true;
+  if (/\bLinkedInApp\//i.test(ua)) return true;
+  return false;
+}
+
 /** One listener: resume shared `AudioContext` / reprime HTML audio when the tab becomes visible again (Safari suspends on hide). */
 let webInterviewAudioVisibilityListenerAttached = false;
 
@@ -483,7 +498,8 @@ function arrayBufferToBase64(buffer: ArrayBuffer): string {
 /**
  * Tear down active web TTS outputs when the document is hidden.
  * Chrome suspends AudioContext in background tabs; leaving PCM stream nodes or AudioBufferSourceNode
- * attached can produce static/noise after resume. HTML audio is paused only (ref kept like before).
+ * attached can produce static/noise after resume. Clear `activeWebAudio` like {@link stopElevenLabsPlayback}
+ * so {@link isWebInterviewPlaybackSurfaceActive} does not stay true while paused.
  */
 export function pauseWebInterviewHtmlAudioForDocumentHidden(): void {
   if (Platform.OS !== 'web') return;
@@ -513,11 +529,14 @@ export function pauseWebInterviewHtmlAudioForDocumentHidden(): void {
       /* ignore */
     }
   }
-  if (!activeWebAudio) return;
-  try {
-    activeWebAudio.pause();
-  } catch {
-    /* ignore */
+  if (activeWebAudio) {
+    try {
+      activeWebAudio.pause();
+      activeWebAudio.currentTime = 0;
+    } catch {
+      /* ignore */
+    }
+    activeWebAudio = null;
   }
 }
 
@@ -1540,6 +1559,7 @@ export async function speakWithElevenLabs(
   /** PCM chunks schedule many `AudioBufferSourceNode`s — desktop Chrome still hits static after tab suspend/resume; mobile keeps streaming for earlier audible output on long lines. */
   const shouldTryPcmStream =
     Platform.OS === 'web' &&
+    !webEmbeddedInAppBrowserDiscouragesPcmStream() &&
     webSpeechShouldDeferToUserGesture() &&
     telemetrySource !== 'greeting' &&
     !options?.prefetchedMpegArrayBuffer &&
@@ -1558,6 +1578,7 @@ export async function speakWithElevenLabs(
           telemetrySource,
           textLen: spokenText.trim().length,
           deferGesture: webSpeechShouldDeferToUserGesture(),
+          embeddedBrowserPcmSuppressed: webEmbeddedInAppBrowserDiscouragesPcmStream(),
           shouldTryPcmStream,
           skipStopBeforeStart: !!options?.skipStopElevenLabsPlaybackBeforeStart,
           hasPrefetchedMpeg: !!options?.prefetchedMpegArrayBuffer,
