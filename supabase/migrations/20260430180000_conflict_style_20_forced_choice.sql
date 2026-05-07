@@ -1,0 +1,5 @@
+-- Conflict style: 20-item forced-choice (2 options per item). Row shape is unchanged:
+--   conflict_style_scores: competing, collaborating, compromising, avoiding, accommodating (counts or trait % as your app writes)
+--   conflict_style_responses: question_index (0–19), selected_option_index (0|1), selected_style
+-- This repository does not define older per-question table columns to drop; remove any
+-- deployment-specific legacy columns in a follow-up migration after auditing your live schema.

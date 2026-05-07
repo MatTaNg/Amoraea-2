@@ -96,13 +96,13 @@ function FlickeringFlame({ size = 100 }: { size?: number }) {
           toValue: 0.78,
           duration: 240,
           easing: Easing.inOut(Easing.quad),
-          useNativeDriver: true,
+          useNativeDriver: Platform.OS !== 'web',
         }),
         Animated.timing(flicker, {
           toValue: 1,
           duration: 420,
           easing: Easing.inOut(Easing.quad),
-          useNativeDriver: true,
+          useNativeDriver: Platform.OS !== 'web',
         }),
         Animated.delay(1400),
       ]),
@@ -521,10 +521,10 @@ export const PostInterviewProcessingScreen: React.FC<{
           {myReferralCode ? (
             <View style={styles.referFriendSection}>
               <View style={styles.referFriendDivider} />
-              <Text style={styles.referFriendTitle}>Know someone who might pass?</Text>
+              <Text style={styles.referFriendTitle}>Know someone who can pass?</Text>
               <Text style={styles.referFriendBody}>
                 Share your personal code with someone you think is ready. If they complete the full interview,
-                you&apos;ll both receive a 20% discount at our next event!.
+                you will both receive a 20% discount at our next event!
               </Text>
               <View style={styles.codeBlockRow}>
                 <Text style={styles.codeBlockText} selectable>

@@ -1,4 +1,5 @@
 import {
+  absentCharacterEngagementCapApplies,
   applyContemptExpressionHeuristicToScenarioScores,
   countScenarioContemptVerdictSignals,
   enrichScenarioSliceWithContemptHeuristic,
@@ -50,5 +51,39 @@ describe('contemptExpressionScenarioHeuristic', () => {
       {},
     );
     expect(out.pillarScores.contempt_expression).toBe(8.2);
+  });
+
+  it('caps contempt_expression at 6 when wholesale relationship dismissal lacks character engagement', () => {
+    const t =
+      "They shouldn't be together honestly — they have issues and they need therapy more than they need each other.";
+    expect(absentCharacterEngagementCapApplies(t)).toBe(true);
+    const out = applyContemptExpressionHeuristicToScenarioScores(
+      t,
+      { contempt_expression: 9 },
+      {},
+    );
+    expect(out.pillarScores.contempt_expression).toBe(6);
+    expect(out.keyEvidence.contempt_expression).toMatch(/character-engagement/);
+  });
+
+  it('does not apply absent-engagement cap when internal-state curiosity is present', () => {
+    const t =
+      "They probably shouldn't be together, but I feel for both of them — she's hurt that he keeps withdrawing and he's afraid of being swallowed.";
+    expect(absentCharacterEngagementCapApplies(t)).toBe(false);
+    const out = applyContemptExpressionHeuristicToScenarioScores(
+      t,
+      { contempt_expression: 8.5 },
+      {},
+    );
+    expect(out.pillarScores.contempt_expression).toBe(8.5);
+  });
+
+  it('absent-engagement cap does not raise low model scores', () => {
+    const out = applyContemptExpressionHeuristicToScenarioScores(
+      'This relationship is not working. They need therapy.',
+      { contempt_expression: 4 },
+      {},
+    );
+    expect(out.pillarScores.contempt_expression).toBe(4);
   });
 });

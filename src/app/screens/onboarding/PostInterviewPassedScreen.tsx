@@ -1,9 +1,8 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
   View,
   StyleSheet,
   Text,
-  TextInput,
   Pressable,
   ScrollView,
   Platform,
@@ -14,7 +13,6 @@ import {
 } from 'react-native';
 import { SafeAreaContainer } from '@ui/components/SafeAreaContainer';
 import { Ionicons } from '@expo/vector-icons';
-import { parsePhoneNumberFromString } from 'libphonenumber-js';
 import { supabase } from '@data/supabase/client';
 import { FlameOrb } from '@app/screens/FlameOrb';
 import * as Clipboard from 'expo-clipboard';
@@ -28,15 +26,16 @@ import {
   standardPostInterviewRouteFromReveal,
 } from '@utilities/postInterviewProcessingGate';
 import { fetchInterviewAttemptRevealSnapshot } from '@utilities/fetchInterviewAttemptRevealSnapshot';
+import { StackActions, useFocusEffect } from '@react-navigation/native';
+import { modalOnboardingService } from '@/datingProfile/screens/onboarding/modals/services/modalOnboardingService';
 
 const BG = '#0a0a0f';
 const ACCENT = '#3b82f6';
-const LAUNCH_CONFIRM_TEXT = '#86efac';
-const LAUNCH_CONFIRM_BORDER = 'rgba(74, 222, 128, 0.38)';
-const LAUNCH_CONFIRM_BG = 'rgba(34, 197, 94, 0.14)';
 const GLASS_BG = 'rgba(255,255,255,0.06)';
 const GLASS_BORDER = 'rgba(255,255,255,0.12)';
-const EVENT_URL = 'https://www.eventbrite.com/e/conscious-singles-dinner-tickets-1988415988749';
+const EVENT_URL =
+  'https://www.eventbrite.com/e/conscious-relating-games-dinner-tickets-1988944369149?aff=oddtdtcreator';
+const WHATSAPP_COMMUNITY_URL = 'https://chat.whatsapp.com/BFIQCNAD1jd2Uw8IqMh2SS';
 
 const FONT_DISPLAY = Platform.OS === 'web' ? "'Cormorant Garamond', serif" : undefined;
 const FONT_BODY = Platform.OS === 'web' ? "'DM Sans', system-ui, sans-serif" : undefined;
@@ -52,36 +51,6 @@ function loadWebFontsOnce() {
   document.head.appendChild(link);
 }
 
-function digitsOnly(s: string): string {
-  return s.replace(/\D/g, '');
-}
-
-function normalizeLaunchNotificationPhone(
-  raw: string
-): { ok: true; e164: string } | { ok: false } {
-  const trimmed = raw.trim();
-  if (!trimmed) return { ok: false };
-  const parsed =
-    parsePhoneNumberFromString(trimmed, 'US') ?? parsePhoneNumberFromString(trimmed);
-  if (parsed && (parsed.isValid() || parsed.isPossible()) && parsed.number && parsed.number.length >= 8) {
-    return { ok: true, e164: parsed.number };
-  }
-  const d = digitsOnly(trimmed);
-  if (d.length === 10 && /^[2-9]\d{2}[2-9]\d{6}$/.test(d)) {
-    return { ok: true, e164: `+1${d}` };
-  }
-  if (d.length === 11 && d.startsWith('1')) {
-    const rest = d.slice(1);
-    if (/^[2-9]\d{2}[2-9]\d{6}$/.test(rest)) {
-      return { ok: true, e164: `+1${rest}` };
-    }
-  }
-  if (d.length >= 11 && d.length <= 15 && d[0] !== '0') {
-    return { ok: true, e164: `+${d}` };
-  }
-  return { ok: false };
-}
-
 function FlickeringFlame({ size = 100 }: { size?: number }) {
   const flicker = useRef(new Animated.Value(1)).current;
   useEffect(() => {
@@ -91,13 +60,13 @@ function FlickeringFlame({ size = 100 }: { size?: number }) {
           toValue: 0.78,
           duration: 240,
           easing: Easing.inOut(Easing.quad),
-          useNativeDriver: true,
+          useNativeDriver: Platform.OS !== 'web',
         }),
         Animated.timing(flicker, {
           toValue: 1,
           duration: 420,
           easing: Easing.inOut(Easing.quad),
-          useNativeDriver: true,
+          useNativeDriver: Platform.OS !== 'web',
         }),
         Animated.delay(1400),
       ])
@@ -123,19 +92,14 @@ export const PostInterviewPassedScreen: React.FC<{ navigation: any; route: { par
   const queryClient = useQueryClient();
   const { user } = useAuth();
   const userId = route.params?.userId ?? '';
-  const [phone, setPhone] = useState('');
-  const [submitted, setSubmitted] = useState(false);
-  const [savedPhone, setSavedPhone] = useState(false);
-  const [submitting, setSubmitting] = useState(false);
-  const [fieldError, setFieldError] = useState<string | null>(null);
-  const [saveError, setSaveError] = useState(false);
-  const [saveErrorDetail, setSaveErrorDetail] = useState<string | null>(null);
   const [myReferralCode, setMyReferralCode] = useState<string | null>(null);
   const [referralNotice, setReferralNotice] = useState<string | null>(null);
   const [copyFeedback, setCopyFeedback] = useState(false);
   const [showPostInterviewRetake, setShowPostInterviewRetake] = useState(false);
   const [retakeBusy, setRetakeBusy] = useState(false);
-  const [launchContactPrefsLoaded, setLaunchContactPrefsLoaded] = useState(false);
+  /** Modal dating onboarding resume step from merged profile + draft (`complete` = all modal steps satisfied). */
+  const [datingModalResumeStep, setDatingModalResumeStep] = useState<string | null>(null);
+  const [profileCtaBusy, setProfileCtaBusy] = useState(false);
 
   useEffect(() => {
     loadWebFontsOnce();
@@ -212,110 +176,71 @@ export const PostInterviewPassedScreen: React.FC<{ navigation: any; route: { par
 
   useEffect(() => {
     let cancelled = false;
-    (async () => {
-      try {
-        const { data: auth } = await supabase.auth.getUser();
-        const uid = auth.user?.id ?? userId;
-        if (!uid) return;
-        const meta = auth.user?.user_metadata as { referral_code?: string } | undefined;
-        if (!cancelled) setShowPostInterviewRetake(isQaRetakeSignupCode(meta?.referral_code));
-        const [{ data: codeRow }, { data: userRow }] = await Promise.all([
-          supabase.from('referral_codes').select('code').eq('referrer_user_id', uid).maybeSingle(),
-          supabase
-            .from('users')
-            .select('referral_notice_pending, launch_notification_phone, launch_notification_submitted_at')
-            .eq('id', uid)
-            .maybeSingle(),
-        ]);
-        if (cancelled) return;
-        setMyReferralCode(codeRow?.code ?? null);
-        setReferralNotice(userRow?.referral_notice_pending ?? null);
-        const storedPhone =
-          typeof userRow?.launch_notification_phone === 'string'
-            ? userRow.launch_notification_phone.trim()
-            : '';
-        const submittedAt =
-          typeof userRow?.launch_notification_submitted_at === 'string'
-            ? userRow.launch_notification_submitted_at.trim()
-            : '';
-        if (storedPhone.length > 0) {
-          setSubmitted(true);
-          setSavedPhone(true);
-        } else if (submittedAt.length > 0) {
-          setSubmitted(true);
-          setSavedPhone(false);
-        }
-      } finally {
-        if (!cancelled) setLaunchContactPrefsLoaded(true);
-      }
+    void (async () => {
+      const { data: auth } = await supabase.auth.getUser();
+      const uid = auth.user?.id ?? userId;
+      if (!uid) return;
+      const meta = auth.user?.user_metadata as { referral_code?: string } | undefined;
+      if (!cancelled) setShowPostInterviewRetake(isQaRetakeSignupCode(meta?.referral_code));
+      const [{ data: codeRow }, { data: userRow }] = await Promise.all([
+        supabase.from('referral_codes').select('code').eq('referrer_user_id', uid).maybeSingle(),
+        supabase.from('users').select('referral_notice_pending').eq('id', uid).maybeSingle(),
+      ]);
+      if (cancelled) return;
+      setMyReferralCode(codeRow?.code ?? null);
+      setReferralNotice(userRow?.referral_notice_pending ?? null);
     })();
     return () => {
       cancelled = true;
     };
   }, [userId]);
 
-  const onSavePhone = async () => {
-    const trimmed = phone.trim();
-    setFieldError(null);
-    setSaveError(false);
-    setSaveErrorDetail(null);
-    if (!trimmed) {
-      setFieldError('Enter a valid phone number to save SMS updates.');
-      return;
-    }
-    const normalized = normalizeLaunchNotificationPhone(trimmed);
-    if (!normalized.ok) {
-      setFieldError(
-        "That doesn't look like a valid phone number. For US numbers include area code (10 digits). Use country code for international."
-      );
-      return;
-    }
-    const { data: authData } = await supabase.auth.getUser();
-    const uid = authData.user?.id ?? userId;
-    if (!uid) {
-      setSaveErrorDetail('Not signed in (no user id).');
-      setSaveError(true);
-      return;
-    }
-    setSubmitting(true);
+  useFocusEffect(
+    useCallback(() => {
+      let cancelled = false;
+      void (async () => {
+        const { data: auth } = await supabase.auth.getUser();
+        const uid = auth.user?.id ?? userId;
+        if (!uid) return;
+        const progress = await modalOnboardingService.getProgress(uid);
+        if (cancelled || !progress.success || !progress.data?.currentStep) return;
+        setDatingModalResumeStep(progress.data.currentStep);
+      })();
+      return () => {
+        cancelled = true;
+      };
+    }, [userId]),
+  );
+
+  const datingModalComplete = datingModalResumeStep === 'complete';
+  const profileCtaLabel = datingModalComplete ? 'Edit your profile' : 'Complete your profile';
+
+  /**
+   * Re-resolve modal progress at tap time (React state can lag `useFocusEffect`) and use `push` for edit so React
+   * Navigation does not briefly activate an older `DatingProfileOnboarding` route via `navigate` deduping.
+   */
+  const openProfileCta = useCallback(async () => {
+    const { data: auth } = await supabase.auth.getUser();
+    const uid = auth.user?.id ?? userId;
+    if (!uid) return;
+    setProfileCtaBusy(true);
     try {
-      const { data: rowExists, error: selErr } = await supabase
-        .from('users')
-        .select('id')
-        .eq('id', uid)
-        .maybeSingle();
-      if (selErr) throw selErr;
-      if (!rowExists?.id) {
-        throw new Error('PROFILE_ROW_MISSING: No users row for this account. Try signing out and back in.');
+      const progress = await modalOnboardingService.getProgress(uid);
+      let goEdit = datingModalResumeStep === 'complete';
+      if (progress.success && progress.data?.currentStep) {
+        const step = progress.data.currentStep;
+        setDatingModalResumeStep(step);
+        goEdit = step === 'complete';
       }
-      const { data, error: upErr } = await supabase
-        .from('users')
-        .update({
-          launch_notification_phone: normalized.e164,
-          launch_notification_submitted_at: new Date().toISOString(),
-        })
-        .eq('id', uid)
-        .select('id')
-        .maybeSingle();
-      if (upErr) throw upErr;
-      if (!data?.id) {
-        throw new Error('ROW_NOT_UPDATED: Update affected 0 rows (check RLS or that users.id matches your login).');
+      if (goEdit) {
+        navigation.dispatch(StackActions.push('DatingProfileEdit', { userId: uid }));
+      } else {
+        navigation.navigate('DatingProfileOnboarding', { userId: uid });
       }
-      setSavedPhone(true);
-      setSubmitted(true);
-    } catch (e: unknown) {
-      const raw =
-        typeof e === 'object' && e !== null && 'message' in e
-          ? String((e as { message: unknown }).message)
-          : e instanceof Error
-            ? e.message
-            : 'Save failed';
-      setSaveErrorDetail(raw.length > 220 ? `${raw.slice(0, 220)}…` : raw);
-      setSaveError(true);
     } finally {
-      setSubmitting(false);
+      setProfileCtaBusy(false);
     }
-  };
+  }, [userId, navigation, datingModalResumeStep]);
 
   const confirmAndRetakeInterview = () => {
     const msg =
@@ -370,6 +295,10 @@ export const PostInterviewPassedScreen: React.FC<{ navigation: any; route: { par
     void Linking.openURL(EVENT_URL);
   };
 
+  const openWhatsAppCommunity = () => {
+    void Linking.openURL(WHATSAPP_COMMUNITY_URL);
+  };
+
   return (
     <SafeAreaContainer style={{ backgroundColor: BG, flex: 1 }}>
       <ScrollView
@@ -416,12 +345,36 @@ export const PostInterviewPassedScreen: React.FC<{ navigation: any; route: { par
             ))}
           </View>
 
+          {/* <Pressable
+            onPress={() => void openProfileCta()}
+            disabled={profileCtaBusy}
+            style={({ pressed }) => [
+              styles.profileOnboardingCta,
+              pressed && !profileCtaBusy && { opacity: 0.9 },
+              profileCtaBusy && { opacity: 0.85 },
+            ]}
+            accessibilityRole="button"
+            accessibilityLabel={profileCtaLabel}
+          >
+            <Ionicons name="person-outline" size={20} color="#fff" style={{ marginRight: 8 }} />
+            <Text style={styles.profileOnboardingCtaText}>{profileCtaLabel}</Text>
+            {profileCtaBusy ? (
+              <ActivityIndicator color="#fff" style={{ marginLeft: 8 }} />
+            ) : (
+              <Ionicons name="chevron-forward" size={20} color="rgba(255,255,255,0.9)" style={{ marginLeft: 8 }} />
+            )}
+          </Pressable>
+          <Text style={styles.profileOnboardingHint}>
+            Next up: your name, photos, match preferences, and a few short assessments — everything we need to introduce
+            you properly.
+          </Text> */}
+
           <View style={styles.divider} />
 
           <Text style={styles.stayTitle}>Conscious Singles Dinner — Austin</Text>
           <Text style={styles.stayLead}>
-            We&apos;re hosting a Conscious Singles Dinner on <Text style={styles.strong}>Monday, May 4th</Text> (7:00–9:00
-            PM). It&apos;s a curated, in-person evening for pre-screened singles. Spots are limited — reserve yours on
+            We&apos;re hosting a Conscious Relating Games & Dinner on <Text style={styles.strong}>Monday, May 11th</Text> (6:00–8:00
+            PM). It&apos;s a curated, in-person evening for pre-screened singles. We will play connection games and then you will have the opportunity to connect deeper during dinner! Spots are limited, reserve yours on
             Eventbrite.
           </Text>
           <Pressable
@@ -440,64 +393,25 @@ export const PostInterviewPassedScreen: React.FC<{ navigation: any; route: { par
 
           <View style={styles.divider} />
 
-          <Text style={styles.stayTitle}>Stay in the loop</Text>
+          <Text style={styles.stayTitle}>Join the community on WhatsApp</Text>
           <Text style={styles.stayLead}>
-            We will email you with community updates! If you would like SMS updates, enter your number below and tap
-            Save. Otherwise we&apos;ll use your sign-in email.
+            You&apos;re invited to our exclusive Amoraea group — get live event updates and connect with other members who
+            passed the interview.
           </Text>
-          {saveError ? (
-            <View style={styles.saveErrBlock}>
-              <Text style={styles.saveErr}>Couldn&apos;t save your number. Please try again in a moment.</Text>
-              {saveErrorDetail ? (
-                <Text style={styles.saveErrDetail} selectable>
-                  {saveErrorDetail}
-                </Text>
-              ) : null}
-            </View>
-          ) : null}
-          {!launchContactPrefsLoaded ? (
-            <View style={styles.launchPrefsPlaceholder} accessibilityLabel="Loading">
-              <ActivityIndicator color={ACCENT} />
-            </View>
-          ) : submitted ? (
-            <View style={styles.confirmBox}>
-              <Text style={styles.confirm}>
-                {savedPhone
-                  ? "You're all set, we'll text you when there's news."
-                  : "You're all set — we'll email you at the address you used to sign in when there's news."}
-              </Text>
-            </View>
-          ) : (
-            <>
-              <TextInput
-                value={phone}
-                onChangeText={(t) => {
-                  setPhone(t);
-                  if (fieldError) setFieldError(null);
-                }}
-                placeholder="Phone for SMS updates (optional)"
-                placeholderTextColor="rgba(255,255,255,0.35)"
-                keyboardType="phone-pad"
-                autoCapitalize="none"
-                autoCorrect={false}
-                textContentType="telephoneNumber"
-                autoComplete="tel"
-                style={[styles.input, fieldError && styles.inputError]}
-              />
-              {fieldError ? <Text style={styles.fieldHint}>{fieldError}</Text> : null}
-              <Pressable
-                onPress={onSavePhone}
-                disabled={submitting}
-                style={({ pressed }) => [styles.button, pressed && { opacity: 0.88 }]}
-              >
-                <Text style={styles.buttonLabel}>{submitting ? '…' : 'Save my number'}</Text>
-              </Pressable>
-            </>
-          )}
-          <View style={styles.privacyRow}>
-            <Ionicons name="lock-closed-outline" size={14} color="rgba(255,255,255,0.45)" />
-            <Text style={styles.privacy}>Your number is private. No spam. No sharing. Ever.</Text>
-          </View>
+          <Pressable
+            onPress={openWhatsAppCommunity}
+            style={({ pressed }) => [styles.whatsAppCta, pressed && { opacity: 0.9 }]}
+            accessibilityRole="link"
+            accessibilityLabel="Open WhatsApp community invite"
+          >
+            <Ionicons name="logo-whatsapp" size={22} color="#fff" style={{ marginRight: 8 }} />
+            <Text style={styles.whatsAppCtaText}>Join the WhatsApp group</Text>
+            <Ionicons name="open-outline" size={18} color="rgba(255,255,255,0.95)" style={{ marginLeft: 8 }} />
+          </Pressable>
+          <Text style={styles.eventUrl} selectable>
+            {WHATSAPP_COMMUNITY_URL}
+          </Text>
+
           {myReferralCode ? (
             <View style={styles.referFriendSection}>
               <View style={styles.referFriendDivider} />
@@ -618,6 +532,34 @@ const styles = StyleSheet.create({
     lineHeight: 21,
     color: 'rgba(255,255,255,0.88)',
   },
+  profileOnboardingCta: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: 'rgba(91,168,232,0.22)',
+    borderWidth: 1,
+    borderColor: 'rgba(91,168,232,0.45)',
+    borderRadius: 12,
+    paddingVertical: 14,
+    paddingHorizontal: 16,
+    marginTop: 8,
+    marginBottom: 10,
+    width: '100%',
+  },
+  profileOnboardingCtaText: {
+    fontFamily: FONT_BODY,
+    fontSize: 15,
+    fontWeight: '700',
+    color: '#E8F4FF',
+  },
+  profileOnboardingHint: {
+    fontFamily: FONT_BODY,
+    fontSize: 13,
+    lineHeight: 19,
+    color: 'rgba(255,255,255,0.58)',
+    marginBottom: 8,
+    textAlign: 'center',
+  },
   divider: {
     height: 1,
     backgroundColor: 'rgba(255,255,255,0.08)',
@@ -661,62 +603,23 @@ const styles = StyleSheet.create({
     color: 'rgba(255,255,255,0.4)',
     marginBottom: 4,
   },
-  fieldHint: {
-    fontFamily: FONT_BODY,
-    fontSize: 12,
-    color: '#f87171',
-    marginBottom: 10,
-    marginTop: -8,
-  },
-  input: {
-    fontFamily: FONT_BODY,
-    borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.2)',
-    borderRadius: 10,
-    paddingHorizontal: 14,
-    paddingVertical: Platform.OS === 'web' ? 12 : 10,
-    color: '#fafafa',
-    fontSize: 15,
-    marginBottom: 12,
-    width: '100%',
-  },
-  inputError: { borderColor: '#ef4444' },
-  button: {
-    backgroundColor: ACCENT,
-    borderRadius: 10,
-    paddingVertical: 14,
+  whatsAppCta: {
+    flexDirection: 'row',
     alignItems: 'center',
-    marginBottom: 16,
-  },
-  buttonLabel: { fontFamily: FONT_BODY, fontSize: 15, fontWeight: '600', color: '#fff' },
-  confirmBox: {
-    width: '100%',
-    backgroundColor: LAUNCH_CONFIRM_BG,
-    borderWidth: 1,
-    borderColor: LAUNCH_CONFIRM_BORDER,
-    borderRadius: 12,
+    justifyContent: 'center',
+    backgroundColor: '#128C7E',
+    borderRadius: 10,
     paddingVertical: 14,
     paddingHorizontal: 16,
-    marginBottom: 16,
+    marginBottom: 10,
+    borderWidth: 1,
+    borderColor: 'rgba(37, 211, 102, 0.45)',
   },
-  confirm: {
+  whatsAppCtaText: {
     fontFamily: FONT_BODY,
-    fontSize: 16,
-    lineHeight: 24,
+    fontSize: 15,
     fontWeight: '600',
-    color: LAUNCH_CONFIRM_TEXT,
-  },
-  saveErr: { fontFamily: FONT_BODY, fontSize: 13, color: '#f87171', marginBottom: 8 },
-  saveErrBlock: { marginBottom: 12, width: '100%' },
-  saveErrDetail: { fontFamily: FONT_BODY, fontSize: 11, lineHeight: 16, color: 'rgba(248,113,113,0.85)' },
-  launchPrefsPlaceholder: { width: '100%', minHeight: 140, justifyContent: 'center', alignItems: 'center', paddingVertical: 24 },
-  privacyRow: { flexDirection: 'row', alignItems: 'center', gap: 8, marginTop: 14, width: '100%' },
-  privacy: {
-    flex: 1,
-    fontFamily: FONT_BODY,
-    fontSize: 12,
-    lineHeight: 17,
-    color: 'rgba(255,255,255,0.45)',
+    color: '#fff',
   },
   referralNoticeBanner: {
     width: '100%',
@@ -736,7 +639,7 @@ const styles = StyleSheet.create({
   },
   referralNoticeDismiss: { alignSelf: 'flex-end' },
   referralNoticeDismissLabel: { fontFamily: FONT_BODY, fontSize: 13, fontWeight: '600', color: ACCENT },
-  referFriendSection: { width: '100%', marginTop: 8, marginBottom: 4 },
+  referFriendSection: { width: '100%', marginTop: 20, marginBottom: 4 },
   referFriendDivider: { height: 1, backgroundColor: 'rgba(255,255,255,0.08)', marginBottom: 20 },
   referFriendTitle: {
     fontFamily: FONT_DISPLAY,

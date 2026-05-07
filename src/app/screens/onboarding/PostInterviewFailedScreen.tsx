@@ -96,13 +96,13 @@ function FlickeringFlame({ size = 100 }: { size?: number }) {
           toValue: 0.78,
           duration: 240,
           easing: Easing.inOut(Easing.quad),
-          useNativeDriver: true,
+          useNativeDriver: Platform.OS !== 'web',
         }),
         Animated.timing(flicker, {
           toValue: 1,
           duration: 420,
           easing: Easing.inOut(Easing.quad),
-          useNativeDriver: true,
+          useNativeDriver: Platform.OS !== 'web',
         }),
         Animated.delay(1400),
       ])

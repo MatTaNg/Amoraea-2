@@ -1,9 +1,9 @@
 -- User-submitted interview feedback; insert open for all roles; read for service role and Amoraea app admin.
-create table public.interview_feedback (
+CREATE TABLE IF NOT EXISTS public.interview_feedback (
   id              uuid primary key default gen_random_uuid(),
   created_at      timestamptz not null default now(),
-  attempt_id      uuid references interview_attempts(id) on delete set null,
-  user_id         uuid references auth.users(id) on delete set null,
+  attempt_id      uuid references public.interview_attempts (id) on delete set null,
+  user_id         uuid references auth.users (id) on delete set null,
   category        text,
   message         text not null,
   rating          smallint,
@@ -11,14 +11,18 @@ create table public.interview_feedback (
   user_agent      text
 );
 
-alter table public.interview_feedback enable row level security;
+ALTER TABLE public.interview_feedback ENABLE ROW LEVEL SECURITY;
 
-create policy "insert_feedback" on public.interview_feedback
-  for insert with check (true);
+DROP POLICY IF EXISTS "insert_feedback" ON public.interview_feedback;
+DROP POLICY IF EXISTS "admin_read_feedback" ON public.interview_feedback;
+DROP POLICY IF EXISTS "admin_read_feedback_app" ON public.interview_feedback;
 
-create policy "admin_read_feedback" on public.interview_feedback
-  for select using (auth.role() = 'service_role');
+CREATE POLICY "insert_feedback" ON public.interview_feedback
+  FOR INSERT WITH CHECK (true);
 
-create policy "admin_read_feedback_app" on public.interview_feedback
-  for select to authenticated
-  using (public.is_amoraea_admin());
+CREATE POLICY "admin_read_feedback" ON public.interview_feedback
+  FOR SELECT USING (auth.role() = 'service_role');
+
+CREATE POLICY "admin_read_feedback_app" ON public.interview_feedback
+  FOR SELECT TO authenticated
+  USING (public.is_amoraea_admin());

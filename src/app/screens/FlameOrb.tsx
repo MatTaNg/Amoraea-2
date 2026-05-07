@@ -1,4 +1,4 @@
-import React, { useEffect, useRef } from 'react';
+import React, { useEffect, useId, useMemo, useRef } from 'react';
 import { Platform } from 'react-native';
 import FlameOrbNative, { type FlameOrbNativeState } from './FlameOrbNative';
 import {
@@ -57,7 +57,6 @@ const W = FLAME_VIEWBOX_W;
 const H = FLAME_VIEWBOX_H;
 const VIEWBOX_W = FLAME_VIEWBOX_W;
 const VIEWBOX_H = FLAME_VIEWBOX_H;
-const ID = 'amoraea-flame';
 
 export const FlameOrb: React.FC<{
   state: FlameState;
@@ -66,6 +65,11 @@ export const FlameOrb: React.FC<{
   minimalGlow?: boolean;
 }> = ({ state = 'idle', size = 200, minimalGlow = false }) => {
   const containerRef = useRef<HTMLDivElement | null>(null);
+  const reactId = useId();
+  const svgId = useMemo(
+    () => `amoraea-flame-${reactId.replace(/[^a-zA-Z0-9_-]/g, '')}`,
+    [reactId]
+  );
   const config = CONFIG[state] ?? CONFIG.idle;
 
   const transition =
@@ -76,7 +80,9 @@ export const FlameOrb: React.FC<{
   useEffect(() => {
     if (Platform.OS !== 'web' || typeof document === 'undefined') return;
     const dur = (CONFIG[state] ?? CONFIG.idle).flickerDur;
-    document.querySelectorAll('.flame-seed-anim').forEach((el) => {
+    const root = containerRef.current;
+    if (!root) return;
+    root.querySelectorAll('.flame-seed-anim').forEach((el) => {
       el.setAttribute('dur', dur);
     });
   }, [state]);
@@ -138,7 +144,7 @@ export const FlameOrb: React.FC<{
         }}
       >
         <defs>
-          <filter id={`${ID}-distort`} x="-20%" y="-10%" width="140%" height="120%">
+          <filter id={`${svgId}-distort`} x="-20%" y="-10%" width="140%" height="120%">
             <feTurbulence
               type="turbulence"
               baseFrequency="0.025 0.008"
@@ -170,7 +176,7 @@ export const FlameOrb: React.FC<{
           </filter>
 
           {/* Outer flame — rich royal blue, darker at edges */}
-          <linearGradient id={`${ID}-outer`} x1="0%" y1="100%" x2="0%" y2="0%">
+          <linearGradient id={`${svgId}-outer`} x1="0%" y1="100%" x2="0%" y2="0%">
             <stop offset="0%" stopColor="#0A2A8C" />
             <stop offset="20%" stopColor="#1245BB" />
             <stop offset="50%" stopColor="#1E6FD9" />
@@ -180,7 +186,7 @@ export const FlameOrb: React.FC<{
           </linearGradient>
 
           {/* Inner flame — very pale blue to near-white, like the logo's bright core */}
-          <linearGradient id={`${ID}-inner`} x1="0%" y1="100%" x2="0%" y2="0%">
+          <linearGradient id={`${svgId}-inner`} x1="0%" y1="100%" x2="0%" y2="0%">
             <stop offset="0%" stopColor="#B8DCFF" />
             <stop offset="20%" stopColor="#D8EEFF" />
             <stop offset="45%" stopColor="#F0F8FF" />
@@ -189,7 +195,7 @@ export const FlameOrb: React.FC<{
             <stop offset="100%" stopColor="#A0CCFF" />
           </linearGradient>
 
-          <radialGradient id={`${ID}-hotcore`} cx="50%" cy="65%" r="30%">
+          <radialGradient id={`${svgId}-hotcore`} cx="50%" cy="65%" r="30%">
             <stop offset="0%" stopColor="#FFFFFF" stopOpacity={1} />
             <stop offset="40%" stopColor="#D8F0FF" stopOpacity={0.8} />
             <stop offset="100%" stopColor="#4A9FE8" stopOpacity={0} />
@@ -210,16 +216,16 @@ export const FlameOrb: React.FC<{
 
         <path
           d={FLAME_PATH}
-          fill={`url(#${ID}-outer)`}
-          filter={`url(#${ID}-distort)`}
+          fill={`url(#${svgId}-outer)`}
+          filter={`url(#${svgId}-distort)`}
         />
         <path
           d={INNER_FLAME_PATH}
-          fill={`url(#${ID}-inner)`}
-          filter={`url(#${ID}-distort)`}
+          fill={`url(#${svgId}-inner)`}
+          filter={`url(#${svgId}-distort)`}
           opacity={0.85}
         />
-        <path d={INNER_FLAME_PATH} fill={`url(#${ID}-hotcore)`} opacity={0.7} />
+        <path d={INNER_FLAME_PATH} fill={`url(#${svgId}-hotcore)`} opacity={0.7} />
       </svg>
 
       <style>{`

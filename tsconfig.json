@@ -10,6 +10,24 @@
     "jsx": "react-native",
     "baseUrl": ".",
     "paths": {
+      "@/src/types": [
+        "src/datingProfile/types/index.ts"
+      ],
+      "@/data/services/*": [
+        "src/datingProfile/data/services/*"
+      ],
+      "@/data/assessments/*": [
+        "src/datingProfile/data/assessments/*"
+      ],
+      "@/screens/assessments/*": [
+        "src/datingProfile/screens/assessments/*"
+      ],
+      "@/screens/onboarding/*": [
+        "src/datingProfile/screens/onboarding/*"
+      ],
+      "@/screens/profile/*": [
+        "src/screens/profile/*"
+      ],
       "@/*": [
         "src/*"
       ],

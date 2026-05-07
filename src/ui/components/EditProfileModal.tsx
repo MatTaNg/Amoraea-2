@@ -16,6 +16,7 @@ import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { z } from 'zod';
 import { TextInput } from '@ui/components/TextInput';
+import { HeightCmPicker } from '@/shared/components/HeightCmPicker';
 import { SelectButton } from '@ui/components/SelectButton';
 import { MultiSelectButton } from '@ui/components/MultiSelectButton';
 import { Button } from '@ui/components/Button';
@@ -266,11 +267,6 @@ export const EditProfileModal: React.FC<EditProfileModalProps> = ({
     setValue('age', isNaN(num) ? undefined : num, { shouldValidate: true });
   };
 
-  const handleHeightChange = (text: string) => {
-    const num = parseInt(text, 10);
-    setValue('heightCentimeters', isNaN(num) ? undefined : num, { shouldValidate: true });
-  };
-
   const toggleAttractedTo = (option: AttractedToOption) => {
     const current = attractedToValue;
     const next = current.includes(option)
@@ -459,13 +455,13 @@ export const EditProfileModal: React.FC<EditProfileModalProps> = ({
                 <Text style={styles.errorText}>{errors.attractedTo.message}</Text>
               )}
 
-              <TextInput
+              <HeightCmPicker
                 label="Height (cm)"
-                value={heightValue?.toString() ?? ''}
-                onChangeText={handleHeightChange}
-                placeholder="100–250"
-                keyboardType="numeric"
-                error={errors.heightCentimeters?.message}
+                valueCm={heightValue}
+                onChangeCm={(cm) =>
+                  setValue('heightCentimeters', cm, { shouldValidate: true })
+                }
+                errorText={errors.heightCentimeters?.message}
               />
 
               <Text style={styles.fieldLabel}>Weight</Text>

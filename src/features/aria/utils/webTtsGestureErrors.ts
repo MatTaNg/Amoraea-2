@@ -16,3 +16,17 @@ export function isWebTtsRequiresUserGestureError(err: unknown): err is WebTtsReq
   const o = err as { name?: string; text?: unknown };
   return o.name === 'WebTtsRequiresUserGestureError' && typeof o.text === 'string';
 }
+
+/** Tab-return TTS resume failed; replacement {@link speakWithElevenLabs} supersedes the stuck playback promise. */
+export class TtsTabResumeFallbackError extends Error {
+  constructor() {
+    super('tts_tab_resume_fallback');
+    this.name = 'TtsTabResumeFallbackError';
+  }
+}
+
+export function isTtsTabResumeFallbackError(err: unknown): err is TtsTabResumeFallbackError {
+  if (err instanceof TtsTabResumeFallbackError) return true;
+  if (typeof err !== 'object' || err === null) return false;
+  return (err as { name?: string }).name === 'TtsTabResumeFallbackError';
+}

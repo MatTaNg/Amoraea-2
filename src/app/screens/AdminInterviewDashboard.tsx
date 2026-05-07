@@ -16,6 +16,7 @@ import {
   Alert,
   Switch,
   Share,
+  Modal,
 } from 'react-native';
 import { supabase } from '@data/supabase/client';
 import {
@@ -30,7 +31,10 @@ import {
   type MarkerScoreSlice,
 } from '@features/aria/aggregateMarkerScoresFromSlices';
 import { enrichScenarioSliceWithContemptHeuristic } from '@features/aria/contemptExpressionScenarioHeuristic';
-import { sanitizePersonalMomentScoresForAggregate } from '@features/aria/personalMomentSliceSanitize';
+import {
+  sanitizeMoment5PersonalScoresForAggregate,
+  sanitizePersonalMomentScoresForAggregate,
+} from '@features/aria/personalMomentSliceSanitize';
 import {
   describeCertaintyAmbiguityAxis,
   describeEmotionalAnalyticalAxis,
@@ -41,10 +45,18 @@ import {
   styleProfileFromDbRow,
   translateStyleProfile,
 } from '@utilities/styleTranslations';
-import { ADMIN_CONSOLE_EMAIL } from '@/constants/adminConsole';
+import { ADMIN_CONSOLE_EMAIL, isAmoraeaAdminConsoleEmail } from '@/constants/adminConsole';
 import { adminRetryAIReasoningForAttempt } from '@utilities/adminRetryAIReasoning';
 import { confirmAsync } from '@utilities/alerts/confirmDialog';
-import { computeGateResultCore } from '@features/aria/computeGateResultCore';
+import { COMMUNICATION_FLOOR_MIN_AVG_WORDS } from '@features/aria/communicationFloorFromTranscript';
+import {
+  computeGateResultCore,
+  GATE_PASS_WEIGHTED_MIN,
+  type GateFailCode,
+  type GateFailDetailJson,
+} from '@features/aria/computeGateResultCore';
+import { MENTALIZING_REPAIR_SCENARIO_PASS_MIN } from '@features/aria/mentalizingRepairScenarioFloor';
+import { SCENARIO_COMPOSITE_PASS_MIN } from '@features/aria/scenarioCompositeFloor';
 import {
   classifyAdminGateOutcome,
   formatGateFailureLines,
@@ -53,6 +65,12 @@ import {
 } from '@features/aria/adminGateDisplay';
 import { AdminFeedbackPanel } from '@/components/admin/AdminFeedbackPanel';
 import { resolveAdminInterviewIntroDisplayName } from '@utilities/adminInterviewIntroDisplayName';
+import {
+  computePillarScoreDelta,
+  recalculateAttemptScoresFromStoredSlices,
+  snapshotAttemptScoresForAudit,
+} from '@features/aria/adminRecalculateAttemptScores';
+import { remoteLog } from '@utilities/remoteLog';
 
 // Marker ids as stored in DB; construct keys match ai_reasoning.construct_breakdown
 const PILLAR_ROWS = [
@@ -72,7 +90,7 @@ const ASSESSED_MARKERS_BY_SECTION: Record<string, string[]> = {
   scenario_2: ['appreciation', 'attunement', 'mentalizing', 'repair', 'accountability', 'contempt'],
   scenario_3: ['regulation', 'repair', 'mentalizing', 'attunement', 'accountability', 'commitment_threshold', 'contempt'],
   moment_4: ['contempt', 'commitment_threshold', 'accountability', 'mentalizing'],
-  moment_5: ['appreciation', 'attunement', 'mentalizing', 'contempt'],
+  moment_5: ['accountability', 'mentalizing', 'repair', 'regulation', 'contempt_expression'],
 };
 
 const SLICE_CONTEMPT_EXTRA_KEYS = ['contempt_recognition', 'contempt_expression'] as const;
@@ -171,9 +189,26 @@ type AttemptRow = {
   scenario_specific_patterns?: Record<string, unknown> | null;
   probe_log?: unknown;
   communication_style_error?: string | null;
+  communication_floor_flag?: boolean | null;
+  communication_floor_avg_unprompted_words?: number | null;
+  communication_floor_dismissed_at?: string | null;
+  communication_floor_dismissed_by?: string | null;
+  communication_floor_dismiss_note?: string | null;
   reasoning_pending?: boolean | null;
   override_status?: boolean | null;
   override_set_at?: string | null;
+  gate_fail_reason?: string | null;
+  scenario_composites?: Record<string, unknown> | null;
+  scenario_floor_grandfather_review?: boolean | null;
+  gate_fail_reasons?: unknown;
+  gate_fail_detail?: unknown;
+  mentalizing_repair_floor_grandfather_review?: boolean | null;
+  /** Snapshot before admin score recalculation. */
+  original_scores?: Record<string, unknown> | null;
+  recalculated_at?: string | null;
+  recalculation_delta?: Record<string, number> | null;
+  recalculation_notes?: string[] | null;
+  incomplete_reason?: string | null;
 };
 
 /** List/overview only — loaded once for all users (small payload). Full rows load per user on drill-down. */
@@ -190,6 +225,12 @@ type AttemptSummary = Pick<
   | 'pillar_scores'
   | 'override_status'
   | 'override_set_at'
+  | 'gate_fail_reason'
+  | 'scenario_composites'
+  | 'scenario_floor_grandfather_review'
+  | 'gate_fail_reasons'
+  | 'gate_fail_detail'
+  | 'mentalizing_repair_floor_grandfather_review'
 >;
 
 const INTERVIEW_ATTEMPTS_FULL_SELECT_BASE = `
@@ -217,7 +258,18 @@ const INTERVIEW_ATTEMPTS_FULL_SELECT_BASE = `
       per_construct_ratings,
       transcript,
       communication_style_error,
-      reasoning_pending
+      communication_floor_flag,
+      communication_floor_avg_unprompted_words,
+      communication_floor_dismissed_at,
+      communication_floor_dismissed_by,
+      communication_floor_dismiss_note,
+      reasoning_pending,
+      gate_fail_reason,
+      scenario_composites,
+      scenario_floor_grandfather_review,
+      gate_fail_reasons,
+      gate_fail_detail,
+      mentalizing_repair_floor_grandfather_review
     ` as const;
 
 const INTERVIEW_ATTEMPTS_FULL_SELECT = `${INTERVIEW_ATTEMPTS_FULL_SELECT_BASE},
@@ -233,7 +285,13 @@ const INTERVIEW_ATTEMPTS_SUMMARY_SELECT_BASE = `
       weighted_score,
       passed,
       reasoning_pending,
-      pillar_scores
+      pillar_scores,
+      gate_fail_reason,
+      scenario_composites,
+      scenario_floor_grandfather_review,
+      gate_fail_reasons,
+      gate_fail_detail,
+      mentalizing_repair_floor_grandfather_review
     ` as const;
 
 const INTERVIEW_ATTEMPTS_SUMMARY_SELECT = `${INTERVIEW_ATTEMPTS_SUMMARY_SELECT_BASE},
@@ -371,6 +429,31 @@ function parseObject(raw: unknown): Record<string, unknown> | null {
   return raw as Record<string, unknown>;
 }
 
+/** Non-empty narrative fields — pending stubs only carry _reasoningPending + pillar_scores + note. */
+function adminAttemptHasSubstantiveAiReasoning(ar: Record<string, unknown> | null): boolean {
+  if (!ar) return false;
+  const summary = ar.interview_summary;
+  if (typeof summary === 'string' && summary.trim().length > 0) return true;
+  const strengths = ar.overall_strengths;
+  if (Array.isArray(strengths) && strengths.some((x) => typeof x === 'string' && x.trim().length > 0)) return true;
+  const growth = ar.overall_growth_areas;
+  if (Array.isArray(growth) && growth.some((x) => typeof x === 'string' && x.trim().length > 0)) return true;
+  return false;
+}
+
+/**
+ * True when the attempt is still missing long-form AI narrative, not only when `reasoning_pending` / _reasoningPending
+ * flags are set (they can be stale after a successful retry or backfill).
+ */
+function adminAiNarrativeStillPending(attempt: AttemptRow): boolean {
+  const ar = parseObject(attempt.ai_reasoning);
+  const flagPending =
+    attempt.reasoning_pending === true || !!(ar as { _reasoningPending?: boolean } | null)?._reasoningPending;
+  if (!flagPending) return false;
+  if (adminAttemptHasSubstantiveAiReasoning(ar)) return false;
+  return true;
+}
+
 function getMomentScoreBundle(
   attempt: AttemptRow | null | undefined,
   momentNumber: 4 | 5
@@ -471,17 +554,30 @@ function extractSanitizedMomentSlice(raw: unknown): MarkerScoreSlice {
   return { pillarScores: sanitized.pillarScores, keyEvidence: sanitized.keyEvidence };
 }
 
+function extractSanitizedMoment5Slice(raw: unknown): MarkerScoreSlice {
+  const slice = extractAggregateSlice(raw);
+  if (!slice?.pillarScores) return slice;
+  const sanitized = sanitizeMoment5PersonalScoresForAggregate({
+    pillarScores: slice.pillarScores as Record<string, number | null>,
+    keyEvidence: slice.keyEvidence,
+  });
+  if (!sanitized?.pillarScores) return slice;
+  return { pillarScores: sanitized.pillarScores, keyEvidence: sanitized.keyEvidence };
+}
+
 function computeMarkerAggregateFromAttempt(
   attempt: AttemptRow
 ): { scores: Record<string, number>; counts: Record<string, number> } {
   const patterns = parseObject(attempt.scenario_specific_patterns);
   const m4Raw = parseObject(patterns?.moment_4_scores);
   const tx = attempt.transcript;
+  const m5Raw = parseObject(patterns?.moment_5_scores);
   const slices: MarkerScoreSlice[] = [
     enrichScenarioSliceWithContemptHeuristic(extractAggregateSlice(attempt.scenario_1_scores), userTextForAdminScenario(tx, 1)),
     enrichScenarioSliceWithContemptHeuristic(extractAggregateSlice(attempt.scenario_2_scores), userTextForAdminScenario(tx, 2)),
     enrichScenarioSliceWithContemptHeuristic(extractAggregateSlice(attempt.scenario_3_scores), userTextForAdminScenario(tx, 3)),
     extractSanitizedMomentSlice(m4Raw),
+    extractSanitizedMoment5Slice(m5Raw),
   ];
   return aggregatePillarScoresWithCommitmentMergeDetailed(slices);
 }
@@ -879,6 +975,117 @@ function pillarScoresForGate(a: AttemptSummary | AttemptRow | null): Record<stri
   return normalizePillarScoresMap((a as AttemptSummary).pillar_scores) ?? {};
 }
 
+function scenarioFloorBreachSummaryFromComposites(scenarioComposites: unknown): string | null {
+  const obj =
+    scenarioComposites != null && typeof scenarioComposites === 'object' && !Array.isArray(scenarioComposites)
+      ? (scenarioComposites as Record<string, unknown>)
+      : null;
+  if (!obj) return null;
+  const breachParts: string[] = [];
+  for (const sn of [1, 2, 3] as const) {
+    const raw = obj[`scenario_${sn}`] ?? obj[String(sn)];
+    const c = typeof raw === 'number' && Number.isFinite(raw) ? raw : undefined;
+    if (c !== undefined && c < SCENARIO_COMPOSITE_PASS_MIN) {
+      breachParts.push(`S${sn} ${c.toFixed(2)}`);
+    }
+  }
+  return breachParts.length > 0 ? breachParts.join(', ') : null;
+}
+
+const STORED_GATE_FAIL_ORDER: GateFailCode[] = [
+  'weighted_score',
+  'scenario_floor',
+  'mentalizing_floor',
+  'repair_floor',
+];
+
+function inferGateFailCodesFromLegacyReason(text: string | null): GateFailCode[] {
+  if (!text) return [];
+  const found: GateFailCode[] = [];
+  if (text.includes('weighted_score:') || text.includes('weighted_below_threshold:')) {
+    found.push('weighted_score');
+  }
+  if (text.includes('scenario_floor:')) found.push('scenario_floor');
+  if (text.includes('mentalizing_floor:')) found.push('mentalizing_floor');
+  if (text.includes('repair_floor:')) found.push('repair_floor');
+  return STORED_GATE_FAIL_ORDER.filter((c) => found.includes(c));
+}
+
+function normalizeGateFailCodesFromAttempt(attempt: AttemptSummary | AttemptRow): GateFailCode[] {
+  const raw = attempt.gate_fail_reasons;
+  if (Array.isArray(raw)) {
+    return STORED_GATE_FAIL_ORDER.filter((c) => raw.includes(c));
+  }
+  return inferGateFailCodesFromLegacyReason(attempt.gate_fail_reason ?? null);
+}
+
+function parseGateFailDetailRow(attempt: AttemptSummary | AttemptRow): GateFailDetailJson | null {
+  const d = attempt.gate_fail_detail;
+  if (!d || typeof d !== 'object' || Array.isArray(d)) return null;
+  return d as GateFailDetailJson;
+}
+
+function buildStoredGateFailureLines(attempt: AttemptSummary | AttemptRow): string[] {
+  const codes = normalizeGateFailCodesFromAttempt(attempt);
+  const detail = parseGateFailDetailRow(attempt);
+  const lines: string[] = [];
+
+  for (const c of STORED_GATE_FAIL_ORDER) {
+    if (!codes.includes(c)) continue;
+    if (c === 'weighted_score') {
+      const w =
+        detail?.weighted_score ??
+        (attempt.weighted_score != null
+          ? { score: attempt.weighted_score, requiredMin: GATE_PASS_WEIGHTED_MIN }
+          : null);
+      if (w) lines.push(`Weighted ${w.score.toFixed(1)} (min ${w.requiredMin.toFixed(1)})`);
+    }
+    if (c === 'scenario_floor') {
+      const breachText = scenarioFloorBreachSummaryFromComposites(attempt.scenario_composites);
+      if (breachText) lines.push(`Scenario floor: ${breachText} (< ${SCENARIO_COMPOSITE_PASS_MIN})`);
+      else if (detail?.scenario_floor?.breaches?.length) {
+        const parts = detail.scenario_floor.breaches.map((b) => `S${b.scenario} ${b.composite.toFixed(2)}`);
+        lines.push(`Scenario floor: ${parts.join(', ')} (< ${SCENARIO_COMPOSITE_PASS_MIN})`);
+      }
+    }
+    if (c === 'mentalizing_floor') {
+      const lows = detail?.mentalizing_floor?.lowScenarios ?? [];
+      if (lows.length > 0) {
+        const parts = lows.map((l) => `S${l.scenario} ${l.score.toFixed(2)}`);
+        lines.push(`Mentalizing: ${parts.join(', ')} (< ${MENTALIZING_REPAIR_SCENARIO_PASS_MIN} in 2+ scenarios)`);
+      }
+    }
+    if (c === 'repair_floor') {
+      const lows = detail?.repair_floor?.lowScenarios ?? [];
+      if (lows.length > 0) {
+        const parts = lows.map((l) => `S${l.scenario} ${l.score.toFixed(2)}`);
+        lines.push(`Repair: ${parts.join(', ')} (< ${MENTALIZING_REPAIR_SCENARIO_PASS_MIN} in 2+ scenarios)`);
+      }
+    }
+  }
+
+  if (lines.length === 0 && attempt.gate_fail_reason) {
+    return attempt.gate_fail_reason.split(';').map((s) => s.trim()).filter(Boolean);
+  }
+  return lines;
+}
+
+function mentalizingRepairGrandfatherLine(attempt: AttemptSummary | AttemptRow): string | null {
+  if (attempt.mentalizing_repair_floor_grandfather_review !== true) return null;
+  const d = parseGateFailDetailRow(attempt);
+  const ment = d?.mentalizing_floor?.lowScenarios ?? [];
+  const rep = d?.repair_floor?.lowScenarios ?? [];
+  const parts: string[] = [];
+  if (ment.length >= 2) {
+    parts.push(`Mentalizing ${ment.map((l) => `S${l.scenario} ${l.score.toFixed(2)}`).join(', ')}`);
+  }
+  if (rep.length >= 2) {
+    parts.push(`Repair ${rep.map((l) => `S${l.scenario} ${l.score.toFixed(2)}`).join(', ')}`);
+  }
+  if (parts.length > 0) return `Legacy pass — mentalizing/repair review: ${parts.join(' · ')}`;
+  return 'Legacy pass — mentalizing/repair scenario review';
+}
+
 function getAdminOutcomeDisplay(attempt: AttemptSummary | AttemptRow | null): {
   word: string;
   color: string;
@@ -888,6 +1095,35 @@ function getAdminOutcomeDisplay(attempt: AttemptSummary | AttemptRow | null): {
   if (!attempt) {
     return { word: '—', color: '#7A9ABE', detail: null, outcomeLabel: 'none' };
   }
+
+  const gateFailReason = attempt.gate_fail_reason ?? null;
+  const scenarioGrandfather = attempt.scenario_floor_grandfather_review === true;
+  const grandfatherBreaches = scenarioFloorBreachSummaryFromComposites(attempt.scenario_composites);
+  const grandfatherDetail =
+    scenarioGrandfather && grandfatherBreaches
+      ? `Legacy pass — review: ${grandfatherBreaches} (< ${SCENARIO_COMPOSITE_PASS_MIN})`
+      : scenarioGrandfather
+        ? 'Legacy pass — scenario floor review'
+        : null;
+  const mrGrandfatherLine = mentalizingRepairGrandfatherLine(attempt);
+
+  const mergeDetail = (base: string | null | undefined): string | null => {
+    const parts = [grandfatherDetail, mrGrandfatherLine, base].filter((p): p is string => !!p && p.length > 0);
+    return parts.length > 0 ? parts.join(' · ') : null;
+  };
+
+  if (attempt.passed === false) {
+    const storedLines = buildStoredGateFailureLines(attempt);
+    const detailStr =
+      storedLines.length > 0 ? storedLines.join(' · ') : gateFailReason ?? null;
+    return {
+      word: 'fail',
+      color: getPassColor('fail'),
+      detail: detailStr,
+      outcomeLabel: 'fail',
+    };
+  }
+
   const scores = pillarScoresForGate(attempt);
   if (Object.keys(scores).length === 0) {
     const pw = getPassWord(attempt);
@@ -895,32 +1131,89 @@ function getAdminOutcomeDisplay(attempt: AttemptSummary | AttemptRow | null): {
     return {
       word: w,
       color: pw === 'none' ? getPassColor('none') : getPassColor(pw),
-      detail: null,
+      detail: mergeDetail(null),
       outcomeLabel: 'none',
     };
   }
   const gate = computeGateResultCore(scores);
   const { label, detailLines } = classifyAdminGateOutcome(scores, gate);
   if (label === 'pass') {
-    return { word: 'pass', color: getPassColor('pass'), detail: null, outcomeLabel: 'pass' };
+    return {
+      word: 'pass',
+      color: getPassColor('pass'),
+      detail: mergeDetail(null),
+      outcomeLabel: 'pass',
+    };
   }
   if (label === 'almost') {
     const detail =
       detailLines.length > 0 ? detailLines.join(' · ') : summarizeGateForAdmin(scores, gate);
-    return { word: 'almost', color: getAlmostPassColor(), detail: detail ?? null, outcomeLabel: 'almost' };
+    return {
+      word: 'almost',
+      color: getAlmostPassColor(),
+      detail: mergeDetail(detail ?? null),
+      outcomeLabel: 'almost',
+    };
   }
   if (label === 'fail') {
     const detail = detailLines.length > 0 ? detailLines.join(' · ') : null;
-    return { word: 'fail', color: getPassColor('fail'), detail, outcomeLabel: 'fail' };
+    return {
+      word: 'fail',
+      color: getPassColor('fail'),
+      detail: mergeDetail(detail),
+      outcomeLabel: 'fail',
+    };
   }
   const pw = getPassWord(attempt);
   const w = pw === 'none' ? '—' : pw;
   return {
     word: w,
     color: pw === 'none' ? getPassColor('none') : getPassColor(pw),
-    detail: null,
+    detail: mergeDetail(null),
     outcomeLabel: 'none',
   };
+}
+
+/** Attempt or profile admin lock-in takes precedence over computed gate / "almost" for list, export, and stats. */
+function getEffectiveAdminForcedPassFail(
+  user: Pick<UserRow, 'interview_passed' | 'interview_passed_computed' | 'interview_passed_admin_override'> | null | undefined,
+  attempt: AttemptSummary | AttemptRow | null,
+): boolean | null {
+  if (attempt) {
+    const ov = attempt.override_status;
+    if (ov === true || ov === false) return ov;
+  }
+  const p = user?.interview_passed_admin_override;
+  if (p === true || p === false) return p;
+  /** Effective routing differs from stored gate — treat as locked-in outcome (CSV/cards match profile row). */
+  const eff = user?.interview_passed;
+  const comp = user?.interview_passed_computed;
+  if ((eff === true || eff === false) && (comp === true || comp === false) && eff !== comp) {
+    return eff;
+  }
+  return null;
+}
+
+function resolveAdminPrimaryOutcomeDisplay(
+  user: Pick<UserRow, 'interview_passed' | 'interview_passed_computed' | 'interview_passed_admin_override'> | null | undefined,
+  attempt: AttemptSummary | AttemptRow | null,
+): {
+  word: string;
+  color: string;
+  detail: string | null;
+  outcomeLabel: AdminGateOutcomeLabel;
+} {
+  const forced = getEffectiveAdminForcedPassFail(user, attempt);
+  if (forced === true) {
+    return { word: 'pass', color: getPassColor('pass'), detail: null, outcomeLabel: 'pass' };
+  }
+  if (forced === false) {
+    return { word: 'fail', color: getPassColor('fail'), detail: null, outcomeLabel: 'fail' };
+  }
+  if (user?.interview_passed === true) {
+    return { word: 'pass', color: getPassColor('pass'), detail: null, outcomeLabel: 'pass' };
+  }
+  return getAdminOutcomeDisplay(attempt);
 }
 
 function formatAttemptDate(attempt: AttemptSummary | AttemptRow): string {
@@ -961,7 +1254,14 @@ function getAttemptsSorted(attempts: AttemptRow[] | null | undefined): AttemptRo
 }
 
 /** Cohort list filter — derived from live interview state + latest attempt gate display. */
-type AdminUserStatusFilter = 'all' | 'in_progress' | 'pass' | 'fail' | 'almost' | 'no_result';
+type AdminUserStatusFilter =
+  | 'all'
+  | 'incomplete'
+  | 'in_progress'
+  | 'pass'
+  | 'fail'
+  | 'almost'
+  | 'no_result';
 
 function getString(v: unknown): string | null {
   return typeof v === 'string' && v.trim().length > 0 ? v.trim() : null;
@@ -991,13 +1291,7 @@ function userHasInProgressInterview(user: UserRow): boolean {
 
 function classifyAdminUserListStatus(g: UserGroup): AdminUserStatusFilter {
   if (userHasInProgressInterview(g.user)) return 'in_progress';
-  if (g.user.interview_passed === true) return 'pass';
-  if (g.user.interview_passed === false) {
-    const o = getAdminOutcomeDisplay(g.latestAttempt);
-    if (o.outcomeLabel === 'almost') return 'almost';
-    return 'fail';
-  }
-  const o = getAdminOutcomeDisplay(g.latestAttempt);
+  const o = resolveAdminPrimaryOutcomeDisplay(g.user, g.latestAttempt);
   if (o.outcomeLabel === 'pass') return 'pass';
   if (o.outcomeLabel === 'fail') return 'fail';
   if (o.outcomeLabel === 'almost') return 'almost';
@@ -1026,8 +1320,9 @@ function computeCohortHeaderStats(groups: UserGroup[]) {
   let failed = 0;
   for (const g of groups) {
     if (hasStartedInterviewCohort(g)) started += 1;
-    if (g.user.interview_passed === true) passed += 1;
-    else if (g.user.interview_passed === false) failed += 1;
+    const o = resolveAdminPrimaryOutcomeDisplay(g.user, g.latestAttempt);
+    if (o.outcomeLabel === 'pass') passed += 1;
+    else if (o.outcomeLabel === 'fail' || o.outcomeLabel === 'almost') failed += 1;
   }
   return { started, passed, failed };
 }
@@ -1053,8 +1348,7 @@ function escapeCsvPhoneForSpreadsheet(display: string): string {
 /** Matches UserCard status line (Pass / Fail / Almost / — / In progress). */
 function adminCohortExportStatusLine(g: UserGroup): string {
   if (userHasInProgressInterview(g.user)) return 'In progress';
-  if (g.user.interview_passed === true) return 'Pass';
-  const o = getAdminOutcomeDisplay(g.latestAttempt);
+  const o = resolveAdminPrimaryOutcomeDisplay(g.user, g.latestAttempt);
   const w = o.word;
   if (w === '—') return '—';
   if (w === 'pass') return 'Pass';
@@ -1221,13 +1515,7 @@ function UserCard({
 }) {
   const [overrideBusy, setOverrideBusy] = useState(false);
   const latest = userData.latestAttempt;
-  const effectivePass = userData.user.interview_passed;
-  const outcome =
-    effectivePass === true
-      ? { word: 'pass', color: getPassColor('pass'), detail: null as string | null }
-      : effectivePass === false
-        ? getAdminOutcomeDisplay(latest)
-        : getAdminOutcomeDisplay(latest);
+  const outcome = resolveAdminPrimaryOutcomeDisplay(userData.user, latest);
   const override = userData.user.interview_passed_admin_override;
   /** Attempt `override_status` or profile `interview_passed_admin_override` means admin already committed — hide chips until cleared (e.g. SQL / recreated user row). */
   const showRevealButtons = adminShowEarlyRevealPassFail(latest) && typeof override !== 'boolean';
@@ -1290,7 +1578,7 @@ function UserCard({
           <View style={styles.userCardMetaLeft}>
             <Text style={[styles.userCardStatus, { color: outcome.color }]}>{outcome.word}</Text>
             {outcome.detail ? (
-              <Text style={styles.userCardGateDetail} numberOfLines={3}>
+              <Text style={styles.userCardGateDetail} numberOfLines={5}>
                 {outcome.detail}
               </Text>
             ) : null}
@@ -1363,12 +1651,24 @@ function functionInvokeBodyError(data: unknown): string | null {
   return null;
 }
 
-function SummaryTab({ attempt }: { attempt: AttemptRow }) {
+function SummaryTab({
+  attempt,
+  onAttemptMutated,
+  candidateUser,
+}: {
+  attempt: AttemptRow;
+  onAttemptMutated?: () => void;
+  /** User row for confirmation dialog (optional when viewing attempt outside cohort drill-down). */
+  candidateUser?: UserRow | null;
+}) {
   const [styleProfile, setStyleProfile] = useState<CommunicationStyleProfileRow | null>(null);
   const [styleStatus, setStyleStatus] = useState<'idle' | 'loading' | 'reprocessing'>('idle');
   const [stylePipelineErrorDisplay, setStylePipelineErrorDisplay] = useState<string | null>(
     attempt.communication_style_error ?? null
   );
+  const [recalcBusy, setRecalcBusy] = useState(false);
+  const [adminSessionUserId, setAdminSessionUserId] = useState<string | null>(null);
+  const [adminSessionEmail, setAdminSessionEmail] = useState<string | null>(null);
 
   useEffect(() => {
     setStylePipelineErrorDisplay(attempt.communication_style_error ?? null);
@@ -1400,6 +1700,18 @@ function SummaryTab({ attempt }: { attempt: AttemptRow }) {
   useEffect(() => {
     void loadStyleProfile();
   }, [attempt.user_id]);
+
+  useEffect(() => {
+    let cancelled = false;
+    void supabase.auth.getSession().then(({ data: { session } }) => {
+      if (cancelled) return;
+      setAdminSessionUserId(session?.user?.id ?? null);
+      setAdminSessionEmail(session?.user?.email ?? null);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   useEffect(() => {
     if (!adminAttemptHasHolisticOnlyTraitScoresNoScenarioSlices(attempt)) return;
@@ -1534,15 +1846,146 @@ function SummaryTab({ attempt }: { attempt: AttemptRow }) {
     { key: 'moment_4', label: 'Moment 4', scores: moment4Bundle.scores, summary: buildMomentOrScenarioSummary('Moment 4', moment4Details, moment4Bundle.summary) },
     { key: 'moment_5', label: 'Moment 5', scores: moment5Bundle.scores, summary: buildMomentOrScenarioSummary('Moment 5', moment5Details, moment5Bundle.summary) },
   ];
-  const outcome = getAdminOutcomeDisplay(attempt);
+  const outcome = resolveAdminPrimaryOutcomeDisplay(candidateUser ?? null, attempt);
   const gateScores = pillarScoresForGate(attempt);
   const gate = computeGateResultCore(gateScores);
   const gateFailureLines =
     !gate.pass && outcome.outcomeLabel !== 'none' ? formatGateFailureLines(gate, gateScores) : [];
-  const reasoningPendingSummary =
-    attempt.reasoning_pending === true ||
-    !!(parseObject(attempt.ai_reasoning) as { _reasoningPending?: boolean } | null)?._reasoningPending;
+  const reasoningPendingSummary = adminAiNarrativeStillPending(attempt);
   const holisticOnlyScenarioDataGap = adminAttemptHasHolisticOnlyTraitScoresNoScenarioSlices(attempt);
+
+  const [commFloorDismissOpen, setCommFloorDismissOpen] = useState(false);
+  const [commFloorDismissNote, setCommFloorDismissNote] = useState('');
+  const [commFloorDismissBusy, setCommFloorDismissBusy] = useState(false);
+
+  const communicationFloorNeedsReview =
+    attempt.communication_floor_flag === true && !attempt.communication_floor_dismissed_at;
+  const communicationFloorDismissed =
+    attempt.communication_floor_flag === true && !!attempt.communication_floor_dismissed_at;
+
+  const isAdminViewer = isAmoraeaAdminConsoleEmail(adminSessionEmail);
+  const recalculateScoresDisabled =
+    !isAdminViewer ||
+    recalcBusy ||
+    attempt.reasoning_pending === true ||
+    !attempt.completed_at;
+
+  const runRecalculateScores = async () => {
+    const displayName = candidateUser
+      ? resolveAdminInterviewIntroDisplayName(candidateUser)
+      : '—';
+    const emailLine = candidateUser?.email ?? '—';
+    const weightDisplay =
+      attempt.weighted_score != null && Number.isFinite(attempt.weighted_score)
+        ? attempt.weighted_score.toFixed(2)
+        : '—';
+    const passDisplay =
+      attempt.passed === true ? 'Pass' : attempt.passed === false ? 'Fail' : 'none / withheld';
+    const confirmMsg = [
+      `Attempt ID: ${attempt.id}`,
+      `User: ${displayName} (${emailLine})`,
+      `User ID: ${attempt.user_id}`,
+      '',
+      `Original weighted score: ${weightDisplay}`,
+      `Original verdict: ${passDisplay}`,
+      '',
+      'This will overwrite pillar_scores, weighted_score, passed, gate fields, and scenario_composites on this row with values recomputed from stored scenario slices using the current rubric (transcript reconciliation + aggregation + gate only).',
+      '',
+      'A snapshot of the previous scoring fields will be stored in original_scores.',
+    ].join('\n');
+    const ok = await confirmAsync({
+      title: 'Recalculate scores?',
+      message: confirmMsg,
+      confirmText: 'Recalculate',
+    });
+    if (!ok) return;
+    setRecalcBusy(true);
+    try {
+      const snap = snapshotAttemptScoresForAudit(attempt);
+      const oldPillars = normalizePillarScoresMap(attempt.pillar_scores) ?? {};
+      const result = recalculateAttemptScoresFromStoredSlices({
+        transcript: attempt.transcript,
+        scenario_1_scores: attempt.scenario_1_scores,
+        scenario_2_scores: attempt.scenario_2_scores,
+        scenario_3_scores: attempt.scenario_3_scores,
+        scenario_specific_patterns: attempt.scenario_specific_patterns,
+      });
+      const nowIso = new Date().toISOString();
+
+      if (result.kind === 'success') {
+        const delta = computePillarScoreDelta(oldPillars, result.pillar_scores);
+        const { error } = await supabase
+          .from('interview_attempts')
+          .update({
+            original_scores: snap,
+            pillar_scores: result.pillar_scores,
+            weighted_score: result.gate.weightedScore,
+            passed: result.gate.pass,
+            gate_fail_reason: result.gate.failReason,
+            gate_fail_reasons: result.gate.failReasonCodes ?? [],
+            gate_fail_detail: result.gate.failReasonDetail ?? null,
+            scenario_composites: result.scenarioCompositesJson,
+            incomplete_reason: null,
+            recalculated_at: nowIso,
+            recalculation_delta: delta,
+            recalculation_notes: result.notes,
+          })
+          .eq('id', attempt.id)
+          .eq('user_id', attempt.user_id);
+        if (error) {
+          Alert.alert('Recalculation failed', error.message);
+          return;
+        }
+        void remoteLog('[RECALCULATE_SCORES]', {
+          triggeredByUserId: adminSessionUserId,
+          triggeredByEmail: adminSessionEmail,
+          attemptId: attempt.id,
+          affectedUserId: attempt.user_id,
+          weightedScoreBefore: attempt.weighted_score,
+          weightedScoreAfter: result.gate.weightedScore,
+          delta,
+        });
+        onAttemptMutated?.();
+      } else {
+        const { error } = await supabase
+          .from('interview_attempts')
+          .update({
+            original_scores: snap,
+            incomplete_reason: result.completionFailure.incomplete_reason,
+            weighted_score: null,
+            passed: null,
+            gate_fail_reason: result.gate.failReason,
+            gate_fail_reasons: [],
+            gate_fail_detail: null,
+            scenario_composites: null,
+            recalculated_at: nowIso,
+            recalculation_delta: {},
+            recalculation_notes: result.notes,
+          })
+          .eq('id', attempt.id)
+          .eq('user_id', attempt.user_id);
+        if (error) {
+          Alert.alert('Recalculation failed', error.message);
+          return;
+        }
+        void remoteLog('[RECALCULATE_SCORES]', {
+          triggeredByUserId: adminSessionUserId,
+          triggeredByEmail: adminSessionEmail,
+          attemptId: attempt.id,
+          affectedUserId: attempt.user_id,
+          outcome: 'incomplete',
+          notes: result.notes,
+        });
+        Alert.alert(
+          'Incomplete data',
+          'Completion gate failed — weighted score and pass/fail were cleared. Fix stored scenario / moment JSON before a full recalculation.',
+        );
+        onAttemptMutated?.();
+      }
+    } finally {
+      setRecalcBusy(false);
+    }
+  };
 
   return (
     <ScrollView style={styles.innerTabContent}>
@@ -1556,6 +1999,28 @@ function SummaryTab({ attempt }: { attempt: AttemptRow }) {
         </View>
       ) : null}
       <Text style={styles.sectionTitle}>Overall</Text>
+      {isAdminViewer ? (
+        <View style={{ marginBottom: 12 }}>
+          <TouchableOpacity
+            style={[styles.overrideChip, recalculateScoresDisabled && { opacity: 0.45 }]}
+            onPress={() => void runRecalculateScores()}
+            disabled={recalculateScoresDisabled}
+            accessibilityRole="button"
+            accessibilityLabel="Recalculate scores from stored scenario slices"
+          >
+            <Text style={styles.overrideChipText}>{recalcBusy ? 'Recalculating…' : 'Recalculate Scores'}</Text>
+          </TouchableOpacity>
+          {attempt.reasoning_pending === true ? (
+            <Text style={[styles.blockText, { marginTop: 6 }]}>
+              Recalculate is disabled while reasoning_pending is true.
+            </Text>
+          ) : !attempt.completed_at ? (
+            <Text style={[styles.blockText, { marginTop: 6 }]}>
+              Recalculate is only available for completed attempts.
+            </Text>
+          ) : null}
+        </View>
+      ) : null}
       <View style={styles.metaRow}>
         <Text style={styles.metaLabel}>Date</Text>
         <Text style={styles.metaValue}>{formatAttemptDate(attempt)}</Text>
@@ -1586,6 +2051,144 @@ function SummaryTab({ attempt }: { attempt: AttemptRow }) {
           ))}
         </View>
       ) : null}
+      {communicationFloorNeedsReview ? (
+        <View
+          style={[
+            styles.block,
+            {
+              marginTop: 4,
+              marginBottom: 10,
+              paddingVertical: 10,
+              borderLeftWidth: 4,
+              borderLeftColor: '#D4A84B',
+              backgroundColor: 'rgba(212, 168, 75, 0.08)',
+            },
+          ]}
+        >
+          <View style={{ flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', gap: 8, marginBottom: 6 }}>
+            <Text style={[styles.commFloorReviewBadge, { backgroundColor: '#E8C96B', color: '#3D3319' }]}>Review</Text>
+            <Text style={[styles.blockTitle, { marginBottom: 0, color: '#E8D49A' }]}>communication_floor</Text>
+          </View>
+          <Text style={styles.blockText}>
+            Average unprompted word count (scenarios A–C + moments 4–5) is{' '}
+            <Text style={{ fontWeight: '600', color: '#F2E6BF' }}>
+              {attempt.communication_floor_avg_unprompted_words != null
+                ? attempt.communication_floor_avg_unprompted_words.toFixed(2)
+                : '—'}
+            </Text>{' '}
+            — below the {COMMUNICATION_FLOOR_MIN_AVG_WORDS}-word admin review threshold. This is not a gate failure and
+            does not change pass/fail.
+          </Text>
+          <TouchableOpacity
+            style={styles.commFloorDismissButton}
+            onPress={() => {
+              setCommFloorDismissNote('');
+              setCommFloorDismissOpen(true);
+            }}
+            accessibilityRole="button"
+            accessibilityLabel="Dismiss communication floor review flag"
+          >
+            <Text style={styles.commFloorDismissButtonText}>Dismiss flag…</Text>
+          </TouchableOpacity>
+        </View>
+      ) : communicationFloorDismissed ? (
+        <View
+          style={[
+            styles.block,
+            {
+              marginTop: 4,
+              marginBottom: 10,
+              paddingVertical: 10,
+              borderLeftWidth: 3,
+              borderLeftColor: 'rgba(122, 154, 190, 0.45)',
+              backgroundColor: 'rgba(122, 154, 190, 0.06)',
+            },
+          ]}
+        >
+          <Text style={[styles.blockTitle, { color: '#A8C4F0', marginBottom: 6 }]}>communication_floor (dismissed)</Text>
+          <Text style={styles.blockText}>
+            Avg unprompted words when flagged:{' '}
+            {attempt.communication_floor_avg_unprompted_words != null
+              ? attempt.communication_floor_avg_unprompted_words.toFixed(2)
+              : '—'}{' '}
+            · Threshold: {COMMUNICATION_FLOOR_MIN_AVG_WORDS}
+          </Text>
+          <Text style={styles.blockText} selectable>
+            Dismissed:{' '}
+            {attempt.communication_floor_dismissed_at
+              ? new Date(attempt.communication_floor_dismissed_at).toLocaleString()
+              : '—'}{' '}
+            · Reviewer id: {attempt.communication_floor_dismissed_by ?? '—'}
+          </Text>
+          {attempt.communication_floor_dismiss_note ? (
+            <Text style={styles.blockText} selectable>
+              Note: {attempt.communication_floor_dismiss_note}
+            </Text>
+          ) : null}
+        </View>
+      ) : null}
+      <Modal visible={commFloorDismissOpen} transparent animationType="fade">
+        <View style={styles.commFloorModalBackdrop}>
+          <View style={styles.commFloorModalCard}>
+            <Text style={styles.commFloorModalTitle}>Dismiss communication_floor flag</Text>
+            <Text style={styles.blockText}>
+              Optional note for the audit log (why transcript style looked acceptable).
+            </Text>
+            <TextInput
+              value={commFloorDismissNote}
+              onChangeText={setCommFloorDismissNote}
+              placeholder="Note"
+              placeholderTextColor="rgba(122, 154, 190, 0.45)"
+              multiline
+              style={styles.commFloorModalInput}
+            />
+            <View style={styles.commFloorModalActions}>
+              <TouchableOpacity
+                style={styles.commFloorModalCancel}
+                onPress={() => !commFloorDismissBusy && setCommFloorDismissOpen(false)}
+                disabled={commFloorDismissBusy}
+              >
+                <Text style={styles.commFloorModalCancelText}>Cancel</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={styles.commFloorModalConfirm}
+                disabled={commFloorDismissBusy}
+                onPress={() => {
+                  void (async () => {
+                    setCommFloorDismissBusy(true);
+                    try {
+                      const { data: authData, error: authErr } = await supabase.auth.getUser();
+                      if (authErr || !authData?.user?.id) {
+                        Alert.alert('Not signed in', authErr?.message ?? 'Could not read admin session.');
+                        return;
+                      }
+                      const { error } = await supabase
+                        .from('interview_attempts')
+                        .update({
+                          communication_floor_dismissed_at: new Date().toISOString(),
+                          communication_floor_dismissed_by: authData.user.id,
+                          communication_floor_dismiss_note: commFloorDismissNote.trim() || null,
+                        })
+                        .eq('id', attempt.id)
+                        .eq('user_id', attempt.user_id);
+                      if (error) {
+                        Alert.alert('Could not save', error.message);
+                        return;
+                      }
+                      setCommFloorDismissOpen(false);
+                      onAttemptMutated?.();
+                    } finally {
+                      setCommFloorDismissBusy(false);
+                    }
+                  })();
+                }}
+              >
+                <Text style={styles.commFloorModalConfirmText}>{commFloorDismissBusy ? 'Saving…' : 'Dismiss flag'}</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
       <View style={styles.metaRow}>
         <Text style={styles.metaLabel}>Weighted score</Text>
         <Text style={styles.metaValue}>{formatScoreCell(attempt.weighted_score)}</Text>
@@ -1779,9 +2382,7 @@ function ReasoningTab({
 }) {
   const [reasoningRetrying, setReasoningRetrying] = useState(false);
   const [reasoningRetryError, setReasoningRetryError] = useState<string | null>(null);
-  const reasoningPending =
-    attempt.reasoning_pending === true ||
-    !!(parseObject(attempt.ai_reasoning) as { _reasoningPending?: boolean } | null)?._reasoningPending;
+  const reasoningPending = adminAiNarrativeStillPending(attempt);
 
   const reasoning = parseObject(attempt.ai_reasoning);
   if (!reasoning && !reasoningPending) {
@@ -2166,7 +2767,9 @@ function UserDetails({
               ))}
             </View>
 
-            {selectedAttempt && activeInnerTab === 'summary' && <SummaryTab attempt={selectedAttempt} />}
+            {selectedAttempt && activeInnerTab === 'summary' && (
+              <SummaryTab attempt={selectedAttempt} onAttemptMutated={onRefreshData} candidateUser={u} />
+            )}
             {selectedAttempt && activeInnerTab === 'reasoning' && (
               <ReasoningTab attempt={selectedAttempt} onRefreshAfterReasoning={onRefreshData} />
             )}
@@ -2183,10 +2786,12 @@ export function AdminAttemptTabsView({
   attemptId,
   userId,
   showFeedbackTab = true,
+  candidateUser,
 }: {
   attemptId: string | null;
   userId?: string;
   showFeedbackTab?: boolean;
+  candidateUser?: UserRow | null;
 }) {
   const [attempt, setAttempt] = useState<AttemptRow | null>(null);
   const [loading, setLoading] = useState(true);
@@ -2282,7 +2887,9 @@ export function AdminAttemptTabsView({
         ))}
       </View>
 
-      {activeInnerTab === 'summary' && <SummaryTab attempt={attempt} />}
+      {activeInnerTab === 'summary' && (
+        <SummaryTab attempt={attempt} onAttemptMutated={refreshAttempt} candidateUser={candidateUser ?? null} />
+      )}
       {activeInnerTab === 'reasoning' && <ReasoningTab attempt={attempt} onRefreshAfterReasoning={refreshAttempt} />}
       {activeInnerTab === 'transcript' && <TranscriptTab attempt={attempt} />}
       {showFeedbackTab && activeInnerTab === 'feedback' && <FeedbackTab attempt={attempt} />}
@@ -2292,6 +2899,7 @@ export function AdminAttemptTabsView({
 
 const STATUS_FILTER_OPTIONS: { id: AdminUserStatusFilter; label: string }[] = [
   { id: 'all', label: 'All' },
+  { id: 'incomplete', label: 'Incomplete' },
   { id: 'in_progress', label: 'In progress' },
   { id: 'pass', label: 'Pass' },
   { id: 'fail', label: 'Fail' },
@@ -2477,11 +3085,16 @@ export function AdminInterviewDashboard({ onClose }: { onClose: () => void }) {
     } else if (reviewedCohortFilter === 'unreviewed') {
       list = list.filter((g) => !g.user.interview_cohort_admin_reviewed);
     }
-    if (hideIncomplete) {
+    // "Only done" excludes non-completed interviews; skip when explicitly filtering Incomplete (in progress | no result).
+    if (hideIncomplete && statusFilter !== 'incomplete') {
       list = list.filter((g) => g.user.interview_completed === true);
     }
     if (statusFilter !== 'all') {
-      list = list.filter((g) => classifyAdminUserListStatus(g) === statusFilter);
+      list = list.filter((g) => {
+        const s = classifyAdminUserListStatus(g);
+        if (statusFilter === 'incomplete') return s === 'in_progress' || s === 'no_result';
+        return s === statusFilter;
+      });
     }
     return list;
   }, [users, timeRangeFilter, customTimeFrom, customTimeTo, reviewedCohortFilter, hideIncomplete, statusFilter]);
@@ -3368,5 +3981,91 @@ const styles = StyleSheet.create({
     color: '#C8E4FF',
     fontSize: 12,
     fontWeight: '600',
+  },
+  commFloorReviewBadge: {
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    borderRadius: 6,
+    overflow: 'hidden',
+    fontSize: 11,
+    fontWeight: '700',
+    letterSpacing: 0.4,
+    textTransform: 'uppercase',
+  },
+  commFloorDismissButton: {
+    marginTop: 10,
+    alignSelf: 'flex-start',
+    paddingVertical: 8,
+    paddingHorizontal: 12,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: 'rgba(212, 168, 75, 0.55)',
+    backgroundColor: 'rgba(212, 168, 75, 0.12)',
+  },
+  commFloorDismissButtonText: {
+    color: '#F2E6BF',
+    fontSize: 12,
+    fontWeight: '600',
+  },
+  commFloorModalBackdrop: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.55)',
+    justifyContent: 'center',
+    padding: 24,
+  },
+  commFloorModalCard: {
+    borderRadius: 12,
+    padding: 16,
+    backgroundColor: 'rgba(18,22,38,0.98)',
+    borderWidth: 1,
+    borderColor: 'rgba(82,142,220,0.25)',
+    maxWidth: 520,
+    alignSelf: 'center',
+    width: '100%',
+  },
+  commFloorModalTitle: {
+    color: '#C8E4FF',
+    fontSize: 15,
+    fontWeight: '600',
+    marginBottom: 8,
+  },
+  commFloorModalInput: {
+    marginTop: 10,
+    minHeight: 88,
+    borderWidth: 1,
+    borderColor: 'rgba(82,142,220,0.25)',
+    borderRadius: 8,
+    padding: 10,
+    color: '#E8F0F8',
+    fontSize: 13,
+    textAlignVertical: 'top',
+  },
+  commFloorModalActions: {
+    flexDirection: 'row',
+    justifyContent: 'flex-end',
+    gap: 10,
+    marginTop: 14,
+  },
+  commFloorModalCancel: {
+    paddingVertical: 10,
+    paddingHorizontal: 14,
+  },
+  commFloorModalCancelText: {
+    color: '#7A9ABE',
+    fontSize: 13,
+    fontWeight: '600',
+  },
+  commFloorModalConfirm: {
+    paddingVertical: 10,
+    paddingHorizontal: 16,
+    borderRadius: 8,
+    backgroundColor: 'rgba(212, 168, 75, 0.22)',
+    borderWidth: 1,
+    borderColor: 'rgba(212, 168, 75, 0.45)',
+  },
+  commFloorModalConfirmText: {
+    color: '#F2E6BF',
+    fontSize: 13,
+    fontWeight: '700',
   },
 });

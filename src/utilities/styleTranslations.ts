@@ -6,6 +6,7 @@
 import {
   buildMatchmakerSummaryFromProfile,
   type BuildMatchmakerSummaryOptions,
+  type MatchmakerStyleHints,
 } from '../../supabase/functions/_shared/matchmakerSummaryFromProfile';
 import {
   countPersonalNarrativeEpisodesAcrossTranscript,
@@ -452,14 +453,24 @@ export function translateStyleProfile(
   }
 
   const primary = labels.slice(0, 3);
-  const summaryOpts: BuildMatchmakerSummaryOptions | undefined =
-    options?.userCorpus != null && options.userCorpus !== ''
-      ? {
-          userCorpus: options.userCorpus,
-          scenarioUserCorpus: options.scenarioUserCorpus ?? undefined,
-          personalUserCorpus: options.personalUserCorpus ?? undefined,
-        }
-      : undefined;
+  const styleHints: MatchmakerStyleHints = {
+    leadsWithFeelingPrimary: primary.includes('leads with feeling'),
+    storytellerPrimary: primary.includes('storyteller'),
+    conceptualThinkerPrimary: primary.includes('conceptual thinker'),
+    analyticalPrimary: primary.includes('analytical'),
+    headyPrimary: primary.includes('heady'),
+    warmPrimary: primary.includes('warm'),
+    expressivePrimary: primary.includes('expressive'),
+  };
+  const corpusForSummary = (options?.userCorpus?.trim() || combinedUserTextForStyleGuards(options) || '').trim();
+  const summaryOpts: BuildMatchmakerSummaryOptions = {
+    userCorpus: corpusForSummary || undefined,
+    userTurns: options?.userTurns ?? undefined,
+    scenarioUserCorpus: options?.scenarioUserCorpus ?? undefined,
+    personalUserCorpus: options?.personalUserCorpus ?? undefined,
+    styleHints,
+    narrativeEpisodeCount: narrativeEpisodes,
+  };
   let matchmakerSummary = buildMatchmakerSummaryFromProfile(profile, summaryOpts);
   if (matchmakerSummaryReadsAsChipRestatement(matchmakerSummary)) {
     matchmakerSummary = NEUTRAL_MATCHMAKER_SUMMARY_FALLBACK;

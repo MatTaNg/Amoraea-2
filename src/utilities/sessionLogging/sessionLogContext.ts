@@ -10,6 +10,11 @@ export type SessionLogRuntimeContext = {
   /** After a successful interview attempt row is created, logs should include attempt_id — dev guard if missing. */
   sessionLogsRequireAttemptId: boolean;
   platform: SessionPlatform | null;
+  /** Current interview user — set from AriaScreen for module-level TTS telemetry (e.g. tab hide). */
+  sessionUserId: string | null;
+  /** Web: TTS was paused mid-line because the tab hid; cleared when playback resumes or completes. */
+  interruptedPlaybackActive: boolean;
+  interruptedPlaybackPositionMs: number | null;
   /** ISO timestamp of last assistant question delivery (for latency). */
   lastQuestionDeliveredAt: string | null;
   /** True while Whisper/native recording pipeline is active (set around transcribe / recorder). */
@@ -28,6 +33,9 @@ const ctx: SessionLogRuntimeContext = {
   attemptId: null,
   sessionLogsRequireAttemptId: false,
   platform: null,
+  sessionUserId: null,
+  interruptedPlaybackActive: false,
+  interruptedPlaybackPositionMs: null,
   lastQuestionDeliveredAt: null,
   recordingSessionActive: false,
   ttsPlaybackActive: false,
@@ -42,6 +50,9 @@ export function resetSessionLogRuntime(partial?: Partial<SessionLogRuntimeContex
   ctx.attemptId = partial?.attemptId ?? null;
   ctx.sessionLogsRequireAttemptId = partial?.sessionLogsRequireAttemptId ?? false;
   ctx.platform = partial?.platform ?? ctx.platform;
+  ctx.sessionUserId = partial?.sessionUserId ?? null;
+  ctx.interruptedPlaybackActive = partial?.interruptedPlaybackActive ?? false;
+  ctx.interruptedPlaybackPositionMs = partial?.interruptedPlaybackPositionMs ?? null;
   ctx.lastQuestionDeliveredAt = partial?.lastQuestionDeliveredAt ?? null;
   ctx.recordingSessionActive = partial?.recordingSessionActive ?? false;
   ctx.ttsPlaybackActive = partial?.ttsPlaybackActive ?? false;
@@ -49,6 +60,16 @@ export function resetSessionLogRuntime(partial?: Partial<SessionLogRuntimeContex
   ctx.lastActivityAtMs = Date.now();
   ctx.lastHiddenAtMs = partial?.lastHiddenAtMs ?? null;
   ctx.navigationAwayAtMs = partial?.navigationAwayAtMs ?? null;
+}
+
+export function setSessionLogUserId(userId: string | null): void {
+  ctx.sessionUserId = userId;
+}
+
+/** Called from web TTS when tab hides mid HTML audio (mirrors elevenLabs interrupted state). */
+export function setInterruptedPlaybackSessionSnapshot(active: boolean, positionMs: number | null): void {
+  ctx.interruptedPlaybackActive = active;
+  ctx.interruptedPlaybackPositionMs = positionMs;
 }
 
 export function getSessionLogRuntime(): Readonly<SessionLogRuntimeContext> {

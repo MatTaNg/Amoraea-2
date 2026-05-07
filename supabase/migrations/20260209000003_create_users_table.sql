@@ -2,8 +2,6 @@
 -- Run this in Supabase SQL Editor.
 -- If typologies/compatibility/profile_photos exist and reference profiles, drop them first:
 --   DROP TABLE IF EXISTS profile_photos, compatibility, typologies CASCADE;
-CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
-
 CREATE OR REPLACE FUNCTION update_updated_at_column()
 RETURNS TRIGGER AS $$
 BEGIN
@@ -52,7 +50,7 @@ CREATE POLICY "Users can update own record"
 
 -- Create typologies table (references users)
 CREATE TABLE IF NOT EXISTS typologies (
-  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   profile_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
   typology_type TEXT NOT NULL CHECK (typology_type IN ('big_five', 'attachment_style', 'schwartz_values')),
   typology_data JSONB NOT NULL DEFAULT '{}',
@@ -80,7 +78,7 @@ CREATE POLICY "Users can delete own typologies" ON typologies FOR DELETE USING (
 
 -- Create compatibility table (references users)
 CREATE TABLE IF NOT EXISTS compatibility (
-  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   profile_id UUID NOT NULL UNIQUE REFERENCES users(id) ON DELETE CASCADE,
   compatibility_data JSONB NOT NULL DEFAULT '{}',
   created_at TIMESTAMP WITH TIME ZONE DEFAULT TIMEZONE('utc', NOW()) NOT NULL,
@@ -105,7 +103,7 @@ CREATE POLICY "Users can delete own compatibility" ON compatibility FOR DELETE U
 
 -- Create profile_photos table (references users)
 CREATE TABLE IF NOT EXISTS profile_photos (
-  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   profile_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
   storage_path TEXT NOT NULL,
   public_url TEXT NOT NULL,

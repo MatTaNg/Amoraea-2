@@ -8,7 +8,11 @@ import { createClient } from '@supabase/supabase-js';
 import { aggregatePillarScoresWithCommitmentMerge } from '../src/features/aria/aggregateMarkerScoresFromSlices';
 import { enrichScenarioSliceWithContemptHeuristic } from '../src/features/aria/contemptExpressionScenarioHeuristic';
 import { computeGateResultCore } from '../src/features/aria/computeGateResultCore';
-import { sanitizePersonalMomentScoresForAggregate } from '../src/features/aria/personalMomentSliceSanitize';
+import { scenarioCompositesToStorageJson } from '../src/features/aria/scenarioCompositeFloor';
+import {
+  sanitizeMoment5PersonalScoresForAggregate,
+  sanitizePersonalMomentScoresForAggregate,
+} from '../src/features/aria/personalMomentSliceSanitize';
 import { fullScenarioReconciliation } from '../src/features/aria/reconcileScenarioScoresTranscript';
 
 function parseArgs(argv: string[]): number {
@@ -101,6 +105,7 @@ async function main(): Promise<void> {
   }
   const patterns = parseObject(row.scenario_specific_patterns);
   const m4 = parseObject(patterns?.moment_4_scores);
+  const m5 = parseObject(patterns?.moment_5_scores);
   const tx = row.transcript;
   const raw1 = extractSlice(row.scenario_1_scores);
   const raw2 = extractSlice(row.scenario_2_scores);
@@ -157,9 +162,24 @@ async function main(): Promise<void> {
             : undefined,
       })
     : null;
-  const slices = [s1, s2, s3, extractSlice(m4San)];
+  const m5San = m5
+    ? sanitizeMoment5PersonalScoresForAggregate({
+        pillarScores: (m5.pillarScores as Record<string, number | null>) ?? {},
+        keyEvidence:
+          typeof m5.keyEvidence === 'object' && m5.keyEvidence != null && !Array.isArray(m5.keyEvidence)
+            ? (m5.keyEvidence as Record<string, string>)
+            : undefined,
+      })
+    : null;
+  const slices = [s1, s2, s3, extractSlice(m4San), extractSlice(m5San)];
   const pillar_scores = aggregatePillarScoresWithCommitmentMerge(slices);
-  const gate = computeGateResultCore(pillar_scores, null);
+  const gate = computeGateResultCore(pillar_scores, null, {
+    scenarioPillarScoresByScenario: {
+      1: s1?.pillarScores,
+      2: s2?.pillarScores,
+      3: s3?.pillarScores,
+    },
+  });
   console.log('Recomputed pillar_scores', pillar_scores);
   console.log('Gate', { pass: gate.pass, weightedScore: gate.weightedScore, failReason: gate.failReason });
   const { error: upErr } = await admin
@@ -169,6 +189,9 @@ async function main(): Promise<void> {
       weighted_score: gate.weightedScore,
       passed: gate.pass,
       gate_fail_reason: gate.failReason,
+      gate_fail_reasons: gate.failReasonCodes ?? [],
+      gate_fail_detail: gate.failReasonDetail ?? null,
+      scenario_composites: scenarioCompositesToStorageJson(gate.scenarioComposites),
     })
     .eq('id', row.id as string);
   if (upErr) {

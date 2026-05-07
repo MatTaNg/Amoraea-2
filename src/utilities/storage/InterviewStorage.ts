@@ -71,6 +71,8 @@ export interface StoredInterviewData {
   scenarioScores: StoredScenarioScores;
   lastSavedAt: string;
   currentScenario: 1 | 2 | 3 | null;
+  /** Scenario in progress (set at scenario start, cleared when checkpoint scores save). Mirrors interview_attempts.resume_active_scenario. */
+  resumeActiveScenario?: 1 | 2 | 3 | null;
   /** Set when DB save failed; recovery can retry on next load */
   pendingDatabaseSave?: boolean;
   saveFailedAt?: string;

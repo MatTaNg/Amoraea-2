@@ -10,7 +10,8 @@ export type PillarMomentLabel =
   | 'scenario_1'
   | 'scenario_2'
   | 'scenario_3'
-  | 'moment_4';
+  | 'moment_4'
+  | 'moment_5';
 
 export type LabeledMarkerSlice = {
   moment: PillarMomentLabel;
@@ -18,7 +19,13 @@ export type LabeledMarkerSlice = {
   keyEvidence?: Record<string, string> | null;
 };
 
-const SLICE_LABELS: PillarMomentLabel[] = ['scenario_1', 'scenario_2', 'scenario_3', 'moment_4'];
+const SLICE_LABELS: PillarMomentLabel[] = [
+  'scenario_1',
+  'scenario_2',
+  'scenario_3',
+  'moment_4',
+  'moment_5',
+];
 
 type StandardMarkerId = Exclude<
   (typeof INTERVIEW_MARKER_IDS)[number],
@@ -27,21 +34,17 @@ type StandardMarkerId = Exclude<
 
 /** Which interview moments may contribute numeric evidence to each pillar aggregate. */
 const STANDARD_MARKER_ALLOWED_MOMENTS: Record<StandardMarkerId, Set<PillarMomentLabel>> = {
-  repair: new Set(['scenario_1', 'scenario_2', 'scenario_3']),
+  repair: new Set(['scenario_1', 'scenario_2', 'scenario_3', 'moment_5']),
   attunement: new Set(['scenario_1', 'scenario_2', 'scenario_3']),
-  regulation: new Set(['scenario_3']),
+  regulation: new Set(['scenario_3', 'moment_5']),
   mentalizing: new Set(SLICE_LABELS),
   appreciation: new Set(['scenario_2']),
-  accountability: new Set(['scenario_1', 'scenario_2', 'scenario_3', 'moment_4']),
+  accountability: new Set(['scenario_1', 'scenario_2', 'scenario_3', 'moment_4', 'moment_5']),
 };
 
 /** Contempt pillar: 60% pooled expression + 40% pooled recognition. */
 const CONTEMPT_EXPRESSION_WEIGHT = 0.6;
 const CONTEMPT_RECOGNITION_WEIGHT = 0.4;
-
-/** First-person Moment 4 vs fictional Scenario C — not equivalent evidence for commitment threshold. */
-const COMMITMENT_THRESHOLD_WEIGHT_MOMENT4 = 0.6;
-const COMMITMENT_THRESHOLD_WEIGHT_SCENARIO3 = 0.4;
 
 function scoredValue(
   pillarScores: Record<string, number | null | undefined> | null | undefined,
@@ -80,29 +83,19 @@ export function commitmentThresholdFromSlice(slice: MarkerScoreSlice): number | 
 }
 
 /**
- * Overrides `commitment_threshold` on aggregated scores: 60% Moment 4 + 40% Scenario C when both
- * have assessable values; Moment 4 only or Scenario C only when the other is missing; leaves
- * aggregated value unchanged only when neither slice contributes (caller may omit keys).
+ * Sets `commitment_threshold` on aggregated scores from **Moment 4 only** (grudge + walk-away follow-up).
+ * Scenario C no longer contributes commitment_threshold.
  */
 export function mergeCommitmentThresholdWeighted(
   aggregated: Record<string, number>,
-  scenario3Slice: MarkerScoreSlice,
+  _scenario3Slice: MarkerScoreSlice,
   moment4Slice: MarkerScoreSlice
 ): Record<string, number> {
-  const s3 = commitmentThresholdFromSlice(scenario3Slice);
   const m4 = commitmentThresholdFromSlice(moment4Slice);
-  if (s3 == null && m4 == null) return aggregated;
-  let ct: number;
-  if (m4 != null && s3 != null) {
-    ct = COMMITMENT_THRESHOLD_WEIGHT_MOMENT4 * m4 + COMMITMENT_THRESHOLD_WEIGHT_SCENARIO3 * s3;
-  } else if (m4 != null) {
-    ct = m4;
-  } else {
-    ct = s3 as number;
-  }
+  if (m4 == null) return aggregated;
   return {
     ...aggregated,
-    commitment_threshold: Math.round(ct * 10) / 10,
+    commitment_threshold: Math.round(m4 * 10) / 10,
   };
 }
 
@@ -174,7 +167,8 @@ export function aggregateMarkerScoresFromLabeledSlices(
     if (
       row.moment === 'scenario_1' ||
       row.moment === 'scenario_2' ||
-      row.moment === 'scenario_3'
+      row.moment === 'scenario_3' ||
+      row.moment === 'moment_5'
     ) {
       const ex = contemptExpressionForRow(row);
       if (ex != null) expressionVals.push(ex);
@@ -235,9 +229,7 @@ export function aggregatePillarScoresWithCommitmentMergeDetailed(
 ): MomentRestrictedAggregateResult {
   const { scores: base, contributorCounts } = aggregateMarkerScoresFromSlicesDetailed(slices);
   const merged = mergeCommitmentThresholdWeighted(base, slices[2], slices[3]);
-  let ctCount = 0;
-  if (commitmentThresholdFromSlice(slices[2]) != null) ctCount += 1;
-  if (commitmentThresholdFromSlice(slices[3]) != null) ctCount += 1;
+  const ctCount = commitmentThresholdFromSlice(slices[3]) != null ? 1 : 0;
   return {
     scores: merged,
     contributorCounts: {

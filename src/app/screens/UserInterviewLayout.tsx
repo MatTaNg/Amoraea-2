@@ -52,8 +52,8 @@ interface UserInterviewLayoutProps {
   micWarning: string | null;
   inputDisabled: boolean;
   onExit?: () => void;
-  /** When true, show "Audio unavailable — read above, then speak when ready" */
-  ttsFallbackActive?: boolean;
+  /** Session-level hint after repeated truncated playback. */
+  ttsPlaybackReliabilityNotice?: string | null;
   /** When true, show mic-denied state with "Enable in browser settings" / open app settings */
   micPermissionDenied?: boolean;
   /** When true, show "Amoraea is thinking..." (visual only, no TTS) */
@@ -117,7 +117,7 @@ export const UserInterviewLayout: React.FC<UserInterviewLayoutProps> = ({
   micWarning,
   inputDisabled,
   onExit,
-  ttsFallbackActive = false,
+  ttsPlaybackReliabilityNotice = null,
   micPermissionDenied = false,
   isWaiting = false,
   micToggleMode = false,
@@ -325,15 +325,11 @@ export const UserInterviewLayout: React.FC<UserInterviewLayoutProps> = ({
           <Text style={styles.insecureContextBanner}>{sessionAudioHealthNotice}</Text>
         ) : null}
 
-        {ttsFallbackActive ? (
-          <Text style={styles.ttsFallbackNotice}>
-            {Platform.OS === 'web'
-              ? '◆ Audio unavailable — hover Show scenario to read the question, then speak when ready'
-              : '◆ Audio unavailable — hold Show scenario to read the question, then speak when ready'}
-          </Text>
+        {ttsPlaybackReliabilityNotice && !micError ? (
+          <Text style={styles.insecureContextBanner}>{ttsPlaybackReliabilityNotice}</Text>
         ) : null}
 
-        {lateStartRecordingCue && voiceState === 'idle' && !ttsFallbackActive ? (
+        {lateStartRecordingCue && voiceState === 'idle' ? (
           <Text style={styles.lateStartCue} accessibilityLiveRegion="polite">
             Take your time — tap when ready
           </Text>
@@ -991,16 +987,6 @@ const styles = StyleSheet.create({
     lineHeight: 22,
     letterSpacing: 0.1,
     color: FLAME_BRIGHT,
-  },
-  ttsFallbackNotice: {
-    fontFamily: FONT_UI,
-    fontSize: 10,
-    fontWeight: '300',
-    letterSpacing: 2,
-    textTransform: 'uppercase',
-    color: TEXT_DIM,
-    textAlign: 'center',
-    marginTop: 8,
   },
   insecureContextBanner: {
     fontFamily: FONT_UI,

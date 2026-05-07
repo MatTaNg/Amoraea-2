@@ -1,0 +1,4 @@
+-- Attachment (ECR-36 / ECR-R): anxiety and avoidance means are stored as JSON on
+-- user_assessments.scores and related trait blobs — not as 36 per-item columns in this repo.
+-- Safe deletion of any legacy per-item attachment columns must be done in a follow-up
+-- migration after listing columns on your live database (e.g. information_schema.columns).

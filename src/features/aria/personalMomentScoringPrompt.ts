@@ -1,5 +1,13 @@
 import { ACCOUNTABILITY_BLAME_SHIFT_VS_CLARITY_REQUEST, SCORE_CALIBRATION_0_10 } from './interviewScoringCalibration';
-import { CONTEMPT_EXPRESSION_SCORING_RUBRIC } from './contemptExpressionScoringRubric';
+import {
+  ELABORATION_ABSENCE_MOMENT4_MARKERS,
+  ELABORATION_ABSENCE_SCORING_HEADER,
+} from './elaborationAbsencePenaltiesRubric';
+import {
+  CONTEMPT_EXPRESSION_SCORING_RUBRIC,
+  CONTEMPT_TIER_BREAKDOWN_JSON_INSTRUCTION,
+  CONTEMPT_TIER_BREAKDOWN_JSON_TEMPLATE,
+} from './contemptExpressionScoringRubric';
 
 const MOMENT_META = {
   name: 'Moment 4 (Personal Grudge/Dislike)',
@@ -14,11 +22,30 @@ const MOMENT_META = {
   ] as const,
 };
 
-export function buildPersonalMomentScoringPrompt(transcript: { role: string; content: string }[]): string {
+/** Optional client-side Moment 4 probe metadata (thin signal handling). */
+export type Moment4ClientScoringMetadata = {
+  clientSpecificityFollowUpAsked: boolean;
+  /** True when answers stayed thin/generic after the one scripted specificity follow-up. */
+  lowSpecificityAfterProbe: boolean;
+};
+
+export function buildPersonalMomentScoringPrompt(
+  transcript: { role: string; content: string }[],
+  moment4ClientMeta?: Moment4ClientScoringMetadata | null,
+): string {
   const ids = [...MOMENT_META.markerIds];
   const turns = transcript
     .map((m) => `${m.role === 'user' ? 'User' : 'Interviewer'}: ${m.content}`)
     .join('\n\n');
+  const specificityProbeCalibration =
+    moment4ClientMeta?.clientSpecificityFollowUpAsked === true
+      ? `\nCLIENT METADATA — SPECIFICITY FOLLOW-UP (truth for scoring):\nThe interviewer **already** delivered **one** scripted follow-up inviting a concrete personal situation (thin signal is **not** because no probe was offered).\n${
+          moment4ClientMeta.lowSpecificityAfterProbe
+            ? 'After that follow-up, the participant\'s content was **still** thin or generic — treat low specificity / sparse evidence as **reflecting their answers**, not missing interviewer scaffolding.'
+            : 'Use the full transcript (including the follow-up exchange) normally; the follow-up is context, not a score boost.'
+        }\n`
+      : '';
+
   const momentSpecificCalibration = `
 MOMENT 4 — NON-ENGAGEMENT / DEFLECTION (entire moment):
 If the user does not substantively engage with the grudge/dislike question — topic switching, philosophical deflection, vague non-answers with no real person or situation, "I don't hold grudges" without a concrete story when pushed, or other absence of signal — set EVERY listed marker in pillarScores to JSON null (not 0, not 1). Use the SAME keyEvidence string for all markers: "No substantive engagement with grudge/dislike question in this slice — deflection, avoidance, or absent signal." Set pillarConfidence to "low" for each. Numeric scores apply only when there is assessable content.
@@ -52,6 +79,7 @@ MOMENT: ${MOMENT_META.name}
 MARKERS TO SCORE IN THIS SLICE: ${MOMENT_META.constructs}
 
 ${SCORE_CALIBRATION_0_10}
+${CONTEMPT_EXPRESSION_SCORING_RUBRIC}
 
 TRANSCRIPT OF THIS MOMENT ONLY:
 ${turns}
@@ -60,9 +88,14 @@ SCORING INSTRUCTIONS:
 Score only the listed markers using only this moment transcript slice.
 For each marker: quote or paraphrase the response that most informed the score.
 If responses are generic and unspecific, cap that marker at 5.
+${ELABORATION_ABSENCE_SCORING_HEADER}
+${ELABORATION_ABSENCE_MOMENT4_MARKERS}
+${specificityProbeCalibration}
 ${momentSpecificCalibration}
 
 When any marker uses JSON null per instructions above, output null (not 0) for that key.
+
+${CONTEMPT_TIER_BREAKDOWN_JSON_INSTRUCTION}
 
 Return ONLY valid JSON:
 {
@@ -71,6 +104,7 @@ Return ONLY valid JSON:
   "pillarScores": { ${ids.map((id) => `"${id}": 0`).join(', ')} },
   "pillarConfidence": { ${ids.map((id) => `"${id}": "high"`).join(', ')} },
   "keyEvidence": { ${ids.map((id) => `"${id}": ""`).join(', ')} },
+  "contempt_tier_breakdown": ${CONTEMPT_TIER_BREAKDOWN_JSON_TEMPLATE},
   "summary": "",
   "specificity": "high"
 }`;

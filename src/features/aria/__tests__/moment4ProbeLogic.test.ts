@@ -1,7 +1,11 @@
+import { describe, expect, it } from 'vitest';
 import {
   evaluateMoment4RelationshipType,
+  isAnsweringFirstUserTurnAfterMoment4Threshold,
   looksLikeMisplacedNonGrudgeMoment4Answer,
+  looksLikeMoment4ThresholdQuestion,
   shouldForceMoment4ThresholdProbe,
+  transcriptIncludesMoment4ThresholdAssistant,
 } from '../moment4ProbeLogic';
 
 const M4_GRUDGE_CARD =
@@ -10,7 +14,63 @@ const M4_GRUDGE_CARD =
 const M4_THRESHOLD =
   '"At what point do you decide when a relationship is something to work through versus something you need to walk away from?"';
 
+const M4_THRESHOLD_FORCED_INJECT =
+  'Thanks for sharing that. At what point do you decide when a relationship is something to work through versus something you need to walk away from?';
+
 describe('moment4ProbeLogic', () => {
+  it('detects commitment threshold with smart quotes and without requiring the word "point" in paraphrases', () => {
+    expect(looksLikeMoment4ThresholdQuestion(M4_THRESHOLD)).toBe(true);
+    expect(
+      looksLikeMoment4ThresholdQuestion(
+        '\u201cAt what point do you decide when a relationship is something to work through versus something you need to walk away from?\u201d',
+      )
+    ).toBe(true);
+    expect(looksLikeMoment4ThresholdQuestion(M4_THRESHOLD_FORCED_INJECT)).toBe(true);
+    expect(
+      looksLikeMoment4ThresholdQuestion(
+        'When would you decide if a relationship is worth working through or it is time to walk away?',
+      )
+    ).toBe(true);
+  });
+
+  it('transcriptIncludesMoment4ThresholdAssistant finds a threshold line among assistants', () => {
+    const msgs = [
+      { role: 'assistant', content: M4_GRUDGE_CARD },
+      { role: 'user', content: 'There was a person at work.' },
+      { role: 'assistant', content: M4_THRESHOLD_FORCED_INJECT },
+    ];
+    expect(transcriptIncludesMoment4ThresholdAssistant(msgs)).toBe(true);
+    expect(transcriptIncludesMoment4ThresholdAssistant([{ role: 'assistant', content: M4_GRUDGE_CARD }])).toBe(false);
+  });
+
+  it('isAnsweringFirstUserTurnAfterMoment4Threshold: true when threshold was asked and no user reply yet (even with assistant ack after threshold)', () => {
+    const prior = [
+      { role: 'assistant', content: M4_GRUDGE_CARD },
+      { role: 'user', content: 'Short grudge story.' },
+      { role: 'assistant', content: M4_THRESHOLD_FORCED_INJECT },
+      { role: 'assistant', content: "Thanks — I'm curious how you'd put that in practice." },
+    ];
+    expect(isAnsweringFirstUserTurnAfterMoment4Threshold(prior)).toBe(true);
+  });
+
+  it('isAnsweringFirstUserTurnAfterMoment4Threshold: false once user has replied after the threshold', () => {
+    const prior = [
+      { role: 'assistant', content: M4_GRUDGE_CARD },
+      { role: 'user', content: 'Short grudge story.' },
+      { role: 'assistant', content: M4_THRESHOLD_FORCED_INJECT },
+      { role: 'user', content: 'I walk away when there is no trust left.' },
+    ];
+    expect(isAnsweringFirstUserTurnAfterMoment4Threshold(prior)).toBe(false);
+  });
+
+  it('isAnsweringFirstUserTurnAfterMoment4Threshold: false when threshold never appeared', () => {
+    const prior = [
+      { role: 'assistant', content: M4_GRUDGE_CARD },
+      { role: 'user', content: 'Still on grudge answer only.' },
+    ];
+    expect(isAnsweringFirstUserTurnAfterMoment4Threshold(prior)).toBe(false);
+  });
+
   it('classifies coworker answers as non_close', () => {
     const answer = 'It was a coworker I worked with closely, and I distanced myself from them.';
     const evalResult = evaluateMoment4RelationshipType(answer);

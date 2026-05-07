@@ -43,7 +43,8 @@ describe('computeGateResult — research weights & floors', () => {
     const r = computeGateResult(scores);
     expect(r.pass).toBe(false);
     expect(r.reason).toBe('weighted_below_threshold');
-    expect(r.failReason).toMatch(/weighted_below_threshold/);
+    expect(r.failReasonCodes).toContain('weighted_score');
+    expect(r.failReason).toMatch(/weighted_score:/);
     expect(r.failReason).toContain('6.0');
   });
 
@@ -147,6 +148,7 @@ describe('computeGateResult — research weights & floors', () => {
     const r = computeGateResult(scores, null, { weightedPassMin: REFERRAL_WEIGHTED_PASS_MIN });
     expect(r.pass).toBe(false);
     expect(r.reason).toBe('weighted_below_threshold');
+    expect(r.failReasonCodes).toContain('weighted_score');
     expect(r.failReason).toContain('5.5');
   });
 });

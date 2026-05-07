@@ -15,6 +15,7 @@ import {
   Linking,
   InteractionManager,
 } from 'react-native';
+import * as Clipboard from 'expo-clipboard';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useAuth } from '@features/authentication/hooks/useAuth';
 import { FeedbackBubble } from '@/components/FeedbackBubble';
@@ -33,12 +34,35 @@ import {
   isBoundaryWarmValidationOnlySentence,
   shouldDeferStreamingBoundaryWarmClause,
 } from '@features/aria/interviewerFrameworkPrompt';
-import { buildElongatingProbeStateSuffix, isApprovedElongatingProbeOnly } from '@features/aria/elongatingProbe';
+import {
+  buildElongatingProbeStateSuffix,
+  isApprovedElongatingProbeOnly,
+  userTurnSuppressesElongatingProbe,
+} from '@features/aria/elongatingProbe';
+import {
+  buildClientFrustrationMetaFallbackAssistantText,
+  buildMetaCommentHandlingSuffix,
+  buildSkipRequestConfirmationSpeech,
+  SKIP_REQUEST_CONFIRMATION_PROMPT_LINE,
+  countsAsSubstantiveInterviewQuestionDelivery,
+  getMetaCommentCanonicalResponseSummary,
+  getPriorSubstantiveNonMetaUserContentInMoment,
+  hadPriorSubstantiveAnswerInScenarioForFrustration,
+  lastSubstantivePriorUserExcerptInScenario,
+  looksLikeFrustrationSkipAcceptance,
+  looksLikeFrustrationSkipConfirmationAffirmative,
+  looksLikeProactiveScenarioSkipRequest,
+  looksLikeSkipConfirmationDecline,
+  resolveMetaCommentForInterviewTurn,
+  type MetaCommentClassification,
+} from '@features/aria/metaCommentClassification';
 import {
   buildMoment4HandoffForInterview,
+  buildMoment4ThresholdAnswerToMoment5Bundle,
   buildScenario1To2BundleForInterview,
   buildScenario2To3TransitionBody,
   ensureScenario2BundleWhenOpeningWithoutVignette,
+  SCENARIO_2_TO_3_TRANSITION_FALLBACK,
 } from '@features/aria/interviewTransitionBundles';
 import { resolveWebActiveGestureOverlayKind, type WebActiveGestureOverlayKind } from '@features/aria/webInterviewGestureOverlay';
 import {
@@ -50,7 +74,23 @@ import {
   INTERVIEW_MARKER_LABELS,
   SLICE_ONLY_MARKER_LABELS,
 } from '@features/aria/interviewMarkers';
-import { computeGateResult, GATE_PASS_WEIGHTED_MIN, type GateResult } from '@features/aria/computeGateResult';
+import { communicationFloorFieldsFromTranscript } from '@features/aria/communicationFloorFromTranscript';
+import {
+  computeGateResult,
+  GATE_PASS_WEIGHTED_MIN,
+  scenarioCompositesToStorageJson,
+  type GateResult,
+} from '@features/aria/computeGateResult';
+import type { ComputeGateResultOptions } from '@features/aria/computeGateResultCore';
+import {
+  computeSkipPenaltyGateComputation,
+  individualPenaltyForSkipNumber,
+} from '@features/aria/interviewSkipPenalties';
+import {
+  buildIncompleteInterviewGateResult,
+  evaluateInterviewCompletionGate,
+  type InterviewCompletionGateResult,
+} from '@features/aria/interviewCompletionGate';
 import {
   NON_ENGLISH_VOICE_PROMPT,
   parseWhisperTranscriptionPayload,
@@ -60,9 +100,21 @@ import {
   isSimpleYesNoInterviewMoment,
   isShortAnswerOkForWhisperRatioGate,
   getWhisperReaskTurnContext,
-  shouldFireWhisperRatioReask,
+  computeWhisperRatioReaskState,
+  WHISPER_RATIO_REASK_MAX_ATTEMPTS_PER_QUESTION,
   whisperLanguageIsEnglish,
+  isResumeReentryWelcomePrompt,
+  isNamePromptInterviewMoment,
+  isClientAudioRecoveryAssistantLine,
 } from '@features/aria/interviewLanguageGate';
+import {
+  isClientOrElongatingInterviewProbeAssistant,
+  isInterviewHardStopUserTurn,
+  isRepairRefusalProbeAssistantLine,
+  looksLikeScenarioBRepairAsJamesQuestion,
+  pickClientDisengagementProbe,
+  scenarioALastAssistantIsRepairProbeOrFollowUp,
+} from '@features/aria/interviewDisengagementProbes';
 import {
   resolveWeightedPassMinAfterReferralFulfillment,
   ensureShareableReferralCodeForReferrer,
@@ -83,8 +135,18 @@ import {
   getLateStartThresholdMs,
 } from '@features/aria/config/audioInterviewConfig';
 import { WHISPER_LANGUAGE, WHISPER_MODEL, WHISPER_TEMPERATURE } from '@features/aria/config/whisperApiConstants';
-import { isTtsDurationMatchWithinOverrunTolerance } from '@features/aria/utils/interviewTtsDurationMatch';
+import {
+  isTtsDurationMatchWithinOverrunTolerance,
+  isTtsPlaybackPrematureCutoff,
+} from '@features/aria/utils/interviewTtsDurationMatch';
+import { classifyResumeRepeatIntent } from '@features/aria/resumeRepeatIntent';
 import { parseJsonObjectFromModelText } from '@utilities/parseHolisticModelJson';
+import {
+  fetchAttemptScenarioScoreCells,
+  persistScenarioScoreBundleToAttempt,
+  type ScenarioAttemptScoreBundle,
+} from '@utilities/interviewAttemptScenarioPersistence';
+import { scenarioScoresMeaningful } from '@utilities/waitForInterviewAttemptScoringReady';
 import { runWithThreeAttemptsFixedBackoff } from '@utilities/networkRetry';
 import { hasLikelySpeechAfterRecording } from '@features/aria/utils/audioEnergy';
 import { analyzeRecordingBuffer } from '@features/aria/utils/recordingBufferAnalysis';
@@ -117,6 +179,14 @@ import {
 } from '@features/aria/utils/elevenLabsTts';
 import { ProfileRepository } from '@data/repositories/ProfileRepository';
 import { supabase } from '@data/supabase/client';
+import {
+  buildResumeWelcomeMessage,
+  computeInterviewResumePlan,
+  lastFullyCompletedScenario,
+  retagScenarioNumbersBeforeMomentFour,
+  scenarioHasPersistedScores,
+  sliceMessagesBeforeScenarioIntro,
+} from '@utilities/interviewResumeCursor';
 import {
   saveInterviewToStorage,
   loadInterviewFromStorage,
@@ -187,6 +257,8 @@ import {
   resetTtsDurationCalibration,
   getTtsExpectedDurationMsFromCharCount,
   recordTtsTurnDurationRatio,
+  TTS_CALIBRATION_MIN_RATIO_TO_INCLUDE,
+  type TtsCalibrationResult,
 } from '@utilities/sessionLogging/ttsDurationCalibration';
 import {
   collectInterviewDeviceEnvironment,
@@ -230,35 +302,70 @@ import { debugNoteWebAudioRouteChange } from '@features/aria/utils/elevenLabsTts
 import { markSessionResumedForNextRecordingStart } from '@utilities/sessionLogging/sessionResumeRecordingTelemetry';
 import {
   evaluateMoment4RelationshipType,
+  isAnsweringFirstUserTurnAfterMoment4Threshold,
   looksLikeMisplacedNonGrudgeMoment4Answer,
   looksLikeMoment4GrudgePrompt,
+  looksLikeMoment4ThresholdQuestion,
   shouldForceMoment4ThresholdProbe as shouldForceMoment4ThresholdProbeByType,
+  transcriptIncludesMoment4ThresholdAssistant,
 } from '@features/aria/moment4ProbeLogic';
+import {
+  countInterviewWords,
+  deriveMoment4PostGrudgeSpecificityResolvedFromMessages,
+  looksLikeMoment4SpecificityFollowUpPrompt,
+  MOMENT_4_SPECIFICITY_FOLLOW_UP_TEXT,
+  needsMoment4SpecificityFollowUp,
+} from '@features/aria/moment4SpecificityFollowUp';
+import type { Moment4ClientScoringMetadata } from '@features/aria/personalMomentScoringPrompt';
 import {
   applyContemptExpressionHeuristicToScenarioScores,
   enrichScenarioSliceWithContemptHeuristic,
   userTurnTextForInterviewScenario,
 } from '@features/aria/contemptExpressionScenarioHeuristic';
-import { CONTEMPT_EXPRESSION_SCORING_RUBRIC } from '@features/aria/contemptExpressionScoringRubric';
-import { sanitizePersonalMomentScoresForAggregate } from '@features/aria/personalMomentSliceSanitize';
-import { analyzeCommitmentThresholdInconsistency } from '@features/aria/commitmentThresholdSliceAnalysis';
+import {
+  applyElaborationAbsencePenaltiesMoment4,
+  applyElaborationAbsencePenaltiesMoment5,
+  applyElaborationAbsencePenaltiesToScenarioScores,
+  computeAvgUserWordsPerTurnPersonalSlice,
+  computeAvgUserWordsPerTurnScenario,
+} from '@features/aria/elaborationAbsencePenaltiesHeuristic';
+import {
+  BEHAVIORAL_VS_EMOTIONAL_INTERIOR_SCENARIO,
+  ELABORATION_ABSENCE_SCORING_HEADER,
+  ELABORATION_ABSENCE_SCENARIO_MARKERS,
+} from '@features/aria/elaborationAbsencePenaltiesRubric';
+import {
+  CONTEMPT_EXPRESSION_SCORING_RUBRIC,
+  CONTEMPT_TIER_BREAKDOWN_JSON_INSTRUCTION,
+  CONTEMPT_TIER_BREAKDOWN_JSON_TEMPLATE,
+  parseContemptTierBreakdown,
+  type ContemptTierBreakdown,
+} from '@features/aria/contemptExpressionScoringRubric';
+import {
+  sanitizeMoment5PersonalScoresForAggregate,
+  sanitizePersonalMomentScoresForAggregate,
+  type PersonalMoment5SliceForSanitize,
+  type PersonalMomentSliceForSanitize,
+} from '@features/aria/personalMomentSliceSanitize';
 import {
   hasScenarioAQ1ContemptProbeCoverage,
   hasScenarioBQ1OnTopicEngagement,
-  hasScenarioCCommitmentThresholdInUserAnswer,
-  hasScenarioCVignetteCommitmentThresholdSignal,
-  scenarioCCommitmentThresholdMatchDetail,
-  extractScenario3CommitmentThresholdUserAnswerAfterPrompt,
   extractScenario3UserCorpusAfterLastRepairPrompt,
   extractScenario3UserCorpusBeforeRepairPrompt,
   type ScenarioCorpusMessageSlice,
-  isLikelyMisplacedPersonalNarrativeForScenarioCThreshold,
   isMisplacedScenarioCQ1Answer,
   isScenarioCQ1Prompt,
   isScenarioCRepairAssistantPrompt,
   normalizeInterviewTypography,
   normalizeScoresByEvidence,
+  SKIPPED_BY_USER_FRUSTRATION_EVIDENCE,
   sliceTranscriptBeforeScenarioCToPersonalHandoff,
+  MOMENT_5_ACCOUNTABILITY_QUESTION_TEXT,
+  MOMENT_5_ACCOUNTABILITY_PROBE_TEXT,
+  evaluateMoment5AccountabilityProbe,
+  looksLikeMoment5AccountabilityProbeAssistantPrompt,
+  isMoment5AssistantAnchor,
+  transcriptAssistantContainsMoment5PrimaryConflictQuestion,
 } from '@features/aria/probeAndScoringUtils';
 import { fullScenarioReconciliation } from '@features/aria/reconcileScenarioScoresTranscript';
 import {
@@ -275,6 +382,10 @@ import {
 import { buildScoringPrompt, SCORING_CONFIDENCE_INSTRUCTIONS } from '@features/aria/holisticScoringPrompt';
 import { SCENARIO_B_VIGNETTE as SCENARIO_2_VIGNETTE } from '@/constants/scenarioBVignette';
 import { buildPersonalMomentScoringPrompt } from '@features/aria/personalMomentScoringPrompt';
+import {
+  buildMoment5AccountabilityScoringPrompt,
+  type Moment5ClientScoringMetadata,
+} from '@features/aria/moment5AccountabilityScoringPrompt';
 import { inferPersonalMomentSlices } from '@features/aria/personalMomentSlices';
 import * as FileSystem from 'expo-file-system';
 import * as FileSystemLegacy from 'expo-file-system/legacy';
@@ -316,7 +427,7 @@ const FALLBACK_MARKER_SCORES_ALL_MARKERS: Record<string, number> = Object.fromEn
 
 const profileRepository = new ProfileRepository();
 
-type InterviewMomentIndex = 1 | 2 | 3 | 4;
+type InterviewMomentIndex = 1 | 2 | 3 | 4 | 5;
 type PostInterviewFeedbackKey = 'conversation_quality' | 'clarity_flow' | 'trust_accuracy';
 
 const POST_INTERVIEW_FEEDBACK_QUESTIONS: Array<{ id: PostInterviewFeedbackKey; title: string; prompt: string }> = [
@@ -352,7 +463,7 @@ function parseJsonObject(value: unknown): Record<string, unknown> | null {
 }
 
 function createInitialMomentCompletion(): Record<InterviewMomentIndex, boolean> {
-  return { 1: false, 2: false, 3: false, 4: false };
+  return { 1: false, 2: false, 3: false, 4: false, 5: false };
 }
 
 function buildInterviewProgressSystemSuffix(opts: {
@@ -363,7 +474,7 @@ function buildInterviewProgressSystemSuffix(opts: {
   const lines: string[] = [
     '',
     'PROGRESS LOCKS (internal metadata — obey strictly; never read aloud):',
-    `Current interview moment index (1–4): ${opts.currentMoment}. 1–3 = scenarios A–C; 4 = personal (grudge + commitment threshold), then final closing only.`,
+    `Current interview moment index (1–5): ${opts.currentMoment}. 1–3 = scenarios A–C; 4 = first personal segment (grudge/dislike + optional specificity follow-up + commitment-threshold follow-up — all still Moment 4); 5 = conflict/resolution personal question (+ at most one scripted accountability probe); after the user completes Moment 5 (and any probe), final closing only.`,
   ];
   if (opts.momentsComplete[1]) lines.push('Moment 1 COMPLETE — do not re-open Scenario A.');
   if (opts.momentsComplete[2]) lines.push('Moment 2 COMPLETE — do not re-open Scenario B.');
@@ -371,7 +482,7 @@ function buildInterviewProgressSystemSuffix(opts: {
   if (opts.personalHandoffInjected) {
     lines.push('The transition into the personal (grudge) question was already delivered. Never repeat that full handoff.');
   }
-  if (opts.momentsComplete[4]) {
+  if (opts.momentsComplete[5]) {
     lines.push(
       'Interview COMPLETE — deliver anchored closing + thanks + [INTERVIEW_COMPLETE] only; do not ask further questions.'
     );
@@ -394,8 +505,8 @@ function syncInterviewMomentsFromTranscript(
     )
   ) {
     return {
-      momentsComplete: { 1: true, 2: true, 3: true, 4: true },
-      currentMoment: 4,
+      momentsComplete: { 1: true, 2: true, 3: true, 4: true, 5: true },
+      currentMoment: 5,
       personalHandoffInjected: true,
     };
   }
@@ -415,10 +526,22 @@ function syncInterviewMomentsFromTranscript(
     const m = msgs[i];
     if (m.role !== 'assistant' || !m.content) continue;
     const c = m.content.toLowerCase();
+    if (looksLikeMoment5AccountabilityProbeAssistantPrompt(m.content)) {
+      personalHandoffInjected = true;
+      momentsComplete[3] = true;
+      currentMoment = 5;
+      break;
+    }
     if (
-      (c.includes("we've covered those three") || c.includes('three situations')) &&
-      c.includes('held a grudge')
+      transcriptAssistantContainsMoment5PrimaryConflictQuestion(m.content) &&
+      !looksLikeMoment4ThresholdQuestion(m.content)
     ) {
+      personalHandoffInjected = true;
+      momentsComplete[3] = true;
+      currentMoment = 5;
+      break;
+    }
+    if (combinedScenarioCToMoment4Handoff(m.content) || grudgeIntroSignalsMoment4Entry(m.content)) {
       personalHandoffInjected = true;
       momentsComplete[3] = true;
       currentMoment = 4;
@@ -439,6 +562,40 @@ function syncInterviewMomentsFromTranscript(
   }
 
   return { momentsComplete, currentMoment, personalHandoffInjected };
+}
+
+/** User turns after the last scripted Moment 5 primary prompt (for resume + closing gate). */
+function countUserTurnsAfterLastMoment5PrimaryAnchor(
+  msgs: ReadonlyArray<{ role: string; content?: string }>,
+  sessionM5PrimaryAnchorMarked?: boolean
+): number {
+  let anchorIdx = -1;
+  for (let i = msgs.length - 1; i >= 0; i--) {
+    if (msgs[i].role !== 'assistant') continue;
+    const content = msgs[i].content ?? '';
+    if (transcriptAssistantContainsMoment5PrimaryConflictQuestion(content)) {
+      anchorIdx = i;
+      break;
+    }
+  }
+  if (anchorIdx < 0 && sessionM5PrimaryAnchorMarked) {
+    for (let i = msgs.length - 1; i >= 0; i--) {
+      if (msgs[i].role !== 'assistant') continue;
+      const raw = msgs[i].content ?? '';
+      if (looksLikeMoment5AccountabilityProbeAssistantPrompt(raw)) continue;
+      const lower = raw.toLowerCase();
+      if (lower.includes('conflict with someone important')) {
+        anchorIdx = i;
+        break;
+      }
+    }
+  }
+  if (anchorIdx < 0) return 0;
+  let n = 0;
+  for (let i = anchorIdx + 1; i < msgs.length; i++) {
+    if (msgs[i].role === 'user') n += 1;
+  }
+  return n;
 }
 
 function messageLooksLikeScoreCard(msg: { role?: string; content?: string; isScoreCard?: boolean }): boolean {
@@ -465,18 +622,66 @@ type InterviewProgressRefs = {
   personalHandoffInjectedRef: { current: boolean };
 };
 
+/** Segment-close from Scenario C → personal (framework wording evolves; keep legacy substrings too). */
+function assistantTextLooksLikeScenarioCToMoment4Handoff(rawDisplayText: string): boolean {
+  const dt = (rawDisplayText ?? '').toLowerCase();
+  return (
+    dt.includes("we've covered those three") ||
+    dt.includes('three situations') ||
+    dt.includes('three described situations') ||
+    dt.includes('end of the three described') ||
+    dt.includes('last of the three described') ||
+    dt.includes('done with those three scenarios') ||
+    dt.includes("we're done with those three scenarios") ||
+    dt.includes('done with those three described situations')
+  );
+}
+
+function combinedScenarioCToMoment4Handoff(raw: string): boolean {
+  if (assistantTextBlocksMoment4ProgressInference(raw)) return false;
+  const dt = (raw ?? '').toLowerCase();
+  return (
+    assistantTextLooksLikeScenarioCToMoment4Handoff(raw) &&
+    (dt.includes('held a grudge') || looksLikeMoment4GrudgePrompt(raw))
+  );
+}
+
+/** Grudge / personal-opening card alone (after a separate boundary message) — still Moment 4 entry. */
+function grudgeIntroSignalsMoment4Entry(raw: string): boolean {
+  if (assistantTextBlocksMoment4ProgressInference(raw)) return false;
+  return looksLikeMoment4GrudgePrompt(raw) && !looksLikeMoment4ThresholdQuestion(raw);
+}
+
 /** Infer M3→M4 progression from assistant visible text (model outputs). */
 function applyInterviewProgressFromAssistantText(rawDisplayText: string, refs: InterviewProgressRefs) {
-  const dt = (rawDisplayText ?? '').toLowerCase();
-  // Require the real grudge ask — do not use "more personal" alone: S2→S3 copy says "something more personal"
-  // and would false-trigger M4 (breaks Scenario C repair → Daniel/Sophie threshold forcing).
-  if (
-    (dt.includes("we've covered those three") || dt.includes('three situations')) &&
-    dt.includes('held a grudge')
-  ) {
+  const raw = rawDisplayText ?? '';
+  const combinedHandoff = combinedScenarioCToMoment4Handoff(raw);
+  const grudgeOnlyAfterScenarioC =
+    refs.currentInterviewMomentRef.current <= 3 && grudgeIntroSignalsMoment4Entry(raw);
+  if (combinedHandoff || grudgeOnlyAfterScenarioC) {
     refs.personalHandoffInjectedRef.current = true;
     refs.interviewMomentsCompleteRef.current[3] = true;
     refs.currentInterviewMomentRef.current = 4;
+    // #region agent log
+    fetch('http://127.0.0.1:7789/ingest/668e0bd5-3283-4492-9f48-e33846c18218', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'X-Debug-Session-Id': 'e43434' },
+      body: JSON.stringify({
+        sessionId: 'e43434',
+        runId: 'post-fix',
+        hypothesisId: 'M4_ADV',
+        location: 'AriaScreen.tsx:applyInterviewProgressFromAssistantText',
+        message: 'moment_advanced_to_4',
+        data: {
+          combinedHandoff,
+          grudgeOnlyAfterScenarioC,
+          segmentHandoff: assistantTextLooksLikeScenarioCToMoment4Handoff(raw),
+          preview: raw.slice(0, 200),
+        },
+        timestamp: Date.now(),
+      }),
+    }).catch(() => {});
+    // #endregion
   }
 }
 
@@ -653,6 +858,18 @@ function assistantMessageForRecordingOrTranscriptionFailure(streak: number, useW
   return randomFrom(shortPool);
 }
 
+/**
+ * After Whisper retries are exhausted: neutral copy only — no subscription/quota/billing wording for users.
+ */
+function getWhisperInfraExhaustedUserMessage(_args: {
+  lastHttpStatus: number | null;
+  failureReason: string;
+}): string {
+  return (
+    "Speech recognition isn't available right now—the service may be temporarily down. Please try again later."
+  );
+}
+
 /** Whisper upload filename must match actual container (Safari/desktop often records MP4, not WebM). */
 function pickWhisperUploadFilename(blob: Blob): string {
   const t = (blob.type || '').toLowerCase();
@@ -697,9 +914,22 @@ function shouldSaveToStorage(
  */
 function isGreetingOnly(savedMessages: Array<{ role: string; content?: string }> | undefined): boolean {
   if (!savedMessages || savedMessages.length === 0) return true;
+  const userCount = savedMessages.filter((m) => m.role === 'user').length;
+  /** Never treat as "greeting-only wipe" once the interview has real user turns (last line can still echo a greeting phrase). */
+  if (userCount >= 2) return false;
   const aiMessages = savedMessages.filter((m) => m.role === 'assistant');
   if (aiMessages.length <= 1) return true;
   const lastAI = aiMessages[aiMessages.length - 1];
+  const content = (lastAI?.content ?? '').toLowerCase();
+  /** Mid-interviewer lines must not trip pre-interview greeting heuristics (second refresh after resume welcome path). */
+  if (
+    content.includes('welcome back') ||
+    content.includes('pick up where we left off') ||
+    content.includes('left off in the personal part') ||
+    content.includes('repeat what i said')
+  ) {
+    return false;
+  }
   const greetingPhrases = [
     'welcome to amoraea',
     'what can i call you',
@@ -707,7 +937,6 @@ function isGreetingOnly(savedMessages: Array<{ role: string; content?: string }>
     'nice to meet you',
     'good to meet you',
   ];
-  const content = (lastAI?.content ?? '').toLowerCase();
   return greetingPhrases.some((phrase) => content.includes(phrase));
 }
 
@@ -726,7 +955,12 @@ async function saveInterviewProgress(
   await saveInterviewToStorage(userId, state);
 }
 
-type MessageWithScenario = { role: string; content: string; scenarioNumber?: number };
+type MessageWithScenario = {
+  role: string;
+  content: string;
+  scenarioNumber?: number;
+  interviewMoment?: InterviewMomentIndex;
+};
 
 function getScenarioNumberForNewMessage(
   prevMessages: MessageWithScenario[],
@@ -749,8 +983,18 @@ function detectScenarioFromResponse(responseText: string): 1 | 2 | 3 | null {
   if (!responseText?.trim()) return null;
   const c = responseText.toLowerCase();
   if (/emma and ryan|ryan takes a call|first situation|here's the first/.test(c)) return 1;
-  if (/sarah has been job hunting|second situation|on to the second|here's the next situation/.test(c)) return 2;
-  if (/sophie and daniel|daniel.*didn't know what to say|daniel.*didn't know how|here's the third situation|third situation|last one.*situation three|situation three/.test(c)) return 3;
+  if (
+    /sarah has been job hunting|second situation|on to the second|here's the next situation|\bsituation\s*2\b|the second situation|next situation/.test(c) ||
+    (/\bsarah\b/.test(c) && /\bjames\b/.test(c) && /job|hunting|offer|celebrate|appreciated|blindsided|deadline/.test(c))
+  ) {
+    return 2;
+  }
+  if (
+    /sophie and daniel|daniel.*didn't know what to say|daniel.*didn't know how|here's the third situation|third situation|last one.*situation three|situation three|\bsituation\s*3\b|the third situation/.test(c) ||
+    (/\bsophie\b/.test(c) && /\bdaniel\b/.test(c) && /ten minutes|avoiding|didn'?t know what to say|silent/.test(c))
+  ) {
+    return 3;
+  }
   return null;
 }
 
@@ -769,15 +1013,70 @@ function inferScenarioMessages(
       "i'm aira",
       "welcome to amoraea",
     ],
-    2: ['sarah has been job hunting', 'on to the second', 'second situation', "here's the next situation"],
-    3: ['sophie and daniel', 'i need ten minutes', "here's the third situation", 'third situation', 'last one', 'situation three'],
+    2: [
+      'sarah has been job hunting',
+      'on to the second',
+      'second situation',
+      "here's the next situation",
+      'the second situation',
+      'next situation',
+      'sarah and james',
+      'situation 2',
+      'situation two',
+    ],
+    3: [
+      'sophie and daniel',
+      'i need ten minutes',
+      "here's the third situation",
+      'third situation',
+      'last one',
+      'situation three',
+      'the third situation',
+      'situation 3',
+    ],
   };
   const anchors = scenarioAnchors[scenarioNum].map((a) => a.toLowerCase());
-  const startIdx = allMessages.findIndex((m) => {
-    if (m.role !== 'assistant') return false;
-    const c = (m.content ?? '').toLowerCase();
-    return anchors.some((anchor) => c.includes(anchor));
-  });
+
+  const findScenarioStartIndex = (): number => {
+    const primary = allMessages.findIndex((m) => {
+      if (m.role !== 'assistant') return false;
+      const c = (m.content ?? '').toLowerCase();
+      return anchors.some((anchor) => c.includes(anchor));
+    });
+    if (primary !== -1) return primary;
+
+    for (let i = 0; i < allMessages.length; i++) {
+      const m = allMessages[i];
+      if (m.role !== 'assistant') continue;
+      if (detectScenarioFromResponse(m.content ?? '') === scenarioNum) return i;
+    }
+
+    if (scenarioNum === 2) {
+      const h = allMessages.findIndex((m) => {
+        if (m.role !== 'assistant') return false;
+        const c = (m.content ?? '').toLowerCase();
+        return (
+          (/\bsarah\b/.test(c) && /\bjames\b/.test(c) && /job|hunting|offer|celebrate|appreciated|blindsided|deadline|fight/.test(c)) ||
+          /\bsituation\s*2\b/.test(c)
+        );
+      });
+      if (h !== -1) return h;
+    }
+    if (scenarioNum === 3) {
+      const h = allMessages.findIndex((m) => {
+        if (m.role !== 'assistant') return false;
+        const c = (m.content ?? '').toLowerCase();
+        return (
+          (/\bsophie\b/.test(c) && /\bdaniel\b/.test(c) && /ten minutes|avoiding|didn'?t know what to say|silent|upset/.test(c)) ||
+          /\bsituation\s*3\b/.test(c)
+        );
+      });
+      if (h !== -1) return h;
+    }
+    return -1;
+  };
+
+  const startIdx = findScenarioStartIndex();
   const effectiveStartIdx = scenarioNum === 1 && startIdx === -1 ? 0 : startIdx;
   if (effectiveStartIdx === -1) return [];
   const nextScenarioAnchors =
@@ -804,6 +1103,27 @@ function inferScenarioMessages(
         )
       : -1;
   return allMessages.slice(effectiveStartIdx, endIdx === -1 ? allMessages.length : endIdx);
+}
+
+/**
+ * Chooses transcript slice for per-scenario scoring when DB hydrate missed slices (weak/missing scenarioNumber tags).
+ * Prefer inferred band when it has more user turns than tagged, or tagged is empty.
+ */
+function pickMessagesForScenarioScoring(
+  allMessages: MessageWithScenario[],
+  scenarioNum: 1 | 2 | 3
+): { role: string; content: string }[] {
+  const tagged = allMessages.filter((m) => (m as MessageWithScenario).scenarioNumber === scenarioNum);
+  const inferred = inferScenarioMessages(allMessages, scenarioNum);
+  const taggedUser = tagged.filter((m) => m.role === 'user').length;
+  const inferredUser = inferred.filter((m) => m.role === 'user').length;
+
+  if (inferred.length >= 2 && inferredUser >= 1 && (tagged.length === 0 || inferredUser > taggedUser)) {
+    return inferred;
+  }
+  if (tagged.length >= 2) return tagged;
+  if (inferred.length >= 2) return inferred;
+  return inferred.length >= tagged.length ? inferred : tagged;
 }
 
 /** Detect if assistant message is the closing question (so we set pending even when [CLOSING_QUESTION:N] is missing). */
@@ -836,6 +1156,13 @@ function stripControlTokens(text: string): string {
     .replace(/\[PROBE_TRIGGERED\]/gi, '')
     .replace(/\[SKEPTICISM_CHECK\]/gi, '')
     .trim();
+}
+
+/** Collapses whitespace and punctuation for consecutive duplicate TTS suppression (before generation/retry). */
+function normalizeTtsTextForConsecutiveDedup(text: string): string {
+  const flat = stripControlTokens(text).trim().toLowerCase();
+  if (!flat) return '';
+  return flat.replace(/\s+/g, ' ').replace(/[^\p{L}\p{N}]/gu, '');
 }
 
 /** Multi-word / distinctive decline fragments — substring match is OK. Never use bare `"no"` here: `includes("no")` hits "not", "now", "know", etc. */
@@ -949,14 +1276,6 @@ function looksLikeMoment5Probe(text: string): boolean {
   );
 }
 
-function looksLikeMoment4ThresholdQuestion(text: string): boolean {
-  const t = text.toLowerCase();
-  return (
-    t.includes('"At what point do you decide when a relationship is something to work through versus something you need to walk away from?"') ||
-    (t.includes('work through') && t.includes('walk away') && t.includes('point'))
-  );
-}
-
 function hasCommitmentThresholdSignal(text: string): boolean {
   const t = text.toLowerCase();
   const hasIrrecoverableCriteria =
@@ -970,29 +1289,49 @@ function hasCommitmentThresholdSignal(text: string): boolean {
   return (hasIrrecoverableCriteria || hasLeaveDecisionProcess || hasBoundaryAndOutcome) && !(repairOnlyLanguage && !hasIrrecoverableCriteria && !hasLeaveDecisionProcess);
 }
 
-function looksLikeScenarioCThresholdQuestion(text: string): boolean {
-  const t = text.toLowerCase();
-  return (
-    t.includes("at what point would you say daniel or sophie should decide this relationship isn't working") ||
-    (t.includes('daniel') &&
-      t.includes('sophie') &&
-      t.includes("isn't working") &&
-      /\b(at what point|what point)\b/.test(t))
-  );
-}
-
 function looksLikeScenarioAContemptProbeQuestion(text: string): boolean {
   const t = text.toLowerCase().replace(/\u2019/g, "'");
-  const mentionsEmmaLine = t.includes("you've made that very clear");
+  /** ASR/model often drop the contraction ("you made that very clear"). */
+  const mentionsEmmaClosingLine =
+    t.includes("you've made that very clear") ||
+    t.includes('you have made that very clear') ||
+    /\byou\s+made\s+that\s+very\s+clear\b/.test(t);
   /** Canonical framework copy (interviewerFrameworkPrompt): "What about when Emma says … what do you make of that?" */
   const canonicalFrameworkProbe =
-    mentionsEmmaLine &&
+    mentionsEmmaClosingLine &&
     /what about when emma says/.test(t) &&
     /\bwhat do you make of (that|it)\b/.test(t);
   /** Legacy client inject when forcing the probe */
   const alternateInjectProbe =
-    mentionsEmmaLine && t.includes("what do you make of emma's statement");
-  return canonicalFrameworkProbe || alternateInjectProbe;
+    mentionsEmmaClosingLine && /\bwhat do you make of emma'?s statement\b/.test(t);
+  /**
+   * TTS/ASR mashups, e.g. "What do you make of Emma's statement you made that very clear"
+   * (missing "when she says 'you've…'" glue) — must count as the probe so we do not stack a second forced ask.
+   */
+  const statementMashup =
+    /\bwhat do you make of\b/.test(t) &&
+    /\bemma'?s\s+statement\b/.test(t) &&
+    /\b(very\s+clear|you'?ve\s+made|you\s+made\s+that)\b/.test(t);
+  const shortGarbledMakeOfEmma =
+    t.length < 220 &&
+    /\bwhat do you make of\b/.test(t) &&
+    /\bemma\b/.test(t) &&
+    /\bvery\s+clear\b/.test(t);
+  return canonicalFrameworkProbe || alternateInjectProbe || statementMashup || shortGarbledMakeOfEmma;
+}
+
+/** Remove repeated Scenario A contempt-probe asks after one was already delivered (model loop / ASR variants). */
+function stripScenarioAContemptProbeQuestion(text: string): string {
+  let s = text;
+  const removals: RegExp[] = [
+    /\n?\s*What about when Emma says[^\n]*?\bwhat do you make of (that|it)\??\s*/gi,
+    /\n?\s*What do you make of Emma['\u2019]s statement when she says[^\n]*?\??\s*/gi,
+    /\n?\s*What do you make of[^\n]{0,140}Emma[^\n]{0,180}very clear[^\n.?!]*\??\s*/gi,
+  ];
+  for (const re of removals) {
+    s = s.replace(re, '\n');
+  }
+  return s.replace(/\n{3,}/g, '\n\n').trim();
 }
 
 function looksLikeScenarioARepairQuestion(text: string): boolean {
@@ -1034,26 +1373,6 @@ function looksLikeScenarioBJamesDifferentlyQuestion(text: string): boolean {
   return (jamesCtx && differently) || beforeFight || leanJamesProbe;
 }
 
-/** Scenario B Q3 — repair in James's shoes. */
-function looksLikeScenarioBRepairAsJamesQuestion(text: string): boolean {
-  const t = text.toLowerCase();
-  const asJames =
-    /\bif you were james\b/.test(t) &&
-    /\b(repair|fix|make it right|apologize|patch things|make up|mend|handle|approach|smooth|sort (this|it) out|navigate|move forward)\b/.test(
-      t
-    );
-  const howRepairJames =
-    /\bhow would you\b/.test(t) &&
-    /\bjames\b/.test(t) &&
-    /\b(repair|fix|handle|approach|make things right|make it right)\b/.test(t);
-  const compact =
-    t.length < 200 &&
-    /\bjames\b/.test(t) &&
-    /\b(you were|as james|if you were)\b/.test(t) &&
-    /\b(repair|fix|handle|approach)\b/.test(t);
-  return asJames || howRepairJames || compact;
-}
-
 /** Model jumped to Scenario C (or completion) without asking what James could have done differently first. */
 function looksLikeAssistantSkipsScenarioBJamesIntermediateQuestion(text: string): boolean {
   if (looksLikeScenarioBJamesDifferentlyQuestion(text)) return false;
@@ -1085,10 +1404,6 @@ function stripScenarioBRepairAsJamesQuestion(text: string): string {
     .replace(/\n{3,}/g, '\n\n')
     .trim();
 }
-
-/** Exact lead when Q3 (repair-as-James) is skipped because Q2 already contained repair signal (client + framework). */
-const SCENARIO_B_REPAIR_ALREADY_COVERED_SKIP_LEAD =
-  "Got it — you've already covered how you'd approach that.";
 
 /**
  * Last user turn in `messages` with the assistant message they were answering (may not be the final message if callers pass a prefix).
@@ -1288,7 +1603,7 @@ Write only the closing line(s) before thanks (no "Thank you" in your output). No
 const CLOSING_LINE_INSTRUCTIONS = `
 CLOSING — ONE MESSAGE, ANCHORED (THIS TRANSCRIPT ONLY):
 
-After Moment 4, the closing is often the **only** place that shows you were listening — it must **reference something specific** from this user's turns: their grudge/threshold story, or a concrete scenario stance (e.g. how they read Emma and Ryan, Sarah and James, or Sophie and Daniel). **Generic sign-offs alone are not acceptable** (e.g. only "thanks for your time" / "direct and thoughtful throughout" with no callback).
+After the personal questions (Moments 4–5), the closing is often the **only** place that shows you were listening — it must **reference something specific** from this user's turns. **Prefer** a concrete detail from their **Moment 5 conflict / resolution** answer when they gave one; otherwise their grudge or commitment-threshold (Moment 4), or a concrete scenario stance (e.g. Emma/Ryan, Sarah/James, Sophie/Daniel). **Generic sign-offs alone are not acceptable** (e.g. only "thanks for your time" / "direct and thoughtful throughout" with no callback).
 
 Structure (flexible): optional brief task acknowledgement (good work / thanks for sticking with this) **plus** one concrete remembered detail — or weave both into one or two tight sentences. Then "Thank you for being so open with me." (or close variant) and [INTERVIEW_COMPLETE].
 
@@ -1318,7 +1633,7 @@ Bad: "I appreciate you walking through all of this — you've been direct and th
 `;
 
 const PERSONAL_CLOSING_INSTRUCTION = `
-CLOSING: The user shared personal experiences in moment four. **One** assistant message only: include **at least one concrete anchor** from their personal turns (grudge/threshold) or a specific scenario read they gave so the closing feels remembered — not a form letter. You may add brief task acknowledgement (good work / thanks for sticking with this). **No** generic trait-only praise ("direct and thoughtful throughout," "very clear," "self-aware"). Do not start with "Sure," "Okay," "Absolutely," "That makes sense," "That checks out," or "That lands." Do not reframe low-scoring signals as positives. No clinical/theoretical labels. Then "Thank you for being so open with me" or similar. Then output [INTERVIEW_COMPLETE].`;
+CLOSING: The user shared personal experiences across Moments 4 and 5. **One** assistant message only: include **at least one concrete anchor** — **prefer** something they said in the **Moment 5 conflict / how it resolved** turn when present; otherwise grudge or commitment-threshold (Moment 4), or a specific scenario read. Do not anchor the closing **only** on Moment 4 if they already answered Moment 5. You may add brief task acknowledgement (good work / thanks for sticking with this). **No** generic trait-only praise ("direct and thoughtful throughout," "very clear," "self-aware"). Do not start with "Sure," "Okay," "Absolutely," "That makes sense," "That checks out," or "That lands." Do not reframe low-scoring signals as positives. No clinical/theoretical labels. Then "Thank you for being so open with me" or similar. Then output [INTERVIEW_COMPLETE].`;
 
 const SCENARIO_ONLY_CLOSING_INSTRUCTION = `
 CLOSING: The user gave limited personal detail. **One** assistant message only: still **anchor on something specific** they said in the scenarios (a named character, a line they quoted, or how they framed the conflict) plus optional brief task acknowledgement. **No** generic-only sign-off. Do not start with "Sure," "Okay," "Absolutely," "That makes sense," "That checks out," or "That lands." No hollow trait evaluation. No biographical content that does not appear in this transcript. Then "Thank you for being so open with me" or similar. Then output [INTERVIEW_COMPLETE].`;
@@ -2184,7 +2499,6 @@ type GenerateAIReasoningSafeOptions = {
   /** Fired before each outer pass after the first (delay + new attempt). */
   onOuterRetry?: (outerAttempt: number) => void;
   onUnrecoverable?: (err: unknown) => void;
-  commitmentThresholdInconsistency?: import('@features/aria/generateAIReasoning').CommitmentThresholdInconsistencyPayload | null;
 };
 
 /** Let the browser / HTTP stack recover after a long scoring burst before the large reasoning request. */
@@ -2212,7 +2526,6 @@ async function generateAIReasoningSafe(
     _isBrowserLevelNetworkFailure?: boolean;
   }
 > {
-  const inconsistency = options?.commitmentThresholdInconsistency ?? null;
   let lastErr: unknown;
   const maxOuter = 1 + AI_REASONING_OUTER_RETRIES;
 
@@ -2235,8 +2548,7 @@ async function generateAIReasoningSafe(
         transcript,
         weightedScore,
         passed,
-        unassessedMarkers,
-        inconsistency
+        unassessedMarkers
       );
     } catch (err) {
       lastErr = err;
@@ -2302,6 +2614,13 @@ const SCENARIO_3_VIGNETTE =
 const SCENARIO_3_OPENING = "When Daniel comes back and says 'I didn't know what to say' — what do you make of that?";
 const SCENARIO_3_TEXT = `${SCENARIO_3_VIGNETTE}\n\n${SCENARIO_3_OPENING}`;
 
+/** Full scripted first assistant block for a scenario (matches fresh delivery after resume slice). */
+function getScenarioResumeIntroAssistantBody(scenario: 1 | 2 | 3): string {
+  if (scenario === 1) return SCENARIO_1_VIGNETTE;
+  if (scenario === 2) return SCENARIO_2_TEXT;
+  return SCENARIO_3_TEXT;
+}
+
 function textContainsScenarioCVignetteBody(text: string): boolean {
   const t = (text ?? '').trim().toLowerCase();
   if (!t) return false;
@@ -2311,6 +2630,19 @@ function textContainsScenarioCVignetteBody(text: string): boolean {
     (/i didn'?t know what to say|did not know what to say|i didn'?t know how|did not know how/.test(t) ||
       /\bstill upset\b/.test(t))
   );
+}
+
+/**
+ * Situation 2→3 delivery (canonical or paraphrased) must not advance interview progress to Moment 4.
+ * Otherwise a sloppy [SCENARIO_COMPLETE:2] model turn that jumps to personal/grudge language can skip Sophie/Daniel.
+ */
+function assistantTextBlocksMoment4ProgressInference(text: string): boolean {
+  if (textContainsScenarioCVignetteBody(text)) return true;
+  const t = (text ?? '').toLowerCase();
+  if (t.includes(SCENARIO_2_TO_3_TRANSITION_FALLBACK.toLowerCase())) return true;
+  if (t.includes("here's the third situation") || t.includes('here the third situation')) return true;
+  if (t.includes('third situation') && (t.includes('more personal') || t.includes('two questions'))) return true;
+  return false;
 }
 
 function stripScenarioCRepairQuestionFromText(text: string): string {
@@ -2329,6 +2661,14 @@ function stripScenarioCThresholdQuestionFromText(text: string): string {
   );
   out = out.replace(
     /\n*\s*At what point would you say (Daniel|Sophie) or (Daniel|Sophie) should decide[^?\n]*\??\s*/gi,
+    '\n\n'
+  );
+  out = out.replace(
+    /\n*\s*At what point do you decide[^\n]*?Daniel[^\n]*?Sophie[^\n]*?(?:isn't|is not)\s+working\??\s*/gi,
+    '\n\n'
+  );
+  out = out.replace(
+    /\n*\s*At what point[^\n]{0,120}Daniel[^\n]{0,120}Sophie[^\n]{0,160}?(?:isn't|is not)\s+working[^\n.?!]*\??\s*/gi,
     '\n\n'
   );
   return out.replace(/\n{3,}/g, '\n\n').trim();
@@ -2369,17 +2709,17 @@ function replaceOrphanScenarioCRepairWithQ1(text: string, priorAssistantContent:
 /** First sentence of Scenario C vignette — re-inserted client-side when the model drops the repetition frame (Prompt 1). */
 const SCENARIO_3_REPETITION_OPENING_LINE = SCENARIO_3_VIGNETTE.slice(0, SCENARIO_3_VIGNETTE.indexOf('.') + 1);
 
-/** Misplaced personal answer to Scenario C commitment probe — two-step redirect + explicit re-ask (see SC3_MISPLACED_THRESHOLD_SEQUENCE logs). */
-const SCENARIO_C_MISPLACED_THRESHOLD_REDIRECT =
-  'I think that one was about Daniel and Sophie specifically — what would you say for them?';
-const SCENARIO_C_COMMITMENT_THRESHOLD_QUESTION =
-  "At what point would you say Daniel or Sophie should decide this relationship isn't working?";
 const SCENARIO_C_MISPLACED_Q1_REDIRECT =
   "I was asking specifically about what you make of Daniel saying 'I didn't know what to say', what does that line tell you about where he's at?";
 
 const MOMENT_4_PERSONAL_LABEL = 'Personal reflection';
 const MOMENT_4_PERSONAL_CARD =
   "Have you ever held a grudge against someone, or had someone in your life you really didn't like? How did that happen, and where are you with it now?";
+/** Show scenario modal: single main block (no Moment 4 grudge vignette); bottom prompt is null so the question is not duplicated. */
+const MOMENT_5_REFERENCE_SCENARIO: ActiveScenario = {
+  label: MOMENT_4_PERSONAL_LABEL,
+  text: MOMENT_5_ACCOUNTABILITY_QUESTION_TEXT.trim(),
+};
 /** After scenario 3 closing, the app injects this handoff so the model continues Moment 4 in the same thread. */
 const MOMENT_4_HANDOFF = buildMoment4HandoffForInterview('', MOMENT_4_PERSONAL_CARD);
 
@@ -2499,6 +2839,33 @@ function normalizeScenarioOpeningForCompare(s: string): string {
     .toLowerCase();
 }
 
+/** Pause between split vignette TTS and closing question TTS (lets segment 1 finish; pairs with expected wall-clock for premature detection). */
+const SCENARIO_SPLIT_INTER_SEGMENT_GAP_MS = 1900;
+
+function computeExpectedTtsWallClockMs(
+  charCount: number,
+  speakOutcome: { scenarioSplitDelivery?: { segment1_expected_duration_ms: number; segment2_expected_duration_ms: number } } | void | null
+): { expectedMs: number; calculationMethod: string } {
+  if (speakOutcome && 'scenarioSplitDelivery' in speakOutcome && speakOutcome.scenarioSplitDelivery) {
+    const s = speakOutcome.scenarioSplitDelivery;
+    return {
+      expectedMs:
+        s.segment1_expected_duration_ms + s.segment2_expected_duration_ms + SCENARIO_SPLIT_INTER_SEGMENT_GAP_MS,
+      calculationMethod: 'split_segments_plus_gap',
+    };
+  }
+  return getTtsExpectedDurationMsFromCharCount(charCount);
+}
+
+const MAX_TTS_PLAYBACK_COMPLETION_ATTEMPTS = 3;
+/** Web duration verification: if attempt 2 truncates at ~the same actual/expected ratio as attempt 1, treat as estimation error (no attempt 3). */
+const TTS_PREMATURE_RATIO_STABILITY_EPSILON = 0.02;
+/**
+ * Verbatim `telemetrySource: 'replay'` lines often finish well below char-based `expectedMs` but above
+ * real truncation; otherwise the generic sub-0.8 premature rule would re-speak the whole line once more.
+ */
+const TTS_REPLAY_PREMATURE_ACCEPT_MIN_RATIO = 0.65;
+
 /**
  * Long fictional scenario intros only: split vignette vs opening question when estimate &gt; 30s.
  * Both segments are intended to be prefetched before playback (see `speak`).
@@ -2549,6 +2916,31 @@ function syncReferenceCardStateFromAssistantMessages(
   if (assistantMessages.length === 0) {
     return { scenario: null, prompt: null, phase: 'pre_scenario' };
   }
+  for (let i = assistantMessages.length - 1; i >= 0; i--) {
+    const raw = stripControlTokens(assistantMessages[i].content ?? '').trim();
+    if (transcriptAssistantContainsMoment5PrimaryConflictQuestion(raw)) {
+      // #region agent log
+      fetch('http://127.0.0.1:7789/ingest/668e0bd5-3283-4492-9f48-e33846c18218', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'X-Debug-Session-Id': 'e43434' },
+        body: JSON.stringify({
+          sessionId: 'e43434',
+          location: 'AriaScreen.tsx:syncReferenceCardStateFromAssistantMessages',
+          message: 'reference_card_sync',
+          data: {
+            earlyReturnMoment5: true,
+            m5MsgIdx: i,
+            bodyOnlyQuestion: true,
+            bodyLen: MOMENT_5_REFERENCE_SCENARIO.text.length,
+          },
+          timestamp: Date.now(),
+          hypothesisId: 'H_m5_modal',
+        }),
+      }).catch(() => {});
+      // #endregion
+      return { scenario: MOMENT_5_REFERENCE_SCENARIO, prompt: null, phase: 'scenario_active' };
+    }
+  }
   let anchorIdx = -1;
   let anchorScenario: ActiveScenario | null = null;
   for (let i = assistantMessages.length - 1; i >= 0; i--) {
@@ -2581,6 +2973,34 @@ function syncReferenceCardStateFromAssistantMessages(
   } else {
     prompt = getSituationOpeningQuestion(anchorScenario);
   }
+  // #region agent log
+  {
+    const lastRaw =
+      lastIdx >= 0 ? stripControlTokens(assistantMessages[lastIdx].content ?? '').trim() : '';
+    const lastHasQ = lastRaw.includes('?');
+    const lastHasM5 = transcriptAssistantContainsMoment5PrimaryConflictQuestion(lastRaw);
+    fetch('http://127.0.0.1:7789/ingest/668e0bd5-3283-4492-9f48-e33846c18218', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'X-Debug-Session-Id': 'e43434' },
+      body: JSON.stringify({
+        sessionId: 'e43434',
+        location: 'AriaScreen.tsx:syncReferenceCardStateFromAssistantMessages',
+        message: 'reference_card_sync',
+        data: {
+          anchorIdx,
+          lastIdx,
+          earlyReturnMoment5: false,
+          lastHasQ,
+          lastHasM5,
+          promptLen: prompt?.length ?? 0,
+          promptStartsWith: prompt ? prompt.slice(0, 48) : null,
+        },
+        timestamp: Date.now(),
+        hypothesisId: 'H_m5_modal',
+      }),
+    }).catch(() => {});
+  }
+  // #endregion
   return { scenario: anchorScenario, prompt, phase: 'scenario_active' };
 }
 
@@ -2627,10 +3047,15 @@ First line must introduce the interviewer directly by name, not the product:
 "Hi, I'm Amoraea. What can I call you?"
 Do not say "welcome to Amoraea."
 
+REQUIRED — IMMEDIATELY AFTER THEY ANSWER WITH THEIR NAME:
+Your very next assistant message must BEGIN with this exact pattern (do not skip, do not substitute "Nice to meet you" alone):
+"Good to meet you, [Name]."
+Use the name they just gave: first name if they gave full name, otherwise exactly what they offered. Capitalize normally. Same sentence then continues into the briefing below (one continuous message is fine).
+
 Your first message after learning the user's name should be the briefing only — do NOT repeat data-use, audio processing, or legal-style disclosure here; the participant already saw that on the pre-interview screen before the interview began.
 
-Example tone (no disclosure paragraph):
-"Good to meet you, [name]. The way this works is I’ll first give you three situations, and you just tell me what you’d do in each situation. Then I’ll give you one personal question. The whole thing usually takes about 20 to 30 minutes. Try to find a quiet, private space if you can. Just do the best you can — there are no right or wrong answers. Are you ready?"
+Full example (no disclosure paragraph):
+"Good to meet you, [name]. The way this works is I’ll first give you three situations, and you just tell me what you’d do in each situation. Then I’ll give you two short personal questions. The whole thing usually takes about 20 to 30 minutes. Try to find a quiet, private space if you can. Just do the best you can — there are no right or wrong answers. Are you ready?"
 
 Keep it conversational.
 `;
@@ -2640,7 +3065,7 @@ FICTIONAL SCENARIOS 1–3 — NO SUBSTITUTION:
 
 The first three situations are always the Emma/Ryan, Sarah/James, and Sophie/Daniel vignettes from your main instructions. Use **only** those six names when you refer to characters in the situations — never substitute alternate names (e.g. "Reese" or any name not in the vignette text). **Never** put the participant’s first name (the name they gave at the start) in place of Emma, Ryan, Sarah, James, Sophie, or Daniel — those names are **only** the fictional characters, not the participant. Do not offer to replace them with the user's personal stories. If the user asks to skip or use only personal examples, acknowledge warmly and explain these three are part of the process; stay with the scenario text.
 
-Moment 4 is the designated personal question — that is where personal disclosure belongs.
+Moments 4 and 5 are the designated personal segments (outside the three fictional scenarios). **Moment 4** is the grudge/dislike line of questioning **including** the commitment-threshold follow-up (work through vs walk away) — that follow-up is still Moment 4, not a separate "second personal question." **Moment 5** is the conflict-and-resolution personal question (scripted separately). Personal disclosure belongs in those segments only.
 
 Never mention scores being reset or cleared.
 `;
@@ -2722,21 +3147,24 @@ The app also strips generic acknowledgment filler from the **first paragraph** w
 The app **rewrites** common wrong first-name hallucinations (e.g. "Reese" for James) to the **canonical** vignette names before speech — you must still output only the correct names; do not rely on client repair.
 `;
 
+/** Client injects this line for proactive + frustration skip confirmation (keep in sync with meta-comment suffix). */
+const SCENARIO_SKIP_CONFIRMATION_PROMPT_LINE =
+  'We can skip this question but it may affect your score, do you still want to skip it?';
+
+/** First-hit inability meta — client-only TTS for scenario moments 1–3 (rotate). */
+const INABILITY_INVITATION_ROTATING_LINES = [
+  "No pressure — just say whatever comes to mind, even if it's just a few words.",
+  "There's no right answer here — just whatever feels true to you.",
+] as const;
+
 const SKIP_HANDLING_INSTRUCTIONS = `
-SKIP REQUESTS:
+SKIP REQUESTS (within an active scenario moment):
 
-If the user asks to skip a scenario entirely:
+**Do not** hard-refuse skipping or imply it is impossible (banned examples: "can't skip," "Unfortunately we can't skip parts," "we need to go through all five parts," or similar).
 
-Do NOT skip it. Do NOT repeat the question after responding. Do NOT use language about "moving on" — that's for between scenarios, not within them.
+Skipping **may** affect their score — if you are speaking this turn (the client did not already show a confirmation), ask whether they still want to skip and mention score impact in one short sentence. Otherwise stay brief and warm.
 
-Respond warmly and briefly. Offer the fictional scenario as an alternative if they haven't tried it. Keep it to one or two sentences.
-
-Use phrases like:
-- "Unfortunately we can't skip parts of this, just try your best, you've got this!"
-- "We do need to go through all four parts. Just try your best, you can do it!"
-- "Can't skip this one, but you can keep it as simple as you like. Just react to it however feels natural."
-
-After responding, wait for the user to engage with the scenario. Do NOT repeat the scenario or the question.
+Do NOT repeat the full scenario or the active question after answering — wait for their next mic turn.
 `;
 
 const SCORE_REQUEST_INSTRUCTIONS = `
@@ -2811,7 +3239,7 @@ Do **not** add mirror paragraphs before the next required question — no "I hea
 
 **Banned (stripped client-side when possible):** "I'm tracking you," inventory "I'm with you on… and …," procedural "continuing," hollow standalone "that makes sense / absolutely," meta-thanks as filler.
 
-After Moment 4 (threshold answer): **one** closing message only (synthesis + thanks + [INTERVIEW_COMPLETE]) — full interview end (per main framework).
+Moment 4 includes the grudge/dislike question **and** the commitment-threshold follow-up ("work through" vs "walk away") — that threshold question is **not** a second personal question and **does not** satisfy any "two personal questions" shortcut. After Moment 5 (the conflict / resolution question) **and** the optional single accountability follow-up if it fires, **one** closing message only (synthesis + thanks + [INTERVIEW_COMPLETE]) — full interview end. **Never** output [INTERVIEW_COMPLETE] immediately after only the Moment 4 threshold answer; you must ask Moment 5 first.
 `;
 
 const PER_REQUEST_REFLECTION_LOCK = `
@@ -2828,18 +3256,25 @@ If your **next move** is **not** a boundary (mid-scenario follow-up, grudge→th
 const THIN_RESPONSE_INSTRUCTIONS = `
 THIN AND EVASIVE RESPONSES:
 
-If the user says "I don't know", "not sure", or similar:
+If the user says "I don't know", "not sure", or similar **before** you have asked any elongating probe or repair follow-up: you may offer help once — ask if anything is unclear (do **not** default to "say more" / "elaborate").
 
-Do NOT ask them to say more. Do NOT ask "can you elaborate?" Instead, offer to help — ask if they'd like the scenario repeated or if anything is unclear.
+**After a thin-answer / word-count elongating probe** ("Can you say more about that?" or the other approved probe lines **only**): if the user gives a **hard stop** ("no", "nothing to add", etc.), **do not** treat that as finishing the **active** scenario early. Ask the **next required question for the scenario you are already in** (same vignette's characters only). **Never** borrow questions, lines, or characters from a **different** scenario (e.g. while in Sarah/James do **not** ask about Emma/Ryan or Emma's lines). **No** [SCENARIO_COMPLETE:N] from this refusal alone unless the scripted beats for the **current** scenario are actually complete.
 
-Use phrases like:
-- "Would it help to hear the scenario again?"
-- "Is there anything about the situation that's unclear?"
-- "No worries, want me to run through it again?"
+**After any repair-as-Ryan follow-up / re-ask** (or repair-refusal client line, or "hear the scenario again" offer): if the user gives a **hard stop** ("no", "I don't know", "I can't", "nothing to add", a single-word refusal, or a very short refusal with no new content), **accept it immediately**. Output **[SCENARIO_COMPLETE:1]** (Situation 1 only) or advance per sequence — **do not** re-ask repair in another wording, **do not** ask "how would you make that repair actually happen", and **do not** ask "Would it help to hear the scenario again?" (that repeat offer is for genuine confusion on the vignette, not for refusal after a probe).
 
 If they say "yeah I guess" or give a very thin response after being offered help: Accept it and move on. One offer of help maximum. Do not push further.
 
 If they say "no not really" or "nothing" to a question about one side of a scenario: Accept it immediately and move on. Do NOT ask them again. Do NOT say "what specifically stood out?" The user was clear.
+`;
+
+const SHORT_AMBIGUOUS_NO_SCENARIO_REPLAY_INSTRUCTIONS = `
+SHORT OR UNCLEAR REPLY — NEVER DEFAULT TO SCENARIO REPLAY:
+
+If the user's message is very short, ambiguous, or does not clearly answer the active question, **never** re-read the fictional scenario/vignette, **never** paste the Emma/Ryan (or other) situation block again, and **never** repeat the full scenario setup.
+
+**Do not** offer "Would it help to hear the scenario again?" unless the user **explicitly** asked you to repeat (see REPEAT REQUESTS) or this is a **session resume** after disconnect (see resume welcome flow).
+
+Instead use a single neutral invitation: "Just say whatever comes to mind." Then wait for their next reply. Scenario replay is **only** for explicit repeat requests or full-session resume — **not** for thin or ambiguous answers.
 `;
 
 const NO_REPEAT_INSTRUCTIONS = `
@@ -2873,15 +3308,16 @@ If the user answers a different question than the active one (for example: perso
 Keep redirect language neutral and brief. Do NOT praise the misplaced answer (no "great answer for earlier question" style phrasing).
 
 SCENARIO A — WRONG CONTENT TYPE FOR THE ACTIVE QUESTION:
-If you asked the repair question ("How would you repair… as Ryan?") and the user answers with analysis of a specific line, contempt dynamics, or vignette interpretation instead of repair-as-Ryan, do not treat that as satisfying the repair prompt. Re-orient in one short clause **without** mirroring their analysis, then ask for repair in character — e.g. "Got it — how would you make that repair actually happen as Ryan?"
+If you asked the repair question ("How would you repair… as Ryan?") and the user answers with analysis of a specific line, contempt dynamics, or vignette interpretation instead of repair-as-Ryan, do not treat that as satisfying the repair prompt. Re-orient in **one** short clause **without** mirroring their analysis, then ask for repair in character **once** (e.g. "Got it — how would you make that repair actually happen as Ryan?"). **Never** ask a third repair variant after that. If the user then refuses or hard-stops ("no", "I don't know", "nothing to add", single-word refusal, or any short refusal with no new content), treat repair as assessed for this scenario and **advance** with **[SCENARIO_COMPLETE:1]** — no repeat of the scenario, no elongating probe, no further repair asks.
 If you asked the contempt probe and they already gave contempt-probe-quality content in an earlier turn (hostile/dismissive read of Emma's line — not passive-aggressive-only or "stating a fact" minimization), treat the probe as satisfied — do not re-ask it; move on in the sequence.
 
 PROBE ALREADY ANSWERED (ALL SCENARIOS):
-Before any scripted follow-up, check whether the user's prior turns in this scenario already substantively answered that follow-up. If yes, skip the follow-up and advance.
+Before any scripted follow-up, check whether the user's prior turns in this scenario already substantively answered that follow-up. If yes, skip the follow-up and advance **silently**: deliver the next required question or boundary step with a **neutral** bridge only (e.g. a one-word ack where the format requires it, or straight into the next prompt). **Never** tell the participant they already answered something, that you are skipping a question, or anything that exposes sequencing or internal checks.
 
 Exception — Scenario B structural Q2: The "what could James have done differently before the fight" question is mandatory after Q1 (and after the optional appreciation branch when it fires). Do not skip it because Q1 already mentioned James's alternatives in passing — only skip if the user's immediately preceding answer already fully addressed that exact prompt. **No** mandatory mirror of Q1 before Q2.
 
 PERSONAL MOMENT 4: After the user gives a personal response, check whether it addresses the grudge/dislike question. If it doesn't, redirect ONCE — gently and without making the user feel wrong. Use SCENARIO_REDIRECT_QUESTIONS.
+The **client may inject one scripted specificity follow-up** after a thin first answer to the grudge question — do **not** repeat that exact prompt yourself; combined verbal redirects plus the client line must never exceed **one** specificity follow-up after the grudge question.
 
 MOMENT 4 COMMITMENT THRESHOLD FOLLOW-UP RULE:
 After the user's answer to the grudge/dislike question, you MUST ask the commitment-threshold follow-up **without** a leading paraphrase of their grudge story — threshold question only in that assistant turn (or threshold after any separate grudge chunk the model already sent).
@@ -3007,7 +3443,7 @@ The token fires when that scenario's required questions are complete.
 Required sequence (no end-of-scenario closing question):
 - Scenario A: Q1, contempt probe unless Emma's "you've made that very clear" was already read as contemptuous/hostile/dismissive (not passive-aggressive-only, not "stating a fact" / venting-only minimizations), Q2.
 - Scenario B: Q1; optional appreciation probe only when Q1 had no on-topic engagement with the scenario; mandatory Q2 (what James could have done differently before the fight); Q3 (repair as James); then **BOUNDARY CLOSURE** (segment close + reflection + transition) before Scenario C. Do not skip Q2 because Q1 was sophisticated. Before Q2, always include a one-sentence specific acknowledgment of Q1 — including short verdict-style analysis answers.
-- Scenario C: **Q1 (Daniel line) always before Q2** — client enforces; never put Q2 or threshold in the same turn as the vignette without Q1. Then Q2, then commitment-threshold probe unless the user already gave irrecoverability / when-it's-not-workable criteria (repair-only Q2 is not enough).
+- Scenario C: **Q1 (Daniel line) always before Q2** — client enforces; never put Q2 in the same turn as the vignette without Q1. Then Q2; commitment threshold is assessed only in Moment 4 (not in Scenario C).
 
 Do NOT ask "anything you'd want me to know?" style closing checks at the end of scenarios.
 
@@ -3023,22 +3459,56 @@ interface ScenarioScoreResult {
   keyEvidence: Record<string, string>;
   specificity: string;
   repairCoherenceIssue: string | null;
+  /** Tier audit for contempt_expression (when scored). */
+  contempt_tier_breakdown: ContemptTierBreakdown | null;
 }
 
+/** When user skips after first frustration offer — force null markers (excluded from aggregates), not zero. */
+const SCENARIO_FRUSTRATION_SKIP_NULL_MARKER_IDS: Record<1 | 2 | 3, string[]> = {
+  1: ['mentalizing', 'accountability', 'contempt_recognition', 'contempt_expression', 'repair', 'attunement'],
+  2: ['appreciation', 'attunement', 'mentalizing', 'repair', 'accountability', 'contempt_expression'],
+  3: ['regulation', 'repair', 'mentalizing', 'attunement', 'accountability', 'contempt_expression'],
+};
+
 interface PersonalMomentScoreResult {
-  momentNumber: 4;
+  momentNumber: 4 | 5;
   momentName: string;
   pillarScores: Record<string, number | null>;
   pillarConfidence: Record<string, string>;
   keyEvidence: Record<string, string>;
   summary: string;
   specificity: string;
+  contempt_tier_breakdown?: ContemptTierBreakdown | null;
+}
+
+function scenarioDbBundleToScenarioScoreResult(scenarioNumber: 1 | 2 | 3, raw: unknown): ScenarioScoreResult {
+  const o = (raw ?? {}) as Record<string, unknown>;
+  const ps = (o.pillarScores ?? {}) as Record<string, number | null>;
+  const pc = (o.pillarConfidence ?? {}) as Record<string, string>;
+  const ke = (o.keyEvidence ?? {}) as Record<string, string>;
+  return {
+    scenarioNumber,
+    scenarioName: typeof o.scenarioName === 'string' ? o.scenarioName : `Scenario ${scenarioNumber}`,
+    pillarScores: ps,
+    pillarConfidence: pc,
+    keyEvidence: ke,
+    specificity: typeof o.specificity === 'string' ? o.specificity : 'high',
+    repairCoherenceIssue: typeof o.repairCoherenceIssue === 'string' ? o.repairCoherenceIssue : null,
+    contempt_tier_breakdown: parseContemptTierBreakdown(o.contempt_tier_breakdown),
+  };
+}
+
+function normalizePersonalMomentContemptTierBreakdown(result: PersonalMomentScoreResult): void {
+  if (result.pillarScores?.contempt_expression == null) {
+    result.contempt_tier_breakdown = null;
+  } else {
+    result.contempt_tier_breakdown = parseContemptTierBreakdown(result.contempt_tier_breakdown);
+  }
 }
 
 function buildScenarioScoringPrompt(
   scenarioNumber: 1 | 2 | 3,
   transcript: Array<{ role: string; content: string; scenarioNumber?: number }>,
-  commitmentThresholdFocusAnswer?: string | null,
   priorScenarioMentalizing?: { s1?: number; s2?: number } | null,
   scenario3RepairFocusAnswer?: string | null,
 ): string {
@@ -3072,14 +3542,13 @@ function buildScenarioScoringPrompt(
     3: {
       name: 'Scenario C (Sophie/Daniel)',
       constructs:
-        'regulation, repair, mentalizing, attunement, accountability, commitment_threshold, contempt_expression',
+        'regulation, repair, mentalizing, attunement, accountability, contempt_expression',
       markerIds: [
         'regulation',
         'repair',
         'mentalizing',
         'attunement',
         'accountability',
-        'commitment_threshold',
         'contempt_expression',
       ] as const,
     },
@@ -3095,16 +3564,6 @@ function buildScenarioScoringPrompt(
     .map((m) => `${m.role === 'user' ? 'User' : 'Interviewer'}: ${m.content}`)
     .join('\n\n');
   const ids = [...scenarioMeta.markerIds];
-  const commitmentThresholdSoleSourceBlock =
-    scenarioNumber === 3 && commitmentThresholdFocusAnswer?.trim()
-      ? `
-COMMITMENT_THRESHOLD SOLE SOURCE (Scenario C):
-The participant first replied to the Daniel/Sophie commitment question with a personal narrative and was redirected. For the "commitment_threshold" marker ONLY, base the score and keyEvidence solely on the following answer about the fictional couple. Do not use unrelated personal narrative content from elsewhere in the transcript for commitment_threshold. Score all other markers using the full transcript as usual.
-
-Authoritative answer for commitment_threshold:
-"""${commitmentThresholdFocusAnswer.trim()}"""
-`
-      : '';
   const scenario3BeforeRepairExcerpt = extractScenario3UserCorpusBeforeRepairPrompt(
     transcript as ScenarioCorpusMessageSlice[]
   );
@@ -3117,17 +3576,16 @@ Authoritative answer for commitment_threshold:
 SCENARIO C — REPAIR & ACCOUNTABILITY EVIDENCE (use with REPAIR & ACCOUNTABILITY — UNPROMPTED VS. PROMPTED above):
 - **Unprompted excerpt** (primary signal for repair & accountability in this slice — typically Q1 and prior user turns before the general repair prompt):
 """${scenario3BeforeRepairExcerpt.trim() || '(none)'}"""
-- **Prompted excerpt** (supplementary — answer after "How do you think this situation could be repaired?" or equivalent; do not use commitment-threshold content for repair):
+- **Prompted excerpt** (supplementary — answer after "How do you think this situation could be repaired?" or equivalent):
 """${scenario3AfterRepairExcerpt.trim() || '(none)'}"""
-Score **repair** and **accountability** using the ~70% / ~30% unprompted/prompted weighting; tag **keyEvidence** as unprompted / prompted / both. Do not use the commitment-threshold follow-up for repair or accountability — that content is for commitment_threshold only.
+Score **repair** and **accountability** using the ~70% / ~30% unprompted/prompted weighting; tag **keyEvidence** as unprompted / prompted / both.
 `
       : '';
   const scenario3RepairIsolationCalibration =
     scenarioNumber === 3
       ? `
-Scenario C — REPAIR isolated from COMMITMENT_THRESHOLD:
-- Apply **REPAIR & ACCOUNTABILITY — UNPROMPTED VS. PROMPTED** when scoring **repair** and **accountability** (combine unprompted + prompted excerpts per weighting; see Scenario C evidence block when present). Exit-only, incompatibility, or "when to leave" framing in the **threshold** answer must **not** raise repair or accountability; if prompted repair is thin or exit-heavy, keep repair in the **3–5** range even when a later threshold answer sounds relationally mature or workable.
-- Score **commitment_threshold** only from threshold-targeted turns (see COMMITMENT_THRESHOLD sole-source block when present). Do not lift commitment_threshold from repair-logistics-only content unless it clearly states walk-away or irrecoverability criteria for Daniel/Sophie.
+Scenario C — REPAIR (this slice does not score commitment_threshold):
+- Apply **REPAIR & ACCOUNTABILITY — UNPROMPTED VS. PROMPTED** when scoring **repair** and **accountability** (combine unprompted + prompted excerpts per weighting; see Scenario C evidence block when present). Pure exit or "not worth fixing" framing without constructive repair moves keeps **repair** in a **3–5** range when the prompted repair answer lacks workable bilateral content.
 `
       : '';
   const scenario1ContemptCalibration =
@@ -3181,7 +3639,7 @@ Contrast (often still **8+** when otherwise clean): ownership followed by a **sp
     scenarioNumber === 2
       ? `
 Scenario B (Sarah/James) — CONTEMPT_EXPRESSION (this slice):
-Apply the **CONTEMPT_EXPRESSION** rubric. Judge how the participant talks in their own voice about Sarah, James, or the situation. Fiction is not a free pass to **character demolition** (idiot, loser, “what a piece of @#!,” “toxic *person*” as a global smear) — that still maps to the **low (1–4)** expression bands. Fair moral or fairness language about **actions** in the story can still fall in **mid (5–7)** or **high (8–10)** per the rubric. Keep this key separate from appreciation, repair, and accountability.
+Apply the **CONTEMPT_EXPRESSION** rubric (Tier 1 observation → Tier 2 blame → Tier 3 character attack) **including Tier 2 and Tier 3 prominence** (centrality, proportion, conviction) and **tier_2_adjusted_score** / **tier_3_adjusted_score** — peripheral hedged Tier 2 or throwaway speculative Tier 3 must **not** dominate an otherwise Tier 1–anchored answer. Judge how the participant talks in their own voice about Sarah, James, or the situation. Fiction is not a free pass to **Tier 3 / character demolition** (idiot, loser, “what a piece of @#!,” toxic-person-as-verdict). **Tier 1** analytical observations of behavior must **not** produce low pillar scores. **Tier 2** blame-without-character-attack supports mid pillar scores; **high-adjusted Tier 3** drives low bands. Keep this key separate from appreciation, repair, and accountability.
 `
       : '';
   const scenario2AttunementAppreciationCalibration =
@@ -3194,27 +3652,7 @@ ${SCENARIO_B_ATTUNEMENT_APPRECIATION_ANCHORS}
     scenarioNumber === 3
       ? `
 Scenario C (Sophie/Daniel) — CONTEMPT_EXPRESSION (this slice):
-Apply the **CONTEMPT_EXPRESSION** rubric. Harsh labels **tied to specific on-vignette behavior** (e.g. avoidant here, shut her down, inconsiderate in that moment) differ from **low (1–4)** character contempt (broad smears, dehumanization, “pathetic,” “loser” toward the person as such). Distinguish moral judgment of **actions** from global **person** derogation. Distinct from mentalizing quality alone.
-`
-      : '';
-  const scenario3CommitmentCalibration =
-    scenarioNumber === 3
-      ? `
-Scenario C commitment-threshold calibration:
-- Score 1-2 when the answer exits at first difficulty or endorses staying no matter what with no limits in harmful dynamics.
-- Score 2-3 when the answer expresses unconditional commitment with no framework for irrecoverability — e.g. "never give up," "just keep trying no matter what," "they shouldn't ever walk away," "stick it out forever." Do not score that pattern 6+.
-- Score 3-4 for vague "keep trying" with no assessable structure, OR exit-only framing ("life is too short") without effort/communicate/assess logic.
-- Score 6-7 when the answer has a complete structure for Daniel/Sophie (or the couple): genuine effort, clear communication about what's wrong, reassessment, willingness to end if the pattern persists without change — even if the user names no timelines, therapy, or step lists.
-- Score 7-8 when that structure is present plus some concrete specificity about what would make the relationship no longer workable (not necessarily exhaustive).
-- Score 9-10 only when the answer strongly demonstrates or describes persistence through serious difficulty with healthy limits; still not gated on procedural verbosity.
-- Do not cap commitment_threshold below 6 solely because the answer lacks granular process detail when the four-part structure is clearly there.
-- If the answer (about Daniel/Sophie) **explicitly** distinguishes unhealthy persistence from justified boundaries, fear-driven staying from irrecoverability, or "when it's actually over" vs "when someone is just conflict-avoidant," treat that as **sound threshold reasoning** (typically **6–8+**), not as unconditional staying. Same logic as first-person self-awareness anchors in SCORE CALIBRATION.
-
-COMMITMENT_THRESHOLD — NOT ASSESSED (Scenario C):
-If this slice has no user response to the interviewer's commitment-threshold follow-up (when the relationship isn't working / when to call it) AND no user turn in Scenario C spontaneously gives irrecoverability or "not worth continuing" criteria, set pillarScores.commitment_threshold to JSON null — never 0. Set keyEvidence.commitment_threshold to exactly: "No commitment threshold content assessed in this scenario slice." Set pillarConfidence.commitment_threshold to "low". Use numeric scores only when there is actual threshold content to evaluate; 0 is reserved for assessed answers that actively fail the construct, not for missing evidence.
-
-COMMITMENT_THRESHOLD CONFIDENCE (this scenario slice only):
-When commitment_threshold is scored (non-null), evidence is third-party reasoning about Daniel/Sophie only. Set pillarConfidence for commitment_threshold to "moderate" or "low" only — never "high" for this scenario, because personal first-person threshold criteria are not elicited in this moment. (Full-interview scoring may raise effective confidence later if Moment 4 adds first-person threshold evidence.) When commitment_threshold is null, confidence is already "low" per above.
+Apply the **CONTEMPT_EXPRESSION** tier rubric **with Tier 2 and Tier 3 proportionality** (log all Tier 2/Tier 3 clauses; weight **tier_2_adjusted_score** and **tier_3_adjusted_score**). **Tier 1:** behavior-bound critique (avoidant *here*, inconsiderate *in that moment*) — not pillar contempt. **Tier 2:** fault/blame on choices without character demolition. **Tier 3:** global person derogation, hostile clinical labels, mockery, profanity — **high-centrality Tier 3** caps how high the pillar can go. Distinct from mentalizing quality alone.
 `
       : '';
   const scenario3MentalizingCalibration =
@@ -3249,13 +3687,15 @@ ${CONTEMPT_EXPRESSION_SCORING_RUBRIC}
 
 TRANSCRIPT OF THIS SCENARIO ONLY:
 ${turns}
-${commitmentThresholdSoleSourceBlock}
 ${scenario3RepairAccountabilityEvidenceBlock}
 
 SCORING INSTRUCTIONS:
 Score only the listed markers, based only on this transcript slice.
 For each marker: quote or paraphrase the response that most informed the score; behavioral > attitudinal.
 GENERIC responses: cap at 5 for that marker.
+${BEHAVIORAL_VS_EMOTIONAL_INTERIOR_SCENARIO}
+${ELABORATION_ABSENCE_SCORING_HEADER}
+${ELABORATION_ABSENCE_SCENARIO_MARKERS}
 
 **This slice only:** Do not down-rank a marker here because another scenario in the same interview might show stronger evidence later, or to keep scores “spread out.” Each slice stands on its own.
 
@@ -3279,12 +3719,13 @@ ${scenario2ContemptExpressionCalibration}
 ${scenario2AttunementAppreciationCalibration}
 ${scenario3ContemptExpressionCalibration}
 ${scenario3RepairIsolationCalibration}
-${scenario3CommitmentCalibration}
 ${scenario3MentalizingCalibration}
 ${scenario3MentalizingInterviewPatternCalibration}
 
 CONFIDENCE: high / moderate / low per scored marker.
 ${SCORING_CONFIDENCE_INSTRUCTIONS}
+
+${CONTEMPT_TIER_BREAKDOWN_JSON_INSTRUCTION}
 
 Return ONLY valid JSON:
 {
@@ -3293,24 +3734,47 @@ Return ONLY valid JSON:
   "pillarScores": { ${ids.map((id) => `"${id}": 0`).join(', ')} },
   "pillarConfidence": { ${ids.map((id) => `"${id}": "high"`).join(', ')} },
   "keyEvidence": { ${ids.map((id) => `"${id}": ""`).join(', ')} },
+  "contempt_tier_breakdown": ${CONTEMPT_TIER_BREAKDOWN_JSON_TEMPLATE},
   "specificity": "high",
   "repairCoherenceIssue": null
 }`;
+}
+
+function applyElaborationAbsenceAfterNormalizeMoment4(
+  result: PersonalMomentScoreResult,
+  sliceForAvg: Array<{ role: string; content: string }>,
+  moment4Meta: Moment4ClientScoringMetadata | null,
+): void {
+  const avg = computeAvgUserWordsPerTurnPersonalSlice(sliceForAvg);
+  const out = applyElaborationAbsencePenaltiesMoment4(
+    result.pillarScores,
+    result.keyEvidence,
+    moment4Meta,
+    avg,
+  );
+  result.pillarScores = out.pillarScores as PersonalMomentScoreResult['pillarScores'];
+  result.keyEvidence = out.keyEvidence;
+}
+
+function applyElaborationAbsenceAfterNormalizeMoment5(
+  result: PersonalMomentScoreResult,
+  sliceForAvg: Array<{ role: string; content: string }>,
+): void {
+  const userText = sliceForAvg
+    .filter((m) => m.role === 'user')
+    .map((m) => m.content)
+    .join('\n');
+  const avg = computeAvgUserWordsPerTurnPersonalSlice(sliceForAvg);
+  const out = applyElaborationAbsencePenaltiesMoment5(userText, result.pillarScores, result.keyEvidence, avg);
+  result.pillarScores = out.pillarScores as PersonalMomentScoreResult['pillarScores'];
+  result.keyEvidence = out.keyEvidence;
 }
 
 /** Fixed column order for scenario scorecards so unassessed markers (e.g. commitment_threshold) still show as — */
 const SCENARIO_SCORE_DISPLAY_ORDER: Record<number, readonly string[]> = {
   1: ['mentalizing', 'accountability', 'contempt_recognition', 'contempt_expression', 'repair', 'attunement'],
   2: ['appreciation', 'attunement', 'mentalizing', 'repair', 'accountability', 'contempt_expression'],
-  3: [
-    'regulation',
-    'repair',
-    'mentalizing',
-    'attunement',
-    'accountability',
-    'commitment_threshold',
-    'contempt_expression',
-  ],
+  3: ['regulation', 'repair', 'mentalizing', 'attunement', 'accountability', 'contempt_expression'],
 };
 
 function formatScoreMessage(scenarioResult: ScenarioScoreResult): string {
@@ -3403,26 +3867,6 @@ function extractLastInterviewerMessage(messages: Array<{ role: string; content: 
   return null;
 }
 
-/** After re-entry prompt: user wants verbatim replay vs continue without replay. Ambiguous → repeat (more context). */
-function classifyResumeRepeatIntent(text: string): 'repeat' | 'continue' | 'ambiguous' {
-  const t = text.trim().toLowerCase();
-  if (!t) return 'ambiguous';
-  const repeatHints =
-    /\b(yes|yeah|yep|sure|please|ok|okay|repeat|again|say it|remind|recap|tell me (again|one more)|what you (just )?said|last said|re-?say|replay|hear (it |that )?again)\b/;
-  /**
-   * Do **not** use a bare `don't` — it matches narrative ("I don't trust them") and wrongly routes to
-   * `continue` → early return with no LLM reply (see resume gate in `processUserSpeech`).
-   */
-  const continueHints =
-    /\b(no|nope|nah|continue|skip|i'?m good|(i am|we'?re) good|ready|go on|let'?s (go|continue)|keep going|don'?t\s+need|don'?t\s+want|don'?t\s+repeat|no thanks|i remember|we can continue|move on|next)\b/;
-  const wantsRepeat = repeatHints.test(t);
-  const wantsContinue = continueHints.test(t);
-  if (wantsRepeat && wantsContinue) return 'ambiguous';
-  if (wantsRepeat) return 'repeat';
-  if (wantsContinue) return 'continue';
-  return 'ambiguous';
-}
-
 function looksLikeRepeatCueInAmbiguousReply(text: string): boolean {
   const t = text.trim().toLowerCase();
   if (!t) return false;
@@ -3481,6 +3925,30 @@ interface InterviewResults {
   interviewSummary?: string;
   gateResult?: GateResult;
   skepticismModifier?: { pillarId: number | string | null; adjustment: number; reason?: string };
+  /** Alpha / diagnostics: scenario skips and summed numeric penalties (third skip has null entry, no extra sum). */
+  skipBreakdown?: {
+    skips_taken: number;
+    skip_penalties: (number | null)[];
+    skip_penalty_total: number;
+  };
+}
+
+function attachSkipPenaltyGateOptions(skipConfirmedCount: number): Pick<
+  ComputeGateResultOptions,
+  'skipPenaltyTotal' | 'skipAutoFail'
+> & {
+  skipBreakdown: NonNullable<InterviewResults['skipBreakdown']>;
+} {
+  const c = computeSkipPenaltyGateComputation(skipConfirmedCount);
+  return {
+    skipPenaltyTotal: c.skipPenaltyTotal,
+    skipAutoFail: c.skipAutoFail,
+    skipBreakdown: {
+      skips_taken: c.skips_taken,
+      skip_penalties: c.skip_penalties,
+      skip_penalty_total: c.skip_penalty_total,
+    },
+  };
 }
 
 const ANTHROPIC_API_KEY = getPublicEnv('EXPO_PUBLIC_ANTHROPIC_API_KEY', 'anthropicApiKey');
@@ -3578,7 +4046,14 @@ type RecordingDelayMeasurement = { modeCompleteAtMs: number; recordingInitialize
 function replaceWithStandardApplicantProcessingHandoffForUser(
   navigation: { replace: (name: string, params: { userId: string }) => void },
   userId: string,
+  meta?: { interviewSessionId?: string | null; source?: string }
 ) {
+  void remoteLog('[RESULTS_SCREEN_TRANSITION]', {
+    destination: 'PostInterviewProcessing',
+    userId,
+    interviewSessionId: meta?.interviewSessionId ?? null,
+    source: meta?.source ?? 'standard_handoff',
+  });
   navigation.replace('PostInterviewProcessing', { userId });
 }
 
@@ -3634,6 +4109,8 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
       skipInterviewSpeechAdvance?: boolean;
       skipQuestionTiming?: boolean;
       skipLastQuestionRef?: boolean;
+      /** Same scripted line may repeat (e.g. skip confirmation in a new scenario beat). */
+      allowDuplicateConsecutiveTts?: boolean;
       skipGestureGate?: boolean;
       ttsTriggerSource?:
         | 'gesture_handler'
@@ -3699,13 +4176,15 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
   /** Set after closing-line TTS is awaited; effect after `scoreInterview` moves to preparing_results when `voiceState` is idle. */
   const [pendingCompletion, setPendingCompletion] = useState(false);
   const pendingCompletionTranscriptRef = useRef<{ role: string; content: string }[] | null>(null);
+  /** Standard onboarding: show shareable referral code on the interview-complete / “being reviewed” results panel (same copy as {@link PostInterviewPassedScreen}). */
+  const [standardResultsReferralCode, setStandardResultsReferralCode] = useState<string | null>(null);
+  const [standardResultsReferralCopyFeedback, setStandardResultsReferralCopyFeedback] = useState(false);
   const committedScenarioRef = useRef<ActiveScenario | null>(null);
   type InterviewUiPhase = 'pre_scenario' | 'scenario_transitioning' | 'scenario_active';
   const [interviewUiPhase, setInterviewUiPhase] = useState<InterviewUiPhase>('pre_scenario');
   const [referenceCardScenario, setReferenceCardScenario] = useState<ActiveScenario | null>(null);
   const [referenceCardPrompt, setReferenceCardPrompt] = useState<string | null>(null);
   const [scenarioIntroTtsPlaying, setScenarioIntroTtsPlaying] = useState(false);
-  const [tTSFallbackActive, setTTSFallbackActive] = useState(false);
   /** HTTP://LAN is not a secure context — browser blocks mic; show fix copy */
   const [webInsecureContextMessage, setWebInsecureContextMessage] = useState<string | null>(null);
   const pendingWebSpeechForGestureRef = useRef<string | null>(null);
@@ -3829,6 +4308,13 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
     recordingEndTime: number | null;
   }>({ questionEndTime: null, recordingStartTime: null, recordingEndTime: null });
   const lastQuestionTextRef = useRef('');
+  /** Updated only after successful audio playback completes (see `speakTextSafe`). Used for consecutive duplicate TTS suppression. */
+  const lastSuccessfulTtsTextNormalizedRef = useRef<string | null>(null);
+  const lastSuccessfulTtsDeliveredPreviewRef = useRef<string>('');
+  /** Confirmed scenario skips (moments 1–3) after user accepts skip prompt — drives penalties / third-skip auto-fail. */
+  const scenarioSkipConfirmedCountRef = useRef(0);
+  /** Running sum of numeric skip penalties (-0.3, -0.6); third skip adds no amount here. */
+  const scenarioSkipPenaltySumRef = useRef(0);
   const responseTimingsRef = useRef<Array<{
     question_id: string;
     scenario: number | null;
@@ -3847,6 +4333,10 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
     score_delta: number;
   }>>([]);
   const scenarioScoresRef = useRef<Record<number, ScenarioScoreResult>>({});
+  /** Populated after `scoreScenario` mounts — used by `notifyScenarioStarted` to score prior scenario on boundary. */
+  const scoreScenarioRef = useRef<
+    ((scenarioNumber: 1 | 2 | 3, allMessages: { role: string; content: string }[]) => Promise<void>) | null
+  >(null);
   type ClosingPhase = 'needed' | 'asked' | 'answered';
   const [closingQuestionState, setClosingQuestionState] = useState<Record<1 | 2 | 3, ClosingPhase>>({
     1: 'needed',
@@ -3864,6 +4354,11 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
   const lastAnsweredClosingScenarioRef = useRef<number | null>(null);
   /** Current scenario number for tagging new messages; avoids stale state in callbacks. Starts at 1 (first scenario). Updated on SCENARIO_COMPLETE and when injecting next scenario. */
   const currentScenarioRef = useRef<1 | 2 | 3>(1);
+  /** Set when a scenario's first content is delivered; cleared when scenario scores checkpoint. Mirrors interview_attempts.resume_active_scenario. */
+  const resumeActiveScenarioRef = useRef<1 | 2 | 3 | null>(null);
+  const resumeWelcomeMessageRef = useRef(RESUME_WELCOME_BACK_MESSAGE);
+  /** Web: after resume welcome tap TTS, speak this scenario intro (fresh preamble) in the same gesture chain. */
+  const pendingScenarioIntroAfterResumeWelcomeRef = useRef<string | null>(null);
   /** Consecutive failed transcription (or recording) recovery lines for the same turn — reset on success. */
   const transcriptionFailureStreakRef = useRef(0);
   /** When user said "yes" to closing question; next message is their addition. null | 1 | 2 | 3 */
@@ -3874,14 +4369,38 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
   const currentInterviewMomentRef = useRef<InterviewMomentIndex>(1);
   const personalHandoffInjectedRef = useRef(false);
   const moment4ThresholdProbeAskedRef = useRef(false);
+  /** At most one client-injected grudge thin-answer specificity follow-up per session. */
+  const moment4ClientSpecificityProbeInjectedRef = useRef(false);
+  /**
+   * True after the grudge→specificity sequence allows the walk-away threshold: either the first grudge answer
+   * did not need the specificity probe, or the user has replied after the probe (or declined the grudge ask).
+   */
+  const moment4PostGrudgeSpecificityResolvedRef = useRef(false);
+  /** True after that follow-up is shown until the user sends their next message. */
+  const moment4ExpectingPostSpecificityUserTurnRef = useRef(false);
+  /** Set after the post-probe user turn — passed into Moment 4 scoring and DB metadata. */
+  const moment4SpecificityScoringRef = useRef<Moment4ClientScoringMetadata | null>(null);
+  /** Client-delivered Moment 5 question (after M4 threshold answer). */
+  const moment5QuestionDeliveredRef = useRef(false);
+  /**
+   * Set synchronously when the scripted M5 conflict bundle is committed to the transcript (client inject).
+   * Closing gate uses this so [INTERVIEW_COMPLETE] is not stripped when {@link isMoment5AssistantAnchor}
+   * misses sanitized bundle text; independent of `scenarioNumber` on the message row.
+   */
+  const moment5PrimaryAnchorDeliveredSessionRef = useRef(false);
+  /** User turns after the Moment 5 primary prompt (used to block premature [INTERVIEW_COMPLETE]). */
+  const moment5PostPromptUserTurnCountRef = useRef(0);
+  /** At most one accountability probe for Moment 5. */
+  const moment5AccountabilityProbeFiredRef = useRef(false);
+  /** Passed into Moment 5 scoring + scenario_specific_patterns. */
+  const moment5ClientScoringMetaRef = useRef<Moment5ClientScoringMetadata | null>(null);
   /** Ensures at most one client-injected M4→M5 bridge per session (backup when model omits). */
   const deferredMoment4NarrativeRef = useRef<string | null>(null);
-  /** After misplaced Scenario C threshold answer: we re-ask Daniel/Sophie; next user turn is scored for commitment_threshold from this ref. */
-  const expectingScenarioCThresholdAnswerAfterMisplaceRef = useRef(false);
-  const scenarioCCommitmentOnlyEvidenceRef = useRef<string | null>(null);
-  /** User answer to Scenario C repair prompt only — isolates repair from commitment-threshold scoring. */
+  /** User answer to Scenario C repair prompt only — isolates unprompted vs prompted repair scoring. */
   const scenarioCRepairOnlyEvidenceRef = useRef<string | null>(null);
   const scenarioAContemptProbeAskedRef = useRef(false);
+  /** Scenario B Q3 (repair as James): set when that probe is first sent to TTS; prevents duplicate delivery/logs in the same turn. Cleared only in {@link resetInterviewProgressRefs} (new attempt). */
+  const s2RepairProbeDeliveredRef = useRef(false);
   const interviewSessionIdRef = useRef<string>(newInterviewSessionId(userId));
   /** Whisper turn ended; next TTS should log recording_session_active for iOS volume diagnostics. */
   const recordingJustFinishedBeforeNextTtsRef = useRef(false);
@@ -3896,12 +4415,19 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
   /** First scenario question: optional server-side lifecycle (client update is a no-op when column absent). */
   const firstScenarioLifecyclePersistedRef = useRef(false);
   const [sessionAudioHealthNotice, setSessionAudioHealthNotice] = useState<string | null>(null);
+  /** Session: repeated truncated TTS — suggest wired / reload (after {@link MAX_TTS_PLAYBACK_COMPLETION_ATTEMPTS} exhausted multiple times). */
+  const [ttsPlaybackReliabilityNotice, setTtsPlaybackReliabilityNotice] = useState<string | null>(null);
+  const ttsSessionHardFailureCountRef = useRef(0);
   /** True while `speak()` / speakTextSafe await is in flight (for tts_interrupted). */
   const ttsLineInFlightRef = useRef(false);
+  /** Web: tab went hidden while this line's TTS was in flight — wall-clock vs estimate is unreliable; skip premature replay loop. */
+  const tabHiddenDuringActiveTtsLineRef = useRef(false);
   /** Last voice turn only — cleared on typed send. */
   const lastVoiceTurnLanguageRef = useRef<string | null>(null);
   const lastVoiceTurnConfidenceRef = useRef<number | null>(null);
   const turnAudioIndexRef = useRef(0);
+  /** Ratio re-asks for the current assistant question; reset when an answer is accepted (see {@link WHISPER_RATIO_REASK_MAX_ATTEMPTS_PER_QUESTION}). */
+  const whisperRatioReaskAttemptsForCurrentQuestionRef = useRef(0);
   const [networkStatus, setNetworkStatus] = useState<'checking' | 'good' | 'poor'>('checking');
 
   const resumeRepeatChoicePendingRef = useRef(false);
@@ -3914,6 +4440,11 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
   /** Web: after a successful default-device rebuild, set true until a recording yields non-zero audio (success log). */
   const micFallbackSuccessPendingRef = useRef(false);
 
+  /** Clears Scenario C (Sophie/Daniel) probe/evidence gates — call whenever we officially enter a fresh Situation 3 segment. */
+  const resetScenarioCClientGatesOnly = useCallback(() => {
+    scenarioCRepairOnlyEvidenceRef.current = null;
+  }, []);
+
   const resetInterviewProgressRefs = useCallback(() => {
     resumeRepeatChoicePendingRef.current = false;
     resumeLastAssistantTextRef.current = null;
@@ -3921,12 +4452,23 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
     currentInterviewMomentRef.current = 1;
     personalHandoffInjectedRef.current = false;
     moment4ThresholdProbeAskedRef.current = false;
+    moment4ClientSpecificityProbeInjectedRef.current = false;
+    moment4PostGrudgeSpecificityResolvedRef.current = false;
+    moment4ExpectingPostSpecificityUserTurnRef.current = false;
+    moment4SpecificityScoringRef.current = null;
+    moment5QuestionDeliveredRef.current = false;
+    moment5PrimaryAnchorDeliveredSessionRef.current = false;
+    moment5PostPromptUserTurnCountRef.current = 0;
+    moment5AccountabilityProbeFiredRef.current = false;
+    moment5ClientScoringMetaRef.current = null;
     deferredMoment4NarrativeRef.current = null;
-    expectingScenarioCThresholdAnswerAfterMisplaceRef.current = false;
-    scenarioCCommitmentOnlyEvidenceRef.current = null;
-    scenarioCRepairOnlyEvidenceRef.current = null;
+    resetScenarioCClientGatesOnly();
     scenarioAContemptProbeAskedRef.current = false;
+    s2RepairProbeDeliveredRef.current = false;
     turnAudioIndexRef.current = 0;
+    whisperRatioReaskAttemptsForCurrentQuestionRef.current = 0;
+    ttsSessionHardFailureCountRef.current = 0;
+    setTtsPlaybackReliabilityNotice(null);
     interviewSessionIdRef.current = newInterviewSessionId(userId);
     firstScenarioLifecyclePersistedRef.current = false;
     resetAudioInterviewTurnCounters();
@@ -3935,10 +4477,17 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
     resetInterviewVadSession();
     resetWebInterviewGestureContext();
     gestureContextLostAtRef.current = null;
+    lastSuccessfulTtsTextNormalizedRef.current = null;
+    lastSuccessfulTtsDeliveredPreviewRef.current = '';
+    scenarioSkipConfirmedCountRef.current = 0;
+    scenarioSkipPenaltySumRef.current = 0;
     consecutiveDigitalSilenceForMicFallbackRef.current = 0;
     micFallbackSuccessPendingRef.current = false;
     elongatingProbeFiredRef.current = false;
-  }, [userId]);
+    resumeActiveScenarioRef.current = null;
+    resumeWelcomeMessageRef.current = RESUME_WELCOME_BACK_MESSAGE;
+    pendingScenarioIntroAfterResumeWelcomeRef.current = null;
+  }, [userId, resetScenarioCClientGatesOnly]);
 
   const deleteTurnAudioFile = useCallback(async (nativeUri: string | null) => {
     if (!nativeUri || Platform.OS === 'web') return;
@@ -4094,10 +4643,61 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
   const currentMessagesRef = useRef(messages);
   /** Mirrors last assistant message: true iff it was exactly one approved elongating line (client-enforced one-per-turn). */
   const elongatingProbeFiredRef = useRef(false);
+  /** Category-1 meta-comment (frustration) signals per interview moment — for repeated_frustration_signal. */
+  const metaCommentFrustrationCountByMomentRef = useRef<Record<number, number>>({});
+  /** Inability meta-comment count within the active moment — client invitation vs skip escalation. */
+  const inabilityCountByMomentRef = useRef<Record<number, number>>({});
+  /** Increments only when `countsAsSubstantiveInterviewQuestionDelivery` (paired with question_delivered). */
+  const substantiveInterviewQuestionDeliveredSeqRef = useRef(0);
+  /** Baseline seq while user's meta-comment was answered with assistant text that was not yet substantive — resets when substantive delivers. */
+  const metaCommentAckAwaitingSubstantiveBaselineSeqRef = useRef<number | null>(null);
+  /** Set immediately before Anthropic call when this user turn uses meta-comment system suffix; consumed when assistant text is finalized. */
+  const metaClassificationForPendingAssistantRef = useRef<MetaCommentClassification | null>(null);
+  /** Substantive seq snapshot when whisper-ratio recovery line was spoken — pairs recovery exemption until a substantive question fires. */
+  const recoveryAssistantSpokenAtSubstantiveSeqRef = useRef<number | null>(null);
+  /** After first frustration meta-response with skip offer; next user turn may accept skip. */
+  const frustrationSkipOfferPendingRef = useRef(false);
+  /** True once we've asked the participant to confirm skipping (same beat as `frustrationSkipOfferPendingRef`). */
+  const frustrationSkipAwaitingConfirmationRef = useRef(false);
+  const frustrationSkipHadPriorAnswerRef = useRef<boolean | null>(null);
+  /** Distinguishes telemetry for skip prompt origin — cleared when offer refs reset. */
+  const scenarioSkipOfferSourceRef = useRef<
+    | 'frustration_meta'
+    | 'proactive_utterance'
+    | 'skip_request_meta'
+    | 'inability_escalation'
+    | 'already_answered_meta'
+    | null
+  >(null);
+  /** Next scenario score merge forces null markers (not zero) when user skipped after frustration offer. */
+  const scenarioFrustrationSkipNullMarkersRef = useRef<Partial<Record<1 | 2 | 3, boolean>>>({});
+  /** One-shot system suffix after skip acceptance — consumed when building the next Anthropic request. */
+  const skipContinuationSystemSuffixRef = useRef('');
+  const recordInterviewAssistantDeliveryForMetaExemptionRef = useRef<(deliveredQuestionText: string) => void>(() => {});
+  const finalizePendingMetaAckBaselineAfterAssistantTextRef = useRef<(fullAssistantText: string) => void>(() => {});
   const statusRef = useRef(status);
   statusRef.current = status;
   const interviewStatusRef = useRef(interviewStatus);
   interviewStatusRef.current = interviewStatus;
+
+  recordInterviewAssistantDeliveryForMetaExemptionRef.current = (deliveredQuestionText: string) => {
+    const cleaned = stripControlTokens(deliveredQuestionText).trim();
+    if (!cleaned) return;
+    if (countsAsSubstantiveInterviewQuestionDelivery(cleaned)) {
+      substantiveInterviewQuestionDeliveredSeqRef.current += 1;
+      metaCommentAckAwaitingSubstantiveBaselineSeqRef.current = null;
+    }
+  };
+  finalizePendingMetaAckBaselineAfterAssistantTextRef.current = (fullAssistantText: string) => {
+    const pendingMeta = metaClassificationForPendingAssistantRef.current;
+    if (pendingMeta == null) return;
+    metaClassificationForPendingAssistantRef.current = null;
+    const cleaned = stripControlTokens(fullAssistantText).trim();
+    if (!cleaned) return;
+    if (!countsAsSubstantiveInterviewQuestionDelivery(cleaned)) {
+      metaCommentAckAwaitingSubstantiveBaselineSeqRef.current = substantiveInterviewQuestionDeliveredSeqRef.current;
+    }
+  };
 
   const [sessionExpired, setSessionExpired] = useState(false);
   const [usingMemoryFallback, setUsingMemoryFallback] = useState(false);
@@ -4140,12 +4740,12 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
 
   const openAdminPanelParam = (route.params as { openAdminPanel?: boolean } | undefined)?.openAdminPanel;
   useEffect(() => {
-    if (!ALPHA_MODE || !openAdminPanelParam) return;
+    if (!openAdminPanelParam || !isAdminUser) return;
     setShowAdminPanel(true);
     if (typeof navigation.setParams === 'function') {
       navigation.setParams({ openAdminPanel: undefined });
     }
-  }, [openAdminPanelParam, navigation]);
+  }, [openAdminPanelParam, navigation, isAdminUser]);
 
   /** Once we move to scenario N, scenarios 1..N-1 are locked. */
   const [highestScenarioReached, setHighestScenarioReached] = useState(1);
@@ -4382,6 +4982,7 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
             scenariosCompleted: completed,
             scenarioScores: scores,
             currentScenario: getCurrentScenario(scoredScenariosRef.current),
+            resumeActiveScenario: resumeActiveScenarioRef.current,
             emergencySave: true,
             savedAt: new Date().toISOString(),
           });
@@ -4437,6 +5038,7 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
             scenariosCompleted: completed,
             scenarioScores: scores,
             currentScenario: getCurrentScenario(scoredScenariosRef.current),
+            resumeActiveScenario: resumeActiveScenarioRef.current,
             sessionExpired: true,
           });
         }
@@ -4517,11 +5119,16 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
        * If `interview_completed` is **true** in the DB, this effect must run: recover from a stuck "preparing" screen
        * (refresh mid-flight, failed navigation) by handing off to PostInterview or re-syncing to congratulations.
        */
-      if (interviewStatusRef.current === 'in_progress') return;
+      /** After `[INTERVIEW_COMPLETE]`, `isInterviewCompleteRef` is true while `interviewStatus` may still be `in_progress` until the next paint — keep syncing so we do not wipe UI with `not_started` below. */
+      if (interviewStatusRef.current === 'in_progress' && !isInterviewCompleteRef.current) {
+        return;
+      }
       const scoringCommitInFlight =
         data != null &&
         data.interview_completed !== true &&
-        (interviewStatusRef.current === 'preparing_results' || statusRef.current === 'scoring');
+        (interviewStatusRef.current === 'preparing_results' ||
+          statusRef.current === 'scoring' ||
+          isInterviewCompleteRef.current);
       if (scoringCommitInFlight) {
         // #region agent log
         fetch('http://127.0.0.1:7789/ingest/668e0bd5-3283-4492-9f48-e33846c18218', {
@@ -4535,6 +5142,7 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
             data: {
               preparing: interviewStatusRef.current === 'preparing_results',
               statusScoring: statusRef.current === 'scoring',
+              interviewCompleteSession: isInterviewCompleteRef.current,
               latestAttemptIdPresent:
                 typeof data?.latest_attempt_id === 'string' && data.latest_attempt_id.length > 0,
             },
@@ -4542,11 +5150,15 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
           }),
         }).catch(() => {});
         // #endregion
-        return;
+          return;
       }
 
       if (error || !data) {
-        if (interviewStatusRef.current === 'preparing_results' || statusRef.current === 'scoring') {
+        if (
+          interviewStatusRef.current === 'preparing_results' ||
+          statusRef.current === 'scoring' ||
+          isInterviewCompleteRef.current
+        ) {
           return;
         }
         setInterviewStatus('not_started');
@@ -4554,12 +5166,40 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
       }
 
       if (shouldHandOffToPostInterview) {
-        replaceWithStandardApplicantProcessingHandoffForUser(navigation, userId);
+        replaceWithStandardApplicantProcessingHandoffForUser(navigation, userId, {
+          interviewSessionId: interviewSessionIdRef.current,
+          source: 'checkInterviewStatus_db_completed',
+        });
         return;
       }
 
       if (!data.interview_completed) {
         setPendingScoringSyncAttemptId(null);
+        if (
+          isInterviewCompleteRef.current ||
+          interviewStatusRef.current === 'preparing_results' ||
+          statusRef.current === 'scoring'
+        ) {
+          // #region agent log
+          fetch('http://127.0.0.1:7789/ingest/668e0bd5-3283-4492-9f48-e33846c18218', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'X-Debug-Session-Id': 'e43434' },
+            body: JSON.stringify({
+              sessionId: 'e43434',
+              location: 'AriaScreen.tsx:checkInterviewStatus',
+              message: 'skip_not_started_while_client_scoring',
+              data: {
+                interviewCompleteSession: isInterviewCompleteRef.current,
+                preparing: interviewStatusRef.current === 'preparing_results',
+                statusScoring: statusRef.current === 'scoring',
+              },
+              timestamp: Date.now(),
+              hypothesisId: 'H_db_race',
+            }),
+          }).catch(() => {});
+          // #endregion
+          return;
+        }
         setInterviewStatus('not_started');
       } else {
         const aid = data.latest_attempt_id as string | null | undefined;
@@ -4659,6 +5299,29 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
     setInterviewStatus('congratulations');
   }, [ALPHA_MODE, userId, status, results, interviewStatus]);
 
+  useEffect(() => {
+    if (status !== 'results' || !userId) {
+      setStandardResultsReferralCode(null);
+      return;
+    }
+    if (isAdmin || isAmoraeaAdminConsoleEmail(user?.email)) {
+      setStandardResultsReferralCode(null);
+      return;
+    }
+    let cancelled = false;
+    void (async () => {
+      const { data } = await supabase
+        .from('referral_codes')
+        .select('code')
+        .eq('referrer_user_id', userId)
+        .maybeSingle();
+      if (!cancelled) setStandardResultsReferralCode(typeof data?.code === 'string' ? data.code : null);
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [status, userId, user?.email, isAdmin]);
+
   // Long scoring + DB confirmation can exceed 90s; do not navigate away from preparing without a completed scoreInterview path.
   useEffect(() => {
     if (interviewStatus !== 'preparing_results') return;
@@ -4716,6 +5379,7 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
       scenariosCompleted: completed,
       scenarioScores: scenarioScoresPayload,
       currentScenario: getCurrentScenario(scoredScenariosRef.current),
+      resumeActiveScenario: resumeActiveScenarioRef.current,
       pendingCompletion:
         pendingCompletion ||
         interviewStatusRef.current === 'preparing_results',
@@ -4724,16 +5388,17 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
     // #region agent log
     fetch('http://127.0.0.1:7789/ingest/668e0bd5-3283-4492-9f48-e33846c18218', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'X-Debug-Session-Id': 'c61a43' },
+      headers: { 'Content-Type': 'application/json', 'X-Debug-Session-Id': 'e43434' },
       body: JSON.stringify({
-        sessionId: 'c61a43',
-        runId: 'pre-fix',
-        hypothesisId: 'H1',
+        sessionId: 'e43434',
+        runId: 'post-fix',
+        hypothesisId: 'H-checkpoint-before-tts',
         location: 'AriaScreen.tsx:saveInterviewProgressEffect',
         message: 'saved_progress_snapshot',
         data: {
           status,
           interviewStatus: interviewStatusRef.current,
+          completedScenarios: completed,
           completedCount: completed.length,
           currentScenario: getCurrentScenario(scoredScenariosRef.current),
           userMessageCount: messages.filter((m) => m.role === 'user').length,
@@ -4866,9 +5531,31 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
       setReferenceCardPrompt(getSituationOpeningQuestion(scenario));
       setInterviewUiPhase('scenario_active');
     } else if (committedScenarioRef.current) {
+      const m5Anchored = moment5PrimaryAnchorDeliveredSessionRef.current;
+      const cleanedHasM5 = transcriptAssistantContainsMoment5PrimaryConflictQuestion(cleaned);
+      if (m5Anchored || cleanedHasM5) {
+        committedScenarioRef.current = MOMENT_5_REFERENCE_SCENARIO;
+        setReferenceCardScenario(MOMENT_5_REFERENCE_SCENARIO);
+        setReferenceCardPrompt(null);
+        // #region agent log
+        fetch('http://127.0.0.1:7789/ingest/668e0bd5-3283-4492-9f48-e33846c18218', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'X-Debug-Session-Id': 'e43434' },
+          body: JSON.stringify({
+            sessionId: 'e43434',
+            location: 'AriaScreen.tsx:applyInterviewSpeechComplete',
+            message: 'm5_modal_guard',
+            data: { m5Anchored, cleanedHasM5, cleanedPreview: cleaned.slice(0, 120) },
+            timestamp: Date.now(),
+            hypothesisId: 'H_apply_m5',
+          }),
+        }).catch(() => {});
+        // #endregion
+      } else {
       const q = extractModalQuestionFromAssistantText(cleaned);
       if (q !== null && !isResumeOrScenarioReplayUiPrompt(q)) {
         setReferenceCardPrompt(q);
+        }
       }
     }
   }, []);
@@ -4880,6 +5567,8 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
       skipQuestionTiming?: boolean;
       skipLastQuestionRef?: boolean;
       preInitTriggerDuring?: PreInitTriggerDuring;
+      /** Web: full MP3 path only (retry after truncated PCM/stream). */
+      skipPcmStream?: boolean;
       ttsTriggerSource?:
         | 'gesture_handler'
         | 'effect'
@@ -4943,8 +5632,9 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
           telemetry: { source: telemetrySource },
           skipStopElevenLabsPlaybackBeforeStart: true,
           preInitTriggerDuring,
+          skipPcmStream: speakOpts?.skipPcmStream,
         });
-        await new Promise<void>((r) => setTimeout(r, 1500));
+        await new Promise<void>((r) => setTimeout(r, SCENARIO_SPLIT_INTER_SEGMENT_GAP_MS));
         await speakWithElevenLabs(split.seg2, undefined, {
           onPlaybackStarted: () => {
             setVoiceState('speaking');
@@ -4953,6 +5643,7 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
           telemetry: { source: telemetrySource },
           skipStopElevenLabsPlaybackBeforeStart: true,
           preInitTriggerDuring,
+          skipPcmStream: speakOpts?.skipPcmStream,
         });
         return {
           scenarioSplitDelivery: {
@@ -4968,6 +5659,7 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
         },
         telemetry: { source: telemetrySource },
         preInitTriggerDuring,
+        skipPcmStream: speakOpts?.skipPcmStream,
       });
     } catch (speakErr) {
       throw speakErr;
@@ -5190,6 +5882,8 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
         skipQuestionTiming?: boolean;
         /** Do not overwrite lastQuestionTextRef (replay is not the active question). */
         skipLastQuestionRef?: boolean;
+        /** Bypass consecutive-duplicate TTS suppression (same wording must replay — e.g. skip confirmation). */
+        allowDuplicateConsecutiveTts?: boolean;
         /** Internal: resume TTS from a tap after tab visibility restored gesture gate. */
         skipGestureGate?: boolean;
         ttsTriggerSource?:
@@ -5211,6 +5905,7 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
         skipInterviewSpeechAdvance = false,
         skipQuestionTiming = false,
         skipLastQuestionRef = false,
+        allowDuplicateConsecutiveTts = false,
         skipGestureGate = false,
         ttsTriggerSource = 'callback',
         immediateWebPlaybackElement,
@@ -5226,6 +5921,48 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
           : ttsTriggerSource;
 
       await awaitTtsScreenReadyGate('speak_text_safe');
+      const incomingAssistantTtsTextForS2Repair = text;
+      const telemetryEarlyForS2Repair =
+        telemetrySourceOpt ?? (interviewSpeechRole === 'assistant_response' ? 'turn' : 'other');
+      if (
+        !silent &&
+        (interviewSpeechRole === 'assistant_response' || telemetryEarlyForS2Repair === 'turn') &&
+        currentInterviewMomentRef.current === 2 &&
+        currentScenarioRef.current === 2 &&
+        looksLikeScenarioBRepairAsJamesQuestion(stripControlTokens(text).trim()) &&
+        s2RepairProbeDeliveredRef.current
+      ) {
+        const dedupedRepairStripped = stripScenarioBRepairAsJamesQuestion(text).trim();
+        if (!dedupedRepairStripped) {
+          setVoiceState('idle');
+          return;
+        }
+        text = dedupedRepairStripped;
+      }
+
+      const skipConsecutiveTtsDedup = silent || skipLastQuestionRef || allowDuplicateConsecutiveTts;
+      if (!skipConsecutiveTtsDedup) {
+        const normalizedIncoming = normalizeTtsTextForConsecutiveDedup(text);
+        const prevNorm = lastSuccessfulTtsTextNormalizedRef.current;
+        if (normalizedIncoming.length > 0 && prevNorm !== null && normalizedIncoming === prevNorm) {
+          if (userId) {
+            const r = getSessionLogRuntime();
+            writeSessionLog({
+              userId,
+              attemptId: r.attemptId,
+              eventType: 'tts_delivery_suppressed',
+              eventData: {
+                suppressed_text_preview: stripControlTokens(text).trim().slice(0, 100),
+                last_delivered_text_preview: lastSuccessfulTtsDeliveredPreviewRef.current,
+                suppression_reason: 'duplicate_consecutive',
+              },
+              platform: r.platform,
+            });
+          }
+          setVoiceState('idle');
+          return;
+        }
+      }
 
       if (Platform.OS === 'web' && immediateWebPlaybackElement && userId) {
         /** Same as `speak()` — prefetched HTMLAudioElement path returns before `speak()`, so ratio gate would see an empty/stale `lastQuestionTextRef` on mobile "Begin Interview". */
@@ -5320,6 +6057,13 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
                 .catch(() => reject(new Error('greeting_audio_error')));
             }
           });
+          if (!silent) {
+            const nOk = normalizeTtsTextForConsecutiveDedup(text);
+            if (nOk.length > 0) {
+              lastSuccessfulTtsTextNormalizedRef.current = nOk;
+              lastSuccessfulTtsDeliveredPreviewRef.current = stripControlTokens(text).trim().slice(0, 100);
+            }
+          }
           if (userId) {
             const rtp = getSessionLogRuntime();
             const actualTtsMs = Date.now() - ttsStart;
@@ -5472,6 +6216,9 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
       if (priorRec) {
         await applyPlaybackBridgeBeforeTtsIfIos('speakTextSafe');
       }
+      if (Platform.OS === 'web') {
+        tabHiddenDuringActiveTtsLineRef.current = false;
+      }
       prepareTtsPlaybackTelemetryState({
         charCount: stripControlTokens(text).trim().length,
         telemetryIsGreeting: telemetrySource === 'greeting',
@@ -5545,7 +6292,192 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
         });
       }
       try {
-        const speakOutcome = await withRetry(
+        const charCount = stripControlTokens(text).trim().length;
+        const useWebDurationVerification = Platform.OS === 'web' && !silent && charCount > 0;
+
+        let speakOutcome:
+          | { scenarioSplitDelivery?: { segment1_expected_duration_ms: number; segment2_expected_duration_ms: number } }
+          | void
+          | undefined;
+        let actualTtsMs = 0;
+        let verificationOk = true;
+        let acceptedStableTruncationAsEstimationError = false;
+
+        if (useWebDurationVerification) {
+          verificationOk = false;
+          let firstPrematureActualToExpectedRatio: number | null = null;
+          for (let attemptIx = 0; attemptIx < MAX_TTS_PLAYBACK_COMPLETION_ATTEMPTS; attemptIx++) {
+            const attemptStart = Date.now();
+            try {
+              speakOutcome = await speak(text, {
+                telemetrySource,
+                skipQuestionTiming: true,
+                skipLastQuestionRef,
+                ttsTriggerSource: effectiveTtsTriggerSource,
+                skipPcmStream: attemptIx > 0,
+              });
+            } catch (e) {
+              if (attemptIx < MAX_TTS_PLAYBACK_COMPLETION_ATTEMPTS - 1) {
+                await stopElevenLabsPlayback();
+                continue;
+              }
+              throw e;
+            }
+            actualTtsMs = Date.now() - attemptStart;
+            const wall = computeExpectedTtsWallClockMs(charCount, speakOutcome);
+            const tabThrottledDuringLine =
+              Platform.OS === 'web' && tabHiddenDuringActiveTtsLineRef.current;
+            const wouldBePremature = isTtsPlaybackPrematureCutoff(actualTtsMs, wall.expectedMs);
+            const premature = !tabThrottledDuringLine && wouldBePremature;
+            const ratioActualToExpected =
+              wall.expectedMs > 0 && Number.isFinite(actualTtsMs) ? actualTtsMs / wall.expectedMs : null;
+            if (
+              premature &&
+              attemptIx === 0 &&
+              telemetrySource === 'replay' &&
+              ratioActualToExpected != null &&
+              ratioActualToExpected >= TTS_REPLAY_PREMATURE_ACCEPT_MIN_RATIO
+            ) {
+              verificationOk = true;
+              acceptedStableTruncationAsEstimationError = true;
+              break;
+            }
+            /** Moment 5 conflict bundle is long; char-based expected duration often overshoots real playback (~0.73× seen in session_logs). Retrying `speak()` replays the whole question — accept one stable "short" pass like replay. */
+            if (
+              premature &&
+              attemptIx === 0 &&
+              telemetrySource === 'turn' &&
+              interviewSpeechRole === 'assistant_response' &&
+              currentInterviewMomentRef.current === 5 &&
+              ratioActualToExpected != null &&
+              ratioActualToExpected >= TTS_REPLAY_PREMATURE_ACCEPT_MIN_RATIO &&
+              transcriptAssistantContainsMoment5PrimaryConflictQuestion(text)
+            ) {
+              verificationOk = true;
+              acceptedStableTruncationAsEstimationError = true;
+              break;
+            }
+            if (
+              premature &&
+              ratioActualToExpected != null &&
+              ratioActualToExpected >= TTS_CALIBRATION_MIN_RATIO_TO_INCLUDE
+            ) {
+              verificationOk = true;
+              acceptedStableTruncationAsEstimationError = true;
+              if (userId) {
+                const rSuppress = getSessionLogRuntime();
+                writeSessionLog({
+                  userId,
+                  attemptId: rSuppress.attemptId,
+                  eventType: 'tts_retry_suppressed',
+                  eventData: {
+                    ratio_actual_to_expected: ratioActualToExpected,
+                    suppression_reason: 'substantially_complete',
+                    attempt_index: attemptIx + 1,
+                    expected_duration_ms: wall.expectedMs,
+                    actual_duration_ms: actualTtsMs,
+                  },
+                  platform: rSuppress.platform,
+                });
+              }
+              break;
+            }
+            // #region agent log
+            if (Platform.OS === 'web' && wouldBePremature) {
+              fetch('http://127.0.0.1:7789/ingest/668e0bd5-3283-4492-9f48-e33846c18218', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json', 'X-Debug-Session-Id': 'e43434' },
+                body: JSON.stringify({
+                  sessionId: 'e43434',
+                  location: 'AriaScreen.tsx:speakTextSafe:webDurationVerify',
+                  message: 'tts_premature_gate',
+                  data: {
+                    hypothesisId: 'H_tab_hidden_skips_premature_retry',
+                    attemptIx: attemptIx + 1,
+                    tabThrottledDuringLine,
+                    wouldBePremature,
+                    effectivePremature: premature,
+                    actualTtsMs,
+                    expectedMs: wall.expectedMs,
+                    ratio:
+                      ratioActualToExpected != null
+                        ? Math.round(1000 * ratioActualToExpected) / 1000
+                        : null,
+                  },
+                  timestamp: Date.now(),
+                  runId: 'post-fix-verify',
+                }),
+              }).catch(() => {});
+            }
+            // #endregion
+            if (userId && premature) {
+              const rtpInc = getSessionLogRuntime();
+              writeAudioSessionLog({
+                userId,
+                attemptId: rtpInc.attemptId,
+                eventType: 'tts_playback_incomplete',
+                eventData: {
+                  attempt_index: attemptIx + 1,
+                  max_attempts: MAX_TTS_PLAYBACK_COMPLETION_ATTEMPTS,
+                  expected_duration_ms: wall.expectedMs,
+                  expected_duration_calculation_method: wall.calculationMethod,
+                  actual_duration_ms: actualTtsMs,
+                  ratio_actual_to_expected: ratioActualToExpected,
+                  skip_pcm_stream: attemptIx > 0,
+                  moment_number: currentInterviewMomentRef.current,
+                },
+                durationMs: actualTtsMs,
+                platform: rtpInc.platform,
+              });
+            }
+            if (!premature) {
+              verificationOk = true;
+              if (
+                currentInterviewMomentRef.current === 2 &&
+                currentScenarioRef.current === 2 &&
+                looksLikeScenarioBRepairAsJamesQuestion(stripControlTokens(text).trim())
+              ) {
+                s2RepairProbeDeliveredRef.current = true;
+              }
+              break;
+            }
+            if (attemptIx === 0 && ratioActualToExpected != null) {
+              firstPrematureActualToExpectedRatio = ratioActualToExpected;
+            }
+            if (
+              attemptIx === 1 &&
+              firstPrematureActualToExpectedRatio != null &&
+              ratioActualToExpected != null &&
+              Math.abs(ratioActualToExpected - firstPrematureActualToExpectedRatio) <=
+                TTS_PREMATURE_RATIO_STABILITY_EPSILON
+            ) {
+              verificationOk = true;
+              acceptedStableTruncationAsEstimationError = true;
+              break;
+            }
+            if (attemptIx < MAX_TTS_PLAYBACK_COMPLETION_ATTEMPTS - 1) {
+              await stopElevenLabsPlayback();
+            }
+          }
+
+          if (!verificationOk) {
+            ttsSessionHardFailureCountRef.current += 1;
+            if (ttsSessionHardFailureCountRef.current > 2) {
+              setTtsPlaybackReliabilityNotice(
+                'Playback keeps stopping early. Try a wired connection or reload this page.',
+              );
+            }
+          } else {
+            setTtsPlaybackReliabilityNotice(null);
+            ttsSessionHardFailureCountRef.current = 0;
+          }
+
+          if (!skipQuestionTiming) {
+            timingRef.current.questionEndTime = Date.now();
+            markQuestionDelivered(new Date().toISOString());
+          }
+        } else {
+          speakOutcome = await withRetry(
           () =>
             speak(text, {
               telemetrySource,
@@ -5559,15 +6491,20 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
             context: 'TTS',
             sessionLog:
               userId ? { userId, attemptId: rt0.attemptId, platform: rt0.platform } : undefined,
-          }
-        );
-        setTTSFallbackActive(false);
-        const actualTtsMs = Date.now() - ttsStart;
-        const charCount = stripControlTokens(text).trim().length;
+            },
+          );
+          actualTtsMs = Date.now() - ttsStart;
+        }
+
         const { expectedMs: expectedTtsMs, calculationMethod: expectedDurationCalculationMethod } =
-          getTtsExpectedDurationMsFromCharCount(charCount);
+          computeExpectedTtsWallClockMs(charCount, speakOutcome);
+        const audioPlaybackTruncated = useWebDurationVerification && !verificationOk;
         const durRatio = recordTtsTurnDurationRatio(actualTtsMs, expectedTtsMs);
         const durationMatch = isTtsDurationMatchWithinOverrunTolerance(actualTtsMs, expectedTtsMs);
+        const calibrationExcluded =
+          durRatio != null && 'excluded' in durRatio && durRatio.excluded === true;
+        const durRatioForCalibration: TtsCalibrationResult | null =
+          calibrationExcluded || durRatio == null ? null : (durRatio as TtsCalibrationResult);
         if (userId) {
           const rtp = getSessionLogRuntime();
           markLastAudioSessionEventType('tts_playback_complete');
@@ -5590,6 +6527,10 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
               expected_duration_calculation_method: expectedDurationCalculationMethod,
               completion_via: 'callback',
               moment_number: currentInterviewMomentRef.current,
+              playback_truncated: audioPlaybackTruncated,
+              ...(acceptedStableTruncationAsEstimationError
+                ? { accepted_stable_truncation_as_estimation_error: true }
+                : {}),
             },
             durationMs: actualTtsMs,
             platform: rtp.platform,
@@ -5609,7 +6550,19 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
               platform: rtp.platform,
             });
           }
-          if (durRatio) {
+          if (calibrationExcluded && durRatio != null && 'excluded' in durRatio) {
+            writeSessionLog({
+              userId,
+              attemptId: rtp.attemptId,
+              eventType: 'calibration_turn_excluded',
+              eventData: {
+                ratio_actual_to_expected: durRatio.ratio,
+                exclusion_reason: durRatio.exclusion_reason,
+              },
+              platform: rtp.platform,
+            });
+          }
+          if (durRatioForCalibration) {
             writeAudioSessionLog({
               userId,
               attemptId: rtp.attemptId,
@@ -5617,27 +6570,27 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
               eventData: {
                 expected_duration_ms: expectedTtsMs,
                 actual_duration_ms: actualTtsMs,
-                ratio_actual_to_expected: durRatio.ratio,
-                calibration_adjusted: durRatio.calibration_adjusted,
-                calibration_skip_reason: durRatio.calibration_skip_reason,
-                previous_multiplier_ms_per_char: durRatio.previous_multiplier_ms_per_char,
-                new_multiplier_ms_per_char: durRatio.new_multiplier_ms_per_char,
+                ratio_actual_to_expected: durRatioForCalibration.ratio,
+                calibration_adjusted: durRatioForCalibration.calibration_adjusted,
+                calibration_skip_reason: durRatioForCalibration.calibration_skip_reason,
+                previous_multiplier_ms_per_char: durRatioForCalibration.previous_multiplier_ms_per_char,
+                new_multiplier_ms_per_char: durRatioForCalibration.new_multiplier_ms_per_char,
                 moment_number: currentInterviewMomentRef.current,
-                ...(durRatio.calibration_adjustment_detail
-                  ? { calibration_adjustment_detail: durRatio.calibration_adjustment_detail }
+                ...(durRatioForCalibration.calibration_adjustment_detail
+                  ? { calibration_adjustment_detail: durRatioForCalibration.calibration_adjustment_detail }
                   : {}),
               },
               platform: rtp.platform,
             });
-            if (durRatio.calibration_escape_applied) {
+            if (durRatioForCalibration.calibration_escape_applied) {
               writeAudioSessionLog({
                 userId,
                 attemptId: rtp.attemptId,
                 eventType: 'calibration_escape_applied',
                 eventData: {
-                  previous_multiplier_ms_per_char: durRatio.previous_multiplier_ms_per_char,
-                  new_multiplier_ms_per_char: durRatio.new_multiplier_ms_per_char,
-                  rolling_avg_ratio: durRatio.calibration_adjustment_detail?.rolling_avg_ratio ?? null,
+                  previous_multiplier_ms_per_char: durRatioForCalibration.previous_multiplier_ms_per_char,
+                  new_multiplier_ms_per_char: durRatioForCalibration.new_multiplier_ms_per_char,
+                  rolling_avg_ratio: durRatioForCalibration.calibration_adjustment_detail?.rolling_avg_ratio ?? null,
                   moment_number: currentInterviewMomentRef.current,
                 },
                 platform: rtp.platform,
@@ -5648,9 +6601,20 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
         const isInterviewLine =
           !skipQuestionDeliveredTelemetry &&
           (interviewSpeechRole === 'assistant_response' || telemetrySource === 'turn');
+        if (
+          isInterviewLine &&
+          currentInterviewMomentRef.current === 2 &&
+          currentScenarioRef.current === 2 &&
+          looksLikeScenarioBRepairAsJamesQuestion(
+            stripControlTokens(incomingAssistantTtsTextForS2Repair).trim(),
+          )
+        ) {
+          s2RepairProbeDeliveredRef.current = true;
+        }
         if (isInterviewLine && userId) {
           const rtd = getSessionLogRuntime();
           const deliveredQuestionText = stripControlTokens(text).trim().slice(0, 2000);
+          recordInterviewAssistantDeliveryForMetaExemptionRef.current(stripControlTokens(text).trim());
           writeSessionLog({
             userId,
             attemptId: rtd.attemptId,
@@ -5660,6 +6624,7 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
               scenario_number: currentScenarioRef.current,
               question_text: deliveredQuestionText,
               delivered_at: new Date().toISOString(),
+              ...(audioPlaybackTruncated ? { audio_playback_truncated: true } : {}),
               ...(ttsPipeline ? { tts_pipeline: ttsPipeline } : {}),
             },
             platform: rtd.platform,
@@ -5677,6 +6642,13 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
         }
         if (interviewSpeechRole === 'assistant_response' && !skipInterviewSpeechAdvance) {
           applyInterviewSpeechComplete(text);
+        }
+        if (!silent) {
+          const nOk = normalizeTtsTextForConsecutiveDedup(text);
+          if (nOk.length > 0) {
+            lastSuccessfulTtsTextNormalizedRef.current = nOk;
+            lastSuccessfulTtsDeliveredPreviewRef.current = stripControlTokens(text).trim().slice(0, 100);
+          }
         }
       } catch (err) {
         if (isWebTtsRequiresUserGestureError(err)) {
@@ -5727,13 +6699,11 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
             setWebDesktopPendingTtsGestureOverlay(true);
           }
           setVoiceState('idle');
-          if (!silent) setTTSFallbackActive(false);
           if (interviewSpeechRole === 'assistant_response' && !skipInterviewSpeechAdvance) {
             applyInterviewSpeechComplete(text);
           }
         } else {
           if (__DEV__) console.warn('TTS failed, falling back to visual display:', err instanceof Error ? err.message : err);
-          if (!silent) setTTSFallbackActive(true);
           setVoiceState('idle');
           // Same advance as success path so reference card + SHOW SCENARIO work when user reads the line on screen.
           if (interviewSpeechRole === 'assistant_response' && !skipInterviewSpeechAdvance) {
@@ -5747,6 +6717,9 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
         if (userId) {
           setTtsPlaybackActive(false);
           ttsLineInFlightRef.current = false;
+        }
+        if (Platform.OS === 'web') {
+          tabHiddenDuringActiveTtsLineRef.current = false;
         }
         if (markIntro) setScenarioIntroTtsPlaying(false);
         const ttsResolvedAt = Date.now();
@@ -5778,6 +6751,7 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
       webSpeechShouldDeferToUserGesture,
       mobileWebTapToBeginDone,
       awaitTtsScreenReadyGate,
+      stopElevenLabsPlayback,
     ]
   );
 
@@ -5821,6 +6795,9 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
       if (document.visibilityState === 'hidden') {
         docVisibilityWasHiddenRef.current = true;
         if (interviewStatusRef.current === 'in_progress') {
+          if (ttsLineInFlightRef.current) {
+            tabHiddenDuringActiveTtsLineRef.current = true;
+        }
           gestureContextLostAtRef.current = { atMs: Date.now(), reason: 'tab_visibility_change' };
           pauseWebInterviewHtmlAudioForDocumentHidden();
           // #region agent log
@@ -5995,11 +6972,145 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
         };
         const { error } = await supabase.from('users').update(updateData).eq('id', uid);
         if (error) console.error(`Failed to save scenario ${scenarioNumber} checkpoint:`, error);
+        else {
+          resumeActiveScenarioRef.current = null;
+          const aid = interviewSessionAttemptIdRef.current;
+          if (aid) {
+            await supabase
+              .from('interview_attempts')
+              .update({ resume_active_scenario: null })
+              .eq('id', aid)
+              .eq('user_id', uid);
+          }
+          const persisted = await loadInterviewFromStorage(uid);
+          if (persisted) await saveInterviewToStorage(uid, { ...persisted, resumeActiveScenario: null });
+        }
       } catch (err) {
         console.error('Checkpoint save error:', err);
       }
     },
     []
+  );
+
+  const notifyScenarioStarted = useCallback(
+    async (
+      scenario: 1 | 2 | 3,
+      messagesSnapshot?: ReadonlyArray<{ role: string; content: string; scenarioNumber?: number }>,
+      opts?: { allowMessageHistoryShrink?: boolean }
+    ) => {
+      if (!userId || isAdmin) return;
+      const attemptId = interviewSessionAttemptIdRef.current;
+      const source = messagesSnapshot ?? currentMessagesRef.current;
+      const transcript = source.filter(
+        (m) => !(m as { isScoreCard?: boolean }).isScoreCard && !(m as { isWelcomeBack?: boolean }).isWelcomeBack
+      );
+      const completed = Array.from(scoredScenariosRef.current);
+      const scenarioScoresPayload: Record<
+        number,
+        { pillarScores: Record<string, number | null>; pillarConfidence: Record<string, string>; keyEvidence: Record<string, string>; scenarioName?: string }
+      > = {};
+      [1, 2, 3].forEach((n) => {
+        const s = scenarioScoresRef.current[n];
+        if (s) {
+          scenarioScoresPayload[n] = {
+            pillarScores: s.pillarScores,
+            pillarConfidence: s.pillarConfidence,
+            keyEvidence: s.keyEvidence,
+            scenarioName: s.scenarioName,
+          };
+        }
+      });
+      const persisted = await loadInterviewFromStorage(userId);
+      const prevMsgs = persisted?.messages ?? [];
+      const prevUserTurns = prevMsgs.filter((m) => m.role === 'user').length;
+      const nextUserTurns = transcript.filter((m) => m.role === 'user').length;
+      const allowShrink = opts?.allowMessageHistoryShrink === true;
+      /** `startInterview` used to call this before `setMessages`, producing a 1-line transcript and wiping a resumed save (see debug-e43434.log resume_decision → scenario_boundary_persisted). */
+      const wouldEraseMeaningfulInterview =
+        !allowShrink &&
+        prevUserTurns >= 2 &&
+        transcript.length < prevMsgs.length &&
+        nextUserTurns < prevUserTurns;
+      const messagesForSave = wouldEraseMeaningfulInterview ? prevMsgs : transcript;
+      const resumeToPersist = wouldEraseMeaningfulInterview
+        ? (persisted?.resumeActiveScenario ?? null)
+        : scenario;
+      resumeActiveScenarioRef.current = resumeToPersist;
+      if (attemptId) {
+        await supabase
+          .from('interview_attempts')
+          .update({ resume_active_scenario: resumeToPersist })
+          .eq('id', attemptId)
+          .eq('user_id', userId);
+      }
+      if (wouldEraseMeaningfulInterview && persisted) {
+        await saveInterviewToStorage(userId, {
+          ...persisted,
+          messages: messagesForSave,
+          resumeActiveScenario: resumeToPersist,
+          sessionAttemptId: attemptId ?? persisted.sessionAttemptId,
+        });
+      } else {
+        const merged: Omit<StoredInterviewData, 'version' | 'userId' | 'lastSavedAt'> = {
+          ...(persisted ?? {
+            messages: [],
+            scenariosCompleted: [],
+            scenarioScores: {},
+            currentScenario: 1,
+            attemptNumber: 1,
+          }),
+          messages: messagesForSave,
+          scenariosCompleted: completed,
+          scenarioScores: { ...(persisted?.scenarioScores ?? {}), ...scenarioScoresPayload },
+          currentScenario: getCurrentScenario(scoredScenariosRef.current),
+          resumeActiveScenario: resumeToPersist,
+          sessionAttemptId: attemptId ?? persisted?.sessionAttemptId,
+          attemptNumber: persisted?.attemptNumber ?? 1,
+        };
+        await saveInterviewToStorage(userId, merged);
+      }
+      /** Only score when caller supplied a transcript snapshot — avoids scoring off a stale ref when `notifyScenarioStarted` is fire-and-forget without messages. */
+      const scoreFn = scoreScenarioRef.current;
+      if (scoreFn && scenario >= 2 && scenario <= 3 && messagesSnapshot != null && messagesSnapshot.length > 0) {
+        const completedScenarioNum = (scenario - 1) as 1 | 2;
+        if (!scoredScenariosRef.current.has(completedScenarioNum)) {
+          scoredScenariosRef.current.add(completedScenarioNum);
+          void remoteLog('[SCENARIO_SCORE_ON_TRANSITION]', {
+            scenario_completed: completedScenarioNum,
+            entering_scenario: scenario,
+            transcript_turns: transcript.length,
+          });
+          void scoreFn(completedScenarioNum, transcript as { role: string; content: string }[]);
+        }
+      }
+      // #region agent log
+      fetch('http://127.0.0.1:7789/ingest/668e0bd5-3283-4492-9f48-e33846c18218', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'X-Debug-Session-Id': 'e43434' },
+        body: JSON.stringify({
+          sessionId: 'e43434',
+          runId: 'post-fix',
+          hypothesisId: 'H-notify-scenario',
+          location: 'AriaScreen.tsx:notifyScenarioStarted',
+          message: 'scenario_boundary_persisted',
+          data: {
+            scenario,
+            resumeToPersist,
+            hadPersisted: !!persisted,
+            usedSnapshot: !!messagesSnapshot,
+            transcriptLen: transcript.length,
+            messagesForSaveLen: messagesForSave.length,
+            wouldEraseMeaningfulInterview,
+            allowShrink,
+            completed,
+            hasAttemptId: !!attemptId,
+          },
+          timestamp: Date.now(),
+        }),
+      }).catch(() => {});
+      // #endregion
+    },
+    [userId, isAdmin]
   );
 
   const scoreScenario = useCallback(
@@ -6019,12 +7130,6 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
         headers['x-api-key'] = ANTHROPIC_API_KEY;
         headers['anthropic-version'] = '2023-06-01';
       }
-      const commitmentFocusForPrompt =
-        scenarioNumber === 3
-          ? scenarioCCommitmentOnlyEvidenceRef.current?.trim() ||
-            extractScenario3CommitmentThresholdUserAnswerAfterPrompt(allMessages as ScenarioCorpusMessageSlice[]) ||
-            null
-          : null;
       const repairFocusForPrompt =
         scenarioNumber === 3
           ? scenarioCRepairOnlyEvidenceRef.current?.trim() ||
@@ -6064,7 +7169,6 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
                     content: buildScenarioScoringPrompt(
                       scenarioNumber,
                       allMessages,
-                      commitmentFocusForPrompt,
                       priorMentalizingForScenario3,
                       repairFocusForPrompt
                     ),
@@ -6080,6 +7184,69 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
               throw e;
             }
             const parsedScenario = parseJsonObjectFromModelText(raw) as ScenarioScoreResult;
+            /** Model sometimes omits these or returns JSON with only a preamble object — fixes empty scorecard / gate. */
+            parsedScenario.scenarioNumber = scenarioNumber;
+            if (typeof parsedScenario.scenarioName !== 'string' || !parsedScenario.scenarioName.trim()) {
+              parsedScenario.scenarioName =
+                scenarioNumber === 1
+                  ? 'Scenario A (Emma/Ryan)'
+                  : scenarioNumber === 2
+                    ? 'Scenario B (Sarah/James)'
+                    : 'Scenario C (Sophie/Daniel)';
+            }
+            const scenarioMarkerIds = SCENARIO_FRUSTRATION_SKIP_NULL_MARKER_IDS[scenarioNumber];
+            const ensureNumericScoreMap = (
+              candidate: unknown,
+            ): Record<string, number | null> => {
+              if (!candidate || typeof candidate !== 'object' || Array.isArray(candidate)) return {};
+              const out: Record<string, number | null> = {};
+              for (const markerId of scenarioMarkerIds) {
+                const rawValue = (candidate as Record<string, unknown>)[markerId];
+                if (typeof rawValue === 'number' && Number.isFinite(rawValue)) {
+                  out[markerId] = rawValue;
+                } else if (typeof rawValue === 'string' && rawValue.trim() !== '' && Number.isFinite(Number(rawValue))) {
+                  out[markerId] = Number(rawValue);
+                }
+              }
+              return out;
+            };
+            const ensureNumericScoreMapDeep = (
+              candidate: unknown,
+              depth = 0,
+            ): Record<string, number | null> => {
+              if (!candidate || typeof candidate !== 'object' || Array.isArray(candidate) || depth > 5) return {};
+              const direct = ensureNumericScoreMap(candidate);
+              if (Object.keys(direct).length > 0) return direct;
+              for (const value of Object.values(candidate as Record<string, unknown>)) {
+                if (!value || typeof value !== 'object') continue;
+                const nested = ensureNumericScoreMapDeep(value, depth + 1);
+                if (Object.keys(nested).length > 0) return nested;
+              }
+              return {};
+            };
+            const extractNumericScoresFromRawModelText = (rawText: string): Record<string, number | null> => {
+              const out: Record<string, number | null> = {};
+              for (const markerId of scenarioMarkerIds) {
+                const escaped = markerId.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+                const keyValuePattern = new RegExp(`["']?${escaped}["']?\\s*[:=]\\s*(-?\\d+(?:\\.\\d+)?)`, 'i');
+                const slashTenPattern = new RegExp(`["']?${escaped}["']?[^\\d\\n]{0,20}(\\d+(?:\\.\\d+)?)\\s*\\/\\s*10`, 'i');
+                const m = rawText.match(keyValuePattern) ?? rawText.match(slashTenPattern);
+                if (!m) continue;
+                const n = Number(m[1]);
+                if (Number.isFinite(n)) out[markerId] = n;
+              }
+              return out;
+            };
+            const psRaw = parsedScenario.pillarScores;
+            if (psRaw && typeof psRaw === 'object' && !Array.isArray(psRaw)) {
+              for (const key of Object.keys(psRaw as Record<string, unknown>)) {
+                const v = (psRaw as Record<string, unknown>)[key];
+                if (typeof v === 'string' && v.trim() !== '' && Number.isFinite(Number(v))) {
+                  (psRaw as Record<string, number | null>)[key] = Number(v);
+                }
+              }
+            }
+            const primaryRawNumericScores = ensureNumericScoreMap(parsedScenario.pillarScores);
             parsedScenario.pillarScores = normalizeScoresByEvidence(
               parsedScenario.pillarScores,
               parsedScenario.keyEvidence
@@ -6092,6 +7259,129 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
             );
             parsedScenario.pillarScores = heur.pillarScores as ScenarioScoreResult['pillarScores'];
             parsedScenario.keyEvidence = heur.keyEvidence as ScenarioScoreResult['keyEvidence'];
+            const avgWords = computeAvgUserWordsPerTurnScenario(allMessages, scenarioNumber);
+            const elabor = applyElaborationAbsencePenaltiesToScenarioScores(
+              scenarioNumber,
+              scenarioUserText,
+              parsedScenario.pillarScores ?? {},
+              parsedScenario.keyEvidence,
+              avgWords,
+            );
+            parsedScenario.pillarScores = elabor.pillarScores as ScenarioScoreResult['pillarScores'];
+            parsedScenario.keyEvidence = elabor.keyEvidence as ScenarioScoreResult['keyEvidence'];
+            if (scenarioFrustrationSkipNullMarkersRef.current[scenarioNumber]) {
+              const ids = SCENARIO_FRUSTRATION_SKIP_NULL_MARKER_IDS[scenarioNumber];
+              const ps = { ...(parsedScenario.pillarScores ?? {}) };
+              const ke = { ...(parsedScenario.keyEvidence ?? {}) };
+              const pc = { ...(parsedScenario.pillarConfidence ?? {}) };
+              for (const id of ids) {
+                ps[id] = null;
+                ke[id] = SKIPPED_BY_USER_FRUSTRATION_EVIDENCE;
+                pc[id] = 'not_assessed';
+              }
+              parsedScenario.pillarScores = ps;
+              parsedScenario.keyEvidence = ke;
+              parsedScenario.pillarConfidence = pc;
+              scenarioFrustrationSkipNullMarkersRef.current[scenarioNumber] = false;
+            }
+            if (Object.keys(parsedScenario.pillarScores ?? {}).length === 0 && Object.keys(primaryRawNumericScores).length > 0) {
+              parsedScenario.pillarScores = primaryRawNumericScores;
+              void remoteLog('[SCENARIO_SCORE_FALLBACK] restored raw numeric scores after evidence normalization', {
+                scenarioNumber,
+                recoveredKeys: Object.keys(primaryRawNumericScores),
+              });
+            }
+            if (Object.keys(parsedScenario.pillarScores ?? {}).length === 0) {
+              const parsedScenarioAny = parsedScenario as unknown as Record<string, unknown>;
+              const alternateCandidates: unknown[] = [
+                parsedScenarioAny,
+                parsedScenarioAny.pillarScores,
+                parsedScenarioAny.scores,
+                parsedScenarioAny.scorecard,
+                (parsedScenarioAny.scorecard as Record<string, unknown> | undefined)?.pillarScores,
+              ];
+              let fallbackFromAlternateShape: Record<string, number | null> = {};
+              for (const candidate of alternateCandidates) {
+                const extracted = ensureNumericScoreMapDeep(candidate);
+                if (Object.keys(extracted).length > 0) {
+                  fallbackFromAlternateShape = extracted;
+                  break;
+                }
+              }
+              if (Object.keys(fallbackFromAlternateShape).length > 0) {
+                const normalizedFromAlternate = normalizeScoresByEvidence(
+                  fallbackFromAlternateShape,
+                  parsedScenario.keyEvidence
+                );
+                parsedScenario.pillarScores =
+                  Object.keys(normalizedFromAlternate).length > 0 ? normalizedFromAlternate : fallbackFromAlternateShape;
+                void remoteLog('[SCENARIO_SCORE_FALLBACK] adopted alternate model score shape', {
+                  scenarioNumber,
+                  recoveredKeys: Object.keys(parsedScenario.pillarScores ?? {}),
+                  usedRawNumericFallback: Object.keys(normalizedFromAlternate).length === 0,
+                });
+              }
+            }
+            if (Object.keys(parsedScenario.pillarScores ?? {}).length === 0) {
+              const fallbackFromRawModelText = extractNumericScoresFromRawModelText(raw);
+              if (Object.keys(fallbackFromRawModelText).length > 0) {
+                parsedScenario.pillarScores = fallbackFromRawModelText;
+                void remoteLog('[SCENARIO_SCORE_FALLBACK] extracted numeric marker scores from raw model text', {
+                  scenarioNumber,
+                  recoveredKeys: Object.keys(fallbackFromRawModelText),
+                });
+              }
+            }
+            if (Object.keys(parsedScenario.pillarScores ?? {}).length === 0) {
+              const neutralFallbackScores: Record<string, number | null> = {};
+              const neutralFallbackEvidence: Record<string, string> = { ...(parsedScenario.keyEvidence ?? {}) };
+              const neutralFallbackConfidence: Record<string, string> = { ...(parsedScenario.pillarConfidence ?? {}) };
+              for (const markerId of scenarioMarkerIds) {
+                neutralFallbackScores[markerId] = 5;
+                if (!neutralFallbackEvidence[markerId]) {
+                  neutralFallbackEvidence[markerId] = 'Score fallback applied after malformed model score payload.';
+                }
+                if (!neutralFallbackConfidence[markerId]) {
+                  neutralFallbackConfidence[markerId] = 'low';
+                }
+              }
+              parsedScenario.pillarScores = neutralFallbackScores;
+              parsedScenario.keyEvidence = neutralFallbackEvidence;
+              parsedScenario.pillarConfidence = neutralFallbackConfidence;
+              void remoteLog('[SCENARIO_SCORE_FALLBACK] using neutral fallback marker scores', {
+                scenarioNumber,
+                markerCount: scenarioMarkerIds.length,
+              });
+            }
+            const existingEvidence = { ...(parsedScenario.keyEvidence ?? {}) };
+            const existingConfidence = { ...(parsedScenario.pillarConfidence ?? {}) };
+            const scoredKeys = Object.keys(parsedScenario.pillarScores ?? {});
+            for (const markerId of scoredKeys) {
+              if (!existingEvidence[markerId]) {
+                existingEvidence[markerId] = 'Score recovered from model output.';
+              }
+              if (!existingConfidence[markerId]) {
+                existingConfidence[markerId] = 'moderate';
+              }
+            }
+            parsedScenario.keyEvidence = existingEvidence;
+            parsedScenario.pillarConfidence = existingConfidence;
+            if (parsedScenario.pillarScores?.contempt_expression == null) {
+              parsedScenario.contempt_tier_breakdown = null;
+            } else {
+              parsedScenario.contempt_tier_breakdown = parseContemptTierBreakdown(
+                (parsedScenario as { contempt_tier_breakdown?: unknown }).contempt_tier_breakdown
+              );
+            }
+            if (scenarioNumber === 3) {
+              const stripCommitmentThreshold = (o: Record<string, unknown> | undefined | null) => {
+                if (!o) return;
+                delete o.commitment_threshold;
+              };
+              stripCommitmentThreshold(parsedScenario.pillarScores as Record<string, unknown>);
+              stripCommitmentThreshold(parsedScenario.keyEvidence as Record<string, unknown>);
+              stripCommitmentThreshold(parsedScenario.pillarConfidence as Record<string, unknown>);
+            }
             return parsedScenario;
           },
           {
@@ -6126,14 +7416,6 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
           });
         }
         if (scenarioNumber === 3) {
-          if (commitmentFocusForPrompt?.trim()) {
-            void remoteLog('[SC3_MISPLACED_THRESHOLD_SEQUENCE]', {
-              phase: 'scenario_3_scored_with_commitment_focus',
-              interviewSessionId: interviewSessionIdRef.current,
-              usedCommitmentFocus: true,
-            });
-          }
-          scenarioCCommitmentOnlyEvidenceRef.current = null;
           scenarioCRepairOnlyEvidenceRef.current = null;
         }
         const scoreMessage = formatScoreMessage(scenarioResult);
@@ -6153,7 +7435,49 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
           userId: userId ?? null,
         });
         setScenarioScores((prev) => ({ ...prev, [scenarioNumber]: scenarioResult }));
-        scenarioScoresRef.current = { ...scenarioScoresRef.current, [scenarioNumber]: scenarioResult };
+        /** Mutate per-key to avoid cross-scenario overwrite races when multiple rescores resolve close together. */
+        scenarioScoresRef.current[scenarioNumber] = scenarioResult;
+        const attemptIdForSlice = interviewSessionAttemptIdRef.current;
+        if (userId && attemptIdForSlice) {
+          const bundle: ScenarioAttemptScoreBundle = {
+            pillarScores: scenarioResult.pillarScores,
+            pillarConfidence: scenarioResult.pillarConfidence,
+            keyEvidence: scenarioResult.keyEvidence,
+            scenarioName: scenarioResult.scenarioName,
+            contempt_tier_breakdown: scenarioResult.contempt_tier_breakdown,
+          };
+          try {
+            await withRetry(
+              async () => {
+                const { error } = await persistScenarioScoreBundleToAttempt(supabase, {
+                  attemptId: attemptIdForSlice,
+                  userId,
+                  scenarioNumber,
+                  bundle,
+                });
+                if (error) throw error;
+              },
+              {
+                retries: 2,
+                baseDelay: 2000,
+                maxDelay: 10000,
+                context: `persist scenario ${scenarioNumber} scores`,
+                sessionLog: userId
+                  ? {
+                      userId,
+                      attemptId: getSessionLogRuntime().attemptId,
+                      platform: getSessionLogRuntime().platform,
+                    }
+                  : undefined,
+              }
+            );
+          } catch (pe) {
+            void remoteLog('[WARN] scenario slice DB persist failed after scoring', {
+              scenarioNumber,
+              message: pe instanceof Error ? pe.message : String(pe),
+            });
+          }
+        }
         if (ALPHA_MODE) {
           const ps = scenarioResult.pillarScores ?? {};
           const vals = Object.values(ps).filter((v): v is number => typeof v === 'number' && Number.isFinite(v));
@@ -6175,6 +7499,12 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
         saveScenarioCheckpoint(scenarioNumber, scenarioResult, allMessages, userId);
       } catch (err) {
         if (__DEV__) console.error(`Scoring failed for scenario ${scenarioNumber}:`, err instanceof Error ? err.message : err);
+        await remoteLog('[ERROR] scenario scoring failed', {
+          scenarioNumber,
+          message: err instanceof Error ? err.message : String(err),
+          totalMessages: allMessages.length,
+          userTurns: allMessages.filter((m) => m.role === 'user').length,
+        });
         const saved = await loadInterviewFromStorage(userId);
         if (saved) {
           const scoringFailed = [...(saved.scoringFailed ?? []), { scenario: scenarioNumber, failedAt: new Date().toISOString(), error: err instanceof Error ? err.message : String(err) }];
@@ -6185,12 +7515,283 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
     [isAdmin, userId, saveScenarioCheckpoint]
   );
 
+  useEffect(() => {
+    scoreScenarioRef.current = scoreScenario;
+  }, [scoreScenario]);
+
   const processUserSpeech = useCallback(async (spokenText: string) => {
     if (!spokenText.trim()) {
       setVoiceState('idle');
       return;
     }
+    whisperRatioReaskAttemptsForCurrentQuestionRef.current = 0;
     const trimmed = spokenText.trim();
+    metaClassificationForPendingAssistantRef.current = null;
+
+    /** Frustration skip confirmed after confirmation prompt — defer moment advance + API until `messagesToUse` exists; must not early-return or skip continuation never hits Claude in the same turn. */
+    let frustrationSkipAcceptancePipeline = false;
+    let frustrationSkipDeclinePipeline = false;
+    if (
+      isInterviewAppRoute &&
+      !isAdmin &&
+      status === 'active' &&
+      frustrationSkipOfferPendingRef.current
+    ) {
+      if (frustrationSkipAwaitingConfirmationRef.current) {
+        if (looksLikeSkipConfirmationDecline(trimmed)) {
+          frustrationSkipDeclinePipeline = true;
+        } else if (looksLikeFrustrationSkipConfirmationAffirmative(trimmed)) {
+          frustrationSkipAcceptancePipeline = true;
+        }
+      } else if (looksLikeFrustrationSkipConfirmationAffirmative(trimmed)) {
+        frustrationSkipAcceptancePipeline = true;
+      }
+    }
+
+    if (
+      frustrationSkipOfferPendingRef.current &&
+      !frustrationSkipAcceptancePipeline &&
+      !frustrationSkipDeclinePipeline
+    ) {
+      if (!frustrationSkipAwaitingConfirmationRef.current) {
+        if (!looksLikeFrustrationSkipAcceptance(trimmed)) {
+          frustrationSkipOfferPendingRef.current = false;
+          frustrationSkipHadPriorAnswerRef.current = null;
+          scenarioSkipOfferSourceRef.current = null;
+        }
+      } else {
+        const affirms = looksLikeFrustrationSkipConfirmationAffirmative(trimmed);
+        const declines = looksLikeSkipConfirmationDecline(trimmed);
+        if (!affirms && !declines) {
+          const wc = countSpokenWords(trimmed);
+          if (wc >= 12 || userTurnSuppressesElongatingProbe(trimmed)) {
+            frustrationSkipOfferPendingRef.current = false;
+            frustrationSkipHadPriorAnswerRef.current = null;
+            frustrationSkipAwaitingConfirmationRef.current = false;
+            scenarioSkipOfferSourceRef.current = null;
+          }
+        }
+      }
+    }
+
+    let proactiveScenarioSkipConfirmationInjection = false;
+    if (
+      isInterviewAppRoute &&
+      !isAdmin &&
+      status === 'active' &&
+      !closingQuestionPending &&
+      !frustrationSkipOfferPendingRef.current &&
+      !frustrationSkipAcceptancePipeline &&
+      !frustrationSkipDeclinePipeline
+    ) {
+      const mSkip = currentInterviewMomentRef.current;
+      if (mSkip >= 1 && mSkip <= 3 && looksLikeProactiveScenarioSkipRequest(trimmed)) {
+        proactiveScenarioSkipConfirmationInjection = true;
+      }
+    }
+
+    const priorUserUtteranceCountForMeta = messages.filter(
+      (m) => m.role === 'user' && !(m as { isWelcomeBack?: boolean }).isWelcomeBack
+    ).length;
+    const wcForMetaExempt = countSpokenWords(trimmed);
+    const suppressMetaClassificationPostMetaAckAwaitingSubstantive =
+      metaCommentAckAwaitingSubstantiveBaselineSeqRef.current !== null &&
+      substantiveInterviewQuestionDeliveredSeqRef.current === metaCommentAckAwaitingSubstantiveBaselineSeqRef.current;
+    const metaResolved = resolveMetaCommentForInterviewTurn(trimmed, {
+      lastQuestionText: lastQuestionTextRef.current,
+      priorUserUtteranceCount: priorUserUtteranceCountForMeta,
+      isInterviewAppRoute,
+      hasProfileFirstName: !!getInterviewUserFirstNameForPrompt(profile),
+      suppressMetaClassificationPostMetaAckAwaitingSubstantive,
+      spokenWordCount: wcForMetaExempt,
+    });
+    void remoteLog('meta_comment_classification_result', {
+      transcript_text: trimmed,
+      word_count: wcForMetaExempt,
+      classification_result: metaResolved.effective?.type ?? null,
+      classification_confidence: metaResolved.effective?.confidence ?? null,
+      raw_classification: metaResolved.raw?.type ?? null,
+      raw_confidence: metaResolved.raw?.confidence ?? null,
+      exempt_meta_turn: metaResolved.exemptMetaCommentTurn,
+      exempt_meta_turn_reason: metaResolved.exemptMetaCommentTurnReason,
+      suppress_post_meta_ack_window: suppressMetaClassificationPostMetaAckAwaitingSubstantive,
+      meta_ack_substantive_baseline_seq: metaCommentAckAwaitingSubstantiveBaselineSeqRef.current,
+      substantive_question_delivery_seq: substantiveInterviewQuestionDeliveredSeqRef.current,
+    });
+    let metaCommentClassification = metaResolved.effective;
+    const momentNumMeta = currentInterviewMomentRef.current;
+    let userScenarioTagForMeta =
+      (currentScenarioRef.current as number | undefined) ??
+      getScenarioNumberForNewMessage(messages, 'user');
+    if (momentNumMeta >= 4) {
+      userScenarioTagForMeta = 3;
+    }
+
+    if (metaCommentClassification?.type !== 'inability') {
+      inabilityCountByMomentRef.current = {
+        ...inabilityCountByMomentRef.current,
+        [momentNumMeta]: 0,
+      };
+    }
+
+    let alreadyAnsweredPriorSubstantiveVerified: boolean | undefined;
+    if (metaCommentClassification?.type === 'already_answered') {
+      alreadyAnsweredPriorSubstantiveVerified =
+        getPriorSubstantiveNonMetaUserContentInMoment(
+          messages,
+          userScenarioTagForMeta as 1 | 2 | 3,
+          momentNumMeta
+        ) != null;
+    }
+
+    const inabilityPrevForLog =
+      metaCommentClassification?.type === 'inability'
+        ? inabilityCountByMomentRef.current[momentNumMeta] ?? 0
+        : undefined;
+    let inabilityCountInMomentLog: number | undefined;
+    let inabilityEscalatedToSkipLog: boolean | undefined;
+    if (metaCommentClassification?.type === 'inability' && inabilityPrevForLog !== undefined) {
+      inabilityCountInMomentLog = inabilityPrevForLog === 0 ? 1 : 2;
+      inabilityEscalatedToSkipLog = inabilityPrevForLog >= 1;
+    }
+
+    const priorNonMetaExcerptForSkip = getPriorSubstantiveNonMetaUserContentInMoment(
+      messages,
+      userScenarioTagForMeta as 1 | 2 | 3,
+      momentNumMeta
+    );
+    const skipRequestConfirmationSpeech = buildSkipRequestConfirmationSpeech({
+      priorSubstantiveNonMetaExcerpt: priorNonMetaExcerptForSkip,
+    });
+
+    if (metaCommentClassification?.type === 'skip_request') {
+      const mSk = currentInterviewMomentRef.current;
+      if (mSk < 1 || mSk > 3 || closingQuestionPending) {
+        metaCommentClassification = null;
+      }
+    }
+    if (metaCommentClassification?.type === 'inability' && closingQuestionPending) {
+      metaCommentClassification = null;
+    }
+
+    let inabilityInvitationClientInjection = false;
+    let inabilityEscalationSkipInjection = false;
+    if (
+      metaCommentClassification?.type === 'inability' &&
+      isInterviewAppRoute &&
+      !isAdmin &&
+      status === 'active' &&
+      !closingQuestionPending &&
+      !frustrationSkipOfferPendingRef.current &&
+      !frustrationSkipAcceptancePipeline &&
+      !frustrationSkipDeclinePipeline &&
+      !proactiveScenarioSkipConfirmationInjection
+    ) {
+      const mIn = currentInterviewMomentRef.current;
+      if (mIn >= 1 && mIn <= 3) {
+        const prevIn = inabilityCountByMomentRef.current[mIn] ?? 0;
+        if (prevIn === 0) {
+          inabilityInvitationClientInjection = true;
+        } else {
+          inabilityEscalationSkipInjection = true;
+        }
+      }
+    }
+
+    /** Snapshot after scenario/skip gates so thin-answer telemetry respects meta even when proactive skip wipes `effective` later. */
+    const metaClassSnapshotPrePipeline = metaCommentClassification;
+    if (
+      frustrationSkipAcceptancePipeline ||
+      frustrationSkipDeclinePipeline ||
+      proactiveScenarioSkipConfirmationInjection
+    ) {
+      metaCommentClassification = null;
+    }
+    const metaForTelemetry = metaCommentClassification;
+    const skipRequestMetaConfirmationInjection =
+      metaCommentClassification?.type === 'skip_request' &&
+      isInterviewAppRoute &&
+      !isAdmin &&
+      status === 'active' &&
+      !closingQuestionPending &&
+      !frustrationSkipOfferPendingRef.current &&
+      !frustrationSkipAcceptancePipeline &&
+      !frustrationSkipDeclinePipeline;
+    let repeatedFrustrationInMoment = false;
+    if (metaForTelemetry?.type === 'frustration') {
+      const momentNum = currentInterviewMomentRef.current;
+      const prev = metaCommentFrustrationCountByMomentRef.current[momentNum] ?? 0;
+      const next = prev + 1;
+      metaCommentFrustrationCountByMomentRef.current = {
+        ...metaCommentFrustrationCountByMomentRef.current,
+        [momentNum]: next,
+      };
+      repeatedFrustrationInMoment = next >= 2;
+      if (repeatedFrustrationInMoment && userId) {
+        const r = getSessionLogRuntime();
+        writeSessionLog({
+          userId,
+          attemptId: r.attemptId,
+          eventType: 'repeated_frustration_signal',
+          eventData: {
+            moment_number: momentNum,
+            frustration_signal_count: next,
+            transcript_preview: trimmed.slice(0, 280),
+          },
+          platform: r.platform,
+        });
+      }
+      if (metaForTelemetry?.type === 'frustration' && repeatedFrustrationInMoment) {
+        frustrationSkipOfferPendingRef.current = false;
+        frustrationSkipHadPriorAnswerRef.current = null;
+        frustrationSkipAwaitingConfirmationRef.current = false;
+        scenarioSkipOfferSourceRef.current = null;
+      }
+    }
+    const suppressForcedConstructProbesForMetaFrustration =
+      (metaForTelemetry?.type === 'frustration' && !repeatedFrustrationInMoment) ||
+      metaForTelemetry?.type === 'skip_request' ||
+      metaForTelemetry?.type === 'inability' ||
+      metaForTelemetry?.type === 'already_answered';
+    if (metaForTelemetry && userId) {
+      const r = getSessionLogRuntime();
+      const summary = getMetaCommentCanonicalResponseSummary(
+        metaForTelemetry.type,
+        repeatedFrustrationInMoment && metaForTelemetry.type === 'frustration'
+      );
+      writeSessionLog({
+        userId,
+        attemptId: r.attemptId,
+        eventType: 'meta_comment_detected',
+        eventData: {
+          transcript_text: trimmed,
+          word_count: countSpokenWords(trimmed),
+          moment_number: currentInterviewMomentRef.current,
+          meta_comment_type: metaForTelemetry.type,
+          classification_confidence: metaForTelemetry.confidence,
+          aira_response_delivered: summary,
+          repeated_frustration: repeatedFrustrationInMoment,
+          ...(metaForTelemetry.type === 'inability'
+            ? {
+                inability_count_in_moment: inabilityCountInMomentLog,
+                escalated_to_skip_request: inabilityEscalatedToSkipLog === true,
+              }
+            : {}),
+          ...(metaForTelemetry.type === 'already_answered'
+            ? {
+                had_prior_answer: alreadyAnsweredPriorSubstantiveVerified === true,
+                resolved_as:
+                  alreadyAnsweredPriorSubstantiveVerified === true
+                    ? 'ownership_and_advance'
+                    : 'frustration_path',
+                skip_consumed: false,
+              }
+            : {}),
+        },
+        platform: r.platform,
+      });
+    }
+
     let participantFirstNameForSpoken = getInterviewUserFirstNameForPrompt(profile);
     const routeChangedDuringRecordingSnap = routeChangedDuringRecordingRef.current;
     routeChangedDuringRecordingRef.current = false;
@@ -6259,6 +7860,14 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
       const resumeCueWordCount = countSpokenWords(trimmed);
       /** Meta cues ("go ahead", "no thanks") are short; long turns are answers, not continue/skip-repeat signals. */
       if ((intent === 'continue' || intent === 'repeat') && resumeCueWordCount > 18) {
+        intent = 'ambiguous';
+      }
+      /**
+       * Resume "continue" hints include `\\bskip\\b` (see `classifyResumeRepeatIntent`). Phrases like
+       * "Let's skip this one" then classify as `continue` and the gate returns with no TTS — but the
+       * same line is a proactive scenario skip request. Fall through to the main pipeline.
+       */
+      if (intent === 'continue' && (proactiveScenarioSkipConfirmationInjection || skipRequestMetaConfirmationInjection)) {
         intent = 'ambiguous';
       }
       const directAnswer = intent === 'ambiguous' && looksLikeDirectResumeAnswer(trimmed, resumeLastAssistantTextRef.current);
@@ -6416,7 +8025,11 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
         platform: r.platform,
       });
       const wcAll = countSpokenWords(trimmed);
-      if (wcAll < 10 && !isSimpleYesNoInterviewMoment(lastQuestionTextRef.current)) {
+      if (
+        wcAll < 10 &&
+        !isSimpleYesNoInterviewMoment(lastQuestionTextRef.current) &&
+        metaClassSnapshotPrePipeline == null
+      ) {
         markLastAudioSessionEventType('short_response_detected');
         writeAudioSessionLog({
           userId,
@@ -6544,8 +8157,21 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
       } else if (scenarioNumber === 2) {
         interviewMomentsCompleteRef.current[2] = true;
         currentInterviewMomentRef.current = 3;
+        resetScenarioCClientGatesOnly();
         nextContent = buildScenario2To3TransitionBody(participantFirstNameForSpoken, SCENARIO_3_TEXT);
       }
+      const transcriptEndForScoringClosingAddition =
+        scenarioNumber === 3
+          ? messagesAfterAck
+          : [...messagesAfterAck, { role: 'assistant', content: nextContent, scenarioNumber: scenarioNumber === 1 ? 2 : 3 }];
+      const persistClosingAdditionScenarioCheckpoint = () => {
+        setHighestScenarioReached((prev) => Math.max(prev, scenarioNumber));
+        if (!scoredScenariosRef.current.has(scenarioNumber)) {
+          scoredScenariosRef.current.add(scenarioNumber);
+          scoreScenario(scenarioNumber, transcriptEndForScoringClosingAddition);
+        }
+      };
+      let closingAdditionCheckpointPersisted = false;
       if (scenarioNumber === 3) {
         if (personalHandoffInjectedRef.current) {
           if (__DEV__) console.warn('[Aria] Duplicate Moment 4 handoff after closing addition — skipped');
@@ -6557,23 +8183,23 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
           const handoffMsg: MessageWithScenario = { role: 'assistant', content: moment4Handoff, scenarioNumber: 3 };
           const withHandoff = [...messagesAfterAck, handoffMsg];
           setMessages(withHandoff);
+          persistClosingAdditionScenarioCheckpoint();
+          closingAdditionCheckpointPersisted = true;
           await speakTextSafe(moment4Handoff, ASSISTANT_INTERVIEW_SPEECH);
         }
       } else {
         const transitionMsg: MessageWithScenario = { role: 'assistant', content: nextContent, scenarioNumber: scenarioNumber === 1 ? 2 : 3 };
-        currentScenarioRef.current = scenarioNumber === 1 ? 2 : 3;
+        const nextSn = (scenarioNumber === 1 ? 2 : 3) as 1 | 2 | 3;
+        currentScenarioRef.current = nextSn;
         const withTransition = [...messagesAfterAck, transitionMsg];
         setMessages(withTransition);
+        persistClosingAdditionScenarioCheckpoint();
+        closingAdditionCheckpointPersisted = true;
+        await notifyScenarioStarted(nextSn, withTransition);
         await speakTextSafe(nextContent, ASSISTANT_INTERVIEW_SPEECH);
       }
-      const transcriptEndForScoring =
-        scenarioNumber === 3
-          ? messagesAfterAck
-          : [...messagesAfterAck, { role: 'assistant', content: nextContent, scenarioNumber: scenarioNumber === 1 ? 2 : 3 }];
-      setHighestScenarioReached((prev) => Math.max(prev, scenarioNumber));
-      if (!scoredScenariosRef.current.has(scenarioNumber)) {
-        scoredScenariosRef.current.add(scenarioNumber);
-        scoreScenario(scenarioNumber, transcriptEndForScoring);
+      if (!closingAdditionCheckpointPersisted) {
+        persistClosingAdditionScenarioCheckpoint();
       }
       if (__DEV__) {
         closingQuestionAskedRef.current[scenarioNumber] = false;
@@ -6641,8 +8267,21 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
       } else if (scenarioNumber === 2) {
         interviewMomentsCompleteRef.current[2] = true;
         currentInterviewMomentRef.current = 3;
+        resetScenarioCClientGatesOnly();
         nextClosingContent = buildScenario2To3TransitionBody(participantFirstNameForSpoken, SCENARIO_3_TEXT);
       }
+      const transcriptEndForScoringClosingAnswer =
+        scenarioNumber === 3
+          ? messagesAfterClosingAnswer
+          : [...messagesAfterClosingAnswer, { role: 'assistant', content: nextClosingContent, scenarioNumber: scenarioNumber === 1 ? 2 : 3 }];
+      const persistClosingAnswerScenarioCheckpoint = () => {
+        setHighestScenarioReached((prev) => Math.max(prev, scenarioNumber));
+        if (!scoredScenariosRef.current.has(scenarioNumber)) {
+          scoredScenariosRef.current.add(scenarioNumber);
+          scoreScenario(scenarioNumber, transcriptEndForScoringClosingAnswer);
+        }
+      };
+      let closingAnswerCheckpointPersisted = false;
       if (scenarioNumber === 3) {
         if (personalHandoffInjectedRef.current) {
           if (__DEV__) console.warn('[Aria] Duplicate Moment 4 handoff after closing answer — skipped');
@@ -6654,6 +8293,8 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
           const handoffMsg: MessageWithScenario = { role: 'assistant', content: moment4Handoff, scenarioNumber: 3 };
           const withHandoff = [...messagesAfterClosingAnswer, handoffMsg];
           setMessages(withHandoff);
+          persistClosingAnswerScenarioCheckpoint();
+          closingAnswerCheckpointPersisted = true;
           await speakTextSafe(moment4Handoff, ASSISTANT_INTERVIEW_SPEECH);
         }
       } else {
@@ -6662,19 +8303,17 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
           content: nextClosingContent,
           scenarioNumber: scenarioNumber === 1 ? 2 : 3,
         };
-        currentScenarioRef.current = scenarioNumber === 1 ? 2 : 3;
+        const nextSnClosing = (scenarioNumber === 1 ? 2 : 3) as 1 | 2 | 3;
+        currentScenarioRef.current = nextSnClosing;
         const updatedMsgs = [...messagesAfterClosingAnswer, newAssistantMsg];
         setMessages(updatedMsgs);
+        persistClosingAnswerScenarioCheckpoint();
+        closingAnswerCheckpointPersisted = true;
+        await notifyScenarioStarted(nextSnClosing, updatedMsgs);
         await speakTextSafe(nextClosingContent, ASSISTANT_INTERVIEW_SPEECH);
       }
-      const transcriptEndForScoring =
-        scenarioNumber === 3
-          ? messagesAfterClosingAnswer
-          : [...messagesAfterClosingAnswer, { role: 'assistant', content: nextClosingContent, scenarioNumber: scenarioNumber === 1 ? 2 : 3 }];
-      setHighestScenarioReached((prev) => Math.max(prev, scenarioNumber));
-      if (!scoredScenariosRef.current.has(scenarioNumber)) {
-        scoredScenariosRef.current.add(scenarioNumber);
-        scoreScenario(scenarioNumber, transcriptEndForScoring);
+      if (!closingAnswerCheckpointPersisted) {
+        persistClosingAnswerScenarioCheckpoint();
       }
       if (__DEV__) {
         closingQuestionAskedRef.current[scenarioNumber] = false;
@@ -6688,66 +8327,10 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
 
     const latestAssistantBeforeAppend = [...messages].reverse().find((m) => m.role === 'assistant');
     const latestAssistantBeforeAppendText = latestAssistantBeforeAppend?.content ?? '';
-    const replyingToScenarioCThresholdPrompt =
-      looksLikeScenarioCThresholdQuestion(latestAssistantBeforeAppendText) &&
-      (currentInterviewMomentRef.current === 3 ||
-        (currentScenarioRef.current === 3 && !personalHandoffInjectedRef.current));
-    const skipMisplacedScenarioCThresholdBecauseAwaitingRedo =
-      expectingScenarioCThresholdAnswerAfterMisplaceRef.current;
-    const misplacedScenarioCThresholdAnswer =
-      replyingToScenarioCThresholdPrompt &&
-      !isDecline(trimmed) &&
-      isLikelyMisplacedPersonalNarrativeForScenarioCThreshold(trimmed) &&
-      !skipMisplacedScenarioCThresholdBecauseAwaitingRedo;
-    if (misplacedScenarioCThresholdAnswer) {
-      deferredMoment4NarrativeRef.current = trimmed;
-      const userMsgMisplaced: MessageWithScenario = {
-        role: 'user',
-        content: trimmed,
-        // Tag as moment-4 context so scenario scoring excludes it.
-        scenarioNumber: 4,
-      };
-      const scenarioTag = currentScenarioRef.current ?? 3;
-      const redirectMsg: MessageWithScenario = {
-        role: 'assistant',
-        content: SCENARIO_C_MISPLACED_THRESHOLD_REDIRECT,
-        scenarioNumber: scenarioTag,
-      };
-      const thresholdMsg: MessageWithScenario = {
-        role: 'assistant',
-        content: SCENARIO_C_COMMITMENT_THRESHOLD_QUESTION,
-        scenarioNumber: scenarioTag,
-      };
-      void remoteLog('[SC3_MISPLACED_THRESHOLD_SEQUENCE]', {
-        phase: 'step1_redirect',
-        interviewSessionId: interviewSessionIdRef.current,
-        content: SCENARIO_C_MISPLACED_THRESHOLD_REDIRECT,
-      });
-      void remoteLog('[SC3_MISPLACED_THRESHOLD_SEQUENCE]', {
-        phase: 'step2_threshold_question',
-        interviewSessionId: interviewSessionIdRef.current,
-        content: SCENARIO_C_COMMITMENT_THRESHOLD_QUESTION,
-      });
-      setMessages([...messages, userMsgMisplaced, redirectMsg, thresholdMsg]);
-      await speakTextSafe(SCENARIO_C_MISPLACED_THRESHOLD_REDIRECT, ASSISTANT_INTERVIEW_SPEECH);
-      await speakTextSafe(SCENARIO_C_COMMITMENT_THRESHOLD_QUESTION, ASSISTANT_INTERVIEW_SPEECH);
-      expectingScenarioCThresholdAnswerAfterMisplaceRef.current = true;
-      void remoteLog('[SC3_MISPLACED_THRESHOLD_SEQUENCE]', {
-        phase: 'awaiting_user_answer_after_reask',
-        interviewSessionId: interviewSessionIdRef.current,
-        deferredPersonalNarrativeChars: trimmed.length,
-      });
-      setVoiceState('idle');
-      return;
-    }
-
     const replyingToScenarioCQ1ForMisplace =
-      currentInterviewMomentRef.current === 3 &&
-      isScenarioCQ1Prompt(latestAssistantBeforeAppendText) &&
-      !looksLikeScenarioCThresholdQuestion(latestAssistantBeforeAppendText);
+      currentInterviewMomentRef.current === 3 && isScenarioCQ1Prompt(latestAssistantBeforeAppendText);
     const scenarioCQ1Misplaced =
       replyingToScenarioCQ1ForMisplace &&
-      !expectingScenarioCThresholdAnswerAfterMisplaceRef.current &&
       !isDecline(trimmed) &&
       isMisplacedScenarioCQ1Answer(trimmed);
     if (scenarioCQ1Misplaced) {
@@ -6780,27 +8363,11 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
 
     const lastAsstForScenarioCCapture = [...messages].reverse().find((m) => m.role === 'assistant');
     const lastAsstScenarioCText = lastAsstForScenarioCCapture?.content ?? '';
-    if (expectingScenarioCThresholdAnswerAfterMisplaceRef.current) {
-      scenarioCCommitmentOnlyEvidenceRef.current = trimmed;
-      expectingScenarioCThresholdAnswerAfterMisplaceRef.current = false;
-      void remoteLog('[SC3_MISPLACED_THRESHOLD_SEQUENCE]', {
-        phase: 'captured_answer_for_commitment_scoring',
-        interviewSessionId: interviewSessionIdRef.current,
-        answerPreview: trimmed.slice(0, 400),
-      });
-    } else if (
+    if (
       currentScenarioRef.current === 3 &&
       !personalHandoffInjectedRef.current &&
       currentInterviewMomentRef.current === 3 &&
-      looksLikeScenarioCThresholdQuestion(lastAsstScenarioCText)
-    ) {
-      scenarioCCommitmentOnlyEvidenceRef.current = trimmed;
-    } else if (
-      currentScenarioRef.current === 3 &&
-      !personalHandoffInjectedRef.current &&
-      currentInterviewMomentRef.current === 3 &&
-      isScenarioCQ2Prompt(lastAsstScenarioCText) &&
-      !looksLikeScenarioCThresholdQuestion(lastAsstScenarioCText)
+      (isScenarioCQ2Prompt(lastAsstScenarioCText) || isRepairRefusalProbeAssistantLine(lastAsstScenarioCText))
     ) {
       scenarioCRepairOnlyEvidenceRef.current = trimmed;
     }
@@ -6815,6 +8382,7 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
       role: 'user',
       content: trimmed,
       scenarioNumber: userScenarioTag as 1 | 2 | 3,
+      interviewMoment: momentN,
     };
     const newMessages: MessageWithScenario[] = [...messages, userMsg];
 
@@ -6825,14 +8393,331 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
     setIsWaiting(true);
     setExchangeCount((c) => c + 1);
     const messagesToUse = newMessages;
+
+    if (
+      frustrationSkipDeclinePipeline &&
+      isInterviewAppRoute &&
+      !isAdmin &&
+      status === 'active'
+    ) {
+      let tag =
+        (currentScenarioRef.current as number | undefined) ??
+        getScenarioNumberForNewMessage(messagesToUse, 'user');
+      const momentNumDecline = currentInterviewMomentRef.current;
+      if (momentNumDecline >= 4) {
+        tag = 3;
+      }
+      frustrationSkipOfferPendingRef.current = false;
+      frustrationSkipAwaitingConfirmationRef.current = false;
+      const skipOfferSourceBeforeClear = scenarioSkipOfferSourceRef.current;
+      frustrationSkipHadPriorAnswerRef.current = null;
+      scenarioSkipOfferSourceRef.current = null;
+      if (skipOfferSourceBeforeClear === 'inability_escalation') {
+        const mReset = momentNumDecline;
+        inabilityCountByMomentRef.current = {
+          ...inabilityCountByMomentRef.current,
+          [mReset]: 0,
+        };
+      }
+      const encouragement =
+        "Great—let's stay on this one, then. Just try your best—you've got this.";
+      const encouragementMsg: MessageWithScenario = {
+        role: 'assistant',
+        content: encouragement,
+        scenarioNumber: tag as 1 | 2 | 3,
+      };
+      setMessages([...messagesToUse, encouragementMsg]);
+      await speakTextSafe(encouragement, ASSISTANT_INTERVIEW_SPEECH);
+      setVoiceState('idle');
+      setIsWaiting(false);
+      return;
+    }
+
+    if (
+      inabilityInvitationClientInjection &&
+      isInterviewAppRoute &&
+      !isAdmin &&
+      status === 'active'
+    ) {
+      let tagInv =
+        (currentScenarioRef.current as number | undefined) ??
+        getScenarioNumberForNewMessage(messagesToUse, 'user');
+      const momentInv = currentInterviewMomentRef.current;
+      if (momentInv >= 4) {
+        tagInv = 3;
+      }
+      inabilityCountByMomentRef.current = {
+        ...inabilityCountByMomentRef.current,
+        [momentInv]: 1,
+      };
+      const priorUserCount = messagesToUse.filter((m) => m.role === 'user').length;
+      const inviteLine =
+        INABILITY_INVITATION_ROTATING_LINES[
+          (priorUserCount + momentInv) % INABILITY_INVITATION_ROTATING_LINES.length
+        ];
+      const inviteMsg: MessageWithScenario = {
+        role: 'assistant',
+        content: inviteLine,
+        scenarioNumber: tagInv as 1 | 2 | 3,
+      };
+      setMessages([...messagesToUse, inviteMsg]);
+      await speakTextSafe(inviteLine, {
+        ...ASSISTANT_INTERVIEW_SPEECH,
+        allowDuplicateConsecutiveTts: true,
+      });
+      setVoiceState('idle');
+      setIsWaiting(false);
+      return;
+    }
+
+    if (
+      inabilityEscalationSkipInjection &&
+      isInterviewAppRoute &&
+      !isAdmin &&
+      status === 'active'
+    ) {
+      let tagEs =
+        (currentScenarioRef.current as number | undefined) ??
+        getScenarioNumberForNewMessage(messagesToUse, 'user');
+      const momentEs = currentInterviewMomentRef.current;
+      if (momentEs >= 4) {
+        tagEs = 3;
+      }
+      scenarioSkipOfferSourceRef.current = 'inability_escalation';
+      frustrationSkipOfferPendingRef.current = true;
+      frustrationSkipAwaitingConfirmationRef.current = true;
+      frustrationSkipHadPriorAnswerRef.current = false;
+      inabilityCountByMomentRef.current = {
+        ...inabilityCountByMomentRef.current,
+        [momentEs]: 2,
+      };
+      const escMsg: MessageWithScenario = {
+        role: 'assistant',
+        content: SKIP_REQUEST_CONFIRMATION_PROMPT_LINE,
+        scenarioNumber: tagEs as 1 | 2 | 3,
+      };
+      setMessages([...messagesToUse, escMsg]);
+      await speakTextSafe(SKIP_REQUEST_CONFIRMATION_PROMPT_LINE, {
+        ...ASSISTANT_INTERVIEW_SPEECH,
+        allowDuplicateConsecutiveTts: true,
+      });
+      setVoiceState('idle');
+      setIsWaiting(false);
+      return;
+    }
+
+    if (
+      proactiveScenarioSkipConfirmationInjection &&
+      isInterviewAppRoute &&
+      !isAdmin &&
+      status === 'active'
+    ) {
+      let tagPro =
+        (currentScenarioRef.current as number | undefined) ??
+        getScenarioNumberForNewMessage(messagesToUse, 'user');
+      const momentPro = currentInterviewMomentRef.current;
+      if (momentPro >= 4) {
+        tagPro = 3;
+      }
+      scenarioSkipOfferSourceRef.current = 'proactive_utterance';
+      frustrationSkipOfferPendingRef.current = true;
+      frustrationSkipAwaitingConfirmationRef.current = true;
+      frustrationSkipHadPriorAnswerRef.current = hadPriorSubstantiveAnswerInScenarioForFrustration(
+        messagesToUse.slice(0, -1),
+        tagPro as 1 | 2 | 3
+      );
+      const proactiveMsg: MessageWithScenario = {
+        role: 'assistant',
+        content: SCENARIO_SKIP_CONFIRMATION_PROMPT_LINE,
+        scenarioNumber: tagPro as 1 | 2 | 3,
+      };
+      setMessages([...messagesToUse, proactiveMsg]);
+      if (userId) {
+        const r = getSessionLogRuntime();
+        writeSessionLog({
+          userId,
+          attemptId: r.attemptId,
+          eventType: 'proactive_skip_confirmation_prompted',
+          eventData: {
+            moment_number: momentPro,
+            scenario_number: tagPro,
+            transcript_preview: trimmed.slice(0, 200),
+          },
+          platform: r.platform,
+        });
+      }
+      await speakTextSafe(SCENARIO_SKIP_CONFIRMATION_PROMPT_LINE, {
+        ...ASSISTANT_INTERVIEW_SPEECH,
+        allowDuplicateConsecutiveTts: true,
+      });
+      setVoiceState('idle');
+      setIsWaiting(false);
+      return;
+    }
+
+    if (
+      skipRequestMetaConfirmationInjection &&
+      isInterviewAppRoute &&
+      !isAdmin &&
+      status === 'active'
+    ) {
+      let tagSr =
+        (currentScenarioRef.current as number | undefined) ??
+        getScenarioNumberForNewMessage(messagesToUse, 'user');
+      const momentSr = currentInterviewMomentRef.current;
+      if (momentSr >= 4) {
+        tagSr = 3;
+      }
+      scenarioSkipOfferSourceRef.current = 'skip_request_meta';
+      frustrationSkipOfferPendingRef.current = true;
+      frustrationSkipAwaitingConfirmationRef.current = true;
+      frustrationSkipHadPriorAnswerRef.current = hadPriorSubstantiveAnswerInScenarioForFrustration(
+        messagesToUse.slice(0, -1),
+        tagSr as 1 | 2 | 3
+      );
+      const skipReqMsg: MessageWithScenario = {
+        role: 'assistant',
+        content: skipRequestConfirmationSpeech,
+        scenarioNumber: tagSr as 1 | 2 | 3,
+      };
+      setMessages([...messagesToUse, skipReqMsg]);
+      await speakTextSafe(skipRequestConfirmationSpeech, {
+        ...ASSISTANT_INTERVIEW_SPEECH,
+        allowDuplicateConsecutiveTts: true,
+      });
+      setVoiceState('idle');
+      setIsWaiting(false);
+      return;
+    }
+
+    if (
+      frustrationSkipAcceptancePipeline &&
+      isInterviewAppRoute &&
+      !isAdmin &&
+      status === 'active'
+    ) {
+      const momentNum = currentInterviewMomentRef.current;
+      let userScenarioTag =
+        (currentScenarioRef.current as number | undefined) ??
+        getScenarioNumberForNewMessage(messagesToUse, 'user');
+      if (momentNum >= 4) {
+        userScenarioTag = 3;
+      }
+      frustrationSkipOfferPendingRef.current = false;
+      frustrationSkipAwaitingConfirmationRef.current = false;
+      const hadPriorAnswer = frustrationSkipHadPriorAnswerRef.current ?? false;
+      frustrationSkipHadPriorAnswerRef.current = null;
+      if (momentNum >= 1 && momentNum <= 3 && userScenarioTag >= 1 && userScenarioTag <= 3) {
+        scenarioFrustrationSkipNullMarkersRef.current[userScenarioTag as 1 | 2 | 3] = true;
+      }
+      if (momentNum >= 1 && momentNum <= 3) {
+        scenarioSkipConfirmedCountRef.current += 1;
+        const skipNum = scenarioSkipConfirmedCountRef.current;
+        const individualPenalty = individualPenaltyForSkipNumber(skipNum as 1 | 2 | 3);
+        if (individualPenalty != null) {
+          scenarioSkipPenaltySumRef.current += individualPenalty;
+        }
+        const cumulativeSkipPenalty = scenarioSkipPenaltySumRef.current;
+        if (userId) {
+          const r = getSessionLogRuntime();
+          writeSessionLog({
+            userId,
+            attemptId: r.attemptId,
+            eventType: 'skip_penalty_applied',
+            eventData: {
+              moment_number: momentNum,
+              skip_number: skipNum,
+              individual_penalty: individualPenalty,
+              auto_fail_triggered: skipNum === 3,
+              cumulative_skip_penalty: cumulativeSkipPenalty,
+            },
+            platform: r.platform,
+          });
+        }
+        const attemptIdSkip = interviewSessionAttemptIdRef.current;
+        if (attemptIdSkip && userId) {
+          const gateSnap = computeSkipPenaltyGateComputation(skipNum);
+          void supabase
+            .from('interview_attempts')
+            .update({
+              skip_count: gateSnap.skips_taken,
+              skip_penalties: gateSnap.skip_penalties,
+              skip_penalty_total: gateSnap.skip_penalty_total,
+              ...(gateSnap.skipAutoFail
+                ? { auto_failed: true, auto_fail_reason: 'exceeded_skip_limit' }
+                : {}),
+            })
+            .eq('id', attemptIdSkip)
+            .eq('user_id', userId);
+        }
+      }
+      const skipTrigger =
+        scenarioSkipOfferSourceRef.current === 'proactive_utterance'
+          ? 'proactive_skip_request'
+          : scenarioSkipOfferSourceRef.current === 'skip_request_meta'
+            ? 'skip_request_meta'
+            : scenarioSkipOfferSourceRef.current === 'inability_escalation'
+              ? 'inability_escalation'
+              : scenarioSkipOfferSourceRef.current === 'already_answered_meta'
+                ? 'already_answered_meta'
+                : 'frustration_first_signal';
+      scenarioSkipOfferSourceRef.current = null;
+      if (userId) {
+        const r = getSessionLogRuntime();
+        writeSessionLog({
+          userId,
+          attemptId: r.attemptId,
+          eventType: 'moment_skipped_by_user',
+          eventData: {
+            moment_number: momentNum,
+            skip_trigger: skipTrigger,
+            had_prior_answer: hadPriorAnswer,
+          },
+          platform: r.platform,
+        });
+      }
+      void remoteLog('[moment_skipped_by_user]', {
+        moment_number: momentNum,
+        skip_trigger: skipTrigger,
+        had_prior_answer: hadPriorAnswer,
+        scenario_number: userScenarioTag,
+      });
+      interviewMomentsCompleteRef.current[momentNum] = true;
+      if (momentNum < 5) {
+        currentInterviewMomentRef.current = (momentNum + 1) as InterviewMomentIndex;
+      }
+      skipContinuationSystemSuffixRef.current = `
+─────────────────────────────────────────
+SKIP ACCEPTED (CLIENT)
+─────────────────────────────────────────
+The participant **confirmed** skipping after the skip confirmation prompt. In **one** assistant reply (same TTS), open with **exactly** this bridge (minor contractions OK): "Okay, we can skip this one, the next question is" — then **immediately** say the **next scripted question or scenario setup only** per sequence (no reflective clause, validation, praise, or extra preamble before that scripted content). **Do not** re-ask the skipped prompt. **Do not** offer the frustration skip again for this beat.
+`;
+    }
+
     const detected = detectConstructs(trimmed);
     setTouchedConstructs((prev) => [...new Set([...prev, ...detected])]);
 
     // Track if user shared a personal example (response to personal-opening question that isn't a decline)
     const lastAssistant = [...messagesToUse].reverse().find((m) => m.role === 'assistant');
     const lastAssistantContent = lastAssistant?.content ?? '';
+    const answeringAfterMoment4SpecificityProbe =
+      currentInterviewMomentRef.current === 4 &&
+      moment4ExpectingPostSpecificityUserTurnRef.current &&
+      looksLikeMoment4SpecificityFollowUpPrompt(lastAssistantContent);
+
+    if (currentInterviewMomentRef.current === 4 && moment4ExpectingPostSpecificityUserTurnRef.current) {
+      moment4ExpectingPostSpecificityUserTurnRef.current = false;
+      if (looksLikeMoment4SpecificityFollowUpPrompt(lastAssistantContent)) {
+        moment4SpecificityScoringRef.current = {
+          clientSpecificityFollowUpAsked: true,
+          lowSpecificityAfterProbe: needsMoment4SpecificityFollowUp(trimmed),
+        };
+      }
+    }
+
     const lastContent = lastAssistantContent.toLowerCase();
     const isPersonalOpening =
+      !looksLikeMoment4ThresholdQuestion(lastAssistantContent) &&
       /real (memory|example|situation|experience)|your own|from your (life|experience)|think of a time|can you think of|do you have (a|an) (example|memory)|share (a|something)|tell me about (a|something)|held a grudge|really didn't like|something a bit more personal/i.test(
         lastContent
       );
@@ -6841,11 +8726,19 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
       currentInterviewMomentRef.current === 1 && isScenarioAQ1Prompt(lastAssistantContent);
     const replyingToScenarioBQ1 =
       currentInterviewMomentRef.current === 2 && isScenarioBQ1Prompt(lastAssistantContent);
-    /** CQ2 detection must not depend on interview-moment ref alone — ref can desync (e.g. resume) while the last assistant turn is still the repair prompt; skipping breaks the scripted Daniel/Sophie threshold probe. */
-    const cq2PromptMatches =
-      isScenarioCQ2Prompt(lastAssistantContent) && !looksLikeScenarioCThresholdQuestion(lastAssistantContent);
+    /** After M4 starts or S3 is marked complete, Scenario C construct probes are closed. */
+    const s3CompleteProbe = interviewMomentsCompleteRef.current[3] === true;
+    const s3ThresholdProbePathClosed = currentInterviewMomentRef.current >= 4 || s3CompleteProbe;
+    /** CQ2 detection must not depend on interview-moment ref alone — ref can desync (e.g. resume). */
+    const cq2PromptMatches = isScenarioCQ2Prompt(lastAssistantContent);
     const replyingToScenarioCQ2 =
+      !s3ThresholdProbePathClosed &&
       cq2PromptMatches &&
+      (currentInterviewMomentRef.current === 3 ||
+        (currentScenarioRef.current === 3 && !personalHandoffInjectedRef.current));
+    const replyingToScenarioCRepairRefusalProbe =
+      !s3ThresholdProbePathClosed &&
+      isRepairRefusalProbeAssistantLine(lastAssistantContent) &&
       (currentInterviewMomentRef.current === 3 ||
         (currentScenarioRef.current === 3 && !personalHandoffInjectedRef.current));
     // #region agent log
@@ -6860,12 +8753,12 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
           hypothesisId: 'H2',
           data: {
             replyingToScenarioCQ2,
+            replyingToScenarioCRepairRefusalProbe,
             cq2PromptMatches,
             moment: currentInterviewMomentRef.current,
             scenario: currentScenarioRef.current,
             personalHandoffInjected: personalHandoffInjectedRef.current,
             lastAsstIsCQ2: isScenarioCQ2Prompt(lastAssistantContent),
-            lastAsstIsThreshold: looksLikeScenarioCThresholdQuestion(lastAssistantContent),
             lastAssistantPreview: lastAssistantContent.slice(0, 320),
           },
           timestamp: Date.now(),
@@ -6877,15 +8770,38 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
     const moment4ThresholdHintInAnswer = hasCommitmentThresholdSignal(trimmed);
     const lastAssistantLooksLikeMoment4Grudge = looksLikeMoment4GrudgePrompt(lastAssistantContent);
     const moment4AnswerLooksMisplaced = looksLikeMisplacedNonGrudgeMoment4Answer(trimmed);
+
+    if (currentInterviewMomentRef.current === 4 && looksLikeMoment4SpecificityFollowUpPrompt(lastAssistantContent)) {
+      moment4PostGrudgeSpecificityResolvedRef.current = true;
+    }
+    if (
+      currentInterviewMomentRef.current === 4 &&
+      lastAssistantLooksLikeMoment4Grudge &&
+      !moment4AnswerLooksMisplaced
+    ) {
+      if (isDecline(trimmed)) {
+        moment4PostGrudgeSpecificityResolvedRef.current = true;
+      } else if (!needsMoment4SpecificityFollowUp(trimmed)) {
+        moment4PostGrudgeSpecificityResolvedRef.current = true;
+      }
+    }
+
     const moment4CommitmentFollowUpBaseEligible = shouldForceMoment4ThresholdProbeByType({
       isMoment4: currentInterviewMomentRef.current === 4,
       probeAlreadyAsked: moment4ThresholdProbeAskedRef.current,
       lastAssistantContent,
       userAnswerText: trimmed,
+      answeringSpecificityFollowUp: answeringAfterMoment4SpecificityProbe,
     });
     const moment4UserExplicitPass = isExplicitPassForMoment4CommitmentFollowUp(trimmed);
     const shouldForceMoment4ThresholdProbe =
-      moment4CommitmentFollowUpBaseEligible && !moment4UserExplicitPass;
+      moment4CommitmentFollowUpBaseEligible &&
+      !moment4UserExplicitPass &&
+      moment4PostGrudgeSpecificityResolvedRef.current;
+    /** Moment 4: at most one client follow-up (specificity vs commitment threshold) per session; threshold wins if both qualify. */
+    const moment4ThresholdFollowUpAlreadyInSession =
+      moment4ThresholdProbeAskedRef.current ||
+      transcriptIncludesMoment4ThresholdAssistant(messagesToUse.slice(0, -1));
     let moment4CommitmentFollowUpReasonIfFalse: string | null = null;
     if (!shouldForceMoment4ThresholdProbe) {
       if (currentInterviewMomentRef.current !== 4) moment4CommitmentFollowUpReasonIfFalse = 'not_moment_4';
@@ -6914,77 +8830,447 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
       }
       void remoteLog('[M4_COMMITMENT_FOLLOWUP_CONDITION]', payload);
     }
-    const scenarioAContemptProbeCoverage = hasScenarioAQ1ContemptProbeCoverage(trimmed);
-    const specificEmmaLineAlreadyAddressed = scenarioAContemptProbeCoverage;
-    const shouldForceScenarioAContemptProbe =
-      replyingToScenarioAQ1 && !isDecline(trimmed) && !scenarioAContemptProbeCoverage;
-    const sidedEntirelyWithJames = userSidesEntirelyWithJames(trimmed);
-    const scenarioBQ1Engaged = hasScenarioBQ1OnTopicEngagement(trimmed);
-    const shouldForceScenarioBFullAppreciationProbe =
-      replyingToScenarioBQ1 &&
+    if (
+      isInterviewAppRoute &&
+      !isAdmin &&
+      status === 'active' &&
+      !closingQuestionPending &&
+      waitingForClosingAdditionRef.current === null &&
+      currentInterviewMomentRef.current === 4 &&
+      !moment4ClientSpecificityProbeInjectedRef.current &&
+      !moment4ThresholdFollowUpAlreadyInSession &&
+      !shouldForceMoment4ThresholdProbe &&
+      lastAssistantLooksLikeMoment4Grudge &&
+      !moment4AnswerLooksMisplaced &&
       !isDecline(trimmed) &&
-      !sidedEntirelyWithJames &&
-      !scenarioBQ1Engaged;
-    const scenarioCUserCorpusForThreshold = extractScenario3UserCorpus(messagesToUse);
-    const scenarioCPostRepairCorpus = extractScenario3UserCorpusAfterLastRepairPrompt(messagesToUse);
-    const scenarioCPostRepairThresholdMatchDetail =
-      scenarioCCommitmentThresholdMatchDetail(scenarioCPostRepairCorpus);
-    const scenarioCThresholdStrictFullCorpus =
-      hasScenarioCCommitmentThresholdInUserAnswer(scenarioCUserCorpusForThreshold);
-    const scenarioCThresholdStrict =
-      hasScenarioCVignetteCommitmentThresholdSignal(scenarioCPostRepairCorpus);
-    const scenarioCThresholdLegacy = hasCommitmentThresholdSignal(scenarioCUserCorpusForThreshold);
-    const shouldForceScenarioCThresholdProbe =
-      replyingToScenarioCQ2 && !isDecline(trimmed) && !scenarioCThresholdStrict;
-    if (replyingToScenarioCQ2) {
-      const skipReason = scenarioCThresholdStrict
-        ? 'vignette-threshold-signal-already-present-post-repair'
-        : 'vignette-threshold-signal-missing-post-repair';
-      if (__DEV__) {
-        console.log('[S3_THRESHOLD_EVAL]', {
-          shouldForceScenarioCThresholdProbe,
-          scenarioCThresholdStrict,
-          scenarioCThresholdStrictFullCorpus,
-          scenarioCThresholdLegacy,
-          skipReason,
-          lastTurnPreview: trimmed.slice(0, 280),
-          postRepairCorpusPreview: scenarioCPostRepairCorpus.slice(0, 500),
-          fullCorpusPreview: scenarioCUserCorpusForThreshold.slice(0, 500),
-        });
-      }
-      void remoteLog('[S3_THRESHOLD_EVAL]', {
-        shouldForceScenarioCThresholdProbe,
-        scenarioCThresholdStrict,
-        scenarioCThresholdStrictFullCorpus,
-        scenarioCThresholdLegacy,
-        skipReason,
-        lastTurnPreview: trimmed.slice(0, 320),
-        postRepairCorpusPreview: scenarioCPostRepairCorpus.slice(0, 500),
-        fullCorpusPreview: scenarioCUserCorpusForThreshold.slice(0, 500),
+      needsMoment4SpecificityFollowUp(trimmed)
+    ) {
+      moment4ClientSpecificityProbeInjectedRef.current = true;
+      moment4ExpectingPostSpecificityUserTurnRef.current = true;
+      void remoteLog('[M4_SPECIFICITY_FOLLOWUP_INJECT]', {
+        interviewSessionId: interviewSessionIdRef.current,
+        wordCount: countInterviewWords(trimmed),
+        preview: trimmed.slice(0, 240),
       });
-      // #region agent log
+      probeLogRef.current.push({
+        scenario: (currentScenarioRef.current ?? 3) as number,
+        construct: 'commitment_threshold',
+        probe_fired: true,
+        trigger_reason: 'moment4_low_specificity',
+        pre_probe_score: 0,
+        post_probe_score: 0,
+        score_delta: 0,
+      });
+      const specProbeMsg: MessageWithScenario = {
+        role: 'assistant',
+        content: MOMENT_4_SPECIFICITY_FOLLOW_UP_TEXT,
+        scenarioNumber: (currentScenarioRef.current ?? 3) as 1 | 2 | 3,
+      };
+      setMessages([...messagesToUse, specProbeMsg]);
+      await speakTextSafe(MOMENT_4_SPECIFICITY_FOLLOW_UP_TEXT, ASSISTANT_INTERVIEW_SPEECH);
+      setVoiceState('idle');
+      setIsWaiting(false);
+      return;
+    }
+
+    const priorTranscriptBeforeThisUserTurn = messagesToUse.slice(0, -1);
+    const moment4ThresholdDeliveredInTranscript =
+      moment4ThresholdProbeAskedRef.current ||
+      transcriptIncludesMoment4ThresholdAssistant(priorTranscriptBeforeThisUserTurn);
+    /** First user reply after walk-away must trigger M5 even when the last assistant line is not the threshold (e.g. extra model ack). */
+    const m5HandoffAfterThresholdAnswer =
+      moment4ThresholdDeliveredInTranscript &&
+      isAnsweringFirstUserTurnAfterMoment4Threshold(priorTranscriptBeforeThisUserTurn);
+    // #region agent log
+    if (currentInterviewMomentRef.current === 4) {
       fetch('http://127.0.0.1:7789/ingest/668e0bd5-3283-4492-9f48-e33846c18218', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'X-Debug-Session-Id': 'c61a43' },
+        headers: { 'Content-Type': 'application/json', 'X-Debug-Session-Id': 'e43434' },
         body: JSON.stringify({
-          sessionId: 'c61a43',
-          location: 'AriaScreen.tsx:S3_THRESHOLD_EVAL',
-          message: 'scenario_c_threshold_pre_api',
-          hypothesisId: 'H1',
+          sessionId: 'e43434',
+          runId: 'm4m5-debug',
+          hypothesisId: 'H1-H3',
+          location: 'AriaScreen.tsx:processUserSpeech:m5_handoff_eval',
+          message: 'm4_to_m5_gate',
           data: {
-            shouldForceScenarioCThresholdProbe,
-            scenarioCThresholdStrict,
-            scenarioCThresholdStrictFullCorpus,
-            isDecline: isDecline(trimmed),
-            userReplyLen: trimmed.length,
-            postRepairCorpusLen: scenarioCPostRepairCorpus.length,
-            postRepairThresholdMatchDetail: scenarioCPostRepairThresholdMatchDetail,
-            namedDanielSophieInPostRepair: /\b(daniel|sophie)\b/i.test(scenarioCPostRepairCorpus),
+            currentMoment: currentInterviewMomentRef.current,
+            m5HandoffAfterThresholdAnswer,
+            moment4ThresholdDeliveredInTranscript,
+            moment4ThresholdProbeAsked: moment4ThresholdProbeAskedRef.current,
+            transcriptHasThreshold: transcriptIncludesMoment4ThresholdAssistant(priorTranscriptBeforeThisUserTurn),
+            firstUserTurnAfterThreshold: isAnsweringFirstUserTurnAfterMoment4Threshold(priorTranscriptBeforeThisUserTurn),
+            moment5Delivered: moment5QuestionDeliveredRef.current,
+            moment4ExpectingPostSpec: moment4ExpectingPostSpecificityUserTurnRef.current,
+            isInterviewAppRoute,
+            isAdmin,
+            status,
+            closingQuestionPending,
+            waitingClosing: waitingForClosingAdditionRef.current,
+            priorTranscriptLen: priorTranscriptBeforeThisUserTurn.length,
+            lastAssistantPreview: lastAssistantContent.slice(0, 200),
+            userPreview: trimmed.slice(0, 120),
           },
           timestamp: Date.now(),
         }),
       }).catch(() => {});
+    }
+    // #endregion
+    if (
+      isInterviewAppRoute &&
+      !isAdmin &&
+      status === 'active' &&
+      !closingQuestionPending &&
+      waitingForClosingAdditionRef.current === null &&
+      currentInterviewMomentRef.current === 4 &&
+      m5HandoffAfterThresholdAnswer &&
+      !moment5QuestionDeliveredRef.current &&
+      !moment4ExpectingPostSpecificityUserTurnRef.current
+    ) {
+      // #region agent log
+      fetch('http://127.0.0.1:7789/ingest/668e0bd5-3283-4492-9f48-e33846c18218', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'X-Debug-Session-Id': 'e43434' },
+        body: JSON.stringify({
+          sessionId: 'e43434',
+          runId: 'm4m5-debug',
+          hypothesisId: 'H3',
+          location: 'AriaScreen.tsx:processUserSpeech:m5_inject_fired',
+          message: 'm5_client_inject_executing',
+          data: { interviewSessionId: interviewSessionIdRef.current },
+          timestamp: Date.now(),
+        }),
+      }).catch(() => {});
       // #endregion
+      void remoteLog('[M5_QUESTION_INJECT]', { interviewSessionId: interviewSessionIdRef.current });
+      const m5BundleRaw = buildMoment4ThresholdAnswerToMoment5Bundle(
+        participantFirstNameForSpoken,
+        MOMENT_5_ACCOUNTABILITY_QUESTION_TEXT,
+      );
+      const m5BundleDisplay = dedupeAdjacentBoundaryValidationsBeforeParticipantName(
+        sanitizeAssistantInterviewerCharacterNames(m5BundleRaw),
+        participantFirstNameForSpoken,
+      );
+      const m5BundleSpoken = ensureSpokenTextIncludesParticipantFirstName(
+        m5BundleDisplay,
+        participantFirstNameForSpoken,
+        { allowAppendWhenMissing: true },
+      );
+      /** Delivery-time flags (before `setMessages`) so the next model turn cannot miss M5 state. */
+      moment4ThresholdProbeAskedRef.current = true;
+      currentInterviewMomentRef.current = 5;
+      moment5QuestionDeliveredRef.current = true;
+      moment5PrimaryAnchorDeliveredSessionRef.current = true;
+      const m5Msg: MessageWithScenario = {
+        role: 'assistant',
+        content: m5BundleSpoken,
+        scenarioNumber: (currentScenarioRef.current ?? 3) as 1 | 2 | 3,
+      };
+      setMessages([...messagesToUse, m5Msg]);
+      /** Persist before long TTS — otherwise a mid-line refresh can load storage without this row and `syncReferenceCardStateFromAssistantMessages` falls back to an older `?` (e.g. grudge). */
+      if (userId && !isAdmin && status === 'active') {
+        const persistedMsgs = [...messagesToUse, m5Msg].filter(
+          (m) => !(m as { isScoreCard?: boolean }).isScoreCard && !(m as { isWelcomeBack?: boolean }).isWelcomeBack,
+        );
+        const completed = Array.from(scoredScenariosRef.current);
+        const scenarioScoresPayload: Record<
+          number,
+          { pillarScores: Record<string, number | null>; pillarConfidence: Record<string, string>; keyEvidence: Record<string, string>; scenarioName?: string }
+        > = {};
+        [1, 2, 3].forEach((n) => {
+          const s = scenarioScoresRef.current[n];
+          if (s) {
+            scenarioScoresPayload[n] = {
+              pillarScores: s.pillarScores,
+              pillarConfidence: s.pillarConfidence,
+              keyEvidence: s.keyEvidence,
+              scenarioName: s.scenarioName,
+            };
+          }
+        });
+        /** Must merge with existing local save — `saveInterviewToStorage` replaces the whole blob; a partial write drops `sessionAttemptId` / recovery flags and can break resume (bootstrap vs. saved id) or wipe metadata. */
+        const priorLocal = await loadInterviewFromStorage(userId);
+        const merged: Omit<StoredInterviewData, 'version' | 'userId' | 'lastSavedAt'> = {
+          ...(priorLocal ?? {
+            messages: [],
+            scenariosCompleted: [],
+            scenarioScores: {},
+            currentScenario: 1,
+          }),
+          messages: persistedMsgs,
+          scenariosCompleted: completed,
+          scenarioScores: { ...(priorLocal?.scenarioScores ?? {}), ...scenarioScoresPayload },
+          currentScenario: getCurrentScenario(scoredScenariosRef.current),
+          resumeActiveScenario: resumeActiveScenarioRef.current,
+          pendingCompletion: pendingCompletion || interviewStatusRef.current === 'preparing_results',
+          sessionAttemptId: interviewSessionAttemptIdRef.current ?? priorLocal?.sessionAttemptId,
+          attemptNumber: priorLocal?.attemptNumber ?? 1,
+        };
+        if (shouldSaveToStorage(merged.messages, merged.scenariosCompleted, merged.currentScenario)) {
+          await saveInterviewToStorage(userId, merged);
+        }
+        // #region agent log
+        fetch('http://127.0.0.1:7789/ingest/668e0bd5-3283-4492-9f48-e33846c18218', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'X-Debug-Session-Id': 'e43434' },
+          body: JSON.stringify({
+            sessionId: 'e43434',
+            runId: 'post-fix',
+            hypothesisId: 'H-m5-persist-merge',
+            location: 'AriaScreen.tsx:processUserSpeech:m5_checkpoint_flush',
+            message: 'm5_messages_persisted_before_tts',
+            data: {
+              persistedLen: persistedMsgs.length,
+              persistedHasM5Anchor: persistedMsgs.some((m) =>
+                m.role === 'assistant' ? transcriptAssistantContainsMoment5PrimaryConflictQuestion(m.content) : false,
+              ),
+              hadPriorLocal: !!priorLocal,
+              sessionAttemptIdKept: !!(interviewSessionAttemptIdRef.current ?? priorLocal?.sessionAttemptId),
+              saveRan: shouldSaveToStorage(merged.messages, merged.scenariosCompleted, merged.currentScenario),
+            },
+            timestamp: Date.now(),
+          }),
+        }).catch(() => {});
+        // #endregion
+      }
+      await speakTextSafe(m5BundleSpoken, ASSISTANT_INTERVIEW_SPEECH);
+      void remoteLog('[M5_DELIVERED]', {
+        interviewSessionId: interviewSessionIdRef.current,
+        source: 'client_inject_after_m4_threshold',
+        contentLen: m5BundleSpoken.length,
+        preview: m5BundleSpoken.slice(0, 160),
+      });
+      setVoiceState('idle');
+      setIsWaiting(false);
+      return;
+    }
+
+    if (
+      currentInterviewMomentRef.current === 5 &&
+      moment5QuestionDeliveredRef.current &&
+      !looksLikeMoment4ThresholdQuestion(lastAssistantContent) &&
+      !looksLikeMoment4GrudgePrompt(lastAssistantContent) &&
+      !looksLikeMoment4SpecificityFollowUpPrompt(lastAssistantContent)
+    ) {
+      moment5PostPromptUserTurnCountRef.current += 1;
+    }
+
+    const moment5AccountabilityProbeCandidate =
+      isInterviewAppRoute &&
+      !isAdmin &&
+      status === 'active' &&
+      !closingQuestionPending &&
+      waitingForClosingAdditionRef.current === null &&
+      currentInterviewMomentRef.current === 5 &&
+      moment5QuestionDeliveredRef.current &&
+      !moment5AccountabilityProbeFiredRef.current &&
+      isMoment5AssistantAnchor(lastAssistantContent) &&
+      !looksLikeMoment5AccountabilityProbeAssistantPrompt(lastAssistantContent);
+    const moment5AccountabilityEval = evaluateMoment5AccountabilityProbe(trimmed);
+    if (moment5AccountabilityProbeCandidate && moment5AccountabilityEval.shouldProbe) {
+      moment5AccountabilityProbeFiredRef.current = true;
+      moment5ClientScoringMetaRef.current = {
+        accountabilityProbeFired: true,
+        probeTriggerReason: moment5AccountabilityEval.reason,
+      };
+      void remoteLog('[M5_ACCOUNTABILITY_PROBE_FIRED]', {
+        interviewSessionId: interviewSessionIdRef.current,
+        reason: moment5AccountabilityEval.reason,
+        wordCount: countInterviewWords(trimmed),
+        preview: trimmed.slice(0, 200),
+      });
+      probeLogRef.current.push({
+        scenario: (currentScenarioRef.current ?? 3) as number,
+        construct: 'accountability',
+        probe_fired: true,
+        trigger_reason: moment5AccountabilityEval.reason,
+        pre_probe_score: 0,
+        post_probe_score: 0,
+        score_delta: 0,
+      });
+      const accountabilityProbeMsg: MessageWithScenario = {
+        role: 'assistant',
+        content: MOMENT_5_ACCOUNTABILITY_PROBE_TEXT,
+        scenarioNumber: (currentScenarioRef.current ?? 3) as 1 | 2 | 3,
+      };
+      setMessages([...messagesToUse, accountabilityProbeMsg]);
+      await speakTextSafe(MOMENT_5_ACCOUNTABILITY_PROBE_TEXT, ASSISTANT_INTERVIEW_SPEECH);
+      setVoiceState('idle');
+      setIsWaiting(false);
+      return;
+    }
+    if (moment5AccountabilityProbeCandidate && !moment5AccountabilityEval.shouldProbe) {
+      void remoteLog('[M5_ACCOUNTABILITY_PROBE_SKIPPED]', {
+        interviewSessionId: interviewSessionIdRef.current,
+        reason: moment5AccountabilityEval.reason,
+        wordCount: countInterviewWords(trimmed),
+        preview: trimmed.slice(0, 200),
+      });
+    }
+
+    const scenarioAContemptProbeCoverage = hasScenarioAQ1ContemptProbeCoverage(trimmed);
+    const specificEmmaLineAlreadyAddressed = scenarioAContemptProbeCoverage;
+    const shouldForceScenarioAContemptProbe =
+      !suppressForcedConstructProbesForMetaFrustration &&
+      replyingToScenarioAQ1 &&
+      !isDecline(trimmed) &&
+      !scenarioAContemptProbeCoverage &&
+      !scenarioAContemptProbeAskedRef.current;
+    const sidedEntirelyWithJames = userSidesEntirelyWithJames(trimmed);
+    const scenarioBQ1Engaged = hasScenarioBQ1OnTopicEngagement(trimmed);
+    const shouldForceScenarioBFullAppreciationProbe =
+      !suppressForcedConstructProbesForMetaFrustration &&
+      replyingToScenarioBQ1 &&
+      !isDecline(trimmed) &&
+      !sidedEntirelyWithJames &&
+      !scenarioBQ1Engaged;
+
+    if (
+      isInterviewAppRoute &&
+      !isAdmin &&
+      status === 'active' &&
+      !closingQuestionPending &&
+      waitingForClosingAdditionRef.current === null
+    ) {
+      const progressRefsForS1HardStop: InterviewProgressRefs = {
+        interviewMomentsCompleteRef,
+        currentInterviewMomentRef,
+        personalHandoffInjectedRef,
+      };
+      /** User refused after a repair ask or client/elongating probe — advance to Situation 2 without another model turn (stops repair re-ask loops). */
+      if (
+        userScenarioTag === 1 &&
+        currentInterviewMomentRef.current === 1 &&
+        isInterviewHardStopUserTurn(trimmed) &&
+        scenarioALastAssistantIsRepairProbeOrFollowUp(lastAssistantContent)
+      ) {
+        void remoteLog('[S1_REPAIR_HARD_STOP_ADVANCE]', {
+          interviewSessionId: interviewSessionIdRef.current,
+          userPreview: trimmed.slice(0, 120),
+          lastAssistantPreview: lastAssistantContent.slice(0, 200),
+        });
+        // #region agent log
+        fetch('http://127.0.0.1:7789/ingest/668e0bd5-3283-4492-9f48-e33846c18218', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'X-Debug-Session-Id': 'e43434' },
+          body: JSON.stringify({
+            sessionId: 'e43434',
+            hypothesisId: 'S1_REPAIR_HARD_STOP',
+            location: 'AriaScreen.tsx:S1_REPAIR_HARD_STOP_ADVANCE',
+            message: 'client_injected_scenario1_to_2',
+            data: {
+              userPreview: trimmed.slice(0, 80),
+              elongatingOnly: isApprovedElongatingProbeOnly(lastAssistantContent),
+            },
+            timestamp: Date.now(),
+          }),
+        }).catch(() => {});
+        // #endregion
+        interviewMomentsCompleteRef.current[1] = true;
+        currentInterviewMomentRef.current = 2;
+        const bundle = buildScenario1To2BundleForInterview(participantFirstNameForSpoken, SCENARIO_2_TEXT);
+        const lead = "Understood — we'll leave it there for this one. ";
+        let fullDisplay = dedupeAdjacentBoundaryValidationsBeforeParticipantName(
+          sanitizeAssistantInterviewerCharacterNames(lead + bundle),
+          participantFirstNameForSpoken,
+        );
+        fullDisplay = ensureSpokenTextIncludesParticipantFirstName(fullDisplay, participantFirstNameForSpoken, {
+          allowAppendWhenMissing: true,
+        });
+        const newAssistantMsg: MessageWithScenario = {
+          role: 'assistant',
+          content: fullDisplay,
+          scenarioNumber: 2,
+        };
+        currentScenarioRef.current = 2;
+        const updatedMessages = [...messagesToUse, newAssistantMsg];
+        setMessages(updatedMessages);
+        applyInterviewProgressFromAssistantText(fullDisplay, progressRefsForS1HardStop);
+        elongatingProbeFiredRef.current = false;
+        setHighestScenarioReached((prev) => Math.max(prev, 1));
+        if (!scoredScenariosRef.current.has(1)) {
+          scoredScenariosRef.current.add(1);
+          scoreScenario(1, updatedMessages);
+        }
+        await notifyScenarioStarted(2, updatedMessages);
+        try {
+          await speakTextSafe(fullDisplay, ASSISTANT_INTERVIEW_SPEECH);
+        } catch {
+          /* advance even if TTS fails */
+        }
+        setVoiceState('idle');
+        setIsWaiting(false);
+        return;
+      }
+
+      if (!metaCommentClassification) {
+        const wcDisengage = countSpokenWords(trimmed);
+        const answeringAfterProbe = isClientOrElongatingInterviewProbeAssistant(lastAssistantContent);
+        const exemptMetaTurn =
+          isSimpleYesNoInterviewMoment(lastQuestionTextRef.current) ||
+          isResumeReentryWelcomePrompt(lastQuestionTextRef.current) ||
+          isNamePromptInterviewMoment(lastQuestionTextRef.current);
+        const isAssistantRecoveryOrMetaLine = isClientAudioRecoveryAssistantLine(lastAssistantContent);
+
+        const priorUserTurnsInScenario = messages.filter(
+          (m) =>
+            m.role === 'user' &&
+            !(m as { isWelcomeBack?: boolean }).isWelcomeBack &&
+            (m as MessageWithScenario).scenarioNumber === userScenarioTag
+        ).length;
+        const isFirstUserTurnInScenario = priorUserTurnsInScenario === 0;
+
+        const disengagePick = pickClientDisengagementProbe({
+          userAnswer: trimmed,
+          lastAssistantContent,
+          wordCount: wcDisengage,
+          answeringAfterProbe,
+          exemptMetaTurn,
+          isGreetingNameTurn,
+          isExplicitDecline: isDecline(trimmed),
+          isAssistantRecoveryOrMetaLine,
+          isFirstUserTurnInScenario,
+        });
+
+        if (disengagePick) {
+          void remoteLog('[CLIENT_DISENGAGEMENT_PROBE]', {
+            kind: disengagePick.kind,
+            wc: wcDisengage,
+            preview: trimmed.slice(0, 120),
+          });
+          const probeConstruct =
+            disengagePick.kind === 'mentalizing_surface'
+              ? 'mentalizing'
+              : disengagePick.kind === 'repair_refusal'
+                ? 'repair'
+                : disengagePick.kind;
+          const probeTriggerReason =
+            disengagePick.kind === 'mentalizing_surface'
+              ? 'surface_label_no_reasoning'
+              : disengagePick.kind === 'repair_refusal'
+                ? 'repair_refusal_detected'
+                : disengagePick.kind;
+          probeLogRef.current.push({
+            scenario: userScenarioTag,
+            construct: probeConstruct,
+            probe_fired: true,
+            trigger_reason: probeTriggerReason,
+            pre_probe_score: 0,
+            post_probe_score: 0,
+            score_delta: 0,
+          });
+          const probeText = disengagePick.probe;
+          const probeMsg: MessageWithScenario = {
+            role: 'assistant',
+            content: probeText,
+            scenarioNumber: userScenarioTag as 1 | 2 | 3,
+          };
+          setMessages([...messagesToUse, probeMsg]);
+          await speakTextSafe(probeText, ASSISTANT_INTERVIEW_SPEECH);
+          setVoiceState('idle');
+          setIsWaiting(false);
+          return;
+        }
+      }
     }
 
     if (!ANTHROPIC_API_KEY && !ANTHROPIC_PROXY_URL) {
@@ -7000,7 +9286,7 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
       if (currentInterviewMomentRef.current >= 1 && currentInterviewMomentRef.current <= 3) {
         maxTok = Math.max(maxTok, 720);
       }
-      if (currentInterviewMomentRef.current === 4) {
+      if (currentInterviewMomentRef.current === 4 || currentInterviewMomentRef.current === 5) {
         maxTok = Math.max(maxTok, 2800);
       }
       const closingInstruction = usedPersonalExamples ? PERSONAL_CLOSING_INSTRUCTION : SCENARIO_ONLY_CLOSING_INSTRUCTION;
@@ -7017,6 +9303,56 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
       const participantFirstNameSystemSuffix = buildInterviewerParticipantFirstNameSystemSuffix(
         getInterviewUserFirstNameForPrompt(profile)
       );
+      const elongatingSuppressedForUserTurn = userTurnSuppressesElongatingProbe(trimmed);
+      const hadPriorSubstantiveAnswerForFrustrationOffer =
+        metaCommentClassification?.type === 'frustration' && !repeatedFrustrationInMoment
+          ? hadPriorSubstantiveAnswerInScenarioForFrustration(
+              messagesToUse.slice(0, -1),
+              userScenarioTag as 1 | 2 | 3
+            )
+          : undefined;
+      const metaCommentSystemSuffix =
+        metaCommentClassification != null
+          ? buildMetaCommentHandlingSuffix({
+              classification: metaCommentClassification,
+              repeatedFrustrationInMoment:
+                repeatedFrustrationInMoment && metaCommentClassification.type === 'frustration',
+              hadPriorSubstantiveAnswerInMoment: hadPriorSubstantiveAnswerForFrustrationOffer,
+              alreadyAnsweredPriorSubstantiveVerified:
+                metaCommentClassification.type === 'already_answered'
+                  ? alreadyAnsweredPriorSubstantiveVerified === true
+                  : undefined,
+            })
+          : '';
+      metaClassificationForPendingAssistantRef.current = metaCommentClassification;
+      if (
+        metaCommentClassification?.type === 'frustration' &&
+        !repeatedFrustrationInMoment &&
+        isInterviewAppRoute &&
+        !isAdmin
+      ) {
+        scenarioSkipOfferSourceRef.current = 'frustration_meta';
+        frustrationSkipOfferPendingRef.current = true;
+        frustrationSkipAwaitingConfirmationRef.current = true;
+        frustrationSkipHadPriorAnswerRef.current = hadPriorSubstantiveAnswerForFrustrationOffer ?? false;
+      }
+      if (
+        metaCommentClassification?.type === 'already_answered' &&
+        alreadyAnsweredPriorSubstantiveVerified === false &&
+        isInterviewAppRoute &&
+        !isAdmin
+      ) {
+        scenarioSkipOfferSourceRef.current = 'already_answered_meta';
+        frustrationSkipOfferPendingRef.current = true;
+        frustrationSkipAwaitingConfirmationRef.current = true;
+        frustrationSkipHadPriorAnswerRef.current = false;
+      }
+      const elongatingProbeStateForApi =
+        elongatingProbeFiredRef.current ||
+        elongatingSuppressedForUserTurn ||
+        metaCommentClassification != null;
+      const skipContinuationSnap = skipContinuationSystemSuffixRef.current;
+      skipContinuationSystemSuffixRef.current = '';
       // #region agent log
       fetch('http://127.0.0.1:7789/ingest/668e0bd5-3283-4492-9f48-e33846c18218', {
         method: 'POST',
@@ -7030,6 +9366,27 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
           data: {
             participantFirstNameForSpoken: participantFirstNameForSpoken || null,
             promptNameFromProfile: getInterviewUserFirstNameForPrompt(profile) || null,
+          },
+          timestamp: Date.now(),
+        }),
+      }).catch(() => {});
+      // #endregion
+      // #region agent log
+      fetch('http://127.0.0.1:7789/ingest/668e0bd5-3283-4492-9f48-e33846c18218', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'X-Debug-Session-Id': 'c61a43' },
+        body: JSON.stringify({
+          sessionId: 'c61a43',
+          runId: 'post-fix',
+          hypothesisId: 'H-ELONG-1',
+          location: 'AriaScreen.tsx:processUserSpeech:elongating_suffix_gate',
+          message: 'elongating_probe_state_for_api',
+          data: {
+            userWordCount: countSpokenWords(trimmed),
+            elongatingProbeFiredRef: elongatingProbeFiredRef.current,
+            elongatingSuppressedForUserTurn,
+            elongatingProbeStateForApi,
+            userPreviewChars: trimmed.length,
           },
           timestamp: Date.now(),
         }),
@@ -7055,6 +9412,9 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
           OFF_TOPIC_INSTRUCTIONS +
           REPEAT_HANDLING_INSTRUCTIONS +
           THIN_RESPONSE_INSTRUCTIONS +
+          SHORT_AMBIGUOUS_NO_SCENARIO_REPLAY_INSTRUCTIONS +
+          skipContinuationSnap +
+          metaCommentSystemSuffix +
           UNIVERSAL_ACK_BEFORE_MOVE_INSTRUCTIONS +
           NO_REPEAT_INSTRUCTIONS +
           PAUSE_HANDLING_INSTRUCTIONS +
@@ -7068,7 +9428,7 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
           CLOSING_LINE_INSTRUCTIONS +
           closingInstruction +
           progressSuffix +
-          buildElongatingProbeStateSuffix(elongatingProbeFiredRef.current) +
+          buildElongatingProbeStateSuffix(elongatingProbeStateForApi) +
           PER_REQUEST_REFLECTION_LOCK,
         messages: messagesToUse
           .filter((m) => m.role === 'user' || m.role === 'assistant')
@@ -7086,6 +9446,8 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
 
     let data: { content?: Array<{ text?: string }>; error?: { message?: string } };
     const textToParallelStream = { full: '', spokenStarted: false };
+    const metaFrustrationFirstSignalBuffered =
+      metaCommentClassification?.type === 'frustration' && !repeatedFrustrationInMoment;
     const makeCall = async (): Promise<typeof data> => {
       const streamBody = { ...requestBody, stream: true };
       const res = await fetch(apiUrl, { method: 'POST', headers, body: JSON.stringify(streamBody) });
@@ -7122,6 +9484,14 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
         if (deferredWarmBoundarySentence) {
           spoken = `${deferredWarmBoundarySentence} ${spoken}`.trim();
           deferredWarmBoundarySentence = null;
+        }
+        if (
+          currentInterviewMomentRef.current === 2 &&
+          currentScenarioRef.current === 2 &&
+          looksLikeScenarioBRepairAsJamesQuestion(spoken) &&
+          s2RepairProbeDeliveredRef.current
+        ) {
+          return;
         }
         const willDefer =
           allowDeferWarm &&
@@ -7244,6 +9614,14 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
               onPlaybackStarted: () => {
                 setVoiceState('speaking');
                 textToParallelStream.spokenStarted = true;
+                recordInterviewAssistantDeliveryForMetaExemptionRef.current(stripControlTokens(spokenForTts).trim());
+                if (
+                  currentInterviewMomentRef.current === 2 &&
+                  currentScenarioRef.current === 2 &&
+                  looksLikeScenarioBRepairAsJamesQuestion(spokenForTts)
+                ) {
+                  s2RepairProbeDeliveredRef.current = true;
+                }
                 if (!firstSentenceLogged && userId) {
                   firstSentenceLogged = true;
                   const rtd = getSessionLogRuntime();
@@ -7277,6 +9655,7 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
       const processTextDelta = (deltaText: string) => {
         if (!deltaText) return;
         textToParallelStream.full += deltaText;
+        if (metaFrustrationFirstSignalBuffered) return;
         sentenceBuffer += deltaText;
         for (;;) {
           const m = sentenceBuffer.match(/[.!?](?:\s|$)/);
@@ -7325,6 +9704,53 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
           maybeQueueSentenceForTts(hold, false);
         }
         await ttsChain;
+        if (metaFrustrationFirstSignalBuffered) {
+          let display = stripControlTokens(textToParallelStream.full).trim();
+          if (isApprovedElongatingProbeOnly(display)) {
+            const excerpt = lastSubstantivePriorUserExcerptInScenario(
+              messagesToUse,
+              userScenarioTag as 1 | 2 | 3,
+            );
+            display = buildClientFrustrationMetaFallbackAssistantText({
+              lastQuestionText: lastQuestionTextRef.current,
+              userTranscript: trimmed,
+              hadPriorSubstantiveAnswerInMoment: hadPriorSubstantiveAnswerForFrustrationOffer,
+              priorSubstantiveUserExcerpt: excerpt,
+            });
+            void remoteLog('[META_FRUSTRATION_ELONGATING_BUFFER_OVERRIDE]', {
+              replaced: true,
+              preview: display.slice(0, 240),
+            });
+          }
+          textToParallelStream.full = display;
+          const spokenSan = dedupeAdjacentBoundaryValidationsBeforeParticipantName(
+            sanitizeAssistantInterviewerCharacterNames(display),
+            participantFirstNameForSpoken,
+          );
+          const spokenFinal = ensureSpokenTextIncludesParticipantFirstName(spokenSan, participantFirstNameForSpoken, {
+            allowAppendWhenMissing: true,
+          });
+          textToParallelStream.spokenStarted = true;
+          setVoiceState('speaking');
+          recordInterviewAssistantDeliveryForMetaExemptionRef.current(stripControlTokens(spokenFinal).trim());
+          if (userId) {
+            const rtd = getSessionLogRuntime();
+            writeSessionLog({
+              userId,
+              attemptId: rtd.attemptId,
+              eventType: 'question_delivered',
+              eventData: {
+                moment_number: currentInterviewMomentRef.current,
+                scenario_number: currentScenarioRef.current,
+                question_text: stripControlTokens(spokenFinal).trim().slice(0, 2000),
+                delivered_at: new Date().toISOString(),
+                tts_pipeline: 'meta_frustration_buffered',
+              },
+              platform: rtd.platform,
+            });
+          }
+          await speakTextSafe(spokenFinal, ASSISTANT_INTERVIEW_SPEECH);
+        }
         if (textToParallelStream.spokenStarted) {
           setVoiceState('idle');
         }
@@ -7390,12 +9816,121 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
         scenariosCompleted: completed,
         scenarioScores: scenarioScoresPayload,
         currentScenario: getCurrentScenario(scoredScenariosRef.current),
+        resumeActiveScenario: resumeActiveScenarioRef.current,
       });
       return;
     }
 
     try {
     let text = (data.content?.[0]?.text ?? '').trim();
+    if (
+      text.includes('[INTERVIEW_COMPLETE]') &&
+      isInterviewAppRoute &&
+      !isAdmin &&
+      status === 'active'
+    ) {
+      const minUserTurnsAfterM5 = moment5AccountabilityProbeFiredRef.current ? 2 : 1;
+      const transcriptSlice = messagesToUse.map((m) => ({
+        role: m.role,
+        content: (m as { content?: string }).content ?? '',
+      }));
+      const postM5UserTurnsFromTranscript = countUserTurnsAfterLastMoment5PrimaryAnchor(
+        transcriptSlice,
+        moment5PrimaryAnchorDeliveredSessionRef.current,
+      );
+      const hasMoment5PrimaryAnchorInTranscript =
+        moment5PrimaryAnchorDeliveredSessionRef.current ||
+        transcriptSlice.some(
+          (m) =>
+            m.role === 'assistant' && transcriptAssistantContainsMoment5PrimaryConflictQuestion(m.content)
+        ) ||
+        transcriptAssistantContainsMoment5PrimaryConflictQuestion(text);
+      const postM5UserTurns = Math.max(moment5PostPromptUserTurnCountRef.current, postM5UserTurnsFromTranscript);
+      /**
+       * `currentInterviewMomentRef` can remain on scenario 3 after resume / numbering skew while the transcript
+       * already contains the M5 conflict anchor and post-M5 user turns — logs showed `[INTERVIEW_COMPLETE_STRIPPED_PRE_M5_GATE]`
+       * with `moment: 3` and `hasMoment5PrimaryAnchorInTranscript: true`, which blocked completion and preparing-results.
+       */
+      const moment5CloseAllowed =
+        (currentInterviewMomentRef.current >= 5 || hasMoment5PrimaryAnchorInTranscript) &&
+        (moment5QuestionDeliveredRef.current || hasMoment5PrimaryAnchorInTranscript) &&
+        postM5UserTurns >= minUserTurnsAfterM5;
+      if (!moment5CloseAllowed) {
+        // #region agent log
+        fetch('http://127.0.0.1:7789/ingest/668e0bd5-3283-4492-9f48-e33846c18218', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'X-Debug-Session-Id': 'e43434' },
+          body: JSON.stringify({
+            sessionId: 'e43434',
+            runId: 'm4m5-debug',
+            hypothesisId: 'H4',
+            location: 'AriaScreen.tsx:sendMessage:INTERVIEW_COMPLETE_stripped',
+            message: 'interview_complete_blocked_pre_m5_gate',
+            data: {
+              moment: currentInterviewMomentRef.current,
+              m5Delivered: moment5QuestionDeliveredRef.current,
+              m5PrimaryAnchorSession: moment5PrimaryAnchorDeliveredSessionRef.current,
+              postM5UserTurnsRef: moment5PostPromptUserTurnCountRef.current,
+              postM5UserTurnsFromTranscript,
+              postM5UserTurnsEffective: postM5UserTurns,
+              minUserTurnsAfterM5,
+              accountabilityProbeFired: moment5AccountabilityProbeFiredRef.current,
+              hasMoment5PrimaryAnchorInTranscript,
+              moment5CloseAllowed,
+            },
+            timestamp: Date.now(),
+          }),
+        }).catch(() => {});
+        // #endregion
+        void remoteLog('[INTERVIEW_COMPLETE_STRIPPED_PRE_M5_GATE]', {
+          interviewSessionId: interviewSessionIdRef.current,
+          moment: currentInterviewMomentRef.current,
+          m5Delivered: moment5QuestionDeliveredRef.current,
+          m5PrimaryAnchorSession: moment5PrimaryAnchorDeliveredSessionRef.current,
+          postM5UserTurnsRef: moment5PostPromptUserTurnCountRef.current,
+          postM5UserTurnsFromTranscript,
+          postM5UserTurnsEffective: postM5UserTurns,
+          minUserTurnsAfterM5,
+          accountabilityProbeFired: moment5AccountabilityProbeFiredRef.current,
+          hasMoment5PrimaryAnchorInTranscript,
+        });
+        /** Drop premature token only — continue this turn so Moment 5 can still be delivered (client inject or model). Never end the session here. */
+        text = text.replace(/\[INTERVIEW_COMPLETE\]/gi, '').trim();
+        /**
+         * Model sometimes emits closing + `[INTERVIEW_COMPLETE]` from Moment 4 when the scripted M5 anchor
+         * was never persisted (e.g. resume moment skew or paraphrased conflict line). Recover by appending
+         * the client M5 bundle so the user still gets the conflict prompt and a later completion can navigate.
+         */
+        if (
+          moment4ThresholdProbeAskedRef.current &&
+          !moment5QuestionDeliveredRef.current &&
+          !hasMoment5PrimaryAnchorInTranscript
+        ) {
+          const m5Raw = buildMoment4ThresholdAnswerToMoment5Bundle(
+            participantFirstNameForSpoken,
+            MOMENT_5_ACCOUNTABILITY_QUESTION_TEXT,
+          );
+          const m5Display = dedupeAdjacentBoundaryValidationsBeforeParticipantName(
+            sanitizeAssistantInterviewerCharacterNames(m5Raw),
+            participantFirstNameForSpoken,
+          );
+          const m5Spoken = ensureSpokenTextIncludesParticipantFirstName(
+            m5Display,
+            participantFirstNameForSpoken,
+            { allowAppendWhenMissing: true },
+          );
+          const lead = text.trim();
+          text = lead ? `${lead}\n\n${m5Spoken}` : m5Spoken;
+          currentInterviewMomentRef.current = 5;
+          moment5QuestionDeliveredRef.current = true;
+          moment5PrimaryAnchorDeliveredSessionRef.current = true;
+          if (textToParallelStream.spokenStarted) {
+            await speakTextSafe(m5Spoken, ASSISTANT_INTERVIEW_SPEECH);
+          }
+        }
+      }
+    }
+    finalizePendingMetaAckBaselineAfterAssistantTextRef.current(text);
     // #region agent log
     fetch('http://127.0.0.1:7789/ingest/668e0bd5-3283-4492-9f48-e33846c18218',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'c61a43'},body:JSON.stringify({sessionId:'c61a43',runId:'pre-fix',hypothesisId:'H10',location:'AriaScreen.tsx:sendMessage:assembledTextNameCheck',message:'assembled_text_name_presence',data:{assembledPreview:text.slice(0,160),assembledHasName:participantFirstNameForSpoken?text.toLowerCase().includes(participantFirstNameForSpoken.toLowerCase()):null,participantFirstNameForSpoken:participantFirstNameForSpoken??null},timestamp:Date.now()})}).catch(()=>{});
     // #endregion
@@ -7413,6 +9948,7 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
       skipInterviewSpeechAdvance?: boolean;
       skipQuestionTiming?: boolean;
       skipLastQuestionRef?: boolean;
+      allowDuplicateConsecutiveTts?: boolean;
       skipGestureGate?: boolean;
       ttsTriggerSource?: 'gesture_handler' | 'effect' | 'callback' | 'timeout' | 'preauthorized_element';
       immediateWebPlaybackElement?: HTMLAudioElement;
@@ -7421,6 +9957,9 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
         // #region agent log
         fetch('http://127.0.0.1:7789/ingest/668e0bd5-3283-4492-9f48-e33846c18218',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'c61a43'},body:JSON.stringify({sessionId:'c61a43',runId:'pre-fix',hypothesisId:'H7',location:'AriaScreen.tsx:speakAssistantTurn:skip',message:'speak_text_safe_skipped_due_parallel_streaming',data:{spokenLen:spokenText.length,spokenPreview:spokenText.slice(0,160),spokenHasName:participantFirstNameForSpoken?spokenText.toLowerCase().includes(participantFirstNameForSpoken.toLowerCase()):null,participantFirstNameForSpoken:participantFirstNameForSpoken??null,interviewUiPhase,status,currentScenario:currentScenarioRef.current,hasReferenceScenario:!!referenceCardScenario,scenarioIntroTtsPlaying},timestamp:Date.now()})}).catch(()=>{});
         // #endregion
+        if (opts?.interviewSpeechRole === 'assistant_response' && !opts?.skipLastQuestionRef) {
+          lastQuestionTextRef.current = stripControlTokens(spokenText).trim();
+        }
         if (opts?.interviewSpeechRole === 'assistant_response' && !opts?.skipInterviewSpeechAdvance) {
           applyInterviewSpeechComplete(spokenText);
           // #region agent log
@@ -7441,7 +9980,8 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
         currentInterviewMomentRef.current
       )
     ) {
-      text = `${SCENARIO_B_REPAIR_ALREADY_COVERED_SKIP_LEAD}\n\n[SCENARIO_COMPLETE:2]\n\n${buildScenario2To3TransitionBody(
+      /** No spoken "already answered" line — advance with completion token + canonical S3 bundle only. */
+      text = `[SCENARIO_COMPLETE:2]\n\n${buildScenario2To3TransitionBody(
         participantFirstNameForSpoken,
         SCENARIO_3_TEXT
       )}`;
@@ -7464,6 +10004,20 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
       SCENARIO_2_TEXT
     );
     const recentAsstForAck = recentAssistantMessagesForAck(messagesToUse);
+    if (currentInterviewMomentRef.current === 1 && scenarioAContemptProbeAskedRef.current) {
+      const beforeProbeStrip = strippedText;
+      strippedText = stripScenarioAContemptProbeQuestion(strippedText);
+      if (strippedText !== beforeProbeStrip) {
+        void remoteLog('[S1_CONTEMPT_PROBE_STRIPPED_DUPLICATE]', { preview: strippedText.slice(0, 220) });
+      }
+    }
+    if (currentInterviewMomentRef.current === 3) {
+      const beforeS3ThreshStrip = strippedText;
+      strippedText = stripScenarioCThresholdQuestionFromText(strippedText);
+      if (strippedText !== beforeS3ThreshStrip) {
+        void remoteLog('[S3_THRESHOLD_TEXT_STRIPPED]', { preview: strippedText.slice(0, 220) });
+      }
+    }
     let assistantIssuedMoment4ThresholdProbe = looksLikeMoment4ThresholdQuestion(strippedText);
     const assistantIssuedScenarioAContemptProbe = looksLikeScenarioAContemptProbeQuestion(strippedText);
     let assistantIssuedScenarioARepairQuestion =
@@ -7473,7 +10027,6 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
       currentInterviewMomentRef.current === 2 && looksLikeScenarioBJamesDifferentlyQuestion(strippedText);
     const assistantIssuedScenarioBRepairAsJames =
       currentInterviewMomentRef.current === 2 && looksLikeScenarioBRepairAsJamesQuestion(strippedText);
-    let assistantIssuedScenarioCThresholdProbe = looksLikeScenarioCThresholdQuestion(strippedText);
     {
       const beforeS3 = strippedText;
       strippedText = ensureScenario3VignetteOpening(strippedText);
@@ -7485,7 +10038,6 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
       const beforeS3q1 = strippedText;
       strippedText = ensureScenarioCQ1SequenceAfterVignette(strippedText);
       strippedText = replaceOrphanScenarioCRepairWithQ1(strippedText, priorAssistantContentS3);
-      assistantIssuedScenarioCThresholdProbe = looksLikeScenarioCThresholdQuestion(strippedText);
       if (strippedText !== beforeS3q1) {
         void remoteLog('[S3_Q1_SEQUENCE_ENFORCED]', {
           preview: strippedText.slice(0, 260),
@@ -7565,31 +10117,6 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
     // #endregion
     /** Elongating probe must be the sole assistant output this turn — never stack forced construct probes after it. */
     const assistantTurnIsElongatingProbeOnly = isApprovedElongatingProbeOnly(strippedText);
-    // #region agent log
-    if (replyingToScenarioCQ2) {
-      fetch('http://127.0.0.1:7789/ingest/668e0bd5-3283-4492-9f48-e33846c18218', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'X-Debug-Session-Id': 'c61a43' },
-        body: JSON.stringify({
-          sessionId: 'c61a43',
-          location: 'AriaScreen.tsx:s3_post_sanitize_threshold_gate',
-          message: 'post_sanitize_assistant_threshold_flags',
-          hypothesisId: 'H5',
-          data: {
-            shouldForceScenarioCThresholdProbe,
-            assistantIssuedScenarioCThresholdProbe,
-            assistantIssuedAfterSanitize: looksLikeScenarioCThresholdQuestion(strippedText),
-            strippedPreview: strippedText.slice(0, 360),
-            willAttemptS3Force:
-              shouldForceScenarioCThresholdProbe &&
-              !assistantIssuedScenarioCThresholdProbe &&
-              !text.includes('[INTERVIEW_COMPLETE]'),
-          },
-          timestamp: Date.now(),
-        }),
-      }).catch(() => {});
-    }
-    // #endregion
     if (assistantIssuedMoment4ThresholdProbe) {
       moment4ThresholdProbeAskedRef.current = true;
     }
@@ -7630,7 +10157,10 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
       let stagedMessages = messagesToUse;
       if (strippedText) {
         const detectedScenario = detectScenarioFromResponse(strippedText);
-        if (detectedScenario !== null) currentScenarioRef.current = detectedScenario;
+        if (detectedScenario !== null) {
+          currentScenarioRef.current = detectedScenario;
+          void notifyScenarioStarted(detectedScenario);
+        }
         const scenarioNum =
           currentScenarioRef.current ??
           detectedScenario ??
@@ -7679,7 +10209,10 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
       let stagedMessages = messagesToUse;
       if (strippedText) {
         const detectedScenario = detectScenarioFromResponse(strippedText);
-        if (detectedScenario !== null) currentScenarioRef.current = detectedScenario;
+        if (detectedScenario !== null) {
+          currentScenarioRef.current = detectedScenario;
+          void notifyScenarioStarted(detectedScenario);
+        }
         const scenarioNum =
           currentScenarioRef.current ??
           detectedScenario ??
@@ -7723,6 +10256,7 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
       assistantIssuedScenarioBRepairAsJames ||
       looksLikeAssistantSkipsScenarioBJamesIntermediateQuestion(strippedText);
     const needsScenarioBJamesDifferentlyInsert =
+      !suppressForcedConstructProbesForMetaFrustration &&
       replyingToScenarioBQ1 &&
       !isDecline(trimmed) &&
       !shouldForceScenarioBFullAppreciationProbe &&
@@ -7744,8 +10278,6 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
             shouldForceS1: shouldForceScenarioAContemptProbe,
             shouldForceS2App: shouldForceScenarioBFullAppreciationProbe,
             needsS2James: needsScenarioBJamesDifferentlyInsert,
-            shouldForceS3Threshold: shouldForceScenarioCThresholdProbe,
-            assistantIssuedS3Threshold: assistantIssuedScenarioCThresholdProbe,
             moment: currentInterviewMomentRef.current,
             scenario: currentScenarioRef.current,
           },
@@ -7769,7 +10301,10 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
       let stagedMessages = messagesToUse;
       if (bLeadIn) {
         const detectedScenario = detectScenarioFromResponse(bLeadIn);
-        if (detectedScenario !== null) currentScenarioRef.current = detectedScenario;
+        if (detectedScenario !== null) {
+          currentScenarioRef.current = detectedScenario;
+          void notifyScenarioStarted(detectedScenario);
+        }
         const scenarioNum =
           currentScenarioRef.current ??
           detectedScenario ??
@@ -7805,80 +10340,8 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
       return;
     }
     if (
-      shouldForceScenarioCThresholdProbe &&
-      !assistantIssuedScenarioCThresholdProbe &&
-      !assistantTurnIsElongatingProbeOnly &&
-      !text.includes('[INTERVIEW_COMPLETE]')
-    ) {
-      // #region agent log
-      fetch('http://127.0.0.1:7789/ingest/668e0bd5-3283-4492-9f48-e33846c18218', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'X-Debug-Session-Id': 'c61a43' },
-        body: JSON.stringify({
-          sessionId: 'c61a43',
-          location: 'AriaScreen.tsx:S3_THRESHOLD_FORCE',
-          message: 'entered_s3_threshold_injection',
-          hypothesisId: 'H4',
-          data: {
-            assistantIssuedScenarioCThresholdProbe,
-            prematureMoment4: assistantTextIsPrematureMoment4HandoffDuringScenarioC(strippedText),
-          },
-          timestamp: Date.now(),
-        }),
-      }).catch(() => {});
-      // #endregion
-      const forcedThresholdProbe =
-        "At what point would you say Daniel or Sophie should decide this relationship isn't working?";
-      const prematureMoment4Handoff = assistantTextIsPrematureMoment4HandoffDuringScenarioC(strippedText);
-      let stagedMessages = messagesToUse;
-      if (strippedText && !prematureMoment4Handoff) {
-        const detectedScenario = detectScenarioFromResponse(strippedText);
-        if (detectedScenario !== null) currentScenarioRef.current = detectedScenario;
-        const scenarioNum =
-          currentScenarioRef.current ??
-          detectedScenario ??
-          getScenarioNumberForNewMessage(messagesToUse, 'assistant', strippedText);
-        const aiMsg: MessageWithScenario = {
-          role: 'assistant',
-          content: strippedText,
-          scenarioNumber: scenarioNum,
-        };
-        stagedMessages = [...messagesToUse, aiMsg];
-        setMessages(stagedMessages);
-        applyInterviewProgressFromAssistantText(strippedText, progressRefsPayload);
-        await speakAssistantTurn(strippedText, ASSISTANT_INTERVIEW_SPEECH);
-      }
-      if (__DEV__) {
-        console.log('[S3_THRESHOLD_FORCED]', {
-          scenarioCThresholdStrict,
-          scenarioCThresholdLegacy,
-          shouldForceScenarioCThresholdProbe,
-          assistantIssuedScenarioCThresholdProbe,
-          reason: 'Scenario C post-repair corpus lacked Daniel/Sophie-anchored commitment-threshold criteria',
-        });
-      }
-      void remoteLog('[S3_THRESHOLD_FORCED]', {
-        scenarioCThresholdStrict,
-        scenarioCThresholdLegacy,
-        shouldForceScenarioCThresholdProbe,
-        assistantIssuedScenarioCThresholdProbe,
-        reason: 'Scenario C post-repair corpus lacked Daniel/Sophie-anchored commitment-threshold criteria',
-      });
-      const wrappedS3ThresholdProbe = wrapForcedProbeWithAck(trimmed, strippedText, forcedThresholdProbe, recentAsstForAck);
-      const probeMsg: MessageWithScenario = {
-        role: 'assistant',
-        content: wrappedS3ThresholdProbe,
-        scenarioNumber:
-          currentScenarioRef.current ??
-          getScenarioNumberForNewMessage(stagedMessages, 'assistant', wrappedS3ThresholdProbe),
-      };
-      setMessages([...stagedMessages, probeMsg]);
-      await speakTextSafe(wrappedS3ThresholdProbe, ASSISTANT_INTERVIEW_SPEECH);
-      setVoiceState('idle');
-      return;
-    }
-    if (
       shouldForceMoment4ThresholdProbe &&
+      !moment4ClientSpecificityProbeInjectedRef.current &&
       !assistantIssuedMoment4ThresholdProbe &&
       !assistantTurnIsElongatingProbeOnly &&
       !text.includes('[INTERVIEW_COMPLETE]')
@@ -7888,7 +10351,10 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
       let stagedMessages = messagesToUse;
       if (strippedText) {
         const detectedScenario = detectScenarioFromResponse(strippedText);
-        if (detectedScenario !== null) currentScenarioRef.current = detectedScenario;
+        if (detectedScenario !== null) {
+          currentScenarioRef.current = detectedScenario;
+          void notifyScenarioStarted(detectedScenario);
+        }
         const scenarioNum =
           currentScenarioRef.current ??
           detectedScenario ??
@@ -7929,7 +10395,13 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
       const looksLikeClosingAck = closingAckPattern.test(text) || (/\blet'?s move on\b/i.test(text) && /got it|okay|alright/i.test(text));
       const justAnsweredClosing = lastAnsweredClosingScenarioRef.current != null;
       const noScenarioCompleteInResponse = !/\[SCENARIO_COMPLETE:\d\]/.test(text);
-      if (justAnsweredClosing && looksLikeClosingAck && noScenarioCompleteInResponse) {
+      /** Must not return before `[INTERVIEW_COMPLETE]` handling — otherwise final turn never sets `pendingCompletion` / preparing screen. */
+      if (
+        justAnsweredClosing &&
+        looksLikeClosingAck &&
+        noScenarioCompleteInResponse &&
+        !text.includes('[INTERVIEW_COMPLETE]')
+      ) {
         const scenarioNumber = lastAnsweredClosingScenarioRef.current as 1 | 2 | 3;
         const canAdvance =
           closingQuestionAskedRef.current[scenarioNumber] === true &&
@@ -7942,6 +10414,7 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
         } else if (scenarioNumber === 2) {
           interviewMomentsCompleteRef.current[2] = true;
           currentInterviewMomentRef.current = 3;
+          resetScenarioCClientGatesOnly();
           nextContent = buildScenario2To3TransitionBody(participantFirstNameForSpoken, SCENARIO_3_TEXT);
         } else if (scenarioNumber === 3) {
           if (personalHandoffInjectedRef.current) {
@@ -7963,7 +10436,6 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
         const updatedMessages = [...messagesToUse, newAssistantMsg];
         setMessages(updatedMessages);
         applyInterviewProgressFromAssistantText(fullDisplay, progressRefsPayload);
-        await speakAssistantTurn(fullDisplay, ASSISTANT_INTERVIEW_SPEECH);
         if (canAdvance) {
           setHighestScenarioReached((prev) => Math.max(prev, scenarioNumber));
           if (!scoredScenariosRef.current.has(scenarioNumber)) {
@@ -7975,6 +10447,8 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
             closingQuestionAnsweredRef.current[scenarioNumber] = false;
           }
         }
+        await notifyScenarioStarted(nextScenarioNum, updatedMessages);
+        await speakAssistantTurn(fullDisplay, ASSISTANT_INTERVIEW_SPEECH);
         lastAnsweredClosingScenarioRef.current = null;
         setVoiceState('idle');
         if (__DEV__) console.log('[Aria] Closing-ack failsafe: advanced to next scenario', scenarioNumber);
@@ -7983,7 +10457,7 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
 
       // Failsafe: AI repeated the closing question (e.g. asked again after user said "no") — don't display; advance instead
       const repeatClosingMatch = text.match(/\[CLOSING_QUESTION:(\d)\]/);
-      if (repeatClosingMatch) {
+      if (repeatClosingMatch && !text.includes('[INTERVIEW_COMPLETE]')) {
         const scenarioNumber = parseInt(repeatClosingMatch[1], 10) as 1 | 2 | 3;
         if (closingQuestionAnsweredRef.current[scenarioNumber] === true) {
           if (__DEV__) console.warn('[Aria] Closing question repeat detected — advancing without displaying');
@@ -7995,6 +10469,7 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
           } else if (scenarioNumber === 2) {
             interviewMomentsCompleteRef.current[2] = true;
             currentInterviewMomentRef.current = 3;
+            resetScenarioCClientGatesOnly();
             nextContent = buildScenario2To3TransitionBody(participantFirstNameForSpoken, SCENARIO_3_TEXT);
           } else if (scenarioNumber === 3) {
             if (personalHandoffInjectedRef.current) {
@@ -8016,7 +10491,6 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
           const updatedMessages = [...messagesToUse, newAssistantMsg];
           setMessages(updatedMessages);
           applyInterviewProgressFromAssistantText(fullDisplay, progressRefsPayload);
-          await speakAssistantTurn(fullDisplay, ASSISTANT_INTERVIEW_SPEECH);
           setHighestScenarioReached((prev) => Math.max(prev, scenarioNumber));
           if (!scoredScenariosRef.current.has(scenarioNumber)) {
             scoredScenariosRef.current.add(scenarioNumber);
@@ -8026,6 +10500,8 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
             closingQuestionAskedRef.current[scenarioNumber] = false;
             closingQuestionAnsweredRef.current[scenarioNumber] = false;
           }
+          await notifyScenarioStarted(nextScenarioNum, updatedMessages);
+          await speakAssistantTurn(fullDisplay, ASSISTANT_INTERVIEW_SPEECH);
           lastAnsweredClosingScenarioRef.current = null;
           setVoiceState('idle');
           return;
@@ -8033,8 +10509,22 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
       }
 
       // Per-scenario completion token: strip token, show summary, insert score card in chat
-      // Process INTERVIEW_COMPLETE first — wait for TTS to finish before showing loading screen
+      // Closing-ack / repeat-closing failsafes above must not run when this token is present (see guards on those branches).
       if (text.includes('[INTERVIEW_COMPLETE]')) {
+        // #region agent log
+        fetch('http://127.0.0.1:7789/ingest/668e0bd5-3283-4492-9f48-e33846c18218', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'X-Debug-Session-Id': 'e43434' },
+          body: JSON.stringify({
+            sessionId: 'e43434',
+            location: 'AriaScreen.tsx:sendMessage:INTERVIEW_COMPLETE',
+            message: 'interview_complete_handler_entered',
+            data: { textLen: text.length, hasClosingQ: /\[CLOSING_QUESTION:/i.test(text) },
+            timestamp: Date.now(),
+            hypothesisId: 'H_prep_handoff',
+          }),
+        }).catch(() => {});
+        // #endregion
         void persistInterviewAttemptSessionLifecycle(interviewSessionAttemptIdRef.current, 'completed');
         await remoteLog('[0] INTERVIEW_COMPLETE token detected in response', {
           isAdmin,
@@ -8047,7 +10537,8 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
           console.log('=== INTERVIEW_COMPLETE TOKEN DETECTED ===');
         }
         interviewMomentsCompleteRef.current[4] = true;
-        currentInterviewMomentRef.current = 4;
+        interviewMomentsCompleteRef.current[5] = true;
+        currentInterviewMomentRef.current = 5;
         let closingRaw = stripControlTokens(text) || 'Thank you. That was really helpful.';
         closingRaw = stripFlatReflectionAcknowledgmentOpeners(closingRaw);
         closingRaw = stripGenericReflectionFillersFirstParagraph(closingRaw);
@@ -8105,10 +10596,18 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
         isInterviewCompleteRef.current = true;
         const transcriptForScoring = finalMessages.filter((m) => m.role === 'user' || m.role === 'assistant');
         try {
-          await speakAssistantTurn(displayText, { telemetrySource: 'turn' });
+          await speakAssistantTurn(displayText, {
+            telemetrySource: 'turn',
+            interviewSpeechRole: 'assistant_response',
+          });
         } catch {
           /* proceed to scoring even if TTS fails */
+        } finally {
+          /** `pendingCompletion` effect requires `voiceState === 'idle'`; parallel streaming and edge TTS paths could leave non-idle and block scoring/navigation indefinitely. */
+          setVoiceState('idle');
         }
+        /** Full-screen handoff as soon as closing `speakAssistantTurn` resolves — do not wait on `voiceState` matching `idle` (parallel streaming often leaves state non-idle while audio still flushes). */
+        setInterviewStatus('preparing_results');
         pendingCompletionTranscriptRef.current = transcriptForScoring;
         if (userId) {
           const completed = Array.from(scoredScenariosRef.current);
@@ -8132,13 +10631,20 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
               };
             }
           });
+          try {
           await saveInterviewProgress(userId, {
             messages: transcriptForScoring,
             scenariosCompleted: completed,
             scenarioScores: scenarioScoresPayload,
             currentScenario: getCurrentScenario(scoredScenariosRef.current),
+              resumeActiveScenario: resumeActiveScenarioRef.current,
             pendingCompletion: true,
           });
+          } catch (persistErr) {
+            void remoteLog('[WARN] saveInterviewProgress_failed_before_pending_completion', {
+              message: persistErr instanceof Error ? persistErr.message : String(persistErr),
+            });
+          }
         }
         // #region agent log
         fetch('http://127.0.0.1:7789/ingest/668e0bd5-3283-4492-9f48-e33846c18218', {
@@ -8222,27 +10728,65 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
         // #region agent log
         fetch('http://127.0.0.1:7789/ingest/668e0bd5-3283-4492-9f48-e33846c18218',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'c61a43'},body:JSON.stringify({sessionId:'c61a43',runId:'pre-fix',hypothesisId:'H10',location:'AriaScreen.tsx:scenarioCompleteDisplayTextNameCheck',message:'scenario_complete_display_text_name_presence',data:{displayPreview:displayText.slice(0,160),displayHasName:participantFirstNameForSpoken?displayText.toLowerCase().includes(participantFirstNameForSpoken.toLowerCase()):null,participantFirstNameForSpoken:participantFirstNameForSpoken??null},timestamp:Date.now()})}).catch(()=>{});
         // #endregion
+        if (scenarioNumber === 2 && !textContainsScenarioCVignetteBody(displayText)) {
+          void remoteLog('[S2_TO_S3_CANONICAL]', {
+            reason: 'scenario_complete_2_missing_s3_vignette',
+            preview: displayText.slice(0, 260),
+          });
+          const repaired = buildScenario2To3TransitionBody(participantFirstNameForSpoken, SCENARIO_3_TEXT);
+          displayText = dedupeAdjacentBoundaryValidationsBeforeParticipantName(
+            sanitizeAssistantInterviewerCharacterNames(repaired),
+            participantFirstNameForSpoken,
+          );
+          displayText = ensureSpokenTextIncludesParticipantFirstName(displayText, participantFirstNameForSpoken, {
+            allowAppendWhenMissing: true,
+          });
+        }
+        const momentBeforeScenarioComplete = currentInterviewMomentRef.current;
+        if (scenarioNumber === 1) {
+          interviewMomentsCompleteRef.current[1] = true;
+          currentInterviewMomentRef.current = 2;
+        } else if (scenarioNumber === 2) {
+          interviewMomentsCompleteRef.current[2] = true;
+          currentInterviewMomentRef.current = 3;
+          resetScenarioCClientGatesOnly();
+        } else if (scenarioNumber === 3) {
+          interviewMomentsCompleteRef.current[3] = true;
+        }
+        // #region agent log
+        fetch('http://127.0.0.1:7789/ingest/668e0bd5-3283-4492-9f48-e33846c18218', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'X-Debug-Session-Id': 'e43434' },
+          body: JSON.stringify({
+            sessionId: 'e43434',
+            runId: 'pre-fix',
+            hypothesisId: 'S2S3-MOMENT',
+            location: 'AriaScreen.tsx:SCENARIO_COMPLETE',
+            message: 'segment_close_moment_align',
+            data: {
+              scenarioNumber,
+              momentBefore: momentBeforeScenarioComplete,
+              momentAfter: currentInterviewMomentRef.current,
+              nextScenarioWillBe: scenarioNumber < 3 ? scenarioNumber + 1 : 3,
+              s3GatesReset: scenarioNumber === 2,
+            },
+            timestamp: Date.now(),
+          }),
+        }).catch(() => {});
+        // #endregion
         applyInterviewProgressFromAssistantText(displayText, progressRefsPayload);
         const transitionMsg: MessageWithScenario = { role: 'assistant', content: displayText, scenarioNumber };
         const nextScenarioNum = scenarioNumber < 3 ? (scenarioNumber + 1) as 2 | 3 : 3;
         currentScenarioRef.current = nextScenarioNum;
         const updatedMessages = [...messagesToUse, transitionMsg];
         setMessages(updatedMessages);
-        await speakAssistantTurn(displayText, ASSISTANT_INTERVIEW_SPEECH);
         setHighestScenarioReached((prev) => Math.max(prev, scenarioNumber));
         if (!scoredScenariosRef.current.has(scenarioNumber)) {
           scoredScenariosRef.current.add(scenarioNumber);
           scoreScenario(scenarioNumber, updatedMessages);
         }
-        if (scenarioNumber === 3) {
-          const corpus = extractScenario3UserCorpus(updatedMessages);
-          void remoteLog('[S3_THRESHOLD_POST_COMPLETE]', {
-            scenarioCThresholdStrict: hasScenarioCCommitmentThresholdInUserAnswer(corpus),
-            scenarioCThresholdLegacy: hasCommitmentThresholdSignal(corpus),
-            corpusCharCount: corpus.length,
-            corpusPreview: corpus.slice(0, 650),
-          });
-        }
+        await notifyScenarioStarted(nextScenarioNum, updatedMessages);
+        await speakAssistantTurn(displayText, ASSISTANT_INTERVIEW_SPEECH);
         if (__DEV__) {
           closingQuestionAskedRef.current[scenarioNumber] = false;
           closingQuestionAnsweredRef.current[scenarioNumber] = false;
@@ -8337,7 +10881,9 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
         currentInterviewMomentRef.current
       );
       const detectedScenario = detectScenarioFromResponse(displayText);
-      if (detectedScenario !== null) currentScenarioRef.current = detectedScenario;
+      if (detectedScenario !== null) {
+        currentScenarioRef.current = detectedScenario;
+      }
       const scenarioNum = currentScenarioRef.current ?? detectedScenario ?? getScenarioNumberForNewMessage(messagesToUse, 'assistant', displayText);
       if (isClosingQuestion(displayText)) {
         setClosingQuestionPending(true);
@@ -8354,7 +10900,17 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
       };
       lastAnsweredClosingScenarioRef.current = null;
       applyInterviewProgressFromAssistantText(displayText, progressRefsPayload);
-      setMessages([...messagesToUse, aiMsg]);
+      const updatedMessages = [...messagesToUse, aiMsg];
+      setMessages(updatedMessages);
+      /**
+       * `notifyScenarioStarted` only scores the just-finished scenario when it receives a message snapshot
+       * (`[SCENARIO_SCORE_ON_TRANSITION]`). The stream often advances Situation 1→2 / 2→3 via natural language
+       * without `[SCENARIO_COMPLETE:N]`; previously we called `notifyScenarioStarted(detected)` with **no** snapshot,
+       * so scenarios 1 & 2 never triggered `scoreScenario` until end-of-interview fallback (which could still fail).
+       */
+      if (detectedScenario !== null) {
+        void notifyScenarioStarted(detectedScenario, updatedMessages);
+      }
       const aiDetected = detectConstructs(text);
       setTouchedConstructs((prev) => [...new Set([...prev, ...aiDetected])]);
       await speakAssistantTurn(displayText, ASSISTANT_INTERVIEW_SPEECH);
@@ -8374,6 +10930,7 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
     usedPersonalExamples,
     markClosingQuestionAsked,
     markClosingQuestionAnswered,
+    notifyScenarioStarted,
   ]);
 
   const handlePressStart = useCallback(async () => {
@@ -8445,7 +11002,7 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
       nativeUri: string | null
     ): Promise<
       | { text: string; language: string | null; confidence: number | null }
-      | { kind: 'whisper_infra_exhausted' }
+      | { kind: 'whisper_infra_exhausted'; lastHttpStatus: number | null; failureReason: string }
       | null
     > => {
       void remoteLog('[TRANSCRIBE] entry', {
@@ -8746,7 +11303,15 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
               platform: r.platform,
             });
           }
-          return { kind: 'whisper_infra_exhausted' as const };
+          const lastHttpStatus =
+            typeof (e as { status?: number }).status === 'number'
+              ? (e as { status: number }).status
+              : null;
+          return {
+            kind: 'whisper_infra_exhausted' as const,
+            lastHttpStatus,
+            failureReason: whisperFailureReason(e),
+          };
         }
         if (userId) {
           const r = getSessionLogRuntime();
@@ -8890,8 +11455,6 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
     "I didn't catch any speech on that try. Tap the mic when you're ready and say that again.";
   const WHISPER_RATIO_REASK_PROMPT =
     'I only caught part of that — could you answer again in a full sentence?';
-  const WHISPER_INFRA_REASK_PROMPT =
-    "I'm having a little trouble on my end — could you say that one more time?";
 
   const releaseRecordingFnRef = useRef<
     | ((opts?: {
@@ -9240,9 +11803,13 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
       }
       if ('kind' in transcribed && transcribed.kind === 'whisper_infra_exhausted') {
         await deleteTurnAudioFile(nativeUri);
-        setMessages((prev) => [...prev, { role: 'assistant', content: WHISPER_INFRA_REASK_PROMPT }]);
+        const infraMsg = getWhisperInfraExhaustedUserMessage({
+          lastHttpStatus: transcribed.lastHttpStatus,
+          failureReason: transcribed.failureReason,
+        });
+        setMessages((prev) => [...prev, { role: 'assistant', content: infraMsg }]);
         setVoiceState('speaking');
-        await speakTextSafe(WHISPER_INFRA_REASK_PROMPT, {
+        await speakTextSafe(infraMsg, {
           telemetrySource: 'turn',
           skipLastQuestionRef: true,
         }).catch(() => {});
@@ -9263,13 +11830,34 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
       const turnContext = getWhisperReaskTurnContext(lastQuestionText);
       const shortAnswerOk = isShortAnswerOkForWhisperRatioGate(lastQuestionText);
       const ratioFlag = wps < 0.3 || (!shortAnswerOk && wc < 3);
-      const willRatioReask = shouldFireWhisperRatioReask({
+      const ratioReaskState = computeWhisperRatioReaskState({
         turnContext,
         transcriptText: userText,
         wordCount: wc,
         wordsPerSecond: wps,
         shortAnswerOk,
       });
+      let willRatioReask = ratioReaskState.shouldFire;
+      if (willRatioReask && whisperRatioReaskAttemptsForCurrentQuestionRef.current >= WHISPER_RATIO_REASK_MAX_ATTEMPTS_PER_QUESTION) {
+        willRatioReask = false;
+      }
+      const priorUserUtteranceCountForWhisperGate = messages.filter(
+        (m) => m.role === 'user' && !(m as { isWelcomeBack?: boolean }).isWelcomeBack
+      ).length;
+      const suppressMetaClassificationPostMetaAckAwaitingSubstantiveGate =
+        metaCommentAckAwaitingSubstantiveBaselineSeqRef.current !== null &&
+        substantiveInterviewQuestionDeliveredSeqRef.current === metaCommentAckAwaitingSubstantiveBaselineSeqRef.current;
+      const metaResolvedForWhisperGate = resolveMetaCommentForInterviewTurn(userText, {
+        lastQuestionText: lastQuestionTextRef.current,
+        priorUserUtteranceCount: priorUserUtteranceCountForWhisperGate,
+        isInterviewAppRoute,
+        hasProfileFirstName: !!getInterviewUserFirstNameForPrompt(profile),
+        suppressMetaClassificationPostMetaAckAwaitingSubstantive: suppressMetaClassificationPostMetaAckAwaitingSubstantiveGate,
+        spokenWordCount: wc,
+      });
+      if (willRatioReask && metaResolvedForWhisperGate.effective != null) {
+        willRatioReask = false;
+      }
       setLastWhisperRatioTelemetry(ratioFlag, durMs, wc);
       {
         const lastQ = lastQuestionText ?? '';
@@ -9295,6 +11883,11 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
               wpsRounded: Math.round(wps * 1000) / 1000,
               ratioFlag,
               willRatioReask,
+              ratioReaskShouldFire: ratioReaskState.shouldFire,
+              ratioReaskAttempts: whisperRatioReaskAttemptsForCurrentQuestionRef.current,
+              ratioReaskLogSuppressed: ratioReaskState.logSuppressedReason,
+              metaCommentEffectiveType: metaResolvedForWhisperGate.effective?.type ?? null,
+              ratioReaskSuppressedForMetaComment: metaResolvedForWhisperGate.effective != null,
             },
             timestamp: Date.now(),
             runId: 'post-fix',
@@ -9319,7 +11912,25 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
           platform: r.platform,
         });
       }
+      if (userId && ratioReaskState.logSuppressedReason === 'valid_hard_stop') {
+        const r = getSessionLogRuntime();
+        writeAudioSessionLog({
+          userId,
+          attemptId: r.attemptId,
+          eventType: 're_ask_suppressed',
+          eventData: {
+            re_ask_suppressed_reason: 'valid_hard_stop',
+            transcript_text: userText,
+            word_count: wc,
+            words_per_second: Math.round(wps * 1000) / 1000,
+            moment_number: currentInterviewMomentRef.current,
+            scenario_number: currentScenarioRef.current,
+          },
+          platform: r.platform,
+        });
+      }
       if (willRatioReask) {
+        whisperRatioReaskAttemptsForCurrentQuestionRef.current += 1;
         // #region agent log
         fetch('http://127.0.0.1:7789/ingest/668e0bd5-3283-4492-9f48-e33846c18218', {
           method: 'POST',
@@ -9359,6 +11970,7 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
           });
         }
         await deleteTurnAudioFile(nativeUri);
+        recoveryAssistantSpokenAtSubstantiveSeqRef.current = substantiveInterviewQuestionDeliveredSeqRef.current;
         setMessages((prev) => [...prev, { role: 'user', content: userText }, { role: 'assistant', content: WHISPER_RATIO_REASK_PROMPT }]);
         setVoiceState('speaking');
         await speakTextSafe(WHISPER_RATIO_REASK_PROMPT, {
@@ -10129,10 +12741,15 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
     unlockWebAudioForAutoplay();
     primeHtmlAudioForMobileTtsFromMicGesture();
     try {
-      await speakTextSafe(RESUME_WELCOME_BACK_MESSAGE, {
+      await speakTextSafe(resumeWelcomeMessageRef.current, {
         telemetrySource: 'greeting',
         ttsTriggerSource: 'gesture_handler',
       });
+      const intro = pendingScenarioIntroAfterResumeWelcomeRef.current;
+      pendingScenarioIntroAfterResumeWelcomeRef.current = null;
+      if (intro?.trim()) {
+        await speakTextSafe(intro, { telemetrySource: 'greeting', ttsTriggerSource: 'gesture_handler' });
+      }
     } finally {
       resumeRepeatChoicePendingRef.current = true;
     }
@@ -10143,56 +12760,209 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
       resumeLoadingFlowActiveRef.current = true;
       setResumeLoadingVisible(true);
       logSessionResumeState('loading');
-      if (saved.sessionAttemptId && userId) {
+      const bootstrapAttemptId = interviewSessionAttemptIdRef.current;
+      const savedAttemptId = saved.sessionAttemptId ?? null;
+      const attemptMismatch = Boolean(
+        savedAttemptId && bootstrapAttemptId && savedAttemptId !== bootstrapAttemptId
+      );
+      const attemptRowId =
+        userId && (savedAttemptId || bootstrapAttemptId)
+          ? attemptMismatch
+            ? bootstrapAttemptId
+            : savedAttemptId ?? bootstrapAttemptId
+          : null;
+
+      let planAttemptMismatch = attemptMismatch;
+      let resumeAttemptResumeScenario: number | null = null;
+      let didOrphanAttemptRebind = false;
+      if (attemptRowId && userId) {
         const { data: resumeAttempt } = await supabase
           .from('interview_attempts')
-          .select('id')
-          .eq('id', saved.sessionAttemptId)
+          .select('id, resume_active_scenario')
+          .eq('id', attemptRowId)
           .eq('user_id', userId)
           .maybeSingle();
         if (!resumeAttempt?.id) {
+          const bootstrapId = interviewSessionAttemptIdRef.current;
+          const userTurns = saved.messages?.filter((m) => m.role === 'user').length ?? 0;
+          const lastDone = lastFullyCompletedScenario(saved.scenariosCompleted ?? [], saved.scenarioScores);
+          const hasSubstantialLocalProgress =
+            userTurns >= 2 ||
+            (saved.scenariosCompleted?.length ?? 0) > 0 ||
+            lastDone > 0 ||
+            saved.resumeActiveScenario === 2 ||
+            saved.resumeActiveScenario === 3;
+          if (bootstrapId && hasSubstantialLocalProgress) {
+            didOrphanAttemptRebind = true;
+            planAttemptMismatch = false;
+            resumeAttemptResumeScenario = null;
+            interviewSessionAttemptIdRef.current = bootstrapId;
+            assignAttemptIdForSessionLogs(bootstrapId);
+            await saveInterviewToStorage(userId, {
+              ...saved,
+              sessionAttemptId: bootstrapId,
+            });
+            await supabase
+              .from('interview_attempts')
+              .update({
+                resume_active_scenario: saved.resumeActiveScenario ?? null,
+                transcript: saved.messages as unknown as object[],
+              })
+              .eq('id', bootstrapId)
+              .eq('user_id', userId);
+            await remoteLog('[resume] orphan_attempt_rebound_to_bootstrap', {
+              missingRowId: attemptRowId,
+              bootstrapId,
+              userTurns,
+              resumeActiveFromStorage: saved.resumeActiveScenario ?? null,
+            });
+            // #region agent log
+            fetch('http://127.0.0.1:7789/ingest/668e0bd5-3283-4492-9f48-e33846c18218', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json', 'X-Debug-Session-Id': 'e43434' },
+              body: JSON.stringify({
+                sessionId: 'e43434',
+                runId: 'post-fix',
+                hypothesisId: 'H-orphan-rebind',
+                location: 'AriaScreen.tsx:handleResume',
+                message: 'attempt_row_missing_rebound',
+                data: {
+                  missingRowId: attemptRowId,
+                  bootstrapId,
+                  userTurns,
+                  messageCount: saved.messages?.length ?? 0,
+                },
+                timestamp: Date.now(),
+              }),
+            }).catch(() => {});
+            // #endregion
+          } else {
           await clearInterviewFromStorage(userId);
-          await remoteLog('[resume] stale_session_attempt_cleared', { orphanAttemptId: saved.sessionAttemptId });
+            await remoteLog('[resume] stale_session_attempt_cleared', { orphanAttemptId: attemptRowId });
           resumeLoadingFlowActiveRef.current = false;
           setResumeLoadingVisible(false);
           setInterviewStatus('not_started');
+            hasResumedRef.current = false;
           return;
         }
+        } else {
+          const ras = resumeAttempt.resume_active_scenario;
+          resumeAttemptResumeScenario = typeof ras === 'number' ? ras : null;
+        }
       }
-      const restoredMessages = saved.messages ?? [];
-      const syncedMoments = syncInterviewMomentsFromTranscript(restoredMessages, saved.scenariosCompleted ?? []);
-      if (saved.sessionAttemptId) {
-        interviewSessionAttemptIdRef.current = saved.sessionAttemptId;
-        assignAttemptIdForSessionLogs(saved.sessionAttemptId);
+
+      const restoredForPlan = retagScenarioNumbersBeforeMomentFour(saved.messages ?? []);
+      const syncedForPlan = syncInterviewMomentsFromTranscript(restoredForPlan, saved.scenariosCompleted ?? []);
+      const resumePlan = computeInterviewResumePlan({
+        scenariosCompleted: saved.scenariosCompleted ?? [],
+        scenarioScores: saved.scenarioScores,
+        resumeActiveFromStorage: planAttemptMismatch ? undefined : saved.resumeActiveScenario,
+        resumeActiveFromAttempt: planAttemptMismatch ? null : resumeAttemptResumeScenario,
+        syncedMoments: syncedForPlan,
+      });
+
+      /** Only slice + replay full vignette TTS when attempt ids disagree — not for normal mid-scenario refresh (`replay_incomplete`), where users expect pick-up copy + optional repeat, not a forced vignette restart. */
+      const shouldRestartIncompleteScenario =
+        resumePlan.mode !== 'resume_post_scenarios' && planAttemptMismatch;
+      const transcriptMessages = shouldRestartIncompleteScenario
+        ? sliceMessagesBeforeScenarioIntro(restoredForPlan, resumePlan.resumeScenario)
+        : restoredForPlan;
+
+      void remoteLog('[REENTRY_RESUME]', {
+        lastCompletedScenario: resumePlan.lastCompletedScenario,
+        resumeScenario: resumePlan.resumeScenario,
+        mode: resumePlan.mode,
+        partialScenarioDataWritten: resumePlan.partialScenarioDataWritten,
+        resumeActiveFromAttempt: resumeAttemptResumeScenario,
+        resumeActiveFromStorage: saved.resumeActiveScenario ?? null,
+        attemptMismatch: planAttemptMismatch,
+        didOrphanAttemptRebind,
+        shouldRestartIncompleteScenario,
+        transcriptLenBefore: restoredForPlan.length,
+        transcriptLenAfter: transcriptMessages.length,
+      });
+
+      if (!didOrphanAttemptRebind && !attemptMismatch && savedAttemptId) {
+        interviewSessionAttemptIdRef.current = savedAttemptId;
+        assignAttemptIdForSessionLogs(savedAttemptId);
+      } else if (!didOrphanAttemptRebind && bootstrapAttemptId) {
+        assignAttemptIdForSessionLogs(bootstrapAttemptId);
       }
-      interviewMomentsCompleteRef.current = syncedMoments.momentsComplete;
-      currentInterviewMomentRef.current = syncedMoments.currentMoment;
-      personalHandoffInjectedRef.current = syncedMoments.personalHandoffInjected;
-      moment4ThresholdProbeAskedRef.current = false;
-      scenarioAContemptProbeAskedRef.current = restoredMessages.some(
+
+      interviewMomentsCompleteRef.current = resumePlan.momentsComplete;
+      currentInterviewMomentRef.current = resumePlan.effectiveMoment;
+      personalHandoffInjectedRef.current = resumePlan.personalHandoffInjected;
+      moment4ThresholdProbeAskedRef.current = transcriptMessages.some(
+        (m) =>
+          m.role === 'assistant' &&
+          typeof (m as { content?: string }).content === 'string' &&
+          looksLikeMoment4ThresholdQuestion((m as { content?: string }).content ?? ''),
+      );
+      moment4PostGrudgeSpecificityResolvedRef.current =
+        deriveMoment4PostGrudgeSpecificityResolvedFromMessages(transcriptMessages);
+      moment4ClientSpecificityProbeInjectedRef.current = transcriptMessages.some(
+        (m) =>
+          m.role === 'assistant' &&
+          looksLikeMoment4SpecificityFollowUpPrompt((m as { content?: string }).content ?? '')
+      );
+      moment5AccountabilityProbeFiredRef.current = transcriptMessages.some(
+        (m) =>
+          m.role === 'assistant' &&
+          looksLikeMoment5AccountabilityProbeAssistantPrompt((m as { content?: string }).content ?? '')
+      );
+      const transcriptHasM5PrimaryConflict = transcriptMessages.some(
+        (m) =>
+          m.role === 'assistant' &&
+          typeof (m as { content?: string }).content === 'string' &&
+          transcriptAssistantContainsMoment5PrimaryConflictQuestion((m as { content?: string }).content ?? '')
+      );
+      moment5QuestionDeliveredRef.current = transcriptHasM5PrimaryConflict;
+      moment5PrimaryAnchorDeliveredSessionRef.current = transcriptHasM5PrimaryConflict;
+      moment5PostPromptUserTurnCountRef.current = countUserTurnsAfterLastMoment5PrimaryAnchor(
+        transcriptMessages,
+        moment5PrimaryAnchorDeliveredSessionRef.current,
+      );
+      scenarioAContemptProbeAskedRef.current = transcriptMessages.some(
         (m) =>
           m.role === 'assistant' &&
           looksLikeScenarioAContemptProbeQuestion((m as { content?: string }).content ?? '')
       );
-      const completedSet = new Set(saved.scenariosCompleted ?? []);
+      s2RepairProbeDeliveredRef.current = transcriptMessages.some(
+        (m) =>
+          m.role === 'assistant' &&
+          looksLikeScenarioBRepairAsJamesQuestion((m as { content?: string }).content ?? ''),
+      );
+      const completedSet = new Set<number>(saved.scenariosCompleted ?? []);
+      for (const n of [1, 2, 3] as const) {
+        if (scenarioHasPersistedScores(n, saved.scenarioScores)) completedSet.add(n);
+      }
       scoredScenariosRef.current = completedSet;
-      const maxCompleted = completedSet.size > 0 ? Math.max(...completedSet) : 1;
+      const maxCompleted = lastFullyCompletedScenario(saved.scenariosCompleted ?? [], saved.scenarioScores);
       setHighestScenarioReached((prev) => Math.max(prev, maxCompleted));
 
-      const restoredScenarioNum = ((): 1 | 2 | 3 => {
-        const cs = saved.currentScenario;
-        if (cs === 1 || cs === 2 || cs === 3) return cs;
-        for (let i = restoredMessages.length - 1; i >= 0; i--) {
-          const sn = (restoredMessages[i] as MessageWithScenario).scenarioNumber;
-          if (sn === 1 || sn === 2 || sn === 3) return sn;
-        }
-        const n = getCurrentScenario(completedSet);
-        return n === null ? 3 : n;
-      })();
-      currentScenarioRef.current = syncedMoments.currentMoment >= 4 ? 3 : restoredScenarioNum;
+      currentScenarioRef.current = resumePlan.resumeScenario;
+      resumeActiveScenarioRef.current = resumePlan.mode === 'resume_post_scenarios' ? null : resumePlan.resumeScenario;
 
-      const scoreCards: { role: string; content: string; isScoreCard?: boolean }[] = (saved.scenariosCompleted ?? [])
-        .slice()
+      const persistenceAttemptId = interviewSessionAttemptIdRef.current ?? savedAttemptId;
+      if (persistenceAttemptId && userId) {
+        await supabase
+          .from('interview_attempts')
+          .update({ resume_active_scenario: resumeActiveScenarioRef.current })
+          .eq('id', persistenceAttemptId)
+          .eq('user_id', userId);
+        await saveInterviewToStorage(userId, {
+          ...saved,
+          sessionAttemptId: persistenceAttemptId,
+          messages: transcriptMessages,
+          resumeActiveScenario: resumeActiveScenarioRef.current,
+        });
+      }
+
+      const scoredNums = new Set<number>(saved.scenariosCompleted ?? []);
+      for (const n of [1, 2, 3] as const) {
+        if (scenarioHasPersistedScores(n, saved.scenarioScores)) scoredNums.add(n);
+      }
+      const scoreCards: { role: string; content: string; isScoreCard?: boolean }[] = [...scoredNums]
         .sort((a, b) => a - b)
         .map((num) => {
           const s = saved.scenarioScores?.[num];
@@ -10205,19 +12975,26 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
             keyEvidence: s.keyEvidence ?? {},
             specificity: 'high',
             repairCoherenceIssue: null,
+            contempt_tier_breakdown: parseContemptTierBreakdown(
+              (s as { contempt_tier_breakdown?: unknown }).contempt_tier_breakdown
+            ),
           };
           return { role: 'system', content: formatScoreMessage(fake), isScoreCard: true } as { role: string; content: string; isScoreCard?: boolean };
         })
         .filter((x): x is { role: string; content: string; isScoreCard?: boolean } => x != null);
-      const fullMessages = [...restoredMessages, ...scoreCards];
-      setMessages(fullMessages);
 
-      const assistantForRef = fullMessages.filter((m) => isAssistantBubbleForTranscript(m));
-      const refSync = syncReferenceCardStateFromAssistantMessages(assistantForRef);
-      committedScenarioRef.current = refSync.scenario;
-      setReferenceCardScenario(refSync.scenario);
-      setReferenceCardPrompt(refSync.prompt);
-      setInterviewUiPhase(refSync.phase);
+      const scenarioIntroBody = shouldRestartIncompleteScenario
+        ? getScenarioResumeIntroAssistantBody(resumePlan.resumeScenario)
+        : null;
+      const scenarioIntroMsg = scenarioIntroBody
+        ? ({
+            role: 'assistant',
+            content: scenarioIntroBody,
+            scenarioNumber: resumePlan.resumeScenario,
+          } as MessageWithScenario)
+        : null;
+
+      const fullMessages = [...transcriptMessages, ...scoreCards];
 
       const scenarioScoresRestored: Record<number, ScenarioScoreResult> = {};
       Object.entries(saved.scenarioScores ?? {}).forEach(([numStr, s]) => {
@@ -10231,6 +13008,9 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
           keyEvidence: s.keyEvidence ?? {},
           specificity: 'high',
           repairCoherenceIssue: null,
+          contempt_tier_breakdown: parseContemptTierBreakdown(
+            (s as { contempt_tier_breakdown?: unknown }).contempt_tier_breakdown
+          ),
         };
       });
       setScenarioScores(scenarioScoresRestored);
@@ -10252,21 +13032,77 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
           }))
       );
 
-      const allDetected = restoredMessages
+      const allDetected = transcriptMessages
         .filter((m) => m.role === 'assistant')
         .flatMap((m) => detectConstructs(m.content));
       setTouchedConstructs([...new Set(allDetected)]);
 
-      resumeLastAssistantTextRef.current = extractLastInterviewerMessage(fullMessages);
-
-      const welcomeBack = RESUME_WELCOME_BACK_MESSAGE;
+      // #region agent log
+      fetch('http://127.0.0.1:7789/ingest/668e0bd5-3283-4492-9f48-e33846c18218', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'X-Debug-Session-Id': 'ca824c' },
+        body: JSON.stringify({
+          sessionId: 'ca824c',
+          hypothesisId: 'H_plan',
+          location: 'AriaScreen.tsx:resume:before_buildResumeWelcomeMessage',
+          message: 'resume_plan_snapshot',
+          data: {
+            runId: 'post-copy-fix',
+            mode: resumePlan.mode,
+            resumeScenario: resumePlan.resumeScenario,
+            effectiveMoment: resumePlan.effectiveMoment,
+            partialScenarioDataWritten: resumePlan.partialScenarioDataWritten,
+            lastCompletedScenario: resumePlan.lastCompletedScenario,
+          },
+          timestamp: Date.now(),
+        }),
+      }).catch(() => {});
+      // #endregion
+      resumeWelcomeMessageRef.current = buildResumeWelcomeMessage({
+        mode: resumePlan.mode,
+        resumeScenario: resumePlan.resumeScenario,
+      });
+      const welcomeBack = resumeWelcomeMessageRef.current;
       const welcomeMsg = {
         role: 'assistant',
         content: welcomeBack,
         isWelcomeBack: true,
         scenarioNumber: currentScenarioRef.current,
       } as MessageWithScenario;
-      setMessages([...fullMessages, welcomeMsg]);
+
+      const messagesWithWelcome = scenarioIntroMsg ? [...fullMessages, welcomeMsg, scenarioIntroMsg] : [...fullMessages, welcomeMsg];
+      resumeLastAssistantTextRef.current = extractLastInterviewerMessage(messagesWithWelcome);
+      setMessages(messagesWithWelcome);
+
+      const assistantForRef = messagesWithWelcome.filter((m) => isAssistantBubbleForTranscript(m));
+      const refSync = syncReferenceCardStateFromAssistantMessages(assistantForRef);
+      // #region agent log
+      fetch('http://127.0.0.1:7789/ingest/668e0bd5-3283-4492-9f48-e33846c18218', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'X-Debug-Session-Id': 'e43434' },
+        body: JSON.stringify({
+          sessionId: 'e43434',
+          runId: 'post-fix',
+          hypothesisId: 'H-modal-mismatch',
+          location: 'AriaScreen.tsx:handleResume:after_refSync',
+          message: 'reference_card_vs_transcript_m5',
+          data: {
+            transcriptHasM5PrimaryConflict,
+            effectiveMoment: resumePlan.effectiveMoment,
+            refPromptPreview: (refSync.prompt ?? '').slice(0, 140),
+            anchorLabel: refSync.scenario?.label ?? null,
+          },
+          timestamp: Date.now(),
+        }),
+      }).catch(() => {});
+      // #endregion
+      committedScenarioRef.current = refSync.scenario;
+      setReferenceCardScenario(refSync.scenario);
+      setReferenceCardPrompt(refSync.prompt);
+      setInterviewUiPhase(refSync.phase);
+
+      pendingScenarioIntroAfterResumeWelcomeRef.current =
+        Platform.OS === 'web' && scenarioIntroBody ? scenarioIntroBody : null;
 
       resumeRepeatChoicePendingRef.current = false;
       markSessionResumedForNextRecordingStart();
@@ -10285,12 +13121,16 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
         void (async () => {
           try {
             await speakTextSafe(welcomeBack, { telemetrySource: 'greeting', ttsTriggerSource: 'callback' });
+            if (scenarioIntroBody?.trim()) {
+              await speakTextSafe(scenarioIntroBody, { telemetrySource: 'greeting', ttsTriggerSource: 'callback' });
+            }
           } finally {
             resumeRepeatChoicePendingRef.current = true;
           }
         })();
       }
 
+      setInterviewStatus('in_progress');
       setStatus('active');
       void (async () => {
         await awaitScreenReadySignal();
@@ -10397,29 +13237,55 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
       }
       // Don't resume from greeting-only state (avoids infinite resume loop)
       if (isGreetingOnly(saved.messages)) {
+        // #region agent log
+        fetch('http://127.0.0.1:7789/ingest/668e0bd5-3283-4492-9f48-e33846c18218', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'X-Debug-Session-Id': 'e43434' },
+          body: JSON.stringify({
+            sessionId: 'e43434',
+            runId: 'post-fix',
+            hypothesisId: 'H-greeting-wipe',
+            location: 'AriaScreen.tsx:resumeEffect',
+            message: 'greeting_only_storage_cleared',
+            data: {
+              savedLen: saved.messages?.length ?? 0,
+              userTurns: saved.messages?.filter((m) => m.role === 'user').length ?? 0,
+              resumeActiveScenario: saved.resumeActiveScenario ?? null,
+            },
+            timestamp: Date.now(),
+          }),
+        }).catch(() => {});
+        // #endregion
         await clearInterviewFromStorage(userId);
         return;
       }
+      const lastCompletedFromPayload = lastFullyCompletedScenario(saved.scenariosCompleted ?? [], saved.scenarioScores);
+      const userTurnsTotal = saved.messages?.filter((m) => m.role === 'user').length ?? 0;
       const hasScenarioProgress =
-        (saved.currentScenario ?? 0) >= 1 &&
-        (saved.messages?.filter((m) => m.role === 'user').length ?? 0) >= 2;
-      const hasCompletedScenario = (saved.scenariosCompleted?.length ?? 0) > 0;
+        ((saved.currentScenario ?? 0) >= 1 && userTurnsTotal >= 2) ||
+        ((saved.resumeActiveScenario === 2 || saved.resumeActiveScenario === 3) && userTurnsTotal >= 1) ||
+        (lastCompletedFromPayload > 0 && userTurnsTotal >= 1);
+      const hasCompletedScenario =
+        (saved.scenariosCompleted?.length ?? 0) > 0 || lastCompletedFromPayload > 0;
       if (hasScenarioProgress || hasCompletedScenario) {
         const completedCount = saved.scenariosCompleted?.length ?? 0;
         // #region agent log
         fetch('http://127.0.0.1:7789/ingest/668e0bd5-3283-4492-9f48-e33846c18218', {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json', 'X-Debug-Session-Id': 'c61a43' },
+          headers: { 'Content-Type': 'application/json', 'X-Debug-Session-Id': 'e43434' },
           body: JSON.stringify({
-            sessionId: 'c61a43',
-            runId: 'pre-fix',
-            hypothesisId: 'H4',
+            sessionId: 'e43434',
+            runId: 'post-fix',
+            hypothesisId: 'H-resume-branch',
             location: 'AriaScreen.tsx:resumeEffect',
             message: 'resume_decision',
             data: {
               hasScenarioProgress,
               hasCompletedScenario,
               completedCount,
+              lastCompletedFromPayload,
+              userTurnsTotal,
+              resumeActiveScenario: saved.resumeActiveScenario ?? null,
               willResume: completedCount < 3,
             },
             timestamp: Date.now(),
@@ -10429,6 +13295,7 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
         if (completedCount < 3) {
           hasResumedRef.current = true;
           void handleResume(saved).catch(() => {
+            hasResumedRef.current = false;
             resumeLoadingFlowActiveRef.current = false;
             setResumeLoadingVisible(false);
           });
@@ -10565,7 +13432,13 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
         lastVoiceTurnLanguageRef.current = null;
         lastVoiceTurnConfidenceRef.current = null;
         currentScenarioRef.current = 1;
-        setMessages([{ role: 'assistant', content: openingLineText, scenarioNumber: 1 } as MessageWithScenario]);
+        const openingRowWeb: MessageWithScenario = {
+          role: 'assistant',
+          content: openingLineText,
+          scenarioNumber: 1,
+        };
+        setMessages([openingRowWeb]);
+        await notifyScenarioStarted(1, [openingRowWeb], { allowMessageHistoryShrink: true });
         const el = getPrefetchedGreetingHtmlAudioElement();
         if (el) {
           await speakTextSafe(openingLineText, {
@@ -10811,7 +13684,13 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
         if (__DEV__) console.error('[Aria] INIT: No API key or proxy — showing fallback message');
         const welcomeFallback = "Hi, I'm Amoraea. I'll be with you in just a moment.";
         currentScenarioRef.current = 1;
-        setMessages([{ role: 'assistant', content: welcomeFallback, scenarioNumber: 1 } as MessageWithScenario]);
+        const openingRowFallback: MessageWithScenario = {
+          role: 'assistant',
+          content: welcomeFallback,
+          scenarioNumber: 1,
+        };
+        setMessages([openingRowFallback]);
+        await notifyScenarioStarted(1, [openingRowFallback], { allowMessageHistoryShrink: true });
         setVoiceState('idle');
         await speakTextSafe(welcomeFallback, { telemetrySource: 'greeting' }).catch(() => {});
         return;
@@ -10821,7 +13700,13 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
         // 3 — Deliver the real greeting (scenario 1 starts here)
         await remoteLog('[START] Delivering real greeting');
         currentScenarioRef.current = 1;
-        setMessages([{ role: 'assistant', content: openingLineText, scenarioNumber: 1 } as MessageWithScenario]);
+        const openingRowNative: MessageWithScenario = {
+          role: 'assistant',
+          content: openingLineText,
+          scenarioNumber: 1,
+        };
+        setMessages([openingRowNative]);
+        await notifyScenarioStarted(1, [openingRowNative], { allowMessageHistoryShrink: true });
         await speakTextSafe(openingLineText, {
           telemetrySource: 'greeting',
           ttsTriggerSource: opts?.fromUserGesture ? 'gesture_handler' : 'callback',
@@ -10845,7 +13730,13 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
       setStatus('active');
       setInterviewStatus('in_progress');
       const fallbackMsg = "Hi, I'm Amoraea. I'll be with you in just a moment.";
-      setMessages([{ role: 'assistant', content: fallbackMsg, scenarioNumber: 1 } as MessageWithScenario]);
+      const openingRowErr: MessageWithScenario = {
+        role: 'assistant',
+        content: fallbackMsg,
+        scenarioNumber: 1,
+      };
+      setMessages([openingRowErr]);
+      await notifyScenarioStarted(1, [openingRowErr], { allowMessageHistoryShrink: true });
       await speakTextSafe(fallbackMsg, { telemetrySource: 'greeting' }).catch(() => {});
     }
   }, [
@@ -10857,6 +13748,7 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
     profile?.isAlphaTester,
     profile?.inviteCode,
     interviewAttemptBootstrap,
+    notifyScenarioStarted,
   ]);
 
   useEffect(() => {
@@ -11047,6 +13939,21 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
     }
     const isStandardOnboardingApplicant =
       isOnboardingFlow && !!userId && !!profile && !profile.isAlphaTester && !isAdminConsoleAccount;
+    const hydrateScenarioScoresFromAttemptIfNeeded = async () => {
+      const aid = interviewSessionAttemptIdRef.current;
+      if (!aid || !userId) return;
+      const rowCells = await fetchAttemptScenarioScoreCells(supabase, aid);
+      if (!rowCells) return;
+      for (const n of [1, 2, 3] as const) {
+        const cell =
+          n === 1 ? rowCells.scenario_1_scores : n === 2 ? rowCells.scenario_2_scores : rowCells.scenario_3_scores;
+        if (!scenarioScoresRef.current[n] && scenarioScoresMeaningful(cell)) {
+          const h = scenarioDbBundleToScenarioScoreResult(n, cell);
+          scenarioScoresRef.current[n] = h;
+          setScenarioScores((prev) => ({ ...prev, [n]: h }));
+        }
+      }
+    };
     if (isStandardOnboardingApplicant && anthropicConfigured) {
       let serverDelegateOk = false;
       try {
@@ -11068,32 +13975,39 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
          * (e.g. weak scenarioNumber tags) left scenario_*_scores null while holistic pillar_scores still saved.
          */
         const msgsDeferred = finalMessages as MessageWithScenario[];
+        await hydrateScenarioScoresFromAttemptIfNeeded();
         const missingForDeferred = ([1, 2, 3] as const).filter((n) => !scenarioScoresRef.current[n]);
         if (missingForDeferred.length > 0) {
-          await remoteLog('[STANDARD] rescore missing scenarios before deferred DB row', {
+          await remoteLog('[STANDARD] rescore scenarios still missing after DB hydrate (fallback only)', {
             missing: missingForDeferred,
           });
-          await Promise.all(
-            missingForDeferred.map(async (scenarioNum) => {
-              const taggedMessages = msgsDeferred.filter(
-                (m) => (m as MessageWithScenario).scenarioNumber === scenarioNum,
-              );
-              const inferredMessages = inferScenarioMessages(msgsDeferred, scenarioNum);
-              const messagesToScore =
-                taggedMessages.length >= inferredMessages.length ? taggedMessages : inferredMessages;
-              if (messagesToScore.length >= 2) {
-                await scoreScenario(scenarioNum, messagesToScore);
-              } else {
-                await remoteLog('[STANDARD] deferred persist: cannot rescore scenario (insufficient messages)', {
-                  scenarioNum,
-                  tagged: taggedMessages.length,
-                  inferred: inferredMessages.length,
-                });
-              }
-            }),
-          );
+          /** Run sequentially: reduces proxy burst failures and keeps score writes deterministic. */
+          for (const scenarioNum of missingForDeferred) {
+            const taggedMessages = msgsDeferred.filter(
+              (m) => (m as MessageWithScenario).scenarioNumber === scenarioNum,
+            );
+            const inferredMessages = inferScenarioMessages(msgsDeferred, scenarioNum);
+            const messagesToScore = pickMessagesForScenarioScoring(msgsDeferred, scenarioNum);
+            if (messagesToScore.length >= 2) {
+              await scoreScenario(scenarioNum, messagesToScore);
+            } else {
+              await remoteLog('[STANDARD] deferred persist: cannot rescore scenario (insufficient messages)', {
+                scenarioNum,
+                tagged: taggedMessages.length,
+                inferred: inferredMessages.length,
+                picked: messagesToScore.length,
+              });
+            }
+          }
+          const stillMissingAfterRescore = ([1, 2, 3] as const).filter((n) => !scenarioScoresRef.current[n]);
+          if (stillMissingAfterRescore.length > 0) {
+            await remoteLog('[STANDARD] rescore attempt finished with missing scenarios', {
+              missing: stillMissingAfterRescore,
+            });
+          }
         }
         let moment4ForAggregate: ReturnType<typeof sanitizePersonalMomentScoresForAggregate> | null = null;
+        let moment5ForAggregate: ReturnType<typeof sanitizeMoment5PersonalScoresForAggregate> | null = null;
         if (apiUrl) {
           const personalSlices = inferPersonalMomentSlices(msgsDeferred);
           const slice = personalSlices.moment4;
@@ -11116,7 +14030,12 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
                     body: JSON.stringify({
                       model: 'claude-sonnet-4-20250514',
                       max_tokens: 900,
-                      messages: [{ role: 'user', content: buildPersonalMomentScoringPrompt(scoringSlice) }],
+                      messages: [
+                        {
+                          role: 'user',
+                          content: buildPersonalMomentScoringPrompt(scoringSlice, moment4SpecificityScoringRef.current),
+                        },
+                      ],
                     }),
                   });
                   const data = await res.json();
@@ -11130,6 +14049,12 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
                   const raw = (data.content?.[0]?.text ?? '{}') as string;
                   const parsedM4 = parseJsonObjectFromModelText(raw) as PersonalMomentScoreResult;
                   parsedM4.pillarScores = normalizeScoresByEvidence(parsedM4.pillarScores, parsedM4.keyEvidence);
+                  applyElaborationAbsenceAfterNormalizeMoment4(
+                    parsedM4,
+                    scoringSlice,
+                    moment4SpecificityScoringRef.current,
+                  );
+                  normalizePersonalMomentContemptTierBreakdown(parsedM4);
                   return parsedM4;
                 },
                 {
@@ -11149,7 +14074,9 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
               if (deferredMoment4NarrativeRef.current) {
                 deferredMoment4NarrativeRef.current = null;
               }
-              moment4ForAggregate = sanitizePersonalMomentScoresForAggregate(scored);
+              moment4ForAggregate = sanitizePersonalMomentScoresForAggregate(
+                scored as unknown as PersonalMomentSliceForSanitize,
+              );
               // #region agent log
               fetch('http://127.0.0.1:7789/ingest/668e0bd5-3283-4492-9f48-e33846c18218', {
                 method: 'POST',
@@ -11196,8 +14123,73 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
                 timestamp: Date.now(),
                 hypothesisId: 'M4-STD',
               }),
-            }).catch(() => {});
+            }            ).catch(() => {});
             // #endregion
+          }
+          const sliceM5 = personalSlices.moment5;
+          const userTurnsM5 = sliceM5.filter((m) => m.role === 'user').length;
+          if (userTurnsM5 >= 1) {
+            const m5Meta: Moment5ClientScoringMetadata =
+              moment5ClientScoringMetaRef.current ?? {
+                accountabilityProbeFired: moment5AccountabilityProbeFiredRef.current,
+                probeTriggerReason: moment5AccountabilityProbeFiredRef.current
+                  ? 'lacks_explicit_self_accountability'
+                  : undefined,
+              };
+            try {
+              const scoredM5 = await withRetry(
+                async (): Promise<PersonalMomentScoreResult> => {
+                  const res = await fetch(apiUrl, {
+                    method: 'POST',
+                    headers,
+                    body: JSON.stringify({
+                      model: 'claude-sonnet-4-20250514',
+                      max_tokens: 900,
+                      messages: [
+                        {
+                          role: 'user',
+                          content: buildMoment5AccountabilityScoringPrompt(sliceM5, m5Meta),
+                        },
+                      ],
+                    }),
+                  });
+                  const data = await res.json();
+                  if (!res.ok) {
+                    const e = new Error(
+                      (data as { error?: { message?: string } })?.error?.message ?? `HTTP ${res.status}`
+                    );
+                    (e as Error & { status?: number }).status = res.status;
+                    throw e;
+                  }
+                  const raw = (data.content?.[0]?.text ?? '{}') as string;
+                  const parsedM5 = parseJsonObjectFromModelText(raw) as PersonalMomentScoreResult;
+                  parsedM5.pillarScores = normalizeScoresByEvidence(parsedM5.pillarScores, parsedM5.keyEvidence);
+                  applyElaborationAbsenceAfterNormalizeMoment5(parsedM5, sliceM5);
+                  normalizePersonalMomentContemptTierBreakdown(parsedM5);
+                  return parsedM5;
+                },
+                {
+                  retries: 2,
+                  baseDelay: 5000,
+                  maxDelay: 20000,
+                  context: 'standard deferred moment 5',
+                  sessionLog: userId
+                    ? {
+                        userId,
+                        attemptId: getSessionLogRuntime().attemptId,
+                        platform: getSessionLogRuntime().platform,
+                      }
+                    : undefined,
+                }
+              );
+              moment5ForAggregate = sanitizeMoment5PersonalScoresForAggregate(
+                scoredM5 as unknown as PersonalMoment5SliceForSanitize,
+              );
+            } catch (err) {
+              await remoteLog('[STANDARD] moment 5 scoring failed', {
+                message: err instanceof Error ? err.message : String(err),
+              });
+            }
           }
         }
         const bundle = (n: 1 | 2 | 3) => {
@@ -11210,6 +14202,22 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
             scenarioName: s.scenarioName,
           };
         };
+        const completionGateStandard = evaluateInterviewCompletionGate({
+          scenario1: bundle(1),
+          scenario2: bundle(2),
+          scenario3: bundle(3),
+          moment4: moment4ForAggregate,
+        });
+        if (!completionGateStandard.ok) {
+          await remoteLog('[COMPLETION_GATE_FAIL]', {
+            path: 'standard_deferred',
+            incomplete_reason: completionGateStandard.incomplete_reason,
+            missingScenarioNumbers: completionGateStandard.missingScenarioNumbers,
+            missingMoment4: completionGateStandard.missingMoment4,
+            detail: completionGateStandard.detail,
+            why: 'Deferred persist: withhold weighted scoring and pass until all scenarios and Moment 4 are scored',
+          });
+        }
         const existingAttemptId = interviewSessionAttemptIdRef.current;
         const rowPayload: Record<string, unknown> = {
           user_id: userId,
@@ -11220,6 +14228,13 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
           scenario_1_scores: bundle(1),
           scenario_2_scores: bundle(2),
           scenario_3_scores: bundle(3),
+          ...(completionGateStandard.ok
+            ? {}
+            : {
+                incomplete_reason: completionGateStandard.incomplete_reason,
+                weighted_score: null,
+                passed: false,
+              }),
           scenario_specific_patterns: {
             moment_4_scores: moment4ForAggregate
               ? {
@@ -11229,11 +14244,30 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
                   summary: moment4ForAggregate.summary,
                   specificity: moment4ForAggregate.specificity,
                   momentName: moment4ForAggregate.momentName,
+                  ...(moment4SpecificityScoringRef.current
+                    ? { specificityScoringMetadata: moment4SpecificityScoringRef.current }
+                    : {}),
                 }
               : null,
-            moment_5_scores: null,
+            moment_5_scores: moment5ForAggregate
+              ? {
+                  pillarScores: moment5ForAggregate.pillarScores,
+                  pillarConfidence: moment5ForAggregate.pillarConfidence,
+                  keyEvidence: moment5ForAggregate.keyEvidence,
+                  summary: moment5ForAggregate.summary,
+                  specificity: moment5ForAggregate.specificity,
+                  momentName: moment5ForAggregate.momentName,
+                  scoringMetadata:
+                    moment5ClientScoringMetaRef.current ?? {
+                      accountabilityProbeFired: moment5AccountabilityProbeFiredRef.current,
+                      probeTriggerReason: moment5AccountabilityProbeFiredRef.current
+                        ? 'lacks_explicit_self_accountability'
+                        : undefined,
+                    },
+                }
+              : null,
           },
-          scoring_deferred: true,
+          scoring_deferred: completionGateStandard.ok,
           interview_typology_context: context,
         };
         // #region agent log
@@ -11283,7 +14317,7 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
           .from('users')
           .update({
             interview_completed: true,
-            interview_passed: interviewPassWhileScoringPending(passOverride),
+            interview_passed: completionGateStandard.ok ? interviewPassWhileScoringPending(passOverride) : false,
             interview_passed_computed: null,
             interview_weighted_score: null,
             interview_completed_at: new Date().toISOString(),
@@ -11299,6 +14333,7 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
         }
         await ensureShareableReferralCodeForReferrer(userId);
         assignAttemptIdForSessionLogs(attemptId);
+        if (completionGateStandard.ok) {
         const { data: edgeData, error: edgeInvokeError } = await supabase.functions.invoke<{
           ok?: boolean;
           error?: string;
@@ -11328,6 +14363,18 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
           });
           throw new Error('EDGE_SKIPPED_NOT_DEFERRED');
         }
+          if (edgeBody?.skipped === 'completion_gate_incomplete') {
+            await remoteLog('[STANDARD] complete-standard-interview held attempt (server completion gate)', {
+              attemptId,
+            });
+            writeSessionLog({
+              userId,
+              attemptId,
+              eventType: 'session_complete',
+              eventData: { path: 'standard_onboarding_incomplete_gate_server', attemptId },
+              platform: getSessionLogRuntime().platform,
+            });
+          } else {
         writeSessionLog({
           userId,
           attemptId,
@@ -11335,11 +14382,41 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
           eventData: { path: 'standard_onboarding_server_scoring', server_delegate: true, edge_ok: true },
           platform: getSessionLogRuntime().platform,
         });
+            {
+              const rtp = getSessionLogRuntime();
+              void runCommunicationStylePipelineAfterSave(
+                userId,
+                attemptId,
+                interviewSessionIdRef.current,
+                { platform: rtp.platform }
+              );
+            }
+          }
+        } else {
+          await remoteLog('[STANDARD] complete-standard-interview not invoked — completion gate incomplete', {
+            attemptId,
+            incomplete_reason: completionGateStandard.incomplete_reason,
+            detail: completionGateStandard.detail,
+          });
+          writeSessionLog({
+            userId,
+            attemptId,
+            eventType: 'session_complete',
+            eventData: {
+              path: 'standard_onboarding_incomplete_gate',
+              incomplete_reason: completionGateStandard.incomplete_reason,
+            },
+            platform: getSessionLogRuntime().platform,
+          });
+        }
         await clearInterviewFromStorage(userId);
         await remoteLog('[STANDARD] application saved; post-interview (server scoring complete)', {
           attemptId,
         });
-        replaceWithStandardApplicantProcessingHandoffForUser(navigation, userId);
+        replaceWithStandardApplicantProcessingHandoffForUser(navigation, userId, {
+          interviewSessionId: interviewSessionIdRef.current,
+          source: 'scoreInterview_standard_server_delegate',
+        });
         setStatus('results');
         serverDelegateOk = true;
       } catch (err) {
@@ -11358,8 +14435,16 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
     await remoteLog('[2] Screen set to scoring');
     if (!ANTHROPIC_API_KEY && !ANTHROPIC_PROXY_URL) {
       const weightedMinFallback = await resolveWeightedPassMinAfterReferralFulfillment(userId);
+      const skipOptsFallback = attachSkipPenaltyGateOptions(scenarioSkipConfirmedCountRef.current);
       const fallbackGate = computeGateResult({ ...FALLBACK_MARKER_SCORES_MID }, null, {
         weightedPassMin: weightedMinFallback,
+        scenarioPillarScoresByScenario: {
+          1: scenarioScoresRef.current[1]?.pillarScores,
+          2: scenarioScoresRef.current[2]?.pillarScores,
+          3: scenarioScoresRef.current[3]?.pillarScores,
+        },
+        skipPenaltyTotal: skipOptsFallback.skipPenaltyTotal,
+        skipAutoFail: skipOptsFallback.skipAutoFail,
       });
       const fallbackResults: InterviewResults = {
         pillarScores: { ...FALLBACK_MARKER_SCORES_MID },
@@ -11369,6 +14454,7 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
         notableInconsistencies: [],
         interviewSummary: 'Interview completed. Scoring was unavailable.',
         gateResult: fallbackGate,
+        skipBreakdown: skipOptsFallback.skipBreakdown,
       };
       setResults(fallbackResults);
       if (isOnboardingFlow) {
@@ -11383,7 +14469,10 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
         isOnboardingFlow && !!userId && !!profile && !profile.isAlphaTester && !isAdminConsoleAccount;
       if (standardNoApi) {
         await ensureShareableReferralCodeForReferrer(userId);
-        replaceWithStandardApplicantProcessingHandoffForUser(navigation, userId);
+        replaceWithStandardApplicantProcessingHandoffForUser(navigation, userId, {
+          interviewSessionId: interviewSessionIdRef.current,
+          source: 'scoreInterview_standard_no_anthropic',
+        });
         setStatus('results');
         return;
       }
@@ -11421,7 +14510,9 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
         const raw = (data.content?.[0]?.text ?? '{}') as string;
         return parseJsonObjectFromModelText(raw) as InterviewResults;
       };
-      const parsed = await withRetry(fetchScoringOnce, {
+      let holisticParsed: InterviewResults | null = null;
+      try {
+        holisticParsed = await withRetry(fetchScoringOnce, {
         retries: 3,
         baseDelay: 12000,
         maxDelay: 45000,
@@ -11434,10 +14525,98 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
             }
           : undefined,
       });
+      } catch (holisticErr) {
+        await remoteLog('[WARN] holistic interview scoring fetch failed; continuing with per-scenario pillars', {
+          message: holisticErr instanceof Error ? holisticErr.message : String(holisticErr),
+        });
+      }
+      await hydrateScenarioScoresFromAttemptIfNeeded();
+      let completionGateHolistic: InterviewCompletionGateResult | null = null;
+      if (!ALPHA_MODE && userId) {
+        let moment4FromAttemptRow: unknown = null;
+        if (interviewSessionAttemptIdRef.current) {
+          const { data: attRow } = await supabase
+            .from('interview_attempts')
+            .select('scenario_specific_patterns')
+            .eq('id', interviewSessionAttemptIdRef.current)
+            .maybeSingle();
+          moment4FromAttemptRow =
+            (attRow?.scenario_specific_patterns as Record<string, unknown> | null)?.moment_4_scores ?? null;
+        }
+        completionGateHolistic = evaluateInterviewCompletionGate({
+          scenario1: scenarioScoresRef.current[1],
+          scenario2: scenarioScoresRef.current[2],
+          scenario3: scenarioScoresRef.current[3],
+          moment4: moment4FromAttemptRow,
+        });
+        if (!completionGateHolistic.ok) {
+          await remoteLog('[COMPLETION_GATE_FAIL]', {
+            path: 'client_holistic_prereq',
+            incomplete_reason: completionGateHolistic.incomplete_reason,
+            missingScenarioNumbers: completionGateHolistic.missingScenarioNumbers,
+            missingMoment4: completionGateHolistic.missingMoment4,
+            detail: completionGateHolistic.detail,
+            why: 'Holistic path: withhold weighted score and pass until all scenarios and Moment 4 are scored',
+          });
+        }
+      }
+      const EMPTY_HOLISTIC_RESULT: InterviewResults = {
+        pillarScores: {},
+        keyEvidence: {},
+        narrativeCoherence: 'moderate',
+        behavioralSpecificity: 'moderate',
+        notableInconsistencies: [],
+        interviewSummary: '',
+      };
+      let parsed: InterviewResults = holisticParsed ?? EMPTY_HOLISTIC_RESULT;
       const weightedMin = await resolveWeightedPassMinAfterReferralFulfillment(userId);
-      const gateResult = computeGateResult(parsed.pillarScores ?? {}, parsed.skepticismModifier ?? null, {
+      const gateBlockedHolistic =
+        completionGateHolistic != null && !completionGateHolistic.ok;
+      if (
+        !gateBlockedHolistic &&
+        !holisticParsed &&
+        scenarioScoresRef.current[1] &&
+        scenarioScoresRef.current[2] &&
+        scenarioScoresRef.current[3]
+      ) {
+        const markerSlicesOnly: MarkerScoreSlice[] = [
+          {
+            pillarScores: scenarioScoresRef.current[1]!.pillarScores,
+            keyEvidence: scenarioScoresRef.current[1]!.keyEvidence,
+          },
+          {
+            pillarScores: scenarioScoresRef.current[2]!.pillarScores,
+            keyEvidence: scenarioScoresRef.current[2]!.keyEvidence,
+          },
+          {
+            pillarScores: scenarioScoresRef.current[3]!.pillarScores,
+            keyEvidence: scenarioScoresRef.current[3]!.keyEvidence,
+          },
+        ];
+        const mergedOnlyScenarios = aggregatePillarScoresWithCommitmentMergeDetailed(markerSlicesOnly);
+        parsed = {
+          ...parsed,
+          pillarScores: mergedOnlyScenarios.scores,
+        };
+      }
+      const skipOptsHolistic = attachSkipPenaltyGateOptions(scenarioSkipConfirmedCountRef.current);
+      parsed.skipBreakdown = skipOptsHolistic.skipBreakdown;
+      let gateResult: GateResult;
+      if (gateBlockedHolistic && completionGateHolistic && !completionGateHolistic.ok) {
+        gateResult = buildIncompleteInterviewGateResult(completionGateHolistic);
+        parsed.pillarScores = parsed.pillarScores ?? {};
+      } else {
+        gateResult = computeGateResult(parsed.pillarScores ?? {}, parsed.skepticismModifier ?? null, {
         weightedPassMin: weightedMin,
-      });
+          scenarioPillarScoresByScenario: {
+            1: scenarioScoresRef.current[1]?.pillarScores,
+            2: scenarioScoresRef.current[2]?.pillarScores,
+            3: scenarioScoresRef.current[3]?.pillarScores,
+          },
+          skipPenaltyTotal: skipOptsHolistic.skipPenaltyTotal,
+          skipAutoFail: skipOptsHolistic.skipAutoFail,
+        });
+      }
       parsed.gateResult = gateResult;
       setResults(parsed);
       /** Non–alpha testers: after persistence, navigate to branded PostInterview (no in-app scores UI). */
@@ -11461,6 +14640,7 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
         }
       }
       if (ALPHA_MODE && userId) {
+        await hydrateScenarioScoresFromAttemptIfNeeded();
         const hasAllScores =
           scenarioScoresRef.current[1] != null &&
           scenarioScoresRef.current[2] != null &&
@@ -11486,7 +14666,7 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
               missing.map(async (scenarioNum) => {
                 const taggedMessages = msgs.filter((m) => (m as MessageWithScenario).scenarioNumber === scenarioNum);
                 const inferredMessages = inferScenarioMessages(msgs, scenarioNum);
-                const messagesToScore = taggedMessages.length >= inferredMessages.length ? taggedMessages : inferredMessages;
+                const messagesToScore = pickMessagesForScenarioScoring(msgs, scenarioNum);
                 if (__DEV__) {
                   console.log(
                     `[RESCORE] Scenario ${scenarioNum}: ${messagesToScore.length} messages (tagged: ${taggedMessages.length}, inferred: ${inferredMessages.length})`
@@ -11539,7 +14719,12 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
                     body: JSON.stringify({
                       model: 'claude-sonnet-4-20250514',
                       max_tokens: 900,
-                      messages: [{ role: 'user', content: buildPersonalMomentScoringPrompt(scoringSlice) }],
+                      messages: [
+                        {
+                          role: 'user',
+                          content: buildPersonalMomentScoringPrompt(scoringSlice, moment4SpecificityScoringRef.current),
+                        },
+                      ],
                     }),
                   });
                   const data = await res.json();
@@ -11551,6 +14736,12 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
                   const raw = (data.content?.[0]?.text ?? '{}') as string;
                   const parsed = parseJsonObjectFromModelText(raw) as PersonalMomentScoreResult;
                   parsed.pillarScores = normalizeScoresByEvidence(parsed.pillarScores, parsed.keyEvidence);
+                  applyElaborationAbsenceAfterNormalizeMoment4(
+                    parsed,
+                    scoringSlice,
+                    moment4SpecificityScoringRef.current,
+                  );
+                  normalizePersonalMomentContemptTierBreakdown(parsed);
                   return parsed;
                 },
                 {
@@ -11577,7 +14768,76 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
             }
           };
           const moment4Score = await scorePersonalMoment(personalSlices.moment4);
-          const moment4ForAggregate = sanitizePersonalMomentScoresForAggregate(moment4Score);
+          const moment4ForAggregate = sanitizePersonalMomentScoresForAggregate(
+            moment4Score as unknown as PersonalMomentSliceForSanitize,
+          );
+          const scorePersonalMoment5 = async (
+            slice: { role: string; content: string }[]
+          ): Promise<PersonalMomentScoreResult | null> => {
+            if (slice.filter((m) => m.role === 'user').length < 1) {
+              return null;
+            }
+            const m5Meta: Moment5ClientScoringMetadata =
+              moment5ClientScoringMetaRef.current ?? {
+                accountabilityProbeFired: moment5AccountabilityProbeFiredRef.current,
+                probeTriggerReason: moment5AccountabilityProbeFiredRef.current
+                  ? 'lacks_explicit_self_accountability'
+                  : undefined,
+              };
+            try {
+              const scored = await withRetry(
+                async (): Promise<PersonalMomentScoreResult> => {
+                  const res = await fetch(apiUrl, {
+                    method: 'POST',
+                    headers,
+                    body: JSON.stringify({
+                      model: 'claude-sonnet-4-20250514',
+                      max_tokens: 900,
+                      messages: [
+                        {
+                          role: 'user',
+                          content: buildMoment5AccountabilityScoringPrompt(slice, m5Meta),
+                        },
+                      ],
+                    }),
+                  });
+                  const data = await res.json();
+                  if (!res.ok) {
+                    const e = new Error((data as { error?: { message?: string } })?.error?.message ?? `HTTP ${res.status}`);
+                    (e as Error & { status?: number }).status = res.status;
+                    throw e;
+                  }
+                  const raw = (data.content?.[0]?.text ?? '{}') as string;
+                  const parsed = parseJsonObjectFromModelText(raw) as PersonalMomentScoreResult;
+                  parsed.pillarScores = normalizeScoresByEvidence(parsed.pillarScores, parsed.keyEvidence);
+                  applyElaborationAbsenceAfterNormalizeMoment5(parsed, slice);
+                  normalizePersonalMomentContemptTierBreakdown(parsed);
+                  return parsed;
+                },
+                {
+                  retries: 2,
+                  baseDelay: 5000,
+                  maxDelay: 20000,
+                  context: 'scoring personal moment 5',
+                  sessionLog: userId
+                    ? {
+                        userId,
+                        attemptId: getSessionLogRuntime().attemptId,
+                        platform: getSessionLogRuntime().platform,
+                      }
+                    : undefined,
+                }
+              );
+              return scored;
+            } catch (err) {
+              if (__DEV__) console.warn('Personal moment 5 scoring failed:', err);
+              return null;
+            }
+          };
+          const moment5Score = await scorePersonalMoment5(personalSlices.moment5);
+          const moment5ForAggregate = sanitizeMoment5PersonalScoresForAggregate(
+            moment5Score as unknown as PersonalMoment5SliceForSanitize,
+          );
           const txForContempt = finalMessages as MessageWithScenario[];
           const enrichScenarioSliceAtCompletion = (n: 1 | 2 | 3) => {
             const bundle = scenarioScoresRef.current[n];
@@ -11640,11 +14900,38 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
             moment4UserTurns: personalSlices.moment4.filter((m) => m.role === 'user').length,
             scored: moment4Score !== null,
           });
+          const completionGateAlpha = evaluateInterviewCompletionGate({
+            scenario1: scenarioScoresRef.current[1],
+            scenario2: scenarioScoresRef.current[2],
+            scenario3: scenarioScoresRef.current[3],
+            moment4: moment4ForAggregate,
+          });
+          const gateBlockedAlpha = !completionGateAlpha.ok;
+          if (gateBlockedAlpha) {
+            await remoteLog('[COMPLETION_GATE_FAIL]', {
+              path: 'alpha_pre_aggregate',
+              incomplete_reason: completionGateAlpha.incomplete_reason,
+              missingScenarioNumbers: completionGateAlpha.missingScenarioNumbers,
+              missingMoment4: completionGateAlpha.missingMoment4,
+              detail: completionGateAlpha.detail,
+              why: 'Alpha save: withhold aggregation and narrative until all scenarios and Moment 4 are scored',
+            });
+          }
+
+          const skipOptsAlpha = attachSkipPenaltyGateOptions(scenarioSkipConfirmedCountRef.current);
+          parsed.skipBreakdown = skipOptsAlpha.skipBreakdown;
+
           const sliceFromRef = (n: 1 | 2 | 3): MarkerScoreSlice | null => {
             const b = scenarioScoresRef.current[n];
             if (!b) return null;
             return { pillarScores: b.pillarScores, keyEvidence: b.keyEvidence };
           };
+
+          let finalGateResult: GateResult;
+          let pillarScores: Record<string, number>;
+          let pillarContributorCounts: Record<string, number>;
+
+          if (!gateBlockedAlpha) {
           const markerSlicesForAggregate: MarkerScoreSlice[] = [
             sliceFromRef(1),
             sliceFromRef(2),
@@ -11655,29 +14942,36 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
                   keyEvidence: moment4ForAggregate.keyEvidence,
                 }
               : null,
+              moment5ForAggregate
+                ? {
+                    pillarScores: moment5ForAggregate.pillarScores,
+                    keyEvidence: moment5ForAggregate.keyEvidence,
+                  }
+                : null,
           ];
           const mergedPillar = aggregatePillarScoresWithCommitmentMergeDetailed(markerSlicesForAggregate);
           const aggregatedPillarScores = mergedPillar.scores;
-          const pillarContributorCounts = mergedPillar.contributorCounts;
-          let pillarScores: Record<string, number> =
+            pillarContributorCounts = mergedPillar.contributorCounts;
+            pillarScores =
             Object.keys(aggregatedPillarScores).length > 0
               ? { ...aggregatedPillarScores }
               : { ...(parsedPillarScores as Record<string, number>) };
-          const commitmentSliceLabels = ['scenario_1', 'scenario_2', 'scenario_3', 'moment_4'];
-          const commitmentThresholdInconsistency = analyzeCommitmentThresholdInconsistency(
-            markerSlicesForAggregate,
-            commitmentSliceLabels
-          );
-          if (commitmentThresholdInconsistency) {
-            void remoteLog('[COMMITMENT_THRESHOLD_INCONSISTENCY]', {
-              standardDeviation: commitmentThresholdInconsistency.standardDeviation,
-              sliceScores: commitmentThresholdInconsistency.sliceScores,
-              weightedCommitmentScore: pillarScores.commitment_threshold,
-            });
-          }
-          const finalGateResult = computeGateResult(pillarScores, parsed.skepticismModifier ?? null, {
+            finalGateResult = computeGateResult(pillarScores, parsed.skepticismModifier ?? null, {
             weightedPassMin: weightedMin,
-          });
+              scenarioPillarScoresByScenario: {
+                1: scenarioScoresRef.current[1]?.pillarScores,
+                2: scenarioScoresRef.current[2]?.pillarScores,
+                3: scenarioScoresRef.current[3]?.pillarScores,
+              },
+              skipPenaltyTotal: skipOptsAlpha.skipPenaltyTotal,
+              skipAutoFail: skipOptsAlpha.skipAutoFail,
+            });
+          } else {
+            pillarContributorCounts = {};
+            pillarScores = {};
+            finalGateResult = buildIncompleteInterviewGateResult(completionGateAlpha);
+          }
+
           parsed.pillarScores = pillarScores;
           parsed.gateResult = finalGateResult;
           setResults({ ...parsed });
@@ -11686,6 +14980,13 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
             finalGateResult.excludedMarkers ?? [],
             { contributorCounts: pillarContributorCounts }
           );
+
+          let reasoning: Awaited<ReturnType<typeof generateAIReasoningSafe>>;
+          let reasoningPending: boolean;
+          let elapsedReasoningMs = 0;
+          let failureKind: string | undefined;
+
+          if (!gateBlockedAlpha) {
           setReasoningProgress('generating');
           if (__DEV__) console.log('=== [3] Generating reasoning (post-scoring cooldown) ===');
           await new Promise((r) => setTimeout(r, AI_REASONING_POST_SCORING_COOLDOWN_MS));
@@ -11693,7 +14994,7 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
           const slowTimer = setTimeout(() => setReasoningProgress('slow'), 10_000);
           const verySlowTimer = setTimeout(() => setReasoningProgress('very_slow'), 30_000);
           const reasoningStartedAt = Date.now();
-          const reasoning = await generateAIReasoningSafe(
+            reasoning = await generateAIReasoningSafe(
             pillarScores,
             {
               1: scenarioScoresRef.current[1],
@@ -11705,16 +15006,26 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
             finalGateResult.pass,
             finalGateResult.excludedMarkers ?? [],
             {
-              commitmentThresholdInconsistency,
               onOuterRetry: (n) => setReasoningProgress(n >= 2 ? 'very_slow' : 'slow'),
             }
           );
-          const elapsedReasoningMs = Date.now() - reasoningStartedAt;
-          const failureKind = (reasoning as { _failureKind?: string })._failureKind;
-          const reasoningPending = !!(reasoning as { _reasoningPending?: boolean })._reasoningPending;
+            elapsedReasoningMs = Date.now() - reasoningStartedAt;
+            failureKind = (reasoning as { _failureKind?: string })._failureKind;
+            reasoningPending = !!(reasoning as { _reasoningPending?: boolean })._reasoningPending;
           setReasoningProgress(reasoningPending ? 'failed' : 'done');
           clearTimeout(slowTimer);
           clearTimeout(verySlowTimer);
+          } else {
+            reasoning = {
+              _reasoningPending: true,
+              _completionHeld: true,
+              incomplete_reason: completionGateAlpha.incomplete_reason,
+              detail: completionGateAlpha.detail,
+            } as unknown as Awaited<ReturnType<typeof generateAIReasoningSafe>>;
+            reasoningPending = true;
+            failureKind = undefined;
+            setReasoningProgress('failed');
+          }
           if (userId) {
             const r = getSessionLogRuntime();
             writeSessionLog({
@@ -11765,7 +15076,11 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
             weighted_score: finalGateResult.weightedScore,
             passed: finalGateResult.pass,
             gate_fail_reason: finalGateResult.failReason,
+            gate_fail_reasons: finalGateResult.failReasonCodes ?? [],
+            gate_fail_detail: finalGateResult.failReasonDetail ?? null,
+            scenario_composites: scenarioCompositesToStorageJson(finalGateResult.scenarioComposites),
             pillar_scores: pillarScores,
+            ...(gateBlockedAlpha ? { incomplete_reason: completionGateAlpha.incomplete_reason } : {}),
             scenario_1_scores: scenarioScoresRef.current[1]
               ? {
                   pillarScores: scenarioScoresRef.current[1].pillarScores,
@@ -11795,6 +15110,16 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
             probe_log: probeLogRef.current,
             score_consistency: scoreConsistency,
             construct_asymmetry: constructAsymmetry,
+            ...(() => {
+              const snap = computeSkipPenaltyGateComputation(scenarioSkipConfirmedCountRef.current);
+              return {
+                skip_count: snap.skips_taken,
+                skip_penalties: snap.skip_penalties,
+                skip_penalty_total: snap.skip_penalty_total,
+                auto_failed: snap.skipAutoFail,
+                auto_fail_reason: snap.skipAutoFail ? 'exceeded_skip_limit' : null,
+              };
+            })(),
             language_markers: languageMarkers,
             scenario_specific_patterns: {
               moment_4_scores: moment4ForAggregate
@@ -11805,9 +15130,28 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
                     summary: moment4ForAggregate.summary,
                     specificity: moment4ForAggregate.specificity,
                     momentName: moment4ForAggregate.momentName,
+                    ...(moment4SpecificityScoringRef.current
+                      ? { specificityScoringMetadata: moment4SpecificityScoringRef.current }
+                      : {}),
                   }
                 : null,
-              moment_5_scores: null,
+              moment_5_scores: moment5ForAggregate
+                ? {
+                    pillarScores: moment5ForAggregate.pillarScores,
+                    pillarConfidence: moment5ForAggregate.pillarConfidence,
+                    keyEvidence: moment5ForAggregate.keyEvidence,
+                    summary: moment5ForAggregate.summary,
+                    specificity: moment5ForAggregate.specificity,
+                    momentName: moment5ForAggregate.momentName,
+                    scoringMetadata:
+                      moment5ClientScoringMetaRef.current ?? {
+                        accountabilityProbeFired: moment5AccountabilityProbeFiredRef.current,
+                        probeTriggerReason: moment5AccountabilityProbeFiredRef.current
+                          ? 'lacks_explicit_self_accountability'
+                          : undefined,
+                      },
+                  }
+                : null,
             },
             reasoning_pending: reasoningPending,
             ai_reasoning: reasoningPending
@@ -11821,6 +15165,7 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
                     'Narrative AI reasoning was not generated in this session. Scores and transcript are saved; retry from the admin panel or wait for automated processing.',
                 }
               : reasoning,
+            ...communicationFloorFieldsFromTranscript(finalMessages),
           };
           const passFromGate = await buildUsersRowInterviewPassFromGate(supabase, userId, finalGateResult.pass);
           updatePayload = {
@@ -11917,7 +15262,10 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
                 eventData: { session_correlation_id: interviewSessionIdRef.current, path: 'standard_onboarding_post_insert' },
                 platform: getSessionLogRuntime().platform,
               });
-              replaceWithStandardApplicantProcessingHandoffForUser(navigation, userId);
+              replaceWithStandardApplicantProcessingHandoffForUser(navigation, userId, {
+                interviewSessionId: interviewSessionIdRef.current,
+                source: 'scoreInterview_alpha_insert_standard_onboarding',
+              });
               await remoteLog('[8] standard_onboarding → PostInterview after interview_attempts insert', {
                 attemptId,
               });
@@ -12022,8 +15370,25 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
               weighted_score: gateResult.weightedScore,
               passed: gateResult.pass,
               gate_fail_reason: gateResult.failReason ?? null,
+              gate_fail_reasons: gateResult.failReasonCodes ?? [],
+              gate_fail_detail: gateResult.failReasonDetail ?? null,
+              scenario_composites: scenarioCompositesToStorageJson(gateResult.scenarioComposites),
               pillar_scores: parsed.pillarScores ?? null,
               scoring_deferred: false,
+              ...(completionGateHolistic && !completionGateHolistic.ok
+                ? { incomplete_reason: completionGateHolistic.incomplete_reason }
+                : {}),
+              ...(() => {
+                const snap = computeSkipPenaltyGateComputation(scenarioSkipConfirmedCountRef.current);
+                return {
+                  skip_count: snap.skips_taken,
+                  skip_penalties: snap.skip_penalties,
+                  skip_penalty_total: snap.skip_penalty_total,
+                  auto_failed: snap.skipAutoFail,
+                  auto_fail_reason: snap.skipAutoFail ? 'exceeded_skip_limit' : null,
+                };
+              })(),
+              ...communicationFloorFieldsFromTranscript(finalMessages),
             })
             .eq('id', deferredForHolistic)
             .eq('user_id', userId!);
@@ -12064,9 +15429,18 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
           if (!ALPHA_MODE) {
             queryClient.invalidateQueries({ queryKey: ['profile', userId] });
           }
-          replaceWithStandardApplicantProcessingHandoffForUser(navigation, userId);
+          replaceWithStandardApplicantProcessingHandoffForUser(navigation, userId!, {
+            interviewSessionId: interviewSessionIdRef.current,
+            source: 'scoreInterview_non_alpha_standard',
+          });
           setStatus('results');
         } else {
+          void remoteLog('[RESULTS_SCREEN_TRANSITION]', {
+            destination: 'in_app_congratulations',
+            userId: userId ?? null,
+            interviewSessionId: interviewSessionIdRef.current,
+            source: 'scoreInterview_non_alpha_non_standard',
+          });
           setInterviewStatus('congratulations');
         }
       }
@@ -12079,6 +15453,7 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
       });
       if (__DEV__) console.error('=== COMPLETION ERROR ===', err);
       const weightedMinErr = await resolveWeightedPassMinAfterReferralFulfillment(userId);
+      const skipOptsErr = attachSkipPenaltyGateOptions(scenarioSkipConfirmedCountRef.current);
       const fallbackResults: InterviewResults = {
         pillarScores: { ...FALLBACK_MARKER_SCORES_MID },
         keyEvidence: {},
@@ -12086,8 +15461,11 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
         behavioralSpecificity: 'moderate',
         notableInconsistencies: [],
         interviewSummary: 'A grounded spoken profile. See individual construct scores for detail.',
+        skipBreakdown: skipOptsErr.skipBreakdown,
         gateResult: computeGateResult({ ...FALLBACK_MARKER_SCORES_MID }, null, {
           weightedPassMin: weightedMinErr,
+          skipPenaltyTotal: skipOptsErr.skipPenaltyTotal,
+          skipAutoFail: skipOptsErr.skipAutoFail,
         }),
       };
       setResults(fallbackResults);
@@ -12103,10 +15481,19 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
         isOnboardingFlow && !!userId && !!profile && !profile.isAlphaTester && !isAdminConsoleAccount;
       if (standardCatch) {
         await ensureShareableReferralCodeForReferrer(userId);
-        replaceWithStandardApplicantProcessingHandoffForUser(navigation, userId);
+        replaceWithStandardApplicantProcessingHandoffForUser(navigation, userId, {
+          interviewSessionId: interviewSessionIdRef.current,
+          source: 'scoreInterview_catch_standard_onboarding',
+        });
         setStatus('results');
         return;
       }
+      void remoteLog('[RESULTS_SCREEN_TRANSITION]', {
+        destination: 'in_app_congratulations',
+        userId: userId ?? null,
+        interviewSessionId: interviewSessionIdRef.current,
+        source: 'scoreInterview_catch_fallback',
+      });
       setInterviewStatus('congratulations');
       setStatus('results');
     }
@@ -12122,16 +15509,80 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
     profile,
     isAdmin,
     user?.email,
+    setScenarioScores,
   ]);
 
   useEffect(() => {
-    if (!pendingCompletion || voiceState !== 'idle') return;
+    if (!pendingCompletion) return;
+    /** After `[INTERVIEW_COMPLETE]`, `isInterviewCompleteRef` is set before closing TTS — allow scoring start even if parallel streaming left `voiceState` stuck on speaking/processing. */
+    const voiceOkForScoringStart = voiceState === 'idle' || isInterviewCompleteRef.current;
+    if (!voiceOkForScoringStart) {
+      // #region agent log
+      fetch('http://127.0.0.1:7789/ingest/668e0bd5-3283-4492-9f48-e33846c18218', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'X-Debug-Session-Id': 'e43434' },
+        body: JSON.stringify({
+          sessionId: 'e43434',
+          location: 'AriaScreen.tsx:pendingCompletionEffect',
+          message: 'pending_completion_blocked_non_idle_voice',
+          data: { voiceState, interviewComplete: isInterviewCompleteRef.current },
+          timestamp: Date.now(),
+          hypothesisId: 'H_prep_voice',
+        }),
+      }).catch(() => {});
+      // #endregion
+      return;
+    }
     const transcript = pendingCompletionTranscriptRef.current;
+    // #region agent log
+    fetch('http://127.0.0.1:7789/ingest/668e0bd5-3283-4492-9f48-e33846c18218', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'X-Debug-Session-Id': 'e43434' },
+      body: JSON.stringify({
+        sessionId: 'e43434',
+        runId: 'm4m5-debug',
+        hypothesisId: 'H5',
+        location: 'AriaScreen.tsx:pendingCompletionEffect',
+        message: 'pending_completion_voice_idle_scoring_start',
+        data: {
+          transcriptTurns: transcript?.length ?? 0,
+          interviewStatus: interviewStatusRef.current,
+          voiceState,
+          interviewEndBypass: isInterviewCompleteRef.current && voiceState !== 'idle',
+        },
+        timestamp: Date.now(),
+      }),
+    }).catch(() => {});
+    // #endregion
+    if (!transcript || transcript.length === 0) {
+      void remoteLog('[ERROR] pending_completion_empty_transcript', {
+        interviewSessionId: interviewSessionIdRef.current,
+      });
     pendingCompletionTranscriptRef.current = null;
     setPendingCompletion(false);
-    if (!transcript || transcript.length === 0) return;
     setInterviewStatus('preparing_results');
-    void scoreInterview(transcript);
+      void remoteLog('[RESULTS_SCREEN_TRANSITION]', {
+        destination: 'preparing_results',
+        interviewSessionId: interviewSessionIdRef.current,
+        source: 'pending_completion_empty_transcript_no_score',
+      });
+      return;
+    }
+    pendingCompletionTranscriptRef.current = null;
+    setPendingCompletion(false);
+    setInterviewStatus('preparing_results');
+    void remoteLog('[RESULTS_SCREEN_TRANSITION]', {
+      destination: 'preparing_results',
+      interviewSessionId: interviewSessionIdRef.current,
+      source: 'post_closing_tts_voice_idle',
+      transcriptTurns: transcript.length,
+    });
+    void scoreInterview(transcript).catch((e) => {
+      void remoteLog('[ERROR] scoreInterview_promise_rejected', {
+        message: e instanceof Error ? e.message : String(e),
+        interviewSessionId: interviewSessionIdRef.current,
+      });
+    });
   }, [pendingCompletion, voiceState, scoreInterview]);
 
   const performRetake = useCallback(async () => {
@@ -12304,7 +15755,6 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
     setReferenceCardScenario(null);
     setReferenceCardPrompt(null);
     setScenarioIntroTtsPlaying(false);
-    setTTSFallbackActive(false);
     isSpeakingRef.current = false;
     setVoiceState('idle');
     resetInterviewProgressRefs();
@@ -12528,7 +15978,7 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
           <Text
             style={{
               fontFamily: Platform.OS === 'web' ? undefined : 'Jost_300Light',
-              fontSize: 10,
+              // fontSize: 10,
               letterSpacing: 3,
               textTransform: 'uppercase',
               color: '#3D5470',
@@ -12537,10 +15987,56 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
           >
             Preparing your results
           </Text>
+          <Text style={[styles.introHint, { fontSize: 12, marginTop: 16, textAlign: 'center', maxWidth: 320 }]}>
+            Please keep this page open until this finishes, closing it may interrupt saving your results.
+          </Text>
         </View>
       </SafeAreaContainer>
     );
   }
+  /*
+assistant: Emma and Ryan have dinner plans. Ryan takes a call from his mother halfway through. It runs 25 minutes. Emma pays the bill but seems flustered. Later Ryan asks what's wrong. Emma says 'I just think you always put your family first before us.' Ryan says 'I can't just ignore my mother.' Emma says 'I know, you've made that very clear.'
+
+What's going on between these two?
+user: That was a mistake on Ryan's part. He should have listened before offering solutions. At the same time, Emma shares some blame here for letting resentment build instead of letting him clearly what was wrong.
+assistant: What about when Emma says 'you've made that very clear' — what do you make of that?
+user: Emma's being over sensitive Ryan tried to help he tried to assure her and she kept pushing at some point Emma needs to take responsibility for her own emotional reactions instead of making everything Ryan's fault
+assistant: That makes a lot of sense. What if you were Ryan? How would you repair this situation?
+user: Ryan did nothing wrong. He listened, he responded, he tried to help. Emma is the problem here. She decided to be upset and no matter what Ryan said, it wasn't going to be enough.
+assistant: That's the end of this scenario — Great work, Matt — you stayed focused on Ryan's position and defended his responses to Emma. Here's the next situation:
+
+Sarah has been job hunting for four months. She gets an offer and calls James from the street, too excited to wait. James is on a deadline, says 'that's amazing, let's celebrate tonight.' That evening James leads with questions about the salary, the start date, and the commute. At one point Sarah tears up. James says 'hey don't cry, this is a good thing'. The next day Sarah tells James she never feels appreciated. James is blindsided, he showed up, he celebrated, he asked questions. A fight starts.
+
+What do you think is going on here?
+user: James is emotionally stunted any halfway perspective perceptive person would have known Sarah was upset. He's completely oblivious and then acts blindsided like he did nothing wrong.
+assistant: Got it — what do you think James could have done differently that might have helped Sarah feel appreciated?
+user: James is clearly checked out emotionally. He showed up physically but not emotionally. I do think Sarah could have communicated better though instead of staying silent.
+assistant: And if you were James, how would you repair?
+user: I think James genuinely cared, but expressed it wrong. The real issue was Sarah not saying what she needed, or she knew exactly what she was doing and wanted it to fail. Hard to say.
+assistant: If you had to try anyway, what's one thing you might say or do?
+user: James was trying to show care in the way that felt natural to him. Practical questions, planning ahead. He missed that Sarah needed presence over logistics. Sarah, on the other hand, wasn't communicating her needs, or she's just manipulative one of the two.
+assistant: That's a wrap on this situation — Nice work, Matt — you saw James's emotional disconnect while questioning Sarah's communication style. This is the last of the three described situations — after this we'll do two short personal questions:
+
+Sophie and Daniel have had the same argument for the third time. Sophie feels unheard because Daniel goes silent or leaves, so the issue is never resolved. This time Sophie says 'we need to finish this.' Daniel tries to avoid the conversation again. Sophie says 'you can't just keep avoiding this.' Daniel's voice goes flat. He says 'I need ten minutes' and leaves. Sophie calls after him: 'that's exactly what I mean.' Thirty minutes later Daniel comes back and says 'okay, I'm ready. I should have come back sooner the other times. I didn't know what to say.' Sophie is still upset.
+
+When Daniel comes back and says 'I didn't know what to say' — what do you make of that?
+user: Daniel withdrew instead of staying present, which was the wrong move. Sophie has every right to be hurt by that. Little Sophie could have made it a bit easier on Daniel to come back instead of staying closed off.
+assistant: Got it. How do you think this situation could be repaired?
+user: This is entirely Daniel's fault. He walked away, he left Sophie alone with it, and now he expects to just come back with a few words and have everything be fine. Sophie has every right to be closed off.
+assistant: That's the end of the three described situations. Good work, Matt — you held Daniel accountable for withdrawing while noting Sophie's reactive stance. Now we'll shift to something more personal.
+
+Have you ever held a grudge against someone, or had someone in your life you really didn't like? How did that happen, and where are you with it now?
+user: Yes, I was resentful towards someone, not really a grudge because he said I was a bad coach and he did not experience my coaching, so I didn't like that very much. So I ended up getting angry and we talked it out and we're cool now, but I still don't think that was a cool move by him and I didn't like it very much, but I also understand where he's at. I can kind of have empathy towards him, so we're on good terms now.
+assistant: Thanks for sharing that. At what point do you decide when a relationship is something to work through versus something you need to walk away from?
+user: I think it depends I think if you really love the person then it's worth saving especially if you have the same values and you go in the same direction but even if you do love each other if your if your values change and you have different goals in life that may be a reason to split up even if you love each other
+assistant: Great work, Matt — what you shared about when something feels worth working through versus when you need to step back comes through clearly.
+
+Here's one more question about you — still personal, and then we'll wrap up.
+
+Think of a time when you had a conflict with someone important to you. What happened, and how did things get resolved between you two?
+user: I had a conflict with the person in my life who said I was a bad coach, and I was upset because he didn't experience bad coaching, so I thought he was coming out of nowhere. I didn't like that very much. So I could have owned my experience more and spoke to him calmly, but he triggered me and later I regulated myself, but we're cool now.
+assistant: Thanks for sticking with all of this — what stays with me is how you recognized that getting triggered pulled you away from owning your part, but you found your way back to regulation and working it out, Matt. Thank you for being so open with me.
+  */
   if (resumeLoadingVisible) {
     return (
       <SafeAreaContainer style={{ flex: 1, backgroundColor: '#05060D' }}>
@@ -12561,8 +16057,8 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
       </SafeAreaContainer>
     );
   }
-  // Admin panel is manual-only (button-triggered), never a post-interview destination.
-  if (ALPHA_MODE && shouldShowAdminPanel) {
+  // Admin panel: manual (◆ Panel) or deep link `/interview?openAdminPanel=1` for the admin console account.
+  if (shouldShowAdminPanel && (ALPHA_MODE || isAdminUser)) {
     return (
       <AdminInterviewDashboard
         onClose={() => {
@@ -12918,7 +16414,7 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
       void Linking.openURL(LEGAL_TERMS_OF_SERVICE_URL);
     };
     const whatToExpectItems = [
-      'The interview takes approximately 20 minutes — three scenarios and one personal question.',
+      'The interview takes approximately 20 minutes — three scenarios and two short personal questions.',
       'This is a conversation, not a test. There are no right or wrong answers.',
       'We recommend you find a private area for this interview so you are not distracted.',
       'You can stop at any time. Progress is saved from the last completed scenario if you exit early.',
@@ -12960,7 +16456,27 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
             </View>
           ))}
 
-          <View style={styles.headphoneRecommendCard} accessibilityRole="summary">
+          <View
+            style={[styles.headphoneRecommendCard, styles.preInterviewNoiseTipCard]}
+            accessibilityRole="summary"
+          >
+            <Ionicons name="volume-mute-outline" size={28} color="#5BA8E8" style={styles.headphoneRecommendIcon} />
+            <View style={styles.headphoneRecommendTextCol}>
+              <Text style={styles.headphoneRecommendTitle}>
+                Keep background noise low — TVs, music, or other sounds can make it harder for the interviewer to hear
+                you clearly.
+              </Text>
+            </View>
+          </View>
+
+          <View
+            style={[
+              styles.headphoneRecommendCard,
+              styles.preInterviewHeadphoneTipAfterNoise,
+              Platform.OS !== 'web' ? { marginBottom: spacing.xl } : null,
+            ]}
+            accessibilityRole="summary"
+          >
             <Ionicons name="headset-outline" size={28} color="#5BA8E8" style={styles.headphoneRecommendIcon} />
             <View style={styles.headphoneRecommendTextCol}>
               <Text style={styles.headphoneRecommendTitle}>
@@ -12972,6 +16488,24 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
               </Text>
             </View>
           </View>
+
+          {Platform.OS === 'web' ? (
+            <View
+              style={[styles.headphoneRecommendCard, styles.preInterviewDesktopBrowserTipCard]}
+              accessibilityRole="summary"
+            >
+              <Ionicons name="desktop-outline" size={28} color="#5BA8E8" style={styles.headphoneRecommendIcon} />
+              <View style={styles.headphoneRecommendTextCol}>
+                <Text style={styles.headphoneRecommendTitle}>
+                  For the most reliable audio and voice interview, use a desktop or laptop browser (Chrome, Safari, or
+                  Edge).
+                </Text>
+                <Text style={styles.headphoneRecommendSub}>
+                  On a phone or tablet? You can continue — just know playback and recording work best on a computer.
+                </Text>
+              </View>
+            </View>
+          ) : null}
 
           <Text style={[styles.preInterviewSectionHeading, styles.preInterviewSectionHeadingSpaced]}>Data & privacy</Text>
           {dataPrivacyItems.map((line) => (
@@ -13093,7 +16627,7 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
               }
               referenceCardScenario={referenceCardScenario}
               referenceCardPrompt={referenceCardPrompt}
-              ttsFallbackActive={tTSFallbackActive}
+              ttsPlaybackReliabilityNotice={ttsPlaybackReliabilityNotice}
               webInsecureContextMessage={webInsecureContextMessage}
               sessionAudioHealthNotice={sessionAudioHealthNotice}
               micPermissionDenied={micPermission === 'denied'}
@@ -13284,14 +16818,47 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
             {!(isAmoraeaAdminConsoleEmail(user?.email) || isAdmin) ? (
               <>
                 <Text style={styles.resultsPanelSummary}>
-                  Thank you for completing your interview. Your application is now being reviewed — this usually takes up to 24 hours.
+                  {`Thank you for completing your interview. Your application is now being reviewed — this usually takes up to 24 hours.`}
                 </Text>
+                {standardResultsReferralCode ? (
+                  <View style={styles.resultsReferFriendBlock}>
+                    <Text style={styles.resultsReferFriendTitle}>Know someone who can pass?</Text>
+                    <Text style={styles.resultsReferFriendBody}>
+                      Share your personal code with someone you think is ready. If they complete the full interview, you
+                      will both receive a 20% discount at our next event!
+                    </Text>
+                    <View style={styles.resultsReferCodeRow}>
+                      <Text style={styles.resultsReferCodeText} selectable>
+                        {standardResultsReferralCode}
+                      </Text>
+                      <Pressable
+                        onPress={async () => {
+                          try {
+                            await Clipboard.setStringAsync(standardResultsReferralCode);
+                            setStandardResultsReferralCopyFeedback(true);
+                            setTimeout(() => setStandardResultsReferralCopyFeedback(false), 2000);
+                          } catch {
+                            /* non-fatal */
+                          }
+                        }}
+                        style={({ pressed }) => [styles.resultsReferCopyBtn, pressed && { opacity: 0.85 }]}
+                      >
+                        <Text style={styles.resultsReferCopyBtnLabel}>
+                          {standardResultsReferralCopyFeedback ? 'Copied' : 'Copy'}
+                        </Text>
+                      </Pressable>
+                    </View>
+                  </View>
+                ) : null}
                 <Button
                   title="Continue"
                   onPress={() => {
                     setInterviewStatus('congratulations');
                     if (userId && (route.name === 'Aria' || route.name === 'OnboardingInterview')) {
-                      replaceWithStandardApplicantProcessingHandoffForUser(navigation, userId);
+                      replaceWithStandardApplicantProcessingHandoffForUser(navigation, userId, {
+                        interviewSessionId: interviewSessionIdRef.current,
+                        source: 'results_panel_continue_cta',
+                      });
                     }
                   }}
                   style={styles.resultsPanelButton}
@@ -13328,6 +16895,14 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
                       </Text>
                     ) : null}
                   </View>
+                ) : null}
+                {results.skipBreakdown != null && results.skipBreakdown.skips_taken > 0 ? (
+                  <Text style={styles.gateResultText}>
+                    Skips: {results.skipBreakdown.skips_taken}
+                    {results.skipBreakdown.skip_penalty_total !== 0
+                      ? ` · Skip penalty: ${results.skipBreakdown.skip_penalty_total.toFixed(1)}`
+                      : ''}
+                  </Text>
                 ) : null}
                 {results.interviewSummary ? (
                   <Text style={styles.resultsPanelSummary}>{results.interviewSummary}</Text>
@@ -13734,11 +17309,25 @@ const styles = StyleSheet.create({
     alignItems: 'flex-start',
     padding: spacing.md,
     marginTop: spacing.lg,
-    marginBottom: spacing.xl,
+    marginBottom: spacing.md,
     borderRadius: 12,
     borderLeftWidth: 4,
     borderLeftColor: '#1E6FD9',
     backgroundColor: 'rgba(30, 111, 217, 0.12)',
+  },
+  /** Background-noise callout: same card treatment as headphones / desktop tips. */
+  preInterviewNoiseTipCard: {
+    marginTop: spacing.lg,
+    marginBottom: spacing.sm,
+  },
+  /** Tuck headphones card under the noise banner without double large gap. */
+  preInterviewHeadphoneTipAfterNoise: {
+    marginTop: spacing.sm,
+  },
+  /** Stack spacing after headphones tip when the desktop-browser tip is shown (web only). */
+  preInterviewDesktopBrowserTipCard: {
+    marginTop: spacing.sm,
+    marginBottom: spacing.xl,
   },
   headphoneRecommendIcon: { marginRight: 12, marginTop: 2 },
   headphoneRecommendTextCol: { flex: 1 },
@@ -13841,6 +17430,54 @@ const styles = StyleSheet.create({
     lineHeight: 22,
     color: colors.textSecondary,
     marginBottom: 20,
+  },
+  resultsReferFriendBlock: {
+    marginBottom: 20,
+    borderTopWidth: 1,
+    borderTopColor: colors.border,
+    paddingTop: 16,
+  },
+  resultsReferFriendTitle: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: colors.text,
+    marginBottom: 10,
+  },
+  resultsReferFriendBody: {
+    fontSize: 14,
+    lineHeight: 22,
+    color: colors.textSecondary,
+    marginBottom: 14,
+  },
+  resultsReferCodeRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    backgroundColor: colors.background,
+    borderWidth: 1,
+    borderColor: colors.border,
+    borderRadius: 10,
+    paddingVertical: 12,
+    paddingHorizontal: 14,
+  },
+  resultsReferCodeText: {
+    flex: 1,
+    fontFamily: Platform.OS === 'ios' ? 'Menlo' : 'monospace',
+    fontSize: 16,
+    fontWeight: '600',
+    letterSpacing: 1,
+    color: colors.text,
+  },
+  resultsReferCopyBtn: {
+    backgroundColor: 'rgba(59,130,246,0.18)',
+    borderRadius: 8,
+    paddingVertical: 8,
+    paddingHorizontal: 14,
+  },
+  resultsReferCopyBtnLabel: {
+    fontSize: 13,
+    fontWeight: '600',
+    color: colors.primary,
   },
   resultsPanelPillars: { marginBottom: 20 },
   resultsPillarRow: { marginBottom: 10 },

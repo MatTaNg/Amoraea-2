@@ -9,7 +9,61 @@ import {
   GATE_PASS_WEIGHTED_MIN,
   REFERRAL_WEIGHTED_PASS_MIN,
 } from './computeGateResultCore.ts';
+import { scenarioCompositesToStorageJson } from './scenarioCompositeFloor.ts';
 import { generateAIReasoning } from './generateAIReasoning.ts';
+import { communicationFloorFieldsFromTranscript } from './communicationFloorFromTranscript.ts';
+import { evaluateInterviewCompletionGate, type CompletionGateFailure } from './interviewCompletionGate.ts';
+
+async function markAttemptIncompleteNoScore(
+  supabase: SupabaseClient,
+  attemptId: string,
+  userId: string,
+  failure: CompletionGateFailure,
+): Promise<string | null> {
+  console.error('[COMPLETION_GATE_FAIL]', {
+    attemptId,
+    incomplete_reason: failure.incomplete_reason,
+    detail: failure.detail,
+    missingScenarioNumbers: failure.missingScenarioNumbers,
+    missingMoment4: failure.missingMoment4,
+  });
+  const { error: upA } = await supabase
+    .from('interview_attempts')
+    .update({
+      completed_at: new Date().toISOString(),
+      weighted_score: null,
+      passed: false,
+      incomplete_reason: failure.incomplete_reason,
+      scoring_deferred: false,
+      pillar_scores: null,
+      gate_fail_reason: failure.detail,
+      gate_fail_reasons: [],
+      gate_fail_detail: null,
+      ai_reasoning: {
+        _completionHeld: true,
+        incomplete_reason: failure.incomplete_reason,
+        detail: failure.detail,
+      },
+    })
+    .eq('id', attemptId)
+    .eq('user_id', userId);
+
+  if (upA) return upA.message;
+
+  const { error: upU } = await supabase
+    .from('users')
+    .update({
+      interview_completed: true,
+      interview_passed_computed: false,
+      interview_passed: false,
+      interview_weighted_score: null,
+      interview_pillar_scores: null,
+    })
+    .eq('id', userId);
+
+  if (upU) return upU.message;
+  return null;
+}
 
 /**
  * Must leave headroom for AI reasoning + DB + cold start under Supabase Edge wall clock (~150s free/pro).
@@ -142,7 +196,7 @@ export async function runCompleteStandardInterview(
   const { data: row, error: qErr } = await supabase
     .from('interview_attempts')
     .select(
-      'id, user_id, scoring_deferred, transcript, interview_typology_context, scenario_1_scores, scenario_2_scores, scenario_3_scores, response_timings, probe_log'
+      'id, user_id, scoring_deferred, transcript, interview_typology_context, scenario_1_scores, scenario_2_scores, scenario_3_scores, scenario_specific_patterns, response_timings, probe_log'
     )
     .eq('id', attemptId)
     .maybeSingle();
@@ -160,6 +214,21 @@ export async function runCompleteStandardInterview(
   const transcript = (row.transcript as Transcript | null) ?? [];
   if (transcript.length === 0) {
     return { ok: false, error: 'empty transcript' };
+  }
+
+  const patterns = (row as { scenario_specific_patterns?: Record<string, unknown> | null }).scenario_specific_patterns;
+  const moment4Stored = patterns?.moment_4_scores ?? null;
+  const completionGate = evaluateInterviewCompletionGate({
+    scenario1: row.scenario_1_scores,
+    scenario2: row.scenario_2_scores,
+    scenario3: row.scenario_3_scores,
+    moment4: moment4Stored,
+  });
+
+  if (!completionGate.ok) {
+    const errIns = await markAttemptIncompleteNoScore(supabase, attemptId, userId, completionGate);
+    if (errIns) return { ok: false, error: errIns };
+    return { ok: true, attemptId, skipped: 'completion_gate_incomplete' };
   }
 
   try {
@@ -247,15 +316,23 @@ export async function runCompleteStandardInterview(
   }
   const parsed = holisticParse.parsed;
 
-  const gate = computeGateResultCore(parsed.pillarScores ?? {}, parsed.skepticismModifier ?? null, {
-    weightedPassMin: weightedMin,
-  });
-
   const scenarioMap = scenarioScoresFromAttempt(
     row.scenario_1_scores,
     row.scenario_2_scores,
     row.scenario_3_scores
   );
+  const scenarioPillarScoresByScenario: Partial<
+    Record<1 | 2 | 3, Record<string, number | null | undefined>>
+  > = {};
+  for (const n of [1, 2, 3] as const) {
+    const ps = scenarioMap[n]?.pillarScores;
+    if (ps && typeof ps === 'object') scenarioPillarScoresByScenario[n] = ps;
+  }
+
+  const gate = computeGateResultCore(parsed.pillarScores ?? {}, parsed.skepticismModifier ?? null, {
+    weightedPassMin: weightedMin,
+    scenarioPillarScoresByScenario,
+  });
   const pillarForReasoning = toNumericPillarMap(parsed.pillarScores as Record<string, number | null>);
 
   let reasoning: Awaited<ReturnType<typeof generateAIReasoning>> & { _reasoningPending?: boolean };
@@ -278,6 +355,7 @@ export async function runCompleteStandardInterview(
     } as typeof reasoning;
   }
   const reasoningPending = !!(reasoning as { _reasoningPending?: boolean })._reasoningPending;
+  const commFloor = communicationFloorFieldsFromTranscript(transcript);
   const aiReasoningOut = reasoningPending
     ? {
         _reasoningPending: true,
@@ -295,6 +373,9 @@ export async function runCompleteStandardInterview(
       weighted_score: gate.weightedScore,
       passed: gate.pass,
       gate_fail_reason: gate.failReason,
+      gate_fail_reasons: gate.failReasonCodes ?? [],
+      gate_fail_detail: gate.failReasonDetail ?? null,
+      scenario_composites: scenarioCompositesToStorageJson(gate.scenarioComposites),
       pillar_scores: parsed.pillarScores ?? null,
       /** Preserve client-written slices; holistic output does not include per-scenario JSON. */
       scenario_1_scores: row.scenario_1_scores,
@@ -305,6 +386,8 @@ export async function runCompleteStandardInterview(
       scoring_deferred: false,
       response_timings: row.response_timings,
       probe_log: row.probe_log,
+      communication_floor_flag: commFloor.communication_floor_flag,
+      communication_floor_avg_unprompted_words: commFloor.communication_floor_avg_unprompted_words,
     })
     .eq('id', attemptId)
     .eq('user_id', userId);

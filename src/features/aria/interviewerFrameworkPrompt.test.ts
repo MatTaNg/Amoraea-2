@@ -185,6 +185,22 @@ describe('dedupeAdjacentBoundaryValidationsBeforeParticipantName', () => {
       'Great work, Matt',
     );
   });
+
+  it('strips redundant warm beat from Scenario C→M4 segment close (reflection keeps one validation + name)', () => {
+    const raw =
+      "That's the end of the three described situations — great work. Great work, Jordan — you stayed with how Sophie and Daniel's repair landed for you.";
+    expect(dedupeAdjacentBoundaryValidationsBeforeParticipantName(raw, 'Jordan')).toBe(
+      "That's the end of the three described situations. Great work, Jordan — you stayed with how Sophie and Daniel's repair landed for you.",
+    );
+  });
+
+  it('strips redundant nice work from alternate Scenario C segment-close opener', () => {
+    const raw =
+      "We're done with those three scenarios — nice work. Nice work, Alex — you named where walk-away would enter for them.";
+    expect(dedupeAdjacentBoundaryValidationsBeforeParticipantName(raw, 'Alex')).toBe(
+      "We're done with those three scenarios. Nice work, Alex — you named where walk-away would enter for them.",
+    );
+  });
 });
 
 describe('isBoundaryWarmValidationOnlySentence', () => {

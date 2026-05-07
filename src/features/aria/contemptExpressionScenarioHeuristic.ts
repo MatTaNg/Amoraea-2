@@ -1,8 +1,10 @@
 /**
- * When the model is **lenient** on `contempt_expression`, **high-precision** lexicon hits on user turns
- * can cap scores down (Math.min) for **egregious character contempt / dehumanization** only.
- * **Not** for ordinary moral language about bad behavior (rude, wrong, hurtful) — those are not listed here;
- * the LLM rubric handles them.
+ * When the model is **lenient** on `contempt_expression`, user-turn text can **cap** scores (Math.min):
+ * 1) **Egregious character contempt** — high-precision lexicon (dehumanization, etc.).
+ * 2) **Wholesale dismissal without character engagement** — relationship verdicts / writing the pair off
+ *    without curiosity about internal experience → cap at **6** (scores 7+ require engagement per rubric).
+ *
+ * Ordinary moral language about bad behavior (rude, wrong, hurtful) is **not** listed here; the LLM rubric handles it.
  */
 import { sliceTranscriptBeforeScenarioCToPersonalHandoff } from './probeAndScoringUtils';
 
@@ -51,6 +53,67 @@ export function countScenarioContemptVerdictSignals(text: string): number {
 }
 
 /**
+ * Verdict-style dismissal of the relationship or both characters **without** naming inner life.
+ * High-precision: avoid matching nuanced answers that only *mention* therapy/issues alongside mentalizing.
+ */
+export const WHOLESALE_DISMISSAL_REGEXES: readonly RegExp[] = [
+  /\bthey shouldn'?t be together\b/i,
+  /\bshouldn'?t be in a relationship\b/i,
+  /\b(?:this |the )relationship (?:isn'?t|is not) working\b/i,
+  /\bthey (?:both )?have (?:a lot of )?issues\b/i,
+  /\bboth (?:of them )?have issues\b/i,
+  /\bthey need (?:couples |relationship )?therapy\b/i,
+  /\b(?:both )?need(?:s)? (?:couples |relationship )?therapy\b/i,
+  /\bnot (?:a )?good (?:match|fit) (?:for each other)?\b/i,
+  /\bit'?s (?:pretty )?(?:clear|obvious) (?:that )?(?:they|this relationship)\b/i,
+  /\bjust (?:end (?:it|the relationship)|break up|walk away|leave)\b/i,
+  /\b(?:total|complete) waste of time\b/i,
+];
+
+/** Curiosity / care about internal states — need ≥2 distinct signals to avoid the absent-engagement cap. */
+export const CHARACTER_ENGAGEMENT_SIGNAL_REGEXES: readonly RegExp[] = [
+  /\b(feel|felt|feeling|feelings)\b/i,
+  /\b(hurt|hurting|harmed|wounded)\b/i,
+  /\b(afraid|fear|fears|fearful|scared)\b/i,
+  /\b(anxious|anxiety|panic|overwhelm)\b/i,
+  /\b(shame|ashamed|embarrassed|vulnerable)\b/i,
+  /\b(why (?:he|she|they|emma|ryan|daniel|sophie|daniel|sophie)\b)/i,
+  /\bwhat(?:'s| is) (?:going on|happening) (?:for|with)\b/i,
+  /\b(from (?:his|her|their) (?:perspective|side|point of view))\b/i,
+  /\b(both (?:partners|people|of them)|each (?:person|partner))\b/i,
+  /\b(underneath|deeper|attachment|avoidant|withdraw|bid for)\b/i,
+];
+
+export function countWholesaleDismissalSignals(text: string): number {
+  const t = (text ?? '').replace(/\u2019/g, "'");
+  let n = 0;
+  for (const re of WHOLESALE_DISMISSAL_REGEXES) {
+    if (re.test(t)) n += 1;
+  }
+  return n;
+}
+
+export function countCharacterEngagementSignals(text: string): number {
+  const t = (text ?? '').replace(/\u2019/g, "'");
+  let n = 0;
+  for (const re of CHARACTER_ENGAGEMENT_SIGNAL_REGEXES) {
+    if (re.test(t)) n += 1;
+  }
+  return n;
+}
+
+/** True → `contempt_expression` must not exceed 6 (healthy-side scale) for this scenario text. */
+export function absentCharacterEngagementCapApplies(text: string): boolean {
+  const w = countWholesaleDismissalSignals(text);
+  if (w <= 0) return false;
+  return countCharacterEngagementSignals(text) < 2;
+}
+
+const ABSENT_ENGAGEMENT_CAP = 6;
+
+export const CONTEMPT_EXPRESSION_ABSENT_ENGAGEMENT_CAP = ABSENT_ENGAGEMENT_CAP;
+
+/**
  * Max allowed **good** `contempt_expression` score (higher = healthier) when egregious lexicon hits
  * are present: lower = stricter cap (worse for participant = lower numeric result after merge with model).
  * Scale: higher pillar score = less contempt in how they express. These caps are **only** for the
@@ -72,26 +135,33 @@ export function applyContemptExpressionHeuristicToScenarioScores(
   pillarScores: Record<string, number | null | undefined>;
   keyEvidence: Record<string, string>;
 } {
-  const hits = countScenarioContemptVerdictSignals(userTurnsText);
-  if (hits === 0) {
-    return { pillarScores, keyEvidence: { ...(keyEvidence ?? {}) } };
-  }
-
-  const hScore = contemptExpressionScoreFromVerdictHitCount(hits);
-  if (!Number.isFinite(hScore)) {
-    return { pillarScores, keyEvidence: { ...(keyEvidence ?? {}) } };
-  }
-
   const nextPs: Record<string, number | null | undefined> = { ...pillarScores };
   const ke: Record<string, string> = { ...(keyEvidence ?? {}) };
-  const note = `Lexicon-backed contempt-expression signal from vignette answers (${hits} hit(s)); caps upward bias when model omitted or softened contempt_expression.`;
 
-  const cur = nextPs.contempt_expression;
-  const curN = typeof cur === 'number' && Number.isFinite(cur) ? cur : null;
-  nextPs.contempt_expression = curN == null ? hScore : Math.min(curN, hScore);
+  const hits = countScenarioContemptVerdictSignals(userTurnsText);
+  const hScore = contemptExpressionScoreFromVerdictHitCount(hits);
+  if (hits > 0 && Number.isFinite(hScore)) {
+    const note = `Lexicon-backed contempt-expression signal from vignette answers (${hits} hit(s)); caps upward bias when model omitted or softened contempt_expression.`;
 
-  const prev = (ke.contempt_expression ?? '').trim();
-  ke.contempt_expression = prev ? `${prev} | ${note}` : note;
+    const cur = nextPs.contempt_expression;
+    const curN = typeof cur === 'number' && Number.isFinite(cur) ? cur : null;
+    nextPs.contempt_expression = curN == null ? hScore : Math.min(curN, hScore);
+
+    const prev = (ke.contempt_expression ?? '').trim();
+    ke.contempt_expression = prev ? `${prev} | ${note}` : note;
+  }
+
+  if (absentCharacterEngagementCapApplies(userTurnsText)) {
+    const cur = nextPs.contempt_expression;
+    const curN = typeof cur === 'number' && Number.isFinite(cur) ? cur : null;
+    if (curN != null && curN > ABSENT_ENGAGEMENT_CAP) {
+      nextPs.contempt_expression = Math.min(curN, ABSENT_ENGAGEMENT_CAP);
+      const note =
+        `Relationship-level dismissal without sufficient character-engagement cues (<2 internal-state/curiosity signals); caps contempt_expression at ${ABSENT_ENGAGEMENT_CAP} per rubric.`;
+      const prev = (ke.contempt_expression ?? '').trim();
+      ke.contempt_expression = prev ? `${prev} | ${note}` : note;
+    }
+  }
 
   return { pillarScores: nextPs, keyEvidence: ke };
 }

@@ -1,6 +1,3 @@
--- Enable UUID extension
-CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
-
 -- Users table (Amoraea app data; avoids conflict with profiles from other apps)
 CREATE TABLE IF NOT EXISTS users (
   id UUID PRIMARY KEY REFERENCES auth.users(id) ON DELETE CASCADE,
@@ -22,7 +19,7 @@ CREATE TABLE IF NOT EXISTS users (
 
 -- Typologies table
 CREATE TABLE IF NOT EXISTS typologies (
-  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   profile_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
   typology_type TEXT NOT NULL CHECK (typology_type IN ('big_five', 'attachment_style', 'schwartz_values')),
   typology_data JSONB NOT NULL DEFAULT '{}',
@@ -33,7 +30,7 @@ CREATE TABLE IF NOT EXISTS typologies (
 
 -- Compatibility table
 CREATE TABLE IF NOT EXISTS compatibility (
-  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   profile_id UUID NOT NULL UNIQUE REFERENCES users(id) ON DELETE CASCADE,
   compatibility_data JSONB NOT NULL DEFAULT '{}',
   created_at TIMESTAMP WITH TIME ZONE DEFAULT TIMEZONE('utc', NOW()) NOT NULL,
@@ -42,7 +39,7 @@ CREATE TABLE IF NOT EXISTS compatibility (
 
 -- Profile photos table
 CREATE TABLE IF NOT EXISTS profile_photos (
-  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   profile_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
   storage_path TEXT NOT NULL,
   public_url TEXT NOT NULL,

@@ -6,6 +6,10 @@
 
 A production-ready mobile dating application built with React Native, Expo, and Supabase, following CLEAN architecture principles.
 
+## Payment Tier Limits:
+OpenAI: https://platform.openai.com/settings/organization/limits
+For speech recognition for AI Interviewer
+
 ## Features
 
 - **Authentication**: Email/password authentication with Supabase Auth

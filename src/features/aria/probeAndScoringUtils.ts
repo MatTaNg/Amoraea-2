@@ -1,3 +1,7 @@
+/** User-facing; when set in keyEvidence, participant skipped the remainder of this segment after a frustration offer. */
+export const SKIPPED_BY_USER_FRUSTRATION_EVIDENCE =
+  'Not scored — participant chose to skip the remaining prompt in this segment after a frustration signal.';
+
 /** User-facing; when set in keyEvidence, the slice did not receive the prompt (session ended, audio, etc.). */
 export const NOT_ASSESSED_SESSION_ENDED_TECHNICAL_EVIDENCE =
   'Not assessed — session ended due to technical difficulties before this prompt was delivered.';
@@ -21,6 +25,7 @@ export function isNotAssessedDueToTechnicalInterruption(text: string | null | un
 
 export function isNoEvidenceText(text: string | null | undefined): boolean {
   if (!text) return false;
+  if (text.trim() === SKIPPED_BY_USER_FRUSTRATION_EVIDENCE) return true;
   const t = text.trim().toLowerCase();
   return (
     /no\s+[a-z_ ]+\s+content\s+in\s+this\s+(scenario|moment|interview)/i.test(t) ||
@@ -32,7 +37,8 @@ export function isNoEvidenceText(text: string | null | undefined): boolean {
     /deflection, avoidance, or absent signal/i.test(t) ||
     /appreciation (was )?not assessed from this moment/i.test(t) ||
     /not assessed from this moment.*appreciation/i.test(t) ||
-    /limited (close[- ]relationship|lived) (experience|opportunity)/i.test(t)
+    /limited (close[- ]relationship|lived) (experience|opportunity)/i.test(t) ||
+    /\bnot scored\b.*\bskip\b.*\bfrustration\b/i.test(t)
   );
 }
 
@@ -160,7 +166,13 @@ export function evaluateMoment5AppreciationSpecificity(text: string): {
   };
 }
 
-/** Single runtime pivot when the user has no strong behavioral example (replaces older specificity probe). */
+/** Client-injected Moment 5 (follows Moment 4 threshold answer). */
+export const MOMENT_5_ACCOUNTABILITY_QUESTION_TEXT =
+  'Think of a time when you had a conflict with someone important to you. What happened, and how did things get resolved between you two?';
+
+export const MOMENT_5_ACCOUNTABILITY_PROBE_TEXT = 'What was your part in how it unfolded?';
+
+/** Single runtime pivot when the user has no strong behavioral example (legacy transcripts only). */
 export const MOMENT_5_INEXPERIENCE_FALLBACK_QUESTION =
   "What would meaningful celebration look like to you — either something you'd want to do for someone, or something that would feel meaningful to receive?";
 
@@ -174,15 +186,130 @@ export function isMoment5InexperienceFallbackPrompt(text: string): boolean {
   );
 }
 
+/** True when assistant turn is the scripted Moment 5 accountability follow-up probe. */
+export function looksLikeMoment5AccountabilityProbeAssistantPrompt(text: string | null | undefined): boolean {
+  const t = (text ?? '').replace(/\s+/g, ' ').trim().toLowerCase();
+  return (
+    t.includes('what was your part in how it unfolded') ||
+    (t.includes('your part') && t.includes('unfolded'))
+  );
+}
+
+export type Moment5AccountabilityProbeEvaluation = {
+  shouldProbe: boolean;
+  /** Machine-readable: why we fire the scripted probe, or why we skip it. */
+  reason:
+    | 'lacks_explicit_self_accountability'
+    | 'explicit_self_accountability'
+    | 'too_short'
+    | 'decline_or_vague_evade';
+};
+
 /**
- * True when an assistant turn is (or contains) the Moment 5 appreciation / celebration prompt or
- * an approved framework variant. Used to slice the transcript for post-interview Moment 5 scoring.
- * Keep aligned with interviewerFrameworkPrompt Moment 5 bridges and scripted lines.
+ * Voluntary ownership of one's part in the conflict — **not** mere first-person narration
+ * ("I felt…", "I said…", "I remember…") which can still be blame-only.
  */
-export function isMoment5AppreciationAssistantAnchor(content: string | null | undefined): boolean {
+export function moment5AnswerHasExplicitSelfAccountability(userText: string): boolean {
+  const t = userText.replace(/\s+/g, ' ').trim();
+  if (!t) return false;
+  const lower = t.toLowerCase();
+  return (
+    /\bi\s+contributed\b/i.test(t) ||
+    /\bmy\s+role\s+(was|here|in\s+that)\b/i.test(lower) ||
+    /\bmy\s+part\s+(was|here|in\s+that)\b/i.test(lower) ||
+    /\bhow\s+i\s+(contributed|acted|handled|messed up|made things worse|made it worse)\b/i.test(lower) ||
+    /\bwhat\s+i\s+did\s+wrong\b/i.test(lower) ||
+    /\bI\s+realiz(?:e|ed)\s+i\b/i.test(t) ||
+    /\bI\s+realis(?:e|ed)\s+i\b/i.test(t) ||
+    /\bi\s+also\s+(knew|realized|realised|should|could|regret|thought\s+i\s+was|had\s+to\s+admit|felt\s+responsible|took\s+(some\s+)?(blame|responsibility)|owned)\b/i.test(lower) ||
+    /\bmy\s+(fault|mistake)\b/i.test(lower) ||
+    /\b(that|this)\s+was\s+on\s+me\b/i.test(lower) ||
+    /\bI\s+take\s+responsibility\b/i.test(t) ||
+    /\bI\s+was\s+(wrong|at fault|to blame|unfair|defensive|too harsh)\b/i.test(t) ||
+    /\bI\s+(should|could)\s+have\b/i.test(t) ||
+    /\bI\s+wish\s+I(\s+had)?\b/i.test(t) ||
+    /\bI\s+(apologized|apologised)\b/i.test(t) ||
+    /\bI\s+('?m|am)\s+sorry\s+(for\s+)?(what\s+i|my|how\s+i)\b/i.test(t) ||
+    /\bI\s+(owned|admitted)\b/i.test(t) ||
+    /\bI\s+acknowledged\s+(that|my|the|I)\b/i.test(t) ||
+    /\bI\s+(overreacted|escalated)\b/i.test(t) ||
+    /\bmy\s+share\s+of\b/i.test(lower) ||
+    /\b(part|role)\s+i\s+(played|had|took)\b/i.test(lower) ||
+    /\bI\s+regret\s+(what\s+i|my|how\s+i|that\s+i)\b/i.test(t) ||
+    /\bI\s+see\s+(now\s+)?that\s+i\b/i.test(t) ||
+    (/\blooking\s+back,?\s+i\b/i.test(lower) &&
+      /\b(wrong|should|could|regret|fault|mistake|overreact|unfair|defensive)\b/i.test(lower))
+  );
+}
+
+/**
+ * At most one scripted follow-up: fire unless the user already names their **own** contribution
+ * to the tension (not only story-telling or other-blame).
+ */
+export function evaluateMoment5AccountabilityProbe(userText: string): Moment5AccountabilityProbeEvaluation {
+  const t = userText.replace(/\s+/g, ' ').trim();
+  const lower = t.toLowerCase();
+  const wordCount = t.split(/\s+/).filter(Boolean).length;
+  if (t.length < 36 || wordCount < 10) {
+    return { shouldProbe: false, reason: 'too_short' };
+  }
+  if (/\b(i don'?t have|nothing comes|can'?t think|no conflict|never really|not sure what to say)\b/i.test(lower) && t.length < 100) {
+    return { shouldProbe: false, reason: 'decline_or_vague_evade' };
+  }
+  if (moment5AnswerHasExplicitSelfAccountability(t)) {
+    return { shouldProbe: false, reason: 'explicit_self_accountability' };
+  }
+  return { shouldProbe: true, reason: 'lacks_explicit_self_accountability' };
+}
+
+/** @deprecated Prefer {@link evaluateMoment5AccountabilityProbe} for logging; boolean is equivalent to `shouldProbe`. */
+export function shouldProbeMoment5NoSelfReference(userText: string): boolean {
+  return evaluateMoment5AccountabilityProbe(userText).shouldProbe;
+}
+
+/**
+ * True when assistant content embeds the **scripted Moment 5 conflict question** (possibly inside a
+ * longer client bundle with reflection + pivot). Use for closing gates and post-M5 user-turn counting
+ * when {@link isMoment5AssistantAnchor} is too strict for sanitized typography.
+ */
+export function transcriptAssistantContainsMoment5PrimaryConflictQuestion(content: string | null | undefined): boolean {
+  if (content == null || typeof content !== 'string') return false;
+  if (looksLikeMoment5AccountabilityProbeAssistantPrompt(content)) return false;
+  if (isMoment5AssistantAnchor(content)) return true;
+  const lower = content.replace(/\s+/g, ' ').trim().toLowerCase();
+  const hasConflictIntro = lower.includes('think of a time when you had a conflict with someone important');
+  const hasResolutionAsk =
+    lower.includes('how did things get resolved') ||
+    (lower.includes('what happened') && lower.includes('resolved'));
+  return hasConflictIntro && hasResolutionAsk;
+}
+
+/**
+ * True when an assistant turn is (or contains) the Moment 5 primary prompt, legacy appreciation prompts,
+ * or related pivots. Used to slice the transcript for post-interview Moment 5 scoring.
+ */
+export function isMoment5AssistantAnchor(content: string | null | undefined): boolean {
   if (!content) return false;
   const c = content.replace(/\s+/g, ' ').trim();
   const lower = c.toLowerCase();
+  if (lower.includes('conflict or disagreement with someone important')) return true;
+  if (
+    lower.includes('think of a time when you had a conflict with someone important') &&
+    lower.includes('how did things get resolved')
+  ) {
+    return true;
+  }
+  /** Common Sonnet paraphrase of the scripted conflict prompt (not matched by canonical strings). */
+  if (
+    /\btell me about a specific conflict\b/i.test(c) &&
+    /\b(someone important|important in your life|important to you)\b/i.test(lower) &&
+    /\b(resolved|resolution|didn'?t)\b/i.test(lower)
+  ) {
+    return true;
+  }
+  if (lower.includes('tell me about a time you had a conflict') && lower.includes('how did it get resolved')) {
+    return true;
+  }
   if (isMoment5InexperienceFallbackPrompt(c)) return true;
   if (lower.includes('think of a time you really celebrated someone')) return true;
   if (lower.includes('really celebrated') && /\b(your life|in your life|them that|show them)\b/.test(lower)) {
@@ -230,6 +357,9 @@ export function isMoment5AppreciationAssistantAnchor(content: string | null | un
   }
   return false;
 }
+
+/** @deprecated Use {@link isMoment5AssistantAnchor} — name retained for legacy imports. */
+export const isMoment5AppreciationAssistantAnchor = isMoment5AssistantAnchor;
 
 export function moment5AcknowledgesLimitedCloseRelationshipExperience(text: string): boolean {
   const t = text.toLowerCase();
@@ -451,6 +581,7 @@ export function hasScenarioAQ1ContemptProbeCoverage(text: string): boolean {
   const referencesEmmaFinalLine =
     lower.includes("you've made that very clear") ||
     lower.includes('you have made that very clear') ||
+    /\byou\s+made\s+that\s+very\s+clear\b/.test(lower) ||
     (lower.includes('very clear') && /\bemma\b/.test(lower));
 
   /** Hostile / verdict / relational-sting reads — not indirectness alone (see passive-aggressive rule below). */
@@ -500,7 +631,7 @@ export function scenarioCCommitmentThresholdMatchDetail(text: string): {
       t
     );
   const relationshipOutcome =
-    /\b(walk away from (the relationship|it all|them|him|her)|leave (for good|the relationship)|end things|end the relationship|leave them for good|time to go|split up|separate for good)\b/.test(
+    /\b(walk away from (the relationship|it all|them|him|her)|leave (for good|the relationship)|end things|end(ing)? the relationship|leave them for good|time to go|split up|separate for good)\b/.test(
       t
     );
   const decisionProcess =
@@ -554,16 +685,62 @@ export function isScenarioCRepairAssistantPrompt(text: string): boolean {
   return canonical || dropSituation || modalShort || canBeRepaired || repairIng;
 }
 
+/**
+ * True when assistant text embeds the canonical scripted Scenario C commitment-threshold line
+ * (client inject or model). Used to avoid duplicate forces, resume false negatives, and races
+ * before `scenarioCCommitmentThresholdProbeAskedRef` flips.
+ */
+export function assistantContainsScenarioCCommitmentThresholdForcedLine(text: string): boolean {
+  const t = normalizeInterviewTypography(text ?? '')
+    .replace(/\u2019/g, "'")
+    .replace(/\s+/g, ' ')
+    .trim()
+    .toLowerCase();
+  if (t.length < 50) return false;
+  if (!t.includes('at what point would you say daniel or sophie should decide')) return false;
+  return (
+    t.includes("this relationship isn't working") ||
+    t.includes('this relationship is not working') ||
+    (t.includes('relationship') && (/\bisn'?t working\b/.test(t) || /\bis not working\b/.test(t)))
+  );
+}
+
 /** Scenario C follow-up: when Daniel/Sophie should decide the relationship is not working (not the repair prompt). */
 export function looksLikeScenarioCCommitmentThresholdAssistantPrompt(text: string): boolean {
-  const t = (text ?? '').toLowerCase();
-  return (
-    t.includes("at what point would you say daniel or sophie should decide this relationship isn't working") ||
-    (t.includes('daniel') &&
-      t.includes('sophie') &&
-      t.includes("isn't working") &&
-      /\b(at what point|what point)\b/.test(t))
-  );
+  if (assistantContainsScenarioCCommitmentThresholdForcedLine(text)) return true;
+  const raw = normalizeInterviewTypography(text ?? '');
+  const t = raw.replace(/\u2019/g, "'").replace(/\s+/g, ' ').trim().toLowerCase();
+  if (t.length < 24) return false;
+  if (!/\bdaniel\b/.test(t) || !/\bsophie\b/.test(t)) return false;
+
+  const relationshipBroken =
+    t.includes("this relationship isn't working") ||
+    t.includes('this relationship is not working') ||
+    t.includes("relationship isn't working") ||
+    t.includes('relationship is not working') ||
+    /\b(isn'?t|is not)\s+working\b/.test(t) ||
+    (/\brelationship\b/.test(t) && /\bnot working\b/.test(t));
+
+  if (!relationshipBroken) return false;
+
+  const canonical =
+    t.includes('at what point would you say daniel or sophie should decide this relationship') ||
+    t.includes("at what point would you say daniel or sophie should decide this relationship isn't working");
+
+  const pointAsk = /\b(at what point|what point)\b/.test(t);
+  const framedAsk =
+    pointAsk &&
+    (/\bwould you say\b/.test(t) || /\bdo you decide\b/.test(t)) &&
+    (/\bshould decide\b/.test(t) || /\brelationship\b/.test(t));
+  /** e.g. "At what point would you decide Sophie and Daniel's relationship isn't working?" — models omit "say" / "should". */
+  const wouldYouDecideBothNamed =
+    pointAsk &&
+    /\bwould you decide\b/.test(t) &&
+    /\bdaniel\b/.test(t) &&
+    /\bsophie\b/.test(t) &&
+    relationshipBroken;
+
+  return Boolean(canonical || framedAsk || wouldYouDecideBothNamed);
 }
 
 /**
@@ -718,8 +895,20 @@ export function normalizeInterviewTypography(text: string): string {
 }
 
 export function isLikelyMisplacedPersonalNarrativeForScenarioCThreshold(text: string): boolean {
+  /**
+   * Answers that already express commitment / exit timing (e.g. "third time… end the relationship")
+   * often omit "Daniel/Sophie/their" — must not be treated as misplaced personal Moment-4 narrative
+   * (session_logs: SC3_MISPLACED_THRESHOLD_SEQUENCE after threshold probe + whisper "end the relationship").
+   */
+  if (hasScenarioCCommitmentThresholdInUserAnswer(text)) return false;
   const t = text.toLowerCase();
-  const referencesScenarioCharacters = /\b(daniel|sophie|they)\b/.test(t) && /\b(should|would|relationship|not working|walk away|end)\b/.test(t);
+  /**
+   * Third-person about the vignette couple often uses "their relationship" / "them" — not `\bthey\b`.
+   * Misclassifying that as a personal Moment-4 narrative re-fires the redirect + threshold TTS loop (see SC3_MISPLACED_THRESHOLD_SEQUENCE).
+   */
+  const referencesScenarioCharacters =
+    /\b(daniel|sophie|they|their|them)\b/.test(t) &&
+    /\b(should|would|relationship|not working|walk away|end|ending|fight|fighting|couple|together)\b/.test(t);
   if (referencesScenarioCharacters) return false;
   const hasPersonalNarrativeSignals =
     /\b(i|my|me|we|our|us)\b/.test(t) &&

@@ -1,6 +1,12 @@
-import React, { useEffect, Suspense, lazy } from 'react';
+import React, { useEffect, Suspense, lazy, useMemo } from 'react';
 import { Platform } from 'react-native';
-import { NavigationContainer, DarkTheme } from '@react-navigation/native';
+import {
+  NavigationContainer,
+  DarkTheme,
+  getStateFromPath as getStateFromPathDefault,
+  type LinkingOptions,
+} from '@react-navigation/native';
+import * as ExpoLinking from 'expo-linking';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
@@ -10,6 +16,8 @@ import { RegisterScreen } from './src/app/screens/RegisterScreen';
 import { PostInterviewScreen } from '@app/screens/onboarding/PostInterviewScreen';
 import { PostInterviewPassedScreen } from '@app/screens/onboarding/PostInterviewPassedScreen';
 import { PostInterviewFailedScreen } from '@app/screens/onboarding/PostInterviewFailedScreen';
+import { DatingProfileOnboardingNavigator } from '@app/navigation/DatingProfileOnboardingNavigator';
+import { DatingProfileEditScreen } from '@app/screens/DatingProfileEditScreen';
 import { PostInterviewProcessingScreen } from '@app/screens/onboarding/PostInterviewProcessingScreen';
 import { isAmoraeaAdminConsoleEmail } from '@/constants/adminConsole';
 import {
@@ -25,6 +33,10 @@ import { AsyncStorageService } from './src/utilities/storage/AsyncStorageService
 import { supabase } from './src/data/supabase/client';
 import { useQuery } from '@tanstack/react-query';
 import { StyleSheet, View, Text, ActivityIndicator } from 'react-native';
+import {
+  initAudosFromEnv,
+  syncAudosIdentifyFromSupabaseUser,
+} from '@/integrations/audos';
 
 const AriaScreenLazy = lazy(async () => {
   try {
@@ -178,6 +190,22 @@ const InterviewAppNavigator = ({
         header: () => <OnboardingHeader variant="dark" />,
       }}
     />
+    <Stack.Screen name="DatingProfileOnboarding" options={{ headerShown: false }}>
+      {(props) => (
+        <DatingProfileOnboardingNavigator
+          userId={(props.route.params as { userId?: string } | undefined)?.userId ?? userId}
+        />
+      )}
+    </Stack.Screen>
+    <Stack.Screen
+      name="DatingProfileEdit"
+      component={DatingProfileEditScreen as unknown as React.ComponentType<Record<string, never>>}
+      initialParams={{ userId }}
+      options={{
+        headerShown: true,
+        header: () => <OnboardingHeader variant="dark" />,
+      }}
+    />
   </Stack.Navigator>
 );
 
@@ -274,10 +302,71 @@ const LoadingScreen = () => (
   </View>
 );
 
+/**
+ * Logged-in stack: `Aria` uses path `interview` so the browser URL stays `/interview` (not rewritten to `/`).
+ * `/` still opens the same screen by parsing as `interview`.
+ */
+function mapInterviewStackPath(path: string): string {
+  const qIndex = path.indexOf('?');
+  const pathnameRaw = qIndex >= 0 ? path.slice(0, qIndex) : path;
+  const search = qIndex >= 0 ? path.slice(qIndex) : '';
+  const pathname = pathnameRaw.replace(/\/+$/, '') || '/';
+  if (
+    pathname === '/' ||
+    pathname === '' ||
+    pathname === '/interview' ||
+    pathname === 'interview'
+  ) {
+    return `interview${search}`;
+  }
+  return path;
+}
+
+/** Auth stack: Login lives at ``; map `/interview` → `/` so both URLs show the login screen. */
+function normalizeAuthWebPath(path: string): string {
+  const [pathPart, query] = path.split('?');
+  const trimmed = pathPart.replace(/\/+$/, '') || '/';
+  const isInterviewAlias =
+    trimmed === '/interview' || trimmed === 'interview' || pathPart === 'interview';
+  if (!isInterviewAlias) {
+    return path;
+  }
+  return query != null && query !== '' ? `/?${query}` : '/';
+}
+
+const INTERVIEW_STACK_LINKING_SCREENS = {
+  Aria: {
+    path: 'interview',
+    parse: {
+      openAdminPanel: (value: string | undefined) =>
+        value === '1' || value === 'true' || value === 'yes',
+    },
+  },
+  PostInterview: 'post-interview',
+  PostInterviewProcessing: 'post-interview-processing',
+  PostInterviewPassed: 'passed',
+  PostInterviewFailed: 'failed',
+} as const;
+
+const AUTH_STACK_LINKING_SCREENS = {
+  Login: '',
+  Register: 'register',
+} as const;
+
 const RootNavigator = () => {
   const { user, loading } = useAuth();
 
   const isLoggedIn = user?.email != null && user.email !== '';
+
+  useEffect(() => {
+    initAudosFromEnv();
+  }, []);
+
+  useEffect(() => {
+    if (!loading) {
+      syncAudosIdentifyFromSupabaseUser(user);
+    }
+  }, [loading, user]);
 
   useEffect(() => {
     if (isLoggedIn && user?.id) {
@@ -293,6 +382,25 @@ const RootNavigator = () => {
       });
     }
   }, [isLoggedIn, user?.id, user?.email]);
+
+  const linking: LinkingOptions<Record<string, unknown>> | undefined = useMemo(() => {
+    if (Platform.OS !== 'web') {
+      return undefined;
+    }
+    const screens = isLoggedIn ? INTERVIEW_STACK_LINKING_SCREENS : AUTH_STACK_LINKING_SCREENS;
+    const prefixes = [
+      ...(typeof window !== 'undefined' ? [`${window.location.protocol}//${window.location.host}`] : []),
+      ExpoLinking.createURL('/'),
+    ];
+    return {
+      prefixes,
+      config: { screens: screens as Record<string, string | Record<string, unknown>> },
+      getStateFromPath(path: string, options: Parameters<typeof getStateFromPathDefault>[1]) {
+        const mapped = isLoggedIn ? mapInterviewStackPath(path) : normalizeAuthWebPath(path);
+        return getStateFromPathDefault(mapped, options);
+      },
+    };
+  }, [isLoggedIn]);
 
   if (loading) {
     return <LoadingScreen />;
@@ -311,7 +419,7 @@ const RootNavigator = () => {
   };
 
   return (
-    <NavigationContainer theme={navTheme}>
+    <NavigationContainer theme={navTheme} linking={linking}>
       {isLoggedIn ? <AppNavigator userId={user!.id} /> : <AuthNavigator />}
     </NavigationContainer>
   );

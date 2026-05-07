@@ -81,6 +81,28 @@ describe('buildMatchmakerSummaryFromProfile — production matchmaker_summary te
     expect(s.split(/\.\s+/).filter((p) => p.trim().length > 0).length).toBe(3);
   });
 
+  it('same broad style branch yields different prose when profile fingerprint differs', () => {
+    const base = baseProfile({
+      emotional_analytical_score: 0.62,
+      narrative_conceptual_score: 0.5,
+      first_person_ratio: 0.55,
+    });
+    const a = buildMatchmakerSummaryFromProfile(base, {
+      userCorpus: 'x'.repeat(400),
+      userTurns: ['short'],
+    });
+    const b = buildMatchmakerSummaryFromProfile(
+      { ...base, avg_response_length: 210, emotional_vocab_density: 9.2 },
+      {
+        userCorpus: 'y'.repeat(1200),
+        userTurns: ['a longer reflective turn about feeling overwhelmed and needing space'],
+      },
+    );
+    expect(a.split('.')[0]).not.toBe(b.split('.')[0]);
+    expect(matchmakerSummaryReadsAsChipRestatement(a)).toBe(false);
+    expect(matchmakerSummaryReadsAsChipRestatement(b)).toBe(false);
+  });
+
   it('when scenario vs personal register diverges, sentence 1 leads with cross-interview register shift', () => {
     const scenario =
       'ryan is emotionally immature and too sensitive. not an acceptable explanation. never had to put their partner first.';

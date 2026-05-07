@@ -3,6 +3,18 @@ import {
   INTERVIEW_MARKER_LABELS,
   type InterviewMarkerId,
 } from './interviewMarkers.ts';
+import {
+  buildScenarioCompositesTriple,
+  formatScenarioFloorFailReason,
+  scenarioFloorBreaches,
+  type ScenarioCompositesTriple,
+  type ScenarioGateIndex as ScenarioCompositeGateIndex,
+} from './scenarioCompositeFloor.ts';
+import {
+  formatMentalizingRepairFloorSnippet,
+  mentalizingRepairFloorTriggered,
+  type ScenarioPillarLow,
+} from './mentalizingRepairScenarioFloor.ts';
 
 /** Research-based weights (sum = 1.0). Renormalized over assessed constructs only. */
 export const GATE_MARKER_BASE_WEIGHTS: Record<InterviewMarkerId, number> = {
@@ -30,7 +42,23 @@ export type GateResultReason =
   | 'pass'
   | 'floor_breach'
   | 'weighted_below_threshold'
+  | 'scenario_floor'
+  | 'mentalizing_floor'
+  | 'repair_floor'
   | 'no_assessed_markers';
+
+/** Stored on `interview_attempts.gate_fail_reasons`; multiple can apply at once. */
+export type GateFailCode = 'weighted_score' | 'scenario_floor' | 'mentalizing_floor' | 'repair_floor';
+
+export type GateFailDetailJson = {
+  weighted_score?: { score: number; requiredMin: number };
+  scenario_floor?: {
+    composites: ScenarioCompositesTriple;
+    breaches: Array<{ scenario: ScenarioCompositeGateIndex; composite: number }>;
+  };
+  mentalizing_floor?: { lowScenarios: ScenarioPillarLow[] };
+  repair_floor?: { lowScenarios: ScenarioPillarLow[] };
+};
 
 export interface GateResult {
   pass: boolean;
@@ -40,7 +68,14 @@ export interface GateResult {
   failingScore: number | null;
   assessedMarkerCount: number;
   excludedMarkers: string[];
+  /** Semicolon-joined summary for logs and legacy readers. */
   failReason: string | null;
+  /** All gate failures that apply (excluding holistic pillar `floor_breach`). */
+  failReasonCodes?: GateFailCode[];
+  /** Structured detail aligned with {@link failReasonCodes}. */
+  failReasonDetail?: GateFailDetailJson | null;
+  /** Present when per-scenario pillar maps were supplied (standard interview scenarios 1–3 only). */
+  scenarioComposites?: ScenarioCompositesTriple | null;
 }
 
 export type ComputeGateResultOptions = {
@@ -48,10 +83,93 @@ export type ComputeGateResultOptions = {
   onWeightedBreakdown?: (data: Record<string, unknown>) => void;
   /** Overrides {@link GATE_PASS_WEIGHTED_MIN} for weighted average only (e.g. referral boost). Floors unchanged. */
   weightedPassMin?: number;
+  /**
+   * When set, after weighted threshold passes, each scenario’s composite (mean of present pillar scores in that
+   * scenario’s slice) must be ≥ 4.5. Omit for holistic-only / scripts.
+   */
+  scenarioPillarScoresByScenario?: Partial<
+    Record<1 | 2 | 3, Record<string, number | null | undefined> | null | undefined>
+  >;
 };
 
 /** Weighted pass threshold when referral boost is active (floors unchanged). */
 export const REFERRAL_WEIGHTED_PASS_MIN = 5.5;
+
+const GATE_FAIL_CODE_ORDER: GateFailCode[] = [
+  'weighted_score',
+  'scenario_floor',
+  'mentalizing_floor',
+  'repair_floor',
+];
+
+function pickPrimaryGateReason(codes: GateFailCode[]): GateResultReason {
+  for (const o of GATE_FAIL_CODE_ORDER) {
+    if (codes.includes(o)) {
+      if (o === 'weighted_score') return 'weighted_below_threshold';
+      return o;
+    }
+  }
+  return 'weighted_below_threshold';
+}
+
+function pickPrimaryFailingConstructAndScore(
+  codes: GateFailCode[],
+  detail: GateFailDetailJson,
+): { failingConstruct: string | null; failingScore: number | null } {
+  for (const o of GATE_FAIL_CODE_ORDER) {
+    if (!codes.includes(o)) continue;
+    if (o === 'weighted_score' && detail.weighted_score) {
+      return { failingConstruct: null, failingScore: detail.weighted_score.score };
+    }
+    if (o === 'scenario_floor' && detail.scenario_floor?.breaches[0]) {
+      const b = detail.scenario_floor.breaches[0]!;
+      return {
+        failingConstruct: `Scenario ${b.scenario} composite`,
+        failingScore: b.composite,
+      };
+    }
+    if (o === 'mentalizing_floor' && detail.mentalizing_floor?.lowScenarios[0]) {
+      const l = detail.mentalizing_floor.lowScenarios[0]!;
+      return {
+        failingConstruct: `Mentalizing scenario ${l.scenario}`,
+        failingScore: l.score,
+      };
+    }
+    if (o === 'repair_floor' && detail.repair_floor?.lowScenarios[0]) {
+      const l = detail.repair_floor.lowScenarios[0]!;
+      return {
+        failingConstruct: `Repair scenario ${l.scenario}`,
+        failingScore: l.score,
+      };
+    }
+  }
+  return { failingConstruct: null, failingScore: null };
+}
+
+function formatAggregateGateFailReason(
+  codes: GateFailCode[],
+  detail: GateFailDetailJson,
+  weightedScore: number,
+  weightedMin: number,
+): string {
+  const parts: string[] = [];
+  for (const c of GATE_FAIL_CODE_ORDER) {
+    if (!codes.includes(c)) continue;
+    if (c === 'weighted_score') {
+      parts.push(`weighted_score: ${weightedScore.toFixed(1)} (required ${weightedMin.toFixed(1)})`);
+    }
+    if (c === 'scenario_floor' && detail.scenario_floor?.breaches.length) {
+      parts.push(formatScenarioFloorFailReason(detail.scenario_floor.breaches, true));
+    }
+    if (c === 'mentalizing_floor' && detail.mentalizing_floor?.lowScenarios.length) {
+      parts.push(formatMentalizingRepairFloorSnippet('mentalizing_floor', detail.mentalizing_floor.lowScenarios));
+    }
+    if (c === 'repair_floor' && detail.repair_floor?.lowScenarios.length) {
+      parts.push(formatMentalizingRepairFloorSnippet('repair_floor', detail.repair_floor.lowScenarios));
+    }
+  }
+  return parts.join('; ');
+}
 
 function isAssessedScore(v: unknown): v is number {
   return typeof v === 'number' && Number.isFinite(v) && v > 0;
@@ -173,6 +291,19 @@ export function computeGateResultCore(
     weightedVsSimpleDelta,
   });
 
+  const scenarioMaps = options?.scenarioPillarScoresByScenario;
+  let scenarioComposites: ScenarioCompositesTriple | null = null;
+  let scenarioFloorGateDetail: GateFailDetailJson | null = null;
+  if (scenarioMaps != null) {
+    scenarioComposites = buildScenarioCompositesTriple(scenarioMaps);
+    const sb = scenarioFloorBreaches(scenarioComposites);
+    if (sb.length > 0) {
+      scenarioFloorGateDetail = {
+        scenario_floor: { composites: scenarioComposites, breaches: sb },
+      };
+    }
+  }
+
   if (floorBreaches.length > 0) {
     const first = floorBreaches.slice().sort((a, b) => a.id.localeCompare(b.id))[0];
     return {
@@ -184,19 +315,68 @@ export function computeGateResultCore(
       assessedMarkerCount: assessedMarkerIds.length,
       excludedMarkers,
       failReason: formatFloorBreachFailReason(floorBreaches),
+      scenarioComposites,
+      failReasonCodes: scenarioFloorGateDetail ? ['scenario_floor'] : undefined,
+      failReasonDetail: scenarioFloorGateDetail,
     };
   }
 
+  const codes: GateFailCode[] = [];
+  const detail: GateFailDetailJson = {};
+
   if (!meetsWeightedThreshold) {
+    codes.push('weighted_score');
+    detail.weighted_score = { score: weightedScore, requiredMin: weightedMin };
+  }
+
+  if (scenarioFloorGateDetail) {
+    codes.push('scenario_floor');
+    Object.assign(detail, scenarioFloorGateDetail);
+  }
+
+  if (scenarioMaps != null) {
+    const mr = mentalizingRepairFloorTriggered(scenarioMaps);
+    if (mr.mentalizingFloorFails) {
+      codes.push('mentalizing_floor');
+      detail.mentalizing_floor = { lowScenarios: mr.mentalizingLowScenarios };
+    }
+    if (mr.repairFloorFails) {
+      codes.push('repair_floor');
+      detail.repair_floor = { lowScenarios: mr.repairLowScenarios };
+    }
+  }
+
+  if (codes.length > 0) {
+    const primary = pickPrimaryGateReason(codes);
+    const { failingConstruct, failingScore } = pickPrimaryFailingConstructAndScore(codes, detail);
     return {
       pass: false,
-      reason: 'weighted_below_threshold',
+      reason: primary,
+      weightedScore,
+      failingConstruct,
+      failingScore,
+      assessedMarkerCount: assessedMarkerIds.length,
+      excludedMarkers,
+      failReason: formatAggregateGateFailReason(codes, detail, weightedScore, weightedMin),
+      failReasonCodes: codes,
+      failReasonDetail: detail,
+      scenarioComposites,
+    };
+  }
+
+  if (scenarioMaps != null) {
+    return {
+      pass: true,
+      reason: 'pass',
       weightedScore,
       failingConstruct: null,
       failingScore: null,
       assessedMarkerCount: assessedMarkerIds.length,
       excludedMarkers,
-      failReason: `weighted_below_threshold: ${weightedScore.toFixed(1)} (required ${weightedMin.toFixed(1)})`,
+      failReason: null,
+      failReasonCodes: [],
+      failReasonDetail: null,
+      scenarioComposites,
     };
   }
 
@@ -209,5 +389,7 @@ export function computeGateResultCore(
     assessedMarkerCount: assessedMarkerIds.length,
     excludedMarkers,
     failReason: null,
+    failReasonCodes: [],
+    failReasonDetail: null,
   };
 }

@@ -15,6 +15,22 @@ describe('reconcileScenarioScoresTranscript', () => {
     expect(keys).toContain('accountability');
   });
 
+  it('does not infer S2 repair unassessed when assistant used silent S2→S3 (complete token + Sophie vignette, no repair line)', () => {
+    const msgs = [
+      { role: 'assistant' as const, content: 'Sarah and James... What do you think is going on here?', scenarioNumber: 2 },
+      { role: 'user' as const, content: 'James should have led with warmth.', scenarioNumber: 2 },
+      { role: 'user' as const, content: "If I were James I'd apologize first and name what she needed.", scenarioNumber: 2 },
+      {
+        role: 'assistant' as const,
+        content:
+          "[SCENARIO_COMPLETE:2]\n\nGreat work — that's the end of this one, too. Here's the third situation — after this we'll move to something more personal.\n\nSophie and Daniel have had the same argument for the third time.",
+        scenarioNumber: 2,
+      },
+    ];
+    const keys = inferUnassessedMarkerKeysFromTranscript(2, msgs);
+    expect(keys).not.toContain('repair');
+  });
+
   it('produces null scores and not_assessed confidence for inferred keys', () => {
     const msgs = [
       { role: 'assistant' as const, content: 'Sarah and James... What do you think is going on here?', scenarioNumber: 2 },

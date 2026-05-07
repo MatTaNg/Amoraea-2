@@ -14,6 +14,7 @@ import { getWebSpeechDeferFromNavigatorSnapshot } from './webSpeechDeferPolicy';
 import { WebTtsRequiresUserGestureError } from './webTtsGestureErrors';
 import { supabase } from '@data/supabase/client';
 import {
+  isIosSafariMobileWeb,
   logTtsAutoplayPlayOutcome,
   type TtsAutoplayPipeline,
   type TtsTelemetrySource,
@@ -939,6 +940,8 @@ export type ElevenLabsSpeakOptions = {
   skipStopElevenLabsPlaybackBeforeStart?: boolean;
   /** Web mic pre-init audit: which phase last warmed the inactive MediaRecorder. */
   preInitTriggerDuring?: PreInitTriggerDuring;
+  /** Web: force full MP3 download + Web Audio / HTML audio — skip raw PCM stream (retry path after truncated playback). */
+  skipPcmStream?: boolean;
 };
 
 /**
@@ -1556,9 +1559,11 @@ export async function speakWithElevenLabs(
     throw new WebTtsRequiresUserGestureError(spokenText);
   }
 
-  /** PCM chunks schedule many `AudioBufferSourceNode`s — desktop Chrome still hits static after tab suspend/resume; mobile keeps streaming for earlier audible output on long lines. */
+  /** PCM chunks schedule many `AudioBufferSourceNode`s — desktop Chrome still hits static after tab suspend/resume; mobile keeps streaming for earlier audible output on long lines. iOS Safari mobile never uses PCM (HTML audio only — avoids mid-playback pipeline switch / static). */
   const shouldTryPcmStream =
     Platform.OS === 'web' &&
+    !options?.skipPcmStream &&
+    !isIosSafariMobileWeb() &&
     !webEmbeddedInAppBrowserDiscouragesPcmStream() &&
     webSpeechShouldDeferToUserGesture() &&
     telemetrySource !== 'greeting' &&

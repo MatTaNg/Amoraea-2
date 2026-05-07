@@ -28,7 +28,7 @@ function pillarScoresMeaningful(raw: unknown): boolean {
 }
 
 /** Scenario bundle should include a non-empty pillarScores map (how interview_attempts stores scenario_*_scores). */
-function scenarioScoresMeaningful(raw: unknown): boolean {
+export function scenarioScoresMeaningful(raw: unknown): boolean {
   if (!objectNonEmpty(raw)) return false;
   const o = raw as Record<string, unknown>;
   const inner = o.pillarScores ?? o.pillar_scores;

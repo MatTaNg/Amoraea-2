@@ -122,8 +122,8 @@ export function isSimpleYesNoInterviewMoment(lastQuestionText: string | null | u
   if (/are you ready\b/.test(q)) return true;
   if (/\bready to (get )?started\b/.test(q)) return true;
   if (/\bready\?\s*$/.test(q) && q.length < 80) return true;
-  if (/\byes or no\b/i.test(q)) return true;
-  if (/\b(yes|no)\b/.test(q) && q.length < 160) return true;
+  /** Explicit yes/no choice — not merely containing the word "yes" or "no" (scenario copy often says "no right or wrong"). */
+  if (/\b(yes or no|answer yes or no|a simple yes or no|just yes or no)\b/i.test(q)) return true;
   return false;
 }
 
@@ -226,7 +226,7 @@ export function getWhisperReaskTurnContext(
   return 'substantive';
 }
 
-type WhisperReaskEvaluationInput = {
+export type WhisperReaskEvaluationInput = {
   turnContext: WhisperReaskTurnContext;
   transcriptText: string;
   wordCount: number;
@@ -234,16 +234,79 @@ type WhisperReaskEvaluationInput = {
   shortAnswerOk: boolean;
 };
 
+/** Max ratio-style re-asks per assistant question before accepting the transcript and advancing. */
+export const WHISPER_RATIO_REASK_MAX_ATTEMPTS_PER_QUESTION = 3;
+
+const MULTIWORD_HARD_STOP_TRANSCRIPTS_NORMALIZED = new Set([
+  "i don't know",
+  'i dont know',
+  "i can't",
+  'i cant',
+  'i cannot',
+  'i do not know',
+]);
+
+function normalizeTranscriptForHardStopMatch(raw: string): string {
+  let s = raw.trim().toLowerCase();
+  s = s.replace(/\u2019/g, "'").replace(/\u2018/g, "'");
+  s = s.replace(/\s+/g, ' ');
+  s = s.replace(/[.,!?;:…]+$/g, '').trim();
+  return s;
+}
+
+/**
+ * Single-word successful Whisper turns and short refusal / hard-stop phrases must not trigger the
+ * ratio re-ask ("answer again in a full sentence"). Empty / failed transcription is handled separately.
+ */
+export function getWhisperRatioReaskSuppressionReason(
+  transcriptText: string,
+  wordCount: number,
+): 'valid_hard_stop' | null {
+  const trimmed = transcriptText.trim();
+  if (!trimmed || wordCount < 1) return null;
+  if (wordCount === 1) return 'valid_hard_stop';
+  const n = normalizeTranscriptForHardStopMatch(trimmed);
+  if (MULTIWORD_HARD_STOP_TRANSCRIPTS_NORMALIZED.has(n)) return 'valid_hard_stop';
+  return null;
+}
+
+export type WhisperRatioReaskState = {
+  /** True when the client should play the ratio re-ask prompt (subject to per-question attempt cap in AriaScreen). */
+  shouldFire: boolean;
+  /** Log when non-null: a ratio re-ask would have fired without hard-stop / single-word suppression. */
+  logSuppressedReason: 'valid_hard_stop' | null;
+};
+
+/**
+ * Whisper ratio re-ask: substantive turns with suspicious words/sec or very short answers — unless
+ * Whisper already returned a valid single-word answer or a recognized hard-stop phrase.
+ */
+export function computeWhisperRatioReaskState(input: WhisperReaskEvaluationInput): WhisperRatioReaskState {
+  const { turnContext, transcriptText, wordCount, wordsPerSecond, shortAnswerOk } = input;
+  const hasNonEmptyTranscript = transcriptText.trim().length > 0;
+  if (!hasNonEmptyTranscript) {
+    return { shouldFire: true, logSuppressedReason: null };
+  }
+  if (turnContext === 'name_collection' || turnContext === 'readiness_confirmation') {
+    return { shouldFire: false, logSuppressedReason: null };
+  }
+
+  const ratioFlag = wordsPerSecond < 0.3 || (!shortAnswerOk && wordCount < 3);
+  const wouldFireRatioOnly = ratioFlag && wordCount < 3 && !shortAnswerOk;
+  const suppression = getWhisperRatioReaskSuppressionReason(transcriptText, wordCount);
+  if (suppression && wouldFireRatioOnly) {
+    return { shouldFire: false, logSuppressedReason: 'valid_hard_stop' };
+  }
+  if (suppression) {
+    return { shouldFire: false, logSuppressedReason: null };
+  }
+  return { shouldFire: wouldFireRatioOnly, logSuppressedReason: null };
+}
+
 /**
  * Re-ask trigger for Whisper ratio gate.
  * Exempt contexts (name/readiness): accept any non-empty transcript, regardless of ratio/word-count/confidence.
  */
 export function shouldFireWhisperRatioReask(input: WhisperReaskEvaluationInput): boolean {
-  const { turnContext, transcriptText, wordCount, wordsPerSecond, shortAnswerOk } = input;
-  const hasNonEmptyTranscript = transcriptText.trim().length > 0;
-  if (!hasNonEmptyTranscript) return true;
-  if (turnContext === 'name_collection' || turnContext === 'readiness_confirmation') return false;
-
-  const ratioFlag = wordsPerSecond < 0.3 || (!shortAnswerOk && wordCount < 3);
-  return ratioFlag && wordCount < 3 && !shortAnswerOk;
+  return computeWhisperRatioReaskState(input).shouldFire;
 }

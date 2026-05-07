@@ -123,6 +123,9 @@ GRANT EXECUTE ON FUNCTION public.fulfill_referral_after_interview(UUID) TO authe
 
 ALTER TABLE public.referral_codes ENABLE ROW LEVEL SECURITY;
 
+DROP POLICY IF EXISTS "Users read own referral rows as referrer" ON public.referral_codes;
+DROP POLICY IF EXISTS "Users insert own referral code row" ON public.referral_codes;
+
 CREATE POLICY "Users read own referral rows as referrer"
   ON public.referral_codes FOR SELECT
   TO authenticated

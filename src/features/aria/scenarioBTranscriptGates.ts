@@ -3,27 +3,15 @@
  * Kept separate from the screen to use in the scoring pipeline and scripts.
  */
 
-const SCENARIO_B_REPAIR_COVERED_SKIP =
+import { looksLikeScenarioBRepairAsJamesQuestion } from './interviewDisengagementProbes';
+
+/** Legacy assistant line when Q3 was skipped (older sessions). Kept for transcript reconciliation. */
+const SCENARIO_B_REPAIR_COVERED_SKIP_LEGACY =
   "Got it — you've already covered how you'd approach that.";
 
 export function isScenarioBRepairAsJamesQuestion(text: string | null | undefined): boolean {
   if (!text?.trim()) return false;
-  const t = text.toLowerCase();
-  const asJames =
-    /\bif you were james\b/.test(t) &&
-    /\b(repair|fix|make it right|apologize|patch things|make up|mend|handle|approach|smooth|sort (this|it) out|navigate|move forward)\b/.test(
-      t
-    );
-  const howRepairJames =
-    /\bhow would you\b/.test(t) &&
-    /\bjames\b/.test(t) &&
-    /\b(repair|fix|handle|approach|make things right|make it right)\b/.test(t);
-  const compact =
-    t.length < 200 &&
-    /\bjames\b/.test(t) &&
-    /\b(you were|as james|if you were)\b/.test(t) &&
-    /\b(repair|fix|handle|approach)\b/.test(t);
-  return asJames || howRepairJames || compact;
+  return looksLikeScenarioBRepairAsJamesQuestion(text);
 }
 
 export function isScenarioBJamesDifferentlyOrAppreciationPathQuestion(text: string | null | undefined): boolean {
@@ -44,7 +32,29 @@ export function isScenarioBJamesDifferentlyOrAppreciationPathQuestion(text: stri
 
 export function isScenarioBRepairCoveredInPriorTurnAssistant(text: string | null | undefined): boolean {
   if (!text?.trim()) return false;
-  return text.trim().includes(SCENARIO_B_REPAIR_COVERED_SKIP);
+  return text.includes(SCENARIO_B_REPAIR_COVERED_SKIP_LEGACY);
+}
+
+/** Client path: S2 completion + S3 opening merged without a separate repair-as-James assistant line. */
+export function isScenarioBSilentRepairSkipAssistant(text: string | null | undefined): boolean {
+  const c = text ?? '';
+  if (!/\[SCENARIO_COMPLETE\s*:\s*2\]/i.test(c)) return false;
+  const t = c.toLowerCase();
+  return (
+    t.includes('sophie and daniel') ||
+    t.includes("here's the third situation") ||
+    t.includes('here the third situation') ||
+    (t.includes('third situation') && (t.includes('more personal') || t.includes('two questions')))
+  );
+}
+
+/** Repair construct was elicited or intentionally omitted as satisfied (legacy phrase, explicit repair ask, or silent S2→S3). */
+export function scenarioBAssistantSignalsRepairConstructHandled(text: string | null | undefined): boolean {
+  return (
+    isScenarioBRepairAsJamesQuestion(text) ||
+    isScenarioBRepairCoveredInPriorTurnAssistant(text) ||
+    isScenarioBSilentRepairSkipAssistant(text)
+  );
 }
 
 export function messagesForScenarioNumber(

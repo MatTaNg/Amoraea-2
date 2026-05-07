@@ -3,6 +3,8 @@
  * Transition leads omit the participant's first name; the model uses it in boundary **reflection** only.
  */
 
+import { MOMENT_5_ACCOUNTABILITY_QUESTION_TEXT } from './probeAndScoringUtils';
+
 export const SCENARIO_1_TO_2_TRANSITION_FALLBACK =
   "Great work — that's the end of that scenario. Here's the next situation.";
 
@@ -38,4 +40,17 @@ export function buildScenario2To3TransitionBody(_firstName: string, scenario3Tex
 
 export function buildMoment4HandoffForInterview(_firstName: string, moment4PersonalCard: string): string {
   return `${MOMENT_4_HANDOFF_NO_NAME_LEAD}\n\n${moment4PersonalCard}`;
+}
+
+/**
+ * After the user answers the Moment 4 commitment-threshold follow-up: short reflection + warm pivot + scripted Moment 5
+ * (mirrors scenario boundary rhythm; the conflict question text is canonical from {@link MOMENT_5_ACCOUNTABILITY_QUESTION_TEXT}).
+ */
+export function buildMoment4ThresholdAnswerToMoment5Bundle(firstName: string, moment5Question: string = MOMENT_5_ACCOUNTABILITY_QUESTION_TEXT): string {
+  const name = firstName?.trim();
+  const reflection = name
+    ? `Great work, ${name} — what you shared about when something feels worth working through versus when you need to step back comes through clearly.`
+    : `What you shared about when something feels worth working through versus when you need to step back comes through clearly.`;
+  const pivot = "Here's one more question about you — still personal, and then we'll wrap up.";
+  return `${reflection}\n\n${pivot}\n\n${moment5Question}`.trim();
 }

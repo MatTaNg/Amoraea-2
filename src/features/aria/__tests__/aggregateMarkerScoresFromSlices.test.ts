@@ -37,11 +37,11 @@ describe('calculateScoreConsistency contempt row', () => {
 });
 
 describe('mergeCommitmentThresholdWeighted', () => {
-  it('uses 60% Moment 4 + 40% Scenario C when both present', () => {
+  it('uses Moment 4 only when both slices have scores (Scenario C ignored)', () => {
     const base = { mentalizing: 7 };
     const s3 = {
       pillarScores: { commitment_threshold: 5 },
-      keyEvidence: { commitment_threshold: 'Daniel/Sophie: generic stay.' },
+      keyEvidence: { commitment_threshold: 'Daniel/Sophie: legacy row ignored.' },
     };
     const m4 = {
       pillarScores: { commitment_threshold: 8 },
@@ -49,20 +49,20 @@ describe('mergeCommitmentThresholdWeighted', () => {
     };
     const out = mergeCommitmentThresholdWeighted(base, s3, m4);
     expect(out.mentalizing).toBe(7);
-    expect(out.commitment_threshold).toBe(6.8);
+    expect(out.commitment_threshold).toBe(8);
   });
 
-  it('falls back to Scenario C alone when Moment 4 has no threshold', () => {
+  it('omits commitment_threshold when Moment 4 has no score (even if Scenario C has legacy data)', () => {
     const base = { repair: 6 };
     const s3 = {
       pillarScores: { commitment_threshold: 5 },
       keyEvidence: { commitment_threshold: 'Scenario C evidence.' },
     };
     const out = mergeCommitmentThresholdWeighted(base, s3, null);
-    expect(out.commitment_threshold).toBe(5);
+    expect(out.commitment_threshold).toBeUndefined();
   });
 
-  it('falls back to Moment 4 alone when Scenario C has no threshold', () => {
+  it('uses Moment 4 alone', () => {
     const base = { repair: 6 };
     const m4 = {
       pillarScores: { commitment_threshold: 9 },

@@ -38,6 +38,20 @@ export interface SchwartzFormData {
   self_direction: number | null;
 }
 
+/** Keys used for completion checks and Schwartz Values UI. */
+export const SCHWARTZ_FORM_KEYS: readonly SchwartzValueKey[] = [
+  'universalism',
+  'benevolence',
+  'tradition',
+  'conformity',
+  'security',
+  'power',
+  'achievement',
+  'hedonism',
+  'stimulation',
+  'self_direction',
+];
+
 export const SCHWARTZ_VALUE_LABELS: Record<SchwartzValueKey, { title: string; description: string }> = {
   universalism: {
     title: 'Universalism',

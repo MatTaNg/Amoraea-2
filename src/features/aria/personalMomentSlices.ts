@@ -1,4 +1,4 @@
-import { isMoment5AppreciationAssistantAnchor } from './probeAndScoringUtils';
+import { isMoment5AssistantAnchor } from './probeAndScoringUtils';
 
 export type TranscriptTurn = { role: string; content: string };
 
@@ -6,12 +6,12 @@ function findMoment5AssistantStartIndex(transcript: TranscriptTurn[], m4Start: n
   const from = m4Start >= 0 ? m4Start : 0;
   for (let i = from; i < transcript.length; i++) {
     const m = transcript[i];
-    if (m.role === 'assistant' && isMoment5AppreciationAssistantAnchor(m.content ?? '')) return i;
+    if (m.role === 'assistant' && isMoment5AssistantAnchor(m.content ?? '')) return i;
   }
   if (m4Start >= 0) {
     for (let i = 0; i < m4Start; i++) {
       const m = transcript[i];
-      if (m.role === 'assistant' && isMoment5AppreciationAssistantAnchor(m.content ?? '')) return i;
+      if (m.role === 'assistant' && isMoment5AssistantAnchor(m.content ?? '')) return i;
     }
   }
   return -1;

@@ -1,6 +1,6 @@
 -- Aria voice matchmaker: store one session per completion (answers to the 6 pillars).
 CREATE TABLE IF NOT EXISTS aria_sessions (
-  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   profile_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
   answers JSONB NOT NULL DEFAULT '[]',
   created_at TIMESTAMP WITH TIME ZONE DEFAULT TIMEZONE('utc', NOW()) NOT NULL,

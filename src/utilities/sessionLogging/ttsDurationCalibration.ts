@@ -18,6 +18,8 @@ const CALIBRATION_ESCAPE_CONSECUTIVE_TURNS = 3;
 const CALIBRATION_ESCAPE_MAX_STEP_MS_PER_CHAR = 40;
 /** Max change to multiplier in one adjustment: 10% of current value. */
 const MAX_STEP_FRACTION = 0.1;
+/** Aligns with web substantial-playback gate — ratios below this are interrupted/failed playbacks, not EL speed samples. */
+export const TTS_CALIBRATION_MIN_RATIO_TO_INCLUDE = 0.7;
 
 let calibratedMsPerChar = Math.min(
   MULTIPLIER_CEILING_MS_PER_CHAR,
@@ -72,13 +74,29 @@ export type TtsCalibrationResult = {
   calibration_adjustment_detail?: TtsCalibrationAdjustmentDetail | null;
 };
 
+/** Turn omitted from rolling calibration (does not advance {@link recentRatios}). */
+export type TtsCalibrationTurnExcluded = {
+  excluded: true;
+  ratio: number;
+  exclusion_reason: 'incomplete_playback';
+};
+
+export type TtsCalibrationRecordResult = TtsCalibrationResult | TtsCalibrationTurnExcluded;
+
 /**
  * After each completed TTS turn, record actual/expected ratio; after 3 samples, adjust if rolling avg &lt; 0.95.
  * Each increase is at most 10% of the current multiplier; target ideal is approached over successive turns.
+ * Ratios below {@link TTS_CALIBRATION_MIN_RATIO_TO_INCLUDE} do not enter the rolling ratio window (interrupted playback).
  */
-export function recordTtsTurnDurationRatio(actualMs: number, expectedMs: number): TtsCalibrationResult | null {
+export function recordTtsTurnDurationRatio(
+  actualMs: number,
+  expectedMs: number
+): TtsCalibrationRecordResult | null {
   if (!Number.isFinite(actualMs) || !Number.isFinite(expectedMs) || expectedMs <= 0) return null;
   const ratio = actualMs / expectedMs;
+  if (ratio < TTS_CALIBRATION_MIN_RATIO_TO_INCLUDE) {
+    return { excluded: true, ratio, exclusion_reason: 'incomplete_playback' };
+  }
   recentRatios.push(ratio);
   if (recentRatios.length > ROLLING_WINDOW) {
     recentRatios.shift();

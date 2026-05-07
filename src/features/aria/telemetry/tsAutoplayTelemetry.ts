@@ -50,6 +50,16 @@ export function getWebAutoplayContext(): {
   };
 }
 
+/**
+ * iPhone/iPad Safari (mobile web only): ElevenLabs must use HTML audio from the start — PCM streaming
+ * then falling back mid-playback causes static on iOS Safari.
+ */
+export function isIosSafariMobileWeb(): boolean {
+  if (Platform.OS !== 'web') return false;
+  const { isMobileWeb, browserFamily } = getWebAutoplayContext();
+  return isMobileWeb && browserFamily === 'safari';
+}
+
 /** Fire-and-forget: TTS play attempt outcome (web + native where applicable). */
 export function logTtsAutoplayPlayOutcome(payload: {
   pipeline: TtsAutoplayPipeline;
@@ -63,10 +73,16 @@ export function logTtsAutoplayPlayOutcome(payload: {
   telemetrySource?: TtsTelemetrySource;
   errorName?: string;
   errorMessagePreview?: string;
+  /** When set, overrides auto-filled `ios_safari_html_audio_forced` for this platform. */
+  pipeline_selection_reason?: string;
 }): void {
   const ctx = getWebAutoplayContext();
+  const pipelineSelectionReason =
+    payload.pipeline_selection_reason ??
+    (isIosSafariMobileWeb() ? 'ios_safari_html_audio_forced' : undefined);
   void remoteLog(TTS_AUTOPLAY_MESSAGE, {
     ...payload,
+    ...(pipelineSelectionReason ? { pipeline_selection_reason: pipelineSelectionReason } : {}),
     platform: Platform.OS,
     ...ctx,
   });

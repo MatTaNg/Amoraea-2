@@ -377,6 +377,9 @@ verify_jwt = false
 [functions.process-deferred-standard-interviews]
 verify_jwt = false
 
+[functions.daily-completed-interviews-digest]
+verify_jwt = false
+
 [analytics]
 enabled = true
 port = 54327

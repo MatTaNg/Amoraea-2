@@ -5,9 +5,8 @@ import {
 } from '@features/aria/probeAndScoringUtils';
 import {
   isScenarioBJamesDifferentlyOrAppreciationPathQuestion,
-  isScenarioBRepairAsJamesQuestion,
-  isScenarioBRepairCoveredInPriorTurnAssistant,
   messagesForScenarioNumber,
+  scenarioBAssistantSignalsRepairConstructHandled,
 } from '@features/aria/scenarioBTranscriptGates';
 
 export type ReconcilableScenarioSlice = {
@@ -41,7 +40,6 @@ const SCENARIO_3_MARKER_IDS = [
   'mentalizing',
   'attunement',
   'accountability',
-  'commitment_threshold',
   'contempt_expression',
 ] as const;
 
@@ -68,10 +66,7 @@ export function inferUnassessedMarkerKeysFromTranscript(
     const s2 = messagesForScenarioNumber(allMessages, 2);
     const s2Asst = s2.filter((m) => m.role === 'assistant');
     const s2User = s2.filter((m) => m.role === 'user');
-    const hasRepairPath = s2Asst.some(
-      (m) =>
-        isScenarioBRepairAsJamesQuestion(m.content) || isScenarioBRepairCoveredInPriorTurnAssistant(m.content)
-    );
+    const hasRepairPath = s2Asst.some((m) => scenarioBAssistantSignalsRepairConstructHandled(m.content));
     const hasJamesDifferently = s2Asst.some((m) => isScenarioBJamesDifferentlyOrAppreciationPathQuestion(m.content));
 
     if (s2User.length === 0) return [...SCENARIO_2_MARKER_IDS];

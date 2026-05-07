@@ -21,8 +21,8 @@ NEVER score HIGH confidence on a response that:
 - Is fewer than two sentences of real content where specificity was required
 - Describes only what the other person did with no reflective or relational insight when the moment required it
 
-COMMITMENT_THRESHOLD — FICTIONAL VS PERSONAL (full interview scoring):
-If commitment_threshold is informed only by third-party reasoning about Sophie/Daniel (Scenario C) and there is no substantive first-person threshold content from Moment 4 (the grudge answer and/or the "work through versus walk away" follow-up with scorable criteria in the user's own relationship terms), set pillarConfidence for commitment_threshold to "moderate" or "low" — not "high." Reserve "high" when first-person threshold reasoning appears in the transcript (clear work-through vs walk-away structure or criteria in their own terms — concise structural answers count; they need not be procedurally detailed), or when fictional and personal evidence jointly support the score with strong clarity.
+COMMITMENT_THRESHOLD — PERSONAL MOMENT (full interview scoring):
+Commitment threshold is assessed from Moment 4 (grudge context and the mandatory "work through versus walk away" follow-up). Set pillarConfidence for commitment_threshold to "moderate" or "low" when that follow-up is thin or missing usable criteria; reserve "high" when first-person threshold reasoning is clear (work-through vs walk-away structure or criteria in their own terms — concise structural answers count).
 `;
 
 const SCORING_GUARDRAILS = `GUARDRAIL 1 — Evaluate mechanism, not vocabulary
@@ -232,7 +232,7 @@ REPAIR COHERENCE: If diagnosed failure reappears in their repair attempt, lower 
 DIAGNOSTIC EMPHASIS:
 - Scenario A: contempt in Emma's lines; bilateral ownership; Ryan repair. For **repair** and **accountability** holistically, apply **REPAIR & ACCOUNTABILITY — UNPROMPTED VS. PROMPTED** across the Scenario A turns (unprompted vs repair-as-Ryan). Per-scenario slice scoring uses the same 10 = real-human ceiling and slice-independence rules as scenario JSON scoring — strong demand-withdraw / power-bid / implicit-priority mentalizing and pattern-level, behavioral Ryan repair can reach **10** when complete; do not cap Scenario A at 9 to leave room for later scenarios.
 - Scenario B: attunement to James redirecting Sarah's tears vs receiving her emotion; James leading with logistics vs emotional presence; appreciation (honoring Sarah vs transactional celebration). For **repair** and **accountability**, weight unprompted vs repair-as-James per **REPAIR & ACCOUNTABILITY — UNPROMPTED VS. PROMPTED**. See SCENARIO B anchors below.
-- Scenario C: regulation, Daniel's return, Sophie's legitimacy; bilateral repair; commitment threshold (especially if they address when the relationship may no longer be workable). For **repair** and **accountability**, weight pre–repair-prompt vs post–repair-prompt per **REPAIR & ACCOUNTABILITY — UNPROMPTED VS. PROMPTED**; commitment_threshold uses its own rules.
+- Scenario C: regulation, Daniel's return, Sophie's legitimacy; bilateral repair. For **repair** and **accountability**, weight pre–repair-prompt vs post–repair-prompt per **REPAIR & ACCOUNTABILITY — UNPROMPTED VS. PROMPTED**. Commitment threshold is not scored from Scenario C — use Moment 4 for commitment_threshold.
 
 ${SCENARIO_B_ATTUNEMENT_APPRECIATION_ANCHORS}
 - Personal grudge moment: contempt + metacognition + commitment threshold when they distinguish work-through vs walk-away conditions.

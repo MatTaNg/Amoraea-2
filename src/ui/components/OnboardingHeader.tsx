@@ -9,9 +9,11 @@ import { showConfirmDialog } from '@utilities/alerts/confirmDialog';
 type OnboardingHeaderProps = {
   /** Dark navy bar to match auth / pre-interview screens */
   variant?: 'default' | 'dark';
+  /** When set, shows a back chevron on the left (e.g. edit profile → post-interview). */
+  onBackPress?: () => void;
 };
 
-export const OnboardingHeader: React.FC<OnboardingHeaderProps> = ({ variant = 'default' }) => {
+export const OnboardingHeader: React.FC<OnboardingHeaderProps> = ({ variant = 'default', onBackPress }) => {
   const { signOut } = useAuth();
   const dark = variant === 'dark';
 
@@ -28,7 +30,19 @@ export const OnboardingHeader: React.FC<OnboardingHeaderProps> = ({ variant = 'd
 
   return (
     <View style={[styles.banner, dark && styles.bannerDark]}>
-      <View style={styles.placeholder} />
+      {onBackPress ? (
+        <TouchableOpacity
+          onPress={onBackPress}
+          style={styles.button}
+          hitSlop={12}
+          accessibilityRole="button"
+          accessibilityLabel="Go back"
+        >
+          <Ionicons name="chevron-back" size={26} color={dark ? '#5BA8E8' : colors.primary} />
+        </TouchableOpacity>
+      ) : (
+        <View style={styles.placeholder} />
+      )}
       <Text style={[styles.title, dark && styles.titleDark]}>Amoraea (BETA)</Text>
       <TouchableOpacity
         onPress={handleLogOut}

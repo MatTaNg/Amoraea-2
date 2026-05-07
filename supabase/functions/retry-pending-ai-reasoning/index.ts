@@ -112,8 +112,7 @@ Deno.serve(async (req) => {
         transcript,
         row.weighted_score,
         row.passed === true,
-        [],
-        null
+        []
       );
       const { error: upErr } = await supabase
         .from('interview_attempts')

@@ -59,8 +59,7 @@ export async function adminRetryAIReasoningForAttempt(attemptId: string): Promis
       transcript,
       r.weighted_score,
       r.passed === true,
-      [],
-      null
+      []
     );
   } catch (e) {
     return { error: e instanceof Error ? e.message : String(e) };

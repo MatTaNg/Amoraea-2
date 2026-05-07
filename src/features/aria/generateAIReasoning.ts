@@ -3,10 +3,6 @@
  * Calls Claude to produce structured explanation of scores. Remove before production.
  */
 
-import type { CommitmentThresholdInconsistencyPayload } from './commitmentThresholdSliceAnalysis';
-
-export type { CommitmentThresholdInconsistencyPayload } from './commitmentThresholdSliceAnalysis';
-
 const ANTHROPIC_API_KEY =
   (typeof process !== 'undefined' && process.env?.EXPO_PUBLIC_ANTHROPIC_API_KEY) || '';
 const ANTHROPIC_PROXY_URL =
@@ -174,7 +170,7 @@ Accountability — growth_edge and "over-functioning" inferences: If you describ
 
 Accountability — blame-shift vs. request for clarity: Do not describe as deflection or blame-shift a turn where the user first owns their part (gap, miss, or impact) and then asks the partner for concrete guidance to follow through (e.g. what "showing appreciation" would look like for them). That pattern is a repair bid on top of ownership. Reserve harsh accountability framing for cases where the partner is assigned sole responsibility with no sincere self-attribution (e.g. "they should have just told me what they needed").
 
-Commitment_threshold narrative: If the score rests primarily on third-party reasoning about Sophie/Daniel with little or no first-person threshold content in the transcript, say so in nuance_and_context or summary and keep claims proportionate — do not write as if they gave rich personal walk-away criteria unless they did.
+Commitment_threshold narrative: This marker is grounded in **Moment 4** (grudge answer and/or the work-through vs walk-away follow-up). Do not anchor commitment_threshold primarily in Scenario C fiction.
 
 Commitment-threshold calibration: Do not describe structurally sound answers as weak merely because they lack procedural detail (timelines, therapy, step lists). A complete path — real effort, honest communication about problems, reassessment, willingness to leave if the pattern doesn't change — supports a solid score (6–7+) even when brief. Unconditional staying with no limits ("never give up no matter what") belongs around 2–3. Exit at first difficulty belongs around 1–2. Reserve 7–8 for that structure plus some concrete irrecoverability specificity; 9–10 for strong evidence of persisting through serious difficulty with healthy limits.
 
@@ -188,8 +184,6 @@ UNASSESSED MARKERS (listed in the user payload): Treat these as not measured in 
 
 REGULATION — NO SLICE EVIDENCE (strict): When "regulation" appears in UNASSESSED MARKERS, construct_breakdown.regulation must contain ONLY a short headline plus one brief summary sentence stating the marker was not directly assessed. Set what_you_did_well, where_you_struggled, key_pattern, nuance_and_context, and growth_edge to empty strings "". Do not write paragraphs, growth edges, patterns, or speculative strengths/struggles for regulation in that case.
 
-COMMITMENT_THRESHOLD INTERNAL INCONSISTENCY (when present in user payload): When the COMMITMENT_THRESHOLD — COMPUTED INTERNAL INCONSISTENCY block appears in the user message, you MUST (1) add a dedicated paragraph in construct_breakdown.commitment_threshold that names the contrasting positions, paraphrases what they said in each relevant moment using only transcript content, and holds the tension without resolving it for them; (2) state explicitly that the numeric score **weights first-person Moment 4 more heavily than Scenario C fiction** when both exist, yet a **large spread between those two** still signals meaningful tension (do not imply the number erases the contradiction); (3) weave the same inconsistency into consistency_note near the top. Do not average away the contradiction silently.
-
 Respond ONLY with valid JSON. No preamble, no markdown, no backticks.
 Do not truncate any field. Do not write placeholder text.`;
 
@@ -200,8 +194,7 @@ export function buildUserPrompt(
   transcript: Array<{ role: string; content?: string }>,
   weightedScore: number | null,
   passed: boolean,
-  unassessedMarkers: string[],
-  commitmentInconsistency: CommitmentThresholdInconsistencyPayload | null
+  unassessedMarkers: string[]
 ): string {
   const fullTranscriptLines = transcript
     .filter((m) => m.role === 'user' || m.role === 'assistant')
@@ -219,20 +212,6 @@ export function buildUserPrompt(
     if (s) scenarioPayload[`scenario_${n}`] = { pillarScores: s.pillarScores, name: s.scenarioName };
   });
 
-  const inconsistencyBlock =
-    commitmentInconsistency != null
-      ? `
-
-COMMITMENT_THRESHOLD — COMPUTED INTERNAL INCONSISTENCY (mandatory to surface in reasoning):
-Sample standard deviation across Scenario C vs Moment 4 commitment slices: ${commitmentInconsistency.standardDeviation} (threshold > 3.0).
-Per-slice scores: ${JSON.stringify(commitmentInconsistency.sliceScores)}.
-The commitment_threshold score in MARKER SCORES (${pillarScores.commitment_threshold}) combines **60% Moment 4 (first-person)** with **40% Scenario C (fictional couple)** when both slices have assessable content — not equal weighting. A high spread between those two sources is **substantive tension** (often fiction vs. personal stance); describe both in plain language and do not imply the weighted number "settles" or erases the contradiction.
-Evidence anchors (from scoring — cross-check against transcript):
-${commitmentInconsistency.evidenceSnippets.map((s) => `- ${s.text}`).join('\n')}
-You must describe the two (or more) stances in plain language, hold the tension without resolving it, and avoid implying one score "averages out" the contradiction.
-`
-      : '';
-
   return `
 ASSESSMENT RESULTS:
 Weighted Score: ${weightedScore ?? 'N/A'}/10
@@ -243,7 +222,6 @@ ${JSON.stringify(pillarScores, null, 2)}
 
 UNASSESSED MARKERS (no direct evidence in this interview; do not speculate):
 ${JSON.stringify(unassessedMarkers, null, 2)}
-${inconsistencyBlock}
 
 SCENARIO SCORES:
 ${JSON.stringify(scenarioPayload, null, 2)}
@@ -307,7 +285,7 @@ For each construct_breakdown.where_you_struggled entry: include only observed ev
 
   "cross_scenario_patterns": "A full, rich paragraph describing patterns that appeared across multiple parts of the interview (scenarios and personal moments). Only tie segments together when the participant actually linked them or a genuine shared theme is evident from their words — do not manufacture through-lines between unrelated content (e.g. a trust violation and an appreciation letter) unless they explicitly connected those threads.",
 
-  "consistency_note": "A thorough paragraph analysing score consistency across the interview segments for each construct. If mentalizing (or similar) was low in earlier scenarios but higher in Scenario C, say whether the jump is justified by clearly stronger evidence in the transcript or whether it looks like inflation from a single baseline observation about the vignette. If COMMITMENT_THRESHOLD — COMPUTED INTERNAL INCONSISTENCY appears above, lead this field (first 2–3 sentences) with that tension before other consistency topics.",
+  "consistency_note": "A thorough paragraph analysing score consistency across the interview segments for each construct. If mentalizing (or similar) was low in earlier scenarios but higher in Scenario C, say whether the jump is justified by clearly stronger evidence in the transcript or whether it looks like inflation from a single baseline observation about the vignette.",
 
   "language_and_style_observations": "A paragraph analysing how this person communicated — qualifiers, pronoun choices, emotional vocabulary, specificity or vagueness.",
 
@@ -348,6 +326,12 @@ export interface AIReasoningResult {
   closing_reflection?: string;
 }
 
+/** Optional tighter limits for Edge Functions — platform wall clock is ~150s (free/pro default). */
+export type GenerateAIReasoningOptions = {
+  perAttemptTimeoutMs?: number;
+  maxAttempts?: number;
+};
+
 export async function generateAIReasoning(
   pillarScores: Record<string, number>,
   scenarioScores: Record<number, { pillarScores: Record<string, number | null>; scenarioName?: string } | undefined>,
@@ -355,7 +339,7 @@ export async function generateAIReasoning(
   weightedScore: number | null,
   passed: boolean,
   unassessedMarkers: string[] = [],
-  commitmentThresholdInconsistency: CommitmentThresholdInconsistencyPayload | null = null
+  options?: GenerateAIReasoningOptions
 ): Promise<AIReasoningResult> {
   const apiUrl = getAnthropicEndpoint();
   const useProxy = apiUrl !== 'https://api.anthropic.com/v1/messages';
@@ -373,8 +357,7 @@ export async function generateAIReasoning(
     transcript,
     weightedScore,
     passed,
-    unassessedMarkers,
-    commitmentThresholdInconsistency
+    unassessedMarkers
   );
 
   const body: Record<string, unknown> = {
@@ -385,8 +368,8 @@ export async function generateAIReasoning(
   };
 
   /** One fetch attempt should not block indefinitely; proxies can hang without closing the socket. */
-  const REASONING_FETCH_PER_ATTEMPT_TIMEOUT_MS = 90_000;
-  const maxAttempts = 4;
+  const REASONING_FETCH_PER_ATTEMPT_TIMEOUT_MS = options?.perAttemptTimeoutMs ?? 90_000;
+  const maxAttempts = options?.maxAttempts ?? 4;
   let lastErr: Error | null = null;
   let response: Response | null = null;
   for (let attempt = 0; attempt < maxAttempts; attempt++) {
@@ -501,25 +484,6 @@ export async function generateAIReasoning(
       ...noEvidenceConstructTemplate,
     };
   });
-
-  if (commitmentThresholdInconsistency) {
-    const ctScore = pillarScores.commitment_threshold;
-    const preamble =
-      `Your answers on commitment threshold differed sharply between Scenario C (fiction) and Moment 4 (first-person) (slice scores ${commitmentThresholdInconsistency.sliceScores.join(', ')}; standard deviation ${commitmentThresholdInconsistency.standardDeviation}). The overall score (${typeof ctScore === 'number' ? ctScore : 'N/A'}) weights Moment 4 more heavily than Scenario C when both exist — the spread still signals real tension between those stances; describe both without implying the number erases it.`;
-    const existingNote = (parsed.consistency_note ?? '').trim();
-    parsed.consistency_note = existingNote ? `${preamble}\n\n${existingNote}` : preamble;
-    const ct = parsed.construct_breakdown?.commitment_threshold ?? {};
-    const ctSummary = (ct.summary ?? '').trim();
-    const summaryLead =
-      `Scenario C and Moment 4 framed commitment differently — that tension matters alongside the weighted score. `;
-    parsed.construct_breakdown = {
-      ...parsed.construct_breakdown,
-      commitment_threshold: {
-        ...ct,
-        summary: ctSummary ? `${summaryLead}${ctSummary}` : `${summaryLead}${preamble}`,
-      },
-    };
-  }
 
   return parsed;
 }
