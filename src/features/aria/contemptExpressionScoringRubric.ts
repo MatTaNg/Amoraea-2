@@ -260,6 +260,12 @@ STEP 1 — CLASSIFY EVERY CRITICAL LINE INTO A TIER (before choosing the pillar 
 ────────────────────────────────────────
 For each negative or critical statement about a **person** (not neutral description of plot), assign **exactly one** tier:
 
+**Register vs content guardrail (apply before tiering):**  
+Profanity, blunt language, and colloquial frustration/dismissal are **not by themselves** contempt-tier evidence. Classify by **semantic target** (what is being said about the person), not by register, tone, or wording style.
+Before assigning a tier, ask: **is this targeting what the person did, or what the person is / is worth?**  
+• Targets behavior, patterns, choices, accountability dynamics -> **Tier 1-2** (depending on blame centrality/conviction).  
+• Targets character, worth, intelligence, or fundamental nature -> **Tier 3**.
+
 **Tier 1 — Analytical observation (internal severity 0; does *not* pull contempt_expression down)**  
 The user describes **behavior, action, communication, or decision** in neutral or evaluative terms **without** attacking **character, worth, or identity**. Includes: what someone did/didn’t do, communication failure, emotional mismatch, mistake or oversight, impact on the other person. This is **expected** scenario-analysis language — **never** treat Tier 1 alone as participant contempt.
 
@@ -291,7 +297,12 @@ Examples (Tier 3):
 
 **Edge cases**  
 • **Gaslighting / narcissist / manipulative:** Tier **3** when used as a **hostile label** or verdict on **who someone is**; **not** Tier 3 when the participant carefully describes **specific repeated behaviors** in-scene without globalizing character worth.  
-• **Profanity directed at a character** → **Tier 3** regardless of context.  
+• **Aggressive register (profanity/blunt phrasing)**: never auto-up-tier based on wording alone. "That's total bullshit"/"that's BS" about a behavior or situation is typically **Tier 1** if analytical; can be **Tier 2** only when paired with explicit blame attribution.  
+• **"You don't get to be upset about X"**: blunt accountability framing; usually **Tier 1-2** by centrality/conviction, **not Tier 3** unless paired with character devaluation.  
+• **"He's hiding behind that excuse"**: behavioral reading in informal language -> **Tier 1**.  
+• **"That's just an excuse"**: dismissal of a reason -> **Tier 1-2** border by context.  
+• **Character-verdict examples remain Tier 3 regardless of profanity presence**: "He's pathetic" -> **Tier 3**; "She's manipulative" as a conclusion -> **Tier 3**; "He's emotionally immature" -> **Tier 3** when dominant/high-conviction character verdict (Tier 2 if peripheral/speculative), and "She's the problem here" -> **Tier 2-3** depending on behavioral responsibility vs character devaluation.
+• **Clinical/psych labels proportionality:** descriptive behavior framing ("he's being avoidant", "that's emotionally immature behavior") is **Tier 2 at most**; elevate to **Tier 3 only** when the label is dominant, high-conviction, and about who the person is rather than situation-specific behavior.
 • **Sarcasm / mockery** ridiculing a character → **Tier 3**.  
 • **Sweeping generalizations beyond the vignette** → **Tier 3** (real-world contempt spillover).  
 • **“He/she is wrong”** vs **“was wrong”:** resolve by referent — behavioral wrongdoing in context → Tier **1**; global verdict on the person → Tier **3**.

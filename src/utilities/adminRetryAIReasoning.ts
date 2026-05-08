@@ -2,7 +2,10 @@
  * Admin console: regenerate narrative AI reasoning for an interview_attempts row (service scores already stored).
  */
 import { supabase } from '@data/supabase/client';
-import { generateAIReasoning } from '@features/aria/generateAIReasoning';
+import {
+  DEFAULT_AI_REASONING_PER_ATTEMPT_TIMEOUT_MS,
+  generateAIReasoning,
+} from '@features/aria/generateAIReasoning';
 import type { AIReasoningResult } from '@features/aria/generateAIReasoning';
 
 type AttemptRow = {
@@ -59,10 +62,17 @@ export async function adminRetryAIReasoningForAttempt(attemptId: string): Promis
       transcript,
       r.weighted_score,
       r.passed === true,
-      []
+      [],
+      { perAttemptTimeoutMs: DEFAULT_AI_REASONING_PER_ATTEMPT_TIMEOUT_MS },
     );
   } catch (e) {
-    return { error: e instanceof Error ? e.message : String(e) };
+    const raw = e instanceof Error ? e.message : String(e);
+    if (/failed to fetch|load failed|network request failed/i.test(raw)) {
+      return {
+        error: `${raw} — Check that this admin build includes EXPO_PUBLIC_SUPABASE_ANON_KEY and EXPO_PUBLIC_ANTHROPIC_PROXY_URL, redeploy if you changed .env, and confirm https://…supabase.co/functions/v1/anthropic-proxy is reachable. Long requests can also be dropped by networks or VPNs; retry once.`,
+      };
+    }
+    return { error: raw };
   }
 
   const { error: upErr } = await supabase

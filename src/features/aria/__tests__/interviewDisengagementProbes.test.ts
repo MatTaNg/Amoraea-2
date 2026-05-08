@@ -228,6 +228,22 @@ describe('interviewDisengagementProbes', () => {
     expect(pick).toBeNull();
   });
 
+  it('Rule 3 does not pick short elaboration when skip_request was classified earlier in this moment', () => {
+    const pick = pickClientDisengagementProbe({
+      userAnswer: 'Hard to explain.',
+      lastAssistantContent: 'Thanks for sharing that. At what point do you decide… work through versus walk away?',
+      wordCount: 3,
+      answeringAfterProbe: false,
+      exemptMetaTurn: false,
+      isGreetingNameTurn: false,
+      isExplicitDecline: false,
+      isAssistantRecoveryOrMetaLine: false,
+      isFirstUserTurnInScenario: true,
+      hadSkipRequestInThisMoment: true,
+    });
+    expect(pick).toBeNull();
+  });
+
   it('Rule 3 picks short elaboration when other rules do not apply', () => {
     const pick = pickClientDisengagementProbe({
       userAnswer: 'Hard to explain.',

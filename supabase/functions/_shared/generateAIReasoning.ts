@@ -325,6 +325,9 @@ export type GenerateAIReasoningOptions = {
   maxAttempts?: number;
 };
 
+/** Long prompts + max_tokens; stay under single-invocation ~150s wall clock when maxAttempts is 1. */
+export const DEFAULT_AI_REASONING_PER_ATTEMPT_TIMEOUT_MS = 140_000;
+
 export async function generateAIReasoning(
   pillarScores: Record<string, number>,
   scenarioScores: Record<number, { pillarScores: Record<string, number | null>; scenarioName?: string } | undefined>,
@@ -337,8 +340,15 @@ export async function generateAIReasoning(
   const apiUrl = getAnthropicEndpoint();
   const useProxy = apiUrl !== 'https://api.anthropic.com/v1/messages';
   const headers: Record<string, string> = { 'Content-Type': 'application/json' };
-  if (useProxy && SUPABASE_ANON_KEY) {
-    headers['Authorization'] = `Bearer ${SUPABASE_ANON_KEY}`;
+  if (useProxy) {
+    const anon = SUPABASE_ANON_KEY?.trim();
+    if (!anon) {
+      throw new Error(
+        'generateAIReasoning: SUPABASE_ANON_KEY missing for anthropic-proxy (set Edge secret / env)'
+      );
+    }
+    headers['Authorization'] = `Bearer ${anon}`;
+    headers['apikey'] = anon;
   } else if (!useProxy) {
     headers['x-api-key'] = ANTHROPIC_API_KEY;
     headers['anthropic-version'] = '2023-06-01';
@@ -361,7 +371,8 @@ export async function generateAIReasoning(
   };
 
   /** One fetch attempt should not block indefinitely; proxies can hang without closing the socket. */
-  const REASONING_FETCH_PER_ATTEMPT_TIMEOUT_MS = options?.perAttemptTimeoutMs ?? 90_000;
+  const REASONING_FETCH_PER_ATTEMPT_TIMEOUT_MS =
+    options?.perAttemptTimeoutMs ?? DEFAULT_AI_REASONING_PER_ATTEMPT_TIMEOUT_MS;
   const maxAttempts = options?.maxAttempts ?? 4;
   let lastErr: Error | null = null;
   let response: Response | null = null;

@@ -64,7 +64,7 @@ describe('applyElaborationAbsencePenaltiesToScenarioScores', () => {
     expect(out.keyEvidence.repair).toMatch(/Compensatory|scheduling/i);
   });
 
-  it('applies −1 to mentalizing, attunement, repair when avg words < 35', () => {
+  it('applies −1 to mentalizing, attunement, repair when avg words < 35 and keyEvidence lacks assessable evidence', () => {
     const out = applyElaborationAbsencePenaltiesToScenarioScores(
       1,
       'short',
@@ -76,6 +76,44 @@ describe('applyElaborationAbsencePenaltiesToScenarioScores', () => {
     expect(out.pillarScores.attunement).toBe(4);
     expect(out.pillarScores.repair).toBe(4);
     expect(out.pillarScores.commitment_threshold).toBe(5);
+    expect(out.keyEvidence.mentalizing).toMatch(
+      /Response-depth modifier: short response with insufficient evidence for mentalizing/,
+    );
+  });
+
+  it('does not apply depth modifier to markers with substantive keyEvidence despite low avg words', () => {
+    const out = applyElaborationAbsencePenaltiesToScenarioScores(
+      1,
+      'x',
+      { mentalizing: 7, attunement: 7, repair: 7 },
+      {
+        mentalizing: 'Level 2 — She wants to feel important and like a priority in his life.',
+        attunement: 'Level 2 — She is reaching the limit of her patience in this relationship.',
+        repair: 'Apologize and tell her what you are going to do next time to prevent this from happening again.',
+      },
+      12,
+    );
+    expect(out.pillarScores.mentalizing).toBe(7);
+    expect(out.pillarScores.attunement).toBe(7);
+    expect(out.pillarScores.repair).toBe(7);
+    expect(out.keyEvidence.repair ?? '').not.toMatch(/Response-depth modifier/);
+  });
+
+  it('applies depth modifier only to markers whose keyEvidence indicates absence', () => {
+    const out = applyElaborationAbsencePenaltiesToScenarioScores(
+      2,
+      'hi',
+      { mentalizing: 6, attunement: 6, repair: 6 },
+      {
+        mentalizing: 'Level 2 — Infers internal need for significance.',
+        attunement: 'Insufficient evidence — response too brief.',
+        repair: 'Score recovered from model output.',
+      },
+      10,
+    );
+    expect(out.pillarScores.mentalizing).toBe(6);
+    expect(out.pillarScores.attunement).toBe(5);
+    expect(out.pillarScores.repair).toBe(5);
   });
 });
 
@@ -103,6 +141,20 @@ describe('applyElaborationAbsencePenaltiesMoment5', () => {
     expect(out.pillarScores.mentalizing).toBe(5);
     expect(out.pillarScores.repair).toBe(4);
     expect(out.pillarScores.regulation).toBe(7);
+  });
+
+  it('does not apply depth modifier when keyEvidence is substantive despite low avg words', () => {
+    const out = applyElaborationAbsencePenaltiesMoment5(
+      'ok',
+      { mentalizing: 6, repair: 6 },
+      {
+        mentalizing: 'Level 2 — User infers partner fears being deprioritized.',
+        repair: 'Acknowledges hurt and commits to checking in before accepting invites.',
+      },
+      10,
+    );
+    expect(out.pillarScores.mentalizing).toBe(6);
+    expect(out.pillarScores.repair).toBe(6);
   });
 });
 

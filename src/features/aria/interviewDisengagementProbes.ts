@@ -355,6 +355,8 @@ export function pickClientDisengagementProbe(input: {
    * Required for the mentalizing surface-label probe — never fires on 2nd+ scenario replies.
    */
   isFirstUserTurnInScenario: boolean;
+  /** Prior `skip_request` meta in this moment — suppress generic short elaboration only. */
+  hadSkipRequestInThisMoment?: boolean;
 }): ClientDisengagementProbePick | null {
   const {
     userAnswer,
@@ -366,6 +368,7 @@ export function pickClientDisengagementProbe(input: {
     isExplicitDecline,
     isAssistantRecoveryOrMetaLine,
     isFirstUserTurnInScenario,
+    hadSkipRequestInThisMoment,
   } = input;
 
   if (!lastAssistantContent.trim()) return null;
@@ -403,7 +406,8 @@ export function pickClientDisengagementProbe(input: {
     !isInterviewHardStopUserTurn(userAnswer) &&
     wordCount < 8 &&
     !hasClearConciseDirectAnswer(userAnswer) &&
-    !looksLikeMoment4GrudgePrompt(lastAssistantContent)
+    !looksLikeMoment4GrudgePrompt(lastAssistantContent) &&
+    hadSkipRequestInThisMoment !== true
   ) {
     return { kind: 'short_elaboration', probe: CLIENT_SHORT_ELABORATION_PROBE };
   }

@@ -153,6 +153,27 @@ function webEmbeddedInAppBrowserDiscouragesPcmStream(): boolean {
   return false;
 }
 
+/**
+ * iOS browsers (including Brave/Chrome/Firefox on iPhone/iPad) all use WebKit under the hood.
+ * PCM streaming is static-prone there; force non-PCM paths like mobile Safari.
+ */
+function isIosWebkitMobileWebLike(): boolean {
+  if (Platform.OS !== 'web' || typeof navigator === 'undefined') return false;
+  const ua = navigator.userAgent || '';
+  const isIosDevice = /\b(iPhone|iPad|iPod)\b/i.test(ua);
+  const isAppleWebKit = /\bAppleWebKit\/\d+/i.test(ua);
+  const isMobile = /\bMobile\/\w+/i.test(ua) || /Mobi/i.test(ua);
+  return isIosDevice && isAppleWebKit && isMobile;
+}
+
+/** Conservative guard: mobile browsers are more static-prone with PCM chunk scheduling. */
+function isAnyMobileWebBrowser(): boolean {
+  if (Platform.OS !== 'web' || typeof navigator === 'undefined') return false;
+  return /Mobi|Android|iPhone|iPad|iPod|webOS|BlackBerry|IEMobile|Opera Mini/i.test(
+    navigator.userAgent || ''
+  );
+}
+
 /** One listener: resume shared `AudioContext` / reprime HTML audio when the tab becomes visible again (Safari suspends on hide). */
 let webInterviewAudioVisibilityListenerAttached = false;
 
@@ -692,7 +713,8 @@ async function tryPlayElevenLabsMp3WithWebAudio(
   arrayBuffer: ArrayBuffer,
   onPlaybackStarted: (() => void) | undefined,
   telemetrySource: TtsTelemetrySource,
-  preInitTriggerDuring: PreInitTriggerDuring
+  preInitTriggerDuring: PreInitTriggerDuring,
+  playbackRateMultiplier: number = 1
 ): Promise<boolean> {
   if (Platform.OS !== 'web' || typeof window === 'undefined') return false;
   const ctx = sharedWebAudioContext;
@@ -727,9 +749,13 @@ async function tryPlayElevenLabsMp3WithWebAudio(
   try {
     src = ctx.createBufferSource();
     src.buffer = decoded;
+    src.playbackRate.value = playbackRateMultiplier;
     const durSec = decoded.duration;
     /** Safety only: decoded buffer duration + 3000ms — never use char estimate; primary completion is `onended`. */
-    const playbackCapMs = Math.min(600_000, Math.max(4_000, Math.ceil((Number.isFinite(durSec) ? durSec : 30) * 1000) + 3_000));
+    const playbackCapMs = Math.min(
+      600_000,
+      Math.max(4_000, Math.ceil(((Number.isFinite(durSec) ? durSec : 30) * 1000) / playbackRateMultiplier) + 3_000)
+    );
 
     const decodeDbg = debugSummarizeAudioBufferPeaks(decoded);
     const rt0 = getSessionLogRuntime();
@@ -942,7 +968,23 @@ export type ElevenLabsSpeakOptions = {
   preInitTriggerDuring?: PreInitTriggerDuring;
   /** Web: force full MP3 download + Web Audio / HTML audio — skip raw PCM stream (retry path after truncated playback). */
   skipPcmStream?: boolean;
+  /** Optional playback-rate multiplier for output pipelines that support it. */
+  playbackRateMultiplier?: number;
 };
+
+function getLocalDevPlaybackRateMultiplier(): number {
+  if (!(typeof __DEV__ !== 'undefined' && __DEV__)) return 1;
+  if (Platform.OS !== 'web' || typeof window === 'undefined') return 1;
+  const h = window.location.hostname.toLowerCase();
+  const isLocal = h === 'localhost' || h === '127.0.0.1' || h === '::1';
+  return isLocal ? 2 : 1;
+}
+
+function getEffectivePlaybackRateMultiplier(explicit?: number): number {
+  const base = explicit ?? getLocalDevPlaybackRateMultiplier();
+  if (!Number.isFinite(base) || base <= 0) return 1;
+  return Math.min(4, Math.max(0.5, base));
+}
 
 /**
  * Fetch ElevenLabs MP3 bytes without playing. Same availability matrix as {@link speakWithElevenLabs}.
@@ -1200,7 +1242,8 @@ async function playElevenLabsPcmStreamFromResponse(
   res: Response,
   onPlaybackStarted: (() => void) | undefined,
   telemetrySource: TtsTelemetrySource,
-  preInitTriggerDuring: PreInitTriggerDuring
+  preInitTriggerDuring: PreInitTriggerDuring,
+  playbackRateMultiplier: number = 1
 ): Promise<boolean> {
   if (Platform.OS !== 'web' || typeof window === 'undefined' || !res.body) return false;
   const ctx = sharedWebAudioContext;
@@ -1267,6 +1310,7 @@ async function playElevenLabsPcmStreamFromResponse(
     const pcmRms = Math.sqrt(pcmSumSq / Math.max(1, ch.length));
     const src = ctx.createBufferSource();
     src.buffer = abuf;
+    src.playbackRate.value = playbackRateMultiplier;
     src.connect(ctx.destination);
     const t0 = !pcmPlaybackStarted ? ctx.currentTime + 0.02 : nextScheduleTime;
     const scheduleSlipSec = t0 - ctx.currentTime;
@@ -1295,7 +1339,7 @@ async function playElevenLabsPcmStreamFromResponse(
       }).catch(() => {});
     }
     // #endregion
-    nextScheduleTime = t0 + abuf.duration;
+    nextScheduleTime = t0 + abuf.duration / playbackRateMultiplier;
     if (!pcmPlaybackStarted) {
       pcmPlaybackStarted = true;
       onPlaybackStarted?.();
@@ -1438,12 +1482,19 @@ async function tryPlayElevenLabsPcmStream(
   spokenText: string,
   onPlaybackStarted: (() => void) | undefined,
   telemetrySource: TtsTelemetrySource,
-  preInitTriggerDuring: PreInitTriggerDuring
+  preInitTriggerDuring: PreInitTriggerDuring,
+  playbackRateMultiplier: number = 1
 ): Promise<boolean> {
   if (Platform.OS !== 'web') return false;
   const res = await openElevenLabsPcmStreamRequest(spokenText);
   if (!res) return false;
-  return playElevenLabsPcmStreamFromResponse(res, onPlaybackStarted, telemetrySource, preInitTriggerDuring);
+  return playElevenLabsPcmStreamFromResponse(
+    res,
+    onPlaybackStarted,
+    telemetrySource,
+    preInitTriggerDuring,
+    playbackRateMultiplier
+  );
 }
 
 export async function speakWithElevenLabs(
@@ -1456,6 +1507,7 @@ export async function speakWithElevenLabs(
   const preInitTriggerDuring: PreInitTriggerDuring =
     options?.preInitTriggerDuring ??
     (telemetrySource === 'greeting' ? 'greeting' : 'tts_playback');
+  const playbackRateMultiplier = getEffectivePlaybackRateMultiplier(options?.playbackRateMultiplier);
   // #region agent log
   if (Platform.OS === 'web') {
     fetch('http://127.0.0.1:7789/ingest/668e0bd5-3283-4492-9f48-e33846c18218', {
@@ -1563,7 +1615,9 @@ export async function speakWithElevenLabs(
   const shouldTryPcmStream =
     Platform.OS === 'web' &&
     !options?.skipPcmStream &&
+    !isAnyMobileWebBrowser() &&
     !isIosSafariMobileWeb() &&
+    !isIosWebkitMobileWebLike() &&
     !webEmbeddedInAppBrowserDiscouragesPcmStream() &&
     webSpeechShouldDeferToUserGesture() &&
     telemetrySource !== 'greeting' &&
@@ -1603,7 +1657,8 @@ export async function speakWithElevenLabs(
         spokenText,
         onPlaybackStarted,
         telemetrySource,
-        preInitTriggerDuring
+        preInitTriggerDuring,
+        playbackRateMultiplier
       );
       // #region agent log
       fetch('http://127.0.0.1:7789/ingest/668e0bd5-3283-4492-9f48-e33846c18218', {
@@ -1702,7 +1757,8 @@ export async function speakWithElevenLabs(
             abForWebAudio,
             onPlaybackStarted,
             telemetrySource,
-            preInitTriggerDuring
+            preInitTriggerDuring,
+            playbackRateMultiplier
           );
       // #region agent log
       fetch('http://127.0.0.1:7789/ingest/668e0bd5-3283-4492-9f48-e33846c18218', {
@@ -1759,10 +1815,12 @@ export async function speakWithElevenLabs(
         }
         htmlAudio.src = url;
         htmlAudio.volume = 1;
+        htmlAudio.playbackRate = playbackRateMultiplier;
       } else if (useSharedPrimed && sharedHtmlAudioForMobileTts) {
         htmlAudio = sharedHtmlAudioForMobileTts;
         htmlAudio.src = url;
         htmlAudio.volume = 1;
+        htmlAudio.playbackRate = playbackRateMultiplier;
       } else {
         const audio = new AudioCtor(url);
         htmlAudio = audio as HTMLAudioElement;
@@ -1771,6 +1829,7 @@ export async function speakWithElevenLabs(
           (htmlAudio as { playsInline: boolean }).playsInline = true;
         }
         htmlAudio.preload = 'auto';
+        htmlAudio.playbackRate = playbackRateMultiplier;
       }
       activeWebAudio = htmlAudio;
       // #region agent log
@@ -2041,7 +2100,8 @@ type WebSpeechResult = { ok: true } | { ok: false; error: string };
 function speakWithWebSpeechSynthesis(
   spokenText: string,
   onPlaybackStarted?: () => void,
-  preInitTriggerDuring: PreInitTriggerDuring = 'tts_playback'
+  preInitTriggerDuring: PreInitTriggerDuring = 'tts_playback',
+  playbackRateMultiplier: number = 1
 ): Promise<WebSpeechResult> {
   return new Promise((resolve) => {
     if (typeof window === 'undefined' || !window.speechSynthesis || typeof SpeechSynthesisUtterance === 'undefined') {
@@ -2089,7 +2149,7 @@ function speakWithWebSpeechSynthesis(
     }
     const utter = new SpeechSynthesisUtterance(spokenText);
     utter.lang = 'en-US';
-    utter.rate = 0.92;
+    utter.rate = Math.min(4, Math.max(0.5, 0.92 * playbackRateMultiplier));
     utter.pitch = 0.95;
     utter.onstart = () => {
       onPlaybackStarted?.();
@@ -2180,6 +2240,7 @@ export async function tryPlayPendingWebTtsAudioInUserGesture(
   const audio = new AudioCtor(url);
   activeWebAudio = audio;
   const htmlAudio = audio as HTMLAudioElement;
+  htmlAudio.playbackRate = getLocalDevPlaybackRateMultiplier();
   htmlAudio.setAttribute('playsinline', '');
   if ('playsInline' in htmlAudio) {
     (htmlAudio as { playsInline: boolean }).playsInline = true;
@@ -2247,7 +2308,7 @@ export function trySpeakWebSpeechInUserGesture(spokenText: string, onDone?: () =
   }
   const utter = new SpeechSynthesisUtterance(spokenText);
   utter.lang = 'en-US';
-  utter.rate = 0.92;
+  utter.rate = Math.min(4, Math.max(0.5, 0.92 * getLocalDevPlaybackRateMultiplier()));
   utter.pitch = 0.95;
   utter.volume = 1;
   utter.onend = () => {
@@ -2285,11 +2346,13 @@ function speakFallback(
       await stopElevenLabsPlayback();
       if (Platform.OS === 'web') {
         /** `speechSynthesis` does not use the shared `AudioContext`; do not require `unlockWebAudioForAutoplay` here. */
+        const playbackRateMultiplier = getEffectivePlaybackRateMultiplier(playbackOpts?.playbackRateMultiplier);
         const webRes = await speakWithWebSpeechSynthesis(
           text,
           onPlaybackStarted,
           playbackOpts?.preInitTriggerDuring ??
-            (playbackOpts?.telemetry?.source === 'greeting' ? 'greeting' : 'tts_playback')
+            (playbackOpts?.telemetry?.source === 'greeting' ? 'greeting' : 'tts_playback'),
+          playbackRateMultiplier
         );
         if (webRes.ok) {
           resolve();
@@ -2328,7 +2391,7 @@ function speakFallback(
       const iosSpeechSession = Platform.OS === 'ios' ? { useApplicationAudioSession: false as const } : {};
       Speech.speak(text, {
         language: 'en-US',
-        rate: 0.78,
+        rate: Math.min(2, Math.max(0.4, 0.78 * getLocalDevPlaybackRateMultiplier())),
         pitch: 0.92,
         ...iosSpeechSession,
         onDone: () => {

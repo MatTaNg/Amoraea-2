@@ -7,10 +7,13 @@ import {
   getMetaCommentCanonicalResponseSummary,
   getPriorSubstantiveNonMetaUserContentInMoment,
   hadPriorSubstantiveAnswerInScenarioForFrustration,
+  isConfusionRepeatRequestText,
+  isCheckingInFrustrationAdjacent,
   isSufficiencyChallengeFrustrationUtterance,
   looksLikeFrustrationSkipAcceptance,
   looksLikeFrustrationSkipConfirmationAffirmative,
   looksLikeProactiveScenarioSkipRequest,
+  looksLikeSkipConfirmationConnectivityGreeting,
   looksLikeSkipConfirmationDecline,
   resolveMetaCommentForInterviewTurn,
 } from '../metaCommentClassification';
@@ -25,6 +28,18 @@ describe('classifyUserMetaComment', () => {
   it('classifies confusion', () => {
     const r = classifyUserMetaComment('What do you mean by that?');
     expect(r?.type).toBe('confusion');
+    expect(r?.confusion_subtype).toBeUndefined();
+  });
+
+  it('classifies repeat-request lines as confusion with repeat_request subtype', () => {
+    const a = classifyUserMetaComment('Can you repeat the question?');
+    expect(a?.type).toBe('confusion');
+    expect(a?.confusion_subtype).toBe('repeat_request');
+    const b = classifyUserMetaComment("I didn't catch that");
+    expect(b?.type).toBe('confusion');
+    expect(b?.confusion_subtype).toBe('repeat_request');
+    const c = classifyUserMetaComment('what was the question');
+    expect(c?.confusion_subtype).toBe('repeat_request');
   });
 
   it('classifies checking in', () => {
@@ -90,6 +105,16 @@ describe('classifyUserMetaComment', () => {
     expect(classifyUserMetaComment("honestly I've got no idea what to say here")?.type).toBe('inability');
     expect(classifyUserMetaComment("I don't know")?.type).toBe('inability');
     expect(classifyUserMetaComment("I'm drawing a blank")?.type).toBe('inability');
+  });
+
+  it('does not classify inability when "that\'s a hard one" only hedges a long substantive answer', () => {
+    const long =
+      "That's a hard one because James showed up as best he could in that situation, I guess maybe just sharing her excitement and let her explain all those details when she's ready rather than asking about them and just listening to her excitement and reflecting that rather than asking detailed questions.";
+    expect(classifyUserMetaComment(long)).toBe(null);
+  });
+
+  it('still classifies short "that\'s a hard one" as inability', () => {
+    expect(classifyUserMetaComment("That's a hard one.")?.type).toBe('inability');
   });
 
   it('keeps frustration when user says "I don\'t know what you want"', () => {
@@ -185,7 +210,32 @@ describe('buildClientFrustrationMetaFallbackAssistantText', () => {
   });
 });
 
+describe('looksLikeSkipConfirmationConnectivityGreeting', () => {
+  it('matches bare greetings only', () => {
+    expect(looksLikeSkipConfirmationConnectivityGreeting('hello')).toBe(true);
+    expect(looksLikeSkipConfirmationConnectivityGreeting('Hi')).toBe(true);
+    expect(looksLikeSkipConfirmationConnectivityGreeting('hey there')).toBe(true);
+    expect(looksLikeSkipConfirmationConnectivityGreeting('still there?')).toBe(false);
+  });
+});
+
+describe('isConfusionRepeatRequestText', () => {
+  it('detects phrasing', () => {
+    expect(isConfusionRepeatRequestText('Can you say that again?')).toBe(true);
+    expect(isConfusionRepeatRequestText('What do you mean by that?')).toBe(false);
+  });
+});
+
 describe('buildMetaCommentHandlingSuffix', () => {
+  it('uses repeat-request block when confusion_subtype is repeat_request', () => {
+    const s = buildMetaCommentHandlingSuffix({
+      classification: { type: 'confusion', confidence: 0.8, confusion_subtype: 'repeat_request' },
+      repeatedFrustrationInMoment: false,
+    });
+    expect(s).toMatch(/verbatim|full|REPEAT REQUEST/i);
+    expect(s).toMatch(/Do not.*say more about that|elongating/i);
+  });
+
   it('omits reflection when omitPriorReflectionClause with prior substantive', () => {
     const s = buildMetaCommentHandlingSuffix({
       classification: { type: 'frustration', confidence: 0.67 },
@@ -205,6 +255,48 @@ describe('buildMetaCommentHandlingSuffix', () => {
     });
     expect(s).toContain('one short reflective clause');
     expect(s).not.toContain('Sufficiency pushback');
+  });
+
+  it('uses frustration-adjacent checking_in pivot instructions', () => {
+    const s = buildMetaCommentHandlingSuffix({
+      classification: { type: 'checking_in', confidence: 0.72 },
+      repeatedFrustrationInMoment: false,
+      checkingInFrustrationAdjacent: true,
+      inMoment5AfterAccountabilityProbe: true,
+    });
+    expect(s).toContain('CHECKING-IN + FRUSTRATION ADJACENT');
+    expect(s).toContain('Do not re-ask the same question');
+    expect(s).toContain('Do **not** re-ask "What was your part in how it unfolded?"');
+  });
+});
+
+describe('isCheckingInFrustrationAdjacent', () => {
+  it('detects sharp checking-in phrasing', () => {
+    expect(
+      isCheckingInFrustrationAdjacent({
+        checkingInText: 'Did you get all that?',
+        priorSubstantiveText: 'short prior text',
+      })
+    ).toBe(true);
+  });
+
+  it('detects long prior substantive narrative', () => {
+    expect(
+      isCheckingInFrustrationAdjacent({
+        checkingInText: 'Is that okay?',
+        priorSubstantiveText:
+          'There was a time my best friend and I had a serious argument and we stopped talking for months, then eventually repaired after long self-reflection and hard conversations.',
+      })
+    ).toBe(true);
+  });
+
+  it('stays false for neutral short prior + neutral checking-in', () => {
+    expect(
+      isCheckingInFrustrationAdjacent({
+        checkingInText: 'Is that okay?',
+        priorSubstantiveText: 'James should listen more.',
+      })
+    ).toBe(false);
   });
 });
 
@@ -379,7 +471,15 @@ describe('getMetaCommentCanonicalResponseSummary', () => {
     );
   });
 
+  it('returns repeat-request summary when confusion_subtype is repeat_request', () => {
+    expect(getMetaCommentCanonicalResponseSummary('confusion', false, 'repeat_request')).toMatch(/verbatim|full/i);
+  });
+
   it('returns repeated-frustration line when flagged', () => {
     expect(getMetaCommentCanonicalResponseSummary('frustration', true)).toContain('No pressure');
+  });
+
+  it('returns checking_in pivot summary when frustration-adjacent flag is set', () => {
+    expect(getMetaCommentCanonicalResponseSummary('checking_in', false, undefined, true)).toContain('pivot');
   });
 });

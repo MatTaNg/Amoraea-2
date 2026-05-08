@@ -23,6 +23,29 @@ export function isNotAssessedDueToTechnicalInterruption(text: string | null | un
   );
 }
 
+/**
+ * True when programmatic response-depth −1 may apply for this marker: model/keyEvidence
+ * indicates nothing substantive to score (empty, recovery line, insufficient-evidence phrasing, etc.).
+ * Returns false for technical non-assessment and frustration skip so we do not stack penalties.
+ */
+export function evidenceAbsentForResponseDepthModifier(text: string | null | undefined): boolean {
+  if (text == null || typeof text !== 'string') return true;
+  const trimmed = text.trim();
+  if (!trimmed) return true;
+  if (isNotAssessedDueToTechnicalInterruption(trimmed)) return false;
+  if (trimmed === SKIPPED_BY_USER_FRUSTRATION_EVIDENCE) return false;
+
+  const lower = trimmed.toLowerCase();
+  if (/score\s+recovered\s+from\s+model\s+output/i.test(trimmed)) return true;
+  if (/insufficient\s+evidence/.test(lower)) return true;
+  if (/no\s+assessable\s+evidence/.test(lower)) return true;
+  if (/response\s+too\s+brief\s+to\s+assess/.test(lower)) return true;
+  if (/too\s+brief\s+to\s+assess/.test(lower)) return true;
+
+  if (isNoEvidenceText(trimmed)) return true;
+  return false;
+}
+
 export function isNoEvidenceText(text: string | null | undefined): boolean {
   if (!text) return false;
   if (text.trim() === SKIPPED_BY_USER_FRUSTRATION_EVIDENCE) return true;
@@ -172,6 +195,216 @@ export const MOMENT_5_ACCOUNTABILITY_QUESTION_TEXT =
 
 export const MOMENT_5_ACCOUNTABILITY_PROBE_TEXT = 'What was your part in how it unfolded?';
 
+/** Moment 5 only — when the user disclosed bereavement/death, prepend one brief ack before the scripted probe (same assistant turn). */
+export const MOMENT_5_ACCOUNTABILITY_PROBE_WITH_GRIEF_ACK_TEXT =
+  'I appreciate you getting vulnerable with me. What was your part in how it unfolded?';
+
+/** Client-only — concrete anchor before accountability when the first answer is generic/process-only. */
+export const MOMENT_5_SPECIFICITY_REDIRECT_TEXT =
+  'Can you think of a specific time — maybe with a partner, friend, or family member — and walk me through what happened?';
+
+/** Alternate client-only redirect (detection only). */
+export const MOMENT_5_SPECIFICITY_REDIRECT_ALT_TEXT =
+  'Is there a specific person or situation that comes to mind when you think about conflict?';
+
+/** After redirect, user still abstract — offer to move on (no accountability probe). */
+export const MOMENT_5_PERSISTENT_ABSTRACT_MOVE_ON_TEXT =
+  "That's okay — we don't need to force a specific story. Whenever you're ready, we can wrap up.";
+
+/** True when assistant turn is the scripted Moment 5 specificity redirect (before accountability probe). */
+export function looksLikeMoment5SpecificityRedirectPrompt(text: string | null | undefined): boolean {
+  const n = (text ?? '').replace(/\s+/g, ' ').trim().toLowerCase();
+  if (!n) return false;
+  return (
+    (n.includes('specific time') && n.includes('walk me through')) ||
+    (n.includes('specific person') && n.includes('comes to mind') && n.includes('conflict'))
+  );
+}
+
+/**
+ * Moment 5 only: user disclosed death / bereavement (not merely breakup or estrangement).
+ * Conservative on metaphors ("death of the relationship") and on "lost them" without bereavement cues.
+ */
+export function moment5ResponseContainsDeathDisclosure(userText: string): boolean {
+  const raw = userText.replace(/\s+/g, ' ').trim();
+  if (raw.length < 14) return false;
+  const lower = raw.toLowerCase();
+
+  const splitOrMetaphorBreakup =
+    /\b(dead to me|dead to us|relationship (is |was )?dead to)\b/i.test(raw) ||
+    /\bdeath of (the |our )?relationship\b/i.test(lower);
+  if (splitOrMetaphorBreakup) {
+    const personBereavement =
+      /\b(passed away|passed on|funeral|burial|memorial service|deceased|suicide)\b/i.test(lower) ||
+      /\bi lost my (dad|father|mom|mother|mum|parents|brother|sister|son|daughter|baby)\b/i.test(lower) ||
+      /\b(my|our|his|her|their)\s+(dad|mom|mother|father|brother|sister|son|daughter|spouse|partner|wife|husband)\s+died\b/i.test(
+        lower,
+      ) ||
+      (/\b(she|he|they)\s+died\b/i.test(lower) && !/\bnobody\s+died\b/i.test(lower));
+    if (!personBereavement) return false;
+  }
+
+  const estrangementLost =
+    /\blost (him|her|them)\b/i.test(lower) &&
+    /\b(after|when|because)\b/i.test(lower) &&
+    /\b(break up|broke up|cheat|cheating|left me|walked out|divorce|split up|ghosted|argument|fight)\b/i.test(lower) &&
+    !/\b(died|passed away|passed on|death|funeral|deceased|suicide|burial|memorial)\b/i.test(lower);
+  if (estrangementLost) return false;
+
+  const deathLexicon =
+    /\b(died|passed away|passed on|deceased|funeral|memorial service|burial|cremat|bereavement|bereaved|suicide|took (his|her|their) own life|lost (his|her|their) life|fatal|homicide|stillborn|miscarriage|in hospice)\b/i.test(
+      lower,
+    );
+  const explicitDeath =
+    deathLexicon ||
+    /\bdeath of (my|our|his|her|their)\b/i.test(lower) ||
+    /\b(my|our|his|her|their)\s+(dad|mom|mother|father|parent|brother|sister|son|daughter|spouse|partner|wife|husband)\s+(died|passed)\b/i.test(lower);
+
+  const lostFamilyMember =
+    /\bi lost (my )?(dad|father|mom|mother|mum|parents|brother|sister|son|daughter|child|children|baby|grandma|grandmother|grandpa|grandfather)\b/i.test(
+      lower,
+    );
+  const lostPartnerOrFriendWithDeathCue =
+    /\bi lost (my )?(husband|wife|spouse|partner|friend|gf|bf)\b/i.test(lower) && deathLexicon;
+  const lostCloseRelative = lostFamilyMember || lostPartnerOrFriendWithDeathCue;
+
+  const lostPronounWithBereavementCue =
+    /\blost (him|her|them)\b/i.test(lower) &&
+    /\b(died|passed away|passed on|death|funeral|burial|memorial|gone forever|taken (from us|too soon)|no longer (with us|here))\b/i.test(lower);
+
+  const goneEuphemism =
+    /\b(they'?re|they are|he'?s|she'?s|he is|she is) gone\b/i.test(lower) &&
+    /\b(died|passed away|passed on|death|funeral|burial|memorial|lost (him|her|them))\b/i.test(lower);
+
+  const capitalizedNameDied =
+    /\b[A-Z][a-z]{1,24}\s+(died|passed away|passed on)\b/.test(raw);
+
+  return explicitDeath || lostCloseRelative || lostPronounWithBereavementCue || goneEuphemism || capitalizedNameDied;
+}
+
+/**
+ * Moment 5 only: true when the user anchored to a specific relationship/person and a particular episode,
+ * not only generic conflict advice or first-person process habits.
+ */
+export function moment5PersonalNarrativeHasConcreteAnchor(userText: string): boolean {
+  const raw = userText.replace(/\s+/g, ' ').trim();
+  if (!raw || raw.length < 28) return false;
+  const t = raw;
+  const lower = t.toLowerCase();
+  const wc = t.split(/\s+/).filter(Boolean).length;
+
+  const instructionalYouHeavy =
+    /\b(you should|you need to|you have to|when you have (a )?conflict|if you('re| are) (in|having))\b/i.test(lower) &&
+    (t.match(/\byou\b/gi) ?? []).length >= 2 &&
+    (t.match(/\bi\b/gi) ?? []).length <= 2 &&
+    !/\b(my |me,|me |mine |i was |i had |with my |our )\b/i.test(lower);
+
+  if (instructionalYouHeavy) return false;
+
+  const genericProcessOnly =
+    /^\s*(well |honestly |so |look, )?i (usually|often|always|typically|generally|just|try to|tend to)\s+(address|handle|discuss|talk|communicate|listen|find|navigate|mediate|work through|figure out)\b/i.test(
+      lower,
+    ) &&
+    !/\b(she|he|they|we had|we got|my |our |friend|partner|boss|mom|dad)\b/i.test(lower) &&
+    wc < 70;
+
+  if (genericProcessOnly) return false;
+
+  const relationalAnchor =
+    /\b(my (mom|mum|dad|mother|father|parents|brother|sister|son|daughter|kids|child|children|husband|wife|partner|spouse|ex|boss|friend|friends|coworker|colleague|neighbor|roommate|gf|bf|aunt|uncle|cousin|niece|nephew|buddy|teammate|client|coach|landlord|tenant))\b/i.test(
+      t,
+    ) ||
+    /\bmy\s+(mother|father|sister|brother)-in-law\b/i.test(lower) ||
+    /\b(my|our)\s+(parents-in-law|in-laws)\b/i.test(lower) ||
+    /\bmy\s+step(mother|father|dad|mom|brother|sister|sibling|kid|child)\b/i.test(lower) ||
+    /\b(?:my\s+)?(?:fiance|fiancé|fiancée)\b/i.test(lower) ||
+    /\b(a|my)\s+buddy\b/i.test(lower) ||
+    /** "my best friend", "my late best friend" — not matched by `my friend` (word immediately after my). */
+    /\bmy\s+(?:\w+\s+){0,3}friend\b/i.test(lower) ||
+    /\b(best|close|childhood)\s+friend\b/i.test(lower) ||
+    /\b(my|our|the|a)\s+(friend|partner|ex|boss|coworker|colleague|neighbor|manager|teammate|flatmate)\b/i.test(lower) ||
+    /\bsomeone(?:\s+i\s+(?:trusted|cared\s+about|knew(?:\s+well)?)|\s+who|\s+that|\s+important|\s+close(?:\s+to)?)\b/i.test(
+      lower,
+    ) ||
+    /\b(a|the) (woman|man|person)\b/i.test(lower) ||
+    /\b(i was dating|we were dating|my relationship|with my )\b/i.test(lower) ||
+    /\b(the|this)\s+(guy|gal|woman|man)\s+i\s+(was\s+)?(seeing|dating|living\s+with)\b/i.test(lower);
+
+  const dyadicOrEpisode =
+    /\bwe ('?ve|had|got|were|argued|fought|disagreed|talked|made up|resolved|reconciled)\b/i.test(lower) ||
+    /\bwe (had a|had an|got into (a )?)(fight|argument|disagreement)\b/i.test(lower) ||
+    /\b(had|have)\s+an?\s+(fight|argument|disagreement)\b/i.test(lower) ||
+    /\bwe\s+stopped\s+(talking|texting|hanging)\b/i.test(lower) ||
+    /\bstopped\s+(talking|texting)\s+(to\s+each\s+other|completely)\b/i.test(lower) ||
+    /\b(blew\s+up|blown\s+up|shut\s+down|stonewall(ed|ing)?|silent\s+treatment|cold\s+shoulder)\b/i.test(lower) ||
+    /\b(ghost(ed)?|blocked\s+me|unfollow(ed)?)\b/i.test(lower) ||
+    /\b(cheated\s+on|lied\s+to|betray(ed)?|crossed\s+(a\s+)?line)\b/i.test(lower) ||
+    /\b(apologiz(ed|ing)|(?:said|offered)\s+an?\s+apology|forg(?:ave|ive|iveness))\b/i.test(lower) ||
+    /\b(clear(ed)?\s+the\s+air|make\s+amends|sat\s+down\s+(together\s+)?to\s+talk|couples\s+therapy)\b/i.test(lower) ||
+    /\b(she|he|they) (said|told me|texted|called|left|walked out|yelled|was upset|didn'?t)\b/i.test(lower) ||
+    /\b(i|we) (went to|walked out|during the|after (she|he|they|that)|before (she|he|that))\b/i.test(lower);
+
+  const situationalAnchor =
+    /\b(last (week|month|year|night|summer|time)|at work|at home|during (the )?(vacation|trip|party|holiday|call)|when we were)\b/i.test(
+      lower,
+    ) ||
+    /\b(that\s+night|the\s+next\s+morning|right\s+before\s+the\s+wedding|on\s+the\s+drive\s+home|over\s+text|in\s+the\s+kitchen|at\s+dinner)\b/i.test(
+      lower,
+    ) ||
+    /\b(a\s+few\s+years\s+ago|back\s+in\s+(high\s+school|college)|during\s+covid|when\s+we\s+were\s+living)\b/i.test(
+      lower,
+    ) ||
+    /\bafter\s+(she|he|they)\s+moved\s+out\b/i.test(lower) ||
+    /\b(about (the )?(money|kids|trust|cheating|sleep|chores|deadline|schedule))\b/i.test(lower);
+
+  /**
+   * Safety net for long first-person narratives that clearly describe one conflict episode
+   * but can miss narrower regex combinations (e.g. "there was a time ... we cut each other out ...").
+   */
+  const explicitNarrativeLead =
+    /\b(there was a time|one time|at one point|i remember when)\b/i.test(lower) &&
+    /\b(i|my|we)\b/i.test(lower);
+  const conflictEpisodeLexicon =
+    /\b(argument|fight|disagreement|stopped talking|stopped texting|cut each other out|had a falling out|fell out|made up|talked again|worked out|resolved)\b/i.test(
+      lower,
+    );
+  const strongNarrativeOverride =
+    wc >= 35 && explicitNarrativeLead && relationalAnchor && conflictEpisodeLexicon;
+
+  const concrete =
+    strongNarrativeOverride ||
+    (relationalAnchor && (dyadicOrEpisode || situationalAnchor || wc >= 40)) ||
+    (dyadicOrEpisode && (relationalAnchor || situationalAnchor || wc >= 28));
+
+  if (wc >= 80 || /\bbest friend\b/i.test(lower) || /\bthere was a time\b/i.test(lower)) {
+    // #region agent log
+    fetch('http://127.0.0.1:7789/ingest/668e0bd5-3283-4492-9f48-e33846c18218', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'X-Debug-Session-Id': 'e43434' },
+      body: JSON.stringify({
+        sessionId: 'e43434',
+        runId: 'm5-anchor-debug',
+        hypothesisId: 'H2_anchor_false_negative',
+        location: 'probeAndScoringUtils.ts:moment5PersonalNarrativeHasConcreteAnchor',
+        message: 'm5_anchor_eval',
+        data: {
+          wc,
+          relationalAnchor,
+          dyadicOrEpisode,
+          situationalAnchor,
+          strongNarrativeOverride,
+          concrete,
+          preview: raw.slice(0, 220),
+        },
+        timestamp: Date.now(),
+      }),
+    }).catch(() => {});
+    // #endregion
+  }
+
+  return concrete;
+}
+
 /** Single runtime pivot when the user has no strong behavioral example (legacy transcripts only). */
 export const MOMENT_5_INEXPERIENCE_FALLBACK_QUESTION =
   "What would meaningful celebration look like to you — either something you'd want to do for someone, or something that would feel meaningful to receive?";
@@ -225,14 +458,36 @@ export function moment5AnswerHasExplicitSelfAccountability(userText: string): bo
     /\bmy\s+(fault|mistake)\b/i.test(lower) ||
     /\b(that|this)\s+was\s+on\s+me\b/i.test(lower) ||
     /\bI\s+take\s+responsibility\b/i.test(t) ||
+    /\bi\s+took\s+responsibility\b/i.test(lower) ||
+    /\bi\s+take\s+ownership\b/i.test(lower) ||
+    /\bi\s+took\s+ownership\b/i.test(lower) ||
+    /\bi\s+own(?:ed)?\s+(my|that|it)\b/i.test(lower) ||
+    /\bi\s+own(?:ed)?\s+my\s+side\b/i.test(lower) ||
+    /\bmy\s+side\s+of\s+(this|it|that)\b/i.test(lower) ||
+    /\bmy\s+responsibilit(?:y|ies)\s+was\b/i.test(lower) ||
     /\bI\s+was\s+(wrong|at fault|to blame|unfair|defensive|too harsh)\b/i.test(t) ||
+    /\bi\s+was\s+(out\s+of\s+line|disrespectful|controlling|accusatory)\b/i.test(lower) ||
+    /\bi\s+crossed\s+a\s+line\b/i.test(lower) ||
+    /\bi\s+did\s+(yell|raise\s+my\s+voice|snap|shut\s+down|stonewall|withdraw|avoid)\b/i.test(lower) ||
+    /\bi\s+shut\s+(him|her|them)\s+out\b/i.test(lower) ||
+    /\bi\s+(wasn'?t|was\s+not|didn'?t)\s+listen(?:ing)?\b/i.test(lower) ||
+    /\bi\s+(got|became)\s+(defensive|reactive)\b/i.test(lower) ||
+    /\bi\s+got\s+accusatory\b/i.test(lower) ||
+    /\bi\s+came\s+in\s+hot\b/i.test(lower) ||
+    /\bi\s+came\s+at\s+(him|her|them)\s+hard\b/i.test(lower) ||
     /\bI\s+(should|could)\s+have\b/i.test(t) ||
+    /\bi\s+should(?:n'?t| not)\s+have\s+reacted\s+like\s+that\b/i.test(lower) ||
+    /\bi\s+could\s+have\s+communicat(?:ed|e)\s+better\b/i.test(lower) ||
     /\bI\s+wish\s+I(\s+had)?\b/i.test(t) ||
     /\bI\s+(apologized|apologised)\b/i.test(t) ||
     /\bI\s+('?m|am)\s+sorry\s+(for\s+)?(what\s+i|my|how\s+i)\b/i.test(t) ||
     /\bI\s+(owned|admitted)\b/i.test(t) ||
     /\bI\s+acknowledged\s+(that|my|the|I)\b/i.test(t) ||
     /\bI\s+(overreacted|escalated)\b/i.test(t) ||
+    /\bi\s+handled\s+(it|that)\s+(badly|poorly)\b/i.test(lower) ||
+    /\bi\s+was\s+projecting\b/i.test(lower) ||
+    /\bi\s+(made|was\s+making)\s+assumptions\b/i.test(lower) ||
+    /\bi\s+jumped\s+to\s+conclusions\b/i.test(lower) ||
     /\bmy\s+share\s+of\b/i.test(lower) ||
     /\b(part|role)\s+i\s+(played|had|took)\b/i.test(lower) ||
     /\bI\s+regret\s+(what\s+i|my|how\s+i|that\s+i)\b/i.test(t) ||
@@ -578,15 +833,25 @@ export function hasScenarioAQ1ContemptProbeCoverage(text: string): boolean {
   if (!SCENARIO_A_TOPIC_RE.test(t)) return false;
   const lower = t.replace(/\u2019/g, "'").replace(/\u2018/g, "'").toLowerCase();
 
+  const hasInterpretiveCue =
+    /\b(what\s+she\s+meant|what\s+emma\s+was\s+(getting\s+at|trying\s+to\s+say)|she\s+meant|when\s+she\s+said|she\s+was\s+basically\s+saying|emma'?s\s+point\s+was|that\s+(line|statement|comment|response|remark|phrase|phrasing)|the\s+subtext\s+was|the\s+undertone\s+was|the\s+way\s+she\s+said|the\s+way\s+that\s+landed|that\s+came\s+across\s+as|it\s+landed\s+as|tone|that\s+comment\s+from\s+emma|emma'?s\s+(response|wording)\s+there)\b/.test(
+      lower
+    );
   const referencesEmmaFinalLine =
     lower.includes("you've made that very clear") ||
     lower.includes('you have made that very clear') ||
     /\byou\s+made\s+that\s+very\s+clear\b/.test(lower) ||
-    (lower.includes('very clear') && /\bemma\b/.test(lower));
+    (lower.includes('very clear') && /\bemma\b/.test(lower)) ||
+    (/\bemma\b/.test(lower) && hasInterpretiveCue);
 
   /** Hostile / verdict / relational-sting reads — not indirectness alone (see passive-aggressive rule below). */
   const hasStrongContemptQualityRead =
-    /\b(cont(empt|emptuous)|harsh|cutting|dismissive|dismissed|cold|biting|sarcastic|verdict|mean|punitive|punish(es|ing)?|shut(ting)?\s+down|clos(e|ing|es)?\s+off|clos(es|ing)?\s+the\s+door|door[- ]?clos|last\s+word|finality|superior|condescend|condescending|derogat|belittl|scathing|hostile|demean|degrad|mock|mockery|sting|walling|stonewall)\b/i.test(
+    /\b(cont(empt|emptuous)|harsh|cutting|dismissive|dismissed|cold|biting|sarcastic|verdict|mean|punitive|punish(es|ing)?|shut(ting)?\s+down|clos(e|ing|es)?\s+off|clos(es|ing)?\s+the\s+door|door[- ]?clos|last\s+word|finality|superior|condescend|condescending|derogat|belittl|scathing|hostile|demean|degrad|mock|mockery|sting|walling|stonewall|jab|dig|put[- ]?down|swipe|loaded|taking\s+a\s+shot)\b/i.test(
+      lower
+    );
+  /** Substantive interpretive read of the line's relational meaning even without explicit contempt adjectives. */
+  const hasSubstantiveInterpretiveRead =
+    /\b(accumulated\s+frustration|built[- ]?up\s+frustration|established\s+behavior|not\s+an\s+isolated\s+incident|current\s+pattern|for\s+some\s+time|tolerated\s+for\s+some\s+time|response\s+to\s+established\s+behavior|prioritiz(?:e|es|ing)\s+(his|her|their)\s+family)\b/i.test(
       lower
     );
 
@@ -603,7 +868,61 @@ export function hasScenarioAQ1ContemptProbeCoverage(text: string): boolean {
   if (onlyPassiveAggressive) return false;
   if (minimizesEmmaLineRead && !hasStrongContemptQualityRead) return false;
 
-  return hasStrongContemptQualityRead;
+  return hasStrongContemptQualityRead || hasSubstantiveInterpretiveRead;
+}
+
+export function debugScenarioAQ1ContemptProbeCoverageDetail(text: string): {
+  normalizedLength: number;
+  hasScenarioATopic: boolean;
+  hasInterpretiveCue: boolean;
+  referencesEmmaFinalLine: boolean;
+  hasStrongContemptQualityRead: boolean;
+  hasSubstantiveInterpretiveRead: boolean;
+  hasPassiveAggressive: boolean;
+  onlyPassiveAggressive: boolean;
+  minimizesEmmaLineRead: boolean;
+  coverage: boolean;
+} {
+  const t = text.replace(/\s+/g, ' ').trim();
+  const hasScenarioATopic = SCENARIO_A_TOPIC_RE.test(t);
+  const lower = t.replace(/\u2019/g, "'").replace(/\u2018/g, "'").toLowerCase();
+  const hasInterpretiveCue =
+    /\b(what\s+she\s+meant|what\s+emma\s+was\s+(getting\s+at|trying\s+to\s+say)|she\s+meant|when\s+she\s+said|she\s+was\s+basically\s+saying|emma'?s\s+point\s+was|that\s+(line|statement|comment|response|remark|phrase|phrasing)|the\s+subtext\s+was|the\s+undertone\s+was|the\s+way\s+she\s+said|the\s+way\s+that\s+landed|that\s+came\s+across\s+as|it\s+landed\s+as|tone|that\s+comment\s+from\s+emma|emma'?s\s+(response|wording)\s+there)\b/.test(
+      lower
+    );
+  const referencesEmmaFinalLine =
+    lower.includes("you've made that very clear") ||
+    lower.includes('you have made that very clear') ||
+    /\byou\s+made\s+that\s+very\s+clear\b/.test(lower) ||
+    (lower.includes('very clear') && /\bemma\b/.test(lower)) ||
+    (/\bemma\b/.test(lower) && hasInterpretiveCue);
+  const hasStrongContemptQualityRead =
+    /\b(cont(empt|emptuous)|harsh|cutting|dismissive|dismissed|cold|biting|sarcastic|verdict|mean|punitive|punish(es|ing)?|shut(ting)?\s+down|clos(e|ing|es)?\s+off|clos(es|ing)?\s+the\s+door|door[- ]?clos|last\s+word|finality|superior|condescend|condescending|derogat|belittl|scathing|hostile|demean|degrad|mock|mockery|sting|walling|stonewall|jab|dig|put[- ]?down|swipe|loaded|taking\s+a\s+shot)\b/i.test(
+      lower
+    );
+  const hasSubstantiveInterpretiveRead =
+    /\b(accumulated\s+frustration|built[- ]?up\s+frustration|established\s+behavior|not\s+an\s+isolated\s+incident|current\s+pattern|for\s+some\s+time|tolerated\s+for\s+some\s+time|response\s+to\s+established\s+behavior|prioritiz(?:e|es|ing)\s+(his|her|their)\s+family)\b/i.test(
+      lower
+    );
+  const hasPassiveAggressive = /\bpassive[- ]aggressive\b/i.test(lower);
+  const onlyPassiveAggressive = hasPassiveAggressive && !hasStrongContemptQualityRead;
+  const minimizesEmmaLineRead =
+    /\b(just\s+)?stating\s+a\s+fact\b|\bemma\s+is\s+just\s+stating\b|\bjust\s+(upset|venting)\b|\bonly\s+(saying|stating)\s+a\s+fact\b/i.test(
+      lower
+    );
+
+  return {
+    normalizedLength: t.length,
+    hasScenarioATopic,
+    hasInterpretiveCue,
+    referencesEmmaFinalLine,
+    hasStrongContemptQualityRead,
+    hasSubstantiveInterpretiveRead,
+    hasPassiveAggressive,
+    onlyPassiveAggressive,
+    minimizesEmmaLineRead,
+    coverage: hasScenarioAQ1ContemptProbeCoverage(text),
+  };
 }
 
 /**

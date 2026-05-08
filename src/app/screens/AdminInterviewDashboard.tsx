@@ -326,6 +326,22 @@ type CommunicationStyleProfileRow = {
   source_attempt_id?: string | null;
 };
 
+/** Used by SummaryTab + reprocess; keep one query shape so admin UI stays in sync with DB. */
+async function fetchCommunicationStyleProfileRowForAdmin(
+  userId: string
+): Promise<CommunicationStyleProfileRow | null> {
+  const { data, error } = await supabase
+    .from('communication_style_profiles')
+    .select('*')
+    .eq('user_id', userId)
+    .maybeSingle();
+  if (error) {
+    console.error('[Admin] communication_style_profiles select', error);
+    return null;
+  }
+  return (data as CommunicationStyleProfileRow | null | undefined) ?? null;
+}
+
 function coerceScoreNumber(v: unknown): number | undefined {
   if (v == null || v === '') return undefined;
   const n = typeof v === 'number' ? v : Number(v);
@@ -1674,31 +1690,31 @@ function SummaryTab({
     setStylePipelineErrorDisplay(attempt.communication_style_error ?? null);
   }, [attempt.id, attempt.communication_style_error]);
 
-  const loadStyleProfile = async () => {
-    setStyleStatus('loading');
-    try {
-      const { data, error } = await supabase
-        .from('communication_style_profiles')
-        .select('*')
-        .eq('user_id', attempt.user_id)
-        .maybeSingle();
-      if (error) {
-        console.error('[Admin] loadStyleProfile', error);
-        setStyleProfile(null);
-        return;
-      }
-      const row = data as CommunicationStyleProfileRow | null | undefined;
-      setStyleProfile(row ?? null);
-    } catch (e) {
-      console.error('[Admin] loadStyleProfile failed', e);
-      setStyleProfile(null);
-    } finally {
-      setStyleStatus('idle');
-    }
-  };
-
   useEffect(() => {
-    void loadStyleProfile();
+    const uid = typeof attempt.user_id === 'string' ? attempt.user_id.trim() : '';
+    if (!uid) {
+      setStyleProfile(null);
+      setStyleStatus('idle');
+      return;
+    }
+    let cancelled = false;
+    setStyleStatus('loading');
+    void fetchCommunicationStyleProfileRowForAdmin(uid)
+      .then((row) => {
+        if (cancelled) return;
+        setStyleProfile(row);
+      })
+      .catch((e) => {
+        if (cancelled) return;
+        console.error('[Admin] fetchCommunicationStyleProfileRowForAdmin failed', e);
+        setStyleProfile(null);
+      })
+      .finally(() => {
+        if (!cancelled) setStyleStatus('idle');
+      });
+    return () => {
+      cancelled = true;
+    };
   }, [attempt.user_id]);
 
   useEffect(() => {
@@ -1784,7 +1800,8 @@ function SummaryTab({
         setStylePipelineErrorDisplay(errorText);
       }
 
-      await loadStyleProfile();
+      const row = await fetchCommunicationStyleProfileRowForAdmin(attempt.user_id);
+      setStyleProfile(row);
     } catch (e) {
       console.error('[Admin] reprocessStyle failed', e);
     } finally {
@@ -2277,6 +2294,8 @@ function SummaryTab({
           const secondaryStored = styleProfile?.style_labels_secondary;
           const summaryStored = styleProfile?.matchmaker_summary;
           const lowNoteStored = styleProfile?.low_confidence_note;
+          const summaryDisplayText =
+            live?.matchmaker_summary?.trim() || summaryStored?.trim() || '';
           const primaryForDisplay = Array.isArray(primaryStored)
             ? primaryStored
             : Array.isArray(live?.primary)
@@ -2295,10 +2314,8 @@ function SummaryTab({
               {secondaryForDisplay.length > 0 ? (
                 <Text style={styles.blockText}>Secondary labels: {secondaryForDisplay.join(', ')}</Text>
               ) : null}
-              {(live?.matchmaker_summary || summaryStored) ? (
-                <Text style={styles.blockText}>
-                  Matchmaker summary: {live?.matchmaker_summary ?? summaryStored}
-                </Text>
+              {summaryDisplayText ? (
+                <Text style={styles.blockText}>Matchmaker summary: {summaryDisplayText}</Text>
               ) : null}
               {(lowNoteStored || live?.low_confidence_note) ? (
                 <Text style={styles.blockText}>Low confidence: {lowNoteStored ?? live?.low_confidence_note}</Text>

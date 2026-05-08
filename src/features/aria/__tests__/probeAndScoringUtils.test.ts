@@ -22,7 +22,14 @@ import {
   assistantContainsScenarioCCommitmentThresholdForcedLine,
   looksLikeScenarioCCommitmentThresholdAssistantPrompt,
   MOMENT_5_ACCOUNTABILITY_QUESTION_TEXT,
+  MOMENT_5_ACCOUNTABILITY_PROBE_WITH_GRIEF_ACK_TEXT,
   MOMENT_5_INEXPERIENCE_FALLBACK_QUESTION,
+  MOMENT_5_SPECIFICITY_REDIRECT_ALT_TEXT,
+  MOMENT_5_SPECIFICITY_REDIRECT_TEXT,
+  looksLikeMoment5AccountabilityProbeAssistantPrompt,
+  looksLikeMoment5SpecificityRedirectPrompt,
+  moment5PersonalNarrativeHasConcreteAnchor,
+  moment5ResponseContainsDeathDisclosure,
   hasMoment5TemporallySpecificMoment,
   MOMENT5_SPECIFIC_MOMENT_NEGATIVE_EXAMPLES,
   MOMENT5_SPECIFIC_MOMENT_POSITIVE_EXAMPLES,
@@ -299,6 +306,30 @@ describe('probeAndScoringUtils', () => {
     ).toBe(true);
   });
 
+  it('implicit interpretive read of Emma line (without exact quote) skips contempt probe', () => {
+    expect(
+      hasScenarioAQ1ContemptProbeCoverage(
+        'What Emma meant was a cutting, dismissive jab that shuts the conversation down.'
+      )
+    ).toBe(true);
+  });
+
+  it('Emma interpretive cue variants skip contempt probe when contempt-quality read is present', () => {
+    expect(
+      hasScenarioAQ1ContemptProbeCoverage(
+        "Emma's point was a loaded jab; that comment from Emma came across as a put-down."
+      )
+    ).toBe(true);
+  });
+
+  it('substantive interpretive read (pattern/accumulated frustration) skips contempt probe', () => {
+    expect(
+      hasScenarioAQ1ContemptProbeCoverage(
+        'It would appear that Emma has accumulated frustration over a current pattern in which Ryan prioritizes his family obligations above their relationship. Her statement, you made that very clear, suggests that this is not an isolated incident but rather a response to established behavior that she has tolerated for some time.'
+      )
+    ).toBe(true);
+  });
+
   it('long Ryan-centered Scenario A Q1 (incl. “Emma was upset” / family framing) still does not skip contempt probe', () => {
     const answer =
       "Ryan sounds like someone who has never had to put their partner first. The fact that they couldn't even see why Emma was upset says a lot about their emotional maturity. Some people just aren't capable of prioritizing their relationship over their family of origin and that's a real problem.";
@@ -474,6 +505,23 @@ describe('probeAndScoringUtils', () => {
       expect(evaluateMoment5AccountabilityProbe(answer).reason).toBe('explicit_self_accountability');
     });
 
+    it('does not fire for "I own my feelings / I did yell" ownership phrasing', () => {
+      const answer =
+        "Well, the conflict story I talked about before is kind of like we use that. So I get resolved by, I own my feelings and I did yell at him. But after I calmed down, I genuinely tried to understand his point of view and try to be open to his criticism.";
+      expect(moment5AnswerHasExplicitSelfAccountability(answer)).toBe(true);
+      expect(evaluateMoment5AccountabilityProbe(answer)).toEqual({
+        shouldProbe: false,
+        reason: 'explicit_self_accountability',
+      });
+    });
+
+    it('does not fire for take-ownership / out-of-line / assumptions phrasing', () => {
+      const answer =
+        'I took ownership of my side in it. I was out of line, I made assumptions, and I could have communicated better.';
+      expect(moment5AnswerHasExplicitSelfAccountability(answer)).toBe(true);
+      expect(evaluateMoment5AccountabilityProbe(answer).reason).toBe('explicit_self_accountability');
+    });
+
     it('does not fire for answers that are too short to evaluate', () => {
       expect(evaluateMoment5AccountabilityProbe('Yeah conflicts happen sometimes.')).toEqual({
         shouldProbe: false,
@@ -515,6 +563,158 @@ describe('probeAndScoringUtils', () => {
       expect(q).toContain('specific moment');
       expect(q).toContain('nothing surfaces');
       expect(q).not.toMatch(/^It can be anything/i);
+    });
+  });
+
+  describe('Moment 5 concrete narrative anchor (specificity redirect gate)', () => {
+    it('detects scripted specificity redirect assistant prompts', () => {
+      expect(looksLikeMoment5SpecificityRedirectPrompt(MOMENT_5_SPECIFICITY_REDIRECT_TEXT)).toBe(true);
+      expect(looksLikeMoment5SpecificityRedirectPrompt(MOMENT_5_SPECIFICITY_REDIRECT_ALT_TEXT)).toBe(true);
+      expect(looksLikeMoment5SpecificityRedirectPrompt('What was your part in how it unfolded?')).toBe(false);
+    });
+
+    it('treats generic second-person advice as lacking concrete anchor', () => {
+      expect(
+        moment5PersonalNarrativeHasConcreteAnchor(
+          'When you have a conflict you need to stay calm and listen. You should not escalate things and you need to hear the other person out.',
+        ),
+      ).toBe(false);
+    });
+
+    it('treats first-person process-only habits as lacking concrete anchor', () => {
+      expect(
+        moment5PersonalNarrativeHasConcreteAnchor(
+          'I usually try to address the issue directly and find a middle ground. I discuss how it made me feel and work through it calmly with people.',
+        ),
+      ).toBe(false);
+    });
+
+    it('accepts concrete relational + episode narrative', () => {
+      expect(
+        moment5PersonalNarrativeHasConcreteAnchor(
+          'Last month my partner and I had a fight about money. She said I was not pulling my weight and we argued for an hour before we talked it through.',
+        ),
+      ).toBe(true);
+    });
+
+    it('accepts my best friend + had an argument phrasing (not only we-had-a-fight)', () => {
+      expect(
+        moment5PersonalNarrativeHasConcreteAnchor(
+          "There was a time my best friend, my late best friend and I had an argument, not exactly sure what it was about but it was pretty serious at the time and we stopped talking to each other for a while. We stopped hanging out and texting but when I finally talked to him again it worked out; he passed away two years ago.",
+        ),
+      ).toBe(true);
+    });
+
+    it('returns false for very short answers', () => {
+      expect(moment5PersonalNarrativeHasConcreteAnchor('My friend was mad.')).toBe(false);
+    });
+
+    it('accepts extended kin + repair language', () => {
+      expect(
+        moment5PersonalNarrativeHasConcreteAnchor(
+          'My cousin and I blew up over money at Christmas and did not speak for months until we finally apologized and cleared the air sitting in her kitchen.',
+        ),
+      ).toBe(true);
+    });
+
+    it('accepts situational hooks without calendar dates', () => {
+      expect(
+        moment5PersonalNarrativeHasConcreteAnchor(
+          'That night my roommate ghosted me after I crossed a line trash-talking her boyfriend over text; we made up weeks later when she showed up at work.',
+        ),
+      ).toBe(true);
+    });
+
+    it('accepts someone i trusted + episode verbs', () => {
+      expect(
+        moment5PersonalNarrativeHasConcreteAnchor(
+          'Someone I trusted gave me the silent treatment for two weeks after I lied to them about something stupid at work, and it escalated until their partner intervened.',
+        ),
+      ).toBe(true);
+    });
+
+    it('accepts non-standard partner phrasing', () => {
+      expect(
+        moment5PersonalNarrativeHasConcreteAnchor(
+          'The guy I was seeing stonewalled me on the drive home right before the wedding trip and I walked away from the whole thing.',
+        ),
+      ).toBe(true);
+    });
+
+    it('accepts explicit long narrative lead with best-friend conflict arc (log regression)', () => {
+      expect(
+        moment5PersonalNarrativeHasConcreteAnchor(
+          "There was a time my best friend, my late best friend and I had an argument, not exactly sure what it was about, but it was pretty serious at the time. We stopped talking to each other for a while and stopped hanging out. We just kind of cut each other out, but what I got from that wasn't that he gave up on me, it was just that both of us were in a situation where we couldn't really fully be there and support each other, and we needed to find a way to be able to do that again for one another. It took a lot of self-reflection, took some tears, a lot of lonely nights without him, but when I finally built up the courage to talk to him again, I was like, hey man, I understand we didn't end our last conversation on the best of terms, and I just wanted to sit down and have a full clear mind, talk about what the issues were, and what we've done in the meantime to get through these things, and it worked out pretty well. I was the best man at his wedding, and I'm the godfather to his daughter. He passed away almost two years ago, and it's kind of hard to be here without him. I'm doing my best for the both of us.",
+        ),
+      ).toBe(true);
+    });
+  });
+
+  describe('Moment 5 death disclosure (grief ack before accountability probe)', () => {
+    it('detects scripted probe-with-grief assistant text', () => {
+      expect(looksLikeMoment5AccountabilityProbeAssistantPrompt(MOMENT_5_ACCOUNTABILITY_PROBE_WITH_GRIEF_ACK_TEXT)).toBe(
+        true,
+      );
+    });
+
+    it('flags explicit death and funeral language', () => {
+      expect(
+        moment5ResponseContainsDeathDisclosure(
+          'After my father passed away we argued constantly about the estate and who would host holidays. It went on for months.',
+        ),
+      ).toBe(true);
+      expect(
+        moment5ResponseContainsDeathDisclosure(
+          'We had a terrible fight at the funeral because she thought I was not stepping up for my brother.',
+        ),
+      ).toBe(true);
+    });
+
+    it('flags lost family member idioms', () => {
+      expect(
+        moment5ResponseContainsDeathDisclosure(
+          'When I lost my sister I shut down completely and my partner kept pushing me to talk until we exploded.',
+        ),
+      ).toBe(true);
+    });
+
+    it('flags lost partner when death cues appear', () => {
+      expect(
+        moment5ResponseContainsDeathDisclosure(
+          'I lost my partner when she died suddenly and we never resolved the last fight about money.',
+        ),
+      ).toBe(true);
+    });
+
+    it('flags Name died pattern', () => {
+      expect(
+        moment5ResponseContainsDeathDisclosure(
+          'Maria died two years ago and my cousin and I still blame each other for how Mom was cared for.',
+        ),
+      ).toBe(true);
+    });
+
+    it('does not flag relationship-metaphor death or estrangement without bereavement', () => {
+      expect(
+        moment5ResponseContainsDeathDisclosure(
+          'It felt like the death of the relationship when she walked out but nobody died.',
+        ),
+      ).toBe(false);
+      expect(
+        moment5ResponseContainsDeathDisclosure(
+          'I lost them after we broke up and they blocked me — pure estrangement, messy but not bereavement.',
+        ),
+      ).toBe(false);
+      expect(
+        moment5ResponseContainsDeathDisclosure(
+          'They are dead to me now after what they pulled and we still fight through lawyers.',
+        ),
+      ).toBe(false);
+      expect(
+        moment5ResponseContainsDeathDisclosure(
+          'I lost my boyfriend when he moved across the country and stopped answering texts.',
+        ),
+      ).toBe(false);
     });
   });
 });

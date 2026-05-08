@@ -1,7 +1,10 @@
 /**
  * Programmatic caps complement LLM rubric {@link ELABORATION_ABSENCE_SCENARIO_MARKERS}.
  */
-import { sliceTranscriptBeforeScenarioCToPersonalHandoff } from './probeAndScoringUtils';
+import {
+  evidenceAbsentForResponseDepthModifier,
+  sliceTranscriptBeforeScenarioCToPersonalHandoff,
+} from './probeAndScoringUtils';
 
 const INTERNAL_STATE_CUES =
   /\b(feel|felt|feeling|feels|afraid|fear|feared|scared|hurt|hurting|need|needs|lonely|ashamed|overwhelm|vulnerable|embarrassed|wonder(?:ed|ing)?|maybe (?:he|she|they)|what (?:might|could|does)|internal|subjectively)\b/i;
@@ -86,6 +89,24 @@ function subtractOne(
   keyEvidence[marker] = mergeEvidence(keyEvidence[marker], note);
 }
 
+function maybeSubtractOneForShortSliceInsufficientEvidence(
+  pillarScores: Record<string, number | null | undefined>,
+  keyEvidence: Record<string, string>,
+  marker: string,
+  avgWordsPerUserTurn: number,
+  /** Model keyEvidence before programmatic ceilings / merges — avoids treating ceiling notes as substantive evidence. */
+  modelEvidenceBeforeHeuristic: Record<string, string | undefined>,
+): void {
+  if (!(avgWordsPerUserTurn > 0 && avgWordsPerUserTurn < 35)) return;
+  if (!evidenceAbsentForResponseDepthModifier(modelEvidenceBeforeHeuristic[marker])) return;
+  subtractOne(
+    pillarScores,
+    keyEvidence,
+    marker,
+    `Response-depth modifier: short response with insufficient evidence for ${marker} (−1)`,
+  );
+}
+
 export function computeAvgUserWordsPerTurnScenario(
   messages: Array<{ role?: string; content?: string; scenarioNumber?: number } | null | undefined>,
   scenarioNum: 1 | 2 | 3,
@@ -141,6 +162,7 @@ export function applyElaborationAbsencePenaltiesToScenarioScores(
 ): { pillarScores: Record<string, number | null | undefined>; keyEvidence: Record<string, string> } {
   const ps: Record<string, number | null | undefined> = { ...pillarScores };
   const ke: Record<string, string> = { ...(keyEvidence ?? {}) };
+  const depthEvidenceBaseline: Record<string, string | undefined> = { ...ke };
   const t = userTurnsJoinedText.replace(/\s+/g, ' ').trim();
 
   if (DIAGNOSTIC_TYPING_PATTERN.test(t) && !INTERNAL_STATE_CUES.test(t)) {
@@ -187,21 +209,9 @@ export function applyElaborationAbsencePenaltiesToScenarioScores(
   annotateMissingLevelTag(ke, 'mentalizing');
   annotateMissingLevelTag(ke, 'attunement');
 
-  if (avgWordsPerUserTurn > 0 && avgWordsPerUserTurn < 35) {
-    subtractOne(
-      ps,
-      ke,
-      'mentalizing',
-      'Response-depth modifier: avg user words per turn <35 in this slice (−1 mentalizing).',
-    );
-    subtractOne(
-      ps,
-      ke,
-      'attunement',
-      'Response-depth modifier: avg user words per turn <35 in this slice (−1 attunement).',
-    );
-    subtractOne(ps, ke, 'repair', 'Response-depth modifier: avg user words per turn <35 in this slice (−1 repair).');
-  }
+  maybeSubtractOneForShortSliceInsufficientEvidence(ps, ke, 'mentalizing', avgWordsPerUserTurn, depthEvidenceBaseline);
+  maybeSubtractOneForShortSliceInsufficientEvidence(ps, ke, 'attunement', avgWordsPerUserTurn, depthEvidenceBaseline);
+  maybeSubtractOneForShortSliceInsufficientEvidence(ps, ke, 'repair', avgWordsPerUserTurn, depthEvidenceBaseline);
 
   return { pillarScores: ps, keyEvidence: ke };
 }
@@ -215,26 +225,21 @@ export function applyElaborationAbsencePenaltiesMoment4(
 ): { pillarScores: Record<string, number | null | undefined>; keyEvidence: Record<string, string> } {
   const ps: Record<string, number | null | undefined> = { ...pillarScores };
   const ke: Record<string, string> = { ...(keyEvidence ?? {}) };
+  const depthEvidenceBaseline: Record<string, string | undefined> = { ...ke };
 
   if (meta?.lowSpecificityAfterProbe === true) {
     capAt(ps, ke, 'mentalizing', 5, 'Moment 4 low specificity — insufficient personal narrative signal.');
     capAt(ps, ke, 'accountability', 4, 'Moment 4 low specificity — insufficient personal narrative signal.');
   }
 
-  if (avgWordsPerTurnInSlice > 0 && avgWordsPerTurnInSlice < 35) {
-    subtractOne(
-      ps,
-      ke,
-      'mentalizing',
-      'Response-depth modifier: avg user words per turn <35 in Moment 4 (−1 mentalizing).',
-    );
-    subtractOne(
-      ps,
-      ke,
-      'accountability',
-      'Response-depth modifier: avg user words per turn <35 in Moment 4 (−1 accountability).',
-    );
-  }
+  maybeSubtractOneForShortSliceInsufficientEvidence(ps, ke, 'mentalizing', avgWordsPerTurnInSlice, depthEvidenceBaseline);
+  maybeSubtractOneForShortSliceInsufficientEvidence(
+    ps,
+    ke,
+    'accountability',
+    avgWordsPerTurnInSlice,
+    depthEvidenceBaseline,
+  );
 
   return { pillarScores: ps, keyEvidence: ke };
 }
@@ -250,6 +255,7 @@ export function applyElaborationAbsencePenaltiesMoment5(
 ): { pillarScores: Record<string, number | null | undefined>; keyEvidence: Record<string, string> } {
   const ps: Record<string, number | null | undefined> = { ...pillarScores };
   const ke: Record<string, string> = { ...(keyEvidence ?? {}) };
+  const depthEvidenceBaseline: Record<string, string | undefined> = { ...ke };
   const t = userTurnsJoinedText.replace(/\s+/g, ' ').trim();
 
   if (DIAGNOSTIC_TYPING_PATTERN.test(t) && !INTERNAL_STATE_CUES.test(t)) {
@@ -278,20 +284,8 @@ export function applyElaborationAbsencePenaltiesMoment5(
     );
   }
 
-  if (avgWordsPerTurnInSlice > 0 && avgWordsPerTurnInSlice < 35) {
-    subtractOne(
-      ps,
-      ke,
-      'mentalizing',
-      'Response-depth modifier: avg user words per turn <35 in Moment 5 (−1 mentalizing).',
-    );
-    subtractOne(
-      ps,
-      ke,
-      'repair',
-      'Response-depth modifier: avg user words per turn <35 in Moment 5 (−1 repair).',
-    );
-  }
+  maybeSubtractOneForShortSliceInsufficientEvidence(ps, ke, 'mentalizing', avgWordsPerTurnInSlice, depthEvidenceBaseline);
+  maybeSubtractOneForShortSliceInsufficientEvidence(ps, ke, 'repair', avgWordsPerTurnInSlice, depthEvidenceBaseline);
 
   return { pillarScores: ps, keyEvidence: ke };
 }

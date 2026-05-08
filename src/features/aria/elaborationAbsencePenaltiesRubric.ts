@@ -58,9 +58,11 @@ APPRECIATION (Scenario B) — wrong attunement failure + absolution (ceiling **6
 - If the participant proposes an appreciation-style repair **without first correctly identifying** what the **original attunement failure** was (e.g. James redirecting Sarah's tears / leading with logistics vs receiving her emotion), cap **appreciation at 6**.
 - If they **absolve the character of wrongdoing** in a way that erases the miss (e.g. "he did everything he could," "there was nothing else he could do" **before** naming what he could have done differently attunement-wise), cap **appreciation at 6**. High appreciation requires accurate recognition of the miss **and** genuine positive regard / repair direction.
 
-RESPONSE DEPTH MODIFIER (user turns in **this slice only**):
-- Compute **avg_response_length** = mean word count across **user** turns in this scenario slice (if not already computed). If **avg_response_length < 35**, apply a **−1 effective ceiling** on **mentalizing**, **attunement**, and **repair** only: reduce the numeric score by **1** (floor at 0), and note in keyEvidence: "Response-depth modifier: avg user words <35 in this slice (−1 to mentalizing/attunement/repair per absence policy)."
-- **Do not** apply this modifier to **contempt_expression**, **regulation**, or **commitment_threshold** — those do not depend on elaboration length to assess reliably.
+RESPONSE DEPTH MODIFIER (user turns in **this slice only**; **per marker**, after substantive scoring + keyEvidence):
+- Compute **avg_response_length** = mean word count across **user** turns in this scenario slice. For **each** of **mentalizing**, **attunement**, and **repair**, apply **−1** (floor at 0) **only if both**: (1) **avg_response_length < 35**, and (2) that marker's keyEvidence indicates **no assessable evidence** — e.g. empty, "insufficient evidence," "no assessable evidence," "response too brief to assess," or **Score recovered from model output** — **not** merely because the slice was short.
+- If keyEvidence for a marker cites a **specific observation, inference, or behavior** from the user's response, **do not** apply the modifier to that marker **even when** avg length is low.
+- When the modifier fires for a marker, append to that marker's keyEvidence: "Response-depth modifier: short response with insufficient evidence for [marker] (−1)". **Do not** add short-response notes when no penalty applies.
+- **Do not** apply this modifier to **contempt_expression**, **regulation**, or **commitment_threshold**.
 `;
 
 export const ELABORATION_ABSENCE_MOMENT4_MARKERS = `
@@ -68,14 +70,14 @@ MOMENT 4 — LOW SPECIFICITY (mentalizing & accountability ceilings):
 - When specificity is **low** — no real concrete personal example (only general philosophy, abstraction, or vague platitudes; or thin signal after the scripted specificity follow-up when one was delivered): cap **mentalizing at 5** and **accountability at 4** for this moment.
 - Low specificity means **insufficient signal** to treat the answer as a scored personal narrative; do not inflate because the topic sounds mature.
 
-RESPONSE DEPTH (Moment 4 slice):
-- Compute **avg_response_length** = mean word count across **user** turns in this moment slice. If **< 35**, apply **−1** to **mentalizing** and **accountability** (floor at 0) and note in keyEvidence. Does **not** apply to **contempt_expression** or **commitment_threshold** here.
+RESPONSE DEPTH (Moment 4 slice; **per marker**):
+- Same rule as scenarios: **−1** to **mentalizing** or **accountability** only when **avg_response_length < 35** **and** that marker's keyEvidence shows **no assessable evidence**; use the same keyEvidence suffix as scenario depth modifier. Does **not** apply to **contempt_expression** or **commitment_threshold** here.
 
 `;
 
 export const ELABORATION_ABSENCE_MOMENT5_MARKERS = `
 MOMENT 5 — same absence rules as scenarios where applicable:
-- **Mentalizing:** diagnostic/attachment labels without Level 2 interior → cap **5**; **Response depth:** if mean user words per turn in this slice <35, apply **−1** to **mentalizing** and **repair** only (not regulation or contempt_expression).
+- **Mentalizing:** diagnostic/attachment labels without Level 2 interior → cap **5**; **Response depth:** **−1** to **mentalizing** or **repair** only when avg user words per turn **< 35** **and** that marker's keyEvidence lacks assessable evidence (same per-marker rule as scenarios).
 - **Repair:** logistics-only “fix” without emotional pattern/rupture → cap **5** when that is the only move.
 
 `;

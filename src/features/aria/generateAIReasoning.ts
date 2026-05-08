@@ -332,6 +332,9 @@ export type GenerateAIReasoningOptions = {
   maxAttempts?: number;
 };
 
+/** One fetch attempt to Anthropic (direct or via `anthropic-proxy`); long prompts + max_tokens need headroom. */
+export const DEFAULT_AI_REASONING_PER_ATTEMPT_TIMEOUT_MS = 140_000;
+
 export async function generateAIReasoning(
   pillarScores: Record<string, number>,
   scenarioScores: Record<number, { pillarScores: Record<string, number | null>; scenarioName?: string } | undefined>,
@@ -344,8 +347,16 @@ export async function generateAIReasoning(
   const apiUrl = getAnthropicEndpoint();
   const useProxy = apiUrl !== 'https://api.anthropic.com/v1/messages';
   const headers: Record<string, string> = { 'Content-Type': 'application/json' };
-  if (useProxy && SUPABASE_ANON_KEY) {
-    headers['Authorization'] = `Bearer ${SUPABASE_ANON_KEY}`;
+  if (useProxy) {
+    const anon = SUPABASE_ANON_KEY?.trim();
+    if (!anon) {
+      throw new Error(
+        'AI reasoning via anthropic-proxy requires EXPO_PUBLIC_SUPABASE_ANON_KEY in the client bundle (missing). Rebuild the admin app with env vars set.'
+      );
+    }
+    /** Supabase Functions gateway expects both — omitting `apikey` can yield opaque browser "Failed to fetch" on some gateways. */
+    headers['Authorization'] = `Bearer ${anon}`;
+    headers['apikey'] = anon;
   } else if (!useProxy) {
     headers['x-api-key'] = ANTHROPIC_API_KEY;
     headers['anthropic-version'] = '2023-06-01';
@@ -368,7 +379,8 @@ export async function generateAIReasoning(
   };
 
   /** One fetch attempt should not block indefinitely; proxies can hang without closing the socket. */
-  const REASONING_FETCH_PER_ATTEMPT_TIMEOUT_MS = options?.perAttemptTimeoutMs ?? 90_000;
+  const REASONING_FETCH_PER_ATTEMPT_TIMEOUT_MS =
+    options?.perAttemptTimeoutMs ?? DEFAULT_AI_REASONING_PER_ATTEMPT_TIMEOUT_MS;
   const maxAttempts = options?.maxAttempts ?? 4;
   let lastErr: Error | null = null;
   let response: Response | null = null;

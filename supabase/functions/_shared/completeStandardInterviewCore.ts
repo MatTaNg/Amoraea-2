@@ -344,8 +344,11 @@ export async function runCompleteStandardInterview(
       gate.weightedScore,
       gate.pass,
       [],
-      null,
-      { perAttemptTimeoutMs: 40_000, maxAttempts: 2 }
+      {
+        /** One attempt fits Supabase Edge ~150s wall clock; retries would risk 504. */
+        perAttemptTimeoutMs: 140_000,
+        maxAttempts: 1,
+      },
     )) as unknown as typeof reasoning;
   } catch (e) {
     reasoning = {

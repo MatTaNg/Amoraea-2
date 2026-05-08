@@ -48,11 +48,14 @@ import {
   getMetaCommentCanonicalResponseSummary,
   getPriorSubstantiveNonMetaUserContentInMoment,
   hadPriorSubstantiveAnswerInScenarioForFrustration,
+  isCheckingInFrustrationAdjacent,
   lastSubstantivePriorUserExcerptInScenario,
   looksLikeFrustrationSkipAcceptance,
   looksLikeFrustrationSkipConfirmationAffirmative,
   looksLikeProactiveScenarioSkipRequest,
   looksLikeSkipConfirmationDecline,
+  looksLikeSkipConfirmationConnectivityGreeting,
+  SKIP_CONFIRMATION_GREETING_REOPEN_LINE,
   resolveMetaCommentForInterviewTurn,
   type MetaCommentClassification,
 } from '@features/aria/metaCommentClassification';
@@ -277,7 +280,11 @@ import {
   analyzeLanguageMarkers,
   buildScenarioBoundaries,
 } from '@features/aria/alphaAssessmentUtils';
-import { classifyAIReasoningRequestError, generateAIReasoning } from '@features/aria/generateAIReasoning';
+import {
+  classifyAIReasoningRequestError,
+  DEFAULT_AI_REASONING_PER_ATTEMPT_TIMEOUT_MS,
+  generateAIReasoning,
+} from '@features/aria/generateAIReasoning';
 import type { TtsTelemetrySource } from '@features/aria/telemetry/tsAutoplayTelemetry';
 import { useAudioRecorder } from '@features/aria/hooks/useAudioRecorder';
 import {
@@ -348,6 +355,7 @@ import {
   type PersonalMomentSliceForSanitize,
 } from '@features/aria/personalMomentSliceSanitize';
 import {
+  debugScenarioAQ1ContemptProbeCoverageDetail,
   hasScenarioAQ1ContemptProbeCoverage,
   hasScenarioBQ1OnTopicEngagement,
   extractScenario3UserCorpusAfterLastRepairPrompt,
@@ -362,9 +370,15 @@ import {
   sliceTranscriptBeforeScenarioCToPersonalHandoff,
   MOMENT_5_ACCOUNTABILITY_QUESTION_TEXT,
   MOMENT_5_ACCOUNTABILITY_PROBE_TEXT,
+  MOMENT_5_ACCOUNTABILITY_PROBE_WITH_GRIEF_ACK_TEXT,
+  MOMENT_5_PERSISTENT_ABSTRACT_MOVE_ON_TEXT,
+  MOMENT_5_SPECIFICITY_REDIRECT_TEXT,
   evaluateMoment5AccountabilityProbe,
   looksLikeMoment5AccountabilityProbeAssistantPrompt,
+  looksLikeMoment5SpecificityRedirectPrompt,
   isMoment5AssistantAnchor,
+  moment5PersonalNarrativeHasConcreteAnchor,
+  moment5ResponseContainsDeathDisclosure,
   transcriptAssistantContainsMoment5PrimaryConflictQuestion,
 } from '@features/aria/probeAndScoringUtils';
 import { fullScenarioReconciliation } from '@features/aria/reconcileScenarioScoresTranscript';
@@ -406,6 +420,26 @@ if (typeof fetch !== 'undefined') {
       timestamp: Date.now(),
       hypothesisId: 'H3',
       runId: 'pre-fix',
+    }),
+  }).catch(() => {});
+}
+// #endregion
+
+// #region agent log
+if (typeof fetch !== 'undefined') {
+  fetch('http://127.0.0.1:7789/ingest/668e0bd5-3283-4492-9f48-e33846c18218', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'X-Debug-Session-Id': '7605c3' },
+    body: JSON.stringify({
+      sessionId: '7605c3',
+      runId: 'resume-debug',
+      hypothesisId: 'H6_BUNDLE_STALE_OR_RESUME_PRE_HANDLER',
+      location: 'AriaScreen.tsx:after-imports',
+      message: 'aria_module_evaluated_for_scenario_a_resume_debug',
+      data: {
+        platform: typeof navigator !== 'undefined' ? String(navigator.userAgent).slice(0, 160) : 'no-ua',
+      },
+      timestamp: Date.now(),
     }),
   }).catch(() => {});
 }
@@ -2548,7 +2582,8 @@ async function generateAIReasoningSafe(
         transcript,
         weightedScore,
         passed,
-        unassessedMarkers
+        unassessedMarkers,
+        { perAttemptTimeoutMs: DEFAULT_AI_REASONING_PER_ATTEMPT_TIMEOUT_MS }
       );
     } catch (err) {
       lastErr = err;
@@ -3727,6 +3762,14 @@ ${SCORING_CONFIDENCE_INSTRUCTIONS}
 
 ${CONTEMPT_TIER_BREAKDOWN_JSON_INSTRUCTION}
 
+OUTPUT CONTRACT (STRICT):
+- Respond with exactly one top-level JSON object.
+- Response must start with "{" and end with "}".
+- Do not include markdown fences, prose, analysis text, or comments.
+- Do not wrap output under alternate keys like "scorecard", "scores", "result", or "data".
+- Use exactly these top-level keys: scenarioNumber, scenarioName, pillarScores, pillarConfidence, keyEvidence, contempt_tier_breakdown, specificity, repairCoherenceIssue.
+- Include every marker in pillarScores/pillarConfidence/keyEvidence for this scenario.
+
 Return ONLY valid JSON:
 {
   "scenarioNumber": ${scenarioNumber},
@@ -4300,6 +4343,7 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
 
   const scrollViewRef = useRef<ScrollView | null>(null);
   const hasResumedRef = useRef(false);
+  const transcriptScenarioLogCursorRef = useRef(0);
 
   // Alpha: Layer 1 timing and probe tracking
   const timingRef = useRef<{
@@ -4392,6 +4436,8 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
   const moment5PostPromptUserTurnCountRef = useRef(0);
   /** At most one accountability probe for Moment 5. */
   const moment5AccountabilityProbeFiredRef = useRef(false);
+  /** Client issued the abstract-first specificity redirect (at most once before accountability). */
+  const moment5SpecificityRedirectIssuedRef = useRef(false);
   /** Passed into Moment 5 scoring + scenario_specific_patterns. */
   const moment5ClientScoringMetaRef = useRef<Moment5ClientScoringMetadata | null>(null);
   /** Ensures at most one client-injected M4→M5 bridge per session (backup when model omits). */
@@ -4460,6 +4506,7 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
     moment5PrimaryAnchorDeliveredSessionRef.current = false;
     moment5PostPromptUserTurnCountRef.current = 0;
     moment5AccountabilityProbeFiredRef.current = false;
+    moment5SpecificityRedirectIssuedRef.current = false;
     moment5ClientScoringMetaRef.current = null;
     deferredMoment4NarrativeRef.current = null;
     resetScenarioCClientGatesOnly();
@@ -4487,7 +4534,67 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
     resumeActiveScenarioRef.current = null;
     resumeWelcomeMessageRef.current = RESUME_WELCOME_BACK_MESSAGE;
     pendingScenarioIntroAfterResumeWelcomeRef.current = null;
+    transcriptScenarioLogCursorRef.current = 0;
   }, [userId, resetScenarioCClientGatesOnly]);
+
+  useEffect(() => {
+    if (!userId) {
+      transcriptScenarioLogCursorRef.current = messages.length;
+      return;
+    }
+    const start = transcriptScenarioLogCursorRef.current;
+    if (messages.length < start) {
+      transcriptScenarioLogCursorRef.current = messages.length;
+      return;
+    }
+    if (messages.length === start) return;
+    const appended = messages.slice(start);
+    appended.forEach((m, i) => {
+      if (m.role !== 'assistant' && m.role !== 'user') return;
+      const msg = m as MessageWithScenario;
+      const scenarioNumber =
+        typeof msg.scenarioNumber === 'number' && [1, 2, 3].includes(msg.scenarioNumber)
+          ? msg.scenarioNumber
+          : null;
+      const interviewMoment =
+        typeof msg.interviewMoment === 'number'
+          ? msg.interviewMoment
+          : currentInterviewMomentRef.current;
+      const content = String(msg.content ?? '');
+      const delivery_source =
+        m.role === 'user'
+          ? 'user_input'
+          : (
+              isMoment5AssistantAnchor(content) ||
+              looksLikeMoment5AccountabilityProbeAssistantPrompt(content) ||
+              looksLikeMoment4ThresholdQuestion(content) ||
+              looksLikeMoment4SpecificityFollowUpPrompt(content) ||
+              looksLikeMoment4GrudgePrompt(content)
+            )
+            ? 'client_inject'
+            : 'api_response';
+      void remoteLog('transcript_scenario_number_assigned', {
+        turn_role: m.role,
+        scenarioNumber,
+        interviewMoment,
+        delivery_source,
+        transcript_index: start + i,
+      });
+    });
+    transcriptScenarioLogCursorRef.current = messages.length;
+  }, [messages, userId]);
+
+  const resolveAssistantScenarioNumber = useCallback(
+    (content: string, prev: MessageWithScenario[]): 1 | 2 | 3 => {
+      if (currentInterviewMomentRef.current >= 4) return 3;
+      const detected = detectScenarioFromResponse(content);
+      if (detected != null) return detected;
+      if (currentInterviewMomentRef.current === 3 && isScenarioCQ1Prompt(content)) return 3;
+      const inferred = getScenarioNumberForNewMessage(prev, 'assistant', content);
+      return (inferred === 1 || inferred === 2 || inferred === 3 ? inferred : 1) as 1 | 2 | 3;
+    },
+    []
+  );
 
   const deleteTurnAudioFile = useCallback(async (nativeUri: string | null) => {
     if (!nativeUri || Platform.OS === 'web') return;
@@ -4669,6 +4776,8 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
     | 'already_answered_meta'
     | null
   >(null);
+  /** Any prior `skip_request` meta classification in this interview moment — suppresses generic short elaboration probe. */
+  const skipRequestClassificationSeenByMomentRef = useRef<Record<number, boolean>>({});
   /** Next scenario score merge forces null markers (not zero) when user skipped after frustration offer. */
   const scenarioFrustrationSkipNullMarkersRef = useRef<Partial<Record<1 | 2 | 3, boolean>>>({});
   /** One-shot system suffix after skip acceptance — consumed when building the next Anthropic request. */
@@ -7163,6 +7272,7 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
               body: JSON.stringify({
                 model: 'claude-sonnet-4-20250514',
                 max_tokens: 800,
+                temperature: 0,
                 messages: [
                   {
                     role: 'user',
@@ -7619,6 +7729,16 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
       substantive_question_delivery_seq: substantiveInterviewQuestionDeliveredSeqRef.current,
     });
     let metaCommentClassification = metaResolved.effective;
+    let skipConfirmationGreetingReconnectInjection = false;
+    if (
+      isInterviewAppRoute &&
+      !isAdmin &&
+      frustrationSkipAwaitingConfirmationRef.current &&
+      looksLikeSkipConfirmationConnectivityGreeting(trimmed)
+    ) {
+      metaCommentClassification = { type: 'ambiguous_short', confidence: 0.42 };
+      skipConfirmationGreetingReconnectInjection = true;
+    }
     const momentNumMeta = currentInterviewMomentRef.current;
     let userScenarioTagForMeta =
       (currentScenarioRef.current as number | undefined) ??
@@ -7660,6 +7780,13 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
       userScenarioTagForMeta as 1 | 2 | 3,
       momentNumMeta
     );
+    const checkingInFrustrationAdjacent =
+      metaCommentClassification?.type === 'checking_in'
+        ? isCheckingInFrustrationAdjacent({
+            checkingInText: trimmed,
+            priorSubstantiveText: priorNonMetaExcerptForSkip,
+          })
+        : false;
     const skipRequestConfirmationSpeech = buildSkipRequestConfirmationSpeech({
       priorSubstantiveNonMetaExcerpt: priorNonMetaExcerptForSkip,
     });
@@ -7706,6 +7833,13 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
       proactiveScenarioSkipConfirmationInjection
     ) {
       metaCommentClassification = null;
+    }
+    if (metaClassSnapshotPrePipeline?.type === 'skip_request') {
+      const mSkipSeen = currentInterviewMomentRef.current;
+      skipRequestClassificationSeenByMomentRef.current = {
+        ...skipRequestClassificationSeenByMomentRef.current,
+        [mSkipSeen]: true,
+      };
     }
     const metaForTelemetry = metaCommentClassification;
     const skipRequestMetaConfirmationInjection =
@@ -7757,7 +7891,9 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
       const r = getSessionLogRuntime();
       const summary = getMetaCommentCanonicalResponseSummary(
         metaForTelemetry.type,
-        repeatedFrustrationInMoment && metaForTelemetry.type === 'frustration'
+        repeatedFrustrationInMoment && metaForTelemetry.type === 'frustration',
+        metaForTelemetry.type === 'confusion' ? metaForTelemetry.confusion_subtype : undefined,
+        metaForTelemetry.type === 'checking_in' ? checkingInFrustrationAdjacent : undefined
       );
       writeSessionLog({
         userId,
@@ -7771,6 +7907,9 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
           classification_confidence: metaForTelemetry.confidence,
           aira_response_delivered: summary,
           repeated_frustration: repeatedFrustrationInMoment,
+          ...(metaForTelemetry.type === 'confusion' && metaForTelemetry.confusion_subtype
+            ? { confusion_subtype: metaForTelemetry.confusion_subtype }
+            : {}),
           ...(metaForTelemetry.type === 'inability'
             ? {
                 inability_count_in_moment: inabilityCountInMomentLog,
@@ -7785,6 +7924,14 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
                     ? 'ownership_and_advance'
                     : 'frustration_path',
                 skip_consumed: false,
+              }
+            : {}),
+          ...(metaForTelemetry.type === 'checking_in'
+            ? {
+                checking_in_frustration_adjacent: checkingInFrustrationAdjacent,
+                ...(checkingInFrustrationAdjacent
+                  ? { pivot_reason: 'frustration_adjacent_checking_in' }
+                  : {}),
               }
             : {}),
         },
@@ -7836,6 +7983,36 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
     }
 
     if (resumeRepeatChoicePendingRef.current) {
+      void remoteLog('[S1_RESUME_GATE_ENTRY_DEBUG_7605c3]', {
+        userCoverageDetail: debugScenarioAQ1ContemptProbeCoverageDetail(trimmed),
+        lastAssistantLooksLikeContemptProbe: looksLikeScenarioAContemptProbeQuestion(
+          resumeLastAssistantTextRef.current ?? ''
+        ),
+        lastAssistantPreview: (resumeLastAssistantTextRef.current ?? '').slice(0, 300),
+        userPreview: trimmed.slice(0, 300),
+      });
+      // #region agent log
+      fetch('http://127.0.0.1:7789/ingest/668e0bd5-3283-4492-9f48-e33846c18218', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'X-Debug-Session-Id': '7605c3' },
+        body: JSON.stringify({
+          sessionId: '7605c3',
+          runId: 'resume-debug',
+          hypothesisId: 'H7_RESUME_GATE_REPLAY,H8_DIRECT_ANSWER_MISCLASSIFIED',
+          location: 'AriaScreen.tsx:processUserSpeech:resume_gate_entry',
+          message: 'scenario_a_resume_gate_entry',
+          data: {
+            userCoverageDetail: debugScenarioAQ1ContemptProbeCoverageDetail(trimmed),
+            lastAssistantLooksLikeContemptProbe: looksLikeScenarioAContemptProbeQuestion(
+              resumeLastAssistantTextRef.current ?? ''
+            ),
+            lastAssistantPreview: (resumeLastAssistantTextRef.current ?? '').slice(0, 300),
+            userPreview: trimmed.slice(0, 300),
+          },
+          timestamp: Date.now(),
+        }),
+      }).catch(() => {});
+      // #endregion
       // #region agent log
       fetch('http://127.0.0.1:7789/ingest/668e0bd5-3283-4492-9f48-e33846c18218', {
         method: 'POST',
@@ -7872,6 +8049,38 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
       }
       const directAnswer = intent === 'ambiguous' && looksLikeDirectResumeAnswer(trimmed, resumeLastAssistantTextRef.current);
       const inferredRepeatFromAmbiguous = intent === 'ambiguous' && !directAnswer && looksLikeRepeatCueInAmbiguousReply(trimmed);
+      void remoteLog('[S1_RESUME_GATE_CLASSIFICATION_DEBUG_7605c3]', {
+        intent,
+        directAnswer,
+        inferredRepeatFromAmbiguous,
+        resumeCueWordCount,
+        lastAssistantLooksLikeContemptProbe: looksLikeScenarioAContemptProbeQuestion(
+          resumeLastAssistantTextRef.current ?? ''
+        ),
+      });
+      // #region agent log
+      fetch('http://127.0.0.1:7789/ingest/668e0bd5-3283-4492-9f48-e33846c18218', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'X-Debug-Session-Id': '7605c3' },
+        body: JSON.stringify({
+          sessionId: '7605c3',
+          runId: 'resume-debug',
+          hypothesisId: 'H7_RESUME_GATE_REPLAY,H8_DIRECT_ANSWER_MISCLASSIFIED',
+          location: 'AriaScreen.tsx:processUserSpeech:resume_gate_classification',
+          message: 'scenario_a_resume_gate_classification',
+          data: {
+            intent,
+            directAnswer,
+            inferredRepeatFromAmbiguous,
+            resumeCueWordCount,
+            lastAssistantLooksLikeContemptProbe: looksLikeScenarioAContemptProbeQuestion(
+              resumeLastAssistantTextRef.current ?? ''
+            ),
+          },
+          timestamp: Date.now(),
+        }),
+      }).catch(() => {});
+      // #endregion
       // #region agent log
       fetch('http://127.0.0.1:7789/ingest/668e0bd5-3283-4492-9f48-e33846c18218', {
         method: 'POST',
@@ -8434,6 +8643,35 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
     }
 
     if (
+      skipConfirmationGreetingReconnectInjection &&
+      isInterviewAppRoute &&
+      !isAdmin &&
+      status === 'active'
+    ) {
+      let tagGre =
+        (currentScenarioRef.current as number | undefined) ??
+        getScenarioNumberForNewMessage(messagesToUse, 'user');
+      const momentGre = currentInterviewMomentRef.current;
+      if (momentGre >= 4) {
+        tagGre = 3;
+      }
+      const tagForMsg = (tagGre >= 1 && tagGre <= 3 ? tagGre : 1) as 1 | 2 | 3;
+      const reopenMsg: MessageWithScenario = {
+        role: 'assistant',
+        content: SKIP_CONFIRMATION_GREETING_REOPEN_LINE,
+        scenarioNumber: tagForMsg,
+      };
+      setMessages([...messagesToUse, reopenMsg]);
+      await speakTextSafe(SKIP_CONFIRMATION_GREETING_REOPEN_LINE, {
+        ...ASSISTANT_INTERVIEW_SPEECH,
+        allowDuplicateConsecutiveTts: true,
+      });
+      setVoiceState('idle');
+      setIsWaiting(false);
+      return;
+    }
+
+    if (
       inabilityInvitationClientInjection &&
       isInterviewAppRoute &&
       !isAdmin &&
@@ -8864,7 +9102,7 @@ The participant **confirmed** skipping after the skip confirmation prompt. In **
       const specProbeMsg: MessageWithScenario = {
         role: 'assistant',
         content: MOMENT_4_SPECIFICITY_FOLLOW_UP_TEXT,
-        scenarioNumber: (currentScenarioRef.current ?? 3) as 1 | 2 | 3,
+        scenarioNumber: resolveAssistantScenarioNumber(MOMENT_4_SPECIFICITY_FOLLOW_UP_TEXT, messagesToUse),
       };
       setMessages([...messagesToUse, specProbeMsg]);
       await speakTextSafe(MOMENT_4_SPECIFICITY_FOLLOW_UP_TEXT, ASSISTANT_INTERVIEW_SPEECH);
@@ -8963,7 +9201,7 @@ The participant **confirmed** skipping after the skip confirmation prompt. In **
       const m5Msg: MessageWithScenario = {
         role: 'assistant',
         content: m5BundleSpoken,
-        scenarioNumber: (currentScenarioRef.current ?? 3) as 1 | 2 | 3,
+        scenarioNumber: resolveAssistantScenarioNumber(m5BundleSpoken, messagesToUse),
       };
       setMessages([...messagesToUse, m5Msg]);
       /** Persist before long TTS — otherwise a mid-line refresh can load storage without this row and `syncReferenceCardStateFromAssistantMessages` falls back to an older `?` (e.g. grudge). */
@@ -9063,18 +9301,157 @@ The participant **confirmed** skipping after the skip confirmation prompt. In **
       currentInterviewMomentRef.current === 5 &&
       moment5QuestionDeliveredRef.current &&
       !moment5AccountabilityProbeFiredRef.current &&
-      isMoment5AssistantAnchor(lastAssistantContent) &&
-      !looksLikeMoment5AccountabilityProbeAssistantPrompt(lastAssistantContent);
+      !looksLikeMoment5AccountabilityProbeAssistantPrompt(lastAssistantContent) &&
+      (isMoment5AssistantAnchor(lastAssistantContent) ||
+        looksLikeMoment5SpecificityRedirectPrompt(lastAssistantContent));
     const moment5AccountabilityEval = evaluateMoment5AccountabilityProbe(trimmed);
+    const moment5NarrativeConcrete = moment5PersonalNarrativeHasConcreteAnchor(trimmed);
+    const moment5AnsweringAfterSpecificityRedirect =
+      looksLikeMoment5SpecificityRedirectPrompt(lastAssistantContent);
+
+    if (currentInterviewMomentRef.current === 5 && moment5QuestionDeliveredRef.current) {
+      // #region agent log
+      fetch('http://127.0.0.1:7789/ingest/668e0bd5-3283-4492-9f48-e33846c18218', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'X-Debug-Session-Id': 'e43434' },
+        body: JSON.stringify({
+          sessionId: 'e43434',
+          runId: 'm5-anchor-debug',
+          hypothesisId: 'H1_runtime_branch_mismatch',
+          location: 'AriaScreen.tsx:processUserSpeech:moment5_gate',
+          message: 'm5_gate_snapshot',
+          data: {
+            versionTag: 'm5-anchor-debug-v2',
+            candidate: moment5AccountabilityProbeCandidate,
+            shouldProbe: moment5AccountabilityEval.shouldProbe,
+            probeReason: moment5AccountabilityEval.reason,
+            moment5NarrativeConcrete,
+            moment5AnsweringAfterSpecificityRedirect,
+            specificityRedirectIssued: moment5SpecificityRedirectIssuedRef.current,
+            wordCount: countInterviewWords(trimmed),
+            userPreview: trimmed.slice(0, 220),
+            lastAssistantPreview: lastAssistantContent.slice(0, 180),
+          },
+          timestamp: Date.now(),
+        }),
+      }).catch(() => {});
+      // #endregion
+    }
+
     if (moment5AccountabilityProbeCandidate && moment5AccountabilityEval.shouldProbe) {
+      if (!moment5NarrativeConcrete && !moment5AnsweringAfterSpecificityRedirect && !moment5SpecificityRedirectIssuedRef.current) {
+        // #region agent log
+        fetch('http://127.0.0.1:7789/ingest/668e0bd5-3283-4492-9f48-e33846c18218', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'X-Debug-Session-Id': 'e43434' },
+          body: JSON.stringify({
+            sessionId: 'e43434',
+            runId: 'm5-anchor-debug',
+            hypothesisId: 'H3_redirect_branch_taken',
+            location: 'AriaScreen.tsx:processUserSpeech:moment5_redirect_branch',
+            message: 'm5_specificity_redirect_path',
+            data: {
+              candidate: moment5AccountabilityProbeCandidate,
+              shouldProbe: moment5AccountabilityEval.shouldProbe,
+              moment5NarrativeConcrete,
+              moment5AnsweringAfterSpecificityRedirect,
+              specificityRedirectIssued: moment5SpecificityRedirectIssuedRef.current,
+              userPreview: trimmed.slice(0, 220),
+            },
+            timestamp: Date.now(),
+          }),
+        }).catch(() => {});
+        // #endregion
+        moment5SpecificityRedirectIssuedRef.current = true;
+        moment5ClientScoringMetaRef.current = {
+          ...(moment5ClientScoringMetaRef.current ?? {}),
+          accountabilityProbeFired: false,
+          specificityRedirectIssued: true,
+        };
+        void remoteLog('[M5_SPECIFICITY_REDIRECT_ISSUED]', {
+          interviewSessionId: interviewSessionIdRef.current,
+          wordCount: countInterviewWords(trimmed),
+          preview: trimmed.slice(0, 200),
+        });
+        const redirectMsg: MessageWithScenario = {
+          role: 'assistant',
+          content: MOMENT_5_SPECIFICITY_REDIRECT_TEXT,
+          scenarioNumber: resolveAssistantScenarioNumber(MOMENT_5_SPECIFICITY_REDIRECT_TEXT, messagesToUse),
+        };
+        setMessages([...messagesToUse, redirectMsg]);
+        await speakTextSafe(MOMENT_5_SPECIFICITY_REDIRECT_TEXT, ASSISTANT_INTERVIEW_SPEECH);
+        setVoiceState('idle');
+        setIsWaiting(false);
+        return;
+      }
+
+      if (
+        !moment5NarrativeConcrete &&
+        moment5AnsweringAfterSpecificityRedirect &&
+        moment5SpecificityRedirectIssuedRef.current
+      ) {
+        moment5ClientScoringMetaRef.current = {
+          ...(moment5ClientScoringMetaRef.current ?? {}),
+          accountabilityProbeFired: false,
+          specificityRedirectIssued: true,
+          persistentAbstractionMoveOn: true,
+        };
+        void remoteLog('[M5_PERSISTENT_ABSTRACT_MOVE_ON]', {
+          interviewSessionId: interviewSessionIdRef.current,
+          wordCount: countInterviewWords(trimmed),
+          preview: trimmed.slice(0, 200),
+        });
+        const moveOnMsg: MessageWithScenario = {
+          role: 'assistant',
+          content: MOMENT_5_PERSISTENT_ABSTRACT_MOVE_ON_TEXT,
+          scenarioNumber: resolveAssistantScenarioNumber(MOMENT_5_PERSISTENT_ABSTRACT_MOVE_ON_TEXT, messagesToUse),
+        };
+        setMessages([...messagesToUse, moveOnMsg]);
+        await speakTextSafe(MOMENT_5_PERSISTENT_ABSTRACT_MOVE_ON_TEXT, ASSISTANT_INTERVIEW_SPEECH);
+        setVoiceState('idle');
+        setIsWaiting(false);
+        return;
+      }
+
+      const griefAckProbe = moment5ResponseContainsDeathDisclosure(trimmed);
+      const accountabilityProbeSpoken = griefAckProbe
+        ? MOMENT_5_ACCOUNTABILITY_PROBE_WITH_GRIEF_ACK_TEXT
+        : MOMENT_5_ACCOUNTABILITY_PROBE_TEXT;
+      // #region agent log
+      fetch('http://127.0.0.1:7789/ingest/668e0bd5-3283-4492-9f48-e33846c18218', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'X-Debug-Session-Id': 'e43434' },
+        body: JSON.stringify({
+          sessionId: 'e43434',
+          runId: 'm5-anchor-debug',
+          hypothesisId: 'H4_probe_path_expected',
+          location: 'AriaScreen.tsx:processUserSpeech:moment5_probe_branch',
+          message: 'm5_accountability_probe_path',
+          data: {
+            candidate: moment5AccountabilityProbeCandidate,
+            shouldProbe: moment5AccountabilityEval.shouldProbe,
+            moment5NarrativeConcrete,
+            moment5AnsweringAfterSpecificityRedirect,
+            griefAckProbe,
+            userPreview: trimmed.slice(0, 220),
+          },
+          timestamp: Date.now(),
+        }),
+      }).catch(() => {});
+      // #endregion
       moment5AccountabilityProbeFiredRef.current = true;
       moment5ClientScoringMetaRef.current = {
+        ...(moment5ClientScoringMetaRef.current ?? {}),
         accountabilityProbeFired: true,
         probeTriggerReason: moment5AccountabilityEval.reason,
+        ...(moment5SpecificityRedirectIssuedRef.current ? { specificityRedirectIssued: true } : {}),
+        ...(griefAckProbe ? { griefAckBeforeAccountabilityProbe: true } : {}),
       };
       void remoteLog('[M5_ACCOUNTABILITY_PROBE_FIRED]', {
         interviewSessionId: interviewSessionIdRef.current,
         reason: moment5AccountabilityEval.reason,
+        after_specificity_redirect: moment5SpecificityRedirectIssuedRef.current,
+        grief_ack_before_probe: griefAckProbe,
         wordCount: countInterviewWords(trimmed),
         preview: trimmed.slice(0, 200),
       });
@@ -9089,11 +9466,11 @@ The participant **confirmed** skipping after the skip confirmation prompt. In **
       });
       const accountabilityProbeMsg: MessageWithScenario = {
         role: 'assistant',
-        content: MOMENT_5_ACCOUNTABILITY_PROBE_TEXT,
-        scenarioNumber: (currentScenarioRef.current ?? 3) as 1 | 2 | 3,
+        content: accountabilityProbeSpoken,
+        scenarioNumber: resolveAssistantScenarioNumber(accountabilityProbeSpoken, messagesToUse),
       };
       setMessages([...messagesToUse, accountabilityProbeMsg]);
-      await speakTextSafe(MOMENT_5_ACCOUNTABILITY_PROBE_TEXT, ASSISTANT_INTERVIEW_SPEECH);
+      await speakTextSafe(accountabilityProbeSpoken, ASSISTANT_INTERVIEW_SPEECH);
       setVoiceState('idle');
       setIsWaiting(false);
       return;
@@ -9115,6 +9492,50 @@ The participant **confirmed** skipping after the skip confirmation prompt. In **
       !isDecline(trimmed) &&
       !scenarioAContemptProbeCoverage &&
       !scenarioAContemptProbeAskedRef.current;
+    if (currentInterviewMomentRef.current === 1 || replyingToScenarioAQ1 || userScenarioTag === 1) {
+      void remoteLog('[S1_CONTEMPT_GATE_DEBUG_7605c3]', {
+        coverageDetail: debugScenarioAQ1ContemptProbeCoverageDetail(trimmed),
+        replyingToScenarioAQ1,
+        userScenarioTag,
+        currentInterviewMoment: currentInterviewMomentRef.current,
+        currentScenario: currentScenarioRef.current,
+        scenarioAContemptProbeAskedRef: scenarioAContemptProbeAskedRef.current,
+        suppressForcedConstructProbesForMetaFrustration,
+        isDecline: isDecline(trimmed),
+        shouldForceScenarioAContemptProbe,
+        lastAssistantLooksLikeContemptProbe: looksLikeScenarioAContemptProbeQuestion(lastAssistantContent),
+        lastAssistantPreview: lastAssistantContent.slice(0, 260),
+        userPreview: trimmed.slice(0, 320),
+      });
+      // #region agent log
+      fetch('http://127.0.0.1:7789/ingest/668e0bd5-3283-4492-9f48-e33846c18218', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'X-Debug-Session-Id': '7605c3' },
+        body: JSON.stringify({
+          sessionId: '7605c3',
+          runId: 'pre-fix',
+          hypothesisId: 'H1_ASR_OR_HELPER_FALSE_NEGATIVE,H2_STATE_MISMATCH,H5_RESUME_REF_NOT_HYDRATED',
+          location: 'AriaScreen.tsx:processUserSpeech:scenarioA_contempt_gate',
+          message: 'scenario_a_contempt_gate_snapshot',
+          data: {
+            coverageDetail: debugScenarioAQ1ContemptProbeCoverageDetail(trimmed),
+            replyingToScenarioAQ1,
+            userScenarioTag,
+            currentInterviewMoment: currentInterviewMomentRef.current,
+            currentScenario: currentScenarioRef.current,
+            scenarioAContemptProbeAskedRef: scenarioAContemptProbeAskedRef.current,
+            suppressForcedConstructProbesForMetaFrustration,
+            isDecline: isDecline(trimmed),
+            shouldForceScenarioAContemptProbe,
+            lastAssistantLooksLikeContemptProbe: looksLikeScenarioAContemptProbeQuestion(lastAssistantContent),
+            lastAssistantPreview: lastAssistantContent.slice(0, 260),
+            userPreview: trimmed.slice(0, 320),
+          },
+          timestamp: Date.now(),
+        }),
+      }).catch(() => {});
+      // #endregion
+    }
     const sidedEntirelyWithJames = userSidesEntirelyWithJames(trimmed);
     const scenarioBQ1Engaged = hasScenarioBQ1OnTopicEngagement(trimmed);
     const shouldForceScenarioBFullAppreciationProbe =
@@ -9229,6 +9650,8 @@ The participant **confirmed** skipping after the skip confirmation prompt. In **
           isExplicitDecline: isDecline(trimmed),
           isAssistantRecoveryOrMetaLine,
           isFirstUserTurnInScenario,
+          hadSkipRequestInThisMoment:
+            !!skipRequestClassificationSeenByMomentRef.current[currentInterviewMomentRef.current],
         });
 
         if (disengagePick) {
@@ -9322,6 +9745,14 @@ The participant **confirmed** skipping after the skip confirmation prompt. In **
                 metaCommentClassification.type === 'already_answered'
                   ? alreadyAnsweredPriorSubstantiveVerified === true
                   : undefined,
+              checkingInFrustrationAdjacent:
+                metaCommentClassification.type === 'checking_in'
+                  ? checkingInFrustrationAdjacent
+                  : undefined,
+              inMoment5AfterAccountabilityProbe:
+                metaCommentClassification.type === 'checking_in'
+                  ? currentInterviewMomentRef.current === 5 && moment5AccountabilityProbeFiredRef.current
+                  : undefined,
             })
           : '';
       metaClassificationForPendingAssistantRef.current = metaCommentClassification;
@@ -9392,6 +9823,37 @@ The participant **confirmed** skipping after the skip confirmation prompt. In **
         }),
       }).catch(() => {});
       // #endregion
+      if (currentInterviewMomentRef.current === 1 || replyingToScenarioAQ1 || userScenarioTag === 1) {
+        // #region agent log
+        fetch('http://127.0.0.1:7789/ingest/668e0bd5-3283-4492-9f48-e33846c18218', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'X-Debug-Session-Id': '7605c3' },
+          body: JSON.stringify({
+            sessionId: '7605c3',
+            runId: 'pre-fix',
+            hypothesisId: 'H2_STATE_MISMATCH,H3_MODEL_IGNORES_PROMPT,H5_RESUME_REF_NOT_HYDRATED',
+            location: 'AriaScreen.tsx:processUserSpeech:scenarioA_api_request',
+            message: 'scenario_a_api_request_snapshot',
+            data: {
+              messageCount: messagesToUse.length,
+              scenarioAContemptProbeAskedRef: scenarioAContemptProbeAskedRef.current,
+              currentInterviewMoment: currentInterviewMomentRef.current,
+              currentScenario: currentScenarioRef.current,
+              replyingToScenarioAQ1,
+              shouldForceScenarioAContemptProbe,
+              recentTranscript: messagesToUse.slice(-8).map((m) => ({
+                role: m.role,
+                scenarioNumber: m.scenarioNumber ?? null,
+                contentPreview: (m.content ?? '').slice(0, 320),
+                looksLikeContemptProbe:
+                  m.role === 'assistant' ? looksLikeScenarioAContemptProbeQuestion(m.content ?? '') : false,
+              })),
+            },
+            timestamp: Date.now(),
+          }),
+        }).catch(() => {});
+        // #endregion
+      }
       const requestBody = {
         model: 'claude-sonnet-4-20250514',
         max_tokens: maxTok,
@@ -10027,6 +10489,38 @@ The participant **confirmed** skipping after the skip confirmation prompt. In **
       currentInterviewMomentRef.current === 2 && looksLikeScenarioBJamesDifferentlyQuestion(strippedText);
     const assistantIssuedScenarioBRepairAsJames =
       currentInterviewMomentRef.current === 2 && looksLikeScenarioBRepairAsJamesQuestion(strippedText);
+    if (currentInterviewMomentRef.current === 1 || replyingToScenarioAQ1 || shouldForceScenarioAContemptProbe) {
+      void remoteLog('[S1_MODEL_OUTPUT_DEBUG_7605c3]', {
+        shouldForceScenarioAContemptProbe,
+        scenarioAContemptProbeAskedRef: scenarioAContemptProbeAskedRef.current,
+        assistantIssuedScenarioAContemptProbe,
+        assistantIssuedScenarioARepairQuestion,
+        assistantTurnPreview: strippedText.slice(0, 420),
+        modelRawPreview: text.slice(0, 420),
+      });
+      // #region agent log
+      fetch('http://127.0.0.1:7789/ingest/668e0bd5-3283-4492-9f48-e33846c18218', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'X-Debug-Session-Id': '7605c3' },
+        body: JSON.stringify({
+          sessionId: '7605c3',
+          runId: 'pre-fix',
+          hypothesisId: 'H3_MODEL_GENERATED_REASK,H4_CLIENT_FORCED_REASK,H5_RESUME_REF_NOT_HYDRATED',
+          location: 'AriaScreen.tsx:processUserSpeech:scenarioA_model_output',
+          message: 'scenario_a_model_output_snapshot',
+          data: {
+            shouldForceScenarioAContemptProbe,
+            scenarioAContemptProbeAskedRef: scenarioAContemptProbeAskedRef.current,
+            assistantIssuedScenarioAContemptProbe,
+            assistantIssuedScenarioARepairQuestion,
+            assistantTurnPreview: strippedText.slice(0, 420),
+            modelRawPreview: text.slice(0, 420),
+          },
+          timestamp: Date.now(),
+        }),
+      }).catch(() => {});
+      // #endregion
+    }
     {
       const beforeS3 = strippedText;
       strippedText = ensureScenario3VignetteOpening(strippedText);
@@ -10161,10 +10655,7 @@ The participant **confirmed** skipping after the skip confirmation prompt. In **
           currentScenarioRef.current = detectedScenario;
           void notifyScenarioStarted(detectedScenario);
         }
-        const scenarioNum =
-          currentScenarioRef.current ??
-          detectedScenario ??
-          getScenarioNumberForNewMessage(messagesToUse, 'assistant', strippedText);
+        const scenarioNum = resolveAssistantScenarioNumber(strippedText, messagesToUse);
         const aiMsg: MessageWithScenario = {
           role: 'assistant',
           content: strippedText,
@@ -10185,14 +10676,48 @@ The participant **confirmed** skipping after the skip confirmation prompt. In **
         specificEmmaLineAlreadyAddressed,
         assistantIssuedScenarioAContemptProbe,
       });
+      void remoteLog('[S1_CONTEMPT_FORCED_DEBUG_7605c3]', {
+        coverageDetail: debugScenarioAQ1ContemptProbeCoverageDetail(trimmed),
+        specificEmmaLineAlreadyAddressed,
+        assistantIssuedScenarioAContemptProbe,
+        assistantTurnIsElongatingProbeOnly,
+        modelTurnPreview: strippedText.slice(0, 320),
+        userPreview: trimmed.slice(0, 320),
+      });
+      // #region agent log
+      fetch('http://127.0.0.1:7789/ingest/668e0bd5-3283-4492-9f48-e33846c18218', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'X-Debug-Session-Id': '7605c3' },
+        body: JSON.stringify({
+          sessionId: '7605c3',
+          runId: 'pre-fix',
+          hypothesisId: 'H4_CLIENT_FORCED_REASK',
+          location: 'AriaScreen.tsx:processUserSpeech:scenarioA_forced_probe_branch',
+          message: 'scenario_a_client_forced_contempt_probe',
+          data: {
+            coverageDetail: debugScenarioAQ1ContemptProbeCoverageDetail(trimmed),
+            specificEmmaLineAlreadyAddressed,
+            assistantIssuedScenarioAContemptProbe,
+            assistantTurnIsElongatingProbeOnly,
+            wrappedProbePreview: wrapForcedProbeWithAck(
+              trimmed,
+              strippedText,
+              forcedContemptProbe,
+              recentAsstForAck
+            ).slice(0, 320),
+            modelTurnPreview: strippedText.slice(0, 320),
+            userPreview: trimmed.slice(0, 320),
+          },
+          timestamp: Date.now(),
+        }),
+      }).catch(() => {});
+      // #endregion
       scenarioAContemptProbeAskedRef.current = true;
       const wrappedContemptProbe = wrapForcedProbeWithAck(trimmed, strippedText, forcedContemptProbe, recentAsstForAck);
       const probeMsg: MessageWithScenario = {
         role: 'assistant',
         content: wrappedContemptProbe,
-        scenarioNumber:
-          currentScenarioRef.current ??
-          getScenarioNumberForNewMessage(stagedMessages, 'assistant', wrappedContemptProbe),
+          scenarioNumber: resolveAssistantScenarioNumber(wrappedContemptProbe, stagedMessages),
       };
       setMessages([...stagedMessages, probeMsg]);
       await speakTextSafe(wrappedContemptProbe, ASSISTANT_INTERVIEW_SPEECH);
@@ -10213,10 +10738,7 @@ The participant **confirmed** skipping after the skip confirmation prompt. In **
           currentScenarioRef.current = detectedScenario;
           void notifyScenarioStarted(detectedScenario);
         }
-        const scenarioNum =
-          currentScenarioRef.current ??
-          detectedScenario ??
-          getScenarioNumberForNewMessage(messagesToUse, 'assistant', strippedText);
+        const scenarioNum = resolveAssistantScenarioNumber(strippedText, messagesToUse);
         const aiMsg: MessageWithScenario = {
           role: 'assistant',
           content: strippedText,
@@ -10243,9 +10765,7 @@ The participant **confirmed** skipping after the skip confirmation prompt. In **
       const probeMsg: MessageWithScenario = {
         role: 'assistant',
         content: wrappedAppreciationProbe,
-        scenarioNumber:
-          currentScenarioRef.current ??
-          getScenarioNumberForNewMessage(stagedMessages, 'assistant', wrappedAppreciationProbe),
+          scenarioNumber: resolveAssistantScenarioNumber(wrappedAppreciationProbe, stagedMessages),
       };
       setMessages([...stagedMessages, probeMsg]);
       await speakTextSafe(wrappedAppreciationProbe, ASSISTANT_INTERVIEW_SPEECH);
@@ -10305,10 +10825,7 @@ The participant **confirmed** skipping after the skip confirmation prompt. In **
           currentScenarioRef.current = detectedScenario;
           void notifyScenarioStarted(detectedScenario);
         }
-        const scenarioNum =
-          currentScenarioRef.current ??
-          detectedScenario ??
-          getScenarioNumberForNewMessage(messagesToUse, 'assistant', bLeadIn);
+        const scenarioNum = resolveAssistantScenarioNumber(bLeadIn, messagesToUse);
         const aiMsg: MessageWithScenario = {
           role: 'assistant',
           content: bLeadIn,
@@ -10330,9 +10847,7 @@ The participant **confirmed** skipping after the skip confirmation prompt. In **
       const probeMsg: MessageWithScenario = {
         role: 'assistant',
         content: wrappedJamesProbe,
-        scenarioNumber:
-          currentScenarioRef.current ??
-          getScenarioNumberForNewMessage(stagedMessages, 'assistant', wrappedJamesProbe),
+        scenarioNumber: resolveAssistantScenarioNumber(wrappedJamesProbe, stagedMessages),
       };
       setMessages([...stagedMessages, probeMsg]);
       await speakTextSafe(wrappedJamesProbe, ASSISTANT_INTERVIEW_SPEECH);
@@ -10355,10 +10870,7 @@ The participant **confirmed** skipping after the skip confirmation prompt. In **
           currentScenarioRef.current = detectedScenario;
           void notifyScenarioStarted(detectedScenario);
         }
-        const scenarioNum =
-          currentScenarioRef.current ??
-          detectedScenario ??
-          getScenarioNumberForNewMessage(messagesToUse, 'assistant', strippedText);
+        const scenarioNum = resolveAssistantScenarioNumber(strippedText, messagesToUse);
         const aiMsg: MessageWithScenario = {
           role: 'assistant',
           content: strippedText,
@@ -10372,9 +10884,7 @@ The participant **confirmed** skipping after the skip confirmation prompt. In **
       const combinedMsg: MessageWithScenario = {
         role: 'assistant',
         content: forcedThresholdProbe,
-        scenarioNumber:
-          currentScenarioRef.current ??
-          getScenarioNumberForNewMessage(stagedMessages, 'assistant', forcedThresholdProbe),
+        scenarioNumber: resolveAssistantScenarioNumber(forcedThresholdProbe, stagedMessages),
       };
       stagedMessages = [...stagedMessages, combinedMsg];
       setMessages(stagedMessages);
@@ -10589,7 +11099,7 @@ The participant **confirmed** skipping after the skip confirmation prompt. In **
         const finalAssistant: MessageWithScenario = {
           role: 'assistant',
           content: displayText,
-          scenarioNumber: currentScenarioRef.current ?? getScenarioNumberForNewMessage(messagesToUse, 'assistant', displayText),
+          scenarioNumber: resolveAssistantScenarioNumber(displayText, messagesToUse),
         };
         const finalMessages = [...messagesToUse, finalAssistant];
         setMessages(finalMessages);
@@ -10884,7 +11394,7 @@ The participant **confirmed** skipping after the skip confirmation prompt. In **
       if (detectedScenario !== null) {
         currentScenarioRef.current = detectedScenario;
       }
-      const scenarioNum = currentScenarioRef.current ?? detectedScenario ?? getScenarioNumberForNewMessage(messagesToUse, 'assistant', displayText);
+      const scenarioNum = resolveAssistantScenarioNumber(displayText, messagesToUse);
       if (isClosingQuestion(displayText)) {
         setClosingQuestionPending(true);
         const scenarioForClosing = (scenarioNum === 1 || scenarioNum === 2 || scenarioNum === 3 ? scenarioNum : 1) as 1 | 2 | 3;
@@ -12881,6 +13391,56 @@ The participant **confirmed** skipping after the skip confirmation prompt. In **
         transcriptLenBefore: restoredForPlan.length,
         transcriptLenAfter: transcriptMessages.length,
       });
+      const lastStoredAssistant = [...transcriptMessages].reverse().find((m) => m.role === 'assistant');
+      const lastStoredUser = [...transcriptMessages].reverse().find((m) => m.role === 'user');
+      const scenarioAStoredUserCoverage =
+        resumePlan.resumeScenario === 1 && lastStoredUser
+          ? debugScenarioAQ1ContemptProbeCoverageDetail(lastStoredUser.content ?? '')
+          : null;
+      void remoteLog('[S1_RESUME_TRANSCRIPT_DEBUG_7605c3]', {
+        mode: resumePlan.mode,
+        resumeScenario: resumePlan.resumeScenario,
+        effectiveMoment: resumePlan.effectiveMoment,
+        transcriptLenBefore: restoredForPlan.length,
+        transcriptLenAfter: transcriptMessages.length,
+        lastStoredAssistantScenario: (lastStoredAssistant as { scenarioNumber?: number } | undefined)?.scenarioNumber ?? null,
+        lastStoredAssistantLooksLikeContemptProbe: lastStoredAssistant
+          ? looksLikeScenarioAContemptProbeQuestion(lastStoredAssistant.content ?? '')
+          : false,
+        lastStoredAssistantPreview: (lastStoredAssistant?.content ?? '').slice(0, 360),
+        lastStoredUserCoverage: scenarioAStoredUserCoverage,
+        lastStoredUserPreview: (lastStoredUser?.content ?? '').slice(0, 360),
+        shouldRestartIncompleteScenario,
+      });
+      // #region agent log
+      fetch('http://127.0.0.1:7789/ingest/668e0bd5-3283-4492-9f48-e33846c18218', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'X-Debug-Session-Id': '7605c3' },
+        body: JSON.stringify({
+          sessionId: '7605c3',
+          runId: 'resume-debug',
+          hypothesisId: 'H5_RESUME_REF_NOT_HYDRATED,H6_STORED_REDUNDANT_ASSISTANT,H7_RESUME_GATE_REPLAY',
+          location: 'AriaScreen.tsx:handleResume:reentry_resume_snapshot',
+          message: 'scenario_a_resume_transcript_snapshot',
+          data: {
+            mode: resumePlan.mode,
+            resumeScenario: resumePlan.resumeScenario,
+            effectiveMoment: resumePlan.effectiveMoment,
+            transcriptLenBefore: restoredForPlan.length,
+            transcriptLenAfter: transcriptMessages.length,
+            lastStoredAssistantScenario: (lastStoredAssistant as { scenarioNumber?: number } | undefined)?.scenarioNumber ?? null,
+            lastStoredAssistantLooksLikeContemptProbe: lastStoredAssistant
+              ? looksLikeScenarioAContemptProbeQuestion(lastStoredAssistant.content ?? '')
+              : false,
+            lastStoredAssistantPreview: (lastStoredAssistant?.content ?? '').slice(0, 360),
+            lastStoredUserCoverage: scenarioAStoredUserCoverage,
+            lastStoredUserPreview: (lastStoredUser?.content ?? '').slice(0, 360),
+            shouldRestartIncompleteScenario,
+          },
+          timestamp: Date.now(),
+        }),
+      }).catch(() => {});
+      // #endregion
 
       if (!didOrphanAttemptRebind && !attemptMismatch && savedAttemptId) {
         interviewSessionAttemptIdRef.current = savedAttemptId;
@@ -12910,6 +13470,32 @@ The participant **confirmed** skipping after the skip confirmation prompt. In **
           m.role === 'assistant' &&
           looksLikeMoment5AccountabilityProbeAssistantPrompt((m as { content?: string }).content ?? '')
       );
+      moment5SpecificityRedirectIssuedRef.current = transcriptMessages.some(
+        (m) =>
+          m.role === 'assistant' &&
+          looksLikeMoment5SpecificityRedirectPrompt((m as { content?: string }).content ?? '')
+      );
+      // #region agent log
+      fetch('http://127.0.0.1:7789/ingest/668e0bd5-3283-4492-9f48-e33846c18218', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'X-Debug-Session-Id': 'e43434' },
+        body: JSON.stringify({
+          sessionId: 'e43434',
+          runId: 'm5-anchor-debug',
+          hypothesisId: 'H5_resume_state_restore',
+          location: 'AriaScreen.tsx:rehydrate_transcript_refs',
+          message: 'm5_resume_refs_restored',
+          data: {
+            transcriptLen: transcriptMessages.length,
+            accountabilityProbeFired: moment5AccountabilityProbeFiredRef.current,
+            specificityRedirectIssued: moment5SpecificityRedirectIssuedRef.current,
+            lastAssistantPreview:
+              [...transcriptMessages].reverse().find((m) => m.role === 'assistant')?.content?.slice(0, 160) ?? null,
+          },
+          timestamp: Date.now(),
+        }),
+      }).catch(() => {});
+      // #endregion
       const transcriptHasM5PrimaryConflict = transcriptMessages.some(
         (m) =>
           m.role === 'assistant' &&
@@ -12922,11 +13508,51 @@ The participant **confirmed** skipping after the skip confirmation prompt. In **
         transcriptMessages,
         moment5PrimaryAnchorDeliveredSessionRef.current,
       );
-      scenarioAContemptProbeAskedRef.current = transcriptMessages.some(
+      const scenarioAContemptProbePreviouslyAsked = transcriptMessages.some(
         (m) =>
           m.role === 'assistant' &&
           looksLikeScenarioAContemptProbeQuestion((m as { content?: string }).content ?? '')
       );
+      const scenarioAContemptProbeSatisfiedByUser = transcriptMessages.some(
+        (m) =>
+          m.role === 'user' &&
+          (m as { scenarioNumber?: number }).scenarioNumber === 1 &&
+          hasScenarioAQ1ContemptProbeCoverage((m as { content?: string }).content ?? '')
+      );
+      scenarioAContemptProbeAskedRef.current =
+        scenarioAContemptProbePreviouslyAsked || scenarioAContemptProbeSatisfiedByUser;
+      void remoteLog('[S1_RESUME_REF_DEBUG_7605c3]', {
+        scenarioAContemptProbeAskedRef: scenarioAContemptProbeAskedRef.current,
+        scenarioAContemptProbePreviouslyAsked,
+        scenarioAContemptProbeSatisfiedByUser,
+        matchingAssistantCount: transcriptMessages.filter(
+          (m) => m.role === 'assistant' && looksLikeScenarioAContemptProbeQuestion((m as { content?: string }).content ?? '')
+        ).length,
+        currentMoment: currentInterviewMomentRef.current,
+        resumeScenario: resumePlan.resumeScenario,
+      });
+      // #region agent log
+      fetch('http://127.0.0.1:7789/ingest/668e0bd5-3283-4492-9f48-e33846c18218', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'X-Debug-Session-Id': '7605c3' },
+        body: JSON.stringify({
+          sessionId: '7605c3',
+          runId: 'resume-debug',
+          hypothesisId: 'H5_RESUME_REF_NOT_HYDRATED,H6_STORED_REDUNDANT_ASSISTANT',
+          location: 'AriaScreen.tsx:handleResume:scenario_a_ref_restore',
+          message: 'scenario_a_resume_refs_restored',
+          data: {
+            scenarioAContemptProbeAskedRef: scenarioAContemptProbeAskedRef.current,
+            matchingAssistantCount: transcriptMessages.filter(
+              (m) => m.role === 'assistant' && looksLikeScenarioAContemptProbeQuestion((m as { content?: string }).content ?? '')
+            ).length,
+            currentMoment: currentInterviewMomentRef.current,
+            resumeScenario: resumePlan.resumeScenario,
+          },
+          timestamp: Date.now(),
+        }),
+      }).catch(() => {});
+      // #endregion
       s2RepairProbeDeliveredRef.current = transcriptMessages.some(
         (m) =>
           m.role === 'assistant' &&
@@ -13072,6 +13698,38 @@ The participant **confirmed** skipping after the skip confirmation prompt. In **
 
       const messagesWithWelcome = scenarioIntroMsg ? [...fullMessages, welcomeMsg, scenarioIntroMsg] : [...fullMessages, welcomeMsg];
       resumeLastAssistantTextRef.current = extractLastInterviewerMessage(messagesWithWelcome);
+      void remoteLog('[S1_RESUME_LAST_ASSISTANT_DEBUG_7605c3]', {
+        resumeLastAssistantLooksLikeContemptProbe: looksLikeScenarioAContemptProbeQuestion(
+          resumeLastAssistantTextRef.current ?? ''
+        ),
+        resumeLastAssistantPreview: (resumeLastAssistantTextRef.current ?? '').slice(0, 360),
+        messageCountWithWelcome: messagesWithWelcome.length,
+        welcomeBackPreview: welcomeBack.slice(0, 180),
+        hasScenarioIntroMsg: !!scenarioIntroMsg,
+      });
+      // #region agent log
+      fetch('http://127.0.0.1:7789/ingest/668e0bd5-3283-4492-9f48-e33846c18218', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'X-Debug-Session-Id': '7605c3' },
+        body: JSON.stringify({
+          sessionId: '7605c3',
+          runId: 'resume-debug',
+          hypothesisId: 'H7_RESUME_GATE_REPLAY,H6_STORED_REDUNDANT_ASSISTANT',
+          location: 'AriaScreen.tsx:handleResume:resume_last_assistant',
+          message: 'scenario_a_resume_last_assistant_selected',
+          data: {
+            resumeLastAssistantLooksLikeContemptProbe: looksLikeScenarioAContemptProbeQuestion(
+              resumeLastAssistantTextRef.current ?? ''
+            ),
+            resumeLastAssistantPreview: (resumeLastAssistantTextRef.current ?? '').slice(0, 360),
+            messageCountWithWelcome: messagesWithWelcome.length,
+            welcomeBackPreview: welcomeBack.slice(0, 180),
+            hasScenarioIntroMsg: !!scenarioIntroMsg,
+          },
+          timestamp: Date.now(),
+        }),
+      }).catch(() => {});
+      // #endregion
       setMessages(messagesWithWelcome);
 
       const assistantForRef = messagesWithWelcome.filter((m) => isAssistantBubbleForTranscript(m));

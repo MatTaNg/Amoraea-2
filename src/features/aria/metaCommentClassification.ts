@@ -15,10 +15,15 @@ export type MetaCommentType =
   | 'already_answered'
   | 'ambiguous_short';
 
+/** Confusion detected as "repeat the question" vs generic clarification — drives interviewer delivery rules. */
+export type ConfusionSubtype = 'repeat_request';
+
 export type MetaCommentClassification = {
   type: MetaCommentType;
   /** Rough confidence 0–1 for telemetry / gating */
   confidence: number;
+  /** Populated when `type === 'confusion'` and the user asked to hear the question again. */
+  confusion_subtype?: ConfusionSubtype;
 };
 
 function wordCount(text: string): number {
@@ -104,6 +109,32 @@ const CONFUSION_RES: RegExp[] = [
 ];
 
 /**
+ * User wants the actual question re-read — not reframing / elaboration probes.
+ * Boosts confusion score in {@link metaScores}.
+ */
+const CONFUSION_REPEAT_REQUEST_RES: RegExp[] = [
+  /\bcan you repeat the questions?\b/i,
+  /\bcan you repeat that\b/i,
+  /\bcan you say that again\b/i,
+  /\bwhat was the question\b/i,
+  /\bwhat did you ask\b/i,
+  /\bi didn'?t catch that\b/i,
+  /\bsorry,?\s*what was that\b/i,
+  /\bcan you ask that again\b/i,
+  /\bwhat was that again\b/i,
+  /\brepeat that please\b/i,
+  /\b(say|run) (that|it) again\b/i,
+  /\bcome again\b/i,
+  /\brepeat the question\b/i,
+];
+
+export function isConfusionRepeatRequestText(text: string): boolean {
+  const t = text.trim();
+  if (!t) return false;
+  return CONFUSION_REPEAT_REQUEST_RES.some((re) => re.test(t));
+}
+
+/**
  * User asks to advance / skip / refuse — confirmation-only skip path (priority class).
  */
 const SKIP_REQUEST_RES: RegExp[] = [
@@ -174,6 +205,11 @@ const INABILITY_RES: RegExp[] = [
   /\bi'?m\s+not\s+sure(?!\s+what\s+you'?re\s+asking)\b/i,
 ];
 
+/** Same patterns as {@link INABILITY_RES} minus the "that's a hard one" hedge (see {@link metaScores}). */
+const INABILITY_RES_WITHOUT_THATS_HARD_ONE_HEDGE = INABILITY_RES.filter(
+  (re) => re.source !== /\bthat'?s\s+a\s+hard\s+one\b/i.source
+);
+
 /** Checking whether their answer registered / was enough. */
 const CHECKING_IN_RES: RegExp[] = [
   /\bwas that enough\b/i,
@@ -238,8 +274,13 @@ const PRIORITY_ORDER: MetaCommentType[] = [
 
 function metaScores(text: string): Record<MetaCommentType, number> {
   const t = text.trim();
+  const wc = wordCount(t);
   const frustration = patternScore(t, FRUSTRATION_RES);
   let confusion = patternScore(t, CONFUSION_RES);
+  const repeatRequestScore = patternScore(t, CONFUSION_REPEAT_REQUEST_RES);
+  if (repeatRequestScore > 0) {
+    confusion = Math.max(confusion, repeatRequestScore, 0.62);
+  }
   if (/\bi don'?t understand\b/i.test(t) && frustration < THRESH) {
     confusion = Math.max(confusion, 0.48);
   }
@@ -249,11 +290,11 @@ function metaScores(text: string): Record<MetaCommentType, number> {
     /\b(enough)\s*\?/i.test(t) && /\b(was|is|wasn'?t|isn'?t|did|does)\b/i.test(t);
   const checkingAdj = checkingPhraseBoost ? Math.max(checking, 0.52) : checking;
 
-  if (/\bi don'?t understand\b/i.test(t) && frustration < THRESH) {
-    confusion = Math.max(confusion, 0.48);
-  }
-
   let inability = patternScore(t, INABILITY_RES);
+  /** "That's a hard one…" is often a verbal hedge before substantive fiction engagement — do not treat as inability alone. */
+  if (wc >= 22 && /\bthat'?s\s+a\s+hard\s+one\b/i.test(t)) {
+    inability = patternScore(t, INABILITY_RES_WITHOUT_THATS_HARD_ONE_HEDGE);
+  }
   if (/\b(honestly\s+)?(i\s+)?(have\s+)?no\s+idea\s+what\s+to\s+say\b/i.test(t)) {
     inability = Math.max(inability, 0.72);
   }
@@ -282,6 +323,16 @@ function pickMetaFromScores(scores: Record<MetaCommentType, number>): MetaCommen
     if (scores[kind] >= THRESH) return kind;
   }
   return null;
+}
+
+function withConfusionSubtype(
+  classification: MetaCommentClassification | null,
+  originalTrimmed: string
+): MetaCommentClassification | null {
+  if (classification?.type === 'confusion' && isConfusionRepeatRequestText(originalTrimmed)) {
+    return { ...classification, confusion_subtype: 'repeat_request' };
+  }
+  return classification;
 }
 
 /** Prior turn counts as substantive iff ≥ minWords and classifier returns null (not a meta-comment). */
@@ -332,7 +383,7 @@ export function classifyUserMetaComment(text: string): MetaCommentClassification
   const scores = metaScores(t);
   const picked = pickMetaFromScores(scores);
   if (picked != null) {
-    return { type: picked, confidence: Math.min(1, scores[picked]) };
+    return withConfusionSubtype({ type: picked, confidence: Math.min(1, scores[picked]) }, t);
   }
 
   const bestWeak = Math.max(
@@ -356,11 +407,14 @@ export function classifyUserMetaComment(text: string): MetaCommentClassification
       ];
       for (const kind of weakOrder) {
         if (scores[kind] >= WEAK_THRESHOLD) {
-          return { type: kind, confidence: scores[kind] };
+          return withConfusionSubtype({ type: kind, confidence: scores[kind] }, t);
         }
       }
     }
-    return { type: 'ambiguous_short', confidence: Math.max(0.35, bestWeak) };
+    return withConfusionSubtype(
+      { type: 'ambiguous_short', confidence: Math.max(0.35, bestWeak) },
+      t
+    );
   }
 
   return null;
@@ -523,10 +577,32 @@ export function looksLikeSkipConfirmationDecline(text: string): boolean {
   return false;
 }
 
+const SKIP_CONFIRM_GREETING_TOKENS = new Set(['hello', 'hi', 'hey', 'hiya', 'yo', 'there']);
+
+/**
+ * After the skip-confirmation prompt, a bare greeting checks whether the app is still listening — not a thin answer.
+ */
+export function looksLikeSkipConfirmationConnectivityGreeting(text: string): boolean {
+  const raw = text.trim().replace(/\s+/g, ' ');
+  if (!raw || wordCount(raw) > 3) return false;
+  const words = raw.toLowerCase().split(/\s+/).filter(Boolean);
+  if (words.length === 0) return false;
+  return words.every((w) => {
+    const core = w.replace(/^[^a-z]+|[^a-z]+$/gi, '');
+    return SKIP_CONFIRM_GREETING_TOKENS.has(core);
+  });
+}
+
+/** Client-only line when user sends a connectivity greeting after skip confirmation (no elaboration probe). */
+export const SKIP_CONFIRMATION_GREETING_REOPEN_LINE =
+  'Still here — just say whatever comes to mind, or we can move on.';
+
 /** Canonical response summary for session_logs (aira_response_delivered). */
 export function getMetaCommentCanonicalResponseSummary(
   type: MetaCommentType,
-  repeatedFrustration: boolean
+  repeatedFrustration: boolean,
+  confusionSubtype?: ConfusionSubtype | null,
+  checkingInFrustrationAdjacent?: boolean
 ): string {
   if (repeatedFrustration) {
     return "No pressure at all — let's just keep going. We can move on whenever you're ready.";
@@ -535,9 +611,13 @@ export function getMetaCommentCanonicalResponseSummary(
     case 'frustration':
       return 'Structured response: reflect prior clause if any → shortened re-ask → ask whether to skip with score warning (or I need to know… path).';
     case 'confusion':
-      return 'Just tell me what you think is happening between the two of them — say if you want the question repeated.';
+      return confusionSubtype === 'repeat_request'
+        ? 'Re-read current interview question in full (verbatim); no reframing, no elaboration/content probe.'
+        : 'Simpler reframing of essential ask unless repeat-request subtype; no full vignette paste unless explicit repeat.';
     case 'checking_in':
-      return "Yes — got it. That works perfectly.";
+      return checkingInFrustrationAdjacent === true
+        ? 'Ownership + salient reflection + pivot forward (no same-question re-ask).'
+        : "Yes — got it. That works perfectly.";
     case 'skip_request':
       return 'Are you sure you want to skip this one? We can, but it may affect your score.';
     case 'inability':
@@ -567,6 +647,10 @@ export function buildMetaCommentHandlingSuffix(args: {
    * `already_answered` only — client verified a ≥8 word non-meta prior user turn in this interview moment.
    */
   alreadyAnsweredPriorSubstantiveVerified?: boolean;
+  /** `checking_in` only — likely frustration-adjacent signal from prior turn + current phrasing. */
+  checkingInFrustrationAdjacent?: boolean;
+  /** `checking_in` only — already inside Moment 5 after accountability probe fired. */
+  inMoment5AfterAccountabilityProbe?: boolean;
 }): string {
   const {
     classification,
@@ -574,6 +658,8 @@ export function buildMetaCommentHandlingSuffix(args: {
     hadPriorSubstantiveAnswerInMoment,
     omitPriorReflectionClause,
     alreadyAnsweredPriorSubstantiveVerified,
+    checkingInFrustrationAdjacent,
+    inMoment5AfterAccountabilityProbe,
   } = args;
   const t = classification.type;
 
@@ -711,15 +797,33 @@ ${priorBranch}
 `;
   }
 
+  if (t === 'confusion' && classification.confusion_subtype === 'repeat_request') {
+    return `
+─────────────────────────────────────────
+META-COMMENT (CLIENT): CONFUSION — REPEAT REQUEST (heard / misheard the question)
+─────────────────────────────────────────
+${noElongating}
+The participant asked to **hear the interview question again** (repeat / didn't catch / what did you ask) — **not** a request for reframing, examples, or more detail.
+
+**Delivery rule:** Re-read the **current active scripted question in full** — the same wording the participant was answering before this meta turn (verbatim is ideal; fix only tiny clarity glitches). **Do not** replace it with a paraphrase, a simplification, a different angle, or a vignette excerpt unless the scripted prompt itself is the vignette setup.
+
+**Forbidden this turn:** "Can you say more about that?", any elongating probe, asking them to elaborate, or answering on their behalf.
+
+After you finish reading the question, **stop** and wait for their mic reply.
+`;
+  }
+
   if (t === 'confusion') {
     return `
 ─────────────────────────────────────────
 META-COMMENT (CLIENT): CONFUSION ABOUT THE QUESTION
 ─────────────────────────────────────────
 ${noElongating}
-They are asking what you mean — **not** refusing to answer. **Do not** repeat the last question verbatim. Reframe in **simpler, concrete** terms.
+They are asking for clarification about what you're asking — **not** a verbatim repeat request (see REPEAT REQUEST subtype when they asked to hear the question again).
 
-**Never** re-read the scenario vignette or paste the situation block unless the user **explicitly** asked to hear it again (see REPEAT REQUESTS in main instructions). You may offer **one short** restatement of what you're asking — not the full vignette.
+**Do not** repeat the last question verbatim unless they explicitly asked to hear it again. Reframe in **simpler, concrete** terms.
+
+**Never** re-read the scenario vignette or paste the situation block unless the user **explicitly** asked to hear it again. You may offer **one short** restatement of what you're asking — not the full vignette.
 
 Example tone:
 "Just tell me what you think is happening between the two of them. If you want, I can repeat the question in one sentence — otherwise go with your read."
@@ -729,6 +833,30 @@ Then wait for their next reply on the mic. No elongating probe.
   }
 
   if (t === 'checking_in') {
+    if (checkingInFrustrationAdjacent === true) {
+      const moment5PivotNote =
+        inMoment5AfterAccountabilityProbe === true
+          ? `
+**Moment 5 special rule (client state):** Accountability probe already fired. Do **not** re-ask "What was your part in how it unfolded?" again. Pivot to a repair-oriented next probe/question instead (what helped repair, what changed, what they did next).
+`
+          : '';
+      return `
+─────────────────────────────────────────
+META-COMMENT (CLIENT): CHECKING-IN + FRUSTRATION ADJACENT
+─────────────────────────────────────────
+${noElongating}
+The participant appears to be checking whether they were heard **with frustration undertone** after a substantive response.
+
+Your single next message must:
+1) Take ownership briefly ("Yes — I heard you." / "I got you, my mistake."),
+2) Reflect one salient point from what they just said (short clause, no invention),
+3) Pivot to the next contextually relevant probe/question.
+
+Hard rule: **Do not re-ask the same question** that preceded this checking-in turn.
+${moment5PivotNote}
+For scenario turns, advance to the next question in sequence rather than re-probing the same construct.
+`;
+    }
     return `
 ─────────────────────────────────────────
 META-COMMENT (CLIENT): CHECKING IF THEY WERE HEARD
@@ -836,4 +964,33 @@ export function resolveMetaCommentForInterviewTurn(
 
   const effective = exemptMetaCommentTurn ? null : raw;
   return { raw, effective, exemptMetaCommentTurn, exemptMetaCommentTurnReason };
+}
+
+/**
+ * Detects checking-in turns that likely include frustration undertone.
+ * Intended for routing/telemetry, not primary classification.
+ */
+export function isCheckingInFrustrationAdjacent(args: {
+  checkingInText: string;
+  priorSubstantiveText?: string | null | undefined;
+}): boolean {
+  const current = args.checkingInText.trim().toLowerCase();
+  const prior = (args.priorSubstantiveText ?? '').trim().toLowerCase();
+  const priorWordCount = wordCount(prior);
+  const priorLong = priorWordCount >= 50;
+  const priorPersonalOrEmotional =
+    /\b(i|my|me|we|our|us)\b/.test(prior) &&
+    /\b(feel|felt|hurt|angry|upset|sad|tears?|lonely|argument|fight|stopped talking|cut each other out|self-reflection|passed away|died|grief)\b/.test(
+      prior
+    );
+  const priorDetailedNarrative =
+    priorWordCount >= 32 &&
+    /\b(there was a time|one time|at one point|i remember when|after|before|that night|for a while)\b/.test(
+      prior
+    );
+  const sharpCheckingIn =
+    /\b(did you get all that|was that enough|did that answer it|i already said all of that|i just explained all of that)\b/.test(
+      current
+    );
+  return sharpCheckingIn || priorLong || priorPersonalOrEmotional || priorDetailedNarrative;
 }
