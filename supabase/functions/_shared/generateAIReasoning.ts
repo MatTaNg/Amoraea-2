@@ -7,6 +7,7 @@ const ANTHROPIC_API_KEY = Deno.env.get('ANTHROPIC_API_KEY') ?? '';
 /** Full URL to anthropic-proxy, e.g. https://<ref>.supabase.co/functions/v1/anthropic-proxy */
 const ANTHROPIC_PROXY_URL = Deno.env.get('ANTHROPIC_PROXY_URL') ?? '';
 function getAnthropicEndpoint(): string {
+  if (ANTHROPIC_API_KEY.trim()) return 'https://api.anthropic.com/v1/messages';
   return ANTHROPIC_PROXY_URL || 'https://api.anthropic.com/v1/messages';
 }
 const SUPABASE_ANON_KEY = Deno.env.get('SUPABASE_ANON_KEY') ?? '';
@@ -376,6 +377,7 @@ export async function generateAIReasoning(
   const maxAttempts = options?.maxAttempts ?? 4;
   let lastErr: Error | null = null;
   let response: Response | null = null;
+  let responseText: string | null = null;
   for (let attempt = 0; attempt < maxAttempts; attempt++) {
     let ourAbortTimerFired = false;
     const abort = new AbortController();
@@ -394,10 +396,10 @@ export async function generateAIReasoning(
         body: JSON.stringify(body),
         signal: abort.signal,
       });
-      clearTimeout(abortTimer);
 
       if (!response.ok) {
         const errText = await response.text();
+        clearTimeout(abortTimer);
         const meta = classifyAIReasoningRequestError(new Error(`HTTP ${response.status} ${errText}`), response);
         lastErr = new Error(
           `AI reasoning request failed: [${meta.kind}] ${response.status} ${errText.slice(0, 500)}`
@@ -407,6 +409,8 @@ export async function generateAIReasoning(
         }
         continue;
       }
+      responseText = await response.text();
+      clearTimeout(abortTimer);
       break;
     } catch (e) {
       clearTimeout(abortTimer);
@@ -418,7 +422,7 @@ export async function generateAIReasoning(
     }
   }
 
-  if (!response?.ok) {
+  if (!response?.ok || responseText == null) {
     throw lastErr ?? new Error('AI reasoning request failed after retries');
   }
 
@@ -426,7 +430,7 @@ export async function generateAIReasoning(
   let text: string;
   let parsed: AIReasoningResult;
   try {
-    data = (await response.json()) as { content?: Array<{ text?: string }> };
+    data = JSON.parse(responseText) as { content?: Array<{ text?: string }> };
     text = (data.content?.[0]?.text ?? '{}').replace(/```json|```/g, '').trim();
     parsed = JSON.parse(text) as AIReasoningResult;
   } catch (e) {

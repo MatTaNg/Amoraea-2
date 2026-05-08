@@ -1,10 +1,13 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it } from '@jest/globals';
 import {
   applyElaborationAbsencePenaltiesMoment4,
   applyElaborationAbsencePenaltiesMoment5,
   applyElaborationAbsencePenaltiesToScenarioScores,
+  computeAvgUserWordsPerTurnForInterviewMoment,
   computeAvgUserWordsPerTurnScenario,
   computeAvgUserWordsPerTurnPersonalSlice,
+  countUserTurnsForScenario,
+  scenarioDepthModifierThreshold,
 } from '../elaborationAbsencePenaltiesHeuristic';
 
 describe('computeAvgUserWordsPerTurnScenario', () => {
@@ -14,6 +17,15 @@ describe('computeAvgUserWordsPerTurnScenario', () => {
       { role: 'user', content: 'three four five', scenarioNumber: 1 },
     ] as const;
     expect(computeAvgUserWordsPerTurnScenario([...messages], 1)).toBe(2.5);
+  });
+
+  it('uses prompted follow-up threshold when a scenario has multiple user turns', () => {
+    const messages = [
+      { role: 'user', content: 'one two three four five six seven eight nine ten', scenarioNumber: 2 },
+      { role: 'user', content: 'one two three four five six seven eight nine ten eleven', scenarioNumber: 2 },
+    ] as const;
+    expect(countUserTurnsForScenario([...messages], 2)).toBe(2);
+    expect(scenarioDepthModifierThreshold(countUserTurnsForScenario([...messages], 2))).toBe(20);
   });
 });
 
@@ -64,7 +76,7 @@ describe('applyElaborationAbsencePenaltiesToScenarioScores', () => {
     expect(out.keyEvidence.repair).toMatch(/Compensatory|scheduling/i);
   });
 
-  it('applies −1 to mentalizing, attunement, repair when avg words < 35 and keyEvidence lacks assessable evidence', () => {
+  it('applies −1 to mentalizing, attunement, repair when avg words are below the scenario threshold and evidence lacks assessable evidence', () => {
     const out = applyElaborationAbsencePenaltiesToScenarioScores(
       1,
       'short',
@@ -79,6 +91,22 @@ describe('applyElaborationAbsencePenaltiesToScenarioScores', () => {
     expect(out.keyEvidence.mentalizing).toMatch(
       /Response-depth modifier: short response with insufficient evidence for mentalizing/,
     );
+    expect(out.depthModifierMeta.depth_modifier_applied).toBe(true);
+  });
+
+  it('does not apply scenario depth modifier when prompted follow-up average meets the 20-word threshold', () => {
+    const out = applyElaborationAbsencePenaltiesToScenarioScores(
+      1,
+      'short',
+      { mentalizing: 5, attunement: 5, repair: 5 },
+      {},
+      20,
+      { depthModifierThreshold: 20 },
+    );
+    expect(out.pillarScores.mentalizing).toBe(5);
+    expect(out.pillarScores.attunement).toBe(5);
+    expect(out.pillarScores.repair).toBe(5);
+    expect(out.depthModifierMeta.depth_modifier_applied).toBe(false);
   });
 
   it('does not apply depth modifier to markers with substantive keyEvidence despite low avg words', () => {
@@ -136,11 +164,24 @@ describe('applyElaborationAbsencePenaltiesMoment5', () => {
       'I would plan another date and turn our phones off.',
       { mentalizing: 6, repair: 6, regulation: 7 },
       {},
-      20,
+      19,
     );
     expect(out.pillarScores.mentalizing).toBe(5);
     expect(out.pillarScores.repair).toBe(4);
     expect(out.pillarScores.regulation).toBe(7);
+  });
+
+  it('does not apply Moment 5 depth modifier when avg words meets the 20-word threshold', () => {
+    const out = applyElaborationAbsencePenaltiesMoment5(
+      'I would plan another date and turn our phones off.',
+      { mentalizing: 6, repair: 6, regulation: 7 },
+      {},
+      20,
+    );
+    expect(out.pillarScores.mentalizing).toBe(6);
+    expect(out.pillarScores.repair).toBe(5);
+    expect(out.pillarScores.regulation).toBe(7);
+    expect(out.depthModifierMeta.depth_modifier_applied).toBe(false);
   });
 
   it('does not apply depth modifier when keyEvidence is substantive despite low avg words', () => {
@@ -166,5 +207,17 @@ describe('computeAvgUserWordsPerTurnPersonalSlice', () => {
       { role: 'user', content: 'four' },
     ];
     expect(computeAvgUserWordsPerTurnPersonalSlice(slice)).toBe(2);
+  });
+});
+
+describe('computeAvgUserWordsPerTurnForInterviewMoment', () => {
+  it('recomputes Moment 5 average from tagged source transcript user turns only', () => {
+    const transcript = [
+      { role: 'user', content: 'one two', interviewMoment: 4 },
+      { role: 'assistant', content: 'Moment 5 prompt', interviewMoment: 5 },
+      { role: 'user', content: 'one two three four', interviewMoment: 5 },
+      { role: 'user', content: 'one two three four five six', interviewMoment: 5 },
+    ];
+    expect(computeAvgUserWordsPerTurnForInterviewMoment(transcript, 5)).toBe(5);
   });
 });

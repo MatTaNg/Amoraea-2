@@ -89,22 +89,55 @@ function subtractOne(
   keyEvidence[marker] = mergeEvidence(keyEvidence[marker], note);
 }
 
+export type DepthModifierWordCountSource = 'live_transcript' | 'cached' | 'retry_recomputed';
+export type ResponseDepthModifierMeta = {
+  avg_words_per_turn_calculated: number;
+  word_count_source: DepthModifierWordCountSource;
+  depth_modifier_threshold: number;
+  depth_modifier_applied: boolean;
+  depth_modifier_applied_markers: string[];
+  depth_modifier_anomaly?: boolean;
+};
+
+function buildDepthModifierMeta(
+  avgWordsPerUserTurn: number,
+  threshold: number,
+  wordCountSource: DepthModifierWordCountSource,
+  appliedMarkers: string[],
+  communicationAvgResponseLength?: number | null,
+): ResponseDepthModifierMeta {
+  const depthModifierApplied = appliedMarkers.length > 0;
+  return {
+    avg_words_per_turn_calculated: avgWordsPerUserTurn,
+    word_count_source: wordCountSource,
+    depth_modifier_threshold: threshold,
+    depth_modifier_applied: depthModifierApplied,
+    depth_modifier_applied_markers: appliedMarkers,
+    ...(depthModifierApplied && (communicationAvgResponseLength ?? 0) > 60
+      ? { depth_modifier_anomaly: true }
+      : {}),
+  };
+}
+
 function maybeSubtractOneForShortSliceInsufficientEvidence(
   pillarScores: Record<string, number | null | undefined>,
   keyEvidence: Record<string, string>,
   marker: string,
   avgWordsPerUserTurn: number,
+  threshold: number,
   /** Model keyEvidence before programmatic ceilings / merges — avoids treating ceiling notes as substantive evidence. */
   modelEvidenceBeforeHeuristic: Record<string, string | undefined>,
-): void {
-  if (!(avgWordsPerUserTurn > 0 && avgWordsPerUserTurn < 35)) return;
-  if (!evidenceAbsentForResponseDepthModifier(modelEvidenceBeforeHeuristic[marker])) return;
+): boolean {
+  if (!(avgWordsPerUserTurn > 0 && avgWordsPerUserTurn < threshold)) return false;
+  if (!evidenceAbsentForResponseDepthModifier(modelEvidenceBeforeHeuristic[marker])) return false;
+  const before = pillarScores[marker];
   subtractOne(
     pillarScores,
     keyEvidence,
     marker,
     `Response-depth modifier: short response with insufficient evidence for ${marker} (−1)`,
   );
+  return pillarScores[marker] !== before;
 }
 
 export function computeAvgUserWordsPerTurnScenario(
@@ -129,6 +162,23 @@ export function computeAvgUserWordsPerTurnScenario(
   return lengths.reduce((a, b) => a + b, 0) / lengths.length;
 }
 
+export function countUserTurnsForScenario(
+  messages: Array<{ role?: string; content?: string; scenarioNumber?: number } | null | undefined>,
+  scenarioNum: 1 | 2 | 3,
+): number {
+  if (!Array.isArray(messages)) return 0;
+  const base =
+    scenarioNum === 3 ? sliceTranscriptBeforeScenarioCToPersonalHandoff(messages as Parameters<typeof sliceTranscriptBeforeScenarioCToPersonalHandoff>[0]) : messages;
+  return base.filter(
+    (m) =>
+      !!m &&
+      m.role === 'user' &&
+      m.scenarioNumber === scenarioNum &&
+      typeof m.content === 'string' &&
+      m.content.trim().length > 0,
+  ).length;
+}
+
 export function computeAvgUserWordsPerTurnPersonalSlice(
   transcript: Array<{ role?: string; content?: string } | null | undefined>,
 ): number {
@@ -145,6 +195,30 @@ export function computeAvgUserWordsPerTurnPersonalSlice(
   return lengths.reduce((a, b) => a + b, 0) / lengths.length;
 }
 
+export function computeAvgUserWordsPerTurnForInterviewMoment(
+  transcript: Array<{ role?: string; content?: string; interviewMoment?: number } | null | undefined>,
+  interviewMoment: 4 | 5,
+): number {
+  if (!Array.isArray(transcript)) return 0;
+  const turns = transcript
+    .filter(
+      (m): m is { role: string; content: string; interviewMoment?: number } =>
+        !!m &&
+        m.role === 'user' &&
+        m.interviewMoment === interviewMoment &&
+        typeof m.content === 'string',
+    )
+    .map((m) => m.content.trim())
+    .filter(Boolean);
+  if (turns.length === 0) return 0;
+  const lengths = turns.map((t) => t.split(/\s+/).filter(Boolean).length);
+  return lengths.reduce((a, b) => a + b, 0) / lengths.length;
+}
+
+export function scenarioDepthModifierThreshold(userTurnCount: number): number {
+  return userTurnCount > 1 ? 20 : 25;
+}
+
 export type Moment4SpecificityMeta = {
   clientSpecificityFollowUpAsked?: boolean;
   lowSpecificityAfterProbe?: boolean;
@@ -159,11 +233,22 @@ export function applyElaborationAbsencePenaltiesToScenarioScores(
   pillarScores: Record<string, number | null | undefined>,
   keyEvidence: Record<string, string> | undefined,
   avgWordsPerUserTurn: number,
-): { pillarScores: Record<string, number | null | undefined>; keyEvidence: Record<string, string> } {
+  options?: {
+    depthModifierThreshold?: number;
+    wordCountSource?: DepthModifierWordCountSource;
+    communicationAvgResponseLength?: number | null;
+  },
+): {
+  pillarScores: Record<string, number | null | undefined>;
+  keyEvidence: Record<string, string>;
+  depthModifierMeta: ResponseDepthModifierMeta;
+} {
   const ps: Record<string, number | null | undefined> = { ...pillarScores };
   const ke: Record<string, string> = { ...(keyEvidence ?? {}) };
   const depthEvidenceBaseline: Record<string, string | undefined> = { ...ke };
   const t = userTurnsJoinedText.replace(/\s+/g, ' ').trim();
+  const threshold = options?.depthModifierThreshold ?? 25;
+  const appliedMarkers: string[] = [];
 
   if (DIAGNOSTIC_TYPING_PATTERN.test(t) && !INTERNAL_STATE_CUES.test(t)) {
     capAt(
@@ -209,11 +294,27 @@ export function applyElaborationAbsencePenaltiesToScenarioScores(
   annotateMissingLevelTag(ke, 'mentalizing');
   annotateMissingLevelTag(ke, 'attunement');
 
-  maybeSubtractOneForShortSliceInsufficientEvidence(ps, ke, 'mentalizing', avgWordsPerUserTurn, depthEvidenceBaseline);
-  maybeSubtractOneForShortSliceInsufficientEvidence(ps, ke, 'attunement', avgWordsPerUserTurn, depthEvidenceBaseline);
-  maybeSubtractOneForShortSliceInsufficientEvidence(ps, ke, 'repair', avgWordsPerUserTurn, depthEvidenceBaseline);
+  if (maybeSubtractOneForShortSliceInsufficientEvidence(ps, ke, 'mentalizing', avgWordsPerUserTurn, threshold, depthEvidenceBaseline)) {
+    appliedMarkers.push('mentalizing');
+  }
+  if (maybeSubtractOneForShortSliceInsufficientEvidence(ps, ke, 'attunement', avgWordsPerUserTurn, threshold, depthEvidenceBaseline)) {
+    appliedMarkers.push('attunement');
+  }
+  if (maybeSubtractOneForShortSliceInsufficientEvidence(ps, ke, 'repair', avgWordsPerUserTurn, threshold, depthEvidenceBaseline)) {
+    appliedMarkers.push('repair');
+  }
 
-  return { pillarScores: ps, keyEvidence: ke };
+  return {
+    pillarScores: ps,
+    keyEvidence: ke,
+    depthModifierMeta: buildDepthModifierMeta(
+      avgWordsPerUserTurn,
+      threshold,
+      options?.wordCountSource ?? 'live_transcript',
+      appliedMarkers,
+      options?.communicationAvgResponseLength,
+    ),
+  };
 }
 
 /** Moment 4 personal slice — run after model normalize; uses client specificity metadata when present. */
@@ -222,26 +323,51 @@ export function applyElaborationAbsencePenaltiesMoment4(
   keyEvidence: Record<string, string> | undefined,
   meta: Moment4SpecificityMeta,
   avgWordsPerTurnInSlice: number,
-): { pillarScores: Record<string, number | null | undefined>; keyEvidence: Record<string, string> } {
+  options?: {
+    wordCountSource?: DepthModifierWordCountSource;
+    communicationAvgResponseLength?: number | null;
+  },
+): {
+  pillarScores: Record<string, number | null | undefined>;
+  keyEvidence: Record<string, string>;
+  depthModifierMeta: ResponseDepthModifierMeta;
+} {
   const ps: Record<string, number | null | undefined> = { ...pillarScores };
   const ke: Record<string, string> = { ...(keyEvidence ?? {}) };
   const depthEvidenceBaseline: Record<string, string | undefined> = { ...ke };
+  const appliedMarkers: string[] = [];
+  const threshold = 20;
 
   if (meta?.lowSpecificityAfterProbe === true) {
     capAt(ps, ke, 'mentalizing', 5, 'Moment 4 low specificity — insufficient personal narrative signal.');
     capAt(ps, ke, 'accountability', 4, 'Moment 4 low specificity — insufficient personal narrative signal.');
   }
 
-  maybeSubtractOneForShortSliceInsufficientEvidence(ps, ke, 'mentalizing', avgWordsPerTurnInSlice, depthEvidenceBaseline);
-  maybeSubtractOneForShortSliceInsufficientEvidence(
+  if (maybeSubtractOneForShortSliceInsufficientEvidence(ps, ke, 'mentalizing', avgWordsPerTurnInSlice, threshold, depthEvidenceBaseline)) {
+    appliedMarkers.push('mentalizing');
+  }
+  if (maybeSubtractOneForShortSliceInsufficientEvidence(
     ps,
     ke,
     'accountability',
     avgWordsPerTurnInSlice,
+    threshold,
     depthEvidenceBaseline,
-  );
+  )) {
+    appliedMarkers.push('accountability');
+  }
 
-  return { pillarScores: ps, keyEvidence: ke };
+  return {
+    pillarScores: ps,
+    keyEvidence: ke,
+    depthModifierMeta: buildDepthModifierMeta(
+      avgWordsPerTurnInSlice,
+      threshold,
+      options?.wordCountSource ?? 'live_transcript',
+      appliedMarkers,
+      options?.communicationAvgResponseLength,
+    ),
+  };
 }
 
 /**
@@ -252,11 +378,21 @@ export function applyElaborationAbsencePenaltiesMoment5(
   pillarScores: Record<string, number | null | undefined>,
   keyEvidence: Record<string, string> | undefined,
   avgWordsPerTurnInSlice: number,
-): { pillarScores: Record<string, number | null | undefined>; keyEvidence: Record<string, string> } {
+  options?: {
+    wordCountSource?: DepthModifierWordCountSource;
+    communicationAvgResponseLength?: number | null;
+  },
+): {
+  pillarScores: Record<string, number | null | undefined>;
+  keyEvidence: Record<string, string>;
+  depthModifierMeta: ResponseDepthModifierMeta;
+} {
   const ps: Record<string, number | null | undefined> = { ...pillarScores };
   const ke: Record<string, string> = { ...(keyEvidence ?? {}) };
   const depthEvidenceBaseline: Record<string, string | undefined> = { ...ke };
   const t = userTurnsJoinedText.replace(/\s+/g, ' ').trim();
+  const appliedMarkers: string[] = [];
+  const threshold = 20;
 
   if (DIAGNOSTIC_TYPING_PATTERN.test(t) && !INTERNAL_STATE_CUES.test(t)) {
     capAt(
@@ -284,9 +420,23 @@ export function applyElaborationAbsencePenaltiesMoment5(
     );
   }
 
-  maybeSubtractOneForShortSliceInsufficientEvidence(ps, ke, 'mentalizing', avgWordsPerTurnInSlice, depthEvidenceBaseline);
-  maybeSubtractOneForShortSliceInsufficientEvidence(ps, ke, 'repair', avgWordsPerTurnInSlice, depthEvidenceBaseline);
+  if (maybeSubtractOneForShortSliceInsufficientEvidence(ps, ke, 'mentalizing', avgWordsPerTurnInSlice, threshold, depthEvidenceBaseline)) {
+    appliedMarkers.push('mentalizing');
+  }
+  if (maybeSubtractOneForShortSliceInsufficientEvidence(ps, ke, 'repair', avgWordsPerTurnInSlice, threshold, depthEvidenceBaseline)) {
+    appliedMarkers.push('repair');
+  }
 
-  return { pillarScores: ps, keyEvidence: ke };
+  return {
+    pillarScores: ps,
+    keyEvidence: ke,
+    depthModifierMeta: buildDepthModifierMeta(
+      avgWordsPerTurnInSlice,
+      threshold,
+      options?.wordCountSource ?? 'live_transcript',
+      appliedMarkers,
+      options?.communicationAvgResponseLength,
+    ),
+  };
 }
 

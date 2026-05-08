@@ -2,87 +2,40 @@
  * Admin console: regenerate narrative AI reasoning for an interview_attempts row (service scores already stored).
  */
 import { supabase } from '@data/supabase/client';
-import {
-  DEFAULT_AI_REASONING_PER_ATTEMPT_TIMEOUT_MS,
-  generateAIReasoning,
-} from '@features/aria/generateAIReasoning';
-import type { AIReasoningResult } from '@features/aria/generateAIReasoning';
 
-type AttemptRow = {
-  id: string;
-  pillar_scores: Record<string, number> | null;
-  scenario_1_scores: Record<string, unknown> | null;
-  scenario_2_scores: Record<string, unknown> | null;
-  scenario_3_scores: Record<string, unknown> | null;
-  transcript: Array<{ role: string; content?: string }> | null;
-  weighted_score: number | null;
-  passed: boolean | null;
-};
+const ADMIN_AI_REASONING_EDGE_TIMEOUT_MS = 150_000;
 
-function scenarioScoresFromAttempt(row: AttemptRow): Record<
-  number,
-  { pillarScores: Record<string, number | null>; scenarioName?: string } | undefined
-> {
-  const out: Record<number, { pillarScores: Record<string, number | null>; scenarioName?: string } | undefined> = {};
-  ([1, 2, 3] as const).forEach((n) => {
-    const raw = row[`scenario_${n}_scores` as keyof AttemptRow] as Record<string, unknown> | null | undefined;
-    if (!raw || typeof raw !== 'object') return;
-    const ps = (raw as { pillarScores?: Record<string, number>; scenarioName?: string }).pillarScores;
-    if (!ps || typeof ps !== 'object') return;
-    out[n] = {
-      pillarScores: ps,
-      scenarioName: (raw as { scenarioName?: string }).scenarioName,
-    };
+function withTimeout<T>(promise: Promise<T>, timeoutMs: number): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const timeout = new Promise<never>((_, reject) => {
+    timer = setTimeout(() => reject(new Error(`Admin AI reasoning retry timed out after ${timeoutMs}ms`)), timeoutMs);
   });
-  return out;
+  return Promise.race([promise, timeout]).finally(() => {
+    if (timer) clearTimeout(timer);
+  });
 }
 
 export async function adminRetryAIReasoningForAttempt(attemptId: string): Promise<{ ok: true } | { error: string }> {
-  const { data: row, error: fetchErr } = await supabase
-    .from('interview_attempts')
-    .select(
-      'id, pillar_scores, scenario_1_scores, scenario_2_scores, scenario_3_scores, transcript, weighted_score, passed'
-    )
-    .eq('id', attemptId)
-    .maybeSingle();
-
-  if (fetchErr) return { error: fetchErr.message };
-  if (!row) return { error: 'Attempt not found' };
-
-  const r = row as AttemptRow;
-  const pillarScores = (r.pillar_scores ?? {}) as Record<string, number>;
-  const transcript = (r.transcript ?? []) as Array<{ role: string; content?: string }>;
-  const scenarioScores = scenarioScoresFromAttempt(r);
-
-  let reasoning: AIReasoningResult;
   try {
-    reasoning = await generateAIReasoning(
-      pillarScores,
-      scenarioScores,
-      transcript,
-      r.weighted_score,
-      r.passed === true,
-      [],
-      { perAttemptTimeoutMs: DEFAULT_AI_REASONING_PER_ATTEMPT_TIMEOUT_MS },
+    const { data, error } = await withTimeout(
+      supabase.functions.invoke('admin-retry-ai-reasoning', { body: { attemptId } }),
+      ADMIN_AI_REASONING_EDGE_TIMEOUT_MS
     );
+    if (error) {
+      return {
+        error: `${error.message} — The dashboard now retries through the admin Edge Function instead of calling anthropic-proxy directly. Make sure admin-retry-ai-reasoning is deployed and has SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, SUPABASE_ANON_KEY, and ANTHROPIC_API_KEY secrets set.`,
+      };
+    }
+    const payload = data as { ok?: boolean; error?: string } | null;
+    if (payload?.error) {
+      return { error: payload.error };
+    }
+    return { ok: true };
   } catch (e) {
     const raw = e instanceof Error ? e.message : String(e);
-    if (/failed to fetch|load failed|network request failed/i.test(raw)) {
-      return {
-        error: `${raw} — Check that this admin build includes EXPO_PUBLIC_SUPABASE_ANON_KEY and EXPO_PUBLIC_ANTHROPIC_PROXY_URL, redeploy if you changed .env, and confirm https://…supabase.co/functions/v1/anthropic-proxy is reachable. Long requests can also be dropped by networks or VPNs; retry once.`,
-      };
+    if (/timeout/i.test(raw)) {
+      return { error: `${raw}. The browser stopped waiting; refresh the attempt in a moment to see whether the server finished or wrote an error.` };
     }
     return { error: raw };
   }
-
-  const { error: upErr } = await supabase
-    .from('interview_attempts')
-    .update({
-      ai_reasoning: reasoning as unknown as Record<string, unknown>,
-      reasoning_pending: false,
-    })
-    .eq('id', attemptId);
-
-  if (upErr) return { error: upErr.message };
-  return { ok: true };
 }

@@ -223,10 +223,14 @@ const AppNavigator = ({ userId }: { userId: string }) => {
         const {
           data: { session },
         } = await supabase.auth.getSession();
-        const metadata = session?.user?.user_metadata as { referral_code?: string } | undefined;
+        const metadata = session?.user?.user_metadata as
+          | { referral_code?: string; age?: number; gender?: 'Man' | 'Woman' | 'Non-binary' }
+          | undefined;
         await inviteCodeRepository.ensureUserWithInviteCode(userId, {
           email: session?.user?.email ?? undefined,
           referralCode: metadata?.referral_code,
+          age: typeof metadata?.age === 'number' ? metadata.age : undefined,
+          gender: metadata?.gender,
         });
         p = await profileRepository.getProfile(userId);
       }

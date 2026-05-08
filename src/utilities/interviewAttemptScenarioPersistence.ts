@@ -1,5 +1,6 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
 import type { ContemptTierBreakdown } from '@features/aria/contemptExpressionScoringRubric';
+import type { MentalizingInferenceSource } from '@features/aria/scenarioInferenceSourceCalibration';
 
 /** Stored JSON shape for `interview_attempts.scenario_N_scores` columns. */
 export type ScenarioAttemptScoreBundle = {
@@ -7,6 +8,7 @@ export type ScenarioAttemptScoreBundle = {
   pillarConfidence: Record<string, string>;
   keyEvidence: Record<string, string>;
   scenarioName?: string;
+  mentalizing_inference_source?: MentalizingInferenceSource;
   contempt_tier_breakdown?: ContemptTierBreakdown | null;
 };
 

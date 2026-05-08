@@ -4,6 +4,7 @@ import {
   buildSkipRequestConfirmationSpeech,
   classifyUserMetaComment,
   countsAsSubstantiveInterviewQuestionDelivery,
+  getInabilitySubstantiveOverrideDetail,
   getMetaCommentCanonicalResponseSummary,
   getPriorSubstantiveNonMetaUserContentInMoment,
   hadPriorSubstantiveAnswerInScenarioForFrustration,
@@ -111,6 +112,25 @@ describe('classifyUserMetaComment', () => {
     const long =
       "That's a hard one because James showed up as best he could in that situation, I guess maybe just sharing her excitement and let her explain all those details when she's ready rather than asking about them and just listening to her excitement and reflecting that rather than asking detailed questions.";
     expect(classifyUserMetaComment(long)).toBe(null);
+  });
+
+  it('does not classify inability when uncertainty is distributed through substantive Scenario B content', () => {
+    const hedged =
+      "Again, not knowing the context, I'm not quite sure what else can you really do because I mean, he did show appreciation, he was genuine in his joy, and Sarah could maybe tell him she needed him to just stay with the excitement instead of questions, yeah man I'm not quite sure.";
+    expect(classifyUserMetaComment(hedged)).toBeNull();
+    expect(getInabilitySubstantiveOverrideDetail(hedged)).toMatchObject({
+      inability_override_fired: true,
+      override_trigger: 'word_count_fallback',
+    });
+    expect(getInabilitySubstantiveOverrideDetail(hedged)?.full_response_word_count).toBeGreaterThanOrEqual(40);
+  });
+
+  it('overrides inability when a hedged response includes a behavioral observation', () => {
+    const hedged = "I'm not sure, but he did show appreciation and he was genuine in his joy.";
+    expect(classifyUserMetaComment(hedged)).toBeNull();
+    expect(getInabilitySubstantiveOverrideDetail(hedged)?.override_trigger).toBe(
+      'behavioral_observation_detected'
+    );
   });
 
   it('still classifies short "that\'s a hard one" as inability', () => {

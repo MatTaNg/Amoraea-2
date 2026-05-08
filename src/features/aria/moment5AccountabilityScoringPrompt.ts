@@ -26,6 +26,10 @@ export type Moment5ClientScoringMetadata = {
   persistentAbstractionMoveOn?: boolean;
   /** One-sentence grief acknowledgment prepended before the scripted accountability probe (death/bereavement disclosure). */
   griefAckBeforeAccountabilityProbe?: boolean;
+  /** Client asked whether the situation actually got tense before any accountability probe. */
+  conflictValidityClarificationAsked?: boolean;
+  /** Clarification confirmed smooth/no added tension detail, so Moment 5 specificity ceilings apply. */
+  conflictValidityLow?: boolean;
 };
 
 export function buildMoment5AccountabilityScoringPrompt(
@@ -52,13 +56,20 @@ export function buildMoment5AccountabilityScoringPrompt(
       ? `\nCLIENT METADATA — GRIEF ACKNOWLEDGMENT (Moment 5):\nThe participant\'s answer included death / bereavement disclosure. The interviewer delivered **one** brief neutral acknowledgment sentence immediately **before** the same-turn scripted accountability probe — not a support conversation, no invitation to elaborate on grief.\n`
       : '';
 
+  const conflictValidityNote =
+    clientMeta?.conflictValidityLow === true
+      ? `\nCLIENT METADATA — LOW CONFLICT VALIDITY (Moment 5):\nThe participant's Moment 5 example did not clearly establish a genuine conflict after one clarifying question. Treat this as **conflict_validity: low**. Because the markers were not tested in a clear rupture/repair process, cap repair at 4, mentalizing at 5, and regulation at 5 regardless of polished language. Accountability and contempt_expression may still be scored normally when evidence is present.\n`
+      : clientMeta?.conflictValidityClarificationAsked === true
+        ? `\nCLIENT METADATA — CONFLICT VALIDITY CLARIFIED (Moment 5):\nThe interviewer asked whether the situation actually became tense or resolved smoothly before any accountability probe. The participant added enough tension detail to continue normal scoring unless other evidence is thin.\n`
+        : '';
+
   const probeCalibration =
     clientMeta?.accountabilityProbeFired === true
       ? `\nCLIENT METADATA — ACCOUNTABILITY PROBE:\nThe interviewer delivered **one** scripted follow-up ("What was your part in how it unfolded?") because the participant\'s answer narrated the conflict **without** referring to their own role (after any specificity redirect, when applicable).\n- If their **subsequent** answer shows genuine reflection on their own contribution, **moderate** accountability scores are appropriate even if the first answer was one-sided.\n- If after the probe they still narrate only from the other person\'s perspective, use **low** accountability with clear evidence.\n- **HIGH** accountability requires **voluntary** ownership in the participant\'s own words **before** any probe — unprompted references to their behavior, contribution to tension, or what they could have done differently.\n`
       : `\nCLIENT METADATA — NO ACCOUNTABILITY PROBE:\nThe scripted accountability follow-up did **not** fire — evaluate accountability from the participant\'s spontaneous narrative only (see specificity / abstraction notes above when present).\n`;
 
   const probeCalibrationResolved =
-    specificityNote + persistentAbstractNote + griefAckNote + probeCalibration;
+    specificityNote + persistentAbstractNote + griefAckNote + conflictValidityNote + probeCalibration;
 
   const bandCalibration = `
 ACCOUNTABILITY-BAND CALIBRATION (encode in scores + evidence; use literal summary labels when summarizing):

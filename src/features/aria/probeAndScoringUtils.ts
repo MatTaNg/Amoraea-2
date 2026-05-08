@@ -195,6 +195,10 @@ export const MOMENT_5_ACCOUNTABILITY_QUESTION_TEXT =
 
 export const MOMENT_5_ACCOUNTABILITY_PROBE_TEXT = 'What was your part in how it unfolded?';
 
+/** Client-only — when the example may not contain a genuine conflict before accountability scoring. */
+export const MOMENT_5_CONFLICT_VALIDITY_CLARIFICATION_TEXT =
+  'Was there a point where it actually got tense between you two, or did it resolve pretty smoothly?';
+
 /** Moment 5 only — when the user disclosed bereavement/death, prepend one brief ack before the scripted probe (same assistant turn). */
 export const MOMENT_5_ACCOUNTABILITY_PROBE_WITH_GRIEF_ACK_TEXT =
   'I appreciate you getting vulnerable with me. What was your part in how it unfolded?';
@@ -219,6 +223,40 @@ export function looksLikeMoment5SpecificityRedirectPrompt(text: string | null | 
     (n.includes('specific time') && n.includes('walk me through')) ||
     (n.includes('specific person') && n.includes('comes to mind') && n.includes('conflict'))
   );
+}
+
+export function looksLikeMoment5ConflictValidityClarificationPrompt(text: string | null | undefined): boolean {
+  const n = (text ?? '').replace(/\s+/g, ' ').trim().toLowerCase();
+  return n.includes('actually got tense between you two') || n.includes('resolve pretty smoothly');
+}
+
+export function moment5ResponseAddsTensionDetail(userText: string): boolean {
+  const t = userText.replace(/\s+/g, ' ').trim().toLowerCase();
+  if (!t) return false;
+  return /\b(argument|fight|disagreement|tension|tense|rupture|strained|strain|upset|hurt|angry|frustrated|resent|blew up|yelled|raised (my|their|our) voice|stopped talking|silent treatment|walked out|cried|crying|defensive|apologiz|repair|make amends)\b/i.test(
+    t
+  );
+}
+
+export function moment5ConflictValidityIsLow(userText: string): boolean {
+  const t = userText.replace(/\s+/g, ' ').trim();
+  if (t.length < 24) return false;
+  const lower = t.toLowerCase();
+  if (moment5ResponseAddsTensionDetail(t)) return false;
+
+  const smoothOrLogistics =
+    /\b(resolved pretty smoothly|pretty smooth|smoothly|no big deal|wasn'?t a big deal|not really a conflict|not much conflict|no real conflict|just talked it out|talked it out|we talked and it was fine)\b/i.test(
+      lower
+    ) ||
+    /\b(boundary|boundaries|schedule|scheduling|logistics|plans?|calendar|chores|money|budget)\b/i.test(lower);
+
+  const lowRuptureProcess =
+    /\b(we|i)\s+(just\s+)?(talked|discussed|communicated|set|decided|agreed)\b/i.test(lower) &&
+    !/\b(then|after that|eventually)\b.{0,80}\b(apologiz|repair|made up|resolved|came back|owned|took responsibility)\b/i.test(
+      lower
+    );
+
+  return smoothOrLogistics || lowRuptureProcess;
 }
 
 /**
@@ -436,6 +474,18 @@ export type Moment5AccountabilityProbeEvaluation = {
     | 'explicit_self_accountability'
     | 'too_short'
     | 'decline_or_vague_evade';
+  selfReference: Moment5AccountabilitySelfReferenceEvaluation;
+};
+
+export type Moment5AccountabilitySelfReferenceType =
+  | 'general_advice'
+  | 'specific_ownership'
+  | 'boundary_expression'
+  | 'process_description';
+
+export type Moment5AccountabilitySelfReferenceEvaluation = {
+  accountability_probe_self_reference_detected: boolean;
+  self_reference_type: Moment5AccountabilitySelfReferenceType;
 };
 
 /**
@@ -497,6 +547,60 @@ export function moment5AnswerHasExplicitSelfAccountability(userText: string): bo
   );
 }
 
+export function evaluateMoment5AccountabilitySelfReference(
+  userText: string
+): Moment5AccountabilitySelfReferenceEvaluation {
+  const t = userText.replace(/\s+/g, ' ').trim();
+  const lower = t.toLowerCase();
+  if (!t) {
+    return { accountability_probe_self_reference_detected: false, self_reference_type: 'process_description' };
+  }
+
+  const boundaryExpression =
+    /\bi\s+(would\s+have\s+appreciated|would'?ve\s+appreciated|needed|need|wanted|want|set\s+a\s+limit|set\s+a\s+boundary)\b/i.test(
+      lower
+    ) ||
+    /\bi\s+don'?t\s+take\s+(your|his|her|their|someone'?s)?\s*(opinion|criticism|feedback)\s+seriously\b/i.test(
+      lower
+    ) ||
+    /\bi\s+told\s+(him|her|them)\b.{0,120}\b(appreciated|needed|need|wanted|want|don'?t\s+take|limit|boundary)\b/i.test(
+      lower
+    );
+  if (boundaryExpression) {
+    return { accountability_probe_self_reference_detected: true, self_reference_type: 'boundary_expression' };
+  }
+
+  const specificConflictSelfReference =
+    moment5AnswerHasExplicitSelfAccountability(t) ||
+    /\bi\s+(yelled|shouted|snapped|raised\s+my\s+voice|got\s+triggered|was\s+triggered|shut\s+down|withdrew|walked\s+away|stormed\s+off|avoided|stonewalled|got\s+defensive|became\s+defensive|overreacted|escalated|calmed\s+down|regulated\s+myself|apologized|apologised)\b/i.test(
+      lower
+    ) ||
+    /\bi\s+(didn'?t|did\s+not)\s+(communicate|listen|say|explain|understand|handle)\b/i.test(lower) ||
+    /\bi\s+felt\s+(hurt|dismissed|angry|upset|triggered|defensive|insecure|attacked|criticized|criticised|disrespected)\b/i.test(
+      lower
+    ) ||
+    /\bi\s+(said|told|asked)\s+(him|her|them)\b/i.test(lower) ||
+    /\bi\s+was\s+the\s+one\s+who\b/i.test(lower) ||
+    /\bi\s+got\s+triggered\s+because\b/i.test(lower) ||
+    /\bi\s+was\s+(just\s+)?(starting\s+out|insecure)\b/i.test(lower);
+  if (specificConflictSelfReference) {
+    return { accountability_probe_self_reference_detected: true, self_reference_type: 'specific_ownership' };
+  }
+
+  const generalAdvice =
+    /\bi\s+(think|believe|find|feel)\s+(it'?s|it\s+is)?\s*(important|helpful|better|good|useful)\b/i.test(lower) ||
+    /\b(communication|listening|taking\s+turns|repeat(?:ing)?\s+back)\s+is\s+(just\s+)?(really\s+)?(important|helpful|useful)\b/i.test(
+      lower
+    ) ||
+    /\bi\s+(always|usually|generally|try\s+to|like\s+to|make\s+sure)\b.{0,80}\b(conflict|heard|understood|listen|repeat|communicat|take\s+turns)\b/i.test(
+      lower
+    );
+  return {
+    accountability_probe_self_reference_detected: false,
+    self_reference_type: generalAdvice ? 'general_advice' : 'process_description',
+  };
+}
+
 /**
  * At most one scripted follow-up: fire unless the user already names their **own** contribution
  * to the tension (not only story-telling or other-blame).
@@ -505,16 +609,17 @@ export function evaluateMoment5AccountabilityProbe(userText: string): Moment5Acc
   const t = userText.replace(/\s+/g, ' ').trim();
   const lower = t.toLowerCase();
   const wordCount = t.split(/\s+/).filter(Boolean).length;
+  const selfReference = evaluateMoment5AccountabilitySelfReference(t);
   if (t.length < 36 || wordCount < 10) {
-    return { shouldProbe: false, reason: 'too_short' };
+    return { shouldProbe: false, reason: 'too_short', selfReference };
   }
   if (/\b(i don'?t have|nothing comes|can'?t think|no conflict|never really|not sure what to say)\b/i.test(lower) && t.length < 100) {
-    return { shouldProbe: false, reason: 'decline_or_vague_evade' };
+    return { shouldProbe: false, reason: 'decline_or_vague_evade', selfReference };
   }
-  if (moment5AnswerHasExplicitSelfAccountability(t)) {
-    return { shouldProbe: false, reason: 'explicit_self_accountability' };
+  if (selfReference.accountability_probe_self_reference_detected) {
+    return { shouldProbe: false, reason: 'explicit_self_accountability', selfReference };
   }
-  return { shouldProbe: true, reason: 'lacks_explicit_self_accountability' };
+  return { shouldProbe: true, reason: 'lacks_explicit_self_accountability', selfReference };
 }
 
 /** @deprecated Prefer {@link evaluateMoment5AccountabilityProbe} for logging; boolean is equivalent to `shouldProbe`. */
@@ -834,7 +939,7 @@ export function hasScenarioAQ1ContemptProbeCoverage(text: string): boolean {
   const lower = t.replace(/\u2019/g, "'").replace(/\u2018/g, "'").toLowerCase();
 
   const hasInterpretiveCue =
-    /\b(what\s+she\s+meant|what\s+emma\s+was\s+(getting\s+at|trying\s+to\s+say)|she\s+meant|when\s+she\s+said|she\s+was\s+basically\s+saying|emma'?s\s+point\s+was|that\s+(line|statement|comment|response|remark|phrase|phrasing)|the\s+subtext\s+was|the\s+undertone\s+was|the\s+way\s+she\s+said|the\s+way\s+that\s+landed|that\s+came\s+across\s+as|it\s+landed\s+as|tone|that\s+comment\s+from\s+emma|emma'?s\s+(response|wording)\s+there)\b/.test(
+    /\b(what\s+she\s+meant|what\s+emma\s+meant|what\s+emma\s+was\s+(getting\s+at|trying\s+to\s+say)|she\s+meant|when\s+she\s+said|she\s+was\s+basically\s+saying|emma'?s\s+point\s+was|that\s+(line|statement|comment|response|remark|phrase|phrasing)|the\s+subtext\s+was|the\s+undertone\s+was|the\s+way\s+she\s+said|the\s+way\s+that\s+landed|that\s+came\s+across\s+as|it\s+landed\s+as|tone|that\s+comment\s+from\s+emma|emma'?s\s+(response|wording)\s+there)\b/.test(
       lower
     );
   const referencesEmmaFinalLine =

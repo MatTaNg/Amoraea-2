@@ -5,6 +5,8 @@ const corsHeaders = {
   'Access-Control-Max-Age': '86400',
 };
 
+const ANTHROPIC_PROXY_TIMEOUT_MS = 120_000;
+
 Deno.serve(async (req) => {
   // Preflight: must return 204 and CORS headers so browser allows the actual POST
   if (req.method === 'OPTIONS') {
@@ -45,6 +47,8 @@ Deno.serve(async (req) => {
   }
 
   try {
+    const abort = new AbortController();
+    const timeout = setTimeout(() => abort.abort(), ANTHROPIC_PROXY_TIMEOUT_MS);
     const res = await fetch('https://api.anthropic.com/v1/messages', {
       method: 'POST',
       headers: {
@@ -53,8 +57,10 @@ Deno.serve(async (req) => {
         'anthropic-version': '2023-06-01',
       },
       body: JSON.stringify(body),
+      signal: abort.signal,
     });
     const text = await res.text();
+    clearTimeout(timeout);
     if (res.status === 401) {
       return new Response(
         JSON.stringify({
@@ -71,8 +77,12 @@ Deno.serve(async (req) => {
       headers: { ...corsHeaders, 'Content-Type': 'application/json' },
     });
   } catch (err) {
+    const message =
+      err instanceof Error && err.name === 'AbortError'
+        ? `Anthropic proxy timed out after ${Math.round(ANTHROPIC_PROXY_TIMEOUT_MS / 1000)}s`
+        : String(err);
     return new Response(
-      JSON.stringify({ error: { message: String(err) } }),
+      JSON.stringify({ error: { message } }),
       { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
     );
   }

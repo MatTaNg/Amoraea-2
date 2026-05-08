@@ -1,0 +1,12 @@
+export const SCENARIO_A_CONTEMPT_RECOGNITION_CALIBRATION = `
+Scenario A — CONTEMPT RECOGNITION (Emma/Ryan):
+- **contempt_recognition:** Whether they identify contemptuous or harsh dynamics in the fiction (Emma's line, the exchange). Accurate reads of coldness, dismissal, shutting down, sarcasm, bitterness, hostility, or relational sting support strong recognition scores. Generic hurt with no relational read -> partial recognition is fine; do not require the word "contempt."
+- Contempt recognition requires identifying the **emotional register** of Emma's contemptuous statement — the sharpness, dismissiveness, bitterness, sarcasm, or hostility in how it was delivered — not just that it reflects accumulated frustration or a recurring pattern.
+- For Scenario A specifically, "you've made that very clear" contains: sarcastic acknowledgment that signals Emma has given up trying to change the behavior; dismissive closure that shuts down Ryan's attempt to engage; and an implicit contemptuous framing of Ryan as someone whose behavior is settled and predictably negative.
+- Pattern recognition is not the same as contempt recognition. A user who says "she's frustrated because this has happened before" has identified recurrence but not contempt. Score contempt_recognition around 3-4 for that evidence.
+- If the user identifies only the pattern without the emotional register, cap contempt_recognition at 4-5 regardless of how accurately they describe the recurrence.
+- If the user identifies both the pattern and the emotional register, score contempt_recognition in the 7-8 range when otherwise accurate.
+- A user who says "that line has a sharp, sarcastic edge — she's not just frustrated, she's signaling that she's stopped expecting things to change" has identified the contemptuous register. Score around 7-8.
+- A user who says "you've made that very clear is contemptuous — it dismisses anything Ryan might say next before he even says it; it's a shut-down, not a complaint" has identified the mechanism of contempt. Score around 8-9.
+- **contempt_expression:** Use only the **CONTEMPT_EXPRESSION** rubric in this prompt. Ordinary disapproval of **bad behavior** (rude, wrong, inconsiderate, dishonoring a *specific* act) is not the same as a **low (1-4)** expression score; those bands are for character attack, mockery, dehumanization, sweeping "who they are" verdicts. Score **contempt_expression** independently of **contempt_recognition**.
+`.trim();

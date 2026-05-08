@@ -33,6 +33,12 @@ function styleLabelsColumnsFromRow(row: Record<string, unknown>, opts?: Translat
 
 type StyleLabelColumns = ReturnType<typeof styleLabelsColumnsFromRow>;
 
+function nonEmptyStringArray(value: unknown): string[] | null {
+  if (!Array.isArray(value)) return null;
+  const arr = value.filter((item): item is string => typeof item === 'string' && item.trim().length > 0);
+  return arr.length > 0 ? arr : null;
+}
+
 /**
  * `analyze-interview-text` runs before finalize; when there is no real audio signal, finalize used to
  * re-bundle stale `_shared` and overwrite a freshly written matchmaker_summary. Keep text pipeline labels.
@@ -51,8 +57,8 @@ function styleLabelColumnsRespectingTextPipeline(
     existing.matchmaker_summary.trim().length > 20
   ) {
     return {
-      style_labels_primary: existing.style_labels_primary ?? computed.style_labels_primary,
-      style_labels_secondary: existing.style_labels_secondary ?? computed.style_labels_secondary,
+      style_labels_primary: nonEmptyStringArray(existing.style_labels_primary) ?? computed.style_labels_primary,
+      style_labels_secondary: nonEmptyStringArray(existing.style_labels_secondary) ?? computed.style_labels_secondary,
       matchmaker_summary: existing.matchmaker_summary,
       low_confidence_note: existing.low_confidence_note ?? computed.low_confidence_note,
     };

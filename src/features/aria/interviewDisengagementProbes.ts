@@ -332,9 +332,83 @@ export function scenarioALastAssistantIsRepairProbeOrFollowUp(content: string): 
 }
 
 export type ClientDisengagementProbePick =
-  | { kind: 'repair_refusal'; probe: typeof CLIENT_REPAIR_REFUSAL_PROBE }
+  | {
+      kind: 'repair_refusal';
+      probe: typeof CLIENT_REPAIR_REFUSAL_PROBE;
+      repairRefusal: RepairRefusalDetectionDetail;
+    }
   | { kind: 'mentalizing_surface'; probe: typeof CLIENT_MENTALIZING_SURFACE_PROBE }
   | { kind: 'short_elaboration'; probe: typeof CLIENT_SHORT_ELABORATION_PROBE };
+
+export type RepairRefusalTriggerReason =
+  | 'explicit_refusal_language'
+  | 'response_too_short'
+  | 'no_repair_content';
+
+export type RepairRefusalDetectionDetail = {
+  repair_refusal_detected: boolean;
+  trigger_reason: RepairRefusalTriggerReason | null;
+  response_word_count: number;
+  repair_refusal_anomaly: boolean;
+  has_concrete_repair_content: boolean;
+};
+
+function countWords(text: string): number {
+  return normalizeWhitespace(text).split(/\s+/).filter(Boolean).length;
+}
+
+export function repairAnswerHasConcreteSuggestionActionOrStep(text: string): boolean {
+  const t = normalizeApostrophes(text).toLowerCase();
+  if (!t.trim()) return false;
+  return (
+    /\b(i|we|he|she|they|daniel|sophie|james|sarah|ryan|emma)\s+(would|could|should|need(?:s)? to|might|can)\s+(say|tell|ask|apologiz\w*|acknowledg\w*|own|admit|listen|validat\w*|explain|share|talk|communicat\w*|set|agree|commit|change|repair|fix|resolv\w*|revisit|come back|take|give|try)\b/i.test(
+      t,
+    ) ||
+    /\b(both|each|together)\s+(of\s+them\s+)?(need|should|could|would|can)\s+(to\s+)?(talk|communicat|listen|agree|set|work|repair|resolve|try)\b/i.test(
+      t,
+    ) ||
+    /\b(apologiz|listen|validate|acknowledge|own(?:ership)?|take responsibility|make amends|talk it through|communicat|counsel(?:ing|ling)|therapy|therapist|mediator|friend|support|boundary|agreement|next step|follow[- ]?up|check in)\b/i.test(
+      t,
+    )
+  );
+}
+
+export function evaluateRepairRefusalDetection(userAnswer: string, wordCount = countWords(userAnswer)): RepairRefusalDetectionDetail {
+  const t = normalizeApostrophes(userAnswer).toLowerCase();
+  const hasConcreteRepairContent = repairAnswerHasConcreteSuggestionActionOrStep(userAnswer);
+  const explicitRefusalLanguage =
+    /\bthere'?s\s+nothing\s+to\s+(repair|fix)\b/i.test(t) ||
+    /\bnothing\s+(to\s+)?(repair|fix)\b/i.test(t) ||
+    /\b(i\s+wouldn'?t|i\s+would\s+not)\s+(repair|fix|apologiz|try)\b/i.test(t) ||
+    /\b(he|she|they|james|sarah|daniel|sophie|ryan|emma)\s+(doesn'?t|does\s+not|don'?t|do\s+not)\s+need\s+to\s+apologiz/i.test(
+      t,
+    ) ||
+    /\b(he|she|they|james|sarah|daniel|sophie|ryan|emma)\s+(did|does|has)\s+nothing\s+wrong\b.*\bnothing\s+to\s+(fix|repair)\b/i.test(
+      t,
+    ) ||
+    /\b(that|this|it)\s+(isn'?t|is\s+not|wasn'?t|was\s+not)\s+(his|her|their|james'?s|sarah'?s|daniel'?s|sophie'?s|ryan'?s|emma'?s)\s+(fault|problem|responsibilit(?:y|ies))\b/i.test(
+      t,
+    ) ||
+    /\bnot\s+(his|her|their|james'?s|sarah'?s|daniel'?s|sophie'?s|ryan'?s|emma'?s)\s+(fault|problem|responsibilit(?:y|ies))\b/i.test(
+      t,
+    );
+
+  let triggerReason: RepairRefusalTriggerReason | null = null;
+  if (explicitRefusalLanguage) {
+    triggerReason = 'explicit_refusal_language';
+  } else if (wordCount < 15 && !hasConcreteRepairContent) {
+    triggerReason = wordCount <= 5 ? 'response_too_short' : 'no_repair_content';
+  }
+
+  const repairRefusalDetected = triggerReason !== null;
+  return {
+    repair_refusal_detected: repairRefusalDetected,
+    trigger_reason: triggerReason,
+    response_word_count: wordCount,
+    repair_refusal_anomaly: repairRefusalDetected && wordCount > 40,
+    has_concrete_repair_content: hasConcreteRepairContent,
+  };
+}
 
 export function pickClientDisengagementProbe(input: {
   userAnswer: string;
@@ -379,16 +453,9 @@ export function pickClientDisengagementProbe(input: {
   const repairQ = looksLikeRepairInterviewQuestion(lastAssistantContent);
   if (repairQ) {
     if (isInterviewHardStopUserTurn(userAnswer)) return null;
-    const scenarioCRepairAsk = isScenarioCRepairAssistantPrompt(lastAssistantContent);
-    const scenarioCPessimism =
-      scenarioCRepairAsk && isScenarioCRepairPessimismRefusalSignal(userAnswer);
-    const shortRepair = wordCount < 10;
-    if (
-      scenarioCPessimism ||
-      shortRepair ||
-      repairAnswerShowsRefusalOrCharacterDeflection(userAnswer)
-    ) {
-      return { kind: 'repair_refusal', probe: CLIENT_REPAIR_REFUSAL_PROBE };
+    const repairRefusal = evaluateRepairRefusalDetection(userAnswer, wordCount);
+    if (repairRefusal.repair_refusal_detected) {
+      return { kind: 'repair_refusal', probe: CLIENT_REPAIR_REFUSAL_PROBE, repairRefusal };
     }
   }
 

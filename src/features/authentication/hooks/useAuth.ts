@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import { supabase } from '@data/supabase/client';
 import { Session, User } from '@supabase/supabase-js';
+import type { Gender } from '@domain/models/Profile';
 
 /** Apply auth state from a session + server-verified user (preferred) or cached user on transient errors. */
 const applySessionForApp = async (session: Session | null) => {
@@ -108,12 +109,21 @@ export const useAuth = () => {
     return data;
   };
 
-  const signUp = async (email: string, password: string, options?: { inviteCode?: string }) => {
+  const signUp = async (
+    email: string,
+    password: string,
+    options?: { inviteCode?: string; age?: number; gender?: Gender }
+  ) => {
+    const metadata: Record<string, unknown> = {};
+    if (options?.inviteCode) metadata.referral_code = options.inviteCode.trim();
+    if (typeof options?.age === 'number') metadata.age = options.age;
+    if (options?.gender) metadata.gender = options.gender;
+
     const { data, error } = await supabase.auth.signUp({
       email,
       password,
       options: {
-        data: options?.inviteCode ? { referral_code: options.inviteCode.trim() } : undefined,
+        data: Object.keys(metadata).length ? metadata : undefined,
         emailRedirectTo: getAuthEmailRedirectTo(),
       },
     });

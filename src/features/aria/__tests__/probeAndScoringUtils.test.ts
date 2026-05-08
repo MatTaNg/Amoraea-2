@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it } from '@jest/globals';
 import { buildMoment4ThresholdAnswerToMoment5Bundle } from '../interviewTransitionBundles';
 import {
   buildMoment5AppreciationProbeQuestion,
@@ -22,13 +22,18 @@ import {
   assistantContainsScenarioCCommitmentThresholdForcedLine,
   looksLikeScenarioCCommitmentThresholdAssistantPrompt,
   MOMENT_5_ACCOUNTABILITY_QUESTION_TEXT,
+  MOMENT_5_CONFLICT_VALIDITY_CLARIFICATION_TEXT,
   MOMENT_5_ACCOUNTABILITY_PROBE_WITH_GRIEF_ACK_TEXT,
   MOMENT_5_INEXPERIENCE_FALLBACK_QUESTION,
   MOMENT_5_SPECIFICITY_REDIRECT_ALT_TEXT,
   MOMENT_5_SPECIFICITY_REDIRECT_TEXT,
   looksLikeMoment5AccountabilityProbeAssistantPrompt,
+  looksLikeMoment5ConflictValidityClarificationPrompt,
   looksLikeMoment5SpecificityRedirectPrompt,
+  moment5ConflictValidityIsLow,
+  evaluateMoment5AccountabilitySelfReference,
   moment5PersonalNarrativeHasConcreteAnchor,
+  moment5ResponseAddsTensionDetail,
   moment5ResponseContainsDeathDisclosure,
   hasMoment5TemporallySpecificMoment,
   MOMENT5_SPECIFIC_MOMENT_NEGATIVE_EXAMPLES,
@@ -460,9 +465,13 @@ describe('probeAndScoringUtils', () => {
     it('fires for symmetric "we both" generic answer without concrete first-person behavior', () => {
       const answer =
         "Yeah I've had conflicts before. We both had our issues in the situation and eventually things worked themselves out. I think communication is just really important in any relationship.";
-      expect(evaluateMoment5AccountabilityProbe(answer)).toEqual({
+      expect(evaluateMoment5AccountabilityProbe(answer)).toMatchObject({
         shouldProbe: true,
         reason: 'lacks_explicit_self_accountability',
+        selfReference: {
+          accountability_probe_self_reference_detected: false,
+          self_reference_type: 'general_advice',
+        },
       });
       expect(shouldProbeMoment5NoSelfReference(answer)).toBe(true);
     });
@@ -470,15 +479,15 @@ describe('probeAndScoringUtils', () => {
     it('fires for third-person-focused conflict narrative', () => {
       const answer =
         'We had a fight about money. They were totally unreasonable and kept bringing up old grievances every time we talked.';
-      expect(evaluateMoment5AccountabilityProbe(answer)).toEqual({
+      expect(evaluateMoment5AccountabilityProbe(answer)).toMatchObject({
         shouldProbe: true,
         reason: 'lacks_explicit_self_accountability',
       });
     });
 
-    it('fires for first-person emotion and story without explicit ownership (I felt / I remember is not enough)', () => {
+    it('fires for conflict story with only process description and no specific first-person behavior', () => {
       const answer =
-        'I felt really dismissed the whole time. I remember we kept going in circles about the same thing and they would not budge an inch. Eventually we just dropped it and moved on.';
+        'The conflict went in circles for a long time. We kept revisiting the same issue and they would not budge an inch. Eventually the only way forward was to slow down, repeat back what was said, and move on.';
       expect(moment5AnswerHasExplicitSelfAccountability(answer)).toBe(false);
       expect(evaluateMoment5AccountabilityProbe(answer).shouldProbe).toBe(true);
     });
@@ -492,7 +501,7 @@ describe('probeAndScoringUtils', () => {
     it('does not fire when user gives explicit ownership language', () => {
       const answer =
         'We argued for weeks. I realize I escalated by walking away mid-conversation and I should have stayed to finish it.';
-      expect(evaluateMoment5AccountabilityProbe(answer)).toEqual({
+      expect(evaluateMoment5AccountabilityProbe(answer)).toMatchObject({
         shouldProbe: false,
         reason: 'explicit_self_accountability',
       });
@@ -509,7 +518,7 @@ describe('probeAndScoringUtils', () => {
       const answer =
         "Well, the conflict story I talked about before is kind of like we use that. So I get resolved by, I own my feelings and I did yell at him. But after I calmed down, I genuinely tried to understand his point of view and try to be open to his criticism.";
       expect(moment5AnswerHasExplicitSelfAccountability(answer)).toBe(true);
-      expect(evaluateMoment5AccountabilityProbe(answer)).toEqual({
+      expect(evaluateMoment5AccountabilityProbe(answer)).toMatchObject({
         shouldProbe: false,
         reason: 'explicit_self_accountability',
       });
@@ -523,9 +532,46 @@ describe('probeAndScoringUtils', () => {
     });
 
     it('does not fire for answers that are too short to evaluate', () => {
-      expect(evaluateMoment5AccountabilityProbe('Yeah conflicts happen sometimes.')).toEqual({
+      expect(evaluateMoment5AccountabilityProbe('Yeah conflicts happen sometimes.')).toMatchObject({
         shouldProbe: false,
         reason: 'too_short',
+      });
+    });
+
+    it('fires when a conflict story is paired with general process language but no specific self-reference', () => {
+      const answer =
+        "I had a conflict with a guy at an event. I think it's important to take turns speaking and let the other person feel heard. I find it helpful to repeat back what someone said and then make a new commitment.";
+      const evalResult = evaluateMoment5AccountabilityProbe(answer);
+      expect(evalResult).toMatchObject({
+        shouldProbe: true,
+        reason: 'lacks_explicit_self_accountability',
+        selfReference: {
+          accountability_probe_self_reference_detected: false,
+          self_reference_type: 'general_advice',
+        },
+      });
+    });
+
+    it('does not fire when the user anchors specific feelings or behavior in the conflict', () => {
+      const answer =
+        'I had a conflict with my brother. I felt hurt when he said that, got triggered, and later I realized I was being defensive.';
+      expect(evaluateMoment5AccountabilitySelfReference(answer)).toMatchObject({
+        accountability_probe_self_reference_detected: true,
+        self_reference_type: 'specific_ownership',
+      });
+      expect(evaluateMoment5AccountabilityProbe(answer).shouldProbe).toBe(false);
+    });
+
+    it('does not fire for specific boundary expression in the conflict story', () => {
+      const answer =
+        "I had a conflict with someone who criticized my coaching. I told him I would have appreciated if he were more open to my feedback, and I don't take criticism seriously from people who haven't experienced my work.";
+      expect(evaluateMoment5AccountabilityProbe(answer)).toMatchObject({
+        shouldProbe: false,
+        reason: 'explicit_self_accountability',
+        selfReference: {
+          accountability_probe_self_reference_detected: true,
+          self_reference_type: 'boundary_expression',
+        },
       });
     });
   });
@@ -647,6 +693,27 @@ describe('probeAndScoringUtils', () => {
           "There was a time my best friend, my late best friend and I had an argument, not exactly sure what it was about, but it was pretty serious at the time. We stopped talking to each other for a while and stopped hanging out. We just kind of cut each other out, but what I got from that wasn't that he gave up on me, it was just that both of us were in a situation where we couldn't really fully be there and support each other, and we needed to find a way to be able to do that again for one another. It took a lot of self-reflection, took some tears, a lot of lonely nights without him, but when I finally built up the courage to talk to him again, I was like, hey man, I understand we didn't end our last conversation on the best of terms, and I just wanted to sit down and have a full clear mind, talk about what the issues were, and what we've done in the meantime to get through these things, and it worked out pretty well. I was the best man at his wedding, and I'm the godfather to his daughter. He passed away almost two years ago, and it's kind of hard to be here without him. I'm doing my best for the both of us.",
         ),
       ).toBe(true);
+    });
+
+    it('detects low conflict validity for smooth boundary/logistics examples', () => {
+      const answer =
+        'Last week my roommate and I had a conversation about the chore schedule. We just talked it out, agreed on who would do what, and it resolved pretty smoothly.';
+      expect(moment5PersonalNarrativeHasConcreteAnchor(answer)).toBe(true);
+      expect(moment5ConflictValidityIsLow(answer)).toBe(true);
+    });
+
+    it('does not mark genuine rupture and repair examples as low conflict validity', () => {
+      const answer =
+        'Last month my partner and I had a fight about money. She was hurt, I got defensive, and we apologized later after we talked through why it had gotten so tense.';
+      expect(moment5ConflictValidityIsLow(answer)).toBe(false);
+      expect(moment5ResponseAddsTensionDetail(answer)).toBe(true);
+    });
+
+    it('detects the scripted conflict-validity clarification prompt', () => {
+      expect(looksLikeMoment5ConflictValidityClarificationPrompt(MOMENT_5_CONFLICT_VALIDITY_CLARIFICATION_TEXT)).toBe(
+        true,
+      );
+      expect(looksLikeMoment5ConflictValidityClarificationPrompt(MOMENT_5_SPECIFICITY_REDIRECT_TEXT)).toBe(false);
     });
   });
 

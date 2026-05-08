@@ -26,6 +26,17 @@ function scenarioBundleAssessable(bundle: unknown): boolean {
   return pillarScoresHaveNumericAssessment(ps);
 }
 
+function personalMomentBundleWasScored(bundle: unknown): boolean {
+  if (bundle == null || typeof bundle !== 'object') return false;
+  const ps = (bundle as { pillarScores?: unknown }).pillarScores;
+  if (pillarScoresHaveNumericAssessment(ps)) return true;
+  if (ps == null || typeof ps !== 'object' || Array.isArray(ps)) return false;
+  const keys = Object.keys(ps as Record<string, unknown>);
+  if (keys.length === 0) return false;
+  const keyEvidence = (bundle as { keyEvidence?: unknown }).keyEvidence;
+  return keyEvidence != null && typeof keyEvidence === 'object' && !Array.isArray(keyEvidence);
+}
+
 /**
  * Full interview completion: all three scenario slices present with ≥1 numeric pillar each,
  * and Moment 4 present with ≥1 numeric pillar (required for commitment / mentalizing aggregation).
@@ -62,10 +73,9 @@ export function evaluateInterviewCompletionGate(input: {
     missingMoment4 = true;
     reasons.push('moment_4_scores null');
   } else {
-    const ps = (input.moment4 as { pillarScores?: unknown }).pillarScores;
-    if (!pillarScoresHaveNumericAssessment(ps)) {
+    if (!personalMomentBundleWasScored(input.moment4)) {
       missingMoment4 = true;
-      reasons.push('moment_4_scores missing numeric pillar scores');
+      reasons.push('moment_4_scores missing scored pillar evidence');
     }
   }
 

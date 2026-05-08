@@ -2,6 +2,7 @@ import {
   CLIENT_MENTALIZING_SURFACE_PROBE,
   CLIENT_REPAIR_REFUSAL_PROBE,
   CLIENT_SHORT_ELABORATION_PROBE,
+  evaluateRepairRefusalDetection,
   isClientOrElongatingInterviewProbeAssistant,
   isInterviewHardStopUserTurn,
   isRepairRefusalProbeAssistantLine,
@@ -10,6 +11,7 @@ import {
   looksLikeScenarioBRepairAsJamesQuestion,
   looksLikeSurfaceOnlyEmotionalLabelAnswer,
   pickClientDisengagementProbe,
+  repairAnswerHasConcreteSuggestionActionOrStep,
   repairAnswerShowsRefusalOrCharacterDeflection,
   scenarioALastAssistantIsRepairProbeOrFollowUp,
 } from '../interviewDisengagementProbes';
@@ -61,7 +63,7 @@ describe('interviewDisengagementProbes', () => {
     expect(repairAnswerShowsRefusalOrCharacterDeflection("I'd apologize and listen.")).toBe(false);
   });
 
-  it('Scenario C repair pessimism (long answer) picks repair refusal before threshold would apply', () => {
+  it('does not pick repair refusal for long pessimism unless there is explicit refusal language', () => {
     const pick = pickClientDisengagementProbe({
       userAnswer:
         "Not sure this can be fixed — he's just not able to communicate and it's probably too far gone.",
@@ -74,8 +76,7 @@ describe('interviewDisengagementProbes', () => {
       isAssistantRecoveryOrMetaLine: false,
       isFirstUserTurnInScenario: true,
     });
-    expect(pick?.kind).toBe('repair_refusal');
-    expect(pick?.probe).toBe(CLIENT_REPAIR_REFUSAL_PROBE);
+    expect(pick?.kind).not.toBe('repair_refusal');
   });
 
   it('isScenarioCRepairPessimismRefusalSignal matches product examples', () => {
@@ -91,7 +92,7 @@ describe('interviewDisengagementProbes', () => {
     expect(isRepairRefusalProbeAssistantLine(`  ${CLIENT_REPAIR_REFUSAL_PROBE}  `)).toBe(true);
   });
 
-  it('Rule 1 picks repair probe for short repair answers without extra signals', () => {
+  it('Rule 1 does not pick repair refusal for short answers with concrete repair content', () => {
     const pick = pickClientDisengagementProbe({
       userAnswer: 'I would apologize briefly.',
       lastAssistantContent: 'If you were Ryan, how would you repair this relationship?',
@@ -103,8 +104,84 @@ describe('interviewDisengagementProbes', () => {
       isAssistantRecoveryOrMetaLine: false,
       isFirstUserTurnInScenario: true,
     });
+    expect(pick?.kind).not.toBe('repair_refusal');
+  });
+
+  it('picks repair refusal for explicit no-repair language', () => {
+    const detail = evaluateRepairRefusalDetection("There's nothing to repair. That's not Daniel's responsibility.", 9);
+    expect(detail).toMatchObject({
+      repair_refusal_detected: true,
+      trigger_reason: 'explicit_refusal_language',
+      response_word_count: 9,
+      repair_refusal_anomaly: false,
+    });
+    const pick = pickClientDisengagementProbe({
+      userAnswer: "There's nothing to repair. That's not Daniel's responsibility.",
+      lastAssistantContent: 'How do you think this situation could be repaired?',
+      wordCount: 9,
+      answeringAfterProbe: false,
+      exemptMetaTurn: false,
+      isGreetingNameTurn: false,
+      isExplicitDecline: false,
+      isAssistantRecoveryOrMetaLine: false,
+      isFirstUserTurnInScenario: true,
+    });
     expect(pick?.kind).toBe('repair_refusal');
     expect(pick?.probe).toBe(CLIENT_REPAIR_REFUSAL_PROBE);
+  });
+
+  it('picks repair refusal for fewer than 15 words with no repair content', () => {
+    const pick = pickClientDisengagementProbe({
+      userAnswer: 'They are both bad at this.',
+      lastAssistantContent: 'How do you think this situation could be repaired?',
+      wordCount: 6,
+      answeringAfterProbe: false,
+      exemptMetaTurn: false,
+      isGreetingNameTurn: false,
+      isExplicitDecline: false,
+      isAssistantRecoveryOrMetaLine: false,
+      isFirstUserTurnInScenario: true,
+    });
+    expect(pick?.kind).toBe('repair_refusal');
+    expect(pick?.kind === 'repair_refusal' ? pick.repairRefusal.trigger_reason : null).toBe('no_repair_content');
+  });
+
+  it('does not pick repair refusal for third-person or bilateral repair plans', () => {
+    const thirdPerson =
+      'Daniel could share with Sophie that he gets overwhelmed and ask for a pause instead of leaving without explanation.';
+    const bilateral =
+      'Both of them need to agree on a process: Daniel could name when he is flooded, Sophie could give him space, and then they should come back to finish the conversation.';
+
+    expect(repairAnswerHasConcreteSuggestionActionOrStep(thirdPerson)).toBe(true);
+    expect(repairAnswerHasConcreteSuggestionActionOrStep(bilateral)).toBe(true);
+    for (const userAnswer of [thirdPerson, bilateral]) {
+      const pick = pickClientDisengagementProbe({
+        userAnswer,
+        lastAssistantContent: 'How do you think this situation could be repaired?',
+        wordCount: userAnswer.split(/\s+/).length,
+        answeringAfterProbe: false,
+        exemptMetaTurn: false,
+        isGreetingNameTurn: false,
+        isExplicitDecline: false,
+        isAssistantRecoveryOrMetaLine: false,
+        isFirstUserTurnInScenario: true,
+      });
+      expect(pick).toBeNull();
+      expect(evaluateRepairRefusalDetection(userAnswer).repair_refusal_detected).toBe(false);
+    }
+  });
+
+  it('does not pick repair refusal for long multi-step repair with external support', () => {
+    const userAnswer =
+      'I think maybe they could start by naming the pattern, then each person could explain what happens for them during the fight. If they keep getting stuck, counseling or a trusted friend could help them slow down and make an agreement for how to pause and come back.';
+    expect(userAnswer.split(/\s+/).length).toBeGreaterThan(40);
+    const detail = evaluateRepairRefusalDetection(userAnswer);
+    expect(detail).toMatchObject({
+      repair_refusal_detected: false,
+      trigger_reason: null,
+      repair_refusal_anomaly: false,
+      has_concrete_repair_content: true,
+    });
   });
 
   it('Rule 1 does not pick repair refusal when user hard-stops the repair answer', () => {

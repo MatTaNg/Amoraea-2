@@ -66,6 +66,21 @@ MOMENT 4 CALIBRATION ANCHORS (when engagement exists):
 ${ACCOUNTABILITY_BLAME_SHIFT_VS_CLARITY_REQUEST}
 - Mentalizing: Limited but present self-awareness/perspective-taking should score at least 3-4; reserve <=2 for zero self-reflection and pure external blame.
 
+RESOLUTION ORIENTATION / "MOVED ON" HANDLING:
+Do not treat "I moved on", "I don't think about them anymore", "I don't think about it", or similar phrases as standalone evidence of resolution orientation or its absence. These phrases are ambiguous: they can indicate genuine emotional release or suppression of unresolved hostility depending on context.
+
+Treat resolution orientation as present when "I moved on" / "I don't think about it" is accompanied by any surrounding evidence of:
+- Understanding why the other person acted as they did.
+- Empathy or perspective-taking about the other person's situation.
+- Personal growth or learning from the experience.
+- Matter-of-fact, non-bitter tone throughout the response.
+
+Treat resolution orientation as absent when "I moved on" / "I don't think about it" is the primary or only statement about where the user is now, with no surrounding evidence of processing, understanding, or growth. The phrase alone is insufficient evidence of genuine release.
+
+If the surrounding tone is dismissive, contemptuous, or frames the other person as entirely at fault with no curiosity, treat "I moved on" as consistent with unresolved hostility regardless of the phrasing.
+
+Other resolution-orientation indicators remain direct evidence when present: explicit forgiveness, perspective-taking, acknowledgment of personal growth, or ongoing relationship survival. Do not include "neutral acceptance without ongoing hostility" as a standalone indicator.
+
 COMMITMENT_THRESHOLD (Moment 4 — first-person):
 - **Low scores (about 2–4):** Unconditional persistence, "I never walk away," "just keep trying no matter what," or no workable invest/communicate/assess/decide structure — **without** reflective limits or self-critique.
 - **7–8 (positive, not a deficit):** The user admits tending to **stay too long** or struggling to leave **and** shows **differentiation** — e.g. working on recognizing **genuine irrecoverability** vs **fear of conflict** / avoidance, or growth-oriented framing of past over-staying. That is **self-knowledge and developing capacity**; **do not** score as unhealthy commitment threshold or conflate with "no limits" staying.

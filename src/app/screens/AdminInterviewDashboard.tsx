@@ -44,7 +44,15 @@ import {
   describeWarmthAxis,
   styleProfileFromDbRow,
   translateStyleProfile,
+  type TranslateStyleProfileOptions,
 } from '@utilities/styleTranslations';
+import { userTurnContentsFromInterviewTranscript } from '../../../supabase/functions/_shared/interviewStyleMarkers';
+import {
+  parseInterviewTranscriptMessages,
+  splitUserCorpusScenarioVsPersonal,
+  userTurnStringsScenarioMainAnalysis,
+  userTurnStringsScenarioSegment,
+} from '../../../supabase/functions/_shared/splitInterviewUserCorpus';
 import { ADMIN_CONSOLE_EMAIL, isAmoraeaAdminConsoleEmail } from '@/constants/adminConsole';
 import { adminRetryAIReasoningForAttempt } from '@utilities/adminRetryAIReasoning';
 import { confirmAsync } from '@utilities/alerts/confirmDialog';
@@ -340,6 +348,27 @@ async function fetchCommunicationStyleProfileRowForAdmin(
     return null;
   }
   return (data as CommunicationStyleProfileRow | null | undefined) ?? null;
+}
+
+function buildCommunicationStyleTranscriptOptionsForAdmin(
+  transcript: AttemptRow['transcript']
+): TranslateStyleProfileOptions | undefined {
+  const userTurns = userTurnContentsFromInterviewTranscript(transcript);
+  const userCorpus = userTurns.join(' ').toLowerCase();
+  if (!userCorpus.trim()) return undefined;
+  const parsedTx = parseInterviewTranscriptMessages(transcript);
+  const { scenarioCorpus, personalCorpus } = splitUserCorpusScenarioVsPersonal(parsedTx);
+  const scenarioUserTurns = userTurnStringsScenarioSegment(parsedTx);
+  const scenarioMainAnalysisUserTurns = userTurnStringsScenarioMainAnalysis(parsedTx);
+  return {
+    userCorpus,
+    userTurns,
+    scenarioUserCorpus: scenarioCorpus.length > 0 ? scenarioCorpus : undefined,
+    scenarioUserTurns: scenarioUserTurns.length > 0 ? scenarioUserTurns : undefined,
+    scenarioMainAnalysisUserTurns:
+      scenarioMainAnalysisUserTurns.length > 0 ? scenarioMainAnalysisUserTurns : undefined,
+    personalUserCorpus: personalCorpus.length > 0 ? personalCorpus : undefined,
+  };
 }
 
 function coerceScoreNumber(v: unknown): number | undefined {
@@ -641,7 +670,7 @@ function trimLaunchNotificationPhone(phone: string | null | undefined): string |
   return t.length > 0 ? t : null;
 }
 
-type TimeRangeFilter = 'all' | 'day' | 'week' | 'month' | 'custom';
+type TimeRangeFilter = 'all' | 'day' | 'three_days' | 'week' | 'month' | 'custom';
 type ReviewedCohortFilter = 'all' | 'reviewed' | 'unreviewed';
 
 function formatYmdLocal(d: Date): string {
@@ -689,10 +718,17 @@ function userMatchesTimeRange(
   if (range === 'all') return true;
   const ts = getCohortActivityTimestampMs(g);
   if (ts <= 0) return false;
-  if (range === 'day' || range === 'week' || range === 'month') {
+  if (range === 'day' || range === 'three_days' || range === 'week' || range === 'month') {
     const now = Date.now();
     const dayMs = 24 * 60 * 60 * 1000;
-    const start = range === 'day' ? now - dayMs : range === 'week' ? now - 7 * dayMs : now - 30 * dayMs;
+    const start =
+      range === 'day'
+        ? now - dayMs
+        : range === 'three_days'
+          ? now - 3 * dayMs
+          : range === 'week'
+            ? now - 7 * dayMs
+            : now - 30 * dayMs;
     return ts >= start;
   }
   if (range === 'custom') {
@@ -2286,9 +2322,13 @@ function SummaryTab({
         <Text style={styles.blockText}>Overall confidence: {formatScoreCell((styleProfile?.overall_confidence ?? null) !== null ? Number(styleProfile?.overall_confidence) * 10 : null)}</Text>
 
         {(() => {
+          const transcriptOpts = buildCommunicationStyleTranscriptOptionsForAdmin(attempt.transcript);
           const live =
             styleProfile != null
-              ? translateStyleProfile(styleProfileFromDbRow(styleProfile as unknown as Record<string, unknown>))
+              ? translateStyleProfile(
+                  styleProfileFromDbRow(styleProfile as unknown as Record<string, unknown>),
+                  transcriptOpts,
+                )
               : null;
           const primaryStored = styleProfile?.style_labels_primary;
           const secondaryStored = styleProfile?.style_labels_secondary;
@@ -2296,12 +2336,12 @@ function SummaryTab({
           const lowNoteStored = styleProfile?.low_confidence_note;
           const summaryDisplayText =
             live?.matchmaker_summary?.trim() || summaryStored?.trim() || '';
-          const primaryForDisplay = Array.isArray(primaryStored)
+          const primaryForDisplay = Array.isArray(primaryStored) && primaryStored.filter(Boolean).length > 0
             ? primaryStored
             : Array.isArray(live?.primary)
               ? live.primary
               : [];
-          const secondaryForDisplay = Array.isArray(secondaryStored)
+          const secondaryForDisplay = Array.isArray(secondaryStored) && secondaryStored.filter(Boolean).length > 0
             ? secondaryStored
             : Array.isArray(live?.secondary)
               ? live.secondary
@@ -2457,10 +2497,19 @@ function ReasoningTab({
               setReasoningRetryError(null);
               setReasoningRetrying(true);
               void (async () => {
-                const r = await adminRetryAIReasoningForAttempt(attempt.id);
-                setReasoningRetrying(false);
-                if ('error' in r) setReasoningRetryError(r.error);
-                else onRefreshAfterReasoning?.();
+                try {
+                  const r = await adminRetryAIReasoningForAttempt(attempt.id);
+                  if ('error' in r) {
+                    setReasoningRetryError(r.error);
+                    onRefreshAfterReasoning?.();
+                  } else {
+                    onRefreshAfterReasoning?.();
+                  }
+                } catch (e) {
+                  setReasoningRetryError(e instanceof Error ? e.message : String(e));
+                } finally {
+                  setReasoningRetrying(false);
+                }
               })();
             }}
             style={styles.reprocessButton}
@@ -2927,6 +2976,7 @@ const STATUS_FILTER_OPTIONS: { id: AdminUserStatusFilter; label: string }[] = [
 const TIME_RANGE_OPTIONS: { id: TimeRangeFilter; label: string }[] = [
   { id: 'all', label: 'All' },
   { id: 'day', label: '24h' },
+  { id: 'three_days', label: '3d' },
   { id: 'week', label: '7d' },
   { id: 'month', label: '30d' },
   { id: 'custom', label: 'Custom' },

@@ -46,6 +46,7 @@ import {
   SKIP_REQUEST_CONFIRMATION_PROMPT_LINE,
   countsAsSubstantiveInterviewQuestionDelivery,
   getMetaCommentCanonicalResponseSummary,
+  getInabilitySubstantiveOverrideDetail,
   getPriorSubstantiveNonMetaUserContentInMoment,
   hadPriorSubstantiveAnswerInScenarioForFrustration,
   isCheckingInFrustrationAdjacent,
@@ -114,6 +115,8 @@ import {
   isClientOrElongatingInterviewProbeAssistant,
   isInterviewHardStopUserTurn,
   isRepairRefusalProbeAssistantLine,
+  evaluateRepairRefusalDetection,
+  looksLikeRepairInterviewQuestion,
   looksLikeScenarioBRepairAsJamesQuestion,
   pickClientDisengagementProbe,
   scenarioALastAssistantIsRepairProbeOrFollowUp,
@@ -333,8 +336,11 @@ import {
   applyElaborationAbsencePenaltiesMoment4,
   applyElaborationAbsencePenaltiesMoment5,
   applyElaborationAbsencePenaltiesToScenarioScores,
+  computeAvgUserWordsPerTurnForInterviewMoment,
   computeAvgUserWordsPerTurnPersonalSlice,
   computeAvgUserWordsPerTurnScenario,
+  countUserTurnsForScenario,
+  scenarioDepthModifierThreshold,
 } from '@features/aria/elaborationAbsencePenaltiesHeuristic';
 import {
   BEHAVIORAL_VS_EMOTIONAL_INTERIOR_SCENARIO,
@@ -348,6 +354,11 @@ import {
   parseContemptTierBreakdown,
   type ContemptTierBreakdown,
 } from '@features/aria/contemptExpressionScoringRubric';
+import {
+  MENTALIZING_INFERENCE_SOURCE_CALIBRATION,
+  type MentalizingInferenceSource,
+} from '@features/aria/scenarioInferenceSourceCalibration';
+import { SCENARIO_A_CONTEMPT_RECOGNITION_CALIBRATION } from '@features/aria/scenarioAContemptRecognitionCalibration';
 import {
   sanitizeMoment5PersonalScoresForAggregate,
   sanitizePersonalMomentScoresForAggregate,
@@ -371,13 +382,17 @@ import {
   MOMENT_5_ACCOUNTABILITY_QUESTION_TEXT,
   MOMENT_5_ACCOUNTABILITY_PROBE_TEXT,
   MOMENT_5_ACCOUNTABILITY_PROBE_WITH_GRIEF_ACK_TEXT,
+  MOMENT_5_CONFLICT_VALIDITY_CLARIFICATION_TEXT,
   MOMENT_5_PERSISTENT_ABSTRACT_MOVE_ON_TEXT,
   MOMENT_5_SPECIFICITY_REDIRECT_TEXT,
   evaluateMoment5AccountabilityProbe,
+  looksLikeMoment5ConflictValidityClarificationPrompt,
   looksLikeMoment5AccountabilityProbeAssistantPrompt,
   looksLikeMoment5SpecificityRedirectPrompt,
   isMoment5AssistantAnchor,
+  moment5ConflictValidityIsLow,
   moment5PersonalNarrativeHasConcreteAnchor,
+  moment5ResponseAddsTensionDetail,
   moment5ResponseContainsDeathDisclosure,
   transcriptAssistantContainsMoment5PrimaryConflictQuestion,
 } from '@features/aria/probeAndScoringUtils';
@@ -3044,6 +3059,36 @@ function stripNameTokenPunctuationForValidation(token: string): string {
   return token.replace(/[.!?,;:]+$/g, '').trim();
 }
 
+type InterviewNameExtractionMethod = 'direct' | 'sentence_stripped' | 'uncertain';
+type InterviewNameExtraction = {
+  extractedName: string;
+  extractionMethod: InterviewNameExtractionMethod;
+  isFalseNameTrigger: boolean;
+};
+
+const FALSE_NAME_TRIGGERS = new Set([
+  'hello',
+  'hi',
+  'hey',
+  'yes',
+  'yeah',
+  'yep',
+  'sure',
+  'ready',
+  'good',
+  'ok',
+  'okay',
+  'manual',
+  'fine',
+  'great',
+]);
+
+function capitalizeNameCandidate(value: string): string {
+  const trimmed = stripNameTokenPunctuationForValidation(value).trim();
+  if (!trimmed) return '';
+  return trimmed.charAt(0).toUpperCase() + trimmed.slice(1);
+}
+
 /**
  * True when the transcript looks like a first name (1–2 tokens, letters/apostrophe/hyphen only).
  * Handles "Tiffany." and "I'm called Mary" is not the goal — keep to short name-like replies.
@@ -3059,15 +3104,62 @@ function looksLikeName(text: string): boolean {
   return parts.length <= 2 && parts.every((p) => /^[a-zA-Z'-]+$/.test(p));
 }
 
-/** Display string for profile `name` after a greeting (normalized spacing, no stray periods on save). */
-function nameFromGreetingForProfile(text: string): string {
-  return text
-    .trim()
+function extractInterviewNameFromResponse(text: string): InterviewNameExtraction {
+  const raw = text.replace(/\s+/g, ' ').trim();
+  const stripped = stripNameTokenPunctuationForValidation(raw);
+  let candidate = stripped;
+  let extractionMethod: InterviewNameExtractionMethod = 'direct';
+
+  const introPattern =
+    /^(?:it\s+(?:will|would|should|can)\s+be|it(?:'s|\s+is)|you\s+can\s+call\s+me|my\s+name\s+is|call\s+me|i\s+go\s+by|people\s+call\s+me|i(?:'m|\s+am)\s+called)\s+/i;
+  if (introPattern.test(candidate)) {
+    candidate = candidate.replace(introPattern, '').trim();
+    extractionMethod = 'sentence_stripped';
+  } else if (!looksLikeName(candidate)) {
+    extractionMethod = 'uncertain';
+  }
+
+  let parts = candidate
     .split(/\s+/)
     .filter(Boolean)
     .map((p) => stripNameTokenPunctuationForValidation(p))
-    .filter((p) => p.length > 0)
-    .join(' ');
+    .filter((p) => /^[a-zA-Z'-]+$/.test(p));
+
+  if (parts.length === 0) {
+    parts = stripped
+      .split(/\s+/)
+      .filter(Boolean)
+      .map((p) => stripNameTokenPunctuationForValidation(p))
+      .filter((p) => /^[a-zA-Z'-]+$/.test(p));
+    extractionMethod = 'uncertain';
+  }
+
+  if (parts.length > 2) {
+    parts = extractionMethod === 'sentence_stripped' ? parts.slice(0, 1) : parts.slice(-1);
+    extractionMethod = 'uncertain';
+  }
+
+  const extractedName = parts.map(capitalizeNameCandidate).join(' ').trim();
+  const triggerKey = extractedName.toLowerCase().replace(/[^a-z]/g, '');
+  return {
+    extractedName,
+    extractionMethod,
+    isFalseNameTrigger: FALSE_NAME_TRIGGERS.has(triggerKey),
+  };
+}
+
+function extractInterviewNameFromTranscript(
+  messages: ReadonlyArray<{ role: string; content?: string | null }>
+): string | null {
+  for (let i = 0; i < messages.length - 1; i += 1) {
+    const assistant = messages[i];
+    const user = messages[i + 1];
+    if (assistant.role !== 'assistant' || user.role !== 'user') continue;
+    if (!isNamePromptInterviewMoment(assistant.content ?? '')) continue;
+    const extracted = extractInterviewNameFromResponse(user.content ?? '');
+    if (extracted.extractedName && !extracted.isFalseNameTrigger) return extracted.extractedName;
+  }
+  return null;
 }
 
 const ADMIN_PASS_EMAIL = 'mattang5280@gmail.com';
@@ -3494,6 +3586,8 @@ interface ScenarioScoreResult {
   keyEvidence: Record<string, string>;
   specificity: string;
   repairCoherenceIssue: string | null;
+  /** Audit: primary mentalizing observation source for scenario paraphrase vs inference calibration. */
+  mentalizing_inference_source?: MentalizingInferenceSource;
   /** Tier audit for contempt_expression (when scored). */
   contempt_tier_breakdown: ContemptTierBreakdown | null;
 }
@@ -3529,8 +3623,15 @@ function scenarioDbBundleToScenarioScoreResult(scenarioNumber: 1 | 2 | 3, raw: u
     keyEvidence: ke,
     specificity: typeof o.specificity === 'string' ? o.specificity : 'high',
     repairCoherenceIssue: typeof o.repairCoherenceIssue === 'string' ? o.repairCoherenceIssue : null,
+    mentalizing_inference_source: normalizeMentalizingInferenceSource(o.mentalizing_inference_source),
     contempt_tier_breakdown: parseContemptTierBreakdown(o.contempt_tier_breakdown),
   };
+}
+
+function normalizeMentalizingInferenceSource(raw: unknown): MentalizingInferenceSource | undefined {
+  return raw === 'scenario_restatement' || raw === 'surface_addition' || raw === 'independent_inference'
+    ? raw
+    : undefined;
 }
 
 function normalizePersonalMomentContemptTierBreakdown(result: PersonalMomentScoreResult): void {
@@ -3625,11 +3726,7 @@ Scenario C — REPAIR (this slice does not score commitment_threshold):
       : '';
   const scenario1ContemptCalibration =
     scenarioNumber === 1
-      ? `
-Scenario A — CONTEMPT (this slice — two keys):
-- **contempt_recognition:** Whether they identify contemptuous or harsh dynamics in the fiction (Emma’s line, the exchange). Accurate reads of coldness, dismissal, shutting down, or relational sting support strong recognition scores. Generic hurt with no relational read → partial recognition is fine; do not require the word “contempt.”
-- **contempt_expression:** Use only the **CONTEMPT_EXPRESSION** rubric in this prompt. Ordinary disapproval of **bad behavior** (rude, wrong, inconsiderate, dishonoring a *specific* act) is not the same as a **low (1–4)** expression score; those bands are for character attack, mockery, dehumanization, sweeping “who they are” verdicts. Score **contempt_expression** independently of **contempt_recognition**.
-`
+      ? SCENARIO_A_CONTEMPT_RECOGNITION_CALIBRATION
       : '';
   const scenario1MentalizingRepairCeiling =
     scenarioNumber === 1
@@ -3741,6 +3838,8 @@ ${REPAIR_CONDITIONAL_AND_PROMPTED_SCORING}
 
 MENTALIZING and CONTEMPT (where scored) — register-neutral: Judge perspective-taking quality and, for Scenario A, score **contempt_recognition** vs **contempt_expression** **separately** (see Scenario A block). **contempt_recognition** = identifying harsh or contemptuous **dynamics** in the vignette (in others) — unchanged. **contempt_expression** = *only* the **CONTEMPT_EXPRESSION** rubric above: do **not** treat ordinary moral or fairness language about harmful **actions** (rude, wrong, hurtful, disrespectful, “dishonoring *her in that moment*,” inconsiderate) as automatic **low (1–4)** participant expression. Do not down-score formal language when the inference is accurate for mentalizing; **contempt_expression** is about the participant’s **stance** toward *people* in the slice, not about accuracy of vignette reads.
 
+${MENTALIZING_INFERENCE_SOURCE_CALIBRATION}
+
 REPAIR COHERENCE: If repair attempt repeats the failure they diagnosed, lower accountability 1-2 points.
 Scenario A repair calibration:
 - For **repair** and **accountability**, apply **REPAIR & ACCOUNTABILITY — UNPROMPTED VS. PROMPTED**: unprompted = user turn(s) before the repair-as-Ryan prompt; prompted = the "if you were Ryan … repair" answer. Tag keyEvidence. For **repair** only, also apply **REPAIR — CONDITIONAL LANGUAGE, DIRECTIONALITY, AND PROMPTED FLOORS** (directionality: self-owning "if" vs blame-redirect).
@@ -3767,8 +3866,9 @@ OUTPUT CONTRACT (STRICT):
 - Response must start with "{" and end with "}".
 - Do not include markdown fences, prose, analysis text, or comments.
 - Do not wrap output under alternate keys like "scorecard", "scores", "result", or "data".
-- Use exactly these top-level keys: scenarioNumber, scenarioName, pillarScores, pillarConfidence, keyEvidence, contempt_tier_breakdown, specificity, repairCoherenceIssue.
+- Use exactly these top-level keys: scenarioNumber, scenarioName, pillarScores, pillarConfidence, keyEvidence, mentalizing_inference_source, contempt_tier_breakdown, specificity, repairCoherenceIssue.
 - Include every marker in pillarScores/pillarConfidence/keyEvidence for this scenario.
+- Include \`mentalizing_inference_source\` as exactly one of: "scenario_restatement", "surface_addition", "independent_inference".
 
 Return ONLY valid JSON:
 {
@@ -3777,6 +3877,7 @@ Return ONLY valid JSON:
   "pillarScores": { ${ids.map((id) => `"${id}": 0`).join(', ')} },
   "pillarConfidence": { ${ids.map((id) => `"${id}": "high"`).join(', ')} },
   "keyEvidence": { ${ids.map((id) => `"${id}": ""`).join(', ')} },
+  "mentalizing_inference_source": "scenario_restatement",
   "contempt_tier_breakdown": ${CONTEMPT_TIER_BREAKDOWN_JSON_TEMPLATE},
   "specificity": "high",
   "repairCoherenceIssue": null
@@ -3787,30 +3888,70 @@ function applyElaborationAbsenceAfterNormalizeMoment4(
   result: PersonalMomentScoreResult,
   sliceForAvg: Array<{ role: string; content: string }>,
   moment4Meta: Moment4ClientScoringMetadata | null,
-): void {
-  const avg = computeAvgUserWordsPerTurnPersonalSlice(sliceForAvg);
+  fullTranscriptForAvg?: Array<{ role?: string; content?: string; interviewMoment?: number }>,
+) {
+  const taggedAvg = fullTranscriptForAvg
+    ? computeAvgUserWordsPerTurnForInterviewMoment(fullTranscriptForAvg, 4)
+    : 0;
+  const avg = taggedAvg > 0 ? taggedAvg : computeAvgUserWordsPerTurnPersonalSlice(sliceForAvg);
+  const communicationAvgResponseLength = fullTranscriptForAvg
+    ? computeAvgUserWordsPerTurnPersonalSlice(fullTranscriptForAvg)
+    : null;
   const out = applyElaborationAbsencePenaltiesMoment4(
     result.pillarScores,
     result.keyEvidence,
     moment4Meta,
     avg,
+    { wordCountSource: 'live_transcript', communicationAvgResponseLength },
   );
   result.pillarScores = out.pillarScores as PersonalMomentScoreResult['pillarScores'];
   result.keyEvidence = out.keyEvidence;
+  return out.depthModifierMeta;
 }
 
 function applyElaborationAbsenceAfterNormalizeMoment5(
   result: PersonalMomentScoreResult,
   sliceForAvg: Array<{ role: string; content: string }>,
-): void {
+  fullTranscriptForAvg?: Array<{ role?: string; content?: string; interviewMoment?: number }>,
+  moment5Meta?: Moment5ClientScoringMetadata | null,
+) {
   const userText = sliceForAvg
     .filter((m) => m.role === 'user')
     .map((m) => m.content)
     .join('\n');
-  const avg = computeAvgUserWordsPerTurnPersonalSlice(sliceForAvg);
-  const out = applyElaborationAbsencePenaltiesMoment5(userText, result.pillarScores, result.keyEvidence, avg);
+  const taggedAvg = fullTranscriptForAvg
+    ? computeAvgUserWordsPerTurnForInterviewMoment(fullTranscriptForAvg, 5)
+    : 0;
+  const avg = taggedAvg > 0 ? taggedAvg : computeAvgUserWordsPerTurnPersonalSlice(sliceForAvg);
+  const communicationAvgResponseLength = fullTranscriptForAvg
+    ? computeAvgUserWordsPerTurnPersonalSlice(fullTranscriptForAvg)
+    : null;
+  const out = applyElaborationAbsencePenaltiesMoment5(
+    userText,
+    result.pillarScores,
+    result.keyEvidence,
+    avg,
+    { wordCountSource: 'live_transcript', communicationAvgResponseLength },
+  );
   result.pillarScores = out.pillarScores as PersonalMomentScoreResult['pillarScores'];
   result.keyEvidence = out.keyEvidence;
+  if (moment5Meta?.conflictValidityLow === true) {
+    const caps: Record<string, number> = { repair: 4, mentalizing: 5, regulation: 5 };
+    Object.entries(caps).forEach(([marker, cap]) => {
+      const score = result.pillarScores?.[marker];
+      if (typeof score === 'number' && Number.isFinite(score) && score > cap) {
+        result.pillarScores[marker] = cap;
+      }
+      const existingEvidence = result.keyEvidence?.[marker]?.trim();
+      const capEvidence =
+        'Conflict validity low: example did not establish a clear rupture/repair process after clarification, so this marker is capped.';
+      result.keyEvidence = {
+        ...(result.keyEvidence ?? {}),
+        [marker]: existingEvidence ? `${existingEvidence} ${capEvidence}` : capEvidence,
+      };
+    });
+  }
+  return out.depthModifierMeta;
 }
 
 /** Fixed column order for scenario scorecards so unassessed markers (e.g. commitment_threshold) still show as — */
@@ -4352,6 +4493,9 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
     recordingEndTime: number | null;
   }>({ questionEndTime: null, recordingStartTime: null, recordingEndTime: null });
   const lastQuestionTextRef = useRef('');
+  const interviewNameRef = useRef<string | null>(null);
+  const interviewNameReaskPendingRef = useRef(false);
+  const interviewNameReaskUsedRef = useRef(false);
   /** Updated only after successful audio playback completes (see `speakTextSafe`). Used for consecutive duplicate TTS suppression. */
   const lastSuccessfulTtsTextNormalizedRef = useRef<string | null>(null);
   const lastSuccessfulTtsDeliveredPreviewRef = useRef<string>('');
@@ -4426,6 +4570,8 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
   const moment4SpecificityScoringRef = useRef<Moment4ClientScoringMetadata | null>(null);
   /** Client-delivered Moment 5 question (after M4 threshold answer). */
   const moment5QuestionDeliveredRef = useRef(false);
+  /** Prevents duplicate M4→M5 handoff commits while the long M5 TTS line is still playing. */
+  const moment5QuestionDeliveryInFlightRef = useRef(false);
   /**
    * Set synchronously when the scripted M5 conflict bundle is committed to the transcript (client inject).
    * Closing gate uses this so [INTERVIEW_COMPLETE] is not stripped when {@link isMoment5AssistantAnchor}
@@ -4436,6 +4582,8 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
   const moment5PostPromptUserTurnCountRef = useRef(0);
   /** At most one accountability probe for Moment 5. */
   const moment5AccountabilityProbeFiredRef = useRef(false);
+  /** Client asked one clarifier when Moment 5 may not contain a genuine conflict. */
+  const moment5ConflictValidityClarificationIssuedRef = useRef(false);
   /** Client issued the abstract-first specificity redirect (at most once before accountability). */
   const moment5SpecificityRedirectIssuedRef = useRef(false);
   /** Passed into Moment 5 scoring + scenario_specific_patterns. */
@@ -4494,6 +4642,9 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
   const resetInterviewProgressRefs = useCallback(() => {
     resumeRepeatChoicePendingRef.current = false;
     resumeLastAssistantTextRef.current = null;
+    interviewNameRef.current = null;
+    interviewNameReaskPendingRef.current = false;
+    interviewNameReaskUsedRef.current = false;
     interviewMomentsCompleteRef.current = createInitialMomentCompletion();
     currentInterviewMomentRef.current = 1;
     personalHandoffInjectedRef.current = false;
@@ -4503,9 +4654,11 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
     moment4ExpectingPostSpecificityUserTurnRef.current = false;
     moment4SpecificityScoringRef.current = null;
     moment5QuestionDeliveredRef.current = false;
+    moment5QuestionDeliveryInFlightRef.current = false;
     moment5PrimaryAnchorDeliveredSessionRef.current = false;
     moment5PostPromptUserTurnCountRef.current = 0;
     moment5AccountabilityProbeFiredRef.current = false;
+    moment5ConflictValidityClarificationIssuedRef.current = false;
     moment5SpecificityRedirectIssuedRef.current = false;
     moment5ClientScoringMetaRef.current = null;
     deferredMoment4NarrativeRef.current = null;
@@ -6440,6 +6593,25 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
             const premature = !tabThrottledDuringLine && wouldBePremature;
             const ratioActualToExpected =
               wall.expectedMs > 0 && Number.isFinite(actualTtsMs) ? actualTtsMs / wall.expectedMs : null;
+            const isMoment5PrimaryConflictTts =
+              telemetrySource === 'turn' &&
+              interviewSpeechRole === 'assistant_response' &&
+              currentInterviewMomentRef.current === 5 &&
+              transcriptAssistantContainsMoment5PrimaryConflictQuestion(text);
+            if (attemptIx === 0 && isMoment5PrimaryConflictTts) {
+              verificationOk = true;
+              acceptedStableTruncationAsEstimationError = wouldBePremature;
+              if (wouldBePremature) {
+                void remoteLog('[TTS_M5_DURATION_VERIFY_BYPASSED]', {
+                  interviewSessionId: interviewSessionIdRef.current,
+                  actualTtsMs,
+                  expectedMs: wall.expectedMs,
+                  ratio_actual_to_expected: ratioActualToExpected,
+                  reason: 'avoid_replaying_long_moment5_primary_prompt',
+                });
+              }
+              break;
+            }
             if (
               premature &&
               attemptIx === 0 &&
@@ -7370,13 +7542,26 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
             parsedScenario.pillarScores = heur.pillarScores as ScenarioScoreResult['pillarScores'];
             parsedScenario.keyEvidence = heur.keyEvidence as ScenarioScoreResult['keyEvidence'];
             const avgWords = computeAvgUserWordsPerTurnScenario(allMessages, scenarioNumber);
+            const scenarioUserTurnCount = countUserTurnsForScenario(allMessages, scenarioNumber);
+            const depthModifierThreshold = scenarioDepthModifierThreshold(scenarioUserTurnCount);
+            const communicationAvgResponseLength = computeAvgUserWordsPerTurnPersonalSlice(allMessages);
             const elabor = applyElaborationAbsencePenaltiesToScenarioScores(
               scenarioNumber,
               scenarioUserText,
               parsedScenario.pillarScores ?? {},
               parsedScenario.keyEvidence,
               avgWords,
+              {
+                depthModifierThreshold,
+                wordCountSource: 'live_transcript',
+                communicationAvgResponseLength,
+              },
             );
+            void remoteLog('[SCORING_DEPTH_MODIFIER]', {
+              scoring_slice: `scenario_${scenarioNumber}`,
+              user_turn_count: scenarioUserTurnCount,
+              ...elabor.depthModifierMeta,
+            });
             parsedScenario.pillarScores = elabor.pillarScores as ScenarioScoreResult['pillarScores'];
             parsedScenario.keyEvidence = elabor.keyEvidence as ScenarioScoreResult['keyEvidence'];
             if (scenarioFrustrationSkipNullMarkersRef.current[scenarioNumber]) {
@@ -7476,6 +7661,9 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
             }
             parsedScenario.keyEvidence = existingEvidence;
             parsedScenario.pillarConfidence = existingConfidence;
+            parsedScenario.mentalizing_inference_source = normalizeMentalizingInferenceSource(
+              (parsedScenario as { mentalizing_inference_source?: unknown }).mentalizing_inference_source
+            );
             if (parsedScenario.pillarScores?.contempt_expression == null) {
               parsedScenario.contempt_tier_breakdown = null;
             } else {
@@ -7535,6 +7723,7 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
             scenarioNumber,
             scoreKeys: Object.keys(scenarioResult.pillarScores ?? {}),
             scoreMessageLength: scoreMessage.length,
+          mentalizing_inference_source: scenarioResult.mentalizing_inference_source ?? null,
           });
         }
         void remoteLog('[SCORECARD_FETCH_RESULT]', {
@@ -7542,6 +7731,7 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
           scenarioNumber,
           scoreKeys: Object.keys(scenarioResult.pillarScores ?? {}),
           scoreMessageLength: scoreMessage.length,
+          mentalizing_inference_source: scenarioResult.mentalizing_inference_source ?? null,
           userId: userId ?? null,
         });
         setScenarioScores((prev) => ({ ...prev, [scenarioNumber]: scenarioResult }));
@@ -7554,6 +7744,7 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
             pillarConfidence: scenarioResult.pillarConfidence,
             keyEvidence: scenarioResult.keyEvidence,
             scenarioName: scenarioResult.scenarioName,
+            mentalizing_inference_source: scenarioResult.mentalizing_inference_source,
             contempt_tier_breakdown: scenarioResult.contempt_tier_breakdown,
           };
           try {
@@ -7711,7 +7902,7 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
       lastQuestionText: lastQuestionTextRef.current,
       priorUserUtteranceCount: priorUserUtteranceCountForMeta,
       isInterviewAppRoute,
-      hasProfileFirstName: !!getInterviewUserFirstNameForPrompt(profile),
+      hasProfileFirstName: !!interviewNameRef.current,
       suppressMetaClassificationPostMetaAckAwaitingSubstantive,
       spokenWordCount: wcForMetaExempt,
     });
@@ -7728,6 +7919,14 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
       meta_ack_substantive_baseline_seq: metaCommentAckAwaitingSubstantiveBaselineSeqRef.current,
       substantive_question_delivery_seq: substantiveInterviewQuestionDeliveredSeqRef.current,
     });
+    const inabilityOverrideDetail = getInabilitySubstantiveOverrideDetail(trimmed);
+    if (inabilityOverrideDetail) {
+      void remoteLog('inability_substantive_override', {
+        ...inabilityOverrideDetail,
+        transcript_text: trimmed,
+        classification_result_after_override: metaResolved.effective?.type ?? null,
+      });
+    }
     let metaCommentClassification = metaResolved.effective;
     let skipConfirmationGreetingReconnectInjection = false;
     if (
@@ -7939,7 +8138,7 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
       });
     }
 
-    let participantFirstNameForSpoken = getInterviewUserFirstNameForPrompt(profile);
+    let participantFirstNameForSpoken = interviewNameRef.current ?? '';
     const routeChangedDuringRecordingSnap = routeChangedDuringRecordingRef.current;
     routeChangedDuringRecordingRef.current = false;
     let reentryTypeForLogging: 'repeat_requested' | 'continue_requested' | 'direct_answer' | null = null;
@@ -8308,22 +8507,73 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
       }
     }
 
-    const priorUserUtteranceCount = messages.filter(
-      (m) => m.role === 'user' && !(m as { isWelcomeBack?: boolean }).isWelcomeBack
-    ).length;
-    const isGreetingNameTurn =
+    const isNameEntryTurn =
       isInterviewAppRoute &&
-      priorUserUtteranceCount === 0 &&
-      !getInterviewUserFirstNameForPrompt(profile) &&
-      looksLikeName(trimmed);
-    if (isGreetingNameTurn) {
+      !interviewNameRef.current &&
+      (interviewNameReaskPendingRef.current || isNamePromptInterviewMoment(lastQuestionTextRef.current));
+    if (isNameEntryTurn) {
+      const extraction = extractInterviewNameFromResponse(trimmed);
+      const acceptingAfterReask = interviewNameReaskPendingRef.current;
+      void remoteLog('interview_name_extracted', {
+        raw_response: trimmed,
+        extracted_name: extraction.extractedName || null,
+        extraction_method: extraction.extractionMethod,
+        false_name_trigger: extraction.isFalseNameTrigger,
+        accepting_after_reask: acceptingAfterReask,
+      });
+      if (userId) {
+        const rtd = getSessionLogRuntime();
+        writeSessionLog({
+          userId,
+          attemptId: rtd.attemptId,
+          eventType: 'interview_name_extracted',
+          eventData: {
+            raw_response: trimmed,
+            extracted_name: extraction.extractedName || null,
+            extraction_method: extraction.extractionMethod,
+          },
+          platform: rtd.platform,
+        });
+      }
+
+      if (extraction.isFalseNameTrigger && !acceptingAfterReask && !interviewNameReaskUsedRef.current) {
+        interviewNameReaskPendingRef.current = true;
+        interviewNameReaskUsedRef.current = true;
+        const momentForNameReask = currentInterviewMomentRef.current;
+        const scenarioForNameReask =
+          ((currentScenarioRef.current as number | undefined) ?? getScenarioNumberForNewMessage(messages, 'user')) || 1;
+        const userMsgNameRetry: MessageWithScenario = {
+          role: 'user',
+          content: trimmed,
+          scenarioNumber: scenarioForNameReask as 1 | 2 | 3,
+          interviewMoment: momentForNameReask,
+        };
+        const reaskText = 'Sorry, I want to make sure I got your name right — what should I call you?';
+        const assistantMsgNameRetry: MessageWithScenario = {
+          role: 'assistant',
+          content: reaskText,
+          scenarioNumber: scenarioForNameReask as 1 | 2 | 3,
+          interviewMoment: momentForNameReask,
+        };
+        setMessages([...messages, userMsgNameRetry, assistantMsgNameRetry]);
+        setCurrentTranscript('');
+        transcriptAtReleaseRef.current = '';
+        await speakTextSafe(reaskText, ASSISTANT_INTERVIEW_SPEECH);
+        setVoiceState('idle');
+        setIsWaiting(false);
+        return;
+      }
+
+      const extractedName = extraction.extractedName || capitalizeNameCandidate(trimmed.split(/\s+/).filter(Boolean)[0] ?? '');
       try {
-        const nameToSave = nameFromGreetingForProfile(trimmed);
+        interviewNameRef.current = extractedName;
+        interviewNameReaskPendingRef.current = false;
+        const nameToSave = extractedName;
         if (nameToSave) {
           await profileRepository.upsertProfile(userId, { name: nameToSave });
           queryClient.invalidateQueries({ queryKey: ['profile', userId] });
-          // Same turn still uses in-memory profile until query refetch — resolve name for this pipeline.
-          participantFirstNameForSpoken = getInterviewUserFirstNameForPrompt({ ...profile, name: nameToSave });
+          // Same turn still uses in-memory profile until query refetch; use immutable interview_name.
+          participantFirstNameForSpoken = nameToSave;
         }
       } catch (_) {
         // ignore
@@ -9115,6 +9365,11 @@ The participant **confirmed** skipping after the skip confirmation prompt. In **
     const moment4ThresholdDeliveredInTranscript =
       moment4ThresholdProbeAskedRef.current ||
       transcriptIncludesMoment4ThresholdAssistant(priorTranscriptBeforeThisUserTurn);
+    const priorTranscriptAlreadyHasM5Primary = priorTranscriptBeforeThisUserTurn.some(
+      (m) =>
+        m.role === 'assistant' &&
+        transcriptAssistantContainsMoment5PrimaryConflictQuestion((m as { content?: string }).content ?? '')
+    );
     /** First user reply after walk-away must trigger M5 even when the last assistant line is not the threshold (e.g. extra model ack). */
     const m5HandoffAfterThresholdAnswer =
       moment4ThresholdDeliveredInTranscript &&
@@ -9138,6 +9393,8 @@ The participant **confirmed** skipping after the skip confirmation prompt. In **
             transcriptHasThreshold: transcriptIncludesMoment4ThresholdAssistant(priorTranscriptBeforeThisUserTurn),
             firstUserTurnAfterThreshold: isAnsweringFirstUserTurnAfterMoment4Threshold(priorTranscriptBeforeThisUserTurn),
             moment5Delivered: moment5QuestionDeliveredRef.current,
+            moment5DeliveryInFlight: moment5QuestionDeliveryInFlightRef.current,
+            priorTranscriptAlreadyHasM5Primary,
             moment4ExpectingPostSpec: moment4ExpectingPostSpecificityUserTurnRef.current,
             isInterviewAppRoute,
             isAdmin,
@@ -9162,6 +9419,8 @@ The participant **confirmed** skipping after the skip confirmation prompt. In **
       currentInterviewMomentRef.current === 4 &&
       m5HandoffAfterThresholdAnswer &&
       !moment5QuestionDeliveredRef.current &&
+      !moment5QuestionDeliveryInFlightRef.current &&
+      !priorTranscriptAlreadyHasM5Primary &&
       !moment4ExpectingPostSpecificityUserTurnRef.current
     ) {
       // #region agent log
@@ -9180,6 +9439,7 @@ The participant **confirmed** skipping after the skip confirmation prompt. In **
       }).catch(() => {});
       // #endregion
       void remoteLog('[M5_QUESTION_INJECT]', { interviewSessionId: interviewSessionIdRef.current });
+      moment5QuestionDeliveryInFlightRef.current = true;
       const m5BundleRaw = buildMoment4ThresholdAnswerToMoment5Bundle(
         participantFirstNameForSpoken,
         MOMENT_5_ACCOUNTABILITY_QUESTION_TEXT,
@@ -9270,7 +9530,11 @@ The participant **confirmed** skipping after the skip confirmation prompt. In **
         }).catch(() => {});
         // #endregion
       }
-      await speakTextSafe(m5BundleSpoken, ASSISTANT_INTERVIEW_SPEECH);
+      try {
+        await speakTextSafe(m5BundleSpoken, ASSISTANT_INTERVIEW_SPEECH);
+      } finally {
+        moment5QuestionDeliveryInFlightRef.current = false;
+      }
       void remoteLog('[M5_DELIVERED]', {
         interviewSessionId: interviewSessionIdRef.current,
         source: 'client_inject_after_m4_threshold',
@@ -9303,11 +9567,19 @@ The participant **confirmed** skipping after the skip confirmation prompt. In **
       !moment5AccountabilityProbeFiredRef.current &&
       !looksLikeMoment5AccountabilityProbeAssistantPrompt(lastAssistantContent) &&
       (isMoment5AssistantAnchor(lastAssistantContent) ||
-        looksLikeMoment5SpecificityRedirectPrompt(lastAssistantContent));
+        looksLikeMoment5SpecificityRedirectPrompt(lastAssistantContent) ||
+        looksLikeMoment5ConflictValidityClarificationPrompt(lastAssistantContent));
     const moment5AccountabilityEval = evaluateMoment5AccountabilityProbe(trimmed);
     const moment5NarrativeConcrete = moment5PersonalNarrativeHasConcreteAnchor(trimmed);
     const moment5AnsweringAfterSpecificityRedirect =
       looksLikeMoment5SpecificityRedirectPrompt(lastAssistantContent);
+    const moment5AnsweringAfterConflictValidityClarification =
+      looksLikeMoment5ConflictValidityClarificationPrompt(lastAssistantContent);
+    const moment5LowConflictValidity = moment5ConflictValidityIsLow(trimmed);
+    const moment5AddsTensionDetailAfterClarification =
+      moment5AnsweringAfterConflictValidityClarification && moment5ResponseAddsTensionDetail(trimmed);
+    const moment5ConfirmedLowConflictValidity =
+      moment5AnsweringAfterConflictValidityClarification && !moment5AddsTensionDetailAfterClarification;
 
     if (currentInterviewMomentRef.current === 5 && moment5QuestionDeliveredRef.current) {
       // #region agent log
@@ -9325,8 +9597,15 @@ The participant **confirmed** skipping after the skip confirmation prompt. In **
             candidate: moment5AccountabilityProbeCandidate,
             shouldProbe: moment5AccountabilityEval.shouldProbe,
             probeReason: moment5AccountabilityEval.reason,
+            accountability_probe_self_reference_detected:
+              moment5AccountabilityEval.selfReference.accountability_probe_self_reference_detected,
+            self_reference_type: moment5AccountabilityEval.selfReference.self_reference_type,
             moment5NarrativeConcrete,
             moment5AnsweringAfterSpecificityRedirect,
+            moment5AnsweringAfterConflictValidityClarification,
+            moment5LowConflictValidity,
+            moment5AddsTensionDetailAfterClarification,
+            conflictValidityClarificationIssued: moment5ConflictValidityClarificationIssuedRef.current,
             specificityRedirectIssued: moment5SpecificityRedirectIssuedRef.current,
             wordCount: countInterviewWords(trimmed),
             userPreview: trimmed.slice(0, 220),
@@ -9336,9 +9615,63 @@ The participant **confirmed** skipping after the skip confirmation prompt. In **
         }),
       }).catch(() => {});
       // #endregion
+      void remoteLog('[M5_ACCOUNTABILITY_SELF_REFERENCE_EVAL]', {
+        interviewSessionId: interviewSessionIdRef.current,
+        should_probe: moment5AccountabilityEval.shouldProbe,
+        probe_reason: moment5AccountabilityEval.reason,
+        accountability_probe_self_reference_detected:
+          moment5AccountabilityEval.selfReference.accountability_probe_self_reference_detected,
+        self_reference_type: moment5AccountabilityEval.selfReference.self_reference_type,
+        wordCount: countInterviewWords(trimmed),
+        preview: trimmed.slice(0, 200),
+      });
     }
 
-    if (moment5AccountabilityProbeCandidate && moment5AccountabilityEval.shouldProbe) {
+    if (moment5AccountabilityProbeCandidate && moment5ConfirmedLowConflictValidity) {
+      moment5ClientScoringMetaRef.current = {
+        ...(moment5ClientScoringMetaRef.current ?? {}),
+        accountabilityProbeFired: false,
+        conflictValidityClarificationAsked: true,
+        conflictValidityLow: true,
+      };
+      void remoteLog('[M5_CONFLICT_VALIDITY_LOW_CONFIRMED]', {
+        interviewSessionId: interviewSessionIdRef.current,
+        wordCount: countInterviewWords(trimmed),
+        preview: trimmed.slice(0, 200),
+      });
+    }
+
+    if (
+      moment5AccountabilityProbeCandidate &&
+      moment5LowConflictValidity &&
+      moment5NarrativeConcrete &&
+      !moment5AnsweringAfterConflictValidityClarification &&
+      !moment5ConflictValidityClarificationIssuedRef.current
+    ) {
+      moment5ConflictValidityClarificationIssuedRef.current = true;
+      moment5ClientScoringMetaRef.current = {
+        ...(moment5ClientScoringMetaRef.current ?? {}),
+        accountabilityProbeFired: false,
+        conflictValidityClarificationAsked: true,
+      };
+      void remoteLog('[M5_CONFLICT_VALIDITY_CLARIFICATION_ISSUED]', {
+        interviewSessionId: interviewSessionIdRef.current,
+        wordCount: countInterviewWords(trimmed),
+        preview: trimmed.slice(0, 200),
+      });
+      const clarificationMsg: MessageWithScenario = {
+        role: 'assistant',
+        content: MOMENT_5_CONFLICT_VALIDITY_CLARIFICATION_TEXT,
+        scenarioNumber: resolveAssistantScenarioNumber(MOMENT_5_CONFLICT_VALIDITY_CLARIFICATION_TEXT, messagesToUse),
+      };
+      setMessages([...messagesToUse, clarificationMsg]);
+      await speakTextSafe(MOMENT_5_CONFLICT_VALIDITY_CLARIFICATION_TEXT, ASSISTANT_INTERVIEW_SPEECH);
+      setVoiceState('idle');
+      setIsWaiting(false);
+      return;
+    }
+
+    if (moment5AccountabilityProbeCandidate && moment5AccountabilityEval.shouldProbe && !moment5ConfirmedLowConflictValidity) {
       if (!moment5NarrativeConcrete && !moment5AnsweringAfterSpecificityRedirect && !moment5SpecificityRedirectIssuedRef.current) {
         // #region agent log
         fetch('http://127.0.0.1:7789/ingest/668e0bd5-3283-4492-9f48-e33846c18218', {
@@ -9413,6 +9746,15 @@ The participant **confirmed** skipping after the skip confirmation prompt. In **
         return;
       }
 
+      if (moment5AnsweringAfterConflictValidityClarification && moment5AddsTensionDetailAfterClarification) {
+        moment5ClientScoringMetaRef.current = {
+          ...(moment5ClientScoringMetaRef.current ?? {}),
+          accountabilityProbeFired: moment5ClientScoringMetaRef.current?.accountabilityProbeFired ?? false,
+          conflictValidityClarificationAsked: true,
+          conflictValidityLow: false,
+        };
+      }
+
       const griefAckProbe = moment5ResponseContainsDeathDisclosure(trimmed);
       const accountabilityProbeSpoken = griefAckProbe
         ? MOMENT_5_ACCOUNTABILITY_PROBE_WITH_GRIEF_ACK_TEXT
@@ -9452,6 +9794,9 @@ The participant **confirmed** skipping after the skip confirmation prompt. In **
         reason: moment5AccountabilityEval.reason,
         after_specificity_redirect: moment5SpecificityRedirectIssuedRef.current,
         grief_ack_before_probe: griefAckProbe,
+        accountability_probe_self_reference_detected:
+          moment5AccountabilityEval.selfReference.accountability_probe_self_reference_detected,
+        self_reference_type: moment5AccountabilityEval.selfReference.self_reference_type,
         wordCount: countInterviewWords(trimmed),
         preview: trimmed.slice(0, 200),
       });
@@ -9479,6 +9824,9 @@ The participant **confirmed** skipping after the skip confirmation prompt. In **
       void remoteLog('[M5_ACCOUNTABILITY_PROBE_SKIPPED]', {
         interviewSessionId: interviewSessionIdRef.current,
         reason: moment5AccountabilityEval.reason,
+        accountability_probe_self_reference_detected:
+          moment5AccountabilityEval.selfReference.accountability_probe_self_reference_detected,
+        self_reference_type: moment5AccountabilityEval.selfReference.self_reference_type,
         wordCount: countInterviewWords(trimmed),
         preview: trimmed.slice(0, 200),
       });
@@ -9639,6 +9987,22 @@ The participant **confirmed** skipping after the skip confirmation prompt. In **
             (m as MessageWithScenario).scenarioNumber === userScenarioTag
         ).length;
         const isFirstUserTurnInScenario = priorUserTurnsInScenario === 0;
+        const repairQuestionForDisengagement = looksLikeRepairInterviewQuestion(lastAssistantContent);
+        const repairRefusalDetail = repairQuestionForDisengagement
+          ? evaluateRepairRefusalDetection(trimmed, wcDisengage)
+          : null;
+        if (repairRefusalDetail) {
+          void remoteLog('[REPAIR_REFUSAL_EVALUATION]', {
+            interviewSessionId: interviewSessionIdRef.current,
+            scenario: userScenarioTag,
+            repair_refusal_detected: repairRefusalDetail.repair_refusal_detected,
+            trigger_reason: repairRefusalDetail.trigger_reason,
+            response_word_count: repairRefusalDetail.response_word_count,
+            repair_refusal_anomaly: repairRefusalDetail.repair_refusal_anomaly,
+            has_concrete_repair_content: repairRefusalDetail.has_concrete_repair_content,
+            preview: trimmed.slice(0, 200),
+          });
+        }
 
         const disengagePick = pickClientDisengagementProbe({
           userAnswer: trimmed,
@@ -9646,7 +10010,7 @@ The participant **confirmed** skipping after the skip confirmation prompt. In **
           wordCount: wcDisengage,
           answeringAfterProbe,
           exemptMetaTurn,
-          isGreetingNameTurn,
+          isGreetingNameTurn: isNameEntryTurn,
           isExplicitDecline: isDecline(trimmed),
           isAssistantRecoveryOrMetaLine,
           isFirstUserTurnInScenario,
@@ -9659,6 +10023,7 @@ The participant **confirmed** skipping after the skip confirmation prompt. In **
             kind: disengagePick.kind,
             wc: wcDisengage,
             preview: trimmed.slice(0, 120),
+            ...(disengagePick.kind === 'repair_refusal' ? disengagePick.repairRefusal : {}),
           });
           const probeConstruct =
             disengagePick.kind === 'mentalizing_surface'
@@ -9723,9 +10088,8 @@ The participant **confirmed** skipping after the skip confirmation prompt. In **
         currentInterviewMomentRef,
         personalHandoffInjectedRef,
       };
-      const participantFirstNameSystemSuffix = buildInterviewerParticipantFirstNameSystemSuffix(
-        getInterviewUserFirstNameForPrompt(profile)
-      );
+      const participantFirstNameSystemSuffix =
+        buildInterviewerParticipantFirstNameSystemSuffix(interviewNameRef.current ?? '');
       const elongatingSuppressedForUserTurn = userTurnSuppressesElongatingProbe(trimmed);
       const hadPriorSubstantiveAnswerForFrustrationOffer =
         metaCommentClassification?.type === 'frustration' && !repeatedFrustrationInMoment
@@ -9796,7 +10160,7 @@ The participant **confirmed** skipping after the skip confirmation prompt. In **
           message: 'system_prompt_participant_name_resolution',
           data: {
             participantFirstNameForSpoken: participantFirstNameForSpoken || null,
-            promptNameFromProfile: getInterviewUserFirstNameForPrompt(profile) || null,
+            promptNameFromProfile: interviewNameRef.current || null,
           },
           timestamp: Date.now(),
         }),
@@ -10016,7 +10380,7 @@ The participant **confirmed** skipping after the skip confirmation prompt. In **
                 message: 'parallel_sentence_name_sources',
                 data: {
                   participantFirstNameForSpoken: participantFirstNameForSpoken || null,
-                  freshNameFromProfile: getInterviewUserFirstNameForPrompt(profile) || null,
+                  freshNameFromProfile: interviewNameRef.current || null,
                   sentencePreview: spoken.slice(0, 120),
                 },
                 timestamp: Date.now(),
@@ -10025,7 +10389,7 @@ The participant **confirmed** skipping after the skip confirmation prompt. In **
             // #endregion
             if (userId) {
               const rtd = getSessionLogRuntime();
-              const freshNameFromProfile = getInterviewUserFirstNameForPrompt(profile);
+              const freshNameFromProfile = interviewNameRef.current ?? '';
               writeSessionLog({
                 userId,
                 attemptId: rtd.attemptId,
@@ -10366,8 +10730,10 @@ The participant **confirmed** skipping after the skip confirmation prompt. In **
         if (
           moment4ThresholdProbeAskedRef.current &&
           !moment5QuestionDeliveredRef.current &&
+          !moment5QuestionDeliveryInFlightRef.current &&
           !hasMoment5PrimaryAnchorInTranscript
         ) {
+          moment5QuestionDeliveryInFlightRef.current = true;
           const m5Raw = buildMoment4ThresholdAnswerToMoment5Bundle(
             participantFirstNameForSpoken,
             MOMENT_5_ACCOUNTABILITY_QUESTION_TEXT,
@@ -10386,8 +10752,12 @@ The participant **confirmed** skipping after the skip confirmation prompt. In **
           currentInterviewMomentRef.current = 5;
           moment5QuestionDeliveredRef.current = true;
           moment5PrimaryAnchorDeliveredSessionRef.current = true;
-          if (textToParallelStream.spokenStarted) {
-            await speakTextSafe(m5Spoken, ASSISTANT_INTERVIEW_SPEECH);
+          try {
+            if (textToParallelStream.spokenStarted) {
+              await speakTextSafe(m5Spoken, ASSISTANT_INTERVIEW_SPEECH);
+            }
+          } finally {
+            moment5QuestionDeliveryInFlightRef.current = false;
           }
         }
       }
@@ -11062,10 +11432,11 @@ The participant **confirmed** skipping after the skip confirmation prompt. In **
           recentAssistantMessagesForAck(messagesToUse)
         );
         {
+          const closingInterviewName = interviewNameRef.current ?? '';
           const preNameClose = displayText;
           displayText = dedupeAdjacentBoundaryValidationsBeforeParticipantName(
             sanitizeAssistantInterviewerCharacterNames(displayText),
-            participantFirstNameForSpoken,
+            closingInterviewName,
           );
           // #region agent log
           if (
@@ -11093,7 +11464,7 @@ The participant **confirmed** skipping after the skip confirmation prompt. In **
           }
           // #endregion
         }
-        displayText = ensureSpokenTextIncludesParticipantFirstName(displayText, participantFirstNameForSpoken, {
+        displayText = ensureSpokenTextIncludesParticipantFirstName(displayText, interviewNameRef.current ?? '', {
           allowAppendWhenMissing: true,
         });
         const finalAssistant: MessageWithScenario = {
@@ -12361,7 +12732,7 @@ The participant **confirmed** skipping after the skip confirmation prompt. In **
         lastQuestionText: lastQuestionTextRef.current,
         priorUserUtteranceCount: priorUserUtteranceCountForWhisperGate,
         isInterviewAppRoute,
-        hasProfileFirstName: !!getInterviewUserFirstNameForPrompt(profile),
+        hasProfileFirstName: !!interviewNameRef.current,
         suppressMetaClassificationPostMetaAckAwaitingSubstantive: suppressMetaClassificationPostMetaAckAwaitingSubstantiveGate,
         spokenWordCount: wc,
       });
@@ -13452,6 +13823,9 @@ The participant **confirmed** skipping after the skip confirmation prompt. In **
       interviewMomentsCompleteRef.current = resumePlan.momentsComplete;
       currentInterviewMomentRef.current = resumePlan.effectiveMoment;
       personalHandoffInjectedRef.current = resumePlan.personalHandoffInjected;
+      if (!interviewNameRef.current) {
+        interviewNameRef.current = extractInterviewNameFromTranscript(transcriptMessages);
+      }
       moment4ThresholdProbeAskedRef.current = transcriptMessages.some(
         (m) =>
           m.role === 'assistant' &&
@@ -14707,11 +15081,16 @@ The participant **confirmed** skipping after the skip confirmation prompt. In **
                   const raw = (data.content?.[0]?.text ?? '{}') as string;
                   const parsedM4 = parseJsonObjectFromModelText(raw) as PersonalMomentScoreResult;
                   parsedM4.pillarScores = normalizeScoresByEvidence(parsedM4.pillarScores, parsedM4.keyEvidence);
-                  applyElaborationAbsenceAfterNormalizeMoment4(
+                  const depthModifierMeta = applyElaborationAbsenceAfterNormalizeMoment4(
                     parsedM4,
                     scoringSlice,
                     moment4SpecificityScoringRef.current,
+                    msgsDeferred,
                   );
+                  void remoteLog('[SCORING_DEPTH_MODIFIER]', {
+                    scoring_slice: 'moment_4',
+                    ...depthModifierMeta,
+                  });
                   normalizePersonalMomentContemptTierBreakdown(parsedM4);
                   return parsedM4;
                 },
@@ -14822,7 +15201,11 @@ The participant **confirmed** skipping after the skip confirmation prompt. In **
                   const raw = (data.content?.[0]?.text ?? '{}') as string;
                   const parsedM5 = parseJsonObjectFromModelText(raw) as PersonalMomentScoreResult;
                   parsedM5.pillarScores = normalizeScoresByEvidence(parsedM5.pillarScores, parsedM5.keyEvidence);
-                  applyElaborationAbsenceAfterNormalizeMoment5(parsedM5, sliceM5);
+                  const depthModifierMeta = applyElaborationAbsenceAfterNormalizeMoment5(parsedM5, sliceM5, msgsDeferred, m5Meta);
+                  void remoteLog('[SCORING_DEPTH_MODIFIER]', {
+                    scoring_slice: 'moment_5',
+                    ...depthModifierMeta,
+                  });
                   normalizePersonalMomentContemptTierBreakdown(parsedM5);
                   return parsedM5;
                 },
@@ -14858,6 +15241,7 @@ The participant **confirmed** skipping after the skip confirmation prompt. In **
             pillarConfidence: s.pillarConfidence,
             keyEvidence: s.keyEvidence,
             scenarioName: s.scenarioName,
+            mentalizing_inference_source: s.mentalizing_inference_source,
           };
         };
         const completionGateStandard = evaluateInterviewCompletionGate({
@@ -15394,11 +15778,16 @@ The participant **confirmed** skipping after the skip confirmation prompt. In **
                   const raw = (data.content?.[0]?.text ?? '{}') as string;
                   const parsed = parseJsonObjectFromModelText(raw) as PersonalMomentScoreResult;
                   parsed.pillarScores = normalizeScoresByEvidence(parsed.pillarScores, parsed.keyEvidence);
-                  applyElaborationAbsenceAfterNormalizeMoment4(
+                  const depthModifierMeta = applyElaborationAbsenceAfterNormalizeMoment4(
                     parsed,
                     scoringSlice,
                     moment4SpecificityScoringRef.current,
+                    finalMessages,
                   );
+                  void remoteLog('[SCORING_DEPTH_MODIFIER]', {
+                    scoring_slice: 'moment_4',
+                    ...depthModifierMeta,
+                  });
                   normalizePersonalMomentContemptTierBreakdown(parsed);
                   return parsed;
                 },
@@ -15468,7 +15857,11 @@ The participant **confirmed** skipping after the skip confirmation prompt. In **
                   const raw = (data.content?.[0]?.text ?? '{}') as string;
                   const parsed = parseJsonObjectFromModelText(raw) as PersonalMomentScoreResult;
                   parsed.pillarScores = normalizeScoresByEvidence(parsed.pillarScores, parsed.keyEvidence);
-                  applyElaborationAbsenceAfterNormalizeMoment5(parsed, slice);
+                  const depthModifierMeta = applyElaborationAbsenceAfterNormalizeMoment5(parsed, slice, finalMessages, m5Meta);
+                  void remoteLog('[SCORING_DEPTH_MODIFIER]', {
+                    scoring_slice: 'moment_5',
+                    ...depthModifierMeta,
+                  });
                   normalizePersonalMomentContemptTierBreakdown(parsed);
                   return parsed;
                 },
@@ -15745,6 +16138,7 @@ The participant **confirmed** skipping after the skip confirmation prompt. In **
                   pillarConfidence: scenarioScoresRef.current[1].pillarConfidence,
                   keyEvidence: scenarioScoresRef.current[1].keyEvidence,
                   scenarioName: scenarioScoresRef.current[1].scenarioName,
+                  mentalizing_inference_source: scenarioScoresRef.current[1].mentalizing_inference_source,
                 }
               : null,
             scenario_2_scores: scenarioScoresRef.current[2]
@@ -15753,6 +16147,7 @@ The participant **confirmed** skipping after the skip confirmation prompt. In **
                   pillarConfidence: scenarioScoresRef.current[2].pillarConfidence,
                   keyEvidence: scenarioScoresRef.current[2].keyEvidence,
                   scenarioName: scenarioScoresRef.current[2].scenarioName,
+                  mentalizing_inference_source: scenarioScoresRef.current[2].mentalizing_inference_source,
                 }
               : null,
             scenario_3_scores: scenarioScoresRef.current[3]
@@ -15761,6 +16156,7 @@ The participant **confirmed** skipping after the skip confirmation prompt. In **
                   pillarConfidence: scenarioScoresRef.current[3].pillarConfidence,
                   keyEvidence: scenarioScoresRef.current[3].keyEvidence,
                   scenarioName: scenarioScoresRef.current[3].scenarioName,
+                  mentalizing_inference_source: scenarioScoresRef.current[3].mentalizing_inference_source,
                 }
               : null,
             transcript: finalMessages,

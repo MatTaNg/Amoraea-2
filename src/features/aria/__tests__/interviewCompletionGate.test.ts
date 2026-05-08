@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it } from '@jest/globals';
 import { evaluateInterviewCompletionGate, pillarScoresHaveNumericAssessment } from '../interviewCompletionGate';
 
 describe('pillarScoresHaveNumericAssessment', () => {
@@ -28,6 +28,31 @@ describe('evaluateInterviewCompletionGate', () => {
     expect(r.ok).toBe(true);
   });
 
+  it('passes when Moment 4 was scored but all markers are non-assessable/null', () => {
+    const r = evaluateInterviewCompletionGate({
+      scenario1: bundle(1),
+      scenario2: bundle(2),
+      scenario3: bundle(3),
+      moment4: {
+        pillarScores: {
+          contempt_recognition: null,
+          contempt_expression: null,
+          commitment_threshold: null,
+          accountability: null,
+          mentalizing: null,
+        },
+        keyEvidence: {
+          contempt_recognition: 'No substantive engagement with grudge/dislike question in this slice.',
+          contempt_expression: 'No substantive engagement with grudge/dislike question in this slice.',
+          commitment_threshold: 'No substantive engagement with grudge/dislike question in this slice.',
+          accountability: 'No substantive engagement with grudge/dislike question in this slice.',
+          mentalizing: 'No substantive engagement with grudge/dislike question in this slice.',
+        },
+      },
+    });
+    expect(r.ok).toBe(true);
+  });
+
   it('fails when a scenario is null', () => {
     const r = evaluateInterviewCompletionGate({
       scenario1: bundle(1),
@@ -48,5 +73,16 @@ describe('evaluateInterviewCompletionGate', () => {
     });
     expect(r.ok).toBe(false);
     if (!r.ok) expect(r.incomplete_reason).toBe('missing_moment_4');
+  });
+
+  it('fails when Moment 4 has no numeric score and no scored evidence', () => {
+    const r = evaluateInterviewCompletionGate({
+      scenario1: bundle(1),
+      scenario2: bundle(2),
+      scenario3: bundle(3),
+      moment4: { pillarScores: { mentalizing: null } },
+    });
+    expect(r.ok).toBe(false);
+    if (!r.ok) expect(r.detail).toContain('moment_4_scores missing scored pillar evidence');
   });
 });

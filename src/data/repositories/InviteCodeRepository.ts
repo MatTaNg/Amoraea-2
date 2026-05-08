@@ -2,6 +2,7 @@ import { supabase } from '../supabase/client';
 import { signOutIfUsersAuthFkViolation } from '../supabase/signOutIfUsersAuthFkViolation';
 import { isAlphaTesterReferralCode } from '@/constants/alphaReferral';
 import { normalizeShareableReferralCode } from '@features/referrals/shareableReferralCode';
+import type { Gender } from '@domain/models/Profile';
 
 const INVITE_CODE_LENGTH = 6;
 const ALPHABET = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789'; // Excluded I,O,0,1 for clarity
@@ -29,7 +30,7 @@ export class InviteCodeRepository {
 
   async ensureUserWithInviteCode(
     userId: string,
-    options: { email?: string; referralCode?: string }
+    options: { email?: string; referralCode?: string; age?: number; gender?: Gender }
   ): Promise<{ inviteCode: string }> {
     const { data: existing } = await supabase
       .from('users')
@@ -79,6 +80,8 @@ export class InviteCodeRepository {
     const { error } = await supabase.from('users').insert({
       id: userId,
       email: options.email ?? null,
+      age: typeof options.age === 'number' ? options.age : null,
+      gender: options.gender ?? null,
       invite_code: inviteCode,
       referred_by_id: referredById,
       is_alpha_tester: isAlphaTester,
