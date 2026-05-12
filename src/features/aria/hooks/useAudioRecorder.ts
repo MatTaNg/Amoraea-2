@@ -521,27 +521,6 @@ export function useAudioRecorder({
                 timing.firstChunkReceivedMs = firstChunkReceivedMs;
                 timing.chunkLatencyMs = firstChunkReceivedMs - timing.recorderStartCalledMs;
               }
-              // #region agent log
-              fetch('http://127.0.0.1:7789/ingest/668e0bd5-3283-4492-9f48-e33846c18218', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json', 'X-Debug-Session-Id': 'c61a43' },
-                body: JSON.stringify({
-                  sessionId: 'c61a43',
-                  location: 'useAudioRecorder.ts:ondataavailable:first',
-                  message: 'first_media_chunk',
-                  data: {
-                    hypothesisId: 'H5',
-                    ms_since_tap: Date.now() - tapIntentAtMs,
-                    chunk_bytes: e.data.size,
-                    micPrimedBeforeTap: streamWasPrimedFromTts,
-                    recorder_pre_initialized: recorderPreInitialized,
-                    chunk_latency_ms: timing?.chunkLatencyMs ?? null,
-                  },
-                  timestamp: Date.now(),
-                  runId: 'post-fix',
-                }),
-              }).catch(() => {});
-              // #endregion
             }
           }
         };
@@ -617,47 +596,9 @@ export function useAudioRecorder({
         };
 
         mediaRecorder.start(100);
-        // #region agent log
-        fetch('http://127.0.0.1:7789/ingest/668e0bd5-3283-4492-9f48-e33846c18218', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json', 'X-Debug-Session-Id': 'c61a43' },
-          body: JSON.stringify({
-            sessionId: 'c61a43',
-            location: 'useAudioRecorder.ts:startWebRecording:afterStart',
-            message: 'mediarecorder_started_sync_meter',
-            data: {
-              hypothesisId: 'H1',
-              ms_since_tap: recorderStartCalledMs - tapIntentAtMs,
-              micPrimedBeforeTap: streamWasPrimedFromTts,
-              recorder_pre_initialized: recorderPreInitialized,
-              delay_ms_applied: delayMs,
-            },
-            timestamp: Date.now(),
-            runId: 'post-fix',
-          }),
-        }).catch(() => {});
-        // #endregion
 
         meterOnce();
         const firstMeterAt = Date.now();
-        // #region agent log
-        fetch('http://127.0.0.1:7789/ingest/668e0bd5-3283-4492-9f48-e33846c18218', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json', 'X-Debug-Session-Id': 'c61a43' },
-          body: JSON.stringify({
-            sessionId: 'c61a43',
-            location: 'useAudioRecorder.ts:startWebRecording:first_meter',
-            message: 'first_meter_sample_after_start',
-            data: {
-              hypothesisId: 'H3',
-              ms_after_mediarecorder_start: firstMeterAt - recorderStartCalledMs,
-              ms_since_tap: firstMeterAt - tapIntentAtMs,
-            },
-            timestamp: Date.now(),
-            runId: 'post-fix',
-          }),
-        }).catch(() => {});
-        // #endregion
         webMeterRafRef.current = requestAnimationFrame(runMeterLoop);
 
         setIsRecording(true);

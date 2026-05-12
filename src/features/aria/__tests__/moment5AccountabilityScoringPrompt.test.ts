@@ -26,4 +26,38 @@ describe('buildMoment5AccountabilityScoringPrompt', () => {
     expect(prompt).toContain('regulation at 5');
     expect(prompt).toContain('Accountability and contempt_expression may still be scored normally');
   });
+
+  it('includes warm acknowledgment metadata when the probe used the standard scripted lead-in', () => {
+    const prompt = buildMoment5AccountabilityScoringPrompt(
+      [
+        { role: 'assistant', content: 'Think of a time when you had a conflict with someone important to you.' },
+        { role: 'user', content: 'We argued sometimes but talked it through.' },
+      ],
+      {
+        accountabilityProbeFired: true,
+        warmAckBeforeAccountabilityProbe: true,
+      },
+    );
+
+    expect(prompt).toContain('WARM ACKNOWLEDGMENT BEFORE PROBE');
+    expect(prompt).toContain('standard pipeline tone');
+  });
+
+  it('echoes path flags and abstract-followup note when metadata includes them', () => {
+    const prompt = buildMoment5AccountabilityScoringPrompt(
+      [{ role: 'user', content: 'stub' }],
+      {
+        accountabilityProbeFired: true,
+        conflictValidityClarificationFired: true,
+        conflictValiditySecondResponseAbstract: true,
+        accountabilityProbeFiredOnAbstractFollowup: true,
+      },
+    );
+
+    expect(prompt).toContain('PATH FLAGS');
+    expect(prompt).toContain('conflict_validity_clarification_fired: true');
+    expect(prompt).toContain('conflict_validity_second_response_abstract: true');
+    expect(prompt).toContain('accountability_probe_fired_on_abstract_followup: true');
+    expect(prompt).toContain('ABSTRACT FOLLOW-UP AFTER SPECIFICITY REDIRECT');
+  });
 });

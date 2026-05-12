@@ -111,7 +111,8 @@ describe('interviewDisengagementProbes', () => {
     const detail = evaluateRepairRefusalDetection("There's nothing to repair. That's not Daniel's responsibility.", 9);
     expect(detail).toMatchObject({
       repair_refusal_detected: true,
-      trigger_reason: 'explicit_refusal_language',
+      trigger_condition: 'explicit_refusal',
+      trigger_reason: 'explicit_refusal',
       response_word_count: 9,
       repair_refusal_anomaly: false,
     });
@@ -130,7 +131,7 @@ describe('interviewDisengagementProbes', () => {
     expect(pick?.probe).toBe(CLIENT_REPAIR_REFUSAL_PROBE);
   });
 
-  it('picks repair refusal for fewer than 15 words with no repair content', () => {
+  it('picks repair refusal for fewer than 8 words with no repair content', () => {
     const pick = pickClientDisengagementProbe({
       userAnswer: 'They are both bad at this.',
       lastAssistantContent: 'How do you think this situation could be repaired?',
@@ -143,7 +144,47 @@ describe('interviewDisengagementProbes', () => {
       isFirstUserTurnInScenario: true,
     });
     expect(pick?.kind).toBe('repair_refusal');
-    expect(pick?.kind === 'repair_refusal' ? pick.repairRefusal.trigger_reason : null).toBe('no_repair_content');
+    expect(pick?.kind === 'repair_refusal' ? pick.repairRefusal.trigger_condition : null).toBe('response_too_short');
+  });
+
+  it('does not pick repair refusal for short communication action', () => {
+    const userAnswer = "They just talk about what's going on and go from there";
+    const detail = evaluateRepairRefusalDetection(
+      userAnswer,
+      userAnswer.split(/\s+/).length,
+      'How do you think this situation could be repaired?',
+    );
+    expect(detail).toMatchObject({
+      repair_refusal_detected: false,
+      trigger_condition: null,
+      repair_refusal_anomaly: false,
+      has_concrete_repair_content: true,
+    });
+    const pick = pickClientDisengagementProbe({
+      userAnswer,
+      lastAssistantContent: 'How do you think this situation could be repaired?',
+      wordCount: userAnswer.split(/\s+/).length,
+      answeringAfterProbe: false,
+      exemptMetaTurn: false,
+      isGreetingNameTurn: false,
+      isExplicitDecline: false,
+      isAssistantRecoveryOrMetaLine: false,
+      isFirstUserTurnInScenario: true,
+    });
+    expect(pick?.kind).not.toBe('repair_refusal');
+  });
+
+  it('picks repair refusal for pure redirect to the other party only', () => {
+    const detail = evaluateRepairRefusalDetection(
+      'Sophie just needs to calm down and accept that he needs time.',
+      11,
+      'If you were Daniel, how would you repair this?',
+    );
+    expect(detail).toMatchObject({
+      repair_refusal_detected: true,
+      trigger_condition: 'redirect_to_other_party_only',
+      response_word_count: 11,
+    });
   });
 
   it('does not pick repair refusal for third-person or bilateral repair plans', () => {

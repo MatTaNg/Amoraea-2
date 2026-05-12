@@ -1,6 +1,8 @@
 import React from "react";
 import { View, Text, StyleSheet } from "react-native";
-import { useRouter } from "expo-router";
+import { useNavigation } from "@react-navigation/native";
+import type { NativeStackNavigationProp } from "@react-navigation/native-stack";
+import type { DatingProfileStackParamList } from "@app/navigation/DatingProfileOnboardingNavigator";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useAuth } from "@/shared/hooks/AuthProvider";
 import { Button } from "@/shared/ui/Button";
@@ -9,9 +11,10 @@ import { ASSESSMENT_IDS } from "@/data/services/assessmentService";
 import { theme } from "@/shared/theme/theme";
 
 const INSTRUMENT_LABELS: Record<string, { label: string; time: string }> = {
-  "ECR-36": { label: "Attachment Style", time: "~8 min" },
+  "ECR-36": { label: "Attachment Style", time: "~5 min" },
   "CONFLICT-30": { label: "Conflict Style", time: "~3–4 min" },
   "PVQ-21": { label: "Schwartz Values", time: "~4 min" },
+  RELATIONSHIP_TRAITS_8: { label: "Relationship Traits", time: "~2 min" },
 };
 
 const styles = StyleSheet.create({
@@ -83,7 +86,7 @@ const styles = StyleSheet.create({
 });
 
 export function AssessmentIntroScreen() {
-  const router = useRouter();
+  const navigation = useNavigation<NativeStackNavigationProp<DatingProfileStackParamList>>();
   const { user } = useAuth();
   const progressPct = 0;
 
@@ -94,7 +97,7 @@ export function AssessmentIntroScreen() {
       console.error(result.error);
       return;
     }
-    router.replace("/onboarding/assessments/instrument?instrument=ECR-36");
+    navigation.replace("DatingInstrument", { instrument: "ECR-36" });
   };
 
   return (
@@ -104,7 +107,7 @@ export function AssessmentIntroScreen() {
       </View>
       <Text style={styles.title}>What we're about to measure</Text>
       <Text style={{ fontSize: 16, color: theme.colors.textSecondary, lineHeight: 24, marginBottom: 24 }}>
-        These three assessments cover the psychological dimensions most predictive of
+        These four assessments cover the psychological dimensions most predictive of
         relationship compatibility. You can pause between them.
       </Text>
       <View style={styles.list}>
@@ -122,7 +125,7 @@ export function AssessmentIntroScreen() {
           </View>
         ))}
       </View>
-      <Text style={styles.total}>Total: ~10–15 minutes</Text>
+      <Text style={styles.total}>Total: ~12–18 minutes</Text>
       <Text style={styles.note}>
         Your answers are saved automatically after each assessment.
       </Text>

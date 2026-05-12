@@ -28,6 +28,12 @@ import {
 import { fetchInterviewAttemptRevealSnapshot } from '@utilities/fetchInterviewAttemptRevealSnapshot';
 import { StackActions, useFocusEffect } from '@react-navigation/native';
 import { modalOnboardingService } from '@/datingProfile/screens/onboarding/modals/services/modalOnboardingService';
+import { profilesRepo } from '@/data/repos/profilesRepo';
+import {
+  getCompletedAssessments,
+  getFirstIncompleteAssessment,
+  type AssessmentId,
+} from '@/data/services/assessmentService';
 
 const BG = '#0a0a0f';
 const ACCENT = '#3b82f6';
@@ -41,6 +47,28 @@ const FONT_DISPLAY = Platform.OS === 'web' ? "'Cormorant Garamond', serif" : und
 const FONT_BODY = Platform.OS === 'web' ? "'DM Sans', system-ui, sans-serif" : undefined;
 const GOOGLE_FONTS_HREF =
   'https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,400;0,500;0,600;1,400&family=DM+Sans:ital,opsz,wght@0,9..40,400;0,9..40,500;0,9..40,600;1,9..40,400&display=swap';
+
+function isAssessmentId(value: unknown): value is AssessmentId {
+  return (
+    value === 'ECR-36' ||
+    value === 'CONFLICT-30' ||
+    value === 'PVQ-21' ||
+    value === 'RELATIONSHIP_TRAITS_8'
+  );
+}
+
+function navigateToAssessment(
+  navigation: any,
+  userId: string,
+  instrument: AssessmentId,
+) {
+  const screen = instrument === 'CONFLICT-30' ? 'DatingConflictStyle' : 'DatingInstrument';
+  navigation.navigate('DatingProfileOnboarding', {
+    userId,
+    screen,
+    params: instrument === 'CONFLICT-30' ? {} : { instrument },
+  });
+}
 
 function loadWebFontsOnce() {
   if (Platform.OS !== 'web' || typeof document === 'undefined') return;
@@ -99,6 +127,7 @@ export const PostInterviewPassedScreen: React.FC<{ navigation: any; route: { par
   const [retakeBusy, setRetakeBusy] = useState(false);
   /** Modal dating onboarding resume step from merged profile + draft (`complete` = all modal steps satisfied). */
   const [datingModalResumeStep, setDatingModalResumeStep] = useState<string | null>(null);
+  const [datingProfileFullyComplete, setDatingProfileFullyComplete] = useState(false);
   const [profileCtaBusy, setProfileCtaBusy] = useState(false);
 
   useEffect(() => {
@@ -203,8 +232,19 @@ export const PostInterviewPassedScreen: React.FC<{ navigation: any; route: { par
         const uid = auth.user?.id ?? userId;
         if (!uid) return;
         const progress = await modalOnboardingService.getProgress(uid);
-        if (cancelled || !progress.success || !progress.data?.currentStep) return;
-        setDatingModalResumeStep(progress.data.currentStep);
+        const profileResult = await profilesRepo.getProfile(uid);
+        if (cancelled) return;
+        if (progress.success && progress.data?.currentStep) {
+          setDatingModalResumeStep(progress.data.currentStep);
+        }
+        if (profileResult.success && profileResult.data) {
+          const profile = profileResult.data as Record<string, unknown>;
+          setDatingProfileFullyComplete(
+            profile.assessmentsCompleted === true
+          );
+        } else {
+          setDatingProfileFullyComplete(false);
+        }
       })();
       return () => {
         cancelled = true;
@@ -212,8 +252,7 @@ export const PostInterviewPassedScreen: React.FC<{ navigation: any; route: { par
     }, [userId]),
   );
 
-  const datingModalComplete = datingModalResumeStep === 'complete';
-  const profileCtaLabel = datingModalComplete ? 'Edit your profile' : 'Complete your profile';
+  const profileCtaLabel = datingProfileFullyComplete ? 'Edit your profile' : 'Complete your profile';
 
   /**
    * Re-resolve modal progress at tap time (React state can lag `useFocusEffect`) and use `push` for edit so React
@@ -226,11 +265,38 @@ export const PostInterviewPassedScreen: React.FC<{ navigation: any; route: { par
     setProfileCtaBusy(true);
     try {
       const progress = await modalOnboardingService.getProgress(uid);
-      let goEdit = datingModalResumeStep === 'complete';
+      const profileResult = await profilesRepo.getProfile(uid);
+      let goEdit = datingProfileFullyComplete;
       if (progress.success && progress.data?.currentStep) {
         const step = progress.data.currentStep;
         setDatingModalResumeStep(step);
-        goEdit = step === 'complete';
+      }
+      if (profileResult.success && profileResult.data) {
+        const profile = profileResult.data as Record<string, unknown>;
+        const assessmentsComplete = profile.assessmentsCompleted === true;
+        const currentAssessment = isAssessmentId(profile.currentAssessment)
+          ? profile.currentAssessment
+          : null;
+
+        if (!assessmentsComplete && currentAssessment) {
+          navigateToAssessment(navigation, uid, currentAssessment);
+          return;
+        }
+
+        if (!assessmentsComplete) {
+          const completed = await getCompletedAssessments(uid);
+          const nextIncomplete =
+            completed.success && completed.data.length > 0
+              ? getFirstIncompleteAssessment(completed.data)
+              : null;
+          if (nextIncomplete) {
+            navigateToAssessment(navigation, uid, nextIncomplete);
+            return;
+          }
+        }
+
+        goEdit = assessmentsComplete;
+        setDatingProfileFullyComplete(goEdit);
       }
       if (goEdit) {
         navigation.dispatch(StackActions.push('DatingProfileEdit', { userId: uid }));
@@ -240,7 +306,7 @@ export const PostInterviewPassedScreen: React.FC<{ navigation: any; route: { par
     } finally {
       setProfileCtaBusy(false);
     }
-  }, [userId, navigation, datingModalResumeStep]);
+  }, [userId, navigation, datingProfileFullyComplete]);
 
   const confirmAndRetakeInterview = () => {
     const msg =
@@ -345,7 +411,7 @@ export const PostInterviewPassedScreen: React.FC<{ navigation: any; route: { par
             ))}
           </View>
 
-          {/* <Pressable
+          <Pressable
             onPress={() => void openProfileCta()}
             disabled={profileCtaBusy}
             style={({ pressed }) => [
@@ -367,7 +433,7 @@ export const PostInterviewPassedScreen: React.FC<{ navigation: any; route: { par
           <Text style={styles.profileOnboardingHint}>
             Next up: your name, photos, match preferences, and a few short assessments — everything we need to introduce
             you properly.
-          </Text> */}
+          </Text>
 
           <View style={styles.divider} />
 

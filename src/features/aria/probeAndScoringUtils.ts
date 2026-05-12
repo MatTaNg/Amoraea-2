@@ -80,6 +80,30 @@ export function normalizeScoresByEvidence(
   return out;
 }
 
+/** Markers scored in Moment 4 personal slice (matches scoring prompt contract). */
+export const MOMENT4_SCORE_MARKER_IDS = [
+  'contempt_recognition',
+  'contempt_expression',
+  'commitment_threshold',
+  'accountability',
+  'mentalizing',
+] as const;
+
+/**
+ * After {@link normalizeScoresByEvidence}, numeric-only output can be `{}` even when the model returned
+ * explicit nulls and assessed keyEvidence (all scores dropped as “no evidence”). Restore explicit `null`
+ * for each Moment 4 marker so persistence and {@link personalMomentBundleWasScored} see a full bundle.
+ */
+export function mergeMoment4PillarScoresAfterEvidenceNormalize(
+  numericFiltered: Record<string, number>
+): Record<string, number | null> {
+  const out: Record<string, number | null> = {};
+  for (const id of MOMENT4_SCORE_MARKER_IDS) {
+    out[id] = Object.prototype.hasOwnProperty.call(numericFiltered, id) ? numericFiltered[id]! : null;
+  }
+  return out;
+}
+
 /** Named fixtures for tests — must NOT count as a temporally specific moment (habitual / values-only). */
 export const MOMENT5_SPECIFIC_MOMENT_NEGATIVE_EXAMPLES = [
   "I try to acknowledge when people I care about do something significant, I'll send a message or take them out for a meal.",
@@ -199,7 +223,11 @@ export const MOMENT_5_ACCOUNTABILITY_PROBE_TEXT = 'What was your part in how it 
 export const MOMENT_5_CONFLICT_VALIDITY_CLARIFICATION_TEXT =
   'Was there a point where it actually got tense between you two, or did it resolve pretty smoothly?';
 
-/** Moment 5 only — when the user disclosed bereavement/death, prepend one brief ack before the scripted probe (same assistant turn). */
+/**
+ * Moment 5 scripted accountability follow-up with a brief warmth beat before the question.
+ * Used whenever the client injects this probe (not only bereavement): first-person conflict narratives
+ * are inherently vulnerable; leading with appreciation avoids sounding cold before accountability.
+ */
 export const MOMENT_5_ACCOUNTABILITY_PROBE_WITH_GRIEF_ACK_TEXT =
   'I appreciate you getting vulnerable with me. What was your part in how it unfolded?';
 
@@ -219,10 +247,14 @@ export const MOMENT_5_PERSISTENT_ABSTRACT_MOVE_ON_TEXT =
 export function looksLikeMoment5SpecificityRedirectPrompt(text: string | null | undefined): boolean {
   const n = (text ?? '').replace(/\s+/g, ' ').trim().toLowerCase();
   if (!n) return false;
-  return (
-    (n.includes('specific time') && n.includes('walk me through')) ||
-    (n.includes('specific person') && n.includes('comes to mind') && n.includes('conflict'))
-  );
+  /** Canonical client inject + common model paraphrases */
+  const canonical =
+    (n.includes('can you think of a specific time') || n.includes('could you think of a specific time')) &&
+    (n.includes('walk me through') || n.includes('walk me thru'));
+  const relaxed =
+    (n.includes('specific time') && (n.includes('walk me through') || n.includes('walk me thru'))) ||
+    (n.includes('specific person') && n.includes('comes to mind') && n.includes('conflict'));
+  return canonical || relaxed;
 }
 
 export function looksLikeMoment5ConflictValidityClarificationPrompt(text: string | null | undefined): boolean {
@@ -415,29 +447,6 @@ export function moment5PersonalNarrativeHasConcreteAnchor(userText: string): boo
     (dyadicOrEpisode && (relationalAnchor || situationalAnchor || wc >= 28));
 
   if (wc >= 80 || /\bbest friend\b/i.test(lower) || /\bthere was a time\b/i.test(lower)) {
-    // #region agent log
-    fetch('http://127.0.0.1:7789/ingest/668e0bd5-3283-4492-9f48-e33846c18218', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'X-Debug-Session-Id': 'e43434' },
-      body: JSON.stringify({
-        sessionId: 'e43434',
-        runId: 'm5-anchor-debug',
-        hypothesisId: 'H2_anchor_false_negative',
-        location: 'probeAndScoringUtils.ts:moment5PersonalNarrativeHasConcreteAnchor',
-        message: 'm5_anchor_eval',
-        data: {
-          wc,
-          relationalAnchor,
-          dyadicOrEpisode,
-          situationalAnchor,
-          strongNarrativeOverride,
-          concrete,
-          preview: raw.slice(0, 220),
-        },
-        timestamp: Date.now(),
-      }),
-    }).catch(() => {});
-    // #endregion
   }
 
   return concrete;
@@ -457,12 +466,13 @@ export function isMoment5InexperienceFallbackPrompt(text: string): boolean {
   );
 }
 
-/** True when assistant turn is the scripted Moment 5 accountability follow-up probe. */
+/** True when assistant turn is the scripted Moment 5 accountability follow-up probe (with or without the warmth prefix). */
 export function looksLikeMoment5AccountabilityProbeAssistantPrompt(text: string | null | undefined): boolean {
   const t = (text ?? '').replace(/\s+/g, ' ').trim().toLowerCase();
   return (
     t.includes('what was your part in how it unfolded') ||
-    (t.includes('your part') && t.includes('unfolded'))
+    (t.includes('your part') && t.includes('unfolded')) ||
+    (t.includes('appreciate you getting vulnerable') && t.includes('your part'))
   );
 }
 
@@ -599,6 +609,49 @@ export function evaluateMoment5AccountabilitySelfReference(
     accountability_probe_self_reference_detected: false,
     self_reference_type: generalAdvice ? 'general_advice' : 'process_description',
   };
+}
+
+/**
+ * Moment 5: true when the user's answer is **abstract** for pipeline purposes — no anchored episode,
+ * no concrete first-person behavior in a described conflict, only generic principles or process habits.
+ * Used after the specificity redirect to decide accountability-probe vs move-on.
+ */
+export function moment5ResponseIsAbstract(userText: string): boolean {
+  const raw = userText.replace(/\s+/g, ' ').trim();
+  if (!raw || raw.length < 20) return true;
+  if (moment5PersonalNarrativeHasConcreteAnchor(raw)) return false;
+  if (moment5AnswerHasExplicitSelfAccountability(raw)) return false;
+
+  const sr = evaluateMoment5AccountabilitySelfReference(raw);
+  if (sr.self_reference_type === 'specific_ownership' || sr.self_reference_type === 'boundary_expression') {
+    return false;
+  }
+
+  const lower = raw.toLowerCase();
+  /** Named other + narrative cue — not abstract even if {@link moment5PersonalNarrativeHasConcreteAnchor} missed an edge case. */
+  if (
+    /\b(with|from)\s+[A-Z][a-z]{1,24}\b/i.test(raw) &&
+    /\b(said|told|would|did|got|felt|when|after|during|because|argu|fight|tense)\b/i.test(raw)
+  ) {
+    return false;
+  }
+  if (
+    /\b(last\s+(year|month|week|night)|during\s+the\s+breakup|after\s+the\s+argument|one\s+time|at\s+one\s+point|a\s+few\s+years\s+ago)\b/i.test(
+      lower,
+    )
+  ) {
+    return false;
+  }
+  /** Concrete first-person act in conflict context (broader than explicit accountability). */
+  if (
+    /\bi\s+(shut\s+down|walked\s+away|yelled|snapped|avoided|stonewall|said\s+something|didn'?t\s+listen|stopped\s+listening|overreacted|escalated)\b/i.test(
+      lower,
+    )
+  ) {
+    return false;
+  }
+
+  return true;
 }
 
 /**
@@ -925,6 +978,112 @@ export function hasScenarioCQ2OnTopicEngagement(text: string): boolean {
 const SCENARIO_A_TOPIC_RE =
   /\b(emma|ryan|dinner|mother|mom|bill|call|family|first|wrong|tension|hurt|frustrat|angry|upset|clear)\b/i;
 
+/** NBSP + apostrophe variants from ASR/TTS when matching Emma's closing line. */
+export function normalizeInterviewApostrophesForMatching(s: string): string {
+  return s
+    .replace(/\u00a0/g, ' ')
+    .replace(/\u2019/g, "'")
+    .replace(/\u2018/g, "'")
+    .replace(/\u02bc/g, "'")
+    .replace(/\uff07/g, "'")
+    .replace(/\u2032/g, "'");
+}
+
+/**
+ * User echoed Emma's "you've made that very clear" (or a close ASR variant).
+ * When true, do not ask the scripted contempt follow-up about that same line.
+ */
+export function userReferencesEmmaClosingLineQuote(text: string): boolean {
+  const lower = normalizeInterviewApostrophesForMatching(text).replace(/\s+/g, ' ').toLowerCase();
+
+  if (lower.includes("you've made that very clear")) return true;
+  if (lower.includes('you have made that very clear')) return true;
+
+  const variantPatterns: RegExp[] = [
+    /\byou\s+made\s+that\s+very\s+clear\b/i,
+    /\byouve\s+made\s+that\s+very\s+clear\b/i,
+    /\byou'?ve\s+made\s+that\s+(?:really|pretty|so)\s+clear\b/i,
+    /\byou'?ve\s+made\s+(?:that\s+)?(?:it\s+)?very\s+clear\b/i,
+    /\bi\s+know[, ]+\s*you'?ve\s+made\s+that\s+very\s+clear\b/i,
+    /\bshe\s+said\s+['"\u201c]?\s*you\s*(?:'ve|have)\s+made\s+that\s+very\s+clear\b/i,
+    /\bwhen\s+(?:emma\s+)?says\s+['"\u201c]?\s*you\s*(?:'ve|have)\s+made\s+that\s+very\s+clear\b/i,
+    /\bemma\s+says\s+['"\u201c]?\s*you\s*(?:'ve|have)\s+made\s+that\s+very\s+clear\b/i,
+  ];
+  if (variantPatterns.some((re) => re.test(lower))) return true;
+
+  const idxMade = lower.search(/\bmade\b/);
+  const idxThatVeryClear = lower.search(/\bthat\s+very\s+clear\b/);
+  if (idxMade >= 0 && idxThatVeryClear >= 0 && Math.abs(idxMade - idxThatVeryClear) <= 140) {
+    const before = lower.slice(0, idxThatVeryClear + 24);
+    if (/\byou\b/.test(before) || /\bemma\b/.test(before) || /\bshe\b/.test(before)) return true;
+  }
+
+  return false;
+}
+
+/** Skip reasons for {@link evaluateScenarioAQ1ContemptProbePreProbeSkip} (auditable). */
+export type ScenarioAContemptProbeSkipReason =
+  | 'literal_quote_present'
+  | 'register_addressed'
+  | 'pattern_interpretation_tied_to_line';
+
+/**
+ * Pre-probe gate: if the user's **initial** Scenario A Q1 answer already engages Emma's final line,
+ * the scripted contempt probe is redundant. Evaluates conditions 1–3 before {@link hasScenarioAQ1ContemptProbeCoverage}.
+ */
+export function evaluateScenarioAQ1ContemptProbePreProbeSkip(text: string): {
+  skip: boolean;
+  reason: ScenarioAContemptProbeSkipReason | null;
+} {
+  const t = text.replace(/\s+/g, ' ').trim();
+  if (t.length < 8) return { skip: false, reason: null };
+  const lower = normalizeInterviewApostrophesForMatching(t).toLowerCase();
+
+  /** Condition 1 — literal quote or close ASR variant (same line must not get a second scripted ask). */
+  if (userReferencesEmmaClosingLineQuote(t)) return { skip: true, reason: 'literal_quote_present' };
+
+  /** Condition 2 — register of the line (lexicon + Emma/line context, or explicit deeper-than-frustration phrases). */
+  const registerLexicon =
+    /\b(sarcasm|sarcastic|passive[- ]aggressive|sharp(?:ness)?|resigned|resignation|bitter|contemptuous|cutting|dismissive|cold|loaded|pointed|snide)\b/i;
+  const lineOrEmmaContext =
+    /\b(emma|she|her|that\s+line|that\s+comment|what\s+she\s+said|final\s+line|last\s+thing\s+she|when\s+she\s+says)\b/i.test(
+      lower,
+    );
+  const deeperThanSurfaceFrustration =
+    /\bshe'?s\s+given\s+up\b/i.test(lower) ||
+    /\bstopped\s+expecting\b/i.test(lower) ||
+    /\bshe'?s\s+shutting\s+down\b/i.test(lower) ||
+    /\bwriting\s+him\s+off\b/i.test(lower) ||
+    /\b(not\s+just\s+frustration|that'?s\s+not\s+just\s+frustration)\b/i.test(lower) ||
+    /\bgo(es)?\s+deeper\s+than\s+tonight\b/i.test(lower) ||
+    /\bshe'?s\s+being\s+passive[- ]aggressive\b/i.test(lower) ||
+    /\bthat'?s\s+a\s+sarcastic\s+comment\b/i.test(lower) ||
+    /\bshe'?s\s+making\s+a\s+dig\b/i.test(lower) ||
+    /\bthat'?s\s+contempt\b/i.test(lower);
+
+  if (deeperThanSurfaceFrustration) {
+    return { skip: true, reason: 'register_addressed' };
+  }
+  if (registerLexicon.test(lower) && lineOrEmmaContext) {
+    return { skip: true, reason: 'register_addressed' };
+  }
+
+  /** Condition 3 — pattern interpretation tied to that specific line / comment. */
+  const patternTiedToLine =
+    (/\bsaid\s+this\s+before\b/i.test(lower) && /\bnothing\s+changed\b/i.test(lower)) ||
+    /\bclearly\s+said\s+this\s+before\b/i.test(lower) ||
+    /\bisn'?t\s+just\s+about\s+tonight\b/i.test(lower) ||
+    /\bthat\s+line\s+shows\b/i.test(lower) ||
+    /\bshe'?s\s+resigned\s+to\s+it\b/i.test(lower) ||
+    /\bthat\s+comment\s+is\s+about\s+more\s+than\b/i.test(lower);
+
+  if (patternTiedToLine) {
+    return { skip: true, reason: 'pattern_interpretation_tied_to_line' };
+  }
+
+  return { skip: false, reason: null };
+}
+
 /**
  * Scenario A Q1: user already showed a **contempt-quality** read of Emma's "you've made that very clear" line —
  * hostile, dismissive, verdict-issuing, or relationally closing — not mere indirectness or minimization.
@@ -936,16 +1095,14 @@ export function hasScenarioAQ1ContemptProbeCoverage(text: string): boolean {
   const t = text.replace(/\s+/g, ' ').trim();
   if (t.length < 10) return false;
   if (!SCENARIO_A_TOPIC_RE.test(t)) return false;
-  const lower = t.replace(/\u2019/g, "'").replace(/\u2018/g, "'").toLowerCase();
+  const lower = normalizeInterviewApostrophesForMatching(t).toLowerCase();
 
   const hasInterpretiveCue =
     /\b(what\s+she\s+meant|what\s+emma\s+meant|what\s+emma\s+was\s+(getting\s+at|trying\s+to\s+say)|she\s+meant|when\s+she\s+said|she\s+was\s+basically\s+saying|emma'?s\s+point\s+was|that\s+(line|statement|comment|response|remark|phrase|phrasing)|the\s+subtext\s+was|the\s+undertone\s+was|the\s+way\s+she\s+said|the\s+way\s+that\s+landed|that\s+came\s+across\s+as|it\s+landed\s+as|tone|that\s+comment\s+from\s+emma|emma'?s\s+(response|wording)\s+there)\b/.test(
       lower
     );
   const referencesEmmaFinalLine =
-    lower.includes("you've made that very clear") ||
-    lower.includes('you have made that very clear') ||
-    /\byou\s+made\s+that\s+very\s+clear\b/.test(lower) ||
+    userReferencesEmmaClosingLineQuote(t) ||
     (lower.includes('very clear') && /\bemma\b/.test(lower)) ||
     (/\bemma\b/.test(lower) && hasInterpretiveCue);
 
@@ -990,15 +1147,13 @@ export function debugScenarioAQ1ContemptProbeCoverageDetail(text: string): {
 } {
   const t = text.replace(/\s+/g, ' ').trim();
   const hasScenarioATopic = SCENARIO_A_TOPIC_RE.test(t);
-  const lower = t.replace(/\u2019/g, "'").replace(/\u2018/g, "'").toLowerCase();
+  const lower = normalizeInterviewApostrophesForMatching(t).toLowerCase();
   const hasInterpretiveCue =
     /\b(what\s+she\s+meant|what\s+emma\s+was\s+(getting\s+at|trying\s+to\s+say)|she\s+meant|when\s+she\s+said|she\s+was\s+basically\s+saying|emma'?s\s+point\s+was|that\s+(line|statement|comment|response|remark|phrase|phrasing)|the\s+subtext\s+was|the\s+undertone\s+was|the\s+way\s+she\s+said|the\s+way\s+that\s+landed|that\s+came\s+across\s+as|it\s+landed\s+as|tone|that\s+comment\s+from\s+emma|emma'?s\s+(response|wording)\s+there)\b/.test(
       lower
     );
   const referencesEmmaFinalLine =
-    lower.includes("you've made that very clear") ||
-    lower.includes('you have made that very clear') ||
-    /\byou\s+made\s+that\s+very\s+clear\b/.test(lower) ||
+    userReferencesEmmaClosingLineQuote(t) ||
     (lower.includes('very clear') && /\bemma\b/.test(lower)) ||
     (/\bemma\b/.test(lower) && hasInterpretiveCue);
   const hasStrongContemptQualityRead =

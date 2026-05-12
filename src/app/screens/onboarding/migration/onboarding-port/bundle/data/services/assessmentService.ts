@@ -5,6 +5,7 @@ import {
   buildDetailedInsightRows,
   getInsightContent,
 } from "@/data/assessments/insightContent";
+import type { RelationshipTraitsQualityFlags } from "@/data/assessments/instruments/relationshipTraits8";
 
 export type AssessmentId =
   | "ECR-36"
@@ -12,10 +13,16 @@ export type AssessmentId =
   | "DSI-R"
   | "BRS"
   | "PVQ-21"
-  | "CONFLICT-30";
+  | "CONFLICT-30"
+  | "RELATIONSHIP_TRAITS_8";
 
-/** Order: Attachment → Conflict style → Schwartz values */
-export const ASSESSMENT_IDS = ["ECR-36", "CONFLICT-30", "PVQ-21"] as const;
+/** Order: Attachment → Conflict style → Schwartz values → Relationship traits */
+export const ASSESSMENT_IDS = [
+  "ECR-36",
+  "CONFLICT-30",
+  "PVQ-21",
+  "RELATIONSHIP_TRAITS_8",
+] as const;
 
 const INSTRUMENT_TO_TEST_ID: Record<string, string> = {
   "ECR-36": "attachment",
@@ -24,6 +31,7 @@ const INSTRUMENT_TO_TEST_ID: Record<string, string> = {
   BRS: "resilience",
   "PVQ-21": "values",
   "CONFLICT-30": "conflict",
+  RELATIONSHIP_TRAITS_8: "relationship_traits",
 };
 
 export function instrumentToTestId(instrument: string): string | null {
@@ -45,6 +53,32 @@ export function buildAssessmentResultSummary(scores: Record<string, number>): st
       return `${k}: ${typeof v === "number" ? v.toFixed(2) : v}`;
     })
     .join(" · ");
+}
+
+const RELATIONSHIP_TRAITS_SUMMARY_KEYS = [
+  "emotional_stability_under_stress",
+  "dispositional_trust",
+] as const;
+
+const RELATIONSHIP_TRAITS_SUMMARY_LABELS: Record<
+  (typeof RELATIONSHIP_TRAITS_SUMMARY_KEYS)[number],
+  string
+> = {
+  emotional_stability_under_stress: "Emotional Stability Under Stress",
+  dispositional_trust: "Dispositional Trust",
+};
+
+/** User-facing one-line summary for `test_results.result_summary`. */
+export function buildRelationshipTraitsResultSummary(scores: Record<string, number>): string {
+  return RELATIONSHIP_TRAITS_SUMMARY_KEYS.map((k) => {
+    const v = scores[k] ?? 0;
+    return `${RELATIONSHIP_TRAITS_SUMMARY_LABELS[k]}: ${v.toFixed(2)} / 7`;
+  }).join(" · ");
+}
+
+export interface SaveAssessmentResultOptions {
+  timeTakenSec?: number;
+  qualityFlags?: RelationshipTraitsQualityFlags;
 }
 
 export interface AssessmentRecord {
@@ -115,8 +149,11 @@ export async function saveAssessmentResult(
   instrument: AssessmentId,
   scores: Record<string, number>,
   rawResponses: Record<string, number>,
-  timeTakenSec?: number
+  options?: SaveAssessmentResultOptions
 ): Promise<Result<void>> {
+  const completedAt = new Date().toISOString();
+  const timeTakenSec = options?.timeTakenSec;
+
   const { error } = await supabase.from("user_assessments").upsert(
     {
       user_id: userId,
@@ -124,24 +161,44 @@ export async function saveAssessmentResult(
       scores,
       raw_responses: rawResponses,
       time_taken_sec: timeTakenSec ?? null,
+      completed_at: completedAt,
     },
     {
       onConflict: "user_id,instrument",
     }
   );
-  if (error) return { success: false, error: new Error(error.message) };
+  if (error) {
+    return { success: false, error: new Error(error.message) };
+  }
 
   const testId = instrumentToTestId(instrument);
   if (testId) {
-    const summary = buildAssessmentResultSummary(scores);
     const details = buildDetailedInsightRows(instrument, scores);
+    const summary =
+      instrument === "RELATIONSHIP_TRAITS_8"
+        ? buildRelationshipTraitsResultSummary(scores)
+        : buildAssessmentResultSummary(scores);
+
+    const resultData: Record<string, unknown> = {
+      scores,
+      instrument,
+      details,
+    };
+    if (instrument === "RELATIONSHIP_TRAITS_8") {
+      resultData.raw_responses = rawResponses;
+      resultData.completed_at = completedAt;
+      if (options?.qualityFlags) {
+        resultData.quality_flags = options.qualityFlags;
+      }
+    }
+
     const { error: testResultsError } = await supabase.from("test_results").upsert(
       {
         user_id: userId,
         test_id: testId,
         result_summary: summary,
-        result_data: { scores, instrument, details },
-        taken_at: new Date().toISOString(),
+        result_data: resultData,
+        taken_at: completedAt,
       },
       { onConflict: "user_id,test_id" }
     );
@@ -162,7 +219,9 @@ export async function saveAssessmentResult(
     update.onboardingCompletedAt = new Date().toISOString();
   }
   const profileResult = await profilesRepo.updateProfile(userId, update);
-  if (!profileResult.success) return profileResult;
+  if (!profileResult.success) {
+    return profileResult;
+  }
   return { success: true };
 }
 
@@ -210,6 +269,21 @@ export function getNextInstrument(current: AssessmentId): AssessmentId | null {
   const i = ASSESSMENT_IDS.indexOf(current as (typeof ASSESSMENT_IDS)[number]);
   if (i < 0 || i >= ASSESSMENT_IDS.length - 1) return null;
   return ASSESSMENT_IDS[i + 1] as AssessmentId;
+}
+
+/**
+ * First assessment in {@link ASSESSMENT_IDS} order that does not have a row in `user_assessments`.
+ * Used after refresh/deep-link when the URL still points at a completed instrument.
+ */
+export function getFirstIncompleteAssessment(
+  completedInstrumentIds: string[]
+): AssessmentId | null {
+  for (const id of ASSESSMENT_IDS) {
+    if (!completedInstrumentIds.includes(id)) {
+      return id;
+    }
+  }
+  return null;
 }
 
 /**

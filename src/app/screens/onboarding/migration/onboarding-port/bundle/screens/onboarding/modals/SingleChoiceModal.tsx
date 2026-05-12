@@ -11,6 +11,20 @@ export interface ChoiceOption {
   value: string;
 }
 
+function renderMustHaveHighlight(text: string) {
+  const phrase = 'must have';
+  const index = text.indexOf(phrase);
+  if (index < 0) return text;
+
+  return (
+    <>
+      {text.slice(0, index)}
+      <Text style={styles.mustHaveEmphasis}>{phrase}</Text>
+      {text.slice(index + phrase.length)}
+    </>
+  );
+}
+
 interface SingleChoiceModalProps {
   title: string;
   options: ChoiceOption[];
@@ -19,6 +33,11 @@ interface SingleChoiceModalProps {
   onNext: () => void;
   onBack: () => void;
   description?: string;
+  secondaryTitle?: string;
+  secondaryOptions?: ChoiceOption[];
+  secondaryValue?: string;
+  onSecondaryValueChange?: (value: string) => void;
+  secondaryRequired?: boolean;
   /** When true, selecting an option immediately saves and advances to next step (no Next button). */
   autoAdvanceOnSelect?: boolean;
 }
@@ -31,14 +50,28 @@ export const SingleChoiceModal: React.FC<SingleChoiceModalProps> = ({
   onNext,
   onBack,
   description,
+  secondaryTitle,
+  secondaryOptions,
+  secondaryValue = '',
+  onSecondaryValueChange,
+  secondaryRequired = false,
   autoAdvanceOnSelect = true,
 }) => {
+  const hasSecondaryQuestion = Boolean(secondaryTitle && secondaryOptions?.length && onSecondaryValueChange);
   const handleSelect = (optionValue: string) => {
     onValueChange(optionValue);
-    if (autoAdvanceOnSelect) {
+    if (autoAdvanceOnSelect && !hasSecondaryQuestion) {
       onNext();
     }
   };
+  const hasPrimarySelection = options.some((option) => option.value === value);
+  const hasSecondarySelection =
+    !secondaryRequired ||
+    Boolean(
+      hasSecondaryQuestion &&
+        secondaryOptions?.some((option) => option.value === secondaryValue),
+    );
+  const nextDisabled = !hasPrimarySelection || !hasSecondarySelection;
 
   return (
     <SafeAreaView style={styles.screen} edges={['top', 'left', 'right']}>
@@ -51,9 +84,21 @@ export const SingleChoiceModal: React.FC<SingleChoiceModalProps> = ({
         <View style={styles.container}>
           {description ? <Text style={styles.description}>{description}</Text> : null}
           <SingleChoiceOptionList options={options} value={value} onSelect={handleSelect} />
+          {hasSecondaryQuestion ? (
+            <View style={styles.secondaryQuestionBlock}>
+              <Text style={styles.secondaryQuestionTitle}>
+                {renderMustHaveHighlight(secondaryTitle ?? '')}
+              </Text>
+              <SingleChoiceOptionList
+                options={secondaryOptions}
+                value={secondaryValue}
+                onSelect={(optionValue) => onSecondaryValueChange?.(optionValue)}
+              />
+            </View>
+          ) : null}
         </View>
       </ScrollView>
-      {!autoAdvanceOnSelect ? (
+      {!autoAdvanceOnSelect || hasSecondaryQuestion ? (
         <SafeAreaView style={styles.buttonContainer} edges={['bottom', 'left', 'right']}>
           <View style={styles.buttonRow}>
             <Button
@@ -65,7 +110,7 @@ export const SingleChoiceModal: React.FC<SingleChoiceModalProps> = ({
             <Button
               title="Next"
               onPress={onNext}
-              disabled={!value}
+              disabled={nextDisabled}
               style={styles.nextButton}
             />
           </View>

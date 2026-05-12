@@ -114,7 +114,7 @@ export function BreakScreen() {
       <Text style={styles.title}>Your profile is complete.</Text>
       <Text style={styles.subtitle}>What's next takes focus.</Text>
       <Text style={styles.body}>
-        The final step is a series of 3 short psychological assessments.
+        The final step is a series of 4 short psychological assessments.
         Together they help us understand how you
         connect, communicate, and show up in relationships.
       </Text>

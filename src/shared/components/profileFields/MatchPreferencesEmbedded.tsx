@@ -1,24 +1,44 @@
-import React, { useState, useEffect, useMemo, useCallback, useLayoutEffect } from 'react';
-import { View, Text, StyleSheet, Platform } from 'react-native';
+import React, {
+  useState,
+  useEffect,
+  useMemo,
+  useCallback,
+  useLayoutEffect,
+} from 'react';
+import { View, Text, StyleSheet, Platform, Pressable } from 'react-native';
 import { Picker } from '@react-native-picker/picker';
-import { MatchPreferences, defaultPreferences } from '@/shared/hooks/filterPreferences/types';
+import {
+  MatchPreferences,
+  defaultPreferences,
+} from '@/shared/hooks/filterPreferences/types';
 import { RangeSlider } from '@/shared/ui/RangeSlider';
+import { formControlStyles } from '@/shared/ui/FormField';
 import { BodyTypeAttractionSelect } from '@/shared/components/BodyTypeAttractionSelect';
-import { parseBodyTypeAttraction, type BodyTypeAttractionId } from '@/shared/constants/bodyTypeAttraction';
+import {
+  parseBodyTypeAttraction,
+  type BodyTypeAttractionId,
+} from '@/shared/constants/bodyTypeAttraction';
 import {
   PREF_DEALBREAKER_CHILDREN_OPTIONS,
   PREF_DEALBREAKER_POLITICS_OPTIONS,
   PREF_DEALBREAKER_RELIGION_OPTIONS,
   PREF_PARTNER_HAS_CHILDREN_OPTIONS,
   PREF_PARTNER_POLITICAL_SHARING_OPTIONS,
+  PREF_PARTNER_SAME_RELIGION_OPTIONS,
   normalizePartnerPoliticalAlignmentToYesNo,
 } from '@/screens/profile/editProfile/constants';
 import { PARTNER_SUBSTANCE_ALIGNMENT_OPTIONS } from '@/shared/constants/filterOptions';
 import {
-  PREF_PHYSICAL_COMPAT_CENTRALITY_OPTIONS,
-  PREF_PARTNER_SHARES_SEXUAL_INTERESTS_OPTIONS,
-} from '@/shared/constants/sexualCompatibilityOptions';
-import { BottomSheet, OptionPickerTrigger, type OptionAnchor } from '@/screens/profile/editProfile/BottomSheet';
+  ETHNICITY_ATTRACTION_OPTIONS,
+  ETHNICITY_ATTRACTION_OPEN_TO_ALL,
+  normalizeEthnicityAttractionStored,
+} from '@/shared/constants/ethnicityAttractionOptions';
+import { PREF_PARTNER_SHARES_SEXUAL_INTERESTS_OPTIONS } from '@/shared/constants/sexualCompatibilityOptions';
+import {
+  BottomSheet,
+  OptionPickerTrigger,
+  type OptionAnchor,
+} from '@/screens/profile/editProfile/BottomSheet';
 import { SingleChoiceOptionList } from '@/shared/components/profileFields/SingleChoiceOptionList';
 type DealbreakerPreferences = MatchPreferences & {
   childrenPreference?: string;
@@ -27,6 +47,10 @@ type DealbreakerPreferences = MatchPreferences & {
   partnerAlignmentPsychedelics?: string;
   partnerAlignmentCannabis?: string;
   partnerAlignmentAlcohol?: string;
+  longTermLivingPreference?: string;
+  lifestylePreference?: string;
+  partnerSameReligionRequired?: string;
+  relocationPreference?: string;
 };
 
 const normalizeNoPreference = (value: unknown): string => {
@@ -34,20 +58,32 @@ const normalizeNoPreference = (value: unknown): string => {
   return v.toLowerCase() === 'any' ? 'No preference' : v;
 };
 
-const normalizeDealbreakerPreferences = (prefs: DealbreakerPreferences): DealbreakerPreferences => ({
+const normalizeDealbreakerPreferences = (
+  prefs: DealbreakerPreferences,
+): DealbreakerPreferences => ({
   ...prefs,
   smokingPreference: normalizeNoPreference(prefs.smokingPreference),
   drinkingPreference: normalizeNoPreference(prefs.drinkingPreference),
   cannabisPreference: normalizeNoPreference(prefs.cannabisPreference),
   partnerAlignmentTobacco: normalizeNoPreference(prefs.partnerAlignmentTobacco),
-  partnerAlignmentRecreationalDrugs: normalizeNoPreference(prefs.partnerAlignmentRecreationalDrugs),
-  partnerAlignmentPsychedelics: normalizeNoPreference(prefs.partnerAlignmentPsychedelics),
-  partnerAlignmentCannabis: normalizeNoPreference(prefs.partnerAlignmentCannabis),
+  partnerAlignmentRecreationalDrugs: normalizeNoPreference(
+    prefs.partnerAlignmentRecreationalDrugs,
+  ),
+  partnerAlignmentPsychedelics: normalizeNoPreference(
+    prefs.partnerAlignmentPsychedelics,
+  ),
+  partnerAlignmentCannabis: normalizeNoPreference(
+    prefs.partnerAlignmentCannabis,
+  ),
   partnerAlignmentAlcohol: normalizeNoPreference(prefs.partnerAlignmentAlcohol),
 });
 
-function withoutRelationshipType(prefs: MatchPreferences | DealbreakerPreferences): DealbreakerPreferences {
-  const { relationshipType: _, ...rest } = prefs as DealbreakerPreferences & { relationshipType?: string };
+function withoutRelationshipType(
+  prefs: MatchPreferences | DealbreakerPreferences,
+): DealbreakerPreferences {
+  const { relationshipType: _, ...rest } = prefs as DealbreakerPreferences & {
+    relationshipType?: string;
+  };
   return rest as DealbreakerPreferences;
 }
 
@@ -55,6 +91,20 @@ function truncDealbreaker(s: string, max = 80): string {
   const t = String(s ?? '').trim();
   if (!t) return 'Select';
   return t.length > max ? `${t.slice(0, max)}…` : t;
+}
+
+function renderMustHaveHighlight(text: string) {
+  const phrase = 'must have';
+  const index = text.indexOf(phrase);
+  if (index < 0) return text;
+
+  return (
+    <>
+      {text.slice(0, index)}
+      <Text style={styles.mustHaveEmphasis}>{phrase}</Text>
+      {text.slice(index + phrase.length)}
+    </>
+  );
 }
 
 type EmbeddedDealbreakerOpt = { label: string; value: string };
@@ -73,6 +123,7 @@ function EmbeddedDealbreakerPicker({
   onCommit: (next: string) => void;
   prependUnsetRow?: boolean;
 }) {
+  const [sheetAnchor, setSheetAnchor] = useState<OptionAnchor | null>(null);
   const options: EmbeddedDealbreakerOpt[] = useMemo(() => {
     const rows = optionStrings.map((s) => ({ label: s, value: s }));
     if (prependUnsetRow) {
@@ -82,15 +133,18 @@ function EmbeddedDealbreakerPicker({
   }, [optionStrings, prependUnsetRow]);
 
   const storedTrimmed = String(rawValue ?? '').trim();
-  const normalizedSelected =
-    prependUnsetRow
-      ? storedTrimmed
-      : storedTrimmed === '' && optionStrings.includes('No preference')
-        ? 'No preference'
-        : storedTrimmed;
+  const normalizedSelected = prependUnsetRow
+    ? storedTrimmed
+    : storedTrimmed === '' && optionStrings.includes('No preference')
+      ? 'No preference'
+      : storedTrimmed;
 
   const validSelection = options.some((o) => o.value === normalizedSelected);
-  const selectedValue = validSelection ? normalizedSelected : (options[0]?.value ?? '');
+  const selectedValue = validSelection
+    ? normalizedSelected
+    : (options[0]?.value ?? '');
+  const selectedLabel =
+    options.find((o) => o.value === selectedValue)?.label ?? 'No preference';
 
   useLayoutEffect(() => {
     if (!options.length) return;
@@ -100,6 +154,40 @@ function EmbeddedDealbreakerPicker({
     // eslint-disable-next-line react-hooks/exhaustive-deps -- coerce legacy / unknown stored values once
   }, [rawValue, options, validSelection]);
 
+  if (Platform.OS === 'web') {
+    return (
+      <View style={pickerStyles.fieldBlock}>
+        <Text style={pickerStyles.label}>{label}</Text>
+        <OptionPickerTrigger
+          style={[pickerStyles.webTrigger, formControlStyles.control]}
+          onOpen={(anchor) => setSheetAnchor(anchor)}
+        >
+          <View style={pickerStyles.webTriggerContent}>
+            <Text style={pickerStyles.webTriggerText}>
+              {truncDealbreaker(selectedLabel)}
+            </Text>
+            <Text style={pickerStyles.webChevron}>▾</Text>
+          </View>
+        </OptionPickerTrigger>
+        <BottomSheet
+          visible={!!sheetAnchor}
+          title={label}
+          anchor={sheetAnchor}
+          onClose={() => setSheetAnchor(null)}
+        >
+          <SingleChoiceOptionList
+            options={options}
+            value={selectedValue}
+            onSelect={(v) => {
+              onCommit(v);
+              setSheetAnchor(null);
+            }}
+          />
+        </BottomSheet>
+      </View>
+    );
+  }
+
   return (
     <View style={pickerStyles.fieldBlock}>
       <Text style={pickerStyles.label}>{label}</Text>
@@ -108,23 +196,21 @@ function EmbeddedDealbreakerPicker({
           selectedValue={selectedValue}
           onValueChange={(v) => onCommit(String(v))}
           mode={Platform.OS === 'android' ? 'dropdown' : undefined}
-          style={[
-            pickerStyles.pickerNative,
-            Platform.OS === 'web'
-              ? [
-                  pickerStyles.pickerWeb,
-                  {
-                    WebkitAppearance: 'none',
-                    appearance: 'none',
-                  } as const,
-                ]
-              : null,
-          ]}
+          style={pickerStyles.pickerNative}
           dropdownIconColor="rgba(156,180,216,0.85)"
-          itemStyle={Platform.OS === 'ios' ? { color: '#E8F0F8', fontSize: 17 } : undefined}
+          itemStyle={
+            Platform.OS === 'ios'
+              ? { color: '#E8F0F8', fontSize: 17 }
+              : undefined
+          }
         >
           {options.map((o) => (
-            <Picker.Item key={o.value === '' ? '__unset__' : o.value} label={o.label} value={o.value} color="#E8F0F8" />
+            <Picker.Item
+              key={o.value === '' ? '__unset__' : o.value}
+              label={o.label}
+              value={o.value}
+              color="#E8F0F8"
+            />
           ))}
         </Picker>
       </View>
@@ -134,7 +220,7 @@ function EmbeddedDealbreakerPicker({
 
 /** Match `styles.pickRow` / `OptionPickerTrigger` (lighter surface vs `theme.colors.card`). */
 const pickerStyles = StyleSheet.create({
-  fieldBlock: { marginBottom: 14, marginTop: 6 },
+  fieldBlock: { marginBottom: 18, marginTop: 12 },
   label: { color: '#9CB4D8', fontSize: 13, marginBottom: 8 },
   pickerShell: {
     borderRadius: 10,
@@ -148,44 +234,71 @@ const pickerStyles = StyleSheet.create({
     width: '100%',
     color: '#E8F0F8',
     backgroundColor: 'rgba(255,255,255,0.06)',
-    ...(Platform.OS === 'ios' ? { height: 160 } : Platform.OS === 'android' ? { height: 56 } : {}),
+    ...(Platform.OS === 'ios'
+      ? { height: 160 }
+      : Platform.OS === 'android'
+        ? { height: 56 }
+        : {}),
   },
-  pickerWeb: {
-    borderWidth: 0,
-    outlineStyle: 'none',
-    outlineWidth: 0,
-    paddingHorizontal: 10,
-    paddingVertical: 12,
-    minHeight: 54,
-    cursor: 'pointer' as const,
+  webTrigger: {},
+  webTriggerContent: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  webTriggerText: {
+    flex: 1,
     color: '#E8F0F8',
-    backgroundColor: 'rgba(255,255,255,0.06)',
+    fontSize: 15,
+  },
+  webChevron: {
+    color: 'rgba(156,180,216,0.9)',
+    fontSize: 14,
+    paddingLeft: 10,
   },
 });
 
-const SUBSTANCE_PARTNER_DEALBREAKERS: { key: keyof DealbreakerPreferences; question: string }[] = [
+const SUBSTANCE_PARTNER_DEALBREAKERS: {
+  key: keyof DealbreakerPreferences;
+  question: string;
+}[] = [
   {
     key: 'partnerAlignmentTobacco',
     question:
-      'How important is it that your partner shares your relationship with cigarettes or tobacco?',
+      'Is it a must have that your partner shares your relationship with cigarettes or tobacco?',
   },
   {
     key: 'partnerAlignmentRecreationalDrugs',
     question:
-      'How important is it that your partner shares your relationship with recreational drugs?',
+      'Is it a must have that your partner shares your relationship with recreational drugs?',
   },
   {
     key: 'partnerAlignmentPsychedelics',
     question:
-      'How important is it that your partner shares your relationship with psychedelics or plant medicines?',
+      'Is it a must have that your partner shares your relationship with psychedelics or plant medicines?',
   },
   {
     key: 'partnerAlignmentCannabis',
-    question: 'How important is it that your partner shares your relationship with cannabis?',
+    question:
+      'Is it a must have that your partner shares your relationship with cannabis or tobacco?',
   },
   {
     key: 'partnerAlignmentAlcohol',
-    question: 'How important is it that your partner shares your relationship with alcohol?',
+    question:
+      'Is it a must have that your partner shares your relationship with alcohol?',
+  },
+];
+
+const LIFESTYLE_DEALBREAKERS: {
+  key: keyof Pick<DealbreakerPreferences, 'partnerSameReligionRequired'>;
+  question: string;
+  options: readonly string[];
+}[] = [
+  {
+    key: 'partnerSameReligionRequired',
+    question:
+      'Is it a must have for your partner to have the same religion as you?',
+    options: PREF_PARTNER_SAME_RELIGION_OPTIONS,
   },
 ];
 
@@ -193,24 +306,23 @@ export type MatchPreferencesEmbeddedProps = {
   location?: string;
   userAge?: number | null;
   matchPreferences?: MatchPreferences | null;
-  prefPhysicalCompatImportance: string;
   prefPartnerSharesSexualInterests: string;
   prefPartnerHasChildren: string;
   prefPartnerPoliticalAlignmentImportance: string;
   onPreferencesPatch: (patch: {
     matchPreferences?: DealbreakerPreferences;
-    prefPhysicalCompatImportance?: string;
     prefPartnerSharesSexualInterests?: string;
     prefPartnerHasChildren?: string;
     prefPartnerPoliticalAlignmentImportance?: string;
   }) => void;
 };
 
-export const MatchPreferencesEmbedded: React.FC<MatchPreferencesEmbeddedProps> = ({
+export const MatchPreferencesEmbedded: React.FC<
+  MatchPreferencesEmbeddedProps
+> = ({
   location: _location,
   userAge,
   matchPreferences,
-  prefPhysicalCompatImportance,
   prefPartnerSharesSexualInterests,
   prefPartnerHasChildren,
   prefPartnerPoliticalAlignmentImportance,
@@ -221,10 +333,21 @@ export const MatchPreferencesEmbedded: React.FC<MatchPreferencesEmbeddedProps> =
 
   const [preferences, setPreferences] = useState<DealbreakerPreferences>(() => {
     const base = normalizeDealbreakerPreferences(
-      withoutRelationshipType((matchPreferences || defaultPreferences) as DealbreakerPreferences),
+      withoutRelationshipType(
+        (matchPreferences || defaultPreferences) as DealbreakerPreferences,
+      ),
     );
-    if (base.ageRange && base.ageRange[0] === 18 && base.ageRange[1] === 65 && userAge != null) {
-      return { ...base, ageRange: [defaultAgeMin, defaultAgeMax] as [number, number] };
+    const baseAgeRange = Array.isArray(base.ageRange) ? base.ageRange : null;
+    if (
+      baseAgeRange &&
+      baseAgeRange[0] === 18 &&
+      baseAgeRange[1] === 65 &&
+      userAge != null
+    ) {
+      return {
+        ...base,
+        ageRange: [defaultAgeMin, defaultAgeMax] as [number, number],
+      };
     }
     return base;
   });
@@ -239,7 +362,11 @@ export const MatchPreferencesEmbedded: React.FC<MatchPreferencesEmbeddedProps> =
 
   useEffect(() => {
     if (matchPreferences) {
-      setPreferences(normalizeDealbreakerPreferences(withoutRelationshipType(matchPreferences)));
+      setPreferences(
+        normalizeDealbreakerPreferences(
+          withoutRelationshipType(matchPreferences),
+        ),
+      );
     }
   }, [matchPreferences]);
 
@@ -247,23 +374,61 @@ export const MatchPreferencesEmbedded: React.FC<MatchPreferencesEmbeddedProps> =
     (patch: Partial<DealbreakerPreferences>) => {
       setPreferences((prevPrefs) => {
         const newPrefs = { ...prevPrefs, ...patch };
-        onPreferencesPatch({ matchPreferences: withoutRelationshipType(newPrefs) });
+        onPreferencesPatch({
+          matchPreferences: withoutRelationshipType(newPrefs),
+        });
         return newPrefs;
       });
     },
     [onPreferencesPatch],
   );
 
-  const ageMin = preferences.ageRange?.[0] != null ? String(preferences.ageRange[0]) : '';
-  const ageMax = preferences.ageRange?.[1] != null ? String(preferences.ageRange[1]) : '';
+  const preferencesAgeRange = Array.isArray(preferences.ageRange)
+    ? preferences.ageRange
+    : null;
+  const ageMin = preferencesAgeRange?.[0] ?? defaultAgeMin;
+  const ageMax = preferencesAgeRange?.[1] ?? defaultAgeMax;
+
+  const ethnicityAttraction = useMemo(
+    () =>
+      normalizeEthnicityAttractionStored(
+        (preferences as Record<string, unknown>).ethnicityAttraction,
+      ),
+    [preferences],
+  );
+
+  const toggleEthnicityAttraction = useCallback(
+    (option: string) => {
+      if (option === ETHNICITY_ATTRACTION_OPEN_TO_ALL) {
+        setPref({
+          ethnicityAttraction: [ETHNICITY_ATTRACTION_OPEN_TO_ALL],
+        } as Partial<DealbreakerPreferences>);
+        return;
+      }
+      const withoutOpen = ethnicityAttraction.filter(
+        (item) => item !== ETHNICITY_ATTRACTION_OPEN_TO_ALL,
+      );
+      const next = withoutOpen.includes(option)
+        ? withoutOpen.filter((item) => item !== option)
+        : [...withoutOpen, option];
+      setPref({ ethnicityAttraction: next } as Partial<DealbreakerPreferences>);
+    },
+    [ethnicityAttraction, setPref],
+  );
 
   const onBodyTypeAttractionChange = useCallback(
     (next: BodyTypeAttractionId[]) => {
       setPreferences((prevPrefs) => {
-        const { bmiRange: _legacyBmi, ...rest } = prevPrefs;
+        const {
+          bmiRange: _legacyBmi,
+          bodyTypeAttraction: _bodyTypeAttraction,
+          ...rest
+        } = prevPrefs;
         const newPrefs: DealbreakerPreferences =
           next.length > 0 ? { ...rest, bodyTypeAttraction: next } : { ...rest };
-        onPreferencesPatch({ matchPreferences: withoutRelationshipType(newPrefs) });
+        onPreferencesPatch({
+          matchPreferences: withoutRelationshipType(newPrefs),
+        });
         return newPrefs;
       });
     },
@@ -272,7 +437,9 @@ export const MatchPreferencesEmbedded: React.FC<MatchPreferencesEmbeddedProps> =
 
   return (
     <View style={styles.wrap}>
-      <Text style={styles.sectionLead}>Set dealbreakers the same way you did during onboarding.</Text>
+      <Text style={styles.sectionLead}>
+        Set dealbreakers the same way you did during onboarding.
+      </Text>
 
       <View style={styles.card}>
         <View style={styles.row}>
@@ -283,41 +450,28 @@ export const MatchPreferencesEmbedded: React.FC<MatchPreferencesEmbeddedProps> =
           <RangeSlider
             minValue={18}
             maxValue={100}
-            initialMinValue={preferences.ageRange?.[0] ?? defaultAgeMin}
-            initialMaxValue={preferences.ageRange?.[1] ?? defaultAgeMax}
+            initialMinValue={ageMin}
+            initialMaxValue={ageMax}
             step={1}
-            onValueChange={(min, max) => setPref({ ageRange: [min, max] as [number, number] })}
+            onValueChange={(min, max) =>
+              setPref({ ageRange: [min, max] as [number, number] })
+            }
             minimumTrackTintColor="#7C3AED"
             maximumTrackTintColor="#32384A"
+            showValueLabels={false}
           />
         </View>
 
-        <Text style={styles.question}>How central is physical and sexual compatibility for you in a relationship?</Text>
+        <Text style={styles.question}>
+          Do you want someone who shares your specific sexual interests?
+        </Text>
         <OptionPickerTrigger
-          style={styles.pickRow}
-          onOpen={(anchor) =>
-            setOptionSheet({
-              title: 'Physical & sexual compatibility',
-              options: PREF_PHYSICAL_COMPAT_CENTRALITY_OPTIONS as unknown as string[],
-              selectedValue: prefPhysicalCompatImportance,
-              anchor,
-              onPick: (value) => {
-                onPreferencesPatch({ prefPhysicalCompatImportance: value });
-                setOptionSheet(null);
-              },
-            })
-          }
-        >
-          <Text style={styles.pickText}>{truncDealbreaker(prefPhysicalCompatImportance)}</Text>
-        </OptionPickerTrigger>
-
-        <Text style={styles.question}>Do you want someone who shares your specific sexual interests?</Text>
-        <OptionPickerTrigger
-          style={styles.pickRow}
+          style={[styles.pickRow, formControlStyles.control]}
           onOpen={(anchor) =>
             setOptionSheet({
               title: 'Partner shares your interests',
-              options: PREF_PARTNER_SHARES_SEXUAL_INTERESTS_OPTIONS as unknown as string[],
+              options:
+                PREF_PARTNER_SHARES_SEXUAL_INTERESTS_OPTIONS as unknown as string[],
               selectedValue: prefPartnerSharesSexualInterests,
               anchor,
               onPick: (value) => {
@@ -327,12 +481,16 @@ export const MatchPreferencesEmbedded: React.FC<MatchPreferencesEmbeddedProps> =
             })
           }
         >
-          <Text style={styles.pickText}>{truncDealbreaker(prefPartnerSharesSexualInterests)}</Text>
+          <Text style={styles.pickText}>
+            {truncDealbreaker(prefPartnerSharesSexualInterests)}
+          </Text>
         </OptionPickerTrigger>
 
-        <Text style={styles.question}>Is it OK if your match already has children?</Text>
+        <Text style={styles.question}>
+          Is it OK if your match already has children?
+        </Text>
         <OptionPickerTrigger
-          style={styles.pickRow}
+          style={[styles.pickRow, formControlStyles.control]}
           onOpen={(anchor) =>
             setOptionSheet({
               title: 'Partner already has children',
@@ -347,13 +505,19 @@ export const MatchPreferencesEmbedded: React.FC<MatchPreferencesEmbeddedProps> =
           }
         >
           <Text style={styles.pickText}>
-            {prefPartnerHasChildren.trim() ? truncDealbreaker(prefPartnerHasChildren) : 'No preference'}
+            {prefPartnerHasChildren.trim()
+              ? truncDealbreaker(prefPartnerHasChildren)
+              : 'No preference'}
           </Text>
         </OptionPickerTrigger>
 
-        <Text style={styles.question}>Is it important for your partner to share the same political views as you?</Text>
+        <Text style={styles.question}>
+          {renderMustHaveHighlight(
+            'Is it a must have that your partner shares the same political views as you?',
+          )}
+        </Text>
         <OptionPickerTrigger
-          style={styles.pickRow}
+          style={[styles.pickRow, formControlStyles.control]}
           onOpen={(anchor) =>
             setOptionSheet({
               title: 'Partner shares your political views',
@@ -361,7 +525,9 @@ export const MatchPreferencesEmbedded: React.FC<MatchPreferencesEmbeddedProps> =
               selectedValue: prefPartnerPoliticalAlignmentImportance,
               anchor,
               onPick: (value) => {
-                onPreferencesPatch({ prefPartnerPoliticalAlignmentImportance: value });
+                onPreferencesPatch({
+                  prefPartnerPoliticalAlignmentImportance: value,
+                });
                 setOptionSheet(null);
               },
             })
@@ -370,7 +536,9 @@ export const MatchPreferencesEmbedded: React.FC<MatchPreferencesEmbeddedProps> =
           <Text style={styles.pickText}>
             {prefPartnerPoliticalAlignmentImportance.trim()
               ? truncDealbreaker(
-                  normalizePartnerPoliticalAlignmentToYesNo(prefPartnerPoliticalAlignmentImportance),
+                  normalizePartnerPoliticalAlignmentToYesNo(
+                    prefPartnerPoliticalAlignmentImportance,
+                  ),
                 )
               : 'Select'}
           </Text>
@@ -378,25 +546,35 @@ export const MatchPreferencesEmbedded: React.FC<MatchPreferencesEmbeddedProps> =
 
         {SUBSTANCE_PARTNER_DEALBREAKERS.map(({ key, question }) => (
           <View key={key}>
-            <Text style={styles.question}>{question}</Text>
+            <Text style={styles.question}>
+              {renderMustHaveHighlight(question)}
+            </Text>
             <OptionPickerTrigger
-              style={styles.pickRow}
+              style={[styles.pickRow, formControlStyles.control]}
               onOpen={(anchor) =>
                 setOptionSheet({
                   title: question,
                   options: PARTNER_SUBSTANCE_ALIGNMENT_OPTIONS,
-                  selectedValue: String((preferences as Record<string, unknown>)[key] ?? ''),
+                  selectedValue: String(
+                    (preferences as Record<string, unknown>)[key] ?? '',
+                  ),
                   anchor,
                   onPick: (value) => {
-                    setPref({ [key]: value } as Partial<DealbreakerPreferences>);
+                    setPref({
+                      [key]: value,
+                    } as Partial<DealbreakerPreferences>);
                     setOptionSheet(null);
                   },
                 })
               }
             >
               <Text style={styles.pickText}>
-                {String((preferences as Record<string, unknown>)[key] ?? '').trim()
-                  ? truncDealbreaker(String((preferences as Record<string, unknown>)[key]))
+                {String(
+                  (preferences as Record<string, unknown>)[key] ?? '',
+                ).trim()
+                  ? truncDealbreaker(
+                      String((preferences as Record<string, unknown>)[key]),
+                    )
                   : 'Select'}
               </Text>
             </OptionPickerTrigger>
@@ -408,31 +586,123 @@ export const MatchPreferencesEmbedded: React.FC<MatchPreferencesEmbeddedProps> =
           onChange={onBodyTypeAttractionChange}
         />
 
+        <Text style={styles.question}>
+          Which ethnicities are you generally attracted to?
+        </Text>
+        <Text style={styles.ethnicityHelper}>Select all that apply.</Text>
+        <View style={styles.ethnicityOptionList}>
+          {ETHNICITY_ATTRACTION_OPTIONS.map((option) => {
+            const selected = ethnicityAttraction.includes(option);
+            return (
+              <Pressable
+                key={option}
+                style={[
+                  styles.ethnicityOptionRow,
+                  selected && styles.ethnicityOptionRowSelected,
+                ]}
+                onPress={() => toggleEthnicityAttraction(option)}
+              >
+                <Text
+                  style={[
+                    styles.ethnicityOptionText,
+                    selected && styles.ethnicityOptionTextSelected,
+                  ]}
+                >
+                  {option}
+                </Text>
+              </Pressable>
+            );
+          })}
+        </View>
+
+        {LIFESTYLE_DEALBREAKERS.map(({ key, question, options }) => (
+          <View key={key}>
+            <Text style={styles.question}>
+              {renderMustHaveHighlight(question)}
+            </Text>
+            <OptionPickerTrigger
+              style={[styles.pickRow, formControlStyles.control]}
+              onOpen={(anchor) =>
+                setOptionSheet({
+                  title: question,
+                  options,
+                  selectedValue: String(
+                    (preferences as Record<string, unknown>)[key] ?? '',
+                  ),
+                  anchor,
+                  onPick: (value) => {
+                    setPref({
+                      [key]: value,
+                    } as Partial<DealbreakerPreferences>);
+                    setOptionSheet(null);
+                  },
+                })
+              }
+            >
+              <Text style={styles.pickText}>
+                {String(
+                  (preferences as Record<string, unknown>)[key] ?? '',
+                ).trim()
+                  ? truncDealbreaker(
+                      String((preferences as Record<string, unknown>)[key]),
+                    )
+                  : 'Select'}
+              </Text>
+            </OptionPickerTrigger>
+          </View>
+        ))}
+
         <EmbeddedDealbreakerPicker
           label="Partner wants children"
           optionStrings={PREF_DEALBREAKER_CHILDREN_OPTIONS}
-          rawValue={String((preferences as Record<string, unknown>).childrenPreference ?? '')}
+          rawValue={String(
+            (preferences as Record<string, unknown>).childrenPreference ?? '',
+          )}
           prependUnsetRow
-          onCommit={(next) => setPref({ childrenPreference: next } as Partial<DealbreakerPreferences>)}
+          onCommit={(next) =>
+            setPref({
+              childrenPreference: next,
+            } as Partial<DealbreakerPreferences>)
+          }
         />
         <EmbeddedDealbreakerPicker
           label="Politics"
           optionStrings={PREF_DEALBREAKER_POLITICS_OPTIONS}
-          rawValue={String((preferences as Record<string, unknown>).politicsPreference ?? '')}
-          onCommit={(next) => setPref({ politicsPreference: next } as Partial<DealbreakerPreferences>)}
+          rawValue={String(
+            (preferences as Record<string, unknown>).politicsPreference ?? '',
+          )}
+          onCommit={(next) =>
+            setPref({
+              politicsPreference: next,
+            } as Partial<DealbreakerPreferences>)
+          }
         />
         <EmbeddedDealbreakerPicker
           label="Religion"
           optionStrings={PREF_DEALBREAKER_RELIGION_OPTIONS}
-          rawValue={String((preferences as Record<string, unknown>).religionPreference ?? '')}
-          onCommit={(next) => setPref({ religionPreference: next } as Partial<DealbreakerPreferences>)}
+          rawValue={String(
+            (preferences as Record<string, unknown>).religionPreference ?? '',
+          )}
+          onCommit={(next) =>
+            setPref({
+              religionPreference: next,
+            } as Partial<DealbreakerPreferences>)
+          }
         />
       </View>
 
-      <BottomSheet visible={!!optionSheet} title={optionSheet?.title} anchor={optionSheet?.anchor} onClose={() => setOptionSheet(null)}>
+      <BottomSheet
+        visible={!!optionSheet}
+        title={optionSheet?.title}
+        anchor={optionSheet?.anchor}
+        onClose={() => setOptionSheet(null)}
+      >
         {optionSheet ? (
           <SingleChoiceOptionList
-            options={(optionSheet.options ?? []).map((o) => ({ label: o, value: o }))}
+            options={(optionSheet.options ?? []).map((o) => ({
+              label: o,
+              value: o,
+            }))}
             value={optionSheet.selectedValue}
             onSelect={(v) => {
               optionSheet.onPick(v);
@@ -471,14 +741,52 @@ const styles = StyleSheet.create({
     marginBottom: 8,
     lineHeight: 18,
   },
+  mustHaveEmphasis: {
+    fontWeight: '800',
+  },
   pickRow: {
-    borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.14)',
-    borderRadius: 10,
-    paddingVertical: Platform.OS === 'web' ? 10 : 12,
-    paddingHorizontal: 12,
-    backgroundColor: 'rgba(255,255,255,0.06)',
+    flexDirection: 'row',
+    alignItems: 'center',
     marginBottom: 4,
   },
-  pickText: { color: '#E8F0F8', fontSize: 15 },
+  pickText: {
+    color: '#E8F0F8',
+    fontSize: 16,
+    fontWeight: '600',
+    lineHeight: 22,
+    flex: 1,
+  },
+  ethnicityHelper: {
+    color: 'rgba(255,255,255,0.55)',
+    fontSize: 13,
+    lineHeight: 18,
+    marginTop: -4,
+    marginBottom: 10,
+  },
+  ethnicityOptionList: {
+    gap: 10,
+    marginBottom: 8,
+  },
+  ethnicityOptionRow: {
+    paddingVertical: 14,
+    paddingHorizontal: 16,
+    borderRadius: 14,
+    borderWidth: 1,
+    borderColor: 'rgba(82,142,220,0.25)',
+    backgroundColor: 'rgba(255,255,255,0.045)',
+  },
+  ethnicityOptionRowSelected: {
+    borderColor: '#7C3AED',
+    backgroundColor: 'rgba(91,168,232,0.2)',
+  },
+  ethnicityOptionText: {
+    color: '#C8D9EE',
+    fontSize: 16,
+    fontWeight: '500',
+    lineHeight: 22,
+  },
+  ethnicityOptionTextSelected: {
+    color: '#EEF6FF',
+    fontWeight: '600',
+  },
 });

@@ -1,5 +1,6 @@
 import { StyleSheet } from 'react-native';
 import { theme } from '@/shared/theme/theme';
+import { onboardingModalLayout } from './onboardingModalLayout';
 
 export const styles = StyleSheet.create({
   screen: {
@@ -13,13 +14,29 @@ export const styles = StyleSheet.create({
     flexGrow: 1,
   },
   container: {
-    padding: 24,
+    ...onboardingModalLayout.centeredContainer,
   },
   description: {
-    fontSize: 14,
+    fontSize: 15,
     color: theme.colors.textSecondary,
-    marginBottom: 16,
-    lineHeight: 20,
+    marginBottom: 20,
+    lineHeight: 22,
+  },
+  secondaryQuestionBlock: {
+    marginTop: 30,
+    borderTopWidth: 1,
+    borderTopColor: 'rgba(82,142,220,0.18)',
+    paddingTop: 24,
+  },
+  secondaryQuestionTitle: {
+    fontSize: 17,
+    fontWeight: '500',
+    color: theme.colors.text,
+    marginBottom: 14,
+    lineHeight: 24,
+  },
+  mustHaveEmphasis: {
+    fontWeight: '800',
   },
   option: {
     padding: 16,
@@ -42,17 +59,8 @@ export const styles = StyleSheet.create({
     color: theme.colors.primary,
     fontWeight: '600',
   },
-  buttonContainer: {
-    borderTopWidth: 1,
-    borderTopColor: theme.colors.border,
-    backgroundColor: theme.colors.surface,
-  },
-  buttonRow: {
-    flexDirection: 'row',
-    gap: 12,
-    paddingHorizontal: 24,
-    paddingVertical: 16,
-  },
+  buttonContainer: onboardingModalLayout.footer,
+  buttonRow: onboardingModalLayout.footerButtons,
   backButton: {
     flex: 1,
   },

@@ -199,18 +199,6 @@ export async function beginInterviewMicPreInitDuringTts(
     }
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
-    if (typeof fetch !== 'undefined') {
-      void fetch('http://127.0.0.1:7789/ingest/668e0bd5-3283-4492-9f48-e33846c18218', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          location: 'webInterviewMicPreInit.ts:beginInterviewMicPreInitDuringTts',
-          message: 'pre_init_getUserMedia_failed',
-          data: { error: msg.slice(0, 200) },
-          timestamp: Date.now(),
-        }),
-      }).catch(() => {});
-    }
     if (__DEV__) console.warn('[webInterviewMicPreInit] pre_init_getUserMedia_failed', msg);
     preInitStream = null;
     preInitRecorder = null;

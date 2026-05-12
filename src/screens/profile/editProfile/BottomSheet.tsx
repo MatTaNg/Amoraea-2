@@ -65,22 +65,28 @@ export const BottomSheet: React.FC<{
     if (!desktopDropdown || !anchor) return null;
     const menuW = Math.min(DROPDOWN_MAX_W, Math.max(220, anchor.width));
     let left = anchor.x;
-    if (left + menuW > winW - VIEWPORT_PAD) left = Math.max(VIEWPORT_PAD, winW - menuW - VIEWPORT_PAD);
+    if (left + menuW > winW - VIEWPORT_PAD)
+      left = Math.max(VIEWPORT_PAD, winW - menuW - VIEWPORT_PAD);
     if (left < VIEWPORT_PAD) left = VIEWPORT_PAD;
 
     const preferredTop = anchor.y + anchor.height + 6;
     const availableBelow = Math.max(0, winH - preferredTop - VIEWPORT_PAD);
     const availableAbove = Math.max(0, anchor.y - 6 - VIEWPORT_PAD);
-    const shouldOpenBelow = availableBelow >= DROPDOWN_MIN_H || availableBelow >= availableAbove;
+    const shouldOpenBelow =
+      availableBelow >= DROPDOWN_MIN_H || availableBelow >= availableAbove;
+    const availableOnChosenSide = shouldOpenBelow
+      ? availableBelow
+      : availableAbove;
     const maxHeight = Math.max(
-      DROPDOWN_MIN_H,
-      Math.min(DROPDOWN_MAX_H, shouldOpenBelow ? availableBelow : availableAbove)
+      Math.min(DROPDOWN_MIN_H, availableOnChosenSide),
+      Math.min(DROPDOWN_MAX_H, availableOnChosenSide),
     );
-    const top = shouldOpenBelow
-      ? preferredTop
-      : Math.max(VIEWPORT_PAD, anchor.y - maxHeight - 6);
+    const top = shouldOpenBelow ? preferredTop : undefined;
+    const bottom = shouldOpenBelow
+      ? undefined
+      : Math.max(VIEWPORT_PAD, winH - anchor.y + 6);
 
-    return { top, left, width: menuW, maxHeight };
+    return { top, bottom, left, width: menuW, maxHeight };
   }, [desktopDropdown, anchor, winW, winH]);
 
   if (!visible) {
@@ -91,12 +97,17 @@ export const BottomSheet: React.FC<{
     return (
       <Modal visible transparent animationType="fade" onRequestClose={onClose}>
         <View style={styles.desktopRoot} pointerEvents="box-none">
-          <Pressable style={StyleSheet.absoluteFill} onPress={onClose} accessibilityLabel="Dismiss menu" />
+          <Pressable
+            style={StyleSheet.absoluteFill}
+            onPress={onClose}
+            accessibilityLabel="Dismiss menu"
+          />
           <View
             style={[
               styles.dropdownPanel,
               {
                 top: dropdownLayout.top,
+                bottom: dropdownLayout.bottom,
                 left: dropdownLayout.left,
                 width: dropdownLayout.width,
                 maxHeight: dropdownLayout.maxHeight,
@@ -104,7 +115,6 @@ export const BottomSheet: React.FC<{
             ]}
             accessibilityRole="menu"
           >
-            {title ? <Text style={styles.dropdownTitle}>{title}</Text> : null}
             <ScrollView
               keyboardShouldPersistTaps="handled"
               style={styles.dropdownScroll}
@@ -123,7 +133,11 @@ export const BottomSheet: React.FC<{
       <Pressable style={styles.back} onPress={onClose}>
         <Pressable style={styles.sheet} onPress={(e) => e.stopPropagation()}>
           {title ? <Text style={styles.title}>{title}</Text> : null}
-          <ScrollView keyboardShouldPersistTaps="handled" nestedScrollEnabled style={styles.sheetScroll}>
+          <ScrollView
+            keyboardShouldPersistTaps="handled"
+            nestedScrollEnabled
+            style={styles.sheetScroll}
+          >
             {children}
           </ScrollView>
         </Pressable>
@@ -142,18 +156,19 @@ const styles = StyleSheet.create({
   },
   dropdownPanel: {
     position: 'absolute',
-    backgroundColor: '#0f1419',
+    backgroundColor: 'rgba(13,17,32,0.98)',
     borderRadius: 10,
     borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.12)',
-    paddingVertical: 8,
-    paddingHorizontal: 4,
+    borderColor: 'rgba(255,255,255,0.16)',
+    paddingVertical: 0,
+    paddingHorizontal: 0,
     shadowColor: '#000',
-    shadowOffset: { width: 0, height: 8 },
-    shadowOpacity: 0.45,
-    shadowRadius: 16,
+    shadowOffset: { width: 0, height: 18 },
+    shadowOpacity: 0.35,
+    shadowRadius: 36,
     elevation: 12,
     zIndex: 2,
+    overflow: 'hidden',
   },
   dropdownTitle: {
     color: '#EEF6FF',
@@ -167,7 +182,11 @@ const styles = StyleSheet.create({
   dropdownScroll: {
     flexGrow: 0,
   },
-  back: { flex: 1, justifyContent: 'flex-end', backgroundColor: 'rgba(0,0,0,0.5)' },
+  back: {
+    flex: 1,
+    justifyContent: 'flex-end',
+    backgroundColor: 'rgba(0,0,0,0.5)',
+  },
   sheet: {
     backgroundColor: '#0f1419',
     padding: 20,
@@ -178,5 +197,10 @@ const styles = StyleSheet.create({
   sheetScroll: {
     maxHeight: 480,
   },
-  title: { color: '#EEF6FF', fontSize: 18, fontWeight: '600', marginBottom: 12 },
+  title: {
+    color: '#EEF6FF',
+    fontSize: 18,
+    fontWeight: '600',
+    marginBottom: 12,
+  },
 });

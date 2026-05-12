@@ -16,6 +16,7 @@ import { TypologyModal } from './TypologyModal';
 import { PhotosVideoModal } from './PhotosVideoModal';
 import { LifeDomainsModal } from './LifeDomainsModal';
 import { MatchPreferencesModal } from './MatchPreferencesModal';
+import { AttractionPreferencesModal } from './AttractionPreferencesModal';
 import { SexInterestsOnboardingModal } from './SexInterestsOnboardingModal';
 import {
   workoutOptions,
@@ -28,6 +29,7 @@ import {
   religionOptions,
   haveKidsOptions,
   wantChildrenYesNoOptions,
+  PARTNER_SUBSTANCE_ALIGNMENT_OPTIONS,
 } from '@/shared/constants/filterOptions';
 import { modalOnboardingService } from './services/modalOnboardingService';
 import { OnboardingData } from './types';
@@ -41,7 +43,17 @@ import {
   SEX_DRIVE_OPTIONS,
   DATING_PACE_AFTER_EXCITEMENT_OPTIONS,
   RECENT_DATING_EARLY_WEEKS_OPTIONS,
+  SPACE_FOR_NEW_RELATIONSHIP_OPTIONS,
+  PARTNER_MOOD_MISMATCH_RESPONSE_OPTIONS,
+  SEXUAL_FOCUS_OPTIONS,
+  SEXUAL_FEEDBACK_STYLE_OPTIONS,
+  SEXUAL_NEEDS_COMMUNICATION_OPTIONS,
 } from '@/shared/constants/sexualCompatibilityOptions';
+import {
+  PREF_PARTNER_HAS_CHILDREN_OPTIONS,
+  PREF_PARTNER_POLITICAL_SHARING_OPTIONS,
+  PREF_PARTNER_SAME_RELIGION_OPTIONS,
+} from '@/screens/profile/editProfile/constants';
 import {
   buildHeightWeightProfileFields,
   mapRelationshipStyleUiToDb,
@@ -73,12 +85,18 @@ export type OnboardingStep =
   | 'religion'
   | 'sexDrive'
   | 'sexInterests'
+  | 'partnerMoodMismatch'
+  | 'sexualFocus'
+  | 'sexualFeedback'
+  | 'sexualNeedsCommunication'
   | 'datingPaceAfterExcitement'
   | 'recentDatingEarlyWeeks'
+  | 'spaceForNewRelationship'
   | 'lifeDomains'
   | 'typology'
   | 'photos'
   | 'matchPreferences'
+  | 'attractionPreferences'
   | 'complete';
 
 const ONBOARDING_STEPS_ORDER: OnboardingStep[] = [
@@ -105,16 +123,38 @@ const ONBOARDING_STEPS_ORDER: OnboardingStep[] = [
   'religion',
   'sexDrive',
   'sexInterests',
+  'partnerMoodMismatch',
+  'sexualFocus',
+  'sexualFeedback',
+  'sexualNeedsCommunication',
   'datingPaceAfterExcitement',
   'recentDatingEarlyWeeks',
+  'spaceForNewRelationship',
   'lifeDomains',
   'typology',
   'photos',
   'matchPreferences',
+  'attractionPreferences',
   'complete',
 ];
 
 const TOTAL_STEPS = ONBOARDING_STEPS_ORDER.filter((s) => s !== 'complete').length;
+const PARTNER_SUBSTANCE_ALIGNMENT_CHOICES = PARTNER_SUBSTANCE_ALIGNMENT_OPTIONS.map((label) => ({
+  label,
+  value: label,
+}));
+const PARTNER_POLITICAL_SHARING_CHOICES = PREF_PARTNER_POLITICAL_SHARING_OPTIONS.map((label) => ({
+  label,
+  value: label,
+}));
+const PARTNER_HAS_CHILDREN_CHOICES = PREF_PARTNER_HAS_CHILDREN_OPTIONS.map((label) => ({
+  label,
+  value: label,
+}));
+const PARTNER_SAME_RELIGION_CHOICES = PREF_PARTNER_SAME_RELIGION_OPTIONS.map((label) => ({
+  label,
+  value: label,
+}));
 
 function OnboardingProgressBar({ currentStep }: { currentStep: OnboardingStep }) {
   const index = ONBOARDING_STEPS_ORDER.indexOf(currentStep);
@@ -625,6 +665,16 @@ export const ModalOnboardingFlow: React.FC<ModalOnboardingFlowProps> = ({ onComp
           (profileUpdates as any).datingPaceAfterExcitement = newData.datingPaceAfterExcitement;
         if (newData.recentDatingEarlyWeeks !== undefined)
           (profileUpdates as any).recentDatingEarlyWeeks = newData.recentDatingEarlyWeeks;
+        if (newData.spaceForNewRelationship !== undefined)
+          (profileUpdates as any).spaceForNewRelationship = newData.spaceForNewRelationship;
+        if (newData.partnerMoodMismatchResponse !== undefined)
+          (profileUpdates as any).partnerMoodMismatchResponse = newData.partnerMoodMismatchResponse;
+        if (newData.sexualFocusPreference !== undefined)
+          (profileUpdates as any).sexualFocusPreference = newData.sexualFocusPreference;
+        if (newData.sexualFeedbackStyle !== undefined)
+          (profileUpdates as any).sexualFeedbackStyle = newData.sexualFeedbackStyle;
+        if (newData.sexualNeedsCommunicationComfort !== undefined)
+          (profileUpdates as any).sexualNeedsCommunicationComfort = newData.sexualNeedsCommunicationComfort;
         if (newData.lifeDomains) {
           profileUpdates.lifeDomains = newData.lifeDomains;
         }
@@ -900,6 +950,18 @@ export const ModalOnboardingFlow: React.FC<ModalOnboardingFlowProps> = ({ onComp
             (profileUpdates as any).datingPaceAfterExcitement = latestData.datingPaceAfterExcitement;
           if (latestData.recentDatingEarlyWeeks !== undefined)
             (profileUpdates as any).recentDatingEarlyWeeks = latestData.recentDatingEarlyWeeks;
+          if (latestData.spaceForNewRelationship !== undefined)
+            (profileUpdates as any).spaceForNewRelationship = latestData.spaceForNewRelationship;
+          if (latestData.partnerMoodMismatchResponse !== undefined)
+            (profileUpdates as any).partnerMoodMismatchResponse =
+              latestData.partnerMoodMismatchResponse;
+          if (latestData.sexualFocusPreference !== undefined)
+            (profileUpdates as any).sexualFocusPreference = latestData.sexualFocusPreference;
+          if (latestData.sexualFeedbackStyle !== undefined)
+            (profileUpdates as any).sexualFeedbackStyle = latestData.sexualFeedbackStyle;
+          if (latestData.sexualNeedsCommunicationComfort !== undefined)
+            (profileUpdates as any).sexualNeedsCommunicationComfort =
+              latestData.sexualNeedsCommunicationComfort;
           if (latestData.hobbies !== undefined) profileUpdates.hobbies = latestData.hobbies;
           if (latestData.professionalHobbyId !== undefined) (profileUpdates as any).professionalHobbyId = latestData.professionalHobbyId;
           if (latestData.availability && Array.isArray(latestData.availability) && latestData.availability.length > 0) {
@@ -1088,7 +1150,6 @@ export const ModalOnboardingFlow: React.FC<ModalOnboardingFlowProps> = ({ onComp
       {currentStep === 'ethnicity' && (
         <SingleChoiceModal
           title="Ethnicity"
-          description="How do you identify? Choose the option that fits you best."
           options={ETHNICITY_CHOICES}
           value={onboardingData.ethnicity || ''}
           onValueChange={(v) => updateData({ ethnicity: v })}
@@ -1247,6 +1308,19 @@ export const ModalOnboardingFlow: React.FC<ModalOnboardingFlowProps> = ({ onComp
           options={smokingOptions}
           value={onboardingData.smoking || ''}
           onValueChange={(v) => updateData({ smoking: v })}
+          secondaryTitle="Is it a must have that your partner shares your relationship with cigarettes or tobacco?"
+          secondaryOptions={PARTNER_SUBSTANCE_ALIGNMENT_CHOICES}
+          secondaryValue={String(onboardingData.matchPreferences?.partnerAlignmentTobacco ?? '')}
+          onSecondaryValueChange={(v) =>
+            updateData({
+              matchPreferences: {
+                ...(onboardingDataRef.current.matchPreferences || {}),
+                partnerAlignmentTobacco: v,
+              },
+            })
+          }
+          secondaryRequired
+          autoAdvanceOnSelect={false}
           onNext={goToNextStep}
           onBack={goToPrevStep}
         />
@@ -1258,6 +1332,19 @@ export const ModalOnboardingFlow: React.FC<ModalOnboardingFlowProps> = ({ onComp
           options={drinkingOptions}
           value={onboardingData.drinking || ''}
           onValueChange={(v) => updateData({ drinking: v })}
+          secondaryTitle="Is it a must have that your partner shares your relationship with alcohol?"
+          secondaryOptions={PARTNER_SUBSTANCE_ALIGNMENT_CHOICES}
+          secondaryValue={String(onboardingData.matchPreferences?.partnerAlignmentAlcohol ?? '')}
+          onSecondaryValueChange={(v) =>
+            updateData({
+              matchPreferences: {
+                ...(onboardingDataRef.current.matchPreferences || {}),
+                partnerAlignmentAlcohol: v,
+              },
+            })
+          }
+          secondaryRequired
+          autoAdvanceOnSelect={false}
           onNext={goToNextStep}
           onBack={goToPrevStep}
         />
@@ -1270,6 +1357,19 @@ export const ModalOnboardingFlow: React.FC<ModalOnboardingFlowProps> = ({ onComp
           options={recreationalDrugsSocialOptions}
           value={onboardingData.recreationalDrugsSocial || ''}
           onValueChange={(v) => updateData({ recreationalDrugsSocial: v })}
+          secondaryTitle="Is it a must have that your partner shares your relationship with recreational drugs?"
+          secondaryOptions={PARTNER_SUBSTANCE_ALIGNMENT_CHOICES}
+          secondaryValue={String(onboardingData.matchPreferences?.partnerAlignmentRecreationalDrugs ?? '')}
+          onSecondaryValueChange={(v) =>
+            updateData({
+              matchPreferences: {
+                ...(onboardingDataRef.current.matchPreferences || {}),
+                partnerAlignmentRecreationalDrugs: v,
+              },
+            })
+          }
+          secondaryRequired
+          autoAdvanceOnSelect={false}
           onNext={goToNextStep}
           onBack={goToPrevStep}
         />
@@ -1282,6 +1382,19 @@ export const ModalOnboardingFlow: React.FC<ModalOnboardingFlowProps> = ({ onComp
           options={psychedelicsRelationshipOptions}
           value={onboardingData.relationshipWithPsychedelics || ''}
           onValueChange={(v) => updateData({ relationshipWithPsychedelics: v })}
+          secondaryTitle="Is it a must have that your partner shares your relationship with psychedelics or plant medicines?"
+          secondaryOptions={PARTNER_SUBSTANCE_ALIGNMENT_CHOICES}
+          secondaryValue={String(onboardingData.matchPreferences?.partnerAlignmentPsychedelics ?? '')}
+          onSecondaryValueChange={(v) =>
+            updateData({
+              matchPreferences: {
+                ...(onboardingDataRef.current.matchPreferences || {}),
+                partnerAlignmentPsychedelics: v,
+              },
+            })
+          }
+          secondaryRequired
+          autoAdvanceOnSelect={false}
           onNext={goToNextStep}
           onBack={goToPrevStep}
         />
@@ -1293,6 +1406,19 @@ export const ModalOnboardingFlow: React.FC<ModalOnboardingFlowProps> = ({ onComp
           options={cannabisRelationshipOptions}
           value={onboardingData.relationshipWithCannabis || ''}
           onValueChange={(v) => updateData({ relationshipWithCannabis: v })}
+          secondaryTitle="Is it a must have that your partner shares your relationship with cannabis or tobacco?"
+          secondaryOptions={PARTNER_SUBSTANCE_ALIGNMENT_CHOICES}
+          secondaryValue={String(onboardingData.matchPreferences?.partnerAlignmentCannabis ?? '')}
+          onSecondaryValueChange={(v) =>
+            updateData({
+              matchPreferences: {
+                ...(onboardingDataRef.current.matchPreferences || {}),
+                partnerAlignmentCannabis: v,
+              },
+            })
+          }
+          secondaryRequired
+          autoAdvanceOnSelect={false}
           onNext={goToNextStep}
           onBack={goToPrevStep}
         />
@@ -1315,6 +1441,12 @@ export const ModalOnboardingFlow: React.FC<ModalOnboardingFlowProps> = ({ onComp
           options={wantChildrenYesNoOptions}
           value={onboardingData.wantKids || ''}
           onValueChange={(v) => updateData({ wantKids: v })}
+          secondaryTitle="Is it OK if your match already has children?"
+          secondaryOptions={PARTNER_HAS_CHILDREN_CHOICES}
+          secondaryValue={onboardingData.prefPartnerHasChildren || ''}
+          onSecondaryValueChange={(v) => updateData({ prefPartnerHasChildren: v })}
+          secondaryRequired
+          autoAdvanceOnSelect={false}
           onNext={goToNextStep}
           onBack={goToPrevStep}
         />
@@ -1326,6 +1458,12 @@ export const ModalOnboardingFlow: React.FC<ModalOnboardingFlowProps> = ({ onComp
           options={politicsOptions}
           value={onboardingData.politics || ''}
           onValueChange={(v) => updateData({ politics: v })}
+          secondaryTitle="Is it a must have that your partner shares the same political views as you?"
+          secondaryOptions={PARTNER_POLITICAL_SHARING_CHOICES}
+          secondaryValue={onboardingData.prefPartnerPoliticalAlignmentImportance || ''}
+          onSecondaryValueChange={(v) => updateData({ prefPartnerPoliticalAlignmentImportance: v })}
+          secondaryRequired
+          autoAdvanceOnSelect={false}
           onNext={goToNextStep}
           onBack={goToPrevStep}
         />
@@ -1337,6 +1475,19 @@ export const ModalOnboardingFlow: React.FC<ModalOnboardingFlowProps> = ({ onComp
           options={religionOptions}
           value={onboardingData.religion || ''}
           onValueChange={(v) => updateData({ religion: v })}
+          secondaryTitle="Is it a must have that your partner shares the same religious faith as you?"
+          secondaryOptions={PARTNER_SAME_RELIGION_CHOICES}
+          secondaryValue={String(onboardingData.matchPreferences?.partnerSameReligionRequired ?? '')}
+          onSecondaryValueChange={(v) =>
+            updateData({
+              matchPreferences: {
+                ...(onboardingData.matchPreferences ?? {}),
+                partnerSameReligionRequired: v,
+              },
+            })
+          }
+          secondaryRequired
+          autoAdvanceOnSelect={false}
           onNext={goToNextStep}
           onBack={goToPrevStep}
         />
@@ -1357,6 +1508,54 @@ export const ModalOnboardingFlow: React.FC<ModalOnboardingFlowProps> = ({ onComp
         <SexInterestsOnboardingModal
           categories={onboardingData.sexInterestCategories || []}
           onCategoriesChange={(sexInterestCategories) => updateData({ sexInterestCategories })}
+          prefPartnerSharesSexualInterests={onboardingData.prefPartnerSharesSexualInterests || ''}
+          onPrefPartnerSharesSexualInterestsChange={(v) =>
+            updateData({ prefPartnerSharesSexualInterests: v })
+          }
+          onNext={goToNextStep}
+          onBack={goToPrevStep}
+        />
+      )}
+
+      {currentStep === 'partnerMoodMismatch' && (
+        <SingleChoiceModal
+          title="When my partner is in the mood and I'm not, I generally..."
+          options={PARTNER_MOOD_MISMATCH_RESPONSE_OPTIONS}
+          value={onboardingData.partnerMoodMismatchResponse || ''}
+          onValueChange={(v) => updateData({ partnerMoodMismatchResponse: v })}
+          onNext={goToNextStep}
+          onBack={goToPrevStep}
+        />
+      )}
+
+      {currentStep === 'sexualFocus' && (
+        <SingleChoiceModal
+          title="During sex, I'm more focused on..."
+          options={SEXUAL_FOCUS_OPTIONS}
+          value={onboardingData.sexualFocusPreference || ''}
+          onValueChange={(v) => updateData({ sexualFocusPreference: v })}
+          onNext={goToNextStep}
+          onBack={goToPrevStep}
+        />
+      )}
+
+      {currentStep === 'sexualFeedback' && (
+        <SingleChoiceModal
+          title="When something isn't working for me sexually, I..."
+          options={SEXUAL_FEEDBACK_STYLE_OPTIONS}
+          value={onboardingData.sexualFeedbackStyle || ''}
+          onValueChange={(v) => updateData({ sexualFeedbackStyle: v })}
+          onNext={goToNextStep}
+          onBack={goToPrevStep}
+        />
+      )}
+
+      {currentStep === 'sexualNeedsCommunication' && (
+        <SingleChoiceModal
+          title="How comfortable are you discussing your sexual needs and preferences with a partner?"
+          options={SEXUAL_NEEDS_COMMUNICATION_OPTIONS}
+          value={onboardingData.sexualNeedsCommunicationComfort || ''}
+          onValueChange={(v) => updateData({ sexualNeedsCommunicationComfort: v })}
           onNext={goToNextStep}
           onBack={goToPrevStep}
         />
@@ -1375,10 +1574,21 @@ export const ModalOnboardingFlow: React.FC<ModalOnboardingFlowProps> = ({ onComp
 
       {currentStep === 'recentDatingEarlyWeeks' && (
         <SingleChoiceModal
-          title="Think about your most recent dating experience. In the first 2–3 weeks, what actually happened?"
+          title="Think about your most recent dating experience. In the first 2-3 weeks, what actually happened?"
           options={RECENT_DATING_EARLY_WEEKS_OPTIONS}
           value={onboardingData.recentDatingEarlyWeeks || ''}
           onValueChange={(v) => updateData({ recentDatingEarlyWeeks: v })}
+          onNext={goToNextStep}
+          onBack={goToPrevStep}
+        />
+      )}
+
+      {currentStep === 'spaceForNewRelationship' && (
+        <SingleChoiceModal
+          title="How much space do you realistically have for a new relationship right now?"
+          options={SPACE_FOR_NEW_RELATIONSHIP_OPTIONS}
+          value={onboardingData.spaceForNewRelationship || ''}
+          onValueChange={(v) => updateData({ spaceForNewRelationship: v })}
           onNext={goToNextStep}
           onBack={goToPrevStep}
         />
@@ -1436,20 +1646,16 @@ export const ModalOnboardingFlow: React.FC<ModalOnboardingFlowProps> = ({ onComp
       {currentStep === 'matchPreferences' && (
         <MatchPreferencesModal
           matchPreferences={onboardingData.matchPreferences}
-          location={onboardingData.location}
-          userAge={profile?.age}
-          prefPhysicalCompatImportance={onboardingData.prefPhysicalCompatImportance}
-          prefPartnerSharesSexualInterests={onboardingData.prefPartnerSharesSexualInterests}
-          onPrefPhysicalCompatImportanceChange={(v: string) => updateData({ prefPhysicalCompatImportance: v })}
-          onPrefPartnerSharesSexualInterestsChange={(v: string) =>
-            updateData({ prefPartnerSharesSexualInterests: v })
-          }
-          prefPartnerHasChildren={onboardingData.prefPartnerHasChildren}
-          onPrefPartnerHasChildrenChange={(v: string) => updateData({ prefPartnerHasChildren: v })}
-          prefPartnerPoliticalAlignmentImportance={onboardingData.prefPartnerPoliticalAlignmentImportance}
-          onPrefPartnerPoliticalAlignmentImportanceChange={(v: string) =>
-            updateData({ prefPartnerPoliticalAlignmentImportance: v })
-          }
+          onMatchPreferencesChange={(matchPreferences) => updateData({ matchPreferences })}
+          onNext={goToNextStep}
+          onBack={goToPrevStep}
+        />
+      )}
+
+      {currentStep === 'attractionPreferences' && (
+        <AttractionPreferencesModal
+          matchPreferences={onboardingData.matchPreferences}
+          userAge={typeof profile?.age === 'number' ? profile.age : undefined}
           onMatchPreferencesChange={(matchPreferences) => updateData({ matchPreferences })}
           onNext={handleComplete}
           onBack={goToPrevStep}

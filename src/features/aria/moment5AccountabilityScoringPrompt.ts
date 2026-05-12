@@ -22,9 +22,20 @@ export type Moment5ClientScoringMetadata = {
   probeTriggerReason?: string;
   /** Client asked once for a concrete person/situation before accountability (abstract first answer). */
   specificityRedirectIssued?: boolean;
+  /**
+   * Product / analytics: `conflict_validity_clarification_fired` — true once the **specificity redirect**
+   * ("specific time… walk me through") was issued during Moment 5 (distinct from tense/smooth clarification).
+   */
+  conflictValidityClarificationFired?: boolean;
+  /** Product / analytics: `conflict_validity_second_response_abstract` — user follow-up after that redirect was still abstract. */
+  conflictValiditySecondResponseAbstract?: boolean;
+  /** Product / analytics: `accountability_probe_fired_on_abstract_followup` — probe fired as alternate entry after abstract second answer. */
+  accountabilityProbeFiredOnAbstractFollowup?: boolean;
   /** User stayed abstract after that redirect — accountability probe was not delivered. */
   persistentAbstractionMoveOn?: boolean;
-  /** One-sentence grief acknowledgment prepended before the scripted accountability probe (death/bereavement disclosure). */
+  /** Brief scripted appreciation line immediately before the accountability question (standard for every fired probe). */
+  warmAckBeforeAccountabilityProbe?: boolean;
+  /** Participant's answer included death / bereavement; same warm line is used, plus this flag for scorer context. */
   griefAckBeforeAccountabilityProbe?: boolean;
   /** Client asked whether the situation actually got tense before any accountability probe. */
   conflictValidityClarificationAsked?: boolean;
@@ -47,13 +58,24 @@ export function buildMoment5AccountabilityScoringPrompt(
       : '';
 
   const persistentAbstractNote =
-    clientMeta?.persistentAbstractionMoveOn === true
-      ? `\nCLIENT METADATA — NO ACCOUNTABILITY PROBE (persistent abstraction):\nAfter the specificity redirect, the participant still did not anchor to a concrete episode. **No** "What was your part…" probe was delivered per pipeline rules — score from thin behavioral evidence only.\n`
+    clientMeta?.persistentAbstractionMoveOn === true &&
+    clientMeta?.accountabilityProbeFiredOnAbstractFollowup !== true
+      ? `\nCLIENT METADATA — NO ACCOUNTABILITY PROBE (persistent abstraction):\nAfter the specificity redirect, the participant still did not anchor to a concrete episode and declined or evaded; **no** "What was your part…" probe was delivered — score from thin behavioral evidence only.\n`
+      : '';
+
+  const abstractFollowupProbeNote =
+    clientMeta?.accountabilityProbeFiredOnAbstractFollowup === true
+      ? `\nCLIENT METADATA — ABSTRACT FOLLOW-UP AFTER SPECIFICITY REDIRECT (Moment 5):\nThe participant\'s second answer after the "specific time" redirect remained abstract; the interviewer delivered the accountability probe once as an alternate entry point (not a second redirect). Apply **low behavioral specificity** expectations for pre-probe turns unless concrete episode detail appears in the post-probe answer.\n`
+      : '';
+
+  const warmAckNote =
+    clientMeta?.warmAckBeforeAccountabilityProbe === true
+      ? `\nCLIENT METADATA — WARM ACKNOWLEDGMENT BEFORE PROBE (Moment 5):\nThe interviewer delivered **one** brief scripted appreciation line immediately **before** the same-turn accountability question — standard pipeline tone, not therapy or extended validation.\n`
       : '';
 
   const griefAckNote =
     clientMeta?.griefAckBeforeAccountabilityProbe === true
-      ? `\nCLIENT METADATA — GRIEF ACKNOWLEDGMENT (Moment 5):\nThe participant\'s answer included death / bereavement disclosure. The interviewer delivered **one** brief neutral acknowledgment sentence immediately **before** the same-turn scripted accountability probe — not a support conversation, no invitation to elaborate on grief.\n`
+      ? `\nCLIENT METADATA — DEATH / BEREAVEMENT IN USER TURN (Moment 5):\nThe participant\'s answer included death or bereavement. The scripted line before the probe is the same warmth beat used for all probes; treat it as brief acknowledgment only — not a support conversation, no invitation to elaborate on grief.\n`
       : '';
 
   const conflictValidityNote =
@@ -68,8 +90,19 @@ export function buildMoment5AccountabilityScoringPrompt(
       ? `\nCLIENT METADATA — ACCOUNTABILITY PROBE:\nThe interviewer delivered **one** scripted follow-up ("What was your part in how it unfolded?") because the participant\'s answer narrated the conflict **without** referring to their own role (after any specificity redirect, when applicable).\n- If their **subsequent** answer shows genuine reflection on their own contribution, **moderate** accountability scores are appropriate even if the first answer was one-sided.\n- If after the probe they still narrate only from the other person\'s perspective, use **low** accountability with clear evidence.\n- **HIGH** accountability requires **voluntary** ownership in the participant\'s own words **before** any probe — unprompted references to their behavior, contribution to tension, or what they could have done differently.\n`
       : `\nCLIENT METADATA — NO ACCOUNTABILITY PROBE:\nThe scripted accountability follow-up did **not** fire — evaluate accountability from the participant\'s spontaneous narrative only (see specificity / abstraction notes above when present).\n`;
 
+  const pathFlagsNote = clientMeta
+    ? `\nCLIENT METADATA — MOMENT 5 PATH FLAGS (echo for scoring):\n- conflict_validity_clarification_fired: ${clientMeta.conflictValidityClarificationFired === true}\n- conflict_validity_second_response_abstract: ${clientMeta.conflictValiditySecondResponseAbstract === true}\n- accountability_probe_fired_on_abstract_followup: ${clientMeta.accountabilityProbeFiredOnAbstractFollowup === true}\n`
+    : '';
+
   const probeCalibrationResolved =
-    specificityNote + persistentAbstractNote + griefAckNote + conflictValidityNote + probeCalibration;
+    specificityNote +
+    persistentAbstractNote +
+    abstractFollowupProbeNote +
+    warmAckNote +
+    griefAckNote +
+    conflictValidityNote +
+    pathFlagsNote +
+    probeCalibration;
 
   const bandCalibration = `
 ACCOUNTABILITY-BAND CALIBRATION (encode in scores + evidence; use literal summary labels when summarizing):

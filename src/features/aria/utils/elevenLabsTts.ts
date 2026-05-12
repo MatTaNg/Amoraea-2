@@ -180,33 +180,6 @@ let webInterviewAudioVisibilityListenerAttached = false;
 export function debugNoteWebAudioRouteChange(source: string, routeData?: Record<string, unknown>): void {
   if (Platform.OS !== 'web') return;
   const ctx = sharedWebAudioContext;
-  // #region agent log
-  fetch('http://127.0.0.1:7789/ingest/668e0bd5-3283-4492-9f48-e33846c18218', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json', 'X-Debug-Session-Id': 'c61a43' },
-    body: JSON.stringify({
-      sessionId: 'c61a43',
-      location: 'elevenLabsTts.ts:debugNoteWebAudioRouteChange',
-      message: 'web_audio_route_change_observed',
-      data: {
-        hypothesisId: 'H10',
-        source,
-        routeData: routeData ?? null,
-        hasCtx: !!ctx,
-        ctxState: ctx?.state ?? null,
-        ctxSampleRate: ctx?.sampleRate ?? null,
-        ctxBaseLatency: (ctx as AudioContext | null)?.baseLatency ?? null,
-        unlocked: webInterviewAudioUnlocked,
-        hasActiveHtmlAudio: activeWebAudio != null,
-        hasActiveWebBufferSource: activeWebBufferSource != null,
-        activePcmSources: activePcmStreamSources.length,
-        visibilityState: typeof document !== 'undefined' ? document.visibilityState : null,
-      },
-      timestamp: Date.now(),
-      runId: 'static-debug-pre',
-    }),
-  }).catch(() => {});
-  // #endregion
 }
 
 function attachWebInterviewAudioVisibilityHandler(): void {
@@ -225,30 +198,6 @@ function attachWebInterviewAudioVisibilityHandler(): void {
 async function handleWebInterviewDocumentVisibilityChange(): Promise<void> {
   if (typeof document === 'undefined' || document.visibilityState !== 'visible') return;
   const ctx = sharedWebAudioContext;
-  // #region agent log
-  fetch('http://127.0.0.1:7789/ingest/668e0bd5-3283-4492-9f48-e33846c18218', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json', 'X-Debug-Session-Id': 'c61a43' },
-    body: JSON.stringify({
-      sessionId: 'c61a43',
-      location: 'elevenLabsTts.ts:handleWebInterviewDocumentVisibilityChange',
-      message: 'web_visibility_resume_audio_state',
-      data: {
-        hypothesisId: 'H11',
-        hasCtx: !!ctx,
-        ctxState: ctx?.state ?? null,
-        ctxSampleRate: ctx?.sampleRate ?? null,
-        unlocked: webInterviewAudioUnlocked,
-        hasSharedHtmlAudio: sharedHtmlAudioForMobileTts != null,
-        hasActiveHtmlAudio: activeWebAudio != null,
-        hasActiveWebBufferSource: activeWebBufferSource != null,
-        activePcmSources: activePcmStreamSources.length,
-      },
-      timestamp: Date.now(),
-      runId: 'static-debug-pre',
-    }),
-  }).catch(() => {});
-  // #endregion
   /** Same path as pre-play: Chrome often suspends on tab hide; some builds use non-`suspended` states before `running`. */
   await ensureSharedWebAudioContextResumedForPlayback('other');
   reprimeSharedHtmlAudioSilentPlay();
@@ -279,31 +228,6 @@ async function ensureSharedWebAudioContextResumedForPlayback(
 ): Promise<boolean> {
   if (Platform.OS !== 'web' || typeof window === 'undefined') return true;
   const ctx = sharedWebAudioContext;
-  // #region agent log
-  fetch('http://127.0.0.1:7789/ingest/668e0bd5-3283-4492-9f48-e33846c18218', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json', 'X-Debug-Session-Id': 'c61a43' },
-    body: JSON.stringify({
-      sessionId: 'c61a43',
-      location: 'elevenLabsTts.ts:ensureSharedWebAudioContextResumedForPlayback',
-      message: 'web_audio_preplay_ctx_state',
-      data: {
-        hypothesisId: 'H12',
-        telemetrySource,
-        hasCtx: !!ctx,
-        ctxState: ctx?.state ?? null,
-        ctxSampleRate: ctx?.sampleRate ?? null,
-        unlocked: webInterviewAudioUnlocked,
-        visibilityState: typeof document !== 'undefined' ? document.visibilityState : null,
-        hasActiveHtmlAudio: activeWebAudio != null,
-        hasActiveWebBufferSource: activeWebBufferSource != null,
-        activePcmSources: activePcmStreamSources.length,
-      },
-      timestamp: Date.now(),
-      runId: 'static-debug-pre',
-    }),
-  }).catch(() => {});
-  // #endregion
   if (!ctx || !webInterviewAudioUnlocked) return true;
   if (ctx.state === 'closed') return false;
   /** `resume()` is a no-op when already `running`; call for `suspended` and any other non-running state (e.g. post–tab-hide Chrome). */
@@ -759,29 +683,6 @@ async function tryPlayElevenLabsMp3WithWebAudio(
 
     const decodeDbg = debugSummarizeAudioBufferPeaks(decoded);
     const rt0 = getSessionLogRuntime();
-    // #region agent log
-    fetch('http://127.0.0.1:7789/ingest/668e0bd5-3283-4492-9f48-e33846c18218', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'X-Debug-Session-Id': 'c61a43' },
-      body: JSON.stringify({
-        sessionId: 'c61a43',
-        location: 'elevenLabsTts.ts:tryPlayElevenLabsMp3WithWebAudio',
-        message: 'mp3_decoded_buffer_summary',
-        data: {
-          hypothesisId: 'H2',
-          preInitTriggerDuring,
-          telemetrySource,
-          ctxSampleRate: ctx.sampleRate,
-          ctxState: ctx.state,
-          ...decodeDbg,
-          recordingSessionActive: rt0.recordingSessionActive,
-          ttsPlaybackActive: rt0.ttsPlaybackActive,
-        },
-        timestamp: Date.now(),
-        runId: 'static-debug-pre',
-      }),
-    }).catch(() => {});
-    // #endregion
 
     const handlePlaybackRaceError = (raceErr: unknown): false => {
       const msg = raceErr instanceof Error ? raceErr.message : String(raceErr);
@@ -799,20 +700,6 @@ async function tryPlayElevenLabsMp3WithWebAudio(
           errorName: 'playback-timeout',
           errorMessagePreview: `capMs=${playbackCapMs}`,
         });
-        // #region agent log
-        fetch('http://127.0.0.1:7789/ingest/668e0bd5-3283-4492-9f48-e33846c18218', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json', 'X-Debug-Session-Id': 'e70f17' },
-          body: JSON.stringify({
-            sessionId: 'e70f17',
-            location: 'elevenLabsTts.ts:tryPlayElevenLabsMp3WithWebAudio',
-            message: 'web_audio_playback_timeout',
-            data: { hypothesisId: 'H12', playbackCapMs },
-            timestamp: Date.now(),
-            runId: 'post-fix',
-          }),
-        }).catch(() => {});
-        // #endregion
         return false;
       }
       throw raceErr;
@@ -861,60 +748,6 @@ async function tryPlayElevenLabsMp3WithWebAudio(
               outcome: 'play_ok',
               telemetrySource,
             });
-            // #region agent log
-            fetch('http://127.0.0.1:7789/ingest/668e0bd5-3283-4492-9f48-e33846c18218', {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json', 'X-Debug-Session-Id': 'e70f17' },
-              body: JSON.stringify({
-                sessionId: 'e70f17',
-                location: 'elevenLabsTts.ts:tryPlayElevenLabsMp3WithWebAudio',
-                message: 'web_audio_context_play_ok',
-                data: { hypothesisId: 'H11' },
-                timestamp: Date.now(),
-                runId: 'post-fix',
-              }),
-            }).catch(() => {});
-            const rt1 = getSessionLogRuntime();
-            if (playbackAnalyser && typeof window !== 'undefined') {
-              window.setTimeout(() => {
-                try {
-                  const arr = new Uint8Array(playbackAnalyser!.frequencyBinCount);
-                  playbackAnalyser!.getByteFrequencyData(arr);
-                  let sum = 0;
-                  let mx = 0;
-                  for (let i = 0; i < arr.length; i += 1) {
-                    sum += arr[i]!;
-                    mx = Math.max(mx, arr[i]!);
-                  }
-                  fetch('http://127.0.0.1:7789/ingest/668e0bd5-3283-4492-9f48-e33846c18218', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json', 'X-Debug-Session-Id': 'c61a43' },
-                    body: JSON.stringify({
-                      sessionId: 'c61a43',
-                      location: 'elevenLabsTts.ts:tryPlayElevenLabsMp3WithWebAudio',
-                      message: 'web_audio_post_start_spectrum',
-                      data: {
-                        hypothesisId: 'H2',
-                        freqBinAvg: arr.length ? sum / arr.length : 0,
-                        freqBinMax: mx,
-                        ctxStateAfterMs: ctx.state,
-                        decodePeak: decodeDbg.peak,
-                        decodeRms: decodeDbg.rms,
-                        recordingSessionActive: rt1.recordingSessionActive,
-                        ttsPlaybackActive: rt1.ttsPlaybackActive,
-                        visibilityState:
-                          typeof document !== 'undefined' ? document.visibilityState : null,
-                      },
-                      timestamp: Date.now(),
-                      runId: 'static-debug-pre',
-                    }),
-                  }).catch(() => {});
-                } catch {
-                  /* ignore */
-                }
-              }, 220);
-            }
-            // #endregion
           } catch (e) {
             if (activeWebBufferSource === src) activeWebBufferSource = null;
             reject(e instanceof Error ? e : new Error(String(e)));
@@ -1315,30 +1148,6 @@ async function playElevenLabsPcmStreamFromResponse(
     const t0 = !pcmPlaybackStarted ? ctx.currentTime + 0.02 : nextScheduleTime;
     const scheduleSlipSec = t0 - ctx.currentTime;
     const scheduleSlipMs = scheduleSlipSec * 1000;
-    // #region agent log
-    // Large positive slip is normal while buffering ahead; negative slip means start() in the past → overlap risk.
-    if (scheduleSlipMs < -1) {
-      fetch('http://127.0.0.1:7789/ingest/668e0bd5-3283-4492-9f48-e33846c18218', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'X-Debug-Session-Id': 'c61a43' },
-        body: JSON.stringify({
-          sessionId: 'c61a43',
-          location: 'elevenLabsTts.ts:schedulePcmChunk',
-          message: 'pcm_schedule_slip_anomaly',
-          data: {
-            hypothesisId: 'H16',
-            scheduleSlipMs: Math.round(scheduleSlipMs * 1000) / 1000,
-            isFirstChunk: !pcmPlaybackStarted,
-            chunkFrames: ch.length,
-            ctxState: ctx.state,
-            visibilityState: typeof document !== 'undefined' ? document.visibilityState : null,
-          },
-          timestamp: Date.now(),
-          runId: 'static-debug-pre',
-        }),
-      }).catch(() => {});
-    }
-    // #endregion
     nextScheduleTime = t0 + abuf.duration / playbackRateMultiplier;
     if (!pcmPlaybackStarted) {
       pcmPlaybackStarted = true;
@@ -1350,31 +1159,6 @@ async function playElevenLabsPcmStreamFromResponse(
         telemetrySource,
       });
       const rtPcm = getSessionLogRuntime();
-      // #region agent log
-      fetch('http://127.0.0.1:7789/ingest/668e0bd5-3283-4492-9f48-e33846c18218', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'X-Debug-Session-Id': 'c61a43' },
-        body: JSON.stringify({
-          sessionId: 'c61a43',
-          location: 'elevenLabsTts.ts:schedulePcmChunk',
-          message: 'pcm_stream_first_chunk_energy',
-          data: {
-            hypothesisId: 'H3',
-            preInitTriggerDuring,
-            telemetrySource,
-            pcmPeak,
-            pcmRms,
-            pcmFrames: ch.length,
-            ctxSampleRate: ctx.sampleRate,
-            ctxState: ctx.state,
-            recordingSessionActive: rtPcm.recordingSessionActive,
-            ttsPlaybackActive: rtPcm.ttsPlaybackActive,
-          },
-          timestamp: Date.now(),
-          runId: 'static-debug-pre',
-        }),
-      }).catch(() => {});
-      // #endregion
     }
     totalSourcesScheduled += 1;
     const srcNode = src;
@@ -1508,34 +1292,6 @@ export async function speakWithElevenLabs(
     options?.preInitTriggerDuring ??
     (telemetrySource === 'greeting' ? 'greeting' : 'tts_playback');
   const playbackRateMultiplier = getEffectivePlaybackRateMultiplier(options?.playbackRateMultiplier);
-  // #region agent log
-  if (Platform.OS === 'web') {
-    fetch('http://127.0.0.1:7789/ingest/668e0bd5-3283-4492-9f48-e33846c18218', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'X-Debug-Session-Id': 'c61a43' },
-      body: JSON.stringify({
-        sessionId: 'c61a43',
-        location: 'elevenLabsTts.ts:speakWithElevenLabs',
-        message: 'tts_call_entry_overlap_state',
-        data: {
-          hypothesisId: 'H13',
-          telemetrySource,
-          textLen: (text ?? '').length,
-          skipStopBeforeStart: !!options?.skipStopElevenLabsPlaybackBeforeStart,
-          hasActiveHtmlAudio: activeWebAudio != null,
-          hasActiveWebBufferSource: activeWebBufferSource != null,
-          activePcmSources: activePcmStreamSources.length,
-          hasCtx: !!sharedWebAudioContext,
-          ctxState: sharedWebAudioContext?.state ?? null,
-          ctxSampleRate: sharedWebAudioContext?.sampleRate ?? null,
-          unlocked: webInterviewAudioUnlocked,
-        },
-        timestamp: Date.now(),
-        runId: 'static-debug-pre',
-      }),
-    }).catch(() => {});
-  }
-  // #endregion
   if (!options?.skipStopElevenLabsPlaybackBeforeStart) {
     await stopElevenLabsPlayback();
   }
@@ -1551,25 +1307,6 @@ export async function speakWithElevenLabs(
   }
 
   if (!envAllowsEleven) {
-    // #region agent log
-    if (Platform.OS === 'web') {
-      fetch('http://127.0.0.1:7789/ingest/668e0bd5-3283-4492-9f48-e33846c18218', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'X-Debug-Session-Id': 'c61a43' },
-        body: JSON.stringify({
-          sessionId: 'c61a43',
-          location: 'elevenLabsTts.ts:speakWithElevenLabs',
-          message: 'elevenlabs_disabled_using_fallback',
-          data: {
-            hypothesisId: 'H3',
-            isDevBundle: typeof __DEV__ !== 'undefined' && __DEV__,
-          },
-          timestamp: Date.now(),
-          runId: 'debug-desktop-tap',
-        }),
-      }).catch(() => {});
-    }
-    // #endregion
     await speakFallback(spokenText, onFallback, options);
     return;
   }
@@ -1594,20 +1331,6 @@ export async function speakWithElevenLabs(
 
   /** Web Audio / MP3 path only — dev `speakFallback` (expo-speech / web speech) must not require prior unlock. */
   if (Platform.OS === 'web' && !webInterviewAudioUnlocked) {
-    // #region agent log
-    fetch('http://127.0.0.1:7789/ingest/668e0bd5-3283-4492-9f48-e33846c18218', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'X-Debug-Session-Id': 'c61a43' },
-      body: JSON.stringify({
-        sessionId: 'c61a43',
-        location: 'elevenLabsTts.ts:speakWithElevenLabs',
-        message: 'throw_web_not_unlocked',
-        data: { hypothesisId: 'H2', reason: 'webInterviewAudioUnlocked_false_elevenlabs_path' },
-        timestamp: Date.now(),
-        runId: 'debug-desktop-tap',
-      }),
-    }).catch(() => {});
-    // #endregion
     throw new WebTtsRequiresUserGestureError(spokenText);
   }
 
@@ -1623,32 +1346,6 @@ export async function speakWithElevenLabs(
     telemetrySource !== 'greeting' &&
     !options?.prefetchedMpegArrayBuffer &&
     spokenText.trim().length > LONG_TTS_USE_STREAMING_MIN_CHARS;
-  // #region agent log
-  if (Platform.OS === 'web') {
-    fetch('http://127.0.0.1:7789/ingest/668e0bd5-3283-4492-9f48-e33846c18218', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'X-Debug-Session-Id': 'c61a43' },
-      body: JSON.stringify({
-        sessionId: 'c61a43',
-        location: 'elevenLabsTts.ts:speakWithElevenLabs',
-        message: 'tts_pipeline_selection_state',
-        data: {
-          hypothesisId: 'H14',
-          telemetrySource,
-          textLen: spokenText.trim().length,
-          deferGesture: webSpeechShouldDeferToUserGesture(),
-          embeddedBrowserPcmSuppressed: webEmbeddedInAppBrowserDiscouragesPcmStream(),
-          shouldTryPcmStream,
-          skipStopBeforeStart: !!options?.skipStopElevenLabsPlaybackBeforeStart,
-          hasPrefetchedMpeg: !!options?.prefetchedMpegArrayBuffer,
-          preInitTriggerDuring,
-        },
-        timestamp: Date.now(),
-        runId: 'static-debug-pre',
-      }),
-    }).catch(() => {});
-  }
-  // #endregion
 
   try {
     if (shouldTryPcmStream) {
@@ -1660,27 +1357,6 @@ export async function speakWithElevenLabs(
         preInitTriggerDuring,
         playbackRateMultiplier
       );
-      // #region agent log
-      fetch('http://127.0.0.1:7789/ingest/668e0bd5-3283-4492-9f48-e33846c18218', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'X-Debug-Session-Id': 'c61a43' },
-        body: JSON.stringify({
-          sessionId: 'c61a43',
-          location: 'elevenLabsTts.ts:speakWithElevenLabs',
-          message: 'tts_pcm_attempt_result',
-          data: {
-            hypothesisId: 'H15',
-            telemetrySource,
-            playedPcm,
-            activePcmSourcesAfterAttempt: activePcmStreamSources.length,
-            hasActiveWebBufferSourceAfterAttempt: activeWebBufferSource != null,
-            hasActiveHtmlAudioAfterAttempt: activeWebAudio != null,
-          },
-          timestamp: Date.now(),
-          runId: 'static-debug-pre',
-        }),
-      }).catch(() => {});
-      // #endregion
       if (playedPcm) {
         return;
       }
@@ -1709,48 +1385,6 @@ export async function speakWithElevenLabs(
        * after `unlockWebAudioForAutoplay()` in `startInterview` so the first line can speak without a tap.
        */
       const skipWebAudioDecode = webSpeechShouldDeferToUserGesture();
-      // #region agent log
-      fetch('http://127.0.0.1:7789/ingest/668e0bd5-3283-4492-9f48-e33846c18218', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'X-Debug-Session-Id': 'c61a43' },
-        body: JSON.stringify({
-          sessionId: 'c61a43',
-          location: 'elevenLabsTts.ts:web_tts_branch',
-          message: 'desktop_tts_branch_state',
-          data: {
-            hypothesisId: 'H1',
-            skipWebAudioDecode,
-            deferGesture: webSpeechShouldDeferToUserGesture(),
-            maxTouchPoints: typeof navigator !== 'undefined' ? navigator.maxTouchPoints : null,
-            navPlatform: typeof navigator !== 'undefined' ? navigator.platform : null,
-            uaSnippet: (typeof navigator !== 'undefined' ? navigator.userAgent : '').slice(0, 120),
-            envAllowsEleven,
-            isDevBundle: typeof __DEV__ !== 'undefined' && __DEV__,
-          },
-          timestamp: Date.now(),
-          runId: 'debug-desktop-tap',
-        }),
-      }).catch(() => {});
-      // #endregion
-      // #region agent log
-      fetch('http://127.0.0.1:7789/ingest/668e0bd5-3283-4492-9f48-e33846c18218', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'X-Debug-Session-Id': 'e70f17' },
-        body: JSON.stringify({
-          sessionId: 'e70f17',
-          location: 'elevenLabsTts.ts:web_tts_branch',
-          message: 'web_tts_skip_web_audio',
-          data: {
-            hypothesisId: 'H_SKIP_WA_MOBILE_TURN',
-            skipWebAudioDecode,
-            telemetrySource,
-            deferGesture: webSpeechShouldDeferToUserGesture(),
-          },
-          timestamp: Date.now(),
-          runId: 'post-fix',
-        }),
-      }).catch(() => {});
-      // #endregion
       const playedViaCtx = skipWebAudioDecode
         ? false
         : await tryPlayElevenLabsMp3WithWebAudio(
@@ -1760,25 +1394,6 @@ export async function speakWithElevenLabs(
             preInitTriggerDuring,
             playbackRateMultiplier
           );
-      // #region agent log
-      fetch('http://127.0.0.1:7789/ingest/668e0bd5-3283-4492-9f48-e33846c18218', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'X-Debug-Session-Id': 'c61a43' },
-        body: JSON.stringify({
-          sessionId: 'c61a43',
-          location: 'elevenLabsTts.ts:web_after_web_audio_attempt',
-          message: 'played_via_web_audio_context',
-          data: {
-            hypothesisId: 'H5',
-            playedViaCtx,
-            skipWebAudioDecode,
-            nextPath: playedViaCtx ? 'done' : 'html_audio',
-          },
-          timestamp: Date.now(),
-          runId: 'debug-desktop-tap',
-        }),
-      }).catch(() => {});
-      // #endregion
       if (playedViaCtx) {
         const orphan = takePreAuthorizedAudioElementForTts();
         if (orphan) {
@@ -1832,20 +1447,6 @@ export async function speakWithElevenLabs(
         htmlAudio.playbackRate = playbackRateMultiplier;
       }
       activeWebAudio = htmlAudio;
-      // #region agent log
-      fetch('http://127.0.0.1:7789/ingest/668e0bd5-3283-4492-9f48-e33846c18218', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'X-Debug-Session-Id': 'e70f17' },
-        body: JSON.stringify({
-          sessionId: 'e70f17',
-          location: 'elevenLabsTts.ts:html_audio_element',
-          message: 'html_audio_use_shared_primed',
-          data: { hypothesisId: 'H_HTML_SHARED_PRIME', useSharedPrimed },
-          timestamp: Date.now(),
-          runId: 'post-fix',
-        }),
-      }).catch(() => {});
-      // #endregion
       /** Context only — do not reprime shared HTMLAudio here; `src` is already the MP3 blob URL. */
       if (!(await ensureSharedWebAudioContextResumedForPlayback(telemetrySource))) {
         activeWebAudio = null;
@@ -1934,20 +1535,6 @@ export async function speakWithElevenLabs(
                 outcome: 'play_blocked_autoplay',
                 telemetrySource,
               });
-              // #region agent log
-              fetch('http://127.0.0.1:7789/ingest/668e0bd5-3283-4492-9f48-e33846c18218', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json', 'X-Debug-Session-Id': 'e70f17' },
-                body: JSON.stringify({
-                  sessionId: 'e70f17',
-                  location: 'elevenLabsTts.ts:mp3_blocked',
-                  message: 'mp3_autoplay_blocked_trying_web_speech',
-                  data: { hypothesisId: 'H6' },
-                  timestamp: Date.now(),
-                  runId: 'post-fix',
-                }),
-              }).catch(() => {});
-              // #endregion
               try {
                 const webRes = await speakWithWebSpeechSynthesis(
                   spokenText,
@@ -1971,40 +1558,12 @@ export async function speakWithElevenLabs(
                     outcome: 'play_ok',
                     telemetrySource,
                   });
-                  // #region agent log
-                  fetch('http://127.0.0.1:7789/ingest/668e0bd5-3283-4492-9f48-e33846c18218', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json', 'X-Debug-Session-Id': 'e70f17' },
-                    body: JSON.stringify({
-                      sessionId: 'e70f17',
-                      location: 'elevenLabsTts.ts:web_speech_fallback',
-                      message: 'web_speech_fallback_ok',
-                      data: { hypothesisId: 'H6' },
-                      timestamp: Date.now(),
-                      runId: 'post-fix',
-                    }),
-                  }).catch(() => {});
-                  // #endregion
                   finish('resolve');
                   return;
                 }
               } catch {
                 /* fall through to gesture error */
               }
-              // #region agent log
-              fetch('http://127.0.0.1:7789/ingest/668e0bd5-3283-4492-9f48-e33846c18218', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json', 'X-Debug-Session-Id': 'e70f17' },
-                body: JSON.stringify({
-                  sessionId: 'e70f17',
-                  location: 'elevenLabsTts.ts:web_speech_fallback',
-                  message: 'web_speech_fallback_failed_gesture_queue',
-                  data: { hypothesisId: 'H6' },
-                  timestamp: Date.now(),
-                  runId: 'post-fix',
-                }),
-              }).catch(() => {});
-              // #endregion
               finish('reject', new WebTtsRequiresUserGestureError(spokenText));
               return;
             }
@@ -2125,20 +1684,6 @@ function speakWithWebSpeechSynthesis(
       } catch {
         /* ignore */
       }
-      // #region agent log
-      fetch('http://127.0.0.1:7789/ingest/668e0bd5-3283-4492-9f48-e33846c18218', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'X-Debug-Session-Id': 'e70f17' },
-        body: JSON.stringify({
-          sessionId: 'e70f17',
-          location: 'elevenLabsTts.ts:speakWithWebSpeechSynthesis',
-          message: 'web_speech_timeout',
-          data: { hypothesisId: 'H_LOAD', timeoutMs, textLen: spokenText.length },
-          timestamp: Date.now(),
-          runId: 'post-fix',
-        }),
-      }).catch(() => {});
-      // #endregion
       settle({ ok: false, error: 'timeout' });
     }, timeoutMs);
 
@@ -2213,21 +1758,6 @@ export async function tryPlayPendingWebTtsAudioInUserGesture(
   const telemetrySource = telemetry?.source ?? 'other';
   if (Platform.OS !== 'web' || typeof window === 'undefined' || !pendingWebGestureBlobUrl) return false;
   await ensureWebPlaybackPrimedForNextTurn(telemetrySource);
-  // #region agent log
-  fetch('http://127.0.0.1:7789/ingest/668e0bd5-3283-4492-9f48-e33846c18218', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json', 'X-Debug-Session-Id': 'c61a43' },
-    body: JSON.stringify({
-      sessionId: 'c61a43',
-      hypothesisId: 'H4',
-      location: 'elevenLabsTts.ts:tryPlayPendingWebTtsAudioInUserGesture',
-      message: 'pending_elevenlabs_blob_flush',
-      data: { telemetrySource },
-      timestamp: Date.now(),
-      runId: 'pre-fix',
-    }),
-  }).catch(() => {});
-  // #endregion
   const url = pendingWebGestureBlobUrl;
   pendingWebGestureBlobUrl = null;
   const AudioCtor = typeof (globalThis as unknown as { Audio?: new (src?: string) => HTMLAudioElement }).Audio !== 'undefined'
@@ -2358,24 +1888,6 @@ function speakFallback(
           resolve();
           return;
         }
-        // #region agent log
-        fetch('http://127.0.0.1:7789/ingest/668e0bd5-3283-4492-9f48-e33846c18218', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json', 'X-Debug-Session-Id': 'c61a43' },
-          body: JSON.stringify({
-            sessionId: 'c61a43',
-            location: 'elevenLabsTts.ts:speakFallback',
-            message: 'web_speech_synthesis_result',
-            data: {
-              hypothesisId: 'H1',
-              error: webRes.ok ? null : webRes.error,
-              deferGesture: webSpeechShouldDeferToUserGesture(),
-            },
-            timestamp: Date.now(),
-            runId: 'debug-desktop-tap',
-          }),
-        }).catch(() => {});
-        // #endregion
         if (!webRes.ok && webRes.error === 'not-allowed') {
           throw new WebTtsRequiresUserGestureError(text);
         }

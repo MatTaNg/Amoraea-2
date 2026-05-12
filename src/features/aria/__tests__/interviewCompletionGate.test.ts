@@ -53,6 +53,21 @@ describe('evaluateInterviewCompletionGate', () => {
     expect(r.ok).toBe(true);
   });
 
+  it('passes when Moment 4 pillarScores is empty after evidence filter but keyEvidence documents assessment', () => {
+    const r = evaluateInterviewCompletionGate({
+      scenario1: bundle(1),
+      scenario2: bundle(2),
+      scenario3: bundle(3),
+      moment4: {
+        pillarScores: {},
+        keyEvidence: {
+          mentalizing: 'No substantive engagement with grudge/dislike question in this slice.',
+        },
+      },
+    });
+    expect(r.ok).toBe(true);
+  });
+
   it('fails when a scenario is null', () => {
     const r = evaluateInterviewCompletionGate({
       scenario1: bundle(1),

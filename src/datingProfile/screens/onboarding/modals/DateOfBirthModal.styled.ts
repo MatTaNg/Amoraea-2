@@ -1,5 +1,6 @@
 import { StyleSheet } from 'react-native';
 import { theme } from '@/shared/theme/theme';
+import { onboardingModalLayout } from './onboardingModalLayout';
 
 const LOCATION_FIELD_WIDTH = 300;
 
@@ -15,7 +16,7 @@ export const styles = StyleSheet.create({
     flexGrow: 1,
   },
   container: {
-    padding: 24,
+    ...onboardingModalLayout.centeredContainer,
   },
   errorText: {
     fontSize: 14,
@@ -66,17 +67,8 @@ export const styles = StyleSheet.create({
     color: theme.colors.text,
     lineHeight: 20,
   },
-  buttonContainer: {
-    borderTopWidth: 1,
-    borderTopColor: theme.colors.border,
-    backgroundColor: theme.colors.card,
-  },
-  buttonRow: {
-    flexDirection: 'row',
-    gap: 12,
-    paddingHorizontal: 24,
-    paddingVertical: 16,
-  },
+  buttonContainer: onboardingModalLayout.footer,
+  buttonRow: onboardingModalLayout.footerButtons,
   backButton: {
     flex: 1,
   },

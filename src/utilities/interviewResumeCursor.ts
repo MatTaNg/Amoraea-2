@@ -220,7 +220,7 @@ export function buildResumeWelcomeMessage(params: {
   resumeScenario: 1 | 2 | 3;
 }): string {
   const tail =
-    " If you'd like me to repeat what I said, let me know. Otherwise, I'm ready for your response.";
+    " If you'd like me to repeat what I said, let me know.";
   let msg: string;
   if (params.mode === 'resume_post_scenarios') {
     msg =
@@ -231,26 +231,6 @@ export function buildResumeWelcomeMessage(params: {
   } else {
     msg = `Welcome back — we'll pick up where we left off.` + tail;
   }
-  // #region agent log
-  fetch('http://127.0.0.1:7789/ingest/668e0bd5-3283-4492-9f48-e33846c18218', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json', 'X-Debug-Session-Id': 'ca824c' },
-    body: JSON.stringify({
-      sessionId: 'ca824c',
-      hypothesisId: 'H_msg',
-      location: 'interviewResumeCursor.ts:buildResumeWelcomeMessage',
-      message: 'resume_welcome_built',
-      data: {
-        runId: 'post-copy-fix',
-        mode: params.mode,
-        resumeScenario: params.resumeScenario,
-        preview: msg.slice(0, 140),
-        hasOrdinalSituation: /\b(the first|the second|the third) situation\b/i.test(msg),
-      },
-      timestamp: Date.now(),
-    }),
-  }).catch(() => {});
-  // #endregion
   return msg;
 }
 

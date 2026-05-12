@@ -334,6 +334,32 @@ type CommunicationStyleProfileRow = {
   source_attempt_id?: string | null;
 };
 
+const COMMUNICATION_STYLE_INITIAL_POLL_ATTEMPTS = 8;
+const COMMUNICATION_STYLE_INITIAL_POLL_DELAY_MS = 1200;
+
+function delay(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function hasNonEmptyStringArray(value: unknown): boolean {
+  return Array.isArray(value) && value.some((item) => typeof item === 'string' && item.trim().length > 0);
+}
+
+function communicationStyleRowHasDisplayData(
+  row: CommunicationStyleProfileRow | null,
+  expectedAttemptId?: string | null
+): boolean {
+  if (!row) return false;
+  if (expectedAttemptId && row.source_attempt_id && row.source_attempt_id !== expectedAttemptId) {
+    return false;
+  }
+  return (
+    hasNonEmptyStringArray(row.style_labels_primary) ||
+    hasNonEmptyStringArray(row.style_labels_secondary) ||
+    (typeof row.matchmaker_summary === 'string' && row.matchmaker_summary.trim().length > 0)
+  );
+}
+
 /** Used by SummaryTab + reprocess; keep one query shape so admin UI stays in sync with DB. */
 async function fetchCommunicationStyleProfileRowForAdmin(
   userId: string
@@ -348,6 +374,25 @@ async function fetchCommunicationStyleProfileRowForAdmin(
     return null;
   }
   return (data as CommunicationStyleProfileRow | null | undefined) ?? null;
+}
+
+async function fetchCommunicationStyleProfileRowForAdminWithInitialPoll(
+  userId: string,
+  expectedAttemptId: string,
+  shouldContinue: () => boolean
+): Promise<CommunicationStyleProfileRow | null> {
+  let latest: CommunicationStyleProfileRow | null = null;
+  for (let i = 0; i < COMMUNICATION_STYLE_INITIAL_POLL_ATTEMPTS; i += 1) {
+    if (!shouldContinue()) return latest;
+    latest = await fetchCommunicationStyleProfileRowForAdmin(userId);
+    if (communicationStyleRowHasDisplayData(latest, expectedAttemptId)) {
+      return latest;
+    }
+    if (i < COMMUNICATION_STYLE_INITIAL_POLL_ATTEMPTS - 1) {
+      await delay(COMMUNICATION_STYLE_INITIAL_POLL_DELAY_MS);
+    }
+  }
+  return latest;
 }
 
 function buildCommunicationStyleTranscriptOptionsForAdmin(
@@ -651,11 +696,44 @@ function formatAdminAttemptElapsed(start: string, end: string): string {
   return mins < 60 ? `${mins} min` : `${Math.floor(mins / 60)}h ${mins % 60}m`;
 }
 
-/** Clock time from start to completion, or elapsed so far when the attempt is still open. */
-function formatAttemptElapsedDisplay(attempt: { created_at: string; completed_at: string | null }): string {
+/** Sum per-turn latency + recording duration from `interview_attempts.response_timings` (active engagement, not wall clock). */
+function sumResponseTimingsActiveMs(
+  timings: Array<{ latency_ms?: number; duration_ms?: number }> | null | undefined,
+): number | null {
+  if (!Array.isArray(timings) || timings.length === 0) return null;
+  let sum = 0;
+  for (const t of timings) {
+    const lat = typeof t.latency_ms === 'number' && Number.isFinite(t.latency_ms) ? Math.max(0, t.latency_ms) : 0;
+    const dur = typeof t.duration_ms === 'number' && Number.isFinite(t.duration_ms) ? Math.max(0, t.duration_ms) : 0;
+    sum += lat + dur;
+  }
+  return Number.isFinite(sum) && sum > 0 ? sum : null;
+}
+
+function formatDurationMsHuman(ms: number): string {
+  if (!Number.isFinite(ms) || ms < 0) return '—';
+  if (ms < 60000) return `${Math.max(1, Math.round(ms / 1000))} sec`;
+  const mins = Math.floor(ms / 60000);
+  return mins < 60 ? `${mins} min` : `${Math.floor(mins / 60)}h ${mins % 60}m`;
+}
+
+/**
+ * Prefer summed active time from `response_timings` when present; otherwise wall clock from
+ * `created_at` to `completed_at` (or now), labeled so admins are not misled by overnight gaps.
+ */
+function formatAttemptElapsedDisplay(attempt: {
+  created_at: string;
+  completed_at: string | null;
+  response_timings?: Array<{ latency_ms?: number; duration_ms?: number }> | null;
+}): string {
+  const activeMs = sumResponseTimingsActiveMs(attempt.response_timings ?? null);
+  if (activeMs != null) {
+    const core = formatDurationMsHuman(activeMs);
+    return attempt.completed_at ? `${core} active` : `${core} active · in progress`;
+  }
   const end = attempt.completed_at ?? new Date().toISOString();
-  const elapsed = formatAdminAttemptElapsed(attempt.created_at, end);
-  return attempt.completed_at ? elapsed : `${elapsed} · in progress`;
+  const wall = formatAdminAttemptElapsed(attempt.created_at, end);
+  return attempt.completed_at ? `${wall} (wall clock)` : `${wall} · in progress (wall clock)`;
 }
 
 type UserGroup = {
@@ -878,32 +956,6 @@ async function fetchLatestFullAttemptForUser(
       .eq('id', latestAttemptId)
       .eq('user_id', userId)
       .maybeSingle();
-    // #region agent log
-    if (data && typeof data === 'object') {
-      const r = data as Record<string, unknown>;
-      fetch('http://127.0.0.1:7789/ingest/668e0bd5-3283-4492-9f48-e33846c18218', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'X-Debug-Session-Id': 'c61a43' },
-        body: JSON.stringify({
-          sessionId: 'c61a43',
-          hypothesisId: 'H3-H4',
-          location: 'AdminInterviewDashboard.tsx:fetchLatestFullAttemptForUser',
-          message: 'full attempt loaded by latest_attempt_id',
-          data: {
-            path: 'latest_id',
-            attemptId: r.id,
-            userTail: typeof userId === 'string' ? userId.slice(-8) : null,
-            s1Null: r.scenario_1_scores == null,
-            s2Null: r.scenario_2_scores == null,
-            s3Null: r.scenario_3_scores == null,
-            pillarScoresNull: r.pillar_scores == null,
-          },
-          timestamp: Date.now(),
-          runId: 'pre-fix',
-        }),
-      }).catch(() => {});
-    }
-    // #endregion
     if (absent && data) {
       data = patchOverrideNulls(data as Record<string, unknown>);
     } else if (!absent && error && isInterviewAttemptsMissingOverrideColumnsError(error)) {
@@ -930,32 +982,6 @@ async function fetchLatestFullAttemptForUser(
     .eq('user_id', userId)
     .order('created_at', { ascending: false })
     .limit(1);
-  // #region agent log
-  if (data?.[0] && typeof data[0] === 'object') {
-    const r = data[0] as Record<string, unknown>;
-    fetch('http://127.0.0.1:7789/ingest/668e0bd5-3283-4492-9f48-e33846c18218', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'X-Debug-Session-Id': 'c61a43' },
-      body: JSON.stringify({
-        sessionId: 'c61a43',
-        hypothesisId: 'H3-H4',
-        location: 'AdminInterviewDashboard.tsx:fetchLatestFullAttemptForUser',
-        message: 'full attempt loaded by newest created_at',
-        data: {
-          path: 'newest_row',
-          attemptId: r.id,
-          userTail: typeof userId === 'string' ? userId.slice(-8) : null,
-          s1Null: r.scenario_1_scores == null,
-          s2Null: r.scenario_2_scores == null,
-          s3Null: r.scenario_3_scores == null,
-          pillarScoresNull: r.pillar_scores == null,
-        },
-        timestamp: Date.now(),
-        runId: 'pre-fix',
-      }),
-    }).catch(() => {});
-  }
-  // #endregion
   if (absent && data) {
     data = data.map((row) => patchOverrideNulls(row as Record<string, unknown>));
   } else if (!absent && error && isInterviewAttemptsMissingOverrideColumnsError(error)) {
@@ -1134,7 +1160,7 @@ function mentalizingRepairGrandfatherLine(attempt: AttemptSummary | AttemptRow):
   if (rep.length >= 2) {
     parts.push(`Repair ${rep.map((l) => `S${l.scenario} ${l.score.toFixed(2)}`).join(', ')}`);
   }
-  if (parts.length > 0) return `Legacy pass — mentalizing/repair review: ${parts.join(' · ')}`;
+  if (parts.length > 0) return `Legacy pass — mentalizing/repair review: ${parts.join(' Â· ')}`;
   return 'Legacy pass — mentalizing/repair scenario review';
 }
 
@@ -1161,13 +1187,13 @@ function getAdminOutcomeDisplay(attempt: AttemptSummary | AttemptRow | null): {
 
   const mergeDetail = (base: string | null | undefined): string | null => {
     const parts = [grandfatherDetail, mrGrandfatherLine, base].filter((p): p is string => !!p && p.length > 0);
-    return parts.length > 0 ? parts.join(' · ') : null;
+    return parts.length > 0 ? parts.join(' Â· ') : null;
   };
 
   if (attempt.passed === false) {
     const storedLines = buildStoredGateFailureLines(attempt);
     const detailStr =
-      storedLines.length > 0 ? storedLines.join(' · ') : gateFailReason ?? null;
+      storedLines.length > 0 ? storedLines.join(' Â· ') : gateFailReason ?? null;
     return {
       word: 'fail',
       color: getPassColor('fail'),
@@ -1199,7 +1225,7 @@ function getAdminOutcomeDisplay(attempt: AttemptSummary | AttemptRow | null): {
   }
   if (label === 'almost') {
     const detail =
-      detailLines.length > 0 ? detailLines.join(' · ') : summarizeGateForAdmin(scores, gate);
+      detailLines.length > 0 ? detailLines.join(' Â· ') : summarizeGateForAdmin(scores, gate);
     return {
       word: 'almost',
       color: getAlmostPassColor(),
@@ -1208,7 +1234,7 @@ function getAdminOutcomeDisplay(attempt: AttemptSummary | AttemptRow | null): {
     };
   }
   if (label === 'fail') {
-    const detail = detailLines.length > 0 ? detailLines.join(' · ') : null;
+    const detail = detailLines.length > 0 ? detailLines.join(' Â· ') : null;
     return {
       word: 'fail',
       color: getPassColor('fail'),
@@ -1282,7 +1308,7 @@ function formatAttemptTabLabel(attempt: AttemptSummary | AttemptRow): string {
           ?._reasoningPending
       : false;
   const pending = attempt.reasoning_pending === true || aiPending;
-  const suffix = pending ? ' · AI narrative pending' : '';
+  const suffix = pending ? ' Â· AI narrative pending' : '';
   if (!raw) return `Test ${attempt.attempt_number}${suffix}`;
   return (
     new Date(raw).toLocaleString('en-GB', {
@@ -1361,7 +1387,7 @@ function formatUserInterviewDateLine(g: UserGroup): string {
     if (a.completed_at) {
       return `Completed ${new Date(raw).toLocaleString('en-GB')}`;
     }
-    return `Started ${new Date(raw).toLocaleString('en-GB')} · not completed`;
+    return `Started ${new Date(raw).toLocaleString('en-GB')} Â· not completed`;
   }
   return '—';
 }
@@ -1524,7 +1550,7 @@ function InProgressTranscriptSection({
         </TouchableOpacity>
       </View>
       <Text style={styles.inProgressMeta}>
-        {inferredScenario != null ? `Latest scenario in snapshot: ${inferredScenario} · ` : ''}
+        {inferredScenario != null ? `Latest scenario in snapshot: ${inferredScenario} Â· ` : ''}
         {lines.length} message{lines.length === 1 ? '' : 's'}
       </Text>
       {lines.length === 0 ? (
@@ -1735,7 +1761,11 @@ function SummaryTab({
     }
     let cancelled = false;
     setStyleStatus('loading');
-    void fetchCommunicationStyleProfileRowForAdmin(uid)
+    void fetchCommunicationStyleProfileRowForAdminWithInitialPoll(
+      uid,
+      attempt.id,
+      () => !cancelled
+    )
       .then((row) => {
         if (cancelled) return;
         setStyleProfile(row);
@@ -1751,7 +1781,7 @@ function SummaryTab({
     return () => {
       cancelled = true;
     };
-  }, [attempt.user_id]);
+  }, [attempt.id, attempt.user_id]);
 
   useEffect(() => {
     let cancelled = false;
@@ -1767,24 +1797,6 @@ function SummaryTab({
 
   useEffect(() => {
     if (!adminAttemptHasHolisticOnlyTraitScoresNoScenarioSlices(attempt)) return;
-    // #region agent log
-    fetch('http://127.0.0.1:7789/ingest/668e0bd5-3283-4492-9f48-e33846c18218', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'X-Debug-Session-Id': 'c61a43' },
-      body: JSON.stringify({
-        sessionId: 'c61a43',
-        hypothesisId: 'verify-gap-banner',
-        location: 'AdminInterviewDashboard.tsx:SummaryTab',
-        message: 'holisticOnlyScenarioGapBannerShown',
-        data: {
-          attemptId: attempt.id,
-          userTail: attempt.user_id?.slice(-8),
-        },
-        timestamp: Date.now(),
-        runId: 'post-fix',
-      }),
-    }).catch(() => {});
-    // #endregion
   }, [
     attempt.id,
     attempt.user_id,
@@ -1858,40 +1870,6 @@ function SummaryTab({
   const moment5Bundle = getMomentScoreBundle(attempt, 5);
   const moment4Details = getScoreBundleDetails(parseObject(parseObject(attempt.scenario_specific_patterns)?.moment_4_scores));
   const moment5Details = getScoreBundleDetails(parseObject(parseObject(attempt.scenario_specific_patterns)?.moment_5_scores));
-  // #region agent log
-  void (() => {
-    const rawShape = (raw: unknown): string => {
-      if (raw == null) return 'null';
-      if (typeof raw === 'string') return `string(len=${raw.length})`;
-      if (typeof raw !== 'object') return typeof raw;
-      const o = raw as Record<string, unknown>;
-      return `keys:${Object.keys(o).slice(0, 12).join(',')}`;
-    };
-    fetch('http://127.0.0.1:7789/ingest/668e0bd5-3283-4492-9f48-e33846c18218', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'X-Debug-Session-Id': 'c61a43' },
-      body: JSON.stringify({
-        sessionId: 'c61a43',
-        hypothesisId: 'H1-H2-H5',
-        location: 'AdminInterviewDashboard.tsx:SummaryTab',
-        message: 'parsed scenario score bundles',
-        data: {
-          attemptId: attempt.id,
-          userTail: attempt.user_id?.slice(-8),
-          s1Raw: rawShape(attempt.scenario_1_scores),
-          s2Raw: rawShape(attempt.scenario_2_scores),
-          s3Raw: rawShape(attempt.scenario_3_scores),
-          s1ParsedKeys: scenario1Details.scores ? Object.keys(scenario1Details.scores).length : 0,
-          s2ParsedKeys: scenario2Details.scores ? Object.keys(scenario2Details.scores).length : 0,
-          s3ParsedKeys: scenario3Details.scores ? Object.keys(scenario3Details.scores).length : 0,
-          totalPillarResolved: Object.keys(totalScores).filter((k) => totalScores[k] != null).length,
-        },
-        timestamp: Date.now(),
-        runId: 'pre-fix',
-      }),
-    }).catch(() => {});
-  })();
-  // #endregion
   const perScenario = [
     { key: 'scenario_1', label: 'Scenario 1', scores: scenario1Details.scores, summary: buildMomentOrScenarioSummary('Scenario 1', scenario1Details) },
     { key: 'scenario_2', label: 'Scenario 2', scores: scenario2Details.scores, summary: buildMomentOrScenarioSummary('Scenario 2', scenario2Details) },
@@ -2164,14 +2142,14 @@ function SummaryTab({
             {attempt.communication_floor_avg_unprompted_words != null
               ? attempt.communication_floor_avg_unprompted_words.toFixed(2)
               : '—'}{' '}
-            · Threshold: {COMMUNICATION_FLOOR_MIN_AVG_WORDS}
+            Â· Threshold: {COMMUNICATION_FLOOR_MIN_AVG_WORDS}
           </Text>
           <Text style={styles.blockText} selectable>
             Dismissed:{' '}
             {attempt.communication_floor_dismissed_at
               ? new Date(attempt.communication_floor_dismissed_at).toLocaleString()
               : '—'}{' '}
-            · Reviewer id: {attempt.communication_floor_dismissed_by ?? '—'}
+            Â· Reviewer id: {attempt.communication_floor_dismissed_by ?? '—'}
           </Text>
           {attempt.communication_floor_dismiss_note ? (
             <Text style={styles.blockText} selectable>
@@ -2747,8 +2725,8 @@ function UserDetails({
         ) : null}
         <Text style={styles.headerSub}>{formatUserInterviewDateLine(userData)}</Text>
         <Text style={styles.headerPassMeta} selectable>
-          Gate (computed): {u.interview_passed_computed == null ? '—' : String(u.interview_passed_computed)} ·
-          Admin override: {formatAdminPassFailLabel(u.interview_passed_admin_override)} ·
+          Gate (computed): {u.interview_passed_computed == null ? '—' : String(u.interview_passed_computed)} Â·
+          Admin override: {formatAdminPassFailLabel(u.interview_passed_admin_override)} Â·
           Effective routing: {u.interview_passed == null ? '—' : String(u.interview_passed)}
         </Text>
         <View style={styles.overrideButtonRow}>
@@ -3340,7 +3318,7 @@ export function AdminInterviewDashboard({ onClose }: { onClose: () => void }) {
                   accessible
                   accessibilityLabel="Custom range end date"
                 />
-                <Text style={styles.filterCustomHint}>Local dates · activity time</Text>
+                <Text style={styles.filterCustomHint}>Local dates Â· activity time</Text>
               </View>
             ) : null}
             <View style={styles.filterCluster}>

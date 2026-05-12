@@ -2,6 +2,8 @@ import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
 import { generateAIReasoning, DEFAULT_AI_REASONING_PER_ATTEMPT_TIMEOUT_MS } from '../_shared/generateAIReasoning.ts';
 
 const ADMIN_EMAIL = 'admin@amoraea.com';
+const ADMIN_AI_REASONING_BACKGROUND_TIMEOUT_MS = 300_000;
+const HANDLER_VERSION = 'admin-retry-ai-reasoning-queued-v2';
 
 const corsHeaders: Record<string, string> = {
   'Access-Control-Allow-Origin': '*',
@@ -23,7 +25,7 @@ type AttemptRow = {
 };
 
 function json(body: Record<string, unknown>, status = 200): Response {
-  return new Response(JSON.stringify(body), {
+  return new Response(JSON.stringify({ handlerVersion: HANDLER_VERSION, ...body }), {
     status,
     headers: { ...corsHeaders, 'Content-Type': 'application/json' },
   });
@@ -57,55 +59,12 @@ function pendingReasoningWithError(existing: Record<string, unknown> | null, err
   };
 }
 
-Deno.serve(async (req) => {
-  if (req.method === 'OPTIONS') return new Response(null, { status: 204, headers: corsHeaders });
-  if (req.method !== 'POST') return json({ error: 'Method not allowed' }, 405);
-
-  const supabaseUrl = Deno.env.get('SUPABASE_URL')?.trim();
-  const serviceRole = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')?.trim();
-  const anonKey = Deno.env.get('SUPABASE_ANON_KEY')?.trim();
-  if (!supabaseUrl || !serviceRole || !anonKey) return json({ error: 'Server misconfiguration' }, 500);
-
-  const authHeader = req.headers.get('Authorization');
-  if (!authHeader?.startsWith('Bearer ')) return json({ error: 'Unauthorized' }, 401);
-
-  const userClient = createClient(supabaseUrl, anonKey, {
-    global: { headers: { Authorization: authHeader } },
-  });
-  const {
-    data: { user: caller },
-    error: callerErr,
-  } = await userClient.auth.getUser();
-  if (callerErr || caller?.email?.toLowerCase() !== ADMIN_EMAIL) {
-    return json({ error: callerErr ? 'Unauthorized' : 'Forbidden' }, callerErr ? 401 : 403);
-  }
-
-  let body: unknown;
-  try {
-    body = await req.json();
-  } catch {
-    return json({ error: 'Invalid JSON body' }, 400);
-  }
-  const attemptId =
-    typeof body === 'object' && body !== null && typeof (body as { attemptId?: unknown }).attemptId === 'string'
-      ? (body as { attemptId: string }).attemptId.trim()
-      : '';
-  if (!attemptId) return json({ error: 'Missing attemptId' }, 400);
-
-  const admin = createClient(supabaseUrl, serviceRole, {
-    auth: { autoRefreshToken: false, persistSession: false },
-  });
-  const { data: row, error: fetchErr } = await admin
-    .from('interview_attempts')
-    .select(
-      'id, pillar_scores, scenario_1_scores, scenario_2_scores, scenario_3_scores, transcript, weighted_score, passed, ai_reasoning'
-    )
-    .eq('id', attemptId)
-    .maybeSingle();
-  if (fetchErr) return json({ error: fetchErr.message }, 500);
-  if (!row) return json({ error: 'Attempt not found' }, 404);
-
-  const attempt = row as AttemptRow;
+async function runReasoningRetryInBackground(
+  admin: ReturnType<typeof createClient>,
+  attemptId: string,
+  attempt: AttemptRow
+): Promise<void> {
+  const startedAt = Date.now();
   try {
     const reasoning = await generateAIReasoning(
       attempt.pillar_scores ?? {},
@@ -114,26 +73,139 @@ Deno.serve(async (req) => {
       attempt.weighted_score,
       attempt.passed === true,
       [],
-      { perAttemptTimeoutMs: DEFAULT_AI_REASONING_PER_ATTEMPT_TIMEOUT_MS, maxAttempts: 1 }
+      { perAttemptTimeoutMs: ADMIN_AI_REASONING_BACKGROUND_TIMEOUT_MS, maxAttempts: 1 }
     );
-    const { error: upErr } = await admin
+    await admin
       .from('interview_attempts')
       .update({
-        ai_reasoning: reasoning as unknown as Record<string, unknown>,
+        ai_reasoning: {
+          ...(reasoning as unknown as Record<string, unknown>),
+          _adminRetryElapsedMs: Date.now() - startedAt,
+          _adminRetryCompletedAt: new Date().toISOString(),
+        },
         reasoning_pending: false,
       })
       .eq('id', attemptId);
-    if (upErr) return json({ error: upErr.message }, 500);
-    return json({ ok: true });
   } catch (e) {
     const error = e instanceof Error ? e.message : String(e);
     await admin
       .from('interview_attempts')
       .update({
-        ai_reasoning: pendingReasoningWithError(attempt.ai_reasoning, error),
+        ai_reasoning: {
+          ...pendingReasoningWithError(attempt.ai_reasoning, error),
+          _adminRetryElapsedMs: Date.now() - startedAt,
+        },
         reasoning_pending: true,
       })
       .eq('id', attemptId);
-    return json({ error }, 500);
+  }
+}
+
+Deno.serve(async (req) => {
+  if (req.method === 'OPTIONS') return new Response(null, { status: 204, headers: corsHeaders });
+  if (req.method === 'GET') {
+    return json({ ok: true, health: true, stage: 'healthcheck' });
+  }
+  if (req.method !== 'POST') return json({ error: 'Method not allowed' }, 405);
+
+  try {
+    const supabaseUrl = Deno.env.get('SUPABASE_URL')?.trim();
+    const serviceRole = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')?.trim();
+    const anonKey = Deno.env.get('SUPABASE_ANON_KEY')?.trim();
+    if (!supabaseUrl || !serviceRole || !anonKey) return json({ error: 'Server misconfiguration' }, 500);
+
+    const authHeader = req.headers.get('Authorization');
+    if (!authHeader?.startsWith('Bearer ')) return json({ error: 'Unauthorized' }, 401);
+
+    const userClient = createClient(supabaseUrl, anonKey, {
+      global: { headers: { Authorization: authHeader } },
+    });
+    const {
+      data: { user: caller },
+      error: callerErr,
+    } = await userClient.auth.getUser();
+    if (callerErr || caller?.email?.toLowerCase() !== ADMIN_EMAIL) {
+      return json({ error: callerErr ? 'Unauthorized' : 'Forbidden' }, callerErr ? 401 : 403);
+    }
+
+    let body: unknown;
+    try {
+      body = await req.json();
+    } catch {
+      return json({ error: 'Invalid JSON body' }, 400);
+    }
+    const attemptId =
+      typeof body === 'object' && body !== null && typeof (body as { attemptId?: unknown }).attemptId === 'string'
+        ? (body as { attemptId: string }).attemptId.trim()
+        : '';
+    if (!attemptId) return json({ error: 'Missing attemptId' }, 400);
+
+    const admin = createClient(supabaseUrl, serviceRole, {
+      auth: { autoRefreshToken: false, persistSession: false },
+    });
+    const { data: row, error: fetchErr } = await admin
+      .from('interview_attempts')
+      .select(
+        'id, pillar_scores, scenario_1_scores, scenario_2_scores, scenario_3_scores, transcript, weighted_score, passed, ai_reasoning'
+      )
+      .eq('id', attemptId)
+      .maybeSingle();
+    if (fetchErr) return json({ error: fetchErr.message, stage: 'attempt_fetch_failed' }, 500);
+    if (!row) return json({ error: 'Attempt not found', stage: 'attempt_not_found' }, 404);
+
+    const attempt = row as AttemptRow;
+    const { error: queuedUpdateErr } = await admin
+      .from('interview_attempts')
+      .update({
+        ai_reasoning: {
+          ...(attempt.ai_reasoning ?? {}),
+          _reasoningPending: true,
+          _adminRetryQueued: true,
+          _adminRetryQueuedAt: new Date().toISOString(),
+          _adminRetryHandlerVersion: HANDLER_VERSION,
+          _adminRetryStage: 'queued_before_background_handoff',
+          last_error: null,
+        },
+        reasoning_pending: true,
+      })
+      .eq('id', attemptId);
+    if (queuedUpdateErr) return json({ error: queuedUpdateErr.message, stage: 'queue_marker_update_failed' }, 500);
+
+    try {
+      EdgeRuntime.waitUntil(Promise.resolve().then(() => runReasoningRetryInBackground(admin, attemptId, attempt)));
+    } catch (e) {
+      const error = e instanceof Error ? e.message : String(e);
+      await admin
+        .from('interview_attempts')
+        .update({
+          ai_reasoning: {
+            ...(attempt.ai_reasoning ?? {}),
+            _reasoningPending: true,
+            _generationFailed: true,
+            _adminRetryHandlerVersion: HANDLER_VERSION,
+            _adminRetryStage: 'wait_until_registration_failed',
+            last_error: error,
+            failed_at: new Date().toISOString(),
+          },
+          reasoning_pending: true,
+        })
+        .eq('id', attemptId);
+      return json({ error, stage: 'wait_until_registration_failed' }, 500);
+    }
+    return json({
+      ok: true,
+      queued: true,
+      stage: 'queued',
+      timeoutMs: ADMIN_AI_REASONING_BACKGROUND_TIMEOUT_MS,
+      previousTimeoutMs: DEFAULT_AI_REASONING_PER_ATTEMPT_TIMEOUT_MS,
+    });
+  } catch (e) {
+    return json(
+      {
+        error: e instanceof Error ? e.message : String(e),
+        stage: 'top_level_catch',
+      },
+      500
+    );
   }
 });

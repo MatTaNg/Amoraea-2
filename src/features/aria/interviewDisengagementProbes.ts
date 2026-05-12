@@ -341,12 +341,14 @@ export type ClientDisengagementProbePick =
   | { kind: 'short_elaboration'; probe: typeof CLIENT_SHORT_ELABORATION_PROBE };
 
 export type RepairRefusalTriggerReason =
-  | 'explicit_refusal_language'
+  | 'explicit_refusal'
   | 'response_too_short'
-  | 'no_repair_content';
+  | 'redirect_to_other_party_only';
 
 export type RepairRefusalDetectionDetail = {
   repair_refusal_detected: boolean;
+  trigger_condition: RepairRefusalTriggerReason | null;
+  /** @deprecated Prefer trigger_condition. Kept for existing logs / payload readers. */
   trigger_reason: RepairRefusalTriggerReason | null;
   response_word_count: number;
   repair_refusal_anomaly: boolean;
@@ -369,13 +371,53 @@ export function repairAnswerHasConcreteSuggestionActionOrStep(text: string): boo
     ) ||
     /\b(apologiz|listen|validate|acknowledge|own(?:ership)?|take responsibility|make amends|talk it through|communicat|counsel(?:ing|ling)|therapy|therapist|mediator|friend|support|boundary|agreement|next step|follow[- ]?up|check in)\b/i.test(
       t,
+    ) ||
+    /\b(talk|discuss|listen|explain|share|ask|apologiz\w*|acknowledg\w*|validat\w*)\b/i.test(t) ||
+    /\b(talk\s+about\s+what'?s\s+going\s+on|have\s+the\s+conversation|discuss\s+it\s+together|make\s+(him|her|them)\s+feel\s+heard)\b/i.test(
+      t,
     )
   );
 }
 
-export function evaluateRepairRefusalDetection(userAnswer: string, wordCount = countWords(userAnswer)): RepairRefusalDetectionDetail {
+function repairAnswerHasCommunicationVerb(text: string): boolean {
+  return /\b(talk|discuss|listen|explain|share)\b/i.test(normalizeApostrophes(text).toLowerCase());
+}
+
+function repairFocalAndOtherFromPrompt(lastAssistantContent?: string): { focal: string; other: string } | null {
+  const t = normalizeApostrophes(lastAssistantContent ?? '').toLowerCase();
+  if (/\b(if you were ryan|you were ryan|as ryan)\b/.test(t)) return { focal: 'ryan', other: 'emma' };
+  if (/\b(if you were james|you were james|as james)\b/.test(t)) return { focal: 'james', other: 'sarah' };
+  if (/\b(if you were daniel|you were daniel|as daniel|daniel\b.*\brepair|repair\b.*\bdaniel)\b/.test(t)) {
+    return { focal: 'daniel', other: 'sophie' };
+  }
+  return null;
+}
+
+function repairAnswerRedirectsOnlyToOtherParty(userAnswer: string, lastAssistantContent?: string): boolean {
+  const parties = repairFocalAndOtherFromPrompt(lastAssistantContent);
+  if (!parties) return false;
+  const t = normalizeApostrophes(userAnswer).toLowerCase();
+  const focalAction = new RegExp(
+    `\\b(${parties.focal}|he)\\b.{0,60}\\b(should|could|would|needs?\\s+to|can|might)\\b.{0,60}\\b(say|tell|ask|apologiz|acknowledg|listen|validat|explain|share|talk|communicat|repair|fix|resolve)\\b`,
+    'i',
+  ).test(t);
+  const namesOther = new RegExp(`\\b${parties.other}\\b|\\bshe\\b|\\bher\\b`, 'i').test(t);
+  if (!namesOther || focalAction) return false;
+  if (/\b(both|each|together|each other|they)\b/i.test(t)) return false;
+  if (repairAnswerHasConcreteSuggestionActionOrStep(userAnswer)) return false;
+  return /\b(needs?\s+to|should|has\s+to|must|just)\b.{0,80}\b(calm\s+down|accept|stop|let\s+it\s+go|get\s+over\s+it|deal\s+with\s+it)\b/i.test(
+    t,
+  );
+}
+
+export function evaluateRepairRefusalDetection(
+  userAnswer: string,
+  wordCount = countWords(userAnswer),
+  lastAssistantContent?: string,
+): RepairRefusalDetectionDetail {
   const t = normalizeApostrophes(userAnswer).toLowerCase();
   const hasConcreteRepairContent = repairAnswerHasConcreteSuggestionActionOrStep(userAnswer);
+  const hasCommunicationVerb = repairAnswerHasCommunicationVerb(userAnswer);
   const explicitRefusalLanguage =
     /\bthere'?s\s+nothing\s+to\s+(repair|fix)\b/i.test(t) ||
     /\bnothing\s+(to\s+)?(repair|fix)\b/i.test(t) ||
@@ -393,19 +435,22 @@ export function evaluateRepairRefusalDetection(userAnswer: string, wordCount = c
       t,
     );
 
-  let triggerReason: RepairRefusalTriggerReason | null = null;
+  let triggerCondition: RepairRefusalTriggerReason | null = null;
   if (explicitRefusalLanguage) {
-    triggerReason = 'explicit_refusal_language';
-  } else if (wordCount < 15 && !hasConcreteRepairContent) {
-    triggerReason = wordCount <= 5 ? 'response_too_short' : 'no_repair_content';
+    triggerCondition = 'explicit_refusal';
+  } else if (wordCount < 8 && !hasConcreteRepairContent) {
+    triggerCondition = 'response_too_short';
+  } else if (repairAnswerRedirectsOnlyToOtherParty(userAnswer, lastAssistantContent)) {
+    triggerCondition = 'redirect_to_other_party_only';
   }
 
-  const repairRefusalDetected = triggerReason !== null;
+  const repairRefusalDetected = triggerCondition !== null;
   return {
     repair_refusal_detected: repairRefusalDetected,
-    trigger_reason: triggerReason,
+    trigger_condition: triggerCondition,
+    trigger_reason: triggerCondition,
     response_word_count: wordCount,
-    repair_refusal_anomaly: repairRefusalDetected && wordCount > 40,
+    repair_refusal_anomaly: repairRefusalDetected && (wordCount > 40 || hasCommunicationVerb),
     has_concrete_repair_content: hasConcreteRepairContent,
   };
 }
@@ -453,7 +498,7 @@ export function pickClientDisengagementProbe(input: {
   const repairQ = looksLikeRepairInterviewQuestion(lastAssistantContent);
   if (repairQ) {
     if (isInterviewHardStopUserTurn(userAnswer)) return null;
-    const repairRefusal = evaluateRepairRefusalDetection(userAnswer, wordCount);
+    const repairRefusal = evaluateRepairRefusalDetection(userAnswer, wordCount, lastAssistantContent);
     if (repairRefusal.repair_refusal_detected) {
       return { kind: 'repair_refusal', probe: CLIENT_REPAIR_REFUSAL_PROBE, repairRefusal };
     }

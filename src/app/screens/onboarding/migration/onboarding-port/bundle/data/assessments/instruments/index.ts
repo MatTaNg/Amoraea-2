@@ -5,6 +5,10 @@ import { BFI2_ITEMS, scoreBFI2 } from "./bfi2";
 import { DSIR_ITEMS, scoreDSIR } from "./dsir";
 import { BRS_ITEMS, scoreBRS } from "./brs";
 import { PVQ21_ITEMS, scorePVQ21 } from "./pvq21";
+import {
+  RELATIONSHIP_TRAITS_ITEMS,
+  scoreRelationshipTraits8,
+} from "./relationshipTraits8";
 
 export interface InstrumentConfig {
   id: AssessmentId;
@@ -18,18 +22,19 @@ export interface InstrumentConfig {
   score: (responses: Record<string, number>) => Record<string, number>;
 }
 
-export const INSTRUMENT_CONFIGS: Record<AssessmentId, InstrumentConfig> = {
+/** CONFLICT-30 uses {@link ConflictStyleAssessmentScreen}, not this map. */
+export const INSTRUMENT_CONFIGS: Partial<Record<AssessmentId, InstrumentConfig>> = {
   "ECR-36": {
     id: "ECR-36",
     title: "Attachment Style",
     description:
-      "36 questions · ~8 minutes (ECR-R)\n\nThese questions explore how you typically feel in close relationships — with romantic partners or people you're deeply connected to.\n\nThere are no right or wrong answers.",
+      "The attachment style quiz is a psychology-based assessment that helps you understand how you tend to connect, trust, communicate, and behave in close relationships.\n\nIt's based on Attachment Theory, one of the most researched frameworks in relationship psychology. Originally developed by John Bowlby and expanded by Mary Ainsworth, the theory explains how early emotional experiences shape the way we bond with romantic partners later in life.\n\nThe quiz typically identifies one of four primary attachment styles:\n\nSecure\nComfortable with intimacy, trust, communication, and emotional closeness.\n\nAnxious\nCraves closeness and reassurance, but may fear abandonment or inconsistency.\n\nAvoidant\nValues independence strongly and may pull away when relationships feel emotionally intense.\n\nFearful Avoidant / Disorganized\nSimultaneously wants closeness and fears it, often creating push-pull dynamics.\n\nMost people are not \"100% one type.\" The quiz measures patterns and tendencies, not fixed identity labels.",
     items: ECR_R_ITEMS.map((i) => i.text),
     min: 1,
     max: 7,
     minLabel: "Disagree strongly",
     maxLabel: "Agree strongly",
-    score: scoreECR36,
+    score: scoreECR36 as unknown as (responses: Record<string, number>) => Record<string, number>,
   },
   "BFI-2": {
     id: "BFI-2",
@@ -67,11 +72,23 @@ export const INSTRUMENT_CONFIGS: Record<AssessmentId, InstrumentConfig> = {
     maxLabel: "Strongly agree",
     score: scoreBRS,
   },
+  "RELATIONSHIP_TRAITS_8": {
+    id: "RELATIONSHIP_TRAITS_8",
+    title: "Relationship Traits",
+    description:
+      "A few quick questions about how you tend to respond to stress and trust in relationships.\n\nYou'll rate each statement on a scale from 1 (strongly disagree) to 7 (strongly agree). There are no right or wrong answers — choose what feels most true for you.",
+    items: RELATIONSHIP_TRAITS_ITEMS,
+    min: 1,
+    max: 7,
+    minLabel: "Strongly disagree",
+    maxLabel: "Strongly agree",
+    score: scoreRelationshipTraits8,
+  },
   "PVQ-21": {
     id: "PVQ-21",
     title: "Schwartz Values",
     description:
-      "20 questions · ~4 minutes\n\nEach question describes a person. Read the description and indicate how much that person is like you.",
+      "What Is the Schwartz Values Quiz?\n\nThe Schwartz Values Quiz measures the deeper values that drive your decisions, priorities, and sense of meaning in life and relationships.\n\nIt's based on the work of Shalom H. Schwartz, whose research identified universal human values found across cultures around the world.\n\nIt has been researched across dozens of countries and cultures and is commonly used in:\n\nPsychology research\nRelationship studies\nOrganizational psychology\nSociology\nLeadership and cultural analysis\n\nThe model is supported by decades of empirical research and cross-cultural validation. It is one of the most respected and widely studied models in social psychology.\n\nRather than measuring personality traits, this quiz measures what fundamentally matters to you.\n\nExamples include:\n\nSecurity and stability\nFreedom and independence\nAdventure and novelty\nAchievement and ambition\nCompassion and empathy\nTradition and family values\nPleasure and enjoyment\nPersonal growth and meaning\n\nThe quiz usually identifies which values are strongest for you and how they compare to other values in your life. Studies have found that similar values are one of the most important metrics of a successful, thriving, long-lasting relationship of any kind.",
     items: PVQ21_ITEMS,
     min: 1,
     max: 6,

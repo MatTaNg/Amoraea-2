@@ -1,4 +1,11 @@
-import React, { useState, useEffect, useLayoutEffect, useCallback, useMemo } from "react";
+import React, {
+  useState,
+  useEffect,
+  useLayoutEffect,
+  useCallback,
+  useMemo,
+  useRef,
+} from "react";
 import {
   View,
   Text,
@@ -26,10 +33,35 @@ import {
   ASSESSMENT_IDS,
   type AssessmentId,
 } from "@/data/services/assessmentService";
+import { computeRelationshipTraitsQualityFlags } from "@/data/assessments/instruments/relationshipTraits8";
 import { useProfile } from "@/shared/hooks/useProfile";
 import { theme } from "@/shared/theme/theme";
 
 const SAVE_PROGRESS_EVERY = 5;
+const ATTACHMENT_STYLE_LABELS = new Set([
+  "Secure",
+  "Anxious",
+  "Avoidant",
+  "Fearful Avoidant / Disorganized",
+]);
+
+function renderIntroDescription(description: string, instrumentId: AssessmentId) {
+  if (instrumentId !== "ECR-36") {
+    return description;
+  }
+
+  const lines = description.split("\n");
+  return lines.map((line, index) => (
+    <React.Fragment key={`${line}-${index}`}>
+      {ATTACHMENT_STYLE_LABELS.has(line.trim()) ? (
+        <Text style={styles.introTypeLabel}>{line}</Text>
+      ) : (
+        line
+      )}
+      {index < lines.length - 1 ? "\n" : ""}
+    </React.Fragment>
+  ));
+}
 
 export function InstrumentScreen() {
   const router = useRouter();
@@ -55,6 +87,7 @@ export function InstrumentScreen() {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [ecrOrder, setEcrOrder] = useState<ECRItem[] | null>(null);
+  const assessmentStartMsRef = useRef<number | null>(null);
 
   const ecrShuffle = instrumentId === "ECR-36";
   const totalQuestions = config?.items.length ?? 0;
@@ -89,6 +122,10 @@ export function InstrumentScreen() {
     };
   }, [user?.id]);
 
+  useEffect(() => {
+    assessmentStartMsRef.current = null;
+  }, [instrumentId]);
+
   const isCoreOnboardingInstrument = (ASSESSMENT_IDS as readonly string[]).includes(instrumentId);
 
   useLayoutEffect(() => {
@@ -118,7 +155,7 @@ export function InstrumentScreen() {
     if (
       profile?.currentAssessment === instrumentId &&
       typeof profile?.currentAssessmentQuestion === "number" &&
-      profile.currentAssessmentQuestion >= 1
+      profile.currentAssessmentQuestion > 1
     ) {
       const q = Math.min(
         profile.currentAssessmentQuestion,
@@ -160,12 +197,17 @@ export function InstrumentScreen() {
           return;
         }
         const scores = config.score(next);
-        const result = await saveAssessmentResult(
-          user.id,
-          instrumentId,
-          scores,
-          next
-        );
+        const elapsedSec =
+          assessmentStartMsRef.current != null
+            ? Math.max(0, Math.floor((Date.now() - assessmentStartMsRef.current) / 1000))
+            : undefined;
+        const result = await saveAssessmentResult(user.id, instrumentId, scores, next, {
+          timeTakenSec: elapsedSec,
+          qualityFlags:
+            instrumentId === "RELATIONSHIP_TRAITS_8"
+              ? computeRelationshipTraitsQualityFlags(next, elapsedSec ?? 0)
+              : undefined,
+        });
         if (result.success) {
           await refreshProfile();
           router.replace(
@@ -253,28 +295,38 @@ export function InstrumentScreen() {
       <SafeAreaView style={styles.container} edges={["top", "left", "right"]}>
         <ScrollView
           style={styles.scroll}
-          contentContainerStyle={styles.scrollContent}
+          contentContainerStyle={styles.introScrollContent}
         >
-          <Text style={styles.introTitle}>{config.title}</Text>
-          <Text style={styles.introDesc}>{config.description}</Text>
-          {instrumentId === "BRS" && (
-            <Text style={styles.brsNote}>
-              Some of these questions may seem similar to each other. That's
-              intentional — answering each one carefully gives a more accurate
-              result.
+          <View style={styles.introCard}>
+            <Text style={styles.introEyebrow}>
+              {instrumentId === "RELATIONSHIP_TRAITS_8"
+                ? "Relationship traits"
+                : "Relationship typology"}
             </Text>
-          )}
-          <Button
-            title="Begin"
-            onPress={() => {
-              if (instrumentId === "ECR-36") {
-                setEcrOrder(getShuffledItems(sessionSeed));
-              }
-              setShowIntro(false);
-            }}
-            variant="primary"
-            style={{ marginTop: 24 }}
-          />
+            <Text style={styles.introTitle}>{config.title}</Text>
+            <Text style={styles.introDesc}>
+              {renderIntroDescription(config.description, instrumentId)}
+            </Text>
+            {instrumentId === "BRS" && (
+              <Text style={styles.brsNote}>
+                Some of these questions may seem similar to each other. That's
+                intentional — answering each one carefully gives a more accurate
+                result.
+              </Text>
+            )}
+            <Button
+              title="Begin"
+              onPress={() => {
+                assessmentStartMsRef.current = Date.now();
+                if (instrumentId === "ECR-36") {
+                  setEcrOrder(getShuffledItems(sessionSeed));
+                }
+                setShowIntro(false);
+              }}
+              variant="primary"
+              style={styles.introButton}
+            />
+          </View>
         </ScrollView>
       </SafeAreaView>
     );
@@ -301,25 +353,39 @@ export function InstrumentScreen() {
       <View style={styles.flowProgressTrack}>
         <View style={[styles.flowProgressFill, { width: `${flowProgressPct}%` }]} />
       </View>
-      <AssessmentHeader
-        surveysComplete={surveysComplete}
-        currentQ={questionNumber}
-        totalQ={totalQuestions}
-        assessmentName={config.title}
-      />
       <ScrollView
         style={[styles.scroll, Platform.OS === "web" && styles.scrollWeb]}
-        contentContainerStyle={styles.scrollContent}
+        contentContainerStyle={styles.questionScrollContent}
       >
-        <Text style={styles.questionText}>{itemText}</Text>
-        <LikertScale
-          value={responses[String(canonicalId)] ?? null}
-          onChange={handleResponse}
-          min={config.min}
-          max={config.max}
-          minLabel={config.minLabel}
-          maxLabel={config.maxLabel}
-        />
+        <View style={styles.questionCard}>
+          <AssessmentHeader
+            surveysComplete={surveysComplete}
+            currentQ={questionNumber}
+            totalQ={totalQuestions}
+            assessmentName={config.title}
+            totalAssessments={ASSESSMENT_IDS.length}
+            subtitle={
+              instrumentId === "RELATIONSHIP_TRAITS_8"
+                ? "A few quick questions about how you tend to respond to stress and trust in relationships."
+                : undefined
+            }
+          />
+          <Text style={styles.questionText}>{itemText}</Text>
+          <LikertScale
+            value={responses[String(canonicalId)] ?? null}
+            onChange={handleResponse}
+            min={config.min}
+            max={config.max}
+            minLabel={config.minLabel}
+            maxLabel={config.maxLabel}
+          />
+          {instrumentId === "RELATIONSHIP_TRAITS_8" && (
+            <Text style={styles.scaleLegend}>
+              1 = Strongly disagree · 2 = Disagree · 3 = Slightly disagree · 4 = Neutral · 5 =
+              Slightly agree · 6 = Agree · 7 = Strongly agree
+            </Text>
+          )}
+        </View>
       </ScrollView>
       {saving && (
         <View
@@ -357,6 +423,20 @@ const styles = StyleSheet.create({
     padding: 24,
     paddingBottom: 48,
   },
+  questionScrollContent: {
+    flexGrow: 1,
+    paddingHorizontal: 24,
+    paddingVertical: 28,
+    paddingBottom: 56,
+    alignItems: "center",
+  },
+  introScrollContent: {
+    flexGrow: 1,
+    paddingHorizontal: 24,
+    paddingVertical: 40,
+    paddingBottom: 56,
+    alignItems: "center",
+  },
   flowProgressTrack: {
     height: 4,
     backgroundColor: "#E0E0E0",
@@ -367,15 +447,42 @@ const styles = StyleSheet.create({
     backgroundColor: "#007AFF",
   },
   introTitle: {
-    fontSize: 22,
+    fontSize: 30,
     fontWeight: "700",
     color: theme.colors.text,
-    marginBottom: 12,
+    marginBottom: 16,
+    lineHeight: 38,
   },
   introDesc: {
     fontSize: 16,
     color: theme.colors.textSecondary,
-    lineHeight: 24,
+    lineHeight: 26,
+  },
+  introTypeLabel: {
+    color: theme.colors.text,
+    fontWeight: "800",
+  },
+  introCard: {
+    width: "100%",
+    maxWidth: 760,
+    borderRadius: 20,
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.1)",
+    backgroundColor: "rgba(255,255,255,0.035)",
+    padding: 28,
+  },
+  introEyebrow: {
+    color: "#9CB4D8",
+    fontSize: 13,
+    fontWeight: "700",
+    letterSpacing: 0.7,
+    textTransform: "uppercase",
+    marginBottom: 10,
+  },
+  introButton: {
+    marginTop: 28,
+    alignSelf: "flex-start",
+    minWidth: 180,
   },
   brsNote: {
     fontSize: 14,
@@ -384,11 +491,27 @@ const styles = StyleSheet.create({
     marginTop: 16,
   },
   questionText: {
-    fontSize: 18,
-    fontWeight: "600",
+    fontSize: 22,
+    fontWeight: "700",
     color: theme.colors.text,
-    lineHeight: 26,
-    marginBottom: 8,
+    lineHeight: 30,
+    marginTop: 12,
+    marginBottom: 24,
+  },
+  questionCard: {
+    width: "100%",
+    maxWidth: 760,
+    borderRadius: 20,
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.1)",
+    backgroundColor: "rgba(255,255,255,0.035)",
+    padding: 28,
+  },
+  scaleLegend: {
+    marginTop: 16,
+    fontSize: 12,
+    lineHeight: 17,
+    color: theme.colors.textSecondary,
   },
   savingOverlay: {
     ...StyleSheet.absoluteFillObject,

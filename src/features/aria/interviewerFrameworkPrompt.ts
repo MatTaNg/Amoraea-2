@@ -515,21 +515,6 @@ export function dedupeAdjacentBoundaryValidationsBeforeParticipantName(text: str
   let out = stripRedundantScenarioCSegmentCloseWarm(text);
   const name = sanitizeInterviewParticipantFirstNameForSpeech(rawFirstName);
   if (!name || !out.trim()) {
-    // #region agent log
-    fetch('http://127.0.0.1:7789/ingest/668e0bd5-3283-4492-9f48-e33846c18218', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'X-Debug-Session-Id': 'c61a43' },
-      body: JSON.stringify({
-        sessionId: 'c61a43',
-        runId: 'dup-debug',
-        hypothesisId: 'H-A',
-        location: 'interviewerFrameworkPrompt.ts:dedupeAdjacentBoundaryValidationsBeforeParticipantName',
-        message: 'dedupe_early_exit',
-        data: { reason: !out.trim() ? 'empty_text' : 'empty_sanitized_name', inLen: out.trim().length },
-        timestamp: Date.now(),
-      }),
-    }).catch(() => {});
-    // #endregion
     return out;
   }
   let esc: string;
@@ -539,21 +524,6 @@ export function dedupeAdjacentBoundaryValidationsBeforeParticipantName(text: str
     return out;
   }
   if (!new RegExp(`\\b${esc}\\b`, 'i').test(out)) {
-    // #region agent log
-    fetch('http://127.0.0.1:7789/ingest/668e0bd5-3283-4492-9f48-e33846c18218', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'X-Debug-Session-Id': 'c61a43' },
-      body: JSON.stringify({
-        sessionId: 'c61a43',
-        runId: 'dup-debug',
-        hypothesisId: 'H-B',
-        location: 'interviewerFrameworkPrompt.ts:dedupeAdjacentBoundaryValidationsBeforeParticipantName',
-        message: 'dedupe_early_exit_name_not_in_text',
-        data: { nameLen: name.length, inPreview: out.slice(0, 160) },
-        timestamp: Date.now(),
-      }),
-    }).catch(() => {});
-    // #endregion
     return out;
   }
 
@@ -576,30 +546,6 @@ export function dedupeAdjacentBoundaryValidationsBeforeParticipantName(text: str
   };
   const warmMatchesIn = countBoundaryWarmPhrases(stripRedundantScenarioCSegmentCloseWarm(text));
   const warmMatchesOut = countBoundaryWarmPhrases(out);
-  // #region agent log
-  if (/great\s+work/gi.test(text) && warmMatchesIn >= 2) {
-    fetch('http://127.0.0.1:7789/ingest/668e0bd5-3283-4492-9f48-e33846c18218', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'X-Debug-Session-Id': 'c61a43' },
-      body: JSON.stringify({
-        sessionId: 'c61a43',
-        runId: 'dup-debug',
-        hypothesisId: 'H-C',
-        location: 'interviewerFrameworkPrompt.ts:dedupeAdjacentBoundaryValidationsBeforeParticipantName',
-        message: 'dedupe_boundary_warm_result',
-        data: {
-          changed: out !== text,
-          iterations,
-          warmMatchesIn,
-          warmMatchesOut,
-          inPreview: text.slice(0, 200),
-          outPreview: out.slice(0, 200),
-        },
-        timestamp: Date.now(),
-      }),
-    }).catch(() => {});
-  }
-  // #endregion
   return out;
 }
 

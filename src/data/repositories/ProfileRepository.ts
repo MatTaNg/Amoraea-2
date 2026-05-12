@@ -181,8 +181,14 @@ export class ProfileRepository {
   }
 
   async uploadPhoto(userId: string, fileUri: string, fileName: string): Promise<{ publicUrl: string; storagePath: string }> {
+    if (fileName.toLowerCase().endsWith('.gif') || fileUri.split('?')[0]?.toLowerCase().endsWith('.gif')) {
+      throw new Error('GIFs cannot be uploaded as profile photos.');
+    }
     const response = await fetch(fileUri);
     const blob = await response.blob();
+    if (blob.type.toLowerCase() === 'image/gif') {
+      throw new Error('GIFs cannot be uploaded as profile photos.');
+    }
     const fileExt = fileName.split('.').pop() || 'jpg';
     const storagePath = `${userId}/${Date.now()}.${fileExt}`;
 

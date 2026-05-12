@@ -40,9 +40,6 @@ export const NameModal: React.FC<NameModalProps> = ({
             maxLength={30}
           />
           
-          <Text style={styles.note}>
-            This name will be shown on your profile
-          </Text>
         </View>
       </ScrollView>
       <SafeAreaView style={styles.buttonContainer} edges={['bottom', 'left', 'right']}>

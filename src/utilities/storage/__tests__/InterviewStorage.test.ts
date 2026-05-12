@@ -4,6 +4,7 @@ import {
   getCurrentScenario,
   getStorageKey,
   loadInterviewFromStorage,
+  mergeInterviewStoragePayload,
   saveInterviewToStorage,
   type StoredInterviewData,
 } from '../InterviewStorage';
@@ -88,6 +89,30 @@ describe('InterviewStorage', () => {
     });
     const keys = await AsyncStorage.getAllKeys();
     expect(keys.filter((k) => k.includes('amoraea_interview'))).toHaveLength(0);
+  });
+
+  it('mergeInterviewStoragePayload preserves fields omitted from patch', async () => {
+    await saveInterviewToStorage('user-merge', {
+      messages: [{ role: 'user', content: 'a' }],
+      scenariosCompleted: [],
+      scenarioScores: {},
+      currentScenario: 1,
+      moment_5_clarification_fired: true,
+      sessionAttemptId: 'att-1',
+    });
+    const prior = await loadInterviewFromStorage('user-merge');
+    expect(prior).not.toBeNull();
+    const merged = mergeInterviewStoragePayload(prior!, {
+      messages: [
+        { role: 'user', content: 'a' },
+        { role: 'assistant', content: 'b' },
+      ],
+      scenariosCompleted: [],
+      scenarioScores: {},
+      currentScenario: 1,
+    });
+    expect(merged.moment_5_clarification_fired).toBe(true);
+    expect(merged.sessionAttemptId).toBe('att-1');
   });
 });
 

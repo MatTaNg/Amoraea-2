@@ -67,7 +67,6 @@ export const wantChildrenYesNoOptions = opts(["Don't want kids", 'Undecided', 'W
 export const PARTNER_SUBSTANCE_ALIGNMENT_OPTIONS: string[] = [
   'Yes',
   'No',
-  'My partner can have a similar relationship as me but does not need to be exact',
 ];
 
 export function normalizeWantKidsToYesNo(raw: unknown): string | undefined {

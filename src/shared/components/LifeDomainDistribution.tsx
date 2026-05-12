@@ -161,7 +161,7 @@ const styles = StyleSheet.create({
     width: '100%',
   },
   rowWrap: {
-    marginBottom: 16,
+    marginBottom: 18,
   },
   labelRow: {
     flexDirection: 'row',
@@ -188,7 +188,7 @@ const styles = StyleSheet.create({
   trackRail: {
     height: TRACK_HEIGHT,
     borderRadius: TRACK_HEIGHT / 2,
-    backgroundColor: '#253042',
+    backgroundColor: 'rgba(200,217,238,0.16)',
     overflow: 'hidden',
     width: '100%',
   },
@@ -202,12 +202,15 @@ const styles = StyleSheet.create({
     height: THUMB_SIZE,
     borderRadius: THUMB_SIZE / 2,
     borderWidth: 2,
-    borderColor: '#0f1419',
+    borderColor: '#05060D',
   },
   totalLine: {
-    marginTop: 8,
-    color: '#7A9ABE',
-    fontSize: 15,
-    fontWeight: '600',
+    marginTop: 12,
+    paddingTop: 16,
+    borderTopWidth: 1,
+    borderTopColor: 'rgba(82,142,220,0.18)',
+    color: '#C8D9EE',
+    fontSize: 16,
+    fontWeight: '700',
   },
 });

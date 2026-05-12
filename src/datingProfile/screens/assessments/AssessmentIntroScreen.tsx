@@ -14,6 +14,7 @@ const INSTRUMENT_LABELS: Record<string, { label: string; time: string }> = {
   "ECR-36": { label: "Attachment Style", time: "~5 min" },
   "CONFLICT-30": { label: "Conflict Style", time: "~3–4 min" },
   "PVQ-21": { label: "Schwartz Values", time: "~4 min" },
+  RELATIONSHIP_TRAITS_8: { label: "Relationship Traits", time: "~2 min" },
 };
 
 const styles = StyleSheet.create({
@@ -106,7 +107,7 @@ export function AssessmentIntroScreen() {
       </View>
       <Text style={styles.title}>What we're about to measure</Text>
       <Text style={{ fontSize: 16, color: theme.colors.textSecondary, lineHeight: 24, marginBottom: 24 }}>
-        These three assessments cover the psychological dimensions most predictive of
+        These four assessments cover the psychological dimensions most predictive of
         relationship compatibility. You can pause between them.
       </Text>
       <View style={styles.list}>
@@ -124,7 +125,7 @@ export function AssessmentIntroScreen() {
           </View>
         ))}
       </View>
-      <Text style={styles.total}>Total: ~10-15 minutes</Text>
+      <Text style={styles.total}>Total: ~12–18 minutes</Text>
       <Text style={styles.note}>
         Your answers are saved automatically after each assessment.
       </Text>

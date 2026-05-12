@@ -41,21 +41,6 @@ import {
 const AriaScreenLazy = lazy(async () => {
   try {
     const mod = await import('./src/app/screens/AriaScreen');
-    // #region agent log
-    fetch('http://127.0.0.1:7789/ingest/668e0bd5-3283-4492-9f48-e33846c18218', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'X-Debug-Session-Id': 'e70f17' },
-      body: JSON.stringify({
-        sessionId: 'e70f17',
-        location: 'App.tsx:AriaScreenLazy',
-        message: 'AriaScreen dynamic import resolved',
-        data: { hasDefault: !!mod?.default },
-        timestamp: Date.now(),
-        hypothesisId: 'H2',
-        runId: 'pre-fix',
-      }),
-    }).catch(() => {});
-    // #endregion
     return mod;
   } catch (err) {
     const e = err as Error;
@@ -65,25 +50,6 @@ const AriaScreenLazy = lazy(async () => {
       message: fallbackErrorMessage,
       stack: e?.stack,
     });
-    // #region agent log
-    fetch('http://127.0.0.1:7789/ingest/668e0bd5-3283-4492-9f48-e33846c18218', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'X-Debug-Session-Id': 'e70f17' },
-      body: JSON.stringify({
-        sessionId: 'e70f17',
-        location: 'App.tsx:AriaScreenLazy:catch',
-        message: 'AriaScreen dynamic import FAILED',
-        data: {
-          name: e?.name,
-          msg: fallbackErrorMessage,
-          stack: (e?.stack ?? '').slice(0, 4000),
-        },
-        timestamp: Date.now(),
-        hypothesisId: 'H1',
-        runId: 'pre-fix',
-      }),
-    }).catch(() => {});
-    // #endregion
     return {
       default: function AriaUnavailable() {
         return (
@@ -302,7 +268,7 @@ const AppNavigator = ({ userId }: { userId: string }) => {
 const LoadingScreen = () => (
   <View style={[ROOT_STYLE, { justifyContent: 'center', alignItems: 'center' }]}>
     <ActivityIndicator size="large" color="#7A9ABE" />
-    <Text style={{ marginTop: 16, color: '#7A9ABE', fontSize: 14 }}>Loading…</Text>
+    <Text style={{ marginTop: 16, color: '#7A9ABE', fontSize: 14 }}>Loading...</Text>
   </View>
 );
 

@@ -3,11 +3,14 @@ import { MatchPreferences } from '@/shared/hooks/filterPreferences/types';
 
 export interface OnboardingDealbreakerPreferences extends MatchPreferences {
   childrenPreference?: string;
+  partnerSameReligionRequired?: string;
   partnerAlignmentTobacco?: string;
   partnerAlignmentRecreationalDrugs?: string;
   partnerAlignmentPsychedelics?: string;
   partnerAlignmentCannabis?: string;
   partnerAlignmentAlcohol?: string;
+  heightDynamicPreference?: string;
+  ethnicityAttraction?: string[];
 }
 
 /** Location from GPS + reverse geocode (step 6). Used for imperial vs metric in Height/Weight. */
@@ -90,6 +93,12 @@ export interface OnboardingData {
   datingPaceAfterExcitement?: string;
   /** Most recent dating: what happened in the first 2–3 weeks */
   recentDatingEarlyWeeks?: string;
+  /** Bandwidth / priority for a new relationship right now */
+  spaceForNewRelationship?: string;
+  partnerMoodMismatchResponse?: string;
+  sexualFocusPreference?: string;
+  sexualFeedbackStyle?: string;
+  sexualNeedsCommunicationComfort?: string;
   /** Partner already has children — Yes / No / No preference */
   prefPartnerHasChildren?: string;
   prefPartnerPoliticalAlignmentImportance?: string;

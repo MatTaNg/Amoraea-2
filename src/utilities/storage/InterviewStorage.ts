@@ -86,9 +86,24 @@ export interface StoredInterviewData {
   pendingCompletion?: boolean;
   /** `interview_attempts.id` for this in-progress session (created at interview start). */
   sessionAttemptId?: string;
+  /**
+   * True once the scripted Moment 5 conflict-validity clarification was delivered (client inject).
+   * Persisted so tab return / remount does not reset sequencing vs. the transcript.
+   */
+  moment_5_clarification_fired?: boolean;
   /** Set by unhandled-rejection safety net */
   emergencySave?: boolean;
   savedAt?: string;
+}
+
+/** Merge prior disk snapshot with a patch without dropping fields omitted from `patch` (partial saves). */
+export function mergeInterviewStoragePayload(
+  prior: StoredInterviewData | null,
+  patch: Omit<StoredInterviewData, 'version' | 'userId' | 'lastSavedAt'>
+): Omit<StoredInterviewData, 'version' | 'userId' | 'lastSavedAt'> {
+  if (!prior) return patch;
+  const { version: _v, userId: _u, lastSavedAt: _l, ...rest } = prior;
+  return { ...rest, ...patch };
 }
 
 export async function saveInterviewToStorage(

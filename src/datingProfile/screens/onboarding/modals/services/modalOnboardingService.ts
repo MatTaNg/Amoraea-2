@@ -84,6 +84,11 @@ class ModalOnboardingService {
         (p as any).recent_dating_early_weeks,
         d.recentDatingEarlyWeeks,
       ),
+      spaceForNewRelationship: coalesce(
+        (p as any).spaceForNewRelationship,
+        (p as any).space_for_new_relationship,
+        d.spaceForNewRelationship,
+      ),
       lifeDomains: coalesce((p as any).lifeDomains, d.lifeDomains),
       typology: coalesce((p as any).typology, d.typology),
       photos: coalesce((p as any).photos, d.photos),
@@ -119,6 +124,14 @@ class ModalOnboardingService {
   private matchPreferencesCompletionSatisfied(ctx: any): boolean {
     const mp = (ctx as any)?.matchPreferences;
     if (!mp || typeof mp !== 'object' || Array.isArray(mp)) return false;
+    return ['longTermLivingPreference', 'lifestylePreference', 'relocationPreference'].every((key) =>
+      String((mp as Record<string, unknown>)[key] ?? '').trim(),
+    );
+  }
+
+  private attractionPreferencesCompletionSatisfied(ctx: any): boolean {
+    const mp = (ctx as any)?.matchPreferences;
+    if (!mp || typeof mp !== 'object' || Array.isArray(mp)) return false;
     const dr = mp.distanceRange;
     const ar = mp.ageRange;
     const pairOk = (x: unknown) => {
@@ -131,7 +144,12 @@ class ModalOnboardingService {
             : NaN;
       return Number.isFinite(toN(x[0])) && Number.isFinite(toN(x[1]));
     };
-    return pairOk(dr) || pairOk(ar);
+    const heightDynamic = String((mp as Record<string, unknown>).heightDynamicPreference ?? '').trim();
+    const ethnicityAttraction = (mp as Record<string, unknown>).ethnicityAttraction;
+    const hasEthnicityAttraction =
+      Array.isArray(ethnicityAttraction) &&
+      ethnicityAttraction.some((value) => String(value ?? '').trim());
+    return (pairOk(dr) || pairOk(ar)) && heightDynamic.length > 0 && hasEthnicityAttraction;
   }
 
   /**
@@ -158,12 +176,18 @@ class ModalOnboardingService {
         'religion',
         'sexDrive',
         'sexInterests',
+        'partnerMoodMismatch',
+        'sexualFocus',
+        'sexualFeedback',
+        'sexualNeedsCommunication',
         'datingPaceAfterExcitement',
         'recentDatingEarlyWeeks',
+        'spaceForNewRelationship',
         'lifeDomains',
         'typology',
         'photos',
         'matchPreferences',
+        'attractionPreferences',
         'complete',
       ] as const;
       const stepsAfterDrinkingNeedSocial = new Set<string>(tailSteps);
@@ -231,6 +255,12 @@ class ModalOnboardingService {
     if (!String((ctx as any)?.sexDrive ?? (ctx as any)?.sex_drive ?? '').trim()) return 'sexDrive';
     const sexInterest = (ctx as any)?.sexInterestCategories;
     if (!Array.isArray(sexInterest) || sexInterest.length === 0) return 'sexInterests';
+    if (!String((ctx as any)?.prefPartnerSharesSexualInterests ?? '').trim()) return 'sexInterests';
+    if (!String((ctx as any)?.partnerMoodMismatchResponse ?? '').trim()) return 'partnerMoodMismatch';
+    if (!String((ctx as any)?.sexualFocusPreference ?? '').trim()) return 'sexualFocus';
+    if (!String((ctx as any)?.sexualFeedbackStyle ?? '').trim()) return 'sexualFeedback';
+    if (!String((ctx as any)?.sexualNeedsCommunicationComfort ?? '').trim())
+      return 'sexualNeedsCommunication';
     if (
       !String(
         (ctx as any)?.datingPaceAfterExcitement ?? (ctx as any)?.dating_pace_after_excitement ?? '',
@@ -239,10 +269,17 @@ class ModalOnboardingService {
       return 'datingPaceAfterExcitement';
     if (!String((ctx as any)?.recentDatingEarlyWeeks ?? (ctx as any)?.recent_dating_early_weeks ?? '').trim())
       return 'recentDatingEarlyWeeks';
+    if (
+      !String(
+        (ctx as any)?.spaceForNewRelationship ?? (ctx as any)?.space_for_new_relationship ?? '',
+      ).trim()
+    )
+      return 'spaceForNewRelationship';
     if (!this.lifeDomainsCompletionSatisfied(ctx)) return 'lifeDomains';
     if (!(ctx as any)?.photos || !Array.isArray((ctx as any).photos) || (ctx as any).photos.length === 0)
       return 'photos';
     if (!this.matchPreferencesCompletionSatisfied(ctx)) return 'matchPreferences';
+    if (!this.attractionPreferencesCompletionSatisfied(ctx)) return 'attractionPreferences';
     return 'complete';
   }
 
@@ -379,6 +416,12 @@ class ModalOnboardingService {
         (profile as any)?.datingPaceAfterExcitement ?? (profile as any)?.dating_pace_after_excitement,
       recentDatingEarlyWeeks:
         (profile as any)?.recentDatingEarlyWeeks ?? (profile as any)?.recent_dating_early_weeks,
+      spaceForNewRelationship:
+        (profile as any)?.spaceForNewRelationship ?? (profile as any)?.space_for_new_relationship,
+      partnerMoodMismatchResponse: (profile as any)?.partnerMoodMismatchResponse,
+      sexualFocusPreference: (profile as any)?.sexualFocusPreference,
+      sexualFeedbackStyle: (profile as any)?.sexualFeedbackStyle,
+      sexualNeedsCommunicationComfort: (profile as any)?.sexualNeedsCommunicationComfort,
       prefPartnerHasChildren: (profile as any)?.prefPartnerHasChildren,
       prefPartnerPoliticalAlignmentImportance: (() => {
         const raw = String((profile as any)?.prefPartnerPoliticalAlignmentImportance ?? "").trim();
@@ -439,50 +482,15 @@ class ModalOnboardingService {
       if (polNorm) mergedOnboardingData.prefPartnerPoliticalAlignmentImportance = polNorm;
       else delete mergedOnboardingData.prefPartnerPoliticalAlignmentImportance;
 
-      // Determine resume step from merged profile+draft state only.
-      // `current_step` can be stale; recomputing prevents users from being sent backward.
-      const currentStep = this.determineStepFromProfile(profile, undefined, mergedOnboardingData);
+      // Saved onboarding progress is the source of truth for where the user intentionally left off.
+      // Profile field writes happen while editing a step (for example photo uploads), so recomputing
+      // solely from profile completeness can skip ahead after refresh before the user presses Next.
+      const savedStep = typeof data?.current_step === 'string' ? data.current_step : undefined;
+      const currentStep =
+        savedStep && savedStep !== 'welcome'
+          ? this.determineStepFromProfile(profile, savedStep, mergedOnboardingData)
+          : this.determineStepFromProfile(profile, undefined, mergedOnboardingData);
 
-      // #region agent log
-      (() => {
-        const ctx = this.buildCompletionContext(profile, mergedOnboardingData);
-        const typ = (mergedOnboardingData as any)?.typology;
-        const typFilledKeys =
-          typ && typeof typ === 'object'
-            ? Object.keys(typ).filter((k) => {
-                const v = (typ as Record<string, unknown>)[k];
-                return v != null && String(v).trim() !== '';
-              }).length
-            : 0;
-        fetch('http://127.0.0.1:7789/ingest/668e0bd5-3283-4492-9f48-e33846c18218', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json', 'X-Debug-Session-Id': 'c61a43' },
-          body: JSON.stringify({
-            sessionId: 'c61a43',
-            runId: 'investigate-1',
-            hypothesisId: 'H_B,H_D,H_merge',
-            location: 'datingProfile/modalOnboardingService.ts:getProgress',
-            message: 'resume step computed',
-            data: {
-              currentStep,
-              dbCurrentStep: data?.current_step ?? null,
-              savedDraftKeyCount: Object.keys(savedOnboardingData).length,
-              mergedKeyCount: Object.keys(mergedOnboardingData).length,
-              gate: {
-                hasDisplayName: !!ctx?.displayName,
-                hasGender: !!ctx?.gender,
-                hasEthnicity: !!String((ctx as any)?.ethnicity ?? '').trim(),
-                hasLifeDomains: !!(ctx as any)?.lifeDomains,
-                typologyFilledKeys: typFilledKeys,
-                hasPhotos: Array.isArray((ctx as any)?.photos) && (ctx as any).photos.length > 0,
-                hasMatchPrefs: !!(ctx as any)?.matchPreferences,
-              },
-            },
-            timestamp: Date.now(),
-          }),
-        }).catch(() => {});
-      })();
-      // #endregion
 
       return {
         success: true,
@@ -729,6 +737,16 @@ class ModalOnboardingService {
         (profileUpdates as any).datingPaceAfterExcitement = data.datingPaceAfterExcitement;
       if (data.recentDatingEarlyWeeks !== undefined)
         (profileUpdates as any).recentDatingEarlyWeeks = data.recentDatingEarlyWeeks;
+      if (data.spaceForNewRelationship !== undefined)
+        (profileUpdates as any).spaceForNewRelationship = data.spaceForNewRelationship;
+      if (data.partnerMoodMismatchResponse !== undefined)
+        (profileUpdates as any).partnerMoodMismatchResponse = data.partnerMoodMismatchResponse;
+      if (data.sexualFocusPreference !== undefined)
+        (profileUpdates as any).sexualFocusPreference = data.sexualFocusPreference;
+      if (data.sexualFeedbackStyle !== undefined)
+        (profileUpdates as any).sexualFeedbackStyle = data.sexualFeedbackStyle;
+      if (data.sexualNeedsCommunicationComfort !== undefined)
+        (profileUpdates as any).sexualNeedsCommunicationComfort = data.sexualNeedsCommunicationComfort;
       if (data.prefPartnerHasChildren !== undefined)
         (profileUpdates as any).prefPartnerHasChildren = data.prefPartnerHasChildren;
       if (data.prefPartnerPoliticalAlignmentImportance !== undefined)

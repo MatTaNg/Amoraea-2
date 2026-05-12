@@ -3,6 +3,7 @@ import { buildMoment4ThresholdAnswerToMoment5Bundle } from '../interviewTransiti
 import {
   buildMoment5AppreciationProbeQuestion,
   evaluateMoment5AppreciationSpecificity,
+  evaluateScenarioAQ1ContemptProbePreProbeSkip,
   hasScenarioAQ1ContemptProbeCoverage,
   hasScenarioAQ1VignetteEngagement,
   hasScenarioBQ1OnTopicEngagement,
@@ -42,8 +43,10 @@ import {
   moment5HasHighInformationBehavioralExample,
   moment5HasSubstantiveCelebrationValuesReflection,
   normalizeScoresByEvidence,
+  mergeMoment4PillarScoresAfterEvidenceNormalize,
   evaluateMoment5AccountabilityProbe,
   moment5AnswerHasExplicitSelfAccountability,
+  moment5ResponseIsAbstract,
   shouldProbeMoment5NoSelfReference,
   transcriptAssistantContainsMoment5PrimaryConflictQuestion,
 } from '../probeAndScoringUtils';
@@ -287,12 +290,14 @@ describe('probeAndScoringUtils', () => {
     ).toBe(false);
   });
 
-  it('reference to final line + passive-aggressive only does not skip contempt probe', () => {
-    expect(
-      hasScenarioAQ1ContemptProbeCoverage(
-        "When Emma says you've made that very clear it's passive aggressive — she's not being direct."
-      )
-    ).toBe(false);
+  it('passive-aggressive read of Emma final line skips via pre-probe (register_addressed)', () => {
+    const s =
+      "When Emma says that last thing to him it's passive aggressive — she's not being direct.";
+    expect(hasScenarioAQ1ContemptProbeCoverage(s)).toBe(false);
+    expect(evaluateScenarioAQ1ContemptProbePreProbeSkip(s)).toEqual({
+      skip: true,
+      reason: 'register_addressed',
+    });
   });
 
   it('reference to final line + stating-a-fact minimization does not skip contempt probe', () => {
@@ -339,7 +344,64 @@ describe('probeAndScoringUtils', () => {
     const answer =
       "Ryan sounds like someone who has never had to put their partner first. The fact that they couldn't even see why Emma was upset says a lot about their emotional maturity. Some people just aren't capable of prioritizing their relationship over their family of origin and that's a real problem.";
     expect(hasScenarioAQ1ContemptProbeCoverage(answer)).toBe(false);
+    expect(evaluateScenarioAQ1ContemptProbePreProbeSkip(answer).skip).toBe(false);
     expect(hasScenarioAQ1VignetteEngagement(answer)).toBe(true);
+  });
+
+  describe('evaluateScenarioAQ1ContemptProbePreProbeSkip', () => {
+    it('literal quote skips with literal_quote_present', () => {
+      expect(
+        evaluateScenarioAQ1ContemptProbePreProbeSkip(
+          "She said you've made that very clear and walked away.",
+        ),
+      ).toEqual({ skip: true, reason: 'literal_quote_present' });
+    });
+
+    it('skips when user echoes the line with capital Y (normalized)', () => {
+      expect(
+        evaluateScenarioAQ1ContemptProbePreProbeSkip(
+          "What's happening is Emma feels sidelined — You've made that very clear lands as a shutdown.",
+        ).skip,
+      ).toBe(true);
+    });
+
+    it('skips when ASR drops the apostrophe in youve', () => {
+      expect(evaluateScenarioAQ1ContemptProbePreProbeSkip(
+        'Emma tells Ryan youve made that very clear and it ends the conversation.',
+      ).skip).toBe(true);
+    });
+
+    it('skips for close variant really clear', () => {
+      expect(
+        evaluateScenarioAQ1ContemptProbePreProbeSkip(
+          "I think when she says you've made that really clear she's not asking for dialogue anymore.",
+        ).skip,
+      ).toBe(true);
+    });
+
+    it('made + that very clear in proximity skips', () => {
+      expect(
+        evaluateScenarioAQ1ContemptProbePreProbeSkip(
+          'The part where she made it that very clear stuck with me.',
+        ),
+      ).toEqual({ skip: true, reason: 'literal_quote_present' });
+    });
+
+    it('pattern tied to the line skips', () => {
+      expect(
+        evaluateScenarioAQ1ContemptProbePreProbeSkip(
+          "That comment is about more than just this one call — it's the pattern.",
+        ),
+      ).toEqual({ skip: true, reason: 'pattern_interpretation_tied_to_line' });
+    });
+
+    it('generic upset-only framing does not pre-skip', () => {
+      expect(
+        evaluateScenarioAQ1ContemptProbePreProbeSkip(
+          'Emma is frustrated and Ryan always puts family first.',
+        ).skip,
+      ).toBe(false);
+    });
   });
 
   it('does not classify the birthday-party answer as generic appreciation', () => {
@@ -448,6 +510,23 @@ describe('probeAndScoringUtils', () => {
     expect(cleaned.regulation).toBeUndefined();
     expect(cleaned.accountability).toBe(3.3);
     expect(cleaned.repair).toBe(6.2);
+  });
+
+  it('mergeMoment4PillarScoresAfterEvidenceNormalize restores explicit nulls when normalize drops all numerics', () => {
+    const merged = mergeMoment4PillarScoresAfterEvidenceNormalize({});
+    expect(merged).toEqual({
+      contempt_recognition: null,
+      contempt_expression: null,
+      commitment_threshold: null,
+      accountability: null,
+      mentalizing: null,
+    });
+  });
+
+  it('mergeMoment4PillarScoresAfterEvidenceNormalize keeps surviving numeric pillars', () => {
+    const merged = mergeMoment4PillarScoresAfterEvidenceNormalize({ mentalizing: 6 });
+    expect(merged.mentalizing).toBe(6);
+    expect(merged.contempt_recognition).toBeNull();
   });
 
   it('transcriptAssistantContainsMoment5PrimaryConflictQuestion matches full M4→M5 client bundle', () => {
@@ -616,6 +695,11 @@ describe('probeAndScoringUtils', () => {
     it('detects scripted specificity redirect assistant prompts', () => {
       expect(looksLikeMoment5SpecificityRedirectPrompt(MOMENT_5_SPECIFICITY_REDIRECT_TEXT)).toBe(true);
       expect(looksLikeMoment5SpecificityRedirectPrompt(MOMENT_5_SPECIFICITY_REDIRECT_ALT_TEXT)).toBe(true);
+      expect(
+        looksLikeMoment5SpecificityRedirectPrompt(
+          'Could you think of a specific time — maybe with a partner — and walk me through what happened?',
+        ),
+      ).toBe(true);
       expect(looksLikeMoment5SpecificityRedirectPrompt('What was your part in how it unfolded?')).toBe(false);
     });
 
@@ -714,6 +798,32 @@ describe('probeAndScoringUtils', () => {
         true,
       );
       expect(looksLikeMoment5ConflictValidityClarificationPrompt(MOMENT_5_SPECIFICITY_REDIRECT_TEXT)).toBe(false);
+    });
+  });
+
+  describe('moment5ResponseIsAbstract (post–specificity-redirect gate)', () => {
+    it('treats generic communication advice as abstract', () => {
+      expect(
+        moment5ResponseIsAbstract(
+          'I think it is really important to listen and repeat back what you heard so the other person feels understood. Communication is the foundation of resolving any disagreement calmly.',
+        ),
+      ).toBe(true);
+    });
+
+    it('treats named person plus described tension as not abstract', () => {
+      expect(
+        moment5ResponseIsAbstract(
+          'With Angel it got tense sometimes when she would say I never listen, and we had to talk it through repeatedly before we cooled off.',
+        ),
+      ).toBe(false);
+    });
+
+    it('treats first-person concrete behavior in conflict as not abstract', () => {
+      expect(
+        moment5ResponseIsAbstract(
+          'During the breakup I shut down for a week and avoided her calls until she showed up at my door and we finally argued it out.',
+        ),
+      ).toBe(false);
     });
   });
 

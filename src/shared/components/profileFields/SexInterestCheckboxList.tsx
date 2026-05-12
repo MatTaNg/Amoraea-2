@@ -35,14 +35,23 @@ export const SexInterestCheckboxList: React.FC<{
 );
 
 const styles = StyleSheet.create({
-  col: { gap: 8 },
+  col: { gap: 10 },
   row: {
-    paddingVertical: 12,
-    paddingHorizontal: 14,
-    borderRadius: 8,
+    paddingVertical: 14,
+    paddingHorizontal: 16,
+    borderRadius: 14,
     borderWidth: 1,
     borderColor: 'rgba(82,142,220,0.25)',
+    backgroundColor: 'rgba(255,255,255,0.045)',
   },
-  rowOn: { borderColor: '#5BA8E8', backgroundColor: 'rgba(91,168,232,0.1)' },
-  txt: { color: '#EEF6FF' },
+  rowOn: {
+    borderColor: '#5BA8E8',
+    backgroundColor: 'rgba(91,168,232,0.2)',
+  },
+  txt: {
+    color: '#EEF6FF',
+    fontSize: 16,
+    fontWeight: '500',
+    lineHeight: 22,
+  },
 });

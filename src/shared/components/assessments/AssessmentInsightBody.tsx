@@ -1,13 +1,13 @@
-import React from 'react';
-import { View, Text, StyleSheet, ActivityIndicator } from 'react-native';
-import type { AssessmentInsightSnapshot } from '@/datingProfile/types';
-import { theme } from '@/shared/theme/theme';
+import React from "react";
+import { View, Text, StyleSheet, ActivityIndicator } from "react-native";
+import type { AssessmentInsightSnapshot } from "@/datingProfile/types";
+import { theme } from "@/shared/theme/theme";
 
 type AssessmentInsightBodyProps = {
   paragraphs?: string[];
   snapshot?: AssessmentInsightSnapshot;
   badgeSuffix?: string;
-  aiPhase?: 'idle' | 'loading' | 'ready' | 'off';
+  aiPhase?: "idle" | "loading" | "ready" | "off";
 };
 
 export const AssessmentInsightBody: React.FC<AssessmentInsightBodyProps> = ({
@@ -33,7 +33,9 @@ export const AssessmentInsightBody: React.FC<AssessmentInsightBodyProps> = ({
     return null;
   }
 
-  const legacyParagraphs = Array.isArray(snap.paragraphs) ? snap.paragraphs : [];
+  const legacyParagraphs = Array.isArray(snap.paragraphs)
+    ? snap.paragraphs
+    : [];
   const label = snap.instrumentLabel || snap.title || snap.instrument;
   const hasRich =
     (label && String(label).trim()) ||
@@ -54,29 +56,70 @@ export const AssessmentInsightBody: React.FC<AssessmentInsightBodyProps> = ({
     );
   }
 
-  const aiParas = snap.aiParagraphs && snap.aiParagraphs.length > 0 ? snap.aiParagraphs : [];
-  const showAiLoading = aiPhase === 'loading';
+  const aiParas =
+    snap.aiParagraphs && snap.aiParagraphs.length > 0 ? snap.aiParagraphs : [];
+  const showAiLoading = aiPhase === "loading";
 
   return (
     <View style={styles.wrap}>
-      {label ? (
-        <Text style={styles.badge}>
-          {label}
-          {badgeSuffix ?? ''}
-        </Text>
-      ) : null}
-      {snap.headline ? <Text style={styles.headline}>{snap.headline}</Text> : null}
-      {snap.body ? <Text style={styles.body}>{snap.body}</Text> : null}
-      {snap.growthEdge ? <Text style={styles.growth}>{snap.growthEdge}</Text> : null}
+      <View style={styles.heroCard}>
+        {label ? (
+          <Text style={styles.badge}>
+            {label}
+            {badgeSuffix ?? ""}
+          </Text>
+        ) : null}
+        {snap.headline ? (
+          <Text style={styles.headline}>{snap.headline}</Text>
+        ) : null}
+        {snap.body ? <Text style={styles.body}>{snap.body}</Text> : null}
+        {snap.growthEdge ? (
+          <View style={styles.growthCard}>
+            <Text style={styles.growthLabel}>Growth edge</Text>
+            <Text style={styles.growth}>{snap.growthEdge}</Text>
+          </View>
+        ) : null}
+      </View>
+
       {snap.details && snap.details.length > 0 ? (
-        <View style={styles.details}>
-          {snap.details.map((d, i) => (
-            <View key={i} style={styles.detailRow}>
-              <Text style={styles.detailLabel}>{d.label}</Text>
-              <Text style={styles.detailValue}>{d.value}</Text>
-              {d.description ? <Text style={styles.detailDesc}>{d.description}</Text> : null}
-            </View>
-          ))}
+        <View style={styles.sectionCard}>
+          <Text style={styles.sectionTitle}>Your breakdown</Text>
+          <View style={styles.details}>
+            {snap.details.map((d, i) => {
+              const isAttachmentStyle =
+                label === "Attachment Style" &&
+                d.label.toLowerCase().includes("attachment style");
+              return (
+                <View
+                  key={i}
+                  style={[
+                    styles.detailRow,
+                    isAttachmentStyle && styles.resultDetailRow,
+                  ]}
+                >
+                  <Text
+                    style={[
+                      styles.detailLabel,
+                      isAttachmentStyle && styles.resultDetailLabel,
+                    ]}
+                  >
+                    {d.label}
+                  </Text>
+                  <Text
+                    style={[
+                      styles.detailValue,
+                      isAttachmentStyle && styles.resultDetailValue,
+                    ]}
+                  >
+                    {d.value}
+                  </Text>
+                  {d.description ? (
+                    <Text style={styles.detailDesc}>{d.description}</Text>
+                  ) : null}
+                </View>
+              );
+            })}
+          </View>
         </View>
       ) : null}
 
@@ -101,42 +144,107 @@ export const AssessmentInsightBody: React.FC<AssessmentInsightBodyProps> = ({
 };
 
 const styles = StyleSheet.create({
-  wrap: { gap: 14 },
+  wrap: { gap: 16 },
+  heroCard: {
+    borderRadius: 24,
+    borderWidth: 1,
+    borderColor: "rgba(91,168,232,0.28)",
+    backgroundColor: "rgba(91,168,232,0.08)",
+    padding: 22,
+    gap: 12,
+  },
   badge: {
     fontSize: 13,
-    fontWeight: '600',
-    color: theme.colors.textSecondary,
-    textTransform: 'uppercase',
-    letterSpacing: 0.6,
+    fontWeight: "700",
+    color: "#9CB4D8",
+    textTransform: "uppercase",
+    letterSpacing: 0.8,
   },
   headline: {
-    fontSize: 22,
-    fontWeight: '700',
+    fontSize: 28,
+    fontWeight: "800",
     color: theme.colors.text,
-    lineHeight: 30,
+    lineHeight: 34,
   },
-  body: { fontSize: 16, lineHeight: 24, color: theme.colors.text },
-  growth: { fontSize: 15, lineHeight: 22, color: theme.colors.textSecondary, fontStyle: 'italic' },
-  details: { gap: 16, marginTop: 4 },
-  detailRow: { gap: 4 },
-  detailLabel: { fontSize: 14, fontWeight: '700', color: theme.colors.text },
-  detailValue: { fontSize: 14, color: theme.colors.primary },
-  detailDesc: { fontSize: 14, lineHeight: 20, color: theme.colors.textSecondary },
+  body: { fontSize: 16, lineHeight: 25, color: theme.colors.text },
+  growthCard: {
+    marginTop: 4,
+    borderRadius: 18,
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.08)",
+    backgroundColor: "rgba(255,255,255,0.04)",
+    padding: 16,
+    gap: 6,
+  },
+  growthLabel: {
+    fontSize: 12,
+    fontWeight: "800",
+    letterSpacing: 0.8,
+    textTransform: "uppercase",
+    color: theme.colors.primary,
+  },
+  growth: { fontSize: 15, lineHeight: 22, color: theme.colors.text },
+  sectionCard: {
+    borderRadius: 22,
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.08)",
+    backgroundColor: "rgba(255,255,255,0.035)",
+    padding: 18,
+    gap: 14,
+  },
+  sectionTitle: {
+    fontSize: 17,
+    fontWeight: "800",
+    color: theme.colors.text,
+  },
+  details: { gap: 12 },
+  detailRow: {
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: "rgba(82,142,220,0.18)",
+    backgroundColor: "rgba(5,6,13,0.36)",
+    padding: 14,
+    gap: 5,
+  },
+  detailLabel: { fontSize: 13, fontWeight: "700", color: "#9CB4D8" },
+  detailValue: { fontSize: 16, fontWeight: "800", color: theme.colors.text },
+  detailDesc: {
+    fontSize: 14,
+    lineHeight: 20,
+    color: theme.colors.textSecondary,
+  },
+  resultDetailRow: {
+    borderColor: "rgba(91,168,232,0.35)",
+    backgroundColor: "rgba(91,168,232,0.14)",
+  },
+  resultDetailLabel: {
+    color: "#9CB4D8",
+    fontSize: 13,
+    textTransform: "uppercase",
+    letterSpacing: 0.7,
+  },
+  resultDetailValue: {
+    color: theme.colors.text,
+    fontSize: 24,
+    fontWeight: "800",
+    lineHeight: 32,
+  },
   aiBlock: {
-    marginTop: 8,
-    paddingTop: 16,
-    borderTopWidth: StyleSheet.hairlineWidth,
-    borderTopColor: theme.colors.border,
+    borderRadius: 22,
+    borderWidth: 1,
+    borderColor: "rgba(91,168,232,0.22)",
+    backgroundColor: "rgba(91,168,232,0.07)",
+    padding: 18,
     gap: 12,
   },
   aiHeading: {
     fontSize: 15,
-    fontWeight: '700',
+    fontWeight: "700",
     color: theme.colors.text,
   },
   aiLoadingRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
+    flexDirection: "row",
+    alignItems: "center",
     gap: 10,
   },
   aiLoadingText: { fontSize: 14, color: theme.colors.textSecondary },

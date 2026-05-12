@@ -93,6 +93,7 @@ import {
 import {
   buildIncompleteInterviewGateResult,
   evaluateInterviewCompletionGate,
+  personalMomentBundleWasScored,
   type InterviewCompletionGateResult,
 } from '@features/aria/interviewCompletionGate';
 import {
@@ -198,6 +199,7 @@ import {
   loadInterviewFromStorage,
   clearInterviewFromStorage,
   getCurrentScenario,
+  mergeInterviewStoragePayload,
   setStorageFallbackListener,
   type StoredInterviewData,
 } from '@utilities/storage/InterviewStorage';
@@ -360,6 +362,7 @@ import {
 } from '@features/aria/scenarioInferenceSourceCalibration';
 import { SCENARIO_A_CONTEMPT_RECOGNITION_CALIBRATION } from '@features/aria/scenarioAContemptRecognitionCalibration';
 import {
+  promoteMoment5LegacyContemptForScoringResult,
   sanitizeMoment5PersonalScoresForAggregate,
   sanitizePersonalMomentScoresForAggregate,
   type PersonalMoment5SliceForSanitize,
@@ -367,6 +370,7 @@ import {
 } from '@features/aria/personalMomentSliceSanitize';
 import {
   debugScenarioAQ1ContemptProbeCoverageDetail,
+  evaluateScenarioAQ1ContemptProbePreProbeSkip,
   hasScenarioAQ1ContemptProbeCoverage,
   hasScenarioBQ1OnTopicEngagement,
   extractScenario3UserCorpusAfterLastRepairPrompt,
@@ -376,11 +380,11 @@ import {
   isScenarioCQ1Prompt,
   isScenarioCRepairAssistantPrompt,
   normalizeInterviewTypography,
+  mergeMoment4PillarScoresAfterEvidenceNormalize,
   normalizeScoresByEvidence,
   SKIPPED_BY_USER_FRUSTRATION_EVIDENCE,
   sliceTranscriptBeforeScenarioCToPersonalHandoff,
   MOMENT_5_ACCOUNTABILITY_QUESTION_TEXT,
-  MOMENT_5_ACCOUNTABILITY_PROBE_TEXT,
   MOMENT_5_ACCOUNTABILITY_PROBE_WITH_GRIEF_ACK_TEXT,
   MOMENT_5_CONFLICT_VALIDITY_CLARIFICATION_TEXT,
   MOMENT_5_PERSISTENT_ABSTRACT_MOVE_ON_TEXT,
@@ -394,6 +398,7 @@ import {
   moment5PersonalNarrativeHasConcreteAnchor,
   moment5ResponseAddsTensionDetail,
   moment5ResponseContainsDeathDisclosure,
+  moment5ResponseIsAbstract,
   transcriptAssistantContainsMoment5PrimaryConflictQuestion,
 } from '@features/aria/probeAndScoringUtils';
 import { fullScenarioReconciliation } from '@features/aria/reconcileScenarioScoresTranscript';
@@ -421,44 +426,7 @@ import * as FileSystemLegacy from 'expo-file-system/legacy';
 import { isAmoraeaAdminConsoleEmail } from '@/constants/adminConsole';
 import { LEGAL_PRIVACY_POLICY_URL, LEGAL_TERMS_OF_SERVICE_URL } from '@/constants/legalUrls';
 
-// #region agent log
-if (typeof fetch !== 'undefined') {
-  console.info('[ARIA_MODULE_EVALUATED]');
-  fetch('http://127.0.0.1:7789/ingest/668e0bd5-3283-4492-9f48-e33846c18218', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json', 'X-Debug-Session-Id': 'e70f17' },
-    body: JSON.stringify({
-      sessionId: 'e70f17',
-      location: 'AriaScreen.tsx:after-imports',
-      message: 'AriaScreen module body executing (imports completed)',
-      data: { platform: typeof navigator !== 'undefined' ? String(navigator.userAgent).slice(0, 160) : 'no-ua' },
-      timestamp: Date.now(),
-      hypothesisId: 'H3',
-      runId: 'pre-fix',
-    }),
-  }).catch(() => {});
-}
-// #endregion
 
-// #region agent log
-if (typeof fetch !== 'undefined') {
-  fetch('http://127.0.0.1:7789/ingest/668e0bd5-3283-4492-9f48-e33846c18218', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json', 'X-Debug-Session-Id': '7605c3' },
-    body: JSON.stringify({
-      sessionId: '7605c3',
-      runId: 'resume-debug',
-      hypothesisId: 'H6_BUNDLE_STALE_OR_RESUME_PRE_HANDLER',
-      location: 'AriaScreen.tsx:after-imports',
-      message: 'aria_module_evaluated_for_scenario_a_resume_debug',
-      data: {
-        platform: typeof navigator !== 'undefined' ? String(navigator.userAgent).slice(0, 160) : 'no-ua',
-      },
-      timestamp: Date.now(),
-    }),
-  }).catch(() => {});
-}
-// #endregion
 
 const FALLBACK_MARKER_SCORES_MID: Record<string, number> = {
   mentalizing: 6,
@@ -711,26 +679,6 @@ function applyInterviewProgressFromAssistantText(rawDisplayText: string, refs: I
     refs.personalHandoffInjectedRef.current = true;
     refs.interviewMomentsCompleteRef.current[3] = true;
     refs.currentInterviewMomentRef.current = 4;
-    // #region agent log
-    fetch('http://127.0.0.1:7789/ingest/668e0bd5-3283-4492-9f48-e33846c18218', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'X-Debug-Session-Id': 'e43434' },
-      body: JSON.stringify({
-        sessionId: 'e43434',
-        runId: 'post-fix',
-        hypothesisId: 'M4_ADV',
-        location: 'AriaScreen.tsx:applyInterviewProgressFromAssistantText',
-        message: 'moment_advanced_to_4',
-        data: {
-          combinedHandoff,
-          grudgeOnlyAfterScenarioC,
-          segmentHandoff: assistantTextLooksLikeScenarioCToMoment4Handoff(raw),
-          preview: raw.slice(0, 200),
-        },
-        timestamp: Date.now(),
-      }),
-    }).catch(() => {});
-    // #endregion
   }
 }
 
@@ -1001,7 +949,8 @@ async function saveInterviewProgress(
   ) {
     return;
   }
-  await saveInterviewToStorage(userId, state);
+  const prior = await loadInterviewFromStorage(userId);
+  await saveInterviewToStorage(userId, mergeInterviewStoragePayload(prior, state));
 }
 
 type MessageWithScenario = {
@@ -1398,6 +1347,39 @@ function stripScenarioARepairQuestion(text: string): string {
     .replace(/\n{3,}/g, '\n\n')
     .trim();
   return cleaned;
+}
+
+/**
+ * Model sometimes repeats the client-injected Moment 5 specificity line after it is already in the transcript.
+ * Drop matching paragraphs only when prior transcript already contained that redirect (welcome-back excluded upstream).
+ */
+function stripDuplicateMoment5SpecificityRedirectParagraphs(
+  draft: string,
+  msgs: MessageWithScenario[],
+  interviewMoment: number,
+): string {
+  if (interviewMoment !== 5 || !draft.trim()) return draft;
+  const priorAssistants = msgs.filter(
+    (m) =>
+      m.role === 'assistant' &&
+      !(m as { isWelcomeBack?: boolean }).isWelcomeBack &&
+      !(m as { isScoreCard?: boolean }).isScoreCard,
+  );
+  const alreadyAsked = priorAssistants.some((m) =>
+    looksLikeMoment5SpecificityRedirectPrompt((m as { content?: string }).content ?? ''),
+  );
+  if (!alreadyAsked) return draft;
+  const blocks = draft
+    .split(/\n{2,}/)
+    .map((b) => b.trim())
+    .filter(Boolean);
+  if (blocks.length <= 1) {
+    if (looksLikeMoment5SpecificityRedirectPrompt(draft)) return '';
+    return draft;
+  }
+  const filtered = blocks.filter((b) => !looksLikeMoment5SpecificityRedirectPrompt(b));
+  const joined = filtered.join('\n\n').trim();
+  return joined || draft;
 }
 
 function looksLikeScenarioBFullAppreciationProbeQuestion(text: string): boolean {
@@ -2834,7 +2816,7 @@ const ASSISTANT_INTERVIEW_SPEECH = {
 };
 
 const RESUME_WELCOME_BACK_MESSAGE =
-  "Welcome back! Lets continue where we left off. If you'd like me to repeat what I said, let me know. Otherwise, I'm ready for your response.";
+  "Welcome back! Lets continue where we left off. If you'd like me to repeat what I said, let me know.";
 
 function isAssistantBubbleForTranscript(
   m: { role: string; content?: string; isScoreCard?: boolean; isWelcomeBack?: boolean }
@@ -2969,25 +2951,6 @@ function syncReferenceCardStateFromAssistantMessages(
   for (let i = assistantMessages.length - 1; i >= 0; i--) {
     const raw = stripControlTokens(assistantMessages[i].content ?? '').trim();
     if (transcriptAssistantContainsMoment5PrimaryConflictQuestion(raw)) {
-      // #region agent log
-      fetch('http://127.0.0.1:7789/ingest/668e0bd5-3283-4492-9f48-e33846c18218', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'X-Debug-Session-Id': 'e43434' },
-        body: JSON.stringify({
-          sessionId: 'e43434',
-          location: 'AriaScreen.tsx:syncReferenceCardStateFromAssistantMessages',
-          message: 'reference_card_sync',
-          data: {
-            earlyReturnMoment5: true,
-            m5MsgIdx: i,
-            bodyOnlyQuestion: true,
-            bodyLen: MOMENT_5_REFERENCE_SCENARIO.text.length,
-          },
-          timestamp: Date.now(),
-          hypothesisId: 'H_m5_modal',
-        }),
-      }).catch(() => {});
-      // #endregion
       return { scenario: MOMENT_5_REFERENCE_SCENARIO, prompt: null, phase: 'scenario_active' };
     }
   }
@@ -3023,34 +2986,6 @@ function syncReferenceCardStateFromAssistantMessages(
   } else {
     prompt = getSituationOpeningQuestion(anchorScenario);
   }
-  // #region agent log
-  {
-    const lastRaw =
-      lastIdx >= 0 ? stripControlTokens(assistantMessages[lastIdx].content ?? '').trim() : '';
-    const lastHasQ = lastRaw.includes('?');
-    const lastHasM5 = transcriptAssistantContainsMoment5PrimaryConflictQuestion(lastRaw);
-    fetch('http://127.0.0.1:7789/ingest/668e0bd5-3283-4492-9f48-e33846c18218', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'X-Debug-Session-Id': 'e43434' },
-      body: JSON.stringify({
-        sessionId: 'e43434',
-        location: 'AriaScreen.tsx:syncReferenceCardStateFromAssistantMessages',
-        message: 'reference_card_sync',
-        data: {
-          anchorIdx,
-          lastIdx,
-          earlyReturnMoment5: false,
-          lastHasQ,
-          lastHasM5,
-          promptLen: prompt?.length ?? 0,
-          promptStartsWith: prompt ? prompt.slice(0, 48) : null,
-        },
-        timestamp: Date.now(),
-        hypothesisId: 'H_m5_modal',
-      }),
-    }).catch(() => {});
-  }
-  // #endregion
   return { scenario: anchorScenario, prompt, phase: 'scenario_active' };
 }
 
@@ -3951,6 +3886,26 @@ function applyElaborationAbsenceAfterNormalizeMoment5(
       };
     });
   }
+  if (
+    moment5Meta?.conflictValidityLow !== true &&
+    moment5Meta?.accountabilityProbeFiredOnAbstractFollowup === true &&
+    moment5Meta?.conflictValiditySecondResponseAbstract === true
+  ) {
+    const caps: Record<string, number> = { repair: 4, mentalizing: 5, regulation: 5 };
+    Object.entries(caps).forEach(([marker, cap]) => {
+      const score = result.pillarScores?.[marker];
+      if (typeof score === 'number' && Number.isFinite(score) && score > cap) {
+        result.pillarScores[marker] = cap;
+      }
+      const existingEvidence = result.keyEvidence?.[marker]?.trim();
+      const capEvidence =
+        'Moment 5 abstract follow-up after specificity redirect: low episodic specificity ceiling applies unless the post-probe answer adds clear rupture/repair evidence.';
+      result.keyEvidence = {
+        ...(result.keyEvidence ?? {}),
+        [marker]: existingEvidence ? `${existingEvidence} ${capEvidence}` : capEvidence,
+      };
+    });
+  }
   return out.depthModifierMeta;
 }
 
@@ -4049,6 +4004,27 @@ function extractLastInterviewerMessage(messages: Array<{ role: string; content: 
     return content;
   }
   return null;
+}
+
+/** True when the next user turn is the first user reply after a Moment 5 conflict-validity clarification (handles resume welcome inserted after clarification). */
+function isFirstUserTurnAfterMoment5ConflictValidityClarification(
+  messages: Array<{ role: string; content?: string; isScoreCard?: boolean; isWelcomeBack?: boolean }>
+): boolean {
+  let lastClarificationIdx = -1;
+  for (let i = messages.length - 1; i >= 0; i--) {
+    const m = messages[i];
+    if (m.role !== 'assistant') continue;
+    if ((m as { isWelcomeBack?: boolean }).isWelcomeBack) continue;
+    if ((m as { isScoreCard?: boolean }).isScoreCard) continue;
+    if (looksLikeMoment5ConflictValidityClarificationPrompt((m.content ?? '').trim())) {
+      lastClarificationIdx = i;
+      break;
+    }
+  }
+  if (lastClarificationIdx < 0) return false;
+  const after = messages.slice(lastClarificationIdx + 1);
+  const usersAfter = after.filter((m) => m.role === 'user' && !(m as { isWelcomeBack?: boolean }).isWelcomeBack);
+  return usersAfter.length === 0;
 }
 
 function looksLikeRepeatCueInAmbiguousReply(text: string): boolean {
@@ -4175,21 +4151,6 @@ function readStoredPendingGestureTts(): string | null {
 function setPendingWebSpeechGesturePair(ref: React.MutableRefObject<string | null>, text: string) {
   ref.current = text;
   pendingWebSpeechForGestureModule = text;
-  // #region agent log
-  fetch('http://127.0.0.1:7789/ingest/668e0bd5-3283-4492-9f48-e33846c18218', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json', 'X-Debug-Session-Id': 'c61a43' },
-    body: JSON.stringify({
-      sessionId: 'c61a43',
-      hypothesisId: 'H3',
-      location: 'AriaScreen.tsx:setPendingWebSpeechGesturePair',
-      message: 'pending_gesture_tts_queued',
-      data: { pendingLen: text.length, pendingPreview: text.slice(0, 140) },
-      timestamp: Date.now(),
-      runId: 'pre-fix',
-    }),
-  }).catch(() => {});
-  // #endregion
   try {
     if (typeof sessionStorage !== 'undefined') sessionStorage.setItem(WEB_GESTURE_TTS_STORAGE_KEY, text);
   } catch {
@@ -4602,6 +4563,8 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
   const recordingPeakMeteringRef = useRef<number | null>(null);
   /** Populated before `transcribeSafe` for Whisper session_logs (duration / size). */
   const transcribeBufferMetaRef = useRef<{ audio_duration_ms: number; buffer_size_bytes: number } | null>(null);
+  /** Web Whisper path: last analyzed recording length for `response_timings` when expo `timingRef` is unused. */
+  const lastUserTurnAudioDurationMsRef = useRef<number | null>(null);
   /** Time from audio session / stream ready through enforced delay until recording engine is initialized. */
   const recordingDelayMeasurementRef = useRef<RecordingDelayMeasurement | null>(null);
   /** Row created at interview start; completion updates this row instead of inserting a second one. */
@@ -4662,6 +4625,7 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
     moment5SpecificityRedirectIssuedRef.current = false;
     moment5ClientScoringMetaRef.current = null;
     deferredMoment4NarrativeRef.current = null;
+    lastUserTurnAudioDurationMsRef.current = null;
     resetScenarioCClientGatesOnly();
     scenarioAContemptProbeAskedRef.current = false;
     s2RepairProbeDeliveredRef.current = false;
@@ -5330,26 +5294,6 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
         .select('interview_completed, interview_passed, interview_reviewed_at, latest_attempt_id, is_alpha_tester')
         .eq('id', userId)
         .maybeSingle();
-      // #region agent log
-      fetch('http://127.0.0.1:7789/ingest/668e0bd5-3283-4492-9f48-e33846c18218', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'X-Debug-Session-Id': 'c61a43' },
-        body: JSON.stringify({
-          sessionId: 'c61a43',
-          runId: 'pre-fix',
-          hypothesisId: 'H2',
-          location: 'AriaScreen.tsx:checkInterviewStatus',
-          message: 'users_row_after_refresh_check',
-          data: {
-            hasError: !!error,
-            interviewCompleted: data?.interview_completed ?? null,
-            latestAttemptIdPresent: typeof data?.latest_attempt_id === 'string' && data.latest_attempt_id.length > 0,
-            interviewStatusBeforeBranch: interviewStatusRef.current,
-          },
-          timestamp: Date.now(),
-        }),
-      }).catch(() => {});
-      // #endregion
 
       /** Session email is reliable on cold start; `user` from useAuth can be null for a frame and caused PostInterview ↔ Aria loops for admin. */
       const isAdminEmail = isAmoraeaAdminConsoleEmail(sessionEmail ?? user?.email);
@@ -5392,26 +5336,6 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
           statusRef.current === 'scoring' ||
           isInterviewCompleteRef.current);
       if (scoringCommitInFlight) {
-        // #region agent log
-        fetch('http://127.0.0.1:7789/ingest/668e0bd5-3283-4492-9f48-e33846c18218', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json', 'X-Debug-Session-Id': 'c61a43' },
-          body: JSON.stringify({
-            sessionId: 'c61a43',
-            hypothesisId: 'UX-PREP',
-            location: 'AriaScreen.tsx:checkInterviewStatus',
-            message: 'hold_ui_during_scoring_commit',
-            data: {
-              preparing: interviewStatusRef.current === 'preparing_results',
-              statusScoring: statusRef.current === 'scoring',
-              interviewCompleteSession: isInterviewCompleteRef.current,
-              latestAttemptIdPresent:
-                typeof data?.latest_attempt_id === 'string' && data.latest_attempt_id.length > 0,
-            },
-            timestamp: Date.now(),
-          }),
-        }).catch(() => {});
-        // #endregion
           return;
       }
 
@@ -5442,24 +5366,6 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
           interviewStatusRef.current === 'preparing_results' ||
           statusRef.current === 'scoring'
         ) {
-          // #region agent log
-          fetch('http://127.0.0.1:7789/ingest/668e0bd5-3283-4492-9f48-e33846c18218', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json', 'X-Debug-Session-Id': 'e43434' },
-            body: JSON.stringify({
-              sessionId: 'e43434',
-              location: 'AriaScreen.tsx:checkInterviewStatus',
-              message: 'skip_not_started_while_client_scoring',
-              data: {
-                interviewCompleteSession: isInterviewCompleteRef.current,
-                preparing: interviewStatusRef.current === 'preparing_results',
-                statusScoring: statusRef.current === 'scoring',
-              },
-              timestamp: Date.now(),
-              hypothesisId: 'H_db_race',
-            }),
-          }).catch(() => {});
-          // #endregion
           return;
         }
         setInterviewStatus('not_started');
@@ -5647,28 +5553,6 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
         interviewStatusRef.current === 'preparing_results',
       sessionAttemptId: interviewSessionAttemptIdRef.current ?? undefined,
     });
-    // #region agent log
-    fetch('http://127.0.0.1:7789/ingest/668e0bd5-3283-4492-9f48-e33846c18218', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'X-Debug-Session-Id': 'e43434' },
-      body: JSON.stringify({
-        sessionId: 'e43434',
-        runId: 'post-fix',
-        hypothesisId: 'H-checkpoint-before-tts',
-        location: 'AriaScreen.tsx:saveInterviewProgressEffect',
-        message: 'saved_progress_snapshot',
-        data: {
-          status,
-          interviewStatus: interviewStatusRef.current,
-          completedScenarios: completed,
-          completedCount: completed.length,
-          currentScenario: getCurrentScenario(scoredScenariosRef.current),
-          userMessageCount: messages.filter((m) => m.role === 'user').length,
-        },
-        timestamp: Date.now(),
-      }),
-    }).catch(() => {});
-    // #endregion
   }, [messages, status, userId, isAdmin, scenarioScores, pendingCompletion]);
 
   /** Debounced sync of live transcript to `users.interview_transcript` so the admin panel can follow in-progress interviews (scenario checkpoints also update this). */
@@ -5702,26 +5586,6 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
   useEffect(() => {
     if (!userId) return;
     const resolvedFirstName = getInterviewUserFirstNameForPrompt(profile);
-    // #region agent log
-    fetch('http://127.0.0.1:7789/ingest/668e0bd5-3283-4492-9f48-e33846c18218', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'X-Debug-Session-Id': 'c61a43' },
-      body: JSON.stringify({
-        sessionId: 'c61a43',
-        runId: 'pre-fix',
-        hypothesisId: 'H12',
-        location: 'AriaScreen.tsx:profileFirstNameEffect',
-        message: 'profile_name_resolution',
-        data: {
-          hasProfile: !!profile,
-          hasBasicInfoFirstName: !!profile?.basicInfo?.firstName,
-          hasProfileName: !!profile?.name,
-          resolvedFirstName: resolvedFirstName || null,
-        },
-        timestamp: Date.now(),
-      }),
-    }).catch(() => {});
-    // #endregion
     const rtd = getSessionLogRuntime();
     writeSessionLog({
       userId,
@@ -5784,9 +5648,6 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
     const cleaned = stripControlTokens(rawText).trim();
     if (!cleaned) return;
     const scenario = detectActiveScenarioFromMessage(cleaned);
-    // #region agent log
-    fetch('http://127.0.0.1:7789/ingest/668e0bd5-3283-4492-9f48-e33846c18218',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'c61a43'},body:JSON.stringify({sessionId:'c61a43',runId:'pre-fix',hypothesisId:'H8',location:'AriaScreen.tsx:applyInterviewSpeechComplete:entry',message:'apply_interview_speech_complete_called',data:{hasScenario:!!scenario,detectedScenario:scenario?.label ?? null,currentPhase:interviewUiPhase,currentScenario:currentScenarioRef.current,hasReferenceScenario:!!referenceCardScenario},timestamp:Date.now()})}).catch(()=>{});
-    // #endregion
     if (scenario) {
       committedScenarioRef.current = scenario;
       setReferenceCardScenario(scenario);
@@ -5799,20 +5660,6 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
         committedScenarioRef.current = MOMENT_5_REFERENCE_SCENARIO;
         setReferenceCardScenario(MOMENT_5_REFERENCE_SCENARIO);
         setReferenceCardPrompt(null);
-        // #region agent log
-        fetch('http://127.0.0.1:7789/ingest/668e0bd5-3283-4492-9f48-e33846c18218', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json', 'X-Debug-Session-Id': 'e43434' },
-          body: JSON.stringify({
-            sessionId: 'e43434',
-            location: 'AriaScreen.tsx:applyInterviewSpeechComplete',
-            message: 'm5_modal_guard',
-            data: { m5Anchored, cleanedHasM5, cleanedPreview: cleaned.slice(0, 120) },
-            timestamp: Date.now(),
-            hypothesisId: 'H_apply_m5',
-          }),
-        }).catch(() => {});
-        // #endregion
       } else {
       const q = extractModalQuestionFromAssistantText(cleaned);
       if (q !== null && !isResumeOrScenarioReplayUiPrompt(q)) {
@@ -5945,59 +5792,12 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
     unlockWebAudioForAutoplay();
     /** Same unlock as "Tap the screen to begin" — avoids back-to-back pending_tts + tap_unlock (two taps). */
     setMobileWebTapToBeginDone(true);
-    // #region agent log
-    const _peekLen = (pendingWebSpeechForGestureRef.current ?? pendingWebSpeechForGestureModule ?? readStoredPendingGestureTts() ?? '').length;
-    fetch('http://127.0.0.1:7789/ingest/668e0bd5-3283-4492-9f48-e33846c18218', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'X-Debug-Session-Id': 'e70f17' },
-      body: JSON.stringify({
-        sessionId: 'e70f17',
-        location: 'AriaScreen.tsx:runWebGestureTtsFlush',
-        message: 'flush_entry',
-        data: {
-          hypothesisId: 'H5',
-          hasPendingBlob: hasPendingWebGestureBlobUrl(),
-          peekTextLen: _peekLen,
-          debugSource: debugSource ?? 'unknown',
-        },
-        timestamp: Date.now(),
-      }),
-    }).catch(() => {});
-    // #endregion
     const tryPlayed = await tryPlayPendingWebTtsAudioInUserGesture(
       () => {},
       () => clearPendingWebSpeechGesturePair(pendingWebSpeechForGestureRef),
       { source: 'turn' }
     );
-    // #region agent log
-    fetch('http://127.0.0.1:7789/ingest/668e0bd5-3283-4492-9f48-e33846c18218', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'X-Debug-Session-Id': 'e70f17' },
-      body: JSON.stringify({
-        sessionId: 'e70f17',
-        location: 'AriaScreen.tsx:runWebGestureTtsFlush',
-        message: 'tryPlayPending_result',
-        data: { hypothesisId: 'H5', tryPlayed },
-        timestamp: Date.now(),
-      }),
-    }).catch(() => {});
-    // #endregion
     if (tryPlayed) {
-      // #region agent log
-      fetch('http://127.0.0.1:7789/ingest/668e0bd5-3283-4492-9f48-e33846c18218', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'X-Debug-Session-Id': 'c61a43' },
-        body: JSON.stringify({
-          sessionId: 'c61a43',
-          hypothesisId: 'H4',
-          location: 'AriaScreen.tsx:runWebGestureTtsFlush',
-          message: 'flush_played_pending_blob',
-          data: { debugSource: debugSource ?? 'unknown' },
-          timestamp: Date.now(),
-          runId: 'pre-fix',
-        }),
-      }).catch(() => {});
-      // #endregion
       setWebDesktopPendingTtsGestureOverlay(false);
       webGestureTtsConsumedPressRef.current = true;
       if (webGestureConsumeClearTimeoutRef.current) {
@@ -6028,21 +5828,6 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
       webGestureConsumeClearTimeoutRef.current = null;
       webGestureTtsConsumedPressRef.current = false;
     }, 1800);
-    // #region agent log
-    fetch('http://127.0.0.1:7789/ingest/668e0bd5-3283-4492-9f48-e33846c18218', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'X-Debug-Session-Id': 'c61a43' },
-      body: JSON.stringify({
-        sessionId: 'c61a43',
-        hypothesisId: 'H3',
-        location: 'AriaScreen.tsx:runWebGestureTtsFlush',
-        message: 'flush_web_speech_text',
-        data: { flushPreview: t.slice(0, 140), flushLen: t.length, debugSource: debugSource ?? 'unknown' },
-        timestamp: Date.now(),
-        runId: 'pre-fix',
-      }),
-    }).catch(() => {});
-    // #endregion
     trySpeakWebSpeechInUserGesture(t, () => {});
     setWebDesktopPendingTtsGestureOverlay(false);
   }, []);
@@ -6050,36 +5835,10 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
   const ensureWebGestureFlushListener = useCallback(() => {
     if (Platform.OS !== 'web' || typeof window === 'undefined') return;
     if (webGestureFlushListenerAttachedRef.current) {
-      // #region agent log
-      fetch('http://127.0.0.1:7789/ingest/668e0bd5-3283-4492-9f48-e33846c18218', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'X-Debug-Session-Id': 'e70f17' },
-        body: JSON.stringify({
-          sessionId: 'e70f17',
-          location: 'AriaScreen.tsx:ensureWebGestureFlushListener',
-          message: 'ensure_skip_already_attached',
-          data: { hypothesisId: 'H1' },
-          timestamp: Date.now(),
-        }),
-      }).catch(() => {});
-      // #endregion
       return;
     }
     webGestureFlushListenerAttachedRef.current = true;
     const fn = () => {
-      // #region agent log
-      fetch('http://127.0.0.1:7789/ingest/668e0bd5-3283-4492-9f48-e33846c18218', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'X-Debug-Session-Id': 'e70f17' },
-        body: JSON.stringify({
-          sessionId: 'e70f17',
-          location: 'AriaScreen.tsx:ensureWebGestureFlushListener:fn',
-          message: 'window_pointerdown_before_flush',
-          data: { hypothesisId: 'H3' },
-          timestamp: Date.now(),
-        }),
-      }).catch(() => {});
-      // #endregion
       webGestureFlushListenerAttachedRef.current = false;
       webGestureFlushHandlerRef.current = null;
       window.removeEventListener('pointerdown', fn, { capture: true });
@@ -6087,19 +5846,6 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
     };
     webGestureFlushHandlerRef.current = fn;
     window.addEventListener('pointerdown', fn, { capture: true });
-    // #region agent log
-    fetch('http://127.0.0.1:7789/ingest/668e0bd5-3283-4492-9f48-e33846c18218', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'X-Debug-Session-Id': 'e70f17' },
-      body: JSON.stringify({
-        sessionId: 'e70f17',
-        location: 'AriaScreen.tsx:ensureWebGestureFlushListener',
-        message: 'listener_registered',
-        data: { hypothesisId: 'H1' },
-        timestamp: Date.now(),
-      }),
-    }).catch(() => {});
-    // #endregion
   }, [runWebGestureTtsFlush]);
 
   useEffect(() => {
@@ -6107,19 +5853,6 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
       if (Platform.OS !== 'web' || typeof window === 'undefined') return;
       const h = webGestureFlushHandlerRef.current;
       if (h) {
-        // #region agent log
-        fetch('http://127.0.0.1:7789/ingest/668e0bd5-3283-4492-9f48-e33846c18218', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json', 'X-Debug-Session-Id': 'e70f17' },
-          body: JSON.stringify({
-            sessionId: 'e70f17',
-            location: 'AriaScreen.tsx:gestureFlushUnmount',
-            message: 'cleanup_remove_listener',
-            data: { hypothesisId: 'H4' },
-            timestamp: Date.now(),
-          }),
-        }).catch(() => {});
-        // #endregion
         window.removeEventListener('pointerdown', h, { capture: true });
         webGestureFlushHandlerRef.current = null;
       }
@@ -6231,24 +5964,6 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
         if (!skipLastQuestionRef) {
           lastQuestionTextRef.current = text;
         }
-        // #region agent log
-        fetch('http://127.0.0.1:7789/ingest/668e0bd5-3283-4492-9f48-e33846c18218', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json', 'X-Debug-Session-Id': 'c61a43' },
-          body: JSON.stringify({
-            sessionId: 'c61a43',
-            location: 'AriaScreen.tsx:speakTextSafe:immediateWebPlaybackElement',
-            message: 'lastQuestionTextRef set (prefetched greeting path)',
-            data: {
-              hypothesisId: 'H6_prefetched_greeting_skipped_speak',
-              skipLastQuestionRef,
-              refLen: (lastQuestionTextRef.current ?? '').length,
-            },
-            timestamp: Date.now(),
-            runId: 'post-fix',
-          }),
-        }).catch(() => {});
-        // #endregion
         const telemetrySourceImmediate =
           telemetrySourceOpt ?? (interviewSpeechRole === 'assistant_response' ? 'turn' : 'other');
         const effectiveImmediateTtsTrigger:
@@ -6663,34 +6378,6 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
               }
               break;
             }
-            // #region agent log
-            if (Platform.OS === 'web' && wouldBePremature) {
-              fetch('http://127.0.0.1:7789/ingest/668e0bd5-3283-4492-9f48-e33846c18218', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json', 'X-Debug-Session-Id': 'e43434' },
-                body: JSON.stringify({
-                  sessionId: 'e43434',
-                  location: 'AriaScreen.tsx:speakTextSafe:webDurationVerify',
-                  message: 'tts_premature_gate',
-                  data: {
-                    hypothesisId: 'H_tab_hidden_skips_premature_retry',
-                    attemptIx: attemptIx + 1,
-                    tabThrottledDuringLine,
-                    wouldBePremature,
-                    effectivePremature: premature,
-                    actualTtsMs,
-                    expectedMs: wall.expectedMs,
-                    ratio:
-                      ratioActualToExpected != null
-                        ? Math.round(1000 * ratioActualToExpected) / 1000
-                        : null,
-                  },
-                  timestamp: Date.now(),
-                  runId: 'post-fix-verify',
-                }),
-              }).catch(() => {});
-            }
-            // #endregion
             if (userId && premature) {
               const rtpInc = getSessionLogRuntime();
               writeAudioSessionLog({
@@ -6933,46 +6620,6 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
         }
       } catch (err) {
         if (isWebTtsRequiresUserGestureError(err)) {
-          // #region agent log
-          fetch('http://127.0.0.1:7789/ingest/668e0bd5-3283-4492-9f48-e33846c18218', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json', 'X-Debug-Session-Id': 'e70f17' },
-            body: JSON.stringify({
-              sessionId: 'e70f17',
-              location: 'AriaScreen.tsx:speakTextSafe',
-              message: 'gesture_error_caught',
-              data: {
-                hypothesisId: 'H2',
-                instanceofOk: err instanceof WebTtsRequiresUserGestureError,
-                duckOk: isWebTtsRequiresUserGestureError(err),
-                errName: err instanceof Error ? err.name : 'unknown',
-              },
-              timestamp: Date.now(),
-            }),
-          }).catch(() => {});
-          // #endregion
-          // #region agent log
-          fetch('http://127.0.0.1:7789/ingest/668e0bd5-3283-4492-9f48-e33846c18218', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json', 'X-Debug-Session-Id': 'c61a43' },
-            body: JSON.stringify({
-              sessionId: 'c61a43',
-              location: 'AriaScreen.tsx:speakTextSafe',
-              message: 'gesture_overlay_trigger',
-              data: {
-                hypothesisId: 'H6',
-                isWebInterviewAudioUnlocked: isWebInterviewAudioUnlocked(),
-                deferGesture: webSpeechShouldDeferToUserGesture(),
-                maxTouchPoints:
-                  Platform.OS === 'web' && typeof navigator !== 'undefined'
-                    ? navigator.maxTouchPoints
-                    : null,
-              },
-              timestamp: Date.now(),
-              runId: 'debug-desktop-tap',
-            }),
-          }).catch(() => {});
-          // #endregion
           setPendingWebSpeechGesturePair(pendingWebSpeechForGestureRef, err.text);
           ensureWebGestureFlushListener();
           /** Mobile Safari/Android web block async TTS without a gesture — same as desktop, show an explicit tap/click overlay (not only a one-time window listener). */
@@ -6992,9 +6639,6 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
           }
         }
       } finally {
-        // #region agent log
-        fetch('http://127.0.0.1:7789/ingest/668e0bd5-3283-4492-9f48-e33846c18218',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'c61a43'},body:JSON.stringify({sessionId:'c61a43',runId:'pre-fix',hypothesisId:'H5',location:'AriaScreen.tsx:speakTextSafe:finally',message:'speak_text_safe_finally_reached',data:{voiceStateBeforeIdleSet:voiceStateRef.current,markIntro,userIdPresent:!!userId},timestamp:Date.now()})}).catch(()=>{});
-        // #endregion
         if (userId) {
           setTtsPlaybackActive(false);
           ttsLineInFlightRef.current = false;
@@ -7081,26 +6725,6 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
         }
           gestureContextLostAtRef.current = { atMs: Date.now(), reason: 'tab_visibility_change' };
           pauseWebInterviewHtmlAudioForDocumentHidden();
-          // #region agent log
-          if (isWebInterviewPlaybackSurfaceActive()) {
-            fetch('http://127.0.0.1:7789/ingest/668e0bd5-3283-4492-9f48-e33846c18218', {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json', 'X-Debug-Session-Id': 'c61a43' },
-              body: JSON.stringify({
-                sessionId: 'c61a43',
-                location: 'AriaScreen.tsx:docVisibility:hidden',
-                message: 'tab_hidden_html_paused_web_surface_still_active',
-                data: {
-                  hypothesisId: 'H21',
-                  interviewStatus: interviewStatusRef.current,
-                  ttsLineInFlight: ttsLineInFlightRef.current,
-                },
-                timestamp: Date.now(),
-                runId: 'static-debug-pre',
-              }),
-            }).catch(() => {});
-          }
-          // #endregion
         }
       } else if (document.visibilityState === 'visible' && docVisibilityWasHiddenRef.current) {
         docVisibilityWasHiddenRef.current = false;
@@ -7163,24 +6787,6 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
       } else if (e.error === 'aborted') {
         // User or we stopped; ignore
       } else if (e.error === 'network' || e.error === 'no-speech') {
-        // #region agent log
-        fetch('http://127.0.0.1:7789/ingest/668e0bd5-3283-4492-9f48-e33846c18218', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json', 'X-Debug-Session-Id': 'c61a43' },
-          body: JSON.stringify({
-            sessionId: 'c61a43',
-            location: 'AriaScreen.tsx:SpeechRecognition:onerror',
-            message: 'web_speech_recognition_error',
-            data: {
-              hypothesisId: 'H3',
-              error: e.error,
-              useMediaRecorderPath,
-            },
-            timestamp: Date.now(),
-            runId: 'speech-detect-debug',
-          }),
-        }).catch(() => {});
-        // #endregion
         setMicWarning(
           e.error === 'network'
             ? 'Connection problem. Check your internet and try again.'
@@ -7364,32 +6970,6 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
           void scoreFn(completedScenarioNum, transcript as { role: string; content: string }[]);
         }
       }
-      // #region agent log
-      fetch('http://127.0.0.1:7789/ingest/668e0bd5-3283-4492-9f48-e33846c18218', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'X-Debug-Session-Id': 'e43434' },
-        body: JSON.stringify({
-          sessionId: 'e43434',
-          runId: 'post-fix',
-          hypothesisId: 'H-notify-scenario',
-          location: 'AriaScreen.tsx:notifyScenarioStarted',
-          message: 'scenario_boundary_persisted',
-          data: {
-            scenario,
-            resumeToPersist,
-            hadPersisted: !!persisted,
-            usedSnapshot: !!messagesSnapshot,
-            transcriptLen: transcript.length,
-            messagesForSaveLen: messagesForSave.length,
-            wouldEraseMeaningfulInterview,
-            allowShrink,
-            completed,
-            hasAttemptId: !!attemptId,
-          },
-          timestamp: Date.now(),
-        }),
-      }).catch(() => {});
-      // #endregion
     },
     [userId, isAdmin]
   );
@@ -8142,27 +7722,6 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
     const routeChangedDuringRecordingSnap = routeChangedDuringRecordingRef.current;
     routeChangedDuringRecordingRef.current = false;
     let reentryTypeForLogging: 'repeat_requested' | 'continue_requested' | 'direct_answer' | null = null;
-    // #region agent log
-    fetch('http://127.0.0.1:7789/ingest/668e0bd5-3283-4492-9f48-e33846c18218', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'X-Debug-Session-Id': 'c61a43' },
-      body: JSON.stringify({
-        sessionId: 'c61a43',
-        runId: 'pre-fix',
-        hypothesisId: 'H13',
-        location: 'AriaScreen.tsx:processUserSpeech',
-        message: 'process_user_speech_name_snapshot',
-        data: {
-          spokenText: trimmed.slice(0, 120),
-          resumeGatePending: resumeRepeatChoicePendingRef.current,
-          participantFirstNameForSpoken: participantFirstNameForSpoken || null,
-          profileHasBasicInfoFirstName: !!profile?.basicInfo?.firstName,
-          profileHasName: !!profile?.name,
-        },
-        timestamp: Date.now(),
-      }),
-    }).catch(() => {});
-    // #endregion
     if (userId) {
       const rtd = getSessionLogRuntime();
       writeSessionLog({
@@ -8190,47 +7749,6 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
         lastAssistantPreview: (resumeLastAssistantTextRef.current ?? '').slice(0, 300),
         userPreview: trimmed.slice(0, 300),
       });
-      // #region agent log
-      fetch('http://127.0.0.1:7789/ingest/668e0bd5-3283-4492-9f48-e33846c18218', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'X-Debug-Session-Id': '7605c3' },
-        body: JSON.stringify({
-          sessionId: '7605c3',
-          runId: 'resume-debug',
-          hypothesisId: 'H7_RESUME_GATE_REPLAY,H8_DIRECT_ANSWER_MISCLASSIFIED',
-          location: 'AriaScreen.tsx:processUserSpeech:resume_gate_entry',
-          message: 'scenario_a_resume_gate_entry',
-          data: {
-            userCoverageDetail: debugScenarioAQ1ContemptProbeCoverageDetail(trimmed),
-            lastAssistantLooksLikeContemptProbe: looksLikeScenarioAContemptProbeQuestion(
-              resumeLastAssistantTextRef.current ?? ''
-            ),
-            lastAssistantPreview: (resumeLastAssistantTextRef.current ?? '').slice(0, 300),
-            userPreview: trimmed.slice(0, 300),
-          },
-          timestamp: Date.now(),
-        }),
-      }).catch(() => {});
-      // #endregion
-      // #region agent log
-      fetch('http://127.0.0.1:7789/ingest/668e0bd5-3283-4492-9f48-e33846c18218', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'X-Debug-Session-Id': 'c61a43' },
-        body: JSON.stringify({
-          sessionId: 'c61a43',
-          runId: 'pre-fix',
-          hypothesisId: 'H1',
-          location: 'AriaScreen.tsx:processUserSpeech',
-          message: 'resume_gate_entry',
-          data: {
-            spokenText: trimmed.slice(0, 120),
-            pendingBefore: true,
-            lastAssistantPreview: (resumeLastAssistantTextRef.current ?? '').slice(0, 120),
-          },
-          timestamp: Date.now(),
-        }),
-      }).catch(() => {});
-      // #endregion
       resumeRepeatChoicePendingRef.current = false;
       let intent = classifyResumeRepeatIntent(trimmed);
       const resumeCueWordCount = countSpokenWords(trimmed);
@@ -8257,60 +7775,7 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
           resumeLastAssistantTextRef.current ?? ''
         ),
       });
-      // #region agent log
-      fetch('http://127.0.0.1:7789/ingest/668e0bd5-3283-4492-9f48-e33846c18218', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'X-Debug-Session-Id': '7605c3' },
-        body: JSON.stringify({
-          sessionId: '7605c3',
-          runId: 'resume-debug',
-          hypothesisId: 'H7_RESUME_GATE_REPLAY,H8_DIRECT_ANSWER_MISCLASSIFIED',
-          location: 'AriaScreen.tsx:processUserSpeech:resume_gate_classification',
-          message: 'scenario_a_resume_gate_classification',
-          data: {
-            intent,
-            directAnswer,
-            inferredRepeatFromAmbiguous,
-            resumeCueWordCount,
-            lastAssistantLooksLikeContemptProbe: looksLikeScenarioAContemptProbeQuestion(
-              resumeLastAssistantTextRef.current ?? ''
-            ),
-          },
-          timestamp: Date.now(),
-        }),
-      }).catch(() => {});
-      // #endregion
-      // #region agent log
-      fetch('http://127.0.0.1:7789/ingest/668e0bd5-3283-4492-9f48-e33846c18218', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'X-Debug-Session-Id': 'c61a43' },
-        body: JSON.stringify({
-          sessionId: 'c61a43',
-          runId: 'pre-fix',
-          hypothesisId: 'H2',
-          location: 'AriaScreen.tsx:processUserSpeech',
-          message: 'resume_gate_classification',
-          data: { intent, directAnswer, inferredRepeatFromAmbiguous },
-          timestamp: Date.now(),
-        }),
-      }).catch(() => {});
-      // #endregion
       if (intent === 'repeat' || inferredRepeatFromAmbiguous) {
-        // #region agent log
-        fetch('http://127.0.0.1:7789/ingest/668e0bd5-3283-4492-9f48-e33846c18218', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json', 'X-Debug-Session-Id': 'c61a43' },
-          body: JSON.stringify({
-            sessionId: 'c61a43',
-            runId: 'pre-fix',
-            hypothesisId: 'H3',
-            location: 'AriaScreen.tsx:processUserSpeech',
-            message: 'resume_gate_branch_repeat',
-            data: {},
-            timestamp: Date.now(),
-          }),
-        }).catch(() => {});
-        // #endregion
         reentryTypeForLogging = 'repeat_requested';
         if (userId) {
           const r = getSessionLogRuntime();
@@ -8347,21 +7812,6 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
           });
         }
       } else if (intent === 'continue') {
-        // #region agent log
-        fetch('http://127.0.0.1:7789/ingest/668e0bd5-3283-4492-9f48-e33846c18218', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json', 'X-Debug-Session-Id': 'c61a43' },
-          body: JSON.stringify({
-            sessionId: 'c61a43',
-            runId: 'pre-fix',
-            hypothesisId: 'H4',
-            location: 'AriaScreen.tsx:processUserSpeech',
-            message: 'resume_gate_branch_continue',
-            data: {},
-            timestamp: Date.now(),
-          }),
-        }).catch(() => {});
-        // #endregion
         reentryTypeForLogging = 'continue_requested';
         if (userId) {
           const r = getSessionLogRuntime();
@@ -8454,23 +7904,40 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
       }
     }
 
-    if (ALPHA_MODE && timingRef.current.recordingStartTime != null) {
-      timingRef.current.recordingEndTime = Date.now();
-      const qEnd = timingRef.current.questionEndTime ?? timingRef.current.recordingStartTime;
-      const latency = timingRef.current.recordingStartTime - qEnd;
-      const duration = (timingRef.current.recordingEndTime ?? 0) - timingRef.current.recordingStartTime;
+    if (isInterviewAppRoute) {
+      let latencyMs = 0;
+      let durationMs = 0;
+      if (timingRef.current.recordingStartTime != null) {
+        timingRef.current.recordingEndTime = Date.now();
+        const qEnd = timingRef.current.questionEndTime ?? timingRef.current.recordingStartTime;
+        latencyMs = Math.max(0, timingRef.current.recordingStartTime - qEnd);
+        durationMs = Math.max(0, (timingRef.current.recordingEndTime ?? Date.now()) - timingRef.current.recordingStartTime);
+        timingRef.current.recordingStartTime = null;
+        timingRef.current.questionEndTime = null;
+        timingRef.current.recordingEndTime = null;
+      } else {
+        const r = getSessionLogRuntime();
+        const deliveredAt = r.lastQuestionDeliveredAt;
+        if (deliveredAt) {
+          const t = Date.parse(deliveredAt);
+          if (!Number.isNaN(t)) latencyMs = Math.max(0, Date.now() - t);
+        }
+        const audioDur = lastUserTurnAudioDurationMsRef.current;
+        if (typeof audioDur === 'number' && Number.isFinite(audioDur) && audioDur > 0) {
+          durationMs = Math.round(audioDur);
+        }
+      }
+      lastUserTurnAudioDurationMsRef.current = null;
       const wordCount = trimmed.split(/\s+/).filter(Boolean).length;
       const scenario = getCurrentScenario(scoredScenariosRef.current);
       responseTimingsRef.current.push({
         question_id: `q_${responseTimingsRef.current.length + 1}`,
         scenario: scenario ?? null,
         question_text: lastQuestionTextRef.current,
-        latency_ms: Math.max(0, latency),
-        duration_ms: Math.max(0, duration),
+        latency_ms: latencyMs,
+        duration_ms: durationMs,
         word_count: wordCount,
       });
-      timingRef.current.recordingStartTime = null;
-      timingRef.current.questionEndTime = null;
     }
 
     // Admin secret pass: skip interview and auto-approve for configured email (onboarding only)
@@ -9188,6 +8655,8 @@ The participant **confirmed** skipping after the skip confirmation prompt. In **
     // Track if user shared a personal example (response to personal-opening question that isn't a decline)
     const lastAssistant = [...messagesToUse].reverse().find((m) => m.role === 'assistant');
     const lastAssistantContent = lastAssistant?.content ?? '';
+    /** Last real interviewer line (excludes resume welcome-back / score cards) — use for Moment 5 probe sequencing so tab-return UI lines do not mask scripted prompts. */
+    const lastInterviewerContent = extractLastInterviewerMessage(messagesToUse) ?? '';
     const answeringAfterMoment4SpecificityProbe =
       currentInterviewMomentRef.current === 4 &&
       moment4ExpectingPostSpecificityUserTurnRef.current &&
@@ -9229,31 +8698,6 @@ The participant **confirmed** skipping after the skip confirmation prompt. In **
       isRepairRefusalProbeAssistantLine(lastAssistantContent) &&
       (currentInterviewMomentRef.current === 3 ||
         (currentScenarioRef.current === 3 && !personalHandoffInjectedRef.current));
-    // #region agent log
-    if (currentScenarioRef.current === 3 && !personalHandoffInjectedRef.current) {
-      fetch('http://127.0.0.1:7789/ingest/668e0bd5-3283-4492-9f48-e33846c18218', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'X-Debug-Session-Id': 'c61a43' },
-        body: JSON.stringify({
-          sessionId: 'c61a43',
-          location: 'AriaScreen.tsx:user_send_scenario3',
-          message: 'cq2_reply_detection',
-          hypothesisId: 'H2',
-          data: {
-            replyingToScenarioCQ2,
-            replyingToScenarioCRepairRefusalProbe,
-            cq2PromptMatches,
-            moment: currentInterviewMomentRef.current,
-            scenario: currentScenarioRef.current,
-            personalHandoffInjected: personalHandoffInjectedRef.current,
-            lastAsstIsCQ2: isScenarioCQ2Prompt(lastAssistantContent),
-            lastAssistantPreview: lastAssistantContent.slice(0, 320),
-          },
-          timestamp: Date.now(),
-        }),
-      }).catch(() => {});
-    }
-    // #endregion
     const relationshipEval = evaluateMoment4RelationshipType(trimmed);
     const moment4ThresholdHintInAnswer = hasCommitmentThresholdSignal(trimmed);
     const lastAssistantLooksLikeMoment4Grudge = looksLikeMoment4GrudgePrompt(lastAssistantContent);
@@ -9374,42 +8818,6 @@ The participant **confirmed** skipping after the skip confirmation prompt. In **
     const m5HandoffAfterThresholdAnswer =
       moment4ThresholdDeliveredInTranscript &&
       isAnsweringFirstUserTurnAfterMoment4Threshold(priorTranscriptBeforeThisUserTurn);
-    // #region agent log
-    if (currentInterviewMomentRef.current === 4) {
-      fetch('http://127.0.0.1:7789/ingest/668e0bd5-3283-4492-9f48-e33846c18218', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'X-Debug-Session-Id': 'e43434' },
-        body: JSON.stringify({
-          sessionId: 'e43434',
-          runId: 'm4m5-debug',
-          hypothesisId: 'H1-H3',
-          location: 'AriaScreen.tsx:processUserSpeech:m5_handoff_eval',
-          message: 'm4_to_m5_gate',
-          data: {
-            currentMoment: currentInterviewMomentRef.current,
-            m5HandoffAfterThresholdAnswer,
-            moment4ThresholdDeliveredInTranscript,
-            moment4ThresholdProbeAsked: moment4ThresholdProbeAskedRef.current,
-            transcriptHasThreshold: transcriptIncludesMoment4ThresholdAssistant(priorTranscriptBeforeThisUserTurn),
-            firstUserTurnAfterThreshold: isAnsweringFirstUserTurnAfterMoment4Threshold(priorTranscriptBeforeThisUserTurn),
-            moment5Delivered: moment5QuestionDeliveredRef.current,
-            moment5DeliveryInFlight: moment5QuestionDeliveryInFlightRef.current,
-            priorTranscriptAlreadyHasM5Primary,
-            moment4ExpectingPostSpec: moment4ExpectingPostSpecificityUserTurnRef.current,
-            isInterviewAppRoute,
-            isAdmin,
-            status,
-            closingQuestionPending,
-            waitingClosing: waitingForClosingAdditionRef.current,
-            priorTranscriptLen: priorTranscriptBeforeThisUserTurn.length,
-            lastAssistantPreview: lastAssistantContent.slice(0, 200),
-            userPreview: trimmed.slice(0, 120),
-          },
-          timestamp: Date.now(),
-        }),
-      }).catch(() => {});
-    }
-    // #endregion
     if (
       isInterviewAppRoute &&
       !isAdmin &&
@@ -9423,21 +8831,6 @@ The participant **confirmed** skipping after the skip confirmation prompt. In **
       !priorTranscriptAlreadyHasM5Primary &&
       !moment4ExpectingPostSpecificityUserTurnRef.current
     ) {
-      // #region agent log
-      fetch('http://127.0.0.1:7789/ingest/668e0bd5-3283-4492-9f48-e33846c18218', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'X-Debug-Session-Id': 'e43434' },
-        body: JSON.stringify({
-          sessionId: 'e43434',
-          runId: 'm4m5-debug',
-          hypothesisId: 'H3',
-          location: 'AriaScreen.tsx:processUserSpeech:m5_inject_fired',
-          message: 'm5_client_inject_executing',
-          data: { interviewSessionId: interviewSessionIdRef.current },
-          timestamp: Date.now(),
-        }),
-      }).catch(() => {});
-      // #endregion
       void remoteLog('[M5_QUESTION_INJECT]', { interviewSessionId: interviewSessionIdRef.current });
       moment5QuestionDeliveryInFlightRef.current = true;
       const m5BundleRaw = buildMoment4ThresholdAnswerToMoment5Bundle(
@@ -9502,33 +8895,11 @@ The participant **confirmed** skipping after the skip confirmation prompt. In **
           pendingCompletion: pendingCompletion || interviewStatusRef.current === 'preparing_results',
           sessionAttemptId: interviewSessionAttemptIdRef.current ?? priorLocal?.sessionAttemptId,
           attemptNumber: priorLocal?.attemptNumber ?? 1,
+          moment_5_clarification_fired: moment5ConflictValidityClarificationIssuedRef.current,
         };
         if (shouldSaveToStorage(merged.messages, merged.scenariosCompleted, merged.currentScenario)) {
           await saveInterviewToStorage(userId, merged);
         }
-        // #region agent log
-        fetch('http://127.0.0.1:7789/ingest/668e0bd5-3283-4492-9f48-e33846c18218', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json', 'X-Debug-Session-Id': 'e43434' },
-          body: JSON.stringify({
-            sessionId: 'e43434',
-            runId: 'post-fix',
-            hypothesisId: 'H-m5-persist-merge',
-            location: 'AriaScreen.tsx:processUserSpeech:m5_checkpoint_flush',
-            message: 'm5_messages_persisted_before_tts',
-            data: {
-              persistedLen: persistedMsgs.length,
-              persistedHasM5Anchor: persistedMsgs.some((m) =>
-                m.role === 'assistant' ? transcriptAssistantContainsMoment5PrimaryConflictQuestion(m.content) : false,
-              ),
-              hadPriorLocal: !!priorLocal,
-              sessionAttemptIdKept: !!(interviewSessionAttemptIdRef.current ?? priorLocal?.sessionAttemptId),
-              saveRan: shouldSaveToStorage(merged.messages, merged.scenariosCompleted, merged.currentScenario),
-            },
-            timestamp: Date.now(),
-          }),
-        }).catch(() => {});
-        // #endregion
       }
       try {
         await speakTextSafe(m5BundleSpoken, ASSISTANT_INTERVIEW_SPEECH);
@@ -9549,11 +8920,33 @@ The participant **confirmed** skipping after the skip confirmation prompt. In **
     if (
       currentInterviewMomentRef.current === 5 &&
       moment5QuestionDeliveredRef.current &&
-      !looksLikeMoment4ThresholdQuestion(lastAssistantContent) &&
-      !looksLikeMoment4GrudgePrompt(lastAssistantContent) &&
-      !looksLikeMoment4SpecificityFollowUpPrompt(lastAssistantContent)
+      !looksLikeMoment4ThresholdQuestion(lastInterviewerContent) &&
+      !looksLikeMoment4GrudgePrompt(lastInterviewerContent) &&
+      !looksLikeMoment4SpecificityFollowUpPrompt(lastInterviewerContent)
     ) {
       moment5PostPromptUserTurnCountRef.current += 1;
+    }
+
+    /** Resume / ref desync: transcript may already contain the client specificity redirect while the ref is still false. */
+    if (currentInterviewMomentRef.current === 5 && !moment5SpecificityRedirectIssuedRef.current) {
+      const redirectAlreadyInTranscript = messagesToUse.some(
+        (m) =>
+          m.role === 'assistant' &&
+          !(m as { isWelcomeBack?: boolean }).isWelcomeBack &&
+          looksLikeMoment5SpecificityRedirectPrompt((m as { content?: string }).content ?? ''),
+      );
+      if (redirectAlreadyInTranscript) moment5SpecificityRedirectIssuedRef.current = true;
+    }
+
+    /** Resume / ref desync: persisted flag or transcript — do not rely on last-assistant alone (welcome-back may follow clarification). */
+    if (currentInterviewMomentRef.current === 5 && !moment5ConflictValidityClarificationIssuedRef.current) {
+      const clarificationAlreadyInTranscript = messagesToUse.some(
+        (m) =>
+          m.role === 'assistant' &&
+          !(m as { isWelcomeBack?: boolean }).isWelcomeBack &&
+          looksLikeMoment5ConflictValidityClarificationPrompt((m as { content?: string }).content ?? ''),
+      );
+      if (clarificationAlreadyInTranscript) moment5ConflictValidityClarificationIssuedRef.current = true;
     }
 
     const moment5AccountabilityProbeCandidate =
@@ -9565,56 +8958,32 @@ The participant **confirmed** skipping after the skip confirmation prompt. In **
       currentInterviewMomentRef.current === 5 &&
       moment5QuestionDeliveredRef.current &&
       !moment5AccountabilityProbeFiredRef.current &&
-      !looksLikeMoment5AccountabilityProbeAssistantPrompt(lastAssistantContent) &&
-      (isMoment5AssistantAnchor(lastAssistantContent) ||
-        looksLikeMoment5SpecificityRedirectPrompt(lastAssistantContent) ||
-        looksLikeMoment5ConflictValidityClarificationPrompt(lastAssistantContent));
+      !looksLikeMoment5AccountabilityProbeAssistantPrompt(lastInterviewerContent) &&
+      (isMoment5AssistantAnchor(lastInterviewerContent) ||
+        looksLikeMoment5SpecificityRedirectPrompt(lastInterviewerContent) ||
+        looksLikeMoment5ConflictValidityClarificationPrompt(lastInterviewerContent));
     const moment5AccountabilityEval = evaluateMoment5AccountabilityProbe(trimmed);
     const moment5NarrativeConcrete = moment5PersonalNarrativeHasConcreteAnchor(trimmed);
     const moment5AnsweringAfterSpecificityRedirect =
-      looksLikeMoment5SpecificityRedirectPrompt(lastAssistantContent);
+      looksLikeMoment5SpecificityRedirectPrompt(lastInterviewerContent);
     const moment5AnsweringAfterConflictValidityClarification =
-      looksLikeMoment5ConflictValidityClarificationPrompt(lastAssistantContent);
+      looksLikeMoment5ConflictValidityClarificationPrompt(lastInterviewerContent) ||
+      isFirstUserTurnAfterMoment5ConflictValidityClarification(messagesToUse);
     const moment5LowConflictValidity = moment5ConflictValidityIsLow(trimmed);
     const moment5AddsTensionDetailAfterClarification =
       moment5AnsweringAfterConflictValidityClarification && moment5ResponseAddsTensionDetail(trimmed);
     const moment5ConfirmedLowConflictValidity =
       moment5AnsweringAfterConflictValidityClarification && !moment5AddsTensionDetailAfterClarification;
 
+    /** Specificity redirect was issued; second answer still abstract — fire accountability probe once (not a second redirect). */
+    const moment5ForcedAbstractFollowupAccountabilityProbe =
+      moment5AnsweringAfterSpecificityRedirect &&
+      moment5SpecificityRedirectIssuedRef.current &&
+      !moment5NarrativeConcrete &&
+      moment5ResponseIsAbstract(trimmed) &&
+      moment5AccountabilityEval.reason !== 'decline_or_vague_evade';
+
     if (currentInterviewMomentRef.current === 5 && moment5QuestionDeliveredRef.current) {
-      // #region agent log
-      fetch('http://127.0.0.1:7789/ingest/668e0bd5-3283-4492-9f48-e33846c18218', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'X-Debug-Session-Id': 'e43434' },
-        body: JSON.stringify({
-          sessionId: 'e43434',
-          runId: 'm5-anchor-debug',
-          hypothesisId: 'H1_runtime_branch_mismatch',
-          location: 'AriaScreen.tsx:processUserSpeech:moment5_gate',
-          message: 'm5_gate_snapshot',
-          data: {
-            versionTag: 'm5-anchor-debug-v2',
-            candidate: moment5AccountabilityProbeCandidate,
-            shouldProbe: moment5AccountabilityEval.shouldProbe,
-            probeReason: moment5AccountabilityEval.reason,
-            accountability_probe_self_reference_detected:
-              moment5AccountabilityEval.selfReference.accountability_probe_self_reference_detected,
-            self_reference_type: moment5AccountabilityEval.selfReference.self_reference_type,
-            moment5NarrativeConcrete,
-            moment5AnsweringAfterSpecificityRedirect,
-            moment5AnsweringAfterConflictValidityClarification,
-            moment5LowConflictValidity,
-            moment5AddsTensionDetailAfterClarification,
-            conflictValidityClarificationIssued: moment5ConflictValidityClarificationIssuedRef.current,
-            specificityRedirectIssued: moment5SpecificityRedirectIssuedRef.current,
-            wordCount: countInterviewWords(trimmed),
-            userPreview: trimmed.slice(0, 220),
-            lastAssistantPreview: lastAssistantContent.slice(0, 180),
-          },
-          timestamp: Date.now(),
-        }),
-      }).catch(() => {});
-      // #endregion
       void remoteLog('[M5_ACCOUNTABILITY_SELF_REFERENCE_EVAL]', {
         interviewSessionId: interviewSessionIdRef.current,
         should_probe: moment5AccountabilityEval.shouldProbe,
@@ -9622,9 +8991,27 @@ The participant **confirmed** skipping after the skip confirmation prompt. In **
         accountability_probe_self_reference_detected:
           moment5AccountabilityEval.selfReference.accountability_probe_self_reference_detected,
         self_reference_type: moment5AccountabilityEval.selfReference.self_reference_type,
+        moment_5_clarification_fired: moment5ConflictValidityClarificationIssuedRef.current,
         wordCount: countInterviewWords(trimmed),
         preview: trimmed.slice(0, 200),
       });
+      if (userId) {
+        const r = getSessionLogRuntime();
+        writeSessionLog({
+          userId,
+          attemptId: r.attemptId,
+          eventType: 'moment_5_session_state',
+          eventData: {
+            moment_number: 5,
+            moment_5_clarification_fired: moment5ConflictValidityClarificationIssuedRef.current,
+            accountability_probe_fired: moment5AccountabilityProbeFiredRef.current,
+            should_probe: moment5AccountabilityEval.shouldProbe,
+            probe_reason: moment5AccountabilityEval.reason,
+            answering_after_conflict_validity_clarification: moment5AnsweringAfterConflictValidityClarification,
+          },
+          platform: r.platform,
+        });
+      }
     }
 
     if (moment5AccountabilityProbeCandidate && moment5ConfirmedLowConflictValidity) {
@@ -9656,6 +9043,7 @@ The participant **confirmed** skipping after the skip confirmation prompt. In **
       };
       void remoteLog('[M5_CONFLICT_VALIDITY_CLARIFICATION_ISSUED]', {
         interviewSessionId: interviewSessionIdRef.current,
+        moment_5_clarification_fired: true,
         wordCount: countInterviewWords(trimmed),
         preview: trimmed.slice(0, 200),
       });
@@ -9665,41 +9053,103 @@ The participant **confirmed** skipping after the skip confirmation prompt. In **
         scenarioNumber: resolveAssistantScenarioNumber(MOMENT_5_CONFLICT_VALIDITY_CLARIFICATION_TEXT, messagesToUse),
       };
       setMessages([...messagesToUse, clarificationMsg]);
+      if (userId && !isAdmin && status === 'active') {
+        const persistedMsgs = [...messagesToUse, clarificationMsg].filter(
+          (m) => !(m as { isScoreCard?: boolean }).isScoreCard && !(m as { isWelcomeBack?: boolean }).isWelcomeBack,
+        );
+        const completed = Array.from(scoredScenariosRef.current);
+        const scenarioScoresPayload: Record<
+          number,
+          { pillarScores: Record<string, number | null>; pillarConfidence: Record<string, string>; keyEvidence: Record<string, string>; scenarioName?: string }
+        > = {};
+        [1, 2, 3].forEach((n) => {
+          const s = scenarioScoresRef.current[n];
+          if (s) {
+            scenarioScoresPayload[n] = {
+              pillarScores: s.pillarScores,
+              pillarConfidence: s.pillarConfidence,
+              keyEvidence: s.keyEvidence,
+              scenarioName: s.scenarioName,
+            };
+          }
+        });
+        const priorLocal = await loadInterviewFromStorage(userId);
+        const merged = mergeInterviewStoragePayload(priorLocal, {
+          messages: persistedMsgs,
+          scenariosCompleted: completed,
+          scenarioScores: { ...(priorLocal?.scenarioScores ?? {}), ...scenarioScoresPayload },
+          currentScenario: getCurrentScenario(scoredScenariosRef.current),
+          resumeActiveScenario: resumeActiveScenarioRef.current,
+          pendingCompletion: pendingCompletion || interviewStatusRef.current === 'preparing_results',
+          sessionAttemptId: interviewSessionAttemptIdRef.current ?? priorLocal?.sessionAttemptId,
+          attemptNumber: priorLocal?.attemptNumber ?? 1,
+          moment_5_clarification_fired: true,
+        });
+        if (shouldSaveToStorage(merged.messages, merged.scenariosCompleted, merged.currentScenario)) {
+          await saveInterviewToStorage(userId, merged);
+        }
+      }
       await speakTextSafe(MOMENT_5_CONFLICT_VALIDITY_CLARIFICATION_TEXT, ASSISTANT_INTERVIEW_SPEECH);
       setVoiceState('idle');
       setIsWaiting(false);
       return;
     }
 
-    if (moment5AccountabilityProbeCandidate && moment5AccountabilityEval.shouldProbe && !moment5ConfirmedLowConflictValidity) {
-      if (!moment5NarrativeConcrete && !moment5AnsweringAfterSpecificityRedirect && !moment5SpecificityRedirectIssuedRef.current) {
-        // #region agent log
-        fetch('http://127.0.0.1:7789/ingest/668e0bd5-3283-4492-9f48-e33846c18218', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json', 'X-Debug-Session-Id': 'e43434' },
-          body: JSON.stringify({
-            sessionId: 'e43434',
-            runId: 'm5-anchor-debug',
-            hypothesisId: 'H3_redirect_branch_taken',
-            location: 'AriaScreen.tsx:processUserSpeech:moment5_redirect_branch',
-            message: 'm5_specificity_redirect_path',
-            data: {
-              candidate: moment5AccountabilityProbeCandidate,
-              shouldProbe: moment5AccountabilityEval.shouldProbe,
-              moment5NarrativeConcrete,
-              moment5AnsweringAfterSpecificityRedirect,
-              specificityRedirectIssued: moment5SpecificityRedirectIssuedRef.current,
-              userPreview: trimmed.slice(0, 220),
-            },
-            timestamp: Date.now(),
-          }),
-        }).catch(() => {});
-        // #endregion
+    if (
+      moment5AccountabilityProbeCandidate &&
+      !moment5ConfirmedLowConflictValidity &&
+      !moment5NarrativeConcrete &&
+      moment5AnsweringAfterSpecificityRedirect &&
+      moment5SpecificityRedirectIssuedRef.current &&
+      moment5AccountabilityEval.reason === 'decline_or_vague_evade'
+    ) {
+      moment5ClientScoringMetaRef.current = {
+        ...(moment5ClientScoringMetaRef.current ?? {}),
+        accountabilityProbeFired: false,
+        specificityRedirectIssued: true,
+        persistentAbstractionMoveOn: true,
+      };
+      void remoteLog('[M5_PERSISTENT_ABSTRACT_MOVE_ON]', {
+        interviewSessionId: interviewSessionIdRef.current,
+        reason: 'decline_after_specificity_redirect',
+        wordCount: countInterviewWords(trimmed),
+        preview: trimmed.slice(0, 200),
+      });
+      const moveOnMsg: MessageWithScenario = {
+        role: 'assistant',
+        content: MOMENT_5_PERSISTENT_ABSTRACT_MOVE_ON_TEXT,
+        scenarioNumber: resolveAssistantScenarioNumber(MOMENT_5_PERSISTENT_ABSTRACT_MOVE_ON_TEXT, messagesToUse),
+      };
+      setMessages([...messagesToUse, moveOnMsg]);
+      await speakTextSafe(MOMENT_5_PERSISTENT_ABSTRACT_MOVE_ON_TEXT, ASSISTANT_INTERVIEW_SPEECH);
+      setVoiceState('idle');
+      setIsWaiting(false);
+      return;
+    }
+
+    if (
+      moment5AccountabilityProbeCandidate &&
+      (moment5AccountabilityEval.shouldProbe || moment5ForcedAbstractFollowupAccountabilityProbe) &&
+      !moment5ConfirmedLowConflictValidity
+    ) {
+      const specificityRedirectAlreadyInTranscript = messagesToUse.some(
+        (m) =>
+          m.role === 'assistant' &&
+          !(m as { isWelcomeBack?: boolean }).isWelcomeBack &&
+          looksLikeMoment5SpecificityRedirectPrompt((m as { content?: string }).content ?? ''),
+      );
+      if (
+        !moment5NarrativeConcrete &&
+        !moment5AnsweringAfterSpecificityRedirect &&
+        !moment5SpecificityRedirectIssuedRef.current &&
+        !specificityRedirectAlreadyInTranscript
+      ) {
         moment5SpecificityRedirectIssuedRef.current = true;
         moment5ClientScoringMetaRef.current = {
           ...(moment5ClientScoringMetaRef.current ?? {}),
           accountabilityProbeFired: false,
           specificityRedirectIssued: true,
+          conflictValidityClarificationFired: true,
         };
         void remoteLog('[M5_SPECIFICITY_REDIRECT_ISSUED]', {
           interviewSessionId: interviewSessionIdRef.current,
@@ -9719,31 +9169,16 @@ The participant **confirmed** skipping after the skip confirmation prompt. In **
       }
 
       if (
-        !moment5NarrativeConcrete &&
         moment5AnsweringAfterSpecificityRedirect &&
-        moment5SpecificityRedirectIssuedRef.current
+        moment5SpecificityRedirectIssuedRef.current &&
+        (moment5NarrativeConcrete || !moment5ResponseIsAbstract(trimmed))
       ) {
         moment5ClientScoringMetaRef.current = {
-          ...(moment5ClientScoringMetaRef.current ?? {}),
-          accountabilityProbeFired: false,
-          specificityRedirectIssued: true,
-          persistentAbstractionMoveOn: true,
+          ...(moment5ClientScoringMetaRef.current ?? { accountabilityProbeFired: false }),
+          accountabilityProbeFired: moment5ClientScoringMetaRef.current?.accountabilityProbeFired ?? false,
+          conflictValidityClarificationFired: true,
+          conflictValiditySecondResponseAbstract: false,
         };
-        void remoteLog('[M5_PERSISTENT_ABSTRACT_MOVE_ON]', {
-          interviewSessionId: interviewSessionIdRef.current,
-          wordCount: countInterviewWords(trimmed),
-          preview: trimmed.slice(0, 200),
-        });
-        const moveOnMsg: MessageWithScenario = {
-          role: 'assistant',
-          content: MOMENT_5_PERSISTENT_ABSTRACT_MOVE_ON_TEXT,
-          scenarioNumber: resolveAssistantScenarioNumber(MOMENT_5_PERSISTENT_ABSTRACT_MOVE_ON_TEXT, messagesToUse),
-        };
-        setMessages([...messagesToUse, moveOnMsg]);
-        await speakTextSafe(MOMENT_5_PERSISTENT_ABSTRACT_MOVE_ON_TEXT, ASSISTANT_INTERVIEW_SPEECH);
-        setVoiceState('idle');
-        setIsWaiting(false);
-        return;
       }
 
       if (moment5AnsweringAfterConflictValidityClarification && moment5AddsTensionDetailAfterClarification) {
@@ -9755,45 +9190,39 @@ The participant **confirmed** skipping after the skip confirmation prompt. In **
         };
       }
 
-      const griefAckProbe = moment5ResponseContainsDeathDisclosure(trimmed);
-      const accountabilityProbeSpoken = griefAckProbe
-        ? MOMENT_5_ACCOUNTABILITY_PROBE_WITH_GRIEF_ACK_TEXT
-        : MOMENT_5_ACCOUNTABILITY_PROBE_TEXT;
-      // #region agent log
-      fetch('http://127.0.0.1:7789/ingest/668e0bd5-3283-4492-9f48-e33846c18218', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'X-Debug-Session-Id': 'e43434' },
-        body: JSON.stringify({
-          sessionId: 'e43434',
-          runId: 'm5-anchor-debug',
-          hypothesisId: 'H4_probe_path_expected',
-          location: 'AriaScreen.tsx:processUserSpeech:moment5_probe_branch',
-          message: 'm5_accountability_probe_path',
-          data: {
-            candidate: moment5AccountabilityProbeCandidate,
-            shouldProbe: moment5AccountabilityEval.shouldProbe,
-            moment5NarrativeConcrete,
-            moment5AnsweringAfterSpecificityRedirect,
-            griefAckProbe,
-            userPreview: trimmed.slice(0, 220),
-          },
-          timestamp: Date.now(),
-        }),
-      }).catch(() => {});
-      // #endregion
+      const deathDisclosureForProbe = moment5ResponseContainsDeathDisclosure(trimmed);
+      const moment5AccountabilityProbeTriggerReason = moment5ForcedAbstractFollowupAccountabilityProbe
+        ? 'abstract_followup_after_specificity_redirect'
+        : moment5AccountabilityEval.reason;
+      /** Always lead with the scripted warmth line before the accountability question (not only death/bereavement). */
+      const accountabilityProbeSpoken = MOMENT_5_ACCOUNTABILITY_PROBE_WITH_GRIEF_ACK_TEXT;
       moment5AccountabilityProbeFiredRef.current = true;
       moment5ClientScoringMetaRef.current = {
         ...(moment5ClientScoringMetaRef.current ?? {}),
         accountabilityProbeFired: true,
-        probeTriggerReason: moment5AccountabilityEval.reason,
+        probeTriggerReason: moment5AccountabilityProbeTriggerReason,
         ...(moment5SpecificityRedirectIssuedRef.current ? { specificityRedirectIssued: true } : {}),
-        ...(griefAckProbe ? { griefAckBeforeAccountabilityProbe: true } : {}),
+        warmAckBeforeAccountabilityProbe: true,
+        ...(deathDisclosureForProbe ? { griefAckBeforeAccountabilityProbe: true } : {}),
+        ...(moment5ForcedAbstractFollowupAccountabilityProbe
+          ? {
+              accountabilityProbeFiredOnAbstractFollowup: true,
+              conflictValiditySecondResponseAbstract: true,
+              conflictValidityClarificationFired: true,
+            }
+          : {}),
       };
       void remoteLog('[M5_ACCOUNTABILITY_PROBE_FIRED]', {
         interviewSessionId: interviewSessionIdRef.current,
-        reason: moment5AccountabilityEval.reason,
+        reason: moment5AccountabilityProbeTriggerReason,
         after_specificity_redirect: moment5SpecificityRedirectIssuedRef.current,
-        grief_ack_before_probe: griefAckProbe,
+        warm_ack_before_accountability_probe: true,
+        grief_ack_before_probe: deathDisclosureForProbe,
+        conflict_validity_clarification_fired: moment5ClientScoringMetaRef.current?.conflictValidityClarificationFired === true,
+        conflict_validity_second_response_abstract:
+          moment5ClientScoringMetaRef.current?.conflictValiditySecondResponseAbstract === true,
+        accountability_probe_fired_on_abstract_followup:
+          moment5ClientScoringMetaRef.current?.accountabilityProbeFiredOnAbstractFollowup === true,
         accountability_probe_self_reference_detected:
           moment5AccountabilityEval.selfReference.accountability_probe_self_reference_detected,
         self_reference_type: moment5AccountabilityEval.selfReference.self_reference_type,
@@ -9804,7 +9233,7 @@ The participant **confirmed** skipping after the skip confirmation prompt. In **
         scenario: (currentScenarioRef.current ?? 3) as number,
         construct: 'accountability',
         probe_fired: true,
-        trigger_reason: moment5AccountabilityEval.reason,
+        trigger_reason: moment5AccountabilityProbeTriggerReason,
         pre_probe_score: 0,
         post_probe_score: 0,
         score_delta: 0,
@@ -9832,7 +9261,10 @@ The participant **confirmed** skipping after the skip confirmation prompt. In **
       });
     }
 
-    const scenarioAContemptProbeCoverage = hasScenarioAQ1ContemptProbeCoverage(trimmed);
+    const legacyScenarioAQ1ContemptCoverage = hasScenarioAQ1ContemptProbeCoverage(trimmed);
+    const scenarioAQ1PreProbeSkip = evaluateScenarioAQ1ContemptProbePreProbeSkip(trimmed);
+    const scenarioAContemptProbeCoverage =
+      legacyScenarioAQ1ContemptCoverage || scenarioAQ1PreProbeSkip.skip;
     const specificEmmaLineAlreadyAddressed = scenarioAContemptProbeCoverage;
     const shouldForceScenarioAContemptProbe =
       !suppressForcedConstructProbesForMetaFrustration &&
@@ -9843,6 +9275,8 @@ The participant **confirmed** skipping after the skip confirmation prompt. In **
     if (currentInterviewMomentRef.current === 1 || replyingToScenarioAQ1 || userScenarioTag === 1) {
       void remoteLog('[S1_CONTEMPT_GATE_DEBUG_7605c3]', {
         coverageDetail: debugScenarioAQ1ContemptProbeCoverageDetail(trimmed),
+        legacyScenarioAQ1ContemptCoverage,
+        scenarioAQ1PreProbeSkip,
         replyingToScenarioAQ1,
         userScenarioTag,
         currentInterviewMoment: currentInterviewMomentRef.current,
@@ -9855,34 +9289,16 @@ The participant **confirmed** skipping after the skip confirmation prompt. In **
         lastAssistantPreview: lastAssistantContent.slice(0, 260),
         userPreview: trimmed.slice(0, 320),
       });
-      // #region agent log
-      fetch('http://127.0.0.1:7789/ingest/668e0bd5-3283-4492-9f48-e33846c18218', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'X-Debug-Session-Id': '7605c3' },
-        body: JSON.stringify({
-          sessionId: '7605c3',
-          runId: 'pre-fix',
-          hypothesisId: 'H1_ASR_OR_HELPER_FALSE_NEGATIVE,H2_STATE_MISMATCH,H5_RESUME_REF_NOT_HYDRATED',
-          location: 'AriaScreen.tsx:processUserSpeech:scenarioA_contempt_gate',
-          message: 'scenario_a_contempt_gate_snapshot',
-          data: {
-            coverageDetail: debugScenarioAQ1ContemptProbeCoverageDetail(trimmed),
-            replyingToScenarioAQ1,
-            userScenarioTag,
-            currentInterviewMoment: currentInterviewMomentRef.current,
-            currentScenario: currentScenarioRef.current,
-            scenarioAContemptProbeAskedRef: scenarioAContemptProbeAskedRef.current,
-            suppressForcedConstructProbesForMetaFrustration,
-            isDecline: isDecline(trimmed),
-            shouldForceScenarioAContemptProbe,
-            lastAssistantLooksLikeContemptProbe: looksLikeScenarioAContemptProbeQuestion(lastAssistantContent),
-            lastAssistantPreview: lastAssistantContent.slice(0, 260),
-            userPreview: trimmed.slice(0, 320),
-          },
-          timestamp: Date.now(),
-        }),
-      }).catch(() => {});
-      // #endregion
+    }
+    if (scenarioAContemptProbeCoverage && !scenarioAContemptProbeAskedRef.current) {
+      scenarioAContemptProbeAskedRef.current = true;
+      void remoteLog('[S1_CONTEMPT_SATISFIED_BY_USER]', {
+        coverageDetail: debugScenarioAQ1ContemptProbeCoverageDetail(trimmed),
+        userPreview: trimmed.slice(0, 320),
+        contempt_probe_skipped: true,
+        contempt_probe_skip_reason: scenarioAQ1PreProbeSkip.reason ?? null,
+        legacy_contempt_quality_coverage: legacyScenarioAQ1ContemptCoverage,
+      });
     }
     const sidedEntirelyWithJames = userSidesEntirelyWithJames(trimmed);
     const scenarioBQ1Engaged = hasScenarioBQ1OnTopicEngagement(trimmed);
@@ -9917,23 +9333,6 @@ The participant **confirmed** skipping after the skip confirmation prompt. In **
           userPreview: trimmed.slice(0, 120),
           lastAssistantPreview: lastAssistantContent.slice(0, 200),
         });
-        // #region agent log
-        fetch('http://127.0.0.1:7789/ingest/668e0bd5-3283-4492-9f48-e33846c18218', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json', 'X-Debug-Session-Id': 'e43434' },
-          body: JSON.stringify({
-            sessionId: 'e43434',
-            hypothesisId: 'S1_REPAIR_HARD_STOP',
-            location: 'AriaScreen.tsx:S1_REPAIR_HARD_STOP_ADVANCE',
-            message: 'client_injected_scenario1_to_2',
-            data: {
-              userPreview: trimmed.slice(0, 80),
-              elongatingOnly: isApprovedElongatingProbeOnly(lastAssistantContent),
-            },
-            timestamp: Date.now(),
-          }),
-        }).catch(() => {});
-        // #endregion
         interviewMomentsCompleteRef.current[1] = true;
         currentInterviewMomentRef.current = 2;
         const bundle = buildScenario1To2BundleForInterview(participantFirstNameForSpoken, SCENARIO_2_TEXT);
@@ -9989,13 +9388,14 @@ The participant **confirmed** skipping after the skip confirmation prompt. In **
         const isFirstUserTurnInScenario = priorUserTurnsInScenario === 0;
         const repairQuestionForDisengagement = looksLikeRepairInterviewQuestion(lastAssistantContent);
         const repairRefusalDetail = repairQuestionForDisengagement
-          ? evaluateRepairRefusalDetection(trimmed, wcDisengage)
+          ? evaluateRepairRefusalDetection(trimmed, wcDisengage, lastAssistantContent)
           : null;
         if (repairRefusalDetail) {
           void remoteLog('[REPAIR_REFUSAL_EVALUATION]', {
             interviewSessionId: interviewSessionIdRef.current,
             scenario: userScenarioTag,
             repair_refusal_detected: repairRefusalDetail.repair_refusal_detected,
+            trigger_condition: repairRefusalDetail.trigger_condition,
             trigger_reason: repairRefusalDetail.trigger_reason,
             response_word_count: repairRefusalDetail.response_word_count,
             repair_refusal_anomaly: repairRefusalDetail.repair_refusal_anomaly,
@@ -10148,75 +9548,7 @@ The participant **confirmed** skipping after the skip confirmation prompt. In **
         metaCommentClassification != null;
       const skipContinuationSnap = skipContinuationSystemSuffixRef.current;
       skipContinuationSystemSuffixRef.current = '';
-      // #region agent log
-      fetch('http://127.0.0.1:7789/ingest/668e0bd5-3283-4492-9f48-e33846c18218', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'X-Debug-Session-Id': 'c61a43' },
-        body: JSON.stringify({
-          sessionId: 'c61a43',
-          runId: 'pre-fix',
-          hypothesisId: 'H14',
-          location: 'AriaScreen.tsx:sendMessage:systemPromptNameSuffix',
-          message: 'system_prompt_participant_name_resolution',
-          data: {
-            participantFirstNameForSpoken: participantFirstNameForSpoken || null,
-            promptNameFromProfile: interviewNameRef.current || null,
-          },
-          timestamp: Date.now(),
-        }),
-      }).catch(() => {});
-      // #endregion
-      // #region agent log
-      fetch('http://127.0.0.1:7789/ingest/668e0bd5-3283-4492-9f48-e33846c18218', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'X-Debug-Session-Id': 'c61a43' },
-        body: JSON.stringify({
-          sessionId: 'c61a43',
-          runId: 'post-fix',
-          hypothesisId: 'H-ELONG-1',
-          location: 'AriaScreen.tsx:processUserSpeech:elongating_suffix_gate',
-          message: 'elongating_probe_state_for_api',
-          data: {
-            userWordCount: countSpokenWords(trimmed),
-            elongatingProbeFiredRef: elongatingProbeFiredRef.current,
-            elongatingSuppressedForUserTurn,
-            elongatingProbeStateForApi,
-            userPreviewChars: trimmed.length,
-          },
-          timestamp: Date.now(),
-        }),
-      }).catch(() => {});
-      // #endregion
       if (currentInterviewMomentRef.current === 1 || replyingToScenarioAQ1 || userScenarioTag === 1) {
-        // #region agent log
-        fetch('http://127.0.0.1:7789/ingest/668e0bd5-3283-4492-9f48-e33846c18218', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json', 'X-Debug-Session-Id': '7605c3' },
-          body: JSON.stringify({
-            sessionId: '7605c3',
-            runId: 'pre-fix',
-            hypothesisId: 'H2_STATE_MISMATCH,H3_MODEL_IGNORES_PROMPT,H5_RESUME_REF_NOT_HYDRATED',
-            location: 'AriaScreen.tsx:processUserSpeech:scenarioA_api_request',
-            message: 'scenario_a_api_request_snapshot',
-            data: {
-              messageCount: messagesToUse.length,
-              scenarioAContemptProbeAskedRef: scenarioAContemptProbeAskedRef.current,
-              currentInterviewMoment: currentInterviewMomentRef.current,
-              currentScenario: currentScenarioRef.current,
-              replyingToScenarioAQ1,
-              shouldForceScenarioAContemptProbe,
-              recentTranscript: messagesToUse.slice(-8).map((m) => ({
-                role: m.role,
-                scenarioNumber: m.scenarioNumber ?? null,
-                contentPreview: (m.content ?? '').slice(0, 320),
-                looksLikeContemptProbe:
-                  m.role === 'assistant' ? looksLikeScenarioAContemptProbeQuestion(m.content ?? '') : false,
-              })),
-            },
-            timestamp: Date.now(),
-          }),
-        }).catch(() => {});
-        // #endregion
       }
       const requestBody = {
         model: 'claude-sonnet-4-20250514',
@@ -10324,39 +9656,6 @@ The participant **confirmed** skipping after the skip confirmation prompt. In **
           !!participantFirstNameForSpoken &&
           (isBoundaryWarmValidationOnlySentence(spoken) ||
             shouldDeferStreamingBoundaryWarmClause(spoken, participantFirstNameForSpoken));
-        // #region agent log
-        if (
-          /great\s+work/gi.test(spoken) ||
-          /nice\s+work/gi.test(spoken) ||
-          /good\s+work/gi.test(spoken) ||
-          willDefer
-        ) {
-          fetch('http://127.0.0.1:7789/ingest/668e0bd5-3283-4492-9f48-e33846c18218', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json', 'X-Debug-Session-Id': 'c61a43' },
-            body: JSON.stringify({
-              sessionId: 'c61a43',
-              runId: 'post-fix',
-              hypothesisId: 'H-D',
-              location: 'AriaScreen.tsx:maybeQueueSentenceForTts:entry',
-              message: 'parallel_tts_warm_sentence_path',
-              data: {
-                allowDeferWarm,
-                hadDeferredBefore,
-                willDefer,
-                segmentWarmDefer: shouldDeferStreamingBoundaryWarmClause(
-                  spoken,
-                  participantFirstNameForSpoken,
-                ),
-                loneWarmDefer: isBoundaryWarmValidationOnlySentence(spoken),
-                participantFirstNameLen: participantFirstNameForSpoken.length,
-                spokenPreview: spoken.slice(0, 200),
-              },
-              timestamp: Date.now(),
-            }),
-          }).catch(() => {});
-        }
-        // #endregion
         if (willDefer) {
           deferredWarmBoundarySentence = spoken;
           return;
@@ -10368,25 +9667,6 @@ The participant **confirmed** skipping after the skip confirmation prompt. In **
               sanitizeAssistantInterviewerCharacterNames(spoken),
               participantFirstNameForSpoken,
             );
-            // #region agent log
-            fetch('http://127.0.0.1:7789/ingest/668e0bd5-3283-4492-9f48-e33846c18218', {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json', 'X-Debug-Session-Id': 'c61a43' },
-              body: JSON.stringify({
-                sessionId: 'c61a43',
-                runId: 'pre-fix',
-                hypothesisId: 'H15',
-                location: 'AriaScreen.tsx:maybeQueueSentenceForTts:nameSourceCompare',
-                message: 'parallel_sentence_name_sources',
-                data: {
-                  participantFirstNameForSpoken: participantFirstNameForSpoken || null,
-                  freshNameFromProfile: interviewNameRef.current || null,
-                  sentencePreview: spoken.slice(0, 120),
-                },
-                timestamp: Date.now(),
-              }),
-            }).catch(() => {});
-            // #endregion
             if (userId) {
               const rtd = getSessionLogRuntime();
               const freshNameFromProfile = interviewNameRef.current ?? '';
@@ -10426,12 +9706,6 @@ The participant **confirmed** skipping after the skip confirmation prompt. In **
                 platform: rtd.platform,
               });
             }
-            // #region agent log
-            fetch('http://127.0.0.1:7789/ingest/668e0bd5-3283-4492-9f48-e33846c18218',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'c61a43'},body:JSON.stringify({sessionId:'c61a43',runId:'post-fix',hypothesisId:'H9',location:'AriaScreen.tsx:maybeQueueSentenceForTts:nameCheck',message:'parallel_sentence_name_presence',data:{sentencePreview:spoken.slice(0,120),sentenceHasName:participantFirstNameForSpoken?spoken.toLowerCase().includes(participantFirstNameForSpoken.toLowerCase()):null,spokenForTtsPreview:spokenForTts.slice(0,120),spokenForTtsHasName:participantFirstNameForSpoken?spokenForTts.toLowerCase().includes(participantFirstNameForSpoken.toLowerCase()):null,participantFirstNameForSpoken:participantFirstNameForSpoken??null},timestamp:Date.now()})}).catch(()=>{});
-            // #endregion
-            // #region agent log
-            fetch('http://127.0.0.1:7789/ingest/668e0bd5-3283-4492-9f48-e33846c18218',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'c61a43'},body:JSON.stringify({sessionId:'c61a43',runId:'post-fix',hypothesisId:'H1',location:'AriaScreen.tsx:maybeQueueSentenceForTts:beforeSpeak',message:'parallel_tts_sentence_about_to_play',data:{sentenceLen:spokenForTts.length,voiceState:voiceStateRef.current,ttsCancelled},timestamp:Date.now()})}).catch(()=>{});
-            // #endregion
               await awaitTtsScreenReadyGate('parallel_streaming_sentence');
             await speakWithElevenLabs(spokenForTts, undefined, {
               skipStopElevenLabsPlaybackBeforeStart: true,
@@ -10467,13 +9741,7 @@ The participant **confirmed** skipping after the skip confirmation prompt. In **
                 }
               },
             });
-            // #region agent log
-            fetch('http://127.0.0.1:7789/ingest/668e0bd5-3283-4492-9f48-e33846c18218',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'c61a43'},body:JSON.stringify({sessionId:'c61a43',runId:'pre-fix',hypothesisId:'H1',location:'AriaScreen.tsx:maybeQueueSentenceForTts:afterSpeak',message:'parallel_tts_sentence_play_resolved',data:{sentenceLen:spoken.length,voiceState:voiceStateRef.current,spokenStarted:textToParallelStream.spokenStarted},timestamp:Date.now()})}).catch(()=>{});
-            // #endregion
           } catch {
-            // #region agent log
-            fetch('http://127.0.0.1:7789/ingest/668e0bd5-3283-4492-9f48-e33846c18218',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'c61a43'},body:JSON.stringify({sessionId:'c61a43',runId:'pre-fix',hypothesisId:'H3',location:'AriaScreen.tsx:maybeQueueSentenceForTts:catch',message:'parallel_tts_sentence_play_error_swallowed',data:{voiceState:voiceStateRef.current},timestamp:Date.now()})}).catch(()=>{});
-            // #endregion
             // swallow tts errors for parallel pipeline
           }
         });
@@ -10580,9 +9848,6 @@ The participant **confirmed** skipping after the skip confirmation prompt. In **
         if (textToParallelStream.spokenStarted) {
           setVoiceState('idle');
         }
-        // #region agent log
-        fetch('http://127.0.0.1:7789/ingest/668e0bd5-3283-4492-9f48-e33846c18218',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'c61a43'},body:JSON.stringify({sessionId:'c61a43',runId:'pre-fix',hypothesisId:'H2',location:'AriaScreen.tsx:makeCall:afterTtsChain',message:'parallel_tts_chain_completed',data:{spokenStarted:textToParallelStream.spokenStarted,voiceState:voiceStateRef.current,fullTextLen:textToParallelStream.full.length},timestamp:Date.now()})}).catch(()=>{});
-        // #endregion
       } catch {
         ttsCancelled = true;
         deferredWarmBoundarySentence = null;
@@ -10590,9 +9855,6 @@ The participant **confirmed** skipping after the skip confirmation prompt. In **
         if (textToParallelStream.spokenStarted) {
           setVoiceState('idle');
         }
-        // #region agent log
-        fetch('http://127.0.0.1:7789/ingest/668e0bd5-3283-4492-9f48-e33846c18218',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'c61a43'},body:JSON.stringify({sessionId:'c61a43',runId:'pre-fix',hypothesisId:'H3',location:'AriaScreen.tsx:makeCall:catch',message:'parallel_llm_stream_or_tts_chain_failed',data:{voiceState:voiceStateRef.current,spokenStarted:textToParallelStream.spokenStarted},timestamp:Date.now()})}).catch(()=>{});
-        // #endregion
       }
       return { content: [{ text: textToParallelStream.full }] };
     };
@@ -10682,32 +9944,6 @@ The participant **confirmed** skipping after the skip confirmation prompt. In **
         (moment5QuestionDeliveredRef.current || hasMoment5PrimaryAnchorInTranscript) &&
         postM5UserTurns >= minUserTurnsAfterM5;
       if (!moment5CloseAllowed) {
-        // #region agent log
-        fetch('http://127.0.0.1:7789/ingest/668e0bd5-3283-4492-9f48-e33846c18218', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json', 'X-Debug-Session-Id': 'e43434' },
-          body: JSON.stringify({
-            sessionId: 'e43434',
-            runId: 'm4m5-debug',
-            hypothesisId: 'H4',
-            location: 'AriaScreen.tsx:sendMessage:INTERVIEW_COMPLETE_stripped',
-            message: 'interview_complete_blocked_pre_m5_gate',
-            data: {
-              moment: currentInterviewMomentRef.current,
-              m5Delivered: moment5QuestionDeliveredRef.current,
-              m5PrimaryAnchorSession: moment5PrimaryAnchorDeliveredSessionRef.current,
-              postM5UserTurnsRef: moment5PostPromptUserTurnCountRef.current,
-              postM5UserTurnsFromTranscript,
-              postM5UserTurnsEffective: postM5UserTurns,
-              minUserTurnsAfterM5,
-              accountabilityProbeFired: moment5AccountabilityProbeFiredRef.current,
-              hasMoment5PrimaryAnchorInTranscript,
-              moment5CloseAllowed,
-            },
-            timestamp: Date.now(),
-          }),
-        }).catch(() => {});
-        // #endregion
         void remoteLog('[INTERVIEW_COMPLETE_STRIPPED_PRE_M5_GATE]', {
           interviewSessionId: interviewSessionIdRef.current,
           moment: currentInterviewMomentRef.current,
@@ -10763,15 +9999,9 @@ The participant **confirmed** skipping after the skip confirmation prompt. In **
       }
     }
     finalizePendingMetaAckBaselineAfterAssistantTextRef.current(text);
-    // #region agent log
-    fetch('http://127.0.0.1:7789/ingest/668e0bd5-3283-4492-9f48-e33846c18218',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'c61a43'},body:JSON.stringify({sessionId:'c61a43',runId:'pre-fix',hypothesisId:'H10',location:'AriaScreen.tsx:sendMessage:assembledTextNameCheck',message:'assembled_text_name_presence',data:{assembledPreview:text.slice(0,160),assembledHasName:participantFirstNameForSpoken?text.toLowerCase().includes(participantFirstNameForSpoken.toLowerCase()):null,participantFirstNameForSpoken:participantFirstNameForSpoken??null},timestamp:Date.now()})}).catch(()=>{});
-    // #endregion
     /** LLM done — do not keep "Amoraea is thinking" (or isWaiting-gated UI) until TTS finishes; HTML audio can hang without `onended` on some mobile browsers. */
     setIsWaiting(false);
     const parallelStreamingPlaybackUsed = textToParallelStream.spokenStarted;
-    // #region agent log
-    fetch('http://127.0.0.1:7789/ingest/668e0bd5-3283-4492-9f48-e33846c18218',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'c61a43'},body:JSON.stringify({sessionId:'c61a43',runId:'pre-fix',hypothesisId:'H6',location:'AriaScreen.tsx:sendMessage:postStreamAssemble',message:'parallel_streaming_flag_and_ui_state',data:{parallelStreamingPlaybackUsed,interviewUiPhase,status,currentScenario:currentScenarioRef.current,hasReferenceScenario:!!referenceCardScenario,scenarioIntroTtsPlaying},timestamp:Date.now()})}).catch(()=>{});
-    // #endregion
     const speakAssistantTurn = async (spokenText: string, opts?: {
       silent?: boolean;
       interviewSpeechRole?: 'assistant_response';
@@ -10786,17 +10016,11 @@ The participant **confirmed** skipping after the skip confirmation prompt. In **
       immediateWebPlaybackElement?: HTMLAudioElement;
     }) => {
       if (parallelStreamingPlaybackUsed) {
-        // #region agent log
-        fetch('http://127.0.0.1:7789/ingest/668e0bd5-3283-4492-9f48-e33846c18218',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'c61a43'},body:JSON.stringify({sessionId:'c61a43',runId:'pre-fix',hypothesisId:'H7',location:'AriaScreen.tsx:speakAssistantTurn:skip',message:'speak_text_safe_skipped_due_parallel_streaming',data:{spokenLen:spokenText.length,spokenPreview:spokenText.slice(0,160),spokenHasName:participantFirstNameForSpoken?spokenText.toLowerCase().includes(participantFirstNameForSpoken.toLowerCase()):null,participantFirstNameForSpoken:participantFirstNameForSpoken??null,interviewUiPhase,status,currentScenario:currentScenarioRef.current,hasReferenceScenario:!!referenceCardScenario,scenarioIntroTtsPlaying},timestamp:Date.now()})}).catch(()=>{});
-        // #endregion
         if (opts?.interviewSpeechRole === 'assistant_response' && !opts?.skipLastQuestionRef) {
           lastQuestionTextRef.current = stripControlTokens(spokenText).trim();
         }
         if (opts?.interviewSpeechRole === 'assistant_response' && !opts?.skipInterviewSpeechAdvance) {
           applyInterviewSpeechComplete(spokenText);
-          // #region agent log
-          fetch('http://127.0.0.1:7789/ingest/668e0bd5-3283-4492-9f48-e33846c18218',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'c61a43'},body:JSON.stringify({sessionId:'c61a43',runId:'post-fix',hypothesisId:'H7',location:'AriaScreen.tsx:speakAssistantTurn:parallelAdvance',message:'applied_interview_speech_complete_in_parallel_skip',data:{spokenLen:spokenText.length,interviewUiPhase,status,currentScenario:currentScenarioRef.current},timestamp:Date.now()})}).catch(()=>{});
-          // #endregion
         }
         return;
       }
@@ -10835,11 +10059,25 @@ The participant **confirmed** skipping after the skip confirmation prompt. In **
       participantFirstNameForSpoken,
       SCENARIO_2_TEXT
     );
+    const beforeM5SpecDupStrip = strippedText;
+    strippedText = stripDuplicateMoment5SpecificityRedirectParagraphs(
+      strippedText,
+      messagesToUse,
+      currentInterviewMomentRef.current,
+    );
+    if (strippedText !== beforeM5SpecDupStrip) {
+      void remoteLog('[M5_SPECIFICITY_REDIRECT_STRIPPED_DUPLICATE]', {
+        preview: strippedText.slice(0, 260),
+      });
+    }
     const recentAsstForAck = recentAssistantMessagesForAck(messagesToUse);
     if (currentInterviewMomentRef.current === 1 && scenarioAContemptProbeAskedRef.current) {
       const beforeProbeStrip = strippedText;
       strippedText = stripScenarioAContemptProbeQuestion(strippedText);
       if (strippedText !== beforeProbeStrip) {
+        if (!strippedText && specificEmmaLineAlreadyAddressed) {
+          strippedText = 'How would you repair this relationship if you were Ryan?';
+        }
         void remoteLog('[S1_CONTEMPT_PROBE_STRIPPED_DUPLICATE]', { preview: strippedText.slice(0, 220) });
       }
     }
@@ -10851,7 +10089,7 @@ The participant **confirmed** skipping after the skip confirmation prompt. In **
       }
     }
     let assistantIssuedMoment4ThresholdProbe = looksLikeMoment4ThresholdQuestion(strippedText);
-    const assistantIssuedScenarioAContemptProbe = looksLikeScenarioAContemptProbeQuestion(strippedText);
+    let assistantIssuedScenarioAContemptProbe = looksLikeScenarioAContemptProbeQuestion(strippedText);
     let assistantIssuedScenarioARepairQuestion =
       currentInterviewMomentRef.current === 1 && looksLikeScenarioARepairQuestion(strippedText);
     const assistantIssuedScenarioBFullProbe = looksLikeScenarioBFullAppreciationProbeQuestion(strippedText);
@@ -10868,28 +10106,21 @@ The participant **confirmed** skipping after the skip confirmation prompt. In **
         assistantTurnPreview: strippedText.slice(0, 420),
         modelRawPreview: text.slice(0, 420),
       });
-      // #region agent log
-      fetch('http://127.0.0.1:7789/ingest/668e0bd5-3283-4492-9f48-e33846c18218', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'X-Debug-Session-Id': '7605c3' },
-        body: JSON.stringify({
-          sessionId: '7605c3',
-          runId: 'pre-fix',
-          hypothesisId: 'H3_MODEL_GENERATED_REASK,H4_CLIENT_FORCED_REASK,H5_RESUME_REF_NOT_HYDRATED',
-          location: 'AriaScreen.tsx:processUserSpeech:scenarioA_model_output',
-          message: 'scenario_a_model_output_snapshot',
-          data: {
-            shouldForceScenarioAContemptProbe,
-            scenarioAContemptProbeAskedRef: scenarioAContemptProbeAskedRef.current,
-            assistantIssuedScenarioAContemptProbe,
-            assistantIssuedScenarioARepairQuestion,
-            assistantTurnPreview: strippedText.slice(0, 420),
-            modelRawPreview: text.slice(0, 420),
-          },
-          timestamp: Date.now(),
-        }),
-      }).catch(() => {});
-      // #endregion
+    }
+    if (currentInterviewMomentRef.current === 1 && specificEmmaLineAlreadyAddressed && assistantIssuedScenarioAContemptProbe) {
+      const beforeCoveredProbeStrip = strippedText;
+      strippedText = stripScenarioAContemptProbeQuestion(strippedText);
+      if (!strippedText) {
+        strippedText = 'How would you repair this relationship if you were Ryan?';
+      }
+      assistantIssuedScenarioAContemptProbe = false;
+      assistantIssuedScenarioARepairQuestion = looksLikeScenarioARepairQuestion(strippedText);
+      void remoteLog('[S1_MODEL_CONTEMPT_PROBE_SUPPRESSED_AFTER_USER_COVERAGE]', {
+        coverageDetail: debugScenarioAQ1ContemptProbeCoverageDetail(trimmed),
+        beforePreview: beforeCoveredProbeStrip.slice(0, 320),
+        afterPreview: strippedText.slice(0, 320),
+        userPreview: trimmed.slice(0, 320),
+      });
     }
     {
       const beforeS3 = strippedText;
@@ -10929,56 +10160,6 @@ The participant **confirmed** skipping after the skip confirmation prompt. In **
       sanitizedForDedupe,
       participantFirstNameForSpoken,
     );
-    // #region agent log
-    if ((sanitizedForDedupe.match(/great\s+work/gi) ?? []).length >= 2) {
-      fetch('http://127.0.0.1:7789/ingest/668e0bd5-3283-4492-9f48-e33846c18218', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'X-Debug-Session-Id': 'c61a43' },
-        body: JSON.stringify({
-          sessionId: 'c61a43',
-          runId: 'dup-debug',
-          hypothesisId: 'H-E',
-          location: 'AriaScreen.tsx:sendMessage:postDedupeMainTurn',
-          message: 'main_turn_double_great_work_probe',
-          data: {
-            parallelStreamingPlaybackUsed,
-            participantFirstNameForSpokenLen: participantFirstNameForSpoken.length,
-            sanitizedPreview: sanitizedForDedupe.slice(0, 220),
-            strippedPreview: strippedText.slice(0, 220),
-            dedupeChanged: sanitizedForDedupe !== strippedText,
-            greatWorkCountSanitized: (sanitizedForDedupe.match(/great\s+work/gi) ?? []).length,
-            greatWorkCountStripped: (strippedText.match(/great\s+work/gi) ?? []).length,
-          },
-          timestamp: Date.now(),
-        }),
-      }).catch(() => {});
-    }
-    // #endregion
-    // #region agent log
-    if (
-      interviewAssistantTextHasDisallowedNameMarker(text) ||
-      interviewAssistantTextHasDisallowedNameMarker(preNameSanitize) ||
-      interviewAssistantTextHasDisallowedNameMarker(strippedText)
-    ) {
-      fetch('http://127.0.0.1:7789/ingest/668e0bd5-3283-4492-9f48-e33846c18218', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'X-Debug-Session-Id': 'e70f17' },
-        body: JSON.stringify({
-          sessionId: 'e70f17',
-          location: 'AriaScreen.tsx:sendMessage',
-          message: 'name_sanitize_main_turn',
-          data: {
-            hypothesisId: 'H1-H3',
-            rawHas: interviewAssistantTextHasDisallowedNameMarker(text),
-            preSanitizeHas: interviewAssistantTextHasDisallowedNameMarker(preNameSanitize),
-            postSanitizeHas: interviewAssistantTextHasDisallowedNameMarker(strippedText),
-            changed: preNameSanitize !== strippedText,
-          },
-          timestamp: Date.now(),
-        }),
-      }).catch(() => {      });
-    }
-    // #endregion
     /** Elongating probe must be the sole assistant output this turn — never stack forced construct probes after it. */
     const assistantTurnIsElongatingProbeOnly = isApprovedElongatingProbeOnly(strippedText);
     if (assistantIssuedMoment4ThresholdProbe) {
@@ -11045,43 +10226,17 @@ The participant **confirmed** skipping after the skip confirmation prompt. In **
       void remoteLog('[S1_CONTEMPT_FORCED]', {
         specificEmmaLineAlreadyAddressed,
         assistantIssuedScenarioAContemptProbe,
+        contempt_probe_skipped: false,
       });
       void remoteLog('[S1_CONTEMPT_FORCED_DEBUG_7605c3]', {
         coverageDetail: debugScenarioAQ1ContemptProbeCoverageDetail(trimmed),
         specificEmmaLineAlreadyAddressed,
         assistantIssuedScenarioAContemptProbe,
+        contempt_probe_skipped: false,
         assistantTurnIsElongatingProbeOnly,
         modelTurnPreview: strippedText.slice(0, 320),
         userPreview: trimmed.slice(0, 320),
       });
-      // #region agent log
-      fetch('http://127.0.0.1:7789/ingest/668e0bd5-3283-4492-9f48-e33846c18218', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'X-Debug-Session-Id': '7605c3' },
-        body: JSON.stringify({
-          sessionId: '7605c3',
-          runId: 'pre-fix',
-          hypothesisId: 'H4_CLIENT_FORCED_REASK',
-          location: 'AriaScreen.tsx:processUserSpeech:scenarioA_forced_probe_branch',
-          message: 'scenario_a_client_forced_contempt_probe',
-          data: {
-            coverageDetail: debugScenarioAQ1ContemptProbeCoverageDetail(trimmed),
-            specificEmmaLineAlreadyAddressed,
-            assistantIssuedScenarioAContemptProbe,
-            assistantTurnIsElongatingProbeOnly,
-            wrappedProbePreview: wrapForcedProbeWithAck(
-              trimmed,
-              strippedText,
-              forcedContemptProbe,
-              recentAsstForAck
-            ).slice(0, 320),
-            modelTurnPreview: strippedText.slice(0, 320),
-            userPreview: trimmed.slice(0, 320),
-          },
-          timestamp: Date.now(),
-        }),
-      }).catch(() => {});
-      // #endregion
       scenarioAContemptProbeAskedRef.current = true;
       const wrappedContemptProbe = wrapForcedProbeWithAck(trimmed, strippedText, forcedContemptProbe, recentAsstForAck);
       const probeMsg: MessageWithScenario = {
@@ -11154,28 +10309,6 @@ The participant **confirmed** skipping after the skip confirmation prompt. In **
       !assistantIssuedScenarioBJamesDifferently &&
       !assistantTurnIsElongatingProbeOnly &&
       !text.includes('[INTERVIEW_COMPLETE]');
-    // #region agent log
-    if (currentScenarioRef.current === 3 && currentInterviewMomentRef.current === 3) {
-      fetch('http://127.0.0.1:7789/ingest/668e0bd5-3283-4492-9f48-e33846c18218', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'X-Debug-Session-Id': 'c61a43' },
-        body: JSON.stringify({
-          sessionId: 'c61a43',
-          location: 'AriaScreen.tsx:before_forced_branches',
-          message: 'forced_probe_branch_order',
-          hypothesisId: 'H3',
-          data: {
-            shouldForceS1: shouldForceScenarioAContemptProbe,
-            shouldForceS2App: shouldForceScenarioBFullAppreciationProbe,
-            needsS2James: needsScenarioBJamesDifferentlyInsert,
-            moment: currentInterviewMomentRef.current,
-            scenario: currentScenarioRef.current,
-          },
-          timestamp: Date.now(),
-        }),
-      }).catch(() => {});
-    }
-    // #endregion
     if (needsScenarioBJamesDifferentlyInsert) {
       const forcedJamesDifferentlyProbe =
         'Before things blew up, what do you think James could have done differently that might have helped Sarah feel appreciated?';
@@ -11391,20 +10524,6 @@ The participant **confirmed** skipping after the skip confirmation prompt. In **
       // Per-scenario completion token: strip token, show summary, insert score card in chat
       // Closing-ack / repeat-closing failsafes above must not run when this token is present (see guards on those branches).
       if (text.includes('[INTERVIEW_COMPLETE]')) {
-        // #region agent log
-        fetch('http://127.0.0.1:7789/ingest/668e0bd5-3283-4492-9f48-e33846c18218', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json', 'X-Debug-Session-Id': 'e43434' },
-          body: JSON.stringify({
-            sessionId: 'e43434',
-            location: 'AriaScreen.tsx:sendMessage:INTERVIEW_COMPLETE',
-            message: 'interview_complete_handler_entered',
-            data: { textLen: text.length, hasClosingQ: /\[CLOSING_QUESTION:/i.test(text) },
-            timestamp: Date.now(),
-            hypothesisId: 'H_prep_handoff',
-          }),
-        }).catch(() => {});
-        // #endregion
         void persistInterviewAttemptSessionLifecycle(interviewSessionAttemptIdRef.current, 'completed');
         await remoteLog('[0] INTERVIEW_COMPLETE token detected in response', {
           isAdmin,
@@ -11438,31 +10557,6 @@ The participant **confirmed** skipping after the skip confirmation prompt. In **
             sanitizeAssistantInterviewerCharacterNames(displayText),
             closingInterviewName,
           );
-          // #region agent log
-          if (
-            interviewAssistantTextHasDisallowedNameMarker(closingRaw) ||
-            interviewAssistantTextHasDisallowedNameMarker(preNameClose) ||
-            interviewAssistantTextHasDisallowedNameMarker(displayText)
-          ) {
-            fetch('http://127.0.0.1:7789/ingest/668e0bd5-3283-4492-9f48-e33846c18218', {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json', 'X-Debug-Session-Id': 'e70f17' },
-              body: JSON.stringify({
-                sessionId: 'e70f17',
-                location: 'AriaScreen.tsx:INTERVIEW_COMPLETE',
-                message: 'name_sanitize_interview_complete',
-                data: {
-                  hypothesisId: 'H4',
-                  path: 'interview_complete',
-                  preSanitizeHas: interviewAssistantTextHasDisallowedNameMarker(preNameClose),
-                  postSanitizeHas: interviewAssistantTextHasDisallowedNameMarker(displayText),
-                  changed: preNameClose !== displayText,
-                },
-                timestamp: Date.now(),
-              }),
-            }).catch(() => {});
-          }
-          // #endregion
         }
         displayText = ensureSpokenTextIncludesParticipantFirstName(displayText, interviewNameRef.current ?? '', {
           allowAppendWhenMissing: true,
@@ -11527,25 +10621,6 @@ The participant **confirmed** skipping after the skip confirmation prompt. In **
             });
           }
         }
-        // #region agent log
-        fetch('http://127.0.0.1:7789/ingest/668e0bd5-3283-4492-9f48-e33846c18218', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json', 'X-Debug-Session-Id': 'c61a43' },
-          body: JSON.stringify({
-            sessionId: 'c61a43',
-            runId: 'pre-fix',
-            hypothesisId: 'H3',
-            location: 'AriaScreen.tsx:INTERVIEW_COMPLETE',
-            message: 'pending_completion_set_true',
-            data: {
-              completedCount: scoredScenariosRef.current.size,
-              transcriptLen: transcriptForScoring.length,
-              statusBeforeSet: statusRef.current,
-            },
-            timestamp: Date.now(),
-          }),
-        }).catch(() => {});
-        // #endregion
         setPendingCompletion(true);
         return;
       }
@@ -11580,35 +10655,7 @@ The participant **confirmed** skipping after the skip confirmation prompt. In **
             sanitizeAssistantInterviewerCharacterNames(displayText),
             participantFirstNameForSpoken,
           );
-          // #region agent log
-          if (
-            interviewAssistantTextHasDisallowedNameMarker(transitionDisplay) ||
-            interviewAssistantTextHasDisallowedNameMarker(preNameSc) ||
-            interviewAssistantTextHasDisallowedNameMarker(displayText)
-          ) {
-            fetch('http://127.0.0.1:7789/ingest/668e0bd5-3283-4492-9f48-e33846c18218', {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json', 'X-Debug-Session-Id': 'e70f17' },
-              body: JSON.stringify({
-                sessionId: 'e70f17',
-                location: 'AriaScreen.tsx:SCENARIO_COMPLETE',
-                message: 'name_sanitize_scenario_complete',
-                data: {
-                  hypothesisId: 'H4',
-                  path: 'scenario_complete',
-                  preSanitizeHas: interviewAssistantTextHasDisallowedNameMarker(preNameSc),
-                  postSanitizeHas: interviewAssistantTextHasDisallowedNameMarker(displayText),
-                  changed: preNameSc !== displayText,
-                },
-                timestamp: Date.now(),
-              }),
-            }).catch(() => {});
-          }
-          // #endregion
         }
-        // #region agent log
-        fetch('http://127.0.0.1:7789/ingest/668e0bd5-3283-4492-9f48-e33846c18218',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'c61a43'},body:JSON.stringify({sessionId:'c61a43',runId:'pre-fix',hypothesisId:'H10',location:'AriaScreen.tsx:scenarioCompleteDisplayTextNameCheck',message:'scenario_complete_display_text_name_presence',data:{displayPreview:displayText.slice(0,160),displayHasName:participantFirstNameForSpoken?displayText.toLowerCase().includes(participantFirstNameForSpoken.toLowerCase()):null,participantFirstNameForSpoken:participantFirstNameForSpoken??null},timestamp:Date.now()})}).catch(()=>{});
-        // #endregion
         if (scenarioNumber === 2 && !textContainsScenarioCVignetteBody(displayText)) {
           void remoteLog('[S2_TO_S3_CANONICAL]', {
             reason: 'scenario_complete_2_missing_s3_vignette',
@@ -11634,27 +10681,6 @@ The participant **confirmed** skipping after the skip confirmation prompt. In **
         } else if (scenarioNumber === 3) {
           interviewMomentsCompleteRef.current[3] = true;
         }
-        // #region agent log
-        fetch('http://127.0.0.1:7789/ingest/668e0bd5-3283-4492-9f48-e33846c18218', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json', 'X-Debug-Session-Id': 'e43434' },
-          body: JSON.stringify({
-            sessionId: 'e43434',
-            runId: 'pre-fix',
-            hypothesisId: 'S2S3-MOMENT',
-            location: 'AriaScreen.tsx:SCENARIO_COMPLETE',
-            message: 'segment_close_moment_align',
-            data: {
-              scenarioNumber,
-              momentBefore: momentBeforeScenarioComplete,
-              momentAfter: currentInterviewMomentRef.current,
-              nextScenarioWillBe: scenarioNumber < 3 ? scenarioNumber + 1 : 3,
-              s3GatesReset: scenarioNumber === 2,
-            },
-            timestamp: Date.now(),
-          }),
-        }).catch(() => {});
-        // #endregion
         applyInterviewProgressFromAssistantText(displayText, progressRefsPayload);
         const transitionMsg: MessageWithScenario = { role: 'assistant', content: displayText, scenarioNumber };
         const nextScenarioNum = scenarioNumber < 3 ? (scenarioNumber + 1) as 2 | 3 : 3;
@@ -11713,9 +10739,6 @@ The participant **confirmed** skipping after the skip confirmation prompt. In **
             platform: rtd.platform,
           });
         }
-        // #region agent log
-        fetch('http://127.0.0.1:7789/ingest/668e0bd5-3283-4492-9f48-e33846c18218',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'c61a43'},body:JSON.stringify({sessionId:'c61a43',runId:'pre-fix',hypothesisId:'H11',location:'AriaScreen.tsx:stageCompleteDisplayTextNameCheck',message:'stage_complete_display_text_name_presence',data:{stageNum,displayPreview:displayText.slice(0,180),displayHasName:participantFirstNameForSpoken?displayText.toLowerCase().includes(participantFirstNameForSpoken.toLowerCase()):null,participantFirstNameForSpoken:participantFirstNameForSpoken??null,currentMoment:currentInterviewMomentRef.current},timestamp:Date.now()})}).catch(()=>{});
-        // #endregion
         const finalMessages = [...messagesToUse, { role: 'assistant', content: displayText || 'Good, that’s helpful.' }];
         setMessages(finalMessages);
         await speakAssistantTurn(displayText || 'Good, that’s helpful.', ASSISTANT_INTERVIEW_SPEECH);
@@ -11843,28 +10866,6 @@ The participant **confirmed** skipping after the skip confirmation prompt. In **
   const handleRecordingError = useCallback(
     (err: Error) => {
       if (__DEV__) console.error('Recording error:', err.message);
-      // #region agent log
-      fetch('http://127.0.0.1:7789/ingest/668e0bd5-3283-4492-9f48-e33846c18218', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'X-Debug-Session-Id': 'c61a43' },
-        body: JSON.stringify({
-          sessionId: 'c61a43',
-          location: 'AriaScreen.tsx:handleRecordingError',
-          message: 'recording_onError',
-          data: {
-            hypothesisId: 'MicGate-1',
-            errName: err.name,
-            errMsgPreview: err.message.slice(0, 220),
-            voiceState: voiceStateRef.current,
-            ttsLineInFlight: ttsLineInFlightRef.current,
-            ttsPlaybackActive: getSessionLogRuntime().ttsPlaybackActive,
-            webPlaybackSurface: isWebInterviewPlaybackSurfaceActive(),
-          },
-          timestamp: Date.now(),
-          runId: 'mic-quiesce',
-        }),
-      }).catch(() => {});
-      // #endregion
       setVoiceState('idle');
       const msg = assistantMessageForRecordingHardwareFailure(Platform.OS === 'web');
       setMessages((prev) => [
@@ -12365,25 +11366,6 @@ The participant **confirmed** skipping after the skip confirmation prompt. In **
     },
     onRecordingComplete: async (blob, nativeUri, meta) => {
       try {
-      // #region agent log
-      fetch('http://127.0.0.1:7789/ingest/668e0bd5-3283-4492-9f48-e33846c18218', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'X-Debug-Session-Id': 'c61a43' },
-        body: JSON.stringify({
-          sessionId: 'c61a43',
-          location: 'AriaScreen.tsx:onRecordingComplete:entry',
-          message: 'recording_complete_entry',
-          data: {
-            hypothesisId: 'H2',
-            blobSize: blob?.size ?? 0,
-            hasNativeUri: !!nativeUri,
-            nativePeakMeteringDb: meta?.peakMeteringDb ?? null,
-          },
-          timestamp: Date.now(),
-          runId: 'speech-detect-debug',
-        }),
-      }).catch(() => {});
-      // #endregion
       recordingPeakMeteringRef.current = meta?.peakMeteringDb ?? null;
       recordingJustFinishedBeforeNextTtsRef.current = true;
       setVoiceState('processing');
@@ -12428,44 +11410,6 @@ The participant **confirmed** skipping after the skip confirmation prompt. In **
       const blockWhisperForVadBypassNoSpeech =
         vadGateBypassReason === VAD_GATE_BYPASS_REASON_NO_SAMPLE_EXCEEDED &&
         !vadBypassSpeechLikelyByPeakVsAmbient;
-      // #region agent log
-      {
-        const vadDb = analysis.vad_threshold_db;
-        const peakDb = analysis.peak_amplitude_db;
-        const gapDb =
-          vadDb != null && typeof peakDb === 'number' ? Math.round((peakDb - vadDb) * 1000) / 1000 : null;
-        fetch('http://127.0.0.1:7789/ingest/668e0bd5-3283-4492-9f48-e33846c18218', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json', 'X-Debug-Session-Id': 'c61a43' },
-          body: JSON.stringify({
-            sessionId: 'c61a43',
-            location: 'AriaScreen.tsx:onRecordingComplete:post_analysis',
-            message: 'recording_buffer_analysis',
-            data: {
-              hypothesisId: 'H1',
-              H5_noise_between_floors:
-                analysis.has_non_zero_audio &&
-                analysis.firstSpeechOffsetMs == null &&
-                (analysis.audio_duration_ms ?? 0) > 0,
-              has_non_zero_audio: analysis.has_non_zero_audio,
-              firstSpeechOffsetMs: analysis.firstSpeechOffsetMs,
-              peak_amplitude_db: analysis.peak_amplitude_db,
-              vad_threshold_db: analysis.vad_threshold_db,
-              peak_minus_vad_db: gapDb,
-              audio_duration_ms: analysis.audio_duration_ms,
-              vad_first_frame_accepted_db: analysis.vad_first_frame_accepted_db,
-              vadGateBypassed,
-              peakAboveAmbientDb,
-              vadBypassSpeechLikelyByPeakVsAmbient,
-              blockWhisperForVadBypassNoSpeech,
-              will_take_silent_branch: !analysis.has_non_zero_audio || blockWhisperForVadBypassNoSpeech,
-            },
-            timestamp: Date.now(),
-            runId: 'speech-detect-debug',
-          }),
-        }).catch(() => {});
-      }
-      // #endregion
       if (meta?.recordingCapped && userId) {
         const r = getSessionLogRuntime();
         markLastAudioSessionEventType('recording_duration_cap_hit');
@@ -12593,28 +11537,6 @@ The participant **confirmed** skipping after the skip confirmation prompt. In **
         if (blockWhisperForVadBypassNoSpeech) {
           pendingRecordingRestartAfterVadBypassRef.current = true;
         }
-        // #region agent log
-        fetch('http://127.0.0.1:7789/ingest/668e0bd5-3283-4492-9f48-e33846c18218', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json', 'X-Debug-Session-Id': 'c61a43' },
-          body: JSON.stringify({
-            sessionId: 'c61a43',
-            location: 'AriaScreen.tsx:onRecordingComplete:no_speech_retake',
-            message: 'no_speech_path',
-            data: {
-              hypothesisId: 'VadBlock-1',
-              has_non_zero_audio: analysis.has_non_zero_audio,
-              blockWhisperForVadBypassNoSpeech,
-              peak_db: analysis.peak_amplitude_db,
-              vad_threshold_db: analysis.vad_threshold_db,
-              vadGateBypassed,
-              will_skip_whisper: blockWhisperForVadBypassNoSpeech,
-            },
-            timestamp: Date.now(),
-            runId: 'speech-detect-debug',
-          }),
-        }).catch(() => {});
-        // #endregion
         if (userId) {
           const r = getSessionLogRuntime();
           markLastAudioSessionEventType('silent_buffer_detected');
@@ -12655,24 +11577,6 @@ The participant **confirmed** skipping after the skip confirmation prompt. In **
         setVoiceState('idle');
         return;
       }
-      // #region agent log
-      fetch('http://127.0.0.1:7789/ingest/668e0bd5-3283-4492-9f48-e33846c18218', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'X-Debug-Session-Id': 'c61a43' },
-        body: JSON.stringify({
-          sessionId: 'c61a43',
-          location: 'AriaScreen.tsx:onRecordingComplete:proceed_transcribe',
-          message: 'recording_complete_proceeding_whisper',
-          data: {
-            hypothesisId: 'HOK',
-            has_non_zero_audio: analysis.has_non_zero_audio,
-            firstSpeechOffsetMs: analysis.firstSpeechOffsetMs,
-          },
-          timestamp: Date.now(),
-          runId: 'speech-detect-debug',
-        }),
-      }).catch(() => {});
-      // #endregion
       transcribeBufferMetaRef.current = {
         audio_duration_ms: analysis.audio_duration_ms,
         buffer_size_bytes: analysis.buffer_size_bytes,
@@ -12742,39 +11646,6 @@ The participant **confirmed** skipping after the skip confirmation prompt. In **
       setLastWhisperRatioTelemetry(ratioFlag, durMs, wc);
       {
         const lastQ = lastQuestionText ?? '';
-        // #region agent log
-        fetch('http://127.0.0.1:7789/ingest/668e0bd5-3283-4492-9f48-e33846c18218', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json', 'X-Debug-Session-Id': 'c61a43' },
-          body: JSON.stringify({
-            sessionId: 'c61a43',
-            location: 'AriaScreen.tsx:onRecordingComplete:whisper_ratio_gate',
-            message: 'whisper_ratio_gate',
-            data: {
-              hypothesisId: 'H1-H5',
-              moment: currentInterviewMomentRef.current,
-              scenario: currentScenarioRef.current,
-              lastQEmpty: lastQ.trim().length === 0,
-              lastQPreview: lastQ.slice(0, 160),
-              shortAnswerOk,
-              turnContext,
-              userTextPreview: userText.slice(0, 120),
-              wc,
-              durMs,
-              wpsRounded: Math.round(wps * 1000) / 1000,
-              ratioFlag,
-              willRatioReask,
-              ratioReaskShouldFire: ratioReaskState.shouldFire,
-              ratioReaskAttempts: whisperRatioReaskAttemptsForCurrentQuestionRef.current,
-              ratioReaskLogSuppressed: ratioReaskState.logSuppressedReason,
-              metaCommentEffectiveType: metaResolvedForWhisperGate.effective?.type ?? null,
-              ratioReaskSuppressedForMetaComment: metaResolvedForWhisperGate.effective != null,
-            },
-            timestamp: Date.now(),
-            runId: 'post-fix',
-          }),
-        }).catch(() => {});
-        // #endregion
       }
       if (userId) {
         const r = getSessionLogRuntime();
@@ -12812,27 +11683,6 @@ The participant **confirmed** skipping after the skip confirmation prompt. In **
       }
       if (willRatioReask) {
         whisperRatioReaskAttemptsForCurrentQuestionRef.current += 1;
-        // #region agent log
-        fetch('http://127.0.0.1:7789/ingest/668e0bd5-3283-4492-9f48-e33846c18218', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json', 'X-Debug-Session-Id': 'c61a43' },
-          body: JSON.stringify({
-            sessionId: 'c61a43',
-            location: 'AriaScreen.tsx:onRecordingComplete:whisper_ratio_reask_fired',
-            message: 'WHISPER_RATIO_REASK_PROMPT path',
-            data: {
-              hypothesisId: 'H1',
-              moment: currentInterviewMomentRef.current,
-              lastQPreview: (lastQuestionTextRef.current ?? '').slice(0, 160),
-              userTextPreview: userText.slice(0, 120),
-              wc,
-              wps: Math.round(wps * 1000) / 1000,
-            },
-            timestamp: Date.now(),
-            runId: 'post-fix',
-          }),
-        }).catch(() => {});
-        // #endregion
         if (userId) {
           const r = getSessionLogRuntime();
           const n = incrementReAskCountThisSession();
@@ -12882,6 +11732,10 @@ The participant **confirmed** skipping after the skip confirmation prompt. In **
         turnIndex,
         scenarioNumber,
       });
+      lastUserTurnAudioDurationMsRef.current =
+        typeof analysis.audio_duration_ms === 'number' && Number.isFinite(analysis.audio_duration_ms)
+          ? analysis.audio_duration_ms
+          : null;
       processUserSpeech(userText);
       } finally {
         await releaseRecordingFnRef.current?.({
@@ -13173,20 +12027,6 @@ The participant **confirmed** skipping after the skip confirmation prompt. In **
     if (Platform.OS !== 'web') return;
     if (voiceStateRef.current !== 'idle') return;
     if (audioRecorder.isRecording) return;
-    // #region agent log
-    fetch('http://127.0.0.1:7789/ingest/668e0bd5-3283-4492-9f48-e33846c18218', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'X-Debug-Session-Id': 'e70f17' },
-      body: JSON.stringify({
-        sessionId: 'e70f17',
-        location: 'AriaScreen.tsx:startRecordingAfterPendingTts',
-        message: 'auto_start_recording_after_pending_tts',
-        data: { hypothesisId: 'H10' },
-        timestamp: Date.now(),
-        runId: 'post-fix',
-      }),
-    }).catch(() => {});
-    // #endregion
     try {
       if (userId && getSessionLogRuntime().ttsPlaybackActive) {
         const r = getSessionLogRuntime();
@@ -13353,9 +12193,6 @@ The participant **confirmed** skipping after the skip confirmation prompt. In **
   const handleNativeOrWhisperMicPress = useCallback(async () => {
     touchActivity();
     setSessionAudioHealthNotice(null);
-    // #region agent log
-    fetch('http://127.0.0.1:7789/ingest/668e0bd5-3283-4492-9f48-e33846c18218',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'c61a43'},body:JSON.stringify({sessionId:'c61a43',runId:'pre-fix',hypothesisId:'H4',location:'AriaScreen.tsx:handleNativeOrWhisperMicPress:entry',message:'mic_press_received',data:{voiceState,ttsPlaybackActive:getSessionLogRuntime().ttsPlaybackActive,isRecording:audioRecorder.isRecording},timestamp:Date.now()})}).catch(()=>{});
-    // #endregion
     if (Platform.OS === 'web') {
       unlockWebAudioForAutoplay();
       primeHtmlAudioForMobileTtsFromMicGesture();
@@ -13364,24 +12201,6 @@ The participant **confirmed** skipping after the skip confirmation prompt. In **
     if (!useTapMicUi) return;
     /** Tap-to-record: stop capture before any web TTS gesture flush or voice-state gate; otherwise the tap can be consumed and MediaRecorder never stops. */
     if (useMediaRecorderPath && audioRecorder.isRecording) {
-      // #region agent log
-      fetch('http://127.0.0.1:7789/ingest/668e0bd5-3283-4492-9f48-e33846c18218', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'X-Debug-Session-Id': 'c61a43' },
-        body: JSON.stringify({
-          sessionId: 'c61a43',
-          location: 'AriaScreen.tsx:handleNativeOrWhisperMicPress',
-          message: 'mic_stop_priority',
-          data: {
-            hypothesisId: 'H1',
-            voiceState,
-            hasPendingBlob: hasPendingWebGestureBlobUrl(),
-          },
-          timestamp: Date.now(),
-          runId: 'post-fix',
-        }),
-      }).catch(() => {});
-      // #endregion
       if (__DEV__) console.log('[Aria] MIC PRESSED, isRecording: true → stop priority');
       try {
         await audioRecorder.stopRecording();
@@ -13697,26 +12516,6 @@ The participant **confirmed** skipping after the skip confirmation prompt. In **
               userTurns,
               resumeActiveFromStorage: saved.resumeActiveScenario ?? null,
             });
-            // #region agent log
-            fetch('http://127.0.0.1:7789/ingest/668e0bd5-3283-4492-9f48-e33846c18218', {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json', 'X-Debug-Session-Id': 'e43434' },
-              body: JSON.stringify({
-                sessionId: 'e43434',
-                runId: 'post-fix',
-                hypothesisId: 'H-orphan-rebind',
-                location: 'AriaScreen.tsx:handleResume',
-                message: 'attempt_row_missing_rebound',
-                data: {
-                  missingRowId: attemptRowId,
-                  bootstrapId,
-                  userTurns,
-                  messageCount: saved.messages?.length ?? 0,
-                },
-                timestamp: Date.now(),
-              }),
-            }).catch(() => {});
-            // #endregion
           } else {
           await clearInterviewFromStorage(userId);
             await remoteLog('[resume] stale_session_attempt_cleared', { orphanAttemptId: attemptRowId });
@@ -13783,35 +12582,6 @@ The participant **confirmed** skipping after the skip confirmation prompt. In **
         lastStoredUserPreview: (lastStoredUser?.content ?? '').slice(0, 360),
         shouldRestartIncompleteScenario,
       });
-      // #region agent log
-      fetch('http://127.0.0.1:7789/ingest/668e0bd5-3283-4492-9f48-e33846c18218', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'X-Debug-Session-Id': '7605c3' },
-        body: JSON.stringify({
-          sessionId: '7605c3',
-          runId: 'resume-debug',
-          hypothesisId: 'H5_RESUME_REF_NOT_HYDRATED,H6_STORED_REDUNDANT_ASSISTANT,H7_RESUME_GATE_REPLAY',
-          location: 'AriaScreen.tsx:handleResume:reentry_resume_snapshot',
-          message: 'scenario_a_resume_transcript_snapshot',
-          data: {
-            mode: resumePlan.mode,
-            resumeScenario: resumePlan.resumeScenario,
-            effectiveMoment: resumePlan.effectiveMoment,
-            transcriptLenBefore: restoredForPlan.length,
-            transcriptLenAfter: transcriptMessages.length,
-            lastStoredAssistantScenario: (lastStoredAssistant as { scenarioNumber?: number } | undefined)?.scenarioNumber ?? null,
-            lastStoredAssistantLooksLikeContemptProbe: lastStoredAssistant
-              ? looksLikeScenarioAContemptProbeQuestion(lastStoredAssistant.content ?? '')
-              : false,
-            lastStoredAssistantPreview: (lastStoredAssistant?.content ?? '').slice(0, 360),
-            lastStoredUserCoverage: scenarioAStoredUserCoverage,
-            lastStoredUserPreview: (lastStoredUser?.content ?? '').slice(0, 360),
-            shouldRestartIncompleteScenario,
-          },
-          timestamp: Date.now(),
-        }),
-      }).catch(() => {});
-      // #endregion
 
       if (!didOrphanAttemptRebind && !attemptMismatch && savedAttemptId) {
         interviewSessionAttemptIdRef.current = savedAttemptId;
@@ -13849,27 +12619,13 @@ The participant **confirmed** skipping after the skip confirmation prompt. In **
           m.role === 'assistant' &&
           looksLikeMoment5SpecificityRedirectPrompt((m as { content?: string }).content ?? '')
       );
-      // #region agent log
-      fetch('http://127.0.0.1:7789/ingest/668e0bd5-3283-4492-9f48-e33846c18218', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'X-Debug-Session-Id': 'e43434' },
-        body: JSON.stringify({
-          sessionId: 'e43434',
-          runId: 'm5-anchor-debug',
-          hypothesisId: 'H5_resume_state_restore',
-          location: 'AriaScreen.tsx:rehydrate_transcript_refs',
-          message: 'm5_resume_refs_restored',
-          data: {
-            transcriptLen: transcriptMessages.length,
-            accountabilityProbeFired: moment5AccountabilityProbeFiredRef.current,
-            specificityRedirectIssued: moment5SpecificityRedirectIssuedRef.current,
-            lastAssistantPreview:
-              [...transcriptMessages].reverse().find((m) => m.role === 'assistant')?.content?.slice(0, 160) ?? null,
-          },
-          timestamp: Date.now(),
-        }),
-      }).catch(() => {});
-      // #endregion
+      moment5ConflictValidityClarificationIssuedRef.current =
+        saved.moment_5_clarification_fired === true ||
+        transcriptMessages.some(
+          (m) =>
+            m.role === 'assistant' &&
+            looksLikeMoment5ConflictValidityClarificationPrompt((m as { content?: string }).content ?? '')
+        );
       const transcriptHasM5PrimaryConflict = transcriptMessages.some(
         (m) =>
           m.role === 'assistant' &&
@@ -13887,12 +12643,14 @@ The participant **confirmed** skipping after the skip confirmation prompt. In **
           m.role === 'assistant' &&
           looksLikeScenarioAContemptProbeQuestion((m as { content?: string }).content ?? '')
       );
-      const scenarioAContemptProbeSatisfiedByUser = transcriptMessages.some(
-        (m) =>
-          m.role === 'user' &&
-          (m as { scenarioNumber?: number }).scenarioNumber === 1 &&
-          hasScenarioAQ1ContemptProbeCoverage((m as { content?: string }).content ?? '')
-      );
+      const scenarioAContemptProbeSatisfiedByUser = transcriptMessages.some((m) => {
+        if (m.role !== 'user' || (m as { scenarioNumber?: number }).scenarioNumber !== 1) return false;
+        const content = (m as { content?: string }).content ?? '';
+        return (
+          hasScenarioAQ1ContemptProbeCoverage(content) ||
+          evaluateScenarioAQ1ContemptProbePreProbeSkip(content).skip
+        );
+      });
       scenarioAContemptProbeAskedRef.current =
         scenarioAContemptProbePreviouslyAsked || scenarioAContemptProbeSatisfiedByUser;
       void remoteLog('[S1_RESUME_REF_DEBUG_7605c3]', {
@@ -13905,28 +12663,6 @@ The participant **confirmed** skipping after the skip confirmation prompt. In **
         currentMoment: currentInterviewMomentRef.current,
         resumeScenario: resumePlan.resumeScenario,
       });
-      // #region agent log
-      fetch('http://127.0.0.1:7789/ingest/668e0bd5-3283-4492-9f48-e33846c18218', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'X-Debug-Session-Id': '7605c3' },
-        body: JSON.stringify({
-          sessionId: '7605c3',
-          runId: 'resume-debug',
-          hypothesisId: 'H5_RESUME_REF_NOT_HYDRATED,H6_STORED_REDUNDANT_ASSISTANT',
-          location: 'AriaScreen.tsx:handleResume:scenario_a_ref_restore',
-          message: 'scenario_a_resume_refs_restored',
-          data: {
-            scenarioAContemptProbeAskedRef: scenarioAContemptProbeAskedRef.current,
-            matchingAssistantCount: transcriptMessages.filter(
-              (m) => m.role === 'assistant' && looksLikeScenarioAContemptProbeQuestion((m as { content?: string }).content ?? '')
-            ).length,
-            currentMoment: currentInterviewMomentRef.current,
-            resumeScenario: resumePlan.resumeScenario,
-          },
-          timestamp: Date.now(),
-        }),
-      }).catch(() => {});
-      // #endregion
       s2RepairProbeDeliveredRef.current = transcriptMessages.some(
         (m) =>
           m.role === 'assistant' &&
@@ -13955,6 +12691,7 @@ The participant **confirmed** skipping after the skip confirmation prompt. In **
           sessionAttemptId: persistenceAttemptId,
           messages: transcriptMessages,
           resumeActiveScenario: resumeActiveScenarioRef.current,
+          moment_5_clarification_fired: moment5ConflictValidityClarificationIssuedRef.current,
         });
       }
 
@@ -14037,27 +12774,6 @@ The participant **confirmed** skipping after the skip confirmation prompt. In **
         .flatMap((m) => detectConstructs(m.content));
       setTouchedConstructs([...new Set(allDetected)]);
 
-      // #region agent log
-      fetch('http://127.0.0.1:7789/ingest/668e0bd5-3283-4492-9f48-e33846c18218', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'X-Debug-Session-Id': 'ca824c' },
-        body: JSON.stringify({
-          sessionId: 'ca824c',
-          hypothesisId: 'H_plan',
-          location: 'AriaScreen.tsx:resume:before_buildResumeWelcomeMessage',
-          message: 'resume_plan_snapshot',
-          data: {
-            runId: 'post-copy-fix',
-            mode: resumePlan.mode,
-            resumeScenario: resumePlan.resumeScenario,
-            effectiveMoment: resumePlan.effectiveMoment,
-            partialScenarioDataWritten: resumePlan.partialScenarioDataWritten,
-            lastCompletedScenario: resumePlan.lastCompletedScenario,
-          },
-          timestamp: Date.now(),
-        }),
-      }).catch(() => {});
-      // #endregion
       resumeWelcomeMessageRef.current = buildResumeWelcomeMessage({
         mode: resumePlan.mode,
         resumeScenario: resumePlan.resumeScenario,
@@ -14081,53 +12797,10 @@ The participant **confirmed** skipping after the skip confirmation prompt. In **
         welcomeBackPreview: welcomeBack.slice(0, 180),
         hasScenarioIntroMsg: !!scenarioIntroMsg,
       });
-      // #region agent log
-      fetch('http://127.0.0.1:7789/ingest/668e0bd5-3283-4492-9f48-e33846c18218', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'X-Debug-Session-Id': '7605c3' },
-        body: JSON.stringify({
-          sessionId: '7605c3',
-          runId: 'resume-debug',
-          hypothesisId: 'H7_RESUME_GATE_REPLAY,H6_STORED_REDUNDANT_ASSISTANT',
-          location: 'AriaScreen.tsx:handleResume:resume_last_assistant',
-          message: 'scenario_a_resume_last_assistant_selected',
-          data: {
-            resumeLastAssistantLooksLikeContemptProbe: looksLikeScenarioAContemptProbeQuestion(
-              resumeLastAssistantTextRef.current ?? ''
-            ),
-            resumeLastAssistantPreview: (resumeLastAssistantTextRef.current ?? '').slice(0, 360),
-            messageCountWithWelcome: messagesWithWelcome.length,
-            welcomeBackPreview: welcomeBack.slice(0, 180),
-            hasScenarioIntroMsg: !!scenarioIntroMsg,
-          },
-          timestamp: Date.now(),
-        }),
-      }).catch(() => {});
-      // #endregion
       setMessages(messagesWithWelcome);
 
       const assistantForRef = messagesWithWelcome.filter((m) => isAssistantBubbleForTranscript(m));
       const refSync = syncReferenceCardStateFromAssistantMessages(assistantForRef);
-      // #region agent log
-      fetch('http://127.0.0.1:7789/ingest/668e0bd5-3283-4492-9f48-e33846c18218', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'X-Debug-Session-Id': 'e43434' },
-        body: JSON.stringify({
-          sessionId: 'e43434',
-          runId: 'post-fix',
-          hypothesisId: 'H-modal-mismatch',
-          location: 'AriaScreen.tsx:handleResume:after_refSync',
-          message: 'reference_card_vs_transcript_m5',
-          data: {
-            transcriptHasM5PrimaryConflict,
-            effectiveMoment: resumePlan.effectiveMoment,
-            refPromptPreview: (refSync.prompt ?? '').slice(0, 140),
-            anchorLabel: refSync.scenario?.label ?? null,
-          },
-          timestamp: Date.now(),
-        }),
-      }).catch(() => {});
-      // #endregion
       committedScenarioRef.current = refSync.scenario;
       setReferenceCardScenario(refSync.scenario);
       setReferenceCardPrompt(refSync.prompt);
@@ -14182,26 +12855,6 @@ The participant **confirmed** skipping after the skip confirmation prompt. In **
     let cancelled = false;
     (async () => {
       const saved = await loadInterviewFromStorage(userId);
-      // #region agent log
-      fetch('http://127.0.0.1:7789/ingest/668e0bd5-3283-4492-9f48-e33846c18218', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'X-Debug-Session-Id': 'c61a43' },
-        body: JSON.stringify({
-          sessionId: 'c61a43',
-          runId: 'pre-fix',
-          hypothesisId: 'H4',
-          location: 'AriaScreen.tsx:resumeEffect',
-          message: 'saved_payload_loaded',
-          data: {
-            hasSaved: !!saved,
-            savedMessageCount: saved?.messages?.length ?? 0,
-            savedCompletedCount: saved?.scenariosCompleted?.length ?? 0,
-            savedCurrentScenario: saved?.currentScenario ?? null,
-          },
-          timestamp: Date.now(),
-        }),
-      }).catch(() => {});
-      // #endregion
       if (cancelled) return;
       if (!saved?.messages?.length) return;
       if (saved.pendingCompletion) {
@@ -14225,43 +12878,10 @@ The participant **confirmed** skipping after the skip confirmation prompt. In **
             attemptStillThere,
             hadPendingCompletion: true,
           });
-          // #region agent log
-          fetch('http://127.0.0.1:7789/ingest/668e0bd5-3283-4492-9f48-e33846c18218', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json', 'X-Debug-Session-Id': 'c61a43' },
-            body: JSON.stringify({
-              sessionId: 'c61a43',
-              runId: 'post-fix',
-              hypothesisId: 'H-A',
-              location: 'AriaScreen.tsx:resumeEffect',
-              message: 'stale_pending_completion_cleared',
-              data: { aidOk, attemptStillThere },
-              timestamp: Date.now(),
-            }),
-          }).catch(() => {});
-          // #endregion
           return;
         }
         hasResumedRef.current = true;
         const transcript = saved.messages.filter((m) => m.role === 'user' || m.role === 'assistant');
-        // #region agent log
-        fetch('http://127.0.0.1:7789/ingest/668e0bd5-3283-4492-9f48-e33846c18218', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json', 'X-Debug-Session-Id': 'c61a43' },
-          body: JSON.stringify({
-            sessionId: 'c61a43',
-            runId: 'post-fix',
-            hypothesisId: 'H7',
-            location: 'AriaScreen.tsx:resumeEffect',
-            message: 'resume_pending_completion_branch',
-            data: {
-              transcriptLen: transcript.length,
-              savedMessageCount: saved.messages.length,
-            },
-            timestamp: Date.now(),
-          }),
-        }).catch(() => {});
-        // #endregion
         pendingCompletionTranscriptRef.current = transcript;
         setPendingCompletion(true);
         setInterviewStatus('preparing_results');
@@ -14269,25 +12889,6 @@ The participant **confirmed** skipping after the skip confirmation prompt. In **
       }
       // Don't resume from greeting-only state (avoids infinite resume loop)
       if (isGreetingOnly(saved.messages)) {
-        // #region agent log
-        fetch('http://127.0.0.1:7789/ingest/668e0bd5-3283-4492-9f48-e33846c18218', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json', 'X-Debug-Session-Id': 'e43434' },
-          body: JSON.stringify({
-            sessionId: 'e43434',
-            runId: 'post-fix',
-            hypothesisId: 'H-greeting-wipe',
-            location: 'AriaScreen.tsx:resumeEffect',
-            message: 'greeting_only_storage_cleared',
-            data: {
-              savedLen: saved.messages?.length ?? 0,
-              userTurns: saved.messages?.filter((m) => m.role === 'user').length ?? 0,
-              resumeActiveScenario: saved.resumeActiveScenario ?? null,
-            },
-            timestamp: Date.now(),
-          }),
-        }).catch(() => {});
-        // #endregion
         await clearInterviewFromStorage(userId);
         return;
       }
@@ -14301,29 +12902,6 @@ The participant **confirmed** skipping after the skip confirmation prompt. In **
         (saved.scenariosCompleted?.length ?? 0) > 0 || lastCompletedFromPayload > 0;
       if (hasScenarioProgress || hasCompletedScenario) {
         const completedCount = saved.scenariosCompleted?.length ?? 0;
-        // #region agent log
-        fetch('http://127.0.0.1:7789/ingest/668e0bd5-3283-4492-9f48-e33846c18218', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json', 'X-Debug-Session-Id': 'e43434' },
-          body: JSON.stringify({
-            sessionId: 'e43434',
-            runId: 'post-fix',
-            hypothesisId: 'H-resume-branch',
-            location: 'AriaScreen.tsx:resumeEffect',
-            message: 'resume_decision',
-            data: {
-              hasScenarioProgress,
-              hasCompletedScenario,
-              completedCount,
-              lastCompletedFromPayload,
-              userTurnsTotal,
-              resumeActiveScenario: saved.resumeActiveScenario ?? null,
-              willResume: completedCount < 3,
-            },
-            timestamp: Date.now(),
-          }),
-        }).catch(() => {});
-        // #endregion
         if (completedCount < 3) {
           hasResumedRef.current = true;
           void handleResume(saved).catch(() => {
@@ -14788,40 +13366,12 @@ The participant **confirmed** skipping after the skip confirmation prompt. In **
     if (status !== 'starting_interview') return;
     if (interviewStatus !== 'not_started') return;
     if (onboardingAutoStartRef.current) {
-      // #region agent log
-      fetch('http://127.0.0.1:7789/ingest/668e0bd5-3283-4492-9f48-e33846c18218', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'X-Debug-Session-Id': 'e70f17' },
-        body: JSON.stringify({
-          sessionId: 'e70f17',
-          location: 'AriaScreen.tsx:autoStartEffect',
-          message: 'skip_ref_already_true',
-          data: { status, interviewStatus },
-          timestamp: Date.now(),
-          hypothesisId: 'H2',
-        }),
-      }).catch(() => {});
-      // #endregion
       return;
     }
     /** Web: never start from this effect — no user gesture after refresh; use overlay (mobile) or pointerdown (desktop). */
     if (Platform.OS === 'web') {
       return;
     }
-    // #region agent log
-    fetch('http://127.0.0.1:7789/ingest/668e0bd5-3283-4492-9f48-e33846c18218', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'X-Debug-Session-Id': 'e70f17' },
-      body: JSON.stringify({
-        sessionId: 'e70f17',
-        location: 'AriaScreen.tsx:autoStartEffect',
-        message: 'effect_calls_startInterview_native',
-        data: {},
-        timestamp: Date.now(),
-        hypothesisId: 'H4',
-      }),
-    }).catch(() => {});
-    // #endregion
     if (interviewAttemptBootstrap !== 'ready') return;
     onboardingAutoStartRef.current = true;
     void startInterview();
@@ -14887,20 +13437,6 @@ The participant **confirmed** skipping after the skip confirmation prompt. In **
    */
   const handleMobileWebTapToBegin = useCallback(
     (shouldStartInterview: boolean) => {
-      // #region agent log
-      fetch('http://127.0.0.1:7789/ingest/668e0bd5-3283-4492-9f48-e33846c18218', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'X-Debug-Session-Id': 'e70f17' },
-        body: JSON.stringify({
-          sessionId: 'e70f17',
-          location: 'AriaScreen.tsx:handleMobileWebTapToBegin',
-          message: 'overlay_press',
-          data: { shouldStartInterview },
-          timestamp: Date.now(),
-          hypothesisId: 'H1',
-        }),
-      }).catch(() => {});
-      // #endregion
       unlockWebAudioForAutoplay();
       primeHtmlAudioForMobileTtsFromMicGesture();
       setMobileWebTapToBeginDone(true);
@@ -15080,7 +13616,9 @@ The participant **confirmed** skipping after the skip confirmation prompt. In **
                   }
                   const raw = (data.content?.[0]?.text ?? '{}') as string;
                   const parsedM4 = parseJsonObjectFromModelText(raw) as PersonalMomentScoreResult;
-                  parsedM4.pillarScores = normalizeScoresByEvidence(parsedM4.pillarScores, parsedM4.keyEvidence);
+                  parsedM4.pillarScores = mergeMoment4PillarScoresAfterEvidenceNormalize(
+                    normalizeScoresByEvidence(parsedM4.pillarScores, parsedM4.keyEvidence)
+                  ) as PersonalMomentScoreResult['pillarScores'];
                   const depthModifierMeta = applyElaborationAbsenceAfterNormalizeMoment4(
                     parsedM4,
                     scoringSlice,
@@ -15114,54 +13652,18 @@ The participant **confirmed** skipping after the skip confirmation prompt. In **
               moment4ForAggregate = sanitizePersonalMomentScoresForAggregate(
                 scored as unknown as PersonalMomentSliceForSanitize,
               );
-              // #region agent log
-              fetch('http://127.0.0.1:7789/ingest/668e0bd5-3283-4492-9f48-e33846c18218', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json', 'X-Debug-Session-Id': 'c61a43' },
-                body: JSON.stringify({
-                  sessionId: 'c61a43',
-                  location: 'AriaScreen.tsx:scoreInterview:standardM4',
-                  message: 'standard deferred moment4 scored',
-                  data: { hasMoment4: !!moment4ForAggregate, userTurnsM4 },
-                  timestamp: Date.now(),
-                  hypothesisId: 'M4-STD',
-                }),
-              }).catch(() => {});
-              // #endregion
+              if (moment4ForAggregate && !personalMomentBundleWasScored(moment4ForAggregate)) {
+                await remoteLog('[STANDARD] moment 4 slice not assessable after sanitize; storing null', {
+                  attemptId: interviewSessionAttemptIdRef.current,
+                });
+                moment4ForAggregate = null;
+              }
             } catch (err) {
               await remoteLog('[STANDARD] moment 4 scoring failed', {
                 message: err instanceof Error ? err.message : String(err),
               });
-              // #region agent log
-              fetch('http://127.0.0.1:7789/ingest/668e0bd5-3283-4492-9f48-e33846c18218', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json', 'X-Debug-Session-Id': 'c61a43' },
-                body: JSON.stringify({
-                  sessionId: 'c61a43',
-                  location: 'AriaScreen.tsx:scoreInterview:standardM4',
-                  message: 'standard deferred moment4 scoring error',
-                  data: { err: err instanceof Error ? err.message : String(err), userTurnsM4 },
-                  timestamp: Date.now(),
-                  hypothesisId: 'M4-STD',
-                }),
-              }).catch(() => {});
-              // #endregion
             }
           } else {
-            // #region agent log
-            fetch('http://127.0.0.1:7789/ingest/668e0bd5-3283-4492-9f48-e33846c18218', {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json', 'X-Debug-Session-Id': 'c61a43' },
-              body: JSON.stringify({
-                sessionId: 'c61a43',
-                location: 'AriaScreen.tsx:scoreInterview:standardM4',
-                message: 'standard deferred moment4 skipped (no user turns)',
-                data: { userTurnsM4 },
-                timestamp: Date.now(),
-                hypothesisId: 'M4-STD',
-              }),
-            }            ).catch(() => {});
-            // #endregion
           }
           const sliceM5 = personalSlices.moment5;
           const userTurnsM5 = sliceM5.filter((m) => m.role === 'user').length;
@@ -15172,6 +13674,7 @@ The participant **confirmed** skipping after the skip confirmation prompt. In **
                 probeTriggerReason: moment5AccountabilityProbeFiredRef.current
                   ? 'lacks_explicit_self_accountability'
                   : undefined,
+                ...(moment5AccountabilityProbeFiredRef.current ? { warmAckBeforeAccountabilityProbe: true } : {}),
               };
             try {
               const scoredM5 = await withRetry(
@@ -15200,6 +13703,7 @@ The participant **confirmed** skipping after the skip confirmation prompt. In **
                   }
                   const raw = (data.content?.[0]?.text ?? '{}') as string;
                   const parsedM5 = parseJsonObjectFromModelText(raw) as PersonalMomentScoreResult;
+                  promoteMoment5LegacyContemptForScoringResult(parsedM5);
                   parsedM5.pillarScores = normalizeScoresByEvidence(parsedM5.pillarScores, parsedM5.keyEvidence);
                   const depthModifierMeta = applyElaborationAbsenceAfterNormalizeMoment5(parsedM5, sliceM5, msgsDeferred, m5Meta);
                   void remoteLog('[SCORING_DEPTH_MODIFIER]', {
@@ -15226,6 +13730,12 @@ The participant **confirmed** skipping after the skip confirmation prompt. In **
               moment5ForAggregate = sanitizeMoment5PersonalScoresForAggregate(
                 scoredM5 as unknown as PersonalMoment5SliceForSanitize,
               );
+              if (moment5ForAggregate && !personalMomentBundleWasScored(moment5ForAggregate)) {
+                await remoteLog('[STANDARD] moment 5 slice not assessable after sanitize; storing null', {
+                  attemptId: interviewSessionAttemptIdRef.current,
+                });
+                moment5ForAggregate = null;
+              }
             } catch (err) {
               await remoteLog('[STANDARD] moment 5 scoring failed', {
                 message: err instanceof Error ? err.message : String(err),
@@ -15312,20 +13822,6 @@ The participant **confirmed** skipping after the skip confirmation prompt. In **
           scoring_deferred: completionGateStandard.ok,
           interview_typology_context: context,
         };
-        // #region agent log
-        fetch('http://127.0.0.1:7789/ingest/668e0bd5-3283-4492-9f48-e33846c18218', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json', 'X-Debug-Session-Id': 'c61a43' },
-          body: JSON.stringify({
-            sessionId: 'c61a43',
-            location: 'AriaScreen.tsx:scoreInterview:rowPayload',
-            message: 'standard deferred rowPayload moment4 snapshot',
-            data: { persistedMoment4: !!moment4ForAggregate },
-            timestamp: Date.now(),
-            hypothesisId: 'M4-STD',
-          }),
-        }).catch(() => {});
-        // #endregion
         let attemptId: string | null = null;
         if (existingAttemptId) {
           const { error: upe } = await supabase
@@ -15416,6 +13912,15 @@ The participant **confirmed** skipping after the skip confirmation prompt. In **
               eventData: { path: 'standard_onboarding_incomplete_gate_server', attemptId },
               platform: getSessionLogRuntime().platform,
             });
+            {
+              const rtp = getSessionLogRuntime();
+              void runCommunicationStylePipelineAfterSave(
+                userId,
+                attemptId,
+                interviewSessionIdRef.current,
+                { platform: rtp.platform },
+              );
+            }
           } else {
         writeSessionLog({
           userId,
@@ -15450,6 +13955,15 @@ The participant **confirmed** skipping after the skip confirmation prompt. In **
             },
             platform: getSessionLogRuntime().platform,
           });
+          {
+            const rtp = getSessionLogRuntime();
+            void runCommunicationStylePipelineAfterSave(
+              userId,
+              attemptId,
+              interviewSessionIdRef.current,
+              { platform: rtp.platform },
+            );
+          }
         }
         await clearInterviewFromStorage(userId);
         await remoteLog('[STANDARD] application saved; post-interview (server scoring complete)', {
@@ -15777,7 +14291,9 @@ The participant **confirmed** skipping after the skip confirmation prompt. In **
                   }
                   const raw = (data.content?.[0]?.text ?? '{}') as string;
                   const parsed = parseJsonObjectFromModelText(raw) as PersonalMomentScoreResult;
-                  parsed.pillarScores = normalizeScoresByEvidence(parsed.pillarScores, parsed.keyEvidence);
+                  parsed.pillarScores = mergeMoment4PillarScoresAfterEvidenceNormalize(
+                    normalizeScoresByEvidence(parsed.pillarScores, parsed.keyEvidence)
+                  ) as PersonalMomentScoreResult['pillarScores'];
                   const depthModifierMeta = applyElaborationAbsenceAfterNormalizeMoment4(
                     parsed,
                     scoringSlice,
@@ -15815,9 +14331,13 @@ The participant **confirmed** skipping after the skip confirmation prompt. In **
             }
           };
           const moment4Score = await scorePersonalMoment(personalSlices.moment4);
-          const moment4ForAggregate = sanitizePersonalMomentScoresForAggregate(
+          let moment4ForAggregate = sanitizePersonalMomentScoresForAggregate(
             moment4Score as unknown as PersonalMomentSliceForSanitize,
           );
+          if (moment4ForAggregate && !personalMomentBundleWasScored(moment4ForAggregate)) {
+            if (__DEV__) console.warn('[Alpha] moment 4: slice not assessable after sanitize; treating as null');
+            moment4ForAggregate = null;
+          }
           const scorePersonalMoment5 = async (
             slice: { role: string; content: string }[]
           ): Promise<PersonalMomentScoreResult | null> => {
@@ -15830,6 +14350,7 @@ The participant **confirmed** skipping after the skip confirmation prompt. In **
                 probeTriggerReason: moment5AccountabilityProbeFiredRef.current
                   ? 'lacks_explicit_self_accountability'
                   : undefined,
+                ...(moment5AccountabilityProbeFiredRef.current ? { warmAckBeforeAccountabilityProbe: true } : {}),
               };
             try {
               const scored = await withRetry(
@@ -15856,6 +14377,7 @@ The participant **confirmed** skipping after the skip confirmation prompt. In **
                   }
                   const raw = (data.content?.[0]?.text ?? '{}') as string;
                   const parsed = parseJsonObjectFromModelText(raw) as PersonalMomentScoreResult;
+                  promoteMoment5LegacyContemptForScoringResult(parsed);
                   parsed.pillarScores = normalizeScoresByEvidence(parsed.pillarScores, parsed.keyEvidence);
                   const depthModifierMeta = applyElaborationAbsenceAfterNormalizeMoment5(parsed, slice, finalMessages, m5Meta);
                   void remoteLog('[SCORING_DEPTH_MODIFIER]', {
@@ -15886,9 +14408,13 @@ The participant **confirmed** skipping after the skip confirmation prompt. In **
             }
           };
           const moment5Score = await scorePersonalMoment5(personalSlices.moment5);
-          const moment5ForAggregate = sanitizeMoment5PersonalScoresForAggregate(
+          let moment5ForAggregate = sanitizeMoment5PersonalScoresForAggregate(
             moment5Score as unknown as PersonalMoment5SliceForSanitize,
           );
+          if (moment5ForAggregate && !personalMomentBundleWasScored(moment5ForAggregate)) {
+            if (__DEV__) console.warn('[Alpha] moment 5: slice not assessable after sanitize; treating as null');
+            moment5ForAggregate = null;
+          }
           const txForContempt = finalMessages as MessageWithScenario[];
           const enrichScenarioSliceAtCompletion = (n: 1 | 2 | 3) => {
             const bundle = scenarioScoresRef.current[n];
@@ -16571,43 +15097,9 @@ The participant **confirmed** skipping after the skip confirmation prompt. In **
     /** After `[INTERVIEW_COMPLETE]`, `isInterviewCompleteRef` is set before closing TTS — allow scoring start even if parallel streaming left `voiceState` stuck on speaking/processing. */
     const voiceOkForScoringStart = voiceState === 'idle' || isInterviewCompleteRef.current;
     if (!voiceOkForScoringStart) {
-      // #region agent log
-      fetch('http://127.0.0.1:7789/ingest/668e0bd5-3283-4492-9f48-e33846c18218', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'X-Debug-Session-Id': 'e43434' },
-        body: JSON.stringify({
-          sessionId: 'e43434',
-          location: 'AriaScreen.tsx:pendingCompletionEffect',
-          message: 'pending_completion_blocked_non_idle_voice',
-          data: { voiceState, interviewComplete: isInterviewCompleteRef.current },
-          timestamp: Date.now(),
-          hypothesisId: 'H_prep_voice',
-        }),
-      }).catch(() => {});
-      // #endregion
       return;
     }
     const transcript = pendingCompletionTranscriptRef.current;
-    // #region agent log
-    fetch('http://127.0.0.1:7789/ingest/668e0bd5-3283-4492-9f48-e33846c18218', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'X-Debug-Session-Id': 'e43434' },
-      body: JSON.stringify({
-        sessionId: 'e43434',
-        runId: 'm4m5-debug',
-        hypothesisId: 'H5',
-        location: 'AriaScreen.tsx:pendingCompletionEffect',
-        message: 'pending_completion_voice_idle_scoring_start',
-        data: {
-          transcriptTurns: transcript?.length ?? 0,
-          interviewStatus: interviewStatusRef.current,
-          voiceState,
-          interviewEndBypass: isInterviewCompleteRef.current && voiceState !== 'idle',
-        },
-        timestamp: Date.now(),
-      }),
-    }).catch(() => {});
-    // #endregion
     if (!transcript || transcript.length === 0) {
       void remoteLog('[ERROR] pending_completion_empty_transcript', {
         interviewSessionId: interviewSessionIdRef.current,

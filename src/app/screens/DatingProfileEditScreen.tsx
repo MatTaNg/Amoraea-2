@@ -1,11 +1,16 @@
-import React, { useCallback, useEffect, useLayoutEffect, useMemo, useState } from 'react';
+import React, {
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useState,
+} from 'react';
 import {
   View,
   Text,
   ScrollView,
   StyleSheet,
   Pressable,
-  TextInput,
   Platform,
   TouchableOpacity,
   ActivityIndicator,
@@ -21,7 +26,11 @@ import { profilesRepo } from '@data/repos/profilesRepo';
 import { ProfileRepository } from '@data/repositories/ProfileRepository';
 import { useAuth } from '@features/authentication/hooks/useAuth';
 import { showSimpleAlert } from '@utilities/alerts/confirmDialog';
-import { HeightCmPicker, HEIGHT_CM_MIN, HEIGHT_CM_MAX } from '@/shared/components/HeightCmPicker';
+import {
+  HeightCmPicker,
+  HEIGHT_CM_MIN,
+  HEIGHT_CM_MAX,
+} from '@/shared/components/HeightCmPicker';
 import { parseCmFromValue } from '@/shared/components/HeightSlider';
 import { WeightInput } from '@/shared/components/WeightInput';
 import {
@@ -31,7 +40,12 @@ import {
 } from '@/shared/components/LifeDomainDistribution';
 import {
   DATING_PACE_AFTER_EXCITEMENT_OPTIONS,
+  PARTNER_MOOD_MISMATCH_RESPONSE_OPTIONS,
   RECENT_DATING_EARLY_WEEKS_OPTIONS,
+  SPACE_FOR_NEW_RELATIONSHIP_OPTIONS,
+  SEXUAL_FEEDBACK_STYLE_OPTIONS,
+  SEXUAL_FOCUS_OPTIONS,
+  SEXUAL_NEEDS_COMMUNICATION_OPTIONS,
   SEX_DRIVE_OPTIONS,
   SEX_INTEREST_CATEGORY_OPTIONS,
 } from '@/shared/constants/sexualCompatibilityOptions';
@@ -48,7 +62,11 @@ import {
   wantChildrenYesNoOptions,
 } from '@/shared/constants/filterOptions';
 import { LONGEST_ROMANTIC_RELATIONSHIP_OPTIONS } from '@/shared/constants/longestRomanticRelationshipOptions';
-import { EDUCATION_LEVEL_CHOICES, ETHNICITY_CHOICES, RELATIONSHIP_STYLE_CHOICES } from '@/screens/profile/editProfile/aboutYouOptions';
+import {
+  EDUCATION_LEVEL_CHOICES,
+  ETHNICITY_CHOICES,
+  RELATIONSHIP_STYLE_CHOICES,
+} from '@/screens/profile/editProfile/aboutYouOptions';
 import {
   buildHeightWeightProfileFields,
   mapRelationshipStyleToUi,
@@ -56,11 +74,17 @@ import {
   mapRelationshipStyleUiToRelationshipType,
 } from '@/screens/profile/editProfile/editProfileService';
 import { MatchPreferencesEmbedded } from '@/shared/components/profileFields/MatchPreferencesEmbedded';
-import { TypologyPickerFields, type TypologyPickerValue } from '@/shared/components/profileFields/TypologyPickerFields';
+import {
+  TypologyPickerFields,
+  type TypologyPickerValue,
+} from '@/shared/components/profileFields/TypologyPickerFields';
 import { TYPOLOGY_ONBOARDING_SECTIONS } from '@/shared/constants/typologyOnboardingOptions';
 import { MatchPreferences } from '@/shared/hooks/filterPreferences/types';
 import { mapGenderToDb, mapGenderToUi } from '@/shared/utils/genderMapper';
-import { mapAttractionToDb, normalizeAttractedToUiLabels } from '@/shared/utils/attractionMapper';
+import {
+  mapAttractionToDb,
+  normalizeAttractedToUiLabels,
+} from '@/shared/utils/attractionMapper';
 import { calculateAgeFromBirthdate } from '@/shared/utils/ageCalculator';
 import { requestMyLocationLabel } from '@/screens/profile/utils/locationHelpers';
 import { theme } from '@/shared/theme/theme';
@@ -70,11 +94,23 @@ import {
   isValidOptionalBirthTime24h,
 } from '@/shared/components/BirthTimeQuarterHourPicker';
 import { OnboardingHeader } from '@ui/components/OnboardingHeader';
+import {
+  FormField,
+  FormTextInput,
+  formControlStyles,
+} from '@/shared/ui/FormField';
+import {
+  BottomSheet,
+  OptionPickerTrigger,
+  type OptionAnchor,
+} from '@/screens/profile/editProfile/BottomSheet';
+import { SingleChoiceOptionList } from '@/shared/components/profileFields/SingleChoiceOptionList';
 
 const BG = '#0a0a0f';
 const MIN_PROFILE_AGE = 18;
 const ACCENT = '#3b82f6';
-const FONT_BODY = Platform.OS === 'web' ? "'DM Sans', system-ui, sans-serif" : undefined;
+const FONT_BODY =
+  Platform.OS === 'web' ? "'DM Sans', system-ui, sans-serif" : undefined;
 const KG_PER_LB = 2.2046;
 
 const profilePhotoRepo = new ProfileRepository();
@@ -83,7 +119,18 @@ const GENDER_UI_OPTIONS = ['Man', 'Woman', 'Non-binary'] as const;
 
 const ATTRACTION_UI = ['Men', 'Women', 'Non-binary'] as const;
 
-const TYPOLOGY_KEYS = TYPOLOGY_ONBOARDING_SECTIONS.flatMap((s) => s.rows.map((r) => r.key));
+const EDIT_PROFILE_TABS = [
+  { id: 'basics', label: 'Basics' },
+  { id: 'lifestyle', label: 'Lifestyle' },
+  { id: 'compatibility', label: 'Compatibility' },
+  { id: 'dealbreakers', label: 'Dealbreakers' },
+] as const;
+
+type EditProfileTabId = (typeof EDIT_PROFILE_TABS)[number]['id'];
+
+const TYPOLOGY_KEYS = TYPOLOGY_ONBOARDING_SECTIONS.flatMap((s) =>
+  s.rows.map((r) => r.key),
+);
 
 const STRIP_FROM_SAVE = [
   'diet',
@@ -106,13 +153,19 @@ function asStr(v: unknown): string {
   return typeof v === 'string' ? v : String(v);
 }
 
-function omitUndefined<T extends Record<string, unknown>>(o: T): Record<string, unknown> {
-  return Object.fromEntries(Object.entries(o).filter(([, v]) => v !== undefined)) as Record<string, unknown>;
+function omitUndefined<T extends Record<string, unknown>>(
+  o: T,
+): Record<string, unknown> {
+  return Object.fromEntries(
+    Object.entries(o).filter(([, v]) => v !== undefined),
+  ) as Record<string, unknown>;
 }
 
 function toTitleCaseUi(s: string): string {
   return s.replace(/[A-Za-z]+|[^A-Za-z]+/g, (seg) =>
-    /^[A-Za-z]+$/.test(seg) ? seg.charAt(0).toUpperCase() + seg.slice(1).toLowerCase() : seg,
+    /^[A-Za-z]+$/.test(seg)
+      ? seg.charAt(0).toUpperCase() + seg.slice(1).toLowerCase()
+      : seg,
   );
 }
 
@@ -160,12 +213,16 @@ function parseBareWeightLbsFromLabel(s: string): number | undefined {
 }
 
 /** Merge onboarding + legacy shapes: `height_cm`, numeric `height` (cm), `heightLabel` / `"172 cm"` strings. */
-function resolveHeightCmFromProfile(pb: Record<string, unknown>): number | undefined {
+function resolveHeightCmFromProfile(
+  pb: Record<string, unknown>,
+): number | undefined {
   const fromCm = parseFiniteNumber(pb.height_cm);
-  if (fromCm != null && fromCm >= HEIGHT_CM_MIN && fromCm <= HEIGHT_CM_MAX) return Math.round(fromCm);
+  if (fromCm != null && fromCm >= HEIGHT_CM_MIN && fromCm <= HEIGHT_CM_MAX)
+    return Math.round(fromCm);
 
   const hNum = parseFiniteNumber(pb.height);
-  if (hNum != null && hNum >= HEIGHT_CM_MIN && hNum <= HEIGHT_CM_MAX) return Math.round(hNum);
+  if (hNum != null && hNum >= HEIGHT_CM_MIN && hNum <= HEIGHT_CM_MAX)
+    return Math.round(hNum);
 
   for (const key of ['heightLabel', 'height_label'] as const) {
     const raw = pb[key];
@@ -186,7 +243,8 @@ function resolveHeightCmFromProfile(pb: Record<string, unknown>): number | undef
 /** Merge `weight_kg`, numeric `weight` (kg from save path), `weightLabel`, or raw lbs string. */
 function resolveWeightLbsStrFromProfile(pb: Record<string, unknown>): string {
   const kgDirect = parseFiniteNumber(pb.weight_kg ?? pb.weightKg);
-  if (kgDirect != null && kgDirect > 12 && kgDirect < 500) return kgToLbsDisplay(kgDirect);
+  if (kgDirect != null && kgDirect > 12 && kgDirect < 500)
+    return kgToLbsDisplay(kgDirect);
 
   const wNum = parseFiniteNumber(pb.weight);
   if (wNum != null && wNum > 12 && wNum < 500) return kgToLbsDisplay(wNum);
@@ -199,7 +257,8 @@ function resolveWeightLbsStrFromProfile(pb: Record<string, unknown>): string {
     const kg = parseKgFromLabel(raw);
     if (kg != null) return kgToLbsDisplay(kg);
     const bareLbs = parseBareWeightLbsFromLabel(raw);
-    if (bareLbs != null && bareLbs > 12 && bareLbs < 700) return String(Math.round(bareLbs * 10) / 10);
+    if (bareLbs != null && bareLbs > 12 && bareLbs < 700)
+      return String(Math.round(bareLbs * 10) / 10);
   }
 
   const ws = pb.weight;
@@ -235,7 +294,8 @@ function extractPhotoUrlsFromUnknown(raw: unknown, depth = 0): string[] {
     const t = raw.trim();
     if (!t) return [];
     const looksJson =
-      (t.startsWith('[') && t.endsWith(']')) || (t.startsWith('{') && t.endsWith('}'));
+      (t.startsWith('[') && t.endsWith(']')) ||
+      (t.startsWith('{') && t.endsWith('}'));
     if (looksJson) {
       try {
         return extractPhotoUrlsFromUnknown(JSON.parse(t), depth + 1);
@@ -273,9 +333,12 @@ function resolvePhotoUrlsFromProfile(pb: Record<string, unknown>): string[] {
     if (urls.length) break;
   }
 
-  const primaryPick = [pb.primary_photo_url, pb.primaryPhotoUrl, pb.avatar_url, pb.avatarUrl].find(
-    (x): x is string => typeof x === 'string' && isRenderablePhotoUri(x),
-  );
+  const primaryPick = [
+    pb.primary_photo_url,
+    pb.primaryPhotoUrl,
+    pb.avatar_url,
+    pb.avatarUrl,
+  ].find((x): x is string => typeof x === 'string' && isRenderablePhotoUri(x));
   if (primaryPick) {
     const p = primaryPick.trim();
     if (!urls.some((u) => u.trim() === p)) urls = [p, ...urls];
@@ -293,7 +356,9 @@ function resolvePhotoUrlsFromProfile(pb: Record<string, unknown>): string[] {
 }
 
 function normalizeLifeDomains(raw: unknown): OnboardingLifeDomainValues {
-  const out: OnboardingLifeDomainValues = { ...DEFAULT_ONBOARDING_LIFE_DOMAINS };
+  const out: OnboardingLifeDomainValues = {
+    ...DEFAULT_ONBOARDING_LIFE_DOMAINS,
+  };
   if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return out;
   const o = raw as Record<string, unknown>;
   const pick = (key: keyof OnboardingLifeDomainValues, snake: string) => {
@@ -318,7 +383,10 @@ function profileToTypology(p: Record<string, unknown>): TypologyPickerValue {
   return out;
 }
 
-async function resolvePhotoUrlsForSave(userId: string, urls: string[]): Promise<string[]> {
+async function resolvePhotoUrlsForSave(
+  userId: string,
+  urls: string[],
+): Promise<string[]> {
   const out: string[] = [];
   for (let i = 0; i < urls.length; i++) {
     const u = urls[i]?.trim();
@@ -328,7 +396,11 @@ async function resolvePhotoUrlsForSave(userId: string, urls: string[]): Promise<
       continue;
     }
     const fn =
-      u.split('/').pop()?.split('?')[0]?.replace(/[^a-zA-Z0-9._-]/g, '_') || `photo_${Date.now()}_${i}.jpg`;
+      u
+        .split('/')
+        .pop()
+        ?.split('?')[0]
+        ?.replace(/[^a-zA-Z0-9._-]/g, '_') || `photo_${Date.now()}_${i}.jpg`;
     const { publicUrl } = await profilePhotoRepo.uploadPhoto(userId, u, fn);
     out.push(publicUrl);
   }
@@ -353,18 +425,14 @@ function Field({
   keyboardType?: 'default' | 'decimal-pad' | 'numeric';
 }) {
   return (
-    <View style={styles.fieldBlock}>
-      <Text style={styles.label}>{label}</Text>
-      <TextInput
-        value={value}
-        onChangeText={onChangeText}
-        multiline={multiline}
-        keyboardType={keyboardType ?? 'default'}
-        textAlignVertical={multiline ? 'top' : 'center'}
-        style={[styles.input, multiline && styles.inputMultiline]}
-        placeholderTextColor="rgba(255,255,255,0.28)"
-      />
-    </View>
+    <FormTextInput
+      label={label}
+      value={value}
+      onChangeText={onChangeText}
+      multiline={multiline}
+      keyboardType={keyboardType ?? 'default'}
+      textAlignVertical={multiline ? 'top' : 'center'}
+    />
   );
 }
 
@@ -379,8 +447,11 @@ function ChoiceDropdown({
   options: { label: string; value: string }[];
   onValueChange: (v: string) => void;
 }) {
+  const [sheetAnchor, setSheetAnchor] = useState<OptionAnchor | null>(null);
   const validSelection = value !== '' && options.some((o) => o.value === value);
   const selectedValue = validSelection ? value : (options[0]?.value ?? '');
+  const selectedLabel =
+    options.find((o) => o.value === selectedValue)?.label ?? 'Select';
 
   useLayoutEffect(() => {
     if (!options.length) return;
@@ -390,9 +461,41 @@ function ChoiceDropdown({
     // eslint-disable-next-line react-hooks/exhaustive-deps -- coerce empty/unknown DB values once options exist; avoid churn from unstable callbacks
   }, [value, options, validSelection]);
 
+  if (Platform.OS === 'web') {
+    return (
+      <FormField label={label}>
+        <OptionPickerTrigger
+          style={formControlStyles.control}
+          onOpen={(anchor) => setSheetAnchor(anchor)}
+        >
+          <View style={styles.dropdownTriggerContent}>
+            <Text style={styles.dropdownTriggerText} numberOfLines={1}>
+              {selectedLabel}
+            </Text>
+            <Text style={styles.dropdownChevron}>▾</Text>
+          </View>
+        </OptionPickerTrigger>
+        <BottomSheet
+          visible={!!sheetAnchor}
+          title={label}
+          anchor={sheetAnchor}
+          onClose={() => setSheetAnchor(null)}
+        >
+          <SingleChoiceOptionList
+            options={options}
+            value={selectedValue}
+            onSelect={(v) => {
+              onValueChange(String(v));
+              setSheetAnchor(null);
+            }}
+          />
+        </BottomSheet>
+      </FormField>
+    );
+  }
+
   return (
-    <View style={styles.fieldBlock}>
-      <Text style={styles.label}>{label}</Text>
+    <FormField label={label}>
       <View style={styles.pickerShell}>
         <Picker
           selectedValue={selectedValue}
@@ -411,14 +514,23 @@ function ChoiceDropdown({
               : null,
           ]}
           dropdownIconColor={theme.colors.textSecondary}
-          itemStyle={Platform.OS === 'ios' ? { color: theme.colors.text, fontSize: 17 } : undefined}
+          itemStyle={
+            Platform.OS === 'ios'
+              ? { color: theme.colors.text, fontSize: 17 }
+              : undefined
+          }
         >
           {options.map((o) => (
-            <Picker.Item key={o.value} label={o.label} value={o.value} color={theme.colors.text} />
+            <Picker.Item
+              key={o.value}
+              label={o.label}
+              value={o.value}
+              color={theme.colors.text}
+            />
           ))}
         </Picker>
       </View>
-    </View>
+    </FormField>
   );
 }
 
@@ -436,14 +548,19 @@ export const DatingProfileEditScreen: React.FC<{
   route: { params: { userId: string } };
 }> = ({ route }) => {
   const userId = route.params?.userId ?? '';
-  const navigation = useNavigation<NativeStackNavigationProp<Record<string, object | undefined>>>();
+  const navigation =
+    useNavigation<
+      NativeStackNavigationProp<Record<string, object | undefined>>
+    >();
   const { user } = useAuth();
 
   const exitEditProfileToPostInterview = useCallback(() => {
     const uid = userId.trim();
     /** Mirror {@link ModalOnboardingScreen} exit: nested dating stack → interview stack → `PostInterviewPassed`. */
     const nestedNav = navigation.getParent?.();
-    const interviewNav = nestedNav?.getParent?.() as InterviewPostInterviewNavigation | undefined;
+    const interviewNav = nestedNav?.getParent?.() as
+      | InterviewPostInterviewNavigation
+      | undefined;
 
     if (interviewNav?.canGoBack?.()) {
       interviewNav.goBack();
@@ -458,16 +575,22 @@ export const DatingProfileEditScreen: React.FC<{
       nestedNav.navigate('PostInterviewPassed', { userId: uid });
       return;
     }
-    (navigation as unknown as InterviewPostInterviewNavigation).navigate('PostInterviewPassed', {
-      userId: uid,
-    });
+    (navigation as unknown as InterviewPostInterviewNavigation).navigate(
+      'PostInterviewPassed',
+      {
+        userId: uid,
+      },
+    );
   }, [navigation, userId]);
 
   useLayoutEffect(() => {
     navigation.setOptions({
       headerShown: true,
       header: () => (
-        <OnboardingHeader variant="dark" onBackPress={exitEditProfileToPostInterview} />
+        <OnboardingHeader
+          variant="dark"
+          onBackPress={exitEditProfileToPostInterview}
+        />
       ),
     });
   }, [navigation, exitEditProfileToPostInterview]);
@@ -476,19 +599,31 @@ export const DatingProfileEditScreen: React.FC<{
   const [photoUrls, setPhotoUrls] = useState<string[]>([]);
   const [attractedUi, setAttractedUi] = useState<string[]>([]);
   const [sexInterestSelected, setSexInterestSelected] = useState<string[]>([]);
-  const [lifeDomainsState, setLifeDomainsState] = useState<OnboardingLifeDomainValues>({
-    ...DEFAULT_ONBOARDING_LIFE_DOMAINS,
-  });
+  const [lifeDomainsState, setLifeDomainsState] =
+    useState<OnboardingLifeDomainValues>({
+      ...DEFAULT_ONBOARDING_LIFE_DOMAINS,
+    });
   const [weightLbsStr, setWeightLbsStr] = useState('');
-  const [heightCmPick, setHeightCmPick] = useState<number | undefined>(undefined);
+  const [heightCmPick, setHeightCmPick] = useState<number | undefined>(
+    undefined,
+  );
   const [locationLoading, setLocationLoading] = useState(false);
   const [typologyValues, setTypologyValues] = useState<TypologyPickerValue>({});
   const [matchPrefs, setMatchPrefs] = useState<MatchPreferences>({});
-  const [prefPhysicalCompatImportance, setPrefPhysicalCompatImportance] = useState('');
-  const [prefPartnerSharesSexualInterests, setPrefPartnerSharesSexualInterests] = useState('');
+  const [prefPhysicalCompatImportance, setPrefPhysicalCompatImportance] =
+    useState('');
+  const [
+    prefPartnerSharesSexualInterests,
+    setPrefPartnerSharesSexualInterests,
+  ] = useState('');
   const [prefPartnerHasChildren, setPrefPartnerHasChildren] = useState('');
-  const [prefPartnerPoliticalAlignmentImportance, setPrefPartnerPoliticalAlignmentImportance] = useState('');
+  const [
+    prefPartnerPoliticalAlignmentImportance,
+    setPrefPartnerPoliticalAlignmentImportance,
+  ] = useState('');
+  const [activeTab, setActiveTab] = useState<EditProfileTabId>('basics');
   const [saving, setSaving] = useState(false);
+  const [saveSucceeded, setSaveSucceeded] = useState(false);
 
   const { data: profileBlob } = useQuery({
     queryKey: ['dating-profile', userId],
@@ -506,9 +641,16 @@ export const DatingProfileEditScreen: React.FC<{
     const resolvedPhotos = resolvePhotoUrlsFromProfile(pb);
     setPhotoUrls(resolvedPhotos);
     setDraft({ ...pb, photos: resolvedPhotos });
-    setAttractedUi(normalizeAttractedToUiLabels(pb.attractedTo as string[] | undefined ?? pb.lookingFor as string[] | undefined));
+    setAttractedUi(
+      normalizeAttractedToUiLabels(
+        (pb.attractedTo as string[] | undefined) ??
+          (pb.lookingFor as string[] | undefined),
+      ),
+    );
     const rawSex = pb.sexInterestCategories;
-    setSexInterestSelected(Array.isArray(rawSex) ? rawSex.map((x) => String(x)) : []);
+    setSexInterestSelected(
+      Array.isArray(rawSex) ? rawSex.map((x) => String(x)) : [],
+    );
     const ldRaw = pb.lifeDomains ?? pb.life_domains;
     setLifeDomainsState(normalizeLifeDomains(ldRaw));
     setWeightLbsStr(resolveWeightLbsStrFromProfile(pb));
@@ -517,23 +659,34 @@ export const DatingProfileEditScreen: React.FC<{
     setTypologyValues(profileToTypology(pb));
     setMatchPrefs((pb.matchPreferences as MatchPreferences) || {});
     setPrefPhysicalCompatImportance(asStr(pb.prefPhysicalCompatImportance));
-    setPrefPartnerSharesSexualInterests(asStr(pb.prefPartnerSharesSexualInterests));
+    setPrefPartnerSharesSexualInterests(
+      asStr(pb.prefPartnerSharesSexualInterests),
+    );
     setPrefPartnerHasChildren(asStr(pb.prefPartnerHasChildren));
-    setPrefPartnerPoliticalAlignmentImportance(asStr(pb.prefPartnerPoliticalAlignmentImportance));
+    setPrefPartnerPoliticalAlignmentImportance(
+      asStr(pb.prefPartnerPoliticalAlignmentImportance),
+    );
   }, [profileBlob]);
 
   const genderUiValue = mapGenderToUi(asStr(draft.gender)) ?? '';
 
-  const relationshipStyleUi = mapRelationshipStyleToUi(asStr(draft.relationshipStyle));
+  const relationshipStyleUi = mapRelationshipStyleToUi(
+    asStr(draft.relationshipStyle),
+  );
 
   const userAge = useMemo(
     () => calculateAgeFromBirthdate(asStr(draft.birthDate)),
     [draft.birthDate],
   );
 
-  const maxBirthYear = useMemo(() => new Date().getFullYear() - MIN_PROFILE_AGE, []);
+  const maxBirthYear = useMemo(
+    () => new Date().getFullYear() - MIN_PROFILE_AGE,
+    [],
+  );
   const birthDateStr = asStr(draft.birthDate);
-  const birthAgeFromDraft = birthDateStr ? calculateAgeFromBirthdate(birthDateStr) : null;
+  const birthAgeFromDraft = birthDateStr
+    ? calculateAgeFromBirthdate(birthDateStr)
+    : null;
   const birthDateError =
     birthAgeFromDraft != null && birthAgeFromDraft < MIN_PROFILE_AGE
       ? 'You must be 18 or older to use this app.'
@@ -554,28 +707,32 @@ export const DatingProfileEditScreen: React.FC<{
   useFocusEffect(
     useCallback(() => {
       void refreshLocation();
-      if (userId) void qc.invalidateQueries({ queryKey: ['dating-profile', userId] });
+      if (userId)
+        void qc.invalidateQueries({ queryKey: ['dating-profile', userId] });
     }, [refreshLocation, qc, userId]),
   );
 
-  const setScalar = (key: string) => (t: string) => setDraft((d) => ({ ...d, [key]: t }));
+  const setScalar = (key: string) => (t: string) =>
+    setDraft((d) => ({ ...d, [key]: t }));
 
   const onMatchEmbeddedPatch = useCallback(
     (patch: {
       matchPreferences?: MatchPreferences;
-      prefPhysicalCompatImportance?: string;
       prefPartnerSharesSexualInterests?: string;
       prefPartnerHasChildren?: string;
       prefPartnerPoliticalAlignmentImportance?: string;
     }) => {
       if (patch.matchPreferences) setMatchPrefs(patch.matchPreferences);
-      if (patch.prefPhysicalCompatImportance !== undefined)
-        setPrefPhysicalCompatImportance(patch.prefPhysicalCompatImportance);
       if (patch.prefPartnerSharesSexualInterests !== undefined)
-        setPrefPartnerSharesSexualInterests(patch.prefPartnerSharesSexualInterests);
-      if (patch.prefPartnerHasChildren !== undefined) setPrefPartnerHasChildren(patch.prefPartnerHasChildren);
+        setPrefPartnerSharesSexualInterests(
+          patch.prefPartnerSharesSexualInterests,
+        );
+      if (patch.prefPartnerHasChildren !== undefined)
+        setPrefPartnerHasChildren(patch.prefPartnerHasChildren);
       if (patch.prefPartnerPoliticalAlignmentImportance !== undefined)
-        setPrefPartnerPoliticalAlignmentImportance(patch.prefPartnerPoliticalAlignmentImportance);
+        setPrefPartnerPoliticalAlignmentImportance(
+          patch.prefPartnerPoliticalAlignmentImportance,
+        );
     },
     [],
   );
@@ -586,12 +743,21 @@ export const DatingProfileEditScreen: React.FC<{
     }
   }, [sexInterestSelected]);
 
+  useEffect(() => {
+    if (!saveSucceeded) return;
+    const timeout = setTimeout(() => setSaveSucceeded(false), 3500);
+    return () => clearTimeout(timeout);
+  }, [saveSucceeded]);
+
   const pickPhotos = async () => {
     const remaining = Math.max(0, 6 - photoUrls.length);
     if (remaining <= 0 || !userId) return;
     const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
     if (status !== 'granted') {
-      showSimpleAlert('Permission Needed', 'Allow access to your photos so you can choose images from this device.');
+      showSimpleAlert(
+        'Permission Needed',
+        'Allow access to your photos so you can choose images from this device.',
+      );
       return;
     }
     const allowsMultiple = Platform.OS !== 'web' && remaining > 1;
@@ -602,7 +768,10 @@ export const DatingProfileEditScreen: React.FC<{
       quality: 0.85,
     });
     if (result.canceled || !result.assets?.length) return;
-    const picked = result.assets.slice(0, remaining).map((a) => a.uri.trim()).filter(Boolean);
+    const picked = result.assets
+      .slice(0, remaining)
+      .map((a) => a.uri.trim())
+      .filter(Boolean);
     setPhotoUrls((prev) => {
       const seen = new Set(prev.map((x) => x.trim()));
       const next = [...prev];
@@ -628,12 +797,15 @@ export const DatingProfileEditScreen: React.FC<{
   };
 
   const onSave = async () => {
-    if (!userId) return;
+    if (!userId || saving) return;
 
     const birthForAge = asStr(draft.birthDate);
     const ageSave = birthForAge ? calculateAgeFromBirthdate(birthForAge) : null;
     if (ageSave != null && ageSave < MIN_PROFILE_AGE) {
-      showSimpleAlert('Age requirement', 'You must be 18 or older to use this app.');
+      showSimpleAlert(
+        'Age requirement',
+        'You must be 18 or older to use this app.',
+      );
       return;
     }
 
@@ -646,16 +818,27 @@ export const DatingProfileEditScreen: React.FC<{
       return;
     }
 
-    const { yearlyIncome: _yi, yearlyIncomeCurrency: _yc, ...draftClean } = draft as Record<string, unknown>;
+    const {
+      yearlyIncome: _yi,
+      yearlyIncomeCurrency: _yc,
+      ...draftClean
+    } = draft as Record<string, unknown>;
     void _yi;
     void _yc;
+
+    setSaving(true);
+    setSaveSucceeded(false);
 
     let resolvedPhotos = photoUrls;
     try {
       resolvedPhotos = await resolvePhotoUrlsForSave(userId, photoUrls);
     } catch (e) {
       if (__DEV__) console.warn('[DatingProfileEdit] photo upload', e);
-      showSimpleAlert('Could Not Upload Photos', e instanceof Error ? e.message : 'Unknown error');
+      showSimpleAlert(
+        'Could Not Upload Photos',
+        e instanceof Error ? e.message : 'Unknown error',
+      );
+      setSaving(false);
       return;
     }
 
@@ -665,14 +848,20 @@ export const DatingProfileEditScreen: React.FC<{
       weight_kg: wKg,
     });
 
-    const qaBase = { ...((draftClean.questionAnswers as Record<string, unknown>) || {}) };
+    const qaBase = {
+      ...((draftClean.questionAnswers as Record<string, unknown>) || {}),
+    };
     for (const key of TYPOLOGY_KEYS) {
       const v = typologyValues[key];
       if (v != null && String(v).trim()) qaBase[key] = String(v).trim();
       else delete qaBase[key];
     }
 
-    const mappedAttraction = mapAttractionToDb(attractedUi) ?? attractedUi.filter((x) => ATTRACTION_UI.includes(x as (typeof ATTRACTION_UI)[number]));
+    const mappedAttraction =
+      mapAttractionToDb(attractedUi) ??
+      attractedUi.filter((x) =>
+        ATTRACTION_UI.includes(x as (typeof ATTRACTION_UI)[number]),
+      );
 
     const next: Record<string, unknown> = { ...draftClean };
     for (const k of STRIP_FROM_SAVE) delete next[k];
@@ -693,10 +882,17 @@ export const DatingProfileEditScreen: React.FC<{
       prefPartnerPoliticalAlignmentImportance,
       questionAnswers: qaBase,
       recreationalDrugsSocial: asStr(draftClean.recreationalDrugsSocial),
-      relationshipWithPsychedelics: asStr(draftClean.relationshipWithPsychedelics),
+      relationshipWithPsychedelics: asStr(
+        draftClean.relationshipWithPsychedelics,
+      ),
       relationshipWithCannabis: asStr(draftClean.relationshipWithCannabis),
       datingPaceAfterExcitement: asStr(draftClean.datingPaceAfterExcitement),
       recentDatingEarlyWeeks: asStr(draftClean.recentDatingEarlyWeeks),
+      spaceForNewRelationship: asStr(draftClean.spaceForNewRelationship),
+      partnerMoodMismatchResponse: asStr(draftClean.partnerMoodMismatchResponse),
+      sexualFocusPreference: asStr(draftClean.sexualFocusPreference),
+      sexualFeedbackStyle: asStr(draftClean.sexualFeedbackStyle),
+      sexualNeedsCommunicationComfort: asStr(draftClean.sexualNeedsCommunicationComfort),
     });
 
     if (hw.height != null) next.height = hw.height;
@@ -713,267 +909,455 @@ export const DatingProfileEditScreen: React.FC<{
 
     if (relationshipStyleUi.trim()) {
       next.relationshipStyle = mapRelationshipStyleUiToDb(relationshipStyleUi);
-      next.relationshipType = mapRelationshipStyleUiToRelationshipType(relationshipStyleUi);
+      next.relationshipType =
+        mapRelationshipStyleUiToRelationshipType(relationshipStyleUi);
     }
 
     const birth = asStr(next.birthDate);
     const calculatedAge = calculateAgeFromBirthdate(birth);
     if (calculatedAge != null) next.age = calculatedAge;
 
-    if (typologyValues.myersBriggs?.trim()) next.myersBriggs = typologyValues.myersBriggs.trim();
+    if (typologyValues.myersBriggs?.trim())
+      next.myersBriggs = typologyValues.myersBriggs.trim();
 
-    setSaving(true);
     try {
       const r = await profilesRepo.updateProfile(userId, omitUndefined(next));
       if (!r.success) throw r.error;
       setPhotoUrls(Array.isArray(resolvedPhotos) ? resolvedPhotos : []);
       await qc.invalidateQueries({ queryKey: ['dating-profile', userId] });
       await qc.invalidateQueries({ queryKey: ['profile', userId] });
+      setSaveSucceeded(true);
     } catch (e) {
       if (__DEV__) console.warn('[DatingProfileEdit]', e);
-      showSimpleAlert('Could Not Save', e instanceof Error ? e.message : 'Unknown error');
+      showSimpleAlert(
+        'Could Not Save',
+        e instanceof Error ? e.message : 'Unknown error',
+      );
     } finally {
       setSaving(false);
     }
   };
 
+  const saveFeedbackText = saveSucceeded ? 'Changes saved successfully.' : '';
+
   return (
     <SafeAreaContainer style={{ flex: 1, backgroundColor: BG }}>
-      <ScrollView contentContainerStyle={styles.scroll} keyboardShouldPersistTaps="handled">
+      <ScrollView
+        contentContainerStyle={styles.scroll}
+        keyboardShouldPersistTaps="handled"
+      >
         <Text style={styles.h1}>{toTitleCaseUi('Your profile')}</Text>
         <Text style={styles.lead}>
-          Same fields and choices as onboarding. Pick from the lists below — free typing is only where onboarding uses text (name, occupation, birth place).
+          Modify these fields so we can better learn about you so that we can better match you with your perfect partner.
         </Text>
 
-        <Pressable onPress={() => void onSave()} disabled={saving || !userId} style={styles.primaryBtn}>
-          <Text style={styles.primaryBtnTxt}>{saving ? 'Saving…' : toTitleCaseUi('Save changes')}</Text>
+        <Pressable
+          onPress={() => void onSave()}
+          disabled={saving || !userId}
+          style={[styles.primaryBtn, saving && styles.primaryBtnDisabled]}
+        >
+          <View style={styles.saveButtonContent}>
+            {saving ? <ActivityIndicator size="small" color="#fff" /> : null}
+            <Text style={styles.primaryBtnTxt}>
+              {saving ? 'Saving...' : toTitleCaseUi('Save changes')}
+            </Text>
+          </View>
         </Pressable>
-
-        <SectionTitle>About you</SectionTitle>
-        <Field label="Name" value={asStr(draft.displayName)} onChangeText={setScalar('displayName')} />
-        <ChoiceDropdown
-          label="Gender"
-          value={genderUiValue}
-          options={GENDER_UI_OPTIONS.map((g) => ({ label: g, value: g }))}
-          onValueChange={(ui) =>
-            setDraft((d) => ({
-              ...d,
-              gender: ui ? mapGenderToDb(ui) ?? ui : '',
-            }))
-          }
-        />
-        <ChoiceDropdown
-          label="Ethnicity"
-          value={asStr(draft.ethnicity)}
-          options={ETHNICITY_CHOICES}
-          onValueChange={setScalar('ethnicity')}
-        />
-        <View style={styles.fieldBlock}>
-          <Text style={styles.label}>Attracted to</Text>
-          <View style={styles.chipWrap}>
-            {ATTRACTION_UI.map((option) => {
-              const on = attractedUi.includes(option);
-              return (
-                <Pressable
-                  key={option}
-                  onPress={() => toggleAttraction(option)}
-                  style={[styles.chip, on && styles.chipOn]}
-                >
-                  <Text style={[styles.chipTxt, on && styles.chipTxtOn]}>{option}</Text>
-                </Pressable>
-              );
-            })}
-          </View>
-        </View>
-        <View style={styles.fieldBlock}>
-          <DatePicker
-            label="Date of birth"
-            value={birthDateStr}
-            onValueChange={setScalar('birthDate')}
-            minYear={1900}
-            maxYear={maxBirthYear}
-            error={birthDateError}
-          />
-        </View>
-        <BirthTimeQuarterHourPicker
-          label="Time of birth (optional)"
-          value={asStr(draft.birthTime)}
-          onValueChange={setScalar('birthTime')}
-        />
-        <Field
-          label="Location of birth (optional)"
-          value={asStr(draft.birthLocation)}
-          onChangeText={setScalar('birthLocation')}
-        />
-
-        <SectionTitle>Relationship & place</SectionTitle>
-        <ChoiceDropdown
-          label="My relationship style is"
-          value={relationshipStyleUi}
-          options={RELATIONSHIP_STYLE_CHOICES}
-          onValueChange={setScalar('relationshipStyle')}
-        />
-        <ChoiceDropdown
-          label="Relationship history"
-          value={asStr(draft.longestRomanticRelationship)}
-          options={LONGEST_ROMANTIC_RELATIONSHIP_OPTIONS}
-          onValueChange={setScalar('longestRomanticRelationship')}
-        />
-        <View style={styles.fieldBlock}>
-          <Text style={styles.label}>I am located at</Text>
-          <View style={[styles.input, styles.readOnlyBox]}>
-            {locationLoading ? (
-              <View style={styles.locInner}>
-                <ActivityIndicator size="small" color="#93c5fd" />
-                <Text style={styles.readOnlyText}>Finding your location…</Text>
-              </View>
+        {saveFeedbackText ? (
+          <View
+            style={[
+              styles.saveStatus,
+              saving ? styles.saveStatusSaving : styles.saveStatusSuccess,
+            ]}
+          >
+            {saving ? (
+              <ActivityIndicator size="small" color="#93c5fd" />
             ) : (
-              <Text style={styles.readOnlyText}>{asStr(draft.location).trim() || '—'}</Text>
+              <Text style={styles.saveStatusIcon}>✓</Text>
             )}
+            <Text style={styles.saveStatusText}>{saveFeedbackText}</Text>
           </View>
-          <TouchableOpacity onPress={() => void refreshLocation()} style={styles.secondaryBtn}>
-            <Text style={styles.secondaryBtnTxt}>Refresh location</Text>
-          </TouchableOpacity>
-        </View>
+        ) : null}
 
-        <SectionTitle>Work & education</SectionTitle>
-        <Field label="Occupation" value={asStr(draft.occupation)} onChangeText={setScalar('occupation')} />
-        <ChoiceDropdown
-          label="Education level"
-          value={asStr(draft.educationLevel)}
-          options={EDUCATION_LEVEL_CHOICES}
-          onValueChange={setScalar('educationLevel')}
-        />
-
-        <SectionTitle>Body & habits</SectionTitle>
-        <View style={styles.fieldBlock}>
-          <HeightCmPicker
-            label="Height (cm)"
-            valueCm={heightCmPick ?? null}
-            onChangeCm={(cm) => setHeightCmPick(cm)}
-            placeholderLabel="Select height"
-          />
-        </View>
-        <View style={styles.fieldBlock}>
-          <WeightInput label="Weight (lbs)" value={weightLbsStr} onChange={setWeightLbsStr} />
-        </View>
-        <ChoiceDropdown
-          label="Workout frequency"
-          value={asStr(draft.workout)}
-          options={workoutOptions}
-          onValueChange={setScalar('workout')}
-        />
-        <ChoiceDropdown
-          label="Smoking & vaping"
-          value={asStr(draft.smoking)}
-          options={smokingOptions}
-          onValueChange={setScalar('smoking')}
-        />
-        <ChoiceDropdown
-          label="What is your relationship with alcohol"
-          value={asStr(draft.drinking)}
-          options={drinkingOptions}
-          onValueChange={setScalar('drinking')}
-        />
-        <ChoiceDropdown
-          label="Do you use recreational drugs socially (MDMA, cocaine, etc)"
-          value={asStr(draft.recreationalDrugsSocial)}
-          options={recreationalDrugsSocialOptions}
-          onValueChange={setScalar('recreationalDrugsSocial')}
-        />
-        <ChoiceDropdown
-          label="What's your relationship with psychedelics or plant medicines?"
-          value={asStr(draft.relationshipWithPsychedelics)}
-          options={psychedelicsRelationshipOptions}
-          onValueChange={setScalar('relationshipWithPsychedelics')}
-        />
-        <ChoiceDropdown
-          label="What is your relationship with cannabis or tobacco?"
-          value={asStr(draft.relationshipWithCannabis)}
-          options={cannabisRelationshipOptions}
-          onValueChange={setScalar('relationshipWithCannabis')}
-        />
-
-        <SectionTitle>Values</SectionTitle>
-        <ChoiceDropdown label="Do you have kids?" value={asStr(draft.haveKids)} options={haveKidsOptions} onValueChange={setScalar('haveKids')} />
-        <ChoiceDropdown label="Do you want children?" value={asStr(draft.wantKids)} options={wantChildrenYesNoOptions} onValueChange={setScalar('wantKids')} />
-        <ChoiceDropdown label="Politics" value={asStr(draft.politics)} options={politicsOptions} onValueChange={setScalar('politics')} />
-        <ChoiceDropdown label="Religion" value={asStr(draft.religion)} options={religionOptions} onValueChange={setScalar('religion')} />
-
-        <SectionTitle>Sexual compatibility</SectionTitle>
-        <ChoiceDropdown
-          label="In a relationship, what feels like your natural rhythm for sex?"
-          value={asStr(draft.sexDrive)}
-          options={SEX_DRIVE_OPTIONS}
-          onValueChange={setScalar('sexDrive')}
-        />
-        <ChoiceDropdown
-          label="Sexual interests (select one)"
-          value={sexInterestSelected[0] ?? ''}
-          options={SEX_INTEREST_CATEGORY_OPTIONS}
-          onValueChange={(v) => setSexInterestSelected(v ? [v] : [])}
-        />
-        <ChoiceDropdown
-          label="After the initial excitement of meeting someone, what pace feels most natural for you?"
-          value={asStr(draft.datingPaceAfterExcitement)}
-          options={DATING_PACE_AFTER_EXCITEMENT_OPTIONS}
-          onValueChange={setScalar('datingPaceAfterExcitement')}
-        />
-        <ChoiceDropdown
-          label="Think about your most recent dating experience. In the first 2–3 weeks, what actually happened?"
-          value={asStr(draft.recentDatingEarlyWeeks)}
-          options={RECENT_DATING_EARLY_WEEKS_OPTIONS}
-          onValueChange={setScalar('recentDatingEarlyWeeks')}
-        />
-
-        <SectionTitle>Life domains</SectionTitle>
-        <LifeDomainDistribution values={lifeDomainsState} onValuesChange={setLifeDomainsState} />
-
-        <SectionTitle>Typology</SectionTitle>
-        <TypologyPickerFields
-          variant="onboarding"
-          allowSkipOption={false}
-          value={typologyValues}
-          onTypologyChange={setTypologyValues}
-        />
-
-        <SectionTitle>Add your photos</SectionTitle>
-        <View style={styles.photoGrid}>
-          {photoUrls.map((uri, index) => (
-            <View key={`${uri}-${index}`} style={styles.photoContainer}>
-              <ExpoImage source={{ uri }} style={styles.photo} contentFit="cover" />
-              <TouchableOpacity
-                style={styles.removePhotoButton}
-                onPress={() => {
-                  setPhotoUrls((prev) => prev.filter((_, i) => i !== index));
-                }}
+        <View style={styles.tabBar}>
+          {EDIT_PROFILE_TABS.map((tab) => {
+            const selected = activeTab === tab.id;
+            return (
+              <Pressable
+                key={tab.id}
+                onPress={() => setActiveTab(tab.id)}
+                style={[styles.tabButton, selected && styles.tabButtonActive]}
               >
-                <Text style={styles.removePhotoText}>×</Text>
+                <Text
+                  style={[styles.tabText, selected && styles.tabTextActive]}
+                >
+                  {tab.label}
+                </Text>
+              </Pressable>
+            );
+          })}
+        </View>
+
+        {activeTab === 'basics' ? (
+          <>
+            <SectionTitle>About you</SectionTitle>
+            <Field
+              label="Name"
+              value={asStr(draft.displayName)}
+              onChangeText={setScalar('displayName')}
+            />
+            <ChoiceDropdown
+              label="Gender"
+              value={genderUiValue}
+              options={GENDER_UI_OPTIONS.map((g) => ({ label: g, value: g }))}
+              onValueChange={(ui) =>
+                setDraft((d) => ({
+                  ...d,
+                  gender: ui ? (mapGenderToDb(ui) ?? ui) : '',
+                }))
+              }
+            />
+            <ChoiceDropdown
+              label="Ethnicity"
+              value={asStr(draft.ethnicity)}
+              options={ETHNICITY_CHOICES}
+              onValueChange={setScalar('ethnicity')}
+            />
+            <View style={styles.fieldBlock}>
+              <Text style={styles.label}>Attracted to</Text>
+              <View style={styles.chipWrap}>
+                {ATTRACTION_UI.map((option) => {
+                  const on = attractedUi.includes(option);
+                  return (
+                    <Pressable
+                      key={option}
+                      onPress={() => toggleAttraction(option)}
+                      style={[styles.chip, on && styles.chipOn]}
+                    >
+                      <Text style={[styles.chipTxt, on && styles.chipTxtOn]}>
+                        {option}
+                      </Text>
+                    </Pressable>
+                  );
+                })}
+              </View>
+            </View>
+            <View style={styles.fieldBlock}>
+              <DatePicker
+                label="Date of birth"
+                value={birthDateStr}
+                onValueChange={setScalar('birthDate')}
+                minYear={1900}
+                maxYear={maxBirthYear}
+                error={birthDateError}
+              />
+            </View>
+            <BirthTimeQuarterHourPicker
+              label="Time of birth (optional)"
+              value={asStr(draft.birthTime)}
+              onValueChange={setScalar('birthTime')}
+            />
+            <Field
+              label="Location of birth (optional)"
+              value={asStr(draft.birthLocation)}
+              onChangeText={setScalar('birthLocation')}
+            />
+
+            <SectionTitle>Relationship & place</SectionTitle>
+            <ChoiceDropdown
+              label="My relationship style is"
+              value={relationshipStyleUi}
+              options={RELATIONSHIP_STYLE_CHOICES}
+              onValueChange={setScalar('relationshipStyle')}
+            />
+            <ChoiceDropdown
+              label="Relationship history"
+              value={asStr(draft.longestRomanticRelationship)}
+              options={LONGEST_ROMANTIC_RELATIONSHIP_OPTIONS}
+              onValueChange={setScalar('longestRomanticRelationship')}
+            />
+            <View style={styles.fieldBlock}>
+              <Text style={styles.label}>I am located at</Text>
+              <View style={[styles.input, styles.readOnlyBox]}>
+                {locationLoading ? (
+                  <View style={styles.locInner}>
+                    <ActivityIndicator size="small" color="#93c5fd" />
+                    <Text style={styles.readOnlyText}>
+                      Finding your location…
+                    </Text>
+                  </View>
+                ) : (
+                  <Text style={styles.readOnlyText}>
+                    {asStr(draft.location).trim() || '—'}
+                  </Text>
+                )}
+              </View>
+              <TouchableOpacity
+                onPress={() => void refreshLocation()}
+                style={styles.secondaryBtn}
+              >
+                <Text style={styles.secondaryBtnTxt}>Refresh location</Text>
               </TouchableOpacity>
             </View>
-          ))}
-          {photoUrls.length < 6 && (
-            <TouchableOpacity style={styles.addPhotoButton} onPress={() => void pickPhotos()} accessibilityRole="button">
-              <Text style={styles.addPhotoGlyph}>+</Text>
-            </TouchableOpacity>
-          )}
-        </View>
 
-        <SectionTitle>Dealbreakers</SectionTitle>
-        <MatchPreferencesEmbedded
-          location={asStr(draft.location)}
-          userAge={userAge}
-          matchPreferences={matchPrefs}
-          prefPhysicalCompatImportance={prefPhysicalCompatImportance}
-          prefPartnerSharesSexualInterests={prefPartnerSharesSexualInterests}
-          prefPartnerHasChildren={prefPartnerHasChildren}
-          prefPartnerPoliticalAlignmentImportance={prefPartnerPoliticalAlignmentImportance}
-          onPreferencesPatch={onMatchEmbeddedPatch}
-        />
+            <SectionTitle>Work & education</SectionTitle>
+            <Field
+              label="Occupation"
+              value={asStr(draft.occupation)}
+              onChangeText={setScalar('occupation')}
+            />
+            <ChoiceDropdown
+              label="Education level"
+              value={asStr(draft.educationLevel)}
+              options={EDUCATION_LEVEL_CHOICES}
+              onValueChange={setScalar('educationLevel')}
+            />
+          </>
+        ) : null}
 
-        <Pressable onPress={() => void onSave()} disabled={saving || !userId} style={[styles.primaryBtn, { marginTop: 8 }]}>
-          <Text style={styles.primaryBtnTxt}>{saving ? 'Saving…' : toTitleCaseUi('Save changes')}</Text>
+        {activeTab === 'lifestyle' ? (
+          <>
+            <SectionTitle>Body & habits</SectionTitle>
+            <View style={styles.fieldBlock}>
+              <HeightCmPicker
+                label="Height (cm)"
+                valueCm={heightCmPick ?? null}
+                onChangeCm={(cm) => setHeightCmPick(cm)}
+                placeholderLabel="Select height"
+              />
+            </View>
+            <View style={styles.fieldBlock}>
+              <WeightInput
+                label="Weight (lbs)"
+                value={weightLbsStr}
+                onChange={setWeightLbsStr}
+              />
+            </View>
+            <ChoiceDropdown
+              label="Workout frequency"
+              value={asStr(draft.workout)}
+              options={workoutOptions}
+              onValueChange={setScalar('workout')}
+            />
+            <ChoiceDropdown
+              label="Smoking & vaping"
+              value={asStr(draft.smoking)}
+              options={smokingOptions}
+              onValueChange={setScalar('smoking')}
+            />
+            <ChoiceDropdown
+              label="What is your relationship with alcohol"
+              value={asStr(draft.drinking)}
+              options={drinkingOptions}
+              onValueChange={setScalar('drinking')}
+            />
+            <ChoiceDropdown
+              label="Do you use recreational drugs socially (MDMA, cocaine, etc)"
+              value={asStr(draft.recreationalDrugsSocial)}
+              options={recreationalDrugsSocialOptions}
+              onValueChange={setScalar('recreationalDrugsSocial')}
+            />
+            <ChoiceDropdown
+              label="What's your relationship with psychedelics or plant medicines?"
+              value={asStr(draft.relationshipWithPsychedelics)}
+              options={psychedelicsRelationshipOptions}
+              onValueChange={setScalar('relationshipWithPsychedelics')}
+            />
+            <ChoiceDropdown
+              label="What is your relationship with cannabis or tobacco?"
+              value={asStr(draft.relationshipWithCannabis)}
+              options={cannabisRelationshipOptions}
+              onValueChange={setScalar('relationshipWithCannabis')}
+            />
+
+            <SectionTitle>Values</SectionTitle>
+            <ChoiceDropdown
+              label="Do you have kids?"
+              value={asStr(draft.haveKids)}
+              options={haveKidsOptions}
+              onValueChange={setScalar('haveKids')}
+            />
+            <ChoiceDropdown
+              label="Do you want children?"
+              value={asStr(draft.wantKids)}
+              options={wantChildrenYesNoOptions}
+              onValueChange={setScalar('wantKids')}
+            />
+            <ChoiceDropdown
+              label="Politics"
+              value={asStr(draft.politics)}
+              options={politicsOptions}
+              onValueChange={setScalar('politics')}
+            />
+            <ChoiceDropdown
+              label="Religion"
+              value={asStr(draft.religion)}
+              options={religionOptions}
+              onValueChange={setScalar('religion')}
+            />
+          </>
+        ) : null}
+
+        {activeTab === 'compatibility' ? (
+          <>
+            <SectionTitle>Sexual compatibility</SectionTitle>
+            <ChoiceDropdown
+              label="In a relationship, what feels like your natural rhythm for sex?"
+              value={asStr(draft.sexDrive)}
+              options={SEX_DRIVE_OPTIONS}
+              onValueChange={setScalar('sexDrive')}
+            />
+            <ChoiceDropdown
+              label="Sexual interests (select one)"
+              value={sexInterestSelected[0] ?? ''}
+              options={SEX_INTEREST_CATEGORY_OPTIONS}
+              onValueChange={(v) => setSexInterestSelected(v ? [v] : [])}
+            />
+            <ChoiceDropdown
+              label="After the initial excitement of meeting someone, what pace feels most natural for you?"
+              value={asStr(draft.datingPaceAfterExcitement)}
+              options={DATING_PACE_AFTER_EXCITEMENT_OPTIONS}
+              onValueChange={setScalar('datingPaceAfterExcitement')}
+            />
+            <ChoiceDropdown
+              label="Think about your most recent dating experience. In the first 2–3 weeks, what actually happened?"
+              value={asStr(draft.recentDatingEarlyWeeks)}
+              options={RECENT_DATING_EARLY_WEEKS_OPTIONS}
+              onValueChange={setScalar('recentDatingEarlyWeeks')}
+            />
+            <ChoiceDropdown
+              label="How much space do you realistically have for a new relationship right now?"
+              value={asStr(draft.spaceForNewRelationship)}
+              options={SPACE_FOR_NEW_RELATIONSHIP_OPTIONS}
+              onValueChange={setScalar('spaceForNewRelationship')}
+            />
+            <ChoiceDropdown
+              label="When my partner is in the mood and I'm not, I generally..."
+              value={asStr(draft.partnerMoodMismatchResponse)}
+              options={PARTNER_MOOD_MISMATCH_RESPONSE_OPTIONS}
+              onValueChange={setScalar('partnerMoodMismatchResponse')}
+            />
+            <ChoiceDropdown
+              label="During sex, I'm more focused on..."
+              value={asStr(draft.sexualFocusPreference)}
+              options={SEXUAL_FOCUS_OPTIONS}
+              onValueChange={setScalar('sexualFocusPreference')}
+            />
+            <ChoiceDropdown
+              label="When something isn't working for me sexually, I..."
+              value={asStr(draft.sexualFeedbackStyle)}
+              options={SEXUAL_FEEDBACK_STYLE_OPTIONS}
+              onValueChange={setScalar('sexualFeedbackStyle')}
+            />
+            <ChoiceDropdown
+              label="How comfortable are you discussing your sexual needs and preferences with a partner?"
+              value={asStr(draft.sexualNeedsCommunicationComfort)}
+              options={SEXUAL_NEEDS_COMMUNICATION_OPTIONS}
+              onValueChange={setScalar('sexualNeedsCommunicationComfort')}
+            />
+
+            <SectionTitle>Life domains</SectionTitle>
+            <LifeDomainDistribution
+              values={lifeDomainsState}
+              onValuesChange={setLifeDomainsState}
+            />
+
+            <SectionTitle>Typology</SectionTitle>
+            <TypologyPickerFields
+              variant="onboarding"
+              allowSkipOption={false}
+              value={typologyValues}
+              onTypologyChange={setTypologyValues}
+            />
+          </>
+        ) : null}
+
+        {activeTab === 'basics' ? (
+          <>
+            <SectionTitle>Add your photos</SectionTitle>
+            <View style={styles.photoGrid}>
+              {photoUrls.map((uri, index) => (
+                <View key={`${uri}-${index}`} style={styles.photoContainer}>
+                  <ExpoImage
+                    source={{ uri }}
+                    style={styles.photo}
+                    contentFit="cover"
+                  />
+                  <TouchableOpacity
+                    style={styles.removePhotoButton}
+                    onPress={() => {
+                      setPhotoUrls((prev) =>
+                        prev.filter((_, i) => i !== index),
+                      );
+                    }}
+                  >
+                    <Text style={styles.removePhotoText}>×</Text>
+                  </TouchableOpacity>
+                </View>
+              ))}
+              {photoUrls.length < 6 && (
+                <TouchableOpacity
+                  style={styles.addPhotoButton}
+                  onPress={() => void pickPhotos()}
+                  accessibilityRole="button"
+                >
+                  <Text style={styles.addPhotoGlyph}>+</Text>
+                </TouchableOpacity>
+              )}
+            </View>
+          </>
+        ) : null}
+
+        {activeTab === 'dealbreakers' ? (
+          <>
+            <SectionTitle>Dealbreakers</SectionTitle>
+            <MatchPreferencesEmbedded
+              location={asStr(draft.location)}
+              userAge={userAge}
+              matchPreferences={matchPrefs}
+              prefPartnerSharesSexualInterests={
+                prefPartnerSharesSexualInterests
+              }
+              prefPartnerHasChildren={prefPartnerHasChildren}
+              prefPartnerPoliticalAlignmentImportance={
+                prefPartnerPoliticalAlignmentImportance
+              }
+              onPreferencesPatch={onMatchEmbeddedPatch}
+            />
+          </>
+        ) : null}
+
+        <Pressable
+          onPress={() => void onSave()}
+          disabled={saving || !userId}
+          style={[
+            styles.primaryBtn,
+            saving && styles.primaryBtnDisabled,
+            { marginTop: 8 },
+          ]}
+        >
+          <View style={styles.saveButtonContent}>
+            {saving ? <ActivityIndicator size="small" color="#fff" /> : null}
+            <Text style={styles.primaryBtnTxt}>
+              {saving ? 'Saving...' : toTitleCaseUi('Save changes')}
+            </Text>
+          </View>
         </Pressable>
+        {saveFeedbackText ? (
+          <View
+            style={[
+              styles.saveStatus,
+              saving ? styles.saveStatusSaving : styles.saveStatusSuccess,
+            ]}
+          >
+            {saving ? (
+              <ActivityIndicator size="small" color="#93c5fd" />
+            ) : (
+              <Text style={styles.saveStatusIcon}>✓</Text>
+            )}
+            <Text style={styles.saveStatusText}>{saveFeedbackText}</Text>
+          </View>
+        ) : null}
 
         <Text style={styles.mutedSmall}>Signed in as {user?.email ?? '—'}</Text>
       </ScrollView>
@@ -982,17 +1366,31 @@ export const DatingProfileEditScreen: React.FC<{
 };
 
 const styles = StyleSheet.create({
-  scroll: { padding: 22, paddingBottom: 48, maxWidth: 560, width: '100%', alignSelf: 'center' },
+  scroll: {
+    padding: 22,
+    paddingBottom: 48,
+    maxWidth: 560,
+    width: '100%',
+    alignSelf: 'center',
+  },
   h1: {
-    fontFamily: Platform.OS === 'web' ? "'Cormorant Garamond', serif" : undefined,
+    fontFamily:
+      Platform.OS === 'web' ? "'Cormorant Garamond', serif" : undefined,
     fontSize: 26,
     fontWeight: '600',
     color: '#fafafa',
     marginBottom: 10,
   },
-  lead: { fontFamily: FONT_BODY, fontSize: 14, lineHeight: 21, color: 'rgba(255,255,255,0.72)', marginBottom: 20 },
+  lead: {
+    fontFamily: FONT_BODY,
+    fontSize: 14,
+    lineHeight: 21,
+    color: 'rgba(255,255,255,0.72)',
+    marginBottom: 20,
+  },
   sectionTitle: {
-    fontFamily: Platform.OS === 'web' ? "'Cormorant Garamond', serif" : undefined,
+    fontFamily:
+      Platform.OS === 'web' ? "'Cormorant Garamond', serif" : undefined,
     fontSize: 18,
     fontWeight: '600',
     color: '#e4e4e7',
@@ -1003,32 +1401,34 @@ const styles = StyleSheet.create({
   label: { color: '#9CB4D8', fontSize: 13, marginBottom: 8 },
   input: {
     fontFamily: FONT_BODY,
-    fontSize: 15,
+    fontSize: 16,
+    fontWeight: '500',
+    lineHeight: 22,
     color: '#E8F0F8',
     backgroundColor: 'rgba(255,255,255,0.06)',
     borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.12)',
-    borderRadius: 12,
+    borderColor: 'rgba(255,255,255,0.14)',
+    borderRadius: 10,
     paddingHorizontal: 14,
-    paddingVertical: Platform.OS === 'web' ? 10 : 12,
-    minHeight: 44,
+    paddingVertical: 12,
+    minHeight: 56,
   },
   inputMultiline: { minHeight: 88, paddingTop: 12 },
   readOnlyBox: { justifyContent: 'center' },
   readOnlyText: { fontFamily: FONT_BODY, fontSize: 15, color: '#E8F0F8' },
   locInner: { flexDirection: 'row', alignItems: 'center', gap: 10 },
   pickerShell: {
-    borderRadius: 12,
+    borderRadius: 10,
     borderWidth: 1,
-    borderColor: theme.colors.border,
-    backgroundColor: theme.colors.card,
+    borderColor: 'rgba(255,255,255,0.14)',
+    backgroundColor: 'rgba(255,255,255,0.06)',
     overflow: 'hidden',
     ...(Platform.OS === 'ios' ? {} : { minHeight: 56 }),
   },
   pickerNative: {
     width: '100%',
-    color: theme.colors.text,
-    backgroundColor: theme.colors.card,
+    color: '#E8F0F8',
+    backgroundColor: 'rgba(255,255,255,0.06)',
     ...(Platform.OS === 'ios'
       ? { height: 160 }
       : Platform.OS === 'android'
@@ -1044,7 +1444,22 @@ const styles = StyleSheet.create({
     minHeight: 54,
     cursor: 'pointer' as const,
     color: theme.colors.text,
-    backgroundColor: theme.colors.card,
+    backgroundColor: 'rgba(255,255,255,0.06)',
+  },
+  dropdownTriggerContent: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  dropdownTriggerText: {
+    flex: 1,
+    color: '#E8F0F8',
+    fontSize: 15,
+  },
+  dropdownChevron: {
+    color: 'rgba(156,180,216,0.9)',
+    fontSize: 14,
+    paddingLeft: 10,
   },
   chipWrap: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
   chip: {
@@ -1059,7 +1474,11 @@ const styles = StyleSheet.create({
     borderColor: '#5BA8E8',
     backgroundColor: 'rgba(91,168,232,0.15)',
   },
-  chipTxt: { fontFamily: FONT_BODY, fontSize: 14, color: 'rgba(255,255,255,0.82)' },
+  chipTxt: {
+    fontFamily: FONT_BODY,
+    fontSize: 14,
+    color: 'rgba(255,255,255,0.82)',
+  },
   chipTxtOn: { color: '#EEF6FF', fontWeight: '600' },
   secondaryBtn: {
     alignSelf: 'flex-start',
@@ -1109,7 +1528,11 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
-  addPhotoGlyph: { fontSize: 32, color: 'rgba(255,255,255,0.55)', fontWeight: '300' },
+  addPhotoGlyph: {
+    fontSize: 32,
+    color: 'rgba(255,255,255,0.55)',
+    fontWeight: '300',
+  },
   primaryBtn: {
     backgroundColor: ACCENT,
     borderRadius: 10,
@@ -1117,6 +1540,81 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     marginBottom: 8,
   },
+  primaryBtnDisabled: {
+    opacity: 0.78,
+  },
+  saveButtonContent: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+  },
   primaryBtnTxt: { color: '#fff', fontWeight: '600', fontSize: 15 },
+  saveStatus: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    borderRadius: 10,
+    borderWidth: 1,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    marginBottom: 10,
+  },
+  saveStatusSaving: {
+    borderColor: 'rgba(147,197,253,0.28)',
+    backgroundColor: 'rgba(59,130,246,0.12)',
+  },
+  saveStatusSuccess: {
+    borderColor: 'rgba(74,222,128,0.28)',
+    backgroundColor: 'rgba(34,197,94,0.12)',
+  },
+  saveStatusIcon: {
+    color: '#86efac',
+    fontSize: 15,
+    fontWeight: '800',
+  },
+  saveStatusText: {
+    color: '#E8F0F8',
+    fontSize: 13,
+    fontWeight: '600',
+  },
+  tabBar: {
+    flexDirection: 'row',
+    flexWrap: 'nowrap',
+    gap: 4,
+    borderRadius: 14,
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.1)',
+    backgroundColor: 'rgba(255,255,255,0.035)',
+    padding: 6,
+    marginTop: 6,
+    marginBottom: 8,
+  },
+  tabButton: {
+    flex: 1,
+    flexGrow: 1,
+    flexBasis: 0,
+    minWidth: 0,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: 'transparent',
+    paddingHorizontal: 6,
+    paddingVertical: 10,
+  },
+  tabButtonActive: {
+    borderColor: 'rgba(91,168,232,0.42)',
+    backgroundColor: 'rgba(91,168,232,0.16)',
+  },
+  tabText: {
+    color: 'rgba(200,217,238,0.78)',
+    fontSize: 12,
+    fontWeight: '700',
+    textAlign: 'center',
+  },
+  tabTextActive: {
+    color: '#EEF6FF',
+  },
   mutedSmall: { color: 'rgba(255,255,255,0.35)', fontSize: 12, marginTop: 16 },
 });

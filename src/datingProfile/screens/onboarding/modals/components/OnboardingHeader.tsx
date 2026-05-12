@@ -36,11 +36,11 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    paddingHorizontal: 8,
-    paddingVertical: 12,
+    paddingHorizontal: 16,
+    paddingVertical: 16,
     borderBottomWidth: 1,
-    borderBottomColor: theme.colors.border,
-    backgroundColor: theme.colors.surface,
+    borderBottomColor: 'rgba(82,142,220,0.18)',
+    backgroundColor: 'rgba(255,255,255,0.035)',
   },
   side: {
     width: 40,
@@ -49,11 +49,12 @@ const styles = StyleSheet.create({
   },
   headerTitle: {
     flex: 1,
-    fontSize: 18,
-    fontWeight: '600',
+    fontSize: 17,
+    fontWeight: '700',
     color: theme.colors.text,
     fontFamily: 'SpaceMono',
     textAlign: 'center',
+    letterSpacing: 0.2,
   },
 });
 

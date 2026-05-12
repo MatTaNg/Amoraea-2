@@ -26,14 +26,26 @@ function scenarioBundleAssessable(bundle: unknown): boolean {
   return pillarScoresHaveNumericAssessment(ps);
 }
 
-function personalMomentBundleWasScored(bundle: unknown): boolean {
+function keyEvidenceHasNonEmptyAssessedText(keyEvidence: unknown): boolean {
+  if (keyEvidence == null || typeof keyEvidence !== 'object' || Array.isArray(keyEvidence)) return false;
+  return Object.values(keyEvidence as Record<string, unknown>).some(
+    (v) => typeof v === 'string' && v.trim().length > 0
+  );
+}
+
+/** Exported for persistence: drop stored shells that would fail {@link evaluateInterviewCompletionGate}. */
+export function personalMomentBundleWasScored(bundle: unknown): boolean {
   if (bundle == null || typeof bundle !== 'object') return false;
   const ps = (bundle as { pillarScores?: unknown }).pillarScores;
   if (pillarScoresHaveNumericAssessment(ps)) return true;
   if (ps == null || typeof ps !== 'object' || Array.isArray(ps)) return false;
   const keys = Object.keys(ps as Record<string, unknown>);
-  if (keys.length === 0) return false;
   const keyEvidence = (bundle as { keyEvidence?: unknown }).keyEvidence;
+  // After normalizeScoresByEvidence, all-null assessed slices can become `{}` — still valid if the model
+  // wrote real evidence strings (see Moment 4 deflection / no-signal paths).
+  if (keys.length === 0) {
+    return keyEvidenceHasNonEmptyAssessedText(keyEvidence);
+  }
   return keyEvidence != null && typeof keyEvidence === 'object' && !Array.isArray(keyEvidence);
 }
 

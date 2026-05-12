@@ -30,6 +30,7 @@ import { profilesRepo } from "@/data/repos/profilesRepo";
 import { theme } from "@/shared/theme/theme";
 import { AssessmentHeader } from "@/shared/components/assessments/AssessmentHeader";
 import {
+  ASSESSMENT_IDS,
   getCompletedAssessments,
   getFirstIncompleteAssessment,
 } from "@/data/services/assessmentService";
@@ -116,7 +117,7 @@ export function ConflictStyleAssessmentScreen() {
     if (
       profile?.currentAssessment === "CONFLICT-30" &&
       typeof profile.currentAssessmentQuestion === "number" &&
-      profile.currentAssessmentQuestion >= 1
+      profile.currentAssessmentQuestion > 1
     ) {
       const q = Math.min(profile.currentAssessmentQuestion, total);
       setShowIntro(false);
@@ -295,37 +296,67 @@ export function ConflictStyleAssessmentScreen() {
   if (showIntro) {
     return (
       <SafeAreaView style={styles.container} edges={["top", "left", "right"]}>
-        <ScrollView contentContainerStyle={styles.scrollContent}>
-          <Text style={styles.introTitle}>How do you handle conflict?</Text>
-          <Text style={styles.introBody}>
-            3–4 minutes. Helps us find someone whose conflict style works with yours.
-          </Text>
-          <Text style={styles.introMeta}>
-            20 questions · one at a time · your answers are saved as you go
-          </Text>
-          <Pressable
-            style={styles.primaryBtn}
-            onPress={async () => {
-              resumeSyncDoneRef.current = true;
-              if (user?.id && isRetake) {
-                const cleared = await clearConflictStyleResponseDrafts(user.id);
-                if (!cleared.success) {
-                  Alert.alert("Couldn't reset", cleared.error.message);
-                  return;
+        <ScrollView contentContainerStyle={styles.introScrollContent}>
+          <View style={styles.introCard}>
+            <Text style={styles.introEyebrow}>Relationship typology</Text>
+            <Text style={styles.introTitle}>What Is the Conflict Style Quiz?</Text>
+            <Text style={styles.introBody}>
+              The Conflict Style Quiz helps identify how you naturally respond when tension, disagreement, or emotional friction happens in relationships.
+              {"\n\n"}Everyone handles conflict differently:
+              {"\n\n"}Some people confront problems immediately.
+              {"\n"}Some withdraw.
+              {"\n"}Some try to keep peace at all costs.
+              {"\n"}Some become highly emotional.
+              {"\n"}Some become analytical or solution-focused.
+              {"\n\n"}The quiz helps reveal your default conflict patterns and communication tendencies under stress.
+              {"\n\n"}Common styles often include:
+              {"\n\n"}Avoidant
+              {"\n"}Accommodating
+              {"\n"}Competitive
+              {"\n"}Collaborative
+              {"\n"}Defensive
+              {"\n"}Emotionally expressive
+              {"\n"}Logical/problem-solving
+              {"\n\n"}Conflict style assessments are grounded in decades of relationship psychology and communication research.
+              {"\n\n"}Many modern frameworks draw from the work of researchers such as:
+              {"\n\n"}John Gottman
+              {"\n"}Marshall Rosenberg (Creator of Non-violent Communication)
+              {"\n"}interpersonal communication and conflict-resolution research fields
+              {"\n\n"}Research consistently shows that conflict behavior strongly correlates with:
+              {"\n\n"}Relationship satisfaction
+              {"\n"}Emotional safety
+              {"\n"}Breakup/divorce likelihood
+              {"\n"}Long-term relationship stability
+              {"\n\n"}The strongest couples are usually not couples who never fight.
+              {"\n"}They're couples who know how to repair, regulate, communicate, and stay connected through tension.
+            </Text>
+            <Text style={styles.introMeta}>
+              20 questions | Your answers are saved as you go
+            </Text>
+            <Pressable
+              style={styles.primaryBtn}
+              onPress={async () => {
+                resumeSyncDoneRef.current = true;
+                if (user?.id && isRetake) {
+                  const cleared = await clearConflictStyleResponseDrafts(user.id);
+                  if (!cleared.success) {
+                    Alert.alert("Couldn't reset", cleared.error.message);
+                    return;
+                  }
+                  setAnswers({});
+                  setCurrentIndex(0);
                 }
-                setAnswers({});
-                setCurrentIndex(0);
-              }
-              setShowIntro(false);
-              if (user?.id) {
-                void saveAssessmentProgress(user.id, "CONFLICT-30", 1).then(() =>
-                  refreshProfile?.()
-                );
-              }
-            }}
-          >
-            <Text style={styles.primaryBtnText}>Begin</Text>
-          </Pressable>
+                setShowIntro(false);
+                if (user?.id) {
+                  void saveAssessmentProgress(user.id, "CONFLICT-30", 1).then(() =>
+                    refreshProfile?.()
+                  );
+                }
+              }}
+            >
+              <Text style={styles.primaryBtnText}>Begin</Text>
+            </Pressable>
+          </View>
         </ScrollView>
       </SafeAreaView>
     );
@@ -340,44 +371,57 @@ export function ConflictStyleAssessmentScreen() {
       <View style={styles.flowProgressTrack}>
         <View style={[styles.flowProgressFill, { width: `${progressPct}%` }]} />
       </View>
-      <AssessmentHeader
-        surveysComplete={surveysComplete}
-        currentQ={qNum}
-        totalQ={total}
-        assessmentName="Conflict style"
-      />
       <ScrollView
         style={styles.scroll}
-        contentContainerStyle={styles.scrollContent}
+        contentContainerStyle={styles.questionScrollContent}
         keyboardShouldPersistTaps="handled"
       >
-        <Text style={styles.question}>{pair?.prompt ?? ""}</Text>
-        {shuffled &&
-          [shuffled.first, shuffled.second].map((opt, displayIdx) => {
-            const isSel = selected?.selectedOptionIndex === displayIdx;
-            return (
-              <Pressable
-                key={`${currentIndex}-${displayIdx}`}
-                style={[styles.option, isSel && styles.optionReviewed]}
-                disabled={saving || selectionBusy}
-                onPress={() => selectOption(displayIdx, opt.style)}
-              >
-                <Text style={styles.optionText}>{opt.text}</Text>
-              </Pressable>
-            );
-          })}
-        <Pressable
-          style={styles.backBtn}
-          onPress={goBack}
-          disabled={currentIndex === 0 || saving || selectionBusy}
-        >
-          <Text style={[styles.backText, currentIndex === 0 && styles.backDisabled]}>← Back</Text>
-        </Pressable>
+        <View style={styles.questionCard}>
+          <AssessmentHeader
+            surveysComplete={surveysComplete}
+            currentQ={qNum}
+            totalQ={total}
+            assessmentName="Conflict style"
+            totalAssessments={ASSESSMENT_IDS.length}
+          />
+          <Text style={styles.question}>{pair?.prompt ?? ""}</Text>
+          {shuffled &&
+            [shuffled.first, shuffled.second].map((opt, displayIdx) => {
+              const isSel = selected?.selectedOptionIndex === displayIdx;
+              return (
+                <Pressable
+                  key={`${currentIndex}-${displayIdx}`}
+                  style={[styles.option, isSel && styles.optionReviewed]}
+                  disabled={saving || selectionBusy}
+                  onPress={() => selectOption(displayIdx, opt.style)}
+                >
+                  <Text style={styles.optionText}>{opt.text}</Text>
+                </Pressable>
+              );
+            })}
+          <Pressable
+            style={styles.backBtn}
+            onPress={goBack}
+            disabled={currentIndex === 0 || saving || selectionBusy}
+          >
+            <Text style={[styles.backText, currentIndex === 0 && styles.backDisabled]}>← Back</Text>
+          </Pressable>
+        </View>
       </ScrollView>
       {saving && (
-        <View style={styles.savingBar}>
-          <ActivityIndicator size="small" />
-          <Text style={styles.savingText}>Saving…</Text>
+        <View
+          style={styles.savingOverlay}
+          pointerEvents="auto"
+          accessibilityRole="progressbar"
+          accessibilityLabel="Preparing your results"
+        >
+          <View style={styles.loadingCard}>
+            <ActivityIndicator size="large" color={theme.colors.primary} />
+            <Text style={styles.loadingTitle}>Preparing your results</Text>
+            <Text style={styles.loadingBody}>
+              Saving your answers and loading your conflict style summary.
+            </Text>
+          </View>
         </View>
       )}
     </SafeAreaView>
@@ -389,6 +433,20 @@ const styles = StyleSheet.create({
   centered: { justifyContent: "center", alignItems: "center" },
   scroll: { flex: 1 },
   scrollContent: { padding: 24, paddingBottom: 48 },
+  questionScrollContent: {
+    flexGrow: 1,
+    paddingHorizontal: 24,
+    paddingVertical: 28,
+    paddingBottom: 56,
+    alignItems: "center",
+  },
+  introScrollContent: {
+    flexGrow: 1,
+    paddingHorizontal: 24,
+    paddingVertical: 40,
+    paddingBottom: 56,
+    alignItems: "center",
+  },
   flowProgressTrack: {
     height: 4,
     backgroundColor: "#E0E0E0",
@@ -396,51 +454,107 @@ const styles = StyleSheet.create({
   },
   flowProgressFill: { height: "100%", backgroundColor: "#007AFF" },
   introTitle: {
-    fontSize: 22,
+    fontSize: 30,
     fontWeight: "700",
     color: theme.colors.text,
-    marginBottom: 12,
+    marginBottom: 16,
+    lineHeight: 38,
   },
-  introBody: { fontSize: 16, color: theme.colors.textSecondary, lineHeight: 24 },
+  introBody: { fontSize: 16, color: theme.colors.textSecondary, lineHeight: 26 },
   introMeta: { fontSize: 14, color: theme.colors.textSecondary, marginTop: 16 },
+  introCard: {
+    width: "100%",
+    maxWidth: 760,
+    borderRadius: 20,
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.1)",
+    backgroundColor: "rgba(255,255,255,0.035)",
+    padding: 28,
+  },
+  introEyebrow: {
+    color: "#9CB4D8",
+    fontSize: 13,
+    fontWeight: "700",
+    letterSpacing: 0.7,
+    textTransform: "uppercase",
+    marginBottom: 10,
+  },
   primaryBtn: {
     marginTop: 28,
     backgroundColor: theme.colors.primary,
     paddingVertical: 14,
+    paddingHorizontal: 22,
     borderRadius: 10,
     alignItems: "center",
+    alignSelf: "flex-start",
+    minWidth: 180,
   },
   primaryBtnText: { color: theme.colors.textInverse, fontSize: 16, fontWeight: "600" },
   question: {
-    fontSize: 18,
-    fontWeight: "600",
+    fontSize: 22,
+    fontWeight: "700",
     color: theme.colors.text,
-    lineHeight: 26,
-    marginBottom: 20,
+    lineHeight: 30,
+    marginBottom: 24,
+  },
+  questionCard: {
+    width: "100%",
+    maxWidth: 760,
+    borderRadius: 20,
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.1)",
+    backgroundColor: "rgba(255,255,255,0.035)",
+    padding: 28,
   },
   option: {
     borderWidth: 1,
-    borderColor: theme.colors.border,
-    borderRadius: 10,
+    borderColor: "rgba(82,142,220,0.25)",
+    borderRadius: 14,
     paddingVertical: 16,
-    paddingHorizontal: 14,
+    paddingHorizontal: 16,
     marginBottom: 12,
     minHeight: 56,
     justifyContent: "center",
-    backgroundColor: theme.colors.surface,
+    backgroundColor: "rgba(255,255,255,0.045)",
   },
-  optionReviewed: { borderColor: theme.colors.primary },
+  optionReviewed: {
+    borderColor: theme.colors.primary,
+    backgroundColor: "rgba(91,168,232,0.2)",
+  },
   optionText: { fontSize: 16, color: theme.colors.text, lineHeight: 22 },
   backBtn: { marginTop: 16, paddingVertical: 8 },
   backText: { fontSize: 16, color: theme.colors.primary },
   backDisabled: { opacity: 0.35 },
-  savingBar: {
-    flexDirection: "row",
-    alignItems: "center",
+  savingOverlay: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: "rgba(0,0,0,0.45)",
     justifyContent: "center",
-    gap: 8,
-    paddingVertical: 12,
-    backgroundColor: theme.colors.surface,
+    alignItems: "center",
+    zIndex: 1000,
+    padding: 24,
   },
-  savingText: { fontSize: 14, color: theme.colors.textSecondary },
+  loadingCard: {
+    width: "100%",
+    maxWidth: 420,
+    borderRadius: 22,
+    borderWidth: 1,
+    borderColor: "rgba(91,168,232,0.24)",
+    backgroundColor: "rgba(91,168,232,0.08)",
+    padding: 28,
+    alignItems: "center",
+  },
+  loadingTitle: {
+    color: theme.colors.text,
+    fontSize: 20,
+    fontWeight: "800",
+    marginTop: 18,
+    marginBottom: 8,
+    textAlign: "center",
+  },
+  loadingBody: {
+    color: theme.colors.textSecondary,
+    fontSize: 15,
+    lineHeight: 22,
+    textAlign: "center",
+  },
 });

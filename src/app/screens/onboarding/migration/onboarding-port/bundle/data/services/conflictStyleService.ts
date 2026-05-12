@@ -11,6 +11,7 @@ import type { Result } from "@/src/types";
 import type { TraitScores } from "@/src/types";
 import {
   buildAssessmentResultSummary,
+  getNextInstrument,
   instrumentToTestId,
 } from "@/data/services/assessmentService";
 import { buildDetailedInsightRows } from "@/data/assessments/insightContent";
@@ -159,9 +160,22 @@ export async function saveConflictStyleCompletion(
     if (trErr) return { success: false, error: new Error(trErr.message) };
   }
 
-  const profUp = await profilesRepo.updateProfile(userId, {
+  const nextInstrument = getNextInstrument("CONFLICT-30");
+  const profileUpdate: Record<string, unknown> = {
     conflictStyleCompleted: true,
-  } as any);
+  };
+  if (!options.isRetake) {
+    profileUpdate.currentAssessment = nextInstrument ?? null;
+    profileUpdate.currentAssessmentQuestion = nextInstrument ? 1 : null;
+    if (!nextInstrument) {
+      profileUpdate.assessmentsCompleted = true;
+      profileUpdate.assessmentsCompletedAt = new Date().toISOString();
+      profileUpdate.onboardingCompleted = true;
+      profileUpdate.onboardingCompletedAt = new Date().toISOString();
+    }
+  }
+
+  const profUp = await profilesRepo.updateProfile(userId, profileUpdate as any);
   if (!profUp.success) return profUp;
 
   return { success: true };

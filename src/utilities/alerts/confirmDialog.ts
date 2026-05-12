@@ -16,35 +16,7 @@ export type ConfirmDialogOptions = {
  */
 export function showConfirmDialog(options: ConfirmDialogOptions, onConfirm: () => void): void {
   const { title, message, cancelText = 'Cancel', confirmText, destructive = true } = options;
-  // #region agent log
-  fetch('http://127.0.0.1:7789/ingest/668e0bd5-3283-4492-9f48-e33846c18218', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json', 'X-Debug-Session-Id': 'c61a43' },
-    body: JSON.stringify({
-      sessionId: 'c61a43',
-      location: 'confirmDialog.ts:showConfirmDialog',
-      message: 'showConfirmDialog_entry',
-      data: { platform: Platform.OS, titleLen: title.length, hypothesisId: 'H2' },
-      timestamp: Date.now(),
-      runId: 'post-fix',
-    }),
-  }).catch(() => {});
-  // #endregion
   if (Platform.OS === 'web' && typeof window !== 'undefined' && typeof window.confirm === 'function') {
-    // #region agent log
-    fetch('http://127.0.0.1:7789/ingest/668e0bd5-3283-4492-9f48-e33846c18218', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'X-Debug-Session-Id': 'c61a43' },
-      body: JSON.stringify({
-        sessionId: 'c61a43',
-        location: 'confirmDialog.ts:showConfirmDialog',
-        message: 'web_window_confirm_branch',
-        data: { hypothesisId: 'H2' },
-        timestamp: Date.now(),
-        runId: 'post-fix',
-      }),
-    }).catch(() => {});
-    // #endregion
     const label = `${title}\n\n${message}\n\n[${cancelText}] / [${confirmText}]`;
     const ok = window.confirm(label);
     if (ok) onConfirm();

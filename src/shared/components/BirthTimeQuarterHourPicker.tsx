@@ -14,7 +14,9 @@ export function isValidOptionalBirthTime24h(s: string): boolean {
 }
 
 const QUARTER_HOUR_TIME_OPTIONS: { label: string; value: string }[] = (() => {
-  const out: { label: string; value: string }[] = [{ label: 'Not specified', value: '' }];
+  const out: { label: string; value: string }[] = [
+    { label: 'Not specified', value: '' },
+  ];
   for (let h = 0; h < 24; h += 1) {
     for (const m of [0, 15, 30, 45]) {
       const value = `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`;
@@ -31,11 +33,9 @@ export type BirthTimeQuarterHourPickerProps = {
 };
 
 /** Quarter-hour birth time dropdown (matches onboarding `DateOfBirthModal`). */
-export const BirthTimeQuarterHourPicker: React.FC<BirthTimeQuarterHourPickerProps> = ({
-  value,
-  onValueChange,
-  label = 'Birth time',
-}) => {
+export const BirthTimeQuarterHourPicker: React.FC<
+  BirthTimeQuarterHourPickerProps
+> = ({ value, onValueChange, label = 'Birth time' }) => {
   const timePickerOptions = useMemo(() => {
     const t = value.trim();
     if (!t || QUARTER_HOUR_TIME_OPTIONS.some((o) => o.value === t)) {
@@ -56,7 +56,10 @@ export const BirthTimeQuarterHourPicker: React.FC<BirthTimeQuarterHourPickerProp
   return (
     <View style={styles.fieldBlock}>
       <Text style={styles.fieldLabel}>{label}</Text>
-      <View style={styles.timePickerWrapper}>
+      <View
+        style={styles.timePickerWrapper}
+        {...(Platform.OS === 'web' ? { nativeID: 'birth-time-quarter-hour-picker' } : {})}
+      >
         <Picker
           selectedValue={value.trim() === '' ? '' : value.trim()}
           onValueChange={(v) => onValueChange(String(v))}
@@ -74,7 +77,11 @@ export const BirthTimeQuarterHourPicker: React.FC<BirthTimeQuarterHourPickerProp
           ]}
           dropdownIconColor={theme.colors.textSecondary}
           mode={Platform.OS === 'android' ? 'dropdown' : undefined}
-          itemStyle={Platform.OS === 'ios' ? { color: theme.colors.text, fontSize: 17 } : undefined}
+          itemStyle={
+            Platform.OS === 'ios'
+              ? { color: theme.colors.text, fontSize: 17 }
+              : undefined
+          }
         >
           {timePickerOptions.map((o) => (
             <Picker.Item
@@ -82,12 +89,19 @@ export const BirthTimeQuarterHourPicker: React.FC<BirthTimeQuarterHourPickerProp
               label={o.label}
               value={o.value}
               color={theme.colors.text}
+              style={
+                o.value === ''
+                  ? styles.timePickerItemPlaceholder
+                  : styles.timePickerItem
+              }
             />
           ))}
         </Picker>
       </View>
       {value.trim() !== '' && !timeOk ? (
-        <Text style={styles.errorText}>Use 24-hour format HH:MM (e.g. 09:05 or 14:30).</Text>
+        <Text style={styles.errorText}>
+          Use 24-hour format HH:MM (e.g. 09:05 or 14:30).
+        </Text>
       ) : null}
     </View>
   );
@@ -107,17 +121,21 @@ const styles = StyleSheet.create({
     maxWidth: '100%',
     width: TIME_PICKER_WIDTH,
     borderWidth: 1,
-    borderColor: theme.colors.border,
+    borderColor: 'rgba(255,255,255,0.14)',
     borderRadius: 10,
-    backgroundColor: theme.colors.card,
+    backgroundColor: 'rgba(255,255,255,0.06)',
     overflow: 'hidden',
     ...(Platform.OS === 'ios' ? {} : { minHeight: 56 }),
   },
   timePicker: {
     width: '100%',
-    color: theme.colors.text,
-    backgroundColor: theme.colors.card,
-    ...(Platform.OS === 'ios' ? { height: 148 } : Platform.OS === 'android' ? { height: 56 } : {}),
+    color: '#E8F0F8',
+    backgroundColor: 'rgba(255,255,255,0.06)',
+    ...(Platform.OS === 'ios'
+      ? { height: 148 }
+      : Platform.OS === 'android'
+        ? { height: 56 }
+        : {}),
   },
   timePickerWeb: {
     borderWidth: 0,
@@ -127,7 +145,15 @@ const styles = StyleSheet.create({
     paddingVertical: 12,
     minHeight: 54,
     cursor: 'pointer' as const,
-    color: theme.colors.text,
-    backgroundColor: theme.colors.card,
+    color: '#E8F0F8',
+    backgroundColor: 'rgba(255,255,255,0.06)',
+  },
+  timePickerItem: {
+    color: '#E8F0F8',
+    backgroundColor: '#0f1419',
+  },
+  timePickerItemPlaceholder: {
+    color: 'rgba(200,217,238,0.72)',
+    backgroundColor: '#0f1419',
   },
 });

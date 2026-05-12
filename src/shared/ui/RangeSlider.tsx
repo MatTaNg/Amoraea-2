@@ -53,6 +53,7 @@ export type RangeSliderProps = {
   onValueChange: (min: number, max: number) => void;
   minimumTrackTintColor?: string;
   maximumTrackTintColor?: string;
+  showValueLabels?: boolean;
   /** One thumb: min is fixed at `minValue`, only max distance is adjustable (stores `[minValue, max]`). */
   mode?: 'range' | 'singleMax';
 };
@@ -66,6 +67,7 @@ export const RangeSlider: React.FC<RangeSliderProps> = ({
   onValueChange,
   minimumTrackTintColor = '#7C3AED',
   maximumTrackTintColor = '#32384A',
+  showValueLabels = true,
   mode = 'range',
 }) => {
   const isSingleMax = mode === 'singleMax';
@@ -244,17 +246,19 @@ export const RangeSlider: React.FC<RangeSliderProps> = ({
 
   return (
     <View style={styles.wrap}>
-      <View style={styles.valuesRow}>
-        {isSingleMax ? (
-          <Text style={styles.valueLabel}>{high}</Text>
-        ) : (
-          <>
-            <Text style={styles.valueLabel}>{low}</Text>
-            <Text style={[styles.valueDash, { color: muted }]}>–</Text>
+      {showValueLabels ? (
+        <View style={styles.valuesRow}>
+          {isSingleMax ? (
             <Text style={styles.valueLabel}>{high}</Text>
-          </>
-        )}
-      </View>
+          ) : (
+            <>
+              <Text style={styles.valueLabel}>{low}</Text>
+              <Text style={[styles.valueDash, { color: muted }]}>–</Text>
+              <Text style={styles.valueLabel}>{high}</Text>
+            </>
+          )}
+        </View>
+      ) : null}
       <View style={styles.trackOuter} onLayout={onTrackLayout} {...panResponder.panHandlers}>
         <View style={[styles.railBg, { backgroundColor: muted }]} />
         {trackWidth > 0 && (

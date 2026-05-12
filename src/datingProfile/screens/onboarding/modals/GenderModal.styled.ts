@@ -1,5 +1,6 @@
 import { StyleSheet } from 'react-native';
 import { theme } from '@/shared/theme/theme';
+import { onboardingModalLayout } from './onboardingModalLayout';
 
 export const styles = StyleSheet.create({
   screen: {
@@ -36,17 +37,8 @@ export const styles = StyleSheet.create({
     color: theme.colors.primary,
     fontWeight: '600',
   },
-  buttonContainer: {
-    borderTopWidth: 1,
-    borderTopColor: theme.colors.border,
-    backgroundColor: theme.colors.surface,
-  },
-  buttonRow: {
-    flexDirection: 'row',
-    gap: 12,
-    paddingHorizontal: 24,
-    paddingVertical: 16,
-  },
+  buttonContainer: onboardingModalLayout.footer,
+  buttonRow: onboardingModalLayout.footerButtons,
   backButton: {
     flex: 1,
   },

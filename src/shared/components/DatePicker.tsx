@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { View, Text, StyleSheet, Platform, TextInput } from 'react-native';
 import { Picker } from '@react-native-picker/picker';
 import { theme } from '@/shared/theme/theme';
@@ -18,18 +18,28 @@ function daysInMonth(year: number, month: number): number {
   return new Date(year, month, 0).getDate();
 }
 
+/** Longest month; used so the day column lists 1–31 before year/month are chosen. */
+const MAX_DAYS_ANY_MONTH = 31;
+
+function maxSelectableDays(y: number | null, m: number | null): number {
+  if (y != null && m != null) return daysInMonth(y, m);
+  return MAX_DAYS_ANY_MONTH;
+}
+
 function parseIsoDate(s: string): { y: number; m: number; d: number } | null {
   const t = s.trim();
   if (!/^\d{4}-\d{2}-\d{2}$/.test(t)) return null;
   const y = Number(t.slice(0, 4));
   const m = Number(t.slice(5, 7));
   const d = Number(t.slice(8, 10));
-  if (!Number.isFinite(y) || !Number.isFinite(m) || !Number.isFinite(d)) return null;
+  if (!Number.isFinite(y) || !Number.isFinite(m) || !Number.isFinite(d))
+    return null;
   if (m < 1 || m > 12 || d < 1) return null;
   const maxD = daysInMonth(y, m);
   if (d > maxD) return null;
   const dt = new Date(y, m - 1, d);
-  if (dt.getFullYear() !== y || dt.getMonth() !== m - 1 || dt.getDate() !== d) return null;
+  if (dt.getFullYear() !== y || dt.getMonth() !== m - 1 || dt.getDate() !== d)
+    return null;
   return { y, m, d };
 }
 
@@ -88,17 +98,74 @@ export const DatePicker: React.FC<DatePickerProps> = ({
   const yMax = maxYear ?? new Date().getFullYear();
 
   const [draft, setDraft] = useState<Draft>({ y: null, m: null, d: null });
+  /** Avoid stale `draft` in pickers when year/month change back-to-back (web / fast taps). */
+  const draftRef = useRef<Draft>(draft);
+  draftRef.current = draft;
+  /** Tracks last controlled `value` so we only reset draft when parent clears a saved ISO, not while value stays "" during partial picks. */
+  const prevControlledValueRef = useRef<string>(value);
 
   useEffect(() => {
     const trimmed = value.trim();
     const p = parseIsoDate(trimmed);
+    // #region agent log
+    fetch('http://127.0.0.1:7789/ingest/668e0bd5-3283-4492-9f48-e33846c18218', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'X-Debug-Session-Id': '4b3376',
+      },
+      body: JSON.stringify({
+        sessionId: '4b3376',
+        hypothesisId: 'F',
+        location: 'DatePicker.tsx:value_effect_entry',
+        message: 'value_effect_run',
+        data: {
+          trimmedLen: trimmed.length,
+          branchGuess: p && p.y >= yMin && p.y <= yMax ? 'iso' : !trimmed ? 'empty' : 'nonIso',
+          yMin,
+          yMax,
+        },
+        timestamp: Date.now(),
+      }),
+    }).catch(() => {});
+    // #endregion
     if (p && p.y >= yMin && p.y <= yMax) {
-      setDraft(normalizeDraft({ y: p.y, m: p.m, d: p.d }));
+      const normalized = normalizeDraft({ y: p.y, m: p.m, d: p.d });
+      setDraft(normalized);
+      draftRef.current = normalized;
+      prevControlledValueRef.current = value;
       return;
     }
     if (!trimmed) {
-      setDraft({ y: null, m: null, d: null });
+      const prevTrimmed = prevControlledValueRef.current.trim();
+      const hadPriorIso = parseIsoDate(prevTrimmed) != null;
+      // #region agent log
+      fetch('http://127.0.0.1:7789/ingest/668e0bd5-3283-4492-9f48-e33846c18218', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'X-Debug-Session-Id': '4b3376',
+        },
+        body: JSON.stringify({
+          sessionId: '4b3376',
+          hypothesisId: 'C',
+          location: 'DatePicker.tsx:value_effect_empty',
+          message: hadPriorIso ? 'draft_cleared_iso_removed' : 'skip_clear_keep_partial',
+          data: { hadPriorIso, valueLen: trimmed.length },
+          timestamp: Date.now(),
+          runId: 'post-fix',
+        }),
+      }).catch(() => {});
+      // #endregion
+      if (hadPriorIso) {
+        const empty = { y: null, m: null, d: null };
+        setDraft(empty);
+        draftRef.current = empty;
+      }
+      prevControlledValueRef.current = value;
+      return;
     }
+    prevControlledValueRef.current = value;
   }, [value, yMin, yMax]);
 
   const yearItems = useMemo(() => {
@@ -107,8 +174,63 @@ export const DatePicker: React.FC<DatePickerProps> = ({
     return out;
   }, [yMin, yMax]);
 
-  const dayCount =
-    draft.y != null && draft.m != null ? daysInMonth(draft.y, draft.m) : 0;
+  const dayCount = maxSelectableDays(draft.y, draft.m);
+
+  // #region agent log
+  useEffect(() => {
+    fetch('http://127.0.0.1:7789/ingest/668e0bd5-3283-4492-9f48-e33846c18218', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'X-Debug-Session-Id': '4b3376',
+      },
+      body: JSON.stringify({
+        sessionId: '4b3376',
+        hypothesisId: 'B',
+        location: 'DatePicker.tsx:draft_dayCount',
+        message: 'react_state',
+        data: {
+          valuePropLen: value.trim().length,
+          draft,
+          dayCount,
+          expectedDayItems: dayCount,
+          expectedSelectOptions: dayCount > 0 ? dayCount + 1 : 1,
+          platform: Platform.OS,
+        },
+        timestamp: Date.now(),
+      }),
+    }).catch(() => {});
+    if (Platform.OS === 'web' && typeof document !== 'undefined') {
+      requestAnimationFrame(() => {
+        const wrap = document.getElementById('date-picker-day-wrap');
+        const sel = wrap?.querySelector?.('select');
+        const optLen = sel?.querySelectorAll?.('option')?.length ?? -1;
+        fetch('http://127.0.0.1:7789/ingest/668e0bd5-3283-4492-9f48-e33846c18218', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'X-Debug-Session-Id': '4b3376',
+          },
+          body: JSON.stringify({
+            sessionId: '4b3376',
+            hypothesisId: 'A',
+            location: 'DatePicker.tsx:web_dom_day_select',
+            message: 'dom_option_count',
+            data: {
+              hasWrap: !!wrap,
+              hasSelect: !!sel,
+              domOptionCount: optLen,
+              reactDayCount: dayCount,
+              mismatch:
+                dayCount > 0 ? optLen !== dayCount + 1 : optLen < 1,
+            },
+            timestamp: Date.now(),
+          }),
+        }).catch(() => {});
+      });
+    }
+  }, [draft.y, draft.m, draft.d, dayCount, value]);
+  // #endregion
 
   const emit = (next: Draft) => {
     const iso = draftToIso(next);
@@ -123,7 +245,9 @@ export const DatePicker: React.FC<DatePickerProps> = ({
   const pickerCommon = {
     style: [styles.picker, Platform.OS === 'web' ? styles.pickerWeb : null],
     dropdownIconColor: theme.colors.textSecondary,
-    mode: (Platform.OS === 'android' ? 'dropdown' : undefined) as 'dropdown' | undefined,
+    mode: (Platform.OS === 'android' ? 'dropdown' : undefined) as
+      | 'dropdown'
+      | undefined,
     itemStyle:
       Platform.OS === 'ios'
         ? ({ color: theme.colors.text, fontSize: 17 } as const)
@@ -136,54 +260,123 @@ export const DatePicker: React.FC<DatePickerProps> = ({
       <View style={styles.row}>
         <View style={styles.pickerColYear}>
           <Text style={styles.subLabel}>Year</Text>
-          <View style={[styles.pickerWrap, error ? styles.pickerWrapErr : null]}>
+          <View
+            style={[styles.pickerWrap, error ? styles.pickerWrapErr : null]}
+          >
             <Picker
               selectedValue={draft.y != null ? String(draft.y) : ''}
               onValueChange={(v) => {
                 if (v === '') {
                   const next = { y: null, m: null, d: null };
+                  draftRef.current = next;
                   setDraft(next);
                   emit(next);
                   return;
                 }
-                const next = applyPatch(draft, { y: Number(v) });
+                const next = applyPatch(draftRef.current, { y: Number(v) });
+                draftRef.current = next;
                 setDraft(next);
+                // #region agent log
+                fetch('http://127.0.0.1:7789/ingest/668e0bd5-3283-4492-9f48-e33846c18218', {
+                  method: 'POST',
+                  headers: {
+                    'Content-Type': 'application/json',
+                    'X-Debug-Session-Id': '4b3376',
+                  },
+                  body: JSON.stringify({
+                    sessionId: '4b3376',
+                    hypothesisId: 'D',
+                    location: 'DatePicker.tsx:year_onValueChange',
+                    message: 'year_picked',
+                    data: {
+                      rawV: typeof v,
+                      nextY: next.y,
+                      nextM: next.m,
+                      nextD: next.d,
+                    },
+                    timestamp: Date.now(),
+                  }),
+                }).catch(() => {});
+                // #endregion
                 emit(next);
               }}
               {...pickerCommon}
             >
-              <Picker.Item label="Year" value="" color={theme.colors.textSecondary} />
+              <Picker.Item
+                label="Year"
+                value=""
+                color={theme.colors.textSecondary}
+                style={styles.pickerItemPlaceholder}
+              />
               {yearItems.map((y) => (
-                <Picker.Item key={y} label={String(y)} value={String(y)} color={theme.colors.text} />
+                <Picker.Item
+                  key={y}
+                  label={String(y)}
+                  value={String(y)}
+                  color={theme.colors.text}
+                  style={styles.pickerItem}
+                />
               ))}
             </Picker>
           </View>
         </View>
         <View style={styles.pickerColMonth}>
           <Text style={styles.subLabel}>Month</Text>
-          <View style={[styles.pickerWrap, error ? styles.pickerWrapErr : null]}>
+          <View
+            style={[styles.pickerWrap, error ? styles.pickerWrapErr : null]}
+          >
             <Picker
               selectedValue={draft.m != null ? String(draft.m) : ''}
               onValueChange={(v) => {
                 if (v === '') {
-                  const next = applyPatch(draft, { m: null, d: null });
+                  const next = applyPatch(draftRef.current, { m: null, d: null });
+                  draftRef.current = next;
                   setDraft(next);
                   emit(next);
                   return;
                 }
-                const next = applyPatch(draft, { m: Number(v) });
+                const next = applyPatch(draftRef.current, { m: Number(v) });
+                draftRef.current = next;
                 setDraft(next);
+                // #region agent log
+                fetch('http://127.0.0.1:7789/ingest/668e0bd5-3283-4492-9f48-e33846c18218', {
+                  method: 'POST',
+                  headers: {
+                    'Content-Type': 'application/json',
+                    'X-Debug-Session-Id': '4b3376',
+                  },
+                  body: JSON.stringify({
+                    sessionId: '4b3376',
+                    hypothesisId: 'E',
+                    location: 'DatePicker.tsx:month_onValueChange',
+                    message: 'month_picked',
+                    data: {
+                      rawV: typeof v,
+                      nextY: next.y,
+                      nextM: next.m,
+                      nextD: next.d,
+                    },
+                    timestamp: Date.now(),
+                  }),
+                }).catch(() => {});
+                // #endregion
                 emit(next);
               }}
               {...pickerCommon}
             >
-              <Picker.Item label="Month" value="" color={theme.colors.textSecondary} />
+              <Picker.Item
+                label="Month"
+                value=""
+                color={theme.colors.textSecondary}
+                style={styles.pickerItemPlaceholder}
+              />
               {MONTH_OPTIONS.map((mo) => (
                 <Picker.Item
                   key={mo.value}
                   label={mo.label}
                   value={String(mo.value)}
                   color={theme.colors.text}
+                  style={styles.pickerItem}
                 />
               ))}
             </Picker>
@@ -191,33 +384,61 @@ export const DatePicker: React.FC<DatePickerProps> = ({
         </View>
         <View style={styles.pickerColDay}>
           <Text style={styles.subLabel}>Day</Text>
-          <View style={[styles.pickerWrap, error ? styles.pickerWrapErr : null]}>
+          <View
+            style={[styles.pickerWrap, error ? styles.pickerWrapErr : null]}
+            {...(Platform.OS === 'web' ? { nativeID: 'date-picker-day-wrap' } : {})}
+          >
             <Picker
-              selectedValue={draft.d != null && dayCount > 0 ? String(draft.d) : ''}
+              key={
+                Platform.OS === 'web'
+                  ? `day-${draft.y ?? ''}-${draft.m ?? ''}`
+                  : undefined
+              }
+              selectedValue={
+                draft.d != null && draft.d <= dayCount ? String(draft.d) : ''
+              }
               onValueChange={(v) => {
-                if (v === '' || dayCount === 0) {
-                  const next = applyPatch(draft, { d: null });
+                const dc = maxSelectableDays(
+                  draftRef.current.y,
+                  draftRef.current.m,
+                );
+                if (v === '') {
+                  const next = applyPatch(draftRef.current, { d: null });
+                  draftRef.current = next;
                   setDraft(next);
                   emit(next);
                   return;
                 }
-                const next = applyPatch(draft, { d: Number(v) });
+                const num = Number(v);
+                if (!Number.isFinite(num) || num < 1 || num > dc) {
+                  const next = applyPatch(draftRef.current, { d: null });
+                  draftRef.current = next;
+                  setDraft(next);
+                  emit(next);
+                  return;
+                }
+                const next = applyPatch(draftRef.current, { d: num });
+                draftRef.current = next;
                 setDraft(next);
                 emit(next);
               }}
               {...pickerCommon}
             >
-              <Picker.Item label="Day" value="" color={theme.colors.textSecondary} />
-              {dayCount > 0
-                ? Array.from({ length: dayCount }, (_, i) => i + 1).map((day) => (
-                    <Picker.Item
-                      key={day}
-                      label={String(day)}
-                      value={String(day)}
-                      color={theme.colors.text}
-                    />
-                  ))
-                : null}
+              <Picker.Item
+                label="Day"
+                value=""
+                color={theme.colors.textSecondary}
+                style={styles.pickerItemPlaceholder}
+              />
+              {Array.from({ length: dayCount }, (_, i) => i + 1).map((day) => (
+                <Picker.Item
+                  key={day}
+                  label={String(day)}
+                  value={String(day)}
+                  color={theme.colors.text}
+                  style={styles.pickerItem}
+                />
+              ))}
             </Picker>
           </View>
         </View>
@@ -275,17 +496,17 @@ const styles = StyleSheet.create({
   pickerColDay: { width: 72, flexShrink: 0 },
   pickerWrap: {
     borderWidth: 1,
-    borderColor: theme.colors.border,
+    borderColor: 'rgba(255,255,255,0.14)',
     borderRadius: 10,
-    backgroundColor: theme.colors.card,
+    backgroundColor: 'rgba(255,255,255,0.06)',
     overflow: 'hidden',
     ...(Platform.OS === 'ios' ? {} : { minHeight: 56 }),
   },
   pickerWrapErr: { borderColor: '#f87171' },
   picker: {
     width: '100%',
-    color: theme.colors.text,
-    backgroundColor: theme.colors.card,
+    color: '#E8F0F8',
+    backgroundColor: 'rgba(255,255,255,0.06)',
     ...(Platform.OS === 'ios'
       ? { height: 152 }
       : Platform.OS === 'android'
@@ -299,16 +520,24 @@ const styles = StyleSheet.create({
     paddingVertical: 12,
     minHeight: 54,
     borderWidth: 0,
-    color: theme.colors.text,
-    backgroundColor: theme.colors.card,
+    color: '#E8F0F8',
+    backgroundColor: 'rgba(255,255,255,0.06)',
+  },
+  pickerItem: {
+    color: '#E8F0F8',
+    backgroundColor: '#0f1419',
+  },
+  pickerItemPlaceholder: {
+    color: 'rgba(200,217,238,0.72)',
+    backgroundColor: '#0f1419',
   },
   input: {
     borderWidth: 1,
-    borderColor: 'rgba(82,142,220,0.25)',
+    borderColor: 'rgba(255,255,255,0.14)',
     borderRadius: 10,
     padding: 12,
-    color: '#EEF6FF',
-    backgroundColor: 'rgba(15,20,25,0.6)',
+    color: '#E8F0F8',
+    backgroundColor: 'rgba(255,255,255,0.06)',
   },
   inputErr: { borderColor: '#f87171' },
   err: { color: '#f87171', fontSize: 12, marginTop: 4 },

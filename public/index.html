@@ -62,6 +62,34 @@
         flex: 1;
       }
     </style>
+    <!-- react-native-web <Picker> renders <select>/<option>; RN inline styles often win without !important. -->
+    <style id="dark-native-selects">
+      html,
+      body {
+        color-scheme: dark;
+      }
+      /* Open list + highlighted row (Chromium / Firefox; Safari varies) */
+      select option,
+      select optgroup,
+      option {
+        background-color: #0f1419 !important;
+        color: #e8f0f8 !important;
+      }
+      select {
+        color-scheme: dark;
+      }
+      /* Date of birth → optional birth time picker (narrow wrapper id from nativeID on web) */
+      #birth-time-quarter-hour-picker select option,
+      #birth-time-quarter-hour-picker option {
+        background-color: #0f1419 !important;
+        color: #e8f0f8 !important;
+      }
+      /* BodyTypeAttractionSelect — custom RN dropdown over ScrollView; RN Web can omit panel fill */
+      #body-type-attraction-dropdown {
+        background-color: #0f1419 !important;
+        opacity: 1 !important;
+      }
+    </style>
   </head>
 
   <body>

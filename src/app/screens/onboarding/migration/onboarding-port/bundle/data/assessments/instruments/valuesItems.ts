@@ -126,8 +126,5 @@ export const TWIVI_ITEMS: ValuesItem[] = [
   },
 ];
 
-/** Same stem as legacy PVQ onboarding ("How much like you is this person? "). */
-export const VALUES_QUESTION_PREFIX = "How much like you is this person? ";
-
-/** Display strings shown in InstrumentScreen (prefix + Schwartz Values item text). */
-export const TWIVI_DISPLAY_STRINGS = TWIVI_ITEMS.map((i) => VALUES_QUESTION_PREFIX + i.text);
+/** Display strings shown in InstrumentScreen. */
+export const TWIVI_DISPLAY_STRINGS = TWIVI_ITEMS.map((i) => i.text);

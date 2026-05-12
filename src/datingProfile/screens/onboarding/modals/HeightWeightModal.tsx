@@ -36,7 +36,7 @@ export const HeightWeightModal: React.FC<HeightWeightModalProps> = ({
       >
         <View style={styles.container}>
           <Text style={styles.note}>
-            This is only used to calculate BMI. Height, weight, and BMI are not shown on your profile.
+          This is only used to calculate BMI. Your height, weight, and BMI will not be communicated to your potential matches.
           </Text>
           <HeightSlider
             label="Height (cm)"

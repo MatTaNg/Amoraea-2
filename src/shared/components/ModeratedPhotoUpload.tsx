@@ -21,6 +21,13 @@ export type PhotoUploadedMeta = {
   fileName?: string | null;
 };
 
+function assetLooksLikeGif(asset: ImagePicker.ImagePickerAsset): boolean {
+  const mimeType = typeof asset.mimeType === 'string' ? asset.mimeType.toLowerCase() : '';
+  const fileName = asset.fileName?.toLowerCase() ?? '';
+  const uriPath = asset.uri.split('?')[0]?.toLowerCase() ?? '';
+  return mimeType === 'image/gif' || fileName.endsWith('.gif') || uriPath.endsWith('.gif');
+}
+
 export const ModeratedPhotoUpload: React.FC<{
   children: React.ReactNode;
   onPhotoUploaded: (url: string, meta?: PhotoUploadedMeta) => void;
@@ -79,6 +86,10 @@ export const ModeratedPhotoUpload: React.FC<{
       for (let i = 0; i < assets.length; i++) {
         const asset = assets[i];
         const uri = asset.uri;
+        if (assetLooksLikeGif(asset)) {
+          Alert.alert('Unsupported file type', 'GIFs cannot be uploaded as profile photos. Please choose a JPG, PNG, or HEIC image.');
+          continue;
+        }
         if (seenLocalUris.has(uri)) {
           Alert.alert('Already added', 'You selected the same photo more than once.');
           continue;

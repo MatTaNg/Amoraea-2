@@ -21,7 +21,7 @@ export const OccupationModal: React.FC<OccupationModalProps> = ({
 }) => {
   return (
     <SafeAreaView style={styles.screen} edges={['top', 'left', 'right']}>
-      <OnboardingHeader title="Occupation" />
+      <OnboardingHeader title="Occupation" onBack={onBack} />
       <ScrollView
         style={styles.scrollView}
         contentContainerStyle={styles.scrollContent}

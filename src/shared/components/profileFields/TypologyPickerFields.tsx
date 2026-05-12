@@ -1,8 +1,15 @@
-import React, { useCallback, useLayoutEffect } from 'react';
+import React, { useCallback, useLayoutEffect, useState } from 'react';
 import { View, Text, StyleSheet, Platform } from 'react-native';
 import { Picker } from '@react-native-picker/picker';
 import { TYPOLOGY_ONBOARDING_SECTIONS } from '@/shared/constants/typologyOnboardingOptions';
 import { theme } from '@/shared/theme/theme';
+import {
+  BottomSheet,
+  OptionPickerTrigger,
+  type OptionAnchor,
+} from '@/screens/profile/editProfile/BottomSheet';
+import { SingleChoiceOptionList } from '@/shared/components/profileFields/SingleChoiceOptionList';
+import { formControlStyles } from '@/shared/ui/FormField';
 
 export type TypologyPickerValue = Record<string, string | undefined>;
 
@@ -26,6 +33,13 @@ export const TypologyPickerFields: React.FC<Props> = ({
   allowSkipOption = true,
 }) => {
   const emit = onTypologyChange ?? onChange ?? (() => {});
+  const [optionSheet, setOptionSheet] = useState<{
+    title: string;
+    options: { label: string; value: string }[];
+    selectedValue: string;
+    onPick: (value: string) => void;
+    anchor?: OptionAnchor;
+  } | null>(null);
 
   const setField = useCallback(
     (key: string, raw: string) => {
@@ -71,43 +85,106 @@ export const TypologyPickerFields: React.FC<Props> = ({
                 : ''
               : match
                 ? raw
-                : row.options[0]?.value ?? '';
+                : (row.options[0]?.value ?? '');
+            const optionRows = allowSkipOption
+              ? [{ label: PLACEHOLDER, value: '' }, ...row.options]
+              : row.options;
+            const selectedLabel =
+              optionRows.find((opt) => opt.value === selectedValue)?.label ??
+              PLACEHOLDER;
             return (
-            <View key={row.key} style={styles.fieldBlock}>
-              <Text style={styles.fieldLabel}>{row.label}</Text>
-              <View style={styles.pickerWrap}>
-                <Picker
-                  selectedValue={selectedValue}
-                  onValueChange={(v) => setField(row.key, String(v))}
-                  mode={Platform.OS === 'android' ? 'dropdown' : undefined}
-                  dropdownIconColor={theme.colors.textSecondary}
-                  itemStyle={Platform.OS === 'ios' ? { color: theme.colors.text, fontSize: 17 } : undefined}
-                  style={[
-                    styles.picker,
-                    Platform.OS === 'web'
-                      ? [
-                          styles.pickerWeb,
-                          {
-                            WebkitAppearance: 'none',
-                            appearance: 'none',
-                          } as const,
-                        ]
-                      : null,
-                  ]}
-                >
-                  {allowSkipOption ? (
-                    <Picker.Item label={PLACEHOLDER} value="" color={theme.colors.text} />
-                  ) : null}
-                  {row.options.map((opt) => (
-                    <Picker.Item key={opt.value} label={opt.label} value={opt.value} color={theme.colors.text} />
-                  ))}
-                </Picker>
+              <View key={row.key} style={styles.fieldBlock}>
+                <Text style={styles.fieldLabel}>{row.label}</Text>
+                {Platform.OS === 'web' ? (
+                  <OptionPickerTrigger
+                    style={[styles.webTrigger, formControlStyles.control]}
+                    onOpen={(anchor) =>
+                      setOptionSheet({
+                        title: row.label,
+                        options: optionRows,
+                        selectedValue,
+                        anchor,
+                        onPick: (next) => {
+                          setField(row.key, next);
+                          setOptionSheet(null);
+                        },
+                      })
+                    }
+                  >
+                    <View style={styles.webTriggerContent}>
+                      <Text style={styles.webTriggerText} numberOfLines={1}>
+                        {selectedLabel}
+                      </Text>
+                      <Text style={styles.webChevron}>▾</Text>
+                    </View>
+                  </OptionPickerTrigger>
+                ) : (
+                  <View style={styles.pickerWrap}>
+                    <Picker
+                      selectedValue={selectedValue}
+                      onValueChange={(v) => setField(row.key, String(v))}
+                      mode={Platform.OS === 'android' ? 'dropdown' : undefined}
+                      dropdownIconColor={theme.colors.textSecondary}
+                      itemStyle={
+                        Platform.OS === 'ios'
+                          ? { color: theme.colors.text, fontSize: 17 }
+                          : undefined
+                      }
+                      style={[
+                        styles.picker,
+                        Platform.OS === 'web'
+                          ? [
+                              styles.pickerWeb,
+                              {
+                                WebkitAppearance: 'none',
+                                appearance: 'none',
+                              } as const,
+                            ]
+                          : null,
+                      ]}
+                    >
+                      {allowSkipOption ? (
+                        <Picker.Item
+                          label={PLACEHOLDER}
+                          value=""
+                          color={theme.colors.text}
+                          style={styles.pickerItemPlaceholder}
+                        />
+                      ) : null}
+                      {row.options.map((opt) => (
+                        <Picker.Item
+                          key={opt.value}
+                          label={opt.label}
+                          value={opt.value}
+                          color={theme.colors.text}
+                          style={styles.pickerItem}
+                        />
+                      ))}
+                    </Picker>
+                  </View>
+                )}
               </View>
-            </View>
             );
           })}
         </View>
       ))}
+      <BottomSheet
+        visible={!!optionSheet}
+        title={optionSheet?.title}
+        anchor={optionSheet?.anchor}
+        onClose={() => setOptionSheet(null)}
+      >
+        {optionSheet ? (
+          <SingleChoiceOptionList
+            options={optionSheet.options}
+            value={optionSheet.selectedValue}
+            onSelect={(next) => {
+              optionSheet.onPick(next);
+              setOptionSheet(null);
+            }}
+          />
+        ) : null}
+      </BottomSheet>
     </View>
   );
 };
@@ -139,17 +216,21 @@ const styles = StyleSheet.create({
   },
   pickerWrap: {
     borderWidth: 1,
-    borderColor: theme.colors.border,
-    borderRadius: 8,
-    backgroundColor: theme.colors.card,
+    borderColor: 'rgba(255,255,255,0.14)',
+    borderRadius: 10,
+    backgroundColor: 'rgba(255,255,255,0.06)',
     overflow: 'hidden',
     ...(Platform.OS === 'ios' ? {} : { minHeight: 56 }),
   },
   picker: {
     width: '100%',
-    color: theme.colors.text,
-    ...(Platform.OS === 'ios' ? { height: 50 } : Platform.OS === 'android' ? { height: 56 } : {}),
-    backgroundColor: theme.colors.card,
+    color: '#E8F0F8',
+    ...(Platform.OS === 'ios'
+      ? { height: 50 }
+      : Platform.OS === 'android'
+        ? { height: 56 }
+        : {}),
+    backgroundColor: 'rgba(255,255,255,0.06)',
   },
   pickerWeb: {
     borderWidth: 0,
@@ -159,7 +240,35 @@ const styles = StyleSheet.create({
     paddingVertical: 12,
     minHeight: 54,
     cursor: 'pointer' as const,
-    color: theme.colors.text,
-    backgroundColor: theme.colors.card,
+    color: '#E8F0F8',
+    backgroundColor: 'rgba(255,255,255,0.06)',
+  },
+  webTrigger: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  webTriggerContent: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  webTriggerText: {
+    flex: 1,
+    color: '#E8F0F8',
+    fontSize: 15,
+    fontWeight: '500',
+  },
+  webChevron: {
+    color: 'rgba(156,180,216,0.9)',
+    fontSize: 14,
+    paddingLeft: 10,
+  },
+  pickerItem: {
+    color: '#E8F0F8',
+    backgroundColor: '#0f1419',
+  },
+  pickerItemPlaceholder: {
+    color: 'rgba(200,217,238,0.72)',
+    backgroundColor: '#0f1419',
   },
 });
