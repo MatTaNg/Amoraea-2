@@ -9,9 +9,13 @@ import {
   type OptionAnchor,
 } from "@/screens/profile/editProfile/BottomSheet";
 import { SingleChoiceOptionList } from "@/shared/components/profileFields/SingleChoiceOptionList";
+import { SexInterestCheckboxList } from "@/shared/components/profileFields/SexInterestCheckboxList";
 import {
   PREF_PHYSICAL_COMPAT_CENTRALITY_OPTIONS,
-  PREF_PARTNER_SHARES_SEXUAL_INTERESTS_OPTIONS,
+  PREF_PARTNER_SHARES_SPECIFIC_SEX_INTERESTS_QUESTION,
+  PARTNER_SPECIFIC_SEX_MUST_HAVE_YES_NO_OPTIONS,
+  prefPartnerSharesSexualInterestsFromYesNo,
+  prefPartnerSharesSexualInterestsYesNoSelected,
   SEX_DRIVE_OPTIONS,
   SEX_INTEREST_CATEGORY_OPTIONS,
   sexualCompatStepComplete,
@@ -38,6 +42,19 @@ function truncLabel(s: string, max = 72): string {
   return t.length > max ? `${t.slice(0, max)}…` : t;
 }
 
+function renderMustHaveHighlight(text: string) {
+  const phrase = 'must have';
+  const index = text.indexOf(phrase);
+  if (index < 0) return text;
+  return (
+    <>
+      {text.slice(0, index)}
+      <Text style={styles.mustHaveEmphasis}>{phrase}</Text>
+      {text.slice(index + phrase.length)}
+    </>
+  );
+}
+
 export const SexualCompatibilityModal: React.FC<SexualCompatibilityModalProps> = ({
   value,
   onChange,
@@ -60,6 +77,11 @@ export const SexualCompatibilityModal: React.FC<SexualCompatibilityModalProps> =
   }, [value.sexInterestCategories, onChange]);
 
   const canContinue = useMemo(() => sexualCompatStepComplete(value), [value]);
+
+  const partnerSpecificSexYesNo = prefPartnerSharesSexualInterestsYesNoSelected(
+    value.prefPartnerSharesSexualInterests,
+  );
+  const partnerSpecificSexSelected = partnerSpecificSexYesNo ? [partnerSpecificSexYesNo] : [];
 
   const pickCategory = useCallback(
     (slug: string) => {
@@ -110,22 +132,20 @@ export const SexualCompatibilityModal: React.FC<SexualCompatibilityModalProps> =
           <Text style={styles.rowValue}>{truncLabel(value.prefPhysicalCompatImportance)}</Text>
         </OptionPickerTrigger>
 
-        <Text style={styles.question}>
-          Do you want someone who shares your specific sexual interests?
+        <Text style={styles.dealbreakerQuestion}>
+          {renderMustHaveHighlight(PREF_PARTNER_SHARES_SPECIFIC_SEX_INTERESTS_QUESTION)}
         </Text>
-        <OptionPickerTrigger
-          style={styles.row}
-          onOpen={(anchor) =>
-            openSingle(
-              anchor,
-              "Partner shares your interests",
-              PREF_PARTNER_SHARES_SEXUAL_INTERESTS_OPTIONS,
-              "prefPartnerSharesSexualInterests"
-            )
-          }
-        >
-          <Text style={styles.rowValue}>{truncLabel(value.prefPartnerSharesSexualInterests)}</Text>
-        </OptionPickerTrigger>
+        <SexInterestCheckboxList
+          singleSelect
+          options={PARTNER_SPECIFIC_SEX_MUST_HAVE_YES_NO_OPTIONS}
+          selected={partnerSpecificSexSelected}
+          onChange={(next) => {
+            const v = next[0] ?? "";
+            onChange({
+              prefPartnerSharesSexualInterests: prefPartnerSharesSexualInterestsFromYesNo(v),
+            });
+          }}
+        />
 
         <Text style={styles.question}>
           In a relationship, what feels like your natural rhythm for sex?

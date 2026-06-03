@@ -123,6 +123,14 @@ export const formControlStyles = StyleSheet.create({
     paddingVertical: 12,
     justifyContent: 'center',
   },
+  /** Match onboarding single-choice options: solid card surface + thicker border. */
+  controlSelectLike: {
+    backgroundColor: '#0f1419',
+    borderWidth: 2,
+    borderRadius: 12,
+    borderColor: 'rgba(82,142,220,0.25)',
+    minHeight: 58,
+  },
   controlPressed: {
     backgroundColor: 'rgba(255,255,255,0.09)',
   },

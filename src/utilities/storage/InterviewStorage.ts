@@ -66,7 +66,7 @@ export interface StoredInterviewData {
   version: number;
   userId: string;
   attemptNumber?: number;
-  messages: Array<{ role: string; content: string }>;
+  messages: Array<{ role: string; content: string; scenarioNumber?: number; interviewMoment?: number }>;
   scenariosCompleted: number[];
   scenarioScores: StoredScenarioScores;
   lastSavedAt: string;
@@ -80,6 +80,8 @@ export interface StoredInterviewData {
   pendingAttemptPayload?: unknown;
   /** Scoring failures by scenario for debugging */
   scoringFailed?: Array<{ scenario: number; failedAt: string; error: string }>;
+  /** Partial or complete emotion modal answers (sequential A–D letters). */
+  emotionItemResponses?: string[];
   /** Set when auth session expired so UI can show "session timed out" and re-auth */
   sessionExpired?: boolean;
   /** True when final prompt was answered and scoring/preparing-results was pending on refresh. */

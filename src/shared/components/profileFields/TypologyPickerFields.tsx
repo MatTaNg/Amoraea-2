@@ -8,6 +8,7 @@ import {
   OptionPickerTrigger,
   type OptionAnchor,
 } from '@/screens/profile/editProfile/BottomSheet';
+import { SelectTriggerRow } from '@/shared/ui/SelectTriggerRow';
 import { SingleChoiceOptionList } from '@/shared/components/profileFields/SingleChoiceOptionList';
 import { formControlStyles } from '@/shared/ui/FormField';
 
@@ -20,7 +21,10 @@ type Props = {
   onTypologyChange?: (v: TypologyPickerValue) => void;
   /** Reserved for non-onboarding layouts */
   variant?: 'onboarding';
-  /** When false, omit the blank/skip row and coerce unset values to each row’s first option (edit profile). */
+  /**
+   * When false, omit the blank/skip row and coerce unset values to each row’s first option.
+   * Prefer true for edit profile too — otherwise users who never completed typology see false “defaults”.
+   */
   allowSkipOption?: boolean;
 };
 
@@ -111,12 +115,12 @@ export const TypologyPickerFields: React.FC<Props> = ({
                       })
                     }
                   >
-                    <View style={styles.webTriggerContent}>
-                      <Text style={styles.webTriggerText} numberOfLines={1}>
-                        {selectedLabel}
-                      </Text>
-                      <Text style={styles.webChevron}>▾</Text>
-                    </View>
+                    <SelectTriggerRow
+                      label={selectedLabel}
+                      isPlaceholder={selectedValue === ''}
+                      labelStyle={styles.webTriggerText}
+                      chevronStyle={styles.webChevron}
+                    />
                   </OptionPickerTrigger>
                 ) : (
                   <View style={styles.pickerWrap}>
@@ -244,16 +248,10 @@ const styles = StyleSheet.create({
     backgroundColor: 'rgba(255,255,255,0.06)',
   },
   webTrigger: {
-    flexDirection: 'row',
-    alignItems: 'center',
-  },
-  webTriggerContent: {
-    flex: 1,
-    flexDirection: 'row',
-    alignItems: 'center',
+    width: '100%',
+    alignSelf: 'stretch',
   },
   webTriggerText: {
-    flex: 1,
     color: '#E8F0F8',
     fontSize: 15,
     fontWeight: '500',

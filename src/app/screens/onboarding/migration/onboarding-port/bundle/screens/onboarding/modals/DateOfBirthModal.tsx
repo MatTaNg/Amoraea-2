@@ -1,9 +1,9 @@
 import React, { useMemo, useState, useCallback } from 'react';
-import { View, Text, ScrollView, TouchableOpacity, Platform } from 'react-native';
-import { Picker } from '@react-native-picker/picker';
+import { View, Text, ScrollView, TouchableOpacity, ActivityIndicator } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Button } from '@/shared/ui/Button';
 import { DatePicker } from '@/shared/components/DatePicker';
+import { BirthTimeQuarterHourPicker, isValidOptionalBirthTime24h } from '@/shared/components/BirthTimeQuarterHourPicker';
 import { Input } from '@/shared/ui/Input';
 import { theme } from '@/shared/theme/theme';
 import { OnboardingHeader } from './components/OnboardingHeader';
@@ -12,25 +12,6 @@ import { useLocationAutocomplete } from '@/shared/hooks/useLocationAutocomplete'
 import { styles } from './DateOfBirthModal.styled';
 
 const MIN_AGE = 18;
-
-function isValidOptionalTime24h(s: string): boolean {
-  const t = s.trim();
-  if (!t) return true;
-  if (!/^\d{1,2}:\d{2}$/.test(t)) return false;
-  const [h, m] = t.split(':').map(Number);
-  return h >= 0 && h <= 23 && m >= 0 && m <= 59;
-}
-
-const QUARTER_HOUR_TIME_OPTIONS: { label: string; value: string }[] = (() => {
-  const out: { label: string; value: string }[] = [{ label: 'Not specified', value: '' }];
-  for (let h = 0; h < 24; h += 1) {
-    for (const m of [0, 15, 30, 45]) {
-      const value = `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`;
-      out.push({ label: value, value });
-    }
-  }
-  return out;
-})();
 
 interface DateOfBirthModalProps {
   dateOfBirth: string;
@@ -59,22 +40,7 @@ export const DateOfBirthModal: React.FC<DateOfBirthModalProps> = ({
     [dateOfBirth]
   );
   const isUnderage = age !== null && age < MIN_AGE;
-  const timeOk = isValidOptionalTime24h(birthTime);
-
-  const timePickerOptions = useMemo(() => {
-    const t = birthTime.trim();
-    if (!t || QUARTER_HOUR_TIME_OPTIONS.some((o) => o.value === t)) {
-      return QUARTER_HOUR_TIME_OPTIONS;
-    }
-    if (isValidOptionalTime24h(t)) {
-      return [
-        QUARTER_HOUR_TIME_OPTIONS[0],
-        { label: `${t} (saved)`, value: t },
-        ...QUARTER_HOUR_TIME_OPTIONS.slice(1),
-      ];
-    }
-    return QUARTER_HOUR_TIME_OPTIONS;
-  }, [birthTime]);
+  const timeOk = isValidOptionalBirthTime24h(birthTime);
 
   const canContinue =
     !!dateOfBirth && !!dateOfBirth.trim() && !isUnderage && timeOk;
@@ -90,7 +56,7 @@ export const DateOfBirthModal: React.FC<DateOfBirthModalProps> = ({
     setBirthLocationSuggestions(suggestions);
   }, []);
 
-  useLocationAutocomplete({
+  const { isSearchingPlaces: birthLocationPlacesLoading } = useLocationAutocomplete({
     value: birthLocation,
     validatedValue: validatedBirthLocation,
     onSuggestionsChange: onBirthSuggestionsChange,
@@ -124,48 +90,11 @@ export const DateOfBirthModal: React.FC<DateOfBirthModalProps> = ({
               The following fields are optional. They can improve astrology and
               compatibility insights if you choose to add them.
             </Text>
-            <View style={styles.fieldGap}>
-              <Text style={styles.timeLabel}>Time of birth (optional)</Text>
-              <View style={styles.timePickerWrapper}>
-                <Picker
-                  selectedValue={birthTime.trim() === '' ? '' : birthTime.trim()}
-                  onValueChange={(v) => onBirthTimeChange(String(v))}
-                  style={[
-                    styles.timePicker,
-                    Platform.OS === 'web'
-                      ? [
-                          styles.timePickerWeb,
-                          {
-                            WebkitAppearance: 'none',
-                            appearance: 'none',
-                          } as const,
-                        ]
-                      : null,
-                  ]}
-                  dropdownIconColor={theme.colors.textSecondary}
-                  mode={Platform.OS === 'android' ? 'dropdown' : undefined}
-                  itemStyle={
-                    Platform.OS === 'ios'
-                      ? { color: theme.colors.text, fontSize: 17 }
-                      : undefined
-                  }
-                >
-                  {timePickerOptions.map((o) => (
-                    <Picker.Item
-                      key={o.value === '' ? '__none__' : o.value}
-                      label={o.label}
-                      value={o.value}
-                      color={theme.colors.text}
-                    />
-                  ))}
-                </Picker>
-              </View>
-              {birthTime.trim() !== '' && !timeOk && (
-                <Text style={styles.errorText}>
-                  Use 24-hour format HH:MM (e.g. 09:05 or 14:30).
-                </Text>
-              )}
-            </View>
+            <BirthTimeQuarterHourPicker
+              label="Time of birth (optional)"
+              value={birthTime}
+              onValueChange={onBirthTimeChange}
+            />
             <View style={styles.optionalLocationNarrow}>
               <Input
                 label="Location of birth (optional)"
@@ -184,6 +113,12 @@ export const DateOfBirthModal: React.FC<DateOfBirthModalProps> = ({
                 placeholder="e.g. city, region, or hospital"
                 autoCapitalize="words"
               />
+              {birthLocationPlacesLoading ? (
+                <View style={styles.placeSearchLoadingRow}>
+                  <ActivityIndicator size="small" color={theme.colors.primary} />
+                  <Text style={styles.placeSearchLoadingText}>Looking up places…</Text>
+                </View>
+              ) : null}
               {birthLocationSuggestions.length > 0 && (
                 <View style={styles.suggestionsContainer}>
                   {birthLocationSuggestions.map((s, idx) => (

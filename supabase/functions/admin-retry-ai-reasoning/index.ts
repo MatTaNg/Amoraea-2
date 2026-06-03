@@ -1,5 +1,6 @@
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
 import { generateAIReasoning, DEFAULT_AI_REASONING_PER_ATTEMPT_TIMEOUT_MS } from '../_shared/generateAIReasoning.ts';
+import { buildReasoningFailurePatch } from '../_shared/aiReasoningPostProcess.ts';
 
 const ADMIN_EMAIL = 'admin@amoraea.com';
 const ADMIN_AI_REASONING_BACKGROUND_TIMEOUT_MS = 300_000;
@@ -52,7 +53,8 @@ function scenarioScoresFromAttempt(row: AttemptRow): Record<
 function pendingReasoningWithError(existing: Record<string, unknown> | null, error: string): Record<string, unknown> {
   return {
     ...(existing ?? {}),
-    _reasoningPending: true,
+    _reasoningPending: false,
+    _narrativeFailed: true,
     _generationFailed: true,
     last_error: error,
     failed_at: new Date().toISOString(),
@@ -88,14 +90,17 @@ async function runReasoningRetryInBackground(
       .eq('id', attemptId);
   } catch (e) {
     const error = e instanceof Error ? e.message : String(e);
+    if (error.includes('aborted') || (e instanceof Error && e.name === 'AbortError')) {
+      console.error('[Reasoning] AbortError on admin retry:', error);
+    }
     await admin
       .from('interview_attempts')
       .update({
         ai_reasoning: {
-          ...pendingReasoningWithError(attempt.ai_reasoning, error),
+          ...buildReasoningFailurePatch(attempt.ai_reasoning, error, { generationFailed: true }),
           _adminRetryElapsedMs: Date.now() - startedAt,
         },
-        reasoning_pending: true,
+        reasoning_pending: false,
       })
       .eq('id', attemptId);
   }
@@ -179,15 +184,11 @@ Deno.serve(async (req) => {
         .from('interview_attempts')
         .update({
           ai_reasoning: {
-            ...(attempt.ai_reasoning ?? {}),
-            _reasoningPending: true,
-            _generationFailed: true,
+            ...buildReasoningFailurePatch(attempt.ai_reasoning, error, { generationFailed: true }),
             _adminRetryHandlerVersion: HANDLER_VERSION,
             _adminRetryStage: 'wait_until_registration_failed',
-            last_error: error,
-            failed_at: new Date().toISOString(),
           },
-          reasoning_pending: true,
+          reasoning_pending: false,
         })
         .eq('id', attemptId);
       return json({ error, stage: 'wait_until_registration_failed' }, 500);

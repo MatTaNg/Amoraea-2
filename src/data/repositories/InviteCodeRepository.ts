@@ -1,7 +1,9 @@
 import { supabase } from '../supabase/client';
+import { profilesRepo } from '../repos/profilesRepo';
 import { signOutIfUsersAuthFkViolation } from '../supabase/signOutIfUsersAuthFkViolation';
 import { isAlphaTesterReferralCode } from '@/constants/alphaReferral';
 import { normalizeShareableReferralCode } from '@features/referrals/shareableReferralCode';
+import { mapGenderToDb } from '@/shared/utils/genderMapper';
 import type { Gender } from '@domain/models/Profile';
 
 const INVITE_CODE_LENGTH = 6;
@@ -13,6 +15,21 @@ function generateCode(): string {
     result += ALPHABET[Math.floor(Math.random() * ALPHABET.length)];
   }
   return result;
+}
+
+/** Signup demographics live in `profiles.profile_json` (not `users` after demographics migration). */
+async function seedSignupDemographicsInProfile(
+  userId: string,
+  options: { age?: number; gender?: Gender },
+): Promise<void> {
+  const patch: Record<string, unknown> = {};
+  if (typeof options.age === 'number') patch.age = options.age;
+  if (options.gender) patch.gender = mapGenderToDb(options.gender) ?? options.gender;
+  if (Object.keys(patch).length === 0) return;
+  const result = await profilesRepo.updateProfile(userId, patch);
+  if (!result.success) {
+    throw new Error(`Failed to seed profile demographics: ${result.error.message}`);
+  }
 }
 
 export class InviteCodeRepository {
@@ -80,8 +97,6 @@ export class InviteCodeRepository {
     const { error } = await supabase.from('users').insert({
       id: userId,
       email: options.email ?? null,
-      age: typeof options.age === 'number' ? options.age : null,
-      gender: options.gender ?? null,
       invite_code: inviteCode,
       referred_by_id: referredById,
       is_alpha_tester: isAlphaTester,
@@ -107,6 +122,10 @@ export class InviteCodeRepository {
       }
       throw new Error(`Failed to create user: ${error.message}`);
     }
+    await seedSignupDemographicsInProfile(userId, {
+      age: options.age,
+      gender: options.gender,
+    });
     return { inviteCode };
   }
 }

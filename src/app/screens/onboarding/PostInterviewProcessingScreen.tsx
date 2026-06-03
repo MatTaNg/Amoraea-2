@@ -3,35 +3,34 @@ import {
   View,
   Text,
   StyleSheet,
-  ScrollView,
   Platform,
   Animated,
   Easing,
-  TextInput,
   Pressable,
   ActivityIndicator,
 } from 'react-native';
-import { SafeAreaContainer } from '@ui/components/SafeAreaContainer';
+import { PostInterviewScrollLayout } from '@app/screens/onboarding/PostInterviewScrollLayout';
 import { FlameOrb } from '@app/screens/FlameOrb';
 import { Ionicons } from '@expo/vector-icons';
-import { parsePhoneNumberFromString } from 'libphonenumber-js';
 import * as Clipboard from 'expo-clipboard';
 import { supabase } from '@data/supabase/client';
+import { clearReferralNoticePending } from '@data/repos/usersRoutingRepo';
+import { triggerResultsReadyEmail } from '@features/interview/triggerResultsReadyEmail';
+import {
+  USER_INTERVIEW_ROUTING_TABLE,
+  USER_REFERRAL_NOTICE_SELECT,
+} from '@data/supabase/userInterviewRoutingSelect';
 import { useQueryClient } from '@tanstack/react-query';
 import { useAuth } from '@features/authentication/hooks/useAuth';
 import { isAmoraeaAdminConsoleEmail } from '@/constants/adminConsole';
-import {
-  evaluateStandardPostInterviewRevealWithUsersPassedFallback,
-  standardPostInterviewRouteFromReveal,
-  type InterviewAttemptRevealFields,
-} from '@utilities/postInterviewProcessingGate';
-import { fetchInterviewAttemptRevealSnapshot } from '@utilities/fetchInterviewAttemptRevealSnapshot';
+import type { InterviewAttemptRevealFields } from '@utilities/postInterviewProcessingGate';
+import { fetchInterviewAttemptRevealSnapshot, fetchUserInterviewRevealPollRow } from '@utilities/fetchInterviewAttemptRevealSnapshot';
+import { useInterviewAttemptEgoRepair } from '@features/aria/hooks/useInterviewAttemptEgoRepair';
+import { DownloadPersonalReportButton } from '@features/psychometrics/DownloadPersonalReportButton';
+import { determinePostInterviewRoute } from '@features/psychometrics/determinePostInterviewRoute';
 
 const BG = '#0a0a0f';
 const ACCENT = '#3b82f6';
-const LAUNCH_CONFIRM_TEXT = '#86efac';
-const LAUNCH_CONFIRM_BORDER = 'rgba(74, 222, 128, 0.38)';
-const LAUNCH_CONFIRM_BG = 'rgba(34, 197, 94, 0.14)';
 const GLASS_BG = 'rgba(255,255,255,0.06)';
 const GLASS_BORDER = 'rgba(255,255,255,0.12)';
 
@@ -43,7 +42,7 @@ const GOOGLE_FONTS_HREF =
 const REVIEW_BULLETS = [
   'Exclusive app: Only people who are relationship-ready get in',
   'Matched on real compatibility metrics backed by science, your attachment style, values, and more',
-  'Curated matches through an AI matchmaker that gets to know you more and more over time',
+  'Exclusive events filled with people that are relationship-ready. Get to know who you\'re most compatible with before the event even starts!',
 ] as const;
 
 function loadWebFontsOnce() {
@@ -53,38 +52,6 @@ function loadWebFontsOnce() {
   link.rel = 'stylesheet';
   link.href = GOOGLE_FONTS_HREF;
   document.head.appendChild(link);
-}
-
-function digitsOnly(s: string): string {
-  return s.replace(/\D/g, '');
-}
-
-function normalizeLaunchNotificationPhone(
-  raw: string,
-): { ok: true; e164: string } | { ok: false } {
-  const trimmed = raw.trim();
-  if (!trimmed) return { ok: false };
-
-  const parsed =
-    parsePhoneNumberFromString(trimmed, 'US') ?? parsePhoneNumberFromString(trimmed);
-  if (parsed && (parsed.isValid() || parsed.isPossible()) && parsed.number && parsed.number.length >= 8) {
-    return { ok: true, e164: parsed.number };
-  }
-
-  const d = digitsOnly(trimmed);
-  if (d.length === 10 && /^[2-9]\d{2}[2-9]\d{6}$/.test(d)) {
-    return { ok: true, e164: `+1${d}` };
-  }
-  if (d.length === 11 && d.startsWith('1')) {
-    const rest = d.slice(1);
-    if (/^[2-9]\d{2}[2-9]\d{6}$/.test(rest)) {
-      return { ok: true, e164: `+1${rest}` };
-    }
-  }
-  if (d.length >= 11 && d.length <= 15 && d[0] !== '0') {
-    return { ok: true, e164: `+${d}` };
-  }
-  return { ok: false };
 }
 
 function FlickeringFlame({ size = 100 }: { size?: number }) {
@@ -159,9 +126,8 @@ async function fetchLatestAttemptSnapshotForUser(userId: string): Promise<Interv
 }
 
 /**
- * Standard applicants land here immediately after interview completion. After 48h from attempt
- * `completed_at` (or sooner if an admin sets `override_status`), they are routed to pass/fail screens.
- * Marketing + SMS + referral UI matches {@link PostInterviewScreen}; attempt polling drives navigation only.
+ * Legacy entry route — redirects to {@link PostInterviewScreen} or pass/fail when reveal is ready.
+ * New completions should hand off to `PostInterview` directly from {@link AriaScreen}.
  */
 export const PostInterviewProcessingScreen: React.FC<{
   navigation: { replace: (name: string, params: { userId: string }) => void };
@@ -170,39 +136,53 @@ export const PostInterviewProcessingScreen: React.FC<{
   const queryClient = useQueryClient();
   const { user } = useAuth();
   const userId = route.params?.userId ?? '';
+  const isAdminEmail = isAmoraeaAdminConsoleEmail(user?.email ?? '');
+  useInterviewAttemptEgoRepair({
+    userId,
+    isAdmin: isAdminEmail,
+    sourceScreen: 'PostInterviewProcessing',
+  });
   const [latestAttemptId, setLatestAttemptId] = useState<string | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
+  /** False until first reveal poll finishes — avoids flashing "in review" when routing straight to pass/fail. */
+  const [revealGateReady, setRevealGateReady] = useState(false);
   const navigatedRef = useRef(false);
 
-  const [phone, setPhone] = useState('');
-  const [submitted, setSubmitted] = useState(false);
-  const [savedPhone, setSavedPhone] = useState(false);
-  const [submitting, setSubmitting] = useState(false);
-  const [fieldError, setFieldError] = useState<string | null>(null);
-  const [saveError, setSaveError] = useState(false);
-  const [saveErrorDetail, setSaveErrorDetail] = useState<string | null>(null);
   const [myReferralCode, setMyReferralCode] = useState<string | null>(null);
   const [referralNotice, setReferralNotice] = useState<string | null>(null);
   const [copyFeedback, setCopyFeedback] = useState(false);
-  const [launchContactPrefsLoaded, setLaunchContactPrefsLoaded] = useState(false);
 
   const applyRevealIfNeeded = useCallback(
-    (row: InterviewAttemptRevealFields | null, usersInterviewPassed: boolean | null | undefined) => {
+    (
+      row: InterviewAttemptRevealFields | null,
+      usersInterviewPassed: boolean | null | undefined,
+      attemptId: string | null,
+      usersInterviewPassedAdminOverride?: boolean | null,
+      usersInterviewPassedComputed?: boolean | null,
+    ) => {
       if (navigatedRef.current) return;
-      const ev = evaluateStandardPostInterviewRevealWithUsersPassedFallback(row ?? undefined, usersInterviewPassed);
-      const target = standardPostInterviewRouteFromReveal(ev);
-      if (target === 'PostInterviewProcessing') return;
-      navigatedRef.current = true;
-      queryClient.invalidateQueries({ queryKey: ['profile', userId] });
-      queryClient.invalidateQueries({ queryKey: ['standardPostInterviewDeferral', userId] });
-      if (target === 'PostInterviewPassed') {
-        navigation.replace('PostInterviewPassed', { userId });
-        return;
-      }
-      if (target === 'PostInterviewFailed') {
-        navigation.replace('PostInterviewFailed', { userId });
-        return;
-      }
+      void (async () => {
+        const decision = determinePostInterviewRoute(row ?? undefined);
+        if (navigatedRef.current) return;
+        if (decision.route === 'PostInterview' || decision.route === 'PostInterviewProcessing') {
+          navigatedRef.current = true;
+          navigation.replace('PostInterview', { userId });
+          return;
+        }
+        navigatedRef.current = true;
+        if (attemptId) {
+          void triggerResultsReadyEmail(userId, attemptId);
+        }
+        queryClient.invalidateQueries({ queryKey: ['profile', userId] });
+        queryClient.invalidateQueries({ queryKey: ['standardPostInterviewDeferral', userId] });
+        if (decision.route === 'PostInterviewPassed') {
+          navigation.replace('PostInterviewPassed', { userId });
+          return;
+        }
+        if (decision.route === 'PostInterviewFailed') {
+          navigation.replace('PostInterviewFailed', { userId });
+        }
+      })();
     },
     [navigation, queryClient, userId],
   );
@@ -210,16 +190,22 @@ export const PostInterviewProcessingScreen: React.FC<{
   const refreshAttempt = useCallback(async () => {
     if (!userId) return;
     try {
-      const [{ data: u }, snap] = await Promise.all([
-        supabase.from('users').select('latest_attempt_id, interview_passed').eq('id', userId).maybeSingle(),
+      const [u, snap] = await Promise.all([
+        fetchUserInterviewRevealPollRow(userId),
         fetchLatestAttemptSnapshotForUser(userId),
       ]);
       setLoadError(null);
       const aid = typeof u?.latest_attempt_id === 'string' ? u.latest_attempt_id : null;
       setLatestAttemptId(aid);
-      applyRevealIfNeeded(snap, u?.interview_passed ?? undefined);
+      const adminOverride = u?.interview_passed_admin_override;
+      const passedComputed = u?.interview_passed_computed;
+      applyRevealIfNeeded(snap, u?.interview_passed ?? undefined, aid, adminOverride, passedComputed);
     } catch (e) {
       setLoadError(e instanceof Error ? e.message : 'Could not load status');
+    } finally {
+      if (!navigatedRef.current) {
+        setRevealGateReady(true);
+      }
     }
   }, [userId, applyRevealIfNeeded]);
 
@@ -242,45 +228,26 @@ export const PostInterviewProcessingScreen: React.FC<{
   }, [userId, user?.email, navigation]);
 
   /**
-   * Referral + launch-notification fields only. Does not branch on `interview_passed` — this screen owns routing
+   * Referral fields only. Does not branch on `interview_passed` — this screen owns routing
    * via attempt-level 48h reveal (`applyRevealIfNeeded`).
    */
   useEffect(() => {
     let cancelled = false;
     void (async () => {
-      try {
-        const { data: auth } = await supabase.auth.getUser();
-        const uid = auth.user?.id ?? userId;
-        if (!uid) return;
-        const [{ data: codeRow }, { data: userRow }] = await Promise.all([
-          supabase.from('referral_codes').select('code').eq('referrer_user_id', uid).maybeSingle(),
-          supabase
-            .from('users')
-            .select('referral_notice_pending, launch_notification_phone, launch_notification_submitted_at')
-            .eq('id', uid)
-            .maybeSingle(),
-        ]);
-        if (cancelled) return;
-        setMyReferralCode(codeRow?.code ?? null);
-        setReferralNotice(userRow?.referral_notice_pending ?? null);
-        const storedPhone =
-          typeof userRow?.launch_notification_phone === 'string'
-            ? userRow.launch_notification_phone.trim()
-            : '';
-        const submittedAt =
-          typeof userRow?.launch_notification_submitted_at === 'string'
-            ? userRow.launch_notification_submitted_at.trim()
-            : '';
-        if (storedPhone.length > 0) {
-          setSubmitted(true);
-          setSavedPhone(true);
-        } else if (submittedAt.length > 0) {
-          setSubmitted(true);
-          setSavedPhone(false);
-        }
-      } finally {
-        if (!cancelled) setLaunchContactPrefsLoaded(true);
-      }
+      const { data: auth } = await supabase.auth.getUser();
+      const uid = auth.user?.id ?? userId;
+      if (!uid) return;
+      const [{ data: codeRow }, { data: userRow }] = await Promise.all([
+        supabase.from('referral_codes').select('code').eq('referrer_user_id', uid).maybeSingle(),
+        supabase
+          .from(USER_INTERVIEW_ROUTING_TABLE)
+          .select(USER_REFERRAL_NOTICE_SELECT)
+          .eq('id', uid)
+          .maybeSingle(),
+      ]);
+      if (cancelled) return;
+      setMyReferralCode(codeRow?.code ?? null);
+      setReferralNotice(userRow?.referral_notice_pending ?? null);
     })();
     return () => {
       cancelled = true;
@@ -289,6 +256,7 @@ export const PostInterviewProcessingScreen: React.FC<{
 
   useEffect(() => {
     navigatedRef.current = false;
+    setRevealGateReady(false);
   }, [userId]);
 
   useEffect(() => {
@@ -326,12 +294,42 @@ export const PostInterviewProcessingScreen: React.FC<{
     };
   }, [latestAttemptId, refreshAttempt]);
 
+  useEffect(() => {
+    if (!userId) return;
+    const channel = supabase
+      .channel(`user_reveal_${userId}`)
+      .on(
+        'postgres_changes',
+        {
+          event: 'UPDATE',
+          schema: 'public',
+          table: 'users',
+          filter: `id=eq.${userId}`,
+        },
+        () => {
+          void refreshAttempt();
+        },
+      )
+      .subscribe();
+    return () => {
+      void supabase.removeChannel(channel);
+    };
+  }, [userId, refreshAttempt]);
+
   const dismissReferralNotice = async () => {
     const { data: auth } = await supabase.auth.getUser();
     const uid = auth.user?.id ?? userId;
     if (!uid || !referralNotice) return;
-    const { error } = await supabase.from('users').update({ referral_notice_pending: null }).eq('id', uid);
-    if (error && __DEV__) console.warn('[PostInterviewProcessing] clear referral notice', error.message);
+    try {
+      await clearReferralNoticePending(uid);
+    } catch (error) {
+      if (__DEV__) {
+        console.warn(
+          '[PostInterviewProcessing] clear referral notice',
+          error instanceof Error ? error.message : error,
+        );
+      }
+    }
     setReferralNotice(null);
     queryClient.invalidateQueries({ queryKey: ['profile', uid] });
   };
@@ -347,77 +345,18 @@ export const PostInterviewProcessingScreen: React.FC<{
     }
   };
 
-  const onSavePhone = async () => {
-    const trimmed = phone.trim();
-    setFieldError(null);
-    setSaveError(false);
-    setSaveErrorDetail(null);
-
-    if (!trimmed) {
-      setFieldError('Enter a valid phone number to save SMS updates.');
-      return;
-    }
-
-    const normalized = normalizeLaunchNotificationPhone(trimmed);
-    if (!normalized.ok) {
-      setFieldError(
-        "That doesn't look like a valid phone number. For US numbers include area code (10 digits). Use country code for international.",
-      );
-      return;
-    }
-
-    const { data: authData } = await supabase.auth.getUser();
-    const uid = authData.user?.id ?? userId;
-    if (!uid) {
-      setSaveErrorDetail('Not signed in (no user id).');
-      setSaveError(true);
-      return;
-    }
-
-    setSubmitting(true);
-    try {
-      const { data: rowExists, error: selErr } = await supabase.from('users').select('id').eq('id', uid).maybeSingle();
-      if (selErr) throw selErr;
-      if (!rowExists?.id) {
-        throw new Error('PROFILE_ROW_MISSING: No users row for this account. Try signing out and back in.');
-      }
-
-      const { data, error: upErr } = await supabase
-        .from('users')
-        .update({
-          launch_notification_phone: normalized.e164,
-          launch_notification_submitted_at: new Date().toISOString(),
-        })
-        .eq('id', uid)
-        .select('id')
-        .maybeSingle();
-
-      if (upErr) throw upErr;
-      if (!data?.id) {
-        throw new Error('ROW_NOT_UPDATED: Update affected 0 rows (check RLS or that users.id matches your login).');
-      }
-      setSavedPhone(true);
-      setSubmitted(true);
-    } catch (e: unknown) {
-      const raw =
-        typeof e === 'object' && e !== null && 'message' in e
-          ? String((e as { message: unknown }).message)
-          : e instanceof Error
-            ? e.message
-            : 'Save failed';
-      setSaveErrorDetail(raw.length > 220 ? `${raw.slice(0, 220)}…` : raw);
-      setSaveError(true);
-      if (__DEV__) {
-        console.warn('[PostInterviewProcessingScreen] save failed', e);
-      }
-    } finally {
-      setSubmitting(false);
-    }
-  };
+  if (!revealGateReady) {
+    return (
+      <PostInterviewScrollLayout>
+        <View style={styles.revealGate}>
+          <ActivityIndicator size="large" color={ACCENT} />
+        </View>
+      </PostInterviewScrollLayout>
+    );
+  }
 
   return (
-    <SafeAreaContainer style={{ backgroundColor: BG, flex: 1 }}>
-      <ScrollView contentContainerStyle={styles.scroll} style={{ backgroundColor: BG }} keyboardShouldPersistTaps="handled">
+    <PostInterviewScrollLayout>
         <FlickeringFlame size={104} />
 
         <Text style={styles.h1}>Your application is in review</Text>
@@ -425,13 +364,6 @@ export const PostInterviewProcessingScreen: React.FC<{
 
         <View style={styles.card}>
           {loadError ? <Text style={styles.err}>{loadError}</Text> : null}
-
-          <View style={styles.badgeRow}>
-            <PulsingDot />
-            <View style={styles.badge}>
-              <Text style={styles.badgeText}>Launching Winter 2026</Text>
-            </View>
-          </View>
 
           {referralNotice ? (
             <View style={styles.referralNoticeBanner}>
@@ -455,68 +387,11 @@ export const PostInterviewProcessingScreen: React.FC<{
 
           <Text style={styles.stayTitle}>Stay in the loop</Text>
           <Text style={styles.stayLead}>
-            We will email you once your application has been reviewed or when the app goes live!
-          </Text>
-          <Text style={styles.staySub}>
-            If you would like SMS updates, enter your number below and tap Save. Otherwise we&apos;ll use your sign-in
-            email for launch and review news.
+            We will email you at the address you used to sign in once your application has been reviewed.
           </Text>
 
-          {saveError ? (
-            <View style={styles.saveErrBlock}>
-              <Text style={styles.saveErr}>Couldn&apos;t save your number. Please try again in a moment.</Text>
-              {saveErrorDetail ? (
-                <Text style={styles.saveErrDetail} selectable>
-                  {saveErrorDetail}
-                </Text>
-              ) : null}
-            </View>
-          ) : null}
-
-          {!launchContactPrefsLoaded ? (
-            <View style={styles.launchPrefsPlaceholder} accessibilityLabel="Loading">
-              <ActivityIndicator color={ACCENT} />
-            </View>
-          ) : submitted ? (
-            <View style={styles.confirmBox}>
-              <Text style={styles.confirm}>
-                {savedPhone
-                  ? "You're all set, we'll text you when the app is close to launch!"
-                  : "You're all set — we'll email you at the address you used to sign in when there's news."}
-              </Text>
-            </View>
-          ) : (
-            <>
-              <TextInput
-                value={phone}
-                onChangeText={(t) => {
-                  setPhone(t);
-                  if (fieldError) setFieldError(null);
-                }}
-                placeholder="Phone for SMS updates (optional)"
-                placeholderTextColor="rgba(255,255,255,0.35)"
-                keyboardType="phone-pad"
-                autoCapitalize="none"
-                autoCorrect={false}
-                textContentType="telephoneNumber"
-                autoComplete="tel"
-                style={[styles.input, fieldError && styles.inputError]}
-              />
-              {fieldError ? <Text style={styles.fieldHint}>{fieldError}</Text> : null}
-              <Pressable
-                onPress={onSavePhone}
-                disabled={submitting}
-                style={({ pressed }) => [styles.button, pressed && { opacity: 0.88 }]}
-              >
-                <Text style={styles.buttonLabel}>{submitting ? '…' : 'Save my number'}</Text>
-              </Pressable>
-            </>
-          )}
-
-          <View style={styles.privacyRow}>
-            <Ionicons name="lock-closed-outline" size={14} color="rgba(255,255,255,0.45)" />
-            <Text style={styles.privacy}>Your number is private. No spam. No sharing. Ever.</Text>
-          </View>
+          <View style={styles.divider} />
+          <DownloadPersonalReportButton userId={userId} variant="dark" />
 
           {myReferralCode ? (
             <View style={styles.referFriendSection}>
@@ -540,20 +415,16 @@ export const PostInterviewProcessingScreen: React.FC<{
             </View>
           ) : null}
         </View>
-      </ScrollView>
-    </SafeAreaContainer>
+    </PostInterviewScrollLayout>
   );
 };
 
 const styles = StyleSheet.create({
-  scroll: {
-    paddingHorizontal: 22,
-    paddingTop: 24,
-    paddingBottom: 48,
+  revealGate: {
+    flex: 1,
+    minHeight: 200,
     alignItems: 'center',
-    maxWidth: 440,
-    width: '100%',
-    alignSelf: 'center',
+    justifyContent: 'center',
   },
   h1: {
     fontFamily: FONT_DISPLAY,
@@ -640,102 +511,6 @@ const styles = StyleSheet.create({
     lineHeight: 22,
     color: 'rgba(255,255,255,0.88)',
     marginBottom: 12,
-  },
-  staySub: {
-    fontFamily: FONT_BODY,
-    fontSize: 14,
-    lineHeight: 20,
-    color: 'rgba(255,255,255,0.65)',
-    marginBottom: 16,
-  },
-  fieldHint: {
-    fontFamily: FONT_BODY,
-    fontSize: 12,
-    color: '#f87171',
-    marginBottom: 10,
-    marginTop: -8,
-  },
-  input: {
-    fontFamily: FONT_BODY,
-    borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.2)',
-    borderRadius: 10,
-    paddingHorizontal: 14,
-    paddingVertical: Platform.OS === 'web' ? 12 : 10,
-    color: '#fafafa',
-    fontSize: 15,
-    marginBottom: 12,
-    width: '100%',
-  },
-  inputError: {
-    borderColor: '#ef4444',
-  },
-  button: {
-    backgroundColor: ACCENT,
-    borderRadius: 10,
-    paddingVertical: 14,
-    alignItems: 'center',
-    marginBottom: 16,
-  },
-  buttonLabel: {
-    fontFamily: FONT_BODY,
-    fontSize: 15,
-    fontWeight: '600',
-    color: '#fff',
-  },
-  confirmBox: {
-    width: '100%',
-    backgroundColor: LAUNCH_CONFIRM_BG,
-    borderWidth: 1,
-    borderColor: LAUNCH_CONFIRM_BORDER,
-    borderRadius: 12,
-    paddingVertical: 14,
-    paddingHorizontal: 16,
-    marginBottom: 16,
-  },
-  confirm: {
-    fontFamily: FONT_BODY,
-    fontSize: 16,
-    lineHeight: 24,
-    fontWeight: '600',
-    color: LAUNCH_CONFIRM_TEXT,
-  },
-  saveErr: {
-    fontFamily: FONT_BODY,
-    fontSize: 13,
-    color: '#f87171',
-    marginBottom: 8,
-  },
-  saveErrBlock: {
-    marginBottom: 12,
-    width: '100%',
-  },
-  saveErrDetail: {
-    fontFamily: FONT_BODY,
-    fontSize: 11,
-    lineHeight: 16,
-    color: 'rgba(248,113,113,0.85)',
-  },
-  launchPrefsPlaceholder: {
-    width: '100%',
-    minHeight: 140,
-    justifyContent: 'center',
-    alignItems: 'center',
-    paddingVertical: 24,
-  },
-  privacyRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-    marginTop: 14,
-    width: '100%',
-  },
-  privacy: {
-    flex: 1,
-    fontFamily: FONT_BODY,
-    fontSize: 12,
-    lineHeight: 17,
-    color: 'rgba(255,255,255,0.45)',
   },
   referralNoticeBanner: {
     width: '100%',

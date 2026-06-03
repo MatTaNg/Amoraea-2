@@ -5,6 +5,7 @@
 
 import { INTERVIEW_MARKER_IDS, type InterviewMarkerId } from '@features/aria/interviewMarkers';
 import { combinedContemptFromScenarioPillarScores } from '@features/aria/aggregateMarkerScoresFromSlices';
+import { scenarioEmotionalVocabDensityPercentFromTranscript } from '@features/aria/personalMomentEmotionalVocab';
 import { isNotAssessedDueToTechnicalInterruption } from '@features/aria/probeAndScoringUtils';
 
 export const CONSTRUCT_IDS = [...INTERVIEW_MARKER_IDS] as InterviewMarkerId[];
@@ -159,6 +160,8 @@ export function analyzeLanguageMarkers(
   emotional_vocab_count: number;
   accountability_phrases: number;
   deflection_phrases: number;
+  /** Scenario user-turn emotional token density (%), for personal-moment divergence vs scenarios. */
+  scenario_emotional_vocab_density: number | null;
   per_scenario: Record<number, { word_count: number; qualifier_count: number; accountability_phrases: number }>;
 } {
   const userMessages = messages.filter(
@@ -340,6 +343,9 @@ export function analyzeLanguageMarkers(
     emotional_vocab_count: emotionalVocabCount,
     accountability_phrases: accountabilityCountForText(fullText),
     deflection_phrases: countPhrasesInText(fullText, deflectionPhrases),
+    scenario_emotional_vocab_density: scenarioEmotionalVocabDensityPercentFromTranscript(
+      userMessages as Array<{ role?: string; content?: string; scenarioNumber?: number | null }>,
+    ),
     per_scenario: perScenario,
   };
 }

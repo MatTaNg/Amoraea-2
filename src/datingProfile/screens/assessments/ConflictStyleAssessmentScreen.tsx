@@ -29,11 +29,15 @@ import { saveAssessmentProgress } from "@/data/services/assessmentService";
 import { profilesRepo } from "@/data/repos/profilesRepo";
 import { theme } from "@/shared/theme/theme";
 import { AssessmentHeader } from "@/shared/components/assessments/AssessmentHeader";
+import { AssessmentPreparingResults } from "@/shared/components/assessments/AssessmentPreparingResults";
 import {
   ASSESSMENT_IDS,
   getCompletedAssessments,
   getFirstIncompleteAssessment,
+  getNextInstrument,
+  onboardingAssessmentBatteryIndex,
 } from "@/data/services/assessmentService";
+import { useNavigateAfterAssessments } from "@/datingProfile/onboarding/useNavigateAfterAssessments";
 
 const SAVE_PROGRESS_EVERY = 5;
 
@@ -42,10 +46,11 @@ export function ConflictStyleAssessmentScreen() {
   const route = useRoute<RouteProp<DatingProfileStackParamList, "DatingConflictStyle">>();
   const { user } = useAuth();
   const { profile, refreshProfile, loading: profileLoading } = useProfile();
+  const navigateAfterAssessments = useNavigateAfterAssessments(user?.id);
   const fromFlow = route.params?.from === "edit" ? "edit" : "onboarding";
   const isRetake = route.params?.retake === "1";
 
-  const [showIntro, setShowIntro] = useState(true);
+  const [showIntro, setShowIntro] = useState(false);
   const [currentIndex, setCurrentIndex] = useState(0);
   const [answers, setAnswers] = useState<
     Record<number, { style: ConflictStyleKey; selectedOptionIndex: number }>
@@ -53,7 +58,6 @@ export function ConflictStyleAssessmentScreen() {
   const [saving, setSaving] = useState(false);
   /** Re-render option disable state while a background upsert runs (refs alone would not update Pressable). */
   const [selectionBusy, setSelectionBusy] = useState(false);
-  const [surveysComplete, setSurveysComplete] = useState(0);
   const [completedInstruments, setCompletedInstruments] = useState<string[] | null>(null);
   const [loadingMeta, setLoadingMeta] = useState(true);
   /** After manual Begin or one-time server resume — stops profile refetches from resetting question index. */
@@ -80,7 +84,6 @@ export function ConflictStyleAssessmentScreen() {
       if (!c) {
         const list = res.success ? res.data : [];
         setCompletedInstruments(list);
-        setSurveysComplete(list.length);
       }
       setLoadingMeta(false);
     })();
@@ -100,7 +103,7 @@ export function ConflictStyleAssessmentScreen() {
       navigation.replace("DatingInstrument", { instrument: next });
       return;
     }
-    navigation.replace("DatingProfileBuilder");
+    void navigateAfterAssessments();
   }, [
     user?.id,
     loadingMeta,
@@ -108,7 +111,7 @@ export function ConflictStyleAssessmentScreen() {
     completedInstruments,
     fromFlow,
     isRetake,
-    navigation,
+    navigateAfterAssessments,
   ]);
 
   React.useEffect(() => {
@@ -125,6 +128,48 @@ export function ConflictStyleAssessmentScreen() {
       resumeSyncDoneRef.current = true;
     }
   }, [profileLoading, profile?.currentAssessment, profile?.currentAssessmentQuestion, total]);
+
+  React.useEffect(() => {
+    if (fromFlow === "edit") return;
+    if (resumeSyncDoneRef.current) return;
+    if (!user?.id) return;
+
+    let cancelled = false;
+    void (async () => {
+      if (isRetake) {
+        const cleared = await clearConflictStyleResponseDrafts(user.id);
+        if (cancelled) return;
+        if (!cleared.success) {
+          Alert.alert("Couldn't reset", cleared.error.message);
+          return;
+        }
+        setAnswers({});
+        setCurrentIndex(0);
+      }
+      if (
+        profile?.currentAssessment === "CONFLICT-30" &&
+        typeof profile.currentAssessmentQuestion === "number" &&
+        profile.currentAssessmentQuestion > 1
+      ) {
+        resumeSyncDoneRef.current = true;
+        return;
+      }
+      resumeSyncDoneRef.current = true;
+      await saveAssessmentProgress(user.id, "CONFLICT-30", 1);
+      if (!cancelled) await refreshProfile?.();
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [
+    fromFlow,
+    isRetake,
+    user?.id,
+    profile?.currentAssessment,
+    profile?.currentAssessmentQuestion,
+    refreshProfile,
+  ]);
 
   /** Restore answers after refresh / resume (server is source of truth for partial progress). */
   React.useEffect(() => {
@@ -218,9 +263,10 @@ export function ConflictStyleAssessmentScreen() {
         const result = await saveConflictStyleCompletion(user.id, rows, { isRetake });
         if (result.success) {
           if (fromFlow === "onboarding") {
+            const nextInstrument = getNextInstrument("CONFLICT-30");
             const prof = await profilesRepo.updateProfile(user.id, {
-              currentAssessment: "PVQ-21",
-              currentAssessmentQuestion: 1,
+              currentAssessment: nextInstrument ?? null,
+              currentAssessmentQuestion: nextInstrument ? 1 : null,
             });
             if (!prof.success) {
               Alert.alert("Profile update failed", prof.error?.message ?? "Try again.");
@@ -287,77 +333,16 @@ export function ConflictStyleAssessmentScreen() {
 
   if (loadingMeta) {
     return (
-      <View style={[styles.centered, { flex: 1 }]}>
-        <ActivityIndicator size="large" />
+      <View style={[styles.centered, { flex: 1, backgroundColor: theme.colors.background }]}>
+        <ActivityIndicator size="large" color={theme.colors.primary} />
       </View>
     );
   }
 
-  if (showIntro) {
+  if (saving) {
     return (
       <SafeAreaView style={styles.container} edges={["top", "left", "right"]}>
-        <ScrollView contentContainerStyle={styles.introScrollContent}>
-          <View style={styles.introCard}>
-            <Text style={styles.introEyebrow}>Relationship typology</Text>
-            <Text style={styles.introTitle}>What Is the Conflict Style Quiz?</Text>
-            <Text style={styles.introBody}>
-              The Conflict Style Quiz helps identify how you naturally respond when tension, disagreement, or emotional friction happens in relationships.
-              {"\n\n"}Everyone handles conflict differently:
-              {"\n\n"}Some people confront problems immediately.
-              {"\n"}Some withdraw.
-              {"\n"}Some try to keep peace at all costs.
-              {"\n"}Some become highly emotional.
-              {"\n"}Some become analytical or solution-focused.
-              {"\n\n"}The quiz helps reveal your default conflict patterns and communication tendencies under stress.
-              {"\n\n"}Common styles often include:
-              {"\n\n"}Avoidant
-              {"\n"}Accommodating
-              {"\n"}Competitive
-              {"\n"}Collaborative
-              {"\n"}Defensive
-              {"\n"}Emotionally expressive
-              {"\n"}Logical/problem-solving
-              {"\n\n"}Conflict style assessments are grounded in decades of relationship psychology and communication research.
-              {"\n\n"}Many modern frameworks draw from the work of researchers such as:
-              {"\n\n"}John Gottman
-              {"\n"}Marshall Rosenberg (Creator of Non-violent Communication)
-              {"\n"}interpersonal communication and conflict-resolution research fields
-              {"\n\n"}Research consistently shows that conflict behavior strongly correlates with:
-              {"\n\n"}Relationship satisfaction
-              {"\n"}Emotional safety
-              {"\n"}Breakup/divorce likelihood
-              {"\n"}Long-term relationship stability
-              {"\n\n"}The strongest couples are usually not couples who never fight.
-              {"\n"}They're couples who know how to repair, regulate, communicate, and stay connected through tension.
-            </Text>
-            <Text style={styles.introMeta}>
-              20 questions | Your answers are saved as you go
-            </Text>
-            <Pressable
-              style={styles.primaryBtn}
-              onPress={async () => {
-                resumeSyncDoneRef.current = true;
-                if (user?.id && isRetake) {
-                  const cleared = await clearConflictStyleResponseDrafts(user.id);
-                  if (!cleared.success) {
-                    Alert.alert("Couldn't reset", cleared.error.message);
-                    return;
-                  }
-                  setAnswers({});
-                  setCurrentIndex(0);
-                }
-                setShowIntro(false);
-                if (user?.id) {
-                  void saveAssessmentProgress(user.id, "CONFLICT-30", 1).then(() =>
-                    refreshProfile?.()
-                  );
-                }
-              }}
-            >
-              <Text style={styles.primaryBtnText}>Begin</Text>
-            </Pressable>
-          </View>
-        </ScrollView>
+        <AssessmentPreparingResults />
       </SafeAreaView>
     );
   }
@@ -365,6 +350,7 @@ export function ConflictStyleAssessmentScreen() {
   const qNum = currentIndex + 1;
   const progressPct = (qNum / total) * 100;
   const selected = answers[currentIndex];
+  const assessmentIndex = onboardingAssessmentBatteryIndex("CONFLICT-30");
 
   return (
     <SafeAreaView style={styles.container} edges={["top", "left", "right"]}>
@@ -378,7 +364,7 @@ export function ConflictStyleAssessmentScreen() {
       >
         <View style={styles.questionCard}>
           <AssessmentHeader
-            surveysComplete={surveysComplete}
+            assessmentIndex={assessmentIndex}
             currentQ={qNum}
             totalQ={total}
             assessmentName="Conflict style"
@@ -408,22 +394,6 @@ export function ConflictStyleAssessmentScreen() {
           </Pressable>
         </View>
       </ScrollView>
-      {saving && (
-        <View
-          style={styles.savingOverlay}
-          pointerEvents="auto"
-          accessibilityRole="progressbar"
-          accessibilityLabel="Preparing your results"
-        >
-          <View style={styles.loadingCard}>
-            <ActivityIndicator size="large" color={theme.colors.primary} />
-            <Text style={styles.loadingTitle}>Preparing your results</Text>
-            <Text style={styles.loadingBody}>
-              Saving your answers and loading your conflict style summary.
-            </Text>
-          </View>
-        </View>
-      )}
     </SafeAreaView>
   );
 }
@@ -525,36 +495,4 @@ const styles = StyleSheet.create({
   backBtn: { marginTop: 16, paddingVertical: 8 },
   backText: { fontSize: 16, color: theme.colors.primary },
   backDisabled: { opacity: 0.35 },
-  savingOverlay: {
-    ...StyleSheet.absoluteFillObject,
-    backgroundColor: "rgba(0,0,0,0.45)",
-    justifyContent: "center",
-    alignItems: "center",
-    zIndex: 1000,
-    padding: 24,
-  },
-  loadingCard: {
-    width: "100%",
-    maxWidth: 420,
-    borderRadius: 22,
-    borderWidth: 1,
-    borderColor: "rgba(91,168,232,0.24)",
-    backgroundColor: "rgba(91,168,232,0.08)",
-    padding: 28,
-    alignItems: "center",
-  },
-  loadingTitle: {
-    color: theme.colors.text,
-    fontSize: 20,
-    fontWeight: "800",
-    marginTop: 18,
-    marginBottom: 8,
-    textAlign: "center",
-  },
-  loadingBody: {
-    color: theme.colors.textSecondary,
-    fontSize: 15,
-    lineHeight: 22,
-    textAlign: "center",
-  },
 });

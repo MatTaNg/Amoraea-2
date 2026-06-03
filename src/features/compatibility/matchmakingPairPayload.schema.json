@@ -1,0 +1,112 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://amoraea.app/schemas/matchmaking-pair-payload.v1.json",
+  "title": "MatchmakingPairPayload",
+  "description": "Two user snapshots for AI pairwise compatibility scoring in Amoraea.",
+  "type": "object",
+  "required": ["schemaVersion", "userA", "userB"],
+  "additionalProperties": false,
+  "properties": {
+    "schemaVersion": { "const": 1 },
+    "userA": { "$ref": "#/$defs/MatchmakingUserSnapshot" },
+    "userB": { "$ref": "#/$defs/MatchmakingUserSnapshot" },
+    "context": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "eventId": { "type": "string" },
+        "eventName": { "type": "string" },
+        "notes": { "type": "string" }
+      }
+    }
+  },
+  "$defs": {
+    "MatchmakingUserSnapshot": {
+      "type": "object",
+      "required": ["userId"],
+      "additionalProperties": false,
+      "properties": {
+        "userId": { "type": "string", "minLength": 1 },
+        "eligibleForMatching": { "type": "boolean" },
+        "interview": { "$ref": "#/$defs/InterviewSnapshot" },
+        "preInterviewPsychometrics": { "$ref": "#/$defs/PreInterviewPsychometrics" },
+        "postInterviewTypology": { "$ref": "#/$defs/PostInterviewTypology" },
+        "communicationStyle": { "$ref": "#/$defs/CommunicationStyle" },
+        "profile": { "$ref": "#/$defs/ProfileSnapshot" },
+        "preferences": { "$ref": "#/$defs/PreferencesSnapshot" }
+      }
+    },
+    "InterviewSnapshot": {
+      "type": "object",
+      "additionalProperties": true,
+      "properties": {
+        "attemptId": { "type": "string" },
+        "passed": { "type": ["boolean", "null"] },
+        "weightedScore": { "type": ["number", "null"], "minimum": 0, "maximum": 10 },
+        "modifiedWeightedScore": { "type": ["number", "null"], "minimum": 0, "maximum": 10 },
+        "egoDevelopmentLevel": { "type": ["integer", "null"], "minimum": 1, "maximum": 5 },
+        "pillarScores": { "type": "object", "additionalProperties": { "type": ["number", "null"] } },
+        "scenarioComposites": { "type": "object" },
+        "reviewFlags": { "type": "array", "items": { "type": "string" } },
+        "gateFailReasons": { "type": "array", "items": { "type": "string" } },
+        "defensePatterns": { "type": "object" },
+        "moment4Concreteness": { "type": ["string", "null"] },
+        "moment5Concreteness": { "type": ["string", "null"] },
+        "disclosureCalibration": { "type": ["string", "null"] },
+        "emotionRecognitionRaw": { "type": ["number", "null"], "minimum": 0, "maximum": 1 }
+      }
+    },
+    "PreInterviewPsychometrics": {
+      "type": "object",
+      "additionalProperties": true,
+      "properties": {
+        "brsScore": { "type": ["number", "null"] },
+        "scsSfScore": { "type": ["number", "null"] },
+        "gaspScore": { "type": ["number", "null"] },
+        "dweckScore": { "type": ["number", "null"] },
+        "aaq2Score": { "type": ["number", "null"] },
+        "rsesScore": { "type": ["number", "null"] },
+        "scsPublicScore": { "type": ["number", "null"] },
+        "scsPrivateScore": { "type": ["number", "null"] },
+        "mspssFriendsScore": { "type": ["number", "null"] },
+        "sd3NarcissismScore": { "type": ["number", "null"] },
+        "rfqScore": { "type": ["number", "null"] },
+        "psychometricModifier": { "type": ["number", "null"] },
+        "psychometricFloorBreaches": { "type": "array", "items": { "type": "string" } },
+        "straightLineFlags": { "type": "array", "items": { "type": "string" } }
+      }
+    },
+    "PostInterviewTypology": {
+      "type": "object",
+      "additionalProperties": true,
+      "properties": {
+        "sexualCommunicationMean": { "type": ["number", "null"], "minimum": 1, "maximum": 5 },
+        "attachment": { "type": "object" },
+        "values": { "type": "object" },
+        "conflictStyle": { "type": "object" },
+        "assessmentsCompleted": { "type": "boolean" }
+      }
+    },
+    "CommunicationStyle": {
+      "type": "object",
+      "additionalProperties": true,
+      "properties": {
+        "emotionalAnalytical": { "type": ["number", "null"], "minimum": 0, "maximum": 1 },
+        "narrativeConceptual": { "type": ["number", "null"], "minimum": 0, "maximum": 1 },
+        "certaintyAmbiguity": { "type": ["number", "null"], "minimum": 0, "maximum": 1 },
+        "relationalIndividual": { "type": ["number", "null"], "minimum": 0, "maximum": 1 },
+        "warmth": { "type": ["number", "null"], "minimum": 0, "maximum": 1 },
+        "overallConfidence": { "type": ["number", "null"], "minimum": 0, "maximum": 1 },
+        "matchmakerSummary": { "type": ["string", "null"] }
+      }
+    },
+    "ProfileSnapshot": {
+      "type": "object",
+      "additionalProperties": true
+    },
+    "PreferencesSnapshot": {
+      "type": "object",
+      "additionalProperties": true
+    }
+  }
+}

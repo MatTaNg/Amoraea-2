@@ -1,4 +1,8 @@
 import type { AssessmentId } from "@/data/services/assessmentService";
+import {
+  buildSexualCommunicationDetailRows,
+  buildSexualCommunicationInsightCopy,
+} from "@features/psychometrics/sexualCommunicationInsight";
 import type { AssessmentInsightSnapshot } from "@/src/types";
 import type { ConflictStyleKey } from "@/data/assessments/instruments/conflictStyleTypes";
 import { CONFLICT_STYLE_KEYS } from "@/data/assessments/instruments/conflictStyleTypes";
@@ -205,36 +209,6 @@ const CONFLICT_STYLE_DETAIL: Record<
   },
 };
 
-const RELATIONSHIP_TRAIT_DETAIL_META: Array<{
-  key: "emotional_stability_under_stress" | "dispositional_trust";
-  label: string;
-  description: string;
-}> = [
-  {
-    key: "emotional_stability_under_stress",
-    label: "Emotional Stability Under Stress",
-    description:
-      "Reflects how steady and self-regulated you tend to be when stress or conflict enters a relationship.",
-  },
-  {
-    key: "dispositional_trust",
-    label: "Dispositional Trust",
-    description:
-      "Reflects whether you tend to interpret a partner's behavior through baseline trust, goodwill, and benefit of the doubt.",
-  },
-];
-
-function relationshipTraitsDetails(scores: Record<string, number>): InsightRow[] {
-  return RELATIONSHIP_TRAIT_DETAIL_META.map(({ key, label, description }) => {
-    const v = scores[key] ?? 0;
-    return {
-      label,
-      value: `${v.toFixed(2)} / 7`,
-      description,
-    };
-  });
-}
-
 function conflict30Details(scores: Record<string, number>): InsightRow[] {
   return CONFLICT_STYLE_KEYS.map((k) => {
     const pct = scores[k] ?? 0;
@@ -257,8 +231,8 @@ export function buildDetailedInsightRows(
       return pvqDetails(scores);
     case "CONFLICT-30":
       return conflict30Details(scores);
-    case "RELATIONSHIP_TRAITS_8":
-      return relationshipTraitsDetails(scores);
+    case "SEXUAL_COMMUNICATION":
+      return sexualCommunicationDetails(scores);
     default:
       return Object.entries(scores).map(([k, v]) => ({
         label: toTitleCase(k),
@@ -290,8 +264,8 @@ function ecr36Insight(scores: Record<string, number>): InsightContent {
     headline,
     body,
     growthEdge,
-    nextTitle: "Conflict Style",
-    nextMeta: "~3–4 minutes",
+    nextTitle: "Sexual Communication",
+    nextMeta: "10 questions · ~3 minutes",
     isFinal: false,
     details: attachmentDetails(scores),
   };
@@ -395,27 +369,27 @@ function conflict30Insight(scores: Record<string, number>): InsightContent {
     headline,
     body,
     growthEdge,
-    nextTitle: "Schwartz Values",
-    nextMeta: "20 questions · ~4 minutes",
+    nextTitle: "Attachment Style",
+    nextMeta: "36 questions · ~6 minutes",
     isFinal: false,
     details: conflict30Details(scores),
   };
 }
 
-function relationshipTraits8Insight(scores: Record<string, number>): InsightContent {
-  const headline = "Your snapshot on stress and trust is ready.";
-  const body =
-    "These two dimensions are relationship-specific: how stress and conflict tend to affect your steadiness day to day, and how you tend to interpret a partner when things are unclear. Lower scores are not a character judgment — they often reflect history, context, and what you need to feel safe.";
-  const growthEdge =
-    "If anything lands differently than you expected, treat it as a conversation starter with yourself (or a therapist), not a label.";
+function sexualCommunicationDetails(scores: Record<string, number>): InsightRow[] {
+  return buildSexualCommunicationDetailRows(scores);
+}
+
+function sexualCommunicationInsight(scores: Record<string, number>): InsightContent {
+  const copy = buildSexualCommunicationInsightCopy(scores);
   return {
-    headline,
-    body,
-    growthEdge,
-    nextTitle: null,
-    nextMeta: null,
-    isFinal: true,
-    details: relationshipTraitsDetails(scores),
+    headline: copy.headline,
+    body: copy.body,
+    growthEdge: copy.growthEdge,
+    nextTitle: "Schwartz Values",
+    nextMeta: "21 questions · ~4 minutes",
+    isFinal: false,
+    details: sexualCommunicationDetails(scores),
   };
 }
 
@@ -447,8 +421,8 @@ function pvq21Insight(scores: Record<string, number>): InsightContent {
     headline,
     body,
     growthEdge,
-    nextTitle: "Relationship Traits",
-    nextMeta: "8 questions · ~2 minutes",
+    nextTitle: "Conflict Style",
+    nextMeta: "30 questions · ~3–4 minutes",
     isFinal: false,
     details: pvqDetails(scores),
   };
@@ -471,8 +445,8 @@ export function getInsightContent(
       return pvq21Insight(scores);
     case "CONFLICT-30":
       return conflict30Insight(scores);
-    case "RELATIONSHIP_TRAITS_8":
-      return relationshipTraits8Insight(scores);
+    case "SEXUAL_COMMUNICATION":
+      return sexualCommunicationInsight(scores);
     default:
       return {
         headline: "Assessment complete.",
@@ -492,7 +466,7 @@ export const INSTRUMENT_TITLES: Record<AssessmentId, string> = {
   BRS: "Resilience",
   "PVQ-21": "Schwartz Values",
   "CONFLICT-30": "Conflict Style",
-  "RELATIONSHIP_TRAITS_8": "Relationship Traits",
+  SEXUAL_COMMUNICATION: "Sexual Communication",
 };
 
 /**

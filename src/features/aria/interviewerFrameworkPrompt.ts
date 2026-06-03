@@ -5,6 +5,7 @@
 import { INTERVIEW_CHARACTER_NAME_LOCK_PARAGRAPH } from '@/constants/interviewCharacterNames';
 import { SCENARIO_B_VIGNETTE } from '@/constants/scenarioBVignette';
 import { APPROVED_ELONGATING_PROBE_LINES } from '@features/aria/elongatingProbe';
+import { isPlausibleInterviewName } from '@features/aria/interviewNameValidation';
 
 const APPROVED_ELONGATING_PROBE_BULLETS = APPROVED_ELONGATING_PROBE_LINES.map((l) => `- "${l}"`).join('\n');
 
@@ -184,13 +185,17 @@ Do NOT ask "what would each person need to own here" or any equivalent ownership
 
 CONTEMPT PROBE (Emma's "you've made that very clear") — apply check-before-asking:
 
-Skip this probe **only** if the user already referenced this line (quote, close paraphrase, or clear reference to "you've made that very clear" / Emma + that exchange) **and** showed they read its **contemptuous** quality: harsh, cutting, dismissive, contemptuous, punishing toward Ryan, shutting down or closing the conversation, door-closing / verdict-issuing, superiority, or similar hostile relational sting — **not** mere indirectness.
+Skip this probe when the participant **already engaged that line** (verbatim, close ASR variant like "you made that very clear," or clear reference tying Emma/her comment to that exchange) **and** any of the following holds — treat as satisfied; **do not** ask them to repeat the same beat:
 
-**Do not** skip the probe when the user only named **passive-aggressive** (that flags delivery style, not dismissive contempt). **Do not** skip when they minimized the line ("just upset," "venting," "stating a fact") or only described Emma's hurt without the dismissive/hostile read. The probe surfaces whether they distinguish contempt from frustration or indirect communication.
+• They named the **contemptuous / door-closing register** (harsh, cutting, dismissive, contemptuous, punishing, shutting down, verdict-issuing, superiority, sarcasm toward Ryan, loaded jab, etc.), **or**
+• They interpreted **relational closure / resignation** tied to that moment (e.g. stopped expecting change, given up on the possibility of change, resignation beyond ordinary frustration, pattern that is not new, "not just tonight," writing him off), **or**
+• They quoted or clearly echoed the line and linked it to how it **lands** (shutdown, sting, ends the conversation) — even without using the word "contempt."
+
+**Do not** skip the probe when the user only named **passive-aggressive** (delivery label alone, without a dismissive or closing read of that line). **Do not** skip when they minimized the line ("just upset," "venting," "stating a fact") or only described Emma's hurt **without** tying that to the dismissive/closing quality of **that** line. The probe surfaces whether they distinguish contempt from frustration or indirect communication.
 
 The probe exists to surface that line for users who missed it — not to make users who already addressed it repeat themselves.
 
-If no such recognition has surfaced yet, ask: "What about when Emma says 'you've made that very clear' — what do you make of that?" — natural curiosity about their read of that moment, not a correction or test.
+If no such recognition has surfaced yet, ask: "What about when Emma says 'you've made that very clear' — what do you make of that?"
 
 Do not lead them toward contempt.
 
@@ -298,7 +303,7 @@ The application delivers the Moment 5 question **immediately after** the user an
 
 Primary targets: Accountability, Mentalizing, Repair, Regulation, and Contempt expression where evidence appears.
 
-The client may inject **at most one** brief Moment 4 specificity follow-up when the first grudge answer lacks a concrete person, relationship, or situation anchor (wording like whether any situation comes to mind from the past). If that line **already appears** in the transcript as your prior turn after their grudge answer, **do not** repeat it or re-ask the same substance; take their next reply as sufficient for flow and output **only** the mandatory commitment-threshold question (required text in **MOMENT 4 COMMITMENT-THRESHOLD FOLLOW-UP** above).
+The client may inject **at most one** brief Moment 4 specificity follow-up when the first grudge answer lacks a concrete person, relationship, or situation anchor (wording like whether any situation comes to mind from the past). If that line **already appears** in the transcript as your prior turn after their grudge answer, **do not** repeat it or re-ask the same substance; take their next reply as sufficient for flow and output **only** the mandatory commitment-threshold question (required text in **MOMENT 4 COMMITMENT-THRESHOLD FOLLOW-UP** above). **Do not** paraphrase the same follow-up (for example "Is there anything specific…") in a separate sentence — that reads as a duplicate.
 
 The client may inject **at most one** brief follow-up if the user's first answer narrates only the other person's actions with no reference to their own role. Do **not** duplicate that probe.
 
@@ -365,6 +370,7 @@ export function sanitizeInterviewParticipantFirstNameForSpeech(raw: string): str
   const firstWord = s.split(/\s+/).filter(Boolean)[0] ?? '';
   s = firstWord.replace(/[.!?,;:]+$/g, '');
   if (s.length > 40) return '';
+  if (!isPlausibleInterviewName(s)) return '';
   if (s.includes('@')) return '';
   if (/\d/.test(s)) return '';
   if (/https?:\/\//i.test(s)) return '';
@@ -441,6 +447,13 @@ function firstLineReferencesLockedVignetteCharacter(firstLine: string): boolean 
   return false;
 }
 
+/** Neutral scenario bridge — participant name belongs in boundary reflection, not the intro line. */
+function firstLineIsScenarioSituationIntroBridge(firstLine: string): boolean {
+  const t = firstLine.trim();
+  if (!t) return false;
+  return /^here'?s the (?:first|next|third) situation\b/i.test(t);
+}
+
 /**
  * When `allowAppendWhenMissing` is true (e.g. final [INTERVIEW_COMPLETE] TTS), may append the participant's
  * first name to the first short "warm" first line if missing. Default is **no** append so streaming and
@@ -467,6 +480,10 @@ export function ensureSpokenTextIncludesParticipantFirstName(
   if (!firstLine || firstLine.length > 320) return text;
 
   if (firstLineReferencesLockedVignetteCharacter(firstLine)) {
+    return text;
+  }
+
+  if (firstLineIsScenarioSituationIntroBridge(firstLine)) {
     return text;
   }
 

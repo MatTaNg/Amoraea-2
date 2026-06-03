@@ -11,12 +11,22 @@ import { LongestRelationshipModal } from './LongestRelationshipModal';
 import { LocationModal } from './LocationModal';
 import { HeightWeightModal } from './HeightWeightModal';
 import { SingleChoiceModal } from './SingleChoiceModal';
-import { OccupationModal } from './OccupationModal';
+import { EthnicityOnboardingModal } from './EthnicityOnboardingModal';
 import { TypologyModal } from './TypologyModal';
+import { ArchetypesOnboardingModal } from '@/datingProfile/screens/onboarding/modals/ArchetypesOnboardingModal';
+import { normalizeArchetypesFromProfile, type ArchetypeId } from '@/shared/constants/archetypes';
 import { PhotosVideoModal } from './PhotosVideoModal';
 import { LifeDomainsModal } from './LifeDomainsModal';
+import { LifeDomainQuestionsModal } from '@/datingProfile/screens/onboarding/modals/LifeDomainQuestionsModal';
+import {
+  LIFE_DOMAIN_QUESTION_ONBOARDING_STEPS,
+  normalizeLifeDomainQuestionOnboardingStep,
+  type LifeDomainQuestionOnboardingStep,
+} from '@/shared/constants/lifeDomainOnboardingQuestions';
+import { syncLifeDomainImportanceFromOnboarding } from '@/screens/profile/editProfile/lifeDomainProfileService';
 import { MatchPreferencesModal } from './MatchPreferencesModal';
 import { AttractionPreferencesModal } from './AttractionPreferencesModal';
+import { ProfileOnboardingCompleteModal } from '@/datingProfile/screens/onboarding/ProfileOnboardingCompleteModal';
 import { SexInterestsOnboardingModal } from './SexInterestsOnboardingModal';
 import {
   workoutOptions,
@@ -70,7 +80,6 @@ export type OnboardingStep =
   | 'relationshipStyle'
   | 'longestRelationship'
   | 'location'
-  | 'occupation'
   | 'educationLevel'
   | 'heightWeight'
   | 'workout'
@@ -93,10 +102,13 @@ export type OnboardingStep =
   | 'recentDatingEarlyWeeks'
   | 'spaceForNewRelationship'
   | 'lifeDomains'
+  | LifeDomainQuestionOnboardingStep
   | 'typology'
+  | 'archetypes'
   | 'photos'
   | 'matchPreferences'
   | 'attractionPreferences'
+  | 'profileComplete'
   | 'complete';
 
 const ONBOARDING_STEPS_ORDER: OnboardingStep[] = [
@@ -108,7 +120,6 @@ const ONBOARDING_STEPS_ORDER: OnboardingStep[] = [
   'relationshipStyle',
   'longestRelationship',
   'location',
-  'occupation',
   'educationLevel',
   'heightWeight',
   'workout',
@@ -130,15 +141,20 @@ const ONBOARDING_STEPS_ORDER: OnboardingStep[] = [
   'datingPaceAfterExcitement',
   'recentDatingEarlyWeeks',
   'spaceForNewRelationship',
-  'lifeDomains',
-  'typology',
-  'photos',
   'matchPreferences',
+  'typology',
+  'archetypes',
+  'photos',
   'attractionPreferences',
+  'lifeDomains',
+  ...LIFE_DOMAIN_QUESTION_ONBOARDING_STEPS.map((s) => s.step),
+  'profileComplete',
   'complete',
 ];
 
-const TOTAL_STEPS = ONBOARDING_STEPS_ORDER.filter((s) => s !== 'complete').length;
+const TOTAL_STEPS = ONBOARDING_STEPS_ORDER.filter(
+  (s) => s !== 'complete' && s !== 'profileComplete',
+).length;
 const PARTNER_SUBSTANCE_ALIGNMENT_CHOICES = PARTNER_SUBSTANCE_ALIGNMENT_OPTIONS.map((label) => ({
   label,
   value: label,
@@ -158,7 +174,10 @@ const PARTNER_SAME_RELIGION_CHOICES = PREF_PARTNER_SAME_RELIGION_OPTIONS.map((la
 
 function OnboardingProgressBar({ currentStep }: { currentStep: OnboardingStep }) {
   const index = ONBOARDING_STEPS_ORDER.indexOf(currentStep);
-  const progress = index < 0 || currentStep === 'complete' ? 1 : (index + 1) / TOTAL_STEPS;
+  const progress =
+    index < 0 || currentStep === 'complete' || currentStep === 'profileComplete'
+      ? 1
+      : (index + 1) / TOTAL_STEPS;
   return (
     <View style={progressBarStyles.container}>
       <View style={[progressBarStyles.fill, { width: `${progress * 100}%` }]} />
@@ -204,7 +223,6 @@ export const ModalOnboardingFlow: React.FC<ModalOnboardingFlowProps> = ({ onComp
   const [onboardingData, setOnboardingData] = useState<OnboardingData>({});
   const [loading, setLoading] = useState(true);
   const isInitialLoad = React.useRef(true);
-  const didAutoExitCompleteRef = React.useRef(false);
   /** Prevents double step advances while save + profile sync run. */
   const stepTransitionLockRef = React.useRef(false);
   const [stepTransitionPending, setStepTransitionPending] = useState(false);
@@ -232,7 +250,18 @@ export const ModalOnboardingFlow: React.FC<ModalOnboardingFlowProps> = ({ onComp
         if (isMounted && progress.success && progress.data) {
           // Restore saved progress
           if (progress.data.currentStep) {
-            setCurrentStep(progress.data.currentStep as OnboardingStep);
+            const rawStep = progress.data.currentStep;
+            const normalizedStep =
+              rawStep === 'complete'
+                ? 'profileComplete'
+                : normalizeLifeDomainQuestionOnboardingStep(rawStep) ?? rawStep;
+            setCurrentStep(normalizedStep as OnboardingStep);
+            if (normalizedStep !== rawStep && user?.id) {
+              void modalOnboardingService.saveProgress(user.id, {
+                currentStep: normalizedStep,
+                onboardingData: progress.data.onboardingData ?? {},
+              });
+            }
           }
           if (progress.data.onboardingData) {
             // Update both state and ref
@@ -712,7 +741,11 @@ export const ModalOnboardingFlow: React.FC<ModalOnboardingFlowProps> = ({ onComp
             profileUpdates.myersBriggs = t.myersBriggs;
           }
         }
-        
+        const archetypesDraft = normalizeArchetypesFromProfile(newData.archetypes);
+        if (archetypesDraft.length === 2) {
+          profileUpdates.archetypes = archetypesDraft;
+        }
+
         if (Object.keys(profileUpdates).length > 0) {
           // Clear any pending profile save
           if (profileSaveTimeoutRef.current) {
@@ -1016,7 +1049,11 @@ export const ModalOnboardingFlow: React.FC<ModalOnboardingFlowProps> = ({ onComp
               profileUpdates.myersBriggs = t.myersBriggs;
             }
           }
-          
+          const archetypesStep = normalizeArchetypesFromProfile(latestData.archetypes);
+          if (archetypesStep.length === 2) {
+            profileUpdates.archetypes = archetypesStep;
+          }
+
           // Save all updates at once
           if (Object.keys(profileUpdates).length > 0) {
             console.log('Saving profile updates on step change:', {
@@ -1100,17 +1137,6 @@ export const ModalOnboardingFlow: React.FC<ModalOnboardingFlowProps> = ({ onComp
     }
   };
 
-  useEffect(() => {
-    if (loading || profileLoading) return;
-    if (currentStep !== 'complete') {
-      didAutoExitCompleteRef.current = false;
-      return;
-    }
-    if (didAutoExitCompleteRef.current) return;
-    didAutoExitCompleteRef.current = true;
-    onComplete();
-  }, [loading, profileLoading, currentStep, onComplete]);
-
   if (loading || profileLoading) {
     return (
       <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center' }}>
@@ -1122,7 +1148,7 @@ export const ModalOnboardingFlow: React.FC<ModalOnboardingFlowProps> = ({ onComp
 
   return (
     <View style={{ flex: 1 }}>
-      <OnboardingProgressBar currentStep={currentStep} />
+      {currentStep !== 'profileComplete' ? <OnboardingProgressBar currentStep={currentStep} /> : null}
       {stepTransitionPending && (
         <View style={stepTransitionStyles.overlay} accessibilityRole="progressbar" accessibilityLabel="Saving progress">
           <ActivityIndicator size="large" color="#FFFFFF" />
@@ -1148,11 +1174,19 @@ export const ModalOnboardingFlow: React.FC<ModalOnboardingFlowProps> = ({ onComp
       )}
 
       {currentStep === 'ethnicity' && (
-        <SingleChoiceModal
-          title="Ethnicity"
-          options={ETHNICITY_CHOICES}
-          value={onboardingData.ethnicity || ''}
-          onValueChange={(v) => updateData({ ethnicity: v })}
+        <EthnicityOnboardingModal
+          ethnicity={onboardingData.ethnicity || ''}
+          onEthnicityChange={(ethnicity) => updateData({ ethnicity })}
+          ethnicityAttraction={onboardingData.matchPreferences?.ethnicityAttraction as string[] | undefined}
+          onEthnicityAttractionChange={(ethnicityAttraction) =>
+            updateData({
+              matchPreferences: {
+                ...(onboardingData.matchPreferences ?? {}),
+                ethnicityAttraction,
+              },
+            })
+          }
+          heritageOptions={ETHNICITY_CHOICES}
           onNext={goToNextStep}
           onBack={goToPrevStep}
         />
@@ -1260,15 +1294,6 @@ export const ModalOnboardingFlow: React.FC<ModalOnboardingFlowProps> = ({ onComp
         />
       )}
 
-      {currentStep === 'occupation' && (
-        <OccupationModal
-          occupation={onboardingData.occupation || ''}
-          onOccupationChange={(occupation) => updateData({ occupation })}
-          onNext={goToNextStep}
-          onBack={goToPrevStep}
-        />
-      )}
-
       {currentStep === 'educationLevel' && (
         <SingleChoiceModal
           title="Education level"
@@ -1308,7 +1333,7 @@ export const ModalOnboardingFlow: React.FC<ModalOnboardingFlowProps> = ({ onComp
           options={smokingOptions}
           value={onboardingData.smoking || ''}
           onValueChange={(v) => updateData({ smoking: v })}
-          secondaryTitle="Is it a must have that your partner shares your relationship with cigarettes or tobacco?"
+          secondaryTitle="Is it a must have that your partner shares your relationship with cigarettes or vaping?"
           secondaryOptions={PARTNER_SUBSTANCE_ALIGNMENT_CHOICES}
           secondaryValue={String(onboardingData.matchPreferences?.partnerAlignmentTobacco ?? '')}
           onSecondaryValueChange={(v) =>
@@ -1598,15 +1623,52 @@ export const ModalOnboardingFlow: React.FC<ModalOnboardingFlowProps> = ({ onComp
         <LifeDomainsModal
           lifeDomains={Array.isArray(onboardingData.lifeDomains) ? undefined : onboardingData.lifeDomains}
           onLifeDomainsChange={(lifeDomains) => updateData({ lifeDomains })}
-          onNext={goToNextStep}
+          onNext={async () => {
+            const latest = onboardingDataRef.current;
+            const ld = Array.isArray(latest.lifeDomains) ? undefined : latest.lifeDomains;
+            if (user?.id && ld) {
+              try {
+                await syncLifeDomainImportanceFromOnboarding(user.id, ld);
+              } catch (e) {
+                if (__DEV__) console.warn('[ModalOnboarding] life domain importance', e);
+              }
+            }
+            goToNextStep();
+          }}
           onBack={goToPrevStep}
         />
+      )}
+
+      {LIFE_DOMAIN_QUESTION_ONBOARDING_STEPS.map(({ step, domainId }) =>
+        currentStep === step && user?.id ? (
+          <LifeDomainQuestionsModal
+            key={step}
+            userId={user.id}
+            domainId={domainId}
+            lifeDomains={
+              Array.isArray(onboardingData.lifeDomains) ? undefined : onboardingData.lifeDomains
+            }
+            initialAnswers={onboardingData.lifeDomainAnswers}
+            onAnswersChange={(lifeDomainAnswers) => updateData({ lifeDomainAnswers })}
+            onNext={goToNextStep}
+            onBack={goToPrevStep}
+          />
+        ) : null,
       )}
 
       {currentStep === 'typology' && (
         <TypologyModal
           typology={onboardingData.typology}
           onTypologyChange={(typology) => updateData({ typology })}
+          onNext={goToNextStep}
+          onBack={goToPrevStep}
+        />
+      )}
+
+      {currentStep === 'archetypes' && (
+        <ArchetypesOnboardingModal
+          archetypes={normalizeArchetypesFromProfile(onboardingData.archetypes)}
+          onArchetypesChange={(archetypes: ArchetypeId[]) => updateData({ archetypes })}
           onNext={goToNextStep}
           onBack={goToPrevStep}
         />
@@ -1657,9 +1719,13 @@ export const ModalOnboardingFlow: React.FC<ModalOnboardingFlowProps> = ({ onComp
           matchPreferences={onboardingData.matchPreferences}
           userAge={typeof profile?.age === 'number' ? profile.age : undefined}
           onMatchPreferencesChange={(matchPreferences) => updateData({ matchPreferences })}
-          onNext={handleComplete}
+          onNext={goToNextStep}
           onBack={goToPrevStep}
         />
+      )}
+
+      {currentStep === 'profileComplete' && (
+        <ProfileOnboardingCompleteModal onContinue={handleComplete} />
       )}
     </View>
   );

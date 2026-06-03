@@ -7,11 +7,17 @@
 export type AdminInterviewIntroUserFields = {
   name?: string | null;
   basic_info?: unknown;
+  /** Prefer `interview_attempts.transcript`; legacy alias kept for tests. */
+  transcript?: unknown;
   interview_transcript?: unknown;
   full_name?: string | null;
   display_name?: string | null;
   email?: string | null;
 };
+
+function transcriptForIntro(user: AdminInterviewIntroUserFields): unknown {
+  return user.transcript ?? user.interview_transcript;
+}
 
 type TranscriptLine = { role: string; content?: string };
 
@@ -52,6 +58,14 @@ function parseTranscriptLines(raw: unknown): TranscriptLine[] {
   return [];
 }
 
+function looksLikeEmailLocalPart(text: string, email?: string | null): boolean {
+  const trimmed = text.trim();
+  if (!trimmed) return false;
+  const local = email?.split('@')[0]?.trim();
+  if (local && trimmed.toLowerCase() === local.toLowerCase()) return true;
+  return false;
+}
+
 function firstUserMessageFromTranscript(transcript: unknown): string | null {
   const lines = parseTranscriptLines(transcript);
   const u = lines.find(
@@ -67,11 +81,33 @@ export function resolveAdminInterviewIntroDisplayName(user: AdminInterviewIntroU
   if (n && isPlausibleInterviewStoredName(n)) return n;
   const fromBasic = firstNameFromBasicInfo(user.basic_info);
   if (fromBasic) return fromBasic;
-  const fromTranscript = firstUserMessageFromTranscript(user.interview_transcript);
+  const fromTranscript = firstUserMessageFromTranscript(transcriptForIntro(user));
   if (fromTranscript && isPlausibleInterviewStoredName(fromTranscript)) return fromTranscript;
   const fallback =
     user.full_name?.trim() || user.display_name?.trim() || user.email?.split('@')[0]?.trim() || '';
   return fallback.length > 0 ? fallback : '—';
+}
+
+/**
+ * Participant-facing label (e.g. personal report title): interview name from greeting,
+ * then onboarding first name — never email local part or auto-filled display_name.
+ */
+export function resolveReportParticipantDisplayName(user: AdminInterviewIntroUserFields): string | null {
+  const n = user.name?.trim();
+  if (n && isPlausibleInterviewStoredName(n) && !looksLikeEmailLocalPart(n, user.email)) return n;
+  const fromBasic = firstNameFromBasicInfo(user.basic_info);
+  if (fromBasic && !looksLikeEmailLocalPart(fromBasic, user.email)) return fromBasic;
+  const fromTranscript = firstUserMessageFromTranscript(transcriptForIntro(user));
+  if (
+    fromTranscript &&
+    isPlausibleInterviewStoredName(fromTranscript) &&
+    !looksLikeEmailLocalPart(fromTranscript, user.email)
+  ) {
+    return fromTranscript;
+  }
+  const full = user.full_name?.trim();
+  if (full && isPlausibleInterviewStoredName(full) && !looksLikeEmailLocalPart(full, user.email)) return full;
+  return null;
 }
 
 /** Prefer plausible `users.name`, else same fallbacks as intro but without using transcript (list display). */

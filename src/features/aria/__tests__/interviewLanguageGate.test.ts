@@ -5,9 +5,19 @@ import {
   isNamePromptInterviewMoment,
   isScenarioModalEligibleScenarioQuestionPrompt,
   isScenarioModalExcludedAssistantPrompt,
+  isScenarioModalFollowUpProbe,
+  getLastSubstantiveScenarioModalQuestion,
+  assistantSpeechShouldRefreshScenarioModalPrompt,
+  resolveMoment4ShowScenarioReferenceCard,
+  resolveScenarioModalPromptInScope,
+  resolveScenarioModalDisplayParts,
+  extractScenarioModalQuestionFromAssistantText,
   isShortAnswerOkForWhisperRatioGate,
   isSimpleYesNoInterviewMoment,
+  looksLikeReadinessAffirmation,
+  userIsAnsweringInterviewReadinessPrompt,
   shouldFireWhisperRatioReask,
+  shouldRecordInterviewResponseTiming,
 } from '../interviewLanguageGate';
 
 describe('isNamePromptInterviewMoment', () => {
@@ -27,6 +37,26 @@ describe('isNamePromptInterviewMoment', () => {
   });
 });
 
+describe('shouldRecordInterviewResponseTiming', () => {
+  it('excludes greeting and preamble turns', () => {
+    expect(shouldRecordInterviewResponseTiming("Hi, I'm Amoraea. What can I call you?")).toBe(
+      false,
+    );
+    expect(
+      shouldRecordInterviewResponseTiming(
+        'Good to meet you, Matt. The way this works is we will go through five parts… Are you ready?',
+      ),
+    ).toBe(false);
+    expect(shouldRecordInterviewResponseTiming('Are you ready to begin?')).toBe(false);
+  });
+
+  it('includes substantive scenario questions', () => {
+    expect(
+      shouldRecordInterviewResponseTiming('If you were Ryan, how would you repair this situation?'),
+    ).toBe(true);
+  });
+});
+
 describe('isSimpleYesNoInterviewMoment', () => {
   it('does not match scenario reassurance copy merely because it contains "yes" or "no"', () => {
     expect(
@@ -40,6 +70,39 @@ describe('isSimpleYesNoInterviewMoment', () => {
 
   it('matches readiness prompts', () => {
     expect(isSimpleYesNoInterviewMoment('Are you ready to begin?')).toBe(true);
+  });
+});
+
+describe('looksLikeReadinessAffirmation', () => {
+  it('matches common readiness assents', () => {
+    expect(looksLikeReadinessAffirmation('Yes')).toBe(true);
+    expect(looksLikeReadinessAffirmation('Yeah.')).toBe(true);
+    expect(looksLikeReadinessAffirmation("I'm ready")).toBe(true);
+    expect(looksLikeReadinessAffirmation("Let's go")).toBe(true);
+  });
+
+  it('rejects declines and long answers', () => {
+    expect(looksLikeReadinessAffirmation('No')).toBe(false);
+    expect(looksLikeReadinessAffirmation('Not yet')).toBe(false);
+    expect(
+      looksLikeReadinessAffirmation(
+        'Yes I am ready to begin the interview now and I have privacy',
+      ),
+    ).toBe(false);
+  });
+});
+
+describe('userIsAnsweringInterviewReadinessPrompt', () => {
+  it('detects briefing and readiness prompts from refs or transcript', () => {
+    expect(
+      userIsAnsweringInterviewReadinessPrompt([
+        "Good to meet you, Max. The way this works is I'll give you three situations. Are you ready?",
+      ]),
+    ).toBe(true);
+    expect(userIsAnsweringInterviewReadinessPrompt(['Are you ready?'])).toBe(true);
+    expect(
+      userIsAnsweringInterviewReadinessPrompt(["What's going on between these two?"]),
+    ).toBe(false);
   });
 });
 
@@ -194,6 +257,154 @@ describe('isScenarioModalExcludedAssistantPrompt', () => {
   });
 });
 
+describe('isScenarioModalFollowUpProbe', () => {
+  it('flags elongating and clarification probes', () => {
+    expect(isScenarioModalFollowUpProbe('Can you say more about that?')).toBe(true);
+    expect(isScenarioModalFollowUpProbe('Just say whatever comes to mind.')).toBe(true);
+    expect(isScenarioModalFollowUpProbe('Take your time — just say whatever comes to mind.')).toBe(true);
+  });
+
+  it('does not flag substantive scenario questions', () => {
+    expect(
+      isScenarioModalFollowUpProbe(
+        "When Ryan takes a call from his mother during dinner — what's going on for Emma?"
+      )
+    ).toBe(false);
+  });
+});
+
+describe('getLastSubstantiveScenarioModalQuestion', () => {
+  it('skips probe after user thin answer (Nancy-style transcript)', () => {
+    const emmaQuestion =
+      "When Ryan takes a call from his mother during dinner with Emma, and Emma says she is done — what do you think is going on for Emma?";
+    const transcript = [
+      { role: 'assistant', content: emmaQuestion },
+      { role: 'user', content: 'She is upset about boundaries.' },
+      { role: 'assistant', content: 'Can you say more about that?' },
+      { role: 'user', content: 'Thank you.' },
+      { role: 'assistant', content: 'Good — and what would you want Ryan to do differently?' },
+    ];
+    expect(getLastSubstantiveScenarioModalQuestion(transcript)).toBe(
+      'Good — and what would you want Ryan to do differently?'
+    );
+    const transcriptProbeLast = transcript.slice(0, 4);
+    expect(getLastSubstantiveScenarioModalQuestion(transcriptProbeLast)).toBe(emmaQuestion);
+  });
+
+  it('keeps compound transition turns that introduce the next scenario question', () => {
+    const compound =
+      "That's the end of this scenario — Nice work. Here's the next situation:\n\nSarah has been job hunting for four months. She gets an offer and calls James from the street, too emotional to go inside. What's going on for Sarah?";
+    const transcript = [
+      { role: 'assistant', content: 'What do you think James should do first?' },
+      { role: 'user', content: 'Listen.' },
+      { role: 'assistant', content: compound },
+    ];
+    expect(getLastSubstantiveScenarioModalQuestion(transcript)).toBe(
+      "What's going on for Sarah?"
+    );
+  });
+
+  it('resolveScenarioModalPromptInScope uses current situation opening, not prior repair question', () => {
+    const detect = (c: string) => {
+      if (c.includes('Sarah has been job hunting')) return { label: 'Situation 2' };
+      if (c.includes('Emma and Ryan')) return { label: 'Situation 1' };
+      return null;
+    };
+    const transcript = [
+      { role: 'assistant', content: 'What if you were Ryan? How would you repair this situation?' },
+      { role: 'user', content: 'Apologize and set boundaries.' },
+      {
+        role: 'assistant',
+        content:
+          "That's the end of this scenario — nice work. Here's the next situation:\n\nSarah has been job hunting for four months. She gets an offer and calls James from the street.",
+      },
+    ];
+    expect(
+      resolveScenarioModalPromptInScope(transcript, {
+        scenarioLabel: 'Situation 2',
+        detectScenarioFromContent: detect,
+        openingQuestionForLabel: (label) =>
+          label === 'Situation 2' ? 'What do you think is going on here?' : null,
+      })
+    ).toBe('What do you think is going on here?');
+    expect(getLastSubstantiveScenarioModalQuestion(transcript)).toBe(
+      'How would you repair this situation?'
+    );
+  });
+
+  it('skips pure transition closings without a question', () => {
+    const transcript = [
+      { role: 'assistant', content: 'How would you repair this if you were Ryan?' },
+      { role: 'user', content: 'Apologize and set boundaries.' },
+      {
+        role: 'assistant',
+        content: "That's the end of this scenario — nice work, you focused on boundaries.",
+      },
+    ];
+    expect(getLastSubstantiveScenarioModalQuestion(transcript)).toBe(
+      'How would you repair this if you were Ryan?'
+    );
+  });
+});
+
+describe('assistantSpeechShouldRefreshScenarioModalPrompt', () => {
+  it('returns true for accountability and repair follow-ups', () => {
+    expect(
+      assistantSpeechShouldRefreshScenarioModalPrompt(
+        'What could James have done differently before the fight?'
+      )
+    ).toBe(true);
+    expect(
+      assistantSpeechShouldRefreshScenarioModalPrompt('If you were James, how would you repair this situation?')
+    ).toBe(true);
+  });
+
+  it('returns false for elongating probes', () => {
+    expect(assistantSpeechShouldRefreshScenarioModalPrompt('Can you say more about that?')).toBe(false);
+  });
+});
+
+describe('resolveScenarioModalDisplayParts', () => {
+  const vignette =
+    "Emma and Ryan have dinner plans. Ryan takes a call from his mother halfway through. It runs 25 minutes. Emma pays the bill but seems flustered. Later Ryan asks what's wrong. Emma says 'I just think you always put your family first before us.' Ryan says 'I can't just ignore my mother.' Emma says 'I know, you've made that very clear.'";
+  const opening = "What's going on between these two?";
+
+  it('splits combined vignette+question into transcript and footer', () => {
+    expect(resolveScenarioModalDisplayParts(`${vignette}\n\n${opening}`, null)).toEqual({
+      transcript: vignette,
+      footerQuestion: opening,
+    });
+  });
+
+  it('strips footer question from body when prompt is provided separately', () => {
+    expect(resolveScenarioModalDisplayParts(`${vignette}\n\n${opening}`, opening)).toEqual({
+      transcript: vignette,
+      footerQuestion: opening,
+    });
+  });
+
+  it('footer shows only the question when vignette dialogue was wrongly included in prompt', () => {
+    const bloatedPrompt = `${vignette.slice(vignette.indexOf("Emma says"))} ${opening}`;
+    expect(resolveScenarioModalDisplayParts(vignette, bloatedPrompt)).toEqual({
+      transcript: vignette,
+      footerQuestion: opening,
+    });
+  });
+
+  it('extractScenarioModalQuestionFromAssistantText skips vignette dialogue before opening', () => {
+    const inline = `${vignette} ${opening}`;
+    expect(extractScenarioModalQuestionFromAssistantText(inline)).toBe(opening);
+  });
+
+  it('keeps question-only body in the scroll area with no footer (Moment 4/5)', () => {
+    const questionOnly = 'Have you ever held a grudge against someone?';
+    expect(resolveScenarioModalDisplayParts(questionOnly, null)).toEqual({
+      transcript: questionOnly,
+      footerQuestion: null,
+    });
+  });
+});
+
 describe('isScenarioModalEligibleScenarioQuestionPrompt', () => {
   it('accepts typical scenario follow-ups', () => {
     expect(
@@ -201,6 +412,10 @@ describe('isScenarioModalEligibleScenarioQuestionPrompt', () => {
         'And if you were James, how would you repair?'
       )
     ).toBe(true);
+  });
+
+  it('rejects elongating probes even when they contain a question mark', () => {
+    expect(isScenarioModalEligibleScenarioQuestionPrompt('Can you say more about that?')).toBe(false);
   });
 
   it('rejects infra copy even when it contains a question mark', () => {
@@ -219,5 +434,66 @@ describe('isScenarioModalEligibleScenarioQuestionPrompt', () => {
 
   it('rejects name-collection prompts', () => {
     expect(isScenarioModalEligibleScenarioQuestionPrompt("Hi, I'm Amoraea. What can I call you?")).toBe(false);
+  });
+});
+
+describe('resolveMoment4ShowScenarioReferenceCard', () => {
+  const grudgeCardBody =
+    "Have you ever held a grudge against someone, or had someone in your life you really didn't like? How did that happen, and where are you with it now?";
+  const grudgeHandoff =
+    "Now we'll shift to something more personal. Have you ever held a grudge against someone, or had someone in your life you really didn't like?";
+  const thresholdProbe =
+    'Thanks for sharing that. At what point do you decide when a relationship is something to work through versus something you need to walk away from?';
+  const situation3Repair = 'How would you repair this situation if you were Daniel?';
+
+  it('replaces grudge card with walk-away question in card body (client inject path)', () => {
+    const transcript = [
+      { role: 'assistant', content: situation3Repair },
+      { role: 'assistant', content: grudgeHandoff },
+      { role: 'user', content: 'I had a grudge with my friend.' },
+    ];
+    const resolved = resolveMoment4ShowScenarioReferenceCard(transcript, {
+      grudgeCardBody,
+      currentSpokenContent: thresholdProbe,
+    });
+    expect(resolved).toEqual({
+      active: true,
+      cardBodyText:
+        'At what point do you decide when a relationship is something to work through versus something you need to walk away from?',
+    });
+  });
+
+  it('returns inactive for fiction-only transcript', () => {
+    expect(
+      resolveMoment4ShowScenarioReferenceCard(
+        [{ role: 'assistant', content: situation3Repair }],
+        { grudgeCardBody },
+      ),
+    ).toEqual({ active: false });
+  });
+
+  it('uses grudge card body during grudge-only phase', () => {
+    expect(
+      resolveMoment4ShowScenarioReferenceCard([{ role: 'assistant', content: grudgeHandoff }], {
+        grudgeCardBody,
+      }),
+    ).toEqual({ active: true, cardBodyText: grudgeCardBody });
+  });
+
+  it('returns inactive when a later Moment 5 conflict anchor is in the transcript', () => {
+    const m5 =
+      'Think of a time when you had a conflict with someone important to you. What happened, and how did things get resolved between you two?';
+    const threshold =
+      'Thanks for sharing that. At what point do you decide when a relationship is something to work through versus something you need to walk away from?';
+    expect(
+      resolveMoment4ShowScenarioReferenceCard(
+        [
+          { role: 'assistant', content: threshold },
+          { role: 'user', content: 'When trust is gone I leave.' },
+          { role: 'assistant', content: m5 },
+        ],
+        { grudgeCardBody },
+      ),
+    ).toEqual({ active: false });
   });
 });

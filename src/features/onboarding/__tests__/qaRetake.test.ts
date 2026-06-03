@@ -58,7 +58,6 @@ describe('qaRetake', () => {
       const update = jest.fn((payload: Record<string, unknown>) => {
         expect(payload).toEqual({
           interview_completed: false,
-          interview_last_checkpoint: 0,
           interview_attempt_count: 3,
           latest_attempt_id: null,
         });

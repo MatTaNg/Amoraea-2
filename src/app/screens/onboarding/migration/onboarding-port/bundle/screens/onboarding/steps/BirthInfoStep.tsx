@@ -1,5 +1,5 @@
 import React from "react";
-import { View, Text, TouchableOpacity } from "react-native";
+import { View, Text, TouchableOpacity, ActivityIndicator } from "react-native";
 import { handleApiError } from "@/shared/utils/errorHandling";
 import { Button } from "@/shared/ui/Button";
 import { Input } from "@/shared/ui/Input";
@@ -7,6 +7,7 @@ import { DatePicker, TimePicker } from "@/shared/components/DatePicker";
 import { styles } from "../ProfileBuilderScreen.styled";
 import { useProfile } from "@/shared/hooks/useProfile";
 import { useLocationAutocomplete } from "@/shared/hooks/useLocationAutocomplete";
+import { theme } from "@/shared/theme/theme";
 import { calculateAgeFromBirthdate } from "@/shared/utils/ageCalculator";
 
 interface BirthInfoStepProps {
@@ -48,11 +49,11 @@ export const BirthInfoStep: React.FC<BirthInfoStepProps> = ({
 }) => {
   const { updateProfile } = useProfile();
 
-  // Use location autocomplete hook
-  useLocationAutocomplete({
+  const { isSearchingPlaces: birthLocationPlacesLoading } = useLocationAutocomplete({
     value: birthLocation,
     validatedValue: validatedBirthLocation,
     onSuggestionsChange: onBirthLocationSuggestionsChange,
+    minLength: 3,
   });
 
   const handleContinue = async () => {
@@ -124,6 +125,12 @@ export const BirthInfoStep: React.FC<BirthInfoStepProps> = ({
         placeholder="City, State/Country (e.g., New York, NY or London, UK)"
         keyboardType="default"
       />
+      {birthLocationPlacesLoading ? (
+        <View style={styles.placeSearchLoadingRow}>
+          <ActivityIndicator size="small" color={theme.colors.primary} />
+          <Text style={styles.placeSearchLoadingText}>Looking up places…</Text>
+        </View>
+      ) : null}
       {showErrors && !birthLocation.trim() ? (
         <Text style={styles.error}>Birth location is required</Text>
       ) : null}

@@ -141,8 +141,7 @@ export const BasicInfoStep: React.FC<BasicInfoStepProps> = ({
     onDistanceRangeMaxChange: handlers.onDistanceRangeMaxChange,
   });
 
-  // Use location autocomplete hook
-  useLocationAutocomplete({
+  void useLocationAutocomplete({
     value: location,
     validatedValue: validatedLocation,
     onSuggestionsChange: handlers.onLocationSuggestionsChange,
@@ -220,6 +219,7 @@ export const BasicInfoStep: React.FC<BasicInfoStepProps> = ({
         onLocationSuggestionSelect={handleLocationSuggestionSelect}
         onUseMyLocation={handleUseMyLocation}
         validatedLocation={validatedLocation}
+        showOccupation={false}
       />
 
       {/* Availability and Contact Info Button */}

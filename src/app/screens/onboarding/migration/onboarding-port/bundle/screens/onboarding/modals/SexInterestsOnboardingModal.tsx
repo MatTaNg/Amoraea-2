@@ -1,14 +1,16 @@
-import React, { useCallback, useEffect } from "react";
-import { View, Text, ScrollView } from "react-native";
-import { SafeAreaView } from "react-native-safe-area-context";
-import { Button } from "@/shared/ui/Button";
-import { OnboardingHeader } from "./components/OnboardingHeader";
-import { SexInterestCheckboxList } from "@/shared/components/profileFields/SexInterestCheckboxList";
-import { SingleChoiceOptionList } from "@/shared/components/profileFields/SingleChoiceOptionList";
+import React, { useCallback, useEffect } from 'react';
+import { View, Text, ScrollView } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
+import { Button } from '@/shared/ui/Button';
+import { OnboardingHeader } from './components/OnboardingHeader';
+import { SexInterestCheckboxList } from '@/shared/components/profileFields/SexInterestCheckboxList';
 import {
-  PREF_PARTNER_SHARES_SEXUAL_INTERESTS_OPTIONS,
-} from "@/shared/constants/sexualCompatibilityOptions";
-import { styles } from "./SexualCompatibilityModal.styled";
+  PREF_PARTNER_SHARES_SPECIFIC_SEX_INTERESTS_QUESTION,
+  PARTNER_SPECIFIC_SEX_MUST_HAVE_YES_NO_OPTIONS,
+  prefPartnerSharesSexualInterestsFromYesNo,
+  prefPartnerSharesSexualInterestsYesNoSelected,
+} from '@/shared/constants/sexualCompatibilityOptions';
+import { styles } from './SexualCompatibilityModal.styled';
 
 interface Props {
   categories: string[];
@@ -19,10 +21,18 @@ interface Props {
   onBack: () => void;
 }
 
-const PARTNER_SHARES_SEXUAL_INTERESTS_CHOICES = PREF_PARTNER_SHARES_SEXUAL_INTERESTS_OPTIONS.map((label) => ({
-  label,
-  value: label,
-}));
+function renderMustHaveHighlight(text: string) {
+  const phrase = 'must have';
+  const index = text.indexOf(phrase);
+  if (index < 0) return text;
+  return (
+    <>
+      {text.slice(0, index)}
+      <Text style={styles.mustHaveEmphasis}>{phrase}</Text>
+      {text.slice(index + phrase.length)}
+    </>
+  );
+}
 
 export const SexInterestsOnboardingModal: React.FC<Props> = ({
   categories,
@@ -44,13 +54,21 @@ export const SexInterestsOnboardingModal: React.FC<Props> = ({
     },
     [onCategoriesChange],
   );
+
+  const yesNoSelected = prefPartnerSharesSexualInterestsYesNoSelected(prefPartnerSharesSexualInterests);
+  const yesNoAsArray = yesNoSelected ? [yesNoSelected] : [];
+
   const canContinue =
-    (categories?.length ?? 0) === 1 && prefPartnerSharesSexualInterests.trim() !== "";
+    (categories?.length ?? 0) === 1 && prefPartnerSharesSexualInterests.trim() !== '';
 
   return (
-    <SafeAreaView style={styles.screen} edges={["top", "left", "right"]}>
+    <SafeAreaView style={styles.screen} edges={['top', 'left', 'right']}>
       <OnboardingHeader title="Sexual interests" onBack={onBack} />
-      <ScrollView style={styles.scroll} contentContainerStyle={styles.scrollContent} keyboardShouldPersistTaps="handled">
+      <ScrollView
+        style={styles.scroll}
+        contentContainerStyle={styles.scrollContent}
+        keyboardShouldPersistTaps="handled"
+      >
         <View style={styles.container}>
           <Text style={styles.question}>Sexual interests (select one)</Text>
           <SexInterestCheckboxList
@@ -59,16 +77,20 @@ export const SexInterestsOnboardingModal: React.FC<Props> = ({
             onChange={onUserPickCategories}
           />
           <Text style={styles.dealbreakerQuestion}>
-            Is it a <Text style={{ fontWeight: "800" }}>must have</Text> that your partner share the same sexual interests as you?
+            {renderMustHaveHighlight(PREF_PARTNER_SHARES_SPECIFIC_SEX_INTERESTS_QUESTION)}
           </Text>
-          <SingleChoiceOptionList
-            options={PARTNER_SHARES_SEXUAL_INTERESTS_CHOICES}
-            value={prefPartnerSharesSexualInterests}
-            onSelect={onPrefPartnerSharesSexualInterestsChange}
+          <SexInterestCheckboxList
+            singleSelect
+            options={PARTNER_SPECIFIC_SEX_MUST_HAVE_YES_NO_OPTIONS}
+            selected={yesNoAsArray}
+            onChange={(next) => {
+              const v = next[0] ?? '';
+              onPrefPartnerSharesSexualInterestsChange(prefPartnerSharesSexualInterestsFromYesNo(v));
+            }}
           />
         </View>
       </ScrollView>
-      <SafeAreaView style={styles.footer} edges={["bottom", "left", "right"]}>
+      <SafeAreaView style={styles.footer} edges={['bottom', 'left', 'right']}>
         <View style={styles.btnRow}>
           <Button title="Back" variant="outline" onPress={onBack} style={styles.backBtn} />
           <Button title="Next" onPress={onNext} disabled={!canContinue} style={styles.nextBtn} />

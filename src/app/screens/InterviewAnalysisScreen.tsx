@@ -16,6 +16,7 @@ import * as Clipboard from 'expo-clipboard';
 import { SafeAreaContainer } from '@ui/components/SafeAreaContainer';
 import { UserCommunicationStyleSection } from '@ui/components/UserCommunicationStyleSection';
 import { supabase } from '@data/supabase/client';
+import { INTERVIEW_ANALYSIS_ATTEMPT_SELECT } from '@data/supabase/tableSelects';
 import { waitForInterviewAttemptScoringReady } from '@utilities/waitForInterviewAttemptScoringReady';
 import { FlameOrb } from '@app/screens/FlameOrb';
 
@@ -309,7 +310,7 @@ export function InterviewAnalysisScreen({
       if (cancelled) return;
       const { data, error } = await supabase
         .from('interview_attempts')
-        .select('*')
+        .select(INTERVIEW_ANALYSIS_ATTEMPT_SELECT)
         .eq('id', attemptId)
         .single();
       if (!cancelled && !error && data) setAttempt(data as AttemptRow);

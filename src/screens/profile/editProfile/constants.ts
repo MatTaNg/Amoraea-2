@@ -15,8 +15,8 @@ export const PREF_PARTNER_HAS_CHILDREN_OPTIONS: string[] = [
 
 /** Political alignment — onboarding BottomSheet string options. */
 export const PREF_PARTNER_POLITICAL_SHARING_OPTIONS: string[] = [
-  'Yes — matters a lot',
-  'No — not important',
+  'Yes',
+  'No',
 ];
 
 export const PREF_DEALBREAKER_CHILDREN_OPTIONS: string[] = [
@@ -65,3 +65,12 @@ export const PREF_LIFESTYLE_OPTIONS: string[] = [
 ];
 
 export const PREF_RELOCATION_OPTIONS: string[] = ['Yes', 'No'];
+
+/** Partner height dynamic — onboarding AttractionPreferencesModal / edit profile. */
+export const PREF_HEIGHT_DYNAMIC_OPTIONS: string[] = [
+  'Much taller than me',
+  'Slightly taller than me',
+  'Around my height',
+  'Shorter than me',
+  'No strong preference',
+];

@@ -13,6 +13,21 @@ jest.mock('@data/supabase/client', () => ({
           })),
         };
       }
+      if (table === 'users') {
+        return {
+          select: jest.fn(() => ({
+            in: jest.fn(() =>
+              Promise.resolve({
+                data: [
+                  { id: 'a', psychometrics_sexual_communication_score: 4.2 },
+                  { id: 'b', psychometrics_sexual_communication_score: 4.0 },
+                ],
+                error: null,
+              })
+            ),
+          })),
+        };
+      }
       return {
         select: jest.fn(() => ({
           eq: jest.fn(() => ({
@@ -69,6 +84,26 @@ describe('CompatibilityUseCase', () => {
       dealbreakerMultiplier: 1,
     });
     expect(score).toBeCloseTo(1, 12);
+  });
+
+  it('computeCombinedCompatibilityScoreForPair applies sexual communication adjustment', async () => {
+    const withoutAdj = useCase.computeCombinedCompatibilityScore({
+      attachmentScore: 0.8,
+      valuesScore: 0.8,
+      semanticScore: 0.8,
+      styleScore: 0.8,
+      styleConfidence: 1,
+      dealbreakerMultiplier: 1,
+    });
+    const withAdj = await useCase.computeCombinedCompatibilityScoreForPair('a', 'b', {
+      attachmentScore: 0.8,
+      valuesScore: 0.8,
+      semanticScore: 0.8,
+      styleScore: 0.8,
+      styleConfidence: 1,
+      dealbreakerMultiplier: 1,
+    });
+    expect(withAdj).toBeCloseTo(withoutAdj + 0.03, 5);
   });
 
   it('computeStyleCompatibility returns neutral style when profiles are missing (Supabase empty)', async () => {

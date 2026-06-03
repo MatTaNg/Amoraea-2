@@ -1,10 +1,11 @@
-import React, { useEffect, Suspense, lazy, useMemo } from 'react';
+import React, { useCallback, useEffect, useState, Suspense, lazy, useMemo, useRef } from 'react';
 import { Platform } from 'react-native';
 import {
   NavigationContainer,
   DarkTheme,
   getStateFromPath as getStateFromPathDefault,
   type LinkingOptions,
+  type NavigationState,
 } from '@react-navigation/native';
 import * as ExpoLinking from 'expo-linking';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
@@ -19,19 +20,29 @@ import { PostInterviewFailedScreen } from '@app/screens/onboarding/PostInterview
 import { DatingProfileOnboardingNavigator } from '@app/navigation/DatingProfileOnboardingNavigator';
 import { DatingProfileEditScreen } from '@app/screens/DatingProfileEditScreen';
 import { PostInterviewProcessingScreen } from '@app/screens/onboarding/PostInterviewProcessingScreen';
+import { PostInterviewSexualCommunicationScreen } from '@app/screens/onboarding/PostInterviewSexualCommunicationScreen';
+import { POST_INTERVIEW_BG } from '@app/screens/onboarding/PostInterviewScrollLayout';
+import { PsychometricAssessmentScreen } from '@app/screens/PsychometricAssessmentScreen';
 import { isAmoraeaAdminConsoleEmail } from '@/constants/adminConsole';
 import {
-  evaluateStandardPostInterviewRevealWithUsersPassedFallback,
-  standardPostInterviewRouteFromReveal,
+  resolveStandardPostInterviewStackRoute,
 } from '@utilities/postInterviewProcessingGate';
-import { fetchInterviewAttemptRevealSnapshot } from '@utilities/fetchInterviewAttemptRevealSnapshot';
+import {
+  fetchInterviewAttemptRevealSnapshot,
+  fetchUserInterviewRevealPollRow,
+} from '@utilities/fetchInterviewAttemptRevealSnapshot';
+import {
+  resolveInitialInterviewRoute,
+  type InterviewStackRoute,
+} from '@features/psychometrics/resolveInitialInterviewRoute';
 import { OnboardingHeader } from './src/ui/components/OnboardingHeader';
 import { ProfileRepository } from './src/data/repositories/ProfileRepository';
 import { InviteCodeRepository } from './src/data/repositories/InviteCodeRepository';
 import { OnboardingUseCase } from './src/domain/useCases/OnboardingUseCase';
 import { AsyncStorageService } from './src/utilities/storage/AsyncStorageService';
 import { supabase } from './src/data/supabase/client';
-import { useQuery } from '@tanstack/react-query';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { MarketResearchModal } from '@features/onboarding/MarketResearchModal';
 import { StyleSheet, View, Text, ActivityIndicator } from 'react-native';
 import {
   initAudosFromEnv,
@@ -95,25 +106,37 @@ const AuthNavigator = () => (
   </Stack.Navigator>
 );
 
+const POST_INTERVIEW_STACK_SCREEN_OPTIONS = {
+  headerShown: true,
+  header: () => <OnboardingHeader variant="dark" />,
+  contentStyle: { flex: 1, backgroundColor: POST_INTERVIEW_BG },
+} as const;
+
 /** Logged-in experience: AI interview only, plus PostInterview for non-admin completion handoff. */
 const InterviewAppNavigator = ({
   userId,
   initialRouteName,
+  interviewAlreadyCompleted,
+  needsMarketResearch,
 }: {
   userId: string;
-  initialRouteName:
-    | 'Aria'
-    | 'PostInterview'
-    | 'PostInterviewProcessing'
-    | 'PostInterviewPassed'
-    | 'PostInterviewFailed';
+  initialRouteName: InterviewStackRoute;
+  interviewAlreadyCompleted: boolean;
+  needsMarketResearch: boolean;
 }) => (
   <Stack.Navigator
+    key={userId}
     initialRouteName={initialRouteName}
     screenOptions={{
       title: '',
     }}
   >
+    <Stack.Screen
+      name="PsychometricAssessment"
+      component={PsychometricAssessmentScreen as unknown as React.ComponentType<Record<string, never>>}
+      initialParams={{ userId, interviewAlreadyCompleted, needsMarketResearch }}
+      options={{ headerShown: false }}
+    />
     <Stack.Screen
       name="Aria"
       component={AriaScreenWithSuspense}
@@ -124,37 +147,31 @@ const InterviewAppNavigator = ({
       name="PostInterview"
       component={PostInterviewScreen as unknown as React.ComponentType<Record<string, never>>}
       initialParams={{ userId }}
-      options={{
-        headerShown: true,
-        header: () => <OnboardingHeader variant="dark" />,
-      }}
+      options={POST_INTERVIEW_STACK_SCREEN_OPTIONS}
     />
     <Stack.Screen
       name="PostInterviewProcessing"
       component={PostInterviewProcessingScreen as unknown as React.ComponentType<Record<string, never>>}
       initialParams={{ userId }}
-      options={{
-        headerShown: true,
-        header: () => <OnboardingHeader variant="dark" />,
-      }}
+      options={POST_INTERVIEW_STACK_SCREEN_OPTIONS}
     />
     <Stack.Screen
       name="PostInterviewPassed"
       component={PostInterviewPassedScreen as unknown as React.ComponentType<Record<string, never>>}
       initialParams={{ userId }}
-      options={{
-        headerShown: true,
-        header: () => <OnboardingHeader variant="dark" />,
-      }}
+      options={POST_INTERVIEW_STACK_SCREEN_OPTIONS}
     />
     <Stack.Screen
       name="PostInterviewFailed"
       component={PostInterviewFailedScreen as unknown as React.ComponentType<Record<string, never>>}
       initialParams={{ userId }}
-      options={{
-        headerShown: true,
-        header: () => <OnboardingHeader variant="dark" />,
-      }}
+      options={POST_INTERVIEW_STACK_SCREEN_OPTIONS}
+    />
+    <Stack.Screen
+      name="PostInterviewSexualCommunication"
+      component={PostInterviewSexualCommunicationScreen as unknown as React.ComponentType<Record<string, never>>}
+      initialParams={{ userId }}
+      options={POST_INTERVIEW_STACK_SCREEN_OPTIONS}
     />
     <Stack.Screen name="DatingProfileOnboarding" options={{ headerShown: false }}>
       {(props) => (
@@ -176,11 +193,79 @@ const InterviewAppNavigator = ({
 );
 
 async function fetchStandardPostInterviewDeferralSnapshot(userId: string) {
-  return fetchInterviewAttemptRevealSnapshot(userId);
+  const [snap, userRow] = await Promise.all([
+    fetchInterviewAttemptRevealSnapshot(userId),
+    fetchUserInterviewRevealPollRow(userId),
+  ]);
+  return { snap, userRow };
 }
 
-const AppNavigator = ({ userId }: { userId: string }) => {
+
+function isTerminalPostInterviewRoute(
+  route: InterviewStackRoute | null | undefined,
+): route is 'PostInterviewPassed' | 'PostInterviewFailed' {
+  return route === 'PostInterviewPassed' || route === 'PostInterviewFailed';
+}
+
+function buildInterviewStackInitialState(
+  initialRouteName: InterviewStackRoute,
+  userId: string,
+  interviewAlreadyCompleted: boolean,
+  needsMarketResearch: boolean,
+): NavigationState {
+  const params =
+    initialRouteName === 'PsychometricAssessment'
+      ? { userId, interviewAlreadyCompleted, needsMarketResearch }
+      : { userId };
+  return {
+    stale: false,
+    type: 'stack',
+    key: `interview-stack-${userId}`,
+    index: 0,
+    routeNames: [
+      'PsychometricAssessment',
+      'Aria',
+      'PostInterview',
+      'PostInterviewProcessing',
+      'PostInterviewPassed',
+      'PostInterviewFailed',
+      'PostInterviewSexualCommunication',
+      'DatingProfileOnboarding',
+      'DatingProfileEdit',
+    ],
+    routes: [{ key: `${initialRouteName}-0`, name: initialRouteName, params }],
+  } as NavigationState;
+}
+
+function createInterviewStackLinking(
+  preferredRoute: InterviewStackRoute | undefined,
+): LinkingOptions<Record<string, unknown>> | undefined {
+  if (Platform.OS !== 'web') {
+    return undefined;
+  }
+  const prefixes = [
+    ...(typeof window !== 'undefined' ? [`${window.location.protocol}//${window.location.host}`] : []),
+    ExpoLinking.createURL('/'),
+  ];
+  return {
+    prefixes,
+    config: { screens: INTERVIEW_STACK_LINKING_SCREENS as Record<string, string | Record<string, unknown>> },
+    getStateFromPath(path: string, options: Parameters<typeof getStateFromPathDefault>[1]) {
+      const mapped = mapInterviewStackPath(path);
+      if (preferredRoute && shouldRedirectWebPathToPreferredRoute(path, preferredRoute)) {
+        const preferredPath = INTERVIEW_STACK_ROUTE_PATH[preferredRoute];
+        return getStateFromPathDefault(preferredPath, options);
+      }
+      return getStateFromPathDefault(mapped, options);
+    },
+  };
+}
+
+const LoggedInInterviewShell = ({ userId }: { userId: string }) => {
+  const queryClient = useQueryClient();
   const { user } = useAuth();
+  const lockedPostInterviewRouteRef = useRef<InterviewStackRoute | null>(null);
+  const [marketResearchDismissed, setMarketResearchDismissed] = useState(false);
   const { data: profile, isPending, isError } = useQuery({
     queryKey: ['profile', userId],
     queryFn: async () => {
@@ -207,17 +292,34 @@ const AppNavigator = ({ userId }: { userId: string }) => {
   });
 
   const isAdminEmail = isAmoraeaAdminConsoleEmail(user?.email);
-  const isStandardPostInterviewCohort = !!profile && !profile.isAlphaTester && !isAdminEmail;
-  const hasDefinitiveGateInProfile = !!profile && (profile.interviewPassed || profile.interviewFailed);
-  const shouldStartOnPostInterviewFlow =
-    !!profile && isStandardPostInterviewCohort && (profile.interviewCompleted || hasDefinitiveGateInProfile);
+
+  const profileShowsStandardInterviewComplete =
+    profile?.interviewCompleted === true && !isAdminEmail;
+
+  const { data: initialRoute, isPending: initialRoutePending } = useQuery({
+    queryKey: ['initialInterviewRoute', userId],
+    queryFn: () => resolveInitialInterviewRoute(userId),
+    enabled: !!userId,
+    staleTime: 0,
+  });
+
+  const needsPostInterviewDeferralSnapshot =
+    initialRoute?.screen === 'PostInterviewProcessing' ||
+    initialRoute?.screen === 'PostInterviewPassed' ||
+    initialRoute?.screen === 'PostInterviewFailed' ||
+    initialRoute?.screen === 'PostInterview' ||
+    profileShowsStandardInterviewComplete;
 
   const { data: deferralAttempt, isPending: deferralPending } = useQuery({
     queryKey: ['standardPostInterviewDeferral', userId],
     queryFn: () => fetchStandardPostInterviewDeferralSnapshot(userId),
-    enabled: !!userId && shouldStartOnPostInterviewFlow,
+    enabled: !!userId && needsPostInterviewDeferralSnapshot,
     staleTime: 0,
   });
+
+  useEffect(() => {
+    lockedPostInterviewRouteRef.current = null;
+  }, [userId]);
 
   useEffect(() => {
     if (userId) {
@@ -225,44 +327,128 @@ const AppNavigator = ({ userId }: { userId: string }) => {
     }
   }, [userId]);
 
-  if (isPending) {
-    return <LoadingScreen />;
-  }
-  if (isError) {
-    return <LoadingScreen />;
-  }
-  if (!profile) {
+  const showMarketResearch =
+    initialRoute?.needsMarketResearch === true && !marketResearchDismissed;
+
+  const handleMarketResearchComplete = useCallback(() => {
+    setMarketResearchDismissed(true);
+    void queryClient.invalidateQueries({ queryKey: ['initialInterviewRoute', userId] });
+  }, [queryClient, userId]);
+
+  const bootstrapPending =
+    isPending ||
+    isError ||
+    !profile ||
+    initialRoutePending ||
+    (needsPostInterviewDeferralSnapshot && deferralPending);
+
+  const resolvedInterviewStack = useMemo(() => {
+    if (bootstrapPending || !profile) {
+      return null;
+    }
+
+    let initialRouteName: InterviewStackRoute = initialRoute?.screen ?? 'Aria';
+    let interviewAlreadyCompleted =
+      initialRoute?.interviewAlreadyCompleted === true || profileShowsStandardInterviewComplete;
+
+    if (profileShowsStandardInterviewComplete && initialRouteName === 'Aria') {
+      initialRouteName = 'PostInterview';
+      interviewAlreadyCompleted = true;
+    }
+
+    const serverResolvedPostInterviewScreen = initialRoute?.screen;
+    if (
+      serverResolvedPostInterviewScreen === 'PostInterviewPassed' ||
+      serverResolvedPostInterviewScreen === 'PostInterviewFailed'
+    ) {
+      initialRouteName = serverResolvedPostInterviewScreen;
+    } else if (needsPostInterviewDeferralSnapshot && deferralAttempt && !isAdminEmail) {
+      initialRouteName = resolveStandardPostInterviewStackRoute(deferralAttempt.snap);
+    }
+
+    if (isTerminalPostInterviewRoute(lockedPostInterviewRouteRef.current)) {
+      initialRouteName = lockedPostInterviewRouteRef.current;
+    } else if (isTerminalPostInterviewRoute(initialRouteName)) {
+      lockedPostInterviewRouteRef.current = initialRouteName;
+    }
+
+    const needsMarketResearch = initialRoute?.needsMarketResearch === true;
+
+    return {
+      initialRouteName,
+      interviewAlreadyCompleted,
+      needsMarketResearch,
+      navInitialState: buildInterviewStackInitialState(
+        initialRouteName,
+        userId,
+        interviewAlreadyCompleted,
+        needsMarketResearch,
+      ),
+      interviewLinking: createInterviewStackLinking(initialRouteName),
+    };
+  }, [
+    bootstrapPending,
+    profile,
+    initialRoute,
+    profileShowsStandardInterviewComplete,
+    needsPostInterviewDeferralSnapshot,
+    deferralAttempt,
+    isAdminEmail,
+    userId,
+    initialRoute?.interviewPassedAdminOverride,
+    initialRoute?.interviewPassedComputed,
+  ]);
+
+  if (bootstrapPending || !resolvedInterviewStack) {
     return <LoadingScreen />;
   }
 
-  if (shouldStartOnPostInterviewFlow && deferralPending) {
-    return <LoadingScreen />;
-  }
+  const {
+    initialRouteName,
+    interviewAlreadyCompleted,
+    needsMarketResearch,
+    navInitialState,
+    interviewLinking,
+  } = resolvedInterviewStack;
 
-  /**
-   * Standard applicants: use the post-interview stack when the interview is finished *or* the gate
-   * already has a definite pass/fail in `users.interview_passed` (so we still route to
-   * `PostInterviewFailed` if `interview_completed` was never set but server scoring stored a fail).
-   * Alpha/admin stay on Aria (in-app results / admin tools).
-   */
-  const usersInterviewPassedForReveal =
-    profile.interviewPassed === true ? true : profile.interviewFailed === true ? false : null;
+  const showMarketResearchOverlay =
+    showMarketResearch && initialRouteName !== 'PsychometricAssessment';
 
-  const initialRouteName:
-    | 'Aria'
-    | 'PostInterview'
-    | 'PostInterviewProcessing'
-    | 'PostInterviewPassed'
-    | 'PostInterviewFailed' = shouldStartOnPostInterviewFlow
-    ? standardPostInterviewRouteFromReveal(
-        evaluateStandardPostInterviewRevealWithUsersPassedFallback(
-          deferralAttempt ?? undefined,
-          usersInterviewPassedForReveal,
-        ),
-      )
-    : 'Aria';
+  const navTheme = {
+    ...DarkTheme,
+    colors: {
+      primary: '#5BA8E8',
+      background: '#05060D',
+      card: '#05060D',
+      text: '#E8F0F8',
+      border: 'rgba(82,142,220,0.2)',
+      notification: '#5BA8E8',
+    },
+  };
 
-  return <InterviewAppNavigator userId={userId} initialRouteName={initialRouteName} />;
+  return (
+    <NavigationContainer
+      theme={navTheme}
+      linking={interviewLinking}
+      initialState={navInitialState}
+    >
+      <View style={ROOT_STYLE}>
+        <InterviewAppNavigator
+          userId={userId}
+          initialRouteName={initialRouteName}
+          interviewAlreadyCompleted={interviewAlreadyCompleted}
+          needsMarketResearch={needsMarketResearch}
+        />
+        {showMarketResearchOverlay ? (
+          <MarketResearchModal
+            visible
+            userId={userId}
+            onComplete={handleMarketResearchComplete}
+          />
+        ) : null}
+      </View>
+    </NavigationContainer>
+  );
 };
 
 const LoadingScreen = () => (
@@ -304,7 +490,61 @@ function normalizeAuthWebPath(path: string): string {
   return query != null && query !== '' ? `/?${query}` : '/';
 }
 
+const INTERVIEW_STACK_ROUTE_PATH: Record<InterviewStackRoute, string> = {
+  PsychometricAssessment: 'psychometrics',
+  Aria: 'interview',
+  PostInterview: 'post-interview',
+  PostInterviewProcessing: 'post-interview-processing',
+  PostInterviewPassed: 'passed',
+  PostInterviewFailed: 'failed',
+  PostInterviewSexualCommunication: 'post-interview-sexual-communication',
+};
+
+function interviewStackPathname(path: string): string {
+  const qIndex = path.indexOf('?');
+  const pathnameRaw = qIndex >= 0 ? path.slice(0, qIndex) : path;
+  return pathnameRaw.replace(/\/+$/, '') || '/';
+}
+
+function isInterviewAliasWebPath(path: string): boolean {
+  const pathname = interviewStackPathname(path);
+  return (
+    pathname === '/' ||
+    pathname === '' ||
+    pathname === '/interview' ||
+    pathname === 'interview'
+  );
+}
+
+/** When reveal is ready, do not keep the user on stale processing / interview URLs after login. */
+function shouldRedirectWebPathToPreferredRoute(
+  path: string,
+  preferredRoute: InterviewStackRoute | undefined,
+): boolean {
+  if (!preferredRoute || preferredRoute === 'Aria' || preferredRoute === 'PsychometricAssessment') {
+    return false;
+  }
+  const pathname = interviewStackPathname(path);
+  if (isInterviewAliasWebPath(path)) return true;
+  if (preferredRoute === 'PostInterviewPassed' || preferredRoute === 'PostInterviewFailed') {
+    return (
+      pathname === '/post-interview-processing' ||
+      pathname === 'post-interview-processing' ||
+      pathname === '/post-interview' ||
+      pathname === 'post-interview'
+    );
+  }
+  return false;
+}
+
 const INTERVIEW_STACK_LINKING_SCREENS = {
+  PsychometricAssessment: {
+    path: 'psychometrics',
+    parse: {
+      openAdminPanel: (value: string | undefined) =>
+        value === '1' || value === 'true' || value === 'yes',
+    },
+  },
   Aria: {
     path: 'interview',
     parse: {
@@ -316,6 +556,7 @@ const INTERVIEW_STACK_LINKING_SCREENS = {
   PostInterviewProcessing: 'post-interview-processing',
   PostInterviewPassed: 'passed',
   PostInterviewFailed: 'failed',
+  PostInterviewSexualCommunication: 'post-interview-sexual-communication',
 } as const;
 
 const AUTH_STACK_LINKING_SCREENS = {
@@ -353,24 +594,22 @@ const RootNavigator = () => {
     }
   }, [isLoggedIn, user?.id, user?.email]);
 
-  const linking: LinkingOptions<Record<string, unknown>> | undefined = useMemo(() => {
+  const authLinking: LinkingOptions<Record<string, unknown>> | undefined = useMemo(() => {
     if (Platform.OS !== 'web') {
       return undefined;
     }
-    const screens = isLoggedIn ? INTERVIEW_STACK_LINKING_SCREENS : AUTH_STACK_LINKING_SCREENS;
     const prefixes = [
       ...(typeof window !== 'undefined' ? [`${window.location.protocol}//${window.location.host}`] : []),
       ExpoLinking.createURL('/'),
     ];
     return {
       prefixes,
-      config: { screens: screens as Record<string, string | Record<string, unknown>> },
+      config: { screens: AUTH_STACK_LINKING_SCREENS as Record<string, string | Record<string, unknown>> },
       getStateFromPath(path: string, options: Parameters<typeof getStateFromPathDefault>[1]) {
-        const mapped = isLoggedIn ? mapInterviewStackPath(path) : normalizeAuthWebPath(path);
-        return getStateFromPathDefault(mapped, options);
+        return getStateFromPathDefault(normalizeAuthWebPath(path), options);
       },
     };
-  }, [isLoggedIn]);
+  }, []);
 
   if (loading) {
     return <LoadingScreen />;
@@ -388,11 +627,15 @@ const RootNavigator = () => {
     },
   };
 
-  return (
-    <NavigationContainer theme={navTheme} linking={linking}>
-      {isLoggedIn ? <AppNavigator userId={user!.id} /> : <AuthNavigator />}
-    </NavigationContainer>
-  );
+  if (!isLoggedIn) {
+    return (
+      <NavigationContainer theme={navTheme} linking={authLinking}>
+        <AuthNavigator />
+      </NavigationContainer>
+    );
+  }
+
+  return <LoggedInInterviewShell userId={user!.id} />;
 };
 
 function useWebAudioUnlock() {

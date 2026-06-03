@@ -1,12 +1,5 @@
-import React, {
-  useState,
-  useEffect,
-  useMemo,
-  useCallback,
-  useLayoutEffect,
-} from 'react';
-import { View, Text, StyleSheet, Platform, Pressable } from 'react-native';
-import { Picker } from '@react-native-picker/picker';
+import React, { useState, useEffect, useMemo, useCallback } from 'react';
+import { View, Text, StyleSheet, Pressable } from 'react-native';
 import {
   MatchPreferences,
   defaultPreferences,
@@ -19,12 +12,10 @@ import {
   type BodyTypeAttractionId,
 } from '@/shared/constants/bodyTypeAttraction';
 import {
-  PREF_DEALBREAKER_CHILDREN_OPTIONS,
-  PREF_DEALBREAKER_POLITICS_OPTIONS,
-  PREF_DEALBREAKER_RELIGION_OPTIONS,
   PREF_PARTNER_HAS_CHILDREN_OPTIONS,
   PREF_PARTNER_POLITICAL_SHARING_OPTIONS,
   PREF_PARTNER_SAME_RELIGION_OPTIONS,
+  PREF_HEIGHT_DYNAMIC_OPTIONS,
   normalizePartnerPoliticalAlignmentToYesNo,
 } from '@/screens/profile/editProfile/constants';
 import { PARTNER_SUBSTANCE_ALIGNMENT_OPTIONS } from '@/shared/constants/filterOptions';
@@ -33,7 +24,14 @@ import {
   ETHNICITY_ATTRACTION_OPEN_TO_ALL,
   normalizeEthnicityAttractionStored,
 } from '@/shared/constants/ethnicityAttractionOptions';
-import { PREF_PARTNER_SHARES_SEXUAL_INTERESTS_OPTIONS } from '@/shared/constants/sexualCompatibilityOptions';
+import {
+  PREF_PARTNER_SHARES_SEXUAL_INTERESTS_YES_NO,
+  PREF_PARTNER_SHARES_SPECIFIC_SEX_INTERESTS_QUESTION,
+  PREF_PARTNER_SPECIFIC_SEX_INTERESTS_SHEET_TITLE,
+  prefPartnerSharesSexualInterestsFromYesNo,
+  prefPartnerSharesSexualInterestsYesNoSelected,
+  labelForPrefPartnerSharesSexualInterestsYesNoPicker,
+} from '@/shared/constants/sexualCompatibilityOptions';
 import {
   BottomSheet,
   OptionPickerTrigger,
@@ -51,6 +49,7 @@ type DealbreakerPreferences = MatchPreferences & {
   lifestylePreference?: string;
   partnerSameReligionRequired?: string;
   relocationPreference?: string;
+  heightDynamicPreference?: string;
 };
 
 const normalizeNoPreference = (value: unknown): string => {
@@ -107,157 +106,6 @@ function renderMustHaveHighlight(text: string) {
   );
 }
 
-type EmbeddedDealbreakerOpt = { label: string; value: string };
-
-/** Native picker styled like `DatingProfileEditScreen` `ChoiceDropdown` (no BottomSheet). */
-function EmbeddedDealbreakerPicker({
-  label,
-  optionStrings,
-  rawValue,
-  onCommit,
-  prependUnsetRow,
-}: {
-  label: string;
-  optionStrings: readonly string[];
-  rawValue: string;
-  onCommit: (next: string) => void;
-  prependUnsetRow?: boolean;
-}) {
-  const [sheetAnchor, setSheetAnchor] = useState<OptionAnchor | null>(null);
-  const options: EmbeddedDealbreakerOpt[] = useMemo(() => {
-    const rows = optionStrings.map((s) => ({ label: s, value: s }));
-    if (prependUnsetRow) {
-      return [{ label: 'No preference', value: '' }, ...rows];
-    }
-    return rows;
-  }, [optionStrings, prependUnsetRow]);
-
-  const storedTrimmed = String(rawValue ?? '').trim();
-  const normalizedSelected = prependUnsetRow
-    ? storedTrimmed
-    : storedTrimmed === '' && optionStrings.includes('No preference')
-      ? 'No preference'
-      : storedTrimmed;
-
-  const validSelection = options.some((o) => o.value === normalizedSelected);
-  const selectedValue = validSelection
-    ? normalizedSelected
-    : (options[0]?.value ?? '');
-  const selectedLabel =
-    options.find((o) => o.value === selectedValue)?.label ?? 'No preference';
-
-  useLayoutEffect(() => {
-    if (!options.length) return;
-    if (!validSelection && options[0]) {
-      onCommit(options[0].value);
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- coerce legacy / unknown stored values once
-  }, [rawValue, options, validSelection]);
-
-  if (Platform.OS === 'web') {
-    return (
-      <View style={pickerStyles.fieldBlock}>
-        <Text style={pickerStyles.label}>{label}</Text>
-        <OptionPickerTrigger
-          style={[pickerStyles.webTrigger, formControlStyles.control]}
-          onOpen={(anchor) => setSheetAnchor(anchor)}
-        >
-          <View style={pickerStyles.webTriggerContent}>
-            <Text style={pickerStyles.webTriggerText}>
-              {truncDealbreaker(selectedLabel)}
-            </Text>
-            <Text style={pickerStyles.webChevron}>▾</Text>
-          </View>
-        </OptionPickerTrigger>
-        <BottomSheet
-          visible={!!sheetAnchor}
-          title={label}
-          anchor={sheetAnchor}
-          onClose={() => setSheetAnchor(null)}
-        >
-          <SingleChoiceOptionList
-            options={options}
-            value={selectedValue}
-            onSelect={(v) => {
-              onCommit(v);
-              setSheetAnchor(null);
-            }}
-          />
-        </BottomSheet>
-      </View>
-    );
-  }
-
-  return (
-    <View style={pickerStyles.fieldBlock}>
-      <Text style={pickerStyles.label}>{label}</Text>
-      <View style={pickerStyles.pickerShell}>
-        <Picker
-          selectedValue={selectedValue}
-          onValueChange={(v) => onCommit(String(v))}
-          mode={Platform.OS === 'android' ? 'dropdown' : undefined}
-          style={pickerStyles.pickerNative}
-          dropdownIconColor="rgba(156,180,216,0.85)"
-          itemStyle={
-            Platform.OS === 'ios'
-              ? { color: '#E8F0F8', fontSize: 17 }
-              : undefined
-          }
-        >
-          {options.map((o) => (
-            <Picker.Item
-              key={o.value === '' ? '__unset__' : o.value}
-              label={o.label}
-              value={o.value}
-              color="#E8F0F8"
-            />
-          ))}
-        </Picker>
-      </View>
-    </View>
-  );
-}
-
-/** Match `styles.pickRow` / `OptionPickerTrigger` (lighter surface vs `theme.colors.card`). */
-const pickerStyles = StyleSheet.create({
-  fieldBlock: { marginBottom: 18, marginTop: 12 },
-  label: { color: '#9CB4D8', fontSize: 13, marginBottom: 8 },
-  pickerShell: {
-    borderRadius: 10,
-    borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.14)',
-    backgroundColor: 'rgba(255,255,255,0.06)',
-    overflow: 'hidden',
-    ...(Platform.OS === 'ios' ? {} : { minHeight: 56 }),
-  },
-  pickerNative: {
-    width: '100%',
-    color: '#E8F0F8',
-    backgroundColor: 'rgba(255,255,255,0.06)',
-    ...(Platform.OS === 'ios'
-      ? { height: 160 }
-      : Platform.OS === 'android'
-        ? { height: 56 }
-        : {}),
-  },
-  webTrigger: {},
-  webTriggerContent: {
-    flex: 1,
-    flexDirection: 'row',
-    alignItems: 'center',
-  },
-  webTriggerText: {
-    flex: 1,
-    color: '#E8F0F8',
-    fontSize: 15,
-  },
-  webChevron: {
-    color: 'rgba(156,180,216,0.9)',
-    fontSize: 14,
-    paddingLeft: 10,
-  },
-});
-
 const SUBSTANCE_PARTNER_DEALBREAKERS: {
   key: keyof DealbreakerPreferences;
   question: string;
@@ -265,7 +113,7 @@ const SUBSTANCE_PARTNER_DEALBREAKERS: {
   {
     key: 'partnerAlignmentTobacco',
     question:
-      'Is it a must have that your partner shares your relationship with cigarettes or tobacco?',
+      'Is it a must have that your partner shares your relationship with cigarettes or vaping?',
   },
   {
     key: 'partnerAlignmentRecreationalDrugs',
@@ -463,26 +311,27 @@ export const MatchPreferencesEmbedded: React.FC<
         </View>
 
         <Text style={styles.question}>
-          Do you want someone who shares your specific sexual interests?
+          {renderMustHaveHighlight(PREF_PARTNER_SHARES_SPECIFIC_SEX_INTERESTS_QUESTION)}
         </Text>
         <OptionPickerTrigger
           style={[styles.pickRow, formControlStyles.control]}
           onOpen={(anchor) =>
             setOptionSheet({
-              title: 'Partner shares your interests',
-              options:
-                PREF_PARTNER_SHARES_SEXUAL_INTERESTS_OPTIONS as unknown as string[],
-              selectedValue: prefPartnerSharesSexualInterests,
+              title: PREF_PARTNER_SPECIFIC_SEX_INTERESTS_SHEET_TITLE,
+              options: [...PREF_PARTNER_SHARES_SEXUAL_INTERESTS_YES_NO],
+              selectedValue: prefPartnerSharesSexualInterestsYesNoSelected(prefPartnerSharesSexualInterests),
               anchor,
               onPick: (value) => {
-                onPreferencesPatch({ prefPartnerSharesSexualInterests: value });
+                onPreferencesPatch({
+                  prefPartnerSharesSexualInterests: prefPartnerSharesSexualInterestsFromYesNo(value),
+                });
                 setOptionSheet(null);
               },
             })
           }
         >
           <Text style={styles.pickText}>
-            {truncDealbreaker(prefPartnerSharesSexualInterests)}
+            {labelForPrefPartnerSharesSexualInterestsYesNoPicker(prefPartnerSharesSexualInterests)}
           </Text>
         </OptionPickerTrigger>
 
@@ -544,6 +393,43 @@ export const MatchPreferencesEmbedded: React.FC<
           </Text>
         </OptionPickerTrigger>
 
+        {LIFESTYLE_DEALBREAKERS.map(({ key, question, options }) => (
+          <View key={key}>
+            <Text style={styles.question}>
+              {renderMustHaveHighlight(question)}
+            </Text>
+            <OptionPickerTrigger
+              style={[styles.pickRow, formControlStyles.control]}
+              onOpen={(anchor) =>
+                setOptionSheet({
+                  title: question,
+                  options,
+                  selectedValue: String(
+                    (preferences as Record<string, unknown>)[key] ?? '',
+                  ),
+                  anchor,
+                  onPick: (value) => {
+                    setPref({
+                      [key]: value,
+                    } as Partial<DealbreakerPreferences>);
+                    setOptionSheet(null);
+                  },
+                })
+              }
+            >
+              <Text style={styles.pickText}>
+                {String(
+                  (preferences as Record<string, unknown>)[key] ?? '',
+                ).trim()
+                  ? truncDealbreaker(
+                      String((preferences as Record<string, unknown>)[key]),
+                    )
+                  : 'Select'}
+              </Text>
+            </OptionPickerTrigger>
+          </View>
+        ))}
+
         {SUBSTANCE_PARTNER_DEALBREAKERS.map(({ key, question }) => (
           <View key={key}>
             <Text style={styles.question}>
@@ -587,6 +473,31 @@ export const MatchPreferencesEmbedded: React.FC<
         />
 
         <Text style={styles.question}>
+          What height dynamic do you typically prefer?
+        </Text>
+        <OptionPickerTrigger
+          style={[styles.pickRow, formControlStyles.control]}
+          onOpen={(anchor) =>
+            setOptionSheet({
+              title: 'Height dynamic preference',
+              options: PREF_HEIGHT_DYNAMIC_OPTIONS,
+              selectedValue: String(preferences.heightDynamicPreference ?? ''),
+              anchor,
+              onPick: (value) => {
+                setPref({ heightDynamicPreference: value });
+                setOptionSheet(null);
+              },
+            })
+          }
+        >
+          <Text style={styles.pickText}>
+            {String(preferences.heightDynamicPreference ?? '').trim()
+              ? truncDealbreaker(String(preferences.heightDynamicPreference))
+              : 'Select'}
+          </Text>
+        </OptionPickerTrigger>
+
+        <Text style={styles.question}>
           Which ethnicities are you generally attracted to?
         </Text>
         <Text style={styles.ethnicityHelper}>Select all that apply.</Text>
@@ -614,81 +525,6 @@ export const MatchPreferencesEmbedded: React.FC<
             );
           })}
         </View>
-
-        {LIFESTYLE_DEALBREAKERS.map(({ key, question, options }) => (
-          <View key={key}>
-            <Text style={styles.question}>
-              {renderMustHaveHighlight(question)}
-            </Text>
-            <OptionPickerTrigger
-              style={[styles.pickRow, formControlStyles.control]}
-              onOpen={(anchor) =>
-                setOptionSheet({
-                  title: question,
-                  options,
-                  selectedValue: String(
-                    (preferences as Record<string, unknown>)[key] ?? '',
-                  ),
-                  anchor,
-                  onPick: (value) => {
-                    setPref({
-                      [key]: value,
-                    } as Partial<DealbreakerPreferences>);
-                    setOptionSheet(null);
-                  },
-                })
-              }
-            >
-              <Text style={styles.pickText}>
-                {String(
-                  (preferences as Record<string, unknown>)[key] ?? '',
-                ).trim()
-                  ? truncDealbreaker(
-                      String((preferences as Record<string, unknown>)[key]),
-                    )
-                  : 'Select'}
-              </Text>
-            </OptionPickerTrigger>
-          </View>
-        ))}
-
-        <EmbeddedDealbreakerPicker
-          label="Partner wants children"
-          optionStrings={PREF_DEALBREAKER_CHILDREN_OPTIONS}
-          rawValue={String(
-            (preferences as Record<string, unknown>).childrenPreference ?? '',
-          )}
-          prependUnsetRow
-          onCommit={(next) =>
-            setPref({
-              childrenPreference: next,
-            } as Partial<DealbreakerPreferences>)
-          }
-        />
-        <EmbeddedDealbreakerPicker
-          label="Politics"
-          optionStrings={PREF_DEALBREAKER_POLITICS_OPTIONS}
-          rawValue={String(
-            (preferences as Record<string, unknown>).politicsPreference ?? '',
-          )}
-          onCommit={(next) =>
-            setPref({
-              politicsPreference: next,
-            } as Partial<DealbreakerPreferences>)
-          }
-        />
-        <EmbeddedDealbreakerPicker
-          label="Religion"
-          optionStrings={PREF_DEALBREAKER_RELIGION_OPTIONS}
-          rawValue={String(
-            (preferences as Record<string, unknown>).religionPreference ?? '',
-          )}
-          onCommit={(next) =>
-            setPref({
-              religionPreference: next,
-            } as Partial<DealbreakerPreferences>)
-          }
-        />
       </View>
 
       <BottomSheet
@@ -776,7 +612,7 @@ const styles = StyleSheet.create({
     backgroundColor: 'rgba(255,255,255,0.045)',
   },
   ethnicityOptionRowSelected: {
-    borderColor: '#7C3AED',
+    borderColor: 'rgba(82,142,220,0.25)',
     backgroundColor: 'rgba(91,168,232,0.2)',
   },
   ethnicityOptionText: {

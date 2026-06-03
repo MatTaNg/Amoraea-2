@@ -1,3 +1,4 @@
+import { saveEditProfilePrimaryPhoto } from '@data/repos/editProfileRepo';
 import { ProfileRepository } from '@data/repositories/ProfileRepository';
 import { ProfilePhoto } from '@domain/models/Profile';
 import * as ImagePicker from 'expo-image-picker';
@@ -16,7 +17,7 @@ export class PhotoUseCase {
       const remaining = photos.filter((p) => p.id !== photoId);
       const newPrimary = remaining[0]?.publicUrl ?? null;
       if (newPrimary) {
-        await this.profileRepository.upsertProfile(userId, { primaryPhotoUrl: newPrimary });
+        await saveEditProfilePrimaryPhoto(userId, newPrimary);
       }
     }
   }
@@ -75,9 +76,7 @@ export class PhotoUseCase {
     }
 
     if (uploadedPhotos.length > 0 && existingPhotos.length === 0) {
-      await this.profileRepository.upsertProfile(userId, {
-        primaryPhotoUrl: uploadedPhotos[0].publicUrl,
-      });
+      await saveEditProfilePrimaryPhoto(userId, uploadedPhotos[0].publicUrl);
     }
 
     return uploadedPhotos;

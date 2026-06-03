@@ -7,14 +7,11 @@ import {
   MatchPreferences,
   defaultPreferences,
 } from '@/shared/hooks/filterPreferences/types';
-
-import { formControlStyles } from '@/shared/ui/FormField';
 import {
   PREF_LIFESTYLE_OPTIONS,
   PREF_LONG_TERM_LOCATION_OPTIONS,
   PREF_RELOCATION_OPTIONS,
 } from '@/screens/profile/editProfile/constants';
-import { BottomSheet, OptionPickerTrigger, type OptionAnchor } from '@/screens/profile/editProfile/BottomSheet';
 import { SingleChoiceOptionList } from '@/shared/components/profileFields/SingleChoiceOptionList';
 import { styles } from './MatchPreferencesModal.styled';
 
@@ -25,8 +22,8 @@ type DealbreakerPreferences = MatchPreferences & {
 };
 
 const normalizeNoPreference = (value: unknown): string => {
-  const v = String(value ?? "").trim();
-  return v.toLowerCase() === "any" ? "No preference" : v;
+  const v = String(value ?? '').trim();
+  return v.toLowerCase() === 'any' ? 'No preference' : v;
 };
 
 const normalizeDealbreakerPreferences = (prefs: DealbreakerPreferences): DealbreakerPreferences => ({
@@ -69,18 +66,12 @@ const REQUIRED_DEALBREAKER_KEYS: (keyof DealbreakerPreferences)[] = [
 
 /** Relationship style is edited on Edit Profile (`relationship_type`), not in dealbreakers. */
 function withoutRelationshipType(
-  prefs: MatchPreferences | DealbreakerPreferences
+  prefs: MatchPreferences | DealbreakerPreferences,
 ): DealbreakerPreferences {
   const { relationshipType: _, ...rest } = prefs as DealbreakerPreferences & {
     relationshipType?: string;
   };
   return rest as DealbreakerPreferences;
-}
-
-function truncDealbreaker(s: string, max = 80): string {
-  const t = String(s ?? "").trim();
-  if (!t) return "Select";
-  return t.length > max ? `${t.slice(0, max)}…` : t;
 }
 
 interface MatchPreferencesModalProps {
@@ -98,23 +89,14 @@ export const MatchPreferencesModal: React.FC<MatchPreferencesModalProps> = ({
 }) => {
   const [preferences, setPreferences] = useState<DealbreakerPreferences>(() => {
     const base = normalizeDealbreakerPreferences(
-      withoutRelationshipType((matchPreferences || defaultPreferences) as DealbreakerPreferences)
+      withoutRelationshipType((matchPreferences || defaultPreferences) as DealbreakerPreferences),
     );
     return base;
   });
-  const [optionSheet, setOptionSheet] = useState<{
-    title: string;
-    options: readonly string[] | string[];
-    selectedValue: string;
-    onPick: (value: string) => void;
-    anchor?: OptionAnchor;
-  } | null>(null);
 
   useEffect(() => {
     if (matchPreferences) {
-      setPreferences(
-        normalizeDealbreakerPreferences(withoutRelationshipType(matchPreferences))
-      );
+      setPreferences(normalizeDealbreakerPreferences(withoutRelationshipType(matchPreferences)));
     }
   }, [matchPreferences]);
 
@@ -126,7 +108,7 @@ export const MatchPreferencesModal: React.FC<MatchPreferencesModalProps> = ({
         return newPrefs;
       });
     },
-    [onMatchPreferencesChange]
+    [onMatchPreferencesChange],
   );
 
   const canContinue = REQUIRED_DEALBREAKER_KEYS.every((key) =>
@@ -135,51 +117,31 @@ export const MatchPreferencesModal: React.FC<MatchPreferencesModalProps> = ({
 
   return (
     <SafeAreaView style={styles.screen} edges={['top', 'left', 'right']}>
-      <OnboardingHeader title="Lifestyle" />
-      <ScrollView 
+      <OnboardingHeader title="Lifestyle" onBack={onBack} />
+      <ScrollView
         style={styles.scrollView}
         contentContainerStyle={styles.scrollContent}
         keyboardShouldPersistTaps="handled"
       >
         <View style={styles.container}>
-          <View style={styles.card}>
-            {LIFESTYLE_DEALBREAKERS.map(({ key, question, options }) => (
-              <View key={key}>
-                <Text style={styles.dealbreakerQuestion}>{question}</Text>
-                <OptionPickerTrigger
-                  style={[styles.dealbreakerPickRow, formControlStyles.control]}
-                  onOpen={(anchor) =>
-                    setOptionSheet({
-                      title: question,
-                      options,
-                      selectedValue: String((preferences as any)[key] ?? ''),
-                      anchor,
-                      onPick: (value) => {
-                        setPref({ [key]: value } as Partial<DealbreakerPreferences>);
-                        setOptionSheet(null);
-                      },
-                    })
-                  }
-                >
-                  <Text style={styles.dealbreakerPickText}>
-                    {String((preferences as any)[key] ?? '').trim()
-                      ? truncDealbreaker(String((preferences as any)[key]))
-                      : 'Select'}
-                  </Text>
-                </OptionPickerTrigger>
-              </View>
-            ))}
-          </View>
+          {LIFESTYLE_DEALBREAKERS.map(({ key, question, options }, index) => (
+            <View
+              key={key}
+              style={[styles.questionBlock, index > 0 && styles.questionBlockSpaced]}
+            >
+              <Text style={styles.questionTitle}>{question}</Text>
+              <SingleChoiceOptionList
+                options={options.map((o) => ({ label: o, value: o }))}
+                value={String((preferences as Record<string, unknown>)[key] ?? '')}
+                onSelect={(value) => setPref({ [key]: value } as Partial<DealbreakerPreferences>)}
+              />
+            </View>
+          ))}
         </View>
       </ScrollView>
       <SafeAreaView style={styles.buttonContainer} edges={['bottom', 'left', 'right']}>
         <View style={styles.buttonRow}>
-          <Button
-            title="Back"
-            variant="outline"
-            onPress={onBack}
-            style={styles.backButton}
-          />
+          <Button title="Back" variant="outline" onPress={onBack} style={styles.backButton} />
           <Button
             title="Next"
             onPress={onNext}
@@ -188,25 +150,6 @@ export const MatchPreferencesModal: React.FC<MatchPreferencesModalProps> = ({
           />
         </View>
       </SafeAreaView>
-      <BottomSheet
-        visible={!!optionSheet}
-        title={optionSheet?.title}
-        anchor={optionSheet?.anchor}
-        onClose={() => setOptionSheet(null)}
-      >
-        {optionSheet ? (
-          <SingleChoiceOptionList
-            options={(optionSheet.options ?? []).map((o) => ({ label: o, value: o }))}
-            value={optionSheet.selectedValue}
-            onSelect={(v) => {
-              optionSheet.onPick(v);
-              setOptionSheet(null);
-            }}
-          />
-        ) : null}
-      </BottomSheet>
     </SafeAreaView>
   );
 };
-
-

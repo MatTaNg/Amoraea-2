@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import {
   View,
   Text,
@@ -37,6 +37,7 @@ export const LoginScreen: React.FC<{ navigation: any; route?: { params?: { confi
   const [resending, setResending] = useState(false);
   const { signIn, resendConfirmationEmail } = useAuth();
   const confirmEmailMessage = route?.params?.confirmEmail ?? false;
+  const passwordInputRef = useRef<React.ElementRef<typeof TextInput>>(null);
 
   useEffect(() => {
     if (Platform.OS !== 'web' || typeof document === 'undefined') return;
@@ -50,6 +51,7 @@ export const LoginScreen: React.FC<{ navigation: any; route?: { params?: { confi
   }, []);
 
   const handleLogin = async () => {
+    if (loading) return;
     if (!email?.trim() || !password) {
       setError('Please fill in all fields');
       return;
@@ -87,6 +89,15 @@ export const LoginScreen: React.FC<{ navigation: any; route?: { params?: { confi
     } finally {
       setResending(false);
     }
+  };
+
+  /** RN Web often does not fire `onSubmitEditing` for the physical Enter key — handle explicitly. */
+  const onEmailEnterAction = () => {
+    if (!password) {
+      passwordInputRef.current?.focus();
+      return;
+    }
+    void handleLogin();
   };
 
   return (
@@ -133,18 +144,35 @@ export const LoginScreen: React.FC<{ navigation: any; route?: { params?: { confi
               keyboardType="email-address"
               autoCapitalize="none"
               autoCorrect={false}
+              returnKeyType="next"
+              blurOnSubmit={false}
+              onSubmitEditing={onEmailEnterAction}
+              onKeyPress={(e) => {
+                if (Platform.OS === 'web' && e.nativeEvent.key === 'Enter') {
+                  (e as unknown as { preventDefault?: () => void }).preventDefault?.();
+                  onEmailEnterAction();
+                }
+              }}
               style={authStyles.input}
             />
 
             <TextInput
+              ref={passwordInputRef}
               testID="login-password-input"
               placeholder="Password"
               placeholderTextColor="#5B6B80"
               value={password}
               onChangeText={setPassword}
               secureTextEntry
+              returnKeyType="go"
               style={[authStyles.input, { marginBottom: 18 }]}
-              onSubmitEditing={handleLogin}
+              onSubmitEditing={() => void handleLogin()}
+              onKeyPress={(e) => {
+                if (Platform.OS === 'web' && e.nativeEvent.key === 'Enter') {
+                  (e as unknown as { preventDefault?: () => void }).preventDefault?.();
+                  void handleLogin();
+                }
+              }}
             />
 
             {confirmEmailMessage && (

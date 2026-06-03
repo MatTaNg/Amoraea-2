@@ -3,6 +3,7 @@ import { View, Text, StyleSheet, Platform } from 'react-native';
 import { Picker } from '@react-native-picker/picker';
 import { theme } from '@/shared/theme/theme';
 import { FormField, formControlStyles } from '@/shared/ui/FormField';
+import { SelectTriggerRow } from '@/shared/ui/SelectTriggerRow';
 import {
   BottomSheet,
   OptionPickerTrigger,
@@ -19,6 +20,11 @@ export type HeightCmPickerProps = {
   onChangeCm: (cm: number | undefined) => void;
   errorText?: string;
   placeholderLabel?: string;
+  /**
+   * When true (default), the first row clears height (`undefined`).
+   * Set false to only list numeric heights (e.g. edit profile).
+   */
+  includeUnsetOption?: boolean;
 };
 
 export const HeightCmPicker: React.FC<HeightCmPickerProps> = ({
@@ -27,24 +33,37 @@ export const HeightCmPicker: React.FC<HeightCmPickerProps> = ({
   onChangeCm,
   errorText,
   placeholderLabel = 'Select height',
+  includeUnsetOption = true,
 }) => {
   const [sheetAnchor, setSheetAnchor] = useState<OptionAnchor | null>(null);
   const options = useMemo(() => {
-    const out: { label: string; value: string }[] = [
-      { label: placeholderLabel, value: '' },
-    ];
+    const heights: { label: string; value: string }[] = [];
     for (let cm = HEIGHT_CM_MIN; cm <= HEIGHT_CM_MAX; cm += 1) {
-      out.push({ label: `${cm} cm`, value: String(cm) });
+      heights.push({ label: `${cm} cm`, value: String(cm) });
     }
-    return out;
-  }, [placeholderLabel]);
+    if (includeUnsetOption) {
+      return [{ label: placeholderLabel, value: '' }, ...heights];
+    }
+    return heights;
+  }, [placeholderLabel, includeUnsetOption]);
 
-  const selected =
-    valueCm != null && valueCm >= HEIGHT_CM_MIN && valueCm <= HEIGHT_CM_MAX
-      ? String(valueCm)
-      : '';
-  const selectedLabel =
-    options.find((o) => o.value === selected)?.label ?? placeholderLabel;
+  const hasValid =
+    valueCm != null &&
+    valueCm >= HEIGHT_CM_MIN &&
+    valueCm <= HEIGHT_CM_MAX;
+  /** Web sheet: no row selected when height unset and unset-row hidden. */
+  const webSheetSelectedValue = hasValid ? String(valueCm) : '';
+  /** Native Picker requires a valid item; when unset-row is hidden, bind to min until user picks. */
+  const nativePickerSelectedValue = hasValid
+    ? String(valueCm)
+    : includeUnsetOption
+      ? ''
+      : String(HEIGHT_CM_MIN);
+  const triggerLabel = hasValid
+    ? `${valueCm} cm`
+    : includeUnsetOption
+      ? placeholderLabel
+      : '—';
 
   const commitValue = (value: string) => {
     if (!value) {
@@ -62,12 +81,12 @@ export const HeightCmPicker: React.FC<HeightCmPickerProps> = ({
           style={[styles.webTrigger, formControlStyles.control]}
           onOpen={(anchor) => setSheetAnchor(anchor)}
         >
-          <View style={styles.webTriggerContent}>
-            <Text style={[formControlStyles.valueText, styles.webTriggerText]}>
-              {selectedLabel}
-            </Text>
-            <Text style={styles.webChevron}>▾</Text>
-          </View>
+          <SelectTriggerRow
+            label={triggerLabel}
+            isPlaceholder={!hasValid}
+            labelStyle={[formControlStyles.valueText, styles.webTriggerText]}
+            chevronStyle={styles.webChevron}
+          />
         </OptionPickerTrigger>
         <BottomSheet
           visible={!!sheetAnchor}
@@ -77,7 +96,7 @@ export const HeightCmPicker: React.FC<HeightCmPickerProps> = ({
         >
           <SingleChoiceOptionList
             options={options}
-            value={selected}
+            value={webSheetSelectedValue}
             onSelect={(next) => {
               commitValue(next);
               setSheetAnchor(null);
@@ -93,7 +112,7 @@ export const HeightCmPicker: React.FC<HeightCmPickerProps> = ({
       {label ? <Text style={styles.lbl}>{label}</Text> : null}
       <View style={styles.pickerWrapper}>
         <Picker
-          selectedValue={selected}
+          selectedValue={nativePickerSelectedValue}
           onValueChange={(v) => commitValue(String(v))}
           style={[
             styles.picker,
@@ -138,17 +157,10 @@ const styles = StyleSheet.create({
   },
   webTrigger: {
     maxWidth: 360,
-    flexDirection: 'row',
-    alignItems: 'center',
+    width: '100%',
+    alignSelf: 'stretch',
   },
-  webTriggerContent: {
-    flex: 1,
-    flexDirection: 'row',
-    alignItems: 'center',
-  },
-  webTriggerText: {
-    flex: 1,
-  },
+  webTriggerText: {},
   webChevron: {
     color: 'rgba(156,180,216,0.9)',
     fontSize: 14,

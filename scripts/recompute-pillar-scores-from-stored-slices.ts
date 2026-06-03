@@ -188,7 +188,6 @@ async function main(): Promise<void> {
       pillar_scores,
       weighted_score: gate.weightedScore,
       passed: gate.pass,
-      gate_fail_reason: gate.failReason,
       gate_fail_reasons: gate.failReasonCodes ?? [],
       gate_fail_detail: gate.failReasonDetail ?? null,
       scenario_composites: scenarioCompositesToStorageJson(gate.scenarioComposites),

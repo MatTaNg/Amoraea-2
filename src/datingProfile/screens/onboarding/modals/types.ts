@@ -1,5 +1,6 @@
 import { AvailabilitySlot } from '@/src/types';
 import { MatchPreferences } from '@/shared/hooks/filterPreferences/types';
+import type { ArchetypeId } from '@/shared/constants/archetypes';
 
 export interface OnboardingDealbreakerPreferences extends MatchPreferences {
   childrenPreference?: string;
@@ -60,6 +61,8 @@ export interface OnboardingData {
     eroticBlueprintType?: string;
     spiralDynamics?: string;
   };
+  /** Jungian brand archetypes (`profile_json.archetypes`) — exactly two when set. */
+  archetypes?: ArchetypeId[];
   /** Full location from GPS (for countryCode → imperial vs metric) */
   userLocation?: OnboardingUserLocation;
   /** Stored in metric (cm). Display in ft/in or cm based on countryCode. */
@@ -97,8 +100,6 @@ export interface OnboardingData {
   spaceForNewRelationship?: string;
   partnerMoodMismatchResponse?: string;
   sexualFocusPreference?: string;
-  sexualFeedbackStyle?: string;
-  sexualNeedsCommunicationComfort?: string;
   /** Partner already has children — Yes / No / No preference */
   prefPartnerHasChildren?: string;
   prefPartnerPoliticalAlignmentImportance?: string;
@@ -119,6 +120,13 @@ export interface OnboardingData {
         physicalHealth: number;
       }
     | string[];
+  /** Optional deep-dive answers keyed by domain id → question id → text (resume in onboarding_progress). */
+  lifeDomainAnswers?: Partial<
+    Record<
+      'finance' | 'family' | 'intimacy' | 'spirituality' | 'health',
+      Record<string, string>
+    >
+  >;
   matchPreferences?: OnboardingDealbreakerPreferences;
 }
 

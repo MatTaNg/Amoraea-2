@@ -1,4 +1,5 @@
 import { supabase } from '@/data/supabaseClient';
+import { ONBOARDING_PROGRESS_SELECT } from '@data/supabase/tableSelects';
 import { Result } from '@/src/types';
 import { OnboardingProgress, OnboardingData } from '../types';
 import { profilesRepo } from '@/data/repos/profilesRepo';
@@ -11,7 +12,7 @@ class ModalOnboardingService {
     try {
       const { data, error } = await supabase
         .from('onboarding_progress')
-        .select('*')
+        .select(ONBOARDING_PROGRESS_SELECT)
         .eq('user_id', userId)
         .maybeSingle();
 

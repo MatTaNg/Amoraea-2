@@ -1,4 +1,6 @@
 import { supabase } from '../supabase/client';
+import { PROFILES_ROW_SELECT } from '../supabase/userInterviewRoutingSelect';
+import { fetchAccountGenderDb } from '@/shared/utils/accountGender';
 import type { Result, UserProfile } from '../../datingProfile/types';
 
 /** When `profiles.profile_json` is missing on the server, we stash dating fields here until migrations run. */
@@ -151,7 +153,11 @@ async function readMergedProfile(
   if (options && 'existingRow' in options) {
     data = options.existingRow ?? null;
   } else {
-    const { data: fetched, error } = await supabase.from('profiles').select('*').eq('id', userId).maybeSingle();
+    const { data: fetched, error } = await supabase
+      .from('profiles')
+      .select(PROFILES_ROW_SELECT)
+      .eq('id', userId)
+      .maybeSingle();
     if (error) throw new Error(error.message);
     data = fetched as Record<string, unknown> | null;
   }
@@ -174,6 +180,9 @@ async function readMergedProfile(
       }
       flat[k] = v;
     }
+    // `profile_json` is canonical for dating fields; legacy top-level row columns are often stale copies
+    // of the same facts and must not overwrite freshly saved JSON after upsert.
+    flat = { ...flat, ...json };
   }
 
   const { data: authData } = await supabase.auth.getUser();
@@ -182,9 +191,19 @@ async function readMergedProfile(
     const raw = (u.user_metadata as Record<string, unknown>)[OVERLAY_METADATA_KEY];
     const overlayFlat = profileJsonObject(raw);
     if (Object.keys(overlayFlat).length > 0) {
-      flat = { ...flat, ...overlayFlat };
+      // Overlay is a fallback when `profile_json` was unavailable; merged DB state must win on conflicts
+      // so saved edits are not reverted by stale `dating_profile_overlay` metadata.
+      flat = { ...overlayFlat, ...flat };
     }
   }
+
+  const existingGender =
+    typeof flat.gender === 'string' && flat.gender.trim() !== '' ? flat.gender.trim() : '';
+  if (!existingGender) {
+    const accountGender = await fetchAccountGenderDb(userId);
+    if (accountGender) flat.gender = accountGender;
+  }
+
   return flat;
 }
 
@@ -215,7 +234,7 @@ export const profilesRepo = {
         email && email.includes('@') ? email.split('@')[0]!.trim() || 'Member' : 'Member';
       const { data: exData, error: exErr } = await supabase
         .from('profiles')
-        .select('*')
+        .select(PROFILES_ROW_SELECT)
         .eq('id', userId)
         .maybeSingle();
       if (exErr) return { success: false, error: new Error(exErr.message) };
@@ -242,7 +261,7 @@ export const profilesRepo = {
     try {
       const { data: existingRowData, error: existingErr } = await supabase
         .from('profiles')
-        .select('*')
+        .select(PROFILES_ROW_SELECT)
         .eq('id', userId)
         .maybeSingle();
       if (existingErr) throw new Error(existingErr.message);
@@ -310,11 +329,10 @@ export const profilesRepo = {
       );
       if (avatarPick) setTopLevelIfColumnExists(row, ex, 'avatar_url', avatarPick);
 
-      const websitePick = pickNonEmptyString(nextFlat.website);
-      if (websitePick) setTopLevelIfColumnExists(row, ex, 'website', websitePick);
-
-      const usernameVal = pickNonEmptyString(nextFlat.username);
-      if (usernameVal) setTopLevelIfColumnExists(row, ex, 'username', usernameVal);
+      const insightAck = nextFlat.insight_display_acknowledged_at;
+      if (typeof insightAck === 'string' && insightAck.trim() !== '') {
+        setTopLevelIfColumnExists(row, ex, 'insight_display_acknowledged_at', insightAck.trim());
+      }
 
       const { error } = await supabase.from('profiles').upsert(row, { onConflict: 'id' });
       if (!error) {

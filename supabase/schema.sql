@@ -1,4 +1,5 @@
--- Users table (Amoraea app data; avoids conflict with profiles from other apps)
+-- Users table (account + interview). Dating demographics: profiles.profile_json (20260621120000).
+-- This file is a partial reference; apply supabase/migrations for the live schema.
 CREATE TABLE IF NOT EXISTS users (
   id UUID PRIMARY KEY REFERENCES auth.users(id) ON DELETE CASCADE,
   created_at TIMESTAMP WITH TIME ZONE DEFAULT TIMEZONE('utc', NOW()) NOT NULL,
@@ -6,15 +7,8 @@ CREATE TABLE IF NOT EXISTS users (
   onboarding_completed BOOLEAN DEFAULT FALSE NOT NULL,
   onboarding_step INTEGER DEFAULT 1 NOT NULL,
   name TEXT,
-  age INTEGER,
-  gender TEXT CHECK (gender IN ('Man', 'Woman', 'Non-binary', 'man', 'woman', 'non-binary', 'non_binary')),
-  attracted_to TEXT[],
-  height_centimeters INTEGER,
-  occupation TEXT,
-  location_latitude DOUBLE PRECISION,
-  location_longitude DOUBLE PRECISION,
-  location_label TEXT,
-  primary_photo_url TEXT
+  display_name TEXT,
+  email TEXT
 );
 
 -- Typologies table

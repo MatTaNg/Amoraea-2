@@ -8,7 +8,14 @@ jest.mock('@data/supabase/client', () => ({
   },
 }));
 
+jest.mock('@data/repos/profilesRepo', () => ({
+  profilesRepo: {
+    updateProfile: jest.fn(),
+  },
+}));
+
 import { supabase } from '@data/supabase/client';
+import { profilesRepo } from '@data/repos/profilesRepo';
 import { InviteCodeRepository } from '../InviteCodeRepository';
 
 describe('InviteCodeRepository', () => {
@@ -17,6 +24,7 @@ describe('InviteCodeRepository', () => {
   beforeEach(() => {
     jest.clearAllMocks();
     repo = new InviteCodeRepository();
+    (profilesRepo.updateProfile as jest.Mock).mockResolvedValue({ success: true, data: {} });
   });
 
   describe('findUserIdByCode', () => {
@@ -64,6 +72,7 @@ describe('InviteCodeRepository', () => {
 
     it('inserts new user when none exists', async () => {
       let fromCalls = 0;
+      let insertedPayload: Record<string, unknown> | null = null;
       (supabase.from as jest.Mock).mockImplementation((table: string) => {
         expect(table).toBe('users');
         fromCalls += 1;
@@ -79,15 +88,28 @@ describe('InviteCodeRepository', () => {
           };
         }
         return {
-          insert: jest.fn(() => Promise.resolve({ error: null })),
+          insert: jest.fn((payload: Record<string, unknown>) => {
+            insertedPayload = payload;
+            return Promise.resolve({ error: null });
+          }),
         };
       });
       (supabase.auth.getSession as jest.Mock).mockResolvedValue({
         data: { session: { user: { id: 'u-new' } } },
       });
 
-      const r = await repo.ensureUserWithInviteCode('u-new', { email: 'a@b.com' });
+      const r = await repo.ensureUserWithInviteCode('u-new', { email: 'a@b.com', age: 29, gender: 'Woman' });
       expect(r.inviteCode).toHaveLength(6);
+      expect(insertedPayload).toMatchObject({
+        id: 'u-new',
+        email: 'a@b.com',
+      });
+      expect(insertedPayload).not.toHaveProperty('age');
+      expect(insertedPayload).not.toHaveProperty('gender');
+      expect(profilesRepo.updateProfile).toHaveBeenCalledWith('u-new', {
+        age: 29,
+        gender: 'woman',
+      });
     });
 
     it('throws when insert fails', async () => {

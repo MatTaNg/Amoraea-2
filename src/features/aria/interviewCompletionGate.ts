@@ -26,7 +26,7 @@ function scenarioBundleAssessable(bundle: unknown): boolean {
   return pillarScoresHaveNumericAssessment(ps);
 }
 
-function keyEvidenceHasNonEmptyAssessedText(keyEvidence: unknown): boolean {
+export function keyEvidenceHasNonEmptyAssessedText(keyEvidence: unknown): boolean {
   if (keyEvidence == null || typeof keyEvidence !== 'object' || Array.isArray(keyEvidence)) return false;
   return Object.values(keyEvidence as Record<string, unknown>).some(
     (v) => typeof v === 'string' && v.trim().length > 0
@@ -39,14 +39,10 @@ export function personalMomentBundleWasScored(bundle: unknown): boolean {
   const ps = (bundle as { pillarScores?: unknown }).pillarScores;
   if (pillarScoresHaveNumericAssessment(ps)) return true;
   if (ps == null || typeof ps !== 'object' || Array.isArray(ps)) return false;
-  const keys = Object.keys(ps as Record<string, unknown>);
   const keyEvidence = (bundle as { keyEvidence?: unknown }).keyEvidence;
-  // After normalizeScoresByEvidence, all-null assessed slices can become `{}` — still valid if the model
-  // wrote real evidence strings (see Moment 4 deflection / no-signal paths).
-  if (keys.length === 0) {
-    return keyEvidenceHasNonEmptyAssessedText(keyEvidence);
-  }
-  return keyEvidence != null && typeof keyEvidence === 'object' && !Array.isArray(keyEvidence);
+  // No finite numerics: treat as scored only when keyEvidence documents the assessment (deflection /
+  // no-signal paths). Do not accept an empty keyEvidence object — that was letting `{}` pass after sanitize.
+  return keyEvidenceHasNonEmptyAssessedText(keyEvidence);
 }
 
 /**
@@ -124,5 +120,8 @@ export function buildIncompleteInterviewGateResult(failure: CompletionGateFailur
     failReasonCodes: [],
     failReasonDetail: null,
     scenarioComposites: null,
+    reviewFlags: [],
+    modifiedWeightedScore: null,
+    scoreModifier: 0,
   };
 }

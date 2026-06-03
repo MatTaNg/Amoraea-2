@@ -1,5 +1,8 @@
+import { transcriptHasInterviewClosingAssistantMessage } from '../features/aria/elongatingProbe';
 import { SCENARIO_2_TO_3_TRANSITION_FALLBACK } from '../features/aria/interviewTransitionBundles';
 import { looksLikeMoment4GrudgePrompt, looksLikeMoment4ThresholdQuestion } from '../features/aria/moment4ProbeLogic';
+import { looksLikeMoment4SpecificityFollowUpEcho } from '../features/aria/moment4SpecificityFollowUp';
+import { detectScenarioFromResponse } from '../features/aria/scenarioNumberDetection';
 import type { StoredScenarioScores } from './storage/InterviewStorage';
 
 export type InterviewMomentIndex = 1 | 2 | 3 | 4 | 5;
@@ -46,14 +49,7 @@ function resumeTranscriptCrossedMoment4Boundary(content: string): boolean {
 
 /** Mirrors AriaScreen `detectScenarioFromResponse` for transcript retagging without importing the screen. */
 export function detectScenarioAnchor(content: string): 1 | 2 | 3 | null {
-  if (!content?.trim()) return null;
-  const c = content.toLowerCase();
-  if (/emma and ryan|ryan takes a call|first situation|here's the first/.test(c)) return 1;
-  if (/sarah has been job hunting|second situation|on to the second|here's the next situation/.test(c)) return 2;
-  if (/sophie and daniel|daniel.*didn't know what to say|daniel.*didn't know how|here's the third situation|third situation|last one.*situation three|situation three/.test(c)) {
-    return 3;
-  }
-  return null;
+  return detectScenarioFromResponse(content);
 }
 
 /** Index of the first assistant message that opens this scenario (vignette lead-in). */
@@ -80,6 +76,29 @@ export function sliceMessagesBeforeScenarioIntro<T extends { role: string; conte
   const idx = firstAssistantIndexForScenarioIntro(msgs, scenario);
   if (idx < 0) return msgs;
   return msgs.slice(0, idx);
+}
+
+/**
+ * Saved local state is resumable only after a scenario vignette anchor exists (or a scenario was fully scored),
+ * not after pre-scenario intro turns alone (name + "Are you ready?" + "Yes").
+ */
+export function storedInterviewHasResumableScenarioProgress(input: {
+  messages: ReadonlyArray<{ role: string; content?: string }>;
+  scenariosCompleted?: number[];
+  scenarioScores?: StoredScenarioScores;
+  resumeActiveScenario?: 1 | 2 | 3 | null;
+  currentScenario?: number;
+}): boolean {
+  const userTurnsTotal = input.messages.filter((m) => m.role === 'user').length;
+  const lastCompleted = lastFullyCompletedScenario(input.scenariosCompleted ?? [], input.scenarioScores);
+  if (lastCompleted > 0 && userTurnsTotal >= 1) return true;
+
+  for (const scenario of [1, 2, 3] as const) {
+    if (firstAssistantIndexForScenarioIntro(input.messages, scenario) >= 0 && userTurnsTotal >= 1) {
+      return true;
+    }
+  }
+  return false;
 }
 
 export function scenarioHasPersistedScores(scenario: number, scores: StoredScenarioScores | undefined): boolean {
@@ -215,6 +234,105 @@ export function createMomentCompletionFromLastC(lastC: number): Record<Interview
   };
 }
 
+/** Resume welcome-back copy (TTS + transcript bubble) — used to block duplicate gesture-flush playback. */
+export function isResumeWelcomeBackAssistantText(text: string | null | undefined): boolean {
+  const c = (text ?? '').toLowerCase().replace(/\s+/g, ' ');
+  return (
+    c.includes('welcome back') &&
+    (c.includes('pick up where we left off') ||
+      c.includes('left off in the personal part') ||
+      c.includes('repeat what i said'))
+  );
+}
+
+/** Drop ephemeral resume welcome lines so refresh does not stack duplicate bubbles. */
+export function stripEphemeralWelcomeBackMessages<
+  T extends { role: string; content?: string; isWelcomeBack?: boolean },
+>(msgs: T[]): T[] {
+  return msgs.filter((m) => {
+    if ((m as { isWelcomeBack?: boolean }).isWelcomeBack) return false;
+    if (m.role !== 'assistant') return true;
+    return !isResumeWelcomeBackAssistantText(m.content);
+  });
+}
+
+/** After scenario N is fully complete, emotion modals 0..N−1 should have been shown. */
+export function emotionModalCatchUpThroughScenario(lastCompletedScenario: number): 1 | 2 | 3 | null {
+  if (lastCompletedScenario < 1) return null;
+  return Math.min(3, lastCompletedScenario) as 1 | 2 | 3;
+}
+
+/**
+ * Score bundles can lag transcript progress (e.g. Moment 4 grudge after S3 vignette while `lastCompletedScenario` is still 2).
+ * Use moment + transcript handoff so the post–S3 emotion modal (index 2) is not skipped on resume.
+ */
+export type EmotionModalCatchUpFromResume = {
+  through: 1 | 2 | 3 | null;
+  /** Why `through` was raised above `lastCompletedScenario` (for resume debug). */
+  bumpReason: string | null;
+};
+
+export function emotionModalCatchUpThroughScenarioFromResume(params: {
+  lastCompletedScenario: number;
+  effectiveMoment: InterviewMomentIndex;
+  transcriptMessages: ReadonlyArray<{ role: string; content?: string }>;
+}): EmotionModalCatchUpFromResume {
+  let through = params.lastCompletedScenario;
+  let bumpReason: string | null = null;
+  if (params.effectiveMoment >= 4) {
+    if (through < 3) bumpReason = 'effectiveMoment>=4';
+    through = Math.max(through, 3);
+  } else if (params.effectiveMoment === 3) {
+    if (through < 2) bumpReason = 'effectiveMoment===3';
+    through = Math.max(through, 2);
+  } else if (params.effectiveMoment === 2) {
+    if (through < 1) bumpReason = 'effectiveMoment===2';
+    through = Math.max(through, 1);
+  }
+  for (let i = 0; i < params.transcriptMessages.length; i++) {
+    const m = params.transcriptMessages[i];
+    if (m.role !== 'assistant') continue;
+    const content = m.content ?? '';
+    if (resumeTranscriptCrossedMoment4Boundary(content)) {
+      if (through < 3) bumpReason = `transcript_m4_boundary@${i}`;
+      through = Math.max(through, 3);
+      break;
+    }
+  }
+  return {
+    through: emotionModalCatchUpThroughScenario(through),
+    bumpReason,
+  };
+}
+
+/** True when the saved session finished (closing delivered) or is awaiting post-interview scoring. */
+export function savedInterviewReachedClosingState(input: {
+  pendingCompletion?: boolean;
+  messages?: ReadonlyArray<{
+    role: string;
+    content?: string;
+    isWelcomeBack?: boolean;
+    isScoreCard?: boolean;
+  }>;
+}): boolean {
+  if (input.pendingCompletion === true) return true;
+  return transcriptHasInterviewClosingAssistantMessage(input.messages ?? []);
+}
+
+/** Offer welcome-back TTS on mid-interview resume only — never after the closing turn. */
+export function shouldOfferResumeWelcomeTts(params: {
+  mode: InterviewResumeMode;
+  transcriptMessages: ReadonlyArray<{
+    role: string;
+    content?: string;
+    isWelcomeBack?: boolean;
+    isScoreCard?: boolean;
+  }>;
+}): boolean {
+  if (transcriptHasInterviewClosingAssistantMessage(params.transcriptMessages)) return false;
+  return true;
+}
+
 export function buildResumeWelcomeMessage(params: {
   mode: InterviewResumeMode;
   resumeScenario: 1 | 2 | 3;
@@ -234,8 +352,98 @@ export function buildResumeWelcomeMessage(params: {
   return msg;
 }
 
+/** True when any assistant turn already delivered the grudge or a later Moment 4 question. */
+export function resumeTranscriptAlreadyDeliveredMoment4Question(
+  transcriptMessages: ReadonlyArray<{ role: string; content?: string }>
+): boolean {
+  for (let i = transcriptMessages.length - 1; i >= 0; i--) {
+    const m = transcriptMessages[i];
+    if (m.role !== 'assistant') continue;
+    const content = (m.content ?? '').trim();
+    if (!content) continue;
+    if (looksLikeMoment4SpecificityFollowUpEcho(content)) return true;
+    if (looksLikeMoment4ThresholdQuestion(content)) return true;
+    if (resumeTranscriptCrossedMoment4Boundary(content)) return true;
+    if (looksLikeMoment4GrudgePrompt(content)) return true;
+  }
+  return false;
+}
+
+/**
+ * After emotion-modal catch-up on resume, only auto-speak the post-modal grudge segment when the user
+ * has not already heard it. Otherwise welcome-back ends silently (user can ask to repeat).
+ */
+export function resumeShouldSpeakEmotionCatchUpAfterModal(
+  transcriptMessages: ReadonlyArray<{ role: string; content?: string }>,
+  afterModal: string | null | undefined
+): boolean {
+  if (!afterModal?.trim()) return false;
+  return !resumeTranscriptAlreadyDeliveredMoment4Question(transcriptMessages);
+}
+
+type ScenarioTaggedTranscriptTurn = {
+  role: string;
+  content?: string;
+  scenarioNumber?: number;
+  interviewMoment?: number;
+};
+
+function isEphemeralOrNonScoringTranscriptTurn(m: ScenarioTaggedTranscriptTurn): boolean {
+  return (
+    (m as { isScoreCard?: boolean }).isScoreCard === true ||
+    (m as { isWelcomeBack?: boolean }).isWelcomeBack === true
+  );
+}
+
+/**
+ * Assign scenarioNumber on every user/assistant turn:
+ * - Scenarios A–C follow vignette / transition anchors (1 → 2 → 3).
+ * - Moment 4+ personal segments stay tagged as scenario 3 for scoring/admin display.
+ */
+export function assignScenarioNumbersToTranscript<T extends ScenarioTaggedTranscriptTurn>(msgs: T[]): T[] {
+  let cur: 1 | 2 | 3 = 1;
+  let passedMoment4 = false;
+  return msgs.map((m) => {
+    if (isEphemeralOrNonScoringTranscriptTurn(m)) return m;
+    const content = m.content ?? '';
+    const moment =
+      typeof m.interviewMoment === 'number' && m.interviewMoment >= 1 && m.interviewMoment <= 5
+        ? m.interviewMoment
+        : undefined;
+    if (resumeTranscriptCrossedMoment4Boundary(content) || (moment != null && moment >= 4)) {
+      passedMoment4 = true;
+    }
+    if (!passedMoment4 && m.role === 'assistant') {
+      const d = detectScenarioAnchor(content);
+      if (d != null) cur = d;
+    }
+    if (m.role === 'user' || m.role === 'assistant') {
+      const scenarioNumber: 1 | 2 | 3 = passedMoment4 ? 3 : cur;
+      if (m.scenarioNumber === scenarioNumber) return m;
+      return { ...m, scenarioNumber } as T;
+    }
+    return m;
+  });
+}
+
+/** True when any scored turn's scenarioNumber differs from {@link assignScenarioNumbersToTranscript}. */
+export function transcriptNeedsScenarioNumberPatch(
+  msgs: ReadonlyArray<ScenarioTaggedTranscriptTurn>,
+): boolean {
+  if (msgs.length === 0) return false;
+  const tagged = assignScenarioNumbersToTranscript([...msgs]);
+  for (let i = 0; i < msgs.length; i++) {
+    const m = msgs[i];
+    if (m.role !== 'user' && m.role !== 'assistant') continue;
+    if (isEphemeralOrNonScoringTranscriptTurn(m)) continue;
+    if (m.scenarioNumber !== tagged[i]?.scenarioNumber) return true;
+  }
+  return false;
+}
+
 /**
  * Reassign scenario numbers from scenario-intro anchors through Moment 4 boundary so stored tags match the segment.
+ * @deprecated Prefer {@link assignScenarioNumbersToTranscript} for full-transcript tagging including Moment 4+.
  */
 export function retagScenarioNumbersBeforeMomentFour<T extends { role: string; content?: string; scenarioNumber?: number }>(
   msgs: T[]

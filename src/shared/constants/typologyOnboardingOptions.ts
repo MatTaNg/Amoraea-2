@@ -92,6 +92,14 @@ export const HUMAN_DESIGN_AUTHORITY_OPTIONS = [
   { label: 'Splenic', value: 'Splenic' },
 ] as const;
 
+export const SPIRAL_DYNAMICS_CONSCIOUSNESS_OPTIONS = [
+  { label: 'Blue (Amber)', value: 'Blue (Amber)' },
+  { label: 'Orange', value: 'Orange' },
+  { label: 'Green', value: 'Green' },
+  { label: 'Yellow (Teal)', value: 'Yellow (Teal)' },
+  { label: 'Turquoise', value: 'Turquoise' },
+] as const;
+
 export const HUMAN_DESIGN_PROFILE_OPTIONS = [
   { label: '1/3 - The Investigator / Martyr', value: '1/3 - The Investigator / Martyr' },
   { label: '1/4 - The Investigator / Opportunist', value: '1/4 - The Investigator / Opportunist' },
@@ -117,6 +125,23 @@ export type TypologyOnboardingSection = {
   readonly title: string;
   readonly rows: readonly TypologyOnboardingRow[];
 };
+
+export type TypologyOnboardingAnswers = Record<string, string | undefined>;
+
+/** True when at least one optional typology dropdown is still unset. */
+export function typologyHasUnansweredFields(typology?: TypologyOnboardingAnswers | null): boolean {
+  const t = typology ?? {};
+  for (const section of TYPOLOGY_ONBOARDING_SECTIONS) {
+    for (const row of section.rows) {
+      if (!String(t[row.key] ?? '').trim()) return true;
+    }
+  }
+  return false;
+}
+
+export function shouldShowTypologyOnboardingStep(typology?: TypologyOnboardingAnswers | null): boolean {
+  return typologyHasUnansweredFields(typology);
+}
 
 /** Grouped UI sections; all fields optional (empty selection = skip). */
 export const TYPOLOGY_ONBOARDING_SECTIONS: readonly TypologyOnboardingSection[] = [
@@ -156,6 +181,17 @@ export const TYPOLOGY_ONBOARDING_SECTIONS: readonly TypologyOnboardingSection[] 
       { key: 'humanDesignType', label: 'What is your Human Design Type?', options: HUMAN_DESIGN_TYPE_OPTIONS },
       { key: 'humanDesignAuthority', label: 'What is your Human Design Authority?', options: HUMAN_DESIGN_AUTHORITY_OPTIONS },
       { key: 'humanDesignProfile', label: 'What is your Human Design Profile Type?', options: HUMAN_DESIGN_PROFILE_OPTIONS },
+    ],
+  },
+  {
+    title: 'Integral / Spiral Dynamics',
+    rows: [
+      {
+        key: 'spiralDynamics',
+        label:
+          'Based on Ken Wilbers Integral Theory or Clair Graves Spiral Dynamics model, what level of consciousness do you most often reside in?',
+        options: SPIRAL_DYNAMICS_CONSCIOUSNESS_OPTIONS,
+      },
     ],
   },
 ] as const;

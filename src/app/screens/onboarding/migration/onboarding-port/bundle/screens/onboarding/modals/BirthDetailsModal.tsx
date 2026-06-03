@@ -1,10 +1,11 @@
 import React from 'react';
-import { View, Text, TouchableOpacity, ScrollView } from 'react-native';
+import { View, Text, TouchableOpacity, ScrollView, ActivityIndicator } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Input } from '@/shared/ui/Input';
 import { Button } from '@/shared/ui/Button';
 import { DatePicker, TimePicker } from '@/shared/components/DatePicker';
 import { useLocationAutocomplete } from '@/shared/hooks/useLocationAutocomplete';
+import { theme } from '@/shared/theme/theme';
 import { OnboardingHeader } from './components/OnboardingHeader';
 import { styles } from './BirthDetailsModal.styled';
 
@@ -37,7 +38,7 @@ export const BirthDetailsModal: React.FC<BirthDetailsModalProps> = ({
     setLocationSuggestions(suggestions);
   }, []);
 
-  useLocationAutocomplete({
+  const { isSearchingPlaces: birthPlacePlacesLoading } = useLocationAutocomplete({
     value: birthPlace,
     validatedValue: validatedLocation,
     onSuggestionsChange: handleSuggestionsChange,
@@ -82,7 +83,14 @@ export const BirthDetailsModal: React.FC<BirthDetailsModalProps> = ({
             }}
             placeholder="City, State or City, Country"
           />
-          
+
+          {birthPlacePlacesLoading ? (
+            <View style={styles.placeSearchLoadingRow}>
+              <ActivityIndicator size="small" color={theme.colors.primary} />
+              <Text style={styles.placeSearchLoadingText}>Looking up places…</Text>
+            </View>
+          ) : null}
+
           {birthPlace.trim() && locationSuggestions.length > 0 && (
             <View style={styles.suggestionsContainer}>
               {locationSuggestions.map((s, idx) => (

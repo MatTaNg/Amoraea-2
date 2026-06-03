@@ -7,6 +7,11 @@ export type PersonalMomentSliceForSanitize = {
   summary?: string;
   specificity?: string;
   momentName?: string;
+  mentalizing_overcertainty?: boolean;
+  response_concreteness?: string | null;
+  emotional_vocab_count?: number | null;
+  emotional_vocab_words?: string[];
+  user_slice_word_count?: number | null;
 };
 
 const M4_REMOVE: readonly string[] = [
@@ -52,6 +57,11 @@ export type PersonalMoment5SliceForSanitize = {
   summary?: string;
   specificity?: string;
   momentName?: string;
+  mentalizing_overcertainty?: boolean;
+  response_concreteness?: string | null;
+  emotional_vocab_count?: number | null;
+  emotional_vocab_words?: string[];
+  user_slice_word_count?: number | null;
 };
 
 /**

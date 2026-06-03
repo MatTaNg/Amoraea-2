@@ -28,6 +28,9 @@ describe('buildUserPrompt', () => {
     );
 
     expect(p).toContain('ASSESSMENT RESULTS:');
+    expect(p).toContain('AUTHORITATIVE SCORES — YOU MUST USE THESE EXACT VALUES');
+    expect(p).toContain('PILLAR SCORES (use these exactly in construct_breakdown.score)');
+    expect(p).toContain('CRITICAL SCORE RULE');
     expect(p).toContain('Weighted Score: 6.5/10');
     expect(p).toContain('Result: PASS');
     expect(p).toContain('"mentalizing": 7');

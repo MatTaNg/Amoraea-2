@@ -1,11 +1,22 @@
 import { describe, expect, it } from 'vitest';
 import {
+  assignScenarioNumbersToTranscript,
   buildResumeWelcomeMessage,
   computeInterviewResumePlan,
+  emotionModalCatchUpThroughScenario,
+  emotionModalCatchUpThroughScenarioFromResume,
+  savedInterviewReachedClosingState,
+  shouldOfferResumeWelcomeTts,
   firstAssistantIndexForScenarioIntro,
   lastFullyCompletedScenario,
   retagScenarioNumbersBeforeMomentFour,
   sliceMessagesBeforeScenarioIntro,
+  isResumeWelcomeBackAssistantText,
+  stripEphemeralWelcomeBackMessages,
+  resumeShouldSpeakEmotionCatchUpAfterModal,
+  resumeTranscriptAlreadyDeliveredMoment4Question,
+  storedInterviewHasResumableScenarioProgress,
+  transcriptNeedsScenarioNumberPatch,
 } from '../interviewResumeCursor';
 
 describe('interviewResumeCursor', () => {
@@ -16,6 +27,129 @@ describe('interviewResumeCursor', () => {
         { 1: { pillarScores: { mentalizing: 5 }, pillarConfidence: {}, keyEvidence: {} } }
       )
     ).toBe(1);
+  });
+
+  it('isResumeWelcomeBackAssistantText detects resume welcome copy', () => {
+    expect(
+      isResumeWelcomeBackAssistantText(
+        "Welcome back — we'll pick up where we left off. If you'd like me to repeat what I said, let me know."
+      )
+    ).toBe(true);
+    expect(isResumeWelcomeBackAssistantText('Can you say more about that?')).toBe(false);
+  });
+
+  it('stripEphemeralWelcomeBackMessages removes tagged and untagged welcome lines', () => {
+    const msgs = [
+      { role: 'assistant', content: 'Sarah vignette', isWelcomeBack: false },
+      {
+        role: 'assistant',
+        content: "Welcome back — we'll pick up where we left off. If you'd like me to repeat what I said, let me know.",
+        isWelcomeBack: true,
+      },
+      {
+        role: 'assistant',
+        content: "Welcome back — we'll pick up where we left off.",
+      },
+    ];
+    expect(stripEphemeralWelcomeBackMessages(msgs)).toHaveLength(1);
+    expect(stripEphemeralWelcomeBackMessages(msgs)[0]?.content).toContain('Sarah');
+  });
+
+  it('emotionModalCatchUpThroughScenario maps last completed to modal gate scenario', () => {
+    expect(emotionModalCatchUpThroughScenario(0)).toBeNull();
+    expect(emotionModalCatchUpThroughScenario(1)).toBe(1);
+    expect(emotionModalCatchUpThroughScenario(2)).toBe(2);
+    expect(emotionModalCatchUpThroughScenario(5)).toBe(3);
+  });
+
+  it('emotionModalCatchUpThroughScenarioFromResume includes S3 modal when moment 4 despite scores at 2', () => {
+    expect(
+      emotionModalCatchUpThroughScenarioFromResume({
+        lastCompletedScenario: 2,
+        effectiveMoment: 4,
+        transcriptMessages: [
+          {
+            role: 'assistant',
+            content:
+              "That's the end of the three described situations. Have you ever held a grudge against someone?",
+          },
+        ],
+      }).through
+    ).toBe(3);
+  });
+
+  it('emotionModalCatchUpThroughScenarioFromResume ignores intro "three situations" on mid-S1 resume', () => {
+    const result = emotionModalCatchUpThroughScenarioFromResume({
+      lastCompletedScenario: 0,
+      effectiveMoment: 1,
+      transcriptMessages: [
+        {
+          role: 'assistant',
+          content:
+            "Good to meet you. I'll first give you three situations, and you just tell me what you'd do in each situation.",
+        },
+        {
+          role: 'assistant',
+          content: 'That makes a lot of sense. What if you were Ryan? How would you repair this situation?',
+        },
+      ],
+    });
+    expect(result.through).toBeNull();
+    expect(result.bumpReason).toBeNull();
+  });
+
+  it('shouldOfferResumeWelcomeTts even when last assistant line is substantive (mid-scenario refresh)', () => {
+    const longAssistant = {
+      role: 'assistant' as const,
+      content:
+        "That's the end of this scenario — great work. Here's the third situation: Sophie and Daniel have had the same argument for the third time.",
+    };
+    expect(
+      shouldOfferResumeWelcomeTts({
+        mode: 'replay_incomplete',
+        transcriptMessages: [longAssistant],
+      })
+    ).toBe(true);
+    expect(
+      shouldOfferResumeWelcomeTts({
+        mode: 'replay_incomplete',
+        transcriptMessages: [{ role: 'assistant', content: 'Hi.' }],
+      })
+    ).toBe(true);
+  });
+
+  it('shouldOfferResumeWelcomeTts is false when closing turn is in transcript', () => {
+    expect(
+      shouldOfferResumeWelcomeTts({
+        mode: 'resume_post_scenarios',
+        transcriptMessages: [
+          {
+            role: 'assistant',
+            content:
+              'Good work getting through all of that. Thank you for being so open with me.',
+          },
+        ],
+      }),
+    ).toBe(false);
+  });
+
+  it('savedInterviewReachedClosingState detects pendingCompletion and closing transcript', () => {
+    expect(savedInterviewReachedClosingState({ pendingCompletion: true, messages: [] })).toBe(true);
+    expect(
+      savedInterviewReachedClosingState({
+        messages: [
+          {
+            role: 'assistant',
+            content: 'Thanks for sticking with this. Thank you for being so open with me.',
+          },
+        ],
+      }),
+    ).toBe(true);
+    expect(
+      savedInterviewReachedClosingState({
+        messages: [{ role: 'assistant', content: 'What do you make of that?' }],
+      }),
+    ).toBe(false);
   });
 
   it('resume welcome for mid-scenario dropout does not promise a full vignette restart', () => {
@@ -30,6 +164,28 @@ describe('interviewResumeCursor', () => {
     const msg = buildResumeWelcomeMessage({ mode: 'resume_next', resumeScenario: 3 });
     expect(msg.toLowerCase()).toContain('pick up where we left off');
     expect(msg.toLowerCase()).not.toMatch(/\bthe (first|second|third) situation\b/);
+  });
+
+  it('resumeShouldSpeakEmotionCatchUpAfterModal skips grudge when already in transcript', () => {
+    const grudge =
+      'Have you ever held a grudge against someone, or had someone in your life you really did not like?';
+    expect(
+      resumeTranscriptAlreadyDeliveredMoment4Question([{ role: 'assistant', content: grudge }])
+    ).toBe(true);
+    expect(
+      resumeShouldSpeakEmotionCatchUpAfterModal([{ role: 'assistant', content: grudge }], grudge)
+    ).toBe(false);
+  });
+
+  it('resumeShouldSpeakEmotionCatchUpAfterModal allows grudge tail when handoff only', () => {
+    const afterModal =
+      'Have you ever held a grudge against someone, or had someone in your life you really did not like?';
+    expect(
+      resumeShouldSpeakEmotionCatchUpAfterModal(
+        [{ role: 'assistant', content: "That's the end of the three described situations — great work." }],
+        afterModal
+      )
+    ).toBe(true);
   });
 
   it('replays when active scenario has no scores', () => {
@@ -120,5 +276,108 @@ describe('interviewResumeCursor', () => {
   it('sliceMessagesBeforeScenarioIntro is no-op when scenario intro anchor is missing', () => {
     const msgs = [{ role: 'assistant', content: 'unrelated' }];
     expect(sliceMessagesBeforeScenarioIntro(msgs, 3)).toEqual(msgs);
+  });
+
+  it('storedInterviewHasResumableScenarioProgress rejects pre-scenario intro only (name + ready)', () => {
+    const msgs = [
+      { role: 'assistant', content: "Hi, I'm Amoraea. What can I call you?" },
+      { role: 'user', content: 'Matt' },
+      {
+        role: 'assistant',
+        content:
+          "Good to meet you, Matt. The way this works is I'll first give you three situations. Are you ready?",
+      },
+      { role: 'user', content: 'Yes.' },
+    ];
+    expect(
+      storedInterviewHasResumableScenarioProgress({
+        messages: msgs,
+        resumeActiveScenario: 1,
+        currentScenario: 1,
+      }),
+    ).toBe(false);
+  });
+
+  it('storedInterviewHasResumableScenarioProgress accepts after Emma/Ryan vignette anchor', () => {
+    const msgs = [
+      { role: 'assistant', content: "Hi, I'm Amoraea. What can I call you?" },
+      { role: 'user', content: 'Matt' },
+      {
+        role: 'assistant',
+        content:
+          "Good to meet you, Matt. The way this works is I'll first give you three situations. Are you ready?",
+      },
+      { role: 'user', content: 'Yes.' },
+      {
+        role: 'assistant',
+        content:
+          "Emma and Ryan have dinner plans. Ryan takes a call from his mother halfway through. What's going on between these two?",
+      },
+    ];
+    expect(
+      storedInterviewHasResumableScenarioProgress({
+        messages: msgs,
+        resumeActiveScenario: 1,
+        currentScenario: 1,
+      }),
+    ).toBe(true);
+  });
+
+  it('assignScenarioNumbersToTranscript tags intro and scenario segments', () => {
+    const raw = [
+      { role: 'assistant', content: "Hi, I'm Amoraea. What can I call you?" },
+      { role: 'user', content: 'Matt' },
+      {
+        role: 'assistant',
+        content:
+          "Good to meet you, Matt. The way this works is I'll first give you three situations. Are you ready?",
+      },
+      { role: 'user', content: 'Yes.' },
+      {
+        role: 'assistant',
+        content:
+          "Emma and Ryan have dinner plans. Ryan takes a call from his mother halfway through. What's going on between these two?",
+      },
+      { role: 'user', content: 'Emma feels ignored.' },
+    ];
+    const out = assignScenarioNumbersToTranscript(raw);
+    expect(out.every((m) => typeof (m as { scenarioNumber?: number }).scenarioNumber === 'number')).toBe(true);
+    expect((out[0] as { scenarioNumber?: number }).scenarioNumber).toBe(1);
+    expect((out[4] as { scenarioNumber?: number }).scenarioNumber).toBe(1);
+    expect((out[5] as { scenarioNumber?: number }).scenarioNumber).toBe(1);
+  });
+
+  it('assignScenarioNumbersToTranscript bumps to 2 after Sarah/James anchor', () => {
+    const raw = [
+      { role: 'assistant', content: "Here's the first situation — Emma and Ryan." },
+      { role: 'user', content: 'Answer a.' },
+      { role: 'assistant', content: "Sarah has been job hunting — here's the next situation." },
+      { role: 'user', content: 'Answer b.' },
+    ];
+    const out = assignScenarioNumbersToTranscript(raw);
+    expect((out[2] as { scenarioNumber?: number }).scenarioNumber).toBe(2);
+    expect((out[3] as { scenarioNumber?: number }).scenarioNumber).toBe(2);
+  });
+
+  it('assignScenarioNumbersToTranscript tags Moment 4+ turns as scenario 3', () => {
+    const raw = [
+      { role: 'assistant', content: 'Sophie and Daniel have had the same argument.', scenarioNumber: 3 },
+      { role: 'user', content: 'Threshold answer.', scenarioNumber: 3, interviewMoment: 3 },
+      {
+        role: 'assistant',
+        content: "Good work — you just finished the three situations. Have you ever held a grudge?",
+        interviewMoment: 4,
+      },
+      { role: 'user', content: 'Yes, a coworker.', interviewMoment: 4 },
+    ];
+    const out = assignScenarioNumbersToTranscript(raw);
+    expect((out[2] as { scenarioNumber?: number }).scenarioNumber).toBe(3);
+    expect((out[3] as { scenarioNumber?: number }).scenarioNumber).toBe(3);
+  });
+
+  it('transcriptNeedsScenarioNumberPatch detects missing tags', () => {
+    const raw = [{ role: 'assistant', content: "Hi, I'm Amoraea." }, { role: 'user', content: 'Matt' }];
+    expect(transcriptNeedsScenarioNumberPatch(raw)).toBe(true);
+    expect(transcriptNeedsScenarioNumberPatch(assignScenarioNumbersToTranscript(raw))).toBe(false);
   });
 });

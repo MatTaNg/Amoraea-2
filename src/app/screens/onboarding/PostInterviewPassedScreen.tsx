@@ -4,16 +4,22 @@ import {
   StyleSheet,
   Text,
   Pressable,
-  ScrollView,
   Platform,
   Animated,
   Easing,
   ActivityIndicator,
   Linking,
 } from 'react-native';
-import { SafeAreaContainer } from '@ui/components/SafeAreaContainer';
+import { PostInterviewScrollLayout } from '@app/screens/onboarding/PostInterviewScrollLayout';
+import { PostInterviewProfileEncouragement } from '@app/screens/onboarding/PostInterviewProfileEncouragement';
+import { POST_INTERVIEW_PROFILE_TIME_ESTIMATE } from '@features/onboarding/postInterviewProfileCompletion';
 import { Ionicons } from '@expo/vector-icons';
 import { supabase } from '@data/supabase/client';
+import { clearReferralNoticePending } from '@data/repos/usersRoutingRepo';
+import {
+  USER_INTERVIEW_ROUTING_TABLE,
+  USER_REFERRAL_NOTICE_SELECT,
+} from '@data/supabase/userInterviewRoutingSelect';
 import { FlameOrb } from '@app/screens/FlameOrb';
 import * as Clipboard from 'expo-clipboard';
 import { useQueryClient } from '@tanstack/react-query';
@@ -21,54 +27,28 @@ import { isQaRetakeSignupCode, resetInterviewForQaRetake } from '@features/onboa
 import { useAuth } from '@features/authentication/hooks/useAuth';
 import { isAmoraeaAdminConsoleEmail } from '@/constants/adminConsole';
 import { showConfirmDialog, showSimpleAlert } from '@utilities/alerts/confirmDialog';
+import { resolveStandardPostInterviewStackRoute } from '@utilities/postInterviewProcessingGate';
 import {
-  evaluateStandardPostInterviewRevealWithUsersPassedFallback,
-  standardPostInterviewRouteFromReveal,
-} from '@utilities/postInterviewProcessingGate';
-import { fetchInterviewAttemptRevealSnapshot } from '@utilities/fetchInterviewAttemptRevealSnapshot';
+  fetchInterviewAttemptRevealSnapshot,
+  fetchUserInterviewRevealPollRow,
+} from '@utilities/fetchInterviewAttemptRevealSnapshot';
 import { StackActions, useFocusEffect } from '@react-navigation/native';
 import { modalOnboardingService } from '@/datingProfile/screens/onboarding/modals/services/modalOnboardingService';
 import { profilesRepo } from '@/data/repos/profilesRepo';
-import {
-  getCompletedAssessments,
-  getFirstIncompleteAssessment,
-  type AssessmentId,
-} from '@/data/services/assessmentService';
+import { useInterviewAttemptEgoRepair } from '@features/aria/hooks/useInterviewAttemptEgoRepair';
+import { DownloadPersonalReportButton } from '@features/psychometrics/DownloadPersonalReportButton';
+import { navigateToDatingProfileOnboardingEntry } from '@/datingProfile/onboarding/navigateToDatingProfileOnboardingEntry';
 
 const BG = '#0a0a0f';
 const ACCENT = '#3b82f6';
 const GLASS_BG = 'rgba(255,255,255,0.06)';
 const GLASS_BORDER = 'rgba(255,255,255,0.12)';
-const EVENT_URL =
-  'https://www.eventbrite.com/e/conscious-relating-games-dinner-tickets-1988944369149?aff=oddtdtcreator';
 const WHATSAPP_COMMUNITY_URL = 'https://chat.whatsapp.com/BFIQCNAD1jd2Uw8IqMh2SS';
 
 const FONT_DISPLAY = Platform.OS === 'web' ? "'Cormorant Garamond', serif" : undefined;
 const FONT_BODY = Platform.OS === 'web' ? "'DM Sans', system-ui, sans-serif" : undefined;
 const GOOGLE_FONTS_HREF =
   'https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,400;0,500;0,600;1,400&family=DM+Sans:ital,opsz,wght@0,9..40,400;0,9..40,500;0,9..40,600;1,9..40,400&display=swap';
-
-function isAssessmentId(value: unknown): value is AssessmentId {
-  return (
-    value === 'ECR-36' ||
-    value === 'CONFLICT-30' ||
-    value === 'PVQ-21' ||
-    value === 'RELATIONSHIP_TRAITS_8'
-  );
-}
-
-function navigateToAssessment(
-  navigation: any,
-  userId: string,
-  instrument: AssessmentId,
-) {
-  const screen = instrument === 'CONFLICT-30' ? 'DatingConflictStyle' : 'DatingInstrument';
-  navigation.navigate('DatingProfileOnboarding', {
-    userId,
-    screen,
-    params: instrument === 'CONFLICT-30' ? {} : { instrument },
-  });
-}
 
 function loadWebFontsOnce() {
   if (Platform.OS !== 'web' || typeof document === 'undefined') return;
@@ -120,6 +100,12 @@ export const PostInterviewPassedScreen: React.FC<{ navigation: any; route: { par
   const queryClient = useQueryClient();
   const { user } = useAuth();
   const userId = route.params?.userId ?? '';
+  const isAdminEmail = isAmoraeaAdminConsoleEmail(user?.email ?? '');
+  useInterviewAttemptEgoRepair({
+    userId,
+    isAdmin: isAdminEmail,
+    sourceScreen: 'PostInterviewPassed',
+  });
   const [myReferralCode, setMyReferralCode] = useState<string | null>(null);
   const [referralNotice, setReferralNotice] = useState<string | null>(null);
   const [copyFeedback, setCopyFeedback] = useState(false);
@@ -128,6 +114,9 @@ export const PostInterviewPassedScreen: React.FC<{ navigation: any; route: { par
   /** Modal dating onboarding resume step from merged profile + draft (`complete` = all modal steps satisfied). */
   const [datingModalResumeStep, setDatingModalResumeStep] = useState<string | null>(null);
   const [datingProfileFullyComplete, setDatingProfileFullyComplete] = useState(false);
+  const [assessmentsComplete, setAssessmentsComplete] = useState(false);
+  /** False until first profile/onboarding progress fetch finishes (avoids Complete → Edit flash). */
+  const [profileCtaLoaded, setProfileCtaLoaded] = useState(false);
   const [profileCtaBusy, setProfileCtaBusy] = useState(false);
 
   useEffect(() => {
@@ -159,30 +148,17 @@ export const PostInterviewPassedScreen: React.FC<{ navigation: any; route: { par
       const { data: auth } = await supabase.auth.getUser();
       const uid = auth.user?.id ?? userId;
       if (!uid) return;
-      const { data: row } = await supabase
-        .from('users')
-        .select('interview_passed, interview_completed')
-        .eq('id', uid)
-        .maybeSingle();
+      const [userRow, snap] = await Promise.all([
+        fetchUserInterviewRevealPollRow(uid),
+        fetchInterviewAttemptRevealSnapshot(uid),
+      ]);
       if (cancelled) return;
-      if (row?.interview_passed === false) {
-        queryClient.invalidateQueries({ queryKey: ['profile', uid] });
-        navigation.replace('PostInterviewFailed', { userId: uid });
-        return;
-      }
-      if (row?.interview_passed === true) {
-        return;
-      }
-      if (row?.interview_passed == null && row?.interview_completed !== true) {
+      if (userRow?.interview_completed !== true) {
         queryClient.invalidateQueries({ queryKey: ['profile', uid] });
         navigation.replace('Aria', { userId: uid });
         return;
       }
-      const snap = await fetchInterviewAttemptRevealSnapshot(uid);
-      if (cancelled) return;
-      const target = standardPostInterviewRouteFromReveal(
-        evaluateStandardPostInterviewRevealWithUsersPassedFallback(snap ?? undefined, row?.interview_passed ?? undefined),
-      );
+      const target = resolveStandardPostInterviewStackRoute(snap ?? undefined);
       if (target === 'PostInterviewPassed') {
         return;
       }
@@ -192,10 +168,10 @@ export const PostInterviewPassedScreen: React.FC<{ navigation: any; route: { par
         navigation.replace('PostInterviewFailed', { userId: uid });
         return;
       }
-      if (target === 'PostInterviewProcessing') {
+      if (target === 'PostInterview') {
         queryClient.invalidateQueries({ queryKey: ['profile', uid] });
         queryClient.invalidateQueries({ queryKey: ['standardPostInterviewDeferral', uid] });
-        navigation.replace('PostInterviewProcessing', { userId: uid });
+        navigation.replace('PostInterview', { userId: uid });
       }
     })();
     return () => {
@@ -213,7 +189,11 @@ export const PostInterviewPassedScreen: React.FC<{ navigation: any; route: { par
       if (!cancelled) setShowPostInterviewRetake(isQaRetakeSignupCode(meta?.referral_code));
       const [{ data: codeRow }, { data: userRow }] = await Promise.all([
         supabase.from('referral_codes').select('code').eq('referrer_user_id', uid).maybeSingle(),
-        supabase.from('users').select('referral_notice_pending').eq('id', uid).maybeSingle(),
+        supabase
+          .from(USER_INTERVIEW_ROUTING_TABLE)
+          .select(USER_REFERRAL_NOTICE_SELECT)
+          .eq('id', uid)
+          .maybeSingle(),
       ]);
       if (cancelled) return;
       setMyReferralCode(codeRow?.code ?? null);
@@ -230,20 +210,35 @@ export const PostInterviewPassedScreen: React.FC<{ navigation: any; route: { par
       void (async () => {
         const { data: auth } = await supabase.auth.getUser();
         const uid = auth.user?.id ?? userId;
-        if (!uid) return;
-        const progress = await modalOnboardingService.getProgress(uid);
-        const profileResult = await profilesRepo.getProfile(uid);
-        if (cancelled) return;
-        if (progress.success && progress.data?.currentStep) {
-          setDatingModalResumeStep(progress.data.currentStep);
+        if (!uid) {
+          if (!cancelled) setProfileCtaLoaded(true);
+          return;
         }
-        if (profileResult.success && profileResult.data) {
-          const profile = profileResult.data as Record<string, unknown>;
-          setDatingProfileFullyComplete(
-            profile.assessmentsCompleted === true
-          );
-        } else {
-          setDatingProfileFullyComplete(false);
+        try {
+          const [progress, profileResult] = await Promise.all([
+            modalOnboardingService.getProgress(uid),
+            profilesRepo.getProfile(uid),
+          ]);
+          if (cancelled) return;
+          if (progress.success && progress.data?.currentStep) {
+            setDatingModalResumeStep(progress.data.currentStep);
+          } else {
+            setDatingModalResumeStep(null);
+          }
+          if (profileResult.success && profileResult.data) {
+            const profile = profileResult.data as Record<string, unknown>;
+            setDatingProfileFullyComplete(profile.onboardingCompleted === true);
+            setAssessmentsComplete(profile.assessmentsCompleted === true);
+          } else {
+            setDatingProfileFullyComplete(false);
+            setAssessmentsComplete(false);
+          }
+        } catch (e) {
+          if (__DEV__) {
+            console.warn('[PostInterviewPassed] profile progress refresh', e);
+          }
+        } finally {
+          if (!cancelled) setProfileCtaLoaded(true);
         }
       })();
       return () => {
@@ -252,7 +247,12 @@ export const PostInterviewPassedScreen: React.FC<{ navigation: any; route: { par
     }, [userId]),
   );
 
-  const profileCtaLabel = datingProfileFullyComplete ? 'Edit your profile' : 'Complete your profile';
+  const profileReadyForMatching = datingProfileFullyComplete && assessmentsComplete;
+  const profileCtaLabel = profileReadyForMatching ? 'Edit your profile' : 'Complete your profile';
+
+  const profileTimeEstimateLabel = profileReadyForMatching
+    ? null
+    : POST_INTERVIEW_PROFILE_TIME_ESTIMATE;
 
   /**
    * Re-resolve modal progress at tap time (React state can lag `useFocusEffect`) and use `push` for edit so React
@@ -266,47 +266,28 @@ export const PostInterviewPassedScreen: React.FC<{ navigation: any; route: { par
     try {
       const progress = await modalOnboardingService.getProgress(uid);
       const profileResult = await profilesRepo.getProfile(uid);
-      let goEdit = datingProfileFullyComplete;
+      let goEdit = datingProfileFullyComplete && assessmentsComplete;
       if (progress.success && progress.data?.currentStep) {
         const step = progress.data.currentStep;
         setDatingModalResumeStep(step);
       }
       if (profileResult.success && profileResult.data) {
         const profile = profileResult.data as Record<string, unknown>;
-        const assessmentsComplete = profile.assessmentsCompleted === true;
-        const currentAssessment = isAssessmentId(profile.currentAssessment)
-          ? profile.currentAssessment
-          : null;
-
-        if (!assessmentsComplete && currentAssessment) {
-          navigateToAssessment(navigation, uid, currentAssessment);
-          return;
-        }
-
-        if (!assessmentsComplete) {
-          const completed = await getCompletedAssessments(uid);
-          const nextIncomplete =
-            completed.success && completed.data.length > 0
-              ? getFirstIncompleteAssessment(completed.data)
-              : null;
-          if (nextIncomplete) {
-            navigateToAssessment(navigation, uid, nextIncomplete);
-            return;
-          }
-        }
-
-        goEdit = assessmentsComplete;
-        setDatingProfileFullyComplete(goEdit);
+        const profileAssessmentsComplete = profile.assessmentsCompleted === true;
+        const profileOnboardingComplete = profile.onboardingCompleted === true;
+        goEdit = profileOnboardingComplete && profileAssessmentsComplete;
+        setDatingProfileFullyComplete(profileOnboardingComplete);
+        setAssessmentsComplete(profileAssessmentsComplete);
       }
       if (goEdit) {
         navigation.dispatch(StackActions.push('DatingProfileEdit', { userId: uid }));
       } else {
-        navigation.navigate('DatingProfileOnboarding', { userId: uid });
+        navigateToDatingProfileOnboardingEntry(navigation, uid);
       }
     } finally {
       setProfileCtaBusy(false);
     }
-  }, [userId, navigation, datingProfileFullyComplete]);
+  }, [userId, navigation, datingProfileFullyComplete, assessmentsComplete]);
 
   const confirmAndRetakeInterview = () => {
     const msg =
@@ -340,8 +321,16 @@ export const PostInterviewPassedScreen: React.FC<{ navigation: any; route: { par
     const { data: auth } = await supabase.auth.getUser();
     const uid = auth.user?.id ?? userId;
     if (!uid || !referralNotice) return;
-    const { error } = await supabase.from('users').update({ referral_notice_pending: null }).eq('id', uid);
-    if (error && __DEV__) console.warn('[PostInterviewPassed] clear referral notice', error.message);
+    try {
+      await clearReferralNoticePending(uid);
+    } catch (error) {
+      if (__DEV__) {
+        console.warn(
+          '[PostInterviewPassed] clear referral notice',
+          error instanceof Error ? error.message : error,
+        );
+      }
+    }
     setReferralNotice(null);
     queryClient.invalidateQueries({ queryKey: ['profile', uid] });
   };
@@ -357,21 +346,12 @@ export const PostInterviewPassedScreen: React.FC<{ navigation: any; route: { par
     }
   };
 
-  const openEvent = () => {
-    void Linking.openURL(EVENT_URL);
-  };
-
   const openWhatsAppCommunity = () => {
     void Linking.openURL(WHATSAPP_COMMUNITY_URL);
   };
 
   return (
-    <SafeAreaContainer style={{ backgroundColor: BG, flex: 1 }}>
-      <ScrollView
-        contentContainerStyle={styles.scroll}
-        keyboardShouldPersistTaps="handled"
-        style={{ backgroundColor: BG }}
-      >
+    <PostInterviewScrollLayout>
         <FlickeringFlame size={104} />
         <Text style={styles.h1}>You passed the interview</Text>
         <Text style={styles.sub}>
@@ -398,64 +378,44 @@ export const PostInterviewPassedScreen: React.FC<{ navigation: any; route: { par
             </View>
           ) : null}
 
-          <View style={styles.bullets}>
-            {[
-              'You completed our AI interview and met the bar for the Amoraea community',
-              'Get matched on real compatibility — attachment, values, and more',
-              'A curated experience for people who want something real, not performative',
-            ].map((line) => (
-              <View key={line} style={styles.bulletRow}>
-                <Ionicons name="checkmark-circle" size={18} color={ACCENT} style={styles.bulletIcon} />
-                <Text style={styles.bulletText}>{line}</Text>
-              </View>
-            ))}
-          </View>
+          {profileCtaLoaded ? (
+            <>
+              <PostInterviewProfileEncouragement timeEstimateLabel={profileTimeEstimateLabel} />
 
-          <Pressable
-            onPress={() => void openProfileCta()}
-            disabled={profileCtaBusy}
-            style={({ pressed }) => [
-              styles.profileOnboardingCta,
-              pressed && !profileCtaBusy && { opacity: 0.9 },
-              profileCtaBusy && { opacity: 0.85 },
-            ]}
-            accessibilityRole="button"
-            accessibilityLabel={profileCtaLabel}
-          >
-            <Ionicons name="person-outline" size={20} color="#fff" style={{ marginRight: 8 }} />
-            <Text style={styles.profileOnboardingCtaText}>{profileCtaLabel}</Text>
-            {profileCtaBusy ? (
-              <ActivityIndicator color="#fff" style={{ marginLeft: 8 }} />
-            ) : (
-              <Ionicons name="chevron-forward" size={20} color="rgba(255,255,255,0.9)" style={{ marginLeft: 8 }} />
-            )}
-          </Pressable>
-          <Text style={styles.profileOnboardingHint}>
-            Next up: your name, photos, match preferences, and a few short assessments — everything we need to introduce
-            you properly.
-          </Text>
-
-          <View style={styles.divider} />
-
-          <Text style={styles.stayTitle}>Conscious Singles Dinner — Austin</Text>
-          <Text style={styles.stayLead}>
-            We&apos;re hosting a Conscious Relating Games & Dinner on <Text style={styles.strong}>Monday, May 11th</Text> (6:00–8:00
-            PM). It&apos;s a curated, in-person evening for pre-screened singles. We will play connection games and then you will have the opportunity to connect deeper during dinner! Spots are limited, reserve yours on
-            Eventbrite.
-          </Text>
-          <Pressable
-            onPress={openEvent}
-            style={({ pressed }) => [styles.eventCta, pressed && { opacity: 0.9 }]}
-            accessibilityRole="link"
-            accessibilityLabel="Open Conscious Singles Dinner on Eventbrite"
-          >
-            <Ionicons name="calendar-outline" size={20} color="#fff" style={{ marginRight: 8 }} />
-            <Text style={styles.eventCtaText}>View event &amp; sign up</Text>
-            <Ionicons name="open-outline" size={18} color="rgba(255,255,255,0.9)" style={{ marginLeft: 8 }} />
-          </Pressable>
-          <Text style={styles.eventUrl} selectable>
-            {EVENT_URL}
-          </Text>
+              <Pressable
+                onPress={() => void openProfileCta()}
+                disabled={profileCtaBusy}
+                style={({ pressed }) => [
+                  styles.profileOnboardingCta,
+                  pressed && !profileCtaBusy && { opacity: 0.9 },
+                  profileCtaBusy && { opacity: 0.85 },
+                ]}
+                accessibilityRole="button"
+                accessibilityLabel={profileCtaLabel}
+              >
+                <Ionicons name="person-outline" size={20} color="#fff" style={{ marginRight: 8 }} />
+                <Text style={styles.profileOnboardingCtaText}>{profileCtaLabel}</Text>
+                {profileCtaBusy ? (
+                  <ActivityIndicator color="#fff" style={{ marginLeft: 8 }} />
+                ) : (
+                  <Ionicons name="chevron-forward" size={20} color="rgba(255,255,255,0.9)" style={{ marginLeft: 8 }} />
+                )}
+              </Pressable>
+              {!profileReadyForMatching ? (
+                <Text style={styles.profileOnboardingHint}>
+                  Photos, match preferences, and short questionnaires — pick up where you left off anytime.
+                </Text>
+              ) : null}
+            </>
+          ) : (
+            <View
+              style={styles.profileCtaLoading}
+              accessibilityLabel="Loading profile status"
+              accessibilityRole="progressbar"
+            >
+              <ActivityIndicator color="#93c5fd" />
+            </View>
+          )}
 
           <View style={styles.divider} />
 
@@ -474,9 +434,12 @@ export const PostInterviewPassedScreen: React.FC<{ navigation: any; route: { par
             <Text style={styles.whatsAppCtaText}>Join the WhatsApp group</Text>
             <Ionicons name="open-outline" size={18} color="rgba(255,255,255,0.95)" style={{ marginLeft: 8 }} />
           </Pressable>
-          <Text style={styles.eventUrl} selectable>
+          <Text style={styles.linkUrl} selectable>
             {WHATSAPP_COMMUNITY_URL}
           </Text>
+
+          <View style={styles.divider} />
+          <DownloadPersonalReportButton userId={userId} variant="dark" />
 
           {myReferralCode ? (
             <View style={styles.referFriendSection}>
@@ -518,21 +481,11 @@ export const PostInterviewPassedScreen: React.FC<{ navigation: any; route: { par
             </Text>
           </View>
         ) : null}
-      </ScrollView>
-    </SafeAreaContainer>
+    </PostInterviewScrollLayout>
   );
 };
 
 const styles = StyleSheet.create({
-  scroll: {
-    paddingHorizontal: 22,
-    paddingTop: 24,
-    paddingBottom: 48,
-    alignItems: 'center',
-    maxWidth: 440,
-    width: '100%',
-    alignSelf: 'center',
-  },
   h1: {
     fontFamily: FONT_DISPLAY,
     fontSize: 26,
@@ -588,15 +541,13 @@ const styles = StyleSheet.create({
     color: '#86efac',
     letterSpacing: 0.3,
   },
-  bullets: { gap: 12 },
-  bulletRow: { flexDirection: 'row', alignItems: 'flex-start' },
-  bulletIcon: { marginTop: 2, marginRight: 10 },
-  bulletText: {
-    flex: 1,
-    fontFamily: FONT_BODY,
-    fontSize: 14,
-    lineHeight: 21,
-    color: 'rgba(255,255,255,0.88)',
+  profileCtaLoading: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    minHeight: 52,
+    marginTop: 8,
+    marginBottom: 10,
+    width: '100%',
   },
   profileOnboardingCta: {
     flexDirection: 'row',
@@ -645,24 +596,7 @@ const styles = StyleSheet.create({
     color: 'rgba(255,255,255,0.88)',
     marginBottom: 12,
   },
-  strong: { fontWeight: '600', color: '#f4f4f5' },
-  eventCta: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    backgroundColor: ACCENT,
-    borderRadius: 10,
-    paddingVertical: 14,
-    paddingHorizontal: 16,
-    marginBottom: 10,
-  },
-  eventCtaText: {
-    fontFamily: FONT_BODY,
-    fontSize: 15,
-    fontWeight: '600',
-    color: '#fff',
-  },
-  eventUrl: {
+  linkUrl: {
     fontFamily: FONT_BODY,
     fontSize: 11,
     lineHeight: 16,

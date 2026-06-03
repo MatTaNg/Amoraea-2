@@ -43,6 +43,99 @@ export function looksLikeScenarioARepairQuestion(text: string): boolean {
   );
 }
 
+/** Scenario A second repair ask after the canonical Ryan repair question (model paraphrase). */
+export function looksLikeScenarioARepairReAskQuestion(text: string): boolean {
+  const t = normalizeApostrophes(text).toLowerCase();
+  if (/\bhow would you make that repair actually happen\b/.test(t)) return true;
+  if (/\bwhat would that repair look like\b/.test(t) && /\bryan\b/.test(t)) return true;
+  if (/\bmake that repair actually happen\b/.test(t) && /\bryan\b/.test(t)) return true;
+  if (/\bwhat would you (actually )?do\b/.test(t) && /\bryan\b/.test(t) && /\brepair\b/.test(t)) {
+    return true;
+  }
+  return false;
+}
+
+/** Strip Scenario A repair-as-Ryan blocks so a forced contempt probe is the only substantive assistant line. */
+export function stripScenarioARepairQuestion(text: string): string {
+  let cleaned = text
+    .replace(/(?:^|\n)\s*How would you repair this relationship if you were Ryan\?\s*/gi, '\n')
+    .replace(
+      /(?:^|\n)\s*What if you were Ryan\?[^\n]*How would you repair this (?:situation|relationship)\??\s*/gi,
+      '\n',
+    )
+    .replace(/(?:^|\n)\s*If you were Ryan[^?.!\n]*repair[^?.!\n]*[?.!]?\s*/gi, '\n')
+    .replace(/\n{3,}/g, '\n\n')
+    .trim();
+  cleaned = stripEmbeddedScenarioARepairQuestionAsk(cleaned);
+  return cleaned.replace(/\n{3,}/g, '\n\n').trim();
+}
+
+/**
+ * Streaming TTS often splits on the `?` after "What if you were Ryan?" before the repair tail arrives.
+ * Hold the Ryan lead clause until the next flushed sentence can complete the repair ask.
+ */
+export function isIncompleteScenarioARepairLeadSentence(text: string): boolean {
+  const t = normalizeApostrophes(text).trim().toLowerCase();
+  if (!t || looksLikeScenarioARepairQuestion(text)) return false;
+  return /\b(what if you were ryan|if you were ryan)\b/.test(t) && !/\brepair\b/.test(t);
+}
+
+/** Remove a glued Scenario A repair ask from a longer paragraph (model echo / stacked asks). */
+export function stripEmbeddedScenarioARepairQuestionAsk(draft: string): string {
+  const t0 = (draft ?? '').trim();
+  if (!t0) return draft;
+  let t = t0;
+  const patterns: RegExp[] = [
+    /\bHow would you repair this relationship if you were Ryan\??\s*/gi,
+    /\bWhat if you were Ryan\??\s*How would you repair this (?:situation|relationship)\??\s*/gi,
+    /\bIf you were Ryan[^?.!\n]{0,120}?repair[^?.!\n]{0,120}?[?.!]?\s*/gi,
+    /\bHow would you repair this (?:situation|relationship)\??\s*/gi,
+  ];
+  let prev = '';
+  while (prev !== t) {
+    prev = t;
+    for (const re of patterns) {
+      t = t.replace(re, '').replace(/\s{2,}/g, ' ').trim();
+    }
+  }
+  return t
+    .replace(/^\s*[.,;—–\-–]\s*/g, '')
+    .replace(/\s+[.,;—–\-–]\s*$/g, '')
+    .trim();
+}
+
+/**
+ * Parallel streaming TTS flushes by sentence before duplicate stripping on the full assistant turn.
+ * When the Scenario A repair ask was already spoken, suppress model echoes in a flushed chunk.
+ */
+export function stripScenarioARepairQuestionStreamingEcho(
+  spoken: string,
+  repairAlreadyAsked: boolean,
+): string | null {
+  const t0 = (spoken ?? '').trim();
+  if (!repairAlreadyAsked || !t0) {
+    return t0;
+  }
+  if (looksLikeScenarioARepairQuestion(t0)) {
+    return null;
+  }
+  const stripped = stripEmbeddedScenarioARepairQuestionAsk(t0).trim();
+  if (!stripped) {
+    return null;
+  }
+  if (stripped !== t0) {
+    return stripped;
+  }
+  const low = t0.toLowerCase();
+  if (/\b(if you were ryan|what if you were ryan)\b/.test(low) && /\brepair\b/.test(low)) {
+    return null;
+  }
+  if (/\bhow would you repair\b/.test(low) && /\b(situation|relationship|this)\b/.test(low)) {
+    return null;
+  }
+  return t0;
+}
+
 /** Scenario B Q2 — James differently / appreciation probe wording (not repair-as-James). */
 export function looksLikeScenarioBJamesDifferentlyQuestion(text: string): boolean {
   const t = text.toLowerCase();
@@ -363,6 +456,9 @@ export function repairAnswerHasConcreteSuggestionActionOrStep(text: string): boo
   const t = normalizeApostrophes(text).toLowerCase();
   if (!t.trim()) return false;
   return (
+    /\b(i|we)\s+(commit|promise|pledge)\b/i.test(t) ||
+    /\b(i|we)\s+shouldn'?t have\b/i.test(t) ||
+    /\b(i|we)\s+(would|will)\s+(apologiz\w*|say sorry|listen|acknowledg\w*|own)\b/i.test(t) ||
     /\b(i|we|he|she|they|daniel|sophie|james|sarah|ryan|emma)\s+(would|could|should|need(?:s)? to|might|can)\s+(say|tell|ask|apologiz\w*|acknowledg\w*|own|admit|listen|validat\w*|explain|share|talk|communicat\w*|set|agree|commit|change|repair|fix|resolv\w*|revisit|come back|take|give|try)\b/i.test(
       t,
     ) ||
@@ -408,6 +504,85 @@ function repairAnswerRedirectsOnlyToOtherParty(userAnswer: string, lastAssistant
   return /\b(needs?\s+to|should|has\s+to|must|just)\b.{0,80}\b(calm\s+down|accept|stop|let\s+it\s+go|get\s+over\s+it|deal\s+with\s+it)\b/i.test(
     t,
   );
+}
+
+/**
+ * User answered a Scenario A repair-as-Ryan prompt with a concrete plan (not line-analysis only).
+ */
+export function userAnswerSatisfiesScenarioARepairPrompt(
+  answer: string,
+  lastAssistantContent?: string,
+): boolean {
+  if (!repairAnswerHasConcreteSuggestionActionOrStep(answer)) return false;
+  const t = normalizeApostrophes(answer).toLowerCase().trim();
+  if (!t) return false;
+
+  const firstPersonRepair =
+    /\bif i were ryan\b/.test(t) ||
+    /\b(as ryan|being ryan)\b/.test(t) ||
+    /\b(i would|i'd|i will|i commit|i shouldn't have|i should have|i apologize|i apologise)\b/.test(t);
+
+  const ryanOwnership =
+    /\b(ryan|he)\b/.test(t) &&
+    /\b(apolog|sorry|shouldn't have|should not have|commit|won't|will not|listen|acknowledg|own|responsib|priorit|call|date|emergency)\b/.test(
+      t,
+    );
+
+  if (firstPersonRepair || ryanOwnership) return true;
+
+  const parties = repairFocalAndOtherFromPrompt(lastAssistantContent);
+  if (parties?.focal === 'ryan' && repairAnswerHasConcreteSuggestionActionOrStep(answer)) {
+    return /\b(both|together|each|talk|listen|apolog|commit|boundary|agreement)\b/i.test(t);
+  }
+  return false;
+}
+
+export function findLastUserWithPriorAssistantContent(
+  messages: Array<{ role: string; content?: string | null }>,
+): { lastUserContent: string | null; priorAssistantContent: string | null } {
+  for (let i = messages.length - 1; i >= 0; i -= 1) {
+    if (messages[i].role !== 'user') continue;
+    const lastUserContent = (messages[i].content ?? '').trim();
+    let priorAssistantContent: string | null = null;
+    for (let j = i - 1; j >= 0; j -= 1) {
+      if (messages[j].role === 'assistant') {
+        priorAssistantContent = messages[j].content ?? '';
+        break;
+      }
+    }
+    return { lastUserContent, priorAssistantContent };
+  }
+  return { lastUserContent: null, priorAssistantContent: null };
+}
+
+/**
+ * After a concrete repair-as-Ryan answer, suppress duplicate repair asks (including re-asks) and advance.
+ */
+export function shouldAdvanceScenarioAAfterSatisfiedRepair(
+  messages: Array<{ role: string; content?: string | null }>,
+  strippedAssistantDraft: string,
+  interviewMoment: number,
+): boolean {
+  if (interviewMoment !== 1) return false;
+  if (!strippedAssistantDraft.trim()) return false;
+
+  const draftIsRepairFollowUp =
+    looksLikeScenarioARepairReAskQuestion(strippedAssistantDraft) ||
+    looksLikeScenarioARepairQuestion(strippedAssistantDraft);
+  if (!draftIsRepairFollowUp) return false;
+
+  const { lastUserContent, priorAssistantContent } = findLastUserWithPriorAssistantContent(messages);
+  if (!lastUserContent || !priorAssistantContent) return false;
+
+  const priorIsRepairContext =
+    looksLikeScenarioARepairQuestion(priorAssistantContent) ||
+    looksLikeScenarioARepairReAskQuestion(priorAssistantContent) ||
+    isRepairRefusalProbeAssistantLine(priorAssistantContent) ||
+    scenarioALastAssistantIsRepairProbeOrFollowUp(priorAssistantContent);
+
+  if (!priorIsRepairContext) return false;
+
+  return userAnswerSatisfiesScenarioARepairPrompt(lastUserContent, priorAssistantContent);
 }
 
 export function evaluateRepairRefusalDetection(

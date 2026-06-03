@@ -19,6 +19,17 @@ export const styles = StyleSheet.create({
     marginTop: -8,
     marginBottom: 8,
   },
+  placeSearchLoadingRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+    marginTop: 8,
+    marginBottom: 4,
+  },
+  placeSearchLoadingText: {
+    fontSize: 12,
+    color: theme.colors.textSecondary,
+  },
   suggestionButton: {
     padding: 12,
     backgroundColor: "#F9FAFB",

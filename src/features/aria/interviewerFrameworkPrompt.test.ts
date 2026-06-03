@@ -119,6 +119,16 @@ describe('ensureSpokenTextIncludesParticipantFirstName', () => {
     ).toBe(t);
   });
 
+  it('does not append participant name after colon-only scenario intro bridge lines', () => {
+    const s1 = "Here's the first situation:\n\nEmma and Ryan have dinner plans.";
+    expect(ensureSpokenTextIncludesParticipantFirstName(s1, 'Matt', { allowAppendWhenMissing: true })).toBe(s1);
+    const s2 = "Here's the next situation.\n\nSarah has been job hunting.";
+    expect(ensureSpokenTextIncludesParticipantFirstName(s2, 'Matt', { allowAppendWhenMissing: true })).toBe(s2);
+    const s3 =
+      "Here's the third situation — after this we'll move to something more personal.\n\nSophie and Daniel have had the same argument.";
+    expect(ensureSpokenTextIncludesParticipantFirstName(s3, 'Matt', { allowAppendWhenMissing: true })).toBe(s3);
+  });
+
   it('returns original text when raw first name is empty', () => {
     const t = "Great work — that's the end of this scenario.";
     expect(ensureSpokenTextIncludesParticipantFirstName(t, '')).toBe(t);
@@ -199,6 +209,14 @@ describe('dedupeAdjacentBoundaryValidationsBeforeParticipantName', () => {
       "We're done with those three scenarios — nice work. Nice work, Alex — you named where walk-away would enter for them.";
     expect(dedupeAdjacentBoundaryValidationsBeforeParticipantName(raw, 'Alex')).toBe(
       "We're done with those three scenarios. Nice work, Alex — you named where walk-away would enter for them.",
+    );
+  });
+
+  it('collapses segment-close nice work and reflection great work before name (Scenario A→B boundary)', () => {
+    const raw =
+      "That's the end of this scenario — nice work! Great work, Matt — you read Emma's closing line as resignation and gave Ryan ownership of the pattern plus a concrete commitment.";
+    expect(dedupeAdjacentBoundaryValidationsBeforeParticipantName(raw, 'Matt')).toBe(
+      "That's the end of this scenario — Great work, Matt — you read Emma's closing line as resignation and gave Ryan ownership of the pattern plus a concrete commitment.",
     );
   });
 });

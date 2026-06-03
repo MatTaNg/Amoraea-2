@@ -35,10 +35,46 @@ import {
   shouldDeferStreamingBoundaryWarmClause,
 } from '@features/aria/interviewerFrameworkPrompt';
 import {
+  isPersonalMomentInterviewTurn,
+  isStandalonePersonalDisclosureAcknowledgment,
+  resolveScenarioFollowUpAfterSuppressedResponse,
+  stripStandalonePersonalDisclosureAckOutsidePersonalMoments,
+} from '@features/aria/personalDisclosureAckGate';
+import {
+  scenarioOneFollowUpFlagsFromTranscript,
+  shouldDeliverScenarioFollowUpQuestion,
+  transcriptContainsScenarioAContemptProbe,
+} from '@features/aria/scenarioFollowUpTranscriptGuard';
+import {
   buildElongatingProbeStateSuffix,
+  buildMoment5ClosingFallbackAfterSuppressedElongating,
+  buildNeutralAckAfterSuppressedElongatingProbe,
+  elongatingProbePlaybackBlockReason,
   isApprovedElongatingProbeOnly,
+  isLenientInterviewCloseAfterClosingSpeech,
+  isMoment5ReadyForInterviewClose,
+  isIncompleteInterviewClosingLeadSentence,
+  isInterviewClosingReflectiveAckFragment,
+  isInterviewClosingStreamFragment,
+  isInterviewClosingThanksFragment,
+  looksLikeInterviewClosingAssistantMessage,
+  moment5AnswerIncludesResolutionOutcome,
+  stripDuplicateInterviewClosingParagraphs,
+  stripDuplicateInterviewClosingSentencesWithinDraft,
+  stripInterviewClosingStreamingEcho,
+  transcriptHasInterviewClosingAssistantMessage,
+  transcriptHasInterviewClosingSpokenFragment,
   userTurnSuppressesElongatingProbe,
 } from '@features/aria/elongatingProbe';
+import {
+  markInterviewClosingTtsDelivered,
+  resetInterviewClosingTtsSession,
+  hasInterviewClosingTtsDeliveredForSession,
+  hasInterviewClosingSpeakInFlightForSession,
+  tryAcquireInterviewClosingSpeak,
+  releaseInterviewClosingSpeak,
+  shouldSuppressDuplicateInterviewClosingTts,
+} from '@features/aria/interviewClosingTtsSession';
 import {
   buildClientFrustrationMetaFallbackAssistantText,
   buildMetaCommentHandlingSuffix,
@@ -64,10 +100,53 @@ import {
   buildMoment4HandoffForInterview,
   buildMoment4ThresholdAnswerToMoment5Bundle,
   buildScenario1To2BundleForInterview,
+  buildScenario1VignetteIntroBundle,
   buildScenario2To3TransitionBody,
   ensureScenario2BundleWhenOpeningWithoutVignette,
   SCENARIO_2_TO_3_TRANSITION_FALLBACK,
 } from '@features/aria/interviewTransitionBundles';
+import { personalMomentWordCountsForDisclosure } from '@features/aria/aggregateMarkerScoresFromSlices';
+import {
+  kickCompletionScoring,
+  isCompletionScoringInFlight,
+  markCompletionScoringInFlight,
+  registerScoreInterviewForCompletion,
+  resetCompletionScoringSession,
+  wasCompletionScoringAttempted,
+} from '@features/aria/completionScoringKick';
+import {
+  INTERVIEW_NAME_AMBIENT_REASK_LINE,
+  isLikelyAmbientSpeech,
+  isPlausibleInterviewName,
+  resolvePlausibleInterviewFirstName,
+} from '@features/aria/interviewNameValidation';
+import {
+  EMOTION_INTERVIEW_MODAL_ITEMS,
+  hydrateEmotionResponsesFromStorage,
+  isEmotionItemAnsweredAt,
+  listUnansweredEmotionModalIndices,
+  mergeEmotionResponses,
+  hydrateEmotionResponsesFromSources,
+  setEmotionResponseAtIndex,
+  buildEmotionRecognitionPersistPayload,
+  emotionRecognitionPersistSpreadIfComplete,
+  isEmotionRecognitionBatteryComplete,
+  emotionRecognitionRawScoreFromResponses,
+  countAnsweredEmotionItems,
+  splitScenarioTransitionForEmotionModal,
+  extractEmotionAfterModalForResumeCatchUp,
+  completedScenarioForEmotionModalFromTransition,
+  emotionModalIndexForCompletedScenario,
+  shouldDeferEmotionModalForTransitionText,
+  isNaturalLanguageScenarioHandoffTransition,
+  isScenarioThreeToMoment4EmotionModalHandoff,
+  resolveNaturalLanguageEmotionModalGate,
+  type PendingEmotionModalTransition,
+} from '@features/aria/emotionRecognitionInterview';
+import {
+  detectScenarioFromResponse,
+  getScenarioNumberForNewMessage,
+} from '@features/aria/scenarioNumberDetection';
 import { resolveWebActiveGestureOverlayKind, type WebActiveGestureOverlayKind } from '@features/aria/webInterviewGestureOverlay';
 import {
   interviewAssistantTextHasDisallowedNameMarker,
@@ -81,11 +160,13 @@ import {
 import { communicationFloorFieldsFromTranscript } from '@features/aria/communicationFloorFromTranscript';
 import {
   computeGateResult,
+  computeInterviewWeightedCompositeFromPillars,
   GATE_PASS_WEIGHTED_MIN,
   scenarioCompositesToStorageJson,
   type GateResult,
 } from '@features/aria/computeGateResult';
 import type { ComputeGateResultOptions } from '@features/aria/computeGateResultCore';
+import { applyPsychometricModifierToAttempt } from '@features/psychometrics/applyPsychometricModifier';
 import {
   computeSkipPenaltyGateComputation,
   individualPenaltyForSkipNumber,
@@ -110,7 +191,16 @@ import {
   whisperLanguageIsEnglish,
   isResumeReentryWelcomePrompt,
   isNamePromptInterviewMoment,
+  isInterviewPreambleBriefingMoment,
+  looksLikeReadinessAffirmation,
+  userIsAnsweringInterviewReadinessPrompt,
+  shouldRecordInterviewResponseTiming,
   isClientAudioRecoveryAssistantLine,
+  extractScenarioModalQuestionFromAssistantText,
+  getLastSubstantiveScenarioModalQuestion,
+  resolveMoment4ShowScenarioReferenceCard,
+  resolveScenarioModalPromptInScope,
+  assistantSpeechShouldRefreshScenarioModalPrompt,
 } from '@features/aria/interviewLanguageGate';
 import {
   isClientOrElongatingInterviewProbeAssistant,
@@ -118,14 +208,21 @@ import {
   isRepairRefusalProbeAssistantLine,
   evaluateRepairRefusalDetection,
   looksLikeRepairInterviewQuestion,
+  looksLikeScenarioARepairQuestion,
   looksLikeScenarioBRepairAsJamesQuestion,
   pickClientDisengagementProbe,
   scenarioALastAssistantIsRepairProbeOrFollowUp,
+  shouldAdvanceScenarioAAfterSatisfiedRepair,
+  stripScenarioARepairQuestion,
+  stripEmbeddedScenarioARepairQuestionAsk,
+  stripScenarioARepairQuestionStreamingEcho,
+  isIncompleteScenarioARepairLeadSentence,
 } from '@features/aria/interviewDisengagementProbes';
 import {
   resolveWeightedPassMinAfterReferralFulfillment,
   ensureShareableReferralCodeForReferrer,
 } from '@features/referrals/referralInterview';
+import { triggerResultsReadyEmail } from '@features/interview/triggerResultsReadyEmail';
 import {
   setPlaybackMode,
   setRecordingMode,
@@ -147,7 +244,13 @@ import {
   isTtsPlaybackPrematureCutoff,
 } from '@features/aria/utils/interviewTtsDurationMatch';
 import { classifyResumeRepeatIntent } from '@features/aria/resumeRepeatIntent';
-import { parseJsonObjectFromModelText } from '@utilities/parseHolisticModelJson';
+import {
+  looksLikeDirectResumeAnswer,
+  looksLikeRepeatCueInAmbiguousReply,
+  shouldBypassResumeRepeatGateForLongAnswer,
+} from '@features/aria/resumeRepeatGate';
+import { computeParallelStreamTabRestoreText } from '@features/aria/computeParallelStreamTabRestoreText';
+import { parseHolisticInterviewModelObjectFromModelText, parseJsonObjectFromModelText } from '@utilities/parseHolisticModelJson';
 import {
   fetchAttemptScenarioScoreCells,
   persistScenarioScoreBundleToAttempt,
@@ -171,7 +274,10 @@ import {
   speakWithElevenLabs,
   stopElevenLabsPlayback,
   stopElevenLabsSpeech,
-  pauseWebInterviewHtmlAudioForDocumentHidden,
+  interruptWebInterviewTtsForTabHide,
+  tryPrepareWebInterviewHtmlAudioTabResume,
+  hasWebInterviewHtmlAudioTabResumePending,
+  resumeWebInterviewHtmlAudioAfterTabHide,
   tryPlayPendingWebTtsAudioInUserGesture,
   hasPendingWebGestureBlobUrl,
   trySpeakWebSpeechInUserGesture,
@@ -183,16 +289,38 @@ import {
   webSpeechShouldDeferToUserGesture,
   WebTtsRequiresUserGestureError,
   isWebInterviewPlaybackSurfaceActive,
+  fetchElevenLabsMpegArrayBuffer,
+  captureWebSpeechSynthTabRestoreText,
 } from '@features/aria/utils/elevenLabsTts';
+import {
+  isTtsTabResumeFallbackError,
+  isWebInterviewTtsTabHiddenAbortError,
+} from '@features/aria/utils/webTtsGestureErrors';
 import { ProfileRepository } from '@data/repositories/ProfileRepository';
+import { updateUserInterviewApplication } from '@data/repos/usersInterviewRepo';
 import { supabase } from '@data/supabase/client';
+import {
+  USER_INTERVIEW_ROUTING_TABLE,
+  USER_INTERVIEW_PASS_SELECT,
+} from '@data/supabase/userInterviewRoutingSelect';
+import { syncLiveInterviewTranscriptToAttempt } from '@utilities/syncLiveInterviewTranscript';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import {
   buildResumeWelcomeMessage,
   computeInterviewResumePlan,
+  emotionModalCatchUpThroughScenario,
+  emotionModalCatchUpThroughScenarioFromResume,
+  isResumeWelcomeBackAssistantText,
   lastFullyCompletedScenario,
-  retagScenarioNumbersBeforeMomentFour,
+  assignScenarioNumbersToTranscript,
   scenarioHasPersistedScores,
   sliceMessagesBeforeScenarioIntro,
+  stripEphemeralWelcomeBackMessages,
+  savedInterviewReachedClosingState,
+  shouldOfferResumeWelcomeTts,
+  resumeShouldSpeakEmotionCatchUpAfterModal,
+  firstAssistantIndexForScenarioIntro,
+  storedInterviewHasResumableScenarioProgress,
 } from '@utilities/interviewResumeCursor';
 import {
   saveInterviewToStorage,
@@ -206,13 +334,27 @@ import {
 import { requestMicrophonePermissionForInterviewStart } from '@utilities/permissions/requestMicPermission';
 import { withRetry, classifyError } from '@utilities/withRetry';
 import { remoteLog } from '@utilities/remoteLog';
+import {
+  buildMoment4ScoresRecord,
+  buildMoment5ScoresRecord,
+  coalesceConcretenessForFinalPersist,
+  fetchAttemptScoringBaseline,
+  logScorePipelineBaseline,
+  persistHolisticModifiersImmediate,
+  persistMoment4ScoresImmediate,
+  persistMoment5ScoresImmediate,
+  resolveMomentScoresForFinalPersist,
+  type AttemptScoringBaseline,
+} from '@utilities/persistPersonalMomentScoresIncremental';
 import { isWebInsecureDevUrl, webInsecureContextHelpMessage } from '@utilities/webSecureContext';
 import { waitForInterviewAttemptScoringReady } from '@utilities/waitForInterviewAttemptScoringReady';
+import { fetchWithTimeout } from '@utilities/fetchWithTimeout';
 import {
   buildUsersRowInterviewPassFromGate,
   fetchInterviewPassAdminOverride,
   interviewPassWhileScoringPending,
 } from '@utilities/interviewPassEffective';
+import { kickClientInterviewNarrativeIfPending } from '@utilities/kickClientInterviewNarrativeIfPending';
 import { runCommunicationStylePipelineAfterSave } from '@utilities/runCommunicationStylePipeline';
 import { writeSessionLog, logSupabaseWriteFailed } from '@utilities/sessionLogging/writeSessionLog';
 import {
@@ -274,6 +416,7 @@ import {
   shouldWarnHighThermal,
 } from '@utilities/sessionLogging/interviewDeviceEnvironment';
 import { persistInterviewAttemptSessionLifecycle } from '@utilities/interviewAttemptLifecycle';
+import { useInterviewAttemptEgoRepair } from '@features/aria/hooks/useInterviewAttemptEgoRepair';
 import { FlameOrb } from '@app/screens/FlameOrb';
 import { UserInterviewLayout, type ActiveScenario } from '@app/screens/UserInterviewLayout';
 import { InterviewAnalysisScreen } from '@app/screens/InterviewAnalysisScreen';
@@ -324,9 +467,11 @@ import {
 import {
   countInterviewWords,
   deriveMoment4PostGrudgeSpecificityResolvedFromMessages,
+  looksLikeMoment4SpecificityFollowUpEcho,
   looksLikeMoment4SpecificityFollowUpPrompt,
   MOMENT_4_SPECIFICITY_FOLLOW_UP_TEXT,
   needsMoment4SpecificityFollowUp,
+  stripMoment4SpecificityFollowUpStreamingEcho,
 } from '@features/aria/moment4SpecificityFollowUp';
 import type { Moment4ClientScoringMetadata } from '@features/aria/personalMomentScoringPrompt';
 import {
@@ -368,10 +513,20 @@ import {
   type PersonalMoment5SliceForSanitize,
   type PersonalMomentSliceForSanitize,
 } from '@features/aria/personalMomentSliceSanitize';
+import { finalizePersonalMomentDepthSignals } from '@features/aria/personalMomentDepthSignals';
+import { normalizeResponseConcreteness, mergeMomentConcretenessForGate, computePersonalMomentConcretenessModifier, type ResponseConcretenessLevel } from '@features/aria/personalMomentConcreteness';
 import {
+  aggregatePersonalMomentEmotionalVocab,
+  extractPersonalMomentEmotionalVocabFromSlice,
+  scenarioEmotionalVocabDensityPercentFromTranscript,
+} from '@features/aria/personalMomentEmotionalVocab';
+import {
+  aggregateScenario1Moment1UserTextForContemptGate,
   debugScenarioAQ1ContemptProbeCoverageDetail,
   evaluateScenarioAQ1ContemptProbePreProbeSkip,
   hasScenarioAQ1ContemptProbeCoverage,
+  hasScenarioAQ1VignetteEngagement,
+  isReplyingToScenarioAQ1AfterDelivery,
   hasScenarioBQ1OnTopicEngagement,
   extractScenario3UserCorpusAfterLastRepairPrompt,
   extractScenario3UserCorpusBeforeRepairPrompt,
@@ -381,31 +536,75 @@ import {
   isScenarioCRepairAssistantPrompt,
   normalizeInterviewTypography,
   mergeMoment4PillarScoresAfterEvidenceNormalize,
+  mergeMoment5PillarScoresAfterEvidenceNormalize,
   normalizeScoresByEvidence,
+  applyMoment4PostParseCoercionAndSalvage,
+  fillMoment4KeyEvidenceWhenNumericScoreButMissingQuote,
+  backfillMoment4KeyEvidenceIfScoresOtherwiseUnpersistable,
+  applyMoment5PostParseCoercionAndSalvage,
+  fillMoment5KeyEvidenceWhenNumericScoreButMissingQuote,
+  backfillMoment5KeyEvidenceIfScoresOtherwiseUnpersistable,
+  coerceScenarioScoreParsedModelRecord,
+  mergeSalvagedScenarioPillarScoresIntoParsed,
+  mergeSalvagedScenarioKeyEvidenceFromRaw,
+  fillScenarioKeyEvidenceWhenNumericScoreButMissingQuote,
+  MOMENT4_SCORE_RECOVERED_EVIDENCE_LINE,
   SKIPPED_BY_USER_FRUSTRATION_EVIDENCE,
-  sliceTranscriptBeforeScenarioCToPersonalHandoff,
+  sliceTranscriptForScenario3Scoring,
   MOMENT_5_ACCOUNTABILITY_QUESTION_TEXT,
-  MOMENT_5_ACCOUNTABILITY_PROBE_WITH_GRIEF_ACK_TEXT,
+  pickMoment5AccountabilityProbeSpokenText,
   MOMENT_5_CONFLICT_VALIDITY_CLARIFICATION_TEXT,
   MOMENT_5_PERSISTENT_ABSTRACT_MOVE_ON_TEXT,
+  MOMENT_5_RESOLUTION_FOLLOWUP_TEXT,
   MOMENT_5_SPECIFICITY_REDIRECT_TEXT,
   evaluateMoment5AccountabilityProbe,
   looksLikeMoment5ConflictValidityClarificationPrompt,
   looksLikeMoment5AccountabilityProbeAssistantPrompt,
+  looksLikeMoment5ResolutionFollowUpPrompt,
   looksLikeMoment5SpecificityRedirectPrompt,
+  transcriptHasMoment5ResolutionFollowUpAsked,
+  stripEmbeddedMoment5SpecificityRedirectAsk,
+  stripEmbeddedMoment5AccountabilityProbeAsk,
+  stripMoment5SpecificityRedirectStreamingEcho,
+  stripMoment5AccountabilityProbeStreamingEcho,
+  looksLikeScenarioAContemptProbeQuestion,
+  isIncompleteScenarioAContemptProbeLeadSentence,
+  mergeDeferredScenarioAContemptProbeLeadWithNextSentence,
+  stripScenarioAContemptProbeQuestion,
+  stripEmbeddedScenarioAContemptProbeAsk,
+  stripScenarioAContemptProbeStreamingEcho,
+  SCENARIO_A_CONTEMPT_PROBE_DELIVERED_COPY,
+  SCENARIO_A_REPAIR_QUESTION_AFTER_CONTEMPT_COPY,
+  scenarioAContemptProbeResumeRepeatTtsText,
   isMoment5AssistantAnchor,
   moment5ConflictValidityIsLow,
   moment5PersonalNarrativeHasConcreteAnchor,
+  moment5TranscriptHasConcreteAnchor,
+  moment5UserDeclinesConcreteReask,
+  buildMoment5ConfusionRepeatReplayAfterPriorAnswer,
+  combineMoment5UserTurnText,
   moment5ResponseAddsTensionDetail,
   moment5ResponseContainsDeathDisclosure,
   moment5ResponseIsAbstract,
+  shouldInjectMoment5SpecificityRedirect,
   transcriptAssistantContainsMoment5PrimaryConflictQuestion,
+  spokenTextStartsMoment5PrimaryConflictQuestion,
 } from '@features/aria/probeAndScoringUtils';
+import {
+  appendAssistantTurn,
+  appendAssistantTurnMergingConcurrentUsers,
+  assistantTurnHasPersistableContent,
+} from '@features/aria/interviewTranscriptTurns';
 import { fullScenarioReconciliation } from '@features/aria/reconcileScenarioScoresTranscript';
 import {
   aggregatePillarScoresWithCommitmentMergeDetailed,
+  disclosureCalibrationFromMarkerSlices,
+  extractEgoDevelopmentLevel,
+  markerSliceFromStoredScenarioMoment,
   type MarkerScoreSlice,
 } from '@features/aria/aggregateMarkerScoresFromSlices';
+import { countMentalizingOvercertaintyInMarkerSlices } from '@features/aria/mentalizingOvercertaintyFromTranscript';
+import { DEFAULT_DEFENSE_PATTERNS, detectDefensePatterns, type DefensePatternsJson } from '@features/aria/defensePatternsDetection';
 import {
   ACCOUNTABILITY_BLAME_SHIFT_VS_CLARITY_REQUEST,
   REPAIR_AND_ACCOUNTABILITY_UNPROMPTED_VS_PROMPTED_WEIGHTING,
@@ -415,12 +614,16 @@ import {
 } from '@features/aria/interviewScoringCalibration';
 import { buildScoringPrompt, SCORING_CONFIDENCE_INSTRUCTIONS } from '@features/aria/holisticScoringPrompt';
 import { SCENARIO_B_VIGNETTE as SCENARIO_2_VIGNETTE } from '@/constants/scenarioBVignette';
-import { buildPersonalMomentScoringPrompt } from '@features/aria/personalMomentScoringPrompt';
+import {
+  buildPersonalMomentScoringPrompt,
+  coerceMentalizingOvercertaintyFromModelJson,
+  MENTALIZING_OVERCERTAINTY_SCORING_INSTRUCTION,
+} from '@features/aria/personalMomentScoringPrompt';
 import {
   buildMoment5AccountabilityScoringPrompt,
   type Moment5ClientScoringMetadata,
 } from '@features/aria/moment5AccountabilityScoringPrompt';
-import { inferPersonalMomentSlices } from '@features/aria/personalMomentSlices';
+import { inferPersonalMomentSlices, trimMoment5SliceForScoring } from '@features/aria/personalMomentSlices';
 import * as FileSystem from 'expo-file-system';
 import * as FileSystemLegacy from 'expo-file-system/legacy';
 import { isAmoraeaAdminConsoleEmail } from '@/constants/adminConsole';
@@ -465,6 +668,20 @@ const POST_INTERVIEW_FEEDBACK_QUESTIONS: Array<{ id: PostInterviewFeedbackKey; t
       'Did you feel the grading and the questions were fair? What about the follow-up questions? How accurately do you think the interview measures relationship-readiness?',
   },
 ];
+
+/** `modified_weighted_score` must match `weighted_score + score_modifier` (2dp rounding in gate). */
+function logWeightedModifierInvariant(context: string, weighted: number | null | undefined, gate: GateResult): void {
+  if (weighted == null || !Number.isFinite(weighted)) return;
+  const sm = gate.scoreModifier ?? 0;
+  const actual = gate.modifiedWeightedScore;
+  if (actual == null || !Number.isFinite(actual)) return;
+  const expected = Math.round((weighted + sm) * 100) / 100;
+  if (Math.abs(expected - actual) > 0.01) {
+    console.error(`[ModifierBase] MISMATCH ${context} — expected:`, expected, 'actual:', actual);
+  } else if (typeof __DEV__ !== 'undefined' && __DEV__) {
+    console.log('[ModifierBase] modifier invariant holds:', actual, `(${context})`);
+  }
+}
 
 function parseJsonObject(value: unknown): Record<string, unknown> | null {
   if (value == null) return null;
@@ -542,6 +759,7 @@ function syncInterviewMomentsFromTranscript(
   for (let i = msgs.length - 1; i >= 0; i--) {
     const m = msgs[i];
     if (m.role !== 'assistant' || !m.content) continue;
+    if ((m as { isWelcomeBack?: boolean }).isWelcomeBack) continue;
     const c = m.content.toLowerCase();
     if (looksLikeMoment5AccountabilityProbeAssistantPrompt(m.content)) {
       personalHandoffInjected = true;
@@ -558,21 +776,34 @@ function syncInterviewMomentsFromTranscript(
       currentMoment = 5;
       break;
     }
+    /** Scripted client redirect after an abstract M5 answer — still Moment 5 (must run before vignette anchors). */
+    if (looksLikeMoment5SpecificityRedirectPrompt(m.content)) {
+      personalHandoffInjected = true;
+      momentsComplete[3] = true;
+      currentMoment = 5;
+      break;
+    }
     if (combinedScenarioCToMoment4Handoff(m.content) || grudgeIntroSignalsMoment4Entry(m.content)) {
       personalHandoffInjected = true;
       momentsComplete[3] = true;
       currentMoment = 4;
       break;
     }
-    if (c.includes('sophie and daniel') && c.includes('i need ten minutes')) {
+    /**
+     * Scenario vignette intros stay in the transcript after those scenarios are scored. When resuming
+     * mid–Moment 5, scanning newest→oldest must not snap `currentMoment` back to 3 (or 2/1) on those
+     * stale anchors — otherwise user turns are tagged `interviewMoment: 3` and Moment 5 scoring slices
+     * the wrong corpus (see persisted attempts with welcome-back + M5 redirects).
+     */
+    if (!momentsComplete[3] && c.includes('sophie and daniel') && c.includes('i need ten minutes')) {
       currentMoment = 3;
       break;
     }
-    if (c.includes('sarah has been job hunting')) {
+    if (!momentsComplete[2] && c.includes('sarah has been job hunting')) {
       currentMoment = 2;
       break;
     }
-    if (c.includes('emma and ryan') || c.includes('ryan takes a call')) {
+    if (!momentsComplete[1] && (c.includes('emma and ryan') || c.includes('ryan takes a call'))) {
       currentMoment = 1;
       break;
     }
@@ -583,12 +814,13 @@ function syncInterviewMomentsFromTranscript(
 
 /** User turns after the last scripted Moment 5 primary prompt (for resume + closing gate). */
 function countUserTurnsAfterLastMoment5PrimaryAnchor(
-  msgs: ReadonlyArray<{ role: string; content?: string }>,
+  msgs: ReadonlyArray<{ role: string; content?: string; isWelcomeBack?: boolean }>,
   sessionM5PrimaryAnchorMarked?: boolean
 ): number {
   let anchorIdx = -1;
   for (let i = msgs.length - 1; i >= 0; i--) {
     if (msgs[i].role !== 'assistant') continue;
+    if (msgs[i].isWelcomeBack) continue;
     const content = msgs[i].content ?? '';
     if (transcriptAssistantContainsMoment5PrimaryConflictQuestion(content)) {
       anchorIdx = i;
@@ -598,6 +830,7 @@ function countUserTurnsAfterLastMoment5PrimaryAnchor(
   if (anchorIdx < 0 && sessionM5PrimaryAnchorMarked) {
     for (let i = msgs.length - 1; i >= 0; i--) {
       if (msgs[i].role !== 'assistant') continue;
+      if (msgs[i].isWelcomeBack) continue;
       const raw = msgs[i].content ?? '';
       if (looksLikeMoment5AccountabilityProbeAssistantPrompt(raw)) continue;
       const lower = raw.toLowerCase();
@@ -610,9 +843,77 @@ function countUserTurnsAfterLastMoment5PrimaryAnchor(
   if (anchorIdx < 0) return 0;
   let n = 0;
   for (let i = anchorIdx + 1; i < msgs.length; i++) {
-    if (msgs[i].role === 'user') n += 1;
+    if (msgs[i].role === 'user' && !msgs[i].isWelcomeBack) n += 1;
   }
   return n;
+}
+
+type Moment5CloseGateSnapshot = {
+  postM5UserTurns: number;
+  hasMoment5PrimaryAnchorInTranscript: boolean;
+  accountabilityProbeStillRequired: boolean;
+  resolutionFollowUpStillRequired: boolean;
+  moment5CloseAllowed: boolean;
+  moment5CombinedForCloseGate: string;
+};
+
+function computeMoment5InterviewCloseGate(
+  msgs: ReadonlyArray<{ role: string; content?: string; isWelcomeBack?: boolean }>,
+  refs: {
+    moment5QuestionDelivered: boolean;
+    moment5PrimaryAnchorSession: boolean;
+    postM5UserTurnsRef: number;
+    accountabilityProbeFired: boolean;
+    currentInterviewMoment: number;
+  },
+): Moment5CloseGateSnapshot {
+  const transcriptSlice = msgs.map((m) => ({
+    role: m.role,
+    content: m.content ?? '',
+    isWelcomeBack: m.isWelcomeBack,
+  }));
+  const postM5UserTurnsFromTranscript = countUserTurnsAfterLastMoment5PrimaryAnchor(
+    transcriptSlice,
+    refs.moment5PrimaryAnchorSession,
+  );
+  const hasMoment5PrimaryAnchorInTranscript =
+    refs.moment5PrimaryAnchorSession ||
+    transcriptSlice.some(
+      (m) =>
+        m.role === 'assistant' &&
+        !m.isWelcomeBack &&
+        transcriptAssistantContainsMoment5PrimaryConflictQuestion(m.content),
+    );
+  const postM5UserTurns = Math.max(refs.postM5UserTurnsRef, postM5UserTurnsFromTranscript);
+  const moment5CombinedForCloseGate = combineMoment5UserTurnText(
+    msgs.filter((m) => !m.isWelcomeBack) as Array<{ role: string; content?: string }>,
+  );
+  const accountabilityProbeStillRequired =
+    (refs.moment5QuestionDelivered || hasMoment5PrimaryAnchorInTranscript) &&
+    !refs.accountabilityProbeFired &&
+    evaluateMoment5AccountabilityProbe(moment5CombinedForCloseGate).shouldProbe;
+  const resolutionFollowUpStillRequired =
+    hasMoment5PrimaryAnchorInTranscript &&
+    !moment5AnswerIncludesResolutionOutcome(moment5CombinedForCloseGate) &&
+    !transcriptHasMoment5ResolutionFollowUpAsked(transcriptSlice);
+  const moment5CloseAllowed = isMoment5ReadyForInterviewClose({
+    currentInterviewMoment: refs.currentInterviewMoment,
+    moment5QuestionDelivered: refs.moment5QuestionDelivered,
+    postM5UserTurns,
+    accountabilityProbeFired: refs.accountabilityProbeFired,
+    hasMoment5PrimaryAnchorInTranscript,
+    moment5CombinedUserText: moment5CombinedForCloseGate,
+    accountabilityProbeStillRequired,
+    resolutionFollowUpStillRequired,
+  });
+  return {
+    postM5UserTurns,
+    hasMoment5PrimaryAnchorInTranscript,
+    accountabilityProbeStillRequired,
+    resolutionFollowUpStillRequired,
+    moment5CloseAllowed,
+    moment5CombinedForCloseGate,
+  };
 }
 
 function messageLooksLikeScoreCard(msg: { role?: string; content?: string; isScoreCard?: boolean }): boolean {
@@ -769,7 +1070,7 @@ function getAnthropicEndpoint(): string {
  * - Remove ALPHA_MODE and all branches that use it (timing/probe refs, alpha save path)
  * - Remove user_analysis_* from queries if not keeping for research; route post-completion to under_review
  */
-const ALPHA_MODE = true;
+const ALPHA_MODE = false;
 
 /**
  * Amoraea-voiced fallbacks when something goes wrong. Never expose technical language.
@@ -937,6 +1238,155 @@ function isGreetingOnly(savedMessages: Array<{ role: string; content?: string }>
   return greetingPhrases.some((phrase) => content.includes(phrase));
 }
 
+function transcriptHasScenario1VignetteAssistant(
+  msgs: Array<{ role: string; content?: string }> | undefined,
+): boolean {
+  return (msgs ?? []).some(
+    (m) =>
+      m.role === 'assistant' &&
+      ((m.content ?? '').includes('Emma and Ryan') ||
+        (m.content ?? '').includes("What's going on between these two")),
+  );
+}
+
+function buildFallbackIntroBriefingText(firstName: string): string {
+  const name = firstName.trim() || 'there';
+  return (
+    `Good to meet you, ${name}. The way this works is I'll first give you three situations, ` +
+    "and you just tell me what you'd do in each situation. Then I'll give you two short personal questions. " +
+    'The whole thing usually takes about 20 to 30 minutes. Try to find a quiet, private space if you can. ' +
+    'Just do the best you can — there are no right or wrong answers. Are you ready?'
+  );
+}
+
+function insertPreambleBriefingIfMissing(
+  msgs: MessageWithScenario[],
+  briefingText: string,
+): MessageWithScenario[] {
+  if (msgs.some((m) => m.role === 'assistant' && isInterviewPreambleBriefingMoment(m.content ?? ''))) {
+    return msgs;
+  }
+  const trimmed = stripControlTokens(briefingText).trim();
+  if (!assistantTurnHasPersistableContent(trimmed)) return msgs;
+  const briefingMsg: MessageWithScenario = {
+    role: 'assistant',
+    content: trimmed,
+    scenarioNumber: 1,
+    interviewMoment: 1,
+  };
+  const firstAsstIdx = msgs.findIndex((m) => m.role === 'assistant');
+  if (firstAsstIdx < 0) return appendAssistantTurn(msgs, trimmed, { scenarioNumber: 1, interviewMoment: 1 });
+  /** After opening greeting + first user turn (name), before readiness assents. */
+  let insertAt = firstAsstIdx + 1;
+  if (insertAt < msgs.length && msgs[insertAt]?.role === 'user') {
+    insertAt += 1;
+  }
+  return [...msgs.slice(0, insertAt), briefingMsg, ...msgs.slice(insertAt)];
+}
+
+/** Ensure every scored transcript turn carries scenarioNumber before persisting or syncing. */
+function tagInterviewTranscriptMessages(msgs: MessageWithScenario[]): MessageWithScenario[] {
+  return assignScenarioNumbersToTranscript(msgs);
+}
+
+const RESUME_WELCOME_SPOKEN_PREFIX = 'amoraea_resume_welcome_spoken_';
+
+/**
+ * Web: in-memory only. `sessionStorage` survives full page refresh, which incorrectly suppressed
+ * welcome-back TTS on reload (user never heard it again after refresh).
+ */
+const resumeWelcomeSpokenWebMemory = new Set<string>();
+/** Synchronous guard: one in-flight welcome TTS per attempt (gesture flush + tap race). */
+let resumeWelcomePlaybackLockAttemptId: string | null = null;
+
+function resumeWelcomeSpokenKey(attemptId: string): string {
+  return `${RESUME_WELCOME_SPOKEN_PREFIX}${attemptId}`;
+}
+
+const PREPARING_RESULTS_SESSION_PREFIX = 'amoraea_preparing_results_';
+
+function preparingResultsSessionKey(userId: string): string {
+  return `${PREPARING_RESULTS_SESSION_PREFIX}${userId}`;
+}
+
+/** Survives React remount / strict-mode double mount while scoreInterview runs (web sessionStorage). */
+function markPreparingResultsSession(userId: string): void {
+  if (Platform.OS === 'web' && typeof sessionStorage !== 'undefined') {
+    sessionStorage.setItem(preparingResultsSessionKey(userId), '1');
+  }
+}
+
+function clearPreparingResultsSession(userId: string): void {
+  if (Platform.OS === 'web' && typeof sessionStorage !== 'undefined') {
+    sessionStorage.removeItem(preparingResultsSessionKey(userId));
+  }
+}
+
+function hasPreparingResultsSession(userId: string): boolean {
+  if (Platform.OS !== 'web' || typeof sessionStorage === 'undefined') return false;
+  return sessionStorage.getItem(preparingResultsSessionKey(userId)) === '1';
+}
+
+/** Each storage resume / refresh should offer welcome TTS again; clears legacy web sessionStorage too. */
+async function clearResumeWelcomeSpokenForHydration(attemptId: string | null | undefined): Promise<void> {
+  if (!attemptId) return;
+  resumeWelcomeSpokenWebMemory.delete(attemptId);
+  if (Platform.OS === 'web' && typeof sessionStorage !== 'undefined') {
+    sessionStorage.removeItem(resumeWelcomeSpokenKey(attemptId));
+    return;
+  }
+  try {
+    await AsyncStorage.removeItem(resumeWelcomeSpokenKey(attemptId));
+  } catch {
+    /* non-fatal */
+  }
+}
+
+async function wasResumeWelcomeSpoken(attemptId: string | null | undefined): Promise<boolean> {
+  if (!attemptId) return false;
+  if (Platform.OS === 'web') {
+    return resumeWelcomeSpokenWebMemory.has(attemptId);
+  }
+  const key = resumeWelcomeSpokenKey(attemptId);
+  try {
+    return (await AsyncStorage.getItem(key)) === '1';
+  } catch {
+    return false;
+  }
+}
+
+async function markResumeWelcomeSpoken(attemptId: string | null | undefined): Promise<void> {
+  if (!attemptId) return;
+  if (Platform.OS === 'web') {
+    resumeWelcomeSpokenWebMemory.add(attemptId);
+    return;
+  }
+  const key = resumeWelcomeSpokenKey(attemptId);
+  try {
+    await AsyncStorage.setItem(key, '1');
+  } catch {
+    /* non-fatal */
+  }
+}
+
+function tryAcquireResumeWelcomePlayback(attemptId: string | null | undefined): boolean {
+  if (!attemptId) return false;
+  if (resumeWelcomeSpokenWebMemory.has(attemptId)) return false;
+  if (resumeWelcomePlaybackLockAttemptId === attemptId) return false;
+  resumeWelcomePlaybackLockAttemptId = attemptId;
+  return true;
+}
+
+function releaseResumeWelcomePlaybackLock(attemptId: string | null | undefined): void {
+  if (attemptId && resumeWelcomePlaybackLockAttemptId === attemptId) {
+    resumeWelcomePlaybackLockAttemptId = null;
+  }
+}
+
+function clearResumeWelcomePlaybackLock(): void {
+  resumeWelcomePlaybackLockAttemptId = null;
+}
+
 /**
  * Save interview progress only when there is meaningful progress (avoids resume loop from pre-interview state).
  */
@@ -960,40 +1410,11 @@ type MessageWithScenario = {
   interviewMoment?: InterviewMomentIndex;
 };
 
-function getScenarioNumberForNewMessage(
-  prevMessages: MessageWithScenario[],
-  role: 'user' | 'assistant',
-  newContent?: string
-): number {
-  const last = [...prevMessages].reverse().find((m) => m.role === 'user' || m.role === 'assistant');
-  const lastNum = (last as MessageWithScenario | undefined)?.scenarioNumber;
-  if (role === 'user') return lastNum ?? 1;
-  if (!newContent) return lastNum ?? 1;
-  const c = newContent.toLowerCase();
-  if (/emma and ryan|ryan takes a call|first situation|here's the first|situation 1/.test(c)) return 1;
-  if (/sarah has been job hunting|sarah.*james|on to the second|second situation|here's the next situation/.test(c)) return 2;
-  if (/sophie and daniel|i need ten minutes|here's the third situation|third situation|last one.*situation three|situation three/.test(c)) return 3;
-  return lastNum ?? 1;
-}
-
-/** Detect which scenario an AI response introduces from content (belt-and-suspenders for tagging). */
-function detectScenarioFromResponse(responseText: string): 1 | 2 | 3 | null {
-  if (!responseText?.trim()) return null;
-  const c = responseText.toLowerCase();
-  if (/emma and ryan|ryan takes a call|first situation|here's the first/.test(c)) return 1;
-  if (
-    /sarah has been job hunting|second situation|on to the second|here's the next situation|\bsituation\s*2\b|the second situation|next situation/.test(c) ||
-    (/\bsarah\b/.test(c) && /\bjames\b/.test(c) && /job|hunting|offer|celebrate|appreciated|blindsided|deadline/.test(c))
-  ) {
-    return 2;
-  }
-  if (
-    /sophie and daniel|daniel.*didn't know what to say|daniel.*didn't know how|here's the third situation|third situation|last one.*situation three|situation three|\bsituation\s*3\b|the third situation/.test(c) ||
-    (/\bsophie\b/.test(c) && /\bdaniel\b/.test(c) && /ten minutes|avoiding|didn'?t know what to say|silent/.test(c))
-  ) {
-    return 3;
-  }
-  return null;
+/** Model output often uses curly apostrophes (U+2019, etc.); ASCII-only `here's` patterns miss `Here's`. */
+function normalizeAssistantTypographicPunctuationForRegex(text: string): string {
+  return text
+    .replace(/[\u2018\u2019\u201A\u201B\u2032\u2035\u0060]/g, "'")
+    .replace(/[\u201C\u201D\u201E]/g, '"');
 }
 
 /** Infer message slice for a scenario when tags are wrong: find anchor message for this scenario, slice until next scenario anchor. */
@@ -1111,8 +1532,10 @@ function pickMessagesForScenarioScoring(
   allMessages: MessageWithScenario[],
   scenarioNum: 1 | 2 | 3
 ): { role: string; content: string }[] {
-  const tagged = allMessages.filter((m) => (m as MessageWithScenario).scenarioNumber === scenarioNum);
-  const inferred = inferScenarioMessages(allMessages, scenarioNum);
+  const corpus =
+    scenarioNum === 3 ? sliceTranscriptForScenario3Scoring(allMessages) : allMessages;
+  const tagged = corpus.filter((m) => (m as MessageWithScenario).scenarioNumber === scenarioNum);
+  const inferred = inferScenarioMessages(corpus, scenarioNum);
   const taggedUser = tagged.filter((m) => m.role === 'user').length;
   const inferredUser = inferred.filter((m) => m.role === 'user').length;
 
@@ -1148,7 +1571,7 @@ function stripControlTokens(text: string): string {
   if (!text) return text;
   return text
     .replace(/\[INTERVIEW_COMPLETE\]/gi, '')
-    .replace(/\[SCENARIO_COMPLETE:\d+\]/gi, '')
+    .replace(/\[SCENARIO_COMPLETE:\s*\d+\]/gi, '')
     .replace(/\[CLOSING_QUESTION:\d+\]/gi, '')
     .replace(/\[STAGE_[123]_COMPLETE\]/g, '')
     .replace(/\[PROBE_TRIGGERED\]/gi, '')
@@ -1287,66 +1710,143 @@ function hasCommitmentThresholdSignal(text: string): boolean {
   return (hasIrrecoverableCriteria || hasLeaveDecisionProcess || hasBoundaryAndOutcome) && !(repairOnlyLanguage && !hasIrrecoverableCriteria && !hasLeaveDecisionProcess);
 }
 
-function looksLikeScenarioAContemptProbeQuestion(text: string): boolean {
-  const t = text.toLowerCase().replace(/\u2019/g, "'");
-  /** ASR/model often drop the contraction ("you made that very clear"). */
-  const mentionsEmmaClosingLine =
-    t.includes("you've made that very clear") ||
-    t.includes('you have made that very clear') ||
-    /\byou\s+made\s+that\s+very\s+clear\b/.test(t);
-  /** Canonical framework copy (interviewerFrameworkPrompt): "What about when Emma says … what do you make of that?" */
-  const canonicalFrameworkProbe =
-    mentionsEmmaClosingLine &&
-    /what about when emma says/.test(t) &&
-    /\bwhat do you make of (that|it)\b/.test(t);
-  /** Legacy client inject when forcing the probe */
-  const alternateInjectProbe =
-    mentionsEmmaClosingLine && /\bwhat do you make of emma'?s statement\b/.test(t);
-  /**
-   * TTS/ASR mashups, e.g. "What do you make of Emma's statement you made that very clear"
-   * (missing "when she says 'you've…'" glue) — must count as the probe so we do not stack a second forced ask.
-   */
-  const statementMashup =
-    /\bwhat do you make of\b/.test(t) &&
-    /\bemma'?s\s+statement\b/.test(t) &&
-    /\b(very\s+clear|you'?ve\s+made|you\s+made\s+that)\b/.test(t);
-  const shortGarbledMakeOfEmma =
-    t.length < 220 &&
-    /\bwhat do you make of\b/.test(t) &&
-    /\bemma\b/.test(t) &&
-    /\bvery\s+clear\b/.test(t);
-  return canonicalFrameworkProbe || alternateInjectProbe || statementMashup || shortGarbledMakeOfEmma;
-}
-
-/** Remove repeated Scenario A contempt-probe asks after one was already delivered (model loop / ASR variants). */
-function stripScenarioAContemptProbeQuestion(text: string): string {
-  let s = text;
-  const removals: RegExp[] = [
-    /\n?\s*What about when Emma says[^\n]*?\bwhat do you make of (that|it)\??\s*/gi,
-    /\n?\s*What do you make of Emma['\u2019]s statement when she says[^\n]*?\??\s*/gi,
-    /\n?\s*What do you make of[^\n]{0,140}Emma[^\n]{0,180}very clear[^\n.?!]*\??\s*/gi,
-  ];
-  for (const re of removals) {
-    s = s.replace(re, '\n');
-  }
-  return s.replace(/\n{3,}/g, '\n\n').trim();
-}
-
-function looksLikeScenarioARepairQuestion(text: string): boolean {
-  const t = text.toLowerCase();
-  return (
-    t.includes('how would you repair this relationship if you were ryan') ||
-    (t.includes('if you were ryan') && t.includes('repair this relationship'))
+/**
+ * Model sometimes repeats the Scenario A contempt probe (or a close paraphrase) after it is already in the transcript.
+ * Drop matching paragraphs only when prior transcript already contained that probe (welcome-back excluded upstream).
+ */
+function stripDuplicateScenarioAContemptProbeParagraphs(
+  draft: string,
+  msgs: MessageWithScenario[],
+  interviewMoment: number,
+  contemptProbeAskedRef: boolean,
+): string {
+  if (interviewMoment !== 1 || !draft.trim()) return draft;
+  const priorAssistants = msgs.filter(
+    (m) =>
+      m.role === 'assistant' &&
+      !(m as { isWelcomeBack?: boolean }).isWelcomeBack &&
+      !(m as { isScoreCard?: boolean }).isScoreCard,
   );
+  const alreadyAsked =
+    contemptProbeAskedRef ||
+    priorAssistants.some((m) =>
+      looksLikeScenarioAContemptProbeQuestion((m as { content?: string }).content ?? ''),
+    );
+  if (!alreadyAsked) return draft;
+  const blocks = draft
+    .split(/\n{2,}/)
+    .map((b) => b.trim())
+    .filter(Boolean);
+  if (blocks.length === 0) return draft;
+  const isProbe = (b: string) => looksLikeScenarioAContemptProbeQuestion(b);
+  if (!blocks.some(isProbe)) return draft;
+  if (blocks.length <= 1) {
+    const stripped = stripEmbeddedScenarioAContemptProbeAsk(draft).trim();
+    if (!stripped) return '';
+    if (stripped !== draft.trim()) return stripped;
+    if (looksLikeScenarioAContemptProbeQuestion(draft)) return '';
+    return draft;
+  }
+  const filtered = blocks
+    .filter((b) => !isProbe(b))
+    .map((b) => stripEmbeddedScenarioAContemptProbeAsk(b).trim())
+    .filter(Boolean);
+  const joined = filtered.join('\n\n').trim();
+  return joined || draft;
 }
 
-function stripScenarioARepairQuestion(text: string): string {
-  const cleaned = text
-    .replace(/(?:^|\n)\s*How would you repair this relationship if you were Ryan\?\s*/gi, '\n')
-    .replace(/(?:^|\n)\s*If you were Ryan[^?.!]*repair[^?.!]*[?.!]\s*/gi, '\n')
-    .replace(/\n{3,}/g, '\n\n')
-    .trim();
-  return cleaned;
+function stripDuplicateScenarioARepairQuestionParagraphs(
+  draft: string,
+  msgs: MessageWithScenario[],
+  interviewMoment: number,
+  repairQuestionAskedRef: boolean,
+): string {
+  if (interviewMoment !== 1 || !draft.trim()) return draft;
+  const priorAssistants = msgs.filter(
+    (m) =>
+      m.role === 'assistant' &&
+      !(m as { isWelcomeBack?: boolean }).isWelcomeBack &&
+      !(m as { isScoreCard?: boolean }).isScoreCard,
+  );
+  const alreadyAsked =
+    repairQuestionAskedRef ||
+    priorAssistants.some((m) =>
+      looksLikeScenarioARepairQuestion((m as { content?: string }).content ?? ''),
+    );
+  if (!alreadyAsked) return draft;
+  const blocks = draft
+    .split(/\n{2,}/)
+    .map((b) => b.trim())
+    .filter(Boolean);
+  if (blocks.length === 0) return draft;
+  const isRepair = (b: string) => looksLikeScenarioARepairQuestion(b);
+  if (!blocks.some(isRepair) && !/\bhow would you repair\b/i.test(draft)) return draft;
+  if (blocks.length <= 1) {
+    const stripped = stripEmbeddedScenarioARepairQuestionAsk(draft).trim();
+    if (!stripped) return '';
+    if (stripped !== draft.trim()) return stripped;
+    if (looksLikeScenarioARepairQuestion(draft)) return '';
+    if (/\bhow would you repair\b/i.test(draft) && /\bryan\b/i.test(draft)) return '';
+    return draft;
+  }
+  const filtered = blocks
+    .filter((b) => !isRepair(b))
+    .map((b) => stripEmbeddedScenarioARepairQuestionAsk(b).trim())
+    .filter(Boolean);
+  const joined = filtered.join('\n\n').trim();
+  return joined || draft;
+}
+
+/**
+ * Models often repeat the conflict-validity clarification (or echo after the client injected it).
+ * Drop extra matching paragraphs so the line is not spoken twice in one turn or stacked after transcript.
+ */
+function stripDuplicateMoment5ConflictValidityClarificationParagraphs(
+  draft: string,
+  msgs: MessageWithScenario[],
+  interviewMoment: number,
+  clarificationIssuedRef: boolean,
+): string {
+  if (interviewMoment !== 5 || !draft.trim()) return draft;
+  const priorAssistants = msgs.filter(
+    (m) =>
+      m.role === 'assistant' &&
+      !(m as { isWelcomeBack?: boolean }).isWelcomeBack &&
+      !(m as { isScoreCard?: boolean }).isScoreCard,
+  );
+  const clarificationAlreadyAsked =
+    clarificationIssuedRef ||
+    priorAssistants.some((m) =>
+      looksLikeMoment5ConflictValidityClarificationPrompt((m as { content?: string }).content ?? ''),
+    );
+
+  const blocks = draft
+    .split(/\n{2,}/)
+    .map((b) => b.trim())
+    .filter(Boolean);
+  if (blocks.length === 0) return draft;
+
+  const isClar = (b: string) => looksLikeMoment5ConflictValidityClarificationPrompt(b);
+  if (!blocks.some(isClar)) return draft;
+
+  let keptClarificationInDraft = false;
+  const out: string[] = [];
+  for (const b of blocks) {
+    if (!isClar(b)) {
+      out.push(b);
+      continue;
+    }
+    if (clarificationAlreadyAsked) {
+      continue;
+    }
+    if (keptClarificationInDraft) {
+      continue;
+    }
+    keptClarificationInDraft = true;
+    out.push(b);
+  }
+  const joined = out.join('\n\n').trim();
+  return joined || draft;
 }
 
 /**
@@ -1374,10 +1874,95 @@ function stripDuplicateMoment5SpecificityRedirectParagraphs(
     .map((b) => b.trim())
     .filter(Boolean);
   if (blocks.length <= 1) {
+    const stripped = stripEmbeddedMoment5SpecificityRedirectAsk(draft).trim();
+    if (!stripped) return '';
+    if (stripped !== draft.trim()) return stripped;
     if (looksLikeMoment5SpecificityRedirectPrompt(draft)) return '';
     return draft;
   }
-  const filtered = blocks.filter((b) => !looksLikeMoment5SpecificityRedirectPrompt(b));
+  const filtered = blocks
+    .filter((b) => !looksLikeMoment5SpecificityRedirectPrompt(b))
+    .map((b) => stripEmbeddedMoment5SpecificityRedirectAsk(b).trim())
+    .filter(Boolean);
+  const joined = filtered.join('\n\n').trim();
+  return joined || draft;
+}
+
+/**
+ * Model sometimes repeats the client-injected Moment 5 accountability probe (or a close paraphrase) after it is already in the transcript.
+ * Drop matching paragraphs only when prior transcript already contained that probe (welcome-back excluded upstream).
+ */
+function stripDuplicateMoment5AccountabilityProbeParagraphs(
+  draft: string,
+  msgs: MessageWithScenario[],
+  interviewMoment: number,
+  accountabilityProbeFiredRef: boolean,
+): string {
+  if (interviewMoment !== 5 || !draft.trim()) return draft;
+  const priorAssistants = msgs.filter(
+    (m) =>
+      m.role === 'assistant' &&
+      !(m as { isWelcomeBack?: boolean }).isWelcomeBack &&
+      !(m as { isScoreCard?: boolean }).isScoreCard,
+  );
+  const alreadyAsked =
+    accountabilityProbeFiredRef ||
+    priorAssistants.some((m) =>
+      looksLikeMoment5AccountabilityProbeAssistantPrompt((m as { content?: string }).content ?? ''),
+    );
+  if (!alreadyAsked) return draft;
+  const blocks = draft
+    .split(/\n{2,}/)
+    .map((b) => b.trim())
+    .filter(Boolean);
+  if (blocks.length === 0) return draft;
+  const isProbe = (b: string) => looksLikeMoment5AccountabilityProbeAssistantPrompt(b);
+  if (!blocks.some(isProbe) && !/\bwhat was your part in how\b/i.test(draft)) return draft;
+  if (blocks.length <= 1) {
+    const stripped = stripEmbeddedMoment5AccountabilityProbeAsk(draft).trim();
+    if (!stripped) return '';
+    if (stripped !== draft.trim()) return stripped;
+    if (looksLikeMoment5AccountabilityProbeAssistantPrompt(draft)) return '';
+    if (/\bwhat was your part in how\b/i.test(draft)) return '';
+    return draft;
+  }
+  const filtered = blocks
+    .filter((b) => !isProbe(b) && !/\bwhat was your part in how\b/i.test(b))
+    .map((b) => stripEmbeddedMoment5AccountabilityProbeAsk(b).trim())
+    .filter(Boolean);
+  const joined = filtered.join('\n\n').trim();
+  return joined || draft;
+}
+
+/**
+ * Model sometimes repeats the client-injected Moment 4 specificity line (or a close paraphrase) after it is already in the transcript.
+ * Drop matching paragraphs when prior assistant turns already included that follow-up.
+ */
+function stripDuplicateMoment4SpecificityFollowUpParagraphs(
+  draft: string,
+  msgs: MessageWithScenario[],
+  interviewMoment: number,
+): string {
+  if (interviewMoment !== 4 || !draft.trim()) return draft;
+  const priorAssistants = msgs.filter(
+    (m) =>
+      m.role === 'assistant' &&
+      !(m as { isWelcomeBack?: boolean }).isWelcomeBack &&
+      !(m as { isScoreCard?: boolean }).isScoreCard,
+  );
+  const alreadyAsked = priorAssistants.some((m) =>
+    looksLikeMoment4SpecificityFollowUpEcho((m as { content?: string }).content ?? ''),
+  );
+  if (!alreadyAsked) return draft;
+  const blocks = draft
+    .split(/\n{2,}/)
+    .map((b) => b.trim())
+    .filter(Boolean);
+  if (blocks.length <= 1) {
+    if (looksLikeMoment4SpecificityFollowUpEcho(draft)) return '';
+    return draft;
+  }
+  const filtered = blocks.filter((b) => !looksLikeMoment4SpecificityFollowUpEcho(b));
   const joined = filtered.join('\n\n').trim();
   return joined || draft;
 }
@@ -1669,6 +2254,20 @@ CLOSING: The user shared personal experiences across Moments 4 and 5. **One** as
 const SCENARIO_ONLY_CLOSING_INSTRUCTION = `
 CLOSING: The user gave limited personal detail. **One** assistant message only: still **anchor on something specific** they said in the scenarios (a named character, a line they quoted, or how they framed the conflict) plus optional brief task acknowledgement. **No** generic-only sign-off. Do not start with "Sure," "Okay," "Absolutely," "That makes sense," "That checks out," or "That lands." No hollow trait evaluation. No biographical content that does not appear in this transcript. Then "Thank you for being so open with me" or similar. Then output [INTERVIEW_COMPLETE].`;
 
+/** Collapse stacked generic interview sign-offs (e.g. walking-through + open-with-me). */
+function dedupeStackedInterviewThankYous(text: string): string {
+  if (!text?.trim()) return text;
+  const hasOpenThanks = /\bthank you for being so open with me\b/i.test(text);
+  const hasWalkThanks = /\bthank you for walking through\b/i.test(text);
+  const hasStickThanks = /\bthanks for sticking with\b/i.test(text);
+  if (!hasOpenThanks || (!hasWalkThanks && !hasStickThanks)) return text;
+  let out = text
+    .replace(/\bthank you for walking through[^.!?]*[.!?]\s*/gi, '')
+    .replace(/\bthanks for sticking with[^.!?]*[.!?]\s*/gi, '');
+  out = out.replace(/\s{2,}/g, ' ').trim();
+  return out || text;
+}
+
 /** Remove model mirror recap ("That X sounds like…") before the scripted thanks line. */
 function stripLeadingMirrorRecapBeforeThanks(text: string): string {
   const thankRe = /\bThank you for being so open\b/i;
@@ -1700,6 +2299,7 @@ function sanitizeClosingLanguage(text: string): string {
     .replace(/\s+going through the motions(?=\s*[.…]?\s*Thank\b)/gi, '')
     .replace(/\s{2,}/g, ' ')
     .trim();
+  out = dedupeStackedInterviewThankYous(out);
   out = stripLeadingMirrorRecapBeforeThanks(out);
   return out;
 }
@@ -2815,6 +3415,20 @@ const ASSISTANT_INTERVIEW_SPEECH = {
   ttsTriggerSource: 'callback' as const,
 };
 
+/** Tab-return replay — never advance interview state or re-verify duration (avoids double-speak). */
+const TAB_RESTORE_PENDING_SPEAK_OPTIONS = {
+  interviewSpeechRole: 'assistant_response' as const,
+  telemetrySource: 'replay' as const,
+  skipInterviewSpeechAdvance: true,
+  skipQuestionDeliveredTelemetry: true,
+  skipLastQuestionRef: true,
+  allowDuplicateConsecutiveTts: true,
+  skipGestureGate: true,
+  /** HTML MP3 only — avoids non-seekable PCM chunk stream on long replay lines. */
+  skipPcmStream: true,
+  ttsTriggerSource: 'gesture_handler' as const,
+};
+
 const RESUME_WELCOME_BACK_MESSAGE =
   "Welcome back! Lets continue where we left off. If you'd like me to repeat what I said, let me know.";
 
@@ -2842,25 +3456,6 @@ function getSituationOpeningQuestion(scenario: ActiveScenario): string | null {
   }
 }
 
-/**
- * Scenario modal (below separator): show only the last interrogative sentence, not preceding reflection.
- * Returns null if there is no `?` — caller should not replace the modal question for statement-only turns.
- */
-function extractModalQuestionFromAssistantText(text: string): string | null {
-  const t = text.trim();
-  if (!t.includes('?')) return null;
-  const lastQ = t.lastIndexOf('?');
-  const beforeClose = t.slice(0, lastQ);
-  let start = 0;
-  const re = /[.!?]\s+/g;
-  let m: RegExpExecArray | null;
-  while ((m = re.exec(beforeClose)) !== null) {
-    start = m.index + m[0].length;
-  }
-  const out = t.slice(start, lastQ + 1).trim();
-  return out.length > 0 ? out : null;
-}
-
 function normalizeScenarioOpeningForCompare(s: string): string {
   return s
     .trim()
@@ -2871,8 +3466,50 @@ function normalizeScenarioOpeningForCompare(s: string): string {
     .toLowerCase();
 }
 
-/** Pause between split vignette TTS and closing question TTS (lets segment 1 finish; pairs with expected wall-clock for premature detection). */
-const SCENARIO_SPLIT_INTER_SEGMENT_GAP_MS = 1900;
+function looksLikeCanonicalScenarioOpeningQuestion(sentence: string): boolean {
+  const normalized = normalizeScenarioOpeningForCompare(sentence);
+  for (const opening of [SCENARIO_1_OPENING, SCENARIO_2_OPENING, SCENARIO_3_OPENING]) {
+    if (normalizeScenarioOpeningForCompare(opening) === normalized) return true;
+  }
+  return false;
+}
+
+function streamTextAlreadyContainsScenarioOpeningQuestion(fullText: string): boolean {
+  const extracted = extractScenarioModalQuestionFromAssistantText(stripControlTokens(fullText));
+  if (!extracted) return false;
+  return looksLikeCanonicalScenarioOpeningQuestion(extracted);
+}
+
+/** Hold the vignette tail when a paragraph break precedes the canonical opening question (streaming TTS). */
+function shouldDeferScenarioVignetteTailForOpeningMerge(
+  spoken: string,
+  bufferAfterSentence: string,
+  fullStreamText: string,
+): boolean {
+  if (looksLikeCanonicalScenarioOpeningQuestion(spoken)) return false;
+  if (streamTextAlreadyContainsScenarioOpeningQuestion(fullStreamText)) return false;
+  const remainder = bufferAfterSentence;
+  const remainderTrim = remainder.trim();
+  if (
+    remainderTrim.length > 0 &&
+    !looksLikeCanonicalScenarioOpeningQuestion(remainderTrim) &&
+    !/^\s*\n+\s*$/.test(remainder)
+  ) {
+    return false;
+  }
+  const t = stripControlTokens(spoken).trim();
+  if (!t) return false;
+  return (
+    detectActiveScenarioFromMessage(t) != null ||
+    /\b(emma and ryan|sarah has been|sophie and daniel)\b/i.test(t)
+  );
+}
+
+/**
+ * Brief breath between split vignette and opening question after segment 1 playback completes.
+ * `speakWithElevenLabs` already awaits segment 1 finish — a long fixed gap sounded like dead air.
+ */
+const SCENARIO_SPLIT_INTER_SEGMENT_GAP_MS = 200;
 
 function computeExpectedTtsWallClockMs(
   charCount: number,
@@ -2916,7 +3553,7 @@ function trySplitFictionalScenarioIntroLongDelivery(text: string): {
   if (!opening) return null;
   const { expectedMs: fullExpected } = getTtsExpectedDurationMsFromCharCount(cleaned.length);
   if (fullExpected <= 30_000) return null;
-  const lastQ = extractModalQuestionFromAssistantText(cleaned);
+  const lastQ = extractScenarioModalQuestionFromAssistantText(cleaned);
   if (!lastQ) return null;
   const nOpen = normalizeScenarioOpeningForCompare(opening);
   const nLast = normalizeScenarioOpeningForCompare(lastQ);
@@ -2954,6 +3591,20 @@ function syncReferenceCardStateFromAssistantMessages(
       return { scenario: MOMENT_5_REFERENCE_SCENARIO, prompt: null, phase: 'scenario_active' };
     }
   }
+  const m4Modal = resolveMoment4ShowScenarioReferenceCard(
+    assistantMessages.map((m) => ({
+      role: m.role,
+      content: stripControlTokens(m.content ?? '').trim(),
+    })),
+    { grudgeCardBody: MOMENT_4_PERSONAL_CARD },
+  );
+  if (m4Modal.active) {
+    return {
+      scenario: { label: MOMENT_4_PERSONAL_LABEL, text: m4Modal.cardBodyText },
+      prompt: null,
+      phase: 'scenario_active',
+    };
+  }
   let anchorIdx = -1;
   let anchorScenario: ActiveScenario | null = null;
   for (let i = assistantMessages.length - 1; i >= 0; i--) {
@@ -2971,14 +3622,13 @@ function syncReferenceCardStateFromAssistantMessages(
   const lastIdx = assistantMessages.length - 1;
   let prompt: string | null = null;
   if (lastIdx > anchorIdx) {
-    for (let i = lastIdx; i > anchorIdx; i--) {
-      const raw = stripControlTokens(assistantMessages[i].content ?? '').trim();
-      if (isResumeOrScenarioReplayUiPrompt(raw)) continue;
-      const q = extractModalQuestionFromAssistantText(raw);
-      if (q && !isResumeOrScenarioReplayUiPrompt(q)) {
-        prompt = q;
-        break;
-      }
+    const scoped = assistantMessages.slice(anchorIdx).map((m) => ({
+      role: m.role,
+      content: stripControlTokens(m.content ?? '').trim(),
+    }));
+    prompt = getLastSubstantiveScenarioModalQuestion(scoped);
+    if (prompt && isResumeOrScenarioReplayUiPrompt(prompt)) {
+      prompt = null;
     }
     if (prompt === null) {
       prompt = getSituationOpeningQuestion(anchorScenario);
@@ -3016,6 +3666,16 @@ const FALSE_NAME_TRIGGERS = new Set([
   'manual',
   'fine',
   'great',
+  'time',
+  'moment',
+  'thanks',
+  'thank',
+  'please',
+  'sorry',
+  'wait',
+  'hold',
+  'just',
+  'one',
 ]);
 
 function capitalizeNameCandidate(value: string): string {
@@ -3092,7 +3752,13 @@ function extractInterviewNameFromTranscript(
     if (assistant.role !== 'assistant' || user.role !== 'user') continue;
     if (!isNamePromptInterviewMoment(assistant.content ?? '')) continue;
     const extracted = extractInterviewNameFromResponse(user.content ?? '');
-    if (extracted.extractedName && !extracted.isFalseNameTrigger) return extracted.extractedName;
+    if (
+      extracted.extractedName &&
+      !extracted.isFalseNameTrigger &&
+      isPlausibleInterviewName(extracted.extractedName)
+    ) {
+      return extracted.extractedName;
+    }
   }
   return null;
 }
@@ -3523,8 +4189,12 @@ interface ScenarioScoreResult {
   repairCoherenceIssue: string | null;
   /** Audit: primary mentalizing observation source for scenario paraphrase vs inference calibration. */
   mentalizing_inference_source?: MentalizingInferenceSource;
+  /** True when the user asserted others' inner states as definite fact without hedging (profile signal). */
+  mentalizing_overcertainty?: boolean;
   /** Tier audit for contempt_expression (when scored). */
   contempt_tier_breakdown: ContemptTierBreakdown | null;
+  /** Optional model metadata blob; overcertainty may appear here instead of top-level. */
+  scoringMetadata?: Record<string, unknown> | null;
 }
 
 /** When user skips after first frustration offer — force null markers (excluded from aggregates), not zero. */
@@ -3543,6 +4213,14 @@ interface PersonalMomentScoreResult {
   summary: string;
   specificity: string;
   contempt_tier_breakdown?: ContemptTierBreakdown | null;
+  /** Scenario-style flag: overcertain reads of others' inner states (Moment 4 / real persons). */
+  mentalizing_overcertainty?: boolean;
+  /** Personal-moment scorer rubric: absent | low | moderate | high. */
+  response_concreteness?: ReturnType<typeof normalizeResponseConcreteness>;
+  emotional_vocab_count?: number | null;
+  emotional_vocab_words?: string[];
+  user_slice_word_count?: number | null;
+  scoringMetadata?: Record<string, unknown> | null;
 }
 
 function scenarioDbBundleToScenarioScoreResult(scenarioNumber: 1 | 2 | 3, raw: unknown): ScenarioScoreResult {
@@ -3550,7 +4228,7 @@ function scenarioDbBundleToScenarioScoreResult(scenarioNumber: 1 | 2 | 3, raw: u
   const ps = (o.pillarScores ?? {}) as Record<string, number | null>;
   const pc = (o.pillarConfidence ?? {}) as Record<string, string>;
   const ke = (o.keyEvidence ?? {}) as Record<string, string>;
-  return {
+  const out: ScenarioScoreResult = {
     scenarioNumber,
     scenarioName: typeof o.scenarioName === 'string' ? o.scenarioName : `Scenario ${scenarioNumber}`,
     pillarScores: ps,
@@ -3559,14 +4237,62 @@ function scenarioDbBundleToScenarioScoreResult(scenarioNumber: 1 | 2 | 3, raw: u
     specificity: typeof o.specificity === 'string' ? o.specificity : 'high',
     repairCoherenceIssue: typeof o.repairCoherenceIssue === 'string' ? o.repairCoherenceIssue : null,
     mentalizing_inference_source: normalizeMentalizingInferenceSource(o.mentalizing_inference_source),
+    mentalizing_overcertainty: coerceMentalizingOvercertaintyFromModelJson({
+      mentalizing_overcertainty: o.mentalizing_overcertainty,
+      keyEvidence: ke as unknown as Record<string, unknown>,
+      scoringMetadata:
+        o.scoringMetadata != null && typeof o.scoringMetadata === 'object' && !Array.isArray(o.scoringMetadata)
+          ? (o.scoringMetadata as Record<string, unknown>)
+          : null,
+    }),
     contempt_tier_breakdown: parseContemptTierBreakdown(o.contempt_tier_breakdown),
   };
+  if (out.mentalizing_overcertainty) {
+    const capped = { ...out.pillarScores };
+    applyMentalizingOvercertaintyScoreCap(capped);
+    out.pillarScores = capped;
+  }
+  return out;
 }
 
 function normalizeMentalizingInferenceSource(raw: unknown): MentalizingInferenceSource | undefined {
   return raw === 'scenario_restatement' || raw === 'surface_addition' || raw === 'independent_inference'
     ? raw
     : undefined;
+}
+
+function applyMentalizingOvercertaintyScoreCap(pillarScores: Record<string, number | null>): void {
+  const m = pillarScores.mentalizing;
+  if (typeof m !== 'number' || !Number.isFinite(m) || m <= 7) return;
+  pillarScores.mentalizing = 7;
+}
+
+function finalizeScenarioMentalizingOvercertaintyFromModel(parsed: ScenarioScoreResult): void {
+  const flag = coerceMentalizingOvercertaintyFromModelJson(
+    parsed as {
+      mentalizing_overcertainty?: unknown;
+      keyEvidence?: Record<string, unknown> | null;
+      scoringMetadata?: Record<string, unknown> | null;
+    },
+  );
+  parsed.mentalizing_overcertainty = flag;
+  if (flag) {
+    applyMentalizingOvercertaintyScoreCap(parsed.pillarScores);
+  }
+}
+
+function finalizePersonalMomentMentalizingOvercertaintyFromModel(parsed: PersonalMomentScoreResult): void {
+  const flag = coerceMentalizingOvercertaintyFromModelJson(
+    parsed as {
+      mentalizing_overcertainty?: unknown;
+      keyEvidence?: Record<string, unknown> | null;
+      scoringMetadata?: Record<string, unknown> | null;
+    },
+  );
+  parsed.mentalizing_overcertainty = flag;
+  if (flag) {
+    applyMentalizingOvercertaintyScoreCap(parsed.pillarScores);
+  }
 }
 
 function normalizePersonalMomentContemptTierBreakdown(result: PersonalMomentScoreResult): void {
@@ -3626,7 +4352,7 @@ function buildScenarioScoringPrompt(
   }[scenarioNumber];
 
   const transcriptForScenarioSlice =
-    scenarioNumber === 3 ? sliceTranscriptBeforeScenarioCToPersonalHandoff(transcript) : transcript;
+    scenarioNumber === 3 ? sliceTranscriptForScenario3Scoring(transcript) : transcript;
   const taggedSlice = transcriptForScenarioSlice.filter(
     (m) => typeof m.scenarioNumber === 'number' && m.scenarioNumber === scenarioNumber
   );
@@ -3635,12 +4361,11 @@ function buildScenarioScoringPrompt(
     .map((m) => `${m.role === 'user' ? 'User' : 'Interviewer'}: ${m.content}`)
     .join('\n\n');
   const ids = [...scenarioMeta.markerIds];
-  const scenario3BeforeRepairExcerpt = extractScenario3UserCorpusBeforeRepairPrompt(
-    transcript as ScenarioCorpusMessageSlice[]
-  );
+  const scenario3Corpus = transcriptForScenarioSlice as ScenarioCorpusMessageSlice[];
+  const scenario3BeforeRepairExcerpt = extractScenario3UserCorpusBeforeRepairPrompt(scenario3Corpus);
   const scenario3AfterRepairExcerpt =
     scenario3RepairFocusAnswer?.trim() ||
-    extractScenario3UserCorpusAfterLastRepairPrompt(transcript as ScenarioCorpusMessageSlice[]);
+    extractScenario3UserCorpusAfterLastRepairPrompt(scenario3Corpus);
   const scenario3RepairAccountabilityEvidenceBlock =
     scenarioNumber === 3 && (scenario3BeforeRepairExcerpt.trim() || scenario3AfterRepairExcerpt.trim())
       ? `
@@ -3775,6 +4500,8 @@ MENTALIZING and CONTEMPT (where scored) — register-neutral: Judge perspective-
 
 ${MENTALIZING_INFERENCE_SOURCE_CALIBRATION}
 
+${MENTALIZING_OVERCERTAINTY_SCORING_INSTRUCTION}
+
 REPAIR COHERENCE: If repair attempt repeats the failure they diagnosed, lower accountability 1-2 points.
 Scenario A repair calibration:
 - For **repair** and **accountability**, apply **REPAIR & ACCOUNTABILITY — UNPROMPTED VS. PROMPTED**: unprompted = user turn(s) before the repair-as-Ryan prompt; prompted = the "if you were Ryan … repair" answer. Tag keyEvidence. For **repair** only, also apply **REPAIR — CONDITIONAL LANGUAGE, DIRECTIONALITY, AND PROMPTED FLOORS** (directionality: self-owning "if" vs blame-redirect).
@@ -3801,9 +4528,10 @@ OUTPUT CONTRACT (STRICT):
 - Response must start with "{" and end with "}".
 - Do not include markdown fences, prose, analysis text, or comments.
 - Do not wrap output under alternate keys like "scorecard", "scores", "result", or "data".
-- Use exactly these top-level keys: scenarioNumber, scenarioName, pillarScores, pillarConfidence, keyEvidence, mentalizing_inference_source, contempt_tier_breakdown, specificity, repairCoherenceIssue.
+- Use exactly these top-level keys: scenarioNumber, scenarioName, pillarScores, pillarConfidence, keyEvidence, mentalizing_inference_source, mentalizing_overcertainty, contempt_tier_breakdown, specificity, repairCoherenceIssue. Optional: scoringMetadata (object) — if present, mentalizing_overcertainty may be duplicated inside scoringMetadata instead of top-level; prefer top-level + boolean.
 - Include every marker in pillarScores/pillarConfidence/keyEvidence for this scenario.
 - Include \`mentalizing_inference_source\` as exactly one of: "scenario_restatement", "surface_addition", "independent_inference".
+- Include boolean \`mentalizing_overcertainty\` (true or false) per the MENTALIZING OVERCERTAINTY instructions above (top-level required; duplicate under \`keyEvidence\` or \`scoringMetadata\` optional if present).
 
 Return ONLY valid JSON:
 {
@@ -3813,6 +4541,7 @@ Return ONLY valid JSON:
   "pillarConfidence": { ${ids.map((id) => `"${id}": "high"`).join(', ')} },
   "keyEvidence": { ${ids.map((id) => `"${id}": ""`).join(', ')} },
   "mentalizing_inference_source": "scenario_restatement",
+  "mentalizing_overcertainty": false,
   "contempt_tier_breakdown": ${CONTEMPT_TIER_BREAKDOWN_JSON_TEMPLATE},
   "specificity": "high",
   "repairCoherenceIssue": null
@@ -4027,42 +4756,6 @@ function isFirstUserTurnAfterMoment5ConflictValidityClarification(
   return usersAfter.length === 0;
 }
 
-function looksLikeRepeatCueInAmbiguousReply(text: string): boolean {
-  const t = text.trim().toLowerCase();
-  if (!t) return false;
-  return /\b(said|you said|what you said|say that|said that|again)\b/.test(t);
-}
-
-function looksLikeDirectResumeAnswer(userText: string, lastQuestionText: string | null): boolean {
-  const t = userText.trim();
-  if (!t) return false;
-  const lowered = t.toLowerCase();
-  const words = lowered.split(/\s+/).filter(Boolean);
-  if (words.length < 6) return false;
-  const metaOnly =
-    /\b(repeat|again|continue|ready|i'?m good|im good|no thanks|yes please|say that again|what did you say)\b/i;
-  if (metaOnly.test(lowered)) return false;
-  const hasAnswerShape =
-    /\b(i|we|he|she|they|because|would|should|could|if|when|then|feel|felt|think|believe|probably|maybe)\b/i.test(
-      lowered
-    );
-  if (!hasAnswerShape) return false;
-  const lastQ = (lastQuestionText ?? '').toLowerCase().trim();
-  if (!lastQ) return words.length >= 8;
-  const stop = new Set([
-    'what', 'when', 'where', 'which', 'would', 'could', 'should', 'have', 'from', 'with', 'that', 'this', 'your',
-    'their', 'about', 'into', 'just', 'then', 'than', 'them', 'they', 'been', 'were', 'because', 'there', 'after',
-    'before', 'while', 'ready', 'continue', 'repeat', 'said', 'last', 'like', 'does', 'did', 'feel', 'felt',
-  ]);
-  const qTokens = lastQ
-    .replace(/[^a-z0-9\s]/g, ' ')
-    .split(/\s+/)
-    .filter((w) => w.length >= 4 && !stop.has(w));
-  if (qTokens.length === 0) return words.length >= 8;
-  const overlap = qTokens.filter((w) => lowered.includes(w)).length;
-  return overlap >= 1;
-}
-
 type VoiceState = 'idle' | 'listening' | 'processing' | 'speaking' | 'recording';
 type Status = 'intro' | 'starting_interview' | 'active' | 'scoring' | 'results';
 
@@ -4085,6 +4778,8 @@ interface InterviewResults {
   interviewSummary?: string;
   gateResult?: GateResult;
   skepticismModifier?: { pillarId: number | string | null; adjustment: number; reason?: string };
+  /** Holistic transcript meta-score (1–5); not a pillar and not in weighted average. */
+  ego_development_level?: number | null;
   /** Alpha / diagnostics: scenario skips and summed numeric penalties (third skip has null entry, no extra sum). */
   skipBreakdown?: {
     skips_taken: number;
@@ -4185,22 +4880,143 @@ function classifyInterviewQuestionType(
 type RecordingDelayMeasurement = { modeCompleteAtMs: number; recordingInitializedAtMs: number };
 
 /**
- * Standard (non–alpha, non–admin) applicants: always land on the 48h processing screen after completion.
- * Pass/fail branded screens open only after the hold (or an admin `override_status` on the attempt).
+ * Standard (non-admin) applicants: land on neutral review (email capture) after completion.
+ * Pass/fail screens open only after 48h from `completed_at` or admin `override_status`.
  */
-function replaceWithStandardApplicantProcessingHandoffForUser(
+function replaceWithStandardApplicantPostInterviewHandoffForUser(
   navigation: { replace: (name: string, params: { userId: string }) => void },
   userId: string,
   meta?: { interviewSessionId?: string | null; source?: string }
 ) {
   void remoteLog('[RESULTS_SCREEN_TRANSITION]', {
-    destination: 'PostInterviewProcessing',
+    destination: 'PostInterview',
     userId,
     interviewSessionId: meta?.interviewSessionId ?? null,
     source: meta?.source ?? 'standard_handoff',
   });
-  navigation.replace('PostInterviewProcessing', { userId });
+  navigation.replace('PostInterview', { userId });
 }
+
+/** Same cohort as `checkInterviewStatus` → PostInterview (not admin). */
+async function resolveStandardPostInterviewHandoffEligible(
+  userId: string,
+  opts: { isInterviewAppRoute: boolean; sessionEmail: string | null; profileEmail?: string | null }
+): Promise<{
+  shouldHandOff: boolean;
+  interviewDoneForRouting: boolean;
+  latestAttemptId: string | null;
+}> {
+  const { data } = await supabase
+    .from(USER_INTERVIEW_ROUTING_TABLE)
+    .select(USER_INTERVIEW_PASS_SELECT)
+    .eq('id', userId)
+    .maybeSingle();
+  const latestAttemptId =
+    typeof data?.latest_attempt_id === 'string' && data.latest_attempt_id.length > 0
+      ? data.latest_attempt_id
+      : null;
+  let interviewDoneForRouting = data?.interview_completed === true;
+  if (!interviewDoneForRouting && latestAttemptId) {
+    const { data: latestAttemptMeta } = await supabase
+      .from('interview_attempts')
+      .select('completed_at')
+      .eq('id', latestAttemptId)
+      .eq('user_id', userId)
+      .maybeSingle();
+    interviewDoneForRouting = !!latestAttemptMeta?.completed_at;
+  }
+  const isAdminEmail = isAmoraeaAdminConsoleEmail(opts.sessionEmail ?? opts.profileEmail);
+  const shouldHandOff = opts.isInterviewAppRoute && interviewDoneForRouting && !isAdminEmail;
+  return { shouldHandOff, interviewDoneForRouting, latestAttemptId };
+}
+
+/** Standard onboarding cohort (not admin) — used when profile may be unavailable in effects. */
+async function resolveStandardApplicantCohort(
+  userId: string,
+  opts: { isInterviewAppRoute: boolean; sessionEmail: string | null; profileEmail?: string | null }
+): Promise<boolean> {
+  if (!opts.isInterviewAppRoute) return false;
+  return !isAmoraeaAdminConsoleEmail(opts.sessionEmail ?? opts.profileEmail);
+}
+
+/**
+ * Client scoring hung (e.g. M4 proxy) — commit routing + delegate to edge, then PostInterview processing.
+ */
+async function recoverStuckPreparingResultsForStandardUser(
+  navigation: { replace: (name: string, params: { userId: string }) => void },
+  userId: string,
+  attemptId: string,
+  opts: { interviewSessionId?: string | null; source: string; gateOkForInterviewPassed?: boolean }
+): Promise<void> {
+  await remoteLog('[WARN] preparing_results_force_recovery', {
+    userId,
+    attemptId,
+    source: opts.source,
+  });
+  const saved = await loadInterviewFromStorage(userId);
+  const { data: attemptEmotionRow } = await supabase
+    .from('interview_attempts')
+    .select('emotion_recognition_responses')
+    .eq('id', attemptId)
+    .eq('user_id', userId)
+    .maybeSingle();
+  const hydratedEmotion = hydrateEmotionResponsesFromSources(
+    saved?.emotionItemResponses,
+    attemptEmotionRow?.emotion_recognition_responses,
+  );
+  if (isEmotionRecognitionBatteryComplete(hydratedEmotion)) {
+    const emotionPayload = buildEmotionRecognitionPersistPayload(hydratedEmotion);
+    await supabase.from('interview_attempts').update(emotionPayload).eq('id', attemptId).eq('user_id', userId);
+  }
+  await supabase
+    .from('interview_attempts')
+    .update({ scoring_deferred: true, completed_at: new Date().toISOString() })
+    .eq('id', attemptId)
+    .eq('user_id', userId);
+  try {
+    await supabase.functions.invoke('complete-standard-interview', { body: { attempt_id: attemptId } });
+  } catch {
+    /* edge may still run via cron; navigation must not block on invoke */
+  }
+  const passOverride = await fetchInterviewPassAdminOverride(supabase, userId);
+  const { data: attMeta } = await supabase
+    .from('interview_attempts')
+    .select('attempt_number')
+    .eq('id', attemptId)
+    .eq('user_id', userId)
+    .maybeSingle();
+  const attemptCount =
+    typeof attMeta?.attempt_number === 'number' && Number.isFinite(attMeta.attempt_number)
+      ? attMeta.attempt_number
+      : 1;
+  const gateOk = opts.gateOkForInterviewPassed === true;
+  await supabase
+    .from('users')
+    .update({
+      interview_completed: true,
+      interview_passed: gateOk ? interviewPassWhileScoringPending(passOverride) : false,
+      interview_passed_computed: null,
+      interview_completed_at: new Date().toISOString(),
+      interview_attempt_count: attemptCount,
+      latest_attempt_id: attemptId,
+    })
+    .eq('id', userId);
+  try {
+    await supabase.rpc('fulfill_referral_after_interview', { p_user_id: userId });
+  } catch {
+    /* non-fatal */
+  }
+  await ensureShareableReferralCodeForReferrer(userId);
+  clearPreparingResultsSession(userId);
+  await clearInterviewFromStorage(userId);
+  replaceWithStandardApplicantPostInterviewHandoffForUser(navigation, userId, {
+    interviewSessionId: opts.interviewSessionId ?? null,
+    source: opts.source,
+  });
+}
+
+/** Deferred M4/M5 prompts can be large; cap each Anthropic call so completion cannot hang indefinitely. */
+const DEFERRED_MOMENT_ANTHROPIC_TIMEOUT_MS = 120_000;
 
 function recordingDelayMsFromRef(
   ref: React.MutableRefObject<RecordingDelayMeasurement | null>,
@@ -4218,7 +5034,31 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
   userIdRef.current = userId;
   /** Main interview route in the app stack (`Aria`) or legacy `OnboardingInterview`. */
   const isInterviewAppRoute = route?.name === 'Aria' || route?.name === 'OnboardingInterview';
-  const [messages, setMessages] = useState<{ role: string; content: string; isScoreCard?: boolean }[]>([]);
+  type TranscriptRow = {
+    role: string;
+    content: string;
+    isScoreCard?: boolean;
+    scenarioNumber?: number;
+    interviewMoment?: number;
+    [key: string]: unknown;
+  };
+  const [messages, setMessagesState] = useState<TranscriptRow[]>([]);
+  const currentMessagesRef = useRef(messages);
+  /** Every transcript commit tags scenarioNumber (required for scoring/admin). */
+  const setMessages = useCallback(
+    (next: TranscriptRow[] | ((prev: TranscriptRow[]) => TranscriptRow[])) => {
+      setMessagesState((prev) => {
+        const resolved = typeof next === 'function' ? next(prev) : next;
+        const tagged =
+          resolved.length === 0
+            ? resolved
+            : tagInterviewTranscriptMessages(resolved as MessageWithScenario[]);
+        currentMessagesRef.current = tagged;
+        return tagged;
+      });
+    },
+    [],
+  );
   const [voiceState, setVoiceState] = useState<VoiceState>('idle');
   const voiceStateRef = useRef<VoiceState>(voiceState);
   voiceStateRef.current = voiceState;
@@ -4246,6 +5086,8 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
   const tabVisibilityGestureLossPendingRef = useRef(false);
   const pendingGestureRestoreSpeakRef = useRef<{
     text: string;
+    /** HTML MP3: resume from pause; streaming/buffer: full replay from stored text. */
+    restoreMode?: 'resume_html' | 'replay';
     options: {
       silent?: boolean;
       interviewSpeechRole?: 'assistant_response';
@@ -4256,7 +5098,10 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
       skipLastQuestionRef?: boolean;
       /** Same scripted line may repeat (e.g. skip confirmation in a new scenario beat). */
       allowDuplicateConsecutiveTts?: boolean;
-      skipGestureGate?: boolean;
+      /** User explicitly requested replay (e.g. resume repeat of closing) — bypass session closing dedup once. */
+        skipClosingSessionDedup?: boolean;
+        skipScenarioAContemptProbeSessionDedup?: boolean;
+        skipGestureGate?: boolean;
       ttsTriggerSource?:
         | 'gesture_handler'
         | 'effect'
@@ -4308,6 +5153,47 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
   const [typedAnswer, setTypedAnswer] = useState('');
   const scoredScenariosRef = useRef<Set<number>>(new Set());
   const [scenarioScores, setScenarioScores] = useState<Record<number, ScenarioScoreResult>>({});
+  const [emotionModalVisible, setEmotionModalVisible] = useState(false);
+  const [emotionModalItemIndex, setEmotionModalItemIndex] = useState(0);
+  const [emotionItemResponses, setEmotionItemResponses] = useState<string[]>([]);
+  const [emotionItemsComplete, setEmotionItemsComplete] = useState(false);
+  const emotionItemResponsesRef = useRef<string[]>([]);
+  const emotionModalResolveRef = useRef<(() => void) | null>(null);
+  /** True while the emotion modal is waiting for an answer (tab-return / gesture restore should re-open it, not advance TTS). */
+  const emotionModalPendingTransitionRef = useRef(false);
+  /** Item index shown when the modal was opened (for logging; avoids stale closure on answer). */
+  const emotionModalOpenForIndexRef = useRef(0);
+  const emotionModalTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  /** Prevents double-opening the same scenario-boundary emotion modal (notify + speak paths). */
+  const emotionModalShownForScenarioRef = useRef<Set<1 | 2 | 3>>(new Set());
+  const maybeAwaitEmotionAfterScenarioTransitionRef = useRef<(sn: 1 | 2 | 3) => Promise<void>>(async () => {});
+  const runEmotionModalAfterScenarioTransitionRef = useRef<
+    (
+      scenarioNum: 1 | 2 | 3,
+      opts?: { transitionText?: string; priorScenario?: 1 | 2 | 3 | null },
+    ) => Promise<void>
+  >(async () => {});
+  const tryRunEmotionModalFromScenarioTransitionRef = useRef<
+    (params: {
+      completedScenario: 1 | 2 | 3;
+      transitionText: string;
+      priorScenario: 1 | 2 | 3 | null;
+      source: string;
+    }) => Promise<void>
+  >(async () => {});
+  /** S2→S3 (etc.) bundled last in-scenario question + transition: modal runs after the user answers. */
+  const pendingEmotionModalTransitionRef = useRef<PendingEmotionModalTransition | null>(null);
+  /** On resume, modal indices still needing an answer (computed at resume; only unanswered). */
+  const resumeEmotionCatchUpIndicesRef = useRef<number[] | null>(null);
+  /** Post–S3 emotion modal segment to speak once after resume catch-up (not the full handoff). */
+  const resumeEmotionAfterModalTextRef = useRef<string | null>(null);
+  /** False when transcript already has a substantive last assistant line (skip welcome + repeat gate). */
+  const resumeOfferWelcomeTtsRef = useRef(true);
+  const webResumeWelcomeTapHandledRef = useRef(false);
+  /** Mirrors {@link webResumeWelcomeTapPending} for gesture-flush / listener guards (no stale closure). */
+  const webResumeWelcomeTapPendingRef = useRef(false);
+  /** Prevents duplicate welcome hydrate / TTS when `handleResume` runs more than once per attempt (e.g. Strict Mode). */
+  const resumeWelcomeHydrationAttemptRef = useRef<string | null>(null);
 
   const [isAdmin, setIsAdmin] = useState(false);
   const [userEmail, setUserEmail] = useState<string | null>(null);
@@ -4329,7 +5215,6 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
   const [interviewUiPhase, setInterviewUiPhase] = useState<InterviewUiPhase>('pre_scenario');
   const [referenceCardScenario, setReferenceCardScenario] = useState<ActiveScenario | null>(null);
   const [referenceCardPrompt, setReferenceCardPrompt] = useState<string | null>(null);
-  const [scenarioIntroTtsPlaying, setScenarioIntroTtsPlaying] = useState(false);
   /** HTTP://LAN is not a secure context — browser blocks mic; show fix copy */
   const [webInsecureContextMessage, setWebInsecureContextMessage] = useState<string | null>(null);
   const pendingWebSpeechForGestureRef = useRef<string | null>(null);
@@ -4510,6 +5395,10 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
   const pendingScenarioIntroAfterResumeWelcomeRef = useRef<string | null>(null);
   /** Consecutive failed transcription (or recording) recovery lines for the same turn — reset on success. */
   const transcriptionFailureStreakRef = useRef(0);
+  /** Prevents duplicate silent-buffer / transcription-retry handling when `onRecordingComplete` fires twice. */
+  const recordingCompleteInFlightRef = useRef(false);
+  const lastRecordingRetryDeliveredNormRef = useRef<string | null>(null);
+  const lastRecordingRetryDeliveredAtMsRef = useRef(0);
   /** When user said "yes" to closing question; next message is their addition. null | 1 | 2 | 3 */
   const waitingForClosingAdditionRef = useRef<number | null>(null);
   const waitingMessageIdRef = useRef<string | null>(null);
@@ -4547,6 +5436,8 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
   const moment5ConflictValidityClarificationIssuedRef = useRef(false);
   /** Client issued the abstract-first specificity redirect (at most once before accountability). */
   const moment5SpecificityRedirectIssuedRef = useRef(false);
+  /** Client issued the resolution follow-up when the opening M5 answer omitted how things resolved. */
+  const moment5ResolutionFollowUpIssuedRef = useRef(false);
   /** Passed into Moment 5 scoring + scenario_specific_patterns. */
   const moment5ClientScoringMetaRef = useRef<Moment5ClientScoringMetadata | null>(null);
   /** Ensures at most one client-injected M4→M5 bridge per session (backup when model omits). */
@@ -4554,6 +5445,12 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
   /** User answer to Scenario C repair prompt only — isolates unprompted vs prompted repair scoring. */
   const scenarioCRepairOnlyEvidenceRef = useRef<string | null>(null);
   const scenarioAContemptProbeAskedRef = useRef(false);
+  /** True after contempt-probe audio was delivered this session — blocks accidental re-TTS (resume replay uses explicit bypass). */
+  const scenarioAContemptProbeTtsDeliveredSessionRef = useRef(false);
+  /** Set on the user turn before makeCall; consumed when the contempt-probe assistant stream starts. */
+  const pendingScenarioAContemptProbeStreamMuteRef = useRef(false);
+  /** Scenario A repair-as-Ryan: set when first sent to TTS; prevents duplicate delivery in streaming + post-stream speak. */
+  const scenarioARepairQuestionAskedRef = useRef(false);
   /** Scenario B Q3 (repair as James): set when that probe is first sent to TTS; prevents duplicate delivery/logs in the same turn. Cleared only in {@link resetInterviewProgressRefs} (new attempt). */
   const s2RepairProbeDeliveredRef = useRef(false);
   const interviewSessionIdRef = useRef<string>(newInterviewSessionId(userId));
@@ -4569,6 +5466,10 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
   const recordingDelayMeasurementRef = useRef<RecordingDelayMeasurement | null>(null);
   /** Row created at interview start; completion updates this row instead of inserting a second one. */
   const interviewSessionAttemptIdRef = useRef<string | null>(null);
+  /** Prevents duplicate `scoreInterview` on remount / strict-mode while a run is in flight. */
+  const scoreInterviewInFlightRef = useRef(false);
+  /** Mirrors {@link wasCompletionScoringAttempted} for legacy call sites in this file. */
+  const scoreInterviewAttemptedRef = useRef(false);
   /** First scenario question: optional server-side lifecycle (client update is a no-op when column absent). */
   const firstScenarioLifecyclePersistedRef = useRef(false);
   const [sessionAudioHealthNotice, setSessionAudioHealthNotice] = useState<string | null>(null);
@@ -4579,6 +5480,43 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
   const ttsLineInFlightRef = useRef(false);
   /** Web: tab went hidden while this line's TTS was in flight — wall-clock vs estimate is unreliable; skip premature replay loop. */
   const tabHiddenDuringActiveTtsLineRef = useRef(false);
+  /** Web: full assistant line being spoken — preserved for tab-switch replay. */
+  const webTtsUtteranceInFlightRef = useRef<string | null>(null);
+  type WebTtsUtteranceReplayOptions = {
+    interviewSpeechRole?: 'assistant_response';
+    telemetrySource?: TtsTelemetrySource;
+    skipInterviewSpeechAdvance?: boolean;
+    skipQuestionDeliveredTelemetry?: boolean;
+    skipLastQuestionRef?: boolean;
+    allowDuplicateConsecutiveTts?: boolean;
+    skipClosingSessionDedup?: boolean;
+    silent?: boolean;
+    skipGestureGate?: boolean;
+    ttsTriggerSource?:
+      | 'gesture_handler'
+      | 'effect'
+      | 'callback'
+      | 'timeout'
+      | 'preauthorized_element';
+  };
+  const webTtsUtteranceInFlightOptionsRef = useRef<WebTtsUtteranceReplayOptions | null>(null);
+  /** When true, in-flight speakTextSafe must not mark question delivered / advance UI; user will replay via tab overlay. */
+  const webTtsTabInterruptPendingReplayRef = useRef(false);
+  /** Bumped when the tab hides during TTS — stale speak completions must not advance the interview. */
+  const webTtsSpeakGenerationRef = useRef(0);
+  /** Claude SSE parallel sentence TTS — bypasses speakTextSafe unless tab-interrupt guards are applied here too. */
+  const parallelStreamingTtsRef = useRef({
+    active: false,
+    cancelRequested: false,
+    accumulatedFullText: '',
+    /** Sentences fully spoken before a tab interrupt (parallel Claude SSE TTS). */
+    spokenCompleteText: '',
+  });
+  const handleWebTabGestureRestoreTapRef = useRef<() => void>(() => {});
+  /** Prevents capture-phase gesture flush + overlay onPress from starting two tab-restore replays. */
+  const webTabRestoreReplayInFlightRef = useRef(false);
+  /** HTML tab-resume already delivered the in-flight utterance — block full replay on the same tap chain. */
+  const webTabHtmlResumeDeliveredRef = useRef(false);
   /** Last voice turn only — cleared on typed send. */
   const lastVoiceTurnLanguageRef = useRef<string | null>(null);
   const lastVoiceTurnConfidenceRef = useRef<number | null>(null);
@@ -4589,6 +5527,10 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
 
   const resumeRepeatChoicePendingRef = useRef(false);
   const resumeLastAssistantTextRef = useRef<string | null>(null);
+  /** MP3 prefetched on mic-stop (gesture window) for likely resume-repeat replay — avoids async-fetch autoplay loss. */
+  const resumeRepeatPrefetchMpegRef = useRef<{ text: string; buffer: ArrayBuffer } | null>(null);
+  /** Prevents overlapping resume repeat TTS for the same closing line within one user turn. */
+  const resumeClosingRepeatSpeakInFlightRef = useRef(false);
   /** Web: resume-from-storage welcome audio must start from a tap (not a timer) for autoplay policy. */
   const [webResumeWelcomeTapPending, setWebResumeWelcomeTapPending] = useState(false);
 
@@ -4605,6 +5547,8 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
   const resetInterviewProgressRefs = useCallback(() => {
     resumeRepeatChoicePendingRef.current = false;
     resumeLastAssistantTextRef.current = null;
+    resumeRepeatPrefetchMpegRef.current = null;
+    resumeClosingRepeatSpeakInFlightRef.current = false;
     interviewNameRef.current = null;
     interviewNameReaskPendingRef.current = false;
     interviewNameReaskUsedRef.current = false;
@@ -4623,11 +5567,15 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
     moment5AccountabilityProbeFiredRef.current = false;
     moment5ConflictValidityClarificationIssuedRef.current = false;
     moment5SpecificityRedirectIssuedRef.current = false;
+    moment5ResolutionFollowUpIssuedRef.current = false;
     moment5ClientScoringMetaRef.current = null;
     deferredMoment4NarrativeRef.current = null;
     lastUserTurnAudioDurationMsRef.current = null;
     resetScenarioCClientGatesOnly();
     scenarioAContemptProbeAskedRef.current = false;
+    scenarioAContemptProbeTtsDeliveredSessionRef.current = false;
+    pendingScenarioAContemptProbeStreamMuteRef.current = false;
+    scenarioARepairQuestionAskedRef.current = false;
     s2RepairProbeDeliveredRef.current = false;
     turnAudioIndexRef.current = 0;
     whisperRatioReaskAttemptsForCurrentQuestionRef.current = 0;
@@ -4635,11 +5583,15 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
     setTtsPlaybackReliabilityNotice(null);
     interviewSessionIdRef.current = newInterviewSessionId(userId);
     firstScenarioLifecyclePersistedRef.current = false;
+    scoreInterviewAttemptedRef.current = false;
+    scoreInterviewInFlightRef.current = false;
+    resetCompletionScoringSession();
     resetAudioInterviewTurnCounters();
     resetTtsDurationCalibration();
     resetWebAudioRouteSessionFingerprint();
     resetInterviewVadSession();
     resetWebInterviewGestureContext();
+    resetInterviewClosingTtsSession();
     gestureContextLostAtRef.current = null;
     lastSuccessfulTtsTextNormalizedRef.current = null;
     lastSuccessfulTtsDeliveredPreviewRef.current = '';
@@ -4650,9 +5602,239 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
     elongatingProbeFiredRef.current = false;
     resumeActiveScenarioRef.current = null;
     resumeWelcomeMessageRef.current = RESUME_WELCOME_BACK_MESSAGE;
+    resumeOfferWelcomeTtsRef.current = true;
+    resumeEmotionAfterModalTextRef.current = null;
+    webResumeWelcomeTapHandledRef.current = false;
+    webResumeWelcomeTapPendingRef.current = false;
+    resumeWelcomeHydrationAttemptRef.current = null;
+    clearResumeWelcomePlaybackLock();
+    webTtsUtteranceInFlightRef.current = null;
+    webTtsUtteranceInFlightOptionsRef.current = null;
+    webTtsTabInterruptPendingReplayRef.current = false;
+    webTtsSpeakGenerationRef.current = 0;
+    webTabRestoreReplayInFlightRef.current = false;
+    parallelStreamingTtsRef.current = {
+      active: false,
+      cancelRequested: false,
+      accumulatedFullText: '',
+      spokenCompleteText: '',
+    };
     pendingScenarioIntroAfterResumeWelcomeRef.current = null;
     transcriptScenarioLogCursorRef.current = 0;
+    emotionItemResponsesRef.current = [];
+    emotionModalResolveRef.current = null;
+    emotionModalPendingTransitionRef.current = false;
+    pendingEmotionModalTransitionRef.current = null;
+    emotionModalShownForScenarioRef.current = new Set();
+    if (emotionModalTimeoutRef.current) {
+      clearTimeout(emotionModalTimeoutRef.current);
+      emotionModalTimeoutRef.current = null;
+    }
+    setEmotionModalVisible(false);
+    setEmotionModalItemIndex(0);
+    setEmotionItemResponses([]);
+    setEmotionItemsComplete(false);
   }, [userId, resetScenarioCClientGatesOnly]);
+
+  const loadEmotionResponsesForCompletion = useCallback(
+    async (attemptId?: string | null): Promise<string[]> => {
+      if (!userId) return [];
+      const aid = attemptId ?? interviewSessionAttemptIdRef.current;
+      const sources: unknown[] = [[...emotionItemResponsesRef.current]];
+      const saved = await loadInterviewFromStorage(userId);
+      if (saved?.emotionItemResponses != null) sources.push(saved.emotionItemResponses);
+      if (typeof aid === 'string' && aid.length > 0) {
+        const { data } = await supabase
+          .from('interview_attempts')
+          .select('emotion_recognition_responses')
+          .eq('id', aid)
+          .eq('user_id', userId)
+          .maybeSingle();
+        if (data?.emotion_recognition_responses != null) {
+          sources.push(data.emotion_recognition_responses);
+        }
+      }
+      return hydrateEmotionResponsesFromSources(...sources);
+    },
+    [userId],
+  );
+
+  const applyEmotionResponsesToSession = useCallback((hydrated: string[]) => {
+    if (hydrated.length === 0) return;
+    emotionItemResponsesRef.current = hydrated;
+    setEmotionItemResponses(hydrated);
+    setEmotionItemsComplete(
+      countAnsweredEmotionItems(hydrated) >= EMOTION_INTERVIEW_MODAL_ITEMS.length,
+    );
+  }, []);
+
+  const persistEmotionResponsesPartial = useCallback(async () => {
+    const attemptId = interviewSessionAttemptIdRef.current;
+    const snap = [...emotionItemResponsesRef.current];
+    if (!userId || countAnsweredEmotionItems(snap) === 0) return;
+
+    const prior = await loadInterviewFromStorage(userId);
+    if (prior) {
+      await saveInterviewToStorage(userId, {
+        ...prior,
+        emotionItemResponses: snap,
+      });
+    }
+
+    if (!attemptId || !isEmotionRecognitionBatteryComplete(snap)) return;
+
+    const payload = buildEmotionRecognitionPersistPayload(snap);
+    const { error } = await supabase
+      .from('interview_attempts')
+      .update(payload)
+      .eq('id', attemptId)
+      .eq('user_id', userId);
+    if (error) {
+      console.warn('[EmotionModal] complete-battery persist failed:', error.message);
+    }
+  }, [userId]);
+
+  const handleEmotionInterviewAnswer = useCallback(
+    (letter: string) => {
+      const idx = emotionModalOpenForIndexRef.current;
+      console.log('[EmotionModal] answer received:', letter, 'for index:', idx);
+
+      const timeout = emotionModalTimeoutRef.current;
+      if (timeout) {
+        clearTimeout(timeout);
+        emotionModalTimeoutRef.current = null;
+      }
+
+      const newResponses = setEmotionResponseAtIndex(
+        emotionItemResponsesRef.current,
+        idx,
+        letter,
+      );
+      emotionItemResponsesRef.current = newResponses;
+
+      setEmotionItemResponses(newResponses);
+
+      if (countAnsweredEmotionItems(newResponses) >= EMOTION_INTERVIEW_MODAL_ITEMS.length) {
+        setEmotionItemsComplete(true);
+        console.log('[EmotionModal] all three complete:', newResponses);
+      }
+
+      void persistEmotionResponsesPartial();
+
+      setEmotionModalVisible(false);
+      emotionModalPendingTransitionRef.current = false;
+
+      const resolve = emotionModalResolveRef.current;
+      emotionModalResolveRef.current = null;
+      if (resolve) {
+        console.log('[EmotionModal] resolving transition promise');
+        resolve();
+      } else {
+        console.warn('[EmotionModal] resolve ref was null — transition may hang');
+      }
+    },
+    [persistEmotionResponsesPartial]
+  );
+
+  const awaitEmotionModalForIndex = async (itemIndex: number): Promise<void> => {
+    if (itemIndex < 0 || itemIndex > 2) return;
+    if (isEmotionItemAnsweredAt(emotionItemResponsesRef.current, itemIndex)) {
+      // #region agent log
+      fetch('http://127.0.0.1:7789/ingest/668e0bd5-3283-4492-9f48-e33846c18218',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'e00888'},body:JSON.stringify({sessionId:'e00888',runId:'pre-fix',hypothesisId:'H5',location:'AriaScreen.tsx:awaitEmotionModalForIndex',message:'emotion_modal_skipped_already_answered',data:{itemIndex,responses:[...emotionItemResponsesRef.current]},timestamp:Date.now()})}).catch(()=>{});
+      // #endregion
+      console.log('[EmotionModal] index', itemIndex, 'already answered, skipping');
+      return;
+    }
+
+    if (emotionModalTimeoutRef.current) {
+      clearTimeout(emotionModalTimeoutRef.current);
+      emotionModalTimeoutRef.current = null;
+    }
+    const priorResolve = emotionModalResolveRef.current;
+    if (priorResolve) {
+      console.warn('[EmotionModal] clearing stale pending resolve before opening modal');
+      emotionModalResolveRef.current = null;
+      priorResolve();
+    }
+
+    await new Promise<void>((resolve) => {
+      // #region agent log
+      fetch('http://127.0.0.1:7789/ingest/668e0bd5-3283-4492-9f48-e33846c18218',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'e00888'},body:JSON.stringify({sessionId:'e00888',runId:'pre-fix',hypothesisId:'H4',location:'AriaScreen.tsx:awaitEmotionModalForIndex',message:'emotion_modal_promise_enter',data:{itemIndex,responses:[...emotionItemResponsesRef.current]},timestamp:Date.now()})}).catch(()=>{});
+      // #endregion
+      emotionModalOpenForIndexRef.current = itemIndex;
+      emotionModalResolveRef.current = resolve;
+      emotionModalPendingTransitionRef.current = true;
+      setEmotionModalItemIndex(itemIndex as 0 | 1 | 2);
+      setEmotionModalVisible(true);
+      // #region agent log
+      fetch('http://127.0.0.1:7789/ingest/668e0bd5-3283-4492-9f48-e33846c18218',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'e00888'},body:JSON.stringify({sessionId:'e00888',runId:'pre-fix',hypothesisId:'H4',location:'AriaScreen.tsx:awaitEmotionModalForIndex',message:'emotion_modal_visibility_requested',data:{itemIndex,pendingTransition:emotionModalPendingTransitionRef.current,responses:[...emotionItemResponsesRef.current]},timestamp:Date.now()})}).catch(()=>{});
+      // #endregion
+      console.log('[EmotionModal] setEmotionModalVisible(true) called');
+
+      console.log('[EmotionModal] modal set visible for index:', itemIndex);
+    });
+  };
+
+  /** Re-assign every render so callers never await the initial no-op from `useRef` before first assignment. */
+  maybeAwaitEmotionAfterScenarioTransitionRef.current = async (sn: 1 | 2 | 3) => {
+    console.log('[EmotionModal] maybeAwait implementation called, sn:', sn);
+
+    const refLen = emotionItemResponsesRef.current.length;
+    if (__DEV__) {
+      console.log('[EmotionModal] emotionItemResponses length:', refLen, 'emotionItemsComplete:', emotionItemsComplete);
+    }
+
+    if (countAnsweredEmotionItems(emotionItemResponsesRef.current) >= EMOTION_INTERVIEW_MODAL_ITEMS.length) {
+      console.log('[EmotionModal] already complete, skipping');
+      return;
+    }
+
+    const itemIndex = emotionModalIndexForCompletedScenario(sn);
+    if (isEmotionItemAnsweredAt(emotionItemResponsesRef.current, itemIndex)) {
+      console.log('[EmotionModal] index', itemIndex, 'already answered, skipping');
+      return;
+    }
+    console.log('[EmotionModal] opening modal index:', itemIndex, 'after scenario:', sn);
+    await awaitEmotionModalForIndex(itemIndex);
+  };
+
+  const runEmotionModalAfterScenarioTransition = useCallback(
+    async (
+      scenarioNum: 1 | 2 | 3,
+      opts?: { transitionText?: string; priorScenario?: 1 | 2 | 3 | null },
+    ) => {
+      void remoteLog('[EMOTION_MODAL] transition_modal_attempt', {
+        scenarioNum,
+        priorScenario: opts?.priorScenario ?? null,
+        preview: (opts?.transitionText ?? '').slice(0, 220),
+      });
+      const transitionText = opts?.transitionText?.trim() ?? '';
+      let completed = scenarioNum;
+      if (transitionText.length > 0) {
+        completed = completedScenarioForEmotionModalFromTransition({
+          declaredComplete: scenarioNum,
+          transitionText,
+          priorScenario: opts?.priorScenario ?? null,
+        });
+        if (completed !== scenarioNum) {
+          void remoteLog('[EMOTION_MODAL] reconciled_completed_scenario', {
+            declared: scenarioNum,
+            reconciled: completed,
+            priorScenario: opts?.priorScenario ?? null,
+          });
+        }
+      }
+      if (emotionModalShownForScenarioRef.current.has(completed)) {
+        void remoteLog('[EMOTION_MODAL] transition_modal_skip_duplicate', { completed });
+        return;
+      }
+      emotionModalShownForScenarioRef.current.add(completed);
+      console.log('[EmotionModal] calling maybeAwait for scenario:', completed);
+      await maybeAwaitEmotionAfterScenarioTransitionRef.current(completed);
+      console.log('[EmotionModal] maybeAwait resolved for scenario:', completed);
+    },
+    [],
+  );
 
   useEffect(() => {
     if (!userId) {
@@ -4701,12 +5883,28 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
     transcriptScenarioLogCursorRef.current = messages.length;
   }, [messages, userId]);
 
+  useEffect(() => {
+    // #region agent log
+    fetch('http://127.0.0.1:7789/ingest/668e0bd5-3283-4492-9f48-e33846c18218',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'e00888'},body:JSON.stringify({sessionId:'e00888',runId:'post-fix',hypothesisId:'H7',location:'AriaScreen.tsx:emotion_modal_visibility_effect',message:'emotion_modal_state_changed',data:{emotionModalVisible,emotionModalItemIndex,emotionItemsComplete,status,voiceState},timestamp:Date.now()})}).catch(()=>{});
+    // #endregion
+    void remoteLog('[EMOTION_MODAL_STATE_DIAG]', {
+      hypothesisId: 'H9_modal_state_never_true',
+      emotionModalVisible,
+      emotionModalItemIndex,
+      emotionItemsComplete,
+      status,
+      voiceState,
+    });
+  }, [emotionModalVisible, emotionModalItemIndex, emotionItemsComplete, status, voiceState]);
+
   const resolveAssistantScenarioNumber = useCallback(
     (content: string, prev: MessageWithScenario[]): 1 | 2 | 3 => {
       if (currentInterviewMomentRef.current >= 4) return 3;
       const detected = detectScenarioFromResponse(content);
       if (detected != null) return detected;
       if (currentInterviewMomentRef.current === 3 && isScenarioCQ1Prompt(content)) return 3;
+      const refScenario = currentScenarioRef.current;
+      if (refScenario === 1 || refScenario === 2 || refScenario === 3) return refScenario;
       const inferred = getScenarioNumberForNewMessage(prev, 'assistant', content);
       return (inferred === 1 || inferred === 2 || inferred === 3 ? inferred : 1) as 1 | 2 | 3;
     },
@@ -4864,7 +6062,8 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
     lastClosingQuestionScenarioRef.current = null;
     setClosingQuestionState((prev) => ({ ...prev, [scenarioNumber]: 'answered' }));
   }, []);
-  const currentMessagesRef = useRef(messages);
+  /** Alias for setMessages — tags scenarioNumber on every commit. */
+  const commitInterviewMessages = setMessages;
   /** Mirrors last assistant message: true iff it was exactly one approved elongating line (client-enforced one-per-turn). */
   const elongatingProbeFiredRef = useRef(false);
   /** Category-1 meta-comment (frustration) signals per interview moment — for repeated_frustration_signal. */
@@ -4905,6 +6104,81 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
   statusRef.current = status;
   const interviewStatusRef = useRef(interviewStatus);
   interviewStatusRef.current = interviewStatus;
+
+  const tryRunEmotionModalFromScenarioTransition = useCallback(
+    async (params: {
+      completedScenario: 1 | 2 | 3;
+      transitionText: string;
+      priorScenario: 1 | 2 | 3 | null;
+      source: string;
+    }) => {
+      const { completedScenario, transitionText, priorScenario, source } = params;
+      if (!isInterviewAppRoute || isAdmin) return;
+      if (statusRef.current !== 'active') {
+        void remoteLog('[EMOTION_MODAL] skip_inactive_status', {
+          source,
+          status: statusRef.current,
+          completedScenario,
+        });
+        return;
+      }
+      const trimmed = transitionText.trim();
+      if (!trimmed) return;
+
+      const handoff = isNaturalLanguageScenarioHandoffTransition(trimmed);
+      const tokenHandoff = /\[SCENARIO_COMPLETE:\s*[123]\]/i.test(trimmed);
+      const moment4Handoff = isScenarioThreeToMoment4EmotionModalHandoff(trimmed);
+      if (!handoff && !tokenHandoff && !moment4Handoff) {
+        void remoteLog('[EMOTION_MODAL] skip_not_handoff', {
+          source,
+          preview: trimmed.slice(0, 160),
+        });
+        return;
+      }
+
+      const reconciled = completedScenarioForEmotionModalFromTransition({
+        declaredComplete: completedScenario,
+        transitionText: trimmed,
+        priorScenario,
+      });
+      if (emotionModalShownForScenarioRef.current.has(reconciled)) {
+        void remoteLog('[EMOTION_MODAL] skip_already_scheduled', { source, reconciled });
+        return;
+      }
+
+      const defer = shouldDeferEmotionModalForTransitionText(trimmed);
+      const { afterModal } = splitScenarioTransitionForEmotionModal(trimmed);
+      if (defer && afterModal.trim()) {
+        pendingEmotionModalTransitionRef.current = {
+          completedScenario: reconciled,
+          afterModal,
+          transitionText: trimmed,
+          priorScenario,
+        };
+        void remoteLog('[EMOTION_MODAL] deferred_to_user_answer', { source, reconciled });
+        return;
+      }
+      if (defer) {
+        void remoteLog('[EMOTION_MODAL] skip_deferred_no_tail', { source, reconciled });
+        return;
+      }
+
+      void remoteLog('[EMOTION_MODAL] scheduled_from_scenario_transition', {
+        source,
+        reconciled,
+        handoff,
+        tokenHandoff,
+        moment4Handoff,
+        preview: trimmed.slice(0, 220),
+      });
+      await runEmotionModalAfterScenarioTransitionRef.current(reconciled, {
+        transitionText: trimmed,
+        priorScenario,
+      });
+    },
+    [isInterviewAppRoute, isAdmin],
+  );
+  tryRunEmotionModalFromScenarioTransitionRef.current = tryRunEmotionModalFromScenarioTransition;
 
   recordInterviewAssistantDeliveryForMetaExemptionRef.current = (deliveredQuestionText: string) => {
     const cleaned = stripControlTokens(deliveredQuestionText).trim();
@@ -4962,16 +6236,17 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
 
   /** Admin from auth user (available on first render). */
   const isAdminUser = isAmoraeaAdminConsoleEmail(user?.email);
-  const shouldShowAdminPanel = showAdminPanel && (isAdmin || isAdminUser);
+  const isAdminAccount = isAdmin || isAdminUser;
+  const shouldShowAdminPanel = showAdminPanel && isAdminAccount;
 
   const openAdminPanelParam = (route.params as { openAdminPanel?: boolean } | undefined)?.openAdminPanel;
   useEffect(() => {
-    if (!openAdminPanelParam || !isAdminUser) return;
+    if (!openAdminPanelParam || !isAdminAccount) return;
     setShowAdminPanel(true);
     if (typeof navigation.setParams === 'function') {
       navigation.setParams({ openAdminPanel: undefined });
     }
-  }, [openAdminPanelParam, navigation, isAdminUser]);
+  }, [openAdminPanelParam, navigation, isAdminAccount]);
 
   /** Once we move to scenario N, scenarios 1..N-1 are locked. */
   const [highestScenarioReached, setHighestScenarioReached] = useState(1);
@@ -5020,6 +6295,37 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
     setInterviewAttemptBootstrap('loading');
     void (async () => {
       try {
+        const { data: routingRow } = await supabase
+          .from(USER_INTERVIEW_ROUTING_TABLE)
+          .select('interview_completed, latest_attempt_id')
+          .eq('id', userId)
+          .maybeSingle();
+        if (cancelled) return;
+
+        const latestAttemptId =
+          typeof routingRow?.latest_attempt_id === 'string' && routingRow.latest_attempt_id.length > 0
+            ? routingRow.latest_attempt_id
+            : null;
+        let latestAttemptCompletedAt: string | null = null;
+        if (latestAttemptId) {
+          const { data: latestAttemptMeta } = await supabase
+            .from('interview_attempts')
+            .select('completed_at')
+            .eq('id', latestAttemptId)
+            .eq('user_id', userId)
+            .maybeSingle();
+          latestAttemptCompletedAt =
+            typeof latestAttemptMeta?.completed_at === 'string' ? latestAttemptMeta.completed_at : null;
+        }
+
+        const interviewDoneForRouting =
+          routingRow?.interview_completed === true || latestAttemptCompletedAt != null;
+        if (interviewDoneForRouting) {
+          await clearInterviewFromStorage(userId);
+          setInterviewAttemptBootstrap('ready');
+          return;
+        }
+
         const saved = await loadInterviewFromStorage(userId);
         if (cancelled) return;
         if (saved?.sessionAttemptId) {
@@ -5040,6 +6346,37 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
               sessionLogsRequireAttemptId: true,
             });
             await remoteLog('[BOOT] attempt_id from storage', { attemptId: saved.sessionAttemptId });
+            markSessionResumedForNextRecordingStart();
+            if (Platform.OS === 'web') {
+              void (async () => {
+                await refreshWebAudioRoutesForSession();
+                const p = await probeHeadphoneRoute();
+                lastHeadphoneProbeRef.current = p;
+                if (p.fingerprint != null) {
+                  lastAudioRouteFingerprintRef.current = p.fingerprint;
+                  setAudioRouteKind(p.kind);
+                }
+              })();
+            }
+            setInterviewAttemptBootstrap('ready');
+            return;
+          }
+        }
+        if (latestAttemptId) {
+          const { data: reuseAttempt } = await supabase
+            .from('interview_attempts')
+            .select('id')
+            .eq('id', latestAttemptId)
+            .eq('user_id', userId)
+            .maybeSingle();
+          if (reuseAttempt?.id) {
+            interviewSessionAttemptIdRef.current = reuseAttempt.id;
+            resetSessionLogRuntime({
+              sessionCorrelationId: interviewSessionIdRef.current,
+              attemptId: reuseAttempt.id,
+              sessionLogsRequireAttemptId: true,
+            });
+            await remoteLog('[BOOT] attempt_id from users.latest_attempt_id', { attemptId: reuseAttempt.id });
             markSessionResumedForNextRecordingStart();
             if (Platform.OS === 'web') {
               void (async () => {
@@ -5284,25 +6621,47 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
     getSession();
   }, []);
 
+  /** Restore preparing UI before `checkInterviewStatus` can fall through to `not_started` after remount. */
+  useEffect(() => {
+    if (!userId || isAdmin) return;
+    if (!hasPreparingResultsSession(userId)) return;
+    isInterviewCompleteRef.current = true;
+    if (interviewStatusRef.current !== 'congratulations') {
+      interviewStatusRef.current = 'preparing_results';
+      setInterviewStatus('preparing_results');
+    }
+  }, [userId, isAdmin]);
+
   useEffect(() => {
     const checkInterviewStatus = async () => {
       if (!userId) return;
       const { data: sessionData } = await supabase.auth.getSession();
       const sessionEmail = sessionData.session?.user?.email ?? null;
       const { data, error } = await supabase
-        .from('users')
-        .select('interview_completed, interview_passed, interview_reviewed_at, latest_attempt_id, is_alpha_tester')
+        .from(USER_INTERVIEW_ROUTING_TABLE)
+        .select(USER_INTERVIEW_PASS_SELECT)
         .eq('id', userId)
         .maybeSingle();
 
       /** Session email is reliable on cold start; `user` from useAuth can be null for a frame and caused PostInterview ↔ Aria loops for admin. */
       const isAdminEmail = isAmoraeaAdminConsoleEmail(sessionEmail ?? user?.email);
-      /** Same cohort as `scoreInterview` → PostInterview: not alpha, not admin — never show in-app thank-you / scores. */
+      const latestAttemptIdForRouting =
+        typeof data?.latest_attempt_id === 'string' && data.latest_attempt_id.length > 0
+          ? data.latest_attempt_id
+          : null;
+      let interviewDoneForRouting = data?.interview_completed === true;
+      if (!interviewDoneForRouting && latestAttemptIdForRouting) {
+        const { data: latestAttemptMeta } = await supabase
+          .from('interview_attempts')
+          .select('completed_at')
+          .eq('id', latestAttemptIdForRouting)
+          .eq('user_id', userId)
+          .maybeSingle();
+        interviewDoneForRouting = !!latestAttemptMeta?.completed_at;
+      }
+      /** Standard applicants: hand off to neutral post-interview review (no in-app scores). */
       const shouldHandOffToPostInterview =
-        isInterviewAppRoute &&
-        data?.interview_completed === true &&
-        data?.is_alpha_tester !== true &&
-        !isAdminEmail;
+        isInterviewAppRoute && interviewDoneForRouting && !isAdminEmail;
 
       // Navigation lock: interview just completed in this session — stay on congratulations and set attempt id
       if (interviewJustCompletedInSession) {
@@ -5317,6 +6676,20 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
         if (resolvedId) setAnalysisAttemptId(resolvedId);
         return;
       }
+
+      /**
+       * DB says interview is done — hand off before local-storage resume can mark `in_progress` and block this path.
+       * Also recovers refresh at `/interview` when stale checkpoint data is still on device.
+       */
+      if (shouldHandOffToPostInterview) {
+        await clearInterviewFromStorage(userId);
+        replaceWithStandardApplicantPostInterviewHandoffForUser(navigation, userId, {
+          interviewSessionId: interviewSessionIdRef.current,
+          source: 'checkInterviewStatus_db_completed',
+        });
+        return;
+      }
+
       /**
        * Skip re-entrant status sync while the live interview is running.
        * While scoring commits (rescore, insert attempt, edge function), `users.interview_completed` may still be false
@@ -5326,15 +6699,20 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
        * (refresh mid-flight, failed navigation) by handing off to PostInterview or re-syncing to congratulations.
        */
       /** After `[INTERVIEW_COMPLETE]`, `isInterviewCompleteRef` is true while `interviewStatus` may still be `in_progress` until the next paint — keep syncing so we do not wipe UI with `not_started` below. */
-      if (interviewStatusRef.current === 'in_progress' && !isInterviewCompleteRef.current) {
+      if (
+        interviewStatusRef.current === 'in_progress' &&
+        !isInterviewCompleteRef.current &&
+        !interviewDoneForRouting
+      ) {
         return;
       }
       const scoringCommitInFlight =
         data != null &&
-        data.interview_completed !== true &&
+        !interviewDoneForRouting &&
         (interviewStatusRef.current === 'preparing_results' ||
           statusRef.current === 'scoring' ||
-          isInterviewCompleteRef.current);
+          isInterviewCompleteRef.current ||
+          hasPreparingResultsSession(userId));
       if (scoringCommitInFlight) {
           return;
       }
@@ -5351,15 +6729,7 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
         return;
       }
 
-      if (shouldHandOffToPostInterview) {
-        replaceWithStandardApplicantProcessingHandoffForUser(navigation, userId, {
-          interviewSessionId: interviewSessionIdRef.current,
-          source: 'checkInterviewStatus_db_completed',
-        });
-        return;
-      }
-
-      if (!data.interview_completed) {
+      if (!data.interview_completed && !interviewDoneForRouting) {
         setPendingScoringSyncAttemptId(null);
         if (
           isInterviewCompleteRef.current ||
@@ -5393,6 +6763,7 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
           if (ready) {
             setPendingScoringSyncAttemptId(null);
             setAnalysisAttemptId(aid);
+            clearPreparingResultsSession(userId);
             setInterviewStatus('congratulations');
           } else {
             setPendingScoringSyncAttemptId(aid);
@@ -5434,6 +6805,7 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
       }
       setPendingScoringSyncAttemptId(null);
       setAnalysisAttemptId(id);
+      clearPreparingResultsSession(userId);
       await runCommunicationStylePipelineAfterSave(userId, id, interviewSessionIdRef.current, {
         platform: getSessionLogRuntime().platform,
       });
@@ -5451,12 +6823,41 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
   // Failsafe: never stay on "Loading..." forever (e.g. slow auth in incognito)
   useEffect(() => {
     const t = setTimeout(() => {
+      if (interviewStatusRef.current !== 'loading') return;
+      void (async () => {
+        if (!userId || isAdmin) {
+          setInterviewStatus('not_started');
+          return;
+        }
+        const { data: routingRow } = await supabase
+          .from(USER_INTERVIEW_ROUTING_TABLE)
+          .select('interview_completed, latest_attempt_id')
+          .eq('id', userId)
+          .maybeSingle();
+        let interviewDoneForRouting = routingRow?.interview_completed === true;
+        const latestAttemptId =
+          typeof routingRow?.latest_attempt_id === 'string' && routingRow.latest_attempt_id.length > 0
+            ? routingRow.latest_attempt_id
+            : null;
+        if (!interviewDoneForRouting && latestAttemptId) {
+          const { data: latestAttemptMeta } = await supabase
+            .from('interview_attempts')
+            .select('completed_at')
+            .eq('id', latestAttemptId)
+            .eq('user_id', userId)
+            .maybeSingle();
+          interviewDoneForRouting = !!latestAttemptMeta?.completed_at;
+        }
+        if (interviewDoneForRouting) {
+          return;
+        }
       if (interviewStatusRef.current === 'loading') {
         setInterviewStatus('not_started');
       }
+      })();
     }, 5000);
     return () => clearTimeout(t);
-  }, []);
+  }, [userId, isAdmin]);
 
   // Failsafe: ensure we leave results-loading state when scoring finishes.
   useEffect(() => {
@@ -5464,6 +6865,7 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
     if (interviewStatus === 'congratulations') return;
     if (status !== 'results' || !results) return;
     if (__DEV__) console.warn('[Aria] Failsafe post-interview route triggered');
+    if (userId) clearPreparingResultsSession(userId);
     setInterviewStatus('congratulations');
   }, [ALPHA_MODE, userId, status, results, interviewStatus]);
 
@@ -5490,14 +6892,97 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
     };
   }, [status, userId, user?.email, isAdmin]);
 
-  // Long scoring + DB confirmation can exceed 90s; do not navigate away from preparing without a completed scoreInterview path.
+  /** Failsafe: client scoring can hang on Anthropic (e.g. M4); recover without waiting for scoreInterview. */
   useEffect(() => {
-    if (interviewStatus !== 'preparing_results') return;
-    const t = setTimeout(() => {
-      if (__DEV__) console.warn('[Aria] Preparing_results still active after 3m — check scoring / network if stuck');
-    }, 180000);
-    return () => clearTimeout(t);
-  }, [interviewStatus]);
+    if (interviewStatus !== 'preparing_results' || !userId || isAdmin) return;
+    let cancelled = false;
+    const runPhase = async (phase: 'edge_retry' | 'force_standard_recovery') => {
+      if (cancelled || interviewStatusRef.current !== 'preparing_results') return;
+      const { data: sessionData } = await supabase.auth.getSession();
+      const sessionEmail = sessionData.session?.user?.email ?? null;
+      const handoff = await resolveStandardPostInterviewHandoffEligible(userId, {
+        isInterviewAppRoute,
+        sessionEmail,
+        profileEmail: user?.email,
+      });
+      if (cancelled || interviewStatusRef.current !== 'preparing_results') return;
+      if (scoreInterviewInFlightRef.current || isCompletionScoringInFlight()) {
+        return;
+      }
+      if (!wasCompletionScoringAttempted() && !scoreInterviewAttemptedRef.current) {
+        const pendingTx = pendingCompletionTranscriptRef.current;
+        if (pendingTx?.length && kickCompletionScoring(`preparing_results_failsafe_${phase}`, pendingTx)) {
+          scoreInterviewAttemptedRef.current = true;
+          await remoteLog('[WARN] preparing_results_failsafe_kick_score_interview', {
+            phase,
+            transcriptTurns: pendingTx.length,
+            attemptId: interviewSessionAttemptIdRef.current,
+          });
+          return;
+        }
+      }
+      if (phase === 'edge_retry') {
+        await remoteLog('[WARN] preparing_results_edge_retry_deferred_scoring_only', {
+          attemptId: interviewSessionAttemptIdRef.current,
+          scoreInterviewAttempted: scoreInterviewAttemptedRef.current,
+        });
+        return;
+      }
+      if (handoff.shouldHandOff) {
+        clearPreparingResultsSession(userId);
+        await clearInterviewFromStorage(userId);
+        replaceWithStandardApplicantPostInterviewHandoffForUser(navigation, userId, {
+          interviewSessionId: interviewSessionIdRef.current,
+          source: 'preparing_results_failsafe',
+        });
+        await remoteLog('[WARN] preparing_results_failsafe_handoff', { userId, phase });
+        return;
+      }
+      const attemptId =
+        handoff.latestAttemptId ??
+        (typeof interviewSessionAttemptIdRef.current === 'string' &&
+        interviewSessionAttemptIdRef.current.length > 0
+          ? interviewSessionAttemptIdRef.current
+          : null);
+      if (!attemptId) {
+        await remoteLog('[WARN] preparing_results_failsafe_no_attempt', { userId, phase });
+        return;
+      }
+      const isStandardCohort = await resolveStandardApplicantCohort(userId, {
+        isInterviewAppRoute,
+        sessionEmail,
+        profileEmail: user?.email,
+      });
+      if (!isStandardCohort) {
+        setPendingScoringSyncAttemptId((prev) => (prev === attemptId ? prev : attemptId));
+        return;
+      }
+      if (scoreInterviewInFlightRef.current || isCompletionScoringInFlight()) {
+        await remoteLog('[WARN] preparing_results_force_deferred_in_flight', { attemptId, phase });
+        return;
+      }
+      if (!wasCompletionScoringAttempted() && !scoreInterviewAttemptedRef.current) {
+        const pendingTx = pendingCompletionTranscriptRef.current;
+        if (pendingTx?.length && kickCompletionScoring('preparing_results_failsafe_force', pendingTx)) {
+          scoreInterviewAttemptedRef.current = true;
+          await remoteLog('[WARN] preparing_results_force_last_kick_score_interview', { attemptId });
+          return;
+        }
+      }
+      await recoverStuckPreparingResultsForStandardUser(navigation, userId, attemptId, {
+        interviewSessionId: interviewSessionIdRef.current,
+        source: 'preparing_results_failsafe_force',
+      });
+    };
+    const tEdge = setTimeout(() => void runPhase('edge_retry'), 45_000);
+    /** M4/M5 deferred scoring can take up to {@link DEFERRED_MOMENT_ANTHROPIC_TIMEOUT_MS} each (×2 + retries) — avoid force recovery while client scoring may still be running. */
+    const tForce = setTimeout(() => void runPhase('force_standard_recovery'), 360_000);
+    return () => {
+      cancelled = true;
+      clearTimeout(tEdge);
+      clearTimeout(tForce);
+    };
+  }, [interviewStatus, userId, isAdmin, navigation, isInterviewAppRoute, user?.email]);
 
   useEffect(() => {
     if (!userId || isAdmin) return;
@@ -5543,11 +7028,16 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
       if (s) scenarioScoresPayload[n] = { pillarScores: s.pillarScores, pillarConfidence: s.pillarConfidence, keyEvidence: s.keyEvidence, scenarioName: s.scenarioName };
     });
     saveInterviewProgress(userId, {
-      messages: messages.filter((m) => !(m as { isScoreCard?: boolean }).isScoreCard && !(m as { isWelcomeBack?: boolean }).isWelcomeBack),
+      messages: tagInterviewTranscriptMessages(
+        messages.filter(
+          (m) => !(m as { isScoreCard?: boolean }).isScoreCard && !(m as { isWelcomeBack?: boolean }).isWelcomeBack,
+        ) as MessageWithScenario[],
+      ),
       scenariosCompleted: completed,
       scenarioScores: scenarioScoresPayload,
       currentScenario: getCurrentScenario(scoredScenariosRef.current),
       resumeActiveScenario: resumeActiveScenarioRef.current,
+      emotionItemResponses: [...emotionItemResponsesRef.current],
       pendingCompletion:
         pendingCompletion ||
         interviewStatusRef.current === 'preparing_results',
@@ -5555,22 +7045,25 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
     });
   }, [messages, status, userId, isAdmin, scenarioScores, pendingCompletion]);
 
-  /** Debounced sync of live transcript to `users.interview_transcript` so the admin panel can follow in-progress interviews (scenario checkpoints also update this). */
+  /** Debounced sync of live transcript to the active `interview_attempts` row for admin follow-along. */
   useEffect(() => {
     if (!userId || isAdmin || status !== 'active') return;
     if (interviewStatusRef.current !== 'in_progress' && interviewStatusRef.current !== 'preparing_results') return;
     if (messages.length === 0) return;
-    const transcriptSnapshot = messages.filter(
-      (m) => !(m as { isScoreCard?: boolean }).isScoreCard && !(m as { isWelcomeBack?: boolean }).isWelcomeBack,
+    const attemptId = interviewSessionAttemptIdRef.current;
+    if (!attemptId) return;
+    const transcriptSnapshot = tagInterviewTranscriptMessages(
+      messages.filter(
+        (m) => !(m as { isScoreCard?: boolean }).isScoreCard && !(m as { isWelcomeBack?: boolean }).isWelcomeBack,
+      ) as MessageWithScenario[],
     );
     const t = setTimeout(() => {
       if (interviewStatusRef.current !== 'in_progress' && interviewStatusRef.current !== 'preparing_results') return;
-      void supabase
-        .from('users')
-        .update({ interview_transcript: transcriptSnapshot })
-        .eq('id', userId)
-        .then(({ error }) => {
-          if (error && __DEV__) console.warn('[live_transcript]', error.message);
+      void syncLiveInterviewTranscriptToAttempt(supabase, {
+        attemptId,
+        userId,
+        transcript: transcriptSnapshot,
+        resumeActiveScenario: resumeActiveScenarioRef.current,
         });
     }, 7000);
     return () => clearTimeout(t);
@@ -5605,11 +7098,19 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
 
   const typologyContext = ''; // Optional: load from profile/assessments later
 
+  useInterviewAttemptEgoRepair({
+    userId,
+    isAdmin,
+    typologyContext,
+    sourceScreen: route?.name ?? 'unknown',
+    enabled: route?.name === 'Aria' || route?.name === 'OnboardingInterview',
+  });
+
   useEffect(() => {
     scrollViewRef.current?.scrollToEnd?.({ animated: true });
   }, [messages, status]);
 
-  // New scenario vignette in the latest assistant message → transition (reference cleared) until TTS finishes delivering it.
+  // New scenario vignette in the latest assistant message → clear stale reference until vignette TTS starts.
   useEffect(() => {
     if (status !== 'active' || isAdmin) return;
     const assistantOnly = messages.filter((m) => m.role === 'assistant' && isAssistantBubbleForTranscript(m));
@@ -5632,7 +7133,6 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
       setInterviewUiPhase('pre_scenario');
       setReferenceCardScenario(null);
       setReferenceCardPrompt(null);
-      setScenarioIntroTtsPlaying(false);
       committedScenarioRef.current = null;
     }
   }, [status, isAdmin]);
@@ -5644,30 +7144,128 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
     ]);
   }, []);
 
-  const applyInterviewSpeechComplete = useCallback((rawText: string) => {
+  const applyReferenceCardFromAssistantSpeechRef = useRef<(rawText: string) => void>(() => {});
+
+  const applyReferenceCardFromAssistantSpeech = useCallback(
+    (rawText: string) => {
     const cleaned = stripControlTokens(rawText).trim();
     if (!cleaned) return;
+
+      const activatesMoment5ShowScenario =
+        transcriptAssistantContainsMoment5PrimaryConflictQuestion(cleaned) ||
+        spokenTextStartsMoment5PrimaryConflictQuestion(cleaned);
+
+      const assistantForModal = messages
+        .filter((m) => m.role === 'assistant' && isAssistantBubbleForTranscript(m))
+        .map((m) => ({
+          role: m.role,
+          content: stripControlTokens(m.content ?? '').trim(),
+        }));
+
+      let moment5InTranscript = activatesMoment5ShowScenario;
+      if (!moment5InTranscript) {
+        for (let i = assistantForModal.length - 1; i >= 0; i--) {
+          const c = assistantForModal[i]?.content ?? '';
+          if (transcriptAssistantContainsMoment5PrimaryConflictQuestion(c)) {
+            moment5InTranscript = true;
+            break;
+          }
+        }
+      }
+      if (moment5InTranscript) {
+        moment5PrimaryAnchorDeliveredSessionRef.current = true;
+        committedScenarioRef.current = MOMENT_5_REFERENCE_SCENARIO;
+        setReferenceCardScenario(MOMENT_5_REFERENCE_SCENARIO);
+        setReferenceCardPrompt(null);
+        setInterviewUiPhase('scenario_active');
+        return;
+      }
+
+      const m4Modal = resolveMoment4ShowScenarioReferenceCard(assistantForModal, {
+        grudgeCardBody: MOMENT_4_PERSONAL_CARD,
+        currentSpokenContent: cleaned,
+      });
+      if (m4Modal.active) {
+        const personalScenario = {
+          label: MOMENT_4_PERSONAL_LABEL,
+          text: m4Modal.cardBodyText,
+        };
+        committedScenarioRef.current = personalScenario;
+        setReferenceCardScenario(personalScenario);
+        setReferenceCardPrompt(null);
+        setInterviewUiPhase('scenario_active');
+        return;
+      }
+
     const scenario = detectActiveScenarioFromMessage(cleaned);
     if (scenario) {
       committedScenarioRef.current = scenario;
       setReferenceCardScenario(scenario);
-      setReferenceCardPrompt(getSituationOpeningQuestion(scenario));
       setInterviewUiPhase('scenario_active');
-    } else if (committedScenarioRef.current) {
-      const m5Anchored = moment5PrimaryAnchorDeliveredSessionRef.current;
-      const cleanedHasM5 = transcriptAssistantContainsMoment5PrimaryConflictQuestion(cleaned);
-      if (m5Anchored || cleanedHasM5) {
-        committedScenarioRef.current = MOMENT_5_REFERENCE_SCENARIO;
-        setReferenceCardScenario(MOMENT_5_REFERENCE_SCENARIO);
-        setReferenceCardPrompt(null);
-      } else {
-      const q = extractModalQuestionFromAssistantText(cleaned);
-      if (q !== null && !isResumeOrScenarioReplayUiPrompt(q)) {
-        setReferenceCardPrompt(q);
+        const fromSpoken = getLastSubstantiveScenarioModalQuestion([
+          { role: 'assistant', content: cleaned },
+        ]);
+        if (fromSpoken) {
+          setReferenceCardPrompt(fromSpoken);
+          return;
         }
+        setReferenceCardPrompt(getSituationOpeningQuestion(scenario));
+        return;
       }
+
+      if (!committedScenarioRef.current) return;
+
+      const resolveModalPrompt = (currentSpoken?: string): string | null => {
+        const committed = committedScenarioRef.current;
+        const q = resolveScenarioModalPromptInScope(assistantForModal, {
+          scenarioLabel: committed?.label ?? null,
+          detectScenarioFromContent: detectActiveScenarioFromMessage,
+          openingQuestionForLabel: (label) => {
+            if (label === SCENARIO_1_LABEL) return SCENARIO_1_OPENING;
+            if (label === SCENARIO_2_LABEL) return SCENARIO_2_OPENING;
+            if (label === SCENARIO_3_LABEL) return SCENARIO_3_OPENING;
+            return null;
+          },
+          currentSpokenContent: currentSpoken,
+        });
+        if (q === null || isResumeOrScenarioReplayUiPrompt(q)) return null;
+        return q;
+      };
+      const q = resolveModalPrompt(cleaned);
+      if (q !== null) {
+        setReferenceCardPrompt(q);
+      }
+    },
+    [messages],
+  );
+
+  applyReferenceCardFromAssistantSpeechRef.current = applyReferenceCardFromAssistantSpeech;
+
+  const referenceCardShouldUpdateOnPlaybackStart = useCallback((rawText: string): boolean => {
+    const cleaned = stripControlTokens(rawText).trim();
+    if (!cleaned) return false;
+    if (detectActiveScenarioFromMessage(cleaned)) return true;
+    if (assistantSpeechShouldRefreshScenarioModalPrompt(cleaned)) return true;
+    if (
+      transcriptAssistantContainsMoment5PrimaryConflictQuestion(cleaned) ||
+      spokenTextStartsMoment5PrimaryConflictQuestion(cleaned)
+    ) {
+      return true;
     }
+    return resolveMoment4ShowScenarioReferenceCard([{ role: 'assistant', content: cleaned }], {
+      grudgeCardBody: MOMENT_4_PERSONAL_CARD,
+    }).active;
   }, []);
+
+  const applyInterviewSpeechComplete = useCallback(
+    (rawText: string) => {
+      if (Platform.OS === 'web' && webTtsTabInterruptPendingReplayRef.current) {
+        return;
+      }
+      applyReferenceCardFromAssistantSpeech(rawText);
+    },
+    [applyReferenceCardFromAssistantSpeech],
+  );
 
   const speak = useCallback(async (
     text: string,
@@ -5678,16 +7276,24 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
       preInitTriggerDuring?: PreInitTriggerDuring;
       /** Web: full MP3 path only (retry after truncated PCM/stream). */
       skipPcmStream?: boolean;
+      prefetchedMpegArrayBuffer?: ArrayBuffer;
       ttsTriggerSource?:
         | 'gesture_handler'
         | 'effect'
         | 'callback'
         | 'timeout'
         | 'preauthorized_element';
+      onPlaybackStarted?: () => void;
     }
   ): Promise<{ scenarioSplitDelivery?: { segment1_expected_duration_ms: number; segment2_expected_duration_ms: number } } | void> => {
     await awaitTtsScreenReadyGate('speak');
+    if (Platform.OS === 'web' && webTabHtmlResumeDeliveredRef.current) {
+      webTabHtmlResumeDeliveredRef.current = false;
+      return;
+    }
+    if (!speakOpts?.prefetchedMpegArrayBuffer?.byteLength) {
     await stopElevenLabsPlayback();
+    }
     if (!speakOpts?.skipLastQuestionRef) {
       lastQuestionTextRef.current = text;
     }
@@ -5724,6 +7330,11 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
         });
       }
     };
+    const firePlaybackStarted = () => {
+      setVoiceState('speaking');
+      logWebFirstAudioPlay();
+      speakOpts?.onPlaybackStarted?.();
+    };
     try {
       // Ensure playback route is reset immediately before TTS (fixes low-volume-after-recording on iOS).
       await setPlaybackMode();
@@ -5733,26 +7344,25 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
         scenarioSplit: !!split,
       });
       if (split) {
+        const seg2PrefetchPromise = fetchElevenLabsMpegArrayBuffer(split.seg2).catch(() => null);
         await speakWithElevenLabs(split.seg1, undefined, {
-          onPlaybackStarted: () => {
-            setVoiceState('speaking');
-            logWebFirstAudioPlay();
-          },
+          onPlaybackStarted: firePlaybackStarted,
           telemetry: { source: telemetrySource },
           skipStopElevenLabsPlaybackBeforeStart: true,
           preInitTriggerDuring,
           skipPcmStream: speakOpts?.skipPcmStream,
         });
-        await new Promise<void>((r) => setTimeout(r, SCENARIO_SPLIT_INTER_SEGMENT_GAP_MS));
+        const prefetchedSeg2 = await seg2PrefetchPromise;
+        if (!prefetchedSeg2 && SCENARIO_SPLIT_INTER_SEGMENT_GAP_MS > 0) {
+          await new Promise<void>((r) => setTimeout(r, SCENARIO_SPLIT_INTER_SEGMENT_GAP_MS));
+        }
         await speakWithElevenLabs(split.seg2, undefined, {
-          onPlaybackStarted: () => {
-            setVoiceState('speaking');
-            logWebFirstAudioPlay();
-          },
+          onPlaybackStarted: firePlaybackStarted,
           telemetry: { source: telemetrySource },
           skipStopElevenLabsPlaybackBeforeStart: true,
           preInitTriggerDuring,
           skipPcmStream: speakOpts?.skipPcmStream,
+          prefetchedMpegArrayBuffer: prefetchedSeg2 ?? undefined,
         });
         return {
           scenarioSplitDelivery: {
@@ -5762,13 +7372,12 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
         };
       }
       await speakWithElevenLabs(text, undefined, {
-        onPlaybackStarted: () => {
-          setVoiceState('speaking');
-          logWebFirstAudioPlay();
-        },
+        onPlaybackStarted: firePlaybackStarted,
         telemetry: { source: telemetrySource },
         preInitTriggerDuring,
         skipPcmStream: speakOpts?.skipPcmStream,
+        prefetchedMpegArrayBuffer: speakOpts?.prefetchedMpegArrayBuffer,
+        skipStopElevenLabsPlaybackBeforeStart: (speakOpts?.prefetchedMpegArrayBuffer?.byteLength ?? 0) > 0,
       });
     } catch (speakErr) {
       throw speakErr;
@@ -5788,13 +7397,27 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
    */
   const runWebGestureTtsFlush = useCallback(async (debugSource?: string) => {
     if (Platform.OS !== 'web') return;
+    if (webResumeWelcomeTapPendingRef.current) {
+      void remoteLog('[resume] gesture_flush_skipped_resume_welcome_pending', { debugSource });
+      return;
+    }
+    if (webTabRestoreReplayInFlightRef.current) {
+      setWebTabGestureRestoreOverlay(false);
+      needsGestureRestoreRef.current = false;
+      return;
+    }
+    if (pendingGestureRestoreSpeakRef.current) {
+      handleWebTabGestureRestoreTapRef.current();
+      return;
+    }
     markWebInterviewUserGestureNow();
     unlockWebAudioForAutoplay();
     /** Same unlock as "Tap the screen to begin" — avoids back-to-back pending_tts + tap_unlock (two taps). */
     setMobileWebTapToBeginDone(true);
+    setVoiceState('speaking');
     const tryPlayed = await tryPlayPendingWebTtsAudioInUserGesture(
-      () => {},
-      () => clearPendingWebSpeechGesturePair(pendingWebSpeechForGestureRef),
+      () => setVoiceState('idle'),
+      () => setVoiceState('speaking'),
       { source: 'turn' }
     );
     if (tryPlayed) {
@@ -5818,6 +7441,12 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
       setWebDesktopPendingTtsGestureOverlay(false);
       return;
     }
+    if (isResumeWelcomeBackAssistantText(t)) {
+      clearPendingWebSpeechGesturePair(pendingWebSpeechForGestureRef);
+      setWebDesktopPendingTtsGestureOverlay(false);
+      void remoteLog('[resume] gesture_flush_skipped_welcome_back_text', { debugSource });
+      return;
+    }
     clearPendingWebSpeechGesturePair(pendingWebSpeechForGestureRef);
     webGestureTtsConsumedPressRef.current = true;
     if (webGestureConsumeClearTimeoutRef.current) {
@@ -5828,12 +7457,16 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
       webGestureConsumeClearTimeoutRef.current = null;
       webGestureTtsConsumedPressRef.current = false;
     }, 1800);
-    trySpeakWebSpeechInUserGesture(t, () => {});
+    setVoiceState('speaking');
+    trySpeakWebSpeechInUserGesture(t, () => setVoiceState('idle'));
     setWebDesktopPendingTtsGestureOverlay(false);
   }, []);
 
   const ensureWebGestureFlushListener = useCallback(() => {
     if (Platform.OS !== 'web' || typeof window === 'undefined') return;
+    if (webResumeWelcomeTapPendingRef.current) {
+      return;
+    }
     if (webGestureFlushListenerAttachedRef.current) {
       return;
     }
@@ -5848,8 +7481,7 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
     window.addEventListener('pointerdown', fn, { capture: true });
   }, [runWebGestureTtsFlush]);
 
-  useEffect(() => {
-    return () => {
+  const detachWebGestureFlushListener = useCallback(() => {
       if (Platform.OS !== 'web' || typeof window === 'undefined') return;
       const h = webGestureFlushHandlerRef.current;
       if (h) {
@@ -5857,8 +7489,13 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
         webGestureFlushHandlerRef.current = null;
       }
       webGestureFlushListenerAttachedRef.current = false;
-    };
   }, []);
+
+  useEffect(() => {
+    return () => {
+      detachWebGestureFlushListener();
+    };
+  }, [detachWebGestureFlushListener]);
 
   /** Attempts TTS; on failure shows text visually and continues (no stall). */
   const speakTextSafe = useCallback(
@@ -5879,6 +7516,12 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
         skipLastQuestionRef?: boolean;
         /** Bypass consecutive-duplicate TTS suppression (same wording must replay — e.g. skip confirmation). */
         allowDuplicateConsecutiveTts?: boolean;
+        /** Bypass session-level closing dedup (explicit user repeat of closing on resume). */
+        skipClosingSessionDedup?: boolean;
+        /** Web: full MP3 path only (tab-restore replay must be seekable). */
+        skipPcmStream?: boolean;
+        /** Skips ElevenLabs fetch when MP3 was prefetched during a user gesture (e.g. resume repeat). */
+        prefetchedMpegArrayBuffer?: ArrayBuffer;
         /** Internal: resume TTS from a tap after tab visibility restored gesture gate. */
         skipGestureGate?: boolean;
         ttsTriggerSource?:
@@ -5901,10 +7544,19 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
         skipQuestionTiming = false,
         skipLastQuestionRef = false,
         allowDuplicateConsecutiveTts = false,
+      skipClosingSessionDedup = false,
+      skipScenarioAContemptProbeSessionDedup = false,
+      skipPcmStream = false,
+        prefetchedMpegArrayBuffer,
         skipGestureGate = false,
         ttsTriggerSource = 'callback',
         immediateWebPlaybackElement,
       } = options;
+      if (Platform.OS === 'web' && webTabHtmlResumeDeliveredRef.current && skipGestureGate) {
+        webTabHtmlResumeDeliveredRef.current = false;
+        setVoiceState('idle');
+        return;
+      }
       const effectiveTtsTriggerSource:
         | 'gesture_handler'
         | 'effect'
@@ -5916,6 +7568,8 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
           : ttsTriggerSource;
 
       await awaitTtsScreenReadyGate('speak_text_safe');
+      const speakGenerationAtStart =
+        Platform.OS === 'web' ? webTtsSpeakGenerationRef.current : 0;
       const incomingAssistantTtsTextForS2Repair = text;
       const telemetryEarlyForS2Repair =
         telemetrySourceOpt ?? (interviewSpeechRole === 'assistant_response' ? 'turn' : 'other');
@@ -5935,7 +7589,10 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
         text = dedupedRepairStripped;
       }
 
-      const skipConsecutiveTtsDedup = silent || skipLastQuestionRef || allowDuplicateConsecutiveTts;
+      const textForAudio = text;
+
+      // `skipLastQuestionRef` must not disable dedup — retry prompts reuse the same copy and can fire twice per turn.
+      const skipConsecutiveTtsDedup = silent || allowDuplicateConsecutiveTts;
       if (!skipConsecutiveTtsDedup) {
         const normalizedIncoming = normalizeTtsTextForConsecutiveDedup(text);
         const prevNorm = lastSuccessfulTtsTextNormalizedRef.current;
@@ -5957,6 +7614,36 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
           setVoiceState('idle');
           return;
         }
+      }
+      const closingTtsSessionKey =
+        interviewSessionAttemptIdRef.current ?? interviewSessionIdRef.current;
+      if (
+        !skipClosingSessionDedup &&
+        shouldSuppressDuplicateInterviewClosingTts(closingTtsSessionKey, text)
+      ) {
+        void remoteLog('[M5_CLOSING_TTS_SUPPRESSED_DUPLICATE]', {
+          interviewSessionId: interviewSessionIdRef.current,
+          source: 'speak_text_safe',
+          preview: stripControlTokens(text).trim().slice(0, 220),
+        });
+        // #region agent log
+        fetch('http://127.0.0.1:7789/ingest/668e0bd5-3283-4492-9f48-e33846c18218',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'442e12'},body:JSON.stringify({sessionId:'442e12',location:'AriaScreen.tsx:speakTextSafe',message:'closing_tts_suppressed_duplicate',data:{hypothesisId:'H10',source:'speak_text_safe',preview:stripControlTokens(text).trim().slice(0,120)},timestamp:Date.now()})}).catch(()=>{});
+        // #endregion
+        setVoiceState('idle');
+        return;
+      }
+      if (
+        !skipScenarioAContemptProbeSessionDedup &&
+        scenarioAContemptProbeTtsDeliveredSessionRef.current &&
+        looksLikeScenarioAContemptProbeQuestion(stripControlTokens(text).trim())
+      ) {
+        void remoteLog('[S1_CONTEMPT_PROBE_TTS_SUPPRESSED_SESSION_DEDUP]', {
+          interviewSessionId: interviewSessionIdRef.current,
+          preview: stripControlTokens(text).trim().slice(0, 220),
+          s1ContemptFixVersion: 12,
+        });
+        setVoiceState('idle');
+        return;
       }
 
       if (Platform.OS === 'web' && immediateWebPlaybackElement && userId) {
@@ -6029,6 +7716,7 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
               void el
                 .play()
                 .then(() => {
+                  applyReferenceCardFromAssistantSpeechRef.current(text);
                   if (el.ended) done();
                 })
                 .catch(() => reject(new Error('greeting_audio_error')));
@@ -6039,6 +7727,9 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
             if (nOk.length > 0) {
               lastSuccessfulTtsTextNormalizedRef.current = nOk;
               lastSuccessfulTtsDeliveredPreviewRef.current = stripControlTokens(text).trim().slice(0, 100);
+            }
+            if (looksLikeScenarioAContemptProbeQuestion(stripControlTokens(text).trim())) {
+              scenarioAContemptProbeTtsDeliveredSessionRef.current = true;
             }
           }
           if (userId) {
@@ -6138,8 +7829,12 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
         interviewStatusRef.current === 'in_progress'
       ) {
         return new Promise<void>((resolve, reject) => {
+          const prior = pendingGestureRestoreSpeakRef.current;
+          const preserveHtmlResume =
+            prior?.restoreMode === 'resume_html' || hasWebInterviewHtmlAudioTabResumePending();
           pendingGestureRestoreSpeakRef.current = {
-            text,
+            text: preserveHtmlResume && prior?.text ? prior.text : text,
+            restoreMode: preserveHtmlResume ? 'resume_html' : prior?.restoreMode,
             options: { ...options },
             resolve,
             reject,
@@ -6149,10 +7844,14 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
       }
       const telemetrySource =
         telemetrySourceOpt ?? (interviewSpeechRole === 'assistant_response' ? 'turn' : 'other');
-      const markIntro =
+      const onScenarioPlaybackStarted =
         interviewSpeechRole === 'assistant_response' &&
-        detectActiveScenarioFromMessage(stripControlTokens(text).trim()) !== null;
-      if (markIntro) setScenarioIntroTtsPlaying(true);
+        !skipInterviewSpeechAdvance &&
+        referenceCardShouldUpdateOnPlaybackStart(text)
+          ? () => {
+              applyReferenceCardFromAssistantSpeechRef.current(text);
+            }
+          : undefined;
       const rt0 = getSessionLogRuntime();
       const ttsPlaybackActiveImmediatelyPrior = rt0.ttsPlaybackActive;
       if (ttsPlaybackActiveImmediatelyPrior) {
@@ -6195,6 +7894,20 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
       }
       if (Platform.OS === 'web') {
         tabHiddenDuringActiveTtsLineRef.current = false;
+        if (!silent) {
+          webTtsUtteranceInFlightRef.current = text;
+          webTtsUtteranceInFlightOptionsRef.current = {
+            interviewSpeechRole,
+            telemetrySource: telemetrySourceOpt,
+            skipInterviewSpeechAdvance,
+            skipQuestionDeliveredTelemetry,
+            skipLastQuestionRef,
+            allowDuplicateConsecutiveTts,
+            silent,
+            skipGestureGate,
+            ttsTriggerSource: effectiveTtsTriggerSource,
+          };
+        }
       }
       prepareTtsPlaybackTelemetryState({
         charCount: stripControlTokens(text).trim().length,
@@ -6270,7 +7983,13 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
       }
       try {
         const charCount = stripControlTokens(text).trim().length;
-        const useWebDurationVerification = Platform.OS === 'web' && !silent && charCount > 0;
+        /** Greeting lines (resume welcome, begin interview) finish below char-based estimates — retry would replay the whole line. */
+        const useWebDurationVerification =
+          Platform.OS === 'web' &&
+          !silent &&
+          charCount > 0 &&
+          telemetrySource !== 'greeting' &&
+          telemetrySource !== 'replay';
 
         let speakOutcome:
           | { scenarioSplitDelivery?: { segment1_expected_duration_ms: number; segment2_expected_duration_ms: number } }
@@ -6286,12 +8005,14 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
           for (let attemptIx = 0; attemptIx < MAX_TTS_PLAYBACK_COMPLETION_ATTEMPTS; attemptIx++) {
             const attemptStart = Date.now();
             try {
-              speakOutcome = await speak(text, {
+              speakOutcome = await speak(textForAudio, {
                 telemetrySource,
                 skipQuestionTiming: true,
                 skipLastQuestionRef,
                 ttsTriggerSource: effectiveTtsTriggerSource,
-                skipPcmStream: attemptIx > 0,
+                skipPcmStream: skipPcmStream || attemptIx > 0,
+                prefetchedMpegArrayBuffer,
+                onPlaybackStarted: onScenarioPlaybackStarted,
               });
             } catch (e) {
               if (attemptIx < MAX_TTS_PLAYBACK_COMPLETION_ATTEMPTS - 1) {
@@ -6323,6 +8044,27 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
                   expectedMs: wall.expectedMs,
                   ratio_actual_to_expected: ratioActualToExpected,
                   reason: 'avoid_replaying_long_moment5_primary_prompt',
+                });
+              }
+              break;
+            }
+            const isScenarioAContemptProbeTts =
+              telemetrySource === 'turn' &&
+              interviewSpeechRole === 'assistant_response' &&
+              currentInterviewMomentRef.current === 1 &&
+              currentScenarioRef.current === 1 &&
+              looksLikeScenarioAContemptProbeQuestion(stripControlTokens(text).trim());
+            if (attemptIx === 0 && isScenarioAContemptProbeTts) {
+              verificationOk = true;
+              acceptedStableTruncationAsEstimationError = wouldBePremature;
+              if (wouldBePremature) {
+                void remoteLog('[S1_CONTEMPT_PROBE_TTS_RETRY_SUPPRESSED]', {
+                  interviewSessionId: interviewSessionIdRef.current,
+                  actualTtsMs,
+                  expectedMs: wall.expectedMs,
+                  ratio_actual_to_expected: ratioActualToExpected,
+                  reason: 'avoid_replaying_contempt_probe_on_duration_estimation_overshoot',
+                  s1ContemptFixVersion: 16,
                 });
               }
               break;
@@ -6447,11 +8189,14 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
         } else {
           speakOutcome = await withRetry(
           () =>
-            speak(text, {
+            speak(textForAudio, {
               telemetrySource,
               skipQuestionTiming,
               skipLastQuestionRef,
               ttsTriggerSource: effectiveTtsTriggerSource,
+              skipPcmStream,
+              prefetchedMpegArrayBuffer,
+              onPlaybackStarted: onScenarioPlaybackStarted,
             }),
           {
             retries: 1,
@@ -6566,7 +8311,13 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
             }
           }
         }
+        const skipDeliveryForTabInterrupt =
+          Platform.OS === 'web' &&
+          (webTtsTabInterruptPendingReplayRef.current ||
+            tabHiddenDuringActiveTtsLineRef.current ||
+            speakGenerationAtStart !== webTtsSpeakGenerationRef.current);
         const isInterviewLine =
+          !skipDeliveryForTabInterrupt &&
           !skipQuestionDeliveredTelemetry &&
           (interviewSpeechRole === 'assistant_response' || telemetrySource === 'turn');
         if (
@@ -6608,18 +8359,37 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
             void persistInterviewAttemptSessionLifecycle(interviewSessionAttemptIdRef.current, 'in_progress');
           }
         }
-        if (interviewSpeechRole === 'assistant_response' && !skipInterviewSpeechAdvance) {
+        if (
+          !skipDeliveryForTabInterrupt &&
+          interviewSpeechRole === 'assistant_response' &&
+          !skipInterviewSpeechAdvance
+        ) {
           applyInterviewSpeechComplete(text);
         }
-        if (!silent) {
+        if (!silent && !skipDeliveryForTabInterrupt) {
           const nOk = normalizeTtsTextForConsecutiveDedup(text);
           if (nOk.length > 0) {
             lastSuccessfulTtsTextNormalizedRef.current = nOk;
             lastSuccessfulTtsDeliveredPreviewRef.current = stripControlTokens(text).trim().slice(0, 100);
           }
+          if (looksLikeScenarioAContemptProbeQuestion(stripControlTokens(text).trim())) {
+            scenarioAContemptProbeTtsDeliveredSessionRef.current = true;
+          }
+          const closingTtsSessionKey =
+            interviewSessionAttemptIdRef.current ?? interviewSessionIdRef.current;
+          if (looksLikeInterviewClosingAssistantMessage(stripControlTokens(text).trim())) {
+            markInterviewClosingTtsDelivered(closingTtsSessionKey, text);
+          }
         }
       } catch (err) {
-        if (isWebTtsRequiresUserGestureError(err)) {
+        const skipAdvanceForTabInterrupt =
+          Platform.OS === 'web' &&
+          (webTtsTabInterruptPendingReplayRef.current ||
+            speakGenerationAtStart !== webTtsSpeakGenerationRef.current ||
+            isWebInterviewTtsTabHiddenAbortError(err));
+        if (isWebInterviewTtsTabHiddenAbortError(err)) {
+          setVoiceState('idle');
+        } else if (isWebTtsRequiresUserGestureError(err)) {
           setPendingWebSpeechGesturePair(pendingWebSpeechForGestureRef, err.text);
           ensureWebGestureFlushListener();
           /** Mobile Safari/Android web block async TTS without a gesture — same as desktop, show an explicit tap/click overlay (not only a one-time window listener). */
@@ -6627,14 +8397,22 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
             setWebDesktopPendingTtsGestureOverlay(true);
           }
           setVoiceState('idle');
-          if (interviewSpeechRole === 'assistant_response' && !skipInterviewSpeechAdvance) {
+          if (
+            !skipAdvanceForTabInterrupt &&
+            interviewSpeechRole === 'assistant_response' &&
+            !skipInterviewSpeechAdvance
+          ) {
             applyInterviewSpeechComplete(text);
           }
         } else {
           if (__DEV__) console.warn('TTS failed, falling back to visual display:', err instanceof Error ? err.message : err);
           setVoiceState('idle');
           // Same advance as success path so reference card + SHOW SCENARIO work when user reads the line on screen.
-          if (interviewSpeechRole === 'assistant_response' && !skipInterviewSpeechAdvance) {
+          if (
+            !skipAdvanceForTabInterrupt &&
+            interviewSpeechRole === 'assistant_response' &&
+            !skipInterviewSpeechAdvance
+          ) {
             applyInterviewSpeechComplete(text);
           }
         }
@@ -6645,8 +8423,11 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
         }
         if (Platform.OS === 'web') {
           tabHiddenDuringActiveTtsLineRef.current = false;
+          if (!webTtsTabInterruptPendingReplayRef.current) {
+            webTtsUtteranceInFlightRef.current = null;
+            webTtsUtteranceInFlightOptionsRef.current = null;
         }
-        if (markIntro) setScenarioIntroTtsPlaying(false);
+        }
         const ttsResolvedAt = Date.now();
         setLastTtsCompletionCallbackMs(ttsResolvedAt);
         if (userId && Platform.OS === 'web') {
@@ -6680,11 +8461,132 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
     ]
   );
 
-  const handleWebTabGestureRestoreTap = useCallback(() => {
-    markWebInterviewUserGestureNow();
-    setMobileWebTapToBeginDone(true);
+  const kickPostClosingInterviewCompletionIfReady = useCallback(
+    async (
+      source: string,
+      transcriptMessages: ReadonlyArray<{ role: string; content?: string; isWelcomeBack?: boolean }>,
+    ): Promise<boolean> => {
+      if (
+        isInterviewCompleteRef.current ||
+        !isInterviewAppRoute ||
+        isAdmin ||
+        status !== 'active'
+      ) {
+        return false;
+      }
+      if (!transcriptHasInterviewClosingAssistantMessage(transcriptMessages)) {
+        return false;
+      }
+      void remoteLog('[M5_CLOSING_RESUME_HANDOFF_EVAL]', {
+        source,
+        interviewSessionId: interviewSessionIdRef.current,
+        transcriptLen: transcriptMessages.length,
+      });
+      // #region agent log
+      fetch('http://127.0.0.1:7789/ingest/668e0bd5-3283-4492-9f48-e33846c18218',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'442e12'},body:JSON.stringify({sessionId:'442e12',location:'AriaScreen.tsx:kickPostClosingInterviewCompletionIfReady',message:'resume_closing_handoff_eval',data:{hypothesisId:'H12',source,transcriptLen:transcriptMessages.length},timestamp:Date.now()})}).catch(()=>{});
+      // #endregion
+      void persistInterviewAttemptSessionLifecycle(interviewSessionAttemptIdRef.current, 'completed');
+      interviewMomentsCompleteRef.current[4] = true;
+      interviewMomentsCompleteRef.current[5] = true;
+      currentInterviewMomentRef.current = 5;
+      isInterviewCompleteRef.current = true;
+      setVoiceState('idle');
+      const transcriptForScoring = transcriptMessages
+        .filter((m) => m.role === 'user' || m.role === 'assistant')
+        .map((m) => ({ role: m.role, content: m.content ?? '' }));
+      pendingCompletionTranscriptRef.current = transcriptForScoring;
+      if (userId) {
+        const completed = Array.from(scoredScenariosRef.current);
+        const scenarioScoresPayload: Record<
+          number,
+          {
+            pillarScores: Record<string, number | null>;
+            pillarConfidence: Record<string, string>;
+            keyEvidence: Record<string, string>;
+            scenarioName?: string;
+          }
+        > = {};
+        [1, 2, 3].forEach((n) => {
+          const s = scenarioScoresRef.current[n];
+          if (s) {
+            scenarioScoresPayload[n] = {
+              pillarScores: s.pillarScores,
+              pillarConfidence: s.pillarConfidence,
+              keyEvidence: s.keyEvidence,
+              scenarioName: s.scenarioName,
+            };
+          }
+        });
+        try {
+          await saveInterviewProgress(userId, {
+            messages: transcriptForScoring,
+            scenariosCompleted: completed,
+            scenarioScores: scenarioScoresPayload,
+            currentScenario: getCurrentScenario(scoredScenariosRef.current),
+            resumeActiveScenario: resumeActiveScenarioRef.current,
+            emotionItemResponses: [...emotionItemResponsesRef.current],
+            pendingCompletion: true,
+          });
+        } catch (persistErr) {
+          void remoteLog('[WARN] saveInterviewProgress_failed_before_pending_completion', {
+            message: persistErr instanceof Error ? persistErr.message : String(persistErr),
+          });
+        }
+      }
+      void remoteLog('[M5_CLOSING_RESUME_HANDOFF]', {
+        source,
+        interviewSessionId: interviewSessionIdRef.current,
+      });
+      kickCompletionScoring(source, transcriptForScoring);
+      const unansweredEmotionAtClose = listUnansweredEmotionModalIndices(
+        emotionItemResponsesRef.current,
+        3,
+      );
+      if (unansweredEmotionAtClose.length > 0) {
+        void remoteLog('[EMOTION_MODAL] catch_up_before_interview_complete', {
+          indices: unansweredEmotionAtClose,
+          source,
+        });
+        for (const itemIndex of unansweredEmotionAtClose) {
+          await awaitEmotionModalForIndex(itemIndex);
+        }
+      }
+      interviewStatusRef.current = 'preparing_results';
+      setInterviewStatus('preparing_results');
+      if (userId) markPreparingResultsSession(userId);
+      setPendingCompletion(true);
+      setIsWaiting(false);
+      return true;
+    },
+    [
+      isAdmin,
+      isInterviewAppRoute,
+      status,
+      userId,
+      awaitEmotionModalForIndex,
+    ],
+  );
+
+  const handleWebTabGestureRestoreTap = useCallback(async () => {
+    if (webTabRestoreReplayInFlightRef.current) {
+      void remoteLog('[tab_restore] replay_tap_ignored_duplicate');
+      setWebTabGestureRestoreOverlay(false);
+      needsGestureRestoreRef.current = false;
+      return;
+    }
     const pending = pendingGestureRestoreSpeakRef.current;
+    if (!pending) {
+      setWebTabGestureRestoreOverlay(false);
+      needsGestureRestoreRef.current = false;
+      webTtsTabInterruptPendingReplayRef.current = false;
+      return;
+    }
+    webTabRestoreReplayInFlightRef.current = true;
     pendingGestureRestoreSpeakRef.current = null;
+    markWebInterviewUserGestureNow();
+    preAuthorizeAudioElementOnMicTapGesture();
+    unlockWebAudioForAutoplay();
+    setMobileWebTapToBeginDone(true);
     needsGestureRestoreRef.current = false;
     setWebTabGestureRestoreOverlay(false);
     const uid = userIdRef.current;
@@ -6694,49 +8596,321 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
         userId: uid,
         attemptId: r.attemptId,
         eventType: 'gesture_restored_after_tab_switch',
-        eventData: { gesture_restored_after_tab_switch: true },
+        eventData: {
+          gesture_restored_after_tab_switch: true,
+          tab_restore_mode: pending.restoreMode ?? 'replay',
+        },
         platform: r.platform,
       });
     }
-    if (pending) {
-      void speakTextSafe(pending.text, {
-        ...pending.options,
-        skipGestureGate: true,
-        ttsTriggerSource: 'gesture_handler',
-      })
-        .then(pending.resolve)
-        .catch(pending.reject);
+    if (emotionModalPendingTransitionRef.current) {
+      webTabRestoreReplayInFlightRef.current = false;
+      setEmotionModalVisible(true);
+      pendingGestureRestoreSpeakRef.current = pending;
+      return;
     }
-  }, [speakTextSafe]);
+    const finishTabRestore = (opts?: {
+      clearTabHiddenLineFlag?: boolean;
+      htmlResumeDelivered?: boolean;
+    }) => {
+      webTtsTabInterruptPendingReplayRef.current = false;
+      if (opts?.htmlResumeDelivered) {
+        webTabHtmlResumeDeliveredRef.current = true;
+        webTtsSpeakGenerationRef.current += 1;
+        const deliveredLine =
+          webTtsUtteranceInFlightRef.current?.trim() ||
+          lastQuestionTextRef.current?.trim() ||
+          pending.text;
+        if (deliveredLine.length > 0) {
+          applyInterviewSpeechComplete(deliveredLine);
+        }
+      }
+      parallelStreamingTtsRef.current = {
+        active: false,
+        cancelRequested: false,
+        accumulatedFullText: '',
+        spokenCompleteText: '',
+      };
+      webTtsUtteranceInFlightRef.current = null;
+      webTtsUtteranceInFlightOptionsRef.current = null;
+      if (opts?.clearTabHiddenLineFlag !== false) {
+        tabHiddenDuringActiveTtsLineRef.current = false;
+      }
+      needsGestureRestoreRef.current = false;
+      setWebTabGestureRestoreOverlay(false);
+      pending.resolve();
+    };
+    const tabRestoreReplayText =
+      pending.text?.trim() ||
+      computeParallelStreamTabRestoreText(
+        parallelStreamingTtsRef.current.accumulatedFullText,
+        parallelStreamingTtsRef.current.spokenCompleteText,
+        [
+          webTtsUtteranceInFlightRef.current ?? '',
+          lastQuestionTextRef.current ?? '',
+        ]
+      ) ||
+      '';
+    const isClosingTabRestoreReplay =
+      isInterviewClosingThanksFragment(tabRestoreReplayText) ||
+      isInterviewClosingReflectiveAckFragment(tabRestoreReplayText) ||
+      looksLikeInterviewClosingAssistantMessage(tabRestoreReplayText);
+    if (isClosingTabRestoreReplay) {
+      // #region agent log
+      fetch('http://127.0.0.1:7789/ingest/668e0bd5-3283-4492-9f48-e33846c18218',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'442e12'},body:JSON.stringify({sessionId:'442e12',location:'AriaScreen.tsx:handleWebTabGestureRestoreTap',message:'tab_restore_replay_skipped_closing',data:{hypothesisId:'H3',preview:tabRestoreReplayText.slice(0,120),restoreMode:pending.restoreMode ?? 'replay'},timestamp:Date.now()})}).catch(()=>{});
+      // #endregion
+      finishTabRestore({ clearTabHiddenLineFlag: false });
+      webTabRestoreReplayInFlightRef.current = false;
+      return;
+    }
+    const canResumeHtml = hasWebInterviewHtmlAudioTabResumePending();
+    if (!canResumeHtml && hasPendingWebGestureBlobUrl()) {
+      try {
+        webTtsTabInterruptPendingReplayRef.current = false;
+        const playedBlob = await tryPlayPendingWebTtsAudioInUserGesture(
+          () => {},
+          undefined,
+          { source: 'replay' }
+        );
+        if (playedBlob) {
+          await new Promise<void>((resolve) => {
+            const poll = () => {
+              if (!isWebInterviewPlaybackSurfaceActive()) {
+                resolve();
+                return;
+              }
+              setTimeout(poll, 80);
+            };
+            poll();
+          });
+          applyInterviewSpeechComplete(tabRestoreReplayText);
+          finishTabRestore({ clearTabHiddenLineFlag: false });
+          webTabRestoreReplayInFlightRef.current = false;
+          return;
+        }
+      } catch {
+        /* fall through to speakTextSafe replay */
+      }
+    }
+    if (canResumeHtml) {
+      try {
+        webTtsTabInterruptPendingReplayRef.current = false;
+        await resumeWebInterviewHtmlAudioAfterTabHide('replay');
+        finishTabRestore({ clearTabHiddenLineFlag: false, htmlResumeDelivered: true });
+      } catch (err) {
+        if (!isTtsTabResumeFallbackError(err)) {
+          webTtsTabInterruptPendingReplayRef.current = true;
+          pendingGestureRestoreSpeakRef.current = pending;
+          setWebTabGestureRestoreOverlay(true);
+          pending.reject(err);
+          webTabRestoreReplayInFlightRef.current = false;
+          return;
+        }
+        parallelStreamingTtsRef.current.cancelRequested = true;
+        parallelStreamingTtsRef.current.active = false;
+        await stopElevenLabsPlayback();
+        try {
+          if (!webTabHtmlResumeDeliveredRef.current) {
+            await speakTextSafe(tabRestoreReplayText, {
+              ...TAB_RESTORE_PENDING_SPEAK_OPTIONS,
+        ...pending.options,
+              telemetrySource: 'replay',
+              skipQuestionTiming: true,
+            });
+          }
+          finishTabRestore();
+        } catch (replayErr) {
+          webTtsTabInterruptPendingReplayRef.current = true;
+          pendingGestureRestoreSpeakRef.current = { ...pending, restoreMode: 'replay' };
+          setWebTabGestureRestoreOverlay(true);
+          pending.reject(replayErr);
+        }
+      } finally {
+        webTabRestoreReplayInFlightRef.current = false;
+      }
+      return;
+    }
+    parallelStreamingTtsRef.current.cancelRequested = true;
+    parallelStreamingTtsRef.current.active = false;
+    await stopElevenLabsPlayback();
+    try {
+      if (!webTabHtmlResumeDeliveredRef.current) {
+        await speakTextSafe(tabRestoreReplayText, {
+          ...TAB_RESTORE_PENDING_SPEAK_OPTIONS,
+          ...pending.options,
+          telemetrySource: 'replay',
+          skipQuestionTiming: true,
+        });
+      }
+      finishTabRestore();
+    } catch (err) {
+      webTtsTabInterruptPendingReplayRef.current = true;
+      pendingGestureRestoreSpeakRef.current = pending;
+      setWebTabGestureRestoreOverlay(true);
+      pending.reject(err);
+    } finally {
+      webTabRestoreReplayInFlightRef.current = false;
+    }
+  }, [speakTextSafe, stopElevenLabsPlayback, applyInterviewSpeechComplete]);
+
+  handleWebTabGestureRestoreTapRef.current = () => {
+    void handleWebTabGestureRestoreTap();
+  };
+
+  const deliverRecordingRetryLine = useCallback(
+    async (
+      message: string,
+      speakOpts?: {
+        telemetrySource?: 'turn' | 'other';
+        skipLastQuestionRef?: boolean;
+      },
+    ): Promise<void> => {
+      const norm = normalizeTtsTextForConsecutiveDedup(message);
+      const now = Date.now();
+      if (
+        norm.length > 0 &&
+        lastRecordingRetryDeliveredNormRef.current === norm &&
+        now - lastRecordingRetryDeliveredAtMsRef.current < 4000
+      ) {
+        setVoiceState('idle');
+        return;
+      }
+      lastRecordingRetryDeliveredNormRef.current = norm;
+      lastRecordingRetryDeliveredAtMsRef.current = now;
+
+      let duplicateInTranscript = false;
+      commitInterviewMessages((prev) => {
+        if (!assistantTurnHasPersistableContent(message)) {
+          return prev;
+        }
+        const last = prev[prev.length - 1];
+        if (
+          last?.role === 'assistant' &&
+          normalizeTtsTextForConsecutiveDedup(String(last.content ?? '')) === norm
+        ) {
+          duplicateInTranscript = true;
+          return prev;
+        }
+        const scenarioNum =
+          currentScenarioRef.current === 1 ||
+          currentScenarioRef.current === 2 ||
+          currentScenarioRef.current === 3
+            ? currentScenarioRef.current
+            : 1;
+        return appendAssistantTurn(prev, message, {
+          scenarioNumber: scenarioNum,
+          interviewMoment: currentInterviewMomentRef.current,
+        });
+      });
+      if (duplicateInTranscript) {
+        setVoiceState('idle');
+        return;
+      }
+      setVoiceState('speaking');
+      await speakTextSafe(message, {
+        telemetrySource: 'turn',
+        skipLastQuestionRef: true,
+        ...speakOpts,
+      }).catch(() => {});
+      setVoiceState('idle');
+    },
+    [speakTextSafe, commitInterviewMessages],
+  );
 
   const docVisibilityWasHiddenRef = useRef(false);
+
+  const interruptInterviewTtsForDocumentHidden = useCallback(() => {
+    if (Platform.OS !== 'web' || interviewStatusRef.current !== 'in_progress') return;
+    gestureContextLostAtRef.current = { atMs: Date.now(), reason: 'tab_visibility_change' };
+    const speechSynthRemaining = captureWebSpeechSynthTabRestoreText();
+    const utterance =
+      speechSynthRemaining ??
+      computeParallelStreamTabRestoreText(
+        parallelStreamingTtsRef.current.accumulatedFullText,
+        parallelStreamingTtsRef.current.spokenCompleteText,
+        [
+          webTtsUtteranceInFlightRef.current ?? '',
+          lastQuestionTextRef.current ?? '',
+        ]
+      );
+    if (parallelStreamingTtsRef.current.active) {
+      parallelStreamingTtsRef.current.cancelRequested = true;
+    }
+    const streamOrTtsActive = ttsLineInFlightRef.current || parallelStreamingTtsRef.current.active;
+    if (streamOrTtsActive) {
+      tabHiddenDuringActiveTtsLineRef.current = true;
+      webTtsTabInterruptPendingReplayRef.current = true;
+      interruptWebInterviewTtsForTabHide();
+      const htmlTabResume = hasWebInterviewHtmlAudioTabResumePending();
+      if (utterance.length > 0) {
+        pendingGestureRestoreSpeakRef.current = {
+          text: utterance,
+          restoreMode: htmlTabResume ? 'resume_html' : 'replay',
+          options: { ...TAB_RESTORE_PENDING_SPEAK_OPTIONS },
+          resolve: () => {},
+          reject: () => {},
+        };
+        needsGestureRestoreRef.current = true;
+        tabVisibilityGestureLossPendingRef.current = true;
+        setWebTabGestureRestoreOverlay(true);
+      }
+      if (!htmlTabResume) {
+        webTtsSpeakGenerationRef.current += 1;
+        setTtsPlaybackActive(false);
+        ttsLineInFlightRef.current = false;
+      }
+      setVoiceState('idle');
+      return;
+    }
+    interruptWebInterviewTtsForTabHide();
+  }, []);
+
   useEffect(() => {
     bumpAriaScreenMountGeneration();
   }, []);
 
   useEffect(() => {
     if (Platform.OS !== 'web' || typeof document === 'undefined') return;
-    const onVis = () => {
-      if (document.visibilityState === 'hidden') {
+    const onDocumentHidden = () => {
         docVisibilityWasHiddenRef.current = true;
-        if (interviewStatusRef.current === 'in_progress') {
-          if (ttsLineInFlightRef.current) {
-            tabHiddenDuringActiveTtsLineRef.current = true;
-        }
-          gestureContextLostAtRef.current = { atMs: Date.now(), reason: 'tab_visibility_change' };
-          pauseWebInterviewHtmlAudioForDocumentHidden();
-        }
-      } else if (document.visibilityState === 'visible' && docVisibilityWasHiddenRef.current) {
+      interruptInterviewTtsForDocumentHidden();
+    };
+    const onDocumentVisible = () => {
+      if (document.visibilityState !== 'visible' || !docVisibilityWasHiddenRef.current) return;
         docVisibilityWasHiddenRef.current = false;
-        if (interviewStatusRef.current === 'in_progress') {
+      if (interviewStatusRef.current !== 'in_progress') return;
+      if (
+        isInterviewCompleteRef.current ||
+        transcriptHasInterviewClosingAssistantMessage(currentMessagesRef.current)
+      ) {
+        return;
+      }
+      if (webTabRestoreReplayInFlightRef.current || webTabHtmlResumeDeliveredRef.current) return;
           needsGestureRestoreRef.current = true;
           tabVisibilityGestureLossPendingRef.current = true;
-        }
+      if (pendingGestureRestoreSpeakRef.current) {
+        setWebTabGestureRestoreOverlay(true);
+      }
+    };
+    const onVis = () => {
+      if (document.visibilityState === 'hidden') {
+        onDocumentHidden();
+      } else {
+        onDocumentVisible();
+      }
+    };
+    const onWindowBlur = () => {
+      if (document.visibilityState === 'hidden') {
+        onDocumentHidden();
       }
     };
     document.addEventListener('visibilitychange', onVis);
-    return () => document.removeEventListener('visibilitychange', onVis);
-  }, []);
+    window.addEventListener('blur', onWindowBlur);
+    return () => {
+      document.removeEventListener('visibilitychange', onVis);
+      window.removeEventListener('blur', onWindowBlur);
+    };
+  }, [interruptInterviewTtsForDocumentHidden]);
 
   // ── Web: browser SpeechRecognition (hold-to-talk fallback when Whisper/MediaRecorder is off)
   useEffect(() => {
@@ -6831,7 +9005,7 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
       });
       const data = await res.json();
       const raw = (data.content?.[0]?.text ?? '{}') as string;
-      return parseJsonObjectFromModelText(raw) as InterviewResults;
+      return parseHolisticInterviewModelObjectFromModelText(raw) as unknown as InterviewResults;
     } catch {
       return fallback;
     }
@@ -6847,31 +9021,17 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
       if (!uid) return;
       const transcriptSnapshot = allMessages.filter((m) => !(m as { isScoreCard?: boolean }).isScoreCard);
       try {
-        const updateData: Record<string, unknown> = {
-          [`interview_scenario_${scenarioNumber}_scores`]: {
-            pillarScores: result.pillarScores,
-            pillarConfidence: result.pillarConfidence,
-            keyEvidence: result.keyEvidence,
-            scenarioName: result.scenarioName,
-          },
-          interview_transcript: transcriptSnapshot,
-          interview_last_checkpoint: scenarioNumber,
-        };
-        const { error } = await supabase.from('users').update(updateData).eq('id', uid);
-        if (error) console.error(`Failed to save scenario ${scenarioNumber} checkpoint:`, error);
-        else {
-          resumeActiveScenarioRef.current = null;
           const aid = interviewSessionAttemptIdRef.current;
-          if (aid) {
-            await supabase
-              .from('interview_attempts')
-              .update({ resume_active_scenario: null })
-              .eq('id', aid)
-              .eq('user_id', uid);
-          }
+        if (!aid) return;
+        await syncLiveInterviewTranscriptToAttempt(supabase, {
+          attemptId: aid,
+          userId: uid,
+          transcript: transcriptSnapshot,
+          resumeActiveScenario: null,
+        });
+        resumeActiveScenarioRef.current = null;
           const persisted = await loadInterviewFromStorage(uid);
           if (persisted) await saveInterviewToStorage(uid, { ...persisted, resumeActiveScenario: null });
-        }
       } catch (err) {
         console.error('Checkpoint save error:', err);
       }
@@ -6886,6 +9046,7 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
       opts?: { allowMessageHistoryShrink?: boolean }
     ) => {
       if (!userId || isAdmin) return;
+      currentScenarioRef.current = scenario;
       const attemptId = interviewSessionAttemptIdRef.current;
       const source = messagesSnapshot ?? currentMessagesRef.current;
       const transcript = source.filter(
@@ -6968,16 +9129,40 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
             transcript_turns: transcript.length,
           });
           void scoreFn(completedScenarioNum, transcript as { role: string; content: string }[]);
+          const lastAssistant = [...messagesSnapshot]
+            .reverse()
+            .find((m) => m.role === 'assistant');
+          const transitionText = String((lastAssistant as { content?: string })?.content ?? '');
+          if (transitionText.trim()) {
+            if (completedScenarioNum === 1) {
+              interviewMomentsCompleteRef.current[1] = true;
+              currentInterviewMomentRef.current = 2;
+            } else if (completedScenarioNum === 2) {
+              interviewMomentsCompleteRef.current[2] = true;
+              currentInterviewMomentRef.current = 3;
+              resetScenarioCClientGatesOnly();
+            }
+            void tryRunEmotionModalFromScenarioTransitionRef.current({
+              completedScenario: completedScenarioNum,
+              transitionText,
+              priorScenario: completedScenarioNum,
+              source: 'notifyScenarioStarted',
+            });
+          }
         }
       }
     },
-    [userId, isAdmin]
+    [userId, isAdmin, resetScenarioCClientGatesOnly]
   );
 
   const scoreScenario = useCallback(
     async (scenarioNumber: 1 | 2 | 3, allMessages: { role: string; content: string }[]) => {
       if (!ANTHROPIC_API_KEY && !ANTHROPIC_PROXY_URL) return;
-      const userMessages = allMessages.filter((m) => m.role === 'user');
+      const scoringMessages =
+        scenarioNumber === 3
+          ? sliceTranscriptForScenario3Scoring(allMessages as ScenarioCorpusMessageSlice[])
+          : allMessages;
+      const userMessages = scoringMessages.filter((m) => m.role === 'user');
       if (userMessages.length < 2 && __DEV__) {
         console.warn(
           `Scenario ${scenarioNumber} scored with insufficient user messages (${userMessages.length}) — both-characters answer may be missing. Token may have fired before the answer was received.`
@@ -6994,9 +9179,9 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
       const repairFocusForPrompt =
         scenarioNumber === 3
           ? scenarioCRepairOnlyEvidenceRef.current?.trim() ||
-            extractScenario3UserCorpusAfterLastRepairPrompt(allMessages as ScenarioCorpusMessageSlice[]) ||
+            extractScenario3UserCorpusAfterLastRepairPrompt(scoringMessages as ScenarioCorpusMessageSlice[]) ||
             null
-          : null;
+          : null;;
       const priorMentalizingForScenario3 =
         scenarioNumber === 3
           ? {
@@ -7023,14 +9208,14 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
               headers,
               body: JSON.stringify({
                 model: 'claude-sonnet-4-20250514',
-                max_tokens: 800,
+                max_tokens: scenarioNumber === 1 ? 800 : 1200,
                 temperature: 0,
                 messages: [
                   {
                     role: 'user',
                     content: buildScenarioScoringPrompt(
                       scenarioNumber,
-                      allMessages,
+                      scoringMessages,
                       priorMentalizingForScenario3,
                       repairFocusForPrompt
                     ),
@@ -7045,7 +9230,75 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
               (e as Error & { status?: number }).status = res.status;
               throw e;
             }
-            const parsedScenario = parseJsonObjectFromModelText(raw) as ScenarioScoreResult;
+            let parsedScenario: ScenarioScoreResult;
+            try {
+              parsedScenario = parseJsonObjectFromModelText(raw) as ScenarioScoreResult;
+            } catch (parseErr) {
+              const parseMessage = parseErr instanceof Error ? parseErr.message : String(parseErr);
+              console.error(
+                '[ScoringPipeline] Primary scoring failed for scenario',
+                scenarioNumber,
+                '— reason:',
+                parseMessage,
+              );
+              console.log('[ScoringPipeline] Falling back to recovery path for scenario', scenarioNumber);
+              parsedScenario = {
+                scenarioNumber,
+                scenarioName:
+                  scenarioNumber === 1
+                    ? 'Scenario A (Emma/Ryan)'
+                    : scenarioNumber === 2
+                      ? 'Scenario B (Sarah/James)'
+                      : 'Scenario C (Sophie/Daniel)',
+                pillarScores: {},
+                keyEvidence: {},
+                pillarConfidence: {},
+              } as ScenarioScoreResult;
+            }
+            const scenarioMarkerIdsEarly = SCENARIO_FRUSTRATION_SKIP_NULL_MARKER_IDS[scenarioNumber];
+            const coercedScenario = coerceScenarioScoreParsedModelRecord(parsedScenario);
+            parsedScenario.pillarScores = coercedScenario.pillarScores as ScenarioScoreResult['pillarScores'];
+            parsedScenario.keyEvidence = coercedScenario.keyEvidence as ScenarioScoreResult['keyEvidence'];
+            if (Object.keys(coercedScenario.pillarConfidence).length > 0) {
+              parsedScenario.pillarConfidence = coercedScenario.pillarConfidence as ScenarioScoreResult['pillarConfidence'];
+            }
+            parsedScenario.pillarScores = mergeSalvagedScenarioPillarScoresIntoParsed(
+              raw,
+              scenarioMarkerIdsEarly,
+              parsedScenario.pillarScores as Record<string, unknown>,
+            ) as ScenarioScoreResult['pillarScores'];
+            parsedScenario.keyEvidence = mergeSalvagedScenarioKeyEvidenceFromRaw(
+              raw,
+              scenarioMarkerIdsEarly,
+              parsedScenario.keyEvidence ?? {},
+            ) as ScenarioScoreResult['keyEvidence'];
+            const scenarioUserTextPreNormalize = userTurnTextForInterviewScenario(scoringMessages, scenarioNumber);
+            fillScenarioKeyEvidenceWhenNumericScoreButMissingQuote(
+              scenarioMarkerIdsEarly,
+              parsedScenario,
+              scenarioUserTextPreNormalize,
+            );
+            try {
+              console.log(
+                '[Overcertainty] raw model response excerpt:',
+                JSON.stringify(parsedScenario).slice(0, 800),
+              );
+            } catch {
+              console.log('[Overcertainty] raw model response excerpt: <stringify failed>');
+            }
+            console.log(
+              '[Overcertainty] mentalizing_overcertainty field:',
+              (parsedScenario as { mentalizing_overcertainty?: unknown }).mentalizing_overcertainty,
+            );
+            console.log(
+              '[Overcertainty] keyEvidence.mentalizing_overcertainty:',
+              (parsedScenario.keyEvidence as Record<string, unknown> | undefined)?.mentalizing_overcertainty,
+            );
+            console.log(
+              '[Overcertainty] scoringMetadata.mentalizing_overcertainty:',
+              (parsedScenario as { scoringMetadata?: Record<string, unknown> }).scoringMetadata
+                ?.mentalizing_overcertainty,
+            );
             /** Model sometimes omits these or returns JSON with only a preamble object — fixes empty scorecard / gate. */
             parsedScenario.scenarioNumber = scenarioNumber;
             if (typeof parsedScenario.scenarioName !== 'string' || !parsedScenario.scenarioName.trim()) {
@@ -7109,11 +9362,24 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
               }
             }
             const primaryRawNumericScores = ensureNumericScoreMap(parsedScenario.pillarScores);
+            const pillarScoresBeforeNormalize = { ...(parsedScenario.pillarScores ?? {}) };
             parsedScenario.pillarScores = normalizeScoresByEvidence(
               parsedScenario.pillarScores,
               parsedScenario.keyEvidence
             );
-            const scenarioUserText = userTurnTextForInterviewScenario(allMessages, scenarioNumber);
+            if (
+              Object.keys(primaryRawNumericScores).length > 0 &&
+              Object.keys(parsedScenario.pillarScores ?? {}).length === 0
+            ) {
+              console.error(
+                '[ScoringPipeline] Primary scoring failed for scenario',
+                scenarioNumber,
+                '— reason:',
+                'normalizeScoresByEvidence dropped all pillar scores (missing or no-evidence keyEvidence)',
+              );
+              console.log('[ScoringPipeline] Falling back to recovery path for scenario', scenarioNumber);
+            }
+            const scenarioUserText = scenarioUserTextPreNormalize;
             const heur = applyContemptExpressionHeuristicToScenarioScores(
               scenarioUserText,
               parsedScenario.pillarScores ?? {},
@@ -7121,10 +9387,10 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
             );
             parsedScenario.pillarScores = heur.pillarScores as ScenarioScoreResult['pillarScores'];
             parsedScenario.keyEvidence = heur.keyEvidence as ScenarioScoreResult['keyEvidence'];
-            const avgWords = computeAvgUserWordsPerTurnScenario(allMessages, scenarioNumber);
-            const scenarioUserTurnCount = countUserTurnsForScenario(allMessages, scenarioNumber);
+            const avgWords = computeAvgUserWordsPerTurnScenario(scoringMessages, scenarioNumber);
+            const scenarioUserTurnCount = countUserTurnsForScenario(scoringMessages, scenarioNumber);
             const depthModifierThreshold = scenarioDepthModifierThreshold(scenarioUserTurnCount);
-            const communicationAvgResponseLength = computeAvgUserWordsPerTurnPersonalSlice(allMessages);
+            const communicationAvgResponseLength = computeAvgUserWordsPerTurnPersonalSlice(scoringMessages);
             const elabor = applyElaborationAbsencePenaltiesToScenarioScores(
               scenarioNumber,
               scenarioUserText,
@@ -7161,12 +9427,25 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
             }
             if (Object.keys(parsedScenario.pillarScores ?? {}).length === 0 && Object.keys(primaryRawNumericScores).length > 0) {
               parsedScenario.pillarScores = primaryRawNumericScores;
+              fillScenarioKeyEvidenceWhenNumericScoreButMissingQuote(
+                scenarioMarkerIds,
+                parsedScenario,
+                scenarioUserText,
+              );
               void remoteLog('[SCENARIO_SCORE_FALLBACK] restored raw numeric scores after evidence normalization', {
                 scenarioNumber,
                 recoveredKeys: Object.keys(primaryRawNumericScores),
               });
             }
             if (Object.keys(parsedScenario.pillarScores ?? {}).length === 0) {
+              console.error(
+                '[ScoringPipeline] Primary scoring failed for scenario',
+                scenarioNumber,
+                '— reason:',
+                'no assessable pillarScores in model JSON',
+                { hadPreNormalizeKeys: Object.keys(pillarScoresBeforeNormalize) },
+              );
+              console.log('[ScoringPipeline] Falling back to recovery path for scenario', scenarioNumber);
               const parsedScenarioAny = parsedScenario as unknown as Record<string, unknown>;
               const alternateCandidates: unknown[] = [
                 parsedScenarioAny,
@@ -7232,8 +9511,16 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
             const existingConfidence = { ...(parsedScenario.pillarConfidence ?? {}) };
             const scoredKeys = Object.keys(parsedScenario.pillarScores ?? {});
             for (const markerId of scoredKeys) {
-              if (!existingEvidence[markerId]) {
-                existingEvidence[markerId] = 'Score recovered from model output.';
+              const ev = existingEvidence[markerId]?.trim();
+              if (!ev) {
+                console.error(
+                  '[ScoringPipeline] Primary scoring failed for scenario',
+                  scenarioNumber,
+                  '— reason:',
+                  `missing keyEvidence for marker ${markerId}`,
+                );
+                console.log('[ScoringPipeline] Falling back to recovery path for scenario', scenarioNumber);
+                existingEvidence[markerId] = MOMENT4_SCORE_RECOVERED_EVIDENCE_LINE;
               }
               if (!existingConfidence[markerId]) {
                 existingConfidence[markerId] = 'moderate';
@@ -7243,6 +9530,13 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
             parsedScenario.pillarConfidence = existingConfidence;
             parsedScenario.mentalizing_inference_source = normalizeMentalizingInferenceSource(
               (parsedScenario as { mentalizing_inference_source?: unknown }).mentalizing_inference_source
+            );
+            finalizeScenarioMentalizingOvercertaintyFromModel(parsedScenario);
+            console.log(
+              '[Overcertainty] resolved value:',
+              parsedScenario.mentalizing_overcertainty,
+              'for scenario:',
+              scenarioNumber,
             );
             if (parsedScenario.pillarScores?.contempt_expression == null) {
               parsedScenario.contempt_tier_breakdown = null;
@@ -7259,6 +9553,16 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
               stripCommitmentThreshold(parsedScenario.pillarScores as Record<string, unknown>);
               stripCommitmentThreshold(parsedScenario.keyEvidence as Record<string, unknown>);
               stripCommitmentThreshold(parsedScenario.pillarConfidence as Record<string, unknown>);
+            }
+            if (parsedScenario.mentalizing_overcertainty === true) {
+              const m = parsedScenario.pillarScores?.mentalizing;
+              if (typeof m === 'number' && Number.isFinite(m) && m > 7) {
+                console.log('[Overcertainty] capping mentalizing from', m, 'to 7');
+                parsedScenario.pillarScores = {
+                  ...(parsedScenario.pillarScores ?? {}),
+                  mentalizing: 7,
+                };
+              }
             }
             return parsedScenario;
           },
@@ -7304,6 +9608,7 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
             scoreKeys: Object.keys(scenarioResult.pillarScores ?? {}),
             scoreMessageLength: scoreMessage.length,
           mentalizing_inference_source: scenarioResult.mentalizing_inference_source ?? null,
+            mentalizing_overcertainty: scenarioResult.mentalizing_overcertainty ?? false,
           });
         }
         void remoteLog('[SCORECARD_FETCH_RESULT]', {
@@ -7312,6 +9617,7 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
           scoreKeys: Object.keys(scenarioResult.pillarScores ?? {}),
           scoreMessageLength: scoreMessage.length,
           mentalizing_inference_source: scenarioResult.mentalizing_inference_source ?? null,
+          mentalizing_overcertainty: scenarioResult.mentalizing_overcertainty ?? false,
           userId: userId ?? null,
         });
         setScenarioScores((prev) => ({ ...prev, [scenarioNumber]: scenarioResult }));
@@ -7325,6 +9631,7 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
             keyEvidence: scenarioResult.keyEvidence,
             scenarioName: scenarioResult.scenarioName,
             mentalizing_inference_source: scenarioResult.mentalizing_inference_source,
+            mentalizing_overcertainty: scenarioResult.mentalizing_overcertainty === true,
             contempt_tier_breakdown: scenarioResult.contempt_tier_breakdown,
           };
           try {
@@ -7377,14 +9684,14 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
           ...prev,
           { role: 'system', content: scoreMessage, isScoreCard: true } as { role: string; content: string; isScoreCard?: boolean },
         ]);
-        saveScenarioCheckpoint(scenarioNumber, scenarioResult, allMessages, userId);
+        saveScenarioCheckpoint(scenarioNumber, scenarioResult, scoringMessages, userId);
       } catch (err) {
         if (__DEV__) console.error(`Scoring failed for scenario ${scenarioNumber}:`, err instanceof Error ? err.message : err);
         await remoteLog('[ERROR] scenario scoring failed', {
           scenarioNumber,
           message: err instanceof Error ? err.message : String(err),
-          totalMessages: allMessages.length,
-          userTurns: allMessages.filter((m) => m.role === 'user').length,
+          totalMessages: scoringMessages.length,
+          userTurns: scoringMessages.filter((m) => m.role === 'user').length,
         });
         const saved = await loadInterviewFromStorage(userId);
         if (saved) {
@@ -7399,6 +9706,36 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
   useEffect(() => {
     scoreScenarioRef.current = scoreScenario;
   }, [scoreScenario]);
+
+  const ensureCompletedScenarioScored = useCallback(
+    (
+      completedScenario: 1 | 2 | 3,
+      messagesForScoring: { role: string; content: string }[],
+      trigger: string,
+    ) => {
+      if (scoredScenariosRef.current.has(completedScenario)) {
+        return;
+      }
+      scoredScenariosRef.current.add(completedScenario);
+      void remoteLog('[SCENARIO_SCORE_ON_TRANSITION]', {
+        scenario_completed: completedScenario,
+        trigger,
+        transcript_turns: messagesForScoring.length,
+      });
+      void scoreScenario(completedScenario, messagesForScoring);
+      const lastAssistant = [...messagesForScoring].reverse().find((m) => m.role === 'assistant');
+      const transitionText = String(lastAssistant?.content ?? '');
+      if (transitionText.trim()) {
+        void tryRunEmotionModalFromScenarioTransitionRef.current({
+          completedScenario,
+          transitionText,
+          priorScenario: completedScenario,
+          source: `ensureCompletedScenarioScored:${trigger}`,
+        });
+      }
+    },
+    [scoreScenario],
+  );
 
   const processUserSpeech = useCallback(async (spokenText: string) => {
     if (!spokenText.trim()) {
@@ -7718,7 +10055,7 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
       });
     }
 
-    let participantFirstNameForSpoken = interviewNameRef.current ?? '';
+    let participantFirstNameForSpoken = resolvePlausibleInterviewFirstName(interviewNameRef.current) ?? '';
     const routeChangedDuringRecordingSnap = routeChangedDuringRecordingRef.current;
     routeChangedDuringRecordingRef.current = false;
     let reentryTypeForLogging: 'repeat_requested' | 'continue_requested' | 'direct_answer' | null = null;
@@ -7741,17 +10078,20 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
     }
 
     if (resumeRepeatChoicePendingRef.current) {
-      void remoteLog('[S1_RESUME_GATE_ENTRY_DEBUG_7605c3]', {
-        userCoverageDetail: debugScenarioAQ1ContemptProbeCoverageDetail(trimmed),
-        lastAssistantLooksLikeContemptProbe: looksLikeScenarioAContemptProbeQuestion(
-          resumeLastAssistantTextRef.current ?? ''
-        ),
-        lastAssistantPreview: (resumeLastAssistantTextRef.current ?? '').slice(0, 300),
-        userPreview: trimmed.slice(0, 300),
-      });
       resumeRepeatChoicePendingRef.current = false;
       let intent = classifyResumeRepeatIntent(trimmed);
       const resumeCueWordCount = countSpokenWords(trimmed);
+      const resumeLastLooksLikeClosing = looksLikeInterviewClosingAssistantMessage(
+        resumeLastAssistantTextRef.current ?? '',
+      );
+      const longAnswerBypass =
+        shouldBypassResumeRepeatGateForLongAnswer(resumeCueWordCount) && !resumeLastLooksLikeClosing;
+      if (longAnswerBypass) {
+        void remoteLog('[S1_RESUME_GATE_LONG_ANSWER_BYPASS]', { resumeCueWordCount });
+        resumeLastAssistantTextRef.current = null;
+        resumeRepeatPrefetchMpegRef.current = null;
+        reentryTypeForLogging = 'direct_answer';
+      } else {
       /** Meta cues ("go ahead", "no thanks") are short; long turns are answers, not continue/skip-repeat signals. */
       if ((intent === 'continue' || intent === 'repeat') && resumeCueWordCount > 18) {
         intent = 'ambiguous';
@@ -7765,16 +10105,11 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
         intent = 'ambiguous';
       }
       const directAnswer = intent === 'ambiguous' && looksLikeDirectResumeAnswer(trimmed, resumeLastAssistantTextRef.current);
-      const inferredRepeatFromAmbiguous = intent === 'ambiguous' && !directAnswer && looksLikeRepeatCueInAmbiguousReply(trimmed);
-      void remoteLog('[S1_RESUME_GATE_CLASSIFICATION_DEBUG_7605c3]', {
-        intent,
-        directAnswer,
-        inferredRepeatFromAmbiguous,
-        resumeCueWordCount,
-        lastAssistantLooksLikeContemptProbe: looksLikeScenarioAContemptProbeQuestion(
-          resumeLastAssistantTextRef.current ?? ''
-        ),
-      });
+      const inferredRepeatFromAmbiguous =
+        intent === 'ambiguous' &&
+        !directAnswer &&
+        resumeCueWordCount <= 18 &&
+        looksLikeRepeatCueInAmbiguousReply(trimmed);
       if (intent === 'repeat' || inferredRepeatFromAmbiguous) {
         reentryTypeForLogging = 'repeat_requested';
         if (userId) {
@@ -7802,14 +10137,55 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
           });
         }
         const last = resumeLastAssistantTextRef.current;
-        if (last?.trim()) {
-          await speakTextSafe(stripControlTokens(last), {
-            telemetrySource: 'replay',
-            skipQuestionDeliveredTelemetry: true,
-            skipInterviewSpeechAdvance: true,
-            skipQuestionTiming: true,
-            skipLastQuestionRef: true,
-          });
+        if (last?.trim() && !resumeClosingRepeatSpeakInFlightRef.current) {
+          resumeClosingRepeatSpeakInFlightRef.current = true;
+          try {
+            const strippedRepeat = stripControlTokens(last).trim();
+            const repeatTtsText = scenarioAContemptProbeResumeRepeatTtsText(strippedRepeat);
+            const usedContemptResumeRepeatTts = repeatTtsText !== strippedRepeat;
+            void remoteLog('[S1_CONTEMPT_PROBE_RESUME_REPEAT_TTS]', {
+              usedContemptResumeRepeatTts,
+              storedPreview: strippedRepeat.slice(0, 200),
+              ttsPreview: repeatTtsText.slice(0, 200),
+              s1ContemptFixVersion: 13,
+            });
+            const prefetched = resumeRepeatPrefetchMpegRef.current;
+            let prefetchedMpegArrayBuffer: ArrayBuffer | undefined =
+              prefetched?.text === repeatTtsText && prefetched.buffer.byteLength > 0
+                ? prefetched.buffer
+                : undefined;
+            resumeRepeatPrefetchMpegRef.current = null;
+            if (!prefetchedMpegArrayBuffer && Platform.OS === 'web') {
+              const fetched = await fetchElevenLabsMpegArrayBuffer(repeatTtsText);
+              if (fetched && fetched.byteLength > 0) {
+                prefetchedMpegArrayBuffer = fetched;
+              }
+            }
+            await speakTextSafe(repeatTtsText, {
+              telemetrySource: 'turn',
+              skipPcmStream: true,
+              prefetchedMpegArrayBuffer,
+              skipQuestionDeliveredTelemetry: true,
+              skipInterviewSpeechAdvance: true,
+              skipQuestionTiming: true,
+              skipLastQuestionRef: true,
+              allowDuplicateConsecutiveTts: !resumeLastLooksLikeClosing,
+              skipClosingSessionDedup: resumeLastLooksLikeClosing,
+              skipScenarioAContemptProbeSessionDedup: true,
+            });
+          } finally {
+            resumeClosingRepeatSpeakInFlightRef.current = false;
+          }
+        }
+        resumeLastAssistantTextRef.current = null;
+        if (resumeLastLooksLikeClosing && transcriptHasInterviewClosingAssistantMessage(messages)) {
+          const kicked = await kickPostClosingInterviewCompletionIfReady(
+            'resume_repeat_closing',
+            messages,
+          );
+          if (kicked) {
+            return;
+          }
         }
       } else if (intent === 'continue') {
         reentryTypeForLogging = 'continue_requested';
@@ -7837,12 +10213,22 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
             platform: r.platform,
           });
         }
+        if (transcriptHasInterviewClosingAssistantMessage(messages)) {
+          const kicked = await kickPostClosingInterviewCompletionIfReady(
+            'resume_continue_after_closing',
+            messages,
+          );
+          if (kicked) {
+            return;
+          }
+        }
         setVoiceState('idle');
         return;
       } else {
         reentryTypeForLogging = 'direct_answer';
         // Proceed through normal answer pipeline (scoring + state advance) below.
         resumeLastAssistantTextRef.current = null;
+      }
       }
       if (reentryTypeForLogging !== 'direct_answer') {
         setVoiceState('idle');
@@ -7908,8 +10294,8 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
       let latencyMs = 0;
       let durationMs = 0;
       if (timingRef.current.recordingStartTime != null) {
-        timingRef.current.recordingEndTime = Date.now();
-        const qEnd = timingRef.current.questionEndTime ?? timingRef.current.recordingStartTime;
+      timingRef.current.recordingEndTime = Date.now();
+      const qEnd = timingRef.current.questionEndTime ?? timingRef.current.recordingStartTime;
         latencyMs = Math.max(0, timingRef.current.recordingStartTime - qEnd);
         durationMs = Math.max(0, (timingRef.current.recordingEndTime ?? Date.now()) - timingRef.current.recordingStartTime);
         timingRef.current.recordingStartTime = null;
@@ -7929,15 +10315,23 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
       }
       lastUserTurnAudioDurationMsRef.current = null;
       const wordCount = trimmed.split(/\s+/).filter(Boolean).length;
-      const scenario = getCurrentScenario(scoredScenariosRef.current);
-      responseTimingsRef.current.push({
-        question_id: `q_${responseTimingsRef.current.length + 1}`,
-        scenario: scenario ?? null,
-        question_text: lastQuestionTextRef.current,
-        latency_ms: latencyMs,
-        duration_ms: durationMs,
-        word_count: wordCount,
-      });
+      const momentNumForTiming = currentInterviewMomentRef.current;
+      const scenario =
+        momentNumForTiming >= 4
+          ? 3
+          : (currentScenarioRef.current ??
+            getCurrentScenario(scoredScenariosRef.current) ??
+            null);
+      if (shouldRecordInterviewResponseTiming(lastQuestionTextRef.current)) {
+        responseTimingsRef.current.push({
+          question_id: `q_${responseTimingsRef.current.length + 1}`,
+          scenario: scenario ?? null,
+          question_text: lastQuestionTextRef.current,
+          latency_ms: latencyMs,
+          duration_ms: durationMs,
+          word_count: wordCount,
+        });
+      }
     }
 
     // Admin secret pass: skip interview and auto-approve for configured email (onboarding only)
@@ -7946,7 +10340,7 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
         const { data: { session } } = await supabase.auth.getSession();
         const email = (session?.user?.email ?? '').toLowerCase();
         if (email === ADMIN_PASS_EMAIL.toLowerCase()) {
-          await profileRepository.upsertProfile(userId, {
+          await updateUserInterviewApplication(userId, {
             applicationStatus: 'approved',
             onboardingStage: 'complete',
           });
@@ -7979,14 +10373,46 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
       !interviewNameRef.current &&
       (interviewNameReaskPendingRef.current || isNamePromptInterviewMoment(lastQuestionTextRef.current));
     if (isNameEntryTurn) {
-      const extraction = extractInterviewNameFromResponse(trimmed);
       const acceptingAfterReask = interviewNameReaskPendingRef.current;
+      const extraction = extractInterviewNameFromResponse(trimmed);
+      const hasPlausibleExtractedName =
+        !!extraction.extractedName &&
+        !extraction.isFalseNameTrigger &&
+        isPlausibleInterviewName(extraction.extractedName);
+
+      if (
+        isLikelyAmbientSpeech(trimmed, 'what can I call you') &&
+        !acceptingAfterReask &&
+        !hasPlausibleExtractedName
+      ) {
+        console.log('[NameExtraction] likely ambient speech detected:', trimmed, '— prompting again');
+        if (!interviewNameReaskUsedRef.current) {
+          interviewNameReaskPendingRef.current = true;
+          interviewNameReaskUsedRef.current = true;
+          const momentForNameReask = currentInterviewMomentRef.current;
+          const scenarioForNameReask =
+            ((currentScenarioRef.current as number | undefined) ?? getScenarioNumberForNewMessage(messages, 'user')) || 1;
+          const userMsgNameRetry: MessageWithScenario = {
+            role: 'user',
+            content: trimmed,
+            scenarioNumber: scenarioForNameReask as 1 | 2 | 3,
+            interviewMoment: momentForNameReask,
+          };
+          setMessages([...messages, userMsgNameRetry]);
+          setCurrentTranscript('');
+          transcriptAtReleaseRef.current = '';
+          await deliverRecordingRetryLine(INTERVIEW_NAME_AMBIENT_REASK_LINE);
+          setIsWaiting(false);
+          return;
+        }
+      }
       void remoteLog('interview_name_extracted', {
         raw_response: trimmed,
         extracted_name: extraction.extractedName || null,
         extraction_method: extraction.extractionMethod,
         false_name_trigger: extraction.isFalseNameTrigger,
         accepting_after_reask: acceptingAfterReask,
+        plausible_name: isPlausibleInterviewName(extraction.extractedName),
       });
       if (userId) {
         const rtd = getSessionLogRuntime();
@@ -8003,7 +10429,13 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
         });
       }
 
-      if (extraction.isFalseNameTrigger && !acceptingAfterReask && !interviewNameReaskUsedRef.current) {
+      const implausibleName =
+        !extraction.extractedName ||
+        extraction.isFalseNameTrigger ||
+        !isPlausibleInterviewName(extraction.extractedName);
+
+      if (implausibleName && !acceptingAfterReask && !interviewNameReaskUsedRef.current) {
+        console.warn('[NameExtraction] implausible name extracted:', extraction.extractedName, '— re-asking');
         interviewNameReaskPendingRef.current = true;
         interviewNameReaskUsedRef.current = true;
         const momentForNameReask = currentInterviewMomentRef.current;
@@ -8016,35 +10448,100 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
           interviewMoment: momentForNameReask,
         };
         const reaskText = 'Sorry, I want to make sure I got your name right — what should I call you?';
-        const assistantMsgNameRetry: MessageWithScenario = {
-          role: 'assistant',
-          content: reaskText,
-          scenarioNumber: scenarioForNameReask as 1 | 2 | 3,
-          interviewMoment: momentForNameReask,
-        };
-        setMessages([...messages, userMsgNameRetry, assistantMsgNameRetry]);
+        setMessages([...messages, userMsgNameRetry]);
         setCurrentTranscript('');
         transcriptAtReleaseRef.current = '';
-        await speakTextSafe(reaskText, ASSISTANT_INTERVIEW_SPEECH);
-        setVoiceState('idle');
+        await deliverRecordingRetryLine(reaskText);
         setIsWaiting(false);
         return;
       }
 
-      const extractedName = extraction.extractedName || capitalizeNameCandidate(trimmed.split(/\s+/).filter(Boolean)[0] ?? '');
+      const extractedName = resolvePlausibleInterviewFirstName(
+        extraction.extractedName || capitalizeNameCandidate(trimmed.split(/\s+/).filter(Boolean)[0] ?? '')
+      );
+      if (!extractedName) {
+        interviewNameRef.current = null;
+        interviewNameReaskPendingRef.current = false;
+      } else {
+        console.log('[NameExtraction] name confirmed:', extractedName);
       try {
         interviewNameRef.current = extractedName;
         interviewNameReaskPendingRef.current = false;
-        const nameToSave = extractedName;
-        if (nameToSave) {
-          await profileRepository.upsertProfile(userId, { name: nameToSave });
+          await updateUserInterviewApplication(userId, { name: extractedName });
           queryClient.invalidateQueries({ queryKey: ['profile', userId] });
-          // Same turn still uses in-memory profile until query refetch; use immutable interview_name.
-          participantFirstNameForSpoken = nameToSave;
-        }
+          participantFirstNameForSpoken = extractedName;
       } catch (_) {
         // ignore
+        }
       }
+    }
+
+    // ━━━ INTERCEPT 0: Deferred emotion modal after bundled in-scenario question + transition
+    if (
+      isInterviewAppRoute &&
+      !isAdmin &&
+      status === 'active' &&
+      pendingEmotionModalTransitionRef.current != null
+    ) {
+      const pending = pendingEmotionModalTransitionRef.current;
+      pendingEmotionModalTransitionRef.current = null;
+      // #region agent log
+      fetch('http://127.0.0.1:7789/ingest/668e0bd5-3283-4492-9f48-e33846c18218',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'e00888'},body:JSON.stringify({sessionId:'e00888',runId:'pre-fix',hypothesisId:'H3',location:'AriaScreen.tsx:processUserSpeech_intercept0',message:'emotion_modal_deferred_resume_entered',data:{completedScenario:pending.completedScenario,hasAfterModal:pending.afterModal.trim().length>0,priorScenario:pending.priorScenario,userInputPreview:trimmed.slice(0,120)},timestamp:Date.now()})}).catch(()=>{});
+      // #endregion
+      const userScenarioTag =
+        pending.completedScenario === 1 || pending.completedScenario === 2 || pending.completedScenario === 3
+          ? pending.completedScenario
+          : ((currentScenarioRef.current as 1 | 2 | 3 | undefined) ??
+            (getScenarioNumberForNewMessage(messages, 'user') as 1 | 2 | 3)) ||
+            1;
+      const userMsgDeferred: MessageWithScenario = {
+        role: 'user',
+        content: trimmed,
+        scenarioNumber: userScenarioTag,
+      };
+      const messagesAfterDeferredUser = [...messages, userMsgDeferred];
+      setMessages(messagesAfterDeferredUser);
+      setCurrentTranscript('');
+      transcriptAtReleaseRef.current = '';
+      setVoiceState('processing');
+      ensureCompletedScenarioScored(
+        pending.completedScenario,
+        messagesAfterDeferredUser,
+        'deferred_bundled_handoff_intercept',
+      );
+      await runEmotionModalAfterScenarioTransition(pending.completedScenario, {
+        transitionText: pending.transitionText,
+        priorScenario: pending.priorScenario,
+      });
+      if (pending.afterModal.trim()) {
+        const nextSn = (pending.completedScenario < 3
+          ? ((pending.completedScenario + 1) as 2 | 3)
+          : 3) as 1 | 2 | 3;
+        if (pending.completedScenario === 1) {
+          interviewMomentsCompleteRef.current[1] = true;
+          currentInterviewMomentRef.current = 2;
+        } else if (pending.completedScenario === 2) {
+          interviewMomentsCompleteRef.current[2] = true;
+          currentInterviewMomentRef.current = 3;
+          resetScenarioCClientGatesOnly();
+        } else if (pending.completedScenario === 3) {
+          interviewMomentsCompleteRef.current[3] = true;
+        }
+        currentScenarioRef.current = nextSn;
+        setHighestScenarioReached((prev) => Math.max(prev, pending.completedScenario));
+        const afterMsg: MessageWithScenario = {
+          role: 'assistant',
+          content: pending.afterModal,
+          scenarioNumber: nextSn,
+        };
+        const withAfter = [...messagesAfterDeferredUser, afterMsg];
+        setMessages(withAfter);
+        void notifyScenarioStarted(nextSn, withAfter);
+        await speakTextSafe(pending.afterModal, ASSISTANT_INTERVIEW_SPEECH);
+      }
+      setVoiceState('idle');
+      setIsWaiting(false);
+      return;
     }
 
     // ━━━ INTERCEPT 1: Waiting for closing addition (after "yes") — never send to Claude
@@ -8111,7 +10608,14 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
           setMessages(withHandoff);
           persistClosingAdditionScenarioCheckpoint();
           closingAdditionCheckpointPersisted = true;
-          await speakTextSafe(moment4Handoff, ASSISTANT_INTERVIEW_SPEECH);
+          const spM4 = splitScenarioTransitionForEmotionModal(moment4Handoff);
+          await speakTextSafe(spM4.beforeModal, ASSISTANT_INTERVIEW_SPEECH);
+          await runEmotionModalAfterScenarioTransition(3, { transitionText: moment4Handoff });
+          if (spM4.afterModal.trim()) {
+            await speakTextSafe(spM4.afterModal, ASSISTANT_INTERVIEW_SPEECH);
+          } else if (__DEV__) {
+            console.warn('[Aria] emotion modal S3→M4: missing afterModal split (closing addition)');
+          }
         }
       } else {
         const transitionMsg: MessageWithScenario = { role: 'assistant', content: nextContent, scenarioNumber: scenarioNumber === 1 ? 2 : 3 };
@@ -8122,7 +10626,17 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
         persistClosingAdditionScenarioCheckpoint();
         closingAdditionCheckpointPersisted = true;
         await notifyScenarioStarted(nextSn, withTransition);
-        await speakTextSafe(nextContent, ASSISTANT_INTERVIEW_SPEECH);
+        const spTr = splitScenarioTransitionForEmotionModal(nextContent);
+        await speakTextSafe(spTr.beforeModal, ASSISTANT_INTERVIEW_SPEECH);
+        await runEmotionModalAfterScenarioTransition(scenarioNumber, {
+          transitionText: nextContent,
+          priorScenario: scenarioNumber,
+        });
+        if (spTr.afterModal.trim()) {
+          await speakTextSafe(spTr.afterModal, ASSISTANT_INTERVIEW_SPEECH);
+        } else if (__DEV__) {
+          console.warn('[Aria] emotion modal transition: missing afterModal split (closing addition)');
+        }
       }
       if (!closingAdditionCheckpointPersisted) {
         persistClosingAdditionScenarioCheckpoint();
@@ -8221,7 +10735,14 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
           setMessages(withHandoff);
           persistClosingAnswerScenarioCheckpoint();
           closingAnswerCheckpointPersisted = true;
-          await speakTextSafe(moment4Handoff, ASSISTANT_INTERVIEW_SPEECH);
+          const spM4c = splitScenarioTransitionForEmotionModal(moment4Handoff);
+          await speakTextSafe(spM4c.beforeModal, ASSISTANT_INTERVIEW_SPEECH);
+          await runEmotionModalAfterScenarioTransition(3, { transitionText: moment4Handoff });
+          if (spM4c.afterModal.trim()) {
+            await speakTextSafe(spM4c.afterModal, ASSISTANT_INTERVIEW_SPEECH);
+          } else if (__DEV__) {
+            console.warn('[Aria] emotion modal S3→M4: missing afterModal split (closing answer)');
+          }
         }
       } else {
         const newAssistantMsg: MessageWithScenario = {
@@ -8236,7 +10757,17 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
         persistClosingAnswerScenarioCheckpoint();
         closingAnswerCheckpointPersisted = true;
         await notifyScenarioStarted(nextSnClosing, updatedMsgs);
-        await speakTextSafe(nextClosingContent, ASSISTANT_INTERVIEW_SPEECH);
+        const spCls = splitScenarioTransitionForEmotionModal(nextClosingContent);
+        await speakTextSafe(spCls.beforeModal, ASSISTANT_INTERVIEW_SPEECH);
+        await runEmotionModalAfterScenarioTransition(scenarioNumber, {
+          transitionText: nextClosingContent,
+          priorScenario: scenarioNumber,
+        });
+        if (spCls.afterModal.trim()) {
+          await speakTextSafe(spCls.afterModal, ASSISTANT_INTERVIEW_SPEECH);
+        } else if (__DEV__) {
+          console.warn('[Aria] emotion modal transition: missing afterModal split (closing answer)');
+        }
       }
       if (!closingAnswerCheckpointPersisted) {
         persistClosingAnswerScenarioCheckpoint();
@@ -8310,15 +10841,180 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
       scenarioNumber: userScenarioTag as 1 | 2 | 3,
       interviewMoment: momentN,
     };
-    const newMessages: MessageWithScenario[] = [...messages, userMsg];
-
-    setMessages(newMessages);
+    let messagesToUse!: MessageWithScenario[];
+    commitInterviewMessages((prev) => [...prev, userMsg]);
+    messagesToUse = currentMessagesRef.current as MessageWithScenario[];
     setCurrentTranscript('');
     transcriptAtReleaseRef.current = '';
     setVoiceState('processing');
     setIsWaiting(true);
     setExchangeCount((c) => c + 1);
-    const messagesToUse = newMessages;
+
+    // ━━━ INTERCEPT: Readiness confirmation → Scenario 1 (prevents briefing loop when transcript races TTS)
+    if (
+      isInterviewAppRoute &&
+      !isAdmin &&
+      status === 'active' &&
+      interviewNameRef.current &&
+      currentInterviewMomentRef.current === 1 &&
+      currentScenarioRef.current === 1 &&
+      !scenarioAContemptProbeAskedRef.current &&
+      looksLikeReadinessAffirmation(trimmed) &&
+      !userTextLooksLikeDecline(trimmed.toLowerCase()) &&
+      !transcriptHasScenario1VignetteAssistant(messagesToUse)
+    ) {
+      const readinessCueTexts = [
+        lastQuestionTextRef.current,
+        parallelStreamingTtsRef.current.spokenCompleteText,
+        parallelStreamingTtsRef.current.accumulatedFullText,
+        ...messagesToUse
+          .filter((m) => m.role === 'assistant')
+          .slice(-2)
+          .map((m) => m.content ?? ''),
+      ];
+      const answeringReadiness = userIsAnsweringInterviewReadinessPrompt(readinessCueTexts);
+      const preScenarioOnly =
+        !messagesToUse.some(
+          (m) =>
+            m.role === 'assistant' &&
+            (isInterviewPreambleBriefingMoment(m.content ?? '') ||
+              (m.content ?? '').includes('Emma and Ryan')),
+        ) && !!interviewNameRef.current;
+      if (answeringReadiness || preScenarioOnly) {
+        const briefingCandidate =
+          parallelStreamingTtsRef.current.accumulatedFullText.trim() ||
+          parallelStreamingTtsRef.current.spokenCompleteText.trim() ||
+          (isInterviewPreambleBriefingMoment(lastQuestionTextRef.current)
+            ? lastQuestionTextRef.current
+            : '');
+        const briefingText =
+          briefingCandidate.trim() ||
+          buildFallbackIntroBriefingText(participantFirstNameForSpoken);
+        let stagedMessages = insertPreambleBriefingIfMissing(messagesToUse, briefingText);
+        const vignetteBundle = buildScenario1VignetteIntroBundle(SCENARIO_1_VIGNETTE, SCENARIO_1_OPENING);
+        let displayText = dedupeAdjacentBoundaryValidationsBeforeParticipantName(
+          sanitizeAssistantInterviewerCharacterNames(vignetteBundle),
+          participantFirstNameForSpoken,
+        );
+        displayText = ensureSpokenTextIncludesParticipantFirstName(displayText, participantFirstNameForSpoken, {
+          allowAppendWhenMissing: true,
+        });
+        const aiMsg: MessageWithScenario = {
+          role: 'assistant',
+          content: displayText,
+          scenarioNumber: 1,
+          interviewMoment: 1,
+        };
+        const updatedMessages = [...stagedMessages, aiMsg];
+        commitInterviewMessages(updatedMessages);
+        currentScenarioRef.current = 1;
+        void remoteLog('[INTRO_READINESS_INTERCEPT]', {
+          interviewSessionId: interviewSessionIdRef.current,
+          userPreview: trimmed.slice(0, 80),
+          answeringReadiness,
+          preScenarioOnly,
+          backfilledBriefing: stagedMessages.length > messagesToUse.length,
+        });
+        await speakTextSafe(displayText, ASSISTANT_INTERVIEW_SPEECH);
+        setVoiceState('idle');
+        setIsWaiting(false);
+        return;
+      }
+    }
+
+    if (
+      !isInterviewCompleteRef.current &&
+      isInterviewAppRoute &&
+      !isAdmin &&
+      status === 'active' &&
+      transcriptHasInterviewClosingAssistantMessage(messages)
+    ) {
+      const closeGate = computeMoment5InterviewCloseGate(messagesToUse, {
+        moment5QuestionDelivered: moment5QuestionDeliveredRef.current,
+        moment5PrimaryAnchorSession: moment5PrimaryAnchorDeliveredSessionRef.current,
+        postM5UserTurnsRef: moment5PostPromptUserTurnCountRef.current,
+        accountabilityProbeFired: moment5AccountabilityProbeFiredRef.current,
+        currentInterviewMoment: currentInterviewMomentRef.current,
+      });
+      if (closeGate.hasMoment5PrimaryAnchorInTranscript && closeGate.moment5CloseAllowed) {
+        void remoteLog('[INTERVIEW_COMPLETE_POST_CLOSING_USER_TURN]', {
+          interviewSessionId: interviewSessionIdRef.current,
+          moment5CloseAllowed: closeGate.moment5CloseAllowed,
+          postM5UserTurns: closeGate.postM5UserTurns,
+          accountabilityProbeStillRequired: closeGate.accountabilityProbeStillRequired,
+          resolutionFollowUpStillRequired: closeGate.resolutionFollowUpStillRequired,
+          preview: trimmed.slice(0, 220),
+        });
+        void persistInterviewAttemptSessionLifecycle(interviewSessionAttemptIdRef.current, 'completed');
+        interviewMomentsCompleteRef.current[4] = true;
+        interviewMomentsCompleteRef.current[5] = true;
+        currentInterviewMomentRef.current = 5;
+        isInterviewCompleteRef.current = true;
+        setVoiceState('idle');
+        const transcriptForScoring = messagesToUse.filter(
+          (m) => m.role === 'user' || m.role === 'assistant',
+        );
+        pendingCompletionTranscriptRef.current = transcriptForScoring;
+        if (userId) {
+          const completed = Array.from(scoredScenariosRef.current);
+          const scenarioScoresPayload: Record<
+            number,
+            {
+              pillarScores: Record<string, number | null>;
+              pillarConfidence: Record<string, string>;
+              keyEvidence: Record<string, string>;
+              scenarioName?: string;
+            }
+          > = {};
+          [1, 2, 3].forEach((n) => {
+            const s = scenarioScoresRef.current[n];
+            if (s) {
+              scenarioScoresPayload[n] = {
+                pillarScores: s.pillarScores,
+                pillarConfidence: s.pillarConfidence,
+                keyEvidence: s.keyEvidence,
+                scenarioName: s.scenarioName,
+              };
+            }
+          });
+          try {
+            await saveInterviewProgress(userId, {
+              messages: transcriptForScoring,
+              scenariosCompleted: completed,
+              scenarioScores: scenarioScoresPayload,
+              currentScenario: getCurrentScenario(scoredScenariosRef.current),
+              resumeActiveScenario: resumeActiveScenarioRef.current,
+              emotionItemResponses: [...emotionItemResponsesRef.current],
+              pendingCompletion: true,
+            });
+          } catch (persistErr) {
+            void remoteLog('[WARN] saveInterviewProgress_failed_before_pending_completion', {
+              message: persistErr instanceof Error ? persistErr.message : String(persistErr),
+            });
+          }
+        }
+        kickCompletionScoring('post_closing_user_turn', transcriptForScoring);
+        const unansweredEmotionAtClose = listUnansweredEmotionModalIndices(
+          emotionItemResponsesRef.current,
+          3,
+        );
+        if (unansweredEmotionAtClose.length > 0) {
+          void remoteLog('[EMOTION_MODAL] catch_up_before_interview_complete', {
+            indices: unansweredEmotionAtClose,
+            source: 'post_closing_user_turn',
+          });
+          for (const itemIndex of unansweredEmotionAtClose) {
+            await awaitEmotionModalForIndex(itemIndex);
+          }
+        }
+        interviewStatusRef.current = 'preparing_results';
+        setInterviewStatus('preparing_results');
+        if (userId) markPreparingResultsSession(userId);
+        setPendingCompletion(true);
+        setIsWaiting(false);
+        return;
+      }
+    }
 
     if (
       frustrationSkipDeclinePipeline &&
@@ -8679,8 +11375,49 @@ The participant **confirmed** skipping after the skip confirmation prompt. In **
         lastContent
       );
     if (isPersonalOpening && !isDecline(trimmed)) setUsedPersonalExamples(true);
-    const replyingToScenarioAQ1 =
-      currentInterviewMomentRef.current === 1 && isScenarioAQ1Prompt(lastAssistantContent);
+
+    const moment5ConfusionRepeatWithPriorAnswer =
+      metaCommentClassification?.type === 'confusion' &&
+      metaCommentClassification.confusion_subtype === 'repeat_request' &&
+      currentInterviewMomentRef.current === 5 &&
+      isInterviewAppRoute &&
+      !isAdmin &&
+      status === 'active' &&
+      !closingQuestionPending &&
+      waitingForClosingAdditionRef.current === null &&
+      moment5TranscriptHasConcreteAnchor(messagesToUse);
+    if (moment5ConfusionRepeatWithPriorAnswer) {
+      const replayText = buildMoment5ConfusionRepeatReplayAfterPriorAnswer({
+        lastInterviewerText: lastInterviewerContent,
+      });
+      void remoteLog('[M5_CONFUSION_REPEAT_SHORT_REPLAY]', {
+        interviewSessionId: interviewSessionIdRef.current,
+        preview: replayText.slice(0, 220),
+      });
+      const replayMsg: MessageWithScenario = {
+        role: 'assistant',
+        content: replayText,
+        scenarioNumber: 3,
+      };
+      setMessages([...messagesToUse, replayMsg]);
+      await speakTextSafe(replayText, ASSISTANT_INTERVIEW_SPEECH);
+      setVoiceState('idle');
+      setIsWaiting(false);
+      return;
+    }
+
+    const replyingToScenarioAQ1 = isReplyingToScenarioAQ1AfterDelivery({
+      currentMoment: currentInterviewMomentRef.current,
+      contemptProbeAlreadyAsked: scenarioAContemptProbeAskedRef.current,
+      lastAssistantWasContemptProbe: looksLikeScenarioAContemptProbeQuestion(lastAssistantContent),
+      lastAssistantWasRepair: looksLikeScenarioARepairQuestion(lastAssistantContent),
+      assistantTexts: [
+        lastAssistantContent,
+        lastInterviewerContent,
+        lastQuestionTextRef.current,
+      ],
+      userAnswerText: trimmed,
+    });
     const replyingToScenarioBQ1 =
       currentInterviewMomentRef.current === 2 && isScenarioBQ1Prompt(lastAssistantContent);
     /** After M4 starts or S3 is marked complete, Scenario C construct probes are closed. */
@@ -8927,6 +11664,23 @@ The participant **confirmed** skipping after the skip confirmation prompt. In **
       moment5PostPromptUserTurnCountRef.current += 1;
     }
 
+    /** Resume / ref desync: transcript may already contain the accountability probe while the ref is still false. */
+    if (currentInterviewMomentRef.current === 5 && !moment5AccountabilityProbeFiredRef.current) {
+      const accountabilityProbeAlreadyInTranscript = messagesToUse.some(
+        (m) =>
+          m.role === 'assistant' &&
+          !(m as { isWelcomeBack?: boolean }).isWelcomeBack &&
+          looksLikeMoment5AccountabilityProbeAssistantPrompt((m as { content?: string }).content ?? ''),
+      );
+      if (accountabilityProbeAlreadyInTranscript) {
+        moment5AccountabilityProbeFiredRef.current = true;
+        moment5ClientScoringMetaRef.current = {
+          ...(moment5ClientScoringMetaRef.current ?? {}),
+          accountabilityProbeFired: true,
+        };
+      }
+    }
+
     /** Resume / ref desync: transcript may already contain the client specificity redirect while the ref is still false. */
     if (currentInterviewMomentRef.current === 5 && !moment5SpecificityRedirectIssuedRef.current) {
       const redirectAlreadyInTranscript = messagesToUse.some(
@@ -8936,6 +11690,13 @@ The participant **confirmed** skipping after the skip confirmation prompt. In **
           looksLikeMoment5SpecificityRedirectPrompt((m as { content?: string }).content ?? ''),
       );
       if (redirectAlreadyInTranscript) moment5SpecificityRedirectIssuedRef.current = true;
+    }
+
+    /** Resume / ref desync: transcript may already contain the resolution follow-up while the ref is still false. */
+    if (currentInterviewMomentRef.current === 5 && !moment5ResolutionFollowUpIssuedRef.current) {
+      if (transcriptHasMoment5ResolutionFollowUpAsked(messagesToUse)) {
+        moment5ResolutionFollowUpIssuedRef.current = true;
+      }
     }
 
     /** Resume / ref desync: persisted flag or transcript — do not rely on last-assistant alone (welcome-back may follow clarification). */
@@ -8961,9 +11722,11 @@ The participant **confirmed** skipping after the skip confirmation prompt. In **
       !looksLikeMoment5AccountabilityProbeAssistantPrompt(lastInterviewerContent) &&
       (isMoment5AssistantAnchor(lastInterviewerContent) ||
         looksLikeMoment5SpecificityRedirectPrompt(lastInterviewerContent) ||
-        looksLikeMoment5ConflictValidityClarificationPrompt(lastInterviewerContent));
+        looksLikeMoment5ConflictValidityClarificationPrompt(lastInterviewerContent) ||
+        looksLikeMoment5ResolutionFollowUpPrompt(lastInterviewerContent));
     const moment5AccountabilityEval = evaluateMoment5AccountabilityProbe(trimmed);
-    const moment5NarrativeConcrete = moment5PersonalNarrativeHasConcreteAnchor(trimmed);
+    const moment5CombinedUserText = combineMoment5UserTurnText(messagesToUse);
+    const moment5NarrativeConcrete = moment5TranscriptHasConcreteAnchor(messagesToUse);
     const moment5AnsweringAfterSpecificityRedirect =
       looksLikeMoment5SpecificityRedirectPrompt(lastInterviewerContent);
     const moment5AnsweringAfterConflictValidityClarification =
@@ -8980,6 +11743,7 @@ The participant **confirmed** skipping after the skip confirmation prompt. In **
       moment5AnsweringAfterSpecificityRedirect &&
       moment5SpecificityRedirectIssuedRef.current &&
       !moment5NarrativeConcrete &&
+      !moment5UserDeclinesConcreteReask(trimmed) &&
       moment5ResponseIsAbstract(trimmed) &&
       moment5AccountabilityEval.reason !== 'decline_or_vague_evade';
 
@@ -9103,25 +11867,97 @@ The participant **confirmed** skipping after the skip confirmation prompt. In **
       moment5SpecificityRedirectIssuedRef.current &&
       moment5AccountabilityEval.reason === 'decline_or_vague_evade'
     ) {
+        moment5ClientScoringMetaRef.current = {
+          ...(moment5ClientScoringMetaRef.current ?? {}),
+          accountabilityProbeFired: false,
+          specificityRedirectIssued: true,
+        persistentAbstractionMoveOn: true,
+        };
+      void remoteLog('[M5_PERSISTENT_ABSTRACT_MOVE_ON]', {
+          interviewSessionId: interviewSessionIdRef.current,
+        reason: 'decline_after_specificity_redirect',
+          wordCount: countInterviewWords(trimmed),
+          preview: trimmed.slice(0, 200),
+        });
+      setMessages(appendAssistantTurn(messagesToUse, MOMENT_5_PERSISTENT_ABSTRACT_MOVE_ON_TEXT, {
+        scenarioNumber: resolveAssistantScenarioNumber(MOMENT_5_PERSISTENT_ABSTRACT_MOVE_ON_TEXT, messagesToUse),
+      }));
+      await speakTextSafe(MOMENT_5_PERSISTENT_ABSTRACT_MOVE_ON_TEXT, ASSISTANT_INTERVIEW_SPEECH);
+        setVoiceState('idle');
+        setIsWaiting(false);
+        return;
+      }
+
+    const specificityRedirectAlreadyInTranscript = messagesToUse.some(
+      (m) =>
+        m.role === 'assistant' &&
+        !(m as { isWelcomeBack?: boolean }).isWelcomeBack &&
+        looksLikeMoment5SpecificityRedirectPrompt((m as { content?: string }).content ?? ''),
+    );
+
+    /** Thin / abstract first answers: redirect before API — do not require accountability `shouldProbe`. */
+    if (
+      moment5AccountabilityProbeCandidate &&
+      !moment5ConfirmedLowConflictValidity &&
+      shouldInjectMoment5SpecificityRedirect({
+        userText: trimmed,
+        narrativeConcrete: moment5NarrativeConcrete,
+        answeringAfterSpecificityRedirect: moment5AnsweringAfterSpecificityRedirect,
+        specificityRedirectIssued: moment5SpecificityRedirectIssuedRef.current,
+        specificityRedirectInTranscript: specificityRedirectAlreadyInTranscript,
+      })
+    ) {
+      moment5SpecificityRedirectIssuedRef.current = true;
       moment5ClientScoringMetaRef.current = {
         ...(moment5ClientScoringMetaRef.current ?? {}),
         accountabilityProbeFired: false,
         specificityRedirectIssued: true,
-        persistentAbstractionMoveOn: true,
+        conflictValidityClarificationFired: true,
       };
-      void remoteLog('[M5_PERSISTENT_ABSTRACT_MOVE_ON]', {
+      void remoteLog('[M5_SPECIFICITY_REDIRECT_ISSUED]', {
         interviewSessionId: interviewSessionIdRef.current,
-        reason: 'decline_after_specificity_redirect',
+        path: 'pre_api_thin_or_abstract',
+        probe_reason: moment5AccountabilityEval.reason,
         wordCount: countInterviewWords(trimmed),
         preview: trimmed.slice(0, 200),
       });
-      const moveOnMsg: MessageWithScenario = {
+      const redirectStaged = appendAssistantTurn(messagesToUse, MOMENT_5_SPECIFICITY_REDIRECT_TEXT, {
+        scenarioNumber: resolveAssistantScenarioNumber(MOMENT_5_SPECIFICITY_REDIRECT_TEXT, messagesToUse),
+      });
+      setMessages(redirectStaged);
+      await speakTextSafe(MOMENT_5_SPECIFICITY_REDIRECT_TEXT, ASSISTANT_INTERVIEW_SPEECH);
+      setVoiceState('idle');
+      setIsWaiting(false);
+      return;
+    }
+
+    const resolutionFollowUpAlreadyInTranscript = transcriptHasMoment5ResolutionFollowUpAsked(messagesToUse);
+
+    if (
+      moment5AccountabilityProbeCandidate &&
+      !moment5ConfirmedLowConflictValidity &&
+      !moment5ResolutionFollowUpIssuedRef.current &&
+      !resolutionFollowUpAlreadyInTranscript &&
+      !looksLikeMoment5ResolutionFollowUpPrompt(lastInterviewerContent) &&
+      !moment5AnswerIncludesResolutionOutcome(moment5CombinedUserText || trimmed) &&
+      (isMoment5AssistantAnchor(lastInterviewerContent) ||
+        transcriptAssistantContainsMoment5PrimaryConflictQuestion(lastInterviewerContent) ||
+        looksLikeMoment5SpecificityRedirectPrompt(lastInterviewerContent) ||
+        looksLikeMoment5ConflictValidityClarificationPrompt(lastInterviewerContent))
+    ) {
+      moment5ResolutionFollowUpIssuedRef.current = true;
+      void remoteLog('[M5_RESOLUTION_FOLLOWUP_ISSUED]', {
+        interviewSessionId: interviewSessionIdRef.current,
+        wordCount: countInterviewWords(trimmed),
+        preview: trimmed.slice(0, 200),
+      });
+      const resolutionFollowUpMsg: MessageWithScenario = {
         role: 'assistant',
-        content: MOMENT_5_PERSISTENT_ABSTRACT_MOVE_ON_TEXT,
-        scenarioNumber: resolveAssistantScenarioNumber(MOMENT_5_PERSISTENT_ABSTRACT_MOVE_ON_TEXT, messagesToUse),
+        content: MOMENT_5_RESOLUTION_FOLLOWUP_TEXT,
+        scenarioNumber: resolveAssistantScenarioNumber(MOMENT_5_RESOLUTION_FOLLOWUP_TEXT, messagesToUse),
       };
-      setMessages([...messagesToUse, moveOnMsg]);
-      await speakTextSafe(MOMENT_5_PERSISTENT_ABSTRACT_MOVE_ON_TEXT, ASSISTANT_INTERVIEW_SPEECH);
+      setMessages([...messagesToUse, resolutionFollowUpMsg]);
+      await speakTextSafe(MOMENT_5_RESOLUTION_FOLLOWUP_TEXT, ASSISTANT_INTERVIEW_SPEECH);
       setVoiceState('idle');
       setIsWaiting(false);
       return;
@@ -9132,12 +11968,6 @@ The participant **confirmed** skipping after the skip confirmation prompt. In **
       (moment5AccountabilityEval.shouldProbe || moment5ForcedAbstractFollowupAccountabilityProbe) &&
       !moment5ConfirmedLowConflictValidity
     ) {
-      const specificityRedirectAlreadyInTranscript = messagesToUse.some(
-        (m) =>
-          m.role === 'assistant' &&
-          !(m as { isWelcomeBack?: boolean }).isWelcomeBack &&
-          looksLikeMoment5SpecificityRedirectPrompt((m as { content?: string }).content ?? ''),
-      );
       if (
         !moment5NarrativeConcrete &&
         !moment5AnsweringAfterSpecificityRedirect &&
@@ -9153,32 +11983,18 @@ The participant **confirmed** skipping after the skip confirmation prompt. In **
         };
         void remoteLog('[M5_SPECIFICITY_REDIRECT_ISSUED]', {
           interviewSessionId: interviewSessionIdRef.current,
+          path: 'accountability_probe_gate',
           wordCount: countInterviewWords(trimmed),
           preview: trimmed.slice(0, 200),
         });
-        const redirectMsg: MessageWithScenario = {
-          role: 'assistant',
-          content: MOMENT_5_SPECIFICITY_REDIRECT_TEXT,
+        const redirectStaged = appendAssistantTurn(messagesToUse, MOMENT_5_SPECIFICITY_REDIRECT_TEXT, {
           scenarioNumber: resolveAssistantScenarioNumber(MOMENT_5_SPECIFICITY_REDIRECT_TEXT, messagesToUse),
-        };
-        setMessages([...messagesToUse, redirectMsg]);
+        });
+        setMessages(redirectStaged);
         await speakTextSafe(MOMENT_5_SPECIFICITY_REDIRECT_TEXT, ASSISTANT_INTERVIEW_SPEECH);
         setVoiceState('idle');
         setIsWaiting(false);
         return;
-      }
-
-      if (
-        moment5AnsweringAfterSpecificityRedirect &&
-        moment5SpecificityRedirectIssuedRef.current &&
-        (moment5NarrativeConcrete || !moment5ResponseIsAbstract(trimmed))
-      ) {
-        moment5ClientScoringMetaRef.current = {
-          ...(moment5ClientScoringMetaRef.current ?? { accountabilityProbeFired: false }),
-          accountabilityProbeFired: moment5ClientScoringMetaRef.current?.accountabilityProbeFired ?? false,
-          conflictValidityClarificationFired: true,
-          conflictValiditySecondResponseAbstract: false,
-        };
       }
 
       if (moment5AnsweringAfterConflictValidityClarification && moment5AddsTensionDetailAfterClarification) {
@@ -9190,39 +12006,69 @@ The participant **confirmed** skipping after the skip confirmation prompt. In **
         };
       }
 
-      const deathDisclosureForProbe = moment5ResponseContainsDeathDisclosure(trimmed);
-      const moment5AccountabilityProbeTriggerReason = moment5ForcedAbstractFollowupAccountabilityProbe
-        ? 'abstract_followup_after_specificity_redirect'
-        : moment5AccountabilityEval.reason;
-      /** Always lead with the scripted warmth line before the accountability question (not only death/bereavement). */
-      const accountabilityProbeSpoken = MOMENT_5_ACCOUNTABILITY_PROBE_WITH_GRIEF_ACK_TEXT;
+      /**
+       * After the scripted specificity redirect, the user may still lack explicit ownership language while
+       * anchoring a concrete episode. Firing the scripted accountability probe on the same beat reads as
+       * "the same push twice" — let the model continue instead of stacking another client inject + TTS.
+       */
+      const moment5AnchoredAfterSpecificityRedirect =
+        moment5AnsweringAfterSpecificityRedirect &&
+        moment5SpecificityRedirectIssuedRef.current &&
+        (moment5NarrativeConcrete ||
+          !moment5ResponseIsAbstract(moment5CombinedUserText || trimmed) ||
+          moment5UserDeclinesConcreteReask(trimmed));
+
+      if (moment5AnchoredAfterSpecificityRedirect) {
+        moment5ClientScoringMetaRef.current = {
+          ...(moment5ClientScoringMetaRef.current ?? { accountabilityProbeFired: false }),
+          accountabilityProbeFired: moment5ClientScoringMetaRef.current?.accountabilityProbeFired ?? false,
+          conflictValidityClarificationFired: true,
+          conflictValiditySecondResponseAbstract: false,
+        };
+        void remoteLog('[M5_ACCOUNTABILITY_PROBE_SKIPPED_POST_REDIRECT_ANCHORED]', {
+          interviewSessionId: interviewSessionIdRef.current,
+          wordCount: countInterviewWords(trimmed),
+          preview: trimmed.slice(0, 200),
+          should_probe_eval: moment5AccountabilityEval.shouldProbe,
+          narrative_concrete: moment5NarrativeConcrete,
+        });
+      } else {
+        const deathDisclosureForProbe = moment5ResponseContainsDeathDisclosure(trimmed);
+        const moment5AccountabilityProbeTriggerReason = moment5ForcedAbstractFollowupAccountabilityProbe
+          ? 'abstract_followup_after_specificity_redirect'
+          : moment5AccountabilityEval.reason;
+        /** Always lead with the scripted warmth line before the accountability question (not only death/bereavement). */
+        const accountabilityProbeSpoken = pickMoment5AccountabilityProbeSpokenText(trimmed, {
+          griefAckPrefix: true,
+        });
       moment5AccountabilityProbeFiredRef.current = true;
       moment5ClientScoringMetaRef.current = {
         ...(moment5ClientScoringMetaRef.current ?? {}),
         accountabilityProbeFired: true,
-        probeTriggerReason: moment5AccountabilityProbeTriggerReason,
+          probeTriggerReason: moment5AccountabilityProbeTriggerReason,
         ...(moment5SpecificityRedirectIssuedRef.current ? { specificityRedirectIssued: true } : {}),
-        warmAckBeforeAccountabilityProbe: true,
-        ...(deathDisclosureForProbe ? { griefAckBeforeAccountabilityProbe: true } : {}),
-        ...(moment5ForcedAbstractFollowupAccountabilityProbe
-          ? {
-              accountabilityProbeFiredOnAbstractFollowup: true,
-              conflictValiditySecondResponseAbstract: true,
-              conflictValidityClarificationFired: true,
-            }
-          : {}),
+          warmAckBeforeAccountabilityProbe: true,
+          ...(deathDisclosureForProbe ? { griefAckBeforeAccountabilityProbe: true } : {}),
+          ...(moment5ForcedAbstractFollowupAccountabilityProbe
+            ? {
+                accountabilityProbeFiredOnAbstractFollowup: true,
+                conflictValiditySecondResponseAbstract: true,
+                conflictValidityClarificationFired: true,
+              }
+            : {}),
       };
       void remoteLog('[M5_ACCOUNTABILITY_PROBE_FIRED]', {
         interviewSessionId: interviewSessionIdRef.current,
-        reason: moment5AccountabilityProbeTriggerReason,
+          reason: moment5AccountabilityProbeTriggerReason,
         after_specificity_redirect: moment5SpecificityRedirectIssuedRef.current,
-        warm_ack_before_accountability_probe: true,
-        grief_ack_before_probe: deathDisclosureForProbe,
-        conflict_validity_clarification_fired: moment5ClientScoringMetaRef.current?.conflictValidityClarificationFired === true,
-        conflict_validity_second_response_abstract:
-          moment5ClientScoringMetaRef.current?.conflictValiditySecondResponseAbstract === true,
-        accountability_probe_fired_on_abstract_followup:
-          moment5ClientScoringMetaRef.current?.accountabilityProbeFiredOnAbstractFollowup === true,
+          warm_ack_before_accountability_probe: true,
+          grief_ack_before_probe: deathDisclosureForProbe,
+          conflict_validity_clarification_fired:
+            moment5ClientScoringMetaRef.current?.conflictValidityClarificationFired === true,
+          conflict_validity_second_response_abstract:
+            moment5ClientScoringMetaRef.current?.conflictValiditySecondResponseAbstract === true,
+          accountability_probe_fired_on_abstract_followup:
+            moment5ClientScoringMetaRef.current?.accountabilityProbeFiredOnAbstractFollowup === true,
         accountability_probe_self_reference_detected:
           moment5AccountabilityEval.selfReference.accountability_probe_self_reference_detected,
         self_reference_type: moment5AccountabilityEval.selfReference.self_reference_type,
@@ -9233,7 +12079,7 @@ The participant **confirmed** skipping after the skip confirmation prompt. In **
         scenario: (currentScenarioRef.current ?? 3) as number,
         construct: 'accountability',
         probe_fired: true,
-        trigger_reason: moment5AccountabilityProbeTriggerReason,
+          trigger_reason: moment5AccountabilityProbeTriggerReason,
         pre_probe_score: 0,
         post_probe_score: 0,
         score_delta: 0,
@@ -9248,6 +12094,7 @@ The participant **confirmed** skipping after the skip confirmation prompt. In **
       setVoiceState('idle');
       setIsWaiting(false);
       return;
+      }
     }
     if (moment5AccountabilityProbeCandidate && !moment5AccountabilityEval.shouldProbe) {
       void remoteLog('[M5_ACCOUNTABILITY_PROBE_SKIPPED]', {
@@ -9261,8 +12108,24 @@ The participant **confirmed** skipping after the skip confirmation prompt. In **
       });
     }
 
-    const legacyScenarioAQ1ContemptCoverage = hasScenarioAQ1ContemptProbeCoverage(trimmed);
-    const scenarioAQ1PreProbeSkip = evaluateScenarioAQ1ContemptProbePreProbeSkip(trimmed);
+    const scenarioAContemptGateUserText =
+      currentInterviewMomentRef.current === 1
+        ? (() => {
+            const agg = aggregateScenario1Moment1UserTextForContemptGate(messagesToUse);
+            return agg.length >= 8 ? agg : trimmed;
+          })()
+        : trimmed;
+    const legacyScenarioAQ1ContemptCoverage =
+      hasScenarioAQ1ContemptProbeCoverage(scenarioAContemptGateUserText);
+    const scenarioAQ1PreProbeSkip =
+      evaluateScenarioAQ1ContemptProbePreProbeSkip(scenarioAContemptGateUserText);
+    const scenarioOneFollowUpFromTranscript = scenarioOneFollowUpFlagsFromTranscript(messagesToUse);
+    if (scenarioOneFollowUpFromTranscript.contemptProbeAsked) {
+      scenarioAContemptProbeAskedRef.current = true;
+    }
+    if (scenarioOneFollowUpFromTranscript.repairQuestionAsked) {
+      scenarioARepairQuestionAskedRef.current = true;
+    }
     const scenarioAContemptProbeCoverage =
       legacyScenarioAQ1ContemptCoverage || scenarioAQ1PreProbeSkip.skip;
     const specificEmmaLineAlreadyAddressed = scenarioAContemptProbeCoverage;
@@ -9272,28 +12135,19 @@ The participant **confirmed** skipping after the skip confirmation prompt. In **
       !isDecline(trimmed) &&
       !scenarioAContemptProbeCoverage &&
       !scenarioAContemptProbeAskedRef.current;
-    if (currentInterviewMomentRef.current === 1 || replyingToScenarioAQ1 || userScenarioTag === 1) {
-      void remoteLog('[S1_CONTEMPT_GATE_DEBUG_7605c3]', {
-        coverageDetail: debugScenarioAQ1ContemptProbeCoverageDetail(trimmed),
-        legacyScenarioAQ1ContemptCoverage,
-        scenarioAQ1PreProbeSkip,
-        replyingToScenarioAQ1,
-        userScenarioTag,
-        currentInterviewMoment: currentInterviewMomentRef.current,
-        currentScenario: currentScenarioRef.current,
-        scenarioAContemptProbeAskedRef: scenarioAContemptProbeAskedRef.current,
-        suppressForcedConstructProbesForMetaFrustration,
-        isDecline: isDecline(trimmed),
-        shouldForceScenarioAContemptProbe,
-        lastAssistantLooksLikeContemptProbe: looksLikeScenarioAContemptProbeQuestion(lastAssistantContent),
-        lastAssistantPreview: lastAssistantContent.slice(0, 260),
-        userPreview: trimmed.slice(0, 320),
-      });
+    /** After Scenario A Q1 (or forced probe), the next assistant stream is usually the contempt probe — mute parallel TTS until one post-stream speak. */
+    const muteParallelTtsForScenarioAContemptProbeStream =
+      currentInterviewMomentRef.current === 1 &&
+      !scenarioAContemptProbeAskedRef.current &&
+      (replyingToScenarioAQ1 || shouldForceScenarioAContemptProbe) &&
+      !isDecline(trimmed);
+    if (muteParallelTtsForScenarioAContemptProbeStream) {
+      pendingScenarioAContemptProbeStreamMuteRef.current = true;
     }
     if (scenarioAContemptProbeCoverage && !scenarioAContemptProbeAskedRef.current) {
       scenarioAContemptProbeAskedRef.current = true;
       void remoteLog('[S1_CONTEMPT_SATISFIED_BY_USER]', {
-        coverageDetail: debugScenarioAQ1ContemptProbeCoverageDetail(trimmed),
+        coverageDetail: debugScenarioAQ1ContemptProbeCoverageDetail(scenarioAContemptGateUserText),
         userPreview: trimmed.slice(0, 320),
         contempt_probe_skipped: true,
         contempt_probe_skip_reason: scenarioAQ1PreProbeSkip.reason ?? null,
@@ -9360,10 +12214,24 @@ The participant **confirmed** skipping after the skip confirmation prompt. In **
           scoreScenario(1, updatedMessages);
         }
         await notifyScenarioStarted(2, updatedMessages);
+        const spS1Hard = splitScenarioTransitionForEmotionModal(fullDisplay);
         try {
-          await speakTextSafe(fullDisplay, ASSISTANT_INTERVIEW_SPEECH);
+          await speakTextSafe(spS1Hard.beforeModal, ASSISTANT_INTERVIEW_SPEECH);
         } catch {
           /* advance even if TTS fails */
+        }
+        await runEmotionModalAfterScenarioTransition(1, {
+          transitionText: fullDisplay,
+          priorScenario: 1,
+        });
+        if (spS1Hard.afterModal.trim()) {
+          try {
+            await speakTextSafe(spS1Hard.afterModal, ASSISTANT_INTERVIEW_SPEECH);
+          } catch {
+            /* advance even if TTS fails */
+          }
+        } else if (__DEV__) {
+          console.warn('[Aria] emotion modal S1→S2: missing afterModal split (S1 repair hard stop)');
         }
         setVoiceState('idle');
         setIsWaiting(false);
@@ -9517,6 +12385,11 @@ The participant **confirmed** skipping after the skip confirmation prompt. In **
                 metaCommentClassification.type === 'checking_in'
                   ? currentInterviewMomentRef.current === 5 && moment5AccountabilityProbeFiredRef.current
                   : undefined,
+              moment5ConfusionRepeatHasPriorSubstantive:
+                metaCommentClassification.type === 'confusion' &&
+                metaCommentClassification.confusion_subtype === 'repeat_request' &&
+                currentInterviewMomentRef.current === 5 &&
+                moment5TranscriptHasConcreteAnchor(messagesToUse),
             })
           : '';
       metaClassificationForPendingAssistantRef.current = metaCommentClassification;
@@ -9603,7 +12476,48 @@ The participant **confirmed** skipping after the skip confirmation prompt. In **
     }
 
     let data: { content?: Array<{ text?: string }>; error?: { message?: string } };
-    const textToParallelStream = { full: '', spokenStarted: false };
+    const textToParallelStream = { full: '', spokenStarted: false, closingSpoken: false };
+    const postM5ForStreamBuffer = Math.max(
+      moment5PostPromptUserTurnCountRef.current,
+      countUserTurnsAfterLastMoment5PrimaryAnchor(
+        messagesToUse.map((m) => ({
+          role: m.role,
+          content: (m as { content?: string }).content ?? '',
+          isWelcomeBack: (m as { isWelcomeBack?: boolean }).isWelcomeBack,
+        })),
+        moment5PrimaryAnchorDeliveredSessionRef.current,
+      ),
+    );
+    const m5ResolutionFollowUpSeen =
+      moment5ResolutionFollowUpIssuedRef.current ||
+      transcriptHasMoment5ResolutionFollowUpAsked(
+        messagesToUse.map((m) => ({
+          role: m.role,
+          content: (m as { content?: string }).content ?? '',
+          isWelcomeBack: (m as { isWelcomeBack?: boolean }).isWelcomeBack,
+        })),
+      );
+    /** After resolution follow-up + user answer (or 2+ post-M5 turns), buffer the full close stream for one deduped TTS. */
+    const bufferAllStreamTtsForMoment5Close =
+      currentInterviewMomentRef.current === 5 &&
+      (postM5ForStreamBuffer >= 2 ||
+        (postM5ForStreamBuffer >= 1 && m5ResolutionFollowUpSeen));
+    void remoteLog('[M5_CLOSING_BUFFER_GATE]', {
+      interviewSessionId: interviewSessionIdRef.current,
+      bufferAllStreamTtsForMoment5Close,
+      postM5ForStreamBuffer,
+      postM5UserTurnsRef: moment5PostPromptUserTurnCountRef.current,
+      m5ResolutionFollowUpSeen,
+    });
+    // #region agent log
+    fetch('http://127.0.0.1:7789/ingest/668e0bd5-3283-4492-9f48-e33846c18218',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'442e12'},body:JSON.stringify({sessionId:'442e12',location:'AriaScreen.tsx:makeCall',message:'m5_closing_buffer_gate',data:{hypothesisId:'H6',bufferAllStreamTtsForMoment5Close,postM5ForStreamBuffer,m5ResolutionFollowUpSeen},timestamp:Date.now()})}).catch(()=>{});
+    // #endregion
+    parallelStreamingTtsRef.current = {
+      active: false,
+      cancelRequested: false,
+      accumulatedFullText: '',
+      spokenCompleteText: '',
+    };
     const metaFrustrationFirstSignalBuffered =
       metaCommentClassification?.type === 'frustration' && !repeatedFrustrationInMoment;
     const makeCall = async (): Promise<typeof data> => {
@@ -9626,22 +12540,141 @@ The participant **confirmed** skipping after the skip confirmation prompt. In **
         (e as Error & { status?: number }).status = res.status;
         throw e;
       }
+      parallelStreamingTtsRef.current.active = true;
+      let streamContemptProbeMuteActive =
+        pendingScenarioAContemptProbeStreamMuteRef.current ||
+        muteParallelTtsForScenarioAContemptProbeStream;
+      const streamContemptProbeMuteArmedFromStart = streamContemptProbeMuteActive;
+      pendingScenarioAContemptProbeStreamMuteRef.current = false;
       const reader = res.body.getReader();
       const decoder = new TextDecoder();
       let sseBuffer = '';
       let sentenceBuffer = '';
+      /** Vignette tail held until canonical opening question arrives — one TTS utterance, no dead air. */
+      let deferredScenarioVignetteTailForOpeningMerge: string | null = null;
       /** Merges with the next flushed sentence so "Great work." + "Great work, Name — …" can be deduped for TTS. */
       let deferredWarmBoundarySentence: string | null = null;
+      /** Merges "What if you were Ryan?" with the following repair tail before TTS (streaming splits on `?`). */
+      let deferredScenarioARepairLeadSentence: string | null = null;
+      /** Merges "What about when Emma says…" with the following "what do you make of that?" tail before TTS. */
+      let deferredScenarioAContemptProbeLeadSentence: string | null = null;
+      /** Merges reflective closing ack with the final thank-you before TTS (streaming splits on `.`). */
+      let deferredInterviewClosingLeadSentence: string | null = null;
+      /** Moment 5+: buffer closing fragments and speak once after dedupe at stream end. */
+      let moment5ClosingStreamBuffer = '';
+      /** Once any closing fragment is seen, buffer all remaining stream sentences until flush. */
+      let moment5StickyCloseBufferAll = bufferAllStreamTtsForMoment5Close;
+      /** Turn-local: first Scenario A construct line already spoken via parallel streaming this response. */
+      let scenarioAContemptProbeSpokenThisStream = false;
+      let scenarioARepairQuestionSpokenThisStream = false;
+      let interviewClosingSpokenThisStream = false;
+      /** Hold contempt-probe fragments until stream end so the quote is not spoken twice via split TTS. */
+      let scenarioAContemptProbeStreamBuffer = '';
+      const closingAlreadyInTranscriptForStream =
+        transcriptHasInterviewClosingSpokenFragment(messagesToUse);
       let ttsChain = Promise.resolve();
       let ttsCancelled = false;
       let firstSentenceLogged = false;
-      const maybeQueueSentenceForTts = (sentence: string, allowDeferWarm = true) => {
+      const maybeQueueSentenceForTts = (
+        sentence: string,
+        allowDeferWarm = true,
+        bypassMoment5ClosingBuffer = false,
+        bufferAfterSentence = '',
+      ) => {
+        if (parallelStreamingTtsRef.current.cancelRequested) {
+          ttsCancelled = true;
+          return;
+        }
         let spoken = stripControlTokens(sentence).trim();
         if (!spoken || ttsCancelled) return;
+        if (looksLikeCanonicalScenarioOpeningQuestion(spoken) && deferredScenarioVignetteTailForOpeningMerge) {
+          spoken = `${deferredScenarioVignetteTailForOpeningMerge} ${spoken}`.trim();
+          deferredScenarioVignetteTailForOpeningMerge = null;
+        }
+        if (
+          !streamContemptProbeMuteActive &&
+          currentInterviewMomentRef.current === 1 &&
+          !scenarioAContemptProbeAskedRef.current &&
+          !scenarioAContemptProbeSpokenThisStream &&
+          (looksLikeScenarioAContemptProbeQuestion(spoken) ||
+            isIncompleteScenarioAContemptProbeLeadSentence(spoken))
+        ) {
+          streamContemptProbeMuteActive = true;
+          void remoteLog('[S1_CONTEMPT_PROBE_STREAM_MUTE_ARMED_MIDSTREAM]', {
+            preview: spoken.slice(0, 200),
+            s1ContemptFixVersion: 8,
+          });
+        }
+        if (streamContemptProbeMuteActive) {
+          scenarioAContemptProbeStreamBuffer = scenarioAContemptProbeStreamBuffer
+            ? `${scenarioAContemptProbeStreamBuffer} ${spoken}`.trim()
+            : spoken;
+          void remoteLog('[S1_CONTEMPT_PROBE_STREAM_MUTED]', {
+            preview: scenarioAContemptProbeStreamBuffer.slice(0, 240),
+            s1ContemptFixVersion: 8,
+          });
+          return;
+        }
         const hadDeferredBefore = !!deferredWarmBoundarySentence;
         if (deferredWarmBoundarySentence) {
           spoken = `${deferredWarmBoundarySentence} ${spoken}`.trim();
           deferredWarmBoundarySentence = null;
+        }
+        if (deferredScenarioARepairLeadSentence) {
+          spoken = `${deferredScenarioARepairLeadSentence} ${spoken}`.trim();
+          deferredScenarioARepairLeadSentence = null;
+        }
+        if (deferredScenarioAContemptProbeLeadSentence) {
+          spoken = mergeDeferredScenarioAContemptProbeLeadWithNextSentence(
+            deferredScenarioAContemptProbeLeadSentence,
+            spoken,
+          );
+          deferredScenarioAContemptProbeLeadSentence = null;
+        }
+        if (deferredInterviewClosingLeadSentence) {
+          spoken = `${deferredInterviewClosingLeadSentence} ${spoken}`.trim();
+          deferredInterviewClosingLeadSentence = null;
+        }
+        const isClosingStreamFragment = isInterviewClosingStreamFragment(spoken);
+        if (
+          !bypassMoment5ClosingBuffer &&
+          currentInterviewMomentRef.current === 5 &&
+          isClosingStreamFragment
+        ) {
+          moment5StickyCloseBufferAll = true;
+        }
+        if (!bypassMoment5ClosingBuffer && moment5StickyCloseBufferAll) {
+          moment5ClosingStreamBuffer = moment5ClosingStreamBuffer
+            ? `${moment5ClosingStreamBuffer} ${spoken}`.trim()
+            : spoken;
+          void remoteLog('[M5_CLOSING_STREAM_BUFFERED_ALL]', {
+            interviewSessionId: interviewSessionIdRef.current,
+            preview: moment5ClosingStreamBuffer.slice(0, 220),
+            postM5UserTurns: moment5PostPromptUserTurnCountRef.current,
+            sticky: !bufferAllStreamTtsForMoment5Close,
+          });
+          // #region agent log
+          fetch('http://127.0.0.1:7789/ingest/668e0bd5-3283-4492-9f48-e33846c18218',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'442e12'},body:JSON.stringify({sessionId:'442e12',location:'AriaScreen.tsx:maybeQueueSentenceForTts',message:'m5_closing_stream_buffered_all',data:{hypothesisId:'H6',preview:moment5ClosingStreamBuffer.slice(0,140),postM5UserTurns:moment5PostPromptUserTurnCountRef.current,sticky:!bufferAllStreamTtsForMoment5Close},timestamp:Date.now()})}).catch(()=>{});
+          // #endregion
+          return;
+        }
+        if (
+          !bypassMoment5ClosingBuffer &&
+          currentInterviewMomentRef.current === 5 &&
+          (moment5ClosingStreamBuffer.length > 0 || isClosingStreamFragment)
+        ) {
+          moment5StickyCloseBufferAll = true;
+          moment5ClosingStreamBuffer = moment5ClosingStreamBuffer
+            ? `${moment5ClosingStreamBuffer} ${spoken}`.trim()
+            : spoken;
+          void remoteLog('[M5_CLOSING_STREAM_BUFFERED]', {
+            interviewSessionId: interviewSessionIdRef.current,
+            preview: moment5ClosingStreamBuffer.slice(0, 220),
+          });
+          // #region agent log
+          fetch('http://127.0.0.1:7789/ingest/668e0bd5-3283-4492-9f48-e33846c18218',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'442e12'},body:JSON.stringify({sessionId:'442e12',location:'AriaScreen.tsx:maybeQueueSentenceForTts',message:'m5_closing_stream_buffered',data:{hypothesisId:'H6',preview:moment5ClosingStreamBuffer.slice(0,140),moment:currentInterviewMomentRef.current},timestamp:Date.now()})}).catch(()=>{});
+          // #endregion
+          return;
         }
         if (
           currentInterviewMomentRef.current === 2 &&
@@ -9650,6 +12683,188 @@ The participant **confirmed** skipping after the skip confirmation prompt. In **
           s2RepairProbeDeliveredRef.current
         ) {
           return;
+        }
+        /**
+         * Scenario A: when Q1 already covered Emma's closing line, post-processing strips the contempt probe
+         * from the assistant turn — but parallel streaming would still speak the raw model sentence, so TTS
+         * no longer matches the reference card (which shows the repair ask). Drop matching flushed sentences.
+         */
+        if (
+          currentInterviewMomentRef.current === 1 &&
+          specificEmmaLineAlreadyAddressed &&
+          looksLikeScenarioAContemptProbeQuestion(spoken)
+        ) {
+          return;
+        }
+        /**
+         * Model often skips ahead to the repair ask before the contempt probe; post-processing injects Emma's line.
+         * Parallel streaming would still speak the repair sentence — suppress it so only the forced probe is heard.
+         */
+        if (
+          currentInterviewMomentRef.current === 1 &&
+          shouldForceScenarioAContemptProbe &&
+          looksLikeScenarioARepairQuestion(spoken)
+        ) {
+          void remoteLog('[S1_CONTEMPT_FORCE_SUPPRESS_REPAIR_STREAM]', { preview: spoken.slice(0, 200) });
+          return;
+        }
+        if (currentInterviewMomentRef.current === 4 && moment4ClientSpecificityProbeInjectedRef.current) {
+          const afterM4EchoStrip = stripMoment4SpecificityFollowUpStreamingEcho(
+            spoken,
+            moment4ClientSpecificityProbeInjectedRef.current,
+          );
+          if (afterM4EchoStrip === null) {
+            return;
+          }
+          spoken = afterM4EchoStrip;
+          if (!spoken.trim()) {
+            return;
+          }
+        }
+        if (currentInterviewMomentRef.current === 5 && moment5SpecificityRedirectIssuedRef.current) {
+          const afterEchoStrip = stripMoment5SpecificityRedirectStreamingEcho(
+            spoken,
+            moment5SpecificityRedirectIssuedRef.current,
+          );
+          if (afterEchoStrip === null) {
+            return;
+          }
+          spoken = afterEchoStrip;
+          if (!spoken.trim()) {
+            return;
+          }
+        }
+        if (currentInterviewMomentRef.current === 1) {
+          if (scenarioAContemptProbeAskedRef.current || scenarioAContemptProbeSpokenThisStream) {
+            const afterContemptEchoStrip = stripScenarioAContemptProbeStreamingEcho(
+              spoken,
+              true,
+            );
+            if (afterContemptEchoStrip === null) {
+              return;
+            }
+            spoken = afterContemptEchoStrip;
+            if (!spoken.trim()) {
+              return;
+            }
+          } else if (looksLikeScenarioAContemptProbeQuestion(spoken)) {
+            streamContemptProbeMuteActive = true;
+            scenarioAContemptProbeStreamBuffer = spoken;
+            void remoteLog('[S1_CONTEMPT_PROBE_STREAM_MUTE_ARMED_LATE]', {
+              preview: spoken.slice(0, 200),
+              s1ContemptFixVersion: 14,
+            });
+            return;
+          }
+        }
+        if (currentInterviewMomentRef.current === 1) {
+          if (scenarioARepairQuestionAskedRef.current || scenarioARepairQuestionSpokenThisStream) {
+            const afterRepairEchoStrip = stripScenarioARepairQuestionStreamingEcho(spoken, true);
+            if (afterRepairEchoStrip === null) {
+              return;
+            }
+            spoken = afterRepairEchoStrip;
+            if (!spoken.trim()) {
+              return;
+            }
+          } else if (looksLikeScenarioARepairQuestion(spoken)) {
+            scenarioARepairQuestionSpokenThisStream = true;
+          }
+        }
+        if (closingAlreadyInTranscriptForStream || interviewClosingSpokenThisStream) {
+          const afterClosingEchoStrip = stripInterviewClosingStreamingEcho(spoken, true);
+          if (afterClosingEchoStrip === null) {
+            // #region agent log
+            fetch('http://127.0.0.1:7789/ingest/668e0bd5-3283-4492-9f48-e33846c18218',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'442e12'},body:JSON.stringify({sessionId:'442e12',location:'AriaScreen.tsx:maybeQueueSentenceForTts',message:'closing_stream_suppressed',data:{hypothesisId:'H5',preview:spoken.slice(0,120),closingSpokenStream:interviewClosingSpokenThisStream,closingAlreadyInTranscript:closingAlreadyInTranscriptForStream,moment:currentInterviewMomentRef.current},timestamp:Date.now()})}).catch(()=>{});
+            // #endregion
+            return;
+          }
+          spoken = afterClosingEchoStrip;
+          if (!spoken.trim()) {
+            return;
+          }
+        }
+        if (
+          currentInterviewMomentRef.current === 1 &&
+          isIncompleteScenarioAContemptProbeLeadSentence(spoken)
+        ) {
+          deferredScenarioAContemptProbeLeadSentence = spoken;
+          return;
+        }
+        if (
+          currentInterviewMomentRef.current === 1 &&
+          isIncompleteScenarioARepairLeadSentence(spoken)
+        ) {
+          deferredScenarioARepairLeadSentence = spoken;
+          return;
+        }
+        if (isIncompleteInterviewClosingLeadSentence(spoken)) {
+          const normalizedClosingLead = spoken.replace(/\s+/g, ' ').trim().toLowerCase();
+          if (
+            currentInterviewMomentRef.current === 5 &&
+            /^thanks for sticking with (this|it|all of this)[.!?…]*$/i.test(normalizedClosingLead)
+          ) {
+            // #region agent log
+            fetch('http://127.0.0.1:7789/ingest/668e0bd5-3283-4492-9f48-e33846c18218',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'442e12'},body:JSON.stringify({sessionId:'442e12',location:'AriaScreen.tsx:maybeQueueSentenceForTts',message:'closing_short_lead_suppressed',data:{hypothesisId:'H1',preview:spoken.slice(0,120),moment:currentInterviewMomentRef.current},timestamp:Date.now()})}).catch(()=>{});
+            // #endregion
+            return;
+          }
+          deferredInterviewClosingLeadSentence = spoken;
+          if (currentInterviewMomentRef.current === 5) {
+            moment5StickyCloseBufferAll = true;
+          }
+          // #region agent log
+          fetch('http://127.0.0.1:7789/ingest/668e0bd5-3283-4492-9f48-e33846c18218',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'442e12'},body:JSON.stringify({sessionId:'442e12',location:'AriaScreen.tsx:maybeQueueSentenceForTts',message:'closing_stream_deferred',data:{hypothesisId:'H1',preview:spoken.slice(0,120),moment:currentInterviewMomentRef.current},timestamp:Date.now()})}).catch(()=>{});
+          // #endregion
+          return;
+        }
+        if (currentInterviewMomentRef.current === 5) {
+          const closingThanks = isInterviewClosingThanksFragment(spoken);
+          const closingReflective = isInterviewClosingReflectiveAckFragment(spoken);
+          const closingFull = looksLikeInterviewClosingAssistantMessage(spoken);
+          // #region agent log
+          fetch('http://127.0.0.1:7789/ingest/668e0bd5-3283-4492-9f48-e33846c18218',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'442e12'},body:JSON.stringify({sessionId:'442e12',location:'AriaScreen.tsx:maybeQueueSentenceForTts',message:'m5_sentence_detector_eval',data:{hypothesisId:'H1',preview:spoken.slice(0,140),closingThanks,closingReflective,closingFull,deferredInterviewClosingLead:!!deferredInterviewClosingLeadSentence},timestamp:Date.now()})}).catch(()=>{});
+          // #endregion
+        }
+        const elongatingBlockReason = elongatingProbePlaybackBlockReason({
+          spokenSentence: spoken,
+          suppressForUserTurn: elongatingSuppressedForUserTurn,
+          elongatingProbeAlreadyFired: elongatingProbeFiredRef.current,
+        });
+        if (elongatingBlockReason) {
+          void remoteLog('[ELONGATING_PROBE_STREAM_SUPPRESSED]', {
+            reason: elongatingBlockReason,
+            preview: spoken,
+            wordCount: trimmed.split(/\s+/).filter(Boolean).length,
+          });
+          return;
+        }
+        if (isApprovedElongatingProbeOnly(spoken)) {
+          elongatingProbeFiredRef.current = true;
+        }
+        if (currentInterviewMomentRef.current === 5) {
+          if (moment5AccountabilityProbeFiredRef.current) {
+            const afterProbeEchoStrip = stripMoment5AccountabilityProbeStreamingEcho(
+              spoken,
+              true,
+            );
+            if (afterProbeEchoStrip === null) {
+              return;
+            }
+            spoken = afterProbeEchoStrip;
+            if (!spoken.trim()) {
+              return;
+            }
+          } else if (looksLikeMoment5AccountabilityProbeAssistantPrompt(spoken)) {
+            moment5AccountabilityProbeFiredRef.current = true;
+            moment5ClientScoringMetaRef.current = {
+              ...(moment5ClientScoringMetaRef.current ?? {}),
+              accountabilityProbeFired: true,
+              warmAckBeforeAccountabilityProbe:
+                moment5ClientScoringMetaRef.current?.warmAckBeforeAccountabilityProbe === true ||
+                /\bappreciate you getting vulnerable\b/i.test(spoken),
+            };
+          }
         }
         const willDefer =
           allowDeferWarm &&
@@ -9660,13 +12875,85 @@ The participant **confirmed** skipping after the skip confirmation prompt. In **
           deferredWarmBoundarySentence = spoken;
           return;
         }
+        if (
+          shouldDeferScenarioVignetteTailForOpeningMerge(
+            spoken,
+            bufferAfterSentence,
+            textToParallelStream.full,
+          )
+        ) {
+          deferredScenarioVignetteTailForOpeningMerge = spoken;
+          return;
+        }
+        textToParallelStream.spokenStarted = true;
+        const closingSentenceQueued =
+          isInterviewClosingThanksFragment(spoken) ||
+          isInterviewClosingReflectiveAckFragment(spoken) ||
+          looksLikeInterviewClosingAssistantMessage(spoken);
+        if (closingSentenceQueued) {
+          // #region agent log
+          fetch('http://127.0.0.1:7789/ingest/668e0bd5-3283-4492-9f48-e33846c18218',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'442e12'},body:JSON.stringify({sessionId:'442e12',location:'AriaScreen.tsx:maybeQueueSentenceForTts',message:'closing_stream_queued',data:{hypothesisId:'H1',preview:spoken.slice(0,120),closingSpokenStream:textToParallelStream.closingSpoken,moment:currentInterviewMomentRef.current},timestamp:Date.now()})}).catch(()=>{});
+          // #endregion
+        }
+        const speakGenAtEnqueue = webTtsSpeakGenerationRef.current;
         ttsChain = ttsChain.then(async () => {
-          if (ttsCancelled) return;
+          if (ttsCancelled || parallelStreamingTtsRef.current.cancelRequested) return;
+          if (Platform.OS === 'web' && speakGenAtEnqueue !== webTtsSpeakGenerationRef.current) {
+            // #region agent log
+            fetch('http://127.0.0.1:7789/ingest/668e0bd5-3283-4492-9f48-e33846c18218',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'442e12'},body:JSON.stringify({sessionId:'442e12',location:'AriaScreen.tsx:parallelTtsChain',message:'parallel_tts_stale_generation',data:{hypothesisId:'H10',speakGenAtEnqueue,currentGen:webTtsSpeakGenerationRef.current,preview:spoken.slice(0,80)},timestamp:Date.now()})}).catch(()=>{});
+            // #endregion
+            return;
+          }
+          parallelStreamingTtsRef.current.active = true;
           try {
             const spokenForTts = dedupeAdjacentBoundaryValidationsBeforeParticipantName(
               sanitizeAssistantInterviewerCharacterNames(spoken),
               participantFirstNameForSpoken,
             );
+            if (
+              currentInterviewMomentRef.current === 1 &&
+              (looksLikeScenarioAContemptProbeQuestion(spokenForTts) ||
+                isIncompleteScenarioAContemptProbeLeadSentence(spokenForTts))
+            ) {
+              void remoteLog('[S1_CONTEMPT_PROBE_PARALLEL_SUPPRESSED]', {
+                preview: spokenForTts.slice(0, 200),
+                s1ContemptFixVersion: 15,
+              });
+              return;
+            }
+            const closingTtsSessionKey =
+              interviewSessionAttemptIdRef.current ?? interviewSessionIdRef.current;
+            const closingSpeakLooksFinal = looksLikeInterviewClosingAssistantMessage(
+              stripControlTokens(spokenForTts).trim(),
+            );
+            if (shouldSuppressDuplicateInterviewClosingTts(closingTtsSessionKey, spokenForTts)) {
+              void remoteLog('[M5_CLOSING_TTS_SUPPRESSED_DUPLICATE]', {
+                interviewSessionId: interviewSessionIdRef.current,
+                source: 'parallel_stream',
+                preview: spokenForTts.slice(0, 220),
+              });
+              // #region agent log
+              fetch('http://127.0.0.1:7789/ingest/668e0bd5-3283-4492-9f48-e33846c18218',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'442e12'},body:JSON.stringify({sessionId:'442e12',location:'AriaScreen.tsx:parallelTtsChain',message:'closing_tts_suppressed_duplicate',data:{hypothesisId:'H10',source:'parallel_stream',preview:spokenForTts.slice(0,120)},timestamp:Date.now()})}).catch(()=>{});
+              // #endregion
+              if (closingSpeakLooksFinal) {
+                interviewClosingSpokenThisStream = true;
+                textToParallelStream.closingSpoken = true;
+              }
+              return;
+            }
+            if (closingSpeakLooksFinal && !tryAcquireInterviewClosingSpeak(closingTtsSessionKey)) {
+              void remoteLog('[M5_CLOSING_SPEAK_SUPPRESSED_IN_FLIGHT]', {
+                interviewSessionId: interviewSessionIdRef.current,
+                source: 'parallel_stream_acquire',
+                preview: spokenForTts.slice(0, 220),
+              });
+              // #region agent log
+              fetch('http://127.0.0.1:7789/ingest/668e0bd5-3283-4492-9f48-e33846c18218',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'442e12'},body:JSON.stringify({sessionId:'442e12',location:'AriaScreen.tsx:parallelTtsChain',message:'closing_speak_suppressed_in_flight',data:{hypothesisId:'H13',source:'parallel_stream_acquire',preview:spokenForTts.slice(0,120)},timestamp:Date.now()})}).catch(()=>{});
+              // #endregion
+              interviewClosingSpokenThisStream = true;
+              textToParallelStream.closingSpoken = true;
+              return;
+            }
             if (userId) {
               const rtd = getSessionLogRuntime();
               const freshNameFromProfile = interviewNameRef.current ?? '';
@@ -9707,14 +12994,44 @@ The participant **confirmed** skipping after the skip confirmation prompt. In **
               });
             }
               await awaitTtsScreenReadyGate('parallel_streaming_sentence');
+            webTtsUtteranceInFlightRef.current = spokenForTts;
+            webTtsUtteranceInFlightOptionsRef.current = {
+              interviewSpeechRole: 'assistant_response',
+              telemetrySource: 'turn',
+              skipInterviewSpeechAdvance: false,
+              skipQuestionDeliveredTelemetry: false,
+              skipLastQuestionRef: false,
+              allowDuplicateConsecutiveTts: false,
+              silent: false,
+              skipGestureGate: false,
+              ttsTriggerSource: 'callback',
+            };
+            ttsLineInFlightRef.current = true;
+            if (userId) {
+              setTtsPlaybackActive(true);
+            }
+            try {
             await speakWithElevenLabs(spokenForTts, undefined, {
               skipStopElevenLabsPlaybackBeforeStart: true,
               telemetry: { source: 'turn' },
               preInitTriggerDuring: 'tts_playback',
               onPlaybackStarted: () => {
+                  if (
+                    Platform.OS === 'web' &&
+                    (webTtsTabInterruptPendingReplayRef.current ||
+                      parallelStreamingTtsRef.current.cancelRequested ||
+                      (typeof document !== 'undefined' && document.visibilityState === 'hidden'))
+                  ) {
+                    return;
+                  }
                 setVoiceState('speaking');
                 textToParallelStream.spokenStarted = true;
-                recordInterviewAssistantDeliveryForMetaExemptionRef.current(stripControlTokens(spokenForTts).trim());
+                  recordInterviewAssistantDeliveryForMetaExemptionRef.current(
+                    stripControlTokens(spokenForTts).trim()
+                  );
+                  if (referenceCardShouldUpdateOnPlaybackStart(spokenForTts)) {
+                    applyReferenceCardFromAssistantSpeechRef.current(spokenForTts);
+                  }
                 if (
                   currentInterviewMomentRef.current === 2 &&
                   currentScenarioRef.current === 2 &&
@@ -9741,14 +13058,142 @@ The participant **confirmed** skipping after the skip confirmation prompt. In **
                 }
               },
             });
+              if (
+                !webTtsTabInterruptPendingReplayRef.current &&
+                !parallelStreamingTtsRef.current.cancelRequested
+              ) {
+                const chunk = stripControlTokens(spokenForTts).trim();
+                if (chunk.length > 0) {
+                  const prev = parallelStreamingTtsRef.current.spokenCompleteText.trim();
+                  parallelStreamingTtsRef.current.spokenCompleteText = prev
+                    ? `${prev} ${chunk}`.trim()
+                    : chunk;
+                }
+                if (closingSpeakLooksFinal) {
+                  markInterviewClosingTtsDelivered(closingTtsSessionKey, spokenForTts);
+                  interviewClosingSpokenThisStream = true;
+                  textToParallelStream.closingSpoken = true;
+                }
+              } else if (closingSpeakLooksFinal) {
+                releaseInterviewClosingSpeak(closingTtsSessionKey);
+              }
+            } finally {
+              if (!webTtsTabInterruptPendingReplayRef.current) {
+                ttsLineInFlightRef.current = false;
+                if (userId) {
+                  setTtsPlaybackActive(false);
+                }
+              }
+            }
           } catch {
-            // swallow tts errors for parallel pipeline
+            if (closingSpeakLooksFinal) {
+              releaseInterviewClosingSpeak(closingTtsSessionKey);
+            }
           }
         });
+      };
+      const speakScenarioAContemptProbeStreamOnce = async () => {
+        if (
+          scenarioAContemptProbeSpokenThisStream ||
+          scenarioAContemptProbeAskedRef.current ||
+          scenarioAContemptProbeTtsDeliveredSessionRef.current
+        ) {
+          void remoteLog('[S1_CONTEMPT_PROBE_SINGLE_SPEAK_SKIPPED]', {
+            spokenThisStream: scenarioAContemptProbeSpokenThisStream,
+            askedRef: scenarioAContemptProbeAskedRef.current,
+            ttsDeliveredSession: scenarioAContemptProbeTtsDeliveredSessionRef.current,
+            s1ContemptFixVersion: 15,
+          });
+          return;
+        }
+        /** Claim before any await so concurrent stream-end flush cannot double-speak. */
+        scenarioAContemptProbeSpokenThisStream = true;
+        await ttsChain;
+        parallelStreamingTtsRef.current.cancelRequested = true;
+        ttsCancelled = true;
+        await stopElevenLabsPlayback();
+        if (deferredScenarioAContemptProbeLeadSentence) {
+          scenarioAContemptProbeStreamBuffer = mergeDeferredScenarioAContemptProbeLeadWithNextSentence(
+            deferredScenarioAContemptProbeLeadSentence,
+            scenarioAContemptProbeStreamBuffer,
+          );
+          deferredScenarioAContemptProbeLeadSentence = null;
+        }
+        let buffered = scenarioAContemptProbeStreamBuffer.trim();
+        scenarioAContemptProbeStreamBuffer = '';
+        if (!buffered) {
+          const full = stripControlTokens(textToParallelStream.full).trim();
+          if (looksLikeScenarioAContemptProbeQuestion(full)) {
+            buffered = full;
+          }
+        }
+        if (!buffered) {
+          scenarioAContemptProbeSpokenThisStream = false;
+          return;
+        }
+        if (
+          scenarioAContemptProbeAskedRef.current ||
+          transcriptContainsScenarioAContemptProbe(messagesToUse)
+        ) {
+          scenarioAContemptProbeAskedRef.current = true;
+          void remoteLog('[S1_CONTEMPT_PROBE_STREAM_SKIPPED_TRANSCRIPT_DEDUP]', {
+            preview: buffered.slice(0, 200),
+            s1ContemptFixVersion: 10,
+          });
+          return;
+        }
+        const probeText = streamContemptProbeMuteArmedFromStart
+          ? SCENARIO_A_CONTEMPT_PROBE_DELIVERED_COPY
+          : looksLikeScenarioAContemptProbeQuestion(buffered)
+            ? buffered
+            : SCENARIO_A_CONTEMPT_PROBE_DELIVERED_COPY;
+        if (!shouldDeliverScenarioFollowUpQuestion(messagesToUse, probeText)) {
+          scenarioAContemptProbeAskedRef.current = true;
+          void remoteLog('[S1_CONTEMPT_PROBE_STREAM_SKIPPED_TRANSCRIPT_DEDUP]', {
+            preview: probeText.slice(0, 200),
+            s1ContemptFixVersion: 10,
+          });
+          return;
+        }
+        scenarioAContemptProbeAskedRef.current = true;
+        void remoteLog('[S1_CONTEMPT_PROBE_SINGLE_SPEAK]', {
+          preview: probeText.slice(0, 240),
+          usedCanonicalCopy: streamContemptProbeMuteArmedFromStart,
+          bufferedPreview: buffered.slice(0, 200),
+          s1ContemptFixVersion: 15,
+        });
+        await speakTextSafe(probeText, ASSISTANT_INTERVIEW_SPEECH);
+        scenarioAContemptProbeTtsDeliveredSessionRef.current = true;
+        textToParallelStream.spokenStarted = true;
+        recordInterviewAssistantDeliveryForMetaExemptionRef.current(probeText);
+        if (referenceCardShouldUpdateOnPlaybackStart(probeText)) {
+          applyReferenceCardFromAssistantSpeechRef.current(probeText);
+        }
       };
       const processTextDelta = (deltaText: string) => {
         if (!deltaText) return;
         textToParallelStream.full += deltaText;
+        parallelStreamingTtsRef.current.accumulatedFullText = textToParallelStream.full;
+        if (Platform.OS === 'web' && webTtsTabInterruptPendingReplayRef.current) {
+          const restoreText = computeParallelStreamTabRestoreText(
+            textToParallelStream.full,
+            parallelStreamingTtsRef.current.spokenCompleteText,
+            [webTtsUtteranceInFlightRef.current ?? '']
+          );
+          if (restoreText.length > 0) {
+            const prior = pendingGestureRestoreSpeakRef.current;
+            const preserveHtmlResume =
+              prior?.restoreMode === 'resume_html' || hasWebInterviewHtmlAudioTabResumePending();
+            pendingGestureRestoreSpeakRef.current = {
+              text: preserveHtmlResume && prior?.text ? prior.text : restoreText,
+              restoreMode: preserveHtmlResume ? 'resume_html' : prior?.restoreMode ?? 'replay',
+              options: prior?.options ?? { ...TAB_RESTORE_PENDING_SPEAK_OPTIONS },
+              resolve: prior?.resolve ?? (() => {}),
+              reject: prior?.reject ?? (() => {}),
+            };
+            setWebTabGestureRestoreOverlay(true);
+          }
+        }
         if (metaFrustrationFirstSignalBuffered) return;
         sentenceBuffer += deltaText;
         for (;;) {
@@ -9757,7 +13202,7 @@ The participant **confirmed** skipping after the skip confirmation prompt. In **
           const cut = m.index + m[0].length;
           const sentence = sentenceBuffer.slice(0, cut);
           sentenceBuffer = sentenceBuffer.slice(cut);
-          maybeQueueSentenceForTts(sentence);
+          maybeQueueSentenceForTts(sentence, true, false, sentenceBuffer);
         }
       };
       try {
@@ -9788,17 +13233,142 @@ The participant **confirmed** skipping after the skip confirmation prompt. In **
           }
           if (done) break;
         }
-        if (sentenceBuffer.trim()) {
+        if (sentenceBuffer.trim() && !streamContemptProbeMuteActive) {
           maybeQueueSentenceForTts(sentenceBuffer);
           sentenceBuffer = '';
+        }
+        if (streamContemptProbeMuteActive) {
+          if (sentenceBuffer.trim()) {
+            scenarioAContemptProbeStreamBuffer = scenarioAContemptProbeStreamBuffer
+              ? `${scenarioAContemptProbeStreamBuffer} ${sentenceBuffer.trim()}`.trim()
+              : sentenceBuffer.trim();
+            sentenceBuffer = '';
+          }
+          if (deferredScenarioAContemptProbeLeadSentence) {
+            scenarioAContemptProbeStreamBuffer = mergeDeferredScenarioAContemptProbeLeadWithNextSentence(
+              deferredScenarioAContemptProbeLeadSentence,
+              scenarioAContemptProbeStreamBuffer,
+            );
+            deferredScenarioAContemptProbeLeadSentence = null;
+          }
+          await speakScenarioAContemptProbeStreamOnce();
         }
         if (deferredWarmBoundarySentence) {
           const hold = deferredWarmBoundarySentence;
           deferredWarmBoundarySentence = null;
           maybeQueueSentenceForTts(hold, false);
         }
-        await ttsChain;
+        if (deferredScenarioARepairLeadSentence) {
+          const holdRepair = deferredScenarioARepairLeadSentence;
+          deferredScenarioARepairLeadSentence = null;
+          maybeQueueSentenceForTts(holdRepair, false);
+        }
+        if (deferredScenarioAContemptProbeLeadSentence) {
+          if (streamContemptProbeMuteActive) {
+            scenarioAContemptProbeStreamBuffer = mergeDeferredScenarioAContemptProbeLeadWithNextSentence(
+              deferredScenarioAContemptProbeLeadSentence,
+              scenarioAContemptProbeStreamBuffer,
+            );
+          } else {
+            maybeQueueSentenceForTts(deferredScenarioAContemptProbeLeadSentence, false);
+          }
+          deferredScenarioAContemptProbeLeadSentence = null;
+        }
+        if (deferredInterviewClosingLeadSentence) {
+          if (currentInterviewMomentRef.current === 5) {
+            moment5ClosingStreamBuffer = moment5ClosingStreamBuffer
+              ? `${moment5ClosingStreamBuffer} ${deferredInterviewClosingLeadSentence}`.trim()
+              : deferredInterviewClosingLeadSentence;
+          } else {
+            maybeQueueSentenceForTts(deferredInterviewClosingLeadSentence, false, true);
+          }
+          deferredInterviewClosingLeadSentence = null;
+        }
+        if (moment5ClosingStreamBuffer.trim()) {
+          const dedupedClosing = stripDuplicateInterviewClosingSentencesWithinDraft(
+            moment5ClosingStreamBuffer.trim(),
+          );
+          moment5ClosingStreamBuffer = '';
+          void remoteLog('[M5_CLOSING_STREAM_FLUSH]', {
+            interviewSessionId: interviewSessionIdRef.current,
+            preview: dedupedClosing.slice(0, 220),
+          });
+          // #region agent log
+          fetch('http://127.0.0.1:7789/ingest/668e0bd5-3283-4492-9f48-e33846c18218',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'442e12'},body:JSON.stringify({sessionId:'442e12',location:'AriaScreen.tsx:streamEnd',message:'m5_closing_stream_flush',data:{hypothesisId:'H6',preview:dedupedClosing.slice(0,140)},timestamp:Date.now()})}).catch(()=>{});
+          // #endregion
+          if (dedupedClosing.trim()) {
+            const closingTtsSessionKey =
+              interviewSessionAttemptIdRef.current ?? interviewSessionIdRef.current;
+            const closingFlushLooksFinal = looksLikeInterviewClosingAssistantMessage(dedupedClosing);
+            if (shouldSuppressDuplicateInterviewClosingTts(closingTtsSessionKey, dedupedClosing)) {
+              void remoteLog('[M5_CLOSING_TTS_SUPPRESSED_DUPLICATE]', {
+                interviewSessionId: interviewSessionIdRef.current,
+                source: 'm5_closing_stream_flush',
+                preview: dedupedClosing.slice(0, 220),
+              });
+              // #region agent log
+              fetch('http://127.0.0.1:7789/ingest/668e0bd5-3283-4492-9f48-e33846c18218',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'442e12'},body:JSON.stringify({sessionId:'442e12',location:'AriaScreen.tsx:streamEnd',message:'closing_tts_suppressed_duplicate',data:{hypothesisId:'H11',source:'m5_closing_stream_flush',preview:dedupedClosing.slice(0,120)},timestamp:Date.now()})}).catch(()=>{});
+              // #endregion
+              if (closingFlushLooksFinal) {
+                interviewClosingSpokenThisStream = true;
+                textToParallelStream.closingSpoken = true;
+                textToParallelStream.spokenStarted = true;
+              }
+            } else {
+              if (closingFlushLooksFinal) {
+                textToParallelStream.spokenStarted = true;
+              }
+              maybeQueueSentenceForTts(dedupedClosing, false, true);
+              if (closingFlushLooksFinal) {
+                interviewClosingSpokenThisStream = true;
+                textToParallelStream.closingSpoken = true;
+              }
+            }
+          }
+        }
+        if (deferredScenarioVignetteTailForOpeningMerge) {
+          const heldTail = deferredScenarioVignetteTailForOpeningMerge;
+          deferredScenarioVignetteTailForOpeningMerge = null;
+          maybeQueueSentenceForTts(heldTail, false);
+        }
+        if (!streamContemptProbeMuteActive) {
+          await ttsChain;
+        }
+        if (!webTtsTabInterruptPendingReplayRef.current) {
+          parallelStreamingTtsRef.current.active = false;
+        }
+        if (Platform.OS === 'web' && webTtsTabInterruptPendingReplayRef.current && !metaFrustrationFirstSignalBuffered) {
+          const fullReplay = stripControlTokens(textToParallelStream.full).trim();
+          if (fullReplay.length > 0) {
+            const isClosingReplay =
+              isInterviewClosingThanksFragment(fullReplay) ||
+              isInterviewClosingReflectiveAckFragment(fullReplay) ||
+              looksLikeInterviewClosingAssistantMessage(fullReplay);
+            if (isClosingReplay) {
+              // #region agent log
+              fetch('http://127.0.0.1:7789/ingest/668e0bd5-3283-4492-9f48-e33846c18218',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'442e12'},body:JSON.stringify({sessionId:'442e12',location:'AriaScreen.tsx:streamEnd',message:'web_full_replay_skipped_closing',data:{hypothesisId:'H3',preview:fullReplay.slice(0,120),spokenCompletePreview:parallelStreamingTtsRef.current.spokenCompleteText.slice(0,120),closingSpoken:textToParallelStream.closingSpoken},timestamp:Date.now()})}).catch(()=>{});
+              // #endregion
+              webTtsTabInterruptPendingReplayRef.current = false;
+            } else {
+              // #region agent log
+              fetch('http://127.0.0.1:7789/ingest/668e0bd5-3283-4492-9f48-e33846c18218',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'442e12'},body:JSON.stringify({sessionId:'442e12',location:'AriaScreen.tsx:streamEnd',message:'web_full_replay_queued',data:{hypothesisId:'H3',preview:fullReplay.slice(0,120),spokenCompletePreview:parallelStreamingTtsRef.current.spokenCompleteText.slice(0,120),closingSpoken:textToParallelStream.closingSpoken},timestamp:Date.now()})}).catch(()=>{});
+              // #endregion
+              const prior = pendingGestureRestoreSpeakRef.current;
+              const preserveHtmlResume =
+                prior?.restoreMode === 'resume_html' || hasWebInterviewHtmlAudioTabResumePending();
+              pendingGestureRestoreSpeakRef.current = {
+                text: preserveHtmlResume && prior?.text ? prior.text : fullReplay,
+                restoreMode: preserveHtmlResume ? 'resume_html' : prior?.restoreMode ?? 'replay',
+                options: prior?.options ?? { ...TAB_RESTORE_PENDING_SPEAK_OPTIONS },
+                resolve: prior?.resolve ?? (() => {}),
+                reject: prior?.reject ?? (() => {}),
+              };
+              setWebTabGestureRestoreOverlay(true);
+            }
+          }
+        }
         if (metaFrustrationFirstSignalBuffered) {
+          webTtsTabInterruptPendingReplayRef.current = false;
           let display = stripControlTokens(textToParallelStream.full).trim();
           if (isApprovedElongatingProbeOnly(display)) {
             const excerpt = lastSubstantivePriorUserExcerptInScenario(
@@ -9815,6 +13385,22 @@ The participant **confirmed** skipping after the skip confirmation prompt. In **
               replaced: true,
               preview: display.slice(0, 240),
             });
+          }
+          display = stripDuplicateScenarioAContemptProbeParagraphs(
+            display,
+            messagesToUse,
+            currentInterviewMomentRef.current,
+            scenarioAContemptProbeAskedRef.current,
+          );
+          display = stripDuplicateScenarioARepairQuestionParagraphs(
+            display,
+            messagesToUse,
+            currentInterviewMomentRef.current,
+            scenarioARepairQuestionAskedRef.current,
+          );
+          if (looksLikeInterviewClosingAssistantMessage(display)) {
+            display = stripDuplicateInterviewClosingSentencesWithinDraft(display);
+            textToParallelStream.closingSpoken = true;
           }
           textToParallelStream.full = display;
           const spokenSan = dedupeAdjacentBoundaryValidationsBeforeParticipantName(
@@ -9851,6 +13437,7 @@ The participant **confirmed** skipping after the skip confirmation prompt. In **
       } catch {
         ttsCancelled = true;
         deferredWarmBoundarySentence = null;
+        parallelStreamingTtsRef.current.active = false;
         await stopElevenLabsPlayback();
         if (textToParallelStream.spokenStarted) {
           setVoiceState('idle');
@@ -9911,16 +13498,17 @@ The participant **confirmed** skipping after the skip confirmation prompt. In **
 
     try {
     let text = (data.content?.[0]?.text ?? '').trim();
+    const rawApiHadInterviewComplete = text.includes('[INTERVIEW_COMPLETE]');
     if (
       text.includes('[INTERVIEW_COMPLETE]') &&
       isInterviewAppRoute &&
       !isAdmin &&
       status === 'active'
     ) {
-      const minUserTurnsAfterM5 = moment5AccountabilityProbeFiredRef.current ? 2 : 1;
       const transcriptSlice = messagesToUse.map((m) => ({
         role: m.role,
         content: (m as { content?: string }).content ?? '',
+        isWelcomeBack: (m as { isWelcomeBack?: boolean }).isWelcomeBack,
       }));
       const postM5UserTurnsFromTranscript = countUserTurnsAfterLastMoment5PrimaryAnchor(
         transcriptSlice,
@@ -9930,19 +13518,41 @@ The participant **confirmed** skipping after the skip confirmation prompt. In **
         moment5PrimaryAnchorDeliveredSessionRef.current ||
         transcriptSlice.some(
           (m) =>
-            m.role === 'assistant' && transcriptAssistantContainsMoment5PrimaryConflictQuestion(m.content)
+            m.role === 'assistant' &&
+            !(m as { isWelcomeBack?: boolean }).isWelcomeBack &&
+            transcriptAssistantContainsMoment5PrimaryConflictQuestion(m.content)
         ) ||
         transcriptAssistantContainsMoment5PrimaryConflictQuestion(text);
       const postM5UserTurns = Math.max(moment5PostPromptUserTurnCountRef.current, postM5UserTurnsFromTranscript);
+      const moment5CombinedForCloseGate = combineMoment5UserTurnText(
+        messagesToUse.filter((m) => !(m as { isWelcomeBack?: boolean }).isWelcomeBack) as Array<{
+          role: string;
+          content?: string;
+        }>,
+      );
+      const accountabilityProbeStillRequired =
+        (moment5QuestionDeliveredRef.current || hasMoment5PrimaryAnchorInTranscript) &&
+        !moment5AccountabilityProbeFiredRef.current &&
+        evaluateMoment5AccountabilityProbe(moment5CombinedForCloseGate).shouldProbe;
+      const resolutionFollowUpStillRequired =
+        hasMoment5PrimaryAnchorInTranscript &&
+        !moment5AnswerIncludesResolutionOutcome(moment5CombinedForCloseGate) &&
+        !transcriptHasMoment5ResolutionFollowUpAsked(transcriptSlice);
       /**
        * `currentInterviewMomentRef` can remain on scenario 3 after resume / numbering skew while the transcript
        * already contains the M5 conflict anchor and post-M5 user turns — logs showed `[INTERVIEW_COMPLETE_STRIPPED_PRE_M5_GATE]`
        * with `moment: 3` and `hasMoment5PrimaryAnchorInTranscript: true`, which blocked completion and preparing-results.
        */
-      const moment5CloseAllowed =
-        (currentInterviewMomentRef.current >= 5 || hasMoment5PrimaryAnchorInTranscript) &&
-        (moment5QuestionDeliveredRef.current || hasMoment5PrimaryAnchorInTranscript) &&
-        postM5UserTurns >= minUserTurnsAfterM5;
+      const moment5CloseAllowed = isMoment5ReadyForInterviewClose({
+        currentInterviewMoment: currentInterviewMomentRef.current,
+        moment5QuestionDelivered: moment5QuestionDeliveredRef.current,
+        postM5UserTurns,
+        accountabilityProbeFired: moment5AccountabilityProbeFiredRef.current,
+        hasMoment5PrimaryAnchorInTranscript,
+        moment5CombinedUserText: moment5CombinedForCloseGate,
+        accountabilityProbeStillRequired,
+        resolutionFollowUpStillRequired,
+      });
       if (!moment5CloseAllowed) {
         void remoteLog('[INTERVIEW_COMPLETE_STRIPPED_PRE_M5_GATE]', {
           interviewSessionId: interviewSessionIdRef.current,
@@ -9952,8 +13562,9 @@ The participant **confirmed** skipping after the skip confirmation prompt. In **
           postM5UserTurnsRef: moment5PostPromptUserTurnCountRef.current,
           postM5UserTurnsFromTranscript,
           postM5UserTurnsEffective: postM5UserTurns,
-          minUserTurnsAfterM5,
           accountabilityProbeFired: moment5AccountabilityProbeFiredRef.current,
+          accountabilityProbeStillRequired,
+          resolutionFollowUpStillRequired,
           hasMoment5PrimaryAnchorInTranscript,
         });
         /** Drop premature token only — continue this turn so Moment 5 can still be delivered (client inject or model). Never end the session here. */
@@ -10001,7 +13612,50 @@ The participant **confirmed** skipping after the skip confirmation prompt. In **
     finalizePendingMetaAckBaselineAfterAssistantTextRef.current(text);
     /** LLM done — do not keep "Amoraea is thinking" (or isWaiting-gated UI) until TTS finishes; HTML audio can hang without `onended` on some mobile browsers. */
     setIsWaiting(false);
+    const streamFullTrimmed = stripControlTokens(textToParallelStream.full).trim();
+    if (
+      interviewNameRef.current &&
+      currentInterviewMomentRef.current === 1 &&
+      !transcriptHasScenario1VignetteAssistant(messagesToUse) &&
+      isInterviewPreambleBriefingMoment(streamFullTrimmed)
+    ) {
+      commitInterviewMessages((prev) =>
+        insertPreambleBriefingIfMissing(prev as MessageWithScenario[], streamFullTrimmed),
+      );
+    }
+    if (isApprovedElongatingProbeOnly(streamFullTrimmed) && elongatingSuppressedForUserTurn) {
+      void remoteLog('[ELONGATING_PROBE_STREAM_DISCARDED]', {
+        preview: streamFullTrimmed,
+        suppressForUserTurn: true,
+      });
+      textToParallelStream.full = '';
+      textToParallelStream.spokenStarted = false;
+      parallelStreamingTtsRef.current.cancelRequested = true;
+    }
     const parallelStreamingPlaybackUsed = textToParallelStream.spokenStarted;
+    if (
+      currentInterviewMomentRef.current === 1 &&
+      scenarioAContemptProbeAskedRef.current &&
+      !transcriptContainsScenarioAContemptProbe(messagesToUse)
+    ) {
+      const streamSpoken = parallelStreamingTtsRef.current.spokenCompleteText.trim();
+      const probePersistText = looksLikeScenarioAContemptProbeQuestion(streamSpoken)
+        ? streamSpoken
+        : SCENARIO_A_CONTEMPT_PROBE_DELIVERED_COPY;
+      if (shouldDeliverScenarioFollowUpQuestion(messagesToUse, probePersistText)) {
+        const probeMsg: MessageWithScenario = {
+          role: 'assistant',
+          content: probePersistText,
+          scenarioNumber: 1,
+        };
+        messagesToUse = [...messagesToUse, probeMsg];
+        setMessages(messagesToUse);
+        void remoteLog('[S1_CONTEMPT_PROBE_TRANSCRIPT_PERSISTED_FROM_STREAM]', {
+          preview: probePersistText.slice(0, 200),
+          s1ContemptFixVersion: 10,
+        });
+      }
+    }
     const speakAssistantTurn = async (spokenText: string, opts?: {
       silent?: boolean;
       interviewSpeechRole?: 'assistant_response';
@@ -10018,6 +13672,20 @@ The participant **confirmed** skipping after the skip confirmation prompt. In **
       if (parallelStreamingPlaybackUsed) {
         if (opts?.interviewSpeechRole === 'assistant_response' && !opts?.skipLastQuestionRef) {
           lastQuestionTextRef.current = stripControlTokens(spokenText).trim();
+        }
+        if (
+          Platform.OS === 'web' &&
+          webTtsTabInterruptPendingReplayRef.current
+        ) {
+          const fullReplay = stripControlTokens(spokenText).trim();
+          if (fullReplay.length > 0 && pendingGestureRestoreSpeakRef.current) {
+            pendingGestureRestoreSpeakRef.current = {
+              ...pendingGestureRestoreSpeakRef.current,
+              text: fullReplay,
+            };
+          }
+          setWebTabGestureRestoreOverlay(true);
+          return;
         }
         if (opts?.interviewSpeechRole === 'assistant_response' && !opts?.skipInterviewSpeechAdvance) {
           applyInterviewSpeechComplete(spokenText);
@@ -10043,8 +13711,28 @@ The participant **confirmed** skipping after the skip confirmation prompt. In **
       )}`;
       strippedText = stripControlTokens(text);
     }
+    if (
+      shouldAdvanceScenarioAAfterSatisfiedRepair(
+        messagesToUse,
+        strippedText,
+        currentInterviewMomentRef.current,
+      )
+    ) {
+      text = `[SCENARIO_COMPLETE:1]\n\n${buildScenario1To2BundleForInterview(
+        participantFirstNameForSpoken,
+        SCENARIO_2_TEXT,
+      )}`;
+      strippedText = stripControlTokens(text);
+      void remoteLog('[S1_REPAIR_SATISFIED_ADVANCE]', {
+        preview: strippedText.slice(0, 280),
+      });
+    }
     strippedText = stripFlatReflectionAcknowledgmentOpeners(strippedText);
     strippedText = stripGenericReflectionFillersFirstParagraph(strippedText);
+    strippedText = stripStandalonePersonalDisclosureAckOutsidePersonalMoments(
+      strippedText,
+      currentInterviewMomentRef.current,
+    );
     strippedText = stripHollowSystemInterviewerPhrases(strippedText);
     strippedText = collapseStackedEmpathyIHearYouInFirstParagraph(strippedText);
     strippedText = enforceAcknowledgmentVariation(
@@ -10059,6 +13747,17 @@ The participant **confirmed** skipping after the skip confirmation prompt. In **
       participantFirstNameForSpoken,
       SCENARIO_2_TEXT
     );
+    const beforeM4SpecDupStrip = strippedText;
+    strippedText = stripDuplicateMoment4SpecificityFollowUpParagraphs(
+      strippedText,
+      messagesToUse,
+      currentInterviewMomentRef.current,
+    );
+    if (strippedText !== beforeM4SpecDupStrip) {
+      void remoteLog('[M4_SPECIFICITY_FOLLOWUP_STRIPPED_DUPLICATE]', {
+        preview: strippedText.slice(0, 260),
+      });
+    }
     const beforeM5SpecDupStrip = strippedText;
     strippedText = stripDuplicateMoment5SpecificityRedirectParagraphs(
       strippedText,
@@ -10070,15 +13769,146 @@ The participant **confirmed** skipping after the skip confirmation prompt. In **
         preview: strippedText.slice(0, 260),
       });
     }
+    const beforeM5AccountabilityDupStrip = strippedText;
+    strippedText = stripDuplicateMoment5AccountabilityProbeParagraphs(
+      strippedText,
+      messagesToUse,
+      currentInterviewMomentRef.current,
+      moment5AccountabilityProbeFiredRef.current,
+    );
+    if (strippedText !== beforeM5AccountabilityDupStrip) {
+      void remoteLog('[M5_ACCOUNTABILITY_PROBE_STRIPPED_DUPLICATE]', {
+        preview: strippedText.slice(0, 260),
+      });
+    }
+    const beforeS1ContemptDupStrip = strippedText;
+    strippedText = stripDuplicateScenarioAContemptProbeParagraphs(
+      strippedText,
+      messagesToUse,
+      currentInterviewMomentRef.current,
+      scenarioAContemptProbeAskedRef.current,
+    );
+    if (strippedText !== beforeS1ContemptDupStrip) {
+      void remoteLog('[S1_CONTEMPT_PROBE_STRIPPED_DUPLICATE_PARAGRAPHS]', {
+        preview: strippedText.slice(0, 260),
+      });
+    }
+    const shouldInjectScenarioARepairAfterContemptAnswer =
+      currentInterviewMomentRef.current === 1 &&
+      scenarioAContemptProbeAskedRef.current &&
+      !scenarioARepairQuestionAskedRef.current &&
+      !replyingToScenarioAQ1 &&
+      !shouldForceScenarioAContemptProbe;
+    if (!strippedText.trim() && shouldInjectScenarioARepairAfterContemptAnswer) {
+      if (shouldDeliverScenarioFollowUpQuestion(messagesToUse, SCENARIO_A_REPAIR_QUESTION_AFTER_CONTEMPT_COPY)) {
+        strippedText = SCENARIO_A_REPAIR_QUESTION_AFTER_CONTEMPT_COPY;
+        void remoteLog('[S1_REPAIR_INJECTED_AFTER_DUPLICATE_CONTEMPT_STRIP]', {
+          preview: strippedText.slice(0, 260),
+          s1ContemptFixVersion: 9,
+        });
+      }
+    }
+    const scenarioHandoffAssistantTurn = isNaturalLanguageScenarioHandoffTransition(strippedText);
+    if (!scenarioHandoffAssistantTurn) {
+      const beforeS1RepairDupStrip = strippedText;
+      strippedText = stripDuplicateScenarioARepairQuestionParagraphs(
+        strippedText,
+        messagesToUse,
+        currentInterviewMomentRef.current,
+        scenarioARepairQuestionAskedRef.current,
+      );
+      if (strippedText !== beforeS1RepairDupStrip) {
+        void remoteLog('[S1_REPAIR_QUESTION_STRIPPED_DUPLICATE_PARAGRAPHS]', {
+          preview: strippedText.slice(0, 260),
+        });
+      }
+    }
+    const beforeClosingWithinTurnDupStrip = strippedText;
+    strippedText = stripDuplicateInterviewClosingSentencesWithinDraft(strippedText);
+    if (strippedText !== beforeClosingWithinTurnDupStrip) {
+      void remoteLog('[INTERVIEW_CLOSING_STRIPPED_WITHIN_TURN_DUPLICATE]', {
+        preview: beforeClosingWithinTurnDupStrip.slice(0, 260),
+        afterPreview: strippedText.slice(0, 260),
+      });
+    }
+    const beforeClosingDupStrip = strippedText;
+    strippedText = stripDuplicateInterviewClosingParagraphs(strippedText, messagesToUse);
+    if (strippedText !== beforeClosingDupStrip) {
+      void remoteLog('[INTERVIEW_CLOSING_STRIPPED_DUPLICATE]', {
+        preview: beforeClosingDupStrip.slice(0, 260),
+      });
+    }
+    if (currentInterviewMomentRef.current === 5) {
+      const closeGateForPrematureClosingStrip = computeMoment5InterviewCloseGate(messagesToUse, {
+        moment5QuestionDelivered: moment5QuestionDeliveredRef.current,
+        moment5PrimaryAnchorSession: moment5PrimaryAnchorDeliveredSessionRef.current,
+        postM5UserTurnsRef: moment5PostPromptUserTurnCountRef.current,
+        accountabilityProbeFired: moment5AccountabilityProbeFiredRef.current,
+        currentInterviewMoment: currentInterviewMomentRef.current,
+      });
+      if (
+        !closeGateForPrematureClosingStrip.moment5CloseAllowed &&
+        looksLikeInterviewClosingAssistantMessage(strippedText)
+      ) {
+        void remoteLog('[INTERVIEW_CLOSING_STRIPPED_PRE_M5_GATE]', {
+          interviewSessionId: interviewSessionIdRef.current,
+          postM5UserTurns: closeGateForPrematureClosingStrip.postM5UserTurns,
+          resolutionFollowUpStillRequired:
+            closeGateForPrematureClosingStrip.resolutionFollowUpStillRequired,
+          accountabilityProbeStillRequired:
+            closeGateForPrematureClosingStrip.accountabilityProbeStillRequired,
+          preview: strippedText.slice(0, 260),
+        });
+        strippedText = '';
+      }
+    }
+    if (
+      currentInterviewMomentRef.current === 5 &&
+      looksLikeMoment5AccountabilityProbeAssistantPrompt(strippedText)
+    ) {
+      moment5AccountabilityProbeFiredRef.current = true;
+      moment5ClientScoringMetaRef.current = {
+        ...(moment5ClientScoringMetaRef.current ?? {}),
+        accountabilityProbeFired: true,
+        warmAckBeforeAccountabilityProbe:
+          moment5ClientScoringMetaRef.current?.warmAckBeforeAccountabilityProbe === true ||
+          /\bappreciate you getting vulnerable\b/i.test(strippedText),
+      };
+    }
+    const beforeM5ConflictClarDupStrip = strippedText;
+    strippedText = stripDuplicateMoment5ConflictValidityClarificationParagraphs(
+      strippedText,
+      messagesToUse,
+      currentInterviewMomentRef.current,
+      moment5ConflictValidityClarificationIssuedRef.current,
+    );
+    if (strippedText !== beforeM5ConflictClarDupStrip) {
+      void remoteLog('[M5_CONFLICT_VALIDITY_CLAR_STRIPPED_DUPLICATE]', {
+        preview: strippedText.slice(0, 260),
+      });
+    }
     const recentAsstForAck = recentAssistantMessagesForAck(messagesToUse);
     if (currentInterviewMomentRef.current === 1 && scenarioAContemptProbeAskedRef.current) {
       const beforeProbeStrip = strippedText;
       strippedText = stripScenarioAContemptProbeQuestion(strippedText);
       if (strippedText !== beforeProbeStrip) {
-        if (!strippedText && specificEmmaLineAlreadyAddressed) {
+        if (!strippedText && shouldInjectScenarioARepairAfterContemptAnswer) {
+          strippedText = SCENARIO_A_REPAIR_QUESTION_AFTER_CONTEMPT_COPY;
+        } else if (!strippedText && specificEmmaLineAlreadyAddressed) {
           strippedText = 'How would you repair this relationship if you were Ryan?';
         }
         void remoteLog('[S1_CONTEMPT_PROBE_STRIPPED_DUPLICATE]', { preview: strippedText.slice(0, 220) });
+      }
+    }
+    if (
+      currentInterviewMomentRef.current === 1 &&
+      scenarioARepairQuestionAskedRef.current &&
+      !scenarioHandoffAssistantTurn
+    ) {
+      const beforeRepairStrip = strippedText;
+      strippedText = stripScenarioARepairQuestion(strippedText);
+      if (strippedText !== beforeRepairStrip) {
+        void remoteLog('[S1_REPAIR_QUESTION_STRIPPED_DUPLICATE]', { preview: strippedText.slice(0, 220) });
       }
     }
     if (currentInterviewMomentRef.current === 3) {
@@ -10089,7 +13919,8 @@ The participant **confirmed** skipping after the skip confirmation prompt. In **
       }
     }
     let assistantIssuedMoment4ThresholdProbe = looksLikeMoment4ThresholdQuestion(strippedText);
-    let assistantIssuedScenarioAContemptProbe = looksLikeScenarioAContemptProbeQuestion(strippedText);
+    const rawAssistantIssuedScenarioAContemptProbe = looksLikeScenarioAContemptProbeQuestion(strippedText);
+    let assistantIssuedScenarioAContemptProbe = rawAssistantIssuedScenarioAContemptProbe;
     let assistantIssuedScenarioARepairQuestion =
       currentInterviewMomentRef.current === 1 && looksLikeScenarioARepairQuestion(strippedText);
     const assistantIssuedScenarioBFullProbe = looksLikeScenarioBFullAppreciationProbeQuestion(strippedText);
@@ -10097,15 +13928,10 @@ The participant **confirmed** skipping after the skip confirmation prompt. In **
       currentInterviewMomentRef.current === 2 && looksLikeScenarioBJamesDifferentlyQuestion(strippedText);
     const assistantIssuedScenarioBRepairAsJames =
       currentInterviewMomentRef.current === 2 && looksLikeScenarioBRepairAsJamesQuestion(strippedText);
-    if (currentInterviewMomentRef.current === 1 || replyingToScenarioAQ1 || shouldForceScenarioAContemptProbe) {
-      void remoteLog('[S1_MODEL_OUTPUT_DEBUG_7605c3]', {
-        shouldForceScenarioAContemptProbe,
-        scenarioAContemptProbeAskedRef: scenarioAContemptProbeAskedRef.current,
-        assistantIssuedScenarioAContemptProbe,
-        assistantIssuedScenarioARepairQuestion,
-        assistantTurnPreview: strippedText.slice(0, 420),
-        modelRawPreview: text.slice(0, 420),
-      });
+    if (currentInterviewMomentRef.current === 1 && rawAssistantIssuedScenarioAContemptProbe) {
+      assistantIssuedScenarioAContemptProbe = true;
+      assistantIssuedScenarioARepairQuestion =
+        currentInterviewMomentRef.current === 1 && looksLikeScenarioARepairQuestion(strippedText);
     }
     if (currentInterviewMomentRef.current === 1 && specificEmmaLineAlreadyAddressed && assistantIssuedScenarioAContemptProbe) {
       const beforeCoveredProbeStrip = strippedText;
@@ -10116,7 +13942,7 @@ The participant **confirmed** skipping after the skip confirmation prompt. In **
       assistantIssuedScenarioAContemptProbe = false;
       assistantIssuedScenarioARepairQuestion = looksLikeScenarioARepairQuestion(strippedText);
       void remoteLog('[S1_MODEL_CONTEMPT_PROBE_SUPPRESSED_AFTER_USER_COVERAGE]', {
-        coverageDetail: debugScenarioAQ1ContemptProbeCoverageDetail(trimmed),
+        coverageDetail: debugScenarioAQ1ContemptProbeCoverageDetail(scenarioAContemptGateUserText),
         beforePreview: beforeCoveredProbeStrip.slice(0, 320),
         afterPreview: strippedText.slice(0, 320),
         userPreview: trimmed.slice(0, 320),
@@ -10161,12 +13987,40 @@ The participant **confirmed** skipping after the skip confirmation prompt. In **
       participantFirstNameForSpoken,
     );
     /** Elongating probe must be the sole assistant output this turn — never stack forced construct probes after it. */
-    const assistantTurnIsElongatingProbeOnly = isApprovedElongatingProbeOnly(strippedText);
+    let assistantTurnIsElongatingProbeOnly = isApprovedElongatingProbeOnly(strippedText);
+    if (elongatingSuppressedForUserTurn && assistantTurnIsElongatingProbeOnly) {
+      void remoteLog('[ELONGATING_PROBE_SUPPRESSED_OVERRIDE]', {
+        wordCount: trimmed.split(/\s+/).filter(Boolean).length,
+        preview: strippedText,
+        shouldForceScenarioAContemptProbe,
+      });
+      strippedText = '';
+      assistantTurnIsElongatingProbeOnly = false;
+      elongatingProbeFiredRef.current = true;
+      if (parallelStreamingPlaybackUsed) {
+        parallelStreamingTtsRef.current.cancelRequested = true;
+      }
+    } else if (elongatingProbeFiredRef.current && assistantTurnIsElongatingProbeOnly) {
+      void remoteLog('[ELONGATING_PROBE_DUPLICATE_SUPPRESSED]', {
+        wordCount: trimmed.split(/\s+/).filter(Boolean).length,
+        preview: strippedText,
+      });
+      strippedText = '';
+      assistantTurnIsElongatingProbeOnly = false;
+      if (parallelStreamingPlaybackUsed) {
+        parallelStreamingTtsRef.current.cancelRequested = true;
+      }
+    } else if (assistantTurnIsElongatingProbeOnly) {
+      elongatingProbeFiredRef.current = true;
+    }
     if (assistantIssuedMoment4ThresholdProbe) {
       moment4ThresholdProbeAskedRef.current = true;
     }
     if (assistantIssuedScenarioAContemptProbe) {
       scenarioAContemptProbeAskedRef.current = true;
+    }
+    if (assistantIssuedScenarioARepairQuestion) {
+      scenarioARepairQuestionAskedRef.current = true;
     }
     if (assistantIssuedScenarioARepairQuestion && !scenarioAContemptProbeAskedRef.current) {
       if (__DEV__) {
@@ -10194,11 +14048,19 @@ The participant **confirmed** skipping after the skip confirmation prompt. In **
     }
     if (
       shouldForceScenarioAContemptProbe &&
+      !scenarioAContemptProbeAskedRef.current &&
+      !transcriptContainsScenarioAContemptProbe(messagesToUse) &&
       !assistantIssuedScenarioAContemptProbe &&
       !assistantTurnIsElongatingProbeOnly &&
       !text.includes('[INTERVIEW_COMPLETE]')
     ) {
-      const forcedContemptProbe = "What do you make of Emma's statement when she says 'you've made that very clear'?";
+      const forcedContemptProbe = SCENARIO_A_CONTEMPT_PROBE_DELIVERED_COPY;
+      if (!shouldDeliverScenarioFollowUpQuestion(messagesToUse, forcedContemptProbe)) {
+        scenarioAContemptProbeAskedRef.current = true;
+        void remoteLog('[S1_CONTEMPT_FORCED_SKIPPED_TRANSCRIPT_DEDUP]', {
+          interviewSessionId: interviewSessionIdRef.current,
+        });
+      } else {
       let stagedMessages = messagesToUse;
       if (strippedText) {
         const detectedScenario = detectScenarioFromResponse(strippedText);
@@ -10228,15 +14090,6 @@ The participant **confirmed** skipping after the skip confirmation prompt. In **
         assistantIssuedScenarioAContemptProbe,
         contempt_probe_skipped: false,
       });
-      void remoteLog('[S1_CONTEMPT_FORCED_DEBUG_7605c3]', {
-        coverageDetail: debugScenarioAQ1ContemptProbeCoverageDetail(trimmed),
-        specificEmmaLineAlreadyAddressed,
-        assistantIssuedScenarioAContemptProbe,
-        contempt_probe_skipped: false,
-        assistantTurnIsElongatingProbeOnly,
-        modelTurnPreview: strippedText.slice(0, 320),
-        userPreview: trimmed.slice(0, 320),
-      });
       scenarioAContemptProbeAskedRef.current = true;
       const wrappedContemptProbe = wrapForcedProbeWithAck(trimmed, strippedText, forcedContemptProbe, recentAsstForAck);
       const probeMsg: MessageWithScenario = {
@@ -10245,9 +14098,19 @@ The participant **confirmed** skipping after the skip confirmation prompt. In **
           scenarioNumber: resolveAssistantScenarioNumber(wrappedContemptProbe, stagedMessages),
       };
       setMessages([...stagedMessages, probeMsg]);
-      await speakTextSafe(wrappedContemptProbe, ASSISTANT_INTERVIEW_SPEECH);
+      if (!parallelStreamingPlaybackUsed && !scenarioAContemptProbeTtsDeliveredSessionRef.current) {
+        await speakTextSafe(wrappedContemptProbe, ASSISTANT_INTERVIEW_SPEECH);
+        scenarioAContemptProbeTtsDeliveredSessionRef.current = true;
+      } else {
+        void remoteLog('[S1_CONTEMPT_FORCED_SKIP_TTS_ALREADY_STREAMED]', {
+          interviewSessionId: interviewSessionIdRef.current,
+          preview: wrappedContemptProbe.slice(0, 200),
+          s1ContemptFixVersion: 10,
+        });
+      }
       setVoiceState('idle');
       return;
+      }
     }
     if (
       shouldForceScenarioBFullAppreciationProbe &&
@@ -10256,6 +14119,11 @@ The participant **confirmed** skipping after the skip confirmation prompt. In **
       !text.includes('[INTERVIEW_COMPLETE]')
     ) {
       const forcedAppreciationProbe = "What do you think James could've done differently so Sarah feels better?";
+      if (!shouldDeliverScenarioFollowUpQuestion(messagesToUse, forcedAppreciationProbe)) {
+        void remoteLog('[S2_APPRECIATION_FORCED_SKIPPED_TRANSCRIPT_DEDUP]', {
+          interviewSessionId: interviewSessionIdRef.current,
+        });
+      } else {
       let stagedMessages = messagesToUse;
       if (strippedText) {
         const detectedScenario = detectScenarioFromResponse(strippedText);
@@ -10296,6 +14164,7 @@ The participant **confirmed** skipping after the skip confirmation prompt. In **
       await speakTextSafe(wrappedAppreciationProbe, ASSISTANT_INTERVIEW_SPEECH);
       setVoiceState('idle');
       return;
+      }
     }
     const scenarioBSkippedJamesIntermediate =
       assistantIssuedScenarioBRepairAsJames ||
@@ -10312,6 +14181,11 @@ The participant **confirmed** skipping after the skip confirmation prompt. In **
     if (needsScenarioBJamesDifferentlyInsert) {
       const forcedJamesDifferentlyProbe =
         'Before things blew up, what do you think James could have done differently that might have helped Sarah feel appreciated?';
+      if (!shouldDeliverScenarioFollowUpQuestion(messagesToUse, forcedJamesDifferentlyProbe)) {
+        void remoteLog('[S2_JAMES_DIFF_FORCED_SKIPPED_TRANSCRIPT_DEDUP]', {
+          interviewSessionId: interviewSessionIdRef.current,
+        });
+      } else {
       const repairStripped = stripScenarioBRepairAsJamesQuestion(strippedText).trim();
       const sophieLeakMiddle =
         (/i didn't know what to say/i.test(repairStripped) || /i didn't know how/i.test(repairStripped)) &&
@@ -10337,7 +14211,19 @@ The participant **confirmed** skipping after the skip confirmation prompt. In **
         stagedMessages = [...messagesToUse, aiMsg];
         setMessages(stagedMessages);
         applyInterviewProgressFromAssistantText(bLeadIn, progressRefsPayload);
+        /**
+         * Parallel streaming TTS already spoke the raw model turn (boundary + vignette + wrong beat).
+         * `bLeadIn` is that same turn with the repair line stripped — replaying it would duplicate the
+         * last audible chunk (often the vignette tail) before the forced James-differently probe.
+         */
+        if (!parallelStreamingPlaybackUsed) {
         await speakTextSafe(bLeadIn, ASSISTANT_INTERVIEW_SPEECH);
+        } else {
+          void remoteLog('[S2_JAMES_DIFF_FORCED_SKIP_LEADIN_TTS]', {
+            reason: 'parallel_streaming_already_spoke',
+            preview: bLeadIn.slice(0, 200),
+          });
+        }
       }
       if (__DEV__) {
         console.log('[S2_JAMES_DIFF_FORCED]', { scenarioBQ1Engaged, sidedEntirelyWithJames });
@@ -10345,6 +14231,7 @@ The participant **confirmed** skipping after the skip confirmation prompt. In **
       void remoteLog('[S2_JAMES_DIFF_FORCED]', {
         scenarioBQ1Engaged,
         sidedEntirelyWithJames,
+        skipped_leadin_tts_due_to_parallel_streaming: parallelStreamingPlaybackUsed && !!bLeadIn,
       });
       const wrappedJamesProbe = wrapForcedProbeWithAck(trimmed, bLeadIn || strippedText, forcedJamesDifferentlyProbe, recentAsstForAck);
       const probeMsg: MessageWithScenario = {
@@ -10356,6 +14243,7 @@ The participant **confirmed** skipping after the skip confirmation prompt. In **
       await speakTextSafe(wrappedJamesProbe, ASSISTANT_INTERVIEW_SPEECH);
       setVoiceState('idle');
       return;
+      }
     }
     if (
       shouldForceMoment4ThresholdProbe &&
@@ -10407,7 +14295,7 @@ The participant **confirmed** skipping after the skip confirmation prompt. In **
       const closingAckPattern = /\b(got it|okay|alright)\b.*\b(move on|on to the next|next one)\b/i;
       const looksLikeClosingAck = closingAckPattern.test(text) || (/\blet'?s move on\b/i.test(text) && /got it|okay|alright/i.test(text));
       const justAnsweredClosing = lastAnsweredClosingScenarioRef.current != null;
-      const noScenarioCompleteInResponse = !/\[SCENARIO_COMPLETE:\d\]/.test(text);
+      const noScenarioCompleteInResponse = !/\[SCENARIO_COMPLETE:\s*\d+\]/i.test(text);
       /** Must not return before `[INTERVIEW_COMPLETE]` handling — otherwise final turn never sets `pendingCompletion` / preparing screen. */
       if (
         justAnsweredClosing &&
@@ -10461,7 +14349,17 @@ The participant **confirmed** skipping after the skip confirmation prompt. In **
           }
         }
         await notifyScenarioStarted(nextScenarioNum, updatedMessages);
-        await speakAssistantTurn(fullDisplay, ASSISTANT_INTERVIEW_SPEECH);
+        const spAck = splitScenarioTransitionForEmotionModal(fullDisplay);
+        await speakAssistantTurn(spAck.beforeModal, ASSISTANT_INTERVIEW_SPEECH);
+        await runEmotionModalAfterScenarioTransition(scenarioNumber, {
+          transitionText: fullDisplay,
+          priorScenario: scenarioNumber,
+        });
+        if (spAck.afterModal.trim()) {
+          await speakAssistantTurn(spAck.afterModal, ASSISTANT_INTERVIEW_SPEECH);
+        } else if (__DEV__) {
+          console.warn('[Aria] emotion modal transition: missing afterModal split (closing-ack failsafe)');
+        }
         lastAnsweredClosingScenarioRef.current = null;
         setVoiceState('idle');
         if (__DEV__) console.log('[Aria] Closing-ack failsafe: advanced to next scenario', scenarioNumber);
@@ -10514,7 +14412,17 @@ The participant **confirmed** skipping after the skip confirmation prompt. In **
             closingQuestionAnsweredRef.current[scenarioNumber] = false;
           }
           await notifyScenarioStarted(nextScenarioNum, updatedMessages);
-          await speakAssistantTurn(fullDisplay, ASSISTANT_INTERVIEW_SPEECH);
+          const spRep = splitScenarioTransitionForEmotionModal(fullDisplay);
+          await speakAssistantTurn(spRep.beforeModal, ASSISTANT_INTERVIEW_SPEECH);
+          await runEmotionModalAfterScenarioTransition(scenarioNumber, {
+            transitionText: fullDisplay,
+            priorScenario: scenarioNumber,
+          });
+          if (spRep.afterModal.trim()) {
+            await speakAssistantTurn(spRep.afterModal, ASSISTANT_INTERVIEW_SPEECH);
+          } else if (__DEV__) {
+            console.warn('[Aria] emotion modal transition: missing afterModal split (repeat-closing failsafe)');
+          }
           lastAnsweredClosingScenarioRef.current = null;
           setVoiceState('idle');
           return;
@@ -10524,6 +14432,14 @@ The participant **confirmed** skipping after the skip confirmation prompt. In **
       // Per-scenario completion token: strip token, show summary, insert score card in chat
       // Closing-ack / repeat-closing failsafes above must not run when this token is present (see guards on those branches).
       if (text.includes('[INTERVIEW_COMPLETE]')) {
+        if (isInterviewCompleteRef.current) {
+          void remoteLog('[INTERVIEW_COMPLETE_DUPLICATE_SKIPPED]', {
+            interviewSessionId: interviewSessionIdRef.current,
+            preview: text.slice(0, 200),
+          });
+          setVoiceState('idle');
+          return;
+        }
         void persistInterviewAttemptSessionLifecycle(interviewSessionAttemptIdRef.current, 'completed');
         await remoteLog('[0] INTERVIEW_COMPLETE token detected in response', {
           isAdmin,
@@ -10551,16 +14467,18 @@ The participant **confirmed** skipping after the skip confirmation prompt. In **
           recentAssistantMessagesForAck(messagesToUse)
         );
         {
-          const closingInterviewName = interviewNameRef.current ?? '';
+          const closingInterviewName = resolvePlausibleInterviewFirstName(interviewNameRef.current) ?? '';
           const preNameClose = displayText;
           displayText = dedupeAdjacentBoundaryValidationsBeforeParticipantName(
             sanitizeAssistantInterviewerCharacterNames(displayText),
             closingInterviewName,
           );
         }
-        displayText = ensureSpokenTextIncludesParticipantFirstName(displayText, interviewNameRef.current ?? '', {
-          allowAppendWhenMissing: true,
-        });
+        displayText = ensureSpokenTextIncludesParticipantFirstName(
+          displayText,
+          resolvePlausibleInterviewFirstName(interviewNameRef.current) ?? '',
+          { allowAppendWhenMissing: true }
+        );
         const finalAssistant: MessageWithScenario = {
           role: 'assistant',
           content: displayText,
@@ -10581,8 +14499,7 @@ The participant **confirmed** skipping after the skip confirmation prompt. In **
           /** `pendingCompletion` effect requires `voiceState === 'idle'`; parallel streaming and edge TTS paths could leave non-idle and block scoring/navigation indefinitely. */
           setVoiceState('idle');
         }
-        /** Full-screen handoff as soon as closing `speakAssistantTurn` resolves — do not wait on `voiceState` matching `idle` (parallel streaming often leaves state non-idle while audio still flushes). */
-        setInterviewStatus('preparing_results');
+        /** Full-screen handoff after emotion catch-up — keep interview UI mounted while modals are shown. */
         pendingCompletionTranscriptRef.current = transcriptForScoring;
         if (userId) {
           const completed = Array.from(scoredScenariosRef.current);
@@ -10613,6 +14530,7 @@ The participant **confirmed** skipping after the skip confirmation prompt. In **
             scenarioScores: scenarioScoresPayload,
             currentScenario: getCurrentScenario(scoredScenariosRef.current),
               resumeActiveScenario: resumeActiveScenarioRef.current,
+            emotionItemResponses: [...emotionItemResponsesRef.current],
             pendingCompletion: true,
           });
           } catch (persistErr) {
@@ -10621,15 +14539,50 @@ The participant **confirmed** skipping after the skip confirmation prompt. In **
             });
           }
         }
+        kickCompletionScoring('interview_complete_token', transcriptForScoring);
+        const unansweredEmotionAtClose = listUnansweredEmotionModalIndices(
+          emotionItemResponsesRef.current,
+          3,
+        );
+        if (unansweredEmotionAtClose.length > 0) {
+          void remoteLog('[EMOTION_MODAL] catch_up_before_interview_complete', {
+            indices: unansweredEmotionAtClose,
+          });
+          for (const itemIndex of unansweredEmotionAtClose) {
+          // #region agent log
+          fetch('http://127.0.0.1:7789/ingest/668e0bd5-3283-4492-9f48-e33846c18218',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'e00888'},body:JSON.stringify({sessionId:'e00888',runId:'pre-fix',hypothesisId:'H6',location:'AriaScreen.tsx:catch_up_before_complete',message:'emotion_modal_catchup_attempt',data:{itemIndex,unansweredEmotionAtClose},timestamp:Date.now()})}).catch(()=>{});
+          // #endregion
+            await awaitEmotionModalForIndex(itemIndex);
+          // #region agent log
+          fetch('http://127.0.0.1:7789/ingest/668e0bd5-3283-4492-9f48-e33846c18218',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'e00888'},body:JSON.stringify({sessionId:'e00888',runId:'pre-fix',hypothesisId:'H6',location:'AriaScreen.tsx:catch_up_before_complete',message:'emotion_modal_catchup_resolved',data:{itemIndex,responses:[...emotionItemResponsesRef.current]},timestamp:Date.now()})}).catch(()=>{});
+          // #endregion
+          }
+        }
+        interviewStatusRef.current = 'preparing_results';
+        setInterviewStatus('preparing_results');
+        if (userId) markPreparingResultsSession(userId);
         setPendingCompletion(true);
         return;
       }
 
       // Then handle per-scenario completion tokens (may appear in earlier messages or alongside other markers)
-      const scenarioMatch = text.match(/\[SCENARIO_COMPLETE:(\d)\]/);
-      if (scenarioMatch) {
+      /** Model / proxy may use any casing, optional spaces after the colon (`[SCENARIO_COMPLETE: 1]`), etc. */
+      const scenarioCompleteMatch = text.match(/\[SCENARIO_COMPLETE:\s*(\d+)\]/i);
+      const scenarioCompleteParsed =
+        scenarioCompleteMatch != null ? parseInt(scenarioCompleteMatch[1] ?? '', 10) : NaN;
+      const scenarioCompleteNumber: 1 | 2 | 3 | null =
+        scenarioCompleteParsed >= 1 && scenarioCompleteParsed <= 3
+          ? (scenarioCompleteParsed as 1 | 2 | 3)
+          : null;
+      if (scenarioCompleteNumber != null) {
         lastAnsweredClosingScenarioRef.current = null;
-        const scenarioNumber = parseInt(scenarioMatch[1], 10) as 1 | 2 | 3;
+        const scenarioNumber = scenarioCompleteNumber;
+        const priorScenarioForEmotionModal =
+          currentScenarioRef.current === 1 ||
+          currentScenarioRef.current === 2 ||
+          currentScenarioRef.current === 3
+            ? currentScenarioRef.current
+            : null;
         let transitionDisplay = stripControlTokens(text) || "Good, that's helpful.";
         transitionDisplay = stripFlatReflectionAcknowledgmentOpeners(transitionDisplay);
         transitionDisplay = stripGenericReflectionFillersFirstParagraph(transitionDisplay);
@@ -10670,33 +14623,87 @@ The participant **confirmed** skipping after the skip confirmation prompt. In **
             allowAppendWhenMissing: true,
           });
         }
-        const momentBeforeScenarioComplete = currentInterviewMomentRef.current;
-        if (scenarioNumber === 1) {
-          interviewMomentsCompleteRef.current[1] = true;
-          currentInterviewMomentRef.current = 2;
-        } else if (scenarioNumber === 2) {
-          interviewMomentsCompleteRef.current[2] = true;
-          currentInterviewMomentRef.current = 3;
-          resetScenarioCClientGatesOnly();
-        } else if (scenarioNumber === 3) {
-          interviewMomentsCompleteRef.current[3] = true;
+        const reconciledScenarioNumber = completedScenarioForEmotionModalFromTransition({
+          declaredComplete: scenarioNumber,
+          transitionText: displayText,
+          priorScenario: priorScenarioForEmotionModal,
+        });
+        if (reconciledScenarioNumber !== scenarioNumber) {
+          void remoteLog('[SCENARIO_COMPLETE] reconciled_token_scenario', {
+            declared: scenarioNumber,
+            reconciled: reconciledScenarioNumber,
+            priorScenario: priorScenarioForEmotionModal,
+          });
         }
-        applyInterviewProgressFromAssistantText(displayText, progressRefsPayload);
-        const transitionMsg: MessageWithScenario = { role: 'assistant', content: displayText, scenarioNumber };
-        const nextScenarioNum = scenarioNumber < 3 ? (scenarioNumber + 1) as 2 | 3 : 3;
-        currentScenarioRef.current = nextScenarioNum;
+        const scenarioCompleteSplit = splitScenarioTransitionForEmotionModal(displayText);
+        const deferScenarioCompleteEmotionModal = shouldDeferEmotionModalForTransitionText(displayText);
+        const tokenPathBundledHandoff =
+          deferScenarioCompleteEmotionModal && scenarioCompleteSplit.afterModal.trim().length > 0;
+        if (!tokenPathBundledHandoff) {
+          if (reconciledScenarioNumber === 1) {
+            interviewMomentsCompleteRef.current[1] = true;
+            currentInterviewMomentRef.current = 2;
+          } else if (reconciledScenarioNumber === 2) {
+            interviewMomentsCompleteRef.current[2] = true;
+            currentInterviewMomentRef.current = 3;
+            resetScenarioCClientGatesOnly();
+          } else if (reconciledScenarioNumber === 3) {
+            interviewMomentsCompleteRef.current[3] = true;
+          }
+        }
+        applyInterviewProgressFromAssistantText(
+          tokenPathBundledHandoff ? scenarioCompleteSplit.beforeModal : displayText,
+          progressRefsPayload,
+        );
+        const nextScenarioNum =
+          reconciledScenarioNumber < 3 ? ((reconciledScenarioNumber + 1) as 2 | 3) : 3;
+        const transitionMsg: MessageWithScenario = {
+          role: 'assistant',
+          content: tokenPathBundledHandoff ? scenarioCompleteSplit.beforeModal : displayText,
+          scenarioNumber: tokenPathBundledHandoff
+            ? ((priorScenarioForEmotionModal ?? reconciledScenarioNumber) as 1 | 2 | 3)
+            : nextScenarioNum,
+        };
+        if (!tokenPathBundledHandoff) {
+          currentScenarioRef.current = nextScenarioNum;
+        } else if (priorScenarioForEmotionModal != null) {
+          currentScenarioRef.current = priorScenarioForEmotionModal;
+        }
         const updatedMessages = [...messagesToUse, transitionMsg];
         setMessages(updatedMessages);
-        setHighestScenarioReached((prev) => Math.max(prev, scenarioNumber));
-        if (!scoredScenariosRef.current.has(scenarioNumber)) {
-          scoredScenariosRef.current.add(scenarioNumber);
-          scoreScenario(scenarioNumber, updatedMessages);
+        if (!tokenPathBundledHandoff) {
+          setHighestScenarioReached((prev) => Math.max(prev, reconciledScenarioNumber));
         }
-        await notifyScenarioStarted(nextScenarioNum, updatedMessages);
-        await speakAssistantTurn(displayText, ASSISTANT_INTERVIEW_SPEECH);
+        if (tokenPathBundledHandoff) {
+          pendingEmotionModalTransitionRef.current = {
+            completedScenario: reconciledScenarioNumber,
+            afterModal: scenarioCompleteSplit.afterModal,
+            transitionText: displayText,
+            priorScenario: priorScenarioForEmotionModal,
+          };
+          await speakAssistantTurn(scenarioCompleteSplit.beforeModal, ASSISTANT_INTERVIEW_SPEECH);
+        } else if (deferScenarioCompleteEmotionModal) {
+          await speakAssistantTurn(displayText, ASSISTANT_INTERVIEW_SPEECH);
+        } else {
+          if (!scoredScenariosRef.current.has(reconciledScenarioNumber)) {
+            scoredScenariosRef.current.add(reconciledScenarioNumber);
+            scoreScenario(reconciledScenarioNumber, updatedMessages);
+          }
+          await notifyScenarioStarted(nextScenarioNum, updatedMessages);
+          await speakAssistantTurn(scenarioCompleteSplit.beforeModal, ASSISTANT_INTERVIEW_SPEECH);
+          await runEmotionModalAfterScenarioTransition(reconciledScenarioNumber, {
+            transitionText: displayText,
+            priorScenario: priorScenarioForEmotionModal,
+          });
+          if (scenarioCompleteSplit.afterModal.trim()) {
+            await speakAssistantTurn(scenarioCompleteSplit.afterModal, ASSISTANT_INTERVIEW_SPEECH);
+          } else if (__DEV__) {
+            console.warn('[Aria] emotion modal transition: missing afterModal split');
+          }
+        }
         if (__DEV__) {
-          closingQuestionAskedRef.current[scenarioNumber] = false;
-          closingQuestionAnsweredRef.current[scenarioNumber] = false;
+          closingQuestionAskedRef.current[reconciledScenarioNumber] = false;
+          closingQuestionAnsweredRef.current[reconciledScenarioNumber] = false;
         }
         setVoiceState('idle');
         return;
@@ -10778,17 +14785,498 @@ The participant **confirmed** skipping after the skip confirmation prompt. In **
         setClosingQuestionScenario(n);
       }
 
-      const displayText = ensureAcknowledgmentBeforeMove(
+      let displayText = ensureAcknowledgmentBeforeMove(
         strippedText,
         trimmed,
         recentAsstForAck,
         currentInterviewMomentRef.current
       );
+      if (!isPersonalMomentInterviewTurn(currentInterviewMomentRef.current)) {
+        if (isStandalonePersonalDisclosureAcknowledgment(displayText)) {
+          const scenarioFollowUp = resolveScenarioFollowUpAfterSuppressedResponse({
+            interviewMoment: currentInterviewMomentRef.current,
+            shouldForceScenarioAContemptProbe,
+            assistantIssuedScenarioAContemptProbe,
+            shouldInjectScenarioARepairAfterContemptAnswer,
+            shouldForceScenarioBFullAppreciationProbe,
+            assistantIssuedScenarioBFullProbe,
+            needsScenarioBJamesDifferentlyInsert,
+            scenarioAContemptProbeAsked: scenarioAContemptProbeAskedRef.current,
+            scenarioARepairQuestionAsked: scenarioARepairQuestionAskedRef.current,
+            transcriptMessages: messagesToUse,
+            contemptProbeDeliveredThisTurn: scenarioAContemptProbeAskedRef.current,
+          });
+          if (scenarioFollowUp) {
+            if (!shouldDeliverScenarioFollowUpQuestion(messagesToUse, scenarioFollowUp)) {
+              void remoteLog('[SCENARIO_PERSONAL_ACK_FOLLOWUP_SKIPPED_TRANSCRIPT_DEDUP]', {
+                interviewSessionId: interviewSessionIdRef.current,
+                preview: scenarioFollowUp.slice(0, 200),
+              });
+              displayText = '';
+            } else {
+            void remoteLog('[SCENARIO_PERSONAL_ACK_REPLACED_WITH_FOLLOWUP]', {
+              interviewSessionId: interviewSessionIdRef.current,
+              interviewMoment: currentInterviewMomentRef.current,
+              preview: scenarioFollowUp.slice(0, 200),
+            });
+            displayText = scenarioFollowUp;
+            }
+          } else {
+            displayText = '';
+          }
+        }
+      }
+      if (!assistantTurnHasPersistableContent(displayText)) {
+        void remoteLog('[TRANSCRIPT_EMPTY_ASSISTANT_SKIPPED]', {
+          interviewSessionId: interviewSessionIdRef.current,
+          interviewMoment: currentInterviewMomentRef.current,
+          elongatingSuppressedForUserTurn,
+          assistantTurnIsElongatingProbeOnly,
+          streamPreview: streamFullTrimmed.slice(0, 260),
+          modelPreview: text.slice(0, 260),
+        });
+        if (parallelStreamingPlaybackUsed) {
+          parallelStreamingTtsRef.current.cancelRequested = true;
+        }
+        const postM5UserTurnsForClose = Math.max(
+          moment5PostPromptUserTurnCountRef.current,
+          countUserTurnsAfterLastMoment5PrimaryAnchor(
+            messagesToUse.map((m) => ({
+              role: m.role,
+              content: (m as { content?: string }).content ?? '',
+              isWelcomeBack: (m as { isWelcomeBack?: boolean }).isWelcomeBack,
+            })),
+            moment5PrimaryAnchorDeliveredSessionRef.current,
+          ),
+        );
+        const moment5CombinedForSuppressedClose = combineMoment5UserTurnText(
+          messagesToUse.filter((m) => !(m as { isWelcomeBack?: boolean }).isWelcomeBack) as Array<{
+            role: string;
+            content?: string;
+          }>,
+        );
+        const hasMoment5PrimaryAnchorForSuppressedClose =
+          moment5PrimaryAnchorDeliveredSessionRef.current ||
+          messagesToUse.some(
+            (m) =>
+              m.role === 'assistant' &&
+              !(m as { isWelcomeBack?: boolean }).isWelcomeBack &&
+              transcriptAssistantContainsMoment5PrimaryConflictQuestion(
+                (m as { content?: string }).content ?? '',
+              ),
+          );
+        const accountabilityProbeStillRequiredForClose =
+          (moment5QuestionDeliveredRef.current || hasMoment5PrimaryAnchorForSuppressedClose) &&
+          !moment5AccountabilityProbeFiredRef.current &&
+          evaluateMoment5AccountabilityProbe(moment5CombinedForSuppressedClose).shouldProbe;
+        const resolutionFollowUpStillRequiredForClose =
+          hasMoment5PrimaryAnchorForSuppressedClose &&
+          !moment5AnswerIncludesResolutionOutcome(moment5CombinedForSuppressedClose) &&
+          !transcriptHasMoment5ResolutionFollowUpAsked(
+            messagesToUse.map((m) => ({
+              role: m.role,
+              content: (m as { content?: string }).content ?? '',
+              isWelcomeBack: (m as { isWelcomeBack?: boolean }).isWelcomeBack,
+            })),
+          );
+        const moment5CloseAfterSuppressedElongating =
+          elongatingSuppressedForUserTurn &&
+          isMoment5ReadyForInterviewClose({
+            currentInterviewMoment: currentInterviewMomentRef.current,
+            moment5QuestionDelivered: moment5QuestionDeliveredRef.current,
+            postM5UserTurns: postM5UserTurnsForClose,
+            accountabilityProbeFired: moment5AccountabilityProbeFiredRef.current,
+            hasMoment5PrimaryAnchorInTranscript: hasMoment5PrimaryAnchorForSuppressedClose,
+            moment5CombinedUserText: moment5CombinedForSuppressedClose,
+            accountabilityProbeStillRequired: accountabilityProbeStillRequiredForClose,
+            resolutionFollowUpStillRequired: resolutionFollowUpStillRequiredForClose,
+          });
+        if (moment5CloseAfterSuppressedElongating) {
+          text = buildMoment5ClosingFallbackAfterSuppressedElongating(participantFirstNameForSpoken);
+          parallelStreamingTtsRef.current.cancelRequested = true;
+          void remoteLog('[ELONGATING_PROBE_SUPPRESSED_M5_CLOSE_FALLBACK]', {
+            interviewSessionId: interviewSessionIdRef.current,
+            postM5UserTurns: postM5UserTurnsForClose,
+            preview: text.slice(0, 200),
+          });
+        } else if (elongatingSuppressedForUserTurn) {
+          if (
+            shouldInjectScenarioARepairAfterContemptAnswer &&
+            shouldDeliverScenarioFollowUpQuestion(messagesToUse, SCENARIO_A_REPAIR_QUESTION_AFTER_CONTEMPT_COPY)
+          ) {
+            displayText = SCENARIO_A_REPAIR_QUESTION_AFTER_CONTEMPT_COPY;
+            void remoteLog('[S1_REPAIR_FALLBACK_AFTER_EMPTY_CONTEMPT_DUPLICATE]', {
+              interviewSessionId: interviewSessionIdRef.current,
+              preview: displayText,
+              s1ContemptFixVersion: 9,
+            });
+          } else if (
+            muteParallelTtsForScenarioAContemptProbeStream &&
+            scenarioAContemptProbeAskedRef.current &&
+            !scenarioARepairQuestionAskedRef.current
+          ) {
+            void remoteLog('[S1_CONTEMPT_DELIVERY_SKIP_POST_STREAM_FALLBACK]', {
+              interviewSessionId: interviewSessionIdRef.current,
+              s1ContemptFixVersion: 11,
+            });
+            setVoiceState('idle');
+            return;
+          } else if (isPersonalMomentInterviewTurn(currentInterviewMomentRef.current)) {
+            displayText = buildNeutralAckAfterSuppressedElongatingProbe(participantFirstNameForSpoken);
+            void remoteLog('[ELONGATING_PROBE_SUPPRESSED_NEUTRAL_ACK_FALLBACK]', {
+              interviewSessionId: interviewSessionIdRef.current,
+              interviewMoment: currentInterviewMomentRef.current,
+              preview: displayText,
+            });
+          } else {
+            const scenarioFollowUp = resolveScenarioFollowUpAfterSuppressedResponse({
+              interviewMoment: currentInterviewMomentRef.current,
+              shouldForceScenarioAContemptProbe,
+              assistantIssuedScenarioAContemptProbe,
+              shouldInjectScenarioARepairAfterContemptAnswer,
+              shouldForceScenarioBFullAppreciationProbe,
+              assistantIssuedScenarioBFullProbe,
+              needsScenarioBJamesDifferentlyInsert,
+              scenarioAContemptProbeAsked: scenarioAContemptProbeAskedRef.current,
+              scenarioARepairQuestionAsked: scenarioARepairQuestionAskedRef.current,
+              transcriptMessages: messagesToUse,
+              contemptProbeDeliveredThisTurn: scenarioAContemptProbeAskedRef.current,
+            });
+            if (scenarioFollowUp) {
+              if (!shouldDeliverScenarioFollowUpQuestion(messagesToUse, scenarioFollowUp)) {
+                void remoteLog('[SCENARIO_FOLLOWUP_FALLBACK_SKIPPED_TRANSCRIPT_DEDUP]', {
+                  interviewSessionId: interviewSessionIdRef.current,
+                  preview: scenarioFollowUp.slice(0, 200),
+                });
+                void remoteLog('[SCENARIO_SUPPRESSED_ELONGATING_NO_FALLBACK]', {
+                  interviewSessionId: interviewSessionIdRef.current,
+                  interviewMoment: currentInterviewMomentRef.current,
+                });
+                setVoiceState('idle');
+                return;
+              }
+              displayText = scenarioFollowUp;
+              void remoteLog('[SCENARIO_FOLLOWUP_FALLBACK_AFTER_SUPPRESSED_ELONGATING]', {
+                interviewSessionId: interviewSessionIdRef.current,
+                interviewMoment: currentInterviewMomentRef.current,
+                preview: displayText.slice(0, 200),
+              });
+            } else {
+              void remoteLog('[SCENARIO_SUPPRESSED_ELONGATING_NO_FALLBACK]', {
+                interviewSessionId: interviewSessionIdRef.current,
+                interviewMoment: currentInterviewMomentRef.current,
+              });
+              setVoiceState('idle');
+              return;
+            }
+          }
+        } else if (transcriptHasInterviewClosingAssistantMessage(messagesToUse)) {
+          void remoteLog('[INTERVIEW_CLOSING_DUPLICATE_SUPPRESSED_HANDOFF]', {
+            interviewSessionId: interviewSessionIdRef.current,
+            postM5UserTurns: postM5UserTurnsForClose,
+          });
+          void persistInterviewAttemptSessionLifecycle(interviewSessionAttemptIdRef.current, 'completed');
+          interviewMomentsCompleteRef.current[4] = true;
+          interviewMomentsCompleteRef.current[5] = true;
+          currentInterviewMomentRef.current = 5;
+          isInterviewCompleteRef.current = true;
+          setVoiceState('idle');
+          const transcriptForScoring = messagesToUse.filter(
+            (m) => m.role === 'user' || m.role === 'assistant',
+          );
+          pendingCompletionTranscriptRef.current = transcriptForScoring;
+          if (userId) {
+            const completed = Array.from(scoredScenariosRef.current);
+            const scenarioScoresPayload: Record<
+              number,
+              {
+                pillarScores: Record<string, number | null>;
+                pillarConfidence: Record<string, string>;
+                keyEvidence: Record<string, string>;
+                scenarioName?: string;
+              }
+            > = {};
+            [1, 2, 3].forEach((n) => {
+              const s = scenarioScoresRef.current[n];
+              if (s) {
+                scenarioScoresPayload[n] = {
+                  pillarScores: s.pillarScores,
+                  pillarConfidence: s.pillarConfidence,
+                  keyEvidence: s.keyEvidence,
+                  scenarioName: s.scenarioName,
+                };
+              }
+            });
+            try {
+              await saveInterviewProgress(userId, {
+                messages: transcriptForScoring,
+                scenariosCompleted: completed,
+                scenarioScores: scenarioScoresPayload,
+                currentScenario: getCurrentScenario(scoredScenariosRef.current),
+                resumeActiveScenario: resumeActiveScenarioRef.current,
+                emotionItemResponses: [...emotionItemResponsesRef.current],
+                pendingCompletion: true,
+              });
+            } catch (persistErr) {
+              void remoteLog('[WARN] saveInterviewProgress_failed_before_pending_completion', {
+                message: persistErr instanceof Error ? persistErr.message : String(persistErr),
+              });
+            }
+          }
+          const unansweredEmotionAtClose = listUnansweredEmotionModalIndices(
+            emotionItemResponsesRef.current,
+            3,
+          );
+          if (unansweredEmotionAtClose.length > 0) {
+            void remoteLog('[EMOTION_MODAL] catch_up_before_interview_complete', {
+              indices: unansweredEmotionAtClose,
+              source: 'duplicate_closing_suppressed',
+            });
+            for (const itemIndex of unansweredEmotionAtClose) {
+              await awaitEmotionModalForIndex(itemIndex);
+            }
+          }
+          interviewStatusRef.current = 'preparing_results';
+          setInterviewStatus('preparing_results');
+          if (userId) markPreparingResultsSession(userId);
+          setPendingCompletion(true);
+          kickCompletionScoring('closing_duplicate_suppressed_handoff', transcriptForScoring);
+          return;
+        } else if (
+          parallelStreamingPlaybackUsed &&
+          (textToParallelStream.closingSpoken ||
+            hasInterviewClosingTtsDeliveredForSession(
+              interviewSessionAttemptIdRef.current ?? interviewSessionIdRef.current,
+            ) ||
+            looksLikeInterviewClosingAssistantMessage(
+              stripDuplicateInterviewClosingSentencesWithinDraft(
+                stripControlTokens(textToParallelStream.full).trim(),
+              ),
+            ))
+        ) {
+          const streamClosingRaw = stripDuplicateInterviewClosingSentencesWithinDraft(
+            stripControlTokens(textToParallelStream.full).trim(),
+          );
+          void remoteLog('[M5_CLOSING_STREAM_ONLY_HANDOFF]', {
+            interviewSessionId: interviewSessionIdRef.current,
+            preview: streamClosingRaw.slice(0, 260),
+            closingSpokenInStream: textToParallelStream.closingSpoken,
+            streamDelivered: hasInterviewClosingTtsDeliveredForSession(
+              interviewSessionAttemptIdRef.current ?? interviewSessionIdRef.current,
+            ),
+          });
+          void persistInterviewAttemptSessionLifecycle(interviewSessionAttemptIdRef.current, 'completed');
+          interviewMomentsCompleteRef.current[4] = true;
+          interviewMomentsCompleteRef.current[5] = true;
+          currentInterviewMomentRef.current = 5;
+          isInterviewCompleteRef.current = true;
+          setVoiceState('idle');
+          const streamClosingMsg: MessageWithScenario = {
+            role: 'assistant',
+            content: streamClosingRaw,
+            scenarioNumber: 3,
+            interviewMoment: 5,
+          };
+          const transcriptForScoring = [
+            ...messagesToUse.filter((m) => m.role === 'user' || m.role === 'assistant'),
+            streamClosingMsg,
+          ];
+          setMessages(transcriptForScoring);
+          pendingCompletionTranscriptRef.current = transcriptForScoring;
+          if (userId) {
+            const completed = Array.from(scoredScenariosRef.current);
+            const scenarioScoresPayload: Record<
+              number,
+              {
+                pillarScores: Record<string, number | null>;
+                pillarConfidence: Record<string, string>;
+                keyEvidence: Record<string, string>;
+                scenarioName?: string;
+              }
+            > = {};
+            [1, 2, 3].forEach((n) => {
+              const s = scenarioScoresRef.current[n];
+              if (s) {
+                scenarioScoresPayload[n] = {
+                  pillarScores: s.pillarScores,
+                  pillarConfidence: s.pillarConfidence,
+                  keyEvidence: s.keyEvidence,
+                  scenarioName: s.scenarioName,
+                };
+              }
+            });
+            try {
+              await saveInterviewProgress(userId, {
+                messages: transcriptForScoring,
+                scenariosCompleted: completed,
+                scenarioScores: scenarioScoresPayload,
+                currentScenario: getCurrentScenario(scoredScenariosRef.current),
+                resumeActiveScenario: resumeActiveScenarioRef.current,
+                emotionItemResponses: [...emotionItemResponsesRef.current],
+                pendingCompletion: true,
+              });
+            } catch (persistErr) {
+              void remoteLog('[WARN] saveInterviewProgress_failed_before_pending_completion', {
+                message: persistErr instanceof Error ? persistErr.message : String(persistErr),
+              });
+            }
+          }
+          if (kickCompletionScoring('closing_stream_only_handoff', transcriptForScoring)) {
+            scoreInterviewAttemptedRef.current = true;
+          }
+          interviewStatusRef.current = 'preparing_results';
+          setInterviewStatus('preparing_results');
+          if (userId) markPreparingResultsSession(userId);
+          setPendingCompletion(true);
+          return;
+        } else {
+          setVoiceState('idle');
+          return;
+        }
+        if (moment5CloseAfterSuppressedElongating && text.includes('[INTERVIEW_COMPLETE]')) {
+          if (isInterviewCompleteRef.current) {
+            void remoteLog('[INTERVIEW_COMPLETE_DUPLICATE_SKIPPED]', {
+              interviewSessionId: interviewSessionIdRef.current,
+              source: 'elongating_suppressed_m5_close_fallback',
+              preview: text.slice(0, 200),
+            });
+            setVoiceState('idle');
+            return;
+          }
+          void persistInterviewAttemptSessionLifecycle(interviewSessionAttemptIdRef.current, 'completed');
+          await remoteLog('[0] INTERVIEW_COMPLETE token detected in response', {
+            isAdmin,
+            ALPHA_MODE,
+            userId: userId ?? null,
+            responseLength: text.length,
+            interviewStatus,
+            source: 'elongating_suppressed_m5_close_fallback',
+          });
+          interviewMomentsCompleteRef.current[4] = true;
+          interviewMomentsCompleteRef.current[5] = true;
+          currentInterviewMomentRef.current = 5;
+          let closingRaw = stripControlTokens(text) || 'Thank you. That was really helpful.';
+          closingRaw = stripFlatReflectionAcknowledgmentOpeners(closingRaw);
+          closingRaw = stripGenericReflectionFillersFirstParagraph(closingRaw);
+          closingRaw = stripHollowSystemInterviewerPhrases(closingRaw);
+          closingRaw = collapseStackedEmpathyIHearYouInFirstParagraph(closingRaw);
+          closingRaw = stripForbiddenReflectionLead(closingRaw);
+          let closingDisplay = sanitizeClosingLanguage(closingRaw);
+          closingDisplay = ensureAcknowledgmentBeforeClosing(
+            closingDisplay,
+            trimmed,
+            recentAssistantMessagesForAck(messagesToUse),
+          );
+          {
+            const closingInterviewName = resolvePlausibleInterviewFirstName(interviewNameRef.current) ?? '';
+            closingDisplay = dedupeAdjacentBoundaryValidationsBeforeParticipantName(
+              sanitizeAssistantInterviewerCharacterNames(closingDisplay),
+              closingInterviewName,
+            );
+          }
+          closingDisplay = ensureSpokenTextIncludesParticipantFirstName(
+            closingDisplay,
+            resolvePlausibleInterviewFirstName(interviewNameRef.current) ?? '',
+            { allowAppendWhenMissing: true },
+          );
+          const finalAssistant: MessageWithScenario = {
+            role: 'assistant',
+            content: closingDisplay,
+            scenarioNumber: resolveAssistantScenarioNumber(closingDisplay, messagesToUse),
+          };
+          const finalMessages = [...messagesToUse, finalAssistant];
+          setMessages(finalMessages);
+          isInterviewCompleteRef.current = true;
+          const transcriptForScoring = finalMessages.filter((m) => m.role === 'user' || m.role === 'assistant');
+          try {
+            await speakAssistantTurn(closingDisplay, {
+              telemetrySource: 'turn',
+              interviewSpeechRole: 'assistant_response',
+            });
+          } catch {
+            /* proceed to scoring even if TTS fails */
+          } finally {
+            setVoiceState('idle');
+          }
+          pendingCompletionTranscriptRef.current = transcriptForScoring;
+          if (userId) {
+            const completed = Array.from(scoredScenariosRef.current);
+            const scenarioScoresPayload: Record<
+              number,
+              {
+                pillarScores: Record<string, number | null>;
+                pillarConfidence: Record<string, string>;
+                keyEvidence: Record<string, string>;
+                scenarioName?: string;
+              }
+            > = {};
+            [1, 2, 3].forEach((n) => {
+              const s = scenarioScoresRef.current[n];
+              if (s) {
+                scenarioScoresPayload[n] = {
+                  pillarScores: s.pillarScores,
+                  pillarConfidence: s.pillarConfidence,
+                  keyEvidence: s.keyEvidence,
+                  scenarioName: s.scenarioName,
+                };
+              }
+            });
+            try {
+              await saveInterviewProgress(userId, {
+                messages: transcriptForScoring,
+                scenariosCompleted: completed,
+                scenarioScores: scenarioScoresPayload,
+                currentScenario: getCurrentScenario(scoredScenariosRef.current),
+                resumeActiveScenario: resumeActiveScenarioRef.current,
+                emotionItemResponses: [...emotionItemResponsesRef.current],
+                pendingCompletion: true,
+              });
+            } catch (persistErr) {
+              void remoteLog('[WARN] saveInterviewProgress_failed_before_pending_completion', {
+                message: persistErr instanceof Error ? persistErr.message : String(persistErr),
+              });
+            }
+          }
+          const unansweredEmotionAtClose = listUnansweredEmotionModalIndices(
+            emotionItemResponsesRef.current,
+            3,
+          );
+          if (unansweredEmotionAtClose.length > 0) {
+            void remoteLog('[EMOTION_MODAL] catch_up_before_interview_complete', {
+              indices: unansweredEmotionAtClose,
+            });
+            for (const itemIndex of unansweredEmotionAtClose) {
+              await awaitEmotionModalForIndex(itemIndex);
+            }
+          }
+          interviewStatusRef.current = 'preparing_results';
+          setInterviewStatus('preparing_results');
+          if (userId) markPreparingResultsSession(userId);
+          setPendingCompletion(true);
+          kickCompletionScoring('elongating_suppressed_m5_close', transcriptForScoring);
+          return;
+        }
+      }
+      /** Capture before `detectScenarioFromResponse` mutates `currentScenarioRef` — needed for emotion modals on natural-language transitions (no `[SCENARIO_COMPLETE:N]`). */
+      const priorScenarioNumRaw = currentScenarioRef.current;
+      const priorScenarioNum: 1 | 2 | 3 =
+        priorScenarioNumRaw === 1 || priorScenarioNumRaw === 2 || priorScenarioNumRaw === 3
+          ? priorScenarioNumRaw
+          : 1;
+      const emotionSplitEarly = splitScenarioTransitionForEmotionModal(displayText);
+      const deferEmotionModalEarly = shouldDeferEmotionModalForTransitionText(displayText);
+      const pendingBundledHandoff =
+        deferEmotionModalEarly && emotionSplitEarly.afterModal.trim().length > 0;
       const detectedScenario = detectScenarioFromResponse(displayText);
-      if (detectedScenario !== null) {
+      if (!pendingBundledHandoff && detectedScenario !== null) {
         currentScenarioRef.current = detectedScenario;
       }
-      const scenarioNum = resolveAssistantScenarioNumber(displayText, messagesToUse);
+      const scenarioNum = pendingBundledHandoff
+        ? priorScenarioNum
+        : resolveAssistantScenarioNumber(displayText, messagesToUse);
+      const assistantContentToPersist = pendingBundledHandoff
+        ? emotionSplitEarly.beforeModal
+        : displayText;
       if (isClosingQuestion(displayText)) {
         setClosingQuestionPending(true);
         const scenarioForClosing = (scenarioNum === 1 || scenarioNum === 2 || scenarioNum === 3 ? scenarioNum : 1) as 1 | 2 | 3;
@@ -10803,9 +15291,43 @@ The participant **confirmed** skipping after the skip confirmation prompt. In **
         scenarioNumber: scenarioNum,
       };
       lastAnsweredClosingScenarioRef.current = null;
+      /** Must run before `applyInterviewProgressFromAssistantText` — that helper can bump moment to 4 and falsify `<= 3` checks. */
+      const s3ToM4HandoffSignals =
+        isScenarioThreeToMoment4EmotionModalHandoff(displayText) ||
+        combinedScenarioCToMoment4Handoff(displayText) ||
+        (currentInterviewMomentRef.current <= 3 && grudgeIntroSignalsMoment4Entry(displayText));
+      if (s3ToM4HandoffSignals) {
+        ensureCompletedScenarioScored(3, messagesToUse, 's3_to_m4_natural_handoff');
+        interviewMomentsCompleteRef.current[3] = true;
+        currentInterviewMomentRef.current = 4;
+      }
       applyInterviewProgressFromAssistantText(displayText, progressRefsPayload);
-      const updatedMessages = [...messagesToUse, aiMsg];
-      setMessages(updatedMessages);
+      const liveTranscriptForAppend = currentMessagesRef.current as MessageWithScenario[];
+      const skipDuplicatePreambleAppend =
+        isInterviewPreambleBriefingMoment(displayText) &&
+        liveTranscriptForAppend.some(
+          (m) => m.role === 'assistant' && isInterviewPreambleBriefingMoment(m.content ?? ''),
+        );
+      const updatedMessages: MessageWithScenario[] = skipDuplicatePreambleAppend
+        ? liveTranscriptForAppend
+        : appendAssistantTurnMergingConcurrentUsers(
+            liveTranscriptForAppend,
+            messagesToUse,
+            displayText,
+            {
+              scenarioNumber: scenarioNum,
+              interviewMoment: currentInterviewMomentRef.current,
+            },
+          );
+      commitInterviewMessages(updatedMessages);
+      void remoteLog('[EMOTION_MODAL_NATURAL_PATH_ENTER]', {
+        hypothesisId: 'H10_post_await_messages_snapshot',
+        updatedMessagesLength: updatedMessages.length,
+        skipDuplicatePreambleAppend,
+        priorScenarioNum,
+        detectedScenario,
+        preview: displayText.slice(0, 220),
+      });
       /**
        * `notifyScenarioStarted` only scores the just-finished scenario when it receives a message snapshot
        * (`[SCENARIO_SCORE_ON_TRANSITION]`). The stream often advances Situation 1→2 / 2→3 via natural language
@@ -10817,13 +15339,310 @@ The participant **confirmed** skipping after the skip confirmation prompt. In **
       }
       const aiDetected = detectConstructs(text);
       setTouchedConstructs((prev) => [...new Set([...prev, ...aiDetected])]);
+      /**
+       * Emotion modals are normally gated on `[SCENARIO_COMPLETE:N]`. Models often advance 1→2 / 2→3 using
+       * canonical prose ("That's the end of this scenario… Here's the next situation…") with **no** token
+       * (see `[SCENARIO_SCORE_ON_TRANSITION]`). Mirror the token path: split
+       * transition text, speak lead-in, await modal, then speak the next vignette / handoff tail.
+       */
+      const emotionSplit = splitScenarioTransitionForEmotionModal(displayText);
+      const deferEmotionModal = shouldDeferEmotionModalForTransitionText(displayText);
+      const scenarioHandoffTransition = isNaturalLanguageScenarioHandoffTransition(displayText);
+      const emotionGate = resolveNaturalLanguageEmotionModalGate({
+        displayText,
+        priorScenario: priorScenarioNum,
+        detectedScenario,
+      });
+      const emotionCompletedScenario = emotionGate.completedScenario;
+      const emotionNaturalForward =
+        status === 'active' &&
+        isInterviewAppRoute &&
+        !isAdmin &&
+        emotionGate.emotionNaturalForward &&
+        !isClosingQuestion(displayText) &&
+        !emotionGate.deferBlocked;
+      const emotionNaturalS3ToM4 =
+        status === 'active' &&
+        isInterviewAppRoute &&
+        !isAdmin &&
+        s3ToM4HandoffSignals &&
+        !deferEmotionModal &&
+        !emotionGate.deferBlocked;
+      if (
+        !pendingBundledHandoff &&
+        !deferEmotionModal &&
+        emotionNaturalForward &&
+        emotionCompletedScenario != null
+      ) {
+        ensureCompletedScenarioScored(emotionCompletedScenario, updatedMessages, 'natural_language_handoff');
+      } else if (!pendingBundledHandoff && !deferEmotionModal && emotionNaturalS3ToM4) {
+        ensureCompletedScenarioScored(3, updatedMessages, 'natural_language_s3_to_m4');
+      }
+      // #region agent log
+      fetch('http://127.0.0.1:7789/ingest/668e0bd5-3283-4492-9f48-e33846c18218',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'e00888'},body:JSON.stringify({sessionId:'e00888',runId:'post-fix',hypothesisId:'H1_H2_H8',location:'AriaScreen.tsx:assistant_transition_gate',message:'emotion_modal_transition_gate_eval',data:{priorScenarioNum,detectedScenario,emotionNaturalForward,emotionCompletedScenario,scenarioHandoffTransition,emotionNaturalS3ToM4,deferEmotionModal,deferBlocked:emotionGate.deferBlocked,hasAfterModal:emotionSplit.afterModal.trim().length>0,isClosingQuestion:isClosingQuestion(displayText),status,isInterviewAppRoute,isAdmin,preview:displayText.slice(0,180)},timestamp:Date.now()})}).catch(()=>{});
+      // #endregion
+      const speakTransitionWithOptionalEmotionModal = async (scenarioJustCompleted: 1 | 2 | 3) => {
+        const { beforeModal, afterModal } = emotionSplit;
+        if (deferEmotionModal && afterModal.trim()) {
+          // #region agent log
+          fetch('http://127.0.0.1:7789/ingest/668e0bd5-3283-4492-9f48-e33846c18218',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'e00888'},body:JSON.stringify({sessionId:'e00888',runId:'pre-fix',hypothesisId:'H2',location:'AriaScreen.tsx:speakTransitionWithOptionalEmotionModal',message:'emotion_modal_deferred_pending_set',data:{scenarioJustCompleted,beforeLength:beforeModal.length,afterLength:afterModal.length,priorScenarioNum},timestamp:Date.now()})}).catch(()=>{});
+          // #endregion
+          pendingEmotionModalTransitionRef.current = {
+            completedScenario: scenarioJustCompleted,
+            afterModal,
+            transitionText: displayText,
+            priorScenario: priorScenarioNum,
+          };
+          setMessages([...messagesToUse, { ...aiMsg, content: beforeModal }]);
+          await speakAssistantTurn(beforeModal, ASSISTANT_INTERVIEW_SPEECH);
+          return;
+        }
+        if (deferEmotionModal) {
       await speakAssistantTurn(displayText, ASSISTANT_INTERVIEW_SPEECH);
+          return;
+        }
+        await speakAssistantTurn(beforeModal, ASSISTANT_INTERVIEW_SPEECH);
+        await runEmotionModalAfterScenarioTransition(scenarioJustCompleted, {
+          transitionText: displayText,
+          priorScenario: priorScenarioNum,
+        });
+        if (afterModal.trim()) {
+          await speakAssistantTurn(afterModal, ASSISTANT_INTERVIEW_SPEECH);
+        } else if (__DEV__) {
+          console.warn('[Aria] emotion modal natural transition: missing afterModal split');
+        }
+      };
+      const closeGateForFailsafe = computeMoment5InterviewCloseGate(updatedMessages, {
+        moment5QuestionDelivered: moment5QuestionDeliveredRef.current,
+        moment5PrimaryAnchorSession: moment5PrimaryAnchorDeliveredSessionRef.current,
+        postM5UserTurnsRef: moment5PostPromptUserTurnCountRef.current,
+        accountabilityProbeFired: moment5AccountabilityProbeFiredRef.current,
+        currentInterviewMoment: currentInterviewMomentRef.current,
+      });
+      const closingCandidate =
+        displayText.trim() ||
+        strippedText.trim() ||
+        stripDuplicateInterviewClosingSentencesWithinDraft(
+          stripControlTokens(textToParallelStream.full).trim(),
+        );
+      const closingLooksFinal = looksLikeInterviewClosingAssistantMessage(closingCandidate);
+      const closingTtsSessionKey =
+        interviewSessionAttemptIdRef.current ?? interviewSessionIdRef.current;
+      const streamClosingAlreadyDelivered =
+        hasInterviewClosingTtsDeliveredForSession(closingTtsSessionKey);
+      const closingSpeakInFlight = hasInterviewClosingSpeakInFlightForSession(closingTtsSessionKey);
+      const lenientCloseReady = isLenientInterviewCloseAfterClosingSpeech({
+        closingText: closingCandidate,
+        hasMoment5PrimaryAnchorInTranscript: closeGateForFailsafe.hasMoment5PrimaryAnchorInTranscript,
+        postM5UserTurns: closeGateForFailsafe.postM5UserTurns,
+        personalHandoffInjected: personalHandoffInjectedRef.current,
+        currentInterviewMoment: currentInterviewMomentRef.current,
+        moment5CloseAllowed: closeGateForFailsafe.moment5CloseAllowed,
+      });
+      const shouldFailsafeComplete =
+        !isInterviewCompleteRef.current &&
+        isInterviewAppRoute &&
+        !isAdmin &&
+        status === 'active' &&
+        closingLooksFinal &&
+        (closeGateForFailsafe.moment5CloseAllowed ||
+          lenientCloseReady ||
+          streamClosingAlreadyDelivered ||
+          textToParallelStream.closingSpoken);
+      void remoteLog('[M5_CLOSING_HANDOFF_EVAL]', {
+        interviewSessionId: interviewSessionIdRef.current,
+        closingLooksFinal,
+        moment5CloseAllowed: closeGateForFailsafe.moment5CloseAllowed,
+        lenientCloseReady,
+        streamClosingAlreadyDelivered,
+        closingSpeakInFlight,
+        closingSpokenInStream: textToParallelStream.closingSpoken,
+        spokenStartedInStream: textToParallelStream.spokenStarted,
+        preview: closingCandidate.slice(0, 220),
+      });
+      const closingAlreadySpokenInTranscript =
+        transcriptHasInterviewClosingSpokenFragment(messagesToUse);
+      const streamThankYouSpeakCount =
+        parallelStreamingTtsRef.current.spokenCompleteText.match(
+          /\bthank you for being so open with me\b/gi,
+        )?.length ?? 0;
+      const streamSpokeClosingThankYou = streamThankYouSpeakCount >= 1;
+      const skipClosingSpeak =
+        (shouldFailsafeComplete || closingLooksFinal) &&
+        (closingAlreadySpokenInTranscript ||
+          textToParallelStream.closingSpoken ||
+          streamSpokeClosingThankYou ||
+          streamClosingAlreadyDelivered ||
+          closingSpeakInFlight);
+      void remoteLog('[EMOTION_MODAL_GATE_DIAG]', {
+        hypothesisId: 'H8_skip_closing_gate_blocks_modal',
+        priorScenarioNum,
+        detectedScenario,
+        emotionNaturalForward,
+        emotionCompletedScenario,
+        scenarioHandoffTransition,
+        emotionNaturalS3ToM4,
+        deferEmotionModal,
+        deferBlocked: emotionGate.deferBlocked,
+        hasAfterModal: emotionSplit.afterModal.trim().length > 0,
+        shouldFailsafeComplete,
+        closingLooksFinal,
+        skipClosingSpeak,
+        closingAlreadySpokenInTranscript,
+        closingSpokenInStream: textToParallelStream.closingSpoken,
+        spokenStartedInStream: textToParallelStream.spokenStarted,
+        preview: displayText.slice(0, 220),
+      });
+      if ((emotionNaturalForward || emotionNaturalS3ToM4) && skipClosingSpeak) {
+        void remoteLog('[EMOTION_MODAL_GATE_BLOCKED_BY_SKIP_CLOSING]', {
+          hypothesisId: 'H8_skip_closing_gate_blocks_modal',
+          priorScenarioNum,
+          detectedScenario,
+          emotionNaturalForward,
+          emotionNaturalS3ToM4,
+          closingLooksFinal,
+          shouldFailsafeComplete,
+          preview: displayText.slice(0, 220),
+        });
+      }
+      if (shouldFailsafeComplete) {
+        const candidateLooksThanks = isInterviewClosingThanksFragment(closingCandidate);
+        const candidateLooksReflective = isInterviewClosingReflectiveAckFragment(closingCandidate);
+        // #region agent log
+        fetch('http://127.0.0.1:7789/ingest/668e0bd5-3283-4492-9f48-e33846c18218',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'442e12'},body:JSON.stringify({sessionId:'442e12',location:'AriaScreen.tsx:closingFailsafe',message:'closing_candidate_detector_eval',data:{hypothesisId:'H4',preview:closingCandidate.slice(0,140),closingLooksFinal,candidateLooksThanks,candidateLooksReflective,closingSpokenInStream:textToParallelStream.closingSpoken,spokenStarted:textToParallelStream.spokenStarted},timestamp:Date.now()})}).catch(()=>{});
+        // #endregion
+        // #region agent log
+        fetch('http://127.0.0.1:7789/ingest/668e0bd5-3283-4492-9f48-e33846c18218',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'442e12'},body:JSON.stringify({sessionId:'442e12',location:'AriaScreen.tsx:closingFailsafe',message:'closing_handoff_decision',data:{hypothesisId:'H2',skipClosingSpeak,closingSpokenInStream:textToParallelStream.closingSpoken,streamSpokeClosingThankYou,spokenStarted:textToParallelStream.spokenStarted,spokenCompletePreview:parallelStreamingTtsRef.current.spokenCompleteText.slice(0,120),closingAlreadySpokenInTranscript,preview:closingCandidate.slice(0,120)},timestamp:Date.now()})}).catch(()=>{});
+        // #endregion
+        void remoteLog('[INTERVIEW_COMPLETE_CLOSING_FAILSAFE]', {
+          interviewSessionId: interviewSessionIdRef.current,
+          moment5CloseAllowed: closeGateForFailsafe.moment5CloseAllowed,
+          lenientCloseReady,
+          rawApiHadInterviewComplete,
+          accountabilityProbeStillRequired: closeGateForFailsafe.accountabilityProbeStillRequired,
+          postM5UserTurns: closeGateForFailsafe.postM5UserTurns,
+          closingAlreadySpokenInTranscript,
+          closingSpokenInStream: textToParallelStream.closingSpoken,
+          streamSpokeClosingThankYou,
+          streamThankYouSpeakCount,
+          spokenCompletePreview: parallelStreamingTtsRef.current.spokenCompleteText.slice(0, 220),
+          skipClosingSpeak,
+          preview: closingCandidate.slice(0, 260),
+        });
+      }
+      const mustRunEmotionTransitionPath = emotionNaturalForward || emotionNaturalS3ToM4;
+      if (pendingBundledHandoff) {
+        if (!parallelStreamingPlaybackUsed && assistantContentToPersist.trim()) {
+          await speakAssistantTurn(assistantContentToPersist, ASSISTANT_INTERVIEW_SPEECH);
+        }
+        setVoiceState('idle');
+        return;
+      }
+      if (!skipClosingSpeak || mustRunEmotionTransitionPath) {
+        if (emotionNaturalForward) {
+          await speakTransitionWithOptionalEmotionModal(
+            emotionCompletedScenario ?? priorScenarioNum,
+          );
+        } else if (emotionNaturalS3ToM4) {
+          await speakTransitionWithOptionalEmotionModal(3);
+        } else if (!skipClosingSpeak) {
+          if (
+            shouldFailsafeComplete &&
+            closingLooksFinal &&
+            parallelStreamingPlaybackUsed &&
+            !streamClosingAlreadyDelivered
+          ) {
+            const dedupedClosing = stripDuplicateInterviewClosingSentencesWithinDraft(closingCandidate);
+            if (dedupedClosing.trim()) {
+              // #region agent log
+              fetch('http://127.0.0.1:7789/ingest/668e0bd5-3283-4492-9f48-e33846c18218',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'442e12'},body:JSON.stringify({sessionId:'442e12',location:'AriaScreen.tsx:closingFailsafe',message:'closing_failsafe_direct_speak',data:{hypothesisId:'H7',preview:dedupedClosing.slice(0,140),spokenCompletePreview:parallelStreamingTtsRef.current.spokenCompleteText.slice(0,140)},timestamp:Date.now()})}).catch(()=>{});
+              // #endregion
+              await speakTextSafe(dedupedClosing, ASSISTANT_INTERVIEW_SPEECH);
+              textToParallelStream.closingSpoken = true;
+            }
+          } else {
+            await speakAssistantTurn(displayText, ASSISTANT_INTERVIEW_SPEECH);
+          }
+        }
+      }
+      if (shouldFailsafeComplete) {
+          void persistInterviewAttemptSessionLifecycle(interviewSessionAttemptIdRef.current, 'completed');
+          interviewMomentsCompleteRef.current[4] = true;
+          interviewMomentsCompleteRef.current[5] = true;
+          currentInterviewMomentRef.current = 5;
+          isInterviewCompleteRef.current = true;
+          setVoiceState('idle');
+          const transcriptForScoring = updatedMessages.filter(
+            (m) => m.role === 'user' || m.role === 'assistant',
+          );
+          pendingCompletionTranscriptRef.current = transcriptForScoring;
+          if (userId) {
+            const completed = Array.from(scoredScenariosRef.current);
+            const scenarioScoresPayload: Record<
+              number,
+              {
+                pillarScores: Record<string, number | null>;
+                pillarConfidence: Record<string, string>;
+                keyEvidence: Record<string, string>;
+                scenarioName?: string;
+              }
+            > = {};
+            [1, 2, 3].forEach((n) => {
+              const s = scenarioScoresRef.current[n];
+              if (s) {
+                scenarioScoresPayload[n] = {
+                  pillarScores: s.pillarScores,
+                  pillarConfidence: s.pillarConfidence,
+                  keyEvidence: s.keyEvidence,
+                  scenarioName: s.scenarioName,
+                };
+              }
+            });
+            try {
+              await saveInterviewProgress(userId, {
+                messages: transcriptForScoring,
+                scenariosCompleted: completed,
+                scenarioScores: scenarioScoresPayload,
+                currentScenario: getCurrentScenario(scoredScenariosRef.current),
+                resumeActiveScenario: resumeActiveScenarioRef.current,
+                emotionItemResponses: [...emotionItemResponsesRef.current],
+                pendingCompletion: true,
+              });
+            } catch (persistErr) {
+              void remoteLog('[WARN] saveInterviewProgress_failed_before_pending_completion', {
+                message: persistErr instanceof Error ? persistErr.message : String(persistErr),
+              });
+            }
+          }
+          if (kickCompletionScoring('closing_failsafe', transcriptForScoring)) {
+            scoreInterviewAttemptedRef.current = true;
+          }
+          const unansweredEmotionAtClose = listUnansweredEmotionModalIndices(
+            emotionItemResponsesRef.current,
+            3,
+          );
+          if (unansweredEmotionAtClose.length > 0) {
+            void remoteLog('[EMOTION_MODAL] catch_up_before_interview_complete', {
+              indices: unansweredEmotionAtClose,
+              source: 'closing_failsafe',
+            });
+            for (const itemIndex of unansweredEmotionAtClose) {
+              await awaitEmotionModalForIndex(itemIndex);
+            }
+          }
+          interviewStatusRef.current = 'preparing_results';
+          setInterviewStatus('preparing_results');
+          if (userId) markPreparingResultsSession(userId);
+          setPendingCompletion(true);
+          return;
+      }
     } finally {
       setIsWaiting(false);
     }
   }, [
     messages,
     speakTextSafe,
+    kickPostClosingInterviewCompletionIfReady,
     route?.name,
     userId,
     navigation,
@@ -10835,6 +15654,11 @@ The participant **confirmed** skipping after the skip confirmation prompt. In **
     markClosingQuestionAsked,
     markClosingQuestionAnswered,
     notifyScenarioStarted,
+    ensureCompletedScenarioScored,
+    status,
+    isInterviewAppRoute,
+    isAdmin,
+    runEmotionModalAfterScenarioTransition,
   ]);
 
   const handlePressStart = useCallback(async () => {
@@ -11210,6 +16034,7 @@ The participant **confirmed** skipping after the skip confirmation prompt. In **
           });
         }
         transcriptionFailureStreakRef.current = 0;
+        lastRecordingRetryDeliveredNormRef.current = null;
         return transcript;
       } catch (err) {
         void remoteLog('[TRANSCRIBE] catch', {
@@ -11229,14 +16054,11 @@ The participant **confirmed** skipping after the skip confirmation prompt. In **
           transcriptionFailureStreakRef.current,
           Platform.OS === 'web'
         );
-        setMessages((prev) => [...prev, { role: 'assistant', content: msg }]);
-        setVoiceState('speaking');
-        await speakTextSafe(msg).catch(() => {});
-        setVoiceState('idle');
+        await deliverRecordingRetryLine(msg);
         return null;
       }
     },
-    [speakTextSafe, deleteTurnAudioFile, userId, classifyError]
+    [deliverRecordingRetryLine, deleteTurnAudioFile, userId, classifyError]
   );
 
   /** Web mic pressIn: same gesture flush as any-page tap (see ensureWebGestureFlushListener). */
@@ -11365,7 +16187,19 @@ The participant **confirmed** skipping after the skip confirmation prompt. In **
       void applyRouteProbeAfterResume('media_services_reset');
     },
     onRecordingComplete: async (blob, nativeUri, meta) => {
+      if (recordingCompleteInFlightRef.current) {
+        void remoteLog('[RECORDING] duplicate onRecordingComplete ignored', {
+          blobBytes: blob?.size ?? 0,
+        });
+        await deleteTurnAudioFile(nativeUri);
+        return;
+      }
+      recordingCompleteInFlightRef.current = true;
       try {
+      if (Platform.OS === 'web') {
+        /** Fresh HTMLAudio autoplay authorization for assistant TTS after Whisper/STT (async gap). */
+        preAuthorizeAudioElementOnMicTapGesture();
+      }
       recordingPeakMeteringRef.current = meta?.peakMeteringDb ?? null;
       recordingJustFinishedBeforeNextTtsRef.current = true;
       setVoiceState('processing');
@@ -11407,9 +16241,20 @@ The participant **confirmed** skipping after the skip confirmation prompt. In **
       const vadBypassSpeechLikelyByPeakVsAmbient =
         peakAboveAmbientDb != null && peakAboveAmbientDb >= VAD_BYPASS_WHISPER_MIN_PEAK_ABOVE_AMBIENT_DB;
       /** Bleed/low-SNR: bypass with no frame above threshold AND peak not clearly above ambient. */
-      const blockWhisperForVadBypassNoSpeech =
+      let blockWhisperForVadBypassNoSpeech =
         vadGateBypassReason === VAD_GATE_BYPASS_REASON_NO_SAMPLE_EXCEEDED &&
         !vadBypassSpeechLikelyByPeakVsAmbient;
+      const contemptProbeAnswerVadGrace =
+        looksLikeScenarioAContemptProbeQuestion(lastQuestionTextRef.current ?? '') &&
+        analysis.has_non_zero_audio &&
+        analysis.buffer_size_bytes >= 32_000;
+      if (contemptProbeAnswerVadGrace && blockWhisperForVadBypassNoSpeech) {
+        blockWhisperForVadBypassNoSpeech = false;
+        void remoteLog('[S1_CONTEMPT_PROBE] whisper_allowed_despite_vad_bypass', {
+          buffer_size_bytes: analysis.buffer_size_bytes,
+          peak_above_ambient_db: peakAboveAmbientDb,
+        });
+      }
       if (meta?.recordingCapped && userId) {
         const r = getSessionLogRuntime();
         markLastAudioSessionEventType('recording_duration_cap_hit');
@@ -11568,13 +16413,7 @@ The participant **confirmed** skipping after the skip confirmation prompt. In **
           });
         }
         await deleteTurnAudioFile(nativeUri);
-        setMessages((prev) => [...prev, { role: 'assistant', content: SILENT_BUFFER_RETAKE_PROMPT }]);
-        setVoiceState('speaking');
-        await speakTextSafe(SILENT_BUFFER_RETAKE_PROMPT, {
-          telemetrySource: 'turn',
-          skipLastQuestionRef: true,
-        }).catch(() => {});
-        setVoiceState('idle');
+        await deliverRecordingRetryLine(SILENT_BUFFER_RETAKE_PROMPT);
         return;
       }
       transcribeBufferMetaRef.current = {
@@ -11752,6 +16591,7 @@ The participant **confirmed** skipping after the skip confirmation prompt. In **
             });
           },
         });
+        recordingCompleteInFlightRef.current = false;
       }
     },
     onError: (err) => handleRecordingError(err),
@@ -11910,7 +16750,30 @@ The participant **confirmed** skipping after the skip confirmation prompt. In **
     return () => {
       unsubBlur();
       unsubBeforeRemove();
-      stopInterviewAudio();
+      const closingSessionKey =
+        interviewSessionAttemptIdRef.current ?? interviewSessionIdRef.current;
+      const preserveClosingTts = hasInterviewClosingSpeakInFlightForSession(closingSessionKey);
+      if (preserveClosingTts) {
+        void remoteLog('[ARIA_UNMOUNT] closing_speak_preserved', {
+          interviewSessionId: interviewSessionIdRef.current,
+          attemptKey: closingSessionKey,
+        });
+        // #region agent log
+        fetch('http://127.0.0.1:7789/ingest/668e0bd5-3283-4492-9f48-e33846c18218',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'442e12'},body:JSON.stringify({sessionId:'442e12',location:'AriaScreen.tsx:unmount',message:'closing_speak_preserved_on_unmount',data:{hypothesisId:'H13',attemptKey:closingSessionKey},timestamp:Date.now()})}).catch(()=>{});
+        // #endregion
+      } else {
+        parallelStreamingTtsRef.current.cancelRequested = true;
+        webTtsSpeakGenerationRef.current += 1;
+        void remoteLog('[ARIA_UNMOUNT] parallel_stream_cancelled', {
+          interviewSessionId: interviewSessionIdRef.current,
+        });
+        // #region agent log
+        fetch('http://127.0.0.1:7789/ingest/668e0bd5-3283-4492-9f48-e33846c18218',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'442e12'},body:JSON.stringify({sessionId:'442e12',location:'AriaScreen.tsx:unmount',message:'parallel_stream_cancelled_on_unmount',data:{hypothesisId:'H10'},timestamp:Date.now()})}).catch(()=>{});
+        // #endregion
+      }
+      if (!preserveClosingTts) {
+        stopInterviewAudio();
+      }
     };
   }, [navigation]);
 
@@ -11967,6 +16830,9 @@ The participant **confirmed** skipping after the skip confirmation prompt. In **
     if (Platform.OS === 'web' && typeof document !== 'undefined') {
       const fn = () => {
         const vis = document.visibilityState === 'visible';
+        if (vis && emotionModalPendingTransitionRef.current) {
+          setEmotionModalVisible(true);
+        }
         const r = getSessionLogRuntime();
         writeSessionLog({
           userId,
@@ -11981,6 +16847,9 @@ The participant **confirmed** skipping after the skip confirmation prompt. In **
     }
     const sub = AppState.addEventListener('change', (next) => {
       if (next === 'active') {
+        if (emotionModalPendingTransitionRef.current) {
+          setEmotionModalVisible(true);
+        }
         const r = getSessionLogRuntime();
         writeSessionLog({
           userId,
@@ -12202,6 +17071,21 @@ The participant **confirmed** skipping after the skip confirmation prompt. In **
     /** Tap-to-record: stop capture before any web TTS gesture flush or voice-state gate; otherwise the tap can be consumed and MediaRecorder never stops. */
     if (useMediaRecorderPath && audioRecorder.isRecording) {
       if (__DEV__) console.log('[Aria] MIC PRESSED, isRecording: true → stop priority');
+      if (Platform.OS === 'web') {
+        preAuthorizeAudioElementOnMicTapGesture();
+        if (resumeRepeatChoicePendingRef.current) {
+          const prefetchText = scenarioAContemptProbeResumeRepeatTtsText(
+            stripControlTokens(resumeLastAssistantTextRef.current ?? '').trim(),
+          );
+          if (prefetchText.length > 0) {
+            void fetchElevenLabsMpegArrayBuffer(prefetchText).then((buffer) => {
+              if (buffer && buffer.byteLength > 0) {
+                resumeRepeatPrefetchMpegRef.current = { text: prefetchText, buffer };
+              }
+            });
+          }
+        }
+      }
       try {
         await audioRecorder.stopRecording();
         if (__DEV__) console.log('[Aria] RECORDING STOPPED (priority)');
@@ -12307,6 +17191,18 @@ The participant **confirmed** skipping after the skip confirmation prompt. In **
         const extraDelayMs = takeRecordingDelayExtraFromEarlyCutoffMs();
         setVoiceState('recording');
         recordingDelayMeasurementRef.current = null;
+        if (Platform.OS === 'web' && resumeRepeatChoicePendingRef.current) {
+          const prefetchText = scenarioAContemptProbeResumeRepeatTtsText(
+            stripControlTokens(resumeLastAssistantTextRef.current ?? '').trim(),
+          );
+          if (prefetchText.length > 0) {
+            void fetchElevenLabsMpegArrayBuffer(prefetchText).then((buffer) => {
+              if (buffer && buffer.byteLength > 0) {
+                resumeRepeatPrefetchMpegRef.current = { text: prefetchText, buffer };
+              }
+            });
+          }
+        }
         await audioRecorder.startRecording({
           postAudioSessionDelayMs: Platform.OS === 'web' ? 0 : 500 + extraDelayMs,
           tapIntentAtMs,
@@ -12435,25 +17331,204 @@ The participant **confirmed** skipping after the skip confirmation prompt. In **
   ]);
 
   const handleWebResumeWelcomeTap = useCallback(async () => {
+    if (webResumeWelcomeTapHandledRef.current) {
+      void remoteLog('[resume] welcome_tap_ignored_duplicate', {
+        attemptId: interviewSessionAttemptIdRef.current,
+      });
+      return;
+    }
+    if (
+      isInterviewCompleteRef.current ||
+      interviewStatusRef.current === 'preparing_results' ||
+      transcriptHasInterviewClosingAssistantMessage(currentMessagesRef.current)
+    ) {
+      webResumeWelcomeTapHandledRef.current = true;
+      webResumeWelcomeTapPendingRef.current = false;
+      setWebResumeWelcomeTapPending(false);
+      resumeOfferWelcomeTtsRef.current = false;
+      void remoteLog('[resume] welcome_tap_blocked_post_closing', {
+        attemptId: interviewSessionAttemptIdRef.current,
+        interviewComplete: isInterviewCompleteRef.current,
+        interviewStatus: interviewStatusRef.current,
+      });
+      return;
+    }
+    webResumeWelcomeTapHandledRef.current = true;
+    webResumeWelcomeTapPendingRef.current = false;
     setWebResumeWelcomeTapPending(false);
+    clearPendingWebSpeechGesturePair(pendingWebSpeechForGestureRef);
+    detachWebGestureFlushListener();
+    setWebDesktopPendingTtsGestureOverlay(false);
     markWebInterviewUserGestureNow();
     setMobileWebTapToBeginDone(true);
     unlockWebAudioForAutoplay();
     primeHtmlAudioForMobileTtsFromMicGesture();
+    if (emotionModalPendingTransitionRef.current) {
+      setEmotionModalVisible(true);
+      return;
+    }
+    const catchUpIndices = resumeEmotionCatchUpIndicesRef.current;
+    const hadEmotionCatchUp = catchUpIndices != null && catchUpIndices.length > 0;
+    if (hadEmotionCatchUp) {
+      for (const itemIndex of catchUpIndices) {
+        await awaitEmotionModalForIndex(itemIndex);
+      }
+      resumeEmotionCatchUpIndicesRef.current = null;
+    }
+    const offerWelcome = resumeOfferWelcomeTtsRef.current;
+    const attemptId = interviewSessionAttemptIdRef.current;
+    let spokeWelcome = false;
+    let playedIntro = false;
+    let playedAfterModal = false;
+    try {
+      if (offerWelcome && tryAcquireResumeWelcomePlayback(attemptId)) {
     try {
       await speakTextSafe(resumeWelcomeMessageRef.current, {
         telemetrySource: 'greeting',
         ttsTriggerSource: 'gesture_handler',
-      });
+            skipQuestionDeliveredTelemetry: true,
+            skipInterviewSpeechAdvance: true,
+            skipQuestionTiming: true,
+            skipLastQuestionRef: true,
+          });
+          await markResumeWelcomeSpoken(attemptId);
+          spokeWelcome = true;
+          void remoteLog('[resume] welcome_tts_completed', { attemptId });
+        } finally {
+          releaseResumeWelcomePlaybackLock(attemptId);
+        }
+      } else if (offerWelcome) {
+        const alreadySpoken = await wasResumeWelcomeSpoken(attemptId);
+        void remoteLog('[resume] welcome_tts_skipped', {
+          attemptId,
+          offerWelcome,
+          alreadySpoken,
+          lockHeld: resumeWelcomePlaybackLockAttemptId === attemptId,
+        });
+      }
       const intro = pendingScenarioIntroAfterResumeWelcomeRef.current;
       pendingScenarioIntroAfterResumeWelcomeRef.current = null;
       if (intro?.trim()) {
+        playedIntro = true;
         await speakTextSafe(intro, { telemetrySource: 'greeting', ttsTriggerSource: 'gesture_handler' });
+      } else if (hadEmotionCatchUp && resumeEmotionAfterModalTextRef.current?.trim()) {
+        const afterModal = resumeEmotionAfterModalTextRef.current;
+        resumeEmotionAfterModalTextRef.current = null;
+        playedAfterModal = true;
+        await speakTextSafe(stripControlTokens(afterModal), {
+          telemetrySource: 'replay',
+          ttsTriggerSource: 'gesture_handler',
+          skipQuestionDeliveredTelemetry: true,
+          skipInterviewSpeechAdvance: true,
+          skipQuestionTiming: true,
+          skipLastQuestionRef: true,
+        });
+        void remoteLog('[resume] emotion_after_modal_tts', { preview: afterModal.slice(0, 120) });
+      } else if (!spokeWelcome && !offerWelcome) {
+        const last = resumeLastAssistantTextRef.current;
+        if (last?.trim()) {
+          await speakTextSafe(stripControlTokens(last), {
+            telemetrySource: 'replay',
+            ttsTriggerSource: 'gesture_handler',
+            skipQuestionDeliveredTelemetry: true,
+            skipInterviewSpeechAdvance: true,
+            skipQuestionTiming: true,
+            skipLastQuestionRef: true,
+          });
+          void remoteLog('[resume] replay_last_assistant_on_tap', {
+            preview: last.slice(0, 120),
+            hadEmotionCatchUp: false,
+          });
+        }
       }
     } finally {
-      resumeRepeatChoicePendingRef.current = true;
+      /** Repeat gate only when welcome TTS invited "repeat what I said". */
+      resumeRepeatChoicePendingRef.current = offerWelcome && spokeWelcome;
     }
-  }, [speakTextSafe]);
+  }, [speakTextSafe, detachWebGestureFlushListener]);
+
+  const hydratePostClosingFromSaved = useCallback(
+    async (
+      saved: NonNullable<Awaited<ReturnType<typeof loadInterviewFromStorage>>>,
+      source: string,
+    ) => {
+      const aid = saved.sessionAttemptId;
+      const aidOk = typeof aid === 'string' && aid.length > 0;
+      let attemptStillThere = false;
+      if (aidOk && userId) {
+        const { data: pendingResumeAttempt } = await supabase
+          .from('interview_attempts')
+          .select('id')
+          .eq('id', aid)
+          .eq('user_id', userId)
+          .maybeSingle();
+        attemptStillThere = !!pendingResumeAttempt?.id;
+      }
+      if (!aidOk || !attemptStillThere) {
+        if (userId) {
+          await clearInterviewFromStorage(userId);
+          await remoteLog('[resume] stale_post_closing_cleared', {
+            source,
+            aidOk,
+            attemptStillThere,
+          });
+        }
+        resumeLoadingFlowActiveRef.current = false;
+        setResumeLoadingVisible(false);
+        return;
+      }
+      hasResumedRef.current = true;
+      resumeLoadingFlowActiveRef.current = false;
+      setResumeLoadingVisible(false);
+      resumeOfferWelcomeTtsRef.current = false;
+      webResumeWelcomeTapPendingRef.current = false;
+      setWebResumeWelcomeTapPending(false);
+      const restored = assignScenarioNumbersToTranscript(
+        stripEphemeralWelcomeBackMessages(saved.messages ?? []),
+      );
+      setMessages(restored);
+      const transcript = restored.filter((m) => m.role === 'user' || m.role === 'assistant');
+      pendingCompletionTranscriptRef.current = transcript;
+      const hydratedEmotionPending = hydrateEmotionResponsesFromSources(saved.emotionItemResponses);
+      if (aidOk && userId) {
+        const { data: attemptEmotion } = await supabase
+          .from('interview_attempts')
+          .select('emotion_recognition_responses')
+          .eq('id', aid)
+          .eq('user_id', userId)
+          .maybeSingle();
+        const mergedPending = hydrateEmotionResponsesFromSources(
+          hydratedEmotionPending,
+          attemptEmotion?.emotion_recognition_responses,
+        );
+        if (mergedPending.length > 0) {
+          emotionItemResponsesRef.current = mergedPending;
+          setEmotionItemResponses(mergedPending);
+          setEmotionItemsComplete(
+            countAnsweredEmotionItems(mergedPending) >= EMOTION_INTERVIEW_MODAL_ITEMS.length,
+          );
+        }
+      } else if (hydratedEmotionPending.length > 0) {
+        emotionItemResponsesRef.current = hydratedEmotionPending;
+        setEmotionItemResponses(hydratedEmotionPending);
+        setEmotionItemsComplete(
+          countAnsweredEmotionItems(hydratedEmotionPending) >= EMOTION_INTERVIEW_MODAL_ITEMS.length,
+        );
+      }
+      setPendingCompletion(true);
+      isInterviewCompleteRef.current = true;
+      if (userId) markPreparingResultsSession(userId);
+      interviewStatusRef.current = 'preparing_results';
+      setInterviewStatus('preparing_results');
+      void remoteLog('[REENTRY_POST_CLOSING_HANDOFF]', {
+        source,
+        transcriptLen: transcript.length,
+        hadPendingCompletionFlag: saved.pendingCompletion === true,
+      });
+      kickCompletionScoring(`post_closing_${source}`, transcript);
+    },
+    [userId],
+  );
 
   const handleResume = useCallback(
     async (saved: NonNullable<Awaited<ReturnType<typeof loadInterviewFromStorage>>>) => {
@@ -12475,10 +17550,11 @@ The participant **confirmed** skipping after the skip confirmation prompt. In **
       let planAttemptMismatch = attemptMismatch;
       let resumeAttemptResumeScenario: number | null = null;
       let didOrphanAttemptRebind = false;
+      let resumeAttemptEmotionResponses: unknown = null;
       if (attemptRowId && userId) {
         const { data: resumeAttempt } = await supabase
           .from('interview_attempts')
-          .select('id, resume_active_scenario')
+          .select('id, resume_active_scenario, emotion_recognition_responses')
           .eq('id', attemptRowId)
           .eq('user_id', userId)
           .maybeSingle();
@@ -12528,10 +17604,17 @@ The participant **confirmed** skipping after the skip confirmation prompt. In **
         } else {
           const ras = resumeAttempt.resume_active_scenario;
           resumeAttemptResumeScenario = typeof ras === 'number' ? ras : null;
+          resumeAttemptEmotionResponses = resumeAttempt.emotion_recognition_responses ?? null;
         }
       }
 
-      const restoredForPlan = retagScenarioNumbersBeforeMomentFour(saved.messages ?? []);
+      const restoredForPlan = assignScenarioNumbersToTranscript(
+        stripEphemeralWelcomeBackMessages(saved.messages ?? [])
+      );
+      if (savedInterviewReachedClosingState({ pendingCompletion: saved.pendingCompletion, messages: restoredForPlan })) {
+        await hydratePostClosingFromSaved(saved, 'handle_resume_post_closing');
+        return;
+      }
       const syncedForPlan = syncInterviewMomentsFromTranscript(restoredForPlan, saved.scenariosCompleted ?? []);
       const resumePlan = computeInterviewResumePlan({
         scenariosCompleted: saved.scenariosCompleted ?? [],
@@ -12561,28 +17644,6 @@ The participant **confirmed** skipping after the skip confirmation prompt. In **
         transcriptLenBefore: restoredForPlan.length,
         transcriptLenAfter: transcriptMessages.length,
       });
-      const lastStoredAssistant = [...transcriptMessages].reverse().find((m) => m.role === 'assistant');
-      const lastStoredUser = [...transcriptMessages].reverse().find((m) => m.role === 'user');
-      const scenarioAStoredUserCoverage =
-        resumePlan.resumeScenario === 1 && lastStoredUser
-          ? debugScenarioAQ1ContemptProbeCoverageDetail(lastStoredUser.content ?? '')
-          : null;
-      void remoteLog('[S1_RESUME_TRANSCRIPT_DEBUG_7605c3]', {
-        mode: resumePlan.mode,
-        resumeScenario: resumePlan.resumeScenario,
-        effectiveMoment: resumePlan.effectiveMoment,
-        transcriptLenBefore: restoredForPlan.length,
-        transcriptLenAfter: transcriptMessages.length,
-        lastStoredAssistantScenario: (lastStoredAssistant as { scenarioNumber?: number } | undefined)?.scenarioNumber ?? null,
-        lastStoredAssistantLooksLikeContemptProbe: lastStoredAssistant
-          ? looksLikeScenarioAContemptProbeQuestion(lastStoredAssistant.content ?? '')
-          : false,
-        lastStoredAssistantPreview: (lastStoredAssistant?.content ?? '').slice(0, 360),
-        lastStoredUserCoverage: scenarioAStoredUserCoverage,
-        lastStoredUserPreview: (lastStoredUser?.content ?? '').slice(0, 360),
-        shouldRestartIncompleteScenario,
-      });
-
       if (!didOrphanAttemptRebind && !attemptMismatch && savedAttemptId) {
         interviewSessionAttemptIdRef.current = savedAttemptId;
         assignAttemptIdForSessionLogs(savedAttemptId);
@@ -12594,7 +17655,10 @@ The participant **confirmed** skipping after the skip confirmation prompt. In **
       currentInterviewMomentRef.current = resumePlan.effectiveMoment;
       personalHandoffInjectedRef.current = resumePlan.personalHandoffInjected;
       if (!interviewNameRef.current) {
-        interviewNameRef.current = extractInterviewNameFromTranscript(transcriptMessages);
+        const resumedName = extractInterviewNameFromTranscript(transcriptMessages);
+        interviewNameRef.current = resolvePlausibleInterviewFirstName(resumedName);
+      } else {
+        interviewNameRef.current = resolvePlausibleInterviewFirstName(interviewNameRef.current);
       }
       moment4ThresholdProbeAskedRef.current = transcriptMessages.some(
         (m) =>
@@ -12607,7 +17671,7 @@ The participant **confirmed** skipping after the skip confirmation prompt. In **
       moment4ClientSpecificityProbeInjectedRef.current = transcriptMessages.some(
         (m) =>
           m.role === 'assistant' &&
-          looksLikeMoment4SpecificityFollowUpPrompt((m as { content?: string }).content ?? '')
+          looksLikeMoment4SpecificityFollowUpEcho((m as { content?: string }).content ?? '')
       );
       moment5AccountabilityProbeFiredRef.current = transcriptMessages.some(
         (m) =>
@@ -12619,13 +17683,20 @@ The participant **confirmed** skipping after the skip confirmation prompt. In **
           m.role === 'assistant' &&
           looksLikeMoment5SpecificityRedirectPrompt((m as { content?: string }).content ?? '')
       );
+      moment5ResolutionFollowUpIssuedRef.current = transcriptHasMoment5ResolutionFollowUpAsked(
+        transcriptMessages.map((m) => ({
+          role: m.role,
+          content: (m as { content?: string }).content ?? '',
+          isWelcomeBack: (m as { isWelcomeBack?: boolean }).isWelcomeBack,
+        })),
+      );
       moment5ConflictValidityClarificationIssuedRef.current =
         saved.moment_5_clarification_fired === true ||
         transcriptMessages.some(
           (m) =>
             m.role === 'assistant' &&
             looksLikeMoment5ConflictValidityClarificationPrompt((m as { content?: string }).content ?? '')
-        );
+      );
       const transcriptHasM5PrimaryConflict = transcriptMessages.some(
         (m) =>
           m.role === 'assistant' &&
@@ -12643,26 +17714,26 @@ The participant **confirmed** skipping after the skip confirmation prompt. In **
           m.role === 'assistant' &&
           looksLikeScenarioAContemptProbeQuestion((m as { content?: string }).content ?? '')
       );
-      const scenarioAContemptProbeSatisfiedByUser = transcriptMessages.some((m) => {
-        if (m.role !== 'user' || (m as { scenarioNumber?: number }).scenarioNumber !== 1) return false;
-        const content = (m as { content?: string }).content ?? '';
-        return (
-          hasScenarioAQ1ContemptProbeCoverage(content) ||
-          evaluateScenarioAQ1ContemptProbePreProbeSkip(content).skip
-        );
-      });
+      const scenario1Moment1CombinedForResume = aggregateScenario1Moment1UserTextForContemptGate(
+        transcriptMessages.map((m) => ({
+          role: m.role,
+          content: typeof (m as { content?: unknown }).content === 'string' ? (m as { content: string }).content : '',
+          scenarioNumber: (m as MessageWithScenario).scenarioNumber,
+          interviewMoment: (m as { interviewMoment?: number }).interviewMoment,
+        })),
+      );
+      const scenarioAContemptProbeSatisfiedByUser =
+        scenario1Moment1CombinedForResume.length >= 8 &&
+        (hasScenarioAQ1ContemptProbeCoverage(scenario1Moment1CombinedForResume) ||
+          evaluateScenarioAQ1ContemptProbePreProbeSkip(scenario1Moment1CombinedForResume).skip);
       scenarioAContemptProbeAskedRef.current =
         scenarioAContemptProbePreviouslyAsked || scenarioAContemptProbeSatisfiedByUser;
-      void remoteLog('[S1_RESUME_REF_DEBUG_7605c3]', {
-        scenarioAContemptProbeAskedRef: scenarioAContemptProbeAskedRef.current,
-        scenarioAContemptProbePreviouslyAsked,
-        scenarioAContemptProbeSatisfiedByUser,
-        matchingAssistantCount: transcriptMessages.filter(
-          (m) => m.role === 'assistant' && looksLikeScenarioAContemptProbeQuestion((m as { content?: string }).content ?? '')
-        ).length,
-        currentMoment: currentInterviewMomentRef.current,
-        resumeScenario: resumePlan.resumeScenario,
-      });
+      scenarioAContemptProbeTtsDeliveredSessionRef.current = scenarioAContemptProbePreviouslyAsked;
+      scenarioARepairQuestionAskedRef.current = transcriptMessages.some(
+        (m) =>
+          m.role === 'assistant' &&
+          looksLikeScenarioARepairQuestion((m as { content?: string }).content ?? ''),
+      );
       s2RepairProbeDeliveredRef.current = transcriptMessages.some(
         (m) =>
           m.role === 'assistant' &&
@@ -12678,6 +17749,44 @@ The participant **confirmed** skipping after the skip confirmation prompt. In **
 
       currentScenarioRef.current = resumePlan.resumeScenario;
       resumeActiveScenarioRef.current = resumePlan.mode === 'resume_post_scenarios' ? null : resumePlan.resumeScenario;
+
+      const hydratedEmotion = hydrateEmotionResponsesFromSources(
+        resumeAttemptEmotionResponses,
+        saved.emotionItemResponses,
+      );
+      if (hydratedEmotion.length > 0) {
+        emotionItemResponsesRef.current = hydratedEmotion;
+        setEmotionItemResponses(hydratedEmotion);
+        setEmotionItemsComplete(
+          countAnsweredEmotionItems(hydratedEmotion) >= EMOTION_INTERVIEW_MODAL_ITEMS.length,
+        );
+      }
+
+      const emotionCatchUp = emotionModalCatchUpThroughScenarioFromResume({
+        lastCompletedScenario: resumePlan.lastCompletedScenario,
+        effectiveMoment: resumePlan.effectiveMoment,
+        transcriptMessages,
+      });
+      const emotionCatchUpThrough = emotionCatchUp.through;
+      const unansweredEmotionIndices = emotionCatchUpThrough
+        ? listUnansweredEmotionModalIndices(emotionItemResponsesRef.current, emotionCatchUpThrough)
+        : [];
+      if (unansweredEmotionIndices.length > 0) {
+        resumeEmotionCatchUpIndicesRef.current = unansweredEmotionIndices;
+        const extractedAfterModal = extractEmotionAfterModalForResumeCatchUp(
+          transcriptMessages,
+          unansweredEmotionIndices,
+        );
+        resumeEmotionAfterModalTextRef.current = resumeShouldSpeakEmotionCatchUpAfterModal(
+          transcriptMessages,
+          extractedAfterModal,
+        )
+          ? extractedAfterModal
+          : null;
+      } else {
+        resumeEmotionCatchUpIndicesRef.current = null;
+        resumeEmotionAfterModalTextRef.current = null;
+      }
 
       const persistenceAttemptId = interviewSessionAttemptIdRef.current ?? savedAttemptId;
       if (persistenceAttemptId && userId) {
@@ -12712,6 +17821,10 @@ The participant **confirmed** skipping after the skip confirmation prompt. In **
             keyEvidence: s.keyEvidence ?? {},
             specificity: 'high',
             repairCoherenceIssue: null,
+            mentalizing_inference_source: normalizeMentalizingInferenceSource(
+              (s as { mentalizing_inference_source?: unknown }).mentalizing_inference_source
+            ),
+            mentalizing_overcertainty: (s as { mentalizing_overcertainty?: unknown }).mentalizing_overcertainty === true,
             contempt_tier_breakdown: parseContemptTierBreakdown(
               (s as { contempt_tier_breakdown?: unknown }).contempt_tier_breakdown
             ),
@@ -12774,6 +17887,11 @@ The participant **confirmed** skipping after the skip confirmation prompt. In **
         .flatMap((m) => detectConstructs(m.content));
       setTouchedConstructs([...new Set(allDetected)]);
 
+      resumeOfferWelcomeTtsRef.current = shouldOfferResumeWelcomeTts({
+        mode: resumePlan.mode,
+        transcriptMessages,
+      });
+
       resumeWelcomeMessageRef.current = buildResumeWelcomeMessage({
         mode: resumePlan.mode,
         resumeScenario: resumePlan.resumeScenario,
@@ -12786,17 +17904,28 @@ The participant **confirmed** skipping after the skip confirmation prompt. In **
         scenarioNumber: currentScenarioRef.current,
       } as MessageWithScenario;
 
-      const messagesWithWelcome = scenarioIntroMsg ? [...fullMessages, welcomeMsg, scenarioIntroMsg] : [...fullMessages, welcomeMsg];
+      const persistenceAttemptIdForWelcome =
+        typeof persistenceAttemptId === 'string' ? persistenceAttemptId : null;
+      const isFirstWelcomeHydrationForAttempt =
+        persistenceAttemptIdForWelcome != null &&
+        resumeWelcomeHydrationAttemptRef.current !== persistenceAttemptIdForWelcome;
+      if (isFirstWelcomeHydrationForAttempt) {
+        resumeWelcomeHydrationAttemptRef.current = persistenceAttemptIdForWelcome;
+        webResumeWelcomeTapHandledRef.current = false;
+        if (resumeOfferWelcomeTtsRef.current) {
+          await clearResumeWelcomeSpokenForHydration(persistenceAttemptIdForWelcome);
+        }
+      }
+      const welcomeAlreadySpoken = await wasResumeWelcomeSpoken(persistenceAttemptIdForWelcome);
+      const messagesWithWelcome =
+        !resumeOfferWelcomeTtsRef.current || welcomeAlreadySpoken
+        ? scenarioIntroMsg
+          ? [...fullMessages, scenarioIntroMsg]
+          : fullMessages
+        : scenarioIntroMsg
+          ? [...fullMessages, welcomeMsg, scenarioIntroMsg]
+          : [...fullMessages, welcomeMsg];
       resumeLastAssistantTextRef.current = extractLastInterviewerMessage(messagesWithWelcome);
-      void remoteLog('[S1_RESUME_LAST_ASSISTANT_DEBUG_7605c3]', {
-        resumeLastAssistantLooksLikeContemptProbe: looksLikeScenarioAContemptProbeQuestion(
-          resumeLastAssistantTextRef.current ?? ''
-        ),
-        resumeLastAssistantPreview: (resumeLastAssistantTextRef.current ?? '').slice(0, 360),
-        messageCountWithWelcome: messagesWithWelcome.length,
-        welcomeBackPreview: welcomeBack.slice(0, 180),
-        hasScenarioIntroMsg: !!scenarioIntroMsg,
-      });
       setMessages(messagesWithWelcome);
 
       const assistantForRef = messagesWithWelcome.filter((m) => isAssistantBubbleForTranscript(m));
@@ -12812,6 +17941,9 @@ The participant **confirmed** skipping after the skip confirmation prompt. In **
       resumeRepeatChoicePendingRef.current = false;
       markSessionResumedForNextRecordingStart();
       if (Platform.OS === 'web') {
+        clearPendingWebSpeechGesturePair(pendingWebSpeechForGestureRef);
+        detachWebGestureFlushListener();
+        setWebDesktopPendingTtsGestureOverlay(false);
         void (async () => {
           await refreshWebAudioRoutesForSession();
           const p = await probeHeadphoneRoute();
@@ -12821,16 +17953,59 @@ The participant **confirmed** skipping after the skip confirmation prompt. In **
             setAudioRouteKind(p.kind);
           }
         })();
+        if (resumeOfferWelcomeTtsRef.current && !welcomeAlreadySpoken && !webResumeWelcomeTapHandledRef.current) {
+          webResumeWelcomeTapPendingRef.current = true;
         setWebResumeWelcomeTapPending(true);
+        }
       } else {
         void (async () => {
           try {
+            const catchUpIndices = resumeEmotionCatchUpIndicesRef.current;
+            if (catchUpIndices != null && catchUpIndices.length > 0) {
+              for (const itemIndex of catchUpIndices) {
+                await awaitEmotionModalForIndex(itemIndex);
+              }
+              resumeEmotionCatchUpIndicesRef.current = null;
+            }
+            const offerWelcome = resumeOfferWelcomeTtsRef.current;
+            const attemptId = interviewSessionAttemptIdRef.current;
+            let spokeWelcome = false;
+            if (offerWelcome && !(await wasResumeWelcomeSpoken(attemptId))) {
             await speakTextSafe(welcomeBack, { telemetrySource: 'greeting', ttsTriggerSource: 'callback' });
+              await markResumeWelcomeSpoken(attemptId);
+              spokeWelcome = true;
+            }
+            const hadCatchUp =
+              catchUpIndices != null && catchUpIndices.length > 0;
             if (scenarioIntroBody?.trim()) {
               await speakTextSafe(scenarioIntroBody, { telemetrySource: 'greeting', ttsTriggerSource: 'callback' });
+            } else if (hadCatchUp && resumeEmotionAfterModalTextRef.current?.trim()) {
+              const afterModal = resumeEmotionAfterModalTextRef.current;
+              resumeEmotionAfterModalTextRef.current = null;
+              await speakTextSafe(stripControlTokens(afterModal), {
+                telemetrySource: 'replay',
+                ttsTriggerSource: 'callback',
+                skipQuestionDeliveredTelemetry: true,
+                skipInterviewSpeechAdvance: true,
+                skipQuestionTiming: true,
+                skipLastQuestionRef: true,
+              });
+            } else if (!spokeWelcome && !offerWelcome) {
+              const last = resumeLastAssistantTextRef.current;
+              if (last?.trim()) {
+                await speakTextSafe(stripControlTokens(last), {
+                  telemetrySource: 'replay',
+                  ttsTriggerSource: 'callback',
+                  skipQuestionDeliveredTelemetry: true,
+                  skipInterviewSpeechAdvance: true,
+                  skipQuestionTiming: true,
+                  skipLastQuestionRef: true,
+                });
+              }
             }
-          } finally {
-            resumeRepeatChoicePendingRef.current = true;
+            resumeRepeatChoicePendingRef.current = offerWelcome && spokeWelcome;
+          } catch {
+            resumeRepeatChoicePendingRef.current = false;
           }
         })();
       }
@@ -12845,7 +18020,7 @@ The participant **confirmed** skipping after the skip confirmation prompt. In **
         logSessionResumeState('ready');
       })();
     },
-    [speakTextSafe, awaitScreenReadySignal, logSessionResumeState, userId]
+    [speakTextSafe, awaitScreenReadySignal, logSessionResumeState, userId, detachWebGestureFlushListener, hydratePostClosingFromSaved]
   );
 
   useEffect(() => {
@@ -12854,37 +18029,38 @@ The participant **confirmed** skipping after the skip confirmation prompt. In **
     if (isInterviewCompleteRef.current) return;
     let cancelled = false;
     (async () => {
+      /** Live session owns the transcript — never resume or wipe storage mid-interview (effect re-runs when `handleResume` identity changes). */
+      if (interviewStatusRef.current === 'in_progress') return;
+      const { data: routingRow } = await supabase
+        .from(USER_INTERVIEW_ROUTING_TABLE)
+        .select('interview_completed, latest_attempt_id')
+        .eq('id', userId)
+        .maybeSingle();
+      if (cancelled) return;
+      let interviewDoneForRouting = routingRow?.interview_completed === true;
+      const latestAttemptId =
+        typeof routingRow?.latest_attempt_id === 'string' && routingRow.latest_attempt_id.length > 0
+          ? routingRow.latest_attempt_id
+          : null;
+      if (!interviewDoneForRouting && latestAttemptId) {
+        const { data: latestAttemptMeta } = await supabase
+          .from('interview_attempts')
+          .select('completed_at')
+          .eq('id', latestAttemptId)
+          .eq('user_id', userId)
+          .maybeSingle();
+        interviewDoneForRouting = !!latestAttemptMeta?.completed_at;
+      }
+      if (interviewDoneForRouting) {
+        await clearInterviewFromStorage(userId);
+        return;
+      }
       const saved = await loadInterviewFromStorage(userId);
       if (cancelled) return;
       if (!saved?.messages?.length) return;
-      if (saved.pendingCompletion) {
-        const aid = saved.sessionAttemptId;
-        const aidOk = typeof aid === 'string' && aid.length > 0;
-        let attemptStillThere = false;
-        if (aidOk) {
-          const { data: pendingResumeAttempt } = await supabase
-            .from('interview_attempts')
-            .select('id')
-            .eq('id', aid)
-            .eq('user_id', userId)
-            .maybeSingle();
-          attemptStillThere = !!pendingResumeAttempt?.id;
-        }
+      if (savedInterviewReachedClosingState(saved)) {
         if (cancelled) return;
-        if (!aidOk || !attemptStillThere) {
-          await clearInterviewFromStorage(userId);
-          await remoteLog('[resume] stale_pending_completion_cleared', {
-            aidOk,
-            attemptStillThere,
-            hadPendingCompletion: true,
-          });
-          return;
-        }
-        hasResumedRef.current = true;
-        const transcript = saved.messages.filter((m) => m.role === 'user' || m.role === 'assistant');
-        pendingCompletionTranscriptRef.current = transcript;
-        setPendingCompletion(true);
-        setInterviewStatus('preparing_results');
+        await hydratePostClosingFromSaved(saved, 'resume_effect_post_closing');
         return;
       }
       // Don't resume from greeting-only state (avoids infinite resume loop)
@@ -12892,14 +18068,16 @@ The participant **confirmed** skipping after the skip confirmation prompt. In **
         await clearInterviewFromStorage(userId);
         return;
       }
-      const lastCompletedFromPayload = lastFullyCompletedScenario(saved.scenariosCompleted ?? [], saved.scenarioScores);
-      const userTurnsTotal = saved.messages?.filter((m) => m.role === 'user').length ?? 0;
-      const hasScenarioProgress =
-        ((saved.currentScenario ?? 0) >= 1 && userTurnsTotal >= 2) ||
-        ((saved.resumeActiveScenario === 2 || saved.resumeActiveScenario === 3) && userTurnsTotal >= 1) ||
-        (lastCompletedFromPayload > 0 && userTurnsTotal >= 1);
+      const hasScenarioProgress = storedInterviewHasResumableScenarioProgress({
+        messages: saved.messages,
+        scenariosCompleted: saved.scenariosCompleted,
+        scenarioScores: saved.scenarioScores,
+        resumeActiveScenario: saved.resumeActiveScenario ?? null,
+        currentScenario: saved.currentScenario,
+      });
       const hasCompletedScenario =
-        (saved.scenariosCompleted?.length ?? 0) > 0 || lastCompletedFromPayload > 0;
+        (saved.scenariosCompleted?.length ?? 0) > 0 ||
+        lastFullyCompletedScenario(saved.scenariosCompleted ?? [], saved.scenarioScores) > 0;
       if (hasScenarioProgress || hasCompletedScenario) {
         const completedCount = saved.scenariosCompleted?.length ?? 0;
         if (completedCount < 3) {
@@ -12917,7 +18095,7 @@ The participant **confirmed** skipping after the skip confirmation prompt. In **
       }
     })();
     return () => { cancelled = true; };
-  }, [userId, isAdmin, handleResume]);
+  }, [userId, isAdmin, handleResume, hydratePostClosingFromSaved]);
 
   const startInterview = useCallback(async (opts?: { fromUserGesture?: boolean }) => {
     const interviewStartTapClockMs = Date.now();
@@ -13033,6 +18211,7 @@ The participant **confirmed** skipping after the skip confirmation prompt. In **
       if (webGestureFirstGreeting) {
         setStatus('active');
         setInterviewStatus('in_progress');
+        hasResumedRef.current = true;
         setVoiceState('processing');
         resetInterviewProgressRefs();
         if (Platform.OS === 'web') {
@@ -13094,6 +18273,7 @@ The participant **confirmed** skipping after the skip confirmation prompt. In **
       if (!openingLineDeliveredEarly) {
         setStatus('active');
         setInterviewStatus('in_progress');
+        hasResumedRef.current = true;
         setVoiceState('processing');
         resetInterviewProgressRefs();
         if (Platform.OS === 'web') {
@@ -13449,7 +18629,11 @@ The participant **confirmed** skipping after the skip confirmation prompt. In **
   );
 
   const saveInterviewResults = useCallback(
-    async (results: InterviewResults, gateResult: GateResult, uid: string) => {
+    async (
+      results: InterviewResults,
+      gateResult: GateResult,
+      uid: string,
+    ) => {
       if (!uid) return;
       try {
         const passFields = await buildUsersRowInterviewPassFromGate(supabase, uid, gateResult.pass);
@@ -13458,13 +18642,13 @@ The participant **confirmed** skipping after the skip confirmation prompt. In **
           .update({
             interview_completed: true,
             ...passFields,
-            interview_weighted_score: gateResult.weightedScore,
-            interview_pillar_scores: results.pillarScores ?? null,
             interview_completed_at: new Date().toISOString(),
           })
           .eq('id', uid);
         if (error) console.error('Failed to save interview results:', error);
-        else await clearInterviewFromStorage(uid);
+        else {
+          await clearInterviewFromStorage(uid);
+        }
       } catch (err) {
         console.error('Interview save error:', err);
       }
@@ -13473,6 +18657,29 @@ The participant **confirmed** skipping after the skip confirmation prompt. In **
   );
 
   const scoreInterview = useCallback(async (finalMessages: { role: string; content: string }[]) => {
+    if (scoreInterviewInFlightRef.current) {
+      void remoteLog('[WARN] scoreInterview_duplicate_skipped', {
+        attemptId: interviewSessionAttemptIdRef.current,
+      });
+      return;
+    }
+    scoreInterviewInFlightRef.current = true;
+    scoreInterviewAttemptedRef.current = true;
+    markCompletionScoringInFlight(true);
+    try {
+    const hydratedEmotionForScore = await loadEmotionResponsesForCompletion();
+    applyEmotionResponsesToSession(hydratedEmotionForScore);
+    if (hydratedEmotionForScore.length > 0) {
+      await remoteLog('[EmotionRecognition] hydrated_for_completion', {
+        attemptId: interviewSessionAttemptIdRef.current,
+        answeredCount: countAnsweredEmotionItems(hydratedEmotionForScore),
+        batteryComplete: isEmotionRecognitionBatteryComplete(hydratedEmotionForScore),
+      });
+    }
+    console.log(
+      '[CompletionPath] client scoreInterview called for attempt:',
+      interviewSessionAttemptIdRef.current ?? 'pending',
+    );
     await remoteLog('[1] INTERVIEW_COMPLETE scoreInterview entered', {
       isAdmin,
       ALPHA_MODE,
@@ -13506,7 +18713,121 @@ The participant **confirmed** skipping after the skip confirmation prompt. In **
       }
     }
     const isStandardOnboardingApplicant =
-      isOnboardingFlow && !!userId && !!profile && !profile.isAlphaTester && !isAdminConsoleAccount;
+      isOnboardingFlow && !!userId && !isAdminConsoleAccount;
+    const commitStandardOnboardingUsersAfterAttempt = async (p: {
+      attemptIdForUserRow: string;
+      gateOkForInterviewPassed: boolean;
+      /** When omitted, read `attempt_number` from `interview_attempts` (e.g. non–ALPHA_MODE holistic-only path). */
+      interviewAttemptCount?: number;
+    }) => {
+      let attemptCount = p.interviewAttemptCount;
+      if (attemptCount == null) {
+        const { data: attMeta } = await supabase
+          .from('interview_attempts')
+          .select('attempt_number')
+          .eq('id', p.attemptIdForUserRow)
+          .eq('user_id', userId)
+          .maybeSingle();
+        attemptCount =
+          typeof attMeta?.attempt_number === 'number' && Number.isFinite(attMeta.attempt_number)
+            ? attMeta.attempt_number
+            : 1;
+      }
+      const passOverride = await fetchInterviewPassAdminOverride(supabase, userId);
+      const { error: userUpErr } = await supabase
+        .from('users')
+        .update({
+          interview_completed: true,
+          interview_passed: p.gateOkForInterviewPassed ? interviewPassWhileScoringPending(passOverride) : false,
+          interview_passed_computed: null,
+          interview_completed_at: new Date().toISOString(),
+          interview_attempt_count: attemptCount,
+          latest_attempt_id: p.attemptIdForUserRow,
+        })
+        .eq('id', userId);
+      if (userUpErr) throw new Error(userUpErr.message);
+      try {
+        await supabase.rpc('fulfill_referral_after_interview', { p_user_id: userId });
+      } catch {
+        /* non-fatal */
+      }
+      await ensureShareableReferralCodeForReferrer(userId);
+    };
+    const emotionRawScoreForGate = (): number | null =>
+      emotionRecognitionRawScoreFromResponses(emotionItemResponsesRef.current);
+    const emotionResponsesForGate = (): string[] => [...emotionItemResponsesRef.current];
+    /** Holistic model fetch (pillar map + ego). Shared by deferred standard gate and main client scoring. */
+    const SCORING_HOLISTIC_FETCH_TIMEOUT_MS = 180_000;
+    const fetchHolisticScoringOnce = async (): Promise<InterviewResults> => {
+      const abort = new AbortController();
+      const t = setTimeout(() => abort.abort(), SCORING_HOLISTIC_FETCH_TIMEOUT_MS);
+      let res: Response;
+      try {
+        res = await fetch(apiUrl, {
+          method: 'POST',
+          headers,
+          signal: abort.signal,
+          body: JSON.stringify({
+            model: 'claude-sonnet-4-20250514',
+            max_tokens: 1500,
+            messages: [{ role: 'user', content: buildScoringPrompt(finalMessages, context) }],
+          }),
+        });
+      } finally {
+        clearTimeout(t);
+      }
+      const data = await res.json();
+      if (!res.ok) {
+        const e = new Error((data as { error?: { message?: string } })?.error?.message ?? `HTTP ${res.status}`);
+        (e as Error & { status?: number }).status = res.status;
+        throw e;
+      }
+      const raw = (data.content?.[0]?.text ?? '{}') as string;
+      const cleanedForEgoDiag = raw.replace(/```json|```/gi, '').trim();
+      let wholeJsonDiagKeys: string[] | null = null;
+      try {
+        const w = JSON.parse(cleanedForEgoDiag);
+        if (w != null && typeof w === 'object' && !Array.isArray(w)) {
+          wholeJsonDiagKeys = Object.keys(w as Record<string, unknown>);
+        }
+      } catch {
+        wholeJsonDiagKeys = null;
+      }
+      const rawHasEgoSubstring = /"ego_development_level"|"egoDevelopmentLevel"/i.test(raw);
+      const coerced = parseHolisticInterviewModelObjectFromModelText(raw) as unknown as InterviewResults;
+      const extractedEgoDiag = extractEgoDevelopmentLevel(coerced);
+      {
+        const { data: egoParseSession } = await supabase.auth.getSession();
+        const sessionUid = egoParseSession.session?.user?.id ?? null;
+        void remoteLog('[HOLISTIC_EGO_PARSE]', {
+          attemptId: getSessionLogRuntime().attemptId ?? null,
+          userId: userId ?? null,
+          sessionUserId: sessionUid,
+          sessionMatchesScoreInterviewUser: sessionUid != null && userId != null && sessionUid === userId,
+          extractedEgo: extractedEgoDiag,
+          rawHasEgoJsonKeySubstring: rawHasEgoSubstring,
+          wholeJsonParseOkKeysLen: wholeJsonDiagKeys?.length ?? null,
+          coercedTopLevelEgo: coerced.ego_development_level ?? null,
+          pillarKeyCount:
+            coerced.pillarScores != null && typeof coerced.pillarScores === 'object'
+              ? Object.keys(coerced.pillarScores as object).length
+              : 0,
+          rawLen: raw.length,
+          note:
+            'If sessionUserId !== userId, interview_attempts UPDATE .eq(user_id, userId) may match 0 rows under RLS unless admin update policy applies. null extractedEgo means model omitted ego.',
+        });
+      }
+      if (__DEV__) {
+        console.log('[EgoDev] holistic ranked keys:', Object.keys(coerced as object));
+        console.log('[EgoDev] coerced ego_development_level:', coerced.ego_development_level);
+        console.log('[EgoDev] extractEgoDevelopmentLevel(coerced):', extractEgoDevelopmentLevel(coerced));
+      }
+      return coerced;
+    };
+    let standardDeferredHolisticForEgoCache: InterviewResults | null = null;
+    const logM4Debug = (msg: string, data?: Record<string, unknown>) => {
+      if (__DEV__) console.log(`[M4 Debug] ${msg}`, data ?? '');
+    };
     const hydrateScenarioScoresFromAttemptIfNeeded = async () => {
       const aid = interviewSessionAttemptIdRef.current;
       if (!aid || !userId) return;
@@ -13576,10 +18897,49 @@ The participant **confirmed** skipping after the skip confirmation prompt. In **
         }
         let moment4ForAggregate: ReturnType<typeof sanitizePersonalMomentScoresForAggregate> | null = null;
         let moment5ForAggregate: ReturnType<typeof sanitizeMoment5PersonalScoresForAggregate> | null = null;
+        const attemptIdForIncremental = interviewSessionAttemptIdRef.current;
+        let scoringBaseline: AttemptScoringBaseline = {
+          patterns: {},
+          moment_4_concreteness: null,
+          moment_5_concreteness: null,
+          ego_development_level: null,
+          personal_moment_emotional_vocab_low: false,
+          personal_moment_emotional_vocab_density: null,
+          disclosure_calibration: null,
+          defense_patterns: null,
+          mentalizing_overcertainty_count: 0,
+        };
+        if (attemptIdForIncremental && userId) {
+          scoringBaseline = await fetchAttemptScoringBaseline(
+            supabase,
+            attemptIdForIncremental,
+            userId,
+          );
+          logScorePipelineBaseline(scoringBaseline);
+        }
         if (apiUrl) {
           const personalSlices = inferPersonalMomentSlices(msgsDeferred);
           const slice = personalSlices.moment4;
           const userTurnsM4 = slice.filter((m) => m.role === 'user').length;
+          logM4Debug('standard_deferred_m4_infer', {
+            transcriptLen: msgsDeferred.length,
+            m4Start: personalSlices.m4Start,
+            m5Start: personalSlices.m5Start,
+            moment4SliceLen: slice.length,
+            moment4UserTurns: userTurnsM4,
+          });
+          logM4Debug('standard_deferred_last_10_moments', {
+            turns: msgsDeferred.slice(-10).map((m) => ({
+              role: m.role,
+              moment: (m as MessageWithScenario).interviewMoment ?? null,
+              scenario: (m as MessageWithScenario).scenarioNumber ?? null,
+              preview: (m.content ?? '').slice(0, 48),
+            })),
+          });
+          logM4Debug('standard_deferred_m4_gate', {
+            moment4UserTurnsLength: userTurnsM4,
+            willScoreM4: userTurnsM4 >= 1,
+          });
           if (userTurnsM4 >= 1) {
             const deferredMoment4Narrative = deferredMoment4NarrativeRef.current;
             const scoringSlice = deferredMoment4Narrative
@@ -13589,24 +18949,43 @@ The participant **confirmed** skipping after the skip confirmation prompt. In **
                   ...slice.slice(1),
                 ]
               : slice;
+            const m4PromptBuilt = buildPersonalMomentScoringPrompt(
+              scoringSlice,
+              moment4SpecificityScoringRef.current,
+            );
+            logM4Debug('standard_deferred_m4_prompt', {
+              promptLen: m4PromptBuilt.length,
+              scoringSliceTurns: scoringSlice.length,
+              scoringSliceJsonLen: JSON.stringify(scoringSlice).length,
+            });
+            const m4ScoreStartedAt = Date.now();
             try {
               const scored = await withRetry(
                 async (): Promise<PersonalMomentScoreResult> => {
-                  const res = await fetch(apiUrl, {
+                  logM4Debug('standard_deferred_m4_claude_request', { at: Date.now() });
+                  const res = await fetchWithTimeout(apiUrl, {
                     method: 'POST',
                     headers,
+                    timeoutMs: DEFERRED_MOMENT_ANTHROPIC_TIMEOUT_MS,
                     body: JSON.stringify({
                       model: 'claude-sonnet-4-20250514',
-                      max_tokens: 900,
+                      max_tokens: 2048,
                       messages: [
                         {
                           role: 'user',
-                          content: buildPersonalMomentScoringPrompt(scoringSlice, moment4SpecificityScoringRef.current),
+                          content: m4PromptBuilt,
                         },
                       ],
                     }),
                   });
                   const data = await res.json();
+                  logM4Debug('standard_deferred_m4_claude_response', {
+                    ok: res.ok,
+                    status: res.status,
+                    contentBlocks: Array.isArray((data as { content?: unknown[] })?.content)
+                      ? (data as { content: unknown[] }).content.length
+                      : 0,
+                  });
                   if (!res.ok) {
                     const e = new Error(
                       (data as { error?: { message?: string } })?.error?.message ?? `HTTP ${res.status}`
@@ -13616,9 +18995,14 @@ The participant **confirmed** skipping after the skip confirmation prompt. In **
                   }
                   const raw = (data.content?.[0]?.text ?? '{}') as string;
                   const parsedM4 = parseJsonObjectFromModelText(raw) as PersonalMomentScoreResult;
+                  applyMoment4PostParseCoercionAndSalvage(raw, parsedM4 as unknown as Record<string, unknown>);
                   parsedM4.pillarScores = mergeMoment4PillarScoresAfterEvidenceNormalize(
-                    normalizeScoresByEvidence(parsedM4.pillarScores, parsedM4.keyEvidence)
+                    normalizeScoresByEvidence(
+                      parsedM4.pillarScores as Record<string, unknown>,
+                      parsedM4.keyEvidence,
+                    ),
                   ) as PersonalMomentScoreResult['pillarScores'];
+                  fillMoment4KeyEvidenceWhenNumericScoreButMissingQuote(parsedM4);
                   const depthModifierMeta = applyElaborationAbsenceAfterNormalizeMoment4(
                     parsedM4,
                     scoringSlice,
@@ -13630,12 +19014,30 @@ The participant **confirmed** skipping after the skip confirmation prompt. In **
                     ...depthModifierMeta,
                   });
                   normalizePersonalMomentContemptTierBreakdown(parsedM4);
+                  finalizePersonalMomentMentalizingOvercertaintyFromModel(parsedM4);
+                  finalizePersonalMomentDepthSignals(parsedM4, {
+                    rawModelText: raw,
+                    transcript: msgsDeferred,
+                    scoringSlice,
+                    moment: 4,
+                  });
+                  backfillMoment4KeyEvidenceIfScoresOtherwiseUnpersistable(parsedM4, {
+                    rawModelResponse: raw,
+                    parsedSnapshot: {
+                      pillarScores: parsedM4.pillarScores,
+                      keyEvidence: parsedM4.keyEvidence,
+                    },
+                  });
+                  logM4Debug('standard_deferred_m4_model_parsed', {
+                    pillarKeys: parsedM4.pillarScores ? Object.keys(parsedM4.pillarScores) : [],
+                    keyEvidenceKeys: parsedM4.keyEvidence ? Object.keys(parsedM4.keyEvidence) : [],
+                  });
                   return parsedM4;
                 },
                 {
-                  retries: 2,
-                  baseDelay: 5000,
-                  maxDelay: 20000,
+                  retries: 1,
+                  baseDelay: 4000,
+                  maxDelay: 12000,
                   context: 'standard deferred moment 4',
                   sessionLog: userId
                     ? {
@@ -13646,26 +19048,48 @@ The participant **confirmed** skipping after the skip confirmation prompt. In **
                     : undefined,
                 }
               );
+              logM4Debug('standard_deferred_m4_scoring_finished', {
+                elapsedMs: Date.now() - m4ScoreStartedAt,
+              });
               if (deferredMoment4NarrativeRef.current) {
                 deferredMoment4NarrativeRef.current = null;
               }
               moment4ForAggregate = sanitizePersonalMomentScoresForAggregate(
                 scored as unknown as PersonalMomentSliceForSanitize,
               );
+              logM4Debug('standard_deferred_m4_after_sanitize', {
+                hasAggregate: !!moment4ForAggregate,
+                bundleAssessable: moment4ForAggregate
+                  ? personalMomentBundleWasScored(moment4ForAggregate)
+                  : false,
+              });
               if (moment4ForAggregate && !personalMomentBundleWasScored(moment4ForAggregate)) {
                 await remoteLog('[STANDARD] moment 4 slice not assessable after sanitize; storing null', {
                   attemptId: interviewSessionAttemptIdRef.current,
                 });
                 moment4ForAggregate = null;
+              } else if (moment4ForAggregate && attemptIdForIncremental && userId) {
+                scoringBaseline = await persistMoment4ScoresImmediate(
+                  supabase,
+                  attemptIdForIncremental,
+                  userId,
+                  moment4ForAggregate,
+                  scoringBaseline,
+                  moment4SpecificityScoringRef.current,
+                );
               }
             } catch (err) {
-              await remoteLog('[STANDARD] moment 4 scoring failed', {
-                message: err instanceof Error ? err.message : String(err),
-              });
+              const message = err instanceof Error ? err.message : String(err);
+              const stack = err instanceof Error ? err.stack?.slice(0, 1200) : undefined;
+              await remoteLog('[STANDARD] moment 4 scoring failed', { message, stack });
+              if (__DEV__) {
+                console.error('[M4 Debug] standard deferred moment 4 scoring threw:', err);
+              }
             }
           } else {
+            logM4Debug('standard_deferred_m4_skipped_no_user_turns', { userTurnsM4 });
           }
-          const sliceM5 = personalSlices.moment5;
+          const sliceM5 = trimMoment5SliceForScoring(personalSlices.moment5);
           const userTurnsM5 = sliceM5.filter((m) => m.role === 'user').length;
           if (userTurnsM5 >= 1) {
             const m5Meta: Moment5ClientScoringMetadata =
@@ -13679,9 +19103,10 @@ The participant **confirmed** skipping after the skip confirmation prompt. In **
             try {
               const scoredM5 = await withRetry(
                 async (): Promise<PersonalMomentScoreResult> => {
-                  const res = await fetch(apiUrl, {
+                  const res = await fetchWithTimeout(apiUrl, {
                     method: 'POST',
                     headers,
+                    timeoutMs: DEFERRED_MOMENT_ANTHROPIC_TIMEOUT_MS,
                     body: JSON.stringify({
                       model: 'claude-sonnet-4-20250514',
                       max_tokens: 900,
@@ -13703,20 +19128,38 @@ The participant **confirmed** skipping after the skip confirmation prompt. In **
                   }
                   const raw = (data.content?.[0]?.text ?? '{}') as string;
                   const parsedM5 = parseJsonObjectFromModelText(raw) as PersonalMomentScoreResult;
+                  applyMoment5PostParseCoercionAndSalvage(raw, parsedM5 as unknown as Record<string, unknown>);
                   promoteMoment5LegacyContemptForScoringResult(parsedM5);
-                  parsedM5.pillarScores = normalizeScoresByEvidence(parsedM5.pillarScores, parsedM5.keyEvidence);
+                  fillMoment5KeyEvidenceWhenNumericScoreButMissingQuote(parsedM5);
+                  parsedM5.pillarScores = mergeMoment5PillarScoresAfterEvidenceNormalize(
+                    normalizeScoresByEvidence(parsedM5.pillarScores, parsedM5.keyEvidence),
+                  ) as PersonalMomentScoreResult['pillarScores'];
                   const depthModifierMeta = applyElaborationAbsenceAfterNormalizeMoment5(parsedM5, sliceM5, msgsDeferred, m5Meta);
                   void remoteLog('[SCORING_DEPTH_MODIFIER]', {
                     scoring_slice: 'moment_5',
                     ...depthModifierMeta,
                   });
                   normalizePersonalMomentContemptTierBreakdown(parsedM5);
+                  finalizePersonalMomentMentalizingOvercertaintyFromModel(parsedM5);
+                  finalizePersonalMomentDepthSignals(parsedM5, {
+                    rawModelText: raw,
+                    transcript: msgsDeferred,
+                    scoringSlice: sliceM5,
+                    moment: 5,
+                  });
+                  backfillMoment5KeyEvidenceIfScoresOtherwiseUnpersistable(parsedM5, {
+                    rawModelResponse: raw,
+                    parsedSnapshot: {
+                      pillarScores: parsedM5.pillarScores,
+                      keyEvidence: parsedM5.keyEvidence,
+                    },
+                  });
                   return parsedM5;
                 },
                 {
-                  retries: 2,
-                  baseDelay: 5000,
-                  maxDelay: 20000,
+                  retries: 1,
+                  baseDelay: 4000,
+                  maxDelay: 12000,
                   context: 'standard deferred moment 5',
                   sessionLog: userId
                     ? {
@@ -13735,6 +19178,20 @@ The participant **confirmed** skipping after the skip confirmation prompt. In **
                   attemptId: interviewSessionAttemptIdRef.current,
                 });
                 moment5ForAggregate = null;
+              } else if (moment5ForAggregate && attemptIdForIncremental && userId) {
+                scoringBaseline = await persistMoment5ScoresImmediate(
+                  supabase,
+                  attemptIdForIncremental,
+                  userId,
+                  moment5ForAggregate,
+                  scoringBaseline,
+                  (moment5ClientScoringMetaRef.current ?? {
+                    accountabilityProbeFired: moment5AccountabilityProbeFiredRef.current,
+                    probeTriggerReason: moment5AccountabilityProbeFiredRef.current
+                      ? 'lacks_explicit_self_accountability'
+                      : undefined,
+                  }) as Record<string, unknown>,
+                );
               }
             } catch (err) {
               await remoteLog('[STANDARD] moment 5 scoring failed', {
@@ -13752,6 +19209,7 @@ The participant **confirmed** skipping after the skip confirmation prompt. In **
             keyEvidence: s.keyEvidence,
             scenarioName: s.scenarioName,
             mentalizing_inference_source: s.mentalizing_inference_source,
+            mentalizing_overcertainty: s.mentalizing_overcertainty === true,
           };
         };
         const completionGateStandard = evaluateInterviewCompletionGate({
@@ -13760,6 +19218,7 @@ The participant **confirmed** skipping after the skip confirmation prompt. In **
           scenario3: bundle(3),
           moment4: moment4ForAggregate,
         });
+        let egoLevelForDeferredAggregate: number | null = null;
         if (!completionGateStandard.ok) {
           await remoteLog('[COMPLETION_GATE_FAIL]', {
             path: 'standard_deferred',
@@ -13770,7 +19229,292 @@ The participant **confirmed** skipping after the skip confirmation prompt. In **
             why: 'Deferred persist: withhold weighted scoring and pass until all scenarios and Moment 4 are scored',
           });
         }
+        if (
+          completionGateStandard.ok &&
+          apiUrl &&
+          bundle(1)?.pillarScores &&
+          bundle(2)?.pillarScores &&
+          bundle(3)?.pillarScores
+        ) {
+          try {
+            const ho = await withRetry(fetchHolisticScoringOnce, {
+              retries: 3,
+              baseDelay: 12000,
+              maxDelay: 45000,
+              context: 'standard_deferred_holistic_ego',
+              sessionLog: userId
+                ? {
+                    userId,
+                    attemptId: getSessionLogRuntime().attemptId,
+                    platform: getSessionLogRuntime().platform,
+                  }
+                : undefined,
+            });
+            standardDeferredHolisticForEgoCache = ho;
+            egoLevelForDeferredAggregate = extractEgoDevelopmentLevel(ho);
+            if (attemptIdForIncremental && userId && egoLevelForDeferredAggregate != null) {
+              scoringBaseline = await persistHolisticModifiersImmediate(
+                supabase,
+                attemptIdForIncremental,
+                userId,
+                { egoDevelopmentLevel: egoLevelForDeferredAggregate },
+                scoringBaseline,
+              );
+            }
+          } catch (holisticEgoErr) {
+            await remoteLog('[STANDARD] deferred holistic prefetch failed (non-fatal for ego/modifiers)', {
+              message: holisticEgoErr instanceof Error ? holisticEgoErr.message : String(holisticEgoErr),
+            });
+          }
+        }
+        const defensePatternsForDeferredRow =
+          completionGateStandard.ok &&
+          bundle(1)?.pillarScores &&
+          bundle(2)?.pillarScores &&
+          bundle(3)?.pillarScores
+            ? detectDefensePatterns(
+                [
+                  { pillarScores: bundle(1)!.pillarScores, keyEvidence: bundle(1)!.keyEvidence },
+                  { pillarScores: bundle(2)!.pillarScores, keyEvidence: bundle(2)!.keyEvidence },
+                  { pillarScores: bundle(3)!.pillarScores, keyEvidence: bundle(3)!.keyEvidence },
+                ],
+                moment4ForAggregate
+                  ? {
+                      pillarScores: moment4ForAggregate.pillarScores,
+                      keyEvidence: moment4ForAggregate.keyEvidence,
+                    }
+                  : null,
+                moment5ForAggregate
+                  ? {
+                      pillarScores: moment5ForAggregate.pillarScores,
+                      keyEvidence: moment5ForAggregate.keyEvidence,
+                    }
+                  : null,
+                msgsDeferred,
+              )
+            : { ...DEFAULT_DEFENSE_PATTERNS };
         const existingAttemptId = interviewSessionAttemptIdRef.current;
+        const pevDeferred = aggregatePersonalMomentEmotionalVocab(moment4ForAggregate, moment5ForAggregate, {
+          scenarioEmotionalVocabDensityPercent: scenarioEmotionalVocabDensityPercentFromTranscript(msgsDeferred),
+          communicationStyleEmotionalVocabDensityPercent: null,
+        });
+        const disclosureSlicesForDeferredRow: MarkerScoreSlice[] = [
+          bundle(1)
+            ? {
+                pillarScores: bundle(1)!.pillarScores,
+                keyEvidence: bundle(1)!.keyEvidence,
+                mentalizing_overcertainty: bundle(1)!.mentalizing_overcertainty === true,
+              }
+            : null,
+          bundle(2)
+            ? {
+                pillarScores: bundle(2)!.pillarScores,
+                keyEvidence: bundle(2)!.keyEvidence,
+                mentalizing_overcertainty: bundle(2)!.mentalizing_overcertainty === true,
+              }
+            : null,
+          bundle(3)
+            ? {
+                pillarScores: bundle(3)!.pillarScores,
+                keyEvidence: bundle(3)!.keyEvidence,
+                mentalizing_overcertainty: bundle(3)!.mentalizing_overcertainty === true,
+              }
+            : null,
+          moment4ForAggregate
+            ? {
+                pillarScores: moment4ForAggregate.pillarScores,
+                keyEvidence: moment4ForAggregate.keyEvidence,
+                mentalizing_overcertainty: moment4ForAggregate.mentalizing_overcertainty === true,
+                response_concreteness: normalizeResponseConcreteness(moment4ForAggregate.response_concreteness),
+                user_slice_word_count: moment4ForAggregate.user_slice_word_count ?? undefined,
+              }
+            : null,
+          moment5ForAggregate
+            ? {
+                pillarScores: moment5ForAggregate.pillarScores,
+                keyEvidence: moment5ForAggregate.keyEvidence,
+                mentalizing_overcertainty: moment5ForAggregate.mentalizing_overcertainty === true,
+                response_concreteness: normalizeResponseConcreteness(moment5ForAggregate.response_concreteness),
+                user_slice_word_count: moment5ForAggregate.user_slice_word_count ?? undefined,
+              }
+            : null,
+        ];
+        const disclosureCalibrationForDeferredRow = disclosureCalibrationFromMarkerSlices(
+          disclosureSlicesForDeferredRow,
+          msgsDeferred,
+        );
+        console.log('[Disclosure] persisting disclosure_calibration:', disclosureCalibrationForDeferredRow);
+        const mentalizingOvercertaintyCountDeferred = countMentalizingOvercertaintyInMarkerSlices(
+          disclosureSlicesForDeferredRow,
+          msgsDeferred,
+        );
+        if (attemptIdForIncremental && userId) {
+          scoringBaseline = await persistHolisticModifiersImmediate(
+            supabase,
+            attemptIdForIncremental,
+            userId,
+            {
+              egoDevelopmentLevel: egoLevelForDeferredAggregate,
+              mentalizingOvercertaintyCount: mentalizingOvercertaintyCountDeferred,
+              defensePatterns: defensePatternsForDeferredRow as Record<string, unknown>,
+            },
+            scoringBaseline,
+          );
+          if (moment5ForAggregate) {
+            scoringBaseline = await persistMoment5ScoresImmediate(
+              supabase,
+              attemptIdForIncremental,
+              userId,
+              moment5ForAggregate,
+              scoringBaseline,
+              (moment5ClientScoringMetaRef.current ?? {
+                accountabilityProbeFired: moment5AccountabilityProbeFiredRef.current,
+                probeTriggerReason: moment5AccountabilityProbeFiredRef.current
+                  ? 'lacks_explicit_self_accountability'
+                  : undefined,
+              }) as Record<string, unknown>,
+              {
+                personal_moment_emotional_vocab_low: pevDeferred.personal_moment_emotional_vocab_low,
+                personal_moment_emotional_vocab_density: pevDeferred.personal_moment_emotional_vocab_density,
+                disclosure_calibration: disclosureCalibrationForDeferredRow,
+              },
+            );
+          }
+        }
+        const weightedMinDeferred = await resolveWeightedPassMinAfterReferralFulfillment(userId);
+        const skipOptsDeferred = attachSkipPenaltyGateOptions(scenarioSkipConfirmedCountRef.current);
+        let deferredModifierPayload: Record<string, unknown> = {};
+        if (
+          completionGateStandard.ok &&
+          bundle(1)?.pillarScores &&
+          bundle(2)?.pillarScores &&
+          bundle(3)?.pillarScores
+        ) {
+          try {
+            const markerSlicesDeferredGate: MarkerScoreSlice[] = [
+              bundle(1)
+                ? {
+                    pillarScores: bundle(1)!.pillarScores,
+                    keyEvidence: bundle(1)!.keyEvidence,
+                    mentalizing_overcertainty: bundle(1)!.mentalizing_overcertainty === true,
+                  }
+                : null,
+              bundle(2)
+                ? {
+                    pillarScores: bundle(2)!.pillarScores,
+                    keyEvidence: bundle(2)!.keyEvidence,
+                    mentalizing_overcertainty: bundle(2)!.mentalizing_overcertainty === true,
+                  }
+                : null,
+              bundle(3)
+                ? {
+                    pillarScores: bundle(3)!.pillarScores,
+                    keyEvidence: bundle(3)!.keyEvidence,
+                    mentalizing_overcertainty: bundle(3)!.mentalizing_overcertainty === true,
+                  }
+                : null,
+              moment4ForAggregate
+                ? {
+                    pillarScores: moment4ForAggregate.pillarScores,
+                    keyEvidence: moment4ForAggregate.keyEvidence,
+                    mentalizing_overcertainty: moment4ForAggregate.mentalizing_overcertainty === true,
+                    response_concreteness: normalizeResponseConcreteness(moment4ForAggregate.response_concreteness),
+                  }
+                : null,
+              moment5ForAggregate
+                ? {
+                    pillarScores: moment5ForAggregate.pillarScores,
+                    keyEvidence: moment5ForAggregate.keyEvidence,
+                    mentalizing_overcertainty: moment5ForAggregate.mentalizing_overcertainty === true,
+                    response_concreteness: normalizeResponseConcreteness(moment5ForAggregate.response_concreteness),
+                  }
+                : null,
+            ];
+            const scenarioBoundariesDeferred = buildScenarioBoundaries(
+              msgsDeferred,
+              Array.from(scoredScenariosRef.current),
+            );
+            const lmDeferred = analyzeLanguageMarkers(msgsDeferred, scenarioBoundariesDeferred);
+            const mergedDeferredGate = aggregatePillarScoresWithCommitmentMergeDetailed(markerSlicesDeferredGate, {
+              egoDevelopmentLevel: egoLevelForDeferredAggregate,
+              defensePatternTranscript: msgsDeferred,
+              disclosureCalibrationTranscript: msgsDeferred,
+              scenarioEmotionalVocabDensityPercent: lmDeferred.scenario_emotional_vocab_density,
+              communicationStyleEmotionalVocabDensityPercent: null,
+            });
+            const scoreForGateDeferred = computeInterviewWeightedCompositeFromPillars(
+              mergedDeferredGate.scores,
+              null,
+              skipOptsDeferred.skipPenaltyTotal,
+              skipOptsDeferred.skipAutoFail,
+            );
+            if (typeof __DEV__ !== 'undefined' && __DEV__) {
+              console.log('[ModifierBase] score being passed to gate (deferred):', scoreForGateDeferred);
+            }
+            if (typeof __DEV__ !== 'undefined' && __DEV__) {
+              console.log('[ModifierInputs] before gate call:', {
+                egoDevelopmentLevel: mergedDeferredGate.egoDevelopmentLevel,
+                defensePatterns: mergedDeferredGate.defensePatterns,
+                moment4Concreteness: mergedDeferredGate.moment4Concreteness,
+                moment5Concreteness: mergedDeferredGate.moment5Concreteness,
+              });
+            }
+            if (typeof __DEV__ !== 'undefined' && __DEV__) {
+              console.log(
+                '[ConcretenessModifier] passing to gate — m4:',
+                mergedDeferredGate.moment4Concreteness ?? null,
+                'm5:',
+                mergedDeferredGate.moment5Concreteness ?? null,
+              );
+            }
+            if (typeof __DEV__ !== 'undefined' && __DEV__) {
+              console.log('[BaseScore] passing precomputedWeightedScore:', scoreForGateDeferred);
+            }
+            const gateDeferredSnap = computeGateResult(mergedDeferredGate.scores, null, {
+              weightedPassMin: weightedMinDeferred,
+              scenarioPillarScoresByScenario: {
+                1: bundle(1)!.pillarScores,
+                2: bundle(2)!.pillarScores,
+                3: bundle(3)!.pillarScores,
+              },
+              skipPenaltyTotal: skipOptsDeferred.skipPenaltyTotal,
+              skipAutoFail: skipOptsDeferred.skipAutoFail,
+              egoDevelopmentLevel: mergedDeferredGate.egoDevelopmentLevel,
+              defensePatterns: mergedDeferredGate.defensePatterns,
+              moment4Concreteness: mergedDeferredGate.moment4Concreteness ?? null,
+              moment5Concreteness: mergedDeferredGate.moment5Concreteness ?? null,
+              mentalizingOvercertaintyCount: mergedDeferredGate.mentalizingOvercertaintyCount ?? 0,
+              disclosureCalibration: mergedDeferredGate.disclosureCalibration,
+              personalMomentEmotionalVocabLow: mergedDeferredGate.personal_moment_emotional_vocab_low ?? false,
+              emotionRecognitionRawScore: emotionRawScoreForGate(),
+              emotionRecognitionResponses: emotionResponsesForGate(),
+              ...(typeof scoreForGateDeferred === 'number' && Number.isFinite(scoreForGateDeferred)
+                ? { precomputedWeightedScore: scoreForGateDeferred }
+                : {}),
+            });
+            logWeightedModifierInvariant('deferred_snapshot', gateDeferredSnap.weightedScore, gateDeferredSnap);
+            deferredModifierPayload = {
+              weighted_score: gateDeferredSnap.weightedScore,
+              depth_signal_modifier: gateDeferredSnap.depthSignalModifier ?? gateDeferredSnap.scoreModifier ?? 0,
+              score_modifier: gateDeferredSnap.depthSignalModifier ?? gateDeferredSnap.scoreModifier ?? 0,
+              modified_weighted_score: gateDeferredSnap.modifiedWeightedScore ?? null,
+              passed: gateDeferredSnap.pass,
+              gate_fail_reasons: gateDeferredSnap.failReasonCodes ?? [],
+              gate_fail_detail: gateDeferredSnap.failReasonDetail ?? null,
+              review_flags: gateDeferredSnap.reviewFlags,
+              ego_development_level:
+                mergedDeferredGate.egoDevelopmentLevel ??
+                egoLevelForDeferredAggregate ??
+                scoringBaseline.ego_development_level,
+              scenario_composites: scenarioCompositesToStorageJson(gateDeferredSnap.scenarioComposites),
+            };
+            console.log('[Modifier] persisting (deferred attempt row):', deferredModifierPayload);
+          } catch (e) {
+            void remoteLog('[STANDARD] deferred gate modifier snapshot failed', {
+              message: e instanceof Error ? e.message : String(e),
+            });
+          }
+        }
         const rowPayload: Record<string, unknown> = {
           user_id: userId,
           attempt_number: nextAttemptNumber,
@@ -13788,39 +19532,56 @@ The participant **confirmed** skipping after the skip confirmation prompt. In **
                 passed: false,
               }),
           scenario_specific_patterns: {
-            moment_4_scores: moment4ForAggregate
-              ? {
-                  pillarScores: moment4ForAggregate.pillarScores,
-                  pillarConfidence: moment4ForAggregate.pillarConfidence,
-                  keyEvidence: moment4ForAggregate.keyEvidence,
-                  summary: moment4ForAggregate.summary,
-                  specificity: moment4ForAggregate.specificity,
-                  momentName: moment4ForAggregate.momentName,
-                  ...(moment4SpecificityScoringRef.current
-                    ? { specificityScoringMetadata: moment4SpecificityScoringRef.current }
-                    : {}),
-                }
+            moment_4_scores: resolveMomentScoresForFinalPersist(
+              moment4ForAggregate
+                ? buildMoment4ScoresRecord(
+                    moment4ForAggregate,
+                    moment4SpecificityScoringRef.current,
+                  )
               : null,
-            moment_5_scores: moment5ForAggregate
-              ? {
-                  pillarScores: moment5ForAggregate.pillarScores,
-                  pillarConfidence: moment5ForAggregate.pillarConfidence,
-                  keyEvidence: moment5ForAggregate.keyEvidence,
-                  summary: moment5ForAggregate.summary,
-                  specificity: moment5ForAggregate.specificity,
-                  momentName: moment5ForAggregate.momentName,
-                  scoringMetadata:
-                    moment5ClientScoringMetaRef.current ?? {
+              scoringBaseline,
+              'moment_4_scores',
+            ),
+            moment_5_scores: resolveMomentScoresForFinalPersist(
+              moment5ForAggregate
+                ? buildMoment5ScoresRecord(
+                    moment5ForAggregate,
+                    (moment5ClientScoringMetaRef.current ?? {
                       accountabilityProbeFired: moment5AccountabilityProbeFiredRef.current,
                       probeTriggerReason: moment5AccountabilityProbeFiredRef.current
                         ? 'lacks_explicit_self_accountability'
                         : undefined,
-                    },
-                }
+                    }) as Record<string, unknown>,
+                  )
               : null,
+              scoringBaseline,
+              'moment_5_scores',
+            ),
           },
-          scoring_deferred: completionGateStandard.ok,
+          defense_patterns: defensePatternsForDeferredRow,
+          moment_4_concreteness: coalesceConcretenessForFinalPersist(
+            moment4ForAggregate,
+            scoringBaseline.moment_4_concreteness,
+          ),
+          moment_5_concreteness: coalesceConcretenessForFinalPersist(
+            moment5ForAggregate,
+            scoringBaseline.moment_5_concreteness,
+          ),
+          personal_moment_emotional_vocab_density:
+            pevDeferred.personal_moment_emotional_vocab_density ??
+            scoringBaseline.personal_moment_emotional_vocab_density,
+          personal_moment_emotional_vocab_low:
+            pevDeferred.personal_moment_emotional_vocab_low ??
+            scoringBaseline.personal_moment_emotional_vocab_low,
+          disclosure_calibration:
+            disclosureCalibrationForDeferredRow ?? scoringBaseline.disclosure_calibration,
+          mentalizing_overcertainty_count:
+            mentalizingOvercertaintyCountDeferred ?? scoringBaseline.mentalizing_overcertainty_count,
+          completed_at: new Date().toISOString(),
+          scoring_deferred: true,
           interview_typology_context: context,
+          ...emotionRecognitionPersistSpreadIfComplete([...emotionItemResponsesRef.current]),
+          ...deferredModifierPayload,
         };
         let attemptId: string | null = null;
         if (existingAttemptId) {
@@ -13841,37 +19602,12 @@ The participant **confirmed** skipping after the skip confirmation prompt. In **
           attemptId = (ins as { id?: string })?.id ?? null;
         }
         if (!attemptId) throw new Error('Missing attempt id after save');
-        await profileRepository.upsertProfile(userId, {
+        assignAttemptIdForSessionLogs(attemptId);
+        await updateUserInterviewApplication(userId, {
           applicationStatus: 'under_review',
           onboardingStage: 'complete',
         });
-        if (!ALPHA_MODE) {
-          queryClient.invalidateQueries({ queryKey: ['profile', userId] });
-        } else {
-          setTimeout(() => queryClient.invalidateQueries({ queryKey: ['profile', userId] }), 0);
-        }
-        const passOverride = await fetchInterviewPassAdminOverride(supabase, userId);
-        const { error: userUpErr } = await supabase
-          .from('users')
-          .update({
-            interview_completed: true,
-            interview_passed: completionGateStandard.ok ? interviewPassWhileScoringPending(passOverride) : false,
-            interview_passed_computed: null,
-            interview_weighted_score: null,
-            interview_completed_at: new Date().toISOString(),
-            interview_attempt_count: nextAttemptNumber,
-            latest_attempt_id: attemptId,
-          })
-          .eq('id', userId);
-        if (userUpErr) throw new Error(userUpErr.message);
-        try {
-          await supabase.rpc('fulfill_referral_after_interview', { p_user_id: userId });
-        } catch {
-          /* non-fatal */
-        }
-        await ensureShareableReferralCodeForReferrer(userId);
-        assignAttemptIdForSessionLogs(attemptId);
-        if (completionGateStandard.ok) {
+        queryClient.invalidateQueries({ queryKey: ['profile', userId] });
         const { data: edgeData, error: edgeInvokeError } = await supabase.functions.invoke<{
           ok?: boolean;
           error?: string;
@@ -13901,27 +19637,14 @@ The participant **confirmed** skipping after the skip confirmation prompt. In **
           });
           throw new Error('EDGE_SKIPPED_NOT_DEFERRED');
         }
-          if (edgeBody?.skipped === 'completion_gate_incomplete') {
-            await remoteLog('[STANDARD] complete-standard-interview held attempt (server completion gate)', {
-              attemptId,
-            });
-            writeSessionLog({
-              userId,
-              attemptId,
-              eventType: 'session_complete',
-              eventData: { path: 'standard_onboarding_incomplete_gate_server', attemptId },
-              platform: getSessionLogRuntime().platform,
-            });
-            {
-              const rtp = getSessionLogRuntime();
-              void runCommunicationStylePipelineAfterSave(
-                userId,
-                attemptId,
-                interviewSessionIdRef.current,
-                { platform: rtp.platform },
-              );
-            }
-          } else {
+        if (edgeBody?.skipped === 'completion_gate_incomplete') {
+          await remoteLog('[STANDARD] complete-standard-interview incomplete gate (will use client scoring)', {
+            attemptId,
+            incomplete_reason:
+              completionGateStandard.ok === false ? completionGateStandard.incomplete_reason : null,
+          });
+          throw new Error('EDGE_GATE_INCOMPLETE');
+        }
         writeSessionLog({
           userId,
           attemptId,
@@ -13929,47 +19652,26 @@ The participant **confirmed** skipping after the skip confirmation prompt. In **
           eventData: { path: 'standard_onboarding_server_scoring', server_delegate: true, edge_ok: true },
           platform: getSessionLogRuntime().platform,
         });
-            {
-              const rtp = getSessionLogRuntime();
-              void runCommunicationStylePipelineAfterSave(
-                userId,
-                attemptId,
-                interviewSessionIdRef.current,
-                { platform: rtp.platform }
-              );
-            }
-          }
-        } else {
-          await remoteLog('[STANDARD] complete-standard-interview not invoked — completion gate incomplete', {
-            attemptId,
-            incomplete_reason: completionGateStandard.incomplete_reason,
-            detail: completionGateStandard.detail,
-          });
-          writeSessionLog({
+        {
+          const rtp = getSessionLogRuntime();
+          void runCommunicationStylePipelineAfterSave(
             userId,
             attemptId,
-            eventType: 'session_complete',
-            eventData: {
-              path: 'standard_onboarding_incomplete_gate',
-              incomplete_reason: completionGateStandard.incomplete_reason,
-            },
-            platform: getSessionLogRuntime().platform,
-          });
-          {
-            const rtp = getSessionLogRuntime();
-            void runCommunicationStylePipelineAfterSave(
-              userId,
-              attemptId,
-              interviewSessionIdRef.current,
-              { platform: rtp.platform },
-            );
-          }
+            interviewSessionIdRef.current,
+            { platform: rtp.platform },
+          );
         }
+        await commitStandardOnboardingUsersAfterAttempt({
+          attemptIdForUserRow: attemptId,
+          gateOkForInterviewPassed: completionGateStandard.ok,
+          interviewAttemptCount: nextAttemptNumber,
+        });
+        await applyPsychometricModifierToAttempt(userId, attemptId);
         await clearInterviewFromStorage(userId);
         await remoteLog('[STANDARD] application saved; post-interview (server scoring complete)', {
           attemptId,
         });
-        replaceWithStandardApplicantProcessingHandoffForUser(navigation, userId, {
+        replaceWithStandardApplicantPostInterviewHandoffForUser(navigation, userId, {
           interviewSessionId: interviewSessionIdRef.current,
           source: 'scoreInterview_standard_server_delegate',
         });
@@ -13981,11 +19683,24 @@ The participant **confirmed** skipping after the skip confirmation prompt. In **
         });
       }
       if (serverDelegateOk) {
+        const attemptIdForNarrativeBackup = interviewSessionAttemptIdRef.current;
+        if (userId && attemptIdForNarrativeBackup) {
+          void kickClientInterviewNarrativeIfPending(
+            userId,
+            attemptIdForNarrativeBackup,
+            'scoreInterview_standard_server_delegate'
+          );
+        }
         return;
       }
     }
     interviewStatusRef.current = 'preparing_results';
     setInterviewStatus('preparing_results');
+    if (userId) markPreparingResultsSession(userId);
+    const sessionAttemptForPoll = interviewSessionAttemptIdRef.current;
+    if (typeof sessionAttemptForPoll === 'string' && sessionAttemptForPoll.length > 0) {
+      setPendingScoringSyncAttemptId(sessionAttemptForPoll);
+    }
     void persistInterviewAttemptSessionLifecycle(interviewSessionAttemptIdRef.current, 'scoring');
     setStatus('scoring');
     await remoteLog('[2] Screen set to scoring');
@@ -14001,6 +19716,7 @@ The participant **confirmed** skipping after the skip confirmation prompt. In **
         },
         skipPenaltyTotal: skipOptsFallback.skipPenaltyTotal,
         skipAutoFail: skipOptsFallback.skipAutoFail,
+        mentalizingOvercertaintyCount: 0,
       });
       const fallbackResults: InterviewResults = {
         pillarScores: { ...FALLBACK_MARKER_SCORES_MID },
@@ -14014,18 +19730,17 @@ The participant **confirmed** skipping after the skip confirmation prompt. In **
       };
       setResults(fallbackResults);
       if (isOnboardingFlow) {
-        await profileRepository.upsertProfile(userId, {
+        await updateUserInterviewApplication(userId, {
           applicationStatus: 'under_review',
           onboardingStage: 'complete',
         });
         queryClient.invalidateQueries({ queryKey: ['profile', userId] });
       }
       await saveInterviewResults(fallbackResults, fallbackResults.gateResult!, userId);
-      const standardNoApi =
-        isOnboardingFlow && !!userId && !!profile && !profile.isAlphaTester && !isAdminConsoleAccount;
+      const standardNoApi = isOnboardingFlow && !!userId && !isAdminConsoleAccount;
       if (standardNoApi) {
         await ensureShareableReferralCodeForReferrer(userId);
-        replaceWithStandardApplicantProcessingHandoffForUser(navigation, userId, {
+        replaceWithStandardApplicantPostInterviewHandoffForUser(navigation, userId, {
           interviewSessionId: interviewSessionIdRef.current,
           source: 'scoreInterview_standard_no_anthropic',
         });
@@ -14037,38 +19752,10 @@ The participant **confirmed** skipping after the skip confirmation prompt. In **
       return;
     }
     try {
-      /** Matches reasoning timeout pattern — proxies can otherwise hang for many minutes with no `fetch` resolution. */
-      const SCORING_HOLISTIC_FETCH_TIMEOUT_MS = 180_000;
-      const fetchScoringOnce = async (): Promise<InterviewResults> => {
-        const abort = new AbortController();
-        const t = setTimeout(() => abort.abort(), SCORING_HOLISTIC_FETCH_TIMEOUT_MS);
-        let res: Response;
+      let holisticParsed: InterviewResults | null = standardDeferredHolisticForEgoCache;
+      if (!holisticParsed) {
         try {
-          res = await fetch(apiUrl, {
-            method: 'POST',
-            headers,
-            signal: abort.signal,
-            body: JSON.stringify({
-              model: 'claude-sonnet-4-20250514',
-              max_tokens: 1500,
-              messages: [{ role: 'user', content: buildScoringPrompt(finalMessages, context) }],
-            }),
-          });
-        } finally {
-          clearTimeout(t);
-        }
-        const data = await res.json();
-        if (!res.ok) {
-          const e = new Error((data as { error?: { message?: string } })?.error?.message ?? `HTTP ${res.status}`);
-          (e as Error & { status?: number }).status = res.status;
-          throw e;
-        }
-        const raw = (data.content?.[0]?.text ?? '{}') as string;
-        return parseJsonObjectFromModelText(raw) as InterviewResults;
-      };
-      let holisticParsed: InterviewResults | null = null;
-      try {
-        holisticParsed = await withRetry(fetchScoringOnce, {
+          holisticParsed = await withRetry(fetchHolisticScoringOnce, {
         retries: 3,
         baseDelay: 12000,
         maxDelay: 45000,
@@ -14086,19 +19773,33 @@ The participant **confirmed** skipping after the skip confirmation prompt. In **
           message: holisticErr instanceof Error ? holisticErr.message : String(holisticErr),
         });
       }
+      }
       await hydrateScenarioScoresFromAttemptIfNeeded();
-      let completionGateHolistic: InterviewCompletionGateResult | null = null;
-      if (!ALPHA_MODE && userId) {
+      let holisticStoredPatterns: Record<string, unknown> | null = null;
         let moment4FromAttemptRow: unknown = null;
-        if (interviewSessionAttemptIdRef.current) {
-          const { data: attRow } = await supabase
+      let moment4ConcretenessHolisticGate: ResponseConcretenessLevel | null = null;
+      let moment5ConcretenessHolisticGate: ResponseConcretenessLevel | null = null;
+      let completionGateHolistic: InterviewCompletionGateResult | null = null;
+      if (userId && interviewSessionAttemptIdRef.current) {
+        const { data: attRowHolistic } = await supabase
             .from('interview_attempts')
-            .select('scenario_specific_patterns')
+          .select('scenario_specific_patterns, moment_4_concreteness, moment_5_concreteness')
             .eq('id', interviewSessionAttemptIdRef.current)
             .maybeSingle();
-          moment4FromAttemptRow =
-            (attRow?.scenario_specific_patterns as Record<string, unknown> | null)?.moment_4_scores ?? null;
-        }
+        holisticStoredPatterns = (attRowHolistic?.scenario_specific_patterns as Record<string, unknown>) ?? null;
+        moment4FromAttemptRow = holisticStoredPatterns?.moment_4_scores ?? null;
+        const m4StoredHolistic = holisticStoredPatterns?.moment_4_scores;
+        const m5StoredHolistic = holisticStoredPatterns?.moment_5_scores;
+        moment4ConcretenessHolisticGate = mergeMomentConcretenessForGate(
+          m4StoredHolistic,
+          (attRowHolistic as Record<string, unknown> | null | undefined)?.moment_4_concreteness,
+        );
+        moment5ConcretenessHolisticGate = mergeMomentConcretenessForGate(
+          m5StoredHolistic,
+          (attRowHolistic as Record<string, unknown> | null | undefined)?.moment_5_concreteness,
+        );
+      }
+      if (userId) {
         completionGateHolistic = evaluateInterviewCompletionGate({
           scenario1: scenarioScoresRef.current[1],
           scenario2: scenarioScoresRef.current[2],
@@ -14112,7 +19813,7 @@ The participant **confirmed** skipping after the skip confirmation prompt. In **
             missingScenarioNumbers: completionGateHolistic.missingScenarioNumbers,
             missingMoment4: completionGateHolistic.missingMoment4,
             detail: completionGateHolistic.detail,
-            why: 'Holistic path: withhold weighted score and pass until all scenarios and Moment 4 are scored',
+            why: 'Holistic path: scoring continues; incomplete_reason may be stored on attempt',
           });
         }
       }
@@ -14126,8 +19827,35 @@ The participant **confirmed** skipping after the skip confirmation prompt. In **
       };
       let parsed: InterviewResults = holisticParsed ?? EMPTY_HOLISTIC_RESULT;
       const weightedMin = await resolveWeightedPassMinAfterReferralFulfillment(userId);
-      const gateBlockedHolistic =
-        completionGateHolistic != null && !completionGateHolistic.ok;
+      /** Do not block the scoring pipeline on the prereq gate — persist scores and let edge/client finish. */
+      const gateBlockedHolistic = false;
+      let holisticDefensePatterns: DefensePatternsJson = { ...DEFAULT_DEFENSE_PATTERNS };
+      if (
+        !gateBlockedHolistic &&
+        scenarioScoresRef.current[1]?.pillarScores &&
+        scenarioScoresRef.current[2]?.pillarScores &&
+        scenarioScoresRef.current[3]?.pillarScores
+      ) {
+        holisticDefensePatterns = detectDefensePatterns(
+          [
+            {
+              pillarScores: scenarioScoresRef.current[1]!.pillarScores,
+              keyEvidence: scenarioScoresRef.current[1]!.keyEvidence,
+            },
+            {
+              pillarScores: scenarioScoresRef.current[2]!.pillarScores,
+              keyEvidence: scenarioScoresRef.current[2]!.keyEvidence,
+            },
+            {
+              pillarScores: scenarioScoresRef.current[3]!.pillarScores,
+              keyEvidence: scenarioScoresRef.current[3]!.keyEvidence,
+            },
+          ],
+          null,
+          null,
+          finalMessages as MessageWithScenario[],
+        );
+      }
       if (
         !gateBlockedHolistic &&
         !holisticParsed &&
@@ -14139,29 +19867,155 @@ The participant **confirmed** skipping after the skip confirmation prompt. In **
           {
             pillarScores: scenarioScoresRef.current[1]!.pillarScores,
             keyEvidence: scenarioScoresRef.current[1]!.keyEvidence,
+            mentalizing_overcertainty: scenarioScoresRef.current[1]!.mentalizing_overcertainty === true,
           },
           {
             pillarScores: scenarioScoresRef.current[2]!.pillarScores,
             keyEvidence: scenarioScoresRef.current[2]!.keyEvidence,
+            mentalizing_overcertainty: scenarioScoresRef.current[2]!.mentalizing_overcertainty === true,
           },
           {
             pillarScores: scenarioScoresRef.current[3]!.pillarScores,
             keyEvidence: scenarioScoresRef.current[3]!.keyEvidence,
+            mentalizing_overcertainty: scenarioScoresRef.current[3]!.mentalizing_overcertainty === true,
           },
         ];
-        const mergedOnlyScenarios = aggregatePillarScoresWithCommitmentMergeDetailed(markerSlicesOnly);
+        const mergedOnlyScenarios = aggregatePillarScoresWithCommitmentMergeDetailed(markerSlicesOnly, {
+          defensePatternTranscript: finalMessages as MessageWithScenario[],
+          disclosureCalibrationTranscript: finalMessages as MessageWithScenario[],
+          scenarioEmotionalVocabDensityPercent:
+            scenarioEmotionalVocabDensityPercentFromTranscript(finalMessages as MessageWithScenario[]),
+          communicationStyleEmotionalVocabDensityPercent: null,
+        });
         parsed = {
           ...parsed,
           pillarScores: mergedOnlyScenarios.scores,
         };
       }
+      const m4HolisticSl = markerSliceFromStoredScenarioMoment(holisticStoredPatterns?.moment_4_scores);
+      const m5HolisticSl = markerSliceFromStoredScenarioMoment(holisticStoredPatterns?.moment_5_scores);
+      const markerSlicesHolisticForDisclosure: MarkerScoreSlice[] = [
+        scenarioScoresRef.current[1]
+          ? {
+              pillarScores: scenarioScoresRef.current[1]!.pillarScores,
+              keyEvidence: scenarioScoresRef.current[1]!.keyEvidence,
+              mentalizing_overcertainty: scenarioScoresRef.current[1]!.mentalizing_overcertainty === true,
+            }
+          : null,
+        scenarioScoresRef.current[2]
+          ? {
+              pillarScores: scenarioScoresRef.current[2]!.pillarScores,
+              keyEvidence: scenarioScoresRef.current[2]!.keyEvidence,
+              mentalizing_overcertainty: scenarioScoresRef.current[2]!.mentalizing_overcertainty === true,
+            }
+          : null,
+        scenarioScoresRef.current[3]
+          ? {
+              pillarScores: scenarioScoresRef.current[3]!.pillarScores,
+              keyEvidence: scenarioScoresRef.current[3]!.keyEvidence,
+              mentalizing_overcertainty: scenarioScoresRef.current[3]!.mentalizing_overcertainty === true,
+            }
+          : null,
+        m4HolisticSl,
+        m5HolisticSl,
+      ];
+      const holisticDisclosureCalibration = disclosureCalibrationFromMarkerSlices(
+        markerSlicesHolisticForDisclosure,
+        finalMessages as MessageWithScenario[],
+      );
+      console.log('[Disclosure] holistic disclosure_calibration:', holisticDisclosureCalibration);
       const skipOptsHolistic = attachSkipPenaltyGateOptions(scenarioSkipConfirmedCountRef.current);
       parsed.skipBreakdown = skipOptsHolistic.skipBreakdown;
+      const mentalizingMarkerSlicesHolistic: Array<MarkerScoreSlice | null> = [
+        scenarioScoresRef.current[1]
+          ? {
+              pillarScores: scenarioScoresRef.current[1]!.pillarScores,
+              keyEvidence: scenarioScoresRef.current[1]!.keyEvidence,
+              mentalizing_overcertainty: scenarioScoresRef.current[1]!.mentalizing_overcertainty === true,
+            }
+          : null,
+        scenarioScoresRef.current[2]
+          ? {
+              pillarScores: scenarioScoresRef.current[2]!.pillarScores,
+              keyEvidence: scenarioScoresRef.current[2]!.keyEvidence,
+              mentalizing_overcertainty: scenarioScoresRef.current[2]!.mentalizing_overcertainty === true,
+            }
+          : null,
+        scenarioScoresRef.current[3]
+          ? {
+              pillarScores: scenarioScoresRef.current[3]!.pillarScores,
+              keyEvidence: scenarioScoresRef.current[3]!.keyEvidence,
+              mentalizing_overcertainty: scenarioScoresRef.current[3]!.mentalizing_overcertainty === true,
+            }
+          : null,
+        null,
+        null,
+      ];
+      const mentalizingOvercertaintyCountHolistic = countMentalizingOvercertaintyInMarkerSlices(
+        mentalizingMarkerSlicesHolistic,
+        finalMessages as MessageWithScenario[],
+      );
+      /** Same composite as `precomputedWeightedScore` / persisted `weighted_score` for standard holistic path. */
+      let holisticWeightedScoreForPersist: number | null = null;
+      const pevHolisticForGate = aggregatePersonalMomentEmotionalVocab(
+        holisticStoredPatterns?.moment_4_scores,
+        holisticStoredPatterns?.moment_5_scores,
+        {
+          scenarioEmotionalVocabDensityPercent: scenarioEmotionalVocabDensityPercentFromTranscript(
+            finalMessages as MessageWithScenario[],
+          ),
+          communicationStyleEmotionalVocabDensityPercent: null,
+        },
+      );
       let gateResult: GateResult;
       if (gateBlockedHolistic && completionGateHolistic && !completionGateHolistic.ok) {
         gateResult = buildIncompleteInterviewGateResult(completionGateHolistic);
         parsed.pillarScores = parsed.pillarScores ?? {};
       } else {
+        const scoreForGateHolistic = computeInterviewWeightedCompositeFromPillars(
+          parsed.pillarScores ?? {},
+          parsed.skepticismModifier ?? null,
+          skipOptsHolistic.skipPenaltyTotal,
+          skipOptsHolistic.skipAutoFail,
+        );
+        holisticWeightedScoreForPersist =
+          typeof scoreForGateHolistic === 'number' && Number.isFinite(scoreForGateHolistic)
+            ? scoreForGateHolistic
+            : null;
+        if (typeof __DEV__ !== 'undefined' && __DEV__) {
+          console.log('[ModifierBase] score being passed to gate:', scoreForGateHolistic);
+        }
+        if (typeof __DEV__ !== 'undefined' && __DEV__) {
+          console.log('[ModifierInputs] before gate call:', {
+            egoDevelopmentLevel: extractEgoDevelopmentLevel(parsed),
+            defensePatterns: holisticDefensePatterns,
+            moment4Concreteness: moment4ConcretenessHolisticGate,
+            moment5Concreteness: moment5ConcretenessHolisticGate,
+          });
+        }
+        if (typeof __DEV__ !== 'undefined' && __DEV__) {
+          console.log(
+            '[ConcretenessModifier] passing to gate — m4:',
+            moment4ConcretenessHolisticGate ?? null,
+            'm5:',
+            moment5ConcretenessHolisticGate ?? null,
+          );
+        }
+        if (typeof __DEV__ !== 'undefined' && __DEV__) {
+          console.log('[BaseScore] passing precomputedWeightedScore:', holisticWeightedScoreForPersist ?? scoreForGateHolistic);
+        }
+        if (typeof __DEV__ !== 'undefined' && __DEV__) {
+          console.log('[Gate call] options:', {
+            precomputedWeightedScore: scoreForGateHolistic,
+            egoDevelopmentLevel: extractEgoDevelopmentLevel(parsed),
+            defensePatterns: holisticDefensePatterns,
+            moment4Concreteness: moment4ConcretenessHolisticGate ?? null,
+            moment5Concreteness: moment5ConcretenessHolisticGate ?? null,
+            emotionRecognitionRawScore: emotionRawScoreForGate(),
+            emotionRecognitionResponses: emotionResponsesForGate(),
+            mentalizingOvercertaintyCount: mentalizingOvercertaintyCountHolistic ?? 0,
+          });
+        }
         gateResult = computeGateResult(parsed.pillarScores ?? {}, parsed.skepticismModifier ?? null, {
         weightedPassMin: weightedMin,
           scenarioPillarScoresByScenario: {
@@ -14171,6 +20025,18 @@ The participant **confirmed** skipping after the skip confirmation prompt. In **
           },
           skipPenaltyTotal: skipOptsHolistic.skipPenaltyTotal,
           skipAutoFail: skipOptsHolistic.skipAutoFail,
+          egoDevelopmentLevel: extractEgoDevelopmentLevel(parsed),
+          defensePatterns: holisticDefensePatterns,
+          moment4Concreteness: moment4ConcretenessHolisticGate ?? null,
+          moment5Concreteness: moment5ConcretenessHolisticGate ?? null,
+          disclosureCalibration: holisticDisclosureCalibration,
+          personalMomentEmotionalVocabLow: pevHolisticForGate.personal_moment_emotional_vocab_low,
+          mentalizingOvercertaintyCount: mentalizingOvercertaintyCountHolistic ?? 0,
+          emotionRecognitionRawScore: emotionRawScoreForGate(),
+          emotionRecognitionResponses: emotionResponsesForGate(),
+          ...(typeof scoreForGateHolistic === 'number' && Number.isFinite(scoreForGateHolistic)
+            ? { precomputedWeightedScore: scoreForGateHolistic }
+            : {}),
         });
       }
       parsed.gateResult = gateResult;
@@ -14185,15 +20051,11 @@ The participant **confirmed** skipping after the skip confirmation prompt. In **
         console.log('=== Scoring API complete ===', 'passed:', gateResult?.pass);
       }
       if (isOnboardingFlow) {
-        await profileRepository.upsertProfile(userId, {
+        await updateUserInterviewApplication(userId, {
           applicationStatus: 'under_review',
           onboardingStage: 'complete',
         });
-        if (!ALPHA_MODE) {
-          queryClient.invalidateQueries({ queryKey: ['profile', userId] });
-        } else {
-          setTimeout(() => queryClient.invalidateQueries({ queryKey: ['profile', userId] }), 2000);
-        }
+        queryClient.invalidateQueries({ queryKey: ['profile', userId] });
       }
       if (ALPHA_MODE && userId) {
         await hydrateScenarioScoresFromAttemptIfNeeded();
@@ -14251,10 +20113,52 @@ The participant **confirmed** skipping after the skip confirmation prompt. In **
           );
           const languageMarkers = analyzeLanguageMarkers(finalMessages, scenarioBoundaries);
           const personalSlices = inferPersonalMomentSlices(finalMessages);
+          const alphaAttemptIdForIncremental = interviewSessionAttemptIdRef.current;
+          let alphaScoringBaseline: AttemptScoringBaseline = {
+            patterns: {},
+            moment_4_concreteness: null,
+            moment_5_concreteness: null,
+            ego_development_level: null,
+            personal_moment_emotional_vocab_low: false,
+            personal_moment_emotional_vocab_density: null,
+            disclosure_calibration: null,
+            defense_patterns: null,
+            mentalizing_overcertainty_count: 0,
+          };
+          if (alphaAttemptIdForIncremental && userId) {
+            alphaScoringBaseline = await fetchAttemptScoringBaseline(
+              supabase,
+              alphaAttemptIdForIncremental,
+              userId,
+            );
+            logScorePipelineBaseline(alphaScoringBaseline);
+          }
+          const alphaM4Users = personalSlices.moment4.filter((m) => m.role === 'user').length;
+          logM4Debug('alpha_m4_infer', {
+            transcriptLen: finalMessages.length,
+            m4Start: personalSlices.m4Start,
+            m5Start: personalSlices.m5Start,
+            moment4SliceLen: personalSlices.moment4.length,
+            moment4UserTurns: alphaM4Users,
+          });
+          logM4Debug('alpha_last_10_moments', {
+            turns: (finalMessages as MessageWithScenario[]).slice(-10).map((m) => ({
+              role: m.role,
+              moment: m.interviewMoment ?? null,
+              scenario: m.scenarioNumber ?? null,
+              preview: (m.content ?? '').slice(0, 48),
+            })),
+          });
+          logM4Debug('alpha_m4_gate', {
+            moment4UserTurnsLength: alphaM4Users,
+            willCallScorePersonalMoment: alphaM4Users >= 1,
+          });
           const scorePersonalMoment = async (
             slice: { role: string; content: string }[]
           ): Promise<PersonalMomentScoreResult | null> => {
-            if (slice.filter((m) => m.role === 'user').length < 1) {
+            const ut = slice.filter((m) => m.role === 'user').length;
+            if (ut < 1) {
+              logM4Debug('alpha_m4_score_fn_skipped', { userTurnsInSlice: ut });
               return null;
             }
             const deferredMoment4Narrative = deferredMoment4NarrativeRef.current;
@@ -14266,24 +20170,42 @@ The participant **confirmed** skipping after the skip confirmation prompt. In **
                     ...slice.slice(1),
                   ]
                 : slice;
+            const m4PromptAlpha = buildPersonalMomentScoringPrompt(
+              scoringSlice,
+              moment4SpecificityScoringRef.current,
+            );
+            logM4Debug('alpha_m4_prompt', {
+              promptLen: m4PromptAlpha.length,
+              scoringSliceTurns: scoringSlice.length,
+              scoringSliceJsonLen: JSON.stringify(scoringSlice).length,
+            });
+            const m4AlphaStartedAt = Date.now();
             try {
               const scored = await withRetry(
                 async (): Promise<PersonalMomentScoreResult> => {
+                  logM4Debug('alpha_m4_claude_request', { at: Date.now() });
                   const res = await fetch(apiUrl, {
                     method: 'POST',
                     headers,
                     body: JSON.stringify({
                       model: 'claude-sonnet-4-20250514',
-                      max_tokens: 900,
+                      max_tokens: 2048,
                       messages: [
                         {
                           role: 'user',
-                          content: buildPersonalMomentScoringPrompt(scoringSlice, moment4SpecificityScoringRef.current),
+                          content: m4PromptAlpha,
                         },
                       ],
                     }),
                   });
                   const data = await res.json();
+                  logM4Debug('alpha_m4_claude_response', {
+                    ok: res.ok,
+                    status: res.status,
+                    contentBlocks: Array.isArray((data as { content?: unknown[] })?.content)
+                      ? (data as { content: unknown[] }).content.length
+                      : 0,
+                  });
                   if (!res.ok) {
                     const e = new Error((data as { error?: { message?: string } })?.error?.message ?? `HTTP ${res.status}`);
                     (e as Error & { status?: number }).status = res.status;
@@ -14291,9 +20213,14 @@ The participant **confirmed** skipping after the skip confirmation prompt. In **
                   }
                   const raw = (data.content?.[0]?.text ?? '{}') as string;
                   const parsed = parseJsonObjectFromModelText(raw) as PersonalMomentScoreResult;
+                  applyMoment4PostParseCoercionAndSalvage(raw, parsed as unknown as Record<string, unknown>);
                   parsed.pillarScores = mergeMoment4PillarScoresAfterEvidenceNormalize(
-                    normalizeScoresByEvidence(parsed.pillarScores, parsed.keyEvidence)
+                    normalizeScoresByEvidence(
+                      parsed.pillarScores as Record<string, unknown>,
+                      parsed.keyEvidence,
+                    ),
                   ) as PersonalMomentScoreResult['pillarScores'];
+                  fillMoment4KeyEvidenceWhenNumericScoreButMissingQuote(parsed);
                   const depthModifierMeta = applyElaborationAbsenceAfterNormalizeMoment4(
                     parsed,
                     scoringSlice,
@@ -14305,6 +20232,24 @@ The participant **confirmed** skipping after the skip confirmation prompt. In **
                     ...depthModifierMeta,
                   });
                   normalizePersonalMomentContemptTierBreakdown(parsed);
+                  finalizePersonalMomentMentalizingOvercertaintyFromModel(parsed);
+                  finalizePersonalMomentDepthSignals(parsed, {
+                    rawModelText: raw,
+                    transcript: finalMessages,
+                    scoringSlice,
+                    moment: 4,
+                  });
+                  backfillMoment4KeyEvidenceIfScoresOtherwiseUnpersistable(parsed, {
+                    rawModelResponse: raw,
+                    parsedSnapshot: {
+                      pillarScores: parsed.pillarScores,
+                      keyEvidence: parsed.keyEvidence,
+                    },
+                  });
+                  logM4Debug('alpha_m4_model_parsed', {
+                    pillarKeys: parsed.pillarScores ? Object.keys(parsed.pillarScores) : [],
+                    keyEvidenceKeys: parsed.keyEvidence ? Object.keys(parsed.keyEvidence) : [],
+                  });
                   return parsed;
                 },
                 {
@@ -14321,22 +20266,38 @@ The participant **confirmed** skipping after the skip confirmation prompt. In **
                     : undefined,
                 }
               );
+              logM4Debug('alpha_m4_scoring_finished', { elapsedMs: Date.now() - m4AlphaStartedAt });
               if (deferredMoment4NarrativeRef.current) {
                 deferredMoment4NarrativeRef.current = null;
               }
               return scored;
             } catch (err) {
-              if (__DEV__) console.warn('Personal moment 4 scoring failed:', err);
+              const message = err instanceof Error ? err.message : String(err);
+              const stack = err instanceof Error ? err.stack?.slice(0, 1200) : undefined;
+              void remoteLog('[Alpha] moment 4 scoring failed', { message, stack });
+              if (__DEV__) {
+                console.error('[M4 Debug] alpha moment 4 scoring threw:', err);
+              }
               return null;
             }
           };
           const moment4Score = await scorePersonalMoment(personalSlices.moment4);
+          logM4Debug('alpha_m4_await_score_personal_done', { hasMoment4Score: moment4Score != null });
           let moment4ForAggregate = sanitizePersonalMomentScoresForAggregate(
             moment4Score as unknown as PersonalMomentSliceForSanitize,
           );
           if (moment4ForAggregate && !personalMomentBundleWasScored(moment4ForAggregate)) {
             if (__DEV__) console.warn('[Alpha] moment 4: slice not assessable after sanitize; treating as null');
             moment4ForAggregate = null;
+          } else if (moment4ForAggregate && alphaAttemptIdForIncremental && userId) {
+            alphaScoringBaseline = await persistMoment4ScoresImmediate(
+              supabase,
+              alphaAttemptIdForIncremental,
+              userId,
+              moment4ForAggregate,
+              alphaScoringBaseline,
+              moment4SpecificityScoringRef.current,
+            );
           }
           const scorePersonalMoment5 = async (
             slice: { role: string; content: string }[]
@@ -14377,14 +20338,32 @@ The participant **confirmed** skipping after the skip confirmation prompt. In **
                   }
                   const raw = (data.content?.[0]?.text ?? '{}') as string;
                   const parsed = parseJsonObjectFromModelText(raw) as PersonalMomentScoreResult;
+                  applyMoment5PostParseCoercionAndSalvage(raw, parsed as unknown as Record<string, unknown>);
                   promoteMoment5LegacyContemptForScoringResult(parsed);
-                  parsed.pillarScores = normalizeScoresByEvidence(parsed.pillarScores, parsed.keyEvidence);
+                  fillMoment5KeyEvidenceWhenNumericScoreButMissingQuote(parsed);
+                  parsed.pillarScores = mergeMoment5PillarScoresAfterEvidenceNormalize(
+                    normalizeScoresByEvidence(parsed.pillarScores, parsed.keyEvidence),
+                  ) as PersonalMomentScoreResult['pillarScores'];
                   const depthModifierMeta = applyElaborationAbsenceAfterNormalizeMoment5(parsed, slice, finalMessages, m5Meta);
                   void remoteLog('[SCORING_DEPTH_MODIFIER]', {
                     scoring_slice: 'moment_5',
                     ...depthModifierMeta,
                   });
                   normalizePersonalMomentContemptTierBreakdown(parsed);
+                  finalizePersonalMomentMentalizingOvercertaintyFromModel(parsed);
+                  finalizePersonalMomentDepthSignals(parsed, {
+                    rawModelText: raw,
+                    transcript: finalMessages,
+                    scoringSlice: slice,
+                    moment: 5,
+                  });
+                  backfillMoment5KeyEvidenceIfScoresOtherwiseUnpersistable(parsed, {
+                    rawModelResponse: raw,
+                    parsedSnapshot: {
+                      pillarScores: parsed.pillarScores,
+                      keyEvidence: parsed.keyEvidence,
+                    },
+                  });
                   return parsed;
                 },
                 {
@@ -14407,13 +20386,29 @@ The participant **confirmed** skipping after the skip confirmation prompt. In **
               return null;
             }
           };
-          const moment5Score = await scorePersonalMoment5(personalSlices.moment5);
+          const moment5Score = await scorePersonalMoment5(
+            trimMoment5SliceForScoring(personalSlices.moment5),
+          );
           let moment5ForAggregate = sanitizeMoment5PersonalScoresForAggregate(
             moment5Score as unknown as PersonalMoment5SliceForSanitize,
           );
           if (moment5ForAggregate && !personalMomentBundleWasScored(moment5ForAggregate)) {
             if (__DEV__) console.warn('[Alpha] moment 5: slice not assessable after sanitize; treating as null');
             moment5ForAggregate = null;
+          } else if (moment5ForAggregate && alphaAttemptIdForIncremental && userId) {
+            alphaScoringBaseline = await persistMoment5ScoresImmediate(
+              supabase,
+              alphaAttemptIdForIncremental,
+              userId,
+              moment5ForAggregate,
+              alphaScoringBaseline,
+              (moment5ClientScoringMetaRef.current ?? {
+                accountabilityProbeFired: moment5AccountabilityProbeFiredRef.current,
+                probeTriggerReason: moment5AccountabilityProbeFiredRef.current
+                  ? 'lacks_explicit_self_accountability'
+                  : undefined,
+              }) as Record<string, unknown>,
+            );
           }
           const txForContempt = finalMessages as MessageWithScenario[];
           const enrichScenarioSliceAtCompletion = (n: 1 | 2 | 3) => {
@@ -14501,14 +20496,23 @@ The participant **confirmed** skipping after the skip confirmation prompt. In **
           const sliceFromRef = (n: 1 | 2 | 3): MarkerScoreSlice | null => {
             const b = scenarioScoresRef.current[n];
             if (!b) return null;
-            return { pillarScores: b.pillarScores, keyEvidence: b.keyEvidence };
+            return {
+              pillarScores: b.pillarScores,
+              keyEvidence: b.keyEvidence,
+              mentalizing_overcertainty: b.mentalizing_overcertainty === true,
+            };
           };
 
           let finalGateResult: GateResult;
           let pillarScores: Record<string, number>;
           let pillarContributorCounts: Record<string, number>;
+          let egoLevelForAttempt: number | null = null;
+          let weightedScoreForAttempt: number | null = null;
+          let disclosureCalibrationForAttempt: 'underdisclosure' | 'calibrated' | 'overdisclosure' = 'calibrated';
 
-          if (!gateBlockedAlpha) {
+          const m4EvAgg = moment4ForAggregate ? extractPersonalMomentEmotionalVocabFromSlice(moment4ForAggregate) : null;
+          const m5EvAgg = moment5ForAggregate ? extractPersonalMomentEmotionalVocabFromSlice(moment5ForAggregate) : null;
+
           const markerSlicesForAggregate: MarkerScoreSlice[] = [
             sliceFromRef(1),
             sliceFromRef(2),
@@ -14517,22 +20521,141 @@ The participant **confirmed** skipping after the skip confirmation prompt. In **
               ? {
                   pillarScores: moment4ForAggregate.pillarScores,
                   keyEvidence: moment4ForAggregate.keyEvidence,
+                  mentalizing_overcertainty: moment4ForAggregate.mentalizing_overcertainty === true,
+                  response_concreteness: normalizeResponseConcreteness(moment4ForAggregate.response_concreteness),
+                  emotional_vocab_count: m4EvAgg?.emotional_vocab_count ?? undefined,
+                  emotional_vocab_words:
+                    m4EvAgg && m4EvAgg.emotional_vocab_words.length > 0 ? m4EvAgg.emotional_vocab_words : undefined,
+                  user_slice_word_count: m4EvAgg?.user_slice_word_count ?? undefined,
                 }
               : null,
               moment5ForAggregate
                 ? {
                     pillarScores: moment5ForAggregate.pillarScores,
                     keyEvidence: moment5ForAggregate.keyEvidence,
+                  mentalizing_overcertainty: moment5ForAggregate.mentalizing_overcertainty === true,
+                  response_concreteness: normalizeResponseConcreteness(moment5ForAggregate.response_concreteness),
+                  emotional_vocab_count: m5EvAgg?.emotional_vocab_count ?? undefined,
+                  emotional_vocab_words:
+                    m5EvAgg && m5EvAgg.emotional_vocab_words.length > 0 ? m5EvAgg.emotional_vocab_words : undefined,
+                  user_slice_word_count: m5EvAgg?.user_slice_word_count ?? undefined,
                   }
                 : null,
           ];
-          const mergedPillar = aggregatePillarScoresWithCommitmentMergeDetailed(markerSlicesForAggregate);
+          let mentalizingOvercertaintyCountForAttempt = countMentalizingOvercertaintyInMarkerSlices(
+            markerSlicesForAggregate,
+            finalMessages as MessageWithScenario[],
+          );
+
+          let defensePatternsForAttempt: DefensePatternsJson = { ...DEFAULT_DEFENSE_PATTERNS };
+          let moment4ConcretenessForAttempt: ResponseConcretenessLevel | null = null;
+          let moment5ConcretenessForAttempt: ResponseConcretenessLevel | null = null;
+          let personalMomentEmotionalVocabDensityForAttempt: number | null = null;
+          let personalMomentEmotionalVocabLowForAttempt = false;
+          if (!gateBlockedAlpha) {
+            const mergedPillar = aggregatePillarScoresWithCommitmentMergeDetailed(markerSlicesForAggregate, {
+              egoDevelopmentLevel: extractEgoDevelopmentLevel(parsed),
+              defensePatternTranscript: finalMessages as MessageWithScenario[],
+              disclosureCalibrationTranscript: finalMessages as MessageWithScenario[],
+              scenarioEmotionalVocabDensityPercent: languageMarkers.scenario_emotional_vocab_density,
+              communicationStyleEmotionalVocabDensityPercent: null,
+            });
+            defensePatternsForAttempt = mergedPillar.defensePatterns;
+            moment4ConcretenessForAttempt = mergedPillar.moment4Concreteness ?? null;
+            moment5ConcretenessForAttempt = mergedPillar.moment5Concreteness ?? null;
+            personalMomentEmotionalVocabDensityForAttempt = mergedPillar.personal_moment_emotional_vocab_density;
+            personalMomentEmotionalVocabLowForAttempt = mergedPillar.personal_moment_emotional_vocab_low;
+            disclosureCalibrationForAttempt = mergedPillar.disclosureCalibration;
           const aggregatedPillarScores = mergedPillar.scores;
+            egoLevelForAttempt = mergedPillar.egoDevelopmentLevel ?? extractEgoDevelopmentLevel(parsed) ?? null;
+            mentalizingOvercertaintyCountForAttempt = mergedPillar.mentalizingOvercertaintyCount;
+            if (alphaAttemptIdForIncremental && userId) {
+              alphaScoringBaseline = await persistHolisticModifiersImmediate(
+                supabase,
+                alphaAttemptIdForIncremental,
+                userId,
+                {
+                  egoDevelopmentLevel: egoLevelForAttempt,
+                  mentalizingOvercertaintyCount: mentalizingOvercertaintyCountForAttempt,
+                  defensePatterns: defensePatternsForAttempt as Record<string, unknown>,
+                },
+                alphaScoringBaseline,
+              );
+              if (moment5ForAggregate) {
+                alphaScoringBaseline = await persistMoment5ScoresImmediate(
+                  supabase,
+                  alphaAttemptIdForIncremental,
+                  userId,
+                  moment5ForAggregate,
+                  alphaScoringBaseline,
+                  (moment5ClientScoringMetaRef.current ?? {
+                    accountabilityProbeFired: moment5AccountabilityProbeFiredRef.current,
+                    probeTriggerReason: moment5AccountabilityProbeFiredRef.current
+                      ? 'lacks_explicit_self_accountability'
+                      : undefined,
+                  }) as Record<string, unknown>,
+                  {
+                    personal_moment_emotional_vocab_low: personalMomentEmotionalVocabLowForAttempt,
+                    personal_moment_emotional_vocab_density: personalMomentEmotionalVocabDensityForAttempt,
+                    disclosure_calibration: disclosureCalibrationForAttempt,
+                  },
+                );
+              }
+            }
             pillarContributorCounts = mergedPillar.contributorCounts;
             pillarScores =
             Object.keys(aggregatedPillarScores).length > 0
               ? { ...aggregatedPillarScores }
               : { ...(parsedPillarScores as Record<string, number>) };
+            const scoreForGateAlpha = computeInterviewWeightedCompositeFromPillars(
+              pillarScores,
+              parsed.skepticismModifier ?? null,
+              skipOptsAlpha.skipPenaltyTotal,
+              skipOptsAlpha.skipAutoFail,
+            );
+            weightedScoreForAttempt =
+              typeof scoreForGateAlpha === 'number' && Number.isFinite(scoreForGateAlpha) ? scoreForGateAlpha : null;
+            if (typeof __DEV__ !== 'undefined' && __DEV__) {
+              console.log('[ModifierBase] score being passed to gate:', scoreForGateAlpha);
+            }
+            if (typeof __DEV__ !== 'undefined' && __DEV__) {
+              console.log('[ModifierInputs] before gate call:', {
+                egoDevelopmentLevel: egoLevelForAttempt,
+                defensePatterns: defensePatternsForAttempt,
+                moment4Concreteness: moment4ConcretenessForAttempt,
+                moment5Concreteness: moment5ConcretenessForAttempt,
+              });
+            }
+            if (typeof __DEV__ !== 'undefined' && __DEV__) {
+              console.log(
+                '[ConcretenessModifier] passing to gate — m4:',
+                moment4ConcretenessForAttempt,
+                'm5:',
+                moment5ConcretenessForAttempt,
+              );
+            }
+            if (typeof __DEV__ !== 'undefined' && __DEV__) {
+              console.log('[BaseScore] weightedScoreForAttempt at call site:', weightedScoreForAttempt);
+            }
+            if (typeof __DEV__ !== 'undefined' && __DEV__) {
+              console.log('[BaseScore] passing precomputedWeightedScore:', weightedScoreForAttempt);
+            }
+            if (typeof __DEV__ !== 'undefined' && __DEV__) {
+              console.log('[Gate call] options:', {
+                precomputedWeightedScore: scoreForGateAlpha,
+                egoDevelopmentLevel: egoLevelForAttempt,
+                defensePatterns: defensePatternsForAttempt,
+                moment4Concreteness: moment4ConcretenessForAttempt,
+                moment5Concreteness: moment5ConcretenessForAttempt,
+                emotionRecognitionRawScore: emotionRawScoreForGate(),
+              emotionRecognitionResponses: emotionResponsesForGate(),
+                mentalizingOvercertaintyCount: mentalizingOvercertaintyCountForAttempt ?? 0,
+              });
+            }
+            const personalWordCountsForGate = personalMomentWordCountsForDisclosure(
+              markerSlicesForAggregate,
+              finalMessages as MessageWithScenario[],
+            );
             finalGateResult = computeGateResult(pillarScores, parsed.skepticismModifier ?? null, {
             weightedPassMin: weightedMin,
               scenarioPillarScoresByScenario: {
@@ -14542,11 +20665,42 @@ The participant **confirmed** skipping after the skip confirmation prompt. In **
               },
               skipPenaltyTotal: skipOptsAlpha.skipPenaltyTotal,
               skipAutoFail: skipOptsAlpha.skipAutoFail,
+              egoDevelopmentLevel: egoLevelForAttempt,
+              defensePatterns: mergedPillar.defensePatterns,
+              moment4Concreteness: moment4ConcretenessForAttempt,
+              moment5Concreteness: moment5ConcretenessForAttempt,
+              mentalizingOvercertaintyCount: mentalizingOvercertaintyCountForAttempt ?? 0,
+              disclosureCalibration: mergedPillar.disclosureCalibration,
+              moment4WordCount: personalWordCountsForGate.moment4WordCount,
+              moment5WordCount: personalWordCountsForGate.moment5WordCount,
+              personalMomentEmotionalVocabDensity: personalMomentEmotionalVocabDensityForAttempt,
+              personalMomentEmotionalVocabLow: personalMomentEmotionalVocabLowForAttempt,
+              emotionRecognitionRawScore: emotionRawScoreForGate(),
+              emotionRecognitionResponses: emotionResponsesForGate(),
+              ...(typeof scoreForGateAlpha === 'number' && Number.isFinite(scoreForGateAlpha)
+                ? { precomputedWeightedScore: scoreForGateAlpha }
+                : {}),
             });
+            if (
+              typeof finalGateResult.weightedScore === 'number' &&
+              Number.isFinite(finalGateResult.weightedScore)
+            ) {
+              weightedScoreForAttempt = finalGateResult.weightedScore;
+            }
           } else {
             pillarContributorCounts = {};
             pillarScores = {};
             finalGateResult = buildIncompleteInterviewGateResult(completionGateAlpha);
+            const pevBlocked = aggregatePersonalMomentEmotionalVocab(moment4ForAggregate, moment5ForAggregate, {
+              scenarioEmotionalVocabDensityPercent: languageMarkers.scenario_emotional_vocab_density,
+              communicationStyleEmotionalVocabDensityPercent: null,
+            });
+            personalMomentEmotionalVocabDensityForAttempt = pevBlocked.personal_moment_emotional_vocab_density;
+            personalMomentEmotionalVocabLowForAttempt = pevBlocked.personal_moment_emotional_vocab_low;
+            disclosureCalibrationForAttempt = disclosureCalibrationFromMarkerSlices(
+              markerSlicesForAggregate,
+              finalMessages as MessageWithScenario[],
+            );
           }
 
           parsed.pillarScores = pillarScores;
@@ -14646,13 +20800,42 @@ The participant **confirmed** skipping after the skip confirmation prompt. In **
             .eq('id', userId)
             .single();
           attemptNum = (userRow?.interview_attempt_count ?? 0) + 1;
+          const emotionPersistAlpha = emotionRecognitionPersistSpreadIfComplete(
+            [...emotionItemResponsesRef.current],
+          );
+          if (typeof __DEV__ !== 'undefined' && __DEV__) {
+            console.log(
+              '[Modifier] persisting score_modifier:',
+              finalGateResult.scoreModifier,
+              'modified_weighted_score:',
+              finalGateResult.modifiedWeightedScore,
+            );
+            const wPersist = weightedScoreForAttempt ?? finalGateResult.weightedScore;
+            console.log('[ModifierBase] weighted_score being persisted:', wPersist);
+            console.log(
+              '[ModifierBase] modified_weighted_score being persisted:',
+              finalGateResult.modifiedWeightedScore,
+            );
+            console.log('[ModifierBase] score_modifier being persisted:', finalGateResult.scoreModifier);
+            if (wPersist != null && Number.isFinite(wPersist) && finalGateResult.modifiedWeightedScore != null) {
+              const expectedMod =
+                Math.round((wPersist + (finalGateResult.scoreModifier ?? 0)) * 100) / 100;
+              console.log(
+                '[ModifierBase] invariant check — expected:',
+                expectedMod,
+                'actual:',
+                finalGateResult.modifiedWeightedScore,
+              );
+            }
+            console.log('[ReviewFlags] persisting review_flags:', finalGateResult.reviewFlags);
+          }
+          logWeightedModifierInvariant('alpha_interview_attempts', finalGateResult.weightedScore, finalGateResult);
           insertPayload = {
             user_id: userId,
             attempt_number: attemptNum,
             completed_at: new Date().toISOString(),
             weighted_score: finalGateResult.weightedScore,
             passed: finalGateResult.pass,
-            gate_fail_reason: finalGateResult.failReason,
             gate_fail_reasons: finalGateResult.failReasonCodes ?? [],
             gate_fail_detail: finalGateResult.failReasonDetail ?? null,
             scenario_composites: scenarioCompositesToStorageJson(finalGateResult.scenarioComposites),
@@ -14665,6 +20848,7 @@ The participant **confirmed** skipping after the skip confirmation prompt. In **
                   keyEvidence: scenarioScoresRef.current[1].keyEvidence,
                   scenarioName: scenarioScoresRef.current[1].scenarioName,
                   mentalizing_inference_source: scenarioScoresRef.current[1].mentalizing_inference_source,
+                  mentalizing_overcertainty: scenarioScoresRef.current[1].mentalizing_overcertainty === true,
                 }
               : null,
             scenario_2_scores: scenarioScoresRef.current[2]
@@ -14674,6 +20858,7 @@ The participant **confirmed** skipping after the skip confirmation prompt. In **
                   keyEvidence: scenarioScoresRef.current[2].keyEvidence,
                   scenarioName: scenarioScoresRef.current[2].scenarioName,
                   mentalizing_inference_source: scenarioScoresRef.current[2].mentalizing_inference_source,
+                  mentalizing_overcertainty: scenarioScoresRef.current[2].mentalizing_overcertainty === true,
                 }
               : null,
             scenario_3_scores: scenarioScoresRef.current[3]
@@ -14683,6 +20868,7 @@ The participant **confirmed** skipping after the skip confirmation prompt. In **
                   keyEvidence: scenarioScoresRef.current[3].keyEvidence,
                   scenarioName: scenarioScoresRef.current[3].scenarioName,
                   mentalizing_inference_source: scenarioScoresRef.current[3].mentalizing_inference_source,
+                  mentalizing_overcertainty: scenarioScoresRef.current[3].mentalizing_overcertainty === true,
                 }
               : null,
             transcript: finalMessages,
@@ -14702,56 +20888,93 @@ The participant **confirmed** skipping after the skip confirmation prompt. In **
             })(),
             language_markers: languageMarkers,
             scenario_specific_patterns: {
-              moment_4_scores: moment4ForAggregate
-                ? {
-                    pillarScores: moment4ForAggregate.pillarScores,
-                    pillarConfidence: moment4ForAggregate.pillarConfidence,
-                    keyEvidence: moment4ForAggregate.keyEvidence,
-                    summary: moment4ForAggregate.summary,
-                    specificity: moment4ForAggregate.specificity,
-                    momentName: moment4ForAggregate.momentName,
-                    ...(moment4SpecificityScoringRef.current
-                      ? { specificityScoringMetadata: moment4SpecificityScoringRef.current }
-                      : {}),
-                  }
+              moment_4_scores: resolveMomentScoresForFinalPersist(
+                moment4ForAggregate
+                  ? buildMoment4ScoresRecord(
+                      moment4ForAggregate,
+                      moment4SpecificityScoringRef.current,
+                    )
                 : null,
-              moment_5_scores: moment5ForAggregate
-                ? {
-                    pillarScores: moment5ForAggregate.pillarScores,
-                    pillarConfidence: moment5ForAggregate.pillarConfidence,
-                    keyEvidence: moment5ForAggregate.keyEvidence,
-                    summary: moment5ForAggregate.summary,
-                    specificity: moment5ForAggregate.specificity,
-                    momentName: moment5ForAggregate.momentName,
-                    scoringMetadata:
-                      moment5ClientScoringMetaRef.current ?? {
+                alphaScoringBaseline,
+                'moment_4_scores',
+              ),
+              moment_5_scores: resolveMomentScoresForFinalPersist(
+                moment5ForAggregate
+                  ? buildMoment5ScoresRecord(
+                      moment5ForAggregate,
+                      (moment5ClientScoringMetaRef.current ?? {
                         accountabilityProbeFired: moment5AccountabilityProbeFiredRef.current,
                         probeTriggerReason: moment5AccountabilityProbeFiredRef.current
                           ? 'lacks_explicit_self_accountability'
                           : undefined,
-                      },
-                  }
+                      }) as Record<string, unknown>,
+                    )
                 : null,
+                alphaScoringBaseline,
+                'moment_5_scores',
+              ),
             },
-            reasoning_pending: reasoningPending,
-            ai_reasoning: reasoningPending
+            reasoning_pending: gateBlockedAlpha,
+            ai_reasoning: gateBlockedAlpha
               ? {
                   _reasoningPending: true,
+                  _completionHeld: true,
+                  incomplete_reason: completionGateAlpha.incomplete_reason,
+                  detail: completionGateAlpha.detail,
+                  pillar_scores: pillarScores,
+                  weighted_score: finalGateResult.weightedScore,
+                  passed: finalGateResult.pass,
+                  note: 'Interview scoring gate blocked completion; narrative was not generated.',
+                }
+              : reasoningPending
+                ? {
+                    _reasoningPending: false,
+                    _narrativeFailed: true,
                   pillar_scores: pillarScores,
                   weighted_score: finalGateResult.weightedScore,
                   passed: finalGateResult.pass,
                   last_error: (reasoning as { _error?: string })._error ?? null,
                   note:
-                    'Narrative AI reasoning was not generated in this session. Scores and transcript are saved; retry from the admin panel or wait for automated processing.',
+                      'Narrative AI reasoning was not generated in this session. Scores and transcript are saved; retry from the admin panel (Tab 2).',
                 }
               : reasoning,
             ...communicationFloorFieldsFromTranscript(finalMessages),
+            ego_development_level:
+              egoLevelForAttempt ?? alphaScoringBaseline.ego_development_level,
+            review_flags: finalGateResult.reviewFlags,
+            depth_signal_modifier: finalGateResult.depthSignalModifier ?? finalGateResult.scoreModifier ?? 0,
+            score_modifier: finalGateResult.depthSignalModifier ?? finalGateResult.scoreModifier ?? 0,
+            modified_weighted_score:
+              finalGateResult.modifiedWeightedScore ?? weightedScoreForAttempt ?? finalGateResult.weightedScore ?? null,
+            mentalizing_overcertainty_count:
+              mentalizingOvercertaintyCountForAttempt ?? alphaScoringBaseline.mentalizing_overcertainty_count,
+            defense_patterns: defensePatternsForAttempt ?? alphaScoringBaseline.defense_patterns,
+            moment_4_concreteness:
+              moment4ConcretenessForAttempt ?? alphaScoringBaseline.moment_4_concreteness,
+            moment_5_concreteness:
+              moment5ConcretenessForAttempt ?? alphaScoringBaseline.moment_5_concreteness,
+            personal_moment_emotional_vocab_density:
+              personalMomentEmotionalVocabDensityForAttempt ??
+              alphaScoringBaseline.personal_moment_emotional_vocab_density,
+            personal_moment_emotional_vocab_low:
+              personalMomentEmotionalVocabLowForAttempt ??
+              alphaScoringBaseline.personal_moment_emotional_vocab_low,
+            ...emotionPersistAlpha,
+            disclosure_calibration:
+              disclosureCalibrationForAttempt ?? alphaScoringBaseline.disclosure_calibration,
           };
+          if (typeof __DEV__ !== 'undefined' && __DEV__) {
+            console.log(
+              '[VocabFlag] persisting personal_moment_emotional_vocab_low:',
+              personalMomentEmotionalVocabLowForAttempt,
+              'density:',
+              personalMomentEmotionalVocabDensityForAttempt,
+            );
+          }
           const passFromGate = await buildUsersRowInterviewPassFromGate(supabase, userId, finalGateResult.pass);
           updatePayload = {
             interview_completed: true,
             ...passFromGate,
-            interview_weighted_score: finalGateResult.weightedScore,
             interview_completed_at: new Date().toISOString(),
             interview_attempt_count: attemptNum,
             latest_attempt_id: null as string | null,
@@ -14762,6 +20985,7 @@ The participant **confirmed** skipping after the skip confirmation prompt. In **
             platform: getSessionLogRuntime().platform,
           };
           const existingAttemptId = interviewSessionAttemptIdRef.current;
+          console.log('[Disclosure] persisting disclosure_calibration:', disclosureCalibrationForAttempt);
           const { data: insertData } = await withRetry(
             async () => {
               if (existingAttemptId) {
@@ -14812,6 +21036,7 @@ The participant **confirmed** skipping after the skip confirmation prompt. In **
           if (attemptId) {
             interviewLastCommittedAttemptId = attemptId;
             assignAttemptIdForSessionLogs(attemptId);
+            await applyPsychometricModifierToAttempt(userId, attemptId);
             const rtp = getSessionLogRuntime();
             logGateAnalyticsToSession({
               base: { userId, attemptId: rtp.attemptId, platform: rtp.platform },
@@ -14831,6 +21056,11 @@ The participant **confirmed** skipping after the skip confirmation prompt. In **
             );
             if (isStandardOnboardingApplicant) {
               await saveInterviewResults(parsed, finalGateResult, userId);
+              await commitStandardOnboardingUsersAfterAttempt({
+                attemptIdForUserRow: attemptId,
+                gateOkForInterviewPassed: !gateBlockedAlpha,
+                interviewAttemptCount: attemptNum,
+              });
               await ensureShareableReferralCodeForReferrer(userId);
               queryClient.invalidateQueries({ queryKey: ['profile', userId] });
               interviewJustCompletedInSession = true;
@@ -14842,7 +21072,7 @@ The participant **confirmed** skipping after the skip confirmation prompt. In **
                 eventData: { session_correlation_id: interviewSessionIdRef.current, path: 'standard_onboarding_post_insert' },
                 platform: getSessionLogRuntime().platform,
               });
-              replaceWithStandardApplicantProcessingHandoffForUser(navigation, userId, {
+              replaceWithStandardApplicantPostInterviewHandoffForUser(navigation, userId, {
                 interviewSessionId: interviewSessionIdRef.current,
                 source: 'scoreInterview_alpha_insert_standard_onboarding',
               });
@@ -14895,6 +21125,7 @@ The participant **confirmed** skipping after the skip confirmation prompt. In **
                 setInterviewStatus('congratulations');
                 await remoteLog('[8] setInterviewStatus called', { screen: 'congratulations', via: 'scoring_ready_fallback' });
               }
+              void triggerResultsReadyEmail(userId, attemptId);
             }
           } else {
             await remoteLog('[ERROR] Alpha save missing attempt id after insert', {});
@@ -14942,14 +21173,84 @@ The participant **confirmed** skipping after the skip confirmation prompt. In **
         }
       } else {
         const deferredForHolistic = interviewSessionAttemptIdRef.current;
-        if (deferredForHolistic && isStandardOnboardingApplicant) {
+        if (isStandardOnboardingApplicant && deferredForHolistic && userId) {
+          const emotionPersistStandard = emotionRecognitionPersistSpreadIfComplete(
+            [...emotionItemResponsesRef.current],
+          );
+          console.log('[Disclosure] persisting disclosure_calibration:', holisticDisclosureCalibration);
+          const holisticPatterns = (holisticStoredPatterns ?? {}) as {
+            moment_4_scores?: unknown;
+            moment_5_scores?: unknown;
+          };
+          const pevHolisticPersist = aggregatePersonalMomentEmotionalVocab(
+            holisticPatterns.moment_4_scores,
+            holisticPatterns.moment_5_scores,
+            {
+              scenarioEmotionalVocabDensityPercent: scenarioEmotionalVocabDensityPercentFromTranscript(
+                finalMessages as MessageWithScenario[],
+              ),
+              communicationStyleEmotionalVocabDensityPercent: null,
+            },
+          );
+          if (typeof __DEV__ !== 'undefined' && __DEV__) {
+            console.log(
+              '[VocabFlag] persisting personal_moment_emotional_vocab_low:',
+              pevHolisticPersist.personal_moment_emotional_vocab_low,
+              'density:',
+              pevHolisticPersist.personal_moment_emotional_vocab_density,
+            );
+          }
+          const egoForStandardHolisticUpdate = extractEgoDevelopmentLevel(parsed);
+          let holisticScoringBaseline = await fetchAttemptScoringBaseline(
+            supabase,
+            deferredForHolistic,
+            userId!,
+          );
+          logScorePipelineBaseline(holisticScoringBaseline);
+          holisticScoringBaseline = await persistHolisticModifiersImmediate(
+            supabase,
+            deferredForHolistic,
+            userId!,
+            {
+              egoDevelopmentLevel: egoForStandardHolisticUpdate,
+              mentalizingOvercertaintyCount: mentalizingOvercertaintyCountHolistic,
+              defensePatterns: holisticDefensePatterns as Record<string, unknown>,
+            },
+            holisticScoringBaseline,
+          );
+          if (__DEV__) {
+            console.log(
+              '[Modifier] persisting score_modifier (client holistic):',
+              gateResult.scoreModifier,
+              'modified_weighted_score:',
+              gateResult.modifiedWeightedScore,
+            );
+            console.log('[ModifierBase] weighted_score being persisted:', gateResult.weightedScore);
+            console.log(
+              '[ModifierBase] modified_weighted_score being persisted:',
+              gateResult.modifiedWeightedScore,
+            );
+            console.log('[ModifierBase] score_modifier being persisted:', gateResult.scoreModifier);
+            const wH = gateResult.weightedScore;
+            if (wH != null && Number.isFinite(wH) && gateResult.modifiedWeightedScore != null) {
+              const expectedMod =
+                Math.round((wH + (gateResult.scoreModifier ?? 0)) * 100) / 100;
+              console.log(
+                '[ModifierBase] invariant check — expected:',
+                expectedMod,
+                'actual:',
+                gateResult.modifiedWeightedScore,
+              );
+            }
+            console.log('[ReviewFlags] persisting review_flags:', gateResult.reviewFlags);
+          }
+          logWeightedModifierInvariant('standard_holistic_client', gateResult.weightedScore, gateResult);
           const { error: attErr } = await supabase
             .from('interview_attempts')
             .update({
               completed_at: new Date().toISOString(),
               weighted_score: gateResult.weightedScore,
               passed: gateResult.pass,
-              gate_fail_reason: gateResult.failReason ?? null,
               gate_fail_reasons: gateResult.failReasonCodes ?? [],
               gate_fail_detail: gateResult.failReasonDetail ?? null,
               scenario_composites: scenarioCompositesToStorageJson(gateResult.scenarioComposites),
@@ -14969,6 +21270,43 @@ The participant **confirmed** skipping after the skip confirmation prompt. In **
                 };
               })(),
               ...communicationFloorFieldsFromTranscript(finalMessages),
+              ego_development_level:
+                egoForStandardHolisticUpdate ?? holisticScoringBaseline.ego_development_level,
+              reasoning_pending: true,
+              ai_reasoning: {
+                _reasoningPending: true,
+                pillar_scores: parsed.pillarScores ?? {},
+                weighted_score: gateResult.weightedScore,
+                passed: gateResult.pass,
+                note: 'Narrative generation queued (client holistic scoring path).',
+                _queuedAt: new Date().toISOString(),
+              },
+              review_flags: gateResult.reviewFlags,
+              depth_signal_modifier: gateResult.depthSignalModifier ?? gateResult.scoreModifier ?? 0,
+              score_modifier: gateResult.depthSignalModifier ?? gateResult.scoreModifier ?? 0,
+              modified_weighted_score:
+                gateResult.modifiedWeightedScore ??
+                holisticWeightedScoreForPersist ??
+                gateResult.weightedScore ??
+                null,
+              mentalizing_overcertainty_count:
+                mentalizingOvercertaintyCountHolistic ??
+                holisticScoringBaseline.mentalizing_overcertainty_count,
+              defense_patterns:
+                holisticDefensePatterns ?? holisticScoringBaseline.defense_patterns,
+              ...emotionPersistStandard,
+              disclosure_calibration:
+                holisticDisclosureCalibration ?? holisticScoringBaseline.disclosure_calibration,
+              personal_moment_emotional_vocab_density:
+                pevHolisticPersist.personal_moment_emotional_vocab_density ??
+                holisticScoringBaseline.personal_moment_emotional_vocab_density,
+              personal_moment_emotional_vocab_low:
+                pevHolisticPersist.personal_moment_emotional_vocab_low ??
+                holisticScoringBaseline.personal_moment_emotional_vocab_low,
+              moment_4_concreteness:
+                moment4ConcretenessHolisticGate ?? holisticScoringBaseline.moment_4_concreteness,
+              moment_5_concreteness:
+                moment5ConcretenessHolisticGate ?? holisticScoringBaseline.moment_5_concreteness,
             })
             .eq('id', deferredForHolistic)
             .eq('user_id', userId!);
@@ -14983,9 +21321,71 @@ The participant **confirmed** skipping after the skip confirmation prompt. In **
               attemptId: deferredForHolistic,
               pass: gateResult.pass,
             });
+            await applyPsychometricModifierToAttempt(userId!, deferredForHolistic);
+            const rtpPost = getSessionLogRuntime();
+            void runCommunicationStylePipelineAfterSave(
+              userId!,
+              deferredForHolistic,
+              interviewSessionIdRef.current,
+              { platform: rtpPost.platform },
+            );
+            void (async () => {
+              const pillarForReasoning: Record<string, number> = {};
+              for (const [k, v] of Object.entries(parsed.pillarScores ?? {})) {
+                if (typeof v === 'number' && Number.isFinite(v)) pillarForReasoning[k] = v;
+              }
+              const scenarioMapForReasoning: Record<
+                number,
+                { pillarScores: Record<string, number | null>; scenarioName?: string } | undefined
+              > = {};
+              for (const n of [1, 2, 3] as const) {
+                const s = scenarioScoresRef.current[n];
+                if (s) {
+                  scenarioMapForReasoning[n] = {
+                    pillarScores: s.pillarScores,
+                    scenarioName: s.scenarioName,
+                  };
+                }
+              }
+              const reasoning = await generateAIReasoningSafe(
+                pillarForReasoning,
+                scenarioMapForReasoning,
+                finalMessages,
+                gateResult.weightedScore,
+                gateResult.pass,
+                [],
+              );
+              const narrativePending = !!(reasoning as { _reasoningPending?: boolean })._reasoningPending;
+              const aiOut = narrativePending
+                ? {
+                    _reasoningPending: false,
+                    _narrativeFailed: true,
+                    pillar_scores: pillarForReasoning,
+                    weighted_score: gateResult.weightedScore,
+                    passed: gateResult.pass,
+                    note: 'Narrative AI reasoning failed or timed out; scores saved.',
+                    last_error: (reasoning as { _error?: string })._error ?? null,
+                  }
+                : (reasoning as unknown as Record<string, unknown>);
+              await supabase
+                .from('interview_attempts')
+                .update({
+                  ai_reasoning: aiOut,
+                  reasoning_pending: false,
+                })
+                .eq('id', deferredForHolistic)
+                .eq('user_id', userId!);
+            })();
           }
         }
         await saveInterviewResults(parsed, gateResult, userId);
+        if (!isStandardOnboardingApplicant && userId) {
+          const attemptIdForResultsEmail =
+            interviewSessionAttemptIdRef.current ?? deferredForHolistic ?? null;
+          if (attemptIdForResultsEmail) {
+            void triggerResultsReadyEmail(userId, attemptIdForResultsEmail);
+          }
+        }
         if (userId) {
           const r = getSessionLogRuntime();
           logGateAnalyticsToSession({
@@ -15005,11 +21405,18 @@ The participant **confirmed** skipping after the skip confirmation prompt. In **
           });
         }
         if (isStandardOnboardingApplicant) {
+          const attemptIdForCommit = interviewSessionAttemptIdRef.current ?? deferredForHolistic ?? null;
+          if (attemptIdForCommit) {
+            await commitStandardOnboardingUsersAfterAttempt({
+              attemptIdForUserRow: attemptIdForCommit,
+              gateOkForInterviewPassed: completionGateHolistic == null || completionGateHolistic.ok,
+            });
+          }
           await ensureShareableReferralCodeForReferrer(userId!);
           if (!ALPHA_MODE) {
             queryClient.invalidateQueries({ queryKey: ['profile', userId] });
           }
-          replaceWithStandardApplicantProcessingHandoffForUser(navigation, userId!, {
+          replaceWithStandardApplicantPostInterviewHandoffForUser(navigation, userId!, {
             interviewSessionId: interviewSessionIdRef.current,
             source: 'scoreInterview_non_alpha_standard',
           });
@@ -15046,22 +21453,22 @@ The participant **confirmed** skipping after the skip confirmation prompt. In **
           weightedPassMin: weightedMinErr,
           skipPenaltyTotal: skipOptsErr.skipPenaltyTotal,
           skipAutoFail: skipOptsErr.skipAutoFail,
+          mentalizingOvercertaintyCount: 0,
         }),
       };
       setResults(fallbackResults);
       if (isOnboardingFlow) {
-        await profileRepository.upsertProfile(userId, {
+        await updateUserInterviewApplication(userId, {
           applicationStatus: 'under_review',
           onboardingStage: 'complete',
         });
         queryClient.invalidateQueries({ queryKey: ['profile', userId] });
       }
       await saveInterviewResults(fallbackResults, fallbackResults.gateResult!, userId);
-      const standardCatch =
-        isOnboardingFlow && !!userId && !!profile && !profile.isAlphaTester && !isAdminConsoleAccount;
+      const standardCatch = isOnboardingFlow && !!userId && !isAdminConsoleAccount;
       if (standardCatch) {
         await ensureShareableReferralCodeForReferrer(userId);
-        replaceWithStandardApplicantProcessingHandoffForUser(navigation, userId, {
+        replaceWithStandardApplicantPostInterviewHandoffForUser(navigation, userId, {
           interviewSessionId: interviewSessionIdRef.current,
           source: 'scoreInterview_catch_standard_onboarding',
         });
@@ -15077,6 +21484,10 @@ The participant **confirmed** skipping after the skip confirmation prompt. In **
       setInterviewStatus('congratulations');
       setStatus('results');
     }
+    } finally {
+      scoreInterviewInFlightRef.current = false;
+      markCompletionScoringInFlight(false);
+    }
   }, [
     typologyContext,
     route.name,
@@ -15090,7 +21501,15 @@ The participant **confirmed** skipping after the skip confirmation prompt. In **
     isAdmin,
     user?.email,
     setScenarioScores,
+    loadEmotionResponsesForCompletion,
+    applyEmotionResponsesToSession,
   ]);
+
+  registerScoreInterviewForCompletion(scoreInterview);
+  useEffect(() => {
+    registerScoreInterviewForCompletion(scoreInterview);
+    return () => registerScoreInterviewForCompletion(null);
+  }, [scoreInterview]);
 
   useEffect(() => {
     if (!pendingCompletion) return;
@@ -15100,36 +21519,14 @@ The participant **confirmed** skipping after the skip confirmation prompt. In **
       return;
     }
     const transcript = pendingCompletionTranscriptRef.current;
-    if (!transcript || transcript.length === 0) {
-      void remoteLog('[ERROR] pending_completion_empty_transcript', {
-        interviewSessionId: interviewSessionIdRef.current,
-      });
-    pendingCompletionTranscriptRef.current = null;
-    setPendingCompletion(false);
-    setInterviewStatus('preparing_results');
-      void remoteLog('[RESULTS_SCREEN_TRANSITION]', {
-        destination: 'preparing_results',
-        interviewSessionId: interviewSessionIdRef.current,
-        source: 'pending_completion_empty_transcript_no_score',
-      });
-      return;
+    if (transcript?.length) {
+      pendingCompletionTranscriptRef.current = null;
+      setPendingCompletion(false);
+      if (kickCompletionScoring('pending_completion_effect', transcript)) {
+        scoreInterviewAttemptedRef.current = true;
+      }
     }
-    pendingCompletionTranscriptRef.current = null;
-    setPendingCompletion(false);
-    setInterviewStatus('preparing_results');
-    void remoteLog('[RESULTS_SCREEN_TRANSITION]', {
-      destination: 'preparing_results',
-      interviewSessionId: interviewSessionIdRef.current,
-      source: 'post_closing_tts_voice_idle',
-      transcriptTurns: transcript.length,
-    });
-    void scoreInterview(transcript).catch((e) => {
-      void remoteLog('[ERROR] scoreInterview_promise_rejected', {
-        message: e instanceof Error ? e.message : String(e),
-        interviewSessionId: interviewSessionIdRef.current,
-      });
-    });
-  }, [pendingCompletion, voiceState, scoreInterview]);
+  }, [pendingCompletion, voiceState]);
 
   const performRetake = useCallback(async () => {
     if (!userId) return;
@@ -15164,9 +21561,7 @@ The participant **confirmed** skipping after the skip confirmation prompt. In **
         interview_passed: null,
         interview_passed_computed: null,
         interview_passed_admin_override: null,
-        interview_weighted_score: null,
         interview_completed_at: null,
-        interview_last_checkpoint: 0,
         interview_attempt_count: nextAttemptNumber,
         latest_attempt_id: null,
       })
@@ -15300,7 +21695,6 @@ The participant **confirmed** skipping after the skip confirmation prompt. In **
     setInterviewUiPhase('pre_scenario');
     setReferenceCardScenario(null);
     setReferenceCardPrompt(null);
-    setScenarioIntroTtsPlaying(false);
     isSpeakingRef.current = false;
     setVoiceState('idle');
     resetInterviewProgressRefs();
@@ -15449,17 +21843,17 @@ The participant **confirmed** skipping after the skip confirmation prompt. In **
     };
   }, [analysisAttemptId, interviewStatus, userId]);
 
-  const adminInterviewTopBar = isAdmin ? (
+  const adminInterviewTopBar = isAdminAccount ? (
     <View style={styles.adminTopBarRow}>
-      {ALPHA_MODE ? (
-        <TouchableOpacity
-          style={styles.adminBarButton}
-          onPress={() => setShowAdminPanel(true)}
-          activeOpacity={0.8}
-        >
-          <Text style={styles.adminPanelButtonText}>◆ Panel</Text>
-        </TouchableOpacity>
-      ) : null}
+      <TouchableOpacity
+        style={styles.adminBarButton}
+        onPress={() => setShowAdminPanel(true)}
+        activeOpacity={0.8}
+        accessibilityRole="button"
+        accessibilityLabel="Open admin panel"
+      >
+        <Text style={styles.adminPanelButtonText}>◆ Panel</Text>
+      </TouchableOpacity>
       <TouchableOpacity
         style={styles.adminBarButtonReset}
         onPress={handleAdminResetInterview}
@@ -15604,7 +21998,7 @@ assistant: Thanks for sticking with all of this — what stays with me is how yo
     );
   }
   // Admin panel: manual (◆ Panel) or deep link `/interview?openAdminPanel=1` for the admin console account.
-  if (shouldShowAdminPanel && (ALPHA_MODE || isAdminUser)) {
+  if (shouldShowAdminPanel) {
     return (
       <AdminInterviewDashboard
         onClose={() => {
@@ -15667,7 +22061,7 @@ assistant: Thanks for sticking with all of this — what stays with me is how yo
               We'll have your results ready soon.
             </Text>
 
-            {ALPHA_MODE && isAdminUser ? (
+            {isAdminAccount ? (
               <Pressable
                 onPress={() => setShowAdminPanel(true)}
                 accessibilityRole="button"
@@ -15750,7 +22144,7 @@ assistant: Thanks for sticking with all of this — what stays with me is how yo
               <Text style={[styles.introHint, { textAlign: 'left', marginBottom: 12, color: '#D6E6F7' }]}>
                 You may review your interview results below. Please use the feedback button to let me know if you feel this information is a fair assessment of you.
               </Text>
-              <AdminAttemptTabsView attemptId={analysisAttemptId} userId={userId} showFeedbackTab={false} />
+              <AdminAttemptTabsView attemptId={analysisAttemptId} userId={userId} />
               <UserCommunicationStyleSection userId={userId} />
             </View>
           </View>
@@ -16158,8 +22552,68 @@ assistant: Thanks for sticking with all of this — what stays with me is how yo
     isInterviewerView,
     webDesktopPendingTtsGestureOverlay,
   });
+  if (__DEV__) {
+    console.log(
+      '[EmotionModal] render — visible:',
+      emotionModalVisible,
+      'index:',
+      emotionModalItemIndex,
+      'items complete:',
+      emotionItemsComplete,
+    );
+  }
   return (
     <SafeAreaContainer style={{ position: 'relative', backgroundColor: '#05060D' }}>
+      <Modal
+        visible={emotionModalVisible && emotionModalItemIndex < EMOTION_INTERVIEW_MODAL_ITEMS.length}
+        transparent
+        animationType="fade"
+        {...(Platform.OS === 'ios' ? ({ presentationStyle: 'overFullScreen' as const } as const) : {})}
+        {...(Platform.OS === 'web' ? ({ style: { zIndex: 99999 } as const } as const) : {})}
+        {...(Platform.OS === 'android'
+          ? ({ statusBarTranslucent: true, navigationBarTranslucent: true, style: { elevation: 9999 } } as const)
+          : {})}
+        onShow={() => {
+          console.log('[EmotionModal] modal onShow, itemIndex', emotionModalItemIndex);
+        }}
+      >
+        <View
+          style={[
+            styles.feedbackModalBackdrop,
+            Platform.OS === 'web' ? ({ zIndex: 99999, pointerEvents: 'auto' } as const) : null,
+            Platform.OS === 'android' ? ({ zIndex: 9999, elevation: 9999 } as const) : null,
+          ]}
+        >
+          <View style={[styles.feedbackModalCard, { maxHeight: '90%' }]}>
+            <Text style={styles.feedbackModalTitle}>Quick question about what you just heard</Text>
+            <ScrollView style={{ maxHeight: 420 }} contentContainerStyle={{ paddingBottom: 12 }}>
+              <Text style={[styles.feedbackModalHint, { marginBottom: 16 }]}>
+                {EMOTION_INTERVIEW_MODAL_ITEMS[emotionModalItemIndex]?.question ?? ''}
+              </Text>
+              {(EMOTION_INTERVIEW_MODAL_ITEMS[emotionModalItemIndex]?.choices ?? []).map((ch) => (
+                <Pressable
+                  key={ch.letter}
+                  onPress={() => handleEmotionInterviewAnswer(ch.letter)}
+                  style={({ pressed }) => ({
+                    paddingVertical: 12,
+                    paddingHorizontal: 14,
+                    borderRadius: 10,
+                    marginBottom: 10,
+                    backgroundColor: pressed ? 'rgba(91,168,232,0.22)' : 'rgba(91,168,232,0.12)',
+                    borderWidth: 1,
+                    borderColor: 'rgba(107,185,255,0.35)',
+                  })}
+                >
+                  <Text style={{ color: '#E7F1FB', fontSize: 15, lineHeight: 22 }}>
+                    <Text style={{ fontWeight: '700', color: '#9EC9FF' }}>{ch.letter}) </Text>
+                    {ch.text}
+                  </Text>
+                </Pressable>
+              ))}
+            </ScrollView>
+          </View>
+        </View>
+      </Modal>
       {adminInterviewTopBar}
       <View style={[styles.activeContainer, isAdmin ? styles.adminActiveContainer : undefined]}>
         {isInterviewerView ? (
@@ -16169,7 +22623,7 @@ assistant: Thanks for sticking with all of this — what stays with me is how yo
                 useMediaRecorderPath && audioRecorder.isRecording ? 'recording' : voiceState
               }
               showScenarioReferenceEnabled={
-                interviewUiPhase === 'scenario_active' && !scenarioIntroTtsPlaying && !!referenceCardScenario
+                interviewUiPhase === 'scenario_active' && !!referenceCardScenario
               }
               referenceCardScenario={referenceCardScenario}
               referenceCardPrompt={referenceCardPrompt}
@@ -16401,7 +22855,7 @@ assistant: Thanks for sticking with all of this — what stays with me is how yo
                   onPress={() => {
                     setInterviewStatus('congratulations');
                     if (userId && (route.name === 'Aria' || route.name === 'OnboardingInterview')) {
-                      replaceWithStandardApplicantProcessingHandoffForUser(navigation, userId, {
+                      replaceWithStandardApplicantPostInterviewHandoffForUser(navigation, userId, {
                         interviewSessionId: interviewSessionIdRef.current,
                         source: 'results_panel_continue_cta',
                       });
@@ -16607,7 +23061,7 @@ assistant: Thanks for sticking with all of this — what stays with me is how yo
         >
           <Text style={styles.mobileWebTapToBeginTitle}>Tap to continue</Text>
           <Text style={styles.mobileWebTapToBeginSubtitle}>
-            Your browser needs a tap after returning to this tab so audio can play.
+            Your browser paused interviewer audio when you switched away. Tap to continue where it left off.
           </Text>
         </Pressable>
       ) : null}
@@ -16616,11 +23070,17 @@ assistant: Thanks for sticking with all of this — what stays with me is how yo
           style={styles.mobileWebTapToBeginOverlay}
           onPress={() => void handleWebResumeWelcomeTap()}
           accessibilityRole="button"
-          accessibilityLabel="Tap to play welcome message"
+          accessibilityLabel={
+            resumeOfferWelcomeTtsRef.current ? 'Tap to play welcome message' : 'Tap to continue interview'
+          }
         >
-          <Text style={styles.mobileWebTapToBeginTitle}>Tap to play</Text>
+          <Text style={styles.mobileWebTapToBeginTitle}>
+            {resumeOfferWelcomeTtsRef.current ? 'Tap to play' : 'Tap to continue'}
+          </Text>
           <Text style={styles.mobileWebTapToBeginSubtitle}>
-            Your browser needs a tap to resume interviewer audio after loading your saved session.
+            {resumeOfferWelcomeTtsRef.current
+              ? 'Your browser needs a tap to resume interviewer audio after loading your saved session.'
+              : 'Your browser needs a tap to unlock audio and finish any quick prompts before you continue.'}
           </Text>
         </Pressable>
       ) : null}
@@ -17049,10 +23509,15 @@ const styles = StyleSheet.create({
   },
   feedbackModalBackdrop: {
     flex: 1,
+    zIndex: 9999,
     backgroundColor: 'rgba(5,6,13,0.75)',
     justifyContent: 'center',
     alignItems: 'center',
     padding: 16,
+    ...Platform.select({
+      android: { elevation: 9999 },
+      default: {},
+    }),
   },
   feedbackModalCard: {
     width: '100%',

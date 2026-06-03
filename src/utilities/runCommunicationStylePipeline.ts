@@ -73,6 +73,20 @@ export async function runCommunicationStylePipelineAfterSave(
   const errs: string[] = [];
   console.log('[COMMUNICATION_STYLE] pipeline start', { attemptId, sessionIdPresent: Boolean(sessionId?.trim()) });
   void remoteLog('[COMMUNICATION_STYLE] pipeline start', { attemptId });
+  // #region agent log
+  fetch('http://127.0.0.1:7789/ingest/668e0bd5-3283-4492-9f48-e33846c18218', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'X-Debug-Session-Id': '4b3376' },
+    body: JSON.stringify({
+      sessionId: '4b3376',
+      hypothesisId: 'H_admin_style_pipeline',
+      location: 'runCommunicationStylePipeline.ts',
+      message: 'communication_style_pipeline_start',
+      data: { attemptId, uid },
+      timestamp: Date.now(),
+    }),
+  }).catch(() => {});
+  // #endregion
 
   try {
     const textResult = await supabase.functions.invoke('analyze-interview-text', {
@@ -159,6 +173,20 @@ export async function runCommunicationStylePipelineAfterSave(
   }
 
   await safeUpdateCommunicationStyleError(attemptId, uid, errorText);
+  // #region agent log
+  fetch('http://127.0.0.1:7789/ingest/668e0bd5-3283-4492-9f48-e33846c18218', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'X-Debug-Session-Id': '4b3376' },
+    body: JSON.stringify({
+      sessionId: '4b3376',
+      hypothesisId: 'H_admin_style_pipeline',
+      location: 'runCommunicationStylePipeline.ts',
+      message: 'communication_style_pipeline_done',
+      data: { attemptId, errorCount: errs.length, errorText: errorText?.slice(0, 300) ?? null },
+      timestamp: Date.now(),
+    }),
+  }).catch(() => {});
+  // #endregion
 
   let matchmakerSummary: string | null = null;
   try {

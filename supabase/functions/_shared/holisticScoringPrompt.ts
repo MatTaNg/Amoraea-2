@@ -237,12 +237,27 @@ DIAGNOSTIC EMPHASIS:
 ${SCENARIO_B_ATTUNEMENT_APPRECIATION_ANCHORS}
 - Personal grudge moment: contempt + metacognition + commitment threshold when they distinguish work-through vs walk-away conditions.
 
+In addition to the eight pillar scores, assess the overall ego development level demonstrated across the full interview transcript. Assign a level from 1 to 5 based on the following criteria:
+
+Level 1 — Concrete and rule-based throughout. Responses are black and white. Characters are simply right or wrong. No complexity or ambiguity is held. Personal moments are deflected or described in purely procedural terms.
+
+Level 2 — Awareness of multiple perspectives but resolved simplistically. Acknowledges that both parties have a point but collapses to simple solutions. Personal moments show some self-reference but without genuine self-examination.
+
+Level 3 — Holds complexity without resolving it prematurely. Recognizes patterns across situations. Uses psychological concepts naturally and accurately. Personal moments show genuine self-reflection with some insight.
+
+Level 4 — Integrates contradictions. Connects present behavior to broader relational patterns. Tolerates ambiguity as a feature rather than a problem. Personal moments show genuine ownership and psychological depth.
+
+Level 5 — Demonstrates systemic understanding of relational dynamics. Recognizes how internal states drive patterns across relationships and time. Personal moments show genuine integration of insight and behavior without performance.
+
+Return this as ego_development_level (integer 1–5) in the JSON output alongside pillar_scores.
+
 Your entire reply must be one JSON object only. Do not write an introduction, preamble, or explanation (for example do not start with "Looking at", "Here is", or analysis before the JSON). The first non-whitespace character of your message must be {.
 
-Return ONLY valid JSON. Keys for pillarScores, keyEvidence, and pillarConfidence must be exactly: mentalizing, accountability, contempt, repair, regulation, attunement, appreciation, commitment_threshold.
+Return ONLY valid JSON. Keys for pillarScores, keyEvidence, and pillarConfidence must be exactly: mentalizing, accountability, contempt, repair, regulation, attunement, appreciation, commitment_threshold. You MUST include top-level key "ego_development_level" as a required integer between 1 and 5 (never omit this key). Put ego_development_level at the top level of the JSON object only — not nested inside pillarScores or pillar_scores.
 
 {
   "pillarScores": { "mentalizing": 0, "accountability": 0, "contempt": 0, "repair": 0, "regulation": 0, "attunement": 0, "appreciation": 0, "commitment_threshold": 0 },
+  "ego_development_level": 3,
   "keyEvidence": { "mentalizing": "", "accountability": "", "contempt": "", "repair": "", "regulation": "", "attunement": "", "appreciation": "", "commitment_threshold": "" },
   "pillarConfidence": { "mentalizing": "high|moderate|low", "accountability": "high|moderate|low", "contempt": "high|moderate|low", "repair": "high|moderate|low", "regulation": "high|moderate|low", "attunement": "high|moderate|low", "appreciation": "high|moderate|low", "commitment_threshold": "high|moderate|low" },
   "communicationQuality": {

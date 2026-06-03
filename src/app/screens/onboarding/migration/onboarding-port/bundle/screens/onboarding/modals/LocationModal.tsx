@@ -1,7 +1,8 @@
 import React, { useEffect, useState, useRef } from 'react';
-import { View, ScrollView, Text, ActivityIndicator } from 'react-native';
+import { View, ScrollView, Text, ActivityIndicator, Platform } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Button } from '@/shared/ui/Button';
+import * as Location from 'expo-location';
 import { requestMyLocationLabel } from '@/screens/profile/utils/locationHelpers';
 import { OnboardingHeader } from './components/OnboardingHeader';
 import { styles } from './LocationModal.styled';
@@ -26,6 +27,8 @@ export const LocationModal: React.FC<LocationModalProps> = ({
 
   // Automatically get location when screen mounts
   useEffect(() => {
+    // Web browsers are more reliable when geolocation permission is requested from an explicit user action.
+    if (Platform.OS === 'web') return;
     if (!location.trim() && !hasAttemptedLocation) {
       getLocation();
     } else if (location.trim()) {
@@ -44,25 +47,45 @@ export const LocationModal: React.FC<LocationModalProps> = ({
   const getLocation = async () => {
     if (isGettingLocation) return; // Prevent multiple calls
     
+    if (Platform.OS === 'web' && typeof window !== 'undefined' && !window.isSecureContext) {
+      setLocationError(
+        'Browser location permission requires a secure context (https). Please open this page over https and try again.',
+      );
+      setHasAttemptedLocation(true);
+      setIsGettingLocation(false);
+      return;
+    }
+
     setIsGettingLocation(true);
     setLocationError(null);
     setHasAttemptedLocation(true);
     locationReceivedRef.current = false;
     
-    // Set timeout before making the async call
-    // This handles cases where permission is denied and callback isn't called
+    // Slow GPS + reverse geocode often exceeds a few seconds; a short timeout caused a false "Try Again" flash
+    // before success. Re-check after the tick so we don't race the same frame as a late resolve.
+    const LOCATION_STALL_MS = 22_000;
     const timeoutId = setTimeout(() => {
-      if (!locationReceivedRef.current) {
+      const showStallError = () => {
+        if (locationReceivedRef.current) return;
         setIsGettingLocation(false);
-        // Only set error if location hasn't been set yet
-        // This prevents showing error when location was actually received
-        if (!location.trim()) {
-          setLocationError('Location is required to continue. Please enable location services in your device settings and try again.');
-        }
-      }
-    }, 5000); // 5 second timeout to check if callback was called
+        setLocationError(
+          'Location is required to continue. Please enable location services in your device settings and try again.',
+        );
+      };
+      requestAnimationFrame(showStallError);
+    }, LOCATION_STALL_MS);
     
     try {
+      const perm = await Location.requestForegroundPermissionsAsync();
+      if (perm.status !== 'granted') {
+        setIsGettingLocation(false);
+        setLocationError(
+          perm.canAskAgain
+            ? 'Location permission is required to continue. Please allow location access and try again.'
+            : 'Location permission is required to continue. Please enable location access in device/browser settings, then try again.',
+        );
+        return;
+      }
       const loc = await requestMyLocationLabel();
       clearTimeout(timeoutId);
       locationReceivedRef.current = true;
@@ -93,7 +116,7 @@ export const LocationModal: React.FC<LocationModalProps> = ({
       >
         <View style={styles.container}>
           <Text style={styles.description}>
-            We use your location to find matches nearby. Location is detected automatically — you don't need to enter it manually.
+            We use your location to find matches nearby. Location is detected automatically and must be enabled to continue.
           </Text>
 
           {isGettingLocation && (
@@ -125,10 +148,12 @@ export const LocationModal: React.FC<LocationModalProps> = ({
           {!isGettingLocation && !location.trim() && !locationError && (
             <View style={styles.errorContainer}>
               <Text style={styles.errorText}>
-                Location could not be detected. Please try again.
+                {hasAttemptedLocation
+                  ? 'Location could not be detected. Please try again.'
+                  : 'Tap below to detect your location.'}
               </Text>
               <Button
-                title="Try Again"
+                title={hasAttemptedLocation ? 'Try Again' : 'Detect Location'}
                 variant="outline"
                 onPress={getLocation}
                 style={styles.retryButton}

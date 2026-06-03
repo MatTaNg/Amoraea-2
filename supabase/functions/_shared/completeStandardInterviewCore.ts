@@ -4,8 +4,10 @@
  */
 import { type SupabaseClient } from 'https://esm.sh/@supabase/supabase-js@2';
 import { buildScoringPrompt } from './holisticScoringPrompt.ts';
+import { coerceHolisticInterviewModelObject } from './coerceHolisticInterviewModelObject.ts';
 import {
   computeGateResultCore,
+  computeInterviewWeightedCompositeFromPillars,
   GATE_PASS_WEIGHTED_MIN,
   REFERRAL_WEIGHTED_PASS_MIN,
 } from './computeGateResultCore.ts';
@@ -13,6 +15,33 @@ import { scenarioCompositesToStorageJson } from './scenarioCompositeFloor.ts';
 import { generateAIReasoning } from './generateAIReasoning.ts';
 import { communicationFloorFieldsFromTranscript } from './communicationFloorFromTranscript.ts';
 import { evaluateInterviewCompletionGate, type CompletionGateFailure } from './interviewCompletionGate.ts';
+import { mergeMomentConcretenessForGate, normalizeResponseConcreteness } from './personalMomentConcreteness.ts';
+import { scenarioEmotionalVocabDensityPercentFromTranscript } from './personalMomentEmotionalVocab.ts';
+import { applyPsychometricModifierToAttempt } from './applyPsychometricModifier.ts';
+import { crossReferenceDefenseDetection } from './crossReferenceDefenseDetection.ts';
+import {
+  computeAvgScenarioTotalUserWords,
+  computeDisclosureCalibration,
+  sumUserWordsForInterviewMoment,
+  type DisclosureCalibration,
+  type DisclosureCalibrationTurn,
+  personalMomentWordCountsForDisclosure,
+} from './disclosureCalibration.ts';
+import { aggregatePillarScoresWithCommitmentMergeDetailed } from './aggregateMarkerScoresFromSlices.ts';
+import {
+  finiteNumberOrNull,
+  markerSliceFromAttemptScoresField,
+  markerSlicesFromAttemptRow,
+  pickPersistedNumber,
+  type MarkerScoreSliceParsed,
+} from './attemptScoreSliceParsing.ts';
+import {
+  emotionRecognitionDisplayScoreFromRow,
+  emotionRecognitionPersistFieldsFromRow,
+  emotionRecognitionRawScoreFromRow,
+} from './emotionRecognitionScoring.ts';
+
+type MarkerScoreSliceEdge = MarkerScoreSliceParsed;
 
 async function markAttemptIncompleteNoScore(
   supabase: SupabaseClient,
@@ -36,9 +65,10 @@ async function markAttemptIncompleteNoScore(
       incomplete_reason: failure.incomplete_reason,
       scoring_deferred: false,
       pillar_scores: null,
-      gate_fail_reason: failure.detail,
       gate_fail_reasons: [],
       gate_fail_detail: null,
+      ego_development_level: null,
+      review_flags: [],
       ai_reasoning: {
         _completionHeld: true,
         incomplete_reason: failure.incomplete_reason,
@@ -56,8 +86,6 @@ async function markAttemptIncompleteNoScore(
       interview_completed: true,
       interview_passed_computed: false,
       interview_passed: false,
-      interview_weighted_score: null,
-      interview_pillar_scores: null,
     })
     .eq('id', userId);
 
@@ -71,7 +99,7 @@ async function markAttemptIncompleteNoScore(
  */
 const HOLISTIC_FETCH_TIMEOUT_MS = 65_000;
 
-type Transcript = Array<{ role: string; content?: string }>;
+type Transcript = Array<{ role: string; content?: string; scenarioNumber?: number | null }>;
 
 type InterviewResults = {
   pillarScores?: Record<string, number | null>;
@@ -79,7 +107,92 @@ type InterviewResults = {
   interviewSummary?: string;
   notableInconsistencies?: string[];
   skepticismModifier?: { pillarId: number | string | null; adjustment: number; reason?: string } | null;
+  ego_development_level?: number | null;
 };
+
+function normalizeHolisticEgoLevelEdge(raw: unknown): number | null {
+  if (raw === null || raw === undefined) return null;
+  if (typeof raw === 'number' && Number.isFinite(raw)) {
+    const r = Math.round(raw);
+    if (r < 1 || r > 5) return null;
+    return r;
+  }
+  if (typeof raw === 'string') {
+    const s = raw.trim();
+    if (s === '') return null;
+    if (/^-?\d+$/.test(s)) {
+      const n = parseInt(s, 10);
+      if (!Number.isNaN(n) && n >= 1 && n <= 5) return n;
+      return null;
+    }
+    const asFloat = Number(s);
+    if (!Number.isFinite(asFloat)) return null;
+    const r = Math.round(asFloat);
+    if (r < 1 || r > 5) return null;
+    return r;
+  }
+  return null;
+}
+
+function extractEgoDevelopmentLevelEdge(parsed: Record<string, unknown>): number | null {
+  const candidates: unknown[] = [parsed.ego_development_level, parsed.egoDevelopmentLevel];
+  const pillarScores = parsed.pillarScores ?? parsed.pillar_scores;
+  if (pillarScores != null && typeof pillarScores === 'object' && !Array.isArray(pillarScores)) {
+    const ps = pillarScores as Record<string, unknown>;
+    candidates.push(ps.ego_development_level, ps.egoDevelopmentLevel);
+  }
+  for (const c of candidates) {
+    const n = normalizeHolisticEgoLevelEdge(c);
+    if (n != null) return n;
+  }
+  return null;
+}
+
+function normalizeHolisticInterviewParse(o: unknown): InterviewResults {
+  if (!o || typeof o !== 'object' || Array.isArray(o)) return { pillarScores: {} };
+  const r = o as Record<string, unknown>;
+  const pillarScores = (r.pillarScores ?? r.pillar_scores) as InterviewResults['pillarScores'];
+  const egoExtracted = extractEgoDevelopmentLevelEdge(r);
+  const skepticismModifier = (r.skepticismModifier ?? r.skepticism_modifier) as InterviewResults['skepticismModifier'];
+  return {
+    pillarScores: pillarScores ?? {},
+    keyEvidence: (r.keyEvidence ?? r.key_evidence) as InterviewResults['keyEvidence'],
+    interviewSummary: (r.interviewSummary ?? r.interview_summary) as string | undefined,
+    notableInconsistencies: (r.notableInconsistencies ?? r.notable_inconsistencies) as string[] | undefined,
+    skepticismModifier: skepticismModifier ?? undefined,
+    ego_development_level: egoExtracted ?? undefined,
+  };
+}
+
+function userSliceWordCountFromStoredMoment(raw: unknown): number | null {
+  if (raw == null || typeof raw !== 'object' || Array.isArray(raw)) return null;
+  const w = (raw as Record<string, unknown>).user_slice_word_count;
+  return typeof w === 'number' && Number.isFinite(w) && w >= 0 ? w : null;
+}
+
+function disclosureCalibrationFromTranscriptAndPatterns(
+  transcript: Transcript,
+  patterns: Record<string, unknown> | null | undefined,
+): DisclosureCalibration {
+  const tx = transcript as unknown as DisclosureCalibrationTurn[];
+  const m4o = patterns?.moment_4_scores;
+  const m5o = patterns?.moment_5_scores;
+  const m4c =
+    m4o != null && typeof m4o === 'object' && !Array.isArray(m4o)
+      ? normalizeResponseConcreteness((m4o as Record<string, unknown>).response_concreteness)
+      : null;
+  const m5c =
+    m5o != null && typeof m5o === 'object' && !Array.isArray(m5o)
+      ? normalizeResponseConcreteness((m5o as Record<string, unknown>).response_concreteness)
+      : null;
+  const s4 = sumUserWordsForInterviewMoment(tx, 4);
+  const s5 = sumUserWordsForInterviewMoment(tx, 5);
+  const w4 = userSliceWordCountFromStoredMoment(m4o) ?? (s4 > 0 ? s4 : null);
+  const w5 = userSliceWordCountFromStoredMoment(m5o) ?? (s5 > 0 ? s5 : null);
+  const avgScenarioRaw = computeAvgScenarioTotalUserWords(tx);
+  const avgScenarioForCalibration = avgScenarioRaw > 0 ? avgScenarioRaw : null;
+  return computeDisclosureCalibration(m4c, m5c, w4, w5, avgScenarioForCalibration, tx);
+}
 
 function getAnthropicEndpoint(): string {
   const proxy = Deno.env.get('ANTHROPIC_PROXY_URL') ?? '';
@@ -148,19 +261,47 @@ function extractBalancedJsonObjectFrom(s: string, start: number): string | null 
   return null;
 }
 
+function tryExtractEgoLevelFromHolisticRawTextEdge(raw: string): number | null {
+  const patterns: RegExp[] = [
+    /"ego_development_level"\s*:\s*([1-5](?:\.\d+)?)\b/g,
+    /"egoDevelopmentLevel"\s*:\s*([1-5](?:\.\d+)?)\b/g,
+    /ego\s*development\s*level\s*[:=]\s*([1-5])\b/gi,
+  ];
+  let last: number | null = null;
+  for (const re of patterns) {
+    re.lastIndex = 0;
+    let m: RegExpExecArray | null;
+    while ((m = re.exec(raw)) !== null) {
+      const n = normalizeHolisticEgoLevelEdge(Number(m[1]));
+      if (n != null) last = n;
+    }
+  }
+  return last;
+}
+
 /**
  * Prose before JSON ("Looking at…") or multiple `{` regions (embedded snippets). Try whole string,
- * then each balanced `{...}` from left to right until one parses.
+ * then each balanced `{...}` from left to right. When several objects parse, prefer one with a valid
+ * `ego_development_level` and fuller `pillarScores` (matches client `coerceHolisticInterviewModelObject` behavior).
  */
 function parseHolisticJsonFromModelText(raw: string): { ok: true; parsed: InterviewResults } | { ok: false; error: string } {
   const cleaned = raw.replace(/```json|```/gi, '').trim();
+  const objectAttempts: Record<string, unknown>[] = [];
+  let lastErr = 'no JSON object found in model output (expected { … })';
+
+  const pushParsed = (obj: unknown) => {
+    if (obj != null && typeof obj === 'object' && !Array.isArray(obj)) {
+      objectAttempts.push(coerceHolisticInterviewModelObject(obj));
+    }
+  };
+
   try {
-    return { ok: true, parsed: JSON.parse(cleaned) as InterviewResults };
+    pushParsed(JSON.parse(cleaned));
   } catch {
     /* fall through */
   }
+
   let searchFrom = 0;
-  let lastErr = 'no JSON object found in model output (expected { … })';
   const maxTries = 100;
   for (let t = 0; t < maxTries; t++) {
     const start = cleaned.indexOf('{', searchFrom);
@@ -171,18 +312,222 @@ function parseHolisticJsonFromModelText(raw: string): { ok: true; parsed: Interv
       continue;
     }
     try {
-      return { ok: true, parsed: JSON.parse(extracted) as InterviewResults };
+      pushParsed(JSON.parse(extracted));
     } catch (e) {
       lastErr = e instanceof Error ? e.message : String(e);
-      searchFrom = start + 1;
+    }
+    searchFrom = start + 1;
+  }
+
+  const seen = new Set<string>();
+  const unique: Record<string, unknown>[] = [];
+  for (const c of objectAttempts) {
+    const sig = JSON.stringify(c);
+    if (seen.has(sig)) continue;
+    seen.add(sig);
+    unique.push(c);
+  }
+
+  if (unique.length === 0) {
+    return { ok: false, error: lastErr };
+  }
+
+  const rankCoercedHolisticCandidate = (coerced: Record<string, unknown>): number => {
+    const ego = extractEgoDevelopmentLevelEdge(coerced);
+    const ps = coerced.pillarScores;
+    const nPillars =
+      ps != null && typeof ps === 'object' && !Array.isArray(ps) ? Object.keys(ps as Record<string, unknown>).length : 0;
+    return (ego != null ? 1000 : 0) + nPillars;
+  };
+
+  let bestCoerced = unique[0]!;
+  let bestRank = rankCoercedHolisticCandidate(bestCoerced);
+  for (let i = 1; i < unique.length; i++) {
+    const c = unique[i]!;
+    const r = rankCoercedHolisticCandidate(c);
+    if (r > bestRank) {
+      bestRank = r;
+      bestCoerced = c;
     }
   }
-  return { ok: false, error: lastErr };
+
+  let bestForNormalize = bestCoerced;
+  if (extractEgoDevelopmentLevelEdge(bestCoerced) == null) {
+    const salvaged = tryExtractEgoLevelFromHolisticRawTextEdge(raw);
+    if (salvaged != null) {
+      bestForNormalize = { ...bestCoerced, ego_development_level: salvaged };
+    }
+  }
+
+  console.log('[EdgeEgoDev] holistic parsed keys:', Object.keys(bestForNormalize));
+  console.log('[EdgeEgoDev] parsed.ego_development_level raw value:', bestForNormalize.ego_development_level);
+  console.log('[EdgeEgoDev] typeof ego_development_level:', typeof bestForNormalize.ego_development_level);
+
+  return { ok: true, parsed: normalizeHolisticInterviewParse(bestForNormalize) };
 }
 
 export type CompleteStandardInterviewResult =
-  | { ok: true; attemptId: string; skipped?: string }
+  | {
+      ok: true;
+      attemptId: string;
+      skipped?: string;
+      /** Run via `EdgeRuntime.waitUntil` in the edge handler (reasoning + communication style). */
+      runPostCompletionInBackground?: () => Promise<void>;
+    }
   | { ok: false; error: string };
+
+/** Matches admin-retry-ai-reasoning background budget (Tab 2 retry succeeds with this). */
+const STANDARD_REASONING_BACKGROUND_TIMEOUT_MS = 300_000;
+
+type ReasoningBackgroundInputs = {
+  pillarForReasoning: Record<string, number>;
+  scenarioMap: Record<
+    number,
+    { pillarScores: Record<string, number | null>; scenarioName?: string } | undefined
+  >;
+  transcript: Transcript;
+  weightedScore: number | null;
+  pass: boolean;
+};
+
+async function runStandardInterviewReasoningInBackground(
+  supabase: SupabaseClient,
+  attemptId: string,
+  userId: string,
+  inputs: ReasoningBackgroundInputs,
+): Promise<void> {
+  const startedAt = Date.now();
+  try {
+    const reasoning = await generateAIReasoning(
+      inputs.pillarForReasoning,
+      inputs.scenarioMap,
+      inputs.transcript,
+      inputs.weightedScore,
+      inputs.pass,
+      [],
+      {
+        perAttemptTimeoutMs: STANDARD_REASONING_BACKGROUND_TIMEOUT_MS,
+        maxAttempts: 1,
+      },
+    );
+    const { error } = await supabase
+      .from('interview_attempts')
+      .update({
+        ai_reasoning: reasoning as unknown as Record<string, unknown>,
+        reasoning_pending: false,
+      })
+      .eq('id', attemptId)
+      .eq('user_id', userId);
+    if (error) {
+      console.error('[complete-standard-interview] reasoning background persist failed', error.message);
+      try {
+        await supabase
+          .from('interview_attempts')
+          .update({
+            ai_reasoning: reasoning as unknown as Record<string, unknown>,
+            reasoning_pending: false,
+          })
+          .eq('id', attemptId)
+          .eq('user_id', userId);
+        console.log('[Reasoning] save retry succeeded after initial failure');
+      } catch (retryErr) {
+        console.error('[Reasoning] save retry failed:', retryErr);
+      }
+    } else {
+      console.log('[complete-standard-interview] reasoning background ok', {
+        attemptId,
+        elapsed_ms: Date.now() - startedAt,
+      });
+    }
+  } catch (e) {
+    const error = e instanceof Error ? e.message : String(e);
+    if (error.includes('aborted') || (e instanceof Error && e.name === 'AbortError')) {
+      console.error('[Reasoning] AbortError on background reasoning:', error);
+    }
+    console.error('[complete-standard-interview] reasoning background failed', { attemptId, error });
+    await supabase
+      .from('interview_attempts')
+      .update({
+        ai_reasoning: {
+          _reasoningPending: false,
+          _narrativeFailed: true,
+          pillar_scores: inputs.pillarForReasoning,
+          weighted_score: inputs.weightedScore,
+          passed: inputs.pass,
+          note: 'Narrative AI reasoning failed or timed out; scores saved.',
+          last_error: error,
+          failed_at: new Date().toISOString(),
+        },
+        reasoning_pending: false,
+      })
+      .eq('id', attemptId)
+      .eq('user_id', userId);
+  }
+}
+
+/** Await text + audio finalize so style labels exist before the edge handler returns. */
+async function awaitCommunicationStylePipelines(
+  userId: string,
+  attemptId: string,
+): Promise<void> {
+  const baseUrl = Deno.env.get('SUPABASE_URL') ?? '';
+  const serviceKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? '';
+  const anonKey = Deno.env.get('SUPABASE_ANON_KEY') ?? '';
+  if (!baseUrl || (!serviceKey && !anonKey)) {
+    console.warn('[complete-standard-interview] communication style skipped — missing Supabase env');
+    return;
+  }
+  const headers: Record<string, string> = {
+    'Content-Type': 'application/json',
+    Authorization: `Bearer ${serviceKey || anonKey}`,
+    apikey: anonKey || serviceKey,
+  };
+  const errs: string[] = [];
+  try {
+    const textRes = await fetch(`${baseUrl}/functions/v1/analyze-interview-text`, {
+      method: 'POST',
+      headers,
+      body: JSON.stringify({ user_id: userId, attempt_id: attemptId }),
+    });
+    if (!textRes.ok) {
+      errs.push(`analyze-interview-text: HTTP ${textRes.status} ${(await textRes.text()).slice(0, 200)}`);
+    }
+  } catch (e) {
+    errs.push(`analyze-interview-text: ${e instanceof Error ? e.message : String(e)}`);
+  }
+  try {
+    const audioRes = await fetch(`${baseUrl}/functions/v1/analyze-interview-audio`, {
+      method: 'POST',
+      headers,
+      body: JSON.stringify({
+        action: 'finalize_session',
+        user_id: userId,
+        attempt_id: attemptId,
+        session_id: '',
+      }),
+    });
+    if (!audioRes.ok) {
+      errs.push(`analyze-interview-audio: HTTP ${audioRes.status} ${(await audioRes.text()).slice(0, 200)}`);
+    }
+  } catch (e) {
+    errs.push(`analyze-interview-audio: ${e instanceof Error ? e.message : String(e)}`);
+  }
+  if (errs.length > 0) {
+    console.error('[complete-standard-interview] communication style pipeline errors', { attemptId, errs });
+    await createClient(baseUrl, serviceKey, {
+      auth: { autoRefreshToken: false, persistSession: false },
+    })
+      .from('interview_attempts')
+      .update({ communication_style_error: errs.join(' | ') })
+      .eq('id', attemptId)
+      .eq('user_id', userId)
+      .then(({ error }) => {
+        if (error) console.error('[complete-standard-interview] communication_style_error update failed', error.message);
+      });
+  } else {
+    console.log('[complete-standard-interview] communication style pipeline ok', { attemptId });
+  }
+}
 
 /**
  * @param supabase -- service-role client
@@ -193,10 +538,11 @@ export async function runCompleteStandardInterview(
   attemptId: string,
   userId: string
 ): Promise<CompleteStandardInterviewResult> {
+  console.log('[CompletionPath] edge function completeStandardInterviewCore called for attempt:', attemptId);
   const { data: row, error: qErr } = await supabase
     .from('interview_attempts')
     .select(
-      'id, user_id, scoring_deferred, transcript, interview_typology_context, scenario_1_scores, scenario_2_scores, scenario_3_scores, scenario_specific_patterns, response_timings, probe_log'
+      'id, user_id, scoring_deferred, transcript, interview_typology_context, scenario_1_scores, scenario_2_scores, scenario_3_scores, scenario_specific_patterns, response_timings, probe_log, emotion_recognition_responses, emotion_recognition_raw_score, emotion_recognition_score, skip_penalty_total, auto_failed, moment_4_concreteness, moment_5_concreteness, ego_development_level, mentalizing_overcertainty_count, defense_patterns, disclosure_calibration, personal_moment_emotional_vocab_low, personal_moment_emotional_vocab_density, depth_signal_modifier, score_modifier, modified_weighted_score'
     )
     .eq('id', attemptId)
     .maybeSingle();
@@ -217,7 +563,15 @@ export async function runCompleteStandardInterview(
   }
 
   const patterns = (row as { scenario_specific_patterns?: Record<string, unknown> | null }).scenario_specific_patterns;
+  /** `moment_4_scores` is produced by client Moment 4 scoring (`AriaScreen` + `probeAndScoringUtils`); this edge path reads stored JSON only — no duplicate M4 model parse here. */
   const moment4Stored = patterns?.moment_4_scores ?? null;
+  if (Deno.env.get('INTERVIEW_DEBUG_M4') === '1') {
+    const m4o = moment4Stored as Record<string, unknown> | null;
+    console.log('[M4 Debug] edge deferred completion — moment_4_scores:', {
+      present: m4o != null,
+      keys: m4o && typeof m4o === 'object' && !Array.isArray(m4o) ? Object.keys(m4o) : [],
+    });
+  }
   const completionGate = evaluateInterviewCompletionGate({
     scenario1: row.scenario_1_scores,
     scenario2: row.scenario_2_scores,
@@ -329,45 +683,271 @@ export async function runCompleteStandardInterview(
     if (ps && typeof ps === 'object') scenarioPillarScoresByScenario[n] = ps;
   }
 
+  const rowTyped = row as Record<string, unknown>;
+  const markerSlices = markerSlicesFromAttemptRow(row);
+  const existingEgo = finiteNumberOrNull(rowTyped.ego_development_level);
+  const holisticEgo = extractEgoDevelopmentLevelEdge(parsed as Record<string, unknown>) ?? existingEgo;
+  const p = patterns as Record<string, unknown> | null | undefined;
+  const m4StoredObj = p?.moment_4_scores;
+  const m5StoredObj = p?.moment_5_scores;
+
+  const aggregatedResult = aggregatePillarScoresWithCommitmentMergeDetailed(markerSlices, {
+    egoDevelopmentLevel: holisticEgo,
+    defensePatternTranscript: transcript,
+    disclosureCalibrationTranscript: transcript as unknown as DisclosureCalibrationTurn[],
+    scenarioEmotionalVocabDensityPercent: scenarioEmotionalVocabDensityPercentFromTranscript(transcript),
+    communicationStyleEmotionalVocabDensityPercent: null,
+  });
+
+  const disclosureCalibrationForAttempt =
+    aggregatedResult.disclosureCalibration ??
+    disclosureCalibrationFromTranscriptAndPatterns(
+      transcript,
+      patterns as Record<string, unknown> | null | undefined,
+    ) ??
+    (typeof rowTyped.disclosure_calibration === 'string' ? rowTyped.disclosure_calibration : null);
+
+  const egoLevelForAttempt = aggregatedResult.egoDevelopmentLevel ?? holisticEgo ?? existingEgo;
+  const moment4ConcretenessForAttempt =
+    mergeMomentConcretenessForGate(m4StoredObj, rowTyped.moment_4_concreteness) ??
+    aggregatedResult.moment4Concreteness;
+  const moment5ConcretenessForAttempt =
+    mergeMomentConcretenessForGate(m5StoredObj, rowTyped.moment_5_concreteness) ??
+    aggregatedResult.moment5Concreteness;
+  const vocabDensityForAttempt =
+    aggregatedResult.personal_moment_emotional_vocab_density ??
+    finiteNumberOrNull(rowTyped.personal_moment_emotional_vocab_density);
+  const vocabLowForAttempt =
+    aggregatedResult.personal_moment_emotional_vocab_low ||
+    rowTyped.personal_moment_emotional_vocab_low === true;
+  const mentalizingOvercertaintyCountForAttempt = aggregatedResult.mentalizingOvercertaintyCount ?? 0;
+  const defensePatternsForAttempt = aggregatedResult.defensePatterns;
+
+  const emotionRow = row as {
+    emotion_recognition_score?: unknown;
+    emotion_recognition_raw_score?: unknown;
+    emotion_recognition_responses?: unknown;
+  };
+  const emotionPersistFields = emotionRecognitionPersistFieldsFromRow(emotionRow);
+  const emotionRawScoreForAttempt = emotionRecognitionRawScoreFromRow(emotionRow);
+  const emotionScoreForAttempt = emotionRecognitionDisplayScoreFromRow(emotionRow);
+  const emotionResponsesForAttempt = emotionRow.emotion_recognition_responses ?? null;
+
+  console.log('[EdgeFunction] depth signal extraction:', {
+    egoLevel: egoLevelForAttempt,
+    m4: moment4ConcretenessForAttempt,
+    m5: moment5ConcretenessForAttempt,
+    vocabDensity: vocabDensityForAttempt,
+    vocabLow: vocabLowForAttempt,
+    erRaw: emotionRawScoreForAttempt,
+    overcertainty: mentalizingOvercertaintyCountForAttempt,
+    disclosure: disclosureCalibrationForAttempt,
+  });
+
+  const rowSkip = row as { skip_penalty_total?: unknown; auto_failed?: unknown };
+  const skipPenaltyTotal =
+    typeof rowSkip.skip_penalty_total === 'number' && Number.isFinite(rowSkip.skip_penalty_total)
+      ? rowSkip.skip_penalty_total
+      : 0;
+  const skipAutoFail = rowSkip.auto_failed === true;
+  console.log('[Disclosure] persisting disclosure_calibration:', disclosureCalibrationForAttempt);
+  const closingIntegrationRaw = (row as Record<string, unknown>).closing_integration;
+  const closingIntegrationForGate =
+    typeof closingIntegrationRaw === 'string' && closingIntegrationRaw.trim() !== ''
+      ? closingIntegrationRaw.trim()
+      : null;
+
+  const precomputedWeighted = computeInterviewWeightedCompositeFromPillars(
+    parsed.pillarScores ?? {},
+    parsed.skepticismModifier ?? null,
+    skipPenaltyTotal,
+    skipAutoFail,
+  );
+
+  const rowDepthModifier = finiteNumberOrNull(rowTyped.depth_signal_modifier);
+  const rowScoreModifier = finiteNumberOrNull(rowTyped.score_modifier);
+  const rowModifiedWeighted = finiteNumberOrNull(rowTyped.modified_weighted_score);
+  console.log('[BaseScore] passing precomputedWeightedScore:', precomputedWeighted);
+
+  console.log('[EdgeGate] full options check:', {
+    egoLevel: egoLevelForAttempt,
+    m4: moment4ConcretenessForAttempt,
+    m5: moment5ConcretenessForAttempt,
+    erRaw: emotionRawScoreForAttempt,
+    overcertainty: mentalizingOvercertaintyCountForAttempt,
+    disclosure: disclosureCalibrationForAttempt,
+    vocabLow: vocabLowForAttempt,
+  });
+  const personalWordCounts = personalMomentWordCountsForDisclosure(markerSlices, transcript);
   const gate = computeGateResultCore(parsed.pillarScores ?? {}, parsed.skepticismModifier ?? null, {
     weightedPassMin: weightedMin,
     scenarioPillarScoresByScenario,
+    skipPenaltyTotal,
+    skipAutoFail,
+    egoDevelopmentLevel: egoLevelForAttempt,
+    defensePatterns: defensePatternsForAttempt,
+    moment4Concreteness: moment4ConcretenessForAttempt ?? null,
+    moment5Concreteness: moment5ConcretenessForAttempt ?? null,
+    disclosureCalibration: disclosureCalibrationForAttempt,
+    moment4WordCount: personalWordCounts.moment4WordCount,
+    moment5WordCount: personalWordCounts.moment5WordCount,
+    personalMomentEmotionalVocabDensity: vocabDensityForAttempt,
+    personalMomentEmotionalVocabLow: vocabLowForAttempt,
+    emotionRecognitionRawScore: emotionRawScoreForAttempt,
+    emotionRecognitionResponses: emotionResponsesForAttempt,
+    mentalizingOvercertaintyCount: mentalizingOvercertaintyCountForAttempt,
+    ...(closingIntegrationForGate != null ? { closingIntegration: closingIntegrationForGate } : {}),
+    ...(typeof precomputedWeighted === 'number' && Number.isFinite(precomputedWeighted)
+      ? { precomputedWeightedScore: precomputedWeighted }
+      : {}),
+  });
+  console.log('[EdgeEgoDev] final ego_development_level to persist:', egoLevelForAttempt);
+  console.log('[EdgeGate] scoreModifier:', gate.scoreModifier, 'modifiedScore:', gate.modifiedWeightedScore);
+  if (egoLevelForAttempt == null) {
+    console.warn('[EdgeEgoDev] ego_development_level still null after coercion and candidate ranking');
+  }
+
+  const { data: userPsych } = await supabase
+    .from('users')
+    .select(
+      'psychometric_straight_line_flags, psychometrics_gasp_score, psychometrics_aaq2_score, psychometrics_brs_score, psychometrics_rses_score, psychometrics_scs_sf_score, psychometrics_dweck_score, psychometrics_sd3_narcissism_score, psychometrics_rfq_score',
+    )
+    .eq('id', userId)
+    .maybeSingle();
+
+  const dpRaw = defensePatternsForAttempt as Record<string, unknown> | null;
+  const preCrossRefDepthModifier = gate.depthSignalModifier ?? gate.scoreModifier ?? 0;
+  const defenseCrossReference = crossReferenceDefenseDetection({
+    defensePatterns: {
+      projection_detected: dpRaw?.projection_detected === true,
+      splitting_detected: dpRaw?.splitting_detected === true,
+      rationalization_detected: dpRaw?.rationalization_detected === true,
+      denial_detected: dpRaw?.denial_detected === true,
+    },
+    psychometricScores: {
+      gasp_externalization: finiteNumberOrNull(userPsych?.psychometrics_gasp_score),
+      rfq_score: finiteNumberOrNull(userPsych?.psychometrics_rfq_score),
+      sd3_narcissism_score: finiteNumberOrNull(userPsych?.psychometrics_sd3_narcissism_score),
+      rses_score: finiteNumberOrNull(userPsych?.psychometrics_rses_score),
+      scs_sf_score: finiteNumberOrNull(userPsych?.psychometrics_scs_sf_score),
+      aaq2_score: finiteNumberOrNull(userPsych?.psychometrics_aaq2_score),
+    },
+    depthSignalModifierApplied: preCrossRefDepthModifier,
+  });
+  const crossRefAdjustedDepthModifier =
+    Math.round((preCrossRefDepthModifier + defenseCrossReference.modifierAdjustment) * 100) / 100;
+  const crossRefAdjustedModifiedWeighted =
+    gate.modifiedWeightedScore != null && Number.isFinite(gate.modifiedWeightedScore)
+      ? Math.round((gate.modifiedWeightedScore + defenseCrossReference.modifierAdjustment) * 100) / 100
+      : gate.modifiedWeightedScore;
+  const reviewFlagsForPersist = [...(gate.reviewFlags ?? [])];
+  if (defenseCrossReference.recommendAdminReview) {
+    reviewFlagsForPersist.push(...defenseCrossReference.flags.map((f) => f.flagName));
+  }
+  console.log('[DefenseCrossRef] result:', {
+    overallConfidence: defenseCrossReference.overallConfidence,
+    modifierAdjustment: defenseCrossReference.modifierAdjustment,
+    recommendAdminReview: defenseCrossReference.recommendAdminReview,
+    flagCount: defenseCrossReference.flags.length,
   });
   const pillarForReasoning = toNumericPillarMap(parsed.pillarScores as Record<string, number | null>);
-
-  let reasoning: Awaited<ReturnType<typeof generateAIReasoning>> & { _reasoningPending?: boolean };
-  try {
-    reasoning = (await generateAIReasoning(
-      pillarForReasoning,
-      scenarioMap,
-      transcript,
-      gate.weightedScore,
-      gate.pass,
-      [],
-      {
-        /** One attempt fits Supabase Edge ~150s wall clock; retries would risk 504. */
-        perAttemptTimeoutMs: 140_000,
-        maxAttempts: 1,
-      },
-    )) as unknown as typeof reasoning;
-  } catch (e) {
-    reasoning = {
-      _reasoningPending: true,
-      overall_strengths: [],
-      overall_growth_areas: [],
-    } as typeof reasoning;
-  }
-  const reasoningPending = !!(reasoning as { _reasoningPending?: boolean })._reasoningPending;
+  const reasoningBackgroundInputs: ReasoningBackgroundInputs = {
+    pillarForReasoning,
+    scenarioMap,
+    transcript,
+    weightedScore: gate.weightedScore,
+    pass: gate.pass,
+  };
   const commFloor = communicationFloorFieldsFromTranscript(transcript);
-  const aiReasoningOut = reasoningPending
-    ? {
-        _reasoningPending: true,
-        pillar_scores: pillarForReasoning,
-        weighted_score: gate.weightedScore,
-        passed: gate.pass,
-        note: 'Narrative AI reasoning failed or timed out; scores saved.',
-      }
-    : reasoning;
+  /** Narrative runs in background (300s) via EdgeRuntime.waitUntil — sync 140s calls routinely timed out. */
+  const aiReasoningOut: Record<string, unknown> = {
+    _reasoningPending: true,
+    pillar_scores: pillarForReasoning,
+    weighted_score: gate.weightedScore,
+    passed: gate.pass,
+    note: 'Narrative generation queued after scoring.',
+    _queuedAt: new Date().toISOString(),
+  };
+
+  console.log(
+    '[VocabFlag] persisting personal_moment_emotional_vocab_low:',
+    vocabLowForAttempt,
+    'density:',
+    vocabDensityForAttempt,
+  );
+
+  console.log('[Modifier] persisting score_modifier:', gate.scoreModifier, 'modified_weighted_score:', gate.modifiedWeightedScore);
+  const wEdge = gate.weightedScore;
+  const smEdge = gate.scoreModifier ?? 0;
+  const actualModEdge = gate.modifiedWeightedScore;
+  console.log('[ModifierBase] weighted_score being persisted:', wEdge);
+  console.log('[ModifierBase] modified_weighted_score being persisted:', actualModEdge);
+  console.log('[ModifierBase] score_modifier being persisted:', smEdge);
+  if (wEdge != null && Number.isFinite(wEdge) && actualModEdge != null && Number.isFinite(actualModEdge)) {
+    const expectedModEdge = Math.round((wEdge + smEdge) * 100) / 100;
+    console.log('[ModifierBase] invariant check — expected:', expectedModEdge, 'actual:', actualModEdge);
+    if (Math.abs(expectedModEdge - actualModEdge) > 0.01) {
+      console.error('[ModifierBase] MISMATCH — expected:', expectedModEdge, 'actual:', actualModEdge);
+    } else {
+      console.log('[ModifierBase] modifier invariant holds:', actualModEdge);
+    }
+  }
+  console.log('[ReviewFlags] persisting review_flags:', reviewFlagsForPersist);
+
+  const moment4ConcretenessPersist = moment4ConcretenessForAttempt;
+  const moment5ConcretenessPersist = moment5ConcretenessForAttempt;
+  const existingMentalizingCount = finiteNumberOrNull(rowTyped.mentalizing_overcertainty_count) ?? 0;
+  const existingDisclosure =
+    typeof rowTyped.disclosure_calibration === 'string' ? rowTyped.disclosure_calibration : null;
+  const persistedDepthModifier =
+    pickPersistedNumber(crossRefAdjustedDepthModifier, rowDepthModifier) ?? 0;
+  const persistedScoreModifier =
+    pickPersistedNumber(crossRefAdjustedDepthModifier, rowScoreModifier) ?? persistedDepthModifier;
+  const persistedModifiedWeighted =
+    pickPersistedNumber(
+      crossRefAdjustedModifiedWeighted,
+      rowModifiedWeighted ??
+        (typeof precomputedWeighted === 'number' && Number.isFinite(precomputedWeighted)
+          ? precomputedWeighted + persistedDepthModifier
+          : null),
+    ) ??
+    gate.weightedScore ??
+    null;
+  const emotionRawPersist = emotionPersistFields.rawCount;
+  const emotionDisplayPersist = emotionPersistFields.displayPercent;
+
+  console.log('[ScorePipeline] existing patterns before scoring:', {
+    hasM4: patterns?.moment_4_scores != null,
+    hasM5: patterns?.moment_5_scores != null,
+    egoDevLevel: existingEgo,
+  });
+
+  const { error: incrementalHolisticErr } = await supabase
+    .from('interview_attempts')
+    .update({
+      ego_development_level: egoLevelForAttempt ?? existingEgo,
+      mentalizing_overcertainty_count:
+        mentalizingOvercertaintyCountForAttempt ?? existingMentalizingCount,
+      defense_patterns: defensePatternsForAttempt,
+      disclosure_calibration: disclosureCalibrationForAttempt ?? existingDisclosure,
+      moment_4_concreteness: moment4ConcretenessPersist ?? rowTyped.moment_4_concreteness ?? null,
+      moment_5_concreteness: moment5ConcretenessPersist ?? rowTyped.moment_5_concreteness ?? null,
+      personal_moment_emotional_vocab_density: vocabDensityForAttempt,
+      personal_moment_emotional_vocab_low: vocabLowForAttempt,
+      depth_signal_modifier: persistedDepthModifier,
+      score_modifier: persistedScoreModifier,
+      modified_weighted_score: persistedModifiedWeighted,
+      defense_cross_reference: defenseCrossReference,
+      emotion_recognition_raw_score: emotionRawPersist,
+      emotion_recognition_score: emotionDisplayPersist,
+    })
+    .eq('id', attemptId)
+    .eq('user_id', userId);
+  if (incrementalHolisticErr) {
+    console.error('[Holistic Persist] edge incremental save failed:', incrementalHolisticErr.message);
+  } else {
+    console.log('[Holistic Persist] holistic scores persisted immediately — ego dev:', egoLevelForAttempt);
+  }
 
   const { error: upA } = await supabase
     .from('interview_attempts')
@@ -375,7 +955,6 @@ export async function runCompleteStandardInterview(
       completed_at: new Date().toISOString(),
       weighted_score: gate.weightedScore,
       passed: gate.pass,
-      gate_fail_reason: gate.failReason,
       gate_fail_reasons: gate.failReasonCodes ?? [],
       gate_fail_detail: gate.failReasonDetail ?? null,
       scenario_composites: scenarioCompositesToStorageJson(gate.scenarioComposites),
@@ -385,12 +964,28 @@ export async function runCompleteStandardInterview(
       scenario_2_scores: row.scenario_2_scores,
       scenario_3_scores: row.scenario_3_scores,
       ai_reasoning: aiReasoningOut,
-      reasoning_pending: reasoningPending,
+      reasoning_pending: true,
       scoring_deferred: false,
       response_timings: row.response_timings,
       probe_log: row.probe_log,
       communication_floor_flag: commFloor.communication_floor_flag,
       communication_floor_avg_unprompted_words: commFloor.communication_floor_avg_unprompted_words,
+      ego_development_level: egoLevelForAttempt ?? existingEgo,
+      review_flags: gate.reviewFlags,
+      depth_signal_modifier: persistedDepthModifier,
+      score_modifier: persistedScoreModifier,
+      modified_weighted_score: persistedModifiedWeighted,
+      disclosure_calibration: disclosureCalibrationForAttempt ?? existingDisclosure,
+      mentalizing_overcertainty_count:
+        mentalizingOvercertaintyCountForAttempt ?? existingMentalizingCount,
+      defense_patterns: defensePatternsForAttempt ?? rowTyped.defense_patterns,
+      moment_4_concreteness: moment4ConcretenessPersist ?? rowTyped.moment_4_concreteness ?? null,
+      moment_5_concreteness: moment5ConcretenessPersist ?? rowTyped.moment_5_concreteness ?? null,
+      personal_moment_emotional_vocab_density: vocabDensityForAttempt,
+      personal_moment_emotional_vocab_low: vocabLowForAttempt,
+      emotion_recognition_raw_score: emotionRawPersist,
+      emotion_recognition_score: emotionDisplayPersist,
+      emotion_recognition_responses: emotionResponsesForAttempt,
     })
     .eq('id', attemptId)
     .eq('user_id', userId);
@@ -398,6 +993,8 @@ export async function runCompleteStandardInterview(
   if (upA) {
     return { ok: false, error: upA.message };
   }
+
+  await applyPsychometricModifierToAttempt(supabase, userId, attemptId);
 
   const { data: userOverride } = await supabase
     .from('users')
@@ -414,8 +1011,6 @@ export async function runCompleteStandardInterview(
       interview_completed: true,
       interview_passed_computed: gate.pass,
       interview_passed: effectivePass,
-      interview_weighted_score: gate.weightedScore,
-      interview_pillar_scores: parsed.pillarScores ?? null,
     })
     .eq('id', userId);
 
@@ -423,20 +1018,12 @@ export async function runCompleteStandardInterview(
     return { ok: false, error: upU.message };
   }
 
-  const baseUrl = Deno.env.get('SUPABASE_URL') ?? '';
-  const serviceKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? '';
-  const anonKey = Deno.env.get('SUPABASE_ANON_KEY') ?? '';
-  if (baseUrl && (serviceKey || anonKey)) {
-    void fetch(`${baseUrl}/functions/v1/analyze-interview-text`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        Authorization: `Bearer ${serviceKey || anonKey}`,
-        apikey: anonKey || serviceKey,
-      },
-      body: JSON.stringify({ user_id: userId, attempt_id: attemptId }),
-    }).catch(() => {});
-  }
+  const runPostCompletionInBackground = async (): Promise<void> => {
+    await Promise.all([
+      runStandardInterviewReasoningInBackground(supabase, attemptId, userId, reasoningBackgroundInputs),
+      awaitCommunicationStylePipelines(userId, attemptId),
+    ]);
+  };
 
-  return { ok: true, attemptId };
+  return { ok: true, attemptId, runPostCompletionInBackground };
 }

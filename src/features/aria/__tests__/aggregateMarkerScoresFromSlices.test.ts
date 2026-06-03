@@ -1,6 +1,7 @@
 import {
   aggregateMarkerScoresFromLabeledSlices,
   combinedContemptFromScenarioPillarScores,
+  extractEgoDevelopmentLevel,
   mergeCommitmentThresholdWeighted,
   type PillarMomentLabel,
 } from '../aggregateMarkerScoresFromSlices';
@@ -163,5 +164,27 @@ describe('aggregateMarkerScoresFromLabeledSlices (moment matrix)', () => {
     ]);
     // expression 2 only (scenarios); recognition (5+8)/2 = 6.5 → 0.6*2 + 0.4*6.5 = 3.8
     expect(scores.contempt).toBe(3.8);
+  });
+});
+
+describe('extractEgoDevelopmentLevel', () => {
+  it('reads top-level ego_development_level', () => {
+    expect(extractEgoDevelopmentLevel({ ego_development_level: 4 })).toBe(4);
+  });
+
+  it('reads nested pillarScores.ego_development_level', () => {
+    expect(
+      extractEgoDevelopmentLevel({
+        pillarScores: { mentalizing: 5, ego_development_level: 2 },
+      })
+    ).toBe(2);
+  });
+
+  it('accepts string numerals', () => {
+    expect(extractEgoDevelopmentLevel({ ego_development_level: '3' })).toBe(3);
+  });
+
+  it('returns null when absent', () => {
+    expect(extractEgoDevelopmentLevel({ pillarScores: { mentalizing: 5 } })).toBe(null);
   });
 });

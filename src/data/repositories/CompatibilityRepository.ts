@@ -1,11 +1,12 @@
 import { supabase } from '../supabase/client';
+import { COMPATIBILITY_SELECT } from '../supabase/tableSelects';
 import { Compatibility, CompatibilityUpdate } from '@domain/models/Compatibility';
 
 export class CompatibilityRepository {
   async getCompatibility(userId: string): Promise<Compatibility | null> {
     const { data, error } = await supabase
       .from('compatibility')
-      .select('*')
+      .select(COMPATIBILITY_SELECT)
       .eq('profile_id', userId)
       .maybeSingle();
 

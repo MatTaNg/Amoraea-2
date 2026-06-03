@@ -4,6 +4,7 @@ export const POST_INTERVIEW_PROCESSING_MS = 48 * 60 * 60 * 1000;
 export type InterviewAttemptRevealFields = {
   completed_at: string | null;
   override_status: boolean | null;
+  /** Applicant-facing outcome on the attempt row — used only after the 48h window (not raw gate fields). */
   passed: boolean | null;
 };
 
@@ -15,9 +16,11 @@ export type StandardPostInterviewReveal =
 /**
  * Standard post-interview routing from the latest attempt row (read-only). Order is fixed:
  * 1. If `override_status` is non-null (`true` / `false`), route by override only — ignores elapsed time and `passed`.
- * 2. If `override_status` is null and fewer than 48h since `completed_at`, stay processing — do not use `passed`.
+ * 2. If `override_status` is null and fewer than 48h since `completed_at`, stay on neutral review — do not use `passed`.
  * 3. If `override_status` is null and 48h+ since `completed_at`, route by `passed` (`true` → pass, `false` → fail).
- * If data is missing or `passed` is still unset after the window, stay processing.
+ * If data is missing or `passed` is still unset after the window, stay on neutral review.
+ *
+ * User-facing routing must not read `final_gate_pass`, `gate_fail_reasons`, `weighted_score`, or `users.interview_passed`.
  */
 export function evaluateStandardPostInterviewReveal(
   att: InterviewAttemptRevealFields | null | undefined,
@@ -41,28 +44,19 @@ export function evaluateStandardPostInterviewReveal(
   return { kind: 'processing' };
 }
 
-/**
- * When `interview_attempts.passed` is still null after the 48h window, `users.interview_passed` may already
- * reflect the gate — use it so standard applicants are not stuck on processing.
- * Does not apply inside the 48h window (deferral preserved). Skipped when `usersInterviewPassed` is nullish.
- */
+/** @deprecated Use {@link evaluateStandardPostInterviewReveal} — users-row pass/fail is not used for routing. */
 export function evaluateStandardPostInterviewRevealWithUsersPassedFallback(
   att: InterviewAttemptRevealFields | null | undefined,
-  usersInterviewPassed: boolean | null | undefined,
+  _usersInterviewPassed?: boolean | null | undefined,
   nowMs: number = Date.now(),
+  _usersInterviewPassedAdminOverride?: boolean | null,
+  _usersInterviewPassedComputed?: boolean | null,
 ): StandardPostInterviewReveal {
-  const base = evaluateStandardPostInterviewReveal(att, nowMs);
-  if (base.kind !== 'processing') return base;
-  if (usersInterviewPassed !== true && usersInterviewPassed !== false) return base;
-  if (!att?.completed_at) return base;
-  const completedMs = new Date(att.completed_at).getTime();
-  if (!Number.isFinite(completedMs)) return base;
-  if (nowMs < completedMs + POST_INTERVIEW_PROCESSING_MS) return base;
-  if (usersInterviewPassed === true) return { kind: 'reveal_pass' };
-  return { kind: 'reveal_fail' };
+  return evaluateStandardPostInterviewReveal(att, nowMs);
 }
 
 export type StandardPostInterviewStackRoute =
+  | 'PostInterview'
   | 'PostInterviewProcessing'
   | 'PostInterviewPassed'
   | 'PostInterviewFailed';
@@ -76,10 +70,20 @@ export function standardPostInterviewRouteFromReveal(
     case 'reveal_fail':
       return 'PostInterviewFailed';
     case 'processing':
-      return 'PostInterviewProcessing';
+      return 'PostInterview';
     default: {
       const _exhaustive: never = ev;
       return _exhaustive;
     }
   }
+}
+
+export function resolveStandardPostInterviewStackRoute(
+  att: InterviewAttemptRevealFields | null | undefined,
+  _usersInterviewPassed?: boolean | null | undefined,
+  _usersInterviewPassedAdminOverride?: boolean | null,
+  _usersInterviewPassedComputed?: boolean | null,
+  nowMs: number = Date.now(),
+): StandardPostInterviewStackRoute {
+  return standardPostInterviewRouteFromReveal(evaluateStandardPostInterviewReveal(att, nowMs));
 }

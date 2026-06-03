@@ -1,11 +1,12 @@
 import { supabase } from '../supabase/client';
+import { TYPOLOGY_SELECT } from '../supabase/tableSelects';
 import { Typology, TypologyType, TypologyUpdate } from '@domain/models/Typology';
 
 export class TypologyRepository {
   async getTypology(userId: string, typologyType: TypologyType): Promise<Typology | null> {
     const { data, error } = await supabase
       .from('typologies')
-      .select('*')
+      .select(TYPOLOGY_SELECT)
       .eq('profile_id', userId)
       .eq('typology_type', typologyType)
       .maybeSingle();

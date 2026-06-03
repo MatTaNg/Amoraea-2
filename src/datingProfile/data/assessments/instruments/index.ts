@@ -6,9 +6,9 @@ import { DSIR_ITEMS, scoreDSIR } from "./dsir";
 import { BRS_ITEMS, scoreBRS } from "./brs";
 import { PVQ21_ITEMS, scorePVQ21 } from "./pvq21";
 import {
-  RELATIONSHIP_TRAITS_ITEMS,
-  scoreRelationshipTraits8,
-} from "./relationshipTraits8";
+  SEXUAL_COMMUNICATION_ITEMS,
+  scoreSexualCommunication10,
+} from "./sexualCommunication10";
 
 export interface InstrumentConfig {
   id: AssessmentId;
@@ -72,18 +72,6 @@ export const INSTRUMENT_CONFIGS: Partial<Record<AssessmentId, InstrumentConfig>>
     maxLabel: "Strongly agree",
     score: scoreBRS,
   },
-  "RELATIONSHIP_TRAITS_8": {
-    id: "RELATIONSHIP_TRAITS_8",
-    title: "Relationship Traits",
-    description:
-      "A few quick questions about how you tend to respond to stress and trust in relationships.\n\nYou'll rate each statement on a scale from 1 (strongly disagree) to 7 (strongly agree). There are no right or wrong answers — choose what feels most true for you.",
-    items: RELATIONSHIP_TRAITS_ITEMS,
-    min: 1,
-    max: 7,
-    minLabel: "Strongly disagree",
-    maxLabel: "Strongly agree",
-    score: scoreRelationshipTraits8,
-  },
   "PVQ-21": {
     id: "PVQ-21",
     title: "Schwartz Values",
@@ -95,6 +83,18 @@ export const INSTRUMENT_CONFIGS: Partial<Record<AssessmentId, InstrumentConfig>>
     minLabel: "Not like me at all",
     maxLabel: "Very much like me",
     score: scorePVQ21,
+  },
+  SEXUAL_COMMUNICATION: {
+    id: "SEXUAL_COMMUNICATION",
+    title: "Sexual Communication",
+    description:
+      "How comfortable are you communicating about the following topics with a partner? Your answers are only used to improve your matches and are never shown to other users.",
+    items: SEXUAL_COMMUNICATION_ITEMS,
+    min: 1,
+    max: 5,
+    minLabel: "Very Uncomfortable",
+    maxLabel: "Very Comfortable",
+    score: scoreSexualCommunication10,
   },
 };
 

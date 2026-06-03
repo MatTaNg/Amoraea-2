@@ -1,10 +1,71 @@
+import {
+  DEFAULT_DEFENSE_PATTERNS,
+  detectDefensePatterns,
+  type DefensePatternsJson,
+  type DefensePatternTranscriptMsg,
+} from './defensePatternsDetection';
+import {
+  computePersonalMomentConcretenessModifier,
+  normalizeResponseConcreteness,
+  type ResponseConcretenessLevel,
+} from './personalMomentConcreteness';
+import {
+  aggregatePersonalMomentEmotionalVocab,
+  depthEnrichedMarkerSlices,
+} from './personalMomentEmotionalVocab';
+import {
+  computeAvgScenarioTotalUserWords,
+  computeDisclosureCalibration,
+  sumUserWordsForInterviewMoment,
+  type DisclosureCalibration,
+  type DisclosureCalibrationTurn,
+} from './disclosureCalibration';
 import { INTERVIEW_MARKER_IDS } from './interviewMarkers';
 import { isNoEvidenceText, isNotAssessedDueToTechnicalInterruption, normalizeScoresByEvidence } from './probeAndScoringUtils';
+import { coerceMentalizingOvercertaintyFromModelJson } from './personalMomentScoringPrompt';
+import { countMentalizingOvercertaintyInMarkerSlices } from './mentalizingOvercertaintyFromTranscript';
+
+export { countMentalizingOvercertaintyInMarkerSlices };
+
+export type { DefensePatternsJson, DefensePatternTranscriptMsg } from './defensePatternsDetection';
+export type { ResponseConcretenessLevel } from './personalMomentConcreteness';
 
 export type MarkerScoreSlice = {
   pillarScores?: Record<string, number | null> | null;
   keyEvidence?: Record<string, string> | null;
+  /** Scenario / personal-moment scorer: definitive internal-state claims without hedging (profile signal). */
+  mentalizing_overcertainty?: boolean | null;
+  /** Personal moments 4–5 only: model `response_concreteness` (absent | low | moderate | high). */
+  response_concreteness?: string | null;
+  /** Personal moments 4–5 only: LLM emotional vocabulary audit (distinct emotion words in user turns). */
+  emotional_vocab_count?: number | null;
+  emotional_vocab_words?: string[] | null;
+  user_slice_word_count?: number | null;
 } | null | undefined;
+
+/** Minimal slice from `scenario_specific_patterns.moment_*_scores` rows (disclosure + gate helpers). */
+export function markerSliceFromStoredScenarioMoment(raw: unknown): MarkerScoreSlice | null {
+  if (raw == null || typeof raw !== 'object' || Array.isArray(raw)) return null;
+  const o = raw as Record<string, unknown>;
+  const ps = o.pillarScores;
+  if (ps == null || typeof ps !== 'object' || Array.isArray(ps)) return null;
+  const ke = o.keyEvidence;
+  return {
+    pillarScores: ps as Record<string, number | null>,
+    keyEvidence:
+      ke != null && typeof ke === 'object' && !Array.isArray(ke) ? (ke as Record<string, string>) : {},
+    mentalizing_overcertainty: coerceMentalizingOvercertaintyFromModelJson({
+      mentalizing_overcertainty: o.mentalizing_overcertainty,
+      keyEvidence: ke != null && typeof ke === 'object' && !Array.isArray(ke) ? (ke as Record<string, unknown>) : null,
+      scoringMetadata:
+        o.scoringMetadata != null && typeof o.scoringMetadata === 'object' && !Array.isArray(o.scoringMetadata)
+          ? (o.scoringMetadata as Record<string, unknown>)
+          : null,
+    }),
+    response_concreteness: typeof o.response_concreteness === 'string' ? o.response_concreteness : null,
+    user_slice_word_count: typeof o.user_slice_word_count === 'number' ? o.user_slice_word_count : undefined,
+  };
+}
 
 export type PillarMomentLabel =
   | 'scenario_1'
@@ -17,6 +78,8 @@ export type LabeledMarkerSlice = {
   moment: PillarMomentLabel;
   pillarScores?: Record<string, number | null | undefined> | null;
   keyEvidence?: Record<string, string> | null;
+  mentalizing_overcertainty?: boolean | null;
+  response_concreteness?: string | null;
 };
 
 const SLICE_LABELS: PillarMomentLabel[] = [
@@ -137,6 +200,119 @@ export type MomentRestrictedAggregateResult = {
   contributorCounts: Record<string, number>;
 };
 
+/** Optional inputs for holistic ego + cross-scenario defense heuristics on aggregate. */
+export type PillarAggregateHolisticMeta = {
+  egoDevelopmentLevel?: number | null;
+  /** When all three scenario pillar maps exist, used with slices to populate {@link PillarAggregateWithCommitmentDetailed.defensePatterns}. */
+  defensePatternTranscript?: readonly DefensePatternTranscriptMsg[] | null;
+  /** Tagged turns for disclosure calibration; defaults to {@link PillarAggregateHolisticMeta.defensePatternTranscript}. */
+  disclosureCalibrationTranscript?: readonly DisclosureCalibrationTurn[] | null;
+  /** Scenario user-turn emotional token density (%), e.g. from {@link scenarioEmotionalVocabDensityPercentFromTranscript}. */
+  scenarioEmotionalVocabDensityPercent?: number | null;
+  /** Full-interview emotional vocab density (%) from communication style / `language_markers` when available. */
+  communicationStyleEmotionalVocabDensityPercent?: number | null;
+};
+
+/** Holistic-only meta; echoed on aggregate for persistence alongside slice-derived pillars. */
+export type PillarAggregateWithCommitmentDetailed = MomentRestrictedAggregateResult & {
+  egoDevelopmentLevel?: number | null;
+  /** Number of scenario / personal moments (1–5) with overcertainty: scorer flag **or** transcript heuristic. */
+  mentalizingOvercertaintyCount: number;
+  defensePatterns: DefensePatternsJson;
+  /** Normalized personal-moment concreteness (null when unscored / invalid). */
+  moment4Concreteness: ResponseConcretenessLevel | null;
+  moment5Concreteness: ResponseConcretenessLevel | null;
+  /** Non-positive adjustment applied to weighted threshold in {@link computeGateResultCore}. */
+  personalMomentConcretenessModifier: number;
+  /** (distinct emotion-word counts / user words) × 100 across moments 4–5 when scorer fields are present. */
+  personal_moment_emotional_vocab_density: number | null;
+  personal_moment_emotional_vocab_low: boolean;
+  disclosureCalibration: DisclosureCalibration;
+};
+
+export function personalMomentWordCountsForDisclosure(
+  slices: Array<MarkerScoreSlice>,
+  transcript: readonly DisclosureCalibrationTurn[] | null | undefined,
+): { moment4WordCount: number | null; moment5WordCount: number | null } {
+  const tx = Array.isArray(transcript) ? transcript : [];
+  const sliceWords = (w: unknown): number | null =>
+    typeof w === 'number' && Number.isFinite(w) && w >= 0 ? w : null;
+  const s4 = sumUserWordsForInterviewMoment(tx, 4);
+  const s5 = sumUserWordsForInterviewMoment(tx, 5);
+  const m4 = slices[3];
+  const m5 = slices[4];
+  const m4Obj = m4 && typeof m4 === 'object' ? m4 : null;
+  const m5Obj = m5 && typeof m5 === 'object' ? m5 : null;
+  return {
+    moment4WordCount: sliceWords(m4Obj?.user_slice_word_count) ?? (s4 > 0 ? s4 : null),
+    moment5WordCount: sliceWords(m5Obj?.user_slice_word_count) ?? (s5 > 0 ? s5 : null),
+  };
+}
+
+/** Personal-moment disclosure vs scenario length and clinical unprompted content (for gate + persistence). */
+export function disclosureCalibrationFromMarkerSlices(
+  slices: Array<MarkerScoreSlice | null | undefined>,
+  transcript: readonly DisclosureCalibrationTurn[] | null | undefined,
+): DisclosureCalibration {
+  const tx = Array.isArray(transcript) ? transcript : [];
+  const m4c = normalizeResponseConcreteness(slices[3]?.response_concreteness);
+  const m5c = normalizeResponseConcreteness(slices[4]?.response_concreteness);
+  const sliceWords = (w: unknown): number | null =>
+    typeof w === 'number' && Number.isFinite(w) && w >= 0 ? w : null;
+  const s4 = sumUserWordsForInterviewMoment(tx, 4);
+  const s5 = sumUserWordsForInterviewMoment(tx, 5);
+  const w4 = sliceWords(slices[3]?.user_slice_word_count) ?? (s4 > 0 ? s4 : null);
+  const w5 = sliceWords(slices[4]?.user_slice_word_count) ?? (s5 > 0 ? s5 : null);
+  const avgScenarioRaw = computeAvgScenarioTotalUserWords(tx);
+  const avgScenarioForCalibration = avgScenarioRaw > 0 ? avgScenarioRaw : null;
+  return computeDisclosureCalibration(m4c, m5c, w4, w5, avgScenarioForCalibration, tx);
+}
+
+function coerceHolisticEgoLevelToInt(raw: unknown): number | null {
+  if (raw === null || raw === undefined) return null;
+  const n =
+    typeof raw === 'number'
+      ? raw
+      : typeof raw === 'string' && String(raw).trim() !== ''
+        ? Number(String(raw).trim())
+        : NaN;
+  if (!Number.isFinite(n)) return null;
+  const r = Math.round(n);
+  if (r < 1 || r > 5) return null;
+  return r;
+}
+
+/** Normalize holistic model `ego_development_level` to 1–5 or null if missing/invalid. */
+export function normalizeHolisticEgoLevel(raw: unknown): number | null {
+  if (typeof __DEV__ !== 'undefined' && __DEV__) {
+    console.log('[EgoDev] normalizeHolisticEgoLevel raw input:', raw, 'type:', typeof raw);
+  }
+  return coerceHolisticEgoLevelToInt(raw);
+}
+
+/**
+ * Holistic JSON may omit `ego_development_level`, nest it under `pillarScores`, or use camelCase.
+ * Returns first valid 1–5 level found, or null.
+ */
+export function extractEgoDevelopmentLevel(parsed: unknown): number | null {
+  if (parsed == null || typeof parsed !== 'object' || Array.isArray(parsed)) return null;
+  const o = parsed as Record<string, unknown>;
+  const candidates: unknown[] = [o.ego_development_level, o.egoDevelopmentLevel];
+  const pillarScores = o.pillarScores ?? o.pillar_scores;
+  if (pillarScores != null && typeof pillarScores === 'object' && !Array.isArray(pillarScores)) {
+    const ps = pillarScores as Record<string, unknown>;
+    candidates.push(ps.ego_development_level, ps.egoDevelopmentLevel);
+  }
+  for (const c of candidates) {
+    const n = coerceHolisticEgoLevelToInt(c);
+    if (n != null) return n;
+  }
+  if (typeof __DEV__ !== 'undefined' && __DEV__) {
+    console.warn('[EgoDev] ego_development_level not found or invalid in parsed holistic response');
+  }
+  return null;
+}
+
 export function aggregateMarkerScoresFromLabeledSlices(
   rows: LabeledMarkerSlice[]
 ): MomentRestrictedAggregateResult {
@@ -213,6 +389,8 @@ export function aggregateMarkerScoresFromSlicesDetailed(
     moment,
     pillarScores: slices[i]?.pillarScores ?? undefined,
     keyEvidence: slices[i]?.keyEvidence ?? undefined,
+    mentalizing_overcertainty: slices[i]?.mentalizing_overcertainty ?? null,
+    response_concreteness: slices[i]?.response_concreteness ?? null,
   }));
   return aggregateMarkerScoresFromLabeledSlices(rows);
 }
@@ -225,18 +403,99 @@ export function aggregateMarkerScoresFromSlices(
 }
 
 export function aggregatePillarScoresWithCommitmentMergeDetailed(
-  slices: Array<MarkerScoreSlice | null | undefined>
-): MomentRestrictedAggregateResult {
+  slices: Array<MarkerScoreSlice | null | undefined>,
+  holisticMeta?: PillarAggregateHolisticMeta | null,
+): PillarAggregateWithCommitmentDetailed {
   const { scores: base, contributorCounts } = aggregateMarkerScoresFromSlicesDetailed(slices);
   const merged = mergeCommitmentThresholdWeighted(base, slices[2], slices[3]);
   const ctCount = commitmentThresholdFromSlice(slices[3]) != null ? 1 : 0;
-  return {
+  const overcertaintyTx =
+    (holisticMeta?.defensePatternTranscript ?? holisticMeta?.disclosureCalibrationTranscript) ?? undefined;
+  const mentalizingOvercertaintyCount = countMentalizingOvercertaintyInMarkerSlices(slices, overcertaintyTx);
+  const discTx =
+    (holisticMeta?.disclosureCalibrationTranscript ??
+      holisticMeta?.defensePatternTranscript) as readonly DisclosureCalibrationTurn[] | null;
+  const depthSlices = depthEnrichedMarkerSlices(slices, discTx);
+  const defensePatterns =
+    slices[0]?.pillarScores && slices[1]?.pillarScores && slices[2]?.pillarScores
+      ? (() => {
+          console.log('[DefensePatterns] aggregate path: invoking detectDefensePatterns');
+          return detectDefensePatterns(
+            [slices[0], slices[1], slices[2]],
+            depthSlices[3] ?? null,
+            depthSlices[4] ?? null,
+            holisticMeta?.defensePatternTranscript ?? null,
+          );
+        })()
+      : (() => {
+          console.log('[DefensePatterns] aggregate path: skipped (missing scenario pillarScores)');
+          return { ...DEFAULT_DEFENSE_PATTERNS };
+        })();
+  const moment4Concreteness = normalizeResponseConcreteness(depthSlices[3]?.response_concreteness);
+  const moment5Concreteness = normalizeResponseConcreteness(depthSlices[4]?.response_concreteness);
+  const personalMomentConcretenessModifier = computePersonalMomentConcretenessModifier(
+    moment4Concreteness,
+    moment5Concreteness,
+  );
+  const evAgg = aggregatePersonalMomentEmotionalVocab(depthSlices[3], depthSlices[4], {
+    scenarioEmotionalVocabDensityPercent: holisticMeta?.scenarioEmotionalVocabDensityPercent ?? null,
+    communicationStyleEmotionalVocabDensityPercent: holisticMeta?.communicationStyleEmotionalVocabDensityPercent ?? null,
+  });
+  if (typeof __DEV__ !== 'undefined' && __DEV__) {
+    console.log(
+      '[VocabFlag] density:',
+      evAgg.personal_moment_emotional_vocab_density,
+      'threshold:',
+      0.3,
+      'flag:',
+      evAgg.personal_moment_emotional_vocab_low,
+    );
+  }
+  const txForDisc = Array.isArray(discTx) ? discTx : [];
+  const s4w = sumUserWordsForInterviewMoment(txForDisc, 4);
+  const s5w = sumUserWordsForInterviewMoment(txForDisc, 5);
+  const sliceWordsLog = (w: unknown): number | null =>
+    typeof w === 'number' && Number.isFinite(w) && w >= 0 ? w : null;
+  const moment4WordCount =
+    sliceWordsLog(depthSlices[3]?.user_slice_word_count) ?? (s4w > 0 ? s4w : null);
+  const moment5WordCount =
+    sliceWordsLog(depthSlices[4]?.user_slice_word_count) ?? (s5w > 0 ? s5w : null);
+  const disclosureCalibration = disclosureCalibrationFromMarkerSlices(depthSlices, discTx);
+  console.log('[Disclosure] aggregation result:', disclosureCalibration);
+  console.log('[Disclosure] calibration:', disclosureCalibration, {
+    moment4Words: moment4WordCount,
+    moment5Words: moment5WordCount,
+    vocabDensity: evAgg.personal_moment_emotional_vocab_density,
+    moment4Concreteness: moment4Concreteness,
+    moment5Concreteness: moment5Concreteness,
+  });
+  const egoIn =
+    holisticMeta?.egoDevelopmentLevel !== undefined && holisticMeta?.egoDevelopmentLevel !== null
+      ? coerceHolisticEgoLevelToInt(holisticMeta.egoDevelopmentLevel)
+      : null;
+  if (typeof __DEV__ !== 'undefined' && __DEV__) {
+    console.log('[EgoDev] aggregation input egoDevelopmentLevel:', holisticMeta?.egoDevelopmentLevel);
+  }
+  const result: PillarAggregateWithCommitmentDetailed = {
     scores: merged,
     contributorCounts: {
       ...contributorCounts,
       commitment_threshold: ctCount > 0 ? ctCount : merged.commitment_threshold != null ? 1 : 0,
     },
+    egoDevelopmentLevel: egoIn,
+    mentalizingOvercertaintyCount,
+    defensePatterns,
+    moment4Concreteness,
+    moment5Concreteness,
+    personalMomentConcretenessModifier,
+    personal_moment_emotional_vocab_density: evAgg.personal_moment_emotional_vocab_density,
+    personal_moment_emotional_vocab_low: evAgg.personal_moment_emotional_vocab_low,
+    disclosureCalibration,
   };
+  if (typeof __DEV__ !== 'undefined' && __DEV__) {
+    console.log('[EgoDev] aggregation output egoDevelopmentLevel:', result.egoDevelopmentLevel);
+  }
+  return result;
 }
 
 /** Pillar map after moment rules + commitment merge (live interview, reprocess scripts, admin). */

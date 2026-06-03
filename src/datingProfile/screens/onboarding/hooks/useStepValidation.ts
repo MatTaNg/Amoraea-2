@@ -42,7 +42,6 @@ export const useStepValidation = ({ state }: UseStepValidationParams) => {
       if (!state.gender) return false;
       if (!state.relationship) return false;
       if (!state.location.trim() || !state.validatedLocation) return false;
-      if (!state.occupation.trim()) return false;
       if (!state.availability || state.availability.length === 0) return false;
       if (!state.contactPreference || !state.phoneNumber) return false;
       return true;
@@ -53,7 +52,6 @@ export const useStepValidation = ({ state }: UseStepValidationParams) => {
     state.relationship,
     state.location,
     state.validatedLocation,
-    state.occupation,
     state.availability,
     state.contactPreference,
     state.phoneNumber,

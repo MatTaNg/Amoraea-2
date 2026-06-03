@@ -2,7 +2,8 @@ import React from 'react';
 import { View, Text, StyleSheet } from 'react-native';
 
 export type AssessmentHeaderProps = {
-  surveysComplete: number;
+  /** 1-based index in the onboarding battery; omit until known (avoids flashing "1 of 4"). */
+  assessmentIndex?: number | null;
   currentQ: number;
   totalQ: number;
   assessmentName: string;
@@ -16,19 +17,24 @@ export type AssessmentHeaderProps = {
  * handoff into the current question (no duplicate “Question N” blocks).
  */
 export const AssessmentHeader: React.FC<AssessmentHeaderProps> = ({
-  surveysComplete,
+  assessmentIndex,
   currentQ,
   totalQ,
   assessmentName,
   totalAssessments,
   subtitle,
 }) => {
-  const assessmentNum = Math.min(surveysComplete + 1, totalAssessments);
+  const showBattery =
+    assessmentIndex != null &&
+    assessmentIndex >= 1 &&
+    assessmentIndex <= totalAssessments;
   return (
     <View style={styles.wrap}>
-      <Text style={styles.battery}>
-        Assessment {assessmentNum} of {totalAssessments}
-      </Text>
+      {showBattery ? (
+        <Text style={styles.battery}>
+          Assessment {assessmentIndex} of {totalAssessments}
+        </Text>
+      ) : null}
       <Text style={styles.title}>{assessmentName}</Text>
       {subtitle ? <Text style={styles.subtitle}>{subtitle}</Text> : null}
       <View style={styles.divider} />

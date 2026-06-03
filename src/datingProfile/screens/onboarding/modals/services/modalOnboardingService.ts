@@ -1,4 +1,5 @@
 import { supabase } from '@/data/supabaseClient';
+import { ONBOARDING_PROGRESS_SELECT } from '@data/supabase/tableSelects';
 import { Result } from '@/src/types';
 import { OnboardingProgress, OnboardingData } from '../types';
 import { profilesRepo } from '@/data/repos/profilesRepo';
@@ -10,8 +11,167 @@ import {
   mapRelationshipStyleUiToRelationshipType,
 } from '@/screens/profile/editProfile/editProfileService';
 import { normalizePartnerPoliticalAlignmentToYesNo } from '@/screens/profile/editProfile/constants';
+import {
+  firstIncompleteLifeDomainOptionalOpenEndedStep,
+  getActiveLifeDomainRequiredQuestionSteps,
+  isLifeDomainAnswerFilled,
+  isLifeDomainOptionalOpenEndedStep,
+  isLifeDomainRequiredQuestionStep,
+  LIFE_DOMAIN_OPTIONAL_OPEN_ENDED_ONBOARDING_STEPS,
+  LIFE_DOMAIN_REQUIRED_QUESTION_ONBOARDING_STEPS,
+  normalizeLifeDomainQuestionOnboardingStep,
+  type LifeDomainId,
+} from '@/shared/constants/lifeDomainOnboardingQuestions';
+import {
+  shouldShowTypologyOnboardingStep,
+  typologyHasUnansweredFields,
+} from '@/shared/constants/typologyOnboardingOptions';
+import { normalizeArchetypesFromProfile } from '@/shared/constants/archetypes';
+import { fetchLifeDomainAnswersMap } from '@/screens/profile/editProfile/lifeDomainProfileService';
+import { ONBOARDING_STEPS_ORDER } from '../onboardingStepOrder';
 
 class ModalOnboardingService {
+  private matchPrefStringMissing(ctx: any, key: string): boolean {
+    const mp = (ctx as any)?.matchPreferences;
+    if (!mp || typeof mp !== 'object' || Array.isArray(mp)) return true;
+    const v = (mp as Record<string, unknown>)[key];
+    return v === undefined || v === null || String(v).trim() === '';
+  }
+
+  private ctxStringMissing(ctx: any, key: string): boolean {
+    const v = (ctx as any)?.[key];
+    return v === undefined || v === null || String(v).trim() === '';
+  }
+
+  private ethnicityAttractionMissing(ctx: any): boolean {
+    const mp = (ctx as any)?.matchPreferences;
+    if (!mp || typeof mp !== 'object' || Array.isArray(mp)) return true;
+    const arr = (mp as Record<string, unknown>).ethnicityAttraction;
+    return !Array.isArray(arr) || !arr.some((value) => String(value ?? '').trim());
+  }
+
+  /** Incomplete partner-alignment steps that appear before `resumeStep` in onboarding order. */
+  private firstIncompleteDealbreakerBefore(resumeStep: string, ctx: any): string | null {
+    const resumeIdx = ONBOARDING_STEPS_ORDER.indexOf(resumeStep as (typeof ONBOARDING_STEPS_ORDER)[number]);
+    if (resumeIdx < 0) return null;
+    const gates: Array<{ step: string; isMissing: (c: any) => boolean }> = [
+      {
+        step: 'partnerAlignmentTobacco',
+        isMissing: (c) => Boolean(c.smoking) && this.matchPrefStringMissing(c, 'partnerAlignmentTobacco'),
+      },
+      {
+        step: 'partnerAlignmentAlcohol',
+        isMissing: (c) => Boolean(c.drinking) && this.matchPrefStringMissing(c, 'partnerAlignmentAlcohol'),
+      },
+      {
+        step: 'partnerAlignmentRecreationalDrugs',
+        isMissing: (c) =>
+          Boolean(c.recreationalDrugsSocial) && this.matchPrefStringMissing(c, 'partnerAlignmentRecreationalDrugs'),
+      },
+      {
+        step: 'partnerAlignmentPsychedelics',
+        isMissing: (c) =>
+          Boolean(c.relationshipWithPsychedelics) &&
+          this.matchPrefStringMissing(c, 'partnerAlignmentPsychedelics'),
+      },
+      {
+        step: 'partnerAlignmentCannabis',
+        isMissing: (c) =>
+          Boolean(c.relationshipWithCannabis) && this.matchPrefStringMissing(c, 'partnerAlignmentCannabis'),
+      },
+      {
+        step: 'prefPartnerHasChildren',
+        isMissing: (c) =>
+          Boolean(normalizeWantKidsToYesNo((c as any)?.wantKids)) &&
+          this.ctxStringMissing(c, 'prefPartnerHasChildren'),
+      },
+      {
+        step: 'prefPartnerPoliticalAlignment',
+        isMissing: (c) =>
+          !this.ctxStringMissing(c, 'politics') && this.ctxStringMissing(c, 'prefPartnerPoliticalAlignmentImportance'),
+      },
+      {
+        step: 'partnerSameReligionRequired',
+        isMissing: (c) =>
+          !this.ctxStringMissing(c, 'religion') && this.matchPrefStringMissing(c, 'partnerSameReligionRequired'),
+      },
+      {
+        step: 'partnerSharesSexualInterests',
+        isMissing: (c) => {
+          const cats = (c as any)?.sexInterestCategories;
+          const hasCategory = Array.isArray(cats) && cats.length > 0;
+          return hasCategory && this.ctxStringMissing(c, 'prefPartnerSharesSexualInterests');
+        },
+      },
+    ];
+    for (const gate of gates) {
+      const gateIdx = ONBOARDING_STEPS_ORDER.indexOf(gate.step as (typeof ONBOARDING_STEPS_ORDER)[number]);
+      if (gateIdx < 0 || gateIdx >= resumeIdx) continue;
+      if (gate.isMissing(ctx)) return gate.step;
+    }
+    return null;
+  }
+
+  /** Dealbreaker step immediately following a primary lifestyle / values question. */
+  private dealbreakerStepAfterPrimary(resumeStep: string, ctx: any): string | null {
+    const nextByPrimary: Record<string, { step: string; isMissing: (c: any) => boolean }> = {
+      smoking: {
+        step: 'partnerAlignmentTobacco',
+        isMissing: (c) => Boolean(c.smoking) && this.matchPrefStringMissing(c, 'partnerAlignmentTobacco'),
+      },
+      drinking: {
+        step: 'partnerAlignmentAlcohol',
+        isMissing: (c) => Boolean(c.drinking) && this.matchPrefStringMissing(c, 'partnerAlignmentAlcohol'),
+      },
+      recreationalDrugsSocial: {
+        step: 'partnerAlignmentRecreationalDrugs',
+        isMissing: (c) =>
+          Boolean(c.recreationalDrugsSocial) && this.matchPrefStringMissing(c, 'partnerAlignmentRecreationalDrugs'),
+      },
+      relationshipPsychedelics: {
+        step: 'partnerAlignmentPsychedelics',
+        isMissing: (c) =>
+          Boolean(c.relationshipWithPsychedelics) &&
+          this.matchPrefStringMissing(c, 'partnerAlignmentPsychedelics'),
+      },
+      relationshipCannabis: {
+        step: 'partnerAlignmentCannabis',
+        isMissing: (c) =>
+          Boolean(c.relationshipWithCannabis) && this.matchPrefStringMissing(c, 'partnerAlignmentCannabis'),
+      },
+      wantKids: {
+        step: 'prefPartnerHasChildren',
+        isMissing: (c) =>
+          Boolean(normalizeWantKidsToYesNo((c as any)?.wantKids)) &&
+          this.ctxStringMissing(c, 'prefPartnerHasChildren'),
+      },
+      politics: {
+        step: 'prefPartnerPoliticalAlignment',
+        isMissing: (c) =>
+          !this.ctxStringMissing(c, 'politics') && this.ctxStringMissing(c, 'prefPartnerPoliticalAlignmentImportance'),
+      },
+      religion: {
+        step: 'partnerSameReligionRequired',
+        isMissing: (c) =>
+          !this.ctxStringMissing(c, 'religion') && this.matchPrefStringMissing(c, 'partnerSameReligionRequired'),
+      },
+      sexInterests: {
+        step: 'partnerSharesSexualInterests',
+        isMissing: (c) => {
+          const cats = (c as any)?.sexInterestCategories;
+          return Array.isArray(cats) && cats.length > 0 && this.ctxStringMissing(c, 'prefPartnerSharesSexualInterests');
+        },
+      },
+      ethnicity: {
+        step: 'ethnicityAttraction',
+        isMissing: (c) =>
+          !this.ctxStringMissing(c, 'ethnicity') && this.ethnicityAttractionMissing(c),
+      },
+    };
+    const gate = nextByPrimary[resumeStep];
+    return gate && gate.isMissing(ctx) ? gate.step : null;
+  }
+
   /**
    * Merge profile row with saved onboarding draft so completion checks match
    * answers that exist only in `onboarding_progress.onboarding_data` until profile sync catches up.
@@ -90,9 +250,24 @@ class ModalOnboardingService {
         d.spaceForNewRelationship,
       ),
       lifeDomains: coalesce((p as any).lifeDomains, d.lifeDomains),
+      lifeDomainAnswers: coalesce((p as any).lifeDomainAnswers, d.lifeDomainAnswers),
       typology: coalesce((p as any).typology, d.typology),
+      archetypes: (() => {
+        const fromDraft = normalizeArchetypesFromProfile(d.archetypes);
+        if (fromDraft.length > 0) return fromDraft;
+        return normalizeArchetypesFromProfile((p as any)?.archetypes);
+      })(),
       photos: coalesce((p as any).photos, d.photos),
       matchPreferences: coalesce((p as any).matchPreferences, d.matchPreferences),
+      prefPartnerHasChildren: coalesce((p as any).prefPartnerHasChildren, d.prefPartnerHasChildren),
+      prefPartnerPoliticalAlignmentImportance: coalesce(
+        (p as any).prefPartnerPoliticalAlignmentImportance,
+        d.prefPartnerPoliticalAlignmentImportance,
+      ),
+      prefPartnerSharesSexualInterests: coalesce(
+        (p as any).prefPartnerSharesSexualInterests,
+        d.prefPartnerSharesSexualInterests,
+      ),
     };
   }
 
@@ -116,6 +291,133 @@ class ModalOnboardingService {
       sum += n;
     }
     return sum === 100;
+  }
+
+  private domainAnswersFromContext(ctx: any, domainId: LifeDomainId): Record<string, string | undefined> {
+    const answers = (ctx as any)?.lifeDomainAnswers;
+    if (!answers || typeof answers !== 'object' || Array.isArray(answers)) return {};
+    return (answers as Record<string, Record<string, string | undefined>>)[domainId] ?? {};
+  }
+
+  private lifeDomainQuestionsCompletionSatisfied(ctx: any): boolean {
+    const wantKids = (ctx as any)?.wantKids;
+    return getActiveLifeDomainRequiredQuestionSteps(wantKids).every(({ domainId, questionId }) =>
+      isLifeDomainAnswerFilled(this.domainAnswersFromContext(ctx, domainId)[questionId]),
+    );
+  }
+
+  private firstIncompleteLifeDomainQuestionStep(ctx: any): string | null {
+    const wantKids = (ctx as any)?.wantKids;
+    for (const { step, domainId, questionId } of getActiveLifeDomainRequiredQuestionSteps(wantKids)) {
+      if (!isLifeDomainAnswerFilled(this.domainAnswersFromContext(ctx, domainId)[questionId])) {
+        return step;
+      }
+    }
+    return null;
+  }
+
+  private firstIncompleteLifeDomainOptionalStep(ctx: any): string | null {
+    return firstIncompleteLifeDomainOptionalOpenEndedStep(
+      (ctx as any)?.wantKids,
+      (ctx as any)?.lifeDomainAnswers,
+    );
+  }
+
+  /** When saved step is a life-domain question screen, resume that question or advance if already complete. */
+  private resolveLifeDomainQuestionResumeStep(resumeStep: string, ctx: any): string | null {
+    const wantKids = (ctx as any)?.wantKids;
+    const legacyNormalized = normalizeLifeDomainQuestionOnboardingStep(resumeStep, wantKids);
+    const isLifeDomainStep =
+      isLifeDomainRequiredQuestionStep(resumeStep) ||
+      legacyNormalized != null ||
+      resumeStep.startsWith('lifeDomainQuestions') ||
+      isLifeDomainOptionalOpenEndedStep(resumeStep);
+    if (!isLifeDomainStep) return null;
+    const incomplete = this.firstIncompleteLifeDomainQuestionStep(ctx);
+    if (incomplete) return incomplete;
+    if (!this.lifeDomainsCompletionSatisfied(ctx)) return 'lifeDomains';
+    const incompleteOptional = this.firstIncompleteLifeDomainOptionalStep(ctx);
+    if (incompleteOptional) return incompleteOptional;
+    if (shouldShowTypologyOnboardingStep((ctx as any)?.typology)) return 'typology';
+    return 'personalityDocuments';
+  }
+
+  /** Lifestyle / archetypes / photos / attraction must be done before life-domain sliders. */
+  private firstIncompletePreLifeDomainBefore(resumeStep: string, ctx: any): string | null {
+    const resumeIdx = ONBOARDING_STEPS_ORDER.indexOf(resumeStep as (typeof ONBOARDING_STEPS_ORDER)[number]);
+    if (resumeIdx < 0) return null;
+    const gates: Array<{ step: (typeof ONBOARDING_STEPS_ORDER)[number]; satisfied: () => boolean }> = [
+      { step: 'matchPreferences', satisfied: () => this.matchPreferencesCompletionSatisfied(ctx) },
+      { step: 'archetypes', satisfied: () => this.archetypesCompletionSatisfied(ctx) },
+      {
+        step: 'photos',
+        satisfied: () =>
+          Array.isArray((ctx as any)?.photos) && (ctx as any).photos.length > 0,
+      },
+      {
+        step: 'attractionPreferences',
+        satisfied: () => this.attractionPreferencesCompletionSatisfied(ctx),
+      },
+    ];
+    for (const gate of gates) {
+      const gateIdx = ONBOARDING_STEPS_ORDER.indexOf(gate.step);
+      if (gateIdx >= 0 && resumeIdx > gateIdx && !gate.satisfied()) {
+        return gate.step;
+      }
+    }
+    return null;
+  }
+
+  /** Redirect when resuming past life-domain questions but answers or sliders are incomplete. */
+  private firstIncompleteLifeDomainBefore(resumeStep: string, ctx: any): string | null {
+    const resumeIdx = ONBOARDING_STEPS_ORDER.indexOf(resumeStep as (typeof ONBOARDING_STEPS_ORDER)[number]);
+    const firstQuestionStep = LIFE_DOMAIN_REQUIRED_QUESTION_ONBOARDING_STEPS[0]?.step;
+    const firstQuestionIdx = firstQuestionStep
+      ? ONBOARDING_STEPS_ORDER.indexOf(firstQuestionStep as (typeof ONBOARDING_STEPS_ORDER)[number])
+      : -1;
+    const lifeDomainsIdx = ONBOARDING_STEPS_ORDER.indexOf('lifeDomains');
+    if (resumeIdx < 0 || firstQuestionIdx < 0 || resumeIdx < firstQuestionIdx) return null;
+
+    const incomplete = this.firstIncompleteLifeDomainQuestionStep(ctx);
+    if (incomplete) {
+      const incompleteIdx = ONBOARDING_STEPS_ORDER.indexOf(
+        incomplete as (typeof ONBOARDING_STEPS_ORDER)[number],
+      );
+      if (incompleteIdx >= 0 && incompleteIdx < resumeIdx) return incomplete;
+    }
+
+    if (
+      lifeDomainsIdx >= 0 &&
+      resumeIdx >= lifeDomainsIdx &&
+      !this.lifeDomainsCompletionSatisfied(ctx)
+    ) {
+      return 'lifeDomains';
+    }
+
+    const incompleteOptional = this.firstIncompleteLifeDomainOptionalStep(ctx);
+    if (incompleteOptional && lifeDomainsIdx >= 0 && resumeIdx > lifeDomainsIdx) {
+      const incompleteOptionalIdx = ONBOARDING_STEPS_ORDER.indexOf(
+        incompleteOptional as (typeof ONBOARDING_STEPS_ORDER)[number],
+      );
+      if (incompleteOptionalIdx >= 0 && resumeIdx > incompleteOptionalIdx) {
+        return incompleteOptional;
+      }
+    }
+
+    const typologyIdx = ONBOARDING_STEPS_ORDER.indexOf('typology');
+    if (
+      shouldShowTypologyOnboardingStep((ctx as any)?.typology) &&
+      typologyIdx >= 0 &&
+      resumeIdx > typologyIdx &&
+      typologyHasUnansweredFields((ctx as any)?.typology)
+    ) {
+      return 'typology';
+    }
+    return null;
+  }
+
+  private archetypesCompletionSatisfied(ctx: any): boolean {
+    return normalizeArchetypesFromProfile((ctx as any)?.archetypes).length === 2;
   }
 
   /**
@@ -161,11 +463,15 @@ class ModalOnboardingService {
     if (savedStep && savedStep !== 'welcome') {
       if (savedStep === 'sexualCompatibility') return 'sexDrive';
       const resumeStep =
-        savedStep === 'drugs'
-          ? 'haveKids'
-          : savedStep === 'sexOpenness' || savedStep === 'sexFrequency'
-            ? 'sexInterests'
-            : savedStep;
+        savedStep === 'gender'
+          ? 'attraction'
+          : savedStep === 'drugs'
+            ? 'haveKids'
+            : savedStep === 'sexOpenness' || savedStep === 'sexFrequency'
+              ? 'sexInterests'
+              : savedStep === 'sexualFeedback' || savedStep === 'sexualNeedsCommunication'
+                ? 'datingPaceAfterExcitement'
+                : savedStep;
       const tailSteps = [
         'recreationalDrugsSocial',
         'relationshipPsychedelics',
@@ -178,16 +484,19 @@ class ModalOnboardingService {
         'sexInterests',
         'partnerMoodMismatch',
         'sexualFocus',
-        'sexualFeedback',
-        'sexualNeedsCommunication',
         'datingPaceAfterExcitement',
         'recentDatingEarlyWeeks',
         'spaceForNewRelationship',
-        'lifeDomains',
-        'typology',
-        'photos',
         'matchPreferences',
+        'archetypes',
+        'photos',
         'attractionPreferences',
+        ...LIFE_DOMAIN_REQUIRED_QUESTION_ONBOARDING_STEPS.map((s) => s.step),
+        'lifeDomains',
+        ...LIFE_DOMAIN_OPTIONAL_OPEN_ENDED_ONBOARDING_STEPS.map((s) => s.step),
+        'typology',
+        'personalityDocuments',
+        'profileComplete',
         'complete',
       ] as const;
       const stepsAfterDrinkingNeedSocial = new Set<string>(tailSteps);
@@ -218,49 +527,66 @@ class ModalOnboardingService {
       if (rwcMissing && stepsAfterPsychedelicsNeedCannabis.has(resumeStep)) {
         return 'relationshipCannabis';
       }
+      const lifeDomainResume = this.resolveLifeDomainQuestionResumeStep(resumeStep, ctx);
+      if (lifeDomainResume) return lifeDomainResume;
+      const dealbreaker = this.firstIncompleteDealbreakerBefore(resumeStep, ctx);
+      if (dealbreaker) return dealbreaker;
+      const nextDealbreaker = this.dealbreakerStepAfterPrimary(resumeStep, ctx);
+      if (nextDealbreaker) return nextDealbreaker;
+      const preLifeDomainGate = this.firstIncompletePreLifeDomainBefore(resumeStep, ctx);
+      if (preLifeDomainGate) return preLifeDomainGate;
+      const lifeDomainGate = this.firstIncompleteLifeDomainBefore(resumeStep, ctx);
+      if (lifeDomainGate) return lifeDomainGate;
       return resumeStep;
     }
     if (!ctx?.displayName) return 'name';
-    if (!ctx?.gender) return 'gender';
-    if (!(ctx as any)?.ethnicity || String((ctx as any).ethnicity).trim() === '') return 'ethnicity';
     if (!ctx?.attractedTo || ctx.attractedTo.length === 0) return 'attraction';
+    if (!(ctx as any)?.ethnicity || String((ctx as any).ethnicity).trim() === '') return 'ethnicity';
+    if (this.ethnicityAttractionMissing(ctx)) return 'ethnicityAttraction';
     if (!(ctx as any)?.birthDate) return 'dateOfBirth';
     if (!ctx?.relationshipStyle) return 'relationshipStyle';
     const longest =
       ctx?.longestRomanticRelationship ?? (ctx as any)?.longest_romantic_relationship;
     if (!longest || String(longest).trim() === '') return 'longestRelationship';
     if (!ctx?.location) return 'location';
-    if (!(ctx as any)?.occupation) return 'occupation';
     if (!(ctx as any)?.educationLevel && !(ctx as any)?.education_level) return 'educationLevel';
     if (!ctx?.height && !ctx?.weight && (ctx as any).height_cm == null && (ctx as any).weight_kg == null)
       return 'heightWeight';
     if (!ctx?.workout) return 'workout';
     if (!ctx?.smoking) return 'smoking';
+    if (this.matchPrefStringMissing(ctx, 'partnerAlignmentTobacco')) return 'partnerAlignmentTobacco';
     if (!ctx?.drinking) return 'drinking';
+    if (this.matchPrefStringMissing(ctx, 'partnerAlignmentAlcohol')) return 'partnerAlignmentAlcohol';
     const social = (ctx as any)?.recreationalDrugsSocial ?? (ctx as any)?.recreational_drugs_social;
     if (social === undefined || social === null || String(social).trim() === '')
       return 'recreationalDrugsSocial';
+    if (this.matchPrefStringMissing(ctx, 'partnerAlignmentRecreationalDrugs'))
+      return 'partnerAlignmentRecreationalDrugs';
     const rwp =
       (ctx as any)?.relationshipWithPsychedelics ?? (ctx as any)?.relationship_with_psychedelics;
     if (rwp === undefined || rwp === null || String(rwp).trim() === '') return 'relationshipPsychedelics';
+    if (this.matchPrefStringMissing(ctx, 'partnerAlignmentPsychedelics'))
+      return 'partnerAlignmentPsychedelics';
     const rwc = (ctx as any)?.relationshipWithCannabis ?? (ctx as any)?.relationship_with_cannabis;
     if (rwc === undefined || rwc === null || String(rwc).trim() === '') return 'relationshipCannabis';
+    if (this.matchPrefStringMissing(ctx, 'partnerAlignmentCannabis')) return 'partnerAlignmentCannabis';
     if ((ctx as any)?.haveKids === undefined || (ctx as any)?.haveKids === null || (ctx as any)?.haveKids === '')
       return 'haveKids';
     if (!normalizeWantKidsToYesNo((ctx as any)?.wantKids)) return 'wantKids';
+    if (this.ctxStringMissing(ctx, 'prefPartnerHasChildren')) return 'prefPartnerHasChildren';
     if ((ctx as any)?.politics === undefined || (ctx as any)?.politics === null || (ctx as any)?.politics === '')
       return 'politics';
+    if (this.ctxStringMissing(ctx, 'prefPartnerPoliticalAlignmentImportance'))
+      return 'prefPartnerPoliticalAlignment';
     if ((ctx as any)?.religion === undefined || (ctx as any)?.religion === null || (ctx as any)?.religion === '')
       return 'religion';
+    if (this.matchPrefStringMissing(ctx, 'partnerSameReligionRequired')) return 'partnerSameReligionRequired';
     if (!String((ctx as any)?.sexDrive ?? (ctx as any)?.sex_drive ?? '').trim()) return 'sexDrive';
     const sexInterest = (ctx as any)?.sexInterestCategories;
     if (!Array.isArray(sexInterest) || sexInterest.length === 0) return 'sexInterests';
-    if (!String((ctx as any)?.prefPartnerSharesSexualInterests ?? '').trim()) return 'sexInterests';
+    if (this.ctxStringMissing(ctx, 'prefPartnerSharesSexualInterests')) return 'partnerSharesSexualInterests';
     if (!String((ctx as any)?.partnerMoodMismatchResponse ?? '').trim()) return 'partnerMoodMismatch';
     if (!String((ctx as any)?.sexualFocusPreference ?? '').trim()) return 'sexualFocus';
-    if (!String((ctx as any)?.sexualFeedbackStyle ?? '').trim()) return 'sexualFeedback';
-    if (!String((ctx as any)?.sexualNeedsCommunicationComfort ?? '').trim())
-      return 'sexualNeedsCommunication';
     if (
       !String(
         (ctx as any)?.datingPaceAfterExcitement ?? (ctx as any)?.dating_pace_after_excitement ?? '',
@@ -275,12 +601,20 @@ class ModalOnboardingService {
       ).trim()
     )
       return 'spaceForNewRelationship';
-    if (!this.lifeDomainsCompletionSatisfied(ctx)) return 'lifeDomains';
+    if (!this.matchPreferencesCompletionSatisfied(ctx)) return 'matchPreferences';
+    if (!this.archetypesCompletionSatisfied(ctx)) return 'archetypes';
     if (!(ctx as any)?.photos || !Array.isArray((ctx as any).photos) || (ctx as any).photos.length === 0)
       return 'photos';
-    if (!this.matchPreferencesCompletionSatisfied(ctx)) return 'matchPreferences';
     if (!this.attractionPreferencesCompletionSatisfied(ctx)) return 'attractionPreferences';
-    return 'complete';
+    const incompleteLifeDomainQuestions = this.firstIncompleteLifeDomainQuestionStep(ctx);
+    if (incompleteLifeDomainQuestions) return incompleteLifeDomainQuestions;
+    if (!this.lifeDomainsCompletionSatisfied(ctx)) return 'lifeDomains';
+    const incompleteOptionalOpenEnded = this.firstIncompleteLifeDomainOptionalStep(ctx);
+    if (incompleteOptionalOpenEnded) return incompleteOptionalOpenEnded;
+    if (shouldShowTypologyOnboardingStep((ctx as any)?.typology)) return 'typology';
+    if (savedStep === 'profileComplete' || savedStep === 'complete') return 'profileComplete';
+    if (savedStep === 'personalityDocuments') return 'personalityDocuments';
+    return 'personalityDocuments';
   }
 
   /**
@@ -420,8 +754,6 @@ class ModalOnboardingService {
         (profile as any)?.spaceForNewRelationship ?? (profile as any)?.space_for_new_relationship,
       partnerMoodMismatchResponse: (profile as any)?.partnerMoodMismatchResponse,
       sexualFocusPreference: (profile as any)?.sexualFocusPreference,
-      sexualFeedbackStyle: (profile as any)?.sexualFeedbackStyle,
-      sexualNeedsCommunicationComfort: (profile as any)?.sexualNeedsCommunicationComfort,
       prefPartnerHasChildren: (profile as any)?.prefPartnerHasChildren,
       prefPartnerPoliticalAlignmentImportance: (() => {
         const raw = String((profile as any)?.prefPartnerPoliticalAlignmentImportance ?? "").trim();
@@ -435,6 +767,7 @@ class ModalOnboardingService {
       phoneNumber: profile?.phoneNumber,
       photos: profile?.photos,
       bio: profile?.bio,
+      archetypes: normalizeArchetypesFromProfile((profile as any)?.archetypes),
       lifeDomains: profile?.lifeDomains,
       matchPreferences: mergedPrefs as any,
     };
@@ -452,7 +785,7 @@ class ModalOnboardingService {
       // Get saved onboarding progress
       const { data, error } = await supabase
         .from('onboarding_progress')
-        .select('*')
+        .select(ONBOARDING_PROGRESS_SELECT)
         .eq('user_id', userId)
         .maybeSingle();
 
@@ -476,6 +809,23 @@ class ModalOnboardingService {
       if (wantKidsNorm) mergedOnboardingData.wantKids = wantKidsNorm;
       else delete mergedOnboardingData.wantKids;
 
+      try {
+        const fromDb = await fetchLifeDomainAnswersMap(userId);
+        const prev = mergedOnboardingData.lifeDomainAnswers ?? {};
+        const mergedAnswers: NonNullable<OnboardingData['lifeDomainAnswers']> = { ...prev };
+        for (const domainId of Object.keys(fromDb) as Array<keyof typeof fromDb>) {
+          const row = fromDb[domainId];
+          if (!row) continue;
+          mergedAnswers[domainId as keyof typeof mergedAnswers] = {
+            ...(mergedAnswers[domainId as keyof typeof mergedAnswers] ?? {}),
+            ...row,
+          };
+        }
+        mergedOnboardingData.lifeDomainAnswers = mergedAnswers;
+      } catch (e) {
+        if (__DEV__) console.warn('[modalOnboardingService] life domain answers fetch', e);
+      }
+
       const polNorm = normalizePartnerPoliticalAlignmentToYesNo(
         String(mergedOnboardingData.prefPartnerPoliticalAlignmentImportance ?? "")
       );
@@ -486,11 +836,17 @@ class ModalOnboardingService {
       // Profile field writes happen while editing a step (for example photo uploads), so recomputing
       // solely from profile completeness can skip ahead after refresh before the user presses Next.
       const savedStep = typeof data?.current_step === 'string' ? data.current_step : undefined;
-      const currentStep =
+      let currentStep =
         savedStep && savedStep !== 'welcome'
           ? this.determineStepFromProfile(profile, savedStep, mergedOnboardingData)
           : this.determineStepFromProfile(profile, undefined, mergedOnboardingData);
 
+      const lifeDomainNormalized = normalizeLifeDomainQuestionOnboardingStep(
+        currentStep,
+        mergedOnboardingData?.wantKids,
+      );
+      if (lifeDomainNormalized) currentStep = lifeDomainNormalized;
+      if (currentStep === 'complete') currentStep = 'profileComplete';
 
       return {
         success: true,
@@ -513,10 +869,11 @@ class ModalOnboardingService {
     progress: { currentStep: string; onboardingData: OnboardingData }
   ): Promise<Result<void>> {
     try {
+      const onboardingData = progress.onboardingData ?? {};
       // Filter out empty values for completed steps tracking
-      const completedSteps = Object.keys(progress.onboardingData).filter(
+      const completedSteps = Object.keys(onboardingData).filter(
         key => {
-          const value = progress.onboardingData[key as keyof OnboardingData];
+          const value = onboardingData[key as keyof OnboardingData];
           if (value === undefined || value === null || value === '') return false;
           // For arrays, check if they have items
           if (Array.isArray(value)) return value.length > 0;
@@ -527,15 +884,15 @@ class ModalOnboardingService {
       const updateData = {
         current_step: progress.currentStep,
         completed_steps: completedSteps,
-        onboarding_data: progress.onboardingData,
+        onboarding_data: onboardingData,
       };
 
       console.log('Saving onboarding progress:', {
         userId,
         currentStep: progress.currentStep,
         completedSteps,
-        onboardingDataKeys: Object.keys(progress.onboardingData),
-        onboardingDataValues: Object.entries(progress.onboardingData).reduce((acc, [key, value]) => {
+        onboardingDataKeys: Object.keys(onboardingData),
+        onboardingDataValues: Object.entries(onboardingData).reduce((acc, [key, value]) => {
           if (value !== undefined && value !== null && value !== '') {
             if (Array.isArray(value)) {
               acc[key] = `Array(${value.length})`;
@@ -578,7 +935,7 @@ class ModalOnboardingService {
           userId,
           currentStep: progress.currentStep,
           completedStepsCount: completedSteps.length,
-          dataKeys: Object.keys(progress.onboardingData),
+          dataKeys: Object.keys(onboardingData),
         });
       } else {
         // Insert new record
@@ -599,7 +956,7 @@ class ModalOnboardingService {
           userId,
           currentStep: progress.currentStep,
           completedStepsCount: completedSteps.length,
-          dataKeys: Object.keys(progress.onboardingData),
+          dataKeys: Object.keys(onboardingData),
         });
       }
 
@@ -692,6 +1049,10 @@ class ModalOnboardingService {
           (profileUpdates as any).myersBriggs = data.typology.myersBriggs;
         }
       }
+      const archetypesComplete = normalizeArchetypesFromProfile(data.archetypes);
+      if (archetypesComplete.length === 2) {
+        (profileUpdates as any).archetypes = archetypesComplete;
+      }
       const hw = buildHeightWeightProfileFields({
         height: data.height,
         height_cm: data.height_cm,
@@ -743,10 +1104,6 @@ class ModalOnboardingService {
         (profileUpdates as any).partnerMoodMismatchResponse = data.partnerMoodMismatchResponse;
       if (data.sexualFocusPreference !== undefined)
         (profileUpdates as any).sexualFocusPreference = data.sexualFocusPreference;
-      if (data.sexualFeedbackStyle !== undefined)
-        (profileUpdates as any).sexualFeedbackStyle = data.sexualFeedbackStyle;
-      if (data.sexualNeedsCommunicationComfort !== undefined)
-        (profileUpdates as any).sexualNeedsCommunicationComfort = data.sexualNeedsCommunicationComfort;
       if (data.prefPartnerHasChildren !== undefined)
         (profileUpdates as any).prefPartnerHasChildren = data.prefPartnerHasChildren;
       if (data.prefPartnerPoliticalAlignmentImportance !== undefined)
@@ -819,14 +1176,9 @@ class ModalOnboardingService {
         },
       });
 
-      // Mark onboarding as seen - this prevents onboarding modals from being shown again
       profileUpdates.hasSeenOnboardingIntro = true;
-      // User is not fully onboarding-complete until required assessments are finished.
-      profileUpdates.assessmentsStarted = false;
-      profileUpdates.assessmentsCompleted = false;
-      profileUpdates.assessmentsCompletedAt = null;
-      profileUpdates.onboardingCompleted = false;
-      profileUpdates.onboardingCompletedAt = null;
+      profileUpdates.onboardingCompleted = true;
+      profileUpdates.onboardingCompletedAt = new Date().toISOString();
 
       // Update profile
       const updateResult = await profilesRepo.updateProfile(userId, profileUpdates);

@@ -39,7 +39,6 @@ C:/Users/ng528/Documents/Amoraea/Amoraea-app/migration/onboarding-port/bundle/da
 C:/Users/ng528/Documents/Amoraea/Amoraea-app/migration/onboarding-port/bundle/data/services/onboarding/updates/basicInfoUpdate.ts
 C:/Users/ng528/Documents/Amoraea/Amoraea-app/migration/onboarding-port/bundle/data/services/onboarding/updates/traitUpdate.ts
 C:/Users/ng528/Documents/Amoraea/Amoraea-app/migration/onboarding-port/bundle/data/services/onboardingService.ts
-C:/Users/ng528/Documents/Amoraea/Amoraea-app/migration/onboarding-port/bundle/screens/assessments/AssessmentIntroScreen.tsx
 C:/Users/ng528/Documents/Amoraea/Amoraea-app/migration/onboarding-port/bundle/screens/assessments/BreakScreen.tsx
 C:/Users/ng528/Documents/Amoraea/Amoraea-app/migration/onboarding-port/bundle/screens/assessments/ConflictStyleAssessmentScreen.tsx
 C:/Users/ng528/Documents/Amoraea/Amoraea-app/migration/onboarding-port/bundle/screens/assessments/ConflictStyleResultsScreen.tsx

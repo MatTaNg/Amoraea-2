@@ -4,8 +4,10 @@ import {
   Text,
   StyleSheet,
   PanResponder,
+  Pressable,
   type LayoutChangeEvent,
 } from 'react-native';
+import { Ionicons } from '@expo/vector-icons';
 
 export const ONBOARDING_LIFE_DOMAIN_KEYS = [
   'intimacy',
@@ -58,14 +60,25 @@ function clampDomainValue(
   return Math.max(0, Math.min(maxForKey, rounded));
 }
 
+export type LifeDomainAnswerCount = { answered: number; total: number };
+
 type RowProps = {
   domain: OnboardingLifeDomainKey;
   value: number;
   values: OnboardingLifeDomainValues;
   onValuesChange: (next: OnboardingLifeDomainValues) => void;
+  onOpenQuestions?: (domain: OnboardingLifeDomainKey) => void;
+  answerCount?: LifeDomainAnswerCount;
 };
 
-const DomainSliderRow: React.FC<RowProps> = ({ domain, value, values, onValuesChange }) => {
+const DomainSliderRow: React.FC<RowProps> = ({
+  domain,
+  value,
+  values,
+  onValuesChange,
+  onOpenQuestions,
+  answerCount,
+}) => {
   const trackWidthRef = useRef(1);
 
   const setFromLocalX = useCallback(
@@ -99,7 +112,31 @@ const DomainSliderRow: React.FC<RowProps> = ({ domain, value, values, onValuesCh
   return (
     <View style={styles.rowWrap}>
       <View style={styles.labelRow}>
-        <Text style={styles.label}>{LABELS[domain]}</Text>
+        <View style={styles.labelStart}>
+          <View style={styles.labelTitleRow}>
+            <Text style={styles.label}>{LABELS[domain]}</Text>
+            {onOpenQuestions ? (
+              <Pressable
+                onPress={() => onOpenQuestions(domain)}
+                hitSlop={10}
+                accessibilityRole="button"
+                accessibilityLabel={
+                  answerCount
+                    ? `View ${LABELS[domain]} questions, ${answerCount.answered} of ${answerCount.total} answered`
+                    : `View ${LABELS[domain]} questions`
+                }
+                style={({ pressed }) => [styles.questionsBtn, pressed && { opacity: 0.65 }]}
+              >
+                <Ionicons name="chatbubble-ellipses-outline" size={20} color="#7EB8F0" />
+              </Pressable>
+            ) : null}
+          </View>
+          {answerCount ? (
+            <Text style={styles.answerCount}>
+              {answerCount.answered} of {answerCount.total} optional answered
+            </Text>
+          ) : null}
+        </View>
         <Text style={[styles.valueBadge, { color }]}>{value}</Text>
       </View>
       <View
@@ -137,7 +174,11 @@ const DomainSliderRow: React.FC<RowProps> = ({ domain, value, values, onValuesCh
 export const LifeDomainDistribution: React.FC<{
   values: OnboardingLifeDomainValues;
   onValuesChange: (next: OnboardingLifeDomainValues) => void;
-}> = ({ values, onValuesChange }) => {
+  /** Opens life-domain deep-dive questions for the tapped domain (e.g. edit profile). */
+  onOpenDomainQuestions?: (domain: OnboardingLifeDomainKey) => void;
+  /** Per-domain answered counts (edit profile). */
+  domainAnswerCounts?: Partial<Record<OnboardingLifeDomainKey, LifeDomainAnswerCount>>;
+}> = ({ values, onValuesChange, onOpenDomainQuestions, domainAnswerCounts }) => {
   const total = ONBOARDING_LIFE_DOMAIN_KEYS.reduce((s, k) => s + (values[k] ?? 0), 0);
   return (
     <View style={styles.box}>
@@ -148,6 +189,8 @@ export const LifeDomainDistribution: React.FC<{
           value={values[k] ?? 0}
           values={values}
           onValuesChange={onValuesChange}
+          onOpenQuestions={onOpenDomainQuestions}
+          answerCount={domainAnswerCounts?.[k]}
         />
       ))}
       <Text style={styles.totalLine}>Total: {total} / 100</Text>
@@ -168,6 +211,24 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     alignItems: 'center',
     marginBottom: 8,
+  },
+  labelStart: {
+    flex: 1,
+    paddingRight: 8,
+    gap: 4,
+  },
+  labelTitleRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  answerCount: {
+    color: 'rgba(200,217,238,0.72)',
+    fontSize: 13,
+    lineHeight: 18,
+  },
+  questionsBtn: {
+    padding: 2,
   },
   label: {
     color: '#C8D9EE',

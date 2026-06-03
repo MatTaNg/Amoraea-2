@@ -90,6 +90,27 @@ describe('computeFinalCompatibilityScore', () => {
     expect(half).toBeCloseTo(full * 0.5, 5);
   });
 
+  it('applies sexual communication soft adjustment', () => {
+    const base = computeFinalCompatibilityScore({
+      attachmentScore: 0.8,
+      valuesScore: 0.8,
+      semanticScore: 0.8,
+      styleScore: 0.8,
+      styleConfidence: 1,
+      dealbreakerMultiplier: 1,
+    });
+    const boosted = computeFinalCompatibilityScore({
+      attachmentScore: 0.8,
+      valuesScore: 0.8,
+      semanticScore: 0.8,
+      styleScore: 0.8,
+      styleConfidence: 1,
+      dealbreakerMultiplier: 1,
+      sexualCommunicationAdjustment: 0.03,
+    });
+    expect(boosted).toBeCloseTo(base + 0.03, 5);
+  });
+
   it('clamps output to 0..1', () => {
     const s = computeFinalCompatibilityScore({
       attachmentScore: 2,

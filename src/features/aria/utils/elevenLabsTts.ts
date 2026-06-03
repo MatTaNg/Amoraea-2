@@ -11,7 +11,11 @@ import {
 } from '@features/aria/telemetry/ttsBufferTelemetry';
 import { computeElevenLabsEnabled } from './elevenLabsEnvGating';
 import { getWebSpeechDeferFromNavigatorSnapshot } from './webSpeechDeferPolicy';
-import { WebTtsRequiresUserGestureError } from './webTtsGestureErrors';
+import {
+  TtsTabResumeFallbackError,
+  WebInterviewTtsTabHiddenAbortError,
+  WebTtsRequiresUserGestureError,
+} from './webTtsGestureErrors';
 import { supabase } from '@data/supabase/client';
 import {
   isIosSafariMobileWeb,
@@ -67,7 +71,192 @@ function iosUseElevenLabsMp3Playback(): boolean {
   return s === '1' || s === 'true' || s === 'yes';
 }
 
-let activeWebAudio: { pause(): void; currentTime: number } | null = null;
+let activeWebAudio: { pause(): void; currentTime: number; ended?: boolean; duration?: number } | null =
+  null;
+/** Blob URL for in-flight HTML MP3 playback — kept through tab-hide soft pause until `ended`. */
+let activeWebHtmlAudioObjectUrl: string | null = null;
+/** Set on tab-hide soft pause; used to restore `currentTime` after return (some browsers reset position). */
+let htmlAudioPausedForTabResume = false;
+let tabPausedHtmlAudioResumeSeconds: number | null = null;
+
+type TabHtmlAudioResumeSnapshot = {
+  element: HTMLAudioElement;
+  objectUrl: string;
+  resumeSeconds: number;
+};
+
+/** Strong ref to paused `<audio>` — survives `activeWebAudio = null` during tab hide. */
+let tabHtmlAudioResumeSnapshot: TabHtmlAudioResumeSnapshot | null = null;
+
+/** Tracks in-flight Web Speech API utterance for tab-hide partial resume (not seekable). */
+let webSpeechSynthTabResumeState: { fullText: string; startedAtMs: number } | null = null;
+const WEB_SPEECH_SYNTH_EST_CHARS_PER_SEC = 14;
+
+/** Call before tab-hide cancels speechSynthesis — returns remaining text estimate, or null. */
+export function captureWebSpeechSynthTabRestoreText(): string | null {
+  if (Platform.OS !== 'web' || typeof window === 'undefined') return null;
+  const snap = webSpeechSynthTabResumeState;
+  if (!snap?.fullText.trim()) return null;
+  const speaking = window.speechSynthesis?.speaking === true;
+  const elapsedMs = Date.now() - snap.startedAtMs;
+  if (!speaking && elapsedMs > 4000) return null;
+  const spokenChars = Math.floor((elapsedMs / 1000) * WEB_SPEECH_SYNTH_EST_CHARS_PER_SEC);
+  const remaining = snap.fullText.slice(Math.min(spokenChars, snap.fullText.length)).trim();
+  if (remaining.length < 12) return null;
+  return remaining;
+}
+
+function clearWebSpeechSynthTabResumeState(): void {
+  webSpeechSynthTabResumeState = null;
+}
+
+function clearHtmlAudioTabResumeState(): void {
+  htmlAudioPausedForTabResume = false;
+  tabPausedHtmlAudioResumeSeconds = null;
+  tabHtmlAudioResumeSnapshot = null;
+}
+
+function captureTabHtmlAudioResumeSnapshot(): boolean {
+  if (Platform.OS !== 'web') return false;
+  if (activePcmStreamSources.length > 0 || activeWebBufferSource != null) return false;
+  const el = getActiveWebHtmlAudioElement();
+  if (!el || el.ended) return false;
+  const resumeSeconds = el.currentTime;
+  if (!Number.isFinite(resumeSeconds) || resumeSeconds < 0.1) return false;
+  const objectUrl = (el.src ?? activeWebHtmlAudioObjectUrl ?? '').trim();
+  if (!objectUrl) return false;
+  const d = el.duration;
+  if (Number.isFinite(d) && d > 0 && resumeSeconds >= d - 0.35) return false;
+  tabHtmlAudioResumeSnapshot = { element: el, objectUrl, resumeSeconds };
+  tabPausedHtmlAudioResumeSeconds = resumeSeconds;
+  htmlAudioPausedForTabResume = true;
+  return true;
+}
+
+/** Rejects in-flight HTML audio playback promises when the tab hides (avoids wall-clock safety timeout resolving as "complete"). */
+let abortActiveWebHtmlAudioPlayback: (() => void) | null = null;
+
+/** Rejects in-flight Web Audio buffer playback when the tab hides. */
+let abortActiveWebBufferAudioPlayback: (() => void) | null = null;
+
+function abortInFlightWebInterviewPlaybackForTabHide(opts?: { includeHtmlAudio?: boolean }): void {
+  if (opts?.includeHtmlAudio !== false) {
+    abortActiveWebHtmlAudioPlayback?.();
+    abortActiveWebHtmlAudioPlayback = null;
+  }
+  abortActiveWebBufferAudioPlayback?.();
+  abortActiveWebBufferAudioPlayback = null;
+}
+
+function getActiveWebHtmlAudioElement(): HTMLAudioElement | null {
+  if (Platform.OS !== 'web' || !activeWebAudio) return null;
+  const el = activeWebAudio as HTMLAudioElement;
+  if (typeof el.play !== 'function' || typeof el.pause !== 'function') return null;
+  return el;
+}
+
+/** True when HTML MP3 playback has started and has meaningful audio left (tab-hide soft pause). */
+export function canSoftPauseActiveWebHtmlAudioForTabResume(): boolean {
+  if (Platform.OS !== 'web') return false;
+  if (activePcmStreamSources.length > 0 || activeWebBufferSource != null) return false;
+  const el = getActiveWebHtmlAudioElement();
+  if (!el || el.ended) return false;
+  const src = (el.src ?? '').trim();
+  if (!src) return false;
+  const t = el.currentTime;
+  if (!Number.isFinite(t) || t < 0.15) return false;
+  const d = el.duration;
+  if (Number.isFinite(d) && d > 0 && t >= d - 0.35) return false;
+  return true;
+}
+
+export function hasWebInterviewHtmlAudioTabResumePending(): boolean {
+  if (Platform.OS !== 'web') return false;
+  const snap = tabHtmlAudioResumeSnapshot;
+  if (!snap || snap.element.ended) return false;
+  return Number.isFinite(snap.resumeSeconds) && snap.resumeSeconds > 0;
+}
+
+function softPauseActiveWebHtmlAudioForTabHide(): void {
+  if (!captureTabHtmlAudioResumeSnapshot()) return;
+  /** Detach tab-hide abort without rejecting the in-flight `speakWithElevenLabs` promise. */
+  abortActiveWebHtmlAudioPlayback = null;
+  try {
+    tabHtmlAudioResumeSnapshot!.element.pause();
+  } catch {
+    /* ignore */
+  }
+}
+
+export function tryPrepareWebInterviewHtmlAudioTabResume(): boolean {
+  return canSoftPauseActiveWebHtmlAudioForTabResume() || hasWebInterviewHtmlAudioTabResumePending();
+}
+
+/**
+ * Resume HTML MP3 playback after tab return (requires user gesture). Resolves when the utterance ends.
+ * Throws {@link TtsTabResumeFallbackError} when resume is not possible — caller should replay from start.
+ */
+export async function resumeWebInterviewHtmlAudioAfterTabHide(
+  telemetrySource: TtsTelemetrySource = 'replay'
+): Promise<void> {
+  const snap = tabHtmlAudioResumeSnapshot;
+  if (!snap || snap.element.ended) {
+    throw new TtsTabResumeFallbackError();
+  }
+  const el = snap.element;
+  const resumeAt = snap.resumeSeconds;
+  activeWebAudio = el;
+  if (!(el.src ?? '').trim() && snap.objectUrl) {
+    el.src = snap.objectUrl;
+  }
+  await ensureWebPlaybackPrimedForNextTurn(telemetrySource);
+  if (!(await ensureSharedWebAudioContextResumedForPlayback(telemetrySource))) {
+    throw new TtsTabResumeFallbackError();
+  }
+  try {
+    el.currentTime = resumeAt;
+  } catch {
+    throw new TtsTabResumeFallbackError();
+  }
+  htmlAudioPausedForTabResume = false;
+  return new Promise<void>((resolve, reject) => {
+    const onEnded = () => {
+      activeWebAudio = null;
+      if (activeWebHtmlAudioObjectUrl === snap.objectUrl) {
+        activeWebHtmlAudioObjectUrl = null;
+      }
+      try {
+        URL.revokeObjectURL(snap.objectUrl);
+      } catch {
+        /* ignore */
+      }
+      clearHtmlAudioTabResumeState();
+      resolve();
+    };
+    const onError = () => {
+      el.removeEventListener('ended', onEnded);
+      clearHtmlAudioTabResumeState();
+      reject(new TtsTabResumeFallbackError());
+    };
+    el.addEventListener('ended', onEnded, { once: true });
+    el.addEventListener('error', onError, { once: true });
+    void el.play().then(
+      () => {
+        logTtsAutoplayPlayOutcome({
+          pipeline: 'elevenlabs_web_html_audio',
+          outcome: 'play_ok',
+          telemetrySource,
+          errorMessagePreview: `tab_resume_from_pause_at_s=${resumeAt}`,
+        });
+      },
+      () => {
+        el.removeEventListener('ended', onEnded);
+        clearHtmlAudioTabResumeState();
+        reject(new TtsTabResumeFallbackError());
+      }
+    );
+  });
+}
 
 /** Web Audio API playback (decode + BufferSource) — often allowed after `unlockWebAudioForAutoplay` without a second tap, unlike HTMLAudio after async fetch. */
 let activeWebBufferSource: AudioBufferSourceNode | null = null;
@@ -447,9 +636,23 @@ function arrayBufferToBase64(buffer: ArrayBuffer): string {
  * attached can produce static/noise after resume. Clear `activeWebAudio` like {@link stopElevenLabsPlayback}
  * so {@link isWebInterviewPlaybackSurfaceActive} does not stay true while paused.
  */
+function suspendSharedWebAudioContextForTabHide(): void {
+  if (Platform.OS !== 'web') return;
+  const ctx = sharedWebAudioContext;
+  if (!ctx || ctx.state === 'closed') return;
+  if (ctx.state === 'running') {
+    void ctx.suspend().catch(() => {});
+  }
+}
+
+/**
+ * Tear down active web TTS outputs when the document is hidden.
+ * Suspends the shared AudioContext so background tabs do not advance decoded audio silently.
+ * HTML audio is paused without seeking — full utterance replay is handled in AriaScreen.
+ */
 export function pauseWebInterviewHtmlAudioForDocumentHidden(): void {
   if (Platform.OS !== 'web') return;
-  bumpWebInterviewTtsScheduleEpoch();
+  /** Stop PCM / Web Audio buffer first — they block {@link canSoftPauseActiveWebHtmlAudioForTabResume}. */
   if (activePcmStreamSources.length > 0) {
     for (const s of activePcmStreamSources) {
       try {
@@ -468,6 +671,12 @@ export function pauseWebInterviewHtmlAudioForDocumentHidden(): void {
     }
     activeWebBufferSource = null;
   }
+  const softPauseHtml = canSoftPauseActiveWebHtmlAudioForTabResume();
+  if (!softPauseHtml) {
+    clearHtmlAudioTabResumeState();
+    bumpWebInterviewTtsScheduleEpoch();
+  }
+  abortInFlightWebInterviewPlaybackForTabHide({ includeHtmlAudio: !softPauseHtml });
   if (typeof window !== 'undefined' && window.speechSynthesis) {
     try {
       window.speechSynthesis.cancel();
@@ -475,15 +684,27 @@ export function pauseWebInterviewHtmlAudioForDocumentHidden(): void {
       /* ignore */
     }
   }
+  if (softPauseHtml) {
+    softPauseActiveWebHtmlAudioForTabHide();
+    suspendSharedWebAudioContextForTabHide();
+    return;
+  }
   if (activeWebAudio) {
     try {
       activeWebAudio.pause();
-      activeWebAudio.currentTime = 0;
     } catch {
       /* ignore */
     }
     activeWebAudio = null;
+    activeWebHtmlAudioObjectUrl = null;
+    clearHtmlAudioTabResumeState();
   }
+  suspendSharedWebAudioContextForTabHide();
+}
+
+/** Same as {@link pauseWebInterviewHtmlAudioForDocumentHidden} — explicit name for tab-switch interrupt path. */
+export function interruptWebInterviewTtsForTabHide(): void {
+  pauseWebInterviewHtmlAudioForDocumentHidden();
 }
 
 /**
@@ -499,6 +720,7 @@ export function isWebInterviewPlaybackSurfaceActive(): boolean {
 
 export async function stopElevenLabsPlayback(): Promise<void> {
   if (Platform.OS === 'web') {
+    clearHtmlAudioTabResumeState();
     bumpWebInterviewTtsScheduleEpoch();
   }
   if (Platform.OS === 'web' && pendingWebGestureBlobUrl) {
@@ -535,6 +757,14 @@ export async function stopElevenLabsPlayback(): Promise<void> {
       /* ignore */
     }
     activeWebAudio = null;
+  }
+  if (Platform.OS === 'web' && activeWebHtmlAudioObjectUrl) {
+    try {
+      URL.revokeObjectURL(activeWebHtmlAudioObjectUrl);
+    } catch {
+      /* ignore */
+    }
+    activeWebHtmlAudioObjectUrl = null;
   }
   if (Platform.OS === 'web' && typeof window !== 'undefined' && window.speechSynthesis) {
     try {
@@ -719,7 +949,24 @@ async function tryPlayElevenLabsMp3WithWebAudio(
     try {
       await Promise.race([
         new Promise<void>((resolve, reject) => {
+          const clearBufferAbort = () => {
+            if (abortActiveWebBufferAudioPlayback === abortBufferPlayback) {
+              abortActiveWebBufferAudioPlayback = null;
+            }
+          };
+          const abortBufferPlayback = () => {
+            clearBufferAbort();
+            try {
+              src!.stop(0);
+            } catch {
+              /* ignore */
+            }
+            if (activeWebBufferSource === src) activeWebBufferSource = null;
+            reject(new WebInterviewTtsTabHiddenAbortError());
+          };
+          abortActiveWebBufferAudioPlayback = abortBufferPlayback;
           src!.onended = () => {
+            clearBufferAbort();
             finalizeInterviewMicAmbientOnTtsEnd();
             if (activeWebBufferSource === src) activeWebBufferSource = null;
             resolve();
@@ -737,7 +984,7 @@ async function tryPlayElevenLabsMp3WithWebAudio(
               } catch {
                 /* ignore */
               }
-              reject(new Error('tts-schedule-aborted'));
+              reject(new WebInterviewTtsTabHiddenAbortError());
               return;
             }
             src!.start(0);
@@ -759,9 +1006,12 @@ async function tryPlayElevenLabsMp3WithWebAudio(
       ]);
       return true;
     } catch (raceErr) {
+      if (raceErr instanceof WebInterviewTtsTabHiddenAbortError) {
+        throw raceErr;
+      }
       const msg = raceErr instanceof Error ? raceErr.message : String(raceErr);
       if (msg === 'tts-schedule-aborted') {
-        return false;
+        throw new WebInterviewTtsTabHiddenAbortError();
       }
       return handlePlaybackRaceError(raceErr);
     }
@@ -1334,9 +1584,17 @@ export async function speakWithElevenLabs(
     throw new WebTtsRequiresUserGestureError(spokenText);
   }
 
+  /**
+   * Interview `turn` and tab-restore `replay` lines use HTML `<audio>` so tab-hide can soft-pause and resume mid-utterance.
+   * PCM / Web Audio buffer paths cannot seek and always replay from the start after tab return.
+   */
+  const preferTabResumableHtmlAudio =
+    Platform.OS === 'web' && (telemetrySource === 'turn' || telemetrySource === 'replay');
+
   /** PCM chunks schedule many `AudioBufferSourceNode`s — desktop Chrome still hits static after tab suspend/resume; mobile keeps streaming for earlier audible output on long lines. iOS Safari mobile never uses PCM (HTML audio only — avoids mid-playback pipeline switch / static). */
   const shouldTryPcmStream =
     Platform.OS === 'web' &&
+    !preferTabResumableHtmlAudio &&
     !options?.skipPcmStream &&
     !isAnyMobileWebBrowser() &&
     !isIosSafariMobileWeb() &&
@@ -1384,7 +1642,7 @@ export async function speakWithElevenLabs(
        * which hits autoplay policy (no user gesture) — user must tap. Desktop should use Web Audio
        * after `unlockWebAudioForAutoplay()` in `startInterview` so the first line can speak without a tap.
        */
-      const skipWebAudioDecode = webSpeechShouldDeferToUserGesture();
+      const skipWebAudioDecode = webSpeechShouldDeferToUserGesture() || preferTabResumableHtmlAudio;
       const playedViaCtx = skipWebAudioDecode
         ? false
         : await tryPlayElevenLabsMp3WithWebAudio(
@@ -1447,8 +1705,12 @@ export async function speakWithElevenLabs(
         htmlAudio.playbackRate = playbackRateMultiplier;
       }
       activeWebAudio = htmlAudio;
-      /** Context only — do not reprime shared HTMLAudio here; `src` is already the MP3 blob URL. */
-      if (!(await ensureSharedWebAudioContextResumedForPlayback(telemetrySource))) {
+      activeWebHtmlAudioObjectUrl = url;
+      /** HTML `<audio>` does not require a running shared AudioContext — only Web Audio decode does. */
+      if (
+        !preferTabResumableHtmlAudio &&
+        !(await ensureSharedWebAudioContextResumedForPlayback(telemetrySource))
+      ) {
         activeWebAudio = null;
         URL.revokeObjectURL(url);
         await speakFallback(spokenText, onFallback, options);
@@ -1465,11 +1727,23 @@ export async function speakWithElevenLabs(
         const finish = (action: 'resolve' | 'reject', err?: Error) => {
           if (settled) return;
           settled = true;
+          if (abortActiveWebHtmlAudioPlayback === abortThisPlayback) {
+            abortActiveWebHtmlAudioPlayback = null;
+          }
           if (timeoutId != null) clearTimeout(timeoutId);
           timeoutId = null;
           if (action === 'resolve') resolve();
           else reject(err ?? new Error('Audio playback failed'));
         };
+        const abortThisPlayback = () => {
+          try {
+            if (!htmlAudio.ended) htmlAudio.pause();
+          } catch {
+            /* ignore */
+          }
+          finish('reject', new WebInterviewTtsTabHiddenAbortError());
+        };
+        abortActiveWebHtmlAudioPlayback = abortThisPlayback;
         const scheduleSafetyTimeout = (reason: string) => {
           if (settled) return;
           if (timeoutId != null) clearTimeout(timeoutId);
@@ -1479,6 +1753,10 @@ export async function speakWithElevenLabs(
               ? Math.min(600_000, Math.ceil(d * 1000) + 3000)
               : LOOSE_UNTIL_METADATA_MS;
           timeoutId = setTimeout(() => {
+            if (htmlAudioPausedForTabResume) {
+              scheduleSafetyTimeout('tab_paused_hold');
+              return;
+            }
             try {
               if (!htmlAudio.ended) {
                 htmlAudio.pause();
@@ -1488,6 +1766,8 @@ export async function speakWithElevenLabs(
             }
             try {
               activeWebAudio = null;
+              if (activeWebHtmlAudioObjectUrl === url) activeWebHtmlAudioObjectUrl = null;
+              clearHtmlAudioTabResumeState();
               URL.revokeObjectURL(url);
             } catch {
               /* ignore */
@@ -1507,11 +1787,14 @@ export async function speakWithElevenLabs(
         htmlAudio.onended = () => {
           finalizeInterviewMicAmbientOnTtsEnd();
           activeWebAudio = null;
+          if (activeWebHtmlAudioObjectUrl === url) activeWebHtmlAudioObjectUrl = null;
+          clearHtmlAudioTabResumeState();
           URL.revokeObjectURL(url);
           finish('resolve');
         };
         htmlAudio.onerror = () => {
           activeWebAudio = null;
+          if (activeWebHtmlAudioObjectUrl === url) activeWebHtmlAudioObjectUrl = null;
           URL.revokeObjectURL(url);
           finish('reject', new Error('Audio playback failed'));
         };
@@ -1528,13 +1811,33 @@ export async function speakWithElevenLabs(
           })
           .catch(async (playErr: unknown) => {
             if (isWebAudioAutoplayBlockedError(playErr)) {
-              activeWebAudio = null;
               pendingWebGestureBlobUrl = url;
+              activeWebAudio = htmlAudio;
               logTtsAutoplayPlayOutcome({
                 pipeline: 'elevenlabs_web_html_audio',
                 outcome: 'play_blocked_autoplay',
                 telemetrySource,
               });
+              if (
+                (telemetrySource === 'turn' || telemetrySource === 'replay') &&
+                (preAuthorizedEl || (options?.prefetchedMpegArrayBuffer?.byteLength ?? 0) > 0)
+              ) {
+                try {
+                  htmlAudio.volume = 1;
+                  await htmlAudio.play();
+                  onPlaybackStarted?.();
+                  logTtsAutoplayPlayOutcome({
+                    pipeline: 'elevenlabs_web_html_audio',
+                    outcome: 'play_ok',
+                    telemetrySource,
+                  });
+                  finish('resolve');
+                  return;
+                } catch {
+                  /* fall through to web speech */
+                }
+              }
+              activeWebAudio = null;
               try {
                 const webRes = await speakWithWebSpeechSynthesis(
                   spokenText,
@@ -1645,7 +1948,7 @@ export async function speakWithElevenLabs(
       // ignore cleanup errors
     }
   } catch (err) {
-    if (err instanceof WebTtsRequiresUserGestureError) {
+    if (err instanceof WebTtsRequiresUserGestureError || err instanceof WebInterviewTtsTabHiddenAbortError) {
       throw err;
     }
     console.warn('ElevenLabs TTS failed, using fallback:', err);
@@ -1697,14 +2000,17 @@ function speakWithWebSpeechSynthesis(
     utter.rate = Math.min(4, Math.max(0.5, 0.92 * playbackRateMultiplier));
     utter.pitch = 0.95;
     utter.onstart = () => {
+      webSpeechSynthTabResumeState = { fullText: spokenText, startedAtMs: Date.now() };
       onPlaybackStarted?.();
       void beginInterviewMicPreInitDuringTts(preInitTriggerDuring);
     };
     utter.onend = () => {
+      clearWebSpeechSynthTabResumeState();
       finalizeInterviewMicAmbientOnTtsEnd();
       settle({ ok: true });
     };
     utter.onerror = (ev) => {
+      clearWebSpeechSynthTabResumeState();
       const code =
         typeof ev === 'object' && ev !== null && 'error' in ev
           ? String((ev as SpeechSynthesisErrorEvent).error)

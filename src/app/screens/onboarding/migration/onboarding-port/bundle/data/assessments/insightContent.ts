@@ -205,36 +205,6 @@ const CONFLICT_STYLE_DETAIL: Record<
   },
 };
 
-const RELATIONSHIP_TRAIT_DETAIL_META: Array<{
-  key: "emotional_stability_under_stress" | "dispositional_trust";
-  label: string;
-  description: string;
-}> = [
-  {
-    key: "emotional_stability_under_stress",
-    label: "Emotional Stability Under Stress",
-    description:
-      "Reflects how steady and self-regulated you tend to be when stress or conflict enters a relationship.",
-  },
-  {
-    key: "dispositional_trust",
-    label: "Dispositional Trust",
-    description:
-      "Reflects whether you tend to interpret a partner's behavior through baseline trust, goodwill, and benefit of the doubt.",
-  },
-];
-
-function relationshipTraitsDetails(scores: Record<string, number>): InsightRow[] {
-  return RELATIONSHIP_TRAIT_DETAIL_META.map(({ key, label, description }) => {
-    const v = scores[key] ?? 0;
-    return {
-      label,
-      value: `${v.toFixed(2)} / 7`,
-      description,
-    };
-  });
-}
-
 function conflict30Details(scores: Record<string, number>): InsightRow[] {
   return CONFLICT_STYLE_KEYS.map((k) => {
     const pct = scores[k] ?? 0;
@@ -257,8 +227,6 @@ export function buildDetailedInsightRows(
       return pvqDetails(scores);
     case "CONFLICT-30":
       return conflict30Details(scores);
-    case "RELATIONSHIP_TRAITS_8":
-      return relationshipTraitsDetails(scores);
     default:
       return Object.entries(scores).map(([k, v]) => ({
         label: toTitleCase(k),
@@ -402,23 +370,6 @@ function conflict30Insight(scores: Record<string, number>): InsightContent {
   };
 }
 
-function relationshipTraits8Insight(scores: Record<string, number>): InsightContent {
-  const headline = "Your snapshot on stress and trust is ready.";
-  const body =
-    "These two dimensions are relationship-specific: how stress and conflict tend to affect your steadiness day to day, and how you tend to interpret a partner when things are unclear. Lower scores are not a character judgment — they often reflect history, context, and what you need to feel safe.";
-  const growthEdge =
-    "If anything lands differently than you expected, treat it as a conversation starter with yourself (or a therapist), not a label.";
-  return {
-    headline,
-    body,
-    growthEdge,
-    nextTitle: null,
-    nextMeta: null,
-    isFinal: true,
-    details: relationshipTraitsDetails(scores),
-  };
-}
-
 function pvq21Insight(scores: Record<string, number>): InsightContent {
   const axes = [
     { key: "self_transcendence", label: "Self-Transcendence" },
@@ -471,8 +422,6 @@ export function getInsightContent(
       return pvq21Insight(scores);
     case "CONFLICT-30":
       return conflict30Insight(scores);
-    case "RELATIONSHIP_TRAITS_8":
-      return relationshipTraits8Insight(scores);
     default:
       return {
         headline: "Assessment complete.",
@@ -492,7 +441,6 @@ export const INSTRUMENT_TITLES: Record<AssessmentId, string> = {
   BRS: "Resilience",
   "PVQ-21": "Schwartz Values",
   "CONFLICT-30": "Conflict Style",
-  "RELATIONSHIP_TRAITS_8": "Relationship Traits",
 };
 
 /**

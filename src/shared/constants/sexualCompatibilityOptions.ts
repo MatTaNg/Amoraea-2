@@ -40,20 +40,6 @@ export const SEXUAL_FOCUS_OPTIONS = [
   'It shifts depending on the moment',
 ].map((label) => ({ label, value: label }));
 
-export const SEXUAL_FEEDBACK_STYLE_OPTIONS = [
-  'Bring it up directly — communication is how things improve',
-  'Drop hints and hope my partner picks up on it',
-  'Usually let it go to avoid making things awkward',
-  'Depends on how comfortable I am with the person',
-].map((label) => ({ label, value: label }));
-
-export const SEXUAL_NEEDS_COMMUNICATION_OPTIONS = [
-  'Very comfortable — I see it as an important part of intimacy',
-  'Somewhat comfortable, though it can feel vulnerable',
-  'I find it difficult but recognize it matters',
-  'I prefer to let things develop naturally without explicit conversation',
-].map((label) => ({ label, value: label }));
-
 export const PREF_PHYSICAL_COMPAT_CENTRALITY_OPTIONS = [
   'Not important',
   'A little important',
@@ -69,6 +55,41 @@ export const PREF_PARTNER_SHARES_SEXUAL_INTERESTS_OPTIONS = [
   'Important',
   'Dealbreaker',
 ] as const;
+
+/** Shown in onboarding + edit profile dealbreakers (must-have wording). */
+export const PREF_PARTNER_SHARES_SPECIFIC_SEX_INTERESTS_QUESTION =
+  'Is it a must have that your partner shares your specific sex interests?';
+
+/** Bottom sheet title when picking Yes/No for {@link PREF_PARTNER_SHARES_SPECIFIC_SEX_INTERESTS_QUESTION}. */
+export const PREF_PARTNER_SPECIFIC_SEX_INTERESTS_SHEET_TITLE =
+  'Specific sex interests — must-have?';
+
+/** Yes/No rows for {@link PREF_PARTNER_SHARES_SPECIFIC_SEX_INTERESTS_QUESTION} (onboarding inline pickers). */
+export const PARTNER_SPECIFIC_SEX_MUST_HAVE_YES_NO_OPTIONS: { label: string; value: string }[] = [
+  { label: 'Yes', value: 'Yes' },
+  { label: 'No', value: 'No' },
+];
+
+/** Picker labels for onboarding / edit profile; persisted values stay `Dealbreaker` / `No preference`. */
+export const PREF_PARTNER_SHARES_SEXUAL_INTERESTS_YES_NO = ['Yes', 'No'] as const;
+
+/** Selected row in Yes/No sheet (`''` when unset). */
+export function prefPartnerSharesSexualInterestsYesNoSelected(stored: string): string {
+  const t = String(stored ?? '').trim();
+  if (!t) return '';
+  return t === 'Dealbreaker' ? 'Yes' : 'No';
+}
+
+/** Maps Yes/No pick to stored preference. */
+export function prefPartnerSharesSexualInterestsFromYesNo(yesNo: string): string {
+  return String(yesNo ?? '').trim() === 'Yes' ? 'Dealbreaker' : 'No preference';
+}
+
+/** Trigger label: Yes / No / Select. */
+export function labelForPrefPartnerSharesSexualInterestsYesNoPicker(stored: string): string {
+  const y = prefPartnerSharesSexualInterestsYesNoSelected(stored);
+  return y === '' ? 'Select' : y;
+}
 
 /** Stored in `sexInterestCategories` as each option's `value` (stable slug). */
 export const SEX_INTEREST_CATEGORY_OPTIONS: { label: string; value: string }[] = [

@@ -47,6 +47,8 @@ export type BasicInfoFormProps = {
   onLocationSuggestionSelect: (selected: string) => void;
   onUseMyLocation: () => void | Promise<void>;
   validatedLocation: string;
+  /** When false, occupation is omitted (collected in welcome market research). */
+  showOccupation?: boolean;
 };
 
 function err(show: boolean, message: string) {
@@ -67,6 +69,7 @@ export const BasicInfoForm: React.FC<BasicInfoFormProps> = ({
   onLocationSuggestionSelect,
   onUseMyLocation,
   validatedLocation,
+  showOccupation = true,
 }) => {
   const { displayName, gender, relationshipStyle, location, occupation, bio } = profile;
 
@@ -129,12 +132,14 @@ export const BasicInfoForm: React.FC<BasicInfoFormProps> = ({
         <Button title="Use my location" variant="outline" onPress={() => void onUseMyLocation()} />
       </View>
 
-      <Input
-        label="Occupation"
-        value={occupation ?? ''}
-        onChangeText={(t) => onFieldChange('occupation', t)}
-        placeholder="What you do"
-      />
+      {showOccupation ? (
+        <Input
+          label="Occupation"
+          value={occupation ?? ''}
+          onChangeText={(t) => onFieldChange('occupation', t)}
+          placeholder="What you do"
+        />
+      ) : null}
 
       <Input
         label="Bio"

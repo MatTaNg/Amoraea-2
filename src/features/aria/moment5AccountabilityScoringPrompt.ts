@@ -8,6 +8,9 @@ import {
   CONTEMPT_TIER_BREAKDOWN_JSON_INSTRUCTION,
   CONTEMPT_TIER_BREAKDOWN_JSON_TEMPLATE,
 } from './contemptExpressionScoringRubric';
+import { MENTALIZING_OVERCERTAINTY_SCORING_INSTRUCTION } from './personalMomentScoringPrompt';
+import { RESPONSE_CONCRETENESS_SCORING_INSTRUCTION } from './personalMomentConcreteness';
+import { PERSONAL_MOMENT_EMOTIONAL_VOCAB_SCORING_INSTRUCTION } from './personalMomentEmotionalVocab';
 
 const MOMENT_META = {
   name: 'Moment 5 (Personal Conflict / Accountability)',
@@ -112,6 +115,12 @@ ACCOUNTABILITY-BAND CALIBRATION (encode in scores + evidence; use literal summar
 
 Score mentalizing, repair, regulation, and contempt_expression from this slice **only when there is assessable evidence**; otherwise JSON null for that marker with a brief keyEvidence note.
 
+${MENTALIZING_OVERCERTAINTY_SCORING_INSTRUCTION}
+
+${RESPONSE_CONCRETENESS_SCORING_INSTRUCTION}
+
+${PERSONAL_MOMENT_EMOTIONAL_VOCAB_SCORING_INSTRUCTION}
+
 contempt_expression (same CONTEMPT_EXPRESSION tier rubric as scenarios — full block below).
 `;
 
@@ -145,6 +154,11 @@ Return ONLY valid JSON:
   "pillarScores": { ${ids.map((id) => `"${id}": 0`).join(', ')} },
   "pillarConfidence": { ${ids.map((id) => `"${id}": "high"`).join(', ')} },
   "keyEvidence": { ${ids.map((id) => `"${id}": ""`).join(', ')} },
+  "mentalizing_overcertainty": false,
+  "response_concreteness": "moderate",
+  "emotional_vocab_count": 0,
+  "emotional_vocab_words": [],
+  "user_slice_word_count": 0,
   "contempt_tier_breakdown": ${CONTEMPT_TIER_BREAKDOWN_JSON_TEMPLATE},
   "summary": "",
   "specificity": "high"

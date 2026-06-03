@@ -197,7 +197,7 @@ export function computeAvgUserWordsPerTurnPersonalSlice(
 
 export function computeAvgUserWordsPerTurnForInterviewMoment(
   transcript: Array<{ role?: string; content?: string; interviewMoment?: number } | null | undefined>,
-  interviewMoment: 4 | 5,
+  interviewMoment: 1 | 2 | 3 | 4 | 5,
 ): number {
   if (!Array.isArray(transcript)) return 0;
   const turns = transcript

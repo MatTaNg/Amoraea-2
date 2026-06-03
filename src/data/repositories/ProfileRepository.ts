@@ -1,14 +1,15 @@
+import { applyProfileUpdate, loadEditProfileSnapshot } from '@data/repos/editProfileRepo';
+import { profilesRepo } from '@data/repos/profilesRepo';
+import { updateUserOnboardingFlags } from '@data/repos/usersRoutingRepo';
 import { supabase } from '../supabase/client';
-import { signOutIfUsersAuthFkViolation } from '../supabase/signOutIfUsersAuthFkViolation';
+import { PROFILE_PHOTO_SELECT } from '../supabase/tableSelects';
+import { USERS_PROFILE_SELECT } from '../supabase/userInterviewRoutingSelect';
 import {
   Profile,
   ProfileUpdate,
   ProfilePhoto,
-  Location,
   ProfilePromptAnswer,
   BasicInfo,
-  Gate2Psychometrics,
-  Gate3Compatibility,
 } from '@domain/models/Profile';
 import type { OnboardingStage, ApplicationStatus } from '@domain/models/OnboardingGates';
 
@@ -54,130 +55,85 @@ function parseBasicInfo(v: unknown): BasicInfo | null {
   };
 }
 
-function parseGate2Psychometrics(v: unknown): Gate2Psychometrics | null {
-  if (v === null || v === undefined || typeof v !== 'object') return null;
-  const o = v as Record<string, unknown>;
-  if (typeof o.ecr12 !== 'object' || typeof o.tipi !== 'object' || typeof o.dsisf !== 'object' || typeof o.brs !== 'object' || typeof o.pvq21 !== 'object') return null;
-  return {
-    ecr12: o.ecr12 as Gate2Psychometrics['ecr12'],
-    tipi: o.tipi as Gate2Psychometrics['tipi'],
-    dsisf: o.dsisf as Gate2Psychometrics['dsisf'],
-    brs: o.brs as Gate2Psychometrics['brs'],
-    pvq21: o.pvq21 as Gate2Psychometrics['pvq21'],
-    completedAt: typeof (o as { completedAt?: string }).completedAt === 'string' ? (o as { completedAt: string }).completedAt : new Date().toISOString(),
-  };
-}
-
-function parseGate3Compatibility(v: unknown): Gate3Compatibility | null {
-  if (v === null || v === undefined || typeof v !== 'object') return null;
-  return v as Gate3Compatibility;
-}
-
-function parsePsychometricsProgress(v: unknown): Profile['psychometricsProgress'] {
-  if (v === null || v === undefined || typeof v !== 'object') return null;
-  const o = v as Record<string, unknown>;
-  const result: Record<string, Record<string, number>> = {};
-  for (const key of ['ecr', 'tipi', 'dsi', 'brs', 'pvq']) {
-    const val = o[key];
-    if (val !== null && val !== undefined && typeof val === 'object' && !Array.isArray(val)) {
-      const entries = Object.entries(val as Record<string, unknown>).filter(
-        ([, n]): n is number => typeof n === 'number'
-      );
-      if (entries.length) result[key] = Object.fromEntries(entries);
-    }
-  }
-  return Object.keys(result).length ? result : null;
-}
-
-// Many Supabase profiles use a PostgreSQL enum with lowercase values; our app uses capitalized
-const GENDER_TO_DB: Record<string, string> = { Man: 'man', Woman: 'woman', 'Non-binary': 'non-binary' };
-const GENDER_FROM_DB: Record<string, Profile['gender']> = {
-  man: 'Man',
-  woman: 'Woman',
-  non_binary: 'Non-binary',
-  'non-binary': 'Non-binary',
-};
-
 export class ProfileRepository {
   async getProfile(userId: string): Promise<Profile | null> {
     const { data, error } = await supabase
       .from('users')
-      .select('*')
+      .select(USERS_PROFILE_SELECT)
       .eq('id', userId)
       .maybeSingle();
 
     if (error) throw new Error(`Failed to fetch profile: ${error.message}`);
     if (!data) return null;
 
-    return this.mapToProfile(data);
+    const base = this.mapToProfile(data);
+    try {
+      const snap = await loadEditProfileSnapshot(userId);
+      if (!snap) return base;
+      return {
+        ...base,
+        name: snap.name || base.name,
+        age: snap.age ?? base.age,
+        gender: snap.gender ?? base.gender,
+        attractedTo: snap.attractedTo.length > 0 ? snap.attractedTo : base.attractedTo,
+        heightCentimeters: snap.heightCentimeters ?? base.heightCentimeters,
+        occupation: snap.occupation || base.occupation,
+        primaryPhotoUrl: snap.primaryPhotoUrl ?? base.primaryPhotoUrl,
+        prompts: snap.prompts.length > 0 ? snap.prompts : base.prompts,
+        basicInfo: snap.basicInfo ?? base.basicInfo,
+      };
+    } catch {
+      return base;
+    }
   }
 
+  /**
+   * Persists profile changes via canonical repos (Phase 5):
+   * dating fields → `profiles.profile_json`; interview/gates → narrow `users` updates.
+   */
   async upsertProfile(userId: string, update: ProfileUpdate): Promise<Profile> {
-    const { data: { session } } = await supabase.auth.getSession();
-    const updateData: Record<string, unknown> = {
-      id: userId,
-      updated_at: new Date().toISOString(),
-    };
-    if (session?.user?.email) {
-      updateData.email = session.user.email;
-    }
-    // Supabase profiles often have NOT NULL display_name; set from name or fallback for initial insert
-    if (update.name !== undefined) {
-      updateData.display_name = update.name;
-    } else {
-      updateData.display_name =
-        session?.user?.user_metadata?.full_name ??
-        session?.user?.email?.split('@')[0] ??
-        'User';
-    }
+    const {
+      data: { session },
+    } = await supabase.auth.getSession();
 
-    if (update.name !== undefined) updateData.name = update.name;
-    if (update.age !== undefined) updateData.age = update.age;
-    if (update.gender !== undefined) updateData.gender = GENDER_TO_DB[update.gender] ?? update.gender;
-    if (update.attractedTo !== undefined) updateData.attracted_to = update.attractedTo;
-    if (update.heightCentimeters !== undefined) updateData.height_centimeters = update.heightCentimeters;
-    if (update.occupation !== undefined) updateData.occupation = update.occupation;
-    if (update.location !== undefined) {
-      updateData.location_latitude = update.location.latitude;
-      updateData.location_longitude = update.location.longitude;
-      updateData.location_label = update.location.label;
-    }
-    if (update.primaryPhotoUrl !== undefined) updateData.primary_photo_url = update.primaryPhotoUrl;
-    if (update.onboardingStep !== undefined) updateData.onboarding_step = update.onboardingStep;
-    if (update.onboardingCompleted !== undefined) updateData.onboarding_completed = update.onboardingCompleted;
-    if (update.prompts !== undefined) updateData.profile_prompts = update.prompts;
-    if (update.onboardingStage !== undefined) updateData.onboarding_stage = update.onboardingStage;
-    if (update.applicationStatus !== undefined) updateData.application_status = update.applicationStatus;
-    if (update.profileVisible !== undefined) updateData.profile_visible = update.profileVisible;
-    if (update.basicInfo !== undefined) updateData.basic_info = update.basicInfo;
-    if (update.gate2Psychometrics !== undefined) updateData.gate2_psychometrics = update.gate2Psychometrics;
-    if (update.gate3Compatibility !== undefined) updateData.gate3_compatibility = update.gate3Compatibility;
-    if (update.psychometricsProgress !== undefined) updateData.psychometrics_progress = update.psychometricsProgress;
-    if (update.referralNoticePending !== undefined) updateData.referral_notice_pending = update.referralNoticePending;
+    const touchesDatingJson =
+      update.name !== undefined ||
+      update.age !== undefined ||
+      update.gender !== undefined ||
+      update.attractedTo !== undefined ||
+      update.heightCentimeters !== undefined ||
+      update.occupation !== undefined ||
+      update.location !== undefined ||
+      update.primaryPhotoUrl !== undefined;
 
-    // Remove undefined values so we don't send them to PostgREST (can cause 400)
-    const payload: Record<string, unknown> = {};
-    for (const [k, v] of Object.entries(updateData)) {
-      if (v !== undefined) payload[k] = v;
+    if (touchesDatingJson) {
+      const ensured = await profilesRepo.ensureProfile(userId, session?.user?.email);
+      if (!ensured.success) throw ensured.error;
     }
 
-    const { data, error } = await supabase
-      .from('users')
-      .upsert(payload, { onConflict: 'id' })
-      .select()
-      .single();
-
-    if (error) {
-      const err = error as { code?: string; message?: string; details?: string; hint?: string };
-      if (await signOutIfUsersAuthFkViolation(err)) {
-        throw new Error('Your session is no longer valid. Please sign in again.');
-      }
-      const extra = [err.details, err.hint].filter(Boolean).join('; ');
-      const fullMessage = extra ? `${error.message} — ${extra}` : error.message;
-      throw new Error(`Failed to upsert profile: ${fullMessage}`);
+    try {
+      await applyProfileUpdate(userId, update);
+    } catch (error) {
+      throw new Error(
+        `Failed to upsert profile: ${error instanceof Error ? error.message : String(error)}`,
+      );
     }
 
-    return this.mapToProfile(data);
+    const flags: Parameters<typeof updateUserOnboardingFlags>[1] = {};
+    if (update.onboardingStep !== undefined) flags.onboardingStep = update.onboardingStep;
+    if (update.onboardingCompleted !== undefined) flags.onboardingCompleted = update.onboardingCompleted;
+    if (update.referralNoticePending !== undefined) {
+      flags.referralNoticePending = update.referralNoticePending;
+    }
+    if (Object.keys(flags).length > 0) {
+      await updateUserOnboardingFlags(userId, flags);
+    }
+
+    const profile = await this.getProfile(userId);
+    if (!profile) {
+      throw new Error('Failed to upsert profile: user row not found');
+    }
+    return profile;
   }
 
   async uploadPhoto(userId: string, fileUri: string, fileName: string): Promise<{ publicUrl: string; storagePath: string }> {
@@ -255,7 +211,7 @@ export class ProfileRepository {
   async getProfilePhotos(userId: string): Promise<ProfilePhoto[]> {
     const { data, error } = await supabase
       .from('profile_photos')
-      .select('*')
+      .select(PROFILE_PHOTO_SELECT)
       .eq('profile_id', userId)
       .order('display_order', { ascending: true });
 
@@ -281,41 +237,17 @@ export class ProfileRepository {
     onboarding_step: number;
     name?: string | null;
     display_name?: string | null;
-    age?: number | null;
-    gender: string | null;
-    attracted_to: string[] | null;
-    height_centimeters: number | null;
-    occupation: string | null;
-    location_latitude: number | null;
-    location_longitude: number | null;
-    location_label: string | null;
-    primary_photo_url: string | null;
     invite_code?: string | null;
     is_alpha_tester?: boolean | null;
     profile_prompts?: unknown;
     onboarding_stage?: string | null;
     application_status?: string | null;
-    profile_visible?: boolean | null;
     basic_info?: unknown;
-    gate2_psychometrics?: unknown;
-    gate3_compatibility?: unknown;
-    psychometrics_progress?: unknown;
     interview_completed?: boolean | null;
     interview_passed?: boolean | null;
     referral_boost_active?: boolean | null;
     referral_notice_pending?: string | null;
   }): Profile {
-    const location: Location | null =
-      data.location_latitude != null && data.location_longitude != null
-        ? {
-            latitude: data.location_latitude,
-            longitude: data.location_longitude,
-            label: data.location_label ?? null,
-          }
-        : data.location_label
-          ? { latitude: 0, longitude: 0, label: data.location_label }
-          : null;
-
     return {
       id: data.id,
       createdAt: data.created_at,
@@ -323,13 +255,13 @@ export class ProfileRepository {
       onboardingCompleted: data.onboarding_completed,
       onboardingStep: data.onboarding_step,
       name: data.name ?? data.display_name ?? null,
-      age: data.age ?? null,
-      gender: (data.gender ? GENDER_FROM_DB[data.gender.toLowerCase().replace('-', '_')] : null) ?? (data.gender as Profile['gender']),
-      attractedTo: data.attracted_to as Profile['attractedTo'],
-      heightCentimeters: data.height_centimeters,
-      occupation: data.occupation,
-      location,
-      primaryPhotoUrl: data.primary_photo_url,
+      age: null,
+      gender: null,
+      attractedTo: null,
+      heightCentimeters: null,
+      occupation: null,
+      location: null,
+      primaryPhotoUrl: null,
       inviteCode: data.invite_code ?? null,
       isAlphaTester: data.is_alpha_tester === true,
       referralBoostActive: data.referral_boost_active === true,
@@ -340,11 +272,7 @@ export class ProfileRepository {
       prompts: parseProfilePrompts(data.profile_prompts),
       onboardingStage: parseOnboardingStage(data.onboarding_stage),
       applicationStatus: parseApplicationStatus(data.application_status),
-      profileVisible: data.profile_visible === true,
       basicInfo: parseBasicInfo(data.basic_info),
-      gate2Psychometrics: parseGate2Psychometrics(data.gate2_psychometrics),
-      gate3Compatibility: parseGate3Compatibility(data.gate3_compatibility),
-      psychometricsProgress: parsePsychometricsProgress(data.psychometrics_progress),
     };
   }
 }

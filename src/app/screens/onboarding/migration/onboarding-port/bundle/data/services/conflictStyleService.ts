@@ -1,4 +1,5 @@
 import { supabase } from "@/data/supabaseClient";
+import { CONFLICT_STYLE_SCORES_SELECT } from "@/data/supabase/tableSelects";
 import type { ConflictStyleKey } from "@/data/assessments/instruments/conflictStyleTypes";
 import {
   primaryConflictStyle,
@@ -46,7 +47,7 @@ function countsToTraitPercents(counts: ConflictStyleCounts): Pick<
 export async function archiveConflictStyleHistory(userId: string): Promise<Result<void>> {
   const { data, error } = await supabase
     .from("conflict_style_scores")
-    .select("*")
+    .select(CONFLICT_STYLE_SCORES_SELECT)
     .eq("user_id", userId)
     .maybeSingle();
   if (error) return { success: false, error: new Error(error.message) };
@@ -170,8 +171,6 @@ export async function saveConflictStyleCompletion(
     if (!nextInstrument) {
       profileUpdate.assessmentsCompleted = true;
       profileUpdate.assessmentsCompletedAt = new Date().toISOString();
-      profileUpdate.onboardingCompleted = true;
-      profileUpdate.onboardingCompletedAt = new Date().toISOString();
     }
   }
 
@@ -239,7 +238,7 @@ export async function getConflictStyleScores(
 > {
   const { data, error } = await supabase
     .from("conflict_style_scores")
-    .select("*")
+    .select(CONFLICT_STYLE_SCORES_SELECT)
     .eq("user_id", userId)
     .maybeSingle();
   if (error) return { success: false, error: new Error(error.message) };

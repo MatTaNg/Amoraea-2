@@ -44,11 +44,11 @@ export const styles = StyleSheet.create({
     borderWidth: 2,
     borderColor: theme.colors.border,
     marginBottom: 12,
-    backgroundColor: theme.colors.surface,
+    backgroundColor: theme.colors.card,
   },
   optionSelected: {
     borderColor: theme.colors.primary,
-    backgroundColor: theme.colors.surfaceElevated,
+    backgroundColor: 'rgba(91, 168, 232, 0.12)',
   },
   optionText: {
     fontSize: 18,

@@ -1,0 +1,66 @@
+<user_query>
+# Task: Add optional Life Domain deep-dive questions after onboarding Life Domains step
+
+## Context
+We use Expo + Expo Router onboarding. Users already complete a **Life Domains** step where they distribute importance/priority across 5 domains (sliders or similar). **Immediately after that step**, add a new onboarding segment that lets users optionally answer deeper questions per domain.
+
+**All questions are optional.** Users must be able to skip the entire segment or skip individual domains/questions and still tap **Next** to continue onboarding.
+
+## Placement in flow
+Insert a new onboarding step (or sub-flow) **after** `lifeDomains` and **before** the next step (e.g. `typology` or `photos`—match our existing `ONBOARDING_STEPS_ORDER`).
+
+Suggested step id: `lifeDomainQuestions` (or one step per domain: `lifeDomainQuestionsFinance`, etc.—prefer **one scrollable flow** with 5 sections unless UX is too long).
+
+Update:
+- Step order array
+- Progress bar / step index
+- `onboarding_progress` persistence (`current_step`, `onboarding_data`) if we store partial answers there for resume
+- Do **not** block onboarding completion if zero questions are answered
+
+## UX requirements
+1. **Header copy** at the start of the segment:
+   - Title: e.g. "Tell us more (optional)"
+   - Body: "These questions help matches understand you in each life area. You can skip anything and fill them in later from your profile."
+2. **Per domain section**: show domain icon + name (see list below). Collapsible sections are fine.
+3. **Per question**: show question text; use **dropdown** (`Picker` or existing `SingleChoiceOptionList`) when `input === "dropdown"`, else multiline `TextInput` for long-form questions.
+4. **No required validation** — empty answers are allowed.
+5. **Next** saves whatever is filled and advances; **Back** returns to Life Domains step.
+6. Optional: show "X of Y answered" per domain (nice-to-have).
+
+## Data model (match existing Supabase schema if present)
+Persist answers to `life_domain_answers` (same as Edit Profile):
+- `user_id`, `domain_id`, `question_id`, `answer` (text), `show_on_match` (boolean, default `false` in onboarding unless we add a toggle later)
+- Upsert on conflict: `user_id,domain_id,question_id`
+- Domain importance scores stay on `profiles.life_domains` (or `life_domain_settings`) from the prior step—do not duplicate that here.
+
+Also save life domain **priority/importance** from the previous step if not already persisted before this segment runs.
+
+Reference implementation in source repo (if available in migration bundle):
+- `screens/profile/editProfile/editProfileService.ts` — `upsertLifeDomainAnswer`, `ensureLifeDomainQuestionsExist`
+- `screens/profile/editProfile/constants.ts` — `DOMAINS`, `LIFE_DOMAIN_QUESTIONS`
+- `screens/profile/components/lifeDomainQuestions.ts` — full question + picker option definitions
+
+## Five domains (display order)
+Use these `domain_id` keys in DB:
+
+| domain_id     | Display name                          |
+|---------------|---------------------------------------|
+| finance       | Finances / Business / Career          |
+| family        | Family                                |
+| intimacy      | Relationships / Intimacy / Sex      |
+| spirituality  | Spirituality / Religion               |
+| health        | Health / Fitness / Growth             |
+
+## Question bank (implement exactly)
+
+Create `shared/constants/lifeDomainOnboardingQuestions.ts` (or equivalent) with this structure:
+```ts
+export type LifeDomainQuestionDef = {
+  id: string;
+  text: string;
+  input?: "text" | "dropdown";
+  multiline?: boolean;
+  options?: { label: string; value: string }[]; // exclude empty "Select" from saved value
+};
+export const LIFE_DOMAIN_ONBOARDING_QUESTIONS: Record<DomainId, LifeDomainQuestionDef[]>
+</user_query>

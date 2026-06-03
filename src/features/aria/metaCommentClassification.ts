@@ -49,7 +49,7 @@ function stripControlTokensMini(text: string): string {
   if (!text) return text;
   return text
     .replace(/\[INTERVIEW_COMPLETE\]/gi, '')
-    .replace(/\[SCENARIO_COMPLETE:\d+\]/gi, '')
+    .replace(/\[SCENARIO_COMPLETE:\s*\d+\]/gi, '')
     .replace(/\[CLOSING_QUESTION:\d+\]/gi, '')
     .replace(/\[STAGE_[123]_COMPLETE\]/g, '')
     .replace(/\[PROBE_TRIGGERED\]/gi, '')
@@ -188,10 +188,14 @@ const SKIP_REQUEST_RES: RegExp[] = [
 const ALREADY_ANSWERED_RES: RegExp[] = [
   /\bi\s+already\s+said\s+that\b/i,
   /\bi\s+already\s+answered\s+that\b/i,
+  /\bi\s+already\s+answered\s+this\b/i,
+  /\bdidn'?t\s+i\s+already\s+answer\b/i,
+  /\bdid\s+i\s+already\s+answer\b/i,
   /\bi\s+already\s+said\s+what\s+i\s+think\b/i,
   /\bi\s+think\s+i\s+covered\s+that\b/i,
   /\bi\s+said\s+everything\s+i\s+have\s+to\s+say\b/i,
   /\bi\s+already\s+told\s+you\b/i,
+  /\bi\s+just\s+told\s+you\b/i,
   /\bi\s+just\s+said\s+that\b/i,
 ];
 
@@ -745,6 +749,11 @@ export function buildMetaCommentHandlingSuffix(args: {
   checkingInFrustrationAdjacent?: boolean;
   /** `checking_in` only — already inside Moment 5 after accountability probe fired. */
   inMoment5AfterAccountabilityProbe?: boolean;
+  /**
+   * `confusion` + `repeat_request` in Moment 5 when the client verified a prior substantive M5 answer —
+   * do not re-read the full conflict vignette / M5 bundle.
+   */
+  moment5ConfusionRepeatHasPriorSubstantive?: boolean;
 }): string {
   const {
     classification,
@@ -754,6 +763,7 @@ export function buildMetaCommentHandlingSuffix(args: {
     alreadyAnsweredPriorSubstantiveVerified,
     checkingInFrustrationAdjacent,
     inMoment5AfterAccountabilityProbe,
+    moment5ConfusionRepeatHasPriorSubstantive,
   } = args;
   const t = classification.type;
 
@@ -892,6 +902,23 @@ ${priorBranch}
   }
 
   if (t === 'confusion' && classification.confusion_subtype === 'repeat_request') {
+    if (moment5ConfusionRepeatHasPriorSubstantive === true) {
+      return `
+─────────────────────────────────────────
+META-COMMENT (CLIENT): CONFUSION — REPEAT REQUEST (MOMENT 5, PRIOR SUBSTANCE VERIFIED)
+─────────────────────────────────────────
+${noElongating}
+The participant asked to hear the question again, but they **already gave a substantive answer** in Moment 5 (client verified).
+
+**Do not** re-read the full conflict vignette, the Moment 4→5 transition bundle, or the long "think of a time when you had a conflict…" setup again.
+
+**Delivery rule:** In **one** short spoken turn, restate **only** the **immediate** last question they were answering (the latest assistant line before this meta turn — typically a follow-up probe). Prefix lightly ("Got it —" / "Sure —") then the question. If the client already delivered this replay, do not contradict it.
+
+**Forbidden:** Full scenario re-introduction, elongating probes, or treating this as a fresh conflict prompt.
+
+Then wait for their mic reply.
+`;
+    }
     return `
 ─────────────────────────────────────────
 META-COMMENT (CLIENT): CONFUSION — REPEAT REQUEST (heard / misheard the question)

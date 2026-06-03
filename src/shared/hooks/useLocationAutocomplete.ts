@@ -1,4 +1,4 @@
-import { useEffect, useRef } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { nominatimSearchPlaces } from '@/shared/utils/nominatimSearch';
 
 export type LocationSuggestion = { label: string };
@@ -22,25 +22,34 @@ export function useLocationAutocomplete({
   onSuggestionsChange,
   minLength = 2,
   debounceMs = 550,
-}: UseLocationAutocompleteParams): void {
+}: UseLocationAutocompleteParams): { isSearchingPlaces: boolean } {
+  const [isSearchingPlaces, setIsSearchingPlaces] = useState(false);
   const onSuggestionsRef = useRef(onSuggestionsChange);
   onSuggestionsRef.current = onSuggestionsChange;
 
   useEffect(() => {
+    let cancelled = false;
     const q = value.trim();
     if (q.length < minLength) {
       onSuggestionsRef.current([]);
-      return undefined;
+      setIsSearchingPlaces(false);
+      return () => {
+        cancelled = true;
+      };
     }
     const validated = validatedValue?.trim() ?? '';
     if (validated !== '' && q === validated) {
       onSuggestionsRef.current([]);
-      return undefined;
+      setIsSearchingPlaces(false);
+      return () => {
+        cancelled = true;
+      };
     }
 
-    let cancelled = false;
     const timer = setTimeout(() => {
       void (async () => {
+        if (cancelled) return;
+        setIsSearchingPlaces(true);
         try {
           const results = await nominatimSearchPlaces(q);
           if (!cancelled) {
@@ -50,6 +59,10 @@ export function useLocationAutocomplete({
           if (!cancelled) {
             onSuggestionsRef.current([]);
           }
+        } finally {
+          if (!cancelled) {
+            setIsSearchingPlaces(false);
+          }
         }
       })();
     }, debounceMs);
@@ -57,6 +70,9 @@ export function useLocationAutocomplete({
     return () => {
       cancelled = true;
       clearTimeout(timer);
+      setIsSearchingPlaces(false);
     };
   }, [value, validatedValue, minLength, debounceMs]);
+
+  return { isSearchingPlaces };
 }

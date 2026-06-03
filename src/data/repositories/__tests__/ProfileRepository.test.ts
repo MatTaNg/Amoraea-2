@@ -10,7 +10,24 @@ jest.mock('@data/supabase/client', () => ({
   },
 }));
 
+jest.mock('@data/repos/editProfileRepo', () => ({
+  applyProfileUpdate: jest.fn(() => Promise.resolve()),
+  loadEditProfileSnapshot: jest.fn(() => Promise.resolve(null)),
+}));
+
+jest.mock('@data/repos/profilesRepo', () => ({
+  profilesRepo: {
+    ensureProfile: jest.fn(() => Promise.resolve({ success: true, data: {} })),
+  },
+}));
+
+jest.mock('@data/repos/usersRoutingRepo', () => ({
+  updateUserOnboardingFlags: jest.fn(() => Promise.resolve()),
+}));
+
 import { supabase } from '@data/supabase/client';
+import { applyProfileUpdate } from '@data/repos/editProfileRepo';
+import { updateUserOnboardingFlags } from '@data/repos/usersRoutingRepo';
 import { ProfileRepository } from '../ProfileRepository';
 
 const baseUserRow = {
@@ -21,23 +38,10 @@ const baseUserRow = {
   onboarding_step: 1,
   name: 'Test',
   display_name: 'Test',
-  age: 30,
-  gender: 'man',
-  attracted_to: ['woman'],
-  height_centimeters: 180,
-  occupation: 'Dev',
-  location_latitude: 1,
-  location_longitude: 2,
-  location_label: 'NYC',
-  primary_photo_url: null,
   profile_prompts: null,
   onboarding_stage: 'interview',
   application_status: 'pending',
-  profile_visible: false,
   basic_info: null,
-  gate2_psychometrics: null,
-  gate3_compatibility: null,
-  psychometrics_progress: null,
 };
 
 describe('ProfileRepository', () => {
@@ -56,7 +60,19 @@ describe('ProfileRepository', () => {
   });
 
   describe('getProfile', () => {
-    it('maps DB gender and location into the Profile model', async () => {
+    it('maps users interview fields; demographics come from profile_json merge', async () => {
+      const { loadEditProfileSnapshot } = require('@data/repos/editProfileRepo');
+      (loadEditProfileSnapshot as jest.Mock).mockResolvedValueOnce({
+        name: 'Test',
+        age: 30,
+        gender: 'Man',
+        attractedTo: ['Women'],
+        heightCentimeters: 180,
+        occupation: 'Dev',
+        primaryPhotoUrl: null,
+        prompts: [],
+        basicInfo: null,
+      });
       (supabase.from as jest.Mock).mockReturnValueOnce({
         select: jest.fn(() => ({
           eq: jest.fn(() => ({
@@ -70,11 +86,7 @@ describe('ProfileRepository', () => {
       const p = await repo.getProfile('user-1');
       expect(p).not.toBeNull();
       expect(p!.gender).toBe('Man');
-      expect(p!.location).toEqual({
-        latitude: 1,
-        longitude: 2,
-        label: 'NYC',
-      });
+      expect(p!.heightCentimeters).toBe(180);
       expect(p!.onboardingStage).toBe('interview');
     });
 
@@ -106,20 +118,20 @@ describe('ProfileRepository', () => {
   });
 
   describe('upsertProfile', () => {
-    it('persists mapped fields and returns mapToProfile result', async () => {
-      const upsert = jest.fn(() => ({
-        select: jest.fn(() => ({
-          single: jest.fn(() =>
-            Promise.resolve({
-              data: { ...baseUserRow, name: 'Updated', gender: 'woman' },
-              error: null,
-            })
-          ),
-        })),
-      }));
-
+    it('routes dating fields and onboarding flags through canonical repos', async () => {
+      (applyProfileUpdate as jest.Mock).mockResolvedValue(undefined);
+      (updateUserOnboardingFlags as jest.Mock).mockResolvedValue(undefined);
       (supabase.from as jest.Mock).mockReturnValue({
-        upsert,
+        select: jest.fn(() => ({
+          eq: jest.fn(() => ({
+            maybeSingle: jest.fn(() =>
+              Promise.resolve({
+                data: { ...baseUserRow, name: 'Updated' },
+                error: null,
+              }),
+            ),
+          })),
+        })),
       });
 
       const p = await repo.upsertProfile('user-1', {
@@ -128,36 +140,61 @@ describe('ProfileRepository', () => {
         gender: 'Woman',
       });
 
-      expect(upsert).toHaveBeenCalled();
-      const payload = upsert.mock.calls[0][0] as Record<string, unknown>;
-      expect(payload.display_name).toBe('Updated');
-      expect(payload.onboarding_step).toBe(2);
-      expect(payload.gender).toBe('woman');
+      expect(applyProfileUpdate).toHaveBeenCalledWith('user-1', {
+        name: 'Updated',
+        onboardingStep: 2,
+        gender: 'Woman',
+      });
+      expect(updateUserOnboardingFlags).toHaveBeenCalledWith('user-1', { onboardingStep: 2 });
       expect(p.name).toBe('Updated');
-      expect(p.gender).toBe('Woman');
     });
 
-    it('throws with Supabase details when upsert fails', async () => {
+    it('throws when applyProfileUpdate fails', async () => {
+      (applyProfileUpdate as jest.Mock).mockRejectedValue(new Error('violates constraint'));
+
+      await expect(repo.upsertProfile('user-1', { name: 'X' })).rejects.toThrow(
+        /Failed to upsert profile: violates constraint/,
+      );
+    });
+
+    it('calls ensureProfile before dating field updates', async () => {
+      const { profilesRepo } = require('@data/repos/profilesRepo');
+      (applyProfileUpdate as jest.Mock).mockResolvedValue(undefined);
+      (updateUserOnboardingFlags as jest.Mock).mockResolvedValue(undefined);
       (supabase.from as jest.Mock).mockReturnValue({
-        upsert: jest.fn(() => ({
-          select: jest.fn(() => ({
-            single: jest.fn(() =>
-              Promise.resolve({
-                data: null,
-                error: {
-                  message: 'violates constraint',
-                  details: 'detail',
-                  hint: 'hint',
-                },
-              })
+        select: jest.fn(() => ({
+          eq: jest.fn(() => ({
+            maybeSingle: jest.fn(() =>
+              Promise.resolve({ data: { ...baseUserRow }, error: null }),
             ),
           })),
         })),
       });
 
-      await expect(
-        repo.upsertProfile('user-1', { name: 'X' })
-      ).rejects.toThrow(/Failed to upsert profile/);
+      await repo.upsertProfile('user-1', { age: 25 });
+
+      expect(profilesRepo.ensureProfile).toHaveBeenCalledWith('user-1', 'test@example.com');
+      expect(applyProfileUpdate).toHaveBeenCalledWith('user-1', { age: 25 });
+    });
+
+    it('does not call ensureProfile for interview-only updates', async () => {
+      const { profilesRepo } = require('@data/repos/profilesRepo');
+      (applyProfileUpdate as jest.Mock).mockResolvedValue(undefined);
+      (supabase.from as jest.Mock).mockReturnValue({
+        select: jest.fn(() => ({
+          eq: jest.fn(() => ({
+            maybeSingle: jest.fn(() =>
+              Promise.resolve({ data: { ...baseUserRow }, error: null }),
+            ),
+          })),
+        })),
+      });
+
+      await repo.upsertProfile('user-1', {
+        prompts: [{ promptId: 'p1', answer: 'x' }],
+      });
+
+      expect(profilesRepo.ensureProfile).not.toHaveBeenCalled();
     });
   });
 

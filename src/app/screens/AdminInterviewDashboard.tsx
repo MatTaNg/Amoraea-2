@@ -3,7 +3,7 @@
  * Visible only to admin@amoraea.com. Remove before production.
  */
 
-import React, { useState, useEffect, useCallback, useMemo } from 'react';
+import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import {
   View,
   Text,
@@ -20,21 +20,40 @@ import {
 } from 'react-native';
 import { supabase } from '@data/supabase/client';
 import {
+  INTERVIEW_ATTEMPTS_SUMMARY_SELECT,
+  INTERVIEW_ATTEMPTS_SUMMARY_SELECT_BASE,
+} from '@data/supabase/interviewAttemptSelects';
+import { COMMUNICATION_STYLE_PROFILE_SELECT } from '@data/supabase/tableSelects';
+import {
+  adminInterviewAttemptsFullSelect,
+  getInterviewAttemptDefenseCrossReferenceColumnAbsent,
+  getInterviewAttemptGamingCorrectionColumnsAbsent,
   getInterviewAttemptOverrideColumnsAbsent,
   isInterviewAttemptsMissingOverrideColumnsError,
+  markInterviewAttemptDefenseCrossReferenceColumnPresent,
+  markInterviewAttemptGamingCorrectionColumnsPresent,
   markInterviewAttemptOverrideColumnsPresent,
   rememberInterviewAttemptOverrideColumnsAbsent,
+  rememberInterviewAttemptSelectColumnAbsences,
+  updateInterviewAttemptRevealOverride,
 } from '@utilities/fetchInterviewAttemptRevealSnapshot';
 import { formatEdgeFunctionInvokeFailure } from '@utilities/runCommunicationStylePipeline';
 import {
   aggregatePillarScoresWithCommitmentMergeDetailed,
+  type DefensePatternsJson,
+  type DefensePatternTranscriptMsg,
   type MarkerScoreSlice,
 } from '@features/aria/aggregateMarkerScoresFromSlices';
+import { formatTranscriptTurnContentForDisplay } from '@features/aria/interviewTranscriptTurns';
 import { enrichScenarioSliceWithContemptHeuristic } from '@features/aria/contemptExpressionScenarioHeuristic';
 import {
   sanitizeMoment5PersonalScoresForAggregate,
   sanitizePersonalMomentScoresForAggregate,
 } from '@features/aria/personalMomentSliceSanitize';
+import {
+  extractPersonalMomentEmotionalVocabFromSlice,
+  scenarioEmotionalVocabDensityPercentFromTranscript,
+} from '@features/aria/personalMomentEmotionalVocab';
 import {
   describeCertaintyAmbiguityAxis,
   describeEmotionalAnalyticalAxis,
@@ -54,15 +73,39 @@ import {
   userTurnStringsScenarioSegment,
 } from '../../../supabase/functions/_shared/splitInterviewUserCorpus';
 import { ADMIN_CONSOLE_EMAIL, isAmoraeaAdminConsoleEmail } from '@/constants/adminConsole';
-import { adminRetryAIReasoningForAttempt } from '@utilities/adminRetryAIReasoning';
+import {
+  adminRetryNarrativeWithClientFallback,
+  fetchAttemptNarrativeState,
+} from '@utilities/adminRetryNarrativeWithClientFallback';
+import {
+  interviewAiReasoningIsSubstantive,
+  recoverFailedReasoningWithContent,
+} from '@utilities/kickClientInterviewNarrativeIfPending';
 import { confirmAsync } from '@utilities/alerts/confirmDialog';
 import { COMMUNICATION_FLOOR_MIN_AVG_WORDS } from '@features/aria/communicationFloorFromTranscript';
 import {
   computeGateResultCore,
   GATE_PASS_WEIGHTED_MIN,
+  REFERRAL_WEIGHTED_PASS_MIN,
+  type ComputeGateResultOptions,
   type GateFailCode,
   type GateFailDetailJson,
 } from '@features/aria/computeGateResultCore';
+import {
+  EMOTION_INTERVIEW_MODAL_ITEMS,
+  EMOTION_ITEM_CORRECT_ANSWERS,
+  EXPECTED_EMOTION_RECOGNITION_ITEMS,
+  countAnsweredEmotionItems,
+  emotionRecognitionCorrectCount,
+  hydrateEmotionResponsesFromStorage,
+  isEmotionRecognitionBatteryComplete,
+  storedEmotionCorrectCountFromRaw,
+  isLegacyEmotionRecognitionFloorOnlyFail,
+  LEGACY_EMOTION_RECOGNITION_FLOOR_REVIEW_NOTE,
+  emotionRecognitionDisplayPercentFromAttemptsRow,
+  resolveEmotionRecognitionRawScoreForGate,
+} from '@features/aria/emotionRecognitionInterview';
+import { DEFAULT_DEFENSE_PATTERNS } from '@features/aria/defensePatternsDetection';
 import { MENTALIZING_REPAIR_SCENARIO_PASS_MIN } from '@features/aria/mentalizingRepairScenarioFloor';
 import { SCENARIO_COMPOSITE_PASS_MIN } from '@features/aria/scenarioCompositeFloor';
 import {
@@ -72,6 +115,21 @@ import {
   type AdminGateOutcomeLabel,
 } from '@features/aria/adminGateDisplay';
 import { AdminFeedbackPanel } from '@/components/admin/AdminFeedbackPanel';
+import { OverviewTab } from '@features/admin/OverviewTab';
+import { UncertaintyScoreCard, uncertaintyBadgeColor, uncertaintyBadgeLabel } from '@features/admin/UncertaintyScoreCard';
+import { GamingCorrectionBanner, GamingCorrectionCard } from '@features/admin/GamingCorrectionCard';
+import { UNCERTAINTY_ROUTING_THRESHOLD } from '@features/psychometrics/computeUncertaintyScore';
+import type { DefenseCrossReferenceResult } from '@features/psychometrics/crossReferenceDefenseDetection';
+import { backfillMissingUncertaintyScores } from '@features/psychometrics/backfillMissingUncertaintyScores';
+import { applyPsychometricModifierToAttempt } from '@features/psychometrics/applyPsychometricModifier';
+import {
+  formatPsychometricGateFailDescription,
+  extractPsychometricFloorsFromGateDetail,
+  getRetroactivePsychometricFloorReviews,
+  ALL_PSYCHOMETRIC_GATE_FAIL_FLOOR_CODES,
+  psychometricFloorScoreForUser,
+  userNeedsPsychometricFloorReview,
+} from '@features/psychometrics/psychometricFloorBreaches';
 import { resolveAdminInterviewIntroDisplayName } from '@utilities/adminInterviewIntroDisplayName';
 import {
   computePillarScoreDelta,
@@ -79,6 +137,13 @@ import {
   snapshotAttemptScoresForAudit,
 } from '@features/aria/adminRecalculateAttemptScores';
 import { remoteLog } from '@utilities/remoteLog';
+import {
+  fetchAdminUserProfile,
+  FullAssessmentTab,
+  isRecoverableUsersSelectError,
+  ProfileIntentTab,
+  type AdminUserProfileRecord,
+} from '@app/screens/admin/AdminProfileAssessmentTabs';
 
 // Marker ids as stored in DB; construct keys match ai_reasoning.construct_breakdown
 const PILLAR_ROWS = [
@@ -114,13 +179,6 @@ function sliceContemptDisplayValue(scores: Record<string, number> | null | undef
   if (e != null && r != null) return Math.round((0.6 * e + 0.4 * r) * 10) / 10;
   return e ?? r;
 }
-const USER_FEEDBACK_LABELS: Record<string, string> = {
-  conversation_quality: 'Conversation Quality',
-  clarity_flow: 'Clarity and Flow',
-  trust_accuracy: 'Trust and Accuracy',
-  other_feedback: 'Additional Feedback',
-};
-
 export { ADMIN_CONSOLE_EMAIL };
 
 async function confirmDeleteAccount(message: string): Promise<boolean> {
@@ -165,11 +223,17 @@ type UserRow = {
   interview_passed_computed?: boolean | null;
   interview_passed_admin_override?: boolean | null;
   interview_cohort_admin_reviewed?: boolean | null;
+  /** Admin-only human judgment; null = follow current gate outcome in UI. Does not change routing. */
+  admin_human_verified_pass?: boolean | null;
   interview_completed_at?: string | null;
   /** Optional SMS number from post-interview flow (`users.launch_notification_phone`). */
   launch_notification_phone?: string | null;
-  /** Live or checkpoint snapshot of messages (same shape as interview_attempts.transcript). */
-  interview_transcript?: unknown;
+  psychometrics_sd3_narcissism_score?: number | null;
+  psychometric_straight_line_flags?: unknown;
+  psychometrics_rfq_score?: number | null;
+  psychometrics_gasp_score?: number | null;
+  psychometrics_dweck_score?: number | null;
+  psychometrics_scs_sf_score?: number | null;
 };
 
 type AttemptRow = {
@@ -205,7 +269,6 @@ type AttemptRow = {
   reasoning_pending?: boolean | null;
   override_status?: boolean | null;
   override_set_at?: string | null;
-  gate_fail_reason?: string | null;
   scenario_composites?: Record<string, unknown> | null;
   scenario_floor_grandfather_review?: boolean | null;
   gate_fail_reasons?: unknown;
@@ -217,6 +280,36 @@ type AttemptRow = {
   recalculation_delta?: Record<string, number> | null;
   recalculation_notes?: string[] | null;
   incomplete_reason?: string | null;
+  ego_development_level?: number | null;
+  review_flags?: unknown;
+  score_modifier?: number | null;
+  depth_signal_modifier?: number | null;
+  modified_weighted_score?: number | null;
+  psychometric_modifier_applied?: number | null;
+  corrected_psychometric_modifier?: number | null;
+  gaming_correction?: import('@features/psychometrics/computeGamingCorrection').GamingCorrectionResult | null;
+  modified_weighted_score_with_psychometrics?: number | null;
+  final_gate_pass?: boolean | null;
+  mentalizing_overcertainty_count?: number | null;
+  defense_patterns?: DefensePatternsJson | null;
+  moment_4_concreteness?: string | null;
+  moment_5_concreteness?: string | null;
+  personal_moment_emotional_vocab_low?: boolean | null;
+  personal_moment_emotional_vocab_density?: number | null;
+  disclosure_calibration?: string | null;
+  emotion_recognition_raw_score?: number | null;
+  emotion_recognition_score?: number | null;
+  emotion_recognition_responses?: string[] | null;
+  /** Not yet persisted on all rows — optional for forward compatibility. */
+  closing_integration?: string | null;
+  skip_penalty_total?: number | null;
+  auto_failed?: boolean | null;
+  uncertainty_score?: number | null;
+  uncertainty_breakdown?: import('@features/psychometrics/computeUncertaintyScore').UncertaintyBreakdown | null;
+  defense_cross_reference?: DefenseCrossReferenceResult | null;
+  requires_clarification_battery?: boolean | null;
+  post_clarification_uncertainty_score?: number | null;
+  uncertainty_pending_admin_review?: boolean | null;
 };
 
 /** List/overview only — loaded once for all users (small payload). Full rows load per user on drill-down. */
@@ -233,78 +326,33 @@ type AttemptSummary = Pick<
   | 'pillar_scores'
   | 'override_status'
   | 'override_set_at'
-  | 'gate_fail_reason'
   | 'scenario_composites'
   | 'scenario_floor_grandfather_review'
   | 'gate_fail_reasons'
   | 'gate_fail_detail'
   | 'mentalizing_repair_floor_grandfather_review'
+  | 'review_flags'
+  | 'score_modifier'
+  | 'depth_signal_modifier'
+  | 'modified_weighted_score'
+  | 'psychometric_modifier_applied'
+  | 'modified_weighted_score_with_psychometrics'
+  | 'final_gate_pass'
+  | 'ego_development_level'
+  | 'defense_patterns'
+  | 'moment_4_concreteness'
+  | 'moment_5_concreteness'
+  | 'personal_moment_emotional_vocab_low'
+  | 'disclosure_calibration'
+  | 'mentalizing_overcertainty_count'
+  | 'emotion_recognition_raw_score'
+  | 'emotion_recognition_score'
+  | 'emotion_recognition_responses'
+  | 'uncertainty_score'
+  | 'requires_clarification_battery'
+  | 'post_clarification_uncertainty_score'
+  | 'uncertainty_pending_admin_review'
 >;
-
-const INTERVIEW_ATTEMPTS_FULL_SELECT_BASE = `
-      id,
-      user_id,
-      attempt_number,
-      created_at,
-      completed_at,
-      weighted_score,
-      passed,
-      pillar_scores,
-      scenario_1_scores,
-      scenario_2_scores,
-      scenario_3_scores,
-      score_consistency,
-      construct_asymmetry,
-      response_timings,
-      probe_log,
-      dropout_point,
-      language_markers,
-      scenario_specific_patterns,
-      ai_reasoning,
-      user_analysis_rating,
-      user_analysis_comment,
-      per_construct_ratings,
-      transcript,
-      communication_style_error,
-      communication_floor_flag,
-      communication_floor_avg_unprompted_words,
-      communication_floor_dismissed_at,
-      communication_floor_dismissed_by,
-      communication_floor_dismiss_note,
-      reasoning_pending,
-      gate_fail_reason,
-      scenario_composites,
-      scenario_floor_grandfather_review,
-      gate_fail_reasons,
-      gate_fail_detail,
-      mentalizing_repair_floor_grandfather_review
-    ` as const;
-
-const INTERVIEW_ATTEMPTS_FULL_SELECT = `${INTERVIEW_ATTEMPTS_FULL_SELECT_BASE},
-      override_status,
-      override_set_at` as const;
-
-const INTERVIEW_ATTEMPTS_SUMMARY_SELECT_BASE = `
-      id,
-      user_id,
-      attempt_number,
-      created_at,
-      completed_at,
-      weighted_score,
-      passed,
-      reasoning_pending,
-      pillar_scores,
-      gate_fail_reason,
-      scenario_composites,
-      scenario_floor_grandfather_review,
-      gate_fail_reasons,
-      gate_fail_detail,
-      mentalizing_repair_floor_grandfather_review
-    ` as const;
-
-const INTERVIEW_ATTEMPTS_SUMMARY_SELECT = `${INTERVIEW_ATTEMPTS_SUMMARY_SELECT_BASE},
-      override_status,
-      override_set_at` as const;
 
 type CommunicationStyleProfileRow = {
   user_id: string;
@@ -366,7 +414,7 @@ async function fetchCommunicationStyleProfileRowForAdmin(
 ): Promise<CommunicationStyleProfileRow | null> {
   const { data, error } = await supabase
     .from('communication_style_profiles')
-    .select('*')
+    .select(COMMUNICATION_STYLE_PROFILE_SELECT)
     .eq('user_id', userId)
     .maybeSingle();
   if (error) {
@@ -521,26 +569,66 @@ function parseObject(raw: unknown): Record<string, unknown> | null {
 
 /** Non-empty narrative fields — pending stubs only carry _reasoningPending + pillar_scores + note. */
 function adminAttemptHasSubstantiveAiReasoning(ar: Record<string, unknown> | null): boolean {
-  if (!ar) return false;
-  const summary = ar.interview_summary;
-  if (typeof summary === 'string' && summary.trim().length > 0) return true;
-  const strengths = ar.overall_strengths;
-  if (Array.isArray(strengths) && strengths.some((x) => typeof x === 'string' && x.trim().length > 0)) return true;
-  const growth = ar.overall_growth_areas;
-  if (Array.isArray(growth) && growth.some((x) => typeof x === 'string' && x.trim().length > 0)) return true;
-  return false;
+  return interviewAiReasoningIsSubstantive(ar);
 }
 
 /**
  * True when the attempt is still missing long-form AI narrative, not only when `reasoning_pending` / _reasoningPending
  * flags are set (they can be stale after a successful retry or backfill).
+ * `_narrativeFailed` / `_completionHeld` mean narrative is absent but not "in flight" — Tab 2 retry still applies.
  */
 function adminAiNarrativeStillPending(attempt: AttemptRow): boolean {
   const ar = parseObject(attempt.ai_reasoning);
+  if (adminAttemptHasSubstantiveAiReasoning(ar)) return false;
+  const narrativeFailed = !!(ar as { _narrativeFailed?: boolean } | null)?._narrativeFailed;
+  const completionHeld = !!(ar as { _completionHeld?: boolean } | null)?._completionHeld;
   const flagPending =
     attempt.reasoning_pending === true || !!(ar as { _reasoningPending?: boolean } | null)?._reasoningPending;
-  if (!flagPending) return false;
-  if (adminAttemptHasSubstantiveAiReasoning(ar)) return false;
+  return flagPending || narrativeFailed || completionHeld;
+}
+
+/** Debounce auto-retry kicks per attempt within one SPA session (full page refresh clears). */
+const adminNarrativeAutoRetryInFlight = new Set<string>();
+/** One automatic narrative retry per attempt per page load (manual Tab 2 retry still allowed). */
+const adminNarrativeAutoRetryFinishedAttempts = new Set<string>();
+
+const adminStyleAutoReprocessLastKickMs = new Map<string, number>();
+const adminStyleAutoReprocessInFlight = new Set<string>();
+const ADMIN_STYLE_AUTO_REPROCESS_COOLDOWN_MS = 120_000;
+
+function adminAttemptEligibleForNarrativeAutoRetry(attempt: AttemptRow): boolean {
+  if (!adminAiNarrativeStillPending(attempt)) return false;
+  const pillars = normalizePillarScoresMap(attempt.pillar_scores);
+  if (!pillars || Object.keys(pillars).length === 0) return false;
+  if (attempt.weighted_score == null || !Number.isFinite(attempt.weighted_score)) return false;
+  const transcript = attempt.transcript;
+  return Array.isArray(transcript) && transcript.length > 0;
+}
+
+async function reconcileStaleReasoningPendingOnAdminView(attempt: AttemptRow): Promise<boolean> {
+  const ar = parseObject(attempt.ai_reasoning);
+  if (!adminAttemptHasSubstantiveAiReasoning(ar)) return false;
+  const failedButHasContent =
+    ar?._generationFailed === true || ar?._narrativeFailed === true;
+  if (failedButHasContent) {
+    const recovered = await recoverFailedReasoningWithContent(attempt.id);
+    if (recovered) return true;
+  }
+  if (attempt.reasoning_pending !== true && !ar?._reasoningPending) return false;
+  const { error } = await supabase
+    .from('interview_attempts')
+    .update({
+      reasoning_pending: false,
+      ai_reasoning: {
+        ...(ar ?? {}),
+        _reasoningPending: false,
+      },
+    })
+    .eq('id', attempt.id);
+  if (error) {
+    console.warn('[Admin] reconcile reasoning_pending failed', error.message);
+    return false;
+  }
   return true;
 }
 
@@ -634,6 +722,7 @@ function userTextForAdminScenario(
 
 /** Strip non-assessed keys from personal moments before pillar math (matches live interview + recompute script). */
 function extractSanitizedMomentSlice(raw: unknown): MarkerScoreSlice {
+  const obj = parseObject(raw);
   const slice = extractAggregateSlice(raw);
   if (!slice?.pillarScores) return slice;
   const sanitized = sanitizePersonalMomentScoresForAggregate({
@@ -641,10 +730,20 @@ function extractSanitizedMomentSlice(raw: unknown): MarkerScoreSlice {
     keyEvidence: slice.keyEvidence,
   });
   if (!sanitized?.pillarScores) return slice;
-  return { pillarScores: sanitized.pillarScores, keyEvidence: sanitized.keyEvidence };
+  const ev = extractPersonalMomentEmotionalVocabFromSlice(obj ?? sanitized);
+  return {
+    pillarScores: sanitized.pillarScores,
+    keyEvidence: sanitized.keyEvidence,
+    mentalizing_overcertainty: obj?.mentalizing_overcertainty === true,
+    response_concreteness: typeof obj?.response_concreteness === 'string' ? obj.response_concreteness : undefined,
+    emotional_vocab_count: ev.emotional_vocab_count,
+    emotional_vocab_words: ev.emotional_vocab_words.length > 0 ? ev.emotional_vocab_words : undefined,
+    user_slice_word_count: ev.user_slice_word_count,
+  };
 }
 
 function extractSanitizedMoment5Slice(raw: unknown): MarkerScoreSlice {
+  const obj = parseObject(raw);
   const slice = extractAggregateSlice(raw);
   if (!slice?.pillarScores) return slice;
   const sanitized = sanitizeMoment5PersonalScoresForAggregate({
@@ -652,7 +751,16 @@ function extractSanitizedMoment5Slice(raw: unknown): MarkerScoreSlice {
     keyEvidence: slice.keyEvidence,
   });
   if (!sanitized?.pillarScores) return slice;
-  return { pillarScores: sanitized.pillarScores, keyEvidence: sanitized.keyEvidence };
+  const ev = extractPersonalMomentEmotionalVocabFromSlice(obj ?? sanitized);
+  return {
+    pillarScores: sanitized.pillarScores,
+    keyEvidence: sanitized.keyEvidence,
+    mentalizing_overcertainty: obj?.mentalizing_overcertainty === true,
+    response_concreteness: typeof obj?.response_concreteness === 'string' ? obj.response_concreteness : undefined,
+    emotional_vocab_count: ev.emotional_vocab_count,
+    emotional_vocab_words: ev.emotional_vocab_words.length > 0 ? ev.emotional_vocab_words : undefined,
+    user_slice_word_count: ev.user_slice_word_count,
+  };
 }
 
 function computeMarkerAggregateFromAttempt(
@@ -669,7 +777,21 @@ function computeMarkerAggregateFromAttempt(
     extractSanitizedMomentSlice(m4Raw),
     extractSanitizedMoment5Slice(m5Raw),
   ];
-  return aggregatePillarScoresWithCommitmentMergeDetailed(slices);
+  const agg = aggregatePillarScoresWithCommitmentMergeDetailed(slices, {
+    defensePatternTranscript: Array.isArray(tx) ? (tx as DefensePatternTranscriptMsg[]) : null,
+    disclosureCalibrationTranscript: Array.isArray(tx)
+      ? (tx as Array<{ role?: string; content?: string; interviewMoment?: number }>)
+      : null,
+    scenarioEmotionalVocabDensityPercent: scenarioEmotionalVocabDensityPercentFromTranscript(
+      Array.isArray(tx) ? (tx as Array<{ role?: string; content?: string; scenarioNumber?: number | null }>) : [],
+    ),
+    communicationStyleEmotionalVocabDensityPercent: (() => {
+      const lm = attempt.language_markers as Record<string, unknown> | null | undefined;
+      const v = lm?.emotional_vocab_density;
+      return typeof v === 'number' && Number.isFinite(v) ? v : null;
+    })(),
+  });
+  return { scores: agg.scores, counts: agg.contributorCounts };
 }
 
 function buildMomentOrScenarioSummary(
@@ -749,7 +871,8 @@ function trimLaunchNotificationPhone(phone: string | null | undefined): string |
 }
 
 type TimeRangeFilter = 'all' | 'day' | 'three_days' | 'week' | 'month' | 'custom';
-type ReviewedCohortFilter = 'all' | 'reviewed' | 'unreviewed';
+type BookmarkCohortFilter = 'all' | 'bookmarked' | 'not_bookmarked';
+type HumanVerifiedCohortFilter = 'all' | 'pass' | 'fail' | 'unset';
 
 function formatYmdLocal(d: Date): string {
   const y = d.getFullYear();
@@ -824,20 +947,14 @@ function userMatchesTimeRange(
 }
 
 function hasStartedInterviewCohort(g: UserGroup): boolean {
-  if (userHasInProgressInterview(g.user)) return true;
+  if (userHasInProgressInterview(g.user, g.latestAttempt)) return true;
   if (g.latestAttempt != null) return true;
-  if (g.user.latest_attempt_id) return true;
-  return parseUserTranscript(g.user.interview_transcript).length > 0;
+  return !!g.user.latest_attempt_id;
 }
 
 type FetchAdminUsersListResult = { groups: UserGroup[]; errorMessage: string | null };
 
-/** Users + lightweight attempt rows for list (counts, pass badge, tab labels). No transcript / scores jsonb. */
-async function fetchAdminUsersList(): Promise<FetchAdminUsersListResult> {
-  const { data: allUsers, error: usersError } = await supabase
-    .from('users')
-    .select(
-      `
+const ADMIN_USERS_LIST_SELECT = `
       id,
       email,
       full_name,
@@ -851,26 +968,78 @@ async function fetchAdminUsersList(): Promise<FetchAdminUsersListResult> {
       interview_passed_computed,
       interview_passed_admin_override,
       interview_cohort_admin_reviewed,
+      admin_human_verified_pass,
       interview_completed_at,
       launch_notification_phone,
-      interview_transcript
-    `
-    )
-    .order('created_at', { ascending: false });
+      psychometrics_sd3_narcissism_score,
+      psychometric_straight_line_flags,
+      psychometrics_rfq_score,
+      psychometrics_gasp_score,
+      psychometrics_dweck_score,
+      psychometrics_scs_sf_score
+    `;
 
-  if (usersError) {
-    console.error('Admin panel users fetch error:', usersError);
-    return { groups: [], errorMessage: usersError.message };
+/** When 20260628140000_users_psychometrics_sd3_narcissism.sql has not been applied yet. */
+const ADMIN_USERS_LIST_SELECT_WITHOUT_SD3_RFQ = `
+      id,
+      email,
+      full_name,
+      name,
+      display_name,
+      basic_info,
+      created_at,
+      latest_attempt_id,
+      interview_completed,
+      interview_passed,
+      interview_passed_computed,
+      interview_passed_admin_override,
+      interview_cohort_admin_reviewed,
+      admin_human_verified_pass,
+      interview_completed_at,
+      launch_notification_phone,
+      psychometric_straight_line_flags,
+      psychometrics_gasp_score,
+      psychometrics_dweck_score,
+      psychometrics_scs_sf_score
+    `;
+
+/** Users + lightweight attempt rows for list (counts, pass badge, tab labels). No transcript / scores jsonb. */
+async function fetchAdminUsersList(): Promise<FetchAdminUsersListResult> {
+  let usersError: { message: string; code?: string } | null = null;
+  let allUsers: UserRow[] | null = null;
+
+  for (const select of [ADMIN_USERS_LIST_SELECT_WITHOUT_SD3_RFQ, ADMIN_USERS_LIST_SELECT]) {
+    const result = await supabase.from('users').select(select).order('created_at', { ascending: false });
+    if (!result.error && result.data) {
+      allUsers = result.data as UserRow[];
+      usersError = null;
+      break;
+    }
+    usersError = result.error;
+    if (result.error && !isRecoverableUsersSelectError(result.error)) {
+      break;
+    }
   }
 
-  const users = (allUsers ?? []) as UserRow[];
+  if (usersError || !allUsers) {
+    console.error('Admin panel users fetch error:', usersError);
+    return { groups: [], errorMessage: usersError?.message ?? 'Failed to load users' };
+  }
+
+  const users = allUsers;
 
   const overrideColsAbsent = await getInterviewAttemptOverrideColumnsAbsent();
 
-  let { data: allAttempts, error: attemptsError } = await supabase
+  const attemptsResp = (await supabase
     .from('interview_attempts')
-    .select(overrideColsAbsent ? INTERVIEW_ATTEMPTS_SUMMARY_SELECT_BASE : INTERVIEW_ATTEMPTS_SUMMARY_SELECT)
-    .order('created_at', { ascending: false });
+    .select(
+      overrideColsAbsent ? INTERVIEW_ATTEMPTS_SUMMARY_SELECT_BASE : INTERVIEW_ATTEMPTS_SUMMARY_SELECT,
+    )
+    .order('created_at', { ascending: false })) as {
+    data: AttemptSummary[] | null;
+    error: { message: string; code?: string } | null;
+  };
+  let { data: allAttempts, error: attemptsError } = attemptsResp;
 
   if (overrideColsAbsent && allAttempts) {
     allAttempts = allAttempts.map((row) => ({
@@ -882,10 +1051,13 @@ async function fetchAdminUsersList(): Promise<FetchAdminUsersListResult> {
 
   if (!overrideColsAbsent && attemptsError && isInterviewAttemptsMissingOverrideColumnsError(attemptsError)) {
     await rememberInterviewAttemptOverrideColumnsAbsent();
-    const legacy = await supabase
+    const legacy = (await supabase
       .from('interview_attempts')
       .select(INTERVIEW_ATTEMPTS_SUMMARY_SELECT_BASE)
-      .order('created_at', { ascending: false });
+      .order('created_at', { ascending: false })) as {
+      data: AttemptSummary[] | null;
+      error: { message: string; code?: string } | null;
+    };
     attemptsError = legacy.error;
     allAttempts = legacy.data?.map((row) => ({
       ...row,
@@ -944,63 +1116,67 @@ async function fetchLatestFullAttemptForUser(
   userId: string,
   latestAttemptId: string | null | undefined,
 ): Promise<{ attempts: AttemptRow[]; errorMessage: string | null }> {
-  const absent = await getInterviewAttemptOverrideColumnsAbsent();
-  const patchOverrideNulls = (row: Record<string, unknown>): AttemptRow =>
-    ({ ...row, override_status: null, override_set_at: null }) as AttemptRow;
-  const fullSelect = absent ? INTERVIEW_ATTEMPTS_FULL_SELECT_BASE : INTERVIEW_ATTEMPTS_FULL_SELECT;
+  const patchOptionalNulls = (row: Record<string, unknown>): AttemptRow =>
+    ({
+      ...row,
+      override_status: row.override_status ?? null,
+      override_set_at: row.override_set_at ?? null,
+      corrected_psychometric_modifier: row.corrected_psychometric_modifier ?? null,
+      gaming_correction: row.gaming_correction ?? null,
+    }) as AttemptRow;
 
-  if (latestAttemptId) {
-    let { data, error } = await supabase
-      .from('interview_attempts')
-      .select(fullSelect)
-      .eq('id', latestAttemptId)
-      .eq('user_id', userId)
-      .maybeSingle();
-    if (absent && data) {
-      data = patchOverrideNulls(data as Record<string, unknown>);
-    } else if (!absent && error && isInterviewAttemptsMissingOverrideColumnsError(error)) {
-      await rememberInterviewAttemptOverrideColumnsAbsent();
-      const legacy = await supabase
+  const runFetch = async (): Promise<{
+    data: AttemptRow | AttemptRow[] | null;
+    error: { message: string; code?: string } | null;
+    multiple: boolean;
+  }> => {
+    const select = await adminInterviewAttemptsFullSelect();
+    if (latestAttemptId) {
+      const result = await supabase
         .from('interview_attempts')
-        .select(INTERVIEW_ATTEMPTS_FULL_SELECT_BASE)
+        .select(select)
         .eq('id', latestAttemptId)
         .eq('user_id', userId)
         .maybeSingle();
-      error = legacy.error;
-      data = legacy.data ? patchOverrideNulls(legacy.data as Record<string, unknown>) : null;
+      return { data: result.data as AttemptRow | null, error: result.error, multiple: false };
     }
-    if (error) {
-      console.error('Admin panel fetchLatestFullAttemptForUser:', error);
-      return { attempts: [], errorMessage: error.message };
-    }
-    if (!absent && !error && data) void markInterviewAttemptOverrideColumnsPresent();
-    return { attempts: data ? ([data] as AttemptRow[]) : [], errorMessage: null };
-  }
-  let { data, error } = await supabase
-    .from('interview_attempts')
-    .select(fullSelect)
-    .eq('user_id', userId)
-    .order('created_at', { ascending: false })
-    .limit(1);
-  if (absent && data) {
-    data = data.map((row) => patchOverrideNulls(row as Record<string, unknown>));
-  } else if (!absent && error && isInterviewAttemptsMissingOverrideColumnsError(error)) {
-    await rememberInterviewAttemptOverrideColumnsAbsent();
-    const legacy = await supabase
+    const result = await supabase
       .from('interview_attempts')
-      .select(INTERVIEW_ATTEMPTS_FULL_SELECT_BASE)
+      .select(select)
       .eq('user_id', userId)
       .order('created_at', { ascending: false })
       .limit(1);
-    error = legacy.error;
-    data = legacy.data?.map((row) => patchOverrideNulls(row as Record<string, unknown>)) ?? null;
+    return { data: (result.data as AttemptRow[] | null) ?? null, error: result.error, multiple: true };
+  };
+
+  for (let attempt = 0; attempt < 4; attempt++) {
+    const { data, error, multiple } = await runFetch();
+    if (!error) {
+      if (!(await getInterviewAttemptGamingCorrectionColumnsAbsent())) {
+        void markInterviewAttemptGamingCorrectionColumnsPresent();
+      }
+      if (!(await getInterviewAttemptDefenseCrossReferenceColumnAbsent())) {
+        void markInterviewAttemptDefenseCrossReferenceColumnPresent();
+      }
+      if (!(await getInterviewAttemptOverrideColumnsAbsent())) {
+        void markInterviewAttemptOverrideColumnsPresent();
+      }
+      if (multiple) {
+        const rows = (data as AttemptRow[] | null)?.map((row) =>
+          patchOptionalNulls(row as Record<string, unknown>),
+        ) ?? [];
+        return { attempts: rows, errorMessage: null };
+      }
+      const row = data ? patchOptionalNulls(data as Record<string, unknown>) : null;
+      return { attempts: row ? [row] : [], errorMessage: null };
+    }
+    if (!(await rememberInterviewAttemptSelectColumnAbsences(error))) {
+      console.error('Admin panel fetchLatestFullAttemptForUser:', error);
+      return { attempts: [], errorMessage: error.message };
+    }
   }
-  if (error) {
-    console.error('Admin panel fetchLatestFullAttemptForUser:', error);
-    return { attempts: [], errorMessage: error.message };
-  }
-  if (!absent && !error && data?.length) void markInterviewAttemptOverrideColumnsPresent();
-  return { attempts: (data ?? []) as AttemptRow[], errorMessage: null };
+
+  return { attempts: [], errorMessage: 'Failed to load attempt after column fallback retries' };
 }
 
 function formatConstruct(key: string): string {
@@ -1017,6 +1193,19 @@ function getPassColor(value: 'pass' | 'fail' | 'none'): string {
   if (value === 'pass') return '#2A8C6A';
   if (value === 'fail') return '#E87A7A';
   return '#7A9ABE';
+}
+
+const PASS_FLAGGED_COLOR = '#C9A227';
+
+function reviewFlagsFromStoredAttempt(attempt: AttemptSummary | AttemptRow | null): string[] {
+  if (!attempt) return [];
+  const raw = attempt.review_flags;
+  if (!Array.isArray(raw)) return [];
+  return raw.filter((x): x is string => typeof x === 'string' && x.length > 0);
+}
+
+function passWithReviewFlagsDetail(flags: string[]): string {
+  return `Review flags: ${flags.join(', ')}`;
 }
 
 /** Human-readable admin pass/fail override for UI (avoids "false" / "true"). */
@@ -1072,29 +1261,18 @@ function scenarioFloorBreachSummaryFromComposites(scenarioComposites: unknown): 
 
 const STORED_GATE_FAIL_ORDER: GateFailCode[] = [
   'weighted_score',
+  'ego_development_floor',
   'scenario_floor',
   'mentalizing_floor',
   'repair_floor',
 ];
-
-function inferGateFailCodesFromLegacyReason(text: string | null): GateFailCode[] {
-  if (!text) return [];
-  const found: GateFailCode[] = [];
-  if (text.includes('weighted_score:') || text.includes('weighted_below_threshold:')) {
-    found.push('weighted_score');
-  }
-  if (text.includes('scenario_floor:')) found.push('scenario_floor');
-  if (text.includes('mentalizing_floor:')) found.push('mentalizing_floor');
-  if (text.includes('repair_floor:')) found.push('repair_floor');
-  return STORED_GATE_FAIL_ORDER.filter((c) => found.includes(c));
-}
 
 function normalizeGateFailCodesFromAttempt(attempt: AttemptSummary | AttemptRow): GateFailCode[] {
   const raw = attempt.gate_fail_reasons;
   if (Array.isArray(raw)) {
     return STORED_GATE_FAIL_ORDER.filter((c) => raw.includes(c));
   }
-  return inferGateFailCodesFromLegacyReason(attempt.gate_fail_reason ?? null);
+  return [];
 }
 
 function parseGateFailDetailRow(attempt: AttemptSummary | AttemptRow): GateFailDetailJson | null {
@@ -1117,6 +1295,14 @@ function buildStoredGateFailureLines(attempt: AttemptSummary | AttemptRow): stri
           ? { score: attempt.weighted_score, requiredMin: GATE_PASS_WEIGHTED_MIN }
           : null);
       if (w) lines.push(`Weighted ${w.score.toFixed(1)} (min ${w.requiredMin.toFixed(1)})`);
+    }
+    if (c === 'ego_development_floor') {
+      const e = detail?.ego_development_floor;
+      if (e) {
+        lines.push(`Ego development floor: level ${e.level}, weighted ${e.weightedScore.toFixed(1)} (< 7.0)`);
+      } else {
+        lines.push('Ego development floor (level 1, weighted < 7.0)');
+      }
     }
     if (c === 'scenario_floor') {
       const breachText = scenarioFloorBreachSummaryFromComposites(attempt.scenario_composites);
@@ -1142,9 +1328,6 @@ function buildStoredGateFailureLines(attempt: AttemptSummary | AttemptRow): stri
     }
   }
 
-  if (lines.length === 0 && attempt.gate_fail_reason) {
-    return attempt.gate_fail_reason.split(';').map((s) => s.trim()).filter(Boolean);
-  }
   return lines;
 }
 
@@ -1174,7 +1357,6 @@ function getAdminOutcomeDisplay(attempt: AttemptSummary | AttemptRow | null): {
     return { word: '—', color: '#7A9ABE', detail: null, outcomeLabel: 'none' };
   }
 
-  const gateFailReason = attempt.gate_fail_reason ?? null;
   const scenarioGrandfather = attempt.scenario_floor_grandfather_review === true;
   const grandfatherBreaches = scenarioFloorBreachSummaryFromComposites(attempt.scenario_composites);
   const grandfatherDetail =
@@ -1191,9 +1373,16 @@ function getAdminOutcomeDisplay(attempt: AttemptSummary | AttemptRow | null): {
   };
 
   if (attempt.passed === false) {
+    if (isLegacyEmotionRecognitionFloorOnlyFail(attempt)) {
+      return {
+        word: 'fail',
+        color: getPassColor('fail'),
+        detail: mergeDetail(LEGACY_EMOTION_RECOGNITION_FLOOR_REVIEW_NOTE),
+        outcomeLabel: 'almost',
+      };
+    }
     const storedLines = buildStoredGateFailureLines(attempt);
-    const detailStr =
-      storedLines.length > 0 ? storedLines.join(' Â· ') : gateFailReason ?? null;
+    const detailStr = storedLines.length > 0 ? storedLines.join(' Â· ') : null;
     return {
       word: 'fail',
       color: getPassColor('fail'),
@@ -1205,21 +1394,25 @@ function getAdminOutcomeDisplay(attempt: AttemptSummary | AttemptRow | null): {
   const scores = pillarScoresForGate(attempt);
   if (Object.keys(scores).length === 0) {
     const pw = getPassWord(attempt);
-    const w = pw === 'none' ? '—' : pw;
+    const rf = reviewFlagsFromStoredAttempt(attempt);
+    const flagged = pw === 'pass' && rf.length > 0;
+    const w = pw === 'none' ? '—' : flagged ? 'pass (flagged)' : pw;
     return {
       word: w,
-      color: pw === 'none' ? getPassColor('none') : getPassColor(pw),
-      detail: mergeDetail(null),
-      outcomeLabel: 'none',
+      color: flagged ? PASS_FLAGGED_COLOR : pw === 'none' ? getPassColor('none') : getPassColor(pw),
+      detail: mergeDetail(flagged ? passWithReviewFlagsDetail(rf) : null),
+      outcomeLabel: pw === 'pass' || pw === 'fail' ? pw : 'none',
     };
   }
   const gate = computeGateResultCore(scores);
   const { label, detailLines } = classifyAdminGateOutcome(scores, gate);
   if (label === 'pass') {
+    const rf = reviewFlagsFromStoredAttempt(attempt);
+    const flagged = attempt.passed === true && rf.length > 0;
     return {
-      word: 'pass',
-      color: getPassColor('pass'),
-      detail: mergeDetail(null),
+      word: flagged ? 'pass (flagged)' : 'pass',
+      color: flagged ? PASS_FLAGGED_COLOR : getPassColor('pass'),
+      detail: mergeDetail(flagged ? passWithReviewFlagsDetail(rf) : null),
       outcomeLabel: 'pass',
     };
   }
@@ -1302,14 +1495,25 @@ function formatAttemptDate(attempt: AttemptSummary | AttemptRow): string {
 
 function formatAttemptTabLabel(attempt: AttemptSummary | AttemptRow): string {
   const raw = attempt.completed_at ?? attempt.created_at;
-  const aiPending =
-    'ai_reasoning' in attempt
-      ? !!(parseObject((attempt as AttemptRow).ai_reasoning) as { _reasoningPending?: boolean } | null)
-          ?._reasoningPending
-      : false;
-  const pending = attempt.reasoning_pending === true || aiPending;
-  const suffix = pending ? ' Â· AI narrative pending' : '';
-  if (!raw) return `Test ${attempt.attempt_number}${suffix}`;
+  let pending = attempt.reasoning_pending === true;
+  if ('ai_reasoning' in attempt) {
+    const ar = parseObject((attempt as AttemptRow).ai_reasoning);
+    pending =
+      pending ||
+      !!(ar as { _reasoningPending?: boolean } | null)?._reasoningPending ||
+      !!(ar as { _narrativeFailed?: boolean } | null)?._narrativeFailed ||
+      !!(ar as { _completionHeld?: boolean } | null)?._completionHeld;
+  }
+  const suffix = pending ? ' · AI narrative pending' : '';
+  const unc =
+    'uncertainty_score' in attempt && typeof attempt.uncertainty_score === 'number'
+      ? attempt.uncertainty_score
+      : null;
+  const uncSuffix =
+    unc != null
+      ? ` · U:${unc.toFixed(2)}`
+      : '';
+  if (!raw) return `Test ${attempt.attempt_number}${suffix}${uncSuffix}`;
   return (
     new Date(raw).toLocaleString('en-GB', {
       day: '2-digit',
@@ -1317,7 +1521,7 @@ function formatAttemptTabLabel(attempt: AttemptSummary | AttemptRow): string {
       year: 'numeric',
       hour: '2-digit',
       minute: '2-digit',
-    }) + suffix
+    }) + suffix + uncSuffix
   );
 }
 
@@ -1339,7 +1543,11 @@ type AdminUserStatusFilter =
   | 'pass'
   | 'fail'
   | 'almost'
-  | 'no_result';
+  | 'no_result'
+  | 'flagged'
+  | 'er_floor_review'
+  | 'sd3_narcissism_floor_review'
+  | 'psychometric_floor_review';
 
 function getString(v: unknown): string | null {
   return typeof v === 'string' && v.trim().length > 0 ? v.trim() : null;
@@ -1361,14 +1569,37 @@ function parseUserTranscript(raw: unknown): LiveTranscriptMsg[] {
   return [];
 }
 
-/** True when the account has an unfinished interview with a transcript snapshot on `users` (live sync or checkpoint). */
-function userHasInProgressInterview(user: UserRow): boolean {
+/** True when the account has an unfinished interview (active attempt row, not yet completed on `users`). */
+function userHasInProgressInterview(
+  user: UserRow,
+  latestAttempt?: AttemptSummary | null,
+): boolean {
   if (user.interview_completed === true) return false;
-  return parseUserTranscript(user.interview_transcript).length > 0;
+  if (latestAttempt != null && latestAttempt.completed_at == null) return true;
+  return !!user.latest_attempt_id;
+}
+
+function asAdminStringArray(raw: unknown): string[] {
+  if (!Array.isArray(raw)) return [];
+  return raw.filter((x): x is string => typeof x === 'string');
+}
+
+function userGroupNeedsPsychometricFloorReview(g: UserGroup): boolean {
+  return userNeedsPsychometricFloorReview(
+    g.latestAttempt,
+    {
+      rfqScore: typeof g.user.psychometrics_rfq_score === 'number' ? g.user.psychometrics_rfq_score : null,
+      gaspScore: typeof g.user.psychometrics_gasp_score === 'number' ? g.user.psychometrics_gasp_score : null,
+      dweckScore: typeof g.user.psychometrics_dweck_score === 'number' ? g.user.psychometrics_dweck_score : null,
+      scsSfScore: typeof g.user.psychometrics_scs_sf_score === 'number' ? g.user.psychometrics_scs_sf_score : null,
+      sd3NarcissismScore: typeof g.user.psychometrics_sd3_narcissism_score === 'number' ? g.user.psychometrics_sd3_narcissism_score : null,
+    },
+    asAdminStringArray(g.user.psychometric_straight_line_flags),
+  );
 }
 
 function classifyAdminUserListStatus(g: UserGroup): AdminUserStatusFilter {
-  if (userHasInProgressInterview(g.user)) return 'in_progress';
+  if (userHasInProgressInterview(g.user, g.latestAttempt)) return 'in_progress';
   const o = resolveAdminPrimaryOutcomeDisplay(g.user, g.latestAttempt);
   if (o.outcomeLabel === 'pass') return 'pass';
   if (o.outcomeLabel === 'fail') return 'fail';
@@ -1425,7 +1656,7 @@ function escapeCsvPhoneForSpreadsheet(display: string): string {
 
 /** Matches UserCard status line (Pass / Fail / Almost / — / In progress). */
 function adminCohortExportStatusLine(g: UserGroup): string {
-  if (userHasInProgressInterview(g.user)) return 'In progress';
+  if (userHasInProgressInterview(g.user, g.latestAttempt)) return 'In progress';
   const o = resolveAdminPrimaryOutcomeDisplay(g.user, g.latestAttempt);
   const w = o.word;
   if (w === '—') return '—';
@@ -1519,7 +1750,7 @@ function triggerAdminCohortCsvDownload(filename: string, csvBody: string): void 
   });
 }
 
-/** Best-effort scenario indicator when `interview_last_checkpoint` is not selected or missing on older DBs. */
+/** Best-effort scenario indicator from live transcript message tags. */
 function inferLatestScenarioFromTranscript(lines: LiveTranscriptMsg[]): number | null {
   let max: number | null = null;
   for (const m of lines) {
@@ -1533,13 +1764,17 @@ function inferLatestScenarioFromTranscript(lines: LiveTranscriptMsg[]): number |
 
 function InProgressTranscriptSection({
   user,
+  latestAttempt,
+  liveTranscript,
   onRefresh,
 }: {
   user: UserRow;
+  latestAttempt?: AttemptSummary | null;
+  liveTranscript?: unknown;
   onRefresh: () => void;
 }) {
-  if (!userHasInProgressInterview(user)) return null;
-  const lines = parseUserTranscript(user.interview_transcript);
+  if (!userHasInProgressInterview(user, latestAttempt)) return null;
+  const lines = parseUserTranscript(liveTranscript);
   const inferredScenario = inferLatestScenarioFromTranscript(lines);
   return (
     <View style={styles.inProgressSection}>
@@ -1563,11 +1798,111 @@ function InProgressTranscriptSection({
           {lines.map((m, idx) => (
             <Text key={`live-${m.role}-${idx}`} style={styles.transcriptLine}>
               {m.role}
-              {m.scenarioNumber != null ? ` (s${m.scenarioNumber})` : ''}: {m.content ?? ''}
+              {m.scenarioNumber != null ? ` (s${m.scenarioNumber})` : ''}:{' '}
+              {formatTranscriptTurnContentForDisplay(m.role, m.content)}
             </Text>
           ))}
         </ScrollView>
       )}
+    </View>
+  );
+}
+
+type UserListSort = 'date' | 'uncertainty';
+
+function sortUserGroups(list: UserGroup[], sort: UserListSort): UserGroup[] {
+  if (sort === 'date') return list;
+  return [...list].sort((a, b) => {
+    const sa = a.latestAttempt?.uncertainty_score;
+    const sb = b.latestAttempt?.uncertainty_score;
+    const na = sa != null && Number.isFinite(sa) ? sa : -1;
+    const nb = sb != null && Number.isFinite(sb) ? sb : -1;
+    return nb - na;
+  });
+}
+
+function userMatchesHumanVerifiedCohortFilter(
+  g: UserGroup,
+  filter: HumanVerifiedCohortFilter,
+): boolean {
+  if (filter === 'all') return true;
+  const v = g.user.admin_human_verified_pass;
+  if (filter === 'pass') return v === true;
+  if (filter === 'fail') return v === false;
+  if (filter === 'unset') return v == null;
+  return true;
+}
+
+type UncertaintyBandFilter = 'all' | 'low' | 'medium' | 'high';
+
+function userMatchesUncertaintyFilter(g: UserGroup, filter: UncertaintyBandFilter): boolean {
+  if (filter === 'all') return true;
+  const score = g.latestAttempt?.uncertainty_score;
+  if (score == null || !Number.isFinite(score)) return false;
+  if (filter === 'low') return score < 0.4;
+  if (filter === 'medium') return score >= 0.4 && score < UNCERTAINTY_ROUTING_THRESHOLD;
+  return score >= UNCERTAINTY_ROUTING_THRESHOLD;
+}
+
+function AdminCheckbox({
+  label,
+  checked,
+  onPress,
+  accent,
+}: {
+  label: string;
+  checked: boolean;
+  onPress: () => void;
+  accent: string;
+}) {
+  return (
+    <Pressable
+      onPress={onPress}
+      style={styles.adminCheckboxRow}
+      accessibilityRole="checkbox"
+      accessibilityState={{ checked }}
+      accessibilityLabel={label}
+    >
+      <View
+        style={[
+          styles.adminCheckboxBox,
+          checked && { borderColor: accent, backgroundColor: `${accent}33` },
+        ]}
+      >
+        {checked ? <Text style={[styles.adminCheckboxMark, { color: accent }]}>✓</Text> : null}
+      </View>
+      <Text style={styles.adminCheckboxLabel}>{label}</Text>
+    </Pressable>
+  );
+}
+
+function HumanVerifiedCheckboxes({
+  value,
+  onChange,
+}: {
+  value: boolean | null | undefined;
+  onChange: (next: boolean | null) => void;
+}) {
+  const passChecked = value === true;
+  const failChecked = value === false;
+
+  return (
+    <View style={styles.humanVerifiedCol}>
+      <Text style={styles.humanVerifiedLabel}>Human verified</Text>
+      <View style={styles.humanVerifiedCheckboxRow}>
+        <AdminCheckbox
+          label="Pass"
+          checked={passChecked}
+          accent="#2A8C6A"
+          onPress={() => onChange(passChecked ? null : true)}
+        />
+        <AdminCheckbox
+          label="Fail"
+          checked={failChecked}
+          accent="#E85D5D"
+          onPress={() => onChange(failChecked ? null : false)}
+        />
+      </View>
     </View>
   );
 }
@@ -1578,8 +1913,9 @@ function UserCard({
   onDelete,
   canDelete,
   deleting,
-  reviewed,
-  onToggleReviewed,
+  bookmarked,
+  onToggleBookmarked,
+  onSetHumanVerified,
   onRefreshList,
 }: {
   userData: UserGroup;
@@ -1587,8 +1923,9 @@ function UserCard({
   onDelete: () => void;
   canDelete: boolean;
   deleting: boolean;
-  reviewed: boolean;
-  onToggleReviewed: (next: boolean) => void;
+  bookmarked: boolean;
+  onToggleBookmarked: (next: boolean) => void;
+  onSetHumanVerified: (pass: boolean | null) => void;
   onRefreshList: () => Promise<void>;
 }) {
   const [overrideBusy, setOverrideBusy] = useState(false);
@@ -1603,20 +1940,9 @@ function UserCard({
     if (!latest?.id || !userData.user.id) return;
     setOverrideBusy(true);
     try {
-      const absentAtStart = await getInterviewAttemptOverrideColumnsAbsent();
-      let attemptUpdateFailedMissingColumns = false;
-      if (!absentAtStart) {
-        const nowIso = new Date().toISOString();
-        const { error: attErr } = await supabase
-          .from('interview_attempts')
-          .update({ override_status: pass, override_set_at: nowIso })
-          .eq('id', latest.id);
-        if (attErr && isInterviewAttemptsMissingOverrideColumnsError(attErr)) {
-          await rememberInterviewAttemptOverrideColumnsAbsent();
-          attemptUpdateFailedMissingColumns = true;
-        } else if (attErr) {
-          throw new Error(attErr.message);
-        }
+      const attemptResult = await updateInterviewAttemptRevealOverride(latest.id, pass);
+      if (!attemptResult.ok && !attemptResult.columnsMissing) {
+        throw new Error(attemptResult.errorMessage);
       }
       const { error: userErr } = await supabase
         .from('users')
@@ -1624,7 +1950,12 @@ function UserCard({
         .eq('id', userData.user.id);
       if (userErr) throw new Error(userErr.message);
       await onRefreshList();
-      if (attemptUpdateFailedMissingColumns) {
+      if (latest?.id) {
+        void supabase.functions.invoke('send-results-email', {
+          body: { userId: userData.user.id, attemptId: latest.id },
+        });
+      }
+      if (attemptResult.columnsMissing) {
         Alert.alert(
           'Profile updated',
           'Pass/fail was saved on the user. This project does not have interview_attempts override columns yet (apply migration 20260430220000_interview_attempts_override_reveal), so the attempt row was not updated.',
@@ -1644,7 +1975,18 @@ function UserCard({
         onPress={onPress}
         style={({ pressed }) => [styles.userCard, styles.userCardFlex, pressed && styles.userCardPressed]}
       >
-        <Text style={styles.userCardIntroName}>{resolveAdminInterviewIntroDisplayName(userData.user)}</Text>
+        <View style={styles.userCardNameRow}>
+          <Text style={styles.userCardIntroName}>{resolveAdminInterviewIntroDisplayName(userData.user)}</Text>
+          {(() => {
+            const rf = reviewFlagsFromStoredAttempt(latest);
+            if (rf.length === 0) return null;
+            return (
+              <Text style={styles.userCardFlagMark} accessibilityLabel={`${rf.length} review flags`}>
+                ⚑{rf.length > 1 ? rf.length : ''}
+              </Text>
+            );
+          })()}
+        </View>
         <Text style={styles.userCardEmail}>{userData.user.email ?? '—'}</Text>
         {launchPhone ? (
           <Text style={styles.userCardEmail} selectable>
@@ -1652,6 +1994,113 @@ function UserCard({
           </Text>
         ) : null}
         <Text style={styles.userCardDateLine}>{formatUserInterviewDateLine(userData)}</Text>
+        {latest && !userHasInProgressInterview(userData.user, userData.latestAttempt) ? (
+          <View style={styles.userCardSignalRow}>
+            {typeof latest.ego_development_level === 'number' &&
+            Number.isFinite(latest.ego_development_level) &&
+            latest.ego_development_level >= 1 &&
+            latest.ego_development_level <= 5 ? (
+              <View
+                style={[
+                  styles.userCardMicroChip,
+                  { borderColor: egoLevelAdminColor(latest.ego_development_level), backgroundColor: 'rgba(0,0,0,0.2)' },
+                ]}
+              >
+                <Text style={[styles.userCardMicroChipText, { color: egoLevelAdminColor(latest.ego_development_level) }]}>
+                  ED:{Math.round(latest.ego_development_level)}
+                </Text>
+              </View>
+            ) : null}
+            {(() => {
+              const unc = latest?.uncertainty_score;
+              if (unc == null || !Number.isFinite(unc)) return null;
+              const color = uncertaintyBadgeColor(unc);
+              return (
+                <View
+                  style={[
+                    styles.userCardMicroChip,
+                    { borderColor: color, backgroundColor: `${color}22` },
+                  ]}
+                >
+                  <Text style={[styles.userCardMicroChipText, { color }]}>
+                    U:{unc.toFixed(2)}
+                  </Text>
+                </View>
+              );
+            })()}
+            {(() => {
+              const resp = hydrateEmotionResponsesFromStorage(latest.emotion_recognition_responses);
+              const answered = countAnsweredEmotionItems(resp);
+              if (answered > 0 && answered < EXPECTED_EMOTION_RECOGNITION_ITEMS) {
+                return (
+                  <View style={styles.userCardMicroChip}>
+                    <Text style={styles.userCardMicroChipText}>ER:incomplete</Text>
+                  </View>
+                );
+              }
+              let c = emotionRecognitionCorrectCount(resp);
+              if (c == null && isEmotionRecognitionBatteryComplete(resp)) {
+                c = storedEmotionCorrectCountFromRaw(
+                  typeof latest.emotion_recognition_raw_score === 'number' &&
+                    Number.isFinite(latest.emotion_recognition_raw_score)
+                    ? latest.emotion_recognition_raw_score
+                    : null,
+                );
+              }
+              if (c == null) return null;
+              return (
+                <View style={styles.userCardMicroChip}>
+                  <Text style={styles.userCardMicroChipText}>
+                    ER:{c}/3
+                  </Text>
+                </View>
+              );
+            })()}
+            {(() => {
+              if (!isLegacyEmotionRecognitionFloorOnlyFail(latest)) return null;
+              return (
+                <View
+                  style={[
+                    styles.userCardMicroChip,
+                    { borderColor: '#D4A84B', backgroundColor: 'rgba(212,168,75,0.15)' },
+                  ]}
+                >
+                  <Text style={[styles.userCardMicroChipText, { color: '#D4A84B' }]}>ER floor review</Text>
+                </View>
+              );
+            })()}
+            {(() => {
+              if (!userGroupNeedsPsychometricFloorReview(userData)) return null;
+              return (
+                <View
+                  style={[
+                    styles.userCardMicroChip,
+                    { borderColor: '#D4A84B', backgroundColor: 'rgba(212,168,75,0.15)' },
+                  ]}
+                >
+                  <Text style={[styles.userCardMicroChipText, { color: '#D4A84B' }]}>
+                    Psych floor review
+                  </Text>
+                </View>
+              );
+            })()}
+            {(() => {
+              const sm = latest.score_modifier;
+              const mod = latest.modified_weighted_score;
+              if (typeof sm === 'number' && sm < 0 && typeof mod === 'number' && Number.isFinite(mod)) {
+                return (
+                  <View style={{ flexDirection: 'row', alignItems: 'center', flexWrap: 'wrap' }}>
+                    <Text style={styles.userCardScoreStrike}>
+                      {formatScoreCell(latest.weighted_score)}
+                    </Text>
+                    <Text style={styles.userCardScoreModified}>{formatScoreCell(mod)}</Text>
+                  </View>
+                );
+              }
+              return null;
+            })()}
+          </View>
+        ) : null}
         <View style={styles.userCardMetaRow}>
           <View style={styles.userCardMetaLeft}>
             <Text style={[styles.userCardStatus, { color: outcome.color }]}>{outcome.word}</Text>
@@ -1665,26 +2114,30 @@ function UserCard({
                 Admin override: {formatAdminPassFailLabel(override)}
               </Text>
             ) : null}
-            {userHasInProgressInterview(userData.user) ? (
+            {userHasInProgressInterview(userData.user, userData.latestAttempt) ? (
               <Text style={styles.userCardInProgress}>In progress</Text>
             ) : null}
           </View>
         </View>
       </Pressable>
       <View style={styles.userCardSideCol}>
-        <View style={styles.reviewedToggleRow}>
-          <Text style={styles.reviewedLabel}>Reviewed</Text>
+        <View style={styles.bookmarkToggleRow}>
+          <Text style={styles.bookmarkLabel}>Bookmark</Text>
           <Switch
-            value={reviewed}
-            onValueChange={(v) => onToggleReviewed(v)}
+            value={bookmarked}
+            onValueChange={(v) => onToggleBookmarked(v)}
             trackColor={{ false: 'rgba(82,142,220,0.2)', true: 'rgba(42,140,106,0.5)' }}
-            thumbColor={reviewed ? '#2A8C6A' : '#7A9ABE'}
+            thumbColor={bookmarked ? '#2A8C6A' : '#7A9ABE'}
           />
         </View>
+        <HumanVerifiedCheckboxes
+          value={userData.user.admin_human_verified_pass}
+          onChange={(next) => onSetHumanVerified(next)}
+        />
         {showRevealButtons ? (
-          <View style={styles.overrideButtonRow}>
+          <View style={styles.userCardOverrideRow}>
             <TouchableOpacity
-              style={[styles.overrideChip, overrideBusy && { opacity: 0.5 }]}
+              style={[styles.userCardOverrideChip, overrideBusy && { opacity: 0.5 }]}
               disabled={overrideBusy}
               onPress={() => void applyRevealOverride(true)}
               accessibilityRole="button"
@@ -1693,7 +2146,7 @@ function UserCard({
               <Text style={styles.overrideChipText}>Pass</Text>
             </TouchableOpacity>
             <TouchableOpacity
-              style={[styles.overrideChip, overrideBusy && { opacity: 0.5 }]}
+              style={[styles.userCardOverrideChip, overrideBusy && { opacity: 0.5 }]}
               disabled={overrideBusy}
               onPress={() => void applyRevealOverride(false)}
               accessibilityRole="button"
@@ -1729,15 +2182,751 @@ function functionInvokeBodyError(data: unknown): string | null {
   return null;
 }
 
+type AdminAttemptInnerTabId =
+  | 'profile_intent'
+  | 'summary'
+  | 'reasoning'
+  | 'transcript'
+  | 'depth'
+  | 'full_assessment';
+
+function adminDetailTabs(): { id: AdminAttemptInnerTabId; label: string }[] {
+  return [
+    { id: 'summary', label: 'Tab 1: Summary' },
+    { id: 'reasoning', label: 'Tab 2: AI Reasoning' },
+    { id: 'transcript', label: 'Tab 3: Transcript' },
+    { id: 'depth', label: 'Tab 4: Depth Signals' },
+    { id: 'profile_intent', label: 'Profile & Intent' },
+    { id: 'full_assessment', label: 'Full Assessment' },
+  ];
+}
+
+const EMPTY_ADMIN_USER_PROFILE = (userId: string): AdminUserProfileRecord => ({
+  id: userId,
+  market_research_completed_at: null,
+  market_research_referral_source: null,
+  market_research_referral_other: null,
+  market_research_relationship_seriousness: null,
+  market_research_search_duration: null,
+  market_research_dating_status: null,
+  market_research_max_spend: null,
+  market_research_spend_context: null,
+  psychometrics_completed_at: null,
+  psychometrics_brs_score: null,
+  psychometrics_scs_sf_score: null,
+  psychometrics_scs_sf_self_kindness_score: null,
+  psychometrics_scs_sf_common_humanity_score: null,
+  psychometrics_scs_sf_mindfulness_score: null,
+  psychometrics_gasp_score: null,
+  psychometrics_dweck_score: null,
+  psychometrics_aaq2_score: null,
+  psychometrics_rses_score: null,
+  psychometrics_scs_public_score: null,
+  psychometrics_scs_private_score: null,
+  psychometrics_mspss_score: null,
+  psychometrics_mspss_family_score: null,
+  psychometrics_mspss_friends_score: null,
+  psychometrics_sd3_narcissism_score: null,
+  psychometrics_rfq_score: null,
+  psychometrics_sexual_communication_score: null,
+  psychometrics_sexual_communication_completed_at: null,
+  psychometric_modifier: null,
+  psychometric_consistency_flags: null,
+  psychometric_straight_line_flags: null,
+});
+
+function renderAdminDetailTabContent(
+  activeInnerTab: AdminAttemptInnerTabId,
+  opts: {
+    profileUser: AdminUserProfileRecord;
+    profileLoading: boolean;
+    selectedAttempt: AttemptRow | null;
+    onRefreshData: () => void;
+    candidateUser: UserRow;
+  },
+): React.ReactNode {
+  const { profileUser, profileLoading, selectedAttempt, onRefreshData, candidateUser } = opts;
+
+  if (activeInnerTab === 'profile_intent') {
+    if (profileLoading) {
+      return (
+        <View style={styles.emptyState}>
+          <Text style={styles.emptyText}>Loading profile & intent…</Text>
+        </View>
+      );
+    }
+    return <ProfileIntentTab user={profileUser} />;
+  }
+
+  if (!selectedAttempt) {
+    return (
+      <View style={styles.emptyState}>
+        <Text style={styles.emptyText}>No completed interview attempt for this tab yet.</Text>
+      </View>
+    );
+  }
+
+  switch (activeInnerTab) {
+    case 'summary':
+      return (
+        <SummaryTab
+          attempt={selectedAttempt}
+          onAttemptMutated={onRefreshData}
+          candidateUser={candidateUser}
+          profileUser={profileUser}
+        />
+      );
+    case 'reasoning':
+      return <ReasoningTab attempt={selectedAttempt} onRefreshAfterReasoning={onRefreshData} />;
+    case 'transcript':
+      return <TranscriptTab attempt={selectedAttempt} />;
+    case 'depth':
+      return <DepthSignalsTab attempt={selectedAttempt} />;
+    case 'full_assessment':
+      if (profileLoading) {
+        return (
+          <View style={styles.emptyState}>
+            <Text style={styles.emptyText}>Loading full assessment…</Text>
+          </View>
+        );
+      }
+      return <FullAssessmentTab attempt={selectedAttempt} user={profileUser} />;
+    default:
+      return null;
+  }
+}
+
+const ADMIN_REVIEW_FLAG_DESCRIPTIONS: Record<string, string> = {
+  ego_development_review: 'Ego development level 1 but weighted score passing — review recommended',
+  defense_pattern_review: 'Two immature defense patterns detected — review recommended',
+  emotion_recognition_review: 'Low emotion recognition score — review recommended',
+  personal_moment_concreteness_review: 'Both personal moments abstract with borderline score — review recommended',
+  overdisclosure_review: 'Overdisclosure pattern detected',
+  closing_integration_absent: 'Closing integration absent with low ego development',
+  mentalizing_overcertainty: 'Mentalizing overcertainty detected across multiple scenarios',
+  projection_self_report_contradiction:
+    'Projection detected in interview but self-report profile contradicts — possible false positive',
+  rationalization_self_report_contradiction:
+    'Rationalization detected but self-report suggests strong self-awareness — possible false positive',
+  splitting_self_report_contradiction:
+    'Splitting detected but self-report profile contradicts — possible false positive',
+  denial_self_report_contradiction:
+    'Denial detected but self-report profile contradicts — possible false positive',
+  defense_possible_false_negative:
+    'Psychometric profile suggests possible missed defense detection — no behavioral detection occurred',
+  projection_insufficient_psychometric_data:
+    'Projection detected but psychometric data insufficient for cross-reference validation',
+  rationalization_insufficient_psychometric_data:
+    'Rationalization detected but psychometric data insufficient for cross-reference validation',
+  splitting_insufficient_psychometric_data:
+    'Splitting detected but psychometric data insufficient for cross-reference validation',
+  denial_insufficient_psychometric_data:
+    'Denial detected but psychometric data insufficient for cross-reference validation',
+  projection_self_report_confirmed: 'Projection detection confirmed by self-report psychometric profile',
+  rationalization_self_report_confirmed:
+    'Rationalization detection confirmed by self-report psychometric profile',
+  splitting_self_report_confirmed: 'Splitting detection confirmed by self-report psychometric profile',
+  denial_self_report_confirmed: 'Denial detection confirmed by self-report psychometric profile',
+  projection_self_report_neutral: 'Projection detected — self-report profile neither confirms nor contradicts',
+  rationalization_self_report_neutral:
+    'Rationalization detected — self-report profile neither confirms nor contradicts',
+  splitting_self_report_neutral: 'Splitting detected — self-report profile neither confirms nor contradicts',
+  denial_self_report_neutral: 'Denial detected — self-report profile neither confirms nor contradicts',
+};
+
+function normalizeEmotionResponseLetters(raw: unknown): string[] {
+  if (!Array.isArray(raw)) return [];
+  return raw
+    .map((x) => (typeof x === 'string' ? x.trim().toUpperCase() : String(x ?? '').trim().toUpperCase()))
+    .filter((s) => s.length > 0);
+}
+
+function egoLevelAdminColor(level: number | null | undefined): string {
+  if (level == null || !Number.isFinite(level)) return '#7A9ABE';
+  const n = Math.round(Number(level));
+  if (n <= 2) return '#E87A7A';
+  if (n === 3) return '#D4A84B';
+  return '#2A8C6A';
+}
+
+function concretenessAdminColor(level: string | null | undefined): string {
+  const t = (level ?? '').toLowerCase();
+  if (t === 'absent' || t === 'low') return '#E87A7A';
+  if (t === 'moderate') return '#D4A84B';
+  if (t === 'high') return '#2A8C6A';
+  return '#7A9ABE';
+}
+
+function disclosureAdminColor(cal: string | null | undefined): string {
+  const t = (cal ?? '').toLowerCase();
+  if (t === 'calibrated') return '#2A8C6A';
+  if (t === 'underdisclosure' || t === 'overdisclosure') return '#D4A84B';
+  return '#7A9ABE';
+}
+
+function extractAdminScenarioSliceMeta(raw: unknown): { mentalizing_overcertainty?: boolean } | null {
+  const obj = parseObject(raw);
+  if (!obj) return null;
+  const ps = obj.pillarScores ?? obj.pillar_scores;
+  const ke = obj.keyEvidence ?? obj.key_evidence;
+  if (ps == null && ke == null) return null;
+  return { mentalizing_overcertainty: obj.mentalizing_overcertainty === true };
+}
+
+function adminMentalizingOvercertaintyLabels(attempt: AttemptRow): string[] {
+  const labels: string[] = [];
+  const s1 = extractAdminScenarioSliceMeta(attempt.scenario_1_scores);
+  const s2 = extractAdminScenarioSliceMeta(attempt.scenario_2_scores);
+  const s3 = extractAdminScenarioSliceMeta(attempt.scenario_3_scores);
+  if (s1?.mentalizing_overcertainty) labels.push('Scenario 1');
+  if (s2?.mentalizing_overcertainty) labels.push('Scenario 2');
+  if (s3?.mentalizing_overcertainty) labels.push('Scenario 3');
+  const p = parseObject(attempt.scenario_specific_patterns);
+  const m4 = parseObject(p?.moment_4_scores);
+  const m5 = parseObject(p?.moment_5_scores);
+  if (m4?.mentalizing_overcertainty === true) labels.push('Moment 4');
+  if (m5?.mentalizing_overcertainty === true) labels.push('Moment 5');
+  return labels;
+}
+
+function buildAdminGateComputeOptions(attempt: AttemptRow): ComputeGateResultOptions {
+  const rawSkip = attempt.skip_penalty_total;
+  const skipNum =
+    typeof rawSkip === 'number' && Number.isFinite(rawSkip) ? rawSkip : Number(rawSkip);
+  const skipPenaltyTotal = Number.isFinite(skipNum) ? skipNum : 0;
+  const responses = hydrateEmotionResponsesFromStorage(attempt.emotion_recognition_responses);
+  const correctOpt = emotionRecognitionCorrectCount(responses);
+  const rawEmotion = resolveEmotionRecognitionRawScoreForGate({
+    emotionRecognitionRawScore: attempt.emotion_recognition_raw_score,
+    emotionRecognitionCorrectCount: correctOpt,
+    emotionRecognitionResponses: attempt.emotion_recognition_responses,
+  });
+  return {
+    skipPenaltyTotal,
+    skipAutoFail: attempt.auto_failed === true,
+    egoDevelopmentLevel: attempt.ego_development_level ?? null,
+    defensePatterns: attempt.defense_patterns ?? DEFAULT_DEFENSE_PATTERNS,
+    moment4Concreteness: attempt.moment_4_concreteness ?? null,
+    moment5Concreteness: attempt.moment_5_concreteness ?? null,
+    emotionRecognitionRawScore: rawEmotion ?? undefined,
+    emotionRecognitionCorrectCount: correctOpt ?? undefined,
+    emotionRecognitionResponses: attempt.emotion_recognition_responses,
+    mentalizingOvercertaintyCount: attempt.mentalizing_overcertainty_count ?? null,
+    disclosureCalibration: attempt.disclosure_calibration ?? null,
+    closingIntegration: attempt.closing_integration ?? null,
+    personalMomentEmotionalVocabLow: attempt.personal_moment_emotional_vocab_low === true,
+  };
+}
+
+const EGO_LEVEL_ADMIN_SHORT_DESC: Record<number, string> = {
+  1: 'Concrete and rule-based',
+  2: 'Multiple perspectives, simplified resolution',
+  3: 'Holds complexity, recognizes patterns',
+  4: 'Integrates contradictions, genuine depth',
+  5: 'Systemic relational understanding',
+};
+
+function defenseCrossRefConfidenceColor(level: 'high' | 'moderate' | 'low'): string {
+  if (level === 'high') return '#2A8C6A';
+  if (level === 'moderate') return '#D4A84B';
+  return '#E87A7A';
+}
+
+function defenseCrossRefConsistencyLabel(consistent: boolean | null): string {
+  if (consistent === true) return 'Consistent';
+  if (consistent === false) return 'Contradicting';
+  return 'Neutral / insufficient data';
+}
+
+function DepthSignalsTab({ attempt }: { attempt: AttemptRow }) {
+  const pillars = pillarScoresForGate(attempt);
+  const gateEcho = computeGateResultCore(pillars, null, buildAdminGateComputeOptions(attempt));
+  const dp = attempt.defense_patterns ?? DEFAULT_DEFENSE_PATTERNS;
+  const defenseActiveCount = [
+    dp.projection_detected,
+    dp.rationalization_detected,
+    dp.splitting_detected,
+    dp.denial_detected,
+  ].filter(Boolean).length;
+  const flags = reviewFlagsFromStoredAttempt(attempt);
+  const hasFlags = flags.length > 0;
+  const legacyErFloorReview = isLegacyEmotionRecognitionFloorOnlyFail(attempt);
+  const responses = hydrateEmotionResponsesFromStorage(attempt.emotion_recognition_responses);
+  const emotionBatteryComplete = isEmotionRecognitionBatteryComplete(responses);
+  const correctN = emotionRecognitionCorrectCount(responses);
+  const pct = emotionRecognitionDisplayPercentFromAttemptsRow({
+    emotion_recognition_raw_score: attempt.emotion_recognition_raw_score,
+    emotion_recognition_responses: attempt.emotion_recognition_responses,
+  });
+  const egoLevel =
+    typeof attempt.ego_development_level === 'number' && Number.isFinite(attempt.ego_development_level)
+      ? Math.round(attempt.ego_development_level)
+      : null;
+  const depthModifier =
+    attempt.depth_signal_modifier ?? attempt.score_modifier ?? gateEcho.depthSignalModifier ?? gateEcho.scoreModifier;
+  const psychometricModifier = attempt.psychometric_modifier_applied;
+  const correctedPsychometricModifier =
+    attempt.corrected_psychometric_modifier ?? psychometricModifier;
+  const finalModified =
+    attempt.modified_weighted_score_with_psychometrics ??
+    attempt.modified_weighted_score ??
+    attempt.weighted_score;
+  const sm = depthModifier;
+  const scoreModNonZero = typeof sm === 'number' && Number.isFinite(sm) && sm !== 0;
+  const defenseCrossRef = attempt.defense_cross_reference ?? null;
+  const gateEchoDepthModifier =
+    gateEcho.depthSignalModifier ?? gateEcho.scoreModifier ?? 0;
+  const crossRefModifierAdjustment = defenseCrossRef?.modifierAdjustment ?? 0;
+  const wReq = parseGateFailDetailRow(attempt)?.weighted_score?.requiredMin;
+  const detailThreshold =
+    typeof wReq === 'number' && Number.isFinite(wReq) ? wReq : GATE_PASS_WEIGHTED_MIN;
+
+  return (
+    <ScrollView style={styles.innerTabContent}>
+      <GamingCorrectionBanner gamingCorrection={attempt.gaming_correction ?? null} />
+      <UncertaintyScoreCard
+        uncertaintyScore={attempt.uncertainty_score ?? null}
+        breakdown={
+          (attempt.uncertainty_breakdown as import('@features/psychometrics/computeUncertaintyScore').UncertaintyBreakdown | null) ??
+          null
+        }
+      />
+      <Text style={styles.sectionTitle}>Section A — Score modifiers</Text>
+      <View style={styles.metaRow}>
+        <Text style={styles.metaLabel}>Raw weighted score</Text>
+        <Text style={styles.metaValue}>{formatScoreCell(attempt.weighted_score)}</Text>
+      </View>
+      <View style={styles.metaRow}>
+        <Text style={styles.metaLabel}>Depth signal modifier</Text>
+        <Text
+          style={[
+            styles.metaValue,
+            { color: typeof depthModifier === 'number' && depthModifier < 0 ? '#E87A7A' : typeof depthModifier === 'number' && depthModifier === 0 ? '#2A8C6A' : '#f4f4f5' },
+          ]}
+        >
+          {typeof depthModifier === 'number' && Number.isFinite(depthModifier) ? depthModifier.toFixed(2) : '—'}
+        </Text>
+      </View>
+      <View style={styles.metaRow}>
+        <Text style={styles.metaLabel}>Psychometric modifier (raw)</Text>
+        <Text style={styles.metaValue}>
+          {psychometricModifier != null && Number.isFinite(psychometricModifier)
+            ? psychometricModifier.toFixed(2)
+            : 'pending'}
+        </Text>
+      </View>
+      {correctedPsychometricModifier != null &&
+      psychometricModifier != null &&
+      correctedPsychometricModifier !== psychometricModifier ? (
+        <View style={styles.metaRow}>
+          <Text style={styles.metaLabel}>Psychometric modifier (corrected)</Text>
+          <Text style={styles.metaValue}>{correctedPsychometricModifier.toFixed(2)}</Text>
+        </View>
+      ) : null}
+      <GamingCorrectionCard
+        gamingCorrection={attempt.gaming_correction ?? null}
+        variant="dark"
+      />
+      <View style={styles.metaRow}>
+        <Text style={styles.metaLabel}>Final score (with psychometrics)</Text>
+        <Text style={styles.metaValue}>{formatScoreCell(finalModified)}</Text>
+      </View>
+      <View style={styles.metaRow}>
+        <Text style={styles.metaLabel}>Modified weighted score (interview only)</Text>
+        <Text style={styles.metaValue}>{formatScoreCell(attempt.modified_weighted_score)}</Text>
+      </View>
+      <View style={styles.metaRow}>
+        <Text style={styles.metaLabel}>Threshold (this attempt)</Text>
+        <Text style={styles.metaValue}>
+          {detailThreshold.toFixed(1)}
+          {detailThreshold <= REFERRAL_WEIGHTED_PASS_MIN + 0.01 ? ' (referral band)' : ' (standard)'}
+        </Text>
+      </View>
+      <View style={styles.metaRow}>
+        <Text style={styles.metaLabel}>Also</Text>
+        <Text style={[styles.metaValue, { fontSize: 12, color: 'rgba(255,255,255,0.55)' }]}>
+          Referral minimum {REFERRAL_WEIGHTED_PASS_MIN.toFixed(1)} · Standard {GATE_PASS_WEIGHTED_MIN.toFixed(1)}
+        </Text>
+      </View>
+      <View style={styles.metaRow}>
+        <Text style={styles.metaLabel}>Final gate</Text>
+        <Text style={[styles.metaValue, { color: attempt.final_gate_pass === true ? '#2A8C6A' : attempt.final_gate_pass === false ? '#E87A7A' : '#7A9ABE' }]}>
+          {attempt.final_gate_pass != null
+            ? attempt.final_gate_pass
+              ? 'PASS'
+              : 'FAIL'
+            : psychometricModifier != null
+              ? 'pending psychometrics'
+              : '—'}
+        </Text>
+      </View>
+      <View style={styles.metaRow}>
+        <Text style={styles.metaLabel}>Interview gate (pre-psychometric)</Text>
+        <Text style={[styles.metaValue, { color: attempt.passed === true ? '#2A8C6A' : attempt.passed === false ? '#E87A7A' : '#7A9ABE' }]}>
+          {attempt.passed === true ? 'PASS' : attempt.passed === false ? 'FAIL' : '—'}
+        </Text>
+      </View>
+      {scoreModNonZero ? (
+        <View style={[styles.block, { marginTop: 8 }]}>
+          <Text style={styles.blockTitle}>Modifier breakdown (recomputed)</Text>
+          <Text style={styles.blockText}>
+            Ego development modifier:{' '}
+            {gateEcho.egoDevelopmentModifier != null ? gateEcho.egoDevelopmentModifier.toFixed(2) : '—'}
+          </Text>
+          <Text style={styles.blockText}>
+            Defense pattern modifier:{' '}
+            {gateEcho.defensePatternScoreAdjustment != null ? gateEcho.defensePatternScoreAdjustment.toFixed(2) : '0.00'}
+          </Text>
+          <Text style={styles.blockText}>
+            Personal moment concreteness modifier:{' '}
+            {gateEcho.personalMomentConcretenessModifier != null
+              ? gateEcho.personalMomentConcretenessModifier.toFixed(2)
+              : '—'}
+          </Text>
+        </View>
+      ) : null}
+      <Text style={[styles.depthSignalFootnote, { marginTop: scoreModNonZero ? 6 : 10 }]}>
+        Score modifiers are applied to the raw weighted score before the pass threshold comparison. They reflect
+        structural features of the interview profile — defensive patterns, psychological maturity, and personal moment
+        engagement quality — that the pillar scores don't fully capture individually.{'\n\n'}
+        A passing weighted score can still result in a fail or review flag when modifiers are active. A borderline score
+        can drop below threshold when multiple modifiers accumulate.
+      </Text>
+
+      <Text style={[styles.sectionTitle, { marginTop: 22 }]}>Section B — Review flags</Text>
+      <View
+        style={[
+          styles.block,
+          hasFlags && {
+            borderWidth: 1,
+            borderColor: 'rgba(212, 168, 75, 0.55)',
+            backgroundColor: 'rgba(212, 168, 75, 0.08)',
+          },
+        ]}
+      >
+        {!hasFlags ? (
+          <Text style={styles.blockText}>No review flags.</Text>
+        ) : (
+          flags.map((f) => (
+            <View key={f} style={{ marginBottom: 10 }}>
+              <Text style={[styles.blockTitle, { fontSize: 13, marginBottom: 4 }]}>{f}</Text>
+              <Text style={styles.blockText}>{ADMIN_REVIEW_FLAG_DESCRIPTIONS[f] ?? '—'}</Text>
+            </View>
+          ))
+        )}
+      </View>
+
+      <Text style={[styles.sectionTitle, { marginTop: 22 }]}>Section C — New pillar dimensions</Text>
+      <View style={styles.block}>
+        <Text style={styles.blockTitle}>Ego development level</Text>
+        {egoLevel != null && egoLevel >= 1 && egoLevel <= 5 ? (
+          <>
+            <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 6, marginVertical: 8 }}>
+              {[1, 2, 3, 4, 5].map((n) => (
+                <View
+                  key={n}
+                  style={{
+                    paddingHorizontal: 10,
+                    paddingVertical: 6,
+                    borderRadius: 8,
+                    backgroundColor: n === egoLevel ? egoLevelAdminColor(egoLevel) : 'rgba(255,255,255,0.06)',
+                    borderWidth: 1,
+                    borderColor: n === egoLevel ? egoLevelAdminColor(egoLevel) : 'rgba(255,255,255,0.12)',
+                  }}
+                >
+                  <Text style={{ color: n === egoLevel ? '#0a0a0f' : 'rgba(255,255,255,0.75)', fontWeight: '700', fontSize: 12 }}>
+                    {n}
+                  </Text>
+                </View>
+              ))}
+            </View>
+            <Text style={[styles.blockText, { fontSize: 12, color: 'rgba(255,255,255,0.65)' }]}>
+              {EGO_LEVEL_ADMIN_SHORT_DESC[egoLevel] ?? ''}
+            </Text>
+            <Text style={styles.depthSignalFootnote}>
+              {`Holistic assessment of response sophistication across the full interview. Based on Loevinger's ego development framework — measures the complexity and maturity of how someone makes meaning of relational situations.\n\nLevel 1 — Concrete and rule-based. Black and white framing. Characters are simply right or wrong. No complexity held.\nLevel 2 — Aware of multiple perspectives but resolves them simplistically. "Both people need to communicate better." Gate modifier: -0.2.\nLevel 3 — Holds complexity without resolving it prematurely. Recognizes patterns. Uses psychological concepts naturally.\nLevel 4 — Integrates contradictions. Connects behavior to broader relational patterns. Tolerates ambiguity.\nLevel 5 — Systemic relational understanding. Recognizes how internal states drive patterns across relationships.\n\nLevel 1 with weighted score below 7.0 = gate fail. Level 1 with passing score = review flag. Level 2 = -0.2 score modifier applied.`}
+            </Text>
+          </>
+        ) : (
+          <Text style={styles.blockText}>—</Text>
+        )}
+      </View>
+
+      <View style={[styles.block, { marginTop: 12 }]}>
+        <Text style={styles.blockTitle}>Emotion recognition</Text>
+        {legacyErFloorReview ? (
+          <Text style={[styles.blockText, { color: '#D4A84B', marginBottom: 8 }]}>
+            {LEGACY_EMOTION_RECOGNITION_FLOOR_REVIEW_NOTE}
+          </Text>
+        ) : null}
+        <Text style={styles.depthSignalFootnote}>
+          Ability-based test of emotion perception. Three multiple choice items — one per scenario — ask what a character
+          is most likely feeling at a key moment. Scored against consensus correct answers. Tests whether the user can
+          accurately read emotional states from situational context, independent of verbal fluency.{'\n\n'}
+          Emotion recognition affects the depth signal modifier only (not a hard gate fail).{'\n\n'}
+          Score guide:{'\n'}
+          3/3 — Strong emotion perception{'\n'}
+          2/3 — Adequate, review flag{'\n'}
+          1/3 — Review flag: limited emotion reading accuracy{'\n'}
+          0/3 — −0.20 depth modifier (no gate fail){'\n'}
+          Incomplete battery (&lt; 3 responses) — scores nulled, no modifier
+        </Text>
+        <Text style={styles.blockText}>
+          {!emotionBatteryComplete && countAnsweredEmotionItems(responses) > 0
+            ? `Incomplete battery (${countAnsweredEmotionItems(responses)}/${EXPECTED_EMOTION_RECOGNITION_ITEMS} recorded)`
+            : correctN != null
+              ? `${correctN} of 3 correct`
+              : countAnsweredEmotionItems(responses) === 0
+                ? 'No responses recorded'
+                : 'Incomplete battery'}
+          {pct != null ? ` · ${pct}%` : emotionBatteryComplete ? '' : ''}
+        </Text>
+        {EMOTION_INTERVIEW_MODAL_ITEMS.map((_item, i) => {
+          const userAns = responses[i]?.trim() ? responses[i]!.trim().toUpperCase() : '—';
+          const correctLetter = EMOTION_ITEM_CORRECT_ANSWERS[i];
+          const ok = userAns === correctLetter;
+          const label = i === 0 ? 'Item 1 (Emma/Ryan)' : i === 1 ? 'Item 2 (Sarah/James)' : 'Item 3 (Sophie/Daniel)';
+          return (
+            <Text key={i} style={[styles.blockText, { marginTop: 6 }]}>
+              {label}: User answered {userAns} — Correct: {correctLetter}{' '}
+              {userAns === '—' ? '(missing)' : ok ? '✓' : '✗'}
+            </Text>
+          );
+        })}
+      </View>
+
+      <View style={[styles.block, { marginTop: 12 }]}>
+        <Text style={styles.blockTitle}>Personal moment concreteness</Text>
+        <Text style={styles.depthSignalFootnote}>
+          {`Measures whether the user engaged with their own personal experience when asked about grudges and conflicts, or retreated to general philosophy.\n\nabsent — No personal example provided. Deflected or claimed no relevant experience.\nlow — Vague reference to a type of situation with no named person or specific event.\nmoderate — Specific person or situation named but thin on narrative detail or emotional content.\nhigh — Specific person named, concrete event described, emotional content present, personal reflection shown.\n\nBoth absent or low applies a score penalty. Users who give rich scenario responses but consistently avoid personal engagement are showing low private self-awareness.`}
+        </Text>
+        <Text style={[styles.blockText, { color: concretenessAdminColor(attempt.moment_4_concreteness ?? undefined) }]}>
+          Moment 4: {attempt.moment_4_concreteness ?? '—'}
+        </Text>
+        <Text style={[styles.blockText, { color: concretenessAdminColor(attempt.moment_5_concreteness ?? undefined) }]}>
+          Moment 5: {attempt.moment_5_concreteness ?? '—'}
+        </Text>
+      </View>
+
+      <View style={[styles.block, { marginTop: 12 }]}>
+        <Text style={styles.blockTitle}>Mentalizing overcertainty</Text>
+        <Text style={styles.depthSignalFootnote}>
+          {`Flags responses where the user states characters' internal states as facts rather than inferences. Genuine high-level mentalizing requires holding uncertainty about others' inner lives — "Ryan might be avoiding tension" is healthy inference; "Ryan clearly doesn't care" is overcertainty.\n\nTrigger examples: "clearly doesn't care," "he's never going to change," "definitely emotionally unavailable," "the type of person who can't," attachment diagnoses stated as fact.\n\nWhen flagged: mentalizing score capped at 7 for that scenario. Count of 2+ adds a review flag.`}
+        </Text>
+        <Text style={styles.blockText}>
+          {typeof attempt.mentalizing_overcertainty_count === 'number'
+            ? `${attempt.mentalizing_overcertainty_count} moments flagged for overcertainty`
+            : '—'}
+        </Text>
+        {overcertaintyLabels.length > 0 ? (
+          <Text style={[styles.blockText, { marginTop: 6 }]}>{overcertaintyLabels.join(' · ')}</Text>
+        ) : null}
+      </View>
+
+      <View style={[styles.block, { marginTop: 12 }]}>
+        <Text style={styles.blockTitle}>Personal moment emotional vocabulary</Text>
+        <Text style={styles.depthSignalFootnote}>
+          {`Measures whether the user uses emotional vocabulary words when describing their own personal experiences — words that name or characterize internal emotional states (angry, hurt, ashamed, proud, anxious, relieved, etc.).\n\nCompares emotional vocabulary density in personal moment responses against scenario responses. A significant gap — analytically rich in scenarios but emotionally flat in personal moments — signals possible alexithymia: difficulty accessing or describing one's own feelings.\n\nNormal — density is adequate or consistent with scenario responses.\nLow — personal moment emotional vocabulary significantly below scenario average. Review flag when combined with low concreteness.`}
+        </Text>
+        <Text style={styles.blockText}>
+          {attempt.personal_moment_emotional_vocab_low === true ? 'Low ⚑' : 'Normal ✓'}
+        </Text>
+      </View>
+
+      <View style={[styles.block, { marginTop: 12 }]}>
+        <Text style={styles.blockTitle}>Disclosure calibration</Text>
+        <Text style={styles.depthSignalFootnote}>
+          {`Assesses whether the user's personal moment disclosures were appropriate for the interview context — neither too guarded nor overwhelming.\n\nCalibrated — personal disclosures were specific and emotionally honest without being either avoidant or excessive. No flag.\n\nUnderdisclosure — personal responses significantly shorter and less specific than scenario responses, with both moments at absent or low concreteness. The user engages analytically with fictional others but closes down when asked about their own experience. Signals low private self-awareness or experiential avoidance.\n\nOverdisclosure — personal responses exceeded appropriate scope: very high word count, unsolicited clinical trauma vocabulary, or extensive detail about third parties not relevant to the question. Signals poor social calibration or boundary awareness. Adds overdisclosure_review flag.`}
+        </Text>
+        <Text
+          style={[
+            styles.blockText,
+            { color: disclosureAdminColor(attempt.disclosure_calibration ?? undefined), textTransform: 'capitalize' },
+          ]}
+        >
+          {attempt.disclosure_calibration
+            ? String(attempt.disclosure_calibration).replace(/_/g, ' ')
+            : '—'}
+        </Text>
+      </View>
+
+      <Text style={[styles.sectionTitle, { marginTop: 22 }]}>Section D — Defense patterns</Text>
+      <Text style={[styles.depthSignalFootnote, { marginTop: 4, marginBottom: 6 }]}>
+        {`Cross-scenario detection of immature psychological defenses. Each flag fires when a consistent pattern is detected across the full interview. Individual flags apply a -0.1 score modifier. Three or more flags active simultaneously applies an additional penalty and triggers gate fail consideration.`}
+      </Text>
+      <View style={styles.defenseGrid}>
+        {(
+          [
+            [
+              'Projection',
+              'projection_detected' as const,
+              `User attributes qualities to fictional characters that their own personal moment responses demonstrate about themselves. e.g. calling Daniel conflict-avoidant while describing their own pattern of going quiet when overwhelmed.`,
+            ],
+            [
+              'Rationalization',
+              'rationalization_detected' as const,
+              `User provides elaborate logical justifications for why repair isn't needed or why the accountable character bears no responsibility. Detected when repair refusal appears alongside extended explanatory content placing full blame elsewhere.`,
+            ],
+            [
+              'Splitting',
+              'splitting_detected' as const,
+              `User consistently assigns all fault to one character across scenarios with no bilateral acknowledgment. One party is always entirely at fault, the other always blameless. Detected when accountability scores are consistently one-sided across all three scenarios.`,
+            ],
+            [
+              'Denial',
+              'denial_detected' as const,
+              `User claims no conflicts, grudges, or negative experiences in personal moments while scenario responses show contemptuous or externalizing patterns. The gap between claimed equanimity and demonstrated contempt is the signal.`,
+            ],
+          ] as const
+        ).map(([label, key, footnote]) => {
+          const active = dp[key] === true;
+          return (
+            <View
+              key={key}
+              style={[
+                styles.defenseGridCell,
+                { borderColor: active ? 'rgba(232, 122, 122, 0.55)' : 'rgba(255,255,255,0.12)' },
+              ]}
+            >
+              <Text style={styles.defenseGridTitle}>{label}</Text>
+              <Text style={[styles.defenseGridState, { color: active ? '#E87A7A' : 'rgba(255,255,255,0.45)' }]}>
+                {active ? 'DETECTED' : 'clear'}
+              </Text>
+              <Text style={styles.defenseCardFootnote}>{footnote}</Text>
+            </View>
+          );
+        })}
+      </View>
+      <Text style={[styles.blockText, { marginTop: 10 }]}>
+        {defenseActiveCount} of 4 immature defense patterns detected.
+      </Text>
+      {defenseActiveCount >= 3 ? (
+        <View style={[styles.block, { marginTop: 10, borderLeftWidth: 4, borderLeftColor: '#E87A7A' }]}>
+          <Text style={[styles.blockText, { color: '#F5A8A8', fontWeight: '600' }]}>
+            High defense pattern load — automatic gate fail triggered.
+          </Text>
+        </View>
+      ) : null}
+
+      <Text style={[styles.sectionTitle, { marginTop: 22 }]}>Defense cross-reference</Text>
+      <Text style={[styles.depthSignalFootnote, { marginTop: 4, marginBottom: 6 }]}>
+        Cross-validates NLP defense pattern detections against self-report psychometric scores. When
+        behavioral detection and self-report diverge, modifier penalties may be partially reversed and
+        admin review is recommended.
+      </Text>
+      {defenseCrossRef ? (
+        <View style={styles.block}>
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 10 }}>
+            <Text style={styles.blockTitle}>Overall confidence</Text>
+            <View
+              style={{
+                paddingHorizontal: 10,
+                paddingVertical: 4,
+                borderRadius: 8,
+                backgroundColor: `${defenseCrossRefConfidenceColor(defenseCrossRef.overallConfidence)}22`,
+                borderWidth: 1,
+                borderColor: defenseCrossRefConfidenceColor(defenseCrossRef.overallConfidence),
+              }}
+            >
+              <Text
+                style={{
+                  color: defenseCrossRefConfidenceColor(defenseCrossRef.overallConfidence),
+                  fontWeight: '700',
+                  fontSize: 12,
+                  textTransform: 'uppercase',
+                }}
+              >
+                {defenseCrossRef.overallConfidence}
+              </Text>
+            </View>
+          </View>
+
+          {defenseCrossRef.recommendAdminReview ? (
+            <View
+              style={{
+                marginBottom: 12,
+                padding: 10,
+                borderRadius: 8,
+                backgroundColor: 'rgba(212, 168, 75, 0.12)',
+                borderWidth: 1,
+                borderColor: 'rgba(212, 168, 75, 0.55)',
+              }}
+            >
+              <Text style={{ color: '#D4A84B', fontWeight: '700', fontSize: 13 }}>
+                Admin review recommended
+              </Text>
+            </View>
+          ) : null}
+
+          {crossRefModifierAdjustment !== 0 ? (
+            <View style={{ marginBottom: 12 }}>
+              <Text style={styles.blockTitle}>Modifier adjustment</Text>
+              <Text style={styles.blockText}>
+                Pre-cross-reference depth modifier: {gateEchoDepthModifier.toFixed(2)}
+              </Text>
+              <Text style={styles.blockText}>
+                Cross-reference adjustment: +{crossRefModifierAdjustment.toFixed(2)}
+              </Text>
+              <Text style={styles.blockText}>
+                Adjusted depth modifier: {typeof depthModifier === 'number' ? depthModifier.toFixed(2) : '—'}
+              </Text>
+            </View>
+          ) : null}
+
+          {defenseCrossRef.flags.length === 0 ? (
+            <Text style={styles.blockText}>No cross-reference flags.</Text>
+          ) : (
+            defenseCrossRef.flags.map((flag) => (
+              <View
+                key={flag.flagName}
+                style={{
+                  marginBottom: 12,
+                  paddingBottom: 12,
+                  borderBottomWidth: 1,
+                  borderBottomColor: 'rgba(255,255,255,0.08)',
+                }}
+              >
+                <Text style={[styles.blockTitle, { fontSize: 13 }]}>
+                  {flag.defense.replace(/_/g, ' ')} · {flag.flagName}
+                </Text>
+                <Text style={styles.blockText}>
+                  Detected: {flag.detected ? 'yes' : 'no'} · Self-report:{' '}
+                  {defenseCrossRefConsistencyLabel(flag.selfReportConsistent)} · Confidence:{' '}
+                  <Text style={{ color: defenseCrossRefConfidenceColor(flag.confidenceLevel) }}>
+                    {flag.confidenceLevel}
+                  </Text>
+                </Text>
+                <Text style={[styles.blockText, { marginTop: 4 }]}>{flag.description}</Text>
+                {flag.flagName === 'defense_possible_false_negative' ? (
+                  <Text style={[styles.blockText, { marginTop: 6, color: '#D4A84B' }]}>
+                    Psychometric profile suggests possible missed defense detection in interview. No
+                    behavioral detection occurred but self-report pattern warrants review.
+                  </Text>
+                ) : null}
+              </View>
+            ))
+          )}
+        </View>
+      ) : (
+        <View style={styles.block}>
+          <Text style={styles.blockText}>Defense cross-reference not computed for this attempt.</Text>
+        </View>
+      )}
+    </ScrollView>
+  );
+}
+
 function SummaryTab({
   attempt,
   onAttemptMutated,
   candidateUser,
+  profileUser,
 }: {
   attempt: AttemptRow;
   onAttemptMutated?: () => void;
   /** User row for confirmation dialog (optional when viewing attempt outside cohort drill-down). */
   candidateUser?: UserRow | null;
+  profileUser?: AdminUserProfileRecord | null;
 }) {
   const [styleProfile, setStyleProfile] = useState<CommunicationStyleProfileRow | null>(null);
   const [styleStatus, setStyleStatus] = useState<'idle' | 'loading' | 'reprocessing'>('idle');
@@ -1745,8 +2934,22 @@ function SummaryTab({
     attempt.communication_style_error ?? null
   );
   const [recalcBusy, setRecalcBusy] = useState(false);
+  const [narrativeAutoRetrying, setNarrativeAutoRetrying] = useState(
+    () =>
+      adminAttemptEligibleForNarrativeAutoRetry(attempt) &&
+      !adminNarrativeAutoRetryFinishedAttempts.has(attempt.id),
+  );
+  const [narrativeAutoRetryError, setNarrativeAutoRetryError] = useState<string | null>(null);
+  const [resendingResultsEmail, setResendingResultsEmail] = useState(false);
+  const [resendResultsEmailError, setResendResultsEmailError] = useState<string | null>(null);
+  const [resendResultsEmailOk, setResendResultsEmailOk] = useState<string | null>(null);
+  /** Fresh DB check on open — avoids flashing "not ready" when narrative already exists. */
+  const [narrativeHydration, setNarrativeHydration] = useState<'loading' | 'ready' | 'pending'>('loading');
+  const [styleAutoReprocessing, setStyleAutoReprocessing] = useState(false);
   const [adminSessionUserId, setAdminSessionUserId] = useState<string | null>(null);
   const [adminSessionEmail, setAdminSessionEmail] = useState<string | null>(null);
+  const onAttemptMutatedRef = useRef(onAttemptMutated);
+  onAttemptMutatedRef.current = onAttemptMutated;
 
   useEffect(() => {
     setStylePipelineErrorDisplay(attempt.communication_style_error ?? null);
@@ -1782,6 +2985,193 @@ function SummaryTab({
       cancelled = true;
     };
   }, [attempt.id, attempt.user_id]);
+
+  useEffect(() => {
+    const ar = parseObject(attempt.ai_reasoning);
+    const primaryLabels = styleProfile?.style_labels_primary;
+    const secondaryLabels = styleProfile?.style_labels_secondary;
+    const labelCount =
+      (Array.isArray(primaryLabels) ? primaryLabels.length : 0) +
+      (Array.isArray(secondaryLabels) ? secondaryLabels.length : 0);
+    // #region agent log
+    fetch('http://127.0.0.1:7789/ingest/668e0bd5-3283-4492-9f48-e33846c18218', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'X-Debug-Session-Id': '4b3376' },
+      body: JSON.stringify({
+        sessionId: '4b3376',
+        hypothesisId: 'H_admin_attempt_view',
+        location: 'AdminInterviewDashboard.tsx:SummaryTab',
+        message: 'admin_attempt_loaded',
+        data: {
+          attemptId: attempt.id,
+          reasoning_pending: attempt.reasoning_pending === true,
+          narrativeStillPending: adminAiNarrativeStillPending(attempt),
+          hasSubstantiveNarrative: adminAttemptHasSubstantiveAiReasoning(ar),
+          aiReasoningKeys: ar ? Object.keys(ar).slice(0, 20) : [],
+          _reasoningPending: !!(ar as { _reasoningPending?: boolean } | null)?._reasoningPending,
+          _narrativeFailed: !!(ar as { _narrativeFailed?: boolean } | null)?._narrativeFailed,
+          communication_style_error: attempt.communication_style_error ?? null,
+          styleProfileSourceAttemptId: styleProfile?.source_attempt_id ?? null,
+          styleLabelCount: labelCount,
+          weighted_score: attempt.weighted_score ?? null,
+          modified_weighted_score: attempt.modified_weighted_score ?? null,
+          score_modifier: attempt.score_modifier ?? null,
+          scoring_deferred:
+            (attempt as { scoring_deferred?: boolean | null }).scoring_deferred === true,
+        },
+        timestamp: Date.now(),
+      }),
+    }).catch(() => {});
+    // #endregion
+  }, [
+    attempt,
+    attempt.id,
+    attempt.ai_reasoning,
+    attempt.reasoning_pending,
+    attempt.communication_style_error,
+    styleProfile,
+    attempt.weighted_score,
+    attempt.modified_weighted_score,
+    attempt.score_modifier,
+  ]);
+
+  const transcriptReady =
+    Array.isArray(attempt.transcript) && attempt.transcript.length > 0;
+
+  useEffect(() => {
+    let cancelled = false;
+    setNarrativeHydration('loading');
+    void (async () => {
+      const fresh = await fetchAttemptNarrativeState(attempt.id);
+      if (cancelled) return;
+      if (fresh.substantive) {
+        setNarrativeHydration('ready');
+        const updated = await reconcileStaleReasoningPendingOnAdminView(attempt);
+        if (!cancelled) onAttemptMutatedRef.current?.();
+        return;
+      }
+      setNarrativeHydration(adminAiNarrativeStillPending(attempt) ? 'pending' : 'ready');
+      const updated = await reconcileStaleReasoningPendingOnAdminView(attempt);
+      if (!cancelled && updated) onAttemptMutatedRef.current?.();
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [attempt.id]);
+
+  useEffect(() => {
+    const id = attempt.id;
+    const ownerUserId = attempt.user_id;
+
+    if (narrativeHydration === 'loading') {
+      return;
+    }
+
+    if (adminNarrativeAutoRetryFinishedAttempts.has(id)) {
+      setNarrativeAutoRetrying(false);
+      return;
+    }
+
+    if (!transcriptReady) {
+      return;
+    }
+
+    if (!adminAttemptEligibleForNarrativeAutoRetry(attempt)) {
+      adminNarrativeAutoRetryFinishedAttempts.add(id);
+      setNarrativeAutoRetrying(false);
+      if (narrativeHydration === 'loading') {
+        setNarrativeHydration(adminAiNarrativeStillPending(attempt) ? 'pending' : 'ready');
+      }
+      return;
+    }
+
+    if (adminNarrativeAutoRetryInFlight.has(id)) {
+      return;
+    }
+
+    adminNarrativeAutoRetryInFlight.add(id);
+    let cancelled = false;
+    setNarrativeAutoRetrying(true);
+    setNarrativeAutoRetryError(null);
+    setNarrativeHydration('pending');
+    // #region agent log
+    fetch('http://127.0.0.1:7789/ingest/668e0bd5-3283-4492-9f48-e33846c18218', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'X-Debug-Session-Id': '4b3376' },
+      body: JSON.stringify({
+        sessionId: '4b3376',
+        hypothesisId: 'H_admin_auto_retry',
+        location: 'AdminInterviewDashboard.tsx:SummaryTab',
+        message: 'admin_auto_retry_start',
+        data: { attemptId: id, ownerUserId },
+        timestamp: Date.now(),
+      }),
+    }).catch(() => {});
+    // #endregion
+    void (async () => {
+      try {
+        const r = await adminRetryNarrativeWithClientFallback(id, ownerUserId);
+        if (cancelled) return;
+        // #region agent log
+        fetch('http://127.0.0.1:7789/ingest/668e0bd5-3283-4492-9f48-e33846c18218', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'X-Debug-Session-Id': '4b3376' },
+          body: JSON.stringify({
+            sessionId: '4b3376',
+            hypothesisId: 'H_admin_auto_retry',
+            location: 'AdminInterviewDashboard.tsx:SummaryTab',
+            message: 'admin_auto_retry_done',
+            data: {
+              attemptId: id,
+              ok: 'ok' in r,
+              via: 'ok' in r ? r.via : r.via,
+              error: 'error' in r ? r.error : null,
+            },
+            timestamp: Date.now(),
+          }),
+        }).catch(() => {});
+        // #endregion
+        if ('error' in r) {
+          setNarrativeAutoRetryError(r.error);
+          if (!cancelled) setNarrativeHydration('pending');
+        } else {
+          const fresh = await fetchAttemptNarrativeState(id);
+          if (!cancelled) {
+            setNarrativeHydration(fresh.substantive ? 'ready' : 'pending');
+          }
+        }
+        onAttemptMutatedRef.current?.();
+      } finally {
+        adminNarrativeAutoRetryFinishedAttempts.add(id);
+        if (!cancelled) setNarrativeAutoRetrying(false);
+        adminNarrativeAutoRetryInFlight.delete(id);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [attempt.id, transcriptReady, narrativeHydration]);
+
+  useEffect(() => {
+    if (!narrativeAutoRetrying) return;
+    const id = attempt.id;
+    let cancelled = false;
+    const tick = async () => {
+      const fresh = await fetchAttemptNarrativeState(id);
+      if (cancelled) return;
+      if (fresh.substantive) {
+        setNarrativeHydration('ready');
+        setNarrativeAutoRetrying(false);
+        onAttemptMutatedRef.current?.();
+      }
+    };
+    void tick();
+    const interval = setInterval(() => void tick(), 10_000);
+    return () => {
+      cancelled = true;
+      clearInterval(interval);
+    };
+  }, [narrativeAutoRetrying, attempt.id]);
 
   useEffect(() => {
     let cancelled = false;
@@ -1880,9 +3270,32 @@ function SummaryTab({
   const outcome = resolveAdminPrimaryOutcomeDisplay(candidateUser ?? null, attempt);
   const gateScores = pillarScoresForGate(attempt);
   const gate = computeGateResultCore(gateScores);
+  const gateWithOpts = computeGateResultCore(gateScores, null, buildAdminGateComputeOptions(attempt));
   const gateFailureLines =
     !gate.pass && outcome.outcomeLabel !== 'none' ? formatGateFailureLines(gate, gateScores) : [];
-  const reasoningPendingSummary = adminAiNarrativeStillPending(attempt);
+  const gateFailReasons = asAdminStringArray(attempt.gate_fail_reasons);
+  const storedPsychometricFloors = extractPsychometricFloorsFromGateDetail(
+    parseGateFailDetailRow(attempt) as Record<string, unknown> | null,
+  );
+  const profileStraightLineFlags = asAdminStringArray(profileUser?.psychometric_straight_line_flags);
+  const profilePsychometricScores = {
+    rfqScore: profileUser?.psychometrics_rfq_score ?? null,
+    gaspScore: profileUser?.psychometrics_gasp_score ?? null,
+    dweckScore: profileUser?.psychometrics_dweck_score ?? null,
+    scsSfScore: profileUser?.psychometrics_scs_sf_score ?? null,
+    sd3NarcissismScore: profileUser?.psychometrics_sd3_narcissism_score ?? null,
+  };
+  const activePsychometricGateFails = gateFailReasons.filter((id) =>
+    (ALL_PSYCHOMETRIC_GATE_FAIL_FLOOR_CODES as readonly string[]).includes(id),
+  );
+  const retroactivePsychometricFloorReviews = getRetroactivePsychometricFloorReviews(
+    attempt,
+    profilePsychometricScores,
+    profileStraightLineFlags,
+  );
+  const reasoningPendingSummary =
+    narrativeHydration === 'pending' ||
+    (narrativeHydration === 'loading' && adminAttemptEligibleForNarrativeAutoRetry(attempt));
   const holisticOnlyScenarioDataGap = adminAttemptHasHolisticOnlyTraitScoresNoScenarioSlices(attempt);
 
   const [commFloorDismissOpen, setCommFloorDismissOpen] = useState(false);
@@ -1920,7 +3333,7 @@ function SummaryTab({
       `Original weighted score: ${weightDisplay}`,
       `Original verdict: ${passDisplay}`,
       '',
-      'This will overwrite pillar_scores, weighted_score, passed, gate fields, and scenario_composites on this row with values recomputed from stored scenario slices using the current rubric (transcript reconciliation + aggregation + gate only).',
+      'This will overwrite pillar_scores, weighted_score, pass/fail, depth modifiers, gate fields, and scenario_composites on this row with values recomputed from stored scenario slices using the current rubric (transcript reconciliation + aggregation + gate only).',
       '',
       'A snapshot of the previous scoring fields will be stored in original_scores.',
     ].join('\n');
@@ -1934,12 +3347,27 @@ function SummaryTab({
     try {
       const snap = snapshotAttemptScoresForAudit(attempt);
       const oldPillars = normalizePillarScoresMap(attempt.pillar_scores) ?? {};
+      let egoLevel = attempt.ego_development_level;
+      if (egoLevel == null) {
+        const { data: egoOut, error: egoFnErr } = await supabase.functions.invoke('repair-interview-ego', {
+          body: { attemptId: attempt.id },
+        });
+        const repaired =
+          egoOut != null && typeof egoOut === 'object' && typeof (egoOut as { ego?: unknown }).ego === 'number'
+            ? (egoOut as { ego: number }).ego
+            : null;
+        if (!egoFnErr && repaired != null && repaired >= 1 && repaired <= 5) {
+          egoLevel = repaired;
+        }
+      }
       const result = recalculateAttemptScoresFromStoredSlices({
         transcript: attempt.transcript,
         scenario_1_scores: attempt.scenario_1_scores,
         scenario_2_scores: attempt.scenario_2_scores,
         scenario_3_scores: attempt.scenario_3_scores,
         scenario_specific_patterns: attempt.scenario_specific_patterns,
+        ego_development_level: egoLevel,
+        language_markers: attempt.language_markers,
       });
       const nowIso = new Date().toISOString();
 
@@ -1952,7 +3380,6 @@ function SummaryTab({
             pillar_scores: result.pillar_scores,
             weighted_score: result.gate.weightedScore,
             passed: result.gate.pass,
-            gate_fail_reason: result.gate.failReason,
             gate_fail_reasons: result.gate.failReasonCodes ?? [],
             gate_fail_detail: result.gate.failReasonDetail ?? null,
             scenario_composites: result.scenarioCompositesJson,
@@ -1960,6 +3387,21 @@ function SummaryTab({
             recalculated_at: nowIso,
             recalculation_delta: delta,
             recalculation_notes: result.notes,
+            review_flags: result.gate.reviewFlags ?? [],
+            mentalizing_overcertainty_count: result.mentalizingOvercertaintyCount,
+            defense_patterns: result.defense_patterns,
+            moment_4_concreteness:
+              result.moment_4_concreteness ?? result.gate.moment4Concreteness ?? null,
+            moment_5_concreteness:
+              result.moment_5_concreteness ?? result.gate.moment5Concreteness ?? null,
+            personal_moment_emotional_vocab_density: result.personal_moment_emotional_vocab_density,
+            personal_moment_emotional_vocab_low: result.personal_moment_emotional_vocab_low,
+            depth_signal_modifier:
+              result.gate.depthSignalModifier ?? result.gate.scoreModifier ?? null,
+            score_modifier: result.gate.scoreModifier ?? result.gate.depthSignalModifier ?? null,
+            modified_weighted_score: result.gate.modifiedWeightedScore ?? null,
+            disclosure_calibration: result.disclosure_calibration,
+            ego_development_level: result.ego_development_level ?? egoLevel ?? null,
           })
           .eq('id', attempt.id)
           .eq('user_id', attempt.user_id);
@@ -1967,6 +3409,7 @@ function SummaryTab({
           Alert.alert('Recalculation failed', error.message);
           return;
         }
+        await applyPsychometricModifierToAttempt(attempt.user_id, attempt.id);
         void remoteLog('[RECALCULATE_SCORES]', {
           triggeredByUserId: adminSessionUserId,
           triggeredByEmail: adminSessionEmail,
@@ -1985,7 +3428,6 @@ function SummaryTab({
             incomplete_reason: result.completionFailure.incomplete_reason,
             weighted_score: null,
             passed: null,
-            gate_fail_reason: result.gate.failReason,
             gate_fail_reasons: [],
             gate_fail_detail: null,
             scenario_composites: null,
@@ -2022,11 +3464,23 @@ function SummaryTab({
     <ScrollView style={styles.innerTabContent}>
       {reasoningPendingSummary ? (
         <View style={[styles.block, { borderLeftWidth: 3, borderLeftColor: '#D4A84B', marginBottom: 12 }]}>
-          <Text style={[styles.blockTitle, { color: '#E8D49A' }]}>AI narrative not ready</Text>
-          <Text style={styles.blockText}>
-            Scores are saved; long-form AI reasoning is still pending or failed. Open Tab 2 (AI Reasoning) to retry
-            generation.
+          <Text style={[styles.blockTitle, { color: '#E8D49A' }]}>
+            {narrativeHydration === 'loading'
+              ? 'Checking AI narrative…'
+              : narrativeAutoRetrying
+                ? 'Generating AI narrative…'
+                : 'AI narrative not ready'}
           </Text>
+          <Text style={styles.blockText}>
+            {narrativeHydration === 'loading'
+              ? 'Loading the latest narrative status from the database…'
+              : narrativeAutoRetrying
+                ? 'Scores are saved; generating long-form AI reasoning automatically (this can take a few minutes). The page will refresh when ready.'
+                : 'Scores are saved; long-form AI reasoning is still pending or failed. Open Tab 2 (AI Reasoning) to retry manually, or wait if generation is already running.'}
+          </Text>
+          {narrativeAutoRetryError ? (
+            <Text style={[styles.blockText, { color: '#E87A7A', marginTop: 8 }]}>{narrativeAutoRetryError}</Text>
+          ) : null}
         </View>
       ) : null}
       <Text style={styles.sectionTitle}>Overall</Text>
@@ -2043,7 +3497,8 @@ function SummaryTab({
           </TouchableOpacity>
           {attempt.reasoning_pending === true ? (
             <Text style={[styles.blockText, { marginTop: 6 }]}>
-              Recalculate is disabled while reasoning_pending is true.
+              Recalculate is disabled while automatic narrative generation is still marked in progress
+              (`reasoning_pending` on the attempt row).
             </Text>
           ) : !attempt.completed_at ? (
             <Text style={[styles.blockText, { marginTop: 6 }]}>
@@ -2064,6 +3519,49 @@ function SummaryTab({
         <Text style={styles.metaLabel}>Result</Text>
         <Text style={[styles.metaValue, { color: outcome.color, textTransform: 'lowercase' }]}>{outcome.word}</Text>
       </View>
+      <View style={[styles.block, { borderLeftWidth: 3, borderLeftColor: '#6B8CDB', marginTop: 8, marginBottom: 10 }]}>
+        <Text style={[styles.blockTitle, { color: '#A8C4F0' }]}>Results email</Text>
+        <Text style={styles.blockText}>Send or re-send the "results ready" email for this attempt.</Text>
+        <TouchableOpacity
+          disabled={resendingResultsEmail}
+          onPress={() => {
+            setResendResultsEmailError(null);
+            setResendResultsEmailOk(null);
+            setResendingResultsEmail(true);
+            void (async () => {
+              try {
+                const { data, error } = await supabase.functions.invoke('send-results-email', {
+                  body: { userId: attempt.user_id, attemptId: attempt.id, force: true },
+                });
+                if (error) {
+                  const edgeMsg =
+                    data && typeof data === 'object' && typeof (data as { error?: unknown }).error === 'string'
+                      ? (data as { error: string }).error
+                      : null;
+                  throw new Error(edgeMsg ? `${error.message}: ${edgeMsg}` : error.message);
+                }
+                setResendResultsEmailOk('Results email trigger sent.');
+                onAttemptMutated?.();
+              } catch (e) {
+                setResendResultsEmailError(e instanceof Error ? e.message : String(e));
+              } finally {
+                setResendingResultsEmail(false);
+              }
+            })();
+          }}
+          style={styles.reprocessButton}
+        >
+          <Text style={styles.reprocessButtonText}>
+            {resendingResultsEmail ? 'Sending…' : 'Resend results email'}
+          </Text>
+        </TouchableOpacity>
+        {resendResultsEmailOk ? (
+          <Text style={[styles.blockText, { color: '#8ACB88', marginTop: 8 }]}>{resendResultsEmailOk}</Text>
+        ) : null}
+        {resendResultsEmailError ? (
+          <Text style={[styles.blockText, { color: '#E87A7A', marginTop: 8 }]}>{resendResultsEmailError}</Text>
+        ) : null}
+      </View>
       {outcome.outcomeLabel === 'almost' ? (
         <View style={styles.metaRow}>
           <Text style={styles.metaLabel}>Review</Text>
@@ -2082,6 +3580,60 @@ function SummaryTab({
           ))}
         </View>
       ) : null}
+      {activePsychometricGateFails.map((floorId) => {
+        const storedFloor = storedPsychometricFloors[floorId];
+        const score =
+          storedFloor?.score ??
+          psychometricFloorScoreForUser(floorId, profilePsychometricScores);
+        if (score == null || !Number.isFinite(score)) return null;
+        const description =
+          storedFloor?.description ?? formatPsychometricGateFailDescription(floorId, score);
+        return (
+          <View
+            key={floorId}
+            style={[
+              styles.block,
+              {
+                marginTop: 4,
+                marginBottom: 10,
+                paddingVertical: 10,
+                borderLeftWidth: 4,
+                borderLeftColor: '#ef4444',
+                backgroundColor: 'rgba(239, 68, 68, 0.08)',
+              },
+            ]}
+          >
+            <View style={{ flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', gap: 8, marginBottom: 6 }}>
+              <Text style={[styles.commFloorReviewBadge, { backgroundColor: '#ef4444', color: '#fff' }]}>Gate fail</Text>
+              <Text style={[styles.blockTitle, { marginBottom: 0, color: '#F5A5A5' }]}>{floorId}</Text>
+            </View>
+            <Text style={styles.blockText}>{description}</Text>
+          </View>
+        );
+      })}
+      {retroactivePsychometricFloorReviews.map((review) => (
+        <View
+          key={review.id}
+          style={[
+            styles.block,
+            {
+              marginTop: 4,
+              marginBottom: 10,
+              paddingVertical: 10,
+              borderLeftWidth: 4,
+              borderLeftColor: '#D4A84B',
+              backgroundColor: 'rgba(212, 168, 75, 0.08)',
+            },
+          ]}
+        >
+          <View style={{ flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', gap: 8, marginBottom: 6 }}>
+            <Text style={[styles.commFloorReviewBadge, { backgroundColor: '#E8C96B', color: '#3D3319' }]}>Review</Text>
+            <Text style={[styles.blockTitle, { marginBottom: 0, color: '#E8D49A' }]}>{review.id} (retroactive)</Text>
+          </View>
+          <Text style={styles.blockText}>{review.retroactiveNote}</Text>
+          <Text style={[styles.blockText, { marginTop: 6 }]}>{review.description}</Text>
+        </View>
+      ))}
       {communicationFloorNeedsReview ? (
         <View
           style={[
@@ -2224,15 +3776,46 @@ function SummaryTab({
         <Text style={styles.metaLabel}>Weighted score</Text>
         <Text style={styles.metaValue}>{formatScoreCell(attempt.weighted_score)}</Text>
       </View>
-
-      <Text style={styles.sectionTitle}>8 Traits (Total)</Text>
+      {(() => {
+        const sm = attempt.score_modifier;
+        if (typeof sm !== 'number' || !Number.isFinite(sm) || sm >= 0) return null;
+        const parts: string[] = [];
+        if (gateWithOpts.egoDevelopmentModifier != null && gateWithOpts.egoDevelopmentModifier !== 0) {
+          parts.push('ego development');
+        }
+        if (gateWithOpts.defensePatternScoreAdjustment != null && gateWithOpts.defensePatternScoreAdjustment !== 0) {
+          parts.push('defense patterns');
+        }
+        if (
+          gateWithOpts.personalMomentConcretenessModifier != null &&
+          gateWithOpts.personalMomentConcretenessModifier !== 0
+        ) {
+          parts.push('personal moment concreteness');
+        }
+        const tail = parts.length ? ` (${parts.join(', ')})` : '';
+        return (
+          <View style={{ marginBottom: 6 }}>
+            <Text style={styles.summaryModifierHint}>
+              Score modifier: <Text style={styles.summaryModifierRed}>{sm.toFixed(2)}</Text>
+              {tail}
+            </Text>
+            <Text style={styles.summaryModifierHint}>
+              Adjusted score:{' '}
+              <Text style={{ fontWeight: '600', color: 'rgba(230,238,248,0.95)' }}>
+                {formatScoreCell(attempt.modified_weighted_score)}
+              </Text>{' '}
+              ← threshold comparison used this
+            </Text>
+          </View>
+        );
+      })()}
       {PILLAR_ROWS.map((p) => (
         <View key={p.id} style={styles.scoreRow}>
           <Text style={styles.scoreLabel}>{p.label}</Text>
           <Text style={styles.scoreValue}>
             {formatScoreCell(totalScores[p.id])}
-            {(aggregate.contributorCounts[p.id] ?? 0) > 0 &&
-            (aggregate.contributorCounts[p.id] ?? 0) < 2
+            {(aggregate.counts[p.id] ?? 0) > 0 &&
+            (aggregate.counts[p.id] ?? 0) < 2
               ? ' *'
               : ''}
           </Text>
@@ -2287,13 +3870,15 @@ function SummaryTab({
         </Text>
         <Text style={styles.blockText}>
           Processing status:{' '}
-          {styleProfile
-            ? styleProfile.text_confidence != null && styleProfile.audio_confidence != null
-              ? 'available'
-              : 'partial'
-            : styleStatus === 'loading'
-              ? 'loading'
-              : 'not processed'}
+          {styleAutoReprocessing || styleStatus === 'reprocessing'
+            ? 'reprocessing automatically…'
+            : styleProfile
+              ? styleProfile.text_confidence != null && styleProfile.audio_confidence != null
+                ? 'available'
+                : 'partial'
+              : styleStatus === 'loading'
+                ? 'loading'
+                : 'not processed'}
         </Text>
         <Text style={styles.blockText}>Text confidence: {formatScoreCell((styleProfile?.text_confidence ?? null) !== null ? Number(styleProfile?.text_confidence) * 10 : null)}</Text>
         <Text style={styles.blockText}>Audio confidence: {formatScoreCell((styleProfile?.audio_confidence ?? null) !== null ? Number(styleProfile?.audio_confidence) * 10 : null)}</Text>
@@ -2417,6 +4002,9 @@ function ReasoningTab({
 }) {
   const [reasoningRetrying, setReasoningRetrying] = useState(false);
   const [reasoningRetryError, setReasoningRetryError] = useState<string | null>(null);
+  const [resendingResultsEmail, setResendingResultsEmail] = useState(false);
+  const [resendResultsEmailError, setResendResultsEmailError] = useState<string | null>(null);
+  const [resendResultsEmailOk, setResendResultsEmailOk] = useState<string | null>(null);
   const reasoningPending = adminAiNarrativeStillPending(attempt);
 
   const reasoning = parseObject(attempt.ai_reasoning);
@@ -2476,7 +4064,7 @@ function ReasoningTab({
               setReasoningRetrying(true);
               void (async () => {
                 try {
-                  const r = await adminRetryAIReasoningForAttempt(attempt.id);
+                  const r = await adminRetryNarrativeWithClientFallback(attempt.id, attempt.user_id);
                   if ('error' in r) {
                     setReasoningRetryError(r.error);
                     onRefreshAfterReasoning?.();
@@ -2499,6 +4087,51 @@ function ReasoningTab({
           ) : null}
         </View>
       ) : null}
+      <View style={[styles.block, { borderLeftWidth: 3, borderLeftColor: '#6B8CDB', marginBottom: 12 }]}>
+        <Text style={[styles.blockTitle, { color: '#A8C4F0' }]}>Results email</Text>
+        <Text style={styles.blockText}>
+          Send or re-send the transactional "results ready" email for this attempt.
+        </Text>
+        <TouchableOpacity
+          disabled={resendingResultsEmail}
+          onPress={() => {
+            setResendResultsEmailError(null);
+            setResendResultsEmailOk(null);
+            setResendingResultsEmail(true);
+            void (async () => {
+              try {
+                const { data, error } = await supabase.functions.invoke('send-results-email', {
+                  body: { userId: attempt.user_id, attemptId: attempt.id, force: true },
+                });
+                if (error) {
+                  const edgeMsg =
+                    data && typeof data === 'object' && typeof (data as { error?: unknown }).error === 'string'
+                      ? (data as { error: string }).error
+                      : null;
+                  throw new Error(edgeMsg ? `${error.message}: ${edgeMsg}` : error.message);
+                }
+                setResendResultsEmailOk('Results email trigger sent.');
+                onRefreshAfterReasoning?.();
+              } catch (e) {
+                setResendResultsEmailError(e instanceof Error ? e.message : String(e));
+              } finally {
+                setResendingResultsEmail(false);
+              }
+            })();
+          }}
+          style={styles.reprocessButton}
+        >
+          <Text style={styles.reprocessButtonText}>
+            {resendingResultsEmail ? 'Sending…' : 'Resend results email'}
+          </Text>
+        </TouchableOpacity>
+        {resendResultsEmailOk ? (
+          <Text style={[styles.blockText, { color: '#8ACB88', marginTop: 8 }]}>{resendResultsEmailOk}</Text>
+        ) : null}
+        {resendResultsEmailError ? (
+          <Text style={[styles.blockText, { color: '#E87A7A', marginTop: 8 }]}>{resendResultsEmailError}</Text>
+        ) : null}
+      </View>
 
       {holisticOnlyScenarioDataGap ? (
         <View style={[styles.block, { borderLeftWidth: 3, borderLeftColor: '#6B8CDB', marginBottom: 12 }]}>
@@ -2582,46 +4215,9 @@ function TranscriptTab({ attempt }: { attempt: AttemptRow }) {
     <ScrollView style={styles.innerTabContent}>
       {transcript.map((m, idx) => (
         <Text key={`${m.role}-${idx}`} style={styles.transcriptLine}>
-          {m.role}: {m.content ?? ''}
+          {m.role}: {formatTranscriptTurnContentForDisplay(m.role, m.content)}
         </Text>
       ))}
-    </ScrollView>
-  );
-}
-
-function FeedbackTab({ attempt }: { attempt: AttemptRow }) {
-  const perConstruct = parseObject(attempt.per_construct_ratings) ?? {};
-  const hasPerConstruct = Object.keys(perConstruct).length > 0;
-  if (!attempt.user_analysis_comment && attempt.user_analysis_rating == null && !hasPerConstruct) {
-    return (
-      <View style={styles.emptyState}>
-        <Text style={styles.emptyText}>No user feedback submitted for this test.</Text>
-      </View>
-    );
-  }
-  return (
-    <ScrollView style={styles.innerTabContent}>
-      <Text style={styles.sectionTitle}>User Feedback</Text>
-      <Text style={styles.blockText}>Overall rating: {attempt.user_analysis_rating ?? '—'}</Text>
-      <Text style={styles.blockText}>{attempt.user_analysis_comment ?? 'No overall comment.'}</Text>
-      {hasPerConstruct && (
-        <View style={styles.block}>
-          <Text style={styles.blockTitle}>Question-by-question feedback</Text>
-          {Object.entries(perConstruct).map(([key, value]) => {
-            const row = parseObject(value);
-            const label = USER_FEEDBACK_LABELS[key] ?? formatConstruct(key);
-            const comment = getString(row?.comment);
-            const rating = coerceScoreNumber(row?.rating);
-            return (
-              <View key={key} style={styles.block}>
-                <Text style={styles.blockTitle}>{label}</Text>
-                {rating !== undefined ? <Text style={styles.blockText}>Rating: {rating}</Text> : null}
-                <Text style={styles.blockText}>{comment ?? 'No comment.'}</Text>
-              </View>
-            );
-          })}
-        </View>
-      )}
     </ScrollView>
   );
 }
@@ -2649,11 +4245,30 @@ function UserDetails({
   onRefreshData: () => void;
 }) {
   const attempts = getAttemptsSorted(fullAttempts);
-  const [activeInnerTab, setActiveInnerTab] = useState<'summary' | 'reasoning' | 'transcript' | 'feedback'>('summary');
+  const [activeInnerTab, setActiveInnerTab] = useState<AdminAttemptInnerTabId>('summary');
   const [overrideBusy, setOverrideBusy] = useState(false);
+  const [profileUser, setProfileUser] = useState<AdminUserProfileRecord | null>(null);
+  const [profileLoading, setProfileLoading] = useState(true);
 
   const selectedAttempt = attempts[0] ?? null;
   const u = userData.user;
+  const attemptIdForOverride =
+    selectedAttempt?.id ??
+    userData.latestAttempt?.id ??
+    (typeof u.latest_attempt_id === 'string' ? u.latest_attempt_id : null);
+
+  useEffect(() => {
+    let cancelled = false;
+    setProfileLoading(true);
+    void fetchAdminUserProfile(u.id).then((data) => {
+      if (cancelled) return;
+      setProfileUser(data ?? EMPTY_ADMIN_USER_PROFILE(u.id));
+      setProfileLoading(false);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [u.id]);
   const detailLaunchPhone = trimLaunchNotificationPhone(u.launch_notification_phone);
 
   const applyPassOverride = useCallback(
@@ -2677,6 +4292,13 @@ function UserDetails({
           return;
         }
         const pass = mode === 'pass';
+        if (attemptIdForOverride) {
+          const attemptResult = await updateInterviewAttemptRevealOverride(attemptIdForOverride, pass);
+          if (!attemptResult.ok && !attemptResult.columnsMissing) {
+            Alert.alert('Update failed', attemptResult.errorMessage);
+            return;
+          }
+        }
         const { error } = await supabase
           .from('users')
           .update({
@@ -2688,12 +4310,17 @@ function UserDetails({
           Alert.alert('Update failed', error.message);
           return;
         }
+        if (attemptIdForOverride) {
+          void supabase.functions.invoke('send-results-email', {
+            body: { userId: u.id, attemptId: attemptIdForOverride },
+          });
+        }
         onRefreshData();
       } finally {
         setOverrideBusy(false);
       }
     },
-    [onRefreshData, u.id, u.interview_passed_computed],
+    [attemptIdForOverride, onRefreshData, u.id, u.interview_passed_computed],
   );
 
   return (
@@ -2760,65 +4387,72 @@ function UserDetails({
         </View>
       </View>
 
-      <InProgressTranscriptSection user={userData.user} onRefresh={onRefreshData} />
+      <InProgressTranscriptSection
+        user={userData.user}
+        latestAttempt={userData.latestAttempt}
+        liveTranscript={attempts.find((a) => a.completed_at == null)?.transcript}
+        onRefresh={onRefreshData}
+      />
 
-      {attemptsLoading ? (
+      {attemptsLoading && activeInnerTab !== 'profile_intent' ? (
         <View style={styles.emptyState}>
           <Text style={styles.emptyText}>Loading interview data…</Text>
         </View>
-      ) : attemptsError ? (
+      ) : attemptsError && activeInnerTab !== 'profile_intent' ? (
         <View style={styles.emptyState}>
           <Text style={styles.listErrorTitle}>Could not load tests</Text>
           <Text style={styles.listErrorDetail} selectable>
             {attemptsError}
           </Text>
         </View>
-      ) : attempts.length === 0 ? (
-        <View style={styles.emptyState}>
-          <Text style={styles.emptyText}>
-            {userHasInProgressInterview(userData.user)
-              ? 'No completed tests yet — transcript above updates while they interview.'
-              : 'No tests found for this user.'}
-          </Text>
-          {userData.user.latest_attempt_id || userData.user.interview_completed ? (
-            <Text style={styles.emptyHint}>
-              Interview data exists for this account — a retake is usually not needed. If attempts stay empty after
-              refreshing, apply{' '}
-              <Text style={styles.emptyHintMono}>20260423150000_admin_rls_is_amoraea_admin_function.sql</Text> (admin
-              check via <Text style={styles.emptyHintMono}>auth.users</Text> email — JWT email in RLS is unreliable), and
-              ensure <Text style={styles.emptyHintMono}>20260423140000_interview_attempts_rls_admin_and_own.sql</Text>{' '}
-              policies exist for <Text style={styles.emptyHintMono}>interview_attempts</Text>.
-            </Text>
-          ) : null}
-        </View>
       ) : (
         <View style={styles.detailsLayoutSingle}>
           <View style={styles.detailsPaneFull}>
             <View style={styles.innerTabsRow}>
-              {[
-                { id: 'summary' as const, label: 'Tab 1: Summary' },
-                { id: 'reasoning' as const, label: 'Tab 2: AI Reasoning' },
-                { id: 'transcript' as const, label: 'Tab 3: Transcript' },
-                { id: 'feedback' as const, label: 'Tab 4: User Feedback' },
-              ].map((t) => (
+              {adminDetailTabs().map((t) => (
                 <TouchableOpacity
                   key={t.id}
                   style={[styles.innerTab, activeInnerTab === t.id && styles.innerTabActive]}
                   onPress={() => setActiveInnerTab(t.id)}
                 >
-                  <Text style={[styles.innerTabText, activeInnerTab === t.id && styles.innerTabTextActive]}>{t.label}</Text>
+                  <Text style={[styles.innerTabText, activeInnerTab === t.id && styles.innerTabTextActive]}>
+                    {t.label}
+                  </Text>
                 </TouchableOpacity>
               ))}
             </View>
 
-            {selectedAttempt && activeInnerTab === 'summary' && (
-              <SummaryTab attempt={selectedAttempt} onAttemptMutated={onRefreshData} candidateUser={u} />
+            {attempts.length === 0 &&
+            activeInnerTab !== 'profile_intent' &&
+            !attemptsLoading &&
+            !attemptsError ? (
+              <View style={styles.emptyState}>
+                <Text style={styles.emptyText}>
+                  {userHasInProgressInterview(userData.user, userData.latestAttempt)
+                    ? 'No completed tests yet — transcript above updates while they interview.'
+                    : 'No tests found for this user.'}
+                </Text>
+                {userData.user.latest_attempt_id || userData.user.interview_completed ? (
+                  <Text style={styles.emptyHint}>
+                    Interview data exists for this account — a retake is usually not needed. If attempts stay empty
+                    after refreshing, apply{' '}
+                    <Text style={styles.emptyHintMono}>20260423150000_admin_rls_is_amoraea_admin_function.sql</Text>{' '}
+                    (admin check via <Text style={styles.emptyHintMono}>auth.users</Text> email — JWT email in RLS is
+                    unreliable), and ensure{' '}
+                    <Text style={styles.emptyHintMono}>20260423140000_interview_attempts_rls_admin_and_own.sql</Text>{' '}
+                    policies exist for <Text style={styles.emptyHintMono}>interview_attempts</Text>.
+                  </Text>
+                ) : null}
+              </View>
+            ) : (
+              renderAdminDetailTabContent(activeInnerTab, {
+                profileUser: profileUser ?? EMPTY_ADMIN_USER_PROFILE(u.id),
+                profileLoading,
+                selectedAttempt,
+                onRefreshData,
+                candidateUser: u,
+              })
             )}
-            {selectedAttempt && activeInnerTab === 'reasoning' && (
-              <ReasoningTab attempt={selectedAttempt} onRefreshAfterReasoning={onRefreshData} />
-            )}
-            {selectedAttempt && activeInnerTab === 'transcript' && <TranscriptTab attempt={selectedAttempt} />}
-            {selectedAttempt && activeInnerTab === 'feedback' && <FeedbackTab attempt={selectedAttempt} />}
           </View>
         </View>
       )}
@@ -2829,33 +4463,55 @@ function UserDetails({
 export function AdminAttemptTabsView({
   attemptId,
   userId,
-  showFeedbackTab = true,
   candidateUser,
 }: {
   attemptId: string | null;
   userId?: string;
-  showFeedbackTab?: boolean;
   candidateUser?: UserRow | null;
 }) {
   const [attempt, setAttempt] = useState<AttemptRow | null>(null);
   const [loading, setLoading] = useState(true);
-  const [activeInnerTab, setActiveInnerTab] = useState<'summary' | 'reasoning' | 'transcript' | 'feedback'>('summary');
+  const [activeInnerTab, setActiveInnerTab] = useState<AdminAttemptInnerTabId>('summary');
+  const [profileUser, setProfileUser] = useState<AdminUserProfileRecord | null>(null);
+  const [profileLoading, setProfileLoading] = useState(true);
 
   const refreshAttempt = useCallback(async () => {
     try {
-      if (attemptId) {
-        const { data } = await supabase.from('interview_attempts').select('*').eq('id', attemptId).maybeSingle();
-        setAttempt((data as AttemptRow | null) ?? null);
-      } else if (userId) {
-        const { data } = await supabase
-          .from('interview_attempts')
-          .select('*')
-          .eq('user_id', userId)
-          .order('created_at', { ascending: false })
-          .limit(1)
-          .maybeSingle();
-        setAttempt((data as AttemptRow | null) ?? null);
+      if (!attemptId && !userId) {
+        setAttempt(null);
+        return;
       }
+      for (let i = 0; i < 4; i++) {
+        const select = await adminInterviewAttemptsFullSelect();
+        const query = attemptId
+          ? supabase.from('interview_attempts').select(select).eq('id', attemptId).maybeSingle()
+          : supabase
+              .from('interview_attempts')
+              .select(select)
+              .eq('user_id', userId!)
+              .order('created_at', { ascending: false })
+              .limit(1)
+              .maybeSingle();
+        const { data, error } = await query;
+        if (!error) {
+          if (!(await getInterviewAttemptGamingCorrectionColumnsAbsent())) {
+            void markInterviewAttemptGamingCorrectionColumnsPresent();
+          }
+          if (!(await getInterviewAttemptDefenseCrossReferenceColumnAbsent())) {
+            void markInterviewAttemptDefenseCrossReferenceColumnPresent();
+          }
+          if (!(await getInterviewAttemptOverrideColumnsAbsent())) {
+            void markInterviewAttemptOverrideColumnsPresent();
+          }
+          setAttempt((data as AttemptRow | null) ?? null);
+          return;
+        }
+        if (!(await rememberInterviewAttemptSelectColumnAbsences(error))) {
+          setAttempt(null);
+          return;
+        }
+      }
+      setAttempt(null);
     } catch {
       setAttempt(null);
     }
@@ -2866,25 +4522,42 @@ export function AdminAttemptTabsView({
     (async () => {
       setLoading(true);
       try {
-        if (attemptId) {
-          const { data } = await supabase
-            .from('interview_attempts')
-            .select('*')
-            .eq('id', attemptId)
-            .maybeSingle();
-          if (!cancelled) setAttempt((data as AttemptRow | null) ?? null);
-        } else if (userId) {
-          const { data } = await supabase
-            .from('interview_attempts')
-            .select('*')
-            .eq('user_id', userId)
-            .order('created_at', { ascending: false })
-            .limit(1)
-            .maybeSingle();
-          if (!cancelled) setAttempt((data as AttemptRow | null) ?? null);
-        } else {
+        if (!attemptId && !userId) {
           if (!cancelled) setAttempt(null);
+          return;
         }
+        for (let i = 0; i < 4; i++) {
+          const select = await adminInterviewAttemptsFullSelect();
+          const query = attemptId
+            ? supabase.from('interview_attempts').select(select).eq('id', attemptId).maybeSingle()
+            : supabase
+                .from('interview_attempts')
+                .select(select)
+                .eq('user_id', userId!)
+                .order('created_at', { ascending: false })
+                .limit(1)
+                .maybeSingle();
+          const { data, error } = await query;
+          if (cancelled) return;
+          if (!error) {
+            if (!(await getInterviewAttemptGamingCorrectionColumnsAbsent())) {
+              void markInterviewAttemptGamingCorrectionColumnsPresent();
+            }
+            if (!(await getInterviewAttemptDefenseCrossReferenceColumnAbsent())) {
+              void markInterviewAttemptDefenseCrossReferenceColumnPresent();
+            }
+            if (!(await getInterviewAttemptOverrideColumnsAbsent())) {
+              void markInterviewAttemptOverrideColumnsPresent();
+            }
+            setAttempt((data as AttemptRow | null) ?? null);
+            return;
+          }
+          if (!(await rememberInterviewAttemptSelectColumnAbsences(error))) {
+            setAttempt(null);
+            return;
+          }
+        }
+        if (!cancelled) setAttempt(null);
       } catch {
         if (!cancelled) setAttempt(null);
       } finally {
@@ -2895,6 +4568,26 @@ export function AdminAttemptTabsView({
       cancelled = true;
     };
   }, [attemptId, userId]);
+
+  const resolvedUserId = userId ?? attempt?.user_id ?? candidateUser?.id ?? null;
+
+  useEffect(() => {
+    if (!resolvedUserId) {
+      setProfileUser(null);
+      setProfileLoading(false);
+      return;
+    }
+    let cancelled = false;
+    setProfileLoading(true);
+    void fetchAdminUserProfile(resolvedUserId).then((data) => {
+      if (cancelled) return;
+      setProfileUser(data ?? EMPTY_ADMIN_USER_PROFILE(resolvedUserId));
+      setProfileLoading(false);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [resolvedUserId]);
 
   if (loading) {
     return (
@@ -2912,15 +4605,14 @@ export function AdminAttemptTabsView({
     );
   }
 
+  const profileRecord =
+    profileUser ?? EMPTY_ADMIN_USER_PROFILE(resolvedUserId ?? attempt.user_id);
+
   return (
     <View style={{ width: '100%', maxWidth: 980 }}>
+      <GamingCorrectionBanner gamingCorrection={attempt.gaming_correction ?? null} />
       <View style={styles.innerTabsRow}>
-        {[
-          { id: 'summary' as const, label: 'Tab 1: Summary' },
-          { id: 'reasoning' as const, label: 'Tab 2: AI Reasoning' },
-          { id: 'transcript' as const, label: 'Tab 3: Transcript' },
-          ...(showFeedbackTab ? [{ id: 'feedback' as const, label: 'Tab 4: User Feedback' }] : []),
-        ].map((t) => (
+        {adminDetailTabs().map((t) => (
           <TouchableOpacity
             key={t.id}
             style={[styles.innerTab, activeInnerTab === t.id && styles.innerTabActive]}
@@ -2931,12 +4623,13 @@ export function AdminAttemptTabsView({
         ))}
       </View>
 
-      {activeInnerTab === 'summary' && (
-        <SummaryTab attempt={attempt} onAttemptMutated={refreshAttempt} candidateUser={candidateUser ?? null} />
-      )}
-      {activeInnerTab === 'reasoning' && <ReasoningTab attempt={attempt} onRefreshAfterReasoning={refreshAttempt} />}
-      {activeInnerTab === 'transcript' && <TranscriptTab attempt={attempt} />}
-      {showFeedbackTab && activeInnerTab === 'feedback' && <FeedbackTab attempt={attempt} />}
+      {renderAdminDetailTabContent(activeInnerTab, {
+        profileUser: profileRecord,
+        profileLoading,
+        selectedAttempt: attempt,
+        onRefreshData: () => void refreshAttempt(),
+        candidateUser: candidateUser ?? ({ id: attempt.user_id } as UserRow),
+      })}
     </View>
   );
 }
@@ -2949,6 +4642,10 @@ const STATUS_FILTER_OPTIONS: { id: AdminUserStatusFilter; label: string }[] = [
   { id: 'fail', label: 'Fail' },
   { id: 'almost', label: 'Almost' },
   { id: 'no_result', label: 'No result' },
+  { id: 'flagged', label: 'Flagged' },
+  { id: 'er_floor_review', label: 'ER floor review' },
+  { id: 'sd3_narcissism_floor_review', label: 'SD3 narcissism floor review' },
+  { id: 'psychometric_floor_review', label: 'Psych floor review' },
 ];
 
 const TIME_RANGE_OPTIONS: { id: TimeRangeFilter; label: string }[] = [
@@ -2960,14 +4657,21 @@ const TIME_RANGE_OPTIONS: { id: TimeRangeFilter; label: string }[] = [
   { id: 'custom', label: 'Custom' },
 ];
 
-const REVIEWED_COHORT_OPTIONS: { id: ReviewedCohortFilter; label: string }[] = [
+const BOOKMARK_COHORT_OPTIONS: { id: BookmarkCohortFilter; label: string }[] = [
   { id: 'all', label: 'All' },
-  { id: 'reviewed', label: 'On' },
-  { id: 'unreviewed', label: 'Off' },
+  { id: 'bookmarked', label: 'Yes' },
+  { id: 'not_bookmarked', label: 'No' },
+];
+
+const HUMAN_VERIFIED_COHORT_OPTIONS: { id: HumanVerifiedCohortFilter; label: string }[] = [
+  { id: 'all', label: 'All' },
+  { id: 'pass', label: 'Pass' },
+  { id: 'fail', label: 'Fail' },
+  { id: 'unset', label: 'Unset' },
 ];
 
 export function AdminInterviewDashboard({ onClose }: { onClose: () => void }) {
-  const [adminMainView, setAdminMainView] = useState<'cohort' | 'feedback'>('cohort');
+  const [adminMainView, setAdminMainView] = useState<'overview' | 'users' | 'feedback'>('users');
   const [users, setUsers] = useState<UserGroup[]>([]);
   const [loading, setLoading] = useState(true);
   const [listError, setListError] = useState<string | null>(null);
@@ -2975,7 +4679,10 @@ export function AdminInterviewDashboard({ onClose }: { onClose: () => void }) {
   const [timeRangeFilter, setTimeRangeFilter] = useState<TimeRangeFilter>('all');
   const [customTimeFrom, setCustomTimeFrom] = useState('');
   const [customTimeTo, setCustomTimeTo] = useState('');
-  const [reviewedCohortFilter, setReviewedCohortFilter] = useState<ReviewedCohortFilter>('all');
+  const [bookmarkCohortFilter, setBookmarkCohortFilter] = useState<BookmarkCohortFilter>('all');
+  const [humanVerifiedCohortFilter, setHumanVerifiedCohortFilter] = useState<HumanVerifiedCohortFilter>('all');
+  const [uncertaintyBandFilter, setUncertaintyBandFilter] = useState<UncertaintyBandFilter>('all');
+  const [userListSort, setUserListSort] = useState<UserListSort>('date');
   const [hideIncomplete, setHideIncomplete] = useState(true);
   const [selectedUserId, setSelectedUserId] = useState<string | null>(null);
   const [detailAttempts, setDetailAttempts] = useState<AttemptRow[] | null>(null);
@@ -2995,6 +4702,7 @@ export function AdminInterviewDashboard({ onClose }: { onClose: () => void }) {
           selectedUserId,
           g?.user.latest_attempt_id,
         );
+        setDetailAttemptsLoading(false);
         if (detailErr) {
           setDetailAttemptsError(detailErr);
           setDetailAttempts([]);
@@ -3043,6 +4751,16 @@ export function AdminInterviewDashboard({ onClose }: { onClose: () => void }) {
       cancelled = true;
     };
   }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+    void backfillMissingUncertaintyScores().then((n) => {
+      if (n > 0 && !cancelled) void refreshUsers();
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [refreshUsers]);
 
   const canDeleteUser = useCallback(
     (row: UserRow) => {
@@ -3093,6 +4811,11 @@ export function AdminInterviewDashboard({ onClose }: { onClose: () => void }) {
     }
   }, [users, selectedUserId]);
 
+  const selectedLatestAttemptId = useMemo(() => {
+    if (!selectedUserId) return null;
+    return users.find((g) => g.user.id === selectedUserId)?.user.latest_attempt_id ?? null;
+  }, [selectedUserId, users]);
+
   useEffect(() => {
     if (!selectedUserId) {
       setDetailAttempts(null);
@@ -3103,32 +4826,39 @@ export function AdminInterviewDashboard({ onClose }: { onClose: () => void }) {
     let cancelled = false;
     setDetailAttemptsLoading(true);
     setDetailAttemptsError(null);
-    const latestId = users.find((g) => g.user.id === selectedUserId)?.user.latest_attempt_id;
-    void fetchLatestFullAttemptForUser(selectedUserId, latestId).then(({ attempts, errorMessage: detailErr }) => {
-      if (cancelled) return;
-      setDetailAttemptsLoading(false);
-      if (detailErr) {
-        setDetailAttemptsError(detailErr);
-        setDetailAttempts([]);
-      } else {
-        setDetailAttemptsError(null);
-        setDetailAttempts(attempts);
-      }
-    });
+    void fetchLatestFullAttemptForUser(selectedUserId, selectedLatestAttemptId).then(
+      ({ attempts, errorMessage: detailErr }) => {
+        if (cancelled) return;
+        setDetailAttemptsLoading(false);
+        if (detailErr) {
+          setDetailAttemptsError(detailErr);
+          setDetailAttempts([]);
+        } else {
+          setDetailAttemptsError(null);
+          setDetailAttempts(attempts);
+        }
+      },
+    );
     return () => {
       cancelled = true;
     };
-  }, [selectedUserId, users]);
+  }, [selectedUserId, selectedLatestAttemptId]);
 
   const selectedGroup = selectedUserId ? users.find((g) => g.user.id === selectedUserId) : null;
 
   const pipelineFiltered = useMemo(() => {
     let list = users;
     list = list.filter((g) => userMatchesTimeRange(g, timeRangeFilter, customTimeFrom, customTimeTo));
-    if (reviewedCohortFilter === 'reviewed') {
+    if (bookmarkCohortFilter === 'bookmarked') {
       list = list.filter((g) => g.user.interview_cohort_admin_reviewed === true);
-    } else if (reviewedCohortFilter === 'unreviewed') {
+    } else if (bookmarkCohortFilter === 'not_bookmarked') {
       list = list.filter((g) => !g.user.interview_cohort_admin_reviewed);
+    }
+    if (humanVerifiedCohortFilter !== 'all') {
+      list = list.filter((g) => userMatchesHumanVerifiedCohortFilter(g, humanVerifiedCohortFilter));
+    }
+    if (uncertaintyBandFilter !== 'all') {
+      list = list.filter((g) => userMatchesUncertaintyFilter(g, uncertaintyBandFilter));
     }
     // "Only done" excludes non-completed interviews; skip when explicitly filtering Incomplete (in progress | no result).
     if (hideIncomplete && statusFilter !== 'incomplete') {
@@ -3136,13 +4866,41 @@ export function AdminInterviewDashboard({ onClose }: { onClose: () => void }) {
     }
     if (statusFilter !== 'all') {
       list = list.filter((g) => {
+        if (statusFilter === 'flagged') {
+          const flags = reviewFlagsFromStoredAttempt(g.latestAttempt);
+          return flags.length > 0;
+        }
+        if (statusFilter === 'er_floor_review') {
+          return g.latestAttempt != null && isLegacyEmotionRecognitionFloorOnlyFail(g.latestAttempt);
+        }
+        if (statusFilter === 'sd3_narcissism_floor_review') {
+          return userGroupNeedsPsychometricFloorReview(g);
+        }
+        if (statusFilter === 'psychometric_floor_review') {
+          return userGroupNeedsPsychometricFloorReview(g);
+        }
         const s = classifyAdminUserListStatus(g);
         if (statusFilter === 'incomplete') return s === 'in_progress' || s === 'no_result';
         return s === statusFilter;
       });
     }
     return list;
-  }, [users, timeRangeFilter, customTimeFrom, customTimeTo, reviewedCohortFilter, hideIncomplete, statusFilter]);
+  }, [
+    users,
+    timeRangeFilter,
+    customTimeFrom,
+    customTimeTo,
+    bookmarkCohortFilter,
+    humanVerifiedCohortFilter,
+    uncertaintyBandFilter,
+    hideIncomplete,
+    statusFilter,
+  ]);
+
+  const displayedUsers = useMemo(
+    () => sortUserGroups(pipelineFiltered, userListSort),
+    [pipelineFiltered, userListSort],
+  );
 
   const cohortStats = useMemo(() => computeCohortHeaderStats(pipelineFiltered), [pipelineFiltered]);
 
@@ -3156,10 +4914,22 @@ export function AdminInterviewDashboard({ onClose }: { onClose: () => void }) {
     triggerAdminCohortCsvDownload(`amoraea_users_${today}.csv`, body);
   }, [pipelineFiltered]);
 
-  const setUserCohortReviewed = useCallback(async (userId: string, next: boolean) => {
+  const setUserBookmarked = useCallback(async (userId: string, next: boolean) => {
     const { error } = await supabase
       .from('users')
       .update({ interview_cohort_admin_reviewed: next })
+      .eq('id', userId);
+    if (error) {
+      Alert.alert('Could not save', error.message);
+      return;
+    }
+    await refreshUsers();
+  }, [refreshUsers]);
+
+  const setUserHumanVerified = useCallback(async (userId: string, pass: boolean | null) => {
+    const { error } = await supabase
+      .from('users')
+      .update({ admin_human_verified_pass: pass })
       .eq('id', userId);
     if (error) {
       Alert.alert('Could not save', error.message);
@@ -3198,7 +4968,7 @@ export function AdminInterviewDashboard({ onClose }: { onClose: () => void }) {
             <Text style={styles.backText}>← Back to interview</Text>
           </TouchableOpacity>
         </View>
-        {adminMainView === 'cohort' ? (
+        {adminMainView === 'users' ? (
           <View style={styles.headerExportRow}>
             <TouchableOpacity
               style={[styles.exportCsvButton, (loading || !!listError) && styles.exportCsvButtonDisabled]}
@@ -3217,13 +4987,25 @@ export function AdminInterviewDashboard({ onClose }: { onClose: () => void }) {
           contentContainerStyle={styles.filterChipsRow}
         >
           <TouchableOpacity
-            style={[styles.filterChip, adminMainView === 'cohort' && styles.filterChipActive]}
-            onPress={() => setAdminMainView('cohort')}
+            style={[styles.filterChip, adminMainView === 'overview' && styles.filterChipActive]}
+            onPress={() => setAdminMainView('overview')}
             accessibilityRole="button"
-            accessibilityState={{ selected: adminMainView === 'cohort' }}
+            accessibilityState={{ selected: adminMainView === 'overview' }}
           >
-            <Text style={[styles.filterChipText, adminMainView === 'cohort' && styles.filterChipTextActive]}>
-              Cohort
+            <Text
+              style={[styles.filterChipText, adminMainView === 'overview' && styles.filterChipTextActive]}
+            >
+              Overview
+            </Text>
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={[styles.filterChip, adminMainView === 'users' && styles.filterChipActive]}
+            onPress={() => setAdminMainView('users')}
+            accessibilityRole="button"
+            accessibilityState={{ selected: adminMainView === 'users' }}
+          >
+            <Text style={[styles.filterChipText, adminMainView === 'users' && styles.filterChipTextActive]}>
+              Users
             </Text>
           </TouchableOpacity>
           <TouchableOpacity
@@ -3238,7 +5020,9 @@ export function AdminInterviewDashboard({ onClose }: { onClose: () => void }) {
           </TouchableOpacity>
         </ScrollView>
       </View>
-      {adminMainView === 'feedback' ? (
+      {adminMainView === 'overview' ? (
+        <OverviewTab />
+      ) : adminMainView === 'feedback' ? (
         <AdminFeedbackPanel />
       ) : (
         <>
@@ -3322,19 +5106,43 @@ export function AdminInterviewDashboard({ onClose }: { onClose: () => void }) {
               </View>
             ) : null}
             <View style={styles.filterCluster}>
-              <Text style={styles.filterClusterLabel}>Reviewed</Text>
-              {REVIEWED_COHORT_OPTIONS.map((opt) => (
+              <Text style={styles.filterClusterLabel}>Bookmark</Text>
+              {BOOKMARK_COHORT_OPTIONS.map((opt) => (
                 <TouchableOpacity
                   key={opt.id}
-                  style={[styles.filterChipCompact, reviewedCohortFilter === opt.id && styles.filterChipActive]}
-                  onPress={() => setReviewedCohortFilter(opt.id)}
+                  style={[styles.filterChipCompact, bookmarkCohortFilter === opt.id && styles.filterChipActive]}
+                  onPress={() => setBookmarkCohortFilter(opt.id)}
                   accessibilityRole="button"
-                  accessibilityState={{ selected: reviewedCohortFilter === opt.id }}
+                  accessibilityState={{ selected: bookmarkCohortFilter === opt.id }}
                 >
                   <Text
                     style={[
                       styles.filterChipTextCompact,
-                      reviewedCohortFilter === opt.id && styles.filterChipTextActive,
+                      bookmarkCohortFilter === opt.id && styles.filterChipTextActive,
+                    ]}
+                  >
+                    {opt.label}
+                  </Text>
+                </TouchableOpacity>
+              ))}
+            </View>
+            <View style={styles.filterCluster}>
+              <Text style={styles.filterClusterLabel}>Human verified</Text>
+              {HUMAN_VERIFIED_COHORT_OPTIONS.map((opt) => (
+                <TouchableOpacity
+                  key={opt.id}
+                  style={[
+                    styles.filterChipCompact,
+                    humanVerifiedCohortFilter === opt.id && styles.filterChipActive,
+                  ]}
+                  onPress={() => setHumanVerifiedCohortFilter(opt.id)}
+                  accessibilityRole="button"
+                  accessibilityState={{ selected: humanVerifiedCohortFilter === opt.id }}
+                >
+                  <Text
+                    style={[
+                      styles.filterChipTextCompact,
+                      humanVerifiedCohortFilter === opt.id && styles.filterChipTextActive,
                     ]}
                   >
                     {opt.label}
@@ -3364,6 +5172,60 @@ export function AdminInterviewDashboard({ onClose }: { onClose: () => void }) {
                   Only done
                 </Text>
               </TouchableOpacity>
+            </View>
+            <View style={styles.filterCluster}>
+              <Text style={styles.filterClusterLabel}>Sort</Text>
+              {(
+                [
+                  { id: 'date', label: 'Date' },
+                  { id: 'uncertainty', label: 'Uncertainty' },
+                ] as const
+              ).map((opt) => (
+                <Pressable
+                  key={opt.id}
+                  style={[styles.filterChipCompact, userListSort === opt.id && styles.filterChipActive]}
+                  onPress={() => setUserListSort(opt.id)}
+                  accessibilityRole="button"
+                  accessibilityState={{ selected: userListSort === opt.id }}
+                >
+                  <Text
+                    style={[
+                      styles.filterChipTextCompact,
+                      userListSort === opt.id && styles.filterChipTextActive,
+                    ]}
+                  >
+                    {opt.label}
+                  </Text>
+                </Pressable>
+              ))}
+            </View>
+            <View style={styles.filterCluster}>
+              <Text style={styles.filterClusterLabel}>Uncertainty</Text>
+              {(
+                [
+                  { id: 'all', label: 'All' },
+                  { id: 'low', label: 'Low (<0.4)' },
+                  { id: 'medium', label: 'Medium' },
+                  { id: 'high', label: 'High (≥0.6)' },
+                ] as const
+              ).map((opt) => (
+                <Pressable
+                  key={opt.id}
+                  style={[styles.filterChipCompact, uncertaintyBandFilter === opt.id && styles.filterChipActive]}
+                  onPress={() => setUncertaintyBandFilter(opt.id)}
+                  accessibilityRole="button"
+                  accessibilityState={{ selected: uncertaintyBandFilter === opt.id }}
+                >
+                  <Text
+                    style={[
+                      styles.filterChipTextCompact,
+                      uncertaintyBandFilter === opt.id && styles.filterChipTextActive,
+                    ]}
+                  >
+                    {opt.label}
+                  </Text>
+                </Pressable>
+              ))}
             </View>
             <View style={[styles.filterCluster, styles.filterClusterGrow]}>
               <Text style={styles.filterClusterLabel}>Status</Text>
@@ -3404,7 +5266,7 @@ export function AdminInterviewDashboard({ onClose }: { onClose: () => void }) {
             ) : pipelineFiltered.length === 0 ? (
               <Text style={styles.emptyText}>No users match these filters.</Text>
             ) : (
-              pipelineFiltered.map((userData) => (
+              displayedUsers.map((userData) => (
                 <UserCard
                   key={userData.user.id}
                   userData={userData}
@@ -3417,8 +5279,9 @@ export function AdminInterviewDashboard({ onClose }: { onClose: () => void }) {
                   canDelete={canDeleteUser(userData.user)}
                   deleting={deletingUserId === userData.user.id}
                   onDelete={() => void handleDeleteUser(userData.user)}
-                  reviewed={userData.user.interview_cohort_admin_reviewed === true}
-                  onToggleReviewed={(next) => void setUserCohortReviewed(userData.user.id, next)}
+                  bookmarked={userData.user.interview_cohort_admin_reviewed === true}
+                  onToggleBookmarked={(next) => void setUserBookmarked(userData.user.id, next)}
+                  onSetHumanVerified={(pass) => void setUserHumanVerified(userData.user.id, pass)}
                   onRefreshList={refreshUsers}
                 />
               ))
@@ -3692,6 +5555,97 @@ const styles = StyleSheet.create({
     fontSize: 11,
     marginTop: 4,
   },
+  userCardNameRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    flexWrap: 'wrap',
+    gap: 8,
+  },
+  userCardFlagMark: {
+    fontSize: 14,
+    color: '#D97A3A',
+    fontWeight: '700',
+  },
+  userCardSignalRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 6,
+    marginTop: 6,
+    alignItems: 'center',
+  },
+  userCardMicroChip: {
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    borderRadius: 6,
+    backgroundColor: 'rgba(255,255,255,0.06)',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.1)',
+  },
+  userCardMicroChipText: {
+    fontSize: 10,
+    fontWeight: '600',
+    color: 'rgba(200, 215, 235, 0.9)',
+  },
+  userCardScoreStrike: {
+    textDecorationLine: 'line-through',
+    color: 'rgba(255,255,255,0.42)',
+    fontSize: 11,
+  },
+  userCardScoreModified: {
+    color: '#E87A7A',
+    fontSize: 11,
+    fontWeight: '700',
+    marginLeft: 6,
+  },
+  defenseGrid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 10,
+    marginTop: 8,
+  },
+  defenseGridCell: {
+    width: '47%',
+    minWidth: 140,
+    padding: 12,
+    borderRadius: 10,
+    borderWidth: 1,
+    backgroundColor: 'rgba(255,255,255,0.04)',
+  },
+  defenseGridTitle: {
+    color: 'rgba(230, 238, 248, 0.9)',
+    fontSize: 13,
+    fontWeight: '600',
+    marginBottom: 6,
+  },
+  defenseGridState: {
+    fontSize: 12,
+    fontWeight: '700',
+    letterSpacing: 0.3,
+  },
+  summaryModifierHint: {
+    fontSize: 11,
+    color: 'rgba(180, 198, 220, 0.75)',
+    marginTop: 2,
+    marginLeft: 0,
+  },
+  /** Depth Signals tab: explanatory copy under construct headings (subordinate to values). */
+  depthSignalFootnote: {
+    fontSize: 11,
+    color: 'rgba(180, 198, 220, 0.78)',
+    lineHeight: 16,
+    marginBottom: 10,
+    marginTop: 2,
+  },
+  defenseCardFootnote: {
+    fontSize: 10,
+    color: 'rgba(180, 198, 220, 0.72)',
+    lineHeight: 15,
+    marginTop: 8,
+  },
+  summaryModifierRed: {
+    color: '#E87A7A',
+    fontWeight: '600',
+  },
   userCardOverrideHint: {
     color: '#D4A84B',
     fontSize: 10,
@@ -3699,23 +5653,85 @@ const styles = StyleSheet.create({
     fontWeight: '600',
   },
   userCardSideCol: {
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    paddingLeft: 8,
+    justifyContent: 'flex-start',
+    alignItems: 'stretch',
+    paddingLeft: 14,
+    paddingRight: 6,
+    paddingVertical: 8,
     borderLeftWidth: 1,
     borderLeftColor: 'rgba(82,142,220,0.12)',
-    minWidth: 100,
+    minWidth: 168,
+    width: 168,
+    gap: 12,
   },
-  reviewedToggleRow: {
+  bookmarkToggleRow: {
+    flexDirection: 'row',
     alignItems: 'center',
-    paddingVertical: 6,
+    justifyContent: 'space-between',
+    paddingVertical: 2,
   },
-  reviewedLabel: {
+  bookmarkLabel: {
     color: '#7A9ABE',
     fontSize: 10,
     marginBottom: 4,
     textTransform: 'uppercase',
     letterSpacing: 0.4,
+  },
+  humanVerifiedCol: {
+    gap: 6,
+  },
+  humanVerifiedLabel: {
+    color: '#7A9ABE',
+    fontSize: 10,
+    textTransform: 'uppercase',
+    letterSpacing: 0.4,
+  },
+  humanVerifiedCheckboxRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 14,
+  },
+  adminCheckboxRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+  },
+  adminCheckboxBox: {
+    width: 18,
+    height: 18,
+    borderRadius: 4,
+    borderWidth: 1.5,
+    borderColor: 'rgba(82,142,220,0.45)',
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: 'rgba(0,0,0,0.2)',
+  },
+  adminCheckboxMark: {
+    fontSize: 12,
+    fontWeight: '700',
+    lineHeight: 14,
+  },
+  adminCheckboxLabel: {
+    color: '#C8E4FF',
+    fontSize: 13,
+    fontWeight: '500',
+  },
+  userCardOverrideRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8,
+    justifyContent: 'space-between',
+  },
+  userCardOverrideChip: {
+    flex: 1,
+    minWidth: 68,
+    borderWidth: 1,
+    borderColor: 'rgba(82,142,220,0.35)',
+    borderRadius: 8,
+    paddingHorizontal: 10,
+    paddingVertical: 8,
+    backgroundColor: 'rgba(30,111,217,0.12)',
+    alignItems: 'center',
   },
   userCardMetaRow: {
     marginTop: 10,

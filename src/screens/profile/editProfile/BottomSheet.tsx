@@ -22,6 +22,8 @@ export type OptionAnchor = {
 
 const DESKTOP_BREAKPOINT = 768;
 const DROPDOWN_MAX_W = 420;
+/** Bottom sheet on web/tablet — avoid edge-to-edge option menus (typology pickers, etc.). */
+const SHEET_MAX_W = 520;
 const DROPDOWN_MAX_H = 380;
 const DROPDOWN_MIN_H = 140;
 const VIEWPORT_PAD = 12;
@@ -33,7 +35,7 @@ export const OptionPickerTrigger: React.FC<{
 }> = ({ style, onOpen, children }) => {
   const ref = useRef<View>(null);
   return (
-    <View ref={ref} collapsable={false} style={style}>
+    <View ref={ref} collapsable={false} style={[styles.triggerOuter, style]}>
       <TouchableOpacity
         activeOpacity={0.75}
         style={styles.triggerFill}
@@ -69,11 +71,13 @@ export const BottomSheet: React.FC<{
       left = Math.max(VIEWPORT_PAD, winW - menuW - VIEWPORT_PAD);
     if (left < VIEWPORT_PAD) left = VIEWPORT_PAD;
 
-    const preferredTop = anchor.y + anchor.height + 6;
+    const gap = 6;
+    const preferredTop = anchor.y + anchor.height + gap;
     const availableBelow = Math.max(0, winH - preferredTop - VIEWPORT_PAD);
-    const availableAbove = Math.max(0, anchor.y - 6 - VIEWPORT_PAD);
+    const availableAbove = Math.max(0, anchor.y - gap - VIEWPORT_PAD);
+    // Open downward only when the full menu fits below, or below clearly has more room.
     const shouldOpenBelow =
-      availableBelow >= DROPDOWN_MIN_H || availableBelow >= availableAbove;
+      availableBelow >= DROPDOWN_MAX_H || availableBelow > availableAbove;
     const availableOnChosenSide = shouldOpenBelow
       ? availableBelow
       : availableAbove;
@@ -147,9 +151,14 @@ export const BottomSheet: React.FC<{
 };
 
 const styles = StyleSheet.create({
+  triggerOuter: {
+    width: '100%',
+    alignSelf: 'stretch',
+  },
   triggerFill: {
     flex: 1,
     alignSelf: 'stretch',
+    width: '100%',
   },
   desktopRoot: {
     flex: 1,
@@ -185,9 +194,13 @@ const styles = StyleSheet.create({
   back: {
     flex: 1,
     justifyContent: 'flex-end',
+    alignItems: 'center',
     backgroundColor: 'rgba(0,0,0,0.5)',
   },
   sheet: {
+    width: '100%',
+    maxWidth: SHEET_MAX_W,
+    alignSelf: 'center',
     backgroundColor: '#0f1419',
     padding: 20,
     borderTopLeftRadius: 16,

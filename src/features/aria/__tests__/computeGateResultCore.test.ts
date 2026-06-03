@@ -206,4 +206,184 @@ describe('computeGateResultCore', () => {
     expect(r.reason).toBe('floor_breach');
     expect(r.weightedScore).toBeGreaterThan(6);
   });
+
+  it('adds ego_development_floor when holistic ego level is 1 and final weighted score is below 7', () => {
+    const pillars = allMarkers(6.9);
+    const hi = allMarkers(7);
+    const r = computeGateResultCore(pillars, null, {
+      egoDevelopmentLevel: 1,
+      scenarioPillarScoresByScenario: { 1: hi, 2: hi, 3: hi },
+    });
+    expect(r.pass).toBe(false);
+    expect(r.failReasonCodes).toContain('ego_development_floor');
+    expect(r.reason).toBe('ego_development_floor');
+    expect(r.failReasonDetail?.ego_development_floor).toEqual({ level: 1, weightedScore: 6.1 });
+  });
+
+  it('fails ego_development_floor when ego level is 1 even if modified score clears 7', () => {
+    const pillars = allMarkers(7.6);
+    const r = computeGateResultCore(pillars, null, {
+      egoDevelopmentLevel: 1,
+      scenarioPillarScoresByScenario: { 1: pillars, 2: pillars, 3: pillars },
+    });
+    expect(r.pass).toBe(false);
+    expect(r.failReasonCodes).toContain('ego_development_floor');
+  });
+
+  it('applies -0.3 ego modifier for level 2 before weighted threshold check', () => {
+    const pillars = allMarkers(6.1);
+    const r = computeGateResultCore(pillars, null, {
+      egoDevelopmentLevel: 2,
+      scenarioPillarScoresByScenario: { 1: pillars, 2: pillars, 3: pillars },
+    });
+    expect(r.egoDevelopmentModifier).toBe(-0.3);
+    expect(r.pass).toBe(false);
+    expect(r.reason).toBe('weighted_below_threshold');
+  });
+
+  it('passes weighted gate at 6.4 with ego level 2 after -0.3 modifier vs 6.0 min', () => {
+    const pillars = allMarkers(6.4);
+    const r = computeGateResultCore(pillars, null, {
+      egoDevelopmentLevel: 2,
+      scenarioPillarScoresByScenario: { 1: pillars, 2: pillars, 3: pillars },
+    });
+    expect(r.egoDevelopmentModifier).toBe(-0.3);
+    expect(r.pass).toBe(true);
+  });
+
+  it('parses string ego level 2 and accumulates concreteness modifier (e.g. absent+low → -0.65 total)', () => {
+    const pillars = allMarkers(7);
+    const r = computeGateResultCore(pillars, null, {
+      egoDevelopmentLevel: '2' as unknown as number,
+      scenarioPillarScoresByScenario: { 1: pillars, 2: pillars, 3: pillars },
+      moment4Concreteness: 'absent',
+      moment5Concreteness: 'low',
+    });
+    expect(r.egoDevelopmentModifier).toBe(-0.3);
+    expect(r.scoreModifier).toBeCloseTo(-0.65, 5);
+    expect(r.modifiedWeightedScore).toBe(6.35);
+  });
+
+  it('does not apply ego modifier for level 3', () => {
+    const pillars = allMarkers(6.1);
+    const r = computeGateResultCore(pillars, null, {
+      egoDevelopmentLevel: 3,
+      scenarioPillarScoresByScenario: { 1: pillars, 2: pillars, 3: pillars },
+    });
+    expect(r.egoDevelopmentModifier).toBeUndefined();
+    expect(r.pass).toBe(true);
+  });
+
+  it('applies defense-pattern score adjustment (per-flag cap -0.4 plus -0.5 when 3+ flags)', () => {
+    const pillars = allMarkers(6.2);
+    const hi = allMarkers(7);
+    const r = computeGateResultCore(pillars, null, {
+      scenarioPillarScoresByScenario: { 1: hi, 2: hi, 3: hi },
+      defensePatterns: {
+        projection_detected: true,
+        rationalization_detected: true,
+        splitting_detected: true,
+        denial_detected: true,
+      },
+    });
+    expect(r.defensePatternScoreAdjustment).toBe(-0.8);
+    expect(r.pass).toBe(false);
+    expect(r.failReasonCodes).toContain('immature_defense_pattern');
+    expect(r.reviewFlags).not.toContain('defense_pattern_review');
+  });
+
+  it('adds defense_pattern_review when exactly two defense flags fire', () => {
+    const pillars = allMarkers(6.05);
+    const hi = allMarkers(7);
+    const r = computeGateResultCore(pillars, null, {
+      scenarioPillarScoresByScenario: { 1: hi, 2: hi, 3: hi },
+      defensePatterns: {
+        projection_detected: true,
+        rationalization_detected: true,
+        splitting_detected: false,
+        denial_detected: false,
+      },
+    });
+    expect(r.reviewFlags).toContain('defense_pattern_review');
+    expect(r.reviewFlags).not.toContain('immature_defense_pattern');
+    expect(r.defensePatternScoreAdjustment).toBe(-0.35);
+    expect(r.pass).toBe(false);
+  });
+
+  it('records immature_defense_pattern when 3+ flags and weighted threshold fails', () => {
+    const pillars = allMarkers(6.0);
+    const hi = allMarkers(7);
+    const r = computeGateResultCore(pillars, null, {
+      scenarioPillarScoresByScenario: { 1: hi, 2: hi, 3: hi },
+      defensePatterns: {
+        projection_detected: true,
+        rationalization_detected: true,
+        splitting_detected: true,
+        denial_detected: false,
+      },
+    });
+    expect(r.pass).toBe(false);
+    expect(r.failReasonCodes).toContain('weighted_score');
+    expect(r.failReasonCodes).toContain('immature_defense_pattern');
+  });
+
+  it('stacks ego level 2 modifier with a single defense flag', () => {
+    const pillars = allMarkers(7);
+    const r = computeGateResultCore(pillars, null, {
+      egoDevelopmentLevel: 2,
+      scenarioPillarScoresByScenario: { 1: pillars, 2: pillars, 3: pillars },
+      defensePatterns: {
+        projection_detected: true,
+        rationalization_detected: false,
+        splitting_detected: false,
+        denial_detected: false,
+      },
+    });
+    expect(r.scoreModifier).toBeCloseTo(-0.45, 5);
+  });
+
+  it('coerces string emotionRecognitionCorrectCount 0 into raw score and applies review flag only', () => {
+    const pillars = allMarkers(7);
+    const r = computeGateResultCore(pillars, null, {
+      scenarioPillarScoresByScenario: { 1: pillars, 2: pillars, 3: pillars },
+      emotionRecognitionCorrectCount: '0' as unknown as number,
+      emotionRecognitionResponses: ['A', 'A', 'A'],
+    });
+    expect(r.failReasonCodes ?? []).not.toContain('emotion_recognition_floor');
+    expect(r.reviewFlags).toContain('emotion_recognition_review');
+    expect(r.depthSignalModifier).toBeLessThan(0);
+  });
+
+  it('null emotion scores for incomplete battery do not fail gate or apply modifier', () => {
+    const pillars = allMarkers(7);
+    const r = computeGateResultCore(pillars, null, {
+      scenarioPillarScoresByScenario: { 1: pillars, 2: pillars, 3: pillars },
+      emotionRecognitionRawScore: 0.333,
+      emotionRecognitionResponses: ['B'],
+    });
+    expect(r.failReasonCodes ?? []).not.toContain('emotion_recognition_floor');
+    expect(r.reviewFlags).not.toContain('emotion_recognition_review');
+    expect(r.depthSignalModifier).toBe(0);
+  });
+
+  it('complete battery with low raw score applies modifier but not gate fail', () => {
+    const pillars = allMarkers(7);
+    const r = computeGateResultCore(pillars, null, {
+      scenarioPillarScoresByScenario: { 1: pillars, 2: pillars, 3: pillars },
+      emotionRecognitionRawScore: 0,
+      emotionRecognitionResponses: ['A', 'A', 'A'],
+    });
+    expect(r.failReasonCodes ?? []).not.toContain('emotion_recognition_floor');
+    expect(r.reviewFlags).toContain('emotion_recognition_review');
+    expect(r.depthSignalModifier).toBeCloseTo(-0.2, 5);
+  });
+
+  it('coerces string mentalizingOvercertaintyCount for overcertainty review', () => {
+    const pillars = allMarkers(7);
+    const r = computeGateResultCore(pillars, null, {
+      scenarioPillarScoresByScenario: { 1: pillars, 2: pillars, 3: pillars },
+      mentalizingOvercertaintyCount: '2' as unknown as number,
+    });
+    expect(r.reviewFlags).toContain('mentalizing_overcertainty');
+  });
 });

@@ -1,11 +1,14 @@
 import { describe, expect, it } from '@jest/globals';
+import { personalMomentBundleWasScored } from '../interviewCompletionGate';
 import { buildMoment4ThresholdAnswerToMoment5Bundle } from '../interviewTransitionBundles';
 import {
+  aggregateScenario1Moment1UserTextForContemptGate,
   buildMoment5AppreciationProbeQuestion,
   evaluateMoment5AppreciationSpecificity,
   evaluateScenarioAQ1ContemptProbePreProbeSkip,
   hasScenarioAQ1ContemptProbeCoverage,
   hasScenarioAQ1VignetteEngagement,
+  isReplyingToScenarioAQ1AfterDelivery,
   hasScenarioBQ1OnTopicEngagement,
   hasScenarioCCommitmentThresholdInUserAnswer,
   hasScenarioCVignetteCommitmentThresholdSignal,
@@ -14,6 +17,7 @@ import {
   extractScenario3UserCorpusBeforeRepairPrompt,
   isScenarioCToPersonalHandoffAssistantContent,
   sliceTranscriptBeforeScenarioCToPersonalHandoff,
+  sliceTranscriptForScenario3Scoring,
   hasScenarioCQ2OnTopicEngagement,
   isLikelyMisplacedPersonalNarrativeForScenarioCThreshold,
   isMoment5AppreciationAbsenceOfSignal,
@@ -28,12 +32,35 @@ import {
   MOMENT_5_INEXPERIENCE_FALLBACK_QUESTION,
   MOMENT_5_SPECIFICITY_REDIRECT_ALT_TEXT,
   MOMENT_5_SPECIFICITY_REDIRECT_TEXT,
+  MOMENT_5_RESOLUTION_FOLLOWUP_TEXT,
   looksLikeMoment5AccountabilityProbeAssistantPrompt,
   looksLikeMoment5ConflictValidityClarificationPrompt,
+  looksLikeMoment5ResolutionFollowUpPrompt,
   looksLikeMoment5SpecificityRedirectPrompt,
+  transcriptHasMoment5ResolutionFollowUpAsked,
+  stripEmbeddedMoment5SpecificityRedirectAsk,
+  stripEmbeddedMoment5AccountabilityProbeAsk,
+  stripMoment5SpecificityRedirectStreamingEcho,
+  stripMoment5AccountabilityProbeStreamingEcho,
+  looksLikeScenarioAContemptProbeQuestion,
+  scenarioAEmmaVeryClearContemptReask,
+  mergeDeferredScenarioAContemptProbeLeadWithNextSentence,
+  isIncompleteScenarioAContemptProbeLeadSentence,
+  stripScenarioAContemptProbeQuestion,
+  stripEmbeddedScenarioAContemptProbeAsk,
+  stripScenarioAContemptProbeStreamingEcho,
+  SCENARIO_A_CONTEMPT_PROBE_DELIVERED_COPY,
+  SCENARIO_A_CONTEMPT_PROBE_RESUME_REPEAT_TTS_COPY,
+  SCENARIO_A_CONTEMPT_PROBE_TTS_SPOKEN_COPY,
+  scenarioAContemptProbeResumeRepeatTtsText,
+  scenarioAContemptProbeTtsSpokenText,
   moment5ConflictValidityIsLow,
   evaluateMoment5AccountabilitySelfReference,
   moment5PersonalNarrativeHasConcreteAnchor,
+  combineMoment5UserTurnText,
+  moment5TranscriptHasConcreteAnchor,
+  moment5UserDeclinesConcreteReask,
+  buildMoment5ConfusionRepeatReplayAfterPriorAnswer,
   moment5ResponseAddsTensionDetail,
   moment5ResponseContainsDeathDisclosure,
   hasMoment5TemporallySpecificMoment,
@@ -43,12 +70,26 @@ import {
   moment5HasHighInformationBehavioralExample,
   moment5HasSubstantiveCelebrationValuesReflection,
   normalizeScoresByEvidence,
+  coerceScenarioScoreParsedModelRecord,
+  mergeSalvagedScenarioPillarScoresIntoParsed,
+  fillScenarioKeyEvidenceWhenNumericScoreButMissingQuote,
   mergeMoment4PillarScoresAfterEvidenceNormalize,
+  mergeMoment5PillarScoresAfterEvidenceNormalize,
+  mergeSalvagedMoment4PillarScoresIntoParsed,
+  coerceScoreToFiniteNumber,
+  backfillMoment4KeyEvidenceIfScoresOtherwiseUnpersistable,
+  backfillMoment5KeyEvidenceIfScoresOtherwiseUnpersistable,
+  fillMoment5KeyEvidenceWhenNumericScoreButMissingQuote,
+  MOMENT4_SCORE_RECOVERED_EVIDENCE_LINE,
+  mergeSalvagedMoment5PillarScoresIntoParsed,
   evaluateMoment5AccountabilityProbe,
+  pickMoment5AccountabilityProbeSpokenText,
+  shouldFireAccountabilityProbe,
   moment5AnswerHasExplicitSelfAccountability,
   moment5ResponseIsAbstract,
   shouldProbeMoment5NoSelfReference,
   transcriptAssistantContainsMoment5PrimaryConflictQuestion,
+  spokenTextStartsMoment5PrimaryConflictQuestion,
 } from '../probeAndScoringUtils';
 
 describe('Moment 5 temporal specificity (named fixtures)', () => {
@@ -243,6 +284,65 @@ describe('probeAndScoringUtils', () => {
     expect(sliced[1].content).toContain('Threshold answer');
   });
 
+  it('sliceTranscriptForScenario3Scoring cuts on three described situations handoff and drops M5 by interviewMoment', () => {
+    const msgs = [
+      { role: 'assistant' as const, content: 'Sophie and Daniel have had the same argument.', scenarioNumber: 3, interviewMoment: 3 },
+      { role: 'user' as const, content: 'Daniel avoids and Sophie feels dismissed.', scenarioNumber: 3, interviewMoment: 3 },
+      {
+        role: 'assistant' as const,
+        content:
+          "That's the end of the three described situations. Now let's shift to something more personal.\n\nHave you ever held a grudge against someone?",
+        scenarioNumber: 3,
+        interviewMoment: 4,
+      },
+      { role: 'user' as const, content: 'Grudge story about a coworker.', scenarioNumber: 3, interviewMoment: 4 },
+      {
+        role: 'assistant' as const,
+        content: 'Tell me about a conflict with someone important — how did it get resolved?',
+        scenarioNumber: 3,
+        interviewMoment: 5,
+      },
+      {
+        role: 'user' as const,
+        content: 'My friend cancelled plans last minute and I felt disrespected.',
+        scenarioNumber: 3,
+        interviewMoment: 5,
+      },
+    ];
+    const sliced = sliceTranscriptForScenario3Scoring(msgs);
+    expect(sliced).toHaveLength(2);
+    expect(sliced.map((m) => m.content).join(' ')).toContain('Daniel avoids');
+    expect(sliced.map((m) => m.content).join(' ')).not.toContain('friend');
+  });
+
+  it('extractScenario3UserCorpusAfterLastRepairPrompt ignores Moment 5 conflict narrative tagged scenario 3', () => {
+    const msgs = [
+      { role: 'assistant' as const, content: 'How do you think this situation could be repaired?', scenarioNumber: 3, interviewMoment: 3 },
+      { role: 'user' as const, content: 'Daniel should name the pattern and ask Sophie what she needs.', scenarioNumber: 3, interviewMoment: 3 },
+      {
+        role: 'assistant' as const,
+        content: "We've finished the three situations. Have you ever held a grudge?",
+        scenarioNumber: 3,
+        interviewMoment: 4,
+      },
+      {
+        role: 'assistant' as const,
+        content: 'Tell me about a conflict with someone important.',
+        scenarioNumber: 3,
+        interviewMoment: 5,
+      },
+      {
+        role: 'user' as const,
+        content: 'My friend cancelled and I still resent the cancellation.',
+        scenarioNumber: 3,
+        interviewMoment: 5,
+      },
+    ];
+    expect(extractScenario3UserCorpusAfterLastRepairPrompt(msgs)).toBe(
+      'Daniel should name the pattern and ask Sophie what she needs.',
+    );
+  });
+
   it('extractScenario3UserCorpusAfterLastRepairPrompt stops before commitment-threshold follow-up (no bleed)', () => {
     const msgs = [
       { role: 'assistant' as const, content: 'How do you think this situation could be repaired?', scenarioNumber: 3 },
@@ -300,6 +400,22 @@ describe('probeAndScoringUtils', () => {
     });
   });
 
+  it('deictic "that line" mis-ASR as Lotline + shutdown still skips scripted contempt probe', () => {
+    const s =
+      "Ryan has been doing this for a while and Emma's had enough. She's not asking him to stop. She's telling him she already knows he won't. Lotline is a shutdown, not a complaint.";
+    expect(evaluateScenarioAQ1ContemptProbePreProbeSkip(s)).toEqual({
+      skip: true,
+      reason: 'register_addressed',
+    });
+    expect(hasScenarioAQ1ContemptProbeCoverage(s)).toBe(true);
+  });
+
+  it('Emma/Ryan + "not asking / already knows he won\'t" rhetoric counts as referencing final line for coverage', () => {
+    const s =
+      "Emma's had enough — she's not asking Ryan to stop anymore; she's telling him she already knows he won't change.";
+    expect(hasScenarioAQ1ContemptProbeCoverage(s)).toBe(true);
+  });
+
   it('reference to final line + stating-a-fact minimization does not skip contempt probe', () => {
     expect(
       hasScenarioAQ1ContemptProbeCoverage(
@@ -346,6 +462,104 @@ describe('probeAndScoringUtils', () => {
     expect(hasScenarioAQ1ContemptProbeCoverage(answer)).toBe(false);
     expect(evaluateScenarioAQ1ContemptProbePreProbeSkip(answer).skip).toBe(false);
     expect(hasScenarioAQ1VignetteEngagement(answer)).toBe(true);
+  });
+
+  describe('isReplyingToScenarioAQ1AfterDelivery', () => {
+    const verboseAnswer =
+      "Ryan shouldn't have took a 25 minute call during their date, that was disrespectful to Emma. Emma can be a little more open and honest instead of being condescending with her statement.";
+    const welcomeBack =
+      "Welcome back — we'll pick up where we left off. If you'd like me to repeat what I said, let me know.";
+    const vignette =
+      "Emma and Ryan have dinner plans. Ryan takes a call from his mother halfway through. It runs 25 minutes.";
+
+    it('returns true after resume welcome-back when user gives substantive Scenario A answer', () => {
+      expect(
+        isReplyingToScenarioAQ1AfterDelivery({
+          currentMoment: 1,
+          contemptProbeAlreadyAsked: false,
+          lastAssistantWasContemptProbe: false,
+          lastAssistantWasRepair: false,
+          assistantTexts: [welcomeBack],
+          userAnswerText: verboseAnswer,
+        })
+      ).toBe(true);
+    });
+
+    it('returns true when last assistant is vignette-only delivery', () => {
+      expect(
+        isReplyingToScenarioAQ1AfterDelivery({
+          currentMoment: 1,
+          contemptProbeAlreadyAsked: false,
+          lastAssistantWasContemptProbe: false,
+          lastAssistantWasRepair: false,
+          assistantTexts: [vignette],
+          userAnswerText: verboseAnswer,
+        })
+      ).toBe(true);
+    });
+
+    it('returns true when Q1 is in lastQuestionText ref but not last assistant bubble', () => {
+      expect(
+        isReplyingToScenarioAQ1AfterDelivery({
+          currentMoment: 1,
+          contemptProbeAlreadyAsked: false,
+          lastAssistantWasContemptProbe: false,
+          lastAssistantWasRepair: false,
+          assistantTexts: ['', welcomeBack, "What's going on between these two?"],
+          userAnswerText: verboseAnswer,
+        })
+      ).toBe(true);
+    });
+
+    it('returns false after contempt probe was already asked', () => {
+      expect(
+        isReplyingToScenarioAQ1AfterDelivery({
+          currentMoment: 1,
+          contemptProbeAlreadyAsked: true,
+          lastAssistantWasContemptProbe: false,
+          lastAssistantWasRepair: false,
+          assistantTexts: [welcomeBack],
+          userAnswerText: verboseAnswer,
+        })
+      ).toBe(false);
+    });
+  });
+
+  describe('aggregateScenario1Moment1UserTextForContemptGate', () => {
+    it('joins prior Q1 answer with a short follow-up so Emma-line pre-skip still applies', () => {
+      const msgs = [
+        { role: 'assistant', content: 'vignette' },
+        {
+          role: 'user',
+          content:
+            "Her comment about you've made that very clear signals she stopped expecting things to change.",
+          scenarioNumber: 1,
+          interviewMoment: 1,
+        },
+        { role: 'assistant', content: 'Welcome back — pick up where we left off.' },
+        { role: 'user', content: 'Continue.', scenarioNumber: 1, interviewMoment: 1 },
+      ];
+      const agg = aggregateScenario1Moment1UserTextForContemptGate(msgs);
+      expect(agg).toContain("you've made that very clear");
+      expect(evaluateScenarioAQ1ContemptProbePreProbeSkip(agg).skip).toBe(true);
+    });
+
+    it('joins split user bubbles so Emma-line echo is detected across fragments', () => {
+      const msgs = [
+        { role: 'user', content: 'Her comment about you', scenarioNumber: 1, interviewMoment: 1 },
+        {
+          role: 'user',
+          content: 'made that very clear in how she frames it toward Ryan.',
+          scenarioNumber: 1,
+          interviewMoment: 1,
+        },
+      ];
+      const agg = aggregateScenario1Moment1UserTextForContemptGate(msgs);
+      expect(agg).toContain('made that very clear');
+      expect(evaluateScenarioAQ1ContemptProbePreProbeSkip(msgs[0]!.content).skip).toBe(false);
+      expect(evaluateScenarioAQ1ContemptProbePreProbeSkip(msgs[1]!.content).skip).toBe(false);
+      expect(evaluateScenarioAQ1ContemptProbePreProbeSkip(agg).skip).toBe(true);
+    });
   });
 
   describe('evaluateScenarioAQ1ContemptProbePreProbeSkip', () => {
@@ -512,6 +726,46 @@ describe('probeAndScoringUtils', () => {
     expect(cleaned.repair).toBe(6.2);
   });
 
+  it('normalizeScoresByEvidence keeps string numeric pillars when keyEvidence is empty', () => {
+    const cleaned = normalizeScoresByEvidence(
+      {
+        mentalizing: '7',
+        accountability: ' 6 ',
+        contempt_recognition: null,
+      },
+      {},
+    );
+    expect(cleaned.mentalizing).toBe(7);
+    expect(cleaned.accountability).toBe(6);
+    expect(cleaned.contempt_recognition).toBeUndefined();
+  });
+
+  it('coerceScoreToFiniteNumber handles common model shapes', () => {
+    expect(coerceScoreToFiniteNumber('8')).toBe(8);
+    expect(coerceScoreToFiniteNumber('null')).toBeUndefined();
+    expect(coerceScoreToFiniteNumber(null)).toBeUndefined();
+    expect(coerceScoreToFiniteNumber(Number.NaN)).toBeUndefined();
+  });
+
+  it('backfillMoment4KeyEvidenceIfScoresOtherwiseUnpersistable makes all-null bundles gate-persistable', () => {
+    const warnSpy = jest.spyOn(console, 'warn').mockImplementation(() => {});
+    const merged = mergeMoment4PillarScoresAfterEvidenceNormalize({});
+    const row = { pillarScores: merged, keyEvidence: {} as Record<string, string> };
+    expect(personalMomentBundleWasScored(row)).toBe(false);
+    backfillMoment4KeyEvidenceIfScoresOtherwiseUnpersistable(row);
+    expect(personalMomentBundleWasScored(row)).toBe(true);
+    expect(row.keyEvidence?.mentalizing).toContain('Moment 4 incomplete model output');
+    warnSpy.mockRestore();
+  });
+
+  it('mergeSalvagedMoment4PillarScoresIntoParsed recovers numerics from truncated JSON text', () => {
+    const raw =
+      '{"pillar_scores":{"mentalizing":null},"x":1}\nLater prose then "mentalizing": 6, "accountability": 5';
+    const merged = mergeSalvagedMoment4PillarScoresIntoParsed(raw, { mentalizing: null });
+    expect(merged.mentalizing).toBe(6);
+    expect(merged.accountability).toBe(5);
+  });
+
   it('mergeMoment4PillarScoresAfterEvidenceNormalize restores explicit nulls when normalize drops all numerics', () => {
     const merged = mergeMoment4PillarScoresAfterEvidenceNormalize({});
     expect(merged).toEqual({
@@ -529,6 +783,96 @@ describe('probeAndScoringUtils', () => {
     expect(merged.contempt_recognition).toBeNull();
   });
 
+  it('mergeMoment5PillarScoresAfterEvidenceNormalize restores explicit nulls when normalize drops all numerics', () => {
+    const merged = mergeMoment5PillarScoresAfterEvidenceNormalize({});
+    expect(merged).toEqual({
+      accountability: null,
+      mentalizing: null,
+      repair: null,
+      regulation: null,
+      contempt_expression: null,
+    });
+  });
+
+  it('mergeMoment5PillarScoresAfterEvidenceNormalize keeps surviving numeric pillars', () => {
+    const merged = mergeMoment5PillarScoresAfterEvidenceNormalize({ accountability: 7 });
+    expect(merged.accountability).toBe(7);
+    expect(merged.mentalizing).toBeNull();
+  });
+
+  it('normalizeScoresByEvidence keeps numerics when evidence is intentionally recovered', () => {
+    const cleaned = normalizeScoresByEvidence(
+      { accountability: 7, mentalizing: 6 },
+      {
+        accountability: MOMENT4_SCORE_RECOVERED_EVIDENCE_LINE,
+        mentalizing: MOMENT4_SCORE_RECOVERED_EVIDENCE_LINE,
+      },
+    );
+    expect(cleaned.accountability).toBe(7);
+    expect(cleaned.mentalizing).toBe(6);
+  });
+
+  it('fillMoment5KeyEvidenceWhenNumericScoreButMissingQuote adds recovery lines before normalize', () => {
+    const row = {
+      pillarScores: { accountability: 8, mentalizing: '7' } as Record<string, unknown>,
+      keyEvidence: {} as Record<string, string>,
+    };
+    fillMoment5KeyEvidenceWhenNumericScoreButMissingQuote(row);
+    expect(row.keyEvidence?.accountability).toContain('Score recovered');
+    expect(row.keyEvidence?.mentalizing).toContain('Score recovered');
+  });
+
+  it('coerceScenarioScoreParsedModelRecord lifts snake_case keys', () => {
+    const coerced = coerceScenarioScoreParsedModelRecord({
+      pillar_scores: { mentalizing: 7, appreciation: '6' },
+      key_evidence: { mentalizing: 'Named demand-withdraw.' },
+    });
+    expect(coerced.pillarScores.mentalizing).toBe(7);
+    expect(coerced.keyEvidence.mentalizing).toContain('demand-withdraw');
+  });
+
+  it('mergeSalvagedScenarioPillarScoresIntoParsed recovers truncated scenario JSON', () => {
+    const raw = '{"pillarScores":{"mentalizing":null}}\n"appreciation": 8, "repair": 6';
+    const merged = mergeSalvagedScenarioPillarScoresIntoParsed(raw, ['mentalizing', 'appreciation', 'repair'], {
+      mentalizing: null,
+    });
+    expect(merged.appreciation).toBe(8);
+    expect(merged.repair).toBe(6);
+  });
+
+  it('fillScenarioKeyEvidenceWhenNumericScoreButMissingQuote uses transcript excerpt', () => {
+    const row = {
+      pillarScores: { mentalizing: 7 },
+      keyEvidence: {} as Record<string, string>,
+    };
+    fillScenarioKeyEvidenceWhenNumericScoreButMissingQuote(
+      ['mentalizing'],
+      row,
+      'Emma felt hurt when Ryan took the call.',
+    );
+    expect(row.keyEvidence?.mentalizing).toContain('Emma felt hurt');
+    expect(row.keyEvidence?.mentalizing).not.toContain('Score recovered');
+  });
+
+  it('backfillMoment5KeyEvidenceIfScoresOtherwiseUnpersistable makes all-null bundles gate-persistable', () => {
+    const warnSpy = jest.spyOn(console, 'warn').mockImplementation(() => {});
+    const merged = mergeMoment5PillarScoresAfterEvidenceNormalize({});
+    const row = { pillarScores: merged, keyEvidence: {} as Record<string, string> };
+    expect(personalMomentBundleWasScored(row)).toBe(false);
+    backfillMoment5KeyEvidenceIfScoresOtherwiseUnpersistable(row);
+    expect(personalMomentBundleWasScored(row)).toBe(true);
+    expect(row.keyEvidence?.accountability).toContain('Moment 5 incomplete model output');
+    warnSpy.mockRestore();
+  });
+
+  it('mergeSalvagedMoment5PillarScoresIntoParsed recovers numerics from truncated JSON text', () => {
+    const raw =
+      '{"pillar_scores":{"repair":null},"x":1}\nLater prose then "repair": 6, "accountability": 5';
+    const merged = mergeSalvagedMoment5PillarScoresIntoParsed(raw, { repair: null });
+    expect(merged.repair).toBe(6);
+    expect(merged.accountability).toBe(5);
+  });
+
   it('transcriptAssistantContainsMoment5PrimaryConflictQuestion matches full M4→M5 client bundle', () => {
     const bundle = buildMoment4ThresholdAnswerToMoment5Bundle('Sam', MOMENT_5_ACCOUNTABILITY_QUESTION_TEXT);
     expect(transcriptAssistantContainsMoment5PrimaryConflictQuestion(bundle)).toBe(true);
@@ -538,6 +882,19 @@ describe('probeAndScoringUtils', () => {
     const paraphrase =
       'Tell me about a specific conflict you had with someone important in your life and how it got resolved — or didn\'t.';
     expect(transcriptAssistantContainsMoment5PrimaryConflictQuestion(paraphrase)).toBe(true);
+  });
+
+  it('spokenTextStartsMoment5PrimaryConflictQuestion matches first streaming sentence only', () => {
+    expect(
+      spokenTextStartsMoment5PrimaryConflictQuestion(
+        'Think of a time when you had a conflict with someone important to you.',
+      ),
+    ).toBe(true);
+    expect(
+      spokenTextStartsMoment5PrimaryConflictQuestion(
+        'Great work — what you shared about when something feels worth working through.',
+      ),
+    ).toBe(false);
   });
 
   describe('evaluateMoment5AccountabilityProbe (Moment 5 accountability probe)', () => {
@@ -641,6 +998,19 @@ describe('probeAndScoringUtils', () => {
       expect(evaluateMoment5AccountabilityProbe(answer).shouldProbe).toBe(false);
     });
 
+    it('fires for philosophy-style response with moderate self-ref but no conflict context (Deb pattern)', () => {
+      const answer =
+        "I've had that scenario many times but at this point in my life it's a conversation in a way that maybe I don't need feedback but I need you or the person to know how I feel about something and try and work through those feelings if possible with that person sometimes there is no response needed it's just a matter of I need to dump my feelings out and I need you to hear them";
+      expect(shouldFireAccountabilityProbe(answer)).toBe(true);
+      expect(evaluateMoment5AccountabilityProbe(answer)).toMatchObject({
+        shouldProbe: true,
+        reason: 'lacks_explicit_self_accountability',
+      });
+      expect(pickMoment5AccountabilityProbeSpokenText(answer, { griefAckPrefix: true })).toContain(
+        'specific time you had a conflict'
+      );
+    });
+
     it('does not fire for specific boundary expression in the conflict story', () => {
       const answer =
         "I had a conflict with someone who criticized my coaching. I told him I would have appreciated if he were more open to my feedback, and I don't take criticism seriously from people who haven't experienced my work.";
@@ -703,6 +1073,226 @@ describe('probeAndScoringUtils', () => {
       expect(looksLikeMoment5SpecificityRedirectPrompt('What was your part in how it unfolded?')).toBe(false);
     });
 
+    it('detects the scripted Moment 5 resolution follow-up', () => {
+      expect(looksLikeMoment5ResolutionFollowUpPrompt(MOMENT_5_RESOLUTION_FOLLOWUP_TEXT)).toBe(true);
+      expect(
+        looksLikeMoment5ResolutionFollowUpPrompt('How did it get resolved between the two of you?'),
+      ).toBe(true);
+      expect(looksLikeMoment5ResolutionFollowUpPrompt(MOMENT_5_SPECIFICITY_REDIRECT_TEXT)).toBe(false);
+    });
+
+    it('transcriptHasMoment5ResolutionFollowUpAsked ignores welcome-back rows', () => {
+      expect(
+        transcriptHasMoment5ResolutionFollowUpAsked([
+          { role: 'assistant', content: MOMENT_5_RESOLUTION_FOLLOWUP_TEXT },
+        ]),
+      ).toBe(true);
+      expect(
+        transcriptHasMoment5ResolutionFollowUpAsked([
+          { role: 'assistant', content: MOMENT_5_RESOLUTION_FOLLOWUP_TEXT, isWelcomeBack: true },
+        ]),
+      ).toBe(false);
+    });
+
+    it('detects specificity redirect when typographic quotes appear in the same turn', () => {
+      expect(
+        looksLikeMoment5SpecificityRedirectPrompt(
+          'Is there a specific person or situation that comes to mind when you think about \u201cconflict\u201d?',
+        ),
+      ).toBe(true);
+    });
+
+    it('stripEmbeddedMoment5SpecificityRedirectAsk removes a glued-in redirect from a single paragraph', () => {
+      const draft =
+        'Great work, Matt — what you shared comes through clearly. Can you think of a specific time — maybe with a partner, friend, or family member — and walk me through what happened? Here is one more question.';
+      expect(stripEmbeddedMoment5SpecificityRedirectAsk(draft)).toBe(
+        'Great work, Matt — what you shared comes through clearly. Here is one more question.',
+      );
+    });
+
+    it('stripEmbeddedMoment5SpecificityRedirectAsk returns empty for a full redirect block', () => {
+      expect(stripEmbeddedMoment5SpecificityRedirectAsk(MOMENT_5_SPECIFICITY_REDIRECT_TEXT)).toBe('');
+    });
+
+    it('stripEmbeddedMoment5SpecificityRedirectAsk leaves unrelated abstract answers unchanged', () => {
+      const t =
+        'I think the key to resolving conflict is communication. You have to be willing to have hard conversations.';
+      expect(stripEmbeddedMoment5SpecificityRedirectAsk(t)).toBe(t);
+    });
+
+    it('stripMoment5SpecificityRedirectStreamingEcho leaves text unchanged when redirect was not injected', () => {
+      expect(stripMoment5SpecificityRedirectStreamingEcho(MOMENT_5_SPECIFICITY_REDIRECT_TEXT, false)).toBe(
+        MOMENT_5_SPECIFICITY_REDIRECT_TEXT,
+      );
+    });
+
+    it('stripMoment5SpecificityRedirectStreamingEcho drops a model echo of the redirect after client inject', () => {
+      expect(
+        stripMoment5SpecificityRedirectStreamingEcho(
+          'Can you think of a specific time — maybe with a partner, friend, or family member — and walk me through what happened?',
+          true,
+        ),
+      ).toBeNull();
+    });
+
+    it('stripMoment5SpecificityRedirectStreamingEcho keeps accountability ask when glued after the redirect', () => {
+      const glued =
+        'Can you think of a specific time — maybe with a partner, friend, or family member — and walk me through what happened? What was your part in how it unfolded?';
+      expect(stripMoment5SpecificityRedirectStreamingEcho(glued, true)).toBe(
+        'What was your part in how it unfolded?',
+      );
+    });
+
+    it('stripMoment5SpecificityRedirectStreamingEcho handles walk me thru spelling with accountability tail', () => {
+      const glued =
+        'Could you think of a specific time with someone close to you and walk me thru what happened? What was your part in how it unfolded?';
+      expect(stripMoment5SpecificityRedirectStreamingEcho(glued, true)).toBe(
+        'What was your part in how it unfolded?',
+      );
+    });
+
+    it('detects common model paraphrases of the accountability probe', () => {
+      expect(looksLikeMoment5AccountabilityProbeAssistantPrompt('What was your part in how it all started?')).toBe(
+        true,
+      );
+      expect(looksLikeMoment5AccountabilityProbeAssistantPrompt('What was your part in how it began?')).toBe(true);
+      expect(looksLikeMoment5AccountabilityProbeAssistantPrompt(MOMENT_5_ACCOUNTABILITY_PROBE_WITH_GRIEF_ACK_TEXT)).toBe(
+        true,
+      );
+    });
+
+    it('does not treat conflict-validity clarification with soft your-part nudge as accountability probe', () => {
+      expect(
+        looksLikeMoment5AccountabilityProbeAssistantPrompt(
+          "Thanks for sharing that.\n\nWas there a point it got tense between you two? or did it resolve smoothly\n\nI'd like to hear more about your part.",
+        ),
+      ).toBe(false);
+    });
+
+    it('stripEmbeddedMoment5AccountabilityProbeAsk removes glued accountability from a longer paragraph', () => {
+      const draft =
+        'Thanks for sharing that. What was your part in how it all started? What helped you two repair things after that?';
+      expect(stripEmbeddedMoment5AccountabilityProbeAsk(draft)).toBe(
+        'Thanks for sharing that. What helped you two repair things after that?',
+      );
+    });
+
+    it('stripMoment5AccountabilityProbeStreamingEcho drops duplicate accountability after client inject', () => {
+      expect(
+        stripMoment5AccountabilityProbeStreamingEcho('What was your part in how it all started?', true),
+      ).toBeNull();
+      expect(
+        stripMoment5AccountabilityProbeStreamingEcho('What was your part in how it unfolded?', true),
+      ).toBeNull();
+    });
+
+    const SCENARIO_A_CONTEMPT_PROBE =
+      "What about when Emma says 'you've made that very clear' — what do you make of that?";
+
+    it('looksLikeScenarioAContemptProbeQuestion matches canonical framework copy', () => {
+      expect(looksLikeScenarioAContemptProbeQuestion(SCENARIO_A_CONTEMPT_PROBE)).toBe(true);
+    });
+
+    it('looksLikeScenarioAContemptProbeQuestion matches common model paraphrase', () => {
+      expect(
+        looksLikeScenarioAContemptProbeQuestion(
+          'What did you think when Emma said you made that very clear?',
+        ),
+      ).toBe(true);
+      expect(
+        scenarioAEmmaVeryClearContemptReask(
+          "What did you think when she said you've made that very clear?",
+        ),
+      ).toBe(true);
+    });
+
+    it('mergeDeferredScenarioAContemptProbeLeadWithNextSentence avoids duplicating full probe', () => {
+    const lead = "What about when Emma says 'you've made that very clear' —";
+    const full =
+      "What about when Emma says 'you've made that very clear' — what do you make of that?";
+    expect(mergeDeferredScenarioAContemptProbeLeadWithNextSentence(lead, full)).toBe(full);
+    expect(mergeDeferredScenarioAContemptProbeLeadWithNextSentence(lead, 'what do you make of that?')).toBe(
+      `${lead} what do you make of that?`,
+    );
+  });
+
+  it('isIncompleteScenarioAContemptProbeLeadSentence detects em-dash split lead', () => {
+      expect(
+        isIncompleteScenarioAContemptProbeLeadSentence(
+          "What about when Emma says 'you've made that very clear' —",
+        ),
+      ).toBe(true);
+      expect(isIncompleteScenarioAContemptProbeLeadSentence(SCENARIO_A_CONTEMPT_PROBE)).toBe(false);
+    });
+
+    it('stripScenarioAContemptProbeStreamingEcho drops duplicate contempt after probe already spoken', () => {
+      expect(stripScenarioAContemptProbeStreamingEcho(SCENARIO_A_CONTEMPT_PROBE, true)).toBeNull();
+      expect(
+        stripScenarioAContemptProbeStreamingEcho(
+          "What do you make of Emma's statement when she says 'you've made that very clear'?",
+          true,
+        ),
+      ).toBeNull();
+      expect(
+        stripScenarioAContemptProbeStreamingEcho(
+          'What did you think when Emma said you made that very clear?',
+          true,
+        ),
+      ).toBeNull();
+    });
+
+    it('stripScenarioAContemptProbeStreamingEcho leaves text unchanged when probe was not yet spoken', () => {
+      expect(stripScenarioAContemptProbeStreamingEcho(SCENARIO_A_CONTEMPT_PROBE, false)).toBe(
+        SCENARIO_A_CONTEMPT_PROBE,
+      );
+    });
+
+    it('SCENARIO_A_CONTEMPT_PROBE_DELIVERED_COPY matches canonical framework probe', () => {
+      expect(SCENARIO_A_CONTEMPT_PROBE_DELIVERED_COPY).toBe(SCENARIO_A_CONTEMPT_PROBE);
+      expect(looksLikeScenarioAContemptProbeQuestion(SCENARIO_A_CONTEMPT_PROBE_DELIVERED_COPY)).toBe(
+        true,
+      );
+    });
+
+    it('scenarioAContemptProbeTtsSpokenText omits quoted Emma line for contempt-probe TTS', () => {
+      expect(scenarioAContemptProbeTtsSpokenText(SCENARIO_A_CONTEMPT_PROBE_DELIVERED_COPY)).toBe(
+        SCENARIO_A_CONTEMPT_PROBE_TTS_SPOKEN_COPY,
+      );
+      expect(SCENARIO_A_CONTEMPT_PROBE_TTS_SPOKEN_COPY).not.toContain("you've made that very clear");
+      expect(scenarioAContemptProbeResumeRepeatTtsText(SCENARIO_A_CONTEMPT_PROBE_DELIVERED_COPY)).toBe(
+        SCENARIO_A_CONTEMPT_PROBE_TTS_SPOKEN_COPY,
+      );
+      expect(
+        scenarioAContemptProbeTtsSpokenText('How would you repair this if you were Ryan?'),
+      ).toBe('How would you repair this if you were Ryan?');
+    });
+
+    it('looksLikeScenarioAContemptProbeQuestion matches deictic paraphrase from prior fix', () => {
+      expect(looksLikeScenarioAContemptProbeQuestion("What do you make of Emma's response there?")).toBe(
+        true,
+      );
+    });
+
+    it('stripEmbeddedScenarioAContemptProbeAsk removes glued contempt from a longer paragraph', () => {
+      const draft = `That makes sense. ${SCENARIO_A_CONTEMPT_PROBE} How would you repair this if you were Ryan?`;
+      expect(stripEmbeddedScenarioAContemptProbeAsk(draft)).toBe(
+        'That makes sense. How would you repair this if you were Ryan?',
+      );
+    });
+
+    it('stripEmbeddedScenarioAContemptProbeAsk removes paraphrase contempt re-ask', () => {
+      const draft =
+        'What did you think when Emma said you made that very clear? That makes sense — how would you repair this if you were Ryan?';
+      expect(stripEmbeddedScenarioAContemptProbeAsk(draft)).toBe(
+        'That makes sense — how would you repair this if you were Ryan?',
+      );
+    });
+
+    it('stripScenarioAContemptProbeQuestion removes duplicate contempt paragraphs', () => {
+      const draft = `${SCENARIO_A_CONTEMPT_PROBE}\n\n${SCENARIO_A_CONTEMPT_PROBE}`;
+      expect(stripScenarioAContemptProbeQuestion(draft)).toBe('');
+    });
+
     it('treats generic second-person advice as lacking concrete anchor', () => {
       expect(
         moment5PersonalNarrativeHasConcreteAnchor(
@@ -727,6 +1317,14 @@ describe('probeAndScoringUtils', () => {
       ).toBe(true);
     });
 
+    it('accepts named family + "had a conflict" + other-party behavior (sister regression)', () => {
+      expect(
+        moment5PersonalNarrativeHasConcreteAnchor(
+          'I had a conflict with my sister. She was being completely unreasonable and eventually I had to stop engaging with her. She needed to change her behavior.',
+        ),
+      ).toBe(true);
+    });
+
     it('accepts my best friend + had an argument phrasing (not only we-had-a-fight)', () => {
       expect(
         moment5PersonalNarrativeHasConcreteAnchor(
@@ -737,6 +1335,14 @@ describe('probeAndScoringUtils', () => {
 
     it('returns false for very short answers', () => {
       expect(moment5PersonalNarrativeHasConcreteAnchor('My friend was mad.')).toBe(false);
+    });
+
+    it('accepts "a co-worker" + we disagreed (hyphenated role; post-M5 redirect regression)', () => {
+      expect(
+        moment5PersonalNarrativeHasConcreteAnchor(
+          'There was a time with a co-worker where we disagreed about how to handle a project. We just discussed it and found a solution.',
+        ),
+      ).toBe(true);
     });
 
     it('accepts extended kin + repair language', () => {
@@ -798,6 +1404,72 @@ describe('probeAndScoringUtils', () => {
         true,
       );
       expect(looksLikeMoment5ConflictValidityClarificationPrompt(MOMENT_5_SPECIFICITY_REDIRECT_TEXT)).toBe(false);
+    });
+
+    it('detects common model paraphrases of the conflict-validity clarification (no "actually" / "pretty")', () => {
+      expect(
+        looksLikeMoment5ConflictValidityClarificationPrompt(
+          'Was there a point it got tense between you two? or did it resolve smoothly',
+        ),
+      ).toBe(true);
+      expect(
+        looksLikeMoment5ConflictValidityClarificationPrompt(
+          "Thanks for sharing that.\n\nWas there a point it got tense between you two? or did it resolve smoothly\n\nI'd like to hear more about your part.",
+        ),
+      ).toBe(true);
+    });
+  });
+
+  describe('moment5 transcript-combined anchor (M5 friend/partner redirect regression)', () => {
+    const friendTurn =
+      'I had a conflict with a close friend over something they did that I felt was being considered. I was upset about it for a while before I said anything.';
+    const plansTurn =
+      'They canceled plans last minute multiple times and I never said anything until it built up and I snapped. It came out harsher than I intended.';
+    const buildupTurn =
+      "I let it build up instead of saying something earlier. If I had said something the first or second time, it wouldn't have escalated.";
+
+    it('combines interviewMoment 5 user turns only', () => {
+      const tx = [
+        { role: 'user', content: friendTurn, interviewMoment: 5 },
+        { role: 'user', content: plansTurn, interviewMoment: 5 },
+        { role: 'user', content: 'M4 grudge answer', interviewMoment: 4 },
+        { role: 'assistant', content: 'prompt', interviewMoment: 5 },
+      ];
+      expect(combineMoment5UserTurnText(tx)).toContain('close friend');
+      expect(combineMoment5UserTurnText(tx)).not.toContain('M4 grudge');
+    });
+
+    it('detects concrete anchor from earlier friend turn when latest turn is buildup-only', () => {
+      const tx = [
+        { role: 'user', content: friendTurn, interviewMoment: 5 },
+        { role: 'user', content: plansTurn, interviewMoment: 5 },
+        { role: 'user', content: buildupTurn, interviewMoment: 5 },
+      ];
+      expect(moment5PersonalNarrativeHasConcreteAnchor(buildupTurn)).toBe(false);
+      expect(moment5TranscriptHasConcreteAnchor(tx)).toBe(true);
+    });
+
+    it('treats "I just told you" as decline and skips accountability probe eval', () => {
+      expect(moment5UserDeclinesConcreteReask('I just told you.')).toBe(true);
+      expect(evaluateMoment5AccountabilityProbe('I just told you.').reason).toBe('decline_or_vague_evade');
+      expect(evaluateMoment5AccountabilityProbe('I just told you.').shouldProbe).toBe(false);
+    });
+  });
+
+  describe('buildMoment5ConfusionRepeatReplayAfterPriorAnswer', () => {
+    it('replays the last question sentence from the immediate interviewer line', () => {
+      const replay = buildMoment5ConfusionRepeatReplayAfterPriorAnswer({
+        lastInterviewerText: 'I hear you. How did it get resolved between you two?',
+      });
+      expect(replay).toBe('Got it — How did it get resolved between you two?');
+      expect(replay).not.toContain('Think of a time when you had a conflict');
+    });
+
+    it('falls back to canonical M5 anchor when last line has no question mark', () => {
+      const replay = buildMoment5ConfusionRepeatReplayAfterPriorAnswer({
+        lastInterviewerText: 'Thanks for sharing that with me.',
+      });
+      expect(replay).toContain(MOMENT_5_ACCOUNTABILITY_QUESTION_TEXT);
     });
   });
 

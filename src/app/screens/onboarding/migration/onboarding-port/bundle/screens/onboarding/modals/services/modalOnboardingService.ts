@@ -1,4 +1,5 @@
 import { supabase } from '@/data/supabaseClient';
+import { ONBOARDING_PROGRESS_SELECT } from '@data/supabase/tableSelects';
 import { Result } from '@/src/types';
 import { OnboardingProgress, OnboardingData } from '../types';
 import { profilesRepo } from '@/data/repos/profilesRepo';
@@ -10,6 +11,11 @@ import {
   mapRelationshipStyleUiToRelationshipType,
 } from '@/screens/profile/editProfile/editProfileService';
 import { normalizePartnerPoliticalAlignmentToYesNo } from '@/screens/profile/editProfile/constants';
+import {
+  LIFE_DOMAIN_QUESTION_ONBOARDING_STEPS,
+  normalizeLifeDomainQuestionOnboardingStep,
+} from '@/shared/constants/lifeDomainOnboardingQuestions';
+import { normalizeArchetypesFromProfile } from '@/shared/constants/archetypes';
 
 class ModalOnboardingService {
   /**
@@ -90,7 +96,13 @@ class ModalOnboardingService {
         d.spaceForNewRelationship,
       ),
       lifeDomains: coalesce((p as any).lifeDomains, d.lifeDomains),
+      lifeDomainAnswers: coalesce((p as any).lifeDomainAnswers, d.lifeDomainAnswers),
       typology: coalesce((p as any).typology, d.typology),
+      archetypes: (() => {
+        const fromDraft = normalizeArchetypesFromProfile(d.archetypes);
+        if (fromDraft.length > 0) return fromDraft;
+        return normalizeArchetypesFromProfile((p as any)?.archetypes);
+      })(),
       photos: coalesce((p as any).photos, d.photos),
       matchPreferences: coalesce((p as any).matchPreferences, d.matchPreferences),
     };
@@ -116,6 +128,32 @@ class ModalOnboardingService {
       sum += n;
     }
     return sum === 100;
+  }
+
+  /**
+   * After life-domain sliders, walk per-domain question steps then profile-complete celebration.
+   */
+  private stepAfterLifeDomains(savedStep?: string): string {
+    const questionSteps = LIFE_DOMAIN_QUESTION_ONBOARDING_STEPS.map((s) => s.step);
+    if (savedStep === 'profileComplete' || savedStep === 'complete') {
+      return 'profileComplete';
+    }
+    if (savedStep === 'lifeDomains') {
+      return questionSteps[0] ?? 'profileComplete';
+    }
+    const normalized = savedStep ? normalizeLifeDomainQuestionOnboardingStep(savedStep) : null;
+    if (normalized) {
+      const idx = questionSteps.indexOf(normalized);
+      if (idx >= 0 && idx < questionSteps.length - 1) {
+        return questionSteps[idx + 1]!;
+      }
+      return 'profileComplete';
+    }
+    return questionSteps[0] ?? 'profileComplete';
+  }
+
+  private archetypesCompletionSatisfied(ctx: any): boolean {
+    return normalizeArchetypesFromProfile((ctx as any)?.archetypes).length === 2;
   }
 
   /**
@@ -183,11 +221,14 @@ class ModalOnboardingService {
         'datingPaceAfterExcitement',
         'recentDatingEarlyWeeks',
         'spaceForNewRelationship',
-        'lifeDomains',
-        'typology',
-        'photos',
         'matchPreferences',
+        'typology',
+        'archetypes',
+        'photos',
         'attractionPreferences',
+        'lifeDomains',
+        ...LIFE_DOMAIN_QUESTION_ONBOARDING_STEPS.map((s) => s.step),
+        'profileComplete',
         'complete',
       ] as const;
       const stepsAfterDrinkingNeedSocial = new Set<string>(tailSteps);
@@ -218,6 +259,8 @@ class ModalOnboardingService {
       if (rwcMissing && stepsAfterPsychedelicsNeedCannabis.has(resumeStep)) {
         return 'relationshipCannabis';
       }
+      const lifeDomainStep = normalizeLifeDomainQuestionOnboardingStep(resumeStep);
+      if (lifeDomainStep) return lifeDomainStep;
       return resumeStep;
     }
     if (!ctx?.displayName) return 'name';
@@ -230,7 +273,6 @@ class ModalOnboardingService {
       ctx?.longestRomanticRelationship ?? (ctx as any)?.longest_romantic_relationship;
     if (!longest || String(longest).trim() === '') return 'longestRelationship';
     if (!ctx?.location) return 'location';
-    if (!(ctx as any)?.occupation) return 'occupation';
     if (!(ctx as any)?.educationLevel && !(ctx as any)?.education_level) return 'educationLevel';
     if (!ctx?.height && !ctx?.weight && (ctx as any).height_cm == null && (ctx as any).weight_kg == null)
       return 'heightWeight';
@@ -275,12 +317,13 @@ class ModalOnboardingService {
       ).trim()
     )
       return 'spaceForNewRelationship';
-    if (!this.lifeDomainsCompletionSatisfied(ctx)) return 'lifeDomains';
+    if (!this.matchPreferencesCompletionSatisfied(ctx)) return 'matchPreferences';
+    if (!this.archetypesCompletionSatisfied(ctx)) return 'archetypes';
     if (!(ctx as any)?.photos || !Array.isArray((ctx as any).photos) || (ctx as any).photos.length === 0)
       return 'photos';
-    if (!this.matchPreferencesCompletionSatisfied(ctx)) return 'matchPreferences';
     if (!this.attractionPreferencesCompletionSatisfied(ctx)) return 'attractionPreferences';
-    return 'complete';
+    if (!this.lifeDomainsCompletionSatisfied(ctx)) return 'lifeDomains';
+    return this.stepAfterLifeDomains(savedStep);
   }
 
   /**
@@ -435,6 +478,7 @@ class ModalOnboardingService {
       phoneNumber: profile?.phoneNumber,
       photos: profile?.photos,
       bio: profile?.bio,
+      archetypes: normalizeArchetypesFromProfile((profile as any)?.archetypes),
       lifeDomains: profile?.lifeDomains,
       matchPreferences: mergedPrefs as any,
     };
@@ -452,7 +496,7 @@ class ModalOnboardingService {
       // Get saved onboarding progress
       const { data, error } = await supabase
         .from('onboarding_progress')
-        .select('*')
+        .select(ONBOARDING_PROGRESS_SELECT)
         .eq('user_id', userId)
         .maybeSingle();
 
@@ -687,6 +731,10 @@ class ModalOnboardingService {
           (profileUpdates as any).myersBriggs = data.typology.myersBriggs;
         }
       }
+      const archetypesComplete = normalizeArchetypesFromProfile(data.archetypes);
+      if (archetypesComplete.length === 2) {
+        (profileUpdates as any).archetypes = archetypesComplete;
+      }
       const hw = buildHeightWeightProfileFields({
         height: data.height,
         height_cm: data.height_cm,
@@ -816,12 +864,8 @@ class ModalOnboardingService {
 
       // Mark onboarding as seen - this prevents onboarding modals from being shown again
       profileUpdates.hasSeenOnboardingIntro = true;
-      // User is not fully onboarding-complete until required assessments are finished.
-      profileUpdates.assessmentsStarted = false;
-      profileUpdates.assessmentsCompleted = false;
-      profileUpdates.assessmentsCompletedAt = null;
-      profileUpdates.onboardingCompleted = false;
-      profileUpdates.onboardingCompletedAt = null;
+      profileUpdates.onboardingCompleted = true;
+      profileUpdates.onboardingCompletedAt = new Date().toISOString();
 
       // Update profile
       const updateResult = await profilesRepo.updateProfile(userId, profileUpdates);

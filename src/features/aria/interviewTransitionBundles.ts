@@ -3,6 +3,7 @@
  * Transition leads omit the participant's first name; the model uses it in boundary **reflection** only.
  */
 
+import { resolvePlausibleInterviewFirstName } from './interviewNameValidation';
 import { MOMENT_5_ACCOUNTABILITY_QUESTION_TEXT } from './probeAndScoringUtils';
 
 export const SCENARIO_1_TO_2_TRANSITION_FALLBACK =
@@ -14,8 +15,28 @@ export const SCENARIO_2_TO_3_TRANSITION_FALLBACK =
 export const MOMENT_4_HANDOFF_NO_NAME_LEAD =
   'Good work — you just finished the three situations. There are only two questions left. These questions are more about you. Here\'s the first one.';
 
+/**
+ * Assistant copy that opens Moment 4 (handoff and/or grudge question). Used by {@link inferPersonalMomentSlices}
+ * so scoring does not depend on a single brittle substring when the model paraphrases the lead.
+ */
+export function assistantTextLooksLikeMoment4HandoffLead(text: string): boolean {
+  const t = (text ?? '').toLowerCase();
+  if (/held a grudge|really didn't like/.test(t)) return true;
+  if (/finished the three situations/.test(t)) return true;
+  if (/end of (the )?three (situations|described situations|vignettes)/.test(t)) return true;
+  if (/done with those three scenarios?/.test(t)) return true;
+  if (t.includes('three situations') && (t.includes('two questions') || t.includes('more about you'))) return true;
+  if (t.includes("we're done with those three") || t.includes('done with those three')) return true;
+  return false;
+}
+
 export function buildScenario1To2BundleForInterview(_firstName: string, scenario2Text: string): string {
   return `${SCENARIO_1_TO_2_TRANSITION_FALLBACK}\n\n${scenario2Text}`.trim();
+}
+
+/** Client-injected Scenario A opening after the participant confirms readiness. */
+export function buildScenario1VignetteIntroBundle(vignetteText: string, openingQuestion: string): string {
+  return `Here's the first situation:\n\n${vignetteText.trim()}\n\n${openingQuestion.trim()}`.trim();
 }
 
 /**
@@ -47,7 +68,7 @@ export function buildMoment4HandoffForInterview(_firstName: string, moment4Perso
  * (mirrors scenario boundary rhythm; the conflict question text is canonical from {@link MOMENT_5_ACCOUNTABILITY_QUESTION_TEXT}).
  */
 export function buildMoment4ThresholdAnswerToMoment5Bundle(firstName: string, moment5Question: string = MOMENT_5_ACCOUNTABILITY_QUESTION_TEXT): string {
-  const name = firstName?.trim();
+  const name = resolvePlausibleInterviewFirstName(firstName);
   const reflection = name
     ? `Great work, ${name} — what you shared about when something feels worth working through versus when you need to step back comes through clearly.`
     : `What you shared about when something feels worth working through versus when you need to step back comes through clearly.`;

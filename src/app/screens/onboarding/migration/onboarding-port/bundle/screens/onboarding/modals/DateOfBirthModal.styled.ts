@@ -45,22 +45,22 @@ export const styles = StyleSheet.create({
     marginBottom: 8,
     color: theme.colors.textSecondary,
   },
-  /** Compact birth-time dropdown (not full screen width). */
+  /** Compact birth-time dropdown (not full screen width); matches single-choice option chrome. */
   timePickerWrapper: {
     alignSelf: 'flex-start',
     maxWidth: '100%',
     width: TIME_PICKER_WIDTH,
-    borderWidth: 1,
+    borderWidth: 2,
     borderColor: theme.colors.border,
-    borderRadius: 10,
+    borderRadius: 12,
     backgroundColor: theme.colors.card,
     overflow: 'hidden',
-    ...(Platform.OS === 'ios' ? {} : { minHeight: 56 }),
+    ...(Platform.OS === 'ios' ? {} : { minHeight: 58 }),
   },
   timePicker: {
     width: '100%',
     color: theme.colors.text,
-    backgroundColor: theme.colors.card,
+    backgroundColor: 'transparent',
     ...(Platform.OS === 'ios'
       ? { height: 148 }
       : Platform.OS === 'android'
@@ -74,10 +74,18 @@ export const styles = StyleSheet.create({
     outlineWidth: 0,
     paddingHorizontal: 10,
     paddingVertical: 12,
-    minHeight: 54,
+    minHeight: 56,
     cursor: 'pointer' as const,
     color: theme.colors.text,
-    backgroundColor: theme.colors.card,
+    backgroundColor: 'transparent',
+  },
+  timePickerItem: {
+    color: theme.colors.text,
+    backgroundColor: '#0f1419',
+  },
+  timePickerItemPlaceholder: {
+    color: theme.colors.textSecondary,
+    backgroundColor: '#0f1419',
   },
   /** Location field + suggestions share a readable but non-full-bleed width. */
   optionalLocationNarrow: {
@@ -91,6 +99,16 @@ export const styles = StyleSheet.create({
     marginTop: 6,
     marginBottom: 4,
     lineHeight: 16,
+  },
+  placeSearchLoadingRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    marginTop: 8,
+  },
+  placeSearchLoadingText: {
+    fontSize: 12,
+    color: theme.colors.textSecondary,
   },
   suggestionsContainer: {
     marginTop: 4,

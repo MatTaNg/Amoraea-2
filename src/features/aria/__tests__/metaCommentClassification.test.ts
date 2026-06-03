@@ -144,6 +144,9 @@ describe('classifyUserMetaComment', () => {
   it('classifies already_answered patterns', () => {
     expect(classifyUserMetaComment('I already answered that')?.type).toBe('already_answered');
     expect(classifyUserMetaComment('I think I covered that')?.type).toBe('already_answered');
+    expect(classifyUserMetaComment('I just told you.')?.type).toBe('already_answered');
+    expect(classifyUserMetaComment("Didn't I already answer this?")?.type).toBe('already_answered');
+    expect(classifyUserMetaComment('I already answered this')?.type).toBe('already_answered');
   });
 
   it('priority: skip_request beats already_answered when both match', () => {
@@ -254,6 +257,17 @@ describe('buildMetaCommentHandlingSuffix', () => {
     });
     expect(s).toMatch(/verbatim|full|REPEAT REQUEST/i);
     expect(s).toMatch(/Do not.*say more about that|elongating/i);
+  });
+
+  it('uses short M5 replay suffix when repeat_request and prior M5 substance verified', () => {
+    const s = buildMetaCommentHandlingSuffix({
+      classification: { type: 'confusion', confidence: 0.8, confusion_subtype: 'repeat_request' },
+      repeatedFrustrationInMoment: false,
+      moment5ConfusionRepeatHasPriorSubstantive: true,
+    });
+    expect(s).toMatch(/PRIOR SUBSTANCE VERIFIED/i);
+    expect(s).toMatch(/Do not.*full conflict|transition bundle/i);
+    expect(s).not.toMatch(/verbatim is ideal/);
   });
 
   it('omits reflection when omitPriorReflectionClause with prior substantive', () => {

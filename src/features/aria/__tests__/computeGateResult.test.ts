@@ -39,7 +39,7 @@ describe('computeGateResult — research weights & floors', () => {
   });
 
   it('fails weighted when just below 6.0', () => {
-    const scores = allAssessed(5.95);
+    const scores = allAssessed(5.9);
     const r = computeGateResult(scores);
     expect(r.pass).toBe(false);
     expect(r.reason).toBe('weighted_below_threshold');
@@ -150,5 +150,38 @@ describe('computeGateResult — research weights & floors', () => {
     expect(r.reason).toBe('weighted_below_threshold');
     expect(r.failReasonCodes).toContain('weighted_score');
     expect(r.failReason).toContain('5.5');
+  });
+
+  it('personal moment concreteness: both absent modifier lowers threshold score', () => {
+    const r = computeGateResult(allAssessed(6.2), null, {
+      moment4Concreteness: 'absent',
+      moment5Concreteness: 'absent',
+    });
+    expect(r.personalMomentConcretenessModifier).toBe(-0.3);
+    expect(r.pass).toBe(false);
+  });
+
+  it('adds personal_moment_concreteness_review when both absent-or-low and weighted in 6–7 band', () => {
+    const r = computeGateResult(allAssessed(6.5), null, {
+      moment4Concreteness: 'absent',
+      moment5Concreteness: 'low',
+    });
+    expect(r.reviewFlags).toContain('personal_moment_concreteness_review');
+  });
+
+  it('omits personal_moment_concreteness_review when one moment is moderate', () => {
+    const r = computeGateResult(allAssessed(6.5), null, {
+      moment4Concreteness: 'absent',
+      moment5Concreteness: 'moderate',
+    });
+    expect(r.reviewFlags ?? []).not.toContain('personal_moment_concreteness_review');
+  });
+
+  it('omits personal_moment_concreteness_review when modified composite is at least 7 (2dp)', () => {
+    const r = computeGateResult(allAssessed(7.25), null, {
+      moment4Concreteness: 'absent',
+      moment5Concreteness: 'low',
+    });
+    expect(r.reviewFlags ?? []).not.toContain('personal_moment_concreteness_review');
   });
 });

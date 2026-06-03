@@ -1,7 +1,6 @@
 import {
   POST_INTERVIEW_PROCESSING_MS,
   evaluateStandardPostInterviewReveal,
-  evaluateStandardPostInterviewRevealWithUsersPassedFallback,
   standardPostInterviewRouteFromReveal,
 } from '../postInterviewProcessingGate';
 
@@ -45,6 +44,7 @@ describe('evaluateStandardPostInterviewReveal', () => {
       completedMs + POST_INTERVIEW_PROCESSING_MS - 1000,
     );
     expect(ev).toEqual({ kind: 'processing' });
+    expect(standardPostInterviewRouteFromReveal(ev)).toBe('PostInterview');
   });
 
   it('3: override null and after 48h routes by passed', () => {
@@ -71,56 +71,11 @@ describe('evaluateStandardPostInterviewReveal', () => {
         after,
       ),
     ).toEqual({ kind: 'processing' });
+    expect(standardPostInterviewRouteFromReveal({ kind: 'processing' })).toBe('PostInterview');
   });
 
   it('null snapshot stays processing', () => {
     expect(evaluateStandardPostInterviewReveal(null)).toEqual({ kind: 'processing' });
     expect(evaluateStandardPostInterviewReveal(undefined)).toEqual({ kind: 'processing' });
-  });
-});
-
-describe('evaluateStandardPostInterviewRevealWithUsersPassedFallback', () => {
-  const completedAt = '2026-01-01T12:00:00.000Z';
-  const completedMs = new Date(completedAt).getTime();
-  const after = completedMs + POST_INTERVIEW_PROCESSING_MS + 1000;
-
-  it('inside 48h ignores users.interview_passed even when false', () => {
-    expect(
-      evaluateStandardPostInterviewRevealWithUsersPassedFallback(
-        { completed_at: completedAt, override_status: null, passed: null },
-        false,
-        completedMs + 1000,
-      ),
-    ).toEqual({ kind: 'processing' });
-  });
-
-  it('after 48h with passed null and users false reveals fail', () => {
-    expect(
-      evaluateStandardPostInterviewRevealWithUsersPassedFallback(
-        { completed_at: completedAt, override_status: null, passed: null },
-        false,
-        after,
-      ),
-    ).toEqual({ kind: 'reveal_fail' });
-  });
-
-  it('after 48h with passed null and users true reveals pass', () => {
-    expect(
-      evaluateStandardPostInterviewRevealWithUsersPassedFallback(
-        { completed_at: completedAt, override_status: null, passed: null },
-        true,
-        after,
-      ),
-    ).toEqual({ kind: 'reveal_pass' });
-  });
-
-  it('after 48h with users null stays processing when attempt passed null', () => {
-    expect(
-      evaluateStandardPostInterviewRevealWithUsersPassedFallback(
-        { completed_at: completedAt, override_status: null, passed: null },
-        null,
-        after,
-      ),
-    ).toEqual({ kind: 'processing' });
   });
 });

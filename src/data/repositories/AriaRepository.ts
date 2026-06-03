@@ -1,4 +1,5 @@
 import { supabase } from '../supabase/client';
+import { ARIA_SESSION_SELECT } from '../supabase/tableSelects';
 import type { AriaSession, AriaAnswerRecord } from '@domain/models/AriaSession';
 
 export class AriaRepository {
@@ -20,7 +21,7 @@ export class AriaRepository {
   async getLatestSession(profileId: string): Promise<AriaSession | null> {
     const { data, error } = await supabase
       .from('aria_sessions')
-      .select('*')
+      .select(ARIA_SESSION_SELECT)
       .eq('profile_id', profileId)
       .order('created_at', { ascending: false })
       .limit(1)

@@ -16,7 +16,7 @@ import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { z } from 'zod';
 import { TextInput } from '@ui/components/TextInput';
-import { HeightCmPicker } from '@/shared/components/HeightCmPicker';
+import { HeightCmInput } from '@/shared/components/HeightCmInput';
 import { SelectButton } from '@ui/components/SelectButton';
 import { MultiSelectButton } from '@ui/components/MultiSelectButton';
 import { Button } from '@ui/components/Button';
@@ -25,6 +25,14 @@ import { spacing } from '@ui/theme/spacing';
 import { Ionicons } from '@expo/vector-icons';
 import { Profile, Gender, AttractedToOption, ProfilePromptAnswer } from '@domain/models/Profile';
 import { ProfileRepository } from '@data/repositories/ProfileRepository';
+import {
+  loadEditProfileSnapshot,
+  saveEditProfileDemographics,
+  saveEditProfileLocation,
+  saveEditProfilePrimaryPhoto,
+  saveEditProfilePrompts,
+  type EditProfileSnapshot,
+} from '@data/repos/editProfileRepo';
 import { PhotoUseCase } from '@domain/useCases/PhotoUseCase';
 import { CompatibilityRepository } from '@data/repositories/CompatibilityRepository';
 import { CompatibilityUseCase } from '@domain/useCases/CompatibilityUseCase';
@@ -82,16 +90,31 @@ export const EditProfileModal: React.FC<EditProfileModalProps> = ({
   const [editingAnswer, setEditingAnswer] = useState('');
   const [promptsSaving, setPromptsSaving] = useState(false);
 
-  const { data: profileFetched, refetch: refetchProfile } = useQuery({
-    queryKey: ['profile', userId],
-    queryFn: () => profileRepository.getProfile(userId),
+  const { data: editProfileFetched, refetch: refetchEditProfile } = useQuery({
+    queryKey: ['editProfile', userId],
+    queryFn: () => loadEditProfileSnapshot(userId),
     enabled: !!userId && visible,
   });
-  const profileToUse = profileFetched ?? profile;
+
+  const profileToUse: EditProfileSnapshot | null = editProfileFetched
+    ? editProfileFetched
+    : profile
+      ? {
+          name: profile.name ?? '',
+          age: profile.age ?? profile.basicInfo?.age ?? undefined,
+          gender: profile.gender ?? undefined,
+          attractedTo: profile.attractedTo ?? [],
+          heightCentimeters: profile.heightCentimeters ?? undefined,
+          occupation: profile.occupation ?? '',
+          primaryPhotoUrl: profile.primaryPhotoUrl,
+          prompts: profile.prompts ?? [],
+          basicInfo: profile.basicInfo,
+        }
+      : null;
 
   useEffect(() => {
-    if (visible && userId) refetchProfile();
-  }, [visible, userId, refetchProfile]);
+    if (visible && userId) refetchEditProfile();
+  }, [visible, userId, refetchEditProfile]);
 
   const currentPrompts: ProfilePromptAnswer[] = profileToUse?.prompts ?? [];
   const canAddPrompt = currentPrompts.length < MAX_PROMPTS;
@@ -147,16 +170,15 @@ export const EditProfileModal: React.FC<EditProfileModalProps> = ({
     if (hasResetForOpenRef.current) return;
     hasResetForOpenRef.current = true;
     const weightFromCompat = compatibility?.compatibilityData?.weight as CompatibilityFormData['weight'] | undefined;
-    const weightFromGate3 = (profileToUse.gate3Compatibility as Record<string, unknown> | null)?.weight as CompatibilityFormData['weight'] | undefined;
     const ageVal = profileToUse.age ?? profileToUse.basicInfo?.age;
     reset({
-      name: profileToUse.name || '',
+      name: profileToUse.name,
       age: ageVal ?? undefined,
-      gender: profileToUse.gender ?? undefined,
-      attractedTo: profileToUse.attractedTo || [],
-      heightCentimeters: profileToUse.heightCentimeters ?? undefined,
-      occupation: profileToUse.occupation || '',
-      weight: weightFromCompat ?? weightFromGate3 ?? null,
+      gender: profileToUse.gender,
+      attractedTo: profileToUse.attractedTo,
+      heightCentimeters: profileToUse.heightCentimeters,
+      occupation: profileToUse.occupation,
+      weight: weightFromCompat ?? null,
     });
   }, [visible, profileToUse, compatibility, reset]);
 
@@ -167,11 +189,11 @@ export const EditProfileModal: React.FC<EditProfileModalProps> = ({
     if (ageVal != null && typeof ageVal === 'number') {
       setValue('age', ageVal, { shouldValidate: false });
     }
-    const w = compatibility?.compatibilityData?.weight ?? (profileToUse?.gate3Compatibility as Record<string, unknown> | null)?.weight;
+    const w = compatibility?.compatibilityData?.weight;
     if (w != null) {
       setValue('weight', w as CompatibilityFormData['weight'], { shouldValidate: false });
     }
-  }, [visible, profileToUse?.age, profileToUse?.basicInfo?.age, compatibility?.compatibilityData?.weight, profileToUse?.gate3Compatibility, setValue]);
+  }, [visible, profileToUse?.age, profileToUse?.basicInfo?.age, compatibility?.compatibilityData?.weight, setValue]);
 
   useEffect(() => {
     register('name');
@@ -214,7 +236,7 @@ export const EditProfileModal: React.FC<EditProfileModalProps> = ({
 
   const setAsPrimary = async (publicUrl: string) => {
     try {
-      await profileRepository.upsertProfile(userId, { primaryPhotoUrl: publicUrl });
+      await saveEditProfilePrimaryPhoto(userId, publicUrl);
       onSaved();
     } catch (error) {
       Alert.alert('Error', error instanceof Error ? error.message : 'Failed to set primary photo');
@@ -230,7 +252,7 @@ export const EditProfileModal: React.FC<EditProfileModalProps> = ({
         return;
       }
       const location = await locationService.getCurrentLocation();
-      await profileRepository.upsertProfile(userId, { location });
+      await saveEditProfileLocation(userId, location);
       onSaved();
       Alert.alert('Success', `Location updated: ${location.label || 'Saved'}`);
     } catch (error) {
@@ -242,14 +264,7 @@ export const EditProfileModal: React.FC<EditProfileModalProps> = ({
 
   const onSubmit = async (data: EditProfileFormData) => {
     try {
-      await profileRepository.upsertProfile(userId, {
-        name: data.name,
-        age: data.age,
-        gender: data.gender,
-        attractedTo: data.attractedTo,
-        heightCentimeters: data.heightCentimeters,
-        occupation: data.occupation,
-      });
+      await saveEditProfileDemographics(userId, data);
       const compatData: Record<string, unknown> = {
         ...(compatibility?.compatibilityData ?? {}),
         weight: data.weight ?? undefined,
@@ -303,7 +318,7 @@ export const EditProfileModal: React.FC<EditProfileModalProps> = ({
     ];
     setPromptsSaving(true);
     try {
-      await profileRepository.upsertProfile(userId, { prompts: next });
+      await saveEditProfilePrompts(userId, next);
       onSaved();
       closePromptFlow();
     } catch {
@@ -318,7 +333,7 @@ export const EditProfileModal: React.FC<EditProfileModalProps> = ({
     next[index] = { ...next[index], answer: newAnswer.trim() };
     setPromptsSaving(true);
     try {
-      await profileRepository.upsertProfile(userId, { prompts: next });
+      await saveEditProfilePrompts(userId, next);
       onSaved();
       setEditingPromptIndex(null);
       setEditingAnswer('');
@@ -333,7 +348,7 @@ export const EditProfileModal: React.FC<EditProfileModalProps> = ({
     const next = currentPrompts.filter((_, i) => i !== index);
     setPromptsSaving(true);
     try {
-      await profileRepository.upsertProfile(userId, { prompts: next });
+      await saveEditProfilePrompts(userId, next);
       onSaved();
       setEditingPromptIndex(null);
     } catch {
@@ -455,7 +470,7 @@ export const EditProfileModal: React.FC<EditProfileModalProps> = ({
                 <Text style={styles.errorText}>{errors.attractedTo.message}</Text>
               )}
 
-              <HeightCmPicker
+              <HeightCmInput
                 label="Height (cm)"
                 valueCm={heightValue}
                 onChangeCm={(cm) =>

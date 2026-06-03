@@ -1,7 +1,9 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { View, Text, StyleSheet, Platform, TextInput } from 'react-native';
+import { View, Text, StyleSheet, Platform } from 'react-native';
 import { Picker } from '@react-native-picker/picker';
 import { theme } from '@/shared/theme/theme';
+import { formControlStyles } from '@/shared/ui/FormField';
+import { BirthTimeHourMinuteInput } from '@/shared/components/BirthTimeHourMinuteInput';
 
 export type DatePickerProps = {
   value: string;
@@ -107,28 +109,6 @@ export const DatePicker: React.FC<DatePickerProps> = ({
   useEffect(() => {
     const trimmed = value.trim();
     const p = parseIsoDate(trimmed);
-    // #region agent log
-    fetch('http://127.0.0.1:7789/ingest/668e0bd5-3283-4492-9f48-e33846c18218', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'X-Debug-Session-Id': '4b3376',
-      },
-      body: JSON.stringify({
-        sessionId: '4b3376',
-        hypothesisId: 'F',
-        location: 'DatePicker.tsx:value_effect_entry',
-        message: 'value_effect_run',
-        data: {
-          trimmedLen: trimmed.length,
-          branchGuess: p && p.y >= yMin && p.y <= yMax ? 'iso' : !trimmed ? 'empty' : 'nonIso',
-          yMin,
-          yMax,
-        },
-        timestamp: Date.now(),
-      }),
-    }).catch(() => {});
-    // #endregion
     if (p && p.y >= yMin && p.y <= yMax) {
       const normalized = normalizeDraft({ y: p.y, m: p.m, d: p.d });
       setDraft(normalized);
@@ -139,24 +119,6 @@ export const DatePicker: React.FC<DatePickerProps> = ({
     if (!trimmed) {
       const prevTrimmed = prevControlledValueRef.current.trim();
       const hadPriorIso = parseIsoDate(prevTrimmed) != null;
-      // #region agent log
-      fetch('http://127.0.0.1:7789/ingest/668e0bd5-3283-4492-9f48-e33846c18218', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'X-Debug-Session-Id': '4b3376',
-        },
-        body: JSON.stringify({
-          sessionId: '4b3376',
-          hypothesisId: 'C',
-          location: 'DatePicker.tsx:value_effect_empty',
-          message: hadPriorIso ? 'draft_cleared_iso_removed' : 'skip_clear_keep_partial',
-          data: { hadPriorIso, valueLen: trimmed.length },
-          timestamp: Date.now(),
-          runId: 'post-fix',
-        }),
-      }).catch(() => {});
-      // #endregion
       if (hadPriorIso) {
         const empty = { y: null, m: null, d: null };
         setDraft(empty);
@@ -175,62 +137,6 @@ export const DatePicker: React.FC<DatePickerProps> = ({
   }, [yMin, yMax]);
 
   const dayCount = maxSelectableDays(draft.y, draft.m);
-
-  // #region agent log
-  useEffect(() => {
-    fetch('http://127.0.0.1:7789/ingest/668e0bd5-3283-4492-9f48-e33846c18218', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'X-Debug-Session-Id': '4b3376',
-      },
-      body: JSON.stringify({
-        sessionId: '4b3376',
-        hypothesisId: 'B',
-        location: 'DatePicker.tsx:draft_dayCount',
-        message: 'react_state',
-        data: {
-          valuePropLen: value.trim().length,
-          draft,
-          dayCount,
-          expectedDayItems: dayCount,
-          expectedSelectOptions: dayCount > 0 ? dayCount + 1 : 1,
-          platform: Platform.OS,
-        },
-        timestamp: Date.now(),
-      }),
-    }).catch(() => {});
-    if (Platform.OS === 'web' && typeof document !== 'undefined') {
-      requestAnimationFrame(() => {
-        const wrap = document.getElementById('date-picker-day-wrap');
-        const sel = wrap?.querySelector?.('select');
-        const optLen = sel?.querySelectorAll?.('option')?.length ?? -1;
-        fetch('http://127.0.0.1:7789/ingest/668e0bd5-3283-4492-9f48-e33846c18218', {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            'X-Debug-Session-Id': '4b3376',
-          },
-          body: JSON.stringify({
-            sessionId: '4b3376',
-            hypothesisId: 'A',
-            location: 'DatePicker.tsx:web_dom_day_select',
-            message: 'dom_option_count',
-            data: {
-              hasWrap: !!wrap,
-              hasSelect: !!sel,
-              domOptionCount: optLen,
-              reactDayCount: dayCount,
-              mismatch:
-                dayCount > 0 ? optLen !== dayCount + 1 : optLen < 1,
-            },
-            timestamp: Date.now(),
-          }),
-        }).catch(() => {});
-      });
-    }
-  }, [draft.y, draft.m, draft.d, dayCount, value]);
-  // #endregion
 
   const emit = (next: Draft) => {
     const iso = draftToIso(next);
@@ -256,12 +162,17 @@ export const DatePicker: React.FC<DatePickerProps> = ({
 
   return (
     <View style={styles.wrap}>
-      {label ? <Text style={styles.l}>{label}</Text> : null}
+      {label ? <Text style={formControlStyles.label}>{label}</Text> : null}
       <View style={styles.row}>
         <View style={styles.pickerColYear}>
           <Text style={styles.subLabel}>Year</Text>
           <View
-            style={[styles.pickerWrap, error ? styles.pickerWrapErr : null]}
+            style={[
+              formControlStyles.control,
+              formControlStyles.controlSelectLike,
+              styles.pickerWrap,
+              error ? formControlStyles.controlError : null,
+            ]}
           >
             <Picker
               selectedValue={draft.y != null ? String(draft.y) : ''}
@@ -276,28 +187,6 @@ export const DatePicker: React.FC<DatePickerProps> = ({
                 const next = applyPatch(draftRef.current, { y: Number(v) });
                 draftRef.current = next;
                 setDraft(next);
-                // #region agent log
-                fetch('http://127.0.0.1:7789/ingest/668e0bd5-3283-4492-9f48-e33846c18218', {
-                  method: 'POST',
-                  headers: {
-                    'Content-Type': 'application/json',
-                    'X-Debug-Session-Id': '4b3376',
-                  },
-                  body: JSON.stringify({
-                    sessionId: '4b3376',
-                    hypothesisId: 'D',
-                    location: 'DatePicker.tsx:year_onValueChange',
-                    message: 'year_picked',
-                    data: {
-                      rawV: typeof v,
-                      nextY: next.y,
-                      nextM: next.m,
-                      nextD: next.d,
-                    },
-                    timestamp: Date.now(),
-                  }),
-                }).catch(() => {});
-                // #endregion
                 emit(next);
               }}
               {...pickerCommon}
@@ -323,7 +212,12 @@ export const DatePicker: React.FC<DatePickerProps> = ({
         <View style={styles.pickerColMonth}>
           <Text style={styles.subLabel}>Month</Text>
           <View
-            style={[styles.pickerWrap, error ? styles.pickerWrapErr : null]}
+            style={[
+              formControlStyles.control,
+              formControlStyles.controlSelectLike,
+              styles.pickerWrap,
+              error ? formControlStyles.controlError : null,
+            ]}
           >
             <Picker
               selectedValue={draft.m != null ? String(draft.m) : ''}
@@ -338,28 +232,6 @@ export const DatePicker: React.FC<DatePickerProps> = ({
                 const next = applyPatch(draftRef.current, { m: Number(v) });
                 draftRef.current = next;
                 setDraft(next);
-                // #region agent log
-                fetch('http://127.0.0.1:7789/ingest/668e0bd5-3283-4492-9f48-e33846c18218', {
-                  method: 'POST',
-                  headers: {
-                    'Content-Type': 'application/json',
-                    'X-Debug-Session-Id': '4b3376',
-                  },
-                  body: JSON.stringify({
-                    sessionId: '4b3376',
-                    hypothesisId: 'E',
-                    location: 'DatePicker.tsx:month_onValueChange',
-                    message: 'month_picked',
-                    data: {
-                      rawV: typeof v,
-                      nextY: next.y,
-                      nextM: next.m,
-                      nextD: next.d,
-                    },
-                    timestamp: Date.now(),
-                  }),
-                }).catch(() => {});
-                // #endregion
                 emit(next);
               }}
               {...pickerCommon}
@@ -385,7 +257,12 @@ export const DatePicker: React.FC<DatePickerProps> = ({
         <View style={styles.pickerColDay}>
           <Text style={styles.subLabel}>Day</Text>
           <View
-            style={[styles.pickerWrap, error ? styles.pickerWrapErr : null]}
+            style={[
+              formControlStyles.control,
+              formControlStyles.controlSelectLike,
+              styles.pickerWrap,
+              error ? formControlStyles.controlError : null,
+            ]}
             {...(Platform.OS === 'web' ? { nativeID: 'date-picker-day-wrap' } : {})}
           >
             <Picker
@@ -443,7 +320,7 @@ export const DatePicker: React.FC<DatePickerProps> = ({
           </View>
         </View>
       </View>
-      {error ? <Text style={styles.err}>{error}</Text> : null}
+      {error ? <Text style={formControlStyles.errorText}>{error}</Text> : null}
     </View>
   );
 };
@@ -461,27 +338,26 @@ export const TimePicker: React.FC<TimePickerProps> = ({
   label,
   error,
 }) => (
-  <View style={styles.wrap}>
-    {label ? <Text style={styles.l}>{label}</Text> : null}
-    <TextInput
-      value={value}
-      onChangeText={onValueChange}
-      placeholder="HH:MM (24h)"
-      placeholderTextColor="rgba(122,154,190,0.55)"
-      style={[styles.input, error ? styles.inputErr : null]}
-      autoCorrect={false}
-      autoCapitalize="none"
-      keyboardType="numbers-and-punctuation"
-      editable
-    />
-    {error ? <Text style={styles.err}>{error}</Text> : null}
-  </View>
+  <BirthTimeHourMinuteInput
+    value={value}
+    onValueChange={onValueChange}
+    label={label}
+    error={error}
+    optional={false}
+    hourLabel="Hour"
+    minuteLabel="Minute"
+  />
 );
 
 const styles = StyleSheet.create({
   wrap: { marginBottom: 12 },
-  l: { color: '#9CB4D8', marginBottom: 6, fontSize: 13 },
-  subLabel: { color: 'rgba(122,154,190,0.85)', marginBottom: 4, fontSize: 12 },
+  subLabel: {
+    color: 'rgba(200,217,238,0.72)',
+    marginBottom: 6,
+    fontSize: 13,
+    fontWeight: '500',
+    lineHeight: 18,
+  },
   /** Compact row: do not stretch to full screen width. */
   row: {
     flexDirection: 'row',
@@ -494,19 +370,17 @@ const styles = StyleSheet.create({
   pickerColYear: { width: 96, flexShrink: 0 },
   pickerColMonth: { width: 144, flexShrink: 0 },
   pickerColDay: { width: 72, flexShrink: 0 },
+  /** Inner surface: inherits border/background from `formControlStyles.control`; strip padding so Picker fills. */
   pickerWrap: {
-    borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.14)',
-    borderRadius: 10,
-    backgroundColor: 'rgba(255,255,255,0.06)',
+    paddingHorizontal: 0,
+    paddingVertical: 0,
     overflow: 'hidden',
     ...(Platform.OS === 'ios' ? {} : { minHeight: 56 }),
   },
-  pickerWrapErr: { borderColor: '#f87171' },
   picker: {
     width: '100%',
     color: '#E8F0F8',
-    backgroundColor: 'rgba(255,255,255,0.06)',
+    backgroundColor: 'transparent',
     ...(Platform.OS === 'ios'
       ? { height: 152 }
       : Platform.OS === 'android'
@@ -518,10 +392,10 @@ const styles = StyleSheet.create({
     cursor: 'pointer' as const,
     paddingHorizontal: 10,
     paddingVertical: 12,
-    minHeight: 54,
+    minHeight: 56,
     borderWidth: 0,
     color: '#E8F0F8',
-    backgroundColor: 'rgba(255,255,255,0.06)',
+    backgroundColor: 'transparent',
   },
   pickerItem: {
     color: '#E8F0F8',
@@ -531,14 +405,4 @@ const styles = StyleSheet.create({
     color: 'rgba(200,217,238,0.72)',
     backgroundColor: '#0f1419',
   },
-  input: {
-    borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.14)',
-    borderRadius: 10,
-    padding: 12,
-    color: '#E8F0F8',
-    backgroundColor: 'rgba(255,255,255,0.06)',
-  },
-  inputErr: { borderColor: '#f87171' },
-  err: { color: '#f87171', fontSize: 12, marginTop: 4 },
 });

@@ -2,6 +2,7 @@ import {
   isPlausibleInterviewStoredName,
   resolveAdminInterviewIntroDisplayName,
   resolveAdminUserListDisplayName,
+  resolveReportParticipantDisplayName,
 } from '../adminInterviewIntroDisplayName';
 
 describe('isPlausibleInterviewStoredName', () => {
@@ -50,6 +51,18 @@ describe('resolveAdminInterviewIntroDisplayName', () => {
     ).toBe('pat');
   });
 
+  it('prefers attempt.transcript over legacy interview_transcript alias', () => {
+    expect(
+      resolveAdminInterviewIntroDisplayName({
+        name: null,
+        basic_info: null,
+        transcript: [{ role: 'user', content: 'FromAttempt' }],
+        interview_transcript: [{ role: 'user', content: 'Legacy' }],
+        email: 'z@z.com',
+      }),
+    ).toBe('FromAttempt');
+  });
+
   it('uses plausible first transcript line when name missing', () => {
     expect(
       resolveAdminInterviewIntroDisplayName({
@@ -61,6 +74,47 @@ describe('resolveAdminInterviewIntroDisplayName', () => {
         email: 'z@z.com',
       }),
     ).toBe('Sam');
+  });
+});
+
+describe('resolveReportParticipantDisplayName', () => {
+  it('prefers interview name over email-derived display_name', () => {
+    expect(
+      resolveReportParticipantDisplayName({
+        name: 'Matt',
+        basic_info: null,
+        interview_transcript: null,
+        email: 'mattang5280@example.com',
+      }),
+    ).toBe('Matt');
+  });
+
+  it('returns null when only email local part would apply', () => {
+    expect(
+      resolveReportParticipantDisplayName({
+        name: null,
+        basic_info: {},
+        interview_transcript: [],
+        full_name: null,
+        display_name: 'mattang5280',
+        email: 'mattang5280@example.com',
+      }),
+    ).toBeNull();
+  });
+});
+
+describe('resolveAdminInterviewIntroDisplayName with display_name', () => {
+  it('uses display_name when name is corrupt', () => {
+    const corrupt = 'A'.repeat(60);
+    expect(
+      resolveAdminInterviewIntroDisplayName({
+        name: corrupt,
+        display_name: 'Riley',
+        basic_info: null,
+        transcript: [],
+        email: 'r@e.com',
+      }),
+    ).toBe('Riley');
   });
 });
 

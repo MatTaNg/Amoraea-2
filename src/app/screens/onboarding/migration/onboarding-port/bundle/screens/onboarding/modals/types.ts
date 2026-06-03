@@ -119,6 +119,12 @@ export interface OnboardingData {
         physicalHealth: number;
       }
     | string[];
+  lifeDomainAnswers?: Partial<
+    Record<
+      'finance' | 'family' | 'intimacy' | 'spirituality' | 'health',
+      Record<string, string>
+    >
+  >;
   matchPreferences?: OnboardingDealbreakerPreferences;
 }
 

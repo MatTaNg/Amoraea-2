@@ -3,6 +3,7 @@ import React, {
   useEffect,
   useLayoutEffect,
   useMemo,
+  useRef,
   useState,
 } from 'react';
 import {
@@ -26,26 +27,29 @@ import { profilesRepo } from '@data/repos/profilesRepo';
 import { ProfileRepository } from '@data/repositories/ProfileRepository';
 import { useAuth } from '@features/authentication/hooks/useAuth';
 import { showSimpleAlert } from '@utilities/alerts/confirmDialog';
+import { PersonalityDocumentsUpload } from '@/features/profile/PersonalityDocumentsUpload';
 import {
-  HeightCmPicker,
   HEIGHT_CM_MIN,
   HEIGHT_CM_MAX,
 } from '@/shared/components/HeightCmPicker';
+import { HeightCmInput } from '@/shared/components/HeightCmInput';
 import { parseCmFromValue } from '@/shared/components/HeightSlider';
 import { WeightInput } from '@/shared/components/WeightInput';
 import {
   LifeDomainDistribution,
   DEFAULT_ONBOARDING_LIFE_DOMAINS,
+  ONBOARDING_LIFE_DOMAIN_KEYS,
+  type LifeDomainAnswerCount,
+  type OnboardingLifeDomainKey,
   type OnboardingLifeDomainValues,
 } from '@/shared/components/LifeDomainDistribution';
+import { countAnsweredInDomain } from '@/shared/constants/lifeDomainOnboardingQuestions';
 import {
   DATING_PACE_AFTER_EXCITEMENT_OPTIONS,
   PARTNER_MOOD_MISMATCH_RESPONSE_OPTIONS,
   RECENT_DATING_EARLY_WEEKS_OPTIONS,
   SPACE_FOR_NEW_RELATIONSHIP_OPTIONS,
-  SEXUAL_FEEDBACK_STYLE_OPTIONS,
   SEXUAL_FOCUS_OPTIONS,
-  SEXUAL_NEEDS_COMMUNICATION_OPTIONS,
   SEX_DRIVE_OPTIONS,
   SEX_INTEREST_CATEGORY_OPTIONS,
 } from '@/shared/constants/sexualCompatibilityOptions';
@@ -73,7 +77,15 @@ import {
   mapRelationshipStyleUiToDb,
   mapRelationshipStyleUiToRelationshipType,
 } from '@/screens/profile/editProfile/editProfileService';
+import {
+  PREF_LONG_TERM_LOCATION_OPTIONS,
+  PREF_LIFESTYLE_OPTIONS,
+  PREF_RELOCATION_OPTIONS,
+} from '@/screens/profile/editProfile/constants';
 import { MatchPreferencesEmbedded } from '@/shared/components/profileFields/MatchPreferencesEmbedded';
+import type { AssessmentId } from '@/data/services/assessmentService';
+import { AssessmentInsightResultsPanel } from '@/shared/components/assessments/AssessmentInsightResultsPanel';
+import { ConflictStyleResultsPanel } from '@/shared/components/assessments/ConflictStyleResultsPanel';
 import {
   TypologyPickerFields,
   type TypologyPickerValue,
@@ -86,6 +98,7 @@ import {
   normalizeAttractedToUiLabels,
 } from '@/shared/utils/attractionMapper';
 import { calculateAgeFromBirthdate } from '@/shared/utils/ageCalculator';
+import { useLocationAutocomplete } from '@/shared/hooks/useLocationAutocomplete';
 import { requestMyLocationLabel } from '@/screens/profile/utils/locationHelpers';
 import { theme } from '@/shared/theme/theme';
 import { DatePicker } from '@/shared/components/DatePicker';
@@ -104,7 +117,26 @@ import {
   OptionPickerTrigger,
   type OptionAnchor,
 } from '@/screens/profile/editProfile/BottomSheet';
+import { SelectTriggerRow } from '@/shared/ui/SelectTriggerRow';
 import { SingleChoiceOptionList } from '@/shared/components/profileFields/SingleChoiceOptionList';
+import { ArchetypeSelector } from '@/shared/components/profileFields/ArchetypeSelector';
+import { ArchetypeDisplayChips } from '@/shared/components/profileFields/ArchetypeDisplayChips';
+import {
+  normalizeArchetypesFromProfile,
+  type ArchetypeId,
+} from '@/shared/constants/archetypes';
+import type { LifeDomainId } from '@/shared/constants/lifeDomainOnboardingQuestions';
+import {
+  fetchLifeDomainAnswersMap,
+  onboardingLifeDomainKeyToId,
+  resolveLifeDomainSlidersForEdit,
+  saveLifeDomainAnswersFromOnboarding,
+  syncLifeDomainImportanceFromOnboarding,
+  type LifeDomainAnswersMap,
+} from '@/screens/profile/editProfile/lifeDomainProfileService';
+import { resolveMatchPreferencesForEdit } from '@/screens/profile/editProfile/matchPreferencesProfileService';
+import { LifeDomainQuestionsEditModal } from '@/screens/profile/editProfile/LifeDomainQuestionsEditModal';
+import { LifeDomainRequiredQuestionsSection } from '@/screens/profile/editProfile/LifeDomainRequiredQuestionsSection';
 
 const BG = '#0a0a0f';
 const MIN_PROFILE_AGE = 18;
@@ -122,9 +154,17 @@ const ATTRACTION_UI = ['Men', 'Women', 'Non-binary'] as const;
 const EDIT_PROFILE_TABS = [
   { id: 'basics', label: 'Basics' },
   { id: 'lifestyle', label: 'Lifestyle' },
+  { id: 'documents', label: 'Documents' },
   { id: 'compatibility', label: 'Compatibility' },
   { id: 'dealbreakers', label: 'Dealbreakers' },
 ] as const;
+
+const TYPOLOGY_RESULT_TABS: { id: AssessmentId; label: string }[] = [
+  { id: 'ECR-36', label: 'Attachment' },
+  { id: 'CONFLICT-30', label: 'Conflict' },
+  { id: 'PVQ-21', label: 'Schwartz values' },
+  { id: 'SEXUAL_COMMUNICATION', label: 'Sexual communication' },
+];
 
 type EditProfileTabId = (typeof EDIT_PROFILE_TABS)[number]['id'];
 
@@ -355,24 +395,6 @@ function resolvePhotoUrlsFromProfile(pb: Record<string, unknown>): string[] {
     .slice(0, 12);
 }
 
-function normalizeLifeDomains(raw: unknown): OnboardingLifeDomainValues {
-  const out: OnboardingLifeDomainValues = {
-    ...DEFAULT_ONBOARDING_LIFE_DOMAINS,
-  };
-  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return out;
-  const o = raw as Record<string, unknown>;
-  const pick = (key: keyof OnboardingLifeDomainValues, snake: string) => {
-    const v = o[key] ?? o[snake];
-    if (typeof v === 'number' && Number.isFinite(v)) out[key] = Math.round(v);
-  };
-  pick('intimacy', 'intimacy');
-  pick('finance', 'finance');
-  pick('spirituality', 'spirituality');
-  pick('family', 'family');
-  pick('physicalHealth', 'physical_health');
-  return out;
-}
-
 function profileToTypology(p: Record<string, unknown>): TypologyPickerValue {
   const qa = (p.questionAnswers as Record<string, unknown>) || {};
   const out: TypologyPickerValue = {};
@@ -441,39 +463,48 @@ function ChoiceDropdown({
   value,
   options,
   onValueChange,
+  allowUnset,
 }: {
   label: string;
   value: string;
   options: { label: string; value: string }[];
   onValueChange: (v: string) => void;
+  /** When true, empty value is valid; no auto-coercion to first option; web sheet lists only `options`. */
+  allowUnset?: boolean;
 }) {
   const [sheetAnchor, setSheetAnchor] = useState<OptionAnchor | null>(null);
-  const validSelection = value !== '' && options.some((o) => o.value === value);
+  const unsetOk = Boolean(allowUnset) && value === '';
+  const validSelection =
+    unsetOk || options.some((o) => o.value === value);
   const selectedValue = validSelection ? value : (options[0]?.value ?? '');
   const selectedLabel =
-    options.find((o) => o.value === selectedValue)?.label ?? 'Select';
+    unsetOk
+      ? 'Choose…'
+      : options.find((o) => o.value === selectedValue)?.label ?? 'Choose…';
 
   useLayoutEffect(() => {
     if (!options.length) return;
+    if (allowUnset) return;
     if (!validSelection && options[0]) {
       onValueChange(options[0].value);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps -- coerce empty/unknown DB values once options exist; avoid churn from unstable callbacks
-  }, [value, options, validSelection]);
+  }, [value, options, validSelection, allowUnset]);
 
   if (Platform.OS === 'web') {
     return (
       <FormField label={label}>
         <OptionPickerTrigger
-          style={formControlStyles.control}
+          style={[formControlStyles.control, formControlStyles.controlSelectLike]}
           onOpen={(anchor) => setSheetAnchor(anchor)}
         >
-          <View style={styles.dropdownTriggerContent}>
-            <Text style={styles.dropdownTriggerText} numberOfLines={1}>
-              {selectedLabel}
-            </Text>
-            <Text style={styles.dropdownChevron}>▾</Text>
-          </View>
+          <SelectTriggerRow
+            label={selectedLabel}
+            isPlaceholder={unsetOk}
+            labelStyle={formControlStyles.valueText}
+            placeholderStyle={formControlStyles.placeholderText}
+            chevronStyle={styles.dropdownChevron}
+          />
         </OptionPickerTrigger>
         <BottomSheet
           visible={!!sheetAnchor}
@@ -496,23 +527,18 @@ function ChoiceDropdown({
 
   return (
     <FormField label={label}>
-      <View style={styles.pickerShell}>
+      <View
+        style={[
+          formControlStyles.control,
+          formControlStyles.controlSelectLike,
+          styles.choicePickerWrap,
+        ]}
+      >
         <Picker
           selectedValue={selectedValue}
           onValueChange={(v) => onValueChange(String(v))}
           mode={Platform.OS === 'android' ? 'dropdown' : undefined}
-          style={[
-            styles.pickerNative,
-            Platform.OS === 'web'
-              ? [
-                  styles.pickerWeb,
-                  {
-                    WebkitAppearance: 'none',
-                    appearance: 'none',
-                  } as const,
-                ]
-              : null,
-          ]}
+          style={styles.choicePicker}
           dropdownIconColor={theme.colors.textSecondary}
           itemStyle={
             Platform.OS === 'ios'
@@ -520,6 +546,9 @@ function ChoiceDropdown({
               : undefined
           }
         >
+          {allowUnset ? (
+            <Picker.Item label="—" value="" color={theme.colors.textSecondary} />
+          ) : null}
           {options.map((o) => (
             <Picker.Item
               key={o.value}
@@ -553,6 +582,7 @@ export const DatingProfileEditScreen: React.FC<{
       NativeStackNavigationProp<Record<string, object | undefined>>
     >();
   const { user } = useAuth();
+  const effectiveUserId = user?.id ?? userId;
 
   const exitEditProfileToPostInterview = useCallback(() => {
     const uid = userId.trim();
@@ -596,6 +626,8 @@ export const DatingProfileEditScreen: React.FC<{
   }, [navigation, exitEditProfileToPostInterview]);
   const qc = useQueryClient();
   const [draft, setDraft] = useState<Record<string, unknown>>({});
+  /** Avoid replacing the whole form from `profileBlob` on every refetch — that wipes unsaved edits (e.g. typing birth location). */
+  const draftHydratedForUserIdRef = useRef<string | null>(null);
   const [photoUrls, setPhotoUrls] = useState<string[]>([]);
   const [attractedUi, setAttractedUi] = useState<string[]>([]);
   const [sexInterestSelected, setSexInterestSelected] = useState<string[]>([]);
@@ -622,8 +654,22 @@ export const DatingProfileEditScreen: React.FC<{
     setPrefPartnerPoliticalAlignmentImportance,
   ] = useState('');
   const [activeTab, setActiveTab] = useState<EditProfileTabId>('basics');
+  const [typologyResultId, setTypologyResultId] = useState<AssessmentId | null>(
+    null,
+  );
   const [saving, setSaving] = useState(false);
   const [saveSucceeded, setSaveSucceeded] = useState(false);
+  const [birthLocationSuggestions, setBirthLocationSuggestions] = useState<
+    Array<{ label: string }>
+  >([]);
+  const [validatedBirthLocation, setValidatedBirthLocation] = useState<
+    string | undefined
+  >(undefined);
+  const [archetypeSelection, setArchetypeSelection] = useState<ArchetypeId[]>([]);
+  const [savedArchetypes, setSavedArchetypes] = useState<ArchetypeId[]>([]);
+  const [lifeDomainAnswers, setLifeDomainAnswers] = useState<LifeDomainAnswersMap>({});
+  const [lifeDomainQuestionsDomainId, setLifeDomainQuestionsDomainId] =
+    useState<LifeDomainId | null>(null);
 
   const { data: profileBlob } = useQuery({
     queryKey: ['dating-profile', userId],
@@ -636,7 +682,16 @@ export const DatingProfileEditScreen: React.FC<{
   });
 
   useEffect(() => {
+    if (!userId) {
+      draftHydratedForUserIdRef.current = null;
+      return;
+    }
     if (!profileBlob) return;
+    if (draftHydratedForUserIdRef.current === userId) {
+      return;
+    }
+    draftHydratedForUserIdRef.current = userId;
+
     const pb = profileBlob as Record<string, unknown>;
     const resolvedPhotos = resolvePhotoUrlsFromProfile(pb);
     setPhotoUrls(resolvedPhotos);
@@ -651,13 +706,10 @@ export const DatingProfileEditScreen: React.FC<{
     setSexInterestSelected(
       Array.isArray(rawSex) ? rawSex.map((x) => String(x)) : [],
     );
-    const ldRaw = pb.lifeDomains ?? pb.life_domains;
-    setLifeDomainsState(normalizeLifeDomains(ldRaw));
     setWeightLbsStr(resolveWeightLbsStrFromProfile(pb));
     const hcResolved = resolveHeightCmFromProfile(pb);
     setHeightCmPick(hcResolved);
     setTypologyValues(profileToTypology(pb));
-    setMatchPrefs((pb.matchPreferences as MatchPreferences) || {});
     setPrefPhysicalCompatImportance(asStr(pb.prefPhysicalCompatImportance));
     setPrefPartnerSharesSexualInterests(
       asStr(pb.prefPartnerSharesSexualInterests),
@@ -666,7 +718,71 @@ export const DatingProfileEditScreen: React.FC<{
     setPrefPartnerPoliticalAlignmentImportance(
       asStr(pb.prefPartnerPoliticalAlignmentImportance),
     );
-  }, [profileBlob]);
+    const savedBirthLoc = asStr(pb.birthLocation);
+    setValidatedBirthLocation(savedBirthLoc ? savedBirthLoc : undefined);
+    const profileArchetypes = normalizeArchetypesFromProfile(pb.archetypes);
+    setArchetypeSelection(profileArchetypes);
+    setSavedArchetypes(profileArchetypes);
+    setBirthLocationSuggestions([]);
+    void fetchLifeDomainAnswersMap(userId)
+      .then(setLifeDomainAnswers)
+      .catch((e) => {
+        if (__DEV__) console.warn('[DatingProfileEdit] life domain answers', e);
+      });
+  }, [profileBlob, userId]);
+
+  useEffect(() => {
+    if (!userId || !profileBlob) return;
+    let cancelled = false;
+    void resolveLifeDomainSlidersForEdit(userId, profileBlob as Record<string, unknown>)
+      .then((sliders) => {
+        if (!cancelled) setLifeDomainsState(sliders);
+      })
+      .catch((e) => {
+        if (__DEV__) console.warn('[DatingProfileEdit] life domain sliders', e);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [profileBlob, userId]);
+
+  useEffect(() => {
+    if (!userId || !profileBlob) return;
+    let cancelled = false;
+    void resolveMatchPreferencesForEdit(userId, profileBlob as Record<string, unknown>)
+      .then((prefs) => {
+        if (!cancelled) setMatchPrefs(prefs);
+      })
+      .catch((e) => {
+        if (__DEV__) console.warn('[DatingProfileEdit] match preferences', e);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [profileBlob, userId]);
+
+  const selectProfileTab = useCallback((id: EditProfileTabId) => {
+    setTypologyResultId(null);
+    setActiveTab(id);
+  }, []);
+
+  const toggleTypologyResult = useCallback((id: AssessmentId) => {
+    setTypologyResultId((prev) => (prev === id ? null : id));
+  }, []);
+
+  const onBirthLocationSuggestionsChange = useCallback(
+    (suggestions: Array<{ label: string }>) => {
+      setBirthLocationSuggestions(suggestions);
+    },
+    [],
+  );
+
+  const { isSearchingPlaces: birthLocationPlacesLoading } = useLocationAutocomplete({
+    value: asStr(draft.birthLocation),
+    validatedValue: validatedBirthLocation,
+    onSuggestionsChange: onBirthLocationSuggestionsChange,
+    minLength: 3,
+  });
 
   const genderUiValue = mapGenderToUi(asStr(draft.gender)) ?? '';
 
@@ -692,6 +808,29 @@ export const DatingProfileEditScreen: React.FC<{
       ? 'You must be 18 or older to use this app.'
       : undefined;
 
+  const lifeDomainsTotal = useMemo(
+    () =>
+      ONBOARDING_LIFE_DOMAIN_KEYS.reduce(
+        (sum, key) => sum + (lifeDomainsState[key] ?? 0),
+        0,
+      ),
+    [lifeDomainsState],
+  );
+  const lifeDomainsSumOk = lifeDomainsTotal === 100;
+
+  const lifeDomainAnswerCounts = useMemo(() => {
+    const counts: Partial<Record<OnboardingLifeDomainKey, LifeDomainAnswerCount>> = {};
+    const wantKids = asStr(draft.wantKids) || null;
+    for (const key of ONBOARDING_LIFE_DOMAIN_KEYS) {
+      const domainId = onboardingLifeDomainKeyToId(key);
+      counts[key] = countAnsweredInDomain(domainId, lifeDomainAnswers[domainId] ?? {}, {
+        wantKids,
+        countOptionalOnly: true,
+      });
+    }
+    return counts;
+  }, [lifeDomainAnswers, draft.wantKids]);
+
   const refreshLocation = useCallback(async () => {
     setLocationLoading(true);
     try {
@@ -707,9 +846,9 @@ export const DatingProfileEditScreen: React.FC<{
   useFocusEffect(
     useCallback(() => {
       void refreshLocation();
-      if (userId)
-        void qc.invalidateQueries({ queryKey: ['dating-profile', userId] });
-    }, [refreshLocation, qc, userId]),
+      // Intentionally do not invalidate `dating-profile` here: refetch re-runs the hydrate effect
+      // and would reset the local draft, wiping unsaved edits (often triggered by focus changes when editing fields).
+    }, [refreshLocation]),
   );
 
   const setScalar = (key: string) => (t: string) =>
@@ -818,6 +957,22 @@ export const DatingProfileEditScreen: React.FC<{
       return;
     }
 
+    if (lifeDomainsTotal !== 100) {
+      showSimpleAlert(
+        'Life domains',
+        `Your life domain sliders must add up to exactly 100 (they are ${lifeDomainsTotal} right now). Open the Lifestyle tab and adjust them until the total shows 100 / 100, then save again.`,
+      );
+      return;
+    }
+
+    if (archetypeSelection.length === 1) {
+      showSimpleAlert(
+        'Archetypes',
+        'Select exactly two archetypes, or clear your selection and save the rest of your profile.',
+      );
+      return;
+    }
+
     const {
       yearlyIncome: _yi,
       yearlyIncomeCurrency: _yc,
@@ -869,6 +1024,10 @@ export const DatingProfileEditScreen: React.FC<{
     delete next.yearlyIncome;
     delete next.yearlyIncomeCurrency;
 
+    if (archetypeSelection.length === 2) {
+      next.archetypes = archetypeSelection;
+    }
+
     Object.assign(next, {
       photos: resolvedPhotos,
       attractedTo: mappedAttraction,
@@ -891,8 +1050,6 @@ export const DatingProfileEditScreen: React.FC<{
       spaceForNewRelationship: asStr(draftClean.spaceForNewRelationship),
       partnerMoodMismatchResponse: asStr(draftClean.partnerMoodMismatchResponse),
       sexualFocusPreference: asStr(draftClean.sexualFocusPreference),
-      sexualFeedbackStyle: asStr(draftClean.sexualFeedbackStyle),
-      sexualNeedsCommunicationComfort: asStr(draftClean.sexualNeedsCommunicationComfort),
     });
 
     if (hw.height != null) next.height = hw.height;
@@ -923,7 +1080,16 @@ export const DatingProfileEditScreen: React.FC<{
     try {
       const r = await profilesRepo.updateProfile(userId, omitUndefined(next));
       if (!r.success) throw r.error;
+      try {
+        await syncLifeDomainImportanceFromOnboarding(userId, lifeDomainsState);
+        await saveLifeDomainAnswersFromOnboarding(userId, lifeDomainAnswers);
+      } catch (syncErr) {
+        if (__DEV__) console.warn('[DatingProfileEdit] life domain settings sync', syncErr);
+      }
       setPhotoUrls(Array.isArray(resolvedPhotos) ? resolvedPhotos : []);
+      if (archetypeSelection.length === 2) {
+        setSavedArchetypes(archetypeSelection);
+      }
       await qc.invalidateQueries({ queryKey: ['dating-profile', userId] });
       await qc.invalidateQueries({ queryKey: ['profile', userId] });
       setSaveSucceeded(true);
@@ -941,6 +1107,7 @@ export const DatingProfileEditScreen: React.FC<{
   const saveFeedbackText = saveSucceeded ? 'Changes saved successfully.' : '';
 
   return (
+    <>
     <SafeAreaContainer style={{ flex: 1, backgroundColor: BG }}>
       <ScrollView
         contentContainerStyle={styles.scroll}
@@ -950,6 +1117,9 @@ export const DatingProfileEditScreen: React.FC<{
         <Text style={styles.lead}>
           Modify these fields so we can better learn about you so that we can better match you with your perfect partner.
         </Text>
+        {savedArchetypes.length === 2 ? (
+          <ArchetypeDisplayChips archetypeIds={savedArchetypes} />
+        ) : null}
 
         <Pressable
           onPress={() => void onSave()}
@@ -981,11 +1151,11 @@ export const DatingProfileEditScreen: React.FC<{
 
         <View style={styles.tabBar}>
           {EDIT_PROFILE_TABS.map((tab) => {
-            const selected = activeTab === tab.id;
+            const selected = activeTab === tab.id && typologyResultId == null;
             return (
               <Pressable
                 key={tab.id}
-                onPress={() => setActiveTab(tab.id)}
+                onPress={() => selectProfileTab(tab.id)}
                 style={[styles.tabButton, selected && styles.tabButtonActive]}
               >
                 <Text
@@ -998,6 +1168,33 @@ export const DatingProfileEditScreen: React.FC<{
           })}
         </View>
 
+        <View style={styles.typologyTabBar}>
+          {TYPOLOGY_RESULT_TABS.map((tab) => {
+            const selected = typologyResultId === tab.id;
+            return (
+              <Pressable
+                key={tab.id}
+                onPress={() => toggleTypologyResult(tab.id)}
+                style={[styles.tabButton, selected && styles.tabButtonActive]}
+              >
+                <Text
+                  style={[styles.tabText, selected && styles.tabTextActive]}
+                  numberOfLines={2}
+                >
+                  {tab.label}
+                </Text>
+              </Pressable>
+            );
+          })}
+        </View>
+
+        {activeTab === 'documents' ? (
+          <>
+            <SectionTitle>Documents</SectionTitle>
+            <PersonalityDocumentsUpload userId={effectiveUserId} />
+          </>
+        ) : !typologyResultId ? (
+          <>
         {activeTab === 'basics' ? (
           <>
             <SectionTitle>About you</SectionTitle>
@@ -1057,11 +1254,50 @@ export const DatingProfileEditScreen: React.FC<{
               value={asStr(draft.birthTime)}
               onValueChange={setScalar('birthTime')}
             />
-            <Field
-              label="Location of birth (optional)"
-              value={asStr(draft.birthLocation)}
-              onChangeText={setScalar('birthLocation')}
-            />
+            <View style={styles.fieldBlock}>
+              <FormTextInput
+                label="Location of birth (optional)"
+                value={asStr(draft.birthLocation)}
+                onChangeText={(v) => {
+                  setDraft((d) => ({ ...d, birthLocation: v }));
+                  if (v.trim() === '') {
+                    setValidatedBirthLocation(undefined);
+                  } else if (
+                    validatedBirthLocation !== undefined &&
+                    v.trim() !== validatedBirthLocation
+                  ) {
+                    setValidatedBirthLocation(undefined);
+                  }
+                }}
+                placeholder="e.g. city, region, or hospital"
+                autoCapitalize="words"
+              />
+              {birthLocationPlacesLoading ? (
+                <View style={styles.birthLocationSearchRow}>
+                  <ActivityIndicator size="small" color="#93c5fd" />
+                  <Text style={styles.birthLocationSearchText}>Looking up places…</Text>
+                </View>
+              ) : null}
+              {birthLocationSuggestions.length > 0 ? (
+                <View style={styles.birthLocationSuggestions}>
+                  {birthLocationSuggestions.map((s, idx) => (
+                    <TouchableOpacity
+                      key={`${idx}-${s.label.slice(0, 48)}`}
+                      style={styles.birthLocationSuggestionRow}
+                      onPress={() => {
+                        setDraft((d) => ({ ...d, birthLocation: s.label }));
+                        setValidatedBirthLocation(s.label);
+                        setBirthLocationSuggestions([]);
+                      }}
+                    >
+                      <Text style={styles.birthLocationSuggestionText}>
+                        {s.label}
+                      </Text>
+                    </TouchableOpacity>
+                  ))}
+                </View>
+              ) : null}
+            </View>
 
             <SectionTitle>Relationship & place</SectionTitle>
             <ChoiceDropdown
@@ -1119,11 +1355,10 @@ export const DatingProfileEditScreen: React.FC<{
           <>
             <SectionTitle>Body & habits</SectionTitle>
             <View style={styles.fieldBlock}>
-              <HeightCmPicker
+              <HeightCmInput
                 label="Height (cm)"
                 valueCm={heightCmPick ?? null}
                 onChangeCm={(cm) => setHeightCmPick(cm)}
-                placeholderLabel="Select height"
               />
             </View>
             <View style={styles.fieldBlock}>
@@ -1131,6 +1366,8 @@ export const DatingProfileEditScreen: React.FC<{
                 label="Weight (lbs)"
                 value={weightLbsStr}
                 onChange={setWeightLbsStr}
+                defaultUnit="lbs"
+                allowUnitSwitch={false}
               />
             </View>
             <ChoiceDropdown
@@ -1170,6 +1407,44 @@ export const DatingProfileEditScreen: React.FC<{
               onValueChange={setScalar('relationshipWithCannabis')}
             />
 
+            <SectionTitle>Lifestyle & location</SectionTitle>
+            <ChoiceDropdown
+              label="Where do you see yourself living long term?"
+              value={asStr(matchPrefs.longTermLivingPreference)}
+              allowUnset
+              options={PREF_LONG_TERM_LOCATION_OPTIONS.map((o) => ({
+                label: o,
+                value: o,
+              }))}
+              onValueChange={(v) =>
+                setMatchPrefs((p) => ({ ...p, longTermLivingPreference: v }))
+              }
+            />
+            <ChoiceDropdown
+              label="Which lifestyle feels most like you?"
+              value={asStr(matchPrefs.lifestylePreference)}
+              allowUnset
+              options={PREF_LIFESTYLE_OPTIONS.map((o) => ({
+                label: o,
+                value: o,
+              }))}
+              onValueChange={(v) =>
+                setMatchPrefs((p) => ({ ...p, lifestylePreference: v }))
+              }
+            />
+            <ChoiceDropdown
+              label="Would you relocate for the right relationship?"
+              value={asStr(matchPrefs.relocationPreference)}
+              allowUnset
+              options={PREF_RELOCATION_OPTIONS.map((o) => ({
+                label: o,
+                value: o,
+              }))}
+              onValueChange={(v) =>
+                setMatchPrefs((p) => ({ ...p, relocationPreference: v }))
+              }
+            />
+
             <SectionTitle>Values</SectionTitle>
             <ChoiceDropdown
               label="Do you have kids?"
@@ -1195,6 +1470,22 @@ export const DatingProfileEditScreen: React.FC<{
               options={religionOptions}
               onValueChange={setScalar('religion')}
             />
+
+            <SectionTitle>Life domains</SectionTitle>
+            <LifeDomainDistribution
+              values={lifeDomainsState}
+              onValuesChange={setLifeDomainsState}
+              domainAnswerCounts={lifeDomainAnswerCounts}
+              onOpenDomainQuestions={(key) =>
+                setLifeDomainQuestionsDomainId(onboardingLifeDomainKeyToId(key))
+              }
+            />
+            {!lifeDomainsSumOk ? (
+              <Text style={styles.lifeDomainsError}>
+                Life domains must total 100 before you can save (currently{' '}
+                {lifeDomainsTotal}).
+              </Text>
+            ) : null}
           </>
         ) : null}
 
@@ -1243,29 +1534,23 @@ export const DatingProfileEditScreen: React.FC<{
               options={SEXUAL_FOCUS_OPTIONS}
               onValueChange={setScalar('sexualFocusPreference')}
             />
-            <ChoiceDropdown
-              label="When something isn't working for me sexually, I..."
-              value={asStr(draft.sexualFeedbackStyle)}
-              options={SEXUAL_FEEDBACK_STYLE_OPTIONS}
-              onValueChange={setScalar('sexualFeedbackStyle')}
-            />
-            <ChoiceDropdown
-              label="How comfortable are you discussing your sexual needs and preferences with a partner?"
-              value={asStr(draft.sexualNeedsCommunicationComfort)}
-              options={SEXUAL_NEEDS_COMMUNICATION_OPTIONS}
-              onValueChange={setScalar('sexualNeedsCommunicationComfort')}
-            />
 
-            <SectionTitle>Life domains</SectionTitle>
-            <LifeDomainDistribution
-              values={lifeDomainsState}
-              onValuesChange={setLifeDomainsState}
+            <SectionTitle>Life domain questions</SectionTitle>
+            <LifeDomainRequiredQuestionsSection
+              wantKids={asStr(draft.wantKids) || null}
+              answers={lifeDomainAnswers}
+              onAnswerChange={(domainId, questionId, value) => {
+                setLifeDomainAnswers((prev) => ({
+                  ...prev,
+                  [domainId]: { ...(prev[domainId] ?? {}), [questionId]: value },
+                }));
+              }}
             />
 
             <SectionTitle>Typology</SectionTitle>
             <TypologyPickerFields
               variant="onboarding"
-              allowSkipOption={false}
+              allowSkipOption
               value={typologyValues}
               onTypologyChange={setTypologyValues}
             />
@@ -1305,6 +1590,17 @@ export const DatingProfileEditScreen: React.FC<{
                 </TouchableOpacity>
               )}
             </View>
+
+            <View style={styles.divider} />
+
+            <SectionTitle>Your archetypes</SectionTitle>
+            <ArchetypeSelector
+              value={archetypeSelection}
+              onChange={setArchetypeSelection}
+            />
+            <Text style={styles.mutedSmall}>
+              Select exactly two archetypes, then use Save changes at the top.
+            </Text>
           </>
         ) : null}
 
@@ -1325,6 +1621,18 @@ export const DatingProfileEditScreen: React.FC<{
               onPreferencesPatch={onMatchEmbeddedPatch}
             />
           </>
+        ) : null}
+          </>
+        ) : typologyResultId === 'CONFLICT-30' && userId ? (
+          <ConflictStyleResultsPanel
+            userId={userId}
+            footer={{ kind: 'none' }}
+          />
+        ) : typologyResultId && userId ? (
+          <AssessmentInsightResultsPanel
+            userId={userId}
+            instrumentId={typologyResultId}
+          />
         ) : null}
 
         <Pressable
@@ -1362,6 +1670,21 @@ export const DatingProfileEditScreen: React.FC<{
         <Text style={styles.mutedSmall}>Signed in as {user?.email ?? '—'}</Text>
       </ScrollView>
     </SafeAreaContainer>
+
+    {userId && lifeDomainQuestionsDomainId ? (
+      <LifeDomainQuestionsEditModal
+        visible
+        userId={userId}
+        domainId={lifeDomainQuestionsDomainId}
+        initialAnswers={lifeDomainAnswers}
+        onAnswersChange={setLifeDomainAnswers}
+        wantKids={asStr(draft.wantKids) || null}
+        enforceRequired={false}
+        questionScope="optional"
+        onClose={() => setLifeDomainQuestionsDomainId(null)}
+      />
+    ) : null}
+    </>
   );
 };
 
@@ -1398,6 +1721,35 @@ const styles = StyleSheet.create({
     marginBottom: 12,
   },
   fieldBlock: { marginBottom: 14 },
+  birthLocationSearchRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    marginTop: 8,
+  },
+  birthLocationSearchText: {
+    fontSize: 12,
+    color: 'rgba(255,255,255,0.55)',
+  },
+  birthLocationSuggestions: {
+    marginTop: 4,
+    marginBottom: 4,
+    maxHeight: 220,
+  },
+  birthLocationSuggestionRow: {
+    paddingVertical: 10,
+    paddingHorizontal: 12,
+    backgroundColor: 'rgba(255,255,255,0.06)',
+    borderRadius: 8,
+    marginBottom: 6,
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.12)',
+  },
+  birthLocationSuggestionText: {
+    fontSize: 14,
+    color: '#E8F0F8',
+    lineHeight: 20,
+  },
   label: { color: '#9CB4D8', fontSize: 13, marginBottom: 8 },
   input: {
     fontFamily: FONT_BODY,
@@ -1417,44 +1769,21 @@ const styles = StyleSheet.create({
   readOnlyBox: { justifyContent: 'center' },
   readOnlyText: { fontFamily: FONT_BODY, fontSize: 15, color: '#E8F0F8' },
   locInner: { flexDirection: 'row', alignItems: 'center', gap: 10 },
-  pickerShell: {
-    borderRadius: 10,
-    borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.14)',
-    backgroundColor: 'rgba(255,255,255,0.06)',
+  choicePickerWrap: {
+    paddingHorizontal: 0,
+    paddingVertical: 0,
     overflow: 'hidden',
     ...(Platform.OS === 'ios' ? {} : { minHeight: 56 }),
   },
-  pickerNative: {
+  choicePicker: {
     width: '100%',
     color: '#E8F0F8',
-    backgroundColor: 'rgba(255,255,255,0.06)',
+    backgroundColor: 'transparent',
     ...(Platform.OS === 'ios'
-      ? { height: 160 }
+      ? { height: 152 }
       : Platform.OS === 'android'
         ? { height: 56 }
         : {}),
-  },
-  pickerWeb: {
-    borderWidth: 0,
-    outlineStyle: 'none',
-    outlineWidth: 0,
-    paddingHorizontal: 10,
-    paddingVertical: 12,
-    minHeight: 54,
-    cursor: 'pointer' as const,
-    color: theme.colors.text,
-    backgroundColor: 'rgba(255,255,255,0.06)',
-  },
-  dropdownTriggerContent: {
-    flex: 1,
-    flexDirection: 'row',
-    alignItems: 'center',
-  },
-  dropdownTriggerText: {
-    flex: 1,
-    color: '#E8F0F8',
-    fontSize: 15,
   },
   dropdownChevron: {
     color: 'rgba(156,180,216,0.9)',
@@ -1590,6 +1919,17 @@ const styles = StyleSheet.create({
     marginTop: 6,
     marginBottom: 8,
   },
+  typologyTabBar: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 6,
+    borderRadius: 14,
+    borderWidth: 1,
+    borderColor: 'rgba(91,168,232,0.22)',
+    backgroundColor: 'rgba(91,168,232,0.06)',
+    padding: 6,
+    marginBottom: 12,
+  },
   tabButton: {
     flex: 1,
     flexGrow: 1,
@@ -1617,4 +1957,17 @@ const styles = StyleSheet.create({
     color: '#EEF6FF',
   },
   mutedSmall: { color: 'rgba(255,255,255,0.35)', fontSize: 12, marginTop: 16 },
+  divider: {
+    height: 1,
+    backgroundColor: 'rgba(255,255,255,0.1)',
+    marginVertical: 20,
+  },
+  lifeDomainsError: {
+    marginTop: 4,
+    marginBottom: 8,
+    fontSize: 14,
+    lineHeight: 20,
+    color: theme.colors.error,
+    fontWeight: '600',
+  },
 });

@@ -5,10 +5,6 @@ import { BFI2_ITEMS, scoreBFI2 } from "./bfi2";
 import { DSIR_ITEMS, scoreDSIR } from "./dsir";
 import { BRS_ITEMS, scoreBRS } from "./brs";
 import { PVQ21_ITEMS, scorePVQ21 } from "./pvq21";
-import {
-  RELATIONSHIP_TRAITS_ITEMS,
-  scoreRelationshipTraits8,
-} from "./relationshipTraits8";
 
 export interface InstrumentConfig {
   id: AssessmentId;
@@ -71,18 +67,6 @@ export const INSTRUMENT_CONFIGS: Partial<Record<AssessmentId, InstrumentConfig>>
     minLabel: "Strongly disagree",
     maxLabel: "Strongly agree",
     score: scoreBRS,
-  },
-  "RELATIONSHIP_TRAITS_8": {
-    id: "RELATIONSHIP_TRAITS_8",
-    title: "Relationship Traits",
-    description:
-      "A few quick questions about how you tend to respond to stress and trust in relationships.\n\nYou'll rate each statement on a scale from 1 (strongly disagree) to 7 (strongly agree). There are no right or wrong answers — choose what feels most true for you.",
-    items: RELATIONSHIP_TRAITS_ITEMS,
-    min: 1,
-    max: 7,
-    minLabel: "Strongly disagree",
-    maxLabel: "Strongly agree",
-    score: scoreRelationshipTraits8,
   },
   "PVQ-21": {
     id: "PVQ-21",

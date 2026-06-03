@@ -127,6 +127,80 @@ describe('OnboardingUseCase', () => {
       expect(mockProfileRepository.upsertProfile).toHaveBeenCalled();
       expect(mockStorageService.clearOnboardingState).toHaveBeenCalled();
     });
+
+    it('queues retry when completeOnboarding remote save fails', async () => {
+      const userId = 'test-user-id';
+      const state: OnboardingState = {
+        step: 8,
+        name: 'Test User',
+        age: 25,
+        gender: 'Man',
+        attractedTo: ['Women'],
+        heightCentimeters: 180,
+        occupation: 'Developer',
+        location: null,
+        photoUris: [],
+      };
+      mockProfileRepository.upsertProfile.mockRejectedValue(new Error('offline'));
+
+      await expect(useCase.completeOnboarding(userId, state)).rejects.toThrow('offline');
+      expect(mockStorageService.addToRetryQueue).toHaveBeenCalled();
+      expect(mockStorageService.clearOnboardingState).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('retryFailedUpdates', () => {
+    it('replays queued updates and removes successful items', async () => {
+      mockStorageService.getRetryQueue.mockResolvedValue([
+        {
+          userId: 'u1',
+          update: { name: 'Replay', onboardingStep: 2 },
+          timestamp: '2024-01-01T00:00:00.000Z',
+        },
+      ]);
+      mockProfileRepository.upsertProfile.mockResolvedValue({} as never);
+
+      await useCase.retryFailedUpdates();
+
+      expect(mockProfileRepository.upsertProfile).toHaveBeenCalledWith('u1', {
+        name: 'Replay',
+        onboardingStep: 2,
+      });
+      expect(mockStorageService.removeRetryQueueItem).toHaveBeenCalledWith(0);
+    });
+
+    it('keeps queue items that still fail', async () => {
+      mockStorageService.getRetryQueue.mockResolvedValue([
+        {
+          userId: 'u1',
+          update: { name: 'Replay' },
+          timestamp: '2024-01-01T00:00:00.000Z',
+        },
+      ]);
+      mockProfileRepository.upsertProfile.mockRejectedValue(new Error('still down'));
+
+      await useCase.retryFailedUpdates();
+
+      expect(mockStorageService.removeRetryQueueItem).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('getOnboardingState', () => {
+    it('returns stored onboarding state', async () => {
+      const state: OnboardingState = {
+        step: 1,
+        name: null,
+        age: null,
+        gender: null,
+        attractedTo: null,
+        heightCentimeters: null,
+        occupation: null,
+        location: null,
+        photoUris: [],
+      };
+      mockStorageService.getOnboardingState.mockResolvedValue(state);
+      await expect(useCase.getOnboardingState()).resolves.toEqual(state);
+    });
   });
 });
 

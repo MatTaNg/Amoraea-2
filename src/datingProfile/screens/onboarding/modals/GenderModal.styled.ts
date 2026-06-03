@@ -14,7 +14,7 @@ export const styles = StyleSheet.create({
     flexGrow: 1,
   },
   container: {
-    padding: 24,
+    ...onboardingModalLayout.centeredContainer,
   },
   option: {
     padding: 16,

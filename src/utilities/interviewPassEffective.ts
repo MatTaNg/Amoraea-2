@@ -1,4 +1,7 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
+import {
+  USER_INTERVIEW_ROUTING_TABLE,
+} from '@data/supabase/userInterviewRoutingSelect';
 
 /** Effective pass for routing: admin override wins when set, otherwise gate result. */
 export function effectiveInterviewPass(override: boolean | null | undefined, gatePass: boolean): boolean {
@@ -10,7 +13,7 @@ export async function fetchInterviewPassAdminOverride(
   userId: string,
 ): Promise<boolean | null> {
   const { data, error } = await supabase
-    .from('users')
+    .from(USER_INTERVIEW_ROUTING_TABLE)
     .select('interview_passed_admin_override')
     .eq('id', userId)
     .maybeSingle();

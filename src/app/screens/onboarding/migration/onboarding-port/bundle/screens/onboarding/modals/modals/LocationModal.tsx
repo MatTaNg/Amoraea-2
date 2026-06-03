@@ -24,7 +24,7 @@ export const LocationModal: React.FC<LocationModalProps> = ({
   const [locationSuggestions, setLocationSuggestions] = React.useState<Array<{ label: string }>>([]);
   const [validatedLocation, setValidatedLocation] = React.useState<string | undefined>(undefined);
 
-  useLocationAutocomplete({
+  void useLocationAutocomplete({
     value: location,
     validatedValue: validatedLocation,
     onSuggestionsChange: setLocationSuggestions,

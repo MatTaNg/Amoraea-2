@@ -20,6 +20,7 @@ export {
   type GateResultReason,
   type ComputeGateResultOptions,
   computeGateResultCore,
+  computeInterviewWeightedCompositeFromPillars,
 } from './computeGateResultCore';
 export {
   SCENARIO_COMPOSITE_PASS_MIN,
@@ -38,7 +39,25 @@ export function computeGateResult(
   skepticismModifier?: { pillarId: number | string | null; adjustment: number; reason?: string } | null,
   options?: Pick<
     ComputeGateResultOptions,
-    'weightedPassMin' | 'scenarioPillarScoresByScenario' | 'skipPenaltyTotal' | 'skipAutoFail'
+    | 'weightedPassMin'
+    | 'scenarioPillarScoresByScenario'
+    | 'skipPenaltyTotal'
+    | 'skipAutoFail'
+    | 'egoDevelopmentLevel'
+    | 'defensePatterns'
+    | 'moment4Concreteness'
+    | 'moment5Concreteness'
+    | 'personalMomentConcretenessModifier'
+    | 'emotionRecognitionRawScore'
+    | 'emotionRecognitionCorrectCount'
+    | 'disclosureCalibration'
+    | 'moment4WordCount'
+    | 'moment5WordCount'
+    | 'personalMomentEmotionalVocabDensity'
+    | 'personalMomentEmotionalVocabLow'
+    | 'closingIntegration'
+    | 'mentalizingOvercertaintyCount'
+    | 'precomputedWeightedScore'
   >,
 ): GateResult {
   return computeGateResultCore(pillarScores, skepticismModifier, {
@@ -46,6 +65,21 @@ export function computeGateResult(
     scenarioPillarScoresByScenario: options?.scenarioPillarScoresByScenario,
     skipPenaltyTotal: options?.skipPenaltyTotal,
     skipAutoFail: options?.skipAutoFail,
+    egoDevelopmentLevel: options?.egoDevelopmentLevel,
+    defensePatterns: options?.defensePatterns,
+    moment4Concreteness: options?.moment4Concreteness,
+    moment5Concreteness: options?.moment5Concreteness,
+    personalMomentConcretenessModifier: options?.personalMomentConcretenessModifier,
+    emotionRecognitionRawScore: options?.emotionRecognitionRawScore,
+    emotionRecognitionCorrectCount: options?.emotionRecognitionCorrectCount,
+    disclosureCalibration: options?.disclosureCalibration,
+    moment4WordCount: options?.moment4WordCount,
+    moment5WordCount: options?.moment5WordCount,
+    personalMomentEmotionalVocabDensity: options?.personalMomentEmotionalVocabDensity,
+    personalMomentEmotionalVocabLow: options?.personalMomentEmotionalVocabLow,
+    closingIntegration: options?.closingIntegration,
+    mentalizingOvercertaintyCount: options?.mentalizingOvercertaintyCount,
+    precomputedWeightedScore: options?.precomputedWeightedScore,
     onWeightedBreakdown: (data) => {
       void remoteLog('[WEIGHTED_SCORE_BREAKDOWN]', data);
     },

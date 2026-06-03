@@ -1,5 +1,10 @@
 import { describe, expect, it } from '@jest/globals';
-import { evaluateInterviewCompletionGate, pillarScoresHaveNumericAssessment } from '../interviewCompletionGate';
+import {
+  evaluateInterviewCompletionGate,
+  personalMomentBundleWasScored,
+  pillarScoresHaveNumericAssessment,
+} from '../interviewCompletionGate';
+import { mergeMoment5PillarScoresAfterEvidenceNormalize } from '../probeAndScoringUtils';
 
 describe('pillarScoresHaveNumericAssessment', () => {
   it('returns false when all null', () => {
@@ -7,6 +12,26 @@ describe('pillarScoresHaveNumericAssessment', () => {
   });
   it('returns true when any finite number', () => {
     expect(pillarScoresHaveNumericAssessment({ mentalizing: 6, repair: null })).toBe(true);
+  });
+});
+
+describe('personalMomentBundleWasScored', () => {
+  it('returns false when merged Moment 5 null bundle has empty keyEvidence', () => {
+    expect(
+      personalMomentBundleWasScored({
+        pillarScores: mergeMoment5PillarScoresAfterEvidenceNormalize({}),
+        keyEvidence: {},
+      }),
+    ).toBe(false);
+  });
+
+  it('returns true when merged Moment 5 null bundle has substantive keyEvidence', () => {
+    expect(
+      personalMomentBundleWasScored({
+        pillarScores: mergeMoment5PillarScoresAfterEvidenceNormalize({}),
+        keyEvidence: { accountability: 'User named repair moves after the rupture.' },
+      }),
+    ).toBe(true);
   });
 });
 

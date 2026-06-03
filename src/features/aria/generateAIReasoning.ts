@@ -3,6 +3,13 @@
  * Calls Claude to produce structured explanation of scores. Remove before production.
  */
 
+import {
+  buildAuthoritativeScoreRule,
+  buildPillarScoreBlock,
+  buildScoreAnchorBlock,
+  prepareAIReasoningForPersistence,
+} from './aiReasoningPostProcess';
+
 const ANTHROPIC_API_KEY =
   (typeof process !== 'undefined' && process.env?.EXPO_PUBLIC_ANTHROPIC_API_KEY) || '';
 const ANTHROPIC_PROXY_URL =
@@ -180,7 +187,7 @@ THIS ATTEMPT'S TRANSCRIPT ONLY (strict): Your reasoning must reference only cont
 
 Scores use eight markers: mentalizing, accountability, contempt, repair, regulation, attunement, appreciation, commitment_threshold. Map each construct_breakdown key to the matching score from the payload. The stored **contempt** score already combines sub-signals (about 60% participant expression across moments, 40% recognition where assessed); if scenario answers used harsh character framing toward fictional people, the contempt score should reflect that — do not describe contempt as strong solely because personal-moment answers were respectful.
 
-UNASSESSED MARKERS (listed in the user payload): Treat these as not measured in this interview — missing or zero scores mean insufficient evidence, not a demonstrated deficit. For each such marker, construct_breakdown should state clearly that it was not directly assessed; do not frame it as a weakness. Do NOT include those markers in overall_growth_areas, readiness_assessment, or what_a_partner_would_experience as skills to build or relational deficits. Omit them from those sections entirely when possible.
+UNASSESSED MARKERS (listed in the user payload): Treat these as not measured in this interview — missing or zero scores mean insufficient evidence, not a demonstrated deficit. For each such marker, construct_breakdown should state clearly that it was not directly assessed; do not frame it as a weakness. Do NOT name unassessed markers as growth-area themes in overall_growth_areas, readiness_assessment, or what_a_partner_would_experience. You MUST still populate overall_growth_areas with 2-3 synthesized themes from growth_edge fields of assessed markers (required for both pass and fail).
 
 REGULATION — NO SLICE EVIDENCE (strict): When "regulation" appears in UNASSESSED MARKERS, construct_breakdown.regulation must contain ONLY a short headline plus one brief summary sentence stating the marker was not directly assessed. Set what_you_did_well, where_you_struggled, key_pattern, nuance_and_context, and growth_edge to empty strings "". Do not write paragraphs, growth edges, patterns, or speculative strengths/struggles for regulation in that case.
 
@@ -212,10 +219,20 @@ export function buildUserPrompt(
     if (s) scenarioPayload[`scenario_${n}`] = { pillarScores: s.pillarScores, name: s.scenarioName };
   });
 
+  const scoreAnchorBlock = buildScoreAnchorBlock(pillarScores, weightedScore, passed);
+  const pillarScoreBlock = buildPillarScoreBlock(pillarScores, weightedScore, passed);
+  const authoritativeScoreRule = buildAuthoritativeScoreRule(pillarScores);
+
   return `
+${scoreAnchorBlock}
+
 ASSESSMENT RESULTS:
 Weighted Score: ${weightedScore ?? 'N/A'}/10
 Result: ${passed ? 'PASS' : 'NEEDS WORK'}
+
+${pillarScoreBlock}
+
+${authoritativeScoreRule}
 
 MARKER SCORES (eight markers):
 ${JSON.stringify(pillarScores, null, 2)}
@@ -248,7 +265,7 @@ For each construct_breakdown.where_you_struggled entry: include only observed ev
   ],
 
   "overall_growth_areas": [
-    "Full paragraph per growth area — describe the pattern clearly, what it likely costs them in relationships, where it showed up in the transcript, and what it might look like to move through it. Include at least 3-4 distinct growth areas when enough markers were assessed; never use this section to invent deficits for markers listed in UNASSESSED MARKERS."
+    "REQUIRED — always populate with exactly 2-3 items regardless of pass or fail. This array must never be empty. Each item is a specific, actionable growth area synthesized from pillar-level growth_edge fields in construct_breakdown (do not repeat growth_edge verbatim — synthesize into higher-order themes). For passing users, frame as development opportunities; for failing users, be honest about limiting patterns. Each growth area: 2-4 sentences naming the pattern, relational impact, and what growth looks like. CRITICAL: 2-3 items on every response; empty array is a generation error. Do not invent deficits for UNASSESSED MARKERS."
   ],
 
   "construct_breakdown": {
@@ -344,6 +361,12 @@ export async function generateAIReasoning(
   unassessedMarkers: string[] = [],
   options?: GenerateAIReasoningOptions
 ): Promise<AIReasoningResult> {
+  console.log('[ReasoningScore] sending authoritative scores to model:', {
+    weightedScore,
+    pillarScores,
+    passed,
+  });
+
   const apiUrl = getAnthropicEndpoint();
   const useProxy = apiUrl !== 'https://api.anthropic.com/v1/messages';
   const headers: Record<string, string> = { 'Content-Type': 'application/json' };
@@ -425,6 +448,14 @@ export async function generateAIReasoning(
       if (ourAbortTimerFired && lastErr.name === 'AbortError') {
         Object.defineProperty(lastErr, AI_REASONING_LOCAL_TIMEOUT, { value: true, enumerable: true });
       }
+      if (lastErr.name === 'AbortError' || /aborted/i.test(lastErr.message)) {
+        console.error('[Reasoning] AbortError detected:', lastErr.message);
+        console.error('[Reasoning] content present at abort:', responseText != null && responseText.length > 0);
+        console.error(
+          '[Reasoning] abort occurred at stage:',
+          responseText != null && responseText.length > 0 ? 'post-response' : 'fetch'
+        );
+      }
       if (attempt === maxAttempts - 1) throw lastErr;
     }
   }
@@ -500,5 +531,10 @@ export async function generateAIReasoning(
     };
   });
 
-  return parsed;
+  return prepareAIReasoningForPersistence(
+    parsed,
+    pillarScores,
+    unassessedMarkers,
+    weightedScore
+  ) as unknown as AIReasoningResult;
 }

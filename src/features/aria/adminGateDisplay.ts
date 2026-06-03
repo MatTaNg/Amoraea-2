@@ -22,6 +22,7 @@ export type AdminGateOutcomeLabel = 'pass' | 'fail' | 'almost' | 'none';
 
 const GATE_FAIL_ADMIN_ORDER: GateFailCode[] = [
   'weighted_score',
+  'ego_development_floor',
   'scenario_floor',
   'mentalizing_floor',
   'repair_floor',
@@ -60,6 +61,10 @@ export function formatGateFailureLines(gate: GateResult, scores: Record<string, 
           `Weighted average: ${detail.weighted_score.score.toFixed(1)} (min ${detail.weighted_score.requiredMin.toFixed(1)})`,
         );
       }
+      if (c === 'ego_development_floor' && detail.ego_development_floor) {
+        const e = detail.ego_development_floor;
+        lines.push(`Ego development floor: level ${e.level}, weighted ${e.weightedScore.toFixed(1)} (< 7.0)`);
+      }
       if (c === 'scenario_floor' && detail.scenario_floor?.breaches.length) {
         const breachParts = detail.scenario_floor.breaches.map((b) => `S${b.scenario} ${b.composite.toFixed(2)}`);
         lines.push(`Scenario composite: ${breachParts.join(', ')} (min ${SCENARIO_COMPOSITE_PASS_MIN})`);
@@ -80,6 +85,14 @@ export function formatGateFailureLines(gate: GateResult, scores: Record<string, 
 
   if (gate.reason === 'weighted_below_threshold' && gate.weightedScore != null) {
     lines.push(`Weighted average: ${gate.weightedScore.toFixed(1)} (min ${GATE_PASS_WEIGHTED_MIN.toFixed(1)})`);
+  }
+  if (gate.reason === 'ego_development_floor') {
+    const e = gate.failReasonDetail?.ego_development_floor;
+    if (e) {
+      lines.push(`Ego development floor: level ${e.level}, weighted ${e.weightedScore.toFixed(1)} (< 7.0)`);
+    } else if (gate.failReason) {
+      lines.push(...gate.failReason.split(';').map((s) => s.trim()).filter(Boolean));
+    }
   }
   if (gate.reason === 'scenario_floor' || gate.reason === 'mentalizing_floor' || gate.reason === 'repair_floor') {
     const comp = gate.scenarioComposites;
@@ -148,6 +161,9 @@ export function summarizeGateForAdmin(scores: Record<string, number>, gate: Gate
   if (detailLines.length === 0) {
     if (!gate.pass && gate.reason === 'weighted_below_threshold' && gate.weightedScore != null) {
       return `Weighted ${gate.weightedScore.toFixed(1)} < ${GATE_PASS_WEIGHTED_MIN.toFixed(1)}`;
+    }
+    if (!gate.pass && gate.reason === 'ego_development_floor' && gate.weightedScore != null) {
+      return `Ego development floor (weighted ${gate.weightedScore.toFixed(1)} < 7.0 with holistic level 1)`;
     }
     if (!gate.pass && gate.reason === 'scenario_floor' && gate.weightedScore != null) {
       return `Scenario composite < ${SCENARIO_COMPOSITE_PASS_MIN} (weighted ${gate.weightedScore.toFixed(1)})`;

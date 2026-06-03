@@ -8,8 +8,8 @@ export interface Location {
   label: string | null;
 }
 
-/** Onboarding gates (Stage 1–4) — re-export for convenience */
-export type { OnboardingStage, ApplicationStatus, BasicInfo, Gate2Psychometrics, Gate3Compatibility } from './OnboardingGates';
+/** Onboarding gates — re-export for convenience */
+export type { OnboardingStage, ApplicationStatus, BasicInfo } from './OnboardingGates';
 
 /** One profile prompt answer (UX only, not used by algorithm). */
 export interface ProfilePromptAnswer {
@@ -17,6 +17,10 @@ export interface ProfilePromptAnswer {
   answer: string;
 }
 
+/**
+ * Mapped from `public.users` (interview / legacy onboarding).
+ * Dating profile fields live in `public.profiles.profile_json` via `profilesRepo`.
+ */
 export interface Profile {
   id: string;
   createdAt: string;
@@ -50,12 +54,7 @@ export interface Profile {
   // Onboarding gates
   onboardingStage: OnboardingStage;
   applicationStatus: ApplicationStatus;
-  profileVisible: boolean;
   basicInfo: BasicInfo | null;
-  gate2Psychometrics: Gate2Psychometrics | null;
-  gate3Compatibility: Gate3Compatibility | null;
-  /** Partial ECR/TIPI/DSI/BRS/PVQ answers for Stage 3 resume. */
-  psychometricsProgress: Record<string, Record<string, number>> | null;
 }
 
 export interface ProfilePhoto {
@@ -83,11 +82,7 @@ export interface ProfileUpdate {
 
   onboardingStage?: OnboardingStage;
   applicationStatus?: ApplicationStatus;
-  profileVisible?: boolean;
   basicInfo?: BasicInfo | null;
-  gate2Psychometrics?: Gate2Psychometrics | null;
-  gate3Compatibility?: Gate3Compatibility | null;
-  psychometricsProgress?: Record<string, Record<string, number>> | null;
   referralNoticePending?: string | null;
 }
 

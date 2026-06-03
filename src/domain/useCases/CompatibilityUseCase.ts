@@ -1,10 +1,21 @@
 import { CompatibilityRepository } from '@data/repositories/CompatibilityRepository';
 import { Compatibility, CompatibilityUpdate } from '@domain/models/Compatibility';
 import {
-  computeFinalCompatibilityScore,
+  computeSexualCommunicationCompatibilityAdjustment,
   computeStyleCompatibility,
   type StyleCompatibilityResult,
 } from '@features/compatibility/styleCompatibility';
+import { computeFinalCompatibilityScore } from '@features/compatibility/styleCompatibilityScore';
+
+export type CombinedCompatibilityParams = {
+  attachmentScore: number;
+  valuesScore: number;
+  semanticScore: number;
+  styleScore: number;
+  styleConfidence: number;
+  dealbreakerMultiplier: number;
+  sexualCommunicationAdjustment?: number;
+};
 
 export class CompatibilityUseCase {
   constructor(private compatibilityRepository: CompatibilityRepository) {}
@@ -21,15 +32,17 @@ export class CompatibilityUseCase {
     return computeStyleCompatibility(userIdA, userIdB);
   }
 
-  computeCombinedCompatibilityScore(params: {
-    attachmentScore: number;
-    valuesScore: number;
-    semanticScore: number;
-    styleScore: number;
-    styleConfidence: number;
-    dealbreakerMultiplier: number;
-  }): number {
+  computeCombinedCompatibilityScore(params: CombinedCompatibilityParams): number {
     return computeFinalCompatibilityScore(params);
   }
-}
 
+  /** Fetches sexual communication scores and applies the soft pair adjustment. */
+  async computeCombinedCompatibilityScoreForPair(
+    userIdA: string,
+    userIdB: string,
+    params: Omit<CombinedCompatibilityParams, 'sexualCommunicationAdjustment'>,
+  ): Promise<number> {
+    const { adjustment } = await computeSexualCommunicationCompatibilityAdjustment(userIdA, userIdB);
+    return computeFinalCompatibilityScore({ ...params, sexualCommunicationAdjustment: adjustment });
+  }
+}

@@ -10,11 +10,10 @@ import {
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { supabase } from '@data/supabase/client';
+import { FEEDBACK_CATEGORIES } from '@/shared/constants/feedbackCategories';
 
 const BG = '#0a1628';
 const ACCENT = '#2563eb';
-
-const CATEGORIES = ['Something broke', 'Suggestion', 'Compliment', 'Other'] as const;
 
 type Props = {
   attemptId?: string;
@@ -137,7 +136,7 @@ export function FeedbackBubble({ attemptId, userId }: Props) {
                 <Text style={styles.sheetTitle}>Feedback</Text>
                 <Text style={styles.label}>Category</Text>
                 <View style={styles.pillRow}>
-                  {CATEGORIES.map((c) => (
+                  {FEEDBACK_CATEGORIES.map((c) => (
                     <Pressable
                       key={c}
                       onPress={() => toggleCategory(c)}

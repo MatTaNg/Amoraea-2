@@ -9,6 +9,7 @@ export type ScenarioAttemptScoreBundle = {
   keyEvidence: Record<string, string>;
   scenarioName?: string;
   mentalizing_inference_source?: MentalizingInferenceSource;
+  mentalizing_overcertainty?: boolean;
   contempt_tier_breakdown?: ContemptTierBreakdown | null;
 };
 

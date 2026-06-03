@@ -18,7 +18,7 @@ export const ModalOnboardingScreen: React.FC = () => {
   const { user } = useAuth();
 
   const handleComplete = () => {
-    navigation.replace('DatingBreak');
+    navigation.replace('DatingProfileBuilder');
   };
 
   const handleExitToPostInterview = useCallback(() => {

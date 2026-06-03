@@ -4,8 +4,9 @@ import { Ionicons } from '@expo/vector-icons';
 import { colors } from '@ui/theme/colors';
 import { spacing } from '@ui/theme/spacing';
 import type { Profile } from '@domain/models/Profile';
-import type { BasicInfo, Gate2Psychometrics, Gate3Compatibility } from '@domain/models/OnboardingGates';
+import type { BasicInfo } from '@domain/models/OnboardingGates';
 import { supabase } from '@data/supabase/client';
+import { USER_INTERVIEW_ROUTING_TABLE } from '@data/supabase/userInterviewRoutingSelect';
 import { CommunicationStyleSection } from '@ui/components/CommunicationStyleSection';
 
 function formatLabel(key: string): string {
@@ -47,8 +48,9 @@ function SummaryBlock({
 
 export const ProfileTestsSummary: React.FC<{ profile: Profile | null | undefined }> = ({ profile }) => {
   const basicInfo: BasicInfo | null = profile?.basicInfo ?? null;
-  const gate2: Gate2Psychometrics | null = profile?.gate2Psychometrics ?? null;
-  const gate3: Gate3Compatibility | null = profile?.gate3Compatibility ?? null;
+
+  const [psychometricsCompleted, setPsychometricsCompleted] = useState(false);
+  const [compatibilityData, setCompatibilityData] = useState<Record<string, unknown> | null>(null);
 
   const [styleLabels, setStyleLabels] = useState<{
     primary: string[] | null;
@@ -66,8 +68,34 @@ export const ProfileTestsSummary: React.FC<{ profile: Profile | null | undefined
     profile?.location?.label
   );
   const hasInterview = profile?.interviewCompleted === true;
-  const hasPsychometrics = !!gate2;
-  const hasCompatibility = !!(gate3 && (Object.keys(gate3).length > 0 || (gate3.profilePrompts?.length ?? 0) > 0));
+  const hasPsychometrics = psychometricsCompleted;
+  const hasCompatibility = !!(compatibilityData && Object.keys(compatibilityData).length > 0);
+
+  useEffect(() => {
+    const uid = profile?.id;
+    if (!uid) {
+      setPsychometricsCompleted(false);
+      setCompatibilityData(null);
+      return;
+    }
+    let cancelled = false;
+    void Promise.all([
+      supabase
+        .from(USER_INTERVIEW_ROUTING_TABLE)
+        .select('psychometrics_completed_at')
+        .eq('id', uid)
+        .maybeSingle(),
+      supabase.from('compatibility').select('compatibility_data').eq('profile_id', uid).maybeSingle(),
+    ]).then(([psychRes, compatRes]) => {
+      if (cancelled) return;
+      setPsychometricsCompleted(!!psychRes.data?.psychometrics_completed_at);
+      const raw = compatRes.data?.compatibility_data;
+      setCompatibilityData(raw && typeof raw === 'object' && !Array.isArray(raw) ? (raw as Record<string, unknown>) : null);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [profile?.id]);
 
   useEffect(() => {
     const uid = profile?.id;
@@ -127,46 +155,24 @@ export const ProfileTestsSummary: React.FC<{ profile: Profile | null | undefined
         {hasInterview ? <SummaryRow label="Status" value="Completed" /> : null}
       </SummaryBlock>
 
-      <SummaryBlock title="Psychometrics" done={hasPsychometrics}>
-        {gate2 && (
-          <>
-            <SummaryRow label="ECR-12" value={`${gate2.ecr12.classification} (Anxious: ${gate2.ecr12.anxious.toFixed(1)}, Avoidant: ${gate2.ecr12.avoidant.toFixed(1)})`} />
-            <SummaryRow label="TIPI (Big Five)" value={`O: ${gate2.tipi.openness.toFixed(1)} C: ${gate2.tipi.conscientiousness.toFixed(1)} E: ${gate2.tipi.extraversion.toFixed(1)} A: ${gate2.tipi.agreeableness.toFixed(1)} N: ${gate2.tipi.neuroticism.toFixed(1)}`} />
-            <SummaryRow label="DSI (Satisfaction)" value={gate2.dsisf.satisfactionScore.toFixed(1)} />
-            <SummaryRow label="BRS (Resilience)" value={gate2.brs.resilienceScore.toFixed(1)} />
-            <SummaryRow label="PVQ-21 (Values)" value={`Self-direction: ${gate2.pvq21.selfDirection.toFixed(1)}, Security: ${gate2.pvq21.security.toFixed(1)}, Benevolence: ${gate2.pvq21.benevolence.toFixed(1)}`} />
-          </>
-        )}
+      <SummaryBlock title="Pre-interview psychometrics" done={hasPsychometrics}>
+        {hasPsychometrics ? <SummaryRow label="Status" value="Completed" /> : null}
       </SummaryBlock>
 
-      <SummaryBlock title="Compatibility" done={hasCompatibility}>
-        {gate3 && (
+      <SummaryBlock title="Compatibility preferences" done={hasCompatibility}>
+        {compatibilityData && (
           <>
-            {gate3.relationshipType && (
-              <SummaryRow label="Relationship type" value={formatRelationshipType(String(gate3.relationshipType))} />
+            {compatibilityData.relationshipType != null && (
+              <SummaryRow label="Relationship type" value={formatRelationshipType(String(compatibilityData.relationshipType))} />
             )}
-            {gate3.kidsWanted != null && (
-              <SummaryRow label="Kids wanted" value={String(gate3.kidsWanted)} />
+            {compatibilityData.kidsWanted != null && (
+              <SummaryRow label="Kids wanted" value={String(compatibilityData.kidsWanted)} />
             )}
-            {gate3.religiousIdentity && (
-              <SummaryRow label="Religion" value={formatLabel(String(gate3.religiousIdentity))} />
+            {compatibilityData.religiousIdentity != null && (
+              <SummaryRow label="Religion" value={formatLabel(String(compatibilityData.religiousIdentity))} />
             )}
-            {gate3.workWeekHours && (
-              <SummaryRow label="Work week" value={formatLabel(String(gate3.workWeekHours))} />
-            )}
-            {(gate3.preferredMinBMI != null || gate3.preferredMaxBMI != null) && (
-              <SummaryRow label="Partner BMI" value={gate3.preferredMinBMI != null && gate3.preferredMaxBMI != null ? `${gate3.preferredMinBMI.toFixed(0)}–${gate3.preferredMaxBMI.toFixed(0)}` : 'No preference'} />
-            )}
-            {gate3.profilePrompts && gate3.profilePrompts.length > 0 && (
-              <View style={styles.promptsWrap}>
-                <Text style={styles.promptsLabel}>Profile prompts</Text>
-                {gate3.profilePrompts.map((p, i) => (
-                  <View key={i} style={styles.promptItem}>
-                    <Text style={styles.promptQuestion}>{p.prompt}</Text>
-                    <Text style={styles.promptAnswer}>{p.answer}</Text>
-                  </View>
-                ))}
-              </View>
+            {compatibilityData.workWeekHours != null && (
+              <SummaryRow label="Work week" value={formatLabel(String(compatibilityData.workWeekHours))} />
             )}
             <CommunicationStyleSection
               primary={styleLabels?.primary}

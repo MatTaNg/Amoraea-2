@@ -16,7 +16,10 @@ import {
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { FlameOrb, type FlameState } from './FlameOrb';
-import { isScenarioModalEligibleScenarioQuestionPrompt } from '@features/aria/interviewLanguageGate';
+import {
+  isScenarioModalEligibleScenarioQuestionPrompt,
+  resolveScenarioModalDisplayParts,
+} from '@features/aria/interviewLanguageGate';
 // Design tokens — Amoraea interviewer
 const BG = '#05060D';
 const SURFACE = '#0D1120';
@@ -171,18 +174,30 @@ export const UserInterviewLayout: React.FC<UserInterviewLayoutProps> = ({
     return lastValidScenarioModalPrompt?.trim() ?? null;
   }, [referenceCardPrompt, lastValidScenarioModalPrompt]);
 
+  const scenarioModalDisplay = useMemo(
+    () =>
+      resolveScenarioModalDisplayParts(
+        referenceCardScenario?.text ?? '',
+        scenarioModalBottomPrompt
+      ),
+    [referenceCardScenario?.text, scenarioModalBottomPrompt]
+  );
+
+  const scenarioModalTranscript = scenarioModalDisplay.transcript;
+  const scenarioModalFooterQuestion = scenarioModalDisplay.footerQuestion;
+
   /** Card caps at viewport; vignette ScrollView caps so long text scrolls without forcing a tall empty card. */
   const { refModalCardMaxHeight, refModalScrollMaxHeight } = useMemo(() => {
     const overlayPadY = 80;
     const innerH = Math.max(0, layoutHeight - overlayPadY);
     const cardMax = Math.min(innerH * 0.82, 580);
     const labelChrome = 48;
-    const footerChrome = scenarioModalBottomPrompt ? 168 : 8;
+    const footerChrome = scenarioModalFooterQuestion ? 168 : 8;
     return {
       refModalCardMaxHeight: cardMax,
       refModalScrollMaxHeight: Math.max(96, cardMax - labelChrome - footerChrome),
     };
-  }, [layoutHeight, scenarioModalBottomPrompt]);
+  }, [layoutHeight, scenarioModalFooterQuestion]);
 
   /**
    * Web is one platform for both desktop and mobile browsers. Touch phones report no hover — only
@@ -588,13 +603,15 @@ export const UserInterviewLayout: React.FC<UserInterviewLayoutProps> = ({
                     showsVerticalScrollIndicator
                   >
                     <Text style={[styles.refModalScenarioText, WEB_MODAL_NO_COPY]}>
-                      {formatScenarioModalBody(referenceCardScenario?.text ?? '')}
+                      {formatScenarioModalBody(scenarioModalTranscript)}
                     </Text>
                   </ScrollView>
-                  {scenarioModalBottomPrompt ? (
+                  {scenarioModalFooterQuestion ? (
                     <>
                       <View style={styles.refModalSeparator} />
-                      <Text style={[styles.refModalPromptText, WEB_MODAL_NO_COPY]}>{scenarioModalBottomPrompt}</Text>
+                      <Text style={[styles.refModalPromptText, WEB_MODAL_NO_COPY]}>
+                        {scenarioModalFooterQuestion}
+                      </Text>
                     </>
                   ) : null}
                 </Pressable>
@@ -672,13 +689,15 @@ export const UserInterviewLayout: React.FC<UserInterviewLayoutProps> = ({
                 showsVerticalScrollIndicator
               >
                 <Text style={[styles.refModalScenarioText, WEB_MODAL_NO_COPY]}>
-                  {formatScenarioModalBody(referenceCardScenario?.text ?? '')}
+                  {formatScenarioModalBody(scenarioModalTranscript)}
                 </Text>
               </ScrollView>
-              {scenarioModalBottomPrompt ? (
+              {scenarioModalFooterQuestion ? (
                 <>
                   <View style={styles.refModalSeparator} />
-                  <Text style={[styles.refModalPromptText, WEB_MODAL_NO_COPY]}>{scenarioModalBottomPrompt}</Text>
+                  <Text style={[styles.refModalPromptText, WEB_MODAL_NO_COPY]}>
+                    {scenarioModalFooterQuestion}
+                  </Text>
                 </>
               ) : null}
             </Pressable>
@@ -976,8 +995,9 @@ const styles = StyleSheet.create({
   },
   refModalSeparator: {
     height: 1,
-    backgroundColor: 'rgba(82, 142, 220, 0.2)',
-    marginVertical: 10,
+    backgroundColor: 'rgba(82, 142, 220, 0.35)',
+    marginTop: 4,
+    marginBottom: 12,
     width: '100%',
   },
   refModalPromptText: {

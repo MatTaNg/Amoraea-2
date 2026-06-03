@@ -48,6 +48,16 @@ export const styles = StyleSheet.create({
     marginBottom: 4,
     lineHeight: 16,
   },
+  placeSearchLoadingRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    marginTop: 8,
+  },
+  placeSearchLoadingText: {
+    fontSize: 12,
+    color: theme.colors.textSecondary,
+  },
   suggestionsContainer: {
     marginTop: 4,
     marginBottom: 8,

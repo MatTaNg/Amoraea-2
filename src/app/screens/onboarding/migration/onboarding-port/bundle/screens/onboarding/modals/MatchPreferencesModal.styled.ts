@@ -1,4 +1,5 @@
 import { StyleSheet } from 'react-native';
+import { ONBOARDING_MODAL_MAX_WIDTH } from './onboardingModalLayout';
 import { theme } from '@/shared/theme/theme';
 import { singleChoiceOptionRowStyle } from '@/shared/components/profileFields/SingleChoiceOptionList';
 
@@ -15,7 +16,7 @@ export const styles = StyleSheet.create({
   },
   container: {
     width: '100%',
-    maxWidth: 760,
+    maxWidth: ONBOARDING_MODAL_MAX_WIDTH,
     alignSelf: 'center',
     paddingHorizontal: 24,
     paddingVertical: 28,
@@ -117,7 +118,7 @@ export const styles = StyleSheet.create({
     flexDirection: 'row',
     gap: 12,
     width: '100%',
-    maxWidth: 760,
+    maxWidth: ONBOARDING_MODAL_MAX_WIDTH,
     alignSelf: 'center',
     paddingHorizontal: 24,
     paddingVertical: 16,

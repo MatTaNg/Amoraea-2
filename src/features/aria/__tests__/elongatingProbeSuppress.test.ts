@@ -1,4 +1,19 @@
 import {
+  buildMoment5ClosingFallbackAfterSuppressedElongating,
+  buildNeutralAckAfterSuppressedElongatingProbe,
+  elongatingProbePlaybackBlockReason,
+  isLenientInterviewCloseAfterClosingSpeech,
+  isMoment5ReadyForInterviewClose,
+  looksLikeInterviewClosingAssistantMessage,
+  stripDuplicateInterviewClosingParagraphs,
+  isIncompleteInterviewClosingLeadSentence,
+  isInterviewClosingReflectiveAckFragment,
+  isInterviewClosingStreamFragment,
+  isInterviewClosingThanksFragment,
+  stripDuplicateInterviewClosingSentencesWithinDraft,
+  stripInterviewClosingStreamingEcho,
+  transcriptHasInterviewClosingAssistantMessage,
+  transcriptHasInterviewClosingSpokenFragment,
   userTurnHasMultipleDistinctIdeasOrHypotheses,
   userTurnLooksLikeSingleSurfaceLabelOnly,
   userTurnSuppressesElongatingProbe,
@@ -30,5 +45,308 @@ describe('userTurnSuppressesElongatingProbe', () => {
 
   it('does not suppress thin vague under 15 words that is not a single-label pattern', () => {
     expect(userTurnSuppressesElongatingProbe('I dont know')).toBe(false);
+  });
+
+  it('suppresses session-log Scenario A verbose answer (32 words)', () => {
+    expect(
+      userTurnSuppressesElongatingProbe(
+        "Ryan shouldn't have took a 25 minute call during their date, that was disrespectful to Emma. Emma can be a little more open and honest instead of being condescending with her statement."
+      )
+    ).toBe(true);
+  });
+});
+
+describe('elongatingProbePlaybackBlockReason', () => {
+  it('blocks duplicate elongating lines after one already fired', () => {
+    expect(
+      elongatingProbePlaybackBlockReason({
+        spokenSentence: 'Can you say more about that?',
+        suppressForUserTurn: false,
+        elongatingProbeAlreadyFired: true,
+      }),
+    ).toBe('already_fired_this_stretch');
+  });
+
+  it('blocks elongating when the user turn is substantive', () => {
+    expect(
+      elongatingProbePlaybackBlockReason({
+        spokenSentence: 'Can you say more about that?',
+        suppressForUserTurn: true,
+        elongatingProbeAlreadyFired: false,
+      }),
+    ).toBe('user_turn_substantive');
+  });
+
+  it('allows the first elongating probe in a stretch', () => {
+    expect(
+      elongatingProbePlaybackBlockReason({
+        spokenSentence: 'Can you say more about that?',
+        suppressForUserTurn: false,
+        elongatingProbeAlreadyFired: false,
+      }),
+    ).toBeNull();
+  });
+});
+
+describe('suppressed elongating fallbacks', () => {
+  it('buildMoment5ClosingFallbackAfterSuppressedElongating uses one thanks line and complete token', () => {
+    const t = buildMoment5ClosingFallbackAfterSuppressedElongating('Matt');
+    expect(t).toContain('Matt');
+    expect(t).toContain('[INTERVIEW_COMPLETE]');
+    expect(t).toMatch(/Thank you for being so open with me/i);
+    expect(t).not.toMatch(/walking through/i);
+    expect((t.match(/thank you/gi) ?? []).length).toBe(1);
+  });
+
+  it('isMoment5ReadyForInterviewClose blocks after first answer without resolution', () => {
+    expect(
+      isMoment5ReadyForInterviewClose({
+        currentInterviewMoment: 5,
+        moment5QuestionDelivered: true,
+        postM5UserTurns: 1,
+        accountabilityProbeFired: false,
+        moment5CombinedUserText:
+          'I snapped at him about it. It came out harsher than I intended.',
+      }),
+    ).toBe(false);
+  });
+
+  it('isMoment5ReadyForInterviewClose allows single turn when resolution is described', () => {
+    expect(
+      isMoment5ReadyForInterviewClose({
+        currentInterviewMoment: 5,
+        moment5QuestionDelivered: true,
+        postM5UserTurns: 1,
+        accountabilityProbeFired: false,
+        moment5CombinedUserText:
+          'We talked it through and apologized. Things are better now.',
+      }),
+    ).toBe(true);
+  });
+
+  it('isMoment5ReadyForInterviewClose requires second turn after accountability probe', () => {
+    expect(
+      isMoment5ReadyForInterviewClose({
+        currentInterviewMoment: 5,
+        moment5QuestionDelivered: true,
+        postM5UserTurns: 1,
+        accountabilityProbeFired: true,
+      }),
+    ).toBe(false);
+    expect(
+      isMoment5ReadyForInterviewClose({
+        currentInterviewMoment: 5,
+        moment5QuestionDelivered: true,
+        postM5UserTurns: 2,
+        accountabilityProbeFired: true,
+      }),
+    ).toBe(true);
+  });
+
+  it('buildNeutralAckAfterSuppressedElongatingProbe is non-empty', () => {
+    expect(buildNeutralAckAfterSuppressedElongatingProbe('Matt')).toContain('Matt');
+  });
+
+  it('looksLikeInterviewClosingAssistantMessage matches final thank-you lines', () => {
+    expect(
+      looksLikeInterviewClosingAssistantMessage(
+        'Good work getting through all of this — what you said about making amends really stuck with me. Thank you for being so open with me.',
+      ),
+    ).toBe(true);
+    expect(
+      looksLikeInterviewClosingAssistantMessage('What if you were Ryan? How would you repair this situation?'),
+    ).toBe(false);
+  });
+
+  it('isLenientInterviewCloseAfterClosingSpeech allows handoff after M5 anchor + closing thanks when close gate passes', () => {
+    expect(
+      isLenientInterviewCloseAfterClosingSpeech({
+        closingText: 'Thank you for being so open with me.',
+        hasMoment5PrimaryAnchorInTranscript: true,
+        postM5UserTurns: 2,
+        personalHandoffInjected: true,
+        currentInterviewMoment: 5,
+        moment5CloseAllowed: true,
+      }),
+    ).toBe(true);
+  });
+
+  it('isLenientInterviewCloseAfterClosingSpeech blocks when Moment 5 close gate fails', () => {
+    expect(
+      isLenientInterviewCloseAfterClosingSpeech({
+        closingText: 'Thank you for being so open with me.',
+        hasMoment5PrimaryAnchorInTranscript: true,
+        postM5UserTurns: 1,
+        personalHandoffInjected: true,
+        currentInterviewMoment: 5,
+        moment5CloseAllowed: false,
+      }),
+    ).toBe(false);
+  });
+
+  it('transcriptHasInterviewClosingAssistantMessage detects prior closing in transcript', () => {
+    expect(
+      transcriptHasInterviewClosingAssistantMessage([
+        { role: 'assistant', content: 'Good work getting through all of this. Thank you for being so open with me.' },
+        { role: 'user', content: 'We talked it through.' },
+      ]),
+    ).toBe(true);
+    expect(
+      transcriptHasInterviewClosingAssistantMessage([
+        { role: 'assistant', content: 'What if you were Ryan? How would you repair this situation?' },
+      ]),
+    ).toBe(false);
+  });
+
+  it('stripDuplicateInterviewClosingParagraphs drops duplicate closing text', () => {
+    const prior = [
+      { role: 'assistant', content: 'Good work getting through all of this. Thank you for being so open with me.' },
+    ];
+    expect(
+      stripDuplicateInterviewClosingParagraphs(
+        'Thank you for being so open with me — that took real honesty.',
+        prior,
+      ),
+    ).toBe('');
+  });
+
+  it('stripInterviewClosingStreamingEcho suppresses duplicate closing sentences', () => {
+    expect(
+      stripInterviewClosingStreamingEcho(
+        'Thank you for being so open with me.',
+        true,
+      ),
+    ).toBeNull();
+    expect(
+      stripInterviewClosingStreamingEcho(
+        'Thanks for sticking with all of this — what you shared really comes through.',
+        true,
+      ),
+    ).toBeNull();
+    expect(stripInterviewClosingStreamingEcho('How would you repair this?', true)).toBe(
+      'How would you repair this?',
+    );
+  });
+
+  it('isIncompleteInterviewClosingLeadSentence detects ack before final thank-you', () => {
+    expect(
+      isIncompleteInterviewClosingLeadSentence(
+        'Thanks for sticking with all of this — what you said about owning that comes through clearly.',
+      ),
+    ).toBe(true);
+    expect(
+      isIncompleteInterviewClosingLeadSentence(
+        'Good work on sticking with all of this — what stands out is how you took ownership of snapping at your friend.',
+      ),
+    ).toBe(true);
+    expect(
+      isIncompleteInterviewClosingLeadSentence(
+        'Thanks for sticking with all of this. Thank you for being so open with me.',
+      ),
+    ).toBe(false);
+  });
+
+  it('defers thanks for being open reflective lead before final thank-you', () => {
+    const lead =
+      'Thanks for being open about that — taking ownership of how the frustration came out while still addressing what was bothering you shows real clarity.';
+    expect(isInterviewClosingReflectiveAckFragment(lead)).toBe(true);
+    expect(isIncompleteInterviewClosingLeadSentence(lead)).toBe(true);
+    expect(isInterviewClosingStreamFragment(lead)).toBe(true);
+  });
+
+  it('looksLikeInterviewClosingAssistantMessage matches good work on sticking variant', () => {
+    expect(
+      looksLikeInterviewClosingAssistantMessage(
+        'Good work on sticking with all of this — what stands out is how you took ownership. Thank you for being so open with me.',
+      ),
+    ).toBe(true);
+  });
+
+  it('transcriptHasInterviewClosingSpokenFragment detects reflective ack without thank-you', () => {
+    expect(
+      transcriptHasInterviewClosingSpokenFragment([
+        {
+          role: 'assistant',
+          content:
+            'Good work on sticking with all of this — what stands out is how you took ownership of snapping at your friend.',
+        },
+      ]),
+    ).toBe(true);
+    expect(
+      transcriptHasInterviewClosingSpokenFragment([
+        { role: 'assistant', content: 'How would you repair this situation?' },
+      ]),
+    ).toBe(false);
+  });
+
+  it('isInterviewClosingStreamFragment detects reflective synthesis before final thank-you', () => {
+    expect(
+      isInterviewClosingStreamFragment(
+        'It sounds like you recognized that letting things build up made it harder than it needed to be, and that you took responsibility for how you delivered it when things finally came out.',
+      ),
+    ).toBe(true);
+    expect(
+      isInterviewClosingStreamFragment('Thank you for being so open with me.'),
+    ).toBe(true);
+    expect(isInterviewClosingStreamFragment('How would you repair this situation?')).toBe(false);
+  });
+
+  it('stripInterviewClosingStreamingEcho suppresses reflective ack echo', () => {
+    expect(
+      stripInterviewClosingStreamingEcho(
+        'Good work on sticking with all of this — what stands out is how you took ownership.',
+        true,
+      ),
+    ).toBeNull();
+  });
+
+  it('stripDuplicateInterviewClosingSentencesWithinDraft collapses duplicate thanks in one turn', () => {
+    const draft =
+      'Thank you for walking through that with me, Matt. Thanks for sticking with all of this — you stayed with it. Thank you for being so open with me.';
+    const out = stripDuplicateInterviewClosingSentencesWithinDraft(draft);
+    expect(out).toContain('Thank you for being so open with me');
+    expect(out).not.toContain('Thank you for walking through');
+  });
+
+  it('isMoment5ReadyForInterviewClose blocks when resolution follow-up still required', () => {
+    expect(
+      isMoment5ReadyForInterviewClose({
+        currentInterviewMoment: 5,
+        moment5QuestionDelivered: true,
+        postM5UserTurns: 1,
+        accountabilityProbeFired: false,
+        moment5CombinedUserText:
+          'I snapped at him about it. It came out harsher than I intended.',
+        resolutionFollowUpStillRequired: true,
+      }),
+    ).toBe(false);
+  });
+
+  it('isMoment5ReadyForInterviewClose allows close after resolution follow-up exchange', () => {
+    expect(
+      isMoment5ReadyForInterviewClose({
+        currentInterviewMoment: 5,
+        moment5QuestionDelivered: true,
+        postM5UserTurns: 2,
+        accountabilityProbeFired: false,
+        moment5CombinedUserText:
+          'I snapped at him about it. We talked it through the next day and apologized.',
+        resolutionFollowUpStillRequired: false,
+      }),
+    ).toBe(true);
+  });
+
+  it('isMoment5ReadyForInterviewClose does not allow single turn with explicit self-accountability alone', () => {
+    expect(
+      isMoment5ReadyForInterviewClose({
+        currentInterviewMoment: 5,
+        moment5QuestionDelivered: true,
+        postM5UserTurns: 1,
+        accountabilityProbeFired: false,
+        moment5CombinedUserText:
+          'I apologize for how I said it. I should have brought it up sooner instead of letting it build.',
+        resolutionFollowUpStillRequired: true,
+      }),
+    ).toBe(false);
   });
 });

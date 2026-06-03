@@ -1,5 +1,6 @@
 import { StyleSheet } from "react-native";
 import { theme } from "@/shared/theme/theme";
+import { ONBOARDING_MODAL_MAX_WIDTH } from "./onboardingModalLayout";
 
 export const styles = StyleSheet.create({
   screen: {
@@ -12,7 +13,7 @@ export const styles = StyleSheet.create({
   },
   container: {
     width: "100%",
-    maxWidth: 720,
+    maxWidth: ONBOARDING_MODAL_MAX_WIDTH,
     alignSelf: "center",
     paddingHorizontal: 24,
     paddingVertical: 28,
@@ -39,6 +40,10 @@ export const styles = StyleSheet.create({
     marginTop: 12,
     marginBottom: 14,
     lineHeight: 24,
+  },
+  mustHaveEmphasis: {
+    fontWeight: "700",
+    color: theme.colors.text,
   },
   secondaryBlock: {
     marginTop: 30,
@@ -98,7 +103,7 @@ export const styles = StyleSheet.create({
     flexDirection: "row",
     gap: 12,
     width: "100%",
-    maxWidth: 720,
+    maxWidth: ONBOARDING_MODAL_MAX_WIDTH,
     alignSelf: "center",
     paddingHorizontal: 24,
     paddingVertical: 16,

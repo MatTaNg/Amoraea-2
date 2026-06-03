@@ -1,5 +1,5 @@
 import React, { useMemo, useState, useCallback } from 'react';
-import { View, Text, ScrollView, TouchableOpacity } from 'react-native';
+import { View, Text, ScrollView, TouchableOpacity, ActivityIndicator } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Button } from '@/shared/ui/Button';
 import { DatePicker } from '@/shared/components/DatePicker';
@@ -8,6 +8,7 @@ import { Input } from '@/shared/ui/Input';
 import { OnboardingHeader } from './components/OnboardingHeader';
 import { calculateAgeFromBirthdate } from '@/shared/utils/ageCalculator';
 import { useLocationAutocomplete } from '@/shared/hooks/useLocationAutocomplete';
+import { theme } from '@/shared/theme/theme';
 import { styles } from './DateOfBirthModal.styled';
 
 const MIN_AGE = 18;
@@ -55,7 +56,7 @@ export const DateOfBirthModal: React.FC<DateOfBirthModalProps> = ({
     setBirthLocationSuggestions(suggestions);
   }, []);
 
-  useLocationAutocomplete({
+  const { isSearchingPlaces: birthLocationPlacesLoading } = useLocationAutocomplete({
     value: birthLocation,
     validatedValue: validatedBirthLocation,
     onSuggestionsChange: onBirthSuggestionsChange,
@@ -112,6 +113,12 @@ export const DateOfBirthModal: React.FC<DateOfBirthModalProps> = ({
                 placeholder="e.g. city, region, or hospital"
                 autoCapitalize="words"
               />
+              {birthLocationPlacesLoading ? (
+                <View style={styles.placeSearchLoadingRow}>
+                  <ActivityIndicator size="small" color={theme.colors.primary} />
+                  <Text style={styles.placeSearchLoadingText}>Looking up places…</Text>
+                </View>
+              ) : null}
               {birthLocationSuggestions.length > 0 && (
                 <View style={styles.suggestionsContainer}>
                   {birthLocationSuggestions.map((s, idx) => (

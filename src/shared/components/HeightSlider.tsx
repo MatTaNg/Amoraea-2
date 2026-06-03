@@ -1,6 +1,7 @@
 import React from 'react';
 import { View, Text, TextInput, StyleSheet } from 'react-native';
-import { HeightCmPicker, HEIGHT_CM_MAX, HEIGHT_CM_MIN } from './HeightCmPicker';
+import { HEIGHT_CM_MAX, HEIGHT_CM_MIN } from './HeightCmPicker';
+import { HeightCmInput } from './HeightCmInput';
 
 /** Parse stored height strings like `172`, `172 cm`, `178 CM` into cm for pickers. */
 export function parseCmFromValue(value: string): number | undefined {
@@ -31,13 +32,7 @@ export const HeightSlider: React.FC<{
   const useCmDropdown = defaultUnit === 'cm' && allowUnitSwitch === false;
 
   if (useCmDropdown) {
-    return (
-      <HeightCmPicker
-        label={label}
-        valueCm={parseCmFromValue(value)}
-        onChangeCm={(cm) => onChange?.(cm != null ? `${cm} cm` : '')}
-      />
-    );
+    return <HeightCmInput label={label} value={value} onChange={onChange} />;
   }
 
   return (

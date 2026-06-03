@@ -166,5 +166,16 @@ describe('alphaAssessmentUtils', () => {
       expect(r.deflection_phrases).toBeGreaterThan(0);
       expect(r.per_scenario[1].word_count).toBeGreaterThan(0);
     });
+
+    it('exposes scenario_emotional_vocab_density for scenario-tagged user turns', () => {
+      const messages = [
+        { role: 'user', content: 'setup', scenarioNumber: 1 },
+        { role: 'user', content: 'I feel hurt and angry about it', scenarioNumber: 1 },
+      ];
+      const boundaries = buildScenarioBoundaries(messages, [1]);
+      const r = analyzeLanguageMarkers(messages, boundaries);
+      expect(r.scenario_emotional_vocab_density).not.toBeNull();
+      expect(r.scenario_emotional_vocab_density!).toBeGreaterThan(0);
+    });
   });
 });

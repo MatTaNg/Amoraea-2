@@ -30,3 +30,23 @@ export function isTtsTabResumeFallbackError(err: unknown): err is TtsTabResumeFa
   if (typeof err !== 'object' || err === null) return false;
   return (err as { name?: string }).name === 'TtsTabResumeFallbackError';
 }
+
+/** HTML/Web Audio playback aborted because the document was hidden mid-utterance. */
+export class WebInterviewTtsTabHiddenAbortError extends Error {
+  constructor() {
+    super('web_interview_tts_tab_hidden_abort');
+    this.name = 'WebInterviewTtsTabHiddenAbortError';
+  }
+}
+
+export function isWebInterviewTtsTabHiddenAbortError(err: unknown): err is WebInterviewTtsTabHiddenAbortError {
+  if (err instanceof WebInterviewTtsTabHiddenAbortError) return true;
+  if (typeof err !== 'object' || err === null) return false;
+  const o = err as { name?: string; message?: string };
+  return (
+    o.name === 'WebInterviewTtsTabHiddenAbortError' ||
+    o.message === 'web_interview_tts_tab_hidden_abort' ||
+    o.message === 'tab-hidden-abort' ||
+    o.message === 'tts-schedule-aborted'
+  );
+}

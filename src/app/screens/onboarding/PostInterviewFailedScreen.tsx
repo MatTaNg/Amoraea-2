@@ -5,17 +5,22 @@ import {
   Text,
   TextInput,
   Pressable,
-  ScrollView,
   Platform,
   Animated,
   Easing,
   ActivityIndicator,
   Linking,
 } from 'react-native';
-import { SafeAreaContainer } from '@ui/components/SafeAreaContainer';
+import { PostInterviewScrollLayout } from '@app/screens/onboarding/PostInterviewScrollLayout';
 import { Ionicons } from '@expo/vector-icons';
 import { parsePhoneNumberFromString } from 'libphonenumber-js';
 import { supabase } from '@data/supabase/client';
+import { clearReferralNoticePending } from '@data/repos/usersRoutingRepo';
+import {
+  USER_INTERVIEW_ROUTING_TABLE,
+  USER_INTERVIEW_PASS_SELECT,
+  USER_POST_INTERVIEW_CONTACT_SELECT,
+} from '@data/supabase/userInterviewRoutingSelect';
 import { FlameOrb } from '@app/screens/FlameOrb';
 import * as Clipboard from 'expo-clipboard';
 import { useQueryClient } from '@tanstack/react-query';
@@ -24,10 +29,12 @@ import { useAuth } from '@features/authentication/hooks/useAuth';
 import { isAmoraeaAdminConsoleEmail } from '@/constants/adminConsole';
 import { showConfirmDialog, showSimpleAlert } from '@utilities/alerts/confirmDialog';
 import {
-  evaluateStandardPostInterviewRevealWithUsersPassedFallback,
+  evaluateStandardPostInterviewReveal,
   standardPostInterviewRouteFromReveal,
 } from '@utilities/postInterviewProcessingGate';
 import { fetchInterviewAttemptRevealSnapshot } from '@utilities/fetchInterviewAttemptRevealSnapshot';
+import { useInterviewAttemptEgoRepair } from '@features/aria/hooks/useInterviewAttemptEgoRepair';
+import { DownloadPersonalReportButton } from '@features/psychometrics/DownloadPersonalReportButton';
 
 const BG = '#0a0a0f';
 const ACCENT = '#3b82f6';
@@ -41,7 +48,7 @@ const FAIL_BADGE_BORDER = 'rgba(248, 113, 113, 0.45)';
 const FAIL_BADGE_BG = 'rgba(220, 38, 38, 0.14)';
 
 /** Free coach consult — may override automated result after evaluation, or offer resources / next steps. */
-const COACH_CALENDLY_URL = 'https://calendly.com/lovemorenow/cc';
+const COACH_CALENDLY_URL = 'https://calendly.com/lovemorenow/coaching-call?back=1';
 
 const FONT_DISPLAY = Platform.OS === 'web' ? "'Cormorant Garamond', serif" : undefined;
 const FONT_BODY = Platform.OS === 'web' ? "'DM Sans', system-ui, sans-serif" : undefined;
@@ -128,6 +135,12 @@ export const PostInterviewFailedScreen: React.FC<{
   const queryClient = useQueryClient();
   const { user } = useAuth();
   const userId = route.params?.userId ?? '';
+  const isAdminEmail = isAmoraeaAdminConsoleEmail(user?.email ?? '');
+  useInterviewAttemptEgoRepair({
+    userId,
+    isAdmin: isAdminEmail,
+    sourceScreen: 'PostInterviewFailed',
+  });
   const [phone, setPhone] = useState('');
   const [submitted, setSubmitted] = useState(false);
   const [savedPhone, setSavedPhone] = useState(false);
@@ -162,10 +175,7 @@ export const PostInterviewFailedScreen: React.FC<{
     };
   }, [userId, user?.email, navigation]);
 
-  /**
-   * Keep stack aligned with DB. `users.interview_passed` can lag `interview_attempts.passed` after the 48h
-   * reveal — do not send failed applicants to legacy `PostInterview` when attempt snapshot says fail.
-   */
+  /** Keep stack aligned with attempt reveal snapshot (override or 48h — not `users.interview_passed`). */
   useEffect(() => {
     if (!userId) return;
     let cancelled = false;
@@ -174,29 +184,19 @@ export const PostInterviewFailedScreen: React.FC<{
       const uid = auth.user?.id ?? userId;
       if (!uid) return;
       const { data: row } = await supabase
-        .from('users')
-        .select('interview_passed, interview_completed')
+        .from(USER_INTERVIEW_ROUTING_TABLE)
+        .select(USER_INTERVIEW_PASS_SELECT)
         .eq('id', uid)
         .maybeSingle();
       if (cancelled) return;
-      if (row?.interview_passed === true) {
-        queryClient.invalidateQueries({ queryKey: ['profile', uid] });
-        navigation.replace('PostInterviewPassed', { userId: uid });
-        return;
-      }
-      if (row?.interview_passed === false) {
-        return;
-      }
-      if (row?.interview_passed == null && row?.interview_completed !== true) {
+      if (row?.interview_completed !== true) {
         queryClient.invalidateQueries({ queryKey: ['profile', uid] });
         navigation.replace('Aria', { userId: uid });
         return;
       }
       const snap = await fetchInterviewAttemptRevealSnapshot(uid);
       if (cancelled) return;
-      const target = standardPostInterviewRouteFromReveal(
-        evaluateStandardPostInterviewRevealWithUsersPassedFallback(snap ?? undefined, row?.interview_passed ?? undefined),
-      );
+      const target = standardPostInterviewRouteFromReveal(evaluateStandardPostInterviewReveal(snap ?? undefined));
       if (target === 'PostInterviewFailed') {
         return;
       }
@@ -206,10 +206,10 @@ export const PostInterviewFailedScreen: React.FC<{
         navigation.replace('PostInterviewPassed', { userId: uid });
         return;
       }
-      if (target === 'PostInterviewProcessing') {
+      if (target === 'PostInterview') {
         queryClient.invalidateQueries({ queryKey: ['profile', uid] });
         queryClient.invalidateQueries({ queryKey: ['standardPostInterviewDeferral', uid] });
-        navigation.replace('PostInterviewProcessing', { userId: uid });
+        navigation.replace('PostInterview', { userId: uid });
       }
     })();
     return () => {
@@ -229,10 +229,8 @@ export const PostInterviewFailedScreen: React.FC<{
         const [{ data: codeRow }, { data: userRow }] = await Promise.all([
           supabase.from('referral_codes').select('code').eq('referrer_user_id', uid).maybeSingle(),
           supabase
-            .from('users')
-            .select(
-              'referral_notice_pending, launch_notification_phone, launch_notification_submitted_at, interview_completed_at'
-            )
+            .from(USER_INTERVIEW_ROUTING_TABLE)
+            .select(USER_POST_INTERVIEW_CONTACT_SELECT)
             .eq('id', uid)
             .maybeSingle(),
         ]);
@@ -370,8 +368,16 @@ export const PostInterviewFailedScreen: React.FC<{
     const { data: auth } = await supabase.auth.getUser();
     const uid = auth.user?.id ?? userId;
     if (!uid || !referralNotice) return;
-    const { error } = await supabase.from('users').update({ referral_notice_pending: null }).eq('id', uid);
-    if (error && __DEV__) console.warn('[PostInterviewFailed] clear referral notice', error.message);
+    try {
+      await clearReferralNoticePending(uid);
+    } catch (error) {
+      if (__DEV__) {
+        console.warn(
+          '[PostInterviewFailed] clear referral notice',
+          error instanceof Error ? error.message : error,
+        );
+      }
+    }
     setReferralNotice(null);
     queryClient.invalidateQueries({ queryKey: ['profile', uid] });
   };
@@ -392,12 +398,7 @@ export const PostInterviewFailedScreen: React.FC<{
   };
 
   return (
-    <SafeAreaContainer style={{ backgroundColor: BG, flex: 1 }}>
-      <ScrollView
-        contentContainerStyle={styles.scroll}
-        keyboardShouldPersistTaps="handled"
-        style={{ backgroundColor: BG }}
-      >
+    <PostInterviewScrollLayout>
         <FlickeringFlame size={104} />
         <Text style={styles.h1}>We&apos;re not able to offer you a spot right now</Text>
         <Text style={styles.sub}>
@@ -438,34 +439,39 @@ export const PostInterviewFailedScreen: React.FC<{
           </View>
 
           <View style={styles.divider} />
+          <DownloadPersonalReportButton userId={userId} variant="dark" />
 
-          <Text style={styles.stayTitle}>Free call with a relationship coach</Text>
+          <View style={styles.divider} />
+
+          <Text style={styles.stayTitle}>Complimentary call with a relationship coach</Text>
           <Text style={styles.stayLead}>
-            We&apos;d like to offer you a complimentary call with one of our dating and relationship coaches. In that
-            conversation, they can review your interview in context. Depending on that evaluation, they may be able to
-            <Text style={styles.strong}> override the automated result</Text> in rare cases. If an override isn&apos;t
-            appropriate, they can still offer resources, perspective, and concrete next steps for moving forward.
+            We&apos;d like to offer you a complimentary session with one of our dating and relationship
+            coaches.
           </Text>
+          <View style={styles.bullets}>
+            {[
+              'A conversation valued at $1,000.',
+              'Your coach will go through your results with you personally, help you understand what they mean, and give you a practical roadmap for what comes next.',
+              "If they feel you're ready to give the interview another shot, they'll invite you to retake it at no charge.",
+            ].map((line) => (
+              <View key={line} style={styles.bulletRow}>
+                <Ionicons name="ellipse-outline" size={16} color="rgba(255,255,255,0.55)" style={styles.bulletIcon} />
+                <Text style={styles.bulletText}>{line}</Text>
+              </View>
+            ))}
+          </View>
           <Pressable
             onPress={openCoachCalendly}
             style={({ pressed }) => [styles.eventCta, pressed && { opacity: 0.9 }]}
             accessibilityRole="link"
-            accessibilityLabel="Book a free coach call on Calendly"
+            accessibilityLabel="Book a free coaching call on Calendly"
           >
-            <Ionicons name="calendar-outline" size={20} color="#fff" style={{ marginRight: 8 }} />
+            <Ionicons name="calendar-outline" size={20} color="#fff" style={{ marginRight: 8, marginTop: 8 }} />
             <Text style={styles.eventCtaText}>Book a free call</Text>
             <Ionicons name="open-outline" size={18} color="rgba(255,255,255,0.9)" style={{ marginLeft: 8 }} />
           </Pressable>
           <Text style={styles.eventUrl} selectable>
             {COACH_CALENDLY_URL}
-          </Text>
-
-          <View style={styles.divider} />
-
-          <Text style={styles.stayTitle}>Stay in the loop</Text>
-          <Text style={styles.stayLead}>
-            We can email you with community updates. If you would like SMS as well, enter your number below and tap Save;
-            otherwise we&apos;ll use your sign-in email.
           </Text>
           {saveError ? (
             <View style={styles.saveErrBlock}>
@@ -477,49 +483,6 @@ export const PostInterviewFailedScreen: React.FC<{
               ) : null}
             </View>
           ) : null}
-          {!launchContactPrefsLoaded ? (
-            <View style={styles.launchPrefsPlaceholder} accessibilityLabel="Loading">
-              <ActivityIndicator color={ACCENT} />
-            </View>
-          ) : submitted ? (
-            <View style={styles.confirmBox}>
-              <Text style={styles.confirm}>
-                {savedPhone
-                  ? "You're all set, we'll text you when there's news."
-                  : "You're all set — we'll email you at the address you used to sign in when there's news."}
-              </Text>
-            </View>
-          ) : (
-            <>
-              <TextInput
-                value={phone}
-                onChangeText={(t) => {
-                  setPhone(t);
-                  if (fieldError) setFieldError(null);
-                }}
-                placeholder="Phone for SMS updates (optional)"
-                placeholderTextColor="rgba(255,255,255,0.35)"
-                keyboardType="phone-pad"
-                autoCapitalize="none"
-                autoCorrect={false}
-                textContentType="telephoneNumber"
-                autoComplete="tel"
-                style={[styles.input, fieldError && styles.inputError]}
-              />
-              {fieldError ? <Text style={styles.fieldHint}>{fieldError}</Text> : null}
-              <Pressable
-                onPress={onSavePhone}
-                disabled={submitting}
-                style={({ pressed }) => [styles.button, pressed && { opacity: 0.88 }]}
-              >
-                <Text style={styles.buttonLabel}>{submitting ? '…' : 'Save my number'}</Text>
-              </Pressable>
-            </>
-          )}
-          <View style={styles.privacyRow}>
-            <Ionicons name="lock-closed-outline" size={14} color="rgba(255,255,255,0.45)" />
-            <Text style={styles.privacy}>Your number is private. No spam. No sharing. Ever.</Text>
-          </View>
           {myReferralCode ? (
             <View style={styles.referFriendSection}>
               <View style={styles.referFriendDivider} />
@@ -559,21 +522,11 @@ export const PostInterviewFailedScreen: React.FC<{
             </Text>
           </View>
         ) : null}
-      </ScrollView>
-    </SafeAreaContainer>
+    </PostInterviewScrollLayout>
   );
 };
 
 const styles = StyleSheet.create({
-  scroll: {
-    paddingHorizontal: 22,
-    paddingTop: 24,
-    paddingBottom: 48,
-    alignItems: 'center',
-    maxWidth: 440,
-    width: '100%',
-    alignSelf: 'center',
-  },
   h1: {
     fontFamily: FONT_DISPLAY,
     fontSize: 26,
@@ -669,6 +622,7 @@ const styles = StyleSheet.create({
   },
   strong: { fontWeight: '600', color: '#f4f4f5' },
   eventCta: {
+    marginTop: 8,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',

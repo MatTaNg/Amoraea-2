@@ -29,10 +29,12 @@ import { saveAssessmentProgress } from "@/data/services/assessmentService";
 import { profilesRepo } from "@/data/repos/profilesRepo";
 import { theme } from "@/shared/theme/theme";
 import { AssessmentHeader } from "@/shared/components/assessments/AssessmentHeader";
+import { AssessmentPreparingResults } from "@/shared/components/assessments/AssessmentPreparingResults";
 import {
   ASSESSMENT_IDS,
   getCompletedAssessments,
   getFirstIncompleteAssessment,
+  onboardingAssessmentBatteryIndex,
 } from "@/data/services/assessmentService";
 
 const SAVE_PROGRESS_EVERY = 5;
@@ -53,7 +55,6 @@ export function ConflictStyleAssessmentScreen() {
   const [saving, setSaving] = useState(false);
   /** Re-render option disable state while a background upsert runs (refs alone would not update Pressable). */
   const [selectionBusy, setSelectionBusy] = useState(false);
-  const [surveysComplete, setSurveysComplete] = useState(0);
   const [completedInstruments, setCompletedInstruments] = useState<string[] | null>(null);
   const [loadingMeta, setLoadingMeta] = useState(true);
   /** After manual Begin or one-time server resume — stops profile refetches from resetting question index. */
@@ -80,7 +81,6 @@ export function ConflictStyleAssessmentScreen() {
       if (!c) {
         const list = res.success ? res.data : [];
         setCompletedInstruments(list);
-        setSurveysComplete(list.length);
       }
       setLoadingMeta(false);
     })();
@@ -287,9 +287,17 @@ export function ConflictStyleAssessmentScreen() {
 
   if (loadingMeta) {
     return (
-      <View style={[styles.centered, { flex: 1 }]}>
-        <ActivityIndicator size="large" />
+      <View style={[styles.centered, { flex: 1, backgroundColor: theme.colors.background }]}>
+        <ActivityIndicator size="large" color={theme.colors.primary} />
       </View>
+    );
+  }
+
+  if (saving) {
+    return (
+      <SafeAreaView style={styles.container} edges={["top", "left", "right"]}>
+        <AssessmentPreparingResults />
+      </SafeAreaView>
     );
   }
 
@@ -365,6 +373,7 @@ export function ConflictStyleAssessmentScreen() {
   const qNum = currentIndex + 1;
   const progressPct = (qNum / total) * 100;
   const selected = answers[currentIndex];
+  const assessmentIndex = onboardingAssessmentBatteryIndex("CONFLICT-30");
 
   return (
     <SafeAreaView style={styles.container} edges={["top", "left", "right"]}>
@@ -378,7 +387,7 @@ export function ConflictStyleAssessmentScreen() {
       >
         <View style={styles.questionCard}>
           <AssessmentHeader
-            surveysComplete={surveysComplete}
+            assessmentIndex={assessmentIndex}
             currentQ={qNum}
             totalQ={total}
             assessmentName="Conflict style"
@@ -408,22 +417,6 @@ export function ConflictStyleAssessmentScreen() {
           </Pressable>
         </View>
       </ScrollView>
-      {saving && (
-        <View
-          style={styles.savingOverlay}
-          pointerEvents="auto"
-          accessibilityRole="progressbar"
-          accessibilityLabel="Preparing your results"
-        >
-          <View style={styles.loadingCard}>
-            <ActivityIndicator size="large" color={theme.colors.primary} />
-            <Text style={styles.loadingTitle}>Preparing your results</Text>
-            <Text style={styles.loadingBody}>
-              Saving your answers and loading your conflict style summary.
-            </Text>
-          </View>
-        </View>
-      )}
     </SafeAreaView>
   );
 }
@@ -526,36 +519,4 @@ const styles = StyleSheet.create({
   backBtn: { marginTop: 16, paddingVertical: 8 },
   backText: { fontSize: 16, color: theme.colors.primary },
   backDisabled: { opacity: 0.35 },
-  savingOverlay: {
-    ...StyleSheet.absoluteFillObject,
-    backgroundColor: "rgba(0,0,0,0.45)",
-    justifyContent: "center",
-    alignItems: "center",
-    zIndex: 1000,
-    padding: 24,
-  },
-  loadingCard: {
-    width: "100%",
-    maxWidth: 420,
-    borderRadius: 22,
-    borderWidth: 1,
-    borderColor: "rgba(91,168,232,0.24)",
-    backgroundColor: "rgba(91,168,232,0.08)",
-    padding: 28,
-    alignItems: "center",
-  },
-  loadingTitle: {
-    color: theme.colors.text,
-    fontSize: 20,
-    fontWeight: "800",
-    marginTop: 18,
-    marginBottom: 8,
-    textAlign: "center",
-  },
-  loadingBody: {
-    color: theme.colors.textSecondary,
-    fontSize: 15,
-    lineHeight: 22,
-    textAlign: "center",
-  },
 });

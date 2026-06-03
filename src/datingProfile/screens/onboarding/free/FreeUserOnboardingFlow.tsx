@@ -5,7 +5,6 @@ import { useProfile } from '@/shared/hooks/useProfile';
 import { WelcomeModal } from '../modals/WelcomeModal';
 import { NameModal } from '../modals/NameModal';
 import { BirthDetailsModal } from '../modals/BirthDetailsModal';
-import { GenderModal } from '../modals/GenderModal';
 import { AttractionModal } from '../modals/AttractionModal';
 import { RelationshipStyleModal } from '../modals/RelationshipStyleModal';
 import { LocationModal } from '../modals/LocationModal';
@@ -84,7 +83,6 @@ export const ModalOnboardingFlow: React.FC<ModalOnboardingFlowProps> = ({ onComp
       'welcome',
       'name',
       'birthDetails',
-      'gender',
       'attraction',
       'relationshipStyle',
       'location',
@@ -152,16 +150,6 @@ export const ModalOnboardingFlow: React.FC<ModalOnboardingFlowProps> = ({ onComp
         />
       )}
 
-      {currentStep === 'gender' && (
-        <GenderModal
-          visible={true}
-          gender={onboardingData.gender || ''}
-          onGenderChange={(gender) => updateData({ gender })}
-          onNext={goToNextStep}
-          onBack={() => setCurrentStep('birthDetails')}
-        />
-      )}
-
       {currentStep === 'attraction' && (
         <AttractionModal
           visible={true}
@@ -190,7 +178,7 @@ export const ModalOnboardingFlow: React.FC<ModalOnboardingFlowProps> = ({ onComp
             }
             goToNextStep();
           }}
-          onBack={() => setCurrentStep('gender')}
+          onBack={() => setCurrentStep('birthDetails')}
         />
       )}
 

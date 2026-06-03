@@ -1,3 +1,10 @@
+import { looksLikeMoment4GrudgePrompt, looksLikeMoment4ThresholdQuestion } from './moment4ProbeLogic';
+import {
+  keyEvidenceHasNonEmptyAssessedText,
+  pillarScoresHaveNumericAssessment,
+} from './interviewCompletionGate';
+import { normalizeResponseConcreteness } from './personalMomentConcreteness';
+
 /** User-facing; when set in keyEvidence, participant skipped the remainder of this segment after a frustration offer. */
 export const SKIPPED_BY_USER_FRUSTRATION_EVIDENCE =
   'Not scored — participant chose to skip the remaining prompt in this segment after a frustration signal.';
@@ -37,6 +44,9 @@ export function evidenceAbsentForResponseDepthModifier(text: string | null | und
 
   const lower = trimmed.toLowerCase();
   if (/score\s+recovered\s+from\s+model\s+output/i.test(trimmed)) return true;
+  if (/score\s+present,\s+evidence\s+not\s+returned\s+by\s+model/i.test(trimmed)) return true;
+  if (/moment\s+4\s+incomplete\s+model\s+output/i.test(trimmed)) return true;
+  if (/rubric\s+excerpt\s+omitted\s+in\s+model\s+json/i.test(trimmed)) return true;
   if (/insufficient\s+evidence/.test(lower)) return true;
   if (/no\s+assessable\s+evidence/.test(lower)) return true;
   if (/response\s+too\s+brief\s+to\s+assess/.test(lower)) return true;
@@ -61,21 +71,51 @@ export function isNoEvidenceText(text: string | null | undefined): boolean {
     /appreciation (was )?not assessed from this moment/i.test(t) ||
     /not assessed from this moment.*appreciation/i.test(t) ||
     /limited (close[- ]relationship|lived) (experience|opportunity)/i.test(t) ||
-    /\bnot scored\b.*\bskip\b.*\bfrustration\b/i.test(t)
+    /\bnot scored\b.*\bskip\b.*\bfrustration\b/i.test(t) ||
+    /rubric excerpt omitted in model json/i.test(t) ||
+    /moment 4 incomplete model output/i.test(t) ||
+    /score present, evidence not returned by model/i.test(t)
+  );
+}
+
+/**
+ * Models sometimes emit pillar scores as numeric strings; `normalizeScoresByEvidence` only kept `typeof number`,
+ * which dropped every pillar and left Moment 4/5 bundles unpersistable (all null + empty keyEvidence).
+ */
+export function coerceScoreToFiniteNumber(raw: unknown): number | undefined {
+  if (raw === null || raw === undefined) return undefined;
+  if (typeof raw === 'number' && Number.isFinite(raw)) return raw;
+  if (typeof raw === 'string') {
+    const t = raw.trim();
+    if (t === '' || /^null$/i.test(t)) return undefined;
+    const n = Number(t);
+    if (Number.isFinite(n)) return n;
+  }
+  return undefined;
+}
+
+/** Intentional fill before normalize — must not drop the paired numeric score. */
+export function isIntentionallyRecoveredScoreEvidence(text: string | null | undefined): boolean {
+  const t = text?.trim() ?? '';
+  if (!t) return false;
+  return (
+    /score\s+recovered\s+from\s+model\s+output/i.test(t) ||
+    /score\s+present,\s+evidence\s+not\s+returned\s+by\s+model/i.test(t)
   );
 }
 
 export function normalizeScoresByEvidence(
-  scores: Record<string, number | null | undefined> | null | undefined,
+  scores: Record<string, unknown> | null | undefined,
   keyEvidence: Record<string, string> | null | undefined
 ): Record<string, number> {
   if (!scores) return {};
   const out: Record<string, number> = {};
   Object.entries(scores).forEach(([id, raw]) => {
-    if (typeof raw !== 'number' || !Number.isFinite(raw)) return;
+    const num = coerceScoreToFiniteNumber(raw);
+    if (num === undefined) return;
     const ev = keyEvidence?.[id];
-    if (isNoEvidenceText(ev)) return;
-    out[id] = raw;
+    if (isNoEvidenceText(ev) && !isIntentionallyRecoveredScoreEvidence(ev)) return;
+    out[id] = num;
   });
   return out;
 }
@@ -102,6 +142,407 @@ export function mergeMoment4PillarScoresAfterEvidenceNormalize(
     out[id] = Object.prototype.hasOwnProperty.call(numericFiltered, id) ? numericFiltered[id]! : null;
   }
   return out;
+}
+
+/** When every marker is null and there is no real evidence — minimal row so persistence/gates see a full key shape. */
+export const MOMENT4_BUNDLE_INCOMPLETE_EVIDENCE_LINE =
+  'Moment 4 incomplete model output; null scores retained for persistence.';
+
+/** Model returned a numeric pillar but no assessable quote (truncated JSON, lazy completion, etc.). */
+export const MOMENT4_SCORE_RECOVERED_EVIDENCE_LINE = 'Score recovered from model output.';
+
+export type Moment4ScoringParseDebug = {
+  rawModelResponse?: string;
+  parsedSnapshot?: unknown;
+};
+
+/** Normalize `pillar_scores` / `key_evidence` and lift pillar scores from raw text when JSON used nulls but numbers appear later in the response. */
+export function coerceMoment4ParsedModelRecord(parsed: unknown): {
+  pillarScores: Record<string, unknown>;
+  keyEvidence: Record<string, string>;
+} {
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+    return { pillarScores: {}, keyEvidence: {} };
+  }
+  const o = parsed as Record<string, unknown>;
+  const psRaw = o.pillarScores ?? o.pillar_scores;
+  const pillarScores =
+    psRaw != null && typeof psRaw === 'object' && !Array.isArray(psRaw)
+      ? { ...(psRaw as Record<string, unknown>) }
+      : {};
+  const keRaw = o.keyEvidence ?? o.key_evidence;
+  const keyEvidence: Record<string, string> = {};
+  if (keRaw != null && typeof keRaw === 'object' && !Array.isArray(keRaw)) {
+    for (const [k, v] of Object.entries(keRaw as Record<string, unknown>)) {
+      keyEvidence[k] = typeof v === 'string' ? v : v == null ? '' : String(v);
+    }
+  }
+  return { pillarScores, keyEvidence };
+}
+
+export function mergeSalvagedMoment4PillarScoresIntoParsed(
+  rawModelText: string,
+  pillarScores: Record<string, unknown> | null | undefined,
+): Record<string, unknown> {
+  const out: Record<string, unknown> = {
+    ...(typeof pillarScores === 'object' && pillarScores && !Array.isArray(pillarScores) ? pillarScores : {}),
+  };
+  for (const id of MOMENT4_SCORE_MARKER_IDS) {
+    if (coerceScoreToFiniteNumber(out[id]) !== undefined) continue;
+    const re = new RegExp(`"${id}"\\s*:\\s*(\\d+(?:\\.\\d+)?)`, 'i');
+    const m = rawModelText.match(re);
+    if (m?.[1]) {
+      const n = Number(m[1]);
+      if (Number.isFinite(n)) out[id] = n;
+    }
+  }
+  return out;
+}
+
+/**
+ * Coerce pillar/keyEvidence shapes and merge regex-salvaged pillar numerics before {@link normalizeScoresByEvidence}.
+ * Mutates `result` in place (Aria personal-moment scoring).
+ */
+export function applyMoment4PostParseCoercionAndSalvage(
+  rawModelText: string,
+  result: Record<string, unknown>,
+): void {
+  const coerced = coerceMoment4ParsedModelRecord(result);
+  result.pillarScores = mergeSalvagedMoment4PillarScoresIntoParsed(rawModelText, coerced.pillarScores);
+  result.keyEvidence = coerced.keyEvidence;
+  if (result.pillarConfidence == null && result.pillar_confidence != null) {
+    result.pillarConfidence = result.pillar_confidence;
+  }
+}
+
+/** After numerics survive normalize: ensure each scored marker has non-empty evidence for aggregation/sanitize. */
+export function fillMoment4KeyEvidenceWhenNumericScoreButMissingQuote(result: {
+  pillarScores?: Record<string, number | null | undefined> | null;
+  keyEvidence?: Record<string, string> | null;
+}): void {
+  const ps = result.pillarScores;
+  if (!ps || typeof ps !== 'object' || Array.isArray(ps)) return;
+  const next: Record<string, string> = { ...(result.keyEvidence ?? {}) };
+  for (const id of MOMENT4_SCORE_MARKER_IDS) {
+    const v = ps[id];
+    if (typeof v !== 'number' || !Number.isFinite(v)) continue;
+    const ev = next[id]?.trim();
+    if (!ev) {
+      next[id] = MOMENT4_SCORE_RECOVERED_EVIDENCE_LINE;
+    }
+  }
+  result.keyEvidence = next;
+}
+
+/**
+ * When the model returns explicit nulls for every Moment 4 marker but omits keyEvidence entirely, gates and
+ * DB persistence treat the bundle as unscored. Fill minimal non-empty evidence so completion and audit stay consistent.
+ */
+export function backfillMoment4KeyEvidenceIfScoresOtherwiseUnpersistable(
+  result: {
+    pillarScores?: Record<string, number | null | undefined> | null;
+    keyEvidence?: Record<string, string> | null;
+  },
+  debug?: Moment4ScoringParseDebug,
+): void {
+  const ps = result.pillarScores;
+  if (!ps || typeof ps !== 'object' || Array.isArray(ps)) return;
+  if (pillarScoresHaveNumericAssessment(ps)) return;
+  if (keyEvidenceHasNonEmptyAssessedText(result.keyEvidence)) return;
+  console.warn(
+    '[M4 Rubric] bundle incomplete backfill triggered (no numeric pillar scores + no assessable keyEvidence)',
+  );
+  if (debug?.rawModelResponse != null) {
+    console.warn('[M4 Rubric] raw model response (preview):', debug.rawModelResponse.slice(0, 500));
+  }
+  if (debug?.parsedSnapshot != null) {
+    console.warn('[M4 Rubric] parsed attempt (preview):', JSON.stringify(debug.parsedSnapshot).slice(0, 500));
+  }
+  const next: Record<string, string> = { ...(result.keyEvidence ?? {}) };
+  for (const id of MOMENT4_SCORE_MARKER_IDS) {
+    if (!next[id]?.trim()) {
+      next[id] = MOMENT4_BUNDLE_INCOMPLETE_EVIDENCE_LINE;
+    }
+  }
+  result.keyEvidence = next;
+}
+
+export const MOMENT5_SCORE_MARKER_IDS = [
+  'accountability',
+  'mentalizing',
+  'repair',
+  'regulation',
+  'contempt_expression',
+] as const;
+
+/**
+ * After {@link normalizeScoresByEvidence}, Moment 5 can become `{}` when every marker was dropped.
+ * Restore explicit `null` for each scored marker so {@link personalMomentBundleWasScored} and persistence
+ * match the Moment 4 merge pattern.
+ */
+export function mergeMoment5PillarScoresAfterEvidenceNormalize(
+  numericFiltered: Record<string, number>
+): Record<string, number | null> {
+  const out: Record<string, number | null> = {};
+  for (const id of MOMENT5_SCORE_MARKER_IDS) {
+    out[id] = Object.prototype.hasOwnProperty.call(numericFiltered, id) ? numericFiltered[id]! : null;
+  }
+  return out;
+}
+
+/** When every marker is null and there is no real evidence — minimal row so persistence sees a full key shape. */
+export const MOMENT5_BUNDLE_INCOMPLETE_EVIDENCE_LINE =
+  'Moment 5 incomplete model output; null scores retained for persistence.';
+
+/** Model returned a numeric pillar but no assessable quote (truncated JSON, lazy completion, etc.). */
+export const MOMENT5_SCORE_RECOVERED_EVIDENCE_LINE = MOMENT4_SCORE_RECOVERED_EVIDENCE_LINE;
+
+export type Moment5ScoringParseDebug = {
+  rawModelResponse?: string;
+  parsedSnapshot?: unknown;
+};
+
+export function coerceMoment5ParsedModelRecord(parsed: unknown): {
+  pillarScores: Record<string, unknown>;
+  keyEvidence: Record<string, string>;
+} {
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+    return { pillarScores: {}, keyEvidence: {} };
+  }
+  const o = parsed as Record<string, unknown>;
+  const psRaw = o.pillarScores ?? o.pillar_scores;
+  const pillarScores =
+    psRaw != null && typeof psRaw === 'object' && !Array.isArray(psRaw)
+      ? { ...(psRaw as Record<string, unknown>) }
+      : {};
+  const keRaw = o.keyEvidence ?? o.key_evidence;
+  const keyEvidence: Record<string, string> = {};
+  if (keRaw != null && typeof keRaw === 'object' && !Array.isArray(keRaw)) {
+    for (const [k, v] of Object.entries(keRaw as Record<string, unknown>)) {
+      keyEvidence[k] = typeof v === 'string' ? v : v == null ? '' : String(v);
+    }
+  }
+  return { pillarScores, keyEvidence };
+}
+
+export function mergeSalvagedMoment5PillarScoresIntoParsed(
+  rawModelText: string,
+  pillarScores: Record<string, unknown> | null | undefined,
+): Record<string, unknown> {
+  const out: Record<string, unknown> = {
+    ...(typeof pillarScores === 'object' && pillarScores && !Array.isArray(pillarScores) ? pillarScores : {}),
+  };
+  for (const id of MOMENT5_SCORE_MARKER_IDS) {
+    if (coerceScoreToFiniteNumber(out[id]) !== undefined) continue;
+    const re = new RegExp(`"${id}"\\s*:\\s*(\\d+(?:\\.\\d+)?)`, 'i');
+    const m = rawModelText.match(re);
+    if (m?.[1]) {
+      const n = Number(m[1]);
+      if (Number.isFinite(n)) out[id] = n;
+    }
+  }
+  return out;
+}
+
+/** Regex salvage for depth fields omitted when pillar scores are recovered from truncated JSON. */
+export function salvagePersonalMomentDepthFieldsFromRawModelText(raw: string): {
+  response_concreteness: ReturnType<typeof normalizeResponseConcreteness>;
+  emotional_vocab_count: number | null;
+  emotional_vocab_words: string[];
+  user_slice_word_count: number | null;
+} {
+  const rcMatch = raw.match(/"response_concreteness"\s*:\s*"(absent|low|moderate|high)"/i);
+  const response_concreteness = rcMatch ? normalizeResponseConcreteness(rcMatch[1]) : null;
+
+  const evcMatch = raw.match(/"emotional_vocab_count"\s*:\s*(\d+)/i);
+  const emotional_vocab_count =
+    evcMatch && Number.isFinite(Number(evcMatch[1])) ? Number(evcMatch[1]) : null;
+
+  const uswMatch = raw.match(/"user_slice_word_count"\s*:\s*(\d+)/i);
+  const user_slice_word_count =
+    uswMatch && Number.isFinite(Number(uswMatch[1])) ? Number(uswMatch[1]) : null;
+
+  const wordsMatch = raw.match(/"emotional_vocab_words"\s*:\s*\[([\s\S]*?)\]/i);
+  let emotional_vocab_words: string[] = [];
+  if (wordsMatch?.[1]) {
+    emotional_vocab_words = [...wordsMatch[1].matchAll(/"([^"\\]+)"/g)].map((m) => m[1]!.trim()).filter(Boolean);
+  }
+
+  return {
+    response_concreteness,
+    emotional_vocab_count,
+    emotional_vocab_words,
+    user_slice_word_count,
+  };
+}
+
+/**
+ * Coerce pillar/keyEvidence shapes and merge regex-salvaged pillar numerics before {@link normalizeScoresByEvidence}.
+ * Mutates `result` in place (Aria personal-moment scoring).
+ */
+export function applyMoment5PostParseCoercionAndSalvage(
+  rawModelText: string,
+  result: Record<string, unknown>,
+): void {
+  const coerced = coerceMoment5ParsedModelRecord(result);
+  result.pillarScores = mergeSalvagedMoment5PillarScoresIntoParsed(rawModelText, coerced.pillarScores);
+  result.keyEvidence = coerced.keyEvidence;
+  if (result.pillarConfidence == null && result.pillar_confidence != null) {
+    result.pillarConfidence = result.pillar_confidence;
+  }
+}
+
+/** Before normalize: ensure each scored marker has evidence so numerics are not dropped. */
+export function fillMoment5KeyEvidenceWhenNumericScoreButMissingQuote(result: {
+  pillarScores?: Record<string, number | null | undefined> | null;
+  keyEvidence?: Record<string, string> | null;
+}): void {
+  const ps = result.pillarScores;
+  if (!ps || typeof ps !== 'object' || Array.isArray(ps)) return;
+  const next: Record<string, string> = { ...(result.keyEvidence ?? {}) };
+  for (const id of MOMENT5_SCORE_MARKER_IDS) {
+    const v = coerceScoreToFiniteNumber(ps[id]);
+    if (v === undefined) continue;
+    const ev = next[id]?.trim();
+    if (!ev) {
+      next[id] = MOMENT5_SCORE_RECOVERED_EVIDENCE_LINE;
+    }
+  }
+  result.keyEvidence = next;
+}
+
+/** Coerce per-scenario model JSON (`pillar_scores`, `key_evidence`, etc.) before evidence normalization. */
+export function coerceScenarioScoreParsedModelRecord(parsed: unknown): {
+  pillarScores: Record<string, unknown>;
+  keyEvidence: Record<string, string>;
+  pillarConfidence: Record<string, unknown>;
+} {
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+    return { pillarScores: {}, keyEvidence: {}, pillarConfidence: {} };
+  }
+  const o = parsed as Record<string, unknown>;
+  const psRaw = o.pillarScores ?? o.pillar_scores;
+  const pillarScores =
+    psRaw != null && typeof psRaw === 'object' && !Array.isArray(psRaw)
+      ? { ...(psRaw as Record<string, unknown>) }
+      : {};
+  const keRaw = o.keyEvidence ?? o.key_evidence;
+  const keyEvidence: Record<string, string> = {};
+  if (keRaw != null && typeof keRaw === 'object' && !Array.isArray(keRaw)) {
+    for (const [k, v] of Object.entries(keRaw as Record<string, unknown>)) {
+      keyEvidence[k] = typeof v === 'string' ? v : v == null ? '' : String(v);
+    }
+  }
+  const pcRaw = o.pillarConfidence ?? o.pillar_confidence;
+  const pillarConfidence =
+    pcRaw != null && typeof pcRaw === 'object' && !Array.isArray(pcRaw)
+      ? { ...(pcRaw as Record<string, unknown>) }
+      : {};
+  return { pillarScores, keyEvidence, pillarConfidence };
+}
+
+/** Lift numeric pillar scores from truncated scenario JSON when the parsed object omitted them. */
+export function mergeSalvagedScenarioPillarScoresIntoParsed(
+  rawModelText: string,
+  markerIds: readonly string[],
+  pillarScores: Record<string, unknown> | null | undefined,
+): Record<string, unknown> {
+  const out: Record<string, unknown> = {
+    ...(typeof pillarScores === 'object' && pillarScores && !Array.isArray(pillarScores) ? pillarScores : {}),
+  };
+  for (const id of markerIds) {
+    if (coerceScoreToFiniteNumber(out[id]) !== undefined) continue;
+    const escaped = id.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const re = new RegExp(`["']?${escaped}["']?\\s*[:=]\\s*(-?\\d+(?:\\.\\d+)?)`, 'i');
+    const m = rawModelText.match(re);
+    if (m?.[1]) {
+      const n = Number(m[1]);
+      if (Number.isFinite(n)) out[id] = n;
+    }
+  }
+  return out;
+}
+
+/** Regex salvage for keyEvidence strings omitted when JSON truncates after pillarScores. */
+export function mergeSalvagedScenarioKeyEvidenceFromRaw(
+  rawModelText: string,
+  markerIds: readonly string[],
+  keyEvidence: Record<string, string>,
+): Record<string, string> {
+  const out = { ...keyEvidence };
+  for (const id of markerIds) {
+    if (out[id]?.trim()) continue;
+    const escaped = id.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const re = new RegExp(`["']?${escaped}["']?\\s*:\\s*"([^"\\\\]*(?:\\\\.[^"\\\\]*)*)"`, 'i');
+    const m = rawModelText.match(re);
+    if (m?.[1]) {
+      const unescaped = m[1].replace(/\\"/g, '"').trim();
+      if (unescaped) out[id] = unescaped;
+    }
+  }
+  return out;
+}
+
+/**
+ * Before {@link normalizeScoresByEvidence}: ensure each numeric marker has assessable evidence.
+ * Prefer transcript excerpt over the generic recovery line when the model omitted keyEvidence.
+ */
+export function fillScenarioKeyEvidenceWhenNumericScoreButMissingQuote(
+  markerIds: readonly string[],
+  result: {
+    pillarScores?: Record<string, number | null | undefined> | null;
+    keyEvidence?: Record<string, string> | null;
+  },
+  scenarioUserText: string,
+): void {
+  const ps = result.pillarScores;
+  if (!ps || typeof ps !== 'object' || Array.isArray(ps)) return;
+  const excerpt = (scenarioUserText ?? '').trim();
+  const quote =
+    excerpt.length > 0
+      ? `User (scenario slice): "${excerpt.length > 240 ? `${excerpt.slice(0, 240)}…` : excerpt}"`
+      : '';
+  const next: Record<string, string> = { ...(result.keyEvidence ?? {}) };
+  for (const id of markerIds) {
+    if (coerceScoreToFiniteNumber(ps[id]) === undefined) continue;
+    const ev = next[id]?.trim();
+    if (ev && !isNoEvidenceText(ev)) continue;
+    next[id] = quote || MOMENT4_SCORE_RECOVERED_EVIDENCE_LINE;
+  }
+  result.keyEvidence = next;
+}
+
+/**
+ * When the model returns explicit nulls for every Moment 5 marker but omits keyEvidence entirely, gates and
+ * DB persistence treat the bundle as unscored. Fill minimal non-empty evidence so completion and audit stay consistent.
+ */
+export function backfillMoment5KeyEvidenceIfScoresOtherwiseUnpersistable(
+  result: {
+    pillarScores?: Record<string, number | null | undefined> | null;
+    keyEvidence?: Record<string, string> | null;
+  },
+  debug?: Moment5ScoringParseDebug,
+): void {
+  const ps = result.pillarScores;
+  if (!ps || typeof ps !== 'object' || Array.isArray(ps)) return;
+  if (pillarScoresHaveNumericAssessment(ps)) return;
+  if (keyEvidenceHasNonEmptyAssessedText(result.keyEvidence)) return;
+  console.warn(
+    '[M5 Rubric] bundle incomplete backfill triggered (no numeric pillar scores + no assessable keyEvidence)',
+  );
+  if (debug?.rawModelResponse != null) {
+    console.warn('[M5 Rubric] raw model response (preview):', debug.rawModelResponse.slice(0, 500));
+  }
+  if (debug?.parsedSnapshot != null) {
+    console.warn('[M5 Rubric] parsed attempt (preview):', JSON.stringify(debug.parsedSnapshot).slice(0, 500));
+  }
+  const next: Record<string, string> = { ...(result.keyEvidence ?? {}) };
+  for (const id of MOMENT5_SCORE_MARKER_IDS) {
+    if (!next[id]?.trim()) {
+      next[id] = MOMENT5_BUNDLE_INCOMPLETE_EVIDENCE_LINE;
+    }
+  }
+  result.keyEvidence = next;
 }
 
 /** Named fixtures for tests — must NOT count as a temporally specific moment (habitual / values-only). */
@@ -231,6 +672,174 @@ export const MOMENT_5_CONFLICT_VALIDITY_CLARIFICATION_TEXT =
 export const MOMENT_5_ACCOUNTABILITY_PROBE_WITH_GRIEF_ACK_TEXT =
   'I appreciate you getting vulnerable with me. What was your part in how it unfolded?';
 
+/** Softer probe when the user gave philosophy/process framing without a specific conflict narrative. */
+export const MOMENT_5_ACCOUNTABILITY_PROBE_PHILOSOPHY_TEXT =
+  'That makes sense as a general approach. Can you think of a specific time you had a conflict with someone important to you — and what was your part in how it played out?';
+
+export const MOMENT_5_ACCOUNTABILITY_PROBE_PHILOSOPHY_WITH_GRIEF_ACK_TEXT =
+  'I appreciate you getting vulnerable with me. That makes sense as a general approach. Can you think of a specific time you had a conflict with someone important to you — and what was your part in how it played out?';
+
+const STRONG_ACCOUNTABILITY_MARKERS = [
+  'my part',
+  'i was',
+  'i did',
+  'i said',
+  'i should have',
+  'i could have',
+  "i wasn't",
+  "i didn't",
+  'my mistake',
+  'my fault',
+  'i contributed',
+  'i take responsibility',
+  'i own',
+  "that's on me",
+  'i tend to',
+  'i have a pattern',
+  'i realize i',
+  'i realise i',
+  'i acknowledge',
+] as const;
+
+/** Strong accountability via "I need to …" — excludes emotional-vent phrasing (Deb-style dump/hear). */
+function moment5StrongNeedToAccountability(lower: string): boolean {
+  if (/\bi\s+need\s+to\s+(dump|vent|express\s+my\s+feelings|share\s+my\s+feelings|be\s+heard|hear\s+them)\b/i.test(lower)) {
+    return false;
+  }
+  return /\bi\s+need\s+to\s+(own|work\s+on|take|apologize|apologise|change|improve|do\s+better|communicate|listen)\b/i.test(
+    lower
+  );
+}
+
+function moment5HasStrongAccountabilityMarker(text: string): boolean {
+  const lower = (text ?? '').trim().toLowerCase();
+  if (moment5StrongNeedToAccountability(lower)) return true;
+  return STRONG_ACCOUNTABILITY_MARKERS.some((marker) => lower.includes(marker));
+}
+
+/** Moderate self-ref that suggests engagement with one's role in a conflict episode (not generic philosophy). */
+function moment5ModerateSelfRefSkipsProbe(text: string): boolean {
+  if (!moment5ConflictEpisodeContext(text)) return false;
+  const lower = (text ?? '').trim().toLowerCase();
+  return (
+    /\bi\s+felt\s+(hurt|upset|angry|triggered|defensive|dismissed)\b/i.test(lower) ||
+    /\bi\s+feel\s+like\s+i\s+was\b/i.test(lower) ||
+    /\bi\s+was\s+too\s+harsh\s+in\s+the\s+argument\b/i.test(lower)
+  );
+}
+
+const MODERATE_SELF_REFERENCE_MARKERS = ['i feel', 'i think', 'i need', 'for me', "i've", "i'm"] as const;
+
+const CONFLICT_CONTEXT_MARKERS = [
+  'conflict',
+  'argument',
+  'fight',
+  'disagreement',
+  'tension',
+  'upset',
+  'hurt',
+  'wrong',
+  'apologize',
+  'apologise',
+  'sorry',
+  'mistake',
+] as const;
+
+export type Moment5AccountabilityProbeSignalAnalysis = {
+  hasStrongAccountability: boolean;
+  hasModerateSelfRef: boolean;
+  /** Keyword-level conflict mention (e.g. "I've had conflicts before"). */
+  hasConflictKeyword: boolean;
+  /** First-person engagement inside a described conflict episode — not abstract conflict talk alone. */
+  hasConflictEpisodeContext: boolean;
+  hasNarrative: boolean;
+};
+
+/** Conflict language tied to a described episode, not merely abstract mention of "conflicts". */
+export function moment5ConflictEpisodeContext(text: string): boolean {
+  const lower = (text ?? '').trim().toLowerCase();
+  const hasConflictKeyword = CONFLICT_CONTEXT_MARKERS.some((marker) => lower.includes(marker));
+  if (!hasConflictKeyword) return false;
+  return (
+    /\bi\s+had\s+a\s+conflict\b/i.test(lower) ||
+    /\bwe\s+(argued|fought|had\s+a\s+(fight|argument|disagreement))\b/i.test(lower) ||
+    /\b(i|we)\s+felt\s+(hurt|upset|angry|triggered|defensive|dismissed)\b/i.test(lower) ||
+    /\b(i|we)\s+(yelled|apologized|apologised|walked\s+away|shut\s+down|overreacted|escalated)\b/i.test(lower) ||
+    /\bi\s+told\s+(him|her|them)\b/i.test(lower) ||
+    /\bi\s+was\s+too\s+harsh\s+in\s+the\s+argument\b/i.test(lower)
+  );
+}
+
+export function analyzeMoment5AccountabilityProbeSignals(responseText: string): Moment5AccountabilityProbeSignalAnalysis {
+  const text = (responseText ?? '').trim().toLowerCase();
+  const hasStrongAccountability = moment5HasStrongAccountabilityMarker(responseText);
+  const hasModerateSelfRef = MODERATE_SELF_REFERENCE_MARKERS.some((marker) => text.includes(marker));
+  const hasConflictKeyword = CONFLICT_CONTEXT_MARKERS.some((marker) => text.includes(marker));
+  const hasConflictEpisodeContext = moment5ConflictEpisodeContext(responseText);
+  const hasNarrative = moment5PersonalNarrativeHasConcreteAnchor(responseText);
+  return {
+    hasStrongAccountability,
+    hasModerateSelfRef,
+    hasConflictKeyword,
+    hasConflictEpisodeContext,
+    hasNarrative,
+  };
+}
+
+/**
+ * Fire when the answer lacks explicit self-accountability — not gated on having a conflict narrative first.
+ */
+export function shouldFireAccountabilityProbe(responseText: string): boolean {
+  if (!responseText || responseText.trim().length === 0) return true;
+
+  if (moment5AnswerHasExplicitSelfAccountability(responseText)) {
+    console.log('[AccountabilityProbe] explicit self-accountability — not probing');
+    return false;
+  }
+
+  const selfRef = evaluateMoment5AccountabilitySelfReference(responseText);
+  if (
+    selfRef.self_reference_type === 'boundary_expression' ||
+    selfRef.self_reference_type === 'specific_ownership'
+  ) {
+    console.log('[AccountabilityProbe] self-reference type — not probing', selfRef.self_reference_type);
+    return false;
+  }
+
+  const { hasStrongAccountability, hasModerateSelfRef, hasConflictEpisodeContext } =
+    analyzeMoment5AccountabilityProbeSignals(responseText);
+
+  if (hasStrongAccountability) {
+    console.log('[AccountabilityProbe] strong accountability detected — not probing');
+    return false;
+  }
+
+  if (hasModerateSelfRef && hasConflictEpisodeContext && moment5ModerateSelfRefSkipsProbe(responseText)) {
+    console.log('[AccountabilityProbe] moderate self-ref with conflict episode engagement — not probing');
+    return false;
+  }
+
+  console.log('[AccountabilityProbe] no accountability signal found — probing', {
+    hasModerateSelfRef,
+    hasConflictEpisodeContext,
+  });
+  return true;
+}
+
+export function pickMoment5AccountabilityProbeSpokenText(
+  responseText: string,
+  opts?: { griefAckPrefix?: boolean }
+): string {
+  const { hasModerateSelfRef, hasConflictEpisodeContext } = analyzeMoment5AccountabilityProbeSignals(responseText);
+  const philosophyStyle = hasModerateSelfRef && !hasConflictEpisodeContext;
+  if (opts?.griefAckPrefix) {
+    return philosophyStyle
+      ? MOMENT_5_ACCOUNTABILITY_PROBE_PHILOSOPHY_WITH_GRIEF_ACK_TEXT
+      : MOMENT_5_ACCOUNTABILITY_PROBE_WITH_GRIEF_ACK_TEXT;
+  }
+  return philosophyStyle ? MOMENT_5_ACCOUNTABILITY_PROBE_PHILOSOPHY_TEXT : MOMENT_5_ACCOUNTABILITY_PROBE_TEXT;
+}
+
 /** Client-only — concrete anchor before accountability when the first answer is generic/process-only. */
 export const MOMENT_5_SPECIFICITY_REDIRECT_TEXT =
   'Can you think of a specific time — maybe with a partner, friend, or family member — and walk me through what happened?';
@@ -243,9 +852,37 @@ export const MOMENT_5_SPECIFICITY_REDIRECT_ALT_TEXT =
 export const MOMENT_5_PERSISTENT_ABSTRACT_MOVE_ON_TEXT =
   "That's okay — we don't need to force a specific story. Whenever you're ready, we can wrap up.";
 
+/** Client-injected when the first Moment 5 answer describes the conflict but not how it resolved. */
+export const MOMENT_5_RESOLUTION_FOLLOWUP_TEXT = 'How did it get resolved between you two?';
+
+export function looksLikeMoment5ResolutionFollowUpPrompt(text: string | null | undefined): boolean {
+  const n = (text ?? '').replace(/\s+/g, ' ').trim().toLowerCase();
+  if (!n) return false;
+  if (n === MOMENT_5_RESOLUTION_FOLLOWUP_TEXT.toLowerCase()) return true;
+  return (
+    /\bhow\s+did\s+it\s+get\s+resolved\b/i.test(n) &&
+    /\b(between\s+you\s+two|the\s+two\s+of\s+you|between\s+you)\b/i.test(n)
+  );
+}
+
+export function transcriptHasMoment5ResolutionFollowUpAsked(
+  transcript: readonly { role?: string; content?: string | null; isWelcomeBack?: boolean }[] | null | undefined,
+): boolean {
+  if (!Array.isArray(transcript)) return false;
+  return transcript.some(
+    (m) =>
+      m.role === 'assistant' &&
+      !m.isWelcomeBack &&
+      looksLikeMoment5ResolutionFollowUpPrompt(m.content ?? ''),
+  );
+}
+
 /** True when assistant turn is the scripted Moment 5 specificity redirect (before accountability probe). */
 export function looksLikeMoment5SpecificityRedirectPrompt(text: string | null | undefined): boolean {
-  const n = (text ?? '').replace(/\s+/g, ' ').trim().toLowerCase();
+  const n = normalizeInterviewTypography(text ?? '')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .toLowerCase();
   if (!n) return false;
   /** Canonical client inject + common model paraphrases */
   const canonical =
@@ -257,9 +894,88 @@ export function looksLikeMoment5SpecificityRedirectPrompt(text: string | null | 
   return canonical || relaxed;
 }
 
+/**
+ * When the client already delivered {@link MOMENT_5_SPECIFICITY_REDIRECT_TEXT}, remove a duplicate ask that the
+ * model glued into the same paragraph (post-processing only sees one `\\n\\n` block).
+ */
+export function stripEmbeddedMoment5SpecificityRedirectAsk(draft: string): string {
+  const t0 = (draft ?? '').trim();
+  if (!t0) return draft;
+  /** Do not use {@link looksLikeMoment5SpecificityRedirectPrompt} on the full draft — it matches any paragraph that merely *contains* the scripted ask. */
+  const normalized = normalizeInterviewTypography(t0);
+  let t = normalized;
+  const re = /\b(?:can|could)\s+you\s+think\s+of\s+a\s+specific\s+time\b[\s\S]{0,420}?\?/gi;
+  let prev = '';
+  while (prev !== t) {
+    prev = t;
+    t = t.replace(re, '').replace(/\s{2,}/g, ' ').trim();
+  }
+  return t
+    .replace(/^\s*[.,;—–\-–]\s*/g, '')
+    .replace(/\s+[.,;—–\-–]\s*$/g, '')
+    .trim();
+}
+
+/**
+ * Parallel streaming TTS flushes by sentence before {@link stripDuplicateMoment5SpecificityRedirectParagraphs}
+ * runs on the full assistant turn. When the client already spoke {@link MOMENT_5_SPECIFICITY_REDIRECT_TEXT},
+ * suppress model echoes of that line in a flushed chunk.
+ *
+ * @returns `null` when the whole flushed sentence should be skipped for TTS; otherwise the text to speak
+ * (may be a suffix after stripping a glued-in redirect that shared a sentence with an accountability ask).
+ */
+export function stripMoment5SpecificityRedirectStreamingEcho(
+  spoken: string,
+  redirectAlreadyInjected: boolean,
+): string | null {
+  const t0 = normalizeInterviewTypography((spoken ?? '').trim());
+  if (!redirectAlreadyInjected || !t0) {
+    return t0;
+  }
+  if (!looksLikeMoment5SpecificityRedirectPrompt(t0)) {
+    return t0;
+  }
+  const low = t0.toLowerCase();
+  const accountabilityTail =
+    /\bwhat was your part\b/.test(low) ||
+    /\bwhat part did you play\b/.test(low) ||
+    /\byour part in how\b/.test(low);
+  if (accountabilityTail) {
+    const wmiThrough = low.indexOf('walk me through');
+    const wmiThru = low.indexOf('walk me thru');
+    const wmi = wmiThrough >= 0 ? wmiThrough : wmiThru;
+    if (wmi < 0) {
+      return t0;
+    }
+    const cut = t0.indexOf('?', wmi);
+    if (cut < 0) {
+      return t0;
+    }
+    const remainder = t0.slice(cut + 1).trim().replace(/^[.\s—–-]+/, '');
+    return remainder.length > 0 ? remainder : null;
+  }
+  return null;
+}
+
 export function looksLikeMoment5ConflictValidityClarificationPrompt(text: string | null | undefined): boolean {
   const n = (text ?? '').replace(/\s+/g, ' ').trim().toLowerCase();
-  return n.includes('actually got tense between you two') || n.includes('resolve pretty smoothly');
+  if (!n) return false;
+  /** Client-injected canonical copy */
+  if (n.includes('actually got tense between you two') || n.includes('resolve pretty smoothly')) return true;
+  /**
+   * Models often paraphrase (drop "actually"/"pretty", reorder) — still the same construct so we must
+   * dedupe TTS/transcript and avoid stacking a second client inject on top of a model-delivered ask.
+   */
+  const mentionsTenseBetweenYouTwo =
+    /\b(between\s+you\s+two|the\s+two\s+of\s+you)\b/.test(n) && /\b(tense|tension|got\s+tense)\b/.test(n);
+  const mentionsResolveSmooth =
+    /\bresolve[d]?\b/.test(n) && /\b(smoothly|smooth)\b/.test(n);
+  const pointOrEitherBranch =
+    /\bwas\s+there\s+a\s+point\b/.test(n) ||
+    /\bdid\s+it\s+resolve\b/.test(n) ||
+    /\bor\s+did\b.*\bresolve\b/i.test(n) ||
+    /\bwas\s+it\s+tense\b/i.test(n);
+  return mentionsTenseBetweenYouTwo && mentionsResolveSmooth && pointOrEitherBranch;
 }
 
 export function moment5ResponseAddsTensionDetail(userText: string): boolean {
@@ -352,6 +1068,73 @@ export function moment5ResponseContainsDeathDisclosure(userText: string): boolea
   return explicitDeath || lostCloseRelative || lostPronounWithBereavementCue || goneEuphemism || capitalizedNameDied;
 }
 
+export type Moment5TranscriptTurn = {
+  role?: string;
+  content?: string | null;
+  interviewMoment?: number;
+};
+
+/** All user turns tagged `interviewMoment: 5` in order — used for anchor/probe gates across follow-ups. */
+export function combineMoment5UserTurnText(
+  transcript: readonly Moment5TranscriptTurn[] | null | undefined,
+): string {
+  const parts: string[] = [];
+  if (!Array.isArray(transcript)) return '';
+  for (const t of transcript) {
+    if (t.role !== 'user' || t.interviewMoment !== 5) continue;
+    const c = (t.content ?? '').trim();
+    if (c) parts.push(c);
+  }
+  return parts.join(' ');
+}
+
+/** True when any Moment 5 user turn (combined) already names a person/episode — not only the latest reply. */
+export function moment5TranscriptHasConcreteAnchor(
+  transcript: readonly Moment5TranscriptTurn[] | null | undefined,
+): boolean {
+  const combined = combineMoment5UserTurnText(transcript);
+  if (!combined) return false;
+  return moment5PersonalNarrativeHasConcreteAnchor(combined);
+}
+
+/** Pushback after a friend/partner redirect when the user already gave a concrete story earlier in M5. */
+export function moment5UserDeclinesConcreteReask(userText: string): boolean {
+  const t = userText.replace(/\s+/g, ' ').trim().toLowerCase();
+  if (!t) return false;
+  return (
+    /\bi\s+just\s+told\s+you\b/.test(t) ||
+    /\bi\s+already\s+told\s+you\b/.test(t) ||
+    /\bi\s+just\s+said\s+(that|so)\b/.test(t) ||
+    /\bi\s+already\s+(said|answered)\s+(that|this)\b/.test(t) ||
+    /\bdidn'?t\s+i\s+already\s+answer\b/.test(t) ||
+    /\bi\s+think\s+i\s+covered\s+that\b/.test(t)
+  );
+}
+
+/**
+ * Short replay when the user asks to hear the question again in Moment 5 but already answered substantively.
+ * Replays the immediate last interviewer question — not the full M4→5 bundle.
+ */
+export function buildMoment5ConfusionRepeatReplayAfterPriorAnswer(args: {
+  lastInterviewerText: string;
+}): string {
+  const last = (args.lastInterviewerText ?? '').trim();
+  if (last) {
+    const questions = last.match(/[^.!?]*\?/g);
+    const lastQuestion = questions?.[questions.length - 1]?.trim();
+    if (lastQuestion && lastQuestion.length >= 12) {
+      return `Got it — ${lastQuestion}`;
+    }
+  }
+  if (
+    isMoment5AssistantAnchor(last) ||
+    transcriptAssistantContainsMoment5PrimaryConflictQuestion(last)
+  ) {
+    return `Got it — ${MOMENT_5_ACCOUNTABILITY_QUESTION_TEXT}`;
+  }
+  return `Got it — ${MOMENT_5_ACCOUNTABILITY_QUESTION_TEXT}`;
+}
+
 /**
  * Moment 5 only: true when the user anchored to a specific relationship/person and a particular episode,
  * not only generic conflict advice or first-person process habits.
@@ -392,7 +1175,7 @@ export function moment5PersonalNarrativeHasConcreteAnchor(userText: string): boo
     /** "my best friend", "my late best friend" — not matched by `my friend` (word immediately after my). */
     /\bmy\s+(?:\w+\s+){0,3}friend\b/i.test(lower) ||
     /\b(best|close|childhood)\s+friend\b/i.test(lower) ||
-    /\b(my|our|the|a)\s+(friend|partner|ex|boss|coworker|colleague|neighbor|manager|teammate|flatmate)\b/i.test(lower) ||
+    /\b(my|our|the|a)\s+(friend|partner|ex|boss|coworker|co-worker|colleague|neighbor|manager|teammate|flatmate)\b/i.test(lower) ||
     /\bsomeone(?:\s+i\s+(?:trusted|cared\s+about|knew(?:\s+well)?)|\s+who|\s+that|\s+important|\s+close(?:\s+to)?)\b/i.test(
       lower,
     ) ||
@@ -402,8 +1185,11 @@ export function moment5PersonalNarrativeHasConcreteAnchor(userText: string): boo
 
   const dyadicOrEpisode =
     /\bwe ('?ve|had|got|were|argued|fought|disagreed|talked|made up|resolved|reconciled)\b/i.test(lower) ||
-    /\bwe (had a|had an|got into (a )?)(fight|argument|disagreement)\b/i.test(lower) ||
-    /\b(had|have)\s+an?\s+(fight|argument|disagreement)\b/i.test(lower) ||
+    /\bwe (had a|had an|got into (a )?)(fight|argument|disagreement|conflict|rupture)\b/i.test(lower) ||
+    /\b(i|we)\s+had\s+a\s+conflict\b/i.test(lower) ||
+    /\b(had|have)\s+an?\s+(fight|argument|disagreement|conflict|rupture)\b/i.test(lower) ||
+    /\b(she|he|they)\s+(was|were)\s+being\b/i.test(lower) ||
+    /\b(i|we)\s+stopped\s+engaging\b/i.test(lower) ||
     /\bwe\s+stopped\s+(talking|texting|hanging)\b/i.test(lower) ||
     /\bstopped\s+(talking|texting)\s+(to\s+each\s+other|completely)\b/i.test(lower) ||
     /\b(blew\s+up|blown\s+up|shut\s+down|stonewall(ed|ing)?|silent\s+treatment|cold\s+shoulder)\b/i.test(lower) ||
@@ -435,7 +1221,7 @@ export function moment5PersonalNarrativeHasConcreteAnchor(userText: string): boo
     /\b(there was a time|one time|at one point|i remember when)\b/i.test(lower) &&
     /\b(i|my|we)\b/i.test(lower);
   const conflictEpisodeLexicon =
-    /\b(argument|fight|disagreement|stopped talking|stopped texting|cut each other out|had a falling out|fell out|made up|talked again|worked out|resolved)\b/i.test(
+    /\b(argument|fight|disagreement|conflict|stopped talking|stopped texting|cut each other out|had a falling out|fell out|made up|talked again|worked out|resolved)\b/i.test(
       lower,
     );
   const strongNarrativeOverride =
@@ -466,14 +1252,303 @@ export function isMoment5InexperienceFallbackPrompt(text: string): boolean {
   );
 }
 
-/** True when assistant turn is the scripted Moment 5 accountability follow-up probe (with or without the warmth prefix). */
+/**
+ * True when text contains the Moment 5 accountability follow-up ask (scripted or common model paraphrase).
+ * Conflict-validity clarifications that only nudge "your part" without a direct accountability question are excluded.
+ */
 export function looksLikeMoment5AccountabilityProbeAssistantPrompt(text: string | null | undefined): boolean {
-  const t = (text ?? '').replace(/\s+/g, ' ').trim().toLowerCase();
-  return (
+  const raw = (text ?? '').replace(/\s+/g, ' ').trim();
+  if (!raw) return false;
+  const t = raw.toLowerCase();
+  const directAccountabilityAsk =
     t.includes('what was your part in how it unfolded') ||
     (t.includes('your part') && t.includes('unfolded')) ||
-    (t.includes('appreciate you getting vulnerable') && t.includes('your part'))
+    (t.includes('appreciate you getting vulnerable') && t.includes('your part')) ||
+    /\bwhat was your part in how\b/.test(t) ||
+    /\bwhat part did you play\b/.test(t) ||
+    /\byour part in how it (all )?(started|began|unfolded|played out|happened|went)\b/.test(t) ||
+    (t.includes('specific time you had a conflict') && t.includes('your part'));
+  if (!directAccountabilityAsk) return false;
+  /** Soft "hear more about your part" tail on conflict-validity clarifications — not the scripted probe. */
+  if (
+    looksLikeMoment5ConflictValidityClarificationPrompt(raw) &&
+    !/\bwhat was your part\b/.test(t) &&
+    !/\bwhat part did you play\b/.test(t) &&
+    !/\byour part in how\b/.test(t)
+  ) {
+    return false;
+  }
+  return true;
+}
+
+/**
+ * When the client already delivered the accountability probe, remove a duplicate ask that the model glued
+ * into the same paragraph (post-processing only sees one `\\n\\n` block).
+ */
+export function stripEmbeddedMoment5AccountabilityProbeAsk(draft: string): string {
+  const t0 = (draft ?? '').trim();
+  if (!t0) return draft;
+  let t = normalizeInterviewTypography(t0);
+  const patterns: RegExp[] = [
+    /\bI appreciate you getting vulnerable with me\.?\s*/gi,
+    /\bThat makes sense as a general approach\.?\s*/gi,
+    /\bwhat was your part in how\b[\s\S]{0,120}?\?/gi,
+    /\bwhat part did you play\b[\s\S]{0,120}?\?/gi,
+    /\b(?:can|could)\s+you\s+think\s+of\s+a\s+specific\s+time\b[\s\S]{0,420}?\byour part\b[\s\S]{0,120}?\?/gi,
+  ];
+  let prev = '';
+  while (prev !== t) {
+    prev = t;
+    for (const re of patterns) {
+      t = t.replace(re, '').replace(/\s{2,}/g, ' ').trim();
+    }
+  }
+  return t
+    .replace(/^\s*[.,;—–\-–]\s*/g, '')
+    .replace(/\s+[.,;—–\-–]\s*$/g, '')
+    .trim();
+}
+
+/**
+ * Parallel streaming TTS flushes by sentence before duplicate stripping on the full assistant turn.
+ * When the accountability probe was already spoken, suppress model echoes in a flushed chunk.
+ *
+ * @returns `null` when the whole flushed sentence should be skipped for TTS; otherwise the text to speak.
+ */
+export function stripMoment5AccountabilityProbeStreamingEcho(
+  spoken: string,
+  accountabilityProbeAlreadyAsked: boolean,
+): string | null {
+  const t0 = normalizeInterviewTypography((spoken ?? '').trim());
+  if (!accountabilityProbeAlreadyAsked || !t0) {
+    return t0;
+  }
+  if (looksLikeMoment5AccountabilityProbeAssistantPrompt(t0)) {
+    return null;
+  }
+  if (/\bwhat was your part in how\b/i.test(t0) || /\bwhat part did you play\b/i.test(t0)) {
+    return null;
+  }
+  return t0;
+}
+
+/** Emma's closing line from Scenario A — verbatim or common ASR variants. */
+export function scenarioAEmmaVeryClearClosingLineMentioned(text: string): boolean {
+  const t = text.toLowerCase().replace(/\u2019/g, "'");
+  return (
+    t.includes("you've made that very clear") ||
+    t.includes('you have made that very clear') ||
+    /\byou\s+made\s+that\s+very\s+clear\b/.test(t)
   );
+}
+
+/**
+ * True when assistant text re-asks about Emma's "you've made that very clear" line — canonical framework copy
+ * or common model paraphrases ("What did you think when Emma said…").
+ */
+export function scenarioAEmmaVeryClearContemptReask(text: string): boolean {
+  const t = normalizeInterviewTypography(text ?? '')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .toLowerCase()
+    .replace(/\u2019/g, "'");
+  if (!t || t.length > 360) return false;
+  /** Vignette body embeds the line narratively — not a contempt re-ask. */
+  if (t.includes('dinner plans') && t.includes('ryan takes a call')) return false;
+  if (!scenarioAEmmaVeryClearClosingLineMentioned(t)) return false;
+  /** Streaming may flush the em-dash lead before the "what do you make of…?" tail — not a delivered probe yet. */
+  if (/\bwhat about when emma says\b/.test(t) && !/\bwhat do you make of\b/.test(t)) {
+    return false;
+  }
+
+  const reaskCue =
+    /\bwhat about when emma says\b/.test(t) ||
+    /\bwhat do you make of\b/.test(t) ||
+    /\bwhat (?:did|do) you think (?:about )?when\b/.test(t) ||
+    /\bhow do you (?:read|take|understand)\b/.test(t) ||
+    (/\bwhen\s+(?:emma|she)\s+said\b/.test(t) && /\b(very\s+clear|made\s+that)\b/.test(t));
+
+  return reaskCue;
+}
+
+/** Canonical Scenario A contempt probe — client-forced and orphan-stream fallback. */
+export const SCENARIO_A_CONTEMPT_PROBE_DELIVERED_COPY =
+  "What about when Emma says 'you've made that very clear' — what do you make of that?";
+
+/**
+ * TTS-only for contempt-probe audio — omits vocalizing Emma's quoted line (vignette already contains it).
+ * Transcript/card keep {@link SCENARIO_A_CONTEMPT_PROBE_DELIVERED_COPY}.
+ */
+export const SCENARIO_A_CONTEMPT_PROBE_TTS_SPOKEN_COPY =
+  'What about when Emma says that — what do you make of that?';
+
+/** @deprecated Alias — use {@link SCENARIO_A_CONTEMPT_PROBE_TTS_SPOKEN_COPY}. */
+export const SCENARIO_A_CONTEMPT_PROBE_RESUME_REPEAT_TTS_COPY = SCENARIO_A_CONTEMPT_PROBE_TTS_SPOKEN_COPY;
+
+/** Map assistant speech (transcript/canonical) to contempt-probe TTS without re-vocalizing Emma's quote. */
+export function scenarioAContemptProbeTtsSpokenText(assistantSpeechText: string): string {
+  const stored = (assistantSpeechText ?? '').trim();
+  if (!stored) return assistantSpeechText;
+  if (stored.includes(SCENARIO_A_CONTEMPT_PROBE_DELIVERED_COPY)) {
+    return stored.replace(
+      SCENARIO_A_CONTEMPT_PROBE_DELIVERED_COPY,
+      SCENARIO_A_CONTEMPT_PROBE_TTS_SPOKEN_COPY,
+    );
+  }
+  if (looksLikeScenarioAContemptProbeQuestion(stored)) {
+    return SCENARIO_A_CONTEMPT_PROBE_TTS_SPOKEN_COPY;
+  }
+  return assistantSpeechText;
+}
+
+/** Map stored contempt-probe transcript text to resume-repeat TTS (transcript unchanged). */
+export function scenarioAContemptProbeResumeRepeatTtsText(storedAssistantText: string): string {
+  return scenarioAContemptProbeTtsSpokenText(storedAssistantText);
+}
+
+/** Canonical Scenario A repair ask after the contempt probe — injected when duplicate-strip empties the model turn. */
+export const SCENARIO_A_REPAIR_QUESTION_AFTER_CONTEMPT_COPY =
+  'And if you were Ryan? How would you repair this situation?';
+
+/** Scenario A contempt probe — "What about when Emma says 'you've made that very clear'…" */
+export function looksLikeScenarioAContemptProbeQuestion(text: string): boolean {
+  const tNorm = normalizeInterviewTypography(text ?? '')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .toLowerCase()
+    .replace(/\u2019/g, "'");
+  if (
+    /\bwhat do you make of emma'?s response there\b/.test(tNorm) ||
+    /\bwhat did you think of emma'?s response there\b/.test(tNorm) ||
+    /\bwhat do you make of emma'?s statement there\b/.test(tNorm)
+  ) {
+    return true;
+  }
+  if (scenarioAEmmaVeryClearContemptReask(text)) return true;
+  const t = text.toLowerCase().replace(/\u2019/g, "'");
+  const mentionsEmmaClosingLine = scenarioAEmmaVeryClearClosingLineMentioned(t);
+  const makeOfEmmaVeryClearProbe =
+    /\bwhat\s+do\s+you\s+make\s+of\b/.test(t) &&
+    /\bemma\b/.test(t) &&
+    /\b(very\s+clear|you'?ve\s+made\s+that|you\s+made\s+that)\b/.test(t);
+  const shortGarbledMakeOfEmma =
+    t.length < 220 &&
+    /\bwhat do you make of\b/.test(t) &&
+    /\bemma\b/.test(t) &&
+    /\bvery\s+clear\b/.test(t);
+  return makeOfEmmaVeryClearProbe || shortGarbledMakeOfEmma || (mentionsEmmaClosingLine && /\bwhat do you make of emma'?s statement\b/.test(t));
+}
+
+/**
+ * Streaming TTS may flush before the "what do you make of that?" tail after an em dash.
+ * Hold the Emma-line lead until the next sentence completes the contempt probe.
+ */
+export function isIncompleteScenarioAContemptProbeLeadSentence(text: string): boolean {
+  const t = normalizeInterviewTypography(text ?? '')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .toLowerCase()
+    .replace(/\u2019/g, "'");
+  if (!t) return false;
+  /** Defer em-dash split leads even when reask heuristics would treat the chunk as a full probe. */
+  if (
+    scenarioAEmmaVeryClearClosingLineMentioned(t) &&
+    /\bwhat about when emma says\b/.test(t) &&
+    !/\bwhat do you make of (that|it|emma)\b/.test(t)
+  ) {
+    return true;
+  }
+  if (looksLikeScenarioAContemptProbeQuestion(text)) return false;
+  if (!scenarioAEmmaVeryClearClosingLineMentioned(t)) return false;
+  if (/\bwhat do you make of (that|it)\b/.test(t)) return false;
+  return (
+    /\bwhat about when emma says\b/.test(t) ||
+    (/\bwhat (?:did|do) you think when\b/.test(t) && /\bwhen\s+(?:emma|she)\s+said\b/.test(t))
+  );
+}
+
+/**
+ * Parallel streaming may defer the Emma-line lead, then flush the full contempt probe as the next sentence.
+ * Prepend only when the next chunk is not already a complete probe (avoids hearing the quote twice).
+ */
+export function mergeDeferredScenarioAContemptProbeLeadWithNextSentence(
+  deferredLead: string,
+  nextSentence: string,
+): string {
+  const lead = (deferredLead ?? '').trim();
+  const next = (nextSentence ?? '').trim();
+  if (!lead) return next;
+  if (!next) return lead;
+  if (looksLikeScenarioAContemptProbeQuestion(next)) {
+    return next;
+  }
+  const nextNorm = next.toLowerCase().replace(/\u2019/g, "'");
+  const leadNorm = lead.toLowerCase().replace(/\u2019/g, "'");
+  if (
+    scenarioAEmmaVeryClearClosingLineMentioned(nextNorm) &&
+    nextNorm.includes(leadNorm.slice(0, Math.min(leadNorm.length, 48)))
+  ) {
+    return next;
+  }
+  return `${lead} ${next}`.trim();
+}
+
+/** Remove repeated Scenario A contempt-probe asks after one was already delivered (model loop / ASR variants). */
+export function stripScenarioAContemptProbeQuestion(text: string): string {
+  let s = text;
+  const removals: RegExp[] = [
+    /\n?\s*What about when Emma says[^\n]*?\bwhat do you make of (that|it)\??\s*/gi,
+    /\n?\s*What do you make of Emma['\u2019]s statement when she says[^\n]*?\??\s*/gi,
+    /\n?\s*What (?:did|do) you think when[^\n]*?(?:very\s+clear|made that very clear)[^\n?]*\??\s*/gi,
+    /\n?\s*What do you make of[^\n]{0,140}Emma[^\n]{0,180}very clear[^\n.?!]*\??\s*/gi,
+    /\n?\s*What do you make of[\s\S]{0,320}?Emma[\s\S]{0,360}?(?:very\s+clear|you'?ve\s+made|you\s+made\s+that)[\s\S]{0,120}?\??\s*/gi,
+  ];
+  for (const re of removals) {
+    s = s.replace(re, '\n');
+  }
+  return s.replace(/\n{3,}/g, '\n\n').trim();
+}
+
+/** When the contempt probe was already delivered, remove a duplicate ask glued into the same paragraph. */
+export function stripEmbeddedScenarioAContemptProbeAsk(draft: string): string {
+  const t0 = (draft ?? '').trim();
+  if (!t0) return draft;
+  let t = normalizeInterviewTypography(t0);
+  const patterns: RegExp[] = [
+    /\bWhat about when Emma says[\s\S]{0,220}?\bwhat do you make of (?:that|it)\??\s*/gi,
+    /\bWhat do you make of Emma['\u2019]s statement when she says[\s\S]{0,220}?\??\s*/gi,
+    /\bWhat (?:did|do) you think when[\s\S]{0,220}?(?:very\s+clear|made that very clear)[\s\S]{0,80}?\??\s*/gi,
+    /\bWhat do you make of[\s\S]{0,320}?Emma[\s\S]{0,360}?(?:very\s+clear|you'?ve\s+made|you\s+made\s+that)[\s\S]{0,120}?\??\s*/gi,
+  ];
+  let prev = '';
+  while (prev !== t) {
+    prev = t;
+    for (const re of patterns) {
+      t = t.replace(re, '').replace(/\s{2,}/g, ' ').trim();
+    }
+  }
+  return t
+    .replace(/^\s*[.,;—–\-–]\s*/g, '')
+    .replace(/\s+[.,;—–\-–]\s*$/g, '')
+    .trim();
+}
+
+/**
+ * Parallel streaming TTS flushes by sentence before duplicate stripping on the full assistant turn.
+ * When the Scenario A contempt probe was already spoken, suppress model echoes in a flushed chunk.
+ */
+export function stripScenarioAContemptProbeStreamingEcho(
+  spoken: string,
+  contemptProbeAlreadyAsked: boolean,
+): string | null {
+  const t0 = normalizeInterviewTypography((spoken ?? '').trim());
+  if (!contemptProbeAlreadyAsked || !t0) {
+    return t0;
+  }
+  if (looksLikeScenarioAContemptProbeQuestion(t0) || scenarioAEmmaVeryClearContemptReask(t0)) {
+    return null;
+  }
+  return t0;
 }
 
 export type Moment5AccountabilityProbeEvaluation = {
@@ -567,15 +1642,12 @@ export function evaluateMoment5AccountabilitySelfReference(
   }
 
   const boundaryExpression =
-    /\bi\s+(would\s+have\s+appreciated|would'?ve\s+appreciated|needed|need|wanted|want|set\s+a\s+limit|set\s+a\s+boundary)\b/i.test(
-      lower
-    ) ||
+    /\bi\s+(would\s+have\s+appreciated|would'?ve\s+appreciated)\b/i.test(lower) ||
+    /\bi\s+(set\s+a\s+limit|set\s+a\s+boundary)\b/i.test(lower) ||
     /\bi\s+don'?t\s+take\s+(your|his|her|their|someone'?s)?\s*(opinion|criticism|feedback)\s+seriously\b/i.test(
       lower
     ) ||
-    /\bi\s+told\s+(him|her|them)\b.{0,120}\b(appreciated|needed|need|wanted|want|don'?t\s+take|limit|boundary)\b/i.test(
-      lower
-    );
+    /\bi\s+told\s+(him|her|them)\b.{0,120}\b(appreciated|limit|boundary|don'?t\s+take)\b/i.test(lower);
   if (boundaryExpression) {
     return { accountability_probe_self_reference_detected: true, self_reference_type: 'boundary_expression' };
   }
@@ -655,6 +1727,26 @@ export function moment5ResponseIsAbstract(userText: string): boolean {
 }
 
 /**
+ * Client-injected specificity redirect — independent of accountability `shouldProbe`.
+ * Thin answers (`too_short`) previously skipped the redirect block and hit the model, which could
+ * yield elongating-only turns stripped to empty transcript rows.
+ */
+export function shouldInjectMoment5SpecificityRedirect(params: {
+  userText: string;
+  narrativeConcrete: boolean;
+  answeringAfterSpecificityRedirect: boolean;
+  specificityRedirectIssued: boolean;
+  specificityRedirectInTranscript: boolean;
+}): boolean {
+  if (params.narrativeConcrete) return false;
+  if (params.answeringAfterSpecificityRedirect) return false;
+  if (params.specificityRedirectIssued || params.specificityRedirectInTranscript) return false;
+  const evalResult = evaluateMoment5AccountabilityProbe(params.userText);
+  if (evalResult.reason === 'too_short') return true;
+  return moment5ResponseIsAbstract(params.userText);
+}
+
+/**
  * At most one scripted follow-up: fire unless the user already names their **own** contribution
  * to the tension (not only story-telling or other-blame).
  */
@@ -663,16 +1755,33 @@ export function evaluateMoment5AccountabilityProbe(userText: string): Moment5Acc
   const lower = t.toLowerCase();
   const wordCount = t.split(/\s+/).filter(Boolean).length;
   const selfReference = evaluateMoment5AccountabilitySelfReference(t);
+  const signals = analyzeMoment5AccountabilityProbeSignals(t);
+
+  console.log('[AccountabilityProbe] response text:', t.slice(0, 200));
+  console.log('[AccountabilityProbe] hasNarrative:', signals.hasNarrative);
+  console.log('[AccountabilityProbe] hasSelfReference:', selfReference.accountability_probe_self_reference_detected);
+  console.log('[AccountabilityProbe] hasStrongAccountability:', signals.hasStrongAccountability);
+  console.log('[AccountabilityProbe] hasModerateSelfRef:', signals.hasModerateSelfRef);
+  console.log('[AccountabilityProbe] hasConflictKeyword:', signals.hasConflictKeyword);
+  console.log('[AccountabilityProbe] hasConflictEpisodeContext:', signals.hasConflictEpisodeContext);
+
+  if (moment5UserDeclinesConcreteReask(t)) {
+    return { shouldProbe: false, reason: 'decline_or_vague_evade', selfReference };
+  }
   if (t.length < 36 || wordCount < 10) {
     return { shouldProbe: false, reason: 'too_short', selfReference };
   }
   if (/\b(i don'?t have|nothing comes|can'?t think|no conflict|never really|not sure what to say)\b/i.test(lower) && t.length < 100) {
     return { shouldProbe: false, reason: 'decline_or_vague_evade', selfReference };
   }
-  if (selfReference.accountability_probe_self_reference_detected) {
-    return { shouldProbe: false, reason: 'explicit_self_accountability', selfReference };
+
+  const probeConditionMet = shouldFireAccountabilityProbe(t);
+  console.log('[AccountabilityProbe] probeConditionMet:', probeConditionMet);
+
+  if (probeConditionMet) {
+    return { shouldProbe: true, reason: 'lacks_explicit_self_accountability', selfReference };
   }
-  return { shouldProbe: true, reason: 'lacks_explicit_self_accountability', selfReference };
+  return { shouldProbe: false, reason: 'explicit_self_accountability', selfReference };
 }
 
 /** @deprecated Prefer {@link evaluateMoment5AccountabilityProbe} for logging; boolean is equivalent to `shouldProbe`. */
@@ -698,11 +1807,23 @@ export function transcriptAssistantContainsMoment5PrimaryConflictQuestion(conten
 }
 
 /**
+ * True when TTS has reached the scripted M5 conflict intro (including the first streaming sentence).
+ * Used to refresh Show scenario as soon as the conflict question begins, not after the full bundle ends.
+ */
+export function spokenTextStartsMoment5PrimaryConflictQuestion(content: string | null | undefined): boolean {
+  if (content == null || typeof content !== 'string') return false;
+  if (looksLikeMoment5AccountabilityProbeAssistantPrompt(content)) return false;
+  const lower = content.replace(/\s+/g, ' ').trim().toLowerCase();
+  return lower.includes('think of a time when you had a conflict with someone important');
+}
+
+/**
  * True when an assistant turn is (or contains) the Moment 5 primary prompt, legacy appreciation prompts,
  * or related pivots. Used to slice the transcript for post-interview Moment 5 scoring.
  */
 export function isMoment5AssistantAnchor(content: string | null | undefined): boolean {
   if (!content) return false;
+  if (looksLikeMoment4ThresholdQuestion(content)) return false;
   const c = content.replace(/\s+/g, ' ').trim();
   const lower = c.toLowerCase();
   if (lower.includes('conflict or disagreement with someone important')) return true;
@@ -990,11 +2111,26 @@ export function normalizeInterviewApostrophesForMatching(s: string): string {
 }
 
 /**
+ * ASR often mishears "that line" as "lot line" / "lotline" when the user deictically refers to Emma's last beat.
+ * Normalize before Scenario A contempt skip / coverage regexes.
+ */
+export function normalizeScenarioAThatLineAsrTypos(s: string): string {
+  return s
+    .replace(/\b[Ll]ot\s*line\b/g, 'that line')
+    .replace(/\b[Ll]otline\b/g, 'that line');
+}
+
+/**
  * User echoed Emma's "you've made that very clear" (or a close ASR variant).
  * When true, do not ask the scripted contempt follow-up about that same line.
  */
 export function userReferencesEmmaClosingLineQuote(text: string): boolean {
-  const lower = normalizeInterviewApostrophesForMatching(text).replace(/\s+/g, ' ').toLowerCase();
+  const squashed = text.replace(/\s+/g, ' ').trim();
+  const lower = normalizeScenarioAThatLineAsrTypos(
+    normalizeInterviewApostrophesForMatching(squashed),
+  )
+    .replace(/\s+/g, ' ')
+    .toLowerCase();
 
   if (lower.includes("you've made that very clear")) return true;
   if (lower.includes('you have made that very clear')) return true;
@@ -1021,6 +2157,34 @@ export function userReferencesEmmaClosingLineQuote(text: string): boolean {
   return false;
 }
 
+/** Minimal message shape for {@link aggregateScenario1Moment1UserTextForContemptGate}. */
+export type Scenario1Moment1UserMessageLike = {
+  role: string;
+  content?: string;
+  scenarioNumber?: number;
+  interviewMoment?: number;
+};
+
+/**
+ * Join all Scenario 1, interview-moment-1 user turns (e.g. initial Q1 + short resume follow-up).
+ * Used so contempt-probe skip/coverage still sees Emma-line engagement after welcome-back when the
+ * current utterance alone is too short to match.
+ */
+export function aggregateScenario1Moment1UserTextForContemptGate(
+  messages: readonly Scenario1Moment1UserMessageLike[],
+): string {
+  const parts: string[] = [];
+  for (const m of messages) {
+    if (m.role !== 'user') continue;
+    if ((m.scenarioNumber ?? 0) !== 1) continue;
+    const im = m.interviewMoment;
+    if (im !== undefined && im !== 1) continue;
+    const c = String(m.content ?? '').trim();
+    if (c) parts.push(c);
+  }
+  return parts.join('\n').trim();
+}
+
 /** Skip reasons for {@link evaluateScenarioAQ1ContemptProbePreProbeSkip} (auditable). */
 export type ScenarioAContemptProbeSkipReason =
   | 'literal_quote_present'
@@ -1037,10 +2201,30 @@ export function evaluateScenarioAQ1ContemptProbePreProbeSkip(text: string): {
 } {
   const t = text.replace(/\s+/g, ' ').trim();
   if (t.length < 8) return { skip: false, reason: null };
-  const lower = normalizeInterviewApostrophesForMatching(t).toLowerCase();
+  const lower = normalizeScenarioAThatLineAsrTypos(
+    normalizeInterviewApostrophesForMatching(t),
+  )
+    .replace(/\s+/g, ' ')
+    .toLowerCase();
+  const onScenarioATopic = SCENARIO_A_TOPIC_RE.test(t);
 
   /** Condition 1 — literal quote or close ASR variant (same line must not get a second scripted ask). */
   if (userReferencesEmmaClosingLineQuote(t)) return { skip: true, reason: 'literal_quote_present' };
+
+  /** User named Emma/Ryan and described Emma's closing move ("not asking…", "already knows he won't") — same beat as "you've made that very clear". */
+  const namesEmmaOrRyan = /\b(emma|ryan)\b/i.test(lower);
+  const emmaClosingRhetoricNamed =
+    onScenarioATopic &&
+    namesEmmaOrRyan &&
+    (/\bshe'?s\s+not\s+asking\s+(?:him|ryan|her)\s+to\s+stop\b/i.test(lower) ||
+      /\bshe\s+isn'?t\s+asking\s+(?:him|ryan|her)\s+to\s+stop\b/i.test(lower) ||
+      /\btelling\s+(?:him|ryan|her)\s+she\s+already\s+knows\b/i.test(lower) ||
+      /\bshe'?s\s+telling\s+(?:him|ryan|her)\s+she\s+already\s+knows\b/i.test(lower) ||
+      /\bshe\s+already\s+knows\s+(?:that\s+)?(?:he|ryan)\s+won'?t\b/i.test(lower) ||
+      /\balready\s+knows\s+(?:he|ryan)\s+won'?t\b/i.test(lower));
+  if (emmaClosingRhetoricNamed) {
+    return { skip: true, reason: 'register_addressed' };
+  }
 
   /** Condition 2 — register of the line (lexicon + Emma/line context, or explicit deeper-than-frustration phrases). */
   const registerLexicon =
@@ -1051,8 +2235,11 @@ export function evaluateScenarioAQ1ContemptProbePreProbeSkip(text: string): {
     );
   const deeperThanSurfaceFrustration =
     /\bshe'?s\s+given\s+up\b/i.test(lower) ||
+    /\bgiven\s+up\s+on\b/i.test(lower) ||
+    /\bresignation\b/i.test(lower) ||
     /\bstopped\s+expecting\b/i.test(lower) ||
     /\bshe'?s\s+shutting\s+down\b/i.test(lower) ||
+    (onScenarioATopic && /\b(a\s+)?shutdown\b/i.test(lower)) ||
     /\bwriting\s+him\s+off\b/i.test(lower) ||
     /\b(not\s+just\s+frustration|that'?s\s+not\s+just\s+frustration)\b/i.test(lower) ||
     /\bgo(es)?\s+deeper\s+than\s+tonight\b/i.test(lower) ||
@@ -1075,7 +2262,11 @@ export function evaluateScenarioAQ1ContemptProbePreProbeSkip(text: string): {
     /\bisn'?t\s+just\s+about\s+tonight\b/i.test(lower) ||
     /\bthat\s+line\s+shows\b/i.test(lower) ||
     /\bshe'?s\s+resigned\s+to\s+it\b/i.test(lower) ||
-    /\bthat\s+comment\s+is\s+about\s+more\s+than\b/i.test(lower);
+    /\bthat\s+comment\s+is\s+about\s+more\s+than\b/i.test(lower) ||
+    (/\bthat\s+line\b/i.test(lower) &&
+      /\b(shutdown|not\s+(?:just\s+)?(?:a\s+)?complaint|resigned|dismissive|closing|sarcastic|sting)\b/i.test(
+        lower,
+      ));
 
   if (patternTiedToLine) {
     return { skip: true, reason: 'pattern_interpretation_tied_to_line' };
@@ -1095,25 +2286,37 @@ export function hasScenarioAQ1ContemptProbeCoverage(text: string): boolean {
   const t = text.replace(/\s+/g, ' ').trim();
   if (t.length < 10) return false;
   if (!SCENARIO_A_TOPIC_RE.test(t)) return false;
-  const lower = normalizeInterviewApostrophesForMatching(t).toLowerCase();
+  const lower = normalizeScenarioAThatLineAsrTypos(
+    normalizeInterviewApostrophesForMatching(t),
+  )
+    .replace(/\s+/g, ' ')
+    .toLowerCase();
 
   const hasInterpretiveCue =
     /\b(what\s+she\s+meant|what\s+emma\s+meant|what\s+emma\s+was\s+(getting\s+at|trying\s+to\s+say)|she\s+meant|when\s+she\s+said|she\s+was\s+basically\s+saying|emma'?s\s+point\s+was|that\s+(line|statement|comment|response|remark|phrase|phrasing)|the\s+subtext\s+was|the\s+undertone\s+was|the\s+way\s+she\s+said|the\s+way\s+that\s+landed|that\s+came\s+across\s+as|it\s+landed\s+as|tone|that\s+comment\s+from\s+emma|emma'?s\s+(response|wording)\s+there)\b/.test(
       lower
     );
+  const referencesEmmaClosingRhetoric =
+    /\bshe'?s\s+not\s+asking\s+(?:him|ryan|her)\s+to\s+stop\b/i.test(lower) ||
+    /\bshe\s+isn'?t\s+asking\s+(?:him|ryan|her)\s+to\s+stop\b/i.test(lower) ||
+    /\btelling\s+(?:him|ryan|her)\s+she\s+already\s+knows\b/i.test(lower) ||
+    /\bshe'?s\s+telling\s+(?:him|ryan|her)\s+she\s+already\s+knows\b/i.test(lower) ||
+    /\bshe\s+already\s+knows\s+(?:that\s+)?(?:he|ryan)\s+won'?t\b/i.test(lower) ||
+    /\balready\s+knows\s+(?:he|ryan)\s+won'?t\b/i.test(lower);
   const referencesEmmaFinalLine =
     userReferencesEmmaClosingLineQuote(t) ||
     (lower.includes('very clear') && /\bemma\b/.test(lower)) ||
-    (/\bemma\b/.test(lower) && hasInterpretiveCue);
+    (/\bemma\b/.test(lower) && hasInterpretiveCue) ||
+    (/\b(emma|ryan)\b/.test(lower) && referencesEmmaClosingRhetoric);
 
   /** Hostile / verdict / relational-sting reads — not indirectness alone (see passive-aggressive rule below). */
   const hasStrongContemptQualityRead =
-    /\b(cont(empt|emptuous)|harsh|cutting|dismissive|dismissed|cold|biting|sarcastic|verdict|mean|punitive|punish(es|ing)?|shut(ting)?\s+down|clos(e|ing|es)?\s+off|clos(es|ing)?\s+the\s+door|door[- ]?clos|last\s+word|finality|superior|condescend|condescending|derogat|belittl|scathing|hostile|demean|degrad|mock|mockery|sting|walling|stonewall|jab|dig|put[- ]?down|swipe|loaded|taking\s+a\s+shot)\b/i.test(
+    /\b(cont(empt|emptuous)|harsh|cutting|dismissive|dismissed|cold|biting|sarcastic|verdict|mean|punitive|punish(es|ing)?|shut(ting)?\s+down|shutdown|clos(e|ing|es)?\s+off|clos(es|ing)?\s+the\s+door|door[- ]?clos|last\s+word|finality|superior|condescend|condescending|derogat|belittl|scathing|hostile|demean|degrad|mock|mockery|sting|walling|stonewall|jab|dig|put[- ]?down|swipe|loaded|taking\s+a\s+shot)\b/i.test(
       lower
     );
   /** Substantive interpretive read of the line's relational meaning even without explicit contempt adjectives. */
   const hasSubstantiveInterpretiveRead =
-    /\b(accumulated\s+frustration|built[- ]?up\s+frustration|established\s+behavior|not\s+an\s+isolated\s+incident|current\s+pattern|for\s+some\s+time|tolerated\s+for\s+some\s+time|response\s+to\s+established\s+behavior|prioritiz(?:e|es|ing)\s+(his|her|their)\s+family)\b/i.test(
+    /\b(accumulated\s+frustration|built[- ]?up\s+frustration|established\s+behavior|not\s+an\s+isolated\s+incident|current\s+pattern|for\s+some\s+time|for\s+a\s+while|tolerated\s+for\s+some\s+time|response\s+to\s+established\s+behavior|prioritiz(?:e|es|ing)\s+(his|her|their)\s+family)\b/i.test(
       lower
     );
 
@@ -1126,6 +2329,13 @@ export function hasScenarioAQ1ContemptProbeCoverage(text: string): boolean {
       lower
     );
 
+  /** Named Emma/Ryan + explicit read of Emma's closing move — sufficient without contempt adjectives (e.g. "won't change"). */
+  if (/\b(emma|ryan)\b/.test(lower) && referencesEmmaClosingRhetoric) {
+    if (onlyPassiveAggressive) return false;
+    if (minimizesEmmaLineRead && !hasStrongContemptQualityRead) return false;
+    return true;
+  }
+
   if (!referencesEmmaFinalLine) return false;
   if (onlyPassiveAggressive) return false;
   if (minimizesEmmaLineRead && !hasStrongContemptQualityRead) return false;
@@ -1137,6 +2347,7 @@ export function debugScenarioAQ1ContemptProbeCoverageDetail(text: string): {
   normalizedLength: number;
   hasScenarioATopic: boolean;
   hasInterpretiveCue: boolean;
+  referencesEmmaClosingRhetoric: boolean;
   referencesEmmaFinalLine: boolean;
   hasStrongContemptQualityRead: boolean;
   hasSubstantiveInterpretiveRead: boolean;
@@ -1147,21 +2358,33 @@ export function debugScenarioAQ1ContemptProbeCoverageDetail(text: string): {
 } {
   const t = text.replace(/\s+/g, ' ').trim();
   const hasScenarioATopic = SCENARIO_A_TOPIC_RE.test(t);
-  const lower = normalizeInterviewApostrophesForMatching(t).toLowerCase();
+  const lower = normalizeScenarioAThatLineAsrTypos(
+    normalizeInterviewApostrophesForMatching(t),
+  )
+    .replace(/\s+/g, ' ')
+    .toLowerCase();
   const hasInterpretiveCue =
     /\b(what\s+she\s+meant|what\s+emma\s+was\s+(getting\s+at|trying\s+to\s+say)|she\s+meant|when\s+she\s+said|she\s+was\s+basically\s+saying|emma'?s\s+point\s+was|that\s+(line|statement|comment|response|remark|phrase|phrasing)|the\s+subtext\s+was|the\s+undertone\s+was|the\s+way\s+she\s+said|the\s+way\s+that\s+landed|that\s+came\s+across\s+as|it\s+landed\s+as|tone|that\s+comment\s+from\s+emma|emma'?s\s+(response|wording)\s+there)\b/.test(
       lower
     );
+  const referencesEmmaClosingRhetoric =
+    /\bshe'?s\s+not\s+asking\s+(?:him|ryan|her)\s+to\s+stop\b/i.test(lower) ||
+    /\bshe\s+isn'?t\s+asking\s+(?:him|ryan|her)\s+to\s+stop\b/i.test(lower) ||
+    /\btelling\s+(?:him|ryan|her)\s+she\s+already\s+knows\b/i.test(lower) ||
+    /\bshe'?s\s+telling\s+(?:him|ryan|her)\s+she\s+already\s+knows\b/i.test(lower) ||
+    /\bshe\s+already\s+knows\s+(?:that\s+)?(?:he|ryan)\s+won'?t\b/i.test(lower) ||
+    /\balready\s+knows\s+(?:he|ryan)\s+won'?t\b/i.test(lower);
   const referencesEmmaFinalLine =
     userReferencesEmmaClosingLineQuote(t) ||
     (lower.includes('very clear') && /\bemma\b/.test(lower)) ||
-    (/\bemma\b/.test(lower) && hasInterpretiveCue);
+    (/\bemma\b/.test(lower) && hasInterpretiveCue) ||
+    (/\b(emma|ryan)\b/.test(lower) && referencesEmmaClosingRhetoric);
   const hasStrongContemptQualityRead =
-    /\b(cont(empt|emptuous)|harsh|cutting|dismissive|dismissed|cold|biting|sarcastic|verdict|mean|punitive|punish(es|ing)?|shut(ting)?\s+down|clos(e|ing|es)?\s+off|clos(es|ing)?\s+the\s+door|door[- ]?clos|last\s+word|finality|superior|condescend|condescending|derogat|belittl|scathing|hostile|demean|degrad|mock|mockery|sting|walling|stonewall|jab|dig|put[- ]?down|swipe|loaded|taking\s+a\s+shot)\b/i.test(
+    /\b(cont(empt|emptuous)|harsh|cutting|dismissive|dismissed|cold|biting|sarcastic|verdict|mean|punitive|punish(es|ing)?|shut(ting)?\s+down|shutdown|clos(e|ing|es)?\s+off|clos(es|ing)?\s+the\s+door|door[- ]?clos|last\s+word|finality|superior|condescend|condescending|derogat|belittl|scathing|hostile|demean|degrad|mock|mockery|sting|walling|stonewall|jab|dig|put[- ]?down|swipe|loaded|taking\s+a\s+shot)\b/i.test(
       lower
     );
   const hasSubstantiveInterpretiveRead =
-    /\b(accumulated\s+frustration|built[- ]?up\s+frustration|established\s+behavior|not\s+an\s+isolated\s+incident|current\s+pattern|for\s+some\s+time|tolerated\s+for\s+some\s+time|response\s+to\s+established\s+behavior|prioritiz(?:e|es|ing)\s+(his|her|their)\s+family)\b/i.test(
+    /\b(accumulated\s+frustration|built[- ]?up\s+frustration|established\s+behavior|not\s+an\s+isolated\s+incident|current\s+pattern|for\s+some\s+time|for\s+a\s+while|tolerated\s+for\s+some\s+time|response\s+to\s+established\s+behavior|prioritiz(?:e|es|ing)\s+(his|her|their)\s+family)\b/i.test(
       lower
     );
   const hasPassiveAggressive = /\bpassive[- ]aggressive\b/i.test(lower);
@@ -1175,6 +2398,7 @@ export function debugScenarioAQ1ContemptProbeCoverageDetail(text: string): {
     normalizedLength: t.length,
     hasScenarioATopic,
     hasInterpretiveCue,
+    referencesEmmaClosingRhetoric,
     referencesEmmaFinalLine,
     hasStrongContemptQualityRead,
     hasSubstantiveInterpretiveRead,
@@ -1195,6 +2419,50 @@ export function hasScenarioAQ1VignetteEngagement(text: string): boolean {
   if (t.length < 10) return false;
   if (!SCENARIO_A_TOPIC_RE.test(t)) return false;
   return t.length >= 28;
+}
+
+function normalizeScenarioAQ1PromptMatchText(text: string): string {
+  return text.replace(/\u2019/g, "'").replace(/\s+/g, ' ').trim().toLowerCase();
+}
+
+function isScenarioAQ1OpeningPromptText(text: string): boolean {
+  return normalizeScenarioAQ1PromptMatchText(text).includes("what's going on between these two");
+}
+
+function isScenarioAVignetteOnlyAssistantText(text: string): boolean {
+  const t = normalizeScenarioAQ1PromptMatchText(text);
+  if (!t || isScenarioAQ1OpeningPromptText(text)) return false;
+  return t.includes('emma and ryan') || t.includes('ryan takes a call from his mother');
+}
+
+function isResumeWelcomeBackAssistantText(text: string): boolean {
+  const t = normalizeScenarioAQ1PromptMatchText(text);
+  return t.includes('welcome back') && t.includes('pick up where we left off');
+}
+
+/**
+ * True when the user's turn is a substantive Scenario A Q1 answer — including after resume when
+ * the last stored assistant line is welcome-back or vignette-only (Q1 may have been spoken via TTS only).
+ */
+export function isReplyingToScenarioAQ1AfterDelivery(params: {
+  currentMoment: number;
+  contemptProbeAlreadyAsked: boolean;
+  lastAssistantWasContemptProbe: boolean;
+  lastAssistantWasRepair: boolean;
+  assistantTexts: string[];
+  userAnswerText: string;
+}): boolean {
+  if (params.currentMoment !== 1) return false;
+  if (params.contemptProbeAlreadyAsked) return false;
+  if (params.lastAssistantWasContemptProbe || params.lastAssistantWasRepair) return false;
+
+  const texts = params.assistantTexts.map((t) => (t ?? '').trim()).filter(Boolean);
+  if (texts.some(isScenarioAQ1OpeningPromptText)) return true;
+
+  const resumeOrVignetteContext = texts.some(
+    (t) => isScenarioAVignetteOnlyAssistantText(t) || isResumeWelcomeBackAssistantText(t)
+  );
+  return resumeOrVignetteContext && hasScenarioAQ1VignetteEngagement(params.userAnswerText);
 }
 
 /** Debug/instrumentation: which Scenario C commitment-threshold regex bucket matched (if any). */
@@ -1345,23 +2613,58 @@ export function isScenarioCToPersonalHandoffAssistantContent(text: string): bool
   );
 }
 
-/** Drop assistant + user turns from personal Moment 4 onward — keeps Scenario C slice fiction-only. */
-export function sliceTranscriptBeforeScenarioCToPersonalHandoff<
-  T extends { role: string; content?: string },
->(transcript: readonly T[]): T[] {
+/** Mirrors {@link assistantTextLooksLikeMoment4HandoffLead} without importing interviewTransitionBundles (cycle). */
+function assistantTextLooksLikePersonalMomentStart(content: string): boolean {
+  if (isScenarioCToPersonalHandoffAssistantContent(content)) return true;
+  if (looksLikeMoment4GrudgePrompt(content)) return true;
+  if (isMoment5AssistantAnchor(content)) return true;
+  const t = normalizeInterviewTypography(content ?? '')
+    .toLowerCase()
+    .replace(/\s+/g, ' ');
+  if (/held a grudge|really didn't like/.test(t)) return true;
+  if (/finished the three situations/.test(t)) return true;
+  if (/end of (the )?three (situations|described situations|vignettes)/.test(t)) return true;
+  if (/done with those three scenarios?/.test(t)) return true;
+  if (t.includes('three situations') && (t.includes('two questions') || t.includes('more about you'))) {
+    return true;
+  }
+  if (t.includes("we're done with those three") || t.includes('done with those three')) return true;
+  return false;
+}
+
+type Scenario3ScoringTurn = { role: string; content?: string; interviewMoment?: number };
+
+/**
+ * Fiction-only Scenario C band for scoring — cuts before Moment 4/5 assistant handoffs and drops
+ * turns tagged `interviewMoment` ≥ 4 (personal moments still carry `scenarioNumber: 3` in production).
+ */
+export function sliceTranscriptForScenario3Scoring<T extends Scenario3ScoringTurn>(
+  transcript: readonly T[],
+): T[] {
   let cut = transcript.length;
   for (let i = 0; i < transcript.length; i++) {
     const m = transcript[i];
+    if (m.role !== 'assistant') continue;
+    const content = typeof m.content === 'string' ? m.content : '';
     if (
-      m.role === 'assistant' &&
-      typeof m.content === 'string' &&
-      isScenarioCToPersonalHandoffAssistantContent(m.content)
+      (typeof m.interviewMoment === 'number' && m.interviewMoment >= 4) ||
+      assistantTextLooksLikePersonalMomentStart(content)
     ) {
       cut = i;
       break;
     }
   }
-  return transcript.slice(0, cut) as T[];
+  return transcript.slice(0, cut).filter((m) => {
+    const im = m.interviewMoment;
+    return im === undefined || im <= 3;
+  }) as T[];
+}
+
+/** Drop assistant + user turns from personal Moment 4 onward — keeps Scenario C slice fiction-only. */
+export function sliceTranscriptBeforeScenarioCToPersonalHandoff<
+  T extends { role: string; content?: string },
+>(transcript: readonly T[]): T[] {
+  return sliceTranscriptForScenario3Scoring(transcript);
 }
 
 export type ScenarioCorpusMessageSlice = {
@@ -1378,9 +2681,10 @@ export type ScenarioCorpusMessageSlice = {
 export function extractScenario3UserCorpusAfterLastRepairPrompt(
   msgs: readonly ScenarioCorpusMessageSlice[],
 ): string {
+  const scoped = sliceTranscriptForScenario3Scoring(msgs);
   let lastRepairIdx = -1;
-  for (let i = msgs.length - 1; i >= 0; i--) {
-    const m = msgs[i];
+  for (let i = scoped.length - 1; i >= 0; i--) {
+    const m = scoped[i];
     if (m.role === 'assistant' && typeof m.content === 'string' && isScenarioCRepairAssistantPrompt(m.content)) {
       lastRepairIdx = i;
       break;
@@ -1388,8 +2692,8 @@ export function extractScenario3UserCorpusAfterLastRepairPrompt(
   }
   if (lastRepairIdx < 0) return '';
   const parts: string[] = [];
-  for (let i = lastRepairIdx + 1; i < msgs.length; i++) {
-    const m = msgs[i];
+  for (let i = lastRepairIdx + 1; i < scoped.length; i++) {
+    const m = scoped[i];
     if (m.role === 'assistant' && m.scenarioNumber === 3 && typeof m.content === 'string') {
       if (looksLikeScenarioCCommitmentThresholdAssistantPrompt(m.content)) break;
       continue;
@@ -1409,9 +2713,10 @@ export function extractScenario3UserCorpusAfterLastRepairPrompt(
 export function extractScenario3UserCorpusBeforeRepairPrompt(
   msgs: readonly ScenarioCorpusMessageSlice[],
 ): string {
+  const scoped = sliceTranscriptForScenario3Scoring(msgs);
   let lastRepairIdx = -1;
-  for (let i = msgs.length - 1; i >= 0; i--) {
-    const m = msgs[i];
+  for (let i = scoped.length - 1; i >= 0; i--) {
+    const m = scoped[i];
     if (m.role === 'assistant' && typeof m.content === 'string' && isScenarioCRepairAssistantPrompt(m.content)) {
       lastRepairIdx = i;
       break;
@@ -1420,7 +2725,7 @@ export function extractScenario3UserCorpusBeforeRepairPrompt(
   if (lastRepairIdx < 0) return '';
   const parts: string[] = [];
   for (let i = 0; i < lastRepairIdx; i++) {
-    const m = msgs[i];
+    const m = scoped[i];
     if (m.role === 'user' && m.scenarioNumber === 3) {
       const t = String(m.content ?? '').trim();
       if (t) parts.push(t);
@@ -1433,9 +2738,10 @@ export function extractScenario3UserCorpusBeforeRepairPrompt(
 export function extractScenario3CommitmentThresholdUserAnswerAfterPrompt(
   msgs: readonly ScenarioCorpusMessageSlice[],
 ): string {
+  const scoped = sliceTranscriptForScenario3Scoring(msgs);
   let threshIdx = -1;
-  for (let i = 0; i < msgs.length; i++) {
-    const m = msgs[i];
+  for (let i = 0; i < scoped.length; i++) {
+    const m = scoped[i];
     if (
       m.role === 'assistant' &&
       m.scenarioNumber === 3 &&
@@ -1448,8 +2754,8 @@ export function extractScenario3CommitmentThresholdUserAnswerAfterPrompt(
   }
   if (threshIdx < 0) return '';
   const parts: string[] = [];
-  for (let i = threshIdx + 1; i < msgs.length; i++) {
-    const m = msgs[i];
+  for (let i = threshIdx + 1; i < scoped.length; i++) {
+    const m = scoped[i];
     if (m.role === 'assistant') break;
     if (m.role === 'user' && m.scenarioNumber === 3) {
       const t = String(m.content ?? '').trim();

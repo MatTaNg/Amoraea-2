@@ -14,6 +14,7 @@ import {
   ActivityIndicator,
   Platform,
   Alert,
+  Pressable,
 } from "react-native";
 import { useNavigation, useRoute } from "@react-navigation/native";
 import type { NativeStackNavigationProp } from "@react-navigation/native-stack";
@@ -33,46 +34,24 @@ import {
   getCompletedAssessments,
   getFirstIncompleteAssessment,
   ASSESSMENT_IDS,
+  FIRST_DATING_PROFILE_ASSESSMENT_ID,
+  onboardingAssessmentBatteryIndex,
   type AssessmentId,
 } from "@/data/services/assessmentService";
-import { computeRelationshipTraitsQualityFlags } from "@/data/assessments/instruments/relationshipTraits8";
 import { useProfile } from "@/shared/hooks/useProfile";
+import { useNavigateAfterAssessments } from "@/datingProfile/onboarding/useNavigateAfterAssessments";
 import { theme } from "@/shared/theme/theme";
 
 const SAVE_PROGRESS_EVERY = 5;
-const ATTACHMENT_STYLE_LABELS = new Set([
-  "Secure",
-  "Anxious",
-  "Avoidant",
-  "Fearful Avoidant / Disorganized",
-]);
-
-function renderIntroDescription(description: string, instrumentId: AssessmentId) {
-  if (instrumentId !== "ECR-36") {
-    return description;
-  }
-
-  const lines = description.split("\n");
-  return lines.map((line, index) => (
-    <React.Fragment key={`${line}-${index}`}>
-      {ATTACHMENT_STYLE_LABELS.has(line.trim()) ? (
-        <Text style={styles.introTypeLabel}>{line}</Text>
-      ) : (
-        line
-      )}
-      {index < lines.length - 1 ? "\n" : ""}
-    </React.Fragment>
-  ));
-}
-
 export function InstrumentScreen() {
   const navigation = useNavigation<NativeStackNavigationProp<DatingProfileStackParamList>>();
   const route = useRoute<RouteProp<DatingProfileStackParamList, "DatingInstrument">>();
   const { user } = useAuth();
   const { profile, refreshProfile, loading: profileLoading } = useProfile();
+  const navigateAfterAssessments = useNavigateAfterAssessments(user?.id);
   const rawInstrument = route.params?.instrument;
   const instrumentId = (
-    Array.isArray(rawInstrument) ? rawInstrument[0] : rawInstrument || "ECR-36"
+    Array.isArray(rawInstrument) ? rawInstrument[0] : rawInstrument || FIRST_DATING_PROFILE_ASSESSMENT_ID
   ) as AssessmentId;
   const config = getInstrumentConfig(instrumentId);
 
@@ -82,9 +61,8 @@ export function InstrumentScreen() {
   );
 
   const [responses, setResponses] = useState<Record<string, number>>({});
-  const [showIntro, setShowIntro] = useState(true);
+  const [showIntro, setShowIntro] = useState(false);
   const [currentIndex, setCurrentIndex] = useState(0);
-  const [surveysComplete, setSurveysComplete] = useState(0);
   /** `null` until the first fetch finishes (avoids redirecting before we know completion state). */
   const [completedInstruments, setCompletedInstruments] = useState<string[] | null>(null);
   const [loading, setLoading] = useState(true);
@@ -104,8 +82,6 @@ export function InstrumentScreen() {
     if (!ecrShuffle || showIntro || !user?.id) return;
     setEcrOrder((prev) => prev ?? getShuffledItems(sessionSeed));
   }, [ecrShuffle, showIntro, user?.id, sessionSeed]);
-  const isIntro = showIntro && totalQuestions > 0;
-
   useEffect(() => {
     let cancelled = false;
     (async () => {
@@ -118,7 +94,6 @@ export function InstrumentScreen() {
       if (cancelled) return;
       const list = res.success ? res.data : [];
       setCompletedInstruments(list);
-      setSurveysComplete(list.length);
       setLoading(false);
     })();
     return () => {
@@ -129,6 +104,16 @@ export function InstrumentScreen() {
   useEffect(() => {
     assessmentStartMsRef.current = null;
   }, [instrumentId]);
+
+  useEffect(() => {
+    if (showIntro || totalQuestions === 0) return;
+    if (assessmentStartMsRef.current == null) {
+      assessmentStartMsRef.current = Date.now();
+    }
+    if (instrumentId === "ECR-36" && !ecrOrder) {
+      setEcrOrder(getShuffledItems(sessionSeed));
+    }
+  }, [showIntro, totalQuestions, instrumentId, ecrOrder, sessionSeed]);
 
   const isCoreOnboardingInstrument = (ASSESSMENT_IDS as readonly string[]).includes(instrumentId);
 
@@ -146,14 +131,14 @@ export function InstrumentScreen() {
       }
       return;
     }
-    navigation.replace("DatingProfileBuilder");
+    void navigateAfterAssessments();
   }, [
     user?.id,
     loading,
     profileLoading,
     completedInstruments,
     instrumentId,
-    navigation,
+    navigateAfterAssessments,
     isCoreOnboardingInstrument,
   ]);
 
@@ -211,10 +196,6 @@ export function InstrumentScreen() {
             : undefined;
         const result = await saveAssessmentResult(user.id, instrumentId, scores, next, {
           timeTakenSec: elapsedSec,
-          qualityFlags:
-            instrumentId === "RELATIONSHIP_TRAITS_8"
-              ? computeRelationshipTraitsQualityFlags(next, elapsedSec ?? 0)
-              : undefined,
         });
         if (result.success) {
           await refreshProfile();
@@ -280,6 +261,11 @@ export function InstrumentScreen() {
     ]
   );
 
+  const goToPreviousQuestion = useCallback(() => {
+    if (saving || safeIndexForSync <= 0) return;
+    setCurrentIndex((i) => Math.max(0, i - 1));
+  }, [saving, safeIndexForSync]);
+
   if (!config) {
     return (
       <SafeAreaView style={styles.container}>
@@ -296,53 +282,12 @@ export function InstrumentScreen() {
     );
   }
 
-  if (isIntro) {
-    return (
-      <SafeAreaView style={styles.container} edges={["top", "left", "right"]}>
-        <ScrollView
-          style={styles.scroll}
-          contentContainerStyle={styles.introScrollContent}
-        >
-          <View style={styles.introCard}>
-            <Text style={styles.introEyebrow}>
-              {instrumentId === "RELATIONSHIP_TRAITS_8"
-                ? "Relationship traits"
-                : "Relationship typology"}
-            </Text>
-            <Text style={styles.introTitle}>{config.title}</Text>
-            <Text style={styles.introDesc}>
-              {renderIntroDescription(config.description, instrumentId)}
-            </Text>
-            {instrumentId === "BRS" && (
-              <Text style={styles.brsNote}>
-                Some of these questions may seem similar to each other. That's
-                intentional — answering each one carefully gives a more accurate
-                result.
-              </Text>
-            )}
-            <Button
-              title="Begin"
-              onPress={() => {
-                assessmentStartMsRef.current = Date.now();
-                if (instrumentId === "ECR-36") {
-                  setEcrOrder(getShuffledItems(sessionSeed));
-                }
-                setShowIntro(false);
-              }}
-              variant="primary"
-              style={styles.introButton}
-            />
-          </View>
-        </ScrollView>
-      </SafeAreaView>
-    );
-  }
-
   const questionNumber = safeIndexForSync + 1;
   const activeEcrItem = ecrShuffle && ecrOrder ? ecrOrder[safeIndexForSync] : null;
   const itemText = activeEcrItem?.text ?? config.items[safeIndexForSync];
   const canonicalId = activeEcrItem?.id ?? safeIndexForSync + 1;
   const flowProgressPct = totalQuestions > 0 ? (questionNumber / totalQuestions) * 100 : 0;
+  const assessmentIndex = onboardingAssessmentBatteryIndex(instrumentId);
 
   if (ecrShuffle && !showIntro && !ecrOrder) {
     return (
@@ -365,16 +310,11 @@ export function InstrumentScreen() {
       >
         <View style={styles.questionCard}>
           <AssessmentHeader
-            surveysComplete={surveysComplete}
+            assessmentIndex={assessmentIndex}
             currentQ={questionNumber}
             totalQ={totalQuestions}
             assessmentName={config.title}
             totalAssessments={ASSESSMENT_IDS.length}
-            subtitle={
-              instrumentId === "RELATIONSHIP_TRAITS_8"
-                ? "A few quick questions about how you tend to respond to stress and trust in relationships."
-                : undefined
-            }
           />
           <Text style={styles.questionText}>{itemText}</Text>
           <LikertScale
@@ -385,12 +325,15 @@ export function InstrumentScreen() {
             minLabel={config.minLabel}
             maxLabel={config.maxLabel}
           />
-          {instrumentId === "RELATIONSHIP_TRAITS_8" && (
-            <Text style={styles.scaleLegend}>
-              1 = Strongly disagree · 2 = Disagree · 3 = Slightly disagree · 4 = Neutral · 5 =
-              Slightly agree · 6 = Agree · 7 = Strongly agree
+          <Pressable
+            style={styles.backBtn}
+            onPress={goToPreviousQuestion}
+            disabled={questionNumber <= 1 || saving}
+          >
+            <Text style={[styles.backText, questionNumber <= 1 && styles.backDisabled]}>
+              ← Back
             </Text>
-          )}
+          </Pressable>
         </View>
       </ScrollView>
       {saving && (
@@ -531,4 +474,7 @@ const styles = StyleSheet.create({
     fontSize: 16,
     color: "#F3F4F6",
   },
+  backBtn: { marginTop: 16, paddingVertical: 8 },
+  backText: { fontSize: 16, color: theme.colors.primary },
+  backDisabled: { opacity: 0.35 },
 });

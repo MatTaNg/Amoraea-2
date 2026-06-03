@@ -1,5 +1,5 @@
 import { normalizeInterviewTypography } from './probeAndScoringUtils';
-import { looksLikeMoment4GrudgePrompt } from './moment4ProbeLogic';
+import { looksLikeMoment4GrudgePrompt, looksLikeMoment4ThresholdQuestion } from './moment4ProbeLogic';
 
 /** Client-injected once when the first grudge answer lacks concrete person/relationship/situation anchors (see product spec). */
 export const MOMENT_4_SPECIFICITY_FOLLOW_UP_TEXT =
@@ -100,6 +100,60 @@ export function looksLikeMoment4SpecificityFollowUpPrompt(text: string): boolean
   return newScript || legacyScript;
 }
 
+/**
+ * Broader than {@link looksLikeMoment4SpecificityFollowUpPrompt}: model paraphrases the same intent
+ * after the client already spoke the scripted line — used to strip duplicate paragraphs / streaming TTS.
+ */
+export function looksLikeMoment4SpecificityFollowUpEcho(text: string): boolean {
+  if (looksLikeMoment4SpecificityFollowUpPrompt(text)) return true;
+  const raw = (text ?? '').trim();
+  if (!raw) return false;
+  if (looksLikeMoment4ThresholdQuestion(raw)) return false;
+  if (looksLikeMoment4GrudgePrompt(raw)) return false;
+  const n = normalizeInterviewTypography(raw).replace(/\s+/g, ' ').trim().toLowerCase();
+  if (/\bis there anything specific\b/.test(n)) return true;
+  if (/\banything specific\b/.test(n) && /\b(come to mind|remember|share|tell me|you'd like)\b/.test(n)) {
+    return true;
+  }
+  if (
+    /\b(is there |any )(a )?specific (person|situation|example|memory|story)\b/.test(n) &&
+    (n.includes('come to mind') || n.includes('comes to mind') || n.includes('think of'))
+  ) {
+    return true;
+  }
+  return false;
+}
+
+/**
+ * Parallel streaming TTS flushes by sentence before post-processing strips the full assistant turn.
+ * When the client already spoke {@link MOMENT_4_SPECIFICITY_FOLLOW_UP_TEXT}, suppress model echoes.
+ *
+ * @returns `null` when the flushed sentence should be skipped for TTS; otherwise text to speak.
+ */
+export function stripMoment4SpecificityFollowUpStreamingEcho(
+  spoken: string,
+  clientSpecificityInjected: boolean,
+): string | null {
+  const t0 = (spoken ?? '').trim();
+  if (!clientSpecificityInjected || !t0) {
+    return t0;
+  }
+  if (!looksLikeMoment4SpecificityFollowUpEcho(t0)) {
+    return t0;
+  }
+  if (looksLikeMoment4ThresholdQuestion(t0)) {
+    const firstQm = t0.indexOf('?');
+    if (firstQm >= 0) {
+      const rest = t0.slice(firstQm + 1).trim().replace(/^[.\s—–-]+/, '');
+      if (rest.length > 0 && looksLikeMoment4ThresholdQuestion(rest)) {
+        return rest;
+      }
+    }
+    return t0;
+  }
+  return null;
+}
+
 function looksLikeMoment4WalkAwayThresholdAssistantPrompt(text: string): boolean {
   const t = (text ?? '').toLowerCase();
   return (
@@ -141,7 +195,9 @@ export function deriveMoment4PostGrudgeSpecificityResolvedFromMessages(
   }
 
   const specIdx = afterGrudge.findIndex(
-    (m) => m.role === 'assistant' && looksLikeMoment4SpecificityFollowUpPrompt(m.content ?? '')
+    (m) =>
+      m.role === 'assistant' &&
+      looksLikeMoment4SpecificityFollowUpEcho((m as { content?: string }).content ?? ''),
   );
   if (specIdx >= 0) {
     const afterSpec = afterGrudge.slice(specIdx + 1);

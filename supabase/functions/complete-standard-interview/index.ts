@@ -78,7 +78,29 @@ Deno.serve(async (req) => {
         headers: { ...corsHeaders, 'Content-Type': 'application/json' },
       });
     }
-    return new Response(JSON.stringify({ ok: true, ...result }), {
+    if (result.runPostCompletionInBackground) {
+      try {
+        console.log('[complete-standard-interview] queueing post-completion (narrative + communication style)', {
+          attemptId: result.attemptId,
+        });
+        EdgeRuntime.waitUntil(
+          Promise.resolve()
+            .then(() => result.runPostCompletionInBackground!())
+            .then(() => {
+              console.log('[complete-standard-interview] post-completion finished', { attemptId: result.attemptId });
+            })
+            .catch((e) => {
+              console.error('[complete-standard-interview] post-completion failed', {
+                attemptId: result.attemptId,
+                error: e instanceof Error ? e.message : String(e),
+              });
+            }),
+        );
+      } catch (e) {
+        console.error('[complete-standard-interview] EdgeRuntime.waitUntil failed', e);
+      }
+    }
+    return new Response(JSON.stringify({ ok: true, attemptId: result.attemptId, skipped: result.skipped }), {
       status: 200,
       headers: { ...corsHeaders, 'Content-Type': 'application/json' },
     });

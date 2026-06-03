@@ -1,6 +1,37 @@
+import { isClientOrElongatingInterviewProbeAssistant } from '@features/aria/interviewDisengagementProbes';
+import {
+  looksLikeMoment4GrudgePrompt,
+  looksLikeMoment4ThresholdQuestion,
+} from '@features/aria/moment4ProbeLogic';
+import { looksLikeMoment4SpecificityFollowUpEcho } from '@features/aria/moment4SpecificityFollowUp';
+import {
+  spokenTextStartsMoment5PrimaryConflictQuestion,
+  transcriptAssistantContainsMoment5PrimaryConflictQuestion,
+} from '@features/aria/probeAndScoringUtils';
+
 /** Fixed copy when Whisper detects a non-English language (see Aria interview flow). */
 export const NON_ENGLISH_VOICE_PROMPT =
   "Sounds like you're speaking a different language. I only know English! Can you repeat that in English?";
+
+/** Clarification / elongating probes — never the "current question" in Show scenario modal. */
+const SCENARIO_MODAL_FOLLOW_UP_PROBE_PATTERNS = [
+  'can you say more about that',
+  'just say whatever comes to mind',
+  'say whatever comes to mind',
+  'could you say more',
+  'can you tell me more',
+  "i didn't quite catch that",
+  'could you say it again',
+  'would you mind repeating that',
+  'seems like an interruption happened',
+  "sorry, i didn't catch",
+  'can you elaborate',
+  'go on',
+  'tell me more',
+  'what else',
+  'take your time',
+  'still here',
+] as const;
 
 export function countSpokenWords(text: string): number {
   return text
@@ -150,9 +181,267 @@ export function isClientAudioRecoveryAssistantLine(lastQuestionText: string | nu
  * infra / retry / mic / connectivity copy from AriaScreen. Display layer uses this with a
  * last-known-good fallback.
  */
+/** True when assistant text is a thin follow-up / elongating probe, not the substantive scenario question. */
+export function isScenarioModalFollowUpProbe(text: string | null | undefined): boolean {
+  const raw = (text ?? '').trim();
+  if (!raw) return false;
+  if (isClientOrElongatingInterviewProbeAssistant(raw)) return true;
+  const lower = raw.toLowerCase();
+  return SCENARIO_MODAL_FOLLOW_UP_PROBE_PATTERNS.some((pattern) => lower.includes(pattern));
+}
+
+/**
+ * Scenario-wrap / closing lines with no real question — skip for modal "last question".
+ * Compound turns that also introduce the next scenario question (contain `?` + substantive cues) are kept.
+ */
+export function isScenarioModalPureTransitionTurn(text: string | null | undefined): boolean {
+  const raw = (text ?? '').trim();
+  if (!raw) return false;
+  const lower = raw.toLowerCase();
+  const hasTransitionPhrase =
+    lower.includes("that's the end of this scenario") ||
+    lower.includes("that's a wrap on this situation") ||
+    lower.includes("that's a wrap") ||
+    lower.includes('great work getting through all of this') ||
+    lower.includes('good work getting through all of this') ||
+    lower.includes("now we'll shift to something more personal") ||
+    lower.includes('now for the first of two personal questions') ||
+    lower.includes("here's one more question about you");
+  if (!hasTransitionPhrase) return false;
+  if (raw.includes('?')) {
+    const hasSubstantiveQuestionCue =
+      lower.includes("what's going on") ||
+      lower.includes('what do you think') ||
+      lower.includes('think of a time') ||
+      lower.includes('have you ever') ||
+      lower.includes('how would you') ||
+      lower.includes('what do you make') ||
+      lower.includes('what would you') ||
+      lower.includes('if you were') ||
+      lower.includes("here's the next situation") ||
+      lower.includes("here's the third situation");
+    if (hasSubstantiveQuestionCue) return false;
+  }
+  return (
+    !raw.includes('?') &&
+    !lower.includes("what's going on") &&
+    !lower.includes('what do you think') &&
+    !lower.includes('think of a time') &&
+    !lower.includes('have you ever')
+  );
+}
+
+/**
+ * Show scenario modal: last interrogative sentence in an assistant turn (reflection stripped).
+ * Ignores vignette dialogue lines (e.g. "Emma says '…'.") that precede the interviewer question.
+ */
+function isScenarioModalFooterQuestionParagraph(para: string): boolean {
+  if (/\b(Emma|Ryan|Sarah|James|Sophie|Daniel)\s+says\b/i.test(para)) return false;
+  const qIdx = para.indexOf('?');
+  if (qIdx < 0) return false;
+  const beforeQ = para.slice(0, qIdx);
+  if (qIdx === para.length - 1 && !/[.!]\s/.test(beforeQ)) return true;
+  if (
+    para.length <= 180 &&
+    /^[\u2014\u2013\-—]?\s*(What's|What would|What do you|What if|How would|When |Good —|Can you)/i.test(
+      para
+    )
+  ) {
+    return true;
+  }
+  return false;
+}
+
+export function extractScenarioModalQuestionFromAssistantText(text: string): string | null {
+  const t = text.trim();
+  if (!t.includes('?')) return null;
+  const lastQ = t.lastIndexOf('?');
+
+  const lastParaBreak = t.lastIndexOf('\n\n', lastQ);
+  if (lastParaBreak >= 0) {
+    const para = t.slice(lastParaBreak + 2, lastQ + 1).trim();
+    if (para.includes('?') && isScenarioModalFooterQuestionParagraph(para)) return para;
+  }
+
+  const prefix = t.slice(0, lastQ);
+  const quoteThenQuestion = /['"]\s+(?=[A-Z])/g;
+  let startAfterQuote = -1;
+  let m: RegExpExecArray | null;
+  while ((m = quoteThenQuestion.exec(prefix)) !== null) {
+    startAfterQuote = m.index + m[0].length;
+  }
+  if (startAfterQuote >= 0) {
+    const candidate = t.slice(startAfterQuote, lastQ + 1).trim();
+    if (candidate.includes('?')) return candidate;
+  }
+
+  const beforeClose = prefix;
+  let start = 0;
+  const re = /[.!?]\s+/g;
+  while ((m = re.exec(beforeClose)) !== null) {
+    const afterBoundary = t.slice(m.index + m[0].length, m.index + m[0].length + 24);
+    if (/^(Emma|Ryan|Sarah|James|Sophie|Daniel)\s+says\b/i.test(afterBoundary)) {
+      continue;
+    }
+    start = m.index + m[0].length;
+  }
+  const out = t.slice(start, lastQ + 1).trim();
+  return out.length > 0 ? out : null;
+}
+
+/** Footer should show the interviewer question only — never repeated vignette dialogue. */
+export function sanitizeScenarioModalFooterQuestion(text: string): string {
+  const cleaned = (text ?? '').trim();
+  if (!cleaned) return cleaned;
+  if (!/\b(Emma|Ryan|Sarah|James|Sophie|Daniel)\s+says\b/i.test(cleaned)) {
+    return cleaned;
+  }
+  const reExtracted = extractScenarioModalQuestionFromAssistantText(cleaned);
+  if (reExtracted && !/\b(Emma|Ryan|Sarah|James|Sophie|Daniel)\s+says\b/i.test(reExtracted)) {
+    return reExtracted;
+  }
+  const lastQ = cleaned.lastIndexOf('?');
+  if (lastQ < 0) return cleaned;
+  const prefix = cleaned.slice(0, lastQ);
+  for (const marker of [".' ", '." ', ".'", '."']) {
+    const idx = prefix.lastIndexOf(marker);
+    if (idx >= 0) {
+      const tail = cleaned.slice(idx + marker.length).trim();
+      if (tail.includes('?')) return tail;
+    }
+  }
+  return cleaned;
+}
+
+export type ScenarioModalTranscriptTurn = { role: string; content?: string | null };
+
+/**
+ * Walk backwards through assistant turns and return the last substantive scenario question
+ * (skips elongating probes, pure transitions, and infra copy).
+ */
+export function getLastSubstantiveScenarioModalQuestion(
+  transcript: ScenarioModalTranscriptTurn[]
+): string | null {
+  for (let i = transcript.length - 1; i >= 0; i--) {
+    const turn = transcript[i];
+    if (turn.role !== 'assistant') continue;
+    const content = (turn.content ?? '').trim();
+    if (!content) continue;
+    if (isScenarioModalFollowUpProbe(content)) continue;
+    if (isScenarioModalPureTransitionTurn(content)) continue;
+    const extracted = extractScenarioModalQuestionFromAssistantText(content);
+    if (!extracted) continue;
+    if (!isScenarioModalEligibleScenarioQuestionPrompt(extracted)) continue;
+    return extracted;
+  }
+  return null;
+}
+
+export type ResolveScenarioModalPromptInScopeOptions = {
+  /** Active situation label (e.g. Situation 2) — limits search to turns on/after that vignette intro. */
+  scenarioLabel: string | null;
+  detectScenarioFromContent: (content: string) => { label: string } | null;
+  openingQuestionForLabel: (label: string) => string | null;
+  /** Prefer a question extracted from the line that just finished speaking (scenario transition TTS). */
+  currentSpokenContent?: string | null;
+};
+
+/**
+ * Show-scenario footer: last substantive question within the current situation only.
+ * Prevents prior-scenario repair/follow-up lines from leaking after S1→S2 (etc.) transitions.
+ */
+export type Moment4ShowScenarioReferenceResolution =
+  | { active: false }
+  | { active: true; cardBodyText: string };
+
+function moment4CardBodyQuestionFromAssistant(content: string): string | null {
+  const extracted = extractScenarioModalQuestionFromAssistantText(content);
+  if (extracted) return extracted;
+  const trimmed = content.trim();
+  return trimmed.includes('?') ? trimmed : null;
+}
+
+/**
+ * Moment 4 Show scenario: one question in the card body only (no footer).
+ * Commitment threshold / specificity lines replace the grudge copy in the card.
+ */
+export function resolveMoment4ShowScenarioReferenceCard(
+  transcript: ScenarioModalTranscriptTurn[],
+  options: { grudgeCardBody: string; currentSpokenContent?: string | null }
+): Moment4ShowScenarioReferenceResolution {
+  const assistantContents: string[] = [];
+  for (const t of transcript) {
+    if (t.role !== 'assistant') continue;
+    const c = (t.content ?? '').trim();
+    if (c) assistantContents.push(c);
+  }
+  const spoken = (options.currentSpokenContent ?? '').trim();
+  if (spoken) assistantContents.push(spoken);
+  const grudgeCardBody = options.grudgeCardBody.trim();
+
+  for (let i = assistantContents.length - 1; i >= 0; i--) {
+    const content = assistantContents[i]!;
+    if (transcriptAssistantContainsMoment5PrimaryConflictQuestion(content)) {
+      return { active: false };
+    }
+    if (looksLikeMoment4ThresholdQuestion(content)) {
+      const cardBodyText = moment4CardBodyQuestionFromAssistant(content);
+      if (cardBodyText) return { active: true, cardBodyText };
+    }
+    if (looksLikeMoment4SpecificityFollowUpEcho(content)) {
+      const cardBodyText = moment4CardBodyQuestionFromAssistant(content);
+      if (cardBodyText) return { active: true, cardBodyText };
+    }
+    if (looksLikeMoment4GrudgePrompt(content)) {
+      return { active: true, cardBodyText: grudgeCardBody };
+    }
+  }
+  return { active: false };
+}
+
+/** Refresh Show scenario footer when substantive scenario questions begin (not only vignette intros). */
+export function assistantSpeechShouldRefreshScenarioModalPrompt(
+  content: string | null | undefined
+): boolean {
+  const cleaned = (content ?? '').trim();
+  if (!cleaned) return false;
+  return getLastSubstantiveScenarioModalQuestion([{ role: 'assistant', content: cleaned }]) != null;
+}
+
+export function resolveScenarioModalPromptInScope(
+  transcript: ScenarioModalTranscriptTurn[],
+  options: ResolveScenarioModalPromptInScopeOptions
+): string | null {
+  const { scenarioLabel, detectScenarioFromContent, openingQuestionForLabel, currentSpokenContent } =
+    options;
+  const spoken = (currentSpokenContent ?? '').trim();
+  if (spoken) {
+    const fromSpoken = getLastSubstantiveScenarioModalQuestion([{ role: 'assistant', content: spoken }]);
+    if (fromSpoken) return fromSpoken;
+  }
+  let scoped = transcript;
+  if (scenarioLabel) {
+    let anchorIdx = -1;
+    for (let i = transcript.length - 1; i >= 0; i--) {
+      if (transcript[i]?.role !== 'assistant') continue;
+      const detected = detectScenarioFromContent((transcript[i]?.content ?? '').trim());
+      if (detected?.label === scenarioLabel) {
+        anchorIdx = i;
+        break;
+      }
+    }
+    if (anchorIdx >= 0) scoped = transcript.slice(anchorIdx);
+  }
+  const q = getLastSubstantiveScenarioModalQuestion(scoped);
+  if (q) return q;
+  if (scenarioLabel) return openingQuestionForLabel(scenarioLabel);
+  return null;
+}
+
 export function isScenarioModalExcludedAssistantPrompt(text: string | null | undefined): boolean {
   const raw = (text ?? '').trim();
   if (!raw) return false;
+  if (isScenarioModalFollowUpProbe(raw)) return true;
   if (isClientAudioRecoveryAssistantLine(raw)) return true;
   const q = raw.toLowerCase();
   const needles = [
@@ -186,10 +475,97 @@ export function isScenarioModalExcludedAssistantPrompt(text: string | null | und
 export function isScenarioModalEligibleScenarioQuestionPrompt(text: string | null | undefined): boolean {
   const raw = (text ?? '').trim();
   if (!raw || !raw.includes('?')) return false;
+  if (isScenarioModalFollowUpProbe(raw)) return false;
   if (isScenarioModalExcludedAssistantPrompt(raw)) return false;
   if (isResumeReentryWelcomePrompt(raw)) return false;
   if (isNamePromptInterviewMoment(raw)) return false;
   return true;
+}
+
+function normalizeScenarioModalQuestionSuffixForCompare(text: string): string {
+  return text
+    .trim()
+    .replace(/\s+/g, ' ')
+    .replace(/[‘'’]/g, "'")
+    .replace(/[“”]/g, '"')
+    .replace(/\?+$/, '')
+    .toLowerCase();
+}
+
+/** Remove a trailing scenario question from vignette body when it will render in the modal footer. */
+export function stripScenarioModalQuestionFromVignetteBody(
+  body: string,
+  question: string
+): string {
+  const b = (body ?? '').trim();
+  const q = (question ?? '').trim();
+  if (!b || !q) return b;
+  if (b.endsWith(q)) {
+    return b.slice(0, -q.length).replace(/[\s\n]+$/, '').trim();
+  }
+  const withGap = `\n\n${q}`;
+  if (b.endsWith(withGap)) {
+    return b.slice(0, -withGap.length).trim();
+  }
+  const nBody = normalizeScenarioModalQuestionSuffixForCompare(b);
+  const nQ = normalizeScenarioModalQuestionSuffixForCompare(q);
+  if (nBody.endsWith(nQ)) {
+    const idx = b.toLowerCase().lastIndexOf(q.toLowerCase());
+    if (idx >= 0) {
+      return b.slice(0, idx).replace(/[\s\n]+$/, '').trim();
+    }
+  }
+  return b;
+}
+
+export type ScenarioModalDisplayParts = {
+  transcript: string;
+  footerQuestion: string | null;
+};
+
+/**
+ * Show scenario modal layout: fiction transcript in the scroll body; current question only in the footer.
+ * When the body is question-only (Moment 4/5), keep a single block with no footer.
+ */
+export function resolveScenarioModalDisplayParts(
+  body: string,
+  prompt: string | null | undefined
+): ScenarioModalDisplayParts {
+  const rawBody = (body ?? '').trim();
+  if (!rawBody) {
+    return { transcript: '', footerQuestion: null };
+  }
+
+  const explicitPrompt = (prompt ?? '').trim();
+  let footerQuestion: string | null =
+    explicitPrompt && isScenarioModalEligibleScenarioQuestionPrompt(explicitPrompt)
+      ? explicitPrompt
+      : null;
+
+  const extractedFromBody = extractScenarioModalQuestionFromAssistantText(rawBody);
+  const bodyEndsWithQuestion =
+    extractedFromBody != null &&
+    isScenarioModalEligibleScenarioQuestionPrompt(extractedFromBody) &&
+    normalizeScenarioModalQuestionSuffixForCompare(rawBody).endsWith(
+      normalizeScenarioModalQuestionSuffixForCompare(extractedFromBody)
+    );
+
+  if (!footerQuestion && bodyEndsWithQuestion && extractedFromBody) {
+    footerQuestion = extractedFromBody;
+  }
+
+  if (!footerQuestion) {
+    return { transcript: rawBody, footerQuestion: null };
+  }
+
+  footerQuestion = sanitizeScenarioModalFooterQuestion(footerQuestion);
+
+  const transcript = stripScenarioModalQuestionFromVignetteBody(rawBody, footerQuestion);
+  if (!transcript) {
+    return { transcript: rawBody, footerQuestion: null };
+  }
+
+  return { transcript, footerQuestion };
 }
 
 /** Name / identity prompts — one or two words are valid. */
@@ -199,7 +575,66 @@ export function isNamePromptInterviewMoment(lastQuestionText: string | null | un
   if (/\bwhat\s+(can|should)\s+i\s+call\s+you\b/.test(q)) return true;
   if (/what('?s|\s+is)\s+your\s+name\b/.test(q)) return true;
   if (/\bhow\s+(do\s+you|should\s+i)\s+(call\s+you|address\s+you)\b/.test(q)) return true;
+  if (/\bhi,?\s+i'?m\s+amoraea\b/.test(q) && /\bwhat\s+(can|should)\s+i\s+call\s+you\b/.test(q)) return true;
   return false;
+}
+
+/** Post-name briefing (five parts, readiness) — not substantive interview response timing. */
+export function isInterviewPreambleBriefingMoment(lastQuestionText: string | null | undefined): boolean {
+  const q = (lastQuestionText ?? '').toLowerCase();
+  if (/the way this works is/i.test(q)) return true;
+  if (
+    /good to meet you/i.test(q) &&
+    (/the way this works|five parts|three short|are you ready/i.test(q))
+  ) {
+    return true;
+  }
+  return false;
+}
+
+const READINESS_AFFIRMATION_PATTERNS: RegExp[] = [
+  /^yes\b/i,
+  /^yeah\b/i,
+  /^yep\b/i,
+  /^yup\b/i,
+  /^sure\b/i,
+  /^ok(?:ay)?\b/i,
+  /^ready\b/i,
+  /^i'?m ready\b/i,
+  /^let'?s (?:go|do it|start|begin)\b/i,
+  /^go ahead\b/i,
+  /^sounds good\b/i,
+  /^absolutely\b/i,
+  /^definitely\b/i,
+  /^of course\b/i,
+];
+
+/** Short procedural assent to "Are you ready?" — not a substantive scenario answer. */
+export function looksLikeReadinessAffirmation(text: string | null | undefined): boolean {
+  const raw = (text ?? '').trim();
+  if (!raw || raw.length > 48) return false;
+  const t = raw.replace(/[.!?,…]+$/g, '').trim();
+  if (!t) return false;
+  if (/^\bno\b/i.test(t)) return false;
+  if (/^(not yet|not ready|wait|hold on|one sec)/i.test(t)) return false;
+  return READINESS_AFFIRMATION_PATTERNS.some((re) => re.test(t));
+}
+
+/** True when the participant is answering a readiness / preamble briefing prompt (not Scenario A Q1). */
+export function userIsAnsweringInterviewReadinessPrompt(
+  lastQuestionTexts: Array<string | null | undefined>,
+): boolean {
+  return lastQuestionTexts.some(
+    (t) => isSimpleYesNoInterviewMoment(t) || isInterviewPreambleBriefingMoment(t),
+  );
+}
+
+/** Only log `response_timings` for substantive scenario / personal-moment questions. */
+export function shouldRecordInterviewResponseTiming(lastQuestionText: string | null | undefined): boolean {
+  if (isNamePromptInterviewMoment(lastQuestionText)) return false;
+  if (isInterviewPreambleBriefingMoment(lastQuestionText)) return false;
+  if (isSimpleYesNoInterviewMoment(lastQuestionText)) return false;
+  return true;
 }
 
 /** Use for whisper ratio re-ask: short answers are OK (do not require a full sentence). */

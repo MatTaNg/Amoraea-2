@@ -24,7 +24,6 @@ export async function resetInterviewForQaRetake(userId: string): Promise<void> {
     .from('users')
     .update({
       interview_completed: false,
-      interview_last_checkpoint: 0,
       interview_attempt_count: nextAttemptNumber,
       latest_attempt_id: null,
     })

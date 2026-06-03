@@ -3,9 +3,11 @@ import {
   countInterviewWords,
   deriveMoment4PostGrudgeSpecificityResolvedFromMessages,
   hasMoment4PersonRelationshipOrSituationAnchor,
+  looksLikeMoment4SpecificityFollowUpEcho,
   looksLikeMoment4SpecificityFollowUpPrompt,
   MOMENT_4_SPECIFICITY_FOLLOW_UP_TEXT,
   needsMoment4SpecificityFollowUp,
+  stripMoment4SpecificityFollowUpStreamingEcho,
 } from '../moment4SpecificityFollowUp';
 
 describe('moment4SpecificityFollowUp', () => {
@@ -75,6 +77,28 @@ describe('moment4SpecificityFollowUp', () => {
     expect(needsMoment4SpecificityFollowUp(t)).toBe(false);
   });
 
+  it('detects model echo paraphrases of the specificity follow-up', () => {
+    expect(looksLikeMoment4SpecificityFollowUpEcho('Is there anything specific you can share?')).toBe(true);
+    expect(
+      looksLikeMoment4SpecificityFollowUpEcho(
+        'Is there a specific person or situation that comes to mind when you think about that?',
+      ),
+    ).toBe(true);
+    expect(looksLikeMoment4SpecificityFollowUpEcho('How do you think this situation could be repaired?')).toBe(
+      false,
+    );
+  });
+
+  it('strip streaming echo: suppress duplicate sentence, keep threshold tail', () => {
+    expect(
+      stripMoment4SpecificityFollowUpStreamingEcho(
+        'Is there anything specific you remember? At what point do you decide when a relationship is something to work through versus something you need to walk away from?',
+        true,
+      ),
+    ).toContain('walk away');
+    expect(stripMoment4SpecificityFollowUpStreamingEcho('Is there anything specific you remember?', true)).toBeNull();
+  });
+
   it('derive gate: resolved after adequate first grudge answer', () => {
     const grudge =
       'Have you ever held a grudge against someone, or had someone in your life you really did not like? How did that happen, and where are you with it now?';
@@ -85,6 +109,21 @@ describe('moment4SpecificityFollowUp', () => {
       { role: 'user' as const, content: rich },
     ];
     expect(deriveMoment4PostGrudgeSpecificityResolvedFromMessages(msgs)).toBe(true);
+  });
+
+  it('derive gate: resolved after user answers paraphrased specificity probe', () => {
+    const grudge =
+      'Have you ever held a grudge against someone, or had someone in your life you really did not like? How did that happen, and where are you with it now?';
+    const vague = 'I try not to hold grudges.';
+    const paraphrase = 'Is there anything specific you can share about that?';
+    const msgs = [
+      { role: 'assistant' as const, content: grudge },
+      { role: 'user' as const, content: vague },
+      { role: 'assistant' as const, content: paraphrase },
+    ];
+    expect(deriveMoment4PostGrudgeSpecificityResolvedFromMessages(msgs)).toBe(false);
+    const msgs2 = [...msgs, { role: 'user' as const, content: 'My old roommate in college.' }];
+    expect(deriveMoment4PostGrudgeSpecificityResolvedFromMessages(msgs2)).toBe(true);
   });
 
   it('derive gate: not resolved until user answers specificity probe', () => {

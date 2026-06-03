@@ -8,7 +8,15 @@ import {
   isRepairRefusalProbeAssistantLine,
   isScenarioCRepairPessimismRefusalSignal,
   looksLikeRepairInterviewQuestion,
+  looksLikeScenarioARepairQuestion,
+  looksLikeScenarioARepairReAskQuestion,
   looksLikeScenarioBRepairAsJamesQuestion,
+  shouldAdvanceScenarioAAfterSatisfiedRepair,
+  stripScenarioARepairQuestion,
+  stripEmbeddedScenarioARepairQuestionAsk,
+  stripScenarioARepairQuestionStreamingEcho,
+  isIncompleteScenarioARepairLeadSentence,
+  userAnswerSatisfiesScenarioARepairPrompt,
   looksLikeSurfaceOnlyEmotionalLabelAnswer,
   pickClientDisengagementProbe,
   repairAnswerHasConcreteSuggestionActionOrStep,
@@ -45,6 +53,14 @@ describe('interviewDisengagementProbes', () => {
       looksLikeRepairInterviewQuestion('How would you repair this relationship if you were Ryan?'),
     ).toBe(true);
     expect(
+      looksLikeScenarioARepairQuestion('What if you were Ryan? How would you repair this situation?'),
+    ).toBe(true);
+    expect(
+      stripScenarioARepairQuestion(
+        "Nice read.\n\nWhat if you were Ryan? How would you repair this situation?\n\n",
+      ).trim(),
+    ).toBe('Nice read.');
+    expect(
       looksLikeRepairInterviewQuestion(
         'That makes a lot of sense. What if you were Ryan? How would you repair this situation',
       ),
@@ -54,6 +70,31 @@ describe('interviewDisengagementProbes', () => {
       looksLikeRepairInterviewQuestion('How do you think this situation could be repaired?'),
     ).toBe(true);
     expect(looksLikeRepairInterviewQuestion('What do you think is going on here?')).toBe(false);
+  });
+
+  it('isIncompleteScenarioARepairLeadSentence detects Ryan lead split by streaming', () => {
+    expect(isIncompleteScenarioARepairLeadSentence('What if you were Ryan?')).toBe(true);
+    expect(
+      isIncompleteScenarioARepairLeadSentence(
+        'What if you were Ryan? How would you repair this situation?',
+      ),
+    ).toBe(false);
+  });
+
+  it('stripScenarioARepairQuestionStreamingEcho drops duplicate repair after first stream chunk', () => {
+    const repair =
+      'That makes a lot of sense. What if you were Ryan? How would you repair this situation?';
+    expect(stripScenarioARepairQuestionStreamingEcho(repair, true)).toBeNull();
+    expect(stripScenarioARepairQuestionStreamingEcho('How would you repair this situation?', true)).toBeNull();
+    expect(stripScenarioARepairQuestionStreamingEcho(repair, false)).toBe(repair);
+  });
+
+  it('stripEmbeddedScenarioARepairQuestionAsk removes glued repair from ack paragraph', () => {
+    expect(
+      stripEmbeddedScenarioARepairQuestionAsk(
+        "That makes a lot of sense. What if you were Ryan? How would you repair this situation?",
+      ),
+    ).toBe('That makes a lot of sense.');
   });
 
   it('detects refusal / character-deflection repair answers', () => {
@@ -246,6 +287,55 @@ describe('interviewDisengagementProbes', () => {
     expect(isInterviewHardStopUserTurn('nothing to add')).toBe(true);
     expect(isInterviewHardStopUserTurn('I already said what I think')).toBe(true);
     expect(isInterviewHardStopUserTurn('I would apologize and listen')).toBe(false);
+  });
+
+  it('detects Scenario A repair re-ask phrasing', () => {
+    expect(
+      looksLikeScenarioARepairReAskQuestion(
+        'Got it — how would you make that repair actually happen as Ryan?',
+      ),
+    ).toBe(true);
+    expect(
+      looksLikeScenarioARepairReAskQuestion(
+        'What would that repair look like if you were Ryan?',
+      ),
+    ).toBe(true);
+  });
+
+  it('treats first-person apology + commitment as satisfying Scenario A repair', () => {
+    const answer =
+      "I would apologize to Emma and Tyler. I shouldn't have taken that call. I commit to not doing it again unless it's an emergency.";
+    expect(
+      userAnswerSatisfiesScenarioARepairPrompt(
+        answer,
+        'What if you were Ryan? How would you repair this situation?',
+      ),
+    ).toBe(true);
+  });
+
+  it('advances Scenario A when model re-asks repair after a concrete repair answer', () => {
+    const messages = [
+      { role: 'assistant', content: 'What if you were Ryan? How would you repair this situation?' },
+      {
+        role: 'user',
+        content:
+          "I would apologize to Emma and Tyler. I shouldn't have taken that call. I commit to not doing it again unless it's an emergency.",
+      },
+    ];
+    expect(
+      shouldAdvanceScenarioAAfterSatisfiedRepair(
+        messages,
+        'Got it — how would you make that repair actually happen as Ryan?',
+        1,
+      ),
+    ).toBe(true);
+    expect(
+      shouldAdvanceScenarioAAfterSatisfiedRepair(
+        messages,
+        "She's tired of it happening.",
+        1,
+      ),
+    ).toBe(false);
   });
 
   it('scenarioALastAssistantIsRepairProbeOrFollowUp matches repair re-asks and thin repeat offers (not elongating-only)', () => {

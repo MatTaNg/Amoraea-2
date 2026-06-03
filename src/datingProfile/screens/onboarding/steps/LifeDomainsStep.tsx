@@ -7,6 +7,7 @@ import {
 } from "@/shared/components/LifeDomainDistribution";
 import { styles } from "../ProfileBuilderScreen.styled";
 import { useProfile } from "@/shared/hooks/useProfile";
+import { syncLifeDomainImportanceFromOnboarding } from "@/screens/profile/editProfile/lifeDomainProfileService";
 
 interface LifeDomainsStepProps {
   guidance: string;
@@ -44,9 +45,16 @@ export const LifeDomainsStep: React.FC<LifeDomainsStepProps> = ({
   const isValid = total === 100;
 
   const handleContinue = () => {
-    void updateProfile({ lifeDomains: valuesAsRecord }).catch((err) => {
-      if (__DEV__) console.warn('[LifeDomainsStep] background save failed', err);
-    });
+    void (async () => {
+      try {
+        await syncLifeDomainImportanceFromOnboarding(userId, valuesAsRecord);
+      } catch (err) {
+        if (__DEV__) console.warn('[LifeDomainsStep] life domain sync failed', err);
+        await updateProfile({ lifeDomains: valuesAsRecord }).catch((saveErr) => {
+          if (__DEV__) console.warn('[LifeDomainsStep] background save failed', saveErr);
+        });
+      }
+    })();
     onStepChange('photos');
   };
 

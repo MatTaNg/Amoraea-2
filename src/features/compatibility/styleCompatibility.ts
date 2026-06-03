@@ -1,4 +1,5 @@
 import { supabase } from '@data/supabase/client';
+import { sexualCommunicationPairAdjustment } from './sexualCommunicationCompatibility';
 
 export { computeFinalCompatibilityScore } from './styleCompatibilityScore';
 
@@ -91,5 +92,34 @@ export async function computeStyleCompatibility(
     explanation,
     overallConfidence: confidence,
   };
+}
+
+export async function fetchSexualCommunicationScores(
+  userIdA: string,
+  userIdB: string,
+): Promise<{ scoreA: number | null; scoreB: number | null }> {
+  const { data, error } = await supabase
+    .from('users')
+    .select('id, psychometrics_sexual_communication_score')
+    .in('id', [userIdA, userIdB]);
+  if (error) throw new Error(`Failed to fetch sexual communication scores: ${error.message}`);
+
+  const byId = new Map<string, number | null>();
+  (data ?? []).forEach((row: Record<string, unknown>) => {
+    byId.set(String(row.id), row.psychometrics_sexual_communication_score as number | null);
+  });
+  return {
+    scoreA: byId.get(userIdA) ?? null,
+    scoreB: byId.get(userIdB) ?? null,
+  };
+}
+
+export async function computeSexualCommunicationCompatibilityAdjustment(
+  userIdA: string,
+  userIdB: string,
+): Promise<{ adjustment: number; label: string }> {
+  const { scoreA, scoreB } = await fetchSexualCommunicationScores(userIdA, userIdB);
+  const result = sexualCommunicationPairAdjustment(scoreA, scoreB);
+  return { adjustment: result.adjustment, label: result.label };
 }
 

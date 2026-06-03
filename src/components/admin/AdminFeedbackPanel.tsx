@@ -12,18 +12,22 @@ import {
 import { Ionicons } from '@expo/vector-icons';
 import { supabase } from '@data/supabase/client';
 import { resolveAdminInterviewIntroDisplayName } from '@utilities/adminInterviewIntroDisplayName';
+import {
+  FEEDBACK_CATEGORY_BUG,
+  FEEDBACK_CATEGORY_COMPLIMENT,
+  FEEDBACK_CATEGORY_FEATURE_REQUEST,
+  FEEDBACK_CATEGORY_SUGGESTION,
+  FEEDBACK_CATEGORIES,
+} from '@/shared/constants/feedbackCategories';
 
-const BUG = 'Something broke';
-const SUG = 'Suggestion';
-const CMP = 'Compliment';
-const OTH = 'Other';
+const BUG = FEEDBACK_CATEGORY_BUG;
+const SUG = FEEDBACK_CATEGORY_SUGGESTION;
+const FEAT = FEEDBACK_CATEGORY_FEATURE_REQUEST;
+const CMP = FEEDBACK_CATEGORY_COMPLIMENT;
 
 const CATEGORY_CHIPS: { id: string | null; label: string }[] = [
   { id: null, label: 'All categories' },
-  { id: BUG, label: 'Something broke' },
-  { id: SUG, label: 'Suggestion' },
-  { id: CMP, label: 'Compliment' },
-  { id: OTH, label: 'Other' },
+  ...FEEDBACK_CATEGORIES.map((label) => ({ id: label, label })),
 ];
 
 const RATING_CHIPS: { id: number | null; label: string }[] = [
@@ -82,6 +86,7 @@ export function AdminFeedbackPanel() {
   const [statTotal, setStatTotal] = useState(0);
   const [statBugs, setStatBugs] = useState(0);
   const [statSug, setStatSug] = useState(0);
+  const [statFeat, setStatFeat] = useState(0);
   const [statCmp, setStatCmp] = useState(0);
   const [statAvg, setStatAvg] = useState<number | null>(null);
   const [statCap, setStatCap] = useState(false);
@@ -97,35 +102,22 @@ export function AdminFeedbackPanel() {
       if (searchTrim) q = q.ilike('message', `%${searchTrim}%`);
       return q;
     };
-    const [tRes, bRes, sRes, cRes, rAll] = await Promise.all([
+    const countForCategory = (cat: string) => {
+      if (categoryFilter && categoryFilter !== cat) {
+        return Promise.resolve({ count: 0, error: null } as { count: number; error: null });
+      }
+      let q = supabase.from('interview_feedback').select('id', { count: 'exact', head: true }).eq('category', cat);
+      if (ratingFilter != null) q = q.eq('rating', ratingFilter);
+      if (searchTrim) q = q.ilike('message', `%${searchTrim}%`);
+      return q;
+    };
+
+    const [tRes, bRes, sRes, fRes, cRes, rAll] = await Promise.all([
       buildBase(),
-      (() => {
-        if (categoryFilter && categoryFilter !== BUG) {
-          return Promise.resolve({ count: 0, error: null } as { count: number; error: null });
-        }
-        let q = supabase.from('interview_feedback').select('id', { count: 'exact', head: true }).eq('category', BUG);
-        if (ratingFilter != null) q = q.eq('rating', ratingFilter);
-        if (searchTrim) q = q.ilike('message', `%${searchTrim}%`);
-        return q;
-      })(),
-      (() => {
-        if (categoryFilter && categoryFilter !== SUG) {
-          return Promise.resolve({ count: 0, error: null } as { count: number; error: null });
-        }
-        let q = supabase.from('interview_feedback').select('id', { count: 'exact', head: true }).eq('category', SUG);
-        if (ratingFilter != null) q = q.eq('rating', ratingFilter);
-        if (searchTrim) q = q.ilike('message', `%${searchTrim}%`);
-        return q;
-      })(),
-      (() => {
-        if (categoryFilter && categoryFilter !== CMP) {
-          return Promise.resolve({ count: 0, error: null } as { count: number; error: null });
-        }
-        let q = supabase.from('interview_feedback').select('id', { count: 'exact', head: true }).eq('category', CMP);
-        if (ratingFilter != null) q = q.eq('rating', ratingFilter);
-        if (searchTrim) q = q.ilike('message', `%${searchTrim}%`);
-        return q;
-      })(),
+      countForCategory(BUG),
+      countForCategory(SUG),
+      countForCategory(FEAT),
+      countForCategory(CMP),
       (() => {
         let q = supabase
           .from('interview_feedback')
@@ -143,6 +135,7 @@ export function AdminFeedbackPanel() {
     setStatTotal(tRes.count ?? 0);
     if (!bRes.error && bRes.count != null) setStatBugs(bRes.count);
     if (!sRes.error && sRes.count != null) setStatSug(sRes.count);
+    if (!fRes.error && fRes.count != null) setStatFeat(fRes.count);
     if (!cRes.error && cRes.count != null) setStatCmp(cRes.count);
     if (rAll.error) {
       return { err: rAll.error.message } as const;
@@ -196,7 +189,7 @@ export function AdminFeedbackPanel() {
     void (async () => {
       const { data, error } = await supabase
         .from('users')
-        .select('id, email, name, basic_info, full_name, display_name, interview_transcript')
+        .select('id, email, name, basic_info, full_name, display_name')
         .in('id', ids);
       if (cancelled || error) return;
       const next: Record<string, UserEnrichRow> = {};
@@ -208,7 +201,6 @@ export function AdminFeedbackPanel() {
           basic_info: unknown;
           full_name: string | null;
           display_name: string | null;
-          interview_transcript: unknown;
         };
         const intro = resolveAdminInterviewIntroDisplayName(o);
         next[o.id] = { email: o.email ?? '—', intro };
@@ -269,6 +261,10 @@ export function AdminFeedbackPanel() {
         <View style={styles.statPill}>
           <Text style={styles.statVal}>{statSug}</Text>
           <Text style={styles.statLbl}>Suggestions</Text>
+        </View>
+        <View style={styles.statPill}>
+          <Text style={styles.statVal}>{statFeat}</Text>
+          <Text style={styles.statLbl}>Feature requests</Text>
         </View>
         <View style={styles.statPill}>
           <Text style={styles.statVal}>{statCmp}</Text>

@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
+  assistantTextLooksLikeMoment4HandoffLead,
   buildMoment4HandoffForInterview,
   buildMoment4ThresholdAnswerToMoment5Bundle,
   buildScenario1To2BundleForInterview,
@@ -54,6 +55,22 @@ describe('buildMoment4ThresholdAnswerToMoment5Bundle', () => {
   it('uses first name in the reflection when provided', () => {
     const out = buildMoment4ThresholdAnswerToMoment5Bundle('Alex', MOMENT_5_ACCOUNTABILITY_QUESTION_TEXT);
     expect(out).toContain('Great work, Alex');
+  });
+});
+
+describe('assistantTextLooksLikeMoment4HandoffLead', () => {
+  it('matches canonical no-name lead without the grudge question line', () => {
+    expect(assistantTextLooksLikeMoment4HandoffLead(MOMENT_4_HANDOFF_NO_NAME_LEAD)).toBe(true);
+  });
+
+  it('matches paraphrase: three situations + two questions / more about you', () => {
+    const t =
+      "Nice work — you've finished the three situations. Only two questions left, and they're more about you.";
+    expect(assistantTextLooksLikeMoment4HandoffLead(t)).toBe(true);
+  });
+
+  it('does not match unrelated scenario chatter', () => {
+    expect(assistantTextLooksLikeMoment4HandoffLead('What do you think Sophie is feeling here?')).toBe(false);
   });
 });
 

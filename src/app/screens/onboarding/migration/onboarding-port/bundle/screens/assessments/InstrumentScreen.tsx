@@ -31,9 +31,9 @@ import {
   getFirstIncompleteAssessment,
   getAssessmentEntryRoute,
   ASSESSMENT_IDS,
+  onboardingAssessmentBatteryIndex,
   type AssessmentId,
 } from "@/data/services/assessmentService";
-import { computeRelationshipTraitsQualityFlags } from "@/data/assessments/instruments/relationshipTraits8";
 import { useProfile } from "@/shared/hooks/useProfile";
 import { theme } from "@/shared/theme/theme";
 
@@ -82,7 +82,6 @@ export function InstrumentScreen() {
   const [responses, setResponses] = useState<Record<string, number>>({});
   const [showIntro, setShowIntro] = useState(true);
   const [currentIndex, setCurrentIndex] = useState(0);
-  const [surveysComplete, setSurveysComplete] = useState(0);
   const [completedInstruments, setCompletedInstruments] = useState<string[] | null>(null);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -114,7 +113,6 @@ export function InstrumentScreen() {
       if (cancelled) return;
       const list = res.success ? res.data : [];
       setCompletedInstruments(list);
-      setSurveysComplete(list.length);
       setLoading(false);
     })();
     return () => {
@@ -203,10 +201,6 @@ export function InstrumentScreen() {
             : undefined;
         const result = await saveAssessmentResult(user.id, instrumentId, scores, next, {
           timeTakenSec: elapsedSec,
-          qualityFlags:
-            instrumentId === "RELATIONSHIP_TRAITS_8"
-              ? computeRelationshipTraitsQualityFlags(next, elapsedSec ?? 0)
-              : undefined,
         });
         if (result.success) {
           await refreshProfile();
@@ -298,11 +292,7 @@ export function InstrumentScreen() {
           contentContainerStyle={styles.introScrollContent}
         >
           <View style={styles.introCard}>
-            <Text style={styles.introEyebrow}>
-              {instrumentId === "RELATIONSHIP_TRAITS_8"
-                ? "Relationship traits"
-                : "Relationship typology"}
-            </Text>
+            <Text style={styles.introEyebrow}>Relationship typology</Text>
             <Text style={styles.introTitle}>{config.title}</Text>
             <Text style={styles.introDesc}>
               {renderIntroDescription(config.description, instrumentId)}
@@ -337,6 +327,7 @@ export function InstrumentScreen() {
   const itemText = activeEcrItem?.text ?? config.items[safeIndexForSync];
   const canonicalId = activeEcrItem?.id ?? safeIndexForSync + 1;
   const flowProgressPct = totalQuestions > 0 ? (questionNumber / totalQuestions) * 100 : 0;
+  const assessmentIndex = onboardingAssessmentBatteryIndex(instrumentId);
 
   if (ecrShuffle && !showIntro && !ecrOrder) {
     return (
@@ -359,16 +350,11 @@ export function InstrumentScreen() {
       >
         <View style={styles.questionCard}>
           <AssessmentHeader
-            surveysComplete={surveysComplete}
+            assessmentIndex={assessmentIndex}
             currentQ={questionNumber}
             totalQ={totalQuestions}
             assessmentName={config.title}
             totalAssessments={ASSESSMENT_IDS.length}
-            subtitle={
-              instrumentId === "RELATIONSHIP_TRAITS_8"
-                ? "A few quick questions about how you tend to respond to stress and trust in relationships."
-                : undefined
-            }
           />
           <Text style={styles.questionText}>{itemText}</Text>
           <LikertScale
@@ -379,12 +365,6 @@ export function InstrumentScreen() {
             minLabel={config.minLabel}
             maxLabel={config.maxLabel}
           />
-          {instrumentId === "RELATIONSHIP_TRAITS_8" && (
-            <Text style={styles.scaleLegend}>
-              1 = Strongly disagree · 2 = Disagree · 3 = Slightly disagree · 4 = Neutral · 5 =
-              Slightly agree · 6 = Agree · 7 = Strongly agree
-            </Text>
-          )}
         </View>
       </ScrollView>
       {saving && (
