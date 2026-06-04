@@ -40,6 +40,7 @@ interface WelcomeModalProps {
 
 export function WelcomeModal({
   visible,
+  legacyMode = false,
   onContinue,
   onOpenAdminPanel,
   continueDisabled,

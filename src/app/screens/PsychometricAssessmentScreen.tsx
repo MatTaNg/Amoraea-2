@@ -58,6 +58,7 @@ type Props = {
     params?: {
       userId?: string;
       interviewAlreadyCompleted?: boolean;
+      legacyPsychometricsMode?: boolean;
       openAdminPanel?: boolean;
       needsMarketResearch?: boolean;
     };
