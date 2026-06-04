@@ -295,6 +295,7 @@ import {
 import {
   isTtsTabResumeFallbackError,
   isWebInterviewTtsTabHiddenAbortError,
+  WebInterviewTtsTabHiddenAbortError,
 } from '@features/aria/utils/webTtsGestureErrors';
 import { ProfileRepository } from '@data/repositories/ProfileRepository';
 import { updateUserInterviewApplication } from '@data/repos/usersInterviewRepo';
@@ -3511,6 +3512,23 @@ function shouldDeferScenarioVignetteTailForOpeningMerge(
  */
 const SCENARIO_SPLIT_INTER_SEGMENT_GAP_MS = 200;
 
+/** Merge streamed sentences into one ElevenLabs request to avoid fetch/play gaps at every period. */
+const PARALLEL_TTS_BATCH_MIN_CHARS = 180;
+const PARALLEL_TTS_BATCH_MAX_CHARS = 480;
+/** Short acks (e.g. "Great work.") play immediately without waiting for a larger batch. */
+const PARALLEL_TTS_BATCH_SHORT_SENTENCE_MAX_CHARS = 52;
+
+function shouldFlushParallelTtsBatch(text: string, force: boolean): boolean {
+  if (force) return text.trim().length > 0;
+  const t = text.trim();
+  if (!t) return false;
+  if (/\?\s*$/.test(t)) return true;
+  if (t.length >= PARALLEL_TTS_BATCH_MAX_CHARS) return true;
+  if (t.length <= PARALLEL_TTS_BATCH_SHORT_SENTENCE_MAX_CHARS && /[.!]\s*$/.test(t)) return true;
+  if (t.length >= PARALLEL_TTS_BATCH_MIN_CHARS && /[.!]\s*$/.test(t)) return true;
+  return false;
+}
+
 function computeExpectedTtsWallClockMs(
   charCount: number,
   speakOutcome: { scenarioSplitDelivery?: { segment1_expected_duration_ms: number; segment2_expected_duration_ms: number } } | void | null
@@ -5739,9 +5757,6 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
   const awaitEmotionModalForIndex = async (itemIndex: number): Promise<void> => {
     if (itemIndex < 0 || itemIndex > 2) return;
     if (isEmotionItemAnsweredAt(emotionItemResponsesRef.current, itemIndex)) {
-      // #region agent log
-      fetch('http://127.0.0.1:7789/ingest/668e0bd5-3283-4492-9f48-e33846c18218',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'e00888'},body:JSON.stringify({sessionId:'e00888',runId:'pre-fix',hypothesisId:'H5',location:'AriaScreen.tsx:awaitEmotionModalForIndex',message:'emotion_modal_skipped_already_answered',data:{itemIndex,responses:[...emotionItemResponsesRef.current]},timestamp:Date.now()})}).catch(()=>{});
-      // #endregion
       console.log('[EmotionModal] index', itemIndex, 'already answered, skipping');
       return;
     }
@@ -5758,17 +5773,11 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
     }
 
     await new Promise<void>((resolve) => {
-      // #region agent log
-      fetch('http://127.0.0.1:7789/ingest/668e0bd5-3283-4492-9f48-e33846c18218',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'e00888'},body:JSON.stringify({sessionId:'e00888',runId:'pre-fix',hypothesisId:'H4',location:'AriaScreen.tsx:awaitEmotionModalForIndex',message:'emotion_modal_promise_enter',data:{itemIndex,responses:[...emotionItemResponsesRef.current]},timestamp:Date.now()})}).catch(()=>{});
-      // #endregion
       emotionModalOpenForIndexRef.current = itemIndex;
       emotionModalResolveRef.current = resolve;
       emotionModalPendingTransitionRef.current = true;
       setEmotionModalItemIndex(itemIndex as 0 | 1 | 2);
       setEmotionModalVisible(true);
-      // #region agent log
-      fetch('http://127.0.0.1:7789/ingest/668e0bd5-3283-4492-9f48-e33846c18218',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'e00888'},body:JSON.stringify({sessionId:'e00888',runId:'pre-fix',hypothesisId:'H4',location:'AriaScreen.tsx:awaitEmotionModalForIndex',message:'emotion_modal_visibility_requested',data:{itemIndex,pendingTransition:emotionModalPendingTransitionRef.current,responses:[...emotionItemResponsesRef.current]},timestamp:Date.now()})}).catch(()=>{});
-      // #endregion
       console.log('[EmotionModal] setEmotionModalVisible(true) called');
 
       console.log('[EmotionModal] modal set visible for index:', itemIndex);
@@ -5884,9 +5893,6 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
   }, [messages, userId]);
 
   useEffect(() => {
-    // #region agent log
-    fetch('http://127.0.0.1:7789/ingest/668e0bd5-3283-4492-9f48-e33846c18218',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'e00888'},body:JSON.stringify({sessionId:'e00888',runId:'post-fix',hypothesisId:'H7',location:'AriaScreen.tsx:emotion_modal_visibility_effect',message:'emotion_modal_state_changed',data:{emotionModalVisible,emotionModalItemIndex,emotionItemsComplete,status,voiceState},timestamp:Date.now()})}).catch(()=>{});
-    // #endregion
     void remoteLog('[EMOTION_MODAL_STATE_DIAG]', {
       hypothesisId: 'H9_modal_state_never_true',
       emotionModalVisible,
@@ -7626,9 +7632,6 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
           source: 'speak_text_safe',
           preview: stripControlTokens(text).trim().slice(0, 220),
         });
-        // #region agent log
-        fetch('http://127.0.0.1:7789/ingest/668e0bd5-3283-4492-9f48-e33846c18218',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'442e12'},body:JSON.stringify({sessionId:'442e12',location:'AriaScreen.tsx:speakTextSafe',message:'closing_tts_suppressed_duplicate',data:{hypothesisId:'H10',source:'speak_text_safe',preview:stripControlTokens(text).trim().slice(0,120)},timestamp:Date.now()})}).catch(()=>{});
-        // #endregion
         setVoiceState('idle');
         return;
       }
@@ -7803,21 +7806,27 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
             });
           }
           await reauthorizePendingPreAuthorizedElement();
-          needsGestureRestoreRef.current = false;
-          tabVisibilityGestureLossPendingRef.current = false;
-          gestureContextLostAtRef.current = null;
-          setWebTabGestureRestoreOverlay(false);
-          pendingGestureRestoreSpeakRef.current = null;
-          gestureRestoredAfterTabSwitchForThisPlayback = true;
-          if (userId) {
-            const r = getSessionLogRuntime();
-            writeSessionLog({
-              userId,
-              attemptId: r.attemptId,
-              eventType: 'gesture_restored_after_tab_switch',
-              eventData: { gesture_restored_after_tab_switch: true },
-              platform: r.platform,
-            });
+          /** Tab-hide interrupt may have queued a dedicated replay/resume — do not steal it and replay turn audio in parallel. */
+          const tabHideReplayAlreadyQueued =
+            webTtsTabInterruptPendingReplayRef.current ||
+            pendingGestureRestoreSpeakRef.current != null;
+          if (!tabHideReplayAlreadyQueued) {
+            needsGestureRestoreRef.current = false;
+            tabVisibilityGestureLossPendingRef.current = false;
+            gestureContextLostAtRef.current = null;
+            setWebTabGestureRestoreOverlay(false);
+            pendingGestureRestoreSpeakRef.current = null;
+            gestureRestoredAfterTabSwitchForThisPlayback = true;
+            if (userId) {
+              const r = getSessionLogRuntime();
+              writeSessionLog({
+                userId,
+                attemptId: r.attemptId,
+                eventType: 'gesture_restored_after_tab_switch',
+                eventData: { gesture_restored_after_tab_switch: true },
+                platform: r.platform,
+              });
+            }
           }
         }
       }
@@ -7892,8 +7901,35 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
       if (priorRec) {
         await applyPlaybackBridgeBeforeTtsIfIos('speakTextSafe');
       }
+      const shouldYieldInFlightSpeakToTabRestore = () =>
+        Platform.OS === 'web' &&
+        (webTtsTabInterruptPendingReplayRef.current ||
+          tabHiddenDuringActiveTtsLineRef.current ||
+          speakGenerationAtStart !== webTtsSpeakGenerationRef.current);
+      if (
+        Platform.OS === 'web' &&
+        telemetrySourceOpt !== 'replay' &&
+        !skipGestureGate &&
+        shouldYieldInFlightSpeakToTabRestore()
+      ) {
+        return new Promise<void>((resolve, reject) => {
+          const prior = pendingGestureRestoreSpeakRef.current;
+          const preserveHtmlResume =
+            prior?.restoreMode === 'resume_html' || hasWebInterviewHtmlAudioTabResumePending();
+          pendingGestureRestoreSpeakRef.current = {
+            text: preserveHtmlResume && prior?.text ? prior.text : text,
+            restoreMode: preserveHtmlResume ? 'resume_html' : prior?.restoreMode ?? 'replay',
+            options: { ...options },
+            resolve,
+            reject,
+          };
+          setWebTabGestureRestoreOverlay(true);
+        });
+      }
       if (Platform.OS === 'web') {
-        tabHiddenDuringActiveTtsLineRef.current = false;
+        if (!webTtsTabInterruptPendingReplayRef.current) {
+          tabHiddenDuringActiveTtsLineRef.current = false;
+        }
         if (!silent) {
           webTtsUtteranceInFlightRef.current = text;
           webTtsUtteranceInFlightOptionsRef.current = {
@@ -8003,6 +8039,9 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
           verificationOk = false;
           let firstPrematureActualToExpectedRatio: number | null = null;
           for (let attemptIx = 0; attemptIx < MAX_TTS_PLAYBACK_COMPLETION_ATTEMPTS; attemptIx++) {
+            if (shouldYieldInFlightSpeakToTabRestore()) {
+              throw new WebInterviewTtsTabHiddenAbortError();
+            }
             const attemptStart = Date.now();
             try {
               speakOutcome = await speak(textForAudio, {
@@ -8015,11 +8054,19 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
                 onPlaybackStarted: onScenarioPlaybackStarted,
               });
             } catch (e) {
+              if (shouldYieldInFlightSpeakToTabRestore()) {
+                throw e instanceof WebInterviewTtsTabHiddenAbortError
+                  ? e
+                  : new WebInterviewTtsTabHiddenAbortError();
+              }
               if (attemptIx < MAX_TTS_PLAYBACK_COMPLETION_ATTEMPTS - 1) {
                 await stopElevenLabsPlayback();
                 continue;
               }
               throw e;
+            }
+            if (shouldYieldInFlightSpeakToTabRestore()) {
+              throw new WebInterviewTtsTabHiddenAbortError();
             }
             actualTtsMs = Date.now() - attemptStart;
             const wall = computeExpectedTtsWallClockMs(charCount, speakOutcome);
@@ -8166,6 +8213,9 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
               break;
             }
             if (attemptIx < MAX_TTS_PLAYBACK_COMPLETION_ATTEMPTS - 1) {
+              if (shouldYieldInFlightSpeakToTabRestore()) {
+                throw new WebInterviewTtsTabHiddenAbortError();
+              }
               await stopElevenLabsPlayback();
             }
           }
@@ -8389,6 +8439,10 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
             isWebInterviewTtsTabHiddenAbortError(err));
         if (isWebInterviewTtsTabHiddenAbortError(err)) {
           setVoiceState('idle');
+          if (pendingGestureRestoreSpeakRef.current) {
+            needsGestureRestoreRef.current = true;
+            setWebTabGestureRestoreOverlay(true);
+          }
         } else if (isWebTtsRequiresUserGestureError(err)) {
           setPendingWebSpeechGesturePair(pendingWebSpeechForGestureRef, err.text);
           ensureWebGestureFlushListener();
@@ -8422,7 +8476,9 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
           ttsLineInFlightRef.current = false;
         }
         if (Platform.OS === 'web') {
-          tabHiddenDuringActiveTtsLineRef.current = false;
+          if (!webTtsTabInterruptPendingReplayRef.current) {
+            tabHiddenDuringActiveTtsLineRef.current = false;
+          }
           if (!webTtsTabInterruptPendingReplayRef.current) {
             webTtsUtteranceInFlightRef.current = null;
             webTtsUtteranceInFlightOptionsRef.current = null;
@@ -8482,9 +8538,6 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
         interviewSessionId: interviewSessionIdRef.current,
         transcriptLen: transcriptMessages.length,
       });
-      // #region agent log
-      fetch('http://127.0.0.1:7789/ingest/668e0bd5-3283-4492-9f48-e33846c18218',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'442e12'},body:JSON.stringify({sessionId:'442e12',location:'AriaScreen.tsx:kickPostClosingInterviewCompletionIfReady',message:'resume_closing_handoff_eval',data:{hypothesisId:'H12',source,transcriptLen:transcriptMessages.length},timestamp:Date.now()})}).catch(()=>{});
-      // #endregion
       void persistInterviewAttemptSessionLifecycle(interviewSessionAttemptIdRef.current, 'completed');
       interviewMomentsCompleteRef.current[4] = true;
       interviewMomentsCompleteRef.current[5] = true;
@@ -8656,9 +8709,6 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
       isInterviewClosingReflectiveAckFragment(tabRestoreReplayText) ||
       looksLikeInterviewClosingAssistantMessage(tabRestoreReplayText);
     if (isClosingTabRestoreReplay) {
-      // #region agent log
-      fetch('http://127.0.0.1:7789/ingest/668e0bd5-3283-4492-9f48-e33846c18218',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'442e12'},body:JSON.stringify({sessionId:'442e12',location:'AriaScreen.tsx:handleWebTabGestureRestoreTap',message:'tab_restore_replay_skipped_closing',data:{hypothesisId:'H3',preview:tabRestoreReplayText.slice(0,120),restoreMode:pending.restoreMode ?? 'replay'},timestamp:Date.now()})}).catch(()=>{});
-      // #endregion
       finishTabRestore({ clearTabHiddenLineFlag: false });
       webTabRestoreReplayInFlightRef.current = false;
       return;
@@ -10485,9 +10535,6 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
     ) {
       const pending = pendingEmotionModalTransitionRef.current;
       pendingEmotionModalTransitionRef.current = null;
-      // #region agent log
-      fetch('http://127.0.0.1:7789/ingest/668e0bd5-3283-4492-9f48-e33846c18218',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'e00888'},body:JSON.stringify({sessionId:'e00888',runId:'pre-fix',hypothesisId:'H3',location:'AriaScreen.tsx:processUserSpeech_intercept0',message:'emotion_modal_deferred_resume_entered',data:{completedScenario:pending.completedScenario,hasAfterModal:pending.afterModal.trim().length>0,priorScenario:pending.priorScenario,userInputPreview:trimmed.slice(0,120)},timestamp:Date.now()})}).catch(()=>{});
-      // #endregion
       const userScenarioTag =
         pending.completedScenario === 1 || pending.completedScenario === 2 || pending.completedScenario === 3
           ? pending.completedScenario
@@ -12509,9 +12556,6 @@ The participant **confirmed** skipping after the skip confirmation prompt. In **
       postM5UserTurnsRef: moment5PostPromptUserTurnCountRef.current,
       m5ResolutionFollowUpSeen,
     });
-    // #region agent log
-    fetch('http://127.0.0.1:7789/ingest/668e0bd5-3283-4492-9f48-e33846c18218',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'442e12'},body:JSON.stringify({sessionId:'442e12',location:'AriaScreen.tsx:makeCall',message:'m5_closing_buffer_gate',data:{hypothesisId:'H6',bufferAllStreamTtsForMoment5Close,postM5ForStreamBuffer,m5ResolutionFollowUpSeen},timestamp:Date.now()})}).catch(()=>{});
-    // #endregion
     parallelStreamingTtsRef.current = {
       active: false,
       cancelRequested: false,
@@ -12575,6 +12619,240 @@ The participant **confirmed** skipping after the skip confirmation prompt. In **
       let ttsChain = Promise.resolve();
       let ttsCancelled = false;
       let firstSentenceLogged = false;
+      /** Batches streamed sentences so scenario intros / summaries do not pause at every period. */
+      let parallelTtsBatchBuffer = '';
+      let parallelTtsBatchPrefetch: { text: string; promise: Promise<ArrayBuffer | null> } | null =
+        null;
+      const scheduleParallelTtsBatchPrefetch = () => {
+        const snap = parallelTtsBatchBuffer.trim();
+        if (snap.length < PARALLEL_TTS_BATCH_MIN_CHARS - 40) return;
+        if (parallelTtsBatchPrefetch?.text === snap) return;
+        parallelTtsBatchPrefetch = {
+          text: snap,
+          promise: fetchElevenLabsMpegArrayBuffer(snap).catch(() => null),
+        };
+      };
+      const enqueueParallelTtsUtterance = (
+        spoken: string,
+        prefetched?: Promise<ArrayBuffer | null> | null,
+      ) => {
+        const closingSentenceQueued =
+          isInterviewClosingThanksFragment(spoken) ||
+          isInterviewClosingReflectiveAckFragment(spoken) ||
+          looksLikeInterviewClosingAssistantMessage(spoken);
+        if (closingSentenceQueued) {
+        }
+        const speakGenAtEnqueue = webTtsSpeakGenerationRef.current;
+        ttsChain = ttsChain.then(async () => {
+          if (ttsCancelled || parallelStreamingTtsRef.current.cancelRequested) return;
+          if (Platform.OS === 'web' && speakGenAtEnqueue !== webTtsSpeakGenerationRef.current) {
+            return;
+          }
+          parallelStreamingTtsRef.current.active = true;
+          let closingSpeakLooksFinal = false;
+          let closingTtsSessionKey =
+            interviewSessionAttemptIdRef.current ?? interviewSessionIdRef.current;
+          try {
+            const spokenForTts = dedupeAdjacentBoundaryValidationsBeforeParticipantName(
+              sanitizeAssistantInterviewerCharacterNames(spoken),
+              participantFirstNameForSpoken,
+            );
+            if (
+              currentInterviewMomentRef.current === 1 &&
+              (looksLikeScenarioAContemptProbeQuestion(spokenForTts) ||
+                isIncompleteScenarioAContemptProbeLeadSentence(spokenForTts))
+            ) {
+              void remoteLog('[S1_CONTEMPT_PROBE_PARALLEL_SUPPRESSED]', {
+                preview: spokenForTts.slice(0, 200),
+                s1ContemptFixVersion: 15,
+              });
+              return;
+            }
+            closingTtsSessionKey =
+              interviewSessionAttemptIdRef.current ?? interviewSessionIdRef.current;
+            closingSpeakLooksFinal = looksLikeInterviewClosingAssistantMessage(
+              stripControlTokens(spokenForTts).trim(),
+            );
+            if (shouldSuppressDuplicateInterviewClosingTts(closingTtsSessionKey, spokenForTts)) {
+              void remoteLog('[M5_CLOSING_TTS_SUPPRESSED_DUPLICATE]', {
+                interviewSessionId: interviewSessionIdRef.current,
+                source: 'parallel_stream',
+                preview: spokenForTts.slice(0, 220),
+              });
+              if (closingSpeakLooksFinal) {
+                interviewClosingSpokenThisStream = true;
+                textToParallelStream.closingSpoken = true;
+              }
+              return;
+            }
+            if (closingSpeakLooksFinal && !tryAcquireInterviewClosingSpeak(closingTtsSessionKey)) {
+              void remoteLog('[M5_CLOSING_SPEAK_SUPPRESSED_IN_FLIGHT]', {
+                interviewSessionId: interviewSessionIdRef.current,
+                source: 'parallel_stream_acquire',
+                preview: spokenForTts.slice(0, 220),
+              });
+              interviewClosingSpokenThisStream = true;
+              textToParallelStream.closingSpoken = true;
+              return;
+            }
+            if (userId) {
+              const rtd = getSessionLogRuntime();
+              const freshNameFromProfile = interviewNameRef.current ?? '';
+              writeSessionLog({
+                userId,
+                attemptId: rtd.attemptId,
+                eventType: 'name_source_debug',
+                eventData: {
+                  stage: 'parallel_sentence',
+                  participant_first_name_present: !!participantFirstNameForSpoken,
+                  participant_first_name_length: participantFirstNameForSpoken.length,
+                  fresh_name_present: !!freshNameFromProfile,
+                  fresh_name_length: freshNameFromProfile.length,
+                },
+                platform: rtd.platform,
+              });
+            }
+            if (userId) {
+              const rtd = getSessionLogRuntime();
+              writeSessionLog({
+                userId,
+                attemptId: rtd.attemptId,
+                eventType: 'name_injection_debug',
+                eventData: {
+                  stage: 'parallel_sentence',
+                  moment_number: currentInterviewMomentRef.current,
+                  scenario_number: currentScenarioRef.current,
+                  raw_has_name: participantFirstNameForSpoken
+                    ? spoken.toLowerCase().includes(participantFirstNameForSpoken.toLowerCase())
+                    : null,
+                  injected_has_name: participantFirstNameForSpoken
+                    ? spokenForTts.toLowerCase().includes(participantFirstNameForSpoken.toLowerCase())
+                    : null,
+                  raw_preview: spoken.slice(0, 140),
+                  injected_preview: spokenForTts.slice(0, 140),
+                },
+                platform: rtd.platform,
+              });
+            }
+            await awaitTtsScreenReadyGate('parallel_streaming_sentence');
+            webTtsUtteranceInFlightRef.current = spokenForTts;
+            webTtsUtteranceInFlightOptionsRef.current = {
+              interviewSpeechRole: 'assistant_response',
+              telemetrySource: 'turn',
+              skipInterviewSpeechAdvance: false,
+              skipQuestionDeliveredTelemetry: false,
+              skipLastQuestionRef: false,
+              allowDuplicateConsecutiveTts: false,
+              silent: false,
+              skipGestureGate: false,
+              ttsTriggerSource: 'callback',
+            };
+            ttsLineInFlightRef.current = true;
+            if (userId) {
+              setTtsPlaybackActive(true);
+            }
+            const prefetchedBuf = prefetched ? await prefetched : null;
+            try {
+              await speakWithElevenLabs(spokenForTts, undefined, {
+                skipStopElevenLabsPlaybackBeforeStart: true,
+                telemetry: { source: 'turn' },
+                preInitTriggerDuring: 'tts_playback',
+                skipPcmStream: true,
+                prefetchedMpegArrayBuffer: prefetchedBuf?.byteLength ? prefetchedBuf : undefined,
+                onPlaybackStarted: () => {
+                  if (
+                    Platform.OS === 'web' &&
+                    (webTtsTabInterruptPendingReplayRef.current ||
+                      parallelStreamingTtsRef.current.cancelRequested ||
+                      (typeof document !== 'undefined' && document.visibilityState === 'hidden'))
+                  ) {
+                    return;
+                  }
+                  setVoiceState('speaking');
+                  textToParallelStream.spokenStarted = true;
+                  recordInterviewAssistantDeliveryForMetaExemptionRef.current(
+                    stripControlTokens(spokenForTts).trim(),
+                  );
+                  if (referenceCardShouldUpdateOnPlaybackStart(spokenForTts)) {
+                    applyReferenceCardFromAssistantSpeechRef.current(spokenForTts);
+                  }
+                  if (
+                    currentInterviewMomentRef.current === 2 &&
+                    currentScenarioRef.current === 2 &&
+                    looksLikeScenarioBRepairAsJamesQuestion(spokenForTts)
+                  ) {
+                    s2RepairProbeDeliveredRef.current = true;
+                  }
+                  if (!firstSentenceLogged && userId) {
+                    firstSentenceLogged = true;
+                    const rtd = getSessionLogRuntime();
+                    writeSessionLog({
+                      userId,
+                      attemptId: rtd.attemptId,
+                      eventType: 'question_delivered',
+                      eventData: {
+                        moment_number: currentInterviewMomentRef.current,
+                        scenario_number: currentScenarioRef.current,
+                        question_text: stripControlTokens(spoken).trim().slice(0, 2000),
+                        delivered_at: new Date().toISOString(),
+                        tts_pipeline: 'parallel_streaming',
+                      },
+                      platform: rtd.platform,
+                    });
+                  }
+                },
+              });
+              if (
+                !webTtsTabInterruptPendingReplayRef.current &&
+                !parallelStreamingTtsRef.current.cancelRequested
+              ) {
+                const chunk = stripControlTokens(spokenForTts).trim();
+                if (chunk.length > 0) {
+                  const prev = parallelStreamingTtsRef.current.spokenCompleteText.trim();
+                  parallelStreamingTtsRef.current.spokenCompleteText = prev
+                    ? `${prev} ${chunk}`.trim()
+                    : chunk;
+                }
+                if (closingSpeakLooksFinal) {
+                  markInterviewClosingTtsDelivered(closingTtsSessionKey, spokenForTts);
+                  interviewClosingSpokenThisStream = true;
+                  textToParallelStream.closingSpoken = true;
+                }
+              } else if (closingSpeakLooksFinal) {
+                releaseInterviewClosingSpeak(closingTtsSessionKey);
+              }
+            } finally {
+              if (!webTtsTabInterruptPendingReplayRef.current) {
+                ttsLineInFlightRef.current = false;
+                if (userId) {
+                  setTtsPlaybackActive(false);
+                }
+              }
+            }
+          } catch {
+            if (closingSpeakLooksFinal) {
+              releaseInterviewClosingSpeak(closingTtsSessionKey);
+            }
+          }
+        });
+      };
+      const flushParallelTtsBatch = (force: boolean) => {
+        const batch = parallelTtsBatchBuffer.trim();
+        if (!shouldFlushParallelTtsBatch(batch, force)) return;
+        const prefetch =
+          parallelTtsBatchPrefetch?.text === batch ? parallelTtsBatchPrefetch.promise : null;
+        parallelTtsBatchBuffer = '';
+        parallelTtsBatchPrefetch = null;
+        enqueueParallelTtsUtterance(batch, prefetch);
+      };
+      const appendToParallelTtsBatch = (spoken: string) => {
+        textToParallelStream.spokenStarted = true;
+        parallelTtsBatchBuffer = parallelTtsBatchBuffer
+          ? `${parallelTtsBatchBuffer} ${spoken}`.trim()
+          : spoken;
+        scheduleParallelTtsBatchPrefetch();
+        flushParallelTtsBatch(false);
+      };
       const maybeQueueSentenceForTts = (
         sentence: string,
         allowDeferWarm = true,
@@ -12653,9 +12931,6 @@ The participant **confirmed** skipping after the skip confirmation prompt. In **
             postM5UserTurns: moment5PostPromptUserTurnCountRef.current,
             sticky: !bufferAllStreamTtsForMoment5Close,
           });
-          // #region agent log
-          fetch('http://127.0.0.1:7789/ingest/668e0bd5-3283-4492-9f48-e33846c18218',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'442e12'},body:JSON.stringify({sessionId:'442e12',location:'AriaScreen.tsx:maybeQueueSentenceForTts',message:'m5_closing_stream_buffered_all',data:{hypothesisId:'H6',preview:moment5ClosingStreamBuffer.slice(0,140),postM5UserTurns:moment5PostPromptUserTurnCountRef.current,sticky:!bufferAllStreamTtsForMoment5Close},timestamp:Date.now()})}).catch(()=>{});
-          // #endregion
           return;
         }
         if (
@@ -12671,9 +12946,6 @@ The participant **confirmed** skipping after the skip confirmation prompt. In **
             interviewSessionId: interviewSessionIdRef.current,
             preview: moment5ClosingStreamBuffer.slice(0, 220),
           });
-          // #region agent log
-          fetch('http://127.0.0.1:7789/ingest/668e0bd5-3283-4492-9f48-e33846c18218',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'442e12'},body:JSON.stringify({sessionId:'442e12',location:'AriaScreen.tsx:maybeQueueSentenceForTts',message:'m5_closing_stream_buffered',data:{hypothesisId:'H6',preview:moment5ClosingStreamBuffer.slice(0,140),moment:currentInterviewMomentRef.current},timestamp:Date.now()})}).catch(()=>{});
-          // #endregion
           return;
         }
         if (
@@ -12774,9 +13046,6 @@ The participant **confirmed** skipping after the skip confirmation prompt. In **
         if (closingAlreadyInTranscriptForStream || interviewClosingSpokenThisStream) {
           const afterClosingEchoStrip = stripInterviewClosingStreamingEcho(spoken, true);
           if (afterClosingEchoStrip === null) {
-            // #region agent log
-            fetch('http://127.0.0.1:7789/ingest/668e0bd5-3283-4492-9f48-e33846c18218',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'442e12'},body:JSON.stringify({sessionId:'442e12',location:'AriaScreen.tsx:maybeQueueSentenceForTts',message:'closing_stream_suppressed',data:{hypothesisId:'H5',preview:spoken.slice(0,120),closingSpokenStream:interviewClosingSpokenThisStream,closingAlreadyInTranscript:closingAlreadyInTranscriptForStream,moment:currentInterviewMomentRef.current},timestamp:Date.now()})}).catch(()=>{});
-            // #endregion
             return;
           }
           spoken = afterClosingEchoStrip;
@@ -12804,27 +13073,18 @@ The participant **confirmed** skipping after the skip confirmation prompt. In **
             currentInterviewMomentRef.current === 5 &&
             /^thanks for sticking with (this|it|all of this)[.!?…]*$/i.test(normalizedClosingLead)
           ) {
-            // #region agent log
-            fetch('http://127.0.0.1:7789/ingest/668e0bd5-3283-4492-9f48-e33846c18218',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'442e12'},body:JSON.stringify({sessionId:'442e12',location:'AriaScreen.tsx:maybeQueueSentenceForTts',message:'closing_short_lead_suppressed',data:{hypothesisId:'H1',preview:spoken.slice(0,120),moment:currentInterviewMomentRef.current},timestamp:Date.now()})}).catch(()=>{});
-            // #endregion
             return;
           }
           deferredInterviewClosingLeadSentence = spoken;
           if (currentInterviewMomentRef.current === 5) {
             moment5StickyCloseBufferAll = true;
           }
-          // #region agent log
-          fetch('http://127.0.0.1:7789/ingest/668e0bd5-3283-4492-9f48-e33846c18218',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'442e12'},body:JSON.stringify({sessionId:'442e12',location:'AriaScreen.tsx:maybeQueueSentenceForTts',message:'closing_stream_deferred',data:{hypothesisId:'H1',preview:spoken.slice(0,120),moment:currentInterviewMomentRef.current},timestamp:Date.now()})}).catch(()=>{});
-          // #endregion
           return;
         }
         if (currentInterviewMomentRef.current === 5) {
           const closingThanks = isInterviewClosingThanksFragment(spoken);
           const closingReflective = isInterviewClosingReflectiveAckFragment(spoken);
           const closingFull = looksLikeInterviewClosingAssistantMessage(spoken);
-          // #region agent log
-          fetch('http://127.0.0.1:7789/ingest/668e0bd5-3283-4492-9f48-e33846c18218',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'442e12'},body:JSON.stringify({sessionId:'442e12',location:'AriaScreen.tsx:maybeQueueSentenceForTts',message:'m5_sentence_detector_eval',data:{hypothesisId:'H1',preview:spoken.slice(0,140),closingThanks,closingReflective,closingFull,deferredInterviewClosingLead:!!deferredInterviewClosingLeadSentence},timestamp:Date.now()})}).catch(()=>{});
-          // #endregion
         }
         const elongatingBlockReason = elongatingProbePlaybackBlockReason({
           spokenSentence: spoken,
@@ -12885,212 +13145,7 @@ The participant **confirmed** skipping after the skip confirmation prompt. In **
           deferredScenarioVignetteTailForOpeningMerge = spoken;
           return;
         }
-        textToParallelStream.spokenStarted = true;
-        const closingSentenceQueued =
-          isInterviewClosingThanksFragment(spoken) ||
-          isInterviewClosingReflectiveAckFragment(spoken) ||
-          looksLikeInterviewClosingAssistantMessage(spoken);
-        if (closingSentenceQueued) {
-          // #region agent log
-          fetch('http://127.0.0.1:7789/ingest/668e0bd5-3283-4492-9f48-e33846c18218',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'442e12'},body:JSON.stringify({sessionId:'442e12',location:'AriaScreen.tsx:maybeQueueSentenceForTts',message:'closing_stream_queued',data:{hypothesisId:'H1',preview:spoken.slice(0,120),closingSpokenStream:textToParallelStream.closingSpoken,moment:currentInterviewMomentRef.current},timestamp:Date.now()})}).catch(()=>{});
-          // #endregion
-        }
-        const speakGenAtEnqueue = webTtsSpeakGenerationRef.current;
-        ttsChain = ttsChain.then(async () => {
-          if (ttsCancelled || parallelStreamingTtsRef.current.cancelRequested) return;
-          if (Platform.OS === 'web' && speakGenAtEnqueue !== webTtsSpeakGenerationRef.current) {
-            // #region agent log
-            fetch('http://127.0.0.1:7789/ingest/668e0bd5-3283-4492-9f48-e33846c18218',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'442e12'},body:JSON.stringify({sessionId:'442e12',location:'AriaScreen.tsx:parallelTtsChain',message:'parallel_tts_stale_generation',data:{hypothesisId:'H10',speakGenAtEnqueue,currentGen:webTtsSpeakGenerationRef.current,preview:spoken.slice(0,80)},timestamp:Date.now()})}).catch(()=>{});
-            // #endregion
-            return;
-          }
-          parallelStreamingTtsRef.current.active = true;
-          try {
-            const spokenForTts = dedupeAdjacentBoundaryValidationsBeforeParticipantName(
-              sanitizeAssistantInterviewerCharacterNames(spoken),
-              participantFirstNameForSpoken,
-            );
-            if (
-              currentInterviewMomentRef.current === 1 &&
-              (looksLikeScenarioAContemptProbeQuestion(spokenForTts) ||
-                isIncompleteScenarioAContemptProbeLeadSentence(spokenForTts))
-            ) {
-              void remoteLog('[S1_CONTEMPT_PROBE_PARALLEL_SUPPRESSED]', {
-                preview: spokenForTts.slice(0, 200),
-                s1ContemptFixVersion: 15,
-              });
-              return;
-            }
-            const closingTtsSessionKey =
-              interviewSessionAttemptIdRef.current ?? interviewSessionIdRef.current;
-            const closingSpeakLooksFinal = looksLikeInterviewClosingAssistantMessage(
-              stripControlTokens(spokenForTts).trim(),
-            );
-            if (shouldSuppressDuplicateInterviewClosingTts(closingTtsSessionKey, spokenForTts)) {
-              void remoteLog('[M5_CLOSING_TTS_SUPPRESSED_DUPLICATE]', {
-                interviewSessionId: interviewSessionIdRef.current,
-                source: 'parallel_stream',
-                preview: spokenForTts.slice(0, 220),
-              });
-              // #region agent log
-              fetch('http://127.0.0.1:7789/ingest/668e0bd5-3283-4492-9f48-e33846c18218',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'442e12'},body:JSON.stringify({sessionId:'442e12',location:'AriaScreen.tsx:parallelTtsChain',message:'closing_tts_suppressed_duplicate',data:{hypothesisId:'H10',source:'parallel_stream',preview:spokenForTts.slice(0,120)},timestamp:Date.now()})}).catch(()=>{});
-              // #endregion
-              if (closingSpeakLooksFinal) {
-                interviewClosingSpokenThisStream = true;
-                textToParallelStream.closingSpoken = true;
-              }
-              return;
-            }
-            if (closingSpeakLooksFinal && !tryAcquireInterviewClosingSpeak(closingTtsSessionKey)) {
-              void remoteLog('[M5_CLOSING_SPEAK_SUPPRESSED_IN_FLIGHT]', {
-                interviewSessionId: interviewSessionIdRef.current,
-                source: 'parallel_stream_acquire',
-                preview: spokenForTts.slice(0, 220),
-              });
-              // #region agent log
-              fetch('http://127.0.0.1:7789/ingest/668e0bd5-3283-4492-9f48-e33846c18218',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'442e12'},body:JSON.stringify({sessionId:'442e12',location:'AriaScreen.tsx:parallelTtsChain',message:'closing_speak_suppressed_in_flight',data:{hypothesisId:'H13',source:'parallel_stream_acquire',preview:spokenForTts.slice(0,120)},timestamp:Date.now()})}).catch(()=>{});
-              // #endregion
-              interviewClosingSpokenThisStream = true;
-              textToParallelStream.closingSpoken = true;
-              return;
-            }
-            if (userId) {
-              const rtd = getSessionLogRuntime();
-              const freshNameFromProfile = interviewNameRef.current ?? '';
-              writeSessionLog({
-                userId,
-                attemptId: rtd.attemptId,
-                eventType: 'name_source_debug',
-                eventData: {
-                  stage: 'parallel_sentence',
-                  participant_first_name_present: !!participantFirstNameForSpoken,
-                  participant_first_name_length: participantFirstNameForSpoken.length,
-                  fresh_name_present: !!freshNameFromProfile,
-                  fresh_name_length: freshNameFromProfile.length,
-                },
-                platform: rtd.platform,
-              });
-            }
-            if (userId) {
-              const rtd = getSessionLogRuntime();
-              writeSessionLog({
-                userId,
-                attemptId: rtd.attemptId,
-                eventType: 'name_injection_debug',
-                eventData: {
-                  stage: 'parallel_sentence',
-                  moment_number: currentInterviewMomentRef.current,
-                  scenario_number: currentScenarioRef.current,
-                  raw_has_name: participantFirstNameForSpoken
-                    ? spoken.toLowerCase().includes(participantFirstNameForSpoken.toLowerCase())
-                    : null,
-                  injected_has_name: participantFirstNameForSpoken
-                    ? spokenForTts.toLowerCase().includes(participantFirstNameForSpoken.toLowerCase())
-                    : null,
-                  raw_preview: spoken.slice(0, 140),
-                  injected_preview: spokenForTts.slice(0, 140),
-                },
-                platform: rtd.platform,
-              });
-            }
-              await awaitTtsScreenReadyGate('parallel_streaming_sentence');
-            webTtsUtteranceInFlightRef.current = spokenForTts;
-            webTtsUtteranceInFlightOptionsRef.current = {
-              interviewSpeechRole: 'assistant_response',
-              telemetrySource: 'turn',
-              skipInterviewSpeechAdvance: false,
-              skipQuestionDeliveredTelemetry: false,
-              skipLastQuestionRef: false,
-              allowDuplicateConsecutiveTts: false,
-              silent: false,
-              skipGestureGate: false,
-              ttsTriggerSource: 'callback',
-            };
-            ttsLineInFlightRef.current = true;
-            if (userId) {
-              setTtsPlaybackActive(true);
-            }
-            try {
-            await speakWithElevenLabs(spokenForTts, undefined, {
-              skipStopElevenLabsPlaybackBeforeStart: true,
-              telemetry: { source: 'turn' },
-              preInitTriggerDuring: 'tts_playback',
-              onPlaybackStarted: () => {
-                  if (
-                    Platform.OS === 'web' &&
-                    (webTtsTabInterruptPendingReplayRef.current ||
-                      parallelStreamingTtsRef.current.cancelRequested ||
-                      (typeof document !== 'undefined' && document.visibilityState === 'hidden'))
-                  ) {
-                    return;
-                  }
-                setVoiceState('speaking');
-                textToParallelStream.spokenStarted = true;
-                  recordInterviewAssistantDeliveryForMetaExemptionRef.current(
-                    stripControlTokens(spokenForTts).trim()
-                  );
-                  if (referenceCardShouldUpdateOnPlaybackStart(spokenForTts)) {
-                    applyReferenceCardFromAssistantSpeechRef.current(spokenForTts);
-                  }
-                if (
-                  currentInterviewMomentRef.current === 2 &&
-                  currentScenarioRef.current === 2 &&
-                  looksLikeScenarioBRepairAsJamesQuestion(spokenForTts)
-                ) {
-                  s2RepairProbeDeliveredRef.current = true;
-                }
-                if (!firstSentenceLogged && userId) {
-                  firstSentenceLogged = true;
-                  const rtd = getSessionLogRuntime();
-                  writeSessionLog({
-                    userId,
-                    attemptId: rtd.attemptId,
-                    eventType: 'question_delivered',
-                    eventData: {
-                      moment_number: currentInterviewMomentRef.current,
-                      scenario_number: currentScenarioRef.current,
-                      question_text: stripControlTokens(spoken).trim().slice(0, 2000),
-                      delivered_at: new Date().toISOString(),
-                      tts_pipeline: 'parallel_streaming',
-                    },
-                    platform: rtd.platform,
-                  });
-                }
-              },
-            });
-              if (
-                !webTtsTabInterruptPendingReplayRef.current &&
-                !parallelStreamingTtsRef.current.cancelRequested
-              ) {
-                const chunk = stripControlTokens(spokenForTts).trim();
-                if (chunk.length > 0) {
-                  const prev = parallelStreamingTtsRef.current.spokenCompleteText.trim();
-                  parallelStreamingTtsRef.current.spokenCompleteText = prev
-                    ? `${prev} ${chunk}`.trim()
-                    : chunk;
-                }
-                if (closingSpeakLooksFinal) {
-                  markInterviewClosingTtsDelivered(closingTtsSessionKey, spokenForTts);
-                  interviewClosingSpokenThisStream = true;
-                  textToParallelStream.closingSpoken = true;
-                }
-              } else if (closingSpeakLooksFinal) {
-                releaseInterviewClosingSpeak(closingTtsSessionKey);
-              }
-            } finally {
-              if (!webTtsTabInterruptPendingReplayRef.current) {
-                ttsLineInFlightRef.current = false;
-                if (userId) {
-                  setTtsPlaybackActive(false);
-                }
-              }
-            }
-          } catch {
-            if (closingSpeakLooksFinal) {
-              releaseInterviewClosingSpeak(closingTtsSessionKey);
-            }
-          }
-        });
+        appendToParallelTtsBatch(spoken);
       };
       const speakScenarioAContemptProbeStreamOnce = async () => {
         if (
@@ -13108,6 +13163,7 @@ The participant **confirmed** skipping after the skip confirmation prompt. In **
         }
         /** Claim before any await so concurrent stream-end flush cannot double-speak. */
         scenarioAContemptProbeSpokenThisStream = true;
+        flushParallelTtsBatch(true);
         await ttsChain;
         parallelStreamingTtsRef.current.cancelRequested = true;
         ttsCancelled = true;
@@ -13293,9 +13349,6 @@ The participant **confirmed** skipping after the skip confirmation prompt. In **
             interviewSessionId: interviewSessionIdRef.current,
             preview: dedupedClosing.slice(0, 220),
           });
-          // #region agent log
-          fetch('http://127.0.0.1:7789/ingest/668e0bd5-3283-4492-9f48-e33846c18218',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'442e12'},body:JSON.stringify({sessionId:'442e12',location:'AriaScreen.tsx:streamEnd',message:'m5_closing_stream_flush',data:{hypothesisId:'H6',preview:dedupedClosing.slice(0,140)},timestamp:Date.now()})}).catch(()=>{});
-          // #endregion
           if (dedupedClosing.trim()) {
             const closingTtsSessionKey =
               interviewSessionAttemptIdRef.current ?? interviewSessionIdRef.current;
@@ -13306,9 +13359,6 @@ The participant **confirmed** skipping after the skip confirmation prompt. In **
                 source: 'm5_closing_stream_flush',
                 preview: dedupedClosing.slice(0, 220),
               });
-              // #region agent log
-              fetch('http://127.0.0.1:7789/ingest/668e0bd5-3283-4492-9f48-e33846c18218',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'442e12'},body:JSON.stringify({sessionId:'442e12',location:'AriaScreen.tsx:streamEnd',message:'closing_tts_suppressed_duplicate',data:{hypothesisId:'H11',source:'m5_closing_stream_flush',preview:dedupedClosing.slice(0,120)},timestamp:Date.now()})}).catch(()=>{});
-              // #endregion
               if (closingFlushLooksFinal) {
                 interviewClosingSpokenThisStream = true;
                 textToParallelStream.closingSpoken = true;
@@ -13331,6 +13381,7 @@ The participant **confirmed** skipping after the skip confirmation prompt. In **
           deferredScenarioVignetteTailForOpeningMerge = null;
           maybeQueueSentenceForTts(heldTail, false);
         }
+        flushParallelTtsBatch(true);
         if (!streamContemptProbeMuteActive) {
           await ttsChain;
         }
@@ -13345,14 +13396,8 @@ The participant **confirmed** skipping after the skip confirmation prompt. In **
               isInterviewClosingReflectiveAckFragment(fullReplay) ||
               looksLikeInterviewClosingAssistantMessage(fullReplay);
             if (isClosingReplay) {
-              // #region agent log
-              fetch('http://127.0.0.1:7789/ingest/668e0bd5-3283-4492-9f48-e33846c18218',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'442e12'},body:JSON.stringify({sessionId:'442e12',location:'AriaScreen.tsx:streamEnd',message:'web_full_replay_skipped_closing',data:{hypothesisId:'H3',preview:fullReplay.slice(0,120),spokenCompletePreview:parallelStreamingTtsRef.current.spokenCompleteText.slice(0,120),closingSpoken:textToParallelStream.closingSpoken},timestamp:Date.now()})}).catch(()=>{});
-              // #endregion
               webTtsTabInterruptPendingReplayRef.current = false;
             } else {
-              // #region agent log
-              fetch('http://127.0.0.1:7789/ingest/668e0bd5-3283-4492-9f48-e33846c18218',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'442e12'},body:JSON.stringify({sessionId:'442e12',location:'AriaScreen.tsx:streamEnd',message:'web_full_replay_queued',data:{hypothesisId:'H3',preview:fullReplay.slice(0,120),spokenCompletePreview:parallelStreamingTtsRef.current.spokenCompleteText.slice(0,120),closingSpoken:textToParallelStream.closingSpoken},timestamp:Date.now()})}).catch(()=>{});
-              // #endregion
               const prior = pendingGestureRestoreSpeakRef.current;
               const preserveHtmlResume =
                 prior?.restoreMode === 'resume_html' || hasWebInterviewHtmlAudioTabResumePending();
@@ -14549,13 +14594,7 @@ The participant **confirmed** skipping after the skip confirmation prompt. In **
             indices: unansweredEmotionAtClose,
           });
           for (const itemIndex of unansweredEmotionAtClose) {
-          // #region agent log
-          fetch('http://127.0.0.1:7789/ingest/668e0bd5-3283-4492-9f48-e33846c18218',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'e00888'},body:JSON.stringify({sessionId:'e00888',runId:'pre-fix',hypothesisId:'H6',location:'AriaScreen.tsx:catch_up_before_complete',message:'emotion_modal_catchup_attempt',data:{itemIndex,unansweredEmotionAtClose},timestamp:Date.now()})}).catch(()=>{});
-          // #endregion
             await awaitEmotionModalForIndex(itemIndex);
-          // #region agent log
-          fetch('http://127.0.0.1:7789/ingest/668e0bd5-3283-4492-9f48-e33846c18218',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'e00888'},body:JSON.stringify({sessionId:'e00888',runId:'pre-fix',hypothesisId:'H6',location:'AriaScreen.tsx:catch_up_before_complete',message:'emotion_modal_catchup_resolved',data:{itemIndex,responses:[...emotionItemResponsesRef.current]},timestamp:Date.now()})}).catch(()=>{});
-          // #endregion
           }
         }
         interviewStatusRef.current = 'preparing_results';
@@ -15378,15 +15417,9 @@ The participant **confirmed** skipping after the skip confirmation prompt. In **
       } else if (!pendingBundledHandoff && !deferEmotionModal && emotionNaturalS3ToM4) {
         ensureCompletedScenarioScored(3, updatedMessages, 'natural_language_s3_to_m4');
       }
-      // #region agent log
-      fetch('http://127.0.0.1:7789/ingest/668e0bd5-3283-4492-9f48-e33846c18218',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'e00888'},body:JSON.stringify({sessionId:'e00888',runId:'post-fix',hypothesisId:'H1_H2_H8',location:'AriaScreen.tsx:assistant_transition_gate',message:'emotion_modal_transition_gate_eval',data:{priorScenarioNum,detectedScenario,emotionNaturalForward,emotionCompletedScenario,scenarioHandoffTransition,emotionNaturalS3ToM4,deferEmotionModal,deferBlocked:emotionGate.deferBlocked,hasAfterModal:emotionSplit.afterModal.trim().length>0,isClosingQuestion:isClosingQuestion(displayText),status,isInterviewAppRoute,isAdmin,preview:displayText.slice(0,180)},timestamp:Date.now()})}).catch(()=>{});
-      // #endregion
       const speakTransitionWithOptionalEmotionModal = async (scenarioJustCompleted: 1 | 2 | 3) => {
         const { beforeModal, afterModal } = emotionSplit;
         if (deferEmotionModal && afterModal.trim()) {
-          // #region agent log
-          fetch('http://127.0.0.1:7789/ingest/668e0bd5-3283-4492-9f48-e33846c18218',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'e00888'},body:JSON.stringify({sessionId:'e00888',runId:'pre-fix',hypothesisId:'H2',location:'AriaScreen.tsx:speakTransitionWithOptionalEmotionModal',message:'emotion_modal_deferred_pending_set',data:{scenarioJustCompleted,beforeLength:beforeModal.length,afterLength:afterModal.length,priorScenarioNum},timestamp:Date.now()})}).catch(()=>{});
-          // #endregion
           pendingEmotionModalTransitionRef.current = {
             completedScenario: scenarioJustCompleted,
             afterModal,
@@ -15508,12 +15541,6 @@ The participant **confirmed** skipping after the skip confirmation prompt. In **
       if (shouldFailsafeComplete) {
         const candidateLooksThanks = isInterviewClosingThanksFragment(closingCandidate);
         const candidateLooksReflective = isInterviewClosingReflectiveAckFragment(closingCandidate);
-        // #region agent log
-        fetch('http://127.0.0.1:7789/ingest/668e0bd5-3283-4492-9f48-e33846c18218',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'442e12'},body:JSON.stringify({sessionId:'442e12',location:'AriaScreen.tsx:closingFailsafe',message:'closing_candidate_detector_eval',data:{hypothesisId:'H4',preview:closingCandidate.slice(0,140),closingLooksFinal,candidateLooksThanks,candidateLooksReflective,closingSpokenInStream:textToParallelStream.closingSpoken,spokenStarted:textToParallelStream.spokenStarted},timestamp:Date.now()})}).catch(()=>{});
-        // #endregion
-        // #region agent log
-        fetch('http://127.0.0.1:7789/ingest/668e0bd5-3283-4492-9f48-e33846c18218',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'442e12'},body:JSON.stringify({sessionId:'442e12',location:'AriaScreen.tsx:closingFailsafe',message:'closing_handoff_decision',data:{hypothesisId:'H2',skipClosingSpeak,closingSpokenInStream:textToParallelStream.closingSpoken,streamSpokeClosingThankYou,spokenStarted:textToParallelStream.spokenStarted,spokenCompletePreview:parallelStreamingTtsRef.current.spokenCompleteText.slice(0,120),closingAlreadySpokenInTranscript,preview:closingCandidate.slice(0,120)},timestamp:Date.now()})}).catch(()=>{});
-        // #endregion
         void remoteLog('[INTERVIEW_COMPLETE_CLOSING_FAILSAFE]', {
           interviewSessionId: interviewSessionIdRef.current,
           moment5CloseAllowed: closeGateForFailsafe.moment5CloseAllowed,
@@ -15554,9 +15581,6 @@ The participant **confirmed** skipping after the skip confirmation prompt. In **
           ) {
             const dedupedClosing = stripDuplicateInterviewClosingSentencesWithinDraft(closingCandidate);
             if (dedupedClosing.trim()) {
-              // #region agent log
-              fetch('http://127.0.0.1:7789/ingest/668e0bd5-3283-4492-9f48-e33846c18218',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'442e12'},body:JSON.stringify({sessionId:'442e12',location:'AriaScreen.tsx:closingFailsafe',message:'closing_failsafe_direct_speak',data:{hypothesisId:'H7',preview:dedupedClosing.slice(0,140),spokenCompletePreview:parallelStreamingTtsRef.current.spokenCompleteText.slice(0,140)},timestamp:Date.now()})}).catch(()=>{});
-              // #endregion
               await speakTextSafe(dedupedClosing, ASSISTANT_INTERVIEW_SPEECH);
               textToParallelStream.closingSpoken = true;
             }
@@ -16758,18 +16782,12 @@ The participant **confirmed** skipping after the skip confirmation prompt. In **
           interviewSessionId: interviewSessionIdRef.current,
           attemptKey: closingSessionKey,
         });
-        // #region agent log
-        fetch('http://127.0.0.1:7789/ingest/668e0bd5-3283-4492-9f48-e33846c18218',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'442e12'},body:JSON.stringify({sessionId:'442e12',location:'AriaScreen.tsx:unmount',message:'closing_speak_preserved_on_unmount',data:{hypothesisId:'H13',attemptKey:closingSessionKey},timestamp:Date.now()})}).catch(()=>{});
-        // #endregion
       } else {
         parallelStreamingTtsRef.current.cancelRequested = true;
         webTtsSpeakGenerationRef.current += 1;
         void remoteLog('[ARIA_UNMOUNT] parallel_stream_cancelled', {
           interviewSessionId: interviewSessionIdRef.current,
         });
-        // #region agent log
-        fetch('http://127.0.0.1:7789/ingest/668e0bd5-3283-4492-9f48-e33846c18218',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'442e12'},body:JSON.stringify({sessionId:'442e12',location:'AriaScreen.tsx:unmount',message:'parallel_stream_cancelled_on_unmount',data:{hypothesisId:'H10'},timestamp:Date.now()})}).catch(()=>{});
-        // #endregion
       }
       if (!preserveClosingTts) {
         stopInterviewAudio();

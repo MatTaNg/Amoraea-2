@@ -95,14 +95,17 @@ type StandardMarkerId = Exclude<
   'contempt' | 'commitment_threshold'
 >;
 
+/** Bump when rollup rules change (surfaced in admin recalculation_notes). */
+export const PILLAR_ROLLUP_ALGORITHM_VERSION = 'scenario_only_integers_v2';
+
 /** Which interview moments may contribute numeric evidence to each pillar aggregate. */
 const STANDARD_MARKER_ALLOWED_MOMENTS: Record<StandardMarkerId, Set<PillarMomentLabel>> = {
-  repair: new Set(['scenario_1', 'scenario_2', 'scenario_3', 'moment_5']),
+  repair: new Set(['scenario_1', 'scenario_2', 'scenario_3']),
   attunement: new Set(['scenario_1', 'scenario_2', 'scenario_3']),
-  regulation: new Set(['scenario_3', 'moment_5']),
-  mentalizing: new Set(SLICE_LABELS),
+  regulation: new Set(['scenario_3']),
+  mentalizing: new Set(['scenario_1', 'scenario_2', 'scenario_3']),
   appreciation: new Set(['scenario_2']),
-  accountability: new Set(['scenario_1', 'scenario_2', 'scenario_3', 'moment_4', 'moment_5']),
+  accountability: new Set(['scenario_1', 'scenario_2', 'scenario_3']),
 };
 
 /** Contempt pillar: 60% pooled expression + 40% pooled recognition. */
@@ -132,10 +135,11 @@ function contemptExpressionForRow(row: LabeledMarkerSlice): number | null {
   return legacy;
 }
 
+/** Mean of scenario-level integer scores → integer pillar value (0–10). */
 function averageNonNull(values: number[]): number | undefined {
   if (values.length === 0) return undefined;
   const sum = values.reduce((a, b) => a + b, 0);
-  return Math.round((sum / values.length) * 10) / 10;
+  return Math.round(sum / values.length);
 }
 
 export function commitmentThresholdFromSlice(slice: MarkerScoreSlice): number | null {
@@ -158,7 +162,7 @@ export function mergeCommitmentThresholdWeighted(
   if (m4 == null) return aggregated;
   return {
     ...aggregated,
-    commitment_threshold: Math.round(m4 * 10) / 10,
+    commitment_threshold: Math.round(m4),
   };
 }
 
@@ -184,9 +188,7 @@ export function combinedContemptFromScenarioPillarScores(
   const legacy = numOrNull('contempt', pillarScores.contempt);
 
   if (expr != null && rec != null) {
-    return (
-      Math.round((CONTEMPT_EXPRESSION_WEIGHT * expr + CONTEMPT_RECOGNITION_WEIGHT * rec) * 10) / 10
-    );
+    return Math.round(CONTEMPT_EXPRESSION_WEIGHT * expr + CONTEMPT_RECOGNITION_WEIGHT * rec);
   }
   if (expr != null) return expr;
   if (rec != null) return rec;
@@ -340,12 +342,7 @@ export function aggregateMarkerScoresFromLabeledSlices(
   for (const row of rows) {
     // Pooled contempt **expression** uses fictional scenario slices only — personal moments must not
     // dilute harsh vignette framing (M4 can read as low contempt for unrelated reasons).
-    if (
-      row.moment === 'scenario_1' ||
-      row.moment === 'scenario_2' ||
-      row.moment === 'scenario_3' ||
-      row.moment === 'moment_5'
-    ) {
+    if (row.moment === 'scenario_1' || row.moment === 'scenario_2' || row.moment === 'scenario_3') {
       const ex = contemptExpressionForRow(row);
       if (ex != null) expressionVals.push(ex);
     }
@@ -365,10 +362,7 @@ export function aggregateMarkerScoresFromLabeledSlices(
   const rAvg = averageNonNull(recognitionVals);
   let contemptScore: number | undefined;
   if (eAvg !== undefined && rAvg !== undefined) {
-    contemptScore =
-      Math.round(
-        (CONTEMPT_EXPRESSION_WEIGHT * eAvg + CONTEMPT_RECOGNITION_WEIGHT * rAvg) * 10
-      ) / 10;
+    contemptScore = Math.round(CONTEMPT_EXPRESSION_WEIGHT * eAvg + CONTEMPT_RECOGNITION_WEIGHT * rAvg);
     contributorCounts.contempt = 2;
   } else if (eAvg !== undefined) {
     contemptScore = eAvg;

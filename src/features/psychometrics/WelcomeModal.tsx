@@ -30,6 +30,8 @@ import {
 
 interface WelcomeModalProps {
   visible: boolean;
+  /** Interview already complete — show neutral copy for the new psychometric section only. */
+  legacyMode?: boolean;
   onContinue: () => void;
   onOpenAdminPanel?: () => void;
   continueDisabled?: boolean;
@@ -63,46 +65,91 @@ export function WelcomeModal({
           </View>
 
           <Text style={styles.title}>Welcome to Amoraea</Text>
-          <Text style={styles.subtitle}>
-            Before you can be matched, we need to get to know you. Your assessment has two parts:
-          </Text>
-
-          <View style={styles.partCard}>
-            <View style={styles.partCardHeader}>
-              <Ionicons name="clipboard-outline" size={26} color={PSYCHOMETRICS_ACCENT} style={styles.partIcon} />
-              <View style={styles.partHeaderText}>
-                <Text style={styles.partLabel}>Part 1 — Self Assessments</Text>
-                <Text style={styles.partTime}>~{PRE_INTERVIEW_PSYCHOMETRICS_ESTIMATED_MINUTES} min</Text>
+          {legacyMode ? (
+            <>
+              <Text style={styles.subtitle}>
+                We added a short self-assessment section to complete your profile. After that, you can view your
+                interview results — no need to repeat the AI interview.
+              </Text>
+              <View style={styles.partCard}>
+                <View style={styles.partCardHeader}>
+                  <Ionicons
+                    name="clipboard-outline"
+                    size={26}
+                    color={PSYCHOMETRICS_ACCENT}
+                    style={styles.partIcon}
+                  />
+                  <View style={styles.partHeaderText}>
+                    <Text style={styles.partLabel}>Self Assessments</Text>
+                    <Text style={styles.partTime}>~{PRE_INTERVIEW_PSYCHOMETRICS_ESTIMATED_MINUTES} min</Text>
+                  </View>
+                </View>
+                <Text style={styles.partDescription}>
+                  Short questionnaires grounded in validated relationship science. There are no right or wrong
+                  answers — just answer honestly.
+                </Text>
               </View>
-            </View>
-            <Text style={styles.partDescription}>
-              Short questionnaires grounded in validated relationship science. There are no right or wrong
-              answers — just answer honestly.
-            </Text>
-          </View>
-
-          <View style={styles.partCard}>
-            <View style={styles.partCardHeader}>
-              <Ionicons name="chatbubble-ellipses-outline" size={26} color={PSYCHOMETRICS_ACCENT} style={styles.partIcon} />
-              <View style={styles.partHeaderText}>
-                <Text style={styles.partLabel}>Part 2 — AI Interview</Text>
-                <Text style={styles.partTime}>~{PRE_INTERVIEW_AI_INTERVIEW_ESTIMATED_MINUTES} min</Text>
+              <View style={styles.totalRow}>
+                <Ionicons name="time-outline" size={18} color={PSYCHOMETRICS_ACCENT} />
+                <Text style={styles.totalTime}>
+                  Approximately {PRE_INTERVIEW_PSYCHOMETRICS_ESTIMATED_MINUTES} minutes
+                </Text>
               </View>
-            </View>
-            <Text style={styles.partDescription}>
-              A conversational interview with Aira, our AI interviewer, exploring how you think about and navigate
-              relationships.
-            </Text>
-          </View>
+            </>
+          ) : (
+            <>
+              <Text style={styles.subtitle}>
+                Before you can be matched, we need to get to know you. Your assessment has two parts:
+              </Text>
 
-          <View style={styles.totalRow}>
-            <Ionicons name="time-outline" size={18} color={PSYCHOMETRICS_ACCENT} />
-            <Text style={styles.totalTime}>
-              Total: approximately{' '}
-              {PRE_INTERVIEW_PSYCHOMETRICS_ESTIMATED_MINUTES + PRE_INTERVIEW_AI_INTERVIEW_ESTIMATED_MINUTES}{' '}
-              minutes
-            </Text>
-          </View>
+              <View style={styles.partCard}>
+                <View style={styles.partCardHeader}>
+                  <Ionicons
+                    name="clipboard-outline"
+                    size={26}
+                    color={PSYCHOMETRICS_ACCENT}
+                    style={styles.partIcon}
+                  />
+                  <View style={styles.partHeaderText}>
+                    <Text style={styles.partLabel}>Part 1 — Self Assessments</Text>
+                    <Text style={styles.partTime}>~{PRE_INTERVIEW_PSYCHOMETRICS_ESTIMATED_MINUTES} min</Text>
+                  </View>
+                </View>
+                <Text style={styles.partDescription}>
+                  Short questionnaires grounded in validated relationship science. There are no right or wrong
+                  answers — just answer honestly.
+                </Text>
+              </View>
+
+              <View style={styles.partCard}>
+                <View style={styles.partCardHeader}>
+                  <Ionicons
+                    name="chatbubble-ellipses-outline"
+                    size={26}
+                    color={PSYCHOMETRICS_ACCENT}
+                    style={styles.partIcon}
+                  />
+                  <View style={styles.partHeaderText}>
+                    <Text style={styles.partLabel}>Part 2 — AI Interview</Text>
+                    <Text style={styles.partTime}>~{PRE_INTERVIEW_AI_INTERVIEW_ESTIMATED_MINUTES} min</Text>
+                  </View>
+                </View>
+                <Text style={styles.partDescription}>
+                  A conversational interview with Aira, our AI interviewer, exploring how you think about and
+                  navigate relationships.
+                </Text>
+              </View>
+
+              <View style={styles.totalRow}>
+                <Ionicons name="time-outline" size={18} color={PSYCHOMETRICS_ACCENT} />
+                <Text style={styles.totalTime}>
+                  Total: approximately{' '}
+                  {PRE_INTERVIEW_PSYCHOMETRICS_ESTIMATED_MINUTES + PRE_INTERVIEW_AI_INTERVIEW_ESTIMATED_MINUTES}{' '}
+                  minutes
+                </Text>
+              </View>
+            </>
+          )}
 
           <Text style={styles.scienceNote}>
             All assessments are grounded in peer-reviewed relationship research. At the end you'll receive a

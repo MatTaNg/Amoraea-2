@@ -1,204 +1,126 @@
 /**
- * Recompute interview_attempts.pillar_scores (moment-restricted aggregate + CT merge) and gate fields
- * from existing scenario_1/2/3 and moment_4/5 JSON — no LLM calls.
+ * Recompute interview_attempts scoring from stored slices (same path as admin Recalculate Scores).
  *
- * Usage: npm run recompute-pillar-scores -- --attempt-number=119
+ * Usage:
+ *   npm run recompute-pillar-scores -- --attempt-id=8f52b3e4-493c-4053-b12b-7df8111eed32
+ *   npm run recompute-pillar-scores -- --attempt-number=1 --user-id=<uuid>
+ *
+ * Requires .env with EXPO_PUBLIC_SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY (recommended).
  */
 import { createClient } from '@supabase/supabase-js';
-import { aggregatePillarScoresWithCommitmentMerge } from '../src/features/aria/aggregateMarkerScoresFromSlices';
-import { enrichScenarioSliceWithContemptHeuristic } from '../src/features/aria/contemptExpressionScenarioHeuristic';
-import { computeGateResultCore } from '../src/features/aria/computeGateResultCore';
-import { scenarioCompositesToStorageJson } from '../src/features/aria/scenarioCompositeFloor';
-import {
-  sanitizeMoment5PersonalScoresForAggregate,
-  sanitizePersonalMomentScoresForAggregate,
-} from '../src/features/aria/personalMomentSliceSanitize';
-import { fullScenarioReconciliation } from '../src/features/aria/reconcileScenarioScoresTranscript';
+import { PILLAR_ROLLUP_ALGORITHM_VERSION } from '../src/features/aria/aggregateMarkerScoresFromSlices';
+import { recalculateAttemptScoresFromStoredSlices } from '../src/features/aria/adminRecalculateAttemptScores';
+import { applyPsychometricModifierToAttempt } from '../src/features/psychometrics/applyPsychometricModifier';
 
-function parseArgs(argv: string[]): number {
-  const arg = argv.find((a) => a.startsWith('--attempt-number='));
-  const n = arg ? Number(arg.split('=')[1]) : NaN;
-  if (!Number.isFinite(n) || n < 1) {
-    console.error('Pass --attempt-number=<positive integer>');
-    process.exit(1);
+type Args = { attemptId?: string; attemptNumber?: number; userId?: string };
+
+function parseArgs(argv: string[]): Args {
+  const idArg = argv.find((a) => a.startsWith('--attempt-id='));
+  const numArg = argv.find((a) => a.startsWith('--attempt-number='));
+  const userArg = argv.find((a) => a.startsWith('--user-id='));
+  const attemptId = idArg?.split('=')[1]?.trim();
+  const attemptNumber = numArg ? Number(numArg.split('=')[1]) : NaN;
+  const userId = userArg?.split('=')[1]?.trim();
+  if (attemptId) return { attemptId };
+  if (Number.isFinite(attemptNumber) && attemptNumber >= 1) {
+    return { attemptNumber, userId };
   }
-  return n;
-}
-
-function parseObject(raw: unknown): Record<string, unknown> | null {
-  if (raw == null) return null;
-  if (typeof raw === 'string') {
-    try {
-      const p = JSON.parse(raw);
-      return typeof p === 'object' && p != null && !Array.isArray(p) ? (p as Record<string, unknown>) : null;
-    } catch {
-      return null;
-    }
-  }
-  if (typeof raw === 'object' && !Array.isArray(raw)) return raw as Record<string, unknown>;
-  return null;
-}
-
-type TranscriptMsg = { role?: string; content?: string; scenarioNumber?: number };
-
-function userTextForScenario(transcript: unknown, scenarioNum: 1 | 2 | 3): string {
-  if (!Array.isArray(transcript)) return '';
-  return (transcript as TranscriptMsg[])
-    .filter(
-      (m) =>
-        m.role === 'user' &&
-        m.scenarioNumber === scenarioNum &&
-        typeof m.content === 'string',
-    )
-    .map((m) => String(m.content).trim())
-    .filter(Boolean)
-    .join(' ');
-}
-
-function extractSlice(raw: unknown): {
-  pillarScores?: Record<string, number | null>;
-  keyEvidence?: Record<string, string>;
-} | null {
-  const obj = parseObject(raw);
-  if (!obj) return null;
-  const ps = obj.pillarScores;
-  const ke = obj.keyEvidence;
-  if (ps == null && ke == null) return null;
-  return {
-    pillarScores:
-      typeof ps === 'object' && ps != null && !Array.isArray(ps)
-        ? (ps as Record<string, number | null>)
-        : undefined,
-    keyEvidence:
-      typeof ke === 'object' && ke != null && !Array.isArray(ke)
-        ? (ke as Record<string, string>)
-        : undefined,
-  };
+  console.error('Pass --attempt-id=<uuid> or --attempt-number=<n> [--user-id=<uuid>]');
+  process.exit(1);
 }
 
 async function main(): Promise<void> {
-  const attemptNumber = parseArgs(process.argv.slice(2));
+  const args = parseArgs(process.argv.slice(2));
   const supabaseUrl =
     process.env.SUPABASE_URL?.trim() ?? process.env.EXPO_PUBLIC_SUPABASE_URL?.trim();
   const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY?.trim();
   const anonKey = process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY?.trim();
   const supabaseKey = serviceKey ?? anonKey;
   if (!supabaseUrl || !supabaseKey) {
-    console.error('Set SUPABASE_URL or EXPO_PUBLIC_SUPABASE_URL and anon or service role key');
+    console.error('Set EXPO_PUBLIC_SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY in .env');
     process.exit(1);
   }
+
   const admin = createClient(supabaseUrl, supabaseKey);
-  const { data: row, error: selErr } = await admin
+  let query = admin
     .from('interview_attempts')
     .select(
-      'id, attempt_number, transcript, scenario_1_scores, scenario_2_scores, scenario_3_scores, scenario_specific_patterns',
-    )
-    .eq('attempt_number', attemptNumber)
-    .maybeSingle();
+      'id, user_id, attempt_number, transcript, scenario_1_scores, scenario_2_scores, scenario_3_scores, scenario_specific_patterns, ego_development_level, language_markers, skip_count',
+    );
+  if (args.attemptId) {
+    query = query.eq('id', args.attemptId);
+  } else {
+    query = query.eq('attempt_number', args.attemptNumber!);
+    if (args.userId) query = query.eq('user_id', args.userId);
+  }
+  const { data: row, error: selErr } = await query.maybeSingle();
   if (selErr) {
     console.error(selErr.message);
     process.exit(1);
   }
   if (!row) {
-    console.error(`No row for attempt_number=${attemptNumber}`);
+    console.error('No matching interview_attempts row');
     process.exit(1);
   }
-  const patterns = parseObject(row.scenario_specific_patterns);
-  const m4 = parseObject(patterns?.moment_4_scores);
-  const m5 = parseObject(patterns?.moment_5_scores);
-  const tx = row.transcript;
-  const raw1 = extractSlice(row.scenario_1_scores);
-  const raw2 = extractSlice(row.scenario_2_scores);
-  const raw3 = extractSlice(row.scenario_3_scores);
-  const txArr = (Array.isArray(tx) ? tx : []) as TranscriptMsg[];
-  const reco1 = raw1
-    ? fullScenarioReconciliation(
-        { scenarioNumber: 1, pillarScores: raw1.pillarScores ?? {}, pillarConfidence: {}, keyEvidence: raw1.keyEvidence ?? {} },
-        txArr,
-      )
-    : null;
-  const reco2 = raw2
-    ? fullScenarioReconciliation(
-        { scenarioNumber: 2, pillarScores: raw2.pillarScores ?? {}, pillarConfidence: {}, keyEvidence: raw2.keyEvidence ?? {} },
-        txArr,
-      )
-    : null;
-  const reco3 = raw3
-    ? fullScenarioReconciliation(
-        { scenarioNumber: 3, pillarScores: raw3.pillarScores ?? {}, pillarConfidence: {}, keyEvidence: raw3.keyEvidence ?? {} },
-        txArr,
-      )
-    : null;
-  const s1 = enrichScenarioSliceWithContemptHeuristic(
-    reco1
-      ? { pillarScores: reco1.pillarScores, keyEvidence: reco1.keyEvidence }
-      : raw1
-        ? { pillarScores: raw1.pillarScores, keyEvidence: raw1.keyEvidence }
-        : null,
-    userTextForScenario(tx, 1),
-  );
-  const s2 = enrichScenarioSliceWithContemptHeuristic(
-    reco2
-      ? { pillarScores: reco2.pillarScores, keyEvidence: reco2.keyEvidence }
-      : raw2
-        ? { pillarScores: raw2.pillarScores, keyEvidence: raw2.keyEvidence }
-        : null,
-    userTextForScenario(tx, 2),
-  );
-  const s3 = enrichScenarioSliceWithContemptHeuristic(
-    reco3
-      ? { pillarScores: reco3.pillarScores, keyEvidence: reco3.keyEvidence }
-      : raw3
-        ? { pillarScores: raw3.pillarScores, keyEvidence: raw3.keyEvidence }
-        : null,
-    userTextForScenario(tx, 3),
-  );
-  const m4San = m4
-    ? sanitizePersonalMomentScoresForAggregate({
-        pillarScores: (m4.pillarScores as Record<string, number | null>) ?? {},
-        keyEvidence:
-          typeof m4.keyEvidence === 'object' && m4.keyEvidence != null && !Array.isArray(m4.keyEvidence)
-            ? (m4.keyEvidence as Record<string, string>)
-            : undefined,
-      })
-    : null;
-  const m5San = m5
-    ? sanitizeMoment5PersonalScoresForAggregate({
-        pillarScores: (m5.pillarScores as Record<string, number | null>) ?? {},
-        keyEvidence:
-          typeof m5.keyEvidence === 'object' && m5.keyEvidence != null && !Array.isArray(m5.keyEvidence)
-            ? (m5.keyEvidence as Record<string, string>)
-            : undefined,
-      })
-    : null;
-  const slices = [s1, s2, s3, extractSlice(m4San), extractSlice(m5San)];
-  const pillar_scores = aggregatePillarScoresWithCommitmentMerge(slices);
-  const gate = computeGateResultCore(pillar_scores, null, {
-    scenarioPillarScoresByScenario: {
-      1: s1?.pillarScores,
-      2: s2?.pillarScores,
-      3: s3?.pillarScores,
-    },
+
+  console.log('PILLAR_ROLLUP_ALGORITHM_VERSION', PILLAR_ROLLUP_ALGORITHM_VERSION);
+  const result = recalculateAttemptScoresFromStoredSlices({
+    transcript: row.transcript,
+    scenario_1_scores: row.scenario_1_scores,
+    scenario_2_scores: row.scenario_2_scores,
+    scenario_3_scores: row.scenario_3_scores,
+    scenario_specific_patterns: row.scenario_specific_patterns,
+    ego_development_level: row.ego_development_level,
+    language_markers: row.language_markers,
+    skip_count: row.skip_count,
   });
-  console.log('Recomputed pillar_scores', pillar_scores);
-  console.log('Gate', { pass: gate.pass, weightedScore: gate.weightedScore, failReason: gate.failReason });
+
+  if (result.kind !== 'success') {
+    console.error('Recalculation incomplete:', result.notes);
+    process.exit(1);
+  }
+
+  console.log('pillar_scores', result.pillar_scores);
+  console.log('weighted_score', result.gate.weightedScore);
+  console.log('defense_patterns', result.defense_patterns);
+  console.log('notes', result.notes);
+
   const { error: upErr } = await admin
     .from('interview_attempts')
     .update({
-      pillar_scores,
-      weighted_score: gate.weightedScore,
-      passed: gate.pass,
-      gate_fail_reasons: gate.failReasonCodes ?? [],
-      gate_fail_detail: gate.failReasonDetail ?? null,
-      scenario_composites: scenarioCompositesToStorageJson(gate.scenarioComposites),
+      pillar_scores: result.pillar_scores,
+      weighted_score: result.gate.weightedScore,
+      passed: result.gate.pass,
+      gate_fail_reasons: result.gate.failReasonCodes ?? [],
+      gate_fail_detail: result.gate.failReasonDetail ?? null,
+      scenario_composites: result.scenarioCompositesJson,
+      recalculated_at: new Date().toISOString(),
+      recalculation_notes: result.notes,
+      mentalizing_overcertainty_count: result.mentalizingOvercertaintyCount,
+      defense_patterns: result.defense_patterns,
+      moment_4_concreteness: result.moment_4_concreteness,
+      moment_5_concreteness: result.moment_5_concreteness,
+      depth_signal_modifier: result.gate.depthSignalModifier ?? result.gate.scoreModifier ?? null,
+      score_modifier: result.gate.scoreModifier ?? result.gate.depthSignalModifier ?? null,
+      modified_weighted_score: result.gate.modifiedWeightedScore ?? null,
+      disclosure_calibration: result.disclosure_calibration,
+      ego_development_level: result.ego_development_level,
     })
     .eq('id', row.id as string);
+
   if (upErr) {
     console.error('Update failed:', upErr.message);
     if (!serviceKey) console.error('If RLS blocked, set SUPABASE_SERVICE_ROLE_KEY');
     process.exit(1);
   }
-  console.log(`Updated interview_attempts id=${row.id} attempt_number=${attemptNumber}`);
+
+  try {
+    await applyPsychometricModifierToAttempt(row.user_id as string, row.id as string);
+  } catch (e) {
+    console.warn('Psychometric modifier apply failed (pillar rollup still saved):', e);
+  }
+
+  console.log(`Updated id=${row.id} attempt_number=${row.attempt_number}`);
 }
 
 void main();

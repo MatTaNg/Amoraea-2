@@ -1,4 +1,6 @@
 import type { MarkerScoreSlice } from './aggregateMarkerScoresFromSlices';
+import { PILLAR_ROLLUP_ALGORITHM_VERSION } from './aggregateMarkerScoresFromSlices';
+import { isPersonalMomentTranscriptTurn } from './defensePatternsDetection';
 import {
   aggregatePillarScoresWithCommitmentMergeDetailed,
   extractEgoDevelopmentLevel,
@@ -41,12 +43,18 @@ function parseObject(raw: unknown): Record<string, unknown> | null {
   return raw as Record<string, unknown>;
 }
 
-type TranscriptMsg = { role?: string; content?: string; scenarioNumber?: number };
+type TranscriptMsg = { role?: string; content?: string; scenarioNumber?: number; interviewMoment?: number };
 
 function userTextForScenario(transcript: unknown, scenarioNum: 1 | 2 | 3): string {
   if (!Array.isArray(transcript)) return '';
   return (transcript as TranscriptMsg[])
-    .filter((m) => m.role === 'user' && m.scenarioNumber === scenarioNum && typeof m.content === 'string')
+    .filter(
+      (m) =>
+        m.role === 'user' &&
+        m.scenarioNumber === scenarioNum &&
+        typeof m.content === 'string' &&
+        !isPersonalMomentTranscriptTurn(m),
+    )
     .map((m) => String(m.content).trim())
     .filter(Boolean)
     .join(' ');
@@ -377,8 +385,8 @@ export function recalculateAttemptScoresFromStoredSlices(input: AdminRecalculate
     personalMomentEmotionalVocabLow: agg.personal_moment_emotional_vocab_low,
   });
 
-  const notes: string[] = [...buildGateNotes(gate)];
-  if (notes.length === 0) notes.push('gate: pass — all current rubric checks satisfied');
+  const notes: string[] = [`rollup_algorithm:${PILLAR_ROLLUP_ALGORITHM_VERSION}`, ...buildGateNotes(gate)];
+  if (notes.length === 1) notes.push('gate: pass — all current rubric checks satisfied');
 
   return {
     kind: 'success',

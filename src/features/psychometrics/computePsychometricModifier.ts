@@ -55,6 +55,10 @@ export interface PsychometricModifierResult {
   };
 }
 
+/**
+ * Sums per-instrument band penalties into a single psychometric modifier applied to the final gate score.
+ * Range is [worst-case negative sum, 0] — favorable self-report bands contribute 0, never a positive boost.
+ */
 export function computePsychometricModifier(
   scores: PsychometricScores,
   interviewSignals?: {
@@ -103,7 +107,7 @@ export function computePsychometricModifier(
   if (scores.brsScore !== null) {
     const s = scores.brsScore;
     if (s >= 4.0) {
-      brsComponent = 0.1;
+      brsComponent = 0;
       brsBand = 'high resilience';
     } else if (s >= 3.0) {
       brsComponent = 0;
@@ -129,7 +133,7 @@ export function computePsychometricModifier(
       anxietyTraitComponent = 0;
       anxietyTraitBand = 'moderate anxiety';
     } else {
-      anxietyTraitComponent = 0.05;
+      anxietyTraitComponent = 0;
       anxietyTraitBand = 'low anxiety';
     }
     modifier += anxietyTraitComponent;
@@ -143,7 +147,7 @@ export function computePsychometricModifier(
   if (scores.scsSfScore !== null) {
     const s = scores.scsSfScore;
     if (s >= 4.0) {
-      scsSfComponent = 0.15;
+      scsSfComponent = 0;
       scsSfBand = 'high self-compassion';
     } else if (s >= 3.0) {
       scsSfComponent = 0;
@@ -164,7 +168,7 @@ export function computePsychometricModifier(
   if (scores.gaspScore !== null) {
     const s = scores.gaspScore;
     if (s <= 2.5) {
-      gaspComponent = 0.1;
+      gaspComponent = 0;
       gaspBand = 'low externalization';
     } else if (s <= 4.5) {
       gaspComponent = 0;
@@ -188,7 +192,7 @@ export function computePsychometricModifier(
   if (scores.dweckScore !== null) {
     const s = scores.dweckScore;
     if (s >= 4.5) {
-      dweckComponent = 0.1;
+      dweckComponent = 0;
       dweckBand = 'growth mindset';
     } else if (s >= 3.5) {
       dweckComponent = 0;
@@ -215,10 +219,10 @@ export function computePsychometricModifier(
   if (scores.aaq2Score !== null) {
     const s = scores.aaq2Score;
     if (s <= 14) {
-      aaq2Component = 0.2;
+      aaq2Component = 0;
       aaq2Band = 'high flexibility';
     } else if (s <= 24) {
-      aaq2Component = 0.1;
+      aaq2Component = 0;
       aaq2Band = 'moderate flexibility';
     } else if (s <= 34) {
       aaq2Component = -0.2;
@@ -262,10 +266,10 @@ export function computePsychometricModifier(
   if (scores.rsesScore !== null) {
     const s = scores.rsesScore;
     if (s >= 30) {
-      rsesComponent = 0.2;
+      rsesComponent = 0;
       rsesBand = 'high self-esteem';
     } else if (s >= 23) {
-      rsesComponent = 0.1;
+      rsesComponent = 0;
       rsesBand = 'moderate-high self-esteem';
     } else if (s >= 17) {
       rsesComponent = -0.2;
@@ -303,10 +307,10 @@ export function computePsychometricModifier(
     const diff = scores.scsPrivateScore - scores.scsPublicScore;
 
     if (diff >= 4) {
-      scsComponent = 0.2;
+      scsComponent = 0;
       scsOrientation = 'strongly internally oriented';
     } else if (diff >= 1) {
-      scsComponent = 0.1;
+      scsComponent = 0;
       scsOrientation = 'mildly internally oriented';
     } else if (diff >= -1) {
       scsComponent = 0;
@@ -343,7 +347,7 @@ export function computePsychometricModifier(
   if (scores.mspssFriendsScore !== null) {
     const s = scores.mspssFriendsScore;
     if (s >= 5.5) {
-      mspssComponent = 0.1;
+      mspssComponent = 0;
       mspssBand = 'strong social network';
     } else if (s >= 4.0) {
       mspssComponent = 0;
@@ -369,7 +373,7 @@ export function computePsychometricModifier(
   if (scores.sd3NarcissismScore !== null) {
     const s = scores.sd3NarcissismScore;
     if (s <= 2.0) {
-      sd3NarcissismComponent = 0.1;
+      sd3NarcissismComponent = 0;
       sd3NarcissismBand = 'low narcissism';
     } else if (s <= 3.5) {
       sd3NarcissismComponent = 0;
@@ -396,7 +400,7 @@ export function computePsychometricModifier(
   if (scores.rfqScore !== null) {
     const s = scores.rfqScore;
     if (s >= 5.0) {
-      rfqComponent = 0.15;
+      rfqComponent = 0;
       rfqBand = 'strong reflective functioning';
     } else if (s >= 3.5) {
       rfqComponent = 0;
@@ -424,7 +428,7 @@ export function computePsychometricModifier(
     }
   }
 
-  modifier = Math.round(modifier * 100) / 100;
+  modifier = Math.min(0, Math.round(modifier * 100) / 100);
 
   psychometricFloorBreaches.length = 0;
   psychometricFloorBreaches.push(

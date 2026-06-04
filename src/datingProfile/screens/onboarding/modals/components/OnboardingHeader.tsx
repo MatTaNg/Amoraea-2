@@ -23,9 +23,7 @@ export const OnboardingHeader: React.FC<OnboardingHeaderProps> = ({ title, onBac
           </TouchableOpacity>
         ) : null}
       </View>
-      <Text style={styles.headerTitle} numberOfLines={1}>
-        {title}
-      </Text>
+      <Text style={styles.headerTitle}>{title}</Text>
       <View style={styles.side} />
     </View>
   );
@@ -37,7 +35,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'space-between',
     paddingHorizontal: 16,
-    paddingVertical: 16,
+    paddingVertical: 14,
     borderBottomWidth: 1,
     borderBottomColor: 'rgba(82,142,220,0.18)',
     backgroundColor: 'rgba(255,255,255,0.035)',
@@ -49,12 +47,14 @@ const styles = StyleSheet.create({
   },
   headerTitle: {
     flex: 1,
+    flexShrink: 1,
     fontSize: 17,
     fontWeight: '700',
     color: theme.colors.text,
     fontFamily: 'SpaceMono',
     textAlign: 'center',
     letterSpacing: 0.2,
+    lineHeight: 22,
   },
 });
 

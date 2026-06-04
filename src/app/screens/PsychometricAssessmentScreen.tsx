@@ -43,6 +43,7 @@ import {
 } from '@features/psychometrics/psychometricsTheme';
 import { spacing } from '@ui/theme/spacing';
 import { applyPsychometricModifierToAttempt } from '@features/psychometrics/applyPsychometricModifier';
+import { fetchMostRecentCompletedInterviewAttemptId } from '@features/psychometrics/interviewCompletionStatus';
 import {
   resolveInitialInterviewRoute,
   type InterviewStackRoute,
@@ -66,7 +67,10 @@ type Props = {
 export function PsychometricAssessmentScreen({ navigation, route }: Props) {
   const { user } = useAuth();
   const userId = route.params?.userId ?? '';
-  const interviewAlreadyCompleted = route.params?.interviewAlreadyCompleted === true;
+  const legacyPsychometricsMode =
+    route.params?.legacyPsychometricsMode === true ||
+    route.params?.interviewAlreadyCompleted === true;
+  const interviewAlreadyCompleted = legacyPsychometricsMode;
   const isAdminUser = isAmoraeaAdminConsoleEmail(user?.email);
 
   const [showWelcome, setShowWelcome] = useState(false);
@@ -124,23 +128,18 @@ export function PsychometricAssessmentScreen({ navigation, route }: Props) {
       return false;
     }
 
-    if (interviewAlreadyCompleted) {
-      const { data: latestAttempt } = await supabase
-        .from('interview_attempts')
-        .select('id')
-        .eq('user_id', userId)
-        .order('created_at', { ascending: false })
-        .limit(1)
-        .maybeSingle();
-
-      if (latestAttempt?.id) {
-        await applyPsychometricModifierToAttempt(userId, latestAttempt.id);
+    if (legacyPsychometricsMode) {
+      const completedAttemptId = await fetchMostRecentCompletedInterviewAttemptId(userId);
+      if (completedAttemptId) {
+        await applyPsychometricModifierToAttempt(userId, completedAttemptId, {
+          preservePassIfPreviouslyPassing: true,
+        });
       }
     }
 
     await navigateAfterComplete();
     return true;
-  }, [interviewAlreadyCompleted, navigateAfterComplete, userId]);
+  }, [legacyPsychometricsMode, navigateAfterComplete, userId]);
 
   const loadSavedResponsesForAssessment = useCallback(
     async (assessmentId: AssessmentId): Promise<Record<number, number>> => {
@@ -383,6 +382,7 @@ export function PsychometricAssessmentScreen({ navigation, route }: Props) {
     return (
       <WelcomeModal
         visible
+        legacyMode={legacyPsychometricsMode}
         onContinue={handleWelcomeContinue}
         onOpenAdminPanel={openAdminPanel}
         onBackPress={cameFromAssessments ? handleWelcomeBack : undefined}

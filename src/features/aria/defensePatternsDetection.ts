@@ -68,10 +68,23 @@ function scenarioContemptParticipantSignal(
   return legacy;
 }
 
+/** Personal moments 4–5 are often tagged `scenarioNumber: 3`; exclude them from fictional scenario corpora. */
+function isPersonalMomentTranscriptTurn(m: DefensePatternTranscriptMsg): boolean {
+  const im = m.interviewMoment;
+  if (typeof im === 'number' && Number.isFinite(im) && (im === 4 || im === 5)) return true;
+  return m.scenarioNumber === 4 || m.scenarioNumber === 5;
+}
+
 function userTextForScenario(transcript: readonly DefensePatternTranscriptMsg[] | null | undefined, n: 1 | 2 | 3): string {
   if (!transcript?.length) return '';
   return transcript
-    .filter((m) => m.role === 'user' && m.scenarioNumber === n && typeof m.content === 'string')
+    .filter(
+      (m) =>
+        m.role === 'user' &&
+        m.scenarioNumber === n &&
+        typeof m.content === 'string' &&
+        !isPersonalMomentTranscriptTurn(m),
+    )
     .map((m) => String(m.content).trim())
     .filter(Boolean)
     .join(' ');
@@ -84,6 +97,8 @@ function userBelongsToPersonalMoment(m: DefensePatternTranscriptMsg, moment: 4 |
   /** Legacy / mis-tagged rows */
   return m.scenarioNumber === moment;
 }
+
+export { isPersonalMomentTranscriptTurn };
 
 /** User spoken text for Moment 4 or 5 (prefers `interviewMoment`; falls back to `scenarioNumber`). */
 function userTextMoment4Or5(
@@ -336,11 +351,12 @@ export function detectDefensePatterns(
     `${moment4UserText}\n${moment5UserText}`,
     personalEvidenceLower,
   );
-  const projection_detected =
-    pairwiseProjection || (scenarioNegative && PERSONAL_AVOIDANCE_OR_CUTOFF.test(personalBlob));
+  // Projection requires cross-slice pairing (scenario read + first-person parallel), not merely
+  // negative character judgment in scenarios plus avoidance language in personal moments.
+  const projection_detected = pairwiseProjection;
   console.log('[DefensePatterns] projection_detected:', projection_detected, {
     pairwiseProjection,
-    legacyPersonalAvoidance: scenarioNegative && PERSONAL_AVOIDANCE_OR_CUTOFF.test(personalBlob),
+    scenarioNegativeAttribution: scenarioNegative,
   });
 
   let rationalCount = 0;

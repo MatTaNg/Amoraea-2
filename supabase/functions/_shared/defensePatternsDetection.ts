@@ -95,6 +95,7 @@ export type DefensePatternTranscriptMsg = {
   role?: string;
   content?: string;
   scenarioNumber?: number | null;
+  interviewMoment?: number | null;
 };
 
 export type DefensePatternScoreSlice = {
@@ -133,10 +134,22 @@ function scenarioContemptParticipantSignal(slice: DefensePatternScoreSlice, scen
   return legacy;
 }
 
+function isPersonalMomentTranscriptTurn(m: DefensePatternTranscriptMsg): boolean {
+  const im = m.interviewMoment;
+  if (typeof im === 'number' && Number.isFinite(im) && (im === 4 || im === 5)) return true;
+  return m.scenarioNumber === 4 || m.scenarioNumber === 5;
+}
+
 function userTextForScenario(transcript: readonly DefensePatternTranscriptMsg[] | null | undefined, n: 1 | 2 | 3): string {
   if (!transcript?.length) return '';
   return transcript
-    .filter((m) => m.role === 'user' && m.scenarioNumber === n && typeof m.content === 'string')
+    .filter(
+      (m) =>
+        m.role === 'user' &&
+        m.scenarioNumber === n &&
+        typeof m.content === 'string' &&
+        !isPersonalMomentTranscriptTurn(m),
+    )
     .map((m) => String(m.content).trim())
     .filter(Boolean)
     .join(' ');
@@ -148,7 +161,12 @@ function userTextMoment4Or5(
 ): string {
   if (!transcript?.length) return '';
   return transcript
-    .filter((m) => m.role === 'user' && m.scenarioNumber === moment && typeof m.content === 'string')
+    .filter((m) => {
+      if (m.role !== 'user' || typeof m.content !== 'string') return false;
+      const im = m.interviewMoment;
+      if (typeof im === 'number' && Number.isFinite(im) && im === moment) return true;
+      return m.scenarioNumber === moment;
+    })
     .map((m) => String(m.content).trim())
     .filter(Boolean)
     .join(' ');
@@ -195,6 +213,100 @@ function hasNegativeAttributionOnCharacter(text: string): boolean {
   return false;
 }
 
+type ProjectionPair = { scenarioTerms: string[]; personalTerms: string[] };
+
+/** Cross-slice: harsh scenario read of a character + same quality named in first-person in M4/M5. */
+function detectProjectionPairwise(
+  scenarioBlobLower: string,
+  personalUserText: string,
+  personalEvidenceLower: string,
+): boolean {
+  const personalText = `${personalUserText}\n${personalEvidenceLower}`.toLowerCase();
+  const projectionPairs: ProjectionPair[] = [
+    {
+      scenarioTerms: [
+        'avoidant',
+        'conflict avoidant',
+        'conflict-avoidant',
+        'avoidance',
+        'goes silent',
+        'go silent',
+        'goes quiet',
+        'go quiet',
+        'shuts down',
+        'withdraws',
+        'leaves',
+        "doesn't know what to say",
+        'does not know what to say',
+      ],
+      personalTerms: [
+        'go quiet',
+        'go silent',
+        'shut down',
+        'withdraw',
+        'avoid',
+        'need time',
+        "can't engage",
+        'cannot engage',
+        'pull away',
+        'silence',
+        'process alone',
+        'i leave',
+        'i walk away',
+        'tend to go quiet',
+        'i tend to go quiet',
+      ],
+    },
+    {
+      scenarioTerms: [
+        'emotionally unavailable',
+        "can't be present",
+        'cannot be present',
+        'does not show up emotionally',
+        "doesn't show up emotionally",
+        'processes analytically',
+      ],
+      personalTerms: [
+        'not good at emotional',
+        'struggle to be present',
+        'analytical',
+        'in my head',
+        "can't express",
+        'cannot express',
+        'hard for me to open up',
+      ],
+    },
+    {
+      scenarioTerms: ['immature', 'emotionally immature', "doesn't know how to handle", 'does not know how to handle'],
+      personalTerms: ['i was immature', 'i struggled', "i didn't know how", 'i was young', 'i used to'],
+    },
+    {
+      scenarioTerms: [
+        "won't communicate",
+        'refuses to talk',
+        'shuts down communication',
+        'avoids the conversation',
+      ],
+      personalTerms: [
+        'i go quiet',
+        'i stop talking',
+        'i withdraw',
+        'i needed space',
+        "couldn't talk about it",
+        'could not talk about it',
+        'i shut down',
+      ],
+    },
+  ];
+
+  for (const pair of projectionPairs) {
+    const scenarioMatch = pair.scenarioTerms.some((term) => scenarioBlobLower.includes(term));
+    const personalMatch = pair.personalTerms.some((term) => personalText.includes(term));
+    if (scenarioMatch && personalMatch) return true;
+  }
+  return false;
+}
+
 function repairTurnWordCount(
   scenarioIndex: 0 | 1 | 2,
   slice: DefensePatternScoreSlice,
@@ -237,18 +349,21 @@ export function detectDefensePatterns(
     return `${ke}\n${ut}`;
   });
   const scenarioAttributionBlob = scenarioBodies.join('\n').toLowerCase();
-  const scenarioNegative = hasNegativeAttributionOnCharacter(scenarioAttributionBlob);
 
-  const personalBlob = [
-    userTextMoment4Or5(txArr, 4),
-    userTextMoment4Or5(txArr, 5),
+  const moment4UserText = userTextMoment4Or5(txArr, 4);
+  const moment5UserText = userTextMoment4Or5(txArr, 5);
+  const personalEvidenceLower = [
     concatKeyEvidenceKeys(moment4Scores, ['accountability', 'mentalizing', 'repair', 'regulation']),
     concatKeyEvidenceKeys(moment5Scores, ['accountability', 'mentalizing', 'repair', 'regulation']),
   ]
     .join('\n')
     .toLowerCase();
 
-  const projection_detected = scenarioNegative && PERSONAL_AVOIDANCE_OR_CUTOFF.test(personalBlob);
+  const projection_detected = detectProjectionPairwise(
+    scenarioAttributionBlob,
+    `${moment4UserText}\n${moment5UserText}`,
+    personalEvidenceLower,
+  );
 
   let rationalCount = 0;
   const slices = [s1, s2, s3] as const;

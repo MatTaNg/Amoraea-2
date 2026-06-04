@@ -2332,6 +2332,8 @@ const ADMIN_REVIEW_FLAG_DESCRIPTIONS: Record<string, string> = {
     'Rationalization detected — self-report profile neither confirms nor contradicts',
   splitting_self_report_neutral: 'Splitting detected — self-report profile neither confirms nor contradicts',
   denial_self_report_neutral: 'Denial detected — self-report profile neither confirms nor contradicts',
+  legacy_psychometric_pass_flip_review:
+    'Psychometric modifier applied after interview completion would change pass to fail — held for admin review',
 };
 
 function normalizeEmotionResponseLetters(raw: unknown): string[] {
@@ -3410,6 +3412,24 @@ function SummaryTab({
           return;
         }
         await applyPsychometricModifierToAttempt(attempt.user_id, attempt.id);
+        const rollupNote = result.notes.find((n) => n.startsWith('rollup_algorithm:'));
+        const rollupVersion = rollupNote?.slice('rollup_algorithm:'.length) ?? 'unknown';
+        const pillarPreview = Object.entries(result.pillar_scores)
+          .map(([k, v]) => `${k}=${v}`)
+          .join(', ');
+        Alert.alert(
+          'Scores recalculated',
+          [
+            `Rollup: ${rollupVersion}`,
+            `Weighted: ${result.gate.weightedScore?.toFixed(2) ?? '—'}`,
+            `Pillars: ${pillarPreview}`,
+            rollupVersion !== 'scenario_only_integers_v2'
+              ? 'Warning: admin bundle is not on the fixed rollup — restart dev server or deploy latest code.'
+              : Object.values(result.pillar_scores).some((v) => !Number.isInteger(v))
+                ? 'Warning: pillar scores are not integers — stale admin bundle.'
+                : 'Integer scenario-only rollup applied.',
+          ].join('\n'),
+        );
         void remoteLog('[RECALCULATE_SCORES]', {
           triggeredByUserId: adminSessionUserId,
           triggeredByEmail: adminSessionEmail,

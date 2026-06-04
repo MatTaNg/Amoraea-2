@@ -38,7 +38,7 @@ describe('computePsychometricModifier', () => {
     expect(moderate.breakdown.anxietyTraitBand).toBe('moderate anxiety');
 
     const low = computePsychometricModifier({ ...FULL_SCORES, anxietyTraitScore: 2.5 });
-    expect(low.anxietyTraitComponent).toBe(0.05);
+    expect(low.anxietyTraitComponent).toBe(0);
     expect(low.breakdown.anxietyTraitBand).toBe('low anxiety');
 
     const straightLine = computePsychometricModifier(
@@ -49,11 +49,12 @@ describe('computePsychometricModifier', () => {
     expect(straightLine.straightLineFlags).toContain('anxiety_trait_straight_line');
   });
 
-  it('applies positive modifier for flexible AAQ-II and high RSES with internal SCS', () => {
+  it('returns zero modifier for favorable scores on all instruments (no positive boost)', () => {
     const result = computePsychometricModifier(
       {
         ...FULL_SCORES,
         brsScore: 4.5,
+        anxietyTraitScore: 2.5,
         scsSfScore: 4.2,
         gaspScore: 2,
         dweckScore: 5,
@@ -61,6 +62,9 @@ describe('computePsychometricModifier', () => {
         rsesScore: 32,
         scsPublicScore: 8,
         scsPrivateScore: 14,
+        mspssFriendsScore: 6,
+        sd3NarcissismScore: 1.5,
+        rfqScore: 5.5,
       },
       {
         disclosureCalibration: 'calibrated',
@@ -69,7 +73,19 @@ describe('computePsychometricModifier', () => {
         regulationPillar: 8,
       },
     );
-    expect(result.modifier).toBeGreaterThan(0.5);
+    expect(result.modifier).toBe(0);
+    expect(result.brsComponent).toBe(0);
+    expect(result.anxietyTraitComponent).toBe(0);
+    expect(result.scsSfComponent).toBe(0);
+    expect(result.gaspComponent).toBe(0);
+    expect(result.dweckComponent).toBe(0);
+    expect(result.aaq2Component).toBe(0);
+    expect(result.rsesComponent).toBe(0);
+    expect(result.scsComponent).toBe(0);
+    expect(result.mspssComponent).toBe(0);
+    expect(result.sd3NarcissismComponent).toBe(0);
+    expect(result.rfqComponent).toBe(0);
+    expect(result.modifier).toBeLessThanOrEqual(0);
     expect(result.psychometricFloorBreaches).toHaveLength(0);
   });
 
@@ -245,7 +261,7 @@ describe('computePsychometricModifier', () => {
 
   it('applies MSPSS modifier from friends subscale bands', () => {
     const strong = computePsychometricModifier({ ...FULL_SCORES, mspssFriendsScore: 6, mspssFamilyScore: 4 });
-    expect(strong.mspssComponent).toBe(0.1);
+    expect(strong.mspssComponent).toBe(0);
     expect(strong.breakdown.mspssBand).toBe('strong social network');
 
     const adequate = computePsychometricModifier({ ...FULL_SCORES, mspssFriendsScore: 4.5, mspssFamilyScore: 4 });
@@ -276,13 +292,32 @@ describe('computePsychometricModifier', () => {
     expect(extreme.straightLineFlags).toContain('mspss_straight_line');
   });
 
-  it('sums MSPSS component into modifier total', () => {
+  it('does not add MSPSS component to modifier when friends subscale is strong', () => {
     const without = computePsychometricModifier({ ...FULL_SCORES, brsScore: 4.5 });
     const withMspss = computePsychometricModifier({
       ...FULL_SCORES,
       brsScore: 4.5,
       mspssFriendsScore: 6,
     });
-    expect(withMspss.modifier).toBe(Math.round((without.modifier + 0.1) * 100) / 100);
+    expect(withMspss.modifier).toBe(without.modifier);
+  });
+
+  it('worst-case modifier across all instruments is unchanged (negative bands only)', () => {
+    const result = computePsychometricModifier({
+      ...FULL_SCORES,
+      brsScore: 2.5,
+      anxietyTraitScore: 4.5,
+      scsSfScore: 2.5,
+      gaspScore: 5.5,
+      dweckScore: 1.5,
+      aaq2Score: 50,
+      rsesScore: 8,
+      scsPublicScore: 15,
+      scsPrivateScore: 8,
+      mspssFriendsScore: 2,
+      sd3NarcissismScore: 4.5,
+      rfqScore: 2.5,
+    });
+    expect(result.modifier).toBe(-2.95);
   });
 });

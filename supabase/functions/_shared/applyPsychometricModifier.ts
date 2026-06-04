@@ -18,6 +18,11 @@ import {
   mergePsychometricFloorsIntoGateState,
 } from './psychometricFloorBreaches.ts';
 import { SD3_NARCISSISM_FLOOR_FAIL_CODE } from './sd3NarcissismFloor.ts';
+import { LEGACY_PSYCHOMETRIC_PASS_FLIP_REVIEW_FLAG } from './legacyPsychometricReview.ts';
+
+export type ApplyPsychometricModifierOptions = {
+  preservePassIfPreviouslyPassing?: boolean;
+};
 import {
   coercePsychometricScore,
   isMissingUsersPsychometricsSd3ColumnsError,
@@ -360,7 +365,28 @@ export async function applyPsychometricModifierToAttempt(
 
   const interviewGatePass =
     allFailReasons.length === 0 && depthSignalModifiedScore >= GATE_PASS_WEIGHTED_MIN;
-  const finalPass = interviewGatePass && finalModifiedScore >= GATE_PASS_WEIGHTED_MIN;
+  const computedFinalPass = interviewGatePass && finalModifiedScore >= GATE_PASS_WEIGHTED_MIN;
+  const wasPreviouslyPassing = attempt.passed === true;
+  const wouldFlipPassToFail =
+    options?.preservePassIfPreviouslyPassing === true &&
+    wasPreviouslyPassing &&
+    !computedFinalPass;
+
+  const existingReviewFlags = Array.isArray(attempt.review_flags)
+    ? (attempt.review_flags as string[])
+    : [];
+  const reviewFlagsForPersist = wouldFlipPassToFail
+    ? [...new Set([...existingReviewFlags, LEGACY_PSYCHOMETRIC_PASS_FLIP_REVIEW_FLAG])]
+    : existingReviewFlags;
+
+  const finalPass = wouldFlipPassToFail ? true : computedFinalPass;
+
+  if (wouldFlipPassToFail) {
+    console.log(
+      '[PsychometricModifier] legacy backfill — preserving passed=true; flagged for admin review',
+      { userId, attemptId, computedFinalPass, finalModifiedScore },
+    );
+  }
 
   await supabase
     .from('users')
@@ -391,6 +417,7 @@ export async function applyPsychometricModifierToAttempt(
       gate_fail_reasons: allFailReasons,
       gate_fail_detail: gateFailDetail,
       passed: finalPass,
+      review_flags: reviewFlagsForPersist,
       ...(uncertaintyForDb
         ? {
             uncertainty_score: uncertaintyForDb.total,

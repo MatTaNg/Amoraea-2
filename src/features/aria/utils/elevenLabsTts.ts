@@ -50,6 +50,33 @@ function getExpoAvAudio(): typeof import('expo-av').Audio {
  */
 const DEFAULT_VOICE_ID = 'cgSgspJ2msm6clMCkdW9'; // Jessica — warm, friendly
 
+/** Last spoken chunk tail — passed as ElevenLabs `previous_text` for prosody continuity across split requests. */
+let elevenLabsPreviousTextContext = '';
+
+const ELEVENLABS_VOICE_SETTINGS = {
+  stability: 0.22,
+  similarity_boost: 0.82,
+  /** Lower style reduces long dramatic pauses at commas / periods within an utterance. */
+  style: 0.42,
+  use_speaker_boost: true,
+} as const;
+
+function takePreviousTextForElevenLabsRequest(): string | undefined {
+  const prev = elevenLabsPreviousTextContext.trim();
+  if (!prev) return undefined;
+  return prev.slice(-200);
+}
+
+function recordElevenLabsSpokenContext(text: string): void {
+  const t = text.trim();
+  if (!t) return;
+  elevenLabsPreviousTextContext = t.slice(-300);
+}
+
+export function resetElevenLabsSpokenContext(): void {
+  elevenLabsPreviousTextContext = '';
+}
+
 /** True when ElevenLabs network TTS is allowed (production builds; not default __DEV__). */
 function isElevenLabsEnabledForEnvironment(): boolean {
   return computeElevenLabsEnabled({
@@ -825,6 +852,7 @@ export function unlockWebAudioForAutoplay(): void {
 /** Reset at each new interview session so the first gesture in that session must unlock again. */
 export function resetWebInterviewAudioSession(): void {
   webInterviewAudioUnlocked = false;
+  resetElevenLabsSpokenContext();
 }
 
 /** Whether web audio has been unlocked in the current interview session (shared context is ready). */
@@ -1094,15 +1122,12 @@ export async function fetchElevenLabsMpegArrayBuffer(
 
   try {
     const modelId = 'eleven_multilingual_v2';
+    const previousText = takePreviousTextForElevenLabsRequest();
     const bodyPayload = {
       text: spokenText.trim(),
       model_id: modelId,
-      voice_settings: {
-        stability: 0.22,
-        similarity_boost: 0.82,
-        style: 0.65,
-        use_speaker_boost: true,
-      },
+      voice_settings: { ...ELEVENLABS_VOICE_SETTINGS },
+      ...(previousText ? { previous_text: previousText } : {}),
     };
     const proxyAuth = useProxy ? await buildSupabaseEdgeFunctionAuthHeaders() : {};
     const fetchTimeoutMs = 45000;
@@ -1128,6 +1153,7 @@ export async function fetchElevenLabsMpegArrayBuffer(
                   voiceId,
                   modelId: bodyPayload.model_id,
                   voiceSettings: bodyPayload.voice_settings,
+                  ...(bodyPayload.previous_text ? { previousText: bodyPayload.previous_text } : {}),
                 }),
               }
             : {
@@ -1216,12 +1242,8 @@ async function openElevenLabsPcmStreamRequest(spokenText: string): Promise<Respo
   if (!apiKey && !useProxy) return null;
 
   const modelId = 'eleven_multilingual_v2';
-  const voiceSettings = {
-    stability: 0.22,
-    similarity_boost: 0.82,
-    style: 0.65,
-    use_speaker_boost: true,
-  };
+  const previousText = takePreviousTextForElevenLabsRequest();
+  const voiceSettings = { ...ELEVENLABS_VOICE_SETTINGS };
   const q = new URLSearchParams({
     output_format: 'pcm_24000',
     optimize_streaming_latency: '2',
@@ -1230,6 +1252,7 @@ async function openElevenLabsPcmStreamRequest(spokenText: string): Promise<Respo
     text: spokenText.trim(),
     model_id: modelId,
     voice_settings: voiceSettings,
+    ...(previousText ? { previous_text: previousText } : {}),
   };
   const proxyAuth = useProxy ? await buildSupabaseEdgeFunctionAuthHeaders() : {};
   const fetchTimeoutMs = 45000;
@@ -1259,6 +1282,7 @@ async function openElevenLabsPcmStreamRequest(spokenText: string): Promise<Respo
                 voiceSettings: bodyPayload.voice_settings,
                 stream: true,
                 outputFormat: 'pcm_24000',
+                ...(bodyPayload.previous_text ? { previousText: bodyPayload.previous_text } : {}),
               }),
             }
           : {
@@ -1616,6 +1640,7 @@ export async function speakWithElevenLabs(
         playbackRateMultiplier
       );
       if (playedPcm) {
+        recordElevenLabsSpokenContext(spokenText);
         return;
       }
     }
@@ -1662,6 +1687,7 @@ export async function speakWithElevenLabs(
             /* ignore */
           }
         }
+        recordElevenLabsSpokenContext(spokenText);
         return;
       }
       const blob = new Blob([abForHtmlAudio], { type: 'audio/mpeg' });
@@ -1881,6 +1907,7 @@ export async function speakWithElevenLabs(
             finish('reject', err);
           });
       });
+      recordElevenLabsSpokenContext(spokenText);
       return;
     }
 
@@ -1947,6 +1974,7 @@ export async function speakWithElevenLabs(
     } catch {
       // ignore cleanup errors
     }
+    recordElevenLabsSpokenContext(spokenText);
   } catch (err) {
     if (err instanceof WebTtsRequiresUserGestureError || err instanceof WebInterviewTtsTabHiddenAbortError) {
       throw err;
@@ -1957,6 +1985,22 @@ export async function speakWithElevenLabs(
 }
 
 type WebSpeechResult = { ok: true } | { ok: false; error: string };
+
+/** Cached browser voice so fallback TTS does not switch voices mid-interview. */
+let cachedWebSpeechVoice: SpeechSynthesisVoice | null = null;
+
+function pickStableWebSpeechVoice(): SpeechSynthesisVoice | null {
+  if (typeof window === 'undefined' || !window.speechSynthesis) return null;
+  if (cachedWebSpeechVoice) return cachedWebSpeechVoice;
+  const list = window.speechSynthesis.getVoices();
+  const prefer =
+    list.find((v) => /samantha|google us english|zira|karen|victoria/i.test(v.name) && /^en/i.test(v.lang)) ??
+    list.find((v) => (v as SpeechSynthesisVoice & { localService?: boolean }).localService === true && /^en/i.test(v.lang)) ??
+    list.find((v) => /^en(-|$)/i.test(v.lang)) ??
+    null;
+  cachedWebSpeechVoice = prefer;
+  return prefer;
+}
 
 /** Web (esp. Mobile Safari): expo-speech often calls onError immediately — use the browser Speech Synthesis API instead. */
 function speakWithWebSpeechSynthesis(
@@ -2025,8 +2069,7 @@ function speakWithWebSpeechSynthesis(
       }
     };
     const applyVoiceAndSpeak = () => {
-      const list = window.speechSynthesis.getVoices();
-      const en = list.find((v) => /^en(-|$)/i.test(v.lang));
+      const en = pickStableWebSpeechVoice();
       if (en) utter.voice = en;
       speakNow();
     };

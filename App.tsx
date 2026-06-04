@@ -117,11 +117,13 @@ const InterviewAppNavigator = ({
   userId,
   initialRouteName,
   interviewAlreadyCompleted,
+  legacyPsychometricsMode,
   needsMarketResearch,
 }: {
   userId: string;
   initialRouteName: InterviewStackRoute;
   interviewAlreadyCompleted: boolean;
+  legacyPsychometricsMode: boolean;
   needsMarketResearch: boolean;
 }) => (
   <Stack.Navigator
@@ -134,7 +136,12 @@ const InterviewAppNavigator = ({
     <Stack.Screen
       name="PsychometricAssessment"
       component={PsychometricAssessmentScreen as unknown as React.ComponentType<Record<string, never>>}
-      initialParams={{ userId, interviewAlreadyCompleted, needsMarketResearch }}
+      initialParams={{
+        userId,
+        interviewAlreadyCompleted,
+        legacyPsychometricsMode,
+        needsMarketResearch,
+      }}
       options={{ headerShown: false }}
     />
     <Stack.Screen
@@ -211,11 +218,12 @@ function buildInterviewStackInitialState(
   initialRouteName: InterviewStackRoute,
   userId: string,
   interviewAlreadyCompleted: boolean,
+  legacyPsychometricsMode: boolean,
   needsMarketResearch: boolean,
 ): NavigationState {
   const params =
     initialRouteName === 'PsychometricAssessment'
-      ? { userId, interviewAlreadyCompleted, needsMarketResearch }
+      ? { userId, interviewAlreadyCompleted, legacyPsychometricsMode, needsMarketResearch }
       : { userId };
   return {
     stale: false,
@@ -350,10 +358,12 @@ const LoggedInInterviewShell = ({ userId }: { userId: string }) => {
     let initialRouteName: InterviewStackRoute = initialRoute?.screen ?? 'Aria';
     let interviewAlreadyCompleted =
       initialRoute?.interviewAlreadyCompleted === true || profileShowsStandardInterviewComplete;
+    let legacyPsychometricsMode = initialRoute?.legacyPsychometricsMode === true;
 
     if (profileShowsStandardInterviewComplete && initialRouteName === 'Aria') {
       initialRouteName = 'PostInterview';
       interviewAlreadyCompleted = true;
+      legacyPsychometricsMode = false;
     }
 
     const serverResolvedPostInterviewScreen = initialRoute?.screen;
@@ -377,11 +387,13 @@ const LoggedInInterviewShell = ({ userId }: { userId: string }) => {
     return {
       initialRouteName,
       interviewAlreadyCompleted,
+      legacyPsychometricsMode,
       needsMarketResearch,
       navInitialState: buildInterviewStackInitialState(
         initialRouteName,
         userId,
         interviewAlreadyCompleted,
+        legacyPsychometricsMode,
         needsMarketResearch,
       ),
       interviewLinking: createInterviewStackLinking(initialRouteName),
@@ -406,6 +418,7 @@ const LoggedInInterviewShell = ({ userId }: { userId: string }) => {
   const {
     initialRouteName,
     interviewAlreadyCompleted,
+    legacyPsychometricsMode,
     needsMarketResearch,
     navInitialState,
     interviewLinking,
@@ -437,6 +450,7 @@ const LoggedInInterviewShell = ({ userId }: { userId: string }) => {
           userId={userId}
           initialRouteName={initialRouteName}
           interviewAlreadyCompleted={interviewAlreadyCompleted}
+          legacyPsychometricsMode={legacyPsychometricsMode}
           needsMarketResearch={needsMarketResearch}
         />
         {showMarketResearchOverlay ? (

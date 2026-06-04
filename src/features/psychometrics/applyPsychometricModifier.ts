@@ -27,6 +27,17 @@ import {
   mergePsychometricFloorsIntoGateState,
 } from './psychometricFloorBreaches';
 import { SD3_NARCISSISM_FLOOR_FAIL_CODE } from './sd3NarcissismFloor';
+import {
+  LEGACY_PSYCHOMETRIC_PASS_FLIP_REVIEW_FLAG,
+} from './legacyPsychometricReview';
+
+export type ApplyPsychometricModifierOptions = {
+  /**
+   * Legacy backfill after interview: keep `passed` true when psychometrics would flip pass → fail;
+   * scores and modifier are still persisted for admin review.
+   */
+  preservePassIfPreviouslyPassing?: boolean;
+};
 
 function mergeScsResponses(
   publicResponses: Record<number, number> | null | undefined,
@@ -225,6 +236,7 @@ function buildUncertaintyInput(
 export async function applyPsychometricModifierToAttempt(
   userId: string,
   attemptId: string,
+  options?: ApplyPsychometricModifierOptions,
 ): Promise<void> {
   let userRow: Record<string, unknown> | null = null;
   /** Prefer SD3 columns first — legacy-only select omits `psychometrics_sd3_narcissism_score` and can hide floor triggers. */
@@ -431,7 +443,28 @@ export async function applyPsychometricModifierToAttempt(
 
   const interviewGatePass =
     allFailReasons.length === 0 && depthSignalModifiedScore >= GATE_PASS_WEIGHTED_MIN;
-  const finalPass = interviewGatePass && finalModifiedScore >= GATE_PASS_WEIGHTED_MIN;
+  const computedFinalPass = interviewGatePass && finalModifiedScore >= GATE_PASS_WEIGHTED_MIN;
+  const wasPreviouslyPassing = attempt.passed === true;
+  const wouldFlipPassToFail =
+    options?.preservePassIfPreviouslyPassing === true &&
+    wasPreviouslyPassing &&
+    !computedFinalPass;
+
+  const existingReviewFlags = Array.isArray(attempt.review_flags)
+    ? (attempt.review_flags as string[])
+    : [];
+  const reviewFlagsForPersist = wouldFlipPassToFail
+    ? [...new Set([...existingReviewFlags, LEGACY_PSYCHOMETRIC_PASS_FLIP_REVIEW_FLAG])]
+    : existingReviewFlags;
+
+  const finalPass = wouldFlipPassToFail ? true : computedFinalPass;
+
+  if (wouldFlipPassToFail) {
+    console.log(
+      '[PsychometricModifier] legacy backfill — preserving passed=true; flagged for admin review',
+      { userId, attemptId, computedFinalPass, finalModifiedScore },
+    );
+  }
 
   await supabase
     .from('users')
@@ -458,6 +491,7 @@ export async function applyPsychometricModifierToAttempt(
     gate_fail_reasons: allFailReasons,
     gate_fail_detail: gateFailDetail,
     passed: finalPass,
+    review_flags: reviewFlagsForPersist,
     ...(uncertaintyForDb
       ? {
           uncertainty_score: uncertaintyForDb.total,

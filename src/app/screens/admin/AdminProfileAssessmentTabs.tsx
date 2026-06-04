@@ -449,7 +449,7 @@ function getBrsBand(score: number | null): { band: string; modifier: number; des
   if (score >= 4.0) {
     return {
       band: 'High resilience',
-      modifier: 0.1,
+      modifier: 0,
       description:
         'Strong ability to recover from stress and adversity. Associated with emotional stability and sustained engagement through relational difficulty.',
     };
@@ -488,9 +488,9 @@ function getAnxietyTraitBand(score: number | null): { band: string; modifier: nu
   }
   return {
     band: 'Low anxiety',
-    modifier: 0.05,
+    modifier: 0,
     description:
-      'Generally calm baseline with limited chronic worry. Mild positive signal for emotional steadiness in partnership.',
+      'Generally calm baseline with limited chronic worry. Neutral modifier — favorable bands do not boost the gate score.',
   };
 }
 
@@ -499,7 +499,7 @@ function getScsSfBand(score: number | null): { band: string; modifier: number; d
   if (score >= 4.0) {
     return {
       band: 'High self-compassion',
-      modifier: 0.15,
+      modifier: 0,
       description:
         'Treats themselves with kindness and balance during difficulty. Associated with healthier self-talk and recovery after relational setbacks.',
     };
@@ -524,7 +524,7 @@ function getGaspBand(score: number | null): { band: string; modifier: number; de
   if (score <= 2.5) {
     return {
       band: 'Low externalization',
-      modifier: 0.1,
+      modifier: 0,
       description:
         'Tends to take responsibility rather than blame others when things go wrong. Associated with accountability in conflict repair.',
     };
@@ -549,7 +549,7 @@ function getDweckBand(score: number | null): { band: string; modifier: number; d
   if (score >= 4.5) {
     return {
       band: 'Growth mindset',
-      modifier: 0.1,
+      modifier: 0,
       description:
         'Believes partners can change and grow. Associated with patience through conflict and investment in development.',
     };
@@ -582,7 +582,7 @@ function getMspssBand(friendsScore: number | null): { band: string; modifier: nu
   if (friendsScore >= 5.5) {
     return {
       band: 'Strong social network',
-      modifier: 0.1,
+      modifier: 0,
       description:
         'Strong perceived support from friends. Associated with lower relational dependency and healthier boundary maintenance.',
     };
@@ -623,7 +623,7 @@ function getSd3NarcissismBand(score: number | null): { band: string; modifier: n
   if (score <= 2.0) {
     return {
       band: 'Low narcissism',
-      modifier: 0.1,
+      modifier: 0,
       description: 'Low narcissism — minimal self-enhancement or entitlement signals.',
     };
   }
@@ -648,7 +648,7 @@ function getRfqBand(score: number | null): { band: string; modifier: number; des
   if (score >= 5.0) {
     return {
       band: 'Strong reflective functioning',
-      modifier: 0.15,
+      modifier: 0,
       description:
         'Strong capacity to understand own and others mental states and link past experience to present feelings.',
     };
@@ -673,14 +673,14 @@ function getAaq2Band(score: number | null): { band: string; modifier: number; de
   if (score <= 14)
     return {
       band: 'High flexibility',
-      modifier: 0.2,
+      modifier: 0,
       description:
         'Strong willingness to experience difficult emotions without avoidance. Associated with better emotional presence in conflict.',
     };
   if (score <= 24)
     return {
       band: 'Moderate flexibility',
-      modifier: 0.1,
+      modifier: 0,
       description: 'Generally able to engage with difficult emotions with some avoidance tendencies.',
     };
   if (score <= 34)
@@ -710,14 +710,14 @@ function getRsesBand(score: number | null): { band: string; modifier: number; de
   if (score >= 30)
     return {
       band: 'High self-esteem',
-      modifier: 0.2,
+      modifier: 0,
       description:
         'Stable self-regard. Associated with lower rejection sensitivity and more secure relational functioning.',
     };
   if (score >= 23)
     return {
       band: 'Moderate-high self-esteem',
-      modifier: 0.1,
+      modifier: 0,
       description: 'Generally positive self-regard with some variability.',
     };
   if (score >= 17)
@@ -752,14 +752,14 @@ function getScsBand(
   if (diff >= 4)
     return {
       band: 'Strongly internally oriented',
-      modifier: 0.2,
+      modifier: 0,
       description:
         'Strong attunement to internal states over external perception. Associated with emotional authenticity and self-awareness in relationships.',
     };
   if (diff >= 1)
     return {
       band: 'Mildly internally oriented',
-      modifier: 0.1,
+      modifier: 0,
       description: 'Slightly more attuned to internal experience than external impression.',
     };
   if (diff >= -1)
@@ -982,14 +982,13 @@ export function FullAssessmentTab({
             style={[
               tabStyles.scoreValue,
               !psychometricsComplete && { color: '#999' },
-              psychometricModifier != null && psychometricModifier > 0 && { color: '#22c55e' },
               psychometricModifier != null && psychometricModifier < 0 && { color: '#ef4444' },
             ]}
           >
             {!psychometricsComplete
               ? 'Pending'
               : psychometricModifier != null
-                ? (psychometricModifier >= 0 ? '+' : '') + psychometricModifier.toFixed(2)
+                ? psychometricModifier.toFixed(2)
                 : '—'}
           </Text>
         </View>
@@ -999,11 +998,10 @@ export function FullAssessmentTab({
             <Text
               style={[
                 tabStyles.scoreValue,
-                correctedPsychometricModifier > 0 && { color: '#22c55e' },
                 correctedPsychometricModifier < 0 && { color: '#ef4444' },
               ]}
             >
-              {(correctedPsychometricModifier >= 0 ? '+' : '') + correctedPsychometricModifier.toFixed(2)}
+              {correctedPsychometricModifier.toFixed(2)}
             </Text>
           </View>
         ) : null}
@@ -1077,13 +1075,13 @@ export function FullAssessmentTab({
       {breakdownUnavailable ? (
         <View style={tabStyles.gateChangedBanner}>
           <Text style={tabStyles.gateChangedText}>
-            The +{psychometricModifier?.toFixed(2)} on this attempt is real, but individual test scores are not
+            The psychometric modifier ({psychometricModifier?.toFixed(2) ?? '—'}) on this attempt is stored, but individual test scores are not
             loading for this user in admin. Open the browser console for [Admin] fetchAdminUserProfile errors, confirm
             you are signed in as admin@amoraea.com, and run the psychometrics query on users for id {user.id}. If scores
             are null in Supabase, they were never saved or were cleared after scoring — retaking Part 1 psychometrics
             and re-applying the modifier will fix the breakdown.
             {user.psychometric_modifier != null
-              ? ` users.psychometric_modifier: ${user.psychometric_modifier >= 0 ? '+' : ''}${user.psychometric_modifier.toFixed(2)}.`
+              ? ` users.psychometric_modifier: ${user.psychometric_modifier.toFixed(2)}.`
               : ''}
           </Text>
         </View>
@@ -1110,11 +1108,9 @@ export function FullAssessmentTab({
               <Text
                 style={[
                   tabStyles.instrumentModifier,
-                  brsInfo.modifier > 0 && { color: '#22c55e' },
                   brsInfo.modifier < 0 && { color: '#ef4444' },
                 ]}
               >
-                {brsInfo.modifier > 0 ? '+' : ''}
                 {brsInfo.modifier.toFixed(2)}
               </Text>
             </View>
@@ -1135,11 +1131,9 @@ export function FullAssessmentTab({
               <Text
                 style={[
                   tabStyles.instrumentModifier,
-                  anxietyTraitInfo.modifier > 0 && { color: '#22c55e' },
                   anxietyTraitInfo.modifier < 0 && { color: '#ef4444' },
                 ]}
               >
-                {anxietyTraitInfo.modifier > 0 ? '+' : ''}
                 {anxietyTraitInfo.modifier.toFixed(2)}
               </Text>
             </View>
@@ -1160,11 +1154,9 @@ export function FullAssessmentTab({
               <Text
                 style={[
                   tabStyles.instrumentModifier,
-                  scsSfInfo.modifier > 0 && { color: '#22c55e' },
                   scsSfInfo.modifier < 0 && { color: '#ef4444' },
                 ]}
               >
-                {scsSfInfo.modifier > 0 ? '+' : ''}
                 {scsSfInfo.modifier.toFixed(2)}
               </Text>
             </View>
@@ -1204,11 +1196,9 @@ export function FullAssessmentTab({
               <Text
                 style={[
                   tabStyles.instrumentModifier,
-                  gaspInfo.modifier > 0 && { color: '#22c55e' },
                   gaspInfo.modifier < 0 && { color: '#ef4444' },
                 ]}
               >
-                {gaspInfo.modifier > 0 ? '+' : ''}
                 {gaspInfo.modifier.toFixed(2)}
               </Text>
             </View>
@@ -1242,11 +1232,9 @@ export function FullAssessmentTab({
               <Text
                 style={[
                   tabStyles.instrumentModifier,
-                  dweckInfo.modifier > 0 && { color: '#22c55e' },
                   dweckInfo.modifier < 0 && { color: '#ef4444' },
                 ]}
               >
-                {dweckInfo.modifier > 0 ? '+' : ''}
                 {dweckInfo.modifier.toFixed(2)}
               </Text>
             </View>
@@ -1272,11 +1260,9 @@ export function FullAssessmentTab({
               <Text
                 style={[
                   tabStyles.instrumentModifier,
-                  aaq2Info.modifier > 0 && { color: '#22c55e' },
                   aaq2Info.modifier < 0 && { color: '#ef4444' },
                 ]}
               >
-                {aaq2Info.modifier > 0 ? '+' : ''}
                 {aaq2Info.modifier.toFixed(2)}
               </Text>
             </View>
@@ -1297,11 +1283,9 @@ export function FullAssessmentTab({
               <Text
                 style={[
                   tabStyles.instrumentModifier,
-                  rsesInfo.modifier > 0 && { color: '#22c55e' },
                   rsesInfo.modifier < 0 && { color: '#ef4444' },
                 ]}
               >
-                {rsesInfo.modifier > 0 ? '+' : ''}
                 {rsesInfo.modifier.toFixed(2)}
               </Text>
             </View>
@@ -1327,11 +1311,9 @@ export function FullAssessmentTab({
               <Text
                 style={[
                   tabStyles.instrumentModifier,
-                  scsInfo.modifier > 0 && { color: '#22c55e' },
                   scsInfo.modifier < 0 && { color: '#ef4444' },
                 ]}
               >
-                {scsInfo.modifier > 0 ? '+' : ''}
                 {scsInfo.modifier.toFixed(2)}
               </Text>
             </View>
@@ -1358,11 +1340,9 @@ export function FullAssessmentTab({
               <Text
                 style={[
                   tabStyles.instrumentModifier,
-                  mspssInfo.modifier > 0 && { color: '#22c55e' },
                   mspssInfo.modifier < 0 && { color: '#ef4444' },
                 ]}
               >
-                {mspssInfo.modifier > 0 ? '+' : ''}
                 {mspssInfo.modifier.toFixed(2)}
               </Text>
             </View>
@@ -1391,11 +1371,9 @@ export function FullAssessmentTab({
               <Text
                 style={[
                   tabStyles.instrumentModifier,
-                  sd3Info.modifier > 0 && { color: '#22c55e' },
                   sd3Info.modifier < 0 && { color: '#ef4444' },
                 ]}
               >
-                {sd3Info.modifier > 0 ? '+' : ''}
                 {sd3Info.modifier.toFixed(2)}
               </Text>
             </View>
@@ -1421,11 +1399,9 @@ export function FullAssessmentTab({
               <Text
                 style={[
                   tabStyles.instrumentModifier,
-                  rfqInfo.modifier > 0 && { color: '#22c55e' },
                   rfqInfo.modifier < 0 && { color: '#ef4444' },
                 ]}
               >
-                {rfqInfo.modifier > 0 ? '+' : ''}
                 {rfqInfo.modifier.toFixed(2)}
               </Text>
             </View>

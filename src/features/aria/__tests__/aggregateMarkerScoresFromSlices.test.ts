@@ -11,7 +11,7 @@ describe('combinedContemptFromScenarioPillarScores', () => {
   it('blends 60% expression + 40% recognition when both present (Scenario A)', () => {
     expect(
       combinedContemptFromScenarioPillarScores({ contempt_expression: 2, contempt_recognition: 3 })
-    ).toBe(2.4);
+    ).toBe(2);
   });
 
   it('uses expression only when recognition absent (Scenario B/C)', () => {
@@ -30,9 +30,9 @@ describe('calculateScoreConsistency contempt row', () => {
       { contempt_expression: 3 },
       { contempt_expression: 2, contempt_recognition: 4 }
     );
-    expect(out.contempt.s1).toBe(2.4);
+    expect(out.contempt.s1).toBe(2);
     expect(out.contempt.s2).toBe(3);
-    expect(out.contempt.s3).toBe(2.8);
+    expect(out.contempt.s3).toBe(3);
     expect(out.contempt.mean).toBeCloseTo(2.7, 5);
   });
 });
@@ -111,6 +111,18 @@ describe('aggregateMarkerScoresFromLabeledSlices (moment matrix)', () => {
     expect(scores.appreciation).toBe(6);
   });
 
+  it('averages mentalizing and accountability from scenarios only (ignores M4/M5)', () => {
+    const { scores } = aggregateMarkerScoresFromLabeledSlices([
+      labeled('scenario_1', { mentalizing: 8, accountability: 7 }, { mentalizing: 's1', accountability: 's1' }),
+      labeled('scenario_2', { mentalizing: 8, accountability: 7 }, { mentalizing: 's2', accountability: 's2' }),
+      labeled('scenario_3', { mentalizing: 8, accountability: 7 }, { mentalizing: 's3', accountability: 's3' }),
+      labeled('moment_4', { mentalizing: 3, accountability: 3 }, { mentalizing: 'm4', accountability: 'm4' }),
+      labeled('moment_5', { mentalizing: 3, accountability: 3 }, { mentalizing: 'm5', accountability: 'm5' }),
+    ]);
+    expect(scores.mentalizing).toBe(8);
+    expect(scores.accountability).toBe(7);
+  });
+
   it('excludes attunement from moment_4', () => {
     const { scores } = aggregateMarkerScoresFromLabeledSlices([
       labeled('scenario_1', { attunement: 6 }, { attunement: 's1' }),
@@ -128,7 +140,7 @@ describe('aggregateMarkerScoresFromLabeledSlices (moment matrix)', () => {
         { contempt_expression: 'e', contempt_recognition: 'r' }
       ),
     ]);
-    expect(scores.contempt).toBe(7.6);
+    expect(scores.contempt).toBe(8);
   });
 
   it('moment_4 legacy monolithic `contempt` does not enter aggregate contempt (pooled expression is vignette-only)', () => {
@@ -162,8 +174,8 @@ describe('aggregateMarkerScoresFromLabeledSlices (moment matrix)', () => {
       ),
       labeled('moment_4', { contempt_expression: 10, contempt_recognition: 8 }, { contempt_expression: 'warm m4', contempt_recognition: 'r4' }),
     ]);
-    // expression 2 only (scenarios); recognition (5+8)/2 = 6.5 → 0.6*2 + 0.4*6.5 = 3.8
-    expect(scores.contempt).toBe(3.8);
+    // expression 2 only (scenarios); recognition (5+8)/2 = 6.5 → round(0.6*2 + 0.4*6.5) = 4
+    expect(scores.contempt).toBe(4);
   });
 });
 
