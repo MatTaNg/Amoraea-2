@@ -5,6 +5,7 @@
 import { Platform } from 'react-native';
 import { getLateStartThresholdMs } from '@features/aria/config/audioInterviewConfig';
 import {
+  MIN_VALID_AMBIENT_NOISE_FLOOR_DB,
   setInterviewSessionAmbientNoiseFloorDb,
   setInterviewSessionAmbientNoiseFallback,
   resetInterviewVadAmbientSamplingState,
@@ -158,6 +159,20 @@ function samplePeakDbOnce(): number | null {
   return 20 * (Math.log(Math.max(peak, 1e-12)) / Math.LN10);
 }
 
+/** UI meter while pre-init stream is live (before recording tap consumes it). */
+export function samplePreInitInputMeterNormalized(): number {
+  if (!micAnalyser) return 0;
+  const data = new Uint8Array(micAnalyser.fftSize);
+  micAnalyser.getByteTimeDomainData(data);
+  let peak = 0;
+  for (let i = 0; i < data.length; i++) {
+    const v = (data[i] - 128) / 128;
+    const a = Math.abs(v);
+    if (a > peak) peak = a;
+  }
+  return Math.min(1, peak * 2.2);
+}
+
 /**
  * Fire after TTS playback actually starts (same moment as onPlaybackStarted), or from session start
  * (greeting) / user gesture to warm the recorder before the first tap.
@@ -194,7 +209,9 @@ export async function beginInterviewMicPreInitDuringTts(
     if (micAnalyser) {
       ambientSampleIntervalId = setInterval(() => {
         const db = samplePeakDbOnce();
-        if (db != null && Number.isFinite(db)) ambientSamplesDb.push(db);
+        if (db != null && Number.isFinite(db) && db >= MIN_VALID_AMBIENT_NOISE_FLOOR_DB) {
+          ambientSamplesDb.push(db);
+        }
       }, 100);
     }
   } catch (err) {
@@ -216,7 +233,10 @@ export function finalizeInterviewMicAmbientOnTtsEnd(): void {
     setInterviewSessionAmbientNoiseFallback(true);
     return;
   }
-  const sorted = [...ambientSamplesDb].sort((a, b) => a - b);
+  const usable = ambientSamplesDb.filter(
+    (db) => Number.isFinite(db) && db >= MIN_VALID_AMBIENT_NOISE_FLOOR_DB
+  );
+  const sorted = [...usable].sort((a, b) => a - b);
   const median = sorted[Math.floor(sorted.length / 2)] ?? null;
   if (median != null && Number.isFinite(median)) {
     setInterviewSessionAmbientNoiseFloorDb(median);

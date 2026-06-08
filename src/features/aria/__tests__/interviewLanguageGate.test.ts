@@ -35,6 +35,14 @@ describe('isNamePromptInterviewMoment', () => {
     expect(isNamePromptInterviewMoment("What's your name?")).toBe(true);
     expect(isNamePromptInterviewMoment('How should I call you?')).toBe(true);
   });
+
+  it('matches name re-ask lines', () => {
+    expect(
+      isNamePromptInterviewMoment(
+        "Sorry, I didn't quite catch that — what name would you like me to use?"
+      )
+    ).toBe(true);
+  });
 });
 
 describe('shouldRecordInterviewResponseTiming', () => {
@@ -110,6 +118,14 @@ describe('isShortAnswerOkForWhisperRatioGate', () => {
   it('treats opening name question as short-answer OK', () => {
     expect(
       isShortAnswerOkForWhisperRatioGate("Hi, I'm Amoraea. What can I call you?")
+    ).toBe(true);
+  });
+
+  it('treats post-name preamble briefing as short-answer OK', () => {
+    expect(
+      isShortAnswerOkForWhisperRatioGate(
+        "Good to meet you, Matt. The way this works is I'll first give you three situations. Are you ready?"
+      )
     ).toBe(true);
   });
 });
@@ -213,13 +229,38 @@ describe('shouldFireWhisperRatioReask', () => {
 });
 
 describe('getWhisperRatioReaskSuppressionReason', () => {
-  it('treats any single non-empty token as valid_hard_stop', () => {
+  it('treats procedural single-word assent/refusal as valid_hard_stop', () => {
     expect(getWhisperRatioReaskSuppressionReason('Nope', 1)).toBe('valid_hard_stop');
+    expect(getWhisperRatioReaskSuppressionReason('Yes', 1)).toBe('valid_hard_stop');
+    expect(getWhisperRatioReaskSuppressionReason('fine', 1)).toBe('valid_hard_stop');
+  });
+
+  it('does not treat mid-sentence single-word fragments as valid_hard_stop', () => {
+    expect(getWhisperRatioReaskSuppressionReason("That's", 1)).toBe(null);
+    expect(getWhisperRatioReaskSuppressionReason('So', 1)).toBe(null);
   });
 
   it('returns null for empty or zero word count', () => {
     expect(getWhisperRatioReaskSuppressionReason('   ', 0)).toBe(null);
     expect(getWhisperRatioReaskSuppressionReason('hello', 0)).toBe(null);
+  });
+
+  it('suppresses multi-word readiness affirmations', () => {
+    expect(getWhisperRatioReaskSuppressionReason('Yes, yes.', 2)).toBe('valid_hard_stop');
+  });
+});
+
+describe('computeWhisperRatioReaskState — fragment single words', () => {
+  it('ratio re-asks substantive turns when Whisper returns a one-word fragment', () => {
+    expect(
+      computeWhisperRatioReaskState({
+        turnContext: 'substantive',
+        transcriptText: "That's",
+        wordCount: 1,
+        wordsPerSecond: 0.641,
+        shortAnswerOk: false,
+      })
+    ).toEqual({ shouldFire: true, logSuppressedReason: null });
   });
 });
 
@@ -231,6 +272,11 @@ describe('getWhisperReaskTurnContext', () => {
     expect(getWhisperReaskTurnContext('Are you ready to begin?')).toBe(
       'readiness_confirmation'
     );
+    expect(
+      getWhisperReaskTurnContext(
+        "Good to meet you, Matt. The way this works is I'll first give you three situations. Are you ready?"
+      )
+    ).toBe('readiness_confirmation');
   });
 });
 

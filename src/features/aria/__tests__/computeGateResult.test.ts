@@ -30,22 +30,28 @@ describe('computeGateResult — research weights & floors', () => {
     expect(s).toBeCloseTo(1, 6);
   });
 
-  it('passes when all constructs at 6 (threshold inclusive)', () => {
-    const r = computeGateResult(allAssessed(6));
+  it('passes when all constructs at 6.5 (threshold inclusive)', () => {
+    const r = computeGateResult(allAssessed(6.5));
     expect(r.pass).toBe(true);
     expect(r.reason).toBe('pass');
-    expect(r.weightedScore).toBe(6);
+    expect(r.weightedScore).toBe(6.5);
     expect(r.failReason).toBeNull();
   });
 
-  it('fails weighted when just below 6.0', () => {
-    const scores = allAssessed(5.9);
+  it('fails weighted when just below 6.5', () => {
+    const scores = allAssessed(6.4);
     const r = computeGateResult(scores);
     expect(r.pass).toBe(false);
     expect(r.reason).toBe('weighted_below_threshold');
     expect(r.failReasonCodes).toContain('weighted_score');
     expect(r.failReason).toMatch(/weighted_score:/);
-    expect(r.failReason).toContain('6.0');
+    expect(r.failReason).toContain('6.5');
+  });
+
+  it('passes weighted at 6.6', () => {
+    const r = computeGateResult(allAssessed(6.6));
+    expect(r.pass).toBe(true);
+    expect(r.modifiedWeightedScore).toBe(6.6);
   });
 
   it('excludes unassessed (0) from numerator and renormalizes weights', () => {
@@ -106,12 +112,52 @@ describe('computeGateResult — research weights & floors', () => {
     expect(r.failReason).toContain('contempt');
   });
 
-  it('regulation floor 4.0: 3.9 fails', () => {
+  it('regulation floor 4.5: 4.4 fails', () => {
     const scores = allAssessed(7);
-    scores.regulation = 3.9;
+    scores.regulation = 4.4;
     const r = computeGateResult(scores);
     expect(r.pass).toBe(false);
     expect(r.failReason).toContain('regulation');
+  });
+
+  it('regulation floor 4.5: 4.5 does not fire', () => {
+    const scores = allAssessed(7);
+    scores.regulation = 4.5;
+    const r = computeGateResult(scores);
+    expect(r.pass).toBe(true);
+    expect(r.failReason).toBeNull();
+  });
+
+  it('accountability floor 5.0: 4.9 fails', () => {
+    const scores = allAssessed(7);
+    scores.accountability = 4.9;
+    const r = computeGateResult(scores);
+    expect(r.pass).toBe(false);
+    expect(r.reason).toBe('floor_breach');
+    expect(r.failReason).toContain('accountability (4.9)');
+  });
+
+  it('accountability floor 5.0: 5.0 does not fire', () => {
+    const scores = allAssessed(7);
+    scores.accountability = 5.0;
+    const r = computeGateResult(scores);
+    expect(r.pass).toBe(true);
+  });
+
+  it('repair floor 5.0: 4.9 fails', () => {
+    const scores = allAssessed(7);
+    scores.repair = 4.9;
+    const r = computeGateResult(scores);
+    expect(r.pass).toBe(false);
+    expect(r.reason).toBe('floor_breach');
+    expect(r.failReason).toContain('repair (4.9)');
+  });
+
+  it('repair floor 5.0: 5.0 does not fire', () => {
+    const scores = allAssessed(7);
+    scores.repair = 5.0;
+    const r = computeGateResult(scores);
+    expect(r.pass).toBe(true);
   });
 
   it('high weighted average does not override accountability floor breach', () => {
@@ -136,20 +182,20 @@ describe('computeGateResult — research weights & floors', () => {
     expect(r.pass).toBe(true);
   });
 
-  it('referral boost: weightedPassMin 5.5 passes uniform 5.8 (would fail at 6.0)', () => {
-    const scores = allAssessed(5.8);
+  it('referral boost: weightedPassMin 6.0 passes uniform 6.0 (would fail at 6.5)', () => {
+    const scores = allAssessed(6.0);
     const r = computeGateResult(scores, null, { weightedPassMin: REFERRAL_WEIGHTED_PASS_MIN });
     expect(r.pass).toBe(true);
     expect(r.reason).toBe('pass');
   });
 
-  it('referral boost: weightedPassMin 5.5 still fails uniform 5.4', () => {
-    const scores = allAssessed(5.4);
+  it('referral boost: weightedPassMin 6.0 still fails uniform 5.9', () => {
+    const scores = allAssessed(5.9);
     const r = computeGateResult(scores, null, { weightedPassMin: REFERRAL_WEIGHTED_PASS_MIN });
     expect(r.pass).toBe(false);
     expect(r.reason).toBe('weighted_below_threshold');
     expect(r.failReasonCodes).toContain('weighted_score');
-    expect(r.failReason).toContain('5.5');
+    expect(r.failReason).toContain('6.0');
   });
 
   it('personal moment concreteness: both absent modifier lowers threshold score', () => {
@@ -157,7 +203,8 @@ describe('computeGateResult — research weights & floors', () => {
       moment4Concreteness: 'absent',
       moment5Concreteness: 'absent',
     });
-    expect(r.personalMomentConcretenessModifier).toBe(-0.3);
+    expect(r.depthSignalModifier).toBe(-0.5);
+    expect(r.modifiedWeightedScore).toBe(5.7);
     expect(r.pass).toBe(false);
   });
 
@@ -178,10 +225,11 @@ describe('computeGateResult — research weights & floors', () => {
   });
 
   it('omits personal_moment_concreteness_review when modified composite is at least 7 (2dp)', () => {
-    const r = computeGateResult(allAssessed(7.25), null, {
+    const r = computeGateResult(allAssessed(7.5), null, {
       moment4Concreteness: 'absent',
       moment5Concreteness: 'low',
     });
+    expect(r.modifiedWeightedScore).toBeGreaterThanOrEqual(7);
     expect(r.reviewFlags ?? []).not.toContain('personal_moment_concreteness_review');
   });
 });

@@ -73,6 +73,22 @@ describe('computeGamingCorrection', () => {
     expect(result.correctedModifier).toBeCloseTo(total - 0.15, 3);
   });
 
+  it('level 1 aaq2_straight_line strips AAQ-II positive modifier contribution', () => {
+    const components = { ...POSITIVE_COMPONENTS };
+    const total = totalModifier(components);
+    const result = computeGamingCorrection({
+      instrumentComponents: components,
+      totalModifier: total,
+      straightLineFlags: ['aaq2_straight_line'],
+      uncertaintyScore: 0.3,
+      pillarScores: ZERO_PILLARS,
+      psychometricScores: ZERO_PSYCH,
+    });
+    expect(result.correctionLevel).toBe(1);
+    expect(result.strippedInstruments).toEqual(['aaq2']);
+    expect(result.correctedModifier).toBeCloseTo(total - 0.1, 3);
+  });
+
   it('level 2 straight-line strips all positives', () => {
     const components = { ...POSITIVE_COMPONENTS };
     const total = totalModifier(components);

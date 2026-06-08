@@ -36,11 +36,14 @@ export function computeUncertaintyScore(attempt: {
   psychometrics_gasp_externalization_score: number | null;
   psychometrics_aaq2_score: number | null;
   psychometrics_brs_score: number | null;
+  psychometrics_anxiety_trait_score: number | null;
   psychometrics_rses_score: number | null;
   psychometrics_scs_sf_score: number | null;
   psychometrics_dweck_score: number | null;
   psychometrics_sd3_narcissism_score: number | null;
   psychometrics_rfq_score: number | null;
+  psychometrics_scs_public_score: number | null;
+  psychometrics_scs_private_score: number | null;
   reasoning_pending: boolean | null;
   defenseCrossReference?: DefenseCrossReferenceResult | null;
   /** Pass 2 only — gaming correction level from computeGamingCorrection (breaks circular dependency). */
@@ -136,6 +139,12 @@ export function computeUncertaintyScore(attempt: {
       dweckScore: attempt.psychometrics_dweck_score,
       scsSfScore: attempt.psychometrics_scs_sf_score,
       sd3NarcissismScore: sd3,
+      brsScore: attempt.psychometrics_brs_score,
+      anxietyTraitScore: attempt.psychometrics_anxiety_trait_score,
+      aaq2Score: attempt.psychometrics_aaq2_score,
+      rsesScore: attempt.psychometrics_rses_score,
+      scsPublicScore: attempt.psychometrics_scs_public_score,
+      scsPrivateScore: attempt.psychometrics_scs_private_score,
     },
     attempt.psychometric_straight_line_flags,
   );

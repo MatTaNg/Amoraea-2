@@ -602,18 +602,25 @@ export function useAudioRecorder({
         webMeterRafRef.current = requestAnimationFrame(runMeterLoop);
 
         setIsRecording(true);
-        const prerollEndWallMs = Date.now() + WEB_RECORDING_PREROLL_MS;
-        recordingStartTimeRef.current = prerollEndWallMs;
-
-        webPrerollTimerRef.current = setTimeout(() => {
-          webPrerollTimerRef.current = null;
-          if (mediaRecorderRef.current?.state !== 'recording') return;
-          const recordingInitializedAtMs = Date.now();
+        const recordingInitializedAtMs = Date.now();
+        if (usedWebModulePreInit) {
+          recordingStartTimeRef.current = recordingInitializedAtMs;
           onRecordingEnginePrimed?.({
             modeCompleteAtMs,
             recordingInitializedAtMs,
           });
-        }, WEB_RECORDING_PREROLL_MS);
+        } else {
+          const prerollEndWallMs = recordingInitializedAtMs + WEB_RECORDING_PREROLL_MS;
+          recordingStartTimeRef.current = prerollEndWallMs;
+          webPrerollTimerRef.current = setTimeout(() => {
+            webPrerollTimerRef.current = null;
+            if (mediaRecorderRef.current?.state !== 'recording') return;
+            onRecordingEnginePrimed?.({
+              modeCompleteAtMs,
+              recordingInitializedAtMs: Date.now(),
+            });
+          }, WEB_RECORDING_PREROLL_MS);
+        }
 
         const capMs = getAudioMaxRecordingDurationMs();
         maxDurationTimerRef.current = setTimeout(() => {
@@ -623,7 +630,7 @@ export function useAudioRecorder({
           onBeforeWebRecorderStop?.();
           const rec = mediaRecorderRef.current;
           if (rec?.state !== 'inactive') rec?.stop();
-        }, capMs + WEB_RECORDING_PREROLL_MS);
+        }, capMs + (usedWebModulePreInit ? 0 : WEB_RECORDING_PREROLL_MS));
       } catch (err) {
         stopWebMetering();
         if (__DEV__) console.error('Web recording failed:', err);

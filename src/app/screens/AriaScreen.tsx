@@ -116,8 +116,13 @@ import {
 } from '@features/aria/completionScoringKick';
 import {
   INTERVIEW_NAME_AMBIENT_REASK_LINE,
+  INTERVIEW_NAME_REPEAT_REASK_LINE,
+  applyInterviewNameWhisperCorrection,
+  isInterviewNameWhisperEcho,
+  isInterviewRecordingRetryLine,
   isLikelyAmbientSpeech,
   isPlausibleInterviewName,
+  pickAlternateInterviewRecordingRetryLine,
   resolvePlausibleInterviewFirstName,
 } from '@features/aria/interviewNameValidation';
 import {
@@ -167,6 +172,7 @@ import {
 } from '@features/aria/computeGateResult';
 import type { ComputeGateResultOptions } from '@features/aria/computeGateResultCore';
 import { applyPsychometricModifierToAttempt } from '@features/psychometrics/applyPsychometricModifier';
+import { normalizeGateFailDetailForPersist } from '@features/psychometrics/gateFailDetailForPersist';
 import {
   computeSkipPenaltyGateComputation,
   individualPenaltyForSkipNumber,
@@ -227,6 +233,7 @@ import {
   setPlaybackMode,
   setRecordingMode,
   applyPlaybackBridgeBeforeTtsIfIos,
+  prepareInterviewTtsPlayback,
   refreshAudioSessionAfterRouteChange,
   setRecordingPlaybackTransitionTelemetryHook,
 } from '@features/aria/utils/audioModeHelpers';
@@ -441,6 +448,9 @@ import {
   scheduleWebMicPreInitRefreshAfterTtsCompletes,
   refreshWebMicPreInitIfStaleAfterLateStartWindow,
   finalizeInterviewMicAmbientOnTtsEnd,
+  rearmWebMicPreInitAfterRecordingStop,
+  getLastPreInitTriggerDuring,
+  samplePreInitInputMeterNormalized,
   type PreInitTriggerDuring,
 } from '@features/aria/utils/webInterviewMicPreInit';
 import {
@@ -581,6 +591,7 @@ import {
   moment5ConflictValidityIsLow,
   moment5PersonalNarrativeHasConcreteAnchor,
   moment5TranscriptHasConcreteAnchor,
+  moment5UserOrTranscriptHasConcreteAnchor,
   moment5UserDeclinesConcreteReask,
   buildMoment5ConfusionRepeatReplayAfterPriorAnswer,
   combineMoment5UserTurnText,
@@ -1165,7 +1176,7 @@ function getWhisperInfraExhaustedUserMessage(_args: {
   failureReason: string;
 }): string {
   return (
-    "Speech recognition isn't available right now—the service may be temporarily down. Please try again later."
+    "Our service is not available right now. Please try again later."
   );
 }
 
@@ -3694,6 +3705,19 @@ const FALSE_NAME_TRIGGERS = new Set([
   'hold',
   'just',
   'one',
+  'you',
+  'your',
+  'bless',
+  'god',
+  'that',
+  'thats',
+  'all',
+  'bye',
+  'cheers',
+  'what',
+  'which',
+  'who',
+  'how',
 ]);
 
 function capitalizeNameCandidate(value: string): string {
@@ -3748,16 +3772,23 @@ function extractInterviewNameFromResponse(text: string): InterviewNameExtraction
   }
 
   if (parts.length > 2) {
-    parts = extractionMethod === 'sentence_stripped' ? parts.slice(0, 1) : parts.slice(-1);
+    if (extractionMethod === 'sentence_stripped') {
+      parts = parts.slice(0, 1);
+    } else {
+      parts = [];
+    }
     extractionMethod = 'uncertain';
   }
 
   const extractedName = parts.map(capitalizeNameCandidate).join(' ').trim();
   const triggerKey = extractedName.toLowerCase().replace(/[^a-z]/g, '');
+  const isFalseNameTrigger =
+    FALSE_NAME_TRIGGERS.has(triggerKey) ||
+    parts.some((p) => FALSE_NAME_TRIGGERS.has(p.toLowerCase().replace(/[^a-z]/g, '')));
   return {
     extractedName,
     extractionMethod,
-    isFalseNameTrigger: FALSE_NAME_TRIGGERS.has(triggerKey),
+    isFalseNameTrigger,
   };
 }
 
@@ -5045,6 +5076,12 @@ function recordingDelayMsFromRef(
   return p.recordingInitializedAtMs - p.modeCompleteAtMs;
 }
 
+/** Name-entry: only discard TTS-contaminated pre-init; skip rearm when mic was already re-armed after last stop. */
+function webMicPreInitNeedsRefreshForNameEntry(): boolean {
+  const trigger = getLastPreInitTriggerDuring();
+  return trigger === 'greeting' || trigger === 'tts_playback';
+}
+
 export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigation, route }) => {
   const { user, signOut } = useAuth();
   const userId = (route.params as { userId?: string } | undefined)?.userId ?? user?.id ?? '';
@@ -5080,6 +5117,11 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
   const [voiceState, setVoiceState] = useState<VoiceState>('idle');
   const voiceStateRef = useRef<VoiceState>(voiceState);
   voiceStateRef.current = voiceState;
+  /** Web: volume meter only after MediaRecorder preroll completes (avoids "recording" UI with silent meter). */
+  const [micEnginePrimed, setMicEnginePrimed] = useState(false);
+  /** Web: pre-init stream meter while MediaRecorder is arming after tap. */
+  const [preInitMeterLevel, setPreInitMeterLevel] = useState(0);
+  const webMicArmInFlightRef = useRef(false);
   /** Gentle idle hint when TTS finished long ago and user has not tapped record yet (visual only). */
   const [lateStartIdleCueVisible, setLateStartIdleCueVisible] = useState(false);
   /** Pre-interview (`intro`) before `startInterview`; `starting_interview` is only for mic-retry / legacy auto-start paths. */
@@ -5476,6 +5518,8 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
   const recordingJustFinishedBeforeNextTtsRef = useRef(false);
   /** Native expo-av peak metering (dBFS) for the last completed recording — used before Whisper retry messaging. */
   const recordingPeakMeteringRef = useRef<number | null>(null);
+  /** Set from decoded buffer VAD scan before Whisper — gates empty-transcript retries. */
+  const lastRecordingVadSpeechDetectedRef = useRef<boolean | null>(null);
   /** Populated before `transcribeSafe` for Whisper session_logs (duration / size). */
   const transcribeBufferMetaRef = useRef<{ audio_duration_ms: number; buffer_size_bytes: number } | null>(null);
   /** Web Whisper path: last analyzed recording length for `response_timings` when expo `timingRef` is unused. */
@@ -7362,6 +7406,9 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
         if (!prefetchedSeg2 && SCENARIO_SPLIT_INTER_SEGMENT_GAP_MS > 0) {
           await new Promise<void>((r) => setTimeout(r, SCENARIO_SPLIT_INTER_SEGMENT_GAP_MS));
         }
+        const priorRecSeg2 = recordingJustFinishedBeforeNextTtsRef.current;
+        recordingJustFinishedBeforeNextTtsRef.current = false;
+        await prepareInterviewTtsPlayback('speak:scenario_split_seg2', { afterRecording: priorRecSeg2 });
         await speakWithElevenLabs(split.seg2, undefined, {
           onPlaybackStarted: firePlaybackStarted,
           telemetry: { source: telemetrySource },
@@ -7595,6 +7642,14 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
         text = dedupedRepairStripped;
       }
 
+      if (interviewSpeechRole === 'assistant_response' && !silent) {
+        const interviewNameForTts = resolvePlausibleInterviewFirstName(interviewNameRef.current) ?? '';
+        text = dedupeAdjacentBoundaryValidationsBeforeParticipantName(
+          sanitizeAssistantInterviewerCharacterNames(text),
+          interviewNameForTts,
+        );
+      }
+
       const textForAudio = text;
 
       // `skipLastQuestionRef` must not disable dedup — retry prompts reuse the same copy and can fire twice per turn.
@@ -7774,6 +7829,9 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
               platform: r.platform,
             });
             scheduleWebMicPreInitRefreshAfterTtsCompletes();
+            if (Platform.OS === 'web' && !interviewNameRef.current) {
+              void rearmWebMicPreInitAfterRecordingStop();
+            }
           }
         }
         return;
@@ -7898,9 +7956,7 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
       }
       const priorRec = recordingJustFinishedBeforeNextTtsRef.current;
       recordingJustFinishedBeforeNextTtsRef.current = false;
-      if (priorRec) {
-        await applyPlaybackBridgeBeforeTtsIfIos('speakTextSafe');
-      }
+      await prepareInterviewTtsPlayback('speakTextSafe', { afterRecording: priorRec });
       const shouldYieldInFlightSpeakToTabRestore = () =>
         Platform.OS === 'web' &&
         (webTtsTabInterruptPendingReplayRef.current ||
@@ -8112,6 +8168,42 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
                   ratio_actual_to_expected: ratioActualToExpected,
                   reason: 'avoid_replaying_contempt_probe_on_duration_estimation_overshoot',
                   s1ContemptFixVersion: 16,
+                });
+              }
+              break;
+            }
+            const isPreambleBriefingTts =
+              telemetrySource === 'turn' &&
+              interviewSpeechRole === 'assistant_response' &&
+              currentInterviewMomentRef.current === 1 &&
+              isInterviewPreambleBriefingMoment(stripControlTokens(text).trim());
+            if (attemptIx === 0 && isPreambleBriefingTts) {
+              verificationOk = true;
+              acceptedStableTruncationAsEstimationError = wouldBePremature;
+              if (wouldBePremature) {
+                void remoteLog('[PREAMBLE_BRIEFING_TTS_RETRY_SUPPRESSED]', {
+                  interviewSessionId: interviewSessionIdRef.current,
+                  actualTtsMs,
+                  expectedMs: wall.expectedMs,
+                  ratio_actual_to_expected: ratioActualToExpected,
+                  reason: 'avoid_replaying_intro_briefing_on_duration_estimation_overshoot',
+                });
+              }
+              break;
+            }
+            const isRecordingRetryLineTts =
+              skipLastQuestionRef &&
+              isInterviewRecordingRetryLine(stripControlTokens(text).trim());
+            if (attemptIx === 0 && isRecordingRetryLineTts) {
+              verificationOk = true;
+              acceptedStableTruncationAsEstimationError = wouldBePremature;
+              if (wouldBePremature) {
+                void remoteLog('[RECORDING_RETRY_TTS_RETRY_SUPPRESSED]', {
+                  interviewSessionId: interviewSessionIdRef.current,
+                  actualTtsMs,
+                  expectedMs: wall.expectedMs,
+                  ratio_actual_to_expected: ratioActualToExpected,
+                  reason: 'avoid_replaying_mic_retry_prompt_on_duration_estimation_overshoot',
                 });
               }
               break;
@@ -8502,6 +8594,9 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
             platform: r.platform,
           });
           scheduleWebMicPreInitRefreshAfterTtsCompletes();
+          if (Platform.OS === 'web' && !interviewNameRef.current) {
+            void rearmWebMicPreInitAfterRecordingStop();
+          }
         }
       }
     },
@@ -8815,28 +8910,44 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
         skipLastQuestionRef?: boolean;
       },
     ): Promise<void> => {
-      const norm = normalizeTtsTextForConsecutiveDedup(message);
       const now = Date.now();
-      if (
+      let speakMessage = message;
+      let norm = normalizeTtsTextForConsecutiveDedup(speakMessage);
+      const recentDuplicateRetry =
         norm.length > 0 &&
         lastRecordingRetryDeliveredNormRef.current === norm &&
-        now - lastRecordingRetryDeliveredAtMsRef.current < 4000
-      ) {
-        setVoiceState('idle');
-        return;
+        now - lastRecordingRetryDeliveredAtMsRef.current < 4000;
+      if (recentDuplicateRetry) {
+        const alternate = pickAlternateInterviewRecordingRetryLine(speakMessage);
+        if (alternate) {
+          speakMessage = alternate;
+          norm = normalizeTtsTextForConsecutiveDedup(alternate);
+        }
       }
+
+      const prevSuccessfulNorm = lastSuccessfulTtsTextNormalizedRef.current;
+      if (norm.length > 0 && prevSuccessfulNorm === norm) {
+        const alternate = pickAlternateInterviewRecordingRetryLine(speakMessage);
+        const alternateNorm = alternate ? normalizeTtsTextForConsecutiveDedup(alternate) : null;
+        if (alternate && alternateNorm !== prevSuccessfulNorm) {
+          speakMessage = alternate;
+          norm = alternateNorm ?? norm;
+        }
+      }
+
       lastRecordingRetryDeliveredNormRef.current = norm;
       lastRecordingRetryDeliveredAtMsRef.current = now;
 
       let duplicateInTranscript = false;
       commitInterviewMessages((prev) => {
-        if (!assistantTurnHasPersistableContent(message)) {
+        if (!assistantTurnHasPersistableContent(speakMessage)) {
           return prev;
         }
         const last = prev[prev.length - 1];
+        const speakNorm = normalizeTtsTextForConsecutiveDedup(speakMessage);
         if (
           last?.role === 'assistant' &&
-          normalizeTtsTextForConsecutiveDedup(String(last.content ?? '')) === norm
+          normalizeTtsTextForConsecutiveDedup(String(last.content ?? '')) === speakNorm
         ) {
           duplicateInTranscript = true;
           return prev;
@@ -8847,19 +8958,16 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
           currentScenarioRef.current === 3
             ? currentScenarioRef.current
             : 1;
-        return appendAssistantTurn(prev, message, {
+        return appendAssistantTurn(prev, speakMessage, {
           scenarioNumber: scenarioNum,
           interviewMoment: currentInterviewMomentRef.current,
         });
       });
-      if (duplicateInTranscript) {
-        setVoiceState('idle');
-        return;
-      }
       setVoiceState('speaking');
-      await speakTextSafe(message, {
+      await speakTextSafe(speakMessage, {
         telemetrySource: 'turn',
         skipLastQuestionRef: true,
+        allowDuplicateConsecutiveTts: true,
         ...speakOpts,
       }).catch(() => {});
       setVoiceState('idle');
@@ -9869,7 +9977,7 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
       lastQuestionText: lastQuestionTextRef.current,
       priorUserUtteranceCount: priorUserUtteranceCountForMeta,
       isInterviewAppRoute,
-      hasProfileFirstName: !!interviewNameRef.current,
+      hasProfileFirstName: !!resolvePlausibleInterviewFirstName(interviewNameRef.current),
       suppressMetaClassificationPostMetaAckAwaitingSubstantive,
       spokenWordCount: wcForMetaExempt,
     });
@@ -10424,19 +10532,23 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
       (interviewNameReaskPendingRef.current || isNamePromptInterviewMoment(lastQuestionTextRef.current));
     if (isNameEntryTurn) {
       const acceptingAfterReask = interviewNameReaskPendingRef.current;
-      const extraction = extractInterviewNameFromResponse(trimmed);
+      const namePromptContext = lastQuestionTextRef.current;
+      const whisperCorrectedTrimmed = applyInterviewNameWhisperCorrection(trimmed);
+      const extraction = extractInterviewNameFromResponse(whisperCorrectedTrimmed);
+      const whisperEchoOfPrompt = isInterviewNameWhisperEcho(trimmed, namePromptContext);
       const hasPlausibleExtractedName =
         !!extraction.extractedName &&
         !extraction.isFalseNameTrigger &&
+        !whisperEchoOfPrompt &&
         isPlausibleInterviewName(extraction.extractedName);
 
       if (
         isLikelyAmbientSpeech(trimmed, 'what can I call you') &&
-        !acceptingAfterReask &&
         !hasPlausibleExtractedName
       ) {
         console.log('[NameExtraction] likely ambient speech detected:', trimmed, '— prompting again');
         if (!interviewNameReaskUsedRef.current) {
+          interviewNameRef.current = null;
           interviewNameReaskPendingRef.current = true;
           interviewNameReaskUsedRef.current = true;
           const momentForNameReask = currentInterviewMomentRef.current;
@@ -10458,9 +10570,11 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
       }
       void remoteLog('interview_name_extracted', {
         raw_response: trimmed,
+        whisper_corrected_response: whisperCorrectedTrimmed !== trimmed ? whisperCorrectedTrimmed : null,
         extracted_name: extraction.extractedName || null,
         extraction_method: extraction.extractionMethod,
         false_name_trigger: extraction.isFalseNameTrigger,
+        whisper_echo_of_prompt: whisperEchoOfPrompt,
         accepting_after_reask: acceptingAfterReask,
         plausible_name: isPlausibleInterviewName(extraction.extractedName),
       });
@@ -10479,15 +10593,25 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
         });
       }
 
+      const transcriptLooksLikeName = looksLikeName(trimmed);
       const implausibleName =
+        whisperEchoOfPrompt ||
         !extraction.extractedName ||
         extraction.isFalseNameTrigger ||
-        !isPlausibleInterviewName(extraction.extractedName);
+        !isPlausibleInterviewName(extraction.extractedName) ||
+        (extraction.extractionMethod === 'uncertain' && !transcriptLooksLikeName);
 
-      if (implausibleName && !acceptingAfterReask && !interviewNameReaskUsedRef.current) {
-        console.warn('[NameExtraction] implausible name extracted:', extraction.extractedName, '— re-asking');
+      if (implausibleName) {
+        console.warn(
+          '[NameExtraction] implausible name extracted:',
+          extraction.extractedName,
+          acceptingAfterReask ? '— re-asking after prior re-ask' : '— re-asking',
+        );
+        interviewNameRef.current = null;
         interviewNameReaskPendingRef.current = true;
-        interviewNameReaskUsedRef.current = true;
+        if (!interviewNameReaskUsedRef.current) {
+          interviewNameReaskUsedRef.current = true;
+        }
         const momentForNameReask = currentInterviewMomentRef.current;
         const scenarioForNameReask =
           ((currentScenarioRef.current as number | undefined) ?? getScenarioNumberForNewMessage(messages, 'user')) || 1;
@@ -10497,7 +10621,9 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
           scenarioNumber: scenarioForNameReask as 1 | 2 | 3,
           interviewMoment: momentForNameReask,
         };
-        const reaskText = 'Sorry, I want to make sure I got your name right — what should I call you?';
+        const reaskText = whisperEchoOfPrompt || acceptingAfterReask
+          ? INTERVIEW_NAME_REPEAT_REASK_LINE
+          : 'Sorry, I want to make sure I got your name right — what should I call you?';
         setMessages([...messages, userMsgNameRetry]);
         setCurrentTranscript('');
         transcriptAtReleaseRef.current = '';
@@ -10506,23 +10632,75 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
         return;
       }
 
+      const shortNameReplyCandidate =
+        looksLikeName(trimmed) && trimmed.split(/\s+/).filter(Boolean).length <= 2
+          ? resolvePlausibleInterviewFirstName(
+              capitalizeNameCandidate(stripNameTokenPunctuationForValidation(trimmed.split(/\s+/).filter(Boolean)[0] ?? ''))
+            )
+          : null;
       const extractedName = resolvePlausibleInterviewFirstName(
-        extraction.extractedName || capitalizeNameCandidate(trimmed.split(/\s+/).filter(Boolean)[0] ?? '')
+        extraction.extractedName || shortNameReplyCandidate
       );
-      if (!extractedName) {
+      const nameTurnConfidence = lastVoiceTurnConfidenceRef.current;
+      const whisperNameCorrected = whisperCorrectedTrimmed !== trimmed;
+      const directPlausibleExtractedName =
+        extraction.extractionMethod === 'direct' &&
+        !!extraction.extractedName &&
+        isPlausibleInterviewName(extraction.extractedName);
+      /** After a prior re-ask, plausibility is enough — don't loop on borderline Whisper confidence (e.g. "Mads" ~0.39). */
+      const lowConfidenceSingleWordName =
+        !acceptingAfterReask &&
+        !whisperNameCorrected &&
+        !directPlausibleExtractedName &&
+        !!extractedName &&
+        trimmed.split(/\s+/).filter(Boolean).length === 1 &&
+        nameTurnConfidence != null &&
+        nameTurnConfidence < 0.45;
+      if (!extractedName || lowConfidenceSingleWordName) {
         interviewNameRef.current = null;
-        interviewNameReaskPendingRef.current = false;
+        interviewNameReaskPendingRef.current = true;
+        await deliverRecordingRetryLine(
+          acceptingAfterReask ? INTERVIEW_NAME_REPEAT_REASK_LINE : INTERVIEW_NAME_AMBIENT_REASK_LINE,
+        );
+        setIsWaiting(false);
+        return;
       } else {
         console.log('[NameExtraction] name confirmed:', extractedName);
-      try {
-        interviewNameRef.current = extractedName;
-        interviewNameReaskPendingRef.current = false;
+        try {
+          interviewNameRef.current = extractedName;
+          interviewNameReaskPendingRef.current = false;
           await updateUserInterviewApplication(userId, { name: extractedName });
           queryClient.invalidateQueries({ queryKey: ['profile', userId] });
           participantFirstNameForSpoken = extractedName;
-      } catch (_) {
-        // ignore
+        } catch (_) {
+          // ignore
         }
+        const momentForNameConfirm = currentInterviewMomentRef.current;
+        const scenarioForNameConfirm =
+          ((currentScenarioRef.current as number | undefined) ?? getScenarioNumberForNewMessage(messages, 'user')) || 1;
+        const userMsgNameConfirm: MessageWithScenario = {
+          role: 'user',
+          content: trimmed,
+          scenarioNumber: scenarioForNameConfirm as 1 | 2 | 3,
+          interviewMoment: momentForNameConfirm,
+        };
+        const briefingText = buildFallbackIntroBriefingText(extractedName);
+        const briefingMsg: MessageWithScenario = {
+          role: 'assistant',
+          content: briefingText,
+          scenarioNumber: 1,
+          interviewMoment: 1,
+        };
+        const messagesAfterName = [...messages, userMsgNameConfirm, briefingMsg];
+        setMessages(messagesAfterName);
+        currentMessagesRef.current = messagesAfterName;
+        setCurrentTranscript('');
+        transcriptAtReleaseRef.current = '';
+        lastQuestionTextRef.current = briefingText;
+        await speakTextSafe(briefingText, ASSISTANT_INTERVIEW_SPEECH);
+        setVoiceState('idle');
+        setIsWaiting(false);
+        return;
       }
     }
 
@@ -10916,17 +11094,23 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
         parallelStreamingTtsRef.current.accumulatedFullText,
         ...messagesToUse
           .filter((m) => m.role === 'assistant')
-          .slice(-2)
+          .slice(-4)
           .map((m) => m.content ?? ''),
       ];
       const answeringReadiness = userIsAnsweringInterviewReadinessPrompt(readinessCueTexts);
+      const hasPreambleBriefingInTranscript = messagesToUse.some(
+        (m) => m.role === 'assistant' && isInterviewPreambleBriefingMoment(m.content ?? ''),
+      );
       const preScenarioOnly =
-        !messagesToUse.some(
-          (m) =>
-            m.role === 'assistant' &&
-            (isInterviewPreambleBriefingMoment(m.content ?? '') ||
-              (m.content ?? '').includes('Emma and Ryan')),
-        ) && !!interviewNameRef.current;
+        !!interviewNameRef.current &&
+        !transcriptHasScenario1VignetteAssistant(messagesToUse) &&
+        (hasPreambleBriefingInTranscript ||
+          !messagesToUse.some(
+            (m) =>
+              m.role === 'assistant' &&
+              ((m.content ?? '').includes('Emma and Ryan') ||
+                isInterviewPreambleBriefingMoment(m.content ?? '')),
+          ));
       if (answeringReadiness || preScenarioOnly) {
         const briefingCandidate =
           parallelStreamingTtsRef.current.accumulatedFullText.trim() ||
@@ -11774,6 +11958,10 @@ The participant **confirmed** skipping after the skip confirmation prompt. In **
     const moment5AccountabilityEval = evaluateMoment5AccountabilityProbe(trimmed);
     const moment5CombinedUserText = combineMoment5UserTurnText(messagesToUse);
     const moment5NarrativeConcrete = moment5TranscriptHasConcreteAnchor(messagesToUse);
+    const moment5NarrativeConcreteIncludingCurrent = moment5UserOrTranscriptHasConcreteAnchor(
+      trimmed,
+      messagesToUse,
+    );
     const moment5AnsweringAfterSpecificityRedirect =
       looksLikeMoment5SpecificityRedirectPrompt(lastInterviewerContent);
     const moment5AnsweringAfterConflictValidityClarification =
@@ -11789,10 +11977,17 @@ The participant **confirmed** skipping after the skip confirmation prompt. In **
     const moment5ForcedAbstractFollowupAccountabilityProbe =
       moment5AnsweringAfterSpecificityRedirect &&
       moment5SpecificityRedirectIssuedRef.current &&
-      !moment5NarrativeConcrete &&
+      !moment5NarrativeConcreteIncludingCurrent &&
       !moment5UserDeclinesConcreteReask(trimmed) &&
       moment5ResponseIsAbstract(trimmed) &&
       moment5AccountabilityEval.reason !== 'decline_or_vague_evade';
+
+    /** User pushback after a mistaken generic-approach redirect — transcript already has a concrete episode. */
+    const moment5PushbackAlreadyGaveSpecificExample =
+      moment5UserDeclinesConcreteReask(trimmed) &&
+      moment5NarrativeConcreteIncludingCurrent &&
+      (moment5AnsweringAfterSpecificityRedirect ||
+        looksLikeMoment5AccountabilityProbeAssistantPrompt(lastInterviewerContent));
 
     if (currentInterviewMomentRef.current === 5 && moment5QuestionDeliveredRef.current) {
       void remoteLog('[M5_ACCOUNTABILITY_SELF_REFERENCE_EVAL]', {
@@ -11943,9 +12138,28 @@ The participant **confirmed** skipping after the skip confirmation prompt. In **
     );
 
     /** Thin / abstract first answers: redirect before API — do not require accountability `shouldProbe`. */
+    if (moment5AccountabilityProbeCandidate && moment5PushbackAlreadyGaveSpecificExample) {
+      moment5SpecificityRedirectIssuedRef.current = true;
+      if (moment5AnswerIncludesResolutionOutcome(moment5CombinedUserText || trimmed)) {
+        moment5ResolutionFollowUpIssuedRef.current = true;
+      }
+      moment5ClientScoringMetaRef.current = {
+        ...(moment5ClientScoringMetaRef.current ?? {}),
+        specificityRedirectIssued: true,
+        accountabilityProbeFired: moment5ClientScoringMetaRef.current?.accountabilityProbeFired ?? false,
+      };
+      void remoteLog('[M5_SPECIFICITY_PUSHBACK_ACK]', {
+        interviewSessionId: interviewSessionIdRef.current,
+        wordCount: countInterviewWords(trimmed),
+        preview: trimmed.slice(0, 200),
+        resolution_already_covered: moment5AnswerIncludesResolutionOutcome(moment5CombinedUserText || trimmed),
+      });
+    }
+
     if (
       moment5AccountabilityProbeCandidate &&
       !moment5ConfirmedLowConflictValidity &&
+      !moment5PushbackAlreadyGaveSpecificExample &&
       shouldInjectMoment5SpecificityRedirect({
         userText: trimmed,
         narrativeConcrete: moment5NarrativeConcrete,
@@ -11983,10 +12197,14 @@ The participant **confirmed** skipping after the skip confirmation prompt. In **
     if (
       moment5AccountabilityProbeCandidate &&
       !moment5ConfirmedLowConflictValidity &&
+      !moment5PushbackAlreadyGaveSpecificExample &&
       !moment5ResolutionFollowUpIssuedRef.current &&
       !resolutionFollowUpAlreadyInTranscript &&
       !looksLikeMoment5ResolutionFollowUpPrompt(lastInterviewerContent) &&
       !moment5AnswerIncludesResolutionOutcome(moment5CombinedUserText || trimmed) &&
+      (moment5NarrativeConcreteIncludingCurrent ||
+        moment5SpecificityRedirectIssuedRef.current ||
+        specificityRedirectAlreadyInTranscript) &&
       (isMoment5AssistantAnchor(lastInterviewerContent) ||
         transcriptAssistantContainsMoment5PrimaryConflictQuestion(lastInterviewerContent) ||
         looksLikeMoment5SpecificityRedirectPrompt(lastInterviewerContent) ||
@@ -12012,11 +12230,12 @@ The participant **confirmed** skipping after the skip confirmation prompt. In **
 
     if (
       moment5AccountabilityProbeCandidate &&
+      !moment5PushbackAlreadyGaveSpecificExample &&
       (moment5AccountabilityEval.shouldProbe || moment5ForcedAbstractFollowupAccountabilityProbe) &&
       !moment5ConfirmedLowConflictValidity
     ) {
       if (
-        !moment5NarrativeConcrete &&
+        !moment5NarrativeConcreteIncludingCurrent &&
         !moment5AnsweringAfterSpecificityRedirect &&
         !moment5SpecificityRedirectIssuedRef.current &&
         !specificityRedirectAlreadyInTranscript
@@ -12061,7 +12280,7 @@ The participant **confirmed** skipping after the skip confirmation prompt. In **
       const moment5AnchoredAfterSpecificityRedirect =
         moment5AnsweringAfterSpecificityRedirect &&
         moment5SpecificityRedirectIssuedRef.current &&
-        (moment5NarrativeConcrete ||
+        (moment5NarrativeConcreteIncludingCurrent ||
           !moment5ResponseIsAbstract(moment5CombinedUserText || trimmed) ||
           moment5UserDeclinesConcreteReask(trimmed));
 
@@ -12735,6 +12954,11 @@ The participant **confirmed** skipping after the skip confirmation prompt. In **
               });
             }
             await awaitTtsScreenReadyGate('parallel_streaming_sentence');
+            const priorRecParallel = recordingJustFinishedBeforeNextTtsRef.current;
+            recordingJustFinishedBeforeNextTtsRef.current = false;
+            await prepareInterviewTtsPlayback('parallel_streaming_sentence', {
+              afterRecording: priorRecParallel,
+            });
             webTtsUtteranceInFlightRef.current = spokenForTts;
             webTtsUtteranceInFlightOptionsRef.current = {
               interviewSpeechRole: 'assistant_response',
@@ -13081,10 +13305,12 @@ The participant **confirmed** skipping after the skip confirmation prompt. In **
           }
           return;
         }
-        if (currentInterviewMomentRef.current === 5) {
-          const closingThanks = isInterviewClosingThanksFragment(spoken);
-          const closingReflective = isInterviewClosingReflectiveAckFragment(spoken);
-          const closingFull = looksLikeInterviewClosingAssistantMessage(spoken);
+        if (
+          currentInterviewMomentRef.current === 5 &&
+          looksLikeInterviewClosingAssistantMessage(spoken)
+        ) {
+          interviewClosingSpokenThisStream = true;
+          textToParallelStream.closingSpoken = true;
         }
         const elongatingBlockReason = elongatingProbePlaybackBlockReason({
           spokenSentence: spoken,
@@ -13290,7 +13516,14 @@ The participant **confirmed** skipping after the skip confirmation prompt. In **
           if (done) break;
         }
         if (sentenceBuffer.trim() && !streamContemptProbeMuteActive) {
-          maybeQueueSentenceForTts(sentenceBuffer);
+          const tail = sentenceBuffer.trim();
+          if (moment5StickyCloseBufferAll) {
+            moment5ClosingStreamBuffer = moment5ClosingStreamBuffer
+              ? `${moment5ClosingStreamBuffer} ${tail}`.trim()
+              : tail;
+          } else {
+            maybeQueueSentenceForTts(sentenceBuffer);
+          }
           sentenceBuffer = '';
         }
         if (streamContemptProbeMuteActive) {
@@ -13364,6 +13597,17 @@ The participant **confirmed** skipping after the skip confirmation prompt. In **
                 textToParallelStream.closingSpoken = true;
                 textToParallelStream.spokenStarted = true;
               }
+            } else if (
+              closingFlushLooksFinal &&
+              !tryAcquireInterviewClosingSpeak(closingTtsSessionKey)
+            ) {
+              void remoteLog('[M5_CLOSING_FLUSH_SUPPRESSED_IN_FLIGHT]', {
+                interviewSessionId: interviewSessionIdRef.current,
+                preview: dedupedClosing.slice(0, 220),
+              });
+              interviewClosingSpokenThisStream = true;
+              textToParallelStream.closingSpoken = true;
+              textToParallelStream.spokenStarted = true;
             } else {
               if (closingFlushLooksFinal) {
                 textToParallelStream.spokenStarted = true;
@@ -15557,6 +15801,13 @@ The participant **confirmed** skipping after the skip confirmation prompt. In **
           preview: closingCandidate.slice(0, 260),
         });
       }
+      const parallelStreamClosingAlreadyAudible =
+        parallelStreamingPlaybackUsed &&
+        (textToParallelStream.closingSpoken ||
+          streamSpokeClosingThankYou ||
+          streamClosingAlreadyDelivered);
+      const effectiveSkipClosingSpeak =
+        skipClosingSpeak || parallelStreamClosingAlreadyAudible;
       const mustRunEmotionTransitionPath = emotionNaturalForward || emotionNaturalS3ToM4;
       if (pendingBundledHandoff) {
         if (!parallelStreamingPlaybackUsed && assistantContentToPersist.trim()) {
@@ -15565,25 +15816,35 @@ The participant **confirmed** skipping after the skip confirmation prompt. In **
         setVoiceState('idle');
         return;
       }
-      if (!skipClosingSpeak || mustRunEmotionTransitionPath) {
+      if (!effectiveSkipClosingSpeak || mustRunEmotionTransitionPath) {
         if (emotionNaturalForward) {
           await speakTransitionWithOptionalEmotionModal(
             emotionCompletedScenario ?? priorScenarioNum,
           );
         } else if (emotionNaturalS3ToM4) {
           await speakTransitionWithOptionalEmotionModal(3);
-        } else if (!skipClosingSpeak) {
+        } else if (!effectiveSkipClosingSpeak) {
           if (
             shouldFailsafeComplete &&
             closingLooksFinal &&
             parallelStreamingPlaybackUsed &&
-            !streamClosingAlreadyDelivered
+            !streamClosingAlreadyDelivered &&
+            !textToParallelStream.closingSpoken &&
+            !streamSpokeClosingThankYou
           ) {
             const dedupedClosing = stripDuplicateInterviewClosingSentencesWithinDraft(closingCandidate);
             if (dedupedClosing.trim()) {
               await speakTextSafe(dedupedClosing, ASSISTANT_INTERVIEW_SPEECH);
               textToParallelStream.closingSpoken = true;
             }
+          } else if (
+            skipDuplicatePreambleAppend &&
+            isInterviewPreambleBriefingMoment(displayText)
+          ) {
+            void remoteLog('[PREAMBLE_BRIEFING_TTS_SKIPPED_DUPLICATE]', {
+              interviewSessionId: interviewSessionIdRef.current,
+              preview: displayText.slice(0, 220),
+            });
           } else {
             await speakAssistantTurn(displayText, ASSISTANT_INTERVIEW_SPEECH);
           }
@@ -15982,6 +16243,7 @@ The participant **confirmed** skipping after the skip confirmation prompt. In **
                 const likelySpeech = await hasLikelySpeechAfterRecording({
                   peakMeteringDb: recordingPeakMeteringRef.current,
                   audioBlob,
+                  vadSpeechDetected: lastRecordingVadSpeechDetectedRef.current,
                 });
                 if (likelySpeech) {
                   throw new Error('empty_transcription_retryable');
@@ -16016,7 +16278,16 @@ The participant **confirmed** skipping after the skip confirmation prompt. In **
             },
           });
         } catch (e) {
-          if (!whisperShouldRetry(e)) {
+          const lastHttpStatus =
+            typeof (e as { status?: number }).status === 'number'
+              ? (e as { status: number }).status
+              : null;
+          const whisperInfraFailure =
+            lastHttpStatus === 401 ||
+            lastHttpStatus === 403 ||
+            lastHttpStatus === 500 ||
+            whisperShouldRetry(e);
+          if (!whisperInfraFailure) {
             throw e;
           }
           if (userId) {
@@ -16029,14 +16300,19 @@ The participant **confirmed** skipping after the skip confirmation prompt. In **
               eventData: {
                 moment_number: currentInterviewMomentRef.current,
                 failure_reason: whisperFailureReason(e),
+                http_status: lastHttpStatus,
+                whisper_proxy_auth_failure: lastHttpStatus === 401 || lastHttpStatus === 403,
               },
               platform: r.platform,
             });
           }
-          const lastHttpStatus =
-            typeof (e as { status?: number }).status === 'number'
-              ? (e as { status: number }).status
-              : null;
+          if (lastHttpStatus === 401 || lastHttpStatus === 403) {
+            void remoteLog('[TRANSCRIBE] proxy_auth_failure', {
+              runId: 'audio-route-debug-10',
+              status: lastHttpStatus,
+              endpointUsed: OPENAI_WHISPER_PROXY_URL ? 'proxy' : 'openai',
+            });
+          }
           return {
             kind: 'whisper_infra_exhausted' as const,
             lastHttpStatus,
@@ -16177,7 +16453,9 @@ The participant **confirmed** skipping after the skip confirmation prompt. In **
    * adaptive threshold can hit the -5 dB cap while speech peaks around -9 dB (session logs 2026-04-18).
    */
   const VAD_GATE_BYPASS_REASON_NO_SAMPLE_EXCEEDED = 'no_sample_exceeded_vad_threshold_in_decode' as const;
-  const VAD_BYPASS_WHISPER_MIN_PEAK_ABOVE_AMBIENT_DB = 6;
+  const VAD_BYPASS_WHISPER_MIN_PEAK_ABOVE_AMBIENT_DB = 5;
+  /** When speech starts late in a min-duration clip, Whisper often returns empty — re-prompt instead. */
+  const MIN_SPEECH_AFTER_VAD_FOR_WHISPER_MS = 450;
 
   const SILENT_BUFFER_RETAKE_PROMPT =
     "I didn't catch any speech on that try. Tap the mic when you're ready and say that again.";
@@ -16196,6 +16474,7 @@ The participant **confirmed** skipping after the skip confirmation prompt. In **
     onRecordingEnginePrimed: (info) => {
       recordingDelayMeasurementRef.current = info;
       setRecordingSessionActive(true);
+      setMicEnginePrimed(true);
     },
     onBeforeWebRecorderStop:
       Platform.OS === 'web'
@@ -16225,7 +16504,9 @@ The participant **confirmed** skipping after the skip confirmation prompt. In **
         preAuthorizeAudioElementOnMicTapGesture();
       }
       recordingPeakMeteringRef.current = meta?.peakMeteringDb ?? null;
+      lastRecordingVadSpeechDetectedRef.current = null;
       recordingJustFinishedBeforeNextTtsRef.current = true;
+      setMicEnginePrimed(false);
       setVoiceState('processing');
       const analysis = await analyzeRecordingBuffer(blob, meta?.peakMeteringDb ?? null);
       const webTiming = meta?.webRecordingTiming;
@@ -16440,6 +16721,46 @@ The participant **confirmed** skipping after the skip confirmation prompt. In **
         await deliverRecordingRetryLine(SILENT_BUFFER_RETAKE_PROMPT);
         return;
       }
+      lastRecordingVadSpeechDetectedRef.current = analysis.firstSpeechOffsetMs != null;
+      const speechAfterVadMs =
+        analysis.firstSpeechOffsetMs != null && analysis.firstSpeechOffsetMs >= 0
+          ? Math.max(0, analysis.audio_duration_ms - analysis.firstSpeechOffsetMs)
+          : null;
+      const nameTurnPending =
+        !interviewNameRef.current &&
+        (interviewNameReaskPendingRef.current ||
+          isNamePromptInterviewMoment(lastQuestionTextRef.current));
+      const vadClipTooShortForWhisper =
+        !nameTurnPending &&
+        !blockWhisperForVadBypassNoSpeech &&
+        analysis.has_non_zero_audio &&
+        analysis.firstSpeechOffsetMs != null &&
+        speechAfterVadMs != null &&
+        speechAfterVadMs < MIN_SPEECH_AFTER_VAD_FOR_WHISPER_MS;
+      if (vadClipTooShortForWhisper) {
+        if (userId) {
+          const r = getSessionLogRuntime();
+          markLastAudioSessionEventType('vad_clip_too_short_for_whisper');
+          writeAudioSessionLog({
+            userId,
+            attemptId: r.attemptId,
+            eventType: 'vad_clip_too_short_for_whisper',
+            eventData: {
+              audio_duration_ms: analysis.audio_duration_ms,
+              speech_after_vad_ms: speechAfterVadMs,
+              vad_gate_delay_ms: vadGateDelayMs,
+              moment_number: currentInterviewMomentRef.current,
+            },
+            platform: r.platform,
+          });
+        }
+        await deleteTurnAudioFile(nativeUri);
+        await deliverRecordingRetryLine(
+          nameTurnPending ? INTERVIEW_NAME_AMBIENT_REASK_LINE : SILENT_BUFFER_RETAKE_PROMPT
+        );
+        return;
+      }
+
       transcribeBufferMetaRef.current = {
         audio_duration_ms: analysis.audio_duration_ms,
         buffer_size_bytes: analysis.buffer_size_bytes,
@@ -16451,6 +16772,18 @@ The participant **confirmed** skipping after the skip confirmation prompt. In **
       }
       if ('kind' in transcribed && transcribed.kind === 'whisper_infra_exhausted') {
         await deleteTurnAudioFile(nativeUri);
+        const emptyTranscriptionLikelySpeech =
+          transcribed.failureReason === 'empty_transcription_retryable';
+        if (emptyTranscriptionLikelySpeech) {
+          const nameTurnPending =
+            !interviewNameRef.current &&
+            (interviewNameReaskPendingRef.current ||
+              isNamePromptInterviewMoment(lastQuestionTextRef.current));
+          await deliverRecordingRetryLine(
+            nameTurnPending ? INTERVIEW_NAME_AMBIENT_REASK_LINE : SILENT_BUFFER_RETAKE_PROMPT
+          );
+          return;
+        }
         const infraMsg = getWhisperInfraExhaustedUserMessage({
           lastHttpStatus: transcribed.lastHttpStatus,
           failureReason: transcribed.failureReason,
@@ -16499,7 +16832,7 @@ The participant **confirmed** skipping after the skip confirmation prompt. In **
         lastQuestionText: lastQuestionTextRef.current,
         priorUserUtteranceCount: priorUserUtteranceCountForWhisperGate,
         isInterviewAppRoute,
-        hasProfileFirstName: !!interviewNameRef.current,
+        hasProfileFirstName: !!resolvePlausibleInterviewFirstName(interviewNameRef.current),
         suppressMetaClassificationPostMetaAckAwaitingSubstantive: suppressMetaClassificationPostMetaAckAwaitingSubstantiveGate,
         spokenWordCount: wc,
       });
@@ -16891,29 +17224,50 @@ The participant **confirmed** skipping after the skip confirmation prompt. In **
     return () => sub.remove();
   }, [userId]);
 
+  useEffect(() => {
+    if (Platform.OS !== 'web' || !useMediaRecorderPath) {
+      setPreInitMeterLevel(0);
+      return;
+    }
+    if (voiceState !== 'recording' || audioRecorder.isRecording) {
+      setPreInitMeterLevel(0);
+      return;
+    }
+    let raf = 0;
+    const tick = () => {
+      setPreInitMeterLevel(samplePreInitInputMeterNormalized());
+      raf = requestAnimationFrame(tick);
+    };
+    raf = requestAnimationFrame(tick);
+    return () => cancelAnimationFrame(raf);
+  }, [voiceState, audioRecorder.isRecording, useMediaRecorderPath]);
+
   /**
-   * Web: stop interviewer TTS and wait until session + Web Audio surfaces are idle before opening the mic.
-   * Avoids capture/OS errors when output and input contend and avoids mis-attributing those as "interruption" retries.
+   * Web: stop interviewer TTS and briefly drain active playback surfaces before MediaRecorder.start.
+   * Does not block on a post-TTS tail — name-entry mic is re-armed after the prompt finishes speaking.
    */
   const waitUntilInterviewerQuiescentForWebMic = useCallback(async (): Promise<void> => {
-    if (Platform.OS !== 'web') return;
-    await stopElevenLabsPlayback();
-    const maxMs = 2000;
-    const t0 = Date.now();
-    while (Date.now() - t0 < maxMs) {
-      const rt = getSessionLogRuntime();
-      const voiceOk = voiceStateRef.current === 'idle';
-      const ttsIdle = !ttsLineInFlightRef.current && !rt.ttsPlaybackActive;
-      const surfacesClear = !isWebInterviewPlaybackSurfaceActive();
-      if (voiceOk && ttsIdle && surfacesClear) return;
-      await new Promise<void>((r) => setTimeout(r, 35));
-    }
-  }, [stopElevenLabsPlayback]);
+      if (Platform.OS !== 'web') return;
+      await stopElevenLabsPlayback();
+      const quiesceStartMs = Date.now();
+      const maxMs = 450;
+      while (Date.now() - quiesceStartMs < maxMs) {
+        const rt = getSessionLogRuntime();
+        const ttsIdle = !ttsLineInFlightRef.current && !rt.ttsPlaybackActive;
+        const surfacesClear = !isWebInterviewPlaybackSurfaceActive();
+        if (ttsIdle && surfacesClear) break;
+        await new Promise<void>((r) => setTimeout(r, 25));
+      }
+    },
+    [stopElevenLabsPlayback],
+  );
 
   const startRecordingAfterPendingTts = useCallback(async () => {
     if (Platform.OS !== 'web') return;
     if (voiceStateRef.current !== 'idle') return;
     if (audioRecorder.isRecording) return;
+    if (webMicArmInFlightRef.current) return;
+    webMicArmInFlightRef.current = true;
     try {
       if (userId && getSessionLogRuntime().ttsPlaybackActive) {
         const r = getSessionLogRuntime();
@@ -16925,14 +17279,26 @@ The participant **confirmed** skipping after the skip confirmation prompt. In **
           platform: r.platform,
         });
       }
-      await waitUntilInterviewerQuiescentForWebMic();
-      const granted = await audioRecorder.requestPermission();
-      if (!granted) return;
       const tapIntentAtMs = Date.now();
+      setVoiceState('recording');
+      setMicEnginePrimed(false);
+      const nameEntryTurn =
+        !interviewNameRef.current &&
+        (interviewNameReaskPendingRef.current ||
+          isNamePromptInterviewMoment(lastQuestionTextRef.current));
+      await waitUntilInterviewerQuiescentForWebMic();
+      if (nameEntryTurn && webMicPreInitNeedsRefreshForNameEntry()) {
+        await rearmWebMicPreInitAfterRecordingStop();
+      }
+      const granted = await audioRecorder.requestPermission();
+      if (!granted) {
+        setVoiceState('idle');
+        setMicEnginePrimed(false);
+        return;
+      }
       const intendedDelayMs =
         Platform.OS === 'web' ? 0 : 500 + peekRecordingDelayExtraFromEarlyCutoffMs();
       const extraDelayMs = takeRecordingDelayExtraFromEarlyCutoffMs();
-      setVoiceState('recording');
       recordingDelayMeasurementRef.current = null;
       await audioRecorder.startRecording({
         postAudioSessionDelayMs: Platform.OS === 'web' ? 0 : 500 + extraDelayMs,
@@ -17039,6 +17405,8 @@ The participant **confirmed** skipping after the skip confirmation prompt. In **
       }
     } catch (err) {
       handleRecordingError(err instanceof Error ? err : new Error(String(err)));
+    } finally {
+      webMicArmInFlightRef.current = false;
     }
   }, [audioRecorder, handleRecordingError, userId, waitUntilInterviewerQuiescentForWebMic]);
 
@@ -17114,6 +17482,7 @@ The participant **confirmed** skipping after the skip confirmation prompt. In **
       return;
     }
     if (voiceState === 'speaking' || voiceState === 'processing') return;
+    if (Platform.OS === 'web' && webMicArmInFlightRef.current) return;
     if (Platform.OS === 'web' && voiceState === 'idle' && !audioRecorder.isRecording) {
       pendingMicStartAfterIdleFlushRef.current = true;
     } else {
@@ -17186,7 +17555,12 @@ The participant **confirmed** skipping after the skip confirmation prompt. In **
         await audioRecorder.stopRecording();
         if (__DEV__) console.log('[Aria] RECORDING STOPPED');
       } else {
+        if (Platform.OS === 'web') {
+          webMicArmInFlightRef.current = true;
+        }
         const tapIntentAtMs = Date.now();
+        setVoiceState('recording');
+        setMicEnginePrimed(false);
         /** Web: fully quiesce interviewer output before getUserMedia + MediaRecorder (avoids overlap with capture). */
         if (Platform.OS === 'web') {
           if (userId && getSessionLogRuntime().ttsPlaybackActive) {
@@ -17199,15 +17573,25 @@ The participant **confirmed** skipping after the skip confirmation prompt. In **
               platform: r.platform,
             });
           }
+          const nameEntryTurn =
+            !interviewNameRef.current &&
+            (interviewNameReaskPendingRef.current ||
+              isNamePromptInterviewMoment(lastQuestionTextRef.current));
           await waitUntilInterviewerQuiescentForWebMic();
+          if (nameEntryTurn && webMicPreInitNeedsRefreshForNameEntry()) {
+            await rearmWebMicPreInitAfterRecordingStop();
+          }
         }
         const granted = await audioRecorder.requestPermission();
         if (__DEV__) console.log('[Aria] MIC PERMISSION:', granted ? 'granted' : 'denied');
-        if (!granted) return;
+        if (!granted) {
+          setVoiceState('idle');
+          setMicEnginePrimed(false);
+          return;
+        }
         const intendedDelayMs =
           Platform.OS === 'web' ? 0 : 500 + peekRecordingDelayExtraFromEarlyCutoffMs();
         const extraDelayMs = takeRecordingDelayExtraFromEarlyCutoffMs();
-        setVoiceState('recording');
         recordingDelayMeasurementRef.current = null;
         if (Platform.OS === 'web' && resumeRepeatChoicePendingRef.current) {
           const prefetchText = scenarioAContemptProbeResumeRepeatTtsText(
@@ -17331,6 +17715,10 @@ The participant **confirmed** skipping after the skip confirmation prompt. In **
     } catch (err) {
       if (__DEV__) console.error('[Aria] MIC ERROR:', err instanceof Error ? err.message : err);
       handleRecordingError(err instanceof Error ? err : new Error(String(err)));
+    } finally {
+      if (Platform.OS === 'web') {
+        webMicArmInFlightRef.current = false;
+      }
     }
   }, [
     voiceState,
@@ -19518,7 +19906,7 @@ The participant **confirmed** skipping after the skip confirmation prompt. In **
               modified_weighted_score: gateDeferredSnap.modifiedWeightedScore ?? null,
               passed: gateDeferredSnap.pass,
               gate_fail_reasons: gateDeferredSnap.failReasonCodes ?? [],
-              gate_fail_detail: gateDeferredSnap.failReasonDetail ?? null,
+              gate_fail_detail: normalizeGateFailDetailForPersist(gateDeferredSnap.failReasonDetail),
               review_flags: gateDeferredSnap.reviewFlags,
               ego_development_level:
                 mergedDeferredGate.egoDevelopmentLevel ??
@@ -20855,7 +21243,7 @@ The participant **confirmed** skipping after the skip confirmation prompt. In **
             weighted_score: finalGateResult.weightedScore,
             passed: finalGateResult.pass,
             gate_fail_reasons: finalGateResult.failReasonCodes ?? [],
-            gate_fail_detail: finalGateResult.failReasonDetail ?? null,
+            gate_fail_detail: normalizeGateFailDetailForPersist(finalGateResult.failReasonDetail),
             scenario_composites: scenarioCompositesToStorageJson(finalGateResult.scenarioComposites),
             pillar_scores: pillarScores,
             ...(gateBlockedAlpha ? { incomplete_reason: completionGateAlpha.incomplete_reason } : {}),
@@ -21270,7 +21658,7 @@ The participant **confirmed** skipping after the skip confirmation prompt. In **
               weighted_score: gateResult.weightedScore,
               passed: gateResult.pass,
               gate_fail_reasons: gateResult.failReasonCodes ?? [],
-              gate_fail_detail: gateResult.failReasonDetail ?? null,
+              gate_fail_detail: normalizeGateFailDetailForPersist(gateResult.failReasonDetail),
               scenario_composites: scenarioCompositesToStorageJson(gateResult.scenarioComposites),
               pillar_scores: parsed.pillarScores ?? null,
               scoring_deferred: false,
@@ -22673,7 +23061,14 @@ assistant: Thanks for sticking with all of this — what stays with me is how yo
                   : undefined
               }
               onExit={handleInterviewSignOut}
-              micInputLevel={useMediaRecorderPath && audioRecorder.isRecording ? audioRecorder.inputMeterLevel : 0}
+              micInputLevel={
+                useMediaRecorderPath && (audioRecorder.isRecording || voiceState === 'recording')
+                  ? Math.max(
+                      audioRecorder.isRecording ? audioRecorder.inputMeterLevel : 0,
+                      preInitMeterLevel,
+                    )
+                  : 0
+              }
               micSessionRecovering={micSessionRecovering}
               micReconnectPrompt={
                 micNeedsReconnect

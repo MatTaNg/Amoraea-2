@@ -38,14 +38,22 @@ export async function estimateBlobEnergyRms(blob: Blob): Promise<number | null> 
 export async function hasLikelySpeechAfterRecording(opts: {
   peakMeteringDb: number | null;
   audioBlob: Blob | null;
+  /** When false, decoded buffer had no frame above the adaptive VAD threshold — require stronger evidence. */
+  vadSpeechDetected?: boolean | null;
 }): Promise<boolean> {
-  const { peakMeteringDb, audioBlob } = opts;
+  const { peakMeteringDb, audioBlob, vadSpeechDetected } = opts;
+  const strictVadMiss = vadSpeechDetected === false;
+  const peakThresholdDb = strictVadMiss ? -38 : getEffectiveAmbientNoiseCeilingDb();
+  const rmsFloor = strictVadMiss
+    ? getAudioWebRmsEnergyFloor() * 2.5
+    : getAudioWebRmsEnergyFloor();
+
   if (peakMeteringDb != null && Number.isFinite(peakMeteringDb)) {
-    if (peakMeteringDb > getEffectiveAmbientNoiseCeilingDb()) return true;
+    if (peakMeteringDb > peakThresholdDb) return true;
   }
   if (audioBlob && audioBlob.size > 400) {
     const rms = await estimateBlobEnergyRms(audioBlob);
-    if (rms != null && rms >= getAudioWebRmsEnergyFloor()) return true;
+    if (rms != null && rms >= rmsFloor) return true;
   }
   return false;
 }

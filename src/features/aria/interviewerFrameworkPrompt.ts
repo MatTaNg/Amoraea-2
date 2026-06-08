@@ -517,19 +517,23 @@ const BETWEEN_STACKED_BOUNDARY_VALIDATIONS_RE = `(?:\\s*[,;.:!?…—–]\\s*|\\
  * phrase (per product copy guidance). No-op when the name is unknown/unsafe or absent from the text.
  */
 export function dedupeAdjacentBoundaryValidationsBeforeParticipantName(text: string, rawFirstName: string): string {
-  /** Strip redundant warm beat after Scenario C→M4 segment-close templates (reflection opens with "Great work, {name}"). */
-  const stripRedundantScenarioCSegmentCloseWarm = (t: string) =>
+  /** Strip redundant warm beat when reflection (step 2) already opens with validation + first name. */
+  const stripRedundantSegmentCloseWarm = (t: string) =>
     t
       .replace(
-        /\b(that['']?s\s+the\s+end\s+of\s+the\s+three\s+described\s+situations)\s*[—–,-]\s*\b(?:(?:great|nice|good)\s+work|well\s+done)\b\.?/gi,
+        /\b(that['']?s\s+the\s+end\s+of\s+(?:the\s+three\s+described\s+situations|this\s+scenario|that\s+scenario))\s*[—–,-]\s*\b(?:(?:great|nice|good)\s+work|well\s+done)\b[!?.]?/gi,
         (_, p1: string) => `${p1}.`,
       )
       .replace(
-        /\b(we['']?re\s+done\s+with\s+those\s+three\s+scenarios)\s*[—–,-]\s*\b(?:(?:great|nice|good)\s+work|well\s+done)\b\.?/gi,
+        /\b(that['']?s\s+a\s+wrap\s+on\s+(?:this\s+)?(?:scenario|situation))\s*[—–,-]\s*\b(?:(?:great|nice|good)\s+work|well\s+done)\b[!?.]?/gi,
+        (_, p1: string) => `${p1}.`,
+      )
+      .replace(
+        /\b(we['']?re\s+done\s+with\s+those\s+three\s+scenarios)\s*[—–,-]\s*\b(?:(?:great|nice|good)\s+work|well\s+done)\b[!?.]?/gi,
         (_, p1: string) => `${p1}.`,
       );
 
-  let out = stripRedundantScenarioCSegmentCloseWarm(text);
+  let out = stripRedundantSegmentCloseWarm(text);
   const name = sanitizeInterviewParticipantFirstNameForSpeech(rawFirstName);
   if (!name || !out.trim()) {
     return out;
@@ -561,7 +565,7 @@ export function dedupeAdjacentBoundaryValidationsBeforeParticipantName(text: str
     while (r.exec(t) != null) n += 1;
     return n;
   };
-  const warmMatchesIn = countBoundaryWarmPhrases(stripRedundantScenarioCSegmentCloseWarm(text));
+  const warmMatchesIn = countBoundaryWarmPhrases(stripRedundantSegmentCloseWarm(text));
   const warmMatchesOut = countBoundaryWarmPhrases(out);
   return out;
 }
@@ -589,8 +593,8 @@ export function shouldDeferStreamingBoundaryWarmClause(text: string, rawFirstNam
   }
   if (new RegExp(`\\b${esc}\\b`, 'i').test(text)) return false;
   const t = text.trim();
-  /** Model often uses "great work!" at segment close; require optional sentence punctuation before `$`. */
-  if (!/\b(?:great|nice|good)\s+work\s*[.!?…]?\s*$/i.test(t)) return false;
+  /** Model often uses "great work!" or "great work," at segment close; optional punctuation before `$`. */
+  if (!/\b(?:great|nice|good)\s+work\s*[,;.:!?…]?\s*$/i.test(t)) return false;
   /** Narrow cues so we do not defer lines like "At the end of the day, nice work." */
   const segmentCue =
     /\b(?:that['']?s\s+the\s+end|that['']?s\s+a\s+wrap|we['']?(?:ve|re)\s+done\s+with|done\s+with\s+those\s+three|end\s+of\s+the\s+three\s+described)/i;

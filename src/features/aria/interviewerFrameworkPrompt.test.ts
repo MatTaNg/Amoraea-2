@@ -216,7 +216,15 @@ describe('dedupeAdjacentBoundaryValidationsBeforeParticipantName', () => {
     const raw =
       "That's the end of this scenario — nice work! Great work, Matt — you read Emma's closing line as resignation and gave Ryan ownership of the pattern plus a concrete commitment.";
     expect(dedupeAdjacentBoundaryValidationsBeforeParticipantName(raw, 'Matt')).toBe(
-      "That's the end of this scenario — Great work, Matt — you read Emma's closing line as resignation and gave Ryan ownership of the pattern plus a concrete commitment.",
+      "That's the end of this scenario. Great work, Matt — you read Emma's closing line as resignation and gave Ryan ownership of the pattern plus a concrete commitment.",
+    );
+  });
+
+  it('strips segment-close great work before reflection nice work + name (Scenario A→B)', () => {
+    const raw =
+      "That's the end of that scenario — great work. Nice work, Matt — you stayed with Ryan's side of the argument.";
+    expect(dedupeAdjacentBoundaryValidationsBeforeParticipantName(raw, 'Matt')).toBe(
+      "That's the end of that scenario. Nice work, Matt — you stayed with Ryan's side of the argument.",
     );
   });
 });

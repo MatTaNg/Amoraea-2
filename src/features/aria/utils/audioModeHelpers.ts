@@ -41,6 +41,22 @@ function logSessionTransition(
   });
 }
 
+/**
+ * Prepare native speaker route for TTS. Use `afterRecording: true` immediately after mic capture
+ * (full deactivate/reactivate cycle); otherwise apply playback mode only.
+ */
+export async function prepareInterviewTtsPlayback(
+  context: string,
+  options?: { afterRecording?: boolean },
+): Promise<void> {
+  if (Platform.OS === 'web') return;
+  if (options?.afterRecording) {
+    await transitionFromRecordingToPlaybackNative(context);
+  } else {
+    await setPlaybackMode();
+  }
+}
+
 /** Call BEFORE every TTS playback so Amoraea speaks through the speaker at full volume. */
 export async function setPlaybackMode(): Promise<void> {
   if (Platform.OS === 'web') {

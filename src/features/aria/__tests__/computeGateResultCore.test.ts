@@ -45,13 +45,13 @@ describe('computeGateResultCore', () => {
 
   it('still computes scenario composites and scenario_floor when holistic floor_breach fires first', () => {
     const pillars = allMarkers(7);
-    pillars.repair = 4; /* below repair floor 4.5 */
+    pillars.repair = 4; /* below repair floor 5.0 */
     const hi = Object.fromEntries(INTERVIEW_MARKER_IDS.map((id) => [id, 7])) as Record<string, number>;
     const r = computeGateResultCore(pillars, null, {
       scenarioPillarScoresByScenario: {
         1: hi,
         2: hi,
-        /** Mean 4.0 < 4.5 */
+        /** Mean 4.0 < 5.0 */
         3: { accountability: 4, repair: 4 },
       },
     });
@@ -83,7 +83,7 @@ describe('computeGateResultCore', () => {
       scenarioPillarScoresByScenario: {
         1: hi,
         2: hi,
-        /** Mean (4+4)/2 = 4.0 < 4.5 while holistic pillars still meet weighted gate. */
+        /** Mean (4+4)/2 = 4.0 < 5.0 while holistic pillars still meet weighted gate. */
         3: { accountability: 4, repair: 4 },
       },
     });
@@ -178,12 +178,12 @@ describe('computeGateResultCore', () => {
   });
 
   it('referral-weighted pass applies post-penalty score vs weightedPassMin', () => {
-    const pillars = allMarkers(6.1);
+    const pillars = allMarkers(6.4);
     const r = computeGateResultCore(pillars, null, {
-      weightedPassMin: 5.5,
+      weightedPassMin: 6.0,
       skipPenaltyTotal: -0.3,
     });
-    expect(r.weightedScore).toBe(5.8);
+    expect(r.weightedScore).toBe(6.1);
     expect(r.pass).toBe(true);
   });
 
@@ -208,7 +208,7 @@ describe('computeGateResultCore', () => {
   });
 
   it('adds ego_development_floor when holistic ego level is 1 and final weighted score is below 7', () => {
-    const pillars = allMarkers(6.9);
+    const pillars = allMarkers(7.5);
     const hi = allMarkers(7);
     const r = computeGateResultCore(pillars, null, {
       egoDevelopmentLevel: 1,
@@ -217,7 +217,7 @@ describe('computeGateResultCore', () => {
     expect(r.pass).toBe(false);
     expect(r.failReasonCodes).toContain('ego_development_floor');
     expect(r.reason).toBe('ego_development_floor');
-    expect(r.failReasonDetail?.ego_development_floor).toEqual({ level: 1, weightedScore: 6.1 });
+    expect(r.failReasonDetail?.ego_development_floor).toEqual({ level: 1, weightedScore: 6.7 });
   });
 
   it('fails ego_development_floor when ego level is 1 even if modified score clears 7', () => {
@@ -241,14 +241,41 @@ describe('computeGateResultCore', () => {
     expect(r.reason).toBe('weighted_below_threshold');
   });
 
-  it('passes weighted gate at 6.4 with ego level 2 after -0.3 modifier vs 6.0 min', () => {
+  it('fails weighted gate at 6.4 with ego level 2 after -0.3 modifier vs 6.5 min', () => {
     const pillars = allMarkers(6.4);
     const r = computeGateResultCore(pillars, null, {
       egoDevelopmentLevel: 2,
       scenarioPillarScoresByScenario: { 1: pillars, 2: pillars, 3: pillars },
     });
     expect(r.egoDevelopmentModifier).toBe(-0.3);
+    expect(r.modifiedWeightedScore).toBe(6.1);
+    expect(r.pass).toBe(false);
+    expect(r.reason).toBe('weighted_below_threshold');
+  });
+
+  it('passes weighted gate at 6.8 with ego level 2 after -0.3 modifier vs 6.5 min', () => {
+    const pillars = allMarkers(6.8);
+    const r = computeGateResultCore(pillars, null, {
+      egoDevelopmentLevel: 2,
+      scenarioPillarScoresByScenario: { 1: pillars, 2: pillars, 3: pillars },
+    });
+    expect(r.modifiedWeightedScore).toBe(6.5);
     expect(r.pass).toBe(true);
+  });
+
+  it('fails scenario_floor when any single scenario composite is below 5.0', () => {
+    const pillars = allMarkers(GATE_PASS_WEIGHTED_MIN);
+    const hi = Object.fromEntries(INTERVIEW_MARKER_IDS.map((id) => [id, 7])) as Record<string, number>;
+    const r = computeGateResultCore(pillars, null, {
+      scenarioPillarScoresByScenario: {
+        1: hi,
+        2: hi,
+        3: { accountability: 4.9, repair: 4.9 },
+      },
+    });
+    expect(r.pass).toBe(false);
+    expect(r.reason).toBe('scenario_floor');
+    expect(r.scenarioComposites?.['3']).toBe(4.9);
   });
 
   it('parses string ego level 2 and accumulates concreteness modifier (e.g. absent+low → -0.65 total)', () => {
@@ -265,7 +292,7 @@ describe('computeGateResultCore', () => {
   });
 
   it('does not apply ego modifier for level 3', () => {
-    const pillars = allMarkers(6.1);
+    const pillars = allMarkers(6.5);
     const r = computeGateResultCore(pillars, null, {
       egoDevelopmentLevel: 3,
       scenarioPillarScoresByScenario: { 1: pillars, 2: pillars, 3: pillars },

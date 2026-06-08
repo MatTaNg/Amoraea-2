@@ -12,14 +12,23 @@ import {
   getRetroactivePsychometricFloorReviews,
   ALL_PSYCHOMETRIC_GATE_FAIL_FLOOR_CODES,
   psychometricFloorScoreForUser,
+  wouldTriggerAaq2HighExperientialAvoidanceFloor,
+  wouldTriggerAnxietyTraitHighFloor,
+  wouldTriggerBrsLowResilienceFloor,
   wouldTriggerDweckExtremeFixedMindsetFloor,
   wouldTriggerGaspExtremeExternalizationFloor,
   wouldTriggerRfqLowReflectiveFunctioningFloor,
+  wouldTriggerRsesLowSelfEsteemFloor,
+  wouldTriggerScsLowPrivateSelfAwarenessFloor,
   wouldTriggerScsSfLowSelfCompassionFloor,
+  AAQ2_HIGH_EXPERIENTIAL_AVOIDANCE_FLOOR_CODE,
+  BRS_LOW_RESILIENCE_FLOOR_CODE,
   DWECK_EXTREME_FIXED_MINDSET_FLOOR_CODE,
   GASP_EXTREME_EXTERNALIZATION_FLOOR_CODE,
   RFQ_LOW_REFLECTIVE_FUNCTIONING_FLOOR_CODE,
   RFQ_STRAIGHT_LINE_FLAG,
+  RSES_LOW_SELF_ESTEEM_FLOOR_CODE,
+  SCS_LOW_PRIVATE_SELF_AWARENESS_FLOOR_CODE,
   SCS_SF_LOW_SELF_COMPASSION_FLOOR_CODE,
 } from '@features/psychometrics/psychometricFloorBreaches';
 import {
@@ -180,6 +189,8 @@ const ADMIN_USER_PSYCHOMETRICS_SELECT = `
   psychometrics_mspss_score,
   psychometrics_mspss_family_score,
   psychometrics_mspss_friends_score,
+  psychometrics_sd3_narcissism_score,
+  psychometrics_rfq_score,
   psychometric_modifier,
   psychometric_consistency_flags,
   psychometric_straight_line_flags
@@ -204,6 +215,8 @@ const ADMIN_USER_PSYCHOMETRICS_SELECT_WITHOUT_BRS = `
   psychometrics_mspss_score,
   psychometrics_mspss_family_score,
   psychometrics_mspss_friends_score,
+  psychometrics_narq_s_score,
+  psychometrics_rfq_score,
   psychometric_modifier,
   psychometric_consistency_flags,
   psychometric_straight_line_flags
@@ -312,14 +325,15 @@ function attemptHasPsychometricModifierApplied(attempt: AdminAttemptAssessmentRe
 export async function fetchAdminUserProfile(
   userId: string,
 ): Promise<AdminUserProfileRecord | null> {
+  /** Richest selects first — minimal variants succeed on any DB and would hide SD3/RFQ/BRS if tried first. */
   const selectVariants = [
-    ADMIN_USER_PSYCHOMETRICS_SELECT_MINIMAL,
-    ADMIN_USER_PSYCHOMETRICS_SELECT_WITHOUT_BRS,
-    ADMIN_USER_PSYCHOMETRICS_SELECT,
-    ADMIN_USER_PROFILE_SELECT_LEGACY,
+    `${ADMIN_USER_PROFILE_SELECT},${ADMIN_USER_PROFILE_SEXUAL_COMMUNICATION_COLUMNS}`,
     ADMIN_USER_PROFILE_SELECT,
     `${ADMIN_USER_PROFILE_SELECT_LEGACY},${ADMIN_USER_PROFILE_SEXUAL_COMMUNICATION_COLUMNS}`,
-    `${ADMIN_USER_PROFILE_SELECT},${ADMIN_USER_PROFILE_SEXUAL_COMMUNICATION_COLUMNS}`,
+    ADMIN_USER_PROFILE_SELECT_LEGACY,
+    ADMIN_USER_PSYCHOMETRICS_SELECT,
+    ADMIN_USER_PSYCHOMETRICS_SELECT_WITHOUT_BRS,
+    ADMIN_USER_PSYCHOMETRICS_SELECT_MINIMAL,
   ];
 
   let lastError: { message?: string; code?: string } | null = null;
@@ -439,8 +453,12 @@ function psychometricFloorScoresFromUser(user: AdminUserProfileRecord) {
     dweckScore: user.psychometrics_dweck_score,
     scsSfScore: user.psychometrics_scs_sf_score,
     sd3NarcissismScore: user.psychometrics_sd3_narcissism_score,
+    brsScore: user.psychometrics_brs_score,
+    anxietyTraitScore: user.psychometrics_anxiety_trait_score,
     aaq2Score: user.psychometrics_aaq2_score,
     rsesScore: user.psychometrics_rses_score,
+    scsPublicScore: user.psychometrics_scs_public_score,
+    scsPrivateScore: user.psychometrics_scs_private_score,
   };
 }
 
@@ -1118,6 +1136,11 @@ export function FullAssessmentTab({
               Score: {user.psychometrics_brs_score ?? '—'}/5.0 — {brsInfo.band}
             </Text>
             <Text style={tabStyles.instrumentDescription}>{brsInfo.description}</Text>
+            {wouldTriggerBrsLowResilienceFloor(user.psychometrics_brs_score, straightLineFlags) ? (
+              <Text style={tabStyles.floorWarning}>
+                ⛔ Floor breach — {BRS_LOW_RESILIENCE_FLOOR_CODE} gate fail triggered
+              </Text>
+            ) : null}
             {straightLineFlags.includes('brs_straight_line') ? (
               <Text style={tabStyles.straightLineWarning}>
                 ⚠ {STRAIGHT_LINE_FLAG_DESCRIPTIONS.brs_straight_line}
@@ -1141,6 +1164,14 @@ export function FullAssessmentTab({
               Score: {user.psychometrics_anxiety_trait_score ?? '—'}/5.0 — {anxietyTraitInfo.band}
             </Text>
             <Text style={tabStyles.instrumentDescription}>{anxietyTraitInfo.description}</Text>
+            {wouldTriggerAnxietyTraitHighFloor(
+              user.psychometrics_anxiety_trait_score,
+              straightLineFlags,
+            ) ? (
+              <Text style={tabStyles.floorWarning}>
+                ⛔ Floor breach — {ANXIETY_TRAIT_HIGH_FLOOR_CODE} gate fail triggered
+              </Text>
+            ) : null}
             {straightLineFlags.includes('anxiety_trait_straight_line') ? (
               <Text style={tabStyles.straightLineWarning}>
                 ⚠ {STRAIGHT_LINE_FLAG_DESCRIPTIONS.anxiety_trait_straight_line}
@@ -1270,6 +1301,14 @@ export function FullAssessmentTab({
               Score: {user.psychometrics_aaq2_score ?? '—'}/49 — {aaq2Info.band}
             </Text>
             <Text style={tabStyles.instrumentDescription}>{aaq2Info.description}</Text>
+            {wouldTriggerAaq2HighExperientialAvoidanceFloor(
+              user.psychometrics_aaq2_score,
+              straightLineFlags,
+            ) ? (
+              <Text style={tabStyles.floorWarning}>
+                ⛔ Floor breach — {AAQ2_HIGH_EXPERIENTIAL_AVOIDANCE_FLOOR_CODE} gate fail triggered
+              </Text>
+            ) : null}
             {straightLineFlags.includes('aaq2_straight_line') ? (
               <Text style={tabStyles.straightLineWarning}>
                 ⚠ {STRAIGHT_LINE_FLAG_DESCRIPTIONS.aaq2_straight_line}
@@ -1293,9 +1332,9 @@ export function FullAssessmentTab({
               Score: {user.psychometrics_rses_score ?? '—'}/40 — {rsesInfo.band}
             </Text>
             <Text style={tabStyles.instrumentDescription}>{rsesInfo.description}</Text>
-            {(user.psychometrics_rses_score ?? 100) <= 12 ? (
+            {wouldTriggerRsesLowSelfEsteemFloor(user.psychometrics_rses_score, straightLineFlags) ? (
               <Text style={tabStyles.floorWarning}>
-                ⛔ Floor breach — low_self_esteem_floor gate fail triggered
+                ⛔ Floor breach — {RSES_LOW_SELF_ESTEEM_FLOOR_CODE} gate fail triggered
               </Text>
             ) : null}
             {straightLineFlags.includes('rses_straight_line') ? (
@@ -1327,6 +1366,15 @@ export function FullAssessmentTab({
             </View>
             <Text style={tabStyles.instrumentScore}>{scsInfo.band}</Text>
             <Text style={tabStyles.instrumentDescription}>{scsInfo.description}</Text>
+            {wouldTriggerScsLowPrivateSelfAwarenessFloor(
+              user.psychometrics_scs_public_score,
+              user.psychometrics_scs_private_score,
+              straightLineFlags,
+            ) ? (
+              <Text style={tabStyles.floorWarning}>
+                ⛔ Floor breach — {SCS_LOW_PRIVATE_SELF_AWARENESS_FLOOR_CODE} gate fail triggered
+              </Text>
+            ) : null}
             {straightLineFlags.includes('scs_straight_line') ? (
               <Text style={tabStyles.straightLineWarning}>
                 ⚠ {STRAIGHT_LINE_FLAG_DESCRIPTIONS.scs_straight_line}

@@ -576,6 +576,9 @@ export function isNamePromptInterviewMoment(lastQuestionText: string | null | un
   if (/what('?s|\s+is)\s+your\s+name\b/.test(q)) return true;
   if (/\bhow\s+(do\s+you|should\s+i)\s+(call\s+you|address\s+you)\b/.test(q)) return true;
   if (/\bhi,?\s+i'?m\s+amoraea\b/.test(q) && /\bwhat\s+(can|should)\s+i\s+call\s+you\b/.test(q)) return true;
+  /** Name re-ask lines must stay in name-collection mode (ratio gate, whisper retry copy). */
+  if (/\bwhat\s+name\s+would\s+you\s+like\s+me\s+to\s+use\b/.test(q)) return true;
+  if (/\bdidn'?t\s+quite\s+catch\s+that\b/.test(q) && /\bname\b/.test(q)) return true;
   return false;
 }
 
@@ -641,6 +644,7 @@ export function shouldRecordInterviewResponseTiming(lastQuestionText: string | n
 export function isShortAnswerOkForWhisperRatioGate(lastQuestionText: string | null | undefined): boolean {
   return (
     isSimpleYesNoInterviewMoment(lastQuestionText) ||
+    isInterviewPreambleBriefingMoment(lastQuestionText) ||
     isResumeReentryWelcomePrompt(lastQuestionText) ||
     isClientAudioRecoveryAssistantLine(lastQuestionText) ||
     isNamePromptInterviewMoment(lastQuestionText)
@@ -657,7 +661,12 @@ export function getWhisperReaskTurnContext(
   lastQuestionText: string | null | undefined
 ): WhisperReaskTurnContext {
   if (isNamePromptInterviewMoment(lastQuestionText)) return 'name_collection';
-  if (isSimpleYesNoInterviewMoment(lastQuestionText)) return 'readiness_confirmation';
+  if (
+    isSimpleYesNoInterviewMoment(lastQuestionText) ||
+    isInterviewPreambleBriefingMoment(lastQuestionText)
+  ) {
+    return 'readiness_confirmation';
+  }
   return 'substantive';
 }
 
@@ -689,9 +698,46 @@ function normalizeTranscriptForHardStopMatch(raw: string): string {
   return s;
 }
 
+/** Procedural one-word assent/refusal — not scenario-substance, but complete for ratio gate purposes. */
+const SINGLE_WORD_HARD_STOP_NORMALIZED = new Set([
+  'no',
+  'nope',
+  'nah',
+  'never',
+  'stop',
+  'skip',
+  'pass',
+  'yes',
+  'yeah',
+  'yep',
+  'yup',
+  'sure',
+  'ok',
+  'okay',
+  'ready',
+]);
+
+/** One-word Whisper tails that usually mean the clip cut off mid-sentence — allow ratio re-ask. */
+const SINGLE_WORD_FRAGMENT_NORMALIZED = new Set([
+  "that's",
+  'thats',
+  "it's",
+  'its',
+  'this',
+  'that',
+  'so',
+  'well',
+  'and',
+  'but',
+  'like',
+  'um',
+  'uh',
+  'er',
+]);
+
 /**
  * Single-word successful Whisper turns and short refusal / hard-stop phrases must not trigger the
- * ratio re-ask ("answer again in a full sentence"). Empty / failed transcription is handled separately.
+ * ratio re-ask ("answer again in a full sentence"). Obvious fragments (e.g. "That's") may re-ask.
  */
 export function getWhisperRatioReaskSuppressionReason(
   transcriptText: string,
@@ -699,9 +745,15 @@ export function getWhisperRatioReaskSuppressionReason(
 ): 'valid_hard_stop' | null {
   const trimmed = transcriptText.trim();
   if (!trimmed || wordCount < 1) return null;
-  if (wordCount === 1) return 'valid_hard_stop';
   const n = normalizeTranscriptForHardStopMatch(trimmed);
+  if (wordCount === 1) {
+    if (SINGLE_WORD_FRAGMENT_NORMALIZED.has(n)) return null;
+    if (SINGLE_WORD_HARD_STOP_NORMALIZED.has(n)) return 'valid_hard_stop';
+    if (looksLikeReadinessAffirmation(trimmed)) return 'valid_hard_stop';
+    return 'valid_hard_stop';
+  }
   if (MULTIWORD_HARD_STOP_TRANSCRIPTS_NORMALIZED.has(n)) return 'valid_hard_stop';
+  if (looksLikeReadinessAffirmation(trimmed)) return 'valid_hard_stop';
   return null;
 }
 

@@ -106,7 +106,10 @@ describe('buildInterviewAttemptGateCompletionFields', () => {
       weighted_score: 5.4,
       passed: false,
       gate_fail_reasons: ['weighted_score', 'scenario_floor'],
-      gate_fail_detail: { weighted_score: { score: 5.4, requiredMin: 6 } },
+      gate_fail_detail: {
+        weighted_score: { score: 5.4, requiredMin: 6 },
+        psychometric_floors: {},
+      },
     });
     expect(patch).not.toHaveProperty('gate_fail_reason');
   });

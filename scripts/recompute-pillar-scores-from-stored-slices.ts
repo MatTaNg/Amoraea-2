@@ -11,6 +11,7 @@ import { createClient } from '@supabase/supabase-js';
 import { PILLAR_ROLLUP_ALGORITHM_VERSION } from '../src/features/aria/aggregateMarkerScoresFromSlices';
 import { recalculateAttemptScoresFromStoredSlices } from '../src/features/aria/adminRecalculateAttemptScores';
 import { applyPsychometricModifierToAttempt } from '../src/features/psychometrics/applyPsychometricModifier';
+import { normalizeGateFailDetailForPersist } from '../src/features/psychometrics/gateFailDetailForPersist';
 
 type Args = { attemptId?: string; attemptNumber?: number; userId?: string };
 
@@ -92,7 +93,7 @@ async function main(): Promise<void> {
       weighted_score: result.gate.weightedScore,
       passed: result.gate.pass,
       gate_fail_reasons: result.gate.failReasonCodes ?? [],
-      gate_fail_detail: result.gate.failReasonDetail ?? null,
+      gate_fail_detail: normalizeGateFailDetailForPersist(result.gate.failReasonDetail),
       scenario_composites: result.scenarioCompositesJson,
       recalculated_at: new Date().toISOString(),
       recalculation_notes: result.notes,
@@ -115,7 +116,9 @@ async function main(): Promise<void> {
   }
 
   try {
-    await applyPsychometricModifierToAttempt(row.user_id as string, row.id as string);
+    await applyPsychometricModifierToAttempt(row.user_id as string, row.id as string, {
+      forceApply: true,
+    });
   } catch (e) {
     console.warn('Psychometric modifier apply failed (pillar rollup still saved):', e);
   }

@@ -573,7 +573,7 @@ export function isLegacyEmotionRecognitionFloorOnlyFail(attempt: {
 }): boolean {
   if (attempt.passed !== false) return false;
   const ws = attempt.weighted_score;
-  const min = attempt.weightedPassMin ?? 6.0;
+  const min = attempt.weightedPassMin ?? 6.5;
   if (typeof ws !== 'number' || !Number.isFinite(ws) || ws < min) return false;
   const raw = attempt.gate_fail_reasons;
   if (!Array.isArray(raw)) return false;

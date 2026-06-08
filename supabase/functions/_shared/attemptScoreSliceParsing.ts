@@ -1,5 +1,7 @@
 /** Pure helpers for reading marker slices from `interview_attempts` JSON (shared + unit-tested). */
 
+import { normalizeGateFailDetailForPersist } from './gateFailDetailForPersist.ts';
+
 export type MarkerScoreSliceParsed = {
   pillarScores?: Record<string, number | null>;
   keyEvidence?: Record<string, string>;
@@ -104,6 +106,8 @@ export function buildInterviewAttemptGateCompletionFields(gate: {
     weighted_score: gate.weightedScore,
     passed: gate.pass,
     gate_fail_reasons: gate.failReasonCodes ?? [],
-    gate_fail_detail: gate.failReasonDetail ?? null,
+    gate_fail_detail: normalizeGateFailDetailForPersist(
+      gate.failReasonDetail as Record<string, unknown> | null | undefined,
+    ),
   };
 }

@@ -9,7 +9,9 @@ import {
   sd3NarcissismResponsesFromUserRow,
   sd3NarcissismScoreForFloorFromUserRow,
   sd3NarcissismScoreFromUserRow,
+  userHasPsychometricScoresForScoring,
 } from './usersPsychometricsSchemaFallback';
+import { normalizeGateFailDetailForPersist } from './gateFailDetailForPersist';
 import {
   computeGamingCorrection,
   gamingCorrectionForStorage,
@@ -37,6 +39,16 @@ export type ApplyPsychometricModifierOptions = {
    * scores and modifier are still persisted for admin review.
    */
   preservePassIfPreviouslyPassing?: boolean;
+  /**
+   * Admin recalculation / backfill: apply floors when psychometric scores exist even if
+   * `psychometrics_completed_at` was never written.
+   */
+  forceApply?: boolean;
+};
+
+export type ApplyPsychometricModifierResult = {
+  applied: boolean;
+  skipReason?: string;
 };
 
 function mergeScsResponses(
@@ -221,11 +233,14 @@ function buildUncertaintyInput(
     psychometrics_gasp_externalization_score: coercePsychometricScore(user.psychometrics_gasp_score),
     psychometrics_aaq2_score: coercePsychometricScore(user.psychometrics_aaq2_score),
     psychometrics_brs_score: coercePsychometricScore(user.psychometrics_brs_score),
+    psychometrics_anxiety_trait_score: coercePsychometricScore(user.psychometrics_anxiety_trait_score),
     psychometrics_rses_score: coercePsychometricScore(user.psychometrics_rses_score),
     psychometrics_scs_sf_score: coercePsychometricScore(user.psychometrics_scs_sf_score),
     psychometrics_dweck_score: coercePsychometricScore(user.psychometrics_dweck_score),
     psychometrics_sd3_narcissism_score: sd3NarcissismScoreFromUserRow(user as Record<string, unknown>),
     psychometrics_rfq_score: coercePsychometricScore(user.psychometrics_rfq_score),
+    psychometrics_scs_public_score: coercePsychometricScore(user.psychometrics_scs_public_score),
+    psychometrics_scs_private_score: coercePsychometricScore(user.psychometrics_scs_private_score),
     reasoning_pending: attempt.reasoning_pending === true,
     defenseCrossReference:
       (attempt.defense_cross_reference as DefenseCrossReferenceResult | null) ?? null,
@@ -237,7 +252,7 @@ export async function applyPsychometricModifierToAttempt(
   userId: string,
   attemptId: string,
   options?: ApplyPsychometricModifierOptions,
-): Promise<void> {
+): Promise<ApplyPsychometricModifierResult> {
   let userRow: Record<string, unknown> | null = null;
   /** Prefer SD3 columns first — legacy-only select omits `psychometrics_sd3_narcissism_score` and can hide floor triggers. */
   for (const select of [PSYCHOMETRIC_USER_SELECT, PSYCHOMETRIC_USER_SELECT_LEGACY_SD3]) {
@@ -252,14 +267,22 @@ export async function applyPsychometricModifierToAttempt(
     }
   }
 
-  if (!userRow?.psychometrics_completed_at) {
-    console.log('[PsychometricModifier] psychometrics not yet complete — skipping');
-    return;
-  }
-
   if (!userRow) {
     console.warn('[PsychometricModifier] no user data found for', userId);
-    return;
+    return { applied: false, skipReason: 'user_row_not_found' };
+  }
+
+  const hasCompletedAt = userRow.psychometrics_completed_at != null;
+  const hasStoredScores = userHasPsychometricScoresForScoring(userRow);
+  if (!options?.forceApply && !hasCompletedAt && !hasStoredScores) {
+    console.log('[PsychometricModifier] psychometrics not yet complete — skipping');
+    return { applied: false, skipReason: 'psychometrics_not_complete' };
+  }
+  if (!options?.forceApply && !hasCompletedAt && hasStoredScores) {
+    console.log(
+      '[PsychometricModifier] psychometrics_completed_at missing but scores present — applying floors',
+      { userId, attemptId },
+    );
   }
 
   let user = userRow as Record<string, unknown>;
@@ -280,16 +303,12 @@ export async function applyPsychometricModifierToAttempt(
 
   if (!attempt) {
     console.warn('[PsychometricModifier] no attempt found for', attemptId);
-    return;
+    return { applied: false, skipReason: 'attempt_not_found' };
   }
 
-  if (
-    user.psychometrics_brs_score == null &&
-    user.psychometrics_aaq2_score == null &&
-    user.psychometrics_rses_score == null
-  ) {
+  if (!hasStoredScores) {
     console.log('[PsychometricModifier] psychometric scores missing — skipping');
-    return;
+    return { applied: false, skipReason: 'psychometric_scores_missing' };
   }
 
   const pillars = (attempt.pillar_scores as Record<string, number> | null) ?? {};
@@ -421,15 +440,10 @@ export async function applyPsychometricModifierToAttempt(
     existingDetail,
     scores: floorScores,
     straightLineFlags,
-    aaq2Score: user.psychometrics_aaq2_score as number | null,
-    rsesScore: user.psychometrics_rses_score as number | null,
     attemptId,
     userId,
   });
-  const floorBreaches = collectPsychometricFloorGateFailReasons(floorScores, straightLineFlags, {
-    aaq2Score: user.psychometrics_aaq2_score as number | null,
-    rsesScore: user.psychometrics_rses_score as number | null,
-  });
+  const floorBreaches = collectPsychometricFloorGateFailReasons(floorScores, straightLineFlags);
   console.log('[PsychometricModifier] gate_fail_detail.psychometric_floors shape', {
     isArray: Array.isArray(gateFailDetail.psychometric_floors),
     keys:
@@ -489,7 +503,7 @@ export async function applyPsychometricModifierToAttempt(
     modified_weighted_score_with_psychometrics: finalModifiedScore,
     final_gate_pass: finalPass,
     gate_fail_reasons: allFailReasons,
-    gate_fail_detail: gateFailDetail,
+    gate_fail_detail: normalizeGateFailDetailForPersist(gateFailDetail),
     passed: finalPass,
     review_flags: reviewFlagsForPersist,
     ...(uncertaintyForDb
@@ -518,20 +532,24 @@ export async function applyPsychometricModifierToAttempt(
 
   if (error) {
     console.error('[PsychometricModifier] failed to persist:', error);
-  } else {
-    console.log(
-      '[PsychometricModifier] applied — raw modifier:',
-      result.modifier,
-      'corrected modifier:',
-      correctedPsychometricModifier,
-      'gaming level:',
-      gamingCorrection.correctionLevel,
-      'depthModified:',
-      depthSignalModifiedScore,
-      'finalModified:',
-      finalModifiedScore,
-      'finalPass:',
-      finalPass,
-    );
+    return { applied: false, skipReason: `persist_failed: ${error.message}` };
   }
+
+  console.log(
+    '[PsychometricModifier] applied — raw modifier:',
+    result.modifier,
+    'corrected modifier:',
+    correctedPsychometricModifier,
+    'gaming level:',
+    gamingCorrection.correctionLevel,
+    'depthModified:',
+    depthSignalModifiedScore,
+    'finalModified:',
+    finalModifiedScore,
+    'finalPass:',
+    finalPass,
+    'floorBreaches:',
+    floorBreaches,
+  );
+  return { applied: true };
 }

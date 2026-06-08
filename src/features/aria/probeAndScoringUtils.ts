@@ -877,6 +877,10 @@ export function transcriptHasMoment5ResolutionFollowUpAsked(
   );
 }
 
+/** Named person-like token (not sentence-initial function words); conservative — mirrors M4 grudge anchor. */
+const MOMENT5_LIKELY_PROPER_NAME_RE =
+  /\b(?!I\b|A\b|The\b|We\b|It\b|So\b|If\b|My\b|In\b|At\b|On\b|He\b|She\b|They\b|That\b|This\b|And\b|But\b)[A-Z][a-z]{2,}\b/;
+
 /** True when assistant turn is the scripted Moment 5 specificity redirect (before accountability probe). */
 export function looksLikeMoment5SpecificityRedirectPrompt(text: string | null | undefined): boolean {
   const n = normalizeInterviewTypography(text ?? '')
@@ -891,7 +895,12 @@ export function looksLikeMoment5SpecificityRedirectPrompt(text: string | null | 
   const relaxed =
     (n.includes('specific time') && (n.includes('walk me through') || n.includes('walk me thru'))) ||
     (n.includes('specific person') && n.includes('comes to mind') && n.includes('conflict'));
-  return canonical || relaxed;
+  /** Philosophy-style accountability probe that embeds a specificity ask — treat as redirect phase for gating. */
+  const philosophySpecificityAsk =
+    (n.includes('general approach') || n.includes('makes sense as a general')) &&
+    (n.includes('specific time') || n.includes('specific person')) &&
+    n.includes('conflict');
+  return canonical || relaxed || philosophySpecificityAsk;
 }
 
 /**
@@ -1107,7 +1116,11 @@ export function moment5UserDeclinesConcreteReask(userText: string): boolean {
     /\bi\s+just\s+said\s+(that|so)\b/.test(t) ||
     /\bi\s+already\s+(said|answered)\s+(that|this)\b/.test(t) ||
     /\bdidn'?t\s+i\s+already\s+answer\b/.test(t) ||
-    /\bi\s+think\s+i\s+covered\s+that\b/.test(t)
+    /\bi\s+think\s+i\s+covered\s+that\b/.test(t) ||
+    /\b(not a general|wasn'?t a general|that was not a general|not\s+general\s+approach)\b/.test(t) ||
+    /\b(named a specific|gave a specific|already named|specific person|specific example)\b/.test(t) ||
+    /\bi\s+already\s+(named|gave|shared|described)\b/.test(t) ||
+    /\bi\s+already\s+been\s+through\b/.test(t)
   );
 }
 
@@ -1163,7 +1176,14 @@ export function moment5PersonalNarrativeHasConcreteAnchor(userText: string): boo
 
   if (genericProcessOnly) return false;
 
+  const namedPersonConflictAnchor =
+    MOMENT5_LIKELY_PROPER_NAME_RE.test(t) &&
+    /\b(called|said|told|texted|argued|fought|upset|angry|yelled|coach|conflict|disagreed|walked|criticized|judged|facilitator|resolved|perspectives|feedback|tense|hurt)\b/i.test(
+      lower,
+    );
+
   const relationalAnchor =
+    namedPersonConflictAnchor ||
     /\b(my (mom|mum|dad|mother|father|parents|brother|sister|son|daughter|kids|child|children|husband|wife|partner|spouse|ex|boss|friend|friends|coworker|colleague|neighbor|roommate|gf|bf|aunt|uncle|cousin|niece|nephew|buddy|teammate|client|coach|landlord|tenant))\b/i.test(
       t,
     ) ||
@@ -1229,6 +1249,7 @@ export function moment5PersonalNarrativeHasConcreteAnchor(userText: string): boo
 
   const concrete =
     strongNarrativeOverride ||
+    (namedPersonConflictAnchor && wc >= 18) ||
     (relationalAnchor && (dyadicOrEpisode || situationalAnchor || wc >= 40)) ||
     (dyadicOrEpisode && (relationalAnchor || situationalAnchor || wc >= 28));
 
@@ -1702,6 +1723,14 @@ export function moment5ResponseIsAbstract(userText: string): boolean {
   const lower = raw.toLowerCase();
   /** Named other + narrative cue — not abstract even if {@link moment5PersonalNarrativeHasConcreteAnchor} missed an edge case. */
   if (
+    MOMENT5_LIKELY_PROPER_NAME_RE.test(raw) &&
+    /\b(called|said|told|would|did|got|felt|when|after|during|because|argu|fight|tense|upset|judged|coach|conflict|resolved|facilitator)\b/i.test(
+      raw,
+    )
+  ) {
+    return false;
+  }
+  if (
     /\b(with|from)\s+[A-Z][a-z]{1,24}\b/i.test(raw) &&
     /\b(said|told|would|did|got|felt|when|after|during|because|argu|fight|tense)\b/i.test(raw)
   ) {
@@ -1731,6 +1760,15 @@ export function moment5ResponseIsAbstract(userText: string): boolean {
  * Thin answers (`too_short`) previously skipped the redirect block and hit the model, which could
  * yield elongating-only turns stripped to empty transcript rows.
  */
+/** True when the current reply or prior M5 user turns already anchor a concrete episode. */
+export function moment5UserOrTranscriptHasConcreteAnchor(
+  userText: string,
+  transcript: readonly Moment5TranscriptTurn[] | null | undefined,
+): boolean {
+  if (moment5PersonalNarrativeHasConcreteAnchor(userText)) return true;
+  return moment5TranscriptHasConcreteAnchor(transcript);
+}
+
 export function shouldInjectMoment5SpecificityRedirect(params: {
   userText: string;
   narrativeConcrete: boolean;
@@ -1738,12 +1776,14 @@ export function shouldInjectMoment5SpecificityRedirect(params: {
   specificityRedirectIssued: boolean;
   specificityRedirectInTranscript: boolean;
 }): boolean {
+  if (moment5PersonalNarrativeHasConcreteAnchor(params.userText)) return false;
   if (params.narrativeConcrete) return false;
   if (params.answeringAfterSpecificityRedirect) return false;
   if (params.specificityRedirectIssued || params.specificityRedirectInTranscript) return false;
   const evalResult = evaluateMoment5AccountabilityProbe(params.userText);
   if (evalResult.reason === 'too_short') return true;
-  return moment5ResponseIsAbstract(params.userText);
+  /** Any non-thin answer without a concrete anchor needs specificity before resolution/accountability/API. */
+  return true;
 }
 
 /**

@@ -13,6 +13,7 @@ import {
   sd3NarcissismScoreFromUserRow,
 } from './usersPsychometricsSchemaFallback';
 import { mergePsychometricFloorsIntoGateState } from './psychometricFloorBreaches';
+import { normalizeGateFailDetailForPersist } from './gateFailDetailForPersist';
 
 function finiteNumberOrNull(v: unknown): number | null {
   return coercePsychometricScore(v);
@@ -129,8 +130,6 @@ export async function backfillMissingUncertaintyScores(limit = 25): Promise<numb
       existingDetail,
       scores: psychometricFloorScoresFromUserRow(up ?? {}),
       straightLineFlags,
-      aaq2Score: coercePsychometricScore(up?.psychometrics_aaq2_score),
-      rsesScore: coercePsychometricScore(up?.psychometrics_rses_score),
     });
 
     const depthModified =
@@ -151,7 +150,7 @@ export async function backfillMissingUncertaintyScores(limit = 25): Promise<numb
         uncertainty_score: breakdown.total,
         uncertainty_breakdown: breakdownForDb,
         gate_fail_reasons: gateFailReasons,
-        gate_fail_detail: gateFailDetail,
+        gate_fail_detail: normalizeGateFailDetailForPersist(gateFailDetail),
         final_gate_pass: gateFailReasons.length === 0 && finalModified >= GATE_PASS_WEIGHTED_MIN,
         passed: gateFailReasons.length === 0 && finalModified >= GATE_PASS_WEIGHTED_MIN,
       })

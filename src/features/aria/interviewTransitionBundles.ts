@@ -6,11 +6,12 @@
 import { resolvePlausibleInterviewFirstName } from './interviewNameValidation';
 import { MOMENT_5_ACCOUNTABILITY_QUESTION_TEXT } from './probeAndScoringUtils';
 
+/** Neutral segment-close only — validation + first name belongs in boundary reflection (step 2), not here. */
 export const SCENARIO_1_TO_2_TRANSITION_FALLBACK =
-  "Great work — that's the end of that scenario. Here's the next situation.";
+  "That's the end of that scenario. Here's the next situation.";
 
 export const SCENARIO_2_TO_3_TRANSITION_FALLBACK =
-  "Great work — that's the end of this one, too. Here's the third situation — after this we'll move to something more personal.";
+  "That's the end of this one, too. Here's the third situation — after this we'll move to something more personal.";
 
 export const MOMENT_4_HANDOFF_NO_NAME_LEAD =
   'Good work — you just finished the three situations. There are only two questions left. These questions are more about you. Here\'s the first one.';

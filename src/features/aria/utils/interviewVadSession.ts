@@ -4,6 +4,9 @@
  * Reset when the interview progress refs reset (new session / retake).
  */
 
+/** Below this dBFS, ambient samples are digital silence / unmeasured — ignore for VAD bypass SNR. */
+export const MIN_VALID_AMBIENT_NOISE_FLOOR_DB = -90;
+
 let ambientNoiseFloorDb: number | null = null;
 /** True when ambient could not be measured — use fixed -66 dB threshold. */
 let ambientNoiseFallback = false;
@@ -58,13 +61,23 @@ export async function sampleAmbientNoiseFloor500ms(analyser: AnalyserNode): Prom
   return samples[Math.floor(samples.length / 2)] ?? null;
 }
 
+export function sanitizeAmbientNoiseFloorDb(db: number | null | undefined): number | null {
+  if (db == null || !Number.isFinite(db)) return null;
+  if (db < MIN_VALID_AMBIENT_NOISE_FLOOR_DB) return null;
+  return db;
+}
+
 /** Median dB from TTS sampling or legacy prepare — updates each successful measure. */
 export function setInterviewSessionAmbientNoiseFloorDb(db: number | null): void {
-  if (db == null || !Number.isFinite(db)) {
+  const sanitized = sanitizeAmbientNoiseFloorDb(db);
+  if (sanitized == null) {
     ambientNoiseFloorDb = null;
+    if (db != null && Number.isFinite(db)) {
+      ambientNoiseFallback = true;
+    }
     return;
   }
-  ambientNoiseFloorDb = db;
+  ambientNoiseFloorDb = sanitized;
   ambientSampleCaptured = true;
 }
 
@@ -77,7 +90,7 @@ export function getInterviewSessionAmbientNoiseFallback(): boolean {
 }
 
 export function getInterviewSessionAmbientNoiseFloorDb(): number | null {
-  return ambientNoiseFloorDb;
+  return sanitizeAmbientNoiseFloorDb(ambientNoiseFloorDb);
 }
 
 /** Default first-speech gate: 6 dB more sensitive than legacy -60 dBFS scan (~ -66). */
@@ -99,11 +112,12 @@ export function getInterviewSessionVadFirstSpeechThresholdDb(): number {
   lastAdaptiveRawDb = null;
   lastThresholdFloored = false;
   lastThresholdUnusuallyHigh = false;
-  if (ambientNoiseFallback && ambientNoiseFloorDb == null) {
+  if (ambientNoiseFallback && sanitizeAmbientNoiseFloorDb(ambientNoiseFloorDb) == null) {
     return defaultFloor;
   }
-  if (ambientNoiseFloorDb != null && Number.isFinite(ambientNoiseFloorDb)) {
-    const raw = ambientNoiseFloorDb + 15;
+  const ambient = sanitizeAmbientNoiseFloorDb(ambientNoiseFloorDb);
+  if (ambient != null) {
+    const raw = ambient + 15;
     lastAdaptiveRawDb = raw;
     let adaptive = raw;
     if (raw < -40) {

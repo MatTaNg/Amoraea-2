@@ -18,6 +18,7 @@ import { evaluateInterviewCompletionGate, type CompletionGateFailure } from './i
 import { mergeMomentConcretenessForGate, normalizeResponseConcreteness } from './personalMomentConcreteness.ts';
 import { scenarioEmotionalVocabDensityPercentFromTranscript } from './personalMomentEmotionalVocab.ts';
 import { applyPsychometricModifierToAttempt } from './applyPsychometricModifier.ts';
+import { normalizeGateFailDetailForPersist } from './gateFailDetailForPersist.ts';
 import { crossReferenceDefenseDetection } from './crossReferenceDefenseDetection.ts';
 import {
   computeAvgScenarioTotalUserWords,
@@ -66,7 +67,7 @@ async function markAttemptIncompleteNoScore(
       scoring_deferred: false,
       pillar_scores: null,
       gate_fail_reasons: [],
-      gate_fail_detail: null,
+      gate_fail_detail: { psychometric_floors: {} },
       ego_development_level: null,
       review_flags: [],
       ai_reasoning: {
@@ -956,7 +957,7 @@ export async function runCompleteStandardInterview(
       weighted_score: gate.weightedScore,
       passed: gate.pass,
       gate_fail_reasons: gate.failReasonCodes ?? [],
-      gate_fail_detail: gate.failReasonDetail ?? null,
+      gate_fail_detail: normalizeGateFailDetailForPersist(gate.failReasonDetail),
       scenario_composites: scenarioCompositesToStorageJson(gate.scenarioComposites),
       pillar_scores: parsed.pillarScores ?? null,
       /** Preserve client-written slices; holistic output does not include per-scenario JSON. */

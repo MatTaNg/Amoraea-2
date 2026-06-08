@@ -53,22 +53,22 @@ describe('computeUncertaintyScore', () => {
     expect(result.activeFlags).toContain('sd3_narcissism_floor');
   });
 
-  it('does not flag sd3_narcissism_floor when straight-line is active', () => {
+  it('flags sd3_narcissism_floor when straight-line is active but score breaches threshold', () => {
     const result = computeUncertaintyScore({
       ...EMPTY_ATTEMPT,
       psychometrics_sd3_narcissism_score: 4.5,
       psychometric_straight_line_flags: ['sd3_narcissism_straight_line'],
     });
-    expect(result.activeFlags).not.toContain('sd3_narcissism_floor');
+    expect(result.activeFlags).toContain('sd3_narcissism_floor');
   });
 
   it('flags psychometric floor breaches in active flags', () => {
     const result = computeUncertaintyScore({
       ...EMPTY_ATTEMPT,
       psychometrics_rfq_score: 1.8,
-      psychometrics_gasp_externalization_score: 5.7,
-      psychometrics_dweck_score: 1.8,
-      psychometrics_scs_sf_score: 1.3,
+      psychometrics_gasp_externalization_score: 4.75,
+      psychometrics_dweck_score: 2.3,
+      psychometrics_scs_sf_score: 2.417,
     });
     expect(result.activeFlags).toContain('rfq_low_reflective_functioning_floor');
     expect(result.activeFlags).toContain('gasp_extreme_externalization_floor');
@@ -76,13 +76,13 @@ describe('computeUncertaintyScore', () => {
     expect(result.activeFlags).toContain('scs_sf_low_self_compassion_floor');
   });
 
-  it('does not flag psychometric floors when straight-line flags are active', () => {
+  it('flags psychometric floors when straight-line flags are active but scores breach thresholds', () => {
     const result = computeUncertaintyScore({
       ...EMPTY_ATTEMPT,
       psychometrics_rfq_score: 1.8,
-      psychometrics_gasp_externalization_score: 5.7,
-      psychometrics_dweck_score: 1.8,
-      psychometrics_scs_sf_score: 1.3,
+      psychometrics_gasp_externalization_score: 4.75,
+      psychometrics_dweck_score: 2.3,
+      psychometrics_scs_sf_score: 2.417,
       psychometric_straight_line_flags: [
         'rfq_straight_line',
         'gasp_straight_line',
@@ -90,10 +90,10 @@ describe('computeUncertaintyScore', () => {
         'scs_sf_straight_line',
       ],
     });
-    expect(result.activeFlags).not.toContain('rfq_low_reflective_functioning_floor');
-    expect(result.activeFlags).not.toContain('gasp_extreme_externalization_floor');
-    expect(result.activeFlags).not.toContain('dweck_extreme_fixed_mindset_floor');
-    expect(result.activeFlags).not.toContain('scs_sf_low_self_compassion_floor');
+    expect(result.activeFlags).toContain('rfq_low_reflective_functioning_floor');
+    expect(result.activeFlags).toContain('gasp_extreme_externalization_floor');
+    expect(result.activeFlags).toContain('dweck_extreme_fixed_mindset_floor');
+    expect(result.activeFlags).toContain('scs_sf_low_self_compassion_floor');
   });
 
   it('flags high RFQ vs low mentalizing divergence', () => {

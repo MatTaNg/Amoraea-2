@@ -175,6 +175,24 @@ export function computeGamingCorrection(params: {
   );
 
   checkDivergence(
+    ps.brs !== null && ps.brs <= 1.8 && p.regulation !== null && p.regulation >= 7.0,
+    'brs',
+    `BRS self-reports very low resilience (${ps.brs}) but interview regulation is strong (${p.regulation}). BRS negative contribution may understate behavioral stability.`,
+  );
+
+  checkDivergence(
+    ps.aaq2 !== null && ps.aaq2 >= 33 && p.regulation !== null && p.regulation >= 7.0,
+    'aaq2',
+    `AAQ-II self-reports severe experiential avoidance (${ps.aaq2}) but interview regulation is strong (${p.regulation}). AAQ-II negative contribution may understate behavioral flexibility.`,
+  );
+
+  checkDivergence(
+    ps.rses !== null && ps.rses <= 24 && p.accountability !== null && p.accountability >= 7.0,
+    'rses',
+    `RSES self-reports low self-esteem (${ps.rses}) but interview accountability is strong (${p.accountability}). RSES negative contribution may understate relational self-worth signals.`,
+  );
+
+  checkDivergence(
     ps.scs_sf !== null &&
       ps.scs_sf >= 4.0 &&
       p.accountability !== null &&

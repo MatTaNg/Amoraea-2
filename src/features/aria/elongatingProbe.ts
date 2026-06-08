@@ -289,6 +289,21 @@ export function stripDuplicateInterviewClosingSentencesWithinDraft(draft: string
   } else {
     keep.add(closingIdx[closingIdx.length - 1]!);
   }
+  /** Model sometimes repeats the same reflective opener twice before the final thank-you. */
+  const goodWorkGettingThroughIdx = parts
+    .map((p, i) => (/\bgood work getting through\b/i.test(p) ? i : -1))
+    .filter((i) => i >= 0);
+  if (goodWorkGettingThroughIdx.length > 1) {
+    const keepGoodWorkIdx =
+      finalThanksIdx >= 0
+        ? goodWorkGettingThroughIdx.filter((i) => i < finalThanksIdx).pop() ??
+          goodWorkGettingThroughIdx[goodWorkGettingThroughIdx.length - 1]!
+        : goodWorkGettingThroughIdx[goodWorkGettingThroughIdx.length - 1]!;
+    for (const i of goodWorkGettingThroughIdx) {
+      if (i !== keepGoodWorkIdx) keep.delete(i);
+    }
+    keep.add(keepGoodWorkIdx);
+  }
   return parts
     .filter((_, i) => !closingIdx.includes(i) || keep.has(i))
     .join(' ')

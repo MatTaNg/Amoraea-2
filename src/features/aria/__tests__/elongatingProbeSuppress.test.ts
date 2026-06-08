@@ -308,6 +308,16 @@ describe('suppressed elongating fallbacks', () => {
     expect(out).not.toContain('Thank you for walking through');
   });
 
+  it('stripDuplicateInterviewClosingSentencesWithinDraft collapses duplicate good-work reflective openers', () => {
+    const draft =
+      'Good work getting through all of this — what you shared about listening really stuck with me. Good work getting through all of this — what you shared about listening without interrupting shows a lot about how you approach working things through. Thank you for being so open with me.';
+    const out = stripDuplicateInterviewClosingSentencesWithinDraft(draft);
+    const goodWorkMatches = out.match(/\bgood work getting through\b/gi) ?? [];
+    expect(goodWorkMatches).toHaveLength(1);
+    expect(out).toContain('Thank you for being so open with me');
+    expect(out).toContain('without interrupting');
+  });
+
   it('isMoment5ReadyForInterviewClose blocks when resolution follow-up still required', () => {
     expect(
       isMoment5ReadyForInterviewClose({

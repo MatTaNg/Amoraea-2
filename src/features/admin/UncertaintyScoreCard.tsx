@@ -2,6 +2,17 @@ import React from 'react';
 import { View, Text, StyleSheet } from 'react-native';
 import type { UncertaintyBreakdown } from '@features/psychometrics/computeUncertaintyScore';
 import { UNCERTAINTY_ROUTING_THRESHOLD } from '@features/psychometrics/computeUncertaintyScore';
+import {
+  AAQ2_HIGH_EXPERIENTIAL_AVOIDANCE_FLOOR_THRESHOLD,
+  ANXIETY_TRAIT_HIGH_FLOOR_THRESHOLD,
+  BRS_LOW_RESILIENCE_FLOOR_THRESHOLD,
+  DWECK_EXTREME_FIXED_MINDSET_FLOOR_THRESHOLD,
+  GASP_EXTREME_EXTERNALIZATION_FLOOR_THRESHOLD,
+  RSES_LOW_SELF_ESTEEM_FLOOR_THRESHOLD,
+  SCS_PRIVATE_LOW_SELF_AWARENESS_FLOOR_THRESHOLD,
+  SCS_PUBLIC_HIGH_SELF_CONSCIOUSNESS_FLOOR_THRESHOLD,
+  SCS_SF_LOW_SELF_COMPASSION_FLOOR_THRESHOLD,
+} from '@features/psychometrics/psychometricFloorBreaches';
 
 const FLAG_DESCRIPTIONS: Record<string, string> = {
   gasp_accountability_divergence:
@@ -21,15 +32,25 @@ const FLAG_DESCRIPTIONS: Record<string, string> = {
   sd3_narcissism_contempt_divergence:
     'High SD3 narcissism self-report but low contempt signals in structured scenarios.',
   sd3_narcissism_floor:
-    'SD3 narcissism self-report meets the automatic fail threshold (≥ 4.0) without a straight-line response pattern.',
+    'SD3 narcissism self-report meets the automatic fail threshold (≥ 4.0).',
   rfq_low_reflective_functioning_floor:
-    'RFQ self-report is below the automatic fail threshold (< 2.0) without a straight-line response pattern.',
+    'RFQ self-report is below the automatic fail threshold (< 2.0).',
   gasp_extreme_externalization_floor:
-    'GASP externalization self-report meets the automatic fail threshold (≥ 5.5) without a straight-line response pattern.',
+    `GASP externalization self-report meets the automatic fail threshold (≥ ${GASP_EXTREME_EXTERNALIZATION_FLOOR_THRESHOLD.toFixed(1)}).`,
   dweck_extreme_fixed_mindset_floor:
-    'Relationship Beliefs combined score is below the automatic fail threshold (< 2.0) without a straight-line response pattern.',
+    `Relationship Beliefs combined score is below the automatic fail threshold (< ${DWECK_EXTREME_FIXED_MINDSET_FLOOR_THRESHOLD.toFixed(1)}).`,
   scs_sf_low_self_compassion_floor:
-    'SCS-SF self-compassion score is below the automatic fail threshold (< 1.5) without a straight-line response pattern.',
+    `SCS-SF self-compassion score is below the automatic fail threshold (< ${SCS_SF_LOW_SELF_COMPASSION_FLOOR_THRESHOLD.toFixed(1)}).`,
+  brs_low_resilience_floor:
+    `BRS resilience score is at or below the automatic fail threshold (≤ ${BRS_LOW_RESILIENCE_FLOOR_THRESHOLD.toFixed(1)}).`,
+  anxiety_trait_high_floor:
+    `Anxiety Trait score meets the automatic fail threshold (≥ ${ANXIETY_TRAIT_HIGH_FLOOR_THRESHOLD.toFixed(1)}).`,
+  aaq2_high_experiential_avoidance_floor:
+    `AAQ-II experiential avoidance sum score meets the automatic fail threshold (≥ ${AAQ2_HIGH_EXPERIENTIAL_AVOIDANCE_FLOOR_THRESHOLD.toFixed(0)}).`,
+  rses_low_self_esteem_floor:
+    `Rosenberg Self-Esteem sum score is at or below the automatic fail threshold (≤ ${RSES_LOW_SELF_ESTEEM_FLOOR_THRESHOLD.toFixed(0)}).`,
+  scs_low_private_self_awareness_floor:
+    `SCS public self-consciousness is high (≥ ${SCS_PUBLIC_HIGH_SELF_CONSCIOUSNESS_FLOOR_THRESHOLD.toFixed(0)}) and private self-awareness is low (≤ ${SCS_PRIVATE_LOW_SELF_AWARENESS_FLOOR_THRESHOLD.toFixed(0)}).`,
   rfq_mentalizing_divergence_low_self_report:
     'Limited reflective functioning self-report but strong mentalizing signals in the interview.',
   rfq_mentalizing_divergence_high_self_report:

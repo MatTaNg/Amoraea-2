@@ -56,8 +56,9 @@ export interface PsychometricModifierResult {
 }
 
 /**
- * Sums per-instrument band penalties into a single psychometric modifier applied to the final gate score.
- * Range is [worst-case negative sum, 0] — favorable self-report bands contribute 0, never a positive boost.
+ * Sums per-instrument three-tier band penalties into a single psychometric modifier applied to the final gate score.
+ * Each instrument uses strong (0), average (-0.10), or poor (-0.25) bands; extreme scores are handled by floor
+ * breaches, not additional modifier tiers. Range is [worst-case negative sum, 0] — never a positive boost.
  */
 export function computePsychometricModifier(
   scores: PsychometricScores,
@@ -106,15 +107,18 @@ export function computePsychometricModifier(
   let brsBand = 'not assessed';
   if (scores.brsScore !== null) {
     const s = scores.brsScore;
-    if (s >= 4.0) {
+    if (s >= 3.5) {
       brsComponent = 0;
-      brsBand = 'high resilience';
-    } else if (s >= 3.0) {
-      brsComponent = 0;
-      brsBand = 'moderate resilience';
+      brsBand = 'strong resilience';
+    } else if (s >= 2.5) {
+      brsComponent = -0.1;
+      brsBand = 'average resilience';
+    } else if (s > 1.8) {
+      brsComponent = -0.25;
+      brsBand = 'poor resilience';
     } else {
-      brsComponent = -0.15;
-      brsBand = 'low resilience';
+      brsComponent = 0;
+      brsBand = 'floor breach';
     }
     modifier += brsComponent;
 
@@ -126,15 +130,18 @@ export function computePsychometricModifier(
   let anxietyTraitBand = 'not assessed';
   if (scores.anxietyTraitScore !== null) {
     const s = scores.anxietyTraitScore;
-    if (s >= 4.0) {
-      anxietyTraitComponent = -0.15;
-      anxietyTraitBand = 'high chronic anxiety';
-    } else if (s >= 3.0) {
+    if (s < 2.5) {
       anxietyTraitComponent = 0;
-      anxietyTraitBand = 'moderate anxiety';
+      anxietyTraitBand = 'strong — low chronic anxiety';
+    } else if (s < 3.5) {
+      anxietyTraitComponent = -0.1;
+      anxietyTraitBand = 'average anxiety';
+    } else if (s < 4.9) {
+      anxietyTraitComponent = -0.25;
+      anxietyTraitBand = 'poor — high anxiety';
     } else {
       anxietyTraitComponent = 0;
-      anxietyTraitBand = 'low anxiety';
+      anxietyTraitBand = 'floor breach';
     }
     modifier += anxietyTraitComponent;
 
@@ -148,13 +155,16 @@ export function computePsychometricModifier(
     const s = scores.scsSfScore;
     if (s >= 4.0) {
       scsSfComponent = 0;
-      scsSfBand = 'high self-compassion';
+      scsSfBand = 'strong self-compassion';
     } else if (s >= 3.0) {
-      scsSfComponent = 0;
-      scsSfBand = 'moderate self-compassion';
+      scsSfComponent = -0.1;
+      scsSfBand = 'average self-compassion';
+    } else if (s >= 2.5) {
+      scsSfComponent = -0.25;
+      scsSfBand = 'poor self-compassion';
     } else {
-      scsSfComponent = -0.2;
-      scsSfBand = 'low self-compassion';
+      scsSfComponent = 0;
+      scsSfBand = 'floor breach';
     }
     modifier += scsSfComponent;
 
@@ -169,13 +179,16 @@ export function computePsychometricModifier(
     const s = scores.gaspScore;
     if (s <= 2.5) {
       gaspComponent = 0;
-      gaspBand = 'low externalization';
-    } else if (s <= 4.5) {
-      gaspComponent = 0;
-      gaspBand = 'moderate externalization';
-    } else {
+      gaspBand = 'strong — low externalization';
+    } else if (s <= 3.5) {
+      gaspComponent = -0.1;
+      gaspBand = 'average externalization';
+    } else if (s < 4.6) {
       gaspComponent = -0.25;
-      gaspBand = 'high externalization';
+      gaspBand = 'poor externalization';
+    } else {
+      gaspComponent = 0;
+      gaspBand = 'floor breach';
     }
     modifier += gaspComponent;
 
@@ -218,21 +231,18 @@ export function computePsychometricModifier(
   let aaq2Band = 'not assessed';
   if (scores.aaq2Score !== null) {
     const s = scores.aaq2Score;
-    if (s <= 14) {
+    if (s <= 18) {
       aaq2Component = 0;
-      aaq2Band = 'high flexibility';
-    } else if (s <= 24) {
-      aaq2Component = 0;
-      aaq2Band = 'moderate flexibility';
-    } else if (s <= 34) {
-      aaq2Component = -0.2;
-      aaq2Band = 'mild avoidance';
-    } else if (s <= 44) {
-      aaq2Component = -0.4;
-      aaq2Band = 'high avoidance';
+      aaq2Band = 'strong psychological flexibility';
+    } else if (s <= 28) {
+      aaq2Component = -0.1;
+      aaq2Band = 'average flexibility';
+    } else if (s < 33) {
+      aaq2Component = -0.25;
+      aaq2Band = 'poor flexibility';
     } else {
-      aaq2Component = -0.6;
-      aaq2Band = 'severe avoidance';
+      aaq2Component = 0;
+      aaq2Band = 'floor breach';
     }
     modifier += aaq2Component;
 
@@ -265,21 +275,18 @@ export function computePsychometricModifier(
   let rsesBand = 'not assessed';
   if (scores.rsesScore !== null) {
     const s = scores.rsesScore;
-    if (s >= 30) {
+    if (s >= 33) {
       rsesComponent = 0;
-      rsesBand = 'high self-esteem';
-    } else if (s >= 23) {
-      rsesComponent = 0;
-      rsesBand = 'moderate-high self-esteem';
-    } else if (s >= 17) {
-      rsesComponent = -0.2;
-      rsesBand = 'moderate-low self-esteem';
-    } else if (s >= 11) {
-      rsesComponent = -0.4;
-      rsesBand = 'low self-esteem';
+      rsesBand = 'strong self-esteem';
+    } else if (s >= 28) {
+      rsesComponent = -0.1;
+      rsesBand = 'average self-esteem';
+    } else if (s > 24) {
+      rsesComponent = -0.25;
+      rsesBand = 'poor self-esteem';
     } else {
-      rsesComponent = -0.6;
-      rsesBand = 'floor self-esteem';
+      rsesComponent = 0;
+      rsesBand = 'floor breach';
     }
     modifier += rsesComponent;
 
@@ -306,24 +313,15 @@ export function computePsychometricModifier(
   if (scores.scsPublicScore !== null && scores.scsPrivateScore !== null) {
     const diff = scores.scsPrivateScore - scores.scsPublicScore;
 
-    if (diff >= 4) {
+    if (diff >= 2) {
       scsComponent = 0;
-      scsOrientation = 'strongly internally oriented';
-    } else if (diff >= 1) {
-      scsComponent = 0;
-      scsOrientation = 'mildly internally oriented';
-    } else if (diff >= -1) {
-      scsComponent = 0;
-      scsOrientation = 'balanced';
-    } else if (diff >= -4) {
+      scsOrientation = 'strong internal orientation';
+    } else if (diff >= -2) {
       scsComponent = -0.1;
-      scsOrientation = 'mildly externally oriented';
-    } else if (diff >= -6) {
-      scsComponent = -0.1;
-      scsOrientation = 'moderately externally oriented';
+      scsOrientation = 'balanced to mildly external';
     } else {
-      scsComponent = -0.2;
-      scsOrientation = 'strongly externally oriented';
+      scsComponent = -0.25;
+      scsOrientation = 'poor — externally oriented';
     }
     modifier += scsComponent;
 
@@ -374,13 +372,16 @@ export function computePsychometricModifier(
     const s = scores.sd3NarcissismScore;
     if (s <= 2.0) {
       sd3NarcissismComponent = 0;
-      sd3NarcissismBand = 'low narcissism';
-    } else if (s <= 3.5) {
-      sd3NarcissismComponent = 0;
-      sd3NarcissismBand = 'moderate narcissism';
-    } else {
+      sd3NarcissismBand = 'strong — low narcissism';
+    } else if (s <= 3.0) {
+      sd3NarcissismComponent = -0.1;
+      sd3NarcissismBand = 'average narcissism';
+    } else if (s < 4.0) {
       sd3NarcissismComponent = -0.25;
-      sd3NarcissismBand = 'high narcissism';
+      sd3NarcissismBand = 'poor — high narcissism';
+    } else {
+      sd3NarcissismComponent = 0;
+      sd3NarcissismBand = 'floor breach';
     }
     modifier += sd3NarcissismComponent;
 
@@ -403,11 +404,14 @@ export function computePsychometricModifier(
       rfqComponent = 0;
       rfqBand = 'strong reflective functioning';
     } else if (s >= 3.5) {
-      rfqComponent = 0;
-      rfqBand = 'moderate reflective functioning';
+      rfqComponent = -0.1;
+      rfqBand = 'average reflective functioning';
+    } else if (s >= 2.0) {
+      rfqComponent = -0.25;
+      rfqBand = 'poor reflective functioning';
     } else {
-      rfqComponent = -0.15;
-      rfqBand = 'limited reflective functioning';
+      rfqComponent = 0;
+      rfqBand = 'floor breach';
     }
     modifier += rfqComponent;
 
@@ -439,9 +443,14 @@ export function computePsychometricModifier(
         dweckScore: scores.dweckScore,
         scsSfScore: scores.scsSfScore,
         sd3NarcissismScore: scores.sd3NarcissismScore,
+        brsScore: scores.brsScore,
+        anxietyTraitScore: scores.anxietyTraitScore,
+        aaq2Score: scores.aaq2Score,
+        rsesScore: scores.rsesScore,
+        scsPublicScore: scores.scsPublicScore,
+        scsPrivateScore: scores.scsPrivateScore,
       },
       straightLineFlags,
-      { aaq2Score: scores.aaq2Score, rsesScore: scores.rsesScore },
     ),
   );
 

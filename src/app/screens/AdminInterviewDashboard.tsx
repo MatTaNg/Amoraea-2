@@ -122,6 +122,8 @@ import { UNCERTAINTY_ROUTING_THRESHOLD } from '@features/psychometrics/computeUn
 import type { DefenseCrossReferenceResult } from '@features/psychometrics/crossReferenceDefenseDetection';
 import { backfillMissingUncertaintyScores } from '@features/psychometrics/backfillMissingUncertaintyScores';
 import { applyPsychometricModifierToAttempt } from '@features/psychometrics/applyPsychometricModifier';
+import { normalizeGateFailDetailForPersist } from '@features/psychometrics/gateFailDetailForPersist';
+import { preparePsychometricFloorGateState } from '@features/psychometrics/preparePsychometricFloorGateState';
 import {
   formatPsychometricGateFailDescription,
   extractPsychometricFloorsFromGateDetail,
@@ -3375,15 +3377,29 @@ function SummaryTab({
 
       if (result.kind === 'success') {
         const delta = computePillarScoreDelta(oldPillars, result.pillar_scores);
+        const interviewGateFailReasons = result.gate.failReasonCodes ?? [];
+        const interviewGateFailDetail = normalizeGateFailDetailForPersist(result.gate.failReasonDetail);
+        const floorPrep = await preparePsychometricFloorGateState(
+          attempt.user_id,
+          interviewGateFailReasons,
+          interviewGateFailDetail,
+          { forceApply: true, attemptId: attempt.id, userId: attempt.user_id },
+        );
+        const gateFailReasons =
+          'gateFailReasons' in floorPrep ? floorPrep.gateFailReasons : interviewGateFailReasons;
+        const gateFailDetail =
+          'gateFailDetail' in floorPrep ? floorPrep.gateFailDetail : interviewGateFailDetail;
+        const passedAfterFloors =
+          gateFailReasons.length === 0 ? result.gate.pass : false;
         const { error } = await supabase
           .from('interview_attempts')
           .update({
             original_scores: snap,
             pillar_scores: result.pillar_scores,
             weighted_score: result.gate.weightedScore,
-            passed: result.gate.pass,
-            gate_fail_reasons: result.gate.failReasonCodes ?? [],
-            gate_fail_detail: result.gate.failReasonDetail ?? null,
+            passed: passedAfterFloors,
+            gate_fail_reasons: gateFailReasons,
+            gate_fail_detail: gateFailDetail,
             scenario_composites: result.scenarioCompositesJson,
             incomplete_reason: null,
             recalculated_at: nowIso,
@@ -3411,12 +3427,17 @@ function SummaryTab({
           Alert.alert('Recalculation failed', error.message);
           return;
         }
-        await applyPsychometricModifierToAttempt(attempt.user_id, attempt.id);
+        const psychApply = await applyPsychometricModifierToAttempt(attempt.user_id, attempt.id, {
+          forceApply: true,
+        });
         const rollupNote = result.notes.find((n) => n.startsWith('rollup_algorithm:'));
         const rollupVersion = rollupNote?.slice('rollup_algorithm:'.length) ?? 'unknown';
         const pillarPreview = Object.entries(result.pillar_scores)
           .map(([k, v]) => `${k}=${v}`)
           .join(', ');
+        const psychWarning = psychApply.applied
+          ? null
+          : `Psychometric floors/modifier were not applied (${psychApply.skipReason ?? 'unknown'}).`;
         Alert.alert(
           'Scores recalculated',
           [
@@ -3428,7 +3449,11 @@ function SummaryTab({
               : Object.values(result.pillar_scores).some((v) => !Number.isInteger(v))
                 ? 'Warning: pillar scores are not integers — stale admin bundle.'
                 : 'Integer scenario-only rollup applied.',
-          ].join('\n'),
+            floorWarning,
+            psychWarning,
+          ]
+            .filter(Boolean)
+            .join('\n'),
         );
         void remoteLog('[RECALCULATE_SCORES]', {
           triggeredByUserId: adminSessionUserId,
@@ -3449,7 +3474,7 @@ function SummaryTab({
             weighted_score: null,
             passed: null,
             gate_fail_reasons: [],
-            gate_fail_detail: null,
+            gate_fail_detail: normalizeGateFailDetailForPersist(null),
             scenario_composites: null,
             recalculated_at: nowIso,
             recalculation_delta: {},

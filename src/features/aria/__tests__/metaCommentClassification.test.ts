@@ -402,6 +402,33 @@ describe('resolveMetaCommentForInterviewTurn', () => {
     expect(resolved.effective?.type).toBe('frustration');
   });
 
+  it('exempts name-collection replies while profile name is unset', () => {
+    const resolved = resolveMetaCommentForInterviewTurn('God bless you.', {
+      lastQuestionText: "Hi, I'm Amoraea. What can I call you?",
+      priorUserUtteranceCount: 0,
+      isInterviewAppRoute: true,
+      hasProfileFirstName: false,
+    });
+    expect(resolved.raw?.type).toBe('ambiguous_short');
+    expect(resolved.exemptMetaCommentTurn).toBe(true);
+    expect(resolved.exemptMetaCommentTurnReason).toBe('name_entry_turn');
+    expect(resolved.effective).toBeNull();
+  });
+
+  it('exempts gratitude during post-name preamble briefing', () => {
+    const resolved = resolveMetaCommentForInterviewTurn('Thank you very much.', {
+      lastQuestionText:
+        "Good to meet you, Matt. The way this works is I'll first give you three situations. Are you ready?",
+      priorUserUtteranceCount: 2,
+      isInterviewAppRoute: true,
+      hasProfileFirstName: true,
+    });
+    expect(resolved.raw?.type).toBe('ambiguous_short');
+    expect(resolved.exemptMetaCommentTurn).toBe(true);
+    expect(resolved.exemptMetaCommentTurnReason).toBe('preamble_readiness_turn');
+    expect(resolved.effective).toBeNull();
+  });
+
   it('does not exempt resume welcome replies — classify ambiguous_short for telemetry/routing', () => {
     const resumeLine =
       "Welcome back — we can continue where we left off. When you're ready, say so, or I can repeat what I said and get ready for your response.";

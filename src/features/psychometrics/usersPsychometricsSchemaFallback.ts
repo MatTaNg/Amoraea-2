@@ -88,6 +88,11 @@ export function sd3NarcissismScoreForFloorFromUserRow(row: Record<string, unknow
 }
 
 /** Coerced psychometric means for instrument floor gating (RFQ + SD3 + GASP/Dweck/SCS-SF). */
+export function userHasPsychometricScoresForScoring(row: Record<string, unknown>): boolean {
+  const scores = psychometricFloorScoresFromUserRow(row);
+  return Object.values(scores).some((v) => v != null && Number.isFinite(v));
+}
+
 export function psychometricFloorScoresFromUserRow(
   row: Record<string, unknown>,
 ): PsychometricFloorUserScores {
@@ -97,6 +102,12 @@ export function psychometricFloorScoresFromUserRow(
     dweckScore: coercePsychometricScore(row.psychometrics_dweck_score),
     scsSfScore: coercePsychometricScore(row.psychometrics_scs_sf_score),
     sd3NarcissismScore: sd3NarcissismScoreForFloorFromUserRow(row),
+    brsScore: coercePsychometricScore(row.psychometrics_brs_score),
+    anxietyTraitScore: coercePsychometricScore(row.psychometrics_anxiety_trait_score),
+    aaq2Score: coercePsychometricScore(row.psychometrics_aaq2_score),
+    rsesScore: coercePsychometricScore(row.psychometrics_rses_score),
+    scsPublicScore: coercePsychometricScore(row.psychometrics_scs_public_score),
+    scsPrivateScore: coercePsychometricScore(row.psychometrics_scs_private_score),
   };
 }
 
@@ -212,3 +223,33 @@ export const PSYCHOMETRIC_USER_SELECT_WITHOUT_SD3 = `
 export const PSYCHOMETRIC_USER_SELECT_WITH_SD3 = `${PSYCHOMETRIC_USER_SELECT_WITHOUT_SD3},
   psychometrics_sd3_narcissism_score,
   psychometrics_sd3_narcissism_responses`.trim();
+
+/** Minimal user select for psychometric floor gating (score columns only). */
+export const PSYCHOMETRIC_FLOOR_SCORES_USER_SELECT = [
+  'psychometrics_rfq_score',
+  'psychometrics_gasp_score',
+  'psychometrics_dweck_score',
+  'psychometrics_scs_sf_score',
+  'psychometrics_sd3_narcissism_score',
+  'psychometrics_brs_score',
+  'psychometrics_anxiety_trait_score',
+  'psychometrics_aaq2_score',
+  'psychometrics_rses_score',
+  'psychometrics_scs_public_score',
+  'psychometrics_scs_private_score',
+  'psychometrics_completed_at',
+].join(',');
+
+export const PSYCHOMETRIC_FLOOR_SCORES_USER_SELECT_LEGACY_SD3 = [
+  'psychometrics_rfq_score',
+  'psychometrics_gasp_score',
+  'psychometrics_dweck_score',
+  'psychometrics_scs_sf_score',
+  'psychometrics_brs_score',
+  'psychometrics_anxiety_trait_score',
+  'psychometrics_aaq2_score',
+  'psychometrics_rses_score',
+  'psychometrics_scs_public_score',
+  'psychometrics_scs_private_score',
+  'psychometrics_completed_at',
+].join(',');

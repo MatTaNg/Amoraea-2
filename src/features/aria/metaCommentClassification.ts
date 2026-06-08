@@ -4,7 +4,13 @@
  * Uses weighted regex hits + fixed priority when multiple categories score above threshold (see code).
  */
 
-import { isClientAudioRecoveryAssistantLine, NON_ENGLISH_VOICE_PROMPT } from './interviewLanguageGate';
+import {
+  isClientAudioRecoveryAssistantLine,
+  isInterviewPreambleBriefingMoment,
+  isNamePromptInterviewMoment,
+  isSimpleYesNoInterviewMoment,
+  NON_ENGLISH_VOICE_PROMPT,
+} from './interviewLanguageGate';
 
 export type MetaCommentType =
   | 'frustration'
@@ -1028,6 +1034,7 @@ export function looksLikeShortNameReply(text: string): boolean {
 /** Telemetry on why classification was nulled for meta-comment routing */
 export type ExemptMetaCommentTurnReason =
   | 'name_entry_turn'
+  | 'preamble_readiness_turn'
   | 'post_meta_ack_window_active'
   | 'seq_not_advanced_since_last_ack'
   | 'no_exemption_condition_met';
@@ -1067,15 +1074,26 @@ export function resolveMetaCommentForInterviewTurn(
     ctx.priorUserUtteranceCount === 0 &&
     !ctx.hasProfileFirstName &&
     looksLikeShortNameReply(text);
+  const isNameCollectionTurn =
+    ctx.isInterviewAppRoute &&
+    !ctx.hasProfileFirstName &&
+    isNamePromptInterviewMoment(ctx.lastQuestionText);
+  const isPreambleOrReadinessTurn =
+    ctx.isInterviewAppRoute &&
+    (isInterviewPreambleBriefingMoment(ctx.lastQuestionText) ||
+      isSimpleYesNoInterviewMoment(ctx.lastQuestionText));
   const postMetaAckSeqWindow =
     ctx.suppressMetaClassificationPostMetaAckAwaitingSubstantive === true && wc < 8;
 
   let exemptMetaCommentTurn = false;
   let exemptMetaCommentTurnReason: ExemptMetaCommentTurnReason = 'no_exemption_condition_met';
 
-  if (isGreetingNameTurn) {
+  if (isGreetingNameTurn || isNameCollectionTurn) {
     exemptMetaCommentTurn = true;
     exemptMetaCommentTurnReason = 'name_entry_turn';
+  } else if (isPreambleOrReadinessTurn) {
+    exemptMetaCommentTurn = true;
+    exemptMetaCommentTurnReason = 'preamble_readiness_turn';
   } else if (postMetaAckSeqWindow) {
     exemptMetaCommentTurn = true;
     exemptMetaCommentTurnReason = 'seq_not_advanced_since_last_ack';

@@ -6,6 +6,12 @@ const AMBIENT_PHRASES = [
   'have a great time',
   'have a good time',
   'good luck',
+  'god bless you',
+  'bless you',
+  'thank you',
+  "that's all",
+  'all for now',
+  'see you next',
   'sounds good',
   'okay',
   'let me',
@@ -54,7 +60,71 @@ const NON_NAME_WORDS = new Set([
   'had',
   'say',
   'let',
+  'you',
+  'your',
+  'bless',
+  'god',
+  'dear',
+  'that',
+  'thats',
+  'all',
+  'for',
+  'now',
+  'bye',
+  'cheers',
+  'what',
+  'which',
+  'who',
+  'how',
+  'why',
+  'when',
+  'where',
+  'name',
+  'call',
+  'use',
+  'catch',
+  'quite',
+  'didnt',
+  'got',
+  'this',
+  'works',
+  'work',
 ]);
+
+/** Whisper often mishears short first names (e.g. "Matt" → "Maths" / "Mads"). */
+const COMMON_NAME_WHISPER_CORRECTIONS: Record<string, string> = {
+  maths: 'Matt',
+  mads: 'Matt',
+  mat: 'Matt',
+  maps: 'Matt',
+  map: 'Matt',
+  max: 'Matt',
+};
+
+const NAME_PROMPT_ECHO_WORDS = new Set([
+  'what',
+  'which',
+  'who',
+  'how',
+  'why',
+  'when',
+  'where',
+  'name',
+  'call',
+  'use',
+  'catch',
+  'quite',
+  'didnt',
+  'sorry',
+]);
+
+function stripNameTokenPunctuation(token: string): string {
+  return token.replace(/[.!?,;:]+$/g, '').trim();
+}
+
+function normalizeNameTokenForBlocklist(token: string): string {
+  return token.toLowerCase().replace(/['’]/g, '');
+}
 
 /** Whisper often transcribes pre-interview ambient chatter on the name question. */
 export function isLikelyAmbientSpeech(transcription: string, _questionContext?: string): boolean {
@@ -75,7 +145,7 @@ export function isLikelyAmbientSpeech(transcription: string, _questionContext?: 
       normalized.length >= 2 &&
       normalized.length <= 20 &&
       /^[A-Za-z'-]+$/.test(normalized) &&
-      !NON_NAME_WORDS.has(normalized.toLowerCase())
+      !NON_NAME_WORDS.has(normalizeNameTokenForBlocklist(normalized))
     );
   });
 
@@ -92,9 +162,14 @@ export function isPlausibleInterviewName(extracted: string | null | undefined): 
   const words = name.split(/\s+/).filter((w) => w.length > 0);
   if (words.length > 3) return false;
 
-  const lowerName = name.toLowerCase();
+  const lowerName = normalizeNameTokenForBlocklist(name);
   if (NON_NAME_WORDS.has(lowerName)) return false;
-  if (words.length === 1 && NON_NAME_WORDS.has(words[0]!.toLowerCase())) return false;
+  if (words.some((w) => NON_NAME_WORDS.has(normalizeNameTokenForBlocklist(w)))) return false;
+
+  if (words.length >= 2) {
+    const firstNorm = normalizeNameTokenForBlocklist(words[0]!);
+    if (words.every((w) => normalizeNameTokenForBlocklist(w) === firstNorm)) return false;
+  }
 
   return true;
 }
@@ -117,3 +192,54 @@ export function formatWithName(template: string, name: string | null): string {
 
 export const INTERVIEW_NAME_AMBIENT_REASK_LINE =
   "Sorry, I didn't quite catch that — what name would you like me to use?";
+
+export const INTERVIEW_NAME_REPEAT_REASK_LINE =
+  'Please say just your first name clearly — what should I call you?';
+
+/** User tapped mic before TTS fully cleared — likely captured speaker bleed, not their voice. */
+export const INTERVIEW_NAME_EARLY_MIC_REASK_LINE =
+  'Please wait until I finish speaking, then tap the mic and say your first name clearly.';
+
+/** Short mic / VAD retry prompts — duration estimation often overshoots; must not replay on web. */
+export function isInterviewRecordingRetryLine(text: string): boolean {
+  const stripped = text.trim();
+  if (stripped === INTERVIEW_NAME_AMBIENT_REASK_LINE) return true;
+  if (stripped === INTERVIEW_NAME_REPEAT_REASK_LINE) return true;
+  if (stripped === INTERVIEW_NAME_EARLY_MIC_REASK_LINE) return true;
+  if (/^i didn't catch any speech on that try\b/i.test(stripped)) return true;
+  return false;
+}
+
+/** Swap re-ask wording when consecutive TTS dedup would suppress audio. */
+export function pickAlternateInterviewRecordingRetryLine(message: string): string | null {
+  const stripped = message.trim();
+  if (stripped === INTERVIEW_NAME_AMBIENT_REASK_LINE) return INTERVIEW_NAME_REPEAT_REASK_LINE;
+  if (stripped === INTERVIEW_NAME_REPEAT_REASK_LINE) return INTERVIEW_NAME_AMBIENT_REASK_LINE;
+  return null;
+}
+
+/** Correct common Whisper mishears when the user is giving a single-word first name. */
+export function applyInterviewNameWhisperCorrection(transcription: string): string {
+  const words = transcription.trim().split(/\s+/).filter(Boolean);
+  if (words.length !== 1) return transcription;
+  const token = normalizeNameTokenForBlocklist(stripNameTokenPunctuation(words[0]!));
+  const corrected = COMMON_NAME_WHISPER_CORRECTIONS[token];
+  return corrected ?? transcription;
+}
+
+/** Single-word reply that echoes the name prompt (e.g. "What" from "what name would you like…"). */
+export function isInterviewNameWhisperEcho(
+  transcription: string,
+  lastQuestionText: string | null | undefined,
+): boolean {
+  const words = transcription.trim().split(/\s+/).filter(Boolean);
+  if (words.length !== 1) return false;
+  const token = normalizeNameTokenForBlocklist(stripNameTokenPunctuation(words[0]!));
+  if (NAME_PROMPT_ECHO_WORDS.has(token)) return true;
+  const questionWords = (lastQuestionText ?? '')
+    .toLowerCase()
+    .split(/[^a-z']+/i)
+    .filter((w) => w.length >= 3)
+    .map((w) => normalizeNameTokenForBlocklist(w));
+  return questionWords.includes(token);
+}

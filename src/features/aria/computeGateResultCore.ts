@@ -22,6 +22,13 @@ import {
   type ScenarioPillarLow,
 } from './mentalizingRepairScenarioFloor';
 import { resolveEmotionRecognitionRawScoreForGate } from './emotionRecognitionInterview';
+import { normalizeGateFailDetailForPersist } from '@features/psychometrics/gateFailDetailForPersist';
+
+function gateFailDetailForResult(
+  detail: GateFailDetailJson | Record<string, unknown> | null | undefined,
+): GateFailDetailJson {
+  return normalizeGateFailDetailForPersist(detail) as GateFailDetailJson;
+}
 
 /** Research-based weights (sum = 1.0). Renormalized over assessed constructs only. */
 export const GATE_MARKER_BASE_WEIGHTS: Record<InterviewMarkerId, number> = {
@@ -38,12 +45,12 @@ export const GATE_MARKER_BASE_WEIGHTS: Record<InterviewMarkerId, number> = {
 /** Minimum score for an assessed construct; omitted = no floor. */
 export const GATE_MARKER_FLOORS: Partial<Record<InterviewMarkerId, number>> = {
   contempt: 5.0,
-  accountability: 4.5,
-  repair: 4.5,
-  regulation: 4.0,
+  accountability: 5.0,
+  repair: 5.0,
+  regulation: 4.5,
 };
 
-export const GATE_PASS_WEIGHTED_MIN = 6.0;
+export const GATE_PASS_WEIGHTED_MIN = 6.5;
 
 /** Emotion recognition raw (0–1): depth signal modifier only; review flag between floor and review max. */
 const EMOTION_RECOGNITION_FLOOR_EXCLUSIVE_MAX = 0.34;
@@ -139,7 +146,7 @@ export type ComputeGateResultOptions = {
   skipAutoFail?: boolean;
   /**
    * When set, after weighted threshold passes, each scenario’s composite (mean of present pillar scores in that
-   * scenario’s slice) must be ≥ 4.5. Omit for holistic-only / scripts.
+   * scenario’s slice) must be ≥ 5.0. Omit for holistic-only / scripts.
    */
   scenarioPillarScoresByScenario?: Partial<
     Record<1 | 2 | 3, Record<string, number | null | undefined> | null | undefined>
@@ -184,7 +191,7 @@ export type ComputeGateResultOptions = {
 };
 
 /** Weighted pass threshold when referral boost is active (floors unchanged). */
-export const REFERRAL_WEIGHTED_PASS_MIN = 5.5;
+export const REFERRAL_WEIGHTED_PASS_MIN = 6.0;
 
 const GATE_FAIL_CODE_ORDER: GateFailCode[] = [
   'weighted_score',
@@ -400,7 +407,7 @@ export function computeGateResultCore(
     failReason,
     reviewFlags: [],
     failReasonCodes: [],
-    failReasonDetail: null,
+    failReasonDetail: gateFailDetailForResult(null),
     modifiedWeightedScore: null,
     scoreModifier: 0,
   });
@@ -779,7 +786,7 @@ export function computeGateResultCore(
       failReason: formatFloorBreachFailReason(floorBreaches),
       scenarioComposites,
       failReasonCodes: scenarioFloorGateDetail ? ['scenario_floor'] : undefined,
-      failReasonDetail: scenarioFloorGateDetail,
+      failReasonDetail: gateFailDetailForResult(scenarioFloorGateDetail),
       ...gateExtras(),
     };
   }
@@ -854,7 +861,7 @@ export function computeGateResultCore(
       excludedMarkers,
       failReason: formatAggregateGateFailReason(failCodesOrdered, detail, modifiedScore, weightedMin),
       failReasonCodes: failCodesOrdered,
-      failReasonDetail: detail,
+      failReasonDetail: gateFailDetailForResult(detail),
       scenarioComposites,
       ...gateExtras(),
     };
@@ -872,7 +879,7 @@ export function computeGateResultCore(
       excludedMarkers,
       failReason: null,
       failReasonCodes: [],
-      failReasonDetail: null,
+      failReasonDetail: gateFailDetailForResult(null),
       scenarioComposites,
       ...gateExtras(),
     };
@@ -889,7 +896,7 @@ export function computeGateResultCore(
     excludedMarkers,
     failReason: null,
     failReasonCodes: [],
-    failReasonDetail: null,
+    failReasonDetail: gateFailDetailForResult(null),
     ...gateExtras(),
   };
 }

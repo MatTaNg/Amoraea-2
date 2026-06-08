@@ -15,12 +15,11 @@ export function wouldTriggerSd3NarcissismFloor(
 ): boolean {
   if (sd3Score === null || !Number.isFinite(sd3Score)) return false;
   if (sd3Score < SD3_NARCISSISM_FLOOR_THRESHOLD) return false;
-  if (isSd3NarcissismStraightLineFlagActive(straightLineFlags)) return false;
   return true;
 }
 
 export function formatSd3NarcissismFloorAdminDescription(sd3Score: number): string {
-  return `SD3 narcissism score of ${sd3Score.toFixed(2)} meets or exceeds the automatic fail threshold of ${SD3_NARCISSISM_FLOOR_THRESHOLD.toFixed(1)}. User self-reported grandiose entitlement, self-enhancement, and special treatment expectations at a level that poses significant risk for intimate partnership dynamics. Straight-line responses excluded from this floor.`;
+  return `SD3 narcissism score of ${sd3Score.toFixed(2)} meets or exceeds the automatic fail threshold of ${SD3_NARCISSISM_FLOOR_THRESHOLD.toFixed(1)}. User self-reported grandiose entitlement, self-enhancement, and special treatment expectations at a level that poses significant risk for intimate partnership dynamics.`;
 }
 
 export function isRetroactiveSd3NarcissismFloorReview(

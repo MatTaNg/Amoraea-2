@@ -33,6 +33,7 @@ import {
   MOMENT_5_SPECIFICITY_REDIRECT_ALT_TEXT,
   MOMENT_5_SPECIFICITY_REDIRECT_TEXT,
   MOMENT_5_RESOLUTION_FOLLOWUP_TEXT,
+  MOMENT_5_ACCOUNTABILITY_PROBE_PHILOSOPHY_WITH_GRIEF_ACK_TEXT,
   looksLikeMoment5AccountabilityProbeAssistantPrompt,
   looksLikeMoment5ConflictValidityClarificationPrompt,
   looksLikeMoment5ResolutionFollowUpPrompt,
@@ -59,7 +60,9 @@ import {
   moment5PersonalNarrativeHasConcreteAnchor,
   combineMoment5UserTurnText,
   moment5TranscriptHasConcreteAnchor,
+  moment5UserOrTranscriptHasConcreteAnchor,
   moment5UserDeclinesConcreteReask,
+  shouldInjectMoment5SpecificityRedirect,
   buildMoment5ConfusionRepeatReplayAfterPriorAnswer,
   moment5ResponseAddsTensionDetail,
   moment5ResponseContainsDeathDisclosure,
@@ -1102,6 +1105,28 @@ describe('probeAndScoringUtils', () => {
       ).toBe(true);
     });
 
+    it('detects philosophy-style accountability probe as specificity-redirect phase', () => {
+      expect(
+        looksLikeMoment5SpecificityRedirectPrompt(MOMENT_5_ACCOUNTABILITY_PROBE_PHILOSOPHY_WITH_GRIEF_ACK_TEXT),
+      ).toBe(true);
+    });
+
+    it('accepts proper-name subject + conflict episode (Devanshu regression)', () => {
+      const answer =
+        'Devanshu called me a bad coach during a session and I got upset and judged him for walking away. It got resolved when we both shared perspectives with a facilitator.';
+      expect(moment5PersonalNarrativeHasConcreteAnchor(answer)).toBe(true);
+      expect(moment5ResponseIsAbstract(answer)).toBe(false);
+      expect(
+        shouldInjectMoment5SpecificityRedirect({
+          userText: answer,
+          narrativeConcrete: false,
+          answeringAfterSpecificityRedirect: false,
+          specificityRedirectIssued: false,
+          specificityRedirectInTranscript: false,
+        }),
+      ).toBe(false);
+    });
+
     it('stripEmbeddedMoment5SpecificityRedirectAsk removes a glued-in redirect from a single paragraph', () => {
       const draft =
         'Great work, Matt — what you shared comes through clearly. Can you think of a specific time — maybe with a partner, friend, or family member — and walk me through what happened? Here is one more question.';
@@ -1453,6 +1478,20 @@ describe('probeAndScoringUtils', () => {
       expect(moment5UserDeclinesConcreteReask('I just told you.')).toBe(true);
       expect(evaluateMoment5AccountabilityProbe('I just told you.').reason).toBe('decline_or_vague_evade');
       expect(evaluateMoment5AccountabilityProbe('I just told you.').shouldProbe).toBe(false);
+    });
+
+    it('treats pushback that a specific person was already named as decline', () => {
+      expect(
+        moment5UserDeclinesConcreteReask('That was not a general approach, I named a specific person.'),
+      ).toBe(true);
+    });
+
+    it('moment5UserOrTranscriptHasConcreteAnchor uses the current reply before transcript rows exist', () => {
+      const devanshuTurn =
+        'Devanshu called me a bad coach and I got upset; we resolved it with a facilitator helping us share perspectives.';
+      expect(
+        moment5UserOrTranscriptHasConcreteAnchor(devanshuTurn, [{ role: 'user', content: 'short', interviewMoment: 5 }]),
+      ).toBe(true);
     });
   });
 

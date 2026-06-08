@@ -19,10 +19,7 @@ import {
 } from './psychometricFloorBreaches.ts';
 import { SD3_NARCISSISM_FLOOR_FAIL_CODE } from './sd3NarcissismFloor.ts';
 import { LEGACY_PSYCHOMETRIC_PASS_FLIP_REVIEW_FLAG } from './legacyPsychometricReview.ts';
-
-export type ApplyPsychometricModifierOptions = {
-  preservePassIfPreviouslyPassing?: boolean;
-};
+import { normalizeGateFailDetailForPersist } from './gateFailDetailForPersist.ts';
 import {
   coercePsychometricScore,
   isMissingUsersPsychometricsSd3ColumnsError,
@@ -30,7 +27,18 @@ import {
   sd3NarcissismResponsesFromUserRow,
   sd3NarcissismScoreForFloorFromUserRow,
   sd3NarcissismScoreFromUserRow,
+  userHasPsychometricScoresForScoring,
 } from './usersPsychometricsSchemaFallback.ts';
+
+export type ApplyPsychometricModifierOptions = {
+  preservePassIfPreviouslyPassing?: boolean;
+  forceApply?: boolean;
+};
+
+export type ApplyPsychometricModifierResult = {
+  applied: boolean;
+  skipReason?: string;
+};
 
 function mergeScsResponses(
   publicResponses: Record<number, number> | null | undefined,
@@ -153,7 +161,8 @@ export async function applyPsychometricModifierToAttempt(
   supabase: SupabaseClient,
   userId: string,
   attemptId: string,
-): Promise<void> {
+  options?: ApplyPsychometricModifierOptions,
+): Promise<ApplyPsychometricModifierResult> {
   let userRow: Record<string, unknown> | null = null;
   /** Prefer SD3 columns first — legacy-only select omits `psychometrics_sd3_narcissism_score` and can hide floor triggers. */
   for (const select of [PSYCHOMETRIC_USER_SELECT_WITH_SD3, PSYCHOMETRIC_USER_SELECT_LEGACY_SD3]) {
@@ -202,16 +211,12 @@ export async function applyPsychometricModifierToAttempt(
 
   if (!attempt) {
     console.warn('[PsychometricModifier] no attempt found for', attemptId);
-    return;
+    return { applied: false, skipReason: 'attempt_not_found' };
   }
 
-  if (
-    user.psychometrics_brs_score == null &&
-    user.psychometrics_aaq2_score == null &&
-    user.psychometrics_rses_score == null
-  ) {
+  if (!hasStoredScores) {
     console.log('[PsychometricModifier] psychometric scores missing — skipping');
-    return;
+    return { applied: false, skipReason: 'psychometric_scores_missing' };
   }
 
   const pillars = (attempt.pillar_scores as Record<string, number> | null) ?? {};
@@ -429,22 +434,26 @@ export async function applyPsychometricModifierToAttempt(
 
   if (error) {
     console.error('[PsychometricModifier] failed to persist:', error);
-  } else {
-    console.log(
-      '[PsychometricModifier] applied — raw modifier:',
-      result.modifier,
-      'corrected modifier:',
-      correctedPsychometricModifier,
-      'gaming level:',
-      gamingCorrection.correctionLevel,
-      'depthModified:',
-      depthSignalModifiedScore,
-      'finalModified:',
-      finalModifiedScore,
-      'finalPass:',
-      finalPass,
-      'gateFailReasons:',
-      allFailReasons,
-    );
+    return { applied: false, skipReason: `persist_failed: ${error.message}` };
   }
+
+  console.log(
+    '[PsychometricModifier] applied — raw modifier:',
+    result.modifier,
+    'corrected modifier:',
+    correctedPsychometricModifier,
+    'gaming level:',
+    gamingCorrection.correctionLevel,
+    'depthModified:',
+    depthSignalModifiedScore,
+    'finalModified:',
+    finalModifiedScore,
+    'finalPass:',
+    finalPass,
+    'gateFailReasons:',
+    allFailReasons,
+    'floorBreaches:',
+    floorBreaches,
+  );
+  return { applied: true };
 }

@@ -1,5 +1,5 @@
 /** Minimum mean pillar score per scenario (1–3) for gate pass; Moment 4/5 excluded by caller. */
-export const SCENARIO_COMPOSITE_PASS_MIN = 4.5;
+export const SCENARIO_COMPOSITE_PASS_MIN = 5.0;
 
 export type ScenarioGateIndex = 1 | 2 | 3;
 
