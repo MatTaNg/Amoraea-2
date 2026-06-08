@@ -268,6 +268,7 @@ describe('psychometric floor gate merge', () => {
     }
     expect(psychFloors[SCS_LOW_PRIVATE_SELF_AWARENESS_FLOOR_CODE]?.description).toContain('18');
     expect(psychFloors[SCS_LOW_PRIVATE_SELF_AWARENESS_FLOOR_CODE]?.description).toContain('9');
+    expect(psychFloors[SCS_LOW_PRIVATE_SELF_AWARENESS_FLOOR_CODE]?.score).toBe(18);
   });
 
   it('triggers all nine instrument floors for the regression user profile', () => {

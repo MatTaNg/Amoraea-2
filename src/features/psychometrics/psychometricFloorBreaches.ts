@@ -402,7 +402,8 @@ export function psychometricFloorScoreForGateDetail(
       const pub = coercePsychometricScore(scores.scsPublicScore);
       const priv = coercePsychometricScore(scores.scsPrivateScore);
       if (pub == null || priv == null) return null;
-      return priv - pub;
+      // Public subscale is the primary breached threshold; description carries both subscales.
+      return pub;
     }
     case SD3_NARCISSISM_FLOOR_FAIL_CODE:
       return coercePsychometricScore(scores.sd3NarcissismScore);
@@ -655,7 +656,7 @@ export function getRetroactivePsychometricFloorReviews(
   ) {
     reviews.push({
       id: SCS_LOW_PRIVATE_SELF_AWARENESS_FLOOR_CODE,
-      score: scores.scsPrivateScore - scores.scsPublicScore,
+      score: scores.scsPublicScore,
       description: formatScsLowPrivateSelfAwarenessFloorAdminDescription(
         scores.scsPublicScore,
         scores.scsPrivateScore,

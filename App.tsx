@@ -25,12 +25,13 @@ import { POST_INTERVIEW_BG } from '@app/screens/onboarding/PostInterviewScrollLa
 import { PsychometricAssessmentScreen } from '@app/screens/PsychometricAssessmentScreen';
 import { isAmoraeaAdminConsoleEmail } from '@/constants/adminConsole';
 import {
-  resolveStandardPostInterviewStackRoute,
-} from '@utilities/postInterviewProcessingGate';
-import {
   fetchInterviewAttemptRevealSnapshot,
   fetchUserInterviewRevealPollRow,
 } from '@utilities/fetchInterviewAttemptRevealSnapshot';
+import {
+  resolveInterviewStackBootstrap,
+  shouldFetchPostInterviewDeferralSnapshot,
+} from '@features/psychometrics/resolveInterviewStackBootstrap';
 import {
   resolveInitialInterviewRoute,
   type InterviewStackRoute,
@@ -311,12 +312,10 @@ const LoggedInInterviewShell = ({ userId }: { userId: string }) => {
     staleTime: 0,
   });
 
-  const needsPostInterviewDeferralSnapshot =
-    initialRoute?.screen === 'PostInterviewProcessing' ||
-    initialRoute?.screen === 'PostInterviewPassed' ||
-    initialRoute?.screen === 'PostInterviewFailed' ||
-    initialRoute?.screen === 'PostInterview' ||
-    profileShowsStandardInterviewComplete;
+  const needsPostInterviewDeferralSnapshot = shouldFetchPostInterviewDeferralSnapshot(
+    initialRoute,
+    profileShowsStandardInterviewComplete,
+  );
 
   const { data: deferralAttempt, isPending: deferralPending } = useQuery({
     queryKey: ['standardPostInterviewDeferral', userId],
@@ -355,34 +354,20 @@ const LoggedInInterviewShell = ({ userId }: { userId: string }) => {
       return null;
     }
 
-    let initialRouteName: InterviewStackRoute = initialRoute?.screen ?? 'Aria';
-    let interviewAlreadyCompleted =
-      initialRoute?.interviewAlreadyCompleted === true || profileShowsStandardInterviewComplete;
-    let legacyPsychometricsMode = initialRoute?.legacyPsychometricsMode === true;
+    const bootstrap = resolveInterviewStackBootstrap({
+      initialRoute,
+      profileShowsStandardInterviewComplete,
+      deferralSnapshot: deferralAttempt?.snap,
+      isAdminEmail,
+      lockedPostInterviewRoute: lockedPostInterviewRouteRef.current,
+    });
 
-    if (profileShowsStandardInterviewComplete && initialRouteName === 'Aria') {
-      initialRouteName = 'PostInterview';
-      interviewAlreadyCompleted = true;
-      legacyPsychometricsMode = false;
+    if (isTerminalPostInterviewRoute(bootstrap.initialRouteName)) {
+      lockedPostInterviewRouteRef.current = bootstrap.initialRouteName;
     }
 
-    const serverResolvedPostInterviewScreen = initialRoute?.screen;
-    if (
-      serverResolvedPostInterviewScreen === 'PostInterviewPassed' ||
-      serverResolvedPostInterviewScreen === 'PostInterviewFailed'
-    ) {
-      initialRouteName = serverResolvedPostInterviewScreen;
-    } else if (needsPostInterviewDeferralSnapshot && deferralAttempt && !isAdminEmail) {
-      initialRouteName = resolveStandardPostInterviewStackRoute(deferralAttempt.snap);
-    }
-
-    if (isTerminalPostInterviewRoute(lockedPostInterviewRouteRef.current)) {
-      initialRouteName = lockedPostInterviewRouteRef.current;
-    } else if (isTerminalPostInterviewRoute(initialRouteName)) {
-      lockedPostInterviewRouteRef.current = initialRouteName;
-    }
-
-    const needsMarketResearch = initialRoute?.needsMarketResearch === true;
+    const { initialRouteName, interviewAlreadyCompleted, legacyPsychometricsMode, needsMarketResearch } =
+      bootstrap;
 
     return {
       initialRouteName,

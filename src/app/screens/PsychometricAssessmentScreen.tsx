@@ -203,7 +203,8 @@ export function PsychometricAssessmentScreen({ navigation, route }: Props) {
       return;
     }
 
-    setNeedsMarketResearch(data.market_research_completed_at == null);
+    const marketResearchPending = data.market_research_completed_at == null;
+    setNeedsMarketResearch(marketResearchPending);
 
     if (data.psychometrics_completed_at) {
       const verification = await verifyAllPsychometricsPersisted(userId);
@@ -240,9 +241,20 @@ export function PsychometricAssessmentScreen({ navigation, route }: Props) {
       return;
     }
 
+    if (interviewAlreadyCompleted) {
+      if (marketResearchPending) {
+        setShowWelcome(true);
+      } else {
+        setShowWelcome(false);
+        void persistPsychometricProgress(userId, 'brs', 0, {});
+      }
+      setLoading(false);
+      return;
+    }
+
     setShowWelcome(true);
     setLoading(false);
-  }, [completeAllAssessments, navigateAfterComplete, resumeAtFirstMissingAssessment, userId]);
+  }, [completeAllAssessments, interviewAlreadyCompleted, navigateAfterComplete, resumeAtFirstMissingAssessment, userId]);
 
   useEffect(() => {
     loadPsychometricsWebFontsOnce();
@@ -330,6 +342,8 @@ export function PsychometricAssessmentScreen({ navigation, route }: Props) {
       return;
     }
 
+    if (interviewAlreadyCompleted) return;
+
     setCameFromAssessments(true);
     setShowWelcome(true);
   }
@@ -350,6 +364,10 @@ export function PsychometricAssessmentScreen({ navigation, route }: Props) {
 
   function handleMarketResearchComplete() {
     setNeedsMarketResearch(false);
+    if (interviewAlreadyCompleted) {
+      setShowWelcome(false);
+      void persistPsychometricProgress(userId, 'brs', 0, {});
+    }
   }
 
   const openAdminPanel = isAdminUser ? () => setShowAdminPanel(true) : undefined;
@@ -383,7 +401,6 @@ export function PsychometricAssessmentScreen({ navigation, route }: Props) {
     return (
       <WelcomeModal
         visible
-        legacyMode={legacyPsychometricsMode}
         onContinue={handleWelcomeContinue}
         onOpenAdminPanel={openAdminPanel}
         onBackPress={cameFromAssessments ? handleWelcomeBack : undefined}
