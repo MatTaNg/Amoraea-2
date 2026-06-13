@@ -98,10 +98,10 @@ describe('resolveInterviewStackBootstrap', () => {
     expect(result.initialRouteName).not.toBe('PsychometricAssessment');
   });
 
-  it('sends new users with incomplete interview to Aria when psychometrics disabled', () => {
+  it('sends new users with incomplete interview to AssessmentWelcome', () => {
     const result = resolveInterviewStackBootstrap({
       initialRoute: {
-        screen: PSYCHOMETRICS_ENABLED ? 'PsychometricAssessment' : 'Aria',
+        screen: 'AssessmentWelcome',
         legacyPsychometricsMode: false,
         interviewAlreadyCompleted: false,
         needsMarketResearch: true,
@@ -112,7 +112,7 @@ describe('resolveInterviewStackBootstrap', () => {
       lockedPostInterviewRoute: null,
     });
 
-    expect(result.initialRouteName).toBe(PSYCHOMETRICS_ENABLED ? 'PsychometricAssessment' : 'Aria');
+    expect(result.initialRouteName).toBe('AssessmentWelcome');
     expect(result.legacyPsychometricsMode).toBe(false);
   });
 });

@@ -783,6 +783,9 @@ export function psychometricBatteryProgressPosition(
 /** User-facing estimate for Part 1 on the psychometrics welcome screen (9 questionnaires). */
 export const PRE_INTERVIEW_PSYCHOMETRICS_ESTIMATED_MINUTES = 10;
 
+/** User-facing estimate for the AI interview when shown as Part 1 (interview-first flow). */
+export const PRE_INTERVIEW_AI_INTERVIEW_ESTIMATED_MINUTES_LABEL = '20–30';
+
 /** User-facing estimate for Part 2 on the psychometrics welcome screen. */
 export const PRE_INTERVIEW_AI_INTERVIEW_ESTIMATED_MINUTES = 20;
 

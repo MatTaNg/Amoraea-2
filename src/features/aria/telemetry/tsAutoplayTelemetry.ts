@@ -75,6 +75,8 @@ export function logTtsAutoplayPlayOutcome(payload: {
   errorMessagePreview?: string;
   /** When set, overrides auto-filled `ios_safari_html_audio_forced` for this platform. */
   pipeline_selection_reason?: string;
+  /** HTML `<audio>` element volume at play time (web only; 1 = max). */
+  html_audio_volume?: number | null;
 }): void {
   const ctx = getWebAutoplayContext();
   const pipelineSelectionReason =

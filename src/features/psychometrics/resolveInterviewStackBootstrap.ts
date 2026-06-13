@@ -57,7 +57,7 @@ export function resolveInterviewStackBootstrap(input: {
     initialRoute?.interviewAlreadyCompleted === true || profileShowsStandardInterviewComplete;
   let legacyPsychometricsMode = initialRoute?.legacyPsychometricsMode === true;
 
-  if (profileShowsStandardInterviewComplete && initialRouteName === 'Aria') {
+  if (profileShowsStandardInterviewComplete && (initialRouteName === 'Aria' || initialRouteName === 'AssessmentWelcome')) {
     if (!PSYCHOMETRICS_ENABLED) {
       initialRouteName = 'PostInterview';
       interviewAlreadyCompleted = true;

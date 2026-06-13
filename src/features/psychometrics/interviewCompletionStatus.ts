@@ -163,7 +163,7 @@ export function resolveInterviewStackScreenFromStatus(
   if (!psychometricsEnabled) {
     if (!input.interviewCompleted) {
       return {
-        screen: 'Aria',
+        screen: 'AssessmentWelcome',
         legacyPsychometricsMode: false,
         interviewAlreadyCompleted: false,
       };
@@ -177,7 +177,7 @@ export function resolveInterviewStackScreenFromStatus(
 
   if (!input.interviewCompleted) {
     return {
-      screen: 'Aria',
+      screen: 'AssessmentWelcome',
       legacyPsychometricsMode: false,
       interviewAlreadyCompleted: false,
     };

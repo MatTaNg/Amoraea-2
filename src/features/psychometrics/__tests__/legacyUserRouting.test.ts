@@ -15,12 +15,12 @@ describe('resolveInterviewStackScreenFromStatus', () => {
       expect(result.interviewAlreadyCompleted).toBe(true);
     });
 
-    it('new user (nothing complete) → Aria (interview first)', () => {
+    it('new user (nothing complete) → AssessmentWelcome (interview first)', () => {
       const result = resolveInterviewStackScreenFromStatus({
         psychometricsCompletedAt: null,
         interviewCompleted: false,
       });
-      expect(result.screen).toBe('Aria');
+      expect(result.screen).toBe('AssessmentWelcome');
       expect(result.legacyPsychometricsMode).toBe(false);
       expect(result.interviewAlreadyCompleted).toBe(false);
     });
@@ -36,12 +36,12 @@ describe('resolveInterviewStackScreenFromStatus', () => {
       expect(result.interviewAlreadyCompleted).toBe(true);
     });
 
-    it('psychometrics complete, interview not → Aria', () => {
+    it('psychometrics complete, interview not → AssessmentWelcome', () => {
       const result = resolveInterviewStackScreenFromStatus({
         psychometricsCompletedAt: '2026-01-01T00:00:00Z',
         interviewCompleted: false,
       });
-      expect(result.screen).toBe('Aria');
+      expect(result.screen).toBe('AssessmentWelcome');
       expect(result.legacyPsychometricsMode).toBe(false);
     });
   } else {
@@ -56,12 +56,12 @@ describe('resolveInterviewStackScreenFromStatus', () => {
       expect(result.interviewAlreadyCompleted).toBe(true);
     });
 
-    it('new user (nothing complete) → Aria (market research handled upstream)', () => {
+    it('new user (nothing complete) → AssessmentWelcome (market research handled upstream)', () => {
       const result = resolveInterviewStackScreenFromStatus({
         psychometricsCompletedAt: null,
         interviewCompleted: false,
       });
-      expect(result.screen).toBe('Aria');
+      expect(result.screen).toBe('AssessmentWelcome');
       expect(result.legacyPsychometricsMode).toBe(false);
       expect(result.interviewAlreadyCompleted).toBe(false);
     });
@@ -76,12 +76,12 @@ describe('resolveInterviewStackScreenFromStatus', () => {
       expect(result.legacyPsychometricsMode).toBe(false);
     });
 
-    it('psychometrics timestamp present but interview incomplete → Aria', () => {
+    it('psychometrics timestamp present but interview incomplete → AssessmentWelcome', () => {
       const result = resolveInterviewStackScreenFromStatus({
         psychometricsCompletedAt: '2026-01-01T00:00:00Z',
         interviewCompleted: false,
       });
-      expect(result.screen).toBe('Aria');
+      expect(result.screen).toBe('AssessmentWelcome');
       expect(result.legacyPsychometricsMode).toBe(false);
     });
   }

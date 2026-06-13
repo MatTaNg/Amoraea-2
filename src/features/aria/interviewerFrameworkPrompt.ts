@@ -584,21 +584,37 @@ export function isBoundaryWarmValidationOnlySentence(text: string): boolean {
  * {@link dedupeAdjacentBoundaryValidationsBeforeParticipantName} can drop the stacked warm beat.
  */
 export function shouldDeferStreamingBoundaryWarmClause(text: string, rawFirstName: string): boolean {
+  if (!text.trim()) return false;
   const name = sanitizeInterviewParticipantFirstNameForSpeech(rawFirstName);
-  if (!name || !text.trim()) return false;
-  let esc: string;
-  try {
-    esc = name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-  } catch {
-    return false;
+  if (name) {
+    let esc: string;
+    try {
+      esc = name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    } catch {
+      return false;
+    }
+    if (new RegExp(`\\b${esc}\\b`, 'i').test(text)) return false;
   }
-  if (new RegExp(`\\b${esc}\\b`, 'i').test(text)) return false;
   const t = text.trim();
   /** Model often uses "great work!" or "great work," at segment close; optional punctuation before `$`. */
-  if (!/\b(?:great|nice|good)\s+work\s*[,;.:!?…]?\s*$/i.test(t)) return false;
+  if (
+    !/\b(?:great|nice|good)\s+work\s*[,;.:!?…]?\s*$/i.test(t) &&
+    !/\bwell\s+done\s*[,;.:!?…]?\s*$/i.test(t)
+  ) {
+    return false;
+  }
   /** Narrow cues so we do not defer lines like "At the end of the day, nice work." */
   const segmentCue =
-    /\b(?:that['']?s\s+the\s+end|that['']?s\s+a\s+wrap|we['']?(?:ve|re)\s+done\s+with|done\s+with\s+those\s+three|end\s+of\s+the\s+three\s+described)/i;
+    /\b(?:that['']?s\s+the\s+end|that['']?s\s+a\s+wrap|wraps?\s+up\s+(?:this\s+)?(?:scenario|situation)|(?:we['']?(?:ve|re)|you['']?ve)\s+(?:finished|completed)\s+(?:this\s+)?(?:scenario|situation|one)|we['']?(?:ve|re)\s+done\s+with|done\s+with\s+those\s+three|end\s+of\s+the\s+three\s+described)/i;
   if (!segmentCue.test(t)) return false;
   return true;
+}
+
+/**
+ * Hold boundary warm lines in streaming/batch buffers until the reflection clause (validation + name) arrives.
+ * Works even when the participant first name is not yet resolved for TTS.
+ */
+export function shouldHoldBoundaryWarmStreamingLine(text: string, rawFirstName?: string): boolean {
+  if (isBoundaryWarmValidationOnlySentence(text)) return true;
+  return shouldDeferStreamingBoundaryWarmClause(text, rawFirstName ?? '');
 }

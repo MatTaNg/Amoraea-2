@@ -221,7 +221,7 @@ export function PsychometricAssessmentScreen({ navigation, route }: Props) {
 
   const loadResumeState = useCallback(async () => {
     if (!userId) {
-      setShowWelcome(true);
+      setShowWelcome(PSYCHOMETRICS_ENABLED ? false : true);
       setLoading(false);
       return;
     }
@@ -236,7 +236,7 @@ export function PsychometricAssessmentScreen({ navigation, route }: Props) {
 
     if (error || !data) {
       setNeedsMarketResearch(true);
-      setShowWelcome(true);
+      setShowWelcome(!PSYCHOMETRICS_ENABLED);
       setLoading(false);
       return;
     }
@@ -290,7 +290,7 @@ export function PsychometricAssessmentScreen({ navigation, route }: Props) {
       return;
     }
 
-    setShowWelcome(true);
+    setShowWelcome(!PSYCHOMETRICS_ENABLED);
     setLoading(false);
   }, [completeAllAssessments, interviewAlreadyCompleted, navigateAfterComplete, resumeAtFirstMissingAssessment, userId]);
 
@@ -414,7 +414,7 @@ export function PsychometricAssessmentScreen({ navigation, route }: Props) {
         return;
       }
       setCameFromAssessments(true);
-      setShowWelcome(true);
+      setShowWelcome(!PSYCHOMETRICS_ENABLED);
     }
   }
 
@@ -471,6 +471,7 @@ export function PsychometricAssessmentScreen({ navigation, route }: Props) {
     return (
       <WelcomeModal
         visible
+        variant="psychometricsFirst"
         onContinue={handleWelcomeContinue}
         onOpenAdminPanel={openAdminPanel}
         onBackPress={cameFromAssessments ? handleWelcomeBack : undefined}

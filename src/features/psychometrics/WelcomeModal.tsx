@@ -15,6 +15,7 @@ import { PsychometricsAdminPanelButton } from './PsychometricsAdminPanelButton';
 import { PsychometricsBackButton } from './PsychometricsBackButton';
 import {
   PRE_INTERVIEW_AI_INTERVIEW_ESTIMATED_MINUTES,
+  PRE_INTERVIEW_AI_INTERVIEW_ESTIMATED_MINUTES_LABEL,
   PRE_INTERVIEW_PSYCHOMETRICS_ESTIMATED_MINUTES,
 } from './assessmentContent';
 import {
@@ -28,12 +29,17 @@ import {
   psychometricsScrollContent,
 } from './psychometricsTheme';
 
+export type WelcomeModalVariant = 'interviewFirst' | 'psychometricsFirst';
+
 interface WelcomeModalProps {
   visible: boolean;
   onContinue: () => void;
   onOpenAdminPanel?: () => void;
   continueDisabled?: boolean;
   onBackPress?: () => void;
+  /** Interview-first (default): AI interview then self assessments. */
+  variant?: WelcomeModalVariant;
+  continueLabel?: string;
 }
 
 export function WelcomeModal({
@@ -42,10 +48,61 @@ export function WelcomeModal({
   onOpenAdminPanel,
   continueDisabled,
   onBackPress,
+  variant = 'interviewFirst',
+  continueLabel,
 }: WelcomeModalProps) {
   useEffect(() => {
     if (visible) loadPsychometricsWebFontsOnce();
   }, [visible]);
+
+  const interviewFirst = variant === 'interviewFirst';
+  const interviewTimeLabel = interviewFirst
+    ? `~${PRE_INTERVIEW_AI_INTERVIEW_ESTIMATED_MINUTES_LABEL} min`
+    : `~${PRE_INTERVIEW_AI_INTERVIEW_ESTIMATED_MINUTES} min`;
+  const psychTimeLabel = `~${PRE_INTERVIEW_PSYCHOMETRICS_ESTIMATED_MINUTES} min`;
+  const ctaTitle =
+    continueLabel ?? (interviewFirst ? 'Continue' : 'Begin Assessments');
+  const totalLabel = interviewFirst
+    ? `Total: approximately 30-40 min`
+    : `Total: approximately ${PRE_INTERVIEW_PSYCHOMETRICS_ESTIMATED_MINUTES + PRE_INTERVIEW_AI_INTERVIEW_ESTIMATED_MINUTES} minutes`;
+
+  const parts = interviewFirst
+    ? [
+        {
+          key: 'interview',
+          icon: 'chatbubble-ellipses-outline' as const,
+          label: 'Part 1 — AI Interview',
+          time: interviewTimeLabel,
+          description:
+            'A conversational interview with Aira, our AI interviewer, exploring how you think about and navigate relationships.',
+        },
+        {
+          key: 'psychometrics',
+          icon: 'clipboard-outline' as const,
+          label: 'Part 2 — Self Assessments',
+          time: psychTimeLabel,
+          description:
+            'Short questionnaires grounded in validated relationship science. There are no right or wrong answers — just answer honestly.',
+        },
+      ]
+    : [
+        {
+          key: 'psychometrics',
+          icon: 'clipboard-outline' as const,
+          label: 'Part 1 — Self Assessments',
+          time: psychTimeLabel,
+          description:
+            'Short questionnaires grounded in validated relationship science. There are no right or wrong answers — just answer honestly.',
+        },
+        {
+          key: 'interview',
+          icon: 'chatbubble-ellipses-outline' as const,
+          label: 'Part 2 — AI Interview',
+          time: interviewTimeLabel,
+          description:
+            'A conversational interview with Aira, our AI interviewer, exploring how you think about and navigate relationships.',
+        },
+      ];
 
   return (
     <Modal visible={visible} animationType="fade" statusBarTranslucent>
@@ -64,54 +121,31 @@ export function WelcomeModal({
 
           <Text style={styles.title}>Welcome to Amoraea</Text>
           <Text style={styles.subtitle}>
-            Before you can be matched, we need to get to know you. Your assessment has two parts:
+            Before you can be matched, we need to get to know you. These assessments help us understand
+            how you show up in relationships and build a profile that reflects who you really are.
           </Text>
 
-          <View style={styles.partCard}>
-            <View style={styles.partCardHeader}>
-              <Ionicons
-                name="clipboard-outline"
-                size={26}
-                color={PSYCHOMETRICS_ACCENT}
-                style={styles.partIcon}
-              />
-              <View style={styles.partHeaderText}>
-                <Text style={styles.partLabel}>Part 1 — Self Assessments</Text>
-                <Text style={styles.partTime}>~{PRE_INTERVIEW_PSYCHOMETRICS_ESTIMATED_MINUTES} min</Text>
+          {parts.map((part) => (
+            <View key={part.key} style={styles.partCard}>
+              <View style={styles.partCardHeader}>
+                <Ionicons
+                  name={part.icon}
+                  size={26}
+                  color={PSYCHOMETRICS_ACCENT}
+                  style={styles.partIcon}
+                />
+                <View style={styles.partHeaderText}>
+                  <Text style={styles.partLabel}>{part.label}</Text>
+                  <Text style={styles.partTime}>{part.time}</Text>
+                </View>
               </View>
+              <Text style={styles.partDescription}>{part.description}</Text>
             </View>
-            <Text style={styles.partDescription}>
-              Short questionnaires grounded in validated relationship science. There are no right or wrong
-              answers — just answer honestly.
-            </Text>
-          </View>
-
-          <View style={styles.partCard}>
-            <View style={styles.partCardHeader}>
-              <Ionicons
-                name="chatbubble-ellipses-outline"
-                size={26}
-                color={PSYCHOMETRICS_ACCENT}
-                style={styles.partIcon}
-              />
-              <View style={styles.partHeaderText}>
-                <Text style={styles.partLabel}>Part 2 — AI Interview</Text>
-                <Text style={styles.partTime}>~{PRE_INTERVIEW_AI_INTERVIEW_ESTIMATED_MINUTES} min</Text>
-              </View>
-            </View>
-            <Text style={styles.partDescription}>
-              A conversational interview with Aira, our AI interviewer, exploring how you think about and
-              navigate relationships.
-            </Text>
-          </View>
+          ))}
 
           <View style={styles.totalRow}>
             <Ionicons name="time-outline" size={18} color={PSYCHOMETRICS_ACCENT} />
-            <Text style={styles.totalTime}>
-              Total: approximately{' '}
-              {PRE_INTERVIEW_PSYCHOMETRICS_ESTIMATED_MINUTES + PRE_INTERVIEW_AI_INTERVIEW_ESTIMATED_MINUTES}{' '}
-              minutes
-            </Text>
+            <Text style={styles.totalTime}>{totalLabel}</Text>
           </View>
 
           <Text style={styles.scienceNote}>
@@ -120,7 +154,7 @@ export function WelcomeModal({
 
           <View style={styles.ctaWrap}>
             <Button
-              title="Begin Assessments"
+              title={ctaTitle}
               onPress={onContinue}
               disabled={continueDisabled}
               style={styles.cta}
@@ -234,6 +268,8 @@ const styles = StyleSheet.create({
     fontSize: 14,
     fontWeight: '600',
     color: '#E8F0F8',
+    flexShrink: 1,
+    textAlign: 'center',
   },
   scienceNote: {
     fontFamily: PSYCHOMETRICS_FONT_BODY,

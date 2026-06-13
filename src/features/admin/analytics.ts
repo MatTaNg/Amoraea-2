@@ -85,7 +85,12 @@ export interface PsychometricScoreAverage {
 }
 
 export interface FullyCompletedCohortAnalytics {
+  /** Primary cohort headcount (definition depends on which compute* function built this). */
   cohortSize: number;
+  /** Users in cohort whose latest attempt has pillar_scores (score averages use this subset). */
+  scoredUsers: number;
+  /** Users in cohort with psychometrics_completed_at. */
+  withPsychometricsUsers: number;
   scoreAverages: {
     weightedScore: number | null;
     modifiedWeightedScore: number | null;
@@ -100,9 +105,19 @@ export interface FullyCompletedCohortAnalytics {
   timingAverages: {
     interviewMs: number | null;
     psychometricMs: number | null;
+    /** Active time on dating-profile relationship questionnaires (`user_assessments.time_taken_sec`). */
+    profileQuestionnaireMs: number | null;
+    /** Wall clock for modal edit-profile onboarding after questionnaires finish. */
+    profileEditMs: number | null;
+    /** Interview attempt start → profile onboarding complete. */
+    totalMs: number | null;
+    /** Interview attempt start → post-interview psychometric battery complete. */
     totalProcessMs: number | null;
     interviewN: number;
     psychometricN: number;
+    profileQuestionnaireN: number;
+    profileEditN: number;
+    totalN: number;
     totalProcessN: number;
   };
   /** Mean pillar stats per scenario / personal moment for the fully completed cohort. */
@@ -146,7 +161,14 @@ export interface MarketResearchAggregation {
 
 export interface OverviewAnalytics {
   sampleSize: {
+    /** Users with `interview_completed` on the account (matches admin Users tab). */
+    interviewCompletedUsers: number;
+    /** Completed attempt rows with `pillar_scores` (used for score distributions). */
+    scoredAttempts: number;
+    /** @deprecated Use `scoredAttempts` — kept for chart denominators. */
     total: number;
+    /** Interview-completed users whose latest attempt has no pillar rollup yet. */
+    pendingScoringUsers: number;
     passed: number;
     failed: number;
     passRate: number;
@@ -261,15 +283,16 @@ export interface ConvergentCorrelation {
 export interface UserSummaryRow {
   userId: string;
   userName: string | null;
-  attemptId: string;
+  attemptId: string | null;
   weightedScore: number | null;
   modifiedScore: number | null;
   passed: boolean | null;
   egoLevel: number | null;
   depthModifier: number | null;
-  algorithmEra: string;
+  algorithmEra: string | null;
   hasRecovery: boolean;
   hasPsychometrics: boolean;
+  hasScoredAttempt: boolean;
 }
 
 const PILLAR_NAMES = [
@@ -505,6 +528,30 @@ export function isFullyCompletedInterviewUser(user: UserRecord): boolean {
   return user.interview_completed === true && user.psychometrics_completed_at != null;
 }
 
+export function isInterviewCompletedUser(user: UserRecord): boolean {
+  return user.interview_completed === true;
+}
+
+function pickLatestAttemptWithCompletedAtPerUser(
+  attempts: AttemptRecord[],
+): Map<string, AttemptRecord> {
+  const map = new Map<string, AttemptRecord>();
+  for (const a of attempts) {
+    if (!a.completed_at) continue;
+    const existing = map.get(a.user_id);
+    if (!existing) {
+      map.set(a.user_id, a);
+      continue;
+    }
+    const existingTs = new Date(existing.completed_at!).getTime();
+    const nextTs = new Date(a.completed_at).getTime();
+    if (Number.isFinite(nextTs) && nextTs >= existingTs) {
+      map.set(a.user_id, a);
+    }
+  }
+  return map;
+}
+
 function pickLatestCompletedAttemptPerUser(
   attempts: AttemptRecord[],
 ): Map<string, AttemptRecord> {
@@ -544,40 +591,74 @@ const PSYCHOMETRIC_AVERAGE_FIELDS: Array<{
   { key: 'psychometric_modifier', label: 'Psychometric modifier' },
 ];
 
-export function computeFullyCompletedCohortAnalytics(
-  attempts: AttemptRecord[],
-  users: UserRecord[],
-): FullyCompletedCohortAnalytics {
-  const userMap = new Map(users.map((u) => [u.id, u]));
-  const latestByUser = pickLatestCompletedAttemptPerUser(attempts);
+export interface ProfileTimingRecord {
+  assessmentsCompletedAt: string | null;
+  onboardingCompletedAt: string | null;
+  /** Sum of `user_assessments.time_taken_sec` for relationship questionnaires, in ms. */
+  datingAssessmentActiveMs: number | null;
+}
 
-  const cohortAttempts: AttemptRecord[] = [];
-  const cohortUsers: UserRecord[] = [];
+function pickIsoTimestamp(value: unknown): string | null {
+  if (typeof value !== 'string' || !value.trim()) return null;
+  return Number.isFinite(Date.parse(value)) ? value : null;
+}
 
-  for (const [userId, attempt] of latestByUser) {
-    const user = userMap.get(userId);
-    if (!user || !isFullyCompletedInterviewUser(user)) continue;
-    cohortAttempts.push(attempt);
-    cohortUsers.push(user);
+/** Read profile onboarding timestamps from `profiles.profile_json`. */
+export function parseProfileTimingTimestamps(
+  profileJson: Record<string, unknown> | null | undefined,
+): Pick<ProfileTimingRecord, 'assessmentsCompletedAt' | 'onboardingCompletedAt'> {
+  const json = profileJson ?? {};
+  return {
+    assessmentsCompletedAt: pickIsoTimestamp(
+      json.assessmentsCompletedAt ?? json.assessments_completed_at,
+    ),
+    onboardingCompletedAt: pickIsoTimestamp(
+      json.onboardingCompletedAt ?? json.onboarding_completed_at,
+    ),
+  };
+}
+
+export function sumUserAssessmentActiveMs(
+  rows: Array<{ time_taken_sec: number | null }>,
+): number | null {
+  let sumSec = 0;
+  let count = 0;
+  for (const row of rows) {
+    if (
+      typeof row.time_taken_sec === 'number' &&
+      Number.isFinite(row.time_taken_sec) &&
+      row.time_taken_sec > 0
+    ) {
+      sumSec += row.time_taken_sec;
+      count += 1;
+    }
   }
+  return count > 0 ? sumSec * 1000 : null;
+}
 
-  const weightedScores = cohortAttempts
+function buildCohortAnalytics(
+  cohortUsers: UserRecord[],
+  scoredAttempts: AttemptRecord[],
+  attemptForTiming: (user: UserRecord) => AttemptRecord | undefined,
+  profileTimingByUserId: Map<string, ProfileTimingRecord> = new Map(),
+): FullyCompletedCohortAnalytics {
+  const weightedScores = scoredAttempts
     .map((a) => a.weighted_score)
     .filter((v): v is number => v != null && Number.isFinite(v));
-  const modifiedScores = cohortAttempts
+  const modifiedScores = scoredAttempts
     .map((a) => a.modified_weighted_score)
     .filter((v): v is number => v != null && Number.isFinite(v));
-  const modifiedWithPsych = cohortAttempts
+  const modifiedWithPsych = scoredAttempts
     .map((a) => a.modified_weighted_score_with_psychometrics)
     .filter((v): v is number => v != null && Number.isFinite(v));
 
   const scenarioValues = (key: '1' | '2' | '3') =>
-    cohortAttempts
+    scoredAttempts
       .map((a) => scenarioComposite(a.scenario_composites, key))
       .filter((v): v is number => v != null);
 
   const momentValues = (momentKey: 'moment_4_scores' | 'moment_5_scores') =>
-    cohortAttempts
+    scoredAttempts
       .map((a) => momentCompositeFromPatterns(a.scenario_specific_patterns, momentKey))
       .filter((v): v is number => v != null);
 
@@ -597,17 +678,19 @@ export function computeFullyCompletedCohortAnalytics(
 
   const interviewDurations: number[] = [];
   const psychometricDurations: number[] = [];
-  const totalProcessDurations: number[] = [];
+  const throughPsychometricDurations: number[] = [];
+  const profileQuestionnaireDurations: number[] = [];
+  const profileEditDurations: number[] = [];
+  const totalEndToEndDurations: number[] = [];
 
-  for (let i = 0; i < cohortAttempts.length; i++) {
-    const attempt = cohortAttempts[i];
-    const user = cohortUsers[i];
+  for (const user of cohortUsers) {
+    const attempt = attemptForTiming(user);
+    if (!attempt) continue;
 
     const interviewMs = computeInterviewDurationMs(attempt);
     if (interviewMs != null) interviewDurations.push(interviewMs);
 
-    const interviewEnd =
-      user.interview_completed_at ?? attempt.completed_at ?? null;
+    const interviewEnd = user.interview_completed_at ?? attempt.completed_at ?? null;
     const psychEnd = user.psychometrics_completed_at ?? null;
     if (interviewEnd && psychEnd) {
       const psychMs = wallClockMsBetween(interviewEnd, psychEnd);
@@ -615,13 +698,31 @@ export function computeFullyCompletedCohortAnalytics(
     }
 
     if (attempt.created_at && psychEnd) {
-      const totalMs = wallClockMsBetween(attempt.created_at, psychEnd);
-      if (totalMs != null) totalProcessDurations.push(totalMs);
+      const throughPsychMs = wallClockMsBetween(attempt.created_at, psychEnd);
+      if (throughPsychMs != null) throughPsychometricDurations.push(throughPsychMs);
+    }
+
+    const profileTiming = profileTimingByUserId.get(user.id);
+    if (profileTiming?.datingAssessmentActiveMs != null) {
+      profileQuestionnaireDurations.push(profileTiming.datingAssessmentActiveMs);
+    }
+    if (profileTiming?.assessmentsCompletedAt && profileTiming.onboardingCompletedAt) {
+      const editMs = wallClockMsBetween(
+        profileTiming.assessmentsCompletedAt,
+        profileTiming.onboardingCompletedAt,
+      );
+      if (editMs != null) profileEditDurations.push(editMs);
+    }
+    if (attempt.created_at && profileTiming?.onboardingCompletedAt) {
+      const totalMs = wallClockMsBetween(attempt.created_at, profileTiming.onboardingCompletedAt);
+      if (totalMs != null) totalEndToEndDurations.push(totalMs);
     }
   }
 
   return {
-    cohortSize: cohortAttempts.length,
+    cohortSize: cohortUsers.length,
+    scoredUsers: scoredAttempts.length,
+    withPsychometricsUsers: cohortUsers.filter((u) => u.psychometrics_completed_at != null).length,
     scoreAverages: {
       weightedScore: roundAverage(weightedScores),
       modifiedWeightedScore: roundAverage(modifiedScores),
@@ -636,13 +737,61 @@ export function computeFullyCompletedCohortAnalytics(
     timingAverages: {
       interviewMs: averageFiniteMs(interviewDurations),
       psychometricMs: averageFiniteMs(psychometricDurations),
-      totalProcessMs: averageFiniteMs(totalProcessDurations),
+      profileQuestionnaireMs: averageFiniteMs(profileQuestionnaireDurations),
+      profileEditMs: averageFiniteMs(profileEditDurations),
+      totalMs: averageFiniteMs(totalEndToEndDurations),
+      totalProcessMs: averageFiniteMs(throughPsychometricDurations),
       interviewN: interviewDurations.length,
       psychometricN: psychometricDurations.length,
-      totalProcessN: totalProcessDurations.length,
+      profileQuestionnaireN: profileQuestionnaireDurations.length,
+      profileEditN: profileEditDurations.length,
+      totalN: totalEndToEndDurations.length,
+      totalProcessN: throughPsychometricDurations.length,
     },
-    segmentPillarDistributions: computeCohortSegmentPillarDistributions(cohortAttempts),
+    segmentPillarDistributions: computeCohortSegmentPillarDistributions(scoredAttempts),
   };
+}
+
+/** One latest scored attempt per interview-completed user — primary admin cohort. */
+export function computeInterviewCompletedCohortAnalytics(
+  attempts: AttemptRecord[],
+  users: UserRecord[],
+  profileTimingByUserId: Map<string, ProfileTimingRecord> = new Map(),
+): FullyCompletedCohortAnalytics {
+  const latestScoredByUser = pickLatestCompletedAttemptPerUser(attempts);
+  const latestAnyByUser = pickLatestAttemptWithCompletedAtPerUser(attempts);
+  const cohortUsers = users.filter(isInterviewCompletedUser);
+  const scoredAttempts = cohortUsers
+    .map((u) => latestScoredByUser.get(u.id))
+    .filter((a): a is AttemptRecord => a != null);
+
+  return buildCohortAnalytics(cohortUsers, scoredAttempts, (user) => {
+    return latestScoredByUser.get(user.id) ?? latestAnyByUser.get(user.id);
+  }, profileTimingByUserId);
+}
+
+export function computeFullyCompletedCohortAnalytics(
+  attempts: AttemptRecord[],
+  users: UserRecord[],
+  profileTimingByUserId: Map<string, ProfileTimingRecord> = new Map(),
+): FullyCompletedCohortAnalytics {
+  const userMap = new Map(users.map((u) => [u.id, u]));
+  const latestScoredByUser = pickLatestCompletedAttemptPerUser(attempts);
+  const latestAnyByUser = pickLatestAttemptWithCompletedAtPerUser(attempts);
+
+  const cohortUsers: UserRecord[] = [];
+  const scoredAttempts: AttemptRecord[] = [];
+
+  for (const [userId, attempt] of latestScoredByUser) {
+    const user = userMap.get(userId);
+    if (!user || !isFullyCompletedInterviewUser(user)) continue;
+    cohortUsers.push(user);
+    scoredAttempts.push(attempt);
+  }
+
+  return buildCohortAnalytics(cohortUsers, scoredAttempts, (user) => {
+    return latestScoredByUser.get(user.id) ?? latestAnyByUser.get(user.id);
+  }, profileTimingByUserId);
 }
 
 function countChoiceValues(
@@ -746,32 +895,66 @@ export function aggregateMarketResearch(
 
 // ─── MAIN COMPUTATION ─────────────────────────────────────────────────────────
 
+function buildUserSummaryRow(
+  user: UserRecord,
+  attempt: AttemptRecord | null | undefined,
+): UserSummaryRow {
+  const hasScoredAttempt = !!(attempt?.completed_at && attempt.pillar_scores);
+  return {
+    userId: user.id,
+    userName: user.full_name ?? user.display_name ?? null,
+    attemptId: attempt?.id ?? null,
+    weightedScore: hasScoredAttempt ? attempt!.weighted_score : null,
+    modifiedScore: hasScoredAttempt ? attempt!.modified_weighted_score : null,
+    passed: hasScoredAttempt ? attempt!.passed : null,
+    egoLevel: hasScoredAttempt ? attempt!.ego_development_level : null,
+    depthModifier: hasScoredAttempt ? depthModifierForAttempt(attempt!) : null,
+    algorithmEra: attempt ? attempt.algorithm_era : null,
+    hasRecovery: hasScoredAttempt
+      ? attempt!.scenario_1_recovered ||
+        attempt!.scenario_2_recovered ||
+        attempt!.scenario_3_recovered
+      : false,
+    hasPsychometrics: user.psychometrics_completed_at != null,
+    hasScoredAttempt,
+  };
+}
+
 export function computeOverviewAnalytics(
   attempts: AttemptRecord[],
   users: UserRecord[],
 ): OverviewAnalytics {
   const userMap = new Map(users.map((u) => [u.id, u]));
+  const interviewCompletedUsers = users.filter((u) => u.interview_completed === true);
+  const latestCompletedByUser = pickLatestAttemptWithCompletedAtPerUser(attempts);
+  const pendingScoringUsers = interviewCompletedUsers.filter((u) => {
+    const latest = latestCompletedByUser.get(u.id);
+    return !latest?.pillar_scores;
+  }).length;
+
   const completed = attempts.filter((a) => a.completed_at && a.pillar_scores);
 
   const passed = completed.filter((a) => a.passed === true);
   const failed = completed.filter((a) => a.passed === false);
   const withDepthSignals = completed.filter((a) => a.ego_development_level !== null);
-  const withPsychometrics = completed.filter((a) => {
-    const u = userMap.get(a.user_id);
-    return u?.psychometrics_completed_at != null;
-  });
+  const withPsychometrics = interviewCompletedUsers.filter(
+    (u) => u.psychometrics_completed_at != null,
+  ).length;
   const withRecovery = completed.filter(
     (a) => a.scenario_1_recovered || a.scenario_2_recovered || a.scenario_3_recovered,
   );
 
   const sampleSize = {
+    interviewCompletedUsers: interviewCompletedUsers.length,
+    scoredAttempts: completed.length,
     total: completed.length,
+    pendingScoringUsers,
     passed: passed.length,
     failed: failed.length,
     passRate:
       completed.length > 0 ? Math.round((passed.length / completed.length) * 1000) / 10 : 0,
     withDepthSignals: withDepthSignals.length,
-    withPsychometrics: withPsychometrics.length,
+    withPsychometrics,
     withScoreRecovery: withRecovery.length,
   };
 
@@ -1122,25 +1305,14 @@ export function computeOverviewAnalytics(
     };
   });
 
-  const userDrilldown: UserSummaryRow[] = completed
-    .map((a) => {
-      const u = userMap.get(a.user_id);
-      return {
-        userId: a.user_id,
-        userName: u?.full_name ?? u?.display_name ?? null,
-        attemptId: a.id,
-        weightedScore: a.weighted_score,
-        modifiedScore: a.modified_weighted_score,
-        passed: a.passed,
-        egoLevel: a.ego_development_level,
-        depthModifier: depthModifierForAttempt(a),
-        algorithmEra: a.algorithm_era,
-        hasRecovery:
-          a.scenario_1_recovered || a.scenario_2_recovered || a.scenario_3_recovered,
-        hasPsychometrics: !!u?.psychometrics_completed_at,
-      };
-    })
-    .sort((a, b) => (b.weightedScore ?? 0) - (a.weightedScore ?? 0));
+  const userDrilldown: UserSummaryRow[] = interviewCompletedUsers
+    .map((u) => buildUserSummaryRow(u, latestCompletedByUser.get(u.id)))
+    .sort((a, b) => {
+      if (a.hasScoredAttempt !== b.hasScoredAttempt) {
+        return a.hasScoredAttempt ? -1 : 1;
+      }
+      return (b.weightedScore ?? 0) - (a.weightedScore ?? 0);
+    });
 
   let uncertaintyGreen = 0;
   let uncertaintyAmber = 0;

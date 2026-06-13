@@ -34,6 +34,7 @@ import {
   psychometricsScrollContent,
 } from '@features/psychometrics/psychometricsTheme';
 import { spacing } from '@ui/theme/spacing';
+import { showConfirmDialog } from '@utilities/alerts/confirmDialog';
 
 const PARTIAL_REPORT_INCLUDES = [
   'A personalized summary of how you tend to show up in close relationships',
@@ -67,12 +68,23 @@ type Props = {
 };
 
 export function InterviewCompleteScreen({ navigation, route }: Props) {
-  const { user } = useAuth();
+  const { user, signOut } = useAuth();
   const userId = route.params?.userId ?? user?.id ?? '';
   const isAlphaTester = isAmoraeaAdminConsoleEmail(user?.email);
   const [attempt, setAttempt] = useState<InterviewReportAttempt | null>(null);
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const scoringReady = attempt?.pillar_scores != null;
+
+  const handleLogOut = useCallback(() => {
+    showConfirmDialog(
+      {
+        title: 'Log out',
+        message: 'Are you sure you want to log out?',
+        confirmText: 'Log out',
+      },
+      () => void signOut(),
+    );
+  }, [signOut]);
 
   const refreshAttempt = useCallback(async () => {
     if (!userId) return null;
@@ -125,6 +137,16 @@ export function InterviewCompleteScreen({ navigation, route }: Props) {
 
   return (
     <SafeAreaView style={styles.container}>
+      <TouchableOpacity
+        style={styles.logoutButton}
+        onPress={handleLogOut}
+        activeOpacity={0.8}
+        accessibilityRole="button"
+        accessibilityLabel="Log out"
+      >
+        <Ionicons name="log-out-outline" size={16} color="#5BA8E8" />
+        <Text style={styles.logoutButtonText}>Log out</Text>
+      </TouchableOpacity>
       <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
         <View style={styles.logoWrap}>
           <FlameOrb state="idle" size={64} minimalGlow />
@@ -214,6 +236,29 @@ export function InterviewCompleteScreen({ navigation, route }: Props) {
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: PSYCHOMETRICS_BG },
+  logoutButton: {
+    position: 'absolute',
+    top: 16,
+    right: 16,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    paddingVertical: 8,
+    paddingHorizontal: 12,
+    backgroundColor: 'rgba(30,111,217,0.1)',
+    borderWidth: 1,
+    borderColor: 'rgba(82,142,220,0.2)',
+    borderRadius: 6,
+    zIndex: 100,
+  },
+  logoutButtonText: {
+    fontFamily: Platform.OS === 'web' ? 'Jost, sans-serif' : PSYCHOMETRICS_FONT_BODY,
+    fontSize: 11,
+    fontWeight: '400',
+    letterSpacing: 1.5,
+    color: '#5BA8E8',
+    textTransform: 'uppercase',
+  },
   content: {
     ...psychometricsScrollContent,
     alignItems: 'center',

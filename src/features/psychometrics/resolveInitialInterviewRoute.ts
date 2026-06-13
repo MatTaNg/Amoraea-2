@@ -11,6 +11,7 @@ import {
 export { PSYCHOMETRICS_ENABLED, NPI_ENTITLEMENT_ENABLED };
 
 export type InterviewStackRoute =
+  | 'AssessmentWelcome'
   | 'PsychometricAssessment'
   | 'PsychometricsComplete'
   | 'InterviewComplete'

@@ -395,7 +395,30 @@ let webInterviewAudioVisibilityListenerAttached = false;
 
 export function debugNoteWebAudioRouteChange(source: string, routeData?: Record<string, unknown>): void {
   if (Platform.OS !== 'web') return;
-  const ctx = sharedWebAudioContext;
+  void source;
+  void routeData;
+  void sharedWebAudioContext;
+}
+
+/** Force full media volume on web HTML audio (Android mobile web can sound quiet without this). */
+export function ensureWebHtmlAudioElementMaxVolume(el: HTMLAudioElement): void {
+  try {
+    el.volume = 1;
+    el.muted = false;
+  } catch {
+    /* ignore */
+  }
+}
+
+/** Volume of the active web HTML audio element — for session telemetry only. */
+export function getActiveWebHtmlAudioVolumeForTelemetry(): number | null {
+  if (Platform.OS !== 'web' || !activeWebAudio) return null;
+  try {
+    const v = activeWebAudio.volume;
+    return Number.isFinite(v) ? v : null;
+  } catch {
+    return null;
+  }
 }
 
 function attachWebInterviewAudioVisibilityHandler(): void {
@@ -878,6 +901,7 @@ export function primeHtmlAudioForMobileTtsFromMicGesture(): void {
         (el as { playsInline: boolean }).playsInline = true;
       }
       el.preload = 'auto';
+      ensureWebHtmlAudioElementMaxVolume(el);
     }
     sharedHtmlAudioForMobileTts.src = SILENT_WAV_DATA_URL;
     void sharedHtmlAudioForMobileTts.play().catch(() => {});
@@ -1713,12 +1737,12 @@ export async function speakWithElevenLabs(
           /* ignore */
         }
         htmlAudio.src = url;
-        htmlAudio.volume = 1;
+        ensureWebHtmlAudioElementMaxVolume(htmlAudio);
         htmlAudio.playbackRate = playbackRateMultiplier;
       } else if (useSharedPrimed && sharedHtmlAudioForMobileTts) {
         htmlAudio = sharedHtmlAudioForMobileTts;
         htmlAudio.src = url;
-        htmlAudio.volume = 1;
+        ensureWebHtmlAudioElementMaxVolume(htmlAudio);
         htmlAudio.playbackRate = playbackRateMultiplier;
       } else {
         const audio = new AudioCtor(url);
@@ -1728,6 +1752,7 @@ export async function speakWithElevenLabs(
           (htmlAudio as { playsInline: boolean }).playsInline = true;
         }
         htmlAudio.preload = 'auto';
+        ensureWebHtmlAudioElementMaxVolume(htmlAudio);
         htmlAudio.playbackRate = playbackRateMultiplier;
       }
       activeWebAudio = htmlAudio;
@@ -1833,6 +1858,7 @@ export async function speakWithElevenLabs(
               pipeline: 'elevenlabs_web_html_audio',
               outcome: 'play_ok',
               telemetrySource,
+              html_audio_volume: htmlAudio.volume,
             });
           })
           .catch(async (playErr: unknown) => {
@@ -1849,13 +1875,14 @@ export async function speakWithElevenLabs(
                 (preAuthorizedEl || (options?.prefetchedMpegArrayBuffer?.byteLength ?? 0) > 0)
               ) {
                 try {
-                  htmlAudio.volume = 1;
+                  ensureWebHtmlAudioElementMaxVolume(htmlAudio);
                   await htmlAudio.play();
                   onPlaybackStarted?.();
                   logTtsAutoplayPlayOutcome({
                     pipeline: 'elevenlabs_web_html_audio',
                     outcome: 'play_ok',
                     telemetrySource,
+                    html_audio_volume: htmlAudio.volume,
                   });
                   finish('resolve');
                   return;

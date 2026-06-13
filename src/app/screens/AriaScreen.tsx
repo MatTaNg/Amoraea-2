@@ -31,8 +31,7 @@ import {
   dedupeAdjacentBoundaryValidationsBeforeParticipantName,
   ensureSpokenTextIncludesParticipantFirstName,
   getInterviewUserFirstNameForPrompt,
-  isBoundaryWarmValidationOnlySentence,
-  shouldDeferStreamingBoundaryWarmClause,
+  shouldHoldBoundaryWarmStreamingLine,
 } from '@features/aria/interviewerFrameworkPrompt';
 import {
   isPersonalMomentInterviewTurn,
@@ -416,7 +415,7 @@ import {
 import { collectDeviceContext } from '@utilities/sessionLogging/collectDeviceContext';
 import { captureWebSessionLogDeviceContext } from '@utilities/sessionLogging/webSessionLogDeviceContext';
 import { showConfirmDialog, showSimpleAlert } from '@utilities/alerts/confirmDialog';
-import { gatherRecordingStartTelemetry, gatherTtsPlaybackTelemetry } from '@utilities/sessionLogging/sessionAudioTelemetry';
+import { gatherRecordingStartTelemetry, gatherParallelStreamingTtsPlaybackTelemetry, gatherTtsPlaybackTelemetry } from '@utilities/sessionLogging/sessionAudioTelemetry';
 import {
   consumeTtsBufferCompleteBeforePlaybackFlag,
   consumeTtsPlaybackStrategyForNextPlayback,
@@ -442,6 +441,7 @@ import {
 } from '@utilities/sessionLogging/audioSessionLogEnvelope';
 import {
   refreshWebAudioRoutesForSession,
+  buildWebAudioRouteChangedEventData,
   subscribeWebAudioDeviceChange,
   resetWebAudioRouteSessionFingerprint,
 } from '@utilities/sessionLogging/webMediaDeviceAudioRoute';
@@ -500,7 +500,7 @@ import {
   reauthorizePendingPreAuthorizedElement,
   refreshPreAuthorizedAudioForLongProcessingGap,
 } from '@features/aria/utils/webPreAuthorizedTtsAudio';
-import { debugNoteWebAudioRouteChange } from '@features/aria/utils/elevenLabsTts';
+import { debugNoteWebAudioRouteChange, getActiveWebHtmlAudioVolumeForTelemetry } from '@features/aria/utils/elevenLabsTts';
 import { markSessionResumedForNextRecordingStart } from '@utilities/sessionLogging/sessionResumeRecordingTelemetry';
 import {
   evaluateMoment4RelationshipType,
@@ -3579,10 +3579,11 @@ const PARALLEL_TTS_BATCH_MAX_CHARS = 480;
 /** Short acks (e.g. "Great work.") play immediately without waiting for a larger batch. */
 const PARALLEL_TTS_BATCH_SHORT_SENTENCE_MAX_CHARS = 52;
 
-function shouldFlushParallelTtsBatch(text: string, force: boolean): boolean {
+function shouldFlushParallelTtsBatch(text: string, force: boolean, participantFirstName?: string): boolean {
   if (force) return text.trim().length > 0;
   const t = text.trim();
   if (!t) return false;
+  if (shouldHoldBoundaryWarmStreamingLine(t, participantFirstName)) return false;
   if (/\?\s*$/.test(t)) return true;
   if (t.length >= PARALLEL_TTS_BATCH_MAX_CHARS) return true;
   if (t.length <= PARALLEL_TTS_BATCH_SHORT_SENTENCE_MAX_CHARS && /[.!]\s*$/.test(t)) return true;
@@ -13220,6 +13221,27 @@ The participant **confirmed** skipping after the skip confirmation prompt. In **
             await prepareInterviewTtsPlayback('parallel_streaming_sentence', {
               afterRecording: priorRecParallel,
             });
+            if (Platform.OS === 'web') {
+              const wr = await refreshWebAudioRoutesForSession();
+              const routeEvent = buildWebAudioRouteChangedEventData(wr, {
+                source: priorRecParallel ? 'parallel_tts_after_recording' : 'parallel_tts_chunk',
+                moment_number: currentInterviewMomentRef.current,
+              });
+              if (routeEvent && userId) {
+                debugNoteWebAudioRouteChange(
+                  priorRecParallel ? 'parallel_tts_after_recording' : 'parallel_tts_chunk',
+                  routeEvent,
+                );
+                const rtdRoute = getSessionLogRuntime();
+                writeSessionLog({
+                  userId,
+                  attemptId: rtdRoute.attemptId,
+                  eventType: 'audio_route_changed',
+                  eventData: routeEvent,
+                  platform: rtdRoute.platform,
+                });
+              }
+            }
             webTtsUtteranceInFlightRef.current = spokenForTts;
             webTtsUtteranceInFlightOptionsRef.current = {
               interviewSpeechRole: 'assistant_response',
@@ -13232,11 +13254,31 @@ The participant **confirmed** skipping after the skip confirmation prompt. In **
               skipGestureGate: false,
               ttsTriggerSource: 'callback',
             };
-            ttsLineInFlightRef.current = true;
+            const ttsPlaybackActiveImmediatelyPrior = getSessionLogRuntime().ttsPlaybackActive;
+            const parallelTtsStartMs = Date.now();
+            const prefetchedBuf = prefetched ? await prefetched : null;
             if (userId) {
               setTtsPlaybackActive(true);
+              ttsLineInFlightRef.current = true;
+              const rtdPlayback = getSessionLogRuntime();
+              writeSessionLog({
+                userId,
+                attemptId: rtdPlayback.attemptId,
+                eventType: 'tts_playback_start',
+                eventData: gatherParallelStreamingTtsPlaybackTelemetry({
+                  ttsPlaybackActiveImmediatelyPrior,
+                  afterRecording: priorRecParallel,
+                  charCount: stripControlTokens(spokenForTts).trim().length,
+                  momentNumber: currentInterviewMomentRef.current,
+                  scenarioNumber: currentScenarioRef.current,
+                  prefetchedMpeg: !!(prefetchedBuf?.byteLength),
+                  htmlAudioVolume: getActiveWebHtmlAudioVolumeForTelemetry(),
+                }),
+                platform: rtdPlayback.platform,
+              });
+            } else {
+              ttsLineInFlightRef.current = true;
             }
-            const prefetchedBuf = prefetched ? await prefetched : null;
             try {
               await speakWithElevenLabs(spokenForTts, undefined, {
                 skipStopElevenLabsPlaybackBeforeStart: true,
@@ -13287,6 +13329,22 @@ The participant **confirmed** skipping after the skip confirmation prompt. In **
                   }
                 },
               });
+              if (userId) {
+                const rtdComplete = getSessionLogRuntime();
+                markLastAudioSessionEventType('tts_playback_complete');
+                writeSessionLog({
+                  userId,
+                  attemptId: rtdComplete.attemptId,
+                  eventType: 'tts_playback_complete',
+                  eventData: {
+                    telemetry_source: 'turn',
+                    tts_pipeline: 'parallel_streaming',
+                    html_audio_volume: getActiveWebHtmlAudioVolumeForTelemetry(),
+                  },
+                  durationMs: Date.now() - parallelTtsStartMs,
+                  platform: rtdComplete.platform,
+                });
+              }
               if (
                 !webTtsTabInterruptPendingReplayRef.current &&
                 !parallelStreamingTtsRef.current.cancelRequested
@@ -13322,10 +13380,16 @@ The participant **confirmed** skipping after the skip confirmation prompt. In **
         });
       };
       const flushParallelTtsBatch = (force: boolean) => {
-        const batch = parallelTtsBatchBuffer.trim();
-        if (!shouldFlushParallelTtsBatch(batch, force)) return;
+        let batch = parallelTtsBatchBuffer.trim();
+        if (!shouldFlushParallelTtsBatch(batch, force, participantFirstNameForSpoken)) return;
+        batch = dedupeAdjacentBoundaryValidationsBeforeParticipantName(
+          batch,
+          participantFirstNameForSpoken,
+        );
         const prefetch =
-          parallelTtsBatchPrefetch?.text === batch ? parallelTtsBatchPrefetch.promise : null;
+          parallelTtsBatchPrefetch?.text === parallelTtsBatchBuffer.trim()
+            ? parallelTtsBatchPrefetch.promise
+            : null;
         parallelTtsBatchBuffer = '';
         parallelTtsBatchPrefetch = null;
         enqueueParallelTtsUtterance(batch, prefetch);
@@ -13615,9 +13679,7 @@ The participant **confirmed** skipping after the skip confirmation prompt. In **
         }
         const willDefer =
           allowDeferWarm &&
-          !!participantFirstNameForSpoken &&
-          (isBoundaryWarmValidationOnlySentence(spoken) ||
-            shouldDeferStreamingBoundaryWarmClause(spoken, participantFirstNameForSpoken));
+          shouldHoldBoundaryWarmStreamingLine(spoken, participantFirstNameForSpoken);
         if (willDefer) {
           deferredWarmBoundarySentence = spoken;
           return;
@@ -13806,7 +13868,12 @@ The participant **confirmed** skipping after the skip confirmation prompt. In **
         if (deferredWarmBoundarySentence) {
           const hold = deferredWarmBoundarySentence;
           deferredWarmBoundarySentence = null;
-          maybeQueueSentenceForTts(hold, false);
+          if (parallelTtsBatchBuffer.trim()) {
+            parallelTtsBatchBuffer = `${hold} ${parallelTtsBatchBuffer}`.trim();
+            flushParallelTtsBatch(true);
+          } else {
+            maybeQueueSentenceForTts(hold, false);
+          }
         }
         if (deferredScenarioARepairLeadSentence) {
           const holdRepair = deferredScenarioARepairLeadSentence;

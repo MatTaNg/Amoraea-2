@@ -7,6 +7,7 @@ import {
   isBoundaryWarmValidationOnlySentence,
   sanitizeInterviewParticipantFirstNameForSpeech,
   shouldDeferStreamingBoundaryWarmClause,
+  shouldHoldBoundaryWarmStreamingLine,
 } from './interviewerFrameworkPrompt';
 
 const SCENARIO_A_VIGNETTE_OPENING = 'Emma and Ryan have dinner plans.';
@@ -196,6 +197,20 @@ describe('dedupeAdjacentBoundaryValidationsBeforeParticipantName', () => {
     );
   });
 
+  it('collapses identical nice work twice before the name', () => {
+    expect(dedupeAdjacentBoundaryValidationsBeforeParticipantName('Nice work, nice work Matt', 'Matt')).toBe(
+      'nice work Matt',
+    );
+  });
+
+  it('strips segment-close nice work when reflection also opens with nice work + name', () => {
+    const raw =
+      "That's the end of this scenario — nice work. Nice work, Matt — you stayed with Ryan's side of the argument.";
+    expect(dedupeAdjacentBoundaryValidationsBeforeParticipantName(raw, 'Matt')).toBe(
+      "That's the end of this scenario. Nice work, Matt — you stayed with Ryan's side of the argument.",
+    );
+  });
+
   it('strips redundant warm beat from Scenario C→M4 segment close (reflection keeps one validation + name)', () => {
     const raw =
       "That's the end of the three described situations — great work. Great work, Jordan — you stayed with how Sophie and Daniel's repair landed for you.";
@@ -268,5 +283,27 @@ describe('shouldDeferStreamingBoundaryWarmClause', () => {
 
   it('does not defer colloquial "end of the day" lines', () => {
     expect(shouldDeferStreamingBoundaryWarmClause('At the end of the day, nice work.', 'Matt')).toBe(false);
+  });
+
+  it('defers segment close even when participant first name is not yet known', () => {
+    expect(
+      shouldDeferStreamingBoundaryWarmClause("That's the end of this scenario — nice work.", ''),
+    ).toBe(true);
+  });
+});
+
+describe('shouldHoldBoundaryWarmStreamingLine', () => {
+  it('holds lone warm-only sentences', () => {
+    expect(shouldHoldBoundaryWarmStreamingLine('Nice work!', 'Matt')).toBe(true);
+  });
+
+  it('holds segment-close warm lines without requiring a participant name', () => {
+    expect(shouldHoldBoundaryWarmStreamingLine("That's the end of this scenario — nice work.", '')).toBe(
+      true,
+    );
+  });
+
+  it('does not hold reflection lines that already include the name', () => {
+    expect(shouldHoldBoundaryWarmStreamingLine('Nice work, Matt — recap here.', 'Matt')).toBe(false);
   });
 });

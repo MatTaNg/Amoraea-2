@@ -25,6 +25,7 @@ import { POST_INTERVIEW_BG } from '@app/screens/onboarding/PostInterviewScrollLa
 import { PsychometricAssessmentScreen } from '@app/screens/PsychometricAssessmentScreen';
 import { PsychometricsCompleteScreen } from '@app/screens/PsychometricsCompleteScreen';
 import { InterviewCompleteScreen } from '@features/onboarding/screens/InterviewCompleteScreen';
+import { AssessmentWelcomeScreen } from '@features/onboarding/screens/AssessmentWelcomeScreen';
 import { isAmoraeaAdminConsoleEmail } from '@/constants/adminConsole';
 import {
   fetchInterviewAttemptRevealSnapshot,
@@ -137,6 +138,12 @@ const InterviewAppNavigator = ({
     }}
   >
     <Stack.Screen
+      name="AssessmentWelcome"
+      component={AssessmentWelcomeScreen as unknown as React.ComponentType<Record<string, never>>}
+      initialParams={{ userId, needsMarketResearch }}
+      options={{ headerShown: false }}
+    />
+    <Stack.Screen
       name="InterviewComplete"
       component={InterviewCompleteScreen as unknown as React.ComponentType<Record<string, never>>}
       initialParams={{ userId }}
@@ -239,13 +246,16 @@ function buildInterviewStackInitialState(
   const params =
     initialRouteName === 'PsychometricAssessment'
       ? { userId, interviewAlreadyCompleted, legacyPsychometricsMode, needsMarketResearch }
-      : { userId };
+      : initialRouteName === 'AssessmentWelcome'
+        ? { userId, needsMarketResearch }
+        : { userId };
   return {
     stale: false,
     type: 'stack',
     key: `interview-stack-${userId}`,
     index: 0,
     routeNames: [
+      'AssessmentWelcome',
       'InterviewComplete',
       'PsychometricAssessment',
       'PsychometricsComplete',
@@ -429,7 +439,9 @@ const LoggedInInterviewShell = ({ userId }: { userId: string }) => {
   } = resolvedInterviewStack;
 
   const showMarketResearchOverlay =
-    showMarketResearch && initialRouteName !== 'PsychometricAssessment';
+    showMarketResearch &&
+    initialRouteName !== 'PsychometricAssessment' &&
+    initialRouteName !== 'AssessmentWelcome';
 
   const navTheme = {
     ...DarkTheme,
@@ -509,6 +521,7 @@ function normalizeAuthWebPath(path: string): string {
 }
 
 const INTERVIEW_STACK_ROUTE_PATH: Record<InterviewStackRoute, string> = {
+  AssessmentWelcome: 'welcome',
   InterviewComplete: 'interview-complete',
   PsychometricAssessment: 'psychometrics',
   PsychometricsComplete: 'psychometrics-complete',
@@ -541,7 +554,13 @@ function shouldRedirectWebPathToPreferredRoute(
   path: string,
   preferredRoute: InterviewStackRoute | undefined,
 ): boolean {
-  if (!preferredRoute || preferredRoute === 'Aria' || preferredRoute === 'PsychometricAssessment') {
+  if (!preferredRoute) {
+    return false;
+  }
+  if (preferredRoute === 'AssessmentWelcome' && isInterviewAliasWebPath(path)) {
+    return true;
+  }
+  if (preferredRoute === 'Aria' || preferredRoute === 'PsychometricAssessment') {
     return false;
   }
   const pathname = interviewStackPathname(path);
@@ -558,6 +577,7 @@ function shouldRedirectWebPathToPreferredRoute(
 }
 
 const INTERVIEW_STACK_LINKING_SCREENS = {
+  AssessmentWelcome: 'welcome',
   InterviewComplete: 'interview-complete',
   PsychometricAssessment: {
     path: 'psychometrics',

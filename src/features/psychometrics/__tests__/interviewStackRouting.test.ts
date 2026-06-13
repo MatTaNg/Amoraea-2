@@ -1,7 +1,7 @@
 import { resolveInterviewStackScreenFromStatus } from '../interviewCompletionStatus';
 
 describe('resolveInterviewStackScreenFromStatus (psychometrics enabled)', () => {
-  it('routes incomplete interview to Aria', () => {
+  it('routes incomplete interview to AssessmentWelcome', () => {
     expect(
       resolveInterviewStackScreenFromStatus(
         {
@@ -12,7 +12,7 @@ describe('resolveInterviewStackScreenFromStatus (psychometrics enabled)', () => 
         true,
       ),
     ).toEqual({
-      screen: 'Aria',
+      screen: 'AssessmentWelcome',
       legacyPsychometricsMode: false,
       interviewAlreadyCompleted: false,
     });

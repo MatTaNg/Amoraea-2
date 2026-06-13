@@ -18,15 +18,19 @@ import {
 import {
   assignAlgorithmEra,
   aggregateMarketResearch,
+  computeInterviewCompletedCohortAnalytics,
   computeFullyCompletedCohortAnalytics,
   computeOverviewAnalytics,
   detectScoreRecovery,
+  parseProfileTimingTimestamps,
+  sumUserAssessmentActiveMs,
   type AttemptRecord,
   type FullyCompletedCohortAnalytics,
   type MarketResearchAggregation,
   type OverviewAnalytics,
   type PillarStats,
   type CohortSegmentPillarDistribution,
+  type ProfileTimingRecord,
   type UserRecord,
 } from './analytics';
 import { formatDurationMsHuman } from './adminAttemptTiming';
@@ -92,6 +96,63 @@ function Section({
   );
 }
 
+function MetricsGrid({ children }: { children: React.ReactNode }) {
+  return (
+    <View style={styles.metricsGrid}>
+      {React.Children.map(children, (child) =>
+        child != null && child !== false ? (
+          <View style={styles.metricCell}>{child}</View>
+        ) : null,
+      )}
+    </View>
+  );
+}
+
+function TabBar<T extends string>({
+  tabs,
+  active,
+  onChange,
+  compact,
+}: {
+  tabs: { id: T; label: string }[];
+  active: T;
+  onChange: (id: T) => void;
+  compact?: boolean;
+}) {
+  return (
+    <ScrollView
+      horizontal
+      showsHorizontalScrollIndicator={false}
+      contentContainerStyle={[
+        styles.tabBarRow,
+        compact ? styles.tabBarRowCompact : null,
+      ]}
+    >
+      {tabs.map((tab) => (
+        <TouchableOpacity
+          key={tab.id}
+          style={[
+            styles.tabChip,
+            compact ? styles.tabChipCompact : null,
+            active === tab.id ? styles.tabChipActive : null,
+          ]}
+          onPress={() => onChange(tab.id)}
+        >
+          <Text
+            style={[
+              styles.tabChipText,
+              compact ? styles.tabChipTextCompact : null,
+              active === tab.id ? styles.tabChipTextActive : null,
+            ]}
+          >
+            {tab.label}
+          </Text>
+        </TouchableOpacity>
+      ))}
+    </ScrollView>
+  );
+}
+
 function MetricRow({
   label,
   value,
@@ -111,13 +172,28 @@ function MetricRow({
         <Text style={styles.metricLabel}>{label}</Text>
         {tooltip ? <Tooltip text={tooltip} /> : null}
       </View>
-      <View>
-        <Text style={[styles.metricValue, color ? { color } : null]}>{value}</Text>
-        {sublabel ? <Text style={styles.metricSublabel}>{sublabel}</Text> : null}
-      </View>
+      <Text style={[styles.metricValue, color ? { color } : null]}>{value}</Text>
+      {sublabel ? <Text style={styles.metricSublabel}>{sublabel}</Text> : null}
     </View>
   );
 }
+
+type OverviewPanelTab = 'cohort' | 'scores' | 'validity' | 'users';
+type CohortDetailTab = 'scores' | 'pillars' | 'psychometrics' | 'timing';
+
+const OVERVIEW_PANEL_TABS: { id: OverviewPanelTab; label: string }[] = [
+  { id: 'cohort', label: 'Cohort' },
+  { id: 'scores', label: 'Scores' },
+  { id: 'validity', label: 'Validity' },
+  { id: 'users', label: 'Users' },
+];
+
+const COHORT_DETAIL_TABS: { id: CohortDetailTab; label: string }[] = [
+  { id: 'scores', label: 'Scores' },
+  { id: 'pillars', label: 'Pillars' },
+  { id: 'psychometrics', label: 'Psychometrics' },
+  { id: 'timing', label: 'Timing' },
+];
 
 function AlphaBadge({ alpha, label }: { alpha: number | null; label: string }) {
   if (alpha === null) {
@@ -299,6 +375,31 @@ const USER_OVERVIEW_SELECT_WITHOUT_BRS = `
   market_research_spend_context
 `;
 
+async function fetchInterviewCompletedUsersForOverview(): Promise<UserRecord[]> {
+  let result = await supabase
+    .from('users')
+    .select(USER_OVERVIEW_SELECT_WITH_BRS)
+    .eq('interview_completed', true);
+  if (result.error && isMissingUsersColumnError(result.error, 'psychometrics_brs_score')) {
+    result = await supabase
+      .from('users')
+      .select(USER_OVERVIEW_SELECT_WITHOUT_BRS)
+      .eq('interview_completed', true);
+  }
+
+  if (result.error) {
+    throw new Error(result.error.message ?? 'Failed to load interview-completed users');
+  }
+
+  return ((result.data ?? []) as Omit<UserRecord, 'psychometrics_brs_score'>[]).map((u) => ({
+    ...u,
+    psychometrics_brs_score:
+      'psychometrics_brs_score' in u
+        ? ((u as UserRecord).psychometrics_brs_score ?? null)
+        : null,
+  }));
+}
+
 async function fetchUsersForOverview(userIds: string[]): Promise<UserRecord[]> {
   const idSet = new Set(userIds);
   if (idSet.size === 0) return [];
@@ -342,6 +443,68 @@ async function fetchAllUsersForMarketResearch(): Promise<UserRecord[]> {
   }
 
   return (data ?? []) as UserRecord[];
+}
+
+async function fetchProfileTimingForUsers(
+  userIds: string[],
+): Promise<Map<string, ProfileTimingRecord>> {
+  const map = new Map<string, ProfileTimingRecord>();
+  const idSet = new Set(userIds);
+  if (idSet.size === 0) return map;
+
+  const { data: profiles, error: profileError } = await supabase
+    .from('profiles')
+    .select('id, profile_json');
+
+  if (profileError) {
+    console.warn('[Overview] profile timing fetch failed:', profileError.message);
+  } else {
+    for (const row of profiles ?? []) {
+      const userId = String((row as { id: string }).id);
+      if (!idSet.has(userId)) continue;
+      const rawJson = (row as { profile_json?: unknown }).profile_json;
+      const profileJson =
+        rawJson && typeof rawJson === 'object' && !Array.isArray(rawJson)
+          ? (rawJson as Record<string, unknown>)
+          : {};
+      map.set(userId, {
+        ...parseProfileTimingTimestamps(profileJson),
+        datingAssessmentActiveMs: null,
+      });
+    }
+  }
+
+  const { data: assessments, error: assessmentError } = await supabase
+    .from('user_assessments')
+    .select('user_id, time_taken_sec')
+    .in('user_id', userIds);
+
+  if (assessmentError) {
+    console.warn('[Overview] user_assessments timing fetch failed:', assessmentError.message);
+  } else {
+    const rowsByUser = new Map<string, Array<{ time_taken_sec: number | null }>>();
+    for (const row of assessments ?? []) {
+      const userId = String((row as { user_id: string }).user_id);
+      if (!idSet.has(userId)) continue;
+      const bucket = rowsByUser.get(userId) ?? [];
+      bucket.push({
+        time_taken_sec: (row as { time_taken_sec: number | null }).time_taken_sec ?? null,
+      });
+      rowsByUser.set(userId, bucket);
+    }
+    for (const [userId, rows] of rowsByUser) {
+      const activeMs = sumUserAssessmentActiveMs(rows);
+      const existing = map.get(userId) ?? {
+        assessmentsCompletedAt: null,
+        onboardingCompletedAt: null,
+        datingAssessmentActiveMs: null,
+      };
+      existing.datingAssessmentActiveMs = activeMs;
+      map.set(userId, existing);
+    }
+  }
+
+  return map;
 }
 
 async function fetchOccupationsForUsers(userIds: string[]): Promise<Map<string, string>> {
@@ -441,12 +604,17 @@ export function OverviewTab() {
   const [refreshing, setRefreshing] = useState(false);
   const [analytics, setAnalytics] = useState<OverviewAnalytics | null>(null);
   const [cohortAnalytics, setCohortAnalytics] = useState<FullyCompletedCohortAnalytics | null>(null);
+  const [fullyCompletedCohortAnalytics, setFullyCompletedCohortAnalytics] =
+    useState<FullyCompletedCohortAnalytics | null>(null);
   const [marketResearch, setMarketResearch] = useState<MarketResearchAggregation | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [expandedPillar, setExpandedPillar] = useState<string | null>(null);
   const [expandedUser, setExpandedUser] = useState<string | null>(null);
   const [showAllUsers, setShowAllUsers] = useState(false);
   const [showFlippedOnly, setShowFlippedOnly] = useState(false);
+  const [panelTab, setPanelTab] = useState<OverviewPanelTab>('cohort');
+  const [cohortDetailTab, setCohortDetailTab] = useState<CohortDetailTab>('scores');
+  const [cohortSegmentTab, setCohortSegmentTab] = useState<string>('scenario1');
 
   const load = useCallback(async () => {
     try {
@@ -481,9 +649,17 @@ export function OverviewTab() {
       );
 
       const userIds = [...new Set(attemptsFiltered.map((a) => a.user_id as string))];
-      const usersRaw = (await fetchUsersForOverview(userIds)).filter(
-        (u) => !isCompatibilityTestSeedUser({ id: u.id, email: u.email }, seedUserIds),
-      );
+      const [usersFromAttempts, interviewCompletedUsers] = await Promise.all([
+        fetchUsersForOverview(userIds),
+        fetchInterviewCompletedUsersForOverview(),
+      ]);
+      const usersById = new Map<string, UserRecord>();
+      for (const u of [...usersFromAttempts, ...interviewCompletedUsers]) {
+        if (isCompatibilityTestSeedUser({ id: u.id, email: u.email }, seedUserIds)) continue;
+        usersById.set(u.id, u);
+      }
+      const usersRaw = [...usersById.values()];
+      const profileTimingByUserId = await fetchProfileTimingForUsers(usersRaw.map((u) => u.id));
 
       const attempts: AttemptRecord[] = attemptsFiltered.map((a) => {
         const row = a as Record<string, unknown>;
@@ -537,7 +713,16 @@ export function OverviewTab() {
       });
 
       const result = computeOverviewAnalytics(attempts, usersRaw);
-      const cohort = computeFullyCompletedCohortAnalytics(attempts, usersRaw);
+      const cohort = computeInterviewCompletedCohortAnalytics(
+        attempts,
+        usersRaw,
+        profileTimingByUserId,
+      );
+      const fullyCompletedCohort = computeFullyCompletedCohortAnalytics(
+        attempts,
+        usersRaw,
+        profileTimingByUserId,
+      );
 
       const marketResearchUsers = await fetchAllUsersForMarketResearch();
       const marketResearchUserIds = marketResearchUsers.map((u) => u.id);
@@ -546,6 +731,7 @@ export function OverviewTab() {
 
       setAnalytics(result);
       setCohortAnalytics(cohort);
+      setFullyCompletedCohortAnalytics(fullyCompletedCohort);
       setMarketResearch(market);
       setError(null);
     } catch (e: unknown) {
@@ -609,105 +795,174 @@ export function OverviewTab() {
       <Text style={styles.pageTitle}>Assessment Battery Overview</Text>
       <Text style={styles.pageSubtitle}>Pull down to refresh · Tap any section to collapse</Text>
 
-      {cohortAnalytics ? (
+      <TabBar tabs={OVERVIEW_PANEL_TABS} active={panelTab} onChange={setPanelTab} />
+
+      {panelTab === 'cohort' && cohortAnalytics ? (
         <Section
-          title="Fully Completed Cohort Averages"
-          tooltip="Users who finished the AI interview (interview_completed) and the psychometric battery (psychometrics_completed_at). One latest attempt per user. Interview time prefers active engagement from response_timings; psychometric and total times use wall clock."
+          title="Interview Completed Cohort Averages"
+          tooltip="All users with interview_completed (matches admin Users tab). Score and pillar averages use the latest attempt with pillar_scores per user; timing uses the latest completed attempt when available."
         >
-          <MetricRow
-            label="Cohort size"
-            value={`${cohortAnalytics.cohortSize} users`}
-          />
+          <MetricsGrid>
+            <MetricRow
+              label="Cohort size"
+              value={`${cohortAnalytics.cohortSize} users`}
+            />
+            <MetricRow
+              label="With scored attempt"
+              value={`${cohortAnalytics.scoredUsers} users`}
+              sublabel={
+                cohortAnalytics.cohortSize > cohortAnalytics.scoredUsers
+                  ? `${cohortAnalytics.cohortSize - cohortAnalytics.scoredUsers} pending pillar rollup`
+                  : undefined
+              }
+            />
+            {fullyCompletedCohortAnalytics ? (
+              <MetricRow
+                label="Interview + psychometrics"
+                value={`${fullyCompletedCohortAnalytics.cohortSize} users`}
+                sublabel="Subset who also finished the psychometric battery"
+              />
+            ) : null}
+          </MetricsGrid>
           {cohortAnalytics.cohortSize === 0 ? (
+            <Text style={styles.alphaNote}>No users have completed the AI interview yet.</Text>
+          ) : cohortAnalytics.scoredUsers === 0 ? (
             <Text style={styles.alphaNote}>
-              No users have completed both the AI interview and psychometrics yet.
+              {cohortAnalytics.cohortSize} user{cohortAnalytics.cohortSize === 1 ? '' : 's'}{' '}
+              finished the interview, but none have pillar_scores on their attempt yet — score
+              averages will appear after scoring completes.
             </Text>
           ) : (
             <>
-              <Text style={styles.subSectionTitle}>Interview scores</Text>
-              <MetricRow
-                label="Weighted score"
-                value={formatScore(cohortAnalytics.scoreAverages.weightedScore)}
-              />
-              <MetricRow
-                label="Modified weighted score"
-                value={formatScore(cohortAnalytics.scoreAverages.modifiedWeightedScore)}
-              />
-              <MetricRow
-                label="Modified weighted (with psychometrics)"
-                value={formatScore(cohortAnalytics.scoreAverages.modifiedWeightedWithPsychometrics)}
-              />
-              <MetricRow
-                label="Scenario 1 composite"
-                value={formatScore(cohortAnalytics.scoreAverages.scenario1)}
-              />
-              <MetricRow
-                label="Scenario 2 composite"
-                value={formatScore(cohortAnalytics.scoreAverages.scenario2)}
-              />
-              <MetricRow
-                label="Scenario 3 composite"
-                value={formatScore(cohortAnalytics.scoreAverages.scenario3)}
-              />
-              <MetricRow
-                label="Moment 4 composite"
-                value={formatScore(cohortAnalytics.scoreAverages.moment4)}
-              />
-              <MetricRow
-                label="Moment 5 composite"
-                value={formatScore(cohortAnalytics.scoreAverages.moment5)}
+              <TabBar
+                compact
+                tabs={COHORT_DETAIL_TABS}
+                active={cohortDetailTab}
+                onChange={setCohortDetailTab}
               />
 
-              <Text style={[styles.subSectionTitle, { marginTop: 16 }]}>
-                Pillar scores by scenario & moment
-              </Text>
-              {cohortAnalytics.segmentPillarDistributions.map((segment) => (
-                <CohortSegmentPillarBlock key={segment.key} segment={segment} />
-              ))}
-
-              <Text style={[styles.subSectionTitle, { marginTop: 16 }]}>Psychometric scores</Text>
-              {cohortAnalytics.scoreAverages.psychometricScores
-                .filter((p) => p.n > 0)
-                .map((p) => (
+              {cohortDetailTab === 'scores' ? (
+                <MetricsGrid>
                   <MetricRow
-                    key={p.key}
-                    label={p.label}
-                    value={p.average != null ? p.average.toFixed(2) : '—'}
-                    sublabel={`n=${p.n}`}
+                    label="Weighted score"
+                    value={formatScore(cohortAnalytics.scoreAverages.weightedScore)}
+                    sublabel={`n=${cohortAnalytics.scoredUsers}`}
                   />
-                ))}
+                  <MetricRow
+                    label="Modified weighted score"
+                    value={formatScore(cohortAnalytics.scoreAverages.modifiedWeightedScore)}
+                  />
+                  <MetricRow
+                    label="Modified weighted (with psychometrics)"
+                    value={formatScore(cohortAnalytics.scoreAverages.modifiedWeightedWithPsychometrics)}
+                  />
+                  <MetricRow
+                    label="Scenario 1 composite"
+                    value={formatScore(cohortAnalytics.scoreAverages.scenario1)}
+                  />
+                  <MetricRow
+                    label="Scenario 2 composite"
+                    value={formatScore(cohortAnalytics.scoreAverages.scenario2)}
+                  />
+                  <MetricRow
+                    label="Scenario 3 composite"
+                    value={formatScore(cohortAnalytics.scoreAverages.scenario3)}
+                  />
+                  <MetricRow
+                    label="Moment 4 composite"
+                    value={formatScore(cohortAnalytics.scoreAverages.moment4)}
+                  />
+                  <MetricRow
+                    label="Moment 5 composite"
+                    value={formatScore(cohortAnalytics.scoreAverages.moment5)}
+                  />
+                </MetricsGrid>
+              ) : null}
 
-              <Text style={[styles.subSectionTitle, { marginTop: 16 }]}>Average time</Text>
-              <MetricRow
-                label="AI interview"
-                value={formatDurationMsHuman(cohortAnalytics.timingAverages.interviewMs)}
-                sublabel={`n=${cohortAnalytics.timingAverages.interviewN}`}
-              />
-              <MetricRow
-                label="Psychometric battery"
-                value={formatDurationMsHuman(cohortAnalytics.timingAverages.psychometricMs)}
-                sublabel={`n=${cohortAnalytics.timingAverages.psychometricN} · after interview`}
-              />
-              <MetricRow
-                label="Total process"
-                value={formatDurationMsHuman(cohortAnalytics.timingAverages.totalProcessMs)}
-                sublabel={`n=${cohortAnalytics.timingAverages.totalProcessN} · interview start → psychometrics complete`}
-              />
+              {cohortDetailTab === 'pillars' ? (
+                <>
+                  <TabBar
+                    compact
+                    tabs={cohortAnalytics.segmentPillarDistributions.map((s) => ({
+                      id: s.key,
+                      label: s.label.replace(/^Scenario |^Moment /, ''),
+                    }))}
+                    active={cohortSegmentTab}
+                    onChange={setCohortSegmentTab}
+                  />
+                  {(() => {
+                    const segment =
+                      cohortAnalytics.segmentPillarDistributions.find(
+                        (s) => s.key === cohortSegmentTab,
+                      ) ?? cohortAnalytics.segmentPillarDistributions[0];
+                    return segment ? <CohortSegmentPillarBlock segment={segment} /> : null;
+                  })()}
+                </>
+              ) : null}
+
+              {cohortDetailTab === 'psychometrics' ? (
+                <MetricsGrid>
+                  {cohortAnalytics.scoreAverages.psychometricScores
+                    .filter((p) => p.n > 0)
+                    .map((p) => (
+                      <MetricRow
+                        key={p.key}
+                        label={p.label}
+                        value={p.average != null ? p.average.toFixed(2) : '—'}
+                        sublabel={`n=${p.n}`}
+                      />
+                    ))}
+                </MetricsGrid>
+              ) : null}
+
+              {cohortDetailTab === 'timing' ? (
+                <MetricsGrid>
+                  <MetricRow
+                    label="Total (end-to-end)"
+                    value={formatDurationMsHuman(cohortAnalytics.timingAverages.totalMs)}
+                    sublabel={`n=${cohortAnalytics.timingAverages.totalN} · interview start → profile complete`}
+                  />
+                  <MetricRow
+                    label="AI interview"
+                    value={formatDurationMsHuman(cohortAnalytics.timingAverages.interviewMs)}
+                    sublabel={`n=${cohortAnalytics.timingAverages.interviewN} · active time from response timings`}
+                  />
+                  <MetricRow
+                    label="Psychometric battery"
+                    value={formatDurationMsHuman(cohortAnalytics.timingAverages.psychometricMs)}
+                    sublabel={`n=${cohortAnalytics.timingAverages.psychometricN} · after interview until psychometrics complete`}
+                  />
+                  <MetricRow
+                    label="Profile questionnaires"
+                    value={formatDurationMsHuman(
+                      cohortAnalytics.timingAverages.profileQuestionnaireMs,
+                    )}
+                    sublabel={`n=${cohortAnalytics.timingAverages.profileQuestionnaireN} · active time on relationship instruments`}
+                  />
+                  <MetricRow
+                    label="Edit profile screens"
+                    value={formatDurationMsHuman(cohortAnalytics.timingAverages.profileEditMs)}
+                    sublabel={`n=${cohortAnalytics.timingAverages.profileEditN} · modal onboarding after questionnaires`}
+                  />
+                </MetricsGrid>
+              ) : null}
             </>
           )}
         </Section>
       ) : null}
 
-      {marketResearch ? (
+      {panelTab === 'cohort' && marketResearch ? (
         <Section
           title="Market Research Responses"
           tooltip="Aggregated answers from the pre-interview market research modal across all users who completed it."
           defaultExpanded={marketResearch.totalResponses > 0}
         >
-          <MetricRow
-            label="Total respondents"
-            value={`${marketResearch.totalResponses}`}
-          />
+          <MetricsGrid>
+            <MetricRow
+              label="Total respondents"
+              value={`${marketResearch.totalResponses}`}
+            />
+          </MetricsGrid>
           {marketResearch.totalResponses === 0 ? (
             <Text style={styles.alphaNote}>No market research responses recorded yet.</Text>
           ) : (
@@ -718,14 +973,28 @@ export function OverviewTab() {
         </Section>
       ) : null}
 
+      {panelTab === 'scores' ? (
+      <>
       <Section
         title="Sample Summary"
-        tooltip="Total completed attempts and breakdown by pass/fail status, data completeness, and assessment coverage."
+        tooltip="Interview-completed users match the admin Users tab. Score distributions and reliability metrics require pillar_scores on the attempt row."
       >
-        <View style={styles.metricsGrid}>
-          <MetricRow label="Total completed" value={`${a.sampleSize.total}`} />
+        <MetricsGrid>
           <MetricRow
-            label="Pass rate"
+            label="Interview completed"
+            value={`${a.sampleSize.interviewCompletedUsers} users`}
+          />
+          <MetricRow
+            label="Scored attempts"
+            value={`${a.sampleSize.scoredAttempts}`}
+            sublabel={
+              a.sampleSize.pendingScoringUsers > 0
+                ? `${a.sampleSize.pendingScoringUsers} completed user${a.sampleSize.pendingScoringUsers === 1 ? '' : 's'} pending pillar rollup`
+                : 'All completed users have pillar_scores'
+            }
+          />
+          <MetricRow
+            label="Pass rate (scored)"
             value={`${a.sampleSize.passRate}%`}
             sublabel={`${a.sampleSize.passed} passed · ${a.sampleSize.failed} failed`}
             color={a.sampleSize.passRate > 85 ? '#f59e0b' : '#22c55e'}
@@ -733,101 +1002,29 @@ export function OverviewTab() {
           />
           <MetricRow
             label="With depth signals"
-            value={`${a.sampleSize.withDepthSignals} / ${a.sampleSize.total}`}
+            value={`${a.sampleSize.withDepthSignals} / ${a.sampleSize.scoredAttempts}`}
             sublabel={
-              a.sampleSize.total > 0
-                ? `${Math.round((a.sampleSize.withDepthSignals / a.sampleSize.total) * 100)}% coverage`
+              a.sampleSize.scoredAttempts > 0
+                ? `${Math.round((a.sampleSize.withDepthSignals / a.sampleSize.scoredAttempts) * 100)}% coverage`
                 : undefined
             }
           />
           <MetricRow
             label="With psychometrics"
-            value={`${a.sampleSize.withPsychometrics} / ${a.sampleSize.total}`}
+            value={`${a.sampleSize.withPsychometrics} / ${a.sampleSize.interviewCompletedUsers}`}
           />
           <MetricRow
             label="Score recovery flags"
             value={`${a.sampleSize.withScoreRecovery} attempts`}
             color={
-              a.sampleSize.total > 0 && a.sampleSize.withScoreRecovery > a.sampleSize.total * 0.3
+              a.sampleSize.scoredAttempts > 0 &&
+              a.sampleSize.withScoreRecovery > a.sampleSize.scoredAttempts * 0.3
                 ? '#ef4444'
                 : '#aaa'
             }
             tooltip="Attempts where at least one scenario used fallback score recovery rather than structured scoring."
           />
-        </View>
-      </Section>
-
-      <Section
-        title="Uncertainty distribution"
-        tooltip="Adaptive uncertainty scores (0–1) computed at interview completion. Green &lt; 0.4, amber 0.4–0.6, red ≥ 0.6. Admin-only — does not affect user routing."
-      >
-        <View style={styles.metricsGrid}>
-          <MetricRow
-            label="Low uncertainty"
-            value={`${a.uncertaintyDistribution.green} (${a.uncertaintyDistribution.greenPct}%)`}
-            color="#22c55e"
-          />
-          <MetricRow
-            label="Moderate uncertainty"
-            value={`${a.uncertaintyDistribution.amber} (${a.uncertaintyDistribution.amberPct}%)`}
-            color="#f59e0b"
-          />
-          <MetricRow
-            label="High uncertainty"
-            value={`${a.uncertaintyDistribution.red} (${a.uncertaintyDistribution.redPct}%)`}
-            color="#ef4444"
-          />
-          <MetricRow
-            label="Average uncertainty"
-            value={
-              a.uncertaintyDistribution.averageScore != null
-                ? a.uncertaintyDistribution.averageScore.toFixed(2)
-                : '—'
-            }
-          />
-        </View>
-        {a.uncertaintyDistribution.commonFlags.length > 0 ? (
-          <>
-            <Text style={styles.subSectionTitle}>Most common active flags</Text>
-            {a.uncertaintyDistribution.commonFlags.map(({ flag, count }) => (
-              <MetricRow key={flag} label={flag} value={`${count} attempts`} />
-            ))}
-          </>
-        ) : null}
-        {a.uncertaintyDistribution.trendByEra.length >= 2 ? (
-          <>
-            <Text style={styles.subSectionTitle}>Average uncertainty by algorithm era</Text>
-            {a.uncertaintyDistribution.trendByEra.map((row) => (
-              <MetricRow
-                key={row.era}
-                label={row.era}
-                value={`${row.averageScore.toFixed(2)} (n=${row.count})`}
-              />
-            ))}
-          </>
-        ) : null}
-      </Section>
-
-      <Section
-        title="Internal Consistency (Cronbach's α)"
-        tooltip="Alpha measures how consistently the items in your assessment measure the same underlying construct. Targets: 0.80+ good, 0.70–0.79 adequate, below 0.70 poor. Minimum 30 attempts needed for a stable estimate."
-      >
-        {!a.cronbachAlpha.sufficient ? (
-          <View style={styles.warningBanner}>
-            <Text style={styles.warningText}>
-              ⚠ {a.sampleSize.total} of {a.cronbachAlpha.minimumNeeded} attempts needed for stable
-              alpha estimate
-            </Text>
-          </View>
-        ) : null}
-        <View style={styles.alphaRow}>
-          <AlphaBadge alpha={a.cronbachAlpha.pillars} label="Across 8 pillars" />
-          <AlphaBadge alpha={a.cronbachAlpha.scenarios} label="Across 3 scenarios" />
-        </View>
-        <Text style={styles.alphaNote}>
-          Target range for a multi-dimensional assessment: 0.75–0.88. Very high alpha (0.95+) may
-          indicate pillar redundancy rather than coherence.
-        </Text>
+        </MetricsGrid>
       </Section>
 
       <Section
@@ -950,17 +1147,19 @@ export function OverviewTab() {
         ))}
 
         <View style={styles.divider} />
-        <MetricRow
-          label="Borderline cases (5.5–6.5)"
-          value={`${a.thresholdAnalysis.borderlineCount} attempts`}
-          tooltip="These users' gate decisions are most sensitive to algorithm changes."
-        />
-        <MetricRow
-          label="Decisions flipped by modifier"
-          value={`${a.thresholdAnalysis.wouldFlipWithModifier}`}
-          color={a.thresholdAnalysis.wouldFlipWithModifier > 0 ? '#f59e0b' : '#22c55e'}
-          tooltip="Attempts where applying the depth signal modifier would change the pass/fail outcome."
-        />
+        <MetricsGrid>
+          <MetricRow
+            label="Borderline cases (5.5–6.5)"
+            value={`${a.thresholdAnalysis.borderlineCount} attempts`}
+            tooltip="These users' gate decisions are most sensitive to algorithm changes."
+          />
+          <MetricRow
+            label="Decisions flipped by modifier"
+            value={`${a.thresholdAnalysis.wouldFlipWithModifier}`}
+            color={a.thresholdAnalysis.wouldFlipWithModifier > 0 ? '#f59e0b' : '#22c55e'}
+            tooltip="Attempts where applying the depth signal modifier would change the pass/fail outcome."
+          />
+        </MetricsGrid>
 
         {a.thresholdAnalysis.wouldFlipWithModifier > 0 ? (
           <>
@@ -1001,6 +1200,122 @@ export function OverviewTab() {
             ))}
           </>
         ) : null}
+      </Section>
+      </>
+      ) : null}
+
+      {panelTab === 'validity' ? (
+      <>
+      <Section
+        title="Uncertainty distribution"
+        tooltip="Adaptive uncertainty scores (0–1) computed at interview completion. Green &lt; 0.4, amber 0.4–0.6, red ≥ 0.6. Admin-only — does not affect user routing."
+      >
+        <MetricsGrid>
+          <MetricRow
+            label="Low uncertainty"
+            value={`${a.uncertaintyDistribution.green} (${a.uncertaintyDistribution.greenPct}%)`}
+            color="#22c55e"
+          />
+          <MetricRow
+            label="Moderate uncertainty"
+            value={`${a.uncertaintyDistribution.amber} (${a.uncertaintyDistribution.amberPct}%)`}
+            color="#f59e0b"
+          />
+          <MetricRow
+            label="High uncertainty"
+            value={`${a.uncertaintyDistribution.red} (${a.uncertaintyDistribution.redPct}%)`}
+            color="#ef4444"
+          />
+          <MetricRow
+            label="Average uncertainty"
+            value={
+              a.uncertaintyDistribution.averageScore != null
+                ? a.uncertaintyDistribution.averageScore.toFixed(2)
+                : '—'
+            }
+          />
+        </MetricsGrid>
+        {a.uncertaintyDistribution.commonFlags.length > 0 ? (
+          <>
+            <Text style={styles.subSectionTitle}>Most common active flags</Text>
+            <MetricsGrid>
+              {a.uncertaintyDistribution.commonFlags.map(({ flag, count }) => (
+                <MetricRow key={flag} label={flag} value={`${count} attempts`} />
+              ))}
+            </MetricsGrid>
+          </>
+        ) : null}
+        {a.uncertaintyDistribution.trendByEra.length >= 2 ? (
+          <>
+            <Text style={styles.subSectionTitle}>Average uncertainty by algorithm era</Text>
+            <MetricsGrid>
+              {a.uncertaintyDistribution.trendByEra.map((row) => (
+                <MetricRow
+                  key={row.era}
+                  label={row.era}
+                  value={`${row.averageScore.toFixed(2)} (n=${row.count})`}
+                />
+              ))}
+            </MetricsGrid>
+          </>
+        ) : null}
+      </Section>
+
+      <Section
+        title="Internal Consistency (Cronbach's α)"
+        tooltip="Alpha measures how consistently the items in your assessment measure the same underlying construct. Targets: 0.80+ good, 0.70–0.79 adequate, below 0.70 poor. Minimum 30 attempts needed for a stable estimate."
+      >
+        {!a.cronbachAlpha.sufficient ? (
+          <View style={styles.warningBanner}>
+            <Text style={styles.warningText}>
+              ⚠ {a.sampleSize.scoredAttempts} of {a.cronbachAlpha.minimumNeeded} scored attempts needed for stable
+              alpha estimate
+            </Text>
+          </View>
+        ) : null}
+        <View style={styles.alphaRow}>
+          <AlphaBadge alpha={a.cronbachAlpha.pillars} label="Across 8 pillars" />
+          <AlphaBadge alpha={a.cronbachAlpha.scenarios} label="Across 3 scenarios" />
+        </View>
+        <Text style={styles.alphaNote}>
+          Target range for a multi-dimensional assessment: 0.75–0.88. Very high alpha (0.95+) may
+          indicate pillar redundancy rather than coherence.
+        </Text>
+      </Section>
+
+      <Section
+        title="Convergent Validity"
+        tooltip="Correlations between interview pillar scores and psychometric instrument scores."
+        defaultExpanded={false}
+      >
+        {!a.convergentValidity.sufficient ? (
+          <View style={styles.warningBanner}>
+            <Text style={styles.warningText}>
+              ⚠ Fewer than 5 users have completed both the interview and psychometric assessments.
+              Deploy psychometrics to real users to enable validity analysis.
+            </Text>
+          </View>
+        ) : null}
+        {a.convergentValidity.correlations.map((corr, i) => (
+          <View key={`${corr.pillar}-${corr.psychometric}-${i}`} style={styles.validityRow}>
+            <View style={styles.validityHeader}>
+              <Text style={styles.validityPillar}>
+                {corr.pillar.replace(/_/g, ' ')} ↔ {corr.psychometric}
+              </Text>
+              <View style={styles.validityRight}>
+                <CorrelationBadge r={corr.correlation} validating={corr.validating} />
+                <Text style={styles.validityN}>n={corr.n}</Text>
+              </View>
+            </View>
+            <Text style={styles.validityInterp}>{corr.interpretation}</Text>
+            {corr.validating === false && corr.correlation !== null ? (
+              <Text style={styles.validityWarning}>
+                ⚠ Correlation does not validate expected direction — review scoring or instrument
+                selection
+              </Text>
+            ) : null}
+          </View>
+        ))}
       </Section>
 
       <Section
@@ -1051,11 +1366,13 @@ export function OverviewTab() {
         tooltip="Attempts where scoring failed and a fallback recovery was used. High recovery rates may indicate scoring pipeline instability."
         defaultExpanded={false}
       >
-        <MetricRow
-          label="Attempts with recovery"
-          value={`${a.scoreRecoveryAnalysis.totalRecoveredAttempts} (${a.scoreRecoveryAnalysis.recoveryRate}%)`}
-          color={a.scoreRecoveryAnalysis.recoveryRate > 30 ? '#ef4444' : '#aaa'}
-        />
+        <MetricsGrid>
+          <MetricRow
+            label="Attempts with recovery"
+            value={`${a.scoreRecoveryAnalysis.totalRecoveredAttempts} (${a.scoreRecoveryAnalysis.recoveryRate}%)`}
+            color={a.scoreRecoveryAnalysis.recoveryRate > 30 ? '#ef4444' : '#aaa'}
+          />
+        </MetricsGrid>
         <View style={styles.alphaRow}>
           <AlphaBadge
             alpha={a.scoreRecoveryAnalysis.alphaWithRecovery}
@@ -1114,10 +1431,12 @@ export function OverviewTab() {
         ))}
 
         <Text style={[styles.subSectionTitle, { marginTop: 16 }]}>Modifier Distribution</Text>
-        <MetricRow
-          label="Average depth modifier"
-          value={`${a.depthSignalSummary.avgModifier > 0 ? '+' : ''}${a.depthSignalSummary.avgModifier}`}
-        />
+        <MetricsGrid>
+          <MetricRow
+            label="Average depth modifier"
+            value={`${a.depthSignalSummary.avgModifier > 0 ? '+' : ''}${a.depthSignalSummary.avgModifier}`}
+          />
+        </MetricsGrid>
         {a.depthSignalSummary.modifierDistribution.map((b) => (
           <View key={b.range} style={styles.distRow}>
             <Text style={styles.distLabel}>{b.range}</Text>
@@ -1130,47 +1449,22 @@ export function OverviewTab() {
           </View>
         ))}
       </Section>
+      </>
+      ) : null}
 
-      <Section
-        title="Convergent Validity"
-        tooltip="Correlations between interview pillar scores and psychometric instrument scores."
-        defaultExpanded={false}
-      >
-        {!a.convergentValidity.sufficient ? (
-          <View style={styles.warningBanner}>
-            <Text style={styles.warningText}>
-              ⚠ Fewer than 5 users have completed both the interview and psychometric assessments.
-              Deploy psychometrics to real users to enable validity analysis.
-            </Text>
-          </View>
-        ) : null}
-        {a.convergentValidity.correlations.map((corr, i) => (
-          <View key={`${corr.pillar}-${corr.psychometric}-${i}`} style={styles.validityRow}>
-            <View style={styles.validityHeader}>
-              <Text style={styles.validityPillar}>
-                {corr.pillar.replace(/_/g, ' ')} ↔ {corr.psychometric}
-              </Text>
-              <View style={styles.validityRight}>
-                <CorrelationBadge r={corr.correlation} validating={corr.validating} />
-                <Text style={styles.validityN}>n={corr.n}</Text>
-              </View>
-            </View>
-            <Text style={styles.validityInterp}>{corr.interpretation}</Text>
-            {corr.validating === false && corr.correlation !== null ? (
-              <Text style={styles.validityWarning}>
-                ⚠ Correlation does not validate expected direction — review scoring or instrument
-                selection
-              </Text>
-            ) : null}
-          </View>
-        ))}
-      </Section>
-
+      {panelTab === 'users' ? (
       <Section
         title="All Users"
-        tooltip="All completed attempts sorted by weighted score. R = score recovery, D = depth signals, P = psychometrics complete."
-        defaultExpanded={false}
+        tooltip="Every user with interview_completed, including those awaiting pillar rollup. R = score recovery, D = depth signals, P = psychometrics complete."
+        defaultExpanded
       >
+        <MetricsGrid>
+          <MetricRow
+            label="Listed users"
+            value={`${a.userDrilldown.length}`}
+            sublabel={`${a.userDrilldown.filter((r) => r.hasScoredAttempt).length} scored · ${a.userDrilldown.filter((r) => !r.hasScoredAttempt).length} pending scoring`}
+          />
+        </MetricsGrid>
         <View style={styles.tableHeader}>
           <Text style={[styles.tableCell, { flex: 2 }]}>User</Text>
           <Text style={styles.tableCell}>Score</Text>
@@ -1180,15 +1474,16 @@ export function OverviewTab() {
         </View>
 
         {displayedUsers.map((row) => (
-          <View key={row.attemptId}>
+          <View key={row.attemptId ?? row.userId}>
             <TouchableOpacity
               style={[
                 styles.tableRow,
-                expandedUser === row.attemptId && styles.tableRowExpanded,
+                expandedUser === (row.attemptId ?? row.userId) && styles.tableRowExpanded,
               ]}
-              onPress={() =>
-                setExpandedUser(expandedUser === row.attemptId ? null : row.attemptId)
-              }
+              onPress={() => {
+                const rowKey = row.attemptId ?? row.userId;
+                setExpandedUser(expandedUser === rowKey ? null : rowKey);
+              }}
             >
               <Text style={[styles.tableCell, { flex: 2, color: '#ccc' }]}>
                 {row.userName ?? 'Unknown'}
@@ -1196,10 +1491,16 @@ export function OverviewTab() {
               <Text
                 style={[
                   styles.tableCell,
-                  { color: (row.weightedScore ?? 0) >= 6 ? '#22c55e' : '#ef4444' },
+                  {
+                    color: !row.hasScoredAttempt
+                      ? '#888'
+                      : (row.weightedScore ?? 0) >= 6
+                        ? '#22c55e'
+                        : '#ef4444',
+                  },
                 ]}
               >
-                {row.weightedScore?.toFixed(2) ?? '—'}
+                {row.hasScoredAttempt ? row.weightedScore?.toFixed(2) ?? '—' : 'Pending'}
               </Text>
               <Text
                 style={[
@@ -1218,8 +1519,8 @@ export function OverviewTab() {
                   ? `${row.depthModifier > 0 ? '+' : ''}${row.depthModifier.toFixed(2)}`
                   : '—'}
               </Text>
-              <Text style={[styles.tableCell, { color: row.passed ? '#22c55e' : '#ef4444' }]}>
-                {row.passed ? 'PASS' : 'FAIL'}
+              <Text style={[styles.tableCell, { color: row.passed ? '#22c55e' : row.passed === false ? '#ef4444' : '#888' }]}>
+                {row.hasScoredAttempt ? (row.passed ? 'PASS' : 'FAIL') : '—'}
               </Text>
               <Text style={[styles.tableCell, { color: '#888', fontSize: 10 }]}>
                 {row.hasRecovery ? 'R' : '·'}
@@ -1228,10 +1529,22 @@ export function OverviewTab() {
               </Text>
             </TouchableOpacity>
 
-            {expandedUser === row.attemptId ? (
+            {expandedUser === (row.attemptId ?? row.userId) ? (
               <View style={styles.userExpanded}>
-                <Text style={styles.userExpandedRow}>Attempt ID: {row.attemptId}</Text>
-                <Text style={styles.userExpandedRow}>Algorithm era: {row.algorithmEra}</Text>
+                <Text style={styles.userExpandedRow}>User ID: {row.userId}</Text>
+                {row.attemptId ? (
+                  <Text style={styles.userExpandedRow}>Attempt ID: {row.attemptId}</Text>
+                ) : (
+                  <Text style={styles.userExpandedRow}>No completed attempt row found</Text>
+                )}
+                {!row.hasScoredAttempt ? (
+                  <Text style={styles.userExpandedRow}>
+                    Scoring: pending — interview marked complete but pillar_scores not on attempt yet
+                  </Text>
+                ) : null}
+                {row.algorithmEra ? (
+                  <Text style={styles.userExpandedRow}>Algorithm era: {row.algorithmEra}</Text>
+                ) : null}
                 <Text style={styles.userExpandedRow}>
                   Ego development: {row.egoLevel ?? 'not assessed'}
                 </Text>
@@ -1257,6 +1570,7 @@ export function OverviewTab() {
           </TouchableOpacity>
         ) : null}
       </Section>
+      ) : null}
     </ScrollView>
   );
 }
@@ -1276,7 +1590,35 @@ const styles = StyleSheet.create({
   },
   retryText: { color: '#fff', fontSize: 14 },
   pageTitle: { fontSize: 22, fontWeight: '700', color: '#fff', marginBottom: 4 },
-  pageSubtitle: { fontSize: 12, color: '#555', marginBottom: 24 },
+  pageSubtitle: { fontSize: 12, color: '#555', marginBottom: 16 },
+  tabBarRow: {
+    flexDirection: 'row',
+    gap: 8,
+    marginBottom: 16,
+    paddingBottom: 4,
+  },
+  tabBarRowCompact: {
+    marginTop: 8,
+    marginBottom: 10,
+  },
+  tabChip: {
+    borderWidth: 1,
+    borderColor: 'rgba(82,142,220,0.22)',
+    borderRadius: 999,
+    paddingHorizontal: 14,
+    paddingVertical: 7,
+  },
+  tabChipCompact: {
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+  },
+  tabChipActive: {
+    backgroundColor: 'rgba(30,111,217,0.2)',
+    borderColor: 'rgba(82,142,220,0.55)',
+  },
+  tabChipText: { color: '#888', fontSize: 13, fontWeight: '600' },
+  tabChipTextCompact: { fontSize: 11 },
+  tabChipTextActive: { color: '#93c5fd' },
   section: {
     backgroundColor: '#111',
     borderRadius: 10,
@@ -1337,19 +1679,25 @@ const styles = StyleSheet.create({
     paddingHorizontal: 12,
   },
   tooltipModalDismissText: { color: '#3b82f6', fontSize: 13, fontWeight: '600' },
-  metricsGrid: { gap: 10 },
-  metricRow: {
+  metricsGrid: {
     flexDirection: 'row',
+    flexWrap: 'wrap',
     justifyContent: 'space-between',
-    alignItems: 'flex-start',
-    paddingVertical: 6,
+    gap: 8,
+  },
+  metricCell: { width: '48%' },
+  metricRow: {
+    gap: 2,
+    paddingVertical: 8,
+    paddingHorizontal: 2,
     borderBottomWidth: 1,
     borderBottomColor: '#1a1a1a',
+    minHeight: 52,
   },
-  metricLabelRow: { flexDirection: 'row', alignItems: 'center', gap: 6, flex: 1 },
-  metricLabel: { fontSize: 13, color: '#888' },
-  metricValue: { fontSize: 14, fontWeight: '600', color: '#fff', textAlign: 'right' },
-  metricSublabel: { fontSize: 11, color: '#555', textAlign: 'right', marginTop: 1 },
+  metricLabelRow: { flexDirection: 'row', alignItems: 'center', gap: 4 },
+  metricLabel: { fontSize: 12, color: '#888', flexShrink: 1 },
+  metricValue: { fontSize: 14, fontWeight: '600', color: '#fff' },
+  metricSublabel: { fontSize: 11, color: '#555', marginTop: 1 },
   warningBanner: {
     backgroundColor: '#1a1000',
     borderRadius: 8,
@@ -1477,10 +1825,7 @@ const styles = StyleSheet.create({
   marketOptionCount: { fontSize: 11, color: '#555', width: 72, textAlign: 'right' },
   marketTextResponse: { fontSize: 12, color: '#888', lineHeight: 18, marginBottom: 4 },
   cohortSegmentBlock: {
-    marginTop: 12,
-    paddingTop: 10,
-    borderTopWidth: 1,
-    borderTopColor: '#1a1a1a',
+    marginTop: 8,
   },
   cohortSegmentTitle: { fontSize: 12, fontWeight: '600', color: '#aaa', marginBottom: 8 },
   cohortPillarRow: {

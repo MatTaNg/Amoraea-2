@@ -42,6 +42,46 @@ export function gatherTtsPlaybackTelemetry(args: {
   };
 }
 
+/** Parallel streaming TTS — always buffered MP3 chunks (prefetch or inline fetch). */
+export function gatherParallelStreamingTtsPlaybackTelemetry(args: {
+  ttsPlaybackActiveImmediatelyPrior: boolean;
+  afterRecording: boolean;
+  charCount: number;
+  momentNumber: number;
+  scenarioNumber: number;
+  prefetchedMpeg: boolean;
+  htmlAudioVolume: number | null;
+}): AudioSessionTelemetryPayload & {
+  telemetry_source: 'turn';
+  tts_pipeline: 'parallel_streaming';
+  playback_strategy: 'buffered_complete';
+  tts_buffer_complete_before_playback: true;
+  after_recording: boolean;
+  char_count: number;
+  moment_number: number;
+  scenario_number: number;
+  prefetched_mpeg: boolean;
+  html_audio_volume: number | null;
+  tts_trigger_source: 'callback';
+} {
+  return {
+    ...gatherTtsPlaybackTelemetry({
+      ttsPlaybackActiveImmediatelyPrior: args.ttsPlaybackActiveImmediatelyPrior,
+    }),
+    telemetry_source: 'turn',
+    tts_pipeline: 'parallel_streaming',
+    playback_strategy: 'buffered_complete',
+    tts_buffer_complete_before_playback: true,
+    after_recording: args.afterRecording,
+    char_count: args.charCount,
+    moment_number: args.momentNumber,
+    scenario_number: args.scenarioNumber,
+    prefetched_mpeg: args.prefetchedMpeg,
+    html_audio_volume: args.htmlAudioVolume,
+    tts_trigger_source: 'callback',
+  };
+}
+
 /** For `recording_start` — recording_session_active reflects whether a session was still marked active (usually false). */
 export function gatherRecordingStartTelemetry(): AudioSessionTelemetryPayload {
   const ctx = getSessionLogRuntime();

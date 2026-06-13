@@ -335,6 +335,25 @@ let lastOutputRoute: string | null = null;
 /**
  * Refresh route state from devices, update session envelope, detect change vs last refresh.
  */
+/** Session log payload when {@link refreshWebAudioRoutesForSession} detects a route change. */
+export function buildWebAudioRouteChangedEventData(
+  wr: WebRouteRefreshResult,
+  extra: { source: string; moment_number?: number },
+): Record<string, unknown> | null {
+  if (!wr.changed || !wr.previous) return null;
+  return {
+    previous_input_route: wr.previous.input_route,
+    previous_output_route: wr.previous.output_route,
+    new_input_route: wr.inference.input_route,
+    new_output_route: wr.inference.output_route,
+    headphones_connected: wr.inference.headphones_connected,
+    devices_audit: wr.inference.devices_audit,
+    moment_number: extra.moment_number,
+    timestamp: new Date().toISOString(),
+    source: extra.source,
+  };
+}
+
 export async function refreshWebAudioRoutesForSession(): Promise<WebRouteRefreshResult> {
   const inf = await inferWebAudioRoutesFromDevices();
   const prevIn = lastInputRoute;
