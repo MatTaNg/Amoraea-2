@@ -30,6 +30,10 @@ const NON_NAME_WORDS = new Set([
   'okay',
   'yes',
   'yeah',
+  'yep',
+  'yup',
+  'nah',
+  'nope',
   'sure',
   'ready',
   'hello',
@@ -95,11 +99,34 @@ const NON_NAME_WORDS = new Set([
 const COMMON_NAME_WHISPER_CORRECTIONS: Record<string, string> = {
   maths: 'Matt',
   mads: 'Matt',
+  mad: 'Matt',
+  met: 'Matt',
   mat: 'Matt',
   maps: 'Matt',
   map: 'Matt',
   max: 'Matt',
 };
+
+/** Single-word yes/bye homophones on the name question — not a first name. */
+const NAME_TURN_PROCEDURAL_WORDS = new Set([
+  'yes',
+  'yeah',
+  'yep',
+  'yup',
+  'sure',
+  'ok',
+  'okay',
+  'ready',
+  'bye',
+  'by',
+  'buy',
+  'bay',
+  'byebye',
+  'byby',
+  'no',
+  'nope',
+  'nah',
+]);
 
 const NAME_PROMPT_ECHO_WORDS = new Set([
   'what',
@@ -200,12 +227,30 @@ export const INTERVIEW_NAME_REPEAT_REASK_LINE =
 export const INTERVIEW_NAME_EARLY_MIC_REASK_LINE =
   'Please wait until I finish speaking, then tap the mic and say your first name clearly.';
 
+export const INTERVIEW_NAME_PROCEDURAL_MISHEAR_LINE =
+  "I heard yes or bye, but I need your first name — say just your name clearly.";
+
+/** Whisper often returns procedural assent on the name question (e.g. Matt → "Bye." / "Yep."). */
+export function isInterviewNameProceduralMishear(transcription: string): boolean {
+  const raw = transcription.trim();
+  if (!raw || raw.length > 32) return false;
+  const compact = raw.toLowerCase().replace(/[^a-z]/g, '');
+  if (compact === 'byebye' || compact === 'byby') return true;
+  const words = raw
+    .split(/\s+/)
+    .map((w) => normalizeNameTokenForBlocklist(stripNameTokenPunctuation(w)))
+    .filter(Boolean);
+  if (words.length === 0 || words.length > 2) return false;
+  return words.every((w) => NAME_TURN_PROCEDURAL_WORDS.has(w));
+}
+
 /** Short mic / VAD retry prompts — duration estimation often overshoots; must not replay on web. */
 export function isInterviewRecordingRetryLine(text: string): boolean {
   const stripped = text.trim();
   if (stripped === INTERVIEW_NAME_AMBIENT_REASK_LINE) return true;
   if (stripped === INTERVIEW_NAME_REPEAT_REASK_LINE) return true;
   if (stripped === INTERVIEW_NAME_EARLY_MIC_REASK_LINE) return true;
+  if (stripped === INTERVIEW_NAME_PROCEDURAL_MISHEAR_LINE) return true;
   if (/^i didn't catch any speech on that try\b/i.test(stripped)) return true;
   return false;
 }
@@ -215,6 +260,8 @@ export function pickAlternateInterviewRecordingRetryLine(message: string): strin
   const stripped = message.trim();
   if (stripped === INTERVIEW_NAME_AMBIENT_REASK_LINE) return INTERVIEW_NAME_REPEAT_REASK_LINE;
   if (stripped === INTERVIEW_NAME_REPEAT_REASK_LINE) return INTERVIEW_NAME_AMBIENT_REASK_LINE;
+  if (stripped === INTERVIEW_NAME_PROCEDURAL_MISHEAR_LINE) return INTERVIEW_NAME_REPEAT_REASK_LINE;
+  if (stripped === INTERVIEW_NAME_EARLY_MIC_REASK_LINE) return INTERVIEW_NAME_REPEAT_REASK_LINE;
   return null;
 }
 

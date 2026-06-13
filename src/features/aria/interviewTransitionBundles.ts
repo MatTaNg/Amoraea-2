@@ -14,7 +14,7 @@ export const SCENARIO_2_TO_3_TRANSITION_FALLBACK =
   "That's the end of this one, too. Here's the third situation — after this we'll move to something more personal.";
 
 export const MOMENT_4_HANDOFF_NO_NAME_LEAD =
-  'Good work — you just finished the three situations. There are only two questions left. These questions are more about you. Here\'s the first one.';
+  "Good work — you just finished the three situations. There are only two questions left. Now I want to ask you about something a bit more personal.";
 
 /**
  * Assistant copy that opens Moment 4 (handoff and/or grudge question). Used by {@link inferPersonalMomentSlices}
@@ -23,6 +23,7 @@ export const MOMENT_4_HANDOFF_NO_NAME_LEAD =
 export function assistantTextLooksLikeMoment4HandoffLead(text: string): boolean {
   const t = (text ?? '').toLowerCase();
   if (/held a grudge|really didn't like/.test(t)) return true;
+  if (/really hard time with|got under your skin/.test(t)) return true;
   if (/finished the three situations/.test(t)) return true;
   if (/end of (the )?three (situations|described situations|vignettes)/.test(t)) return true;
   if (/done with those three scenarios?/.test(t)) return true;

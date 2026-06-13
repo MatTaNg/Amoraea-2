@@ -7,13 +7,15 @@ import {
   collectPsychometricFloorGateFailReasons,
   mergePsychometricFloorsIntoGateState,
 } from '../psychometricFloorBreaches';
+import { NPI_ENTITLEMENT_ENABLED } from '../interviewCompletionStatus';
+import { narcissismFloorBreachScores } from '../narcissismInstrumentTestFixtures';
 
 const REGRESSION_FLOOR_SCORES = {
   rfqScore: 1.75,
   gaspScore: 5.7,
   dweckScore: 2.3,
   scsSfScore: 2.417,
-  sd3NarcissismScore: 4.111,
+  ...narcissismFloorBreachScores(true),
   brsScore: 1.5,
   anxietyTraitScore: 2.5,
   aaq2Score: 34,
@@ -56,7 +58,7 @@ const ADMIN_RECALC_USER_FLOOR_SCORES = {
   gaspScore: 4.75,
   dweckScore: 2,
   scsSfScore: 2.25,
-  sd3NarcissismScore: 3.222,
+  ...narcissismFloorBreachScores(false),
   brsScore: 1.667,
   anxietyTraitScore: 5,
   aaq2Score: 37,
@@ -66,15 +68,37 @@ const ADMIN_RECALC_USER_FLOOR_SCORES = {
 };
 
 describe('admin recalculation psychometric floor merge', () => {
-  it('fires nine instrument floors for admin recalc regression user (SD3 below threshold)', () => {
-    const breaches = collectPsychometricFloorGateFailReasons(ADMIN_RECALC_USER_FLOOR_SCORES, []);
-    expect(breaches).toHaveLength(9);
-    expect(breaches).not.toContain('sd3_narcissism_floor');
+  it('fires zero floors for moderate random psychometric profile', () => {
+    const breaches = collectPsychometricFloorGateFailReasons(
+      {
+        rfqScore: 3.875,
+        gaspScore: 3.0,
+        dweckScore: 3.7,
+        scsSfScore: 2.917,
+        sd3NarcissismScore: 3.333,
+        brsScore: 3.0,
+        anxietyTraitScore: 3.0,
+        aaq2Score: 28,
+        rsesScore: 26,
+        scsPublicScore: 13,
+        scsPrivateScore: 10,
+      },
+      [],
+    );
+    expect(breaches).toHaveLength(0);
   });
 
-  it('produces nine floor breaches with rich keyed psychometric_floors detail', () => {
+  it('fires eight active instrument floors for admin recalc regression user (SD3 below threshold)', () => {
+    const breaches = collectPsychometricFloorGateFailReasons(ADMIN_RECALC_USER_FLOOR_SCORES, []);
+    expect(breaches).toHaveLength(8);
+    expect(breaches).not.toContain(
+      NPI_ENTITLEMENT_ENABLED ? 'npi_entitlement_floor' : 'sd3_narcissism_floor',
+    );
+  });
+
+  it('produces eight active floor breaches with rich keyed psychometric_floors detail', () => {
     const breaches = collectPsychometricFloorGateFailReasons(REGRESSION_FLOOR_SCORES, []);
-    expect(breaches).toHaveLength(9);
+    expect(breaches).toHaveLength(8);
 
     const merged = mergePsychometricFloorsIntoGateState({
       existingFailReasons: [],
@@ -83,7 +107,7 @@ describe('admin recalculation psychometric floor merge', () => {
       straightLineFlags: [],
     });
 
-    expect(merged.gateFailReasons).toHaveLength(9);
+    expect(merged.gateFailReasons).toHaveLength(8);
     const psychFloors = merged.gateFailDetail.psychometric_floors as Record<
       string,
       { score: number; description: string }

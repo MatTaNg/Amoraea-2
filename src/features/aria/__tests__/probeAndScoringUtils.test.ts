@@ -29,6 +29,7 @@ import {
   MOMENT_5_ACCOUNTABILITY_QUESTION_TEXT,
   MOMENT_5_CONFLICT_VALIDITY_CLARIFICATION_TEXT,
   MOMENT_5_ACCOUNTABILITY_PROBE_WITH_GRIEF_ACK_TEXT,
+  MOMENT_5_ACCOUNTABILITY_PROBE_TEXT,
   MOMENT_5_INEXPERIENCE_FALLBACK_QUESTION,
   MOMENT_5_SPECIFICITY_REDIRECT_ALT_TEXT,
   MOMENT_5_SPECIFICITY_REDIRECT_TEXT,
@@ -55,10 +56,13 @@ import {
   SCENARIO_A_CONTEMPT_PROBE_TTS_SPOKEN_COPY,
   scenarioAContemptProbeResumeRepeatTtsText,
   scenarioAContemptProbeTtsSpokenText,
+  classifyConflictValidity,
+  extractPriorM5TranscriptBeforeClarification,
   moment5ConflictValidityIsLow,
   evaluateMoment5AccountabilitySelfReference,
   moment5PersonalNarrativeHasConcreteAnchor,
   combineMoment5UserTurnText,
+  combineMoment5UserTextIncludingCurrent,
   moment5TranscriptHasConcreteAnchor,
   moment5UserOrTranscriptHasConcreteAnchor,
   moment5UserDeclinesConcreteReask,
@@ -526,6 +530,23 @@ describe('probeAndScoringUtils', () => {
         })
       ).toBe(false);
     });
+
+    it('returns true after a brief Scenario A LLM reflection before the contempt probe', () => {
+      const alexAnswer =
+        'I think it was a bit condescending, Emma is not expressing her real thoughts to Ryan and this can never be resolved until she does.';
+      expect(
+        isReplyingToScenarioAQ1AfterDelivery({
+          currentMoment: 1,
+          contemptProbeAlreadyAsked: false,
+          lastAssistantWasContemptProbe: false,
+          lastAssistantWasRepair: false,
+          assistantTexts: [
+            'That makes sense — Emma sounds frustrated that Ryan keeps prioritizing his family over their time together.',
+          ],
+          userAnswerText: alexAnswer,
+        })
+      ).toBe(true);
+    });
   });
 
   describe('aggregateScenario1Moment1UserTextForContemptGate', () => {
@@ -618,6 +639,16 @@ describe('probeAndScoringUtils', () => {
           'Emma is frustrated and Ryan always puts family first.',
         ).skip,
       ).toBe(false);
+    });
+
+    it('generic condescending + Emma without closing-line engagement does not pre-skip (Alex session)', () => {
+      const answer =
+        'I think it was a bit condescending, Emma is not expressing her real thoughts to Ryan and this can never be resolved until she does.';
+      expect(evaluateScenarioAQ1ContemptProbePreProbeSkip(answer)).toEqual({
+        skip: false,
+        reason: null,
+      });
+      expect(hasScenarioAQ1ContemptProbeCoverage(answer)).toBe(false);
     });
   });
 
@@ -1177,6 +1208,13 @@ describe('probeAndScoringUtils', () => {
     });
 
     it('detects common model paraphrases of the accountability probe', () => {
+      expect(MOMENT_5_ACCOUNTABILITY_PROBE_TEXT).toBe(
+        'What do you think you did or said that contributed to the conflict?',
+      );
+      expect(MOMENT_5_ACCOUNTABILITY_PROBE_WITH_GRIEF_ACK_TEXT).toContain(
+        'What do you think you did or said that contributed to the conflict?',
+      );
+      expect(looksLikeMoment5AccountabilityProbeAssistantPrompt(MOMENT_5_ACCOUNTABILITY_PROBE_TEXT)).toBe(true);
       expect(looksLikeMoment5AccountabilityProbeAssistantPrompt('What was your part in how it all started?')).toBe(
         true,
       );
@@ -1443,6 +1481,38 @@ describe('probeAndScoringUtils', () => {
         ),
       ).toBe(true);
     });
+
+    it('classifies conflict validity clarification responses (three-state)', () => {
+      expect(
+        classifyConflictValidity('Honestly it was pretty smooth — no real tension.', ''),
+      ).toBe('no_conflict');
+      expect(
+        classifyConflictValidity(
+          'It resolved pretty smoothly after we talked.',
+          'My partner was upset and I apologized for how I spoke to her.',
+        ),
+      ).toBe('resolved_well');
+      expect(
+        classifyConflictValidity(
+          'Honestly it was pretty smooth — we talked it through.',
+          'We had verbal altercations but eventually apologized to each other.',
+        ),
+      ).toBe('resolved_well');
+      expect(classifyConflictValidity('Yeah it did get tense for a bit before we talked.', '')).toBe(
+        'resolved_well',
+      );
+      expect(classifyConflictValidity('We had a hard conversation but worked through it.', '')).toBe(
+        'genuine_conflict',
+      );
+      expect(
+        classifyConflictValidity('Honestly it was pretty smooth.', 'We had verbal altercations with my sister.'),
+      ).toBe('resolved_well');
+      expect(classifyConflictValidity('Honestly it was pretty smooth.', '')).toBe('no_conflict');
+      expect(
+        classifyConflictValidity('It resolved fine after we talked.', 'We had an argument about money.'),
+      ).toBe('resolved_well');
+      expect(classifyConflictValidity('It was tense between us for a while.', '')).toBe('resolved_well');
+    });
   });
 
   describe('moment5 transcript-combined anchor (M5 friend/partner redirect regression)', () => {
@@ -1462,6 +1532,18 @@ describe('probeAndScoringUtils', () => {
       ];
       expect(combineMoment5UserTurnText(tx)).toContain('close friend');
       expect(combineMoment5UserTurnText(tx)).not.toContain('M4 grudge');
+    });
+
+    it('combineMoment5UserTextIncludingCurrent preserves prior ownership across follow-up turns', () => {
+      const firstTurn =
+        "He called me a bad coach and I did raise my voice at him, but it was facilitated. I listened to him, he listened to me without interruption. We're cool now.";
+      const recapTurn = "I listened to him, he listened to me, and we're good now.";
+      const tx = [{ role: 'user', content: firstTurn, interviewMoment: 5 }];
+      const combined = combineMoment5UserTextIncludingCurrent(tx, recapTurn);
+      expect(moment5AnswerHasExplicitSelfAccountability(recapTurn)).toBe(false);
+      expect(moment5AnswerHasExplicitSelfAccountability(combined)).toBe(true);
+      expect(evaluateMoment5AccountabilityProbe(recapTurn).shouldProbe).toBe(true);
+      expect(evaluateMoment5AccountabilityProbe(combined).shouldProbe).toBe(false);
     });
 
     it('detects concrete anchor from earlier friend turn when latest turn is buildup-only', () => {

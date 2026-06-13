@@ -16,6 +16,9 @@ import {
   looksLikeProactiveScenarioSkipRequest,
   looksLikeSkipConfirmationConnectivityGreeting,
   looksLikeSkipConfirmationDecline,
+  evaluateFrustrationMetaCommentPathSuppression,
+  FRUSTRATION_META_CONFIDENCE_THRESHOLD,
+  FRUSTRATION_META_WORD_COUNT_THRESHOLD,
   resolveMetaCommentForInterviewTurn,
 } from '../metaCommentClassification';
 
@@ -39,8 +42,21 @@ describe('classifyUserMetaComment', () => {
     const b = classifyUserMetaComment("I didn't catch that");
     expect(b?.type).toBe('confusion');
     expect(b?.confusion_subtype).toBe('repeat_request');
+    expect(b?.confidence).toBe(1.0);
     const c = classifyUserMetaComment('what was the question');
     expect(c?.confusion_subtype).toBe('repeat_request');
+  });
+
+  it('pre-classifies explicit repeat phrases with confidence 1.0 before ambiguous_short', () => {
+    const r = classifyUserMetaComment('Can you ask the question again?');
+    expect(r?.type).toBe('confusion');
+    expect(r?.confusion_subtype).toBe('repeat_request');
+    expect(r?.confidence).toBe(1.0);
+    expect(classifyUserMetaComment('pardon')?.confidence).toBe(1.0);
+    expect(classifyUserMetaComment('say it again')?.confusion_subtype).toBe('repeat_request');
+    expect(classifyUserMetaComment('Yes, repeat')?.type).toBe('confusion');
+    expect(classifyUserMetaComment('Yes, repeat')?.confusion_subtype).toBe('repeat_request');
+    expect(classifyUserMetaComment('Yes, repeat')?.confidence).toBe(1.0);
   });
 
   it('classifies checking in', () => {
@@ -429,7 +445,35 @@ describe('resolveMetaCommentForInterviewTurn', () => {
     expect(resolved.effective).toBeNull();
   });
 
-  it('does not exempt resume welcome replies — classify ambiguous_short for telemetry/routing', () => {
+  it('exempts stay intent after exit confirmation prompt', () => {
+    const resolved = resolveMetaCommentForInterviewTurn('No, I want you to stay.', {
+      lastQuestionText:
+        'I hear you. If you leave now, it may affect your score. Are you sure you want to stop?',
+      priorUserUtteranceCount: 3,
+      isInterviewAppRoute: true,
+      hasProfileFirstName: true,
+    });
+    expect(resolved.raw?.type).toBe('ambiguous_short');
+    expect(resolved.exemptMetaCommentTurn).toBe(true);
+    expect(resolved.exemptMetaCommentTurnReason).toBe('exit_decline_turn');
+    expect(resolved.effective).toBeNull();
+  });
+
+  it('exempts bye-bye homophone yes during resume welcome gate', () => {
+    const resolved = resolveMetaCommentForInterviewTurn('Bye-bye.', {
+      lastQuestionText: "What's going on between these two?",
+      priorUserUtteranceCount: 4,
+      isInterviewAppRoute: true,
+      hasProfileFirstName: true,
+      resumeGatePending: true,
+    });
+    expect(resolved.raw?.type).toBe('ambiguous_short');
+    expect(resolved.exemptMetaCommentTurn).toBe(true);
+    expect(resolved.exemptMetaCommentTurnReason).toBe('resume_reentry_turn');
+    expect(resolved.effective).toBeNull();
+  });
+
+  it('exempts procedural assent on resume welcome prompt', () => {
     const resumeLine =
       "Welcome back — we can continue where we left off. When you're ready, say so, or I can repeat what I said and get ready for your response.";
     const resolved = resolveMetaCommentForInterviewTurn('yeah', {
@@ -439,9 +483,25 @@ describe('resolveMetaCommentForInterviewTurn', () => {
       hasProfileFirstName: true,
     });
     expect(resolved.raw?.type).toBe('ambiguous_short');
+    expect(resolved.exemptMetaCommentTurn).toBe(true);
+    expect(resolved.exemptMetaCommentTurnReason).toBe('resume_reentry_turn');
+    expect(resolved.effective).toBeNull();
+  });
+
+  it('does not exempt yes+repeat on resume welcome as procedural assent', () => {
+    const resumeLine =
+      "Welcome back — we can continue where we left off. When you're ready, say so, or I can repeat what I said and get ready for your response.";
+    const resolved = resolveMetaCommentForInterviewTurn('Yes, repeat', {
+      lastQuestionText: resumeLine,
+      priorUserUtteranceCount: 2,
+      isInterviewAppRoute: true,
+      hasProfileFirstName: true,
+      resumeGatePending: true,
+    });
+    expect(resolved.raw?.type).toBe('confusion');
+    expect(resolved.raw?.confusion_subtype).toBe('repeat_request');
     expect(resolved.exemptMetaCommentTurn).toBe(false);
-    expect(resolved.exemptMetaCommentTurnReason).toBe('no_exemption_condition_met');
-    expect(resolved.effective?.type).toBe('ambiguous_short');
+    expect(resolved.effective?.confusion_subtype).toBe('repeat_request');
   });
 });
 
@@ -542,5 +602,83 @@ describe('getMetaCommentCanonicalResponseSummary', () => {
 
   it('returns checking_in pivot summary when frustration-adjacent flag is set', () => {
     expect(getMetaCommentCanonicalResponseSummary('checking_in', false, undefined, true)).toContain('pivot');
+  });
+});
+
+describe('evaluateFrustrationMetaCommentPathSuppression', () => {
+  const frustration = (confidence: number) => ({ type: 'frustration' as const, confidence });
+
+  it('suppresses long substantive answers via word-count guard (≥40 words)', () => {
+    const longAnswer =
+      "It's not my place to judge, but as an observer I think James was trying to be practical while Sarah wanted emotional presence. He may have felt responsible for planning their future and defaulted to logistics when she needed him to simply be with her in the moment of her news.";
+    expect(longAnswer.split(/\s+/).length).toBeGreaterThanOrEqual(40);
+    const decision = evaluateFrustrationMetaCommentPathSuppression({
+      classification: frustration(0.95),
+      wordCount: longAnswer.split(/\s+/).filter(Boolean).length,
+      priorFrustrationSignalCountInMoment: 0,
+    });
+    expect(decision.suppress).toBe(true);
+    expect(decision.reason).toBe('word_count_above_threshold');
+    expect(decision.suppressionEventType).toBe('meta_comment_suppressed_word_count_guard');
+  });
+
+  it('suppresses low-confidence short frustration (confidence < 0.85)', () => {
+    const decision = evaluateFrustrationMetaCommentPathSuppression({
+      classification: frustration(0.67),
+      wordCount: 12,
+      priorFrustrationSignalCountInMoment: 0,
+    });
+    expect(decision.suppress).toBe(true);
+    expect(decision.reason).toBe('confidence_below_0.85');
+    expect(decision.suppressionEventType).toBe('meta_comment_suppressed_confidence_threshold');
+  });
+
+  it('allows high-confidence short frustration (confidence ≥ 0.85)', () => {
+    const decision = evaluateFrustrationMetaCommentPathSuppression({
+      classification: frustration(0.9),
+      wordCount: 12,
+      priorFrustrationSignalCountInMoment: 0,
+    });
+    expect(decision.suppress).toBe(false);
+    expect(decision.reason).toBeNull();
+    expect(decision.suppressionEventType).toBeNull();
+  });
+
+  it('exempts repeated prior frustration from word-count guard but still applies confidence threshold', () => {
+    const longAnswer = Array.from({ length: 45 }, () => 'word').join(' ');
+    expect(
+      evaluateFrustrationMetaCommentPathSuppression({
+        classification: frustration(0.95),
+        wordCount: 45,
+        priorFrustrationSignalCountInMoment: 1,
+      }).suppress
+    ).toBe(false);
+
+    expect(
+      evaluateFrustrationMetaCommentPathSuppression({
+        classification: frustration(0.67),
+        wordCount: 45,
+        priorFrustrationSignalCountInMoment: 1,
+      })
+    ).toEqual({
+      suppress: true,
+      reason: 'confidence_below_0.85',
+      suppressionEventType: 'meta_comment_suppressed_confidence_threshold',
+    });
+  });
+
+  it('does not suppress non-frustration classifications', () => {
+    expect(
+      evaluateFrustrationMetaCommentPathSuppression({
+        classification: { type: 'confusion', confidence: 0.4 },
+        wordCount: 5,
+        priorFrustrationSignalCountInMoment: 0,
+      }).suppress
+    ).toBe(false);
+  });
+
+  it('uses configured thresholds', () => {
+    expect(FRUSTRATION_META_CONFIDENCE_THRESHOLD).toBe(0.85);
+    expect(FRUSTRATION_META_WORD_COUNT_THRESHOLD).toBe(40);
   });
 });

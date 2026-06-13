@@ -1,4 +1,4 @@
-import React, { useCallback, useState, type MutableRefObject } from 'react';
+import React, { useCallback, useRef, type MutableRefObject } from 'react';
 import { Pressable, View, StyleSheet, Alert, Platform } from 'react-native';
 import * as ImagePicker from 'expo-image-picker';
 import { ProfileRepository } from '@data/repositories/ProfileRepository';
@@ -39,6 +39,8 @@ export const ModeratedPhotoUpload: React.FC<{
   onUploadEnd?: () => void;
   maxPhotos?: number;
   currentPhotoCount?: number;
+  /** Prefer passing from parent so the button is not blocked while auth hydrates. */
+  userId?: string | null;
 }> = ({
   children,
   onPhotoUploaded,
@@ -48,17 +50,73 @@ export const ModeratedPhotoUpload: React.FC<{
   onUploadEnd,
   maxPhotos = 6,
   currentPhotoCount = 0,
+  userId: userIdProp,
 }) => {
   const { user } = useAuth();
-  const [busy, setBusy] = useState(false);
+  const userId = userIdProp ?? user?.id ?? null;
+  /** Blocks only while the system photo picker is open (not during background upload). */
+  const pickInFlightRef = useRef(false);
   const remainingSlots = Math.max(0, maxPhotos - currentPhotoCount);
-  const disabled = remainingSlots <= 0 || busy || !user?.id;
+  const disabled = remainingSlots <= 0 || !userId;
+
+  const uploadAssetsInBackground = useCallback(
+    (assets: ImagePicker.ImagePickerAsset[], uid: string) => {
+      void (async () => {
+        const seenLocalUris = new Set<string>();
+        for (let i = 0; i < assets.length; i++) {
+          const asset = assets[i];
+          const uri = asset.uri;
+          if (assetLooksLikeGif(asset)) {
+            Alert.alert(
+              'Unsupported file type',
+              'GIFs cannot be uploaded as profile photos. Please choose a JPG, PNG, or HEIC image.',
+            );
+            continue;
+          }
+          if (seenLocalUris.has(uri)) {
+            Alert.alert('Already added', 'You selected the same photo more than once.');
+            continue;
+          }
+          seenLocalUris.add(uri);
+          const assetId = asset.assetId ?? null;
+          if (assetId && existingAssetIdsRef?.current.has(assetId)) {
+            Alert.alert('Already added', 'This photo is already in your profile.');
+            continue;
+          }
+          const fileName =
+            asset.fileName?.replace(/[^a-zA-Z0-9._-]/g, '_') ||
+            uri.split('/').pop()?.split('?')[0] ||
+            `photo_${Date.now()}_${i}.jpg`;
+
+          onUploadStart?.();
+          try {
+            const { publicUrl } = await profileRepository.uploadPhoto(uid, uri, fileName);
+            onPhotoUploaded(publicUrl, {
+              assetId: assetId ?? undefined,
+              fileName,
+            });
+          } catch (e) {
+            const message = e instanceof Error ? e.message : 'Could not upload photo';
+            Alert.alert('Upload failed', message);
+          } finally {
+            onUploadEnd?.();
+          }
+        }
+      })();
+    },
+    [
+      onPhotoUploaded,
+      onUploadStart,
+      onUploadEnd,
+      existingAssetIdsRef,
+      existingFileNameKeysRef,
+    ],
+  );
 
   const pickAndUpload = useCallback(async () => {
-    if (remainingSlots <= 0 || !user?.id) return;
+    if (remainingSlots <= 0 || !userId || pickInFlightRef.current) return;
 
-    setBusy(true);
-    onUploadStart?.();
+    pickInFlightRef.current = true;
     try {
       const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
       if (status !== 'granted') {
@@ -82,56 +140,30 @@ export const ModeratedPhotoUpload: React.FC<{
       }
 
       const assets = result.assets.slice(0, remainingSlots);
-      const seenLocalUris = new Set<string>();
-      for (let i = 0; i < assets.length; i++) {
-        const asset = assets[i];
-        const uri = asset.uri;
-        if (assetLooksLikeGif(asset)) {
-          Alert.alert('Unsupported file type', 'GIFs cannot be uploaded as profile photos. Please choose a JPG, PNG, or HEIC image.');
-          continue;
-        }
-        if (seenLocalUris.has(uri)) {
-          Alert.alert('Already added', 'You selected the same photo more than once.');
-          continue;
-        }
-        seenLocalUris.add(uri);
-        const assetId = asset.assetId ?? null;
-        if (assetId && existingAssetIdsRef?.current.has(assetId)) {
-          Alert.alert('Already added', 'This photo is already in your profile.');
-          continue;
-        }
-        const fileName =
-          asset.fileName?.replace(/[^a-zA-Z0-9._-]/g, '_') ||
-          uri.split('/').pop()?.split('?')[0] ||
-          `photo_${Date.now()}_${i}.jpg`;
-
-        const { publicUrl } = await profileRepository.uploadPhoto(user.id, uri, fileName);
-        onPhotoUploaded(publicUrl, { assetId: assetId ?? undefined });
-      }
+      uploadAssetsInBackground(assets, userId);
     } catch (e) {
       const message = e instanceof Error ? e.message : 'Could not upload photo';
       Alert.alert('Upload failed', message);
     } finally {
-      setBusy(false);
-      onUploadEnd?.();
+      pickInFlightRef.current = false;
     }
-  }, [
-    onPhotoUploaded,
-    onUploadStart,
-    onUploadEnd,
-    remainingSlots,
-    user?.id,
-    existingAssetIdsRef,
-    existingFileNameKeysRef,
-  ]);
+  }, [remainingSlots, uploadAssetsInBackground, userId]);
 
   return (
-    <Pressable disabled={disabled} onPress={pickAndUpload} style={disabled ? styles.disabled : undefined}>
-      <View>{children}</View>
+    <Pressable
+      disabled={disabled}
+      onPress={pickAndUpload}
+      style={({ pressed }) => [
+        disabled ? styles.disabled : null,
+        pressed && !disabled ? styles.pressed : null,
+      ]}
+    >
+      <View pointerEvents="none">{children}</View>
     </Pressable>
   );
 };
 
 const styles = StyleSheet.create({
   disabled: { opacity: 0.45 },
+  pressed: { opacity: 0.85 },
 });

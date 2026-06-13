@@ -2,6 +2,7 @@ import {
   CLIENT_MENTALIZING_SURFACE_PROBE,
   CLIENT_REPAIR_REFUSAL_PROBE,
   CLIENT_SHORT_ELABORATION_PROBE,
+  SCENARIO_C_SOPHIE_PERSPECTIVE_PROBE,
   evaluateRepairRefusalDetection,
   isClientOrElongatingInterviewProbeAssistant,
   isInterviewHardStopUserTurn,
@@ -16,13 +17,16 @@ import {
   stripEmbeddedScenarioARepairQuestionAsk,
   stripScenarioARepairQuestionStreamingEcho,
   isIncompleteScenarioARepairLeadSentence,
+  resolveInterviewQuestionRepeatTtsText,
   userAnswerSatisfiesScenarioARepairPrompt,
   looksLikeSurfaceOnlyEmotionalLabelAnswer,
   pickClientDisengagementProbe,
   repairAnswerHasConcreteSuggestionActionOrStep,
   repairAnswerShowsRefusalOrCharacterDeflection,
   scenarioALastAssistantIsRepairProbeOrFollowUp,
+  userAnswerHasSophiePerspectiveLanguage,
 } from '../interviewDisengagementProbes';
+import { SCENARIO_A_REPAIR_QUESTION_AFTER_CONTEMPT_COPY } from '../probeAndScoringUtils';
 import { isScenarioBRepairAsJamesQuestion } from '../scenarioBTranscriptGates';
 
 describe('interviewDisengagementProbes', () => {
@@ -74,11 +78,23 @@ describe('interviewDisengagementProbes', () => {
 
   it('isIncompleteScenarioARepairLeadSentence detects Ryan lead split by streaming', () => {
     expect(isIncompleteScenarioARepairLeadSentence('What if you were Ryan?')).toBe(true);
+    expect(isIncompleteScenarioARepairLeadSentence('And if you were Ryan?')).toBe(true);
     expect(
       isIncompleteScenarioARepairLeadSentence(
         'What if you were Ryan? How would you repair this situation?',
       ),
     ).toBe(false);
+  });
+
+  it('resolveInterviewQuestionRepeatTtsText expands truncated Ryan repair lead', () => {
+    expect(resolveInterviewQuestionRepeatTtsText('And if you were Ryan?')).toBe(
+      SCENARIO_A_REPAIR_QUESTION_AFTER_CONTEMPT_COPY,
+    );
+    expect(
+      resolveInterviewQuestionRepeatTtsText(
+        'And if you were Ryan? How would you repair this situation?',
+      ),
+    ).toBe('And if you were Ryan? How would you repair this situation?');
   });
 
   it('stripScenarioARepairQuestionStreamingEcho drops duplicate repair after first stream chunk', () => {
@@ -486,7 +502,89 @@ describe('interviewDisengagementProbes', () => {
   it('recognizes client probe assistants for chaining guard', () => {
     expect(isClientOrElongatingInterviewProbeAssistant(CLIENT_REPAIR_REFUSAL_PROBE)).toBe(true);
     expect(isClientOrElongatingInterviewProbeAssistant(CLIENT_MENTALIZING_SURFACE_PROBE)).toBe(true);
+    expect(isClientOrElongatingInterviewProbeAssistant(SCENARIO_C_SOPHIE_PERSPECTIVE_PROBE)).toBe(true);
     expect(isClientOrElongatingInterviewProbeAssistant(CLIENT_SHORT_ELABORATION_PROBE)).toBe(true);
     expect(isClientOrElongatingInterviewProbeAssistant('Can you say more about that?')).toBe(true);
+  });
+
+  const SCENARIO_C_Q1_PROMPT =
+    "When Daniel comes back and says 'I didn't know what to say' — what do you make of that?";
+
+  it('Scenario C Q1 Sophie perspective probe fires for Daniel-focused Q1 answer without Sophie inference', () => {
+    const answer =
+      "He feels put on the spot and he's buying time to figure out what to say — Daniel probably needs a moment before he can face her.";
+    const pick = pickClientDisengagementProbe({
+      userAnswer: answer,
+      lastAssistantContent: SCENARIO_C_Q1_PROMPT,
+      wordCount: answer.trim().split(/\s+/).length,
+      answeringAfterProbe: false,
+      exemptMetaTurn: false,
+      isGreetingNameTurn: false,
+      isExplicitDecline: false,
+      isAssistantRecoveryOrMetaLine: false,
+      isFirstUserTurnInScenario: true,
+      scenarioCSophiePerspectiveProbeAlreadyFired: false,
+      mentalizingSurfaceProbeAlreadyFired: false,
+    });
+    expect(pick?.kind).toBe('scenario_c_sophie_perspective');
+    expect(pick?.probe).toBe(SCENARIO_C_SOPHIE_PERSPECTIVE_PROBE);
+  });
+
+  it('Scenario C Q1 Sophie perspective probe does not fire when user already mentions Sophie experience', () => {
+    const answer =
+      "Daniel feels overwhelmed when he comes back, and Sophie has probably felt abandoned each time he leaves — waiting for him to finally stay.";
+    const pick = pickClientDisengagementProbe({
+      userAnswer: answer,
+      lastAssistantContent: SCENARIO_C_Q1_PROMPT,
+      wordCount: answer.trim().split(/\s+/).length,
+      answeringAfterProbe: false,
+      exemptMetaTurn: false,
+      isGreetingNameTurn: false,
+      isExplicitDecline: false,
+      isAssistantRecoveryOrMetaLine: false,
+      isFirstUserTurnInScenario: true,
+      scenarioCSophiePerspectiveProbeAlreadyFired: false,
+      mentalizingSurfaceProbeAlreadyFired: false,
+    });
+    expect(pick).toBeNull();
+    expect(userAnswerHasSophiePerspectiveLanguage(answer)).toBe(true);
+  });
+
+  it('Scenario C Q1 Sophie perspective probe does not fire for misplaced repair answer', () => {
+    const answer =
+      'They should sit down and make a plan — maybe couples therapy and ground rules for timeouts so both feel heard and can repair this pattern over time together.';
+    const pick = pickClientDisengagementProbe({
+      userAnswer: answer,
+      lastAssistantContent: SCENARIO_C_Q1_PROMPT,
+      wordCount: answer.trim().split(/\s+/).length,
+      answeringAfterProbe: false,
+      exemptMetaTurn: false,
+      isGreetingNameTurn: false,
+      isExplicitDecline: false,
+      isAssistantRecoveryOrMetaLine: false,
+      isFirstUserTurnInScenario: true,
+      scenarioCSophiePerspectiveProbeAlreadyFired: false,
+      mentalizingSurfaceProbeAlreadyFired: false,
+    });
+    expect(pick).toBeNull();
+  });
+
+  it('Scenario C Q1 Sophie perspective probe does not fire when mentalizing surface probe already fired', () => {
+    const answer =
+      "He feels put on the spot and he's buying time to figure out what to say — Daniel probably needs a moment before he can face her.";
+    const pick = pickClientDisengagementProbe({
+      userAnswer: answer,
+      lastAssistantContent: SCENARIO_C_Q1_PROMPT,
+      wordCount: answer.trim().split(/\s+/).length,
+      answeringAfterProbe: false,
+      exemptMetaTurn: false,
+      isGreetingNameTurn: false,
+      isExplicitDecline: false,
+      isAssistantRecoveryOrMetaLine: false,
+      isFirstUserTurnInScenario: true,
+      scenarioCSophiePerspectiveProbeAlreadyFired: false,
+      mentalizingSurfaceProbeAlreadyFired: true,
+    });
+    expect(pick).toBeNull();
   });
 });

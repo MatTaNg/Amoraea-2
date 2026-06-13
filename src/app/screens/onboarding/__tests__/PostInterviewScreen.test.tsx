@@ -4,7 +4,7 @@ import { render, waitFor, fireEvent } from '@testing-library/react-native';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { PostInterviewScreen } from '../PostInterviewScreen';
 import { supabase } from '@data/supabase/client';
-import * as qaRetake from '@features/onboarding/qaRetake';
+import { enableInterviewRetake } from '@features/interview/interviewRetake';
 
 jest.mock('@utilities/storage/InterviewStorage', () => ({
   clearInterviewFromStorage: jest.fn(),
@@ -26,9 +26,19 @@ jest.mock('@app/screens/FlameOrb', () => ({
   },
 }));
 
-jest.mock('@features/onboarding/qaRetake', () => ({
-  ...jest.requireActual('@features/onboarding/qaRetake'),
-  resetInterviewForQaRetake: jest.fn(() => Promise.resolve()),
+jest.mock('@features/interview/interviewRetake', () => ({
+  enableInterviewRetake: jest.fn(() => Promise.resolve()),
+}));
+
+const mockUsePostInterviewRetakeEligibility = jest.fn(() => ({
+  showRetake: false,
+  retakeEligibleOnLabel: null,
+  loading: false,
+}));
+
+jest.mock('@features/onboarding/usePostInterviewRetakeEligibility', () => ({
+  usePostInterviewRetakeEligibility: (...args: unknown[]) =>
+    mockUsePostInterviewRetakeEligibility(...args),
 }));
 
 jest.mock('@data/supabase/client', () => ({
@@ -65,12 +75,19 @@ function renderWithClient(ui: React.ReactElement) {
 }
 
 describe('PostInterviewScreen', () => {
+  jest.setTimeout(30_000);
+
   const navigation = { replace: jest.fn() };
 
   beforeEach(() => {
     jest.clearAllMocks();
     fromMock.mockImplementation(() => tableChain());
-    (qaRetake.resetInterviewForQaRetake as jest.Mock).mockResolvedValue(undefined);
+    mockUsePostInterviewRetakeEligibility.mockReturnValue({
+      showRetake: false,
+      retakeEligibleOnLabel: null,
+      loading: false,
+    });
+    (enableInterviewRetake as jest.Mock).mockResolvedValue(undefined);
   });
 
   it('does not show Retake test for a non-QA referral code', async () => {
@@ -95,6 +112,12 @@ describe('PostInterviewScreen', () => {
   });
 
   it('shows Retake test for QA signup (trim/case) and on confirm calls reset + navigates to Aria', async () => {
+    mockUsePostInterviewRetakeEligibility.mockReturnValue({
+      showRetake: true,
+      retakeEligibleOnLabel: null,
+      loading: false,
+    });
+
     const alertSpy = jest.spyOn(Alert, 'alert').mockImplementation((_title, _message, buttons) => {
       const retake = buttons?.find((b) => 'text' in b && b.text === 'Retake');
       (retake as { onPress?: () => void } | undefined)?.onPress?.();
@@ -125,7 +148,7 @@ describe('PostInterviewScreen', () => {
     fireEvent.press(getByText('Retake test'));
 
     await waitFor(() => {
-      expect(qaRetake.resetInterviewForQaRetake).toHaveBeenCalledWith('auth-user-3');
+      expect(enableInterviewRetake).toHaveBeenCalledWith('auth-user-3');
       expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: ['profile', 'auth-user-3'] });
       expect(navigation.replace).toHaveBeenCalledWith('Aria', { userId: 'auth-user-3' });
     });
@@ -135,6 +158,12 @@ describe('PostInterviewScreen', () => {
   });
 
   it('web: uses window.confirm for retake (showConfirmDialog — Alert.alert is no-op on react-native-web)', async () => {
+    mockUsePostInterviewRetakeEligibility.mockReturnValue({
+      showRetake: true,
+      retakeEligibleOnLabel: null,
+      loading: false,
+    });
+
     const prevOs = Platform.OS;
     // @ts-expect-error test override
     Platform.OS = 'web';
@@ -171,7 +200,7 @@ describe('PostInterviewScreen', () => {
     await waitFor(() => {
       expect(confirmMock).toHaveBeenCalled();
       expect(alertSpy).not.toHaveBeenCalled();
-      expect(qaRetake.resetInterviewForQaRetake).toHaveBeenCalledWith('web-user');
+      expect(enableInterviewRetake).toHaveBeenCalledWith('web-user');
       expect(navigation.replace).toHaveBeenCalledWith('Aria', { userId: 'web-user' });
     });
 

@@ -9,8 +9,6 @@ import {
   DWECK_EXTREME_FIXED_MINDSET_FLOOR_THRESHOLD,
   GASP_EXTREME_EXTERNALIZATION_FLOOR_THRESHOLD,
   RSES_LOW_SELF_ESTEEM_FLOOR_THRESHOLD,
-  SCS_PRIVATE_LOW_SELF_AWARENESS_FLOOR_THRESHOLD,
-  SCS_PUBLIC_HIGH_SELF_CONSCIOUSNESS_FLOOR_THRESHOLD,
   SCS_SF_LOW_SELF_COMPASSION_FLOOR_THRESHOLD,
 } from '@features/psychometrics/psychometricFloorBreaches';
 
@@ -49,8 +47,6 @@ const FLAG_DESCRIPTIONS: Record<string, string> = {
     `AAQ-II experiential avoidance sum score meets the automatic fail threshold (≥ ${AAQ2_HIGH_EXPERIENTIAL_AVOIDANCE_FLOOR_THRESHOLD.toFixed(0)}).`,
   rses_low_self_esteem_floor:
     `Rosenberg Self-Esteem sum score is at or below the automatic fail threshold (≤ ${RSES_LOW_SELF_ESTEEM_FLOOR_THRESHOLD.toFixed(0)}).`,
-  scs_low_private_self_awareness_floor:
-    `SCS public self-consciousness is high (≥ ${SCS_PUBLIC_HIGH_SELF_CONSCIOUSNESS_FLOOR_THRESHOLD.toFixed(0)}) and private self-awareness is low (≤ ${SCS_PRIVATE_LOW_SELF_AWARENESS_FLOOR_THRESHOLD.toFixed(0)}).`,
   rfq_mentalizing_divergence_low_self_report:
     'Limited reflective functioning self-report but strong mentalizing signals in the interview.',
   rfq_mentalizing_divergence_high_self_report:

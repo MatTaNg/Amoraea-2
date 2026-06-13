@@ -280,7 +280,7 @@ function buildRequiredQuestionSteps(): Array<{
   return rows;
 }
 
-/** One onboarding step per required life-domain question (before sliders and lifestyle). */
+/** One onboarding step per required life-domain question (before space / lifestyle dealbreakers). */
 export const LIFE_DOMAIN_REQUIRED_QUESTION_ONBOARDING_STEPS = buildRequiredQuestionSteps();
 
 export type LifeDomainRequiredQuestionOnboardingStep =

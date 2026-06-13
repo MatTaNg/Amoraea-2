@@ -6,9 +6,11 @@
 import { isApprovedElongatingProbeOnly } from './elongatingProbe';
 import { APPROVED_ELONGATING_PROBE_LINES } from './elongatingProbe';
 import {
+  isMisplacedScenarioCQ1Answer,
   isScenarioCQ1Prompt,
   isScenarioCRepairAssistantPrompt,
   looksLikeScenarioCCommitmentThresholdAssistantPrompt,
+  SCENARIO_A_REPAIR_QUESTION_AFTER_CONTEMPT_COPY,
 } from './probeAndScoringUtils';
 import { looksLikeMoment4GrudgePrompt } from './moment4ProbeLogic';
 
@@ -17,6 +19,9 @@ export const CLIENT_REPAIR_REFUSAL_PROBE =
 
 export const CLIENT_MENTALIZING_SURFACE_PROBE =
   'What do you think is underneath that for each of them?' as const;
+
+export const SCENARIO_C_SOPHIE_PERSPECTIVE_PROBE =
+  'What do you think this pattern of leaving has been like for Sophie over time?' as const;
 
 /** Same verbatim line as approved elongating probes — keeps `elongating_probe_fired` accurate after client inject. */
 export const CLIENT_SHORT_ELABORATION_PROBE = APPROVED_ELONGATING_PROBE_LINES[0];
@@ -77,7 +82,17 @@ export function stripScenarioARepairQuestion(text: string): string {
 export function isIncompleteScenarioARepairLeadSentence(text: string): boolean {
   const t = normalizeApostrophes(text).trim().toLowerCase();
   if (!t || looksLikeScenarioARepairQuestion(text)) return false;
-  return /\b(what if you were ryan|if you were ryan)\b/.test(t) && !/\brepair\b/.test(t);
+  return /\b(what if you were ryan|if you were ryan|and if you were ryan)\b/.test(t) && !/\brepair\b/.test(t);
+}
+
+/** Expand truncated Ryan repair lead-ins so repeat TTS delivers the full canonical ask. */
+export function resolveInterviewQuestionRepeatTtsText(storedText: string): string {
+  const t = (storedText ?? '').trim();
+  if (!t) return t;
+  if (isIncompleteScenarioARepairLeadSentence(t)) {
+    return SCENARIO_A_REPAIR_QUESTION_AFTER_CONTEMPT_COPY;
+  }
+  return t;
 }
 
 /** Remove a glued Scenario A repair ask from a longer paragraph (model echo / stacked asks). */
@@ -359,7 +374,72 @@ export function isClientOrElongatingInterviewProbeAssistant(content: string): bo
   return (
     n === normalizeWhitespace(CLIENT_REPAIR_REFUSAL_PROBE) ||
     n === normalizeWhitespace(CLIENT_MENTALIZING_SURFACE_PROBE) ||
+    n === normalizeWhitespace(SCENARIO_C_SOPHIE_PERSPECTIVE_PROBE) ||
     n === normalizeWhitespace(CLIENT_SHORT_ELABORATION_PROBE)
+  );
+}
+
+export function transcriptContainsMentalizingSurfaceProbe(
+  messages: Array<{ role: string; content?: string | null }>,
+): boolean {
+  return messages.some(
+    (m) =>
+      m.role === 'assistant' &&
+      normalizeWhitespace(m.content ?? '') === normalizeWhitespace(CLIENT_MENTALIZING_SURFACE_PROBE),
+  );
+}
+
+export function transcriptContainsScenarioCSophiePerspectiveProbe(
+  messages: Array<{ role: string; content?: string | null }>,
+): boolean {
+  return messages.some(
+    (m) =>
+      m.role === 'assistant' &&
+      normalizeWhitespace(m.content ?? '') === normalizeWhitespace(SCENARIO_C_SOPHIE_PERSPECTIVE_PROBE),
+  );
+}
+
+/** True when the user volunteered inference about Sophie's emotional experience or the impact on her. */
+export function userAnswerHasSophiePerspectiveLanguage(text: string): boolean {
+  const t = normalizeApostrophes(text).toLowerCase();
+  if (!t.trim()) return false;
+
+  const mentionsSophie = /\bsophie\b/.test(t);
+  const mentionsHerInScenarioContext =
+    /\b(she|her)\b/.test(t) &&
+    (/\b(sophie|daniel|leaving|left|walk(ed)? away|pattern)\b/.test(t) ||
+      /\bwhat (this|it) (is|was|has been|might be) like for (her|sophie)\b/.test(t));
+
+  if (!mentionsSophie && !mentionsHerInScenarioContext) {
+    if (!/\b(for (her|sophie)|impact on (her|sophie))\b/.test(t)) {
+      return false;
+    }
+  }
+
+  const sophieExperiencePatterns: RegExp[] = [
+    /\bsophie\b.{0,100}\b(feel|felt|feeling|feels|upset|hurt|frustrated|angry|waiting|unheard|dismissed|abandoned|lonely|painful|hard|difficult|invalidated|exhausted|tired|scared|anxious|resigned|disappointed)\b/,
+    /\b(she|her)\b.{0,80}\b(feel|felt|feeling|feels|upset|hurt|frustrated|waiting|unheard|dismissed|left alone|abandoned|invalidated|lonely|painful|hard|difficult)\b/,
+    /\bwhat (this|it|the pattern|leaving|him leaving|him walking away) (is|was|has been|must be|might be) like for (her|sophie)\b/,
+    /\b(for sophie|for her)\b.{0,80}\b(hard|difficult|painful|lonely|invalidating|exhausting|draining|frustrating|hurtful|damaging)\b/,
+    /\bimpact on (her|sophie)\b/,
+    /\b(sophie|she)\b.{0,100}\b(going through|experiencing|dealing with|living with|put up with|endured|suffered|carries|carrying)\b/,
+    /\b(recurring|repeated|pattern of leaving|pattern of walking away|again and again|over time|each time he)\b.{0,100}\b(sophie|she|her)\b/,
+    /\b(sophie|she)\b.{0,100}\b(over time|each time|again|pattern|recurring|repeatedly)\b/,
+  ];
+  return sophieExperiencePatterns.some((re) => re.test(t));
+}
+
+/** User answered Scenario C Q1 with Daniel-focused inference (not a misplaced repair/logistics answer). */
+export function userAnswerAddressesDanielStateForScenarioCQ1(text: string): boolean {
+  if (isMisplacedScenarioCQ1Answer(text)) return false;
+  const t = normalizeApostrophes(text).toLowerCase();
+  if (!t.trim()) return false;
+  return (
+    /\bdaniel\b/.test(t) ||
+    (/\b(he|him)\b/.test(t) &&
+      /\b(feel|felt|feeling|overwhelm|avoid|shut|withdraw|didn'?t know|know what to say|put on the spot|buying time|processing|ready|come back|apolog|regret|shame|anxiety|flooded|stuck|internal|state|emotion|experience|going through|struggle|vulnerable|defensive|avoidant|figure out|time to)\b/.test(
+        t,
+      ))
   );
 }
 
@@ -431,6 +511,10 @@ export type ClientDisengagementProbePick =
       repairRefusal: RepairRefusalDetectionDetail;
     }
   | { kind: 'mentalizing_surface'; probe: typeof CLIENT_MENTALIZING_SURFACE_PROBE }
+  | {
+      kind: 'scenario_c_sophie_perspective';
+      probe: typeof SCENARIO_C_SOPHIE_PERSPECTIVE_PROBE;
+    }
   | { kind: 'short_elaboration'; probe: typeof CLIENT_SHORT_ELABORATION_PROBE };
 
 export type RepairRefusalTriggerReason =
@@ -651,6 +735,10 @@ export function pickClientDisengagementProbe(input: {
   isFirstUserTurnInScenario: boolean;
   /** Prior `skip_request` meta in this moment — suppress generic short elaboration only. */
   hadSkipRequestInThisMoment?: boolean;
+  /** Scenario C Sophie-perspective probe already fired this interview — at most once. */
+  scenarioCSophiePerspectiveProbeAlreadyFired?: boolean;
+  /** Generic mentalizing surface probe already delivered earlier in the interview. */
+  mentalizingSurfaceProbeAlreadyFired?: boolean;
 }): ClientDisengagementProbePick | null {
   const {
     userAnswer,
@@ -663,6 +751,8 @@ export function pickClientDisengagementProbe(input: {
     isAssistantRecoveryOrMetaLine,
     isFirstUserTurnInScenario,
     hadSkipRequestInThisMoment,
+    scenarioCSophiePerspectiveProbeAlreadyFired,
+    mentalizingSurfaceProbeAlreadyFired,
   } = input;
 
   if (!lastAssistantContent.trim()) return null;
@@ -677,6 +767,20 @@ export function pickClientDisengagementProbe(input: {
     if (repairRefusal.repair_refusal_detected) {
       return { kind: 'repair_refusal', probe: CLIENT_REPAIR_REFUSAL_PROBE, repairRefusal };
     }
+  }
+
+  if (
+    !scenarioCSophiePerspectiveProbeAlreadyFired &&
+    !mentalizingSurfaceProbeAlreadyFired &&
+    isFirstUserTurnInScenario &&
+    isScenarioCQ1Prompt(lastAssistantContent) &&
+    !isMisplacedScenarioCQ1Answer(userAnswer) &&
+    userAnswerAddressesDanielStateForScenarioCQ1(userAnswer) &&
+    !userAnswerHasSophiePerspectiveLanguage(userAnswer) &&
+    wordCount >= 15 &&
+    wordCount <= 60
+  ) {
+    return { kind: 'scenario_c_sophie_perspective', probe: SCENARIO_C_SOPHIE_PERSPECTIVE_PROBE };
   }
 
   if (

@@ -394,6 +394,8 @@ const styles = StyleSheet.create({
     paddingVertical: 12,
     minHeight: 56,
     borderWidth: 0,
+    outlineStyle: 'none',
+    outlineWidth: 0,
     color: '#E8F0F8',
     backgroundColor: 'transparent',
   },

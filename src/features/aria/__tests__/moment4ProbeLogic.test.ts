@@ -3,13 +3,14 @@ import {
   evaluateMoment4RelationshipType,
   isAnsweringFirstUserTurnAfterMoment4Threshold,
   looksLikeMisplacedNonGrudgeMoment4Answer,
+  looksLikeMoment4GrudgePrompt,
   looksLikeMoment4ThresholdQuestion,
+  MOMENT_4_GRUDGE_QUESTION_TEXT,
   shouldForceMoment4ThresholdProbe,
   transcriptIncludesMoment4ThresholdAssistant,
 } from '../moment4ProbeLogic';
 
-const M4_GRUDGE_CARD =
-  "Have you ever held a grudge against someone, or had someone in your life you really didn't like? How did that happen, and where are you with it now?";
+const M4_GRUDGE_CARD = MOMENT_4_GRUDGE_QUESTION_TEXT;
 
 const M4_THRESHOLD =
   '"At what point do you decide when a relationship is something to work through versus something you need to walk away from?"';
@@ -18,6 +19,15 @@ const M4_THRESHOLD_FORCED_INJECT =
   'Thanks for sharing that. At what point do you decide when a relationship is something to work through versus something you need to walk away from?';
 
 describe('moment4ProbeLogic', () => {
+  it('detects canonical episodic grudge question', () => {
+    expect(looksLikeMoment4GrudgePrompt(MOMENT_4_GRUDGE_QUESTION_TEXT)).toBe(true);
+    expect(
+      looksLikeMoment4GrudgePrompt(
+        "Have you ever held a grudge against someone, or had someone in your life you really didn't like?",
+      ),
+    ).toBe(true);
+  });
+
   it('detects commitment threshold with smart quotes and without requiring the word "point" in paraphrases', () => {
     expect(looksLikeMoment4ThresholdQuestion(M4_THRESHOLD)).toBe(true);
     expect(

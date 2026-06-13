@@ -23,6 +23,8 @@ import { PostInterviewProcessingScreen } from '@app/screens/onboarding/PostInter
 import { PostInterviewSexualCommunicationScreen } from '@app/screens/onboarding/PostInterviewSexualCommunicationScreen';
 import { POST_INTERVIEW_BG } from '@app/screens/onboarding/PostInterviewScrollLayout';
 import { PsychometricAssessmentScreen } from '@app/screens/PsychometricAssessmentScreen';
+import { PsychometricsCompleteScreen } from '@app/screens/PsychometricsCompleteScreen';
+import { InterviewCompleteScreen } from '@features/onboarding/screens/InterviewCompleteScreen';
 import { isAmoraeaAdminConsoleEmail } from '@/constants/adminConsole';
 import {
   fetchInterviewAttemptRevealSnapshot,
@@ -135,6 +137,12 @@ const InterviewAppNavigator = ({
     }}
   >
     <Stack.Screen
+      name="InterviewComplete"
+      component={InterviewCompleteScreen as unknown as React.ComponentType<Record<string, never>>}
+      initialParams={{ userId }}
+      options={{ headerShown: false }}
+    />
+    <Stack.Screen
       name="PsychometricAssessment"
       component={PsychometricAssessmentScreen as unknown as React.ComponentType<Record<string, never>>}
       initialParams={{
@@ -143,6 +151,12 @@ const InterviewAppNavigator = ({
         legacyPsychometricsMode,
         needsMarketResearch,
       }}
+      options={{ headerShown: false }}
+    />
+    <Stack.Screen
+      name="PsychometricsComplete"
+      component={PsychometricsCompleteScreen as unknown as React.ComponentType<Record<string, never>>}
+      initialParams={{ userId }}
       options={{ headerShown: false }}
     />
     <Stack.Screen
@@ -232,7 +246,9 @@ function buildInterviewStackInitialState(
     key: `interview-stack-${userId}`,
     index: 0,
     routeNames: [
+      'InterviewComplete',
       'PsychometricAssessment',
+      'PsychometricsComplete',
       'Aria',
       'PostInterview',
       'PostInterviewProcessing',
@@ -305,10 +321,13 @@ const LoggedInInterviewShell = ({ userId }: { userId: string }) => {
   const profileShowsStandardInterviewComplete =
     profile?.interviewCompleted === true && !isAdminEmail;
 
+  /** Wait until `ensureUserWithInviteCode` has created the `users` row before routing (avoids missing market research on first login). */
+  const profileBootstrapped = !!profile && !isPending && !isError;
+
   const { data: initialRoute, isPending: initialRoutePending } = useQuery({
     queryKey: ['initialInterviewRoute', userId],
     queryFn: () => resolveInitialInterviewRoute(userId),
-    enabled: !!userId,
+    enabled: !!userId && profileBootstrapped,
     staleTime: 0,
   });
 
@@ -343,10 +362,10 @@ const LoggedInInterviewShell = ({ userId }: { userId: string }) => {
   }, [queryClient, userId]);
 
   const bootstrapPending =
-    isPending ||
-    isError ||
+    !profileBootstrapped ||
     !profile ||
     initialRoutePending ||
+    initialRoute === undefined ||
     (needsPostInterviewDeferralSnapshot && deferralPending);
 
   const resolvedInterviewStack = useMemo(() => {
@@ -490,7 +509,9 @@ function normalizeAuthWebPath(path: string): string {
 }
 
 const INTERVIEW_STACK_ROUTE_PATH: Record<InterviewStackRoute, string> = {
+  InterviewComplete: 'interview-complete',
   PsychometricAssessment: 'psychometrics',
+  PsychometricsComplete: 'psychometrics-complete',
   Aria: 'interview',
   PostInterview: 'post-interview',
   PostInterviewProcessing: 'post-interview-processing',
@@ -537,6 +558,7 @@ function shouldRedirectWebPathToPreferredRoute(
 }
 
 const INTERVIEW_STACK_LINKING_SCREENS = {
+  InterviewComplete: 'interview-complete',
   PsychometricAssessment: {
     path: 'psychometrics',
     parse: {
@@ -544,6 +566,7 @@ const INTERVIEW_STACK_LINKING_SCREENS = {
         value === '1' || value === 'true' || value === 'yes',
     },
   },
+  PsychometricsComplete: 'psychometrics-complete',
   Aria: {
     path: 'interview',
     parse: {

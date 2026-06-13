@@ -83,3 +83,14 @@ export async function reauthorizePendingPreAuthorizedElement(): Promise<void> {
     /* ignore */
   }
 }
+
+/** Refresh or create pre-authorized HTML audio before TTS after a long async processing gap. */
+export async function refreshPreAuthorizedAudioForLongProcessingGap(): Promise<boolean> {
+  if (Platform.OS !== 'web') return false;
+  if (preAuthorizedForNextTts) {
+    await reauthorizePendingPreAuthorizedElement();
+    return true;
+  }
+  preAuthorizeAudioElementOnMicTapGesture();
+  return preAuthorizedForNextTts != null;
+}

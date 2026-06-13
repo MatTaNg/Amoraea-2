@@ -7,14 +7,13 @@ import {
 const POSITIVE_COMPONENTS: InstrumentModifierComponents = {
   gasp: 0.1,
   brs: 0.1,
+  anxiety_trait: 0,
   aaq2: 0.1,
   rfq: 0.15,
-  mspss: 0.1,
   sd3_narcissism: 0,
   dweck: 0.05,
   rses: -0.4,
   scs_sf: 0.15,
-  scs: 0,
 };
 
 const ZERO_PILLARS = {
@@ -32,6 +31,7 @@ const ZERO_PSYCH = {
   aaq2: null,
   rses: null,
   sd3_narcissism: null,
+  npi_entitlement: null,
   dweck: null,
 };
 
@@ -241,14 +241,14 @@ describe('computeGamingCorrection', () => {
     const components: InstrumentModifierComponents = {
       gasp: 0.1,
       brs: 0.1,
+      anxiety_trait: 0,
       aaq2: 0.1,
       rfq: 0.15,
-      mspss: 0.05,
-      sd3_narcissism: 0,
-      dweck: 0,
+  sd3_narcissism: 0,
+  npi_entitlement: 0,
+  dweck: 0,
       rses: 0,
       scs_sf: 0,
-      scs: 0,
     };
     const total = 0.5;
     const result = computeGamingCorrection({

@@ -3,19 +3,20 @@ import {
   truncateTranscriptTurnsForMoment4Scoring,
   MOMENT4_MAX_USER_TURN_CHARS_FOR_SCORING,
 } from '../personalMomentScoringPrompt';
+import { MOMENT_4_GRUDGE_QUESTION_TEXT } from '../moment4ProbeLogic';
 
 describe('buildPersonalMomentScoringPrompt', () => {
   it('calibrates ambiguous "moved on" phrasing by surrounding context', () => {
     const prompt = buildPersonalMomentScoringPrompt([
       {
         role: 'assistant',
-        content:
-          "Have you ever held a grudge against someone, or had someone in your life you really didn't like? How did that happen, and where are you with it now?",
+        content: MOMENT_4_GRUDGE_QUESTION_TEXT,
       },
       { role: 'user', content: "I moved on and don't think about it anymore." },
     ]);
 
-    expect(prompt).toContain('RESOLUTION ORIENTATION / "MOVED ON" HANDLING');
+    expect(prompt).toContain('M4 QUESTION DESIGN AND SCORING CALIBRATION');
+    expect(prompt).toContain(MOMENT_4_GRUDGE_QUESTION_TEXT);
     expect(prompt).toContain('standalone evidence of resolution orientation or its absence');
     expect(prompt).toContain('The phrase alone is insufficient evidence of genuine release');
     expect(prompt).toContain('dismissive, contemptuous, or frames the other person as entirely at fault');

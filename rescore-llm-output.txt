@@ -1,0 +1,439 @@
+﻿Rescore users - mode=llm
+Rollup algorithm: scenario_only_integers_v2
+
+[DefensePatterns] aggregate path: invoking detectDefensePatterns
+[DefensePatterns] detectDefensePatterns called
+[DefensePatterns] scenario1 scores present: true moment5 scores present: true
+[DefensePatterns] transcript length: 31
+[DefensePatterns] moment4Text length: 820 preview: I have held a grudge before but I had to realize that everybody doesn't have the heart that I have. 
+[DefensePatterns] moment5Text length: 1162 preview: When I think about having a conflict between somebody that is very important to me, for me, I just l
+[DefensePatterns] projection_detected: false { pairwiseProjection: false, scenarioNegativeAttribution: false }
+[DefensePatterns] rationalization_detected: false rationalCount: 0
+[DefensePatterns] splitting_detected: false {
+  allAccPresent: true,
+  allAccLow: false,
+  accScores: [ 8, 7, 5 ],
+  mitBlobLen: 1072,
+  mitigating: false
+}
+[Disclosure] computeDisclosureCalibration called with: {
+  moment4Concreteness: 'low',
+  moment5Concreteness: 'low',
+  moment4WordCount: 84,
+  moment5WordCount: 178,
+  avgScenarioWordCount: 421
+}
+[Disclosure] returning: underdisclosure
+[Disclosure] aggregation result: underdisclosure
+[Disclosure] calibration: underdisclosure {
+  moment4Words: 84,
+  moment5Words: 178,
+  vocabDensity: 0,
+  moment4Concreteness: 'low',
+  moment5Concreteness: 'low'
+}
+[DefensePatterns] aggregate path: invoking detectDefensePatterns
+[DefensePatterns] detectDefensePatterns called
+[DefensePatterns] scenario1 scores present: true moment5 scores present: true
+[DefensePatterns] transcript length: 33
+[DefensePatterns] moment4Text length: 2493 preview: Yes, I have, against a girl that I was friends with since we were childhood. And when we were in our
+[DefensePatterns] moment5Text length: 3729 preview: Aside from the one that I mentioned earlier with a friend, I think another one would be with my sist
+[DefensePatterns] projection_detected: false { pairwiseProjection: false, scenarioNegativeAttribution: false }
+[DefensePatterns] rationalization_detected: false rationalCount: 0
+[DefensePatterns] splitting_detected: false {
+  allAccPresent: true,
+  allAccLow: false,
+  accScores: [ 6, 5, 5 ],
+  mitBlobLen: 1242,
+  mitigating: false
+}
+[Disclosure] computeDisclosureCalibration called with: {
+  moment4Concreteness: 'high',
+  moment5Concreteness: 'high',
+  moment4WordCount: 372,
+  moment5WordCount: 547,
+  avgScenarioWordCount: 1351
+}
+[Disclosure] returning: overdisclosure { m4Long: false, m5Long: true, hasClinicalTerms: true }
+[Disclosure] aggregation result: overdisclosure
+[Disclosure] calibration: overdisclosure {
+  moment4Words: 372,
+  moment5Words: 547,
+  vocabDensity: 0.653,
+  moment4Concreteness: 'high',
+  moment5Concreteness: 'high'
+}
+[Disclosure] overdisclosure_review flag added
+[DefensePatterns] aggregate path: invoking detectDefensePatterns
+[DefensePatterns] detectDefensePatterns called
+[DefensePatterns] scenario1 scores present: true moment5 scores present: true
+[DefensePatterns] transcript length: 31
+[DefensePatterns] moment4Text length: 2317 preview: I don't really think there's anyone that comes to mind when I think of someone I don't really like. 
+[DefensePatterns] moment5Text length: 1448 preview: So I had a situation with a family member, you know, something was said to me in a, in a very, I'd s
+[DefensePatterns] projection_detected: false { pairwiseProjection: false, scenarioNegativeAttribution: false }
+[DefensePatterns] rationalization_detected: false rationalCount: 0
+[DefensePatterns] splitting_detected: false {
+  allAccPresent: true,
+  allAccLow: false,
+  accScores: [ 8, 8, 7 ],
+  mitBlobLen: 1327,
+  mitigating: true
+}
+[Disclosure] computeDisclosureCalibration called with: {
+  moment4Concreteness: 'low',
+  moment5Concreteness: 'moderate',
+  moment4WordCount: 286,
+  moment5WordCount: 217,
+  avgScenarioWordCount: 1769
+}
+[Disclosure] returning: calibrated
+[Disclosure] aggregation result: calibrated
+[Disclosure] calibration: calibrated {
+  moment4Words: 286,
+  moment5Words: 217,
+  vocabDensity: 0.994,
+  moment4Concreteness: 'low',
+  moment5Concreteness: 'moderate'
+}
+=================================
+BASELINE CHECK (aggregate, +/-0.1)
+Rollup: scenario_only_integers_v2
+=================================
+[~] CHORM (6f17318f): gate scores match; pillars diverge (rollup may differ from persist-time)
+    - pillar mentalizing: stored 8.0 vs recomputed 6.0
+    - pillar accountability: stored 6.0 vs recomputed 7.0
+    - pillar contempt: stored 8.0 vs recomputed 9.0
+    - pillar attunement: stored 7.0 vs recomputed 6.0
+[~] Julie (a429020a): gate scores match; pillars diverge (rollup may differ from persist-time)
+    - pillar mentalizing: stored 8.0 vs recomputed 6.0
+    - pillar accountability: stored 6.0 vs recomputed 5.0
+    - pillar contempt: stored 8.0 vs recomputed 6.0
+    - pillar attunement: stored 7.0 vs recomputed 6.0
+    - pillar appreciation: stored 6.0 vs recomputed 7.0
+[~] Radhesa (68577c70): gate scores match; pillars diverge (rollup may differ from persist-time)
+    - pillar mentalizing: stored 8.0 vs recomputed 7.0
+    - pillar contempt: stored 8.0 vs recomputed 7.0
+    - pillar repair: stored 9.0 vs recomputed 8.0
+    - pillar regulation: stored 7.0 vs recomputed 8.0
+    - pillar attunement: stored 9.0 vs recomputed 7.0
+    - pillar appreciation: stored 9.0 vs recomputed 8.0
+=================================
+Baseline: PASS - all users within tolerance
+
+Comparison (full LLM re-score + aggregate + gate):
+
+[CALIBRATION_NOTE_CHECK] holisticPrompt excerpt around calibration: FOUND
+[CALIBRATION_NOTE_CHECK] "Do not compress scores toward the middle" text: FOUND
+[S1_RESCORE_DEBUG] mentalizing: 7
+[S1_RESCORE_DEBUG] contempt_expression: 9
+[S1_RESCORE_DEBUG] contempt_recognition: 6
+[S1_RESCORE_DEBUG] mentalizing_evidence: high | Level tag missing ΓÇö prefix keyEvidence with Level 1 ΓÇö or Level 2 ΓÇö per behavioral vs interior rubric.
+[S1_RESCORE_DEBUG] contempt_evidence: high
+[S1_RESCORE_DEBUG] combined_contempt_60_40: 8
+[S2_RESCORE_DEBUG] mentalizing: 6
+[S2_RESCORE_DEBUG] contempt_expression: 9
+[S2_RESCORE_DEBUG] contempt_recognition: undefined
+[S2_RESCORE_DEBUG] mentalizing_evidence: Level 2 ΓÇö User independently infers Sarah's unmet need to 'be celebrated' in her preferred way, moving beyond scenario facts to understand her internal experience of wanting specific recognition
+[S2_RESCORE_DEBUG] contempt_evidence: Pure Tier 1 analytical language throughout - describes communication gaps and missed expectations without character attacks or blame attribution. Uses respectful problem-solving frame.
+[S2_RESCORE_DEBUG] combined_contempt_60_40: 9
+[S3_RESCORE_DEBUG] mentalizing: 7
+[S3_RESCORE_DEBUG] contempt_expression: 9
+[S3_RESCORE_DEBUG] contempt_recognition: undefined
+[S3_RESCORE_DEBUG] mentalizing_evidence: Level 2 ΓÇö User infers Daniel's internal state: 'feels put on the spot' and 'time is what he's trying to buy to figure out how to address the issue' - goes beyond scenario text to explain his emotional
+[S3_RESCORE_DEBUG] contempt_evidence: No contemptuous language toward either character. Maintains respectful, analytical framing throughout. Describes behavior neutrally without character attacks
+[S3_RESCORE_DEBUG] combined_contempt_60_40: 9
+[M5_SCORING_PROMPT_CONFLICT_VALIDITY] value used in prompt: null
+[M5_SCORING_PROMPT_CONFLICT_VALIDITY] prompt excerpt (first 500 chars): You are scoring one personal moment from a relationship assessment interview.
+
+MOMENT: Moment 5 (Personal Conflict / Accountability)
+MARKERS TO SCORE IN THIS SLICE: accountability (primary), mentalizing, repair, regulation, contempt_expression ΓÇö NOT commitment_threshold, NOT appreciation, NOT attunement, NOT contempt_recognition
+
+
+SCORE CALIBRATION (0ΓÇô10) ΓÇö apply to every marker:
+
+**What 10 means:** On every marker, **10** is *the best response a thoughtful, psychologically minded real person co
+[M5_RESCORE_DEBUG] mentalizing: 6
+[M5_RESCORE_DEBUG] contempt_expression: 9
+[M5_RESCORE_DEBUG] accountability: 3
+[M5_RESCORE_DEBUG] mentalizing_evidence: User demonstrates basic perspective-taking: 'people really just want to be heard' and recognizes misunderstandings ('We thought the person meant one thing and they meant something else'). Shows awaren
+[M5_RESCORE_DEBUG] contempt_evidence: Response contains only analytical, process-focused language about conflict resolution. No blame attribution, character attacks, or contemptuous framing of the other party. Maintains respectful stance 
+[ROLLUP_DEBUG] algorithm: scenario_only_integers_v2
+[ROLLUP_DEBUG] mentalizing rollup uses S1+S2+S3 only (M4/M5 excluded per STANDARD_MARKER_ALLOWED_MOMENTS)
+[ROLLUP_DEBUG] S1 slice mentalizing=7 contempt_expression=9 contempt_recognition=6
+[ROLLUP_DEBUG] S2 slice mentalizing=6 contempt_expression=9 contempt_recognition=null
+[ROLLUP_DEBUG] S3 slice mentalizing=7 contempt_expression=9 contempt_recognition=null
+[ROLLUP_DEBUG] M4 slice mentalizing=4 contempt_expression=8 contempt_recognition=null
+[ROLLUP_DEBUG] M5 slice mentalizing=6 contempt_expression=9 contempt_recognition=null
+[ROLLUP_DEBUG] contempt expression pool (S1+S2+S3): [ 9, 9, 9 ] avg= 9
+[ROLLUP_DEBUG] contempt recognition pool (S1+M4): [ 6 ] avg= 6
+[ROLLUP_DEBUG] manual contempt aggregate (60% expr + 40% rec): 8
+[ROLLUP_DEBUG] aggregate mentalizing: 7 (n=3 scenario slices)
+[ROLLUP_DEBUG] aggregate contempt: 8 (n=2 pools)
+[ROLLUP_DEBUG] aggregate attunement: 6
+[DefensePatterns] aggregate path: invoking detectDefensePatterns
+[DefensePatterns] detectDefensePatterns called
+[DefensePatterns] scenario1 scores present: true moment5 scores present: true
+[DefensePatterns] transcript length: 31
+[DefensePatterns] moment4Text length: 820 preview: I have held a grudge before but I had to realize that everybody doesn't have the heart that I have. 
+[DefensePatterns] moment5Text length: 1162 preview: When I think about having a conflict between somebody that is very important to me, for me, I just l
+[DefensePatterns] projection_detected: false { pairwiseProjection: false, scenarioNegativeAttribution: false }
+[DefensePatterns] rationalization_detected: false rationalCount: 0
+[DefensePatterns] splitting_detected: false {
+  allAccPresent: true,
+  allAccLow: false,
+  accScores: [ 7, 7, 6 ],
+  mitBlobLen: 932,
+  mitigating: true
+}
+[Disclosure] computeDisclosureCalibration called with: {
+  moment4Concreteness: 'low',
+  moment5Concreteness: 'low',
+  moment4WordCount: 157,
+  moment5WordCount: 201,
+  avgScenarioWordCount: 421
+}
+[Disclosure] returning: calibrated
+[Disclosure] aggregation result: calibrated
+[Disclosure] calibration: calibrated {
+  moment4Words: 157,
+  moment5Words: 201,
+  vocabDensity: 2.514,
+  moment4Concreteness: 'low',
+  moment5Concreteness: 'low'
+}
+User: CHORM (6f17318f)
+---------------------------------
+Pillar          Old    New    Delta
+mentalizing       8.0    7.0    -1.0
+accountability    6.0    7.0    +1.0
+contempt          8.0    8.0       0
+repair            7.0    7.0       0
+regulation        7.0    8.0    +1.0
+attunement        7.0    6.0    -1.0
+appreciation      8.0    7.0    -1.0
+commitment_threshold  7.0    8.0    +1.0
+
+Scenario composites:
+  S1: 7.83 -> 7.33 (-0.50)
+  S2: 7.50 -> 7.17 (-0.33)
+  S3: 6.00 -> 7.00 (+1.00)
+
+Weighted score:    7.20 -> 7.30 (+0.10)
+Modified score:    6.65 -> 7.00 (+0.35)
+Gate result:       FAIL -> PASS
+Gate fail reasons: [] -> []
+Final gate pass:   FAIL (stored; psychometrics not re-simulated)
+---------------------------------
+
+[M5_CONFLICT_VALIDITY] RECOMPUTED differs from stored ΓÇö using reclassified "genuine_conflict" (stored was "no_conflict")
+[CALIBRATION_NOTE_CHECK] holisticPrompt excerpt around calibration: FOUND
+[CALIBRATION_NOTE_CHECK] "Do not compress scores toward the middle" text: FOUND
+[S1_RESCORE_DEBUG] mentalizing: 7
+[S1_RESCORE_DEBUG] contempt_expression: 8
+[S1_RESCORE_DEBUG] contempt_recognition: 6
+[S1_RESCORE_DEBUG] mentalizing_evidence: high | Level tag missing ΓÇö prefix keyEvidence with Level 1 ΓÇö or Level 2 ΓÇö per behavioral vs interior rubric.
+[S1_RESCORE_DEBUG] contempt_evidence: high
+[S1_RESCORE_DEBUG] combined_contempt_60_40: 7
+[S2_RESCORE_DEBUG] mentalizing: 7
+[S2_RESCORE_DEBUG] contempt_expression: 8
+[S2_RESCORE_DEBUG] contempt_recognition: undefined
+[S2_RESCORE_DEBUG] mentalizing_evidence: Level 2 ΓÇö User independently infers James's internal motivation (provider instinct, 'paternal and masculinity that makes them want to be providers') and Sarah's emotional experience (excitement vs fee
+[S2_RESCORE_DEBUG] contempt_evidence: Consistently respectful language throughout. Describes behavior analytically without character attacks. Uses charitable framing ('hardworking person,' 'went out of his way') and explains motivations s
+[S2_RESCORE_DEBUG] combined_contempt_60_40: 8
+[S3_RESCORE_DEBUG] mentalizing: 7
+[S3_RESCORE_DEBUG] contempt_expression: 8
+[S3_RESCORE_DEBUG] contempt_recognition: undefined
+[S3_RESCORE_DEBUG] mentalizing_evidence: Level 2 ΓÇö User infers Daniel's internal experience: 'focusing on what he thinks somebody wants to hear rather than just saying whatever it is that he is feeling' and 'trying to avoid the conversation 
+[S3_RESCORE_DEBUG] contempt_evidence: User maintains respectful, analytical language throughout. Describes Daniel's behavior as avoidance and discomfort without character attacks or contemptuous framing. No hostile language or person-deva
+[S3_RESCORE_DEBUG] combined_contempt_60_40: 8
+[M5_SCORING_PROMPT_CONFLICT_VALIDITY] value used in prompt: genuine_conflict
+[M5_SCORING_PROMPT_CONFLICT_VALIDITY] prompt excerpt (first 500 chars): You are scoring one personal moment from a relationship assessment interview.
+
+MOMENT: Moment 5 (Personal Conflict / Accountability)
+MARKERS TO SCORE IN THIS SLICE: accountability (primary), mentalizing, repair, regulation, contempt_expression ΓÇö NOT commitment_threshold, NOT appreciation, NOT attunement, NOT contempt_recognition
+
+
+SCORE CALIBRATION (0ΓÇô10) ΓÇö apply to every marker:
+
+**What 10 means:** On every marker, **10** is *the best response a thoughtful, psychologically minded real person co
+[M5_RESCORE_DEBUG] mentalizing: 4
+[M5_RESCORE_DEBUG] contempt_expression: 8
+[M5_RESCORE_DEBUG] accountability: 6
+[M5_RESCORE_DEBUG] mentalizing_evidence: Score recovered from model output.
+[M5_RESCORE_DEBUG] contempt_evidence: Score recovered from model output.
+[ROLLUP_DEBUG] algorithm: scenario_only_integers_v2
+[ROLLUP_DEBUG] mentalizing rollup uses S1+S2+S3 only (M4/M5 excluded per STANDARD_MARKER_ALLOWED_MOMENTS)
+[ROLLUP_DEBUG] S1 slice mentalizing=7 contempt_expression=8 contempt_recognition=6
+[ROLLUP_DEBUG] S2 slice mentalizing=7 contempt_expression=8 contempt_recognition=null
+[ROLLUP_DEBUG] S3 slice mentalizing=7 contempt_expression=8 contempt_recognition=null
+[ROLLUP_DEBUG] M4 slice mentalizing=6 contempt_expression=8 contempt_recognition=null
+[ROLLUP_DEBUG] M5 slice mentalizing=4 contempt_expression=8 contempt_recognition=null
+[ROLLUP_DEBUG] contempt expression pool (S1+S2+S3): [ 8, 8, 8 ] avg= 8
+[ROLLUP_DEBUG] contempt recognition pool (S1+M4): [ 6 ] avg= 6
+[ROLLUP_DEBUG] manual contempt aggregate (60% expr + 40% rec): 7
+[ROLLUP_DEBUG] aggregate mentalizing: 7 (n=3 scenario slices)
+[ROLLUP_DEBUG] aggregate contempt: 7 (n=2 pools)
+[ROLLUP_DEBUG] aggregate attunement: 7
+[DefensePatterns] aggregate path: invoking detectDefensePatterns
+[DefensePatterns] detectDefensePatterns called
+[DefensePatterns] scenario1 scores present: true moment5 scores present: true
+[DefensePatterns] transcript length: 33
+[DefensePatterns] moment4Text length: 2493 preview: Yes, I have, against a girl that I was friends with since we were childhood. And when we were in our
+[DefensePatterns] moment5Text length: 3729 preview: Aside from the one that I mentioned earlier with a friend, I think another one would be with my sist
+[DefensePatterns] projection_detected: false { pairwiseProjection: false, scenarioNegativeAttribution: false }
+[DefensePatterns] rationalization_detected: false rationalCount: 0
+[DefensePatterns] splitting_detected: false {
+  allAccPresent: true,
+  allAccLow: false,
+  accScores: [ 7, 5, 6 ],
+  mitBlobLen: 1252,
+  mitigating: true
+}
+[Disclosure] computeDisclosureCalibration called with: {
+  moment4Concreteness: 'low',
+  moment5Concreteness: 'high',
+  moment4WordCount: 501,
+  moment5WordCount: 746,
+  avgScenarioWordCount: 1351
+}
+[Disclosure] returning: overdisclosure { m4Long: true, m5Long: true, hasClinicalTerms: true }
+[Disclosure] aggregation result: overdisclosure
+[Disclosure] calibration: overdisclosure {
+  moment4Words: 501,
+  moment5Words: 746,
+  vocabDensity: 1.203,
+  moment4Concreteness: 'low',
+  moment5Concreteness: 'high'
+}
+[Disclosure] overdisclosure_review flag added
+User: Julie (a429020a)
+---------------------------------
+Pillar          Old    New    Delta
+mentalizing       8.0    7.0    -1.0
+accountability    6.0    6.0       0
+contempt          8.0    7.0    -1.0
+repair            7.0    7.0       0
+regulation        7.0    7.0       0
+attunement        7.0    7.0       0
+appreciation      6.0    7.0    +1.0
+commitment_threshold  7.0    8.0    +1.0
+
+Scenario composites:
+  S1: 6.33 -> 7.00 (+0.67)
+  S2: 6.83 -> 6.83
+  S3: 5.83 -> 6.67 (+0.83)
+
+Weighted score:    7.10 -> 6.90 (-0.20)
+Modified score:    7.10 -> 6.75 (-0.35)
+Gate result:       PASS -> PASS
+Gate fail reasons: [] -> []
+Final gate pass:   PASS (stored; psychometrics not re-simulated)
+---------------------------------
+
+[M5_CONFLICT_VALIDITY] RECOMPUTED differs from stored ΓÇö using reclassified "resolved_well" (stored was "no_conflict")
+[CALIBRATION_NOTE_CHECK] holisticPrompt excerpt around calibration: FOUND
+[CALIBRATION_NOTE_CHECK] "Do not compress scores toward the middle" text: FOUND
+[S1_RESCORE_DEBUG] mentalizing: 7
+[S1_RESCORE_DEBUG] contempt_expression: 8
+[S1_RESCORE_DEBUG] contempt_recognition: 6
+[S1_RESCORE_DEBUG] mentalizing_evidence: high | Level tag missing ΓÇö prefix keyEvidence with Level 1 ΓÇö or Level 2 ΓÇö per behavioral vs interior rubric.
+[S1_RESCORE_DEBUG] contempt_evidence: high
+[S1_RESCORE_DEBUG] combined_contempt_60_40: 7
+[S2_RESCORE_DEBUG] mentalizing: 8
+[S2_RESCORE_DEBUG] contempt_expression: 9
+[S2_RESCORE_DEBUG] contempt_recognition: undefined
+[S2_RESCORE_DEBUG] mentalizing_evidence: Level 2 ΓÇö User infers Sarah's internal emotional experience beyond scenario text: 'she probably wanted to feel a little bit more loved, a little bit more appreciated' and 'job hunting and job searchin
+[S2_RESCORE_DEBUG] contempt_evidence: Consistently respectful language throughout. Uses Tier 1 analytical observations ('it's just very... brazen,' 'lacks a little bit of maybe love and empathy') without character attacks. Maintains chari
+[S2_RESCORE_DEBUG] combined_contempt_60_40: 9
+[S3_RESCORE_DEBUG] mentalizing: 7
+[S3_RESCORE_DEBUG] contempt_expression: 9
+[S3_RESCORE_DEBUG] contempt_recognition: undefined
+[S3_RESCORE_DEBUG] mentalizing_evidence: Level 2 ΓÇö User infers Daniel's internal processing needs ('needs time to decompress or regroup,' 'gather his thoughts together') and considers deeper trauma as potential factor. Goes beyond behavioral
+[S3_RESCORE_DEBUG] contempt_evidence: User maintains consistently respectful, charitable framing throughout. Actively explains both characters' behaviors sympathetically ('we all process things differently,' 'might stem from deeper trauma
+[S3_RESCORE_DEBUG] combined_contempt_60_40: 9
+[M5_SCORING_PROMPT_CONFLICT_VALIDITY] value used in prompt: resolved_well
+[M5_SCORING_PROMPT_CONFLICT_VALIDITY] prompt excerpt (first 500 chars): You are scoring one personal moment from a relationship assessment interview.
+
+MOMENT: Moment 5 (Personal Conflict / Accountability)
+MARKERS TO SCORE IN THIS SLICE: accountability (primary), mentalizing, repair, regulation, contempt_expression ΓÇö NOT commitment_threshold, NOT appreciation, NOT attunement, NOT contempt_recognition
+
+
+SCORE CALIBRATION (0ΓÇô10) ΓÇö apply to every marker:
+
+**What 10 means:** On every marker, **10** is *the best response a thoughtful, psychologically minded real person co
+[M5_RESCORE_DEBUG] mentalizing: undefined
+[M5_RESCORE_DEBUG] contempt_expression: 8
+[M5_RESCORE_DEBUG] accountability: 6
+[M5_RESCORE_DEBUG] mentalizing_evidence: No assessable evidence - user focuses on behavioral description of the interaction without exploring inner experiences, motivations, or perspective-taking of either party.
+[M5_RESCORE_DEBUG] contempt_evidence: Response contains only Tier 1 analytical language describing the interaction ('something was said to me in a...condescending way') without character attacks, blame attribution, or devaluation of the f
+[ROLLUP_DEBUG] algorithm: scenario_only_integers_v2
+[ROLLUP_DEBUG] mentalizing rollup uses S1+S2+S3 only (M4/M5 excluded per STANDARD_MARKER_ALLOWED_MOMENTS)
+[ROLLUP_DEBUG] S1 slice mentalizing=7 contempt_expression=8 contempt_recognition=6
+[ROLLUP_DEBUG] S2 slice mentalizing=8 contempt_expression=9 contempt_recognition=null
+[ROLLUP_DEBUG] S3 slice mentalizing=7 contempt_expression=9 contempt_recognition=null
+[ROLLUP_DEBUG] M4 slice mentalizing=null contempt_expression=9 contempt_recognition=null
+[ROLLUP_DEBUG] M5 slice mentalizing=null contempt_expression=8 contempt_recognition=null
+[ROLLUP_DEBUG] contempt expression pool (S1+S2+S3): [ 8, 9, 9 ] avg= 9
+[ROLLUP_DEBUG] contempt recognition pool (S1+M4): [ 6 ] avg= 6
+[ROLLUP_DEBUG] manual contempt aggregate (60% expr + 40% rec): 8
+[ROLLUP_DEBUG] aggregate mentalizing: 7 (n=3 scenario slices)
+[ROLLUP_DEBUG] aggregate contempt: 8 (n=2 pools)
+[ROLLUP_DEBUG] aggregate attunement: 7
+[DefensePatterns] aggregate path: invoking detectDefensePatterns
+[DefensePatterns] detectDefensePatterns called
+[DefensePatterns] scenario1 scores present: true moment5 scores present: true
+[DefensePatterns] transcript length: 31
+[DefensePatterns] moment4Text length: 2317 preview: I don't really think there's anyone that comes to mind when I think of someone I don't really like. 
+[DefensePatterns] moment5Text length: 1448 preview: So I had a situation with a family member, you know, something was said to me in a, in a very, I'd s
+[DefensePatterns] projection detected ΓÇö scenario term matched and personal term matched
+[DefensePatterns] scenario match: avoidance
+[DefensePatterns] personal match: avoid
+[DefensePatterns] projection_detected: true { pairwiseProjection: true, scenarioNegativeAttribution: false }
+[DefensePatterns] rationalization_detected: false rationalCount: 0
+[DefensePatterns] splitting_detected: false {
+  allAccPresent: true,
+  allAccLow: false,
+  accScores: [ 8, 7, 8 ],
+  mitBlobLen: 1293,
+  mitigating: true
+}
+[Disclosure] computeDisclosureCalibration called with: {
+  moment4Concreteness: 'absent',
+  moment5Concreteness: 'moderate',
+  moment4WordCount: 426,
+  moment5WordCount: 285,
+  avgScenarioWordCount: 1769
+}
+[Disclosure] returning: overdisclosure { m4Long: true, m5Long: false, hasClinicalTerms: false }
+[Disclosure] aggregation result: overdisclosure
+[Disclosure] calibration: overdisclosure {
+  moment4Words: 426,
+  moment5Words: 285,
+  vocabDensity: 1.125,
+  moment4Concreteness: 'absent',
+  moment5Concreteness: 'moderate'
+}
+User: Radhesa (68577c70)
+---------------------------------
+Pillar          Old    New    Delta
+mentalizing       8.0    7.0    -1.0
+accountability    8.0    8.0       0
+contempt          8.0    8.0       0
+repair            9.0    8.0    -1.0
+regulation        7.0    8.0    +1.0
+attunement        9.0    7.0    -2.0
+appreciation      9.0    8.0    -1.0
+commitment_threshold  8.0    8.0       0
+
+Scenario composites:
+  S1: 7.00 -> 7.33 (+0.33)
+  S2: 8.00 -> 8.00
+  S3: 7.33 -> 7.67 (+0.33)
+
+Weighted score:    8.20 -> 7.80 (-0.40)
+Modified score:    8.40 -> 7.70 (-0.70)
+Gate result:       PASS -> PASS
+Gate fail reasons: [] -> []
+Final gate pass:   PASS (stored; psychometrics not re-simulated)
+---------------------------------
+

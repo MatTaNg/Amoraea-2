@@ -1,8 +1,9 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import {
   View,
   Text,
   TouchableOpacity,
+  Pressable,
   StyleSheet,
   SafeAreaView,
   ScrollView,
@@ -18,9 +19,16 @@ import { PsychometricsBackButton } from '@features/psychometrics/PsychometricsBa
 import {
   ASSESSMENTS,
   ASSESSMENT_ORDER,
+  hasPsychometricQuestionResponse,
+  isForcedChoiceAssessment,
   resolvePsychometricsResumePosition,
+  psychometricBatteryProgressPosition,
+  psychometricBatteryTotalQuestions,
   type AssessmentId,
+  type NpiEntitlementResponse,
+  type PsychometricResponsesMap,
 } from '@features/psychometrics/assessmentContent';
+import { shuffleNpiPair } from '@features/psychometrics/npiEntitlementShuffle';
 import {
   clearPsychometricsCompleted,
   formatMissingPsychometricAssessmentNames,
@@ -46,6 +54,7 @@ import { applyPsychometricModifierToAttempt } from '@features/psychometrics/appl
 import { fetchMostRecentCompletedInterviewAttemptId } from '@features/psychometrics/interviewCompletionStatus';
 import {
   resolveInitialInterviewRoute,
+  PSYCHOMETRICS_ENABLED,
   type InterviewStackRoute,
 } from '@features/psychometrics/resolveInitialInterviewRoute';
 
@@ -81,7 +90,7 @@ export function PsychometricAssessmentScreen({ navigation, route }: Props) {
   const [showAdminPanel, setShowAdminPanel] = useState(false);
   const [currentAssessmentIndex, setCurrentAssessmentIndex] = useState(0);
   const [currentQuestionIndex, setCurrentQuestionIndex] = useState(0);
-  const [responses, setResponses] = useState<Record<number, number>>({});
+  const [responses, setResponses] = useState<PsychometricResponsesMap>({});
   const [saving, setSaving] = useState(false);
   const [finishing, setFinishing] = useState(false);
   const [loading, setLoading] = useState(true);
@@ -93,23 +102,47 @@ export function PsychometricAssessmentScreen({ navigation, route }: Props) {
     navigation.setParams?.({ openAdminPanel: undefined });
   }, [route.params?.openAdminPanel, isAdminUser, navigation]);
 
-  const navigateAfterComplete = useCallback(async () => {
-    if (!userId) return;
-    const adminPanelParams = isAdminUser ? { openAdminPanel: true as const } : {};
-    if (interviewAlreadyCompleted) {
+  useEffect(() => {
+    if (PSYCHOMETRICS_ENABLED || !userId) return;
+    let cancelled = false;
+    void (async () => {
       const { screen } = await resolveInitialInterviewRoute(userId);
-      if (screen !== 'PsychometricAssessment') {
-        navigation.replace(screen, {
-          userId,
-          ...(screen === 'Aria' ? adminPanelParams : {}),
-        });
+      if (cancelled || screen === 'PsychometricAssessment') return;
+      navigation.replace(screen, { userId });
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [navigation, userId]);
+
+  const navigateAfterComplete = useCallback(
+    async (options?: { showCongrats?: boolean }) => {
+      if (!userId) return;
+      const adminPanelParams = isAdminUser ? { openAdminPanel: true as const } : {};
+      if (interviewAlreadyCompleted) {
+        if (PSYCHOMETRICS_ENABLED) {
+          navigation.replace('PsychometricsComplete', { userId });
+          return;
+        }
+        const { screen } = await resolveInitialInterviewRoute(userId);
+        if (screen !== 'PsychometricAssessment') {
+          navigation.replace(screen, {
+            userId,
+            ...(screen === 'Aria' ? adminPanelParams : {}),
+          });
+          return;
+        }
+        navigation.replace('PostInterview', { userId });
         return;
       }
-      navigation.replace('PostInterview', { userId });
-      return;
-    }
-    navigation.replace('Aria', { userId, ...adminPanelParams });
-  }, [interviewAlreadyCompleted, isAdminUser, navigation, userId]);
+      if (options?.showCongrats && PSYCHOMETRICS_ENABLED) {
+        navigation.replace('PsychometricsComplete', { userId });
+        return;
+      }
+      navigation.replace('Aria', { userId, ...adminPanelParams });
+    },
+    [interviewAlreadyCompleted, isAdminUser, navigation, userId],
+  );
 
   const completeAllAssessments = useCallback(async (): Promise<boolean> => {
     if (!userId) return false;
@@ -129,7 +162,7 @@ export function PsychometricAssessmentScreen({ navigation, route }: Props) {
       return false;
     }
 
-    if (legacyPsychometricsMode) {
+    if (legacyPsychometricsMode && !PSYCHOMETRICS_ENABLED) {
       const completedAttemptId = await fetchMostRecentCompletedInterviewAttemptId(userId);
       if (completedAttemptId) {
         await applyPsychometricModifierToAttempt(userId, completedAttemptId, {
@@ -138,12 +171,17 @@ export function PsychometricAssessmentScreen({ navigation, route }: Props) {
       }
     }
 
-    await navigateAfterComplete();
+    await navigateAfterComplete({ showCongrats: true });
     return true;
   }, [legacyPsychometricsMode, navigateAfterComplete, userId]);
 
+  const sessionSeed = useMemo(
+    () => userId.split('').reduce((acc, ch) => acc + ch.charCodeAt(0), 0),
+    [userId],
+  );
+
   const loadSavedResponsesForAssessment = useCallback(
-    async (assessmentId: AssessmentId): Promise<Record<number, number>> => {
+    async (assessmentId: AssessmentId): Promise<PsychometricResponsesMap> => {
       if (!userId) return {};
       return loadPsychometricAssessmentResponses(userId, assessmentId);
     },
@@ -162,7 +200,7 @@ export function PsychometricAssessmentScreen({ navigation, route }: Props) {
       const questions = ASSESSMENTS[firstMissing].questions;
       let questionIndex = 0;
       for (let i = 0; i < questions.length; i++) {
-        if (saved[questions[i]!.id] == null) {
+        if (!hasPsychometricQuestionResponse(saved[questions[i]!.id])) {
           questionIndex = i;
           break;
         }
@@ -235,7 +273,7 @@ export function PsychometricAssessmentScreen({ navigation, route }: Props) {
 
       setCurrentAssessmentIndex(resume.assessmentIndex);
       setCurrentQuestionIndex(resume.questionIndex);
-      setResponses((data.psychometrics_partial_responses as Record<number, number>) ?? {});
+      setResponses((data.psychometrics_partial_responses as PsychometricResponsesMap) ?? {});
       setShowWelcome(false);
       setLoading(false);
       return;
@@ -264,7 +302,7 @@ export function PsychometricAssessmentScreen({ navigation, route }: Props) {
   async function persistProgress(
     assessmentId: AssessmentId,
     questionIndex: number,
-    currentResponses: Record<number, number>,
+    currentResponses: PsychometricResponsesMap,
   ) {
     if (!userId) return;
     const result = await persistPsychometricProgress(userId, assessmentId, questionIndex, currentResponses);
@@ -273,18 +311,12 @@ export function PsychometricAssessmentScreen({ navigation, route }: Props) {
     }
   }
 
-  async function handleAnswer(value: number) {
-    const assessmentId = ASSESSMENT_ORDER[currentAssessmentIndex];
-    const assessment = ASSESSMENTS[assessmentId];
-    const question = assessment.questions[currentQuestionIndex];
-    if (!question || saving || finishing) return;
-
-    const newResponses = { ...responses, [question.id]: value };
-    setResponses(newResponses);
-
-    const isLastQuestion = currentQuestionIndex === assessment.questions.length - 1;
-    const isLastAssessment = currentAssessmentIndex === ASSESSMENT_ORDER.length - 1;
-
+  async function advanceAfterAnswer(
+    assessmentId: AssessmentId,
+    newResponses: PsychometricResponsesMap,
+    isLastQuestion: boolean,
+    isLastAssessment: boolean,
+  ) {
     if (!isLastQuestion) {
       const nextIndex = currentQuestionIndex + 1;
       setCurrentQuestionIndex(nextIndex);
@@ -318,6 +350,40 @@ export function PsychometricAssessmentScreen({ navigation, route }: Props) {
     setSaving(false);
   }
 
+  async function handleAnswer(value: number) {
+    const assessmentId = ASSESSMENT_ORDER[currentAssessmentIndex];
+    const assessment = ASSESSMENTS[assessmentId];
+    const question = assessment.questions[currentQuestionIndex];
+    if (!question || saving || finishing || isForcedChoiceAssessment(assessment)) return;
+
+    const newResponses = { ...responses, [question.id]: value };
+    setResponses(newResponses);
+
+    const isLastQuestion = currentQuestionIndex === assessment.questions.length - 1;
+    const isLastAssessment = currentAssessmentIndex === ASSESSMENT_ORDER.length - 1;
+    await advanceAfterAnswer(assessmentId, newResponses, isLastQuestion, isLastAssessment);
+  }
+
+  async function handleForcedChoiceAnswer(
+    selectedOptionIndex: 0 | 1,
+    wasEntitlement: boolean,
+  ) {
+    const assessmentId = ASSESSMENT_ORDER[currentAssessmentIndex];
+    const assessment = ASSESSMENTS[assessmentId];
+    if (!isForcedChoiceAssessment(assessment) || saving || finishing) return;
+
+    const question = assessment.questions[currentQuestionIndex];
+    if (!question) return;
+
+    const response: NpiEntitlementResponse = { selectedOptionIndex, wasEntitlement };
+    const newResponses = { ...responses, [question.id]: response };
+    setResponses(newResponses);
+
+    const isLastQuestion = currentQuestionIndex === assessment.questions.length - 1;
+    const isLastAssessment = currentAssessmentIndex === ASSESSMENT_ORDER.length - 1;
+    await advanceAfterAnswer(assessmentId, newResponses, isLastQuestion, isLastAssessment);
+  }
+
   async function handleBack() {
     if (saving || finishing) return;
 
@@ -342,10 +408,14 @@ export function PsychometricAssessmentScreen({ navigation, route }: Props) {
       return;
     }
 
-    if (interviewAlreadyCompleted) return;
-
-    setCameFromAssessments(true);
-    setShowWelcome(true);
+    if (currentAssessmentIndex === 0 && currentQuestionIndex === 0) {
+      if (interviewAlreadyCompleted && userId) {
+        navigation.replace('InterviewComplete', { userId });
+        return;
+      }
+      setCameFromAssessments(true);
+      setShowWelcome(true);
+    }
   }
 
   function handleWelcomeContinue() {
@@ -411,6 +481,11 @@ export function PsychometricAssessmentScreen({ navigation, route }: Props) {
   const assessmentId = ASSESSMENT_ORDER[currentAssessmentIndex];
   const assessment = ASSESSMENTS[assessmentId];
   const question = assessment?.questions[currentQuestionIndex];
+  const isForcedChoice = assessment != null && isForcedChoiceAssessment(assessment);
+  const forcedChoiceQuestion = isForcedChoice ? assessment.questions[currentQuestionIndex] : null;
+  const shuffledNpiPair = forcedChoiceQuestion
+    ? shuffleNpiPair(forcedChoiceQuestion, sessionSeed)
+    : null;
 
   if (!assessment || !question) {
     return (
@@ -419,14 +494,33 @@ export function PsychometricAssessmentScreen({ navigation, route }: Props) {
       </SafeAreaView>
     );
   }
-  const totalQuestions = assessment.questions.length;
-  const assessmentNumber = currentAssessmentIndex + 1;
-  const totalAssessments = ASSESSMENT_ORDER.length;
-  const questionProgress = (currentQuestionIndex + 1) / totalQuestions;
-
-  const scaleEntries = Object.entries(assessment.scale.labels).sort(
-    ([a], [b]) => Number(a) - Number(b),
+  const batteryProgress = psychometricBatteryProgressPosition(
+    currentAssessmentIndex,
+    currentQuestionIndex,
   );
+  const questionProgress = batteryProgress.current / batteryProgress.total;
+
+  const scaleEntries =
+    !isForcedChoice && 'scale' in assessment
+      ? Object.entries(assessment.scale.labels).sort(([a], [b]) => Number(a) - Number(b))
+      : [];
+
+  const selectedForcedChoice =
+    typeof question.id === 'number' &&
+    typeof responses[question.id] === 'object' &&
+    responses[question.id] != null &&
+    !Array.isArray(responses[question.id])
+      ? (responses[question.id] as NpiEntitlementResponse)
+      : undefined;
+
+  const instrumentPreamble =
+    !isForcedChoice &&
+    'preamble' in assessment &&
+    typeof assessment.preamble === 'string' &&
+    assessment.preamble.length > 0 &&
+    currentQuestionIndex === 0
+      ? assessment.preamble
+      : null;
 
   return (
     <SafeAreaView style={styles.container}>
@@ -435,12 +529,14 @@ export function PsychometricAssessmentScreen({ navigation, route }: Props) {
         <View style={styles.progressBarContainer}>
           <View style={[styles.progressBar, { width: `${questionProgress * 100}%` }]} />
         </View>
-        <Text style={styles.progressText}>
-          {assessmentNumber}/{totalAssessments}
-        </Text>
 
         <View style={styles.questionContainer}>
-          {question.scenario && question.response ? (
+          {instrumentPreamble ? (
+            <Text style={styles.preambleText}>{instrumentPreamble}</Text>
+          ) : null}
+          {isForcedChoice ? (
+            <Text style={styles.questionText}>{assessment.description}</Text>
+          ) : question.scenario && question.response ? (
             <>
               <Text style={styles.scenarioText}>{question.scenario}</Text>
               <Text style={styles.responsePrompt}>{question.response}</Text>
@@ -451,16 +547,33 @@ export function PsychometricAssessmentScreen({ navigation, route }: Props) {
         </View>
 
         <View style={styles.optionsContainer}>
-          {scaleEntries.map(([value, label]) => (
-            <TouchableOpacity
-              key={value}
-              style={styles.optionButton}
-              onPress={() => void handleAnswer(Number(value))}
-              disabled={saving}
-            >
-              <Text style={styles.optionText}>{label}</Text>
-            </TouchableOpacity>
-          ))}
+          {isForcedChoice && shuffledNpiPair
+            ? [shuffledNpiPair.first, shuffledNpiPair.second].map((opt, displayIdx) => {
+                const displayIndex = displayIdx as 0 | 1;
+                const isSelected = selectedForcedChoice?.selectedOptionIndex === displayIndex;
+                return (
+                  <Pressable
+                    key={`${question.id}-${displayIndex}`}
+                    style={[styles.optionButton, isSelected && styles.optionButtonSelected]}
+                    onPress={() =>
+                      void handleForcedChoiceAnswer(displayIndex, opt.isEntitlement)
+                    }
+                    disabled={saving}
+                  >
+                    <Text style={styles.optionText}>{opt.text}</Text>
+                  </Pressable>
+                );
+              })
+            : scaleEntries.map(([value, label]) => (
+                <TouchableOpacity
+                  key={value}
+                  style={styles.optionButton}
+                  onPress={() => void handleAnswer(Number(value))}
+                  disabled={saving}
+                >
+                  <Text style={styles.optionText}>{label}</Text>
+                </TouchableOpacity>
+              ))}
           <PsychometricsBackButton
             variant="inline"
             onPress={() => void handleBack()}
@@ -497,7 +610,7 @@ const styles = StyleSheet.create({
     height: 4,
     backgroundColor: 'rgba(255,255,255,0.1)',
     borderRadius: 2,
-    marginBottom: 8,
+    marginBottom: spacing.lg,
     overflow: 'hidden',
     alignSelf: 'stretch',
   },
@@ -506,16 +619,17 @@ const styles = StyleSheet.create({
     backgroundColor: PSYCHOMETRICS_ACCENT,
     borderRadius: 2,
   },
-  progressText: {
-    fontFamily: PSYCHOMETRICS_FONT_BODY,
-    fontSize: 12,
-    color: '#7A9ABE',
-    marginBottom: spacing.lg,
-    alignSelf: 'stretch',
-  },
   questionContainer: {
     alignSelf: 'stretch',
     marginBottom: spacing.lg,
+  },
+  preambleText: {
+    fontFamily: PSYCHOMETRICS_FONT_BODY,
+    fontSize: 14,
+    color: '#7A9ABE',
+    lineHeight: 21,
+    textAlign: 'center',
+    marginBottom: spacing.md,
   },
   questionText: {
     fontFamily: PSYCHOMETRICS_FONT_DISPLAY,
@@ -553,6 +667,10 @@ const styles = StyleSheet.create({
     paddingHorizontal: 16,
     alignItems: 'center',
     backgroundColor: 'rgba(255,255,255,0.04)',
+  },
+  optionButtonSelected: {
+    borderColor: PSYCHOMETRICS_ACCENT,
+    backgroundColor: 'rgba(255,255,255,0.08)',
   },
   optionText: {
     fontFamily: PSYCHOMETRICS_FONT_BODY,

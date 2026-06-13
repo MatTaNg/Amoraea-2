@@ -9,6 +9,8 @@ type ScoreInterviewFn = (messages: CompletionTranscriptMsg[]) => Promise<void>;
 let registeredScoreInterview: ScoreInterviewFn | null = null;
 let scoringInFlight = false;
 let scoringAttempted = false;
+/** Set when we already navigated to InterviewComplete so scoreInterview does not hand off twice. */
+let psychometricsInterviewHandoffIssued = false;
 
 export function registerScoreInterviewForCompletion(fn: ScoreInterviewFn | null): void {
   registeredScoreInterview = fn;
@@ -29,6 +31,15 @@ export function markCompletionScoringInFlight(inFlight: boolean): void {
 export function resetCompletionScoringSession(): void {
   scoringAttempted = false;
   scoringInFlight = false;
+  psychometricsInterviewHandoffIssued = false;
+}
+
+export function markPsychometricsInterviewHandoffIssued(): void {
+  psychometricsInterviewHandoffIssued = true;
+}
+
+export function wasPsychometricsInterviewHandoffIssued(): boolean {
+  return psychometricsInterviewHandoffIssued;
 }
 
 /** Start client M4/M5 + deferred completion scoring. Safe to call from stream handlers. */

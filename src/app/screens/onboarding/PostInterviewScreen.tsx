@@ -22,10 +22,8 @@ import {
 import { FlameOrb } from '@app/screens/FlameOrb';
 import * as Clipboard from 'expo-clipboard';
 import { useQueryClient } from '@tanstack/react-query';
-import {
-  isQaRetakeSignupCode,
-  resetInterviewForQaRetake,
-} from '@features/onboarding/qaRetake';
+import { enableInterviewRetake } from '@features/interview/interviewRetake';
+import { usePostInterviewRetakeEligibility } from '@features/onboarding/usePostInterviewRetakeEligibility';
 import { useAuth } from '@features/authentication/hooks/useAuth';
 import { isAmoraeaAdminConsoleEmail } from '@/constants/adminConsole';
 import { showConfirmDialog, showSimpleAlert } from '@utilities/alerts/confirmDialog';
@@ -190,7 +188,7 @@ export const PostInterviewScreen: React.FC<{ navigation: any; route: { params: {
   const [myReferralCode, setMyReferralCode] = useState<string | null>(null);
   const [referralNotice, setReferralNotice] = useState<string | null>(null);
   const [copyFeedback, setCopyFeedback] = useState(false);
-  const [showPostInterviewRetake, setShowPostInterviewRetake] = useState(false);
+  const { showRetake: showPostInterviewRetake } = usePostInterviewRetakeEligibility(userId);
   const [retakeBusy, setRetakeBusy] = useState(false);
   /** False until `users` launch-notification fields are read — avoids flashing the phone field then the confirmation. */
   const [launchContactPrefsLoaded, setLaunchContactPrefsLoaded] = useState(false);
@@ -257,7 +255,7 @@ export const PostInterviewScreen: React.FC<{ navigation: any; route: { params: {
         const uid = auth.user?.id ?? userId;
         if (!uid) return;
         const meta = auth.user?.user_metadata as { referral_code?: string } | undefined;
-        if (!cancelled) setShowPostInterviewRetake(isQaRetakeSignupCode(meta?.referral_code));
+        void meta;
         const [{ data: codeRow }, { data: userRow }] = await Promise.all([
           supabase.from('referral_codes').select('code').eq('referrer_user_id', uid).maybeSingle(),
           supabase
@@ -308,7 +306,7 @@ export const PostInterviewScreen: React.FC<{ navigation: any; route: { params: {
         if (!uid) return;
         setRetakeBusy(true);
         try {
-          await resetInterviewForQaRetake(uid);
+          await enableInterviewRetake(uid);
           await queryClient.invalidateQueries({ queryKey: ['profile', uid] });
           navigation.replace('Aria', { userId: uid });
         } catch (e) {

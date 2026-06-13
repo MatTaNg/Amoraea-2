@@ -5,6 +5,7 @@ import {
 import {
   scenarioFollowUpAlreadyInTranscript,
   transcriptContainsScenarioAContemptProbe,
+  transcriptHasUserResponseAfterScenarioAContemptProbe,
   type ScenarioFollowUpTranscriptMessage,
 } from './scenarioFollowUpTranscriptGuard';
 
@@ -79,10 +80,12 @@ export function resolveScenarioFollowUpAfterSuppressedResponse(
   }
 
   if (
-    opts.shouldInjectScenarioARepairAfterContemptAnswer ||
-    (opts.interviewMoment === 1 &&
-      opts.scenarioAContemptProbeAsked &&
-      !opts.scenarioARepairQuestionAsked)
+    (opts.shouldInjectScenarioARepairAfterContemptAnswer ||
+      (opts.interviewMoment === 1 &&
+        opts.scenarioAContemptProbeAsked &&
+        !opts.scenarioARepairQuestionAsked)) &&
+    !opts.shouldForceScenarioAContemptProbe &&
+    transcriptHasUserResponseAfterScenarioAContemptProbe(transcript)
   ) {
     const candidate = SCENARIO_A_REPAIR_QUESTION_AFTER_CONTEMPT_COPY;
     if (!scenarioFollowUpAlreadyInTranscript(transcript, candidate)) {

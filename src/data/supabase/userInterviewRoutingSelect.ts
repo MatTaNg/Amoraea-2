@@ -2,7 +2,7 @@
 export const USER_INTERVIEW_ROUTING_TABLE = 'user_interview_routing' as const;
 
 export const USER_INTERVIEW_ROUTING_SELECT =
-  'id, interview_completed, interview_passed, interview_passed_computed, interview_passed_admin_override, latest_attempt_id, interview_attempt_count, is_alpha_tester, referral_boost_active, referral_notice_pending, psychometrics_completed_at, interview_completed_at' as const;
+  'id, interview_completed, interview_passed, interview_passed_computed, interview_passed_admin_override, latest_attempt_id, interview_attempt_count, is_alpha_tester, referral_boost_active, referral_notice_pending, psychometrics_completed_at, interview_completed_at, interview_retake_admin_allowed_at' as const;
 
 /** Post-login stack routing (`resolveInitialInterviewRoute`). */
 export const USER_LOGIN_ROUTING_SELECT =

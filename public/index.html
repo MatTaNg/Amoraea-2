@@ -77,6 +77,17 @@
       }
       select {
         color-scheme: dark;
+        border: none;
+        outline: none;
+      }
+      select:focus,
+      select:focus-visible,
+      select:active {
+        outline: none !important;
+        outline-width: 0 !important;
+        box-shadow: none !important;
+        border: none !important;
+        border-width: 0 !important;
       }
       /* Date of birth → optional birth time picker (narrow wrapper id from nativeID on web) */
       #birth-time-quarter-hour-picker select option,

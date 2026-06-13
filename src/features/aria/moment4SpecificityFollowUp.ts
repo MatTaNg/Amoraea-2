@@ -3,7 +3,7 @@ import { looksLikeMoment4GrudgePrompt, looksLikeMoment4ThresholdQuestion } from 
 
 /** Client-injected once when the first grudge answer lacks concrete person/relationship/situation anchors (see product spec). */
 export const MOMENT_4_SPECIFICITY_FOLLOW_UP_TEXT =
-  "Is there any situation that comes to mind, even something from the past you've already worked through?";
+  "Can you think of a specific person — even if it's just someone from a while back — and tell me a bit more about what happened?";
 
 export function countInterviewWords(text: string): number {
   const t = (text ?? '').trim();
@@ -93,10 +93,12 @@ export function looksLikeMoment4SpecificityFollowUpPrompt(text: string): boolean
     .trim()
     .toLowerCase();
   const newScript =
-    n.includes('is there any situation that comes to mind') && n.includes('already worked through');
+    n.includes('can you think of a specific person') &&
+    (n.includes('from a while back') || n.includes('a bit more about what happened'));
   /** Legacy longer line (still in saved transcripts). */
   const legacyScript =
-    n.includes('something from the past that you') && n.includes('already worked through');
+    (n.includes('is there any situation that comes to mind') && n.includes('already worked through')) ||
+    (n.includes('something from the past that you') && n.includes('already worked through'));
   return newScript || legacyScript;
 }
 

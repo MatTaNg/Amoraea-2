@@ -535,7 +535,8 @@ export function mergePsychometricFloorsIntoGateState(opts: {
     opts.straightLineFlags,
   );
   const floorBreaches = collectPsychometricFloorGateFailReasons(opts.scores, opts.straightLineFlags);
-  const gateFailReasons = [...new Set([...opts.existingFailReasons, ...floorBreaches])];
+  const interviewFailReasons = opts.existingFailReasons.filter((code) => !isPsychometricGateFailFloorCode(code));
+  const gateFailReasons = [...new Set([...interviewFailReasons, ...floorBreaches])];
   const priorDetail =
     opts.existingDetail != null && typeof opts.existingDetail === 'object' && !Array.isArray(opts.existingDetail)
       ? opts.existingDetail

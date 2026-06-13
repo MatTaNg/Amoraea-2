@@ -72,8 +72,55 @@ describe('personalDisclosureAckGate', () => {
         needsScenarioBJamesDifferentlyInsert: false,
         scenarioAContemptProbeAsked: true,
         scenarioARepairQuestionAsked: false,
+        transcriptMessages: [
+          { role: 'user', content: 'q1' },
+          { role: 'assistant', content: SCENARIO_A_CONTEMPT_PROBE_DELIVERED_COPY },
+          { role: 'user', content: 'condescending' },
+        ],
       }),
     ).toBe(SCENARIO_A_REPAIR_QUESTION_AFTER_CONTEMPT_COPY);
+  });
+
+  it('resolveScenarioFollowUpAfterSuppressedResponse delivers repair after phantom repair in transcript', () => {
+    expect(
+      resolveScenarioFollowUpAfterSuppressedResponse({
+        interviewMoment: 1,
+        shouldForceScenarioAContemptProbe: false,
+        assistantIssuedScenarioAContemptProbe: true,
+        shouldInjectScenarioARepairAfterContemptAnswer: true,
+        shouldForceScenarioBFullAppreciationProbe: false,
+        assistantIssuedScenarioBFullProbe: false,
+        needsScenarioBJamesDifferentlyInsert: false,
+        scenarioAContemptProbeAsked: true,
+        scenarioARepairQuestionAsked: false,
+        transcriptMessages: [
+          { role: 'user', content: 'q1' },
+          { role: 'assistant', content: SCENARIO_A_REPAIR_QUESTION_AFTER_CONTEMPT_COPY },
+          { role: 'assistant', content: SCENARIO_A_CONTEMPT_PROBE_DELIVERED_COPY },
+          { role: 'user', content: 'condescending' },
+        ],
+      }),
+    ).toBe(SCENARIO_A_REPAIR_QUESTION_AFTER_CONTEMPT_COPY);
+  });
+
+  it('resolveScenarioFollowUpAfterSuppressedResponse does not skip ahead to repair before contempt answer', () => {
+    expect(
+      resolveScenarioFollowUpAfterSuppressedResponse({
+        interviewMoment: 1,
+        shouldForceScenarioAContemptProbe: false,
+        assistantIssuedScenarioAContemptProbe: true,
+        shouldInjectScenarioARepairAfterContemptAnswer: false,
+        shouldForceScenarioBFullAppreciationProbe: false,
+        assistantIssuedScenarioBFullProbe: false,
+        needsScenarioBJamesDifferentlyInsert: false,
+        scenarioAContemptProbeAsked: true,
+        scenarioARepairQuestionAsked: false,
+        transcriptMessages: [
+          { role: 'user', content: 'q1' },
+          { role: 'assistant', content: SCENARIO_A_CONTEMPT_PROBE_DELIVERED_COPY },
+        ],
+      }),
+    ).toBeNull();
   });
 
   it('resolveScenarioFollowUpAfterSuppressedResponse returns null for personal moments', () => {

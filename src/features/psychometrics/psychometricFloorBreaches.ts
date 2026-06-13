@@ -6,6 +6,13 @@ import {
   SD3_NARCISSISM_STRAIGHT_LINE_FLAG,
   wouldTriggerSd3NarcissismFloor,
 } from './sd3NarcissismFloor';
+import {
+  formatNpiEntitlementFloorAdminDescription,
+  isRetroactiveNpiEntitlementFloorReview,
+  NPI_ENTITLEMENT_FLOOR_FAIL_CODE,
+  wouldTriggerNpiEntitlementFloor,
+} from './npiEntitlementFloor';
+import { NPI_ENTITLEMENT_ENABLED } from './interviewCompletionStatus';
 import { coercePsychometricScore } from './usersPsychometricsSchemaFallback';
 
 export const RFQ_LOW_REFLECTIVE_FUNCTIONING_FLOOR_THRESHOLD = 2.0;
@@ -43,11 +50,13 @@ export const RSES_LOW_SELF_ESTEEM_FLOOR_THRESHOLD = 24;
 export const RSES_STRAIGHT_LINE_FLAG = 'rses_straight_line';
 export const RSES_LOW_SELF_ESTEEM_FLOOR_CODE = 'rses_low_self_esteem_floor';
 
-/** SCS public subscale sum (7 items × 0–3); max 21. */
+/** @deprecated Retired SCS instrument — constants kept for legacy gate_fail_detail only. */
 export const SCS_PUBLIC_HIGH_SELF_CONSCIOUSNESS_FLOOR_THRESHOLD = 17;
-/** SCS private subscale sum (6 items × 0–3); max 18. */
+/** @deprecated Retired SCS instrument — constants kept for legacy gate_fail_detail only. */
 export const SCS_PRIVATE_LOW_SELF_AWARENESS_FLOOR_THRESHOLD = 10;
+/** @deprecated Retired SCS instrument — no longer collected for new attempts. */
 export const SCS_STRAIGHT_LINE_FLAG = 'scs_straight_line';
+/** @deprecated Retired SCS instrument — no longer collected for new attempts. */
 export const SCS_LOW_PRIVATE_SELF_AWARENESS_FLOOR_CODE = 'scs_low_private_self_awareness_floor';
 
 export type PsychometricFloorUserScores = {
@@ -56,6 +65,7 @@ export type PsychometricFloorUserScores = {
   dweckScore: number | null;
   scsSfScore: number | null;
   sd3NarcissismScore: number | null;
+  npiEntitlementScore: number | null;
   brsScore: number | null;
   anxietyTraitScore: number | null;
   aaq2Score: number | null;
@@ -168,7 +178,7 @@ export function formatRfqLowReflectiveFunctioningFloorAdminDescription(rfqScore:
 }
 
 export function formatGaspExtremeExternalizationFloorAdminDescription(gaspScore: number): string {
-  return `GASP externalization score of ${gaspScore.toFixed(2)} meets or exceeds the automatic fail threshold of ${GASP_EXTREME_EXTERNALIZATION_FLOOR_THRESHOLD.toFixed(1)}. User self-reported near-complete absence of personal accountability — consistently endorsing blame attribution to others after their own wrongdoing at a level incompatible with healthy relational functioning. The existing modifier penalty is insufficient to capture the severity of this pattern.`;
+  return `GASP 4-item externalization subscale score of ${gaspScore.toFixed(2)} meets or exceeds the automatic fail threshold of ${GASP_EXTREME_EXTERNALIZATION_FLOOR_THRESHOLD.toFixed(1)}. User self-reported near-complete absence of personal accountability — consistently endorsing blame attribution to others after their own wrongdoing at a level incompatible with healthy relational functioning. The existing modifier penalty is insufficient to capture the severity of this pattern.`;
 }
 
 export function formatDweckExtremeFixedMindsetFloorAdminDescription(dweckScore: number): string {
@@ -227,8 +237,8 @@ export const ALL_PSYCHOMETRIC_GATE_FAIL_FLOOR_CODES = [
   ANXIETY_TRAIT_HIGH_FLOOR_CODE,
   AAQ2_HIGH_EXPERIENTIAL_AVOIDANCE_FLOOR_CODE,
   RSES_LOW_SELF_ESTEEM_FLOOR_CODE,
-  SCS_LOW_PRIVATE_SELF_AWARENESS_FLOOR_CODE,
   SD3_NARCISSISM_FLOOR_FAIL_CODE,
+  NPI_ENTITLEMENT_FLOOR_FAIL_CODE,
 ] as const;
 
 export type PsychometricGateFailFloorCode = (typeof ALL_PSYCHOMETRIC_GATE_FAIL_FLOOR_CODES)[number];
@@ -253,7 +263,8 @@ export function logPsychometricFloorEvaluation(
 ): void {
   const rfqWould = wouldTriggerRfqLowReflectiveFunctioningFloor(scores.rfqScore, straightLineFlags);
   const sd3Would = wouldTriggerSd3NarcissismFloor(scores.sd3NarcissismScore, straightLineFlags);
-  if (__DEV__ || rfqWould || sd3Would) {
+  const npiWould = wouldTriggerNpiEntitlementFloor(scores.npiEntitlementScore);
+  if (__DEV__ || rfqWould || sd3Would || npiWould) {
     console.log('[PsychometricFloor]', {
       ...context,
       psychometrics_rfq_score: scores.rfqScore,
@@ -261,6 +272,8 @@ export function logPsychometricFloorEvaluation(
       straightLineFlags: straightLineFlags ?? [],
       sd3_narcissism_score_effective: scores.sd3NarcissismScore,
       sd3_narcissism_floor: sd3Would,
+      npi_entitlement_score_effective: scores.npiEntitlementScore,
+      npi_entitlement_floor: npiWould,
     });
   }
 }
@@ -295,32 +308,29 @@ export function collectPsychometricFloorUncertaintyFlags(
   if (wouldTriggerRsesLowSelfEsteemFloor(scores.rsesScore, straightLineFlags)) {
     flags.push(RSES_LOW_SELF_ESTEEM_FLOOR_CODE);
   }
-  if (
-    wouldTriggerScsLowPrivateSelfAwarenessFloor(
-      scores.scsPublicScore,
-      scores.scsPrivateScore,
-      straightLineFlags,
-    )
-  ) {
-    flags.push(SCS_LOW_PRIVATE_SELF_AWARENESS_FLOOR_CODE);
-  }
-  if (
-    scores.sd3NarcissismScore != null &&
-    Number.isFinite(scores.sd3NarcissismScore) &&
-    scores.sd3NarcissismScore >= SD3_NARCISSISM_FLOOR_THRESHOLD
-  ) {
-    const sd3WouldTrigger = wouldTriggerSd3NarcissismFloor(
-      scores.sd3NarcissismScore,
-      straightLineFlags,
-    );
-    console.log('[PsychometricFloor] SD3 narcissism floor pre-check (collectPsychometricFloorUncertaintyFlags)', {
-      sd3NarcissismScore: scores.sd3NarcissismScore,
-      wouldTriggerSd3NarcissismFloor: sd3WouldTrigger,
-      straightLineFlags: straightLineFlags ?? [],
-    });
-  }
-  if (wouldTriggerSd3NarcissismFloor(scores.sd3NarcissismScore, straightLineFlags)) {
-    flags.push(SD3_NARCISSISM_FLOOR_FAIL_CODE);
+  if (NPI_ENTITLEMENT_ENABLED) {
+    if (wouldTriggerNpiEntitlementFloor(scores.npiEntitlementScore)) {
+      flags.push(NPI_ENTITLEMENT_FLOOR_FAIL_CODE);
+    }
+  } else {
+    if (
+      scores.sd3NarcissismScore != null &&
+      Number.isFinite(scores.sd3NarcissismScore) &&
+      scores.sd3NarcissismScore >= SD3_NARCISSISM_FLOOR_THRESHOLD
+    ) {
+      const sd3WouldTrigger = wouldTriggerSd3NarcissismFloor(
+        scores.sd3NarcissismScore,
+        straightLineFlags,
+      );
+      console.log('[PsychometricFloor] SD3 narcissism floor pre-check (collectPsychometricFloorUncertaintyFlags)', {
+        sd3NarcissismScore: scores.sd3NarcissismScore,
+        wouldTriggerSd3NarcissismFloor: sd3WouldTrigger,
+        straightLineFlags: straightLineFlags ?? [],
+      });
+    }
+    if (wouldTriggerSd3NarcissismFloor(scores.sd3NarcissismScore, straightLineFlags)) {
+      flags.push(SD3_NARCISSISM_FLOOR_FAIL_CODE);
+    }
   }
   return flags;
 }
@@ -357,6 +367,8 @@ export function formatPsychometricGateFailDescription(
     }
     case SD3_NARCISSISM_FLOOR_FAIL_CODE:
       return formatSd3NarcissismFloorAdminDescription(score);
+    case NPI_ENTITLEMENT_FLOOR_FAIL_CODE:
+      return formatNpiEntitlementFloorAdminDescription(score);
     default:
       return floorId;
   }
@@ -407,6 +419,8 @@ export function psychometricFloorScoreForGateDetail(
     }
     case SD3_NARCISSISM_FLOOR_FAIL_CODE:
       return coercePsychometricScore(scores.sd3NarcissismScore);
+    case NPI_ENTITLEMENT_FLOOR_FAIL_CODE:
+      return coercePsychometricScore(scores.npiEntitlementScore);
     default:
       return null;
   }
@@ -535,7 +549,8 @@ export function mergePsychometricFloorsIntoGateState(opts: {
     opts.straightLineFlags,
   );
   const floorBreaches = collectPsychometricFloorGateFailReasons(opts.scores, opts.straightLineFlags);
-  const gateFailReasons = [...new Set([...opts.existingFailReasons, ...floorBreaches])];
+  const interviewFailReasons = opts.existingFailReasons.filter((code) => !isPsychometricGateFailFloorCode(code));
+  const gateFailReasons = [...new Set([...interviewFailReasons, ...floorBreaches])];
   const priorDetail =
     opts.existingDetail != null && typeof opts.existingDetail === 'object' && !Array.isArray(opts.existingDetail)
       ? opts.existingDetail
@@ -564,7 +579,6 @@ export const PSYCHOMETRIC_GATE_FAIL_FLOOR_IDS = [
   ANXIETY_TRAIT_HIGH_FLOOR_CODE,
   AAQ2_HIGH_EXPERIENTIAL_AVOIDANCE_FLOOR_CODE,
   RSES_LOW_SELF_ESTEEM_FLOOR_CODE,
-  SCS_LOW_PRIVATE_SELF_AWARENESS_FLOOR_CODE,
   SD3_NARCISSISM_FLOOR_FAIL_CODE,
 ] as const;
 
@@ -639,32 +653,6 @@ export function getRetroactivePsychometricFloorReviews(
     },
   ];
 
-  if (
-    scores.scsPublicScore != null &&
-    scores.scsPrivateScore != null &&
-    Number.isFinite(scores.scsPublicScore) &&
-    Number.isFinite(scores.scsPrivateScore) &&
-    isRetroactiveFloorReview(
-      attempt,
-      SCS_LOW_PRIVATE_SELF_AWARENESS_FLOOR_CODE,
-      wouldTriggerScsLowPrivateSelfAwarenessFloor(
-        scores.scsPublicScore,
-        scores.scsPrivateScore,
-        straightLineFlags,
-      ),
-    )
-  ) {
-    reviews.push({
-      id: SCS_LOW_PRIVATE_SELF_AWARENESS_FLOOR_CODE,
-      score: scores.scsPublicScore,
-      description: formatScsLowPrivateSelfAwarenessFloorAdminDescription(
-        scores.scsPublicScore,
-        scores.scsPrivateScore,
-      ),
-      retroactiveNote: retroactivePsychometricFloorReviewNote(SCS_LOW_PRIVATE_SELF_AWARENESS_FLOOR_CODE),
-    });
-  }
-
   for (const candidate of candidates) {
     if (
       candidate.score == null ||
@@ -681,7 +669,20 @@ export function getRetroactivePsychometricFloorReviews(
     });
   }
 
-  if (
+  if (NPI_ENTITLEMENT_ENABLED) {
+    if (
+      scores.npiEntitlementScore != null &&
+      Number.isFinite(scores.npiEntitlementScore) &&
+      isRetroactiveNpiEntitlementFloorReview(attempt, scores.npiEntitlementScore)
+    ) {
+      reviews.push({
+        id: NPI_ENTITLEMENT_FLOOR_FAIL_CODE,
+        score: scores.npiEntitlementScore,
+        description: formatNpiEntitlementFloorAdminDescription(scores.npiEntitlementScore),
+        retroactiveNote: retroactivePsychometricFloorReviewNote(NPI_ENTITLEMENT_FLOOR_FAIL_CODE),
+      });
+    }
+  } else if (
     scores.sd3NarcissismScore != null &&
     Number.isFinite(scores.sd3NarcissismScore) &&
     isRetroactiveSd3NarcissismFloorReview(attempt, scores.sd3NarcissismScore, straightLineFlags)

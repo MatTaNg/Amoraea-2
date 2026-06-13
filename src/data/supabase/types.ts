@@ -170,6 +170,7 @@ export interface Database {
           referral_notice_pending: string | null;
           psychometrics_completed_at: string | null;
           interview_completed_at: string | null;
+          interview_retake_admin_allowed_at: string | null;
           market_research_completed_at: string | null;
           launch_notification_phone: string | null;
           launch_notification_submitted_at: string | null;

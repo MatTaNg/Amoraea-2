@@ -10,6 +10,7 @@ import {
   SCENARIO_1_TO_2_TRANSITION_FALLBACK,
   SCENARIO_2_TO_3_TRANSITION_FALLBACK,
 } from './interviewTransitionBundles';
+import { MOMENT_4_GRUDGE_QUESTION_TEXT } from './moment4ProbeLogic';
 import { MOMENT_5_ACCOUNTABILITY_QUESTION_TEXT } from './probeAndScoringUtils';
 
 const STUB_S2 = 'SARAH_VIGNETTE\n\nWhat do you think is going on here?';
@@ -71,6 +72,10 @@ describe('assistantTextLooksLikeMoment4HandoffLead', () => {
 
   it('does not match unrelated scenario chatter', () => {
     expect(assistantTextLooksLikeMoment4HandoffLead('What do you think Sophie is feeling here?')).toBe(false);
+  });
+
+  it('matches episodic M4 grudge question wording', () => {
+    expect(assistantTextLooksLikeMoment4HandoffLead(MOMENT_4_GRUDGE_QUESTION_TEXT)).toBe(true);
   });
 });
 

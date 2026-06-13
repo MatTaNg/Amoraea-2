@@ -3,11 +3,17 @@ import { fetchInterviewAttemptRevealSnapshot } from '@utilities/fetchInterviewAt
 import { determinePostInterviewRoute } from '@features/psychometrics/determinePostInterviewRoute';
 import {
   fetchUserInterviewCompletionStatus,
+  NPI_ENTITLEMENT_ENABLED,
+  PSYCHOMETRICS_ENABLED,
   resolveInterviewStackScreenFromStatus,
 } from '@features/psychometrics/interviewCompletionStatus';
 
+export { PSYCHOMETRICS_ENABLED, NPI_ENTITLEMENT_ENABLED };
+
 export type InterviewStackRoute =
   | 'PsychometricAssessment'
+  | 'PsychometricsComplete'
+  | 'InterviewComplete'
   | 'Aria'
   | 'PostInterview'
   | 'PostInterviewProcessing'
@@ -27,17 +33,23 @@ export type InitialInterviewRouteResult = {
 
 /**
  * Decides the first screen after login for the interview stack.
- * Market research (root overlay) → psychometrics → interview / post-interview.
+ * Market research (root overlay) → psychometrics (when enabled) → interview / post-interview.
+ *
+ * Feature flag: {@link PSYCHOMETRICS_ENABLED} in interviewCompletionStatus.ts — set to `true` to restore psychometrics.
  */
 export async function resolveInitialInterviewRoute(userId: string): Promise<InitialInterviewRouteResult> {
-  const { interviewCompleted, psychometricsCompletedAt, routingRow } =
+  const { interviewCompleted, psychometricsCompletedAt, gateResultFinalizedAt, routingRow } =
     await fetchUserInterviewCompletionStatus(userId);
 
-  const needsMarketResearch =
-    routingRow != null && routingRow.market_research_completed_at == null;
+  const needsMarketResearch = routingRow?.market_research_completed_at == null;
 
   let postInterviewScreen: InterviewStackRoute | null = null;
-  if (psychometricsCompletedAt != null && interviewCompleted) {
+  const shouldResolvePostInterviewRoute = PSYCHOMETRICS_ENABLED
+    ? psychometricsCompletedAt != null &&
+      interviewCompleted &&
+      gateResultFinalizedAt != null
+    : interviewCompleted;
+  if (shouldResolvePostInterviewRoute) {
     const snapshot = await fetchInterviewAttemptRevealSnapshot(userId);
     postInterviewScreen = determinePostInterviewRoute(snapshot).route;
   }
@@ -45,6 +57,7 @@ export async function resolveInitialInterviewRoute(userId: string): Promise<Init
   const routed = resolveInterviewStackScreenFromStatus({
     psychometricsCompletedAt,
     interviewCompleted,
+    gateResultFinalizedAt,
     postInterviewScreen,
   });
 

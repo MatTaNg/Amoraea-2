@@ -11,7 +11,7 @@ import {
 import { useNavigation, useRoute } from "@react-navigation/native";
 import type { NativeStackNavigationProp } from "@react-navigation/native-stack";
 import type { RouteProp } from "@react-navigation/native";
-import type { DatingProfileStackParamList } from "@app/navigation/DatingProfileOnboardingNavigator";
+import { replaceWithPreviousOnboardingAssessment } from "@/datingProfile/onboarding/navigateToPreviousOnboardingAssessment";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useAuth } from "@/shared/hooks/AuthProvider";
 import { useProfile } from "@/shared/hooks/useProfile";
@@ -56,14 +56,12 @@ export function ConflictStyleAssessmentScreen() {
     Record<number, { style: ConflictStyleKey; selectedOptionIndex: number }>
   >({});
   const [saving, setSaving] = useState(false);
-  /** Re-render option disable state while a background upsert runs (refs alone would not update Pressable). */
-  const [selectionBusy, setSelectionBusy] = useState(false);
   const [completedInstruments, setCompletedInstruments] = useState<string[] | null>(null);
   const [loadingMeta, setLoadingMeta] = useState(true);
   /** After manual Begin or one-time server resume — stops profile refetches from resetting question index. */
   const resumeSyncDoneRef = useRef(false);
-  /** Blocks double-taps while a non-final answer persists in the background. */
-  const selectionInFlightRef = useRef(false);
+  /** Prevents double-tap on the same question while its draft upsert runs — does not block later questions. */
+  const selectionInFlightRef = useRef<number | null>(null);
 
   const total = CONFLICT_STYLE_PAIRS.length;
   const sessionSeed = useMemo(
@@ -210,9 +208,11 @@ export function ConflictStyleAssessmentScreen() {
   );
 
   const selectOption = async (displayIndex: number, style: ConflictStyleKey) => {
-    if (saving || selectionInFlightRef.current) return;
+    if (saving) return;
 
     const idx = currentIndex;
+    if (selectionInFlightRef.current === idx) return;
+
     const next = {
       ...answers,
       [idx]: { style, selectedOptionIndex: displayIndex },
@@ -221,7 +221,7 @@ export function ConflictStyleAssessmentScreen() {
 
     if (idx >= total - 1) {
       setSaving(true);
-      selectionInFlightRef.current = true;
+      selectionInFlightRef.current = idx;
       try {
         if (user?.id) {
           const up = await upsertConflictStyleDraftAnswer(user.id, {
@@ -280,25 +280,21 @@ export function ConflictStyleAssessmentScreen() {
         }
       } finally {
         setSaving(false);
-        selectionInFlightRef.current = false;
+        selectionInFlightRef.current = null;
       }
       return;
     }
 
     const nextIndex = idx + 1;
     const q1 = nextIndex + 1;
-
-    selectionInFlightRef.current = true;
-    setSelectionBusy(true);
     setCurrentIndex(nextIndex);
 
     const uid = user?.id;
     if (!uid) {
-      selectionInFlightRef.current = false;
-      setSelectionBusy(false);
       return;
     }
 
+    selectionInFlightRef.current = idx;
     void (async () => {
       try {
         const up = await upsertConflictStyleDraftAnswer(uid, {
@@ -320,15 +316,20 @@ export function ConflictStyleAssessmentScreen() {
           await persistProgress(q1);
         }
       } finally {
-        selectionInFlightRef.current = false;
-        setSelectionBusy(false);
+        if (selectionInFlightRef.current === idx) {
+          selectionInFlightRef.current = null;
+        }
       }
     })();
   };
 
   const goBack = () => {
-    if (currentIndex <= 0 || saving || selectionBusy) return;
-    setCurrentIndex((i) => i - 1);
+    if (saving) return;
+    if (currentIndex > 0) {
+      setCurrentIndex((i) => i - 1);
+      return;
+    }
+    replaceWithPreviousOnboardingAssessment(navigation, "CONFLICT-30");
   };
 
   if (loadingMeta) {
@@ -378,7 +379,7 @@ export function ConflictStyleAssessmentScreen() {
                 <Pressable
                   key={`${currentIndex}-${displayIdx}`}
                   style={[styles.option, isSel && styles.optionReviewed]}
-                  disabled={saving || selectionBusy}
+                  disabled={saving}
                   onPress={() => selectOption(displayIdx, opt.style)}
                 >
                   <Text style={styles.optionText}>{opt.text}</Text>
@@ -388,9 +389,9 @@ export function ConflictStyleAssessmentScreen() {
           <Pressable
             style={styles.backBtn}
             onPress={goBack}
-            disabled={currentIndex === 0 || saving || selectionBusy}
+            disabled={saving}
           >
-            <Text style={[styles.backText, currentIndex === 0 && styles.backDisabled]}>← Back</Text>
+            <Text style={[styles.backText, saving && styles.backDisabled]}>← Back</Text>
           </Pressable>
         </View>
       </ScrollView>

@@ -5,6 +5,8 @@ import {
   uncertaintyBreakdownForStorage,
   UNCERTAINTY_ROUTING_THRESHOLD,
 } from '../computeUncertaintyScore';
+import { NPI_ENTITLEMENT_ENABLED } from '../interviewCompletionStatus';
+import { ACTIVE_NARCISSISM_FLOOR_CODE } from '../narcissismInstrumentTestFixtures';
 
 const EMPTY_ATTEMPT = {
   weighted_score: 8,
@@ -26,6 +28,7 @@ const EMPTY_ATTEMPT = {
   psychometrics_scs_sf_score: 4,
   psychometrics_dweck_score: 4,
   psychometrics_sd3_narcissism_score: 2,
+  psychometrics_npi_entitlement_score: null as number | null,
   psychometrics_rfq_score: 5,
   reasoning_pending: false,
 };
@@ -36,7 +39,7 @@ describe('computeUncertaintyScore', () => {
     expect(result.total).toBeLessThan(UNCERTAINTY_ROUTING_THRESHOLD);
   });
 
-  it('flags SD3 narcissism and RFQ consistency divergences', () => {
+  it('flags narcissism and RFQ consistency divergences', () => {
     const result = computeUncertaintyScore({
       ...EMPTY_ATTEMPT,
       weighted_score: 6.1,
@@ -45,15 +48,36 @@ describe('computeUncertaintyScore', () => {
         contempt: 4,
         mentalizing: 7.5,
       },
-      psychometrics_sd3_narcissism_score: 4.5,
+      ...(NPI_ENTITLEMENT_ENABLED
+        ? {
+            psychometrics_npi_entitlement_score: 5,
+            psychometrics_sd3_narcissism_score: null,
+          }
+        : {
+            psychometrics_sd3_narcissism_score: 4.5,
+            psychometrics_npi_entitlement_score: null,
+          }),
       psychometrics_rfq_score: 3,
     });
-    expect(result.activeFlags).toContain('sd3_narcissism_contempt_divergence');
+    if (NPI_ENTITLEMENT_ENABLED) {
+      expect(result.activeFlags).toContain('npi_entitlement_accountability_divergence');
+      expect(result.activeFlags).toContain(ACTIVE_NARCISSISM_FLOOR_CODE);
+    } else {
+      expect(result.activeFlags).toContain('sd3_narcissism_contempt_divergence');
+      expect(result.activeFlags).toContain('sd3_narcissism_floor');
+    }
     expect(result.activeFlags).toContain('rfq_mentalizing_divergence_low_self_report');
-    expect(result.activeFlags).toContain('sd3_narcissism_floor');
   });
 
-  it('flags sd3_narcissism_floor when straight-line is active but score breaches threshold', () => {
+  it('flags active narcissism floor when straight-line is active but score breaches threshold', () => {
+    if (NPI_ENTITLEMENT_ENABLED) {
+      const result = computeUncertaintyScore({
+        ...EMPTY_ATTEMPT,
+        psychometrics_npi_entitlement_score: 5,
+      });
+      expect(result.activeFlags).toContain(ACTIVE_NARCISSISM_FLOOR_CODE);
+      return;
+    }
     const result = computeUncertaintyScore({
       ...EMPTY_ATTEMPT,
       psychometrics_sd3_narcissism_score: 4.5,

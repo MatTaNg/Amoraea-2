@@ -1,0 +1,6146 @@
+{
+  "generatedAt": "2026-06-11T00:13:31.246Z",
+  "seedTag": "compat-algo-v2",
+  "userCount": 12,
+  "pairCount": 144,
+  "users": [
+    {
+      "slug": "alice",
+      "label": "Ideal Alice",
+      "index": 1,
+      "userId": "330354f3-70f1-4613-a398-7c72ae9043a1"
+    },
+    {
+      "slug": "bob",
+      "label": "Compatible Bob",
+      "index": 2,
+      "userId": "f79971c4-63cf-41c7-b4c7-46812f4cb135"
+    },
+    {
+      "slug": "clara",
+      "label": "Anxious Clara",
+      "index": 3,
+      "userId": "0b32753d-c16d-41ad-bc51-81e6c3ad7f97"
+    },
+    {
+      "slug": "dan",
+      "label": "Avoidant Dan",
+      "index": 4,
+      "userId": "d61cf14a-c5f8-4b68-aa96-4578e442c9ee"
+    },
+    {
+      "slug": "eve",
+      "label": "Avoidant Eve",
+      "index": 5,
+      "userId": "7dce3fc3-d706-4b3f-a4a3-540e454cbda5"
+    },
+    {
+      "slug": "frank",
+      "label": "Conservative Frank",
+      "index": 6,
+      "userId": "dafef373-b753-4044-bfd3-1030dc97709d"
+    },
+    {
+      "slug": "grace",
+      "label": "Progressive Grace",
+      "index": 7,
+      "userId": "45f62791-91da-4219-b20d-521bed73e780"
+    },
+    {
+      "slug": "henry",
+      "label": "Low Capacity Henry",
+      "index": 8,
+      "userId": "071c75d4-1060-4001-be2a-c5f9560fe65e"
+    },
+    {
+      "slug": "isabel",
+      "label": "Finance Mismatch Isabel",
+      "index": 9,
+      "userId": "5b0903dd-236b-4550-9e71-baa3fd27921e"
+    },
+    {
+      "slug": "jake",
+      "label": "Dealbreaker Jake",
+      "index": 10,
+      "userId": "543fd725-2ff7-4ff3-b49b-f666cfc5caf4"
+    },
+    {
+      "slug": "kim",
+      "label": "Demanding-Withdrawing Kim",
+      "index": 11,
+      "userId": "526add45-7bec-4a4d-ab36-c879a41528e4"
+    },
+    {
+      "slug": "morgan",
+      "label": "Disorganised Morgan",
+      "index": 12,
+      "userId": "346c6543-cf25-4c9f-af22-a11bd538ddb8"
+    }
+  ],
+  "scoreMatrix": {
+    "alice": {
+      "alice": 1,
+      "bob": 0.9945707176711626,
+      "clara": 0.8717173739982829,
+      "dan": 0.8473380406649496,
+      "eve": 0.8475380406649496,
+      "frank": 0.6533821976163714,
+      "grace": 0.9095093081686596,
+      "henry": 0.7503034732362059,
+      "isabel": 0.9700728223546163,
+      "jake": 0,
+      "kim": 0.9228337073316163,
+      "morgan": 0.7374614009678367
+    },
+    "bob": {
+      "alice": 0.9945707176711626,
+      "bob": 0.9962177073316162,
+      "clara": 0.8655173924126738,
+      "dan": 0.8426634004875184,
+      "eve": 0.8437634004875184,
+      "frank": 0.6557901395117149,
+      "grace": 0.9054041341679673,
+      "henry": 0.7426189371161861,
+      "isabel": 0.9641924993608292,
+      "jake": 0,
+      "kim": 0.9130139590207785,
+      "morgan": 0.7285313215551044
+    },
+    "clara": {
+      "alice": 0.8717173739982829,
+      "bob": 0.8655173924126738,
+      "clara": 0.8001946073316163,
+      "dan": 0.6754496038221681,
+      "eve": 0.6823384927110571,
+      "frank": 0.551717213103912,
+      "grace": 0.799756021676227,
+      "henry": 0.6805456169702688,
+      "isabel": 0.8427141556879496,
+      "jake": 0,
+      "kim": 0.8031671791199567,
+      "morgan": 0.6522674742091529
+    },
+    "dan": {
+      "alice": 0.8473380406649496,
+      "bob": 0.8426634004875185,
+      "clara": 0.6754496038221681,
+      "dan": 0.7153833184427274,
+      "eve": 0.7174722073316163,
+      "frank": 0.529474727249478,
+      "grace": 0.7697252338418198,
+      "henry": 0.6592721945741816,
+      "isabel": 0.8168548223546163,
+      "jake": 0,
+      "kim": 0.7741015443960809,
+      "morgan": 0.6033848912545039
+    },
+    "eve": {
+      "alice": 0.8475380406649496,
+      "bob": 0.8437634004875185,
+      "clara": 0.682338492711057,
+      "dan": 0.7174722073316163,
+      "eve": 0.7232055406649497,
+      "frank": 0.531474727249478,
+      "grace": 0.7717252338418198,
+      "henry": 0.6612721945741816,
+      "isabel": 0.8188548223546163,
+      "jake": 0,
+      "kim": 0.7761015443960809,
+      "morgan": 0.6082293356989483
+    },
+    "frank": {
+      "alice": 0.6533821976163714,
+      "bob": 0.6557901395117149,
+      "clara": 0.551717213103912,
+      "dan": 0.529474727249478,
+      "eve": 0.531474727249478,
+      "frank": 0.8632457073316161,
+      "grace": 0.5993326399550953,
+      "henry": 0.4775159507061133,
+      "isabel": 0.6253289793060381,
+      "jake": 0,
+      "kim": 0.6006648173213103,
+      "morgan": 0.42800294459186056
+    },
+    "grace": {
+      "alice": 0.9095093081686596,
+      "bob": 0.9054041341679673,
+      "clara": 0.799756021676227,
+      "dan": 0.7697252338418198,
+      "eve": 0.7717252338418198,
+      "frank": 0.5993326399550953,
+      "grace": 0.9141123739982828,
+      "henry": 0.7096781553184819,
+      "isabel": 0.8814560898583264,
+      "jake": 0,
+      "kim": 0.8413153239136522,
+      "morgan": 0.660165149204229
+    },
+    "henry": {
+      "alice": 0.7503034732362059,
+      "bob": 0.7426189371161861,
+      "clara": 0.6805456169702688,
+      "dan": 0.6592721945741816,
+      "eve": 0.6612721945741816,
+      "frank": 0.4775159507061133,
+      "grace": 0.7096781553184819,
+      "henry": 0.6295115406649494,
+      "isabel": 0.718505017575106,
+      "jake": 0,
+      "kim": 0.7266505246491989,
+      "morgan": 0.5443658207509232
+    },
+    "isabel": {
+      "alice": 0.9700728223546163,
+      "bob": 0.9641924993608292,
+      "clara": 0.8427141556879496,
+      "dan": 0.8168548223546163,
+      "eve": 0.8188548223546163,
+      "frank": 0.6253289793060381,
+      "grace": 0.8814560898583264,
+      "henry": 0.718505017575106,
+      "isabel": 0.9948843959028134,
+      "jake": 0,
+      "kim": 0.8890053808878763,
+      "morgan": 0.7044174020140241
+    },
+    "jake": {
+      "alice": 0,
+      "bob": 0,
+      "clara": 0,
+      "dan": 0,
+      "eve": 0,
+      "frank": 0,
+      "grace": 0,
+      "henry": 0,
+      "isabel": 0,
+      "jake": 0.9962177073316162,
+      "kim": 0,
+      "morgan": 0
+    },
+    "kim": {
+      "alice": 0.9228337073316163,
+      "bob": 0.9130139590207785,
+      "clara": 0.8031671791199567,
+      "dan": 0.7741015443960809,
+      "eve": 0.7761015443960809,
+      "frank": 0.6006648173213103,
+      "grace": 0.8413153239136522,
+      "henry": 0.7266505246491989,
+      "isabel": 0.8890053808878763,
+      "jake": 0,
+      "kim": 0.8588707739982828,
+      "morgan": 0.6724336358937568
+    },
+    "morgan": {
+      "alice": 0.7374614009678367,
+      "bob": 0.7285313215551044,
+      "clara": 0.6522674742091529,
+      "dan": 0.6033848912545039,
+      "eve": 0.6082293356989483,
+      "frank": 0.42800294459186056,
+      "grace": 0.660165149204229,
+      "henry": 0.5443658207509232,
+      "isabel": 0.7044174020140241,
+      "jake": 0,
+      "kim": 0.6724336358937568,
+      "morgan": 0.48846281844272726
+    }
+  },
+  "highestPairs": [
+    {
+      "pair": "Ideal Alice + Ideal Alice",
+      "slugA": "alice",
+      "slugB": "alice",
+      "finalScore": 1,
+      "compatibilityScore": 100
+    },
+    {
+      "pair": "Compatible Bob + Compatible Bob",
+      "slugA": "bob",
+      "slugB": "bob",
+      "finalScore": 0.9962177073316162,
+      "compatibilityScore": 100
+    },
+    {
+      "pair": "Dealbreaker Jake + Dealbreaker Jake",
+      "slugA": "jake",
+      "slugB": "jake",
+      "finalScore": 0.9962177073316162,
+      "compatibilityScore": 100
+    },
+    {
+      "pair": "Finance Mismatch Isabel + Finance Mismatch Isabel",
+      "slugA": "isabel",
+      "slugB": "isabel",
+      "finalScore": 0.9948843959028134,
+      "compatibilityScore": 99
+    },
+    {
+      "pair": "Ideal Alice + Compatible Bob",
+      "slugA": "alice",
+      "slugB": "bob",
+      "finalScore": 0.9945707176711626,
+      "compatibilityScore": 99
+    },
+    {
+      "pair": "Compatible Bob + Ideal Alice",
+      "slugA": "bob",
+      "slugB": "alice",
+      "finalScore": 0.9945707176711626,
+      "compatibilityScore": 99
+    },
+    {
+      "pair": "Ideal Alice + Finance Mismatch Isabel",
+      "slugA": "alice",
+      "slugB": "isabel",
+      "finalScore": 0.9700728223546163,
+      "compatibilityScore": 97
+    },
+    {
+      "pair": "Finance Mismatch Isabel + Ideal Alice",
+      "slugA": "isabel",
+      "slugB": "alice",
+      "finalScore": 0.9700728223546163,
+      "compatibilityScore": 97
+    },
+    {
+      "pair": "Compatible Bob + Finance Mismatch Isabel",
+      "slugA": "bob",
+      "slugB": "isabel",
+      "finalScore": 0.9641924993608292,
+      "compatibilityScore": 96
+    },
+    {
+      "pair": "Finance Mismatch Isabel + Compatible Bob",
+      "slugA": "isabel",
+      "slugB": "bob",
+      "finalScore": 0.9641924993608292,
+      "compatibilityScore": 96
+    }
+  ],
+  "lowestPairs": [
+    {
+      "pair": "Disorganised Morgan + Dealbreaker Jake",
+      "slugA": "morgan",
+      "slugB": "jake",
+      "finalScore": 0,
+      "compatibilityScore": 0
+    },
+    {
+      "pair": "Demanding-Withdrawing Kim + Dealbreaker Jake",
+      "slugA": "kim",
+      "slugB": "jake",
+      "finalScore": 0,
+      "compatibilityScore": 0
+    },
+    {
+      "pair": "Dealbreaker Jake + Disorganised Morgan",
+      "slugA": "jake",
+      "slugB": "morgan",
+      "finalScore": 0,
+      "compatibilityScore": 0
+    },
+    {
+      "pair": "Dealbreaker Jake + Demanding-Withdrawing Kim",
+      "slugA": "jake",
+      "slugB": "kim",
+      "finalScore": 0,
+      "compatibilityScore": 0
+    },
+    {
+      "pair": "Dealbreaker Jake + Finance Mismatch Isabel",
+      "slugA": "jake",
+      "slugB": "isabel",
+      "finalScore": 0,
+      "compatibilityScore": 0
+    },
+    {
+      "pair": "Dealbreaker Jake + Low Capacity Henry",
+      "slugA": "jake",
+      "slugB": "henry",
+      "finalScore": 0,
+      "compatibilityScore": 0
+    },
+    {
+      "pair": "Dealbreaker Jake + Progressive Grace",
+      "slugA": "jake",
+      "slugB": "grace",
+      "finalScore": 0,
+      "compatibilityScore": 0
+    },
+    {
+      "pair": "Dealbreaker Jake + Conservative Frank",
+      "slugA": "jake",
+      "slugB": "frank",
+      "finalScore": 0,
+      "compatibilityScore": 0
+    },
+    {
+      "pair": "Dealbreaker Jake + Avoidant Eve",
+      "slugA": "jake",
+      "slugB": "eve",
+      "finalScore": 0,
+      "compatibilityScore": 0
+    },
+    {
+      "pair": "Dealbreaker Jake + Avoidant Dan",
+      "slugA": "jake",
+      "slugB": "dan",
+      "finalScore": 0,
+      "compatibilityScore": 0
+    }
+  ],
+  "zeroScorePairs": [
+    {
+      "pair": "Ideal Alice + Dealbreaker Jake",
+      "slugA": "alice",
+      "slugB": "jake",
+      "dealbreakerMultiplier": 0
+    },
+    {
+      "pair": "Compatible Bob + Dealbreaker Jake",
+      "slugA": "bob",
+      "slugB": "jake",
+      "dealbreakerMultiplier": 0
+    },
+    {
+      "pair": "Anxious Clara + Dealbreaker Jake",
+      "slugA": "clara",
+      "slugB": "jake",
+      "dealbreakerMultiplier": 0
+    },
+    {
+      "pair": "Avoidant Dan + Dealbreaker Jake",
+      "slugA": "dan",
+      "slugB": "jake",
+      "dealbreakerMultiplier": 0
+    },
+    {
+      "pair": "Avoidant Eve + Dealbreaker Jake",
+      "slugA": "eve",
+      "slugB": "jake",
+      "dealbreakerMultiplier": 0
+    },
+    {
+      "pair": "Conservative Frank + Dealbreaker Jake",
+      "slugA": "frank",
+      "slugB": "jake",
+      "dealbreakerMultiplier": 0
+    },
+    {
+      "pair": "Progressive Grace + Dealbreaker Jake",
+      "slugA": "grace",
+      "slugB": "jake",
+      "dealbreakerMultiplier": 0
+    },
+    {
+      "pair": "Low Capacity Henry + Dealbreaker Jake",
+      "slugA": "henry",
+      "slugB": "jake",
+      "dealbreakerMultiplier": 0
+    },
+    {
+      "pair": "Finance Mismatch Isabel + Dealbreaker Jake",
+      "slugA": "isabel",
+      "slugB": "jake",
+      "dealbreakerMultiplier": 0
+    },
+    {
+      "pair": "Dealbreaker Jake + Ideal Alice",
+      "slugA": "jake",
+      "slugB": "alice",
+      "dealbreakerMultiplier": 0
+    },
+    {
+      "pair": "Dealbreaker Jake + Compatible Bob",
+      "slugA": "jake",
+      "slugB": "bob",
+      "dealbreakerMultiplier": 0
+    },
+    {
+      "pair": "Dealbreaker Jake + Anxious Clara",
+      "slugA": "jake",
+      "slugB": "clara",
+      "dealbreakerMultiplier": 0
+    },
+    {
+      "pair": "Dealbreaker Jake + Avoidant Dan",
+      "slugA": "jake",
+      "slugB": "dan",
+      "dealbreakerMultiplier": 0
+    },
+    {
+      "pair": "Dealbreaker Jake + Avoidant Eve",
+      "slugA": "jake",
+      "slugB": "eve",
+      "dealbreakerMultiplier": 0
+    },
+    {
+      "pair": "Dealbreaker Jake + Conservative Frank",
+      "slugA": "jake",
+      "slugB": "frank",
+      "dealbreakerMultiplier": 0
+    },
+    {
+      "pair": "Dealbreaker Jake + Progressive Grace",
+      "slugA": "jake",
+      "slugB": "grace",
+      "dealbreakerMultiplier": 0
+    },
+    {
+      "pair": "Dealbreaker Jake + Low Capacity Henry",
+      "slugA": "jake",
+      "slugB": "henry",
+      "dealbreakerMultiplier": 0
+    },
+    {
+      "pair": "Dealbreaker Jake + Finance Mismatch Isabel",
+      "slugA": "jake",
+      "slugB": "isabel",
+      "dealbreakerMultiplier": 0
+    },
+    {
+      "pair": "Dealbreaker Jake + Demanding-Withdrawing Kim",
+      "slugA": "jake",
+      "slugB": "kim",
+      "dealbreakerMultiplier": 0
+    },
+    {
+      "pair": "Dealbreaker Jake + Disorganised Morgan",
+      "slugA": "jake",
+      "slugB": "morgan",
+      "dealbreakerMultiplier": 0
+    },
+    {
+      "pair": "Demanding-Withdrawing Kim + Dealbreaker Jake",
+      "slugA": "kim",
+      "slugB": "jake",
+      "dealbreakerMultiplier": 0
+    },
+    {
+      "pair": "Disorganised Morgan + Dealbreaker Jake",
+      "slugA": "morgan",
+      "slugB": "jake",
+      "dealbreakerMultiplier": 0
+    }
+  ],
+  "pairs": [
+    {
+      "slugA": "alice",
+      "slugB": "alice",
+      "labelA": "Ideal Alice",
+      "labelB": "Ideal Alice",
+      "userIdA": "330354f3-70f1-4613-a398-7c72ae9043a1",
+      "userIdB": "330354f3-70f1-4613-a398-7c72ae9043a1",
+      "compatibilityScore": 100,
+      "finalScore": 1,
+      "dealbreakerMultiplier": 1,
+      "subscores": {
+        "attachment": 1,
+        "values": 0.9850000000000001,
+        "semantic": 0.7,
+        "finance": 0.9693141466323211,
+        "interviewProcess": 1,
+        "capacityA": 0.8400572000000001,
+        "capacityB": 0.8400572000000001,
+        "dealbreakerMultiplier": 1
+      },
+      "adjustments": {
+        "sexualComm": 0,
+        "conflictStyle": 0.012627,
+        "politics": 0,
+        "psychometricSoft": 0.02,
+        "total": 0.032627
+      },
+      "breakdown": {
+        "attachment": 0.4,
+        "values": 0.3940000000000001,
+        "semantic": 0.034999999999999996,
+        "finance": 0.04846570733161606,
+        "interviewProcess": 0.05,
+        "baseline": 0.05,
+        "capacityDiscount": 0,
+        "interviewDiscount": 1,
+        "adjustments": 0.032627
+      }
+    },
+    {
+      "slugA": "alice",
+      "slugB": "bob",
+      "labelA": "Ideal Alice",
+      "labelB": "Compatible Bob",
+      "userIdA": "330354f3-70f1-4613-a398-7c72ae9043a1",
+      "userIdB": "f79971c4-63cf-41c7-b4c7-46812f4cb135",
+      "compatibilityScore": 99,
+      "finalScore": 0.9945707176711626,
+      "dealbreakerMultiplier": 1,
+      "subscores": {
+        "attachment": 0.9866666666666667,
+        "values": 0.974465859182199,
+        "semantic": 0.7,
+        "finance": 0.9693141466323211,
+        "interviewProcess": 0.9,
+        "capacityA": 0.8400572000000001,
+        "capacityB": 0.7883005000000003,
+        "dealbreakerMultiplier": 1
+      },
+      "adjustments": {
+        "sexualComm": 0,
+        "conflictStyle": 0.011652000000000001,
+        "politics": 0,
+        "psychometricSoft": 0.02,
+        "total": 0.031652
+      },
+      "breakdown": {
+        "attachment": 0.3946666666666667,
+        "values": 0.3897863436728796,
+        "semantic": 0.034999999999999996,
+        "finance": 0.04846570733161606,
+        "interviewProcess": 0.045000000000000005,
+        "baseline": 0.05,
+        "capacityDiscount": 0,
+        "interviewDiscount": 1,
+        "adjustments": 0.031652
+      }
+    },
+    {
+      "slugA": "alice",
+      "slugB": "clara",
+      "labelA": "Ideal Alice",
+      "labelB": "Anxious Clara",
+      "userIdA": "330354f3-70f1-4613-a398-7c72ae9043a1",
+      "userIdB": "0b32753d-c16d-41ad-bc51-81e6c3ad7f97",
+      "compatibilityScore": 87,
+      "finalScore": 0.8717173739982829,
+      "dealbreakerMultiplier": 1,
+      "subscores": {
+        "attachment": 0.7782916666666667,
+        "values": 0.9850000000000001,
+        "semantic": 0.7,
+        "finance": 0.9693141466323211,
+        "interviewProcess": 0.8,
+        "capacityA": 0.8400572000000001,
+        "capacityB": 0.590513,
+        "dealbreakerMultiplier": 1
+      },
+      "adjustments": {
+        "sexualComm": 0,
+        "conflictStyle": 0.002785,
+        "politics": 0,
+        "psychometricSoft": 0,
+        "total": 0.002785
+      },
+      "breakdown": {
+        "attachment": 0.3113166666666667,
+        "values": 0.38415000000000005,
+        "semantic": 0.034999999999999996,
+        "finance": 0.04846570733161606,
+        "interviewProcess": 0.04000000000000001,
+        "baseline": 0.05,
+        "capacityDiscount": 0,
+        "interviewDiscount": 0.975,
+        "adjustments": 0.002785
+      }
+    },
+    {
+      "slugA": "alice",
+      "slugB": "dan",
+      "labelA": "Ideal Alice",
+      "labelB": "Avoidant Dan",
+      "userIdA": "330354f3-70f1-4613-a398-7c72ae9043a1",
+      "userIdB": "d61cf14a-c5f8-4b68-aa96-4578e442c9ee",
+      "compatibilityScore": 85,
+      "finalScore": 0.8473380406649496,
+      "dealbreakerMultiplier": 1,
+      "subscores": {
+        "attachment": 0.7592083333333334,
+        "values": 0.9850000000000001,
+        "semantic": 0.7,
+        "finance": 0.9693141466323211,
+        "interviewProcess": 0.7,
+        "capacityA": 0.8400572000000001,
+        "capacityB": 0.557265,
+        "dealbreakerMultiplier": 1
+      },
+      "adjustments": {
+        "sexualComm": 0,
+        "conflictStyle": 0.0008889999999999998,
+        "politics": 0,
+        "psychometricSoft": 0,
+        "total": 0.0008889999999999998
+      },
+      "breakdown": {
+        "attachment": 0.30368333333333336,
+        "values": 0.3743000000000001,
+        "semantic": 0.034999999999999996,
+        "finance": 0.04846570733161606,
+        "interviewProcess": 0.034999999999999996,
+        "baseline": 0.05,
+        "capacityDiscount": 0,
+        "interviewDiscount": 0.95,
+        "adjustments": 0.0008889999999999998
+      }
+    },
+    {
+      "slugA": "alice",
+      "slugB": "eve",
+      "labelA": "Ideal Alice",
+      "labelB": "Avoidant Eve",
+      "userIdA": "330354f3-70f1-4613-a398-7c72ae9043a1",
+      "userIdB": "7dce3fc3-d706-4b3f-a4a3-540e454cbda5",
+      "compatibilityScore": 85,
+      "finalScore": 0.8475380406649496,
+      "dealbreakerMultiplier": 1,
+      "subscores": {
+        "attachment": 0.7597083333333334,
+        "values": 0.9850000000000001,
+        "semantic": 0.7,
+        "finance": 0.9693141466323211,
+        "interviewProcess": 0.7,
+        "capacityA": 0.8400572000000001,
+        "capacityB": 0.557265,
+        "dealbreakerMultiplier": 1
+      },
+      "adjustments": {
+        "sexualComm": 0,
+        "conflictStyle": 0.0008889999999999998,
+        "politics": 0,
+        "psychometricSoft": 0,
+        "total": 0.0008889999999999998
+      },
+      "breakdown": {
+        "attachment": 0.3038833333333334,
+        "values": 0.3743000000000001,
+        "semantic": 0.034999999999999996,
+        "finance": 0.04846570733161606,
+        "interviewProcess": 0.034999999999999996,
+        "baseline": 0.05,
+        "capacityDiscount": 0,
+        "interviewDiscount": 0.95,
+        "adjustments": 0.0008889999999999998
+      }
+    },
+    {
+      "slugA": "alice",
+      "slugB": "frank",
+      "labelA": "Ideal Alice",
+      "labelB": "Conservative Frank",
+      "userIdA": "330354f3-70f1-4613-a398-7c72ae9043a1",
+      "userIdB": "dafef373-b753-4044-bfd3-1030dc97709d",
+      "compatibilityScore": 65,
+      "finalScore": 0.6533821976163714,
+      "dealbreakerMultiplier": 1,
+      "subscores": {
+        "attachment": 0.9380416666666667,
+        "values": 0.3077764708156118,
+        "semantic": 0.7,
+        "finance": 0.9693141466323211,
+        "interviewProcess": 0.8,
+        "capacityA": 0.8400572000000001,
+        "capacityB": 0.5849099999999999,
+        "dealbreakerMultiplier": 1
+      },
+      "adjustments": {
+        "sexualComm": 0,
+        "conflictStyle": 0.004667,
+        "politics": -0.02,
+        "psychometricSoft": 0,
+        "total": -0.015333
+      },
+      "breakdown": {
+        "attachment": 0.3752166666666667,
+        "values": 0.1200328236180886,
+        "semantic": 0.034999999999999996,
+        "finance": 0.04846570733161606,
+        "interviewProcess": 0.04000000000000001,
+        "baseline": 0.05,
+        "capacityDiscount": 0,
+        "interviewDiscount": 0.975,
+        "adjustments": -0.015333
+      }
+    },
+    {
+      "slugA": "alice",
+      "slugB": "grace",
+      "labelA": "Ideal Alice",
+      "labelB": "Progressive Grace",
+      "userIdA": "330354f3-70f1-4613-a398-7c72ae9043a1",
+      "userIdB": "45f62791-91da-4219-b20d-521bed73e780",
+      "compatibilityScore": 91,
+      "finalScore": 0.9095093081686596,
+      "dealbreakerMultiplier": 1,
+      "subscores": {
+        "attachment": 0.96525,
+        "values": 0.9366066688129319,
+        "semantic": 0.7,
+        "finance": 0.9693141466323211,
+        "interviewProcess": 0.8,
+        "capacityA": 0.8400572000000001,
+        "capacityB": 0.5849099999999999,
+        "dealbreakerMultiplier": 1
+      },
+      "adjustments": {
+        "sexualComm": 0,
+        "conflictStyle": 0.004667,
+        "politics": -0.02,
+        "psychometricSoft": 0,
+        "total": -0.015333
+      },
+      "breakdown": {
+        "attachment": 0.38610000000000005,
+        "values": 0.36527660083704344,
+        "semantic": 0.034999999999999996,
+        "finance": 0.04846570733161606,
+        "interviewProcess": 0.04000000000000001,
+        "baseline": 0.05,
+        "capacityDiscount": 0,
+        "interviewDiscount": 0.975,
+        "adjustments": -0.015333
+      }
+    },
+    {
+      "slugA": "alice",
+      "slugB": "henry",
+      "labelA": "Ideal Alice",
+      "labelB": "Low Capacity Henry",
+      "userIdA": "330354f3-70f1-4613-a398-7c72ae9043a1",
+      "userIdB": "071c75d4-1060-4001-be2a-c5f9560fe65e",
+      "compatibilityScore": 75,
+      "finalScore": 0.7503034732362059,
+      "dealbreakerMultiplier": 1,
+      "subscores": {
+        "attachment": 0.8297083333333335,
+        "values": 0.9850000000000001,
+        "semantic": 0.7,
+        "finance": 0.9693141466323211,
+        "interviewProcess": 0.31,
+        "capacityA": 0.8400572000000001,
+        "capacityB": 0.224285,
+        "dealbreakerMultiplier": 1
+      },
+      "adjustments": {
+        "sexualComm": 0,
+        "conflictStyle": -0.00021500000000000002,
+        "politics": 0,
+        "psychometricSoft": -0.03,
+        "total": -0.030215
+      },
+      "breakdown": {
+        "attachment": 0.3318833333333334,
+        "values": 0.3644500000000001,
+        "semantic": 0.034999999999999996,
+        "finance": 0.04846570733161606,
+        "interviewProcess": 0.0155,
+        "baseline": 0.05,
+        "capacityDiscount": 0.06478056742874357,
+        "interviewDiscount": 0.925,
+        "adjustments": -0.030215
+      }
+    },
+    {
+      "slugA": "alice",
+      "slugB": "isabel",
+      "labelA": "Ideal Alice",
+      "labelB": "Finance Mismatch Isabel",
+      "userIdA": "330354f3-70f1-4613-a398-7c72ae9043a1",
+      "userIdB": "5b0903dd-236b-4550-9e71-baa3fd27921e",
+      "compatibilityScore": 97,
+      "finalScore": 0.9700728223546163,
+      "dealbreakerMultiplier": 1,
+      "subscores": {
+        "attachment": 0.981625,
+        "values": 0.9850000000000001,
+        "semantic": 0.7,
+        "finance": 0.43541644709232274,
+        "interviewProcess": 0.9,
+        "capacityA": 0.8400572000000001,
+        "capacityB": 0.7883005000000003,
+        "dealbreakerMultiplier": 1
+      },
+      "adjustments": {
+        "sexualComm": 0,
+        "conflictStyle": 0.011652000000000001,
+        "politics": 0,
+        "psychometricSoft": 0.02,
+        "total": 0.031652
+      },
+      "breakdown": {
+        "attachment": 0.39265,
+        "values": 0.3940000000000001,
+        "semantic": 0.034999999999999996,
+        "finance": 0.021770822354616137,
+        "interviewProcess": 0.045000000000000005,
+        "baseline": 0.05,
+        "capacityDiscount": 0,
+        "interviewDiscount": 1,
+        "adjustments": 0.031652
+      }
+    },
+    {
+      "slugA": "alice",
+      "slugB": "jake",
+      "labelA": "Ideal Alice",
+      "labelB": "Dealbreaker Jake",
+      "userIdA": "330354f3-70f1-4613-a398-7c72ae9043a1",
+      "userIdB": "543fd725-2ff7-4ff3-b49b-f666cfc5caf4",
+      "compatibilityScore": 0,
+      "finalScore": 0,
+      "dealbreakerMultiplier": 0,
+      "subscores": {
+        "attachment": 0.9866666666666667,
+        "values": 0.974465859182199,
+        "semantic": 0.7,
+        "finance": 0.9693141466323211,
+        "interviewProcess": 0.9,
+        "capacityA": 0.8400572000000001,
+        "capacityB": 0.7883005000000003,
+        "dealbreakerMultiplier": 0
+      },
+      "adjustments": {
+        "sexualComm": 0,
+        "conflictStyle": 0.011652000000000001,
+        "politics": 0,
+        "psychometricSoft": 0.02,
+        "total": 0.031652
+      },
+      "breakdown": {
+        "attachment": 0.3946666666666667,
+        "values": 0.3897863436728796,
+        "semantic": 0.034999999999999996,
+        "finance": 0.04846570733161606,
+        "interviewProcess": 0.045000000000000005,
+        "baseline": 0.05,
+        "capacityDiscount": 0,
+        "interviewDiscount": 1,
+        "adjustments": 0.031652
+      }
+    },
+    {
+      "slugA": "alice",
+      "slugB": "kim",
+      "labelA": "Ideal Alice",
+      "labelB": "Demanding-Withdrawing Kim",
+      "userIdA": "330354f3-70f1-4613-a398-7c72ae9043a1",
+      "userIdB": "526add45-7bec-4a4d-ab36-c879a41528e4",
+      "compatibilityScore": 92,
+      "finalScore": 0.9228337073316163,
+      "dealbreakerMultiplier": 1,
+      "subscores": {
+        "attachment": 0.949125,
+        "values": 0.9850000000000001,
+        "semantic": 0.7,
+        "finance": 0.9693141466323211,
+        "interviewProcess": 0.7,
+        "capacityA": 0.8400572000000001,
+        "capacityB": 0.503168,
+        "dealbreakerMultiplier": 1
+      },
+      "adjustments": {
+        "sexualComm": 0,
+        "conflictStyle": 0.00041799999999999997,
+        "politics": 0,
+        "psychometricSoft": 0,
+        "total": 0.00041799999999999997
+      },
+      "breakdown": {
+        "attachment": 0.37965000000000004,
+        "values": 0.3743000000000001,
+        "semantic": 0.034999999999999996,
+        "finance": 0.04846570733161606,
+        "interviewProcess": 0.034999999999999996,
+        "baseline": 0.05,
+        "capacityDiscount": 0,
+        "interviewDiscount": 0.95,
+        "adjustments": 0.00041799999999999997
+      }
+    },
+    {
+      "slugA": "alice",
+      "slugB": "morgan",
+      "labelA": "Ideal Alice",
+      "labelB": "Disorganised Morgan",
+      "userIdA": "330354f3-70f1-4613-a398-7c72ae9043a1",
+      "userIdB": "346c6543-cf25-4c9f-af22-a11bd538ddb8",
+      "compatibilityScore": 74,
+      "finalScore": 0.7374614009678367,
+      "dealbreakerMultiplier": 1,
+      "subscores": {
+        "attachment": 0.5916250000000001,
+        "values": 0.9850000000000001,
+        "semantic": 0.7,
+        "finance": 0.9693141466323211,
+        "interviewProcess": 0.57,
+        "capacityA": 0.8400572000000001,
+        "capacityB": 0.3780366666666667,
+        "dealbreakerMultiplier": 1
+      },
+      "adjustments": {
+        "sexualComm": 0,
+        "conflictStyle": 0.0003349999999999999,
+        "politics": 0,
+        "psychometricSoft": 0,
+        "total": 0.0003349999999999999
+      },
+      "breakdown": {
+        "attachment": 0.23665000000000003,
+        "values": 0.3644500000000001,
+        "semantic": 0.034999999999999996,
+        "finance": 0.04846570733161606,
+        "interviewProcess": 0.028499999999999998,
+        "baseline": 0.05,
+        "capacityDiscount": 0.025939306363779512,
+        "interviewDiscount": 0.925,
+        "adjustments": 0.0003349999999999999
+      }
+    },
+    {
+      "slugA": "bob",
+      "slugB": "alice",
+      "labelA": "Compatible Bob",
+      "labelB": "Ideal Alice",
+      "userIdA": "f79971c4-63cf-41c7-b4c7-46812f4cb135",
+      "userIdB": "330354f3-70f1-4613-a398-7c72ae9043a1",
+      "compatibilityScore": 99,
+      "finalScore": 0.9945707176711626,
+      "dealbreakerMultiplier": 1,
+      "subscores": {
+        "attachment": 0.9866666666666667,
+        "values": 0.974465859182199,
+        "semantic": 0.7,
+        "finance": 0.9693141466323211,
+        "interviewProcess": 0.9,
+        "capacityA": 0.7883005000000003,
+        "capacityB": 0.8400572000000001,
+        "dealbreakerMultiplier": 1
+      },
+      "adjustments": {
+        "sexualComm": 0,
+        "conflictStyle": 0.011652000000000001,
+        "politics": 0,
+        "psychometricSoft": 0.02,
+        "total": 0.031652
+      },
+      "breakdown": {
+        "attachment": 0.3946666666666667,
+        "values": 0.3897863436728796,
+        "semantic": 0.034999999999999996,
+        "finance": 0.04846570733161606,
+        "interviewProcess": 0.045000000000000005,
+        "baseline": 0.05,
+        "capacityDiscount": 0,
+        "interviewDiscount": 1,
+        "adjustments": 0.031652
+      }
+    },
+    {
+      "slugA": "bob",
+      "slugB": "bob",
+      "labelA": "Compatible Bob",
+      "labelB": "Compatible Bob",
+      "userIdA": "f79971c4-63cf-41c7-b4c7-46812f4cb135",
+      "userIdB": "f79971c4-63cf-41c7-b4c7-46812f4cb135",
+      "compatibilityScore": 100,
+      "finalScore": 0.9962177073316162,
+      "dealbreakerMultiplier": 1,
+      "subscores": {
+        "attachment": 0.975,
+        "values": 0.9800000000000001,
+        "semantic": 0.7,
+        "finance": 0.9693141466323211,
+        "interviewProcess": 1,
+        "capacityA": 0.7883005000000003,
+        "capacityB": 0.7883005000000003,
+        "dealbreakerMultiplier": 1
+      },
+      "adjustments": {
+        "sexualComm": 0,
+        "conflictStyle": 0.010752,
+        "politics": 0,
+        "psychometricSoft": 0.02,
+        "total": 0.030752
+      },
+      "breakdown": {
+        "attachment": 0.39,
+        "values": 0.39200000000000007,
+        "semantic": 0.034999999999999996,
+        "finance": 0.04846570733161606,
+        "interviewProcess": 0.05,
+        "baseline": 0.05,
+        "capacityDiscount": 0,
+        "interviewDiscount": 1,
+        "adjustments": 0.030752
+      }
+    },
+    {
+      "slugA": "bob",
+      "slugB": "clara",
+      "labelA": "Compatible Bob",
+      "labelB": "Anxious Clara",
+      "userIdA": "f79971c4-63cf-41c7-b4c7-46812f4cb135",
+      "userIdB": "0b32753d-c16d-41ad-bc51-81e6c3ad7f97",
+      "compatibilityScore": 87,
+      "finalScore": 0.8655173924126738,
+      "dealbreakerMultiplier": 1,
+      "subscores": {
+        "attachment": 0.7611249999999998,
+        "values": 0.974465859182199,
+        "semantic": 0.7,
+        "finance": 0.9693141466323211,
+        "interviewProcess": 0.9,
+        "capacityA": 0.7883005000000003,
+        "capacityB": 0.590513,
+        "dealbreakerMultiplier": 1
+      },
+      "adjustments": {
+        "sexualComm": 0,
+        "conflictStyle": 0.0025599999999999998,
+        "politics": 0,
+        "psychometricSoft": 0,
+        "total": 0.0025599999999999998
+      },
+      "breakdown": {
+        "attachment": 0.30444999999999994,
+        "values": 0.3800416850810576,
+        "semantic": 0.034999999999999996,
+        "finance": 0.04846570733161606,
+        "interviewProcess": 0.045000000000000005,
+        "baseline": 0.05,
+        "capacityDiscount": 0,
+        "interviewDiscount": 0.975,
+        "adjustments": 0.0025599999999999998
+      }
+    },
+    {
+      "slugA": "bob",
+      "slugB": "dan",
+      "labelA": "Compatible Bob",
+      "labelB": "Avoidant Dan",
+      "userIdA": "f79971c4-63cf-41c7-b4c7-46812f4cb135",
+      "userIdB": "d61cf14a-c5f8-4b68-aa96-4578e442c9ee",
+      "compatibilityScore": 84,
+      "finalScore": 0.8426634004875184,
+      "dealbreakerMultiplier": 1,
+      "subscores": {
+        "attachment": 0.7452916666666666,
+        "values": 0.974465859182199,
+        "semantic": 0.7,
+        "finance": 0.9693141466323211,
+        "interviewProcess": 0.8,
+        "capacityA": 0.7883005000000003,
+        "capacityB": 0.557265,
+        "dealbreakerMultiplier": 1
+      },
+      "adjustments": {
+        "sexualComm": 0,
+        "conflictStyle": 0.000784,
+        "politics": 0,
+        "psychometricSoft": 0,
+        "total": 0.000784
+      },
+      "breakdown": {
+        "attachment": 0.29811666666666664,
+        "values": 0.3702970264892356,
+        "semantic": 0.034999999999999996,
+        "finance": 0.04846570733161606,
+        "interviewProcess": 0.04000000000000001,
+        "baseline": 0.05,
+        "capacityDiscount": 0,
+        "interviewDiscount": 0.95,
+        "adjustments": 0.000784
+      }
+    },
+    {
+      "slugA": "bob",
+      "slugB": "eve",
+      "labelA": "Compatible Bob",
+      "labelB": "Avoidant Eve",
+      "userIdA": "f79971c4-63cf-41c7-b4c7-46812f4cb135",
+      "userIdB": "7dce3fc3-d706-4b3f-a4a3-540e454cbda5",
+      "compatibilityScore": 84,
+      "finalScore": 0.8437634004875184,
+      "dealbreakerMultiplier": 1,
+      "subscores": {
+        "attachment": 0.7480416666666666,
+        "values": 0.974465859182199,
+        "semantic": 0.7,
+        "finance": 0.9693141466323211,
+        "interviewProcess": 0.8,
+        "capacityA": 0.7883005000000003,
+        "capacityB": 0.557265,
+        "dealbreakerMultiplier": 1
+      },
+      "adjustments": {
+        "sexualComm": 0,
+        "conflictStyle": 0.000784,
+        "politics": 0,
+        "psychometricSoft": 0,
+        "total": 0.000784
+      },
+      "breakdown": {
+        "attachment": 0.29921666666666663,
+        "values": 0.3702970264892356,
+        "semantic": 0.034999999999999996,
+        "finance": 0.04846570733161606,
+        "interviewProcess": 0.04000000000000001,
+        "baseline": 0.05,
+        "capacityDiscount": 0,
+        "interviewDiscount": 0.95,
+        "adjustments": 0.000784
+      }
+    },
+    {
+      "slugA": "bob",
+      "slugB": "frank",
+      "labelA": "Compatible Bob",
+      "labelB": "Conservative Frank",
+      "userIdA": "f79971c4-63cf-41c7-b4c7-46812f4cb135",
+      "userIdB": "dafef373-b753-4044-bfd3-1030dc97709d",
+      "compatibilityScore": 66,
+      "finalScore": 0.6557901395117149,
+      "dealbreakerMultiplier": 1,
+      "subscores": {
+        "attachment": 0.926375,
+        "values": 0.3140575184105095,
+        "semantic": 0.7,
+        "finance": 0.9693141466323211,
+        "interviewProcess": 0.9,
+        "capacityA": 0.7883005000000003,
+        "capacityB": 0.5849099999999999,
+        "dealbreakerMultiplier": 1
+      },
+      "adjustments": {
+        "sexualComm": 0,
+        "conflictStyle": 0.004292,
+        "politics": -0.02,
+        "psychometricSoft": 0,
+        "total": -0.015708
+      },
+      "breakdown": {
+        "attachment": 0.37055,
+        "values": 0.12248243218009872,
+        "semantic": 0.034999999999999996,
+        "finance": 0.04846570733161606,
+        "interviewProcess": 0.045000000000000005,
+        "baseline": 0.05,
+        "capacityDiscount": 0,
+        "interviewDiscount": 0.975,
+        "adjustments": -0.015708
+      }
+    },
+    {
+      "slugA": "bob",
+      "slugB": "grace",
+      "labelA": "Compatible Bob",
+      "labelB": "Progressive Grace",
+      "userIdA": "f79971c4-63cf-41c7-b4c7-46812f4cb135",
+      "userIdB": "45f62791-91da-4219-b20d-521bed73e780",
+      "compatibilityScore": 91,
+      "finalScore": 0.9054041341679673,
+      "dealbreakerMultiplier": 1,
+      "subscores": {
+        "attachment": 0.9535833333333333,
+        "values": 0.9261874192385071,
+        "semantic": 0.7,
+        "finance": 0.9693141466323211,
+        "interviewProcess": 0.9,
+        "capacityA": 0.7883005000000003,
+        "capacityB": 0.5849099999999999,
+        "dealbreakerMultiplier": 1
+      },
+      "adjustments": {
+        "sexualComm": 0,
+        "conflictStyle": 0.004292,
+        "politics": -0.02,
+        "psychometricSoft": 0,
+        "total": -0.015708
+      },
+      "breakdown": {
+        "attachment": 0.38143333333333335,
+        "values": 0.36121309350301783,
+        "semantic": 0.034999999999999996,
+        "finance": 0.04846570733161606,
+        "interviewProcess": 0.045000000000000005,
+        "baseline": 0.05,
+        "capacityDiscount": 0,
+        "interviewDiscount": 0.975,
+        "adjustments": -0.015708
+      }
+    },
+    {
+      "slugA": "bob",
+      "slugB": "henry",
+      "labelA": "Compatible Bob",
+      "labelB": "Low Capacity Henry",
+      "userIdA": "f79971c4-63cf-41c7-b4c7-46812f4cb135",
+      "userIdB": "071c75d4-1060-4001-be2a-c5f9560fe65e",
+      "compatibilityScore": 74,
+      "finalScore": 0.7426189371161861,
+      "dealbreakerMultiplier": 1,
+      "subscores": {
+        "attachment": 0.8180416666666666,
+        "values": 0.974465859182199,
+        "semantic": 0.7,
+        "finance": 0.9693141466323211,
+        "interviewProcess": 0.41,
+        "capacityA": 0.7883005000000003,
+        "capacityB": 0.224285,
+        "dealbreakerMultiplier": 1
+      },
+      "adjustments": {
+        "sexualComm": 0,
+        "conflictStyle": -0.00026000000000000014,
+        "politics": 0,
+        "psychometricSoft": -0.03,
+        "total": -0.03026
+      },
+      "breakdown": {
+        "attachment": 0.32721666666666666,
+        "values": 0.3605523678974137,
+        "semantic": 0.034999999999999996,
+        "finance": 0.04846570733161606,
+        "interviewProcess": 0.0205,
+        "baseline": 0.05,
+        "capacityDiscount": 0.06885580477951034,
+        "interviewDiscount": 0.925,
+        "adjustments": -0.03026
+      }
+    },
+    {
+      "slugA": "bob",
+      "slugB": "isabel",
+      "labelA": "Compatible Bob",
+      "labelB": "Finance Mismatch Isabel",
+      "userIdA": "f79971c4-63cf-41c7-b4c7-46812f4cb135",
+      "userIdB": "5b0903dd-236b-4550-9e71-baa3fd27921e",
+      "compatibilityScore": 96,
+      "finalScore": 0.9641924993608292,
+      "dealbreakerMultiplier": 1,
+      "subscores": {
+        "attachment": 0.9672083333333333,
+        "values": 0.974465859182199,
+        "semantic": 0.7,
+        "finance": 0.43541644709232274,
+        "interviewProcess": 1,
+        "capacityA": 0.7883005000000003,
+        "capacityB": 0.7883005000000003,
+        "dealbreakerMultiplier": 1
+      },
+      "adjustments": {
+        "sexualComm": 0,
+        "conflictStyle": 0.010752,
+        "politics": 0,
+        "psychometricSoft": 0.02,
+        "total": 0.030752
+      },
+      "breakdown": {
+        "attachment": 0.38688333333333336,
+        "values": 0.3897863436728796,
+        "semantic": 0.034999999999999996,
+        "finance": 0.021770822354616137,
+        "interviewProcess": 0.05,
+        "baseline": 0.05,
+        "capacityDiscount": 0,
+        "interviewDiscount": 1,
+        "adjustments": 0.030752
+      }
+    },
+    {
+      "slugA": "bob",
+      "slugB": "jake",
+      "labelA": "Compatible Bob",
+      "labelB": "Dealbreaker Jake",
+      "userIdA": "f79971c4-63cf-41c7-b4c7-46812f4cb135",
+      "userIdB": "543fd725-2ff7-4ff3-b49b-f666cfc5caf4",
+      "compatibilityScore": 0,
+      "finalScore": 0,
+      "dealbreakerMultiplier": 0,
+      "subscores": {
+        "attachment": 0.975,
+        "values": 0.9800000000000001,
+        "semantic": 0.7,
+        "finance": 0.9693141466323211,
+        "interviewProcess": 1,
+        "capacityA": 0.7883005000000003,
+        "capacityB": 0.7883005000000003,
+        "dealbreakerMultiplier": 0
+      },
+      "adjustments": {
+        "sexualComm": 0,
+        "conflictStyle": 0.010752,
+        "politics": 0,
+        "psychometricSoft": 0.02,
+        "total": 0.030752
+      },
+      "breakdown": {
+        "attachment": 0.39,
+        "values": 0.39200000000000007,
+        "semantic": 0.034999999999999996,
+        "finance": 0.04846570733161606,
+        "interviewProcess": 0.05,
+        "baseline": 0.05,
+        "capacityDiscount": 0,
+        "interviewDiscount": 1,
+        "adjustments": 0.030752
+      }
+    },
+    {
+      "slugA": "bob",
+      "slugB": "kim",
+      "labelA": "Compatible Bob",
+      "labelB": "Demanding-Withdrawing Kim",
+      "userIdA": "f79971c4-63cf-41c7-b4c7-46812f4cb135",
+      "userIdB": "526add45-7bec-4a4d-ab36-c879a41528e4",
+      "compatibilityScore": 91,
+      "finalScore": 0.9130139590207785,
+      "dealbreakerMultiplier": 1,
+      "subscores": {
+        "attachment": 0.9374583333333333,
+        "values": 0.974465859182199,
+        "semantic": 0.7,
+        "finance": 0.9693141466323211,
+        "interviewProcess": 0.8,
+        "capacityA": 0.7883005000000003,
+        "capacityB": 0.503168,
+        "dealbreakerMultiplier": 1
+      },
+      "adjustments": {
+        "sexualComm": 0,
+        "conflictStyle": 0.00032799999999999973,
+        "politics": 0,
+        "psychometricSoft": 0,
+        "total": 0.00032799999999999973
+      },
+      "breakdown": {
+        "attachment": 0.37498333333333334,
+        "values": 0.3702970264892356,
+        "semantic": 0.034999999999999996,
+        "finance": 0.04846570733161606,
+        "interviewProcess": 0.04000000000000001,
+        "baseline": 0.05,
+        "capacityDiscount": 0.006060108133406594,
+        "interviewDiscount": 0.95,
+        "adjustments": 0.00032799999999999973
+      }
+    },
+    {
+      "slugA": "bob",
+      "slugB": "morgan",
+      "labelA": "Compatible Bob",
+      "labelB": "Disorganised Morgan",
+      "userIdA": "f79971c4-63cf-41c7-b4c7-46812f4cb135",
+      "userIdB": "346c6543-cf25-4c9f-af22-a11bd538ddb8",
+      "compatibilityScore": 73,
+      "finalScore": 0.7285313215551044,
+      "dealbreakerMultiplier": 1,
+      "subscores": {
+        "attachment": 0.5799583333333332,
+        "values": 0.974465859182199,
+        "semantic": 0.7,
+        "finance": 0.9693141466323211,
+        "interviewProcess": 0.6699999999999999,
+        "capacityA": 0.7883005000000003,
+        "capacityB": 0.3780366666666667,
+        "dealbreakerMultiplier": 1
+      },
+      "adjustments": {
+        "sexualComm": 0,
+        "conflictStyle": 0.0002599999999999999,
+        "politics": 0,
+        "psychometricSoft": 0,
+        "total": 0.0002599999999999999
+      },
+      "breakdown": {
+        "attachment": 0.23198333333333332,
+        "values": 0.3605523678974137,
+        "semantic": 0.034999999999999996,
+        "finance": 0.04846570733161606,
+        "interviewProcess": 0.033499999999999995,
+        "baseline": 0.05,
+        "capacityDiscount": 0.031230087007258853,
+        "interviewDiscount": 0.925,
+        "adjustments": 0.0002599999999999999
+      }
+    },
+    {
+      "slugA": "clara",
+      "slugB": "alice",
+      "labelA": "Anxious Clara",
+      "labelB": "Ideal Alice",
+      "userIdA": "0b32753d-c16d-41ad-bc51-81e6c3ad7f97",
+      "userIdB": "330354f3-70f1-4613-a398-7c72ae9043a1",
+      "compatibilityScore": 87,
+      "finalScore": 0.8717173739982829,
+      "dealbreakerMultiplier": 1,
+      "subscores": {
+        "attachment": 0.7782916666666667,
+        "values": 0.9850000000000001,
+        "semantic": 0.7,
+        "finance": 0.9693141466323211,
+        "interviewProcess": 0.8,
+        "capacityA": 0.590513,
+        "capacityB": 0.8400572000000001,
+        "dealbreakerMultiplier": 1
+      },
+      "adjustments": {
+        "sexualComm": 0,
+        "conflictStyle": 0.002785,
+        "politics": 0,
+        "psychometricSoft": 0,
+        "total": 0.002785
+      },
+      "breakdown": {
+        "attachment": 0.3113166666666667,
+        "values": 0.38415000000000005,
+        "semantic": 0.034999999999999996,
+        "finance": 0.04846570733161606,
+        "interviewProcess": 0.04000000000000001,
+        "baseline": 0.05,
+        "capacityDiscount": 0,
+        "interviewDiscount": 0.975,
+        "adjustments": 0.002785
+      }
+    },
+    {
+      "slugA": "clara",
+      "slugB": "bob",
+      "labelA": "Anxious Clara",
+      "labelB": "Compatible Bob",
+      "userIdA": "0b32753d-c16d-41ad-bc51-81e6c3ad7f97",
+      "userIdB": "f79971c4-63cf-41c7-b4c7-46812f4cb135",
+      "compatibilityScore": 87,
+      "finalScore": 0.8655173924126738,
+      "dealbreakerMultiplier": 1,
+      "subscores": {
+        "attachment": 0.761125,
+        "values": 0.974465859182199,
+        "semantic": 0.7,
+        "finance": 0.9693141466323211,
+        "interviewProcess": 0.9,
+        "capacityA": 0.590513,
+        "capacityB": 0.7883005000000003,
+        "dealbreakerMultiplier": 1
+      },
+      "adjustments": {
+        "sexualComm": 0,
+        "conflictStyle": 0.0025599999999999998,
+        "politics": 0,
+        "psychometricSoft": 0,
+        "total": 0.0025599999999999998
+      },
+      "breakdown": {
+        "attachment": 0.30445000000000005,
+        "values": 0.3800416850810576,
+        "semantic": 0.034999999999999996,
+        "finance": 0.04846570733161606,
+        "interviewProcess": 0.045000000000000005,
+        "baseline": 0.05,
+        "capacityDiscount": 0,
+        "interviewDiscount": 0.975,
+        "adjustments": 0.0025599999999999998
+      }
+    },
+    {
+      "slugA": "clara",
+      "slugB": "clara",
+      "labelA": "Anxious Clara",
+      "labelB": "Anxious Clara",
+      "userIdA": "0b32753d-c16d-41ad-bc51-81e6c3ad7f97",
+      "userIdB": "0b32753d-c16d-41ad-bc51-81e6c3ad7f97",
+      "compatibilityScore": 80,
+      "finalScore": 0.8001946073316163,
+      "dealbreakerMultiplier": 1,
+      "subscores": {
+        "attachment": 0.6499999999999999,
+        "values": 0.9850000000000001,
+        "semantic": 0.7,
+        "finance": 0.9693141466323211,
+        "interviewProcess": 1,
+        "capacityA": 0.590513,
+        "capacityB": 0.590513,
+        "dealbreakerMultiplier": 1
+      },
+      "adjustments": {
+        "sexualComm": 0,
+        "conflictStyle": 0.0002749999999999999,
+        "politics": 0,
+        "psychometricSoft": 0,
+        "total": 0.0002749999999999999
+      },
+      "breakdown": {
+        "attachment": 0.25999999999999995,
+        "values": 0.3743000000000001,
+        "semantic": 0.034999999999999996,
+        "finance": 0.04846570733161606,
+        "interviewProcess": 0.05,
+        "baseline": 0.05,
+        "capacityDiscount": 0.01784610000000002,
+        "interviewDiscount": 0.95,
+        "adjustments": 0.0002749999999999999
+      }
+    },
+    {
+      "slugA": "clara",
+      "slugB": "dan",
+      "labelA": "Anxious Clara",
+      "labelB": "Avoidant Dan",
+      "userIdA": "0b32753d-c16d-41ad-bc51-81e6c3ad7f97",
+      "userIdB": "d61cf14a-c5f8-4b68-aa96-4578e442c9ee",
+      "compatibilityScore": 68,
+      "finalScore": 0.6754496038221681,
+      "dealbreakerMultiplier": 1,
+      "subscores": {
+        "attachment": 0.3908611111111111,
+        "values": 0.9850000000000001,
+        "semantic": 0.7,
+        "finance": 0.9693141466323211,
+        "interviewProcess": 0.9,
+        "capacityA": 0.590513,
+        "capacityB": 0.557265,
+        "dealbreakerMultiplier": 1
+      },
+      "adjustments": {
+        "sexualComm": 0,
+        "conflictStyle": -0.000905,
+        "politics": 0,
+        "psychometricSoft": 0,
+        "total": -0.000905
+      },
+      "breakdown": {
+        "attachment": 0.15634444444444445,
+        "values": 0.3644500000000001,
+        "semantic": 0.034999999999999996,
+        "finance": 0.04846570733161606,
+        "interviewProcess": 0.045000000000000005,
+        "baseline": 0.05,
+        "capacityDiscount": 0.0229055479538925,
+        "interviewDiscount": 0.925,
+        "adjustments": -0.000905
+      }
+    },
+    {
+      "slugA": "clara",
+      "slugB": "eve",
+      "labelA": "Anxious Clara",
+      "labelB": "Avoidant Eve",
+      "userIdA": "0b32753d-c16d-41ad-bc51-81e6c3ad7f97",
+      "userIdB": "7dce3fc3-d706-4b3f-a4a3-540e454cbda5",
+      "compatibilityScore": 68,
+      "finalScore": 0.6823384927110571,
+      "dealbreakerMultiplier": 1,
+      "subscores": {
+        "attachment": 0.40808333333333335,
+        "values": 0.9850000000000001,
+        "semantic": 0.7,
+        "finance": 0.9693141466323211,
+        "interviewProcess": 0.9,
+        "capacityA": 0.590513,
+        "capacityB": 0.557265,
+        "dealbreakerMultiplier": 1
+      },
+      "adjustments": {
+        "sexualComm": 0,
+        "conflictStyle": -0.000905,
+        "politics": 0,
+        "psychometricSoft": 0,
+        "total": -0.000905
+      },
+      "breakdown": {
+        "attachment": 0.16323333333333334,
+        "values": 0.3644500000000001,
+        "semantic": 0.034999999999999996,
+        "finance": 0.04846570733161606,
+        "interviewProcess": 0.045000000000000005,
+        "baseline": 0.05,
+        "capacityDiscount": 0.0229055479538925,
+        "interviewDiscount": 0.925,
+        "adjustments": -0.000905
+      }
+    },
+    {
+      "slugA": "clara",
+      "slugB": "frank",
+      "labelA": "Anxious Clara",
+      "labelB": "Conservative Frank",
+      "userIdA": "0b32753d-c16d-41ad-bc51-81e6c3ad7f97",
+      "userIdB": "dafef373-b753-4044-bfd3-1030dc97709d",
+      "compatibilityScore": 55,
+      "finalScore": 0.551717213103912,
+      "dealbreakerMultiplier": 1,
+      "subscores": {
+        "attachment": 0.72375,
+        "values": 0.3077764708156118,
+        "semantic": 0.7,
+        "finance": 0.9693141466323211,
+        "interviewProcess": 1,
+        "capacityA": 0.590513,
+        "capacityB": 0.5849099999999999,
+        "dealbreakerMultiplier": 1
+      },
+      "adjustments": {
+        "sexualComm": 0,
+        "conflictStyle": 0.00048499999999999986,
+        "politics": -0.02,
+        "psychometricSoft": 0,
+        "total": -0.019515
+      },
+      "breakdown": {
+        "attachment": 0.28950000000000004,
+        "values": 0.11695505890993249,
+        "semantic": 0.034999999999999996,
+        "finance": 0.04846570733161606,
+        "interviewProcess": 0.05,
+        "baseline": 0.05,
+        "capacityDiscount": 0.018688553137636586,
+        "interviewDiscount": 0.95,
+        "adjustments": -0.019515
+      }
+    },
+    {
+      "slugA": "clara",
+      "slugB": "grace",
+      "labelA": "Anxious Clara",
+      "labelB": "Progressive Grace",
+      "userIdA": "0b32753d-c16d-41ad-bc51-81e6c3ad7f97",
+      "userIdB": "45f62791-91da-4219-b20d-521bed73e780",
+      "compatibilityScore": 80,
+      "finalScore": 0.799756021676227,
+      "dealbreakerMultiplier": 1,
+      "subscores": {
+        "attachment": 0.7464583333333332,
+        "values": 0.9366066688129319,
+        "semantic": 0.7,
+        "finance": 0.9693141466323211,
+        "interviewProcess": 1,
+        "capacityA": 0.590513,
+        "capacityB": 0.5849099999999999,
+        "dealbreakerMultiplier": 1
+      },
+      "adjustments": {
+        "sexualComm": 0,
+        "conflictStyle": 0.00048499999999999986,
+        "politics": -0.02,
+        "psychometricSoft": 0,
+        "total": -0.019515
+      },
+      "breakdown": {
+        "attachment": 0.2985833333333333,
+        "values": 0.3559105341489141,
+        "semantic": 0.034999999999999996,
+        "finance": 0.04846570733161606,
+        "interviewProcess": 0.05,
+        "baseline": 0.05,
+        "capacityDiscount": 0.018688553137636586,
+        "interviewDiscount": 0.95,
+        "adjustments": -0.019515
+      }
+    },
+    {
+      "slugA": "clara",
+      "slugB": "henry",
+      "labelA": "Anxious Clara",
+      "labelB": "Low Capacity Henry",
+      "userIdA": "0b32753d-c16d-41ad-bc51-81e6c3ad7f97",
+      "userIdB": "071c75d4-1060-4001-be2a-c5f9560fe65e",
+      "compatibilityScore": 68,
+      "finalScore": 0.6805456169702688,
+      "dealbreakerMultiplier": 1,
+      "subscores": {
+        "attachment": 0.6379166666666667,
+        "values": 0.9850000000000001,
+        "semantic": 0.7,
+        "finance": 0.9693141466323211,
+        "interviewProcess": 0.51,
+        "capacityA": 0.590513,
+        "capacityB": 0.224285,
+        "dealbreakerMultiplier": 1
+      },
+      "adjustments": {
+        "sexualComm": 0,
+        "conflictStyle": -0.002365,
+        "politics": 0,
+        "psychometricSoft": 0,
+        "total": -0.002365
+      },
+      "breakdown": {
+        "attachment": 0.2551666666666667,
+        "values": 0.3546,
+        "semantic": 0.034999999999999996,
+        "finance": 0.04846570733161606,
+        "interviewProcess": 0.025500000000000002,
+        "baseline": 0.05,
+        "capacityDiscount": 0.08582175702801405,
+        "interviewDiscount": 0.8999999999999999,
+        "adjustments": -0.002365
+      }
+    },
+    {
+      "slugA": "clara",
+      "slugB": "isabel",
+      "labelA": "Anxious Clara",
+      "labelB": "Finance Mismatch Isabel",
+      "userIdA": "0b32753d-c16d-41ad-bc51-81e6c3ad7f97",
+      "userIdB": "5b0903dd-236b-4550-9e71-baa3fd27921e",
+      "compatibilityScore": 84,
+      "finalScore": 0.8427141556879496,
+      "dealbreakerMultiplier": 1,
+      "subscores": {
+        "attachment": 0.7605833333333334,
+        "values": 0.9850000000000001,
+        "semantic": 0.7,
+        "finance": 0.43541644709232274,
+        "interviewProcess": 0.9,
+        "capacityA": 0.590513,
+        "capacityB": 0.7883005000000003,
+        "dealbreakerMultiplier": 1
+      },
+      "adjustments": {
+        "sexualComm": 0,
+        "conflictStyle": 0.0025599999999999998,
+        "politics": 0,
+        "psychometricSoft": 0,
+        "total": 0.0025599999999999998
+      },
+      "breakdown": {
+        "attachment": 0.30423333333333336,
+        "values": 0.38415000000000005,
+        "semantic": 0.034999999999999996,
+        "finance": 0.021770822354616137,
+        "interviewProcess": 0.045000000000000005,
+        "baseline": 0.05,
+        "capacityDiscount": 0,
+        "interviewDiscount": 0.975,
+        "adjustments": 0.0025599999999999998
+      }
+    },
+    {
+      "slugA": "clara",
+      "slugB": "jake",
+      "labelA": "Anxious Clara",
+      "labelB": "Dealbreaker Jake",
+      "userIdA": "0b32753d-c16d-41ad-bc51-81e6c3ad7f97",
+      "userIdB": "543fd725-2ff7-4ff3-b49b-f666cfc5caf4",
+      "compatibilityScore": 0,
+      "finalScore": 0,
+      "dealbreakerMultiplier": 0,
+      "subscores": {
+        "attachment": 0.761125,
+        "values": 0.974465859182199,
+        "semantic": 0.7,
+        "finance": 0.9693141466323211,
+        "interviewProcess": 0.9,
+        "capacityA": 0.590513,
+        "capacityB": 0.7883005000000003,
+        "dealbreakerMultiplier": 0
+      },
+      "adjustments": {
+        "sexualComm": 0,
+        "conflictStyle": 0.0025599999999999998,
+        "politics": 0,
+        "psychometricSoft": 0,
+        "total": 0.0025599999999999998
+      },
+      "breakdown": {
+        "attachment": 0.30445000000000005,
+        "values": 0.3800416850810576,
+        "semantic": 0.034999999999999996,
+        "finance": 0.04846570733161606,
+        "interviewProcess": 0.045000000000000005,
+        "baseline": 0.05,
+        "capacityDiscount": 0,
+        "interviewDiscount": 0.975,
+        "adjustments": 0.0025599999999999998
+      }
+    },
+    {
+      "slugA": "clara",
+      "slugB": "kim",
+      "labelA": "Anxious Clara",
+      "labelB": "Demanding-Withdrawing Kim",
+      "userIdA": "0b32753d-c16d-41ad-bc51-81e6c3ad7f97",
+      "userIdB": "526add45-7bec-4a4d-ab36-c879a41528e4",
+      "compatibilityScore": 80,
+      "finalScore": 0.8031671791199567,
+      "dealbreakerMultiplier": 1,
+      "subscores": {
+        "attachment": 0.7348333333333333,
+        "values": 0.9850000000000001,
+        "semantic": 0.7,
+        "finance": 0.9693141466323211,
+        "interviewProcess": 0.9,
+        "capacityA": 0.590513,
+        "capacityB": 0.503168,
+        "dealbreakerMultiplier": 1
+      },
+      "adjustments": {
+        "sexualComm": 0,
+        "conflictStyle": -0.00221,
+        "politics": 0,
+        "psychometricSoft": 0,
+        "total": -0.00221
+      },
+      "breakdown": {
+        "attachment": 0.2939333333333333,
+        "values": 0.3644500000000001,
+        "semantic": 0.034999999999999996,
+        "finance": 0.04846570733161606,
+        "interviewProcess": 0.045000000000000005,
+        "baseline": 0.05,
+        "capacityDiscount": 0.03147186154499282,
+        "interviewDiscount": 0.925,
+        "adjustments": -0.00221
+      }
+    },
+    {
+      "slugA": "clara",
+      "slugB": "morgan",
+      "labelA": "Anxious Clara",
+      "labelB": "Disorganised Morgan",
+      "userIdA": "0b32753d-c16d-41ad-bc51-81e6c3ad7f97",
+      "userIdB": "346c6543-cf25-4c9f-af22-a11bd538ddb8",
+      "compatibilityScore": 65,
+      "finalScore": 0.6522674742091529,
+      "dealbreakerMultiplier": 1,
+      "subscores": {
+        "attachment": 0.4515833333333333,
+        "values": 0.9850000000000001,
+        "semantic": 0.7,
+        "finance": 0.9693141466323211,
+        "interviewProcess": 0.77,
+        "capacityA": 0.590513,
+        "capacityB": 0.3780366666666667,
+        "dealbreakerMultiplier": 1
+      },
+      "adjustments": {
+        "sexualComm": 0,
+        "conflictStyle": -0.001675,
+        "politics": 0,
+        "psychometricSoft": 0,
+        "total": -0.001675
+      },
+      "breakdown": {
+        "attachment": 0.1806333333333333,
+        "values": 0.3546,
+        "semantic": 0.034999999999999996,
+        "finance": 0.04846570733161606,
+        "interviewProcess": 0.038500000000000006,
+        "baseline": 0.05,
+        "capacityDiscount": 0.05325656645579662,
+        "interviewDiscount": 0.8999999999999999,
+        "adjustments": -0.001675
+      }
+    },
+    {
+      "slugA": "dan",
+      "slugB": "alice",
+      "labelA": "Avoidant Dan",
+      "labelB": "Ideal Alice",
+      "userIdA": "d61cf14a-c5f8-4b68-aa96-4578e442c9ee",
+      "userIdB": "330354f3-70f1-4613-a398-7c72ae9043a1",
+      "compatibilityScore": 85,
+      "finalScore": 0.8473380406649496,
+      "dealbreakerMultiplier": 1,
+      "subscores": {
+        "attachment": 0.7592083333333334,
+        "values": 0.9850000000000001,
+        "semantic": 0.7,
+        "finance": 0.9693141466323211,
+        "interviewProcess": 0.7,
+        "capacityA": 0.557265,
+        "capacityB": 0.8400572000000001,
+        "dealbreakerMultiplier": 1
+      },
+      "adjustments": {
+        "sexualComm": 0,
+        "conflictStyle": 0.0008889999999999998,
+        "politics": 0,
+        "psychometricSoft": 0,
+        "total": 0.0008889999999999998
+      },
+      "breakdown": {
+        "attachment": 0.30368333333333336,
+        "values": 0.3743000000000001,
+        "semantic": 0.034999999999999996,
+        "finance": 0.04846570733161606,
+        "interviewProcess": 0.034999999999999996,
+        "baseline": 0.05,
+        "capacityDiscount": 0,
+        "interviewDiscount": 0.95,
+        "adjustments": 0.0008889999999999998
+      }
+    },
+    {
+      "slugA": "dan",
+      "slugB": "bob",
+      "labelA": "Avoidant Dan",
+      "labelB": "Compatible Bob",
+      "userIdA": "d61cf14a-c5f8-4b68-aa96-4578e442c9ee",
+      "userIdB": "f79971c4-63cf-41c7-b4c7-46812f4cb135",
+      "compatibilityScore": 84,
+      "finalScore": 0.8426634004875185,
+      "dealbreakerMultiplier": 1,
+      "subscores": {
+        "attachment": 0.7452916666666668,
+        "values": 0.974465859182199,
+        "semantic": 0.7,
+        "finance": 0.9693141466323211,
+        "interviewProcess": 0.8,
+        "capacityA": 0.557265,
+        "capacityB": 0.7883005000000003,
+        "dealbreakerMultiplier": 1
+      },
+      "adjustments": {
+        "sexualComm": 0,
+        "conflictStyle": 0.000784,
+        "politics": 0,
+        "psychometricSoft": 0,
+        "total": 0.000784
+      },
+      "breakdown": {
+        "attachment": 0.29811666666666675,
+        "values": 0.3702970264892356,
+        "semantic": 0.034999999999999996,
+        "finance": 0.04846570733161606,
+        "interviewProcess": 0.04000000000000001,
+        "baseline": 0.05,
+        "capacityDiscount": 0,
+        "interviewDiscount": 0.95,
+        "adjustments": 0.000784
+      }
+    },
+    {
+      "slugA": "dan",
+      "slugB": "clara",
+      "labelA": "Avoidant Dan",
+      "labelB": "Anxious Clara",
+      "userIdA": "d61cf14a-c5f8-4b68-aa96-4578e442c9ee",
+      "userIdB": "0b32753d-c16d-41ad-bc51-81e6c3ad7f97",
+      "compatibilityScore": 68,
+      "finalScore": 0.6754496038221681,
+      "dealbreakerMultiplier": 1,
+      "subscores": {
+        "attachment": 0.3908611111111111,
+        "values": 0.9850000000000001,
+        "semantic": 0.7,
+        "finance": 0.9693141466323211,
+        "interviewProcess": 0.9,
+        "capacityA": 0.557265,
+        "capacityB": 0.590513,
+        "dealbreakerMultiplier": 1
+      },
+      "adjustments": {
+        "sexualComm": 0,
+        "conflictStyle": -0.000905,
+        "politics": 0,
+        "psychometricSoft": 0,
+        "total": -0.000905
+      },
+      "breakdown": {
+        "attachment": 0.15634444444444445,
+        "values": 0.3644500000000001,
+        "semantic": 0.034999999999999996,
+        "finance": 0.04846570733161606,
+        "interviewProcess": 0.045000000000000005,
+        "baseline": 0.05,
+        "capacityDiscount": 0.0229055479538925,
+        "interviewDiscount": 0.925,
+        "adjustments": -0.000905
+      }
+    },
+    {
+      "slugA": "dan",
+      "slugB": "dan",
+      "labelA": "Avoidant Dan",
+      "labelB": "Avoidant Dan",
+      "userIdA": "d61cf14a-c5f8-4b68-aa96-4578e442c9ee",
+      "userIdB": "d61cf14a-c5f8-4b68-aa96-4578e442c9ee",
+      "compatibilityScore": 72,
+      "finalScore": 0.7153833184427274,
+      "dealbreakerMultiplier": 1,
+      "subscores": {
+        "attachment": 0.5157777777777779,
+        "values": 0.9850000000000001,
+        "semantic": 0.7,
+        "finance": 0.9693141466323211,
+        "interviewProcess": 1,
+        "capacityA": 0.557265,
+        "capacityB": 0.557265,
+        "dealbreakerMultiplier": 1
+      },
+      "adjustments": {
+        "sexualComm": 0,
+        "conflictStyle": -0.001173,
+        "politics": 0,
+        "psychometricSoft": 0,
+        "total": -0.001173
+      },
+      "breakdown": {
+        "attachment": 0.20631111111111117,
+        "values": 0.3546000000000001,
+        "semantic": 0.034999999999999996,
+        "finance": 0.04846570733161606,
+        "interviewProcess": 0.05,
+        "baseline": 0.05,
+        "capacityDiscount": 0.0278205,
+        "interviewDiscount": 0.9,
+        "adjustments": -0.001173
+      }
+    },
+    {
+      "slugA": "dan",
+      "slugB": "eve",
+      "labelA": "Avoidant Dan",
+      "labelB": "Avoidant Eve",
+      "userIdA": "d61cf14a-c5f8-4b68-aa96-4578e442c9ee",
+      "userIdB": "7dce3fc3-d706-4b3f-a4a3-540e454cbda5",
+      "compatibilityScore": 72,
+      "finalScore": 0.7174722073316163,
+      "dealbreakerMultiplier": 1,
+      "subscores": {
+        "attachment": 0.5210000000000001,
+        "values": 0.9850000000000001,
+        "semantic": 0.7,
+        "finance": 0.9693141466323211,
+        "interviewProcess": 1,
+        "capacityA": 0.557265,
+        "capacityB": 0.557265,
+        "dealbreakerMultiplier": 1
+      },
+      "adjustments": {
+        "sexualComm": 0,
+        "conflictStyle": -0.001173,
+        "politics": 0,
+        "psychometricSoft": 0,
+        "total": -0.001173
+      },
+      "breakdown": {
+        "attachment": 0.20840000000000006,
+        "values": 0.3546000000000001,
+        "semantic": 0.034999999999999996,
+        "finance": 0.04846570733161606,
+        "interviewProcess": 0.05,
+        "baseline": 0.05,
+        "capacityDiscount": 0.0278205,
+        "interviewDiscount": 0.9,
+        "adjustments": -0.001173
+      }
+    },
+    {
+      "slugA": "dan",
+      "slugB": "frank",
+      "labelA": "Avoidant Dan",
+      "labelB": "Conservative Frank",
+      "userIdA": "d61cf14a-c5f8-4b68-aa96-4578e442c9ee",
+      "userIdB": "dafef373-b753-4044-bfd3-1030dc97709d",
+      "compatibilityScore": 53,
+      "finalScore": 0.529474727249478,
+      "dealbreakerMultiplier": 1,
+      "subscores": {
+        "attachment": 0.7076666666666667,
+        "values": 0.3077764708156118,
+        "semantic": 0.7,
+        "finance": 0.9693141466323211,
+        "interviewProcess": 0.9,
+        "capacityA": 0.557265,
+        "capacityB": 0.5849099999999999,
+        "dealbreakerMultiplier": 1
+      },
+      "adjustments": {
+        "sexualComm": 0,
+        "conflictStyle": -0.0022110000000000003,
+        "politics": -0.02,
+        "psychometricSoft": 0,
+        "total": -0.022211
+      },
+      "breakdown": {
+        "attachment": 0.2830666666666667,
+        "values": 0.11387729420177638,
+        "semantic": 0.034999999999999996,
+        "finance": 0.04846570733161606,
+        "interviewProcess": 0.045000000000000005,
+        "baseline": 0.05,
+        "capacityDiscount": 0.02372394095058119,
+        "interviewDiscount": 0.925,
+        "adjustments": -0.022211
+      }
+    },
+    {
+      "slugA": "dan",
+      "slugB": "grace",
+      "labelA": "Avoidant Dan",
+      "labelB": "Progressive Grace",
+      "userIdA": "d61cf14a-c5f8-4b68-aa96-4578e442c9ee",
+      "userIdB": "45f62791-91da-4219-b20d-521bed73e780",
+      "compatibilityScore": 77,
+      "finalScore": 0.7697252338418198,
+      "dealbreakerMultiplier": 1,
+      "subscores": {
+        "attachment": 0.726625,
+        "values": 0.9366066688129319,
+        "semantic": 0.7,
+        "finance": 0.9693141466323211,
+        "interviewProcess": 0.9,
+        "capacityA": 0.557265,
+        "capacityB": 0.5849099999999999,
+        "dealbreakerMultiplier": 1
+      },
+      "adjustments": {
+        "sexualComm": 0,
+        "conflictStyle": -0.0022110000000000003,
+        "politics": -0.02,
+        "psychometricSoft": 0,
+        "total": -0.022211
+      },
+      "breakdown": {
+        "attachment": 0.29065,
+        "values": 0.3465444674607848,
+        "semantic": 0.034999999999999996,
+        "finance": 0.04846570733161606,
+        "interviewProcess": 0.045000000000000005,
+        "baseline": 0.05,
+        "capacityDiscount": 0.02372394095058119,
+        "interviewDiscount": 0.925,
+        "adjustments": -0.022211
+      }
+    },
+    {
+      "slugA": "dan",
+      "slugB": "henry",
+      "labelA": "Avoidant Dan",
+      "labelB": "Low Capacity Henry",
+      "userIdA": "d61cf14a-c5f8-4b68-aa96-4578e442c9ee",
+      "userIdB": "071c75d4-1060-4001-be2a-c5f9560fe65e",
+      "compatibilityScore": 66,
+      "finalScore": 0.6592721945741816,
+      "dealbreakerMultiplier": 1,
+      "subscores": {
+        "attachment": 0.6268333333333335,
+        "values": 0.9850000000000001,
+        "semantic": 0.7,
+        "finance": 0.9693141466323211,
+        "interviewProcess": 0.61,
+        "capacityA": 0.557265,
+        "capacityB": 0.224285,
+        "dealbreakerMultiplier": 1
+      },
+      "adjustments": {
+        "sexualComm": 0,
+        "conflictStyle": -0.011236999999999999,
+        "politics": 0,
+        "psychometricSoft": 0,
+        "total": -0.011236999999999999
+      },
+      "breakdown": {
+        "attachment": 0.2507333333333334,
+        "values": 0.34475000000000006,
+        "semantic": 0.034999999999999996,
+        "finance": 0.04846570733161606,
+        "interviewProcess": 0.0305,
+        "baseline": 0.05,
+        "capacityDiscount": 0.0889398460907679,
+        "interviewDiscount": 0.875,
+        "adjustments": -0.011236999999999999
+      }
+    },
+    {
+      "slugA": "dan",
+      "slugB": "isabel",
+      "labelA": "Avoidant Dan",
+      "labelB": "Finance Mismatch Isabel",
+      "userIdA": "d61cf14a-c5f8-4b68-aa96-4578e442c9ee",
+      "userIdB": "5b0903dd-236b-4550-9e71-baa3fd27921e",
+      "compatibilityScore": 82,
+      "finalScore": 0.8168548223546163,
+      "dealbreakerMultiplier": 1,
+      "subscores": {
+        "attachment": 0.7374999999999999,
+        "values": 0.9850000000000001,
+        "semantic": 0.7,
+        "finance": 0.43541644709232274,
+        "interviewProcess": 0.8,
+        "capacityA": 0.557265,
+        "capacityB": 0.7883005000000003,
+        "dealbreakerMultiplier": 1
+      },
+      "adjustments": {
+        "sexualComm": 0,
+        "conflictStyle": 0.000784,
+        "politics": 0,
+        "psychometricSoft": 0,
+        "total": 0.000784
+      },
+      "breakdown": {
+        "attachment": 0.295,
+        "values": 0.3743000000000001,
+        "semantic": 0.034999999999999996,
+        "finance": 0.021770822354616137,
+        "interviewProcess": 0.04000000000000001,
+        "baseline": 0.05,
+        "capacityDiscount": 0,
+        "interviewDiscount": 0.95,
+        "adjustments": 0.000784
+      }
+    },
+    {
+      "slugA": "dan",
+      "slugB": "jake",
+      "labelA": "Avoidant Dan",
+      "labelB": "Dealbreaker Jake",
+      "userIdA": "d61cf14a-c5f8-4b68-aa96-4578e442c9ee",
+      "userIdB": "543fd725-2ff7-4ff3-b49b-f666cfc5caf4",
+      "compatibilityScore": 0,
+      "finalScore": 0,
+      "dealbreakerMultiplier": 0,
+      "subscores": {
+        "attachment": 0.7452916666666668,
+        "values": 0.974465859182199,
+        "semantic": 0.7,
+        "finance": 0.9693141466323211,
+        "interviewProcess": 0.8,
+        "capacityA": 0.557265,
+        "capacityB": 0.7883005000000003,
+        "dealbreakerMultiplier": 0
+      },
+      "adjustments": {
+        "sexualComm": 0,
+        "conflictStyle": 0.000784,
+        "politics": 0,
+        "psychometricSoft": 0,
+        "total": 0.000784
+      },
+      "breakdown": {
+        "attachment": 0.29811666666666675,
+        "values": 0.3702970264892356,
+        "semantic": 0.034999999999999996,
+        "finance": 0.04846570733161606,
+        "interviewProcess": 0.04000000000000001,
+        "baseline": 0.05,
+        "capacityDiscount": 0,
+        "interviewDiscount": 0.95,
+        "adjustments": 0.000784
+      }
+    },
+    {
+      "slugA": "dan",
+      "slugB": "kim",
+      "labelA": "Avoidant Dan",
+      "labelB": "Demanding-Withdrawing Kim",
+      "userIdA": "d61cf14a-c5f8-4b68-aa96-4578e442c9ee",
+      "userIdB": "526add45-7bec-4a4d-ab36-c879a41528e4",
+      "compatibilityScore": 77,
+      "finalScore": 0.7741015443960809,
+      "dealbreakerMultiplier": 1,
+      "subscores": {
+        "attachment": 0.71325,
+        "values": 0.9850000000000001,
+        "semantic": 0.7,
+        "finance": 0.9693141466323211,
+        "interviewProcess": 1,
+        "capacityA": 0.557265,
+        "capacityB": 0.503168,
+        "dealbreakerMultiplier": 1
+      },
+      "adjustments": {
+        "sexualComm": 0,
+        "conflictStyle": -0.013122,
+        "politics": 0,
+        "psychometricSoft": 0,
+        "total": -0.013122
+      },
+      "breakdown": {
+        "attachment": 0.28530000000000005,
+        "values": 0.3546000000000001,
+        "semantic": 0.034999999999999996,
+        "finance": 0.04846570733161606,
+        "interviewProcess": 0.05,
+        "baseline": 0.05,
+        "capacityDiscount": 0.036142162935535356,
+        "interviewDiscount": 0.9,
+        "adjustments": -0.013122
+      }
+    },
+    {
+      "slugA": "dan",
+      "slugB": "morgan",
+      "labelA": "Avoidant Dan",
+      "labelB": "Disorganised Morgan",
+      "userIdA": "d61cf14a-c5f8-4b68-aa96-4578e442c9ee",
+      "userIdB": "346c6543-cf25-4c9f-af22-a11bd538ddb8",
+      "compatibilityScore": 60,
+      "finalScore": 0.6033848912545039,
+      "dealbreakerMultiplier": 1,
+      "subscores": {
+        "attachment": 0.36472222222222217,
+        "values": 0.9850000000000001,
+        "semantic": 0.7,
+        "finance": 0.9693141466323211,
+        "interviewProcess": 0.87,
+        "capacityA": 0.557265,
+        "capacityB": 0.3780366666666667,
+        "dealbreakerMultiplier": 1
+      },
+      "adjustments": {
+        "sexualComm": 0,
+        "conflictStyle": -0.006914999999999999,
+        "politics": 0,
+        "psychometricSoft": 0,
+        "total": -0.006914999999999999
+      },
+      "breakdown": {
+        "attachment": 0.14588888888888887,
+        "values": 0.34475000000000006,
+        "semantic": 0.034999999999999996,
+        "finance": 0.04846570733161606,
+        "interviewProcess": 0.043500000000000004,
+        "baseline": 0.05,
+        "capacityDiscount": 0.05730470496600112,
+        "interviewDiscount": 0.875,
+        "adjustments": -0.006914999999999999
+      }
+    },
+    {
+      "slugA": "eve",
+      "slugB": "alice",
+      "labelA": "Avoidant Eve",
+      "labelB": "Ideal Alice",
+      "userIdA": "7dce3fc3-d706-4b3f-a4a3-540e454cbda5",
+      "userIdB": "330354f3-70f1-4613-a398-7c72ae9043a1",
+      "compatibilityScore": 85,
+      "finalScore": 0.8475380406649496,
+      "dealbreakerMultiplier": 1,
+      "subscores": {
+        "attachment": 0.7597083333333334,
+        "values": 0.9850000000000001,
+        "semantic": 0.7,
+        "finance": 0.9693141466323211,
+        "interviewProcess": 0.7,
+        "capacityA": 0.557265,
+        "capacityB": 0.8400572000000001,
+        "dealbreakerMultiplier": 1
+      },
+      "adjustments": {
+        "sexualComm": 0,
+        "conflictStyle": 0.0008889999999999998,
+        "politics": 0,
+        "psychometricSoft": 0,
+        "total": 0.0008889999999999998
+      },
+      "breakdown": {
+        "attachment": 0.3038833333333334,
+        "values": 0.3743000000000001,
+        "semantic": 0.034999999999999996,
+        "finance": 0.04846570733161606,
+        "interviewProcess": 0.034999999999999996,
+        "baseline": 0.05,
+        "capacityDiscount": 0,
+        "interviewDiscount": 0.95,
+        "adjustments": 0.0008889999999999998
+      }
+    },
+    {
+      "slugA": "eve",
+      "slugB": "bob",
+      "labelA": "Avoidant Eve",
+      "labelB": "Compatible Bob",
+      "userIdA": "7dce3fc3-d706-4b3f-a4a3-540e454cbda5",
+      "userIdB": "f79971c4-63cf-41c7-b4c7-46812f4cb135",
+      "compatibilityScore": 84,
+      "finalScore": 0.8437634004875185,
+      "dealbreakerMultiplier": 1,
+      "subscores": {
+        "attachment": 0.7480416666666668,
+        "values": 0.974465859182199,
+        "semantic": 0.7,
+        "finance": 0.9693141466323211,
+        "interviewProcess": 0.8,
+        "capacityA": 0.557265,
+        "capacityB": 0.7883005000000003,
+        "dealbreakerMultiplier": 1
+      },
+      "adjustments": {
+        "sexualComm": 0,
+        "conflictStyle": 0.000784,
+        "politics": 0,
+        "psychometricSoft": 0,
+        "total": 0.000784
+      },
+      "breakdown": {
+        "attachment": 0.29921666666666674,
+        "values": 0.3702970264892356,
+        "semantic": 0.034999999999999996,
+        "finance": 0.04846570733161606,
+        "interviewProcess": 0.04000000000000001,
+        "baseline": 0.05,
+        "capacityDiscount": 0,
+        "interviewDiscount": 0.95,
+        "adjustments": 0.000784
+      }
+    },
+    {
+      "slugA": "eve",
+      "slugB": "clara",
+      "labelA": "Avoidant Eve",
+      "labelB": "Anxious Clara",
+      "userIdA": "7dce3fc3-d706-4b3f-a4a3-540e454cbda5",
+      "userIdB": "0b32753d-c16d-41ad-bc51-81e6c3ad7f97",
+      "compatibilityScore": 68,
+      "finalScore": 0.682338492711057,
+      "dealbreakerMultiplier": 1,
+      "subscores": {
+        "attachment": 0.40808333333333324,
+        "values": 0.9850000000000001,
+        "semantic": 0.7,
+        "finance": 0.9693141466323211,
+        "interviewProcess": 0.9,
+        "capacityA": 0.557265,
+        "capacityB": 0.590513,
+        "dealbreakerMultiplier": 1
+      },
+      "adjustments": {
+        "sexualComm": 0,
+        "conflictStyle": -0.000905,
+        "politics": 0,
+        "psychometricSoft": 0,
+        "total": -0.000905
+      },
+      "breakdown": {
+        "attachment": 0.1632333333333333,
+        "values": 0.3644500000000001,
+        "semantic": 0.034999999999999996,
+        "finance": 0.04846570733161606,
+        "interviewProcess": 0.045000000000000005,
+        "baseline": 0.05,
+        "capacityDiscount": 0.0229055479538925,
+        "interviewDiscount": 0.925,
+        "adjustments": -0.000905
+      }
+    },
+    {
+      "slugA": "eve",
+      "slugB": "dan",
+      "labelA": "Avoidant Eve",
+      "labelB": "Avoidant Dan",
+      "userIdA": "7dce3fc3-d706-4b3f-a4a3-540e454cbda5",
+      "userIdB": "d61cf14a-c5f8-4b68-aa96-4578e442c9ee",
+      "compatibilityScore": 72,
+      "finalScore": 0.7174722073316163,
+      "dealbreakerMultiplier": 1,
+      "subscores": {
+        "attachment": 0.5210000000000001,
+        "values": 0.9850000000000001,
+        "semantic": 0.7,
+        "finance": 0.9693141466323211,
+        "interviewProcess": 1,
+        "capacityA": 0.557265,
+        "capacityB": 0.557265,
+        "dealbreakerMultiplier": 1
+      },
+      "adjustments": {
+        "sexualComm": 0,
+        "conflictStyle": -0.001173,
+        "politics": 0,
+        "psychometricSoft": 0,
+        "total": -0.001173
+      },
+      "breakdown": {
+        "attachment": 0.20840000000000006,
+        "values": 0.3546000000000001,
+        "semantic": 0.034999999999999996,
+        "finance": 0.04846570733161606,
+        "interviewProcess": 0.05,
+        "baseline": 0.05,
+        "capacityDiscount": 0.0278205,
+        "interviewDiscount": 0.9,
+        "adjustments": -0.001173
+      }
+    },
+    {
+      "slugA": "eve",
+      "slugB": "eve",
+      "labelA": "Avoidant Eve",
+      "labelB": "Avoidant Eve",
+      "userIdA": "7dce3fc3-d706-4b3f-a4a3-540e454cbda5",
+      "userIdB": "7dce3fc3-d706-4b3f-a4a3-540e454cbda5",
+      "compatibilityScore": 72,
+      "finalScore": 0.7232055406649497,
+      "dealbreakerMultiplier": 1,
+      "subscores": {
+        "attachment": 0.5353333333333334,
+        "values": 0.9850000000000001,
+        "semantic": 0.7,
+        "finance": 0.9693141466323211,
+        "interviewProcess": 1,
+        "capacityA": 0.557265,
+        "capacityB": 0.557265,
+        "dealbreakerMultiplier": 1
+      },
+      "adjustments": {
+        "sexualComm": 0,
+        "conflictStyle": -0.001173,
+        "politics": 0,
+        "psychometricSoft": 0,
+        "total": -0.001173
+      },
+      "breakdown": {
+        "attachment": 0.2141333333333334,
+        "values": 0.3546000000000001,
+        "semantic": 0.034999999999999996,
+        "finance": 0.04846570733161606,
+        "interviewProcess": 0.05,
+        "baseline": 0.05,
+        "capacityDiscount": 0.0278205,
+        "interviewDiscount": 0.9,
+        "adjustments": -0.001173
+      }
+    },
+    {
+      "slugA": "eve",
+      "slugB": "frank",
+      "labelA": "Avoidant Eve",
+      "labelB": "Conservative Frank",
+      "userIdA": "7dce3fc3-d706-4b3f-a4a3-540e454cbda5",
+      "userIdB": "dafef373-b753-4044-bfd3-1030dc97709d",
+      "compatibilityScore": 53,
+      "finalScore": 0.531474727249478,
+      "dealbreakerMultiplier": 1,
+      "subscores": {
+        "attachment": 0.7126666666666667,
+        "values": 0.3077764708156118,
+        "semantic": 0.7,
+        "finance": 0.9693141466323211,
+        "interviewProcess": 0.9,
+        "capacityA": 0.557265,
+        "capacityB": 0.5849099999999999,
+        "dealbreakerMultiplier": 1
+      },
+      "adjustments": {
+        "sexualComm": 0,
+        "conflictStyle": -0.0022110000000000003,
+        "politics": -0.02,
+        "psychometricSoft": 0,
+        "total": -0.022211
+      },
+      "breakdown": {
+        "attachment": 0.2850666666666667,
+        "values": 0.11387729420177638,
+        "semantic": 0.034999999999999996,
+        "finance": 0.04846570733161606,
+        "interviewProcess": 0.045000000000000005,
+        "baseline": 0.05,
+        "capacityDiscount": 0.02372394095058119,
+        "interviewDiscount": 0.925,
+        "adjustments": -0.022211
+      }
+    },
+    {
+      "slugA": "eve",
+      "slugB": "grace",
+      "labelA": "Avoidant Eve",
+      "labelB": "Progressive Grace",
+      "userIdA": "7dce3fc3-d706-4b3f-a4a3-540e454cbda5",
+      "userIdB": "45f62791-91da-4219-b20d-521bed73e780",
+      "compatibilityScore": 77,
+      "finalScore": 0.7717252338418198,
+      "dealbreakerMultiplier": 1,
+      "subscores": {
+        "attachment": 0.731625,
+        "values": 0.9366066688129319,
+        "semantic": 0.7,
+        "finance": 0.9693141466323211,
+        "interviewProcess": 0.9,
+        "capacityA": 0.557265,
+        "capacityB": 0.5849099999999999,
+        "dealbreakerMultiplier": 1
+      },
+      "adjustments": {
+        "sexualComm": 0,
+        "conflictStyle": -0.0022110000000000003,
+        "politics": -0.02,
+        "psychometricSoft": 0,
+        "total": -0.022211
+      },
+      "breakdown": {
+        "attachment": 0.29265,
+        "values": 0.3465444674607848,
+        "semantic": 0.034999999999999996,
+        "finance": 0.04846570733161606,
+        "interviewProcess": 0.045000000000000005,
+        "baseline": 0.05,
+        "capacityDiscount": 0.02372394095058119,
+        "interviewDiscount": 0.925,
+        "adjustments": -0.022211
+      }
+    },
+    {
+      "slugA": "eve",
+      "slugB": "henry",
+      "labelA": "Avoidant Eve",
+      "labelB": "Low Capacity Henry",
+      "userIdA": "7dce3fc3-d706-4b3f-a4a3-540e454cbda5",
+      "userIdB": "071c75d4-1060-4001-be2a-c5f9560fe65e",
+      "compatibilityScore": 66,
+      "finalScore": 0.6612721945741816,
+      "dealbreakerMultiplier": 1,
+      "subscores": {
+        "attachment": 0.6318333333333335,
+        "values": 0.9850000000000001,
+        "semantic": 0.7,
+        "finance": 0.9693141466323211,
+        "interviewProcess": 0.61,
+        "capacityA": 0.557265,
+        "capacityB": 0.224285,
+        "dealbreakerMultiplier": 1
+      },
+      "adjustments": {
+        "sexualComm": 0,
+        "conflictStyle": -0.011236999999999999,
+        "politics": 0,
+        "psychometricSoft": 0,
+        "total": -0.011236999999999999
+      },
+      "breakdown": {
+        "attachment": 0.2527333333333334,
+        "values": 0.34475000000000006,
+        "semantic": 0.034999999999999996,
+        "finance": 0.04846570733161606,
+        "interviewProcess": 0.0305,
+        "baseline": 0.05,
+        "capacityDiscount": 0.0889398460907679,
+        "interviewDiscount": 0.875,
+        "adjustments": -0.011236999999999999
+      }
+    },
+    {
+      "slugA": "eve",
+      "slugB": "isabel",
+      "labelA": "Avoidant Eve",
+      "labelB": "Finance Mismatch Isabel",
+      "userIdA": "7dce3fc3-d706-4b3f-a4a3-540e454cbda5",
+      "userIdB": "5b0903dd-236b-4550-9e71-baa3fd27921e",
+      "compatibilityScore": 82,
+      "finalScore": 0.8188548223546163,
+      "dealbreakerMultiplier": 1,
+      "subscores": {
+        "attachment": 0.7424999999999999,
+        "values": 0.9850000000000001,
+        "semantic": 0.7,
+        "finance": 0.43541644709232274,
+        "interviewProcess": 0.8,
+        "capacityA": 0.557265,
+        "capacityB": 0.7883005000000003,
+        "dealbreakerMultiplier": 1
+      },
+      "adjustments": {
+        "sexualComm": 0,
+        "conflictStyle": 0.000784,
+        "politics": 0,
+        "psychometricSoft": 0,
+        "total": 0.000784
+      },
+      "breakdown": {
+        "attachment": 0.297,
+        "values": 0.3743000000000001,
+        "semantic": 0.034999999999999996,
+        "finance": 0.021770822354616137,
+        "interviewProcess": 0.04000000000000001,
+        "baseline": 0.05,
+        "capacityDiscount": 0,
+        "interviewDiscount": 0.95,
+        "adjustments": 0.000784
+      }
+    },
+    {
+      "slugA": "eve",
+      "slugB": "jake",
+      "labelA": "Avoidant Eve",
+      "labelB": "Dealbreaker Jake",
+      "userIdA": "7dce3fc3-d706-4b3f-a4a3-540e454cbda5",
+      "userIdB": "543fd725-2ff7-4ff3-b49b-f666cfc5caf4",
+      "compatibilityScore": 0,
+      "finalScore": 0,
+      "dealbreakerMultiplier": 0,
+      "subscores": {
+        "attachment": 0.7480416666666668,
+        "values": 0.974465859182199,
+        "semantic": 0.7,
+        "finance": 0.9693141466323211,
+        "interviewProcess": 0.8,
+        "capacityA": 0.557265,
+        "capacityB": 0.7883005000000003,
+        "dealbreakerMultiplier": 0
+      },
+      "adjustments": {
+        "sexualComm": 0,
+        "conflictStyle": 0.000784,
+        "politics": 0,
+        "psychometricSoft": 0,
+        "total": 0.000784
+      },
+      "breakdown": {
+        "attachment": 0.29921666666666674,
+        "values": 0.3702970264892356,
+        "semantic": 0.034999999999999996,
+        "finance": 0.04846570733161606,
+        "interviewProcess": 0.04000000000000001,
+        "baseline": 0.05,
+        "capacityDiscount": 0,
+        "interviewDiscount": 0.95,
+        "adjustments": 0.000784
+      }
+    },
+    {
+      "slugA": "eve",
+      "slugB": "kim",
+      "labelA": "Avoidant Eve",
+      "labelB": "Demanding-Withdrawing Kim",
+      "userIdA": "7dce3fc3-d706-4b3f-a4a3-540e454cbda5",
+      "userIdB": "526add45-7bec-4a4d-ab36-c879a41528e4",
+      "compatibilityScore": 78,
+      "finalScore": 0.7761015443960809,
+      "dealbreakerMultiplier": 1,
+      "subscores": {
+        "attachment": 0.7182499999999999,
+        "values": 0.9850000000000001,
+        "semantic": 0.7,
+        "finance": 0.9693141466323211,
+        "interviewProcess": 1,
+        "capacityA": 0.557265,
+        "capacityB": 0.503168,
+        "dealbreakerMultiplier": 1
+      },
+      "adjustments": {
+        "sexualComm": 0,
+        "conflictStyle": -0.013122,
+        "politics": 0,
+        "psychometricSoft": 0,
+        "total": -0.013122
+      },
+      "breakdown": {
+        "attachment": 0.2873,
+        "values": 0.3546000000000001,
+        "semantic": 0.034999999999999996,
+        "finance": 0.04846570733161606,
+        "interviewProcess": 0.05,
+        "baseline": 0.05,
+        "capacityDiscount": 0.036142162935535356,
+        "interviewDiscount": 0.9,
+        "adjustments": -0.013122
+      }
+    },
+    {
+      "slugA": "eve",
+      "slugB": "morgan",
+      "labelA": "Avoidant Eve",
+      "labelB": "Disorganised Morgan",
+      "userIdA": "7dce3fc3-d706-4b3f-a4a3-540e454cbda5",
+      "userIdB": "346c6543-cf25-4c9f-af22-a11bd538ddb8",
+      "compatibilityScore": 61,
+      "finalScore": 0.6082293356989483,
+      "dealbreakerMultiplier": 1,
+      "subscores": {
+        "attachment": 0.37683333333333335,
+        "values": 0.9850000000000001,
+        "semantic": 0.7,
+        "finance": 0.9693141466323211,
+        "interviewProcess": 0.87,
+        "capacityA": 0.557265,
+        "capacityB": 0.3780366666666667,
+        "dealbreakerMultiplier": 1
+      },
+      "adjustments": {
+        "sexualComm": 0,
+        "conflictStyle": -0.006914999999999999,
+        "politics": 0,
+        "psychometricSoft": 0,
+        "total": -0.006914999999999999
+      },
+      "breakdown": {
+        "attachment": 0.15073333333333336,
+        "values": 0.34475000000000006,
+        "semantic": 0.034999999999999996,
+        "finance": 0.04846570733161606,
+        "interviewProcess": 0.043500000000000004,
+        "baseline": 0.05,
+        "capacityDiscount": 0.05730470496600112,
+        "interviewDiscount": 0.875,
+        "adjustments": -0.006914999999999999
+      }
+    },
+    {
+      "slugA": "frank",
+      "slugB": "alice",
+      "labelA": "Conservative Frank",
+      "labelB": "Ideal Alice",
+      "userIdA": "dafef373-b753-4044-bfd3-1030dc97709d",
+      "userIdB": "330354f3-70f1-4613-a398-7c72ae9043a1",
+      "compatibilityScore": 65,
+      "finalScore": 0.6533821976163714,
+      "dealbreakerMultiplier": 1,
+      "subscores": {
+        "attachment": 0.9380416666666667,
+        "values": 0.3077764708156118,
+        "semantic": 0.7,
+        "finance": 0.9693141466323211,
+        "interviewProcess": 0.8,
+        "capacityA": 0.5849099999999999,
+        "capacityB": 0.8400572000000001,
+        "dealbreakerMultiplier": 1
+      },
+      "adjustments": {
+        "sexualComm": 0,
+        "conflictStyle": 0.004667,
+        "politics": -0.02,
+        "psychometricSoft": 0,
+        "total": -0.015333
+      },
+      "breakdown": {
+        "attachment": 0.3752166666666667,
+        "values": 0.1200328236180886,
+        "semantic": 0.034999999999999996,
+        "finance": 0.04846570733161606,
+        "interviewProcess": 0.04000000000000001,
+        "baseline": 0.05,
+        "capacityDiscount": 0,
+        "interviewDiscount": 0.975,
+        "adjustments": -0.015333
+      }
+    },
+    {
+      "slugA": "frank",
+      "slugB": "bob",
+      "labelA": "Conservative Frank",
+      "labelB": "Compatible Bob",
+      "userIdA": "dafef373-b753-4044-bfd3-1030dc97709d",
+      "userIdB": "f79971c4-63cf-41c7-b4c7-46812f4cb135",
+      "compatibilityScore": 66,
+      "finalScore": 0.6557901395117149,
+      "dealbreakerMultiplier": 1,
+      "subscores": {
+        "attachment": 0.926375,
+        "values": 0.3140575184105095,
+        "semantic": 0.7,
+        "finance": 0.9693141466323211,
+        "interviewProcess": 0.9,
+        "capacityA": 0.5849099999999999,
+        "capacityB": 0.7883005000000003,
+        "dealbreakerMultiplier": 1
+      },
+      "adjustments": {
+        "sexualComm": 0,
+        "conflictStyle": 0.004292,
+        "politics": -0.02,
+        "psychometricSoft": 0,
+        "total": -0.015708
+      },
+      "breakdown": {
+        "attachment": 0.37055,
+        "values": 0.12248243218009872,
+        "semantic": 0.034999999999999996,
+        "finance": 0.04846570733161606,
+        "interviewProcess": 0.045000000000000005,
+        "baseline": 0.05,
+        "capacityDiscount": 0,
+        "interviewDiscount": 0.975,
+        "adjustments": -0.015708
+      }
+    },
+    {
+      "slugA": "frank",
+      "slugB": "clara",
+      "labelA": "Conservative Frank",
+      "labelB": "Anxious Clara",
+      "userIdA": "dafef373-b753-4044-bfd3-1030dc97709d",
+      "userIdB": "0b32753d-c16d-41ad-bc51-81e6c3ad7f97",
+      "compatibilityScore": 55,
+      "finalScore": 0.551717213103912,
+      "dealbreakerMultiplier": 1,
+      "subscores": {
+        "attachment": 0.72375,
+        "values": 0.3077764708156118,
+        "semantic": 0.7,
+        "finance": 0.9693141466323211,
+        "interviewProcess": 1,
+        "capacityA": 0.5849099999999999,
+        "capacityB": 0.590513,
+        "dealbreakerMultiplier": 1
+      },
+      "adjustments": {
+        "sexualComm": 0,
+        "conflictStyle": 0.00048499999999999986,
+        "politics": -0.02,
+        "psychometricSoft": 0,
+        "total": -0.019515
+      },
+      "breakdown": {
+        "attachment": 0.28950000000000004,
+        "values": 0.11695505890993249,
+        "semantic": 0.034999999999999996,
+        "finance": 0.04846570733161606,
+        "interviewProcess": 0.05,
+        "baseline": 0.05,
+        "capacityDiscount": 0.018688553137636586,
+        "interviewDiscount": 0.95,
+        "adjustments": -0.019515
+      }
+    },
+    {
+      "slugA": "frank",
+      "slugB": "dan",
+      "labelA": "Conservative Frank",
+      "labelB": "Avoidant Dan",
+      "userIdA": "dafef373-b753-4044-bfd3-1030dc97709d",
+      "userIdB": "d61cf14a-c5f8-4b68-aa96-4578e442c9ee",
+      "compatibilityScore": 53,
+      "finalScore": 0.529474727249478,
+      "dealbreakerMultiplier": 1,
+      "subscores": {
+        "attachment": 0.7076666666666667,
+        "values": 0.3077764708156118,
+        "semantic": 0.7,
+        "finance": 0.9693141466323211,
+        "interviewProcess": 0.9,
+        "capacityA": 0.5849099999999999,
+        "capacityB": 0.557265,
+        "dealbreakerMultiplier": 1
+      },
+      "adjustments": {
+        "sexualComm": 0,
+        "conflictStyle": -0.0022110000000000003,
+        "politics": -0.02,
+        "psychometricSoft": 0,
+        "total": -0.022211
+      },
+      "breakdown": {
+        "attachment": 0.2830666666666667,
+        "values": 0.11387729420177638,
+        "semantic": 0.034999999999999996,
+        "finance": 0.04846570733161606,
+        "interviewProcess": 0.045000000000000005,
+        "baseline": 0.05,
+        "capacityDiscount": 0.02372394095058119,
+        "interviewDiscount": 0.925,
+        "adjustments": -0.022211
+      }
+    },
+    {
+      "slugA": "frank",
+      "slugB": "eve",
+      "labelA": "Conservative Frank",
+      "labelB": "Avoidant Eve",
+      "userIdA": "dafef373-b753-4044-bfd3-1030dc97709d",
+      "userIdB": "7dce3fc3-d706-4b3f-a4a3-540e454cbda5",
+      "compatibilityScore": 53,
+      "finalScore": 0.531474727249478,
+      "dealbreakerMultiplier": 1,
+      "subscores": {
+        "attachment": 0.7126666666666667,
+        "values": 0.3077764708156118,
+        "semantic": 0.7,
+        "finance": 0.9693141466323211,
+        "interviewProcess": 0.9,
+        "capacityA": 0.5849099999999999,
+        "capacityB": 0.557265,
+        "dealbreakerMultiplier": 1
+      },
+      "adjustments": {
+        "sexualComm": 0,
+        "conflictStyle": -0.0022110000000000003,
+        "politics": -0.02,
+        "psychometricSoft": 0,
+        "total": -0.022211
+      },
+      "breakdown": {
+        "attachment": 0.2850666666666667,
+        "values": 0.11387729420177638,
+        "semantic": 0.034999999999999996,
+        "finance": 0.04846570733161606,
+        "interviewProcess": 0.045000000000000005,
+        "baseline": 0.05,
+        "capacityDiscount": 0.02372394095058119,
+        "interviewDiscount": 0.925,
+        "adjustments": -0.022211
+      }
+    },
+    {
+      "slugA": "frank",
+      "slugB": "frank",
+      "labelA": "Conservative Frank",
+      "labelB": "Conservative Frank",
+      "userIdA": "dafef373-b753-4044-bfd3-1030dc97709d",
+      "userIdB": "dafef373-b753-4044-bfd3-1030dc97709d",
+      "compatibilityScore": 86,
+      "finalScore": 0.8632457073316161,
+      "dealbreakerMultiplier": 1,
+      "subscores": {
+        "attachment": 0.9,
+        "values": 0.89,
+        "semantic": 0.7,
+        "finance": 0.9693141466323211,
+        "interviewProcess": 1,
+        "capacityA": 0.5849099999999999,
+        "capacityB": 0.5849099999999999,
+        "dealbreakerMultiplier": 1
+      },
+      "adjustments": {
+        "sexualComm": 0,
+        "conflictStyle": 0.001107,
+        "politics": 0,
+        "psychometricSoft": 0,
+        "total": 0.001107
+      },
+      "breakdown": {
+        "attachment": 0.36000000000000004,
+        "values": 0.3382,
+        "semantic": 0.034999999999999996,
+        "finance": 0.04846570733161606,
+        "interviewProcess": 0.05,
+        "baseline": 0.05,
+        "capacityDiscount": 0.019527000000000027,
+        "interviewDiscount": 0.95,
+        "adjustments": 0.001107
+      }
+    },
+    {
+      "slugA": "frank",
+      "slugB": "grace",
+      "labelA": "Conservative Frank",
+      "labelB": "Progressive Grace",
+      "userIdA": "dafef373-b753-4044-bfd3-1030dc97709d",
+      "userIdB": "45f62791-91da-4219-b20d-521bed73e780",
+      "compatibilityScore": 60,
+      "finalScore": 0.5993326399550953,
+      "dealbreakerMultiplier": 1,
+      "subscores": {
+        "attachment": 0.9144583333333334,
+        "values": 0.2329042086582787,
+        "semantic": 0.7,
+        "finance": 0.9693141466323211,
+        "interviewProcess": 1,
+        "capacityA": 0.5849099999999999,
+        "capacityB": 0.5849099999999999,
+        "dealbreakerMultiplier": 1
+      },
+      "adjustments": {
+        "sexualComm": 0,
+        "conflictStyle": 0.001107,
+        "politics": -0.02,
+        "psychometricSoft": 0,
+        "total": -0.018893
+      },
+      "breakdown": {
+        "attachment": 0.36578333333333335,
+        "values": 0.08850359929014592,
+        "semantic": 0.034999999999999996,
+        "finance": 0.04846570733161606,
+        "interviewProcess": 0.05,
+        "baseline": 0.05,
+        "capacityDiscount": 0.019527000000000027,
+        "interviewDiscount": 0.95,
+        "adjustments": -0.018893
+      }
+    },
+    {
+      "slugA": "frank",
+      "slugB": "henry",
+      "labelA": "Conservative Frank",
+      "labelB": "Low Capacity Henry",
+      "userIdA": "dafef373-b753-4044-bfd3-1030dc97709d",
+      "userIdB": "071c75d4-1060-4001-be2a-c5f9560fe65e",
+      "compatibilityScore": 48,
+      "finalScore": 0.4775159507061133,
+      "dealbreakerMultiplier": 1,
+      "subscores": {
+        "attachment": 0.7916666666666667,
+        "values": 0.3077764708156118,
+        "semantic": 0.7,
+        "finance": 0.9693141466323211,
+        "interviewProcess": 0.51,
+        "capacityA": 0.5849099999999999,
+        "capacityB": 0.224285,
+        "dealbreakerMultiplier": 1
+      },
+      "adjustments": {
+        "sexualComm": 0,
+        "conflictStyle": -0.0025750000000000005,
+        "politics": -0.02,
+        "psychometricSoft": 0,
+        "total": -0.022575
+      },
+      "breakdown": {
+        "attachment": 0.3166666666666667,
+        "values": 0.11079952949362025,
+        "semantic": 0.034999999999999996,
+        "finance": 0.04846570733161606,
+        "interviewProcess": 0.025500000000000002,
+        "baseline": 0.05,
+        "capacityDiscount": 0.08634095278578963,
+        "interviewDiscount": 0.8999999999999999,
+        "adjustments": -0.022575
+      }
+    },
+    {
+      "slugA": "frank",
+      "slugB": "isabel",
+      "labelA": "Conservative Frank",
+      "labelB": "Finance Mismatch Isabel",
+      "userIdA": "dafef373-b753-4044-bfd3-1030dc97709d",
+      "userIdB": "5b0903dd-236b-4550-9e71-baa3fd27921e",
+      "compatibilityScore": 63,
+      "finalScore": 0.6253289793060381,
+      "dealbreakerMultiplier": 1,
+      "subscores": {
+        "attachment": 0.9230833333333333,
+        "values": 0.3077764708156118,
+        "semantic": 0.7,
+        "finance": 0.43541644709232274,
+        "interviewProcess": 0.9,
+        "capacityA": 0.5849099999999999,
+        "capacityB": 0.7883005000000003,
+        "dealbreakerMultiplier": 1
+      },
+      "adjustments": {
+        "sexualComm": 0,
+        "conflictStyle": 0.004292,
+        "politics": -0.02,
+        "psychometricSoft": 0,
+        "total": -0.015708
+      },
+      "breakdown": {
+        "attachment": 0.3692333333333333,
+        "values": 0.1200328236180886,
+        "semantic": 0.034999999999999996,
+        "finance": 0.021770822354616137,
+        "interviewProcess": 0.045000000000000005,
+        "baseline": 0.05,
+        "capacityDiscount": 0,
+        "interviewDiscount": 0.975,
+        "adjustments": -0.015708
+      }
+    },
+    {
+      "slugA": "frank",
+      "slugB": "jake",
+      "labelA": "Conservative Frank",
+      "labelB": "Dealbreaker Jake",
+      "userIdA": "dafef373-b753-4044-bfd3-1030dc97709d",
+      "userIdB": "543fd725-2ff7-4ff3-b49b-f666cfc5caf4",
+      "compatibilityScore": 0,
+      "finalScore": 0,
+      "dealbreakerMultiplier": 0,
+      "subscores": {
+        "attachment": 0.926375,
+        "values": 0.3140575184105095,
+        "semantic": 0.7,
+        "finance": 0.9693141466323211,
+        "interviewProcess": 0.9,
+        "capacityA": 0.5849099999999999,
+        "capacityB": 0.7883005000000003,
+        "dealbreakerMultiplier": 0
+      },
+      "adjustments": {
+        "sexualComm": 0,
+        "conflictStyle": 0.004292,
+        "politics": -0.02,
+        "psychometricSoft": 0,
+        "total": -0.015708
+      },
+      "breakdown": {
+        "attachment": 0.37055,
+        "values": 0.12248243218009872,
+        "semantic": 0.034999999999999996,
+        "finance": 0.04846570733161606,
+        "interviewProcess": 0.045000000000000005,
+        "baseline": 0.05,
+        "capacityDiscount": 0,
+        "interviewDiscount": 0.975,
+        "adjustments": -0.015708
+      }
+    },
+    {
+      "slugA": "frank",
+      "slugB": "kim",
+      "labelA": "Conservative Frank",
+      "labelB": "Demanding-Withdrawing Kim",
+      "userIdA": "dafef373-b753-4044-bfd3-1030dc97709d",
+      "userIdB": "526add45-7bec-4a4d-ab36-c879a41528e4",
+      "compatibilityScore": 60,
+      "finalScore": 0.6006648173213103,
+      "dealbreakerMultiplier": 1,
+      "subscores": {
+        "attachment": 0.9055833333333333,
+        "values": 0.3077764708156118,
+        "semantic": 0.7,
+        "finance": 0.9693141466323211,
+        "interviewProcess": 0.9,
+        "capacityA": 0.5849099999999999,
+        "capacityB": 0.503168,
+        "dealbreakerMultiplier": 1
+      },
+      "adjustments": {
+        "sexualComm": 0,
+        "conflictStyle": -0.0016620000000000003,
+        "politics": -0.02,
+        "psychometricSoft": 0,
+        "total": -0.021662
+      },
+      "breakdown": {
+        "attachment": 0.36223333333333335,
+        "values": 0.11387729420177638,
+        "semantic": 0.034999999999999996,
+        "finance": 0.04846570733161606,
+        "interviewProcess": 0.045000000000000005,
+        "baseline": 0.05,
+        "capacityDiscount": 0.03224951754541559,
+        "interviewDiscount": 0.925,
+        "adjustments": -0.021662
+      }
+    },
+    {
+      "slugA": "frank",
+      "slugB": "morgan",
+      "labelA": "Conservative Frank",
+      "labelB": "Disorganised Morgan",
+      "userIdA": "dafef373-b753-4044-bfd3-1030dc97709d",
+      "userIdB": "346c6543-cf25-4c9f-af22-a11bd538ddb8",
+      "compatibilityScore": 43,
+      "finalScore": 0.42800294459186056,
+      "dealbreakerMultiplier": 1,
+      "subscores": {
+        "attachment": 0.5535833333333334,
+        "values": 0.3077764708156118,
+        "semantic": 0.7,
+        "finance": 0.9693141466323211,
+        "interviewProcess": 0.77,
+        "capacityA": 0.5849099999999999,
+        "capacityB": 0.3780366666666667,
+        "dealbreakerMultiplier": 1
+      },
+      "adjustments": {
+        "sexualComm": 0,
+        "conflictStyle": -0.002265,
+        "politics": -0.02,
+        "psychometricSoft": 0,
+        "total": -0.022265
+      },
+      "breakdown": {
+        "attachment": 0.22143333333333337,
+        "values": 0.11079952949362025,
+        "semantic": 0.034999999999999996,
+        "finance": 0.04846570733161606,
+        "interviewProcess": 0.038500000000000006,
+        "baseline": 0.05,
+        "capacityDiscount": 0.0539306255667092,
+        "interviewDiscount": 0.8999999999999999,
+        "adjustments": -0.022265
+      }
+    },
+    {
+      "slugA": "grace",
+      "slugB": "alice",
+      "labelA": "Progressive Grace",
+      "labelB": "Ideal Alice",
+      "userIdA": "45f62791-91da-4219-b20d-521bed73e780",
+      "userIdB": "330354f3-70f1-4613-a398-7c72ae9043a1",
+      "compatibilityScore": 91,
+      "finalScore": 0.9095093081686596,
+      "dealbreakerMultiplier": 1,
+      "subscores": {
+        "attachment": 0.96525,
+        "values": 0.9366066688129319,
+        "semantic": 0.7,
+        "finance": 0.9693141466323211,
+        "interviewProcess": 0.8,
+        "capacityA": 0.5849099999999999,
+        "capacityB": 0.8400572000000001,
+        "dealbreakerMultiplier": 1
+      },
+      "adjustments": {
+        "sexualComm": 0,
+        "conflictStyle": 0.004667,
+        "politics": -0.02,
+        "psychometricSoft": 0,
+        "total": -0.015333
+      },
+      "breakdown": {
+        "attachment": 0.38610000000000005,
+        "values": 0.36527660083704344,
+        "semantic": 0.034999999999999996,
+        "finance": 0.04846570733161606,
+        "interviewProcess": 0.04000000000000001,
+        "baseline": 0.05,
+        "capacityDiscount": 0,
+        "interviewDiscount": 0.975,
+        "adjustments": -0.015333
+      }
+    },
+    {
+      "slugA": "grace",
+      "slugB": "bob",
+      "labelA": "Progressive Grace",
+      "labelB": "Compatible Bob",
+      "userIdA": "45f62791-91da-4219-b20d-521bed73e780",
+      "userIdB": "f79971c4-63cf-41c7-b4c7-46812f4cb135",
+      "compatibilityScore": 91,
+      "finalScore": 0.9054041341679673,
+      "dealbreakerMultiplier": 1,
+      "subscores": {
+        "attachment": 0.9535833333333333,
+        "values": 0.9261874192385071,
+        "semantic": 0.7,
+        "finance": 0.9693141466323211,
+        "interviewProcess": 0.9,
+        "capacityA": 0.5849099999999999,
+        "capacityB": 0.7883005000000003,
+        "dealbreakerMultiplier": 1
+      },
+      "adjustments": {
+        "sexualComm": 0,
+        "conflictStyle": 0.004292,
+        "politics": -0.02,
+        "psychometricSoft": 0,
+        "total": -0.015708
+      },
+      "breakdown": {
+        "attachment": 0.38143333333333335,
+        "values": 0.36121309350301783,
+        "semantic": 0.034999999999999996,
+        "finance": 0.04846570733161606,
+        "interviewProcess": 0.045000000000000005,
+        "baseline": 0.05,
+        "capacityDiscount": 0,
+        "interviewDiscount": 0.975,
+        "adjustments": -0.015708
+      }
+    },
+    {
+      "slugA": "grace",
+      "slugB": "clara",
+      "labelA": "Progressive Grace",
+      "labelB": "Anxious Clara",
+      "userIdA": "45f62791-91da-4219-b20d-521bed73e780",
+      "userIdB": "0b32753d-c16d-41ad-bc51-81e6c3ad7f97",
+      "compatibilityScore": 80,
+      "finalScore": 0.799756021676227,
+      "dealbreakerMultiplier": 1,
+      "subscores": {
+        "attachment": 0.7464583333333332,
+        "values": 0.9366066688129319,
+        "semantic": 0.7,
+        "finance": 0.9693141466323211,
+        "interviewProcess": 1,
+        "capacityA": 0.5849099999999999,
+        "capacityB": 0.590513,
+        "dealbreakerMultiplier": 1
+      },
+      "adjustments": {
+        "sexualComm": 0,
+        "conflictStyle": 0.00048499999999999986,
+        "politics": -0.02,
+        "psychometricSoft": 0,
+        "total": -0.019515
+      },
+      "breakdown": {
+        "attachment": 0.2985833333333333,
+        "values": 0.3559105341489141,
+        "semantic": 0.034999999999999996,
+        "finance": 0.04846570733161606,
+        "interviewProcess": 0.05,
+        "baseline": 0.05,
+        "capacityDiscount": 0.018688553137636586,
+        "interviewDiscount": 0.95,
+        "adjustments": -0.019515
+      }
+    },
+    {
+      "slugA": "grace",
+      "slugB": "dan",
+      "labelA": "Progressive Grace",
+      "labelB": "Avoidant Dan",
+      "userIdA": "45f62791-91da-4219-b20d-521bed73e780",
+      "userIdB": "d61cf14a-c5f8-4b68-aa96-4578e442c9ee",
+      "compatibilityScore": 77,
+      "finalScore": 0.7697252338418198,
+      "dealbreakerMultiplier": 1,
+      "subscores": {
+        "attachment": 0.726625,
+        "values": 0.9366066688129319,
+        "semantic": 0.7,
+        "finance": 0.9693141466323211,
+        "interviewProcess": 0.9,
+        "capacityA": 0.5849099999999999,
+        "capacityB": 0.557265,
+        "dealbreakerMultiplier": 1
+      },
+      "adjustments": {
+        "sexualComm": 0,
+        "conflictStyle": -0.0022110000000000003,
+        "politics": -0.02,
+        "psychometricSoft": 0,
+        "total": -0.022211
+      },
+      "breakdown": {
+        "attachment": 0.29065,
+        "values": 0.3465444674607848,
+        "semantic": 0.034999999999999996,
+        "finance": 0.04846570733161606,
+        "interviewProcess": 0.045000000000000005,
+        "baseline": 0.05,
+        "capacityDiscount": 0.02372394095058119,
+        "interviewDiscount": 0.925,
+        "adjustments": -0.022211
+      }
+    },
+    {
+      "slugA": "grace",
+      "slugB": "eve",
+      "labelA": "Progressive Grace",
+      "labelB": "Avoidant Eve",
+      "userIdA": "45f62791-91da-4219-b20d-521bed73e780",
+      "userIdB": "7dce3fc3-d706-4b3f-a4a3-540e454cbda5",
+      "compatibilityScore": 77,
+      "finalScore": 0.7717252338418198,
+      "dealbreakerMultiplier": 1,
+      "subscores": {
+        "attachment": 0.731625,
+        "values": 0.9366066688129319,
+        "semantic": 0.7,
+        "finance": 0.9693141466323211,
+        "interviewProcess": 0.9,
+        "capacityA": 0.5849099999999999,
+        "capacityB": 0.557265,
+        "dealbreakerMultiplier": 1
+      },
+      "adjustments": {
+        "sexualComm": 0,
+        "conflictStyle": -0.0022110000000000003,
+        "politics": -0.02,
+        "psychometricSoft": 0,
+        "total": -0.022211
+      },
+      "breakdown": {
+        "attachment": 0.29265,
+        "values": 0.3465444674607848,
+        "semantic": 0.034999999999999996,
+        "finance": 0.04846570733161606,
+        "interviewProcess": 0.045000000000000005,
+        "baseline": 0.05,
+        "capacityDiscount": 0.02372394095058119,
+        "interviewDiscount": 0.925,
+        "adjustments": -0.022211
+      }
+    },
+    {
+      "slugA": "grace",
+      "slugB": "frank",
+      "labelA": "Progressive Grace",
+      "labelB": "Conservative Frank",
+      "userIdA": "45f62791-91da-4219-b20d-521bed73e780",
+      "userIdB": "dafef373-b753-4044-bfd3-1030dc97709d",
+      "compatibilityScore": 60,
+      "finalScore": 0.5993326399550953,
+      "dealbreakerMultiplier": 1,
+      "subscores": {
+        "attachment": 0.9144583333333334,
+        "values": 0.2329042086582787,
+        "semantic": 0.7,
+        "finance": 0.9693141466323211,
+        "interviewProcess": 1,
+        "capacityA": 0.5849099999999999,
+        "capacityB": 0.5849099999999999,
+        "dealbreakerMultiplier": 1
+      },
+      "adjustments": {
+        "sexualComm": 0,
+        "conflictStyle": 0.001107,
+        "politics": -0.02,
+        "psychometricSoft": 0,
+        "total": -0.018893
+      },
+      "breakdown": {
+        "attachment": 0.36578333333333335,
+        "values": 0.08850359929014592,
+        "semantic": 0.034999999999999996,
+        "finance": 0.04846570733161606,
+        "interviewProcess": 0.05,
+        "baseline": 0.05,
+        "capacityDiscount": 0.019527000000000027,
+        "interviewDiscount": 0.95,
+        "adjustments": -0.018893
+      }
+    },
+    {
+      "slugA": "grace",
+      "slugB": "grace",
+      "labelA": "Progressive Grace",
+      "labelB": "Progressive Grace",
+      "userIdA": "45f62791-91da-4219-b20d-521bed73e780",
+      "userIdB": "45f62791-91da-4219-b20d-521bed73e780",
+      "compatibilityScore": 91,
+      "finalScore": 0.9141123739982828,
+      "dealbreakerMultiplier": 1,
+      "subscores": {
+        "attachment": 0.9416666666666667,
+        "values": 0.9800000000000001,
+        "semantic": 0.7,
+        "finance": 0.9693141466323211,
+        "interviewProcess": 1,
+        "capacityA": 0.5849099999999999,
+        "capacityB": 0.5849099999999999,
+        "dealbreakerMultiplier": 1
+      },
+      "adjustments": {
+        "sexualComm": 0,
+        "conflictStyle": 0.001107,
+        "politics": 0,
+        "psychometricSoft": 0,
+        "total": 0.001107
+      },
+      "breakdown": {
+        "attachment": 0.3766666666666667,
+        "values": 0.37240000000000006,
+        "semantic": 0.034999999999999996,
+        "finance": 0.04846570733161606,
+        "interviewProcess": 0.05,
+        "baseline": 0.05,
+        "capacityDiscount": 0.019527000000000027,
+        "interviewDiscount": 0.95,
+        "adjustments": 0.001107
+      }
+    },
+    {
+      "slugA": "grace",
+      "slugB": "henry",
+      "labelA": "Progressive Grace",
+      "labelB": "Low Capacity Henry",
+      "userIdA": "45f62791-91da-4219-b20d-521bed73e780",
+      "userIdB": "071c75d4-1060-4001-be2a-c5f9560fe65e",
+      "compatibilityScore": 71,
+      "finalScore": 0.7096781553184819,
+      "dealbreakerMultiplier": 1,
+      "subscores": {
+        "attachment": 0.806125,
+        "values": 0.9366066688129319,
+        "semantic": 0.7,
+        "finance": 0.9693141466323211,
+        "interviewProcess": 0.51,
+        "capacityA": 0.5849099999999999,
+        "capacityB": 0.224285,
+        "dealbreakerMultiplier": 1
+      },
+      "adjustments": {
+        "sexualComm": 0,
+        "conflictStyle": -0.0025750000000000005,
+        "politics": -0.02,
+        "psychometricSoft": 0,
+        "total": -0.022575
+      },
+      "breakdown": {
+        "attachment": 0.32245,
+        "values": 0.3371784007726555,
+        "semantic": 0.034999999999999996,
+        "finance": 0.04846570733161606,
+        "interviewProcess": 0.025500000000000002,
+        "baseline": 0.05,
+        "capacityDiscount": 0.08634095278578963,
+        "interviewDiscount": 0.8999999999999999,
+        "adjustments": -0.022575
+      }
+    },
+    {
+      "slugA": "grace",
+      "slugB": "isabel",
+      "labelA": "Progressive Grace",
+      "labelB": "Finance Mismatch Isabel",
+      "userIdA": "45f62791-91da-4219-b20d-521bed73e780",
+      "userIdB": "5b0903dd-236b-4550-9e71-baa3fd27921e",
+      "compatibilityScore": 88,
+      "finalScore": 0.8814560898583264,
+      "dealbreakerMultiplier": 1,
+      "subscores": {
+        "attachment": 0.9502916666666666,
+        "values": 0.9366066688129319,
+        "semantic": 0.7,
+        "finance": 0.43541644709232274,
+        "interviewProcess": 0.9,
+        "capacityA": 0.5849099999999999,
+        "capacityB": 0.7883005000000003,
+        "dealbreakerMultiplier": 1
+      },
+      "adjustments": {
+        "sexualComm": 0,
+        "conflictStyle": 0.004292,
+        "politics": -0.02,
+        "psychometricSoft": 0,
+        "total": -0.015708
+      },
+      "breakdown": {
+        "attachment": 0.38011666666666666,
+        "values": 0.36527660083704344,
+        "semantic": 0.034999999999999996,
+        "finance": 0.021770822354616137,
+        "interviewProcess": 0.045000000000000005,
+        "baseline": 0.05,
+        "capacityDiscount": 0,
+        "interviewDiscount": 0.975,
+        "adjustments": -0.015708
+      }
+    },
+    {
+      "slugA": "grace",
+      "slugB": "jake",
+      "labelA": "Progressive Grace",
+      "labelB": "Dealbreaker Jake",
+      "userIdA": "45f62791-91da-4219-b20d-521bed73e780",
+      "userIdB": "543fd725-2ff7-4ff3-b49b-f666cfc5caf4",
+      "compatibilityScore": 0,
+      "finalScore": 0,
+      "dealbreakerMultiplier": 0,
+      "subscores": {
+        "attachment": 0.9535833333333333,
+        "values": 0.9261874192385071,
+        "semantic": 0.7,
+        "finance": 0.9693141466323211,
+        "interviewProcess": 0.9,
+        "capacityA": 0.5849099999999999,
+        "capacityB": 0.7883005000000003,
+        "dealbreakerMultiplier": 0
+      },
+      "adjustments": {
+        "sexualComm": 0,
+        "conflictStyle": 0.004292,
+        "politics": -0.02,
+        "psychometricSoft": 0,
+        "total": -0.015708
+      },
+      "breakdown": {
+        "attachment": 0.38143333333333335,
+        "values": 0.36121309350301783,
+        "semantic": 0.034999999999999996,
+        "finance": 0.04846570733161606,
+        "interviewProcess": 0.045000000000000005,
+        "baseline": 0.05,
+        "capacityDiscount": 0,
+        "interviewDiscount": 0.975,
+        "adjustments": -0.015708
+      }
+    },
+    {
+      "slugA": "grace",
+      "slugB": "kim",
+      "labelA": "Progressive Grace",
+      "labelB": "Demanding-Withdrawing Kim",
+      "userIdA": "45f62791-91da-4219-b20d-521bed73e780",
+      "userIdB": "526add45-7bec-4a4d-ab36-c879a41528e4",
+      "compatibilityScore": 84,
+      "finalScore": 0.8413153239136522,
+      "dealbreakerMultiplier": 1,
+      "subscores": {
+        "attachment": 0.9255416666666667,
+        "values": 0.9366066688129319,
+        "semantic": 0.7,
+        "finance": 0.9693141466323211,
+        "interviewProcess": 0.9,
+        "capacityA": 0.5849099999999999,
+        "capacityB": 0.503168,
+        "dealbreakerMultiplier": 1
+      },
+      "adjustments": {
+        "sexualComm": 0,
+        "conflictStyle": -0.0016620000000000003,
+        "politics": -0.02,
+        "psychometricSoft": 0,
+        "total": -0.021662
+      },
+      "breakdown": {
+        "attachment": 0.3702166666666667,
+        "values": 0.3465444674607848,
+        "semantic": 0.034999999999999996,
+        "finance": 0.04846570733161606,
+        "interviewProcess": 0.045000000000000005,
+        "baseline": 0.05,
+        "capacityDiscount": 0.03224951754541559,
+        "interviewDiscount": 0.925,
+        "adjustments": -0.021662
+      }
+    },
+    {
+      "slugA": "grace",
+      "slugB": "morgan",
+      "labelA": "Progressive Grace",
+      "labelB": "Disorganised Morgan",
+      "userIdA": "45f62791-91da-4219-b20d-521bed73e780",
+      "userIdB": "346c6543-cf25-4c9f-af22-a11bd538ddb8",
+      "compatibilityScore": 66,
+      "finalScore": 0.660165149204229,
+      "dealbreakerMultiplier": 1,
+      "subscores": {
+        "attachment": 0.5680416666666667,
+        "values": 0.9366066688129319,
+        "semantic": 0.7,
+        "finance": 0.9693141466323211,
+        "interviewProcess": 0.77,
+        "capacityA": 0.5849099999999999,
+        "capacityB": 0.3780366666666667,
+        "dealbreakerMultiplier": 1
+      },
+      "adjustments": {
+        "sexualComm": 0,
+        "conflictStyle": -0.002265,
+        "politics": -0.02,
+        "psychometricSoft": 0,
+        "total": -0.022265
+      },
+      "breakdown": {
+        "attachment": 0.22721666666666668,
+        "values": 0.3371784007726555,
+        "semantic": 0.034999999999999996,
+        "finance": 0.04846570733161606,
+        "interviewProcess": 0.038500000000000006,
+        "baseline": 0.05,
+        "capacityDiscount": 0.0539306255667092,
+        "interviewDiscount": 0.8999999999999999,
+        "adjustments": -0.022265
+      }
+    },
+    {
+      "slugA": "henry",
+      "slugB": "alice",
+      "labelA": "Low Capacity Henry",
+      "labelB": "Ideal Alice",
+      "userIdA": "071c75d4-1060-4001-be2a-c5f9560fe65e",
+      "userIdB": "330354f3-70f1-4613-a398-7c72ae9043a1",
+      "compatibilityScore": 75,
+      "finalScore": 0.7503034732362059,
+      "dealbreakerMultiplier": 1,
+      "subscores": {
+        "attachment": 0.8297083333333335,
+        "values": 0.9850000000000001,
+        "semantic": 0.7,
+        "finance": 0.9693141466323211,
+        "interviewProcess": 0.31,
+        "capacityA": 0.224285,
+        "capacityB": 0.8400572000000001,
+        "dealbreakerMultiplier": 1
+      },
+      "adjustments": {
+        "sexualComm": 0,
+        "conflictStyle": -0.00021500000000000002,
+        "politics": 0,
+        "psychometricSoft": -0.03,
+        "total": -0.030215
+      },
+      "breakdown": {
+        "attachment": 0.3318833333333334,
+        "values": 0.3644500000000001,
+        "semantic": 0.034999999999999996,
+        "finance": 0.04846570733161606,
+        "interviewProcess": 0.0155,
+        "baseline": 0.05,
+        "capacityDiscount": 0.06478056742874357,
+        "interviewDiscount": 0.925,
+        "adjustments": -0.030215
+      }
+    },
+    {
+      "slugA": "henry",
+      "slugB": "bob",
+      "labelA": "Low Capacity Henry",
+      "labelB": "Compatible Bob",
+      "userIdA": "071c75d4-1060-4001-be2a-c5f9560fe65e",
+      "userIdB": "f79971c4-63cf-41c7-b4c7-46812f4cb135",
+      "compatibilityScore": 74,
+      "finalScore": 0.7426189371161861,
+      "dealbreakerMultiplier": 1,
+      "subscores": {
+        "attachment": 0.8180416666666666,
+        "values": 0.974465859182199,
+        "semantic": 0.7,
+        "finance": 0.9693141466323211,
+        "interviewProcess": 0.41,
+        "capacityA": 0.224285,
+        "capacityB": 0.7883005000000003,
+        "dealbreakerMultiplier": 1
+      },
+      "adjustments": {
+        "sexualComm": 0,
+        "conflictStyle": -0.00026000000000000014,
+        "politics": 0,
+        "psychometricSoft": -0.03,
+        "total": -0.03026
+      },
+      "breakdown": {
+        "attachment": 0.32721666666666666,
+        "values": 0.3605523678974137,
+        "semantic": 0.034999999999999996,
+        "finance": 0.04846570733161606,
+        "interviewProcess": 0.0205,
+        "baseline": 0.05,
+        "capacityDiscount": 0.06885580477951034,
+        "interviewDiscount": 0.925,
+        "adjustments": -0.03026
+      }
+    },
+    {
+      "slugA": "henry",
+      "slugB": "clara",
+      "labelA": "Low Capacity Henry",
+      "labelB": "Anxious Clara",
+      "userIdA": "071c75d4-1060-4001-be2a-c5f9560fe65e",
+      "userIdB": "0b32753d-c16d-41ad-bc51-81e6c3ad7f97",
+      "compatibilityScore": 68,
+      "finalScore": 0.6805456169702688,
+      "dealbreakerMultiplier": 1,
+      "subscores": {
+        "attachment": 0.6379166666666667,
+        "values": 0.9850000000000001,
+        "semantic": 0.7,
+        "finance": 0.9693141466323211,
+        "interviewProcess": 0.51,
+        "capacityA": 0.224285,
+        "capacityB": 0.590513,
+        "dealbreakerMultiplier": 1
+      },
+      "adjustments": {
+        "sexualComm": 0,
+        "conflictStyle": -0.002365,
+        "politics": 0,
+        "psychometricSoft": 0,
+        "total": -0.002365
+      },
+      "breakdown": {
+        "attachment": 0.2551666666666667,
+        "values": 0.3546,
+        "semantic": 0.034999999999999996,
+        "finance": 0.04846570733161606,
+        "interviewProcess": 0.025500000000000002,
+        "baseline": 0.05,
+        "capacityDiscount": 0.08582175702801405,
+        "interviewDiscount": 0.8999999999999999,
+        "adjustments": -0.002365
+      }
+    },
+    {
+      "slugA": "henry",
+      "slugB": "dan",
+      "labelA": "Low Capacity Henry",
+      "labelB": "Avoidant Dan",
+      "userIdA": "071c75d4-1060-4001-be2a-c5f9560fe65e",
+      "userIdB": "d61cf14a-c5f8-4b68-aa96-4578e442c9ee",
+      "compatibilityScore": 66,
+      "finalScore": 0.6592721945741816,
+      "dealbreakerMultiplier": 1,
+      "subscores": {
+        "attachment": 0.6268333333333335,
+        "values": 0.9850000000000001,
+        "semantic": 0.7,
+        "finance": 0.9693141466323211,
+        "interviewProcess": 0.61,
+        "capacityA": 0.224285,
+        "capacityB": 0.557265,
+        "dealbreakerMultiplier": 1
+      },
+      "adjustments": {
+        "sexualComm": 0,
+        "conflictStyle": -0.011236999999999999,
+        "politics": 0,
+        "psychometricSoft": 0,
+        "total": -0.011236999999999999
+      },
+      "breakdown": {
+        "attachment": 0.2507333333333334,
+        "values": 0.34475000000000006,
+        "semantic": 0.034999999999999996,
+        "finance": 0.04846570733161606,
+        "interviewProcess": 0.0305,
+        "baseline": 0.05,
+        "capacityDiscount": 0.0889398460907679,
+        "interviewDiscount": 0.875,
+        "adjustments": -0.011236999999999999
+      }
+    },
+    {
+      "slugA": "henry",
+      "slugB": "eve",
+      "labelA": "Low Capacity Henry",
+      "labelB": "Avoidant Eve",
+      "userIdA": "071c75d4-1060-4001-be2a-c5f9560fe65e",
+      "userIdB": "7dce3fc3-d706-4b3f-a4a3-540e454cbda5",
+      "compatibilityScore": 66,
+      "finalScore": 0.6612721945741816,
+      "dealbreakerMultiplier": 1,
+      "subscores": {
+        "attachment": 0.6318333333333335,
+        "values": 0.9850000000000001,
+        "semantic": 0.7,
+        "finance": 0.9693141466323211,
+        "interviewProcess": 0.61,
+        "capacityA": 0.224285,
+        "capacityB": 0.557265,
+        "dealbreakerMultiplier": 1
+      },
+      "adjustments": {
+        "sexualComm": 0,
+        "conflictStyle": -0.011236999999999999,
+        "politics": 0,
+        "psychometricSoft": 0,
+        "total": -0.011236999999999999
+      },
+      "breakdown": {
+        "attachment": 0.2527333333333334,
+        "values": 0.34475000000000006,
+        "semantic": 0.034999999999999996,
+        "finance": 0.04846570733161606,
+        "interviewProcess": 0.0305,
+        "baseline": 0.05,
+        "capacityDiscount": 0.0889398460907679,
+        "interviewDiscount": 0.875,
+        "adjustments": -0.011236999999999999
+      }
+    },
+    {
+      "slugA": "henry",
+      "slugB": "frank",
+      "labelA": "Low Capacity Henry",
+      "labelB": "Conservative Frank",
+      "userIdA": "071c75d4-1060-4001-be2a-c5f9560fe65e",
+      "userIdB": "dafef373-b753-4044-bfd3-1030dc97709d",
+      "compatibilityScore": 48,
+      "finalScore": 0.4775159507061133,
+      "dealbreakerMultiplier": 1,
+      "subscores": {
+        "attachment": 0.7916666666666667,
+        "values": 0.3077764708156118,
+        "semantic": 0.7,
+        "finance": 0.9693141466323211,
+        "interviewProcess": 0.51,
+        "capacityA": 0.224285,
+        "capacityB": 0.5849099999999999,
+        "dealbreakerMultiplier": 1
+      },
+      "adjustments": {
+        "sexualComm": 0,
+        "conflictStyle": -0.0025750000000000005,
+        "politics": -0.02,
+        "psychometricSoft": 0,
+        "total": -0.022575
+      },
+      "breakdown": {
+        "attachment": 0.3166666666666667,
+        "values": 0.11079952949362025,
+        "semantic": 0.034999999999999996,
+        "finance": 0.04846570733161606,
+        "interviewProcess": 0.025500000000000002,
+        "baseline": 0.05,
+        "capacityDiscount": 0.08634095278578963,
+        "interviewDiscount": 0.8999999999999999,
+        "adjustments": -0.022575
+      }
+    },
+    {
+      "slugA": "henry",
+      "slugB": "grace",
+      "labelA": "Low Capacity Henry",
+      "labelB": "Progressive Grace",
+      "userIdA": "071c75d4-1060-4001-be2a-c5f9560fe65e",
+      "userIdB": "45f62791-91da-4219-b20d-521bed73e780",
+      "compatibilityScore": 71,
+      "finalScore": 0.7096781553184819,
+      "dealbreakerMultiplier": 1,
+      "subscores": {
+        "attachment": 0.806125,
+        "values": 0.9366066688129319,
+        "semantic": 0.7,
+        "finance": 0.9693141466323211,
+        "interviewProcess": 0.51,
+        "capacityA": 0.224285,
+        "capacityB": 0.5849099999999999,
+        "dealbreakerMultiplier": 1
+      },
+      "adjustments": {
+        "sexualComm": 0,
+        "conflictStyle": -0.0025750000000000005,
+        "politics": -0.02,
+        "psychometricSoft": 0,
+        "total": -0.022575
+      },
+      "breakdown": {
+        "attachment": 0.32245,
+        "values": 0.3371784007726555,
+        "semantic": 0.034999999999999996,
+        "finance": 0.04846570733161606,
+        "interviewProcess": 0.025500000000000002,
+        "baseline": 0.05,
+        "capacityDiscount": 0.08634095278578963,
+        "interviewDiscount": 0.8999999999999999,
+        "adjustments": -0.022575
+      }
+    },
+    {
+      "slugA": "henry",
+      "slugB": "henry",
+      "labelA": "Low Capacity Henry",
+      "labelB": "Low Capacity Henry",
+      "userIdA": "071c75d4-1060-4001-be2a-c5f9560fe65e",
+      "userIdB": "071c75d4-1060-4001-be2a-c5f9560fe65e",
+      "compatibilityScore": 63,
+      "finalScore": 0.6295115406649494,
+      "dealbreakerMultiplier": 1,
+      "subscores": {
+        "attachment": 0.7333333333333333,
+        "values": 0.9850000000000001,
+        "semantic": 0.7,
+        "finance": 0.9693141466323211,
+        "interviewProcess": 0.91,
+        "capacityA": 0.224285,
+        "capacityB": 0.224285,
+        "dealbreakerMultiplier": 1
+      },
+      "adjustments": {
+        "sexualComm": 0,
+        "conflictStyle": -0.009973000000000001,
+        "politics": 0,
+        "psychometricSoft": -0.04,
+        "total": -0.049973000000000004
+      },
+      "breakdown": {
+        "attachment": 0.29333333333333333,
+        "values": 0.33490000000000003,
+        "semantic": 0.034999999999999996,
+        "finance": 0.04846570733161606,
+        "interviewProcess": 0.045500000000000006,
+        "baseline": 0.05,
+        "capacityDiscount": 0.1277145,
+        "interviewDiscount": 0.85,
+        "adjustments": -0.049973000000000004
+      }
+    },
+    {
+      "slugA": "henry",
+      "slugB": "isabel",
+      "labelA": "Low Capacity Henry",
+      "labelB": "Finance Mismatch Isabel",
+      "userIdA": "071c75d4-1060-4001-be2a-c5f9560fe65e",
+      "userIdB": "5b0903dd-236b-4550-9e71-baa3fd27921e",
+      "compatibilityScore": 72,
+      "finalScore": 0.718505017575106,
+      "dealbreakerMultiplier": 1,
+      "subscores": {
+        "attachment": 0.81475,
+        "values": 0.9850000000000001,
+        "semantic": 0.7,
+        "finance": 0.43541644709232274,
+        "interviewProcess": 0.41,
+        "capacityA": 0.224285,
+        "capacityB": 0.7883005000000003,
+        "dealbreakerMultiplier": 1
+      },
+      "adjustments": {
+        "sexualComm": 0,
+        "conflictStyle": -0.00026000000000000014,
+        "politics": 0,
+        "psychometricSoft": -0.03,
+        "total": -0.03026
+      },
+      "breakdown": {
+        "attachment": 0.3259,
+        "values": 0.3644500000000001,
+        "semantic": 0.034999999999999996,
+        "finance": 0.021770822354616137,
+        "interviewProcess": 0.0205,
+        "baseline": 0.05,
+        "capacityDiscount": 0.06885580477951034,
+        "interviewDiscount": 0.925,
+        "adjustments": -0.03026
+      }
+    },
+    {
+      "slugA": "henry",
+      "slugB": "jake",
+      "labelA": "Low Capacity Henry",
+      "labelB": "Dealbreaker Jake",
+      "userIdA": "071c75d4-1060-4001-be2a-c5f9560fe65e",
+      "userIdB": "543fd725-2ff7-4ff3-b49b-f666cfc5caf4",
+      "compatibilityScore": 0,
+      "finalScore": 0,
+      "dealbreakerMultiplier": 0,
+      "subscores": {
+        "attachment": 0.8180416666666666,
+        "values": 0.974465859182199,
+        "semantic": 0.7,
+        "finance": 0.9693141466323211,
+        "interviewProcess": 0.41,
+        "capacityA": 0.224285,
+        "capacityB": 0.7883005000000003,
+        "dealbreakerMultiplier": 0
+      },
+      "adjustments": {
+        "sexualComm": 0,
+        "conflictStyle": -0.00026000000000000014,
+        "politics": 0,
+        "psychometricSoft": -0.03,
+        "total": -0.03026
+      },
+      "breakdown": {
+        "attachment": 0.32721666666666666,
+        "values": 0.3605523678974137,
+        "semantic": 0.034999999999999996,
+        "finance": 0.04846570733161606,
+        "interviewProcess": 0.0205,
+        "baseline": 0.05,
+        "capacityDiscount": 0.06885580477951034,
+        "interviewDiscount": 0.925,
+        "adjustments": -0.03026
+      }
+    },
+    {
+      "slugA": "henry",
+      "slugB": "kim",
+      "labelA": "Low Capacity Henry",
+      "labelB": "Demanding-Withdrawing Kim",
+      "userIdA": "071c75d4-1060-4001-be2a-c5f9560fe65e",
+      "userIdB": "526add45-7bec-4a4d-ab36-c879a41528e4",
+      "compatibilityScore": 73,
+      "finalScore": 0.7266505246491989,
+      "dealbreakerMultiplier": 1,
+      "subscores": {
+        "attachment": 0.79725,
+        "values": 0.9850000000000001,
+        "semantic": 0.7,
+        "finance": 0.9693141466323211,
+        "interviewProcess": 0.61,
+        "capacityA": 0.224285,
+        "capacityB": 0.503168,
+        "dealbreakerMultiplier": 1
+      },
+      "adjustments": {
+        "sexualComm": 0,
+        "conflictStyle": -0.006746,
+        "politics": 0,
+        "psychometricSoft": 0,
+        "total": -0.006746
+      },
+      "breakdown": {
+        "attachment": 0.3189,
+        "values": 0.34475000000000006,
+        "semantic": 0.034999999999999996,
+        "finance": 0.04846570733161606,
+        "interviewProcess": 0.0305,
+        "baseline": 0.05,
+        "capacityDiscount": 0.0942191826824172,
+        "interviewDiscount": 0.875,
+        "adjustments": -0.006746
+      }
+    },
+    {
+      "slugA": "henry",
+      "slugB": "morgan",
+      "labelA": "Low Capacity Henry",
+      "labelB": "Disorganised Morgan",
+      "userIdA": "071c75d4-1060-4001-be2a-c5f9560fe65e",
+      "userIdB": "346c6543-cf25-4c9f-af22-a11bd538ddb8",
+      "compatibilityScore": 54,
+      "finalScore": 0.5443658207509232,
+      "dealbreakerMultiplier": 1,
+      "subscores": {
+        "attachment": 0.49525,
+        "values": 0.9850000000000001,
+        "semantic": 0.7,
+        "finance": 0.9693141466323211,
+        "interviewProcess": 0.7100000000000001,
+        "capacityA": 0.224285,
+        "capacityB": 0.3780366666666667,
+        "dealbreakerMultiplier": 1
+      },
+      "adjustments": {
+        "sexualComm": 0,
+        "conflictStyle": -0.009955,
+        "politics": 0,
+        "psychometricSoft": -0.04,
+        "total": -0.049955
+      },
+      "breakdown": {
+        "attachment": 0.19810000000000003,
+        "values": 0.33490000000000003,
+        "semantic": 0.034999999999999996,
+        "finance": 0.04846570733161606,
+        "interviewProcess": 0.035500000000000004,
+        "baseline": 0.05,
+        "capacityDiscount": 0.10764488658069293,
+        "interviewDiscount": 0.85,
+        "adjustments": -0.049955
+      }
+    },
+    {
+      "slugA": "isabel",
+      "slugB": "alice",
+      "labelA": "Finance Mismatch Isabel",
+      "labelB": "Ideal Alice",
+      "userIdA": "5b0903dd-236b-4550-9e71-baa3fd27921e",
+      "userIdB": "330354f3-70f1-4613-a398-7c72ae9043a1",
+      "compatibilityScore": 97,
+      "finalScore": 0.9700728223546163,
+      "dealbreakerMultiplier": 1,
+      "subscores": {
+        "attachment": 0.981625,
+        "values": 0.9850000000000001,
+        "semantic": 0.7,
+        "finance": 0.43541644709232274,
+        "interviewProcess": 0.9,
+        "capacityA": 0.7883005000000003,
+        "capacityB": 0.8400572000000001,
+        "dealbreakerMultiplier": 1
+      },
+      "adjustments": {
+        "sexualComm": 0,
+        "conflictStyle": 0.011652000000000001,
+        "politics": 0,
+        "psychometricSoft": 0.02,
+        "total": 0.031652
+      },
+      "breakdown": {
+        "attachment": 0.39265,
+        "values": 0.3940000000000001,
+        "semantic": 0.034999999999999996,
+        "finance": 0.021770822354616137,
+        "interviewProcess": 0.045000000000000005,
+        "baseline": 0.05,
+        "capacityDiscount": 0,
+        "interviewDiscount": 1,
+        "adjustments": 0.031652
+      }
+    },
+    {
+      "slugA": "isabel",
+      "slugB": "bob",
+      "labelA": "Finance Mismatch Isabel",
+      "labelB": "Compatible Bob",
+      "userIdA": "5b0903dd-236b-4550-9e71-baa3fd27921e",
+      "userIdB": "f79971c4-63cf-41c7-b4c7-46812f4cb135",
+      "compatibilityScore": 96,
+      "finalScore": 0.9641924993608292,
+      "dealbreakerMultiplier": 1,
+      "subscores": {
+        "attachment": 0.9672083333333333,
+        "values": 0.974465859182199,
+        "semantic": 0.7,
+        "finance": 0.43541644709232274,
+        "interviewProcess": 1,
+        "capacityA": 0.7883005000000003,
+        "capacityB": 0.7883005000000003,
+        "dealbreakerMultiplier": 1
+      },
+      "adjustments": {
+        "sexualComm": 0,
+        "conflictStyle": 0.010752,
+        "politics": 0,
+        "psychometricSoft": 0.02,
+        "total": 0.030752
+      },
+      "breakdown": {
+        "attachment": 0.38688333333333336,
+        "values": 0.3897863436728796,
+        "semantic": 0.034999999999999996,
+        "finance": 0.021770822354616137,
+        "interviewProcess": 0.05,
+        "baseline": 0.05,
+        "capacityDiscount": 0,
+        "interviewDiscount": 1,
+        "adjustments": 0.030752
+      }
+    },
+    {
+      "slugA": "isabel",
+      "slugB": "clara",
+      "labelA": "Finance Mismatch Isabel",
+      "labelB": "Anxious Clara",
+      "userIdA": "5b0903dd-236b-4550-9e71-baa3fd27921e",
+      "userIdB": "0b32753d-c16d-41ad-bc51-81e6c3ad7f97",
+      "compatibilityScore": 84,
+      "finalScore": 0.8427141556879496,
+      "dealbreakerMultiplier": 1,
+      "subscores": {
+        "attachment": 0.7605833333333332,
+        "values": 0.9850000000000001,
+        "semantic": 0.7,
+        "finance": 0.43541644709232274,
+        "interviewProcess": 0.9,
+        "capacityA": 0.7883005000000003,
+        "capacityB": 0.590513,
+        "dealbreakerMultiplier": 1
+      },
+      "adjustments": {
+        "sexualComm": 0,
+        "conflictStyle": 0.0025599999999999998,
+        "politics": 0,
+        "psychometricSoft": 0,
+        "total": 0.0025599999999999998
+      },
+      "breakdown": {
+        "attachment": 0.3042333333333333,
+        "values": 0.38415000000000005,
+        "semantic": 0.034999999999999996,
+        "finance": 0.021770822354616137,
+        "interviewProcess": 0.045000000000000005,
+        "baseline": 0.05,
+        "capacityDiscount": 0,
+        "interviewDiscount": 0.975,
+        "adjustments": 0.0025599999999999998
+      }
+    },
+    {
+      "slugA": "isabel",
+      "slugB": "dan",
+      "labelA": "Finance Mismatch Isabel",
+      "labelB": "Avoidant Dan",
+      "userIdA": "5b0903dd-236b-4550-9e71-baa3fd27921e",
+      "userIdB": "d61cf14a-c5f8-4b68-aa96-4578e442c9ee",
+      "compatibilityScore": 82,
+      "finalScore": 0.8168548223546163,
+      "dealbreakerMultiplier": 1,
+      "subscores": {
+        "attachment": 0.7374999999999999,
+        "values": 0.9850000000000001,
+        "semantic": 0.7,
+        "finance": 0.43541644709232274,
+        "interviewProcess": 0.8,
+        "capacityA": 0.7883005000000003,
+        "capacityB": 0.557265,
+        "dealbreakerMultiplier": 1
+      },
+      "adjustments": {
+        "sexualComm": 0,
+        "conflictStyle": 0.000784,
+        "politics": 0,
+        "psychometricSoft": 0,
+        "total": 0.000784
+      },
+      "breakdown": {
+        "attachment": 0.295,
+        "values": 0.3743000000000001,
+        "semantic": 0.034999999999999996,
+        "finance": 0.021770822354616137,
+        "interviewProcess": 0.04000000000000001,
+        "baseline": 0.05,
+        "capacityDiscount": 0,
+        "interviewDiscount": 0.95,
+        "adjustments": 0.000784
+      }
+    },
+    {
+      "slugA": "isabel",
+      "slugB": "eve",
+      "labelA": "Finance Mismatch Isabel",
+      "labelB": "Avoidant Eve",
+      "userIdA": "5b0903dd-236b-4550-9e71-baa3fd27921e",
+      "userIdB": "7dce3fc3-d706-4b3f-a4a3-540e454cbda5",
+      "compatibilityScore": 82,
+      "finalScore": 0.8188548223546163,
+      "dealbreakerMultiplier": 1,
+      "subscores": {
+        "attachment": 0.7424999999999999,
+        "values": 0.9850000000000001,
+        "semantic": 0.7,
+        "finance": 0.43541644709232274,
+        "interviewProcess": 0.8,
+        "capacityA": 0.7883005000000003,
+        "capacityB": 0.557265,
+        "dealbreakerMultiplier": 1
+      },
+      "adjustments": {
+        "sexualComm": 0,
+        "conflictStyle": 0.000784,
+        "politics": 0,
+        "psychometricSoft": 0,
+        "total": 0.000784
+      },
+      "breakdown": {
+        "attachment": 0.297,
+        "values": 0.3743000000000001,
+        "semantic": 0.034999999999999996,
+        "finance": 0.021770822354616137,
+        "interviewProcess": 0.04000000000000001,
+        "baseline": 0.05,
+        "capacityDiscount": 0,
+        "interviewDiscount": 0.95,
+        "adjustments": 0.000784
+      }
+    },
+    {
+      "slugA": "isabel",
+      "slugB": "frank",
+      "labelA": "Finance Mismatch Isabel",
+      "labelB": "Conservative Frank",
+      "userIdA": "5b0903dd-236b-4550-9e71-baa3fd27921e",
+      "userIdB": "dafef373-b753-4044-bfd3-1030dc97709d",
+      "compatibilityScore": 63,
+      "finalScore": 0.6253289793060381,
+      "dealbreakerMultiplier": 1,
+      "subscores": {
+        "attachment": 0.9230833333333333,
+        "values": 0.3077764708156118,
+        "semantic": 0.7,
+        "finance": 0.43541644709232274,
+        "interviewProcess": 0.9,
+        "capacityA": 0.7883005000000003,
+        "capacityB": 0.5849099999999999,
+        "dealbreakerMultiplier": 1
+      },
+      "adjustments": {
+        "sexualComm": 0,
+        "conflictStyle": 0.004292,
+        "politics": -0.02,
+        "psychometricSoft": 0,
+        "total": -0.015708
+      },
+      "breakdown": {
+        "attachment": 0.3692333333333333,
+        "values": 0.1200328236180886,
+        "semantic": 0.034999999999999996,
+        "finance": 0.021770822354616137,
+        "interviewProcess": 0.045000000000000005,
+        "baseline": 0.05,
+        "capacityDiscount": 0,
+        "interviewDiscount": 0.975,
+        "adjustments": -0.015708
+      }
+    },
+    {
+      "slugA": "isabel",
+      "slugB": "grace",
+      "labelA": "Finance Mismatch Isabel",
+      "labelB": "Progressive Grace",
+      "userIdA": "5b0903dd-236b-4550-9e71-baa3fd27921e",
+      "userIdB": "45f62791-91da-4219-b20d-521bed73e780",
+      "compatibilityScore": 88,
+      "finalScore": 0.8814560898583264,
+      "dealbreakerMultiplier": 1,
+      "subscores": {
+        "attachment": 0.9502916666666666,
+        "values": 0.9366066688129319,
+        "semantic": 0.7,
+        "finance": 0.43541644709232274,
+        "interviewProcess": 0.9,
+        "capacityA": 0.7883005000000003,
+        "capacityB": 0.5849099999999999,
+        "dealbreakerMultiplier": 1
+      },
+      "adjustments": {
+        "sexualComm": 0,
+        "conflictStyle": 0.004292,
+        "politics": -0.02,
+        "psychometricSoft": 0,
+        "total": -0.015708
+      },
+      "breakdown": {
+        "attachment": 0.38011666666666666,
+        "values": 0.36527660083704344,
+        "semantic": 0.034999999999999996,
+        "finance": 0.021770822354616137,
+        "interviewProcess": 0.045000000000000005,
+        "baseline": 0.05,
+        "capacityDiscount": 0,
+        "interviewDiscount": 0.975,
+        "adjustments": -0.015708
+      }
+    },
+    {
+      "slugA": "isabel",
+      "slugB": "henry",
+      "labelA": "Finance Mismatch Isabel",
+      "labelB": "Low Capacity Henry",
+      "userIdA": "5b0903dd-236b-4550-9e71-baa3fd27921e",
+      "userIdB": "071c75d4-1060-4001-be2a-c5f9560fe65e",
+      "compatibilityScore": 72,
+      "finalScore": 0.718505017575106,
+      "dealbreakerMultiplier": 1,
+      "subscores": {
+        "attachment": 0.81475,
+        "values": 0.9850000000000001,
+        "semantic": 0.7,
+        "finance": 0.43541644709232274,
+        "interviewProcess": 0.41,
+        "capacityA": 0.7883005000000003,
+        "capacityB": 0.224285,
+        "dealbreakerMultiplier": 1
+      },
+      "adjustments": {
+        "sexualComm": 0,
+        "conflictStyle": -0.00026000000000000014,
+        "politics": 0,
+        "psychometricSoft": -0.03,
+        "total": -0.03026
+      },
+      "breakdown": {
+        "attachment": 0.3259,
+        "values": 0.3644500000000001,
+        "semantic": 0.034999999999999996,
+        "finance": 0.021770822354616137,
+        "interviewProcess": 0.0205,
+        "baseline": 0.05,
+        "capacityDiscount": 0.06885580477951034,
+        "interviewDiscount": 0.925,
+        "adjustments": -0.03026
+      }
+    },
+    {
+      "slugA": "isabel",
+      "slugB": "isabel",
+      "labelA": "Finance Mismatch Isabel",
+      "labelB": "Finance Mismatch Isabel",
+      "userIdA": "5b0903dd-236b-4550-9e71-baa3fd27921e",
+      "userIdB": "5b0903dd-236b-4550-9e71-baa3fd27921e",
+      "compatibilityScore": 99,
+      "finalScore": 0.9948843959028134,
+      "dealbreakerMultiplier": 1,
+      "subscores": {
+        "attachment": 0.9666666666666667,
+        "values": 0.9850000000000001,
+        "semantic": 0.7,
+        "finance": 0.9693145847229279,
+        "interviewProcess": 1,
+        "capacityA": 0.7883005000000003,
+        "capacityB": 0.7883005000000003,
+        "dealbreakerMultiplier": 1
+      },
+      "adjustments": {
+        "sexualComm": 0,
+        "conflictStyle": 0.010752,
+        "politics": 0,
+        "psychometricSoft": 0.02,
+        "total": 0.030752
+      },
+      "breakdown": {
+        "attachment": 0.3866666666666667,
+        "values": 0.3940000000000001,
+        "semantic": 0.034999999999999996,
+        "finance": 0.04846572923614639,
+        "interviewProcess": 0.05,
+        "baseline": 0.05,
+        "capacityDiscount": 0,
+        "interviewDiscount": 1,
+        "adjustments": 0.030752
+      }
+    },
+    {
+      "slugA": "isabel",
+      "slugB": "jake",
+      "labelA": "Finance Mismatch Isabel",
+      "labelB": "Dealbreaker Jake",
+      "userIdA": "5b0903dd-236b-4550-9e71-baa3fd27921e",
+      "userIdB": "543fd725-2ff7-4ff3-b49b-f666cfc5caf4",
+      "compatibilityScore": 0,
+      "finalScore": 0,
+      "dealbreakerMultiplier": 0,
+      "subscores": {
+        "attachment": 0.9672083333333333,
+        "values": 0.974465859182199,
+        "semantic": 0.7,
+        "finance": 0.43541644709232274,
+        "interviewProcess": 1,
+        "capacityA": 0.7883005000000003,
+        "capacityB": 0.7883005000000003,
+        "dealbreakerMultiplier": 0
+      },
+      "adjustments": {
+        "sexualComm": 0,
+        "conflictStyle": 0.010752,
+        "politics": 0,
+        "psychometricSoft": 0.02,
+        "total": 0.030752
+      },
+      "breakdown": {
+        "attachment": 0.38688333333333336,
+        "values": 0.3897863436728796,
+        "semantic": 0.034999999999999996,
+        "finance": 0.021770822354616137,
+        "interviewProcess": 0.05,
+        "baseline": 0.05,
+        "capacityDiscount": 0,
+        "interviewDiscount": 1,
+        "adjustments": 0.030752
+      }
+    },
+    {
+      "slugA": "isabel",
+      "slugB": "kim",
+      "labelA": "Finance Mismatch Isabel",
+      "labelB": "Demanding-Withdrawing Kim",
+      "userIdA": "5b0903dd-236b-4550-9e71-baa3fd27921e",
+      "userIdB": "526add45-7bec-4a4d-ab36-c879a41528e4",
+      "compatibilityScore": 89,
+      "finalScore": 0.8890053808878763,
+      "dealbreakerMultiplier": 1,
+      "subscores": {
+        "attachment": 0.9341666666666666,
+        "values": 0.9850000000000001,
+        "semantic": 0.7,
+        "finance": 0.43541644709232274,
+        "interviewProcess": 0.8,
+        "capacityA": 0.7883005000000003,
+        "capacityB": 0.503168,
+        "dealbreakerMultiplier": 1
+      },
+      "adjustments": {
+        "sexualComm": 0,
+        "conflictStyle": 0.00032799999999999973,
+        "politics": 0,
+        "psychometricSoft": 0,
+        "total": 0.00032799999999999973
+      },
+      "breakdown": {
+        "attachment": 0.37366666666666665,
+        "values": 0.3743000000000001,
+        "semantic": 0.034999999999999996,
+        "finance": 0.021770822354616137,
+        "interviewProcess": 0.04000000000000001,
+        "baseline": 0.05,
+        "capacityDiscount": 0.006060108133406594,
+        "interviewDiscount": 0.95,
+        "adjustments": 0.00032799999999999973
+      }
+    },
+    {
+      "slugA": "isabel",
+      "slugB": "morgan",
+      "labelA": "Finance Mismatch Isabel",
+      "labelB": "Disorganised Morgan",
+      "userIdA": "5b0903dd-236b-4550-9e71-baa3fd27921e",
+      "userIdB": "346c6543-cf25-4c9f-af22-a11bd538ddb8",
+      "compatibilityScore": 70,
+      "finalScore": 0.7044174020140241,
+      "dealbreakerMultiplier": 1,
+      "subscores": {
+        "attachment": 0.5766666666666667,
+        "values": 0.9850000000000001,
+        "semantic": 0.7,
+        "finance": 0.43541644709232274,
+        "interviewProcess": 0.6699999999999999,
+        "capacityA": 0.7883005000000003,
+        "capacityB": 0.3780366666666667,
+        "dealbreakerMultiplier": 1
+      },
+      "adjustments": {
+        "sexualComm": 0,
+        "conflictStyle": 0.0002599999999999999,
+        "politics": 0,
+        "psychometricSoft": 0,
+        "total": 0.0002599999999999999
+      },
+      "breakdown": {
+        "attachment": 0.2306666666666667,
+        "values": 0.3644500000000001,
+        "semantic": 0.034999999999999996,
+        "finance": 0.021770822354616137,
+        "interviewProcess": 0.033499999999999995,
+        "baseline": 0.05,
+        "capacityDiscount": 0.031230087007258853,
+        "interviewDiscount": 0.925,
+        "adjustments": 0.0002599999999999999
+      }
+    },
+    {
+      "slugA": "jake",
+      "slugB": "alice",
+      "labelA": "Dealbreaker Jake",
+      "labelB": "Ideal Alice",
+      "userIdA": "543fd725-2ff7-4ff3-b49b-f666cfc5caf4",
+      "userIdB": "330354f3-70f1-4613-a398-7c72ae9043a1",
+      "compatibilityScore": 0,
+      "finalScore": 0,
+      "dealbreakerMultiplier": 0,
+      "subscores": {
+        "attachment": 0.9866666666666667,
+        "values": 0.974465859182199,
+        "semantic": 0.7,
+        "finance": 0.9693141466323211,
+        "interviewProcess": 0.9,
+        "capacityA": 0.7883005000000003,
+        "capacityB": 0.8400572000000001,
+        "dealbreakerMultiplier": 0
+      },
+      "adjustments": {
+        "sexualComm": 0,
+        "conflictStyle": 0.011652000000000001,
+        "politics": 0,
+        "psychometricSoft": 0.02,
+        "total": 0.031652
+      },
+      "breakdown": {
+        "attachment": 0.3946666666666667,
+        "values": 0.3897863436728796,
+        "semantic": 0.034999999999999996,
+        "finance": 0.04846570733161606,
+        "interviewProcess": 0.045000000000000005,
+        "baseline": 0.05,
+        "capacityDiscount": 0,
+        "interviewDiscount": 1,
+        "adjustments": 0.031652
+      }
+    },
+    {
+      "slugA": "jake",
+      "slugB": "bob",
+      "labelA": "Dealbreaker Jake",
+      "labelB": "Compatible Bob",
+      "userIdA": "543fd725-2ff7-4ff3-b49b-f666cfc5caf4",
+      "userIdB": "f79971c4-63cf-41c7-b4c7-46812f4cb135",
+      "compatibilityScore": 0,
+      "finalScore": 0,
+      "dealbreakerMultiplier": 0,
+      "subscores": {
+        "attachment": 0.975,
+        "values": 0.9800000000000001,
+        "semantic": 0.7,
+        "finance": 0.9693141466323211,
+        "interviewProcess": 1,
+        "capacityA": 0.7883005000000003,
+        "capacityB": 0.7883005000000003,
+        "dealbreakerMultiplier": 0
+      },
+      "adjustments": {
+        "sexualComm": 0,
+        "conflictStyle": 0.010752,
+        "politics": 0,
+        "psychometricSoft": 0.02,
+        "total": 0.030752
+      },
+      "breakdown": {
+        "attachment": 0.39,
+        "values": 0.39200000000000007,
+        "semantic": 0.034999999999999996,
+        "finance": 0.04846570733161606,
+        "interviewProcess": 0.05,
+        "baseline": 0.05,
+        "capacityDiscount": 0,
+        "interviewDiscount": 1,
+        "adjustments": 0.030752
+      }
+    },
+    {
+      "slugA": "jake",
+      "slugB": "clara",
+      "labelA": "Dealbreaker Jake",
+      "labelB": "Anxious Clara",
+      "userIdA": "543fd725-2ff7-4ff3-b49b-f666cfc5caf4",
+      "userIdB": "0b32753d-c16d-41ad-bc51-81e6c3ad7f97",
+      "compatibilityScore": 0,
+      "finalScore": 0,
+      "dealbreakerMultiplier": 0,
+      "subscores": {
+        "attachment": 0.7611249999999998,
+        "values": 0.974465859182199,
+        "semantic": 0.7,
+        "finance": 0.9693141466323211,
+        "interviewProcess": 0.9,
+        "capacityA": 0.7883005000000003,
+        "capacityB": 0.590513,
+        "dealbreakerMultiplier": 0
+      },
+      "adjustments": {
+        "sexualComm": 0,
+        "conflictStyle": 0.0025599999999999998,
+        "politics": 0,
+        "psychometricSoft": 0,
+        "total": 0.0025599999999999998
+      },
+      "breakdown": {
+        "attachment": 0.30444999999999994,
+        "values": 0.3800416850810576,
+        "semantic": 0.034999999999999996,
+        "finance": 0.04846570733161606,
+        "interviewProcess": 0.045000000000000005,
+        "baseline": 0.05,
+        "capacityDiscount": 0,
+        "interviewDiscount": 0.975,
+        "adjustments": 0.0025599999999999998
+      }
+    },
+    {
+      "slugA": "jake",
+      "slugB": "dan",
+      "labelA": "Dealbreaker Jake",
+      "labelB": "Avoidant Dan",
+      "userIdA": "543fd725-2ff7-4ff3-b49b-f666cfc5caf4",
+      "userIdB": "d61cf14a-c5f8-4b68-aa96-4578e442c9ee",
+      "compatibilityScore": 0,
+      "finalScore": 0,
+      "dealbreakerMultiplier": 0,
+      "subscores": {
+        "attachment": 0.7452916666666666,
+        "values": 0.974465859182199,
+        "semantic": 0.7,
+        "finance": 0.9693141466323211,
+        "interviewProcess": 0.8,
+        "capacityA": 0.7883005000000003,
+        "capacityB": 0.557265,
+        "dealbreakerMultiplier": 0
+      },
+      "adjustments": {
+        "sexualComm": 0,
+        "conflictStyle": 0.000784,
+        "politics": 0,
+        "psychometricSoft": 0,
+        "total": 0.000784
+      },
+      "breakdown": {
+        "attachment": 0.29811666666666664,
+        "values": 0.3702970264892356,
+        "semantic": 0.034999999999999996,
+        "finance": 0.04846570733161606,
+        "interviewProcess": 0.04000000000000001,
+        "baseline": 0.05,
+        "capacityDiscount": 0,
+        "interviewDiscount": 0.95,
+        "adjustments": 0.000784
+      }
+    },
+    {
+      "slugA": "jake",
+      "slugB": "eve",
+      "labelA": "Dealbreaker Jake",
+      "labelB": "Avoidant Eve",
+      "userIdA": "543fd725-2ff7-4ff3-b49b-f666cfc5caf4",
+      "userIdB": "7dce3fc3-d706-4b3f-a4a3-540e454cbda5",
+      "compatibilityScore": 0,
+      "finalScore": 0,
+      "dealbreakerMultiplier": 0,
+      "subscores": {
+        "attachment": 0.7480416666666666,
+        "values": 0.974465859182199,
+        "semantic": 0.7,
+        "finance": 0.9693141466323211,
+        "interviewProcess": 0.8,
+        "capacityA": 0.7883005000000003,
+        "capacityB": 0.557265,
+        "dealbreakerMultiplier": 0
+      },
+      "adjustments": {
+        "sexualComm": 0,
+        "conflictStyle": 0.000784,
+        "politics": 0,
+        "psychometricSoft": 0,
+        "total": 0.000784
+      },
+      "breakdown": {
+        "attachment": 0.29921666666666663,
+        "values": 0.3702970264892356,
+        "semantic": 0.034999999999999996,
+        "finance": 0.04846570733161606,
+        "interviewProcess": 0.04000000000000001,
+        "baseline": 0.05,
+        "capacityDiscount": 0,
+        "interviewDiscount": 0.95,
+        "adjustments": 0.000784
+      }
+    },
+    {
+      "slugA": "jake",
+      "slugB": "frank",
+      "labelA": "Dealbreaker Jake",
+      "labelB": "Conservative Frank",
+      "userIdA": "543fd725-2ff7-4ff3-b49b-f666cfc5caf4",
+      "userIdB": "dafef373-b753-4044-bfd3-1030dc97709d",
+      "compatibilityScore": 0,
+      "finalScore": 0,
+      "dealbreakerMultiplier": 0,
+      "subscores": {
+        "attachment": 0.926375,
+        "values": 0.3140575184105095,
+        "semantic": 0.7,
+        "finance": 0.9693141466323211,
+        "interviewProcess": 0.9,
+        "capacityA": 0.7883005000000003,
+        "capacityB": 0.5849099999999999,
+        "dealbreakerMultiplier": 0
+      },
+      "adjustments": {
+        "sexualComm": 0,
+        "conflictStyle": 0.004292,
+        "politics": -0.02,
+        "psychometricSoft": 0,
+        "total": -0.015708
+      },
+      "breakdown": {
+        "attachment": 0.37055,
+        "values": 0.12248243218009872,
+        "semantic": 0.034999999999999996,
+        "finance": 0.04846570733161606,
+        "interviewProcess": 0.045000000000000005,
+        "baseline": 0.05,
+        "capacityDiscount": 0,
+        "interviewDiscount": 0.975,
+        "adjustments": -0.015708
+      }
+    },
+    {
+      "slugA": "jake",
+      "slugB": "grace",
+      "labelA": "Dealbreaker Jake",
+      "labelB": "Progressive Grace",
+      "userIdA": "543fd725-2ff7-4ff3-b49b-f666cfc5caf4",
+      "userIdB": "45f62791-91da-4219-b20d-521bed73e780",
+      "compatibilityScore": 0,
+      "finalScore": 0,
+      "dealbreakerMultiplier": 0,
+      "subscores": {
+        "attachment": 0.9535833333333333,
+        "values": 0.9261874192385071,
+        "semantic": 0.7,
+        "finance": 0.9693141466323211,
+        "interviewProcess": 0.9,
+        "capacityA": 0.7883005000000003,
+        "capacityB": 0.5849099999999999,
+        "dealbreakerMultiplier": 0
+      },
+      "adjustments": {
+        "sexualComm": 0,
+        "conflictStyle": 0.004292,
+        "politics": -0.02,
+        "psychometricSoft": 0,
+        "total": -0.015708
+      },
+      "breakdown": {
+        "attachment": 0.38143333333333335,
+        "values": 0.36121309350301783,
+        "semantic": 0.034999999999999996,
+        "finance": 0.04846570733161606,
+        "interviewProcess": 0.045000000000000005,
+        "baseline": 0.05,
+        "capacityDiscount": 0,
+        "interviewDiscount": 0.975,
+        "adjustments": -0.015708
+      }
+    },
+    {
+      "slugA": "jake",
+      "slugB": "henry",
+      "labelA": "Dealbreaker Jake",
+      "labelB": "Low Capacity Henry",
+      "userIdA": "543fd725-2ff7-4ff3-b49b-f666cfc5caf4",
+      "userIdB": "071c75d4-1060-4001-be2a-c5f9560fe65e",
+      "compatibilityScore": 0,
+      "finalScore": 0,
+      "dealbreakerMultiplier": 0,
+      "subscores": {
+        "attachment": 0.8180416666666666,
+        "values": 0.974465859182199,
+        "semantic": 0.7,
+        "finance": 0.9693141466323211,
+        "interviewProcess": 0.41,
+        "capacityA": 0.7883005000000003,
+        "capacityB": 0.224285,
+        "dealbreakerMultiplier": 0
+      },
+      "adjustments": {
+        "sexualComm": 0,
+        "conflictStyle": -0.00026000000000000014,
+        "politics": 0,
+        "psychometricSoft": -0.03,
+        "total": -0.03026
+      },
+      "breakdown": {
+        "attachment": 0.32721666666666666,
+        "values": 0.3605523678974137,
+        "semantic": 0.034999999999999996,
+        "finance": 0.04846570733161606,
+        "interviewProcess": 0.0205,
+        "baseline": 0.05,
+        "capacityDiscount": 0.06885580477951034,
+        "interviewDiscount": 0.925,
+        "adjustments": -0.03026
+      }
+    },
+    {
+      "slugA": "jake",
+      "slugB": "isabel",
+      "labelA": "Dealbreaker Jake",
+      "labelB": "Finance Mismatch Isabel",
+      "userIdA": "543fd725-2ff7-4ff3-b49b-f666cfc5caf4",
+      "userIdB": "5b0903dd-236b-4550-9e71-baa3fd27921e",
+      "compatibilityScore": 0,
+      "finalScore": 0,
+      "dealbreakerMultiplier": 0,
+      "subscores": {
+        "attachment": 0.9672083333333333,
+        "values": 0.974465859182199,
+        "semantic": 0.7,
+        "finance": 0.43541644709232274,
+        "interviewProcess": 1,
+        "capacityA": 0.7883005000000003,
+        "capacityB": 0.7883005000000003,
+        "dealbreakerMultiplier": 0
+      },
+      "adjustments": {
+        "sexualComm": 0,
+        "conflictStyle": 0.010752,
+        "politics": 0,
+        "psychometricSoft": 0.02,
+        "total": 0.030752
+      },
+      "breakdown": {
+        "attachment": 0.38688333333333336,
+        "values": 0.3897863436728796,
+        "semantic": 0.034999999999999996,
+        "finance": 0.021770822354616137,
+        "interviewProcess": 0.05,
+        "baseline": 0.05,
+        "capacityDiscount": 0,
+        "interviewDiscount": 1,
+        "adjustments": 0.030752
+      }
+    },
+    {
+      "slugA": "jake",
+      "slugB": "jake",
+      "labelA": "Dealbreaker Jake",
+      "labelB": "Dealbreaker Jake",
+      "userIdA": "543fd725-2ff7-4ff3-b49b-f666cfc5caf4",
+      "userIdB": "543fd725-2ff7-4ff3-b49b-f666cfc5caf4",
+      "compatibilityScore": 100,
+      "finalScore": 0.9962177073316162,
+      "dealbreakerMultiplier": 1,
+      "subscores": {
+        "attachment": 0.975,
+        "values": 0.9800000000000001,
+        "semantic": 0.7,
+        "finance": 0.9693141466323211,
+        "interviewProcess": 1,
+        "capacityA": 0.7883005000000003,
+        "capacityB": 0.7883005000000003,
+        "dealbreakerMultiplier": 1
+      },
+      "adjustments": {
+        "sexualComm": 0,
+        "conflictStyle": 0.010752,
+        "politics": 0,
+        "psychometricSoft": 0.02,
+        "total": 0.030752
+      },
+      "breakdown": {
+        "attachment": 0.39,
+        "values": 0.39200000000000007,
+        "semantic": 0.034999999999999996,
+        "finance": 0.04846570733161606,
+        "interviewProcess": 0.05,
+        "baseline": 0.05,
+        "capacityDiscount": 0,
+        "interviewDiscount": 1,
+        "adjustments": 0.030752
+      }
+    },
+    {
+      "slugA": "jake",
+      "slugB": "kim",
+      "labelA": "Dealbreaker Jake",
+      "labelB": "Demanding-Withdrawing Kim",
+      "userIdA": "543fd725-2ff7-4ff3-b49b-f666cfc5caf4",
+      "userIdB": "526add45-7bec-4a4d-ab36-c879a41528e4",
+      "compatibilityScore": 0,
+      "finalScore": 0,
+      "dealbreakerMultiplier": 0,
+      "subscores": {
+        "attachment": 0.9374583333333333,
+        "values": 0.974465859182199,
+        "semantic": 0.7,
+        "finance": 0.9693141466323211,
+        "interviewProcess": 0.8,
+        "capacityA": 0.7883005000000003,
+        "capacityB": 0.503168,
+        "dealbreakerMultiplier": 0
+      },
+      "adjustments": {
+        "sexualComm": 0,
+        "conflictStyle": 0.00032799999999999973,
+        "politics": 0,
+        "psychometricSoft": 0,
+        "total": 0.00032799999999999973
+      },
+      "breakdown": {
+        "attachment": 0.37498333333333334,
+        "values": 0.3702970264892356,
+        "semantic": 0.034999999999999996,
+        "finance": 0.04846570733161606,
+        "interviewProcess": 0.04000000000000001,
+        "baseline": 0.05,
+        "capacityDiscount": 0.006060108133406594,
+        "interviewDiscount": 0.95,
+        "adjustments": 0.00032799999999999973
+      }
+    },
+    {
+      "slugA": "jake",
+      "slugB": "morgan",
+      "labelA": "Dealbreaker Jake",
+      "labelB": "Disorganised Morgan",
+      "userIdA": "543fd725-2ff7-4ff3-b49b-f666cfc5caf4",
+      "userIdB": "346c6543-cf25-4c9f-af22-a11bd538ddb8",
+      "compatibilityScore": 0,
+      "finalScore": 0,
+      "dealbreakerMultiplier": 0,
+      "subscores": {
+        "attachment": 0.5799583333333332,
+        "values": 0.974465859182199,
+        "semantic": 0.7,
+        "finance": 0.9693141466323211,
+        "interviewProcess": 0.6699999999999999,
+        "capacityA": 0.7883005000000003,
+        "capacityB": 0.3780366666666667,
+        "dealbreakerMultiplier": 0
+      },
+      "adjustments": {
+        "sexualComm": 0,
+        "conflictStyle": 0.0002599999999999999,
+        "politics": 0,
+        "psychometricSoft": 0,
+        "total": 0.0002599999999999999
+      },
+      "breakdown": {
+        "attachment": 0.23198333333333332,
+        "values": 0.3605523678974137,
+        "semantic": 0.034999999999999996,
+        "finance": 0.04846570733161606,
+        "interviewProcess": 0.033499999999999995,
+        "baseline": 0.05,
+        "capacityDiscount": 0.031230087007258853,
+        "interviewDiscount": 0.925,
+        "adjustments": 0.0002599999999999999
+      }
+    },
+    {
+      "slugA": "kim",
+      "slugB": "alice",
+      "labelA": "Demanding-Withdrawing Kim",
+      "labelB": "Ideal Alice",
+      "userIdA": "526add45-7bec-4a4d-ab36-c879a41528e4",
+      "userIdB": "330354f3-70f1-4613-a398-7c72ae9043a1",
+      "compatibilityScore": 92,
+      "finalScore": 0.9228337073316163,
+      "dealbreakerMultiplier": 1,
+      "subscores": {
+        "attachment": 0.949125,
+        "values": 0.9850000000000001,
+        "semantic": 0.7,
+        "finance": 0.9693141466323211,
+        "interviewProcess": 0.7,
+        "capacityA": 0.503168,
+        "capacityB": 0.8400572000000001,
+        "dealbreakerMultiplier": 1
+      },
+      "adjustments": {
+        "sexualComm": 0,
+        "conflictStyle": 0.00041799999999999997,
+        "politics": 0,
+        "psychometricSoft": 0,
+        "total": 0.00041799999999999997
+      },
+      "breakdown": {
+        "attachment": 0.37965000000000004,
+        "values": 0.3743000000000001,
+        "semantic": 0.034999999999999996,
+        "finance": 0.04846570733161606,
+        "interviewProcess": 0.034999999999999996,
+        "baseline": 0.05,
+        "capacityDiscount": 0,
+        "interviewDiscount": 0.95,
+        "adjustments": 0.00041799999999999997
+      }
+    },
+    {
+      "slugA": "kim",
+      "slugB": "bob",
+      "labelA": "Demanding-Withdrawing Kim",
+      "labelB": "Compatible Bob",
+      "userIdA": "526add45-7bec-4a4d-ab36-c879a41528e4",
+      "userIdB": "f79971c4-63cf-41c7-b4c7-46812f4cb135",
+      "compatibilityScore": 91,
+      "finalScore": 0.9130139590207785,
+      "dealbreakerMultiplier": 1,
+      "subscores": {
+        "attachment": 0.9374583333333333,
+        "values": 0.974465859182199,
+        "semantic": 0.7,
+        "finance": 0.9693141466323211,
+        "interviewProcess": 0.8,
+        "capacityA": 0.503168,
+        "capacityB": 0.7883005000000003,
+        "dealbreakerMultiplier": 1
+      },
+      "adjustments": {
+        "sexualComm": 0,
+        "conflictStyle": 0.00032799999999999973,
+        "politics": 0,
+        "psychometricSoft": 0,
+        "total": 0.00032799999999999973
+      },
+      "breakdown": {
+        "attachment": 0.37498333333333334,
+        "values": 0.3702970264892356,
+        "semantic": 0.034999999999999996,
+        "finance": 0.04846570733161606,
+        "interviewProcess": 0.04000000000000001,
+        "baseline": 0.05,
+        "capacityDiscount": 0.006060108133406594,
+        "interviewDiscount": 0.95,
+        "adjustments": 0.00032799999999999973
+      }
+    },
+    {
+      "slugA": "kim",
+      "slugB": "clara",
+      "labelA": "Demanding-Withdrawing Kim",
+      "labelB": "Anxious Clara",
+      "userIdA": "526add45-7bec-4a4d-ab36-c879a41528e4",
+      "userIdB": "0b32753d-c16d-41ad-bc51-81e6c3ad7f97",
+      "compatibilityScore": 80,
+      "finalScore": 0.8031671791199567,
+      "dealbreakerMultiplier": 1,
+      "subscores": {
+        "attachment": 0.7348333333333333,
+        "values": 0.9850000000000001,
+        "semantic": 0.7,
+        "finance": 0.9693141466323211,
+        "interviewProcess": 0.9,
+        "capacityA": 0.503168,
+        "capacityB": 0.590513,
+        "dealbreakerMultiplier": 1
+      },
+      "adjustments": {
+        "sexualComm": 0,
+        "conflictStyle": -0.00221,
+        "politics": 0,
+        "psychometricSoft": 0,
+        "total": -0.00221
+      },
+      "breakdown": {
+        "attachment": 0.2939333333333333,
+        "values": 0.3644500000000001,
+        "semantic": 0.034999999999999996,
+        "finance": 0.04846570733161606,
+        "interviewProcess": 0.045000000000000005,
+        "baseline": 0.05,
+        "capacityDiscount": 0.03147186154499282,
+        "interviewDiscount": 0.925,
+        "adjustments": -0.00221
+      }
+    },
+    {
+      "slugA": "kim",
+      "slugB": "dan",
+      "labelA": "Demanding-Withdrawing Kim",
+      "labelB": "Avoidant Dan",
+      "userIdA": "526add45-7bec-4a4d-ab36-c879a41528e4",
+      "userIdB": "d61cf14a-c5f8-4b68-aa96-4578e442c9ee",
+      "compatibilityScore": 77,
+      "finalScore": 0.7741015443960809,
+      "dealbreakerMultiplier": 1,
+      "subscores": {
+        "attachment": 0.71325,
+        "values": 0.9850000000000001,
+        "semantic": 0.7,
+        "finance": 0.9693141466323211,
+        "interviewProcess": 1,
+        "capacityA": 0.503168,
+        "capacityB": 0.557265,
+        "dealbreakerMultiplier": 1
+      },
+      "adjustments": {
+        "sexualComm": 0,
+        "conflictStyle": -0.013122,
+        "politics": 0,
+        "psychometricSoft": 0,
+        "total": -0.013122
+      },
+      "breakdown": {
+        "attachment": 0.28530000000000005,
+        "values": 0.3546000000000001,
+        "semantic": 0.034999999999999996,
+        "finance": 0.04846570733161606,
+        "interviewProcess": 0.05,
+        "baseline": 0.05,
+        "capacityDiscount": 0.036142162935535356,
+        "interviewDiscount": 0.9,
+        "adjustments": -0.013122
+      }
+    },
+    {
+      "slugA": "kim",
+      "slugB": "eve",
+      "labelA": "Demanding-Withdrawing Kim",
+      "labelB": "Avoidant Eve",
+      "userIdA": "526add45-7bec-4a4d-ab36-c879a41528e4",
+      "userIdB": "7dce3fc3-d706-4b3f-a4a3-540e454cbda5",
+      "compatibilityScore": 78,
+      "finalScore": 0.7761015443960809,
+      "dealbreakerMultiplier": 1,
+      "subscores": {
+        "attachment": 0.7182499999999999,
+        "values": 0.9850000000000001,
+        "semantic": 0.7,
+        "finance": 0.9693141466323211,
+        "interviewProcess": 1,
+        "capacityA": 0.503168,
+        "capacityB": 0.557265,
+        "dealbreakerMultiplier": 1
+      },
+      "adjustments": {
+        "sexualComm": 0,
+        "conflictStyle": -0.013122,
+        "politics": 0,
+        "psychometricSoft": 0,
+        "total": -0.013122
+      },
+      "breakdown": {
+        "attachment": 0.2873,
+        "values": 0.3546000000000001,
+        "semantic": 0.034999999999999996,
+        "finance": 0.04846570733161606,
+        "interviewProcess": 0.05,
+        "baseline": 0.05,
+        "capacityDiscount": 0.036142162935535356,
+        "interviewDiscount": 0.9,
+        "adjustments": -0.013122
+      }
+    },
+    {
+      "slugA": "kim",
+      "slugB": "frank",
+      "labelA": "Demanding-Withdrawing Kim",
+      "labelB": "Conservative Frank",
+      "userIdA": "526add45-7bec-4a4d-ab36-c879a41528e4",
+      "userIdB": "dafef373-b753-4044-bfd3-1030dc97709d",
+      "compatibilityScore": 60,
+      "finalScore": 0.6006648173213103,
+      "dealbreakerMultiplier": 1,
+      "subscores": {
+        "attachment": 0.9055833333333333,
+        "values": 0.3077764708156118,
+        "semantic": 0.7,
+        "finance": 0.9693141466323211,
+        "interviewProcess": 0.9,
+        "capacityA": 0.503168,
+        "capacityB": 0.5849099999999999,
+        "dealbreakerMultiplier": 1
+      },
+      "adjustments": {
+        "sexualComm": 0,
+        "conflictStyle": -0.0016620000000000003,
+        "politics": -0.02,
+        "psychometricSoft": 0,
+        "total": -0.021662
+      },
+      "breakdown": {
+        "attachment": 0.36223333333333335,
+        "values": 0.11387729420177638,
+        "semantic": 0.034999999999999996,
+        "finance": 0.04846570733161606,
+        "interviewProcess": 0.045000000000000005,
+        "baseline": 0.05,
+        "capacityDiscount": 0.03224951754541559,
+        "interviewDiscount": 0.925,
+        "adjustments": -0.021662
+      }
+    },
+    {
+      "slugA": "kim",
+      "slugB": "grace",
+      "labelA": "Demanding-Withdrawing Kim",
+      "labelB": "Progressive Grace",
+      "userIdA": "526add45-7bec-4a4d-ab36-c879a41528e4",
+      "userIdB": "45f62791-91da-4219-b20d-521bed73e780",
+      "compatibilityScore": 84,
+      "finalScore": 0.8413153239136522,
+      "dealbreakerMultiplier": 1,
+      "subscores": {
+        "attachment": 0.9255416666666667,
+        "values": 0.9366066688129319,
+        "semantic": 0.7,
+        "finance": 0.9693141466323211,
+        "interviewProcess": 0.9,
+        "capacityA": 0.503168,
+        "capacityB": 0.5849099999999999,
+        "dealbreakerMultiplier": 1
+      },
+      "adjustments": {
+        "sexualComm": 0,
+        "conflictStyle": -0.0016620000000000003,
+        "politics": -0.02,
+        "psychometricSoft": 0,
+        "total": -0.021662
+      },
+      "breakdown": {
+        "attachment": 0.3702166666666667,
+        "values": 0.3465444674607848,
+        "semantic": 0.034999999999999996,
+        "finance": 0.04846570733161606,
+        "interviewProcess": 0.045000000000000005,
+        "baseline": 0.05,
+        "capacityDiscount": 0.03224951754541559,
+        "interviewDiscount": 0.925,
+        "adjustments": -0.021662
+      }
+    },
+    {
+      "slugA": "kim",
+      "slugB": "henry",
+      "labelA": "Demanding-Withdrawing Kim",
+      "labelB": "Low Capacity Henry",
+      "userIdA": "526add45-7bec-4a4d-ab36-c879a41528e4",
+      "userIdB": "071c75d4-1060-4001-be2a-c5f9560fe65e",
+      "compatibilityScore": 73,
+      "finalScore": 0.7266505246491989,
+      "dealbreakerMultiplier": 1,
+      "subscores": {
+        "attachment": 0.79725,
+        "values": 0.9850000000000001,
+        "semantic": 0.7,
+        "finance": 0.9693141466323211,
+        "interviewProcess": 0.61,
+        "capacityA": 0.503168,
+        "capacityB": 0.224285,
+        "dealbreakerMultiplier": 1
+      },
+      "adjustments": {
+        "sexualComm": 0,
+        "conflictStyle": -0.006746,
+        "politics": 0,
+        "psychometricSoft": 0,
+        "total": -0.006746
+      },
+      "breakdown": {
+        "attachment": 0.3189,
+        "values": 0.34475000000000006,
+        "semantic": 0.034999999999999996,
+        "finance": 0.04846570733161606,
+        "interviewProcess": 0.0305,
+        "baseline": 0.05,
+        "capacityDiscount": 0.0942191826824172,
+        "interviewDiscount": 0.875,
+        "adjustments": -0.006746
+      }
+    },
+    {
+      "slugA": "kim",
+      "slugB": "isabel",
+      "labelA": "Demanding-Withdrawing Kim",
+      "labelB": "Finance Mismatch Isabel",
+      "userIdA": "526add45-7bec-4a4d-ab36-c879a41528e4",
+      "userIdB": "5b0903dd-236b-4550-9e71-baa3fd27921e",
+      "compatibilityScore": 89,
+      "finalScore": 0.8890053808878763,
+      "dealbreakerMultiplier": 1,
+      "subscores": {
+        "attachment": 0.9341666666666666,
+        "values": 0.9850000000000001,
+        "semantic": 0.7,
+        "finance": 0.43541644709232274,
+        "interviewProcess": 0.8,
+        "capacityA": 0.503168,
+        "capacityB": 0.7883005000000003,
+        "dealbreakerMultiplier": 1
+      },
+      "adjustments": {
+        "sexualComm": 0,
+        "conflictStyle": 0.00032799999999999973,
+        "politics": 0,
+        "psychometricSoft": 0,
+        "total": 0.00032799999999999973
+      },
+      "breakdown": {
+        "attachment": 0.37366666666666665,
+        "values": 0.3743000000000001,
+        "semantic": 0.034999999999999996,
+        "finance": 0.021770822354616137,
+        "interviewProcess": 0.04000000000000001,
+        "baseline": 0.05,
+        "capacityDiscount": 0.006060108133406594,
+        "interviewDiscount": 0.95,
+        "adjustments": 0.00032799999999999973
+      }
+    },
+    {
+      "slugA": "kim",
+      "slugB": "jake",
+      "labelA": "Demanding-Withdrawing Kim",
+      "labelB": "Dealbreaker Jake",
+      "userIdA": "526add45-7bec-4a4d-ab36-c879a41528e4",
+      "userIdB": "543fd725-2ff7-4ff3-b49b-f666cfc5caf4",
+      "compatibilityScore": 0,
+      "finalScore": 0,
+      "dealbreakerMultiplier": 0,
+      "subscores": {
+        "attachment": 0.9374583333333333,
+        "values": 0.974465859182199,
+        "semantic": 0.7,
+        "finance": 0.9693141466323211,
+        "interviewProcess": 0.8,
+        "capacityA": 0.503168,
+        "capacityB": 0.7883005000000003,
+        "dealbreakerMultiplier": 0
+      },
+      "adjustments": {
+        "sexualComm": 0,
+        "conflictStyle": 0.00032799999999999973,
+        "politics": 0,
+        "psychometricSoft": 0,
+        "total": 0.00032799999999999973
+      },
+      "breakdown": {
+        "attachment": 0.37498333333333334,
+        "values": 0.3702970264892356,
+        "semantic": 0.034999999999999996,
+        "finance": 0.04846570733161606,
+        "interviewProcess": 0.04000000000000001,
+        "baseline": 0.05,
+        "capacityDiscount": 0.006060108133406594,
+        "interviewDiscount": 0.95,
+        "adjustments": 0.00032799999999999973
+      }
+    },
+    {
+      "slugA": "kim",
+      "slugB": "kim",
+      "labelA": "Demanding-Withdrawing Kim",
+      "labelB": "Demanding-Withdrawing Kim",
+      "userIdA": "526add45-7bec-4a4d-ab36-c879a41528e4",
+      "userIdB": "526add45-7bec-4a4d-ab36-c879a41528e4",
+      "compatibilityScore": 86,
+      "finalScore": 0.8588707739982828,
+      "dealbreakerMultiplier": 1,
+      "subscores": {
+        "attachment": 0.9166666666666667,
+        "values": 0.9850000000000001,
+        "semantic": 0.7,
+        "finance": 0.9693141466323211,
+        "interviewProcess": 1,
+        "capacityA": 0.503168,
+        "capacityB": 0.503168,
+        "dealbreakerMultiplier": 1
+      },
+      "adjustments": {
+        "sexualComm": 0,
+        "conflictStyle": -0.001812,
+        "politics": 0,
+        "psychometricSoft": 0,
+        "total": -0.001812
+      },
+      "breakdown": {
+        "attachment": 0.3666666666666667,
+        "values": 0.3546000000000001,
+        "semantic": 0.034999999999999996,
+        "finance": 0.04846570733161606,
+        "interviewProcess": 0.05,
+        "baseline": 0.05,
+        "capacityDiscount": 0.04404960000000002,
+        "interviewDiscount": 0.9,
+        "adjustments": -0.001812
+      }
+    },
+    {
+      "slugA": "kim",
+      "slugB": "morgan",
+      "labelA": "Demanding-Withdrawing Kim",
+      "labelB": "Disorganised Morgan",
+      "userIdA": "526add45-7bec-4a4d-ab36-c879a41528e4",
+      "userIdB": "346c6543-cf25-4c9f-af22-a11bd538ddb8",
+      "compatibilityScore": 67,
+      "finalScore": 0.6724336358937568,
+      "dealbreakerMultiplier": 1,
+      "subscores": {
+        "attachment": 0.5591666666666667,
+        "values": 0.9850000000000001,
+        "semantic": 0.7,
+        "finance": 0.9693141466323211,
+        "interviewProcess": 0.87,
+        "capacityA": 0.503168,
+        "capacityB": 0.3780366666666667,
+        "dealbreakerMultiplier": 1
+      },
+      "adjustments": {
+        "sexualComm": 0,
+        "conflictStyle": -0.008790000000000001,
+        "politics": 0,
+        "psychometricSoft": 0,
+        "total": -0.008790000000000001
+      },
+      "breakdown": {
+        "attachment": 0.22366666666666668,
+        "values": 0.34475000000000006,
+        "semantic": 0.034999999999999996,
+        "finance": 0.04846570733161606,
+        "interviewProcess": 0.043500000000000004,
+        "baseline": 0.05,
+        "capacityDiscount": 0.06415873810452608,
+        "interviewDiscount": 0.875,
+        "adjustments": -0.008790000000000001
+      }
+    },
+    {
+      "slugA": "morgan",
+      "slugB": "alice",
+      "labelA": "Disorganised Morgan",
+      "labelB": "Ideal Alice",
+      "userIdA": "346c6543-cf25-4c9f-af22-a11bd538ddb8",
+      "userIdB": "330354f3-70f1-4613-a398-7c72ae9043a1",
+      "compatibilityScore": 74,
+      "finalScore": 0.7374614009678367,
+      "dealbreakerMultiplier": 1,
+      "subscores": {
+        "attachment": 0.5916250000000001,
+        "values": 0.9850000000000001,
+        "semantic": 0.7,
+        "finance": 0.9693141466323211,
+        "interviewProcess": 0.57,
+        "capacityA": 0.3780366666666667,
+        "capacityB": 0.8400572000000001,
+        "dealbreakerMultiplier": 1
+      },
+      "adjustments": {
+        "sexualComm": 0,
+        "conflictStyle": 0.0003349999999999999,
+        "politics": 0,
+        "psychometricSoft": 0,
+        "total": 0.0003349999999999999
+      },
+      "breakdown": {
+        "attachment": 0.23665000000000003,
+        "values": 0.3644500000000001,
+        "semantic": 0.034999999999999996,
+        "finance": 0.04846570733161606,
+        "interviewProcess": 0.028499999999999998,
+        "baseline": 0.05,
+        "capacityDiscount": 0.025939306363779512,
+        "interviewDiscount": 0.925,
+        "adjustments": 0.0003349999999999999
+      }
+    },
+    {
+      "slugA": "morgan",
+      "slugB": "bob",
+      "labelA": "Disorganised Morgan",
+      "labelB": "Compatible Bob",
+      "userIdA": "346c6543-cf25-4c9f-af22-a11bd538ddb8",
+      "userIdB": "f79971c4-63cf-41c7-b4c7-46812f4cb135",
+      "compatibilityScore": 73,
+      "finalScore": 0.7285313215551044,
+      "dealbreakerMultiplier": 1,
+      "subscores": {
+        "attachment": 0.5799583333333335,
+        "values": 0.974465859182199,
+        "semantic": 0.7,
+        "finance": 0.9693141466323211,
+        "interviewProcess": 0.6699999999999999,
+        "capacityA": 0.3780366666666667,
+        "capacityB": 0.7883005000000003,
+        "dealbreakerMultiplier": 1
+      },
+      "adjustments": {
+        "sexualComm": 0,
+        "conflictStyle": 0.0002599999999999999,
+        "politics": 0,
+        "psychometricSoft": 0,
+        "total": 0.0002599999999999999
+      },
+      "breakdown": {
+        "attachment": 0.2319833333333334,
+        "values": 0.3605523678974137,
+        "semantic": 0.034999999999999996,
+        "finance": 0.04846570733161606,
+        "interviewProcess": 0.033499999999999995,
+        "baseline": 0.05,
+        "capacityDiscount": 0.031230087007258853,
+        "interviewDiscount": 0.925,
+        "adjustments": 0.0002599999999999999
+      }
+    },
+    {
+      "slugA": "morgan",
+      "slugB": "clara",
+      "labelA": "Disorganised Morgan",
+      "labelB": "Anxious Clara",
+      "userIdA": "346c6543-cf25-4c9f-af22-a11bd538ddb8",
+      "userIdB": "0b32753d-c16d-41ad-bc51-81e6c3ad7f97",
+      "compatibilityScore": 65,
+      "finalScore": 0.6522674742091529,
+      "dealbreakerMultiplier": 1,
+      "subscores": {
+        "attachment": 0.4515833333333333,
+        "values": 0.9850000000000001,
+        "semantic": 0.7,
+        "finance": 0.9693141466323211,
+        "interviewProcess": 0.77,
+        "capacityA": 0.3780366666666667,
+        "capacityB": 0.590513,
+        "dealbreakerMultiplier": 1
+      },
+      "adjustments": {
+        "sexualComm": 0,
+        "conflictStyle": -0.001675,
+        "politics": 0,
+        "psychometricSoft": 0,
+        "total": -0.001675
+      },
+      "breakdown": {
+        "attachment": 0.1806333333333333,
+        "values": 0.3546,
+        "semantic": 0.034999999999999996,
+        "finance": 0.04846570733161606,
+        "interviewProcess": 0.038500000000000006,
+        "baseline": 0.05,
+        "capacityDiscount": 0.05325656645579662,
+        "interviewDiscount": 0.8999999999999999,
+        "adjustments": -0.001675
+      }
+    },
+    {
+      "slugA": "morgan",
+      "slugB": "dan",
+      "labelA": "Disorganised Morgan",
+      "labelB": "Avoidant Dan",
+      "userIdA": "346c6543-cf25-4c9f-af22-a11bd538ddb8",
+      "userIdB": "d61cf14a-c5f8-4b68-aa96-4578e442c9ee",
+      "compatibilityScore": 60,
+      "finalScore": 0.6033848912545039,
+      "dealbreakerMultiplier": 1,
+      "subscores": {
+        "attachment": 0.3647222222222223,
+        "values": 0.9850000000000001,
+        "semantic": 0.7,
+        "finance": 0.9693141466323211,
+        "interviewProcess": 0.87,
+        "capacityA": 0.3780366666666667,
+        "capacityB": 0.557265,
+        "dealbreakerMultiplier": 1
+      },
+      "adjustments": {
+        "sexualComm": 0,
+        "conflictStyle": -0.006914999999999999,
+        "politics": 0,
+        "psychometricSoft": 0,
+        "total": -0.006914999999999999
+      },
+      "breakdown": {
+        "attachment": 0.14588888888888893,
+        "values": 0.34475000000000006,
+        "semantic": 0.034999999999999996,
+        "finance": 0.04846570733161606,
+        "interviewProcess": 0.043500000000000004,
+        "baseline": 0.05,
+        "capacityDiscount": 0.05730470496600112,
+        "interviewDiscount": 0.875,
+        "adjustments": -0.006914999999999999
+      }
+    },
+    {
+      "slugA": "morgan",
+      "slugB": "eve",
+      "labelA": "Disorganised Morgan",
+      "labelB": "Avoidant Eve",
+      "userIdA": "346c6543-cf25-4c9f-af22-a11bd538ddb8",
+      "userIdB": "7dce3fc3-d706-4b3f-a4a3-540e454cbda5",
+      "compatibilityScore": 61,
+      "finalScore": 0.6082293356989483,
+      "dealbreakerMultiplier": 1,
+      "subscores": {
+        "attachment": 0.37683333333333335,
+        "values": 0.9850000000000001,
+        "semantic": 0.7,
+        "finance": 0.9693141466323211,
+        "interviewProcess": 0.87,
+        "capacityA": 0.3780366666666667,
+        "capacityB": 0.557265,
+        "dealbreakerMultiplier": 1
+      },
+      "adjustments": {
+        "sexualComm": 0,
+        "conflictStyle": -0.006914999999999999,
+        "politics": 0,
+        "psychometricSoft": 0,
+        "total": -0.006914999999999999
+      },
+      "breakdown": {
+        "attachment": 0.15073333333333336,
+        "values": 0.34475000000000006,
+        "semantic": 0.034999999999999996,
+        "finance": 0.04846570733161606,
+        "interviewProcess": 0.043500000000000004,
+        "baseline": 0.05,
+        "capacityDiscount": 0.05730470496600112,
+        "interviewDiscount": 0.875,
+        "adjustments": -0.006914999999999999
+      }
+    },
+    {
+      "slugA": "morgan",
+      "slugB": "frank",
+      "labelA": "Disorganised Morgan",
+      "labelB": "Conservative Frank",
+      "userIdA": "346c6543-cf25-4c9f-af22-a11bd538ddb8",
+      "userIdB": "dafef373-b753-4044-bfd3-1030dc97709d",
+      "compatibilityScore": 43,
+      "finalScore": 0.42800294459186056,
+      "dealbreakerMultiplier": 1,
+      "subscores": {
+        "attachment": 0.5535833333333334,
+        "values": 0.3077764708156118,
+        "semantic": 0.7,
+        "finance": 0.9693141466323211,
+        "interviewProcess": 0.77,
+        "capacityA": 0.3780366666666667,
+        "capacityB": 0.5849099999999999,
+        "dealbreakerMultiplier": 1
+      },
+      "adjustments": {
+        "sexualComm": 0,
+        "conflictStyle": -0.002265,
+        "politics": -0.02,
+        "psychometricSoft": 0,
+        "total": -0.022265
+      },
+      "breakdown": {
+        "attachment": 0.22143333333333337,
+        "values": 0.11079952949362025,
+        "semantic": 0.034999999999999996,
+        "finance": 0.04846570733161606,
+        "interviewProcess": 0.038500000000000006,
+        "baseline": 0.05,
+        "capacityDiscount": 0.0539306255667092,
+        "interviewDiscount": 0.8999999999999999,
+        "adjustments": -0.022265
+      }
+    },
+    {
+      "slugA": "morgan",
+      "slugB": "grace",
+      "labelA": "Disorganised Morgan",
+      "labelB": "Progressive Grace",
+      "userIdA": "346c6543-cf25-4c9f-af22-a11bd538ddb8",
+      "userIdB": "45f62791-91da-4219-b20d-521bed73e780",
+      "compatibilityScore": 66,
+      "finalScore": 0.660165149204229,
+      "dealbreakerMultiplier": 1,
+      "subscores": {
+        "attachment": 0.5680416666666667,
+        "values": 0.9366066688129319,
+        "semantic": 0.7,
+        "finance": 0.9693141466323211,
+        "interviewProcess": 0.77,
+        "capacityA": 0.3780366666666667,
+        "capacityB": 0.5849099999999999,
+        "dealbreakerMultiplier": 1
+      },
+      "adjustments": {
+        "sexualComm": 0,
+        "conflictStyle": -0.002265,
+        "politics": -0.02,
+        "psychometricSoft": 0,
+        "total": -0.022265
+      },
+      "breakdown": {
+        "attachment": 0.22721666666666668,
+        "values": 0.3371784007726555,
+        "semantic": 0.034999999999999996,
+        "finance": 0.04846570733161606,
+        "interviewProcess": 0.038500000000000006,
+        "baseline": 0.05,
+        "capacityDiscount": 0.0539306255667092,
+        "interviewDiscount": 0.8999999999999999,
+        "adjustments": -0.022265
+      }
+    },
+    {
+      "slugA": "morgan",
+      "slugB": "henry",
+      "labelA": "Disorganised Morgan",
+      "labelB": "Low Capacity Henry",
+      "userIdA": "346c6543-cf25-4c9f-af22-a11bd538ddb8",
+      "userIdB": "071c75d4-1060-4001-be2a-c5f9560fe65e",
+      "compatibilityScore": 54,
+      "finalScore": 0.5443658207509232,
+      "dealbreakerMultiplier": 1,
+      "subscores": {
+        "attachment": 0.49525,
+        "values": 0.9850000000000001,
+        "semantic": 0.7,
+        "finance": 0.9693141466323211,
+        "interviewProcess": 0.7100000000000001,
+        "capacityA": 0.3780366666666667,
+        "capacityB": 0.224285,
+        "dealbreakerMultiplier": 1
+      },
+      "adjustments": {
+        "sexualComm": 0,
+        "conflictStyle": -0.009955,
+        "politics": 0,
+        "psychometricSoft": -0.04,
+        "total": -0.049955
+      },
+      "breakdown": {
+        "attachment": 0.19810000000000003,
+        "values": 0.33490000000000003,
+        "semantic": 0.034999999999999996,
+        "finance": 0.04846570733161606,
+        "interviewProcess": 0.035500000000000004,
+        "baseline": 0.05,
+        "capacityDiscount": 0.10764488658069293,
+        "interviewDiscount": 0.85,
+        "adjustments": -0.049955
+      }
+    },
+    {
+      "slugA": "morgan",
+      "slugB": "isabel",
+      "labelA": "Disorganised Morgan",
+      "labelB": "Finance Mismatch Isabel",
+      "userIdA": "346c6543-cf25-4c9f-af22-a11bd538ddb8",
+      "userIdB": "5b0903dd-236b-4550-9e71-baa3fd27921e",
+      "compatibilityScore": 70,
+      "finalScore": 0.7044174020140241,
+      "dealbreakerMultiplier": 1,
+      "subscores": {
+        "attachment": 0.5766666666666667,
+        "values": 0.9850000000000001,
+        "semantic": 0.7,
+        "finance": 0.43541644709232274,
+        "interviewProcess": 0.6699999999999999,
+        "capacityA": 0.3780366666666667,
+        "capacityB": 0.7883005000000003,
+        "dealbreakerMultiplier": 1
+      },
+      "adjustments": {
+        "sexualComm": 0,
+        "conflictStyle": 0.0002599999999999999,
+        "politics": 0,
+        "psychometricSoft": 0,
+        "total": 0.0002599999999999999
+      },
+      "breakdown": {
+        "attachment": 0.2306666666666667,
+        "values": 0.3644500000000001,
+        "semantic": 0.034999999999999996,
+        "finance": 0.021770822354616137,
+        "interviewProcess": 0.033499999999999995,
+        "baseline": 0.05,
+        "capacityDiscount": 0.031230087007258853,
+        "interviewDiscount": 0.925,
+        "adjustments": 0.0002599999999999999
+      }
+    },
+    {
+      "slugA": "morgan",
+      "slugB": "jake",
+      "labelA": "Disorganised Morgan",
+      "labelB": "Dealbreaker Jake",
+      "userIdA": "346c6543-cf25-4c9f-af22-a11bd538ddb8",
+      "userIdB": "543fd725-2ff7-4ff3-b49b-f666cfc5caf4",
+      "compatibilityScore": 0,
+      "finalScore": 0,
+      "dealbreakerMultiplier": 0,
+      "subscores": {
+        "attachment": 0.5799583333333335,
+        "values": 0.974465859182199,
+        "semantic": 0.7,
+        "finance": 0.9693141466323211,
+        "interviewProcess": 0.6699999999999999,
+        "capacityA": 0.3780366666666667,
+        "capacityB": 0.7883005000000003,
+        "dealbreakerMultiplier": 0
+      },
+      "adjustments": {
+        "sexualComm": 0,
+        "conflictStyle": 0.0002599999999999999,
+        "politics": 0,
+        "psychometricSoft": 0,
+        "total": 0.0002599999999999999
+      },
+      "breakdown": {
+        "attachment": 0.2319833333333334,
+        "values": 0.3605523678974137,
+        "semantic": 0.034999999999999996,
+        "finance": 0.04846570733161606,
+        "interviewProcess": 0.033499999999999995,
+        "baseline": 0.05,
+        "capacityDiscount": 0.031230087007258853,
+        "interviewDiscount": 0.925,
+        "adjustments": 0.0002599999999999999
+      }
+    },
+    {
+      "slugA": "morgan",
+      "slugB": "kim",
+      "labelA": "Disorganised Morgan",
+      "labelB": "Demanding-Withdrawing Kim",
+      "userIdA": "346c6543-cf25-4c9f-af22-a11bd538ddb8",
+      "userIdB": "526add45-7bec-4a4d-ab36-c879a41528e4",
+      "compatibilityScore": 67,
+      "finalScore": 0.6724336358937568,
+      "dealbreakerMultiplier": 1,
+      "subscores": {
+        "attachment": 0.5591666666666667,
+        "values": 0.9850000000000001,
+        "semantic": 0.7,
+        "finance": 0.9693141466323211,
+        "interviewProcess": 0.87,
+        "capacityA": 0.3780366666666667,
+        "capacityB": 0.503168,
+        "dealbreakerMultiplier": 1
+      },
+      "adjustments": {
+        "sexualComm": 0,
+        "conflictStyle": -0.008790000000000001,
+        "politics": 0,
+        "psychometricSoft": 0,
+        "total": -0.008790000000000001
+      },
+      "breakdown": {
+        "attachment": 0.22366666666666668,
+        "values": 0.34475000000000006,
+        "semantic": 0.034999999999999996,
+        "finance": 0.04846570733161606,
+        "interviewProcess": 0.043500000000000004,
+        "baseline": 0.05,
+        "capacityDiscount": 0.06415873810452608,
+        "interviewDiscount": 0.875,
+        "adjustments": -0.008790000000000001
+      }
+    },
+    {
+      "slugA": "morgan",
+      "slugB": "morgan",
+      "labelA": "Disorganised Morgan",
+      "labelB": "Disorganised Morgan",
+      "userIdA": "346c6543-cf25-4c9f-af22-a11bd538ddb8",
+      "userIdB": "346c6543-cf25-4c9f-af22-a11bd538ddb8",
+      "compatibilityScore": 49,
+      "finalScore": 0.48846281844272726,
+      "dealbreakerMultiplier": 1,
+      "subscores": {
+        "attachment": 0.253777777777778,
+        "values": 0.9850000000000001,
+        "semantic": 0.7,
+        "finance": 0.9693141466323211,
+        "interviewProcess": 0.97,
+        "capacityA": 0.3780366666666667,
+        "capacityB": 0.3780366666666667,
+        "dealbreakerMultiplier": 1
+      },
+      "adjustments": {
+        "sexualComm": 0,
+        "conflictStyle": -0.008324999999999999,
+        "politics": 0,
+        "psychometricSoft": -0.04,
+        "total": -0.048325
+      },
+      "breakdown": {
+        "attachment": 0.1015111111111112,
+        "values": 0.33490000000000003,
+        "semantic": 0.034999999999999996,
+        "finance": 0.04846570733161606,
+        "interviewProcess": 0.0485,
+        "baseline": 0.05,
+        "capacityDiscount": 0.081589,
+        "interviewDiscount": 0.85,
+        "adjustments": -0.048325
+      }
+    }
+  ]
+}

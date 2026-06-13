@@ -44,6 +44,7 @@ import {
   scenarioOneFollowUpFlagsFromTranscript,
   shouldDeliverScenarioFollowUpQuestion,
   transcriptContainsScenarioAContemptProbe,
+  transcriptHasUserResponseAfterScenarioAContemptProbe,
 } from '@features/aria/scenarioFollowUpTranscriptGuard';
 import {
   buildElongatingProbeStateSuffix,
@@ -94,6 +95,10 @@ import {
   looksLikeSkipConfirmationConnectivityGreeting,
   SKIP_CONFIRMATION_GREETING_REOPEN_LINE,
   resolveMetaCommentForInterviewTurn,
+  evaluateFrustrationMetaCommentPathSuppression,
+  isExplicitRepeatRequestPreClassification,
+  FRUSTRATION_META_CONFIDENCE_THRESHOLD,
+  FRUSTRATION_META_WORD_COUNT_THRESHOLD,
   type MetaCommentClassification,
 } from '@features/aria/metaCommentClassification';
 import {
@@ -110,14 +115,19 @@ import {
   kickCompletionScoring,
   isCompletionScoringInFlight,
   markCompletionScoringInFlight,
+  markPsychometricsInterviewHandoffIssued,
   registerScoreInterviewForCompletion,
   resetCompletionScoringSession,
   wasCompletionScoringAttempted,
+  wasPsychometricsInterviewHandoffIssued,
 } from '@features/aria/completionScoringKick';
 import {
   INTERVIEW_NAME_AMBIENT_REASK_LINE,
+  INTERVIEW_NAME_EARLY_MIC_REASK_LINE,
+  INTERVIEW_NAME_PROCEDURAL_MISHEAR_LINE,
   INTERVIEW_NAME_REPEAT_REASK_LINE,
   applyInterviewNameWhisperCorrection,
+  isInterviewNameProceduralMishear,
   isInterviewNameWhisperEcho,
   isInterviewRecordingRetryLine,
   isLikelyAmbientSpeech,
@@ -172,6 +182,11 @@ import {
 } from '@features/aria/computeGateResult';
 import type { ComputeGateResultOptions } from '@features/aria/computeGateResultCore';
 import { applyPsychometricModifierToAttempt } from '@features/psychometrics/applyPsychometricModifier';
+import {
+  PSYCHOMETRICS_ENABLED,
+  fetchMostRecentCompletedInterviewAttemptId,
+} from '@features/psychometrics/interviewCompletionStatus';
+import { triggerAsyncAiReasoningPipeline } from '@features/onboarding/triggerAsyncAiReasoningPipeline';
 import { normalizeGateFailDetailForPersist } from '@features/psychometrics/gateFailDetailForPersist';
 import {
   computeSkipPenaltyGateComputation,
@@ -198,7 +213,11 @@ import {
   isResumeReentryWelcomePrompt,
   isNamePromptInterviewMoment,
   isInterviewPreambleBriefingMoment,
+  isInterviewExitConfirmationMoment,
+  looksLikeInterviewExitDecline,
   looksLikeReadinessAffirmation,
+  looksLikeReadinessYesHomophone,
+  normalizeReadinessHomophoneTranscript,
   userIsAnsweringInterviewReadinessPrompt,
   shouldRecordInterviewResponseTiming,
   isClientAudioRecoveryAssistantLine,
@@ -223,11 +242,23 @@ import {
   stripEmbeddedScenarioARepairQuestionAsk,
   stripScenarioARepairQuestionStreamingEcho,
   isIncompleteScenarioARepairLeadSentence,
+  resolveInterviewQuestionRepeatTtsText,
+  transcriptContainsMentalizingSurfaceProbe,
+  transcriptContainsScenarioCSophiePerspectiveProbe,
+  SCENARIO_C_SOPHIE_PERSPECTIVE_PROBE,
 } from '@features/aria/interviewDisengagementProbes';
 import {
   resolveWeightedPassMinAfterReferralFulfillment,
   ensureShareableReferralCodeForReferrer,
 } from '@features/referrals/referralInterview';
+import { enableInterviewRetake } from '@features/interview/interviewRetake';
+import {
+  countSubstantiveInterviewAttemptsForUser,
+  fetchLatestNonPhantomInProgressAttemptId,
+  isSubstantiveInterviewAttempt,
+  resolveAttemptNumberForCompletion,
+  shouldCreateAttemptOnFirstSubstantiveResponse,
+} from '@features/interview/interviewAttemptLifecycle';
 import { triggerResultsReadyEmail } from '@features/interview/triggerResultsReadyEmail';
 import {
   setPlaybackMode,
@@ -275,6 +306,9 @@ import {
   getLastWebInterviewUserGestureMs,
   markWebInterviewUserGestureNow,
   resetWebInterviewGestureContext,
+  markAiProcessingTurnStarted,
+  clearAiProcessingTurnStarted,
+  peekAiProcessingTurnStartedAtMs,
   type GestureContextLostReason,
 } from '@features/aria/utils/webInterviewGestureContext';
 import {
@@ -447,6 +481,7 @@ import {
   beginInterviewMicPreInitDuringTts,
   scheduleWebMicPreInitRefreshAfterTtsCompletes,
   refreshWebMicPreInitIfStaleAfterLateStartWindow,
+  shouldSuppressTabSwitchDeactivationAfterLateStartRefresh,
   finalizeInterviewMicAmbientOnTtsEnd,
   rearmWebMicPreInitAfterRecordingStop,
   getLastPreInitTriggerDuring,
@@ -463,6 +498,7 @@ import {
   preAuthorizeAudioElementOnMicTapGesture,
   isPreAuthorizedAudioPendingForNextTts,
   reauthorizePendingPreAuthorizedElement,
+  refreshPreAuthorizedAudioForLongProcessingGap,
 } from '@features/aria/utils/webPreAuthorizedTtsAudio';
 import { debugNoteWebAudioRouteChange } from '@features/aria/utils/elevenLabsTts';
 import { markSessionResumedForNextRecordingStart } from '@utilities/sessionLogging/sessionResumeRecordingTelemetry';
@@ -472,6 +508,7 @@ import {
   looksLikeMisplacedNonGrudgeMoment4Answer,
   looksLikeMoment4GrudgePrompt,
   looksLikeMoment4ThresholdQuestion,
+  MOMENT_4_GRUDGE_QUESTION_TEXT,
   shouldForceMoment4ThresholdProbe as shouldForceMoment4ThresholdProbeByType,
   transcriptIncludesMoment4ThresholdAssistant,
 } from '@features/aria/moment4ProbeLogic';
@@ -588,6 +625,8 @@ import {
   SCENARIO_A_REPAIR_QUESTION_AFTER_CONTEMPT_COPY,
   scenarioAContemptProbeResumeRepeatTtsText,
   isMoment5AssistantAnchor,
+  classifyConflictValidity,
+  extractPriorM5TranscriptBeforeClarification,
   moment5ConflictValidityIsLow,
   moment5PersonalNarrativeHasConcreteAnchor,
   moment5TranscriptHasConcreteAnchor,
@@ -595,6 +634,8 @@ import {
   moment5UserDeclinesConcreteReask,
   buildMoment5ConfusionRepeatReplayAfterPriorAnswer,
   combineMoment5UserTurnText,
+  combineMoment5UserTextIncludingCurrent,
+  moment5AnswerHasExplicitSelfAccountability,
   moment5ResponseAddsTensionDetail,
   moment5ResponseContainsDeathDisclosure,
   moment5ResponseIsAbstract,
@@ -617,13 +658,7 @@ import {
 } from '@features/aria/aggregateMarkerScoresFromSlices';
 import { countMentalizingOvercertaintyInMarkerSlices } from '@features/aria/mentalizingOvercertaintyFromTranscript';
 import { DEFAULT_DEFENSE_PATTERNS, detectDefensePatterns, type DefensePatternsJson } from '@features/aria/defensePatternsDetection';
-import {
-  ACCOUNTABILITY_BLAME_SHIFT_VS_CLARITY_REQUEST,
-  REPAIR_AND_ACCOUNTABILITY_UNPROMPTED_VS_PROMPTED_WEIGHTING,
-  REPAIR_CONDITIONAL_AND_PROMPTED_SCORING,
-  SCENARIO_B_ATTUNEMENT_APPRECIATION_ANCHORS,
-  SCORE_CALIBRATION_0_10,
-} from '@features/aria/interviewScoringCalibration';
+import { buildScenarioScoringPrompt } from '@features/aria/scenarioScoringPrompt';
 import { buildScoringPrompt, SCORING_CONFIDENCE_INSTRUCTIONS } from '@features/aria/holisticScoringPrompt';
 import { SCENARIO_B_VIGNETTE as SCENARIO_2_VIGNETTE } from '@/constants/scenarioBVignette';
 import {
@@ -1084,6 +1119,9 @@ function getAnthropicEndpoint(): string {
  */
 const ALPHA_MODE = false;
 
+/** Versioned telemetry for Scenario A contempt probe delivery guards (increment on behavior change). */
+const S1_CONTEMPT_FIX_VERSION = 18;
+
 /**
  * Amoraea-voiced fallbacks when something goes wrong. Never expose technical language.
  * Used only for recording/transcription retry prompts — not for API errors.
@@ -1267,7 +1305,7 @@ function buildFallbackIntroBriefingText(firstName: string): string {
     `Good to meet you, ${name}. The way this works is I'll first give you three situations, ` +
     "and you just tell me what you'd do in each situation. Then I'll give you two short personal questions. " +
     'The whole thing usually takes about 20 to 30 minutes. Try to find a quiet, private space if you can. ' +
-    'Just do the best you can — there are no right or wrong answers. Are you ready?'
+    "Just do the best you can — there are no right or wrong answers. I'm interested in how you naturally think about people and relationships, so just share whatever genuinely comes to mind. Are you ready?"
   );
 }
 
@@ -1796,7 +1834,12 @@ function stripDuplicateScenarioARepairQuestionParagraphs(
   if (blocks.length <= 1) {
     const stripped = stripEmbeddedScenarioARepairQuestionAsk(draft).trim();
     if (!stripped) return '';
-    if (stripped !== draft.trim()) return stripped;
+    if (stripped !== draft.trim()) {
+      if (isIncompleteScenarioARepairLeadSentence(stripped)) {
+        return SCENARIO_A_REPAIR_QUESTION_AFTER_CONTEMPT_COPY;
+      }
+      return stripped;
+    }
     if (looksLikeScenarioARepairQuestion(draft)) return '';
     if (/\bhow would you repair\b/i.test(draft) && /\bryan\b/i.test(draft)) return '';
     return draft;
@@ -1929,17 +1972,25 @@ function stripDuplicateMoment5AccountabilityProbeParagraphs(
     .filter(Boolean);
   if (blocks.length === 0) return draft;
   const isProbe = (b: string) => looksLikeMoment5AccountabilityProbeAssistantPrompt(b);
-  if (!blocks.some(isProbe) && !/\bwhat was your part in how\b/i.test(draft)) return draft;
+  const draftHasAccountabilityAsk =
+    /\bwhat do you think you did or said that contributed\b/i.test(draft) ||
+    /\bwhat was your part in how\b/i.test(draft);
+  if (!blocks.some(isProbe) && !draftHasAccountabilityAsk) return draft;
   if (blocks.length <= 1) {
     const stripped = stripEmbeddedMoment5AccountabilityProbeAsk(draft).trim();
     if (!stripped) return '';
     if (stripped !== draft.trim()) return stripped;
     if (looksLikeMoment5AccountabilityProbeAssistantPrompt(draft)) return '';
-    if (/\bwhat was your part in how\b/i.test(draft)) return '';
+    if (draftHasAccountabilityAsk) return '';
     return draft;
   }
   const filtered = blocks
-    .filter((b) => !isProbe(b) && !/\bwhat was your part in how\b/i.test(b))
+    .filter(
+      (b) =>
+        !isProbe(b) &&
+        !/\bwhat do you think you did or said that contributed\b/i.test(b) &&
+        !/\bwhat was your part in how\b/i.test(b),
+    )
     .map((b) => stripEmbeddedMoment5AccountabilityProbeAsk(b).trim())
     .filter(Boolean);
   const joined = filtered.join('\n\n').trim();
@@ -3357,8 +3408,7 @@ const SCENARIO_C_MISPLACED_Q1_REDIRECT =
   "I was asking specifically about what you make of Daniel saying 'I didn't know what to say', what does that line tell you about where he's at?";
 
 const MOMENT_4_PERSONAL_LABEL = 'Personal reflection';
-const MOMENT_4_PERSONAL_CARD =
-  "Have you ever held a grudge against someone, or had someone in your life you really didn't like? How did that happen, and where are you with it now?";
+const MOMENT_4_PERSONAL_CARD = MOMENT_4_GRUDGE_QUESTION_TEXT;
 /** Show scenario modal: single main block (no Moment 4 grudge vignette); bottom prompt is null so the question is not duplicated. */
 const MOMENT_5_REFERENCE_SCENARIO: ActiveScenario = {
   label: MOMENT_4_PERSONAL_LABEL,
@@ -3832,7 +3882,7 @@ Use the name they just gave: first name if they gave full name, otherwise exactl
 Your first message after learning the user's name should be the briefing only — do NOT repeat data-use, audio processing, or legal-style disclosure here; the participant already saw that on the pre-interview screen before the interview began.
 
 Full example (no disclosure paragraph):
-"Good to meet you, [name]. The way this works is I’ll first give you three situations, and you just tell me what you’d do in each situation. Then I’ll give you two short personal questions. The whole thing usually takes about 20 to 30 minutes. Try to find a quiet, private space if you can. Just do the best you can — there are no right or wrong answers. Are you ready?"
+"Good to meet you, [name]. The way this works is I'll first give you three situations, and you just tell me what you'd do in each situation. Then I'll give you two short personal questions. The whole thing usually takes about 20 to 30 minutes. Try to find a quiet, private space if you can. Just do the best you can — there are no right or wrong answers. I'm interested in how you naturally think about people and relationships, so just share whatever genuinely comes to mind. Are you ready?"
 
 Keep it conversational.
 `;
@@ -4136,7 +4186,7 @@ User: "I procrastinate on work tasks all the time and then feel bad about it at 
 WRONG:
 "I'm looking for a person you had a hard time with — can you think of someone?"
 RIGHT:
-"The work stress is real — for this question I'm curious about someone you held a grudge against or really struggled to like, if anyone comes to mind."
+"The work stress is real — for this question I'm curious about someone you've had a really hard time with, if anyone comes to mind."
 
 User: "I conflict with myself a lot about my life choices and whether I'm making the right decisions."
 WRONG:
@@ -4352,251 +4402,6 @@ function normalizePersonalMomentContemptTierBreakdown(result: PersonalMomentScor
   }
 }
 
-function buildScenarioScoringPrompt(
-  scenarioNumber: 1 | 2 | 3,
-  transcript: Array<{ role: string; content: string; scenarioNumber?: number }>,
-  priorScenarioMentalizing?: { s1?: number; s2?: number } | null,
-  scenario3RepairFocusAnswer?: string | null,
-): string {
-  const scenarioMeta = {
-    1: {
-      name: 'Scenario A (Emma/Ryan)',
-      constructs:
-        'mentalizing, accountability, contempt_recognition, contempt_expression, repair, attunement (score only these keys in this scenario JSON; contempt is split: recognition = identifying contemptuous dynamics in the vignette; expression = participant’s own framing of others per the CONTEMPT_EXPRESSION rubric in this prompt)',
-      markerIds: [
-        'mentalizing',
-        'accountability',
-        'contempt_recognition',
-        'contempt_expression',
-        'repair',
-        'attunement',
-      ] as const,
-    },
-    2: {
-      name: 'Scenario B (Sarah/James)',
-      constructs:
-        'appreciation, attunement, mentalizing, repair, accountability, contempt_expression (per CONTEMPT_EXPRESSION rubric; omit contempt_recognition here)',
-      markerIds: [
-        'appreciation',
-        'attunement',
-        'mentalizing',
-        'repair',
-        'accountability',
-        'contempt_expression',
-      ] as const,
-    },
-    3: {
-      name: 'Scenario C (Sophie/Daniel)',
-      constructs:
-        'regulation, repair, mentalizing, attunement, accountability, contempt_expression',
-      markerIds: [
-        'regulation',
-        'repair',
-        'mentalizing',
-        'attunement',
-        'accountability',
-        'contempt_expression',
-      ] as const,
-    },
-  }[scenarioNumber];
-
-  const transcriptForScenarioSlice =
-    scenarioNumber === 3 ? sliceTranscriptForScenario3Scoring(transcript) : transcript;
-  const taggedSlice = transcriptForScenarioSlice.filter(
-    (m) => typeof m.scenarioNumber === 'number' && m.scenarioNumber === scenarioNumber
-  );
-  const scoringSlice = taggedSlice.length >= 2 ? taggedSlice : transcriptForScenarioSlice;
-  const turns = scoringSlice
-    .map((m) => `${m.role === 'user' ? 'User' : 'Interviewer'}: ${m.content}`)
-    .join('\n\n');
-  const ids = [...scenarioMeta.markerIds];
-  const scenario3Corpus = transcriptForScenarioSlice as ScenarioCorpusMessageSlice[];
-  const scenario3BeforeRepairExcerpt = extractScenario3UserCorpusBeforeRepairPrompt(scenario3Corpus);
-  const scenario3AfterRepairExcerpt =
-    scenario3RepairFocusAnswer?.trim() ||
-    extractScenario3UserCorpusAfterLastRepairPrompt(scenario3Corpus);
-  const scenario3RepairAccountabilityEvidenceBlock =
-    scenarioNumber === 3 && (scenario3BeforeRepairExcerpt.trim() || scenario3AfterRepairExcerpt.trim())
-      ? `
-SCENARIO C — REPAIR & ACCOUNTABILITY EVIDENCE (use with REPAIR & ACCOUNTABILITY — UNPROMPTED VS. PROMPTED above):
-- **Unprompted excerpt** (primary signal for repair & accountability in this slice — typically Q1 and prior user turns before the general repair prompt):
-"""${scenario3BeforeRepairExcerpt.trim() || '(none)'}"""
-- **Prompted excerpt** (supplementary — answer after "How do you think this situation could be repaired?" or equivalent):
-"""${scenario3AfterRepairExcerpt.trim() || '(none)'}"""
-Score **repair** and **accountability** using the ~70% / ~30% unprompted/prompted weighting; tag **keyEvidence** as unprompted / prompted / both.
-`
-      : '';
-  const scenario3RepairIsolationCalibration =
-    scenarioNumber === 3
-      ? `
-Scenario C — REPAIR (this slice does not score commitment_threshold):
-- Apply **REPAIR & ACCOUNTABILITY — UNPROMPTED VS. PROMPTED** when scoring **repair** and **accountability** (combine unprompted + prompted excerpts per weighting; see Scenario C evidence block when present). Pure exit or "not worth fixing" framing without constructive repair moves keeps **repair** in a **3–5** range when the prompted repair answer lacks workable bilateral content.
-`
-      : '';
-  const scenario1ContemptCalibration =
-    scenarioNumber === 1
-      ? SCENARIO_A_CONTEMPT_RECOGNITION_CALIBRATION
-      : '';
-  const scenario1MentalizingRepairCeiling =
-    scenarioNumber === 1
-      ? `
-Scenario A (Emma/Ryan) — MENTALIZING & REPAIR: REAL-HUMAN 10 CEILING (this slice only):
-
-Re-read SCORE CALIBRATION above: **10** = best a thoughtful real person could reasonably do here, with **no material gap**; **slice independence** — never cap this scenario lower because Scenario B or C might later look “even richer” in another transcript slice you are not scoring now.
-
-MENTALIZING — examples of **complete** inference (when accurate to the vignette and prompts), not an exhaustive list:
-- Naming an interactional pattern (e.g. demand–withdraw) that fits Emma/Ryan’s exchange.
-- Reading contempt or harshness as functioning as a **bid for power or control** after **feeling powerless** (or an equivalent accurate relational read).
-- Surfacing an **implicit or unspoken agreement about priorities** that was never openly negotiated, when the participant grounds it in the scenario.
-
-When that level of inference is **accurate** and **sufficient for the moment** and you **cannot** name a meaningful perspective-taking omission, assign **10**. Use **9** only if you can state a **concrete minor gap**. **Do not** systematically assign **9** for “strong Scenario A” to reserve **10** for later scenarios — **forbidden**.
-
-REPAIR (as Ryan) — apply **REPAIR & ACCOUNTABILITY — UNPROMPTED VS. PROMPTED** for **repair** and **accountability** in this slice (unprompted ≈ Q1 / pre–repair-as-Ryan; prompted ≈ repair-as-Ryan). Examples of **ceiling-level** repair (when actually present in the user’s words), not a checklist:
-- Owning not only the **incident** (e.g. the phone call) but the **pattern** it represents, with a **specific behavioral** commitment (not vague intent alone).
-- **Correct sequencing** when present in the answer: e.g. clear ownership of Ryan’s part **before** or alongside addressing how Emma’s contempt or dismissal landed — without using that ordering as a pretext to score down when the answer already satisfies bilateral repair at ceiling.
-
-When repair is **bilateral where appropriate**, **pattern-aware**, **behaviorally specific**, and **not** primarily deflected onto Emma’s failings (see Scenario A repair calibration below), assign **9–10**; **10** when there is **no meaningful omission** for this prompt. **Do not** withhold **10** because a hypothetical “even better” repair could exist or because Scenario B’s James repair might be longer.
-
-**Forbidden:** Applying a standing one-point penalty to Scenario A mentalizing or repair relative to Scenario B/C, or capping at **9** to “leave room” on the scale across the interview.
-`
-      : '';
-  const scenario2AccountabilityCalibration =
-    scenarioNumber === 2
-      ? `
-Scenario B (Sarah/James) — ACCOUNTABILITY & REPAIR (unprompted vs. prompted):
-- For **repair** and **accountability**, apply **REPAIR & ACCOUNTABILITY — UNPROMPTED VS. PROMPTED**: unprompted = user turn(s) **before** the "if you were James, how would you repair" (or equivalent) prompt; prompted = repair-as-James. Weight unprompted ~70%; tag keyEvidence. Other markers in this slice use the full transcript as usual.
-
-Scenario B (Sarah/James) — ACCOUNTABILITY CEILING (repair as James and comparable ownership turns in this slice):
-
-NAMED CALIBRATION — **OWNERSHIP + "BUT I ALSO NEED THEM"** (accountability **6–7 maximum**; **not 8–10**):
-When the user shows **genuine ownership** or care in an apology **and then** uses **"but I also need them to…"**, **"but I need Sarah to…"**, **"but they need to…"**, or **functionally equivalent** wording that **shifts responsibility back to the partner** right after the apology (making the partner's future behavior the hinge), treat that as **meaningful deflection**. **Cap accountability at 6–7.** **8+** requires **clean ownership without** that partner-conditional pivot.
-
-Example (**6–7, not 8**): "I would tell Sarah I'm sorry she felt unappreciated — that wasn't my intention at all. I'd explain that I was asking about the practical stuff because I care about her future... but I also need her to be clearer with me about what she's looking for."
-
-Contrast (often still **8+** when otherwise clean): ownership followed by a **specific information ask** so the user can follow through ("what would appreciation look like for you?") — see ACCOUNTABILITY — BLAME-SHIFT VS. GENUINE REQUEST FOR CLARITY.
-`
-      : '';
-  const scenario2ContemptExpressionCalibration =
-    scenarioNumber === 2
-      ? `
-Scenario B (Sarah/James) — CONTEMPT_EXPRESSION (this slice):
-Apply the **CONTEMPT_EXPRESSION** rubric (Tier 1 observation → Tier 2 blame → Tier 3 character attack) **including Tier 2 and Tier 3 prominence** (centrality, proportion, conviction) and **tier_2_adjusted_score** / **tier_3_adjusted_score** — peripheral hedged Tier 2 or throwaway speculative Tier 3 must **not** dominate an otherwise Tier 1–anchored answer. Judge how the participant talks in their own voice about Sarah, James, or the situation. Fiction is not a free pass to **Tier 3 / character demolition** (idiot, loser, “what a piece of @#!,” toxic-person-as-verdict). **Tier 1** analytical observations of behavior must **not** produce low pillar scores. **Tier 2** blame-without-character-attack supports mid pillar scores; **high-adjusted Tier 3** drives low bands. Keep this key separate from appreciation, repair, and accountability.
-`
-      : '';
-  const scenario2AttunementAppreciationCalibration =
-    scenarioNumber === 2
-      ? `
-${SCENARIO_B_ATTUNEMENT_APPRECIATION_ANCHORS}
-`
-      : '';
-  const scenario3ContemptExpressionCalibration =
-    scenarioNumber === 3
-      ? `
-Scenario C (Sophie/Daniel) — CONTEMPT_EXPRESSION (this slice):
-Apply the **CONTEMPT_EXPRESSION** tier rubric **with Tier 2 and Tier 3 proportionality** (log all Tier 2/Tier 3 clauses; weight **tier_2_adjusted_score** and **tier_3_adjusted_score**). **Tier 1:** behavior-bound critique (avoidant *here*, inconsiderate *in that moment*) — not pillar contempt. **Tier 2:** fault/blame on choices without character demolition. **Tier 3:** global person derogation, hostile clinical labels, mockery, profanity — **high-centrality Tier 3** caps how high the pillar can go. Distinct from mentalizing quality alone.
-`
-      : '';
-  const scenario3MentalizingCalibration =
-    scenarioNumber === 3
-      ? `
-Scenario C mentalizing calibration:
-- Accurately noting an obvious on-vignette dynamic (e.g. Daniel acknowledging a communication problem or taking partial responsibility for avoidance) is competent basic perspective-taking, not strong mentalizing by itself: prefer the 5-6 range unless the answer adds clearly richer inference (Sophie's inner experience beyond the script, bilateral curiosity about both people's states, nuanced uncertainty).
-- Reserve 7+ only when mentalizing in this answer is markedly more sophisticated than restating what the situation already displayed.
-`
-      : '';
-  const priorM1 = priorScenarioMentalizing?.s1;
-  const priorM2 = priorScenarioMentalizing?.s2;
-  const scenario3MentalizingInterviewPatternCalibration =
-    scenarioNumber === 3 &&
-    priorScenarioMentalizing &&
-    ((priorM1 != null && Number.isFinite(priorM1) && priorM1 < 4) ||
-      (priorM2 != null && Number.isFinite(priorM2) && priorM2 < 4))
-      ? `
-Scenario C mentalizing — interview pattern calibration:
-Prior mentalizing scores in this same interview: Scenario 1 = ${priorM1 != null && Number.isFinite(priorM1) ? priorM1.toFixed(1) : 'n/a'}, Scenario 2 = ${priorM2 != null && Number.isFinite(priorM2) ? priorM2.toFixed(1) : 'n/a'}.
-Earlier scenario(s) showed limited mentalizing. Do not assign Scenario C mentalizing 7+ for a single balanced observation that merely labels what the vignette made visible (e.g. "Daniel is acknowledging they have a communication problem") without clearly stronger perspective-taking. In that pattern, 5-6 is appropriate for that level of evidence. Reserve 7+ only if this answer demonstrates a clear step up in sophistication versus those prior moments.
-`
-      : '';
-
-  return `You are scoring a single scenario from a relationship assessment interview.
-
-SCENARIO: ${scenarioMeta.name}
-MARKERS TO SCORE IN THIS SLICE: ${scenarioMeta.constructs}
-
-${SCORE_CALIBRATION_0_10}
-${CONTEMPT_EXPRESSION_SCORING_RUBRIC}
-
-TRANSCRIPT OF THIS SCENARIO ONLY:
-${turns}
-${scenario3RepairAccountabilityEvidenceBlock}
-
-SCORING INSTRUCTIONS:
-Score only the listed markers, based only on this transcript slice.
-For each marker: quote or paraphrase the response that most informed the score; behavioral > attitudinal.
-GENERIC responses: cap at 5 for that marker.
-${BEHAVIORAL_VS_EMOTIONAL_INTERIOR_SCENARIO}
-${ELABORATION_ABSENCE_SCORING_HEADER}
-${ELABORATION_ABSENCE_SCENARIO_MARKERS}
-
-**This slice only:** Do not down-rank a marker here because another scenario in the same interview might show stronger evidence later, or to keep scores “spread out.” Each slice stands on its own.
-
-${ACCOUNTABILITY_BLAME_SHIFT_VS_CLARITY_REQUEST}
-
-${REPAIR_AND_ACCOUNTABILITY_UNPROMPTED_VS_PROMPTED_WEIGHTING}
-${REPAIR_CONDITIONAL_AND_PROMPTED_SCORING}
-
-MENTALIZING and CONTEMPT (where scored) — register-neutral: Judge perspective-taking quality and, for Scenario A, score **contempt_recognition** vs **contempt_expression** **separately** (see Scenario A block). **contempt_recognition** = identifying harsh or contemptuous **dynamics** in the vignette (in others) — unchanged. **contempt_expression** = *only* the **CONTEMPT_EXPRESSION** rubric above: do **not** treat ordinary moral or fairness language about harmful **actions** (rude, wrong, hurtful, disrespectful, “dishonoring *her in that moment*,” inconsiderate) as automatic **low (1–4)** participant expression. Do not down-score formal language when the inference is accurate for mentalizing; **contempt_expression** is about the participant’s **stance** toward *people* in the slice, not about accuracy of vignette reads.
-
-${MENTALIZING_INFERENCE_SOURCE_CALIBRATION}
-
-${MENTALIZING_OVERCERTAINTY_SCORING_INSTRUCTION}
-
-REPAIR COHERENCE: If repair attempt repeats the failure they diagnosed, lower accountability 1-2 points.
-Scenario A repair calibration:
-- For **repair** and **accountability**, apply **REPAIR & ACCOUNTABILITY — UNPROMPTED VS. PROMPTED**: unprompted = user turn(s) before the repair-as-Ryan prompt; prompted = the "if you were Ryan … repair" answer. Tag keyEvidence. For **repair** only, also apply **REPAIR — CONDITIONAL LANGUAGE, DIRECTIONALITY, AND PROMPTED FLOORS** (directionality: self-owning "if" vs blame-redirect).
-- If the repair answer **redirects fault to Emma** (e.g. "Emma needs to communicate better" as the main move, or **"I would apologize if she had just been clearer"** in a way that makes her the problem), score **repair** in the 4-5 range. **Do not** use **"if she doesn't communicate it well"**-style **conditionals alone** as deflection: if the clause **leads into** the respondent’s **own** limits, learning, and ownership (see directionality block), that can support **6+** and often **7–8** for **repair** on the prompted turn.
-- Reserve 6+ for answers that keep Ryan’s contribution and repair move **central** (including humbly naming **one’s own** listening/understanding limits with **her** in the room).
-- Reserve 9-10 for strong repair with explicit ownership and no **blame-redirecting** conditional (per directionality), not 9-10 for mere absence of the word "if."
-${scenario1ContemptCalibration}
-${scenario1MentalizingRepairCeiling}
-${scenario2AccountabilityCalibration}
-${scenario2ContemptExpressionCalibration}
-${scenario2AttunementAppreciationCalibration}
-${scenario3ContemptExpressionCalibration}
-${scenario3RepairIsolationCalibration}
-${scenario3MentalizingCalibration}
-${scenario3MentalizingInterviewPatternCalibration}
-
-CONFIDENCE: high / moderate / low per scored marker.
-${SCORING_CONFIDENCE_INSTRUCTIONS}
-
-${CONTEMPT_TIER_BREAKDOWN_JSON_INSTRUCTION}
-
-OUTPUT CONTRACT (STRICT):
-- Respond with exactly one top-level JSON object.
-- Response must start with "{" and end with "}".
-- Do not include markdown fences, prose, analysis text, or comments.
-- Do not wrap output under alternate keys like "scorecard", "scores", "result", or "data".
-- Use exactly these top-level keys: scenarioNumber, scenarioName, pillarScores, pillarConfidence, keyEvidence, mentalizing_inference_source, mentalizing_overcertainty, contempt_tier_breakdown, specificity, repairCoherenceIssue. Optional: scoringMetadata (object) — if present, mentalizing_overcertainty may be duplicated inside scoringMetadata instead of top-level; prefer top-level + boolean.
-- Include every marker in pillarScores/pillarConfidence/keyEvidence for this scenario.
-- Include \`mentalizing_inference_source\` as exactly one of: "scenario_restatement", "surface_addition", "independent_inference".
-- Include boolean \`mentalizing_overcertainty\` (true or false) per the MENTALIZING OVERCERTAINTY instructions above (top-level required; duplicate under \`keyEvidence\` or \`scoringMetadata\` optional if present).
-
-Return ONLY valid JSON:
-{
-  "scenarioNumber": ${scenarioNumber},
-  "scenarioName": "${scenarioMeta.name}",
-  "pillarScores": { ${ids.map((id) => `"${id}": 0`).join(', ')} },
-  "pillarConfidence": { ${ids.map((id) => `"${id}": "high"`).join(', ')} },
-  "keyEvidence": { ${ids.map((id) => `"${id}": ""`).join(', ')} },
-  "mentalizing_inference_source": "scenario_restatement",
-  "mentalizing_overcertainty": false,
-  "contempt_tier_breakdown": ${CONTEMPT_TIER_BREAKDOWN_JSON_TEMPLATE},
-  "specificity": "high",
-  "repairCoherenceIssue": null
-}`;
-}
-
 function applyElaborationAbsenceAfterNormalizeMoment4(
   result: PersonalMomentScoreResult,
   sliceForAvg: Array<{ role: string; content: string }>,
@@ -4620,6 +4425,86 @@ function applyElaborationAbsenceAfterNormalizeMoment4(
   result.pillarScores = out.pillarScores as PersonalMomentScoreResult['pillarScores'];
   result.keyEvidence = out.keyEvidence;
   return out.depthModifierMeta;
+}
+
+function applyMoment5ConflictValidityScoreAdjustments(
+  result: PersonalMomentScoreResult,
+  moment5Meta?: Moment5ClientScoringMetadata | null,
+) {
+  const conflictState =
+    moment5Meta?.conflictValidity ??
+    (moment5Meta?.conflictValidityLow === true ? 'no_conflict' : null);
+  if (conflictState !== 'no_conflict') return;
+
+  const ceiling = 6;
+  const floor = 5;
+  const cappedMarkers = ['repair', 'regulation', 'accountability', 'mentalizing'] as const;
+  for (const marker of cappedMarkers) {
+    const score = result.pillarScores?.[marker];
+    if (typeof score === 'number' && Number.isFinite(score)) {
+      if (score > ceiling) {
+        result.pillarScores[marker] = ceiling;
+      } else if (score < floor) {
+        result.pillarScores[marker] = floor;
+      }
+    }
+    const existingEvidence = result.keyEvidence?.[marker]?.trim();
+    const capEvidence =
+      'Conflict validity no_conflict (TYPE A): repair/regulation/accountability/mentalizing capped at 6 with floor 5 unless actively harmful behavior was described.';
+    result.keyEvidence = {
+      ...(result.keyEvidence ?? {}),
+      [marker]: existingEvidence ? `${existingEvidence} ${capEvidence}` : capEvidence,
+    };
+  }
+}
+
+/** Creates interview_attempts row on first substantive Scenario A answer (not on screen load / ready confirmation). */
+async function createInterviewAttemptOnFirstSubstantiveResponse(
+  userId: string,
+  userText: string,
+  scenarioNumber: 1,
+  platform: 'ios' | 'android' | 'web',
+): Promise<string | null> {
+  const existingInProgress = await fetchLatestNonPhantomInProgressAttemptId(userId);
+  if (existingInProgress) return existingInProgress;
+
+  const substantiveCount = await countSubstantiveInterviewAttemptsForUser(userId);
+  const attemptNumber = substantiveCount + 1;
+  const { data: attemptRow, error: attemptErr } = await supabase
+    .from('interview_attempts')
+    .insert({
+      user_id: userId,
+      attempt_number: attemptNumber,
+      transcript: [],
+      is_phantom: false,
+    })
+    .select('id')
+    .single();
+  if (attemptErr || !attemptRow?.id) {
+    await remoteLog('[attempt_record_created] failed', {
+      message: attemptErr?.message ?? 'missing id',
+    });
+    return null;
+  }
+  writeSessionLog({
+    userId,
+    attemptId: attemptRow.id,
+    eventType: 'attempt_record_created',
+    eventData: {
+      trigger_reason: 'first_substantive_response',
+      word_count: countInterviewWords(userText),
+      scenario_number: scenarioNumber,
+      created_at: new Date().toISOString(),
+    },
+    platform,
+  });
+  await remoteLog('[attempt_record_created]', {
+    attemptId: attemptRow.id,
+    attemptNumber,
+    wordCount: countInterviewWords(userText),
+    scenarioNumber,
+  });
+  return attemptRow.id;
 }
 
 function applyElaborationAbsenceAfterNormalizeMoment5(
@@ -4648,23 +4533,9 @@ function applyElaborationAbsenceAfterNormalizeMoment5(
   );
   result.pillarScores = out.pillarScores as PersonalMomentScoreResult['pillarScores'];
   result.keyEvidence = out.keyEvidence;
-  if (moment5Meta?.conflictValidityLow === true) {
-    const caps: Record<string, number> = { repair: 4, mentalizing: 5, regulation: 5 };
-    Object.entries(caps).forEach(([marker, cap]) => {
-      const score = result.pillarScores?.[marker];
-      if (typeof score === 'number' && Number.isFinite(score) && score > cap) {
-        result.pillarScores[marker] = cap;
-      }
-      const existingEvidence = result.keyEvidence?.[marker]?.trim();
-      const capEvidence =
-        'Conflict validity low: example did not establish a clear rupture/repair process after clarification, so this marker is capped.';
-      result.keyEvidence = {
-        ...(result.keyEvidence ?? {}),
-        [marker]: existingEvidence ? `${existingEvidence} ${capEvidence}` : capEvidence,
-      };
-    });
-  }
+  applyMoment5ConflictValidityScoreAdjustments(result, moment5Meta);
   if (
+    moment5Meta?.conflictValidity !== 'no_conflict' &&
     moment5Meta?.conflictValidityLow !== true &&
     moment5Meta?.accountabilityProbeFiredOnAbstractFollowup === true &&
     moment5Meta?.conflictValiditySecondResponseAbstract === true
@@ -4932,11 +4803,52 @@ type RecordingDelayMeasurement = { modeCompleteAtMs: number; recordingInitialize
  * Standard (non-admin) applicants: land on neutral review (email capture) after completion.
  * Pass/fail screens open only after 48h from `completed_at` or admin `override_status`.
  */
+function tryHandOffToPsychometricsCongratulations(
+  navigation: { replace: (name: string, params: { userId: string }) => void },
+  userId: string,
+  meta?: { interviewSessionId?: string | null; source?: string; attemptId?: string | null },
+): boolean {
+  if (!PSYCHOMETRICS_ENABLED) return false;
+  replaceWithStandardApplicantPostInterviewHandoffForUser(navigation, userId, meta);
+  return wasPsychometricsInterviewHandoffIssued();
+}
+
 function replaceWithStandardApplicantPostInterviewHandoffForUser(
   navigation: { replace: (name: string, params: { userId: string }) => void },
   userId: string,
-  meta?: { interviewSessionId?: string | null; source?: string }
+  meta?: { interviewSessionId?: string | null; source?: string; attemptId?: string | null }
 ) {
+  if (PSYCHOMETRICS_ENABLED) {
+    if (wasPsychometricsInterviewHandoffIssued()) {
+      void remoteLog('[RESULTS_SCREEN_TRANSITION]', {
+        destination: 'InterviewComplete',
+        skipped_duplicate: true,
+        userId,
+        interviewSessionId: meta?.interviewSessionId ?? null,
+        source: meta?.source ?? 'standard_handoff_psychometrics_enabled',
+        attemptId: meta?.attemptId ?? null,
+      });
+      return;
+    }
+    markPsychometricsInterviewHandoffIssued();
+    void remoteLog('[RESULTS_SCREEN_TRANSITION]', {
+      destination: 'InterviewComplete',
+      userId,
+      interviewSessionId: meta?.interviewSessionId ?? null,
+      source: meta?.source ?? 'standard_handoff_psychometrics_enabled',
+      attemptId: meta?.attemptId ?? null,
+    });
+    const attemptId = meta?.attemptId;
+    if (typeof attemptId === 'string' && attemptId.length > 0) {
+      triggerAsyncAiReasoningPipeline(userId, attemptId);
+    } else {
+      void fetchMostRecentCompletedInterviewAttemptId(userId).then((resolvedId) => {
+        if (resolvedId) triggerAsyncAiReasoningPipeline(userId, resolvedId);
+      });
+    }
+    navigation.replace('InterviewComplete', { userId });
+    return;
+  }
   void remoteLog('[RESULTS_SCREEN_TRANSITION]', {
     destination: 'PostInterview',
     userId,
@@ -5061,6 +4973,7 @@ async function recoverStuckPreparingResultsForStandardUser(
   replaceWithStandardApplicantPostInterviewHandoffForUser(navigation, userId, {
     interviewSessionId: opts.interviewSessionId ?? null,
     source: opts.source,
+    attemptId,
   });
 }
 
@@ -5122,6 +5035,8 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
   /** Web: pre-init stream meter while MediaRecorder is arming after tap. */
   const [preInitMeterLevel, setPreInitMeterLevel] = useState(0);
   const webMicArmInFlightRef = useRef(false);
+  /** Web name-entry: true when the user tapped mic while interviewer TTS was still active. */
+  const micTapWhileTtsActiveRef = useRef(false);
   /** Gentle idle hint when TTS finished long ago and user has not tapped record yet (visual only). */
   const [lateStartIdleCueVisible, setLateStartIdleCueVisible] = useState(false);
   /** Pre-interview (`intro`) before `startInterview`; `starting_interview` is only for mic-retry / legacy auto-start paths. */
@@ -5146,6 +5061,8 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
   const tabVisibilityGestureLossPendingRef = useRef(false);
   const pendingGestureRestoreSpeakRef = useRef<{
     text: string;
+    /** When this line was queued for tab-restore replay (session log elapsed time). */
+    queuedAtMs?: number;
     /** HTML MP3: resume from pause; streaming/buffer: full replay from stored text. */
     restoreMode?: 'resume_html' | 'replay';
     options: {
@@ -5161,7 +5078,7 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
       /** User explicitly requested replay (e.g. resume repeat of closing) — bypass session closing dedup once. */
         skipClosingSessionDedup?: boolean;
         skipScenarioAContemptProbeSessionDedup?: boolean;
-        skipGestureGate?: boolean;
+      skipGestureGate?: boolean;
       ttsTriggerSource?:
         | 'gesture_handler'
         | 'effect'
@@ -5206,7 +5123,8 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
   /** Pre-interview consent — both required before Begin interview. */
   const [preInterviewConsentAge, setPreInterviewConsentAge] = useState(false);
   const [preInterviewConsentData, setPreInterviewConsentData] = useState(false);
-  /** Supabase interview_attempts row — created at screen mount (before TTS) when possible. */
+  /** Supabase interview_attempts row — created on first substantive Scenario A answer, not at screen mount. */
+  const interviewAttemptCreationInFlightRef = useRef(false);
   const [interviewAttemptBootstrap, setInterviewAttemptBootstrap] = useState<
     'idle' | 'loading' | 'ready' | 'failed'
   >('idle');
@@ -5504,7 +5422,10 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
   const deferredMoment4NarrativeRef = useRef<string | null>(null);
   /** User answer to Scenario C repair prompt only — isolates unprompted vs prompted repair scoring. */
   const scenarioCRepairOnlyEvidenceRef = useRef<string | null>(null);
+  const scenarioCSophiePerspectiveProbeFiredRef = useRef(false);
   const scenarioAContemptProbeAskedRef = useRef(false);
+  /** True only after confirmed `tts_playback_complete` for the contempt probe line. */
+  const scenarioAContemptProbePlaybackConfirmedRef = useRef(false);
   /** True after contempt-probe audio was delivered this session — blocks accidental re-TTS (resume replay uses explicit bypass). */
   const scenarioAContemptProbeTtsDeliveredSessionRef = useRef(false);
   /** Set on the user turn before makeCall; consumed when the contempt-probe assistant stream starts. */
@@ -5604,6 +5525,7 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
   /** Clears Scenario C (Sophie/Daniel) probe/evidence gates — call whenever we officially enter a fresh Situation 3 segment. */
   const resetScenarioCClientGatesOnly = useCallback(() => {
     scenarioCRepairOnlyEvidenceRef.current = null;
+    scenarioCSophiePerspectiveProbeFiredRef.current = false;
   }, []);
 
   const resetInterviewProgressRefs = useCallback(() => {
@@ -5635,6 +5557,7 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
     lastUserTurnAudioDurationMsRef.current = null;
     resetScenarioCClientGatesOnly();
     scenarioAContemptProbeAskedRef.current = false;
+    scenarioAContemptProbePlaybackConfirmedRef.current = false;
     scenarioAContemptProbeTtsDeliveredSessionRef.current = false;
     pendingScenarioAContemptProbeStreamMuteRef.current = false;
     scenarioARepairQuestionAskedRef.current = false;
@@ -6335,7 +6258,7 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
     };
   }, [status, preInterviewConsentAge, preInterviewConsentData]);
 
-  /** Create or restore interview attempt before any TTS so session_logs always have attempt_id. */
+  /** Create or restore interview attempt before TTS; new attempts deferred until first substantive Scenario A answer. */
   useEffect(() => {
     if (!userId || isAdmin) {
       setInterviewAttemptBootstrap('ready');
@@ -6381,13 +6304,20 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
         if (saved?.sessionAttemptId) {
           const { data: bootAttempt } = await supabase
             .from('interview_attempts')
-            .select('id')
+            .select('id, completed_at, transcript, is_phantom')
             .eq('id', saved.sessionAttemptId)
             .eq('user_id', userId)
             .maybeSingle();
-          if (!bootAttempt?.id) {
+          if (
+            !bootAttempt?.id ||
+            !isSubstantiveInterviewAttempt(bootAttempt) ||
+            bootAttempt.completed_at != null
+          ) {
             await clearInterviewFromStorage(userId);
-            await remoteLog('[BOOT] stale_session_attempt_cleared', { orphanAttemptId: saved.sessionAttemptId });
+            await remoteLog('[BOOT] stale_session_attempt_cleared', {
+              orphanAttemptId: saved.sessionAttemptId,
+              is_phantom: bootAttempt?.is_phantom === true,
+            });
           } else {
             interviewSessionAttemptIdRef.current = saved.sessionAttemptId;
             resetSessionLogRuntime({
@@ -6415,11 +6345,15 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
         if (latestAttemptId) {
           const { data: reuseAttempt } = await supabase
             .from('interview_attempts')
-            .select('id')
+            .select('id, completed_at, transcript, is_phantom')
             .eq('id', latestAttemptId)
             .eq('user_id', userId)
             .maybeSingle();
-          if (reuseAttempt?.id) {
+          if (
+            reuseAttempt?.id &&
+            isSubstantiveInterviewAttempt(reuseAttempt) &&
+            reuseAttempt.completed_at == null
+          ) {
             interviewSessionAttemptIdRef.current = reuseAttempt.id;
             resetSessionLogRuntime({
               sessionCorrelationId: interviewSessionIdRef.current,
@@ -6443,69 +6377,12 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
             return;
           }
         }
-        const { data: urow } = await supabase
-          .from('users')
-          .select('interview_attempt_count')
-          .eq('id', userId)
-          .maybeSingle();
-        const attemptNumber = (urow?.interview_attempt_count ?? 0) + 1;
-        const { data: attemptRow, error: attemptErr } = await supabase
-          .from('interview_attempts')
-          .insert({
-            user_id: userId,
-            attempt_number: attemptNumber,
-            transcript: [],
-          })
-          .select('id')
-          .single();
-        if (cancelled) return;
-        if (attemptErr || !attemptRow?.id) {
-          const errPayload = attemptErr
-            ? {
-                message: attemptErr.message,
-                code: attemptErr.code,
-                details: attemptErr.details,
-                hint: attemptErr.hint,
-              }
-            : { message: 'missing id' as const };
-          await remoteLog('[BOOT] attempt_creation_failed', { error: errPayload });
-          writeSessionLog({
-            userId,
-            attemptId: null,
-            eventType: 'attempt_creation_failed',
-            eventData: { ...errPayload, phase: 'mount_bootstrap' },
-            platform: Platform.OS as 'ios' | 'android' | 'web',
-          });
-          setInterviewAttemptBootstrap('failed');
-          return;
-        }
-        interviewSessionAttemptIdRef.current = attemptRow.id;
         resetSessionLogRuntime({
           sessionCorrelationId: interviewSessionIdRef.current,
-          attemptId: attemptRow.id,
-          sessionLogsRequireAttemptId: true,
+          attemptId: null,
+          sessionLogsRequireAttemptId: false,
         });
-        const device = await collectDeviceContext();
-        setSessionLogPlatform(device.platform);
-        writeSessionLog({
-          userId,
-          attemptId: attemptRow.id,
-          eventType: 'attempt_created',
-          eventData: { attempt_id: attemptRow.id },
-          platform: device.platform,
-        });
-        await remoteLog('[BOOT] attempt_created', { attemptId: attemptRow.id });
-        writeSessionLog({
-          userId,
-          attemptId: attemptRow.id,
-          eventType: 'session_initialized',
-          eventData: {
-            session_correlation_id: interviewSessionIdRef.current,
-            bootstrap: 'mount',
-          },
-          platform: device.platform,
-        });
-        await remoteLog('[BOOT] attempt_id ready', { attemptId: attemptRow.id });
+        await remoteLog('[BOOT] attempt deferred until first substantive response', { userId });
         setInterviewAttemptBootstrap('ready');
       } catch (e) {
         await remoteLog('[BOOT] attempt bootstrap exception', {
@@ -6678,7 +6555,9 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
     isInterviewCompleteRef.current = true;
     if (interviewStatusRef.current !== 'congratulations') {
       interviewStatusRef.current = 'preparing_results';
-      setInterviewStatus('preparing_results');
+      if (!PSYCHOMETRICS_ENABLED) {
+        setInterviewStatus('preparing_results');
+      }
     }
   }, [userId, isAdmin]);
 
@@ -6790,6 +6669,14 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
         }
         setInterviewStatus('not_started');
       } else {
+        if (PSYCHOMETRICS_ENABLED && isInterviewAppRoute && !isAdminEmail) {
+          await clearInterviewFromStorage(userId);
+          replaceWithStandardApplicantPostInterviewHandoffForUser(navigation, userId, {
+            interviewSessionId: interviewSessionIdRef.current,
+            source: 'checkInterviewStatus_interview_done_recovery',
+          });
+          return;
+        }
         const aid = data.latest_attempt_id as string | null | undefined;
         if (typeof aid === 'string' && aid.length > 0) {
           const { data: attemptStillThere } = await supabase
@@ -6805,7 +6692,9 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
             setInterviewStatus('not_started');
             return;
           }
-          setInterviewStatus('preparing_results');
+          if (!PSYCHOMETRICS_ENABLED) {
+            setInterviewStatus('preparing_results');
+          }
           const ready = await waitForInterviewAttemptScoringReady(supabase, aid, {
             maxMs: 90_000,
             intervalMs: 500,
@@ -6817,7 +6706,9 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
             setInterviewStatus('congratulations');
           } else {
             setPendingScoringSyncAttemptId(aid);
-            setInterviewStatus('preparing_results');
+            if (!PSYCHOMETRICS_ENABLED) {
+              setInterviewStatus('preparing_results');
+            }
           }
         } else {
           setInterviewStatus('congratulations');
@@ -7104,7 +6995,7 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
     if (!attemptId) return;
     const transcriptSnapshot = tagInterviewTranscriptMessages(
       messages.filter(
-        (m) => !(m as { isScoreCard?: boolean }).isScoreCard && !(m as { isWelcomeBack?: boolean }).isWelcomeBack,
+      (m) => !(m as { isScoreCard?: boolean }).isScoreCard && !(m as { isWelcomeBack?: boolean }).isWelcomeBack,
       ) as MessageWithScenario[],
     );
     const t = setTimeout(() => {
@@ -7198,8 +7089,8 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
 
   const applyReferenceCardFromAssistantSpeech = useCallback(
     (rawText: string) => {
-    const cleaned = stripControlTokens(rawText).trim();
-    if (!cleaned) return;
+      const cleaned = stripControlTokens(rawText).trim();
+      if (!cleaned) return;
 
       const activatesMoment5ShowScenario =
         transcriptAssistantContainsMoment5PrimaryConflictQuestion(cleaned) ||
@@ -7247,11 +7138,11 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
         return;
       }
 
-    const scenario = detectActiveScenarioFromMessage(cleaned);
-    if (scenario) {
-      committedScenarioRef.current = scenario;
-      setReferenceCardScenario(scenario);
-      setInterviewUiPhase('scenario_active');
+      const scenario = detectActiveScenarioFromMessage(cleaned);
+      if (scenario) {
+        committedScenarioRef.current = scenario;
+        setReferenceCardScenario(scenario);
+        setInterviewUiPhase('scenario_active');
         const fromSpoken = getLastSubstantiveScenarioModalQuestion([
           { role: 'assistant', content: cleaned },
         ]);
@@ -7404,7 +7295,7 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
         });
         const prefetchedSeg2 = await seg2PrefetchPromise;
         if (!prefetchedSeg2 && SCENARIO_SPLIT_INTER_SEGMENT_GAP_MS > 0) {
-          await new Promise<void>((r) => setTimeout(r, SCENARIO_SPLIT_INTER_SEGMENT_GAP_MS));
+        await new Promise<void>((r) => setTimeout(r, SCENARIO_SPLIT_INTER_SEGMENT_GAP_MS));
         }
         const priorRecSeg2 = recordingJustFinishedBeforeNextTtsRef.current;
         recordingJustFinishedBeforeNextTtsRef.current = false;
@@ -7460,7 +7351,7 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
       return;
     }
     if (pendingGestureRestoreSpeakRef.current) {
-      handleWebTabGestureRestoreTapRef.current();
+        handleWebTabGestureRestoreTapRef.current();
       return;
     }
     markWebInterviewUserGestureNow();
@@ -7484,6 +7375,13 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
         webGestureConsumeClearTimeoutRef.current = null;
         webGestureTtsConsumedPressRef.current = false;
       }, 1800);
+      /** Blob playback alone does not resolve tab-restore queued speak — replay explicitly. */
+      if (
+        pendingGestureRestoreSpeakRef.current ||
+        webTtsTabInterruptPendingReplayRef.current
+      ) {
+        handleWebTabGestureRestoreTapRef.current();
+      }
       return;
     }
     const fromRef = pendingWebSpeechForGestureRef.current;
@@ -7535,13 +7433,13 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
   }, [runWebGestureTtsFlush]);
 
   const detachWebGestureFlushListener = useCallback(() => {
-      if (Platform.OS !== 'web' || typeof window === 'undefined') return;
-      const h = webGestureFlushHandlerRef.current;
-      if (h) {
-        window.removeEventListener('pointerdown', h, { capture: true });
-        webGestureFlushHandlerRef.current = null;
-      }
-      webGestureFlushListenerAttachedRef.current = false;
+    if (Platform.OS !== 'web' || typeof window === 'undefined') return;
+    const h = webGestureFlushHandlerRef.current;
+    if (h) {
+      window.removeEventListener('pointerdown', h, { capture: true });
+      webGestureFlushHandlerRef.current = null;
+    }
+    webGestureFlushListenerAttachedRef.current = false;
   }, []);
 
   useEffect(() => {
@@ -7610,7 +7508,7 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
         setVoiceState('idle');
         return;
       }
-      const effectiveTtsTriggerSource:
+      let effectiveTtsTriggerSource:
         | 'gesture_handler'
         | 'effect'
         | 'callback'
@@ -7692,16 +7590,41 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
       }
       if (
         !skipScenarioAContemptProbeSessionDedup &&
-        scenarioAContemptProbeTtsDeliveredSessionRef.current &&
+        scenarioAContemptProbePlaybackConfirmedRef.current &&
         looksLikeScenarioAContemptProbeQuestion(stripControlTokens(text).trim())
       ) {
         void remoteLog('[S1_CONTEMPT_PROBE_TTS_SUPPRESSED_SESSION_DEDUP]', {
           interviewSessionId: interviewSessionIdRef.current,
           preview: stripControlTokens(text).trim().slice(0, 220),
-          s1ContemptFixVersion: 12,
+          s1ContemptFixVersion: S1_CONTEMPT_FIX_VERSION,
         });
         setVoiceState('idle');
         return;
+      }
+
+      if (Platform.OS === 'web') {
+        const processingStartedAt = peekAiProcessingTurnStartedAtMs();
+        if (processingStartedAt != null) {
+          const gapMs = Date.now() - processingStartedAt;
+          clearAiProcessingTurnStarted();
+          await refreshPreAuthorizedAudioForLongProcessingGap();
+          if (isPreAuthorizedAudioPendingForNextTts()) {
+            effectiveTtsTriggerSource = 'preauthorized_element';
+          }
+          if (userId) {
+            const rProc = getSessionLogRuntime();
+            writeSessionLog({
+              userId,
+              attemptId: rProc.attemptId,
+              eventType: 'gesture_context_refresh_on_long_processing',
+              eventData: {
+                processing_gap_ms: gapMs,
+                trigger_reason: 'pre_tts_delivery_refresh',
+              },
+              platform: rProc.platform,
+            });
+          }
+        }
       }
 
       if (Platform.OS === 'web' && immediateWebPlaybackElement && userId) {
@@ -7788,6 +7711,7 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
             }
             if (looksLikeScenarioAContemptProbeQuestion(stripControlTokens(text).trim())) {
               scenarioAContemptProbeTtsDeliveredSessionRef.current = true;
+              scenarioAContemptProbePlaybackConfirmedRef.current = true;
             }
           }
           if (userId) {
@@ -7869,22 +7793,25 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
             webTtsTabInterruptPendingReplayRef.current ||
             pendingGestureRestoreSpeakRef.current != null;
           if (!tabHideReplayAlreadyQueued) {
-            needsGestureRestoreRef.current = false;
-            tabVisibilityGestureLossPendingRef.current = false;
-            gestureContextLostAtRef.current = null;
-            setWebTabGestureRestoreOverlay(false);
-            pendingGestureRestoreSpeakRef.current = null;
-            gestureRestoredAfterTabSwitchForThisPlayback = true;
-            if (userId) {
-              const r = getSessionLogRuntime();
-              writeSessionLog({
-                userId,
-                attemptId: r.attemptId,
-                eventType: 'gesture_restored_after_tab_switch',
-                eventData: { gesture_restored_after_tab_switch: true },
-                platform: r.platform,
-              });
+          needsGestureRestoreRef.current = false;
+          tabVisibilityGestureLossPendingRef.current = false;
+          gestureContextLostAtRef.current = null;
+          setWebTabGestureRestoreOverlay(false);
+          pendingGestureRestoreSpeakRef.current = null;
+          gestureRestoredAfterTabSwitchForThisPlayback = true;
+          if (userId) {
+            const r = getSessionLogRuntime();
+            writeSessionLog({
+              userId,
+              attemptId: r.attemptId,
+              eventType: 'gesture_restored_after_tab_switch',
+              eventData: { gesture_restored_after_tab_switch: true },
+              platform: r.platform,
+            });
             }
+          } else if (pendingGestureRestoreSpeakRef.current) {
+            /** Tab-hide replay is queued — gesture context is restored; replay pending TTS explicitly. */
+            queueMicrotask(() => handleWebTabGestureRestoreTapRef.current());
           }
         }
       }
@@ -7902,6 +7829,7 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
           pendingGestureRestoreSpeakRef.current = {
             text: preserveHtmlResume && prior?.text ? prior.text : text,
             restoreMode: preserveHtmlResume ? 'resume_html' : prior?.restoreMode,
+            queuedAtMs: prior?.queuedAtMs ?? Date.now(),
             options: { ...options },
             resolve,
             reject,
@@ -7975,6 +7903,7 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
           pendingGestureRestoreSpeakRef.current = {
             text: preserveHtmlResume && prior?.text ? prior.text : text,
             restoreMode: preserveHtmlResume ? 'resume_html' : prior?.restoreMode ?? 'replay',
+            queuedAtMs: prior?.queuedAtMs ?? Date.now(),
             options: { ...options },
             resolve,
             reject,
@@ -7984,7 +7913,7 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
       }
       if (Platform.OS === 'web') {
         if (!webTtsTabInterruptPendingReplayRef.current) {
-          tabHiddenDuringActiveTtsLineRef.current = false;
+        tabHiddenDuringActiveTtsLineRef.current = false;
         }
         if (!silent) {
           webTtsUtteranceInFlightRef.current = text;
@@ -8371,6 +8300,9 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
             durationMs: actualTtsMs,
             platform: rtp.platform,
           });
+          if (looksLikeScenarioAContemptProbeQuestion(stripControlTokens(text).trim())) {
+            scenarioAContemptProbePlaybackConfirmedRef.current = true;
+          }
           writeAudioSessionLog({
             userId,
             attemptId: rtp.attemptId,
@@ -8516,6 +8448,7 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
           }
           if (looksLikeScenarioAContemptProbeQuestion(stripControlTokens(text).trim())) {
             scenarioAContemptProbeTtsDeliveredSessionRef.current = true;
+            scenarioAContemptProbePlaybackConfirmedRef.current = true;
           }
           const closingTtsSessionKey =
             interviewSessionAttemptIdRef.current ?? interviewSessionIdRef.current;
@@ -8569,12 +8502,12 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
         }
         if (Platform.OS === 'web') {
           if (!webTtsTabInterruptPendingReplayRef.current) {
-            tabHiddenDuringActiveTtsLineRef.current = false;
+          tabHiddenDuringActiveTtsLineRef.current = false;
           }
           if (!webTtsTabInterruptPendingReplayRef.current) {
             webTtsUtteranceInFlightRef.current = null;
             webTtsUtteranceInFlightOptionsRef.current = null;
-        }
+          }
         }
         const ttsResolvedAt = Date.now();
         setLastTtsCompletionCallbackMs(ttsResolvedAt);
@@ -8700,10 +8633,19 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
         }
       }
       interviewStatusRef.current = 'preparing_results';
-      setInterviewStatus('preparing_results');
+      if (!PSYCHOMETRICS_ENABLED) {
+        setInterviewStatus('preparing_results');
+      }
       if (userId) markPreparingResultsSession(userId);
       setPendingCompletion(true);
       setIsWaiting(false);
+      if (userId) {
+        replaceWithStandardApplicantPostInterviewHandoffForUser(navigation, userId, {
+          interviewSessionId: interviewSessionIdRef.current,
+          source: `post_closing_handoff_${source}`,
+          attemptId: interviewSessionAttemptIdRef.current,
+        });
+      }
       return true;
     },
     [
@@ -8711,6 +8653,7 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
       isInterviewAppRoute,
       status,
       userId,
+      navigation,
       awaitEmotionModalForIndex,
     ],
   );
@@ -8727,6 +8670,38 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
       setWebTabGestureRestoreOverlay(false);
       needsGestureRestoreRef.current = false;
       webTtsTabInterruptPendingReplayRef.current = false;
+      return;
+    }
+    const navRestore = typeof navigator !== 'undefined' ? navigator : undefined;
+    const uaRestore = navRestore as Navigator & { userActivation?: { isActive?: boolean } } | undefined;
+    const gestureContextActiveAtRestore = uaRestore?.userActivation?.isActive === true;
+    const tabRestoreMode = pending.restoreMode ?? 'replay';
+    if (!gestureContextActiveAtRestore && tabRestoreMode === 'replay') {
+      needsGestureRestoreRef.current = true;
+      setWebTabGestureRestoreOverlay(true);
+      ensureWebGestureFlushListener();
+      const textPreview =
+        pending.text?.trim() ||
+        computeParallelStreamTabRestoreText(
+          parallelStreamingTtsRef.current.accumulatedFullText,
+          parallelStreamingTtsRef.current.spokenCompleteText,
+          [webTtsUtteranceInFlightRef.current ?? '', lastQuestionTextRef.current ?? ''],
+        ) ||
+        '';
+      const uidDefer = userIdRef.current;
+      if (uidDefer) {
+        const rDefer = getSessionLogRuntime();
+        writeSessionLog({
+          userId: uidDefer,
+          attemptId: rDefer.attemptId,
+          eventType: 'tts_replay_deferred_pending_gesture',
+          eventData: {
+            reason: 'gesture_context_not_active_at_tab_restore',
+            queued_text_preview: textPreview.slice(0, 80),
+          },
+          platform: rDefer.platform,
+        });
+      }
       return;
     }
     webTabRestoreReplayInFlightRef.current = true;
@@ -8799,6 +8774,24 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
         ]
       ) ||
       '';
+    const queuedAtMs =
+      pending.queuedAtMs ?? gestureContextLostAtRef.current?.atMs ?? null;
+    const msSinceOriginalQueue =
+      queuedAtMs != null ? Math.max(0, Date.now() - queuedAtMs) : null;
+    if (uid && tabRestoreReplayText.length > 0) {
+      const rLog = getSessionLogRuntime();
+      writeSessionLog({
+        userId: uid,
+        attemptId: rLog.attemptId,
+        eventType: 'tts_replayed_after_gesture_restore',
+        eventData: {
+          replayed_text: tabRestoreReplayText.slice(0, 2000),
+          ms_since_original_queue: msSinceOriginalQueue,
+          tab_restore_mode: pending.restoreMode ?? 'replay',
+        },
+        platform: rLog.platform,
+      });
+    }
     const isClosingTabRestoreReplay =
       isInterviewClosingThanksFragment(tabRestoreReplayText) ||
       isInterviewClosingReflectiveAckFragment(tabRestoreReplayText) ||
@@ -8856,12 +8849,12 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
         await stopElevenLabsPlayback();
         try {
           if (!webTabHtmlResumeDeliveredRef.current) {
-            await speakTextSafe(tabRestoreReplayText, {
-              ...TAB_RESTORE_PENDING_SPEAK_OPTIONS,
-        ...pending.options,
-              telemetrySource: 'replay',
-              skipQuestionTiming: true,
-            });
+          await speakTextSafe(tabRestoreReplayText, {
+            ...TAB_RESTORE_PENDING_SPEAK_OPTIONS,
+            ...pending.options,
+            telemetrySource: 'replay',
+            skipQuestionTiming: true,
+          });
           }
           finishTabRestore();
         } catch (replayErr) {
@@ -8880,12 +8873,12 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
     await stopElevenLabsPlayback();
     try {
       if (!webTabHtmlResumeDeliveredRef.current) {
-        await speakTextSafe(tabRestoreReplayText, {
-          ...TAB_RESTORE_PENDING_SPEAK_OPTIONS,
-          ...pending.options,
-          telemetrySource: 'replay',
-          skipQuestionTiming: true,
-        });
+      await speakTextSafe(tabRestoreReplayText, {
+        ...TAB_RESTORE_PENDING_SPEAK_OPTIONS,
+        ...pending.options,
+        telemetrySource: 'replay',
+        skipQuestionTiming: true,
+      });
       }
       finishTabRestore();
     } catch (err) {
@@ -8896,7 +8889,7 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
     } finally {
       webTabRestoreReplayInFlightRef.current = false;
     }
-  }, [speakTextSafe, stopElevenLabsPlayback, applyInterviewSpeechComplete]);
+  }, [speakTextSafe, stopElevenLabsPlayback, applyInterviewSpeechComplete, ensureWebGestureFlushListener]);
 
   handleWebTabGestureRestoreTapRef.current = () => {
     void handleWebTabGestureRestoreTap();
@@ -8979,6 +8972,20 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
 
   const interruptInterviewTtsForDocumentHidden = useCallback(() => {
     if (Platform.OS !== 'web' || interviewStatusRef.current !== 'in_progress') return;
+    const suppressTabDeactivation = shouldSuppressTabSwitchDeactivationAfterLateStartRefresh();
+    if (suppressTabDeactivation) {
+      const uidSuppress = userIdRef.current;
+      if (uidSuppress) {
+        const rSuppress = getSessionLogRuntime();
+        writeSessionLog({
+          userId: uidSuppress,
+          attemptId: rSuppress.attemptId,
+          eventType: 'tab_switch_deactivation_suppressed_post_late_start_refresh',
+          eventData: { tab_switch_deactivation_suppressed_post_late_start_refresh: true },
+          platform: rSuppress.platform,
+        });
+      }
+    }
     gestureContextLostAtRef.current = { atMs: Date.now(), reason: 'tab_visibility_change' };
     const speechSynthRemaining = captureWebSpeechSynthTabRestoreText();
     const utterance =
@@ -8998,12 +9005,15 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
     if (streamOrTtsActive) {
       tabHiddenDuringActiveTtsLineRef.current = true;
       webTtsTabInterruptPendingReplayRef.current = true;
-      interruptWebInterviewTtsForTabHide();
+      if (!suppressTabDeactivation) {
+        interruptWebInterviewTtsForTabHide();
+      }
       const htmlTabResume = hasWebInterviewHtmlAudioTabResumePending();
       if (utterance.length > 0) {
         pendingGestureRestoreSpeakRef.current = {
           text: utterance,
           restoreMode: htmlTabResume ? 'resume_html' : 'replay',
+          queuedAtMs: Date.now(),
           options: { ...TAB_RESTORE_PENDING_SPEAK_OPTIONS },
           resolve: () => {},
           reject: () => {},
@@ -9020,7 +9030,9 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
       setVoiceState('idle');
       return;
     }
-    interruptWebInterviewTtsForTabHide();
+    if (!suppressTabDeactivation) {
+      interruptWebInterviewTtsForTabHide();
+    }
   }, []);
 
   useEffect(() => {
@@ -9030,12 +9042,12 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
   useEffect(() => {
     if (Platform.OS !== 'web' || typeof document === 'undefined') return;
     const onDocumentHidden = () => {
-        docVisibilityWasHiddenRef.current = true;
+      docVisibilityWasHiddenRef.current = true;
       interruptInterviewTtsForDocumentHidden();
     };
     const onDocumentVisible = () => {
       if (document.visibilityState !== 'visible' || !docVisibilityWasHiddenRef.current) return;
-        docVisibilityWasHiddenRef.current = false;
+      docVisibilityWasHiddenRef.current = false;
       if (interviewStatusRef.current !== 'in_progress') return;
       if (
         isInterviewCompleteRef.current ||
@@ -9044,10 +9056,11 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
         return;
       }
       if (webTabRestoreReplayInFlightRef.current || webTabHtmlResumeDeliveredRef.current) return;
-          needsGestureRestoreRef.current = true;
-          tabVisibilityGestureLossPendingRef.current = true;
+      needsGestureRestoreRef.current = true;
+      tabVisibilityGestureLossPendingRef.current = true;
       if (pendingGestureRestoreSpeakRef.current) {
         setWebTabGestureRestoreOverlay(true);
+        ensureWebGestureFlushListener();
       }
     };
     const onVis = () => {
@@ -9068,7 +9081,7 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
       document.removeEventListener('visibilitychange', onVis);
       window.removeEventListener('blur', onWindowBlur);
     };
-  }, [interruptInterviewTtsForDocumentHidden]);
+  }, [interruptInterviewTtsForDocumentHidden, ensureWebGestureFlushListener]);
 
   // ── Web: browser SpeechRecognition (hold-to-talk fallback when Whisper/MediaRecorder is off)
   useEffect(() => {
@@ -9765,7 +9778,7 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
             scenarioNumber,
             scoreKeys: Object.keys(scenarioResult.pillarScores ?? {}),
             scoreMessageLength: scoreMessage.length,
-          mentalizing_inference_source: scenarioResult.mentalizing_inference_source ?? null,
+            mentalizing_inference_source: scenarioResult.mentalizing_inference_source ?? null,
             mentalizing_overcertainty: scenarioResult.mentalizing_overcertainty ?? false,
           });
         }
@@ -9901,7 +9914,52 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
       return;
     }
     whisperRatioReaskAttemptsForCurrentQuestionRef.current = 0;
-    const trimmed = spokenText.trim();
+    const resumeGatePendingEarly = resumeRepeatChoicePendingRef.current;
+    const readinessCueTextsEarly = [
+      lastQuestionTextRef.current,
+      parallelStreamingTtsRef.current.spokenCompleteText,
+      parallelStreamingTtsRef.current.accumulatedFullText,
+      ...(resumeGatePendingEarly
+        ? messages
+            .filter((m) => m.role === 'assistant')
+            .slice(-4)
+            .map((m) => m.content ?? '')
+        : []),
+    ];
+    let trimmed = normalizeReadinessHomophoneTranscript(spokenText.trim(), readinessCueTextsEarly, {
+      resumeGatePending: resumeGatePendingEarly,
+    });
+    if (
+      trimmed !== spokenText.trim() &&
+      looksLikeReadinessYesHomophone(spokenText.trim())
+    ) {
+      void remoteLog('[INTRO_READINESS_HOMOPHONE_NORMALIZED]', {
+        interviewSessionId: interviewSessionIdRef.current,
+        resumeGatePending: resumeGatePendingEarly,
+        rawPreview: spokenText.trim().slice(0, 40),
+        normalizedPreview: trimmed.slice(0, 40),
+      });
+    }
+    if (
+      resumeGatePendingEarly &&
+      isInterviewAppRoute &&
+      !isAdmin &&
+      status === 'active' &&
+      (looksLikeReadinessYesHomophone(spokenText.trim()) || looksLikeReadinessAffirmation(trimmed)) &&
+      classifyResumeRepeatIntent(trimmed) !== 'repeat' &&
+      !isExplicitRepeatRequestPreClassification(trimmed)
+    ) {
+      resumeRepeatChoicePendingRef.current = false;
+      resumeLastAssistantTextRef.current = null;
+      void remoteLog('[RESUME_WELCOME_ASSENT_CONTINUE]', {
+        interviewSessionId: interviewSessionIdRef.current,
+        rawPreview: spokenText.trim().slice(0, 40),
+        normalizedPreview: trimmed.slice(0, 40),
+      });
+      setVoiceState('idle');
+      setIsWaiting(false);
+      return;
+    }
     metaClassificationForPendingAssistantRef.current = null;
 
     /** Frustration skip confirmed after confirmation prompt — defer moment advance + API until `messagesToUse` exists; must not early-return or skip continuation never hits Claude in the same turn. */
@@ -9979,6 +10037,7 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
       isInterviewAppRoute,
       hasProfileFirstName: !!resolvePlausibleInterviewFirstName(interviewNameRef.current),
       suppressMetaClassificationPostMetaAckAwaitingSubstantive,
+      resumeGatePending: resumeGatePendingEarly,
       spokenWordCount: wcForMetaExempt,
     });
     void remoteLog('meta_comment_classification_result', {
@@ -10072,6 +10131,43 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
       }
     }
     if (metaCommentClassification?.type === 'inability' && closingQuestionPending) {
+      metaCommentClassification = null;
+    }
+
+    const priorFrustrationSignalCountInMoment =
+      metaCommentFrustrationCountByMomentRef.current[momentNumMeta] ?? 0;
+    const frustrationPathSuppression = evaluateFrustrationMetaCommentPathSuppression({
+      classification: metaCommentClassification,
+      wordCount: wcForMetaExempt,
+      priorFrustrationSignalCountInMoment,
+    });
+    if (
+      frustrationPathSuppression.suppress &&
+      metaCommentClassification?.type === 'frustration' &&
+      frustrationPathSuppression.suppressionEventType
+    ) {
+      const suppressionPayload =
+        frustrationPathSuppression.reason === 'word_count_above_threshold'
+          ? {
+              transcript_text: trimmed,
+              classification_confidence: metaCommentClassification.confidence,
+              raw_classification: 'frustration' as const,
+              word_count: wcForMetaExempt,
+              suppression_reason: 'word_count_above_threshold' as const,
+              word_count_threshold: FRUSTRATION_META_WORD_COUNT_THRESHOLD,
+              repeated_frustration_prior: priorFrustrationSignalCountInMoment >= 1,
+              moment_number: momentNumMeta,
+            }
+          : {
+              transcript_text: trimmed,
+              classification_confidence: metaCommentClassification.confidence,
+              raw_classification: 'frustration' as const,
+              word_count: wcForMetaExempt,
+              suppression_reason: 'confidence_below_0.85' as const,
+              repeated_frustration_prior: priorFrustrationSignalCountInMoment >= 1,
+              moment_number: momentNumMeta,
+            };
+      void remoteLog(frustrationPathSuppression.suppressionEventType, suppressionPayload);
       metaCommentClassification = null;
     }
 
@@ -10238,6 +10334,12 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
     if (resumeRepeatChoicePendingRef.current) {
       resumeRepeatChoicePendingRef.current = false;
       let intent = classifyResumeRepeatIntent(trimmed);
+      if (
+        intent !== 'repeat' &&
+        (looksLikeReadinessYesHomophone(spokenText.trim()) || looksLikeReadinessAffirmation(trimmed))
+      ) {
+        intent = 'continue';
+      }
       const resumeCueWordCount = countSpokenWords(trimmed);
       const resumeLastLooksLikeClosing = looksLikeInterviewClosingAssistantMessage(
         resumeLastAssistantTextRef.current ?? '',
@@ -10299,7 +10401,9 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
           resumeClosingRepeatSpeakInFlightRef.current = true;
           try {
             const strippedRepeat = stripControlTokens(last).trim();
-            const repeatTtsText = scenarioAContemptProbeResumeRepeatTtsText(strippedRepeat);
+            const repeatTtsText = resolveInterviewQuestionRepeatTtsText(
+              scenarioAContemptProbeResumeRepeatTtsText(strippedRepeat),
+            );
             const usedContemptResumeRepeatTts = repeatTtsText !== strippedRepeat;
             void remoteLog('[S1_CONTEMPT_PROBE_RESUME_REPEAT_TTS]', {
               usedContemptResumeRepeatTts,
@@ -10323,10 +10427,10 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
               telemetrySource: 'turn',
               skipPcmStream: true,
               prefetchedMpegArrayBuffer,
-              skipQuestionDeliveredTelemetry: true,
-              skipInterviewSpeechAdvance: true,
-              skipQuestionTiming: true,
-              skipLastQuestionRef: true,
+            skipQuestionDeliveredTelemetry: true,
+            skipInterviewSpeechAdvance: true,
+            skipQuestionTiming: true,
+            skipLastQuestionRef: true,
               allowDuplicateConsecutiveTts: !resumeLastLooksLikeClosing,
               skipClosingSessionDedup: resumeLastLooksLikeClosing,
               skipScenarioAContemptProbeSessionDedup: true,
@@ -10452,8 +10556,8 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
       let latencyMs = 0;
       let durationMs = 0;
       if (timingRef.current.recordingStartTime != null) {
-      timingRef.current.recordingEndTime = Date.now();
-      const qEnd = timingRef.current.questionEndTime ?? timingRef.current.recordingStartTime;
+        timingRef.current.recordingEndTime = Date.now();
+        const qEnd = timingRef.current.questionEndTime ?? timingRef.current.recordingStartTime;
         latencyMs = Math.max(0, timingRef.current.recordingStartTime - qEnd);
         durationMs = Math.max(0, (timingRef.current.recordingEndTime ?? Date.now()) - timingRef.current.recordingStartTime);
         timingRef.current.recordingStartTime = null;
@@ -10481,14 +10585,14 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
             getCurrentScenario(scoredScenariosRef.current) ??
             null);
       if (shouldRecordInterviewResponseTiming(lastQuestionTextRef.current)) {
-        responseTimingsRef.current.push({
-          question_id: `q_${responseTimingsRef.current.length + 1}`,
-          scenario: scenario ?? null,
-          question_text: lastQuestionTextRef.current,
-          latency_ms: latencyMs,
-          duration_ms: durationMs,
-          word_count: wordCount,
-        });
+      responseTimingsRef.current.push({
+        question_id: `q_${responseTimingsRef.current.length + 1}`,
+        scenario: scenario ?? null,
+        question_text: lastQuestionTextRef.current,
+        latency_ms: latencyMs,
+        duration_ms: durationMs,
+        word_count: wordCount,
+      });
       }
     }
 
@@ -10536,10 +10640,15 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
       const whisperCorrectedTrimmed = applyInterviewNameWhisperCorrection(trimmed);
       const extraction = extractInterviewNameFromResponse(whisperCorrectedTrimmed);
       const whisperEchoOfPrompt = isInterviewNameWhisperEcho(trimmed, namePromptContext);
+      const proceduralMishearOnNameTurn =
+        isInterviewNameProceduralMishear(trimmed) ||
+        looksLikeReadinessYesHomophone(trimmed) ||
+        looksLikeReadinessAffirmation(trimmed);
       const hasPlausibleExtractedName =
         !!extraction.extractedName &&
         !extraction.isFalseNameTrigger &&
         !whisperEchoOfPrompt &&
+        !proceduralMishearOnNameTurn &&
         isPlausibleInterviewName(extraction.extractedName);
 
       if (
@@ -10574,6 +10683,7 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
         extracted_name: extraction.extractedName || null,
         extraction_method: extraction.extractionMethod,
         false_name_trigger: extraction.isFalseNameTrigger,
+        procedural_mishear_on_name_turn: proceduralMishearOnNameTurn,
         whisper_echo_of_prompt: whisperEchoOfPrompt,
         accepting_after_reask: acceptingAfterReask,
         plausible_name: isPlausibleInterviewName(extraction.extractedName),
@@ -10595,6 +10705,7 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
 
       const transcriptLooksLikeName = looksLikeName(trimmed);
       const implausibleName =
+        proceduralMishearOnNameTurn ||
         whisperEchoOfPrompt ||
         !extraction.extractedName ||
         extraction.isFalseNameTrigger ||
@@ -10610,7 +10721,7 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
         interviewNameRef.current = null;
         interviewNameReaskPendingRef.current = true;
         if (!interviewNameReaskUsedRef.current) {
-          interviewNameReaskUsedRef.current = true;
+        interviewNameReaskUsedRef.current = true;
         }
         const momentForNameReask = currentInterviewMomentRef.current;
         const scenarioForNameReask =
@@ -10621,9 +10732,11 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
           scenarioNumber: scenarioForNameReask as 1 | 2 | 3,
           interviewMoment: momentForNameReask,
         };
-        const reaskText = whisperEchoOfPrompt || acceptingAfterReask
-          ? INTERVIEW_NAME_REPEAT_REASK_LINE
-          : 'Sorry, I want to make sure I got your name right — what should I call you?';
+        const reaskText = proceduralMishearOnNameTurn
+          ? INTERVIEW_NAME_PROCEDURAL_MISHEAR_LINE
+          : whisperEchoOfPrompt || acceptingAfterReask
+            ? INTERVIEW_NAME_REPEAT_REASK_LINE
+            : 'Sorry, I want to make sure I got your name right — what should I call you?';
         setMessages([...messages, userMsgNameRetry]);
         setCurrentTranscript('');
         transcriptAtReleaseRef.current = '';
@@ -11071,9 +11184,95 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
     messagesToUse = currentMessagesRef.current as MessageWithScenario[];
     setCurrentTranscript('');
     transcriptAtReleaseRef.current = '';
+    markAiProcessingTurnStarted();
     setVoiceState('processing');
     setIsWaiting(true);
     setExchangeCount((c) => c + 1);
+
+    if (
+      userId &&
+      !isAdmin &&
+      isInterviewAppRoute &&
+      status === 'active' &&
+      !interviewSessionAttemptIdRef.current &&
+      !interviewAttemptCreationInFlightRef.current &&
+      shouldCreateAttemptOnFirstSubstantiveResponse({
+        isAdmin,
+        isInterviewAppRoute,
+        status,
+        existingAttemptId: interviewSessionAttemptIdRef.current,
+        currentInterviewMoment: currentInterviewMomentRef.current,
+        currentScenario: (currentScenarioRef.current as number) ?? userScenarioTag,
+        userText: trimmed,
+        lastAssistantQuestionText:
+          lastQuestionTextRef.current ??
+          [...messagesToUse].reverse().find((m) => m.role === 'assistant')?.content ??
+          '',
+      })
+    ) {
+      interviewAttemptCreationInFlightRef.current = true;
+      try {
+        const device = await collectDeviceContext();
+        const newAttemptId = await createInterviewAttemptOnFirstSubstantiveResponse(
+          userId,
+          trimmed,
+          1,
+          device.platform,
+        );
+        if (newAttemptId) {
+          interviewSessionAttemptIdRef.current = newAttemptId;
+          resetSessionLogRuntime({
+            sessionCorrelationId: interviewSessionIdRef.current,
+            attemptId: newAttemptId,
+            sessionLogsRequireAttemptId: true,
+          });
+          assignAttemptIdForSessionLogs(newAttemptId);
+        }
+      } finally {
+        interviewAttemptCreationInFlightRef.current = false;
+      }
+    }
+
+    // ━━━ INTERCEPT: Exit decline → readiness (pre-scenario; do not loop on leave confirmation)
+    const exitDeclineCueTexts = [
+      lastQuestionTextRef.current,
+      parallelStreamingTtsRef.current.spokenCompleteText,
+      parallelStreamingTtsRef.current.accumulatedFullText,
+      ...messagesToUse
+        .filter((m) => m.role === 'assistant')
+        .slice(-3)
+        .map((m) => m.content ?? ''),
+    ];
+    const answeringExitDecline =
+      exitDeclineCueTexts.some((t) => isInterviewExitConfirmationMoment(t)) &&
+      looksLikeInterviewExitDecline(trimmed);
+    if (
+      isInterviewAppRoute &&
+      !isAdmin &&
+      status === 'active' &&
+      interviewNameRef.current &&
+      currentInterviewMomentRef.current === 1 &&
+      !transcriptHasScenario1VignetteAssistant(messagesToUse) &&
+      answeringExitDecline
+    ) {
+      const readinessPrompt = `Great, I'm here. Are you ready to start with the first situation?`;
+      const aiMsg: MessageWithScenario = {
+        role: 'assistant',
+        content: readinessPrompt,
+        scenarioNumber: 1,
+        interviewMoment: 1,
+      };
+      const updatedMessages = [...messagesToUse, aiMsg];
+      commitInterviewMessages(updatedMessages);
+      void remoteLog('[INTRO_EXIT_DECLINE_INTERCEPT]', {
+        interviewSessionId: interviewSessionIdRef.current,
+        userPreview: trimmed.slice(0, 80),
+      });
+      await speakTextSafe(readinessPrompt, ASSISTANT_INTERVIEW_SPEECH);
+      setVoiceState('idle');
+      setIsWaiting(false);
+      return;
+    }
 
     // ━━━ INTERCEPT: Readiness confirmation → Scenario 1 (prevents briefing loop when transcript races TTS)
     if (
@@ -11239,7 +11438,9 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
           }
         }
         interviewStatusRef.current = 'preparing_results';
-        setInterviewStatus('preparing_results');
+        if (!PSYCHOMETRICS_ENABLED) {
+          setInterviewStatus('preparing_results');
+        }
         if (userId) markPreparingResultsSession(userId);
         setPendingCompletion(true);
         setIsWaiting(false);
@@ -11637,6 +11838,41 @@ The participant **confirmed** skipping after the skip confirmation prompt. In **
       return;
     }
 
+    const confusionRepeatRequestVerbatim =
+      metaCommentClassification?.type === 'confusion' &&
+      metaCommentClassification.confusion_subtype === 'repeat_request' &&
+      isInterviewAppRoute &&
+      !isAdmin &&
+      status === 'active' &&
+      !closingQuestionPending &&
+      waitingForClosingAdditionRef.current === null;
+    if (confusionRepeatRequestVerbatim) {
+      const replayText = resolveInterviewQuestionRepeatTtsText(
+        stripControlTokens(lastInterviewerContent || lastQuestionTextRef.current || '').trim(),
+      );
+      if (replayText.length > 0) {
+        void remoteLog('[META_CONFUSION_REPEAT_VERBATIM_REPLAY]', {
+          interviewSessionId: interviewSessionIdRef.current,
+          preview: replayText.slice(0, 220),
+          preclassified: metaCommentClassification.confidence === 1.0,
+        });
+        const replayMsg: MessageWithScenario = {
+          role: 'assistant',
+          content: replayText,
+          scenarioNumber: userScenarioTag as 1 | 2 | 3,
+          interviewMoment: currentInterviewMomentRef.current,
+        };
+        setMessages([...messagesToUse, replayMsg]);
+        await speakTextSafe(replayText, {
+          ...ASSISTANT_INTERVIEW_SPEECH,
+          allowDuplicateConsecutiveTts: true,
+        });
+        setVoiceState('idle');
+        setIsWaiting(false);
+        return;
+      }
+    }
+
     const replyingToScenarioAQ1 = isReplyingToScenarioAQ1AfterDelivery({
       currentMoment: currentInterviewMomentRef.current,
       contemptProbeAlreadyAsked: scenarioAContemptProbeAskedRef.current,
@@ -11743,6 +11979,8 @@ The participant **confirmed** skipping after the skip confirmation prompt. In **
       lastAssistantLooksLikeMoment4Grudge &&
       !moment4AnswerLooksMisplaced &&
       !isDecline(trimmed) &&
+      !isInterviewHardStopUserTurn(trimmed) &&
+      countInterviewWords(trimmed) > 10 &&
       needsMoment4SpecificityFollowUp(trimmed)
     ) {
       moment4ClientSpecificityProbeInjectedRef.current = true;
@@ -11957,6 +12195,10 @@ The participant **confirmed** skipping after the skip confirmation prompt. In **
         looksLikeMoment5ResolutionFollowUpPrompt(lastInterviewerContent));
     const moment5AccountabilityEval = evaluateMoment5AccountabilityProbe(trimmed);
     const moment5CombinedUserText = combineMoment5UserTurnText(messagesToUse);
+    const moment5CombinedIncludingCurrent = combineMoment5UserTextIncludingCurrent(messagesToUse, trimmed);
+    const moment5SelfAccountabilityAlreadyEstablished = moment5AnswerHasExplicitSelfAccountability(
+      moment5CombinedIncludingCurrent,
+    );
     const moment5NarrativeConcrete = moment5TranscriptHasConcreteAnchor(messagesToUse);
     const moment5NarrativeConcreteIncludingCurrent = moment5UserOrTranscriptHasConcreteAnchor(
       trimmed,
@@ -11968,10 +12210,12 @@ The participant **confirmed** skipping after the skip confirmation prompt. In **
       looksLikeMoment5ConflictValidityClarificationPrompt(lastInterviewerContent) ||
       isFirstUserTurnAfterMoment5ConflictValidityClarification(messagesToUse);
     const moment5LowConflictValidity = moment5ConflictValidityIsLow(trimmed);
+    const moment5PriorM5Transcript = extractPriorM5TranscriptBeforeClarification(messagesToUse.slice(0, -1));
+    const moment5ConflictValidityClassification = moment5AnsweringAfterConflictValidityClarification
+      ? classifyConflictValidity(trimmed, moment5PriorM5Transcript)
+      : null;
     const moment5AddsTensionDetailAfterClarification =
       moment5AnsweringAfterConflictValidityClarification && moment5ResponseAddsTensionDetail(trimmed);
-    const moment5ConfirmedLowConflictValidity =
-      moment5AnsweringAfterConflictValidityClarification && !moment5AddsTensionDetailAfterClarification;
 
     /** Specificity redirect was issued; second answer still abstract — fire accountability probe once (not a second redirect). */
     const moment5ForcedAbstractFollowupAccountabilityProbe =
@@ -12020,15 +12264,16 @@ The participant **confirmed** skipping after the skip confirmation prompt. In **
       }
     }
 
-    if (moment5AccountabilityProbeCandidate && moment5ConfirmedLowConflictValidity) {
+    if (moment5AnsweringAfterConflictValidityClarification && moment5ConflictValidityClassification) {
       moment5ClientScoringMetaRef.current = {
         ...(moment5ClientScoringMetaRef.current ?? {}),
-        accountabilityProbeFired: false,
+        accountabilityProbeFired: moment5ClientScoringMetaRef.current?.accountabilityProbeFired ?? false,
         conflictValidityClarificationAsked: true,
-        conflictValidityLow: true,
+        conflictValidity: moment5ConflictValidityClassification,
       };
-      void remoteLog('[M5_CONFLICT_VALIDITY_LOW_CONFIRMED]', {
+      void remoteLog('[M5_CONFLICT_VALIDITY_CLASSIFIED]', {
         interviewSessionId: interviewSessionIdRef.current,
+        conflict_validity: moment5ConflictValidityClassification,
         wordCount: countInterviewWords(trimmed),
         preview: trimmed.slice(0, 200),
       });
@@ -12103,39 +12348,38 @@ The participant **confirmed** skipping after the skip confirmation prompt. In **
 
     if (
       moment5AccountabilityProbeCandidate &&
-      !moment5ConfirmedLowConflictValidity &&
       !moment5NarrativeConcrete &&
       moment5AnsweringAfterSpecificityRedirect &&
       moment5SpecificityRedirectIssuedRef.current &&
       moment5AccountabilityEval.reason === 'decline_or_vague_evade'
     ) {
-        moment5ClientScoringMetaRef.current = {
-          ...(moment5ClientScoringMetaRef.current ?? {}),
-          accountabilityProbeFired: false,
-          specificityRedirectIssued: true,
+      moment5ClientScoringMetaRef.current = {
+        ...(moment5ClientScoringMetaRef.current ?? {}),
+        accountabilityProbeFired: false,
+        specificityRedirectIssued: true,
         persistentAbstractionMoveOn: true,
-        };
+      };
       void remoteLog('[M5_PERSISTENT_ABSTRACT_MOVE_ON]', {
-          interviewSessionId: interviewSessionIdRef.current,
+        interviewSessionId: interviewSessionIdRef.current,
         reason: 'decline_after_specificity_redirect',
-          wordCount: countInterviewWords(trimmed),
-          preview: trimmed.slice(0, 200),
-        });
+        wordCount: countInterviewWords(trimmed),
+        preview: trimmed.slice(0, 200),
+      });
       setMessages(appendAssistantTurn(messagesToUse, MOMENT_5_PERSISTENT_ABSTRACT_MOVE_ON_TEXT, {
         scenarioNumber: resolveAssistantScenarioNumber(MOMENT_5_PERSISTENT_ABSTRACT_MOVE_ON_TEXT, messagesToUse),
       }));
       await speakTextSafe(MOMENT_5_PERSISTENT_ABSTRACT_MOVE_ON_TEXT, ASSISTANT_INTERVIEW_SPEECH);
-        setVoiceState('idle');
-        setIsWaiting(false);
-        return;
-      }
+      setVoiceState('idle');
+      setIsWaiting(false);
+      return;
+    }
 
-    const specificityRedirectAlreadyInTranscript = messagesToUse.some(
-      (m) =>
-        m.role === 'assistant' &&
-        !(m as { isWelcomeBack?: boolean }).isWelcomeBack &&
-        looksLikeMoment5SpecificityRedirectPrompt((m as { content?: string }).content ?? ''),
-    );
+      const specificityRedirectAlreadyInTranscript = messagesToUse.some(
+        (m) =>
+          m.role === 'assistant' &&
+          !(m as { isWelcomeBack?: boolean }).isWelcomeBack &&
+          looksLikeMoment5SpecificityRedirectPrompt((m as { content?: string }).content ?? ''),
+      );
 
     /** Thin / abstract first answers: redirect before API — do not require accountability `shouldProbe`. */
     if (moment5AccountabilityProbeCandidate && moment5PushbackAlreadyGaveSpecificExample) {
@@ -12158,7 +12402,6 @@ The participant **confirmed** skipping after the skip confirmation prompt. In **
 
     if (
       moment5AccountabilityProbeCandidate &&
-      !moment5ConfirmedLowConflictValidity &&
       !moment5PushbackAlreadyGaveSpecificExample &&
       shouldInjectMoment5SpecificityRedirect({
         userText: trimmed,
@@ -12196,7 +12439,6 @@ The participant **confirmed** skipping after the skip confirmation prompt. In **
 
     if (
       moment5AccountabilityProbeCandidate &&
-      !moment5ConfirmedLowConflictValidity &&
       !moment5PushbackAlreadyGaveSpecificExample &&
       !moment5ResolutionFollowUpIssuedRef.current &&
       !resolutionFollowUpAlreadyInTranscript &&
@@ -12231,8 +12473,7 @@ The participant **confirmed** skipping after the skip confirmation prompt. In **
     if (
       moment5AccountabilityProbeCandidate &&
       !moment5PushbackAlreadyGaveSpecificExample &&
-      (moment5AccountabilityEval.shouldProbe || moment5ForcedAbstractFollowupAccountabilityProbe) &&
-      !moment5ConfirmedLowConflictValidity
+      (moment5AccountabilityEval.shouldProbe || moment5ForcedAbstractFollowupAccountabilityProbe)
     ) {
       if (
         !moment5NarrativeConcreteIncludingCurrent &&
@@ -12268,7 +12509,10 @@ The participant **confirmed** skipping after the skip confirmation prompt. In **
           ...(moment5ClientScoringMetaRef.current ?? {}),
           accountabilityProbeFired: moment5ClientScoringMetaRef.current?.accountabilityProbeFired ?? false,
           conflictValidityClarificationAsked: true,
-          conflictValidityLow: false,
+          conflictValidity:
+            moment5ClientScoringMetaRef.current?.conflictValidity ??
+            moment5ConflictValidityClassification ??
+            'genuine_conflict',
         };
       }
 
@@ -12298,6 +12542,14 @@ The participant **confirmed** skipping after the skip confirmation prompt. In **
           should_probe_eval: moment5AccountabilityEval.shouldProbe,
           narrative_concrete: moment5NarrativeConcrete,
         });
+      } else if (moment5SelfAccountabilityAlreadyEstablished) {
+        void remoteLog('[M5_ACCOUNTABILITY_PROBE_SKIPPED_PRIOR_OWNERSHIP]', {
+          interviewSessionId: interviewSessionIdRef.current,
+          wordCount: countInterviewWords(trimmed),
+          preview: trimmed.slice(0, 200),
+          should_probe_eval: moment5AccountabilityEval.shouldProbe,
+          combined_preview: moment5CombinedIncludingCurrent.slice(0, 260),
+        });
       } else {
         const deathDisclosureForProbe = moment5ResponseContainsDeathDisclosure(trimmed);
         const moment5AccountabilityProbeTriggerReason = moment5ForcedAbstractFollowupAccountabilityProbe
@@ -12307,12 +12559,12 @@ The participant **confirmed** skipping after the skip confirmation prompt. In **
         const accountabilityProbeSpoken = pickMoment5AccountabilityProbeSpokenText(trimmed, {
           griefAckPrefix: true,
         });
-      moment5AccountabilityProbeFiredRef.current = true;
-      moment5ClientScoringMetaRef.current = {
-        ...(moment5ClientScoringMetaRef.current ?? {}),
-        accountabilityProbeFired: true,
+        moment5AccountabilityProbeFiredRef.current = true;
+        moment5ClientScoringMetaRef.current = {
+          ...(moment5ClientScoringMetaRef.current ?? {}),
+          accountabilityProbeFired: true,
           probeTriggerReason: moment5AccountabilityProbeTriggerReason,
-        ...(moment5SpecificityRedirectIssuedRef.current ? { specificityRedirectIssued: true } : {}),
+          ...(moment5SpecificityRedirectIssuedRef.current ? { specificityRedirectIssued: true } : {}),
           warmAckBeforeAccountabilityProbe: true,
           ...(deathDisclosureForProbe ? { griefAckBeforeAccountabilityProbe: true } : {}),
           ...(moment5ForcedAbstractFollowupAccountabilityProbe
@@ -12322,11 +12574,11 @@ The participant **confirmed** skipping after the skip confirmation prompt. In **
                 conflictValidityClarificationFired: true,
               }
             : {}),
-      };
-      void remoteLog('[M5_ACCOUNTABILITY_PROBE_FIRED]', {
-        interviewSessionId: interviewSessionIdRef.current,
+        };
+        void remoteLog('[M5_ACCOUNTABILITY_PROBE_FIRED]', {
+          interviewSessionId: interviewSessionIdRef.current,
           reason: moment5AccountabilityProbeTriggerReason,
-        after_specificity_redirect: moment5SpecificityRedirectIssuedRef.current,
+          after_specificity_redirect: moment5SpecificityRedirectIssuedRef.current,
           warm_ack_before_accountability_probe: true,
           grief_ack_before_probe: deathDisclosureForProbe,
           conflict_validity_clarification_fired:
@@ -12335,31 +12587,31 @@ The participant **confirmed** skipping after the skip confirmation prompt. In **
             moment5ClientScoringMetaRef.current?.conflictValiditySecondResponseAbstract === true,
           accountability_probe_fired_on_abstract_followup:
             moment5ClientScoringMetaRef.current?.accountabilityProbeFiredOnAbstractFollowup === true,
-        accountability_probe_self_reference_detected:
-          moment5AccountabilityEval.selfReference.accountability_probe_self_reference_detected,
-        self_reference_type: moment5AccountabilityEval.selfReference.self_reference_type,
-        wordCount: countInterviewWords(trimmed),
-        preview: trimmed.slice(0, 200),
-      });
-      probeLogRef.current.push({
-        scenario: (currentScenarioRef.current ?? 3) as number,
-        construct: 'accountability',
-        probe_fired: true,
+          accountability_probe_self_reference_detected:
+            moment5AccountabilityEval.selfReference.accountability_probe_self_reference_detected,
+          self_reference_type: moment5AccountabilityEval.selfReference.self_reference_type,
+          wordCount: countInterviewWords(trimmed),
+          preview: trimmed.slice(0, 200),
+        });
+        probeLogRef.current.push({
+          scenario: (currentScenarioRef.current ?? 3) as number,
+          construct: 'accountability',
+          probe_fired: true,
           trigger_reason: moment5AccountabilityProbeTriggerReason,
-        pre_probe_score: 0,
-        post_probe_score: 0,
-        score_delta: 0,
-      });
-      const accountabilityProbeMsg: MessageWithScenario = {
-        role: 'assistant',
-        content: accountabilityProbeSpoken,
-        scenarioNumber: resolveAssistantScenarioNumber(accountabilityProbeSpoken, messagesToUse),
-      };
-      setMessages([...messagesToUse, accountabilityProbeMsg]);
-      await speakTextSafe(accountabilityProbeSpoken, ASSISTANT_INTERVIEW_SPEECH);
-      setVoiceState('idle');
-      setIsWaiting(false);
-      return;
+          pre_probe_score: 0,
+          post_probe_score: 0,
+          score_delta: 0,
+        });
+        const accountabilityProbeMsg: MessageWithScenario = {
+          role: 'assistant',
+          content: accountabilityProbeSpoken,
+          scenarioNumber: resolveAssistantScenarioNumber(accountabilityProbeSpoken, messagesToUse),
+        };
+        setMessages([...messagesToUse, accountabilityProbeMsg]);
+        await speakTextSafe(accountabilityProbeSpoken, ASSISTANT_INTERVIEW_SPEECH);
+        setVoiceState('idle');
+        setIsWaiting(false);
+        return;
       }
     }
     if (moment5AccountabilityProbeCandidate && !moment5AccountabilityEval.shouldProbe) {
@@ -12550,6 +12802,8 @@ The participant **confirmed** skipping after the skip confirmation prompt. In **
           isFirstUserTurnInScenario,
           hadSkipRequestInThisMoment:
             !!skipRequestClassificationSeenByMomentRef.current[currentInterviewMomentRef.current],
+          scenarioCSophiePerspectiveProbeAlreadyFired: scenarioCSophiePerspectiveProbeFiredRef.current,
+          mentalizingSurfaceProbeAlreadyFired: transcriptContainsMentalizingSurfaceProbe(messagesToUse),
         });
 
         if (disengagePick) {
@@ -12559,18 +12813,25 @@ The participant **confirmed** skipping after the skip confirmation prompt. In **
             preview: trimmed.slice(0, 120),
             ...(disengagePick.kind === 'repair_refusal' ? disengagePick.repairRefusal : {}),
           });
+          if (disengagePick.kind === 'scenario_c_sophie_perspective') {
+            scenarioCSophiePerspectiveProbeFiredRef.current = true;
+          }
           const probeConstruct =
             disengagePick.kind === 'mentalizing_surface'
               ? 'mentalizing'
-              : disengagePick.kind === 'repair_refusal'
-                ? 'repair'
-                : disengagePick.kind;
+              : disengagePick.kind === 'scenario_c_sophie_perspective'
+                ? 'mentalizing'
+                : disengagePick.kind === 'repair_refusal'
+                  ? 'repair'
+                  : disengagePick.kind;
           const probeTriggerReason =
             disengagePick.kind === 'mentalizing_surface'
               ? 'surface_label_no_reasoning'
-              : disengagePick.kind === 'repair_refusal'
-                ? 'repair_refusal_detected'
-                : disengagePick.kind;
+              : disengagePick.kind === 'scenario_c_sophie_perspective'
+                ? 'scenario_c_q1_no_sophie_perspective'
+                : disengagePick.kind === 'repair_refusal'
+                  ? 'repair_refusal_detected'
+                  : disengagePick.kind;
           probeLogRef.current.push({
             scenario: userScenarioTag,
             construct: probeConstruct,
@@ -12865,8 +13126,8 @@ The participant **confirmed** skipping after the skip confirmation prompt. In **
         ttsChain = ttsChain.then(async () => {
           if (ttsCancelled || parallelStreamingTtsRef.current.cancelRequested) return;
           if (Platform.OS === 'web' && speakGenAtEnqueue !== webTtsSpeakGenerationRef.current) {
-            return;
-          }
+          return;
+        }
           parallelStreamingTtsRef.current.active = true;
           let closingSpeakLooksFinal = false;
           let closingTtsSessionKey =
@@ -12876,17 +13137,17 @@ The participant **confirmed** skipping after the skip confirmation prompt. In **
               sanitizeAssistantInterviewerCharacterNames(spoken),
               participantFirstNameForSpoken,
             );
-            if (
-              currentInterviewMomentRef.current === 1 &&
+        if (
+          currentInterviewMomentRef.current === 1 &&
               (looksLikeScenarioAContemptProbeQuestion(spokenForTts) ||
                 isIncompleteScenarioAContemptProbeLeadSentence(spokenForTts))
-            ) {
+        ) {
               void remoteLog('[S1_CONTEMPT_PROBE_PARALLEL_SUPPRESSED]', {
                 preview: spokenForTts.slice(0, 200),
                 s1ContemptFixVersion: 15,
               });
-              return;
-            }
+          return;
+        }
             closingTtsSessionKey =
               interviewSessionAttemptIdRef.current ?? interviewSessionIdRef.current;
             closingSpeakLooksFinal = looksLikeInterviewClosingAssistantMessage(
@@ -12902,8 +13163,8 @@ The participant **confirmed** skipping after the skip confirmation prompt. In **
                 interviewClosingSpokenThisStream = true;
                 textToParallelStream.closingSpoken = true;
               }
-              return;
-            }
+            return;
+          }
             if (closingSpeakLooksFinal && !tryAcquireInterviewClosingSpeak(closingTtsSessionKey)) {
               void remoteLog('[M5_CLOSING_SPEAK_SUPPRESSED_IN_FLIGHT]', {
                 interviewSessionId: interviewSessionIdRef.current,
@@ -12912,8 +13173,8 @@ The participant **confirmed** skipping after the skip confirmation prompt. In **
               });
               interviewClosingSpokenThisStream = true;
               textToParallelStream.closingSpoken = true;
-              return;
-            }
+            return;
+          }
             if (userId) {
               const rtd = getSessionLogRuntime();
               const freshNameFromProfile = interviewNameRef.current ?? '';
@@ -12953,7 +13214,7 @@ The participant **confirmed** skipping after the skip confirmation prompt. In **
                 platform: rtd.platform,
               });
             }
-            await awaitTtsScreenReadyGate('parallel_streaming_sentence');
+              await awaitTtsScreenReadyGate('parallel_streaming_sentence');
             const priorRecParallel = recordingJustFinishedBeforeNextTtsRef.current;
             recordingJustFinishedBeforeNextTtsRef.current = false;
             await prepareInterviewTtsPlayback('parallel_streaming_sentence', {
@@ -13445,7 +13706,6 @@ The participant **confirmed** skipping after the skip confirmation prompt. In **
           s1ContemptFixVersion: 15,
         });
         await speakTextSafe(probeText, ASSISTANT_INTERVIEW_SPEECH);
-        scenarioAContemptProbeTtsDeliveredSessionRef.current = true;
         textToParallelStream.spokenStarted = true;
         recordInterviewAssistantDeliveryForMetaExemptionRef.current(probeText);
         if (referenceCardShouldUpdateOnPlaybackStart(probeText)) {
@@ -13469,6 +13729,7 @@ The participant **confirmed** skipping after the skip confirmation prompt. In **
             pendingGestureRestoreSpeakRef.current = {
               text: preserveHtmlResume && prior?.text ? prior.text : restoreText,
               restoreMode: preserveHtmlResume ? 'resume_html' : prior?.restoreMode ?? 'replay',
+              queuedAtMs: prior?.queuedAtMs ?? Date.now(),
               options: prior?.options ?? { ...TAB_RESTORE_PENDING_SPEAK_OPTIONS },
               resolve: prior?.resolve ?? (() => {}),
               reject: prior?.reject ?? (() => {}),
@@ -13522,7 +13783,7 @@ The participant **confirmed** skipping after the skip confirmation prompt. In **
               ? `${moment5ClosingStreamBuffer} ${tail}`.trim()
               : tail;
           } else {
-            maybeQueueSentenceForTts(sentenceBuffer);
+          maybeQueueSentenceForTts(sentenceBuffer);
           }
           sentenceBuffer = '';
         }
@@ -13627,7 +13888,7 @@ The participant **confirmed** skipping after the skip confirmation prompt. In **
         }
         flushParallelTtsBatch(true);
         if (!streamContemptProbeMuteActive) {
-          await ttsChain;
+        await ttsChain;
         }
         if (!webTtsTabInterruptPendingReplayRef.current) {
           parallelStreamingTtsRef.current.active = false;
@@ -13642,17 +13903,18 @@ The participant **confirmed** skipping after the skip confirmation prompt. In **
             if (isClosingReplay) {
               webTtsTabInterruptPendingReplayRef.current = false;
             } else {
-              const prior = pendingGestureRestoreSpeakRef.current;
-              const preserveHtmlResume =
-                prior?.restoreMode === 'resume_html' || hasWebInterviewHtmlAudioTabResumePending();
-              pendingGestureRestoreSpeakRef.current = {
-                text: preserveHtmlResume && prior?.text ? prior.text : fullReplay,
-                restoreMode: preserveHtmlResume ? 'resume_html' : prior?.restoreMode ?? 'replay',
-                options: prior?.options ?? { ...TAB_RESTORE_PENDING_SPEAK_OPTIONS },
-                resolve: prior?.resolve ?? (() => {}),
-                reject: prior?.reject ?? (() => {}),
-              };
-              setWebTabGestureRestoreOverlay(true);
+            const prior = pendingGestureRestoreSpeakRef.current;
+            const preserveHtmlResume =
+              prior?.restoreMode === 'resume_html' || hasWebInterviewHtmlAudioTabResumePending();
+            pendingGestureRestoreSpeakRef.current = {
+              text: preserveHtmlResume && prior?.text ? prior.text : fullReplay,
+              restoreMode: preserveHtmlResume ? 'resume_html' : prior?.restoreMode ?? 'replay',
+                queuedAtMs: prior?.queuedAtMs ?? Date.now(),
+              options: prior?.options ?? { ...TAB_RESTORE_PENDING_SPEAK_OPTIONS },
+              resolve: prior?.resolve ?? (() => {}),
+              reject: prior?.reject ?? (() => {}),
+            };
+            setWebTabGestureRestoreOverlay(true);
             }
           }
         }
@@ -13971,6 +14233,7 @@ The participant **confirmed** skipping after the skip confirmation prompt. In **
             pendingGestureRestoreSpeakRef.current = {
               ...pendingGestureRestoreSpeakRef.current,
               text: fullReplay,
+              queuedAtMs: pendingGestureRestoreSpeakRef.current?.queuedAtMs ?? Date.now(),
             };
           }
           setWebTabGestureRestoreOverlay(true);
@@ -14087,7 +14350,8 @@ The participant **confirmed** skipping after the skip confirmation prompt. In **
       scenarioAContemptProbeAskedRef.current &&
       !scenarioARepairQuestionAskedRef.current &&
       !replyingToScenarioAQ1 &&
-      !shouldForceScenarioAContemptProbe;
+      !shouldForceScenarioAContemptProbe &&
+      transcriptHasUserResponseAfterScenarioAContemptProbe(messagesToUse);
     if (!strippedText.trim() && shouldInjectScenarioARepairAfterContemptAnswer) {
       if (shouldDeliverScenarioFollowUpQuestion(messagesToUse, SCENARIO_A_REPAIR_QUESTION_AFTER_CONTEMPT_COPY)) {
         strippedText = SCENARIO_A_REPAIR_QUESTION_AFTER_CONTEMPT_COPY;
@@ -14388,7 +14652,7 @@ The participant **confirmed** skipping after the skip confirmation prompt. In **
       };
       setMessages([...stagedMessages, probeMsg]);
       if (!parallelStreamingPlaybackUsed && !scenarioAContemptProbeTtsDeliveredSessionRef.current) {
-        await speakTextSafe(wrappedContemptProbe, ASSISTANT_INTERVIEW_SPEECH);
+      await speakTextSafe(wrappedContemptProbe, ASSISTANT_INTERVIEW_SPEECH);
         scenarioAContemptProbeTtsDeliveredSessionRef.current = true;
       } else {
         void remoteLog('[S1_CONTEMPT_FORCED_SKIP_TTS_ALREADY_STREAMED]', {
@@ -14506,7 +14770,7 @@ The participant **confirmed** skipping after the skip confirmation prompt. In **
          * last audible chunk (often the vignette tail) before the forced James-differently probe.
          */
         if (!parallelStreamingPlaybackUsed) {
-        await speakTextSafe(bLeadIn, ASSISTANT_INTERVIEW_SPEECH);
+          await speakTextSafe(bLeadIn, ASSISTANT_INTERVIEW_SPEECH);
         } else {
           void remoteLog('[S2_JAMES_DIFF_FORCED_SKIP_LEADIN_TTS]', {
             reason: 'parallel_streaming_already_spoke',
@@ -14813,15 +15077,15 @@ The participant **confirmed** skipping after the skip confirmation prompt. In **
             }
           });
           try {
-          await saveInterviewProgress(userId, {
-            messages: transcriptForScoring,
-            scenariosCompleted: completed,
-            scenarioScores: scenarioScoresPayload,
-            currentScenario: getCurrentScenario(scoredScenariosRef.current),
+            await saveInterviewProgress(userId, {
+              messages: transcriptForScoring,
+              scenariosCompleted: completed,
+              scenarioScores: scenarioScoresPayload,
+              currentScenario: getCurrentScenario(scoredScenariosRef.current),
               resumeActiveScenario: resumeActiveScenarioRef.current,
             emotionItemResponses: [...emotionItemResponsesRef.current],
-            pendingCompletion: true,
-          });
+              pendingCompletion: true,
+            });
           } catch (persistErr) {
             void remoteLog('[WARN] saveInterviewProgress_failed_before_pending_completion', {
               message: persistErr instanceof Error ? persistErr.message : String(persistErr),
@@ -14842,9 +15106,18 @@ The participant **confirmed** skipping after the skip confirmation prompt. In **
           }
         }
         interviewStatusRef.current = 'preparing_results';
-        setInterviewStatus('preparing_results');
+        if (!PSYCHOMETRICS_ENABLED) {
+          setInterviewStatus('preparing_results');
+        }
         if (userId) markPreparingResultsSession(userId);
         setPendingCompletion(true);
+        if (userId) {
+          replaceWithStandardApplicantPostInterviewHandoffForUser(navigation, userId, {
+            interviewSessionId: interviewSessionIdRef.current,
+            source: 'interview_complete_token',
+            attemptId: interviewSessionAttemptIdRef.current,
+          });
+        }
         return;
       }
 
@@ -14923,16 +15196,16 @@ The participant **confirmed** skipping after the skip confirmation prompt. In **
         const tokenPathBundledHandoff =
           deferScenarioCompleteEmotionModal && scenarioCompleteSplit.afterModal.trim().length > 0;
         if (!tokenPathBundledHandoff) {
-          if (reconciledScenarioNumber === 1) {
-            interviewMomentsCompleteRef.current[1] = true;
-            currentInterviewMomentRef.current = 2;
-          } else if (reconciledScenarioNumber === 2) {
-            interviewMomentsCompleteRef.current[2] = true;
-            currentInterviewMomentRef.current = 3;
-            resetScenarioCClientGatesOnly();
-          } else if (reconciledScenarioNumber === 3) {
-            interviewMomentsCompleteRef.current[3] = true;
-          }
+        if (reconciledScenarioNumber === 1) {
+          interviewMomentsCompleteRef.current[1] = true;
+          currentInterviewMomentRef.current = 2;
+        } else if (reconciledScenarioNumber === 2) {
+          interviewMomentsCompleteRef.current[2] = true;
+          currentInterviewMomentRef.current = 3;
+          resetScenarioCClientGatesOnly();
+        } else if (reconciledScenarioNumber === 3) {
+          interviewMomentsCompleteRef.current[3] = true;
+        }
         }
         applyInterviewProgressFromAssistantText(
           tokenPathBundledHandoff ? scenarioCompleteSplit.beforeModal : displayText,
@@ -14948,14 +15221,14 @@ The participant **confirmed** skipping after the skip confirmation prompt. In **
             : nextScenarioNum,
         };
         if (!tokenPathBundledHandoff) {
-          currentScenarioRef.current = nextScenarioNum;
+        currentScenarioRef.current = nextScenarioNum;
         } else if (priorScenarioForEmotionModal != null) {
           currentScenarioRef.current = priorScenarioForEmotionModal;
         }
         const updatedMessages = [...messagesToUse, transitionMsg];
         setMessages(updatedMessages);
         if (!tokenPathBundledHandoff) {
-          setHighestScenarioReached((prev) => Math.max(prev, reconciledScenarioNumber));
+        setHighestScenarioReached((prev) => Math.max(prev, reconciledScenarioNumber));
         }
         if (tokenPathBundledHandoff) {
           pendingEmotionModalTransitionRef.current = {
@@ -14968,20 +15241,20 @@ The participant **confirmed** skipping after the skip confirmation prompt. In **
         } else if (deferScenarioCompleteEmotionModal) {
           await speakAssistantTurn(displayText, ASSISTANT_INTERVIEW_SPEECH);
         } else {
-          if (!scoredScenariosRef.current.has(reconciledScenarioNumber)) {
-            scoredScenariosRef.current.add(reconciledScenarioNumber);
-            scoreScenario(reconciledScenarioNumber, updatedMessages);
-          }
-          await notifyScenarioStarted(nextScenarioNum, updatedMessages);
+        if (!scoredScenariosRef.current.has(reconciledScenarioNumber)) {
+          scoredScenariosRef.current.add(reconciledScenarioNumber);
+          scoreScenario(reconciledScenarioNumber, updatedMessages);
+        }
+        await notifyScenarioStarted(nextScenarioNum, updatedMessages);
           await speakAssistantTurn(scenarioCompleteSplit.beforeModal, ASSISTANT_INTERVIEW_SPEECH);
-          await runEmotionModalAfterScenarioTransition(reconciledScenarioNumber, {
-            transitionText: displayText,
-            priorScenario: priorScenarioForEmotionModal,
-          });
+        await runEmotionModalAfterScenarioTransition(reconciledScenarioNumber, {
+          transitionText: displayText,
+          priorScenario: priorScenarioForEmotionModal,
+        });
           if (scenarioCompleteSplit.afterModal.trim()) {
             await speakAssistantTurn(scenarioCompleteSplit.afterModal, ASSISTANT_INTERVIEW_SPEECH);
-          } else if (__DEV__) {
-            console.warn('[Aria] emotion modal transition: missing afterModal split');
+        } else if (__DEV__) {
+          console.warn('[Aria] emotion modal transition: missing afterModal split');
           }
         }
         if (__DEV__) {
@@ -15198,12 +15471,25 @@ The participant **confirmed** skipping after the skip confirmation prompt. In **
             scenarioAContemptProbeAskedRef.current &&
             !scenarioARepairQuestionAskedRef.current
           ) {
+            const confirmedPlaybackExists = scenarioAContemptProbePlaybackConfirmedRef.current;
             void remoteLog('[S1_CONTEMPT_DELIVERY_SKIP_POST_STREAM_FALLBACK]', {
               interviewSessionId: interviewSessionIdRef.current,
-              s1ContemptFixVersion: 11,
+              s1ContemptFixVersion: S1_CONTEMPT_FIX_VERSION,
+              confirmedPlaybackExists,
+              skipReason: confirmedPlaybackExists ? 'confirmed_delivered' : 'fallback_state_inconsistency',
             });
-            setVoiceState('idle');
-            return;
+            if (!confirmedPlaybackExists) {
+              void remoteLog('[S1_CONTEMPT_PROBE_REQUEUED_AFTER_STATE_INCONSISTENCY]', {
+                interviewSessionId: interviewSessionIdRef.current,
+                s1ContemptFixVersion: S1_CONTEMPT_FIX_VERSION,
+                preview: SCENARIO_A_CONTEMPT_PROBE_DELIVERED_COPY.slice(0, 200),
+              });
+              scenarioAContemptProbeTtsDeliveredSessionRef.current = false;
+              displayText = SCENARIO_A_CONTEMPT_PROBE_DELIVERED_COPY;
+            } else {
+              setVoiceState('idle');
+              return;
+            }
           } else if (isPersonalMomentInterviewTurn(currentInterviewMomentRef.current)) {
             displayText = buildNeutralAckAfterSuppressedElongatingProbe(participantFirstNameForSpoken);
             void remoteLog('[ELONGATING_PROBE_SUPPRESSED_NEUTRAL_ACK_FALLBACK]', {
@@ -15320,7 +15606,9 @@ The participant **confirmed** skipping after the skip confirmation prompt. In **
             }
           }
           interviewStatusRef.current = 'preparing_results';
-          setInterviewStatus('preparing_results');
+          if (!PSYCHOMETRICS_ENABLED) {
+            setInterviewStatus('preparing_results');
+          }
           if (userId) markPreparingResultsSession(userId);
           setPendingCompletion(true);
           kickCompletionScoring('closing_duplicate_suppressed_handoff', transcriptForScoring);
@@ -15408,7 +15696,9 @@ The participant **confirmed** skipping after the skip confirmation prompt. In **
             scoreInterviewAttemptedRef.current = true;
           }
           interviewStatusRef.current = 'preparing_results';
-          setInterviewStatus('preparing_results');
+          if (!PSYCHOMETRICS_ENABLED) {
+            setInterviewStatus('preparing_results');
+          }
           if (userId) markPreparingResultsSession(userId);
           setPendingCompletion(true);
           return;
@@ -15533,7 +15823,9 @@ The participant **confirmed** skipping after the skip confirmation prompt. In **
             }
           }
           interviewStatusRef.current = 'preparing_results';
-          setInterviewStatus('preparing_results');
+          if (!PSYCHOMETRICS_ENABLED) {
+            setInterviewStatus('preparing_results');
+          }
           if (userId) markPreparingResultsSession(userId);
           setPendingCompletion(true);
           kickCompletionScoring('elongating_suppressed_m5_close', transcriptForScoring);
@@ -15817,12 +16109,12 @@ The participant **confirmed** skipping after the skip confirmation prompt. In **
         return;
       }
       if (!effectiveSkipClosingSpeak || mustRunEmotionTransitionPath) {
-        if (emotionNaturalForward) {
+      if (emotionNaturalForward) {
           await speakTransitionWithOptionalEmotionModal(
             emotionCompletedScenario ?? priorScenarioNum,
           );
-        } else if (emotionNaturalS3ToM4) {
-          await speakTransitionWithOptionalEmotionModal(3);
+      } else if (emotionNaturalS3ToM4) {
+        await speakTransitionWithOptionalEmotionModal(3);
         } else if (!effectiveSkipClosingSpeak) {
           if (
             shouldFailsafeComplete &&
@@ -15845,8 +16137,8 @@ The participant **confirmed** skipping after the skip confirmation prompt. In **
               interviewSessionId: interviewSessionIdRef.current,
               preview: displayText.slice(0, 220),
             });
-          } else {
-            await speakAssistantTurn(displayText, ASSISTANT_INTERVIEW_SPEECH);
+      } else {
+        await speakAssistantTurn(displayText, ASSISTANT_INTERVIEW_SPEECH);
           }
         }
       }
@@ -15916,7 +16208,9 @@ The participant **confirmed** skipping after the skip confirmation prompt. In **
             }
           }
           interviewStatusRef.current = 'preparing_results';
-          setInterviewStatus('preparing_results');
+          if (!PSYCHOMETRICS_ENABLED) {
+            setInterviewStatus('preparing_results');
+          }
           if (userId) markPreparingResultsSession(userId);
           setPendingCompletion(true);
           return;
@@ -16449,13 +16743,15 @@ The participant **confirmed** skipping after the skip confirmation prompt. In **
 
   /**
    * When VAD decode finds no frame above the adaptive threshold, we normally skip Whisper (bleed-through).
-   * If decoded peak is still clearly above the session ambient floor (SNR), treat as likely real speech:
-   * adaptive threshold can hit the -5 dB cap while speech peaks around -9 dB (session logs 2026-04-18).
+   * If decoded peak is still clearly above the session ambient floor (SNR), treat as likely real speech.
    */
   const VAD_GATE_BYPASS_REASON_NO_SAMPLE_EXCEEDED = 'no_sample_exceeded_vad_threshold_in_decode' as const;
   const VAD_BYPASS_WHISPER_MIN_PEAK_ABOVE_AMBIENT_DB = 5;
   /** When speech starts late in a min-duration clip, Whisper often returns empty — re-prompt instead. */
   const MIN_SPEECH_AFTER_VAD_FOR_WHISPER_MS = 450;
+  /** Strong peak + near-miss duration after a hot adaptive threshold — still try Whisper once. */
+  const VAD_CLIP_NEAR_MISS_MIN_SPEECH_MS = 300;
+  const VAD_CLIP_NEAR_MISS_MIN_PEAK_DB = -25;
 
   const SILENT_BUFFER_RETAKE_PROMPT =
     "I didn't catch any speech on that try. Tap the mic when you're ready and say that again.";
@@ -16624,6 +16920,28 @@ The participant **confirmed** skipping after the skip confirmation prompt. In **
           platform: r.platform,
         });
       }
+      const nameTurnPendingEarlyMic =
+        !interviewNameRef.current &&
+        (interviewNameReaskPendingRef.current ||
+          isNamePromptInterviewMoment(lastQuestionTextRef.current));
+      const tapIntentMs = webTiming?.tapIntentAtMs;
+      const ttsDoneForEarlyMic = getLastTtsCompletionCallbackMs();
+      const sinceTtsAtTap =
+        tapIntentMs != null && ttsDoneForEarlyMic != null ? tapIntentMs - ttsDoneForEarlyMic : null;
+      const tappedBeforeTtsFinished = sinceTtsAtTap != null && sinceTtsAtTap < 0;
+      const tappedDuringTtsPlayback = micTapWhileTtsActiveRef.current;
+      micTapWhileTtsActiveRef.current = false;
+      if (nameTurnPendingEarlyMic && (tappedDuringTtsPlayback || tappedBeforeTtsFinished)) {
+        void remoteLog('[NAME_ENTRY_EARLY_MIC_BLOCKED]', {
+          sinceTtsAtTap,
+          tappedDuringTtsPlayback,
+          tappedBeforeTtsFinished,
+          lastQuestionPreview: (lastQuestionTextRef.current ?? '').slice(0, 80),
+        });
+        await deleteTurnAudioFile(nativeUri);
+        await deliverRecordingRetryLine(INTERVIEW_NAME_EARLY_MIC_REASK_LINE);
+        return;
+      }
       const peakDbForMicFallback = analysis.peak_amplitude_db;
       const isDigitalSilenceForMicFallback =
         Platform.OS === 'web' &&
@@ -16736,7 +17054,12 @@ The participant **confirmed** skipping after the skip confirmation prompt. In **
         analysis.has_non_zero_audio &&
         analysis.firstSpeechOffsetMs != null &&
         speechAfterVadMs != null &&
-        speechAfterVadMs < MIN_SPEECH_AFTER_VAD_FOR_WHISPER_MS;
+        speechAfterVadMs < MIN_SPEECH_AFTER_VAD_FOR_WHISPER_MS &&
+        !(
+          speechAfterVadMs >= VAD_CLIP_NEAR_MISS_MIN_SPEECH_MS &&
+          analysis.peak_amplitude_db >= VAD_CLIP_NEAR_MISS_MIN_PEAK_DB &&
+          analysis.audio_duration_ms >= getAudioMinRecordingDurationMs()
+        );
       if (vadClipTooShortForWhisper) {
         if (userId) {
           const r = getSessionLogRuntime();
@@ -17123,7 +17446,7 @@ The participant **confirmed** skipping after the skip confirmation prompt. In **
         });
       }
       if (!preserveClosingTts) {
-        stopInterviewAudio();
+      stopInterviewAudio();
       }
     };
   }, [navigation]);
@@ -17247,17 +17570,17 @@ The participant **confirmed** skipping after the skip confirmation prompt. In **
    * Does not block on a post-TTS tail — name-entry mic is re-armed after the prompt finishes speaking.
    */
   const waitUntilInterviewerQuiescentForWebMic = useCallback(async (): Promise<void> => {
-      if (Platform.OS !== 'web') return;
-      await stopElevenLabsPlayback();
+    if (Platform.OS !== 'web') return;
+    await stopElevenLabsPlayback();
       const quiesceStartMs = Date.now();
       const maxMs = 450;
       while (Date.now() - quiesceStartMs < maxMs) {
-        const rt = getSessionLogRuntime();
-        const ttsIdle = !ttsLineInFlightRef.current && !rt.ttsPlaybackActive;
-        const surfacesClear = !isWebInterviewPlaybackSurfaceActive();
+      const rt = getSessionLogRuntime();
+      const ttsIdle = !ttsLineInFlightRef.current && !rt.ttsPlaybackActive;
+      const surfacesClear = !isWebInterviewPlaybackSurfaceActive();
         if (ttsIdle && surfacesClear) break;
         await new Promise<void>((r) => setTimeout(r, 25));
-      }
+    }
     },
     [stopElevenLabsPlayback],
   );
@@ -17280,6 +17603,8 @@ The participant **confirmed** skipping after the skip confirmation prompt. In **
         });
       }
       const tapIntentAtMs = Date.now();
+      micTapWhileTtsActiveRef.current =
+        getSessionLogRuntime().ttsPlaybackActive || ttsLineInFlightRef.current;
       setVoiceState('recording');
       setMicEnginePrimed(false);
       const nameEntryTurn =
@@ -17460,8 +17785,10 @@ The participant **confirmed** skipping after the skip confirmation prompt. In **
       if (Platform.OS === 'web') {
         preAuthorizeAudioElementOnMicTapGesture();
         if (resumeRepeatChoicePendingRef.current) {
-          const prefetchText = scenarioAContemptProbeResumeRepeatTtsText(
-            stripControlTokens(resumeLastAssistantTextRef.current ?? '').trim(),
+          const prefetchText = resolveInterviewQuestionRepeatTtsText(
+            scenarioAContemptProbeResumeRepeatTtsText(
+              stripControlTokens(resumeLastAssistantTextRef.current ?? '').trim(),
+            ),
           );
           if (prefetchText.length > 0) {
             void fetchElevenLabsMpegArrayBuffer(prefetchText).then((buffer) => {
@@ -17489,6 +17816,10 @@ The participant **confirmed** skipping after the skip confirmation prompt. In **
       pendingMicStartAfterIdleFlushRef.current = false;
     }
     if (Platform.OS === 'web') {
+      if (pendingGestureRestoreSpeakRef.current) {
+        handleWebTabGestureRestoreTapRef.current();
+        return;
+      }
       const tryPlayed = await tryPlayPendingWebTtsAudioInUserGesture(
         () => {
           const shouldStartMic = pendingMicStartAfterIdleFlushRef.current;
@@ -17498,7 +17829,15 @@ The participant **confirmed** skipping after the skip confirmation prompt. In **
         () => clearPendingWebSpeechGesturePair(pendingWebSpeechForGestureRef),
         { source: 'turn' }
       );
-      if (tryPlayed) return;
+      if (tryPlayed) {
+        if (
+          pendingGestureRestoreSpeakRef.current ||
+          webTtsTabInterruptPendingReplayRef.current
+        ) {
+          handleWebTabGestureRestoreTapRef.current();
+        }
+        return;
+      }
     }
     if (Platform.OS === 'web' && webGestureTtsConsumedPressRef.current) {
       pendingMicStartAfterIdleFlushRef.current = false;
@@ -17559,6 +17898,8 @@ The participant **confirmed** skipping after the skip confirmation prompt. In **
           webMicArmInFlightRef.current = true;
         }
         const tapIntentAtMs = Date.now();
+        micTapWhileTtsActiveRef.current =
+          getSessionLogRuntime().ttsPlaybackActive || ttsLineInFlightRef.current;
         setVoiceState('recording');
         setMicEnginePrimed(false);
         /** Web: fully quiesce interviewer output before getUserMedia + MediaRecorder (avoids overlap with capture). */
@@ -17594,8 +17935,10 @@ The participant **confirmed** skipping after the skip confirmation prompt. In **
         const extraDelayMs = takeRecordingDelayExtraFromEarlyCutoffMs();
         recordingDelayMeasurementRef.current = null;
         if (Platform.OS === 'web' && resumeRepeatChoicePendingRef.current) {
-          const prefetchText = scenarioAContemptProbeResumeRepeatTtsText(
-            stripControlTokens(resumeLastAssistantTextRef.current ?? '').trim(),
+          const prefetchText = resolveInterviewQuestionRepeatTtsText(
+            scenarioAContemptProbeResumeRepeatTtsText(
+              stripControlTokens(resumeLastAssistantTextRef.current ?? '').trim(),
+            ),
           );
           if (prefetchText.length > 0) {
             void fetchElevenLabsMpegArrayBuffer(prefetchText).then((buffer) => {
@@ -17788,10 +18131,10 @@ The participant **confirmed** skipping after the skip confirmation prompt. In **
     let playedAfterModal = false;
     try {
       if (offerWelcome && tryAcquireResumeWelcomePlayback(attemptId)) {
-    try {
-      await speakTextSafe(resumeWelcomeMessageRef.current, {
-        telemetrySource: 'greeting',
-        ttsTriggerSource: 'gesture_handler',
+        try {
+          await speakTextSafe(resumeWelcomeMessageRef.current, {
+            telemetrySource: 'greeting',
+            ttsTriggerSource: 'gesture_handler',
             skipQuestionDeliveredTelemetry: true,
             skipInterviewSpeechAdvance: true,
             skipQuestionTiming: true,
@@ -17821,15 +18164,15 @@ The participant **confirmed** skipping after the skip confirmation prompt. In **
         const afterModal = resumeEmotionAfterModalTextRef.current;
         resumeEmotionAfterModalTextRef.current = null;
         playedAfterModal = true;
-        await speakTextSafe(stripControlTokens(afterModal), {
-          telemetrySource: 'replay',
-          ttsTriggerSource: 'gesture_handler',
-          skipQuestionDeliveredTelemetry: true,
-          skipInterviewSpeechAdvance: true,
-          skipQuestionTiming: true,
-          skipLastQuestionRef: true,
-        });
-        void remoteLog('[resume] emotion_after_modal_tts', { preview: afterModal.slice(0, 120) });
+          await speakTextSafe(stripControlTokens(afterModal), {
+            telemetrySource: 'replay',
+            ttsTriggerSource: 'gesture_handler',
+            skipQuestionDeliveredTelemetry: true,
+            skipInterviewSpeechAdvance: true,
+            skipQuestionTiming: true,
+            skipLastQuestionRef: true,
+          });
+          void remoteLog('[resume] emotion_after_modal_tts', { preview: afterModal.slice(0, 120) });
       } else if (!spokeWelcome && !offerWelcome) {
         const last = resumeLastAssistantTextRef.current;
         if (last?.trim()) {
@@ -17925,7 +18268,9 @@ The participant **confirmed** skipping after the skip confirmation prompt. In **
       isInterviewCompleteRef.current = true;
       if (userId) markPreparingResultsSession(userId);
       interviewStatusRef.current = 'preparing_results';
-      setInterviewStatus('preparing_results');
+      if (!PSYCHOMETRICS_ENABLED) {
+        setInterviewStatus('preparing_results');
+      }
       void remoteLog('[REENTRY_POST_CLOSING_HANDOFF]', {
         source,
         transcriptLen: transcript.length,
@@ -18102,7 +18447,7 @@ The participant **confirmed** skipping after the skip confirmation prompt. In **
           (m) =>
             m.role === 'assistant' &&
             looksLikeMoment5ConflictValidityClarificationPrompt((m as { content?: string }).content ?? '')
-      );
+        );
       const transcriptHasM5PrimaryConflict = transcriptMessages.some(
         (m) =>
           m.role === 'assistant' &&
@@ -18132,9 +18477,16 @@ The participant **confirmed** skipping after the skip confirmation prompt. In **
         scenario1Moment1CombinedForResume.length >= 8 &&
         (hasScenarioAQ1ContemptProbeCoverage(scenario1Moment1CombinedForResume) ||
           evaluateScenarioAQ1ContemptProbePreProbeSkip(scenario1Moment1CombinedForResume).skip);
-      scenarioAContemptProbeAskedRef.current =
-        scenarioAContemptProbePreviouslyAsked || scenarioAContemptProbeSatisfiedByUser;
+      scenarioAContemptProbeAskedRef.current = scenarioAContemptProbePreviouslyAsked;
+      if (scenarioAContemptProbeSatisfiedByUser && !scenarioAContemptProbePreviouslyAsked) {
+        void remoteLog('[S1_CONTEMPT_RESUME_COVERAGE_WITHOUT_PROBE]', {
+          interviewSessionId: interviewSessionIdRef.current,
+          preview: scenario1Moment1CombinedForResume.slice(0, 320),
+          s1ContemptFixVersion: S1_CONTEMPT_FIX_VERSION,
+        });
+      }
       scenarioAContemptProbeTtsDeliveredSessionRef.current = scenarioAContemptProbePreviouslyAsked;
+      scenarioAContemptProbePlaybackConfirmedRef.current = scenarioAContemptProbePreviouslyAsked;
       scenarioARepairQuestionAskedRef.current = transcriptMessages.some(
         (m) =>
           m.role === 'assistant' &&
@@ -18361,7 +18713,7 @@ The participant **confirmed** skipping after the skip confirmation prompt. In **
         })();
         if (resumeOfferWelcomeTtsRef.current && !welcomeAlreadySpoken && !webResumeWelcomeTapHandledRef.current) {
           webResumeWelcomeTapPendingRef.current = true;
-        setWebResumeWelcomeTapPending(true);
+          setWebResumeWelcomeTapPending(true);
         }
       } else {
         void (async () => {
@@ -18377,7 +18729,7 @@ The participant **confirmed** skipping after the skip confirmation prompt. In **
             const attemptId = interviewSessionAttemptIdRef.current;
             let spokeWelcome = false;
             if (offerWelcome && !(await wasResumeWelcomeSpoken(attemptId))) {
-            await speakTextSafe(welcomeBack, { telemetrySource: 'greeting', ttsTriggerSource: 'callback' });
+              await speakTextSafe(welcomeBack, { telemetrySource: 'greeting', ttsTriggerSource: 'callback' });
               await markResumeWelcomeSpoken(attemptId);
               spokeWelcome = true;
             }
@@ -18388,14 +18740,14 @@ The participant **confirmed** skipping after the skip confirmation prompt. In **
             } else if (hadCatchUp && resumeEmotionAfterModalTextRef.current?.trim()) {
               const afterModal = resumeEmotionAfterModalTextRef.current;
               resumeEmotionAfterModalTextRef.current = null;
-              await speakTextSafe(stripControlTokens(afterModal), {
-                telemetrySource: 'replay',
-                ttsTriggerSource: 'callback',
-                skipQuestionDeliveredTelemetry: true,
-                skipInterviewSpeechAdvance: true,
-                skipQuestionTiming: true,
-                skipLastQuestionRef: true,
-              });
+                await speakTextSafe(stripControlTokens(afterModal), {
+                  telemetrySource: 'replay',
+                  ttsTriggerSource: 'callback',
+                  skipQuestionDeliveredTelemetry: true,
+                  skipInterviewSpeechAdvance: true,
+                  skipQuestionTiming: true,
+                  skipLastQuestionRef: true,
+                });
             } else if (!spokeWelcome && !offerWelcome) {
               const last = resumeLastAssistantTextRef.current;
               if (last?.trim()) {
@@ -18450,17 +18802,17 @@ The participant **confirmed** skipping after the skip confirmation prompt. In **
           : null;
       if (!interviewDoneForRouting && latestAttemptId) {
         const { data: latestAttemptMeta } = await supabase
-          .from('interview_attempts')
+            .from('interview_attempts')
           .select('completed_at')
           .eq('id', latestAttemptId)
-          .eq('user_id', userId)
-          .maybeSingle();
+            .eq('user_id', userId)
+            .maybeSingle();
         interviewDoneForRouting = !!latestAttemptMeta?.completed_at;
-      }
+        }
       if (interviewDoneForRouting) {
-        await clearInterviewFromStorage(userId);
-        return;
-      }
+          await clearInterviewFromStorage(userId);
+          return;
+        }
       const saved = await loadInterviewFromStorage(userId);
       if (cancelled) return;
       if (!saved?.messages?.length) return;
@@ -18713,63 +19065,12 @@ The participant **confirmed** skipping after the skip confirmation prompt. In **
           } else {
             setSessionAudioRoutes(mapHeadphoneProbeToSessionInputRoute(routeProbe), 'unknown');
           }
-          const { data: urow } = await supabase
-            .from('users')
-            .select('interview_attempt_count')
-            .eq('id', userId)
-            .maybeSingle();
-          const attemptNumber = (urow?.interview_attempt_count ?? 0) + 1;
+          const substantiveCount = await countSubstantiveInterviewAttemptsForUser(userId);
+          const attemptNumber = substantiveCount + 1;
           if (!createdAttemptId) {
-            const { data: attemptRow, error: attemptInsErr } = await supabase
-              .from('interview_attempts')
-              .insert({
-                user_id: userId,
-                attempt_number: attemptNumber,
-                transcript: [],
-              })
-              .select('id')
-              .single();
-            if (attemptInsErr) {
-              if (__DEV__) {
-                console.warn('[Aria] interview_attempts insert at session start failed:', attemptInsErr);
-              }
-              const errPayload = {
-                message: attemptInsErr.message,
-                code: attemptInsErr.code,
-                details: attemptInsErr.details,
-                hint: attemptInsErr.hint,
-              };
-              await remoteLog('[START] attempt_creation_failed', { error: errPayload });
-              writeSessionLog({
-                userId,
-                attemptId: null,
-                eventType: 'attempt_creation_failed',
-                eventData: { ...errPayload, phase: 'start_interview_fallback' },
-                platform: device.platform,
-              });
-            }
-            createdAttemptId = attemptRow?.id ?? null;
+            createdAttemptId = await fetchLatestNonPhantomInProgressAttemptId(userId);
             if (createdAttemptId) {
               interviewSessionAttemptIdRef.current = createdAttemptId;
-            }
-            if (createdAttemptId) {
-              writeSessionLog({
-                userId,
-                attemptId: createdAttemptId,
-                eventType: 'attempt_created',
-                eventData: { attempt_id: createdAttemptId },
-                platform: device.platform,
-              });
-              writeSessionLog({
-                userId,
-                attemptId: createdAttemptId,
-                eventType: 'session_initialized',
-                eventData: {
-                  session_correlation_id: interviewSessionIdRef.current,
-                  bootstrap: 'start_interview_fallback',
-                },
-                platform: device.platform,
-              });
             }
           }
           resetSessionLogRuntime({
@@ -18779,13 +19080,7 @@ The participant **confirmed** skipping after the skip confirmation prompt. In **
           });
           markInterviewSessionClockStart();
           const rLog = getSessionLogRuntime();
-          if (!rLog.attemptId) {
-            setMicError('Could not link your interview session. Please try again.');
-            setVoiceState('idle');
-            setStatus('starting_interview');
-            setInterviewStatus('not_started');
-            return;
-          }
+          setSessionLogPlatform(device.platform);
           writeAudioSessionLog({
             userId,
             attemptId: rLog.attemptId,
@@ -19254,16 +19549,16 @@ The participant **confirmed** skipping after the skip confirmation prompt. In **
       try {
         /** Show full-screen "Preparing your results" before rescore/DB/edge — avoids long awkward mic UI (rescore can take 15s+ per scenario). */
         interviewStatusRef.current = 'preparing_results';
-        setInterviewStatus('preparing_results');
+        if (!PSYCHOMETRICS_ENABLED) {
+          setInterviewStatus('preparing_results');
+        }
         void persistInterviewAttemptSessionLifecycle(interviewSessionAttemptIdRef.current, 'scoring');
         setStatus('scoring');
         await ensureValidSession();
-        const { data: preAttemptUser } = await supabase
-          .from('users')
-          .select('interview_attempt_count')
-          .eq('id', userId)
-          .single();
-        const nextAttemptNumber = (preAttemptUser?.interview_attempt_count ?? 0) + 1;
+        const nextAttemptNumber = await resolveAttemptNumberForCompletion(
+          userId,
+          interviewSessionAttemptIdRef.current,
+        );
         /**
          * Per-scenario slices must exist on the deferred row. ALPHA_MODE completion runs
          * `rescoreMissingScenarios` before save; standard onboarding deferred path did not — ref gaps
@@ -19944,7 +20239,7 @@ The participant **confirmed** skipping after the skip confirmation prompt. In **
                     moment4ForAggregate,
                     moment4SpecificityScoringRef.current,
                   )
-              : null,
+                : null,
               scoringBaseline,
               'moment_4_scores',
             ),
@@ -19959,7 +20254,7 @@ The participant **confirmed** skipping after the skip confirmation prompt. In **
                         : undefined,
                     }) as Record<string, unknown>,
                   )
-              : null,
+                : null,
               scoringBaseline,
               'moment_5_scores',
             ),
@@ -20013,7 +20308,7 @@ The participant **confirmed** skipping after the skip confirmation prompt. In **
           applicationStatus: 'under_review',
           onboardingStage: 'complete',
         });
-        queryClient.invalidateQueries({ queryKey: ['profile', userId] });
+          queryClient.invalidateQueries({ queryKey: ['profile', userId] });
         const { data: edgeData, error: edgeInvokeError } = await supabase.functions.invoke<{
           ok?: boolean;
           error?: string;
@@ -20043,9 +20338,9 @@ The participant **confirmed** skipping after the skip confirmation prompt. In **
           });
           throw new Error('EDGE_SKIPPED_NOT_DEFERRED');
         }
-        if (edgeBody?.skipped === 'completion_gate_incomplete') {
+          if (edgeBody?.skipped === 'completion_gate_incomplete') {
           await remoteLog('[STANDARD] complete-standard-interview incomplete gate (will use client scoring)', {
-            attemptId,
+              attemptId,
             incomplete_reason:
               completionGateStandard.ok === false ? completionGateStandard.incomplete_reason : null,
           });
@@ -20056,23 +20351,25 @@ The participant **confirmed** skipping after the skip confirmation prompt. In **
           attemptId,
           eventType: 'session_complete',
           eventData: { path: 'standard_onboarding_server_scoring', server_delegate: true, edge_ok: true },
-          platform: getSessionLogRuntime().platform,
-        });
-        {
-          const rtp = getSessionLogRuntime();
-          void runCommunicationStylePipelineAfterSave(
-            userId,
-            attemptId,
-            interviewSessionIdRef.current,
-            { platform: rtp.platform },
-          );
+            platform: getSessionLogRuntime().platform,
+          });
+          {
+            const rtp = getSessionLogRuntime();
+            void runCommunicationStylePipelineAfterSave(
+              userId,
+              attemptId,
+              interviewSessionIdRef.current,
+              { platform: rtp.platform },
+            );
         }
         await commitStandardOnboardingUsersAfterAttempt({
           attemptIdForUserRow: attemptId,
           gateOkForInterviewPassed: completionGateStandard.ok,
           interviewAttemptCount: nextAttemptNumber,
         });
-        await applyPsychometricModifierToAttempt(userId, attemptId);
+        if (!PSYCHOMETRICS_ENABLED) {
+          await applyPsychometricModifierToAttempt(userId, attemptId);
+        }
         await clearInterviewFromStorage(userId);
         await remoteLog('[STANDARD] application saved; post-interview (server scoring complete)', {
           attemptId,
@@ -20080,6 +20377,7 @@ The participant **confirmed** skipping after the skip confirmation prompt. In **
         replaceWithStandardApplicantPostInterviewHandoffForUser(navigation, userId, {
           interviewSessionId: interviewSessionIdRef.current,
           source: 'scoreInterview_standard_server_delegate',
+          attemptId,
         });
         setStatus('results');
         serverDelegateOk = true;
@@ -20089,19 +20387,23 @@ The participant **confirmed** skipping after the skip confirmation prompt. In **
         });
       }
       if (serverDelegateOk) {
-        const attemptIdForNarrativeBackup = interviewSessionAttemptIdRef.current;
-        if (userId && attemptIdForNarrativeBackup) {
-          void kickClientInterviewNarrativeIfPending(
-            userId,
-            attemptIdForNarrativeBackup,
-            'scoreInterview_standard_server_delegate'
-          );
+        if (!PSYCHOMETRICS_ENABLED) {
+          const attemptIdForNarrativeBackup = interviewSessionAttemptIdRef.current;
+          if (userId && attemptIdForNarrativeBackup) {
+            void kickClientInterviewNarrativeIfPending(
+              userId,
+              attemptIdForNarrativeBackup,
+              'scoreInterview_standard_server_delegate'
+            );
+          }
         }
         return;
       }
     }
     interviewStatusRef.current = 'preparing_results';
-    setInterviewStatus('preparing_results');
+    if (!PSYCHOMETRICS_ENABLED) {
+      setInterviewStatus('preparing_results');
+    }
     if (userId) markPreparingResultsSession(userId);
     const sessionAttemptForPoll = interviewSessionAttemptIdRef.current;
     if (typeof sessionAttemptForPoll === 'string' && sessionAttemptForPoll.length > 0) {
@@ -20157,41 +20459,40 @@ The participant **confirmed** skipping after the skip confirmation prompt. In **
       setStatus('results');
       return;
     }
-    try {
-      let holisticParsed: InterviewResults | null = standardDeferredHolisticForEgoCache;
+    let holisticParsed: InterviewResults | null = standardDeferredHolisticForEgoCache;
       if (!holisticParsed) {
         try {
           holisticParsed = await withRetry(fetchHolisticScoringOnce, {
-        retries: 3,
-        baseDelay: 12000,
-        maxDelay: 45000,
-        context: 'scoring',
-        sessionLog: userId
-          ? {
-              userId,
-              attemptId: getSessionLogRuntime().attemptId,
-              platform: getSessionLogRuntime().platform,
-            }
-          : undefined,
-      });
-      } catch (holisticErr) {
-        await remoteLog('[WARN] holistic interview scoring fetch failed; continuing with per-scenario pillars', {
-          message: holisticErr instanceof Error ? holisticErr.message : String(holisticErr),
-        });
-      }
+            retries: 3,
+            baseDelay: 12000,
+            maxDelay: 45000,
+            context: 'scoring',
+            sessionLog: userId
+              ? {
+                  userId,
+                  attemptId: getSessionLogRuntime().attemptId,
+                  platform: getSessionLogRuntime().platform,
+                }
+              : undefined,
+          });
+        } catch (holisticErr) {
+          await remoteLog('[WARN] holistic interview scoring fetch failed; continuing with per-scenario pillars', {
+            message: holisticErr instanceof Error ? holisticErr.message : String(holisticErr),
+          });
+        }
       }
       await hydrateScenarioScoresFromAttemptIfNeeded();
       let holisticStoredPatterns: Record<string, unknown> | null = null;
-        let moment4FromAttemptRow: unknown = null;
+      let moment4FromAttemptRow: unknown = null;
       let moment4ConcretenessHolisticGate: ResponseConcretenessLevel | null = null;
       let moment5ConcretenessHolisticGate: ResponseConcretenessLevel | null = null;
       let completionGateHolistic: InterviewCompletionGateResult | null = null;
       if (userId && interviewSessionAttemptIdRef.current) {
         const { data: attRowHolistic } = await supabase
-            .from('interview_attempts')
+          .from('interview_attempts')
           .select('scenario_specific_patterns, moment_4_concreteness, moment_5_concreteness')
-            .eq('id', interviewSessionAttemptIdRef.current)
-            .maybeSingle();
+          .eq('id', interviewSessionAttemptIdRef.current)
+          .maybeSingle();
         holisticStoredPatterns = (attRowHolistic?.scenario_specific_patterns as Record<string, unknown>) ?? null;
         moment4FromAttemptRow = holisticStoredPatterns?.moment_4_scores ?? null;
         const m4StoredHolistic = holisticStoredPatterns?.moment_4_scores;
@@ -20461,7 +20762,7 @@ The participant **confirmed** skipping after the skip confirmation prompt. In **
           applicationStatus: 'under_review',
           onboardingStage: 'complete',
         });
-        queryClient.invalidateQueries({ queryKey: ['profile', userId] });
+          queryClient.invalidateQueries({ queryKey: ['profile', userId] });
       }
       if (ALPHA_MODE && userId) {
         await hydrateScenarioScoresFromAttemptIfNeeded();
@@ -20935,18 +21236,18 @@ The participant **confirmed** skipping after the skip confirmation prompt. In **
                   user_slice_word_count: m4EvAgg?.user_slice_word_count ?? undefined,
                 }
               : null,
-              moment5ForAggregate
-                ? {
-                    pillarScores: moment5ForAggregate.pillarScores,
-                    keyEvidence: moment5ForAggregate.keyEvidence,
+            moment5ForAggregate
+              ? {
+                  pillarScores: moment5ForAggregate.pillarScores,
+                  keyEvidence: moment5ForAggregate.keyEvidence,
                   mentalizing_overcertainty: moment5ForAggregate.mentalizing_overcertainty === true,
                   response_concreteness: normalizeResponseConcreteness(moment5ForAggregate.response_concreteness),
                   emotional_vocab_count: m5EvAgg?.emotional_vocab_count ?? undefined,
                   emotional_vocab_words:
                     m5EvAgg && m5EvAgg.emotional_vocab_words.length > 0 ? m5EvAgg.emotional_vocab_words : undefined,
                   user_slice_word_count: m5EvAgg?.user_slice_word_count ?? undefined,
-                  }
-                : null,
+                }
+              : null,
           ];
           let mentalizingOvercertaintyCountForAttempt = countMentalizingOvercertaintyInMarkerSlices(
             markerSlicesForAggregate,
@@ -20972,7 +21273,7 @@ The participant **confirmed** skipping after the skip confirmation prompt. In **
             personalMomentEmotionalVocabDensityForAttempt = mergedPillar.personal_moment_emotional_vocab_density;
             personalMomentEmotionalVocabLowForAttempt = mergedPillar.personal_moment_emotional_vocab_low;
             disclosureCalibrationForAttempt = mergedPillar.disclosureCalibration;
-          const aggregatedPillarScores = mergedPillar.scores;
+            const aggregatedPillarScores = mergedPillar.scores;
             egoLevelForAttempt = mergedPillar.egoDevelopmentLevel ?? extractEgoDevelopmentLevel(parsed) ?? null;
             mentalizingOvercertaintyCountForAttempt = mergedPillar.mentalizingOvercertaintyCount;
             if (alphaAttemptIdForIncremental && userId) {
@@ -21010,9 +21311,9 @@ The participant **confirmed** skipping after the skip confirmation prompt. In **
             }
             pillarContributorCounts = mergedPillar.contributorCounts;
             pillarScores =
-            Object.keys(aggregatedPillarScores).length > 0
-              ? { ...aggregatedPillarScores }
-              : { ...(parsedPillarScores as Record<string, number>) };
+              Object.keys(aggregatedPillarScores).length > 0
+                ? { ...aggregatedPillarScores }
+                : { ...(parsedPillarScores as Record<string, number>) };
             const scoreForGateAlpha = computeInterviewWeightedCompositeFromPillars(
               pillarScores,
               parsed.skepticismModifier ?? null,
@@ -21063,7 +21364,7 @@ The participant **confirmed** skipping after the skip confirmation prompt. In **
               finalMessages as MessageWithScenario[],
             );
             finalGateResult = computeGateResult(pillarScores, parsed.skepticismModifier ?? null, {
-            weightedPassMin: weightedMin,
+              weightedPassMin: weightedMin,
               scenarioPillarScoresByScenario: {
                 1: scenarioScoresRef.current[1]?.pillarScores,
                 2: scenarioScoresRef.current[2]?.pillarScores,
@@ -21200,12 +21501,7 @@ The participant **confirmed** skipping after the skip confirmation prompt. In **
             is_network_error: failureKind === 'network' || failureKind === 'aborted',
           });
           if (__DEV__) console.log('=== [4] Reasoning complete ===');
-          const { data: userRow } = await supabase
-            .from('users')
-            .select('interview_attempt_count')
-            .eq('id', userId)
-            .single();
-          attemptNum = (userRow?.interview_attempt_count ?? 0) + 1;
+          attemptNum = await resolveAttemptNumberForCompletion(userId, existingAttemptId);
           const emotionPersistAlpha = emotionRecognitionPersistSpreadIfComplete(
             [...emotionItemResponsesRef.current],
           );
@@ -21300,7 +21596,7 @@ The participant **confirmed** skipping after the skip confirmation prompt. In **
                       moment4ForAggregate,
                       moment4SpecificityScoringRef.current,
                     )
-                : null,
+                  : null,
                 alphaScoringBaseline,
                 'moment_4_scores',
               ),
@@ -21315,7 +21611,7 @@ The participant **confirmed** skipping after the skip confirmation prompt. In **
                           : undefined,
                       }) as Record<string, unknown>,
                     )
-                : null,
+                  : null,
                 alphaScoringBaseline,
                 'moment_5_scores',
               ),
@@ -21336,14 +21632,14 @@ The participant **confirmed** skipping after the skip confirmation prompt. In **
                 ? {
                     _reasoningPending: false,
                     _narrativeFailed: true,
-                  pillar_scores: pillarScores,
-                  weighted_score: finalGateResult.weightedScore,
-                  passed: finalGateResult.pass,
-                  last_error: (reasoning as { _error?: string })._error ?? null,
-                  note:
+                    pillar_scores: pillarScores,
+                    weighted_score: finalGateResult.weightedScore,
+                    passed: finalGateResult.pass,
+                    last_error: (reasoning as { _error?: string })._error ?? null,
+                    note:
                       'Narrative AI reasoning was not generated in this session. Scores and transcript are saved; retry from the admin panel (Tab 2).',
-                }
-              : reasoning,
+                  }
+                : reasoning,
             ...communicationFloorFieldsFromTranscript(finalMessages),
             ego_development_level:
               egoLevelForAttempt ?? alphaScoringBaseline.ego_development_level,
@@ -21442,7 +21738,9 @@ The participant **confirmed** skipping after the skip confirmation prompt. In **
           if (attemptId) {
             interviewLastCommittedAttemptId = attemptId;
             assignAttemptIdForSessionLogs(attemptId);
-            await applyPsychometricModifierToAttempt(userId, attemptId);
+            if (!PSYCHOMETRICS_ENABLED) {
+              await applyPsychometricModifierToAttempt(userId, attemptId);
+            }
             const rtp = getSessionLogRuntime();
             logGateAnalyticsToSession({
               base: { userId, attemptId: rtp.attemptId, platform: rtp.platform },
@@ -21727,7 +22025,9 @@ The participant **confirmed** skipping after the skip confirmation prompt. In **
               attemptId: deferredForHolistic,
               pass: gateResult.pass,
             });
-            await applyPsychometricModifierToAttempt(userId!, deferredForHolistic);
+            if (!PSYCHOMETRICS_ENABLED) {
+              await applyPsychometricModifierToAttempt(userId!, deferredForHolistic);
+            }
             const rtpPost = getSessionLogRuntime();
             void runCommunicationStylePipelineAfterSave(
               userId!,
@@ -21735,7 +22035,10 @@ The participant **confirmed** skipping after the skip confirmation prompt. In **
               interviewSessionIdRef.current,
               { platform: rtpPost.platform },
             );
-            void (async () => {
+            if (PSYCHOMETRICS_ENABLED) {
+              triggerAsyncAiReasoningPipeline(userId!, deferredForHolistic);
+            } else {
+              void (async () => {
               const pillarForReasoning: Record<string, number> = {};
               for (const [k, v] of Object.entries(parsed.pillarScores ?? {})) {
                 if (typeof v === 'number' && Number.isFinite(v)) pillarForReasoning[k] = v;
@@ -21781,13 +22084,13 @@ The participant **confirmed** skipping after the skip confirmation prompt. In **
                 })
                 .eq('id', deferredForHolistic)
                 .eq('user_id', userId!);
-            })();
+              })();
+            }
           }
-        }
         await saveInterviewResults(parsed, gateResult, userId);
         if (!isStandardOnboardingApplicant && userId) {
-          const attemptIdForResultsEmail =
-            interviewSessionAttemptIdRef.current ?? deferredForHolistic ?? null;
+        const attemptIdForResultsEmail =
+          interviewSessionAttemptIdRef.current ?? deferredForHolistic ?? null;
           if (attemptIdForResultsEmail) {
             void triggerResultsReadyEmail(userId, attemptIdForResultsEmail);
           }
@@ -21825,6 +22128,7 @@ The participant **confirmed** skipping after the skip confirmation prompt. In **
           replaceWithStandardApplicantPostInterviewHandoffForUser(navigation, userId!, {
             interviewSessionId: interviewSessionIdRef.current,
             source: 'scoreInterview_non_alpha_standard',
+            attemptId: attemptIdForCommit,
           });
           setStatus('results');
         } else {
@@ -21838,6 +22142,7 @@ The participant **confirmed** skipping after the skip confirmation prompt. In **
         }
       }
       setStatus('results');
+      }
     } catch (err) {
       await remoteLog('[ERROR] scoreInterview threw', {
         message: err instanceof Error ? err.message : String(err),
@@ -21889,7 +22194,6 @@ The participant **confirmed** skipping after the skip confirmation prompt. In **
       });
       setInterviewStatus('congratulations');
       setStatus('results');
-    }
     } finally {
       scoreInterviewInFlightRef.current = false;
       markCompletionScoringInFlight(false);
@@ -21926,8 +22230,8 @@ The participant **confirmed** skipping after the skip confirmation prompt. In **
     }
     const transcript = pendingCompletionTranscriptRef.current;
     if (transcript?.length) {
-      pendingCompletionTranscriptRef.current = null;
-      setPendingCompletion(false);
+    pendingCompletionTranscriptRef.current = null;
+    setPendingCompletion(false);
       if (kickCompletionScoring('pending_completion_effect', transcript)) {
         scoreInterviewAttemptedRef.current = true;
       }
@@ -21954,25 +22258,7 @@ The participant **confirmed** skipping after the skip confirmation prompt. In **
         platform: r.platform,
       });
     }
-    const { data: userData } = await supabase
-      .from('users')
-      .select('interview_attempt_count')
-      .eq('id', userId)
-      .single();
-    const nextAttemptNumber = (userData?.interview_attempt_count ?? 0) + 1;
-    await supabase
-      .from('users')
-      .update({
-        interview_completed: false,
-        interview_passed: null,
-        interview_passed_computed: null,
-        interview_passed_admin_override: null,
-        interview_completed_at: null,
-        interview_attempt_count: nextAttemptNumber,
-        latest_attempt_id: null,
-      })
-      .eq('id', userId);
-    await clearInterviewFromStorage(userId);
+    await enableInterviewRetake(userId);
     isInterviewCompleteRef.current = false;
     setMessages([]);
     setScenarioScores({});
@@ -22251,15 +22537,15 @@ The participant **confirmed** skipping after the skip confirmation prompt. In **
 
   const adminInterviewTopBar = isAdminAccount ? (
     <View style={styles.adminTopBarRow}>
-      <TouchableOpacity
-        style={styles.adminBarButton}
-        onPress={() => setShowAdminPanel(true)}
-        activeOpacity={0.8}
+        <TouchableOpacity
+          style={styles.adminBarButton}
+          onPress={() => setShowAdminPanel(true)}
+          activeOpacity={0.8}
         accessibilityRole="button"
         accessibilityLabel="Open admin panel"
-      >
-        <Text style={styles.adminPanelButtonText}>◆ Panel</Text>
-      </TouchableOpacity>
+        >
+          <Text style={styles.adminPanelButtonText}>◆ Panel</Text>
+        </TouchableOpacity>
       <TouchableOpacity
         style={styles.adminBarButtonReset}
         onPress={handleAdminResetInterview}
@@ -22316,7 +22602,7 @@ The participant **confirmed** skipping after the skip confirmation prompt. In **
       </SafeAreaContainer>
     );
   }
-  if (interviewStatus === 'preparing_results') {
+  if (interviewStatus === 'preparing_results' && !PSYCHOMETRICS_ENABLED) {
     return (
       <SafeAreaContainer>
         <View style={[styles.container, { flex: 1, backgroundColor: '#05060D', alignItems: 'center', justifyContent: 'center', padding: 24 }]}>
@@ -22369,9 +22655,9 @@ When Daniel comes back and says 'I didn't know what to say' — what do you make
 user: Daniel withdrew instead of staying present, which was the wrong move. Sophie has every right to be hurt by that. Little Sophie could have made it a bit easier on Daniel to come back instead of staying closed off.
 assistant: Got it. How do you think this situation could be repaired?
 user: This is entirely Daniel's fault. He walked away, he left Sophie alone with it, and now he expects to just come back with a few words and have everything be fine. Sophie has every right to be closed off.
-assistant: That's the end of the three described situations. Good work, Matt — you held Daniel accountable for withdrawing while noting Sophie's reactive stance. Now we'll shift to something more personal.
+assistant: That's the end of the three described situations. Good work, Matt — you held Daniel accountable for withdrawing while noting Sophie's reactive stance. Now I want to ask you about something a bit more personal.
 
-Have you ever held a grudge against someone, or had someone in your life you really didn't like? How did that happen, and where are you with it now?
+${MOMENT_4_GRUDGE_QUESTION_TEXT}
 user: Yes, I was resentful towards someone, not really a grudge because he said I was a bad coach and he did not experience my coaching, so I didn't like that very much. So I ended up getting angry and we talked it out and we're cool now, but I still don't think that was a cool move by him and I didn't like it very much, but I also understand where he's at. I can kind of have empathy towards him, so we're on good terms now.
 assistant: Thanks for sharing that. At what point do you decide when a relationship is something to work through versus something you need to walk away from?
 user: I think it depends I think if you really love the person then it's worth saving especially if you have the same values and you go in the same direction but even if you do love each other if your if your values change and you have different goals in life that may be a reason to split up even if you love each other
@@ -22761,7 +23047,6 @@ assistant: Thanks for sticking with all of this — what stays with me is how yo
     };
     const whatToExpectItems = [
       'The interview takes approximately 20 minutes — three scenarios and two short personal questions.',
-      'This is a conversation, not a test. There are no right or wrong answers.',
       'We recommend you find a private area for this interview so you are not distracted.',
       'You can stop at any time. Progress is saved from the last completed scenario if you exit early.',
     ];
@@ -22769,6 +23054,11 @@ assistant: Thanks for sticking with all of this — what stays with me is how yo
       'This conversation will be recorded and processed by AI.',
       'Your voice is analyzed for communication style alongside your words.',
       'Your responses are stored and used to generate your profile and match you with others.',
+    ];
+    const preInterviewTips = [
+      { icon: 'headset-outline' as const, label: 'Use headphones if possible' },
+      { icon: 'volume-mute-outline' as const, label: 'Find a quiet space' },
+      { icon: 'desktop-outline' as const, label: 'Laptop works best' },
     ];
     return (
       <SafeAreaContainer style={{ position: 'relative', flex: 1, backgroundColor: '#05060D' }}>
@@ -22791,8 +23081,7 @@ assistant: Thanks for sticking with all of this — what stays with me is how yo
           <View style={styles.preInterviewLogoWrap}>
             <FlameOrb state="idle" size={72} minimalGlow />
           </View>
-          <Text style={styles.preInterviewMainTitle}>Before we begin</Text>
-          <Text style={styles.preInterviewSubtitle}>A few things to know before your interview starts.</Text>
+          <Text style={styles.preInterviewMainTitle}>Before you begin</Text>
 
           <Text style={styles.preInterviewSectionHeading}>What to expect</Text>
           {whatToExpectItems.map((line) => (
@@ -22802,56 +23091,14 @@ assistant: Thanks for sticking with all of this — what stays with me is how yo
             </View>
           ))}
 
-          <View
-            style={[styles.headphoneRecommendCard, styles.preInterviewNoiseTipCard]}
-            accessibilityRole="summary"
-          >
-            <Ionicons name="volume-mute-outline" size={28} color="#5BA8E8" style={styles.headphoneRecommendIcon} />
-            <View style={styles.headphoneRecommendTextCol}>
-              <Text style={styles.headphoneRecommendTitle}>
-                Keep background noise low — TVs, music, or other sounds can make it harder for the interviewer to hear
-                you clearly.
-              </Text>
+          <View style={styles.preInterviewTipsBlock}>
+            {preInterviewTips.map((tip) => (
+              <View key={tip.label} style={styles.preInterviewTipRow}>
+                <Ionicons name={tip.icon} size={28} color="#5BA8E8" style={styles.preInterviewTipIcon} />
+                <Text style={styles.preInterviewTipLabel}>{tip.label}</Text>
             </View>
+            ))}
           </View>
-
-          <View
-            style={[
-              styles.headphoneRecommendCard,
-              styles.preInterviewHeadphoneTipAfterNoise,
-              Platform.OS !== 'web' ? { marginBottom: spacing.xl } : null,
-            ]}
-            accessibilityRole="summary"
-          >
-            <Ionicons name="headset-outline" size={28} color="#5BA8E8" style={styles.headphoneRecommendIcon} />
-            <View style={styles.headphoneRecommendTextCol}>
-              <Text style={styles.headphoneRecommendTitle}>
-                For the best experience, use headphones with a microphone. This helps Amoraea hear you clearly and reduces
-                background noise.
-              </Text>
-              <Text style={styles.headphoneRecommendSub}>
-                No headphones? The interview still works — just find a quiet space.
-              </Text>
-            </View>
-          </View>
-
-          {Platform.OS === 'web' ? (
-            <View
-              style={[styles.headphoneRecommendCard, styles.preInterviewDesktopBrowserTipCard]}
-              accessibilityRole="summary"
-            >
-              <Ionicons name="desktop-outline" size={28} color="#5BA8E8" style={styles.headphoneRecommendIcon} />
-              <View style={styles.headphoneRecommendTextCol}>
-                <Text style={styles.headphoneRecommendTitle}>
-                  For the most reliable audio and voice interview, use a desktop or laptop browser (Chrome, Safari, or
-                  Edge).
-                </Text>
-                <Text style={styles.headphoneRecommendSub}>
-                  On a phone or tablet? You can continue — just know playback and recording work best on a computer.
-                </Text>
-              </View>
-            </View>
-          ) : null}
 
           <Text style={[styles.preInterviewSectionHeading, styles.preInterviewSectionHeadingSpaced]}>Data & privacy</Text>
           {dataPrivacyItems.map((line) => (
@@ -23709,6 +23956,35 @@ const styles = StyleSheet.create({
     marginTop: spacing.lg,
     alignSelf: 'stretch',
     width: '100%',
+  },
+  preInterviewTipsBlock: {
+    marginTop: spacing.lg,
+    marginBottom: spacing.lg,
+    gap: 12,
+    alignSelf: 'stretch',
+  },
+  preInterviewTipRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 14,
+    paddingVertical: 14,
+    paddingHorizontal: spacing.md,
+    borderRadius: 12,
+    borderLeftWidth: 4,
+    borderLeftColor: '#1E6FD9',
+    backgroundColor: 'rgba(30, 111, 217, 0.12)',
+  },
+  preInterviewTipIcon: {
+    width: 32,
+    textAlign: 'center',
+    flexShrink: 0,
+  },
+  preInterviewTipLabel: {
+    flex: 1,
+    fontSize: 17,
+    fontWeight: '600',
+    color: '#F4F8FC',
+    lineHeight: 24,
   },
   preInterviewLegalRow: {
     flexDirection: 'row',

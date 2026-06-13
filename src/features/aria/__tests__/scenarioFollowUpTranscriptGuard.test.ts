@@ -43,13 +43,31 @@ describe('scenarioFollowUpTranscriptGuard', () => {
     ).toBe(true);
   });
 
-  it('detects repair question and blocks duplicate repair delivery', () => {
-    const msgs = [{ role: 'user', content: 'x' }, contemptAssistant, repairAssistant];
+  it('detects repair question and blocks duplicate repair delivery after user answered', () => {
+    const msgs = [
+      { role: 'user', content: 'x' },
+      contemptAssistant,
+      repairAssistant,
+      { role: 'user', content: 'I would apologize.' },
+    ];
     expect(transcriptContainsScenarioARepairQuestion(msgs)).toBe(true);
     expect(
       shouldDeliverScenarioFollowUpQuestion(msgs, SCENARIO_A_REPAIR_QUESTION_AFTER_CONTEMPT_COPY),
     ).toBe(false);
     expect(scenarioOneFollowUpFlagsFromTranscript(msgs).repairQuestionAsked).toBe(true);
+  });
+
+  it('treats repair before contempt probe as phantom — repair still deliverable after contempt answer', () => {
+    const msgs = [
+      { role: 'user', content: 'q1 answer' },
+      repairAssistant,
+      contemptAssistant,
+      { role: 'user', content: 'It seems condescending.' },
+    ];
+    expect(scenarioOneFollowUpFlagsFromTranscript(msgs).repairQuestionAsked).toBe(false);
+    expect(
+      shouldDeliverScenarioFollowUpQuestion(msgs, SCENARIO_A_REPAIR_QUESTION_AFTER_CONTEMPT_COPY),
+    ).toBe(true);
   });
 
   it('ignores welcome-back and score-card assistant turns', () => {

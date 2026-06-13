@@ -365,9 +365,18 @@ export function isLenientInterviewCloseAfterClosingSpeech(params: {
 export function moment5AnswerIncludesResolutionOutcome(text: string): boolean {
   const lower = text.replace(/\s+/g, ' ').trim().toLowerCase();
   if (!lower) return false;
-  return /\b(resolved|resolution|worked (it )?out|talked (it )?through|made up|reconciled|sorted (it )?out|moved past|got past|forgave|apologized|we'?re (okay|ok|fine|good) now|things (got|are) better|made amends|cleared the air|talked it through|brought it up)\b/i.test(
-    lower,
-  );
+  if (
+    /\b(resolved|resolution|worked (it )?out|talked (it )?through|made up|reconciled|sorted (it )?out|moved past|got past|forgave|apologized|made peace|mended (things|fences)|patch(ed)? things up|we'?re (okay|ok|fine|good|cool|better) now|we (are|were) (okay|ok|fine|good|cool|better)|things (got|are) better|made amends|cleared the air|talked it through|brought it up|without interruption|facilitated|mediated|mediator|sat down (and )?(talk|listen)|heard each other out)\b/i.test(
+      lower,
+    )
+  ) {
+    return true;
+  }
+  /** Mutual listening / repair process — both sides engaged without only narrating the blow-up. */
+  if (/\b(i|we)\s+listened\b/.test(lower) && /\b(he|she|they|we)\s+(listened|heard)\b/.test(lower)) {
+    return true;
+  }
+  return false;
 }
 
 export function isMoment5ReadyForInterviewClose(params: {

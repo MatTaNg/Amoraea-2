@@ -6,6 +6,12 @@ import {
 
 import type { InterviewStackRoute } from './resolveInitialInterviewRoute';
 
+/** When true: interview → congratulations → psychometric battery → post-interview report. */
+export const PSYCHOMETRICS_ENABLED = true;
+
+/** Set to true to use NPI Entitlement forced-choice instrument instead of SD3 narcissism Likert scale. */
+export const NPI_ENTITLEMENT_ENABLED = true;
+
 export type UserLoginRoutingRow = {
   interview_completed?: boolean | null;
   latest_attempt_id?: string | null;
@@ -18,6 +24,7 @@ export type UserLoginRoutingRow = {
 export type UserInterviewCompletionStatus = {
   interviewCompleted: boolean;
   psychometricsCompletedAt: string | null;
+  gateResultFinalizedAt: string | null;
   routingRow: UserLoginRoutingRow | null;
 };
 
@@ -70,6 +77,23 @@ export async function resolveInterviewCompletedForUser(
   return interviewCompleted;
 }
 
+export async function fetchGateResultFinalizedAt(
+  userId: string,
+  latestAttemptId: string | null,
+): Promise<string | null> {
+  const attemptId =
+    latestAttemptId ?? (await fetchMostRecentCompletedInterviewAttemptId(userId));
+  if (!attemptId) return null;
+  const { data, error } = await supabase
+    .from('interview_attempts')
+    .select('gate_result_finalized_at')
+    .eq('id', attemptId)
+    .eq('user_id', userId)
+    .maybeSingle();
+  if (error || !data) return null;
+  return typeof data.gate_result_finalized_at === 'string' ? data.gate_result_finalized_at : null;
+}
+
 export async function fetchUserInterviewCompletionStatus(
   userId: string,
 ): Promise<UserInterviewCompletionStatus> {
@@ -79,10 +103,18 @@ export async function fetchUserInterviewCompletionStatus(
     typeof routingRow?.psychometrics_completed_at === 'string'
       ? routingRow.psychometrics_completed_at
       : null;
+  const latestAttemptId =
+    typeof routingRow?.latest_attempt_id === 'string' && routingRow.latest_attempt_id.length > 0
+      ? routingRow.latest_attempt_id
+      : null;
+  const gateResultFinalizedAt = PSYCHOMETRICS_ENABLED
+    ? await fetchGateResultFinalizedAt(userId, latestAttemptId)
+    : null;
 
   return {
     interviewCompleted,
     psychometricsCompletedAt,
+    gateResultFinalizedAt,
     routingRow,
   };
 }
@@ -95,6 +127,7 @@ export async function fetchMostRecentCompletedInterviewAttemptId(
     .from('interview_attempts')
     .select('id')
     .eq('user_id', userId)
+    .or('is_phantom.eq.false,is_phantom.is.null')
     .not('completed_at', 'is', null)
     .order('completed_at', { ascending: false })
     .limit(1)
@@ -111,28 +144,34 @@ export async function fetchMostRecentCompletedInterviewAttemptId(
 export type InterviewStackRouteInput = {
   psychometricsCompletedAt: string | null;
   interviewCompleted: boolean;
+  gateResultFinalizedAt: string | null;
   postInterviewScreen?: InterviewStackRoute | null;
 };
 
 /**
- * Priority: legacy psychometrics → new-user psychometrics → interview → post-interview.
- * `legacyPsychometricsMode` is true only when interview is done and psychometrics are not.
+ * Market research → interview → (psychometrics path when enabled) → post-interview.
+ * When {@link PSYCHOMETRICS_ENABLED} is false, behavior matches legacy production routing.
  */
 export function resolveInterviewStackScreenFromStatus(
   input: InterviewStackRouteInput,
+  psychometricsEnabled: boolean = PSYCHOMETRICS_ENABLED,
 ): {
   screen: InterviewStackRoute;
   legacyPsychometricsMode: boolean;
   interviewAlreadyCompleted: boolean;
 } {
-  const psychometricsComplete = input.psychometricsCompletedAt != null;
-
-  if (!psychometricsComplete) {
-    const legacyPsychometricsMode = input.interviewCompleted;
+  if (!psychometricsEnabled) {
+    if (!input.interviewCompleted) {
+      return {
+        screen: 'Aria',
+        legacyPsychometricsMode: false,
+        interviewAlreadyCompleted: false,
+      };
+    }
     return {
-      screen: 'PsychometricAssessment',
-      legacyPsychometricsMode,
-      interviewAlreadyCompleted: legacyPsychometricsMode,
+      screen: input.postInterviewScreen ?? 'PostInterview',
+      legacyPsychometricsMode: false,
+      interviewAlreadyCompleted: true,
     };
   }
 
@@ -141,6 +180,22 @@ export function resolveInterviewStackScreenFromStatus(
       screen: 'Aria',
       legacyPsychometricsMode: false,
       interviewAlreadyCompleted: false,
+    };
+  }
+
+  if (input.psychometricsCompletedAt == null) {
+    return {
+      screen: 'InterviewComplete',
+      legacyPsychometricsMode: true,
+      interviewAlreadyCompleted: true,
+    };
+  }
+
+  if (input.gateResultFinalizedAt == null) {
+    return {
+      screen: 'PsychometricsComplete',
+      legacyPsychometricsMode: false,
+      interviewAlreadyCompleted: true,
     };
   }
 

@@ -4,7 +4,6 @@ import {
   ScrollView,
   Text,
   TextInput,
-  ActivityIndicator,
   Platform,
 } from 'react-native';
 import { Picker } from '@react-native-picker/picker';
@@ -47,6 +46,17 @@ type PickerSheet = {
   anchor?: OptionAnchor;
 };
 
+function mergeLifeDomainAnswerMaps(
+  fromDb: LifeDomainAnswersMap,
+  seed: LifeDomainAnswersMap | undefined,
+): LifeDomainAnswersMap {
+  const merged: LifeDomainAnswersMap = { ...fromDb };
+  for (const id of Object.keys(seed ?? {}) as LifeDomainId[]) {
+    merged[id] = { ...merged[id], ...seed![id] };
+  }
+  return merged;
+}
+
 interface LifeDomainQuestionsModalProps {
   userId: string;
   domainId: LifeDomainId;
@@ -76,9 +86,9 @@ export const LifeDomainQuestionsModal: React.FC<LifeDomainQuestionsModalProps> =
   onBack,
 }) => {
   const domainMeta = getLifeDomainOnboardingMeta(domainId);
-  const [answers, setAnswers] = useState<LifeDomainAnswersMap>({});
-  const [loading, setLoading] = useState(true);
-  const [saving, setSaving] = useState(false);
+  const [answers, setAnswers] = useState<LifeDomainAnswersMap>(() =>
+    mergeLifeDomainAnswerMaps({}, initialAnswers),
+  );
   const [validationError, setValidationError] = useState<string | null>(null);
   const [pickerSheet, setPickerSheet] = useState<PickerSheet | null>(null);
   const [questionSuggestion, setQuestionSuggestion] = useState('');
@@ -92,26 +102,27 @@ export const LifeDomainQuestionsModal: React.FC<LifeDomainQuestionsModalProps> =
   }, [domainId, userId]);
 
   useEffect(() => {
+    const merged = mergeLifeDomainAnswerMaps({}, draftSeedRef.current);
+    setAnswers(merged);
+    answersBaselineRef.current = JSON.parse(JSON.stringify(merged)) as LifeDomainAnswersMap;
+  }, [domainId]);
+
+  useEffect(() => {
     let cancelled = false;
-    setLoading(true);
     void (async () => {
       try {
         if (lifeDomains && domainId === 'finance') {
-          await syncLifeDomainImportanceFromOnboarding(userId, lifeDomains);
+          void syncLifeDomainImportanceFromOnboarding(userId, lifeDomains).catch((e) => {
+            if (__DEV__) console.warn('[LifeDomainQuestionsModal] finance importance sync', e);
+          });
         }
         const fromDb = await fetchLifeDomainAnswersMap(userId);
         if (cancelled) return;
-        const seed = draftSeedRef.current ?? {};
-        const merged: LifeDomainAnswersMap = { ...fromDb };
-        for (const id of Object.keys(seed) as LifeDomainId[]) {
-          merged[id] = { ...merged[id], ...seed[id] };
-        }
+        const merged = mergeLifeDomainAnswerMaps(fromDb, draftSeedRef.current);
         setAnswers(merged);
         answersBaselineRef.current = JSON.parse(JSON.stringify(merged)) as LifeDomainAnswersMap;
       } catch (e) {
         if (__DEV__) console.warn('[LifeDomainQuestionsModal] load', e);
-      } finally {
-        if (!cancelled) setLoading(false);
       }
     })();
     return () => {
@@ -132,7 +143,7 @@ export const LifeDomainQuestionsModal: React.FC<LifeDomainQuestionsModalProps> =
     onBack();
   }, [onBack]);
 
-  const handleNext = async () => {
+  const handleNext = () => {
     const domainAnswers = answers[domainId] ?? {};
     const validation = validateLifeDomainStep(domainId, domainAnswers, {
       enforceRequired,
@@ -144,20 +155,19 @@ export const LifeDomainQuestionsModal: React.FC<LifeDomainQuestionsModalProps> =
       return;
     }
 
-    setSaving(true);
-    try {
-      if (lifeDomains && domainId === 'finance') {
-        await syncLifeDomainImportanceFromOnboarding(userId, lifeDomains);
+    onAnswersChange?.(answers);
+    onNext();
+
+    void (async () => {
+      try {
+        if (lifeDomains && domainId === 'finance') {
+          await syncLifeDomainImportanceFromOnboarding(userId, lifeDomains);
+        }
+        await saveLifeDomainAnswersFromOnboarding(userId, answers);
+      } catch (e) {
+        if (__DEV__) console.warn('[LifeDomainQuestionsModal] save', e);
       }
-      await saveLifeDomainAnswersFromOnboarding(userId, answers);
-      onAnswersChange?.(answers);
-      onNext();
-    } catch (e) {
-      if (__DEV__) console.warn('[LifeDomainQuestionsModal] save', e);
-      onNext();
-    } finally {
-      setSaving(false);
-    }
+    })();
   };
 
   const questionLabelSuffix = (q: LifeDomainQuestionDef) => {
@@ -310,7 +320,7 @@ export const LifeDomainQuestionsModal: React.FC<LifeDomainQuestionsModalProps> =
               ? 'Optional: share more about this life area if you like. You can skip any question and tap Next.'
               : 'Answer each required question for this life area to continue. You can add more detail later from your profile.'}
           </Text>
-          {!loading && !optionalOpenEndedLeftover ? (
+          {!optionalOpenEndedLeftover ? (
             <Text style={styles.domainMeta}>
               {answered} of {total} required answered on this step
             </Text>
@@ -318,13 +328,9 @@ export const LifeDomainQuestionsModal: React.FC<LifeDomainQuestionsModalProps> =
           {validationError ? (
             <Text style={styles.validationError}>{validationError}</Text>
           ) : null}
-          {loading ? (
-            <ActivityIndicator color="#5BA8E8" style={{ marginVertical: 24 }} />
-          ) : (
-            <View style={styles.domainBody}>
-              {questions.map((q) => renderQuestion(q))}
-            </View>
-          )}
+          <View style={styles.domainBody}>
+            {questions.map((q) => renderQuestion(q))}
+          </View>
         </View>
       </ScrollView>
 
@@ -335,13 +341,11 @@ export const LifeDomainQuestionsModal: React.FC<LifeDomainQuestionsModalProps> =
             variant="outline"
             onPress={handleBack}
             style={styles.backButton}
-            disabled={saving}
           />
           <Button
-            title={saving ? 'Saving…' : 'Next'}
-            onPress={() => void handleNext()}
+            title="Next"
+            onPress={handleNext}
             style={styles.nextButton}
-            disabled={saving}
           />
         </View>
       </SafeAreaView>

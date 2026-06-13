@@ -86,6 +86,7 @@ import {
   mapRelationshipStyleUiToDb,
   mapRelationshipStyleUiToRelationshipType,
 } from '@/screens/profile/editProfile/editProfileService';
+import { OnboardingHeaderExitContext } from './components/onboardingHeaderExitContext';
 
 export type { OnboardingStep } from './onboardingStepOrder';
 
@@ -722,7 +723,7 @@ export const ModalOnboardingFlow: React.FC<ModalOnboardingFlowProps> = ({
     });
   };
 
-  const goToNextStep = async () => {
+  const goToNextStep = () => {
     if (stepTransitionLockRef.current) return;
     const stepWeLeave = currentStep;
     const uid = user?.id;
@@ -1032,7 +1033,7 @@ export const ModalOnboardingFlow: React.FC<ModalOnboardingFlowProps> = ({
     onComplete();
   };
 
-  if (loading || profileLoading) {
+  if (loading || (profileLoading && profile === undefined)) {
     return (
       <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center' }}>
         <ActivityIndicator size="large" />
@@ -1042,6 +1043,7 @@ export const ModalOnboardingFlow: React.FC<ModalOnboardingFlowProps> = ({
   }
 
   return (
+    <OnboardingHeaderExitContext.Provider value={onExitToPostInterview}>
     <View style={{ flex: 1 }}>
       {currentStep !== 'profileComplete' && currentStep !== 'personalityDocuments' ? (
         <OnboardingProgressBar
@@ -1572,17 +1574,15 @@ export const ModalOnboardingFlow: React.FC<ModalOnboardingFlowProps> = ({
         <LifeDomainsModal
           lifeDomains={Array.isArray(onboardingData.lifeDomains) ? undefined : onboardingData.lifeDomains}
           onLifeDomainsChange={(lifeDomains) => updateData({ lifeDomains })}
-          onNext={async () => {
+          onNext={() => {
+            void goToNextStep();
             const latest = onboardingDataRef.current;
             const ld = Array.isArray(latest.lifeDomains) ? undefined : latest.lifeDomains;
             if (user?.id && ld) {
-              try {
-                await syncLifeDomainImportanceFromOnboarding(user.id, ld);
-              } catch (e) {
+              void syncLifeDomainImportanceFromOnboarding(user.id, ld).catch((e) => {
                 if (__DEV__) console.warn('[ModalOnboarding] life domain importance', e);
-              }
+              });
             }
-            goToNextStep();
           }}
           onBack={goToPrevStep}
         />
@@ -1637,9 +1637,11 @@ export const ModalOnboardingFlow: React.FC<ModalOnboardingFlowProps> = ({
 
       {currentStep === 'photos' && (
         <PhotosVideoModal
+          userId={user?.id}
           photos={onboardingData.photos || []}
           onPhotosChange={(photos) => updateData({ photos })}
           onNext={() => {
+            void goToNextStep();
             const latestData = onboardingDataRef.current;
             if (user?.id) {
               const photosUid = user.id;
@@ -1661,7 +1663,6 @@ export const ModalOnboardingFlow: React.FC<ModalOnboardingFlowProps> = ({
                 }
               })();
             }
-            void goToNextStep();
           }}
           onBack={goToPrevStep}
         />
@@ -1672,17 +1673,17 @@ export const ModalOnboardingFlow: React.FC<ModalOnboardingFlowProps> = ({
           matchPreferences={onboardingData.matchPreferences}
           userAge={typeof profile?.age === 'number' ? profile.age : undefined}
           onMatchPreferencesChange={(matchPreferences) => updateData({ matchPreferences })}
-          onNext={async () => {
+          onNext={() => {
+            void goToNextStep();
             const latest = onboardingDataRef.current;
             const mp = latest.matchPreferences;
             if (user?.id && mp && typeof mp === 'object' && !Array.isArray(mp)) {
-              try {
-                await mergeAndPersistMatchPreferences(user.id, mp as Record<string, unknown>);
-              } catch (e) {
-                if (__DEV__) console.warn('[ModalOnboarding] match preferences', e);
-              }
+              void mergeAndPersistMatchPreferences(user.id, mp as Record<string, unknown>).catch(
+                (e) => {
+                  if (__DEV__) console.warn('[ModalOnboarding] match preferences', e);
+                },
+              );
             }
-            goToNextStep();
           }}
           onBack={goToPrevStep}
         />
@@ -1700,6 +1701,7 @@ export const ModalOnboardingFlow: React.FC<ModalOnboardingFlowProps> = ({
         <ProfileOnboardingCompleteModal onContinue={handleComplete} />
       )}
     </View>
+    </OnboardingHeaderExitContext.Provider>
   );
 };
 

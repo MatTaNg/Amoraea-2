@@ -15,6 +15,11 @@ import {
   isShortAnswerOkForWhisperRatioGate,
   isSimpleYesNoInterviewMoment,
   looksLikeReadinessAffirmation,
+  looksLikeReadinessYesHomophone,
+  normalizeReadinessHomophoneTranscript,
+  isInterviewExitConfirmationMoment,
+  isResumeReentryWelcomePrompt,
+  looksLikeInterviewExitDecline,
   userIsAnsweringInterviewReadinessPrompt,
   shouldFireWhisperRatioReask,
   shouldRecordInterviewResponseTiming,
@@ -89,14 +94,75 @@ describe('looksLikeReadinessAffirmation', () => {
     expect(looksLikeReadinessAffirmation("Let's go")).toBe(true);
   });
 
+  it('treats Whisper yes homophones as readiness assent', () => {
+    expect(looksLikeReadinessAffirmation('Bye.')).toBe(true);
+    expect(looksLikeReadinessAffirmation('Bye. Bye.')).toBe(true);
+    expect(looksLikeReadinessAffirmation('Bye-bye.')).toBe(true);
+    expect(looksLikeReadinessYesHomophone('Bye. Bye.')).toBe(true);
+    expect(looksLikeReadinessYesHomophone('Bye-bye.')).toBe(true);
+  });
+
   it('rejects declines and long answers', () => {
     expect(looksLikeReadinessAffirmation('No')).toBe(false);
     expect(looksLikeReadinessAffirmation('Not yet')).toBe(false);
+    expect(looksLikeReadinessAffirmation('Yes, repeat')).toBe(false);
     expect(
       looksLikeReadinessAffirmation(
         'Yes I am ready to begin the interview now and I have privacy',
       ),
     ).toBe(false);
+  });
+});
+
+describe('normalizeReadinessHomophoneTranscript', () => {
+  it('maps bye homophones to Yes only on readiness prompts', () => {
+    expect(
+      normalizeReadinessHomophoneTranscript('Bye. Bye.', ['Are you ready to start?']),
+    ).toBe('Yes');
+    expect(
+      normalizeReadinessHomophoneTranscript('Bye-bye.', ['Are you ready to start?']),
+    ).toBe('Yes');
+    expect(
+      normalizeReadinessHomophoneTranscript('Bye. Bye.', ["What's going on between these two?"]),
+    ).toBe('Bye. Bye.');
+  });
+
+  it('maps bye homophones on resume welcome when resume gate is pending', () => {
+    expect(
+      normalizeReadinessHomophoneTranscript(
+        'Bye-bye.',
+        ["What's going on between these two?"],
+        { resumeGatePending: true },
+      ),
+    ).toBe('Yes');
+  });
+
+  it('does not normalize bye homophones on the name question', () => {
+    expect(
+      normalizeReadinessHomophoneTranscript('Bye.', ['What should I call you?']),
+    ).toBe('Bye.');
+    expect(
+      normalizeReadinessHomophoneTranscript('Bye-bye.', [
+        "Please say just your first name clearly — what should I call you?",
+      ]),
+    ).toBe('Bye-bye.');
+  });
+});
+
+describe('interview exit confirmation helpers', () => {
+  it('detects exit confirmation assistant lines', () => {
+    expect(
+      isInterviewExitConfirmationMoment(
+        'I hear you. If you leave now, it may affect your score. Are you sure you want to stop?',
+      ),
+    ).toBe(true);
+    expect(isInterviewExitConfirmationMoment('Are you ready to begin?')).toBe(false);
+  });
+
+  it('detects participant stay / continue replies', () => {
+    expect(looksLikeInterviewExitDecline('No, I want you to stay.')).toBe(true);
+    expect(looksLikeInterviewExitDecline("I don't want to leave")).toBe(true);
+    expect(looksLikeInterviewExitDecline('Yes')).toBe(false);
   });
 });
 
@@ -111,6 +177,16 @@ describe('userIsAnsweringInterviewReadinessPrompt', () => {
     expect(
       userIsAnsweringInterviewReadinessPrompt(["What's going on between these two?"]),
     ).toBe(false);
+  });
+});
+
+describe('isResumeReentryWelcomePrompt', () => {
+  it('detects standard resume welcome copy', () => {
+    expect(
+      isResumeReentryWelcomePrompt(
+        "Welcome back — we'll pick up where we left off. If you'd like me to repeat what I said, let me know.",
+      ),
+    ).toBe(true);
   });
 });
 

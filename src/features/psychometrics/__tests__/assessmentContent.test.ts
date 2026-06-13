@@ -3,14 +3,18 @@ import {
   ANXIETY_TRAIT_REVERSE_ITEMS,
   ASSESSMENT_ORDER,
   ASSESSMENTS,
+  GASP_EXTERNALIZATION_ITEM_COUNT,
   GASP_EXTERNALIZATION_ITEM_IDS,
-  GASP_GUILT_REPAIR_ITEM_IDS,
-  GASP_SHAME_WITHDRAW_ITEM_IDS,
+  psychometricBatteryProgressPosition,
+  psychometricBatteryTotalQuestions,
   resolvePsychometricsResumePosition,
   scoreAssessment,
   scoreBRS,
+  scoreNpiEntitlement,
   scorePostInterviewAssessment,
+  scoreRetiredAssessment,
 } from '../assessmentContent';
+import { NPI_ENTITLEMENT_ENABLED } from '../interviewCompletionStatus';
 import { buildAssessmentSavePayload } from '../psychometricsPersistence';
 
 describe('scoreAssessment', () => {
@@ -42,69 +46,58 @@ describe('scoreAssessment', () => {
     expect(scoreAssessment('brs', responses)).toEqual({ total: 5 });
   });
 
-  it('means SCS-SF with reverse scoring', () => {
+  it('means SCS-SF from 8 retained items with reverse scoring', () => {
     const responses: Record<number, number> = {};
-    for (const id of [2, 3, 5, 6, 7, 8, 10]) responses[id] = 5;
-    for (const id of [1, 4, 9, 11, 12]) responses[id] = 1;
+    for (const id of [2, 3, 5, 6, 7]) responses[id] = 5;
+    for (const id of [1, 9, 11]) responses[id] = 1;
     const scores = scoreAssessment('scs_sf', responses);
     expect(scores.total).toBe(5);
     expect(scores.self_kindness).toBe(5);
     expect(scores.common_humanity).toBe(5);
     expect(scores.mindfulness).toBe(5);
+    expect(ASSESSMENTS.scs_sf.questions).toHaveLength(8);
+    expect(ASSESSMENTS.scs_sf.scoring.reverseItems).toEqual([1, 9, 11]);
   });
 
-  it('means GASP externalization only from items 1–4 (backward compatible)', () => {
+  it('means GASP externalization only from items 1–4', () => {
     const gasp = scoreAssessment('gasp', { 1: 3, 2: 3, 3: 3, 4: 3 });
     expect(gasp.total).toBe(3);
-    expect(gasp.guilt_repair).toBe(0);
-    expect(gasp.shame_withdraw).toBe(0);
+    expect(gasp.guilt_repair).toBeUndefined();
+    expect(gasp.shame_withdraw).toBeUndefined();
+    expect(ASSESSMENTS.gasp.questions).toHaveLength(4);
   });
 
-  it('scores GASP guilt_repair and shame_withdraw subscales from full 12-item battery', () => {
-    const responses: Record<number, number> = {
-      1: 6,
-      2: 5,
-      3: 4,
-      4: 3,
-      5: 7,
-      6: 6,
-      7: 5,
-      8: 4,
-      9: 2,
-      10: 3,
-      11: 4,
-      12: 5,
-    };
-    const gasp = scoreAssessment('gasp', responses);
-    expect(gasp.total).toBe(4.5);
-    expect(gasp.guilt_repair).toBe(5.5);
-    expect(gasp.shame_withdraw).toBe(3.5);
-  });
-
-  it('persists GASP subscale scores on save payload', () => {
-    const responses: Record<number, number> = Object.fromEntries(
-      Array.from({ length: 12 }, (_, i) => [i + 1, 4]),
-    );
+  it('persists GASP externalization mean only on save payload', () => {
+    const responses: Record<number, number> = { 1: 4, 2: 4, 3: 4, 4: 4 };
     const payload = buildAssessmentSavePayload('gasp', responses);
     expect(payload.psychometrics_gasp_score).toBe(4);
-    expect(payload.psychometrics_gasp_guilt_repair_score).toBe(4);
-    expect(payload.psychometrics_gasp_shame_withdraw_score).toBe(4);
+    expect(payload.psychometrics_gasp_guilt_repair_score).toBeUndefined();
+    expect(payload.psychometrics_gasp_shame_withdraw_score).toBeUndefined();
     expect(payload.psychometrics_gasp_responses).toEqual(responses);
   });
 
-  it('GASP item id sets match published subscale membership', () => {
+  it('GASP item id set matches 4-item externalization battery', () => {
     expect(GASP_EXTERNALIZATION_ITEM_IDS).toEqual([1, 2, 3, 4]);
-    expect(GASP_GUILT_REPAIR_ITEM_IDS).toEqual([5, 6, 7, 8]);
-    expect(GASP_SHAME_WITHDRAW_ITEM_IDS).toEqual([9, 10, 11, 12]);
-    expect(ASSESSMENTS.gasp.questions).toHaveLength(12);
+    expect(GASP_EXTERNALIZATION_ITEM_COUNT).toBe(4);
   });
 
   it('scores combined relationship beliefs with Dweck and RBI subscales', () => {
-    const responses = Object.fromEntries(Array.from({ length: 10 }, (_, i) => [i + 1, 4]));
+    const responses: Record<number, number> = {
+      1: 1,
+      2: 1,
+      3: 1,
+      4: 6,
+      5: 6,
+      6: 6,
+      7: 1,
+      8: 1,
+      9: 1,
+      10: 1,
+    };
     const scores = scoreAssessment('dweck', responses);
-    expect(scores.total).toBe(4);
-    expect(scores.growth).toBe(4);
-    expect(scores.rbi_disagreement).toBe(4);
+    expect(scores.total).toBe(6);
+    expect(scores.growth).toBe(6);
+    expect(scores.rbi_disagreement).toBe(6);
   });
 
   it('sums AAQ-II responses', () => {
@@ -112,9 +105,9 @@ describe('scoreAssessment', () => {
     expect(scoreAssessment('aaq2', responses)).toEqual({ total: 14 });
   });
 
-  it('means MSPSS family and friends subscales', () => {
+  it('scores retired MSPSS for legacy admin paths', () => {
     const responses = Object.fromEntries(Array.from({ length: 8 }, (_, i) => [i + 1, 4]));
-    const scores = scoreAssessment('mspss', responses);
+    const scores = scoreRetiredAssessment('mspss', responses);
     expect(scores.total).toBe(4);
     expect(scores.family).toBe(4);
     expect(scores.friends).toBe(4);
@@ -123,45 +116,111 @@ describe('scoreAssessment', () => {
   it('means SD3 narcissism and RFQ responses', () => {
     const sd3 = Object.fromEntries(Array.from({ length: 9 }, (_, i) => [i + 1, 3]));
     expect(scoreAssessment('sd3_narcissism', sd3).total).toBe(3);
-    const rfq = Object.fromEntries(Array.from({ length: 8 }, (_, i) => [i + 1, 5]));
-    expect(scoreAssessment('rfq', rfq).total).toBe(5);
+    const rfq: Record<number, number> = { 1: 1, 2: 7, 3: 1, 4: 7, 5: 1, 6: 7, 7: 1, 8: 7 };
+    expect(scoreAssessment('rfq', rfq).total).toBe(7);
   });
 
-  it('runs assessments in configured order with anxiety_trait after BRS', () => {
+  it('counts NPI Entitlement entitlement poles selected', () => {
+    const responses = {
+      1: { selectedOptionIndex: 0 as const, wasEntitlement: true },
+      2: { selectedOptionIndex: 1 as const, wasEntitlement: false },
+      3: { selectedOptionIndex: 0 as const, wasEntitlement: true },
+      4: { selectedOptionIndex: 0 as const, wasEntitlement: true },
+      5: { selectedOptionIndex: 1 as const, wasEntitlement: false },
+      6: { selectedOptionIndex: 0 as const, wasEntitlement: true },
+      7: { selectedOptionIndex: 1 as const, wasEntitlement: false },
+    };
+    expect(scoreNpiEntitlement(responses)).toBe(4);
+    expect(scoreAssessment('npi_entitlement', responses).total).toBe(4);
+  });
+
+  it('runs 9 active instruments in configured order', () => {
     expect(ASSESSMENT_ORDER).toEqual([
       'brs',
       'anxiety_trait',
-      'aaq2',
-      'rfq',
-      'mspss',
-      'sd3_narcissism',
-      'dweck',
-      'rses',
       'scs_sf',
       'gasp',
-      'scs',
+      'dweck',
+      'aaq2',
+      'rses',
+      NPI_ENTITLEMENT_ENABLED ? 'npi_entitlement' : 'sd3_narcissism',
+      'rfq',
     ]);
     expect(ASSESSMENT_ORDER).not.toContain('sexual_communication');
+    expect(ASSESSMENT_ORDER).not.toContain('mspss');
+    expect(ASSESSMENT_ORDER).not.toContain('scs');
   });
 
   it('means sexual communication post-interview responses', () => {
     const responses = Object.fromEntries(Array.from({ length: 10 }, (_, i) => [i + 1, 4]));
-    expect(scorePostInterviewAssessment('sexual_communication', responses)).toEqual({ total: 4 });
+    expect(scorePostInterviewAssessment('sexual_communication', responses)).toMatchObject({ total: 4 });
   });
 
   it('maps deprecated PAQ resume position to GASP', () => {
     expect(resolvePsychometricsResumePosition('paq', 5)).toEqual({
-      assessmentIndex: 9,
+      assessmentIndex: 3,
+      questionIndex: 0,
+      allQuestionsAnswered: false,
+    });
+  });
+
+  it('maps retired MSPSS resume position to SD3', () => {
+    expect(resolvePsychometricsResumePosition('mspss', 2)).toEqual({
+      assessmentIndex: 7,
+      questionIndex: 0,
+      allQuestionsAnswered: false,
+    });
+  });
+
+  it('maps retired SCS resume position to RFQ (final instrument)', () => {
+    expect(resolvePsychometricsResumePosition('scs', 5)).toEqual({
+      assessmentIndex: 8,
       questionIndex: 0,
       allQuestionsAnswered: false,
     });
   });
 });
 
+describe('psychometricBatteryProgressPosition', () => {
+  it('tracks cumulative position across the full battery', () => {
+    const total = psychometricBatteryTotalQuestions();
+    expect(total).toBeGreaterThan(0);
+
+    expect(psychometricBatteryProgressPosition(0, 0)).toEqual({ current: 1, total });
+    expect(psychometricBatteryProgressPosition(0, 5)).toEqual({ current: 6, total });
+
+    const brsCount = ASSESSMENTS.brs.questions.length;
+    expect(psychometricBatteryProgressPosition(1, 0)).toEqual({
+      current: brsCount + 1,
+      total,
+    });
+
+    const anxietyCount = ASSESSMENTS.anxiety_trait.questions.length;
+    expect(psychometricBatteryProgressPosition(2, 0)).toEqual({
+      current: brsCount + anxietyCount + 1,
+      total,
+    });
+  });
+
+  it('uses NPI or SD3 item count based on active battery slot', () => {
+    const narcissismId = ASSESSMENT_ORDER[7];
+    const narcissismCount = ASSESSMENTS[narcissismId].questions.length;
+    const beforeNarcissism = ASSESSMENT_ORDER.slice(0, 7).reduce(
+      (sum, id) => sum + ASSESSMENTS[id].questions.length,
+      0,
+    );
+    expect(psychometricBatteryProgressPosition(7, 0)).toEqual({
+      current: beforeNarcissism + 1,
+      total: psychometricBatteryTotalQuestions(),
+    });
+    expect(narcissismCount).toBe(NPI_ENTITLEMENT_ENABLED ? 7 : 9);
+  });
+});
+
 describe('resolvePsychometricsResumePosition', () => {
   it('clamps an out-of-range index on the current assessment', () => {
     expect(resolvePsychometricsResumePosition('rses', 9)).toEqual({
-      assessmentIndex: 7,
+      assessmentIndex: 6,
       questionIndex: 9,
       allQuestionsAnswered: false,
     });
@@ -169,16 +228,16 @@ describe('resolvePsychometricsResumePosition', () => {
 
   it('advances to the next assessment when index is one past the last question', () => {
     expect(resolvePsychometricsResumePosition('rses', 10)).toEqual({
-      assessmentIndex: 8,
+      assessmentIndex: 7,
       questionIndex: 0,
       allQuestionsAnswered: false,
     });
   });
 
   it('marks flow complete when index is past the final assessment', () => {
-    expect(resolvePsychometricsResumePosition('scs', 13)).toEqual({
-      assessmentIndex: 10,
-      questionIndex: 12,
+    expect(resolvePsychometricsResumePosition('rfq', 8)).toEqual({
+      assessmentIndex: 8,
+      questionIndex: 7,
       allQuestionsAnswered: true,
     });
   });

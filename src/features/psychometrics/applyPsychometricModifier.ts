@@ -5,13 +5,12 @@ import type { DefenseCrossReferenceResult } from './crossReferenceDefenseDetecti
 import {
   coercePsychometricScore,
   isMissingUsersPsychometricsSd3ColumnsError,
-  psychometricFloorScoresFromUserRow,
   sd3NarcissismResponsesFromUserRow,
-  sd3NarcissismScoreForFloorFromUserRow,
   sd3NarcissismScoreFromUserRow,
   userHasPsychometricScoresForScoring,
 } from './usersPsychometricsSchemaFallback';
 import { normalizeGateFailDetailForPersist } from './gateFailDetailForPersist';
+import { loadFreshPsychometricFloorScoresForUser } from './loadFreshPsychometricFloorUserRow';
 import {
   computeGamingCorrection,
   gamingCorrectionForStorage,
@@ -26,12 +25,14 @@ import {
 } from './computeUncertaintyScore';
 import {
   collectPsychometricFloorGateFailReasons,
+  isPsychometricGateFailFloorCode,
   mergePsychometricFloorsIntoGateState,
 } from './psychometricFloorBreaches';
 import { SD3_NARCISSISM_FLOOR_FAIL_CODE } from './sd3NarcissismFloor';
 import {
   LEGACY_PSYCHOMETRIC_PASS_FLIP_REVIEW_FLAG,
 } from './legacyPsychometricReview';
+import { PSYCHOMETRICS_ENABLED } from './interviewCompletionStatus';
 
 export type ApplyPsychometricModifierOptions = {
   /**
@@ -50,14 +51,6 @@ export type ApplyPsychometricModifierResult = {
   applied: boolean;
   skipReason?: string;
 };
-
-function mergeScsResponses(
-  publicResponses: Record<number, number> | null | undefined,
-  privateResponses: Record<number, number> | null | undefined,
-): Record<number, number> | undefined {
-  if (!publicResponses && !privateResponses) return undefined;
-  return { ...(publicResponses ?? {}), ...(privateResponses ?? {}) };
-}
 
 function finiteNumberOrNull(v: unknown): number | null {
   return coercePsychometricScore(v);
@@ -89,6 +82,8 @@ const PSYCHOMETRIC_USER_SELECT = `
   psychometrics_mspss_responses,
   psychometrics_sd3_narcissism_score,
   psychometrics_sd3_narcissism_responses,
+  psychometrics_npi_entitlement_score,
+  psychometrics_npi_entitlement_responses,
   psychometrics_narq_s_score,
   psychometrics_narq_s_responses,
   psychometrics_rfq_score,
@@ -122,51 +117,17 @@ const PSYCHOMETRIC_USER_SELECT_LEGACY_SD3 = `
   psychometrics_mspss_responses,
   psychometrics_narq_s_score,
   psychometrics_narq_s_responses,
+  psychometrics_npi_entitlement_score,
+  psychometrics_npi_entitlement_responses,
   psychometrics_rfq_score,
   psychometrics_rfq_responses,
   psychometrics_completed_at
 `;
 
-/** Floor gating reads `psychometrics_sd3_narcissism_score` only — refresh immediately before merge. */
-async function refreshSd3NarcissismScoreOnUserRowForFloor(
-  userId: string,
-  userRow: Record<string, unknown>,
-): Promise<Record<string, unknown>> {
-  const { data, error } = await supabase
-    .from('users')
-    .select('psychometrics_sd3_narcissism_score, psychometrics_narq_s_score')
-    .eq('id', userId)
-    .maybeSingle();
-  if (error) {
-    console.warn('[PsychometricModifier] fresh psychometrics_sd3_narcissism_score read failed:', error.message);
-    return userRow;
-  }
-  const freshSd3 = coercePsychometricScore(data?.psychometrics_sd3_narcissism_score);
-  const cachedSd3 = sd3NarcissismScoreForFloorFromUserRow(userRow);
-  if (freshSd3 != null && freshSd3 !== cachedSd3) {
-    console.log('[PsychometricModifier] refreshed psychometrics_sd3_narcissism_score from DB', {
-      userId,
-      cachedSd3,
-      freshSd3,
-    });
-  }
-  if (freshSd3 == null) {
-    const narqOnly = coercePsychometricScore(data?.psychometrics_narq_s_score ?? userRow.psychometrics_narq_s_score);
-    if (narqOnly != null) {
-      console.log(
-        '[PsychometricModifier] psychometrics_sd3_narcissism_score null on DB — floor will not use psychometrics_narq_s_score',
-        { userId, psychometrics_narq_s_score: narqOnly },
-      );
-    }
-  }
-  return {
-    ...userRow,
-    psychometrics_sd3_narcissism_score:
-      data?.psychometrics_sd3_narcissism_score ?? userRow.psychometrics_sd3_narcissism_score,
-  };
-}
+/** Floor gating reads fresh score columns from `users` — see loadFreshPsychometricFloorScoresForUser. */
 
 const ATTEMPT_SELECT_FOR_PSYCHOMETRIC_SCORING_BASE = `
+  user_id,
   weighted_score,
   modified_weighted_score,
   pillar_scores,
@@ -238,6 +199,7 @@ function buildUncertaintyInput(
     psychometrics_scs_sf_score: coercePsychometricScore(user.psychometrics_scs_sf_score),
     psychometrics_dweck_score: coercePsychometricScore(user.psychometrics_dweck_score),
     psychometrics_sd3_narcissism_score: sd3NarcissismScoreFromUserRow(user as Record<string, unknown>),
+    psychometrics_npi_entitlement_score: coercePsychometricScore(user.psychometrics_npi_entitlement_score),
     psychometrics_rfq_score: coercePsychometricScore(user.psychometrics_rfq_score),
     psychometrics_scs_public_score: coercePsychometricScore(user.psychometrics_scs_public_score),
     psychometrics_scs_private_score: coercePsychometricScore(user.psychometrics_scs_private_score),
@@ -248,11 +210,130 @@ function buildUncertaintyInput(
   };
 }
 
+const ATTEMPT_SELECT_INTERVIEW_ONLY_GATE = `
+  user_id,
+  weighted_score,
+  modified_weighted_score,
+  passed,
+  gate_fail_reasons,
+  gate_fail_detail,
+  review_flags
+`;
+
+async function applyInterviewOnlyGateWithoutPsychometrics(
+  userId: string,
+  attemptId: string,
+  options?: ApplyPsychometricModifierOptions,
+): Promise<ApplyPsychometricModifierResult> {
+  const attemptRes = await supabase
+    .from('interview_attempts')
+    .select(ATTEMPT_SELECT_INTERVIEW_ONLY_GATE)
+    .eq('id', attemptId)
+    .single();
+  const attempt = attemptRes.data;
+  if (!attempt) {
+    console.warn('[PsychometricModifier] no attempt found for interview-only gate', attemptId);
+    return { applied: false, skipReason: 'attempt_not_found' };
+  }
+
+  const depthSignalModifiedScore =
+    (attempt.modified_weighted_score as number | null) ?? (attempt.weighted_score as number | null) ?? 0;
+  const existingFailReasons = Array.isArray(attempt.gate_fail_reasons)
+    ? (attempt.gate_fail_reasons as string[])
+    : [];
+  const interviewFailReasons = existingFailReasons.filter((code) => !isPsychometricGateFailFloorCode(code));
+
+  const existingDetail =
+    attempt.gate_fail_detail != null &&
+    typeof attempt.gate_fail_detail === 'object' &&
+    !Array.isArray(attempt.gate_fail_detail)
+      ? (attempt.gate_fail_detail as Record<string, unknown>)
+      : null;
+  const normalizedDetail = normalizeGateFailDetailForPersist(existingDetail);
+  const { psychometric_floors: _ignoredPsychFloors, ...detailWithoutPsychFloors } = normalizedDetail;
+  const gateFailDetail = normalizeGateFailDetailForPersist({
+    ...detailWithoutPsychFloors,
+    psychometric_floors: {},
+  });
+
+  const interviewGatePass =
+    interviewFailReasons.length === 0 && depthSignalModifiedScore >= GATE_PASS_WEIGHTED_MIN;
+  const computedFinalPass = interviewGatePass;
+  const wasPreviouslyPassing = attempt.passed === true;
+  const wouldFlipPassToFail =
+    options?.preservePassIfPreviouslyPassing === true &&
+    wasPreviouslyPassing &&
+    !computedFinalPass;
+
+  const existingReviewFlags = Array.isArray(attempt.review_flags)
+    ? (attempt.review_flags as string[])
+    : [];
+  const reviewFlagsForPersist = wouldFlipPassToFail
+    ? [...new Set([...existingReviewFlags, LEGACY_PSYCHOMETRIC_PASS_FLIP_REVIEW_FLAG])]
+    : existingReviewFlags;
+
+  const finalPass = wouldFlipPassToFail ? true : computedFinalPass;
+
+  /** Telemetry only — floor evaluation does not affect gate when psychometrics are disabled. */
+  const freshFloorScores = await loadFreshPsychometricFloorScoresForUser(userId);
+  if (freshFloorScores) {
+    const floorBreachesForLog = collectPsychometricFloorGateFailReasons(freshFloorScores, []);
+    if (floorBreachesForLog.length > 0) {
+      console.log('[PsychometricModifier] psychometrics disabled — floor breaches logged only', {
+        userId,
+        attemptId,
+        floorBreachesForLog,
+      });
+    }
+  }
+
+  const attemptUpdateBase: Record<string, unknown> = {
+    psychometric_modifier_applied: 0,
+    corrected_psychometric_modifier: 0,
+    modified_weighted_score_with_psychometrics: depthSignalModifiedScore,
+    final_gate_pass: finalPass,
+    gate_fail_reasons: interviewFailReasons,
+    gate_fail_detail: gateFailDetail,
+    passed: finalPass,
+    review_flags: reviewFlagsForPersist,
+  };
+
+  let { error } = await supabase
+    .from('interview_attempts')
+    .update({
+      ...attemptUpdateBase,
+      gaming_correction: null,
+    })
+    .eq('id', attemptId);
+
+  if (error && isInterviewAttemptsMissingGamingCorrectionColumnsError(error)) {
+    ({ error } = await supabase.from('interview_attempts').update(attemptUpdateBase).eq('id', attemptId));
+  }
+
+  if (error) {
+    console.error('[PsychometricModifier] interview-only gate persist failed:', error);
+    return { applied: false, skipReason: `persist_failed: ${error.message}` };
+  }
+
+  console.log('[PsychometricModifier] psychometrics disabled — interview-only gate persisted', {
+    userId,
+    attemptId,
+    depthSignalModifiedScore,
+    finalPass,
+    interviewFailReasons,
+  });
+  return { applied: true, skipReason: 'psychometrics_disabled' };
+}
+
 export async function applyPsychometricModifierToAttempt(
   userId: string,
   attemptId: string,
   options?: ApplyPsychometricModifierOptions,
 ): Promise<ApplyPsychometricModifierResult> {
+  if (!PSYCHOMETRICS_ENABLED) {
+    return applyInterviewOnlyGateWithoutPsychometrics(userId, attemptId, options);
+  }
+
   let userRow: Record<string, unknown> | null = null;
   /** Prefer SD3 columns first — legacy-only select omits `psychometrics_sd3_narcissism_score` and can hide floor triggers. */
   for (const select of [PSYCHOMETRIC_USER_SELECT, PSYCHOMETRIC_USER_SELECT_LEGACY_SD3]) {
@@ -306,6 +387,16 @@ export async function applyPsychometricModifierToAttempt(
     return { applied: false, skipReason: 'attempt_not_found' };
   }
 
+  const attemptUserId =
+    typeof attempt.user_id === 'string' && attempt.user_id.length > 0 ? attempt.user_id : userId;
+  if (attemptUserId !== userId) {
+    console.warn('[PsychometricModifier] userId mismatch — using attempt.user_id for floor evaluation', {
+      passedUserId: userId,
+      attemptUserId,
+      attemptId,
+    });
+  }
+
   if (!hasStoredScores) {
     console.log('[PsychometricModifier] psychometric scores missing — skipping');
     return { applied: false, skipReason: 'psychometric_scores_missing' };
@@ -322,11 +413,8 @@ export async function applyPsychometricModifierToAttempt(
       dweckScore: user.psychometrics_dweck_score as number | null,
       aaq2Score: user.psychometrics_aaq2_score as number | null,
       rsesScore: user.psychometrics_rses_score as number | null,
-      scsPublicScore: user.psychometrics_scs_public_score as number | null,
-      scsPrivateScore: user.psychometrics_scs_private_score as number | null,
-      mspssFriendsScore: user.psychometrics_mspss_friends_score as number | null,
-      mspssFamilyScore: user.psychometrics_mspss_family_score as number | null,
       sd3NarcissismScore: sd3NarcissismScoreFromUserRow(user),
+      npiEntitlementScore: coercePsychometricScore(user.psychometrics_npi_entitlement_score),
       rfqScore: coercePsychometricScore(user.psychometrics_rfq_score),
     },
     {
@@ -349,11 +437,6 @@ export async function applyPsychometricModifierToAttempt(
       dweck: user.psychometrics_dweck_responses as Record<number, number> | undefined,
       aaq2: user.psychometrics_aaq2_responses as Record<number, number> | undefined,
       rses: user.psychometrics_rses_responses as Record<number, number> | undefined,
-      scs: mergeScsResponses(
-        user.psychometrics_scs_public_responses as Record<number, number> | undefined,
-        user.psychometrics_scs_private_responses as Record<number, number> | undefined,
-      ),
-      mspss: user.psychometrics_mspss_responses as Record<number, number> | undefined,
       sd3_narcissism: sd3NarcissismResponsesFromUserRow(user) as Record<number, number> | undefined,
       rfq: user.psychometrics_rfq_responses as Record<number, number> | undefined,
     },
@@ -384,6 +467,7 @@ export async function applyPsychometricModifierToAttempt(
       aaq2: user.psychometrics_aaq2_score as number | null,
       rses: user.psychometrics_rses_score as number | null,
       sd3_narcissism: sd3NarcissismScoreFromUserRow(user),
+      npi_entitlement: coercePsychometricScore(user.psychometrics_npi_entitlement_score),
       dweck: user.psychometrics_dweck_score as number | null,
     },
   });
@@ -414,36 +498,30 @@ export async function applyPsychometricModifierToAttempt(
       ? (attempt.gate_fail_detail as Record<string, unknown>)
       : null;
 
-  const userBeforeRefresh = user;
-  user = await refreshSd3NarcissismScoreOnUserRowForFloor(userId, user);
-  console.log('[PsychometricModifier] refreshSd3NarcissismScoreOnUserRowForFloor', {
-    userId,
-    attemptId,
-    cachedSd3: sd3NarcissismScoreForFloorFromUserRow(userBeforeRefresh),
-    afterRefreshSd3: sd3NarcissismScoreForFloorFromUserRow(user),
-    rawAfter: user.psychometrics_sd3_narcissism_score,
-    changed: userBeforeRefresh.psychometrics_sd3_narcissism_score !== user.psychometrics_sd3_narcissism_score,
-  });
-  const floorScores = psychometricFloorScoresFromUserRow(user);
-  console.log(
-    '[PsychometricModifier] floorScores.sd3NarcissismScore before mergePsychometricFloorsIntoGateState:',
-    floorScores.sd3NarcissismScore,
-    {
-      userId,
+  const freshFloorScores = await loadFreshPsychometricFloorScoresForUser(attemptUserId);
+  if (!freshFloorScores) {
+    console.warn('[PsychometricModifier] fresh psychometric floor scores unavailable', {
+      attemptUserId,
       attemptId,
-      psychometrics_sd3_narcissism_score_raw: user.psychometrics_sd3_narcissism_score,
-    },
-  );
+    });
+    return { applied: false, skipReason: 'psychometric_scores_missing' };
+  }
+
+  console.log('[PsychometricModifier] fresh floor scores loaded from DB', {
+    attemptUserId,
+    attemptId,
+    floorScores: freshFloorScores,
+  });
 
   const { gateFailReasons: allFailReasons, gateFailDetail } = mergePsychometricFloorsIntoGateState({
     existingFailReasons,
     existingDetail,
-    scores: floorScores,
+    scores: freshFloorScores,
     straightLineFlags,
     attemptId,
-    userId,
+    userId: attemptUserId,
   });
-  const floorBreaches = collectPsychometricFloorGateFailReasons(floorScores, straightLineFlags);
+  const floorBreaches = collectPsychometricFloorGateFailReasons(freshFloorScores, straightLineFlags);
   console.log('[PsychometricModifier] gate_fail_detail.psychometric_floors shape', {
     isArray: Array.isArray(gateFailDetail.psychometric_floors),
     keys:
@@ -452,7 +530,7 @@ export async function applyPsychometricModifierToAttempt(
         : null,
     sd3InReasons: allFailReasons.includes(SD3_NARCISSISM_FLOOR_FAIL_CODE),
     floorBreaches,
-    floorScoresSd3: floorScores.sd3NarcissismScore,
+    floorScoresSd3: freshFloorScores.sd3NarcissismScore,
   });
 
   const interviewGatePass =
@@ -499,12 +577,12 @@ export async function applyPsychometricModifierToAttempt(
   }
 
   const attemptUpdateBase: Record<string, unknown> = {
-    psychometric_modifier_applied: result.modifier,
-    modified_weighted_score_with_psychometrics: finalModifiedScore,
-    final_gate_pass: finalPass,
-    gate_fail_reasons: allFailReasons,
+      psychometric_modifier_applied: result.modifier,
+      modified_weighted_score_with_psychometrics: finalModifiedScore,
+      final_gate_pass: finalPass,
+      gate_fail_reasons: allFailReasons,
     gate_fail_detail: normalizeGateFailDetailForPersist(gateFailDetail),
-    passed: finalPass,
+      passed: finalPass,
     review_flags: reviewFlagsForPersist,
     ...(uncertaintyForDb
       ? {
@@ -535,21 +613,21 @@ export async function applyPsychometricModifierToAttempt(
     return { applied: false, skipReason: `persist_failed: ${error.message}` };
   }
 
-  console.log(
+    console.log(
     '[PsychometricModifier] applied — raw modifier:',
-    result.modifier,
+      result.modifier,
     'corrected modifier:',
     correctedPsychometricModifier,
     'gaming level:',
     gamingCorrection.correctionLevel,
-    'depthModified:',
-    depthSignalModifiedScore,
-    'finalModified:',
-    finalModifiedScore,
-    'finalPass:',
-    finalPass,
+      'depthModified:',
+      depthSignalModifiedScore,
+      'finalModified:',
+      finalModifiedScore,
+      'finalPass:',
+      finalPass,
     'floorBreaches:',
     floorBreaches,
-  );
+    );
   return { applied: true };
 }

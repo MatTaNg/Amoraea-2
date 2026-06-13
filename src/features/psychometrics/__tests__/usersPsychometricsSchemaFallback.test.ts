@@ -11,7 +11,8 @@ import {
   collectPsychometricFloorGateFailReasons,
   RFQ_LOW_REFLECTIVE_FUNCTIONING_FLOOR_CODE,
 } from '../psychometricFloorBreaches';
-import { SD3_NARCISSISM_FLOOR_FAIL_CODE } from '../sd3NarcissismFloor';
+import { ACTIVE_NARCISSISM_FLOOR_CODE } from '../narcissismInstrumentTestFixtures';
+import { NPI_ENTITLEMENT_ENABLED } from '../interviewCompletionStatus';
 
 describe('usersPsychometricsSchemaFallback', () => {
   it('detects missing SD3 column errors', () => {
@@ -51,26 +52,38 @@ describe('usersPsychometricsSchemaFallback', () => {
     ).toBe(4.2);
   });
 
-  it('triggers RFQ and SD3 floors when user row scores are strings (attempt 84e8909e shape)', () => {
-    const scores = psychometricFloorScoresFromUserRow({
-      psychometrics_rfq_score: '1.625',
-      psychometrics_sd3_narcissism_score: '4.889',
-    });
+  it('triggers RFQ and active narcissism floors when user row scores are strings (attempt 84e8909e shape)', () => {
+    const scores = psychometricFloorScoresFromUserRow(
+      NPI_ENTITLEMENT_ENABLED
+        ? {
+            psychometrics_rfq_score: '1.625',
+            psychometrics_npi_entitlement_score: '5',
+          }
+        : {
+            psychometrics_rfq_score: '1.625',
+            psychometrics_sd3_narcissism_score: '4.889',
+          },
+    );
     const floors = collectPsychometricFloorGateFailReasons(scores, [
       'aaq2_straight_line',
       'rses_straight_line',
       'scs_straight_line',
     ]);
     expect(floors).toContain(RFQ_LOW_REFLECTIVE_FUNCTIONING_FLOOR_CODE);
-    expect(floors).toContain(SD3_NARCISSISM_FLOOR_FAIL_CODE);
+    if (NPI_ENTITLEMENT_ENABLED) {
+      expect(floors).toContain(ACTIVE_NARCISSISM_FLOOR_CODE);
+    } else {
+      expect(floors).toContain('sd3_narcissism_floor');
+    }
   });
 
   it('SD3 floor scoring uses SD3 column only — legacy NARQ score does not trigger floor', () => {
+    if (NPI_ENTITLEMENT_ENABLED) return;
     const scores = psychometricFloorScoresFromUserRow({
       psychometrics_narq_s_score: '4.889',
     });
     const floors = collectPsychometricFloorGateFailReasons(scores, []);
-    expect(floors).not.toContain(SD3_NARCISSISM_FLOOR_FAIL_CODE);
+    expect(floors).not.toContain('sd3_narcissism_floor');
     expect(sd3NarcissismScoreForFloorFromUserRow({ psychometrics_narq_s_score: 4.889 })).toBeNull();
     expect(sd3NarcissismScoreFromUserRow({ psychometrics_narq_s_score: 4.889 })).toBe(4.889);
   });

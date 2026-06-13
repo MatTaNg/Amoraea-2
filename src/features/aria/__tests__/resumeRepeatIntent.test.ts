@@ -5,11 +5,12 @@ describe('classifyResumeRepeatIntent', () => {
     expect(classifyResumeRepeatIntent('Yes, please repeat what you said.')).toBe('repeat');
     expect(classifyResumeRepeatIntent('Can you say that again?')).toBe('repeat');
     expect(classifyResumeRepeatIntent('What you just said')).toBe('repeat');
+    expect(classifyResumeRepeatIntent('Yes, repeat')).toBe('repeat');
   });
 
-  it('treats one- or two-word affirmatives as repeat (resume consent)', () => {
-    expect(classifyResumeRepeatIntent('yes')).toBe('repeat');
-    expect(classifyResumeRepeatIntent('yeah')).toBe('repeat');
+  it('treats short affirmatives as continue (ready to proceed after welcome)', () => {
+    expect(classifyResumeRepeatIntent('yes')).toBe('continue');
+    expect(classifyResumeRepeatIntent('yeah')).toBe('continue');
     expect(classifyResumeRepeatIntent('yes please')).toBe('repeat');
   });
 

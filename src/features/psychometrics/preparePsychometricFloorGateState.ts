@@ -1,13 +1,11 @@
-import { supabase } from '@data/supabase/client';
 import { normalizeGateFailDetailForPersist } from './gateFailDetailForPersist';
-import { mergePsychometricFloorsIntoGateState } from './psychometricFloorBreaches';
+import { PSYCHOMETRICS_ENABLED } from './interviewCompletionStatus';
 import {
-  isMissingUsersPsychometricsSd3ColumnsError,
-  psychometricFloorScoresFromUserRow,
-  PSYCHOMETRIC_FLOOR_SCORES_USER_SELECT,
-  PSYCHOMETRIC_FLOOR_SCORES_USER_SELECT_LEGACY_SD3,
-  userHasPsychometricScoresForScoring,
-} from './usersPsychometricsSchemaFallback';
+  loadFreshPsychometricFloorUserRow,
+  userRowHasPsychometricFloorScores,
+} from './loadFreshPsychometricFloorUserRow';
+import { mergePsychometricFloorsIntoGateState } from './psychometricFloorBreaches';
+import { psychometricFloorScoresFromUserRow } from './usersPsychometricsSchemaFallback';
 
 export type PreparePsychometricFloorGateStateOptions = {
   forceApply?: boolean;
@@ -54,13 +52,17 @@ export async function preparePsychometricFloorGateState(
   existingDetail: Record<string, unknown> | null | undefined,
   options?: PreparePsychometricFloorGateStateOptions,
 ): Promise<PreparePsychometricFloorGateStateResult> {
-  const userRow = await loadUserRowForPsychometricFloors(userId);
+  if (!PSYCHOMETRICS_ENABLED) {
+    return { skipReason: 'psychometrics_disabled' };
+  }
+
+  const userRow = await loadFreshPsychometricFloorUserRow(userId);
   if (!userRow) {
     return { skipReason: 'user_row_not_found' };
   }
 
   const hasCompletedAt = userRow.psychometrics_completed_at != null;
-  const hasStoredScores = userHasPsychometricScoresForScoring(userRow);
+  const hasStoredScores = userRowHasPsychometricFloorScores(userRow);
   if (!options?.forceApply && !hasCompletedAt && !hasStoredScores) {
     return { skipReason: 'psychometrics_not_complete' };
   }

@@ -12,14 +12,24 @@ import {
 } from 'react-native';
 import { supabase } from '@data/supabase/client';
 import {
+  fetchCompatibilityTestSeedUserIds,
+  isCompatibilityTestSeedUser,
+} from '@features/compatibility/compatibilityTestSeedUser';
+import {
   assignAlgorithmEra,
+  aggregateMarketResearch,
+  computeFullyCompletedCohortAnalytics,
   computeOverviewAnalytics,
   detectScoreRecovery,
   type AttemptRecord,
+  type FullyCompletedCohortAnalytics,
+  type MarketResearchAggregation,
   type OverviewAnalytics,
   type PillarStats,
+  type CohortSegmentPillarDistribution,
   type UserRecord,
 } from './analytics';
+import { formatDurationMsHuman } from './adminAttemptTiming';
 
 function Tooltip({ text }: { text: string }) {
   const [visible, setVisible] = useState(false);
@@ -155,6 +165,68 @@ function CorrelationBadge({ r, validating }: { r: number | null; validating: boo
   );
 }
 
+function formatPillarLabel(name: string): string {
+  return name.replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase());
+}
+
+const COHORT_PILLAR_DISPLAY_ORDER = [
+  'mentalizing',
+  'repair',
+  'accountability',
+  'attunement',
+  'regulation',
+  'appreciation',
+  'contempt_recognition',
+  'contempt_expression',
+  'contempt',
+  'commitment_threshold',
+] as const;
+
+function sortCohortPillarKeys(keys: string[]): string[] {
+  return [...keys].sort((a, b) => {
+    const ai = COHORT_PILLAR_DISPLAY_ORDER.indexOf(a as (typeof COHORT_PILLAR_DISPLAY_ORDER)[number]);
+    const bi = COHORT_PILLAR_DISPLAY_ORDER.indexOf(b as (typeof COHORT_PILLAR_DISPLAY_ORDER)[number]);
+    if (ai >= 0 && bi >= 0) return ai - bi;
+    if (ai >= 0) return -1;
+    if (bi >= 0) return 1;
+    return a.localeCompare(b);
+  });
+}
+
+function CohortSegmentPillarBlock({ segment }: { segment: CohortSegmentPillarDistribution }) {
+  const pillarKeys = sortCohortPillarKeys(Object.keys(segment.pillars));
+
+  return (
+    <View style={styles.cohortSegmentBlock}>
+      <Text style={styles.cohortSegmentTitle}>
+        {segment.label}
+        {segment.n > 0 ? ` · n=${segment.n}` : ''}
+      </Text>
+      {segment.n === 0 || pillarKeys.length === 0 ? (
+        <Text style={styles.alphaNote}>No pillar scores in cohort</Text>
+      ) : (
+        pillarKeys.map((key) => {
+          const stats = segment.pillars[key];
+          return (
+            <View key={key} style={styles.cohortPillarRow}>
+              <Text style={styles.cohortPillarLabel} numberOfLines={2}>
+                {formatPillarLabel(stats.name)}
+              </Text>
+              <View style={styles.cohortPillarBarWrap}>
+                <MiniBar value={stats.mean} max={10} color="#6366f1" />
+              </View>
+              <Text style={styles.cohortPillarMean}>{stats.mean.toFixed(2)}</Text>
+              <Text style={styles.cohortPillarMeta}>
+                σ {stats.std.toFixed(2)} · {stats.min}–{stats.max}
+              </Text>
+            </View>
+          );
+        })
+      )}
+    </View>
+  );
+}
+
 function PillarCard({ stats, onExpand }: { stats: PillarStats; onExpand: () => void }) {
   const label = stats.name.replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase());
   return (
@@ -192,19 +264,39 @@ function isMissingUsersColumnError(error: { message?: string; code?: string }, c
 
 const USER_OVERVIEW_SELECT_WITH_BRS = `
   id, email, full_name, display_name,
+  interview_completed, interview_completed_at,
   psychometrics_completed_at,
   psychometrics_aaq2_score, psychometrics_rses_score,
   psychometrics_brs_score,
   psychometrics_scs_public_score, psychometrics_scs_private_score,
-  psychometric_modifier
+  psychometrics_anxiety_trait_score, psychometrics_scs_sf_score,
+  psychometrics_gasp_score, psychometrics_dweck_score,
+  psychometrics_mspss_score, psychometrics_sd3_narcissism_score,
+  psychometrics_rfq_score,
+  psychometric_modifier,
+  market_research_completed_at,
+  market_research_referral_source, market_research_referral_other,
+  market_research_relationship_seriousness, market_research_search_duration,
+  market_research_dating_status, market_research_max_spend,
+  market_research_spend_context
 `;
 
 const USER_OVERVIEW_SELECT_WITHOUT_BRS = `
   id, email, full_name, display_name,
+  interview_completed, interview_completed_at,
   psychometrics_completed_at,
   psychometrics_aaq2_score, psychometrics_rses_score,
   psychometrics_scs_public_score, psychometrics_scs_private_score,
-  psychometric_modifier
+  psychometrics_anxiety_trait_score, psychometrics_scs_sf_score,
+  psychometrics_gasp_score, psychometrics_dweck_score,
+  psychometrics_mspss_score, psychometrics_sd3_narcissism_score,
+  psychometrics_rfq_score,
+  psychometric_modifier,
+  market_research_completed_at,
+  market_research_referral_source, market_research_referral_other,
+  market_research_relationship_seriousness, market_research_search_duration,
+  market_research_dating_status, market_research_max_spend,
+  market_research_spend_context
 `;
 
 async function fetchUsersForOverview(userIds: string[]): Promise<UserRecord[]> {
@@ -230,10 +322,126 @@ async function fetchUsersForOverview(userIds: string[]): Promise<UserRecord[]> {
   })).filter((u) => idSet.has(u.id));
 }
 
+async function fetchAllUsersForMarketResearch(): Promise<UserRecord[]> {
+  const select = `
+    id, email, full_name, display_name,
+    market_research_completed_at,
+    market_research_referral_source, market_research_referral_other,
+    market_research_relationship_seriousness, market_research_search_duration,
+    market_research_dating_status, market_research_max_spend,
+    market_research_spend_context
+  `;
+  const { data, error } = await supabase
+    .from('users')
+    .select(select)
+    .not('market_research_completed_at', 'is', null);
+
+  if (error) {
+    console.warn('[Overview] market research users fetch failed:', error.message);
+    return [];
+  }
+
+  return (data ?? []) as UserRecord[];
+}
+
+async function fetchOccupationsForUsers(userIds: string[]): Promise<Map<string, string>> {
+  const map = new Map<string, string>();
+  if (userIds.length === 0) return map;
+
+  const { data, error } = await supabase
+    .from('profiles')
+    .select('id, profile_json')
+    .in('id', userIds);
+
+  if (error) {
+    console.warn('[Overview] profiles occupation fetch failed:', error.message);
+    return map;
+  }
+
+  for (const row of data ?? []) {
+    const userId = String((row as { id: string }).id);
+    const json = (row as { profile_json: unknown }).profile_json;
+    const occupation =
+      json && typeof json === 'object' && !Array.isArray(json)
+        ? (json as Record<string, unknown>).occupation
+        : null;
+    if (typeof occupation === 'string' && occupation.trim()) {
+      map.set(userId, occupation.trim());
+    }
+  }
+  return map;
+}
+
+function formatScore(value: number | null): string {
+  return value != null ? value.toFixed(2) : '—';
+}
+
+function MarketResearchQuestionBlock({
+  question,
+}: {
+  question: MarketResearchAggregation['questions'][number];
+}) {
+  const [expanded, setExpanded] = useState(false);
+  const showExpand =
+    question.type === 'text' && (question.textResponses?.length ?? 0) > 8;
+
+  return (
+    <View style={styles.marketQuestionBlock}>
+      <Text style={styles.marketQuestionLabel}>{question.label}</Text>
+      <Text style={styles.marketQuestionMeta}>
+        {question.totalAnswered} response{question.totalAnswered === 1 ? '' : 's'}
+      </Text>
+      {question.type === 'choice' && question.options
+        ? question.options.map((opt) => (
+            <View key={opt.value} style={styles.marketOptionRow}>
+              <Text style={styles.marketOptionLabel} numberOfLines={2}>
+                {opt.value}
+              </Text>
+              <MiniBar value={opt.count} max={question.totalAnswered || 1} color="#8b5cf6" />
+              <Text style={styles.marketOptionCount}>
+                {opt.count} ({opt.percentage}%)
+              </Text>
+            </View>
+          ))
+        : null}
+      {question.type === 'text' && question.textResponses
+        ? (() => {
+            const items = showExpand && !expanded
+              ? question.textResponses!.slice(0, 8)
+              : question.textResponses!;
+            return (
+              <>
+                {items.map((text, i) => (
+                  <Text key={`${question.id}-${i}`} style={styles.marketTextResponse}>
+                    · {text}
+                  </Text>
+                ))}
+                {showExpand ? (
+                  <TouchableOpacity
+                    style={styles.toggleButton}
+                    onPress={() => setExpanded((v) => !v)}
+                  >
+                    <Text style={styles.toggleButtonText}>
+                      {expanded
+                        ? 'Show fewer'
+                        : `Show all ${question.textResponses!.length} responses`}
+                    </Text>
+                  </TouchableOpacity>
+                ) : null}
+              </>
+            );
+          })()
+        : null}
+    </View>
+  );
+}
+
 export function OverviewTab() {
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [analytics, setAnalytics] = useState<OverviewAnalytics | null>(null);
+  const [cohortAnalytics, setCohortAnalytics] = useState<FullyCompletedCohortAnalytics | null>(null);
+  const [marketResearch, setMarketResearch] = useState<MarketResearchAggregation | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [expandedPillar, setExpandedPillar] = useState<string | null>(null);
   const [expandedUser, setExpandedUser] = useState<string | null>(null);
@@ -247,9 +455,13 @@ export function OverviewTab() {
         .select(
           `
           id, user_id, created_at, completed_at,
-          weighted_score, modified_weighted_score, passed, final_gate_pass,
+          weighted_score, modified_weighted_score,
+          modified_weighted_score_with_psychometrics,
+          passed, final_gate_pass,
           pillar_scores, scenario_1_scores, scenario_2_scores, scenario_3_scores,
-          scenario_composites, depth_signal_modifier, score_modifier,
+          scenario_composites, scenario_specific_patterns,
+          response_timings,
+          depth_signal_modifier, score_modifier,
           ego_development_level, disclosure_calibration,
           moment_4_concreteness, moment_5_concreteness,
           personal_moment_emotional_vocab_density, mentalizing_overcertainty_count,
@@ -263,10 +475,17 @@ export function OverviewTab() {
 
       if (aErr) throw aErr;
 
-      const userIds = [...new Set((attemptsRaw ?? []).map((a) => a.user_id as string))];
-      const usersRaw = await fetchUsersForOverview(userIds);
+      const seedUserIds = await fetchCompatibilityTestSeedUserIds(supabase);
+      const attemptsFiltered = (attemptsRaw ?? []).filter(
+        (a) => !seedUserIds.has(String((a as { user_id: string }).user_id)),
+      );
 
-      const attempts: AttemptRecord[] = (attemptsRaw ?? []).map((a) => {
+      const userIds = [...new Set(attemptsFiltered.map((a) => a.user_id as string))];
+      const usersRaw = (await fetchUsersForOverview(userIds)).filter(
+        (u) => !isCompatibilityTestSeedUser({ id: u.id, email: u.email }, seedUserIds),
+      );
+
+      const attempts: AttemptRecord[] = attemptsFiltered.map((a) => {
         const row = a as Record<string, unknown>;
         return {
           id: row.id as string,
@@ -275,6 +494,10 @@ export function OverviewTab() {
           completed_at: (row.completed_at as string | null) ?? null,
           weighted_score: row.weighted_score as number | null,
           modified_weighted_score: row.modified_weighted_score as number | null,
+          modified_weighted_score_with_psychometrics:
+            row.modified_weighted_score_with_psychometrics as number | null,
+          response_timings: row.response_timings as AttemptRecord['response_timings'],
+          scenario_specific_patterns: row.scenario_specific_patterns as Record<string, unknown> | null,
           passed: row.passed as boolean | null,
           final_gate_pass: row.final_gate_pass as boolean | null,
           pillar_scores: row.pillar_scores as Record<string, number> | null,
@@ -314,7 +537,16 @@ export function OverviewTab() {
       });
 
       const result = computeOverviewAnalytics(attempts, usersRaw);
+      const cohort = computeFullyCompletedCohortAnalytics(attempts, usersRaw);
+
+      const marketResearchUsers = await fetchAllUsersForMarketResearch();
+      const marketResearchUserIds = marketResearchUsers.map((u) => u.id);
+      const occupations = await fetchOccupationsForUsers(marketResearchUserIds);
+      const market = aggregateMarketResearch(marketResearchUsers, occupations);
+
       setAnalytics(result);
+      setCohortAnalytics(cohort);
+      setMarketResearch(market);
       setError(null);
     } catch (e: unknown) {
       const message = e instanceof Error ? e.message : 'Failed to load analytics';
@@ -376,6 +608,115 @@ export function OverviewTab() {
     >
       <Text style={styles.pageTitle}>Assessment Battery Overview</Text>
       <Text style={styles.pageSubtitle}>Pull down to refresh · Tap any section to collapse</Text>
+
+      {cohortAnalytics ? (
+        <Section
+          title="Fully Completed Cohort Averages"
+          tooltip="Users who finished the AI interview (interview_completed) and the psychometric battery (psychometrics_completed_at). One latest attempt per user. Interview time prefers active engagement from response_timings; psychometric and total times use wall clock."
+        >
+          <MetricRow
+            label="Cohort size"
+            value={`${cohortAnalytics.cohortSize} users`}
+          />
+          {cohortAnalytics.cohortSize === 0 ? (
+            <Text style={styles.alphaNote}>
+              No users have completed both the AI interview and psychometrics yet.
+            </Text>
+          ) : (
+            <>
+              <Text style={styles.subSectionTitle}>Interview scores</Text>
+              <MetricRow
+                label="Weighted score"
+                value={formatScore(cohortAnalytics.scoreAverages.weightedScore)}
+              />
+              <MetricRow
+                label="Modified weighted score"
+                value={formatScore(cohortAnalytics.scoreAverages.modifiedWeightedScore)}
+              />
+              <MetricRow
+                label="Modified weighted (with psychometrics)"
+                value={formatScore(cohortAnalytics.scoreAverages.modifiedWeightedWithPsychometrics)}
+              />
+              <MetricRow
+                label="Scenario 1 composite"
+                value={formatScore(cohortAnalytics.scoreAverages.scenario1)}
+              />
+              <MetricRow
+                label="Scenario 2 composite"
+                value={formatScore(cohortAnalytics.scoreAverages.scenario2)}
+              />
+              <MetricRow
+                label="Scenario 3 composite"
+                value={formatScore(cohortAnalytics.scoreAverages.scenario3)}
+              />
+              <MetricRow
+                label="Moment 4 composite"
+                value={formatScore(cohortAnalytics.scoreAverages.moment4)}
+              />
+              <MetricRow
+                label="Moment 5 composite"
+                value={formatScore(cohortAnalytics.scoreAverages.moment5)}
+              />
+
+              <Text style={[styles.subSectionTitle, { marginTop: 16 }]}>
+                Pillar scores by scenario & moment
+              </Text>
+              {cohortAnalytics.segmentPillarDistributions.map((segment) => (
+                <CohortSegmentPillarBlock key={segment.key} segment={segment} />
+              ))}
+
+              <Text style={[styles.subSectionTitle, { marginTop: 16 }]}>Psychometric scores</Text>
+              {cohortAnalytics.scoreAverages.psychometricScores
+                .filter((p) => p.n > 0)
+                .map((p) => (
+                  <MetricRow
+                    key={p.key}
+                    label={p.label}
+                    value={p.average != null ? p.average.toFixed(2) : '—'}
+                    sublabel={`n=${p.n}`}
+                  />
+                ))}
+
+              <Text style={[styles.subSectionTitle, { marginTop: 16 }]}>Average time</Text>
+              <MetricRow
+                label="AI interview"
+                value={formatDurationMsHuman(cohortAnalytics.timingAverages.interviewMs)}
+                sublabel={`n=${cohortAnalytics.timingAverages.interviewN}`}
+              />
+              <MetricRow
+                label="Psychometric battery"
+                value={formatDurationMsHuman(cohortAnalytics.timingAverages.psychometricMs)}
+                sublabel={`n=${cohortAnalytics.timingAverages.psychometricN} · after interview`}
+              />
+              <MetricRow
+                label="Total process"
+                value={formatDurationMsHuman(cohortAnalytics.timingAverages.totalProcessMs)}
+                sublabel={`n=${cohortAnalytics.timingAverages.totalProcessN} · interview start → psychometrics complete`}
+              />
+            </>
+          )}
+        </Section>
+      ) : null}
+
+      {marketResearch ? (
+        <Section
+          title="Market Research Responses"
+          tooltip="Aggregated answers from the pre-interview market research modal across all users who completed it."
+          defaultExpanded={marketResearch.totalResponses > 0}
+        >
+          <MetricRow
+            label="Total respondents"
+            value={`${marketResearch.totalResponses}`}
+          />
+          {marketResearch.totalResponses === 0 ? (
+            <Text style={styles.alphaNote}>No market research responses recorded yet.</Text>
+          ) : (
+            marketResearch.questions.map((q) => (
+              <MarketResearchQuestionBlock key={q.id} question={q} />
+            ))
+          )}
+        </Section>
+      ) : null}
 
       <Section
         title="Sample Summary"
@@ -1123,4 +1464,34 @@ const styles = StyleSheet.create({
   validityN: { fontSize: 11, color: '#555' },
   validityInterp: { fontSize: 11, color: '#555', lineHeight: 16 },
   validityWarning: { fontSize: 11, color: '#ef4444', marginTop: 4, lineHeight: 16 },
+  marketQuestionBlock: {
+    marginTop: 14,
+    paddingTop: 12,
+    borderTopWidth: 1,
+    borderTopColor: '#1a1a1a',
+  },
+  marketQuestionLabel: { fontSize: 13, fontWeight: '600', color: '#ccc', marginBottom: 4 },
+  marketQuestionMeta: { fontSize: 11, color: '#555', marginBottom: 8 },
+  marketOptionRow: { flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 5 },
+  marketOptionLabel: { fontSize: 11, color: '#888', width: 120, flexShrink: 0 },
+  marketOptionCount: { fontSize: 11, color: '#555', width: 72, textAlign: 'right' },
+  marketTextResponse: { fontSize: 12, color: '#888', lineHeight: 18, marginBottom: 4 },
+  cohortSegmentBlock: {
+    marginTop: 12,
+    paddingTop: 10,
+    borderTopWidth: 1,
+    borderTopColor: '#1a1a1a',
+  },
+  cohortSegmentTitle: { fontSize: 12, fontWeight: '600', color: '#aaa', marginBottom: 8 },
+  cohortPillarRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    marginBottom: 6,
+    flexWrap: 'wrap',
+  },
+  cohortPillarLabel: { fontSize: 11, color: '#888', width: 118, flexShrink: 0 },
+  cohortPillarBarWrap: { flex: 1, minWidth: 80 },
+  cohortPillarMean: { fontSize: 12, fontWeight: '600', color: '#fff', width: 36, textAlign: 'right' },
+  cohortPillarMeta: { fontSize: 10, color: '#555', width: 88, textAlign: 'right' },
 });

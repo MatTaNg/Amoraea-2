@@ -49,6 +49,53 @@ export function transcriptContainsScenarioARepairQuestion(
   );
 }
 
+function substantiveTranscriptMessages(msgs: readonly ScenarioFollowUpTranscriptMessage[]) {
+  return msgs.filter(
+    (m) =>
+      !(m as { isWelcomeBack?: boolean }).isWelcomeBack &&
+      !(m as { isScoreCard?: boolean }).isScoreCard,
+  );
+}
+
+/**
+ * Repair counts as complete only when the user answered it, or it is the last substantive
+ * assistant line (awaiting answer). A repair line followed by another assistant turn (e.g.
+ * contempt probe streamed after a premature fallback) is a phantom and does not block delivery.
+ */
+export function isScenarioARepairFollowUpCompleteInTranscript(
+  msgs: readonly ScenarioFollowUpTranscriptMessage[],
+): boolean {
+  const filtered = substantiveTranscriptMessages(msgs);
+  for (let i = 0; i < filtered.length; i++) {
+    const m = filtered[i];
+    if (m.role !== 'assistant') continue;
+    if (!looksLikeScenarioARepairQuestion((m as { content?: string }).content ?? '')) continue;
+    const next = filtered[i + 1];
+    if (!next) return true;
+    if (next.role === 'user') return true;
+    return false;
+  }
+  return false;
+}
+
+/** True when a user turn follows the most recent Scenario A contempt probe in the transcript. */
+export function transcriptHasUserResponseAfterScenarioAContemptProbe(
+  msgs: readonly ScenarioFollowUpTranscriptMessage[],
+): boolean {
+  const filtered = substantiveTranscriptMessages(msgs);
+  for (let i = filtered.length - 1; i >= 0; i--) {
+    const m = filtered[i];
+    if (m.role !== 'assistant') continue;
+    if (
+      !looksLikeScenarioAContemptProbeQuestion((m as { content?: string }).content ?? '')
+    ) {
+      continue;
+    }
+    return filtered.slice(i + 1).some((t) => t.role === 'user');
+  }
+  return false;
+}
+
 export function transcriptContainsScenarioBAppreciationProbe(
   msgs: readonly ScenarioFollowUpTranscriptMessage[],
 ): boolean {
@@ -76,7 +123,7 @@ export function scenarioFollowUpAlreadyInTranscript(
     return transcriptContainsScenarioAContemptProbe(msgs);
   }
   if (looksLikeScenarioARepairQuestion(t)) {
-    return transcriptContainsScenarioARepairQuestion(msgs);
+    return isScenarioARepairFollowUpCompleteInTranscript(msgs);
   }
   if (looksLikeScenarioBFullAppreciationProbeQuestion(t)) {
     return transcriptContainsScenarioBAppreciationProbe(msgs);
@@ -105,7 +152,7 @@ export function scenarioOneFollowUpFlagsFromTranscript(msgs: readonly ScenarioFo
 } {
   return {
     contemptProbeAsked: transcriptContainsScenarioAContemptProbe(msgs),
-    repairQuestionAsked: transcriptContainsScenarioARepairQuestion(msgs),
+    repairQuestionAsked: isScenarioARepairFollowUpCompleteInTranscript(msgs),
   };
 }
 

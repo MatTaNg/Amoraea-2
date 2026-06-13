@@ -24,7 +24,8 @@ import {
 import { FlameOrb } from '@app/screens/FlameOrb';
 import * as Clipboard from 'expo-clipboard';
 import { useQueryClient } from '@tanstack/react-query';
-import { isQaRetakeSignupCode, resetInterviewForQaRetake } from '@features/onboarding/qaRetake';
+import { enableInterviewRetake } from '@features/interview/interviewRetake';
+import { usePostInterviewRetakeEligibility } from '@features/onboarding/usePostInterviewRetakeEligibility';
 import { useAuth } from '@features/authentication/hooks/useAuth';
 import { isAmoraeaAdminConsoleEmail } from '@/constants/adminConsole';
 import { showConfirmDialog, showSimpleAlert } from '@utilities/alerts/confirmDialog';
@@ -151,11 +152,10 @@ export const PostInterviewFailedScreen: React.FC<{
   const [myReferralCode, setMyReferralCode] = useState<string | null>(null);
   const [referralNotice, setReferralNotice] = useState<string | null>(null);
   const [copyFeedback, setCopyFeedback] = useState(false);
-  const [showPostInterviewRetake, setShowPostInterviewRetake] = useState(false);
+  const { showRetake: showPostInterviewRetake, retakeEligibleOnLabel } =
+    usePostInterviewRetakeEligibility(userId);
   const [retakeBusy, setRetakeBusy] = useState(false);
   const [launchContactPrefsLoaded, setLaunchContactPrefsLoaded] = useState(false);
-  /** First calendar day retake is allowed (completion + 6 months), for display — aligns with DB `interval '6 months'`. */
-  const [retakeEligibleOnLabel, setRetakeEligibleOnLabel] = useState<string | null>(null);
 
   useEffect(() => {
     loadWebFontsOnce();
@@ -224,8 +224,6 @@ export const PostInterviewFailedScreen: React.FC<{
         const { data: auth } = await supabase.auth.getUser();
         const uid = auth.user?.id ?? userId;
         if (!uid) return;
-        const meta = auth.user?.user_metadata as { referral_code?: string } | undefined;
-        if (!cancelled) setShowPostInterviewRetake(isQaRetakeSignupCode(meta?.referral_code));
         const [{ data: codeRow }, { data: userRow }] = await Promise.all([
           supabase.from('referral_codes').select('code').eq('referrer_user_id', uid).maybeSingle(),
           supabase
@@ -237,21 +235,6 @@ export const PostInterviewFailedScreen: React.FC<{
         if (cancelled) return;
         setMyReferralCode(codeRow?.code ?? null);
         setReferralNotice(userRow?.referral_notice_pending ?? null);
-        const completedAtRaw = userRow?.interview_completed_at;
-        if (typeof completedAtRaw === 'string' && completedAtRaw.length > 0) {
-          const completed = new Date(completedAtRaw);
-          if (!Number.isNaN(completed.getTime())) {
-            const eligible = new Date(completed);
-            eligible.setMonth(eligible.getMonth() + 6);
-            setRetakeEligibleOnLabel(
-              eligible.toLocaleDateString(undefined, { year: 'numeric', month: 'long', day: 'numeric' })
-            );
-          } else {
-            setRetakeEligibleOnLabel(null);
-          }
-        } else {
-          setRetakeEligibleOnLabel(null);
-        }
         const storedPhone =
           typeof userRow?.launch_notification_phone === 'string'
             ? userRow.launch_notification_phone.trim()
@@ -349,7 +332,7 @@ export const PostInterviewFailedScreen: React.FC<{
         if (!uid) return;
         setRetakeBusy(true);
         try {
-          await resetInterviewForQaRetake(uid);
+          await enableInterviewRetake(uid);
           await queryClient.invalidateQueries({ queryKey: ['profile', uid] });
           navigation.replace('Aria', { userId: uid });
         } catch (e) {

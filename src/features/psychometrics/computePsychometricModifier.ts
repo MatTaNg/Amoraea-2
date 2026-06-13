@@ -1,3 +1,6 @@
+import { GASP_EXTERNALIZATION_ITEM_IDS } from './assessmentContent';
+import { GASP_EXTREME_EXTERNALIZATION_FLOOR_THRESHOLD } from './psychometricFloorBreaches';
+import { NPI_ENTITLEMENT_ENABLED } from './interviewCompletionStatus';
 import {
   detectRfqStraightLineFromResponses,
   RFQ_STRAIGHT_LINE_FLAG,
@@ -16,11 +19,8 @@ export interface PsychometricScores {
   dweckScore: number | null;
   aaq2Score: number | null;
   rsesScore: number | null;
-  scsPublicScore: number | null;
-  scsPrivateScore: number | null;
-  mspssFriendsScore: number | null;
-  mspssFamilyScore: number | null;
   sd3NarcissismScore: number | null;
+  npiEntitlementScore: number | null;
   rfqScore: number | null;
 }
 
@@ -33,9 +33,8 @@ export interface PsychometricModifierResult {
   dweckComponent: number;
   aaq2Component: number;
   rsesComponent: number;
-  scsComponent: number;
-  mspssComponent: number;
   sd3NarcissismComponent: number;
+  npiEntitlementComponent: number;
   rfqComponent: number;
   consistencyFlags: string[];
   straightLineFlags: string[];
@@ -48,17 +47,82 @@ export interface PsychometricModifierResult {
     dweckBand: string;
     aaq2Band: string;
     rsesBand: string;
-    scsOrientation: string;
-    mspssBand: string;
     sd3NarcissismBand: string;
+    npiEntitlementBand: string;
     rfqBand: string;
   };
+}
+
+// GASP recalibrated for 4-item externalization subscale only (guilt-repair and shame-withdraw removed).
+// With 4 items a mean of 3.0 reflects active rejection of externalization on clear interpersonal
+// scenarios combined with genuine neutrality on ambiguous situational scenarios — not average externalization.
+// Bands shifted upward from the 12-item calibration accordingly.
+
+export function isGaspLowExternalizationPattern(
+  gaspResponses: Record<number, number> | null | undefined,
+): boolean {
+  if (!gaspResponses) return false;
+
+  // Items 1 and 3 are interpersonal conflict scenarios (supervisor criticism, party comment)
+  // Items 2 and 4 are situational ambiguous scenarios (parked car, coworker upset)
+  const item1 = gaspResponses[1];
+  const item2 = gaspResponses[2];
+  const item3 = gaspResponses[3];
+  const item4 = gaspResponses[4];
+
+  if (item1 == null || item2 == null || item3 == null || item4 == null) return false;
+
+  // Pattern: interpersonal items score ≤ 3 AND situational items score ≤ 4
+  const interpersonalLow = item1 <= 3 && item3 <= 3;
+  const situationalNeutralOrLow = item2 <= 4 && item4 <= 4;
+
+  return interpersonalLow && situationalNeutralOrLow;
+}
+
+export type GaspExternalizationModifierResult = {
+  modifier: number;
+  band: string;
+  patternOverride?: boolean;
+  floorBreach: boolean;
+};
+
+/** GASP externalization mean → modifier band (4-item subscale calibration). */
+export function computeGaspExternalizationModifier(
+  gaspMean: number,
+  gaspResponses?: Record<number, number> | null,
+): GaspExternalizationModifierResult {
+  if (gaspMean >= GASP_EXTREME_EXTERNALIZATION_FLOOR_THRESHOLD) {
+    return { modifier: 0, band: 'floor breach', floorBreach: true };
+  }
+
+  // Pattern override: principled rejection on interpersonal + neutrality on situational
+  // → treat as strong (0 modifier) even if mean is in the average band
+  if (
+    gaspMean <= 3.5 &&
+    isGaspLowExternalizationPattern(gaspResponses)
+  ) {
+    return {
+      modifier: 0,
+      band: 'strong — low externalization (pattern override)',
+      patternOverride: true,
+      floorBreach: false,
+    };
+  }
+
+  if (gaspMean <= 3.0) {
+    return { modifier: 0, band: 'strong — low externalization', floorBreach: false };
+  }
+  if (gaspMean <= 4.0) {
+    return { modifier: -0.1, band: 'average externalization', floorBreach: false };
+  }
+  return { modifier: -0.25, band: 'poor externalization', floorBreach: false };
 }
 
 /**
  * Sums per-instrument three-tier band penalties into a single psychometric modifier applied to the final gate score.
  * Each instrument uses strong (0), average (-0.10), or poor (-0.25) bands; extreme scores are handled by floor
  * breaches, not additional modifier tiers. Range is [worst-case negative sum, 0] — never a positive boost.
+ * Worst-case total across 9 active instruments: -2.10 (8 × -0.25 poor bands + NPI average -0.10).
  */
 export function computePsychometricModifier(
   scores: PsychometricScores,
@@ -82,8 +146,6 @@ export function computePsychometricModifier(
     dweck?: Record<number, number>;
     aaq2?: Record<number, number>;
     rses?: Record<number, number>;
-    scs?: Record<number, number>;
-    mspss?: Record<number, number>;
     sd3_narcissism?: Record<number, number>;
     rfq?: Record<number, number>;
   },
@@ -96,9 +158,8 @@ export function computePsychometricModifier(
   let dweckComponent = 0;
   let aaq2Component = 0;
   let rsesComponent = 0;
-  let scsComponent = 0;
-  let mspssComponent = 0;
   let sd3NarcissismComponent = 0;
+  let npiEntitlementComponent = 0;
   let rfqComponent = 0;
   const consistencyFlags: string[] = [];
   const straightLineFlags: string[] = [];
@@ -177,23 +238,18 @@ export function computePsychometricModifier(
   let gaspBand = 'not assessed';
   if (scores.gaspScore !== null) {
     const s = scores.gaspScore;
-    if (s <= 2.5) {
-      gaspComponent = 0;
-      gaspBand = 'strong — low externalization';
-    } else if (s <= 3.5) {
-      gaspComponent = -0.1;
-      gaspBand = 'average externalization';
-    } else if (s < 4.6) {
-      gaspComponent = -0.25;
-      gaspBand = 'poor externalization';
-    } else {
-      gaspComponent = 0;
-      gaspBand = 'floor breach';
-    }
+    const gaspResult = computeGaspExternalizationModifier(s, rawResponses?.gasp);
+    gaspComponent = gaspResult.modifier;
+    gaspBand = gaspResult.band;
     modifier += gaspComponent;
 
-    if (rawResponses?.gasp && new Set(Object.values(rawResponses.gasp)).size === 1) {
-      straightLineFlags.push('gasp_straight_line');
+    if (rawResponses?.gasp) {
+      const extValues = GASP_EXTERNALIZATION_ITEM_IDS.map((id) => rawResponses.gasp![id]).filter(
+        (v): v is number => v != null,
+      );
+      if (extValues.length === GASP_EXTERNALIZATION_ITEM_IDS.length && new Set(extValues).size === 1) {
+        straightLineFlags.push('gasp_straight_line');
+      }
     }
 
     if (interviewSignals && s > 4.5 && (interviewSignals.accountabilityPillar ?? 0) >= 7) {
@@ -309,66 +365,32 @@ export function computePsychometricModifier(
     }
   }
 
-  let scsOrientation = 'not assessed';
-  if (scores.scsPublicScore !== null && scores.scsPrivateScore !== null) {
-    const diff = scores.scsPrivateScore - scores.scsPublicScore;
+  let sd3NarcissismBand = 'not assessed';
+  let npiEntitlementBand = 'not assessed';
+  if (NPI_ENTITLEMENT_ENABLED) {
+    if (scores.npiEntitlementScore !== null) {
+      const s = scores.npiEntitlementScore;
+      if (s <= 2) {
+        npiEntitlementComponent = 0;
+        npiEntitlementBand = 'strong — low entitlement';
+      } else if (s <= 4) {
+        npiEntitlementComponent = -0.1;
+        npiEntitlementBand = 'average entitlement';
+      } else {
+        npiEntitlementComponent = 0;
+        npiEntitlementBand = 'floor breach';
+      }
+      modifier += npiEntitlementComponent;
 
-    if (diff >= 2) {
-      scsComponent = 0;
-      scsOrientation = 'strong internal orientation';
-    } else if (diff >= -2) {
-      scsComponent = -0.1;
-      scsOrientation = 'balanced to mildly external';
-    } else {
-      scsComponent = -0.25;
-      scsOrientation = 'poor — externally oriented';
-    }
-    modifier += scsComponent;
-
-    if (rawResponses?.scs && new Set(Object.values(rawResponses.scs)).size <= 2) {
-      straightLineFlags.push('scs_straight_line');
-    }
-
-    if (interviewSignals) {
-      const stronglyExternal = diff <= -7;
-      const behavioralInternal =
-        interviewSignals.disclosureCalibration === 'calibrated' &&
-        (interviewSignals.moment4Concreteness === 'high' ||
-          interviewSignals.moment5Concreteness === 'high') &&
-        (interviewSignals.personalMomentVocabDensity ?? 0) >= 1.0;
-
-      if (stronglyExternal && behavioralInternal) consistencyFlags.push('scs_consistency_review');
-    }
-  }
-
-  let mspssBand = 'not assessed';
-  if (scores.mspssFriendsScore !== null) {
-    const s = scores.mspssFriendsScore;
-    if (s >= 5.5) {
-      mspssComponent = 0;
-      mspssBand = 'strong social network';
-    } else if (s >= 4.0) {
-      mspssComponent = 0;
-      mspssBand = 'adequate social network';
-    } else if (s >= 2.5) {
-      mspssComponent = -0.1;
-      mspssBand = 'limited social network';
-    } else {
-      mspssComponent = -0.2;
-      mspssBand = 'isolated — high dependency risk';
-    }
-    modifier += mspssComponent;
-
-    if (rawResponses?.mspss) {
-      const values = Object.values(rawResponses.mspss);
-      if (values.length === 8 && new Set(values).size === 1 && (values[0] === 1 || values[0] === 7)) {
-        straightLineFlags.push('mspss_straight_line');
+      if (
+        interviewSignals &&
+        s >= 4 &&
+        (interviewSignals.accountabilityPillar ?? 0) >= 7
+      ) {
+        consistencyFlags.push('npi_entitlement_accountability_divergence');
       }
     }
-  }
-
-  let sd3NarcissismBand = 'not assessed';
-  if (scores.sd3NarcissismScore !== null) {
+  } else if (scores.sd3NarcissismScore !== null) {
     const s = scores.sd3NarcissismScore;
     if (s <= 2.0) {
       sd3NarcissismComponent = 0;
@@ -443,12 +465,11 @@ export function computePsychometricModifier(
         dweckScore: scores.dweckScore,
         scsSfScore: scores.scsSfScore,
         sd3NarcissismScore: scores.sd3NarcissismScore,
+        npiEntitlementScore: scores.npiEntitlementScore,
         brsScore: scores.brsScore,
         anxietyTraitScore: scores.anxietyTraitScore,
         aaq2Score: scores.aaq2Score,
         rsesScore: scores.rsesScore,
-        scsPublicScore: scores.scsPublicScore,
-        scsPrivateScore: scores.scsPrivateScore,
       },
       straightLineFlags,
     ),
@@ -468,9 +489,8 @@ export function computePsychometricModifier(
     dweckComponent,
     aaq2Component,
     rsesComponent,
-    scsComponent,
-    mspssComponent,
     sd3NarcissismComponent,
+    npiEntitlementComponent,
     rfqComponent,
     consistencyFlags,
     straightLineFlags,
@@ -483,9 +503,8 @@ export function computePsychometricModifier(
       dweckBand,
       aaq2Band,
       rsesBand,
-      scsOrientation,
-      mspssBand,
       sd3NarcissismBand,
+      npiEntitlementBand,
       rfqBand,
     },
   };

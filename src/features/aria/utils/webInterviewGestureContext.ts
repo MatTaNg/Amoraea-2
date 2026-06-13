@@ -17,6 +17,9 @@ let ariaScreenMountGeneration = 0;
 
 let recordedLoss: { atMs: number; reason: GestureContextLostReason } | null = null;
 
+/** Set when Claude/API processing begins after a user turn (cleared at pre-TTS delivery). */
+let aiProcessingTurnStartedAtMs: number | null = null;
+
 export function bumpAriaScreenMountGeneration(): void {
   ariaScreenMountGeneration += 1;
 }
@@ -56,4 +59,17 @@ export function resetWebInterviewGestureContext(): void {
   lastUserGestureAtMs = null;
   lastGestureMountGeneration = 0;
   recordedLoss = null;
+  aiProcessingTurnStartedAtMs = null;
+}
+
+export function markAiProcessingTurnStarted(): void {
+  aiProcessingTurnStartedAtMs = Date.now();
+}
+
+export function clearAiProcessingTurnStarted(): void {
+  aiProcessingTurnStartedAtMs = null;
+}
+
+export function peekAiProcessingTurnStartedAtMs(): number | null {
+  return aiProcessingTurnStartedAtMs;
 }

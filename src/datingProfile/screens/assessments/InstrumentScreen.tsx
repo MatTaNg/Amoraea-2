@@ -40,6 +40,7 @@ import {
 } from "@/data/services/assessmentService";
 import { useProfile } from "@/shared/hooks/useProfile";
 import { useNavigateAfterAssessments } from "@/datingProfile/onboarding/useNavigateAfterAssessments";
+import { replaceWithPreviousOnboardingAssessment } from "@/datingProfile/onboarding/navigateToPreviousOnboardingAssessment";
 import { theme } from "@/shared/theme/theme";
 
 const SAVE_PROGRESS_EVERY = 5;
@@ -262,9 +263,13 @@ export function InstrumentScreen() {
   );
 
   const goToPreviousQuestion = useCallback(() => {
-    if (saving || safeIndexForSync <= 0) return;
-    setCurrentIndex((i) => Math.max(0, i - 1));
-  }, [saving, safeIndexForSync]);
+    if (saving) return;
+    if (safeIndexForSync > 0) {
+      setCurrentIndex((i) => Math.max(0, i - 1));
+      return;
+    }
+    replaceWithPreviousOnboardingAssessment(navigation, instrumentId);
+  }, [instrumentId, navigation, safeIndexForSync, saving]);
 
   if (!config) {
     return (
@@ -328,9 +333,9 @@ export function InstrumentScreen() {
           <Pressable
             style={styles.backBtn}
             onPress={goToPreviousQuestion}
-            disabled={questionNumber <= 1 || saving}
+            disabled={saving}
           >
-            <Text style={[styles.backText, questionNumber <= 1 && styles.backDisabled]}>
+            <Text style={[styles.backText, saving && styles.backDisabled]}>
               ← Back
             </Text>
           </Pressable>

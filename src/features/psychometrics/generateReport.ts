@@ -1,7 +1,14 @@
 import { supabase } from '@data/supabase/client';
-import { getAnthropicEndpoint, getAnthropicRequestHeaders } from '@utilities/anthropicMessagesClient';
+import { fetchMostRecentCompletedInterviewAttemptId } from '@features/psychometrics/interviewCompletionStatus';
 import { resolveReportParticipantDisplayName } from '@utilities/adminInterviewIntroDisplayName';
+import { invokeAnthropicMessages } from '@utilities/invokeAnthropicMessages';
 import { getReportLogoSrc } from './reportBranding';
+import {
+  computePersonalReportSourceHash,
+  loadStoredInterviewReports,
+  readCachedPersonalReportMarkdown,
+  savePersonalReportMarkdown,
+} from './persistedInterviewReport';
 
 export interface ReportData {
   user: {
@@ -86,7 +93,9 @@ export async function fetchReportData(userId: string): Promise<ReportData> {
     `,
     )
     .eq('user_id', userId)
-    .order('created_at', { ascending: false })
+    .or('is_phantom.eq.false,is_phantom.is.null')
+    .not('completed_at', 'is', null)
+    .order('completed_at', { ascending: false })
     .limit(1)
     .maybeSingle();
 
@@ -307,29 +316,18 @@ Write 2-3 growth areas. For each use a ### heading. Write 3-4 sentences per area
 export async function generateUserReport(userId: string, prefetchedData?: ReportData): Promise<string> {
   const data = prefetchedData ?? (await fetchReportData(userId));
 
-  const response = await fetch(getAnthropicEndpoint(), {
-    method: 'POST',
-    headers: getAnthropicRequestHeaders(),
-    body: JSON.stringify({
-      model: 'claude-sonnet-4-20250514',
-      max_tokens: 2500,
-      system: buildSystemPrompt(),
-      messages: [
-        {
-          role: 'user',
-          content: buildReportPrompt(data),
-        },
-      ],
-    }),
+  const result = await invokeAnthropicMessages({
+    model: 'claude-sonnet-4-20250514',
+    max_tokens: 2500,
+    system: buildSystemPrompt(),
+    messages: [
+      {
+        role: 'user',
+        content: buildReportPrompt(data),
+      },
+    ],
   });
 
-  if (!response.ok) {
-    const error = await response.text();
-    console.error('[Report] Claude API error:', error);
-    throw new Error('Report generation failed');
-  }
-
-  const result = (await response.json()) as { content?: Array<{ text?: string }> };
   const reportText = result.content?.[0]?.text;
 
   if (!reportText?.trim()) {
@@ -339,21 +337,53 @@ export async function generateUserReport(userId: string, prefetchedData?: Report
   return reportText.trim();
 }
 
+export type ReportHtmlOptions = {
+  userName: string | null;
+  logoSrc: string;
+  headerTitle?: string;
+  headerSubtitle?: string;
+  footerDisclaimer?: string;
+};
+
 /** Full branded HTML document for PDF export / print. */
 export async function buildPersonalReportHtml(userId: string): Promise<string> {
-  const reportData = await fetchReportData(userId);
-  const [reportMarkdown, logoSrc] = await Promise.all([
-    generateUserReport(userId, reportData),
+  const [reportData, stored, logoSrc] = await Promise.all([
+    fetchReportData(userId),
+    loadStoredInterviewReports(userId),
     getReportLogoSrc(),
   ]);
-  return convertMarkdownToHtml(reportMarkdown, reportData.user.name, logoSrc);
+  const safeName = reportData.user.name;
+  const personalHash = computePersonalReportSourceHash(reportData);
+
+  if (stored) {
+    const cached = readCachedPersonalReportMarkdown(stored, personalHash);
+    if (cached) {
+      return convertMarkdownToHtml(cached, {
+        userName: safeName,
+        logoSrc,
+        headerTitle: safeName ? `${safeName}'s Personal Report` : 'Your Personal Report',
+        headerSubtitle: 'Personal Development Report',
+      });
+    }
+  }
+
+  const reportMarkdown = await generateUserReport(userId, reportData);
+  const attemptId =
+    stored?.attemptId ?? (await fetchMostRecentCompletedInterviewAttemptId(userId));
+  if (attemptId) {
+    await savePersonalReportMarkdown(attemptId, userId, reportMarkdown, personalHash);
+  }
+
+  return convertMarkdownToHtml(reportMarkdown, {
+    userName: safeName,
+    logoSrc,
+    headerTitle: safeName ? `${safeName}'s Personal Report` : 'Your Personal Report',
+    headerSubtitle: 'Personal Development Report',
+  });
 }
 
-export function convertMarkdownToHtml(
-  markdown: string,
-  userName: string | null,
-  logoSrc: string,
-): string {
+export function convertMarkdownToHtml(markdown: string, options: ReportHtmlOptions): string {
+  const { userName, logoSrc, headerTitle, headerSubtitle, footerDisclaimer } = options;
   const lines = markdown.split('\n');
   const htmlLines: string[] = [];
 
@@ -375,13 +405,18 @@ export function convertMarkdownToHtml(
   }
 
   const safeName = userName ? escapeHtml(userName) : null;
-  const title = safeName ? `${safeName}'s Personal Report` : 'Your Personal Report';
-  const safeLogoSrc = escapeHtml(logoSrc);
-  const generatedDate = new Date().toLocaleDateString('en-US', {
+  const title = escapeHtml(
+    headerTitle ?? (safeName ? `${safeName}'s Personal Report` : 'Your Personal Report'),
+  );
+  const subtitleSuffix = new Date().toLocaleDateString('en-US', {
     year: 'numeric',
     month: 'long',
     day: 'numeric',
   });
+  const subtitleLabel = headerSubtitle ?? 'Personal Development Report';
+  const safeLogoSrc = escapeHtml(logoSrc);
+  const defaultFooter =
+    'This report is based on validated scientific instruments and behavioral assessment conducted through the Amoraea platform. It is intended for personal reflection and growth, not clinical diagnosis. Results reflect patterns observed during your assessment and may not capture the full complexity of who you are as a person.';
 
   return `<!DOCTYPE html>
 <html>
@@ -517,7 +552,7 @@ export function convertMarkdownToHtml(
         <img class="report-logo" src="${safeLogoSrc}" alt="Amoraea" />
         <div class="app-name">Amoraea</div>
         <div class="report-title">${title}</div>
-        <div class="report-subtitle">Personal Development Report · ${generatedDate}</div>
+        <div class="report-subtitle">${escapeHtml(subtitleLabel)} · ${subtitleSuffix}</div>
       </div>
 
       <div class="report-body">
@@ -526,7 +561,7 @@ export function convertMarkdownToHtml(
 
       <div class="report-footer">
         <div class="report-footer-brand">Amoraea</div>
-        This report is based on validated scientific instruments and behavioral assessment conducted through the Amoraea platform. It is intended for personal reflection and growth, not clinical diagnosis. Results reflect patterns observed during your assessment and may not capture the full complexity of who you are as a person.
+        ${escapeHtml(footerDisclaimer ?? defaultFooter)}
       </div>
     </div>
   </body>

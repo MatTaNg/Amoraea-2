@@ -161,8 +161,12 @@ export function isSimpleYesNoInterviewMoment(lastQuestionText: string | null | u
 /** Resume / re-entry copy — user may answer briefly (yes / repeat / continue). */
 export function isResumeReentryWelcomePrompt(lastQuestionText: string | null | undefined): boolean {
   const q = (lastQuestionText ?? '').toLowerCase();
-  if (/welcome back\b/.test(q) && /continue where we left off\b/.test(q)) return true;
-  if (/repeat what i said\b/.test(q) && /ready for your response\b/.test(q)) return true;
+  if (!q || !/\bwelcome back\b/.test(q)) return false;
+  if (/\b(pick up where we left off|left off in the personal|continue from there|continue where we left off)\b/.test(q)) {
+    return true;
+  }
+  if (/\brepeat what i said\b/.test(q)) return true;
+  if (/\bready for your response\b/.test(q)) return true;
   return false;
 }
 
@@ -612,14 +616,92 @@ const READINESS_AFFIRMATION_PATTERNS: RegExp[] = [
   /^of course\b/i,
 ];
 
+/** Whisper often mishears short "yes" as "bye" / "by" / "buy" on readiness turns. */
+const READINESS_YES_HOMOPHONE_NORMALIZED = new Set(['bye', 'by', 'buy', 'bay']);
+
+function normalizeReadinessHomophoneToken(raw: string): string {
+  let s = raw.trim().toLowerCase();
+  s = s.replace(/\u2019/g, "'").replace(/\u2018/g, "'");
+  s = s.replace(/-/g, ' ');
+  return s.replace(/[.,!?;:…]+$/g, '').trim();
+}
+
+export function looksLikeReadinessYesHomophone(text: string | null | undefined): boolean {
+  const raw = (text ?? '').trim();
+  if (!raw || raw.length > 32) return false;
+  const compact = raw.toLowerCase().replace(/[^a-z]/g, '');
+  if (compact === 'byebye' || compact === 'byby') return true;
+  const words = raw
+    .split(/\s+/)
+    .flatMap((chunk) => normalizeReadinessHomophoneToken(chunk).split(/\s+/))
+    .map((w) => w.trim())
+    .filter(Boolean);
+  if (words.length === 0 || words.length > 2) return false;
+  return words.every((w) => READINESS_YES_HOMOPHONE_NORMALIZED.has(w));
+}
+
+/** Readiness briefing, resume welcome, or an active resume gate awaiting assent. */
+export function userIsAnsweringProceduralAssentPrompt(
+  lastQuestionTexts: Array<string | null | undefined>,
+  opts?: { resumeGatePending?: boolean },
+): boolean {
+  if (opts?.resumeGatePending === true) return true;
+  return lastQuestionTexts.some(
+    (t) =>
+      isSimpleYesNoInterviewMoment(t) ||
+      isInterviewPreambleBriefingMoment(t) ||
+      isResumeReentryWelcomePrompt(t),
+  );
+}
+
+/**
+ * Map Whisper yes homophones ("bye", "bye-bye") to "Yes" on procedural assent turns
+ * (readiness, preamble, resume welcome) so intercepts do not route to leave/stop flows.
+ */
+export function normalizeReadinessHomophoneTranscript(
+  text: string,
+  lastQuestionTexts: Array<string | null | undefined>,
+  opts?: { resumeGatePending?: boolean },
+): string {
+  if (lastQuestionTexts.some((t) => isNamePromptInterviewMoment(t))) return text;
+  if (!userIsAnsweringProceduralAssentPrompt(lastQuestionTexts, opts)) return text;
+  if (looksLikeReadinessYesHomophone(text)) return 'Yes';
+  return text;
+}
+
+/** Assistant asked whether the participant still wants to stop / leave early. */
+export function isInterviewExitConfirmationMoment(lastQuestionText: string | null | undefined): boolean {
+  const q = (lastQuestionText ?? '').toLowerCase();
+  if (!q) return false;
+  if (/\b(sure you want to stop|still want to go|want to leave|want to stop)\b/.test(q)) return true;
+  if (/\bif you (leave|stop)\b/.test(q) && /\baffect your score\b/.test(q)) return true;
+  return false;
+}
+
+/** Participant declines exit / affirms they want to continue the interview. */
+export function looksLikeInterviewExitDecline(text: string | null | undefined): boolean {
+  const raw = (text ?? '').trim();
+  if (!raw || raw.length > 200) return false;
+  const t = raw.toLowerCase();
+  if (/\b(want you to stay|want to stay|don'?t want to (leave|go|stop|quit|end))\b/.test(t)) {
+    return true;
+  }
+  if (/\b(i'?ll|let me)\s+stay\b/.test(t)) return true;
+  if (/\bno[,.]?\s*(i\s+)?(want|wanna)\s+(you\s+to\s+)?stay\b/.test(t)) return true;
+  if (/\bkeep\s+going\b/.test(t) && /\b(no|don'?t)\b/.test(t)) return true;
+  return false;
+}
+
 /** Short procedural assent to "Are you ready?" — not a substantive scenario answer. */
 export function looksLikeReadinessAffirmation(text: string | null | undefined): boolean {
   const raw = (text ?? '').trim();
   if (!raw || raw.length > 48) return false;
   const t = raw.replace(/[.!?,…]+$/g, '').trim();
   if (!t) return false;
+  if (/\brepeat\b/i.test(t)) return false;
   if (/^\bno\b/i.test(t)) return false;
   if (/^(not yet|not ready|wait|hold on|one sec)/i.test(t)) return false;
+  if (looksLikeReadinessYesHomophone(raw)) return true;
   return READINESS_AFFIRMATION_PATTERNS.some((re) => re.test(t));
 }
 

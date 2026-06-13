@@ -23,12 +23,11 @@ export interface InstrumentModifierComponents {
   anxiety_trait: number;
   aaq2: number;
   rfq: number;
-  mspss: number;
   sd3_narcissism: number;
+  npi_entitlement: number;
   dweck: number;
   rses: number;
   scs_sf: number;
-  scs: number;
 }
 
 export function instrumentComponentsFromModifierResult(result: {
@@ -37,12 +36,10 @@ export function instrumentComponentsFromModifierResult(result: {
   anxietyTraitComponent: number;
   aaq2Component: number;
   rfqComponent: number;
-  mspssComponent: number;
   sd3NarcissismComponent: number;
   dweckComponent: number;
   rsesComponent: number;
   scsSfComponent: number;
-  scsComponent: number;
 }): InstrumentModifierComponents {
   return {
     gasp: result.gaspComponent,
@@ -50,12 +47,11 @@ export function instrumentComponentsFromModifierResult(result: {
     anxiety_trait: result.anxietyTraitComponent,
     aaq2: result.aaq2Component,
     rfq: result.rfqComponent,
-    mspss: result.mspssComponent,
     sd3_narcissism: result.sd3NarcissismComponent,
+    npi_entitlement: result.npiEntitlementComponent,
     dweck: result.dweckComponent,
     rses: result.rsesComponent,
     scs_sf: result.scsSfComponent,
-    scs: result.scsComponent,
   };
 }
 
@@ -93,6 +89,7 @@ export function computeGamingCorrection(params: {
     aaq2: number | null;
     rses: number | null;
     sd3_narcissism: number | null;
+    npi_entitlement: number | null;
     dweck: number | null;
   };
 }): GamingCorrectionResult {
@@ -125,14 +122,18 @@ export function computeGamingCorrection(params: {
       detail: `${straightLineCount} straight-line flags detected. All positive modifier contributions stripped.`,
       level: 2,
     });
-    Object.keys(instrumentComponents).forEach((k) => strippedInstruments.add(k));
+    Object.keys(instrumentComponents).forEach((k) => {
+      if (k !== 'npi_entitlement') strippedInstruments.add(k);
+    });
   } else if (straightLineCount >= 3) {
     activeTriggers.push({
       type: 'straight_line',
       detail: `${straightLineCount} straight-line flags detected. All positive modifier contributions stripped and -0.3 penalty applied.`,
       level: 3,
     });
-    Object.keys(instrumentComponents).forEach((k) => strippedInstruments.add(k));
+    Object.keys(instrumentComponents).forEach((k) => {
+      if (k !== 'npi_entitlement') strippedInstruments.add(k);
+    });
   }
 
   const divergences: { instrument: string; detail: string }[] = [];

@@ -74,6 +74,50 @@ Specifically for Scenario C (Sophie and Daniel): this scenario involves a third 
 
 Do not penalize bilateral repair framing in recurring pattern scenarios. Do not require individual ownership language as the primary repair signal when the scenario is structurally about a pattern rather than a single incident.`;
 
+/** Shared floor/bonus philosophy — injected into holistic and per-scenario scoring prompts. */
+export const FLOOR_AND_BONUS_SCORING_PHILOSOPHY = `
+FLOOR AND BONUS SCORING PHILOSOPHY
+
+This interview scores what users demonstrate, not what they fail to volunteer.
+
+FLOOR PRINCIPLE:
+A user who provides a minimally adequate answer to the question as asked should score at or above 5 on any pillar. The floor of 4 or below is reserved for actively problematic responses — externalization, contempt, dismissal, refusal to engage, or restatement of the scenario with no interpretive attempt whatsoever.
+
+Absence of volunteered depth is not evidence of low capacity. It is evidence of low spontaneity, which is a weaker signal. Do not penalize a user for not answering a question that was not asked.
+
+BONUS PRINCIPLE:
+Scores of 7 and above should be earned by volunteering depth, emotional inference, or self-reflection that goes beyond what the question explicitly invited. If the question asked for behavioral interpretation and the user provided it accurately, that is a complete answer deserving a score of 5–6. A score of 7+ requires the user to have gone further than the question required — unprompted emotional interior inference, unprompted self-examination, unprompted perspective-taking on the non-focal character.
+
+CALIBRATION PRESERVATION NOTE:
+The floor and bonus principles define the minimum expectations, not a compressed scoring range. A response that goes meaningfully beyond the minimum — showing genuine insight, emotional depth, or sophisticated pattern recognition even without meeting the full 7+ bar — should score 6–7, not just 5.
+
+The full scoring range 1–10 remains active. A user who:
+- Accurately describes behavioral motivation AND adds relevant context scores 6
+- Accurately describes behavioral motivation AND infers emotional meaning for the focal character scores 7
+- Does the above AND volunteers perspective on the non-focal character scores 8+
+
+Do not compress scores toward the middle because of floor language. The floors prevent unfair penalties. They do not compress the upper range.
+
+Specifically: a response that demonstrates clear Level 2 mentalizing (inferring emotional interior states) should score 7–8 regardless of whether it covers both characters. A response with no contemptuous language AND active charitable framing of character motivations should score 7–8, not 6. The floor clarifications are minimum floors, not target scores.
+
+PENALTY PRINCIPLE:
+Scores of 1–4 are reserved for responses that actively demonstrate problematic patterns:
+- 1–2: Active externalization, blame attribution, contempt expression, or explicit refusal to engage
+- 3–4: Significant avoidance, very thin engagement suggesting disengagement rather than honest surface response, or active redirection away from the question
+
+A short but honest answer that addresses the question asked scores 5, not 3–4. Length and depth are not the same construct. A user who gives a brief but accurate answer has demonstrated the capacity. Probes exist to invite elaboration — use them before scoring low.
+`;
+
+export const SCENARIO_MENTALIZING_CONTEMPT_FLOOR_CLARIFICATIONS = `
+MENTALIZING FLOOR CLARIFICATION (this scenario slice):
+When the question asks for behavioral interpretation, a response that correctly identifies behavioral motivation is a complete answer. Score no lower than 5.
+Score 4 only when the user restates scenario events with no interpretive attempt.
+Score 7+ when the user infers emotional interior states — what the character is feeling, what the situation means to them emotionally, or what unmet need is driving their behavior. This includes responses to direct questions (prompted) when the inference shows genuine depth. Score 8+ for unprompted volunteering of interior states or multi-character emotional perspective-taking.
+
+CONTEMPT_EXPRESSION FLOOR CLARIFICATION (this scenario slice):
+Score 7–8 when the user maintains consistently respectful, non-contemptuous language AND actively frames character behavior charitably (finding sympathetic explanations for difficult behavior). Score 8–9 when this is sustained across multiple scenarios with nuanced framing. The floor of 5 prevents penalizing absence of contempt — it does not compress users with strong contempt regulation into the 5–6 range.
+`;
+
 export function buildScoringPrompt(
   transcript: { role: string; content: string }[],
   typologyContext: string
@@ -99,6 +143,8 @@ GLOBAL CALIBRATION RULES
 
 3. These anchors reflect what a healthy, self-aware person in a good relationship would actually say — not clinical perfection. Reserve scores below 5 for actual red flags, not absence of textbook precision. **9–10** require genuine insight and specificity; **10** additionally means **no material gap** on that marker for the moment (see SCORE CALIBRATION: “What 10 means”). **8** means a **clearer** limitation or shallower demonstration than 9 — not merely “very good but not superhuman.”
 
+${FLOOR_AND_BONUS_SCORING_PHILOSOPHY}
+
 THE EIGHT MARKERS
 
 MENTALIZING
@@ -111,6 +157,11 @@ Can the user hold another person's internal world in mind - their feelings, moti
 3-4 - Minimal perspective-taking. Focuses on behavior and outcome rather than inner experience. May explain away the other person's reaction.
 1-2 - No genuine mentalizing. Dismisses, ignores, or misreads the other person's experience entirely.
 
+MENTALIZING FLOOR CLARIFICATION:
+When the question asks for behavioral interpretation, a response that correctly identifies behavioral motivation is a complete answer. Score no lower than 5.
+Score 4 only when the user restates scenario events with no interpretive attempt.
+Score 7+ when the user infers emotional interior states — what the character is feeling, what the situation means to them emotionally, or what unmet need is driving their behavior. This includes responses to direct questions (prompted) when the inference shows genuine depth. Score 8+ for unprompted volunteering of interior states or multi-character emotional perspective-taking.
+
 ACCOUNTABILITY / DEFENSIVENESS
 Does the user take genuine ownership of their part without deflecting, minimizing, or requiring the other person to be wrong first?
 
@@ -120,6 +171,23 @@ Does the user take genuine ownership of their part without deflecting, minimizin
 5-6 - Partial ownership. Acknowledges a mistake but deflects meaningfully - blames context, timing, or the other person's reaction.
 3-4 - Primarily defensive. Acknowledges fault only minimally or only when the other party is also implicated.
 1-2 - No accountability. Justifies, blames, or dismisses.
+
+ACCOUNTABILITY FLOOR CLARIFICATION (SCENARIO QUESTIONS):
+A user who identified the focal character's responsibility and proposed a repair direction has demonstrated scenario accountability.
+Score no lower than 5 when the user identified the focal character's contribution and a repair direction.
+Score 4 only when the user actively deflected all responsibility to the non-focal character.
+Score 7+ only when the user articulated specific behavioral accountability with clear understanding of what the character contributed to the rupture, not just what they should do to fix it.
+
+ACCOUNTABILITY FLOOR CLARIFICATION (M5 PERSONAL QUESTION):
+The primary M5 question asks for a conflict narrative and resolution description. It does not ask for self-accountability. The probe exists to specifically elicit that.
+
+Pre-probe scoring:
+- User volunteered self-examination: 7+
+- User provided genuine narrative without self-examination: 5
+- User gave process or philosophical response instead of specific narrative: 4–5
+- User actively externalized or blamed in their narrative: 3–4
+
+After the probe fires the ceiling adjusts based on probe response quality per moment5AccountabilityScoringPrompt.ts. A process answer after the probe (answering how the conflict was resolved rather than what the user contributed to causing it) scores 3–4, not 1–2. Score 1–2 only for active externalization or contempt after the probe.
 
 ${ACCOUNTABILITY_BLAME_SHIFT_VS_CLARITY_REQUEST}
 ${REPAIR_AND_ACCOUNTABILITY_UNPROMPTED_VS_PROMPTED_WEIGHTING}
@@ -136,6 +204,9 @@ WHO YOU ARE SCORING: Measure the participant's own contemptuous stance (derogati
 3-4 - Normalizes or minimizes contemptuous language. May sympathize with the person expressing it without noting the problem.
 1-2 - Endorses or models contemptuous communication. Does not recognize it as a problem.
 
+CONTEMPT FLOOR CLARIFICATION:
+Score 7–8 when the user maintains consistently respectful, non-contemptuous language AND actively frames character behavior charitably (finding sympathetic explanations for difficult behavior). Score 8–9 when this is sustained across multiple scenarios with nuanced framing. The floor of 5 prevents penalizing absence of contempt — it does not compress users with strong contempt regulation into the 5–6 range.
+
 (Register reminder: mentalizing and contempt scores follow section 1b — insight accuracy over communication style.)
 
 REPAIR
@@ -148,6 +219,12 @@ Does the user understand what genuine repair requires - specific acknowledgment,
 3-4 - Repair is one-sided, or purely transactional - resolving the conflict without attending to the relationship.
 1-2 - No repair instinct. Suggests moving on without resolution or places no value on repair.
 
+REPAIR FLOOR CLARIFICATION:
+When repair is prompted, a user who identifies a concrete repair direction has answered the question asked.
+Score no lower than 5 when the user proposed a concrete repair action addressing the core issue, even if it does not address the emotional layer.
+Score 4 only when the proposed repair is misdirected, dismissive, or not a genuine attempt.
+Score 7+ only when repair addresses both behavioral and emotional core of the rupture unprompted.
+
 EMOTIONAL REGULATION
 Does the user understand the difference between needing space to regulate and withdrawal as avoidance? Can they hold both the need for regulation and the relational obligation to return?
 
@@ -157,6 +234,12 @@ Does the user understand the difference between needing space to regulate and wi
 5-6 - Sympathizes with the person who withdrew without recognizing the relational impact, or judges the withdrawal without recognizing the flooding.
 3-4 - Treats withdrawal as purely avoidant without curiosity, or treats it as fully acceptable without noting the relational cost.
 1-2 - Endorses stonewalling or indefinite withdrawal. No understanding of the regulation-relationship tension.
+
+REGULATION FLOOR CLARIFICATION:
+A user who engaged calmly and analytically throughout without emotional reactivity is demonstrating regulation.
+Score no lower than 5 when the user maintained calm, non-reactive engagement throughout.
+Score 4 only when the user showed signs of dysregulation — reactive framing, escalating language, or inability to stay with the scenario.
+Score 7+ only when the user articulated specific regulation strategies or showed sophisticated awareness of their own emotional responses in conflict.
 
 PASSIVE REGULATION — PERSONAL MOMENT 4 (grudge / dislike narrative, not the withdrawal vignette):
 The grudge question does not name "regulation," but first-person stories often show **emotional self-management**. When the user describes an **ongoing** difficult feeling or relationship residue **without** flooding, hostile escalation, or purely dismissive avoidance — e.g. distinguishing making peace with a **situation** versus a **person**, emotions becoming **"less loud"** or slowly settling rather than resolving cleanly, **reflective** holding of mixed or unresolved feelings, or **measured** language about hurt or resentment while staying non-reactive — treat that as **regulation evidence**. Score **regulation in the 6–8 band** from sophistication (6 = clear containment/reflection, 7–8 = nuanced differentiation, bilateral self-awareness, or rich description of holding difficulty without being controlled by it). **Do not** leave regulation unscored, null, or artificially low solely because they were not asked about space vs withdrawal; if this evidence is present in Moment 4, **assign a numeric regulation score** in that band.
@@ -170,6 +253,12 @@ Is the user sensitive to emotional bids - moments when someone signals a need fo
 5-6 - Misses the bid but notices something feels off. Focuses on content rather than emotional need.
 3-4 - Does not register the bid. Responds to surface content only.
 1-2 - Actively misreads the bid or dismisses the emotional need entirely.
+
+ATTUNEMENT FLOOR CLARIFICATION:
+When the question focuses on one character, attunement is evaluated on that character only. Not mentioning the other character is neutral — it is not a penalty.
+Score no lower than 5 when the user correctly recognized the focal character's emotional state.
+Score 4 only when the user showed no emotional recognition of any character — treating the scenario as purely logistical.
+Score 7+ only when the user described the emotional experience of both characters or the recurring pattern without being asked.
 
 APPRECIATION AND POSITIVE REGARD
 Does the user understand the difference between acknowledging an achievement and genuinely honoring the person - their effort, their journey, their experience?

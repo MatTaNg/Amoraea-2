@@ -2,22 +2,29 @@ import React from 'react';
 import { View, Text, TouchableOpacity, StyleSheet } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { theme } from '@/shared/theme/theme';
+import { useOnboardingHeaderExit } from './onboardingHeaderExitContext';
 
 interface OnboardingHeaderProps {
   title: string;
+  /** Footer / in-step back; header arrow prefers {@link useOnboardingHeaderExit} when set. */
   onBack?: () => void;
 }
 
 export const OnboardingHeader: React.FC<OnboardingHeaderProps> = ({ title, onBack }) => {
+  const exitToPostInterview = useOnboardingHeaderExit();
+  const onHeaderPress = exitToPostInterview ?? onBack;
+
   return (
     <View style={styles.header}>
       <View style={styles.side}>
-        {onBack ? (
+        {onHeaderPress ? (
           <TouchableOpacity
-            onPress={onBack}
+            onPress={onHeaderPress}
             hitSlop={12}
             accessibilityRole="button"
-            accessibilityLabel="Go back"
+            accessibilityLabel={
+              exitToPostInterview ? 'Return to interview results' : 'Go back'
+            }
           >
             <Ionicons name="chevron-back" size={24} color={theme.colors.text} />
           </TouchableOpacity>

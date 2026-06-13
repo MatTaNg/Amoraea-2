@@ -9,6 +9,7 @@ import {
   needsMoment4SpecificityFollowUp,
   stripMoment4SpecificityFollowUpStreamingEcho,
 } from '../moment4SpecificityFollowUp';
+import { MOMENT_4_GRUDGE_QUESTION_TEXT } from '../moment4ProbeLogic';
 
 describe('moment4SpecificityFollowUp', () => {
   it('counts words', () => {
@@ -21,6 +22,11 @@ describe('moment4SpecificityFollowUp', () => {
     expect(
       looksLikeMoment4SpecificityFollowUpPrompt(
         "Is there any situation that comes to mind, even something from the past that you've already worked through? It doesn't have to be something you're still carrying.",
+      ),
+    ).toBe(true);
+    expect(
+      looksLikeMoment4SpecificityFollowUpPrompt(
+        "Can you think of a specific person — even if it's just someone from a while back — and tell me a bit more about what happened?",
       ),
     ).toBe(true);
     expect(looksLikeMoment4SpecificityFollowUpPrompt('Random text')).toBe(false);
@@ -100,8 +106,7 @@ describe('moment4SpecificityFollowUp', () => {
   });
 
   it('derive gate: resolved after adequate first grudge answer', () => {
-    const grudge =
-      'Have you ever held a grudge against someone, or had someone in your life you really did not like? How did that happen, and where are you with it now?';
+    const grudge = MOMENT_4_GRUDGE_QUESTION_TEXT;
     const rich =
       'When my coworker Jim took credit for my project last year I stopped trusting him and we barely speak — it still bothers me sometimes but I keep professional distance.';
     const msgs = [
@@ -112,8 +117,7 @@ describe('moment4SpecificityFollowUp', () => {
   });
 
   it('derive gate: resolved after user answers paraphrased specificity probe', () => {
-    const grudge =
-      'Have you ever held a grudge against someone, or had someone in your life you really did not like? How did that happen, and where are you with it now?';
+    const grudge = MOMENT_4_GRUDGE_QUESTION_TEXT;
     const vague = 'I try not to hold grudges.';
     const paraphrase = 'Is there anything specific you can share about that?';
     const msgs = [
@@ -127,8 +131,7 @@ describe('moment4SpecificityFollowUp', () => {
   });
 
   it('derive gate: not resolved until user answers specificity probe', () => {
-    const grudge =
-      'Have you ever held a grudge against someone, or had someone in your life you really did not like? How did that happen, and where are you with it now?';
+    const grudge = MOMENT_4_GRUDGE_QUESTION_TEXT;
     const vague = 'I try not to hold grudges.';
     const spec = MOMENT_4_SPECIFICITY_FOLLOW_UP_TEXT;
     const msgs = [

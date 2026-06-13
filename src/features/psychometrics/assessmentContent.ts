@@ -1,3 +1,5 @@
+import { NPI_ENTITLEMENT_ENABLED } from '@features/psychometrics/interviewCompletionStatus';
+
 export type PsychometricQuestion = {
   id: number;
   text?: string;
@@ -5,12 +7,17 @@ export type PsychometricQuestion = {
   response?: string;
   reverse?: boolean;
   subscale?: string;
+  optionA?: string;
+  optionB?: string;
+  optionAEntitlement?: boolean;
+  optionBEntitlement?: boolean;
 };
 
-type AssessmentDef = {
+type LikertAssessmentDef = {
   id: string;
   name: string;
   description: string;
+  preamble?: string;
   estimatedMinutes: number;
   scale: {
     min: number;
@@ -25,14 +32,54 @@ type AssessmentDef = {
   };
 };
 
+type ForcedChoiceAssessmentDef = {
+  id: string;
+  name: string;
+  description: string;
+  estimatedMinutes: number;
+  format: 'forced_choice';
+  questions: Array<{
+    id: number;
+    optionA: string;
+    optionB: string;
+    optionAEntitlement: boolean;
+    optionBEntitlement: boolean;
+  }>;
+  scoring: {
+    method: 'entitlement_count';
+    entitlementPole: 'optionA' | 'optionB';
+  };
+};
+
+type AssessmentDef = LikertAssessmentDef | ForcedChoiceAssessmentDef;
+
+export type NpiEntitlementResponse = {
+  selectedOptionIndex: 0 | 1;
+  wasEntitlement: boolean;
+};
+
+export type PsychometricResponseValue = number | NpiEntitlementResponse;
+
+export type PsychometricResponsesMap = Record<number, PsychometricResponseValue>;
+
+export function isForcedChoiceAssessment(
+  assessment: AssessmentDef,
+): assessment is ForcedChoiceAssessmentDef {
+  return 'format' in assessment && assessment.format === 'forced_choice';
+}
+
+export function hasPsychometricQuestionResponse(
+  value: PsychometricResponseValue | undefined,
+): boolean {
+  if (value == null) return false;
+  if (typeof value === 'number') return Number.isFinite(value);
+  return value.selectedOptionIndex === 0 || value.selectedOptionIndex === 1;
+}
+
 /** Published GASP externalization vignettes (battery ids 1–4). Unchanged for floor/modifier compatibility. */
 export const GASP_EXTERNALIZATION_ITEM_IDS = [1, 2, 3, 4] as const;
 
-/** Cohen et al. (2011) Guilt–Repair items 2, 5, 11, 15 → battery ids 5–8. */
-export const GASP_GUILT_REPAIR_ITEM_IDS = [5, 6, 7, 8] as const;
-
-/** Cohen et al. (2011) Shame–Withdraw items 4, 7, 8, 12 → battery ids 9–12. */
-export const GASP_SHAME_WITHDRAW_ITEM_IDS = [9, 10, 11, 12] as const;
+export const GASP_EXTERNALIZATION_ITEM_COUNT = GASP_EXTERNALIZATION_ITEM_IDS.length;
 
 /** Reverse-scored Emotional Patterns Assessment items (calm / low-tension statements). */
 export const ANXIETY_TRAIT_REVERSE_ITEMS = [2, 4] as const;
@@ -97,7 +144,7 @@ export const ASSESSMENTS = {
       },
       {
         id: 3,
-        text: 'I am someone who lets small setbacks or uncertainties stay on their mind longer than they probably should.',
+        text: 'I am someone who finds it hard to let go of worries even after the situation has passed.',
         reverse: false,
       },
       {
@@ -142,14 +189,9 @@ export const ASSESSMENTS = {
       },
       {
         id: 3,
-        text: 'When something painful happens I try to take a balanced view of the situation.',
+        text: 'When something painful happens I try to keep things in perspective rather than catastrophizing.',
         subscale: 'mindfulness',
         reverse: false,
-      },
-      {
-        id: 4,
-        text: "When I'm feeling down, I tend to feel like most other people are probably happier than I am.",
-        reverse: true,
       },
       {
         id: 5,
@@ -165,14 +207,8 @@ export const ASSESSMENTS = {
       },
       {
         id: 7,
-        text: 'When something upsets me I try to keep my emotions in balance.',
+        text: 'When something upsets me I try to stay aware of my feelings without getting overwhelmed by them.',
         subscale: 'mindfulness',
-        reverse: false,
-      },
-      {
-        id: 8,
-        text: "When I fail at something that's important to me, I tend to see the failure as part of the human condition.",
-        subscale: 'common_humanity',
         reverse: false,
       },
       {
@@ -181,25 +217,14 @@ export const ASSESSMENTS = {
         reverse: true,
       },
       {
-        id: 10,
-        text: 'When I feel inadequate in some way, I try to remind myself that feelings of inadequacy are shared by most people.',
-        subscale: 'common_humanity',
-        reverse: false,
-      },
-      {
         id: 11,
         text: "I'm disapproving and judgmental about my own flaws and inadequacies.",
-        reverse: true,
-      },
-      {
-        id: 12,
-        text: "I'm intolerant and impatient with those aspects of my personality I don't like.",
         reverse: true,
       },
     ],
     scoring: {
       method: 'mean',
-      reverseItems: [1, 4, 9, 11, 12],
+      reverseItems: [1, 9, 11],
     },
   },
 
@@ -207,7 +232,9 @@ export const ASSESSMENTS = {
     id: 'gasp',
     name: 'Responsibility Assessment',
     description: 'Brief scenarios about how you might interpret difficult situations.',
-    estimatedMinutes: 3,
+    preamble:
+      'The following questions describe everyday situations. For each one, imagine your honest first reaction — not what you think you should feel, but what would genuinely come to mind in the moment.',
+    estimatedMinutes: 1,
     scale: {
       min: 1,
       max: 7,
@@ -232,7 +259,7 @@ export const ASSESSMENTS = {
         id: 2,
         subscale: 'externalization',
         scenario: 'You are driving and you hit a parked car.',
-        response: 'You think about how the person parked their car poorly.',
+        response: 'You find yourself thinking the other driver could have parked better.',
       },
       {
         id: 3,
@@ -246,60 +273,6 @@ export const ASSESSMENTS = {
         subscale: 'externalization',
         scenario: 'You and a coworker get in an argument and they get visibly upset.',
         response: 'You think they are overreacting.',
-      },
-      {
-        id: 5,
-        subscale: 'guilt_repair',
-        scenario:
-          'You are privately informed that you are the only one in your group that did not make the honor society because you skipped too many days of school.',
-        response: 'You would become more responsible about attending school.',
-      },
-      {
-        id: 6,
-        subscale: 'guilt_repair',
-        scenario: "You reveal a friend's secret, though your friend never finds out.",
-        response:
-          'Your failure to keep the secret would lead you to exert extra effort to keep secrets in the future.',
-      },
-      {
-        id: 7,
-        subscale: 'guilt_repair',
-        scenario:
-          'You strongly defend a point of view in a discussion, and though nobody was aware of it, you realize that you were wrong.',
-        response: 'You would think more carefully before you speak.',
-      },
-      {
-        id: 8,
-        subscale: 'guilt_repair',
-        scenario:
-          'While discussing a heated subject with friends, you suddenly realize you are shouting though nobody seems to notice.',
-        response: 'You would try to act more considerately toward your friends.',
-      },
-      {
-        id: 9,
-        subscale: 'shame_withdraw',
-        scenario:
-          'After making a big mistake on an important project at work in which people were depending on you, your boss criticizes you in front of your coworkers.',
-        response: 'You would feign sickness and leave work.',
-      },
-      {
-        id: 10,
-        subscale: 'shame_withdraw',
-        scenario: 'A friend tells you that you boast a great deal.',
-        response: 'You would stop spending time with that friend.',
-      },
-      {
-        id: 11,
-        subscale: 'shame_withdraw',
-        scenario:
-          'Your home is very messy and unexpected guests knock on your door and invite themselves in.',
-        response: 'You would avoid the guests until they leave.',
-      },
-      {
-        id: 12,
-        subscale: 'shame_withdraw',
-        scenario: 'You take office supplies home for personal use and are caught by your boss.',
-        response: 'This would lead you to quit your job.',
       },
     ],
     scoring: {
@@ -328,7 +301,7 @@ export const ASSESSMENTS = {
     questions: [
       {
         id: 1,
-        text: 'The kind of partner someone is in a relationship is something very basic about them and it can\'t be changed very much.',
+        text: 'The kind of partner someone is while in a relationship is something very basic about them and it can\'t be changed very much.',
         reverse: true,
       },
       {
@@ -387,6 +360,8 @@ export const ASSESSMENTS = {
     id: 'aaq2',
     name: 'Emotional Flexibility Assessment',
     description: 'A brief questionnaire about how you relate to your thoughts and feelings.',
+    preamble:
+      'The following questions ask about your relationship with difficult thoughts and feelings — things like worry, sadness, frustration, or painful memories. Try to answer based on your general pattern, not a specific situation.',
     estimatedMinutes: 1,
     scale: {
       min: 1,
@@ -403,10 +378,10 @@ export const ASSESSMENTS = {
     },
     questions: [
       { id: 1, text: 'My painful experiences and memories make it difficult for me to live a life that I would value.' },
-      { id: 2, text: "I'm afraid of my feelings." },
+      { id: 2, text: 'I try to push away difficult feelings rather than letting myself experience them.' },
       { id: 3, text: "I worry about not being able to control my worries and feelings." },
       { id: 4, text: 'My painful memories prevent me from having a fulfilling life.' },
-      { id: 5, text: 'Emotions cause problems in my life.' },
+      { id: 5, text: 'Difficult emotions regularly get in the way of things that matter to me.' },
       { id: 6, text: 'It seems like most people are handling their lives better than I am.' },
       { id: 7, text: 'Worries get in the way of my success.' },
     ],
@@ -450,6 +425,151 @@ export const ASSESSMENTS = {
     },
   },
 
+  sd3_narcissism: {
+    id: 'sd3_narcissism',
+    name: 'Social Perceptions Assessment',
+    description: 'How much do you agree with the following statements?',
+    estimatedMinutes: 1,
+    scale: {
+      min: 1,
+      max: 5,
+      labels: {
+        1: 'Strongly Disagree',
+        2: 'Disagree',
+        3: 'Neither Agree nor Disagree',
+        4: 'Agree',
+        5: 'Strongly Agree',
+      },
+    },
+    questions: [
+      { id: 1, text: 'People see me as a natural leader.', reverse: false },
+      { id: 2, text: 'I hate being the center of attention.', reverse: true },
+      { id: 3, text: 'Many group activities tend to be dull without me.', reverse: false },
+      { id: 4, text: 'I know that I am special because everyone keeps telling me so.', reverse: false },
+      { id: 5, text: 'I like to get acquainted with important people.', reverse: false },
+      { id: 6, text: 'I feel embarrassed if someone compliments me.', reverse: true },
+      { id: 7, text: 'I have been compared to famous people.', reverse: false },
+      { id: 8, text: 'I am an average person.', reverse: true },
+      { id: 9, text: 'I insist on getting the respect I deserve.', reverse: false },
+    ],
+    scoring: {
+      method: 'mean',
+      reverseItems: [2, 6, 8],
+    },
+  },
+
+  npi_entitlement: {
+    id: 'npi_entitlement',
+    name: 'Values Assessment',
+    description: 'For each pair, choose the statement that sounds more like you.',
+    estimatedMinutes: 2,
+    format: 'forced_choice',
+    questions: [
+      {
+        id: 1,
+        optionA: 'I expect a great deal from other people.',
+        optionAEntitlement: true,
+        optionB: 'I like to do things for other people.',
+        optionBEntitlement: false,
+      },
+      {
+        id: 2,
+        optionA: 'I find it easy to manipulate people.',
+        optionAEntitlement: true,
+        optionB: "I don't like it when I find myself manipulating people.",
+        optionBEntitlement: false,
+      },
+      {
+        id: 3,
+        optionA: 'I can make anybody believe anything I want them to.',
+        optionAEntitlement: true,
+        optionB: 'People sometimes believe what I tell them.',
+        optionBEntitlement: false,
+      },
+      {
+        id: 4,
+        optionA: 'I insist upon getting the respect that is due to me.',
+        optionAEntitlement: true,
+        optionB: 'I usually get the respect that I deserve.',
+        optionBEntitlement: false,
+      },
+      {
+        id: 5,
+        optionA: 'I am going to be a great person.',
+        optionAEntitlement: true,
+        optionB: 'I hope I am going to be successful.',
+        optionBEntitlement: false,
+      },
+      {
+        id: 6,
+        optionA: 'If I ruled the world it would be a better place.',
+        optionAEntitlement: true,
+        optionB: 'The thought of ruling the world frightens the hell out of me.',
+        optionBEntitlement: false,
+      },
+      {
+        id: 7,
+        optionA: 'Everybody likes to hear my story.',
+        optionAEntitlement: true,
+        optionB: 'I try not to be a show off.',
+        optionBEntitlement: false,
+      },
+    ],
+    scoring: {
+      method: 'entitlement_count',
+      entitlementPole: 'optionA',
+    },
+  },
+
+  rfq: {
+    id: 'rfq',
+    name: 'Self-Reflection Assessment',
+    description: 'How much do you agree with the following statements?',
+    estimatedMinutes: 1,
+    scale: {
+      min: 1,
+      max: 7,
+      labels: {
+        1: 'Strongly Disagree',
+        2: 'Disagree',
+        3: 'Somewhat Disagree',
+        4: 'Neither Agree nor Disagree',
+        5: 'Somewhat Agree',
+        6: 'Agree',
+        7: 'Strongly Agree',
+      },
+    },
+    questions: [
+      { id: 1, text: "People's feelings are often a mystery to me.", reverse: true },
+      {
+        id: 2,
+        text: 'I can usually understand what motivates others to behave the way they do.',
+        reverse: false,
+      },
+      { id: 3, text: 'I find it hard to understand why people behave the way they do.', reverse: true },
+      {
+        id: 4,
+        text: 'I can usually see the link between my past experiences and how I feel now.',
+        reverse: false,
+      },
+      { id: 5, text: "I often don't know what I think about complex matters.", reverse: true },
+      { id: 6, text: 'I can usually understand how other people are feeling.', reverse: false },
+      {
+        id: 7,
+        text: "I often act without thinking about why I'm doing what I'm doing.",
+        reverse: true,
+      },
+      { id: 8, text: 'I can usually recognize when I misunderstand someone.', reverse: false },
+    ],
+    scoring: {
+      method: 'mean',
+      reverseItems: [1, 3, 5, 7],
+    },
+  },
+} as const satisfies Record<string, AssessmentDef>;
+
+/** Retired pre-interview instruments — preserved for legacy scoring and admin display only. */
+export const RETIRED_ASSESSMENTS = {
   scs: {
     id: 'scs',
     name: 'Self-Awareness Assessment',
@@ -546,86 +666,9 @@ export const ASSESSMENTS = {
       reverseItems: [],
     },
   },
-
-  sd3_narcissism: {
-    id: 'sd3_narcissism',
-    name: 'Social Perceptions Assessment',
-    description: 'How much do you agree with the following statements?',
-    estimatedMinutes: 1,
-    scale: {
-      min: 1,
-      max: 5,
-      labels: {
-        1: 'Strongly Disagree',
-        2: 'Disagree',
-        3: 'Neither Agree nor Disagree',
-        4: 'Agree',
-        5: 'Strongly Agree',
-      },
-    },
-    questions: [
-      { id: 1, text: 'People see me as a natural leader.', reverse: false },
-      { id: 2, text: 'I hate being the center of attention.', reverse: true },
-      { id: 3, text: 'Many group activities tend to be dull without me.', reverse: false },
-      { id: 4, text: 'I know that I am special because everyone keeps telling me so.', reverse: false },
-      { id: 5, text: 'I like to get acquainted with important people.', reverse: false },
-      { id: 6, text: 'I feel embarrassed if someone compliments me.', reverse: true },
-      { id: 7, text: 'I have been compared to famous people.', reverse: false },
-      { id: 8, text: 'I am an average person.', reverse: true },
-      { id: 9, text: 'I insist on getting the respect I deserve.', reverse: false },
-    ],
-    scoring: {
-      method: 'mean',
-      reverseItems: [2, 6, 8],
-    },
-  },
-
-  rfq: {
-    id: 'rfq',
-    name: 'Self-Reflection Assessment',
-    description: 'How much do you agree with the following statements?',
-    estimatedMinutes: 1,
-    scale: {
-      min: 1,
-      max: 7,
-      labels: {
-        1: 'Strongly Disagree',
-        2: 'Disagree',
-        3: 'Somewhat Disagree',
-        4: 'Neither Agree nor Disagree',
-        5: 'Somewhat Agree',
-        6: 'Agree',
-        7: 'Strongly Agree',
-      },
-    },
-    questions: [
-      { id: 1, text: "People's feelings are often a mystery to me.", reverse: true },
-      {
-        id: 2,
-        text: 'I can usually understand what motivates others to behave the way they do.',
-        reverse: false,
-      },
-      { id: 3, text: 'I find it hard to understand why people behave the way they do.', reverse: true },
-      {
-        id: 4,
-        text: 'I can usually see the link between my past experiences and how I feel now.',
-        reverse: false,
-      },
-      { id: 5, text: "I often don't know what I think about complex matters.", reverse: true },
-      { id: 6, text: 'I can usually understand how other people are feeling.', reverse: false },
-      {
-        id: 7,
-        text: "I often act without thinking about why I'm doing what I'm doing.",
-        reverse: true,
-      },
-      { id: 8, text: 'I can usually recognize when I misunderstand someone.', reverse: false },
-    ],
-    scoring: {
-      method: 'mean',
-      reverseItems: [1, 3, 5, 7],
-    },
-  },
 } as const satisfies Record<string, AssessmentDef>;
+
+export type RetiredAssessmentId = keyof typeof RETIRED_ASSESSMENTS;
 
 /** Post-interview instruments — never included in {@link ASSESSMENT_ORDER}. */
 export const POST_INTERVIEW_ASSESSMENTS = {
@@ -694,22 +737,50 @@ export const POST_INTERVIEW_ASSESSMENT_ORDER: PostInterviewAssessmentId[] = (
 
 export type AssessmentId = keyof typeof ASSESSMENTS;
 
-/** Pre-interview psychometrics — mostly shortest-first; anxiety_trait follows BRS for flow. */
+/** Pre-interview psychometrics — 9 instruments in battery flow order. */
 export const ASSESSMENT_ORDER: AssessmentId[] = [
   'brs',
   'anxiety_trait',
-  'aaq2',
-  'rfq',
-  'mspss',
-  'sd3_narcissism',
-  'dweck',
-  'rses',
   'scs_sf',
   'gasp',
-  'scs',
+  'dweck',
+  'aaq2',
+  'rses',
+  NPI_ENTITLEMENT_ENABLED ? 'npi_entitlement' : 'sd3_narcissism',
+  'rfq',
 ];
 
-/** User-facing estimate for Part 1 on the psychometrics welcome screen (10 questionnaires). */
+/** Total question count across all instruments in {@link ASSESSMENT_ORDER}. */
+export function psychometricBatteryTotalQuestions(): number {
+  return ASSESSMENT_ORDER.reduce(
+    (total, id) => total + ASSESSMENTS[id].questions.length,
+    0,
+  );
+}
+
+/** Questions already answered before each instrument index in {@link ASSESSMENT_ORDER}. */
+export function psychometricBatteryQuestionOffsets(): readonly number[] {
+  const offsets: number[] = [];
+  let sum = 0;
+  for (const id of ASSESSMENT_ORDER) {
+    offsets.push(sum);
+    sum += ASSESSMENTS[id].questions.length;
+  }
+  return offsets;
+}
+
+/** 1-based position within the full battery (not per-instrument). */
+export function psychometricBatteryProgressPosition(
+  assessmentIndex: number,
+  questionIndex: number,
+): { current: number; total: number } {
+  const offsets = psychometricBatteryQuestionOffsets();
+  const total = psychometricBatteryTotalQuestions();
+  const current = (offsets[assessmentIndex] ?? 0) + questionIndex + 1;
+  return { current, total };
+}
+
+/** User-facing estimate for Part 1 on the psychometrics welcome screen (9 questionnaires). */
 export const PRE_INTERVIEW_PSYCHOMETRICS_ESTIMATED_MINUTES = 10;
 
 /** User-facing estimate for Part 2 on the psychometrics welcome screen. */
@@ -718,7 +789,10 @@ export const PRE_INTERVIEW_AI_INTERVIEW_ESTIMATED_MINUTES = 20;
 /** Resume targets for instruments removed from the active battery. */
 const DEPRECATED_ASSESSMENT_RESUME_TARGET: Record<string, AssessmentId> = {
   paq: 'gasp',
-  narq_s: 'sd3_narcissism',
+  narq_s: NPI_ENTITLEMENT_ENABLED ? 'npi_entitlement' : 'sd3_narcissism',
+  mspss: NPI_ENTITLEMENT_ENABLED ? 'npi_entitlement' : 'sd3_narcissism',
+  scs: 'rfq',
+  sd3_narcissism: NPI_ENTITLEMENT_ENABLED ? 'npi_entitlement' : 'sd3_narcissism',
 };
 
 /** @deprecated Use ASSESSMENT_ORDER */
@@ -729,7 +803,7 @@ function round3(n: number): number {
 }
 
 function scoreItemValue(
-  assessment: AssessmentDef,
+  assessment: LikertAssessmentDef,
   questionId: number,
   raw: number,
 ): number {
@@ -756,7 +830,7 @@ export function scoreBRS(responses: Record<number, number>): number {
 }
 
 function meanOfItems(
-  assessment: AssessmentDef,
+  assessment: LikertAssessmentDef,
   responses: Record<number, number>,
   itemIds: number[],
 ): number {
@@ -817,11 +891,31 @@ export function resolvePsychometricsResumePosition(
   };
 }
 
+export function scoreNpiEntitlement(responses: Record<number, NpiEntitlementResponse>): number {
+  const assessment = ASSESSMENTS.npi_entitlement;
+  let count = 0;
+  for (const q of assessment.questions) {
+    const response = responses[q.id];
+    if (response?.wasEntitlement === true) count++;
+  }
+  return count;
+}
+
 export function scoreAssessment(
   assessmentId: AssessmentId,
-  responses: Record<number, number>,
+  responses: PsychometricResponsesMap,
 ): Record<string, number> {
   const assessment = ASSESSMENTS[assessmentId];
+
+  if (assessmentId === 'npi_entitlement') {
+    return {
+      total: scoreNpiEntitlement(responses as Record<number, NpiEntitlementResponse>),
+    };
+  }
+
+  if (isForcedChoiceAssessment(assessment)) {
+    return { total: 0 };
+  }
 
   if (assessmentId === 'brs') {
     return { total: scoreBRS(responses) };
@@ -845,20 +939,14 @@ export function scoreAssessment(
     return {
       total,
       self_kindness: meanOfItems(assessment, responses, [2, 6]),
-      common_humanity: meanOfItems(assessment, responses, [5, 8, 10]),
+      common_humanity: meanOfItems(assessment, responses, [5]),
       mindfulness: meanOfItems(assessment, responses, [3, 7]),
     };
   }
 
   if (assessmentId === 'gasp') {
     const externalization = meanOfItems(assessment, responses, [...GASP_EXTERNALIZATION_ITEM_IDS]);
-    const guiltRepair = meanOfItems(assessment, responses, [...GASP_GUILT_REPAIR_ITEM_IDS]);
-    const shameWithdraw = meanOfItems(assessment, responses, [...GASP_SHAME_WITHDRAW_ITEM_IDS]);
-    return {
-      total: externalization,
-      guilt_repair: guiltRepair,
-      shame_withdraw: shameWithdraw,
-    };
+    return { total: externalization };
   }
 
   if (assessmentId === 'dweck') {
@@ -881,29 +969,6 @@ export function scoreAssessment(
     return { total };
   }
 
-  if (assessmentId === 'scs') {
-    let publicScore = 0;
-    let privateScore = 0;
-    assessment.questions.forEach((q) => {
-      const raw = responses[q.id] ?? 0;
-      const value = scoreItemValue(assessment, q.id, raw);
-      if (q.subscale === 'public') publicScore += value;
-      else privateScore += value;
-    });
-    return { public: publicScore, private: privateScore };
-  }
-
-  if (assessmentId === 'mspss') {
-    const family = meanOfItems(assessment, responses, [1, 2, 3, 4]);
-    const friends = meanOfItems(assessment, responses, [5, 6, 7, 8]);
-    const total = meanOfItems(
-      assessment,
-      responses,
-      assessment.questions.map((q) => q.id),
-    );
-    return { total, family, friends };
-  }
-
   let total = 0;
   assessment.questions.forEach((q) => {
     const raw = responses[q.id] ?? 1;
@@ -919,11 +984,40 @@ export function mergeScsResponses(
   return { ...(publicResponses ?? {}), ...(privateResponses ?? {}) };
 }
 
+/** Score retired instruments for legacy admin / historical data only. */
+export function scoreRetiredAssessment(
+  assessmentId: RetiredAssessmentId,
+  responses: Record<number, number>,
+): Record<string, number> {
+  const assessment = RETIRED_ASSESSMENTS[assessmentId];
+
+  if (assessmentId === 'scs') {
+    let publicScore = 0;
+    let privateScore = 0;
+    assessment.questions.forEach((q) => {
+      const raw = responses[q.id] ?? 0;
+      const value = scoreItemValue(assessment, q.id, raw);
+      if (q.subscale === 'public') publicScore += value;
+      else privateScore += value;
+    });
+    return { public: publicScore, private: privateScore };
+  }
+
+  const family = meanOfItems(assessment, responses, [1, 2, 3, 4]);
+  const friends = meanOfItems(assessment, responses, [5, 6, 7, 8]);
+  const total = meanOfItems(
+    assessment,
+    responses,
+    assessment.questions.map((q) => q.id),
+  );
+  return { total, family, friends };
+}
+
 export function splitScsResponses(responses: Record<number, number>): {
   public: Record<number, number>;
   private: Record<number, number>;
 } {
-  const assessment = ASSESSMENTS.scs;
+  const assessment = RETIRED_ASSESSMENTS.scs;
   const pub: Record<number, number> = {};
   const priv: Record<number, number> = {};
   assessment.questions.forEach((q) => {

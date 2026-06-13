@@ -4,6 +4,7 @@ import {
   elongatingProbePlaybackBlockReason,
   isLenientInterviewCloseAfterClosingSpeech,
   isMoment5ReadyForInterviewClose,
+  moment5AnswerIncludesResolutionOutcome,
   looksLikeInterviewClosingAssistantMessage,
   stripDuplicateInterviewClosingParagraphs,
   isIncompleteInterviewClosingLeadSentence,
@@ -122,6 +123,23 @@ describe('suppressed elongating fallbacks', () => {
           'We talked it through and apologized. Things are better now.',
       }),
     ).toBe(true);
+  });
+
+  it('moment5AnswerIncludesResolutionOutcome detects facilitated mutual listening and cool-now repair', () => {
+    const conferenceAnswer =
+      "I did raise my voice at him, but it was facilitated. I listened to him, he listened to me without interruption. That's okay, we're cool now.";
+    expect(moment5AnswerIncludesResolutionOutcome(conferenceAnswer)).toBe(true);
+    expect(
+      moment5AnswerIncludesResolutionOutcome('I listened to him, he listened to me, and we are good now.'),
+    ).toBe(true);
+  });
+
+  it('moment5AnswerIncludesResolutionOutcome stays false for blow-up-only narration', () => {
+    expect(
+      moment5AnswerIncludesResolutionOutcome(
+        'He called me a bad coach and walked away. I was really angry and thought he was out of line.',
+      ),
+    ).toBe(false);
   });
 
   it('isMoment5ReadyForInterviewClose requires second turn after accountability probe', () => {

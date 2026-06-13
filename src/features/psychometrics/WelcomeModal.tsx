@@ -115,8 +115,7 @@ export function WelcomeModal({
           </View>
 
           <Text style={styles.scienceNote}>
-            All assessments are grounded in peer-reviewed relationship research. At the end you'll receive a
-            detailed personal report covering your strengths and areas for growth.
+            At the end you'll receive a detailed personal report covering your strengths and areas for growth.
           </Text>
 
           <View style={styles.ctaWrap}>

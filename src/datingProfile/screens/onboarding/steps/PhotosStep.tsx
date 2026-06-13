@@ -113,6 +113,7 @@ export const PhotosStep: React.FC<PhotosStepProps> = ({
         ))}
         {photos.length + uploadingPhotosCount < 5 && (
           <ModeratedPhotoUpload
+            userId={userId}
             existingAssetIdsRef={existingAssetIdsRef}
             existingFileNameKeysRef={existingFileNameKeysRef}
             onPhotoUploaded={(url, meta?: PhotoUploadedMeta) => {

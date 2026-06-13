@@ -7,6 +7,12 @@
 /** Below this dBFS, ambient samples are digital silence / unmeasured — ignore for VAD bypass SNR. */
 export const MIN_VALID_AMBIENT_NOISE_FLOOR_DB = -90;
 
+/**
+ * Median ambient sampled while TTS plays above this is usually speaker bleed, not room noise.
+ * Using it for adaptive VAD would require near-0 dBFS peaks before "speech" is detected.
+ */
+export const TTS_BLEED_AMBIENT_CEILING_DB = -38;
+
 let ambientNoiseFloorDb: number | null = null;
 /** True when ambient could not be measured — use fixed -66 dB threshold. */
 let ambientNoiseFallback = false;
@@ -105,7 +111,7 @@ let lastThresholdUnusuallyHigh = false;
 
 /**
  * First-sample "speech" threshold in dBFS: ambient + 15 dB (wider window vs ambient),
- * lower-bounded at -40 dB (very quiet rooms), hard-capped at -5 dB when ambient+15 would exceed it.
+ * lower-bounded at -40 dB (very quiet rooms), upper-bounded at -35 dB when ambient+15 runs hot.
  */
 export function getInterviewSessionVadFirstSpeechThresholdDb(): number {
   const defaultFloor = getDefaultFirstSpeechThresholdDb();
@@ -124,8 +130,8 @@ export function getInterviewSessionVadFirstSpeechThresholdDb(): number {
       adaptive = -40;
       lastThresholdFloored = true;
     }
-    if (raw > -5) {
-      adaptive = -5;
+    if (raw > -35) {
+      adaptive = -35;
       lastThresholdUnusuallyHigh = true;
     }
     return Math.max(-72, adaptive);
@@ -138,7 +144,7 @@ export function getInterviewSessionVadThresholdFloored(): boolean {
   return lastThresholdFloored;
 }
 
-/** True when ambient + 15 would have exceeded -5 dB; threshold clamped to -5 dB. */
+/** True when ambient + 15 would have exceeded -35 dB; threshold clamped to -35 dB. */
 export function getInterviewSessionVadThresholdUnusuallyHigh(): boolean {
   return lastThresholdUnusuallyHigh;
 }

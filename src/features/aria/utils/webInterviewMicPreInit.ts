@@ -9,6 +9,7 @@ import {
   setInterviewSessionAmbientNoiseFloorDb,
   setInterviewSessionAmbientNoiseFallback,
   resetInterviewVadAmbientSamplingState,
+  TTS_BLEED_AMBIENT_CEILING_DB,
 } from '@features/aria/utils/interviewVadSession';
 import {
   buildWebMicGetUserMediaConstraints,
@@ -25,6 +26,20 @@ export type PreInitTriggerDuring =
   | 'late_start_refresh';
 
 let lastRecorderRefreshedOnLateStartFlag = false;
+
+/** When a late-start recorder refresh completed — suppress tab-hide audio deactivation briefly after. */
+let lastLateStartRecorderRefreshAtMs: number | null = null;
+
+const TAB_SWITCH_SUPPRESS_AFTER_LATE_START_MS = 3000;
+
+export function markLateStartRecorderRefreshCompleted(): void {
+  lastLateStartRecorderRefreshAtMs = Date.now();
+}
+
+export function shouldSuppressTabSwitchDeactivationAfterLateStartRefresh(): boolean {
+  if (lastLateStartRecorderRefreshAtMs == null) return false;
+  return Date.now() - lastLateStartRecorderRefreshAtMs < TAB_SWITCH_SUPPRESS_AFTER_LATE_START_MS;
+}
 
 export function takeRecorderRefreshedOnLateStartForTelemetry(): boolean {
   const v = lastRecorderRefreshedOnLateStartFlag;
@@ -78,6 +93,7 @@ export async function refreshWebMicPreInitIfStaleAfterLateStartWindow(): Promise
     preInitRecorder.state === 'inactive';
   if (rebuilt) {
     lastRecorderRefreshedOnLateStartFlag = true;
+    markLateStartRecorderRefreshCompleted();
   }
   return { refreshed: rebuilt };
 }
@@ -239,8 +255,13 @@ export function finalizeInterviewMicAmbientOnTtsEnd(): void {
   const sorted = [...usable].sort((a, b) => a - b);
   const median = sorted[Math.floor(sorted.length / 2)] ?? null;
   if (median != null && Number.isFinite(median)) {
-    setInterviewSessionAmbientNoiseFloorDb(median);
-    setInterviewSessionAmbientNoiseFallback(false);
+    if (median > TTS_BLEED_AMBIENT_CEILING_DB) {
+      setInterviewSessionAmbientNoiseFloorDb(null);
+      setInterviewSessionAmbientNoiseFallback(true);
+    } else {
+      setInterviewSessionAmbientNoiseFloorDb(median);
+      setInterviewSessionAmbientNoiseFallback(false);
+    }
   } else {
     setInterviewSessionAmbientNoiseFloorDb(null);
     setInterviewSessionAmbientNoiseFallback(true);

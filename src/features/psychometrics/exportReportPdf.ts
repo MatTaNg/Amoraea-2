@@ -22,20 +22,22 @@ export async function exportReportPdfFromHtml(html: string): Promise<void> {
     printWindow.document.write(html);
     printWindow.document.close();
 
-    printWindow.onload = () => {
-      printWindow.focus();
-      printWindow.print();
-    };
-
-    // Fallback if onload already fired
-    window.setTimeout(() => {
+    let printTriggered = false;
+    const triggerPrintOnce = () => {
+      if (printTriggered) return;
+      printTriggered = true;
       try {
         printWindow.focus();
         printWindow.print();
       } catch {
         // User can print manually from the new tab
       }
-    }, 500);
+    };
+
+    printWindow.addEventListener('load', triggerPrintOnce, { once: true });
+
+    // Fallback if load already fired before the listener was attached
+    window.setTimeout(triggerPrintOnce, 500);
 
     return;
   }

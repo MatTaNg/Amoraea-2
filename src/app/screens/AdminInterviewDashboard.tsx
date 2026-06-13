@@ -20,6 +20,11 @@ import {
 } from 'react-native';
 import { supabase } from '@data/supabase/client';
 import {
+  fetchCompatibilityTestSeedUserIds,
+  isCompatibilityTestSeedUser,
+} from '@features/compatibility/compatibilityTestSeedUser';
+import * as Clipboard from 'expo-clipboard';
+import {
   INTERVIEW_ATTEMPTS_SUMMARY_SELECT,
   INTERVIEW_ATTEMPTS_SUMMARY_SELECT_BASE,
 } from '@data/supabase/interviewAttemptSelects';
@@ -116,14 +121,18 @@ import {
 } from '@features/aria/adminGateDisplay';
 import { AdminFeedbackPanel } from '@/components/admin/AdminFeedbackPanel';
 import { OverviewTab } from '@features/admin/OverviewTab';
+import { CompatibilityTab } from '@features/admin/CompatibilityTab';
 import { UncertaintyScoreCard, uncertaintyBadgeColor, uncertaintyBadgeLabel } from '@features/admin/UncertaintyScoreCard';
 import { GamingCorrectionBanner, GamingCorrectionCard } from '@features/admin/GamingCorrectionCard';
+import { ScoreReceiptCard } from '@features/admin/ScoreReceiptCard';
 import { UNCERTAINTY_ROUTING_THRESHOLD } from '@features/psychometrics/computeUncertaintyScore';
 import type { DefenseCrossReferenceResult } from '@features/psychometrics/crossReferenceDefenseDetection';
 import { backfillMissingUncertaintyScores } from '@features/psychometrics/backfillMissingUncertaintyScores';
 import { applyPsychometricModifierToAttempt } from '@features/psychometrics/applyPsychometricModifier';
+import { PSYCHOMETRICS_ENABLED } from '@features/psychometrics/interviewCompletionStatus';
 import { normalizeGateFailDetailForPersist } from '@features/psychometrics/gateFailDetailForPersist';
 import { preparePsychometricFloorGateState } from '@features/psychometrics/preparePsychometricFloorGateState';
+import { allowInterviewRetakeByAdmin } from '@features/interview/interviewRetake';
 import {
   formatPsychometricGateFailDescription,
   extractPsychometricFloorsFromGateDetail,
@@ -228,6 +237,8 @@ type UserRow = {
   /** Admin-only human judgment; null = follow current gate outcome in UI. Does not change routing. */
   admin_human_verified_pass?: boolean | null;
   interview_completed_at?: string | null;
+  interview_retake_admin_allowed_at?: string | null;
+  interview_attempt_count?: number | null;
   /** Optional SMS number from post-interview flow (`users.launch_notification_phone`). */
   launch_notification_phone?: string | null;
   psychometrics_sd3_narcissism_score?: number | null;
@@ -972,6 +983,8 @@ const ADMIN_USERS_LIST_SELECT = `
       interview_cohort_admin_reviewed,
       admin_human_verified_pass,
       interview_completed_at,
+      interview_retake_admin_allowed_at,
+      interview_attempt_count,
       launch_notification_phone,
       psychometrics_sd3_narcissism_score,
       psychometric_straight_line_flags,
@@ -998,6 +1011,8 @@ const ADMIN_USERS_LIST_SELECT_WITHOUT_SD3_RFQ = `
       interview_cohort_admin_reviewed,
       admin_human_verified_pass,
       interview_completed_at,
+      interview_retake_admin_allowed_at,
+      interview_attempt_count,
       launch_notification_phone,
       psychometric_straight_line_flags,
       psychometrics_gasp_score,
@@ -1028,7 +1043,10 @@ async function fetchAdminUsersList(): Promise<FetchAdminUsersListResult> {
     return { groups: [], errorMessage: usersError?.message ?? 'Failed to load users' };
   }
 
-  const users = allUsers;
+  const seedUserIds = await fetchCompatibilityTestSeedUserIds(supabase);
+  const users = allUsers.filter(
+    (user) => !isCompatibilityTestSeedUser({ id: user.id, email: user.email }, seedUserIds),
+  );
 
   const overrideColsAbsent = await getInterviewAttemptOverrideColumnsAbsent();
 
@@ -1037,6 +1055,7 @@ async function fetchAdminUsersList(): Promise<FetchAdminUsersListResult> {
     .select(
       overrideColsAbsent ? INTERVIEW_ATTEMPTS_SUMMARY_SELECT_BASE : INTERVIEW_ATTEMPTS_SUMMARY_SELECT,
     )
+    .or('is_phantom.eq.false,is_phantom.is.null')
     .order('created_at', { ascending: false })) as {
     data: AttemptSummary[] | null;
     error: { message: string; code?: string } | null;
@@ -1056,6 +1075,7 @@ async function fetchAdminUsersList(): Promise<FetchAdminUsersListResult> {
     const legacy = (await supabase
       .from('interview_attempts')
       .select(INTERVIEW_ATTEMPTS_SUMMARY_SELECT_BASE)
+      .or('is_phantom.eq.false,is_phantom.is.null')
       .order('created_at', { ascending: false })) as {
       data: AttemptSummary[] | null;
       error: { message: string; code?: string } | null;
@@ -1113,10 +1133,9 @@ async function fetchAdminUsersList(): Promise<FetchAdminUsersListResult> {
   return { groups, errorMessage: null };
 }
 
-/** Latest run only — product treats one run per user (retake overwrites). */
-async function fetchLatestFullAttemptForUser(
+/** All interview runs for a user (newest first) — retakes keep prior attempt rows. */
+async function fetchAllFullAttemptsForUser(
   userId: string,
-  latestAttemptId: string | null | undefined,
 ): Promise<{ attempts: AttemptRow[]; errorMessage: string | null }> {
   const patchOptionalNulls = (row: Record<string, unknown>): AttemptRow =>
     ({
@@ -1127,32 +1146,13 @@ async function fetchLatestFullAttemptForUser(
       gaming_correction: row.gaming_correction ?? null,
     }) as AttemptRow;
 
-  const runFetch = async (): Promise<{
-    data: AttemptRow | AttemptRow[] | null;
-    error: { message: string; code?: string } | null;
-    multiple: boolean;
-  }> => {
+  for (let attempt = 0; attempt < 4; attempt++) {
     const select = await adminInterviewAttemptsFullSelect();
-    if (latestAttemptId) {
-      const result = await supabase
-        .from('interview_attempts')
-        .select(select)
-        .eq('id', latestAttemptId)
-        .eq('user_id', userId)
-        .maybeSingle();
-      return { data: result.data as AttemptRow | null, error: result.error, multiple: false };
-    }
-    const result = await supabase
+    const { data, error } = await supabase
       .from('interview_attempts')
       .select(select)
       .eq('user_id', userId)
-      .order('created_at', { ascending: false })
-      .limit(1);
-    return { data: (result.data as AttemptRow[] | null) ?? null, error: result.error, multiple: true };
-  };
-
-  for (let attempt = 0; attempt < 4; attempt++) {
-    const { data, error, multiple } = await runFetch();
+      .order('created_at', { ascending: false });
     if (!error) {
       if (!(await getInterviewAttemptGamingCorrectionColumnsAbsent())) {
         void markInterviewAttemptGamingCorrectionColumnsPresent();
@@ -1163,22 +1163,18 @@ async function fetchLatestFullAttemptForUser(
       if (!(await getInterviewAttemptOverrideColumnsAbsent())) {
         void markInterviewAttemptOverrideColumnsPresent();
       }
-      if (multiple) {
-        const rows = (data as AttemptRow[] | null)?.map((row) =>
-          patchOptionalNulls(row as Record<string, unknown>),
-        ) ?? [];
-        return { attempts: rows, errorMessage: null };
-      }
-      const row = data ? patchOptionalNulls(data as Record<string, unknown>) : null;
-      return { attempts: row ? [row] : [], errorMessage: null };
+      const rows = (data as AttemptRow[] | null)?.map((row) =>
+        patchOptionalNulls(row as Record<string, unknown>),
+      ) ?? [];
+      return { attempts: rows, errorMessage: null };
     }
     if (!(await rememberInterviewAttemptSelectColumnAbsences(error))) {
-      console.error('Admin panel fetchLatestFullAttemptForUser:', error);
+      console.error('Admin panel fetchAllFullAttemptsForUser:', error);
       return { attempts: [], errorMessage: error.message };
     }
   }
 
-  return { attempts: [], errorMessage: 'Failed to load attempt after column fallback retries' };
+  return { attempts: [], errorMessage: 'Failed to load attempts after column fallback retries' };
 }
 
 function formatConstruct(key: string): string {
@@ -1724,6 +1720,20 @@ function buildAdminCohortExportCsv(groups: UserGroup[]): string {
   return lines.join('\r\n');
 }
 
+function collectFilteredUserEmails(groups: UserGroup[]): string[] {
+  const seen = new Set<string>();
+  const emails: string[] = [];
+  for (const g of groups) {
+    const raw = g.user.email?.trim();
+    if (!raw || !raw.includes('@')) continue;
+    const key = raw.toLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    emails.push(raw);
+  }
+  return emails;
+}
+
 function triggerAdminCohortCsvDownload(filename: string, csvBody: string): void {
   const payload = `\uFEFF${csvBody}`;
   if (Platform.OS === 'web' && typeof document !== 'undefined') {
@@ -1844,6 +1854,39 @@ function userMatchesUncertaintyFilter(g: UserGroup, filter: UncertaintyBandFilte
   if (filter === 'low') return score < 0.4;
   if (filter === 'medium') return score >= 0.4 && score < UNCERTAINTY_ROUTING_THRESHOLD;
   return score >= UNCERTAINTY_ROUTING_THRESHOLD;
+}
+
+function normalizePhoneSearchDigits(value: string): string {
+  return value.replace(/\D/g, '');
+}
+
+function userGroupMatchesSearchQuery(g: UserGroup, rawQuery: string): boolean {
+  const query = rawQuery.trim().toLowerCase();
+  if (!query) return true;
+
+  const phoneQuery = normalizePhoneSearchDigits(rawQuery);
+  const u = g.user;
+  const haystacks = [
+    resolveAdminInterviewIntroDisplayName(u),
+    u.email,
+    u.full_name,
+    u.display_name,
+    u.name,
+    trimLaunchNotificationPhone(u.launch_notification_phone),
+  ]
+    .filter((v): v is string => typeof v === 'string' && v.trim().length > 0)
+    .map((v) => v.toLowerCase());
+
+  if (haystacks.some((h) => h.includes(query))) return true;
+
+  if (phoneQuery.length >= 4) {
+    const phoneDigits = normalizePhoneSearchDigits(
+      trimLaunchNotificationPhone(u.launch_notification_phone) ?? '',
+    );
+    if (phoneDigits.includes(phoneQuery)) return true;
+  }
+
+  return false;
 }
 
 function AdminCheckbox({
@@ -1996,6 +2039,9 @@ function UserCard({
           </Text>
         ) : null}
         <Text style={styles.userCardDateLine}>{formatUserInterviewDateLine(userData)}</Text>
+        {userData.attempts.length > 1 ? (
+          <Text style={styles.userCardTests}>{userData.attempts.length} interview runs</Text>
+        ) : null}
         {latest && !userHasInProgressInterview(userData.user, userData.latestAttempt) ? (
           <View style={styles.userCardSignalRow}>
             {typeof latest.ego_development_level === 'number' &&
@@ -2283,7 +2329,7 @@ function renderAdminDetailTabContent(
     case 'transcript':
       return <TranscriptTab attempt={selectedAttempt} />;
     case 'depth':
-      return <DepthSignalsTab attempt={selectedAttempt} />;
+      return <DepthSignalsTab attempt={selectedAttempt} user={profileLoading ? null : profileUser} />;
     case 'full_assessment':
       if (profileLoading) {
         return (
@@ -2442,7 +2488,13 @@ function defenseCrossRefConsistencyLabel(consistent: boolean | null): string {
   return 'Neutral / insufficient data';
 }
 
-function DepthSignalsTab({ attempt }: { attempt: AttemptRow }) {
+function DepthSignalsTab({
+  attempt,
+  user,
+}: {
+  attempt: AttemptRow;
+  user?: AdminUserProfileRecord | null;
+}) {
   const pillars = pillarScoresForGate(attempt);
   const gateEcho = computeGateResultCore(pillars, null, buildAdminGateComputeOptions(attempt));
   const dp = attempt.defense_patterns ?? DEFAULT_DEFENSE_PATTERNS;
@@ -2484,9 +2536,11 @@ function DepthSignalsTab({ attempt }: { attempt: AttemptRow }) {
   const wReq = parseGateFailDetailRow(attempt)?.weighted_score?.requiredMin;
   const detailThreshold =
     typeof wReq === 'number' && Number.isFinite(wReq) ? wReq : GATE_PASS_WEIGHTED_MIN;
+  const overcertaintyLabels = adminMentalizingOvercertaintyLabels(attempt);
 
   return (
     <ScrollView style={styles.innerTabContent}>
+      <ScoreReceiptCard attempt={attempt} user={user} variant="dark" />
       <GamingCorrectionBanner gamingCorrection={attempt.gaming_correction ?? null} />
       <UncertaintyScoreCard
         uncertaintyScore={attempt.uncertainty_score ?? null}
@@ -3288,6 +3342,12 @@ function SummaryTab({
     dweckScore: profileUser?.psychometrics_dweck_score ?? null,
     scsSfScore: profileUser?.psychometrics_scs_sf_score ?? null,
     sd3NarcissismScore: profileUser?.psychometrics_sd3_narcissism_score ?? null,
+    brsScore: profileUser?.psychometrics_brs_score ?? null,
+    anxietyTraitScore: profileUser?.psychometrics_anxiety_trait_score ?? null,
+    aaq2Score: profileUser?.psychometrics_aaq2_score ?? null,
+    rsesScore: profileUser?.psychometrics_rses_score ?? null,
+    scsPublicScore: profileUser?.psychometrics_scs_public_score ?? null,
+    scsPrivateScore: profileUser?.psychometrics_scs_private_score ?? null,
   };
   const activePsychometricGateFails = gateFailReasons.filter((id) =>
     (ALL_PSYCHOMETRIC_GATE_FAIL_FLOOR_CODES as readonly string[]).includes(id),
@@ -3379,16 +3439,20 @@ function SummaryTab({
         const delta = computePillarScoreDelta(oldPillars, result.pillar_scores);
         const interviewGateFailReasons = result.gate.failReasonCodes ?? [];
         const interviewGateFailDetail = normalizeGateFailDetailForPersist(result.gate.failReasonDetail);
-        const floorPrep = await preparePsychometricFloorGateState(
-          attempt.user_id,
-          interviewGateFailReasons,
-          interviewGateFailDetail,
-          { forceApply: true, attemptId: attempt.id, userId: attempt.user_id },
-        );
-        const gateFailReasons =
-          'gateFailReasons' in floorPrep ? floorPrep.gateFailReasons : interviewGateFailReasons;
-        const gateFailDetail =
-          'gateFailDetail' in floorPrep ? floorPrep.gateFailDetail : interviewGateFailDetail;
+        let gateFailReasons = interviewGateFailReasons;
+        let gateFailDetail = interviewGateFailDetail;
+        if (PSYCHOMETRICS_ENABLED) {
+          const floorPrep = await preparePsychometricFloorGateState(
+            attempt.user_id,
+            interviewGateFailReasons,
+            interviewGateFailDetail,
+            { forceApply: true, attemptId: attempt.id, userId: attempt.user_id },
+          );
+          if ('gateFailReasons' in floorPrep) {
+            gateFailReasons = floorPrep.gateFailReasons;
+            gateFailDetail = floorPrep.gateFailDetail;
+          }
+        }
         const passedAfterFloors =
           gateFailReasons.length === 0 ? result.gate.pass : false;
         const { error } = await supabase
@@ -3529,6 +3593,7 @@ function SummaryTab({
         </View>
       ) : null}
       <Text style={styles.sectionTitle}>Overall</Text>
+      <ScoreReceiptCard attempt={attempt} user={profileUser} variant="dark" />
       {isAdminViewer ? (
         <View style={{ marginBottom: 12 }}>
           <TouchableOpacity
@@ -4279,7 +4344,7 @@ function UserDetails({
   onRefreshData,
 }: {
   userData: UserGroup;
-  /** Latest run only (full attempt row). */
+  /** All full attempt rows for this user (newest first). */
   fullAttempts: AttemptRow[];
   attemptsLoading: boolean;
   attemptsError: string | null;
@@ -4291,11 +4356,23 @@ function UserDetails({
 }) {
   const attempts = getAttemptsSorted(fullAttempts);
   const [activeInnerTab, setActiveInnerTab] = useState<AdminAttemptInnerTabId>('summary');
+  const [selectedAttemptId, setSelectedAttemptId] = useState<string | null>(null);
   const [overrideBusy, setOverrideBusy] = useState(false);
+  const [retakeAllowBusy, setRetakeAllowBusy] = useState(false);
   const [profileUser, setProfileUser] = useState<AdminUserProfileRecord | null>(null);
   const [profileLoading, setProfileLoading] = useState(true);
 
-  const selectedAttempt = attempts[0] ?? null;
+  useEffect(() => {
+    if (attempts.length === 0) {
+      setSelectedAttemptId(null);
+      return;
+    }
+    if (!selectedAttemptId || !attempts.some((a) => a.id === selectedAttemptId)) {
+      setSelectedAttemptId(attempts[0]!.id);
+    }
+  }, [attempts, selectedAttemptId]);
+
+  const selectedAttempt = attempts.find((a) => a.id === selectedAttemptId) ?? attempts[0] ?? null;
   const u = userData.user;
   const attemptIdForOverride =
     selectedAttempt?.id ??
@@ -4368,6 +4445,27 @@ function UserDetails({
     [attemptIdForOverride, onRefreshData, u.id, u.interview_passed_computed],
   );
 
+  const handleAllowRetake = useCallback(async () => {
+    if (!u.id) return;
+    const ok = await confirmAsync({
+      title: 'Allow interview retake?',
+      message:
+        'This clears the user’s active interview routing so they can start a new run. Prior attempt rows stay in the database for review.',
+      confirmText: 'Allow retake',
+    });
+    if (!ok) return;
+    setRetakeAllowBusy(true);
+    try {
+      await allowInterviewRetakeByAdmin(u.id);
+      onRefreshData();
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : 'Could not allow retake';
+      Alert.alert('Allow retake failed', msg);
+    } finally {
+      setRetakeAllowBusy(false);
+    }
+  }, [onRefreshData, u.id]);
+
   return (
     <View style={styles.fullScreen}>
       <View style={styles.header}>
@@ -4396,6 +4494,11 @@ function UserDetails({
           </Text>
         ) : null}
         <Text style={styles.headerSub}>{formatUserInterviewDateLine(userData)}</Text>
+        {attempts.length > 0 ? (
+          <Text style={styles.headerSub}>
+            {attempts.length === 1 ? '1 interview run on file' : `${attempts.length} interview runs on file`}
+          </Text>
+        ) : null}
         <Text style={styles.headerPassMeta} selectable>
           Gate (computed): {u.interview_passed_computed == null ? '—' : String(u.interview_passed_computed)} Â·
           Admin override: {formatAdminPassFailLabel(u.interview_passed_admin_override)} Â·
@@ -4429,6 +4532,19 @@ function UserDetails({
           >
             <Text style={styles.overrideChipText}>Use gate only</Text>
           </TouchableOpacity>
+          {u.interview_completed === true ? (
+            <TouchableOpacity
+              style={styles.overrideChip}
+              onPress={() => void handleAllowRetake()}
+              disabled={retakeAllowBusy}
+              accessibilityRole="button"
+              accessibilityLabel="Allow interview retake"
+            >
+              <Text style={styles.overrideChipText}>
+                {retakeAllowBusy ? 'Allowing…' : 'Allow retake'}
+              </Text>
+            </TouchableOpacity>
+          ) : null}
         </View>
       </View>
 
@@ -4453,6 +4569,38 @@ function UserDetails({
       ) : (
         <View style={styles.detailsLayoutSingle}>
           <View style={styles.detailsPaneFull}>
+            {attempts.length > 1 ? (
+              <ScrollView
+                horizontal
+                showsHorizontalScrollIndicator={false}
+                style={styles.attemptTabsRowScroll}
+                contentContainerStyle={styles.attemptTabsRowContent}
+              >
+                {attempts.map((att) => {
+                  const active = att.id === selectedAttempt?.id;
+                  const passWord = getPassWord(att);
+                  return (
+                    <TouchableOpacity
+                      key={att.id}
+                      style={[styles.attemptTab, active && styles.attemptTabActive]}
+                      onPress={() => setSelectedAttemptId(att.id)}
+                      accessibilityRole="button"
+                      accessibilityLabel={`View interview run ${att.attempt_number}`}
+                    >
+                      <Text style={[styles.attemptTabLabel, active && styles.attemptTabLabelActive]}>
+                        Run {att.attempt_number}
+                      </Text>
+                      <Text style={styles.attemptTabLabel} numberOfLines={1}>
+                        {formatAttemptTabLabel(att)}
+                      </Text>
+                      <Text style={[styles.attemptTabOutcome, { color: getPassColor(passWord) }]}>
+                        {passWord === 'none' ? '—' : passWord}
+                      </Text>
+                    </TouchableOpacity>
+                  );
+                })}
+              </ScrollView>
+            ) : null}
             <View style={styles.innerTabsRow}>
               {adminDetailTabs().map((t) => (
                 <TouchableOpacity
@@ -4479,7 +4627,7 @@ function UserDetails({
                 </Text>
                 {userData.user.latest_attempt_id || userData.user.interview_completed ? (
                   <Text style={styles.emptyHint}>
-                    Interview data exists for this account — a retake is usually not needed. If attempts stay empty
+                    Interview data exists for this account but full attempt rows did not load. If attempts stay empty
                     after refreshing, apply{' '}
                     <Text style={styles.emptyHintMono}>20260423150000_admin_rls_is_amoraea_admin_function.sql</Text>{' '}
                     (admin check via <Text style={styles.emptyHintMono}>auth.users</Text> email — JWT email in RLS is
@@ -4716,7 +4864,7 @@ const HUMAN_VERIFIED_COHORT_OPTIONS: { id: HumanVerifiedCohortFilter; label: str
 ];
 
 export function AdminInterviewDashboard({ onClose }: { onClose: () => void }) {
-  const [adminMainView, setAdminMainView] = useState<'overview' | 'users' | 'feedback'>('users');
+  const [adminMainView, setAdminMainView] = useState<'overview' | 'users' | 'feedback' | 'compatibility'>('users');
   const [users, setUsers] = useState<UserGroup[]>([]);
   const [loading, setLoading] = useState(true);
   const [listError, setListError] = useState<string | null>(null);
@@ -4729,6 +4877,7 @@ export function AdminInterviewDashboard({ onClose }: { onClose: () => void }) {
   const [uncertaintyBandFilter, setUncertaintyBandFilter] = useState<UncertaintyBandFilter>('all');
   const [userListSort, setUserListSort] = useState<UserListSort>('date');
   const [hideIncomplete, setHideIncomplete] = useState(true);
+  const [userSearchQuery, setUserSearchQuery] = useState('');
   const [selectedUserId, setSelectedUserId] = useState<string | null>(null);
   const [detailAttempts, setDetailAttempts] = useState<AttemptRow[] | null>(null);
   const [detailAttemptsLoading, setDetailAttemptsLoading] = useState(false);
@@ -4743,10 +4892,7 @@ export function AdminInterviewDashboard({ onClose }: { onClose: () => void }) {
       setListError(errorMessage);
       if (selectedUserId) {
         const g = groups.find((x) => x.user.id === selectedUserId);
-        const { attempts, errorMessage: detailErr } = await fetchLatestFullAttemptForUser(
-          selectedUserId,
-          g?.user.latest_attempt_id,
-        );
+        const { attempts, errorMessage: detailErr } = await fetchAllFullAttemptsForUser(selectedUserId);
         setDetailAttemptsLoading(false);
         if (detailErr) {
           setDetailAttemptsError(detailErr);
@@ -4856,11 +5002,6 @@ export function AdminInterviewDashboard({ onClose }: { onClose: () => void }) {
     }
   }, [users, selectedUserId]);
 
-  const selectedLatestAttemptId = useMemo(() => {
-    if (!selectedUserId) return null;
-    return users.find((g) => g.user.id === selectedUserId)?.user.latest_attempt_id ?? null;
-  }, [selectedUserId, users]);
-
   useEffect(() => {
     if (!selectedUserId) {
       setDetailAttempts(null);
@@ -4871,23 +5012,21 @@ export function AdminInterviewDashboard({ onClose }: { onClose: () => void }) {
     let cancelled = false;
     setDetailAttemptsLoading(true);
     setDetailAttemptsError(null);
-    void fetchLatestFullAttemptForUser(selectedUserId, selectedLatestAttemptId).then(
-      ({ attempts, errorMessage: detailErr }) => {
-        if (cancelled) return;
-        setDetailAttemptsLoading(false);
-        if (detailErr) {
-          setDetailAttemptsError(detailErr);
-          setDetailAttempts([]);
-        } else {
-          setDetailAttemptsError(null);
-          setDetailAttempts(attempts);
-        }
-      },
-    );
+    void fetchAllFullAttemptsForUser(selectedUserId).then(({ attempts, errorMessage: detailErr }) => {
+      if (cancelled) return;
+      setDetailAttemptsLoading(false);
+      if (detailErr) {
+        setDetailAttemptsError(detailErr);
+        setDetailAttempts([]);
+      } else {
+        setDetailAttemptsError(null);
+        setDetailAttempts(attempts);
+      }
+    });
     return () => {
       cancelled = true;
     };
-  }, [selectedUserId, selectedLatestAttemptId]);
+  }, [selectedUserId]);
 
   const selectedGroup = selectedUserId ? users.find((g) => g.user.id === selectedUserId) : null;
 
@@ -4929,6 +5068,9 @@ export function AdminInterviewDashboard({ onClose }: { onClose: () => void }) {
         return s === statusFilter;
       });
     }
+    if (userSearchQuery.trim()) {
+      list = list.filter((g) => userGroupMatchesSearchQuery(g, userSearchQuery));
+    }
     return list;
   }, [
     users,
@@ -4940,6 +5082,7 @@ export function AdminInterviewDashboard({ onClose }: { onClose: () => void }) {
     uncertaintyBandFilter,
     hideIncomplete,
     statusFilter,
+    userSearchQuery,
   ]);
 
   const displayedUsers = useMemo(
@@ -4957,6 +5100,24 @@ export function AdminInterviewDashboard({ onClose }: { onClose: () => void }) {
     const body = buildAdminCohortExportCsv(pipelineFiltered);
     const today = formatYmdLocal(new Date());
     triggerAdminCohortCsvDownload(`amoraea_users_${today}.csv`, body);
+  }, [pipelineFiltered]);
+
+  const handleCopyEmails = useCallback(async () => {
+    const emails = collectFilteredUserEmails(pipelineFiltered);
+    if (emails.length === 0) {
+      Alert.alert('No email addresses', 'No users with email addresses match the current filters.');
+      return;
+    }
+    try {
+      await Clipboard.setStringAsync(emails.join(', '));
+      Alert.alert(
+        'Copied',
+        `${emails.length} email address${emails.length === 1 ? '' : 'es'} copied to clipboard.`,
+      );
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : 'Could not copy to clipboard.';
+      Alert.alert('Copy failed', msg);
+    }
   }, [pipelineFiltered]);
 
   const setUserBookmarked = useCallback(async (userId: string, next: boolean) => {
@@ -5024,6 +5185,15 @@ export function AdminInterviewDashboard({ onClose }: { onClose: () => void }) {
             >
               <Text style={styles.exportCsvButtonText}>Export CSV</Text>
             </TouchableOpacity>
+            <TouchableOpacity
+              style={[styles.exportCsvButton, (loading || !!listError) && styles.exportCsvButtonDisabled]}
+              onPress={handleCopyEmails}
+              disabled={loading || !!listError}
+              accessibilityRole="button"
+              accessibilityLabel="Copy filtered emails"
+            >
+              <Text style={styles.exportCsvButtonText}>Copy Emails</Text>
+            </TouchableOpacity>
           </View>
         ) : null}
         <ScrollView
@@ -5063,14 +5233,53 @@ export function AdminInterviewDashboard({ onClose }: { onClose: () => void }) {
               Feedback
             </Text>
           </TouchableOpacity>
+          <TouchableOpacity
+            style={[styles.filterChip, adminMainView === 'compatibility' && styles.filterChipActive]}
+            onPress={() => setAdminMainView('compatibility')}
+            accessibilityRole="button"
+            accessibilityState={{ selected: adminMainView === 'compatibility' }}
+          >
+            <Text
+              style={[styles.filterChipText, adminMainView === 'compatibility' && styles.filterChipTextActive]}
+            >
+              Compatibility
+            </Text>
+          </TouchableOpacity>
         </ScrollView>
       </View>
       {adminMainView === 'overview' ? (
         <OverviewTab />
       ) : adminMainView === 'feedback' ? (
         <AdminFeedbackPanel />
+      ) : adminMainView === 'compatibility' ? (
+        <CompatibilityTab />
       ) : (
         <>
+          <View style={styles.userSearchBar}>
+            <Text style={styles.filterClusterLabel}>Search</Text>
+            <TextInput
+              value={userSearchQuery}
+              onChangeText={setUserSearchQuery}
+              placeholder="Name, email, or phone"
+              placeholderTextColor="rgba(122, 154, 190, 0.45)"
+              style={styles.userSearchInput}
+              autoCapitalize="none"
+              autoCorrect={false}
+              clearButtonMode="while-editing"
+              accessible
+              accessibilityLabel="Filter users by name, email, or phone number"
+            />
+            {userSearchQuery.trim() ? (
+              <TouchableOpacity
+                onPress={() => setUserSearchQuery('')}
+                style={styles.userSearchClearBtn}
+                accessibilityRole="button"
+                accessibilityLabel="Clear user search"
+              >
+                <Text style={styles.userSearchClearText}>Clear</Text>
+              </TouchableOpacity>
+            ) : null}
+          </View>
           <View style={styles.cohortToolbar}>
             <View style={styles.cohortStatsRowInline}>
               <View style={styles.cohortStatPill}>
@@ -5399,6 +5608,38 @@ const styles = StyleSheet.create({
     borderBottomWidth: 1,
     borderBottomColor: 'rgba(82,142,220,0.1)',
   },
+  userSearchBar: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    alignItems: 'center',
+    gap: 8,
+    paddingHorizontal: 16,
+    paddingTop: 10,
+    paddingBottom: 6,
+    borderBottomWidth: 1,
+    borderBottomColor: 'rgba(82,142,220,0.08)',
+  },
+  userSearchInput: {
+    flex: 1,
+    minWidth: 180,
+    borderWidth: 1,
+    borderColor: 'rgba(82,142,220,0.3)',
+    borderRadius: 8,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    color: '#E8F0F8',
+    fontSize: 13,
+    backgroundColor: 'rgba(5,6,13,0.35)',
+  },
+  userSearchClearBtn: {
+    paddingHorizontal: 8,
+    paddingVertical: 6,
+  },
+  userSearchClearText: {
+    color: '#7A9ABE',
+    fontSize: 12,
+    fontWeight: '600',
+  },
   cohortStatsRowInline: {
     flexDirection: 'row',
     flexWrap: 'wrap',
@@ -5547,6 +5788,8 @@ const styles = StyleSheet.create({
   },
   headerExportRow: {
     alignSelf: 'flex-start',
+    flexDirection: 'row',
+    gap: 8,
     marginBottom: 8,
   },
   exportCsvButton: {
@@ -5826,6 +6069,17 @@ const styles = StyleSheet.create({
     flex: 1,
     minWidth: 0,
   },
+  attemptTabsRowScroll: {
+    maxHeight: 108,
+    borderBottomWidth: 1,
+    borderBottomColor: 'rgba(82,142,220,0.12)',
+  },
+  attemptTabsRowContent: {
+    paddingHorizontal: 8,
+    paddingVertical: 8,
+    gap: 8,
+    flexDirection: 'row',
+  },
   attemptTabsColumn: {
     flex: 1,
     minWidth: 0,
@@ -5835,10 +6089,14 @@ const styles = StyleSheet.create({
     alignSelf: 'stretch',
   },
   attemptTab: {
-    paddingVertical: 14,
+    minWidth: 168,
+    maxWidth: 240,
+    paddingVertical: 10,
     paddingHorizontal: 12,
-    borderBottomWidth: 1,
-    borderBottomColor: 'rgba(82,142,220,0.08)',
+    borderWidth: 1,
+    borderColor: 'rgba(82,142,220,0.16)',
+    borderRadius: 8,
+    backgroundColor: 'rgba(13,17,32,0.55)',
   },
   attemptTabActive: {
     backgroundColor: 'rgba(30,111,217,0.14)',
@@ -5847,6 +6105,10 @@ const styles = StyleSheet.create({
     color: '#C8E4FF',
     fontSize: 12,
     letterSpacing: 0.3,
+  },
+  attemptTabLabelActive: {
+    color: '#E8F4FF',
+    fontWeight: '600',
   },
   attemptTabOutcome: {
     fontSize: 11,

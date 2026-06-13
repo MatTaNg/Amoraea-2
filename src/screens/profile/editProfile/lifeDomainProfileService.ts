@@ -2,12 +2,19 @@ import { supabase } from '@/data/supabase/client';
 import { profilesRepo } from '@/data/repos/profilesRepo';
 import {
   DEFAULT_ONBOARDING_LIFE_DOMAINS,
+  normalizeLifeDomainsFromProfile,
   ONBOARDING_LIFE_DOMAIN_KEYS,
   type OnboardingLifeDomainKey,
   type OnboardingLifeDomainValues,
-} from '@/shared/components/LifeDomainDistribution';
+} from '@/shared/constants/normalizeLifeDomainsFromProfile';
+export {
+  DEFAULT_ONBOARDING_LIFE_DOMAINS,
+  normalizeLifeDomainsFromProfile,
+  ONBOARDING_LIFE_DOMAIN_KEYS,
+  type OnboardingLifeDomainKey,
+  type OnboardingLifeDomainValues,
+} from '@/shared/constants/normalizeLifeDomainsFromProfile';
 import {
-  LIFE_DOMAIN_ONBOARDING_QUESTIONS,
   type LifeDomainId,
 } from '@/shared/constants/lifeDomainOnboardingQuestions';
 
@@ -29,28 +36,6 @@ const DOMAIN_ID_TO_ONBOARDING_KEY: Record<LifeDomainId, OnboardingLifeDomainKey>
 
 export function sumLifeDomainSliders(values: OnboardingLifeDomainValues): number {
   return ONBOARDING_LIFE_DOMAIN_KEYS.reduce((s, k) => s + (values[k] ?? 0), 0);
-}
-
-/** Parse slider values from merged profile JSON (camelCase or snake_case). */
-export function normalizeLifeDomainsFromProfile(raw: unknown): OnboardingLifeDomainValues {
-  const out: OnboardingLifeDomainValues = { ...DEFAULT_ONBOARDING_LIFE_DOMAINS };
-  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return out;
-  const o = raw as Record<string, unknown>;
-  const pick = (key: OnboardingLifeDomainKey, ...aliases: string[]) => {
-    for (const alias of [key, ...aliases]) {
-      const v = o[alias];
-      if (typeof v === 'number' && Number.isFinite(v)) {
-        out[key] = Math.max(0, Math.min(100, Math.round(v)));
-        return;
-      }
-    }
-  };
-  pick('intimacy', 'intimacy');
-  pick('finance', 'finance');
-  pick('spirituality', 'spirituality');
-  pick('family', 'family');
-  pick('physicalHealth', 'physical_health', 'physicalHealth', 'health');
-  return out;
 }
 
 /** Load slider distribution saved during onboarding (`life_domain_settings`). */

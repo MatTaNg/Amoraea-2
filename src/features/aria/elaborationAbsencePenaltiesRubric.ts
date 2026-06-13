@@ -29,7 +29,7 @@ The user infers what is happening **inside** the character — felt experience, 
 Examples: "Emma's response suggests this isn't about one dinner — she's questioning whether she matters in this relationship at all"; "Daniel may be flooded and unable to access language when overwhelmed, which Sophie reads as indifference"; "Sarah didn't want the job analyzed — she wanted James in the moment with her, to feel what she felt."
 
 **Apply:**
-- **Mentalizing:** If perspective-taking in this slice stays **Level 1** throughout, cap **mentalizing at 5** regardless of vocabulary. **7+** requires **Level 2** inference in the user's own words.
+- **Mentalizing:** If perspective-taking in this slice stays **Level 1** throughout, cap **mentalizing at 5** regardless of vocabulary. **7+** requires **Level 2** inference in the user's own words. When **Level 2** is present with genuine depth, score **7–8** (prompted or unprompted) — see FLOOR AND BONUS CALIBRATION PRESERVATION NOTE; do not compress strong Level 2 inference to 5–6.
 - **Attunement:** Surface emotion labels alone ("upset," "overwhelmed") **without** elaborating **why it hurts** for **that** character in **this** situation → cap **attunement at 5**. **7+** requires grasp of **why** it lands as it does — stakes, meaning, identity — not only that they feel bad.
 - **Repair:** Compensatory or logistical moves **without** awareness of the **emotional core** of the rupture → cap **repair at 5**. **6+** requires the repair to address **underlying emotional need or relational meaning**, not only the surface incident.
   - Misses the core (cap appropriately): "I would make up the time somehow, plan another date."

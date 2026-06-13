@@ -1,6 +1,7 @@
 import {
   applyInterviewNameWhisperCorrection,
   formatWithName,
+  isInterviewNameProceduralMishear,
   isInterviewNameWhisperEcho,
   isLikelyAmbientSpeech,
   isPlausibleInterviewName,
@@ -41,9 +42,19 @@ describe('interviewNameValidation', () => {
   it('corrects common Whisper mishears of Matt', () => {
     expect(applyInterviewNameWhisperCorrection('Maths.')).toBe('Matt');
     expect(applyInterviewNameWhisperCorrection('Mads')).toBe('Matt');
+    expect(applyInterviewNameWhisperCorrection('Mad')).toBe('Matt');
+    expect(applyInterviewNameWhisperCorrection('Met.')).toBe('Matt');
     expect(applyInterviewNameWhisperCorrection('Maps.')).toBe('Matt');
     expect(applyInterviewNameWhisperCorrection('Max?')).toBe('Matt');
     expect(applyInterviewNameWhisperCorrection('Sean')).toBe('Sean');
+  });
+
+  it('flags procedural yes/bye mishears on the name question', () => {
+    expect(isInterviewNameProceduralMishear('Bye.')).toBe(true);
+    expect(isInterviewNameProceduralMishear('Yep.')).toBe(true);
+    expect(isInterviewNameProceduralMishear('Bye-bye.')).toBe(true);
+    expect(isInterviewNameProceduralMishear('Matt')).toBe(false);
+    expect(isInterviewNameProceduralMishear('Sean')).toBe(false);
   });
 
   it('rejects single-word echoes of the name prompt', () => {

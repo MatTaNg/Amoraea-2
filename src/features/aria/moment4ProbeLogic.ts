@@ -33,6 +33,9 @@ export function evaluateMoment4RelationshipType(text: string): {
  * Commitment-threshold follow-up in Moment 4 (repair vs leave framing).
  * Shared with AriaScreen for injection detection, resume restore, and Moment 5 handoff.
  */
+export const MOMENT_4_GRUDGE_QUESTION_TEXT =
+  "Think of someone you've had a really hard time with — maybe a falling out, a grudge, or just someone who got under your skin. Tell me what happened there, and where things stand now." as const;
+
 export function looksLikeMoment4ThresholdQuestion(text: string): boolean {
   const normalized = (text ?? '')
     .replace(/\u2019/g, "'")
@@ -99,7 +102,12 @@ export function looksLikeMoment4GrudgePrompt(text: string): boolean {
   return (
     t.includes('held a grudge') ||
     (t.includes("really didn't like") && (t.includes('someone') || t.includes('your life'))) ||
-    (t.includes('grudge') && t.includes('someone'))
+    (t.includes('grudge') && t.includes('someone')) ||
+    (t.includes('really hard time with') &&
+      (t.includes('what happened') || t.includes('where things stand'))) ||
+    (t.includes('got under your skin') &&
+      (t.includes('what happened') || t.includes('where things stand'))) ||
+    (t.includes('falling out') && t.includes('what happened'))
   );
 }
 

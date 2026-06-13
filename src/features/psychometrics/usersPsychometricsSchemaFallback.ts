@@ -93,6 +93,10 @@ export function userHasPsychometricScoresForScoring(row: Record<string, unknown>
   return Object.values(scores).some((v) => v != null && Number.isFinite(v));
 }
 
+export function npiEntitlementScoreFromUserRow(row: Record<string, unknown>): number | null {
+  return coercePsychometricScore(row.psychometrics_npi_entitlement_score);
+}
+
 export function psychometricFloorScoresFromUserRow(
   row: Record<string, unknown>,
 ): PsychometricFloorUserScores {
@@ -102,6 +106,7 @@ export function psychometricFloorScoresFromUserRow(
     dweckScore: coercePsychometricScore(row.psychometrics_dweck_score),
     scsSfScore: coercePsychometricScore(row.psychometrics_scs_sf_score),
     sd3NarcissismScore: sd3NarcissismScoreForFloorFromUserRow(row),
+    npiEntitlementScore: npiEntitlementScoreFromUserRow(row),
     brsScore: coercePsychometricScore(row.psychometrics_brs_score),
     anxietyTraitScore: coercePsychometricScore(row.psychometrics_anxiety_trait_score),
     aaq2Score: coercePsychometricScore(row.psychometrics_aaq2_score),
@@ -231,6 +236,7 @@ export const PSYCHOMETRIC_FLOOR_SCORES_USER_SELECT = [
   'psychometrics_dweck_score',
   'psychometrics_scs_sf_score',
   'psychometrics_sd3_narcissism_score',
+  'psychometrics_npi_entitlement_score',
   'psychometrics_brs_score',
   'psychometrics_anxiety_trait_score',
   'psychometrics_aaq2_score',

@@ -323,26 +323,30 @@ class ModalOnboardingService {
     );
   }
 
-  /** When saved step is a life-domain question screen, resume that question or advance if already complete. */
+  /** When saved step is a life-domain question screen, resume that question if incomplete. */
   private resolveLifeDomainQuestionResumeStep(resumeStep: string, ctx: any): string | null {
     const wantKids = (ctx as any)?.wantKids;
     const legacyNormalized = normalizeLifeDomainQuestionOnboardingStep(resumeStep, wantKids);
-    const isLifeDomainStep =
+
+    if (isLifeDomainOptionalOpenEndedStep(resumeStep)) {
+      const incompleteOptional = this.firstIncompleteLifeDomainOptionalStep(ctx);
+      if (incompleteOptional) return incompleteOptional;
+      return null;
+    }
+
+    const isRequiredQuestionStep =
       isLifeDomainRequiredQuestionStep(resumeStep) ||
       legacyNormalized != null ||
-      resumeStep.startsWith('lifeDomainQuestions') ||
-      isLifeDomainOptionalOpenEndedStep(resumeStep);
-    if (!isLifeDomainStep) return null;
+      resumeStep.startsWith('lifeDomainQuestions');
+
+    if (!isRequiredQuestionStep) return null;
+
     const incomplete = this.firstIncompleteLifeDomainQuestionStep(ctx);
     if (incomplete) return incomplete;
-    if (!this.lifeDomainsCompletionSatisfied(ctx)) return 'lifeDomains';
-    const incompleteOptional = this.firstIncompleteLifeDomainOptionalStep(ctx);
-    if (incompleteOptional) return incompleteOptional;
-    if (shouldShowTypologyOnboardingStep((ctx as any)?.typology)) return 'typology';
-    return 'personalityDocuments';
+    return null;
   }
 
-  /** Lifestyle / archetypes / photos / attraction must be done before life-domain sliders. */
+  /** Match preferences / archetypes / photos / attraction must be done before life-domain sliders. */
   private firstIncompletePreLifeDomainBefore(resumeStep: string, ctx: any): string | null {
     const resumeIdx = ONBOARDING_STEPS_ORDER.indexOf(resumeStep as (typeof ONBOARDING_STEPS_ORDER)[number]);
     if (resumeIdx < 0) return null;
@@ -486,12 +490,12 @@ class ModalOnboardingService {
         'sexualFocus',
         'datingPaceAfterExcitement',
         'recentDatingEarlyWeeks',
+        ...LIFE_DOMAIN_REQUIRED_QUESTION_ONBOARDING_STEPS.map((s) => s.step),
         'spaceForNewRelationship',
         'matchPreferences',
         'archetypes',
         'photos',
         'attractionPreferences',
-        ...LIFE_DOMAIN_REQUIRED_QUESTION_ONBOARDING_STEPS.map((s) => s.step),
         'lifeDomains',
         ...LIFE_DOMAIN_OPTIONAL_OPEN_ENDED_ONBOARDING_STEPS.map((s) => s.step),
         'typology',
@@ -595,6 +599,8 @@ class ModalOnboardingService {
       return 'datingPaceAfterExcitement';
     if (!String((ctx as any)?.recentDatingEarlyWeeks ?? (ctx as any)?.recent_dating_early_weeks ?? '').trim())
       return 'recentDatingEarlyWeeks';
+    const incompleteLifeDomainQuestions = this.firstIncompleteLifeDomainQuestionStep(ctx);
+    if (incompleteLifeDomainQuestions) return incompleteLifeDomainQuestions;
     if (
       !String(
         (ctx as any)?.spaceForNewRelationship ?? (ctx as any)?.space_for_new_relationship ?? '',
@@ -606,8 +612,6 @@ class ModalOnboardingService {
     if (!(ctx as any)?.photos || !Array.isArray((ctx as any).photos) || (ctx as any).photos.length === 0)
       return 'photos';
     if (!this.attractionPreferencesCompletionSatisfied(ctx)) return 'attractionPreferences';
-    const incompleteLifeDomainQuestions = this.firstIncompleteLifeDomainQuestionStep(ctx);
-    if (incompleteLifeDomainQuestions) return incompleteLifeDomainQuestions;
     if (!this.lifeDomainsCompletionSatisfied(ctx)) return 'lifeDomains';
     const incompleteOptionalOpenEnded = this.firstIncompleteLifeDomainOptionalStep(ctx);
     if (incompleteOptionalOpenEnded) return incompleteOptionalOpenEnded;

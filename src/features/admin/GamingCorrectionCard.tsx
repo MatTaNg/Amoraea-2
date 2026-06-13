@@ -10,12 +10,10 @@ const INSTRUMENT_LABELS: Record<string, string> = {
   brs: 'BRS',
   aaq2: 'AAQ-II',
   rfq: 'RFQ',
-  mspss: 'MSPSS',
   sd3_narcissism: 'SD3',
   dweck: 'Dweck/RBI',
   rses: 'RSES',
   scs_sf: 'SCS-SF',
-  scs: 'SCS',
 };
 
 export function gamingCorrectionBadgeColor(level: 0 | 1 | 2 | 3): string {

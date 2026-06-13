@@ -1,14 +1,19 @@
 import type { InterviewAttemptRevealFields } from '@utilities/postInterviewProcessingGate';
 import { resolveStandardPostInterviewStackRoute } from '@utilities/postInterviewProcessingGate';
 
+import { PSYCHOMETRICS_ENABLED } from './interviewCompletionStatus';
 import type { InitialInterviewRouteResult, InterviewStackRoute } from './resolveInitialInterviewRoute';
 
 export function shouldFetchPostInterviewDeferralSnapshot(
   initialRoute: Pick<InitialInterviewRouteResult, 'screen'> | undefined | null,
   profileShowsStandardInterviewComplete: boolean,
 ): boolean {
-  // Legacy users still owe pre-interview psychometrics — do not treat them as post-interview ready.
-  if (initialRoute?.screen === 'PsychometricAssessment') {
+  // Psychometrics-enabled partial report / battery must not be overridden by post-interview deferral.
+  if (
+    initialRoute?.screen === 'PsychometricAssessment' ||
+    initialRoute?.screen === 'InterviewComplete' ||
+    initialRoute?.screen === 'PsychometricsComplete'
+  ) {
     return false;
   }
 
@@ -53,9 +58,11 @@ export function resolveInterviewStackBootstrap(input: {
   let legacyPsychometricsMode = initialRoute?.legacyPsychometricsMode === true;
 
   if (profileShowsStandardInterviewComplete && initialRouteName === 'Aria') {
-    initialRouteName = 'PostInterview';
-    interviewAlreadyCompleted = true;
-    legacyPsychometricsMode = false;
+    if (!PSYCHOMETRICS_ENABLED) {
+      initialRouteName = 'PostInterview';
+      interviewAlreadyCompleted = true;
+      legacyPsychometricsMode = false;
+    }
   }
 
   const serverResolvedPostInterviewScreen = initialRoute?.screen;
@@ -66,6 +73,8 @@ export function resolveInterviewStackBootstrap(input: {
     initialRouteName = serverResolvedPostInterviewScreen;
   } else if (
     initialRouteName !== 'PsychometricAssessment' &&
+    initialRouteName !== 'InterviewComplete' &&
+    initialRouteName !== 'PsychometricsComplete' &&
     shouldFetchPostInterviewDeferralSnapshot(initialRoute, profileShowsStandardInterviewComplete) &&
     deferralSnapshot != null &&
     !isAdminEmail

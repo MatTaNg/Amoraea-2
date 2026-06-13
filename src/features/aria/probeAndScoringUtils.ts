@@ -658,7 +658,8 @@ export function evaluateMoment5AppreciationSpecificity(text: string): {
 export const MOMENT_5_ACCOUNTABILITY_QUESTION_TEXT =
   'Think of a time when you had a conflict with someone important to you. What happened, and how did things get resolved between you two?';
 
-export const MOMENT_5_ACCOUNTABILITY_PROBE_TEXT = 'What was your part in how it unfolded?';
+export const MOMENT_5_ACCOUNTABILITY_PROBE_TEXT =
+  'What do you think you did or said that contributed to the conflict?';
 
 /** Client-only — when the example may not contain a genuine conflict before accountability scoring. */
 export const MOMENT_5_CONFLICT_VALIDITY_CLARIFICATION_TEXT =
@@ -670,14 +671,14 @@ export const MOMENT_5_CONFLICT_VALIDITY_CLARIFICATION_TEXT =
  * are inherently vulnerable; leading with appreciation avoids sounding cold before accountability.
  */
 export const MOMENT_5_ACCOUNTABILITY_PROBE_WITH_GRIEF_ACK_TEXT =
-  'I appreciate you getting vulnerable with me. What was your part in how it unfolded?';
+  'I appreciate you getting vulnerable with me. What do you think you did or said that contributed to the conflict?';
 
 /** Softer probe when the user gave philosophy/process framing without a specific conflict narrative. */
 export const MOMENT_5_ACCOUNTABILITY_PROBE_PHILOSOPHY_TEXT =
-  'That makes sense as a general approach. Can you think of a specific time you had a conflict with someone important to you — and what was your part in how it played out?';
+  'That makes sense as a general approach. Can you think of a specific time you had a conflict with someone important to you — and what do you think you did or said that contributed to it?';
 
 export const MOMENT_5_ACCOUNTABILITY_PROBE_PHILOSOPHY_WITH_GRIEF_ACK_TEXT =
-  'I appreciate you getting vulnerable with me. That makes sense as a general approach. Can you think of a specific time you had a conflict with someone important to you — and what was your part in how it played out?';
+  'I appreciate you getting vulnerable with me. That makes sense as a general approach. Can you think of a specific time you had a conflict with someone important to you — and what do you think you did or said that contributed to it?';
 
 const STRONG_ACCOUNTABILITY_MARKERS = [
   'my part',
@@ -946,9 +947,11 @@ export function stripMoment5SpecificityRedirectStreamingEcho(
   }
   const low = t0.toLowerCase();
   const accountabilityTail =
+    /\bwhat do you think you did or said that contributed\b/.test(low) ||
     /\bwhat was your part\b/.test(low) ||
     /\bwhat part did you play\b/.test(low) ||
-    /\byour part in how\b/.test(low);
+    /\byour part in how\b/.test(low) ||
+    /\bcontributed to the conflict\b/.test(low);
   if (accountabilityTail) {
     const wmiThrough = low.indexOf('walk me through');
     const wmiThru = low.indexOf('walk me thru');
@@ -995,6 +998,124 @@ export function moment5ResponseAddsTensionDetail(userText: string): boolean {
   );
 }
 
+export type ConflictValidityResult = 'no_conflict' | 'resolved_well' | 'genuine_conflict';
+
+export const M5_NO_CONFLICT_SIGNAL_PHRASES = [
+  'no it was fine',
+  'nothing got tense',
+  'it was never really tense',
+  'pretty smooth',
+  'resolved smoothly',
+  'not really tense',
+  'no tension',
+  'it was actually smooth',
+  'honestly pretty smooth',
+  'not much tension',
+  'it stayed calm',
+  'it was fine',
+  'ended fine',
+  'resolved fine',
+  'worked it out',
+  'made up',
+  'moved on',
+  'not a big deal',
+  'calmed down',
+  'sorted it out',
+  'figured it out',
+] as const;
+
+export const M5_RESOLVED_WELL_SIGNAL_PHRASES = [
+  'it did get tense',
+  'there was tension',
+  'it was tense for a bit',
+  'it was tense',
+  'yeah it got heated',
+  'things got a bit tense',
+  'it was uncomfortable',
+  'there was a moment',
+  'we had words',
+  'it escalated briefly',
+  'feelings were hurt',
+  'there was some tension',
+] as const;
+
+const PRIOR_M5_TENSION_PATTERN_SOURCE =
+  'apologize|disrespect|upset|hurt|conflict|argument|tense|heated|altercation|altercations|fight|yell|yelled|yelling|shouted|shouting|angry|anger|frustrated|frustration|disagreement|confrontation|blowup|blow\\s*up';
+
+/** Prior M5 narrative cues that disambiguate smooth clarification answers toward resolved_well. */
+export const PRIOR_M5_TENSION_SIGNAL_PATTERN = new RegExp(PRIOR_M5_TENSION_PATTERN_SOURCE, 'i');
+
+export function priorM5TranscriptHadTension(priorM5Transcript: string): boolean {
+  return PRIOR_M5_TENSION_SIGNAL_PATTERN.test(priorM5Transcript);
+}
+
+function priorM5TensionTokenMatches(priorM5Transcript: string): string[] {
+  const matches: string[] = [];
+  for (const m of priorM5Transcript.toLowerCase().matchAll(new RegExp(PRIOR_M5_TENSION_PATTERN_SOURCE, 'gi'))) {
+    const token = m[0]?.trim();
+    if (token && !matches.includes(token)) matches.push(token);
+  }
+  return matches;
+}
+
+export type ConflictValidityClassificationDebug = {
+  result: ConflictValidityResult;
+  clarificationResponse: string;
+  hasNoConflict: boolean;
+  hasResolvedWell: boolean;
+  priorHadTension: boolean;
+  matchedNoConflictPhrases: string[];
+  matchedResolvedWellPhrases: string[];
+  priorTensionMatches: string[];
+};
+
+export function analyzeConflictValidityClassification(
+  clarificationResponse: string,
+  priorM5Transcript: string,
+): ConflictValidityClassificationDebug {
+  const text = clarificationResponse.toLowerCase();
+  const matchedNoConflictPhrases = M5_NO_CONFLICT_SIGNAL_PHRASES.filter((s) => text.includes(s));
+  const matchedResolvedWellPhrases = M5_RESOLVED_WELL_SIGNAL_PHRASES.filter((s) => text.includes(s));
+  const priorTensionMatches = priorM5TensionTokenMatches(priorM5Transcript);
+  const hasNoConflict = matchedNoConflictPhrases.length > 0;
+  const hasResolvedWell = matchedResolvedWellPhrases.length > 0;
+  const priorHadTension = priorTensionMatches.length > 0;
+  const result = classifyConflictValidity(clarificationResponse, priorM5Transcript);
+  return {
+    result,
+    clarificationResponse,
+    hasNoConflict,
+    hasResolvedWell,
+    priorHadTension,
+    matchedNoConflictPhrases: [...matchedNoConflictPhrases],
+    matchedResolvedWellPhrases: [...matchedResolvedWellPhrases],
+    priorTensionMatches,
+  };
+}
+
+/**
+ * Classifies the user's answer to the conflict-validity clarification question.
+ * Uses prior M5 narrative context to disambiguate smooth-resolution phrasing.
+ */
+export function classifyConflictValidity(
+  clarificationResponse: string,
+  priorM5Transcript: string,
+): ConflictValidityResult {
+  const text = clarificationResponse.toLowerCase();
+
+  const hasNoConflict = M5_NO_CONFLICT_SIGNAL_PHRASES.some((s) => text.includes(s));
+  const hasResolvedWell = M5_RESOLVED_WELL_SIGNAL_PHRASES.some((s) => text.includes(s));
+
+  const priorHadTension = priorM5TranscriptHadTension(priorM5Transcript);
+
+  if (hasResolvedWell) return 'resolved_well';
+  if (hasNoConflict && !priorHadTension) return 'no_conflict';
+  if (hasNoConflict && priorHadTension) return 'resolved_well';
+
+  return 'genuine_conflict';
+}
+
+/** @deprecated Prefer {@link classifyConflictValidity} after the clarification question fires. */
 export function moment5ConflictValidityIsLow(userText: string): boolean {
   const t = userText.replace(/\s+/g, ' ').trim();
   if (t.length < 24) return false;
@@ -1095,6 +1216,25 @@ export function combineMoment5UserTurnText(
     if (c) parts.push(c);
   }
   return parts.join(' ');
+}
+
+/** Prior M5 user turns plus the in-flight reply — for cross-turn accountability/resolution gates. */
+export function combineMoment5UserTextIncludingCurrent(
+  transcript: readonly Moment5TranscriptTurn[] | null | undefined,
+  currentUserText: string,
+): string {
+  const prior = combineMoment5UserTurnText(transcript);
+  const current = currentUserText.replace(/\s+/g, ' ').trim();
+  if (!prior) return current;
+  if (!current) return prior;
+  return `${prior} ${current}`;
+}
+
+/** M5 user narrative before the conflict-validity clarification answer (excludes clarification response). */
+export function extractPriorM5TranscriptBeforeClarification(
+  transcript: readonly Moment5TranscriptTurn[] | null | undefined,
+): string {
+  return combineMoment5UserTurnText(transcript);
 }
 
 /** True when any Moment 5 user turn (combined) already names a person/episode — not only the latest reply. */
@@ -1282,13 +1422,18 @@ export function looksLikeMoment5AccountabilityProbeAssistantPrompt(text: string 
   if (!raw) return false;
   const t = raw.toLowerCase();
   const directAccountabilityAsk =
+    t.includes('what do you think you did or said that contributed to the conflict') ||
+    t.includes('what do you think you did or said that contributed to it') ||
+    t.includes('contributed to the conflict') ||
     t.includes('what was your part in how it unfolded') ||
     (t.includes('your part') && t.includes('unfolded')) ||
-    (t.includes('appreciate you getting vulnerable') && t.includes('your part')) ||
+    (t.includes('appreciate you getting vulnerable') &&
+      (t.includes('contributed to the conflict') || t.includes('your part'))) ||
     /\bwhat was your part in how\b/.test(t) ||
     /\bwhat part did you play\b/.test(t) ||
     /\byour part in how it (all )?(started|began|unfolded|played out|happened|went)\b/.test(t) ||
-    (t.includes('specific time you had a conflict') && t.includes('your part'));
+    (t.includes('specific time you had a conflict') &&
+      (t.includes('contributed') || t.includes('your part')));
   if (!directAccountabilityAsk) return false;
   /** Soft "hear more about your part" tail on conflict-validity clarifications — not the scripted probe. */
   if (
@@ -1313,9 +1458,10 @@ export function stripEmbeddedMoment5AccountabilityProbeAsk(draft: string): strin
   const patterns: RegExp[] = [
     /\bI appreciate you getting vulnerable with me\.?\s*/gi,
     /\bThat makes sense as a general approach\.?\s*/gi,
+    /\bwhat do you think you did or said that contributed to (the conflict|it)\b[\s\S]{0,120}?\?/gi,
     /\bwhat was your part in how\b[\s\S]{0,120}?\?/gi,
     /\bwhat part did you play\b[\s\S]{0,120}?\?/gi,
-    /\b(?:can|could)\s+you\s+think\s+of\s+a\s+specific\s+time\b[\s\S]{0,420}?\byour part\b[\s\S]{0,120}?\?/gi,
+    /\b(?:can|could)\s+you\s+think\s+of\s+a\s+specific\s+time\b[\s\S]{0,420}?\b(contributed|your part)\b[\s\S]{0,120}?\?/gi,
   ];
   let prev = '';
   while (prev !== t) {
@@ -1347,7 +1493,11 @@ export function stripMoment5AccountabilityProbeStreamingEcho(
   if (looksLikeMoment5AccountabilityProbeAssistantPrompt(t0)) {
     return null;
   }
-  if (/\bwhat was your part in how\b/i.test(t0) || /\bwhat part did you play\b/i.test(t0)) {
+  if (
+    /\bwhat do you think you did or said that contributed\b/i.test(t0) ||
+    /\bwhat was your part in how\b/i.test(t0) ||
+    /\bwhat part did you play\b/i.test(t0)
+  ) {
     return null;
   }
   return t0;
@@ -2266,13 +2416,21 @@ export function evaluateScenarioAQ1ContemptProbePreProbeSkip(text: string): {
     return { skip: true, reason: 'register_addressed' };
   }
 
-  /** Condition 2 — register of the line (lexicon + Emma/line context, or explicit deeper-than-frustration phrases). */
+  /** Condition 2 — register of the line (lexicon + closing-line engagement, or explicit deeper-than-frustration phrases). */
   const registerLexicon =
-    /\b(sarcasm|sarcastic|passive[- ]aggressive|sharp(?:ness)?|resigned|resignation|bitter|contemptuous|cutting|dismissive|cold|loaded|pointed|snide)\b/i;
-  const lineOrEmmaContext =
-    /\b(emma|she|her|that\s+line|that\s+comment|what\s+she\s+said|final\s+line|last\s+thing\s+she|when\s+she\s+says)\b/i.test(
+    /\b(sarcasm|sarcastic|passive[- ]aggressive|sharp(?:ness)?|resigned|resignation|bitter|contemptuous|cutting|dismissive|cold|loaded|pointed|snide|condescend(?:ing)?)\b/i;
+  const interpretiveCueForClosingLine =
+    /\b(what\s+she\s+meant|what\s+emma\s+meant|what\s+emma\s+was\s+(getting\s+at|trying\s+to\s+say)|she\s+meant|when\s+she\s+said|she\s+was\s+basically\s+saying|emma'?s\s+point\s+was|that\s+(line|statement|comment|response|remark|phrase|phrasing)|the\s+subtext\s+was|the\s+undertone\s+was|the\s+way\s+she\s+said|the\s+way\s+that\s+landed|that\s+came\s+across\s+as|it\s+landed\s+as|tone|that\s+comment\s+from\s+emma|emma'?s\s+(response|wording)\s+there)\b/.test(
       lower,
     );
+  /** Bare "Emma + condescending" in a general Q1 answer is not enough — must tie register to the closing line. */
+  const engagesEmmaClosingLineSpecifically =
+    userReferencesEmmaClosingLineQuote(t) ||
+    (lower.includes('very clear') && /\bemma\b/.test(lower)) ||
+    /\b(that\s+line|that\s+comment|what\s+she\s+said|final\s+line|last\s+thing\s+she|when\s+she\s+says|that\s+last\s+thing|closing\s+line)\b/i.test(
+      lower,
+    ) ||
+    (/\bemma\b/.test(lower) && interpretiveCueForClosingLine);
   const deeperThanSurfaceFrustration =
     /\bshe'?s\s+given\s+up\b/i.test(lower) ||
     /\bgiven\s+up\s+on\b/i.test(lower) ||
@@ -2291,7 +2449,7 @@ export function evaluateScenarioAQ1ContemptProbePreProbeSkip(text: string): {
   if (deeperThanSurfaceFrustration) {
     return { skip: true, reason: 'register_addressed' };
   }
-  if (registerLexicon.test(lower) && lineOrEmmaContext) {
+  if (registerLexicon.test(lower) && engagesEmmaClosingLineSpecifically) {
     return { skip: true, reason: 'register_addressed' };
   }
 
@@ -2480,6 +2638,23 @@ function isResumeWelcomeBackAssistantText(text: string): boolean {
   return t.includes('welcome back') && t.includes('pick up where we left off');
 }
 
+/** Brief Scenario A acknowledgment/reflection after Q1 — contempt probe not yet delivered. */
+function isScenarioAPreContemptAssistantReflection(text: string): boolean {
+  const t = normalizeScenarioAQ1PromptMatchText(text);
+  if (!t) return false;
+  if (isScenarioAQ1OpeningPromptText(text)) return false;
+  if (isScenarioAVignetteOnlyAssistantText(text)) return false;
+  if (isResumeWelcomeBackAssistantText(text)) return false;
+  if (looksLikeScenarioAContemptProbeQuestion(text)) return false;
+  if (
+    t.includes('how would you repair this relationship if you were ryan') ||
+    (/\b(if you were ryan|you were ryan)\b/.test(t) && /\brepair\b/.test(t))
+  ) {
+    return false;
+  }
+  return /\b(emma|ryan)\b/.test(t);
+}
+
 /**
  * True when the user's turn is a substantive Scenario A Q1 answer — including after resume when
  * the last stored assistant line is welcome-back or vignette-only (Q1 may have been spoken via TTS only).
@@ -2502,7 +2677,11 @@ export function isReplyingToScenarioAQ1AfterDelivery(params: {
   const resumeOrVignetteContext = texts.some(
     (t) => isScenarioAVignetteOnlyAssistantText(t) || isResumeWelcomeBackAssistantText(t)
   );
-  return resumeOrVignetteContext && hasScenarioAQ1VignetteEngagement(params.userAnswerText);
+  const preContemptReflectionContext = texts.some(isScenarioAPreContemptAssistantReflection);
+  return (
+    (resumeOrVignetteContext || preContemptReflectionContext) &&
+    hasScenarioAQ1VignetteEngagement(params.userAnswerText)
+  );
 }
 
 /** Debug/instrumentation: which Scenario C commitment-threshold regex bucket matched (if any). */
@@ -2640,7 +2819,9 @@ export function isScenarioCToPersonalHandoffAssistantContent(text: string): bool
     .replace(/\s+/g, ' ');
   const grudgeOrDislike =
     t.includes('held a grudge') ||
-    (t.includes("really didn't like") && /\b(someone|your life|people)\b/.test(t));
+    (t.includes("really didn't like") && /\b(someone|your life|people)\b/.test(t)) ||
+    (t.includes('really hard time with') && t.includes('what happened')) ||
+    (t.includes('got under your skin') && t.includes('what happened'));
   if (!grudgeOrDislike) return false;
   return (
     t.includes('three situations') ||
@@ -2662,6 +2843,7 @@ function assistantTextLooksLikePersonalMomentStart(content: string): boolean {
     .toLowerCase()
     .replace(/\s+/g, ' ');
   if (/held a grudge|really didn't like/.test(t)) return true;
+  if (/really hard time with|got under your skin/.test(t)) return true;
   if (/finished the three situations/.test(t)) return true;
   if (/end of (the )?three (situations|described situations|vignettes)/.test(t)) return true;
   if (/done with those three scenarios?/.test(t)) return true;

@@ -603,6 +603,8 @@ const INLINE_EMOTION_MODAL_NEXT_SEGMENT_MARKERS: readonly RegExp[] = [
   /now let'?s shift to something more personal/i,
   /there are only two questions left/i,
   /have you ever held a grudge/i,
+  /think of someone you(?:'|’)ve had a really hard time with/i,
+  /got under your skin/i,
   /\bhave you ever\b/i,
   /\bsarah has been job hunting\b/i,
   /\bsophie and daniel have had\b/i,
@@ -620,7 +622,7 @@ export function splitScenarioTransitionForEmotionModal(fullText: string): {
   }
   /** First substantial line that starts the next segment (Situation 2/3 vignette or personal card). */
   const vignetteStart =
-    /\n+(?=Sarah has been\b|Sophie and Daniel\b|There are only two questions left\b|Have you ever held a grudge\b|Personal reflection\b|Situation [23]\b)/i;
+    /\n+(?=Sarah has been\b|Sophie and Daniel\b|There are only two questions left\b|Have you ever held a grudge\b|Think of someone you(?:'|’)ve had\b|Personal reflection\b|Situation [23]\b)/i;
   const m = vignetteStart.exec(t);
   if (m != null && m.index >= 24) {
     return {

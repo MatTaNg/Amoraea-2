@@ -250,6 +250,7 @@ export const ModalOnboardingFlow: React.FC<ModalOnboardingFlowProps> = ({ onComp
 
       {currentStep === 'photos' && (
         <PhotosVideoModal
+          userId={user?.id}
           photos={onboardingData.photos || []}
           onPhotosChange={(photos) => updateData({ photos })}
           onNext={goToNextStep}

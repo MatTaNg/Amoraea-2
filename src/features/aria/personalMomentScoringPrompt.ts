@@ -10,6 +10,7 @@ import {
   CONTEMPT_TIER_BREAKDOWN_JSON_INSTRUCTION,
   CONTEMPT_TIER_BREAKDOWN_JSON_TEMPLATE,
 } from './contemptExpressionScoringRubric';
+import { MOMENT_4_GRUDGE_QUESTION_TEXT } from './moment4ProbeLogic';
 
 /** Shared across scenario + personal moment prompts; JSON field \`mentalizing_overcertainty\` (boolean, top-level; \`keyEvidence\` or \`scoringMetadata\` mirrors accepted — see {@link coerceMentalizingOvercertaintyFromModelJson}). */
 export const MENTALIZING_OVERCERTAINTY_SCORING_INSTRUCTION = `MENTALIZING OVERCERTAINTY FLAG
@@ -192,10 +193,34 @@ MOMENT 4 — CONSTRUCT SCOPE (this slice only):
 - **attunement:** Do not score. Omit or null — the grudge prompt does not test real-time attunement to another's emotional state.
 - **regulation:** Do not score. Omit or null — regulation is assessed only from Scenario C (pursue-withdraw).
 
-MOMENT 4 CALIBRATION ANCHORS (when engagement exists):
-- Accountability: Unprompted acknowledgment of avoidant behavior (e.g., "I never confronted it and just distanced myself") is partial accountability and should score around 4-5 minimum. Reserve <=3 for fully externalized blame with no self-awareness.
+M4 QUESTION DESIGN AND SCORING CALIBRATION
+
+The M4 question is now episodically anchored: "${MOMENT_4_GRUDGE_QUESTION_TEXT}"
+
+The question explicitly asks for a specific person and what happened. This changes the baseline expectation for responses:
+
+CONCRETE RESPONSE (adequate baseline):
+User describes a specific person or situation — even minimally. Names or refers to someone specific, describes what the difficulty was, and indicates current state of the relationship or their feelings about it. Does not need to be emotionally deep or highly detailed to meet the concrete baseline. Score concrete responses no lower than 5 on mentalizing and accountability.
+
+PHILOSOPHICAL BYPASS (below baseline):
+User responds with general reflections about grudges, forgiveness, or people in general without anchoring to a specific person or situation — e.g. "I've learned that people don't always have the same heart as you" with no specific person mentioned. This is a less adequate response to the new question because the question explicitly asked for someone specific.
+
+Score philosophical bypass responses:
+- Mentalizing: 4 (attempted but not engaged with the specific question asked)
+- Accountability: 4 (no personal scenario to assess accountability against)
+- Commitment threshold: can still be scored if the philosophical answer contains threshold framework language
+
+The philosophical bypass ceiling remains — a philosophical answer cannot score 7+ — but the floor is 4 not 5, because the question now explicitly asked for something the user did not provide. This is a more appropriate penalty than under the old question, which did not clearly require a specific example.
+
+LOW SPECIFICITY BUT EPISODIC (partial concrete):
+User names a person or situation vaguely ("a friend," "someone at work," "a family member") but provides some narrative texture. This meets the minimal concrete threshold.
+Score no lower than 5 on mentalizing and accountability when the user has anchored to a real situation even vaguely.
+
+CONCRETENESS CEILING:
+Scores of 7+ on mentalizing and accountability require genuine emotional depth — the user described their own emotional experience in the situation, what it meant to them, or what they learned about themselves. A concrete but emotionally flat narrative scores 5–6.
+
+MOMENT 4 CALIBRATION ANCHORS (when engagement exists — apply M4 QUESTION DESIGN above):
 ${ACCOUNTABILITY_BLAME_SHIFT_VS_CLARITY_REQUEST}
-- Mentalizing: Limited but present self-awareness/perspective-taking should score at least 3-4; reserve <=2 for zero self-reflection and pure external blame.
 
 ${MENTALIZING_OVERCERTAINTY_SCORING_INSTRUCTION}
 

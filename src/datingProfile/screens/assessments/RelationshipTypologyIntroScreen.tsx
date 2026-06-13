@@ -1,5 +1,5 @@
-import React from 'react';
-import { ScrollView, StyleSheet, Text, View } from 'react-native';
+import React, { useCallback } from 'react';
+import { ScrollView, StyleSheet, Text, View, Pressable } from 'react-native';
 import { useNavigation } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import type { DatingProfileStackParamList } from '@app/navigation/DatingProfileOnboardingNavigator';
@@ -14,6 +14,7 @@ import {
   TYPOLOGY_ONBOARDING_TOTAL_DURATION_LABEL,
   TYPOLOGY_PROFILE_SETUP_DURATION_MIN,
 } from '@/data/services/assessmentService';
+import { exitDatingProfileOnboardingToPostInterview } from '@/datingProfile/onboarding/exitDatingProfileOnboardingToPostInterview';
 import { theme } from '@/shared/theme/theme';
 
 const INSTRUMENT_LABELS: Record<(typeof ASSESSMENT_IDS)[number], string> = {
@@ -34,6 +35,10 @@ export function RelationshipTypologyIntroScreen() {
   const navigation = useNavigation<NativeStackNavigationProp<DatingProfileStackParamList>>();
   const { user } = useAuth();
 
+  const handleBackToPostInterview = useCallback(() => {
+    exitDatingProfileOnboardingToPostInterview(navigation, user?.id);
+  }, [navigation, user?.id]);
+
   const handleBegin = () => {
     void (async () => {
       if (!user?.id) return;
@@ -48,6 +53,9 @@ export function RelationshipTypologyIntroScreen() {
 
   return (
     <SafeAreaView style={styles.safe} edges={['top', 'left', 'right']}>
+      <Pressable style={styles.backBtn} onPress={handleBackToPostInterview} accessibilityRole="button">
+        <Text style={styles.backText}>← Back to your results</Text>
+      </Pressable>
       <ScrollView
         style={styles.scroll}
         contentContainerStyle={styles.scrollContent}
@@ -118,6 +126,17 @@ const styles = StyleSheet.create({
   safe: {
     flex: 1,
     backgroundColor: theme.colors.background,
+  },
+  backBtn: {
+    paddingHorizontal: 20,
+    paddingTop: 8,
+    paddingBottom: 4,
+    alignSelf: 'flex-start',
+  },
+  backText: {
+    fontSize: 15,
+    color: theme.colors.primary,
+    fontWeight: '500',
   },
   scroll: {
     flex: 1,

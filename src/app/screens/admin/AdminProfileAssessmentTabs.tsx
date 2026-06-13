@@ -37,6 +37,9 @@ import {
 } from '@features/psychometrics/sd3NarcissismFloor';
 import { sd3NarcissismScoreFromUserRow } from '@features/psychometrics/usersPsychometricsSchemaFallback';
 import { LifeDomainAnswersSection } from '@app/screens/admin/LifeDomainAnswersSection';
+import { PsychometricAnswersSection } from '@app/screens/admin/PsychometricAnswersSection';
+import { ScoreReceiptCard } from '@features/admin/ScoreReceiptCard';
+import type { ScoreReceiptAttemptInput } from '@features/admin/buildScoreReceipt';
 
 export type AdminUserProfileRecord = {
   id: string;
@@ -77,17 +80,7 @@ export type AdminUserProfileRecord = {
   psychometrics_sexual_communication_completed_at: string | null;
 };
 
-export type AdminAttemptAssessmentRecord = {
-  weighted_score: number | null;
-  passed: boolean | null;
-  score_modifier: number | null;
-  depth_signal_modifier: number | null;
-  psychometric_modifier_applied: number | null;
-  corrected_psychometric_modifier?: number | null;
-  gaming_correction?: GamingCorrectionResult | null;
-  modified_weighted_score_with_psychometrics: number | null;
-  final_gate_pass: boolean | null;
-  gate_fail_reasons?: unknown;
+export type AdminAttemptAssessmentRecord = ScoreReceiptAttemptInput & {
   disclosure_calibration: string | null;
   personal_moment_emotional_vocab_low: boolean | null;
   personal_moment_emotional_vocab_density: number | null;
@@ -925,12 +918,9 @@ export function FullAssessmentTab({
   const psychometricsCompletionTimestampMissing =
     psychometricsAppliedOnAttempt && !user.psychometrics_completed_at;
 
-  const interviewScore = attempt.weighted_score ?? null;
-  const depthModifier = attempt.depth_signal_modifier ?? attempt.score_modifier ?? null;
   const psychometricModifier = attempt.psychometric_modifier_applied ?? null;
   const correctedPsychometricModifier = attempt.corrected_psychometric_modifier ?? psychometricModifier;
   const gamingCorrection = attempt.gaming_correction ?? null;
-  const finalScore = attempt.modified_weighted_score_with_psychometrics ?? null;
   const finalPass = attempt.final_gate_pass ?? null;
   const interviewOnlyPass = attempt.passed;
 
@@ -947,10 +937,16 @@ export function FullAssessmentTab({
   const dweckInfo = getDweckBand(user.psychometrics_dweck_score ?? null);
   const aaq2Info = getAaq2Band(user.psychometrics_aaq2_score ?? null);
   const rsesInfo = getRsesBand(user.psychometrics_rses_score ?? null);
+  const hasLegacyScsScores =
+    user.psychometrics_scs_public_score != null || user.psychometrics_scs_private_score != null;
   const scsInfo = getScsBand(
     user.psychometrics_scs_public_score ?? null,
     user.psychometrics_scs_private_score ?? null,
   );
+  const hasLegacyMspssScores =
+    user.psychometrics_mspss_friends_score != null ||
+    user.psychometrics_mspss_family_score != null ||
+    user.psychometrics_mspss_score != null;
   const mspssInfo = getMspssBand(user.psychometrics_mspss_friends_score ?? null);
   const sd3Info = getSd3NarcissismBand(user.psychometrics_sd3_narcissism_score ?? null);
   const rfqInfo = getRfqBand(user.psychometrics_rfq_score ?? null);
@@ -973,84 +969,7 @@ export function FullAssessmentTab({
   return (
     <ScrollView style={tabStyles.container} contentContainerStyle={tabStyles.content}>
       <GamingCorrectionBanner gamingCorrection={gamingCorrection} />
-      <Text style={tabStyles.sectionHeader}>Score Summary</Text>
-
-      <View style={tabStyles.scoreTable}>
-        <View style={tabStyles.scoreRow}>
-          <Text style={tabStyles.scoreLabel}>Interview weighted score</Text>
-          <Text style={tabStyles.scoreValue}>
-            {interviewScore != null ? interviewScore.toFixed(2) : '—'}
-          </Text>
-        </View>
-        <View style={tabStyles.scoreRow}>
-          <Text style={tabStyles.scoreLabel}>Depth signal modifier</Text>
-          <Text
-            style={[
-              tabStyles.scoreValue,
-              depthModifier != null && depthModifier > 0 && { color: '#22c55e' },
-              depthModifier != null && depthModifier < 0 && { color: '#ef4444' },
-            ]}
-          >
-            {depthModifier != null ? (depthModifier >= 0 ? '+' : '') + depthModifier.toFixed(2) : '—'}
-          </Text>
-        </View>
-        <View style={tabStyles.scoreRow}>
-          <Text style={tabStyles.scoreLabel}>Psychometric modifier (raw)</Text>
-          <Text
-            style={[
-              tabStyles.scoreValue,
-              !psychometricsComplete && { color: '#999' },
-              psychometricModifier != null && psychometricModifier < 0 && { color: '#ef4444' },
-            ]}
-          >
-            {!psychometricsComplete
-              ? 'Pending'
-              : psychometricModifier != null
-                ? psychometricModifier.toFixed(2)
-                : '—'}
-          </Text>
-        </View>
-        {psychometricsComplete && correctedPsychometricModifier != null && correctedPsychometricModifier !== psychometricModifier ? (
-          <View style={tabStyles.scoreRow}>
-            <Text style={tabStyles.scoreLabel}>Psychometric modifier (corrected)</Text>
-            <Text
-              style={[
-                tabStyles.scoreValue,
-                correctedPsychometricModifier < 0 && { color: '#ef4444' },
-              ]}
-            >
-              {correctedPsychometricModifier.toFixed(2)}
-            </Text>
-          </View>
-        ) : null}
-        <View style={[tabStyles.scoreRow, tabStyles.scoreRowTotal]}>
-          <Text style={tabStyles.scoreLabelTotal}>Final modified score</Text>
-          <Text style={tabStyles.scoreValueTotal}>
-            {!psychometricsComplete
-              ? `${((interviewScore ?? 0) + (depthModifier ?? 0)).toFixed(2)} (no psychometrics yet)`
-              : finalScore != null
-                ? finalScore.toFixed(2)
-                : '—'}
-          </Text>
-        </View>
-      </View>
-
-      <View style={tabStyles.gateDecisionRow}>
-        <Text style={tabStyles.gateDecisionLabel}>Final gate decision</Text>
-        {!psychometricsComplete ? (
-          <View style={[tabStyles.gateBadge, { backgroundColor: '#f5f5f5', borderColor: '#ccc' }]}>
-            <Text style={[tabStyles.gateBadgeText, { color: '#999' }]}>PENDING PSYCHOMETRICS</Text>
-          </View>
-        ) : finalPass === true ? (
-          <View style={[tabStyles.gateBadge, { backgroundColor: '#f0fdf4', borderColor: '#22c55e' }]}>
-            <Text style={[tabStyles.gateBadgeText, { color: '#22c55e' }]}>PASS</Text>
-          </View>
-        ) : (
-          <View style={[tabStyles.gateBadge, { backgroundColor: '#fef2f2', borderColor: '#ef4444' }]}>
-            <Text style={[tabStyles.gateBadgeText, { color: '#ef4444' }]}>FAIL</Text>
-          </View>
-        )}
-      </View>
+      <ScoreReceiptCard attempt={attempt} user={user} variant="dark" />
 
       {gateDecisionChanged ? (
         <View style={tabStyles.gateChangedBanner}>
@@ -1344,9 +1263,10 @@ export function FullAssessmentTab({
             ) : null}
           </View>
 
+          {hasLegacyScsScores ? (
           <View style={tabStyles.instrumentCard}>
             <View style={tabStyles.instrumentHeader}>
-              <Text style={tabStyles.instrumentName}>Self-Awareness Assessment</Text>
+              <Text style={tabStyles.instrumentName}>Self-Awareness Assessment (retired)</Text>
               <Text
                 style={[
                   tabStyles.instrumentModifier,
@@ -1381,10 +1301,12 @@ export function FullAssessmentTab({
               </Text>
             ) : null}
           </View>
+          ) : null}
 
+          {hasLegacyMspssScores ? (
           <View style={tabStyles.instrumentCard}>
             <View style={tabStyles.instrumentHeader}>
-              <Text style={tabStyles.instrumentName}>Social Support Assessment</Text>
+              <Text style={tabStyles.instrumentName}>Social Support Assessment (retired)</Text>
               <Text
                 style={[
                   tabStyles.instrumentModifier,
@@ -1412,6 +1334,7 @@ export function FullAssessmentTab({
               </Text>
             ) : null}
           </View>
+          ) : null}
 
           <View style={tabStyles.instrumentCard}>
             <View style={tabStyles.instrumentHeader}>
@@ -1471,6 +1394,14 @@ export function FullAssessmentTab({
         </>
       ) : null}
 
+      <View style={tabStyles.sectionSpacer} />
+      <Text style={tabStyles.sectionHeader}>Psychometric Item Responses</Text>
+      <Text style={[tabStyles.instrumentDescription, { marginBottom: 10 }]}>
+        Raw Likert answers per questionnaire item. Reverse-scored items show the scored value after
+        inversion.
+      </Text>
+      <PsychometricAnswersSection userId={user.id} />
+
       {psychometricsComplete ? (
         <GamingCorrectionCard
           gamingCorrection={gamingCorrection}
@@ -1480,12 +1411,10 @@ export function FullAssessmentTab({
             anxiety_trait: anxietyTraitInfo.modifier,
             aaq2: aaq2Info.modifier,
             rfq: rfqInfo.modifier,
-            mspss: mspssInfo.modifier,
             sd3_narcissism: sd3Info.modifier,
             dweck: dweckInfo.modifier,
             rses: rsesInfo.modifier,
             scs_sf: scsSfInfo.modifier,
-            scs: scsInfo.modifier,
           }}
         />
       ) : null}

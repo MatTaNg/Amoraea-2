@@ -1,4 +1,5 @@
 import { collectPsychometricFloorUncertaintyFlags } from './psychometricFloorBreaches';
+import { NPI_ENTITLEMENT_ENABLED } from './interviewCompletionStatus';
 import type { DefenseCrossReferenceResult } from './crossReferenceDefenseDetection';
 // Higher uncertainty = less confident the existing data is sufficient
 // to make a reliable gate determination.
@@ -39,6 +40,7 @@ export function computeUncertaintyScore(attempt: {
   psychometrics_scs_sf_score: number | null;
   psychometrics_dweck_score: number | null;
   psychometrics_sd3_narcissism_score: number | null;
+  psychometrics_npi_entitlement_score: number | null;
   psychometrics_rfq_score: number | null;
   psychometrics_scs_public_score: number | null;
   psychometrics_scs_private_score: number | null;
@@ -122,11 +124,19 @@ export function computeUncertaintyScore(attempt: {
   }
 
   const sd3 = attempt.psychometrics_sd3_narcissism_score;
+  const npi = attempt.psychometrics_npi_entitlement_score;
   const contempt = pillars.contempt ?? null;
-  if (sd3 !== null && contempt !== null) {
+  if (!NPI_ENTITLEMENT_ENABLED && sd3 !== null && contempt !== null) {
     if (sd3 > 3.5 && contempt < 5.0) {
       consistencyFlagCount++;
       activeFlags.push('sd3_narcissism_contempt_divergence');
+    }
+  }
+
+  if (NPI_ENTITLEMENT_ENABLED && npi !== null && accountability !== null) {
+    if (npi >= 4 && accountability >= 7.0) {
+      consistencyFlagCount++;
+      activeFlags.push('npi_entitlement_accountability_divergence');
     }
   }
 
@@ -137,6 +147,7 @@ export function computeUncertaintyScore(attempt: {
       dweckScore: attempt.psychometrics_dweck_score,
       scsSfScore: attempt.psychometrics_scs_sf_score,
       sd3NarcissismScore: sd3,
+      npiEntitlementScore: npi,
       brsScore: attempt.psychometrics_brs_score,
       anxietyTraitScore: attempt.psychometrics_anxiety_trait_score,
       aaq2Score: attempt.psychometrics_aaq2_score,

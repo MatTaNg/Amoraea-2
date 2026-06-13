@@ -8,7 +8,8 @@ import {
   type PhotoUploadedMeta,
   normalizePhotoFileNameKey,
 } from '@/shared/components/ModeratedPhotoUpload';
-import { useProfile } from '@/shared/hooks/useProfile';
+import { useAuth } from '@/shared/hooks/AuthProvider';
+import { profilesRepo } from '@/data/repos/profilesRepo';
 import { OnboardingHeader } from './components/OnboardingHeader';
 import { styles } from './PhotosVideoModal.styled';
 
@@ -17,6 +18,7 @@ interface PhotosVideoModalProps {
   onPhotosChange: (photos: string[]) => void;
   onNext: () => void;
   onBack: () => void;
+  userId?: string | null;
 }
 
 export const PhotosVideoModal: React.FC<PhotosVideoModalProps> = ({
@@ -24,8 +26,10 @@ export const PhotosVideoModal: React.FC<PhotosVideoModalProps> = ({
   onPhotosChange,
   onNext,
   onBack,
+  userId: userIdProp,
 }) => {
-  const { updateProfile } = useProfile();
+  const { user } = useAuth();
+  const userId = userIdProp ?? user?.id ?? null;
   const [uploadingPhotosCount, setUploadingPhotosCount] = useState(0);
   
   // Use ref to track latest photos array for concurrent uploads
@@ -106,9 +110,11 @@ export const PhotosVideoModal: React.FC<PhotosVideoModalProps> = ({
       fileNameKeyByUrlRef.current.set(normalized, fileKey);
     }
     onPhotosChange(newPhotos);
-    updateProfile({ photos: newPhotos }).catch((error) => {
-      console.error('Failed to update profile with photos:', error);
-    });
+    if (userId) {
+      void profilesRepo.updateProfile(userId, { photos: newPhotos }).catch((error) => {
+        console.error('Failed to update profile with photos:', error);
+      });
+    }
   };
 
   const handleRemovePhoto = (uri: string) => {
@@ -126,9 +132,11 @@ export const PhotosVideoModal: React.FC<PhotosVideoModalProps> = ({
     const newPhotos = photos.filter((p) => p !== uri);
     photosRef.current = newPhotos.filter((p) => p && p.trim() !== '');
     onPhotosChange(newPhotos);
-    updateProfile({ photos: photosRef.current }).catch((error) => {
-      console.error('Failed to update profile after removing photo:', error);
-    });
+    if (userId) {
+      void profilesRepo.updateProfile(userId, { photos: photosRef.current }).catch((error) => {
+        console.error('Failed to update profile after removing photo:', error);
+      });
+    }
   };
 
   // Disable Next button if uploads are in progress or if no photos are uploaded
@@ -179,6 +187,7 @@ export const PhotosVideoModal: React.FC<PhotosVideoModalProps> = ({
             ))}
             {photos.filter((p) => p && p.trim() !== '').length + uploadingPhotosCount < 6 && (
               <ModeratedPhotoUpload
+                userId={userId}
                 onPhotoUploaded={handlePhotoUploaded}
                 existingAssetIdsRef={existingAssetIdsRef}
                 existingFileNameKeysRef={existingFileNameKeysRef}

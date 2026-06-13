@@ -6,11 +6,17 @@
 
 import {
   isClientAudioRecoveryAssistantLine,
+  isInterviewExitConfirmationMoment,
   isInterviewPreambleBriefingMoment,
   isNamePromptInterviewMoment,
+  isResumeReentryWelcomePrompt,
   isSimpleYesNoInterviewMoment,
+  looksLikeInterviewExitDecline,
+  looksLikeReadinessAffirmation,
+  looksLikeReadinessYesHomophone,
   NON_ENGLISH_VOICE_PROMPT,
 } from './interviewLanguageGate';
+import { classifyResumeRepeatIntent } from './resumeRepeatIntent';
 
 export type MetaCommentType =
   | 'frustration'
@@ -143,12 +149,50 @@ const CONFUSION_REPEAT_REQUEST_RES: RegExp[] = [
   /\b(say|run) (that|it) again\b/i,
   /\bcome again\b/i,
   /\brepeat the question\b/i,
+  /\b(yes|yeah|yep|sure),?\s+repeat\b/i,
+  /\bplease\s+repeat\b/i,
 ];
 
 export function isConfusionRepeatRequestText(text: string): boolean {
   const t = text.trim();
   if (!t) return false;
   return CONFUSION_REPEAT_REQUEST_RES.some((re) => re.test(t));
+}
+
+/**
+ * Unambiguous repeat-request phrases — checked before the general classifier so short clear
+ * utterances are never downgraded to `ambiguous_short` (word count is irrelevant).
+ */
+const EXPLICIT_REPEAT_REQUEST_PRECLASS_RES: RegExp[] = [
+  /\brepeat the questions?\b/i,
+  /\bask the questions? again\b/i,
+  /\bsay that again\b/i,
+  /\bcan you repeat\b/i,
+  /\bwhat did you say\b/i,
+  /\bdidn'?t hear you\b/i,
+  /\bdidn'?t catch that\b/i,
+  /\bsay it again\b/i,
+  /\bone more time\b/i,
+  /\bcome again\b/i,
+  /\bsorry\s+what\b/i,
+  /\bpardon\b/i,
+  /\bhuh\b/i,
+  /\b(yes|yeah|yep|sure),?\s+repeat\b/i,
+  /\bplease\s+repeat\b/i,
+  /^\s*repeat\s*$/i,
+];
+
+export function isExplicitRepeatRequestPreClassification(text: string): boolean {
+  const t = text.trim();
+  if (!t) return false;
+  return EXPLICIT_REPEAT_REQUEST_PRECLASS_RES.some((re) => re.test(t));
+}
+
+export function classifyExplicitRepeatRequestPreClassification(
+  text: string
+): MetaCommentClassification | null {
+  if (!isExplicitRepeatRequestPreClassification(text)) return null;
+  return { type: 'confusion', confidence: 1.0, confusion_subtype: 'repeat_request' };
 }
 
 /**
@@ -482,6 +526,9 @@ export function getPriorSubstantiveNonMetaUserContentInMoment(
 export function classifyUserMetaComment(text: string): MetaCommentClassification | null {
   const t = text.trim();
   if (!t) return null;
+
+  const explicitRepeat = classifyExplicitRepeatRequestPreClassification(t);
+  if (explicitRepeat) return explicitRepeat;
 
   const wc = wordCount(t);
   const scores = metaScores(t);
@@ -964,7 +1011,7 @@ Then wait for their next reply on the mic. No elongating probe.
       const moment5PivotNote =
         inMoment5AfterAccountabilityProbe === true
           ? `
-**Moment 5 special rule (client state):** Accountability probe already fired. Do **not** re-ask "What was your part in how it unfolded?" again. Pivot to a repair-oriented next probe/question instead (what helped repair, what changed, what they did next).
+**Moment 5 special rule (client state):** Accountability probe already fired. Do **not** re-ask "What do you think you did or said that contributed to the conflict?" again. Pivot to a repair-oriented next probe/question instead (what helped repair, what changed, what they did next).
 `
           : '';
       return `
@@ -1035,6 +1082,8 @@ export function looksLikeShortNameReply(text: string): boolean {
 export type ExemptMetaCommentTurnReason =
   | 'name_entry_turn'
   | 'preamble_readiness_turn'
+  | 'resume_reentry_turn'
+  | 'exit_decline_turn'
   | 'post_meta_ack_window_active'
   | 'seq_not_advanced_since_last_ack'
   | 'no_exemption_condition_met';
@@ -1063,6 +1112,8 @@ export function resolveMetaCommentForInterviewTurn(
      * interview delivery (see `countsAsSubstantiveInterviewQuestionDelivery`) — suppress duplicate meta reads.
      */
     suppressMetaClassificationPostMetaAckAwaitingSubstantive?: boolean;
+    /** Resume welcome gate: next mic turn is procedural assent, not substantive scenario content. */
+    resumeGatePending?: boolean;
     /** Prefer interview `countSpokenWords` when provided; else heuristic word count on `text`. */
     spokenWordCount?: number;
   }
@@ -1082,6 +1133,17 @@ export function resolveMetaCommentForInterviewTurn(
     ctx.isInterviewAppRoute &&
     (isInterviewPreambleBriefingMoment(ctx.lastQuestionText) ||
       isSimpleYesNoInterviewMoment(ctx.lastQuestionText));
+  const isResumeReentryTurn =
+    ctx.isInterviewAppRoute &&
+    (ctx.resumeGatePending === true ||
+      isResumeReentryWelcomePrompt(ctx.lastQuestionText)) &&
+    (looksLikeReadinessYesHomophone(text) || looksLikeReadinessAffirmation(text)) &&
+    !isExplicitRepeatRequestPreClassification(text) &&
+    classifyResumeRepeatIntent(text) !== 'repeat';
+  const isExitDeclineTurn =
+    ctx.isInterviewAppRoute &&
+    isInterviewExitConfirmationMoment(ctx.lastQuestionText) &&
+    looksLikeInterviewExitDecline(text);
   const postMetaAckSeqWindow =
     ctx.suppressMetaClassificationPostMetaAckAwaitingSubstantive === true && wc < 8;
 
@@ -1091,6 +1153,12 @@ export function resolveMetaCommentForInterviewTurn(
   if (isGreetingNameTurn || isNameCollectionTurn) {
     exemptMetaCommentTurn = true;
     exemptMetaCommentTurnReason = 'name_entry_turn';
+  } else if (isExitDeclineTurn) {
+    exemptMetaCommentTurn = true;
+    exemptMetaCommentTurnReason = 'exit_decline_turn';
+  } else if (isResumeReentryTurn) {
+    exemptMetaCommentTurn = true;
+    exemptMetaCommentTurnReason = 'resume_reentry_turn';
   } else if (isPreambleOrReadinessTurn) {
     exemptMetaCommentTurn = true;
     exemptMetaCommentTurnReason = 'preamble_readiness_turn';
@@ -1105,10 +1173,6 @@ export function resolveMetaCommentForInterviewTurn(
   return { raw, effective, exemptMetaCommentTurn, exemptMetaCommentTurnReason };
 }
 
-/**
- * Detects checking-in turns that likely include frustration undertone.
- * Intended for routing/telemetry, not primary classification.
- */
 export function isCheckingInFrustrationAdjacent(args: {
   checkingInText: string;
   priorSubstantiveText?: string | null | undefined;
@@ -1132,4 +1196,55 @@ export function isCheckingInFrustrationAdjacent(args: {
       current
     );
   return sharpCheckingIn || priorLong || priorPersonalOrEmotional || priorDetailedNarrative;
+}
+
+/** Minimum classifier confidence before the frustration-diverting interview path may fire. */
+export const FRUSTRATION_META_CONFIDENCE_THRESHOLD = 0.85;
+
+/** Word-count guard — substantive answers at or above this length skip frustration routing (unless repeated-frustration exempt). */
+export const FRUSTRATION_META_WORD_COUNT_THRESHOLD = 40;
+
+export type FrustrationMetaSuppressionReason =
+  | 'word_count_above_threshold'
+  | 'confidence_below_0.85';
+
+export type FrustrationMetaSuppressionDecision = {
+  suppress: boolean;
+  reason: FrustrationMetaSuppressionReason | null;
+  suppressionEventType:
+    | 'meta_comment_suppressed_word_count_guard'
+    | 'meta_comment_suppressed_confidence_threshold'
+    | null;
+};
+
+/**
+ * Gates whether a frustration classification diverts to the frustration-handling path.
+ * Word-count guard runs first; repeated prior frustration in this moment exempts word count only.
+ */
+export function evaluateFrustrationMetaCommentPathSuppression(args: {
+  classification: MetaCommentClassification | null | undefined;
+  wordCount: number;
+  /** Frustration signals already counted in this interview moment before the current turn. */
+  priorFrustrationSignalCountInMoment: number;
+}): FrustrationMetaSuppressionDecision {
+  const { classification, wordCount, priorFrustrationSignalCountInMoment } = args;
+  if (classification?.type !== 'frustration') {
+    return { suppress: false, reason: null, suppressionEventType: null };
+  }
+  const repeatedFrustrationPrior = priorFrustrationSignalCountInMoment >= 1;
+  if (!repeatedFrustrationPrior && wordCount >= FRUSTRATION_META_WORD_COUNT_THRESHOLD) {
+    return {
+      suppress: true,
+      reason: 'word_count_above_threshold',
+      suppressionEventType: 'meta_comment_suppressed_word_count_guard',
+    };
+  }
+  if (classification.confidence < FRUSTRATION_META_CONFIDENCE_THRESHOLD) {
+    return {
+      suppress: true,
+      reason: 'confidence_below_0.85',
+      suppressionEventType: 'meta_comment_suppressed_confidence_threshold',
+    };
+  }
+  return { suppress: false, reason: null, suppressionEventType: null };
 }
