@@ -610,11 +610,25 @@ export function shouldDeferStreamingBoundaryWarmClause(text: string, rawFirstNam
   return true;
 }
 
+/** Short scenario/personal transition preambles — hold until the reflection clause arrives so they share one TTS utterance (avoids volume snap between clauses). */
+export function shouldHoldScenarioTransitionPreambleForStreaming(text: string): boolean {
+  const t = text.trim();
+  if (!t || t.length > 140) return false;
+  if (/\?\s*$/.test(t)) return false;
+  if (!/[.!]\s*$/.test(t)) return false;
+  return (
+    /\bthat['']?s\s+(?:the\s+end|a\s+wrap)\b/i.test(t) ||
+    /\bthanks\s+for\s+sharing\b/i.test(t) ||
+    /\bend\s+of\s+the\s+three\s+described\b/i.test(t)
+  );
+}
+
 /**
  * Hold boundary warm lines in streaming/batch buffers until the reflection clause (validation + name) arrives.
  * Works even when the participant first name is not yet resolved for TTS.
  */
 export function shouldHoldBoundaryWarmStreamingLine(text: string, rawFirstName?: string): boolean {
   if (isBoundaryWarmValidationOnlySentence(text)) return true;
+  if (shouldHoldScenarioTransitionPreambleForStreaming(text)) return true;
   return shouldDeferStreamingBoundaryWarmClause(text, rawFirstName ?? '');
 }

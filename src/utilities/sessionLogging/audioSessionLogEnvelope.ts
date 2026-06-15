@@ -101,6 +101,16 @@ export function setSessionAudioRoutesFromWebInference(inf: {
   lastTimeSincePermissionGrantedMs = inf.time_since_permission_granted_ms ?? null;
 }
 
+/** Keep session log correlation in sync when a live mic stream seeds the route cache. */
+export function syncSessionMicTrackSettingsFromCache(
+  settings: MediaTrackSettings,
+  permissionGrantedAtMs: number | null,
+): void {
+  lastActiveTrackSettings = { ...settings };
+  lastTimeSincePermissionGrantedMs =
+    permissionGrantedAtMs != null ? Date.now() - permissionGrantedAtMs : null;
+}
+
 export function getSessionAudioRoutesSnapshot(): {
   input_route: string;
   output_route: SessionOutputRouteLabel;

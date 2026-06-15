@@ -2,7 +2,7 @@ import { Platform } from 'react-native';
 import Constants from 'expo-constants';
 import * as FileSystem from 'expo-file-system';
 import * as Speech from 'expo-speech';
-import { logAndApplyPlaybackModeForTts } from './audioModeHelpers';
+import { logAndApplyPlaybackModeForTts, applyWebInterviewForegroundTtsSettle } from './audioModeHelpers';
 import { runWithThreeAttemptsFixedBackoff } from '@utilities/networkRetry';
 import { classifyError } from '@utilities/withRetry';
 import {
@@ -31,6 +31,7 @@ import {
   finalizeInterviewMicAmbientOnTtsEnd,
   type PreInitTriggerDuring,
 } from '@features/aria/utils/webInterviewMicPreInit';
+import { markWebTabBecameVisible } from './webInterviewGestureContext';
 import { takePreAuthorizedAudioElementForTts } from '@features/aria/utils/webPreAuthorizedTtsAudio';
 
 /** Avoid top-level `expo-av` import — it breaks web lazy-load of the interview chunk (SDK 53+). */
@@ -105,15 +106,67 @@ let activeWebHtmlAudioObjectUrl: string | null = null;
 /** Set on tab-hide soft pause; used to restore `currentTime` after return (some browsers reset position). */
 let htmlAudioPausedForTabResume = false;
 let tabPausedHtmlAudioResumeSeconds: number | null = null;
+/** After mid-utterance tab resume, block global volume re-prime briefly (avoids speaker snap). */
+let webInterviewTabResumeVolumeLockedUntilMs: number | null = null;
+const WEB_TAB_RESUME_VOLUME_LOCK_MS = 30_000;
 
 type TabHtmlAudioResumeSnapshot = {
   element: HTMLAudioElement;
   objectUrl: string;
   resumeSeconds: number;
+  /** `<audio>` volume when tab hide soft-paused — avoid speaker snap on mid-utterance resume. */
+  volume: number;
 };
 
 /** Strong ref to paused `<audio>` — survives `activeWebAudio = null` during tab hide. */
 let tabHtmlAudioResumeSnapshot: TabHtmlAudioResumeSnapshot | null = null;
+
+/** Blob + seek preserved across {@link stopElevenLabsPlayback} for tab-return replay. */
+let webInterviewTabRestoreStash: { objectUrl: string; resumeSeconds: number } | null = null;
+let webInterviewTabRestoreEndResolve: (() => void) | null = null;
+let webInterviewTabRestoreEndReject: ((err: Error) => void) | null = null;
+
+export function hasWebInterviewTabRestoreStash(): boolean {
+  return Platform.OS === 'web' && webInterviewTabRestoreStash != null;
+}
+
+export function pauseActiveWebInterviewHtmlAudioWithoutRevoke(): void {
+  if (Platform.OS !== 'web') return;
+  const el = getActiveWebHtmlAudioElement();
+  if (el) {
+    try {
+      el.pause();
+    } catch {
+      /* ignore */
+    }
+  }
+  activeWebAudio = null;
+}
+
+function releaseWebInterviewTabRestoreStash(revokeObjectUrl: boolean): void {
+  if (revokeObjectUrl && webInterviewTabRestoreStash?.objectUrl) {
+    const url = webInterviewTabRestoreStash.objectUrl;
+    if (activeWebHtmlAudioObjectUrl === url) {
+      activeWebHtmlAudioObjectUrl = null;
+    }
+    try {
+      URL.revokeObjectURL(url);
+    } catch {
+      /* ignore */
+    }
+  }
+  webInterviewTabRestoreStash = null;
+}
+
+function settleWebInterviewTabRestorePlaybackEnd(err?: Error): void {
+  if (err) {
+    webInterviewTabRestoreEndReject?.(err);
+  } else {
+    webInterviewTabRestoreEndResolve?.();
+  }
+  webInterviewTabRestoreEndResolve = null;
+  webInterviewTabRestoreEndReject = null;
+}
 
 /** Tracks in-flight Web Speech API utterance for tab-hide partial resume (not seekable). */
 let webSpeechSynthTabResumeState: { fullText: string; startedAtMs: number } | null = null;
@@ -141,27 +194,118 @@ function clearHtmlAudioTabResumeState(): void {
   htmlAudioPausedForTabResume = false;
   tabPausedHtmlAudioResumeSeconds = null;
   tabHtmlAudioResumeSnapshot = null;
+  webInterviewTabResumeVolumeLockedUntilMs = null;
+  lastTabRestoreSyncPlayKey = null;
+  lastTabRestoreSyncPlayAtMs = 0;
 }
 
-function captureTabHtmlAudioResumeSnapshot(): boolean {
+function shouldSkipWebInterviewTtsVolumeReprime(): boolean {
+  if (Platform.OS !== 'web') return false;
+  if (htmlAudioPausedForTabResume || hasWebInterviewHtmlAudioTabResumePending()) return true;
+  return (
+    webInterviewTabResumeVolumeLockedUntilMs != null &&
+    Date.now() < webInterviewTabResumeVolumeLockedUntilMs
+  );
+}
+
+function isWebHtmlAudioMidUtteranceTabResumeElement(el: HTMLAudioElement): boolean {
+  if (!htmlAudioPausedForTabResume && !hasWebInterviewHtmlAudioTabResumePending()) {
+    return false;
+  }
+  const snap = tabHtmlAudioResumeSnapshot;
+  return (
+    snap?.element === el &&
+    Number.isFinite(snap.resumeSeconds) &&
+    snap.resumeSeconds > 0.05
+  );
+}
+
+/** True while tab-hide stash or post-resume volume lock is active — skip route/volume re-prime. */
+export function isWebInterviewMidUtteranceTabResumeActive(): boolean {
+  return shouldSkipWebInterviewTtsVolumeReprime();
+}
+
+/** Restore pre-pause `<audio>` volume on the stashed or active element (mobile tab/home return). */
+export function restoreWebInterviewTabStashedPlaybackVolume(el?: HTMLAudioElement): void {
+  if (Platform.OS !== 'web') return;
+  const target = el ?? tabHtmlAudioResumeSnapshot?.element ?? getActiveWebHtmlAudioElement();
+  if (target) applyTabStashedHtmlAudioVolume(target);
+}
+
+let lastTabRestoreSyncPlayKey: string | null = null;
+let lastTabRestoreSyncPlayAtMs = 0;
+const TAB_RESTORE_SYNC_DEDUPE_MS = 900;
+
+function captureTabHtmlAudioResumeSnapshotFromElement(el: HTMLAudioElement): boolean {
   if (Platform.OS !== 'web') return false;
   if (activePcmStreamSources.length > 0 || activeWebBufferSource != null) return false;
-  const el = getActiveWebHtmlAudioElement();
-  if (!el || el.ended) return false;
+  if (el.ended) return false;
   const resumeSeconds = el.currentTime;
-  if (!Number.isFinite(resumeSeconds) || resumeSeconds < 0.1) return false;
-  const objectUrl = (el.src ?? activeWebHtmlAudioObjectUrl ?? '').trim();
+  if (!Number.isFinite(resumeSeconds) || resumeSeconds < 0) return false;
+  const objectUrl = (el.src ?? activeWebHtmlAudioObjectUrl ?? tabHtmlAudioResumeSnapshot?.objectUrl ?? '').trim();
   if (!objectUrl) return false;
   const d = el.duration;
   if (Number.isFinite(d) && d > 0 && resumeSeconds >= d - 0.35) return false;
-  tabHtmlAudioResumeSnapshot = { element: el, objectUrl, resumeSeconds };
+  let volume = 1;
+  try {
+    const v = el.volume;
+    if (Number.isFinite(v) && v > 0) volume = v;
+  } catch {
+    /* ignore */
+  }
+  tabHtmlAudioResumeSnapshot = { element: el, objectUrl, resumeSeconds, volume };
+  webInterviewTabRestoreStash = { objectUrl, resumeSeconds };
   tabPausedHtmlAudioResumeSeconds = resumeSeconds;
   htmlAudioPausedForTabResume = true;
   return true;
 }
 
+function captureTabHtmlAudioResumeSnapshot(): boolean {
+  const el = getActiveWebHtmlAudioElement();
+  if (!el) return false;
+  return captureTabHtmlAudioResumeSnapshotFromElement(el);
+}
+
+/**
+ * Repeat tab-hide while stash is still pending: refresh pause position + volume instead of
+ * leaving a stale seek (second resume replays from an old `currentTime` → overlap / volume snap).
+ */
+export function refreshWebInterviewHtmlTabStashForRepeatHide(): void {
+  if (Platform.OS !== 'web') return;
+  if (!hasWebInterviewHtmlAudioTabResumePending()) return;
+  const el = getTabStashedHtmlAudioElement() ?? getActiveWebHtmlAudioElement();
+  if (!el || el.ended) return;
+  if (!el.paused) {
+    try {
+      el.pause();
+    } catch {
+      /* ignore */
+    }
+  }
+  if (!captureTabHtmlAudioResumeSnapshotFromElement(el)) return;
+  abortActiveWebHtmlAudioPlayback = null;
+  activeWebAudio = null;
+}
+
 /** Rejects in-flight HTML audio playback promises when the tab hides (avoids wall-clock safety timeout resolving as "complete"). */
 let abortActiveWebHtmlAudioPlayback: (() => void) | null = null;
+
+/** Links tab-resume playback to the original {@link speakWithElevenLabs} HTML promise (clears safety timeout + resolves on `ended`). */
+type WebHtmlAudioPlaybackHandoff = {
+  clearSafetyTimeout: () => void;
+  completePlayback: () => void;
+  objectUrl: string;
+};
+let activeWebHtmlAudioPlaybackHandoff: WebHtmlAudioPlaybackHandoff | null = null;
+
+function claimWebHtmlAudioPlaybackHandoffForTabResume(
+  objectUrl: string
+): WebHtmlAudioPlaybackHandoff | null {
+  const handoff = activeWebHtmlAudioPlaybackHandoff;
+  if (!handoff || handoff.objectUrl !== objectUrl) return null;
+  handoff.clearSafetyTimeout();
+  return handoff;
+}
 
 /** Rejects in-flight Web Audio buffer playback when the tab hides. */
 let abortActiveWebBufferAudioPlayback: (() => void) | null = null;
@@ -182,6 +326,59 @@ function getActiveWebHtmlAudioElement(): HTMLAudioElement | null {
   return el;
 }
 
+function getTabStashedHtmlAudioElement(): HTMLAudioElement | null {
+  if (Platform.OS !== 'web') return null;
+  const snap = tabHtmlAudioResumeSnapshot;
+  if (!snap || snap.element.ended) return null;
+  return snap.element;
+}
+
+/**
+ * Chrome may auto-resume a soft-paused utterance when the tab becomes visible before our handoff
+ * runs — pause it so resume goes through a single controlled path (clears safety timeout overlap).
+ */
+export function holdTabStashedHtmlAudioForGestureResume(): boolean {
+  if (Platform.OS !== 'web') return false;
+  if (!hasWebInterviewHtmlAudioTabResumePending()) return false;
+  const el = getTabStashedHtmlAudioElement();
+  if (!el) return false;
+  if (!el.ended) {
+    /** Chrome may advance `currentTime` while away — refresh stash before pause/resume (avoids overlap snap). */
+    captureTabHtmlAudioResumeSnapshotFromElement(el);
+  }
+  if (!el.paused && !el.ended) {
+    try {
+      el.pause();
+    } catch {
+      /* ignore */
+    }
+  }
+  htmlAudioPausedForTabResume = true;
+  return true;
+}
+
+/** Sync tab-stash seek position + volume from the stashed element (navigation/home return). */
+export function syncTabStashHtmlAudioPositionForResumeReturn(): boolean {
+  if (Platform.OS !== 'web') return false;
+  if (!hasWebInterviewHtmlAudioTabResumePending()) return false;
+  const el = getTabStashedHtmlAudioElement();
+  if (!el || el.ended) return false;
+  return captureTabHtmlAudioResumeSnapshotFromElement(el);
+}
+
+/** Re-link soft-paused HTML audio to the in-flight speak promise (clears wall-clock safety timeout). */
+export function attachTabStashHtmlAudioPlaybackHandoff(): boolean {
+  if (Platform.OS !== 'web') return false;
+  const snap = tabHtmlAudioResumeSnapshot;
+  if (!snap || snap.element.ended) return false;
+  activeWebAudio = snap.element;
+  const handoff = claimWebHtmlAudioPlaybackHandoffForTabResume(snap.objectUrl);
+  if (handoff) {
+    abortActiveWebHtmlAudioPlayback = null;
+  }
+  return handoff != null;
+}
+
 /** True when HTML MP3 playback has started and has meaningful audio left (tab-hide soft pause). */
 export function canSoftPauseActiveWebHtmlAudioForTabResume(): boolean {
   if (Platform.OS !== 'web') return false;
@@ -191,7 +388,7 @@ export function canSoftPauseActiveWebHtmlAudioForTabResume(): boolean {
   const src = (el.src ?? '').trim();
   if (!src) return false;
   const t = el.currentTime;
-  if (!Number.isFinite(t) || t < 0.15) return false;
+  if (!Number.isFinite(t) || t < 0) return false;
   const d = el.duration;
   if (Number.isFinite(d) && d > 0 && t >= d - 0.35) return false;
   return true;
@@ -199,9 +396,251 @@ export function canSoftPauseActiveWebHtmlAudioForTabResume(): boolean {
 
 export function hasWebInterviewHtmlAudioTabResumePending(): boolean {
   if (Platform.OS !== 'web') return false;
+  if (webInterviewTabRestoreStash != null) return true;
   const snap = tabHtmlAudioResumeSnapshot;
   if (!snap || snap.element.ended) return false;
-  return Number.isFinite(snap.resumeSeconds) && snap.resumeSeconds > 0;
+  return Number.isFinite(snap.resumeSeconds) && snap.resumeSeconds >= 0;
+}
+
+/** Drop stashed HTML tab-resume state (snapshot + blob URL). Safe after replay or dismiss. */
+export function clearWebInterviewHtmlTabRestoreState(): void {
+  if (Platform.OS !== 'web') return;
+  try {
+    tabHtmlAudioResumeSnapshot?.element.pause();
+  } catch {
+    /* ignore */
+  }
+  clearHtmlAudioTabResumeState();
+  releaseWebInterviewTabRestoreStash(true);
+  if (webInterviewTabRestoreEndResolve) {
+    webInterviewTabRestoreEndResolve();
+  }
+  webInterviewTabRestoreEndResolve = null;
+  webInterviewTabRestoreEndReject = null;
+}
+
+/**
+ * Start tab-return HTML playback synchronously inside a user-gesture handler (no await before `play()`).
+ * Returns false when no stashed blob / element is available.
+ */
+export function trySyncStartTabRestoreHtmlPlaybackInUserGesture(opts?: {
+  onPlayStarted?: () => void;
+  telemetrySource?: TtsTelemetrySource;
+  /** Mobile web: replay from 0 (seek-after-tab-hide is unreliable). Desktop: resume at pause position. */
+  replayFromStart?: boolean;
+}): { started: boolean; done: Promise<void> } {
+  const failDone = Promise.reject(new TtsTabResumeFallbackError());
+  if (Platform.OS !== 'web' || typeof window === 'undefined') {
+    return { started: false, done: failDone };
+  }
+  let stash =
+    webInterviewTabRestoreStash ??
+    (tabHtmlAudioResumeSnapshot
+      ? {
+          objectUrl: tabHtmlAudioResumeSnapshot.objectUrl,
+          resumeSeconds: tabHtmlAudioResumeSnapshot.resumeSeconds,
+        }
+      : null);
+  if (!stash?.objectUrl) {
+    return { started: false, done: failDone };
+  }
+
+  const telemetrySource = opts?.telemetrySource ?? 'replay';
+  const snapEl = tabHtmlAudioResumeSnapshot?.element;
+  let el: HTMLAudioElement;
+  if (snapEl && !snapEl.ended && typeof snapEl.play === 'function') {
+    el = snapEl;
+    const ct = el.currentTime;
+    if (
+      Number.isFinite(ct) &&
+      (!Number.isFinite(stash.resumeSeconds) || ct > stash.resumeSeconds + 0.15)
+    ) {
+      captureTabHtmlAudioResumeSnapshotFromElement(el);
+      stash =
+        webInterviewTabRestoreStash ??
+        (tabHtmlAudioResumeSnapshot
+          ? {
+              objectUrl: tabHtmlAudioResumeSnapshot.objectUrl,
+              resumeSeconds: tabHtmlAudioResumeSnapshot.resumeSeconds,
+            }
+          : stash);
+    }
+  } else {
+    const AudioCtor = (globalThis as { Audio?: new (src?: string) => HTMLAudioElement }).Audio;
+    if (!AudioCtor) {
+      return { started: false, done: failDone };
+    }
+    el = new AudioCtor(stash.objectUrl);
+    el.setAttribute('playsinline', '');
+    if ('playsInline' in el) {
+      (el as { playsInline: boolean }).playsInline = true;
+    }
+  }
+
+  activeWebAudio = el;
+  const midUtteranceResume = !opts?.replayFromStart && stash.resumeSeconds > 0.05;
+  if (midUtteranceResume) {
+    applyTabStashedHtmlAudioVolume(el);
+  } else {
+    ensureWebHtmlAudioElementMaxVolume(el);
+  }
+  if (!(el.src ?? '').trim()) {
+    el.src = stash.objectUrl;
+  }
+  const seekSec = opts?.replayFromStart ? 0 : stash.resumeSeconds;
+  const playKey = `${stash.objectUrl}|${seekSec.toFixed(3)}`;
+  const playDedupeNow = Date.now();
+  if (
+    lastTabRestoreSyncPlayKey === playKey &&
+    playDedupeNow - lastTabRestoreSyncPlayAtMs < TAB_RESTORE_SYNC_DEDUPE_MS
+  ) {
+    return { started: false, done: failDone };
+  }
+  if (!opts?.replayFromStart && !el.paused && !el.ended) {
+    const ct = el.currentTime;
+    if (Number.isFinite(ct)) {
+      if (ct > seekSec + 0.35) {
+        captureTabHtmlAudioResumeSnapshotFromElement(el);
+        applyTabStashedHtmlAudioVolume(el);
+        htmlAudioPausedForTabResume = false;
+        activeWebAudio = el;
+        opts?.onPlayStarted?.();
+        logTtsAutoplayPlayOutcome({
+          pipeline: 'elevenlabs_web_html_audio',
+          outcome: 'play_ok',
+          telemetrySource,
+          html_audio_volume: el.volume,
+          errorMessagePreview: `tab_restore_continue_ahead_at_s=${ct}`,
+        });
+        return { started: true, done: Promise.resolve() };
+      }
+      if (Math.abs(ct - seekSec) < 0.4) {
+        applyTabStashedHtmlAudioVolume(el);
+        htmlAudioPausedForTabResume = false;
+        activeWebAudio = el;
+        opts?.onPlayStarted?.();
+        logTtsAutoplayPlayOutcome({
+          pipeline: 'elevenlabs_web_html_audio',
+          outcome: 'play_ok',
+          telemetrySource,
+          html_audio_volume: el.volume,
+          errorMessagePreview: `tab_restore_continue_without_replay_at_s=${ct}`,
+        });
+        return { started: true, done: Promise.resolve() };
+      }
+    }
+  }
+  try {
+    el.currentTime = seekSec;
+  } catch {
+    try {
+      el.currentTime = 0;
+    } catch {
+      return { started: false, done: failDone };
+    }
+  }
+
+  let doneResolve!: () => void;
+  let doneReject!: (err: Error) => void;
+  const done = new Promise<void>((resolve, reject) => {
+    doneResolve = resolve;
+    doneReject = reject;
+  });
+  webInterviewTabRestoreEndResolve = doneResolve;
+  webInterviewTabRestoreEndReject = doneReject;
+
+  const playbackHandoff = claimWebHtmlAudioPlaybackHandoffForTabResume(stash.objectUrl);
+  const onEnded = () => {
+    finalizeInterviewMicAmbientOnTtsEnd();
+    activeWebAudio = null;
+    htmlAudioPausedForTabResume = false;
+    playbackHandoff?.completePlayback();
+    clearHtmlAudioTabResumeState();
+    releaseWebInterviewTabRestoreStash(true);
+    settleWebInterviewTabRestorePlaybackEnd();
+  };
+  const onError = () => {
+    el.removeEventListener('ended', onEnded);
+    settleWebInterviewTabRestorePlaybackEnd(new TtsTabResumeFallbackError());
+  };
+  el.addEventListener('ended', onEnded, { once: true });
+  el.addEventListener('error', onError, { once: true });
+
+  try {
+    lastTabRestoreSyncPlayKey = playKey;
+    lastTabRestoreSyncPlayAtMs = playDedupeNow;
+    const playPromise = el.play();
+    void playPromise
+      .then(() => {
+        htmlAudioPausedForTabResume = false;
+        opts?.onPlayStarted?.();
+        logTtsAutoplayPlayOutcome({
+          pipeline: 'elevenlabs_web_html_audio',
+          outcome: 'play_ok',
+          telemetrySource,
+          html_audio_volume: el.volume,
+          errorMessagePreview: opts?.replayFromStart
+            ? `tab_restore_sync_from_start`
+            : `tab_restore_sync_from_pause_at_s=${seekSec}`,
+        });
+      })
+      .catch((playErr: unknown) => {
+        el.removeEventListener('ended', onEnded);
+        logTtsAutoplayPlayOutcome({
+          pipeline: 'elevenlabs_web_html_audio',
+          outcome: isWebAudioAutoplayBlockedError(playErr) ? 'play_blocked_autoplay' : 'playback_timeout',
+          telemetrySource,
+          errorMessagePreview:
+            playErr instanceof Error ? playErr.message.slice(0, 120) : 'tab_restore_sync_play_failed',
+        });
+        settleWebInterviewTabRestorePlaybackEnd(new TtsTabResumeFallbackError());
+      });
+    return { started: true, done };
+  } catch {
+    el.removeEventListener('ended', onEnded);
+    settleWebInterviewTabRestorePlaybackEnd(new TtsTabResumeFallbackError());
+    return { started: false, done: failDone };
+  }
+}
+
+/** Wait until sync-started tab-restore HTML audio finishes (or fails). */
+export function waitForWebInterviewTabRestorePlaybackEnd(timeoutMs = 600_000): Promise<void> {
+  if (Platform.OS !== 'web') return Promise.resolve();
+  const el = getActiveWebHtmlAudioElement();
+  if (!el || el.ended) return Promise.resolve();
+  return new Promise<void>((resolve, reject) => {
+    const timeoutId = setTimeout(() => {
+      webInterviewTabRestoreEndResolve = null;
+      webInterviewTabRestoreEndReject = null;
+      reject(new TtsTabResumeFallbackError());
+    }, timeoutMs);
+    webInterviewTabRestoreEndResolve = () => {
+      clearTimeout(timeoutId);
+      webInterviewTabRestoreEndResolve = null;
+      webInterviewTabRestoreEndReject = null;
+      resolve();
+    };
+    webInterviewTabRestoreEndReject = (err: Error) => {
+      clearTimeout(timeoutId);
+      webInterviewTabRestoreEndResolve = null;
+      webInterviewTabRestoreEndReject = null;
+      reject(err);
+    };
+  });
+}
+
+/** After `play()`, confirm the element is advancing (mobile tab-return can resolve play without audible output). */
+async function verifyHtmlAudioAudibleAfterPlay(
+  el: HTMLAudioElement,
+  resumeAtSeconds: number,
+  waitMs = 220
+): Promise<boolean> {
+  const t0 = el.currentTime;
+  await new Promise((r) => setTimeout(r, waitMs));
+  if (el.paused || el.ended) return false;
+  if (el.currentTime > t0 + 0.02) return true;
+  if (!el.paused && Number.isFinite(resumeAtSeconds) && el.currentTime >= resumeAtSeconds) return true;
+  return false;
 }
 
 function softPauseActiveWebHtmlAudioForTabHide(): void {
@@ -213,6 +652,8 @@ function softPauseActiveWebHtmlAudioForTabHide(): void {
   } catch {
     /* ignore */
   }
+  /** Snapshot retains the element — clear so {@link isWebInterviewPlaybackSurfaceActive} is false while paused. */
+  activeWebAudio = null;
 }
 
 export function tryPrepareWebInterviewHtmlAudioTabResume(): boolean {
@@ -224,7 +665,8 @@ export function tryPrepareWebInterviewHtmlAudioTabResume(): boolean {
  * Throws {@link TtsTabResumeFallbackError} when resume is not possible — caller should replay from start.
  */
 export async function resumeWebInterviewHtmlAudioAfterTabHide(
-  telemetrySource: TtsTelemetrySource = 'replay'
+  telemetrySource: TtsTelemetrySource = 'replay',
+  hooks?: { onPlayStarted?: () => void }
 ): Promise<void> {
   const snap = tabHtmlAudioResumeSnapshot;
   if (!snap || snap.element.ended) {
@@ -236,17 +678,53 @@ export async function resumeWebInterviewHtmlAudioAfterTabHide(
   if (!(el.src ?? '').trim() && snap.objectUrl) {
     el.src = snap.objectUrl;
   }
-  await ensureWebPlaybackPrimedForNextTurn(telemetrySource);
-  if (!(await ensureSharedWebAudioContextResumedForPlayback(telemetrySource))) {
-    throw new TtsTabResumeFallbackError();
-  }
+  /** Mid-utterance resume: avoid foreground route settle / global re-prime (speaker snap at end). */
+  applyTabStashedHtmlAudioVolume(el);
   try {
     el.currentTime = resumeAt;
   } catch {
     throw new TtsTabResumeFallbackError();
   }
-  htmlAudioPausedForTabResume = false;
+  const playbackHandoff = claimWebHtmlAudioPlaybackHandoffForTabResume(snap.objectUrl);
   return new Promise<void>((resolve, reject) => {
+    let settled = false;
+    let safetyTimeoutId: ReturnType<typeof setTimeout> | null = null;
+    const finish = (action: 'resolve' | 'reject', err?: Error) => {
+      if (settled) return;
+      settled = true;
+      if (safetyTimeoutId != null) clearTimeout(safetyTimeoutId);
+      safetyTimeoutId = null;
+      if (action === 'resolve') resolve();
+      else reject(err ?? new TtsTabResumeFallbackError());
+    };
+    const scheduleEndedSafetyTimeout = () => {
+      if (safetyTimeoutId != null) clearTimeout(safetyTimeoutId);
+      const d = el.duration;
+      const resumeAt = snap.resumeSeconds;
+      const remainingSec =
+        Number.isFinite(d) && d > 0
+          ? Math.max(1, d - (Number.isFinite(resumeAt) ? resumeAt : 0))
+          : 120;
+      const safetyMs = Math.min(600_000, Math.ceil(remainingSec * 1000) + 5000);
+      safetyTimeoutId = setTimeout(() => {
+        if (el.ended) {
+          finish('resolve');
+          return;
+        }
+        try {
+          el.pause();
+        } catch {
+          /* ignore */
+        }
+        logTtsAutoplayPlayOutcome({
+          pipeline: 'elevenlabs_web_html_audio',
+          outcome: 'playback_timeout',
+          telemetrySource,
+          errorMessagePreview: `tab_resume_safety_ms=${safetyMs}`,
+        });
+        finish('reject', new TtsTabResumeFallbackError());
+      }, safetyMs);
+    };
     const onEnded = () => {
       activeWebAudio = null;
       if (activeWebHtmlAudioObjectUrl === snap.objectUrl) {
@@ -257,18 +735,43 @@ export async function resumeWebInterviewHtmlAudioAfterTabHide(
       } catch {
         /* ignore */
       }
+      htmlAudioPausedForTabResume = false;
+      playbackHandoff?.completePlayback();
       clearHtmlAudioTabResumeState();
-      resolve();
+      finish('resolve');
     };
     const onError = () => {
       el.removeEventListener('ended', onEnded);
+      htmlAudioPausedForTabResume = true;
       clearHtmlAudioTabResumeState();
-      reject(new TtsTabResumeFallbackError());
+      finish('reject', new TtsTabResumeFallbackError());
     };
     el.addEventListener('ended', onEnded, { once: true });
     el.addEventListener('error', onError, { once: true });
-    void el.play().then(
-      () => {
+    const playTimeoutMs = 2500;
+    void Promise.race([
+      el.play(),
+      new Promise<never>((_, rejectPlay) =>
+        setTimeout(() => rejectPlay(new Error('tab_resume_play_timeout')), playTimeoutMs)
+      ),
+    ]).then(
+      async () => {
+        const audible = await verifyHtmlAudioAudibleAfterPlay(el, resumeAt);
+        if (!audible) {
+          el.removeEventListener('ended', onEnded);
+          htmlAudioPausedForTabResume = true;
+          logTtsAutoplayPlayOutcome({
+            pipeline: 'elevenlabs_web_html_audio',
+            outcome: 'playback_timeout',
+            telemetrySource,
+            errorMessagePreview: `tab_resume_not_audible_at_s=${resumeAt}`,
+          });
+          finish('reject', new TtsTabResumeFallbackError());
+          return;
+        }
+        hooks?.onPlayStarted?.();
+        htmlAudioPausedForTabResume = false;
+        scheduleEndedSafetyTimeout();
         logTtsAutoplayPlayOutcome({
           pipeline: 'elevenlabs_web_html_audio',
           outcome: 'play_ok',
@@ -276,10 +779,18 @@ export async function resumeWebInterviewHtmlAudioAfterTabHide(
           errorMessagePreview: `tab_resume_from_pause_at_s=${resumeAt}`,
         });
       },
-      () => {
+      (playErr: unknown) => {
         el.removeEventListener('ended', onEnded);
+        htmlAudioPausedForTabResume = true;
         clearHtmlAudioTabResumeState();
-        reject(new TtsTabResumeFallbackError());
+        logTtsAutoplayPlayOutcome({
+          pipeline: 'elevenlabs_web_html_audio',
+          outcome: isWebAudioAutoplayBlockedError(playErr) ? 'play_blocked_autoplay' : 'playback_timeout',
+          telemetrySource,
+          errorMessagePreview:
+            playErr instanceof Error ? playErr.message.slice(0, 120) : 'tab_resume_play_failed',
+        });
+        finish('reject', new TtsTabResumeFallbackError());
       }
     );
   });
@@ -392,6 +903,8 @@ function isAnyMobileWebBrowser(): boolean {
 
 /** One listener: resume shared `AudioContext` / reprime HTML audio when the tab becomes visible again (Safari suspends on hide). */
 let webInterviewAudioVisibilityListenerAttached = false;
+/** True when the last tab-hide actually paused/stopped interview playback (skip idle reprime on return). */
+let webTabHideAudioTeardownApplied = false;
 
 export function debugNoteWebAudioRouteChange(source: string, routeData?: Record<string, unknown>): void {
   if (Platform.OS !== 'web') return;
@@ -401,13 +914,98 @@ export function debugNoteWebAudioRouteChange(source: string, routeData?: Record<
 }
 
 /** Force full media volume on web HTML audio (Android mobile web can sound quiet without this). */
-export function ensureWebHtmlAudioElementMaxVolume(el: HTMLAudioElement): void {
+export function ensureWebHtmlAudioElementMaxVolume(
+  el: HTMLAudioElement,
+  opts?: { force?: boolean },
+): void {
+  if (Platform.OS !== 'web') return;
+  if (!opts?.force && shouldSkipWebInterviewTtsVolumeReprime()) {
+    if (isWebHtmlAudioMidUtteranceTabResumeElement(el)) {
+      applyTabStashedHtmlAudioVolume(el);
+    }
+    return;
+  }
   try {
     el.volume = 1;
     el.muted = false;
   } catch {
     /* ignore */
   }
+}
+
+/** Mid-utterance tab resume: restore pre-pause level instead of re-priming to max (avoids speaker snap). */
+function applyTabStashedHtmlAudioVolume(el: HTMLAudioElement): void {
+  if (Platform.OS !== 'web') return;
+  const snap = tabHtmlAudioResumeSnapshot;
+  const vol =
+    snap?.element === el && Number.isFinite(snap.volume) && snap.volume > 0
+      ? snap.volume
+      : null;
+  try {
+    el.muted = false;
+    if (vol != null) {
+      el.volume = vol;
+      webInterviewTabResumeVolumeLockedUntilMs = Date.now() + WEB_TAB_RESUME_VOLUME_LOCK_MS;
+    }
+  } catch {
+    /* ignore */
+  }
+}
+
+/** Keep interview TTS at full `<audio>` volume across shared, active, and pre-authorized elements. */
+export function ensureWebInterviewTtsOutputVolumePrimed(): void {
+  if (Platform.OS !== 'web') return;
+  if (shouldSkipWebInterviewTtsVolumeReprime()) return;
+  if (sharedHtmlAudioForMobileTts) ensureWebHtmlAudioElementMaxVolume(sharedHtmlAudioForMobileTts);
+  if (activeWebAudio) ensureWebHtmlAudioElementMaxVolume(activeWebAudio as HTMLAudioElement);
+}
+
+const HTML_MEDIA_HAVE_ENOUGH_DATA = 4;
+
+/**
+ * Mobile Chrome often clips the first syllables when `play()` runs before decode finishes.
+ * Wait for `canplaythrough` (with timeout) and reset position before audible playback.
+ */
+export async function waitForWebHtmlAudioElementReady(
+  el: HTMLAudioElement,
+  timeoutMs = 8000,
+  options?: { skipExplicitLoad?: boolean; preservePlaybackPosition?: boolean },
+): Promise<void> {
+  if (Platform.OS !== 'web') return;
+  const preservePosition =
+    options?.preservePlaybackPosition || isWebHtmlAudioMidUtteranceTabResumeElement(el);
+  if (preservePosition) {
+    applyTabStashedHtmlAudioVolume(el);
+  } else {
+    ensureWebHtmlAudioElementMaxVolume(el, { force: true });
+    try {
+      el.currentTime = 0;
+    } catch {
+      /* ignore */
+    }
+  }
+  if (el.readyState >= HTML_MEDIA_HAVE_ENOUGH_DATA) return;
+  await new Promise<void>((resolve) => {
+    let settled = false;
+    const finish = () => {
+      if (settled) return;
+      settled = true;
+      el.removeEventListener('canplaythrough', finish);
+      el.removeEventListener('loadeddata', finish);
+      clearTimeout(tid);
+      resolve();
+    };
+    el.addEventListener('canplaythrough', finish, { once: true });
+    el.addEventListener('loadeddata', finish, { once: true });
+    const tid = setTimeout(finish, timeoutMs);
+    if (!options?.skipExplicitLoad) {
+      try {
+        el.load();
+      } catch {
+        /* ignore */
+      }
+    }
+  });
 }
 
 /** Volume of the active web HTML audio element — for session telemetry only. */
@@ -436,10 +1034,24 @@ function attachWebInterviewAudioVisibilityHandler(): void {
 
 async function handleWebInterviewDocumentVisibilityChange(): Promise<void> {
   if (typeof document === 'undefined' || document.visibilityState !== 'visible') return;
+  markWebTabBecameVisible();
+  const hadTeardown = webTabHideAudioTeardownApplied;
+  webTabHideAudioTeardownApplied = false;
+  const tabResumePending = hasWebInterviewHtmlAudioTabResumePending();
+  if (tabResumePending) {
+    holdTabStashedHtmlAudioForGestureResume();
+  }
   const ctx = sharedWebAudioContext;
-  /** Same path as pre-play: Chrome often suspends on tab hide; some builds use non-`suspended` states before `running`. */
-  await ensureSharedWebAudioContextResumedForPlayback('other');
-  reprimeSharedHtmlAudioSilentPlay();
+  /** Resume only when we tore down on hide, or Chrome suspended the context in the background. */
+  const needsContextResume =
+    !tabResumePending &&
+    (hadTeardown || (ctx != null && ctx.state !== 'closed' && ctx.state !== 'running'));
+  if (needsContextResume) {
+    await ensureSharedWebAudioContextResumedForPlayback('other');
+  }
+  if (hadTeardown && !tabResumePending) {
+    reprimeSharedHtmlAudioSilentPlay();
+  }
 }
 
 /** Silent tick on the shared HTMLAudio element — does not replace `src` while that element is playing real TTS. */
@@ -447,12 +1059,30 @@ function reprimeSharedHtmlAudioSilentPlay(): void {
   if (Platform.OS !== 'web' || typeof window === 'undefined') return;
   if (!sharedHtmlAudioForMobileTts) return;
   try {
-    if (activeWebAudio === sharedHtmlAudioForMobileTts) {
-      void sharedHtmlAudioForMobileTts.play().catch(() => {});
+    if (activeWebAudio === sharedHtmlAudioForMobileTts && !sharedHtmlAudioForMobileTts.paused) {
       return;
     }
     sharedHtmlAudioForMobileTts.src = SILENT_WAV_DATA_URL;
-    void sharedHtmlAudioForMobileTts.play().catch(() => {});
+    sharedHtmlAudioForMobileTts.muted = true;
+    sharedHtmlAudioForMobileTts.volume = 1;
+    void sharedHtmlAudioForMobileTts
+      .play()
+      .then(() => {
+        try {
+          if (activeWebAudio !== sharedHtmlAudioForMobileTts) {
+            sharedHtmlAudioForMobileTts?.pause();
+            if (sharedHtmlAudioForMobileTts) {
+              sharedHtmlAudioForMobileTts.currentTime = 0;
+              ensureWebHtmlAudioElementMaxVolume(sharedHtmlAudioForMobileTts);
+            }
+          }
+        } catch {
+          /* ignore */
+        }
+      })
+      .catch(() => {
+        if (sharedHtmlAudioForMobileTts) ensureWebHtmlAudioElementMaxVolume(sharedHtmlAudioForMobileTts);
+      });
   } catch {
     /* ignore */
   }
@@ -492,9 +1122,26 @@ async function ensureSharedWebAudioContextResumedForPlayback(
   }
 }
 
-async function ensureWebPlaybackPrimedForNextTurn(telemetrySource: TtsTelemetrySource): Promise<void> {
+async function ensureWebPlaybackPrimedForNextTurn(
+  telemetrySource: TtsTelemetrySource,
+  opts?: { skipSilentReprime?: boolean },
+): Promise<void> {
+  if (!hasWebInterviewHtmlAudioTabResumePending()) {
+    ensureWebInterviewTtsOutputVolumePrimed();
+  }
   await ensureSharedWebAudioContextResumedForPlayback(telemetrySource);
-  reprimeSharedHtmlAudioSilentPlay();
+  if (!opts?.skipSilentReprime && !hasWebInterviewHtmlAudioTabResumePending()) {
+    reprimeSharedHtmlAudioSilentPlay();
+  }
+}
+
+function shouldSkipSilentReprimeForTelemetry(telemetrySource: TtsTelemetrySource): boolean {
+  if (hasWebInterviewHtmlAudioTabResumePending()) return true;
+  if (telemetrySource !== 'replay') return false;
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  const { getMsSinceWebTabBecameVisible } = require('./webInterviewGestureContext') as typeof import('./webInterviewGestureContext');
+  const msSinceTabVisible = getMsSinceWebTabBecameVisible();
+  return msSinceTabVisible != null && msSinceTabVisible < 20000;
 }
 
 export { WebTtsRequiresUserGestureError, isWebTtsRequiresUserGestureError } from './webTtsGestureErrors';
@@ -520,6 +1167,12 @@ export function webSpeechShouldDeferToUserGesture(): boolean {
     platform: navigator.platform,
     maxTouchPoints: navigator.maxTouchPoints,
   });
+}
+
+/** Mobile web: opening mic capture during TTS ducks playback — pre-init runs after the turn instead. */
+function kickInterviewMicPreInitForTtsPlayback(preInitTriggerDuring: PreInitTriggerDuring): void {
+  if (webSpeechShouldDeferToUserGesture()) return;
+  void beginInterviewMicPreInitDuringTts(preInitTriggerDuring);
 }
 
 /** Native ElevenLabs MP3 playback; must be stopped/unloaded before starting another clip. */
@@ -702,6 +1355,22 @@ function suspendSharedWebAudioContextForTabHide(): void {
  */
 export function pauseWebInterviewHtmlAudioForDocumentHidden(): void {
   if (Platform.OS !== 'web') return;
+  if (hasWebInterviewHtmlAudioTabResumePending()) {
+    webTabHideAudioTeardownApplied = true;
+    suspendSharedWebAudioContextForTabHide();
+    refreshWebInterviewHtmlTabStashForRepeatHide();
+    return;
+  }
+  const softPauseHtmlInitial = canSoftPauseActiveWebHtmlAudioForTabResume();
+  const hasActivePlayback =
+    isWebInterviewPlaybackSurfaceActive() ||
+    softPauseHtmlInitial ||
+    (typeof window !== 'undefined' && window.speechSynthesis?.speaking === true);
+  if (!hasActivePlayback) {
+    webTabHideAudioTeardownApplied = false;
+    return;
+  }
+  webTabHideAudioTeardownApplied = true;
   /** Stop PCM / Web Audio buffer first — they block {@link canSoftPauseActiveWebHtmlAudioForTabResume}. */
   if (activePcmStreamSources.length > 0) {
     for (const s of activePcmStreamSources) {
@@ -757,6 +1426,19 @@ export function interruptWebInterviewTtsForTabHide(): void {
   pauseWebInterviewHtmlAudioForDocumentHidden();
 }
 
+/** Optional hooks for playback surfaces owned outside this module (e.g. prefetched greeting `<audio>`). */
+type WebInterviewExtraPlaybackHooks = {
+  stop?: () => void;
+  isActive?: () => boolean;
+};
+let extraWebInterviewPlaybackHooks: WebInterviewExtraPlaybackHooks = {};
+
+export function registerExtraWebInterviewPlaybackHooks(
+  hooks: WebInterviewExtraPlaybackHooks,
+): void {
+  extraWebInterviewPlaybackHooks = hooks;
+}
+
 /**
  * Web: true while interview TTS might still be using Web Audio / HTMLAudio / speechSynthesis output.
  * Use after {@link stopElevenLabsPlayback} to poll until surfaces are idle before opening the mic.
@@ -765,19 +1447,41 @@ export function isWebInterviewPlaybackSurfaceActive(): boolean {
   if (Platform.OS !== 'web') return false;
   if (activeWebAudio != null || activeWebBufferSource != null || activePcmStreamSources.length > 0) return true;
   if (typeof window !== 'undefined' && window.speechSynthesis?.speaking === true) return true;
+  if (extraWebInterviewPlaybackHooks.isActive?.()) return true;
+  return false;
+}
+
+/** Like {@link isWebInterviewPlaybackSurfaceActive} but false for paused HTML audio (iOS tab background). */
+export function isWebInterviewPlaybackAudiblyActive(): boolean {
+  if (Platform.OS !== 'web') return false;
+  const el = getActiveWebHtmlAudioElement();
+  if (el) {
+    return !el.paused && !el.ended;
+  }
+  const stashEl = getTabStashedHtmlAudioElement();
+  if (stashEl && !stashEl.paused && !stashEl.ended) {
+    return true;
+  }
+  if (activeWebBufferSource != null || activePcmStreamSources.length > 0) return true;
+  if (typeof window !== 'undefined' && window.speechSynthesis?.speaking === true) return true;
+  if (extraWebInterviewPlaybackHooks.isActive?.()) return true;
   return false;
 }
 
 export async function stopElevenLabsPlayback(): Promise<void> {
   if (Platform.OS === 'web') {
+    extraWebInterviewPlaybackHooks.stop?.();
     clearHtmlAudioTabResumeState();
     bumpWebInterviewTtsScheduleEpoch();
   }
   if (Platform.OS === 'web' && pendingWebGestureBlobUrl) {
-    try {
-      URL.revokeObjectURL(pendingWebGestureBlobUrl);
-    } catch {
-      /* ignore */
+    const tabStashUrl = webInterviewTabRestoreStash?.objectUrl ?? null;
+    if (pendingWebGestureBlobUrl !== tabStashUrl) {
+      try {
+        URL.revokeObjectURL(pendingWebGestureBlobUrl);
+      } catch {
+        /* ignore */
+      }
     }
     pendingWebGestureBlobUrl = null;
   }
@@ -809,10 +1513,13 @@ export async function stopElevenLabsPlayback(): Promise<void> {
     activeWebAudio = null;
   }
   if (Platform.OS === 'web' && activeWebHtmlAudioObjectUrl) {
-    try {
-      URL.revokeObjectURL(activeWebHtmlAudioObjectUrl);
-    } catch {
-      /* ignore */
+    const tabStashUrl = webInterviewTabRestoreStash?.objectUrl ?? null;
+    if (activeWebHtmlAudioObjectUrl !== tabStashUrl) {
+      try {
+        URL.revokeObjectURL(activeWebHtmlAudioObjectUrl);
+      } catch {
+        /* ignore */
+      }
     }
     activeWebHtmlAudioObjectUrl = null;
   }
@@ -867,6 +1574,9 @@ export function unlockWebAudioForAutoplay(): void {
     src.start(0);
     webInterviewAudioUnlocked = true;
     attachWebInterviewAudioVisibilityHandler();
+    if (!isWebInterviewMidUtteranceTabResumeActive()) {
+      ensureWebInterviewTtsOutputVolumePrimed();
+    }
   } catch {
     /* ignore — TTS will throw WebTtsRequiresUserGestureError until a successful unlock */
   }
@@ -876,11 +1586,30 @@ export function unlockWebAudioForAutoplay(): void {
 export function resetWebInterviewAudioSession(): void {
   webInterviewAudioUnlocked = false;
   resetElevenLabsSpokenContext();
+  clearWebInterviewHtmlTabRestoreState();
 }
 
 /** Whether web audio has been unlocked in the current interview session (shared context is ready). */
 export function isWebInterviewAudioUnlocked(): boolean {
   return Platform.OS !== 'web' || webInterviewAudioUnlocked;
+}
+
+/** Shared mobile-web `<audio>` for interview TTS — reused across parallel-stream chunks. */
+export function ensureSharedHtmlAudioElementForInterviewTts(): HTMLAudioElement | null {
+  if (Platform.OS !== 'web' || typeof window === 'undefined') return null;
+  const AudioCtor = (globalThis as unknown as { Audio?: new (src?: string) => HTMLAudioElement }).Audio;
+  if (!AudioCtor) return null;
+  if (!sharedHtmlAudioForMobileTts) {
+    sharedHtmlAudioForMobileTts = new AudioCtor();
+    const el = sharedHtmlAudioForMobileTts;
+    el.setAttribute('playsinline', '');
+    if ('playsInline' in el) {
+      (el as { playsInline: boolean }).playsInline = true;
+    }
+    el.preload = 'auto';
+    ensureWebHtmlAudioElementMaxVolume(el);
+  }
+  return sharedHtmlAudioForMobileTts;
 }
 
 /**
@@ -890,21 +1619,30 @@ export function isWebInterviewAudioUnlocked(): boolean {
 export function primeHtmlAudioForMobileTtsFromMicGesture(): void {
   if (Platform.OS !== 'web' || typeof window === 'undefined') return;
   if (!webSpeechShouldDeferToUserGesture()) return;
-  const AudioCtor = (globalThis as unknown as { Audio?: new (src?: string) => HTMLAudioElement }).Audio;
-  if (!AudioCtor) return;
   try {
-    if (!sharedHtmlAudioForMobileTts) {
-      sharedHtmlAudioForMobileTts = new AudioCtor();
-      const el = sharedHtmlAudioForMobileTts;
-      el.setAttribute('playsinline', '');
-      if ('playsInline' in el) {
-        (el as { playsInline: boolean }).playsInline = true;
-      }
-      el.preload = 'auto';
+    const el = ensureSharedHtmlAudioElementForInterviewTts();
+    if (!el) return;
+    el.src = SILENT_WAV_DATA_URL;
+    try {
+      el.muted = true;
+      el.volume = 1;
+      void el
+        .play()
+        .then(() => {
+          try {
+            el.pause();
+            el.currentTime = 0;
+            ensureWebHtmlAudioElementMaxVolume(el);
+          } catch {
+            /* ignore */
+          }
+        })
+        .catch(() => {
+          ensureWebHtmlAudioElementMaxVolume(el);
+        });
+    } catch {
       ensureWebHtmlAudioElementMaxVolume(el);
     }
-    sharedHtmlAudioForMobileTts.src = SILENT_WAV_DATA_URL;
-    void sharedHtmlAudioForMobileTts.play().catch(() => {});
   } catch {
     /* ignore */
   }
@@ -1041,7 +1779,7 @@ async function tryPlayElevenLabsMp3WithWebAudio(
             }
             src!.start(0);
             onPlaybackStarted?.();
-            void beginInterviewMicPreInitDuringTts(preInitTriggerDuring);
+            void kickInterviewMicPreInitForTtsPlayback(preInitTriggerDuring);
             logTtsAutoplayPlayOutcome({
               pipeline: 'elevenlabs_web_audio_context',
               outcome: 'play_ok',
@@ -1099,6 +1837,17 @@ export type ElevenLabsSpeakOptions = {
    * When chaining segments, skip `stopElevenLabsPlayback` at entry so the prior segment is not torn down mid-handoff.
    */
   skipStopElevenLabsPlaybackBeforeStart?: boolean;
+  /** Parallel-stream 2nd+ sentence: skip silent HTML reprime (avoids Android/BT speaker snap between chunks). */
+  skipWebPlaybackPriming?: boolean;
+  /** Skip `reprimeSharedHtmlAudioSilentPlay` during priming (post-recording / parallel-stream continuations). */
+  skipSilentWebPlaybackReprime?: boolean;
+  /** Parallel streaming: never open mic capture during playback (Android speaker duck / route snap). */
+  skipMicPreInitDuringPlayback?: boolean;
+  /**
+   * Parallel-stream handoffs: always play on the shared mobile `<audio>` element so Android Chrome
+   * does not re-route speaker output when swapping blob URLs between consecutive chunks.
+   */
+  chainHtmlAudioPlayback?: boolean;
   /** Web mic pre-init audit: which phase last warmed the inactive MediaRecorder. */
   preInitTriggerDuring?: PreInitTriggerDuring;
   /** Web: force full MP3 download + Web Audio / HTML audio — skip raw PCM stream (retry path after truncated playback). */
@@ -1450,7 +2199,7 @@ async function playElevenLabsPcmStreamFromResponse(
     if (!pcmPlaybackStarted) {
       pcmPlaybackStarted = true;
       onPlaybackStarted?.();
-      void beginInterviewMicPreInitDuringTts(preInitTriggerDuring);
+      kickInterviewMicPreInitForTtsPlayback(preInitTriggerDuring);
       logTtsAutoplayPlayOutcome({
         pipeline: TTS_PCM_STREAM_PIPELINE,
         outcome: 'play_ok',
@@ -1655,7 +2404,13 @@ export async function speakWithElevenLabs(
 
   try {
     if (shouldTryPcmStream) {
-      await ensureWebPlaybackPrimedForNextTurn(telemetrySource);
+      if (!options?.skipWebPlaybackPriming) {
+        await ensureWebPlaybackPrimedForNextTurn(telemetrySource, {
+          skipSilentReprime:
+            options?.skipSilentWebPlaybackReprime ||
+            shouldSkipSilentReprimeForTelemetry(telemetrySource),
+        });
+      }
       const playedPcm = await tryPlayElevenLabsPcmStream(
         spokenText,
         onPlaybackStarted,
@@ -1682,7 +2437,13 @@ export async function speakWithElevenLabs(
     }
 
     if (Platform.OS === 'web') {
-      await ensureWebPlaybackPrimedForNextTurn(telemetrySource);
+      if (!options?.skipWebPlaybackPriming) {
+        await ensureWebPlaybackPrimedForNextTurn(telemetrySource, {
+          skipSilentReprime:
+            options?.skipSilentWebPlaybackReprime ||
+            shouldSkipSilentReprimeForTelemetry(telemetrySource),
+        });
+      }
       const abForWebAudio = arrayBuffer.slice(0);
       const abForHtmlAudio = arrayBuffer.slice(0);
       /**
@@ -1725,10 +2486,37 @@ export async function speakWithElevenLabs(
         return;
       }
       const preAuthorizedEl = takePreAuthorizedAudioElementForTts();
+      const chainHtmlAudioPlayback = options?.chainHtmlAudioPlayback === true;
+      const chainedContinuation = chainHtmlAudioPlayback && options?.skipWebPlaybackPriming === true;
       const useSharedPrimed =
-        webSpeechShouldDeferToUserGesture() && sharedHtmlAudioForMobileTts !== null;
+        !preAuthorizedEl &&
+        !chainHtmlAudioPlayback &&
+        webSpeechShouldDeferToUserGesture() &&
+        sharedHtmlAudioForMobileTts !== null;
       let htmlAudio: HTMLAudioElement;
-      if (preAuthorizedEl) {
+      if (chainHtmlAudioPlayback) {
+        const shared = ensureSharedHtmlAudioElementForInterviewTts();
+        if (!shared) {
+          URL.revokeObjectURL(url);
+          await speakFallback(spokenText, onFallback, options);
+          return;
+        }
+        htmlAudio = shared;
+        try {
+          if (!htmlAudio.paused && !htmlAudio.ended) {
+            htmlAudio.pause();
+          }
+          if (!chainedContinuation) {
+            htmlAudio.currentTime = 0;
+          }
+        } catch {
+          /* ignore */
+        }
+        htmlAudio.muted = false;
+        htmlAudio.src = url;
+        ensureWebHtmlAudioElementMaxVolume(htmlAudio);
+        htmlAudio.playbackRate = playbackRateMultiplier;
+      } else if (preAuthorizedEl) {
         htmlAudio = preAuthorizedEl;
         try {
           htmlAudio.pause();
@@ -1781,10 +2569,21 @@ export async function speakWithElevenLabs(
           if (abortActiveWebHtmlAudioPlayback === abortThisPlayback) {
             abortActiveWebHtmlAudioPlayback = null;
           }
+          if (activeWebHtmlAudioPlaybackHandoff?.objectUrl === url) {
+            activeWebHtmlAudioPlaybackHandoff = null;
+          }
           if (timeoutId != null) clearTimeout(timeoutId);
           timeoutId = null;
           if (action === 'resolve') resolve();
           else reject(err ?? new Error('Audio playback failed'));
+        };
+        activeWebHtmlAudioPlaybackHandoff = {
+          clearSafetyTimeout: () => {
+            if (timeoutId != null) clearTimeout(timeoutId);
+            timeoutId = null;
+          },
+          completePlayback: () => finish('resolve'),
+          objectUrl: url,
         };
         const abortThisPlayback = () => {
           try {
@@ -1799,14 +2598,33 @@ export async function speakWithElevenLabs(
           if (settled) return;
           if (timeoutId != null) clearTimeout(timeoutId);
           const d = htmlAudio.duration;
-          const safetyMs =
-            Number.isFinite(d) && d > 0
-              ? Math.min(600_000, Math.ceil(d * 1000) + 3000)
-              : LOOSE_UNTIL_METADATA_MS;
+          const tabSnap = tabHtmlAudioResumeSnapshot;
+          const resumeAt =
+            tabSnap && tabSnap.element === htmlAudio && Number.isFinite(tabSnap.resumeSeconds)
+              ? tabSnap.resumeSeconds
+              : htmlAudio.currentTime;
+          let safetyMs = LOOSE_UNTIL_METADATA_MS;
+          if (Number.isFinite(d) && d > 0) {
+            const remainingSec =
+              Number.isFinite(resumeAt) && resumeAt > 0 && d > resumeAt + 0.35
+                ? d - resumeAt
+                : d;
+            if (remainingSec > 0.5) {
+              safetyMs = Math.min(600_000, Math.ceil(remainingSec * 1000) + 5000);
+            }
+          }
           timeoutId = setTimeout(() => {
-            if (htmlAudioPausedForTabResume) {
+            if (htmlAudioPausedForTabResume || hasWebInterviewHtmlAudioTabResumePending()) {
               scheduleSafetyTimeout('tab_paused_hold');
               return;
+            }
+            if (!htmlAudio.ended && !htmlAudio.paused) {
+              const d = htmlAudio.duration;
+              const ct = htmlAudio.currentTime;
+              if (Number.isFinite(d) && d > 0.5 && ct < d - 0.35) {
+                scheduleSafetyTimeout('still_playing');
+                return;
+              }
             }
             try {
               if (!htmlAudio.ended) {
@@ -1849,19 +2667,39 @@ export async function speakWithElevenLabs(
           URL.revokeObjectURL(url);
           finish('reject', new Error('Audio playback failed'));
         };
-        void htmlAudio
-          .play()
-          .then(() => {
+        void (async () => {
+          try {
+            const tabResumeSameElement =
+              tabHtmlAudioResumeSnapshot?.element === htmlAudio &&
+              (htmlAudioPausedForTabResume || hasWebInterviewHtmlAudioTabResumePending());
+            if (tabResumeSameElement && !htmlAudio.paused && !htmlAudio.ended) {
+              applyTabStashedHtmlAudioVolume(htmlAudio);
+              onPlaybackStarted?.();
+              logTtsAutoplayPlayOutcome({
+                pipeline: 'elevenlabs_web_html_audio',
+                outcome: 'play_ok',
+                telemetrySource,
+                html_audio_volume: htmlAudio.volume,
+                errorMessagePreview: `tab_resume_already_audible_at_s=${htmlAudio.currentTime}`,
+              });
+              return;
+            }
+            await waitForWebHtmlAudioElementReady(htmlAudio, 8000, {
+              skipExplicitLoad: options?.skipWebPlaybackPriming,
+              preservePlaybackPosition: tabResumeSameElement,
+            });
+            await htmlAudio.play();
             onPlaybackStarted?.();
-            void beginInterviewMicPreInitDuringTts(preInitTriggerDuring);
+            if (!options?.skipWebPlaybackPriming && !options?.skipMicPreInitDuringPlayback) {
+              void kickInterviewMicPreInitForTtsPlayback(preInitTriggerDuring);
+            }
             logTtsAutoplayPlayOutcome({
               pipeline: 'elevenlabs_web_html_audio',
               outcome: 'play_ok',
               telemetrySource,
               html_audio_volume: htmlAudio.volume,
             });
-          })
-          .catch(async (playErr: unknown) => {
+          } catch (playErr: unknown) {
             if (isWebAudioAutoplayBlockedError(playErr)) {
               pendingWebGestureBlobUrl = url;
               activeWebAudio = htmlAudio;
@@ -1876,6 +2714,9 @@ export async function speakWithElevenLabs(
               ) {
                 try {
                   ensureWebHtmlAudioElementMaxVolume(htmlAudio);
+                  await waitForWebHtmlAudioElementReady(htmlAudio, 8000, {
+                    skipExplicitLoad: options?.skipWebPlaybackPriming,
+                  });
                   await htmlAudio.play();
                   onPlaybackStarted?.();
                   logTtsAutoplayPlayOutcome({
@@ -1932,7 +2773,8 @@ export async function speakWithElevenLabs(
               errorMessagePreview: err.message?.slice(0, 120),
             });
             finish('reject', err);
-          });
+          }
+        })();
       });
       recordElevenLabsSpokenContext(spokenText);
       return;
@@ -2073,7 +2915,7 @@ function speakWithWebSpeechSynthesis(
     utter.onstart = () => {
       webSpeechSynthTabResumeState = { fullText: spokenText, startedAtMs: Date.now() };
       onPlaybackStarted?.();
-      void beginInterviewMicPreInitDuringTts(preInitTriggerDuring);
+      kickInterviewMicPreInitForTtsPlayback(preInitTriggerDuring);
     };
     utter.onend = () => {
       clearWebSpeechSynthTabResumeState();
@@ -2133,7 +2975,9 @@ export async function tryPlayPendingWebTtsAudioInUserGesture(
 ): Promise<boolean> {
   const telemetrySource = telemetry?.source ?? 'other';
   if (Platform.OS !== 'web' || typeof window === 'undefined' || !pendingWebGestureBlobUrl) return false;
-  await ensureWebPlaybackPrimedForNextTurn(telemetrySource);
+  await ensureWebPlaybackPrimedForNextTurn(telemetrySource, {
+    skipSilentReprime: shouldSkipSilentReprimeForTelemetry(telemetrySource),
+  });
   const url = pendingWebGestureBlobUrl;
   pendingWebGestureBlobUrl = null;
   const AudioCtor = typeof (globalThis as unknown as { Audio?: new (src?: string) => HTMLAudioElement }).Audio !== 'undefined'
@@ -2151,6 +2995,7 @@ export async function tryPlayPendingWebTtsAudioInUserGesture(
   if ('playsInline' in htmlAudio) {
     (htmlAudio as { playsInline: boolean }).playsInline = true;
   }
+  ensureWebHtmlAudioElementMaxVolume(htmlAudio);
   const finishAfterPlayback = () => {
     finalizeInterviewMicAmbientOnTtsEnd();
     if (activeWebAudio === audio) activeWebAudio = null;
@@ -2172,17 +3017,18 @@ export async function tryPlayPendingWebTtsAudioInUserGesture(
     });
     onDone?.();
   };
-  void htmlAudio.play().then(
-    () => {
+  void (async () => {
+    try {
+      await waitForWebHtmlAudioElementReady(htmlAudio);
+      await htmlAudio.play();
       onPlaybackStarted?.();
-      void beginInterviewMicPreInitDuringTts('tts_playback');
+      kickInterviewMicPreInitForTtsPlayback('tts_playback');
       logTtsAutoplayPlayOutcome({
         pipeline: 'elevenlabs_gesture_flush',
         outcome: 'gesture_flush_ok',
         telemetrySource,
       });
-    },
-    () => {
+    } catch {
       pendingWebGestureBlobUrl = url;
       if (activeWebAudio === audio) activeWebAudio = null;
       logTtsAutoplayPlayOutcome({
@@ -2192,7 +3038,7 @@ export async function tryPlayPendingWebTtsAudioInUserGesture(
       });
       onDone?.();
     }
-  );
+  })();
   return true;
 }
 

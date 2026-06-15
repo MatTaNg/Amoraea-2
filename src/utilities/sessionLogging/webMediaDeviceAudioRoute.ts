@@ -4,7 +4,11 @@
  */
 import { Platform } from 'react-native';
 import { remoteLog } from '@utilities/remoteLog';
-import { setSessionAudioRoutesFromWebInference } from './audioSessionLogEnvelope';
+import {
+  setSessionAudioRoutesFromWebInference,
+  syncSessionMicTrackSettingsFromCache,
+} from './audioSessionLogEnvelope';
+import { getSessionLogRuntime } from './sessionLogContext';
 
 export type WebInferredOutputRoute =
   | 'speaker'
@@ -46,6 +50,22 @@ function audit(devices: MediaDeviceInfo[]) {
   }));
 }
 
+let cachedMicTrackSettings: MediaTrackSettings | null = null;
+let cachedMicPermissionGrantedAtMs: number | null = null;
+
+/** Seed route cache from an existing live mic stream (pre-init / recording) without a new probe. */
+export function seedCachedWebMicTrackSettings(settings: MediaTrackSettings | null | undefined): void {
+  if (!settings || Platform.OS !== 'web') return;
+  cachedMicTrackSettings = { ...settings };
+  cachedMicPermissionGrantedAtMs = Date.now();
+  syncSessionMicTrackSettingsFromCache(cachedMicTrackSettings, cachedMicPermissionGrantedAtMs);
+}
+
+/** True after interview-start mic permission or a live capture stream seeded the route cache. */
+export function hasCachedWebMicTrackSettings(): boolean {
+  return Platform.OS === 'web' && cachedMicTrackSettings != null;
+}
+
 /** Request mic and return active audio track settings (helps when enumerate labels are empty). */
 async function getMicStreamAndSettings(): Promise<{
   permission_obtained: boolean;
@@ -61,10 +81,29 @@ async function getMicStreamAndSettings(): Promise<{
     const track = s.getAudioTracks()[0];
     const settings = track ? { ...track.getSettings() } : null;
     s.getTracks().forEach((t) => t.stop());
+    if (settings) {
+      cachedMicTrackSettings = settings;
+      cachedMicPermissionGrantedAtMs = grantedAt;
+    }
     return { permission_obtained: true, settings, permissionGrantedAtMs: grantedAt };
   } catch (e) {
     return { permission_obtained: false, settings: null, permissionGrantedAtMs: null };
   }
+}
+
+function readCachedMicStreamAndSettings(): {
+  permission_obtained: boolean;
+  settings: MediaTrackSettings | null;
+  permissionGrantedAtMs: number | null;
+} {
+  if (!cachedMicTrackSettings) {
+    return { permission_obtained: false, settings: null, permissionGrantedAtMs: null };
+  }
+  return {
+    permission_obtained: true,
+    settings: cachedMicTrackSettings,
+    permissionGrantedAtMs: cachedMicPermissionGrantedAtMs,
+  };
 }
 
 function inferHeadphonesFromTrackSettings(st: MediaTrackSettings | null): boolean | null {
@@ -244,7 +283,19 @@ export function inferWebAudioRoutesFromDeviceList(
   };
 }
 
-export async function inferWebAudioRoutesFromDevices(): Promise<WebAudioRouteInference> {
+export type WebAudioRouteRefreshOptions = {
+  /**
+   * When false, skip opening a new `getUserMedia` probe and reuse cached track settings.
+   * Required during TTS on Android Chrome — a mic probe ducks speaker playback and causes volume jumps.
+   */
+  probeMicrophone?: boolean;
+  /** When true, run `enumerateDevices` even if mic track settings are already cached. */
+  forceEnumerate?: boolean;
+};
+
+export async function inferWebAudioRoutesFromDevices(
+  options?: WebAudioRouteRefreshOptions,
+): Promise<WebAudioRouteInference> {
   if (Platform.OS !== 'web' || typeof navigator === 'undefined') {
     return {
       input_route: 'unknown',
@@ -266,7 +317,16 @@ export async function inferWebAudioRoutesFromDevices(): Promise<WebAudioRouteInf
     };
   }
 
-  const { permission_obtained, settings: media_track_settings, permissionGrantedAtMs } = await getMicStreamAndSettings();
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  const greetingMod = require('@features/aria/utils/webInterviewGreetingAudio') as typeof import('@features/aria/utils/webInterviewGreetingAudio');
+  if (greetingMod.isWebGreetingAudiblePlaybackActive()) {
+    return buildCachedRouteRefreshResult().inference;
+  }
+
+  const probeMicrophone = options?.probeMicrophone !== false;
+  const { permission_obtained, settings: media_track_settings, permissionGrantedAtMs } = probeMicrophone
+    ? await getMicStreamAndSettings()
+    : readCachedMicStreamAndSettings();
 
   let devices: MediaDeviceInfo[] = [];
   let enumerate_devices_error: string | null = null;
@@ -312,6 +372,7 @@ export async function inferWebAudioRoutesFromDevices(): Promise<WebAudioRouteInf
     enumerate_devices_result,
     device_count: devices.length,
     active_track_settings: media_track_settings,
+    mic_probe_skipped: !probeMicrophone,
   });
 
   return inferWebAudioRoutesFromDeviceList(devices, {
@@ -354,15 +415,32 @@ export function buildWebAudioRouteChangedEventData(
   };
 }
 
-export async function refreshWebAudioRoutesForSession(): Promise<WebRouteRefreshResult> {
-  const inf = await inferWebAudioRoutesFromDevices();
-  const prevIn = lastInputRoute;
-  const prevOut = lastOutputRoute;
-  const hadPrior = lastInputRoute != null && lastOutputRoute != null;
-  const changed =
-    hadPrior && (prevIn !== inf.input_route || prevOut !== inf.output_route);
-  lastInputRoute = inf.input_route;
-  lastOutputRoute = inf.output_route;
+function buildCachedRouteRefreshResult(): WebRouteRefreshResult {
+  const { settings: media_track_settings } = readCachedMicStreamAndSettings();
+  const time_since_permission_granted_ms =
+    cachedMicPermissionGrantedAtMs != null ? Date.now() - cachedMicPermissionGrantedAtMs : null;
+  const inf: WebAudioRouteInference = {
+    input_route: lastInputRoute ?? 'unknown',
+    output_route: (lastOutputRoute ?? 'speaker') as WebInferredOutputRoute,
+    headphones_connected: null,
+    labels_empty: lastInputRoute == null,
+    devices_audit: [],
+    enumerate_devices_error: null,
+    media_track_settings,
+    enumeration_debug: {
+      device_count: 0,
+      kinds_present: [],
+      labels_populated_count: 0,
+      permission_obtained: media_track_settings != null,
+    },
+    time_since_permission_granted_ms,
+    enumerate_devices_result: 'ok',
+    headphone_detection_status: null,
+  };
+  return { inference: inf, changed: false, previous: null };
+}
+
+function applyWebRouteInferenceToSessionEnvelope(inf: WebAudioRouteInference): void {
   setSessionAudioRoutesFromWebInference({
     input_route: inf.input_route,
     output_route: inf.output_route,
@@ -374,6 +452,72 @@ export async function refreshWebAudioRoutesForSession(): Promise<WebRouteRefresh
     enumerate_devices_result: inf.enumerate_devices_result,
     time_since_permission_granted_ms: inf.time_since_permission_granted_ms,
   });
+}
+
+/** Update session telemetry from cached mic settings — no `enumerateDevices` (safe during TTS). */
+export function syncWebAudioRouteSessionEnvelopeFromCache(): void {
+  if (Platform.OS !== 'web') return;
+  const cached = buildCachedRouteRefreshResult();
+  applyWebRouteInferenceToSessionEnvelope(cached.inference);
+}
+
+/** Route inference from cached mic track settings only — never calls `enumerateDevices`. */
+export function getCachedWebAudioRouteInference(): WebAudioRouteInference {
+  return buildCachedRouteRefreshResult().inference;
+}
+
+export async function refreshWebAudioRoutesForSession(
+  options?: WebAudioRouteRefreshOptions,
+): Promise<WebRouteRefreshResult> {
+  if (Platform.OS === 'web') {
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const greeting = require('@features/aria/utils/webInterviewGreetingAudio') as typeof import('@features/aria/utils/webInterviewGreetingAudio');
+    if (greeting.isWebGreetingAudiblePlaybackActive()) {
+      void remoteLog('[AUDIO_ROUTE] refresh_skipped_during_greeting');
+      const cached = buildCachedRouteRefreshResult();
+      applyWebRouteInferenceToSessionEnvelope(cached.inference);
+      return cached;
+    }
+  }
+  if (Platform.OS === 'web' && getSessionLogRuntime().recordingSessionActive) {
+    void remoteLog('[AUDIO_ROUTE] refresh_skipped_during_recording', {
+      mic_probe_skipped: options?.probeMicrophone === false,
+    });
+    const cached = buildCachedRouteRefreshResult();
+    applyWebRouteInferenceToSessionEnvelope(cached.inference);
+    return cached;
+  }
+  if (Platform.OS === 'web' && getSessionLogRuntime().ttsPlaybackActive) {
+    void remoteLog('[AUDIO_ROUTE] refresh_skipped_during_tts', {
+      mic_probe_skipped: options?.probeMicrophone === false,
+    });
+    const cached = buildCachedRouteRefreshResult();
+    applyWebRouteInferenceToSessionEnvelope(cached.inference);
+    return cached;
+  }
+  if (Platform.OS === 'web' && !hasCachedWebMicTrackSettings()) {
+    void remoteLog('[AUDIO_ROUTE] refresh_skipped_no_mic_cache');
+    const cached = buildCachedRouteRefreshResult();
+    applyWebRouteInferenceToSessionEnvelope(cached.inference);
+    return cached;
+  }
+  if (Platform.OS === 'web' && hasCachedWebMicTrackSettings() && !options?.forceEnumerate) {
+    void remoteLog('[AUDIO_ROUTE] refresh_skipped_cached_mic_track', {
+      mic_probe_skipped: options?.probeMicrophone === false,
+    });
+    const cached = buildCachedRouteRefreshResult();
+    applyWebRouteInferenceToSessionEnvelope(cached.inference);
+    return cached;
+  }
+  const inf = await inferWebAudioRoutesFromDevices(options);
+  const prevIn = lastInputRoute;
+  const prevOut = lastOutputRoute;
+  const hadPrior = lastInputRoute != null && lastOutputRoute != null;
+  const changed =
+    hadPrior && (prevIn !== inf.input_route || prevOut !== inf.output_route);
+  lastInputRoute = inf.input_route;
+  lastOutputRoute = inf.output_route;
+  applyWebRouteInferenceToSessionEnvelope(inf);
   return {
     inference: inf,
     changed,
@@ -384,6 +528,8 @@ export async function refreshWebAudioRoutesForSession(): Promise<WebRouteRefresh
 export function resetWebAudioRouteSessionFingerprint(): void {
   lastInputRoute = null;
   lastOutputRoute = null;
+  cachedMicTrackSettings = null;
+  cachedMicPermissionGrantedAtMs = null;
 }
 
 export function subscribeWebAudioDeviceChange(onChange: () => void): () => void {

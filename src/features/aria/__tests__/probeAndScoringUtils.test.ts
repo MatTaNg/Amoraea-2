@@ -1323,7 +1323,10 @@ describe('probeAndScoringUtils', () => {
       );
       expect(SCENARIO_A_CONTEMPT_PROBE_TTS_SPOKEN_COPY).not.toContain("you've made that very clear");
       expect(scenarioAContemptProbeResumeRepeatTtsText(SCENARIO_A_CONTEMPT_PROBE_DELIVERED_COPY)).toBe(
-        SCENARIO_A_CONTEMPT_PROBE_TTS_SPOKEN_COPY,
+        SCENARIO_A_CONTEMPT_PROBE_DELIVERED_COPY,
+      );
+      expect(scenarioAContemptProbeResumeRepeatTtsText(SCENARIO_A_CONTEMPT_PROBE_TTS_SPOKEN_COPY)).toBe(
+        SCENARIO_A_CONTEMPT_PROBE_DELIVERED_COPY,
       );
       expect(
         scenarioAContemptProbeTtsSpokenText('How would you repair this if you were Ryan?'),

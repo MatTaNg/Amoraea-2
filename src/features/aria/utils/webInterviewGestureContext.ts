@@ -6,6 +6,7 @@
 export type GestureContextLostReason =
   | 'async_gap_in_tts_chain'
   | 'tab_visibility_change'
+  | 'navigation_away'
   | 'component_remount'
   | 'tts_called_from_effect'
   | 'unknown';
@@ -37,6 +38,12 @@ export function getLastWebInterviewUserGestureMs(): number | null {
   return lastUserGestureAtMs;
 }
 
+/** True when a pointer/mic tap was recorded recently — not tab-focus `userActivation` alone. */
+export function hasRecentWebInterviewUserGesture(maxAgeMs = 2000): boolean {
+  if (lastUserGestureAtMs == null) return false;
+  return Date.now() - lastUserGestureAtMs < maxAgeMs;
+}
+
 export function getLastGestureMountGeneration(): number {
   return lastGestureMountGeneration;
 }
@@ -60,6 +67,8 @@ export function resetWebInterviewGestureContext(): void {
   lastGestureMountGeneration = 0;
   recordedLoss = null;
   aiProcessingTurnStartedAtMs = null;
+  lastTabBecameVisibleAtMs = null;
+  lastWebSessionResumeReadyAtMs = null;
 }
 
 export function markAiProcessingTurnStarted(): void {
@@ -72,4 +81,27 @@ export function clearAiProcessingTurnStarted(): void {
 
 export function peekAiProcessingTurnStartedAtMs(): number | null {
   return aiProcessingTurnStartedAtMs;
+}
+
+let lastTabBecameVisibleAtMs: number | null = null;
+let lastWebSessionResumeReadyAtMs: number | null = null;
+
+export function markWebTabBecameVisible(): void {
+  lastTabBecameVisibleAtMs = Date.now();
+}
+
+/** Milliseconds since the document last became visible; null if not yet observed this session. */
+export function getMsSinceWebTabBecameVisible(): number | null {
+  if (lastTabBecameVisibleAtMs == null) return null;
+  return Date.now() - lastTabBecameVisibleAtMs;
+}
+
+/** Call when a saved interview session is hydrated and ready for the resume welcome tap. */
+export function markWebSessionResumeReady(): void {
+  lastWebSessionResumeReadyAtMs = Date.now();
+}
+
+export function getMsSinceWebSessionResumeReady(): number | null {
+  if (lastWebSessionResumeReadyAtMs == null) return null;
+  return Date.now() - lastWebSessionResumeReadyAtMs;
 }

@@ -59,6 +59,12 @@ describe('classifyUserMetaComment', () => {
     expect(classifyUserMetaComment('Yes, repeat')?.confidence).toBe(1.0);
   });
 
+  it('pre-classifies Whisper repeat variants (see/say) as repeat_request', () => {
+    expect(classifyUserMetaComment('Repeat what you see.')?.type).toBe('confusion');
+    expect(classifyUserMetaComment('Repeat what you see.')?.confusion_subtype).toBe('repeat_request');
+    expect(classifyUserMetaComment('Repeat what you said.')?.confusion_subtype).toBe('repeat_request');
+  });
+
   it('classifies checking in', () => {
     const r = classifyUserMetaComment('Was that enough?');
     expect(r?.type).toBe('checking_in');
@@ -503,6 +509,20 @@ describe('resolveMetaCommentForInterviewTurn', () => {
     expect(resolved.exemptMetaCommentTurn).toBe(false);
     expect(resolved.effective?.confusion_subtype).toBe('repeat_request');
   });
+
+  it('does not exempt repeat requests during post-meta-ack window', () => {
+    const resolved = resolveMetaCommentForInterviewTurn('Can you repeat what you said?', {
+      lastQuestionText: 'And if you were James, how would you repair?',
+      priorUserUtteranceCount: 3,
+      isInterviewAppRoute: true,
+      hasProfileFirstName: true,
+      suppressMetaClassificationPostMetaAckAwaitingSubstantive: true,
+      spokenWordCount: 6,
+    });
+    expect(resolved.exemptMetaCommentTurn).toBe(false);
+    expect(resolved.effective?.type).toBe('confusion');
+    expect(resolved.effective?.confusion_subtype).toBe('repeat_request');
+  });
 });
 
 describe('hadPriorSubstantiveAnswerInScenarioForFrustration', () => {
@@ -582,6 +602,10 @@ describe('countsAsSubstantiveInterviewQuestionDelivery', () => {
         'I only caught part of that — could you answer again in a full sentence?'
       )
     ).toBe(false);
+  });
+
+  it('treats client elongating probes as non-substantive', () => {
+    expect(countsAsSubstantiveInterviewQuestionDelivery('Can you say more about that?')).toBe(false);
   });
 });
 

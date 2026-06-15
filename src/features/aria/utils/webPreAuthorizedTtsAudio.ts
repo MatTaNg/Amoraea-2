@@ -7,6 +7,41 @@ import { Platform } from 'react-native';
 const SILENT_WAV_DATA_URL =
   'data:audio/wav;base64,UklGRigAAABXQVZFZm10IBAAAAABAAEAQB8AAEAfAAABAAgAZGF0YQQAAAAAAA==';
 
+/** Interview TTS target level — restore after muted gesture priming. */
+function restoreInterviewHtmlAudioVolume(el: HTMLAudioElement): void {
+  try {
+    el.volume = 1;
+    el.muted = false;
+  } catch {
+    /* ignore */
+  }
+}
+
+/** Muted silent play — unlocks autoplay without audible static on mobile speakers. */
+function playMutedSilentHtmlAudioPriming(el: HTMLAudioElement, src?: string): void {
+  try {
+    if (src) el.src = src;
+    el.muted = true;
+    el.volume = 1;
+    void el
+      .play()
+      .then(() => {
+        try {
+          el.pause();
+          el.currentTime = 0;
+          restoreInterviewHtmlAudioVolume(el);
+        } catch {
+          restoreInterviewHtmlAudioVolume(el);
+        }
+      })
+      .catch(() => {
+        restoreInterviewHtmlAudioVolume(el);
+      });
+  } catch {
+    restoreInterviewHtmlAudioVolume(el);
+  }
+}
+
 let preAuthorizedForNextTts: HTMLAudioElement | null = null;
 let recordingStartShouldLogPreAuthorized = false;
 
@@ -15,6 +50,9 @@ let recordingStartShouldLogPreAuthorized = false;
  */
 export function preAuthorizeAudioElementOnMicTapGesture(): void {
   if (Platform.OS !== 'web' || typeof window === 'undefined') return;
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  const { isWebInterviewMidUtteranceTabResumeActive } = require('./elevenLabsTts') as typeof import('./elevenLabsTts');
+  if (isWebInterviewMidUtteranceTabResumeActive()) return;
   const AudioCtor = (globalThis as unknown as { Audio?: new (src?: string) => HTMLAudioElement }).Audio;
   if (!AudioCtor) return;
   try {
@@ -23,18 +61,7 @@ export function preAuthorizeAudioElementOnMicTapGesture(): void {
     if ('playsInline' in el) {
       (el as { playsInline: boolean }).playsInline = true;
     }
-    el.volume = 0.0001;
-    void el
-      .play()
-      .then(() => {
-        try {
-          el.pause();
-          el.currentTime = 0;
-        } catch {
-          /* ignore */
-        }
-      })
-      .catch(() => {});
+    playMutedSilentHtmlAudioPriming(el, SILENT_WAV_DATA_URL);
     preAuthorizedForNextTts = el;
     recordingStartShouldLogPreAuthorized = true;
   } catch {
@@ -52,6 +79,7 @@ export function isPreAuthorizedAudioPendingForNextTts(): boolean {
 export function takePreAuthorizedAudioElementForTts(): HTMLAudioElement | null {
   const el = preAuthorizedForNextTts;
   preAuthorizedForNextTts = null;
+  if (el) restoreInterviewHtmlAudioVolume(el);
   return el;
 }
 
@@ -70,18 +98,7 @@ export async function reauthorizePendingPreAuthorizedElement(): Promise<void> {
   if (document.visibilityState !== 'visible') return;
   const el = preAuthorizedForNextTts;
   if (!el) return;
-  try {
-    el.volume = 0.0001;
-    await el.play().catch(() => {});
-    try {
-      el.pause();
-      el.currentTime = 0;
-    } catch {
-      /* ignore */
-    }
-  } catch {
-    /* ignore */
-  }
+  playMutedSilentHtmlAudioPriming(el);
 }
 
 /** Refresh or create pre-authorized HTML audio before TTS after a long async processing gap. */

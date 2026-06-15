@@ -247,7 +247,7 @@ function isScenarioModalFooterQuestionParagraph(para: string): boolean {
   if (qIdx === para.length - 1 && !/[.!]\s/.test(beforeQ)) return true;
   if (
     para.length <= 180 &&
-    /^[\u2014\u2013\-—]?\s*(What's|What would|What do you|What if|How would|When |Good —|Can you)/i.test(
+    /^[\u2014\u2013\-—]?\s*(What's|What would|What do you|What if|How would|When |Good —|Can you|And if you)/i.test(
       para
     )
   ) {

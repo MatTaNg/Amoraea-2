@@ -303,6 +303,14 @@ describe('shouldHoldBoundaryWarmStreamingLine', () => {
     );
   });
 
+  it('holds short scenario transition preambles until the reflection clause', () => {
+    expect(shouldHoldBoundaryWarmStreamingLine("That's the end of the three described situations.", '')).toBe(
+      true,
+    );
+    expect(shouldHoldBoundaryWarmStreamingLine("That's a wrap on this situation.", '')).toBe(true);
+    expect(shouldHoldBoundaryWarmStreamingLine('Thanks for sharing that.', '')).toBe(true);
+  });
+
   it('does not hold reflection lines that already include the name', () => {
     expect(shouldHoldBoundaryWarmStreamingLine('Nice work, Matt — recap here.', 'Matt')).toBe(false);
   });

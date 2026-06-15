@@ -14,6 +14,8 @@ import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { useAuth } from './src/features/authentication/hooks/useAuth';
 import { LoginScreen } from './src/app/screens/LoginScreen';
 import { RegisterScreen } from './src/app/screens/RegisterScreen';
+import { ForgotPasswordScreen } from './src/app/screens/ForgotPasswordScreen';
+import { SetNewPasswordScreen } from './src/app/screens/SetNewPasswordScreen';
 import { PostInterviewScreen } from '@app/screens/onboarding/PostInterviewScreen';
 import { PostInterviewPassedScreen } from '@app/screens/onboarding/PostInterviewPassedScreen';
 import { PostInterviewFailedScreen } from '@app/screens/onboarding/PostInterviewFailedScreen';
@@ -26,6 +28,7 @@ import { PsychometricAssessmentScreen } from '@app/screens/PsychometricAssessmen
 import { PsychometricsCompleteScreen } from '@app/screens/PsychometricsCompleteScreen';
 import { InterviewCompleteScreen } from '@features/onboarding/screens/InterviewCompleteScreen';
 import { AssessmentWelcomeScreen } from '@features/onboarding/screens/AssessmentWelcomeScreen';
+import { shouldForceWebPasswordResetUi } from '@features/authentication/webAuthRecoveryRouting';
 import { isAmoraeaAdminConsoleEmail } from '@/constants/adminConsole';
 import {
   fetchInterviewAttemptRevealSnapshot,
@@ -103,10 +106,12 @@ const inviteCodeRepository = new InviteCodeRepository();
 const storageService = new AsyncStorageService();
 const onboardingUseCase = new OnboardingUseCase(profileRepository, storageService);
 
-const AuthNavigator = () => (
-  <Stack.Navigator screenOptions={{ headerShown: false }}>
+const AuthNavigator = ({ initialRouteName = 'Login' }: { initialRouteName?: string }) => (
+  <Stack.Navigator screenOptions={{ headerShown: false }} initialRouteName={initialRouteName}>
     <Stack.Screen name="Login" component={LoginScreen} />
     <Stack.Screen name="Register" component={RegisterScreen} />
+    <Stack.Screen name="ForgotPassword" component={ForgotPasswordScreen} />
+    <Stack.Screen name="SetNewPassword" component={SetNewPasswordScreen} />
   </Stack.Navigator>
 );
 
@@ -604,12 +609,18 @@ const INTERVIEW_STACK_LINKING_SCREENS = {
 const AUTH_STACK_LINKING_SCREENS = {
   Login: '',
   Register: 'register',
+  ForgotPassword: 'forgot-password',
+  /** Supabase password-reset emails redirect here (`getPasswordResetRedirectTo`). */
+  SetNewPassword: 'reset-password',
 } as const;
 
 const RootNavigator = () => {
-  const { user, loading } = useAuth();
+  const { user, loading, passwordRecoveryPending } = useAuth();
 
   const isLoggedIn = user?.email != null && user.email !== '';
+  const forcePasswordResetUi =
+    passwordRecoveryPending ||
+    (Platform.OS === 'web' && shouldForceWebPasswordResetUi());
 
   useEffect(() => {
     initAudosFromEnv();
@@ -638,6 +649,12 @@ const RootNavigator = () => {
 
   const authLinking: LinkingOptions<Record<string, unknown>> | undefined = useMemo(() => {
     if (Platform.OS !== 'web') {
+      /**
+       * Native password-reset deep links: `app.json` has no custom URL scheme yet and Supabase
+       * `detectSessionInUrl` is web-only (`client.ts`). Follow-up: add `scheme` to app.json,
+       * register `/reset-password` in Supabase redirect URLs, and handle `Linking.getInitialURL()`
+       * + session exchange before routing to SetNewPassword.
+       */
       return undefined;
     }
     const prefixes = [
@@ -669,10 +686,12 @@ const RootNavigator = () => {
     },
   };
 
-  if (!isLoggedIn) {
+  if (!isLoggedIn || forcePasswordResetUi) {
     return (
       <NavigationContainer theme={navTheme} linking={authLinking}>
-        <AuthNavigator />
+        <AuthNavigator
+          initialRouteName={forcePasswordResetUi ? 'SetNewPassword' : 'Login'}
+        />
       </NavigationContainer>
     );
   }

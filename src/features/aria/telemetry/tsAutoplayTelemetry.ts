@@ -60,6 +60,13 @@ export function isIosSafariMobileWeb(): boolean {
   return isMobileWeb && browserFamily === 'safari';
 }
 
+/** Android mobile browsers often keep HTML audio audible when the tab is backgrounded; iOS WebKit does not. */
+export function isAndroidMobileWeb(): boolean {
+  if (Platform.OS !== 'web' || typeof navigator === 'undefined') return false;
+  const ua = navigator.userAgent || '';
+  return isMobileUserAgent(ua) && /Android/i.test(ua);
+}
+
 /** Fire-and-forget: TTS play attempt outcome (web + native where applicable). */
 export function logTtsAutoplayPlayOutcome(payload: {
   pipeline: TtsAutoplayPipeline;

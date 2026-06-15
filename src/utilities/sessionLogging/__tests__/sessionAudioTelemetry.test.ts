@@ -15,6 +15,7 @@ describe('gatherParallelStreamingTtsPlaybackTelemetry', () => {
     expect(payload.tts_pipeline).toBe('parallel_streaming');
     expect(payload.playback_strategy).toBe('buffered_complete');
     expect(payload.after_recording).toBe(true);
+    expect(payload.parallel_stream_continuation).toBe(false);
     expect(payload.prefetched_mpeg).toBe(true);
     expect(payload.html_audio_volume).toBe(1);
     expect(payload.audio_output_route).toBeDefined();

@@ -105,5 +105,39 @@
     </noscript>
     <!-- The root element for your Expo app. -->
     <div id="root"></div>
+    <script>
+      (function () {
+        try {
+          var path = window.location.pathname || '';
+          var search = window.location.search || '';
+          var hash = window.location.hash || '';
+          var pendingKey = 'amoraea_password_reset_pending';
+          var pendingRaw = window.localStorage.getItem(pendingKey);
+          var pendingActive = false;
+          if (pendingRaw) {
+            var ts = Number(pendingRaw);
+            pendingActive = Number.isFinite(ts) && Date.now() - ts < 30 * 60 * 1000;
+            if (!pendingActive) window.localStorage.removeItem(pendingKey);
+          }
+          var hasAuthQuery =
+            search.indexOf('code=') !== -1 || search.indexOf('token_hash=') !== -1;
+          var hasRecoveryHash =
+            hash.indexOf('type=recovery') !== -1 ||
+            hash.indexOf('access_token') !== -1 ||
+            hash.indexOf('otp_expired') !== -1 ||
+            hash.indexOf('otp_disabled') !== -1;
+          var shouldUseResetRoute =
+            path.indexOf('reset-password') !== -1 ||
+            hasAuthQuery ||
+            hasRecoveryHash ||
+            pendingActive;
+          if (shouldUseResetRoute && path.indexOf('reset-password') === -1) {
+            window.location.replace('/reset-password' + search + hash);
+          }
+        } catch (e) {
+          /* ignore */
+        }
+      })();
+    </script>
   </body>
 </html>

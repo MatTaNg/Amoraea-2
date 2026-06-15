@@ -3,6 +3,7 @@
  * input when those device IDs appear in enumerateDevices — avoids locking to a stale non-default hardware ID.
  */
 import { Platform } from 'react-native';
+import { hasCachedWebMicTrackSettings } from '@utilities/sessionLogging/webMediaDeviceAudioRoute';
 
 export const WEB_MIC_PROCESSING_CONSTRAINTS = {
   echoCancellation: true,
@@ -22,6 +23,15 @@ export function isDefaultOrCommunicationsDeviceId(deviceId: string | undefined |
 export async function buildWebMicGetUserMediaConstraints(): Promise<MediaStreamConstraints> {
   if (Platform.OS !== 'web' || typeof navigator === 'undefined' || !navigator.mediaDevices?.enumerateDevices) {
     return { audio: { ...WEB_MIC_PROCESSING_CONSTRAINTS } };
+  }
+  /** Mid-interview re-capture: avoid enumerateDevices (Android Chrome speaker volume snap). */
+  if (hasCachedWebMicTrackSettings()) {
+    return {
+      audio: {
+        deviceId: { ideal: 'default' },
+        ...WEB_MIC_PROCESSING_CONSTRAINTS,
+      },
+    };
   }
   try {
     const devices = await navigator.mediaDevices.enumerateDevices();

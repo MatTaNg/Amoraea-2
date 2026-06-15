@@ -46,6 +46,7 @@ export function gatherTtsPlaybackTelemetry(args: {
 export function gatherParallelStreamingTtsPlaybackTelemetry(args: {
   ttsPlaybackActiveImmediatelyPrior: boolean;
   afterRecording: boolean;
+  parallelStreamContinuation?: boolean;
   charCount: number;
   momentNumber: number;
   scenarioNumber: number;
@@ -63,6 +64,7 @@ export function gatherParallelStreamingTtsPlaybackTelemetry(args: {
   prefetched_mpeg: boolean;
   html_audio_volume: number | null;
   tts_trigger_source: 'callback';
+  parallel_stream_continuation: boolean;
 } {
   return {
     ...gatherTtsPlaybackTelemetry({
@@ -73,6 +75,7 @@ export function gatherParallelStreamingTtsPlaybackTelemetry(args: {
     playback_strategy: 'buffered_complete',
     tts_buffer_complete_before_playback: true,
     after_recording: args.afterRecording,
+    parallel_stream_continuation: args.parallelStreamContinuation === true,
     char_count: args.charCount,
     moment_number: args.momentNumber,
     scenario_number: args.scenarioNumber,

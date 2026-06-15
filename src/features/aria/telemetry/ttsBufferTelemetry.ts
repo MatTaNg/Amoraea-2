@@ -33,7 +33,16 @@ export function prepareTtsPlaybackTelemetryState(args: {
   isWeb: boolean;
 }): void {
   const { charCount, telemetryIsGreeting, isWeb } = args;
-  if (telemetryIsGreeting || !isWeb || charCount <= LONG_LINE_BUFFERED_STRATEGY_CHAR_THRESHOLD) {
+  const isMobileWeb =
+    isWeb &&
+    typeof navigator !== 'undefined' &&
+    /Android|iPhone|iPad|iPod|Mobile/i.test(navigator.userAgent ?? '');
+  if (
+    telemetryIsGreeting ||
+    !isWeb ||
+    charCount <= LONG_LINE_BUFFERED_STRATEGY_CHAR_THRESHOLD ||
+    isMobileWeb
+  ) {
     setTtsBufferCompleteBeforePlaybackForNextPlayback(true);
     setTtsPlaybackStrategyForNextPlayback('buffered_complete');
   } else {

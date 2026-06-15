@@ -27,6 +27,10 @@ import {
   buildWebMicGetUserMediaConstraints,
   isDefaultOrCommunicationsDeviceId,
 } from '@features/aria/utils/webMicDeviceConstraints';
+import {
+  seedCachedWebMicTrackSettings,
+  syncWebAudioRouteSessionEnvelopeFromCache,
+} from '@utilities/sessionLogging/webMediaDeviceAudioRoute';
 
 function isWebMicStreamLive(stream: MediaStream | null): boolean {
   if (!stream?.active) return false;
@@ -93,6 +97,7 @@ export function useAudioRecorder({
   onBeforeWebRecorderStop,
   onMediaServicesReset,
   onRecordingEnginePrimed,
+  onRecordingTapIntent,
 }: {
   onRecordingComplete?: (
     blob: Blob,
@@ -126,6 +131,8 @@ export function useAudioRecorder({
     modeCompleteAtMs: number;
     recordingInitializedAtMs: number;
   }) => void;
+  /** Web/native: first line of recording start (before getUserMedia) — mark session active before route churn. */
+  onRecordingTapIntent?: () => void;
 }) {
   logAudioInterviewConfigOnce();
 
@@ -176,7 +183,11 @@ export function useAudioRecorder({
 
   const captureWebMicDeviceIdFromStream = useCallback((stream: MediaStream | null) => {
     const t = stream?.getAudioTracks?.()[0];
-    const id = t?.getSettings?.()?.deviceId;
+    const settings = t?.getSettings?.();
+    if (settings) {
+      seedCachedWebMicTrackSettings(settings);
+    }
+    const id = settings?.deviceId;
     lastWebMicDeviceIdRef.current = typeof id === 'string' && id.length > 0 ? id : lastWebMicDeviceIdRef.current;
   }, []);
 
@@ -315,6 +326,7 @@ export function useAudioRecorder({
       maxMeteringDbRef.current = null;
       recordingCappedThisTurnRef.current = false;
       clearMaxDurationTimer();
+      onRecordingTapIntent?.();
       await setRecordingMode();
       const modeCompleteAtMs = Date.now();
       if (getLastAppliedAudioModeLabel() !== 'recording') {
@@ -359,7 +371,7 @@ export function useAudioRecorder({
       onError?.(err instanceof Error ? err : new Error(String(err)));
     }
   },
-    [onError, onMediaServicesReset, onRecordingEnginePrimed, clearMaxDurationTimer, stopNativeRecording, sleep]
+    [onError, onMediaServicesReset, onRecordingEnginePrimed, onRecordingTapIntent, clearMaxDurationTimer, stopNativeRecording, sleep]
   );
 
   const ensureWebAudioAnalyserForStream = useCallback((stream: MediaStream) => {
@@ -402,6 +414,7 @@ export function useAudioRecorder({
         recordingCappedThisTurnRef.current = false;
         clearMaxDurationTimer();
         clearWebPrerollTimer();
+        onRecordingTapIntent?.();
         const tapIntentAtMs = opts?.tapIntentAtMs ?? Date.now();
 
         const consumedResult = tryConsumeWebPreInitRecorder();
@@ -448,6 +461,9 @@ export function useAudioRecorder({
             modeCompleteAtMs = webPrepareCompleteAtMsRef.current;
           }
         }
+
+        /** Mic stream settings were just seeded — avoid enumerateDevices (Android speaker snap). */
+        syncWebAudioRouteSessionEnvelopeFromCache();
 
         const delayMs =
           usedWebModulePreInit || streamWasPrimedFromTts
@@ -550,7 +566,9 @@ export function useAudioRecorder({
             recordingCapped: recordingCappedThisTurnRef.current,
             webRecordingTiming: timing ?? undefined,
           });
-          rearmWebMicPreInitAfterRecordingStop().catch(() => {});
+          if (Platform.OS !== 'web') {
+            rearmWebMicPreInitAfterRecordingStop().catch(() => {});
+          }
           lastWebRecordingTimingRef.current = null;
           recordingCappedThisTurnRef.current = false;
         };
@@ -645,6 +663,7 @@ export function useAudioRecorder({
       stopWebMeterLoop,
       onRecordingEnginePrimed,
       onBeforeWebRecorderStop,
+      onRecordingTapIntent,
       clearMaxDurationTimer,
       clearWebPrerollTimer,
       sleep,
@@ -725,17 +744,22 @@ export function useAudioRecorder({
   );
 
   const startRecording = useCallback(
-    async (opts?: { postAudioSessionDelayMs?: number; tapIntentAtMs?: number }) => {
+    async (opts?: { postAudioSessionDelayMs?: number; tapIntentAtMs?: number }): Promise<boolean> => {
       const granted = permissionStatus === 'granted' || (await requestPermission());
       if (!granted) {
         onError?.(new Error('Microphone permission denied'));
-        return;
+        return false;
       }
 
-      if (Platform.OS === 'web') {
-        await startWebRecording(opts);
-      } else {
-        await startNativeRecording(opts);
+      try {
+        if (Platform.OS === 'web') {
+          await startWebRecording(opts);
+        } else {
+          await startNativeRecording(opts);
+        }
+        return true;
+      } catch {
+        return false;
       }
     },
     [permissionStatus, requestPermission, startWebRecording, startNativeRecording, onError]
@@ -793,6 +817,11 @@ export function useAudioRecorder({
 
   const getLastWebMicCaptureDeviceId = useCallback((): string | undefined => lastWebMicDeviceIdRef.current, []);
 
+  /** Web: call when mic permission was granted during interview start (skip redundant getUserMedia on first tap). */
+  const markWebMicPermissionGranted = useCallback(() => {
+    setPermissionStatus('granted');
+  }, []);
+
   return {
     isRecording,
     permissionStatus,
@@ -802,6 +831,7 @@ export function useAudioRecorder({
     /** Ensures native `Recording` / web `MediaRecorder` is fully released (call before next turn). */
     releaseRecordingInstance,
     requestPermission,
+    markWebMicPermissionGranted,
     /** Smoothed 0–1 for UI meter */
     inputMeterLevel,
     /** Native: max peak metering (dBFS) for last completed recording; web: null (use blob RMS in transcribe). */

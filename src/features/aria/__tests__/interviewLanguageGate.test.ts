@@ -479,6 +479,9 @@ describe('assistantSpeechShouldRefreshScenarioModalPrompt', () => {
     expect(
       assistantSpeechShouldRefreshScenarioModalPrompt('If you were James, how would you repair this situation?')
     ).toBe(true);
+    expect(
+      assistantSpeechShouldRefreshScenarioModalPrompt('And if you were James, how would you repair?')
+    ).toBe(true);
   });
 
   it('returns false for elongating probes', () => {

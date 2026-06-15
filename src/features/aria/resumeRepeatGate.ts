@@ -8,7 +8,7 @@ export function looksLikeRepeatCueInAmbiguousReply(text: string): boolean {
   const wordCount = t.split(/\s+/).filter(Boolean).length;
   if (wordCount > RESUME_GATE_LONG_ANSWER_WORD_THRESHOLD) return false;
   /** Bare "said" matches narrative ("he said…") — require explicit repeat phrasing only. */
-  return /\b(you said|what you said|what did you say|say that|said that|say it again|hear it again|repeat that)\b/.test(
+  return /\b(you said|what you said|what did you say|say that|said that|say it again|hear it again|repeat that|repeat what you (said|say|see|asked|meant))\b/.test(
     t
   );
 }

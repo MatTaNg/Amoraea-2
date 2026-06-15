@@ -45,11 +45,89 @@ function logSessionTransition(
  * Prepare native speaker route for TTS. Use `afterRecording: true` immediately after mic capture
  * (full deactivate/reactivate cycle); otherwise apply playback mode only.
  */
+/** Android Chrome: brief pause after mic capture before speaker TTS avoids a loud route snap. */
+const WEB_TTS_SETTLE_AFTER_RECORDING_MS = 350;
+/** After app/tab foreground or session resume, avoid speaker snap before the next TTS. */
+const WEB_TTS_SETTLE_AFTER_FOREGROUND_MS = 350;
+const WEB_FOREGROUND_RESUME_SETTLE_WINDOW_MS = 20000;
+
+/** Brief mobile-web settle before TTS after tab/app return or post-recording (avoids Android speaker snap). */
+export async function applyWebInterviewForegroundTtsSettle(
+  context: 'after_recording' | 'after_foreground',
+): Promise<void> {
+  await applyWebMobileTtsRouteSettle(context);
+}
+
+async function applyWebMobileTtsRouteSettle(context: 'after_recording' | 'after_foreground'): Promise<void> {
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  const { isWebInterviewMidUtteranceTabResumeActive } = require('./elevenLabsTts') as typeof import('./elevenLabsTts');
+  if (isWebInterviewMidUtteranceTabResumeActive()) return;
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  const { getWebSpeechDeferFromNavigatorSnapshot } = require('./webSpeechDeferPolicy') as typeof import('./webSpeechDeferPolicy');
+  const deferMobile =
+    typeof navigator !== 'undefined' &&
+    getWebSpeechDeferFromNavigatorSnapshot({
+      userAgent: navigator.userAgent || '',
+      platform: navigator.platform,
+      maxTouchPoints: navigator.maxTouchPoints,
+    });
+  if (!deferMobile) return;
+  const delayMs =
+    context === 'after_recording' ? WEB_TTS_SETTLE_AFTER_RECORDING_MS : WEB_TTS_SETTLE_AFTER_FOREGROUND_MS;
+  await new Promise<void>((r) => setTimeout(r, delayMs));
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  const routeCache = require('@utilities/sessionLogging/webMediaDeviceAudioRoute') as typeof import('@utilities/sessionLogging/webMediaDeviceAudioRoute');
+  routeCache.syncWebAudioRouteSessionEnvelopeFromCache();
+}
+
 export async function prepareInterviewTtsPlayback(
   context: string,
-  options?: { afterRecording?: boolean },
+  options?: { afterRecording?: boolean; parallelStreamContinuation?: boolean },
 ): Promise<void> {
-  if (Platform.OS === 'web') return;
+  if (Platform.OS === 'web') {
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const mic = require('./webInterviewMicPreInit') as typeof import('./webInterviewMicPreInit');
+    if (!options?.parallelStreamContinuation) {
+      mic.suspendWebInterviewMicPreInitForTtsPlayback();
+    }
+    if (options?.afterRecording) {
+      await applyWebMobileTtsRouteSettle('after_recording');
+    } else if (!options?.parallelStreamContinuation) {
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      const { getWebSpeechDeferFromNavigatorSnapshot } = require('./webSpeechDeferPolicy') as typeof import('./webSpeechDeferPolicy');
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      const {
+        getMsSinceWebTabBecameVisible,
+        getMsSinceWebSessionResumeReady,
+      } = require('./webInterviewGestureContext') as typeof import('./webInterviewGestureContext');
+      const deferMobile =
+        typeof navigator !== 'undefined' &&
+        getWebSpeechDeferFromNavigatorSnapshot({
+          userAgent: navigator.userAgent || '',
+          platform: navigator.platform,
+          maxTouchPoints: navigator.maxTouchPoints,
+        });
+      const msSinceTabVisible = getMsSinceWebTabBecameVisible();
+      const msSinceResumeReady = getMsSinceWebSessionResumeReady();
+      const recentForeground =
+        (msSinceTabVisible != null && msSinceTabVisible < WEB_FOREGROUND_RESUME_SETTLE_WINDOW_MS) ||
+        (msSinceResumeReady != null && msSinceResumeReady < WEB_FOREGROUND_RESUME_SETTLE_WINDOW_MS);
+      if (deferMobile && recentForeground) {
+        await applyWebMobileTtsRouteSettle('after_foreground');
+      }
+    }
+    if (!options?.parallelStreamContinuation) {
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      const {
+        ensureWebInterviewTtsOutputVolumePrimed,
+        isWebInterviewMidUtteranceTabResumeActive,
+      } = require('./elevenLabsTts') as typeof import('./elevenLabsTts');
+      if (!isWebInterviewMidUtteranceTabResumeActive()) {
+        ensureWebInterviewTtsOutputVolumePrimed();
+      }
+    }
+    return;
+  }
   if (options?.afterRecording) {
     await transitionFromRecordingToPlaybackNative(context);
   } else {

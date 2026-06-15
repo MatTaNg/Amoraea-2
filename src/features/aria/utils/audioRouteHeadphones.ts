@@ -4,7 +4,10 @@
  */
 import { Platform } from 'react-native';
 import type { RecordingInput } from 'expo-audio';
-import { inferWebAudioRoutesFromDevices } from '@utilities/sessionLogging/webMediaDeviceAudioRoute';
+import {
+  getCachedWebAudioRouteInference,
+  hasCachedWebMicTrackSettings,
+} from '@utilities/sessionLogging/webMediaDeviceAudioRoute';
 
 export type HeadphoneProbeResult = {
   /** Raw input when available */
@@ -61,8 +64,11 @@ async function probeWeb(): Promise<RecordingInput | null> {
   if (typeof navigator === 'undefined' || !navigator.mediaDevices?.enumerateDevices) {
     return null;
   }
+  if (!hasCachedWebMicTrackSettings()) {
+    return null;
+  }
   try {
-    const inf = await inferWebAudioRoutesFromDevices();
+    const inf = getCachedWebAudioRouteInference();
     if (inf.labels_empty && inf.input_route === 'permission_required') {
       return null;
     }

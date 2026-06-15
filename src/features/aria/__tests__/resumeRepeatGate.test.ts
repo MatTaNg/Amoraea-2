@@ -19,6 +19,7 @@ describe('resumeRepeatGate', () => {
 
   it('still detects explicit short repeat requests', () => {
     expect(looksLikeRepeatCueInAmbiguousReply('Can you repeat what you said?')).toBe(true);
+    expect(looksLikeRepeatCueInAmbiguousReply('Repeat what you see.')).toBe(true);
     expect(looksLikeRepeatCueInAmbiguousReply('What did you say again?')).toBe(true);
   });
 

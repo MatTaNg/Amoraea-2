@@ -231,6 +231,7 @@ import {
   isInterviewHardStopUserTurn,
   isRepairRefusalProbeAssistantLine,
   evaluateRepairRefusalDetection,
+  findLastRepeatableInterviewQuestionText,
   looksLikeRepairInterviewQuestion,
   looksLikeScenarioARepairQuestion,
   looksLikeScenarioBRepairAsJamesQuestion,
@@ -303,11 +304,15 @@ import {
   getAriaScreenMountGeneration,
   getLastGestureMountGeneration,
   getLastWebInterviewUserGestureMs,
+  hasRecentWebInterviewUserGesture,
   markWebInterviewUserGestureNow,
   resetWebInterviewGestureContext,
   markAiProcessingTurnStarted,
   clearAiProcessingTurnStarted,
   peekAiProcessingTurnStartedAtMs,
+  markWebTabBecameVisible,
+  getMsSinceWebTabBecameVisible,
+  markWebSessionResumeReady,
   type GestureContextLostReason,
 } from '@features/aria/utils/webInterviewGestureContext';
 import {
@@ -317,7 +322,9 @@ import {
   interruptWebInterviewTtsForTabHide,
   tryPrepareWebInterviewHtmlAudioTabResume,
   hasWebInterviewHtmlAudioTabResumePending,
-  resumeWebInterviewHtmlAudioAfterTabHide,
+  clearWebInterviewHtmlTabRestoreState,
+  trySyncStartTabRestoreHtmlPlaybackInUserGesture,
+  pauseActiveWebInterviewHtmlAudioWithoutRevoke,
   tryPlayPendingWebTtsAudioInUserGesture,
   hasPendingWebGestureBlobUrl,
   trySpeakWebSpeechInUserGesture,
@@ -329,12 +336,24 @@ import {
   webSpeechShouldDeferToUserGesture,
   WebTtsRequiresUserGestureError,
   isWebInterviewPlaybackSurfaceActive,
+  isWebInterviewPlaybackAudiblyActive,
+  holdTabStashedHtmlAudioForGestureResume,
+  attachTabStashHtmlAudioPlaybackHandoff,
   fetchElevenLabsMpegArrayBuffer,
   captureWebSpeechSynthTabRestoreText,
+  waitForWebHtmlAudioElementReady,
+  ensureWebInterviewTtsOutputVolumePrimed,
+  ensureWebHtmlAudioElementMaxVolume,
+  restoreWebInterviewTabStashedPlaybackVolume,
+  isWebInterviewMidUtteranceTabResumeActive,
+  refreshWebInterviewHtmlTabStashForRepeatHide,
+  syncTabStashHtmlAudioPositionForResumeReturn,
+  ensureSharedHtmlAudioElementForInterviewTts,
 } from '@features/aria/utils/elevenLabsTts';
 import {
   isTtsTabResumeFallbackError,
   isWebInterviewTtsTabHiddenAbortError,
+  TtsTabResumeFallbackError,
   WebInterviewTtsTabHiddenAbortError,
 } from '@features/aria/utils/webTtsGestureErrors';
 import { ProfileRepository } from '@data/repositories/ProfileRepository';
@@ -444,6 +463,8 @@ import {
   buildWebAudioRouteChangedEventData,
   subscribeWebAudioDeviceChange,
   resetWebAudioRouteSessionFingerprint,
+  hasCachedWebMicTrackSettings,
+  syncWebAudioRouteSessionEnvelopeFromCache,
 } from '@utilities/sessionLogging/webMediaDeviceAudioRoute';
 import {
   resetTtsDurationCalibration,
@@ -475,7 +496,7 @@ import {
   DEFAULT_AI_REASONING_PER_ATTEMPT_TIMEOUT_MS,
   generateAIReasoning,
 } from '@features/aria/generateAIReasoning';
-import type { TtsTelemetrySource } from '@features/aria/telemetry/tsAutoplayTelemetry';
+import { getWebAutoplayContext, type TtsTelemetrySource } from '@features/aria/telemetry/tsAutoplayTelemetry';
 import { useAudioRecorder } from '@features/aria/hooks/useAudioRecorder';
 import {
   beginInterviewMicPreInitDuringTts,
@@ -484,6 +505,8 @@ import {
   shouldSuppressTabSwitchDeactivationAfterLateStartRefresh,
   finalizeInterviewMicAmbientOnTtsEnd,
   rearmWebMicPreInitAfterRecordingStop,
+  rearmWebMicPreInitAfterTtsPlaybackComplete,
+  isWebInterviewMicPreInitReady,
   getLastPreInitTriggerDuring,
   samplePreInitInputMeterNormalized,
   type PreInitTriggerDuring,
@@ -492,6 +515,9 @@ import {
   prefetchWebInterviewGreetingMp3,
   releaseWebInterviewGreetingPrefetch,
   getPrefetchedGreetingHtmlAudioElement,
+  isWebInterviewGreetingPrefetchReady,
+  syncPlayPrefetchedWebInterviewGreeting,
+  waitForPrefetchedGreetingPlaybackEnd,
   WEB_INTERVIEW_OPENING_GREETING,
 } from '@features/aria/utils/webInterviewGreetingAudio';
 import {
@@ -499,6 +525,7 @@ import {
   isPreAuthorizedAudioPendingForNextTts,
   reauthorizePendingPreAuthorizedElement,
   refreshPreAuthorizedAudioForLongProcessingGap,
+  takePreAuthorizedAudioElementForTts,
 } from '@features/aria/utils/webPreAuthorizedTtsAudio';
 import { debugNoteWebAudioRouteChange, getActiveWebHtmlAudioVolumeForTelemetry } from '@features/aria/utils/elevenLabsTts';
 import { markSessionResumedForNextRecordingStart } from '@utilities/sessionLogging/sessionResumeRecordingTelemetry';
@@ -1305,7 +1332,7 @@ function buildFallbackIntroBriefingText(firstName: string): string {
     `Good to meet you, ${name}. The way this works is I'll first give you three situations, ` +
     "and you just tell me what you'd do in each situation. Then I'll give you two short personal questions. " +
     'The whole thing usually takes about 20 to 30 minutes. Try to find a quiet, private space if you can. ' +
-    "Just do the best you can — there are no right or wrong answers. I'm interested in how you naturally think about people and relationships, so just share whatever genuinely comes to mind. Are you ready?"
+    "I'm interested in how you naturally think about people and relationships, so just share whatever genuinely comes to mind. Are you ready?"
   );
 }
 
@@ -2157,14 +2184,15 @@ function scenarioBJamesDifferenceOrAppreciationAnswerHasRepairContent(answer: st
   );
 }
 
-function shouldReplaceScenarioBRepairWithSkipAndScenario3Transition(
+/** Scenario B Q3 skipped when Q2 / appreciation answer already contains repair-oriented content. */
+function shouldSkipScenarioBRepairAsJamesProbe(
   messages: MessageWithScenario[],
-  strippedAssistantDraft: string,
-  interviewMoment: number
+  assistantDraft: string,
+  interviewMoment: number,
 ): boolean {
   if (interviewMoment !== 2) return false;
-  if (!strippedAssistantDraft.trim()) return false;
-  if (!looksLikeScenarioBRepairAsJamesQuestion(strippedAssistantDraft)) return false;
+  if (!assistantDraft.trim()) return false;
+  if (!looksLikeScenarioBRepairAsJamesQuestion(assistantDraft)) return false;
 
   const { lastUserContent, priorAssistantContent } = findLastUserWithPriorAssistantContent(messages);
   if (!lastUserContent || !priorAssistantContent) return false;
@@ -2176,6 +2204,14 @@ function shouldReplaceScenarioBRepairWithSkipAndScenario3Transition(
 
   if (!priorIsJamesDiffOrAppreciation) return false;
   return scenarioBJamesDifferenceOrAppreciationAnswerHasRepairContent(lastUserContent);
+}
+
+function shouldReplaceScenarioBRepairWithSkipAndScenario3Transition(
+  messages: MessageWithScenario[],
+  strippedAssistantDraft: string,
+  interviewMoment: number
+): boolean {
+  return shouldSkipScenarioBRepairAsJamesProbe(messages, strippedAssistantDraft, interviewMoment);
 }
 
 /** Model/TTS often emit U+2019 (') instead of ASCII ' in What's, could've, etc. */
@@ -3491,6 +3527,9 @@ const TAB_RESTORE_PENDING_SPEAK_OPTIONS = {
   ttsTriggerSource: 'gesture_handler' as const,
 };
 
+/** Max wait for HTML tab-resume `play()` to become audible before full replay from start. */
+const TAB_RESTORE_HTML_PLAY_START_TIMEOUT_MS = 4500;
+
 const RESUME_WELCOME_BACK_MESSAGE =
   "Welcome back! Lets continue where we left off. If you'd like me to repeat what I said, let me know.";
 
@@ -3576,6 +3615,8 @@ const SCENARIO_SPLIT_INTER_SEGMENT_GAP_MS = 200;
 /** Merge streamed sentences into one ElevenLabs request to avoid fetch/play gaps at every period. */
 const PARALLEL_TTS_BATCH_MIN_CHARS = 180;
 const PARALLEL_TTS_BATCH_MAX_CHARS = 480;
+/** Do not flush mid-vignette on `.` until this length — keeps S2→S3 intros in one MP3 when possible. */
+const PARALLEL_TTS_BATCH_PERIOD_FLUSH_MIN_CHARS = 400;
 /** Short acks (e.g. "Great work.") play immediately without waiting for a larger batch. */
 const PARALLEL_TTS_BATCH_SHORT_SENTENCE_MAX_CHARS = 52;
 
@@ -3587,7 +3628,7 @@ function shouldFlushParallelTtsBatch(text: string, force: boolean, participantFi
   if (/\?\s*$/.test(t)) return true;
   if (t.length >= PARALLEL_TTS_BATCH_MAX_CHARS) return true;
   if (t.length <= PARALLEL_TTS_BATCH_SHORT_SENTENCE_MAX_CHARS && /[.!]\s*$/.test(t)) return true;
-  if (t.length >= PARALLEL_TTS_BATCH_MIN_CHARS && /[.!]\s*$/.test(t)) return true;
+  if (t.length >= PARALLEL_TTS_BATCH_PERIOD_FLUSH_MIN_CHARS && /[.!]\s*$/.test(t)) return true;
   return false;
 }
 
@@ -4987,11 +5028,12 @@ function recordingDelayMsFromRef(
 ): number {
   const p = ref.current;
   if (p == null) return Date.now() - tapIntentAtMs;
-  return p.recordingInitializedAtMs - p.modeCompleteAtMs;
+  return p.recordingInitializedAtMs - tapIntentAtMs;
 }
 
-/** Name-entry: only discard TTS-contaminated pre-init; skip rearm when mic was already re-armed after last stop. */
+/** Name-entry: discard stale TTS-era pre-init only when the warm recorder is not already live. */
 function webMicPreInitNeedsRefreshForNameEntry(): boolean {
+  if (isWebInterviewMicPreInitReady()) return false;
   const trigger = getLastPreInitTriggerDuring();
   return trigger === 'greeting' || trigger === 'tts_playback';
 }
@@ -5029,6 +5071,8 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
     [],
   );
   const [voiceState, setVoiceState] = useState<VoiceState>('idle');
+  /** Web: drives mic gate UI — synced from playback refs (not voiceState alone). */
+  const [webInterviewerOutputActive, setWebInterviewerOutputActive] = useState(false);
   const voiceStateRef = useRef<VoiceState>(voiceState);
   voiceStateRef.current = voiceState;
   /** Web: volume meter only after MediaRecorder preroll completes (avoids "recording" UI with silent meter). */
@@ -5044,6 +5088,9 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
   const [status, setStatus] = useState<Status>(() => 'intro');
   /** Onboarding: auto-run startInterview once after profile gate; reset on retake / retry. */
   const onboardingAutoStartRef = useRef(false);
+  /** Blocks duplicate Begin taps while mic permission / session setup is in flight. */
+  const startInterviewInFlightRef = useRef(false);
+  const [interviewStartInFlight, setInterviewStartInFlight] = useState(false);
   /**
    * Web: autoplay policy requires a user gesture before audio/TTS. We never auto-call `startInterview` from
    * useEffect on web — mobile uses the tap overlay; desktop waits for the first `pointerdown` (see effect below).
@@ -5092,6 +5139,11 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
     reject: (reason?: unknown) => void;
   } | null>(null);
   const [webTabGestureRestoreOverlay, setWebTabGestureRestoreOverlay] = useState(false);
+  const webTabGestureRestoreOverlayRef = useRef(false);
+  const setWebTabRestoreOverlayVisible = useCallback((visible: boolean) => {
+    webTabGestureRestoreOverlayRef.current = visible;
+    setWebTabGestureRestoreOverlay(visible);
+  }, []);
   const ttsScreenReadyRef = useRef(false);
   const pendingTtsGateResolversRef = useRef<Array<() => void>>([]);
   const pendingScreenReadyResolversRef = useRef<Array<() => void>>([]);
@@ -5247,6 +5299,9 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
 
   const logSessionResumeState = useCallback(
     (state: 'loading' | 'ready') => {
+      if (state === 'ready' && Platform.OS === 'web') {
+        markWebSessionResumeReady();
+      }
       if (!userId) return;
       const r = getSessionLogRuntime();
       writeSessionLog({
@@ -5438,6 +5493,8 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
   const interviewSessionIdRef = useRef<string>(newInterviewSessionId(userId));
   /** Whisper turn ended; next TTS should log recording_session_active for iOS volume diagnostics. */
   const recordingJustFinishedBeforeNextTtsRef = useRef(false);
+  /** Survives `speakTextSafe` clearing — post-recording settle for every parallel-stream sentence. */
+  const postRecordingParallelStreamSettleRef = useRef(false);
   /** Native expo-av peak metering (dBFS) for the last completed recording — used before Whisper retry messaging. */
   const recordingPeakMeteringRef = useRef<number | null>(null);
   /** Set from decoded buffer VAD scan before Whisper — gates empty-transcript retries. */
@@ -5496,11 +5553,191 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
     /** Sentences fully spoken before a tab interrupt (parallel Claude SSE TTS). */
     spokenCompleteText: '',
   });
+  /** Web: true while interviewer audio may still be playing (mic must stay disabled). */
+  const isInterviewerOutputActiveForMicGate = (): boolean => {
+    if (voiceStateRef.current === 'processing') {
+      return true;
+    }
+    if (Platform.OS !== 'web') {
+      return voiceStateRef.current === 'speaking';
+    }
+    const rt = getSessionLogRuntime();
+    return (
+      isWebInterviewPlaybackAudiblyActive() ||
+      parallelStreamingTtsRef.current.active ||
+      ttsLineInFlightRef.current ||
+      rt.ttsPlaybackActive ||
+      webTabRestoreReplayInFlightRef.current ||
+      webTtsTabInterruptPendingReplayRef.current
+    );
+  };
+  /** Scenario handoff TTS can run 60s+ — wait before empathy modal so it does not cut off the vignette. */
+  const waitForWebInterviewTtsQuiescentBeforeEmotionModal = async (): Promise<void> => {
+    if (Platform.OS !== 'web') return;
+    const deadline = Date.now() + 180_000;
+    while (Date.now() < deadline) {
+      if (
+        !isWebInterviewPlaybackAudiblyActive() &&
+        !isWebInterviewPlaybackSurfaceActive() &&
+        !webTabRestoreReplayInFlightRef.current &&
+        !webTtsTabInterruptPendingReplayRef.current &&
+        !parallelStreamingTtsRef.current.active &&
+        !ttsLineInFlightRef.current &&
+        !getSessionLogRuntime().ttsPlaybackActive
+      ) {
+        return;
+      }
+      await new Promise<void>((res) => setTimeout(res, 120));
+    }
+    void remoteLog('[EMOTION_MODAL] tts_quiescence_wait_timeout', {
+      audible: isWebInterviewPlaybackAudiblyActive(),
+      tabRestorePending: webTtsTabInterruptPendingReplayRef.current,
+      parallelStreamActive: parallelStreamingTtsRef.current.active,
+    });
+  };
+
+  /** Refs can stay true after tab hide / parallel-stream completion while HTML audio is already silent. */
+  const clearStaleWebInterviewTtsRuntimeLocks = (opts?: {
+    recoverVoiceUi?: boolean;
+    /** When true, clear speak-text-safe utterance refs even if a line is still nominally in flight. */
+    force?: boolean;
+  }): void => {
+    const preserveSpeakUtterance =
+      !opts?.force && (webTtsUtteranceInFlightRef.current?.trim().length ?? 0) > 0;
+    parallelStreamingTtsRef.current.active = false;
+    if (!preserveSpeakUtterance) {
+      ttsLineInFlightRef.current = false;
+      setTtsPlaybackActive(false);
+      if (opts?.recoverVoiceUi || opts?.force) {
+        webTtsUtteranceInFlightRef.current = null;
+        webTtsUtteranceInFlightOptionsRef.current = null;
+      }
+      if (opts?.recoverVoiceUi) {
+        if (
+          voiceStateRef.current === 'processing' ||
+          voiceStateRef.current === 'speaking'
+        ) {
+          setVoiceState('idle');
+        }
+      }
+    }
+  };
+  /** Stop any audible interviewer output and invalidate in-flight speak completions. */
+  const interruptAllWebInterviewTtsOutput = (opts?: {
+    preserveTabRestorePending?: boolean;
+  }): void => {
+    webTtsSpeakGenerationRef.current += 1;
+    parallelStreamingTtsRef.current.cancelRequested = true;
+    clearStaleWebInterviewTtsRuntimeLocks({ force: true });
+    webTabRestoreReplayInFlightRef.current = false;
+    if (!opts?.preserveTabRestorePending) {
+      pendingGestureRestoreSpeakRef.current = null;
+      webTtsTabInterruptPendingReplayRef.current = false;
+      clearWebInterviewHtmlTabRestoreState();
+    }
+    void stopElevenLabsPlayback();
+    stopElevenLabsSpeech();
+  };
   const handleWebTabGestureRestoreTapRef = useRef<() => void>(() => {});
   /** Prevents capture-phase gesture flush + overlay onPress from starting two tab-restore replays. */
   const webTabRestoreReplayInFlightRef = useRef(false);
+  /** Monotonic id — stale async tab-restore completions ignore finish/dismiss after a newer tap. */
+  const webTabRestoreTapSessionRef = useRef(0);
+  /** When `voiceState` is speaking but no HTML/PCM surface is active (tab-restore hang). */
+  const speakingWithoutPlaybackSinceMsRef = useRef<number | null>(null);
+  /** When runtime TTS refs say active but no audible playback surface (stale after tab switch). */
+  const staleWebTtsRuntimeLockSinceMsRef = useRef<number | null>(null);
+  /** ElevenLabs fetch can exceed 10s on long lines — do not treat as stale before audible playback. */
+  const STALE_SPEAK_AWAITING_AUDIO_MS = 50_000;
+  const STALE_PARALLEL_STREAM_AWAITING_AUDIO_MS = 15_000;
+  const STALE_TTS_RUNTIME_LOCK_MS = 2_000;
+  const resolveStaleWebTtsRuntimeLockThresholdMs = (): number => {
+    if ((webTtsUtteranceInFlightRef.current?.trim().length ?? 0) > 0) {
+      return STALE_SPEAK_AWAITING_AUDIO_MS;
+    }
+    if (parallelStreamingTtsRef.current.active) {
+      return STALE_PARALLEL_STREAM_AWAITING_AUDIO_MS;
+    }
+    return STALE_TTS_RUNTIME_LOCK_MS;
+  };
+  /** Tab-restore in flight without audible playback (overlay hidden, idle UI). */
+  const tabRestoreInFlightWithoutPlaybackSinceMsRef = useRef<number | null>(null);
+  /** After a successful tab-restore replay/resume — suppress watchdog re-prompt for the same line. */
+  const webTabRestoreDeliveredNormRef = useRef<string | null>(null);
+  /** Mobile: tab hide while HTML TTS still audible — let background playback finish without overlay. */
+  const mobileTabHideLetPlaybackContinueRef = useRef(false);
+  /** Utterance playing when background-continue path was taken (tab switch or in-app navigation away). */
+  const mobileTabHideBackgroundUtteranceRef = useRef<string | null>(null);
+  const resolveMobileTabHideBackgroundUtterance = (): string | null =>
+    parallelStreamingTtsRef.current.spokenCompleteText.trim() ||
+    parallelStreamingTtsRef.current.accumulatedFullText.trim() ||
+    webTtsUtteranceInFlightRef.current?.trim() ||
+    lastQuestionTextRef.current?.trim() ||
+    null;
+  /** Mobile web: TTS in flight even when Chrome pauses HTML audio before visibilitychange fires. */
+  const isMobileWebInterviewTtsSessionActive = (): boolean => {
+    const rt = getSessionLogRuntime();
+    return (
+      isWebInterviewPlaybackAudiblyActive() ||
+      isWebInterviewPlaybackSurfaceActive() ||
+      hasWebInterviewHtmlAudioTabResumePending() ||
+      parallelStreamingTtsRef.current.active ||
+      ttsLineInFlightRef.current ||
+      rt.ttsPlaybackActive ||
+      voiceStateRef.current === 'speaking'
+    );
+  };
+  /**
+   * Mobile web: tab switch or navigation away during TTS — keep background playback or soft-paused
+   * HTML stash; never queue full replay on hide (Chrome often pauses before the audible check).
+   */
+  const armMobileWebBackgroundTtsContinue = (): boolean => {
+    if (Platform.OS !== 'web' || !getWebAutoplayContext().isMobileWeb) return false;
+    if (!isMobileWebInterviewTtsSessionActive()) return false;
+    /** Capture pause position before Chrome pauses — never discard stash while audio is still audible. */
+    if (!hasWebInterviewHtmlAudioTabResumePending()) {
+      interruptWebInterviewTtsForTabHide();
+    } else {
+      refreshWebInterviewHtmlTabStashForRepeatHide();
+    }
+    parallelStreamingTtsRef.current.cancelRequested = true;
+    mobileTabHideLetPlaybackContinueRef.current = true;
+    mobileTabHideBackgroundUtteranceRef.current = resolveMobileTabHideBackgroundUtterance();
+    tabHiddenDuringActiveTtsLineRef.current = false;
+    webTtsTabInterruptPendingReplayRef.current = false;
+    pendingGestureRestoreSpeakRef.current = null;
+    needsGestureRestoreRef.current = false;
+    tabVisibilityGestureLossPendingRef.current = false;
+    setWebTabRestoreOverlayVisible(false);
+    setVoiceState('speaking');
+    return true;
+  };
+  const queueMobileWebHtmlResumeAfterScreenReturn = (): boolean => {
+    if (!hasWebInterviewHtmlAudioTabResumePending()) return false;
+    const utterance =
+      mobileTabHideBackgroundUtteranceRef.current?.trim() ||
+      resolveMobileTabHideBackgroundUtterance()?.trim() ||
+      webTtsUtteranceInFlightRef.current?.trim() ||
+      lastQuestionTextRef.current?.trim() ||
+      '';
+    if (!utterance) return false;
+    pendingGestureRestoreSpeakRef.current = {
+      text: utterance,
+      restoreMode: 'resume_html',
+      queuedAtMs: Date.now(),
+      options: { ...TAB_RESTORE_PENDING_SPEAK_OPTIONS },
+      resolve: () => {},
+      reject: () => {},
+    };
+    webTtsTabInterruptPendingReplayRef.current = true;
+    needsGestureRestoreRef.current = true;
+    tabVisibilityGestureLossPendingRef.current = true;
+    mobileTabHideLetPlaybackContinueRef.current = false;
+    setWebTabRestoreOverlayVisible(true);
+    ensureWebGestureFlushListener();
+    return true;
+  };
   /** HTML tab-resume already delivered the in-flight utterance — block full replay on the same tap chain. */
-  const webTabHtmlResumeDeliveredRef = useRef(false);
   /** Last voice turn only — cleared on typed send. */
   const lastVoiceTurnLanguageRef = useRef<string | null>(null);
   const lastVoiceTurnConfidenceRef = useRef<number | null>(null);
@@ -5574,7 +5811,9 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
     resetCompletionScoringSession();
     resetAudioInterviewTurnCounters();
     resetTtsDurationCalibration();
-    resetWebAudioRouteSessionFingerprint();
+    if (!hasCachedWebMicTrackSettings()) {
+      resetWebAudioRouteSessionFingerprint();
+    }
     resetInterviewVadSession();
     resetWebInterviewGestureContext();
     resetInterviewClosingTtsSession();
@@ -5803,6 +6042,11 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
       }
       if (emotionModalShownForScenarioRef.current.has(completed)) {
         void remoteLog('[EMOTION_MODAL] transition_modal_skip_duplicate', { completed });
+        return;
+      }
+      await waitForWebInterviewTtsQuiescentBeforeEmotionModal();
+      if (emotionModalShownForScenarioRef.current.has(completed)) {
+        void remoteLog('[EMOTION_MODAL] transition_modal_skip_duplicate_post_quiesce', { completed });
         return;
       }
       emotionModalShownForScenarioRef.current.add(completed);
@@ -6145,6 +6389,7 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
         moment4Handoff,
         preview: trimmed.slice(0, 220),
       });
+      await waitForWebInterviewTtsQuiescentBeforeEmotionModal();
       await runEmotionModalAfterScenarioTransitionRef.current(reconciled, {
         transitionText: trimmed,
         priorScenario,
@@ -6329,15 +6574,7 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
             await remoteLog('[BOOT] attempt_id from storage', { attemptId: saved.sessionAttemptId });
             markSessionResumedForNextRecordingStart();
             if (Platform.OS === 'web') {
-              void (async () => {
-                await refreshWebAudioRoutesForSession();
-                const p = await probeHeadphoneRoute();
-                lastHeadphoneProbeRef.current = p;
-                if (p.fingerprint != null) {
-                  lastAudioRouteFingerprintRef.current = p.fingerprint;
-                  setAudioRouteKind(p.kind);
-                }
-              })();
+              syncWebAudioRouteSessionEnvelopeFromCache();
             }
             setInterviewAttemptBootstrap('ready');
             return;
@@ -6364,15 +6601,7 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
             await remoteLog('[BOOT] attempt_id from users.latest_attempt_id', { attemptId: reuseAttempt.id });
             markSessionResumedForNextRecordingStart();
             if (Platform.OS === 'web') {
-              void (async () => {
-                await refreshWebAudioRoutesForSession();
-                const p = await probeHeadphoneRoute();
-                lastHeadphoneProbeRef.current = p;
-                if (p.fingerprint != null) {
-                  lastAudioRouteFingerprintRef.current = p.fingerprint;
-                  setAudioRouteKind(p.kind);
-                }
-              })();
+              syncWebAudioRouteSessionEnvelopeFromCache();
             }
             setInterviewAttemptBootstrap('ready');
             return;
@@ -7219,6 +7448,8 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
       /** Web: full MP3 path only (retry after truncated PCM/stream). */
       skipPcmStream?: boolean;
       prefetchedMpegArrayBuffer?: ArrayBuffer;
+      /** When speakTextSafe already applied post-recording settle for seg1, reuse for scenario-split seg2. */
+      afterRecordingForScenarioSplitSeg2?: boolean;
       ttsTriggerSource?:
         | 'gesture_handler'
         | 'effect'
@@ -7229,10 +7460,6 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
     }
   ): Promise<{ scenarioSplitDelivery?: { segment1_expected_duration_ms: number; segment2_expected_duration_ms: number } } | void> => {
     await awaitTtsScreenReadyGate('speak');
-    if (Platform.OS === 'web' && webTabHtmlResumeDeliveredRef.current) {
-      webTabHtmlResumeDeliveredRef.current = false;
-      return;
-    }
     if (!speakOpts?.prefetchedMpegArrayBuffer?.byteLength) {
     await stopElevenLabsPlayback();
     }
@@ -7291,6 +7518,7 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
           onPlaybackStarted: firePlaybackStarted,
           telemetry: { source: telemetrySource },
           skipStopElevenLabsPlaybackBeforeStart: true,
+          chainHtmlAudioPlayback: true,
           preInitTriggerDuring,
           skipPcmStream: speakOpts?.skipPcmStream,
         });
@@ -7298,13 +7526,19 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
         if (!prefetchedSeg2 && SCENARIO_SPLIT_INTER_SEGMENT_GAP_MS > 0) {
         await new Promise<void>((r) => setTimeout(r, SCENARIO_SPLIT_INTER_SEGMENT_GAP_MS));
         }
-        const priorRecSeg2 = recordingJustFinishedBeforeNextTtsRef.current;
         recordingJustFinishedBeforeNextTtsRef.current = false;
-        await prepareInterviewTtsPlayback('speak:scenario_split_seg2', { afterRecording: priorRecSeg2 });
+        await prepareInterviewTtsPlayback('speak:scenario_split_seg2', {
+          afterRecording: false,
+          parallelStreamContinuation: true,
+        });
         await speakWithElevenLabs(split.seg2, undefined, {
           onPlaybackStarted: firePlaybackStarted,
           telemetry: { source: telemetrySource },
           skipStopElevenLabsPlaybackBeforeStart: true,
+          skipWebPlaybackPriming: true,
+          skipSilentWebPlaybackReprime: true,
+          skipMicPreInitDuringPlayback: true,
+          chainHtmlAudioPlayback: true,
           preInitTriggerDuring,
           skipPcmStream: speakOpts?.skipPcmStream,
           prefetchedMpegArrayBuffer: prefetchedSeg2 ?? undefined,
@@ -7347,12 +7581,10 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
       return;
     }
     if (webTabRestoreReplayInFlightRef.current) {
-      setWebTabGestureRestoreOverlay(false);
-      needsGestureRestoreRef.current = false;
       return;
     }
+    /** Tab-restore overlay / mic handler own this path — capture `pointerdown` would double-fire and dismiss overlay. */
     if (pendingGestureRestoreSpeakRef.current) {
-        handleWebTabGestureRestoreTapRef.current();
       return;
     }
     markWebInterviewUserGestureNow();
@@ -7417,6 +7649,9 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
   const ensureWebGestureFlushListener = useCallback(() => {
     if (Platform.OS !== 'web' || typeof window === 'undefined') return;
     if (webResumeWelcomeTapPendingRef.current) {
+      return;
+    }
+    if (webTabRestoreReplayInFlightRef.current || webTabGestureRestoreOverlayRef.current) {
       return;
     }
     if (webGestureFlushListenerAttachedRef.current) {
@@ -7484,6 +7719,8 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
           | 'preauthorized_element';
         /** Web: `play()` already invoked synchronously on this element (Begin Interview greeting). */
         immediateWebPlaybackElement?: HTMLAudioElement;
+        /** Web: sync greeting `play()` already started — skip prep/re-play, wait for `ended` only. */
+        greetingAlreadyAudible?: boolean;
       } = {}
     ) => {
       const {
@@ -7503,12 +7740,8 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
         skipGestureGate = false,
         ttsTriggerSource = 'callback',
         immediateWebPlaybackElement,
+        greetingAlreadyAudible = false,
       } = options;
-      if (Platform.OS === 'web' && webTabHtmlResumeDeliveredRef.current && skipGestureGate) {
-        webTabHtmlResumeDeliveredRef.current = false;
-        setVoiceState('idle');
-        return;
-      }
       let effectiveTtsTriggerSource:
         | 'gesture_handler'
         | 'effect'
@@ -7649,6 +7882,12 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
           telemetryIsGreeting: telemetrySourceImmediate === 'greeting',
           isWeb: true,
         });
+        if (!greetingAlreadyAudible) {
+          await prepareInterviewTtsPlayback('greeting_immediate_element');
+        } else if (!isWebInterviewMidUtteranceTabResumeActive()) {
+          ensureWebInterviewTtsOutputVolumePrimed();
+          ensureWebHtmlAudioElementMaxVolume(immediateWebPlaybackElement);
+        }
         const rtImmediate = getSessionLogRuntime();
         const ttsPlaybackActiveImmediatelyPriorIm = rtImmediate.ttsPlaybackActive;
         setTtsPlaybackActive(true);
@@ -7662,24 +7901,48 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
           Platform.OS === 'web'
             ? webUnlock && (gestureContextActive === true || mobileWebTapToBeginDone)
             : null;
-        writeSessionLog({
-          userId,
-          attemptId: rtImmediate.attemptId,
-          eventType: 'tts_playback_start',
-          eventData: {
-            ...gatherTtsPlaybackTelemetry({ ttsPlaybackActiveImmediatelyPrior: ttsPlaybackActiveImmediatelyPriorIm }),
-            telemetry_source: telemetrySourceImmediate,
-            tts_buffer_complete_before_playback: consumeTtsBufferCompleteBeforePlaybackFlag(),
-            playback_strategy: consumeTtsPlaybackStrategyForNextPlayback(),
-            gesture_context_active: gestureContextActive,
-            web_tts_gesture_error_prevented: webTtsGestureErrorPrevented,
-            tts_trigger_source: effectiveImmediateTtsTrigger,
-          },
-          platform: rtImmediate.platform,
-        });
+        if (!greetingAlreadyAudible) {
+          writeSessionLog({
+            userId,
+            attemptId: rtImmediate.attemptId,
+            eventType: 'tts_playback_start',
+            eventData: {
+              ...gatherTtsPlaybackTelemetry({ ttsPlaybackActiveImmediatelyPrior: ttsPlaybackActiveImmediatelyPriorIm }),
+              telemetry_source: telemetrySourceImmediate,
+              tts_buffer_complete_before_playback: consumeTtsBufferCompleteBeforePlaybackFlag(),
+              playback_strategy: consumeTtsPlaybackStrategyForNextPlayback(),
+              gesture_context_active: gestureContextActive,
+              web_tts_gesture_error_prevented: webTtsGestureErrorPrevented,
+              tts_trigger_source: effectiveImmediateTtsTrigger,
+            },
+            platform: rtImmediate.platform,
+          });
+        } else {
+          writeSessionLog({
+            userId,
+            attemptId: rtImmediate.attemptId,
+            eventType: 'tts_playback_start',
+            eventData: {
+              ...gatherTtsPlaybackTelemetry({ ttsPlaybackActiveImmediatelyPrior: ttsPlaybackActiveImmediatelyPriorIm }),
+              telemetry_source: telemetrySourceImmediate,
+              tts_buffer_complete_before_playback: true,
+              playback_strategy: 'buffered_complete',
+              gesture_context_active: gestureContextActive,
+              web_tts_gesture_error_prevented: webTtsGestureErrorPrevented,
+              tts_trigger_source: effectiveImmediateTtsTrigger,
+              greeting_sync_play_already_audible: true,
+            },
+            platform: rtImmediate.platform,
+          });
+        }
         const ttsStart = Date.now();
         try {
           setVoiceState('speaking');
+          if (greetingAlreadyAudible) {
+            await waitForPrefetchedGreetingPlaybackEnd(immediateWebPlaybackElement);
+            finalizeInterviewMicAmbientOnTtsEnd();
+            applyReferenceCardFromAssistantSpeechRef.current(text);
+          } else {
           await new Promise<void>((resolve, reject) => {
             const el = immediateWebPlaybackElement;
             const done = () => {
@@ -7695,15 +7958,26 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
             if (el.ended) {
               done();
             } else {
-              void el
-                .play()
-                .then(() => {
+              void (async () => {
+                try {
+                  const alreadyAudible = !el.paused && el.currentTime > 0;
+                  if (!alreadyAudible) {
+                    if (el.readyState >= HTMLMediaElement.HAVE_ENOUGH_DATA) {
+                      await el.play();
+                    } else {
+                      await waitForWebHtmlAudioElementReady(el);
+                      await el.play();
+                    }
+                  }
                   applyReferenceCardFromAssistantSpeechRef.current(text);
                   if (el.ended) done();
-                })
-                .catch(() => reject(new Error('greeting_audio_error')));
+                } catch {
+                  reject(new Error('greeting_audio_error'));
+                }
+              })();
             }
           });
+          }
           if (!silent) {
             const nOk = normalizeTtsTextForConsecutiveDedup(text);
             if (nOk.length > 0) {
@@ -7754,9 +8028,7 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
               platform: r.platform,
             });
             scheduleWebMicPreInitRefreshAfterTtsCompletes();
-            if (Platform.OS === 'web' && !interviewNameRef.current) {
-              void rearmWebMicPreInitAfterRecordingStop();
-            }
+            /** Defer mic re-arm until the user taps record — opening capture here ducks Android speaker output. */
           }
         }
         return;
@@ -7810,10 +8082,8 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
               platform: r.platform,
             });
             }
-          } else if (pendingGestureRestoreSpeakRef.current) {
-            /** Tab-hide replay is queued — gesture context is restored; replay pending TTS explicitly. */
-            queueMicrotask(() => handleWebTabGestureRestoreTapRef.current());
           }
+          /** Tab-hide replay/resume is queued — wait for an explicit tap (overlay/mic), not tab-focus userActivation. */
         }
       }
 
@@ -7850,12 +8120,22 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
           : undefined;
       const rt0 = getSessionLogRuntime();
       const ttsPlaybackActiveImmediatelyPrior = rt0.ttsPlaybackActive;
-      if (ttsPlaybackActiveImmediatelyPrior) {
-        const deadline = Date.now() + 500;
-        while (getSessionLogRuntime().ttsPlaybackActive && Date.now() < deadline) {
-          await new Promise<void>((res) => setTimeout(res, 40));
+      const webPriorPlaybackStillActive = () =>
+        Platform.OS === 'web' &&
+        (isWebInterviewPlaybackSurfaceActive() || isWebInterviewPlaybackAudiblyActive());
+      if (ttsPlaybackActiveImmediatelyPrior || webPriorPlaybackStillActive()) {
+        const waitStartMs = Date.now();
+        const deadline = waitStartMs + 8000;
+        while (
+          Date.now() < deadline &&
+          (getSessionLogRuntime().ttsPlaybackActive || webPriorPlaybackStillActive())
+        ) {
+          await new Promise<void>((res) => setTimeout(res, 80));
         }
-        if (getSessionLogRuntime().ttsPlaybackActive) {
+        const waitedMs = Date.now() - waitStartMs;
+        const priorStillActive =
+          getSessionLogRuntime().ttsPlaybackActive || webPriorPlaybackStillActive();
+        if (priorStillActive) {
           if (userId) {
             writeSessionLog({
               userId,
@@ -7863,11 +8143,17 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
               eventType: 'tts_playback_prior_turn_still_active',
               eventData: {
                 telemetry_source: telemetrySource,
-                waited_ms: 500,
+                waited_ms: waitedMs,
+                playback_surface_still_active: isWebInterviewPlaybackSurfaceActive(),
+                playback_audibly_still_active: isWebInterviewPlaybackAudiblyActive(),
               },
               platform: rt0.platform,
             });
           }
+          await stopElevenLabsPlayback();
+          ttsLineInFlightRef.current = false;
+          setTtsPlaybackActive(false);
+        } else if (getSessionLogRuntime().ttsPlaybackActive) {
           setTtsPlaybackActive(false);
         }
       }
@@ -7883,7 +8169,9 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
         }
         setRecordingSessionActive(false);
       }
-      const priorRec = recordingJustFinishedBeforeNextTtsRef.current;
+      const priorRec =
+        recordingJustFinishedBeforeNextTtsRef.current ||
+        postRecordingParallelStreamSettleRef.current;
       recordingJustFinishedBeforeNextTtsRef.current = false;
       await prepareInterviewTtsPlayback('speakTextSafe', { afterRecording: priorRec });
       const shouldYieldInFlightSpeakToTabRestore = () =>
@@ -8038,6 +8326,7 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
                 skipPcmStream: skipPcmStream || attemptIx > 0,
                 prefetchedMpegArrayBuffer,
                 onPlaybackStarted: onScenarioPlaybackStarted,
+                afterRecordingForScenarioSplitSeg2: priorRec,
               });
             } catch (e) {
               if (shouldYieldInFlightSpeakToTabRestore()) {
@@ -8081,13 +8370,17 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
               }
               break;
             }
+            const ttsPlaybackLikelySilent =
+              Platform.OS === 'web' &&
+              actualTtsMs < 250 &&
+              !isWebInterviewPlaybackSurfaceActive();
             const isScenarioAContemptProbeTts =
               telemetrySource === 'turn' &&
               interviewSpeechRole === 'assistant_response' &&
               currentInterviewMomentRef.current === 1 &&
               currentScenarioRef.current === 1 &&
               looksLikeScenarioAContemptProbeQuestion(stripControlTokens(text).trim());
-            if (attemptIx === 0 && isScenarioAContemptProbeTts) {
+            if (attemptIx === 0 && isScenarioAContemptProbeTts && !ttsPlaybackLikelySilent) {
               verificationOk = true;
               acceptedStableTruncationAsEstimationError = wouldBePremature;
               if (wouldBePremature) {
@@ -8147,6 +8440,35 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
             ) {
               verificationOk = true;
               acceptedStableTruncationAsEstimationError = true;
+              break;
+            }
+            /** Web interview turns often finish below char-based expectedMs but `onended` fired (~0.65–0.79× in session_logs). Retrying replays the whole line (e.g. Sophie perspective probe). */
+            if (
+              premature &&
+              attemptIx === 0 &&
+              telemetrySource === 'turn' &&
+              interviewSpeechRole === 'assistant_response' &&
+              ratioActualToExpected != null &&
+              ratioActualToExpected >= TTS_REPLAY_PREMATURE_ACCEPT_MIN_RATIO
+            ) {
+              verificationOk = true;
+              acceptedStableTruncationAsEstimationError = true;
+              if (userId) {
+                const rTurnSuppress = getSessionLogRuntime();
+                writeSessionLog({
+                  userId,
+                  attemptId: rTurnSuppress.attemptId,
+                  eventType: 'tts_retry_suppressed',
+                  eventData: {
+                    ratio_actual_to_expected: ratioActualToExpected,
+                    suppression_reason: 'turn_estimation_overshoot_substantially_complete',
+                    attempt_index: attemptIx + 1,
+                    expected_duration_ms: wall.expectedMs,
+                    actual_duration_ms: actualTtsMs,
+                  },
+                  platform: rTurnSuppress.platform,
+                });
+              }
               break;
             }
             /** Moment 5 conflict bundle is long; char-based expected duration often overshoots real playback (~0.73× seen in session_logs). Retrying `speak()` replays the whole question — accept one stable "short" pass like replay. */
@@ -8528,8 +8850,11 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
             platform: r.platform,
           });
           scheduleWebMicPreInitRefreshAfterTtsCompletes();
-          if (Platform.OS === 'web' && !interviewNameRef.current) {
-            void rearmWebMicPreInitAfterRecordingStop();
+          /** Mobile: warm mic only after the short greeting — not after every turn (avoids getUserMedia racing the next TTS). */
+          if (telemetrySource === 'greeting' && webSpeechShouldDeferToUserGesture()) {
+            void rearmWebMicPreInitAfterTtsPlaybackComplete();
+          } else if (telemetrySource !== 'greeting' && !webSpeechShouldDeferToUserGesture()) {
+            void rearmWebMicPreInitAfterTtsPlaybackComplete();
           }
         }
       }
@@ -8659,27 +8984,276 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
     ],
   );
 
+  const dismissTabRestoreOverlay = useCallback(
+    (opts?: { deliveredText?: string | null }) => {
+      if (opts?.deliveredText?.trim()) {
+        webTabRestoreDeliveredNormRef.current = normalizeTtsTextForConsecutiveDedup(
+          opts.deliveredText.trim(),
+        );
+      }
+      mobileTabHideLetPlaybackContinueRef.current = false;
+      mobileTabHideBackgroundUtteranceRef.current = null;
+      pendingGestureRestoreSpeakRef.current = null;
+      webTtsTabInterruptPendingReplayRef.current = false;
+      tabHiddenDuringActiveTtsLineRef.current = false;
+      tabVisibilityGestureLossPendingRef.current = false;
+      needsGestureRestoreRef.current = false;
+      webTabRestoreReplayInFlightRef.current = false;
+      clearWebInterviewHtmlTabRestoreState();
+      setWebTabRestoreOverlayVisible(false);
+    },
+    [setWebTabRestoreOverlayVisible],
+  );
+
+  const queueWebTabRestoreOverlayForUtterance = useCallback(
+    (utterance: string): boolean => {
+      const trimmed = utterance.trim();
+      if (!trimmed) return false;
+      const norm = normalizeTtsTextForConsecutiveDedup(trimmed);
+      if (norm === webTabRestoreDeliveredNormRef.current) return false;
+      pendingGestureRestoreSpeakRef.current = {
+        text: trimmed,
+        restoreMode: 'replay',
+        queuedAtMs: Date.now(),
+        options: { ...TAB_RESTORE_PENDING_SPEAK_OPTIONS },
+        resolve: () => {},
+        reject: () => {},
+      };
+      webTtsTabInterruptPendingReplayRef.current = true;
+      needsGestureRestoreRef.current = true;
+      tabVisibilityGestureLossPendingRef.current = true;
+      setWebTabRestoreOverlayVisible(true);
+      return true;
+    },
+    [setWebTabRestoreOverlayVisible],
+  );
+
+  const dismissAfterAndroidBackgroundPlaybackEnd = useCallback(
+    (opts?: { force?: boolean }) => {
+      mobileTabHideLetPlaybackContinueRef.current = false;
+      const heardLine =
+        mobileTabHideBackgroundUtteranceRef.current?.trim() ||
+        webTtsUtteranceInFlightRef.current?.trim() ||
+        lastQuestionTextRef.current?.trim() ||
+        pendingGestureRestoreSpeakRef.current?.text?.trim() ||
+        '';
+      mobileTabHideBackgroundUtteranceRef.current = null;
+      if (!opts?.force) {
+        const restoreAlreadyPending =
+          pendingGestureRestoreSpeakRef.current != null ||
+          webTtsTabInterruptPendingReplayRef.current ||
+          hasWebInterviewHtmlAudioTabResumePending();
+        if (restoreAlreadyPending) {
+          return false;
+        }
+      }
+      if (heardLine) {
+        const heardNorm = normalizeTtsTextForConsecutiveDedup(heardLine);
+        const alreadyDelivered =
+          heardNorm === webTabRestoreDeliveredNormRef.current ||
+          heardNorm === lastSuccessfulTtsTextNormalizedRef.current;
+        if (!alreadyDelivered) {
+          applyInterviewSpeechComplete(heardLine);
+        }
+        dismissTabRestoreOverlay({ deliveredText: heardLine });
+      } else {
+        dismissTabRestoreOverlay();
+      }
+      return true;
+    },
+    [applyInterviewSpeechComplete, dismissTabRestoreOverlay],
+  );
+
+  const attemptMobileWebHtmlTabResumeAfterScreenReturn = useCallback((): boolean => {
+    if (Platform.OS !== 'web' || !getWebAutoplayContext().isMobileWeb) return false;
+    if (!hasWebInterviewHtmlAudioTabResumePending()) return false;
+    if (!queueMobileWebHtmlResumeAfterScreenReturn()) return false;
+    const pending = pendingGestureRestoreSpeakRef.current;
+    if (!pending) return false;
+    markWebInterviewUserGestureNow();
+    const sync = trySyncStartTabRestoreHtmlPlaybackInUserGesture({
+      telemetrySource: 'replay',
+      replayFromStart: false,
+      onPlayStarted: () => {
+        needsGestureRestoreRef.current = false;
+        setWebTabRestoreOverlayVisible(false);
+        setVoiceState('speaking');
+        attachTabStashHtmlAudioPlaybackHandoff();
+      },
+    });
+    if (!sync.started) return false;
+    webTabRestoreReplayInFlightRef.current = true;
+    void sync.done
+      .then(() => {
+        attachTabStashHtmlAudioPlaybackHandoff();
+        dismissTabRestoreOverlay({ deliveredText: pending.text });
+        mobileTabHideLetPlaybackContinueRef.current = false;
+        mobileTabHideBackgroundUtteranceRef.current = null;
+      })
+      .catch(() => {
+        needsGestureRestoreRef.current = true;
+        setWebTabRestoreOverlayVisible(true);
+        ensureWebGestureFlushListener();
+      })
+      .finally(() => {
+        webTabRestoreReplayInFlightRef.current = false;
+      });
+    return true;
+  }, [dismissTabRestoreOverlay, ensureWebGestureFlushListener, setWebTabRestoreOverlayVisible]);
+
+  const syncInterviewTtsAfterScreenReturn = useCallback(() => {
+    if (Platform.OS !== 'web' || interviewStatusRef.current !== 'in_progress') return;
+    if (
+      isInterviewCompleteRef.current ||
+      transcriptHasInterviewClosingAssistantMessage(currentMessagesRef.current)
+    ) {
+      return;
+    }
+    if (hasWebInterviewHtmlAudioTabResumePending()) {
+      if (
+        mobileTabHideLetPlaybackContinueRef.current &&
+        isWebInterviewPlaybackAudiblyActive()
+      ) {
+        syncTabStashHtmlAudioPositionForResumeReturn();
+        restoreWebInterviewTabStashedPlaybackVolume();
+        attachTabStashHtmlAudioPlaybackHandoff();
+        mobileTabHideLetPlaybackContinueRef.current = false;
+        mobileTabHideBackgroundUtteranceRef.current = null;
+        pendingGestureRestoreSpeakRef.current = null;
+        webTtsTabInterruptPendingReplayRef.current = false;
+        tabHiddenDuringActiveTtsLineRef.current = false;
+        setWebTabRestoreOverlayVisible(false);
+        if (voiceStateRef.current === 'idle') {
+          setVoiceState('speaking');
+        }
+        return;
+      }
+      holdTabStashedHtmlAudioForGestureResume();
+      if (getWebAutoplayContext().isMobileWeb) {
+        markWebInterviewUserGestureNow();
+      }
+      if (attemptMobileWebHtmlTabResumeAfterScreenReturn()) {
+        return;
+      }
+      if (queueMobileWebHtmlResumeAfterScreenReturn()) {
+        if (voiceStateRef.current === 'idle') {
+          setVoiceState('speaking');
+        }
+        ensureWebGestureFlushListener();
+        return;
+      }
+    }
+    const playbackAudible = isWebInterviewPlaybackAudiblyActive();
+    if (mobileTabHideLetPlaybackContinueRef.current && !playbackAudible) {
+      if (hasWebInterviewHtmlAudioTabResumePending()) {
+        if (queueMobileWebHtmlResumeAfterScreenReturn()) {
+          if (voiceStateRef.current === 'idle') {
+            setVoiceState('speaking');
+          }
+          ensureWebGestureFlushListener();
+          return;
+        }
+      }
+      if (!hasWebInterviewHtmlAudioTabResumePending()) {
+        dismissAfterAndroidBackgroundPlaybackEnd({ force: true });
+        if (voiceStateRef.current === 'speaking') {
+          setVoiceState('idle');
+        }
+      }
+      return;
+    }
+    if (playbackAudible) {
+      if (hasWebInterviewHtmlAudioTabResumePending()) {
+        restoreWebInterviewTabStashedPlaybackVolume();
+      }
+      if (voiceStateRef.current === 'idle') {
+        setVoiceState('speaking');
+      }
+      if (mobileTabHideLetPlaybackContinueRef.current) {
+        attachTabStashHtmlAudioPlaybackHandoff();
+        pendingGestureRestoreSpeakRef.current = null;
+        webTtsTabInterruptPendingReplayRef.current = false;
+        tabHiddenDuringActiveTtsLineRef.current = false;
+        setWebTabRestoreOverlayVisible(false);
+      } else if (!hasWebInterviewHtmlAudioTabResumePending()) {
+        pendingGestureRestoreSpeakRef.current = null;
+        webTtsTabInterruptPendingReplayRef.current = false;
+        tabHiddenDuringActiveTtsLineRef.current = false;
+        setWebTabRestoreOverlayVisible(false);
+      }
+      return;
+    }
+    const speakUtteranceAwaitingAudio =
+      (webTtsUtteranceInFlightRef.current?.trim().length ?? 0) > 0;
+    const staleRuntimeLocks =
+      !speakUtteranceAwaitingAudio &&
+      (parallelStreamingTtsRef.current.active ||
+        ttsLineInFlightRef.current ||
+        getSessionLogRuntime().ttsPlaybackActive);
+    if (staleRuntimeLocks) {
+      clearStaleWebInterviewTtsRuntimeLocks({ force: true });
+      if (voiceStateRef.current === 'speaking') {
+        setVoiceState('idle');
+      }
+    }
+  }, [
+    dismissAfterAndroidBackgroundPlaybackEnd,
+    setWebTabRestoreOverlayVisible,
+    attemptMobileWebHtmlTabResumeAfterScreenReturn,
+    ensureWebGestureFlushListener,
+  ]);
+
   const handleWebTabGestureRestoreTap = useCallback(async () => {
+    markWebInterviewUserGestureNow();
+    const pending = pendingGestureRestoreSpeakRef.current;
+    const pendingNorm = pending?.text?.trim()
+      ? normalizeTtsTextForConsecutiveDedup(pending.text.trim())
+      : '';
+    if (
+      pending &&
+      pendingNorm.length > 0 &&
+      pendingNorm === webTabRestoreDeliveredNormRef.current
+    ) {
+      dismissTabRestoreOverlay();
+      setVoiceState('idle');
+      return;
+    }
+    if (
+      pending &&
+      pendingNorm.length > 0 &&
+      pending.restoreMode !== 'resume_html' &&
+      pendingNorm === lastSuccessfulTtsTextNormalizedRef.current
+    ) {
+      dismissTabRestoreOverlay({ deliveredText: pending.text });
+      setVoiceState('idle');
+      return;
+    }
     if (webTabRestoreReplayInFlightRef.current) {
       void remoteLog('[tab_restore] replay_tap_ignored_duplicate');
-      setWebTabGestureRestoreOverlay(false);
-      needsGestureRestoreRef.current = false;
       return;
     }
-    const pending = pendingGestureRestoreSpeakRef.current;
+    if (
+      pending &&
+      isWebInterviewPlaybackAudiblyActive() &&
+      !hasWebInterviewHtmlAudioTabResumePending()
+    ) {
+      void remoteLog('[tab_restore] replay_tap_ignored_playback_active');
+      return;
+    }
     if (!pending) {
-      setWebTabGestureRestoreOverlay(false);
-      needsGestureRestoreRef.current = false;
-      webTtsTabInterruptPendingReplayRef.current = false;
+      dismissTabRestoreOverlay();
+      setVoiceState('idle');
       return;
     }
-    const navRestore = typeof navigator !== 'undefined' ? navigator : undefined;
-    const uaRestore = navRestore as Navigator & { userActivation?: { isActive?: boolean } } | undefined;
-    const gestureContextActiveAtRestore = uaRestore?.userActivation?.isActive === true;
     const tabRestoreMode = pending.restoreMode ?? 'replay';
-    if (!gestureContextActiveAtRestore && tabRestoreMode === 'replay') {
+    /** Tab return can briefly set `navigator.userActivation` without allowing audio — require a tracked tap. */
+    const gestureContextActiveAtRestore =
+      hasRecentWebInterviewUserGesture(2000) ||
+      (tabRestoreMode === 'resume_html' &&
+        (getMsSinceWebTabBecameVisible() ?? 999_999) < 4000);
+    if (!gestureContextActiveAtRestore && (tabRestoreMode === 'replay' || tabRestoreMode === 'resume_html')) {
       needsGestureRestoreRef.current = true;
-      setWebTabGestureRestoreOverlay(true);
+      setWebTabRestoreOverlayVisible(true);
       ensureWebGestureFlushListener();
       const textPreview =
         pending.text?.trim() ||
@@ -8698,21 +9272,54 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
           eventType: 'tts_replay_deferred_pending_gesture',
           eventData: {
             reason: 'gesture_context_not_active_at_tab_restore',
+            tab_restore_mode: tabRestoreMode,
             queued_text_preview: textPreview.slice(0, 80),
           },
           platform: rDefer.platform,
         });
       }
+      setVoiceState('idle');
       return;
     }
     webTabRestoreReplayInFlightRef.current = true;
-    pendingGestureRestoreSpeakRef.current = null;
+    const tapSession = webTabRestoreTapSessionRef.current + 1;
+    webTabRestoreTapSessionRef.current = tapSession;
+    detachWebGestureFlushListener();
+    interruptAllWebInterviewTtsOutput({ preserveTabRestorePending: true });
     markWebInterviewUserGestureNow();
-    preAuthorizeAudioElementOnMicTapGesture();
-    unlockWebAudioForAutoplay();
+    const canStashResumeEarly = hasWebInterviewHtmlAudioTabResumePending();
+    if (!(tabRestoreMode === 'resume_html' && canStashResumeEarly)) {
+      preAuthorizeAudioElementOnMicTapGesture();
+      unlockWebAudioForAutoplay();
+    }
     setMobileWebTapToBeginDone(true);
-    needsGestureRestoreRef.current = false;
-    setWebTabGestureRestoreOverlay(false);
+    setVoiceState('idle');
+    if (emotionModalPendingTransitionRef.current) {
+      webTabRestoreReplayInFlightRef.current = false;
+      setEmotionModalVisible(true);
+      pendingGestureRestoreSpeakRef.current = pending;
+      return;
+    }
+    /** Keep overlay until playback is audibly confirmed — mobile resume can fail silently. */
+    const onTabRestoreAudibleStart = () => {
+      needsGestureRestoreRef.current = false;
+      setWebTabRestoreOverlayVisible(false);
+      setVoiceState('speaking');
+      tabRestoreInFlightWithoutPlaybackSinceMsRef.current = null;
+    };
+    const canStashResume = hasWebInterviewHtmlAudioTabResumePending();
+    const webAutoplayCtx = Platform.OS === 'web' ? getWebAutoplayContext() : { isMobileWeb: false };
+    let syncTabRestoreStarted = false;
+    let syncTabRestorePlayback: Promise<void> | null = null;
+    if (canStashResume) {
+      const sync = trySyncStartTabRestoreHtmlPlaybackInUserGesture({
+        onPlayStarted: onTabRestoreAudibleStart,
+        telemetrySource: 'replay',
+        replayFromStart: tabRestoreMode === 'replay' && webAutoplayCtx.isMobileWeb,
+      });
+      syncTabRestoreStarted = sync.started;
+      syncTabRestorePlayback = sync.done;
+    }
     const uid = userIdRef.current;
     if (uid) {
       const r = getSessionLogRuntime();
@@ -8727,19 +9334,28 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
         platform: r.platform,
       });
     }
-    if (emotionModalPendingTransitionRef.current) {
-      webTabRestoreReplayInFlightRef.current = false;
-      setEmotionModalVisible(true);
-      pendingGestureRestoreSpeakRef.current = pending;
-      return;
-    }
+    let htmlResumeAudibleThisRestore = false;
+    const tabRestoreReplayText =
+      pending.text?.trim() ||
+      computeParallelStreamTabRestoreText(
+        parallelStreamingTtsRef.current.accumulatedFullText,
+        parallelStreamingTtsRef.current.spokenCompleteText,
+        [
+          webTtsUtteranceInFlightRef.current ?? '',
+          lastQuestionTextRef.current ?? '',
+        ]
+      ) ||
+      '';
     const finishTabRestore = (opts?: {
       clearTabHiddenLineFlag?: boolean;
       htmlResumeDelivered?: boolean;
     }) => {
+      if (tapSession !== webTabRestoreTapSessionRef.current) {
+        return;
+      }
       webTtsTabInterruptPendingReplayRef.current = false;
       if (opts?.htmlResumeDelivered) {
-        webTabHtmlResumeDeliveredRef.current = true;
+        htmlResumeAudibleThisRestore = true;
         webTtsSpeakGenerationRef.current += 1;
         const deliveredLine =
           webTtsUtteranceInFlightRef.current?.trim() ||
@@ -8761,25 +9377,109 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
         tabHiddenDuringActiveTtsLineRef.current = false;
       }
       needsGestureRestoreRef.current = false;
-      setWebTabGestureRestoreOverlay(false);
+      setWebTabRestoreOverlayVisible(false);
+      pendingGestureRestoreSpeakRef.current = null;
+      webTabRestoreDeliveredNormRef.current = normalizeTtsTextForConsecutiveDedup(
+        pending.text?.trim() || tabRestoreReplayText || '',
+      );
+      clearWebInterviewHtmlTabRestoreState();
       pending.resolve();
+      webTabRestoreReplayInFlightRef.current = false;
     };
-    const tabRestoreReplayText =
-      pending.text?.trim() ||
-      computeParallelStreamTabRestoreText(
-        parallelStreamingTtsRef.current.accumulatedFullText,
-        parallelStreamingTtsRef.current.spokenCompleteText,
-        [
-          webTtsUtteranceInFlightRef.current ?? '',
-          lastQuestionTextRef.current ?? '',
-        ]
-      ) ||
-      '';
+    const releaseTabRestoreTapWithoutFinish = () => {
+      if (tapSession !== webTabRestoreTapSessionRef.current) {
+        return;
+      }
+      webTabRestoreReplayInFlightRef.current = false;
+    };
+    const replayTabRestoreFromStart = async (): Promise<boolean> => {
+      parallelStreamingTtsRef.current.cancelRequested = true;
+      parallelStreamingTtsRef.current.active = false;
+      clearWebInterviewHtmlTabRestoreState();
+      pauseActiveWebInterviewHtmlAudioWithoutRevoke();
+      pendingGestureRestoreSpeakRef.current = { ...pending, restoreMode: 'replay' };
+      let audibleConfirmed = htmlResumeAudibleThisRestore;
+      if (!audibleConfirmed) {
+        const prefetched = resumeRepeatPrefetchMpegRef.current;
+        const replayNorm = normalizeTtsTextForConsecutiveDedup(tabRestoreReplayText);
+        const prefetchMatches =
+          prefetched != null &&
+          normalizeTtsTextForConsecutiveDedup(prefetched.text) === replayNorm;
+        const preAuthEl = takePreAuthorizedAudioElementForTts();
+        const speakPromise = speakTextSafe(tabRestoreReplayText, {
+          ...TAB_RESTORE_PENDING_SPEAK_OPTIONS,
+          ...pending.options,
+          telemetrySource: 'replay',
+          skipQuestionTiming: true,
+          ...(prefetchMatches && prefetched
+            ? {
+                prefetchedMpegArrayBuffer: prefetched.buffer,
+                ttsTriggerSource: 'preauthorized_element' as const,
+              }
+            : preAuthEl
+              ? {
+                  immediateWebPlaybackElement: preAuthEl,
+                  ttsTriggerSource: 'preauthorized_element' as const,
+                }
+              : {}),
+        });
+        const audibleDeadline = Date.now() + 12_000;
+        while (Date.now() < audibleDeadline) {
+          if (isWebInterviewPlaybackAudiblyActive()) {
+            onTabRestoreAudibleStart();
+            audibleConfirmed = true;
+            break;
+          }
+          await new Promise((r) => setTimeout(r, 50));
+        }
+        await speakPromise;
+        if (!audibleConfirmed) {
+          audibleConfirmed = isWebInterviewPlaybackAudiblyActive();
+        }
+      }
+      if (audibleConfirmed) {
+        finishTabRestore({ htmlResumeDelivered: true });
+        return true;
+      }
+      if (tapSession !== webTabRestoreTapSessionRef.current) {
+        return false;
+      }
+      const replayNorm = normalizeTtsTextForConsecutiveDedup(tabRestoreReplayText);
+      if (
+        replayNorm.length > 0 &&
+        (replayNorm === lastSuccessfulTtsTextNormalizedRef.current ||
+          replayNorm === webTabRestoreDeliveredNormRef.current)
+      ) {
+        finishTabRestore({ clearTabHiddenLineFlag: false });
+        return true;
+      }
+      void remoteLog('[tab_restore] replay_finished_without_audible', {
+        preview: tabRestoreReplayText.slice(0, 120),
+      });
+      pendingGestureRestoreSpeakRef.current = { ...pending, restoreMode: 'replay' };
+      webTtsTabInterruptPendingReplayRef.current = true;
+      needsGestureRestoreRef.current = true;
+      setWebTabRestoreOverlayVisible(true);
+      setVoiceState('idle');
+      releaseTabRestoreTapWithoutFinish();
+      return false;
+    };
     const queuedAtMs =
       pending.queuedAtMs ?? gestureContextLostAtRef.current?.atMs ?? null;
     const msSinceOriginalQueue =
       queuedAtMs != null ? Math.max(0, Date.now() - queuedAtMs) : null;
-    if (uid && tabRestoreReplayText.length > 0) {
+    const isClosingTabRestoreReplay =
+      isInterviewClosingThanksFragment(tabRestoreReplayText) ||
+      isInterviewClosingReflectiveAckFragment(tabRestoreReplayText) ||
+      looksLikeInterviewClosingAssistantMessage(tabRestoreReplayText);
+    if (isClosingTabRestoreReplay) {
+      finishTabRestore({ clearTabHiddenLineFlag: false });
+      return;
+    }
+    const logTabRestoreReplayCompleted = () => {
+      if (tapSession !== webTabRestoreTapSessionRef.current || !uid || tabRestoreReplayText.length === 0) {
+        return;
+      }
       const rLog = getSessionLogRuntime();
       writeSessionLog({
         userId: uid,
@@ -8792,23 +9492,104 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
         },
         platform: rLog.platform,
       });
-    }
-    const isClosingTabRestoreReplay =
-      isInterviewClosingThanksFragment(tabRestoreReplayText) ||
-      isInterviewClosingReflectiveAckFragment(tabRestoreReplayText) ||
-      looksLikeInterviewClosingAssistantMessage(tabRestoreReplayText);
-    if (isClosingTabRestoreReplay) {
-      finishTabRestore({ clearTabHiddenLineFlag: false });
-      webTabRestoreReplayInFlightRef.current = false;
+    };
+    if (syncTabRestoreStarted && syncTabRestorePlayback) {
+      try {
+        const remainingMs = Math.min(
+          600_000,
+          Math.max(20_000, tabRestoreReplayText.length * 90)
+        );
+        await Promise.race([
+          syncTabRestorePlayback,
+          new Promise<never>((_, reject) =>
+            setTimeout(() => reject(new TtsTabResumeFallbackError()), remainingMs)
+          ),
+        ]);
+        if (htmlResumeAudibleThisRestore || isWebInterviewPlaybackAudiblyActive()) {
+          logTabRestoreReplayCompleted();
+          finishTabRestore({ clearTabHiddenLineFlag: false, htmlResumeDelivered: true });
+        } else {
+          if (tapSession !== webTabRestoreTapSessionRef.current) {
+            return;
+          }
+          const replayNorm = normalizeTtsTextForConsecutiveDedup(tabRestoreReplayText);
+          if (
+            replayNorm.length > 0 &&
+            (replayNorm === lastSuccessfulTtsTextNormalizedRef.current ||
+              replayNorm === webTabRestoreDeliveredNormRef.current)
+          ) {
+            finishTabRestore({ clearTabHiddenLineFlag: false });
+            return;
+          }
+          void remoteLog('[tab_restore] html_resume_finished_without_audible', {
+            preview: tabRestoreReplayText.slice(0, 120),
+          });
+          pendingGestureRestoreSpeakRef.current = { ...pending, restoreMode: 'replay' };
+          webTtsTabInterruptPendingReplayRef.current = true;
+          needsGestureRestoreRef.current = true;
+          setWebTabRestoreOverlayVisible(true);
+          setVoiceState('idle');
+          releaseTabRestoreTapWithoutFinish();
+        }
+      } catch (err) {
+        if (uid && isTtsTabResumeFallbackError(err)) {
+          const rFail = getSessionLogRuntime();
+          writeSessionLog({
+            userId: uid,
+            attemptId: rFail.attemptId,
+            eventType: 'tab_restore_html_resume_failed',
+            eventData: {
+              tab_restore_mode: pending.restoreMode ?? 'resume_html',
+              fallback: 'replay_from_start',
+              tab_restore_html_resume_failed: true,
+            },
+            platform: rFail.platform,
+          });
+        }
+        try {
+          if (await replayTabRestoreFromStart()) {
+            logTabRestoreReplayCompleted();
+          }
+        } catch (replayErr) {
+          if (tapSession !== webTabRestoreTapSessionRef.current) {
+            return;
+          }
+          webTtsTabInterruptPendingReplayRef.current = true;
+          pendingGestureRestoreSpeakRef.current = { ...pending, restoreMode: 'replay' };
+          setWebTabRestoreOverlayVisible(true);
+          needsGestureRestoreRef.current = true;
+          setVoiceState('idle');
+          releaseTabRestoreTapWithoutFinish();
+          pending.reject(replayErr);
+        }
+      }
       return;
     }
-    const canResumeHtml = hasWebInterviewHtmlAudioTabResumePending();
-    if (!canResumeHtml && hasPendingWebGestureBlobUrl()) {
+    if (canStashResume && !syncTabRestoreStarted) {
+      try {
+        if (await replayTabRestoreFromStart()) {
+          logTabRestoreReplayCompleted();
+        }
+      } catch (replayErr) {
+        if (tapSession !== webTabRestoreTapSessionRef.current) {
+          return;
+        }
+        webTtsTabInterruptPendingReplayRef.current = true;
+        pendingGestureRestoreSpeakRef.current = { ...pending, restoreMode: 'replay' };
+        setWebTabRestoreOverlayVisible(true);
+        needsGestureRestoreRef.current = true;
+        setVoiceState('idle');
+        releaseTabRestoreTapWithoutFinish();
+        pending.reject(replayErr);
+      }
+      return;
+    }
+    if (!canStashResume && hasPendingWebGestureBlobUrl()) {
       try {
         webTtsTabInterruptPendingReplayRef.current = false;
         const playedBlob = await tryPlayPendingWebTtsAudioInUserGesture(
           () => {},
-          undefined,
+          onTabRestoreAudibleStart,
           { source: 'replay' }
         );
         if (playedBlob) {
@@ -8823,74 +9604,30 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
             poll();
           });
           applyInterviewSpeechComplete(tabRestoreReplayText);
+          logTabRestoreReplayCompleted();
           finishTabRestore({ clearTabHiddenLineFlag: false });
-          webTabRestoreReplayInFlightRef.current = false;
           return;
         }
       } catch {
         /* fall through to speakTextSafe replay */
       }
     }
-    if (canResumeHtml) {
-      try {
-        webTtsTabInterruptPendingReplayRef.current = false;
-        await resumeWebInterviewHtmlAudioAfterTabHide('replay');
-        finishTabRestore({ clearTabHiddenLineFlag: false, htmlResumeDelivered: true });
-      } catch (err) {
-        if (!isTtsTabResumeFallbackError(err)) {
-          webTtsTabInterruptPendingReplayRef.current = true;
-          pendingGestureRestoreSpeakRef.current = pending;
-          setWebTabGestureRestoreOverlay(true);
-          pending.reject(err);
-          webTabRestoreReplayInFlightRef.current = false;
-          return;
-        }
-        parallelStreamingTtsRef.current.cancelRequested = true;
-        parallelStreamingTtsRef.current.active = false;
-        await stopElevenLabsPlayback();
-        try {
-          if (!webTabHtmlResumeDeliveredRef.current) {
-          await speakTextSafe(tabRestoreReplayText, {
-            ...TAB_RESTORE_PENDING_SPEAK_OPTIONS,
-            ...pending.options,
-            telemetrySource: 'replay',
-            skipQuestionTiming: true,
-          });
-          }
-          finishTabRestore();
-        } catch (replayErr) {
-          webTtsTabInterruptPendingReplayRef.current = true;
-          pendingGestureRestoreSpeakRef.current = { ...pending, restoreMode: 'replay' };
-          setWebTabGestureRestoreOverlay(true);
-          pending.reject(replayErr);
-        }
-      } finally {
-        webTabRestoreReplayInFlightRef.current = false;
-      }
-      return;
-    }
-    parallelStreamingTtsRef.current.cancelRequested = true;
-    parallelStreamingTtsRef.current.active = false;
-    await stopElevenLabsPlayback();
     try {
-      if (!webTabHtmlResumeDeliveredRef.current) {
-      await speakTextSafe(tabRestoreReplayText, {
-        ...TAB_RESTORE_PENDING_SPEAK_OPTIONS,
-        ...pending.options,
-        telemetrySource: 'replay',
-        skipQuestionTiming: true,
-      });
+      if (await replayTabRestoreFromStart()) {
+        logTabRestoreReplayCompleted();
       }
-      finishTabRestore();
     } catch (err) {
+      if (tapSession !== webTabRestoreTapSessionRef.current) {
+        return;
+      }
       webTtsTabInterruptPendingReplayRef.current = true;
       pendingGestureRestoreSpeakRef.current = pending;
-      setWebTabGestureRestoreOverlay(true);
+      setWebTabRestoreOverlayVisible(true);
+      setVoiceState('idle');
+      releaseTabRestoreTapWithoutFinish();
       pending.reject(err);
-    } finally {
-      webTabRestoreReplayInFlightRef.current = false;
     }
-  }, [speakTextSafe, stopElevenLabsPlayback, applyInterviewSpeechComplete, ensureWebGestureFlushListener]);
+  }, [speakTextSafe, stopElevenLabsPlayback, applyInterviewSpeechComplete, ensureWebGestureFlushListener, setWebTabRestoreOverlayVisible, dismissTabRestoreOverlay, detachWebGestureFlushListener, interruptAllWebInterviewTtsOutput]);
 
   handleWebTabGestureRestoreTapRef.current = () => {
     void handleWebTabGestureRestoreTap();
@@ -8973,6 +9710,13 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
 
   const interruptInterviewTtsForDocumentHidden = useCallback(() => {
     if (Platform.OS !== 'web' || interviewStatusRef.current !== 'in_progress') return;
+    const streamOrTtsActive =
+      ttsLineInFlightRef.current ||
+      parallelStreamingTtsRef.current.active ||
+      isWebInterviewPlaybackSurfaceActive();
+    if (!streamOrTtsActive) {
+      return;
+    }
     const suppressTabDeactivation = shouldSuppressTabSwitchDeactivationAfterLateStartRefresh();
     if (suppressTabDeactivation) {
       const uidSuppress = userIdRef.current;
@@ -8988,6 +9732,19 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
       }
     }
     gestureContextLostAtRef.current = { atMs: Date.now(), reason: 'tab_visibility_change' };
+    const isMobileWeb = Platform.OS === 'web' && getWebAutoplayContext().isMobileWeb;
+    if (isMobileWeb && isMobileWebInterviewTtsSessionActive()) {
+      armMobileWebBackgroundTtsContinue();
+      return;
+    }
+    if (armMobileWebBackgroundTtsContinue()) {
+      return;
+    }
+    tabHiddenDuringActiveTtsLineRef.current = true;
+    if (!suppressTabDeactivation) {
+      interruptWebInterviewTtsForTabHide();
+    }
+    const htmlTabResume = hasWebInterviewHtmlAudioTabResumePending();
     const speechSynthRemaining = captureWebSpeechSynthTabRestoreText();
     const utterance =
       speechSynthRemaining ??
@@ -8999,42 +9756,48 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
           lastQuestionTextRef.current ?? '',
         ]
       );
-    if (parallelStreamingTtsRef.current.active) {
+    webTtsTabInterruptPendingReplayRef.current = true;
+    if (parallelStreamingTtsRef.current.active && !htmlTabResume) {
       parallelStreamingTtsRef.current.cancelRequested = true;
     }
-    const streamOrTtsActive = ttsLineInFlightRef.current || parallelStreamingTtsRef.current.active;
-    if (streamOrTtsActive) {
-      tabHiddenDuringActiveTtsLineRef.current = true;
-      webTtsTabInterruptPendingReplayRef.current = true;
-      if (!suppressTabDeactivation) {
-        interruptWebInterviewTtsForTabHide();
+    if (utterance.length > 0) {
+      const utteranceNorm = normalizeTtsTextForConsecutiveDedup(utterance);
+      if (utteranceNorm === webTabRestoreDeliveredNormRef.current) {
+        tabHiddenDuringActiveTtsLineRef.current = false;
+        mobileTabHideLetPlaybackContinueRef.current = false;
+        mobileTabHideBackgroundUtteranceRef.current = null;
+        webTtsTabInterruptPendingReplayRef.current = false;
+        return;
       }
-      const htmlTabResume = hasWebInterviewHtmlAudioTabResumePending();
-      if (utterance.length > 0) {
-        pendingGestureRestoreSpeakRef.current = {
-          text: utterance,
-          restoreMode: htmlTabResume ? 'resume_html' : 'replay',
-          queuedAtMs: Date.now(),
-          options: { ...TAB_RESTORE_PENDING_SPEAK_OPTIONS },
-          resolve: () => {},
-          reject: () => {},
-        };
-        needsGestureRestoreRef.current = true;
-        tabVisibilityGestureLossPendingRef.current = true;
-        setWebTabGestureRestoreOverlay(true);
+      const preferMobileReplay =
+        Platform.OS === 'web' && getWebAutoplayContext().isMobileWeb;
+      const useHtmlResume = htmlTabResume && !preferMobileReplay;
+      if (utteranceNorm !== webTabRestoreDeliveredNormRef.current) {
+        webTabRestoreDeliveredNormRef.current = null;
       }
-      if (!htmlTabResume) {
-        webTtsSpeakGenerationRef.current += 1;
-        setTtsPlaybackActive(false);
-        ttsLineInFlightRef.current = false;
-      }
+      pendingGestureRestoreSpeakRef.current = {
+        text: utterance,
+        restoreMode: useHtmlResume ? 'resume_html' : 'replay',
+        queuedAtMs: Date.now(),
+        options: { ...TAB_RESTORE_PENDING_SPEAK_OPTIONS },
+        resolve: () => {},
+        reject: () => {},
+      };
+      needsGestureRestoreRef.current = true;
+      tabVisibilityGestureLossPendingRef.current = true;
+      setWebTabRestoreOverlayVisible(true);
+    }
+    if (htmlTabResume && !(Platform.OS === 'web' && getWebAutoplayContext().isMobileWeb)) {
+      setTtsPlaybackActive(false);
+      ttsLineInFlightRef.current = false;
       setVoiceState('idle');
-      return;
+    } else {
+      webTtsSpeakGenerationRef.current += 1;
+      setTtsPlaybackActive(false);
+      ttsLineInFlightRef.current = false;
+      setVoiceState('idle');
     }
-    if (!suppressTabDeactivation) {
-      interruptWebInterviewTtsForTabHide();
-    }
-  }, []);
+  }, [setWebTabRestoreOverlayVisible]);
 
   useEffect(() => {
     bumpAriaScreenMountGeneration();
@@ -9056,11 +9819,27 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
       ) {
         return;
       }
-      if (webTabRestoreReplayInFlightRef.current || webTabHtmlResumeDeliveredRef.current) return;
+      syncInterviewTtsAfterScreenReturn();
+      if (webTabRestoreReplayInFlightRef.current) return;
+      if (
+        hasWebInterviewHtmlAudioTabResumePending() &&
+        !isWebInterviewPlaybackAudiblyActive()
+      ) {
+        needsGestureRestoreRef.current = true;
+        tabVisibilityGestureLossPendingRef.current = true;
+        setWebTabRestoreOverlayVisible(true);
+        ensureWebGestureFlushListener();
+        void handleWebTabGestureRestoreTapRef.current();
+        return;
+      }
+      if (mobileTabHideLetPlaybackContinueRef.current) return;
+      if (!pendingGestureRestoreSpeakRef.current && !tabHiddenDuringActiveTtsLineRef.current) {
+        return;
+      }
       needsGestureRestoreRef.current = true;
       tabVisibilityGestureLossPendingRef.current = true;
       if (pendingGestureRestoreSpeakRef.current) {
-        setWebTabGestureRestoreOverlay(true);
+        setWebTabRestoreOverlayVisible(true);
         ensureWebGestureFlushListener();
       }
     };
@@ -9082,7 +9861,170 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
       document.removeEventListener('visibilitychange', onVis);
       window.removeEventListener('blur', onWindowBlur);
     };
-  }, [interruptInterviewTtsForDocumentHidden, ensureWebGestureFlushListener]);
+  }, [interruptInterviewTtsForDocumentHidden, dismissTabRestoreOverlay, queueWebTabRestoreOverlayForUtterance, dismissAfterAndroidBackgroundPlaybackEnd, syncInterviewTtsAfterScreenReturn, ensureWebGestureFlushListener]);
+
+  /** Recover UI when tab-restore sets speaking but HTML resume never starts audible playback. */
+  useEffect(() => {
+    if (Platform.OS !== 'web') return;
+    const id = setInterval(() => {
+      const playbackActive = isWebInterviewPlaybackSurfaceActive();
+      const playbackAudible = isWebInterviewPlaybackAudiblyActive();
+      if (mobileTabHideLetPlaybackContinueRef.current && !playbackAudible) {
+        if (!hasWebInterviewHtmlAudioTabResumePending()) {
+          dismissAfterAndroidBackgroundPlaybackEnd({ force: true });
+          if (voiceState === 'speaking') {
+            setVoiceState('idle');
+          }
+        }
+      }
+      if (Platform.OS === 'web') {
+        const outputActive = isInterviewerOutputActiveForMicGate();
+        setWebInterviewerOutputActive((prev) => (prev === outputActive ? prev : outputActive));
+      }
+      if (
+        hasWebInterviewHtmlAudioTabResumePending() &&
+        !pendingGestureRestoreSpeakRef.current &&
+        !webTtsTabInterruptPendingReplayRef.current &&
+        !mobileTabHideLetPlaybackContinueRef.current &&
+        !ttsLineInFlightRef.current &&
+        !webTabRestoreReplayInFlightRef.current
+      ) {
+        if (queueMobileWebHtmlResumeAfterScreenReturn()) {
+          ensureWebGestureFlushListener();
+        }
+      }
+      const restorePending =
+        pendingGestureRestoreSpeakRef.current != null ||
+        webTtsTabInterruptPendingReplayRef.current ||
+        hasWebInterviewHtmlAudioTabResumePending();
+      const rt = getSessionLogRuntime();
+      const ttsLocksWithoutPlayback =
+        !restorePending &&
+        !playbackAudible &&
+        !isWebInterviewMidUtteranceTabResumeActive() &&
+        !webTabRestoreReplayInFlightRef.current &&
+        !mobileTabHideLetPlaybackContinueRef.current &&
+        ttsLineInFlightRef.current &&
+        (parallelStreamingTtsRef.current.active || rt.ttsPlaybackActive);
+
+      if (ttsLocksWithoutPlayback) {
+        const lockNow = Date.now();
+        const staleThresholdMs = resolveStaleWebTtsRuntimeLockThresholdMs();
+        if (staleWebTtsRuntimeLockSinceMsRef.current == null) {
+          staleWebTtsRuntimeLockSinceMsRef.current = lockNow;
+        } else if (lockNow - staleWebTtsRuntimeLockSinceMsRef.current >= staleThresholdMs) {
+          const speakUtteranceActive =
+            (webTtsUtteranceInFlightRef.current?.trim().length ?? 0) > 0;
+          void remoteLog('[tab_restore] stale_tts_runtime_locks_cleared', {
+            stale_threshold_ms: staleThresholdMs,
+            speak_utterance_active: speakUtteranceActive,
+            waited_ms: lockNow - staleWebTtsRuntimeLockSinceMsRef.current,
+          });
+          clearStaleWebInterviewTtsRuntimeLocks({ recoverVoiceUi: true, force: true });
+          staleWebTtsRuntimeLockSinceMsRef.current = null;
+          if (
+            (voiceState === 'speaking' || voiceState === 'processing') &&
+            !restorePending &&
+            !webTabRestoreReplayInFlightRef.current
+          ) {
+            setVoiceState('idle');
+          }
+        }
+      } else {
+        staleWebTtsRuntimeLockSinceMsRef.current = null;
+      }
+
+      if (
+        voiceState === 'idle' &&
+        interviewStatusRef.current === 'in_progress' &&
+        playbackActive
+      ) {
+        setVoiceState('speaking');
+        return;
+      }
+
+      /** Restore tap cleared overlay but HTML resume never became audible — re-prompt. */
+      if (
+        restorePending &&
+        !mobileTabHideLetPlaybackContinueRef.current &&
+        !webTabRestoreReplayInFlightRef.current &&
+        !playbackActive &&
+        voiceState === 'idle' &&
+        !webTabGestureRestoreOverlay
+      ) {
+        const pendingText = pendingGestureRestoreSpeakRef.current?.text?.trim() ?? '';
+        const pendingNorm = normalizeTtsTextForConsecutiveDedup(pendingText);
+        if (
+          pendingNorm.length > 0 &&
+          (pendingNorm === webTabRestoreDeliveredNormRef.current ||
+            pendingNorm === lastSuccessfulTtsTextNormalizedRef.current)
+        ) {
+          dismissTabRestoreOverlay({ deliveredText: pendingText });
+          return;
+        }
+        needsGestureRestoreRef.current = true;
+        setWebTabRestoreOverlayVisible(true);
+        ensureWebGestureFlushListener();
+      }
+
+      if (webTabRestoreReplayInFlightRef.current && !playbackActive) {
+        const rtBusy = getSessionLogRuntime();
+        if (
+          voiceState === 'processing' ||
+          ttsLineInFlightRef.current ||
+          rtBusy.ttsPlaybackActive
+        ) {
+          tabRestoreInFlightWithoutPlaybackSinceMsRef.current = null;
+        } else {
+        const now = Date.now();
+        if (tabRestoreInFlightWithoutPlaybackSinceMsRef.current == null) {
+          tabRestoreInFlightWithoutPlaybackSinceMsRef.current = now;
+        } else if (
+          now - tabRestoreInFlightWithoutPlaybackSinceMsRef.current >=
+          TAB_RESTORE_HTML_PLAY_START_TIMEOUT_MS + 500
+        ) {
+          void remoteLog('[tab_restore] in_flight_stuck_recovered');
+          webTabRestoreReplayInFlightRef.current = false;
+          tabRestoreInFlightWithoutPlaybackSinceMsRef.current = null;
+          needsGestureRestoreRef.current = true;
+          setWebTabRestoreOverlayVisible(true);
+          setVoiceState('idle');
+        }
+        }
+      } else {
+        tabRestoreInFlightWithoutPlaybackSinceMsRef.current = null;
+      }
+
+      if (voiceState !== 'speaking') {
+        speakingWithoutPlaybackSinceMsRef.current = null;
+        return;
+      }
+      if (playbackActive || webTabRestoreReplayInFlightRef.current) {
+        speakingWithoutPlaybackSinceMsRef.current = null;
+        return;
+      }
+      const now = Date.now();
+      if (speakingWithoutPlaybackSinceMsRef.current == null) {
+        speakingWithoutPlaybackSinceMsRef.current = now;
+        return;
+      }
+      const stuckMs = now - speakingWithoutPlaybackSinceMsRef.current;
+      if (stuckMs < 3500) return;
+      void remoteLog('[tab_restore] stuck_speaking_recovered', {
+        stuckMs,
+        restorePending,
+      });
+      interruptAllWebInterviewTtsOutput();
+      if (restorePending) {
+        needsGestureRestoreRef.current = true;
+        setWebTabRestoreOverlayVisible(true);
+        ensureWebGestureFlushListener();
+      }
+      setVoiceState('idle');
+      speakingWithoutPlaybackSinceMsRef.current = null;
+    }, 500);
+    return () => clearInterval(id);
+  }, [voiceState, webTabGestureRestoreOverlay, ensureWebGestureFlushListener, setWebTabRestoreOverlayVisible, dismissTabRestoreOverlay, queueWebTabRestoreOverlayForUtterance, dismissAfterAndroidBackgroundPlaybackEnd]);
 
   // ── Web: browser SpeechRecognition (hold-to-talk fallback when Whisper/MediaRecorder is off)
   useEffect(() => {
@@ -9895,16 +10837,6 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
         transcript_turns: messagesForScoring.length,
       });
       void scoreScenario(completedScenario, messagesForScoring);
-      const lastAssistant = [...messagesForScoring].reverse().find((m) => m.role === 'assistant');
-      const transitionText = String(lastAssistant?.content ?? '');
-      if (transitionText.trim()) {
-        void tryRunEmotionModalFromScenarioTransitionRef.current({
-          completedScenario,
-          transitionText,
-          priorScenario: completedScenario,
-          source: `ensureCompletedScenarioScored:${trigger}`,
-        });
-      }
     },
     [scoreScenario],
   );
@@ -10334,6 +11266,13 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
 
     if (resumeRepeatChoicePendingRef.current) {
       resumeRepeatChoicePendingRef.current = false;
+      const deferRepeatToMetaVerbatimHandler =
+        (metaCommentClassification?.type === 'confusion' &&
+          metaCommentClassification?.confusion_subtype === 'repeat_request') ||
+        isExplicitRepeatRequestPreClassification(trimmed);
+      if (deferRepeatToMetaVerbatimHandler) {
+        resumeLastAssistantTextRef.current = null;
+      } else {
       let intent = classifyResumeRepeatIntent(trimmed);
       if (
         intent !== 'repeat' &&
@@ -10397,7 +11336,10 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
             platform: r.platform,
           });
         }
-        const last = resumeLastAssistantTextRef.current;
+        const last = findLastRepeatableInterviewQuestionText(
+          messages,
+          resumeLastAssistantTextRef.current ?? lastQuestionTextRef.current,
+        );
         if (last?.trim() && !resumeClosingRepeatSpeakInFlightRef.current) {
           resumeClosingRepeatSpeakInFlightRef.current = true;
           try {
@@ -10496,6 +11438,7 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
       if (reentryTypeForLogging !== 'direct_answer') {
         setVoiceState('idle');
         return;
+      }
       }
     }
 
@@ -11849,7 +12792,7 @@ The participant **confirmed** skipping after the skip confirmation prompt. In **
       waitingForClosingAdditionRef.current === null;
     if (confusionRepeatRequestVerbatim) {
       const replayText = resolveInterviewQuestionRepeatTtsText(
-        stripControlTokens(lastInterviewerContent || lastQuestionTextRef.current || '').trim(),
+        findLastRepeatableInterviewQuestionText(messagesToUse, lastQuestionTextRef.current),
       );
       if (replayText.length > 0) {
         void remoteLog('[META_CONFUSION_REPEAT_VERBATIM_REPLAY]', {
@@ -12849,7 +13792,10 @@ The participant **confirmed** skipping after the skip confirmation prompt. In **
             scenarioNumber: userScenarioTag as 1 | 2 | 3,
           };
           setMessages([...messagesToUse, probeMsg]);
-          await speakTextSafe(probeText, ASSISTANT_INTERVIEW_SPEECH);
+          await speakTextSafe(probeText, {
+            ...ASSISTANT_INTERVIEW_SPEECH,
+            skipLastQuestionRef: true,
+          });
           setVoiceState('idle');
           setIsWaiting(false);
           return;
@@ -13066,6 +14012,19 @@ The participant **confirmed** skipping after the skip confirmation prompt. In **
         throw e;
       }
       parallelStreamingTtsRef.current.active = true;
+      if (userId) {
+        setTtsPlaybackActive(true);
+      }
+      if (Platform.OS === 'web') {
+        ensureSharedHtmlAudioElementForInterviewTts();
+      }
+      /** Snapshotted before reader — immune to speakTextSafe clearing refs mid-stream. */
+      const postRecordingSettleForThisParallelStream =
+        recordingJustFinishedBeforeNextTtsRef.current ||
+        postRecordingParallelStreamSettleRef.current;
+      if (postRecordingSettleForThisParallelStream) {
+        await prepareInterviewTtsPlayback('parallel_stream_post_recording', { afterRecording: true });
+      }
       let streamContemptProbeMuteActive =
         pendingScenarioAContemptProbeStreamMuteRef.current ||
         muteParallelTtsForScenarioAContemptProbeStream;
@@ -13100,12 +14059,19 @@ The participant **confirmed** skipping after the skip confirmation prompt. In **
       let ttsChain = Promise.resolve();
       let ttsCancelled = false;
       let firstSentenceLogged = false;
+      let postRecordingSettleConsumedThisParallelStream = postRecordingSettleForThisParallelStream;
+      let parallelStreamSentenceIndex = 0;
       /** Batches streamed sentences so scenario intros / summaries do not pause at every period. */
       let parallelTtsBatchBuffer = '';
       let parallelTtsBatchPrefetch: { text: string; promise: Promise<ArrayBuffer | null> } | null =
         null;
+      const parallelTtsBatchDeduped = () =>
+        dedupeAdjacentBoundaryValidationsBeforeParticipantName(
+          parallelTtsBatchBuffer.trim(),
+          participantFirstNameForSpoken,
+        );
       const scheduleParallelTtsBatchPrefetch = () => {
-        const snap = parallelTtsBatchBuffer.trim();
+        const snap = parallelTtsBatchDeduped();
         if (snap.length < PARALLEL_TTS_BATCH_MIN_CHARS - 40) return;
         if (parallelTtsBatchPrefetch?.text === snap) return;
         parallelTtsBatchPrefetch = {
@@ -13127,8 +14093,11 @@ The participant **confirmed** skipping after the skip confirmation prompt. In **
         ttsChain = ttsChain.then(async () => {
           if (ttsCancelled || parallelStreamingTtsRef.current.cancelRequested) return;
           if (Platform.OS === 'web' && speakGenAtEnqueue !== webTtsSpeakGenerationRef.current) {
-          return;
-        }
+            void remoteLog('[parallel_stream] utterance_skipped_speak_generation', {
+              preview: spoken.slice(0, 120),
+            });
+            return;
+          }
           parallelStreamingTtsRef.current.active = true;
           let closingSpeakLooksFinal = false;
           let closingTtsSessionKey =
@@ -13216,32 +14185,10 @@ The participant **confirmed** skipping after the skip confirmation prompt. In **
               });
             }
               await awaitTtsScreenReadyGate('parallel_streaming_sentence');
-            const priorRecParallel = recordingJustFinishedBeforeNextTtsRef.current;
-            recordingJustFinishedBeforeNextTtsRef.current = false;
-            await prepareInterviewTtsPlayback('parallel_streaming_sentence', {
-              afterRecording: priorRecParallel,
-            });
-            if (Platform.OS === 'web') {
-              const wr = await refreshWebAudioRoutesForSession();
-              const routeEvent = buildWebAudioRouteChangedEventData(wr, {
-                source: priorRecParallel ? 'parallel_tts_after_recording' : 'parallel_tts_chunk',
-                moment_number: currentInterviewMomentRef.current,
-              });
-              if (routeEvent && userId) {
-                debugNoteWebAudioRouteChange(
-                  priorRecParallel ? 'parallel_tts_after_recording' : 'parallel_tts_chunk',
-                  routeEvent,
-                );
-                const rtdRoute = getSessionLogRuntime();
-                writeSessionLog({
-                  userId,
-                  attemptId: rtdRoute.attemptId,
-                  eventType: 'audio_route_changed',
-                  eventData: routeEvent,
-                  platform: rtdRoute.platform,
-                });
-              }
-            }
+            const parallelStreamContinuation = parallelStreamSentenceIndex > 0;
+            const afterRecordingTelemetry =
+              postRecordingSettleForThisParallelStream && parallelStreamSentenceIndex === 0;
+            parallelStreamSentenceIndex += 1;
             webTtsUtteranceInFlightRef.current = spokenForTts;
             webTtsUtteranceInFlightOptionsRef.current = {
               interviewSpeechRole: 'assistant_response',
@@ -13256,7 +14203,20 @@ The participant **confirmed** skipping after the skip confirmation prompt. In **
             };
             const ttsPlaybackActiveImmediatelyPrior = getSessionLogRuntime().ttsPlaybackActive;
             const parallelTtsStartMs = Date.now();
-            const prefetchedBuf = prefetched ? await prefetched : null;
+            const PARALLEL_STREAM_PREFETCH_TIMEOUT_MS = 45_000;
+            const prefetchedBuf = prefetched
+              ? await Promise.race([
+                  prefetched,
+                  new Promise<ArrayBuffer | null>((resolve) => {
+                    setTimeout(() => {
+                      void remoteLog('[parallel_stream] prefetch_timeout', {
+                        preview: spokenForTts.slice(0, 120),
+                      });
+                      resolve(null);
+                    }, PARALLEL_STREAM_PREFETCH_TIMEOUT_MS);
+                  }),
+                ])
+              : null;
             if (userId) {
               setTtsPlaybackActive(true);
               ttsLineInFlightRef.current = true;
@@ -13265,9 +14225,10 @@ The participant **confirmed** skipping after the skip confirmation prompt. In **
                 userId,
                 attemptId: rtdPlayback.attemptId,
                 eventType: 'tts_playback_start',
-                eventData: gatherParallelStreamingTtsPlaybackTelemetry({
+                eventData:                 gatherParallelStreamingTtsPlaybackTelemetry({
                   ttsPlaybackActiveImmediatelyPrior,
-                  afterRecording: priorRecParallel,
+                  afterRecording: afterRecordingTelemetry,
+                  parallelStreamContinuation,
                   charCount: stripControlTokens(spokenForTts).trim().length,
                   momentNumber: currentInterviewMomentRef.current,
                   scenarioNumber: currentScenarioRef.current,
@@ -13282,6 +14243,11 @@ The participant **confirmed** skipping after the skip confirmation prompt. In **
             try {
               await speakWithElevenLabs(spokenForTts, undefined, {
                 skipStopElevenLabsPlaybackBeforeStart: true,
+                skipWebPlaybackPriming: parallelStreamContinuation,
+                skipSilentWebPlaybackReprime:
+                  afterRecordingTelemetry || parallelStreamContinuation,
+                skipMicPreInitDuringPlayback: true,
+                chainHtmlAudioPlayback: true,
                 telemetry: { source: 'turn' },
                 preInitTriggerDuring: 'tts_playback',
                 skipPcmStream: true,
@@ -13301,6 +14267,13 @@ The participant **confirmed** skipping after the skip confirmation prompt. In **
                     stripControlTokens(spokenForTts).trim(),
                   );
                   if (referenceCardShouldUpdateOnPlaybackStart(spokenForTts)) {
+                    const cleanedSpoken = stripControlTokens(spokenForTts).trim();
+                    const modalQ = getLastSubstantiveScenarioModalQuestion([
+                      { role: 'assistant', content: cleanedSpoken },
+                    ]);
+                    if (modalQ) {
+                      setReferenceCardPrompt(modalQ);
+                    }
                     applyReferenceCardFromAssistantSpeechRef.current(spokenForTts);
                   }
                   if (
@@ -13367,7 +14340,8 @@ The participant **confirmed** skipping after the skip confirmation prompt. In **
             } finally {
               if (!webTtsTabInterruptPendingReplayRef.current) {
                 ttsLineInFlightRef.current = false;
-                if (userId) {
+                /** Keep session TTS active between parallel-stream chunks (avoids mic pre-init / route churn). */
+                if (userId && !parallelStreamingTtsRef.current.active) {
                   setTtsPlaybackActive(false);
                 }
               }
@@ -13380,16 +14354,10 @@ The participant **confirmed** skipping after the skip confirmation prompt. In **
         });
       };
       const flushParallelTtsBatch = (force: boolean) => {
-        let batch = parallelTtsBatchBuffer.trim();
+        let batch = parallelTtsBatchDeduped();
         if (!shouldFlushParallelTtsBatch(batch, force, participantFirstNameForSpoken)) return;
-        batch = dedupeAdjacentBoundaryValidationsBeforeParticipantName(
-          batch,
-          participantFirstNameForSpoken,
-        );
         const prefetch =
-          parallelTtsBatchPrefetch?.text === parallelTtsBatchBuffer.trim()
-            ? parallelTtsBatchPrefetch.promise
-            : null;
+          parallelTtsBatchPrefetch?.text === batch ? parallelTtsBatchPrefetch.promise : null;
         parallelTtsBatchBuffer = '';
         parallelTtsBatchPrefetch = null;
         enqueueParallelTtsUtterance(batch, prefetch);
@@ -13446,6 +14414,7 @@ The participant **confirmed** skipping after the skip confirmation prompt. In **
         if (deferredWarmBoundarySentence) {
           spoken = `${deferredWarmBoundarySentence} ${spoken}`.trim();
           deferredWarmBoundarySentence = null;
+          parallelTtsBatchPrefetch = null;
         }
         if (deferredScenarioARepairLeadSentence) {
           spoken = `${deferredScenarioARepairLeadSentence} ${spoken}`.trim();
@@ -13498,11 +14467,20 @@ The participant **confirmed** skipping after the skip confirmation prompt. In **
           return;
         }
         if (
-          currentInterviewMomentRef.current === 2 &&
-          currentScenarioRef.current === 2 &&
           looksLikeScenarioBRepairAsJamesQuestion(spoken) &&
-          s2RepairProbeDeliveredRef.current
+          (s2RepairProbeDeliveredRef.current ||
+            currentScenarioRef.current !== 2 ||
+            shouldSkipScenarioBRepairAsJamesProbe(
+              messagesToUse,
+              spoken,
+              currentInterviewMomentRef.current,
+            ))
         ) {
+          if (shouldSkipScenarioBRepairAsJamesProbe(messagesToUse, spoken, currentInterviewMomentRef.current)) {
+            void remoteLog('[S2_REPAIR_STREAM_SUPPRESSED_SATISFIED]', {
+              preview: spoken.slice(0, 200),
+            });
+          }
           return;
         }
         /**
@@ -13714,6 +14692,8 @@ The participant **confirmed** skipping after the skip confirmation prompt. In **
         scenarioAContemptProbeSpokenThisStream = true;
         flushParallelTtsBatch(true);
         await ttsChain;
+        recordingJustFinishedBeforeNextTtsRef.current = false;
+        postRecordingParallelStreamSettleRef.current = false;
         parallelStreamingTtsRef.current.cancelRequested = true;
         ttsCancelled = true;
         await stopElevenLabsPlayback();
@@ -13866,11 +14846,16 @@ The participant **confirmed** skipping after the skip confirmation prompt. In **
           await speakScenarioAContemptProbeStreamOnce();
         }
         if (deferredWarmBoundarySentence) {
-          const hold = deferredWarmBoundarySentence;
+          const hold: string = deferredWarmBoundarySentence;
           deferredWarmBoundarySentence = null;
           if (parallelTtsBatchBuffer.trim()) {
             parallelTtsBatchBuffer = `${hold} ${parallelTtsBatchBuffer}`.trim();
+            parallelTtsBatchPrefetch = null;
             flushParallelTtsBatch(true);
+          } else if (textToParallelStream.spokenStarted) {
+            void remoteLog('[BOUNDARY_WARM_DEFERRED_DROPPED_AFTER_STREAM_SPOKE]', {
+              preview: hold.slice(0, 120),
+            });
           } else {
             maybeQueueSentenceForTts(hold, false);
           }
@@ -13957,8 +14942,14 @@ The participant **confirmed** skipping after the skip confirmation prompt. In **
         if (!streamContemptProbeMuteActive) {
         await ttsChain;
         }
+        recordingJustFinishedBeforeNextTtsRef.current = false;
+        postRecordingParallelStreamSettleRef.current = false;
         if (!webTtsTabInterruptPendingReplayRef.current) {
           parallelStreamingTtsRef.current.active = false;
+          if (userId) {
+            setTtsPlaybackActive(false);
+            ttsLineInFlightRef.current = false;
+          }
         }
         if (Platform.OS === 'web' && webTtsTabInterruptPendingReplayRef.current && !metaFrustrationFirstSignalBuffered) {
           const fullReplay = stripControlTokens(textToParallelStream.full).trim();
@@ -14051,11 +15042,20 @@ The participant **confirmed** skipping after the skip confirmation prompt. In **
         }
         if (textToParallelStream.spokenStarted) {
           setVoiceState('idle');
+          if (Platform.OS === 'web') {
+            scheduleWebMicPreInitRefreshAfterTtsCompletes();
+          }
         }
       } catch {
         ttsCancelled = true;
         deferredWarmBoundarySentence = null;
+        recordingJustFinishedBeforeNextTtsRef.current = false;
+        postRecordingParallelStreamSettleRef.current = false;
         parallelStreamingTtsRef.current.active = false;
+        if (userId) {
+          setTtsPlaybackActive(false);
+          ttsLineInFlightRef.current = false;
+        }
         await stopElevenLabsPlayback();
         if (textToParallelStream.spokenStarted) {
           setVoiceState('idle');
@@ -16317,7 +17317,9 @@ The participant **confirmed** skipping after the skip confirmation prompt. In **
         return;
       }
     }
-    if (voiceState !== 'idle') return;
+    if (Platform.OS === 'web' && voiceState === 'speaking' && !isInterviewerOutputActiveForMicGate()) {
+      setVoiceState('idle');
+    } else if (voiceState !== 'idle') return;
     if (useMediaRecorderPath) return; // expo-av / MediaRecorder — mic uses tap handler, not press-in
     setMicWarning(null);
     stopElevenLabsSpeech();
@@ -16709,6 +17711,7 @@ The participant **confirmed** skipping after the skip confirmation prompt. In **
         });
         if (__DEV__) console.error('Transcription failed:', err instanceof Error ? err.message : err);
         recordingJustFinishedBeforeNextTtsRef.current = false;
+        postRecordingParallelStreamSettleRef.current = false;
         await deleteTurnAudioFile(nativeUri);
         transcriptionFailureStreakRef.current += 1;
         const msg = assistantMessageForRecordingOrTranscriptionFailure(
@@ -16732,53 +17735,7 @@ The participant **confirmed** skipping after the skip confirmation prompt. In **
     const uid = userIdRef.current;
     if (!uid) return;
     if (Platform.OS === 'web') {
-      const wr = await refreshWebAudioRoutesForSession();
-      if (wr.changed && wr.previous) {
-        debugNoteWebAudioRouteChange(source, {
-          previousInputRoute: wr.previous.input_route,
-          previousOutputRoute: wr.previous.output_route,
-          newInputRoute: wr.inference.input_route,
-          newOutputRoute: wr.inference.output_route,
-        });
-        const r = getSessionLogRuntime();
-        writeSessionLog({
-          userId: uid,
-          attemptId: r.attemptId,
-          eventType: 'audio_route_changed',
-          eventData: {
-            previous_input_route: wr.previous.input_route,
-            previous_output_route: wr.previous.output_route,
-            new_input_route: wr.inference.input_route,
-            new_output_route: wr.inference.output_route,
-            headphones_connected: wr.inference.headphones_connected,
-            devices_audit: wr.inference.devices_audit,
-            moment_number: currentInterviewMomentRef.current,
-            timestamp: new Date().toISOString(),
-            source,
-          },
-          platform: r.platform,
-        });
-        if (audioRecorderIsRecordingForRouteRef.current) {
-          routeChangedDuringRecordingRef.current = true;
-          writeAudioSessionLog({
-            userId: uid,
-            attemptId: r.attemptId,
-            eventType: 'audio_route_changed_during_recording_warning',
-            eventData: {
-              moment_number: currentInterviewMomentRef.current,
-              source,
-            },
-            platform: r.platform,
-          });
-        }
-        await refreshAudioSessionAfterRouteChange(source);
-      }
-      const p = await probeHeadphoneRoute();
-      lastHeadphoneProbeRef.current = p;
-      if (p.fingerprint != null) {
-        lastAudioRouteFingerprintRef.current = p.fingerprint;
-        setAudioRouteKind(p.kind);
-      }
+      syncWebAudioRouteSessionEnvelopeFromCache();
       return;
     }
     const p = await probeHeadphoneRoute();
@@ -16834,6 +17791,9 @@ The participant **confirmed** skipping after the skip confirmation prompt. In **
   >(null);
 
   const audioRecorder = useAudioRecorder({
+    onRecordingTapIntent: () => {
+      setRecordingSessionActive(true);
+    },
     onRecordingEnginePrimed: (info) => {
       recordingDelayMeasurementRef.current = info;
       setRecordingSessionActive(true);
@@ -16869,6 +17829,7 @@ The participant **confirmed** skipping after the skip confirmation prompt. In **
       recordingPeakMeteringRef.current = meta?.peakMeteringDb ?? null;
       lastRecordingVadSpeechDetectedRef.current = null;
       recordingJustFinishedBeforeNextTtsRef.current = true;
+      postRecordingParallelStreamSettleRef.current = true;
       setMicEnginePrimed(false);
       setVoiceState('processing');
       const analysis = await analyzeRecordingBuffer(blob, meta?.peakMeteringDb ?? null);
@@ -17368,49 +18329,8 @@ The participant **confirmed** skipping after the skip confirmation prompt. In **
     if (Platform.OS !== 'web') return;
     if (interviewStatus !== 'in_progress') return;
     return subscribeWebAudioDeviceChange(() => {
-      void (async () => {
-        const uid = userIdRef.current;
-        if (!uid) return;
-        const wr = await refreshWebAudioRoutesForSession();
-        if (!wr.changed || !wr.previous) return;
-        debugNoteWebAudioRouteChange('devicechange', {
-          previousInputRoute: wr.previous.input_route,
-          previousOutputRoute: wr.previous.output_route,
-          newInputRoute: wr.inference.input_route,
-          newOutputRoute: wr.inference.output_route,
-        });
-        const r = getSessionLogRuntime();
-        writeSessionLog({
-          userId: uid,
-          attemptId: r.attemptId,
-          eventType: 'audio_route_changed',
-          eventData: {
-            previous_input_route: wr.previous.input_route,
-            previous_output_route: wr.previous.output_route,
-            new_input_route: wr.inference.input_route,
-            new_output_route: wr.inference.output_route,
-            headphones_connected: wr.inference.headphones_connected,
-            devices_audit: wr.inference.devices_audit,
-            moment_number: currentInterviewMomentRef.current,
-            timestamp: new Date().toISOString(),
-            source: 'devicechange',
-          },
-          platform: r.platform,
-        });
-        if (audioRecorderIsRecordingForRouteRef.current) {
-          routeChangedDuringRecordingRef.current = true;
-          writeAudioSessionLog({
-            userId: uid,
-            attemptId: r.attemptId,
-            eventType: 'audio_route_changed_during_recording_warning',
-            eventData: {
-              moment_number: currentInterviewMomentRef.current,
-              source: 'devicechange',
-            },
-            platform: r.platform,
-          });
-        }
-      })();
+      /** Mic open/close fires devicechange on Android Chrome — enumerateDevices snaps speaker volume. */
+      syncWebAudioRouteSessionEnvelopeFromCache();
     });
   }, [interviewStatus]);
 
@@ -17418,6 +18338,51 @@ The participant **confirmed** skipping after the skip confirmation prompt. In **
 
   const audioRecorderRefForLeave = useRef(audioRecorder);
   audioRecorderRefForLeave.current = audioRecorder;
+
+  /** Latest nav-blur cleanup — navigation listeners must not capture stale tab-restore state. */
+  const stopInterviewAudioForNavigationRef = useRef<() => void>(() => {});
+  const hardStopInterviewAudioForNavigationRef = useRef<() => void>(() => {});
+  stopInterviewAudioForNavigationRef.current = () => {
+    if (
+      Platform.OS === 'web' &&
+      getWebAutoplayContext().isMobileWeb &&
+      isMobileWebInterviewTtsSessionActive()
+    ) {
+      gestureContextLostAtRef.current = {
+        atMs: Date.now(),
+        reason: 'navigation_away',
+      };
+    }
+    if (armMobileWebBackgroundTtsContinue()) {
+      return;
+    }
+    hardStopInterviewAudioForNavigationRef.current();
+  };
+  hardStopInterviewAudioForNavigationRef.current = () => {
+    interruptAllWebInterviewTtsOutput();
+    dismissTabRestoreOverlay();
+    gestureContextLostAtRef.current = null;
+    void stopElevenLabsPlayback().then(() => {
+      if (isWebInterviewPlaybackAudiblyActive()) {
+        void stopElevenLabsPlayback();
+      }
+    });
+    setVoiceState('idle');
+    try {
+      if (audioRecorderRefForLeave.current.isRecording) {
+        audioRecorderRefForLeave.current.stopRecording();
+      }
+    } catch {
+      /* ignore */
+    }
+    if (Platform.OS === 'web' && recognitionRef.current) {
+      try {
+        recognitionRef.current.stop();
+      } catch {
+        /* ignore */
+      }
+    }
+  };
 
   useEffect(() => {
     setRecordingPlaybackTransitionTelemetryHook((info) => {
@@ -17473,26 +18438,13 @@ The participant **confirmed** skipping after the skip confirmation prompt. In **
   /** Stop interviewer TTS and mic capture when navigating away or the screen unmounts (tab switches do not stop audio). */
   useEffect(() => {
     const stopInterviewAudio = () => {
-      void stopElevenLabsPlayback();
-      stopElevenLabsSpeech();
-      try {
-        if (audioRecorderRefForLeave.current.isRecording) {
-          audioRecorderRefForLeave.current.stopRecording();
-        }
-      } catch {
-        /* ignore */
-      }
-      if (Platform.OS === 'web' && recognitionRef.current) {
-        try {
-          recognitionRef.current.stop();
-        } catch {
-          /* ignore */
-        }
-      }
+      stopInterviewAudioForNavigationRef.current();
     };
 
     const unsubBlur = navigation.addListener('blur', stopInterviewAudio);
-    const unsubBeforeRemove = navigation.addListener('beforeRemove', stopInterviewAudio);
+    const unsubBeforeRemove = navigation.addListener('beforeRemove', () => {
+      hardStopInterviewAudioForNavigationRef.current();
+    });
 
     return () => {
       unsubBlur();
@@ -17531,6 +18483,31 @@ The participant **confirmed** skipping after the skip confirmation prompt. In **
         eventData: { moment_number: currentInterviewMomentRef.current },
         platform: r.platform,
       });
+      if (Platform.OS === 'web' && interviewStatusRef.current === 'in_progress') {
+        if (hasWebInterviewHtmlAudioTabResumePending()) {
+          holdTabStashedHtmlAudioForGestureResume();
+        }
+        syncInterviewTtsAfterScreenReturn();
+        if (
+          !mobileTabHideLetPlaybackContinueRef.current &&
+          !isWebInterviewPlaybackAudiblyActive() &&
+          !hasWebInterviewHtmlAudioTabResumePending() &&
+          pendingGestureRestoreSpeakRef.current?.restoreMode !== 'resume_html' &&
+          (pendingGestureRestoreSpeakRef.current != null ||
+            webTtsTabInterruptPendingReplayRef.current)
+        ) {
+          dismissTabRestoreOverlay();
+        }
+        if (
+          pendingGestureRestoreSpeakRef.current?.restoreMode === 'resume_html' ||
+          (mobileTabHideLetPlaybackContinueRef.current &&
+            hasWebInterviewHtmlAudioTabResumePending())
+        ) {
+          needsGestureRestoreRef.current = true;
+          setWebTabRestoreOverlayVisible(true);
+          ensureWebGestureFlushListener();
+        }
+      }
     });
     const unsubBlurNav = navigation.addListener('blur', () => {
       if (!userId || interviewStatusRef.current !== 'in_progress') return;
@@ -17563,7 +18540,7 @@ The participant **confirmed** skipping after the skip confirmation prompt. In **
       unsubFocus();
       unsubBlurNav();
     };
-  }, [navigation, userId]);
+  }, [navigation, userId, syncInterviewTtsAfterScreenReturn, dismissTabRestoreOverlay, ensureWebGestureFlushListener, setWebTabRestoreOverlayVisible]);
 
   /** One listener per session: web uses `visibilitychange` only; native uses `AppState` only (both fire on some web builds and duplicate logs). */
   useEffect(() => {
@@ -17571,6 +18548,9 @@ The participant **confirmed** skipping after the skip confirmation prompt. In **
     if (Platform.OS === 'web' && typeof document !== 'undefined') {
       const fn = () => {
         const vis = document.visibilityState === 'visible';
+        if (vis) {
+          markWebTabBecameVisible();
+        }
         if (vis && emotionModalPendingTransitionRef.current) {
           setEmotionModalVisible(true);
         }
@@ -17619,7 +18599,10 @@ The participant **confirmed** skipping after the skip confirmation prompt. In **
       setPreInitMeterLevel(0);
       return;
     }
-    if (voiceState !== 'recording' || audioRecorder.isRecording) {
+    const showPreInitMeter =
+      (voiceState === 'recording' && !audioRecorder.isRecording) ||
+      (voiceState === 'idle' && isWebInterviewMicPreInitReady());
+    if (!showPreInitMeter) {
       setPreInitMeterLevel(0);
       return;
     }
@@ -17654,7 +18637,13 @@ The participant **confirmed** skipping after the skip confirmation prompt. In **
 
   const startRecordingAfterPendingTts = useCallback(async () => {
     if (Platform.OS !== 'web') return;
-    if (voiceStateRef.current !== 'idle') return;
+    if (voiceStateRef.current === 'processing') return;
+    if (
+      voiceStateRef.current !== 'idle' &&
+      (Platform.OS !== 'web' || isInterviewerOutputActiveForMicGate())
+    ) {
+      return;
+    }
     if (audioRecorder.isRecording) return;
     if (webMicArmInFlightRef.current) return;
     webMicArmInFlightRef.current = true;
@@ -17672,22 +18661,18 @@ The participant **confirmed** skipping after the skip confirmation prompt. In **
       const tapIntentAtMs = Date.now();
       micTapWhileTtsActiveRef.current =
         getSessionLogRuntime().ttsPlaybackActive || ttsLineInFlightRef.current;
-      setVoiceState('recording');
       setMicEnginePrimed(false);
       const nameEntryTurn =
         !interviewNameRef.current &&
         (interviewNameReaskPendingRef.current ||
           isNamePromptInterviewMoment(lastQuestionTextRef.current));
       await waitUntilInterviewerQuiescentForWebMic();
-      if (nameEntryTurn && webMicPreInitNeedsRefreshForNameEntry()) {
+      if (Platform.OS === 'web' && !isWebInterviewMicPreInitReady()) {
+        await rearmWebMicPreInitAfterTtsPlaybackComplete();
+      } else if (nameEntryTurn && webMicPreInitNeedsRefreshForNameEntry()) {
         await rearmWebMicPreInitAfterRecordingStop();
       }
-      const granted = await audioRecorder.requestPermission();
-      if (!granted) {
-        setVoiceState('idle');
-        setMicEnginePrimed(false);
-        return;
-      }
+      setVoiceState('recording');
       const intendedDelayMs =
         Platform.OS === 'web' ? 0 : 500 + peekRecordingDelayExtraFromEarlyCutoffMs();
       const extraDelayMs = takeRecordingDelayExtraFromEarlyCutoffMs();
@@ -17696,6 +18681,11 @@ The participant **confirmed** skipping after the skip confirmation prompt. In **
         postAudioSessionDelayMs: Platform.OS === 'web' ? 0 : 500 + extraDelayMs,
         tapIntentAtMs,
       });
+      if (!audioRecorder.isRecording) {
+        setVoiceState('idle');
+        setMicEnginePrimed(false);
+        return;
+      }
       const actualDelayMs = recordingDelayMsFromRef(recordingDelayMeasurementRef, tapIntentAtMs);
       if (userId) {
         const r = getSessionLogRuntime();
@@ -17772,7 +18762,7 @@ The participant **confirmed** skipping after the skip confirmation prompt. In **
           },
           platform: r.platform,
         });
-        if (userId && sinceTts != null && sinceTts > lateTh) {
+        if (userId && sinceTts != null && sinceTts > lateTh && !webSpeechShouldDeferToUserGesture()) {
           writeAudioSessionLog({
             userId,
             attemptId: r.attemptId,
@@ -17841,6 +18831,7 @@ The participant **confirmed** skipping after the skip confirmation prompt. In **
     touchActivity();
     setSessionAudioHealthNotice(null);
     if (Platform.OS === 'web') {
+      markWebInterviewUserGestureNow();
       unlockWebAudioForAutoplay();
       primeHtmlAudioForMobileTtsFromMicGesture();
       preAuthorizeAudioElementOnMicTapGesture();
@@ -17854,7 +18845,12 @@ The participant **confirmed** skipping after the skip confirmation prompt. In **
         if (resumeRepeatChoicePendingRef.current) {
           const prefetchText = resolveInterviewQuestionRepeatTtsText(
             scenarioAContemptProbeResumeRepeatTtsText(
-              stripControlTokens(resumeLastAssistantTextRef.current ?? '').trim(),
+              stripControlTokens(
+                findLastRepeatableInterviewQuestionText(
+                  currentMessagesRef.current,
+                  resumeLastAssistantTextRef.current ?? lastQuestionTextRef.current,
+                ),
+              ).trim(),
             ),
           );
           if (prefetchText.length > 0) {
@@ -17875,8 +18871,38 @@ The participant **confirmed** skipping after the skip confirmation prompt. In **
       }
       return;
     }
-    if (voiceState === 'speaking' || voiceState === 'processing') return;
+    if (isInterviewerOutputActiveForMicGate()) {
+      if (Platform.OS === 'web' && voiceStateRef.current === 'idle') {
+        setVoiceState('speaking');
+      }
+      return;
+    }
+    if (Platform.OS === 'web' && mobileTabHideLetPlaybackContinueRef.current) {
+      if (isWebInterviewPlaybackAudiblyActive() && voiceStateRef.current === 'idle') {
+        setVoiceState('speaking');
+      }
+      return;
+    }
+    if (Platform.OS === 'web' && voiceStateRef.current === 'speaking') {
+      setVoiceState('idle');
+    }
     if (Platform.OS === 'web' && webMicArmInFlightRef.current) return;
+    if (Platform.OS === 'web' && webTabGestureRestoreOverlayRef.current) {
+      return;
+    }
+    if (
+      Platform.OS === 'web' &&
+      webTtsTabInterruptPendingReplayRef.current &&
+      !webTabRestoreReplayInFlightRef.current
+    ) {
+      if (pendingGestureRestoreSpeakRef.current) {
+        handleWebTabGestureRestoreTapRef.current();
+      } else {
+        setWebTabGestureRestoreOverlay(true);
+        ensureWebGestureFlushListener();
+      }
+      return;
+    }
     if (Platform.OS === 'web' && voiceState === 'idle' && !audioRecorder.isRecording) {
       pendingMicStartAfterIdleFlushRef.current = true;
     } else {
@@ -17947,6 +18973,9 @@ The participant **confirmed** skipping after the skip confirmation prompt. In **
         await handlePressEnd();
         return;
       }
+      if (voiceState === 'speaking' && !isInterviewerOutputActiveForMicGate()) {
+        setVoiceState('idle');
+      }
       if (voiceState === 'idle') {
         await handlePressStart();
         return;
@@ -17967,7 +18996,6 @@ The participant **confirmed** skipping after the skip confirmation prompt. In **
         const tapIntentAtMs = Date.now();
         micTapWhileTtsActiveRef.current =
           getSessionLogRuntime().ttsPlaybackActive || ttsLineInFlightRef.current;
-        setVoiceState('recording');
         setMicEnginePrimed(false);
         /** Web: fully quiesce interviewer output before getUserMedia + MediaRecorder (avoids overlap with capture). */
         if (Platform.OS === 'web') {
@@ -17986,17 +19014,13 @@ The participant **confirmed** skipping after the skip confirmation prompt. In **
             (interviewNameReaskPendingRef.current ||
               isNamePromptInterviewMoment(lastQuestionTextRef.current));
           await waitUntilInterviewerQuiescentForWebMic();
-          if (nameEntryTurn && webMicPreInitNeedsRefreshForNameEntry()) {
+          if (Platform.OS === 'web' && !isWebInterviewMicPreInitReady()) {
+            await rearmWebMicPreInitAfterTtsPlaybackComplete();
+          } else if (nameEntryTurn && webMicPreInitNeedsRefreshForNameEntry()) {
             await rearmWebMicPreInitAfterRecordingStop();
           }
         }
-        const granted = await audioRecorder.requestPermission();
-        if (__DEV__) console.log('[Aria] MIC PERMISSION:', granted ? 'granted' : 'denied');
-        if (!granted) {
-          setVoiceState('idle');
-          setMicEnginePrimed(false);
-          return;
-        }
+        setVoiceState('recording');
         const intendedDelayMs =
           Platform.OS === 'web' ? 0 : 500 + peekRecordingDelayExtraFromEarlyCutoffMs();
         const extraDelayMs = takeRecordingDelayExtraFromEarlyCutoffMs();
@@ -18004,7 +19028,12 @@ The participant **confirmed** skipping after the skip confirmation prompt. In **
         if (Platform.OS === 'web' && resumeRepeatChoicePendingRef.current) {
           const prefetchText = resolveInterviewQuestionRepeatTtsText(
             scenarioAContemptProbeResumeRepeatTtsText(
-              stripControlTokens(resumeLastAssistantTextRef.current ?? '').trim(),
+              stripControlTokens(
+                findLastRepeatableInterviewQuestionText(
+                  currentMessagesRef.current,
+                  resumeLastAssistantTextRef.current ?? lastQuestionTextRef.current,
+                ),
+              ).trim(),
             ),
           );
           if (prefetchText.length > 0) {
@@ -18019,6 +19048,11 @@ The participant **confirmed** skipping after the skip confirmation prompt. In **
           postAudioSessionDelayMs: Platform.OS === 'web' ? 0 : 500 + extraDelayMs,
           tapIntentAtMs,
         });
+        if (!audioRecorder.isRecording) {
+          setVoiceState('idle');
+          setMicEnginePrimed(false);
+          return;
+        }
         const actualDelayMs = recordingDelayMsFromRef(recordingDelayMeasurementRef, tapIntentAtMs);
         if (userId) {
           const r = getSessionLogRuntime();
@@ -18097,7 +19131,7 @@ The participant **confirmed** skipping after the skip confirmation prompt. In **
             },
             platform: r.platform,
           });
-          if (userId && sinceTts != null && sinceTts > lateTh) {
+          if (userId && sinceTts != null && sinceTts > lateTh && !webSpeechShouldDeferToUserGesture()) {
             writeAudioSessionLog({
               userId,
               attemptId: r.attemptId,
@@ -18178,6 +19212,7 @@ The participant **confirmed** skipping after the skip confirmation prompt. In **
     markWebInterviewUserGestureNow();
     setMobileWebTapToBeginDone(true);
     unlockWebAudioForAutoplay();
+    preAuthorizeAudioElementOnMicTapGesture();
     primeHtmlAudioForMobileTtsFromMicGesture();
     if (emotionModalPendingTransitionRef.current) {
       setEmotionModalVisible(true);
@@ -18197,30 +19232,35 @@ The participant **confirmed** skipping after the skip confirmation prompt. In **
     let playedIntro = false;
     let playedAfterModal = false;
     try {
-      if (offerWelcome && tryAcquireResumeWelcomePlayback(attemptId)) {
-        try {
-          await speakTextSafe(resumeWelcomeMessageRef.current, {
-            telemetrySource: 'greeting',
-            ttsTriggerSource: 'gesture_handler',
-            skipQuestionDeliveredTelemetry: true,
-            skipInterviewSpeechAdvance: true,
-            skipQuestionTiming: true,
-            skipLastQuestionRef: true,
-          });
-          await markResumeWelcomeSpoken(attemptId);
-          spokeWelcome = true;
-          void remoteLog('[resume] welcome_tts_completed', { attemptId });
-        } finally {
-          releaseResumeWelcomePlaybackLock(attemptId);
-        }
-      } else if (offerWelcome) {
+      if (offerWelcome) {
         const alreadySpoken = await wasResumeWelcomeSpoken(attemptId);
-        void remoteLog('[resume] welcome_tts_skipped', {
-          attemptId,
-          offerWelcome,
-          alreadySpoken,
-          lockHeld: resumeWelcomePlaybackLockAttemptId === attemptId,
-        });
+        /** Deferred bootstrap may leave attemptId null — still play welcome on tap (no attempt-scoped lock). */
+        const acquiredLock = !attemptId || tryAcquireResumeWelcomePlayback(attemptId);
+        if (!alreadySpoken && acquiredLock) {
+          try {
+            await speakTextSafe(resumeWelcomeMessageRef.current, {
+              telemetrySource: 'greeting',
+              ttsTriggerSource: 'gesture_handler',
+              skipQuestionDeliveredTelemetry: true,
+              skipInterviewSpeechAdvance: true,
+              skipQuestionTiming: true,
+              skipLastQuestionRef: true,
+            });
+            await markResumeWelcomeSpoken(attemptId);
+            spokeWelcome = true;
+            void remoteLog('[resume] welcome_tts_completed', { attemptId });
+          } finally {
+            releaseResumeWelcomePlaybackLock(attemptId);
+          }
+        } else {
+          void remoteLog('[resume] welcome_tts_skipped', {
+            attemptId,
+            offerWelcome,
+            alreadySpoken,
+            lockHeld:
+              attemptId != null && resumeWelcomePlaybackLockAttemptId === attemptId,
+          });
+        }
       }
       const intro = pendingScenarioIntroAfterResumeWelcomeRef.current;
       pendingScenarioIntroAfterResumeWelcomeRef.current = null;
@@ -18240,20 +19280,31 @@ The participant **confirmed** skipping after the skip confirmation prompt. In **
             skipLastQuestionRef: true,
           });
           void remoteLog('[resume] emotion_after_modal_tts', { preview: afterModal.slice(0, 120) });
-      } else if (!spokeWelcome && !offerWelcome) {
-        const last = resumeLastAssistantTextRef.current;
-        if (last?.trim()) {
+      } else if (!spokeWelcome) {
+        const welcomeFallback = offerWelcome ? resumeWelcomeMessageRef.current?.trim() : '';
+        const last =
+          welcomeFallback ||
+          findLastRepeatableInterviewQuestionText(
+            currentMessagesRef.current,
+            resumeLastAssistantTextRef.current ?? lastQuestionTextRef.current,
+          )?.trim() ||
+          '';
+        if (last) {
           await speakTextSafe(stripControlTokens(last), {
-            telemetrySource: 'replay',
+            telemetrySource: welcomeFallback ? 'greeting' : 'replay',
             ttsTriggerSource: 'gesture_handler',
             skipQuestionDeliveredTelemetry: true,
             skipInterviewSpeechAdvance: true,
             skipQuestionTiming: true,
             skipLastQuestionRef: true,
           });
+          if (welcomeFallback) {
+            spokeWelcome = true;
+          }
           void remoteLog('[resume] replay_last_assistant_on_tap', {
             preview: last.slice(0, 120),
             hadEmotionCatchUp: false,
+            welcomeFallback: Boolean(welcomeFallback),
           });
         }
       }
@@ -18353,6 +19404,9 @@ The participant **confirmed** skipping after the skip confirmation prompt. In **
       resumeLoadingFlowActiveRef.current = true;
       setResumeLoadingVisible(true);
       logSessionResumeState('loading');
+      if (Platform.OS === 'web') {
+        clearWebInterviewHtmlTabRestoreState();
+      }
       const bootstrapAttemptId = interviewSessionAttemptIdRef.current;
       const savedAttemptId = saved.sessionAttemptId ?? null;
       const attemptMismatch = Boolean(
@@ -18750,7 +19804,10 @@ The participant **confirmed** skipping after the skip confirmation prompt. In **
         : scenarioIntroMsg
           ? [...fullMessages, welcomeMsg, scenarioIntroMsg]
           : [...fullMessages, welcomeMsg];
-      resumeLastAssistantTextRef.current = extractLastInterviewerMessage(messagesWithWelcome);
+      resumeLastAssistantTextRef.current = findLastRepeatableInterviewQuestionText(
+        messagesWithWelcome,
+        lastQuestionTextRef.current,
+      );
       setMessages(messagesWithWelcome);
 
       const assistantForRef = messagesWithWelcome.filter((m) => isAssistantBubbleForTranscript(m));
@@ -18769,15 +19826,7 @@ The participant **confirmed** skipping after the skip confirmation prompt. In **
         clearPendingWebSpeechGesturePair(pendingWebSpeechForGestureRef);
         detachWebGestureFlushListener();
         setWebDesktopPendingTtsGestureOverlay(false);
-        void (async () => {
-          await refreshWebAudioRoutesForSession();
-          const p = await probeHeadphoneRoute();
-          lastHeadphoneProbeRef.current = p;
-          if (p.fingerprint != null) {
-            lastAudioRouteFingerprintRef.current = p.fingerprint;
-            setAudioRouteKind(p.kind);
-          }
-        })();
+        syncWebAudioRouteSessionEnvelopeFromCache();
         if (resumeOfferWelcomeTtsRef.current && !welcomeAlreadySpoken && !webResumeWelcomeTapHandledRef.current) {
           webResumeWelcomeTapPendingRef.current = true;
           setWebResumeWelcomeTapPending(true);
@@ -18816,7 +19865,10 @@ The participant **confirmed** skipping after the skip confirmation prompt. In **
                   skipLastQuestionRef: true,
                 });
             } else if (!spokeWelcome && !offerWelcome) {
-              const last = resumeLastAssistantTextRef.current;
+              const last = findLastRepeatableInterviewQuestionText(
+                currentMessagesRef.current,
+                resumeLastAssistantTextRef.current ?? lastQuestionTextRef.current,
+              );
               if (last?.trim()) {
                 await speakTextSafe(stripControlTokens(last), {
                   telemetrySource: 'replay',
@@ -18923,9 +19975,26 @@ The participant **confirmed** skipping after the skip confirmation prompt. In **
   }, [userId, isAdmin, handleResume, hydratePostClosingFromSaved]);
 
   const startInterview = useCallback(async (opts?: { fromUserGesture?: boolean }) => {
+    if (startInterviewInFlightRef.current) {
+      void remoteLog('[START] skipped duplicate in_flight');
+      return;
+    }
+    if (hasResumedRef.current && interviewStatusRef.current === 'in_progress') {
+      void remoteLog('[START] skipped already in_progress');
+      return;
+    }
+    startInterviewInFlightRef.current = true;
+    setInterviewStartInFlight(true);
+    try {
+    /** Prior session TTS (greeting, parallel stream, tab-restore replay) must stop before a new opening line. */
+    interruptAllWebInterviewTtsOutput();
     const interviewStartTapClockMs = Date.now();
+    let greetingSyncStarted = false;
+    let earlyWebRouteProbe: HeadphoneProbeResult | null = null;
     /** New interview session: require a fresh web audio unlock in this gesture stack before any TTS. */
-    resetWebInterviewAudioSession();
+    if (!hasResumedRef.current) {
+      resetWebInterviewAudioSession();
+    }
     /** Any web path that begins inside a real user gesture (overlay, first pointerdown, consent button). */
     if (opts?.fromUserGesture && Platform.OS === 'web') {
       setMobileWebTapToBeginDone(true);
@@ -18934,9 +20003,13 @@ The participant **confirmed** skipping after the skip confirmation prompt. In **
     /** Sync unlock, then mic permission + pre-init before any other await — preserves gesture for Chrome mobile. */
     if (Platform.OS === 'web') {
       unlockWebAudioForAutoplay();
-      primeHtmlAudioForMobileTtsFromMicGesture();
-      /** Pairs with later `speakTextSafe` / ElevenLabs so `tts_trigger_source: preauthorized_element` matches post-greeting turns. */
-      preAuthorizeAudioElementOnMicTapGesture();
+      const deferPreAuthForPrefetchedGreeting =
+        opts?.fromUserGesture === true && isWebInterviewGreetingPrefetchReady();
+      if (!deferPreAuthForPrefetchedGreeting) {
+        primeHtmlAudioForMobileTtsFromMicGesture();
+        /** Pairs with later `speakTextSafe` / ElevenLabs so `tts_trigger_source: preauthorized_element` matches post-greeting turns. */
+        preAuthorizeAudioElementOnMicTapGesture();
+      }
       const micGate = await requestMicrophonePermissionForInterviewStart();
       const attemptIdForMicGate = interviewSessionAttemptIdRef.current;
       const webPlat = 'web' as const;
@@ -18966,6 +20039,7 @@ The participant **confirmed** skipping after the skip confirmation prompt. In **
         setVoiceState('idle');
         return;
       }
+      audioRecorder.markWebMicPermissionGranted();
       const timeToGrantMs = Date.now() - interviewStartTapClockMs;
       if (userId) {
         writeSessionLog({
@@ -18986,8 +20060,23 @@ The participant **confirmed** skipping after the skip confirmation prompt. In **
           time_to_grant_ms: timeToGrantMs,
         });
       }
-      await beginInterviewMicPreInitDuringTts('greeting');
-      await refreshWebAudioRoutesForSession();
+      /** Route probe + cache refresh before greeting — opening mic/enumerating during TTS ducks Android speaker. */
+      await refreshWebAudioRoutesForSession({ probeMicrophone: false });
+      if (opts?.fromUserGesture) {
+        earlyWebRouteProbe = await probeHeadphoneRoute();
+        lastHeadphoneProbeRef.current = earlyWebRouteProbe;
+        setAudioRouteKind(earlyWebRouteProbe.kind);
+        lastAudioRouteFingerprintRef.current = earlyWebRouteProbe.fingerprint;
+      }
+      if (opts?.fromUserGesture && isWebInterviewGreetingPrefetchReady()) {
+        if (syncPlayPrefetchedWebInterviewGreeting()) {
+          greetingSyncStarted = true;
+          setStatus('active');
+          setInterviewStatus('in_progress');
+          hasResumedRef.current = true;
+          setVoiceState('speaking');
+        }
+      }
     }
     if (Platform.OS === 'web' && opts?.fromUserGesture) {
       void remoteLog('[START] startInterview called', {
@@ -19023,6 +20112,7 @@ The participant **confirmed** skipping after the skip confirmation prompt. In **
     try {
       const openingLineText = WEB_INTERVIEW_OPENING_GREETING;
       let openingLineDeliveredEarly = false;
+      let interviewSessionStartLogged = false;
       const hasApiKeys = !!ANTHROPIC_API_KEY || !!ANTHROPIC_PROXY_URL;
       const webGestureFirstGreeting =
         Platform.OS === 'web' &&
@@ -19032,84 +20122,25 @@ The participant **confirmed** skipping after the skip confirmation prompt. In **
         !isAdmin &&
         interviewAttemptBootstrap === 'ready';
 
-      /** Greeting after mic permission (web): synchronous `play()` stays in the Begin tap gesture chain. */
-      if (webGestureFirstGreeting) {
-        setStatus('active');
-        setInterviewStatus('in_progress');
-        hasResumedRef.current = true;
-        setVoiceState('processing');
-        resetInterviewProgressRefs();
-        if (Platform.OS === 'web') {
-          audioRecorder.resetWebMicInputFallbackState();
-        }
-        recordingJustFinishedBeforeNextTtsRef.current = false;
-        lastVoiceTurnLanguageRef.current = null;
-        lastVoiceTurnConfidenceRef.current = null;
-        currentScenarioRef.current = 1;
-        const openingRowWeb: MessageWithScenario = {
-          role: 'assistant',
-          content: openingLineText,
-          scenarioNumber: 1,
+      /** Probe routes once before greeting (cache-only on web — no second getUserMedia during the name tap). */
+      let routeProbe: HeadphoneProbeResult =
+        earlyWebRouteProbe ??
+        lastHeadphoneProbeRef.current ?? {
+          input: null,
+          fingerprint: null,
+          kind: 'unknown',
+          shouldShowHeadphonePrompt: false,
         };
-        setMessages([openingRowWeb]);
-        await notifyScenarioStarted(1, [openingRowWeb], { allowMessageHistoryShrink: true });
-        const el = getPrefetchedGreetingHtmlAudioElement();
-        if (el) {
-          await speakTextSafe(openingLineText, {
-            telemetrySource: 'greeting',
-            ttsTriggerSource: 'gesture_handler',
-            immediateWebPlaybackElement: el,
-          });
-          openingLineDeliveredEarly = true;
-          releaseWebInterviewGreetingPrefetch();
-        } else {
-          await speakTextSafe(openingLineText, {
-            telemetrySource: 'greeting',
-            ttsTriggerSource: 'gesture_handler',
-          });
-          openingLineDeliveredEarly = true;
-        }
+      if (Platform.OS === 'web' && !earlyWebRouteProbe) {
+        routeProbe = await probeHeadphoneRoute();
+        lastHeadphoneProbeRef.current = routeProbe;
+        setAudioRouteKind(routeProbe.kind);
+        lastAudioRouteFingerprintRef.current = routeProbe.fingerprint;
       }
 
-      // 1 — Request mic permissions (web: already granted in gesture stack before greeting TTS)
-      if (Platform.OS !== 'web') {
-        const granted = await audioRecorder.requestPermission();
-        setMicPermission(granted ? 'granted' : 'denied');
-        await remoteLog('[START] Mic permission result', { granted });
-        if (!granted) {
-          if (__DEV__) console.warn('[Aria] Mic permission denied at start');
-          setVoiceState('idle');
-          setMicError('Microphone access was denied. Enable the microphone in settings, then try again.');
-          return;
-        }
-      }
-
-      const routeProbe = await probeHeadphoneRoute();
-      lastHeadphoneProbeRef.current = routeProbe;
-      setAudioRouteKind(routeProbe.kind);
-      lastAudioRouteFingerprintRef.current = routeProbe.fingerprint;
-
-      // 2 — Set playback mode so welcome TTS plays through speaker; mic will switch to recording mode when user holds button
-      if (Platform.OS !== 'web') {
-        await setPlaybackMode();
-        await remoteLog('[START] Audio mode set');
-      }
-
-      if (!openingLineDeliveredEarly) {
-        setStatus('active');
-        setInterviewStatus('in_progress');
-        hasResumedRef.current = true;
-        setVoiceState('processing');
-        resetInterviewProgressRefs();
-        if (Platform.OS === 'web') {
-          audioRecorder.resetWebMicInputFallbackState();
-        }
-        recordingJustFinishedBeforeNextTtsRef.current = false;
-        lastVoiceTurnLanguageRef.current = null;
-        lastVoiceTurnConfidenceRef.current = null;
-      }
-
-      if (userId) {
+      const runInterviewSessionStartIfNeeded = async (probe: HeadphoneProbeResult) => {
+        if (!userId || interviewSessionStartLogged) return;
+        interviewSessionStartLogged = true;
         let createdAttemptId: string | null = interviewSessionAttemptIdRef.current;
         try {
           const device = await collectDeviceContext();
@@ -19119,7 +20150,7 @@ The participant **confirmed** skipping after the skip confirmation prompt. In **
             os_version: device.os_version,
             app_version: device.app_version,
           });
-          const env = await collectInterviewDeviceEnvironment(routeProbe);
+          const env = await collectInterviewDeviceEnvironment(probe);
           setLastInterviewDeviceEnvironment(env);
           if (Platform.OS === 'web') {
             captureWebSessionLogDeviceContext({
@@ -19128,9 +20159,9 @@ The participant **confirmed** skipping after the skip confirmation prompt. In **
               app_version: device.app_version,
               available_memory_mb: env.available_memory_mb,
             });
-            await refreshWebAudioRoutesForSession();
+            await refreshWebAudioRoutesForSession({ probeMicrophone: false });
           } else {
-            setSessionAudioRoutes(mapHeadphoneProbeToSessionInputRoute(routeProbe), 'unknown');
+            setSessionAudioRoutes(mapHeadphoneProbeToSessionInputRoute(probe), 'unknown');
           }
           const substantiveCount = await countSubstantiveInterviewAttemptsForUser(userId);
           const attemptNumber = substantiveCount + 1;
@@ -19204,10 +20235,10 @@ The participant **confirmed** skipping after the skip confirmation prompt. In **
             attemptId: rLog.attemptId,
             eventType: 'audio_route_probe',
             eventData: {
-              kind: routeProbe.kind,
-              fingerprint: routeProbe.fingerprint,
-              input_type: routeProbe.input?.type ?? null,
-              input_name: routeProbe.input?.name?.slice?.(0, 120) ?? null,
+              kind: probe.kind,
+              fingerprint: probe.fingerprint,
+              input_type: probe.input?.type ?? null,
+              input_name: probe.input?.name?.slice?.(0, 120) ?? null,
             },
             platform: device.platform,
           });
@@ -19221,6 +20252,99 @@ The participant **confirmed** skipping after the skip confirmation prompt. In **
             });
           }
         }
+      };
+
+      /** Greeting after mic permission (web): sync play may have already started audible playback. */
+      if (webGestureFirstGreeting) {
+        if (!hasResumedRef.current) {
+          setStatus('active');
+          setInterviewStatus('in_progress');
+          hasResumedRef.current = true;
+        }
+        setVoiceState((prev) => (prev === 'speaking' ? 'speaking' : 'processing'));
+        resetInterviewProgressRefs();
+        if (Platform.OS === 'web') {
+          audioRecorder.resetWebMicInputFallbackState();
+        }
+        recordingJustFinishedBeforeNextTtsRef.current = false;
+        postRecordingParallelStreamSettleRef.current = false;
+        lastVoiceTurnLanguageRef.current = null;
+        lastVoiceTurnConfidenceRef.current = null;
+        currentScenarioRef.current = 1;
+        const openingRowWeb: MessageWithScenario = {
+          role: 'assistant',
+          content: openingLineText,
+          scenarioNumber: 1,
+        };
+        setMessages([openingRowWeb]);
+        await notifyScenarioStarted(1, [openingRowWeb], { allowMessageHistoryShrink: true });
+        const el = getPrefetchedGreetingHtmlAudioElement();
+        if (el) {
+          await speakTextSafe(openingLineText, {
+            telemetrySource: 'greeting',
+            ttsTriggerSource: 'gesture_handler',
+            immediateWebPlaybackElement: el,
+            greetingAlreadyAudible: greetingSyncStarted,
+          });
+          releaseWebInterviewGreetingPrefetch();
+        } else {
+          await speakTextSafe(openingLineText, {
+            telemetrySource: 'greeting',
+            ttsTriggerSource: 'gesture_handler',
+          });
+        }
+        openingLineDeliveredEarly = true;
+        if (Platform.OS === 'web') {
+          primeHtmlAudioForMobileTtsFromMicGesture();
+          preAuthorizeAudioElementOnMicTapGesture();
+        }
+        /** After greeting ends — session setup must not open mic or enumerate during audible intro. */
+        await runInterviewSessionStartIfNeeded(routeProbe);
+      }
+
+      // 1 — Request mic permissions (web: already granted in gesture stack before greeting TTS)
+      if (Platform.OS !== 'web') {
+        const granted = await audioRecorder.requestPermission();
+        setMicPermission(granted ? 'granted' : 'denied');
+        await remoteLog('[START] Mic permission result', { granted });
+        if (!granted) {
+          if (__DEV__) console.warn('[Aria] Mic permission denied at start');
+          setVoiceState('idle');
+          setMicError('Microphone access was denied. Enable the microphone in settings, then try again.');
+          return;
+        }
+      }
+
+      if (Platform.OS !== 'web') {
+        routeProbe = await probeHeadphoneRoute();
+        lastHeadphoneProbeRef.current = routeProbe;
+        setAudioRouteKind(routeProbe.kind);
+        lastAudioRouteFingerprintRef.current = routeProbe.fingerprint;
+      }
+
+      // 2 — Set playback mode so welcome TTS plays through speaker; mic will switch to recording mode when user holds button
+      if (Platform.OS !== 'web') {
+        await setPlaybackMode();
+        await remoteLog('[START] Audio mode set');
+      }
+
+      if (!openingLineDeliveredEarly) {
+        setStatus('active');
+        setInterviewStatus('in_progress');
+        hasResumedRef.current = true;
+        setVoiceState('processing');
+        resetInterviewProgressRefs();
+        if (Platform.OS === 'web') {
+          audioRecorder.resetWebMicInputFallbackState();
+        }
+        recordingJustFinishedBeforeNextTtsRef.current = false;
+        postRecordingParallelStreamSettleRef.current = false;
+        lastVoiceTurnLanguageRef.current = null;
+        lastVoiceTurnConfidenceRef.current = null;
+      }
+
+      if (userId) {
+        await runInterviewSessionStartIfNeeded(routeProbe);
       } else {
         resetSessionLogRuntime({
           sessionCorrelationId: interviewSessionIdRef.current,
@@ -19296,6 +20420,10 @@ The participant **confirmed** skipping after the skip confirmation prompt. In **
       setMessages([openingRowErr]);
       await notifyScenarioStarted(1, [openingRowErr], { allowMessageHistoryShrink: true });
       await speakTextSafe(fallbackMsg, { telemetrySource: 'greeting' }).catch(() => {});
+    }
+    } finally {
+      startInterviewInFlightRef.current = false;
+      setInterviewStartInFlight(false);
     }
   }, [
     speakTextSafe,
@@ -19385,8 +20513,6 @@ The participant **confirmed** skipping after the skip confirmation prompt. In **
    */
   const handleMobileWebTapToBegin = useCallback(
     (shouldStartInterview: boolean) => {
-      unlockWebAudioForAutoplay();
-      primeHtmlAudioForMobileTtsFromMicGesture();
       setMobileWebTapToBeginDone(true);
       if (shouldStartInterview) {
         onboardingAutoStartRef.current = true;
@@ -23233,14 +24359,16 @@ assistant: Thanks for sticking with all of this — what stays with me is how yo
 
           <Button
             title={
-              interviewAttemptBootstrap === 'loading' && userId && !isAdmin
+              interviewStartInFlight
+                ? 'Starting…'
+                : interviewAttemptBootstrap === 'loading' && userId && !isAdmin
                 ? 'Preparing session…'
                 : interviewAttemptBootstrap === 'failed' && userId && !isAdmin
                   ? 'Session unavailable'
                   : 'Begin interview'
             }
             onPress={() => void startInterview({ fromUserGesture: true })}
-            disabled={!preInterviewReady}
+            disabled={!preInterviewReady || interviewStartInFlight}
             style={styles.preInterviewBeginButton}
           />
 
@@ -23250,7 +24378,7 @@ assistant: Thanks for sticking with all of this — what stays with me is how yo
   }
 
   // Active interview — chat always visible; scoring and results as inline panels below
-  const inputDisabled = status === 'scoring' || status === 'results';
+  const inputDisabled = status === 'scoring' || status === 'results' || emotionModalVisible;
   const PILLAR_META: Record<string, { name: string; color: string }> = {
     mentalizing: { name: INTERVIEW_MARKER_LABELS.mentalizing, color: colors.error },
     accountability: { name: INTERVIEW_MARKER_LABELS.accountability, color: colors.success },
@@ -23340,7 +24468,13 @@ assistant: Thanks for sticking with all of this — what stays with me is how yo
           <View style={{ flex: 1, backgroundColor: '#05060D' }}>
             <UserInterviewLayout
               flameState={
-                useMediaRecorderPath && audioRecorder.isRecording ? 'recording' : voiceState
+                useMediaRecorderPath && audioRecorder.isRecording
+                  ? 'recording'
+                  : Platform.OS === 'web' &&
+                      voiceState === 'speaking' &&
+                      !webInterviewerOutputActive
+                    ? 'idle'
+                    : voiceState
               }
               showScenarioReferenceEnabled={
                 interviewUiPhase === 'scenario_active' && !!referenceCardScenario
@@ -23357,6 +24491,7 @@ assistant: Thanks for sticking with all of this — what stays with me is how yo
               voiceState={
                 useMediaRecorderPath && audioRecorder.isRecording ? 'recording' : voiceState
               }
+              interviewerOutputActive={webInterviewerOutputActive}
               micError={micError}
               micWarning={micWarning}
               inputDisabled={inputDisabled}
@@ -23376,11 +24511,11 @@ assistant: Thanks for sticking with all of this — what stays with me is how yo
               }
               onExit={handleInterviewSignOut}
               micInputLevel={
-                useMediaRecorderPath && (audioRecorder.isRecording || voiceState === 'recording')
-                  ? Math.max(
-                      audioRecorder.isRecording ? audioRecorder.inputMeterLevel : 0,
-                      preInitMeterLevel,
-                    )
+                useMediaRecorderPath &&
+                (audioRecorder.isRecording ||
+                  voiceState === 'recording' ||
+                  preInitMeterLevel > 0)
+                  ? Math.max(audioRecorder.inputMeterLevel, preInitMeterLevel)
                   : 0
               }
               micSessionRecovering={micSessionRecovering}
@@ -23681,7 +24816,12 @@ assistant: Thanks for sticking with all of this — what stays with me is how yo
             <Pressable
               onPressIn={handlePressStart}
               onPressOut={handlePressEnd}
-              disabled={!!micError || voiceState === 'speaking' || voiceState === 'processing'}
+              disabled={
+                !!micError ||
+                emotionModalVisible ||
+                voiceState === 'processing' ||
+                (Platform.OS === 'web' ? webInterviewerOutputActive : voiceState === 'speaking')
+              }
               style={[
                 styles.micOrb,
                 voiceState === 'listening' && styles.micOrbListening,
@@ -23782,7 +24922,17 @@ assistant: Thanks for sticking with all of this — what stays with me is how yo
       {webActiveGestureOverlayKind === 'tab_restore' ? (
         <Pressable
           style={styles.mobileWebTapToBeginOverlay}
-          onPress={() => handleWebTabGestureRestoreTap()}
+          onPressIn={() => {
+            markWebInterviewUserGestureNow();
+            preAuthorizeAudioElementOnMicTapGesture();
+            unlockWebAudioForAutoplay();
+          }}
+          onPress={() => {
+            if (webTabRestoreReplayInFlightRef.current) {
+              return;
+            }
+            void handleWebTabGestureRestoreTap();
+          }}
           accessibilityRole="button"
           accessibilityLabel="Tap to continue"
         >
@@ -23795,6 +24945,11 @@ assistant: Thanks for sticking with all of this — what stays with me is how yo
       {webActiveGestureOverlayKind === 'resume_welcome' ? (
         <Pressable
           style={styles.mobileWebTapToBeginOverlay}
+          onPressIn={() => {
+            markWebInterviewUserGestureNow();
+            preAuthorizeAudioElementOnMicTapGesture();
+            unlockWebAudioForAutoplay();
+          }}
           onPress={() => void handleWebResumeWelcomeTap()}
           accessibilityRole="button"
           accessibilityLabel={

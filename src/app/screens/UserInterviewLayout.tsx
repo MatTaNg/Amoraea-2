@@ -81,6 +81,11 @@ interface UserInterviewLayoutProps {
   micReconnectPrompt?: { message: string; onReconnect: () => void } | null;
   /** After TTS, if the user has not tapped record for a long time — gentle visual-only reminder. */
   lateStartRecordingCue?: boolean;
+  /**
+   * Web: true while interviewer TTS is audibly active (playback surface / in-flight stream).
+   * When false while `voiceState === 'speaking'`, treat as idle for mic — avoids stale UI after tab switch.
+   */
+  interviewerOutputActive?: boolean;
 }
 
 const GOOGLE_FONTS_URL =
@@ -133,6 +138,7 @@ export const UserInterviewLayout: React.FC<UserInterviewLayoutProps> = ({
   micSessionRecovering = false,
   micReconnectPrompt = null,
   lateStartRecordingCue = false,
+  interviewerOutputActive = false,
 }) => {
   const [refCardOpen, setRefCardOpen] = useState(false);
   const [lastValidScenarioModalPrompt, setLastValidScenarioModalPrompt] = useState<string | null>(null);
@@ -247,20 +253,28 @@ export const UserInterviewLayout: React.FC<UserInterviewLayoutProps> = ({
       ? micLabelOverride
       : voiceState === 'listening' || voiceState === 'recording'
         ? 'Listening...'
-        : voiceState === 'speaking'
+        : voiceState === 'speaking' &&
+            (Platform.OS !== 'web' || interviewerOutputActive)
           ? 'Speaking...'
           : voiceState === 'processing'
             ? '...'
             : 'Tap to speak';
 
+  const interviewerSpeakingUi =
+    voiceState === 'speaking' && (Platform.OS !== 'web' || interviewerOutputActive);
+
   const statusLabelOpacity =
-    voiceState === 'speaking' || voiceState === 'processing' ? 0.35 : 0.7;
+    interviewerSpeakingUi || voiceState === 'processing' ? 0.35 : 0.7;
 
   const rippleScale = rippleAnim.interpolate({ inputRange: [0, 1], outputRange: [1, 1.6] });
   const rippleOpacity = rippleAnim.interpolate({ inputRange: [0, 1], outputRange: [0.5, 0] });
 
-  const isMicDisabled = !!micError || inputDisabled || voiceState === 'speaking' || voiceState === 'processing';
-  const micOpacity = voiceState === 'speaking' ? 0.35 : 1;
+  const isMicDisabled =
+    !!micError ||
+    inputDisabled ||
+    voiceState === 'processing' ||
+    (Platform.OS === 'web' ? interviewerOutputActive : voiceState === 'speaking');
+  const micOpacity = interviewerSpeakingUi ? 0.35 : 1;
   const isListeningOrRecording = voiceState === 'listening' || voiceState === 'recording';
   const isRecording = voiceState === 'recording';
 

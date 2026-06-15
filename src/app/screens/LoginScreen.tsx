@@ -9,7 +9,7 @@ import {
   Platform,
   ScrollView,
 } from 'react-native';
-import { useAuth } from '@features/authentication/hooks/useAuth';
+import { useAuth, getAuthEmailSendErrorMessage } from '@features/authentication/hooks/useAuth';
 import { SafeAreaContainer } from '@ui/components/SafeAreaContainer';
 import { FlameOrb } from '@app/screens/FlameOrb';
 import { authStyles } from '@app/screens/authStyles';
@@ -85,7 +85,9 @@ export const LoginScreen: React.FC<{ navigation: any; route?: { params?: { confi
       await resendConfirmationEmail(email.trim());
       setResendSent(true);
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to resend confirmation email');
+      setError(
+        getAuthEmailSendErrorMessage(err, 'Failed to resend confirmation email'),
+      );
     } finally {
       setResending(false);
     }
@@ -165,7 +167,7 @@ export const LoginScreen: React.FC<{ navigation: any; route?: { params?: { confi
               onChangeText={setPassword}
               secureTextEntry
               returnKeyType="go"
-              style={[authStyles.input, { marginBottom: 18 }]}
+              style={authStyles.input}
               onSubmitEditing={() => void handleLogin()}
               onKeyPress={(e) => {
                 if (Platform.OS === 'web' && e.nativeEvent.key === 'Enter') {
@@ -174,6 +176,14 @@ export const LoginScreen: React.FC<{ navigation: any; route?: { params?: { confi
                 }
               }}
             />
+
+            <Pressable
+              testID="login-forgot-password-link"
+              onPress={() => navigation.navigate('ForgotPassword')}
+              style={styles.forgotPasswordWrap}
+            >
+              <Text style={styles.forgotPasswordLink}>Forgot password?</Text>
+            </Pressable>
 
             {confirmEmailMessage && (
               <Text style={styles.successText}>
@@ -277,6 +287,20 @@ const styles = StyleSheet.create({
   },
   button: {
     marginBottom: 12,
+  },
+  forgotPasswordWrap: {
+    alignSelf: 'flex-end',
+    width: '100%',
+    marginBottom: 18,
+    paddingVertical: 2,
+  },
+  forgotPasswordLink: {
+    fontFamily: Platform.OS === 'web' ? "'Jost', sans-serif" : undefined,
+    fontSize: 12,
+    fontWeight: '300',
+    color: '#3D5470',
+    letterSpacing: 0.3,
+    textAlign: 'right',
   },
   successText: {
     color: '#5BA8E8',

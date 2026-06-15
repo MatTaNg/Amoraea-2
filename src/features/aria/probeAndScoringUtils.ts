@@ -1572,9 +1572,20 @@ export function scenarioAContemptProbeTtsSpokenText(assistantSpeechText: string)
   return assistantSpeechText;
 }
 
-/** Map stored contempt-probe transcript text to resume-repeat TTS (transcript unchanged). */
+/**
+ * Repeat/resume TTS for the contempt probe — speak the full delivered line (including Emma's quote).
+ * Initial playback uses {@link scenarioAContemptProbeTtsSpokenText} to avoid re-vocalizing the vignette line.
+ */
 export function scenarioAContemptProbeResumeRepeatTtsText(storedAssistantText: string): string {
-  return scenarioAContemptProbeTtsSpokenText(storedAssistantText);
+  const stored = (storedAssistantText ?? '').trim();
+  if (!stored) return storedAssistantText;
+  if (
+    stored.includes(SCENARIO_A_CONTEMPT_PROBE_DELIVERED_COPY) ||
+    looksLikeScenarioAContemptProbeQuestion(stored)
+  ) {
+    return SCENARIO_A_CONTEMPT_PROBE_DELIVERED_COPY;
+  }
+  return storedAssistantText;
 }
 
 /** Canonical Scenario A repair ask after the contempt probe — injected when duplicate-strip empties the model turn. */

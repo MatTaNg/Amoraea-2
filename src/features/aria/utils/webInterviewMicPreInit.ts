@@ -15,6 +15,17 @@ import {
   buildWebMicGetUserMediaConstraints,
   buildWebMicDefaultIdealFallbackConstraints,
 } from '@features/aria/utils/webMicDeviceConstraints';
+import { getWebSpeechDeferFromNavigatorSnapshot } from '@features/aria/utils/webSpeechDeferPolicy';
+import { seedCachedWebMicTrackSettings } from '@utilities/sessionLogging/webMediaDeviceAudioRoute';
+
+function shouldDeferWarmMicPreInitOnMobileWeb(): boolean {
+  if (Platform.OS !== 'web' || typeof navigator === 'undefined') return false;
+  return getWebSpeechDeferFromNavigatorSnapshot({
+    userAgent: navigator.userAgent || '',
+    platform: navigator.platform,
+    maxTouchPoints: navigator.maxTouchPoints,
+  });
+}
 
 const PREFERRED_MR_MIME = 'audio/webm;codecs=opus';
 
@@ -50,7 +61,7 @@ export function takeRecorderRefreshedOnLateStartForTelemetry(): boolean {
 let lateStartPreInitTimer: ReturnType<typeof setTimeout> | null = null;
 
 export function scheduleWebMicPreInitRefreshAfterTtsCompletes(): void {
-  if (Platform.OS !== 'web') return;
+  if (Platform.OS !== 'web' || shouldDeferWarmMicPreInitOnMobileWeb()) return;
   if (lateStartPreInitTimer != null) {
     clearTimeout(lateStartPreInitTimer);
     lateStartPreInitTimer = null;
@@ -78,7 +89,7 @@ export function cancelScheduledLateStartPreInitRefresh(): void {
  * After TTS, if the user waits past the late-start threshold, rebuild pre-init so a long-delay tap still gets a warm recorder.
  */
 export async function refreshWebMicPreInitIfStaleAfterLateStartWindow(): Promise<{ refreshed: boolean }> {
-  if (Platform.OS !== 'web') return { refreshed: false };
+  if (Platform.OS !== 'web' || shouldDeferWarmMicPreInitOnMobileWeb()) return { refreshed: false };
   const streamOk = preInitStream && isStreamLive(preInitStream);
   const recOk = preInitRecorder && preInitRecorder.state === 'inactive';
   if (streamOk && recOk) {
@@ -104,6 +115,9 @@ export function getLastPreInitTriggerDuring(): PreInitTriggerDuring | null {
   return lastPreInitTriggerDuring;
 }
 
+/** Bumped when TTS playback suspends pre-init — in-flight getUserMedia must abort. */
+let preInitGeneration = 0;
+
 let preInitStream: MediaStream | null = null;
 let preInitRecorder: MediaRecorder | null = null;
 let micAnalyser: AnalyserNode | null = null;
@@ -115,6 +129,17 @@ function isStreamLive(stream: MediaStream | null): boolean {
   if (!stream?.active) return false;
   const t = stream.getAudioTracks()[0];
   return !!t && t.readyState === 'live';
+}
+
+/** Inactive MediaRecorder + live mic stream ready for a recording tap. */
+export function isWebInterviewMicPreInitReady(): boolean {
+  if (Platform.OS !== 'web') return false;
+  return (
+    preInitStream != null &&
+    isStreamLive(preInitStream) &&
+    preInitRecorder != null &&
+    preInitRecorder.state === 'inactive'
+  );
 }
 
 function pickMediaRecorderMimeType(): string {
@@ -194,12 +219,16 @@ export function samplePreInitInputMeterNormalized(): number {
  * (greeting) / user gesture to warm the recorder before the first tap.
  */
 export async function beginInterviewMicPreInitDuringTts(
-  trigger: PreInitTriggerDuring = 'tts_playback'
+  trigger: PreInitTriggerDuring = 'tts_playback',
+  options?: { allowOnMobileWebRecordingArm?: boolean },
 ): Promise<void> {
   if (Platform.OS !== 'web' || typeof navigator === 'undefined' || !navigator.mediaDevices?.getUserMedia) return;
   if (typeof MediaRecorder === 'undefined') return;
+  /** Proactive warm-up during/after TTS ducks Android speaker; recording-tap rearm is allowed. */
+  if (shouldDeferWarmMicPreInitOnMobileWeb() && !options?.allowOnMobileWebRecordingArm) return;
 
   lastPreInitTriggerDuring = trigger;
+  const generation = preInitGeneration;
 
   try {
     if (preInitStream && !isStreamLive(preInitStream)) {
@@ -209,14 +238,31 @@ export async function beginInterviewMicPreInitDuringTts(
     if (!preInitStream || !preInitRecorder) {
       const constraints = await buildWebMicGetUserMediaConstraints();
       const stream = await navigator.mediaDevices.getUserMedia(constraints);
+      if (preInitGenerationStale(generation)) {
+        stream.getTracks().forEach((tr) => tr.stop());
+        return;
+      }
       preInitStream = stream;
+      const track = stream.getAudioTracks()[0];
+      if (track?.getSettings) {
+        seedCachedWebMicTrackSettings(track.getSettings());
+      }
       const mime = pickMediaRecorderMimeType();
       try {
         preInitRecorder = new MediaRecorder(stream, { mimeType: mime });
       } catch {
         preInitRecorder = new MediaRecorder(stream);
       }
+      if (preInitGenerationStale(generation)) {
+        releaseWebInterviewMicPreInitHard();
+        return;
+      }
       setupAnalyserForStream(stream);
+    }
+
+    if (preInitGenerationStale(generation)) {
+      releaseWebInterviewMicPreInitHard();
+      return;
     }
 
     resetInterviewVadAmbientSamplingState();
@@ -305,6 +351,10 @@ function releaseWebInterviewMicPreInitHard(): void {
   preInitRecorder = null;
 }
 
+function preInitGenerationStale(generation: number): boolean {
+  return generation !== preInitGeneration;
+}
+
 /**
  * After recording stops: release mic, then immediately re-acquire for next turn (inactive MR).
  */
@@ -323,6 +373,10 @@ export async function replaceWebInterviewMicPreInitWithConstraints(
   try {
     const stream = await navigator.mediaDevices.getUserMedia(constraints);
     preInitStream = stream;
+    const track = stream.getAudioTracks()[0];
+    if (track?.getSettings) {
+      seedCachedWebMicTrackSettings(track.getSettings());
+    }
     const mime = pickMediaRecorderMimeType();
     try {
       preInitRecorder = new MediaRecorder(stream, { mimeType: mime });
@@ -351,6 +405,10 @@ export async function rearmWebMicPreInitAfterRecordingStop(): Promise<void> {
     const constraints = await buildWebMicGetUserMediaConstraints();
     const stream = await navigator.mediaDevices.getUserMedia(constraints);
     preInitStream = stream;
+    const track = stream.getAudioTracks()[0];
+    if (track?.getSettings) {
+      seedCachedWebMicTrackSettings(track.getSettings());
+    }
     const mime = pickMediaRecorderMimeType();
     try {
       preInitRecorder = new MediaRecorder(stream, { mimeType: mime });
@@ -366,6 +424,26 @@ export async function rearmWebMicPreInitAfterRecordingStop(): Promise<void> {
 /** Screen unmount or interview end */
 export function releaseWebInterviewMicPreInit(): void {
   releaseWebInterviewMicPreInitHard();
+}
+
+/**
+ * Mobile web: an open capture stream during TTS ducks speaker playback on Android Chrome.
+ * Release pre-init before audible playback; re-arm after the turn finishes speaking.
+ */
+export function suspendWebInterviewMicPreInitForTtsPlayback(): void {
+  if (Platform.OS !== 'web') return;
+  preInitGeneration++;
+  releaseWebInterviewMicPreInitHard();
+}
+
+/** Re-acquire inactive pre-init after TTS (not during recording). */
+export async function rearmWebMicPreInitAfterTtsPlaybackComplete(): Promise<void> {
+  if (Platform.OS !== 'web') return;
+  if (preInitStream && isStreamLive(preInitStream) && preInitRecorder?.state === 'inactive') {
+    return;
+  }
+  lastPreInitTriggerDuring = 'tts_playback';
+  await beginInterviewMicPreInitDuringTts('tts_playback', { allowOnMobileWebRecordingArm: true });
 }
 
 /** Debug / telemetry: active input deviceId from the pre-init stream (after getUserMedia). */

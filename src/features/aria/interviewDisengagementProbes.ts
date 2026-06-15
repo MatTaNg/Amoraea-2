@@ -379,6 +379,33 @@ export function isClientOrElongatingInterviewProbeAssistant(content: string): bo
   );
 }
 
+/** Meta-comment / thin follow-up lines — not the substantive scenario question to verbatim-repeat. */
+const NON_REPEATABLE_ASSISTANT_LINE_PATTERNS = [
+  'can you say more about that',
+  'just say whatever comes to mind',
+  'say whatever comes to mind',
+  'could you say more',
+  'can you tell me more',
+  "i didn't quite catch that",
+  'could you say it again',
+  'would you mind repeating that',
+  'seems like an interruption happened',
+  "sorry, i didn't catch",
+  'can you elaborate',
+  'go on',
+  'tell me more',
+  'what else',
+  'take your time',
+  'still here',
+] as const;
+
+export function isNonRepeatableAssistantLineForVerbatimReplay(content: string): boolean {
+  if (isClientOrElongatingInterviewProbeAssistant(content)) return true;
+  const lower = content.trim().toLowerCase();
+  if (!lower) return false;
+  return NON_REPEATABLE_ASSISTANT_LINE_PATTERNS.some((pattern) => lower.includes(pattern));
+}
+
 export function transcriptContainsMentalizingSurfaceProbe(
   messages: Array<{ role: string; content?: string | null }>,
 ): boolean {
@@ -714,6 +741,49 @@ export function evaluateRepairRefusalDetection(
   };
 }
 
+function userTurnIsRepeatRequest(text: string): boolean {
+  const t = text.trim();
+  if (!t) return false;
+  return (
+    /\bcan you repeat\b/i.test(t) ||
+    /\brepeat\w* what you said\b/i.test(t) ||
+    /\brepeat what you said\b/i.test(t) ||
+    /\brepeat the questions?\b/i.test(t) ||
+    /\bsay (that|it) again\b/i.test(t) ||
+    /\bwhat was the question\b/i.test(t) ||
+    /\bwhat did you (say|ask)\b/i.test(t) ||
+    /\bcome again\b/i.test(t) ||
+    /\b(yes|yeah|yep|sure),?\s+repeat\b/i.test(t)
+  );
+}
+
+/** Last real scenario/interview question to re-read on repeat-request — skips client elongating probes. */
+export function findLastRepeatableInterviewQuestionText(
+  messages: Array<{
+    role: string;
+    content?: string | null;
+    isScoreCard?: boolean;
+    isWelcomeBack?: boolean;
+  }>,
+  fallbackLastQuestionText?: string | null,
+): string {
+  for (let i = messages.length - 1; i >= 0; i--) {
+    const m = messages[i];
+    if (m.role !== 'assistant') continue;
+    if (m.isScoreCard) continue;
+    if (m.isWelcomeBack) continue;
+    const raw = (m.content ?? '').trim();
+    if (!raw) continue;
+    if (isNonRepeatableAssistantLineForVerbatimReplay(raw)) continue;
+    if (/^i only caught part of that\b/i.test(raw)) continue;
+    if (/^welcome back\b/i.test(raw)) continue;
+    return raw;
+  }
+  const fb = (fallbackLastQuestionText ?? '').trim();
+  if (fb && !isNonRepeatableAssistantLineForVerbatimReplay(fb)) return fb;
+  return fb;
+}
+
 export function pickClientDisengagementProbe(input: {
   userAnswer: string;
   lastAssistantContent: string;
@@ -798,7 +868,8 @@ export function pickClientDisengagementProbe(input: {
     wordCount < 8 &&
     !hasClearConciseDirectAnswer(userAnswer) &&
     !looksLikeMoment4GrudgePrompt(lastAssistantContent) &&
-    hadSkipRequestInThisMoment !== true
+    hadSkipRequestInThisMoment !== true &&
+    !userTurnIsRepeatRequest(userAnswer)
   ) {
     return { kind: 'short_elaboration', probe: CLIENT_SHORT_ELABORATION_PROBE };
   }

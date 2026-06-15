@@ -1,4 +1,5 @@
 import { buildWebMicGetUserMediaConstraints } from '@features/aria/utils/webMicDeviceConstraints';
+import { seedCachedWebMicTrackSettings } from '@utilities/sessionLogging/webMediaDeviceAudioRoute';
 
 /**
  * Interview start (web): request mic with minimal constraints in the same user-gesture stack as "Start".
@@ -13,7 +14,11 @@ export async function requestMicrophonePermissionForInterviewStart(): Promise<{
   }
   try {
     const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-    stream.getTracks().forEach((track) => track.stop());
+    const track = stream.getAudioTracks()[0];
+    if (track?.getSettings) {
+      seedCachedWebMicTrackSettings(track.getSettings());
+    }
+    stream.getTracks().forEach((t) => t.stop());
     return { ok: true, errorName: null };
   } catch (err) {
     const name = err instanceof Error ? err.name : 'UnknownError';

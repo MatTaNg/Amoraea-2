@@ -4,6 +4,7 @@ import {
   CLIENT_SHORT_ELABORATION_PROBE,
   SCENARIO_C_SOPHIE_PERSPECTIVE_PROBE,
   evaluateRepairRefusalDetection,
+  findLastRepeatableInterviewQuestionText,
   isClientOrElongatingInterviewProbeAssistant,
   isInterviewHardStopUserTurn,
   isRepairRefusalProbeAssistantLine,
@@ -416,6 +417,21 @@ describe('interviewDisengagementProbes', () => {
     expect(pick?.probe).toBe(CLIENT_SHORT_ELABORATION_PROBE);
   });
 
+  it('does not fire short_elaboration when user asks to repeat the question', () => {
+    const pick = pickClientDisengagementProbe({
+      userAnswer: 'Can you repeat what you said?',
+      lastAssistantContent: 'Just say whatever comes to mind.',
+      wordCount: 6,
+      answeringAfterProbe: false,
+      exemptMetaTurn: false,
+      isGreetingNameTurn: false,
+      isExplicitDecline: false,
+      isAssistantRecoveryOrMetaLine: false,
+      isFirstUserTurnInScenario: false,
+    });
+    expect(pick).toBeNull();
+  });
+
   it('surface label helper rejects causal reasoning (because)', () => {
     expect(looksLikeSurfaceOnlyEmotionalLabelAnswer("She's angry because he lied.")).toBe(false);
   });
@@ -586,5 +602,21 @@ describe('interviewDisengagementProbes', () => {
       mentalizingSurfaceProbeAlreadyFired: true,
     });
     expect(pick).toBeNull();
+  });
+});
+
+describe('findLastRepeatableInterviewQuestionText', () => {
+  it('skips elongating and meta-comment probes and returns prior scenario question', () => {
+    const scenarioQuestion =
+      "Here's the first situation:\n\nEmma and Ryan have dinner plans. What's going on between these two?";
+    const messages = [
+      { role: 'assistant', content: scenarioQuestion },
+      { role: 'assistant', content: 'Just say whatever comes to mind.' },
+      { role: 'user', content: 'Hello?' },
+      { role: 'assistant', content: 'Can you say more about that?' },
+    ];
+    expect(findLastRepeatableInterviewQuestionText(messages, 'Can you say more about that?')).toBe(
+      scenarioQuestion,
+    );
   });
 });

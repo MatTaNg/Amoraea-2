@@ -96,7 +96,7 @@ EXPO_PUBLIC_SUPABASE_ANON_KEY=your_supabase_anon_key
 # EXPO_PUBLIC_AUTH_REDIRECT_URL=https://www.amoraea.com/
 ```
 
-In **Supabase → Authentication → URL Configuration**, set **Site URL** to your deployed web app origin and add every origin users hit under **Redirect URLs** (e.g. `https://www.amoraea.com/`, `https://your-app.netlify.app/`). Production web builds use `window.location.origin` when `EXPO_PUBLIC_AUTH_REDIRECT_URL` is unset so the confirmation link matches Netlify or your custom domain.
+In **Supabase → Authentication → URL Configuration**, set **Site URL** to your deployed web app **root origin only** (e.g. `https://www.amoraea.com/` — **not** `/welcome`). Under **Redirect URLs**, add `https://www.amoraea.com/reset-password` and your other origins (e.g. `https://www.amoraea.com/**`). Password-reset emails use `redirectTo` `/reset-password`; if that URL is missing from the allowlist, Supabase falls back to Site URL and users land on the wrong page. In **Email Templates → Reset password**, the link must be `href="{{ .ConfirmationURL }}"` only.
 
 **Netlify:** `netlify.toml` and `public/_redirects` configure SPA fallback so `/` and deep paths return `index.html` (fixes “Page not found” after email confirmation). Redeploy after pulling these files.
 

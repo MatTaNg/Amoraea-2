@@ -16,6 +16,7 @@ import {
   looksLikeReadinessYesHomophone,
   NON_ENGLISH_VOICE_PROMPT,
 } from './interviewLanguageGate';
+import { isApprovedElongatingProbeOnly } from './elongatingProbe';
 import { classifyResumeRepeatIntent } from './resumeRepeatIntent';
 
 export type MetaCommentType =
@@ -81,6 +82,7 @@ export function countsAsSubstantiveInterviewQuestionDelivery(text: string): bool
   if (/^i only caught part of that\b/i.test(raw)) return false;
   if (/^i didn't catch any speech on that try\b/i.test(raw)) return false;
   if (/i'?m having a little trouble on my end\b/i.test(raw)) return false;
+  if (isApprovedElongatingProbeOnly(raw)) return false;
   const wc = wordCount(raw);
   /** Normal interview moves include a question mark; long transitions without `?` still count. */
   if (raw.includes('?')) return true;
@@ -150,6 +152,7 @@ const CONFUSION_REPEAT_REQUEST_RES: RegExp[] = [
   /\bcome again\b/i,
   /\brepeat the question\b/i,
   /\b(yes|yeah|yep|sure),?\s+repeat\b/i,
+  /\brepeat\s+what you (said|say|see|asked|meant)\b/i,
   /\bplease\s+repeat\b/i,
 ];
 
@@ -178,6 +181,9 @@ const EXPLICIT_REPEAT_REQUEST_PRECLASS_RES: RegExp[] = [
   /\bpardon\b/i,
   /\bhuh\b/i,
   /\b(yes|yeah|yep|sure),?\s+repeat\b/i,
+  /\b(yes|yeah|yep|sure),?\s+repeat what you said\b/i,
+  /\brepeat\w* what you (said|just said)\b/i,
+  /\brepeat\s+what you (said|say|see|asked|meant)\b/i,
   /\bplease\s+repeat\b/i,
   /^\s*repeat\s*$/i,
 ];
@@ -1162,7 +1168,11 @@ export function resolveMetaCommentForInterviewTurn(
   } else if (isPreambleOrReadinessTurn) {
     exemptMetaCommentTurn = true;
     exemptMetaCommentTurnReason = 'preamble_readiness_turn';
-  } else if (postMetaAckSeqWindow) {
+  } else if (
+    postMetaAckSeqWindow &&
+    !isExplicitRepeatRequestPreClassification(text) &&
+    !isConfusionRepeatRequestText(text)
+  ) {
     exemptMetaCommentTurn = true;
     exemptMetaCommentTurnReason = 'seq_not_advanced_since_last_ack';
   } else {
