@@ -3,6 +3,10 @@ import { profilesRepo } from '../repos/profilesRepo';
 import { signOutIfUsersAuthFkViolation } from '../supabase/signOutIfUsersAuthFkViolation';
 import { isAlphaTesterReferralCode } from '@/constants/alphaReferral';
 import { normalizeShareableReferralCode } from '@features/referrals/shareableReferralCode';
+import {
+  isRelationshipValidationReferralCode,
+  RELATIONSHIP_VALIDATION_TRACK,
+} from '@features/relationshipValidation/constants';
 import { mapGenderToDb } from '@/shared/utils/genderMapper';
 import type { Gender } from '@domain/models/Profile';
 
@@ -56,6 +60,14 @@ export class InviteCodeRepository {
       .maybeSingle();
 
     if (existing) {
+      const raw = options.referralCode?.trim() ?? '';
+      if (isRelationshipValidationReferralCode(raw)) {
+        await supabase
+          .from('users')
+          .update({ validation_track: RELATIONSHIP_VALIDATION_TRACK })
+          .eq('id', userId)
+          .is('validation_track', null);
+      }
       return { inviteCode: existing.invite_code || '' };
     }
 
@@ -65,8 +77,11 @@ export class InviteCodeRepository {
     let isAlphaTester = false;
 
     const raw = options.referralCode?.trim() ?? '';
+    const isRelationshipValidation = isRelationshipValidationReferralCode(raw);
     if (raw) {
-      if (isAlphaTesterReferralCode(raw)) {
+      if (isRelationshipValidation) {
+        /* Cohort signup — no invite-code referral graph. */
+      } else if (isAlphaTesterReferralCode(raw)) {
         isAlphaTester = true;
       } else {
         const normalizedShareable = normalizeShareableReferralCode(raw);
@@ -101,6 +116,7 @@ export class InviteCodeRepository {
       referred_by_id: referredById,
       is_alpha_tester: isAlphaTester,
       pending_referral_code: pendingReferralCode,
+      ...(isRelationshipValidation ? { validation_track: RELATIONSHIP_VALIDATION_TRACK } : {}),
     });
 
     if (error) {

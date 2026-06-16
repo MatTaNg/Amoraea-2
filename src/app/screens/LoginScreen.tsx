@@ -35,9 +35,20 @@ export const LoginScreen: React.FC<{ navigation: any; route?: { params?: { confi
   const [loading, setLoading] = useState(false);
   const [resendSent, setResendSent] = useState(false);
   const [resending, setResending] = useState(false);
-  const { signIn, resendConfirmationEmail } = useAuth();
-  const confirmEmailMessage = route?.params?.confirmEmail ?? false;
+  const { signIn, resendConfirmationEmail, emailConfirmationLinkError, clearEmailConfirmationLinkError } =
+    useAuth();
+  const confirmEmailMessage =
+    route?.params?.confirmEmail ??
+    (Platform.OS === 'web' &&
+    typeof window !== 'undefined' &&
+    (new URLSearchParams(window.location.search).get('confirmEmail') === '1' ||
+      new URLSearchParams(window.location.search).get('confirmEmail') === 'true'));
   const passwordInputRef = useRef<React.ElementRef<typeof TextInput>>(null);
+
+  useEffect(() => {
+    if (!emailConfirmationLinkError) return;
+    setError(emailConfirmationLinkError);
+  }, [emailConfirmationLinkError]);
 
   useEffect(() => {
     if (Platform.OS !== 'web' || typeof document === 'undefined') return;
@@ -58,6 +69,7 @@ export const LoginScreen: React.FC<{ navigation: any; route?: { params?: { confi
     }
     setError(null);
     setResendSent(false);
+    clearEmailConfirmationLinkError();
     if (Platform.OS === 'web') {
       unlockWebAudioForAutoplay();
     }

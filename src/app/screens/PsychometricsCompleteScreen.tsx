@@ -23,6 +23,12 @@ import {
   psychometricsScrollContent,
 } from '@features/psychometrics/psychometricsTheme';
 import { spacing } from '@ui/theme/spacing';
+import { PreparingResultsView } from '@app/screens/PreparingResultsView';
+import {
+  RELATIONSHIP_VALIDATION_TRACK,
+} from '@features/relationshipValidation/constants';
+import { fetchUserValidationTrack } from '@features/relationshipValidation/relationshipValidationRepo';
+import { useQueryClient } from '@tanstack/react-query';
 
 type Props = {
   navigation: {
@@ -37,15 +43,22 @@ type Props = {
 
 export function PsychometricsCompleteScreen({ navigation, route }: Props) {
   const { user } = useAuth();
+  const queryClient = useQueryClient();
   const userId = route.params?.userId ?? '';
   const isAdminUser = isAmoraeaAdminConsoleEmail(user?.email);
-  const [phase, setPhase] = useState<'finalizing' | 'failed'>('finalizing');
+  const [phase, setPhase] = useState<'finalizing' | 'failed' | 'validation_redirect'>('finalizing');
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
-  const advanceToFullReport = useCallback(() => {
+  const advanceToFullReport = useCallback(async () => {
     if (!userId) return;
+    const track = await fetchUserValidationTrack(userId);
+    if (track === RELATIONSHIP_VALIDATION_TRACK) {
+      setPhase('validation_redirect');
+      await queryClient.invalidateQueries({ queryKey: ['validationTrack', userId] });
+      return;
+    }
     navigation.replace('PostInterview', { userId });
-  }, [navigation, userId]);
+  }, [navigation, queryClient, userId]);
 
   useEffect(() => {
     loadPsychometricsWebFontsOnce();
@@ -68,6 +81,10 @@ export function PsychometricsCompleteScreen({ navigation, route }: Props) {
       cancelled = true;
     };
   }, [advanceToFullReport, userId]);
+
+  if (phase === 'validation_redirect') {
+    return <PreparingResultsView />;
+  }
 
   if (!PSYCHOMETRICS_ENABLED) {
     return (

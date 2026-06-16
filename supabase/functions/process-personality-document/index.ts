@@ -1,5 +1,6 @@
 import { createClient, type SupabaseClient } from 'https://esm.sh/@supabase/supabase-js@2';
 import { encode as base64Encode } from 'https://deno.land/std@0.168.0/encoding/base64.ts';
+import { CLAUDE_SONNET_MODEL } from '../_shared/anthropicModel.ts';
 
 const corsHeaders: Record<string, string> = {
   'Access-Control-Allow-Origin': '*',
@@ -137,7 +138,7 @@ async function runProcessPersonalityDocument(
       if (!textContent.trim()) throw new Error('No text content could be extracted');
 
       const signalResult = await anthropicMessages(apiKey, {
-        model: 'claude-sonnet-4-20250514',
+        model: CLAUDE_SONNET_MODEL,
         max_tokens: 1500,
         system: SIGNAL_SYSTEM,
         messages: [
@@ -157,7 +158,7 @@ async function runProcessPersonalityDocument(
       const base64 = base64Encode(new Uint8Array(arrayBuffer));
 
       const signalResult = await anthropicMessages(apiKey, {
-        model: 'claude-sonnet-4-20250514',
+        model: CLAUDE_SONNET_MODEL,
         max_tokens: 1500,
         system: SIGNAL_SYSTEM,
         messages: [
@@ -186,7 +187,7 @@ async function runProcessPersonalityDocument(
       const base64 = base64Encode(new Uint8Array(arrayBuffer));
 
       const signalResult = await anthropicMessages(apiKey, {
-        model: 'claude-sonnet-4-20250514',
+        model: CLAUDE_SONNET_MODEL,
         max_tokens: 1500,
         system: SIGNAL_SYSTEM,
         messages: [

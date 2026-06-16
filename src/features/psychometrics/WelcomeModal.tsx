@@ -1,4 +1,4 @@
-import React, { useEffect } from 'react';
+import React, { useCallback, useEffect } from 'react';
 import {
   Modal,
   View,
@@ -6,11 +6,15 @@ import {
   StyleSheet,
   ScrollView,
   SafeAreaView,
+  TouchableOpacity,
+  Platform,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { FlameOrb } from '@app/screens/FlameOrb';
 import { Button } from '@/shared/ui/Button';
 import { spacing } from '@ui/theme/spacing';
+import { useAuth } from '@/shared/hooks/AuthProvider';
+import { showConfirmDialog } from '@utilities/alerts/confirmDialog';
 import { PsychometricsAdminPanelButton } from './PsychometricsAdminPanelButton';
 import { PsychometricsBackButton } from './PsychometricsBackButton';
 import {
@@ -51,9 +55,22 @@ export function WelcomeModal({
   variant = 'interviewFirst',
   continueLabel,
 }: WelcomeModalProps) {
+  const { signOut } = useAuth();
+
   useEffect(() => {
     if (visible) loadPsychometricsWebFontsOnce();
   }, [visible]);
+
+  const handleLogOut = useCallback(() => {
+    showConfirmDialog(
+      {
+        title: 'Log out',
+        message: 'Are you sure you want to log out?',
+        confirmText: 'Log out',
+      },
+      () => void signOut(),
+    );
+  }, [signOut]);
 
   const interviewFirst = variant === 'interviewFirst';
   const interviewTimeLabel = interviewFirst
@@ -108,6 +125,16 @@ export function WelcomeModal({
     <Modal visible={visible} animationType="fade" statusBarTranslucent>
       <SafeAreaView style={styles.safe}>
         {onBackPress ? <PsychometricsBackButton onPress={onBackPress} /> : null}
+        <TouchableOpacity
+          style={[styles.logoutButton, onOpenAdminPanel ? styles.logoutButtonWithAdmin : null]}
+          onPress={handleLogOut}
+          activeOpacity={0.8}
+          accessibilityRole="button"
+          accessibilityLabel="Log out"
+        >
+          <Ionicons name="log-out-outline" size={16} color={PSYCHOMETRICS_ACCENT} />
+          <Text style={styles.logoutButtonText}>Log out</Text>
+        </TouchableOpacity>
         {onOpenAdminPanel ? <PsychometricsAdminPanelButton onPress={onOpenAdminPanel} /> : null}
         <ScrollView
           style={styles.scroll}
@@ -288,5 +315,32 @@ const styles = StyleSheet.create({
   cta: {
     minWidth: 260,
     paddingHorizontal: spacing.lg,
+  },
+  logoutButton: {
+    position: 'absolute',
+    top: 16,
+    right: 16,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    paddingVertical: 8,
+    paddingHorizontal: 12,
+    backgroundColor: 'rgba(30,111,217,0.1)',
+    borderWidth: 1,
+    borderColor: 'rgba(82,142,220,0.2)',
+    borderRadius: 6,
+    zIndex: 100,
+  },
+  logoutButtonWithAdmin: {
+    top: 56,
+  },
+  logoutButtonText: {
+    fontFamily: PSYCHOMETRICS_FONT_BODY,
+    fontSize: 11,
+    fontWeight: '400',
+    letterSpacing: 1.5,
+    color: PSYCHOMETRICS_ACCENT,
+    textTransform: 'uppercase',
+    ...(Platform.OS === 'web' ? { userSelect: 'none' as const } : {}),
   },
 });

@@ -2,6 +2,7 @@ import { supabase } from '@data/supabase/client';
 import { fetchMostRecentCompletedInterviewAttemptId } from '@features/psychometrics/interviewCompletionStatus';
 import { resolveReportParticipantDisplayName } from '@utilities/adminInterviewIntroDisplayName';
 import { invokeAnthropicMessages } from '@utilities/invokeAnthropicMessages';
+import { CLAUDE_SONNET_MODEL } from '@utilities/anthropicMessagesClient';
 import { getReportLogoSrc } from './reportBranding';
 import {
   computePersonalReportSourceHash,
@@ -317,7 +318,7 @@ export async function generateUserReport(userId: string, prefetchedData?: Report
   const data = prefetchedData ?? (await fetchReportData(userId));
 
   const result = await invokeAnthropicMessages({
-    model: 'claude-sonnet-4-20250514',
+    model: CLAUDE_SONNET_MODEL,
     max_tokens: 2500,
     system: buildSystemPrompt(),
     messages: [

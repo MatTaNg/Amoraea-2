@@ -9,6 +9,7 @@ import {
   buildScoreAnchorBlock,
   prepareAIReasoningForPersistence,
 } from './aiReasoningPostProcess';
+import { CLAUDE_SONNET_MODEL } from '@utilities/anthropicMessagesClient';
 
 const ANTHROPIC_API_KEY =
   (typeof process !== 'undefined' && process.env?.EXPO_PUBLIC_ANTHROPIC_API_KEY) || '';
@@ -395,7 +396,7 @@ export async function generateAIReasoning(
   );
 
   const body: Record<string, unknown> = {
-    model: 'claude-sonnet-4-20250514',
+    model: CLAUDE_SONNET_MODEL,
     max_tokens: 8000,
     system: SYSTEM_PROMPT,
     messages: [{ role: 'user', content: userPrompt }],

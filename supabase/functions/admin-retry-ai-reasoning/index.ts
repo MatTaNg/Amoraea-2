@@ -1,6 +1,7 @@
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
 import { generateAIReasoning, DEFAULT_AI_REASONING_PER_ATTEMPT_TIMEOUT_MS } from '../_shared/generateAIReasoning.ts';
 import { buildReasoningFailurePatch } from '../_shared/aiReasoningPostProcess.ts';
+import { rollupPillarScoresFromStoredAttemptRow } from '../_shared/resolvePillarScoresForNarrative.ts';
 
 const ADMIN_EMAIL = 'admin@amoraea.com';
 const ADMIN_AI_REASONING_BACKGROUND_TIMEOUT_MS = 300_000;
@@ -50,6 +51,15 @@ function scenarioScoresFromAttempt(row: AttemptRow): Record<
   return out;
 }
 
+function pillarScoresRecord(raw: Record<string, number> | null | undefined): Record<string, number> {
+  const out: Record<string, number> = {};
+  if (!raw || typeof raw !== 'object') return out;
+  for (const [k, v] of Object.entries(raw)) {
+    if (typeof v === 'number' && Number.isFinite(v)) out[k] = v;
+  }
+  return out;
+}
+
 function pendingReasoningWithError(existing: Record<string, unknown> | null, error: string): Record<string, unknown> {
   return {
     ...(existing ?? {}),
@@ -64,12 +74,56 @@ function pendingReasoningWithError(existing: Record<string, unknown> | null, err
 async function runReasoningRetryInBackground(
   admin: ReturnType<typeof createClient>,
   attemptId: string,
-  attempt: AttemptRow
+  _attemptSnapshot: AttemptRow
 ): Promise<void> {
   const startedAt = Date.now();
+  const { data: freshRow, error: refetchErr } = await admin
+    .from('interview_attempts')
+    .select(
+      'id, pillar_scores, scenario_1_scores, scenario_2_scores, scenario_3_scores, scenario_specific_patterns, transcript, weighted_score, passed, ai_reasoning, ego_development_level'
+    )
+    .eq('id', attemptId)
+    .maybeSingle();
+  if (refetchErr || !freshRow) {
+    const error = refetchErr?.message ?? 'attempt_not_found_on_background_refetch';
+    await admin
+      .from('interview_attempts')
+      .update({
+        ai_reasoning: pendingReasoningWithError(_attemptSnapshot.ai_reasoning, error),
+        reasoning_pending: false,
+      })
+      .eq('id', attemptId);
+    return;
+  }
+
+  const attempt = freshRow as AttemptRow;
+  let pillarScores = pillarScoresRecord(attempt.pillar_scores);
+  if (Object.keys(pillarScores).length === 0) {
+    const rolledUp = rollupPillarScoresFromStoredAttemptRow(attempt);
+    if (rolledUp) {
+      pillarScores = rolledUp;
+      await admin
+        .from('interview_attempts')
+        .update({ pillar_scores: rolledUp })
+        .eq('id', attemptId);
+    }
+  }
+
+  if (Object.keys(pillarScores).length === 0) {
+    const error = 'missing_pillar_scores';
+    await admin
+      .from('interview_attempts')
+      .update({
+        ai_reasoning: pendingReasoningWithError(attempt.ai_reasoning, error),
+        reasoning_pending: false,
+      })
+      .eq('id', attemptId);
+    return;
+  }
+
   try {
     const reasoning = await generateAIReasoning(
-      attempt.pillar_scores ?? {},
+      pillarScores,
       scenarioScoresFromAttempt(attempt),
       attempt.transcript ?? [],
       attempt.weighted_score,

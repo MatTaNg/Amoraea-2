@@ -122,6 +122,7 @@ import {
 import { AdminFeedbackPanel } from '@/components/admin/AdminFeedbackPanel';
 import { OverviewTab } from '@features/admin/OverviewTab';
 import { CompatibilityTab } from '@features/admin/CompatibilityTab';
+import { ValidationCohortTab } from '@features/admin/ValidationCohortTab';
 import { UncertaintyScoreCard, uncertaintyBadgeColor, uncertaintyBadgeLabel } from '@features/admin/UncertaintyScoreCard';
 import { GamingCorrectionBanner, GamingCorrectionCard } from '@features/admin/GamingCorrectionCard';
 import { ScoreReceiptCard } from '@features/admin/ScoreReceiptCard';
@@ -4864,7 +4865,9 @@ const HUMAN_VERIFIED_COHORT_OPTIONS: { id: HumanVerifiedCohortFilter; label: str
 ];
 
 export function AdminInterviewDashboard({ onClose }: { onClose: () => void }) {
-  const [adminMainView, setAdminMainView] = useState<'overview' | 'users' | 'feedback' | 'compatibility'>('users');
+  const [adminMainView, setAdminMainView] = useState<
+    'overview' | 'users' | 'feedback' | 'compatibility' | 'validation'
+  >('users');
   const [users, setUsers] = useState<UserGroup[]>([]);
   const [loading, setLoading] = useState(true);
   const [listError, setListError] = useState<string | null>(null);
@@ -5245,6 +5248,18 @@ export function AdminInterviewDashboard({ onClose }: { onClose: () => void }) {
               Compatibility
             </Text>
           </TouchableOpacity>
+          <TouchableOpacity
+            style={[styles.filterChip, adminMainView === 'validation' && styles.filterChipActive]}
+            onPress={() => setAdminMainView('validation')}
+            accessibilityRole="button"
+            accessibilityState={{ selected: adminMainView === 'validation' }}
+          >
+            <Text
+              style={[styles.filterChipText, adminMainView === 'validation' && styles.filterChipTextActive]}
+            >
+              Validation
+            </Text>
+          </TouchableOpacity>
         </ScrollView>
       </View>
       {adminMainView === 'overview' ? (
@@ -5253,6 +5268,8 @@ export function AdminInterviewDashboard({ onClose }: { onClose: () => void }) {
         <AdminFeedbackPanel />
       ) : adminMainView === 'compatibility' ? (
         <CompatibilityTab />
+      ) : adminMainView === 'validation' ? (
+        <ValidationCohortTab />
       ) : (
         <>
           <View style={styles.userSearchBar}>

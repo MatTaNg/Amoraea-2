@@ -16,6 +16,7 @@ import { authStyles } from '@app/screens/authStyles';
 import { supabase } from '@data/supabase/client';
 import { isAlphaTesterReferralCode } from '@/constants/alphaReferral';
 import { normalizeShareableReferralCode } from '@features/referrals/shareableReferralCode';
+import { isRelationshipValidationReferralCode } from '@features/relationshipValidation/constants';
 import type { Gender } from '@domain/models/Profile';
 
 const GOOGLE_FONTS_URL =
@@ -86,7 +87,9 @@ export const RegisterScreen: React.FC<{ navigation: any }> = ({ navigation }) =>
       const raw = inviteCode.trim();
       let codeToSend: string | undefined;
       if (raw) {
-        if (isAlphaTesterReferralCode(raw)) {
+        if (isRelationshipValidationReferralCode(raw)) {
+          codeToSend = raw;
+        } else if (isAlphaTesterReferralCode(raw)) {
           codeToSend = raw;
         } else {
           const normalizedShareable = normalizeShareableReferralCode(raw);

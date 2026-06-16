@@ -9,6 +9,7 @@ import {
   buildScoreAnchorBlock,
   prepareAIReasoningForPersistence,
 } from './aiReasoningPostProcess.ts';
+import { CLAUDE_SONNET_MODEL } from './anthropicModel.ts';
 
 const ANTHROPIC_API_KEY = Deno.env.get('ANTHROPIC_API_KEY') ?? '';
 /** Full URL to anthropic-proxy, e.g. https://<ref>.supabase.co/functions/v1/anthropic-proxy */
@@ -395,7 +396,7 @@ export async function generateAIReasoning(
   );
 
   const body: Record<string, unknown> = {
-    model: 'claude-sonnet-4-20250514',
+    model: CLAUDE_SONNET_MODEL,
     max_tokens: 8000,
     system: SYSTEM_PROMPT,
     messages: [{ role: 'user', content: userPrompt }],

@@ -1,7 +1,7 @@
 /**
  * Node-safe Anthropic messages client for batch scripts (no Expo / React Native).
  */
-const DEFAULT_MODEL = 'claude-sonnet-4-20250514';
+const DEFAULT_MODEL = 'claude-sonnet-4-6';
 
 function env(name: string): string {
   return (process.env[name] ?? '').trim();

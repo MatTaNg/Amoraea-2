@@ -23,8 +23,8 @@ export const supabase = createClient(supabaseUrl, supabaseAnonKey, {
     storage: AsyncStorage,
     autoRefreshToken: true,
     persistSession: true,
-    /** Web only: parse email-confirm / OAuth tokens from the URL when user lands on redirect URL. */
-    detectSessionInUrl: Platform.OS === 'web',
+    /** We parse auth callbacks ourselves in `useAuth` so confirm vs reset is decided by auth event. */
+    detectSessionInUrl: false,
     ...(Platform.OS === 'web' ? { lock: webAuthNoopLock } : {}),
   },
 });

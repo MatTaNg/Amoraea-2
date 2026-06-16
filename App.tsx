@@ -28,7 +28,7 @@ import { PsychometricAssessmentScreen } from '@app/screens/PsychometricAssessmen
 import { PsychometricsCompleteScreen } from '@app/screens/PsychometricsCompleteScreen';
 import { InterviewCompleteScreen } from '@features/onboarding/screens/InterviewCompleteScreen';
 import { AssessmentWelcomeScreen } from '@features/onboarding/screens/AssessmentWelcomeScreen';
-import { shouldForceWebPasswordResetUi } from '@features/authentication/webAuthRecoveryRouting';
+import { isEmailConfirmationCallback } from '@features/authentication/webAuthRecoveryRouting';
 import { isAmoraeaAdminConsoleEmail } from '@/constants/adminConsole';
 import {
   fetchInterviewAttemptRevealSnapshot,
@@ -50,6 +50,9 @@ import { AsyncStorageService } from './src/utilities/storage/AsyncStorageService
 import { supabase } from './src/data/supabase/client';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { MarketResearchModal } from '@features/onboarding/MarketResearchModal';
+import { RelationshipValidationNavigator } from '@app/navigation/RelationshipValidationNavigator';
+import { RELATIONSHIP_VALIDATION_TRACK } from '@features/relationshipValidation/constants';
+import { fetchUserValidationTrack } from '@features/relationshipValidation/relationshipValidationRepo';
 import { StyleSheet, View, Text, ActivityIndicator } from 'react-native';
 import {
   initAudosFromEnv,
@@ -618,9 +621,7 @@ const RootNavigator = () => {
   const { user, loading, passwordRecoveryPending } = useAuth();
 
   const isLoggedIn = user?.email != null && user.email !== '';
-  const forcePasswordResetUi =
-    passwordRecoveryPending ||
-    (Platform.OS === 'web' && shouldForceWebPasswordResetUi());
+  const forcePasswordResetUi = passwordRecoveryPending;
 
   useEffect(() => {
     initAudosFromEnv();
@@ -665,10 +666,20 @@ const RootNavigator = () => {
       prefixes,
       config: { screens: AUTH_STACK_LINKING_SCREENS as Record<string, string | Record<string, unknown>> },
       getStateFromPath(path: string, options: Parameters<typeof getStateFromPathDefault>[1]) {
-        return getStateFromPathDefault(normalizeAuthWebPath(path), options);
+        const normalized = normalizeAuthWebPath(path);
+        const confirmCallback =
+          typeof window !== 'undefined' &&
+          (isEmailConfirmationCallback() || normalized.startsWith('/confirm-email'));
+        if (confirmCallback) {
+          return getStateFromPathDefault('/', options);
+        }
+        if (normalized.startsWith('/reset-password') && !passwordRecoveryPending) {
+          return getStateFromPathDefault('/', options);
+        }
+        return getStateFromPathDefault(normalized, options);
       },
     };
-  }, []);
+  }, [passwordRecoveryPending]);
 
   if (loading) {
     return <LoadingScreen />;
@@ -696,7 +707,72 @@ const RootNavigator = () => {
     );
   }
 
-  return <LoggedInInterviewShell userId={user!.id} />;
+  return <LoggedInRootShell userId={user!.id} userEmail={user!.email ?? null} navTheme={navTheme} />;
+};
+
+const loggedInNavTheme = {
+  ...DarkTheme,
+  colors: {
+    primary: '#5BA8E8',
+    background: '#05060D',
+    card: '#05060D',
+    text: '#E8F0F8',
+    border: 'rgba(82,142,220,0.2)',
+    notification: '#5BA8E8',
+  },
+};
+
+const LoggedInRootShell = ({
+  userId,
+  userEmail,
+  navTheme = loggedInNavTheme,
+}: {
+  userId: string;
+  userEmail: string | null;
+  navTheme?: typeof loggedInNavTheme;
+}) => {
+  const { user } = useAuth();
+  const [userBootstrapped, setUserBootstrapped] = useState(false);
+
+  useEffect(() => {
+    let cancelled = false;
+    void (async () => {
+      const metadata = user?.user_metadata as
+        | { referral_code?: string; age?: number; gender?: 'Man' | 'Woman' | 'Non-binary' }
+        | undefined;
+      await inviteCodeRepository.ensureUserWithInviteCode(userId, {
+        email: userEmail ?? undefined,
+        referralCode: metadata?.referral_code,
+        age: typeof metadata?.age === 'number' ? metadata.age : undefined,
+        gender: metadata?.gender,
+      });
+      if (!cancelled) setUserBootstrapped(true);
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [userId, userEmail, user?.user_metadata]);
+
+  const { data: validationTrack, isPending: validationTrackPending } = useQuery({
+    queryKey: ['validationTrack', userId],
+    queryFn: () => fetchUserValidationTrack(userId),
+    enabled: userBootstrapped,
+    staleTime: 60_000,
+  });
+
+  if (!userBootstrapped || validationTrackPending) {
+    return <LoadingScreen />;
+  }
+
+  if (validationTrack === RELATIONSHIP_VALIDATION_TRACK) {
+    return (
+      <NavigationContainer theme={navTheme}>
+        <RelationshipValidationNavigator userId={userId} />
+      </NavigationContainer>
+    );
+  }
+
+  return <LoggedInInterviewShell userId={userId} />;
 };
 
 function useWebAudioUnlock() {

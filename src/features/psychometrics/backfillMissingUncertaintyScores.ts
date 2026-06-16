@@ -12,7 +12,7 @@ import {
   psychometricFloorScoresFromUserRow,
   sd3NarcissismScoreFromUserRow,
 } from './usersPsychometricsSchemaFallback';
-import { mergePsychometricFloorsIntoGateState } from './psychometricFloorBreaches';
+import { isPsychometricGateFailFloorCode, mergePsychometricFloorsIntoGateState } from './psychometricFloorBreaches';
 import { normalizeGateFailDetailForPersist } from './gateFailDetailForPersist';
 
 function finiteNumberOrNull(v: unknown): number | null {
@@ -42,7 +42,11 @@ export async function backfillMissingUncertaintyScores(limit = 25): Promise<numb
       uncertainty_score,
       uncertainty_breakdown,
       gate_fail_reasons,
-      gate_fail_detail
+      gate_fail_detail,
+      final_gate_pass,
+      gate_result_finalized_at,
+      modified_weighted_score,
+      modified_weighted_score_with_psychometrics
     `,
     )
     .not('completed_at', 'is', null)
@@ -61,7 +65,7 @@ export async function backfillMissingUncertaintyScores(limit = 25): Promise<numb
 
     const { data: userPsych } = await supabase
       .from('users')
-      .select(buildUsersPsychometricUncertaintyScoresSelect())
+      .select(`${buildUsersPsychometricUncertaintyScoresSelect()}, psychometrics_completed_at`)
       .eq('id', userId)
       .maybeSingle();
 
@@ -115,6 +119,9 @@ export async function backfillMissingUncertaintyScores(limit = 25): Promise<numb
     logUncertaintyBreakdownBeforePersist(String(attempt.id), breakdown);
     const breakdownForDb = uncertaintyBreakdownForStorage(breakdown);
 
+    const psychometricsComplete = (userPsych as { psychometrics_completed_at?: string | null } | null)
+      ?.psychometrics_completed_at != null;
+
     const existingFailReasons = Array.isArray(attempt.gate_fail_reasons)
       ? (attempt.gate_fail_reasons as string[]).filter((x): x is string => typeof x === 'string')
       : [];
@@ -125,34 +132,64 @@ export async function backfillMissingUncertaintyScores(limit = 25): Promise<numb
         ? (attempt.gate_fail_detail as Record<string, unknown>)
         : null;
 
-    const { gateFailReasons, gateFailDetail } = mergePsychometricFloorsIntoGateState({
-      existingFailReasons,
-      existingDetail,
-      scores: psychometricFloorScoresFromUserRow(up ?? {}),
-      straightLineFlags,
-    });
+    let gateFailReasons = existingFailReasons;
+    let gateFailDetail = normalizeGateFailDetailForPersist(existingDetail);
+
+    if (psychometricsComplete) {
+      const merged = mergePsychometricFloorsIntoGateState({
+        existingFailReasons,
+        existingDetail,
+        scores: psychometricFloorScoresFromUserRow(up ?? {}),
+        straightLineFlags,
+      });
+      gateFailReasons = merged.gateFailReasons;
+      gateFailDetail = normalizeGateFailDetailForPersist(merged.gateFailDetail);
+    } else {
+      gateFailReasons = existingFailReasons.filter((code) => !isPsychometricGateFailFloorCode(code));
+      const normalizedDetail = normalizeGateFailDetailForPersist(existingDetail);
+      const { psychometric_floors: _ignored, ...detailWithoutPsychFloors } = normalizedDetail;
+      gateFailDetail = normalizeGateFailDetailForPersist({
+        ...detailWithoutPsychFloors,
+        psychometric_floors: {},
+      });
+    }
 
     const depthModified =
       typeof attempt.modified_weighted_score === 'number' && Number.isFinite(attempt.modified_weighted_score)
         ? attempt.modified_weighted_score
         : typeof attempt.weighted_score === 'number' && Number.isFinite(attempt.weighted_score)
           ? attempt.weighted_score
-          : 0;
+          : null;
     const finalModified =
+      psychometricsComplete &&
       typeof attempt.modified_weighted_score_with_psychometrics === 'number' &&
       Number.isFinite(attempt.modified_weighted_score_with_psychometrics)
         ? attempt.modified_weighted_score_with_psychometrics
         : depthModified;
+
+    const interviewFailReasons = gateFailReasons.filter((code) => !isPsychometricGateFailFloorCode(code));
+    const gatePassScore = psychometricsComplete ? finalModified : depthModified;
+    const shouldUpdateGate =
+      gatePassScore != null &&
+      (psychometricsComplete || attempt.final_gate_pass == null || attempt.gate_result_finalized_at == null);
+    const finalPass =
+      shouldUpdateGate && gatePassScore != null
+        ? interviewFailReasons.length === 0 && gatePassScore >= GATE_PASS_WEIGHTED_MIN
+        : null;
 
     const { error: upErr } = await supabase
       .from('interview_attempts')
       .update({
         uncertainty_score: breakdown.total,
         uncertainty_breakdown: breakdownForDb,
-        gate_fail_reasons: gateFailReasons,
-        gate_fail_detail: normalizeGateFailDetailForPersist(gateFailDetail),
-        final_gate_pass: gateFailReasons.length === 0 && finalModified >= GATE_PASS_WEIGHTED_MIN,
-        passed: gateFailReasons.length === 0 && finalModified >= GATE_PASS_WEIGHTED_MIN,
+        ...(shouldUpdateGate && finalPass != null
+          ? {
+              gate_fail_reasons: interviewFailReasons,
+              gate_fail_detail: gateFailDetail,
+              final_gate_pass: finalPass,
+              passed: finalPass,
+            }
+          : {}),
       })
       .eq('id', attempt.id as string);
 

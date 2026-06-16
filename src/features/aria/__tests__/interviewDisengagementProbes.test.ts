@@ -106,6 +106,11 @@ describe('interviewDisengagementProbes', () => {
     expect(stripScenarioARepairQuestionStreamingEcho(repair, false)).toBe(repair);
   });
 
+  it('stripScenarioARepairQuestionStreamingEcho keeps Scenario B James repair during Scenario A echo pass', () => {
+    const jamesRepair = 'And if you were James, how would you repair this?';
+    expect(stripScenarioARepairQuestionStreamingEcho(jamesRepair, true)).toBe(jamesRepair);
+  });
+
   it('stripEmbeddedScenarioARepairQuestionAsk removes glued repair from ack paragraph', () => {
     expect(
       stripEmbeddedScenarioARepairQuestionAsk(

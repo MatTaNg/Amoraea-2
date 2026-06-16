@@ -153,15 +153,18 @@ export function computePsychometricModifier(
   let scsSfBand = 'not assessed';
   if (scores.scsSfScore !== null) {
     const s = scores.scsSfScore;
-    if (s >= 4.0) {
+    // SCS-SF recalibrated: scores above midpoint (3.5+) should not trigger modifier penalties.
+    // A score of 3.875 represents average-to-good self-compassion and is not a relational risk signal.
+    // Penalty bands begin below 3.5, meaningful penalty below 2.5.
+    if (s >= 3.5) {
       scsSfComponent = 0;
       scsSfBand = 'strong self-compassion';
-    } else if (s >= 3.0) {
-      scsSfComponent = -0.1;
-      scsSfBand = 'average self-compassion';
     } else if (s >= 2.5) {
-      scsSfComponent = -0.25;
-      scsSfBand = 'poor self-compassion';
+      scsSfComponent = -0.05;
+      scsSfBand = 'below average self-compassion';
+    } else if (s >= 2.0) {
+      scsSfComponent = -0.1;
+      scsSfBand = 'low self-compassion';
     } else {
       scsSfComponent = 0;
       scsSfBand = 'floor breach';
@@ -275,18 +278,22 @@ export function computePsychometricModifier(
   let rsesBand = 'not assessed';
   if (scores.rsesScore !== null) {
     const s = scores.rsesScore;
-    if (s >= 33) {
+    // RSES recalibrated: score of 26/40 sits at the bottom of the normal range,
+    // not in clinical low-esteem territory. The -0.25 penalty is reserved for
+    // scores below 20 where self-esteem is genuinely problematic for relational functioning.
+    // Mild penalty (-0.10) begins below 30, meaningful penalty (-0.15) below 25.
+    if (s >= 30) {
       rsesComponent = 0;
-      rsesBand = 'strong self-esteem';
-    } else if (s >= 28) {
+      rsesBand = 'healthy self-esteem';
+    } else if (s >= 25) {
       rsesComponent = -0.1;
-      rsesBand = 'average self-esteem';
-    } else if (s > 24) {
-      rsesComponent = -0.25;
-      rsesBand = 'poor self-esteem';
+      rsesBand = 'below average self-esteem';
+    } else if (s >= 20) {
+      rsesComponent = -0.15;
+      rsesBand = 'low self-esteem';
     } else {
-      rsesComponent = 0;
-      rsesBand = 'floor breach';
+      rsesComponent = -0.25;
+      rsesBand = 'very low self-esteem';
     }
     modifier += rsesComponent;
 

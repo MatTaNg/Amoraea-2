@@ -5,6 +5,7 @@ import {
   ASSESSMENTS,
   GASP_EXTERNALIZATION_ITEM_COUNT,
   GASP_EXTERNALIZATION_ITEM_IDS,
+  isUnfavorableLikertItemResponse,
   psychometricBatteryProgressPosition,
   psychometricBatteryTotalQuestions,
   resolvePsychometricsResumePosition,
@@ -57,6 +58,31 @@ describe('scoreAssessment', () => {
     expect(scores.mindfulness).toBe(5);
     expect(ASSESSMENTS.scs_sf.questions).toHaveLength(8);
     expect(ASSESSMENTS.scs_sf.scoring.reverseItems).toEqual([1, 9, 11]);
+  });
+
+  it('flags unfavorable Likert poles using item keying direction, not keyed score alone', () => {
+    const scs = ASSESSMENTS.scs_sf;
+    expect(isUnfavorableLikertItemResponse('scs_sf', scs, 2, 5)).toBe(false);
+    expect(isUnfavorableLikertItemResponse('scs_sf', scs, 3, 4)).toBe(false);
+    expect(isUnfavorableLikertItemResponse('scs_sf', scs, 6, 3)).toBe(false);
+    expect(isUnfavorableLikertItemResponse('scs_sf', scs, 1, 5)).toBe(true);
+    expect(isUnfavorableLikertItemResponse('scs_sf', scs, 11, 4)).toBe(true);
+
+    const rses = ASSESSMENTS.rses;
+    expect(isUnfavorableLikertItemResponse('rses', rses, 1, 3)).toBe(false);
+    expect(isUnfavorableLikertItemResponse('rses', rses, 4, 3)).toBe(false);
+    expect(isUnfavorableLikertItemResponse('rses', rses, 5, 3)).toBe(true);
+    expect(isUnfavorableLikertItemResponse('rses', rses, 8, 4)).toBe(true);
+
+    const anxiety = ASSESSMENTS.anxiety_trait;
+    expect(isUnfavorableLikertItemResponse('anxiety_trait', anxiety, 1, 5)).toBe(true);
+    expect(isUnfavorableLikertItemResponse('anxiety_trait', anxiety, 2, 1)).toBe(true);
+
+    const gasp = ASSESSMENTS.gasp;
+    expect(isUnfavorableLikertItemResponse('gasp', gasp, 1, 1)).toBe(false);
+    expect(isUnfavorableLikertItemResponse('gasp', gasp, 2, 2)).toBe(false);
+    expect(isUnfavorableLikertItemResponse('gasp', gasp, 3, 6)).toBe(true);
+    expect(isUnfavorableLikertItemResponse('gasp', gasp, 4, 7)).toBe(true);
   });
 
   it('means GASP externalization only from items 1–4', () => {

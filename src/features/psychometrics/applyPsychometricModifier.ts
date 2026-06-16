@@ -25,13 +25,13 @@ import {
 } from './computeUncertaintyScore';
 import {
   collectPsychometricFloorGateFailReasons,
-  isPsychometricGateFailFloorCode,
   mergePsychometricFloorsIntoGateState,
 } from './psychometricFloorBreaches';
 import { SD3_NARCISSISM_FLOOR_FAIL_CODE } from './sd3NarcissismFloor';
 import {
   LEGACY_PSYCHOMETRIC_PASS_FLIP_REVIEW_FLAG,
 } from './legacyPsychometricReview';
+import { finalizeInterviewOnlyGateForAttempt } from './finalizeInterviewOnlyGate';
 import { PSYCHOMETRICS_ENABLED } from './interviewCompletionStatus';
 
 export type ApplyPsychometricModifierOptions = {
@@ -210,71 +210,11 @@ function buildUncertaintyInput(
   };
 }
 
-const ATTEMPT_SELECT_INTERVIEW_ONLY_GATE = `
-  user_id,
-  weighted_score,
-  modified_weighted_score,
-  passed,
-  gate_fail_reasons,
-  gate_fail_detail,
-  review_flags
-`;
-
 async function applyInterviewOnlyGateWithoutPsychometrics(
   userId: string,
   attemptId: string,
   options?: ApplyPsychometricModifierOptions,
 ): Promise<ApplyPsychometricModifierResult> {
-  const attemptRes = await supabase
-    .from('interview_attempts')
-    .select(ATTEMPT_SELECT_INTERVIEW_ONLY_GATE)
-    .eq('id', attemptId)
-    .single();
-  const attempt = attemptRes.data;
-  if (!attempt) {
-    console.warn('[PsychometricModifier] no attempt found for interview-only gate', attemptId);
-    return { applied: false, skipReason: 'attempt_not_found' };
-  }
-
-  const depthSignalModifiedScore =
-    (attempt.modified_weighted_score as number | null) ?? (attempt.weighted_score as number | null) ?? 0;
-  const existingFailReasons = Array.isArray(attempt.gate_fail_reasons)
-    ? (attempt.gate_fail_reasons as string[])
-    : [];
-  const interviewFailReasons = existingFailReasons.filter((code) => !isPsychometricGateFailFloorCode(code));
-
-  const existingDetail =
-    attempt.gate_fail_detail != null &&
-    typeof attempt.gate_fail_detail === 'object' &&
-    !Array.isArray(attempt.gate_fail_detail)
-      ? (attempt.gate_fail_detail as Record<string, unknown>)
-      : null;
-  const normalizedDetail = normalizeGateFailDetailForPersist(existingDetail);
-  const { psychometric_floors: _ignoredPsychFloors, ...detailWithoutPsychFloors } = normalizedDetail;
-  const gateFailDetail = normalizeGateFailDetailForPersist({
-    ...detailWithoutPsychFloors,
-    psychometric_floors: {},
-  });
-
-  const interviewGatePass =
-    interviewFailReasons.length === 0 && depthSignalModifiedScore >= GATE_PASS_WEIGHTED_MIN;
-  const computedFinalPass = interviewGatePass;
-  const wasPreviouslyPassing = attempt.passed === true;
-  const wouldFlipPassToFail =
-    options?.preservePassIfPreviouslyPassing === true &&
-    wasPreviouslyPassing &&
-    !computedFinalPass;
-
-  const existingReviewFlags = Array.isArray(attempt.review_flags)
-    ? (attempt.review_flags as string[])
-    : [];
-  const reviewFlagsForPersist = wouldFlipPassToFail
-    ? [...new Set([...existingReviewFlags, LEGACY_PSYCHOMETRIC_PASS_FLIP_REVIEW_FLAG])]
-    : existingReviewFlags;
-
-  const finalPass = wouldFlipPassToFail ? true : computedFinalPass;
-
-  /** Telemetry only — floor evaluation does not affect gate when psychometrics are disabled. */
   const freshFloorScores = await loadFreshPsychometricFloorScoresForUser(userId);
   if (freshFloorScores) {
     const floorBreachesForLog = collectPsychometricFloorGateFailReasons(freshFloorScores, []);
@@ -287,42 +227,11 @@ async function applyInterviewOnlyGateWithoutPsychometrics(
     }
   }
 
-  const attemptUpdateBase: Record<string, unknown> = {
-    psychometric_modifier_applied: 0,
-    corrected_psychometric_modifier: 0,
-    modified_weighted_score_with_psychometrics: depthSignalModifiedScore,
-    final_gate_pass: finalPass,
-    gate_fail_reasons: interviewFailReasons,
-    gate_fail_detail: gateFailDetail,
-    passed: finalPass,
-    review_flags: reviewFlagsForPersist,
+  const result = await finalizeInterviewOnlyGateForAttempt(userId, attemptId, options);
+  return {
+    applied: result.applied,
+    skipReason: result.applied ? 'psychometrics_disabled' : result.skipReason,
   };
-
-  let { error } = await supabase
-    .from('interview_attempts')
-    .update({
-      ...attemptUpdateBase,
-      gaming_correction: null,
-    })
-    .eq('id', attemptId);
-
-  if (error && isInterviewAttemptsMissingGamingCorrectionColumnsError(error)) {
-    ({ error } = await supabase.from('interview_attempts').update(attemptUpdateBase).eq('id', attemptId));
-  }
-
-  if (error) {
-    console.error('[PsychometricModifier] interview-only gate persist failed:', error);
-    return { applied: false, skipReason: `persist_failed: ${error.message}` };
-  }
-
-  console.log('[PsychometricModifier] psychometrics disabled — interview-only gate persisted', {
-    userId,
-    attemptId,
-    depthSignalModifiedScore,
-    finalPass,
-    interviewFailReasons,
-  });
-  return { applied: true, skipReason: 'psychometrics_disabled' };
 }
 
 export async function applyPsychometricModifierToAttempt(
@@ -356,8 +265,8 @@ export async function applyPsychometricModifierToAttempt(
   const hasCompletedAt = userRow.psychometrics_completed_at != null;
   const hasStoredScores = userHasPsychometricScoresForScoring(userRow);
   if (!options?.forceApply && !hasCompletedAt && !hasStoredScores) {
-    console.log('[PsychometricModifier] psychometrics not yet complete — skipping');
-    return { applied: false, skipReason: 'psychometrics_not_complete' };
+    console.log('[PsychometricModifier] psychometrics not yet complete — interview-only gate');
+    return finalizeInterviewOnlyGateForAttempt(userId, attemptId, options);
   }
   if (!options?.forceApply && !hasCompletedAt && hasStoredScores) {
     console.log(
@@ -398,8 +307,8 @@ export async function applyPsychometricModifierToAttempt(
   }
 
   if (!hasStoredScores) {
-    console.log('[PsychometricModifier] psychometric scores missing — skipping');
-    return { applied: false, skipReason: 'psychometric_scores_missing' };
+    console.log('[PsychometricModifier] psychometric scores missing — interview-only gate');
+    return finalizeInterviewOnlyGateForAttempt(userId, attemptId, options);
   }
 
   const pillars = (attempt.pillar_scores as Record<string, number> | null) ?? {};
@@ -500,11 +409,11 @@ export async function applyPsychometricModifierToAttempt(
 
   const freshFloorScores = await loadFreshPsychometricFloorScoresForUser(attemptUserId);
   if (!freshFloorScores) {
-    console.warn('[PsychometricModifier] fresh psychometric floor scores unavailable', {
+    console.warn('[PsychometricModifier] fresh psychometric floor scores unavailable — interview-only gate', {
       attemptUserId,
       attemptId,
     });
-    return { applied: false, skipReason: 'psychometric_scores_missing' };
+    return finalizeInterviewOnlyGateForAttempt(userId, attemptId, options);
   }
 
   console.log('[PsychometricModifier] fresh floor scores loaded from DB', {

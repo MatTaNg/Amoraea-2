@@ -3,22 +3,33 @@ import { Platform } from 'react-native';
 import { supabase } from '@data/supabase/client';
 import { Session, User } from '@supabase/supabase-js';
 import type { Gender } from '@domain/models/Profile';
+import { isRelationshipValidationReferralCode } from '@features/relationshipValidation/constants';
 import {
   clearPasswordResetPendingInStorage,
+  hasImplicitAuthHash,
   hasRecoveryAuthHash,
   hasWebAuthCallbackInUrl,
-  hasWebAuthCallbackQuery,
-  isWebPasswordRecoveryCallback,
+  isEmailConfirmationCallback,
   markPasswordResetPendingInStorage,
+  normalizeWebEmailConfirmationUrl,
   normalizeWebPasswordRecoveryUrl,
   parseWebAuthHashError,
   readInitialWebPasswordRecoveryState,
+  webEmailConfirmationLinkErrorMessage,
   webPasswordRecoveryLinkErrorMessage,
 } from '@features/authentication/webAuthRecoveryRouting';
 
 if (Platform.OS === 'web') {
+  normalizeWebEmailConfirmationUrl();
   normalizeWebPasswordRecoveryUrl();
 }
+
+const webAuthCallbackAtLoadRef = {
+  current:
+    Platform.OS === 'web' &&
+    typeof window !== 'undefined' &&
+    hasWebAuthCallbackInUrl(),
+};
 
 type AuthSnapshot = {
   session: Session | null;
@@ -26,6 +37,8 @@ type AuthSnapshot = {
   loading: boolean;
   passwordRecoveryPending: boolean;
   passwordRecoveryLinkError: string | null;
+  emailConfirmationLinkError: string | null;
+  isRelationshipValidation: boolean;
 };
 
 const initialRecovery = readInitialWebPasswordRecoveryState();
@@ -37,6 +50,8 @@ let snapshot: AuthSnapshot = {
   loading: true,
   passwordRecoveryPending: initialRecovery.pending,
   passwordRecoveryLinkError: initialRecovery.linkError,
+  emailConfirmationLinkError: initialRecovery.emailConfirmationLinkError,
+  isRelationshipValidation: false,
 };
 
 const listeners = new Set<() => void>();
@@ -59,6 +74,16 @@ function subscribeAuth(listener: () => void) {
 
 function getAuthSnapshot(): AuthSnapshot {
   return snapshot;
+}
+
+function readIsRelationshipValidation(user: User | null): boolean {
+  if (!user) return false;
+  const meta = user.user_metadata as {
+    is_relationship_validation?: boolean;
+    referral_code?: string;
+  } | undefined;
+  if (meta?.is_relationship_validation === true) return true;
+  return isRelationshipValidationReferralCode(meta?.referral_code);
 }
 
 /** Apply auth state from a session + server-verified user (preferred) or cached user on transient errors. */
@@ -110,49 +135,121 @@ const applySessionForApp = async (
   return { session, user: verifiedUser };
 };
 
+async function applySessionFromUrlHash(hash: string): Promise<void> {
+  const params = new URLSearchParams(hash.startsWith('#') ? hash.slice(1) : hash);
+  const access_token = params.get('access_token');
+  const refresh_token = params.get('refresh_token');
+  if (!access_token || !refresh_token) return;
+  await supabase.auth.setSession({ access_token, refresh_token });
+}
+
 async function bootstrapWebAuthFromUrl(): Promise<void> {
   if (Platform.OS !== 'web' || typeof window === 'undefined') return;
 
-  normalizeWebPasswordRecoveryUrl();
+  const { pathname, search, hash } = window.location;
 
-  const hashErr = parseWebAuthHashError(window.location.hash);
+  const hashErr = parseWebAuthHashError(hash);
   if (hashErr) {
-    passwordRecoveryPendingRef.current = true;
-    setSnapshot({
-      passwordRecoveryPending: true,
-      passwordRecoveryLinkError: webPasswordRecoveryLinkErrorMessage(hashErr),
-    });
-    await supabase.auth.signOut();
-    return;
-  }
-
-  const hasCallback = hasWebAuthCallbackInUrl();
-  if (hasCallback || isWebPasswordRecoveryCallback()) {
-    passwordRecoveryPendingRef.current = true;
-    setSnapshot({ passwordRecoveryPending: true });
-  }
-
-  if (!hasCallback) return;
-
-  const code = new URLSearchParams(window.location.search).get('code');
-  if (code) {
-    /** PKCE recovery links — clear stale sessions before exchanging the one-time code. */
-    await supabase.auth.signOut();
-    const { error } = await supabase.auth.exchangeCodeForSession(code);
-    if (error) {
+    if (isEmailConfirmationCallback()) {
+      clearPasswordResetPendingInStorage();
+      passwordRecoveryPendingRef.current = false;
       setSnapshot({
-        passwordRecoveryLinkError:
-          error.message || 'This reset link is invalid. Request a new reset email below.',
+        passwordRecoveryPending: false,
+        passwordRecoveryLinkError: null,
+        emailConfirmationLinkError: webEmailConfirmationLinkErrorMessage(hashErr),
       });
-    } else {
-      window.history.replaceState(null, '', '/reset-password');
+      await supabase.auth.signOut();
+      window.history.replaceState(null, '', '/');
+      return;
+    }
+    if (hasRecoveryAuthHash(hash, { pathname, search })) {
+      passwordRecoveryPendingRef.current = true;
+      setSnapshot({
+        passwordRecoveryPending: true,
+        passwordRecoveryLinkError: webPasswordRecoveryLinkErrorMessage(hashErr),
+        emailConfirmationLinkError: null,
+      });
+      await supabase.auth.signOut();
     }
     return;
   }
 
-  /** Implicit hash recovery — do not sign out first or detectSessionInUrl loses the token. */
-  if (hasRecoveryAuthHash(window.location.hash)) {
-    await supabase.auth.getSession();
+  if (hasRecoveryAuthHash(hash, { pathname, search })) {
+    passwordRecoveryPendingRef.current = true;
+    setSnapshot({ passwordRecoveryPending: true, emailConfirmationLinkError: null });
+    normalizeWebPasswordRecoveryUrl();
+  }
+
+  if (isEmailConfirmationCallback()) {
+    clearPasswordResetPendingInStorage();
+    passwordRecoveryPendingRef.current = false;
+    setSnapshot({
+      passwordRecoveryPending: false,
+      passwordRecoveryLinkError: null,
+      emailConfirmationLinkError: null,
+    });
+  }
+
+  const searchParams = new URLSearchParams(search.startsWith('?') ? search.slice(1) : search);
+  const code = searchParams.get('code');
+  if (code) {
+    const recoveryHash = hasRecoveryAuthHash(hash, { pathname, search });
+    if (!recoveryHash) {
+      await supabase.auth.signOut();
+      clearPasswordResetPendingInStorage();
+      passwordRecoveryPendingRef.current = false;
+      setSnapshot({
+        passwordRecoveryPending: false,
+        passwordRecoveryLinkError: null,
+        emailConfirmationLinkError: null,
+      });
+    }
+    const { error } = await supabase.auth.exchangeCodeForSession(code);
+    if (error) {
+      if (passwordRecoveryPendingRef.current) {
+        setSnapshot({
+          passwordRecoveryLinkError:
+            error.message || 'This reset link is invalid. Request a new reset email below.',
+        });
+      } else {
+        setSnapshot({
+          emailConfirmationLinkError:
+            error.message ||
+            'This confirmation link is invalid or expired. Sign in and request a new confirmation email.',
+        });
+        window.history.replaceState(null, '', '/');
+      }
+    }
+    return;
+  }
+
+  const tokenHash = searchParams.get('token_hash');
+  const tokenType = searchParams.get('type');
+  if (tokenHash && tokenType) {
+    await supabase.auth.signOut();
+    clearPasswordResetPendingInStorage();
+    passwordRecoveryPendingRef.current = false;
+    const { error } = await supabase.auth.verifyOtp({
+      token_hash: tokenHash,
+      type: tokenType as 'signup',
+    });
+    if (error) {
+      setSnapshot({
+        emailConfirmationLinkError:
+          error.message ||
+          'This confirmation link is invalid or expired. Sign in and request a new confirmation email.',
+      });
+      window.history.replaceState(null, '', '/');
+    }
+    return;
+  }
+
+  if (hasImplicitAuthHash(hash)) {
+    if (isEmailConfirmationCallback()) {
+      clearPasswordResetPendingInStorage();
+      passwordRecoveryPendingRef.current = false;
+    }
+    await applySessionFromUrlHash(hash);
   }
 }
 
@@ -171,6 +268,7 @@ function startAuthInitOnce(): Promise<void> {
       setSnapshot({
         session: next.session,
         user: next.user,
+        isRelationshipValidation: readIsRelationshipValidation(next.user),
       });
     };
 
@@ -179,27 +277,69 @@ function startAuthInitOnce(): Promise<void> {
       setSnapshot({ loading: false });
     };
 
-    await bootstrapWebAuthFromUrl();
-
     supabase.auth.onAuthStateChange((event, nextSession) => {
       if (event === 'PASSWORD_RECOVERY') {
-        passwordRecoveryPendingRef.current = true;
-        setSnapshot({
-          passwordRecoveryPending: true,
-          passwordRecoveryLinkError: null,
-        });
-        clearPasswordResetPendingInStorage();
-        if (Platform.OS === 'web' && typeof window !== 'undefined') {
-          normalizeWebPasswordRecoveryUrl();
-          const hashError = parseWebAuthHashError(window.location.hash);
-          if (!hashError) {
-            const search = hasWebAuthCallbackQuery(window.location.search)
-              ? window.location.search
-              : '';
-            window.history.replaceState(null, '', `/reset-password${search}`);
+        if (isEmailConfirmationCallback()) {
+          passwordRecoveryPendingRef.current = false;
+          setSnapshot({
+            passwordRecoveryPending: false,
+            passwordRecoveryLinkError: null,
+            emailConfirmationLinkError: null,
+          });
+          clearPasswordResetPendingInStorage();
+          if (Platform.OS === 'web' && typeof window !== 'undefined') {
+            window.history.replaceState(null, '', '/');
+          }
+          webAuthCallbackAtLoadRef.current = false;
+        } else {
+          const onResetPath =
+            Platform.OS === 'web' &&
+            typeof window !== 'undefined' &&
+            window.location.pathname.includes('reset-password');
+          const recoveryHash = hasRecoveryAuthHash(window.location.hash, {
+            pathname: window.location.pathname,
+            search: window.location.search,
+          });
+          if (onResetPath || recoveryHash) {
+            passwordRecoveryPendingRef.current = true;
+            setSnapshot({
+              passwordRecoveryPending: true,
+              passwordRecoveryLinkError: null,
+              emailConfirmationLinkError: null,
+            });
+            clearPasswordResetPendingInStorage();
+            if (Platform.OS === 'web' && typeof window !== 'undefined') {
+              window.history.replaceState(null, '', '/reset-password');
+            }
+          } else {
+            passwordRecoveryPendingRef.current = false;
+            setSnapshot({
+              passwordRecoveryPending: false,
+              passwordRecoveryLinkError: null,
+              emailConfirmationLinkError: null,
+            });
+            if (Platform.OS === 'web' && typeof window !== 'undefined') {
+              window.history.replaceState(null, '', '/');
+            }
+          }
+          webAuthCallbackAtLoadRef.current = false;
+        }
+      } else if (event === 'SIGNED_IN' && webAuthCallbackAtLoadRef.current) {
+        if (!passwordRecoveryPendingRef.current) {
+          clearPasswordResetPendingInStorage();
+          setSnapshot({
+            passwordRecoveryPending: false,
+            passwordRecoveryLinkError: null,
+            emailConfirmationLinkError: null,
+          });
+          if (Platform.OS === 'web' && typeof window !== 'undefined') {
+            const confirmedViaEmailLink = isEmailConfirmationCallback();
+            window.history.replaceState(null, '', confirmedViaEmailLink ? '/?confirmEmail=1' : '/');
           }
         }
+        webAuthCallbackAtLoadRef.current = false;
       }
+
       if (
         event === 'INITIAL_SESSION' ||
         event === 'PASSWORD_RECOVERY' ||
@@ -209,6 +349,8 @@ function startAuthInitOnce(): Promise<void> {
       }
       void sync(nextSession);
     });
+
+    await bootstrapWebAuthFromUrl();
 
     await supabase.auth.getSession();
     if (!initialSessionSeen) {
@@ -249,7 +391,7 @@ export function getAuthSiteOrigin(): string {
 }
 
 export function getAuthEmailRedirectTo(): string {
-  return `${getAuthSiteOrigin()}/`;
+  return `${getAuthSiteOrigin()}/confirm-email`;
 }
 
 export function getPasswordResetRedirectTo(): string {
@@ -303,6 +445,8 @@ export const useAuth = () => {
   }, []);
 
   const signIn = async (email: string, password: string) => {
+    clearPasswordResetPendingInStorage();
+    setSnapshot({ emailConfirmationLinkError: null });
     const { data, error } = await supabase.auth.signInWithPassword({
       email,
       password,
@@ -317,9 +461,24 @@ export const useAuth = () => {
     options?: { inviteCode?: string; age?: number; gender?: Gender },
   ) => {
     const metadata: Record<string, unknown> = {};
-    if (options?.inviteCode) metadata.referral_code = options.inviteCode.trim();
+    if (options?.inviteCode) {
+      const trimmed = options.inviteCode.trim();
+      metadata.referral_code = trimmed;
+      if (isRelationshipValidationReferralCode(trimmed)) {
+        metadata.is_relationship_validation = true;
+      }
+    }
     if (typeof options?.age === 'number') metadata.age = options.age;
     if (options?.gender) metadata.gender = options.gender;
+
+    await supabase.auth.signOut();
+    clearPasswordResetPendingInStorage();
+    passwordRecoveryPendingRef.current = false;
+    setSnapshot({
+      passwordRecoveryPending: false,
+      passwordRecoveryLinkError: null,
+      emailConfirmationLinkError: null,
+    });
 
     const { data, error } = await supabase.auth.signUp({
       email,
@@ -330,6 +489,7 @@ export const useAuth = () => {
       },
     });
     if (error) throw error;
+    clearPasswordResetPendingInStorage();
     if (data.user == null) {
       throw new Error('An account with this email already exists. Sign in instead.');
     }
@@ -340,6 +500,8 @@ export const useAuth = () => {
   };
 
   const signOut = async () => {
+    clearPasswordResetPendingInStorage();
+    passwordRecoveryPendingRef.current = false;
     const { error } = await supabase.auth.signOut();
     if (error) throw error;
   };
@@ -394,6 +556,10 @@ export const useAuth = () => {
     });
   };
 
+  const clearEmailConfirmationLinkError = () => {
+    setSnapshot({ emailConfirmationLinkError: null });
+  };
+
   return {
     ...state,
     signIn,
@@ -403,5 +569,6 @@ export const useAuth = () => {
     resetPasswordForEmail,
     updatePassword,
     clearPasswordRecoveryPending,
+    clearEmailConfirmationLinkError,
   };
 };

@@ -131,6 +131,9 @@ export function stripScenarioARepairQuestionStreamingEcho(
   if (!repairAlreadyAsked || !t0) {
     return t0;
   }
+  if (looksLikeScenarioBRepairAsJamesQuestion(t0)) {
+    return t0;
+  }
   if (looksLikeScenarioARepairQuestion(t0)) {
     return null;
   }

@@ -7,6 +7,7 @@ import {
   recoverFailedReasoningPayload,
 } from '@features/aria/aiReasoningPostProcess';
 import { generateAIReasoning } from '@features/aria/generateAIReasoning';
+import { resolvePillarScoresForNarrativeFromAttempt } from '@features/aria/resolvePillarScoresForNarrative';
 
 const CLIENT_NARRATIVE_BACKUP_TIMEOUT_MS = 300_000;
 
@@ -49,13 +50,21 @@ function scenarioScoresFromAttemptRow(row: {
   return out;
 }
 
-function pillarScoresRecord(raw: unknown): Record<string, number> {
-  const out: Record<string, number> = {};
-  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return out;
-  for (const [k, v] of Object.entries(raw as Record<string, unknown>)) {
-    if (typeof v === 'number' && Number.isFinite(v)) out[k] = v;
-  }
-  return out;
+async function persistRollupIfNeeded(
+  attemptId: string,
+  userId: string,
+  resolution: ReturnType<typeof resolvePillarScoresForNarrativeFromAttempt>,
+): Promise<void> {
+  if (!resolution?.fromRollup) return;
+  await supabase
+    .from('interview_attempts')
+    .update({
+      pillar_scores: resolution.pillar_scores,
+      ...(resolution.weighted_score != null ? { weighted_score: resolution.weighted_score } : {}),
+      ...(resolution.passed != null ? { passed: resolution.passed } : {}),
+    })
+    .eq('id', attemptId)
+    .eq('user_id', userId);
 }
 
 export async function kickClientInterviewNarrativeIfPending(
@@ -66,8 +75,9 @@ export async function kickClientInterviewNarrativeIfPending(
   const { data: row, error: fetchErr } = await supabase
     .from('interview_attempts')
     .select(
-      'id, user_id, pillar_scores, scenario_1_scores, scenario_2_scores, scenario_3_scores, transcript, weighted_score, passed, ai_reasoning, reasoning_pending'
+      'id, user_id, pillar_scores, scenario_1_scores, scenario_2_scores, scenario_3_scores, scenario_specific_patterns, transcript, weighted_score, passed, ai_reasoning, reasoning_pending, skip_count, ego_development_level, language_markers, defense_patterns, disclosure_calibration, mentalizing_overcertainty_count, skip_penalty_total, auto_failed, moment_4_concreteness, moment_5_concreteness, personal_moment_emotional_vocab_density, personal_moment_emotional_vocab_low'
     )
+
     .eq('id', attemptId)
     .eq('user_id', userId)
     .maybeSingle();
@@ -81,10 +91,12 @@ export async function kickClientInterviewNarrativeIfPending(
     return { skipped: true };
   }
 
-  const pillars = pillarScoresRecord(row.pillar_scores);
-  if (Object.keys(pillars).length === 0) {
+  const resolution = resolvePillarScoresForNarrativeFromAttempt(row, row.passed === true);
+  if (!resolution) {
     return { skipped: true, error: 'missing_pillar_scores' };
   }
+  const pillars = resolution.pillar_scores;
+  await persistRollupIfNeeded(attemptId, userId, resolution);
 
   const transcript = Array.isArray(row.transcript)
     ? (row.transcript as Array<{ role: string; content?: string }>)
@@ -98,8 +110,8 @@ export async function kickClientInterviewNarrativeIfPending(
       pillars,
       scenarioScoresFromAttemptRow(row),
       transcript,
-      row.weighted_score,
-      row.passed === true,
+      row.weighted_score ?? resolution.weighted_score,
+      resolution.passed ?? row.passed === true,
       [],
       { perAttemptTimeoutMs: CLIENT_NARRATIVE_BACKUP_TIMEOUT_MS, maxAttempts: 2 }
     );

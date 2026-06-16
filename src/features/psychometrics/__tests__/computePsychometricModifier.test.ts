@@ -93,6 +93,17 @@ describe('computePsychometricModifier', () => {
     expect(result.psychometricFloorBreaches).toHaveLength(0);
   });
 
+  it('recalibrated RSES modifier bands apply expected penalties', () => {
+    expect(computePsychometricModifier({ ...FULL_SCORES, rsesScore: 26 }).rsesComponent).toBe(-0.1);
+    expect(computePsychometricModifier({ ...FULL_SCORES, rsesScore: 28 }).rsesComponent).toBe(-0.1);
+    expect(computePsychometricModifier({ ...FULL_SCORES, rsesScore: 30 }).rsesComponent).toBe(0);
+    expect(computePsychometricModifier({ ...FULL_SCORES, rsesScore: 19 }).rsesComponent).toBe(-0.25);
+
+    const atFloor = computePsychometricModifier({ ...FULL_SCORES, rsesScore: 24 });
+    expect(atFloor.rsesComponent).toBe(-0.15);
+    expect(atFloor.psychometricFloorBreaches).toContain('rses_low_self_esteem_floor');
+  });
+
   it('flags low self-esteem floor at RSES <= 24', () => {
     const result = computePsychometricModifier({
       ...FULL_SCORES,
@@ -227,8 +238,14 @@ describe('computePsychometricModifier', () => {
   it('flags SCS-SF low self-compassion floor below 2.5 on reverse-scored mean', () => {
     const result = computePsychometricModifier({ ...FULL_SCORES, scsSfScore: 2.417 });
     expect(result.psychometricFloorBreaches).toContain(SCS_SF_LOW_SELF_COMPASSION_FLOOR_CODE);
-    expect(result.scsSfComponent).toBe(0);
-    expect(result.breakdown.scsSfBand).toBe('floor breach');
+    expect(result.scsSfComponent).toBe(-0.1);
+    expect(result.breakdown.scsSfBand).toBe('low self-compassion');
+  });
+
+  it('recalibrated SCS-SF modifier bands apply expected penalties', () => {
+    expect(computePsychometricModifier({ ...FULL_SCORES, scsSfScore: 3.875 }).scsSfComponent).toBe(0);
+    expect(computePsychometricModifier({ ...FULL_SCORES, scsSfScore: 3.0 }).scsSfComponent).toBe(-0.05);
+    expect(computePsychometricModifier({ ...FULL_SCORES, scsSfScore: 2.3 }).scsSfComponent).toBe(-0.1);
   });
 
   it('does not flag SCS-SF floor at moderate self-compassion scores', () => {
@@ -310,14 +327,14 @@ describe('computePsychometricModifier', () => {
       ...narcissismModifierAverageBandScores(),
       rfqScore: 4.0,
     });
-    expect(result.modifier).toBe(-0.9);
+    expect(result.modifier).toBe(-0.7);
     expect(result.brsComponent).toBe(-0.1);
     expect(result.anxietyTraitComponent).toBe(-0.1);
-    expect(result.scsSfComponent).toBe(-0.1);
+    expect(result.scsSfComponent).toBe(0);
     expect(result.gaspComponent).toBe(-0.1);
     expect(result.dweckComponent).toBe(-0.1);
     expect(result.aaq2Component).toBe(-0.1);
-    expect(result.rsesComponent).toBe(-0.1);
+    expect(result.rsesComponent).toBe(0);
     if (NPI_ENTITLEMENT_ENABLED) {
       expect(result.npiEntitlementComponent).toBe(-0.1);
     } else {
@@ -326,7 +343,7 @@ describe('computePsychometricModifier', () => {
     expect(result.rfqComponent).toBe(-0.1);
   });
 
-  it('applies poor three-tier bands just above floors (~-2.1 worst-case across 9 instruments)', () => {
+  it('applies poor three-tier bands just above floors (~-1.75 worst-case across 9 instruments)', () => {
     const result = computePsychometricModifier({
       ...FULL_SCORES,
       brsScore: 1.9,
@@ -339,11 +356,11 @@ describe('computePsychometricModifier', () => {
       ...narcissismModifierPoorBandScores(),
       rfqScore: 2.0,
     });
-    expect(result.modifier).toBe(-2.1);
+    expect(result.modifier).toBe(-1.75);
     expect(result.psychometricFloorBreaches).toHaveLength(0);
   });
 
-  it('worst-case modifier across 9 active instruments uses poor bands (-2.1)', () => {
+  it('worst-case modifier across 9 active instruments uses poor bands (-1.75)', () => {
     const result = computePsychometricModifier({
       ...FULL_SCORES,
       brsScore: 1.9,
@@ -356,7 +373,7 @@ describe('computePsychometricModifier', () => {
       ...narcissismModifierPoorBandScores(),
       rfqScore: 2.0,
     });
-    expect(result.modifier).toBe(-2.1);
+    expect(result.modifier).toBe(-1.75);
   });
 
   it('fires floor breaches independently of modifier bands', () => {
@@ -364,7 +381,7 @@ describe('computePsychometricModifier', () => {
       ...FULL_SCORES,
       brsScore: 1.5,
       anxietyTraitScore: 4.95,
-      scsSfScore: 2.0,
+      scsSfScore: 1.9,
       gaspScore: 4.8,
       dweckScore: 2.0,
       aaq2Score: 40,
@@ -391,10 +408,10 @@ describe('computePsychometricModifier', () => {
     expect(floorBreach.gaspComponent).toBe(0);
     expect(floorBreach.dweckComponent).toBe(0);
     expect(floorBreach.aaq2Component).toBe(0);
-    expect(floorBreach.rsesComponent).toBe(0);
+    expect(floorBreach.rsesComponent).toBe(-0.15);
     expect(floorBreach.sd3NarcissismComponent).toBe(0);
     expect(floorBreach.rfqComponent).toBe(0);
-    expect(floorBreach.modifier).toBe(0);
+    expect(floorBreach.modifier).toBe(-0.15);
   });
 });
 

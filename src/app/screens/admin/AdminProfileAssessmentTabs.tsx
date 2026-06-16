@@ -22,6 +22,7 @@ import {
   wouldTriggerScsLowPrivateSelfAwarenessFloor,
   wouldTriggerScsSfLowSelfCompassionFloor,
   AAQ2_HIGH_EXPERIENTIAL_AVOIDANCE_FLOOR_CODE,
+  ANXIETY_TRAIT_HIGH_FLOOR_CODE,
   BRS_LOW_RESILIENCE_FLOOR_CODE,
   DWECK_EXTREME_FIXED_MINDSET_FLOOR_CODE,
   GASP_EXTREME_EXTERNALIZATION_FLOOR_CODE,
@@ -35,7 +36,17 @@ import {
   SD3_NARCISSISM_FLOOR_FAIL_CODE,
   wouldTriggerSd3NarcissismFloor,
 } from '@features/psychometrics/sd3NarcissismFloor';
+import {
+  formatNpiEntitlementFloorAdminDescription,
+  NPI_ENTITLEMENT_FLOOR_FAIL_CODE,
+  wouldTriggerNpiEntitlementFloor,
+} from '@features/psychometrics/npiEntitlementFloor';
+import { NPI_ENTITLEMENT_ENABLED } from '@features/psychometrics/interviewCompletionStatus';
 import { sd3NarcissismScoreFromUserRow } from '@features/psychometrics/usersPsychometricsSchemaFallback';
+import {
+  adminPsychometricScoringDisplay,
+  mergeAdminBandWithAuthoritativeScoring,
+} from '@features/psychometrics/adminPsychometricScoringDisplay';
 import { LifeDomainAnswersSection } from '@app/screens/admin/LifeDomainAnswersSection';
 import { PsychometricAnswersSection } from '@app/screens/admin/PsychometricAnswersSection';
 import { ScoreReceiptCard } from '@features/admin/ScoreReceiptCard';
@@ -72,6 +83,7 @@ export type AdminUserProfileRecord = {
   psychometrics_mspss_family_score: number | null;
   psychometrics_mspss_friends_score: number | null;
   psychometrics_sd3_narcissism_score: number | null;
+  psychometrics_npi_entitlement_score?: number | null;
   psychometrics_rfq_score: number | null;
   psychometric_modifier: number | null;
   psychometric_consistency_flags: unknown;
@@ -902,6 +914,259 @@ export function ProfileIntentTab({ user }: { user: AdminUserProfileRecord }) {
   );
 }
 
+function getNpiEntitlementBand(score: number | null): { band: string; modifier: number; description: string } {
+  if (score === null) return { band: 'Not assessed', modifier: 0, description: '' };
+  if (score <= 2) {
+    return {
+      band: 'Strong — low entitlement',
+      modifier: 0,
+      description: 'Low entitlement pattern — no modifier penalty.',
+    };
+  }
+  if (score <= 4) {
+    return {
+      band: 'Average entitlement',
+      modifier: -0.1,
+      description: 'Moderate entitlement selections — small composite penalty.',
+    };
+  }
+  return {
+    band: 'Floor breach range',
+    modifier: 0,
+    description: 'High entitlement count — automatic gate fail floor when threshold met.',
+  };
+}
+
+export type PsychometricInstrumentImpactSummary = {
+  aggregateScoreLabel: string | null;
+  modifier: number;
+  band: string;
+  floorBreached: boolean;
+  floorCode: string | null;
+  floorDescription: string | null;
+  straightLineFlag: string | null;
+  straightLineDescription: string | null;
+};
+
+export type PsychometricInstrumentImpacts = Partial<
+  Record<string, PsychometricInstrumentImpactSummary>
+>;
+
+function straightLineImpact(
+  straightLineFlags: string[],
+  flagKey: string,
+): { flag: string; description: string } | null {
+  if (!straightLineFlags.includes(flagKey)) return null;
+  return { flag: flagKey, description: STRAIGHT_LINE_FLAG_DESCRIPTIONS[flagKey] ?? flagKey };
+}
+
+function makeInstrumentImpact(
+  aggregateScoreLabel: string | null,
+  bandInfo: { band: string; modifier: number },
+  floorBreached: boolean,
+  floorCode: string | null,
+  floorDescription: string | null,
+  straightLineFlagKey: string | null,
+  straightLineFlags: string[],
+): PsychometricInstrumentImpactSummary {
+  const straightLine = straightLineFlagKey
+    ? straightLineImpact(straightLineFlags, straightLineFlagKey)
+    : null;
+  return {
+    aggregateScoreLabel,
+    modifier: bandInfo.modifier,
+    band: bandInfo.band,
+    floorBreached,
+    floorCode: floorBreached ? floorCode : null,
+    floorDescription: floorBreached ? floorDescription : null,
+    straightLineFlag: straightLine?.flag ?? null,
+    straightLineDescription: straightLine?.description ?? null,
+  };
+}
+
+/** Gate/modifier context keyed by assessment id — shown on item-response blocks in admin. */
+export function buildPsychometricInstrumentImpacts(
+  user: AdminUserProfileRecord,
+  straightLineFlags: string[],
+  attempt?: AdminAttemptAssessmentRecord | null,
+): PsychometricInstrumentImpacts {
+  const scoring = adminPsychometricScoringDisplay(user, attempt)?.byInstrument;
+  const brsInfo = mergeAdminBandWithAuthoritativeScoring(
+    getBrsBand(user.psychometrics_brs_score ?? null),
+    scoring?.brs,
+  );
+  const anxietyTraitInfo = mergeAdminBandWithAuthoritativeScoring(
+    getAnxietyTraitBand(user.psychometrics_anxiety_trait_score ?? null),
+    scoring?.anxiety_trait,
+  );
+  const scsSfInfo = mergeAdminBandWithAuthoritativeScoring(
+    getScsSfBand(user.psychometrics_scs_sf_score ?? null),
+    scoring?.scs_sf,
+  );
+  const gaspInfo = mergeAdminBandWithAuthoritativeScoring(
+    getGaspBand(user.psychometrics_gasp_score ?? null),
+    scoring?.gasp,
+  );
+  const dweckInfo = mergeAdminBandWithAuthoritativeScoring(
+    getDweckBand(user.psychometrics_dweck_score ?? null),
+    scoring?.dweck,
+  );
+  const aaq2Info = mergeAdminBandWithAuthoritativeScoring(
+    getAaq2Band(user.psychometrics_aaq2_score ?? null),
+    scoring?.aaq2,
+  );
+  const rsesInfo = mergeAdminBandWithAuthoritativeScoring(
+    getRsesBand(user.psychometrics_rses_score ?? null),
+    scoring?.rses,
+  );
+  const sd3Info = mergeAdminBandWithAuthoritativeScoring(
+    getSd3NarcissismBand(user.psychometrics_sd3_narcissism_score ?? null),
+    scoring?.sd3_narcissism,
+  );
+  const rfqInfo = mergeAdminBandWithAuthoritativeScoring(
+    getRfqBand(user.psychometrics_rfq_score ?? null),
+    scoring?.rfq,
+  );
+  const sexualCommInfo = sexualCommunicationBand(user.psychometrics_sexual_communication_score ?? null);
+  const npiScore = user.psychometrics_npi_entitlement_score ?? null;
+  const npiInfo = mergeAdminBandWithAuthoritativeScoring(
+    getNpiEntitlementBand(npiScore),
+    scoring?.npi_entitlement,
+  );
+
+  const brsScore = user.psychometrics_brs_score ?? null;
+  const anxietyScore = user.psychometrics_anxiety_trait_score ?? null;
+  const scsSfScore = user.psychometrics_scs_sf_score ?? null;
+  const gaspScore = user.psychometrics_gasp_score ?? null;
+  const dweckScore = user.psychometrics_dweck_score ?? null;
+  const aaq2Score = user.psychometrics_aaq2_score ?? null;
+  const rsesScore = user.psychometrics_rses_score ?? null;
+  const sd3Score = user.psychometrics_sd3_narcissism_score ?? null;
+  const rfqScore = user.psychometrics_rfq_score ?? null;
+
+  const impacts: PsychometricInstrumentImpacts = {
+    brs: makeInstrumentImpact(
+      `Score: ${brsScore ?? '—'}/5.0 — ${brsInfo.band}`,
+      brsInfo,
+      wouldTriggerBrsLowResilienceFloor(brsScore, straightLineFlags),
+      BRS_LOW_RESILIENCE_FLOOR_CODE,
+      brsScore != null ? formatPsychometricGateFailDescription(BRS_LOW_RESILIENCE_FLOOR_CODE, brsScore) : null,
+      'brs_straight_line',
+      straightLineFlags,
+    ),
+    anxiety_trait: makeInstrumentImpact(
+      `Score: ${anxietyScore ?? '—'}/5.0 — ${anxietyTraitInfo.band}`,
+      anxietyTraitInfo,
+      wouldTriggerAnxietyTraitHighFloor(anxietyScore, straightLineFlags),
+      ANXIETY_TRAIT_HIGH_FLOOR_CODE,
+      anxietyScore != null
+        ? formatPsychometricGateFailDescription(ANXIETY_TRAIT_HIGH_FLOOR_CODE, anxietyScore)
+        : null,
+      'anxiety_trait_straight_line',
+      straightLineFlags,
+    ),
+    scs_sf: makeInstrumentImpact(
+      `Score: ${scsSfScore ?? '—'}/5.0 — ${scsSfInfo.band}`,
+      scsSfInfo,
+      wouldTriggerScsSfLowSelfCompassionFloor(scsSfScore, straightLineFlags),
+      SCS_SF_LOW_SELF_COMPASSION_FLOOR_CODE,
+      scsSfScore != null
+        ? formatPsychometricGateFailDescription(SCS_SF_LOW_SELF_COMPASSION_FLOOR_CODE, scsSfScore)
+        : null,
+      'scs_sf_straight_line',
+      straightLineFlags,
+    ),
+    gasp: makeInstrumentImpact(
+      `Externalization: ${gaspScore ?? '—'}/7.0 — ${gaspInfo.band}`,
+      gaspInfo,
+      wouldTriggerGaspExtremeExternalizationFloor(gaspScore, straightLineFlags),
+      GASP_EXTREME_EXTERNALIZATION_FLOOR_CODE,
+      gaspScore != null
+        ? formatPsychometricGateFailDescription(GASP_EXTREME_EXTERNALIZATION_FLOOR_CODE, gaspScore)
+        : null,
+      'gasp_straight_line',
+      straightLineFlags,
+    ),
+    dweck: makeInstrumentImpact(
+      `Mean: ${dweckScore ?? '—'}/6.0 — ${dweckInfo.band}`,
+      dweckInfo,
+      wouldTriggerDweckExtremeFixedMindsetFloor(dweckScore, straightLineFlags),
+      DWECK_EXTREME_FIXED_MINDSET_FLOOR_CODE,
+      dweckScore != null
+        ? formatPsychometricGateFailDescription(DWECK_EXTREME_FIXED_MINDSET_FLOOR_CODE, dweckScore)
+        : null,
+      'dweck_straight_line',
+      straightLineFlags,
+    ),
+    aaq2: makeInstrumentImpact(
+      `Score: ${aaq2Score ?? '—'}/49 — ${aaq2Info.band}`,
+      aaq2Info,
+      wouldTriggerAaq2HighExperientialAvoidanceFloor(aaq2Score, straightLineFlags),
+      AAQ2_HIGH_EXPERIENTIAL_AVOIDANCE_FLOOR_CODE,
+      aaq2Score != null
+        ? formatPsychometricGateFailDescription(AAQ2_HIGH_EXPERIENTIAL_AVOIDANCE_FLOOR_CODE, aaq2Score)
+        : null,
+      'aaq2_straight_line',
+      straightLineFlags,
+    ),
+    rses: makeInstrumentImpact(
+      `Score: ${rsesScore ?? '—'}/40 — ${rsesInfo.band}`,
+      rsesInfo,
+      wouldTriggerRsesLowSelfEsteemFloor(rsesScore, straightLineFlags),
+      RSES_LOW_SELF_ESTEEM_FLOOR_CODE,
+      rsesScore != null
+        ? formatPsychometricGateFailDescription(RSES_LOW_SELF_ESTEEM_FLOOR_CODE, rsesScore)
+        : null,
+      'rses_straight_line',
+      straightLineFlags,
+    ),
+    rfq: makeInstrumentImpact(
+      `Mean: ${rfqScore ?? '—'}/7.0 — ${rfqInfo.band}`,
+      rfqInfo,
+      wouldTriggerRfqLowReflectiveFunctioningFloor(rfqScore, straightLineFlags),
+      RFQ_LOW_REFLECTIVE_FUNCTIONING_FLOOR_CODE,
+      rfqScore != null
+        ? formatPsychometricGateFailDescription(RFQ_LOW_REFLECTIVE_FUNCTIONING_FLOOR_CODE, rfqScore)
+        : null,
+      RFQ_STRAIGHT_LINE_FLAG,
+      straightLineFlags,
+    ),
+    sexual_communication: makeInstrumentImpact(
+      `Mean: ${user.psychometrics_sexual_communication_score ?? '—'}/5.0 — ${sexualCommInfo.band}`,
+      { band: sexualCommInfo.band, modifier: 0 },
+      false,
+      null,
+      null,
+      null,
+      straightLineFlags,
+    ),
+  };
+
+  if (NPI_ENTITLEMENT_ENABLED) {
+    impacts.npi_entitlement = makeInstrumentImpact(
+      `Entitlement count: ${npiScore ?? '—'}/7 — ${npiInfo.band}`,
+      npiInfo,
+      wouldTriggerNpiEntitlementFloor(npiScore),
+      NPI_ENTITLEMENT_FLOOR_FAIL_CODE,
+      npiScore != null ? formatNpiEntitlementFloorAdminDescription(npiScore) : null,
+      null,
+      straightLineFlags,
+    );
+  } else {
+    impacts.sd3_narcissism = makeInstrumentImpact(
+      `Mean narcissism: ${sd3Score ?? '—'}/5.0 — ${sd3Info.band}`,
+      sd3Info,
+      wouldTriggerSd3NarcissismFloor(sd3Score, straightLineFlags),
+      SD3_NARCISSISM_FLOOR_FAIL_CODE,
+      sd3Score != null ? formatPsychometricGateFailDescription(SD3_NARCISSISM_FLOOR_FAIL_CODE, sd3Score) : null,
+      'sd3_narcissism_straight_line',
+      straightLineFlags,
+    );
+  }
+
+  return impacts;
+}
+
 export function FullAssessmentTab({
   attempt,
   user,
@@ -930,13 +1195,35 @@ export function FullAssessmentTab({
   const hasScoreBreakdown = userHasStoredPsychometricScores(user);
   const breakdownUnavailable = psychometricsAppliedOnAttempt && !hasScoreBreakdown;
 
-  const brsInfo = getBrsBand(user.psychometrics_brs_score ?? null);
-  const anxietyTraitInfo = getAnxietyTraitBand(user.psychometrics_anxiety_trait_score ?? null);
-  const scsSfInfo = getScsSfBand(user.psychometrics_scs_sf_score ?? null);
-  const gaspInfo = getGaspBand(user.psychometrics_gasp_score ?? null);
-  const dweckInfo = getDweckBand(user.psychometrics_dweck_score ?? null);
-  const aaq2Info = getAaq2Band(user.psychometrics_aaq2_score ?? null);
-  const rsesInfo = getRsesBand(user.psychometrics_rses_score ?? null);
+  const scoring = adminPsychometricScoringDisplay(user, attempt)?.byInstrument;
+  const brsInfo = mergeAdminBandWithAuthoritativeScoring(
+    getBrsBand(user.psychometrics_brs_score ?? null),
+    scoring?.brs,
+  );
+  const anxietyTraitInfo = mergeAdminBandWithAuthoritativeScoring(
+    getAnxietyTraitBand(user.psychometrics_anxiety_trait_score ?? null),
+    scoring?.anxiety_trait,
+  );
+  const scsSfInfo = mergeAdminBandWithAuthoritativeScoring(
+    getScsSfBand(user.psychometrics_scs_sf_score ?? null),
+    scoring?.scs_sf,
+  );
+  const gaspInfo = mergeAdminBandWithAuthoritativeScoring(
+    getGaspBand(user.psychometrics_gasp_score ?? null),
+    scoring?.gasp,
+  );
+  const dweckInfo = mergeAdminBandWithAuthoritativeScoring(
+    getDweckBand(user.psychometrics_dweck_score ?? null),
+    scoring?.dweck,
+  );
+  const aaq2Info = mergeAdminBandWithAuthoritativeScoring(
+    getAaq2Band(user.psychometrics_aaq2_score ?? null),
+    scoring?.aaq2,
+  );
+  const rsesInfo = mergeAdminBandWithAuthoritativeScoring(
+    getRsesBand(user.psychometrics_rses_score ?? null),
+    scoring?.rses,
+  );
   const hasLegacyScsScores =
     user.psychometrics_scs_public_score != null || user.psychometrics_scs_private_score != null;
   const scsInfo = getScsBand(
@@ -948,8 +1235,14 @@ export function FullAssessmentTab({
     user.psychometrics_mspss_family_score != null ||
     user.psychometrics_mspss_score != null;
   const mspssInfo = getMspssBand(user.psychometrics_mspss_friends_score ?? null);
-  const sd3Info = getSd3NarcissismBand(user.psychometrics_sd3_narcissism_score ?? null);
-  const rfqInfo = getRfqBand(user.psychometrics_rfq_score ?? null);
+  const sd3Info = mergeAdminBandWithAuthoritativeScoring(
+    getSd3NarcissismBand(user.psychometrics_sd3_narcissism_score ?? null),
+    scoring?.sd3_narcissism,
+  );
+  const rfqInfo = mergeAdminBandWithAuthoritativeScoring(
+    getRfqBand(user.psychometrics_rfq_score ?? null),
+    scoring?.rfq,
+  );
   const sexualCommInfo = sexualCommunicationBand(user.psychometrics_sexual_communication_score ?? null);
   const sexualCommComplete = !!user.psychometrics_sexual_communication_completed_at;
 
@@ -965,6 +1258,7 @@ export function FullAssessmentTab({
     psychometricFloorScores,
     straightLineFlags,
   );
+  const instrumentImpacts = buildPsychometricInstrumentImpacts(user, straightLineFlags, attempt);
 
   return (
     <ScrollView style={tabStyles.container} contentContainerStyle={tabStyles.content}>
@@ -1400,7 +1694,7 @@ export function FullAssessmentTab({
         Raw Likert answers per questionnaire item. Reverse-scored items show the scored value after
         inversion.
       </Text>
-      <PsychometricAnswersSection userId={user.id} />
+      <PsychometricAnswersSection userId={user.id} instrumentImpacts={instrumentImpacts} />
 
       {psychometricsComplete ? (
         <GamingCorrectionCard

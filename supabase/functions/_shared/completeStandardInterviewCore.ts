@@ -13,6 +13,7 @@ import {
 } from './computeGateResultCore.ts';
 import { scenarioCompositesToStorageJson } from './scenarioCompositeFloor.ts';
 import { generateAIReasoning } from './generateAIReasoning.ts';
+import { CLAUDE_SONNET_MODEL } from './anthropicModel.ts';
 import { communicationFloorFieldsFromTranscript } from './communicationFloorFromTranscript.ts';
 import { evaluateInterviewCompletionGate, type CompletionGateFailure } from './interviewCompletionGate.ts';
 import { mergeMomentConcretenessForGate, normalizeResponseConcreteness } from './personalMomentConcreteness.ts';
@@ -645,7 +646,7 @@ export async function runCompleteStandardInterview(
       headers,
       signal: abort.signal,
       body: JSON.stringify({
-        model: 'claude-sonnet-4-20250514',
+        model: CLAUDE_SONNET_MODEL,
         max_tokens: 1500,
         messages: [{ role: 'user', content: userPrompt }],
       }),

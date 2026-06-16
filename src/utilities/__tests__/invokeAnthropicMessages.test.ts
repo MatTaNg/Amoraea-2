@@ -6,6 +6,7 @@ import { invokeAnthropicMessages } from '../invokeAnthropicMessages';
 jest.mock('@utilities/anthropicMessagesClient', () => ({
   getAnthropicEndpoint: jest.fn(),
   getAnthropicRequestHeaders: jest.fn(),
+  CLAUDE_SONNET_MODEL: 'claude-sonnet-4-6',
 }));
 
 jest.mock('react-native', () => ({
@@ -34,14 +35,14 @@ describe('invokeAnthropicMessages', () => {
     });
 
     const result = await invokeAnthropicMessages({
-      model: 'claude-sonnet-4-20250514',
+      model: 'claude-sonnet-4-6',
       max_tokens: 100,
       messages: [{ role: 'user', content: 'hi' }],
     });
 
     expect(mockInvoke).toHaveBeenCalledWith('anthropic-proxy', {
       body: {
-        model: 'claude-sonnet-4-20250514',
+        model: 'claude-sonnet-4-6',
         max_tokens: 100,
         messages: [{ role: 'user', content: 'hi' }],
       },
@@ -58,7 +59,7 @@ describe('invokeAnthropicMessages', () => {
 
     await expect(
       invokeAnthropicMessages({
-        model: 'claude-sonnet-4-20250514',
+        model: 'claude-sonnet-4-6',
         max_tokens: 100,
         messages: [{ role: 'user', content: 'hi' }],
       }),

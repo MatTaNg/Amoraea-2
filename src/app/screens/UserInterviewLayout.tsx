@@ -75,6 +75,8 @@ interface UserInterviewLayoutProps {
   sessionAudioHealthNotice?: string | null;
   /** 0–1 live mic level while recording (expo metering / web analyser). */
   micInputLevel?: number;
+  /** When true, keep level bars visible even at silence (mic pre-init or active recording). */
+  showMicInputMeter?: boolean;
   /** After resume from background / interruption — mic session is being re-established. */
   micSessionRecovering?: boolean;
   /** Hardware route lost — show manual reconnect. */
@@ -135,6 +137,7 @@ export const UserInterviewLayout: React.FC<UserInterviewLayoutProps> = ({
   webInsecureContextMessage = null,
   sessionAudioHealthNotice = null,
   micInputLevel = 0,
+  showMicInputMeter = false,
   micSessionRecovering = false,
   micReconnectPrompt = null,
   lateStartRecordingCue = false,
@@ -277,6 +280,24 @@ export const UserInterviewLayout: React.FC<UserInterviewLayoutProps> = ({
   const micOpacity = interviewerSpeakingUi ? 0.35 : 1;
   const isListeningOrRecording = voiceState === 'listening' || voiceState === 'recording';
   const isRecording = voiceState === 'recording';
+  const showMicMeter = showMicInputMeter || isRecording;
+
+  /** Attack fast / release slow so bars respond to speech without flickering off between samples. */
+  const smoothedMicLevelRef = useRef(0);
+  useEffect(() => {
+    if (!showMicMeter) {
+      smoothedMicLevelRef.current = 0;
+    }
+  }, [showMicMeter]);
+  const displayMicLevel = (() => {
+    if (!showMicMeter) return 0;
+    const target = Math.max(0, Math.min(1, micInputLevel));
+    const prev = smoothedMicLevelRef.current;
+    const blend = target > prev ? 0.55 : 0.22;
+    const next = prev + (target - prev) * blend;
+    smoothedMicLevelRef.current = next;
+    return next;
+  })();
 
   /** Shrink orb on short viewports so mic + SHOW SCENARIO stay above the fold (esp. mobile Safari + home indicator). */
   const flameOrbSize = useMemo(
@@ -413,10 +434,10 @@ export const UserInterviewLayout: React.FC<UserInterviewLayoutProps> = ({
                   </Pressable>
                 </View>
               ) : null}
-              {(isRecording || micInputLevel > 0.02) && (
+              {showMicMeter ? (
                 <View style={styles.micMeterRow} accessibilityLabel="Microphone input level">
                   {[0, 1, 2, 3, 4].map((i) => {
-                    const active = micInputLevel > i * 0.22;
+                    const active = displayMicLevel > i * 0.22;
                     return (
                       <View
                         key={i}
@@ -433,7 +454,7 @@ export const UserInterviewLayout: React.FC<UserInterviewLayoutProps> = ({
                     );
                   })}
                 </View>
-              )}
+              ) : null}
               <View style={styles.micButtonWrapper}>
                 {Platform.OS === 'web' && isListeningOrRecording && (
                   <Animated.View

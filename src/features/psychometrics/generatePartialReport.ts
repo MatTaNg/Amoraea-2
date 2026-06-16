@@ -1,6 +1,7 @@
 import { supabase } from '@data/supabase/client';
 import { fetchMostRecentCompletedInterviewAttemptId } from '@features/psychometrics/interviewCompletionStatus';
 import { invokeAnthropicMessages } from '@utilities/invokeAnthropicMessages';
+import { CLAUDE_SONNET_MODEL } from '@utilities/anthropicMessagesClient';
 import { resolveReportParticipantDisplayName } from '@utilities/adminInterviewIntroDisplayName';
 import { convertMarkdownToHtml, fetchReportData } from './generateReport';
 import { getReportLogoSrc } from './reportBranding';
@@ -254,7 +255,7 @@ export async function generatePartialUserReport(
   const data = prefetchedData ?? (await fetchPartialReportData(userId));
 
   const result = await invokeAnthropicMessages({
-    model: 'claude-sonnet-4-20250514',
+    model: CLAUDE_SONNET_MODEL,
     max_tokens: 1800,
     system: buildPartialSystemPrompt(),
     messages: [

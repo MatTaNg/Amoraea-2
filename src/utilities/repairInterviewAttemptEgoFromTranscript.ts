@@ -3,6 +3,7 @@ import { extractEgoDevelopmentLevel } from '@features/aria/aggregateMarkerScores
 import { buildScoringPrompt } from '@features/aria/holisticScoringPrompt';
 import { parseHolisticInterviewModelObjectFromModelText } from '@utilities/parseHolisticModelJson';
 import { remoteLog } from '@utilities/remoteLog';
+import { CLAUDE_SONNET_MODEL } from '@utilities/anthropicMessagesClient';
 
 type TranscriptMsg = { role: string; content?: string; scenarioNumber?: number | null };
 
@@ -34,7 +35,7 @@ export async function repairInterviewAttemptEgoFromTranscript(opts: {
       headers,
       signal: abort.signal,
       body: JSON.stringify({
-        model: 'claude-sonnet-4-20250514',
+        model: CLAUDE_SONNET_MODEL,
         max_tokens: 1500,
         messages: [{ role: 'user', content: buildScoringPrompt(transcript, typologyContext) }],
       }),

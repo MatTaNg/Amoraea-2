@@ -31,6 +31,8 @@ function getResolvedSupabaseUrl(): string {
   return configured.replace(/\/+$/, '');
 }
 
+export const CLAUDE_SONNET_MODEL = 'claude-sonnet-4-6';
+
 export function getAnthropicEndpoint(): string {
   const configured = getPublicEnv('EXPO_PUBLIC_ANTHROPIC_PROXY_URL', 'anthropicProxyUrl');
   if (configured) return configured;

@@ -805,8 +805,8 @@ function round3(n: number): number {
   return Math.round(n * 1000) / 1000;
 }
 
-function scoreItemValue(
-  assessment: LikertAssessmentDef,
+export function scoreLikertItemValue(
+  assessment: Pick<LikertAssessmentDef, 'scale' | 'scoring'>,
   questionId: number,
   raw: number,
 ): number {
@@ -816,6 +816,62 @@ function scoreItemValue(
     return (assessment.scoring.reverseScale as Record<number, number>)[raw] ?? raw;
   }
   return assessment.scale.max + assessment.scale.min - raw;
+}
+
+/** Whether a higher keyed item score indicates a healthier construct (vs. more pathology). */
+export const ASSESSMENT_HIGHER_SCORE_IS_FAVORABLE: Record<string, boolean> = {
+  brs: true,
+  scs_sf: true,
+  rses: true,
+  rfq: true,
+  dweck: true,
+  aaq2: false,
+  anxiety_trait: false,
+  gasp: false,
+  sd3_narcissism: false,
+  sexual_communication: true,
+};
+
+/** True when an item is negatively keyed (reverse-scored): agreement indicates pathology. */
+export function isNegativelyKeyedLikertItem(
+  assessment: Pick<LikertAssessmentDef, 'scoring'>,
+  questionId: number,
+): boolean {
+  return assessment.scoring.reverseItems.includes(questionId);
+}
+
+/** True when the raw response sits at the unfavorable pole for that item's keying direction. */
+export function isUnfavorableLikertItemResponse(
+  assessmentId: string,
+  assessment: Pick<LikertAssessmentDef, 'scale' | 'scoring'>,
+  questionId: number,
+  raw: number,
+): boolean {
+  const negativelyKeyed = isNegativelyKeyedLikertItem(assessment, questionId);
+  const higherConstructIsFavorable = ASSESSMENT_HIGHER_SCORE_IS_FAVORABLE[assessmentId] ?? true;
+
+  if (negativelyKeyed) {
+    if (higherConstructIsFavorable) {
+      // Reverse-scored pathological statement (e.g. "I am a failure"): agreement is unfavorable.
+      return raw >= assessment.scale.max - 1;
+    }
+    // Reverse-scored healthy statement on a pathology scale (e.g. "I am calm"): disagreement is unfavorable.
+    return raw <= assessment.scale.min + 1;
+  }
+  if (higherConstructIsFavorable) {
+    // Agreement is favorable — Disagree / Strongly Disagree (bottom of scale) is unfavorable.
+    return raw <= assessment.scale.min + 1;
+  }
+  // Pathology-worded non-reverse items (e.g. chronic worry): endorsement at top of scale is unfavorable.
+  return raw >= assessment.scale.max - 1;
+}
+
+function scoreItemValue(
+  assessment: LikertAssessmentDef,
+  questionId: number,
+  raw: number,
+): number {
+  return scoreLikertItemValue(assessment, questionId, raw);
 }
 
 export function scoreBRS(responses: Record<number, number>): number {

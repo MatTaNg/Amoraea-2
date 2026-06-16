@@ -17,7 +17,7 @@ export type ConfirmDialogOptions = {
 export function showConfirmDialog(options: ConfirmDialogOptions, onConfirm: () => void): void {
   const { title, message, cancelText = 'Cancel', confirmText, destructive = true } = options;
   if (Platform.OS === 'web' && typeof window !== 'undefined' && typeof window.confirm === 'function') {
-    const label = `${title}\n\n${message}\n\n[${cancelText}] / [${confirmText}]`;
+    const label = message.trim() ? `${title}\n\n${message}` : title;
     const ok = window.confirm(label);
     if (ok) onConfirm();
     return;
@@ -36,7 +36,7 @@ export function showConfirmDialog(options: ConfirmDialogOptions, onConfirm: () =
 export function confirmAsync(options: ConfirmDialogOptions): Promise<boolean> {
   const { title, message, cancelText = 'Cancel', confirmText, destructive = true } = options;
   if (Platform.OS === 'web' && typeof window !== 'undefined' && typeof window.confirm === 'function') {
-    const label = `${title}\n\n${message}\n\n[${cancelText}] / [${confirmText}]`;
+    const label = message.trim() ? `${title}\n\n${message}` : title;
     return Promise.resolve(window.confirm(label));
   }
   return new Promise((resolve) => {

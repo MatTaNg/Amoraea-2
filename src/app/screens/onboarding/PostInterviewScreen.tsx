@@ -34,6 +34,8 @@ import {
 import { fetchInterviewAttemptRevealSnapshot } from '@utilities/fetchInterviewAttemptRevealSnapshot';
 import { useInterviewAttemptEgoRepair } from '@features/aria/hooks/useInterviewAttemptEgoRepair';
 import { DownloadPersonalReportButton } from '@features/psychometrics/DownloadPersonalReportButton';
+import { PreparingResultsView } from '@app/screens/PreparingResultsView';
+import { useRedirectRelationshipValidationFromStandardPostInterview } from '@features/relationshipValidation/validationPostInterviewRouting';
 
 const BG = '#0a0a0f';
 const ACCENT = '#3b82f6';
@@ -172,6 +174,8 @@ export const PostInterviewScreen: React.FC<{ navigation: any; route: { params: {
   const queryClient = useQueryClient();
   const { user } = useAuth();
   const userId = route.params?.userId ?? '';
+  const { isRedirecting: validationRedirecting } =
+    useRedirectRelationshipValidationFromStandardPostInterview(userId);
   const isAdminEmail = isAmoraeaAdminConsoleEmail(user?.email ?? '');
   useInterviewAttemptEgoRepair({
     userId,
@@ -434,6 +438,10 @@ export const PostInterviewScreen: React.FC<{ navigation: any; route: { params: {
       if (__DEV__) console.warn('[PostInterview] clipboard', e);
     }
   };
+
+  if (validationRedirecting) {
+    return <PreparingResultsView />;
+  }
 
   return (
     <PostInterviewScrollLayout>

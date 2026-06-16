@@ -393,6 +393,7 @@ import {
 } from '@utilities/storage/InterviewStorage';
 import { requestMicrophonePermissionForInterviewStart } from '@utilities/permissions/requestMicPermission';
 import { withRetry, classifyError } from '@utilities/withRetry';
+import { CLAUDE_SONNET_MODEL } from '@utilities/anthropicMessagesClient';
 import { remoteLog } from '@utilities/remoteLog';
 import {
   buildMoment4ScoresRecord,
@@ -481,6 +482,12 @@ import {
 import { persistInterviewAttemptSessionLifecycle } from '@utilities/interviewAttemptLifecycle';
 import { useInterviewAttemptEgoRepair } from '@features/aria/hooks/useInterviewAttemptEgoRepair';
 import { FlameOrb } from '@app/screens/FlameOrb';
+import { PreparingResultsView } from '@app/screens/PreparingResultsView';
+import {
+  isValidationTrackInterviewHandoffActive,
+  setValidationTrackInterviewHandoffActive,
+  VALIDATION_POST_INTERVIEW_HANDOFF_ROUTE,
+} from '@features/relationshipValidation/validationPostInterviewRouting';
 import { UserInterviewLayout, type ActiveScenario } from '@app/screens/UserInterviewLayout';
 import { InterviewAnalysisScreen } from '@app/screens/InterviewAnalysisScreen';
 import { AdminInterviewDashboard, AdminAttemptTabsView } from '@app/screens/AdminInterviewDashboard';
@@ -2436,6 +2443,18 @@ function isPreservedAckBeforeScenarioBJamesQ2(text: string): boolean {
   );
 }
 
+/** Scenario B repair-as-James often leads with "Got it." before the repair ask; keep for TTS/display. */
+function isPreservedAckBeforeScenarioBJamesRepair(text: string): boolean {
+  const t = text.trim();
+  const afterAck = t.replace(/^(got it|okay|fair|thanks|sure|absolutely)\s*[.,;—–-]?\s*/i, '').trim();
+  if (afterAck === t) return false;
+  return looksLikeScenarioBRepairAsJamesQuestion(afterAck);
+}
+
+function isShortAckOnlySentence(text: string): boolean {
+  return /^(got it|okay|fair|thanks|sure|absolutely|right)\s*[.!]?\s*$/i.test(text.trim());
+}
+
 /**
  * Hard blocklist: empty acknowledgments before the real reflection (applied on every assistant line before TTS/display).
  * Does not remove phrases that are integrated into one idea (e.g. "That makes sense that you'd feel…").
@@ -2445,6 +2464,7 @@ function stripFlatReflectionAcknowledgmentOpeners(text: string): string {
   if (!original) return original;
   if (isPreservedAckBeforeScenarioARepairLead(original)) return original;
   if (isPreservedAckBeforeScenarioBJamesQ2(original)) return original;
+  if (isPreservedAckBeforeScenarioBJamesRepair(original)) return original;
   const MIN_REMAINDER = 14;
   const orderedPhrases = [
     'That makes sense',
@@ -4860,6 +4880,17 @@ function replaceWithStandardApplicantPostInterviewHandoffForUser(
   userId: string,
   meta?: { interviewSessionId?: string | null; source?: string; attemptId?: string | null }
 ) {
+  if (isValidationTrackInterviewHandoffActive()) {
+    void remoteLog('[RESULTS_SCREEN_TRANSITION]', {
+      destination: VALIDATION_POST_INTERVIEW_HANDOFF_ROUTE,
+      userId,
+      interviewSessionId: meta?.interviewSessionId ?? null,
+      source: meta?.source ?? 'validation_track_handoff',
+      attemptId: meta?.attemptId ?? null,
+    });
+    navigation.replace(VALIDATION_POST_INTERVIEW_HANDOFF_ROUTE, { userId });
+    return;
+  }
   if (PSYCHOMETRICS_ENABLED) {
     if (wasPsychometricsInterviewHandoffIssued()) {
       void remoteLog('[RESULTS_SCREEN_TRANSITION]', {
@@ -5041,10 +5072,20 @@ function webMicPreInitNeedsRefreshForNameEntry(): boolean {
 export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigation, route }) => {
   const { user, signOut } = useAuth();
   const userId = (route.params as { userId?: string } | undefined)?.userId ?? user?.id ?? '';
+  const fromValidationTrack =
+    (route.params as { fromValidationTrack?: boolean } | undefined)?.fromValidationTrack === true;
+  useEffect(() => {
+    setValidationTrackInterviewHandoffActive(fromValidationTrack);
+    return () => setValidationTrackInterviewHandoffActive(false);
+  }, [fromValidationTrack]);
   const userIdRef = useRef(userId);
   userIdRef.current = userId;
   /** Main interview route in the app stack (`Aria`) or legacy `OnboardingInterview`. */
-  const isInterviewAppRoute = route?.name === 'Aria' || route?.name === 'OnboardingInterview';
+  const isInterviewAppRoute =
+    route?.name === 'Aria' ||
+    route?.name === 'OnboardingInterview' ||
+    route?.name === 'ValidationAria' ||
+    fromValidationTrack;
   type TranscriptRow = {
     role: string;
     content: string;
@@ -6452,6 +6493,16 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
       () => void signOut(),
     );
   }, [signOut]);
+
+  const handleBackToValidationReport = useCallback(() => {
+    if (typeof navigation.canGoBack === 'function' && navigation.canGoBack()) {
+      navigation.goBack();
+      return;
+    }
+    if (typeof navigation.replace === 'function') {
+      navigation.replace('ValidationReport');
+    }
+  }, [navigation]);
 
   /** Admin from auth user (available on first render). */
   const isAdminUser = isAmoraeaAdminConsoleEmail(user?.email);
@@ -10112,7 +10163,7 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
         method: 'POST',
         headers,
         body: JSON.stringify({
-          model: 'claude-sonnet-4-20250514',
+          model: CLAUDE_SONNET_MODEL,
           max_tokens: 1500,
           messages: [{ role: 'user', content: buildScoringPrompt(finalMessages, context) }],
         }),
@@ -10321,7 +10372,7 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
               method: 'POST',
               headers,
               body: JSON.stringify({
-                model: 'claude-sonnet-4-20250514',
+                model: CLAUDE_SONNET_MODEL,
                 max_tokens: scenarioNumber === 1 ? 800 : 1200,
                 temperature: 0,
                 messages: [
@@ -13898,7 +13949,7 @@ The participant **confirmed** skipping after the skip confirmation prompt. In **
       if (currentInterviewMomentRef.current === 1 || replyingToScenarioAQ1 || userScenarioTag === 1) {
       }
       const requestBody = {
-        model: 'claude-sonnet-4-20250514',
+        model: CLAUDE_SONNET_MODEL,
         max_tokens: maxTok,
         system:
           INTERVIEWER_SYSTEM +
@@ -14040,6 +14091,8 @@ The participant **confirmed** skipping after the skip confirmation prompt. In **
       let deferredWarmBoundarySentence: string | null = null;
       /** Merges "What if you were Ryan?" with the following repair tail before TTS (streaming splits on `?`). */
       let deferredScenarioARepairLeadSentence: string | null = null;
+      /** Holds "Got it." until Scenario B James repair tail arrives (streaming splits on `.`). */
+      let deferredScenarioBJamesShortAckSentence: string | null = null;
       /** Merges "What about when Emma says…" with the following "what do you make of that?" tail before TTS. */
       let deferredScenarioAContemptProbeLeadSentence: string | null = null;
       /** Merges reflective closing ack with the final thank-you before TTS (streaming splits on `.`). */
@@ -14389,6 +14442,7 @@ The participant **confirmed** skipping after the skip confirmation prompt. In **
         if (
           !streamContemptProbeMuteActive &&
           currentInterviewMomentRef.current === 1 &&
+          currentScenarioRef.current === 1 &&
           !scenarioAContemptProbeAskedRef.current &&
           !scenarioAContemptProbeSpokenThisStream &&
           (looksLikeScenarioAContemptProbeQuestion(spoken) ||
@@ -14419,6 +14473,10 @@ The participant **confirmed** skipping after the skip confirmation prompt. In **
         if (deferredScenarioARepairLeadSentence) {
           spoken = `${deferredScenarioARepairLeadSentence} ${spoken}`.trim();
           deferredScenarioARepairLeadSentence = null;
+        }
+        if (deferredScenarioBJamesShortAckSentence) {
+          spoken = `${deferredScenarioBJamesShortAckSentence} ${spoken}`.trim();
+          deferredScenarioBJamesShortAckSentence = null;
         }
         if (deferredScenarioAContemptProbeLeadSentence) {
           spoken = mergeDeferredScenarioAContemptProbeLeadWithNextSentence(
@@ -14490,6 +14548,7 @@ The participant **confirmed** skipping after the skip confirmation prompt. In **
          */
         if (
           currentInterviewMomentRef.current === 1 &&
+          currentScenarioRef.current === 1 &&
           specificEmmaLineAlreadyAddressed &&
           looksLikeScenarioAContemptProbeQuestion(spoken)
         ) {
@@ -14501,6 +14560,7 @@ The participant **confirmed** skipping after the skip confirmation prompt. In **
          */
         if (
           currentInterviewMomentRef.current === 1 &&
+          currentScenarioRef.current === 1 &&
           shouldForceScenarioAContemptProbe &&
           looksLikeScenarioARepairQuestion(spoken)
         ) {
@@ -14533,7 +14593,7 @@ The participant **confirmed** skipping after the skip confirmation prompt. In **
             return;
           }
         }
-        if (currentInterviewMomentRef.current === 1) {
+        if (currentInterviewMomentRef.current === 1 && currentScenarioRef.current === 1) {
           if (scenarioAContemptProbeAskedRef.current || scenarioAContemptProbeSpokenThisStream) {
             const afterContemptEchoStrip = stripScenarioAContemptProbeStreamingEcho(
               spoken,
@@ -14556,7 +14616,7 @@ The participant **confirmed** skipping after the skip confirmation prompt. In **
             return;
           }
         }
-        if (currentInterviewMomentRef.current === 1) {
+        if (currentInterviewMomentRef.current === 1 && currentScenarioRef.current === 1) {
           if (scenarioARepairQuestionAskedRef.current || scenarioARepairQuestionSpokenThisStream) {
             const afterRepairEchoStrip = stripScenarioARepairQuestionStreamingEcho(spoken, true);
             if (afterRepairEchoStrip === null) {
@@ -14582,6 +14642,7 @@ The participant **confirmed** skipping after the skip confirmation prompt. In **
         }
         if (
           currentInterviewMomentRef.current === 1 &&
+          currentScenarioRef.current === 1 &&
           isIncompleteScenarioAContemptProbeLeadSentence(spoken)
         ) {
           deferredScenarioAContemptProbeLeadSentence = spoken;
@@ -14589,9 +14650,18 @@ The participant **confirmed** skipping after the skip confirmation prompt. In **
         }
         if (
           currentInterviewMomentRef.current === 1 &&
+          currentScenarioRef.current === 1 &&
           isIncompleteScenarioARepairLeadSentence(spoken)
         ) {
           deferredScenarioARepairLeadSentence = spoken;
+          return;
+        }
+        if (
+          currentScenarioRef.current === 2 &&
+          isShortAckOnlySentence(spoken) &&
+          !looksLikeScenarioBRepairAsJamesQuestion(spoken)
+        ) {
+          deferredScenarioBJamesShortAckSentence = spoken;
           return;
         }
         if (isIncompleteInterviewClosingLeadSentence(spoken)) {
@@ -14864,6 +14934,11 @@ The participant **confirmed** skipping after the skip confirmation prompt. In **
           const holdRepair = deferredScenarioARepairLeadSentence;
           deferredScenarioARepairLeadSentence = null;
           maybeQueueSentenceForTts(holdRepair, false);
+        }
+        if (deferredScenarioBJamesShortAckSentence) {
+          const holdAck = deferredScenarioBJamesShortAckSentence;
+          deferredScenarioBJamesShortAckSentence = null;
+          maybeQueueSentenceForTts(holdAck, false);
         }
         if (deferredScenarioAContemptProbeLeadSentence) {
           if (streamContemptProbeMuteActive) {
@@ -20662,7 +20737,7 @@ The participant **confirmed** skipping after the skip confirmation prompt. In **
           headers,
           signal: abort.signal,
           body: JSON.stringify({
-            model: 'claude-sonnet-4-20250514',
+            model: CLAUDE_SONNET_MODEL,
             max_tokens: 1500,
             messages: [{ role: 'user', content: buildScoringPrompt(finalMessages, context) }],
           }),
@@ -20862,7 +20937,7 @@ The participant **confirmed** skipping after the skip confirmation prompt. In **
                     headers,
                     timeoutMs: DEFERRED_MOMENT_ANTHROPIC_TIMEOUT_MS,
                     body: JSON.stringify({
-                      model: 'claude-sonnet-4-20250514',
+                      model: CLAUDE_SONNET_MODEL,
                       max_tokens: 2048,
                       messages: [
                         {
@@ -21002,7 +21077,7 @@ The participant **confirmed** skipping after the skip confirmation prompt. In **
                     headers,
                     timeoutMs: DEFERRED_MOMENT_ANTHROPIC_TIMEOUT_MS,
                     body: JSON.stringify({
-                      model: 'claude-sonnet-4-20250514',
+                      model: CLAUDE_SONNET_MODEL,
                       max_tokens: 900,
                       messages: [
                         {
@@ -21560,9 +21635,7 @@ The participant **confirmed** skipping after the skip confirmation prompt. In **
           gateOkForInterviewPassed: completionGateStandard.ok,
           interviewAttemptCount: nextAttemptNumber,
         });
-        if (!PSYCHOMETRICS_ENABLED) {
-          await applyPsychometricModifierToAttempt(userId, attemptId);
-        }
+        await applyPsychometricModifierToAttempt(userId, attemptId);
         await clearInterviewFromStorage(userId);
         await remoteLog('[STANDARD] application saved; post-interview (server scoring complete)', {
           attemptId,
@@ -21594,7 +21667,7 @@ The participant **confirmed** skipping after the skip confirmation prompt. In **
       }
     }
     interviewStatusRef.current = 'preparing_results';
-    if (!PSYCHOMETRICS_ENABLED) {
+    if (!PSYCHOMETRICS_ENABLED || fromValidationTrack) {
       setInterviewStatus('preparing_results');
     }
     if (userId) markPreparingResultsSession(userId);
@@ -22088,7 +22161,7 @@ The participant **confirmed** skipping after the skip confirmation prompt. In **
                     method: 'POST',
                     headers,
                     body: JSON.stringify({
-                      model: 'claude-sonnet-4-20250514',
+                      model: CLAUDE_SONNET_MODEL,
                       max_tokens: 2048,
                       messages: [
                         {
@@ -22220,7 +22293,7 @@ The participant **confirmed** skipping after the skip confirmation prompt. In **
                     method: 'POST',
                     headers,
                     body: JSON.stringify({
-                      model: 'claude-sonnet-4-20250514',
+                      model: CLAUDE_SONNET_MODEL,
                       max_tokens: 900,
                       messages: [
                         {
@@ -22928,12 +23001,10 @@ The participant **confirmed** skipping after the skip confirmation prompt. In **
           if (__DEV__) {
             console.log('=== [5] DB save ===', { id: attemptId ?? undefined, error: null });
           }
-          if (attemptId) {
+            if (attemptId) {
             interviewLastCommittedAttemptId = attemptId;
             assignAttemptIdForSessionLogs(attemptId);
-            if (!PSYCHOMETRICS_ENABLED) {
-              await applyPsychometricModifierToAttempt(userId, attemptId);
-            }
+            await applyPsychometricModifierToAttempt(userId, attemptId);
             const rtp = getSessionLogRuntime();
             logGateAnalyticsToSession({
               base: { userId, attemptId: rtp.attemptId, platform: rtp.platform },
@@ -23218,9 +23289,7 @@ The participant **confirmed** skipping after the skip confirmation prompt. In **
               attemptId: deferredForHolistic,
               pass: gateResult.pass,
             });
-            if (!PSYCHOMETRICS_ENABLED) {
-              await applyPsychometricModifierToAttempt(userId!, deferredForHolistic);
-            }
+            await applyPsychometricModifierToAttempt(userId!, deferredForHolistic);
             const rtpPost = getSessionLogRuntime();
             void runCommunicationStylePipelineAfterSave(
               userId!,
@@ -23409,6 +23478,18 @@ The participant **confirmed** skipping after the skip confirmation prompt. In **
   ]);
 
   registerScoreInterviewForCompletion(scoreInterview);
+  useEffect(() => {
+    if (!fromValidationTrack || !pendingCompletion) return;
+    interviewStatusRef.current = 'preparing_results';
+    setInterviewStatus('preparing_results');
+  }, [fromValidationTrack, pendingCompletion]);
+
+  useEffect(() => {
+    if (!fromValidationTrack || status !== 'scoring') return;
+    interviewStatusRef.current = 'preparing_results';
+    setInterviewStatus('preparing_results');
+  }, [fromValidationTrack, status]);
+
   useEffect(() => {
     registerScoreInterviewForCompletion(scoreInterview);
     return () => registerScoreInterviewForCompletion(null);
@@ -23795,29 +23876,20 @@ The participant **confirmed** skipping after the skip confirmation prompt. In **
       </SafeAreaContainer>
     );
   }
-  if (interviewStatus === 'preparing_results' && !PSYCHOMETRICS_ENABLED) {
-    return (
-      <SafeAreaContainer>
-        <View style={[styles.container, { flex: 1, backgroundColor: '#05060D', alignItems: 'center', justifyContent: 'center', padding: 24 }]}>
-          <FlameOrb state="idle" size={80} />
-          <Text
-            style={{
-              fontFamily: Platform.OS === 'web' ? undefined : 'Jost_300Light',
-              // fontSize: 10,
-              letterSpacing: 3,
-              textTransform: 'uppercase',
-              color: '#3D5470',
-              marginTop: 24,
-            }}
-          >
-            Preparing your results
-          </Text>
-          <Text style={[styles.introHint, { fontSize: 12, marginTop: 16, textAlign: 'center', maxWidth: 320 }]}>
-            Please keep this page open until this finishes, closing it may interrupt saving your results.
-          </Text>
-        </View>
-      </SafeAreaContainer>
-    );
+  const validationPreparingResultsVisible =
+    fromValidationTrack &&
+    (interviewStatus === 'preparing_results' ||
+      status === 'scoring' ||
+      status === 'results' ||
+      pendingCompletion ||
+      interviewStatus === 'under_review' ||
+      interviewStatus === 'congratulations');
+
+  if (
+    validationPreparingResultsVisible ||
+    (interviewStatus === 'preparing_results' && !PSYCHOMETRICS_ENABLED)
+  ) {
+    return <PreparingResultsView />;
   }
   /*
 assistant: Emma and Ryan have dinner plans. Ryan takes a call from his mother halfway through. It runs 25 minutes. Emma pays the bill but seems flustered. Later Ryan asks what's wrong. Emma says 'I just think you always put your family first before us.' Ryan says 'I can't just ignore my mother.' Emma says 'I know, you've made that very clear.'
@@ -24256,6 +24328,18 @@ assistant: Thanks for sticking with all of this — what stays with me is how yo
     return (
       <SafeAreaContainer style={{ position: 'relative', flex: 1, backgroundColor: '#05060D' }}>
         {adminInterviewTopBar}
+        {fromValidationTrack ? (
+          <TouchableOpacity
+            style={styles.introBackButton}
+            onPress={handleBackToValidationReport}
+            activeOpacity={0.8}
+            accessibilityRole="button"
+            accessibilityLabel="Back to your results"
+          >
+            <Ionicons name="chevron-back" size={16} color="#5BA8E8" />
+            <Text style={styles.introLogoutButtonText}>Your results</Text>
+          </TouchableOpacity>
+        ) : null}
         <TouchableOpacity
           style={styles.introLogoutButton}
           onPress={handleInterviewSignOut}
@@ -24391,6 +24475,14 @@ assistant: Thanks for sticking with all of this — what stays with me is how yo
   };
 
   const isInterviewerView = status === 'active' && !isAdmin;
+  const interviewMicMeterActive =
+    useMediaRecorderPath &&
+    (audioRecorder.isRecording ||
+      voiceState === 'recording' ||
+      (Platform.OS === 'web' && isWebInterviewMicPreInitReady()));
+  const interviewMicInputLevel = interviewMicMeterActive
+    ? Math.max(audioRecorder.inputMeterLevel, preInitMeterLevel)
+    : 0;
   /** Web: at most one full-screen gesture overlay — identical rgba layers stack and read as “double dim” on mobile. */
   const webActiveGestureOverlayKind: WebActiveGestureOverlayKind = resolveWebActiveGestureOverlayKind({
     platformIsWeb: Platform.OS === 'web',
@@ -24510,14 +24602,8 @@ assistant: Thanks for sticking with all of this — what stays with me is how yo
                   : undefined
               }
               onExit={handleInterviewSignOut}
-              micInputLevel={
-                useMediaRecorderPath &&
-                (audioRecorder.isRecording ||
-                  voiceState === 'recording' ||
-                  preInitMeterLevel > 0)
-                  ? Math.max(audioRecorder.inputMeterLevel, preInitMeterLevel)
-                  : 0
-              }
+              micInputLevel={interviewMicInputLevel}
+              showMicInputMeter={interviewMicMeterActive}
               micSessionRecovering={micSessionRecovering}
               micReconnectPrompt={
                 micNeedsReconnect
@@ -25648,6 +25734,21 @@ const styles = StyleSheet.create({
   chatCompletionButton: { alignSelf: 'flex-start' },
   // Admin interview — dark design system (void/surface/flame-bright/text-primary)
   adminActiveContainer: { flex: 1, backgroundColor: '#05060D' },
+  introBackButton: {
+    position: 'absolute',
+    top: 16,
+    left: 16,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    paddingVertical: 8,
+    paddingHorizontal: 12,
+    backgroundColor: 'rgba(30,111,217,0.1)',
+    borderWidth: 1,
+    borderColor: 'rgba(82,142,220,0.2)',
+    borderRadius: 6,
+    zIndex: 100,
+  },
   introLogoutButton: {
     position: 'absolute',
     top: 16,

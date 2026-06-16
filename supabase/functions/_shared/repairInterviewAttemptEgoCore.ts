@@ -5,6 +5,7 @@
 import { type SupabaseClient } from 'https://esm.sh/@supabase/supabase-js@2';
 import { coerceHolisticInterviewModelObject } from './coerceHolisticInterviewModelObject.ts';
 import { buildScoringPrompt } from './holisticScoringPrompt.ts';
+import { CLAUDE_SONNET_MODEL } from './anthropicModel.ts';
 
 const HOLISTIC_FETCH_TIMEOUT_MS = 180_000;
 
@@ -83,7 +84,7 @@ export async function repairInterviewAttemptEgoCore(opts: {
       headers,
       signal: abort.signal,
       body: JSON.stringify({
-        model: 'claude-sonnet-4-20250514',
+        model: CLAUDE_SONNET_MODEL,
         max_tokens: 1500,
         messages: [{ role: 'user', content: buildScoringPrompt(transcript, typologyContext) }],
       }),

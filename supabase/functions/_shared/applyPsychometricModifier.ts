@@ -28,6 +28,7 @@ import {
   sd3NarcissismScoreFromUserRow,
   userHasPsychometricScoresForScoring,
 } from './usersPsychometricsSchemaFallback.ts';
+import { finalizeInterviewOnlyGateForAttempt } from './finalizeInterviewOnlyGate.ts';
 
 export type ApplyPsychometricModifierOptions = {
   preservePassIfPreviouslyPassing?: boolean;
@@ -138,13 +139,13 @@ export async function applyPsychometricModifierToAttempt(
     }
   }
 
-  if (!userRow?.psychometrics_completed_at) {
-    console.log('[PsychometricModifier] psychometrics not yet complete — skipping', {
+  if (!userRow?.psychometrics_completed_at && !options?.forceApply) {
+    console.log('[PsychometricModifier] psychometrics not yet complete — interview-only gate', {
       userId,
       attemptId,
       hadUserRow: userRow != null,
     });
-    return;
+    return finalizeInterviewOnlyGateForAttempt(supabase, userId, attemptId, options);
   }
 
   if (!userRow) {
@@ -187,8 +188,8 @@ export async function applyPsychometricModifierToAttempt(
 
   const hasStoredScores = userHasPsychometricScoresForScoring(user);
   if (!hasStoredScores) {
-    console.log('[PsychometricModifier] psychometric scores missing — skipping');
-    return { applied: false, skipReason: 'psychometric_scores_missing' };
+    console.log('[PsychometricModifier] psychometric scores missing — interview-only gate');
+    return finalizeInterviewOnlyGateForAttempt(supabase, userId, attemptId, options);
   }
 
   const pillars = (attempt.pillar_scores as Record<string, number> | null) ?? {};
@@ -296,11 +297,11 @@ export async function applyPsychometricModifierToAttempt(
 
   const freshFloorScores = await loadFreshPsychometricFloorScoresForUser(attemptUserId, supabase);
   if (!freshFloorScores) {
-    console.warn('[PsychometricModifier] fresh psychometric floor scores unavailable', {
+    console.warn('[PsychometricModifier] fresh psychometric floor scores unavailable — interview-only gate', {
       attemptUserId,
       attemptId,
     });
-    return { applied: false, skipReason: 'psychometric_scores_missing' };
+    return finalizeInterviewOnlyGateForAttempt(supabase, userId, attemptId, options);
   }
 
   console.log('[PsychometricModifier] fresh floor scores loaded from DB', {
