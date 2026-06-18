@@ -35,7 +35,7 @@ export function ValidationEntryScreen({ userId, navigation }: Props) {
       await ensureRelationshipValidationRecord(userId);
       const record = await fetchRelationshipValidationRecord(userId);
       if (cancelled) return;
-      const step = resolveValidationFlowStep(record);
+      const step = await resolveValidationFlowStep(userId, record);
       if (step === 'welcome') {
         setShowWelcome(true);
         setBooting(false);

@@ -1,5 +1,5 @@
 import { ACCOUNTABILITY_BLAME_SHIFT_VS_CLARITY_REQUEST, SCORE_CALIBRATION_0_10 } from './interviewScoringCalibration';
-import { RESPONSE_CONCRETENESS_SCORING_INSTRUCTION } from './personalMomentConcreteness';
+import { MOMENT4_RESPONSE_CONCRETENESS_SCORING_INSTRUCTION } from './moment4ConcretenessClassification';
 import { PERSONAL_MOMENT_EMOTIONAL_VOCAB_SCORING_INSTRUCTION } from './personalMomentEmotionalVocab';
 import {
   ELABORATION_ABSENCE_MOMENT4_MARKERS,
@@ -179,8 +179,14 @@ export function buildPersonalMomentScoringPrompt(
       : '';
 
   const momentSpecificCalibration = `
+MOMENT 4 — VALID NON-APPLICABLE (coherent absence of grudges):
+When the user states they do not hold grudges (or have no one who got under their skin) AND provides coherent personal reasoning — growth, boundaries, forgiveness practice, resolved past patterns, energy/capacity, quality-over-quantity friendships, etc. — WITHOUT naming a specific person or describing a specific episodic event, set response_concreteness to **valid_non_applicable**. This is informative about whether they hold onto grudges; it is NOT bypass or deflection.
+- Score **mentalizing** and **accountability** from the quality of self-reflection present (e.g. connecting past grudge patterns to childhood trauma, trust, or personal growth can support scores of 7–8 when evidence is substantive — as with any engaged answer).
+- Do NOT set all markers to null solely because no specific grudge example was given when valid_non_applicable applies.
+- Reserve JSON null markers for **absent** — genuine non-engagement, single-word answers, or circular philosophical restatement with no personal reasoning.
+
 MOMENT 4 — NON-ENGAGEMENT / DEFLECTION (entire moment):
-If the user does not substantively engage with the grudge/dislike question — topic switching, philosophical deflection, vague non-answers with no real person or situation, "I don't hold grudges" without a concrete story when pushed, or other absence of signal — set EVERY listed marker in pillarScores to JSON null (not 0, not 1). Use the SAME keyEvidence string for all markers: "No substantive engagement with grudge/dislike question in this slice — deflection, avoidance, or absent signal." Set pillarConfidence to "low" for each. Numeric scores apply only when there is assessable content.
+If the user does not substantively engage with the grudge/dislike question — topic switching, philosophical deflection without personal reasoning, vague non-answers with no real person or situation, single-word replies, or other absence of signal — set EVERY listed marker in pillarScores to JSON null (not 0, not 1). Use the SAME keyEvidence string for all markers: "No substantive engagement with grudge/dislike question in this slice — deflection, avoidance, or absent signal." Set pillarConfidence to "low" for each. Set response_concreteness to **absent**. Numeric scores apply only when there is assessable content (including valid_non_applicable).
 
 MOMENT 4 — SCORE 1 ONLY FOR ACTIVE FAILURE (when there IS engagement):
 Reserve score 1 for active construct failure: e.g. unreflective contempt expression, explicit refusal of any responsibility, or hostile framing. Do NOT use 1 for mere absence of signal — that is null as above.
@@ -224,7 +230,7 @@ ${ACCOUNTABILITY_BLAME_SHIFT_VS_CLARITY_REQUEST}
 
 ${MENTALIZING_OVERCERTAINTY_SCORING_INSTRUCTION}
 
-${RESPONSE_CONCRETENESS_SCORING_INSTRUCTION}
+${MOMENT4_RESPONSE_CONCRETENESS_SCORING_INSTRUCTION}
 
 ${PERSONAL_MOMENT_EMOTIONAL_VOCAB_SCORING_INSTRUCTION}
 

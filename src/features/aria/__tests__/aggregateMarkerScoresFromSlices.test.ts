@@ -102,9 +102,18 @@ describe('aggregateMarkerScoresFromLabeledSlices (moment matrix)', () => {
     expect(scores.regulation).toBe(5);
   });
 
-  it('uses appreciation from scenario_2 only', () => {
+  it('averages appreciation from scenario_1 and scenario_2 only (ignores M4/M5)', () => {
     const { scores } = aggregateMarkerScoresFromLabeledSlices([
-      labeled('scenario_1', { appreciation: 10 }, { appreciation: 'n/a' }),
+      labeled('scenario_1', { appreciation: 8 }, { appreciation: 's1' }),
+      labeled('scenario_2', { appreciation: 6 }, { appreciation: 's2' }),
+      labeled('moment_4', { appreciation: 9 }, { appreciation: 'ignored' }),
+      labeled('moment_5', { appreciation: 4 }, { appreciation: 'ignored' }),
+    ]);
+    expect(scores.appreciation).toBe(7);
+  });
+
+  it('uses scenario_2 appreciation alone when scenario_1 has no score', () => {
+    const { scores } = aggregateMarkerScoresFromLabeledSlices([
       labeled('scenario_2', { appreciation: 6 }, { appreciation: 's2' }),
       labeled('moment_4', { appreciation: 9 }, { appreciation: 'ignored' }),
     ]);

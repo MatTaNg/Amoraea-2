@@ -14,6 +14,8 @@ import {
 } from './personalMomentEmotionalVocab';
 import {
   normalizeResponseConcreteness,
+  normalizeMoment4Concreteness,
+  reconcileMoment4Concreteness,
   type ResponseConcretenessLevel,
 } from './personalMomentConcreteness';
 import { salvagePersonalMomentDepthFieldsFromRawModelText } from './probeAndScoringUtils';
@@ -62,11 +64,17 @@ function applyLexiconFields(
   }
 }
 
+function normalizeConcretenessForMoment(raw: unknown, moment: 4 | 5): string | null {
+  if (moment === 4) return normalizeMoment4Concreteness(raw);
+  return normalizeResponseConcreteness(raw);
+}
+
 function applyEnrichedDepthRecord(
   parsed: PersonalMomentDepthSlice,
   enriched: Record<string, unknown>,
+  moment: 4 | 5,
 ): void {
-  const rc = normalizeResponseConcreteness(enriched.response_concreteness);
+  const rc = normalizeConcretenessForMoment(enriched.response_concreteness, moment);
   if (parsed.response_concreteness == null && rc != null) {
     parsed.response_concreteness = rc;
   }
@@ -90,8 +98,8 @@ export function finalizePersonalMomentDepthSignals(
   opts: FinalizePersonalMomentDepthSignalsOpts,
 ): void {
   parsed.response_concreteness =
-    normalizeResponseConcreteness(parsed.response_concreteness) ??
-    normalizeResponseConcreteness(parsed.specificity);
+    normalizeConcretenessForMoment(parsed.response_concreteness, opts.moment) ??
+    normalizeConcretenessForMoment(parsed.specificity, opts.moment);
 
   const fromModel = extractPersonalMomentEmotionalVocabFromSlice(parsed);
   applyLexiconFields(parsed, fromModel);
@@ -115,7 +123,7 @@ export function finalizePersonalMomentDepthSignals(
     opts.moment,
     sliceText,
   );
-  if (enriched) applyEnrichedDepthRecord(parsed, enriched);
+  if (enriched) applyEnrichedDepthRecord(parsed, enriched, opts.moment);
 
   if (parsed.user_slice_word_count == null && sliceText) {
     applyLexiconFields(parsed, personalMomentLexiconStatsFromUserText(sliceText));
@@ -135,6 +143,30 @@ export function finalizePersonalMomentDepthSignals(
     );
     if (inferred != null) parsed.response_concreteness = inferred;
   }
+
+  if (opts.moment === 4) {
+    const combined = combineUserTextForMoment4Reconcile(opts.transcript, sliceText);
+    if (combined) {
+      const reconciled = reconcileMoment4Concreteness(parsed.response_concreteness, combined);
+      if (reconciled != null) parsed.response_concreteness = reconciled;
+    }
+  }
+}
+
+function combineUserTextForMoment4Reconcile(
+  transcript: readonly PersonalMomentTranscriptTurn[] | undefined,
+  sliceText: string,
+): string {
+  const parts: string[] = [];
+  if (transcript?.length) {
+    for (const t of transcript) {
+      if (t.role !== 'user' || t.interviewMoment !== 4) continue;
+      const c = (t.content ?? '').trim();
+      if (c) parts.push(c);
+    }
+  }
+  if (parts.length > 0) return parts.join(' ');
+  return sliceText.trim();
 }
 
 /** Simulate recovery-path scoring output then depth finalization (for tests). */

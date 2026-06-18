@@ -1,0 +1,769 @@
+{
+  "generatedAt": "2026-06-17T05:30:48.967Z",
+  "runtimeSec": "1.7",
+  "algorithm": "scenario_only_integers_v2",
+  "skippedNoComposites": 14,
+  "report": {
+    "total": 75,
+    "byCategory": {
+      "isolatedS2Failure": [
+        {
+          "id": "6a5f057e-766e-403d-83b2-bcf9442a41ed",
+          "shortId": "6a5f057e",
+          "composites": {
+            "s1": 7,
+            "s2": 1.5,
+            "s3": 7.142857142857143
+          },
+          "category": "isolatedS2Failure"
+        },
+        {
+          "id": "bb89a602-a382-462d-aca8-056a5e2c42fc",
+          "shortId": "bb89a602",
+          "composites": {
+            "s1": 7.333333333333333,
+            "s2": 4.333333333333333,
+            "s3": 6.857142857142857
+          },
+          "category": "isolatedS2Failure"
+        },
+        {
+          "id": "af73e8b4-5e04-44f2-9a2d-8ad50c524468",
+          "shortId": "af73e8b4",
+          "composites": {
+            "s1": 6.5,
+            "s2": 3.8333333333333335,
+            "s3": 7.428571428571429
+          },
+          "category": "isolatedS2Failure"
+        },
+        {
+          "id": "31ff2788-afca-432e-9822-ff59d64996bf",
+          "shortId": "31ff2788",
+          "composites": {
+            "s1": 7,
+            "s2": 3.3333333333333335,
+            "s3": 7.166666666666667
+          },
+          "category": "isolatedS2Failure"
+        }
+      ],
+      "correlatedFailure": [
+        {
+          "id": "e725cdad-e6b2-48d1-b1dc-e2dcdf19030b",
+          "shortId": "e725cdad",
+          "composites": {
+            "s1": 6,
+            "s2": 4.666666666666667,
+            "s3": 4.714285714285714
+          },
+          "category": "correlatedFailure"
+        },
+        {
+          "id": "2fec04ab-73ea-4eb5-83a0-7ba5a0da969d",
+          "shortId": "2fec04ab",
+          "composites": {
+            "s1": 7.5,
+            "s2": 4.8,
+            "s3": 5.428571428571429
+          },
+          "category": "correlatedFailure"
+        },
+        {
+          "id": "ad23da2d-c106-443c-b69c-efc6f65d64d0",
+          "shortId": "ad23da2d",
+          "composites": {
+            "s1": 4.833333333333333,
+            "s2": 4,
+            "s3": 4.571428571428571
+          },
+          "category": "correlatedFailure"
+        },
+        {
+          "id": "c1ebbcdc-bf39-4dc0-bdcc-422807cb617c",
+          "shortId": "c1ebbcdc",
+          "composites": {
+            "s1": 2.6666666666666665,
+            "s2": 3.6666666666666665,
+            "s3": 3.6666666666666665
+          },
+          "category": "correlatedFailure"
+        },
+        {
+          "id": "1ba58fff-c81f-47af-a786-73b91ec38cd4",
+          "shortId": "1ba58fff",
+          "composites": {
+            "s1": 7.5,
+            "s2": 4.5,
+            "s3": 6.428571428571429
+          },
+          "category": "correlatedFailure"
+        },
+        {
+          "id": "ee99a4aa-85d8-4d5a-b320-de6b640e5640",
+          "shortId": "ee99a4aa",
+          "composites": {
+            "s1": 6.5,
+            "s2": 4.833333333333333,
+            "s3": 6.142857142857143
+          },
+          "category": "correlatedFailure"
+        },
+        {
+          "id": "fa365f2a-fb6f-4711-a4fa-36f9e5078ccc",
+          "shortId": "fa365f2a",
+          "composites": {
+            "s1": 5.666666666666667,
+            "s2": 3.1666666666666665,
+            "s3": 6.571428571428571
+          },
+          "category": "correlatedFailure"
+        },
+        {
+          "id": "af88b820-b052-4515-9d11-faf36df6b245",
+          "shortId": "af88b820",
+          "composites": {
+            "s1": 3.3333333333333335,
+            "s2": 4.833333333333333,
+            "s3": 4
+          },
+          "category": "correlatedFailure"
+        },
+        {
+          "id": "98a75fe5-1037-4d43-8dac-5e39e2861f5f",
+          "shortId": "98a75fe5",
+          "composites": {
+            "s1": 5.166666666666667,
+            "s2": 4.666666666666667,
+            "s3": 6.333333333333333
+          },
+          "category": "correlatedFailure"
+        },
+        {
+          "id": "77340fcc-25d1-41be-8dcd-398aec0916c3",
+          "shortId": "77340fcc",
+          "composites": {
+            "s1": 6.666666666666667,
+            "s2": 2.6666666666666665,
+            "s3": 5.166666666666667
+          },
+          "category": "correlatedFailure"
+        },
+        {
+          "id": "2faaf48b-25c3-4b92-9d11-955444680c1c",
+          "shortId": "2faaf48b",
+          "composites": {
+            "s1": 3.6666666666666665,
+            "s2": 1.5,
+            "s3": 6.166666666666667
+          },
+          "category": "correlatedFailure"
+        },
+        {
+          "id": "7359ebfe-8166-4f0e-b574-da52129810bc",
+          "shortId": "7359ebfe",
+          "composites": {
+            "s1": 5.5,
+            "s2": 2.3333333333333335,
+            "s3": 6
+          },
+          "category": "correlatedFailure"
+        },
+        {
+          "id": "a62d1359-c256-4499-be07-d8ab5e87dbe5",
+          "shortId": "a62d1359",
+          "composites": {
+            "s1": 6.166666666666667,
+            "s2": 4.166666666666667,
+            "s3": 7.166666666666667
+          },
+          "category": "correlatedFailure"
+        },
+        {
+          "id": "324a9e98-fd3f-47c9-80ee-90e40877d395",
+          "shortId": "324a9e98",
+          "composites": {
+            "s1": 6.833333333333333,
+            "s2": 3.6666666666666665,
+            "s3": 5.333333333333333
+          },
+          "category": "correlatedFailure"
+        },
+        {
+          "id": "db8efc65-df96-4adb-86de-d55b9ba340a6",
+          "shortId": "db8efc65",
+          "composites": {
+            "s1": 6.666666666666667,
+            "s2": 3.5,
+            "s3": 4
+          },
+          "category": "correlatedFailure"
+        },
+        {
+          "id": "6c0470b7-c18c-4a1d-830f-cc0808001d07",
+          "shortId": "6c0470b7",
+          "composites": {
+            "s1": 3.6666666666666665,
+            "s2": 4.833333333333333,
+            "s3": 3.5
+          },
+          "category": "correlatedFailure"
+        }
+      ],
+      "s2StrongOthersWeak": [
+        {
+          "id": "721ef7f7-c311-48b2-9002-fdacf756f1de",
+          "shortId": "721ef7f7",
+          "composites": {
+            "s1": 4.666666666666667,
+            "s2": 8.333333333333334,
+            "s3": 6.428571428571429
+          },
+          "category": "s2StrongOthersWeak"
+        },
+        {
+          "id": "824326a2-3312-4d9c-85c2-c649dce9b146",
+          "shortId": "824326a2",
+          "composites": {
+            "s1": 7.333333333333333,
+            "s2": 8.333333333333334,
+            "s3": 4.285714285714286
+          },
+          "category": "s2StrongOthersWeak"
+        },
+        {
+          "id": "7118b49e-0c81-40f5-bb38-4234eb407c54",
+          "shortId": "7118b49e",
+          "composites": {
+            "s1": 5.333333333333333,
+            "s2": 8,
+            "s3": 4.285714285714286
+          },
+          "category": "s2StrongOthersWeak"
+        },
+        {
+          "id": "c13df507-fb38-4aa7-9219-a3d159ab41ba",
+          "shortId": "c13df507",
+          "composites": {
+            "s1": 5.333333333333333,
+            "s2": 7.5,
+            "s3": 4.714285714285714
+          },
+          "category": "s2StrongOthersWeak"
+        },
+        {
+          "id": "51e53c4d-ba87-459a-bbc1-a09088cd52a4",
+          "shortId": "51e53c4d",
+          "composites": {
+            "s1": 5.666666666666667,
+            "s2": 7,
+            "s3": 4.666666666666667
+          },
+          "category": "s2StrongOthersWeak"
+        },
+        {
+          "id": "58c5d715-a018-4929-9fda-017af15c645b",
+          "shortId": "58c5d715",
+          "composites": {
+            "s1": 7,
+            "s2": 7,
+            "s3": 4.285714285714286
+          },
+          "category": "s2StrongOthersWeak"
+        },
+        {
+          "id": "96670ebe-5d1d-45ef-881e-3f53407e44c2",
+          "shortId": "96670ebe",
+          "composites": {
+            "s1": 5.5,
+            "s2": 6.833333333333333,
+            "s3": 4.833333333333333
+          },
+          "category": "s2StrongOthersWeak"
+        }
+      ],
+      "neither": [
+        {
+          "id": "8fa6a8f6-d180-4b41-907f-df86a3906168",
+          "shortId": "8fa6a8f6",
+          "composites": {
+            "s1": 8.833333333333334,
+            "s2": 9.166666666666666,
+            "s3": 7.285714285714286
+          },
+          "category": "neither"
+        },
+        {
+          "id": "4d4775f3-b92c-41bf-a0b5-8801b1a3053e",
+          "shortId": "4d4775f3",
+          "composites": {
+            "s1": 8,
+            "s2": 7.166666666666667,
+            "s3": 6.571428571428571
+          },
+          "category": "neither"
+        },
+        {
+          "id": "83fab986-0b1b-41ae-b0f5-b39dc2ca7094",
+          "shortId": "83fab986",
+          "composites": {
+            "s1": 5,
+            "s2": 7.166666666666667,
+            "s3": 6.142857142857143
+          },
+          "category": "neither"
+        },
+        {
+          "id": "526a4e86-42f8-4b6b-8ef4-1f2000ccc2ad",
+          "shortId": "526a4e86",
+          "composites": {
+            "s1": 7.666666666666667,
+            "s2": 6.833333333333333,
+            "s3": 5.571428571428571
+          },
+          "category": "neither"
+        },
+        {
+          "id": "45590186-a6df-4a5e-92a3-220f6cb45dc8",
+          "shortId": "45590186",
+          "composites": {
+            "s1": 7.5,
+            "s2": 5.333333333333333,
+            "s3": 7.142857142857143
+          },
+          "category": "neither"
+        },
+        {
+          "id": "7a9b44c1-7850-43df-b1ea-a62fd075ab79",
+          "shortId": "7a9b44c1",
+          "composites": {
+            "s1": 7.666666666666667,
+            "s2": 7.166666666666667,
+            "s3": 6.285714285714286
+          },
+          "category": "neither"
+        },
+        {
+          "id": "b980a9e6-2c73-489c-8900-47f71396ba0d",
+          "shortId": "b980a9e6",
+          "composites": {
+            "s1": 7.333333333333333,
+            "s2": 8,
+            "s3": 7.428571428571429
+          },
+          "category": "neither"
+        },
+        {
+          "id": "eb4c73fc-c715-4151-9f34-4f0a9532b2cb",
+          "shortId": "eb4c73fc",
+          "composites": {
+            "s1": 6.5,
+            "s2": 5.166666666666667,
+            "s3": 6.857142857142857
+          },
+          "category": "neither"
+        },
+        {
+          "id": "138dca24-218c-4b55-a3e1-ee1293dbf7dd",
+          "shortId": "138dca24",
+          "composites": {
+            "s1": 7.5,
+            "s2": 8.166666666666666,
+            "s3": 7.285714285714286
+          },
+          "category": "neither"
+        },
+        {
+          "id": "92655ae1-3918-4e67-b94d-a1865b99526a",
+          "shortId": "92655ae1",
+          "composites": {
+            "s1": 8.333333333333334,
+            "s2": 8,
+            "s3": 7.428571428571429
+          },
+          "category": "neither"
+        },
+        {
+          "id": "718f6e99-8d0d-4b08-9e80-3c389d695e98",
+          "shortId": "718f6e99",
+          "composites": {
+            "s1": 6.5,
+            "s2": 5.666666666666667,
+            "s3": 6.714285714285714
+          },
+          "category": "neither"
+        },
+        {
+          "id": "fbc78d23-d63b-4144-a4c3-95b91157a5f2",
+          "shortId": "fbc78d23",
+          "composites": {
+            "s1": 7.666666666666667,
+            "s2": 8,
+            "s3": 6.857142857142857
+          },
+          "category": "neither"
+        },
+        {
+          "id": "760ad35c-7a78-49b1-bb9b-4512282c08e5",
+          "shortId": "760ad35c",
+          "composites": {
+            "s1": 7.666666666666667,
+            "s2": 7.333333333333333,
+            "s3": 6.857142857142857
+          },
+          "category": "neither"
+        },
+        {
+          "id": "93fad3be-71d1-4710-91ad-07156975b1f8",
+          "shortId": "93fad3be",
+          "composites": {
+            "s1": 7.5,
+            "s2": 7.5,
+            "s3": 6.857142857142857
+          },
+          "category": "neither"
+        },
+        {
+          "id": "e30d8721-e7bf-44ed-b7cb-2fb8f9b462f5",
+          "shortId": "e30d8721",
+          "composites": {
+            "s1": 7,
+            "s2": 7.666666666666667,
+            "s3": 7.428571428571429
+          },
+          "category": "neither"
+        },
+        {
+          "id": "77aac053-5aeb-4d58-8743-d77c3d210595",
+          "shortId": "77aac053",
+          "composites": {
+            "s1": 7.666666666666667,
+            "s2": 7.833333333333333,
+            "s3": 6.666666666666667
+          },
+          "category": "neither"
+        },
+        {
+          "id": "b287c616-375c-4f45-8411-cf6188ba84db",
+          "shortId": "b287c616",
+          "composites": {
+            "s1": 7.833333333333333,
+            "s2": 7.833333333333333,
+            "s3": 7.428571428571429
+          },
+          "category": "neither"
+        },
+        {
+          "id": "f3d127a4-b3dd-4cec-bb5a-8dc6dbbaeaf5",
+          "shortId": "f3d127a4",
+          "composites": {
+            "s1": 6.833333333333333,
+            "s2": 8.333333333333334,
+            "s3": 7
+          },
+          "category": "neither"
+        },
+        {
+          "id": "60eee704-54d5-4abe-b23a-a51ac622b052",
+          "shortId": "60eee704",
+          "composites": {
+            "s1": 6.333333333333333,
+            "s2": 6.5,
+            "s3": 6
+          },
+          "category": "neither"
+        },
+        {
+          "id": "4d151e17-e2f3-42ec-9257-8c87a52d9f9f",
+          "shortId": "4d151e17",
+          "composites": {
+            "s1": 7,
+            "s2": 7.833333333333333,
+            "s3": 7.285714285714286
+          },
+          "category": "neither"
+        },
+        {
+          "id": "0cae9531-a7a5-48fe-8305-be2d045320ee",
+          "shortId": "0cae9531",
+          "composites": {
+            "s1": 6.833333333333333,
+            "s2": 7.833333333333333,
+            "s3": 6
+          },
+          "category": "neither"
+        },
+        {
+          "id": "f9494ec1-1d1c-49f1-bfa6-4a8abc3752a5",
+          "shortId": "f9494ec1",
+          "composites": {
+            "s1": 6.5,
+            "s2": 5.166666666666667,
+            "s3": 6.571428571428571
+          },
+          "category": "neither"
+        },
+        {
+          "id": "352182dd-db45-402a-a26c-c6d5cc441da4",
+          "shortId": "352182dd",
+          "composites": {
+            "s1": 7,
+            "s2": 6.5,
+            "s3": 6.714285714285714
+          },
+          "category": "neither"
+        },
+        {
+          "id": "e0e0e324-1fee-49e0-b091-e88c03e5989c",
+          "shortId": "e0e0e324",
+          "composites": {
+            "s1": 7.166666666666667,
+            "s2": 7.333333333333333,
+            "s3": 7.333333333333333
+          },
+          "category": "neither"
+        },
+        {
+          "id": "044a9993-47ec-4250-b743-b687cc37e4f8",
+          "shortId": "044a9993",
+          "composites": {
+            "s1": 5.333333333333333,
+            "s2": 5.166666666666667,
+            "s3": 5.833333333333333
+          },
+          "category": "neither"
+        },
+        {
+          "id": "97da22a6-7425-42ae-bcda-f1b6a4146c25",
+          "shortId": "97da22a6",
+          "composites": {
+            "s1": 7.666666666666667,
+            "s2": 7.833333333333333,
+            "s3": 8.5
+          },
+          "category": "neither"
+        },
+        {
+          "id": "b12b7c7a-1fa7-4ad9-8256-8adf05df48ae",
+          "shortId": "b12b7c7a",
+          "composites": {
+            "s1": 7.166666666666667,
+            "s2": 7.833333333333333,
+            "s3": 7.333333333333333
+          },
+          "category": "neither"
+        },
+        {
+          "id": "1098d765-1224-4a62-8df4-fcbd7d224fa7",
+          "shortId": "1098d765",
+          "composites": {
+            "s1": 6.5,
+            "s2": 8.166666666666666,
+            "s3": 7.666666666666667
+          },
+          "category": "neither"
+        },
+        {
+          "id": "86f783ed-fc75-4b01-a466-ef26eca39158",
+          "shortId": "86f783ed",
+          "composites": {
+            "s1": 5.166666666666667,
+            "s2": 5.166666666666667,
+            "s3": 7.5
+          },
+          "category": "neither"
+        },
+        {
+          "id": "ea48999d-9300-4fa9-915f-e95629f5d951",
+          "shortId": "ea48999d",
+          "composites": {
+            "s1": 6.5,
+            "s2": 7.333333333333333,
+            "s3": 7.166666666666667
+          },
+          "category": "neither"
+        },
+        {
+          "id": "b3dcb5fd-a735-410d-9493-ee1fbb7c8b46",
+          "shortId": "b3dcb5fd",
+          "composites": {
+            "s1": 5.666666666666667,
+            "s2": 7.833333333333333,
+            "s3": 6.666666666666667
+          },
+          "category": "neither"
+        },
+        {
+          "id": "0c1cf5b1-be61-4de7-b838-8efd19c86a39",
+          "shortId": "0c1cf5b1",
+          "composites": {
+            "s1": 5.833333333333333,
+            "s2": 5.5,
+            "s3": 6.666666666666667
+          },
+          "category": "neither"
+        },
+        {
+          "id": "7ee5e43d-7fd7-4bd6-a78b-8f828c54a695",
+          "shortId": "7ee5e43d",
+          "composites": {
+            "s1": 5.333333333333333,
+            "s2": 7.6,
+            "s3": 7
+          },
+          "category": "neither"
+        },
+        {
+          "id": "5611ffd1-85dd-4b07-991b-d778ab301a6a",
+          "shortId": "5611ffd1",
+          "composites": {
+            "s1": 7,
+            "s2": 7.5,
+            "s3": 7
+          },
+          "category": "neither"
+        },
+        {
+          "id": "577b27d8-26c6-4fde-a804-d0360b4aa20b",
+          "shortId": "577b27d8",
+          "composites": {
+            "s1": 5.5,
+            "s2": 8,
+            "s3": 7.833333333333333
+          },
+          "category": "neither"
+        },
+        {
+          "id": "e7464bb1-1625-4d77-8818-e3c0a5fe8f04",
+          "shortId": "e7464bb1",
+          "composites": {
+            "s1": 7.333333333333333,
+            "s2": 5,
+            "s3": 7.666666666666667
+          },
+          "category": "neither"
+        },
+        {
+          "id": "eece836d-7e6e-4297-bb58-4e89008110d5",
+          "shortId": "eece836d",
+          "composites": {
+            "s1": 7.166666666666667,
+            "s2": 8,
+            "s3": 6.333333333333333
+          },
+          "category": "neither"
+        },
+        {
+          "id": "40279911-f9db-4760-ba6e-91e135d67c07",
+          "shortId": "40279911",
+          "composites": {
+            "s1": 7.666666666666667,
+            "s2": 8,
+            "s3": 7.333333333333333
+          },
+          "category": "neither"
+        },
+        {
+          "id": "9255d75a-46f7-42d2-aed1-7fef443a194a",
+          "shortId": "9255d75a",
+          "composites": {
+            "s1": 7.833333333333333,
+            "s2": 7.833333333333333,
+            "s3": 5.5
+          },
+          "category": "neither"
+        },
+        {
+          "id": "25c11612-b1f1-4364-b32f-146e5ec99399",
+          "shortId": "25c11612",
+          "composites": {
+            "s1": 6.666666666666667,
+            "s2": 6.833333333333333,
+            "s3": 7
+          },
+          "category": "neither"
+        },
+        {
+          "id": "4c79c7f2-c16b-47de-b61c-9366e2d4ec39",
+          "shortId": "4c79c7f2",
+          "composites": {
+            "s1": 6.333333333333333,
+            "s2": 7.666666666666667,
+            "s3": 7.666666666666667
+          },
+          "category": "neither"
+        },
+        {
+          "id": "195fe2e7-de52-49e4-9473-f16d1eb98ca1",
+          "shortId": "195fe2e7",
+          "composites": {
+            "s1": 7.833333333333333,
+            "s2": 7.5,
+            "s3": 6
+          },
+          "category": "neither"
+        },
+        {
+          "id": "2840c8de-d8ae-4db0-9b99-21f9d978d2cf",
+          "shortId": "2840c8de",
+          "composites": {
+            "s1": 7,
+            "s2": 8,
+            "s3": 7.333333333333333
+          },
+          "category": "neither"
+        },
+        {
+          "id": "ea8005bc-951a-4fd9-aa4a-a10ebdcd7912",
+          "shortId": "ea8005bc",
+          "composites": {
+            "s1": 7,
+            "s2": 7.166666666666667,
+            "s3": 6.333333333333333
+          },
+          "category": "neither"
+        },
+        {
+          "id": "664dfe29-d7df-42c9-a085-bbeb78bfc5c4",
+          "shortId": "664dfe29",
+          "composites": {
+            "s1": 6.333333333333333,
+            "s2": 6.833333333333333,
+            "s3": 5.833333333333333
+          },
+          "category": "neither"
+        },
+        {
+          "id": "21367f76-42df-4e1b-beec-c5ce598f9242",
+          "shortId": "21367f76",
+          "composites": {
+            "s1": 6.666666666666667,
+            "s2": 7.833333333333333,
+            "s3": 6.5
+          },
+          "category": "neither"
+        },
+        {
+          "id": "8d110d29-9e67-41fb-a58f-665b561a7b53",
+          "shortId": "8d110d29",
+          "composites": {
+            "s1": 6.166666666666667,
+            "s2": 7,
+            "s3": 6.833333333333333
+          },
+          "category": "neither"
+        },
+        {
+          "id": "e5ef9c7d-4cc8-4741-b7a5-b28820a8093a",
+          "shortId": "e5ef9c7d",
+          "composites": {
+            "s1": 5,
+            "s2": 6.166666666666667,
+            "s3": 6
+          },
+          "category": "neither"
+        }
+      ]
+    }
+  }
+}

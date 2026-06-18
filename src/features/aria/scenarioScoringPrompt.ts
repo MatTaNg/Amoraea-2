@@ -18,6 +18,7 @@ import {
   ACCOUNTABILITY_BLAME_SHIFT_VS_CLARITY_REQUEST,
   REPAIR_AND_ACCOUNTABILITY_UNPROMPTED_VS_PROMPTED_WEIGHTING,
   REPAIR_CONDITIONAL_AND_PROMPTED_SCORING,
+  SCENARIO_A_APPRECIATION_ANCHORS,
   SCENARIO_B_ATTUNEMENT_APPRECIATION_ANCHORS,
   SCORE_CALIBRATION_0_10,
 } from './interviewScoringCalibration';
@@ -43,7 +44,7 @@ export function buildScenarioScoringPrompt(
     1: {
       name: 'Scenario A (Emma/Ryan)',
       constructs:
-        'mentalizing, accountability, contempt_recognition, contempt_expression, repair, attunement (score only these keys in this scenario JSON; contempt is split: recognition = identifying contemptuous dynamics in the vignette; expression = participant’s own framing of others per the CONTEMPT_EXPRESSION rubric in this prompt)',
+        'mentalizing, accountability, contempt_recognition, contempt_expression, repair, attunement, appreciation (score only these keys in this scenario JSON; contempt is split: recognition = identifying contemptuous dynamics in the vignette; expression = participant’s own framing of others per the CONTEMPT_EXPRESSION rubric in this prompt)',
       markerIds: [
         'mentalizing',
         'accountability',
@@ -51,6 +52,7 @@ export function buildScenarioScoringPrompt(
         'contempt_expression',
         'repair',
         'attunement',
+        'appreciation',
       ] as const,
     },
     2: {
@@ -117,6 +119,12 @@ Scenario C — REPAIR (this slice does not score commitment_threshold):
   const scenario1ContemptCalibration =
     scenarioNumber === 1
       ? SCENARIO_A_CONTEMPT_RECOGNITION_CALIBRATION
+      : '';
+  const scenario1AppreciationCalibration =
+    scenarioNumber === 1
+      ? `
+${SCENARIO_A_APPRECIATION_ANCHORS}
+`
       : '';
   const scenario1MentalizingRepairCeiling =
     scenarioNumber === 1
@@ -280,6 +288,7 @@ Scenario A repair calibration:
 - Reserve 6+ for answers that keep Ryan’s contribution and repair move **central** (including humbly naming **one’s own** listening/understanding limits with **her** in the room).
 - Reserve 9-10 for strong repair with explicit ownership and no **blame-redirecting** conditional (per directionality), not 9-10 for mere absence of the word "if."
 ${scenario1ContemptCalibration}
+${scenario1AppreciationCalibration}
 ${scenario1MentalizingRepairCeiling}
 ${scenario2AccountabilityCalibration}
 ${scenario2ContemptExpressionCalibration}

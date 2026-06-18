@@ -2,14 +2,23 @@ import { describe, expect, it } from 'vitest';
 import {
   countInterviewWords,
   deriveMoment4PostGrudgeSpecificityResolvedFromMessages,
+  evaluateMoment4SpecificityProbe,
   hasMoment4PersonRelationshipOrSituationAnchor,
   looksLikeMoment4SpecificityFollowUpEcho,
   looksLikeMoment4SpecificityFollowUpPrompt,
   MOMENT_4_SPECIFICITY_FOLLOW_UP_TEXT,
+  moment4HasNamedOrReferencedPerson,
+  moment4HasSpecificEventDescription,
   needsMoment4SpecificityFollowUp,
   stripMoment4SpecificityFollowUpStreamingEcho,
 } from '../moment4SpecificityFollowUp';
 import { MOMENT_4_GRUDGE_QUESTION_TEXT } from '../moment4ProbeLogic';
+
+const VAISHNAVA_PATTERN =
+  "I'm generally too nice and don't take offense to many things. So in my life, I've never really had anyone that has ever tried to get under my skin. But there was one time where this one guy who thought I had a crush on his girlfriend tried to get back to me, get back on me in a game and we just talked afterwards and figured out that it was just a misunderstanding and we parted ways amicably after that.";
+
+const EXPLICIT_NO_CURRENT_GRUDGE =
+  "Honestly, I don't think I'm holding on to anything right now. I went through a stretch a few years back where I realized I was keeping score with people, replying things, staying annoyed longer than the situation deserved, and I made a conscious effort to let that go because it was making me worse company, not because the other person earned forgiveness. So when I think about it, I genuinely can't point to someone, I'm still carrying something.";
 
 describe('moment4SpecificityFollowUp', () => {
   it('counts words', () => {
@@ -32,55 +41,91 @@ describe('moment4SpecificityFollowUp', () => {
     expect(looksLikeMoment4SpecificityFollowUpPrompt('Random text')).toBe(false);
   });
 
-  it('needs follow-up when very short', () => {
-    expect(needsMoment4SpecificityFollowUp('yes maybe sometimes')).toBe(true);
+  it('fires for Vaishnava-style generic opener with thin example (no named person)', () => {
+    const evalResult = evaluateMoment4SpecificityProbe(VAISHNAVA_PATTERN);
+    expect(evalResult.hasNamedPerson).toBe(false);
+    expect(evalResult.genericOpenerDetected).toBe(true);
+    expect(evalResult.probeShouldFire).toBe(true);
+    expect(evalResult.triggerReason).toBe('no_named_person');
+    expect(needsMoment4SpecificityFollowUp(VAISHNAVA_PATTERN)).toBe(true);
   });
 
-  it('does not need follow-up for short concrete grudge (years ago + demonstrative)', () => {
+  it('does not fire for brief answer with referenced person and specific event', () => {
     const t =
       "Yes, this woman cut me off 20 years ago. I'm still upset at her. Some people should not be driving.";
     expect(countInterviewWords(t)).toBeLessThan(30);
+    expect(moment4HasNamedOrReferencedPerson(t)).toBe(true);
+    expect(moment4HasSpecificEventDescription(t)).toBe(true);
     expect(hasMoment4PersonRelationshipOrSituationAnchor(t)).toBe(true);
     expect(needsMoment4SpecificityFollowUp(t)).toBe(false);
   });
 
-  it('does not need follow-up when user points at "the woman driving" (short)', () => {
-    const t = 'Yes, I already gave you one. The woman driving.';
+  it('does not fire when user points at "the woman driving" with an event (short)', () => {
+    const t = 'Yes, I already gave you one. The woman driving cut me off last year.';
     expect(countInterviewWords(t)).toBeLessThan(30);
-    expect(hasMoment4PersonRelationshipOrSituationAnchor(t)).toBe(true);
+    expect(moment4HasNamedOrReferencedPerson(t)).toBe(true);
+    expect(moment4HasSpecificEventDescription(t)).toBe(true);
     expect(needsMoment4SpecificityFollowUp(t)).toBe(false);
   });
 
-  it('needs follow-up when long but no person/relationship/situation anchors', () => {
+  it('fires for long generic philosophy without named person', () => {
     const generic =
       'I think people should generally try to be nice and communication is important in life overall and one ought to consider many perspectives in society broadly speaking across cultures while staying polite and cooperative in groups and valuing harmony without naming anyone concrete.';
     expect(countInterviewWords(generic)).toBeGreaterThanOrEqual(30);
-    expect(hasMoment4PersonRelationshipOrSituationAnchor(generic)).toBe(false);
+    expect(moment4HasNamedOrReferencedPerson(generic)).toBe(false);
     expect(needsMoment4SpecificityFollowUp(generic)).toBe(true);
+    expect(evaluateMoment4SpecificityProbe(generic).triggerReason).toBe('no_named_person');
   });
 
-  it('does not need follow-up when adequate length and person/situation anchors', () => {
+  it('does not fire when named person and specific event are both present', () => {
     const t =
       'I felt really hurt when my friend Sarah dismissed what happened — we had argued before but this time I just shut down and I kept replaying it in my head for weeks because it mattered to me and I could not let it go easily at all.';
     expect(countInterviewWords(t)).toBeGreaterThanOrEqual(30);
-    expect(hasMoment4PersonRelationshipOrSituationAnchor(t)).toBe(true);
+    expect(moment4HasNamedOrReferencedPerson(t)).toBe(true);
+    expect(moment4HasSpecificEventDescription(t)).toBe(true);
     expect(needsMoment4SpecificityFollowUp(t)).toBe(false);
   });
 
-  it('needs follow-up when long but only generic habit language (no anchor)', () => {
+  it('fires for long generic habit language without named person', () => {
     const t =
       "I've had grudges before but I work through them generally and try to move on with life overall without dwelling too much on past conflicts in most situations day to day.";
     expect(countInterviewWords(t)).toBeGreaterThanOrEqual(30);
-    expect(hasMoment4PersonRelationshipOrSituationAnchor(t)).toBe(false);
+    expect(moment4HasNamedOrReferencedPerson(t)).toBe(false);
     expect(needsMoment4SpecificityFollowUp(t)).toBe(true);
   });
 
-  it('does not need follow-up for long grudge + forgive + boundaries answer (grudge against someone / people in my life)', () => {
-    const t =
+  it('does not fire when user explicitly cannot recall anyone they still hold a grudge against', () => {
+    const evalResult = evaluateMoment4SpecificityProbe(EXPLICIT_NO_CURRENT_GRUDGE);
+    expect(evalResult.probeShouldFire).toBe(false);
+    expect(evalResult.triggerReason).toBeNull();
+    expect(needsMoment4SpecificityFollowUp(EXPLICIT_NO_CURRENT_GRUDGE)).toBe(false);
+    expect(deriveMoment4PostGrudgeSpecificityResolvedFromMessages([
+      { role: 'assistant', content: MOMENT_4_GRUDGE_QUESTION_TEXT },
+      { role: 'user', content: EXPLICIT_NO_CURRENT_GRUDGE },
+    ])).toBe(true);
+  });
+
+  it('does not fire specificity redirect on valid_non_applicable responses', () => {
+    const forgiveBoundaries =
       "I've learned that it really takes a lot of energy to hold a grudge against someone so I tend to just forgive and move on and have boundaries and I don't allow the same bad habits or situations to pop up for me and I just don't include those people in my life.";
-    expect(countInterviewWords(t)).toBeGreaterThanOrEqual(30);
-    expect(hasMoment4PersonRelationshipOrSituationAnchor(t)).toBe(true);
-    expect(needsMoment4SpecificityFollowUp(t)).toBe(false);
+    const growthNoGrudge =
+      "I don't really think there's anyone that comes to mind when I think of someone I don't really like. I am in a place in my life where I've certainly been evolving and working on myself, doing my inner healing work, and naturally with that, my friendships have shifted. I don't hold grudges. I don't have the energy or capacity for that.";
+    expect(evaluateMoment4SpecificityProbe(growthNoGrudge).probeShouldFire).toBe(false);
+    expect(evaluateMoment4SpecificityProbe(forgiveBoundaries).probeShouldFire).toBe(false);
+    expect(needsMoment4SpecificityFollowUp(forgiveBoundaries)).toBe(false);
+  });
+
+  it('fires for very short vague answers', () => {
+    expect(needsMoment4SpecificityFollowUp('yes maybe sometimes')).toBe(true);
+    expect(evaluateMoment4SpecificityProbe('yes maybe sometimes').triggerReason).toBe('no_named_person');
+  });
+
+  it('fires for spiritual deflection without named person', () => {
+    const t =
+      "I am a spiritual person. I know as the time passes we meet new people. Some people try to commit mistakes. I forgive them because forgiving is so good for the body and for spiritual growth.";
+    expect(moment4HasNamedOrReferencedPerson(t)).toBe(false);
+    expect(needsMoment4SpecificityFollowUp(t)).toBe(true);
+    expect(evaluateMoment4SpecificityProbe(t).genericOpenerDetected).toBe(true);
   });
 
   it('detects model echo paraphrases of the specificity follow-up', () => {
@@ -126,7 +171,7 @@ describe('moment4SpecificityFollowUp', () => {
       { role: 'assistant' as const, content: paraphrase },
     ];
     expect(deriveMoment4PostGrudgeSpecificityResolvedFromMessages(msgs)).toBe(false);
-    const msgs2 = [...msgs, { role: 'user' as const, content: 'My old roommate in college.' }];
+    const msgs2 = [...msgs, { role: 'user' as const, content: 'My old roommate in college argued with me last year.' }];
     expect(deriveMoment4PostGrudgeSpecificityResolvedFromMessages(msgs2)).toBe(true);
   });
 
@@ -142,7 +187,7 @@ describe('moment4SpecificityFollowUp', () => {
     expect(deriveMoment4PostGrudgeSpecificityResolvedFromMessages(msgs)).toBe(false);
     const msgs2 = [
       ...msgs,
-      { role: 'user' as const, content: 'Fine — my cousin Rita and I fell out over the estate thing.' },
+      { role: 'user' as const, content: 'Fine — my cousin Rita and I fell out over the estate thing last year.' },
     ];
     expect(deriveMoment4PostGrudgeSpecificityResolvedFromMessages(msgs2)).toBe(true);
   });

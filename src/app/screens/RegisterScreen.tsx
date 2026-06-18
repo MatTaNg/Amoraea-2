@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import {
   View,
   Text,
@@ -9,7 +9,11 @@ import {
   Platform,
   ScrollView,
 } from 'react-native';
-import { useAuth } from '@features/authentication/hooks/useAuth';
+import {
+  AUTH_EMAIL_RESEND_COOLDOWN_MS,
+  getAuthEmailSendErrorMessage,
+  useAuth,
+} from '@features/authentication/hooks/useAuth';
 import { SafeAreaContainer } from '@ui/components/SafeAreaContainer';
 import { FlameOrb } from '@app/screens/FlameOrb';
 import { authStyles } from '@app/screens/authStyles';
@@ -45,7 +49,11 @@ export const RegisterScreen: React.FC<{ navigation: any }> = ({ navigation }) =>
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [sent, setSent] = useState(false);
-  const { signUp } = useAuth();
+  const [resendSent, setResendSent] = useState(false);
+  const [resending, setResending] = useState(false);
+  const [resendError, setResendError] = useState<string | null>(null);
+  const lastResendMsRef = useRef(0);
+  const { signUp, resendConfirmationEmail } = useAuth();
 
   useEffect(() => {
     if (Platform.OS !== 'web' || typeof document === 'undefined') return;
@@ -117,11 +125,39 @@ export const RegisterScreen: React.FC<{ navigation: any }> = ({ navigation }) =>
         age: parsedAge,
         gender: mapRegisterGenderToProfileGender(gender),
       });
+      lastResendMsRef.current = Date.now();
       setSent(true);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Something went wrong. Please try again.');
     } finally {
       setLoading(false);
+    }
+  };
+
+  const handleResendConfirmation = async () => {
+    if (!email?.trim() || resending) return;
+    const now = Date.now();
+    const elapsed = now - lastResendMsRef.current;
+    if (lastResendMsRef.current > 0 && elapsed < AUTH_EMAIL_RESEND_COOLDOWN_MS) {
+      const waitSec = Math.ceil((AUTH_EMAIL_RESEND_COOLDOWN_MS - elapsed) / 1000);
+      setResendError(`Please wait ${waitSec} seconds before requesting another confirmation email.`);
+      return;
+    }
+    setResending(true);
+    setResendError(null);
+    setResendSent(false);
+    try {
+      await resendConfirmationEmail(email.trim());
+      lastResendMsRef.current = Date.now();
+      setResendSent(true);
+    } catch (err) {
+      lastResendMsRef.current = Date.now();
+      setResendSent(false);
+      setResendError(
+        getAuthEmailSendErrorMessage(err, 'Failed to resend confirmation email'),
+      );
+    } finally {
+      setResending(false);
     }
   };
 
@@ -140,10 +176,29 @@ export const RegisterScreen: React.FC<{ navigation: any }> = ({ navigation }) =>
             <Text style={styles.sentIcon}>✦</Text>
             <Text style={authStyles.sentScreenTitle}>Check your email.</Text>
             <Text style={authStyles.sentScreenBody}>
-              {`We've sent a confirmation link to `}
-              <Text style={{ color: '#C8E4FF' }}>{email}</Text>
-              {`. Open it to complete your registration and begin your interview.`}
+              {resendSent
+                ? 'Confirmation email sent successfully. Open the link in your inbox to complete registration.'
+                : `We've sent a confirmation link to `}
+              {!resendSent ? (
+                <>
+                  <Text style={{ color: '#C8E4FF' }}>{email}</Text>
+                  {`. Open it to complete your registration and begin your interview.`}
+                </>
+              ) : null}
             </Text>
+            <Text style={authStyles.sentScreenBody}>
+              If you don&apos;t see it within a few minutes, check your junk or spam folder.
+            </Text>
+            {resendError ? <Text style={authStyles.errorText}>{resendError}</Text> : null}
+            <Pressable
+              onPress={() => void handleResendConfirmation()}
+              disabled={resending}
+              style={[authStyles.primaryButton, styles.button, styles.sentResendButton]}
+            >
+              <Text style={authStyles.primaryButtonText}>
+                {resending ? 'Sending…' : resendSent ? 'Resend again' : 'Resend confirmation email'}
+              </Text>
+            </Pressable>
             <View style={authStyles.divider} />
             <Text style={authStyles.footerText}>
               Already have an account?{' '}
@@ -298,7 +353,7 @@ export const RegisterScreen: React.FC<{ navigation: any }> = ({ navigation }) =>
             </Pressable>
 
             <Text style={authStyles.confirmationNote}>
-              {"You'll receive a confirmation email to verify your address."}
+              {"You'll receive a confirmation email to verify your address. Check your junk or spam folder if it doesn't arrive within a few minutes."}
             </Text>
 
             <View style={authStyles.divider} />
@@ -468,6 +523,10 @@ const styles = StyleSheet.create({
   },
   button: {
     marginBottom: 0,
+  },
+  sentResendButton: {
+    marginTop: 8,
+    marginBottom: 8,
   },
   sentInner: {
     alignItems: 'center',

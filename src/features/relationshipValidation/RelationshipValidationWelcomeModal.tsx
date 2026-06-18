@@ -7,8 +7,8 @@ import {
   ScrollView,
   Pressable,
   Platform,
+  useWindowDimensions,
 } from 'react-native';
-import { Button } from '@/shared/ui/Button';
 import { FlameOrb } from '@app/screens/FlameOrb';
 import { authStyles } from '@app/screens/authStyles';
 import { loadPsychometricsWebFontsOnce } from '@features/psychometrics/psychometricsTheme';
@@ -18,7 +18,14 @@ type Props = {
   onContinue: () => void;
 };
 
+/** Footer + button — used to cap scroll area so the CTA stays visible. */
+const FOOTER_HEIGHT = 84;
+
 export function RelationshipValidationWelcomeModal({ visible, onContinue }: Props) {
+  const { height: windowHeight } = useWindowDimensions();
+  const cardMaxHeight = Math.round(windowHeight * 0.88);
+  const scrollMaxHeight = Math.max(200, cardMaxHeight - FOOTER_HEIGHT);
+
   useEffect(() => {
     if (visible) loadPsychometricsWebFontsOnce();
   }, [visible]);
@@ -26,11 +33,13 @@ export function RelationshipValidationWelcomeModal({ visible, onContinue }: Prop
   return (
     <Modal visible={visible} transparent animationType="fade" onRequestClose={() => {}}>
       <View style={styles.backdrop}>
-        <View style={styles.card}>
+        <View style={[styles.card, { maxHeight: cardMaxHeight }]}>
           <ScrollView
+            style={{ maxHeight: scrollMaxHeight }}
             contentContainerStyle={styles.scrollContent}
             keyboardShouldPersistTaps="handled"
             showsVerticalScrollIndicator
+            bounces={false}
           >
             <View style={styles.flameWrap}>
               <View style={styles.flameScale}>
@@ -57,18 +66,20 @@ export function RelationshipValidationWelcomeModal({ visible, onContinue }: Prop
               Total: about 25 minutes
             </Text>
 
-            <Text style={styles.body}>
+            <Text style={[styles.body, styles.bodyLast]}>
               When you finish, you will receive a relationship compatibility report and your own
               psychological profile as a thank you.
             </Text>
+          </ScrollView>
 
+          <View style={styles.footer}>
             <Pressable
               onPress={onContinue}
               style={({ pressed }) => [authStyles.primaryButton, pressed && { opacity: 0.9 }]}
             >
               <Text style={authStyles.primaryButtonText}>I understand — let&apos;s begin</Text>
             </Pressable>
-          </ScrollView>
+          </View>
         </View>
       </View>
     </Modal>
@@ -86,7 +97,6 @@ const styles = StyleSheet.create({
     maxWidth: 480,
     width: '100%',
     alignSelf: 'center',
-    maxHeight: '90%',
     backgroundColor: '#0B0F18',
     borderRadius: 16,
     borderWidth: 1,
@@ -94,15 +104,27 @@ const styles = StyleSheet.create({
     overflow: 'hidden',
   },
   scrollContent: {
-    padding: 24,
-    paddingBottom: 28,
+    paddingHorizontal: 24,
+    paddingTop: 16,
+    paddingBottom: 12,
+  },
+  footer: {
+    paddingHorizontal: 24,
+    paddingTop: 12,
+    paddingBottom: 24,
+    borderTopWidth: 1,
+    borderTopColor: 'rgba(82, 142, 220, 0.12)',
+    backgroundColor: '#0B0F18',
   },
   flameWrap: {
+    height: 88,
+    overflow: 'hidden',
     alignItems: 'center',
-    marginBottom: 16,
+    justifyContent: 'flex-end',
+    marginBottom: 8,
   },
   flameScale: {
-    transform: [{ scale: 0.55 }],
+    transform: [{ scale: 0.42 }],
   },
   title: {
     fontFamily: Platform.OS === 'web' ? "'Cormorant Garamond', serif" : undefined,
@@ -118,6 +140,9 @@ const styles = StyleSheet.create({
     color: '#95A8BD',
     textAlign: 'center',
     marginBottom: 16,
+  },
+  bodyLast: {
+    marginBottom: 0,
   },
   callout: {
     backgroundColor: 'rgba(91, 168, 232, 0.08)',

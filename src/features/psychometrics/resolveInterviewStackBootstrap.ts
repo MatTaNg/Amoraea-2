@@ -1,7 +1,9 @@
 import type { InterviewAttemptRevealFields } from '@utilities/postInterviewProcessingGate';
 import { resolveStandardPostInterviewStackRoute } from '@utilities/postInterviewProcessingGate';
 
-import { PSYCHOMETRICS_ENABLED } from './interviewCompletionStatus';
+import { PSYCHOMETRICS_ENABLED } from './psychometricsFeatureFlags';
+import type { ValidationStandardReturnRoute } from '@features/relationshipValidation/validationShellRouting';
+
 import type { InitialInterviewRouteResult, InterviewStackRoute } from './resolveInitialInterviewRoute';
 
 export function shouldFetchPostInterviewDeferralSnapshot(
@@ -43,6 +45,8 @@ export function resolveInterviewStackBootstrap(input: {
   deferralSnapshot: InterviewAttemptRevealFields | null | undefined;
   isAdminEmail: boolean;
   lockedPostInterviewRoute: InterviewStackRoute | null;
+  /** Restores the post-interview screen after exiting the validation flow. */
+  validationStandardReturnRoute?: ValidationStandardReturnRoute | null;
 }): ResolvedInterviewStackBootstrap {
   const {
     initialRoute,
@@ -50,6 +54,7 @@ export function resolveInterviewStackBootstrap(input: {
     deferralSnapshot,
     isAdminEmail,
     lockedPostInterviewRoute,
+    validationStandardReturnRoute,
   } = input;
 
   let initialRouteName: InterviewStackRoute = initialRoute?.screen ?? 'Aria';
@@ -84,6 +89,12 @@ export function resolveInterviewStackBootstrap(input: {
 
   if (lockedPostInterviewRoute === 'PostInterviewPassed' || lockedPostInterviewRoute === 'PostInterviewFailed') {
     initialRouteName = lockedPostInterviewRoute;
+  }
+
+  if (validationStandardReturnRoute) {
+    initialRouteName = validationStandardReturnRoute;
+    interviewAlreadyCompleted = true;
+    legacyPsychometricsMode = false;
   }
 
   return {

@@ -92,6 +92,21 @@ REPAIR — CONDITIONAL LANGUAGE, DIRECTIONALITY, AND PROMPTED FLOORS (marker: **
 - **Prompted repair without every concrete detail:** A **prompted** repair (Ryan / James / Scenario C repair question) that shows **genuine ownership**, **growth** orientation, and **gratitude** (e.g. thankfulness for the other’s patience) may sit in the **7–8** **repair** range even if it does not enumerate every line of the conflict — **as long as** the relational stance and repair intent are clear and not blame-redirecting (per above). **Do not** use absence of a named incident as the sole reason to cap **repair** below 7 when the prompted answer is otherwise strong on ownership and care.
 `;
 
+/** Scenario A (Emma/Ryan) — appreciation anchors for slice scoring (repair-as-Ryan answer). */
+export const SCENARIO_A_APPRECIATION_ANCHORS = `
+SCENARIO A (Emma/Ryan) — APPRECIATION (assessed primarily from the repair answer):
+
+Score **appreciation** from the participant's **repair-as-Ryan** answer ("What if you were Ryan? How would you repair this situation?") and supporting context in this slice. The unprompted Q1 read may inform context but **appreciation** is anchored on whether the **repair** communicates that Emma is **prioritized and valued**, not only that Ryan will fix the phone-call incident.
+
+Emma's complaint is not really about one 25-minute phone call — it is about a pattern of feeling deprioritized ("you always put your family first before us"). Strong appreciation recognizes that repair requires more than apologizing for the specific incident; it requires Ryan communicating that Emma matters and is prioritized, not only that he will set a boundary with his mother going forward.
+
+• **Strong appreciation:** Explicitly addresses Emma's underlying need to feel valued/prioritized, not just the logistics of the phone call. May include reassurance, affirmation of her importance, or asking what would help her feel prioritized going forward — not only a boundary commitment with his mother.
+
+• **Weaker appreciation:** Addresses only the behavioral fix (turning off the phone, not taking calls during dinner) without addressing Emma's emotional need to feel like she matters. A purely logistical repair ("I'll set a boundary with my mom") that never affirms Emma's value or the deprioritization pattern should score in the **4–5** range on appreciation, even if it is a fine repair on accountability/repair grounds.
+
+• **Floor:** A minimally adequate repair answer that addresses at least the immediate incident should score **at or above 5** on appreciation per the standard floor-and-bonus philosophy — this rubric differentiates further based on whether the deeper prioritization need is named.
+`;
+
 /** Scenario B (Sarah/James) — attunement/appreciation anchors for slice + holistic scoring models. */
 export const SCENARIO_B_ATTUNEMENT_APPRECIATION_ANCHORS = `
 SCENARIO B (Sarah/James) — ATTUNEMENT & APPRECIATION (canonical vignette):

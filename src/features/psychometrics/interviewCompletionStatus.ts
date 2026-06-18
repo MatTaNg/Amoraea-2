@@ -5,12 +5,8 @@ import {
 } from '@data/supabase/userInterviewRoutingSelect';
 
 import type { InterviewStackRoute } from './resolveInitialInterviewRoute';
-
-/** When true: interview → congratulations → psychometric battery → post-interview report. */
-export const PSYCHOMETRICS_ENABLED = true;
-
-/** Set to true to use NPI Entitlement forced-choice instrument instead of SD3 narcissism Likert scale. */
-export const NPI_ENTITLEMENT_ENABLED = true;
+export { NPI_ENTITLEMENT_ENABLED, PSYCHOMETRICS_ENABLED } from './psychometricsFeatureFlags';
+import { PSYCHOMETRICS_ENABLED } from './psychometricsFeatureFlags';
 
 export type UserLoginRoutingRow = {
   interview_completed?: boolean | null;

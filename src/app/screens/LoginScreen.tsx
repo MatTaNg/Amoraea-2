@@ -9,7 +9,12 @@ import {
   Platform,
   ScrollView,
 } from 'react-native';
-import { useAuth, getAuthEmailSendErrorMessage } from '@features/authentication/hooks/useAuth';
+import {
+  AUTH_EMAIL_RESEND_COOLDOWN_MS,
+  getAuthEmailSendErrorMessage,
+  useAuth,
+} from '@features/authentication/hooks/useAuth';
+import { debugAuthCallbackLog, sanitizeAuthUrlForLog } from '@features/authentication/debugAuthCallbackLog';
 import { SafeAreaContainer } from '@ui/components/SafeAreaContainer';
 import { FlameOrb } from '@app/screens/FlameOrb';
 import { authStyles } from '@app/screens/authStyles';
@@ -20,6 +25,16 @@ const isEmailNotConfirmedError = (err: unknown): boolean => {
   const lower = msg.toLowerCase();
   return lower.includes('email not confirmed') || lower.includes('confirm your email');
 };
+
+function isConfirmationResendContext(message: string | null): boolean {
+  if (!message) return false;
+  const lower = message.toLowerCase();
+  return (
+    lower.includes('confirm your email') ||
+    lower.includes('confirmation email') ||
+    lower.includes('confirmation link')
+  );
+}
 
 const GOOGLE_FONTS_URL =
   "https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,300;0,400;1,300&family=Jost:wght@200;300;400&display=swap";
@@ -35,6 +50,7 @@ export const LoginScreen: React.FC<{ navigation: any; route?: { params?: { confi
   const [loading, setLoading] = useState(false);
   const [resendSent, setResendSent] = useState(false);
   const [resending, setResending] = useState(false);
+  const lastResendMsRef = useRef(0);
   const { signIn, resendConfirmationEmail, emailConfirmationLinkError, clearEmailConfirmationLinkError } =
     useAuth();
   const confirmEmailMessage =
@@ -44,6 +60,23 @@ export const LoginScreen: React.FC<{ navigation: any; route?: { params?: { confi
     (new URLSearchParams(window.location.search).get('confirmEmail') === '1' ||
       new URLSearchParams(window.location.search).get('confirmEmail') === 'true'));
   const passwordInputRef = useRef<React.ElementRef<typeof TextInput>>(null);
+
+  useEffect(() => {
+    if (Platform.OS !== 'web' || typeof window === 'undefined') return;
+    // #region agent log
+    debugAuthCallbackLog(
+      'LoginScreen.tsx:mount',
+      'Login screen mounted',
+      sanitizeAuthUrlForLog(
+        window.location.pathname,
+        window.location.search,
+        window.location.hash,
+      ),
+      'H7',
+      'post-fix',
+    );
+    // #endregion
+  }, []);
 
   useEffect(() => {
     if (!emailConfirmationLinkError) return;
@@ -79,7 +112,7 @@ export const LoginScreen: React.FC<{ navigation: any; route?: { params?: { confi
     } catch (err) {
       if (isEmailNotConfirmedError(err)) {
         setError(
-          'Please confirm your email before signing in. Check your inbox or resend the confirmation link below.'
+          'Please confirm your email before signing in. Check your inbox (and junk or spam folder) or resend the confirmation link below.'
         );
       } else {
         setError(err instanceof Error ? err.message : 'Incorrect email or password.');
@@ -90,13 +123,25 @@ export const LoginScreen: React.FC<{ navigation: any; route?: { params?: { confi
   };
 
   const handleResendConfirmation = async () => {
-    if (!email?.trim()) return;
+    if (!email?.trim() || resending) return;
+    const now = Date.now();
+    const elapsed = now - lastResendMsRef.current;
+    if (lastResendMsRef.current > 0 && elapsed < AUTH_EMAIL_RESEND_COOLDOWN_MS) {
+      const waitSec = Math.ceil((AUTH_EMAIL_RESEND_COOLDOWN_MS - elapsed) / 1000);
+      setError(`Please wait ${waitSec} seconds before requesting another confirmation email.`);
+      return;
+    }
     setResending(true);
     setError(null);
+    setResendSent(false);
+    clearEmailConfirmationLinkError();
     try {
       await resendConfirmationEmail(email.trim());
+      lastResendMsRef.current = Date.now();
       setResendSent(true);
     } catch (err) {
+      lastResendMsRef.current = Date.now();
+      setResendSent(false);
       setError(
         getAuthEmailSendErrorMessage(err, 'Failed to resend confirmation email'),
       );
@@ -104,6 +149,10 @@ export const LoginScreen: React.FC<{ navigation: any; route?: { params?: { confi
       setResending(false);
     }
   };
+
+  const showResendConfirmation =
+    Boolean(email?.trim()) &&
+    (isConfirmationResendContext(error) || Boolean(emailConfirmationLinkError) || resendSent);
 
   /** RN Web often does not fire `onSubmitEditing` for the physical Enter key — handle explicitly. */
   const onEmailEnterAction = () => {
@@ -154,7 +203,10 @@ export const LoginScreen: React.FC<{ navigation: any; route?: { params?: { confi
               placeholder="Email"
               placeholderTextColor="#5B6B80"
               value={email}
-              onChangeText={setEmail}
+              onChangeText={(value) => {
+                setEmail(value);
+                if (resendSent) setResendSent(false);
+              }}
               keyboardType="email-address"
               autoCapitalize="none"
               autoCorrect={false}
@@ -197,22 +249,39 @@ export const LoginScreen: React.FC<{ navigation: any; route?: { params?: { confi
               <Text style={styles.forgotPasswordLink}>Forgot password?</Text>
             </Pressable>
 
-            {confirmEmailMessage && (
+            {confirmEmailMessage && !resendSent ? (
               <Text style={styles.successText}>
-                Check your email to confirm your account, then sign in below.
+                Check your email to confirm your account, then sign in below. If you don&apos;t see it,
+                check your junk or spam folder.
               </Text>
-            )}
+            ) : null}
 
-            {error ? <Text style={authStyles.errorText}>{error}</Text> : null}
+            {resendSent ? (
+              <Text style={styles.successText}>
+                Confirmation email sent successfully. Check your inbox at{' '}
+                <Text style={styles.successEmail}>{email.trim()}</Text>, then sign in below. If you
+                don&apos;t see it, check your junk or spam folder.
+              </Text>
+            ) : null}
 
-            {error && error.includes('confirm your email') && email?.trim() ? (
+            {error && !resendSent ? <Text style={authStyles.errorText}>{error}</Text> : null}
+
+            {showResendConfirmation ? (
               <Pressable
-                onPress={handleResendConfirmation}
+                onPress={() => void handleResendConfirmation()}
                 disabled={resendSent || resending}
-                style={[authStyles.primaryButton, styles.button]}
+                style={[
+                  authStyles.primaryButton,
+                  styles.button,
+                  (resendSent || resending) && styles.buttonMuted,
+                ]}
               >
                 <Text style={authStyles.primaryButtonText}>
-                  {resendSent ? 'Confirmation email sent' : resending ? '...' : 'Resend confirmation email'}
+                  {resendSent
+                    ? 'Confirmation email sent'
+                    : resending
+                      ? 'Sending…'
+                      : 'Resend confirmation email'}
                 </Text>
               </Pressable>
             ) : null}
@@ -320,5 +389,13 @@ const styles = StyleSheet.create({
     marginBottom: 16,
     textAlign: 'center',
     fontFamily: Platform.OS === 'web' ? "'Jost', sans-serif" : undefined,
+    lineHeight: 21,
+  },
+  successEmail: {
+    color: '#C8E4FF',
+    fontWeight: '600',
+  },
+  buttonMuted: {
+    opacity: 0.72,
   },
 });

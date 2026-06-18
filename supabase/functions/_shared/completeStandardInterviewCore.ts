@@ -16,7 +16,7 @@ import { generateAIReasoning } from './generateAIReasoning.ts';
 import { CLAUDE_SONNET_MODEL } from './anthropicModel.ts';
 import { communicationFloorFieldsFromTranscript } from './communicationFloorFromTranscript.ts';
 import { evaluateInterviewCompletionGate, type CompletionGateFailure } from './interviewCompletionGate.ts';
-import { mergeMomentConcretenessForGate, normalizeResponseConcreteness } from './personalMomentConcreteness.ts';
+import { mergeMomentConcretenessForGate, normalizeMoment4Concreteness, normalizeResponseConcreteness } from './personalMomentConcreteness.ts';
 import { scenarioEmotionalVocabDensityPercentFromTranscript } from './personalMomentEmotionalVocab.ts';
 import { applyPsychometricModifierToAttempt } from './applyPsychometricModifier.ts';
 import { normalizeGateFailDetailForPersist } from './gateFailDetailForPersist.ts';
@@ -181,7 +181,7 @@ function disclosureCalibrationFromTranscriptAndPatterns(
   const m5o = patterns?.moment_5_scores;
   const m4c =
     m4o != null && typeof m4o === 'object' && !Array.isArray(m4o)
-      ? normalizeResponseConcreteness((m4o as Record<string, unknown>).response_concreteness)
+      ? normalizeMoment4Concreteness((m4o as Record<string, unknown>).response_concreteness)
       : null;
   const m5c =
     m5o != null && typeof m5o === 'object' && !Array.isArray(m5o)

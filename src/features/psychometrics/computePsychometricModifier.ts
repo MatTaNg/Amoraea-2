@@ -1,6 +1,6 @@
 import { GASP_EXTERNALIZATION_ITEM_IDS } from './assessmentContent';
 import { GASP_EXTREME_EXTERNALIZATION_FLOOR_THRESHOLD } from './psychometricFloorBreaches';
-import { NPI_ENTITLEMENT_ENABLED } from './interviewCompletionStatus';
+import { NPI_ENTITLEMENT_ENABLED } from './psychometricsFeatureFlags';
 import {
   detectRfqStraightLineFromResponses,
   RFQ_STRAIGHT_LINE_FLAG,

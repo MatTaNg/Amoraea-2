@@ -115,4 +115,24 @@ describe('resolveInterviewStackBootstrap', () => {
     expect(result.initialRouteName).toBe('AssessmentWelcome');
     expect(result.legacyPsychometricsMode).toBe(false);
   });
+
+  it('restores the post-interview screen after exiting the validation flow', () => {
+    const result = resolveInterviewStackBootstrap({
+      initialRoute: {
+        screen: 'InterviewComplete',
+        legacyPsychometricsMode: false,
+        interviewAlreadyCompleted: true,
+        needsMarketResearch: false,
+      },
+      profileShowsStandardInterviewComplete: true,
+      deferralSnapshot: null,
+      isAdminEmail: false,
+      lockedPostInterviewRoute: null,
+      validationStandardReturnRoute: 'PostInterview',
+    });
+
+    expect(result.initialRouteName).toBe('PostInterview');
+    expect(result.interviewAlreadyCompleted).toBe(true);
+    expect(result.legacyPsychometricsMode).toBe(false);
+  });
 });

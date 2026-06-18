@@ -81,7 +81,7 @@ For an authoritative current schema in a deployed project, use `supabase db dump
 
 | Call site | Prompt builder | Notes |
 |-----------|------------------|-------|
-| `AriaScreen` `scoreScenario` | `buildScenarioScoringPrompt` in **AriaScreen.tsx ~3580** | User message only; model `claude-sonnet-4-20250514` in code |
+| `AriaScreen` `scoreScenario` | `buildScenarioScoringPrompt` in **AriaScreen.tsx** | User message only; model `CLAUDE_SONNET_MODEL` (`claude-sonnet-4-6`) |
 | `AriaScreen` `scoreInterview` (Moments 4/5) | `buildPersonalMomentScoringPrompt`, `buildMoment5AccountabilityScoringPrompt` | Imports from `src/features/aria/` |
 | Edge `runCompleteStandardInterview` | `buildScoringPrompt` in **`supabase/functions/_shared/holisticScoringPrompt.ts`** | Full-transcript holistic JSON; same ideas as `src/features/aria/holisticScoringPrompt.ts` |
 | Narrative after scores (not pillar numbers) | `supabase/functions/_shared/generateAIReasoning.ts` | Parallel: `src/features/aria/generateAIReasoning.ts` |

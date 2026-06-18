@@ -3,7 +3,7 @@ import {
   keyEvidenceHasNonEmptyAssessedText,
   pillarScoresHaveNumericAssessment,
 } from './interviewCompletionGate';
-import { normalizeResponseConcreteness } from './personalMomentConcreteness';
+import { normalizeResponseConcreteness, normalizeMoment4Concreteness } from './personalMomentConcreteness';
 
 /** User-facing; when set in keyEvidence, participant skipped the remainder of this segment after a frustration offer. */
 export const SKIPPED_BY_USER_FRUSTRATION_EVIDENCE =
@@ -351,8 +351,10 @@ export function salvagePersonalMomentDepthFieldsFromRawModelText(raw: string): {
   emotional_vocab_words: string[];
   user_slice_word_count: number | null;
 } {
-  const rcMatch = raw.match(/"response_concreteness"\s*:\s*"(absent|low|moderate|high)"/i);
-  const response_concreteness = rcMatch ? normalizeResponseConcreteness(rcMatch[1]) : null;
+  const rcMatch = raw.match(/"response_concreteness"\s*:\s*"(absent|valid_non_applicable|low|moderate|high)"/i);
+  const response_concreteness = rcMatch
+    ? normalizeMoment4Concreteness(rcMatch[1]) ?? normalizeResponseConcreteness(rcMatch[1])
+    : null;
 
   const evcMatch = raw.match(/"emotional_vocab_count"\s*:\s*(\d+)/i);
   const emotional_vocab_count =

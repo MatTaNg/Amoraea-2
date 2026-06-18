@@ -96,7 +96,15 @@ EXPO_PUBLIC_SUPABASE_ANON_KEY=your_supabase_anon_key
 # EXPO_PUBLIC_AUTH_REDIRECT_URL=https://www.amoraea.com/
 ```
 
-In **Supabase → Authentication → URL Configuration**, set **Site URL** to your deployed web app **root origin only** (e.g. `https://www.amoraea.com/` — **not** `/welcome` or `/reset-password`). Under **Redirect URLs**, add **`https://www.amoraea.com/confirm-email`**, `https://www.amoraea.com/reset-password`, and your other origins (e.g. `https://www.amoraea.com/**`). Signup confirmation emails use `emailRedirectTo` `/confirm-email`; if that URL is missing from the allowlist, Supabase falls back to Site URL and users may land on the wrong page (including the reset-password screen). In **Email Templates → Confirm signup**, the link must be `href="{{ .ConfirmationURL }}"` only.
+In **Supabase → Authentication → URL Configuration**, set **Site URL** to your deployed web app **root origin only** (e.g. `https://www.amoraea.com/` — **not** `/welcome` or `/auth/reset-password`). Under **Redirect URLs**, add **`https://www.amoraea.com/auth/confirm`**, `https://www.amoraea.com/auth/reset-password`, legacy paths if needed (`/confirm-email`, `/reset-password`), and your other origins (e.g. `https://www.amoraea.com/**`). Signup confirmation emails use `emailRedirectTo` `/auth/confirm`; if that URL is missing from the allowlist, Supabase falls back to Site URL and users may land on the wrong page (including the reset-password screen).
+
+**Hotmail / Outlook junk folder:** Supabase’s default template uses `{{ .ConfirmationURL }}`, which points at `https://<project>.supabase.co/auth/v1/verify?...` — that third-party domain is a common spam signal. Replace it in **Authentication → Email Templates → Confirm signup** with the branded link from `supabase/templates/confirm-signup.html`:
+
+```html
+<a href="{{ .SiteURL }}/auth/confirm?token_hash={{ .TokenHash }}&type=signup">Confirm email address</a>
+```
+
+The app already verifies `token_hash` on `/auth/confirm`. Also enable **Custom SMTP** (e.g. [Resend](https://resend.com)) with a `@amoraea.com` sender and SPF/DKIM/DMARC on your domain — inbox placement improves more from SMTP + domain auth than from redirect URL alone. Optional: Supabase **Custom Auth Domain** (`auth.amoraea.com`) on Pro plans.
 
 **Netlify:** `netlify.toml` and `public/_redirects` configure SPA fallback so `/` and deep paths return `index.html` (fixes “Page not found” after email confirmation). Redeploy after pulling these files.
 

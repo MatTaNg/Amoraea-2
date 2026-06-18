@@ -111,6 +111,24 @@
           var path = window.location.pathname || '';
           var search = window.location.search || '';
           var hash = window.location.hash || '';
+          try {
+            sessionStorage.setItem(
+              'debug_auth_first_landing_28d27a',
+              JSON.stringify({
+                pathname: path,
+                hasCode: search.indexOf('code=') !== -1,
+                hasTokenHash: search.indexOf('token_hash=') !== -1,
+                queryTypeSignup: search.toLowerCase().indexOf('type=signup') !== -1,
+                onConfirmPath:
+                  path.indexOf('auth/confirm') !== -1 || path.indexOf('confirm-email') !== -1,
+                onResetPath:
+                  path.indexOf('auth/reset-password') !== -1 ||
+                  path.indexOf('reset-password') !== -1,
+                host: window.location.host || '',
+                timestamp: Date.now(),
+              }),
+            );
+          } catch (eStore) {}
           var hashLower = hash.toLowerCase();
           var isRecoveryHash = hashLower.indexOf('type=recovery') !== -1;
           var isConfirmHash =
@@ -118,8 +136,10 @@
             hashLower.indexOf('type=email') !== -1 ||
             hashLower.indexOf('type=email_change') !== -1 ||
             hashLower.indexOf('type=invite') !== -1;
-          var onResetPath = path.indexOf('reset-password') !== -1;
-          var onConfirmPath = path.indexOf('confirm-email') !== -1;
+          var onResetPath =
+            path.indexOf('auth/reset-password') !== -1 || path.indexOf('reset-password') !== -1;
+          var onConfirmPath =
+            path.indexOf('auth/confirm') !== -1 || path.indexOf('confirm-email') !== -1;
           var searchLower = search.toLowerCase();
           var isConfirmQuery =
             searchLower.indexOf('type=signup') !== -1 ||
@@ -127,12 +147,53 @@
             searchLower.indexOf('type=email_change') !== -1 ||
             searchLower.indexOf('type=invite') !== -1;
           if (onResetPath && (isConfirmHash || isConfirmQuery) && !isRecoveryHash) {
-            window.location.replace('/confirm-email' + search + hash);
+            try { window.localStorage.removeItem('amoraea_password_reset_pending'); } catch (eClr) {}
+            window.location.replace('/auth/confirm' + search + hash);
             return;
           }
-          if (isRecoveryHash && !onResetPath) {
-            window.location.replace('/reset-password' + search + hash);
+          var resetPending = false;
+          try {
+            var rawPending = window.localStorage.getItem('amoraea_password_reset_pending');
+            if (rawPending) {
+              var ts = Number(rawPending);
+              resetPending =
+                Number.isFinite(ts) && Date.now() - ts <= 30 * 60 * 1000;
+            }
+          } catch (ePending) {
+            resetPending = false;
           }
+          var hasAuthCode =
+            search.indexOf('code=') !== -1 || search.indexOf('token_hash=') !== -1;
+          var hasImplicitAuthHash =
+            hashLower.indexOf('access_token=') !== -1 && hashLower.indexOf('error=') === -1;
+          if (
+            onResetPath &&
+            !isRecoveryHash &&
+            searchLower.indexOf('type=recovery') === -1 &&
+            (hasAuthCode || hasImplicitAuthHash)
+          ) {
+            if (!resetPending || isConfirmQuery || isConfirmHash) {
+              try { window.localStorage.removeItem('amoraea_password_reset_pending'); } catch (eClr2) {}
+              window.location.replace('/auth/confirm' + search + hash);
+              return;
+            }
+          }
+          if (isRecoveryHash && !onResetPath) {
+            window.location.replace('/auth/reset-password' + search + hash);
+            return;
+          }
+          if (
+            onResetPath &&
+            !isRecoveryHash &&
+            searchLower.indexOf('type=recovery') === -1 &&
+            !hasAuthCode &&
+            !hasImplicitAuthHash
+          ) {
+            fetch('http://127.0.0.1:7668/ingest/668e0bd5-3283-4492-9f48-e33846c18218',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'28d27a'},body:JSON.stringify({sessionId:'28d27a',location:'index.html:auth-bootstrap',message:'redirect bare reset path to home',data:{pathname:path},hypothesisId:'H6',timestamp:Date.now(),runId:'post-fix'})}).catch(function(){});
+            window.location.replace('/');
+            return;
+          }
+          fetch('http://127.0.0.1:7668/ingest/668e0bd5-3283-4492-9f48-e33846c18218',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'28d27a'},body:JSON.stringify({sessionId:'28d27a',location:'index.html:auth-bootstrap',message:'early auth URL',data:{pathname:path,hasCode:search.indexOf('code=')!==-1,hasTokenHash:search.indexOf('token_hash=')!==-1,queryTypeSignup:isConfirmQuery,queryTypeRecovery:searchLower.indexOf('type=recovery')!==-1,hashTypeSignup:isConfirmHash,hashTypeRecovery:isRecoveryHash,onResetPath,resetPending:resetPending,hasImplicitAuthHash:hashLower.indexOf('access_token=')!==-1&&hashLower.indexOf('error=')===-1,hrefLen:(window.location.href||'').length},hypothesisId:'H1',timestamp:Date.now(),runId:'post-fix'})}).catch(function(){});
         } catch (e) {
           /* ignore */
         }

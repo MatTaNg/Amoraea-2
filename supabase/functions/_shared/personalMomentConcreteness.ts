@@ -1,6 +1,23 @@
 /** Duplicated from `src/features/aria/personalMomentConcreteness.ts` for Edge — keep in sync. */
 export type ResponseConcretenessLevel = 'absent' | 'low' | 'moderate' | 'high';
 
+export type Moment4ConcretenessLevel = ResponseConcretenessLevel | 'valid_non_applicable';
+
+export function normalizeMoment4Concreteness(raw: unknown): Moment4ConcretenessLevel | null {
+  if (raw == null) return null;
+  const t = String(raw).trim().toLowerCase();
+  if (
+    t === 'absent' ||
+    t === 'low' ||
+    t === 'moderate' ||
+    t === 'high' ||
+    t === 'valid_non_applicable'
+  ) {
+    return t as Moment4ConcretenessLevel;
+  }
+  return null;
+}
+
 export function normalizeResponseConcreteness(raw: unknown): ResponseConcretenessLevel | null {
   if (raw == null) return null;
   const t = String(raw).trim().toLowerCase();
@@ -32,8 +49,10 @@ export function computePersonalMomentConcretenessModifier(
   moment4: string | null | undefined,
   moment5: string | null | undefined,
 ): number {
-  const a = normalizeResponseConcreteness(moment4);
+  const a = normalizeMoment4Concreteness(moment4);
   const b = normalizeResponseConcreteness(moment5);
+  // valid_non_applicable: coherent reflective answer explaining genuine absence of grudges — neutral.
+  if (a === 'valid_non_applicable') return 0;
   if (a == null || b == null) return 0;
   if (a === 'moderate' || a === 'high' || b === 'moderate' || b === 'high') return 0;
   if (a === 'absent' && b === 'absent') return -0.3;
@@ -42,15 +61,33 @@ export function computePersonalMomentConcretenessModifier(
   return 0;
 }
 
+export function moment4Moment5ConcretenessDepthSignalDelta(
+  moment4: string | null | undefined,
+  moment5: string | null | undefined,
+): number {
+  const m4 = normalizeMoment4Concreteness(moment4) ?? '';
+  const m5 = (moment5 ?? '').toString().trim().toLowerCase();
+  if (m4 === 'valid_non_applicable') return 0;
+  if (m4 === 'absent' && m5 === 'absent') return -0.5;
+  if ((m4 === 'absent' && m5 === 'low') || (m4 === 'low' && m5 === 'absent')) return -0.35;
+  if (m4 === 'low' && m5 === 'low') return -0.3;
+  if ((m4 === 'low' && m5 === 'moderate') || (m4 === 'moderate' && m5 === 'low')) return -0.1;
+  if (m4 === 'moderate' && m5 === 'moderate') return 0;
+  if ((m4 === 'high' && m5 === 'moderate') || (m4 === 'moderate' && m5 === 'high')) return 0.1;
+  if (m4 === 'high' && m5 === 'high') return 0.2;
+  return 0;
+}
+
 export function bothPersonalMomentsAbsentOrLow(
   moment4: string | null | undefined,
   moment5: string | null | undefined,
 ): boolean {
-  const a = normalizeResponseConcreteness(moment4);
+  const a = normalizeMoment4Concreteness(moment4);
   const b = normalizeResponseConcreteness(moment5);
   if (a == null || b == null) return false;
-  const weak = (x: ResponseConcretenessLevel) => x === 'absent' || x === 'low';
-  return weak(a) && weak(b);
+  const weakM4 = a === 'absent' || a === 'low';
+  const weakM5 = b === 'absent' || b === 'low';
+  return weakM4 && weakM5;
 }
 
 export const RESPONSE_CONCRETENESS_SCORING_INSTRUCTION = `Assess the concreteness of the user's personal response on a 4-level scale and return as response_concreteness:

@@ -24,10 +24,8 @@ import {
 } from '@features/psychometrics/psychometricsTheme';
 import { spacing } from '@ui/theme/spacing';
 import { PreparingResultsView } from '@app/screens/PreparingResultsView';
-import {
-  RELATIONSHIP_VALIDATION_TRACK,
-} from '@features/relationshipValidation/constants';
-import { fetchUserValidationTrack } from '@features/relationshipValidation/relationshipValidationRepo';
+import { fetchValidationShellRouting } from '@features/relationshipValidation/relationshipValidationRepo';
+import { shouldUseRelationshipValidationNavigator } from '@features/relationshipValidation/validationShellRouting';
 import { useQueryClient } from '@tanstack/react-query';
 
 type Props = {
@@ -51,9 +49,10 @@ export function PsychometricsCompleteScreen({ navigation, route }: Props) {
 
   const advanceToFullReport = useCallback(async () => {
     if (!userId) return;
-    const track = await fetchUserValidationTrack(userId);
-    if (track === RELATIONSHIP_VALIDATION_TRACK) {
+    const routing = await fetchValidationShellRouting(userId);
+    if (shouldUseRelationshipValidationNavigator(routing)) {
       setPhase('validation_redirect');
+      await queryClient.invalidateQueries({ queryKey: ['validationShellRouting', userId] });
       await queryClient.invalidateQueries({ queryKey: ['validationTrack', userId] });
       return;
     }

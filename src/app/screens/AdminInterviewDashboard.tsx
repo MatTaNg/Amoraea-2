@@ -123,6 +123,11 @@ import { AdminFeedbackPanel } from '@/components/admin/AdminFeedbackPanel';
 import { OverviewTab } from '@features/admin/OverviewTab';
 import { CompatibilityTab } from '@features/admin/CompatibilityTab';
 import { ValidationCohortTab } from '@features/admin/ValidationCohortTab';
+import { RELATIONSHIP_VALIDATION_TRACK } from '@features/relationshipValidation/constants';
+import {
+  enrollExistingUserInRelationshipValidation,
+  unenrollExistingUserFromRelationshipValidation,
+} from '@features/relationshipValidation/relationshipValidationRepo';
 import { UncertaintyScoreCard, uncertaintyBadgeColor, uncertaintyBadgeLabel } from '@features/admin/UncertaintyScoreCard';
 import { GamingCorrectionBanner, GamingCorrectionCard } from '@features/admin/GamingCorrectionCard';
 import { ScoreReceiptCard } from '@features/admin/ScoreReceiptCard';
@@ -171,7 +176,7 @@ const PILLAR_ROWS = [
 
 const MARKER_IDS = PILLAR_ROWS.map((p) => p.id);
 const ASSESSED_MARKERS_BY_SECTION: Record<string, string[]> = {
-  scenario_1: ['mentalizing', 'accountability', 'contempt', 'repair', 'attunement'],
+  scenario_1: ['mentalizing', 'accountability', 'contempt', 'repair', 'attunement', 'appreciation'],
   scenario_2: ['appreciation', 'attunement', 'mentalizing', 'repair', 'accountability', 'contempt'],
   scenario_3: ['regulation', 'repair', 'mentalizing', 'attunement', 'accountability', 'commitment_threshold', 'contempt'],
   moment_4: ['contempt', 'commitment_threshold', 'accountability', 'mentalizing'],
@@ -248,6 +253,8 @@ type UserRow = {
   psychometrics_gasp_score?: number | null;
   psychometrics_dweck_score?: number | null;
   psychometrics_scs_sf_score?: number | null;
+  validation_track?: string | null;
+  validation_standard_app_enrolled?: boolean | null;
 };
 
 type AttemptRow = {
@@ -992,7 +999,9 @@ const ADMIN_USERS_LIST_SELECT = `
       psychometrics_rfq_score,
       psychometrics_gasp_score,
       psychometrics_dweck_score,
-      psychometrics_scs_sf_score
+      psychometrics_scs_sf_score,
+      validation_track,
+      validation_standard_app_enrolled
     `;
 
 /** When 20260628140000_users_psychometrics_sd3_narcissism.sql has not been applied yet. */
@@ -1018,7 +1027,9 @@ const ADMIN_USERS_LIST_SELECT_WITHOUT_SD3_RFQ = `
       psychometric_straight_line_flags,
       psychometrics_gasp_score,
       psychometrics_dweck_score,
-      psychometrics_scs_sf_score
+      psychometrics_scs_sf_score,
+      validation_track,
+      validation_standard_app_enrolled
     `;
 
 /** Users + lightweight attempt rows for list (counts, pass badge, tab labels). No transcript / scores jsonb. */
@@ -2403,6 +2414,7 @@ function egoLevelAdminColor(level: number | null | undefined): string {
 function concretenessAdminColor(level: string | null | undefined): string {
   const t = (level ?? '').toLowerCase();
   if (t === 'absent' || t === 'low') return '#E87A7A';
+  if (t === 'valid_non_applicable') return '#5B8FBD';
   if (t === 'moderate') return '#D4A84B';
   if (t === 'high') return '#2A8C6A';
   return '#7A9ABE';
@@ -4359,6 +4371,7 @@ function UserDetails({
   const [activeInnerTab, setActiveInnerTab] = useState<AdminAttemptInnerTabId>('summary');
   const [selectedAttemptId, setSelectedAttemptId] = useState<string | null>(null);
   const [overrideBusy, setOverrideBusy] = useState(false);
+  const [validationEnrollBusy, setValidationEnrollBusy] = useState(false);
   const [retakeAllowBusy, setRetakeAllowBusy] = useState(false);
   const [profileUser, setProfileUser] = useState<AdminUserProfileRecord | null>(null);
   const [profileLoading, setProfileLoading] = useState(true);
@@ -4393,6 +4406,28 @@ function UserDetails({
     };
   }, [u.id]);
   const detailLaunchPhone = trimLaunchNotificationPhone(u.launch_notification_phone);
+  const isStandardAppValidationEnrolled =
+    u.validation_track === RELATIONSHIP_VALIDATION_TRACK && u.validation_standard_app_enrolled === true;
+
+  const toggleStandardAppValidationEnrollment = useCallback(async () => {
+    if (!u.id || validationEnrollBusy) return;
+    setValidationEnrollBusy(true);
+    try {
+      if (isStandardAppValidationEnrolled) {
+        await unenrollExistingUserFromRelationshipValidation(u.id);
+      } else {
+        await enrollExistingUserInRelationshipValidation(u.id);
+      }
+      onRefreshData();
+    } catch (err) {
+      Alert.alert(
+        'Update failed',
+        err instanceof Error ? err.message : 'Could not update validation enrollment.',
+      );
+    } finally {
+      setValidationEnrollBusy(false);
+    }
+  }, [isStandardAppValidationEnrolled, onRefreshData, u.id, validationEnrollBusy]);
 
   const applyPassOverride = useCallback(
     async (mode: 'pass' | 'fail' | 'clear') => {
@@ -4546,6 +4581,28 @@ function UserDetails({
               </Text>
             </TouchableOpacity>
           ) : null}
+          <TouchableOpacity
+            style={[
+              styles.overrideChip,
+              isStandardAppValidationEnrolled && styles.overrideChipActive,
+            ]}
+            onPress={() => void toggleStandardAppValidationEnrollment()}
+            disabled={validationEnrollBusy}
+            accessibilityRole="button"
+            accessibilityLabel={
+              isStandardAppValidationEnrolled
+                ? 'Remove RELATIONSHIP validation enrollment'
+                : 'Enroll in RELATIONSHIP validation cohort'
+            }
+          >
+            <Text style={styles.overrideChipText}>
+              {validationEnrollBusy
+                ? 'Updating…'
+                : isStandardAppValidationEnrolled
+                  ? 'Validation enrolled'
+                  : 'Enroll validation'}
+            </Text>
+          </TouchableOpacity>
         </View>
       </View>
 
@@ -5608,6 +5665,10 @@ const styles = StyleSheet.create({
     paddingHorizontal: 12,
     paddingVertical: 7,
     backgroundColor: 'rgba(30,111,217,0.12)',
+  },
+  overrideChipActive: {
+    borderColor: 'rgba(74, 222, 128, 0.55)',
+    backgroundColor: 'rgba(34, 197, 94, 0.14)',
   },
   overrideChipText: {
     color: '#C8E4FF',

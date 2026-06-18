@@ -19,16 +19,12 @@ type Props = {
 export function ValidationPsychometricsHubScreen({ userId, navigation }: Props) {
   const routeNext = useCallback(async () => {
     const { complete, nextStep } = await validationInstrumentsCompleted(userId);
-    if (!complete && nextStep === 'ECR-36') {
-      navigation.replace('ValidationInstrument', { instrument: 'ECR-36' });
-      return;
-    }
-    if (!complete && nextStep === 'PVQ-21') {
-      navigation.replace('ValidationInstrument', { instrument: 'PVQ-21' });
-      return;
-    }
-    if (!complete && nextStep === 'CONFLICT-30') {
-      navigation.replace('ValidationConflict');
+    if (!complete && nextStep) {
+      if (nextStep === 'CONFLICT-30') {
+        navigation.replace('ValidationConflict');
+        return;
+      }
+      navigation.replace('ValidationInstrument', { instrument: nextStep });
       return;
     }
 

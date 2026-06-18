@@ -13,6 +13,7 @@ import {
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useFocusEffect } from '@react-navigation/native';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { SafeAreaContainer } from '@ui/components/SafeAreaContainer';
 import { authStyles } from '@app/screens/authStyles';
 import { useAuth } from '@/shared/hooks/AuthProvider';
@@ -34,6 +35,11 @@ import { markValidationInterviewOptIn } from '@features/relationshipValidation/r
 import { maybeComputeValidationPairScore } from '@features/relationshipValidation/relationshipValidationService';
 import { DownloadValidationReportButton } from '@features/relationshipValidation/DownloadValidationReportButton';
 import { isValidationInterviewCompleted } from '@features/relationshipValidation/generateValidationReport';
+import {
+  exitValidationFlowToStandardApp,
+  fetchValidationShellRouting,
+  isValidationStandardAppEnrolled,
+} from '@features/relationshipValidation/validationShellRouting';
 
 // eslint-disable-next-line @typescript-eslint/no-require-imports
 const AMORAEA_LOGO = require('../../../../assets/branding/amoraea-logo.png');
@@ -59,12 +65,22 @@ type Props = {
   };
 };
 
-const DIMENSION_OPTIONS = [
-  { value: 'attachment', label: 'Attachment' },
-  { value: 'values', label: 'Values' },
-  { value: 'conflict_style', label: 'Conflict style' },
-  { value: 'overall', label: 'Overall score' },
-] as const;
+/** Defaults for legacy post-assessment fields no longer collected in the UI. */
+function buildPostAssessmentPayload(
+  reportValue: number,
+  reportImprovement: string,
+): RelationshipValidationPostAssessment {
+  return {
+    scoreAccuracy: 0,
+    mostAccurateDimension: 'overall',
+    leastAccurateDimension: 'none_surprising',
+    selfSurpriseText: null,
+    partnerSurpriseText: null,
+    hypotheticalInterest: 0,
+    reportValue,
+    reportImprovementText: reportImprovement.trim() || null,
+  };
+}
 
 function ScoreBar({ label, score }: { label: string; score: number }) {
   const pct = Math.round(score * 100);
@@ -81,6 +97,7 @@ function ScoreBar({ label, score }: { label: string; score: number }) {
 
 export function ValidationReportScreen({ userId, navigation }: Props) {
   const { signOut } = useAuth();
+  const queryClient = useQueryClient();
   const [loading, setLoading] = useState(true);
   const [profile, setProfile] = useState<Awaited<
     ReturnType<typeof loadValidationSelfProfileSummary>
@@ -89,15 +106,9 @@ export function ValidationReportScreen({ userId, navigation }: Props) {
     null,
   );
   const [partnerComplete, setPartnerComplete] = useState(false);
-  const [postSubmitted, setPostSubmitted] = useState(false);
+  const [feedbackSaved, setFeedbackSaved] = useState(false);
   const [interviewCompleted, setInterviewCompleted] = useState(false);
 
-  const [scoreAccuracy, setScoreAccuracy] = useState(0);
-  const [mostAccurate, setMostAccurate] = useState<string | null>(null);
-  const [leastAccurate, setLeastAccurate] = useState<string | null>(null);
-  const [selfSurprise, setSelfSurprise] = useState('');
-  const [partnerSurprise, setPartnerSurprise] = useState('');
-  const [hypotheticalInterest, setHypotheticalInterest] = useState(0);
   const [reportValue, setReportValue] = useState(0);
   const [reportImprovement, setReportImprovement] = useState('');
   const [submitting, setSubmitting] = useState(false);
@@ -105,28 +116,26 @@ export function ValidationReportScreen({ userId, navigation }: Props) {
   const [comparisons, setComparisons] = useState<RelationshipValidationComparison[]>([]);
   const [activeComparisonId, setActiveComparisonId] = useState<string | null>(null);
   const [switchingPartner, setSwitchingPartner] = useState(false);
+  const [exitingToStandardApp, setExitingToStandardApp] = useState(false);
+  const [pairSyncReason, setPairSyncReason] = useState<string | null>(null);
+
+  const { data: validationShellRouting } = useQuery({
+    queryKey: ['validationShellRouting', userId],
+    queryFn: () => fetchValidationShellRouting(userId),
+    enabled: Boolean(userId),
+    staleTime: 30_000,
+  });
+  const showBackToStandardPostInterview = isValidationStandardAppEnrolled(validationShellRouting);
 
   const applyComparisonFormState = useCallback((comparison: RelationshipValidationComparison) => {
     setActiveComparisonId(comparison.id);
     const hasPost = Boolean(comparison.post_assessment);
-    setPostSubmitted(hasPost);
+    setFeedbackSaved(hasPost);
     if (hasPost && comparison.post_assessment) {
       const p = comparison.post_assessment;
-      setScoreAccuracy(p.scoreAccuracy);
-      setMostAccurate(p.mostAccurateDimension);
-      setLeastAccurate(p.leastAccurateDimension);
-      setSelfSurprise(p.selfSurpriseText ?? '');
-      setPartnerSurprise(p.partnerSurpriseText ?? '');
-      setHypotheticalInterest(p.hypotheticalInterest);
       setReportValue(p.reportValue ?? 0);
       setReportImprovement(p.reportImprovementText ?? '');
     } else {
-      setScoreAccuracy(0);
-      setMostAccurate(null);
-      setLeastAccurate(null);
-      setSelfSurprise('');
-      setPartnerSurprise('');
-      setHypotheticalInterest(0);
       setReportValue(0);
       setReportImprovement('');
     }
@@ -203,6 +212,7 @@ export function ValidationReportScreen({ userId, navigation }: Props) {
           activeComparison.compatibility_breakdown as RelationshipValidationCompatibilityBreakdown,
         );
       }
+      setPairSyncReason(pairResult.pairSyncReason);
     } finally {
       if (!opts?.silent) {
         setLoading(false);
@@ -272,32 +282,12 @@ export function ValidationReportScreen({ userId, navigation }: Props) {
   };
 
   const handleSubmitPost = async () => {
-    if (
-      scoreAccuracy < 1 ||
-      !mostAccurate ||
-      !leastAccurate ||
-      hypotheticalInterest < 1 ||
-      reportValue < 1
-    ) {
-      setError('Please answer all required feedback questions.');
-      return;
-    }
     setError(null);
     setSubmitting(true);
     try {
-      const payload: RelationshipValidationPostAssessment = {
-        scoreAccuracy,
-        mostAccurateDimension: mostAccurate as RelationshipValidationPostAssessment['mostAccurateDimension'],
-        leastAccurateDimension:
-          leastAccurate as RelationshipValidationPostAssessment['leastAccurateDimension'],
-        selfSurpriseText: selfSurprise.trim() || null,
-        partnerSurpriseText: partnerComplete ? partnerSurprise.trim() || null : null,
-        hypotheticalInterest,
-        reportValue,
-        reportImprovementText: reportImprovement.trim() || null,
-      };
+      const payload = buildPostAssessmentPayload(reportValue, reportImprovement);
       await savePostAssessment(userId, payload);
-      setPostSubmitted(true);
+      setFeedbackSaved(true);
     } catch {
       setError('Could not save feedback. Please try again.');
     } finally {
@@ -314,8 +304,100 @@ export function ValidationReportScreen({ userId, navigation }: Props) {
     navigation.navigate('ValidationPartnerEmail', { newComparison: true });
   };
 
-  const isFeedbackPhase = !postSubmitted;
+  const handleBackToStandardPostInterview = useCallback(async () => {
+    if (exitingToStandardApp) return;
+    setExitingToStandardApp(true);
+    try {
+      await exitValidationFlowToStandardApp(userId);
+      await queryClient.invalidateQueries({ queryKey: ['validationShellRouting', userId] });
+      await queryClient.invalidateQueries({ queryKey: ['validationTrack', userId] });
+    } finally {
+      setExitingToStandardApp(false);
+    }
+  }, [exitingToStandardApp, queryClient, userId]);
+
+  const waitingForPartnerMessage = (() => {
+    if (partnerComplete) return null;
+    if (pairSyncReason === 'partner_has_not_entered_your_email') {
+      return 'Your partner has not entered your email yet. They need to add your address when they sign up or on their results screen.';
+    }
+    if (pairSyncReason === 'partner_not_registered') {
+      return 'Your partner has not created an account with that email yet.';
+    }
+    if (pairSyncReason === 'no_partner_email' || pairSyncReason === 'no_active_comparison') {
+      return 'Enter your partner\'s email to link your results together.';
+    }
+    return 'Your partner has not finished their psychometrics yet. Once they complete the assessment, your couple report will unlock.';
+  })();
+
   const showPartnerSwitcher = comparisons.length > 1;
+
+  const renderBackToApplicationReviewLink = () => {
+    if (!showBackToStandardPostInterview) return null;
+    return (
+      <Pressable
+        onPress={() => void handleBackToStandardPostInterview()}
+        disabled={exitingToStandardApp}
+        style={({ pressed }) => [
+          styles.backToPostInterviewLink,
+          (pressed || exitingToStandardApp) && styles.backToPostInterviewLinkPressed,
+        ]}
+        accessibilityRole="link"
+        accessibilityLabel="Back to application review"
+      >
+        {exitingToStandardApp ? (
+          <ActivityIndicator color="#5BA8E8" size="small" />
+        ) : (
+          <Text style={styles.backToPostInterviewLinkText}>← Back to application review</Text>
+        )}
+      </Pressable>
+    );
+  };
+
+  const renderReportFeedback = () => {
+    if (feedbackSaved) return null;
+
+    return (
+    <View style={styles.feedbackSection}>
+      <Text style={styles.feedbackTitle}>Feedback on your report</Text>
+      <Text style={styles.feedbackIntro}>
+        Optional — share what you thought of the report after you&apos;ve read it.
+      </Text>
+
+      <Text style={styles.questionLabel}>
+        How valuable did you find the report? (optional, 1–10)
+      </Text>
+      <SliderRow
+        value={reportValue}
+        onChange={setReportValue}
+      />
+
+      <Text style={styles.questionLabel}>
+        What would you change or improve about the report? (optional)
+      </Text>
+      <TextInput
+        value={reportImprovement}
+        onChangeText={setReportImprovement}
+        placeholder="Share any suggestions about the report itself…"
+        placeholderTextColor="#5B6B80"
+        multiline
+        style={styles.textArea}
+      />
+
+      {error ? <Text style={authStyles.errorText}>{error}</Text> : null}
+
+      <Pressable
+        onPress={() => void handleSubmitPost()}
+        disabled={submitting}
+        style={[authStyles.primaryButton, submitting && { opacity: 0.6 }]}
+      >
+        <Text style={authStyles.primaryButtonText}>
+          {submitting ? 'Saving…' : 'Save feedback'}
+        </Text>
+      </Pressable>
+    </View>
+    );
+  };
 
   const renderPartnerSwitcher = () => {
     if (!showPartnerSwitcher) return null;
@@ -441,152 +523,44 @@ export function ValidationReportScreen({ userId, navigation }: Props) {
           </Text>
         </View>
 
-        {isFeedbackPhase ? (
-          <>
-            {showPartnerSwitcher ? renderPartnerSwitcher() : null}
+        {showPartnerSwitcher ? renderPartnerSwitcher() : null}
 
-            {needsPreAssessment ? (
-              <View style={styles.preAssessmentCallout}>
-                <Text style={styles.preAssessmentCalloutText}>
-                  Complete the relationship survey for this partner before you can download your
-                  report.
-                </Text>
-                <Pressable
-                  onPress={() => navigation.navigate('ValidationPreAssessment')}
-                  style={styles.preAssessmentCalloutBtn}
-                >
-                  <Text style={styles.preAssessmentCalloutBtnText}>Complete relationship survey</Text>
-                </Pressable>
-              </View>
-            ) : (
-              <>
-                <View style={styles.stepHeader}>
-                  <Text style={styles.stepLabel}>Step 1 of 2</Text>
-                  <Text style={styles.stepTitle}>
-                    {interviewCompleted
-                      ? 'Download and read your full report'
-                      : 'Download and read your partial report'}
-                  </Text>
-                  <Text style={styles.stepBody}>
-                    {interviewCompleted
-                      ? 'This report combines your questionnaires, psychometrics, and AI interview. Read it carefully before answering the questions below.'
-                      : 'This report is based on your questionnaires and psychometrics — not the full interview-based report yet. Read it carefully before answering the questions below.'}
-                  </Text>
-                </View>
-
-                <DownloadValidationReportButton
-                  userId={userId}
-                  reportReady={Boolean(profile) && partnerComplete}
-                  waitingForPartner={Boolean(profile) && !partnerComplete}
-                  refreshKey={reportRefreshKey}
-                  reportTier={reportTier}
-                  hideTitle
-                  style={styles.reportDownloadTop}
-                />
-
-                <View style={styles.stepHeader}>
-                  <Text style={styles.stepLabel}>Step 2 of 2</Text>
-                  <Text style={styles.stepTitle}>Feedback on your report</Text>
-                  <Text style={styles.stepBody}>
-                    {partnerComplete
-                      ? 'Answer based on what you read in the PDF — compatibility score, breakdown, and narrative — not guesses from memory alone.'
-                      : 'Once your partner completes their assessment and your report is ready, download it first, then return here to answer these questions.'}
-                  </Text>
-                </View>
-
-                {partnerComplete ? (
-                  <>
-                    <Text style={styles.questionLabel}>
-                      How accurately does the compatibility score reflect how compatible you actually
-                      feel? (1–10)
-                    </Text>
-                    <SliderRow value={scoreAccuracy} onChange={setScoreAccuracy} />
-
-                    <Text style={styles.questionLabel}>
-                      Which dimension felt most accurate to your relationship?
-                    </Text>
-                    <OptionGroup
-                      options={DIMENSION_OPTIONS}
-                      value={mostAccurate}
-                      onChange={setMostAccurate}
-                    />
-
-                    <Text style={styles.questionLabel}>
-                      Which dimension felt least accurate or most surprising?
-                    </Text>
-                    <OptionGroup
-                      options={[
-                        ...DIMENSION_OPTIONS,
-                        { value: 'none_surprising', label: 'None were surprising' },
-                      ]}
-                      value={leastAccurate}
-                      onChange={setLeastAccurate}
-                    />
-
-                    <Text style={styles.questionLabel}>
-                      Did anything in your own results surprise you? (optional)
-                    </Text>
-                    <TextInput
-                      value={selfSurprise}
-                      onChangeText={setSelfSurprise}
-                      placeholder="Refer to something specific from your report…"
-                      placeholderTextColor="#5B6B80"
-                      multiline
-                      style={styles.textArea}
-                    />
-
-                    <Text style={styles.questionLabel}>
-                      Did anything about your partner surprise you? (optional)
-                    </Text>
-                    <TextInput
-                      value={partnerSurprise}
-                      onChangeText={setPartnerSurprise}
-                      placeholder="Refer to something specific from your report…"
-                      placeholderTextColor="#5B6B80"
-                      multiline
-                      style={styles.textArea}
-                    />
-
-                    <Text style={styles.questionLabel}>
-                      If you were single and met someone with that compatibility score, how interested
-                      would you be? (1–10)
-                    </Text>
-                    <SliderRow value={hypotheticalInterest} onChange={setHypotheticalInterest} />
-
-                    <Text style={styles.questionLabel}>How valuable did you find the report? (1–10)</Text>
-                    <SliderRow value={reportValue} onChange={setReportValue} />
-
-                    <Text style={styles.questionLabel}>
-                      What would you change or improve about the report? (optional)
-                    </Text>
-                    <TextInput
-                      value={reportImprovement}
-                      onChangeText={setReportImprovement}
-                      placeholder="Share any suggestions about the report itself…"
-                      placeholderTextColor="#5B6B80"
-                      multiline
-                      style={styles.textArea}
-                    />
-
-                    {error ? <Text style={authStyles.errorText}>{error}</Text> : null}
-
-                    <Pressable
-                      onPress={() => void handleSubmitPost()}
-                      disabled={submitting}
-                      style={[authStyles.primaryButton, submitting && { opacity: 0.6 }]}
-                    >
-                      <Text style={authStyles.primaryButtonText}>
-                        {submitting ? 'Submitting…' : 'Submit feedback'}
-                      </Text>
-                    </Pressable>
-                  </>
-                ) : null}
-              </>
-            )}
-          </>
+        {needsPreAssessment ? (
+          <View style={styles.preAssessmentCallout}>
+            <Text style={styles.preAssessmentCalloutText}>
+              Complete the relationship survey for this partner before you can download your
+              report.
+            </Text>
+            <Pressable
+              onPress={() => navigation.navigate('ValidationPreAssessment')}
+              style={styles.preAssessmentCalloutBtn}
+            >
+              <Text style={styles.preAssessmentCalloutBtnText}>Complete relationship survey</Text>
+            </Pressable>
+          </View>
         ) : (
           <>
-            {renderPartnerSwitcher()}
+            <View style={styles.stepHeader}>
+              <Text style={styles.stepTitle}>
+                {interviewCompleted ? 'Your full report' : 'Your partial report'}
+              </Text>
+              <Text style={styles.stepBody}>
+                {interviewCompleted
+                  ? 'This report combines your questionnaires, psychometrics, and AI interview.'
+                  : 'This report is based on your questionnaires and psychometrics — not the full interview-based report yet.'}
+              </Text>
+            </View>
+
+            <DownloadValidationReportButton
+              userId={userId}
+              reportReady={Boolean(profile) && partnerComplete}
+              waitingForPartner={Boolean(profile) && !partnerComplete}
+              waitingMessage={waitingForPartnerMessage}
+              refreshKey={reportRefreshKey}
+              reportTier={reportTier}
+              hideTitle
+              style={styles.reportDownloadTop}
+            />
 
             {profile ? (
               <View style={styles.card}>
@@ -619,37 +593,28 @@ export function ValidationReportScreen({ userId, navigation }: Props) {
               )}
             </View>
 
-            <View style={styles.actionsSection}>
-              <Text style={styles.actionsSectionTitle}>What would you like to do?</Text>
+            {renderReportFeedback()}
 
-              <DownloadValidationReportButton
-                userId={userId}
-                reportReady={Boolean(profile) && partnerComplete}
-                waitingForPartner={Boolean(profile) && !partnerComplete}
-                refreshKey={reportRefreshKey}
-                reportTier={reportTier}
-                variant="actions"
-                style={styles.reportDownloadActions}
-              />
+            <View style={styles.actionsSection}>
 
               {!interviewCompleted ? (
-              <View style={styles.actionCard}>
-                <Text style={styles.actionCardTitle}>Unlock your full report</Text>
-                <Text style={styles.actionCardBody}>
-                  Take the optional AI interview (~20–30 minutes) for deeper insight into how you
-                  think about relationships, conflict, and repair.
-                </Text>
-                <Pressable onPress={() => void handleInterview()} style={authStyles.primaryButton}>
-                  <Text style={authStyles.primaryButtonText}>Take the interview</Text>
-                </Pressable>
-              </View>
+                <View style={styles.actionCard}>
+                  <Text style={styles.actionCardTitle}>Unlock your full report</Text>
+                  <Text style={styles.actionCardBody}>
+                    Take the optional AI interview (~20–30 minutes) for deeper insight into how you
+                    think about relationships, conflict, and repair.
+                  </Text>
+                  <Pressable onPress={() => void handleInterview()} style={authStyles.primaryButton}>
+                    <Text style={authStyles.primaryButtonText}>Take the interview</Text>
+                  </Pressable>
+                </View>
               ) : null}
 
               <View style={styles.actionCard}>
                 <Text style={styles.actionCardTitle}>Compare with another partner</Text>
                 <Text style={styles.actionCardBody}>
-                  Enter a new partner&apos;s email and answer the relationship survey and report
-                  feedback again. Your psychometric results will be reused.
+                  Enter a new partner&apos;s email and answer the relationship survey again. Your
+                  psychometric results will be reused.
                 </Text>
                 <Pressable
                   onPress={handleCompareAnotherPartner}
@@ -662,6 +627,8 @@ export function ValidationReportScreen({ userId, navigation }: Props) {
             </View>
           </>
         )}
+
+        {renderBackToApplicationReviewLink()}
       </ScrollView>
     </SafeAreaContainer>
   );
@@ -677,32 +644,6 @@ function SliderRow({ value, onChange }: { value: number; onChange: (n: number) =
           style={[styles.chip, value === n && styles.chipActive]}
         >
           <Text style={[styles.chipText, value === n && styles.chipTextActive]}>{n}</Text>
-        </Pressable>
-      ))}
-    </View>
-  );
-}
-
-function OptionGroup({
-  options,
-  value,
-  onChange,
-}: {
-  options: readonly { value: string; label: string }[];
-  value: string | null;
-  onChange: (v: string) => void;
-}) {
-  return (
-    <View style={styles.optionGroup}>
-      {options.map((opt) => (
-        <Pressable
-          key={opt.value}
-          onPress={() => onChange(opt.value)}
-          style={[styles.choice, value === opt.value && styles.choiceActive]}
-        >
-          <Text style={[styles.choiceText, value === opt.value && styles.choiceTextActive]}>
-            {opt.label}
-          </Text>
         </Pressable>
       ))}
     </View>
@@ -744,6 +685,24 @@ const styles = StyleSheet.create({
   logoWrap: { alignItems: 'center', marginBottom: 20 },
   logoImage: { width: 240, height: 72 },
   title: { fontSize: 26, color: '#E8F0F8', textAlign: 'center', marginBottom: 10 },
+  backToPostInterviewLink: {
+    alignSelf: 'center',
+    marginTop: 28,
+    paddingVertical: 8,
+    paddingHorizontal: 4,
+    ...Platform.select({
+      web: { cursor: 'pointer' as const },
+    }),
+  },
+  backToPostInterviewLinkPressed: {
+    opacity: 0.7,
+  },
+  backToPostInterviewLinkText: {
+    color: '#5BA8E8',
+    fontSize: 14,
+    fontWeight: '500',
+    textDecorationLine: 'underline',
+  },
   partialBadge: {
     alignSelf: 'center',
     borderWidth: 1,
@@ -877,7 +836,6 @@ const styles = StyleSheet.create({
     textAlign: 'center',
     marginBottom: 16,
   },
-  reportDownloadActions: { marginBottom: 16 },
   actionCard: {
     borderWidth: 1,
     borderColor: 'rgba(82,142,220,0.25)',
@@ -967,6 +925,19 @@ const styles = StyleSheet.create({
     marginVertical: 20,
   },
   feedbackTitle: { color: '#E8F0F8', fontSize: 18, marginBottom: 10, textAlign: 'center' },
+  feedbackSection: {
+    marginTop: 8,
+    marginBottom: 24,
+    paddingTop: 8,
+    borderTopWidth: 1,
+    borderTopColor: 'rgba(82,142,220,0.2)',
+  },
+  feedbackSavedText: {
+    color: '#78DCA0',
+    fontSize: 14,
+    textAlign: 'center',
+    marginBottom: 12,
+  },
   feedbackIntro: {
     color: '#95A8BD',
     fontSize: 14,

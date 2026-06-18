@@ -36,6 +36,7 @@ import {
 import { fetchInterviewAttemptRevealSnapshot } from '@utilities/fetchInterviewAttemptRevealSnapshot';
 import { useInterviewAttemptEgoRepair } from '@features/aria/hooks/useInterviewAttemptEgoRepair';
 import { DownloadPersonalReportButton } from '@features/psychometrics/DownloadPersonalReportButton';
+import { ValidationFlowOptInCard } from '@features/relationshipValidation/ValidationFlowOptInCard';
 
 const BG = '#0a0a0f';
 const ACCENT = '#3b82f6';
@@ -423,6 +424,8 @@ export const PostInterviewFailedScreen: React.FC<{
 
           <View style={styles.divider} />
           <DownloadPersonalReportButton userId={userId} variant="dark" />
+
+          <ValidationFlowOptInCard userId={userId} returnRoute="PostInterviewFailed" />
 
           <View style={styles.divider} />
 

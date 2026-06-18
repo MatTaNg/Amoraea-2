@@ -250,6 +250,76 @@ export function isIncompleteInterviewClosingLeadSentence(text: string): boolean 
   );
 }
 
+function splitAssistantDraftIntoSentences(draft: string): string[] {
+  const t = (draft ?? '').replace(/\s+/g, ' ').trim();
+  if (!t) return [];
+  const parts: string[] = [];
+  let start = 0;
+  const re = /[.!?]['"]?(?=\s+)/g;
+  let match: RegExpExecArray | null;
+  while ((match = re.exec(t)) !== null) {
+    const end = match.index + match[0].length;
+    const segment = t.slice(start, end).trim();
+    if (segment) parts.push(segment);
+    start = end;
+    while (start < t.length && /\s/.test(t[start]!)) start++;
+  }
+  const tail = t.slice(start).trim();
+  if (tail) parts.push(tail);
+  return parts;
+}
+
+/** Normalizes one sentence for consecutive duplicate comparison (punctuation-insensitive). */
+export function normalizeAssistantSentenceForConsecutiveDedup(sentence: string): string {
+  return (sentence ?? '')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .toLowerCase()
+    .replace(/[^\p{L}\p{N}]/gu, '');
+}
+
+/**
+ * Collapse immediately adjacent duplicate sentences in one assistant turn
+ * (model stutter while narrating scenario vignettes or other scripted beats).
+ */
+export function stripConsecutiveDuplicateSentencesWithinDraft(draft: string): string {
+  const parts = splitAssistantDraftIntoSentences(draft);
+  if (parts.length <= 1) return draft;
+  const kept: string[] = [];
+  let prevNorm = '';
+  for (const part of parts) {
+    const norm = normalizeAssistantSentenceForConsecutiveDedup(part);
+    if (norm && norm === prevNorm) continue;
+    kept.push(part);
+    prevNorm = norm;
+  }
+  if (kept.length === parts.length) return draft;
+  return kept.join(' ').trim();
+}
+
+/**
+ * Streaming TTS: drop sentences that repeat the prior flushed sentence verbatim.
+ */
+export function applyConsecutiveStreamSentenceDedup(
+  spoken: string,
+  lastSentenceNorm: string | null,
+): { text: string; lastSentenceNorm: string | null } {
+  const parts = splitAssistantDraftIntoSentences(stripConsecutiveDuplicateSentencesWithinDraft(spoken));
+  if (parts.length === 0) return { text: '', lastSentenceNorm };
+  const kept: string[] = [];
+  let prevNorm = lastSentenceNorm ?? '';
+  for (const part of parts) {
+    const norm = normalizeAssistantSentenceForConsecutiveDedup(part);
+    if (norm && norm === prevNorm) continue;
+    kept.push(part);
+    prevNorm = norm;
+  }
+  return {
+    text: kept.join(' ').trim(),
+    lastSentenceNorm: prevNorm || lastSentenceNorm,
+  };
+}
+
 /** Any per-sentence closing fragment eligible for stream buffering / dedupe. */
 export function isInterviewClosingStreamFragment(text: string): boolean {
   return (

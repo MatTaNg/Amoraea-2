@@ -10,6 +10,17 @@ export type DisclosureCalibrationTurn = {
 
 export type DisclosureCalibration = 'underdisclosure' | 'calibrated' | 'overdisclosure';
 
+const UNDERDISCLOSURE_RATIO_THRESHOLD = 0.4;
+const SUBSTANTIVE_PERSONAL_CONCRETENESS = new Set(['high', 'valid_non_applicable']);
+
+/** Direct evidence of substantive personal disclosure — overrides low word-count ratio alone. */
+export function isSubstantivePersonalMomentConcreteness(
+  value: string | null | undefined,
+): boolean {
+  if (!value) return false;
+  return SUBSTANTIVE_PERSONAL_CONCRETENESS.has(value.trim().toLowerCase());
+}
+
 /** Total user words in transcript turns tagged with `interviewMoment` (0 when none). */
 export function sumUserWordsForInterviewMoment(
   transcript: readonly DisclosureCalibrationTurn[],
@@ -49,9 +60,6 @@ export function computeDisclosureCalibration(
     avgScenarioWordCount,
   });
 
-  const bothAbsentOrLow =
-    ['absent', 'low'].includes(moment4Concreteness ?? '') && ['absent', 'low'].includes(moment5Concreteness ?? '');
-
   const clinicalTerms = ['abuse', 'assault', 'suicide', 'self-harm', 'hospitalization', 'trauma'];
   const personalText = transcript
     .filter((t) => t.role === 'user' && (t.interviewMoment === 4 || t.interviewMoment === 5))
@@ -61,7 +69,10 @@ export function computeDisclosureCalibration(
 
   const avgPersonal =
     moment4WordCount != null && moment5WordCount != null ? (moment4WordCount + moment5WordCount) / 2 : null;
-  const avgScenario = avgScenarioWordCount ?? 0;
+  const avgScenario =
+    avgScenarioWordCount != null && Number.isFinite(avgScenarioWordCount) && avgScenarioWordCount > 0
+      ? avgScenarioWordCount
+      : null;
 
   const m4Long = (moment4WordCount ?? 0) > 400;
   const m5Long = (moment5WordCount ?? 0) > 400;
@@ -71,17 +82,36 @@ export function computeDisclosureCalibration(
     return 'overdisclosure';
   }
 
-  if (avgScenario > 0 && avgPersonal != null && avgPersonal < avgScenario * 0.4 && bothAbsentOrLow) {
-    console.log('[Disclosure] returning:', 'underdisclosure');
+  // A low word-count ratio alone is not sufficient evidence of underdisclosure — it
+  // conflates general verbosity style with actual disclosure quality. A concise
+  // communicator can give fully substantive personal answers that are still shorter
+  // than their (more expansive) scenario answers. Require BOTH a low ratio AND
+  // concreteness evidence of thinness before flagging underdisclosure. If either
+  // moment is high or valid_non_applicable, treat as calibrated regardless of ratio —
+  // confirmed real-world case: 131/148-word M4/M5 (valid_non_applicable/high) was
+  // incorrectly flagged underdisclosure purely due to longer scenario answers (ratio 0.30).
+  // Design: eitherSubstantive (one strong personal moment overrides) — consistent with
+  // floor-and-bonus philosophy of not penalizing unless evidence of a real problem is clear.
+  const eitherSubstantive =
+    isSubstantivePersonalMomentConcreteness(moment4Concreteness) ||
+    isSubstantivePersonalMomentConcreteness(moment5Concreteness);
+
+  if (
+    avgScenario != null &&
+    avgPersonal != null &&
+    avgPersonal < avgScenario * UNDERDISCLOSURE_RATIO_THRESHOLD &&
+    !eitherSubstantive
+  ) {
+    console.log('[Disclosure] returning:', 'underdisclosure', {
+      avgPersonal,
+      avgScenario,
+      ratio: avgPersonal / avgScenario,
+      eitherSubstantive,
+    });
     return 'underdisclosure';
   }
 
-  if (avgPersonal == null && bothAbsentOrLow) {
-    console.log('[Disclosure] returning:', 'underdisclosure');
-    return 'underdisclosure';
-  }
-
-  console.log('[Disclosure] returning:', 'calibrated');
+  console.log('[Disclosure] returning:', 'calibrated', { eitherSubstantive });
   return 'calibrated';
 }
 

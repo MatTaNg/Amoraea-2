@@ -7,6 +7,7 @@ import {
 import {
   computePersonalMomentConcretenessModifier,
   normalizeResponseConcreteness,
+  normalizeMoment4Concreteness,
   type ResponseConcretenessLevel,
 } from './personalMomentConcreteness';
 import {
@@ -96,7 +97,7 @@ type StandardMarkerId = Exclude<
 >;
 
 /** Bump when rollup rules change (surfaced in admin recalculation_notes). */
-export const PILLAR_ROLLUP_ALGORITHM_VERSION = 'scenario_only_integers_v2';
+export const PILLAR_ROLLUP_ALGORITHM_VERSION = 'scenario_only_integers_v3';
 
 /** Which interview moments may contribute numeric evidence to each pillar aggregate. */
 const STANDARD_MARKER_ALLOWED_MOMENTS: Record<StandardMarkerId, Set<PillarMomentLabel>> = {
@@ -104,7 +105,7 @@ const STANDARD_MARKER_ALLOWED_MOMENTS: Record<StandardMarkerId, Set<PillarMoment
   attunement: new Set(['scenario_1', 'scenario_2', 'scenario_3']),
   regulation: new Set(['scenario_3']),
   mentalizing: new Set(['scenario_1', 'scenario_2', 'scenario_3']),
-  appreciation: new Set(['scenario_2']),
+  appreciation: new Set(['scenario_1', 'scenario_2']),
   accountability: new Set(['scenario_1', 'scenario_2', 'scenario_3']),
 };
 
@@ -222,7 +223,7 @@ export type PillarAggregateWithCommitmentDetailed = MomentRestrictedAggregateRes
   mentalizingOvercertaintyCount: number;
   defensePatterns: DefensePatternsJson;
   /** Normalized personal-moment concreteness (null when unscored / invalid). */
-  moment4Concreteness: ResponseConcretenessLevel | null;
+  moment4Concreteness: ReturnType<typeof normalizeMoment4Concreteness>;
   moment5Concreteness: ResponseConcretenessLevel | null;
   /** Non-positive adjustment applied to weighted threshold in {@link computeGateResultCore}. */
   personalMomentConcretenessModifier: number;
@@ -257,7 +258,7 @@ export function disclosureCalibrationFromMarkerSlices(
   transcript: readonly DisclosureCalibrationTurn[] | null | undefined,
 ): DisclosureCalibration {
   const tx = Array.isArray(transcript) ? transcript : [];
-  const m4c = normalizeResponseConcreteness(slices[3]?.response_concreteness);
+  const m4c = normalizeMoment4Concreteness(slices[3]?.response_concreteness);
   const m5c = normalizeResponseConcreteness(slices[4]?.response_concreteness);
   const sliceWords = (w: unknown): number | null =>
     typeof w === 'number' && Number.isFinite(w) && w >= 0 ? w : null;
@@ -425,7 +426,7 @@ export function aggregatePillarScoresWithCommitmentMergeDetailed(
           console.log('[DefensePatterns] aggregate path: skipped (missing scenario pillarScores)');
           return { ...DEFAULT_DEFENSE_PATTERNS };
         })();
-  const moment4Concreteness = normalizeResponseConcreteness(depthSlices[3]?.response_concreteness);
+  const moment4Concreteness = normalizeMoment4Concreteness(depthSlices[3]?.response_concreteness);
   const moment5Concreteness = normalizeResponseConcreteness(depthSlices[4]?.response_concreteness);
   const personalMomentConcretenessModifier = computePersonalMomentConcretenessModifier(
     moment4Concreteness,

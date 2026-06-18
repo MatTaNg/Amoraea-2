@@ -36,6 +36,7 @@ import { useInterviewAttemptEgoRepair } from '@features/aria/hooks/useInterviewA
 import { DownloadPersonalReportButton } from '@features/psychometrics/DownloadPersonalReportButton';
 import { PreparingResultsView } from '@app/screens/PreparingResultsView';
 import { useRedirectRelationshipValidationFromStandardPostInterview } from '@features/relationshipValidation/validationPostInterviewRouting';
+import { ValidationFlowOptInCard } from '@features/relationshipValidation/ValidationFlowOptInCard';
 
 const BG = '#0a0a0f';
 const ACCENT = '#3b82f6';
@@ -476,6 +477,8 @@ export const PostInterviewScreen: React.FC<{ navigation: any; route: { params: {
           <View style={styles.divider} />
 
           <DownloadPersonalReportButton userId={userId} variant="dark" />
+
+          <ValidationFlowOptInCard userId={userId} returnRoute="PostInterview" />
 
           <View style={styles.divider} />
 

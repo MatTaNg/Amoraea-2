@@ -11,6 +11,8 @@ import {
   isInterviewClosingReflectiveAckFragment,
   isInterviewClosingStreamFragment,
   isInterviewClosingThanksFragment,
+  applyConsecutiveStreamSentenceDedup,
+  stripConsecutiveDuplicateSentencesWithinDraft,
   stripDuplicateInterviewClosingSentencesWithinDraft,
   stripInterviewClosingStreamingEcho,
   transcriptHasInterviewClosingAssistantMessage,
@@ -334,6 +336,28 @@ describe('suppressed elongating fallbacks', () => {
     expect(goodWorkMatches).toHaveLength(1);
     expect(out).toContain('Thank you for being so open with me');
     expect(out).toContain('without interrupting');
+  });
+
+  it('stripConsecutiveDuplicateSentencesWithinDraft collapses repeated scenario vignette beats', () => {
+    const duplicateLine =
+      "Sophie calls after him: 'that's exactly what I mean.' Sophie calls after him: 'that's exactly what I mean.' Thirty minutes later Daniel comes back.";
+    const out = stripConsecutiveDuplicateSentencesWithinDraft(duplicateLine);
+    expect(out.match(/sophie calls after him/gi)).toHaveLength(1);
+    expect(out).toContain('Thirty minutes later Daniel comes back');
+  });
+
+  it('applyConsecutiveStreamSentenceDedup suppresses repeated flushed sentences', () => {
+    const first =
+      applyConsecutiveStreamSentenceDedup(
+        "Sophie calls after him: 'that's exactly what I mean.'",
+        null,
+      );
+    expect(first.text).toContain("that's exactly what I mean");
+    const second = applyConsecutiveStreamSentenceDedup(
+      "Sophie calls after him: 'that's exactly what I mean.'",
+      first.lastSentenceNorm,
+    );
+    expect(second.text).toBe('');
   });
 
   it('isMoment5ReadyForInterviewClose blocks when resolution follow-up still required', () => {

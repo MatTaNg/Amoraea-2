@@ -8,7 +8,7 @@ import {
   type DefensePatternsJson,
 } from './defensePatternsDetection';
 import { detectOverdisclosure } from './disclosureCalibration';
-import { normalizeResponseConcreteness } from './personalMomentConcreteness';
+import { normalizeResponseConcreteness, normalizeMoment4Concreteness, moment4Moment5ConcretenessDepthSignalDelta } from './personalMomentConcreteness';
 import {
   buildScenarioCompositesTriple,
   formatScenarioFloorFailReason,
@@ -480,7 +480,7 @@ export function computeGateResultCore(
 
   const m4cOpt = options?.moment4Concreteness;
   const m5cOpt = options?.moment5Concreteness;
-  const m4n = normalizeResponseConcreteness(m4cOpt);
+  const m4n = normalizeMoment4Concreteness(m4cOpt);
   const m5n = normalizeResponseConcreteness(m5cOpt);
 
   const gateFailReasons: GateFailCode[] = [];
@@ -508,16 +508,7 @@ export function computeGateResultCore(
   else if (_defenseCount === 3) depthSignalModifier += -0.6;
   else if (_defenseCount >= 4) depthSignalModifier += -0.8;
 
-  const _m4 = (options?.moment4Concreteness ?? '').toString().trim().toLowerCase();
-  const _m5 = (options?.moment5Concreteness ?? '').toString().trim().toLowerCase();
-
-  if (_m4 === 'absent' && _m5 === 'absent') depthSignalModifier += -0.5;
-  else if ((_m4 === 'absent' && _m5 === 'low') || (_m4 === 'low' && _m5 === 'absent')) depthSignalModifier += -0.35;
-  else if (_m4 === 'low' && _m5 === 'low') depthSignalModifier += -0.3;
-  else if ((_m4 === 'low' && _m5 === 'moderate') || (_m4 === 'moderate' && _m5 === 'low')) depthSignalModifier += -0.1;
-  else if (_m4 === 'moderate' && _m5 === 'moderate') depthSignalModifier += 0;
-  else if ((_m4 === 'high' && _m5 === 'moderate') || (_m4 === 'moderate' && _m5 === 'high')) depthSignalModifier += 0.1;
-  else if (_m4 === 'high' && _m5 === 'high') depthSignalModifier += 0.2;
+  depthSignalModifier += moment4Moment5ConcretenessDepthSignalDelta(m4n, m5n);
 
   const _overcertaintyCount = parseNonNegativeGateInt(options?.mentalizingOvercertaintyCount);
   if (_overcertaintyCount === 1) depthSignalModifier += -0.1;
@@ -536,6 +527,13 @@ export function computeGateResultCore(
     }
   }
 
+  // disclosure_calibration now measures word-count ratio ONLY (verbosity pattern
+  // relative to scenario responses), independent of moment4Concreteness/moment5Concreteness
+  // content-quality labels. This avoids double-counting the same underlying fact
+  // that the concreteness pair delta already penalizes. A user can have low
+  // concreteness (thin content) without necessarily having a low word ratio
+  // (could be verbose but vague), and vice versa — these are now genuinely
+  // distinct signals contributing independently to depth_signal_modifier.
   const _disclosure = options?.disclosureCalibration ?? null;
   if (_disclosure === 'underdisclosure') depthSignalModifier += -0.2;
   else if (_disclosure === 'overdisclosure') depthSignalModifier += -0.15;
@@ -587,9 +585,9 @@ export function computeGateResultCore(
       'defenseCount:',
       _defenseCount,
       'm4:',
-      _m4,
+      m4n,
       'm5:',
-      _m5,
+      m5n,
       'er:',
       _erScore,
       'overcertainty:',
@@ -637,6 +635,7 @@ export function computeGateResultCore(
   if (
     m4n !== null &&
     m5n !== null &&
+    m4n !== 'valid_non_applicable' &&
     (m4n === 'absent' || m4n === 'low') &&
     (m5n === 'absent' || m5n === 'low') &&
     modifiedScore >= 6.0 &&

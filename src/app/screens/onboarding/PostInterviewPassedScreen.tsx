@@ -38,6 +38,7 @@ import { modalOnboardingService } from '@/datingProfile/screens/onboarding/modal
 import { profilesRepo } from '@/data/repos/profilesRepo';
 import { useInterviewAttemptEgoRepair } from '@features/aria/hooks/useInterviewAttemptEgoRepair';
 import { DownloadPersonalReportButton } from '@features/psychometrics/DownloadPersonalReportButton';
+import { ValidationFlowOptInCard } from '@features/relationshipValidation/ValidationFlowOptInCard';
 import { navigateToDatingProfileOnboardingEntry } from '@/datingProfile/onboarding/navigateToDatingProfileOnboardingEntry';
 
 const BG = '#0a0a0f';
@@ -439,6 +440,8 @@ export const PostInterviewPassedScreen: React.FC<{ navigation: any; route: { par
 
           <View style={styles.divider} />
           <DownloadPersonalReportButton userId={userId} variant="dark" />
+
+          <ValidationFlowOptInCard userId={userId} returnRoute="PostInterviewPassed" />
 
           {myReferralCode ? (
             <View style={styles.referFriendSection}>

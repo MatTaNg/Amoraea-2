@@ -1,5 +1,13 @@
 import { supabase } from '@data/supabase/client';
 import { fetchMostRecentCompletedInterviewAttemptId } from '@features/psychometrics/interviewCompletionStatus';
+import type { GamingCorrectionResult } from '@features/psychometrics/computeGamingCorrection';
+import {
+  parseMentalizingFromStoredSlice,
+} from '@features/psychometrics/personalReportNarrativeGuidance';
+import {
+  buildInterviewEvidencePromptBlock,
+  composeNarrativeCalibration,
+} from '@features/reports/narrativeCalibration';
 import { resolveReportParticipantDisplayName } from '@utilities/adminInterviewIntroDisplayName';
 import { invokeOpenAiChat } from '@utilities/invokeOpenAiChat';
 import { convertMarkdownToHtml } from '@features/psychometrics/generateReport';
@@ -21,20 +29,48 @@ import {
   loadValidationSelfProfileSummary,
   type ValidationSelfProfileSummary,
 } from './validationProfileSummary';
+import {
+  deriveValidationInterviewPerformanceTier,
+  type ValidationInterviewPerformanceTier,
+} from './validationInterviewPerformanceTier';
 
 export type ValidationReportTier = 'partial' | 'full';
 
 export type ValidationInterviewSummary = {
   attemptId: string;
-  pillarScores: Record<string, number> | null;
-  egoDevLevel: number | null;
-  weightedScore: number | null;
   transcriptText: string;
+  /** Qualitative tier derived from gate outcome — never exposed in report output. */
+  performanceTier: ValidationInterviewPerformanceTier | null;
+  finalGatePass: boolean | null;
+  gateFailReasons: string[];
+  gamingCorrection: GamingCorrectionResult | null;
+  modifiedWeightedScore: number | null;
+  pillarScores: Record<string, number> | null;
+  scenarioKeyEvidence: {
+    scenario1: string | null;
+    scenario2: string | null;
+    scenario3: string | null;
+    moment4: string | null;
+  };
+  scenarioMentalizingScores: {
+    scenario1: number | null;
+    scenario2: number | null;
+    scenario3: number | null;
+    moment4: number | null;
+  };
+};
+
+export type ValidationGaspProfile = {
+  guiltRepairScore: number | null;
+  shameWithdrawScore: number | null;
+  externalizationScore: number | null;
 };
 
 export type ValidationReportData = {
   userName: string | null;
   reportTier: ValidationReportTier;
+  aaq2Score: number | null;
+  gaspProfile: ValidationGaspProfile | null;
   preAssessment: RelationshipValidationPreAssessment | null;
   selfProfile: ValidationSelfProfileSummary | null;
   assessments: {
@@ -47,6 +83,7 @@ export type ValidationReportData = {
     score: number | null;
     breakdown: RelationshipValidationCompatibilityBreakdown | null;
     partnerProfile: ValidationSelfProfileSummary | null;
+    partnerGaspProfile: ValidationGaspProfile | null;
   };
   interview: ValidationInterviewSummary | null;
 };
@@ -81,20 +118,75 @@ async function fetchValidationInterviewSummary(
 
   const { data: attempt, error } = await supabase
     .from('interview_attempts')
-    .select('pillar_scores, ego_development_level, weighted_score, transcript')
+    .select(
+      `
+      final_gate_pass,
+      gate_fail_reasons,
+      gaming_correction,
+      modified_weighted_score,
+      modified_weighted_score_with_psychometrics,
+      pillar_scores,
+      scenario_1_scores,
+      scenario_2_scores,
+      scenario_3_scores,
+      scenario_specific_patterns,
+      transcript
+    `,
+    )
     .eq('id', attemptId)
     .eq('user_id', userId)
     .maybeSingle();
 
   if (error || !attempt) return null;
 
+  const finalGatePass =
+    typeof attempt.final_gate_pass === 'boolean' ? attempt.final_gate_pass : null;
+  const modifiedWeightedScore =
+    typeof attempt.modified_weighted_score_with_psychometrics === 'number'
+      ? attempt.modified_weighted_score_with_psychometrics
+      : typeof attempt.modified_weighted_score === 'number'
+        ? attempt.modified_weighted_score
+        : null;
+  const gateFailReasons = Array.isArray(attempt.gate_fail_reasons)
+    ? (attempt.gate_fail_reasons as unknown[]).filter((x): x is string => typeof x === 'string')
+    : [];
+  const gamingCorrection =
+    attempt.gaming_correction != null &&
+    typeof attempt.gaming_correction === 'object' &&
+    !Array.isArray(attempt.gaming_correction)
+      ? (attempt.gaming_correction as GamingCorrectionResult)
+      : null;
+  const pillarScores = (attempt.pillar_scores as Record<string, number> | null) ?? null;
+  const patterns = (attempt.scenario_specific_patterns as Record<string, unknown> | null) ?? null;
+  const s1 = parseMentalizingFromStoredSlice(attempt.scenario_1_scores);
+  const s2 = parseMentalizingFromStoredSlice(attempt.scenario_2_scores);
+  const s3 = parseMentalizingFromStoredSlice(attempt.scenario_3_scores);
+  const m4 = parseMentalizingFromStoredSlice(patterns?.moment_4_scores);
+
   return {
     attemptId,
-    pillarScores: (attempt.pillar_scores as Record<string, number> | null) ?? null,
-    egoDevLevel:
-      typeof attempt.ego_development_level === 'number' ? attempt.ego_development_level : null,
-    weightedScore: typeof attempt.weighted_score === 'number' ? attempt.weighted_score : null,
     transcriptText: formatInterviewTranscriptForPrompt(attempt.transcript),
+    performanceTier: deriveValidationInterviewPerformanceTier(
+      finalGatePass,
+      modifiedWeightedScore,
+    ),
+    finalGatePass,
+    gateFailReasons,
+    gamingCorrection,
+    modifiedWeightedScore,
+    pillarScores,
+    scenarioKeyEvidence: {
+      scenario1: s1.keyEvidenceMentalizing,
+      scenario2: s2.keyEvidenceMentalizing,
+      scenario3: s3.keyEvidenceMentalizing,
+      moment4: m4.keyEvidenceMentalizing,
+    },
+    scenarioMentalizingScores: {
+      scenario1: s1.mentalizing,
+      scenario2: s2.mentalizing,
+      scenario3: s3.mentalizing,
+      moment4: m4.mentalizing,
+    },
   };
 }
 
@@ -110,6 +202,89 @@ function durationLabel(value: RelationshipValidationPreAssessment['duration']): 
 
 function endingLabel(value: RelationshipValidationPreAssessment['consideredEnding']): string {
   return RELATIONSHIP_ENDING_OPTIONS.find((o) => o.value === value)?.label ?? value;
+}
+
+function parseValidationGaspProfile(row: {
+  psychometrics_gasp_score?: number | null;
+  psychometrics_gasp_guilt_repair_score?: number | null;
+  psychometrics_gasp_shame_withdraw_score?: number | null;
+} | null): ValidationGaspProfile | null {
+  if (!row) return null;
+  const guiltRepairScore =
+    typeof row.psychometrics_gasp_guilt_repair_score === 'number'
+      ? row.psychometrics_gasp_guilt_repair_score
+      : null;
+  const shameWithdrawScore =
+    typeof row.psychometrics_gasp_shame_withdraw_score === 'number'
+      ? row.psychometrics_gasp_shame_withdraw_score
+      : null;
+  const externalizationScore =
+    typeof row.psychometrics_gasp_score === 'number' ? row.psychometrics_gasp_score : null;
+  if (guiltRepairScore == null && shameWithdrawScore == null && externalizationScore == null) {
+    return null;
+  }
+  return { guiltRepairScore, shameWithdrawScore, externalizationScore };
+}
+
+type ValidationGaspPattern = 'repair' | 'withdraw' | 'mixed';
+
+function resolveValidationGaspPattern(profile: ValidationGaspProfile): ValidationGaspPattern {
+  const guiltRepair = profile.guiltRepairScore ?? 4;
+  const shameWithdraw = profile.shameWithdrawScore ?? 4;
+  const repairDominant = guiltRepair >= 5 && shameWithdraw <= 4;
+  const withdrawDominant = shameWithdraw >= 5 && guiltRepair <= 4;
+  if (repairDominant && !withdrawDominant) return 'repair';
+  if (withdrawDominant && !repairDominant) return 'withdraw';
+  return 'mixed';
+}
+
+function buildValidationGaspInternalBlock(profile: ValidationGaspProfile): string {
+  const pattern = resolveValidationGaspPattern(profile);
+  const repairBand =
+    profile.guiltRepairScore != null
+      ? profile.guiltRepairScore >= 5
+        ? 'high move-toward-repair'
+        : profile.guiltRepairScore <= 3
+          ? 'low move-toward-repair'
+          : 'mid-range move-toward-repair'
+      : 'not assessed';
+  const withdrawBand =
+    profile.shameWithdrawScore != null
+      ? profile.shameWithdrawScore >= 5
+        ? 'high pull-back-after-harm'
+        : profile.shameWithdrawScore <= 3
+          ? 'low pull-back-after-harm'
+          : 'mid-range pull-back-after-harm'
+      : 'not assessed';
+
+  return `HARM-RESPONSE PROFILE (internal — translate to accessible behavioral language only; never name instruments or use clinical terms):
+- Move-toward-repair tendency: ${repairBand}
+- Pull-back-after-harm tendency: ${withdrawBand}
+- Overall pattern: ${pattern === 'repair' ? 'repair-oriented when they realize they hurt someone' : pattern === 'withdraw' ? 'withdrawal-oriented when they realize they hurt someone' : 'mixed — sometimes repair, sometimes pull back depending on severity'}
+
+GASP SECTION INSTRUCTION (MANDATORY when this block is present):
+Write 2–3 paragraphs describing what this person tends to do when they realize they have hurt someone — behaviorally, in plain language.
+- High move-toward-repair / low pull-back-after-harm: describe someone who tends to move toward repair when they have caused harm — acknowledging impact, making amends, staying in connection rather than retreating.
+- High pull-back-after-harm / low move-toward-repair: describe someone whose instinct when they have caused harm is to pull back or go quiet — motivated more by discomfort with having been "bad" than by concern for the other person's experience. Note this can look like withdrawal or avoidance after conflict even when the person cares deeply.
+- Balanced or mid-range: describe as a mixed pattern — sometimes moving toward repair, sometimes pulling back depending on the severity of the perceived harm.
+Never use the words "guilt," "shame," "GASP," or clinical terminology. Describe behaviorally: what the person tends to do when they realize they have hurt someone.`;
+}
+
+function buildValidationGaspCompatibilityNote(
+  userProfile: ValidationGaspProfile,
+  partnerProfile: ValidationGaspProfile,
+): string {
+  const userPattern = resolveValidationGaspPattern(userProfile);
+  const partnerPattern = resolveValidationGaspPattern(partnerProfile);
+  if (userPattern === partnerPattern) return '';
+  if (
+    (userPattern === 'repair' && partnerPattern === 'withdraw') ||
+    (userPattern === 'withdraw' && partnerPattern === 'repair')
+  ) {
+    return `
+HARM-RESPONSE COMPATIBILITY NOTE (internal): One partner tends to move toward repair after causing harm while the other tends to pull back or go quiet. In the Compatibility section, name this dynamic gently — the repair-oriented partner may experience withdrawal as indifference; the withdrawal-oriented partner may experience pursuit of repair as overwhelming. Frame developmentally, not as fault.`;
+  }
+  return '';
 }
 
 function stableStringify(value: unknown): string {
@@ -142,14 +317,25 @@ export function computeValidationReportSourceHash(data: ValidationReportData): s
     ecr: data.assessments.ecr,
     pvq: data.assessments.pvq,
     conflict: data.assessments.conflict,
+    gasp: data.gaspProfile,
+    partnerGasp: data.compatibility.partnerGaspProfile,
     compat: data.compatibility,
     interviewAttemptId: data.interview?.attemptId ?? null,
+    interviewPerformanceTier: data.interview?.performanceTier ?? null,
+    interviewFinalGatePass: data.interview?.finalGatePass ?? null,
+    interviewGateFailReasons: data.interview?.gateFailReasons ?? [],
   });
 }
 
 export async function fetchValidationReportData(userId: string): Promise<ValidationReportData> {
   const [userRow, record, selfProfile, assessmentsRes] = await Promise.all([
-    supabase.from('users').select('name, basic_info, email').eq('id', userId).maybeSingle(),
+    supabase
+      .from('users')
+      .select(
+        'name, basic_info, email, psychometrics_aaq2_score, psychometrics_gasp_score, psychometrics_gasp_guilt_repair_score, psychometrics_gasp_shame_withdraw_score',
+      )
+      .eq('id', userId)
+      .maybeSingle(),
     fetchRelationshipValidationRecord(userId),
     loadValidationSelfProfileSummary(userId),
     supabase
@@ -170,8 +356,20 @@ export async function fetchValidationReportData(userId: string): Promise<Validat
 
   const partnerUserId = record?.partner_user_id ?? null;
   let partnerProfile: ValidationSelfProfileSummary | null = null;
+  let partnerGaspProfile: ValidationGaspProfile | null = null;
   if (partnerUserId && record?.psychometrics_completed_at) {
-    partnerProfile = await loadValidationSelfProfileSummary(partnerUserId);
+    const [loadedPartnerProfile, partnerUserRes] = await Promise.all([
+      loadValidationSelfProfileSummary(partnerUserId),
+      supabase
+        .from('users')
+        .select(
+          'psychometrics_gasp_score, psychometrics_gasp_guilt_repair_score, psychometrics_gasp_shame_withdraw_score',
+        )
+        .eq('id', partnerUserId)
+        .maybeSingle(),
+    ]);
+    partnerProfile = loadedPartnerProfile;
+    partnerGaspProfile = parseValidationGaspProfile(partnerUserRes.data);
   }
 
   const partnerComplete =
@@ -191,6 +389,11 @@ export async function fetchValidationReportData(userId: string): Promise<Validat
   return {
     userName: displayName,
     reportTier,
+    aaq2Score:
+      typeof userRow.data?.psychometrics_aaq2_score === 'number'
+        ? userRow.data.psychometrics_aaq2_score
+        : null,
+    gaspProfile: parseValidationGaspProfile(userRow.data),
     preAssessment: record?.pre_assessment ?? null,
     selfProfile,
     assessments: {
@@ -205,6 +408,7 @@ export async function fetchValidationReportData(userId: string): Promise<Validat
         (record?.compatibility_breakdown as RelationshipValidationCompatibilityBreakdown | null) ??
         null,
       partnerProfile,
+      partnerGaspProfile,
     },
     interview,
   };
@@ -215,16 +419,17 @@ function buildValidationReportSystemPrompt(tier: ValidationReportTier): string {
     tier === 'full'
       ? `
 - The user also completed an Amoraea AI interview — weave conversational evidence into the narrative
-- Reference specific themes from their interview responses (conflict, repair, mentalizing) without quoting scores
-- Do NOT paste the transcript verbatim; synthesize patterns you observe`
+- Reference specific themes from their interview responses (conflict, repair, perspective-taking, emotional attunement) using descriptive pattern language only
+- Do NOT paste the transcript verbatim; synthesize patterns you observe
+- Calibrate interview tone to the performance tier provided in the user message — never reframe weak interview signals as strengths; use emotionally neutral reflections regardless of answer quality`
       : `
 - This is a partial report based on questionnaires and psychometrics only — do not invent interview evidence`;
 
   return `You are generating a comprehensive relationship validation report for Amoraea, a relationship-readiness platform. The user completed psychometric assessments (attachment, Schwartz values, conflict style) and a relationship pre-survey as part of a research validation study.${tier === 'full' ? ' They also completed the Amoraea AI interview.' : ''}
 
+This report is generated independently from the standard interview narrative pipeline — base interview sections on the transcript and tone tier only.
+
 CRITICAL RULES:
-- Do NOT reveal raw numerical psychometric scores, percentiles, or instrument names (ECR, PVQ, TKI, etc.)
-- Do NOT describe the scoring algorithm or compatibility formula in technical terms
 - Do NOT use clinical diagnostic language
 - DO write in warm, direct, plain language a non-psychologist would understand
 - DO use second person throughout ("you", "your")
@@ -238,8 +443,16 @@ CRITICAL RULES:
 }
 
 function buildValidationReportUserPrompt(data: ValidationReportData): string {
-  const { userName, preAssessment, selfProfile, assessments, compatibility, interview, reportTier } =
-    data;
+  const {
+    userName,
+    preAssessment,
+    selfProfile,
+    assessments,
+    compatibility,
+    interview,
+    reportTier,
+    gaspProfile,
+  } = data;
   const pre = preAssessment;
 
   const preBlock = pre
@@ -269,6 +482,17 @@ INTERNAL SCORE DATA (for your analysis only — never quote numbers or instrumen
 - Values profile: ${JSON.stringify(assessments.pvq ?? {})}
 - Conflict style distribution: ${JSON.stringify(assessments.conflict ?? {})}`;
 
+  const gaspBlock = gaspProfile ? `\n${buildValidationGaspInternalBlock(gaspProfile)}` : '';
+  const gaspCompatibilityNote =
+    gaspProfile && compatibility.partnerGaspProfile
+      ? buildValidationGaspCompatibilityNote(gaspProfile, compatibility.partnerGaspProfile)
+      : '';
+  const gaspSection = gaspProfile
+    ? `
+## How You Respond When Things Go Wrong
+2–3 paragraphs on what you tend to do when you realize you have hurt someone — follow the harm-response profile instructions above. Place behavioral emphasis on repair vs withdrawal patterns without clinical language.`
+    : '';
+
   const compatBlock = compatibility.partnerComplete
     ? `
 PAIR COMPATIBILITY (both partners completed):
@@ -287,13 +511,29 @@ ${
     : `
 PAIR COMPATIBILITY: Partner has not completed their assessment yet. Write about the user's individual profile and note that couple compatibility analysis will be available once their partner finishes. Do not invent a compatibility score.`;
 
+  const narrativeCalibration = composeNarrativeCalibration({
+    finalGatePass: interview?.finalGatePass ?? null,
+    gateFailReasons: interview?.gateFailReasons ?? [],
+    gamingCorrection: interview?.gamingCorrection ?? null,
+    pillarScores: interview?.pillarScores ?? null,
+    aaq2Score: data.aaq2Score,
+    modifiedWeightedScore: interview?.modifiedWeightedScore ?? null,
+  });
+
+  const interviewEvidenceBlock =
+    reportTier === 'full' && interview
+      ? buildInterviewEvidencePromptBlock({
+          pillarScores: interview.pillarScores,
+          scenarioKeyEvidence: interview.scenarioKeyEvidence,
+          scenarioMentalizingScores: interview.scenarioMentalizingScores,
+        })
+      : '';
+
   const interviewBlock =
     reportTier === 'full' && interview
       ? `
 AI INTERVIEW (completed — synthesize; do not quote verbatim):
-- Interview composite score (internal): ${interview.weightedScore ?? 'n/a'}
-- Ego development level (internal): ${interview.egoDevLevel ?? 'n/a'}
-- Construct scores (internal): ${JSON.stringify(interview.pillarScores ?? {})}
+${interviewEvidenceBlock}
 
 TRANSCRIPT:
 ${interview.transcriptText || '[No transcript available]'}`
@@ -303,24 +543,27 @@ ${interview.transcriptText || '[No transcript available]'}`
     reportTier === 'full'
       ? `
 ## What Your AI Interview Revealed
-3–4 paragraphs on how the user thinks about relationships under pressure — mentalizing, accountability, repair, attunement, and contempt dynamics as shown in their spoken responses. Tie observations to scenario moments without naming scores.
+3–4 paragraphs on how the user thinks about relationships under pressure — conflict, repair, perspective-taking, emotional attunement, and respect as shown in their spoken responses. Tie observations to scenario moments using descriptive pattern language only. Follow the interview tone tier strictly.
 
 ## Patterns Across Conversation and Questionnaires
-2–3 paragraphs integrating psychometric profile with interview behavior — where they align, where conversation adds nuance questionnaires alone could not capture.`
+2–3 paragraphs integrating psychometric profile with interview behavior — where they align, where conversation adds nuance questionnaires alone could not capture. Follow the interview tone tier for anything drawn from the interview.`
       : '';
 
   return `Generate a ${reportTier === 'full' ? 'full' : 'partial'} relationship validation report for ${userName ?? 'this participant'}.
 
 ${preBlock}
 ${selfBlock}
-${scoresHint}
+${scoresHint}${gaspBlock}${gaspCompatibilityNote}
 ${compatBlock}
 ${interviewBlock}
+
+NARRATIVE CALIBRATION (follow exactly):
+${narrativeCalibration}
 
 Write the report with exactly these sections:
 
 ## Overview
-3–4 rich paragraphs synthesizing who this person is relationally — attachment, values, conflict approach, and how they experience their current relationship.${reportTier === 'full' ? ' Include how their interview responses deepen or refine the questionnaire picture.' : ''} This should feel like being truly seen. Reference their pre-survey satisfaction and compatibility ratings alongside psychometric patterns.
+3–4 rich paragraphs synthesizing who this person is relationally — attachment, values, conflict approach, and how they experience their current relationship.${reportTier === 'full' ? ' Include how their interview responses deepen or refine the questionnaire picture.' : ''}${gaspProfile ? ' Include how they tend to respond after causing harm when relevant.' : ''} This should feel like being truly seen. Reference their pre-survey satisfaction and compatibility ratings alongside psychometric patterns.
 
 ## Your Attachment Style in Relationships
 2–3 paragraphs on their attachment pattern: what it tends to look like in intimacy, stress, and conflict; strengths it brings; common pitfalls. Use the attachment label and description provided but expand with relational nuance.
@@ -330,7 +573,7 @@ Write the report with exactly these sections:
 
 ## How You Navigate Conflict
 2–3 paragraphs on their conflict style — default moves under pressure, what partners likely experience, and how this interacts with their attachment pattern.
-
+${gaspSection}
 ## Your Relationship Right Now
 2–3 paragraphs weaving together their pre-survey responses (satisfaction, felt compatibility, conflict handling, values alignment, attunement, consideration of ending). Be honest and compassionate. Note any gaps between felt experience and psychometric patterns if evident.
 ${interviewSections}
@@ -372,7 +615,10 @@ export async function generateValidationReportMarkdown(
     max_tokens: data.reportTier === 'full' ? 5500 : 4500,
     temperature: 0.65,
     messages: [
-      { role: 'system', content: buildValidationReportSystemPrompt(data.reportTier) },
+      {
+        role: 'system',
+        content: buildValidationReportSystemPrompt(data.reportTier),
+      },
       { role: 'user', content: buildValidationReportUserPrompt(data) },
     ],
   });

@@ -1,5 +1,5 @@
-import type { ReportData } from './generateReport';
 import type { PartialReportData } from './generatePartialReport';
+import type { ReportData } from './personalReportData';
 
 export type StoredInterviewReports = {
   attemptId: string;
@@ -47,6 +47,8 @@ export function computePartialReportSourceHash(data: PartialReportData): string 
     rationalization: data.attempt?.rationalization ?? false,
     denial: data.attempt?.denial ?? false,
     mentalizing_overcertainty_count: data.attempt?.mentalizing_overcertainty_count ?? null,
+    finalGatePass: data.attempt?.finalGatePass ?? null,
+    gateFailReasons: data.attempt?.gateFailReasons ?? [],
   });
 }
 
@@ -59,6 +61,8 @@ export function computePersonalReportSourceHash(data: ReportData): string {
       scsPublicScore: data.user.scsPublicScore,
       scsPrivateScore: data.user.scsPrivateScore,
       psychometricModifier: data.user.psychometricModifier,
+      psychometrics: data.user.psychometrics,
+      psychometricStraightLineFlags: data.user.psychometricStraightLineFlags,
     },
     attempt: data.attempt
       ? {
@@ -67,6 +71,18 @@ export function computePersonalReportSourceHash(data: ReportData): string {
           finalScore: data.attempt.finalScore,
           passed: data.attempt.passed,
           finalGatePass: data.attempt.finalGatePass,
+          gateFailReasons: data.attempt.gateFailReasons,
+          gamingCorrection: data.attempt.gamingCorrection
+            ? {
+                correctionLevel: data.attempt.gamingCorrection.correctionLevel,
+                strippedInstruments: data.attempt.gamingCorrection.strippedInstruments,
+                activeTriggers: data.attempt.gamingCorrection.activeTriggers.map((t) => ({
+                  type: t.type,
+                  instrument: t.instrument,
+                  level: t.level,
+                })),
+              }
+            : null,
           pillarScores: data.attempt.pillarScores,
           egoDevLevel: data.attempt.egoDevLevel,
           emotionRecognitionScore: data.attempt.emotionRecognitionScore,
@@ -79,7 +95,9 @@ export function computePersonalReportSourceHash(data: ReportData): string {
           splitting: data.attempt.splitting,
           rationalization: data.attempt.rationalization,
           denial: data.attempt.denial,
-          mentalizing_overcertainty_count: data.attempt.mentalizing_overcertainty_count,
+          mentalizingProfile: data.attempt.mentalizingProfile,
+          moment5Profile: data.attempt.moment5Profile,
+          scenarioKeyEvidence: data.attempt.scenarioKeyEvidence,
         }
       : null,
   });

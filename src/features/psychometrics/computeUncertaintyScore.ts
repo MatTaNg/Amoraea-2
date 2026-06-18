@@ -1,5 +1,5 @@
 import { collectPsychometricFloorUncertaintyFlags } from './psychometricFloorBreaches';
-import { NPI_ENTITLEMENT_ENABLED } from './interviewCompletionStatus';
+import { NPI_ENTITLEMENT_ENABLED } from './psychometricsFeatureFlags';
 import type { DefenseCrossReferenceResult } from './crossReferenceDefenseDetection';
 // Higher uncertainty = less confident the existing data is sufficient
 // to make a reliable gate determination.

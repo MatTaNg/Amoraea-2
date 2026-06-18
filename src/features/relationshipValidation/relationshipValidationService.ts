@@ -4,70 +4,63 @@ import { loadMatchmakingUserSnapshot } from '@features/compatibility/loadMatchma
 import { mapMatchmakingUserToCompatibilityInputs } from '@features/compatibility/mapMatchmakingUserToCompatibilityInputs';
 import type { RelationshipValidationCompatibilityBreakdown } from './constants';
 import {
-  fetchComparisonByPartnerEmail,
   fetchRelationshipValidationRecord,
   fetchValidationComparison,
   getActiveComparisonId,
-  linkValidationComparisonPair,
   saveCompatibilityResultForComparison,
   type RelationshipValidationRecord,
 } from './relationshipValidationRepo';
 import { validationInstrumentsCompleted } from './validationPsychometricsProgress';
 
-function normalizeEmail(email: string): string {
-  return email.trim().toLowerCase();
+export type ValidationPartnerPairSyncResult = {
+  confirmed: boolean;
+  partnerUserId: string | null;
+  selfComparisonId: string | null;
+  partnerComparisonId: string | null;
+  selfPsychometricsComplete: boolean;
+  partnerPsychometricsComplete: boolean;
+  partnerComplete: boolean;
+  reason: string | null;
+};
+
+function parseValidationPartnerPairSyncResult(data: unknown): ValidationPartnerPairSyncResult {
+  const row = (data ?? {}) as Record<string, unknown>;
+  return {
+    confirmed: row.confirmed === true,
+    partnerUserId: typeof row.partner_user_id === 'string' ? row.partner_user_id : null,
+    selfComparisonId: typeof row.self_comparison_id === 'string' ? row.self_comparison_id : null,
+    partnerComparisonId:
+      typeof row.partner_comparison_id === 'string' ? row.partner_comparison_id : null,
+    selfPsychometricsComplete: row.self_psychometrics_complete === true,
+    partnerPsychometricsComplete: row.partner_psychometrics_complete === true,
+    partnerComplete: row.partner_complete === true,
+    reason: typeof row.reason === 'string' ? row.reason : null,
+  };
 }
 
-/** Mutual partner email match for the active comparison. */
+/** Mutual partner email match for the active comparison (server-side; bypasses users RLS). */
+export async function syncValidationPartnerPair(
+  userId: string,
+): Promise<ValidationPartnerPairSyncResult> {
+  const { data, error } = await supabase.rpc('sync_validation_partner_pair');
+  if (error) throw new Error(error.message);
+  void userId;
+  return parseValidationPartnerPairSyncResult(data);
+}
+
+/** @deprecated Prefer syncValidationPartnerPair — kept for tests and legacy callers. */
 export async function tryConfirmValidationPartnerPair(userId: string): Promise<{
   confirmed: boolean;
   partnerUserId: string | null;
   selfComparisonId: string | null;
   partnerComparisonId: string | null;
 }> {
-  const record = await fetchRelationshipValidationRecord(userId);
-  const selfComparisonId = record?.active_comparison_id ?? null;
-  if (!record?.partner_email_entered || !selfComparisonId) {
-    return { confirmed: false, partnerUserId: null, selfComparisonId: null, partnerComparisonId: null };
-  }
-
-  const { data: selfUser, error: selfErr } = await supabase
-    .from('users')
-    .select('email')
-    .eq('id', userId)
-    .maybeSingle();
-  if (selfErr) throw new Error(selfErr.message);
-  const selfEmail = normalizeEmail(String(selfUser?.email ?? ''));
-  if (!selfEmail) {
-    return { confirmed: false, partnerUserId: null, selfComparisonId, partnerComparisonId: null };
-  }
-
-  const partnerEmail = normalizeEmail(record.partner_email_entered);
-  const { data: partnerUsers, error: partnerErr } = await supabase
-    .from('users')
-    .select('id, email')
-    .ilike('email', partnerEmail);
-  if (partnerErr) throw new Error(partnerErr.message);
-
-  const partnerUser = (partnerUsers ?? []).find(
-    (row) => normalizeEmail(String(row.email ?? '')) === partnerEmail,
-  );
-  if (!partnerUser?.id) {
-    return { confirmed: false, partnerUserId: null, selfComparisonId, partnerComparisonId: null };
-  }
-
-  const partnerComparison = await fetchComparisonByPartnerEmail(partnerUser.id, selfEmail);
-  if (!partnerComparison) {
-    return { confirmed: false, partnerUserId: null, selfComparisonId, partnerComparisonId: null };
-  }
-
-  await linkValidationComparisonPair(selfComparisonId, partnerComparison.id, partnerUser.id);
-
+  const result = await syncValidationPartnerPair(userId);
   return {
-    confirmed: true,
-    partnerUserId: partnerUser.id,
-    selfComparisonId,
-    partnerComparisonId: partnerComparison.id,
+    confirmed: result.confirmed,
+    partnerUserId: result.partnerUserId,
+    selfComparisonId: result.selfComparisonId,
+    partnerComparisonId: result.partnerComparisonId,
   };
 }
 
@@ -102,8 +95,6 @@ export async function computeAndStoreValidationPairScore(
 }
 
 export async function isValidationPsychometricsComplete(userId: string): Promise<boolean> {
-  const record = await fetchRelationshipValidationRecord(userId);
-  if (record?.psychometrics_completed_at) return true;
   const { complete } = await validationInstrumentsCompleted(userId);
   return complete;
 }
@@ -112,26 +103,39 @@ export async function maybeComputeValidationPairScore(userId: string): Promise<{
   partnerComplete: boolean;
   breakdown: RelationshipValidationCompatibilityBreakdown | null;
   activeComparisonId: string | null;
+  pairSyncReason: string | null;
 }> {
   const activeComparisonId = await getActiveComparisonId(userId);
-  const { confirmed, partnerUserId, selfComparisonId, partnerComparisonId } =
-    await tryConfirmValidationPartnerPair(userId);
-  if (!confirmed || !partnerUserId || !selfComparisonId || !partnerComparisonId) {
-    return { partnerComplete: false, breakdown: null, activeComparisonId };
-  }
-
-  const partnerRecord = await fetchRelationshipValidationRecord(partnerUserId);
-  if (!partnerRecord?.psychometrics_completed_at) {
-    return { partnerComplete: false, breakdown: null, activeComparisonId };
-  }
-
-  const breakdown = await computeAndStoreValidationPairScore(
-    userId,
+  const pairSync = await syncValidationPartnerPair(userId);
+  const {
+    confirmed,
     partnerUserId,
     selfComparisonId,
     partnerComparisonId,
-  );
-  return { partnerComplete: true, breakdown, activeComparisonId };
+    partnerComplete: psychometricsReady,
+    reason,
+  } = pairSync;
+
+  if (!confirmed || !partnerUserId || !selfComparisonId || !partnerComparisonId) {
+    return { partnerComplete: false, breakdown: null, activeComparisonId, pairSyncReason: reason };
+  }
+
+  if (!psychometricsReady) {
+    return { partnerComplete: false, breakdown: null, activeComparisonId, pairSyncReason: reason };
+  }
+
+  try {
+    const breakdown = await computeAndStoreValidationPairScore(
+      userId,
+      partnerUserId,
+      selfComparisonId,
+      partnerComparisonId,
+    );
+    return { partnerComplete: true, breakdown, activeComparisonId, pairSyncReason: null };
+  } catch (err) {
+    console.warn('[maybeComputeValidationPairScore] compute failed:', err);
+    return { partnerComplete: false, breakdown: null, activeComparisonId, pairSyncReason: 'compute_failed' };
+  }
 }
 
 export type ValidationFlowStep =
@@ -141,13 +145,15 @@ export type ValidationFlowStep =
   | 'psychometrics'
   | 'report';
 
-export function resolveValidationFlowStep(
+export async function resolveValidationFlowStep(
+  userId: string,
   record: RelationshipValidationRecord | null,
-): ValidationFlowStep {
+): Promise<ValidationFlowStep> {
   if (!record?.welcome_completed_at) return 'welcome';
   if (!record.partner_email_entered) return 'partner_email';
   if (!record.pre_assessment) return 'pre_assessment';
-  if (!record.psychometrics_completed_at) return 'psychometrics';
+  const psychometricsDone = await isValidationPsychometricsComplete(userId);
+  if (!psychometricsDone) return 'psychometrics';
   return 'report';
 }
 

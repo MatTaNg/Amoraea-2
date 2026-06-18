@@ -1,67 +1,92 @@
-import { normalizeInterviewTypography } from './probeAndScoringUtils';
+import { moment4QualifiesAsValidNonApplicable } from './moment4ConcretenessClassification';
+import {
+  countInterviewWords,
+  moment4HasGenericSelfDescriptionOpener,
+  moment4HasNamedOrReferencedPerson,
+  moment4HasSpecificEventDescription,
+} from './moment4AnswerSignals';
 import { looksLikeMoment4GrudgePrompt, looksLikeMoment4ThresholdQuestion } from './moment4ProbeLogic';
+import { normalizeInterviewTypography } from './probeAndScoringUtils';
+
+export {
+  countInterviewWords,
+  moment4HasGenericSelfDescriptionOpener,
+  moment4HasNamedOrReferencedPerson,
+  moment4HasSpecificEventDescription,
+} from './moment4AnswerSignals';
 
 /** Client-injected once when the first grudge answer lacks concrete person/relationship/situation anchors (see product spec). */
 export const MOMENT_4_SPECIFICITY_FOLLOW_UP_TEXT =
   "Can you think of a specific person — even if it's just someone from a while back — and tell me a bit more about what happened?";
 
-export function countInterviewWords(text: string): number {
-  const t = (text ?? '').trim();
-  if (!t) return 0;
-  return t.split(/\s+/).filter(Boolean).length;
+/** Aligns with elaboration probe unprompted threshold (25 words) — M4 specificity redirect. */
+export const MOMENT4_SPECIFICITY_LOW_WORD_THRESHOLD = 25;
+
+export type Moment4SpecificityProbeEval = {
+  hasNamedPerson: boolean;
+  hasSpecificEvent: boolean;
+  genericOpenerDetected: boolean;
+  wordCount: number;
+  probeShouldFire: boolean;
+  triggerReason: string | null;
+};
+
+/**
+ * Evaluate whether the Moment 4 specificity redirect should fire.
+ * Fires when ANY bypass signal is present unless both a named person and specific event are present.
+ */
+export function evaluateMoment4SpecificityProbe(text: string): Moment4SpecificityProbeEval {
+  const wordCount = countInterviewWords(text);
+  const hasNamedPerson = moment4HasNamedOrReferencedPerson(text);
+  const hasSpecificEvent = moment4HasSpecificEventDescription(text);
+  const genericOpenerDetected = moment4HasGenericSelfDescriptionOpener(text);
+
+  if (moment4QualifiesAsValidNonApplicable(text)) {
+    return {
+      hasNamedPerson,
+      hasSpecificEvent,
+      genericOpenerDetected,
+      wordCount,
+      probeShouldFire: false,
+      triggerReason: null,
+    };
+  }
+
+  let probeShouldFire = false;
+  let triggerReason: string | null = null;
+
+  if (hasNamedPerson && hasSpecificEvent) {
+    probeShouldFire = false;
+  } else if (!hasNamedPerson) {
+    probeShouldFire = true;
+    triggerReason = 'no_named_person';
+  } else if (genericOpenerDetected && !hasSpecificEvent) {
+    probeShouldFire = true;
+    triggerReason = 'generic_opener_no_event';
+  } else if (wordCount < MOMENT4_SPECIFICITY_LOW_WORD_THRESHOLD && !hasSpecificEvent) {
+    probeShouldFire = true;
+    triggerReason = 'low_word_count_no_event';
+  }
+
+  return {
+    hasNamedPerson,
+    hasSpecificEvent,
+    genericOpenerDetected,
+    wordCount,
+    probeShouldFire,
+    triggerReason,
+  };
 }
 
-const RELATIONSHIP_OR_ROLE_RE =
-  /\b(mom|mother|dad|father|parent|sister|brother|family|aunt|uncle|cousin|grandparent|wife|husband|partner|ex[- ]?partner|boyfriend|girlfriend|spouse|fianc[eé]|friend|coworker|co-worker|colleague|boss|manager|neighbor|teacher|roommate)\b/i;
-
-/** Named person-like token (not sentence-initial I/A); conservative. */
-const LIKELY_NAME_RE = /\b(?!I\b|A\b|The\b|We\b|It\b|So\b|If\b|My\b|In\b|At\b|On\b|He\b|She\b|They\b)[A-Z][a-z]{2,}\b/;
-
-/** Situational anchors — exclude bare temporal adverbs ("before" as in "I've done it before"). */
-const INCIDENT_OR_SITUATION_RE =
-  /\b(when|once|that time|that day|that night|years?\s*ago|last\s+(year|week|month)|at\s+(work|school|home)|in\s+(high\s+)?school|happened|we\s+(went|fought|argued|talked|met)|told\s+me|said\s+to\s+me|called\s+me|found\s+out|broke\s+up|split\s+up)\b/i;
-
-const AFTER_BEFORE_LINKED_RE =
-  /\b(after|before)\s+(that|this|the|we|it|she|he|they|i|you)\b/i;
-
-const SOCIAL_ANCHOR_RE =
-  /\b(my|a|an)\s+(friend|coworker|co-worker|colleague|neighbor|roommate|boss|ex|partner)\b/i;
-
-const SOMEONE_I_KNEW_RE = /\bsomeone\s+I\s+(knew|dated|worked\s+with|went\s+to\s+school\s+with)\b/i;
-
-const THIS_THAT_PERSON_RE = /\b(this|that)\s+person\b/i;
-
-/** "This woman", "the driver", etc. — concrete referent without a proper name. */
-const THIS_THAT_THE_HUMAN_REF_RE =
-  /\b(this|that|the)\s+(woman|man|guy|girl|lady|gentleman|person|people|driver|dude|kid)\b/i;
-
 /**
- * Grudge answers often use "someone" / "people in my life" without a proper name — still a concrete social frame
- * (session_logs: M4_SPECIFICITY_FOLLOWUP_INJECT on long forgive/boundaries answers that included these phrases).
- */
-const GRUDGE_OR_SOCIAL_CUTOFF_REF_RE =
-  /\b(hold(?:ing)?\s+a\s+)?grudge\s+against\s+someone\b|\bdon'?t\s+include\s+those\s+people\b|\b(those|these)\s+people\s+in\s+my\s+life\b|\bpeople\s+in\s+my\s+life\b/i;
-
-/**
- * Concrete anchor: specific person/relationship, named individual, or identifiable situation — not generic habits or emotion-only.
- * Used to decide if the Moment 4 grudge answer already carries enough specificity to skip the follow-up probe.
+ * Concrete anchor: specific person/relationship plus identifiable episode — adequate to skip the follow-up probe.
  */
 export function hasMoment4PersonRelationshipOrSituationAnchor(text: string): boolean {
-  const t = normalizeInterviewTypography(text ?? '').trim();
-  if (!t) return false;
-  if (RELATIONSHIP_OR_ROLE_RE.test(t)) return true;
-  if (LIKELY_NAME_RE.test(t)) return true;
-  if (INCIDENT_OR_SITUATION_RE.test(t) || AFTER_BEFORE_LINKED_RE.test(t)) return true;
-  if (SOCIAL_ANCHOR_RE.test(t)) return true;
-  if (SOMEONE_I_KNEW_RE.test(t)) return true;
-  if (THIS_THAT_PERSON_RE.test(t)) return true;
-  if (THIS_THAT_THE_HUMAN_REF_RE.test(t)) return true;
-  if (GRUDGE_OR_SOCIAL_CUTOFF_REF_RE.test(t)) return true;
-  return false;
+  const { hasNamedPerson, hasSpecificEvent } = evaluateMoment4SpecificityProbe(text);
+  return hasNamedPerson && hasSpecificEvent;
 }
 
 /**
- * True when the answer carries at least one of: named relationship/role, described incident, or emotional detail.
  * @deprecated Prefer {@link hasMoment4PersonRelationshipOrSituationAnchor} for grudge specificity gating; kept for callers that still want the broader signal.
  */
 export function hasMoment4SpecificPersonalSignal(text: string): boolean {
@@ -79,12 +104,11 @@ export function hasMoment4SpecificPersonalSignal(text: string): boolean {
 }
 
 /**
- * Fire specificity follow-up when the answer lacks a person/relationship/situation anchor
- * (vague generalities). Adequate anchors skip the probe even when the answer is short.
+ * Fire specificity follow-up when the answer lacks adequate person + event anchors.
+ * Adequate anchors skip the probe even when the answer is short.
  */
 export function needsMoment4SpecificityFollowUp(text: string): boolean {
-  if (hasMoment4PersonRelationshipOrSituationAnchor(text)) return false;
-  return true;
+  return evaluateMoment4SpecificityProbe(text).probeShouldFire;
 }
 
 export function looksLikeMoment4SpecificityFollowUpPrompt(text: string): boolean {

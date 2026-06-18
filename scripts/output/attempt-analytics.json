@@ -1,0 +1,1584 @@
+{
+  "generatedAt": "2026-06-17T14:45:58.667Z",
+  "runtimeSec": "2.3",
+  "recomputeMeta": {
+    "mode": "recomputed",
+    "algorithm": "scenario_only_integers_v2",
+    "successCount": 75,
+    "incompleteCount": 14
+  },
+  "report": {
+    "total": 89,
+    "passCount": 35,
+    "scoreBucketCounts": {
+      "< 5.0": 7,
+      "5.0-5.5": 4,
+      "5.5-6.0": 8,
+      "6.0-6.5": 15,
+      "6.5-7.0": 14,
+      "7.0-7.5": 16,
+      "7.5-8.0": 8,
+      "8.0+": 3
+    },
+    "scoredCount": 75,
+    "dangerZoneCount": 15,
+    "pillarStats": {
+      "repair": {
+        "mean": 6.28,
+        "stdDev": 1.24,
+        "min": 3,
+        "max": 9,
+        "count": 75
+      },
+      "contempt": {
+        "mean": 7.21,
+        "stdDev": 1.15,
+        "min": 4,
+        "max": 9,
+        "count": 75
+      },
+      "attunement": {
+        "mean": 6,
+        "stdDev": 1.49,
+        "min": 3,
+        "max": 9,
+        "count": 75
+      },
+      "regulation": {
+        "mean": 7.32,
+        "stdDev": 1.1,
+        "min": 2,
+        "max": 9,
+        "count": 73
+      },
+      "mentalizing": {
+        "mean": 5.99,
+        "stdDev": 1.29,
+        "min": 3,
+        "max": 8,
+        "count": 75
+      },
+      "appreciation": {
+        "mean": 6.27,
+        "stdDev": 2.26,
+        "min": 1,
+        "max": 9,
+        "count": 75
+      },
+      "accountability": {
+        "mean": 5.75,
+        "stdDev": 1.25,
+        "min": 3,
+        "max": 9,
+        "count": 75
+      },
+      "commitment_threshold": {
+        "mean": 6.97,
+        "stdDev": 0.81,
+        "min": 4,
+        "max": 8,
+        "count": 71
+      }
+    },
+    "probeRates": [
+      {
+        "reason": "lacks_explicit_self_accountability",
+        "fired": 24,
+        "attemptsWithProbe": 24,
+        "attemptPct": 26.96629213483146
+      },
+      {
+        "reason": "moment4_low_specificity",
+        "fired": 2,
+        "attemptsWithProbe": 2,
+        "attemptPct": 2.247191011235955
+      },
+      {
+        "reason": "scenario_c_q1_no_sophie_perspective",
+        "fired": 2,
+        "attemptsWithProbe": 2,
+        "attemptPct": 2.247191011235955
+      },
+      {
+        "reason": "short_elaboration",
+        "fired": 1,
+        "attemptsWithProbe": 1,
+        "attemptPct": 1.1235955056179776
+      },
+      {
+        "reason": "repair_refusal_detected",
+        "fired": 1,
+        "attemptsWithProbe": 1,
+        "attemptPct": 1.1235955056179776
+      }
+    ],
+    "m4Counts": {
+      "absent": 2,
+      "low": 29,
+      "moderate": 17,
+      "high": 27,
+      "valid_non_applicable": 0
+    },
+    "m5Counts": {
+      "absent": 0,
+      "low": 15,
+      "moderate": 9,
+      "high": 25,
+      "valid_non_applicable": 0
+    },
+    "m4Total": 75,
+    "m5Total": 49,
+    "m4LowAbsent": 41.333333333333336,
+    "m5LowAbsent": 30.612244897959183,
+    "depthPositive": 10,
+    "depthZero": 43,
+    "depthNegative": 36,
+    "depthTotal": 89,
+    "depthAvg": -0.09,
+    "psychPairsCount": 75,
+    "psychCategories": {
+      "largePositive": 0,
+      "smallPositive": 0,
+      "neutral": 68,
+      "smallNegative": 1,
+      "largeNegative": 6
+    },
+    "psychDeltas": [
+      -0.39999999999999947,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      -0.6000000000000005,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      -1.1,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      -0.8500000000000001,
+      0,
+      0,
+      0,
+      0,
+      0,
+      -0.5999999999999996,
+      -0.4500000000000002,
+      -0.2999999999999998
+    ],
+    "gateChangedCount": 2,
+    "interviewPassPsychFail": 2,
+    "interviewFailPsychPass": 0,
+    "gateFailRates": [
+      {
+        "reason": "scenario_floor",
+        "count": 27
+      },
+      {
+        "reason": "weighted_score",
+        "count": 25
+      },
+      {
+        "reason": "mentalizing_floor",
+        "count": 1
+      }
+    ],
+    "top10": [
+      {
+        "id": "8fa6a8f6-d180-4b41-907f-df86a3906168",
+        "user_id": "3b05c8b7-1783-404a-85f9-eb5a592d044a",
+        "completed_at": "2026-04-15T20:21:52.07+00:00",
+        "weighted_score": 8.3,
+        "modified_weighted_score": 8.35,
+        "modified_weighted_score_with_psychometrics": 7.95,
+        "passed": true,
+        "final_gate_pass": true,
+        "pillar_scores": {
+          "mentalizing": 8,
+          "accountability": 9,
+          "repair": 9,
+          "regulation": 7,
+          "attunement": 8,
+          "appreciation": 9,
+          "contempt": 9,
+          "commitment_threshold": 5
+        },
+        "gate_fail_reasons": [],
+        "probe_log": [
+          {
+            "scenario": 1,
+            "construct": "combined",
+            "probe_fired": false,
+            "score_delta": 8.8,
+            "trigger_reason": null,
+            "pre_probe_score": 0,
+            "post_probe_score": 8.8
+          },
+          {
+            "scenario": 2,
+            "construct": "combined",
+            "probe_fired": false,
+            "score_delta": 9.2,
+            "trigger_reason": null,
+            "pre_probe_score": 0,
+            "post_probe_score": 9.2
+          },
+          {
+            "scenario": 3,
+            "construct": "combined",
+            "probe_fired": false,
+            "score_delta": 7.3,
+            "trigger_reason": null,
+            "pre_probe_score": 0,
+            "post_probe_score": 7.3
+          }
+        ],
+        "moment_4_concreteness": "high",
+        "moment_5_concreteness": "high",
+        "depth_signal_modifier": 0.05,
+        "score_modifier": 0.05,
+        "scenario_composites": {
+          "scenario_1": 8.833333333333334,
+          "scenario_2": 9.166666666666666,
+          "scenario_3": 7.285714285714286
+        },
+        "disclosure_calibration": "calibrated",
+        "ego_development_level": null,
+        "recomputeStatus": "success",
+        "recomputeNotes": [
+          "rollup_algorithm:scenario_only_integers_v2",
+          "gate: pass — all current rubric checks satisfied"
+        ]
+      },
+      {
+        "id": "92655ae1-3918-4e67-b94d-a1865b99526a",
+        "user_id": "9c911a24-6ec2-4cd8-9772-2018803d4415",
+        "completed_at": "2026-05-01T23:58:34.084+00:00",
+        "weighted_score": 8,
+        "modified_weighted_score": 8,
+        "modified_weighted_score_with_psychometrics": 8,
+        "passed": true,
+        "final_gate_pass": true,
+        "pillar_scores": {
+          "mentalizing": 8,
+          "accountability": 7,
+          "repair": 7,
+          "regulation": 8,
+          "attunement": 9,
+          "appreciation": 8,
+          "contempt": 9,
+          "commitment_threshold": 8
+        },
+        "gate_fail_reasons": [],
+        "probe_log": [
+          {
+            "scenario": 1,
+            "construct": "combined",
+            "probe_fired": false,
+            "score_delta": 8.3,
+            "trigger_reason": null,
+            "pre_probe_score": 0,
+            "post_probe_score": 8.3
+          },
+          {
+            "scenario": 2,
+            "construct": "combined",
+            "probe_fired": false,
+            "score_delta": 8,
+            "trigger_reason": null,
+            "pre_probe_score": 0,
+            "post_probe_score": 8
+          },
+          {
+            "scenario": 3,
+            "construct": "combined",
+            "probe_fired": false,
+            "score_delta": 7.4,
+            "trigger_reason": null,
+            "pre_probe_score": 0,
+            "post_probe_score": 7.4
+          }
+        ],
+        "moment_4_concreteness": "high",
+        "moment_5_concreteness": null,
+        "depth_signal_modifier": 0,
+        "score_modifier": 0,
+        "scenario_composites": {
+          "scenario_1": 8.333333333333334,
+          "scenario_2": 8,
+          "scenario_3": 7.428571428571429
+        },
+        "disclosure_calibration": "calibrated",
+        "ego_development_level": null,
+        "recomputeStatus": "success",
+        "recomputeNotes": [
+          "rollup_algorithm:scenario_only_integers_v2",
+          "gate: pass — all current rubric checks satisfied"
+        ]
+      },
+      {
+        "id": "40279911-f9db-4760-ba6e-91e135d67c07",
+        "user_id": "3686b694-684d-43e7-9ca0-e47079d88d9c",
+        "completed_at": "2026-05-18T18:03:07.84+00:00",
+        "weighted_score": 8,
+        "modified_weighted_score": 8.2,
+        "modified_weighted_score_with_psychometrics": 8.2,
+        "passed": true,
+        "final_gate_pass": true,
+        "pillar_scores": {
+          "mentalizing": 7,
+          "accountability": 8,
+          "repair": 8,
+          "regulation": 8,
+          "attunement": 7,
+          "appreciation": 8,
+          "contempt": 9,
+          "commitment_threshold": 8
+        },
+        "gate_fail_reasons": [],
+        "probe_log": [
+          {
+            "scenario": 1,
+            "construct": "combined",
+            "probe_fired": false,
+            "score_delta": 7.7,
+            "trigger_reason": null,
+            "pre_probe_score": 0,
+            "post_probe_score": 7.7
+          },
+          {
+            "scenario": 2,
+            "construct": "combined",
+            "probe_fired": false,
+            "score_delta": 8,
+            "trigger_reason": null,
+            "pre_probe_score": 0,
+            "post_probe_score": 8
+          },
+          {
+            "scenario": 3,
+            "construct": "accountability",
+            "probe_fired": true,
+            "score_delta": 0,
+            "trigger_reason": "lacks_explicit_self_accountability",
+            "pre_probe_score": 0,
+            "post_probe_score": 0
+          },
+          {
+            "scenario": 3,
+            "construct": "combined",
+            "probe_fired": false,
+            "score_delta": 7.3,
+            "trigger_reason": null,
+            "pre_probe_score": 0,
+            "post_probe_score": 7.3
+          }
+        ],
+        "moment_4_concreteness": "high",
+        "moment_5_concreteness": "high",
+        "depth_signal_modifier": 0.2,
+        "score_modifier": 0.2,
+        "scenario_composites": {
+          "scenario_1": 7.666666666666667,
+          "scenario_2": 8,
+          "scenario_3": 7.333333333333333
+        },
+        "disclosure_calibration": "underdisclosure",
+        "ego_development_level": 4,
+        "recomputeStatus": "success",
+        "recomputeNotes": [
+          "rollup_algorithm:scenario_only_integers_v2",
+          "gate: pass — all current rubric checks satisfied"
+        ]
+      },
+      {
+        "id": "97da22a6-7425-42ae-bcda-f1b6a4146c25",
+        "user_id": "4c2fdd48-3b5b-4ceb-892d-6142560e5092",
+        "completed_at": "2026-05-07T20:53:47.835+00:00",
+        "weighted_score": 7.9,
+        "modified_weighted_score": 7.9,
+        "modified_weighted_score_with_psychometrics": 7.9,
+        "passed": true,
+        "final_gate_pass": true,
+        "pillar_scores": {
+          "mentalizing": 8,
+          "accountability": 7,
+          "repair": 8,
+          "regulation": 9,
+          "attunement": 8,
+          "appreciation": 8,
+          "contempt": 8,
+          "commitment_threshold": 7
+        },
+        "gate_fail_reasons": [],
+        "probe_log": [
+          {
+            "scenario": 1,
+            "construct": "combined",
+            "probe_fired": false,
+            "score_delta": 7.7,
+            "trigger_reason": null,
+            "pre_probe_score": 0,
+            "post_probe_score": 7.7
+          },
+          {
+            "scenario": 2,
+            "construct": "combined",
+            "probe_fired": false,
+            "score_delta": 7.8,
+            "trigger_reason": null,
+            "pre_probe_score": 0,
+            "post_probe_score": 7.8
+          },
+          {
+            "scenario": 3,
+            "construct": "accountability",
+            "probe_fired": true,
+            "score_delta": 0,
+            "trigger_reason": "lacks_explicit_self_accountability",
+            "pre_probe_score": 0,
+            "post_probe_score": 0
+          },
+          {
+            "scenario": 3,
+            "construct": "combined",
+            "probe_fired": false,
+            "score_delta": 8.5,
+            "trigger_reason": null,
+            "pre_probe_score": 0,
+            "post_probe_score": 8.5
+          }
+        ],
+        "moment_4_concreteness": "low",
+        "moment_5_concreteness": "high",
+        "depth_signal_modifier": 0,
+        "score_modifier": 0,
+        "scenario_composites": {
+          "scenario_1": 7.666666666666667,
+          "scenario_2": 7.833333333333333,
+          "scenario_3": 8.5
+        },
+        "disclosure_calibration": "underdisclosure",
+        "ego_development_level": 4,
+        "recomputeStatus": "success",
+        "recomputeNotes": [
+          "rollup_algorithm:scenario_only_integers_v2",
+          "gate: pass — all current rubric checks satisfied"
+        ]
+      },
+      {
+        "id": "b980a9e6-2c73-489c-8900-47f71396ba0d",
+        "user_id": "6339c9b5-dac0-4b99-b9f0-d82c84d1d60d",
+        "completed_at": "2026-04-30T17:02:53.252+00:00",
+        "weighted_score": 7.6,
+        "modified_weighted_score": 7.8,
+        "modified_weighted_score_with_psychometrics": 7.8,
+        "passed": true,
+        "final_gate_pass": true,
+        "pillar_scores": {
+          "mentalizing": 7,
+          "accountability": 6,
+          "repair": 7,
+          "regulation": 8,
+          "attunement": 8,
+          "appreciation": 9,
+          "contempt": 9,
+          "commitment_threshold": 7
+        },
+        "gate_fail_reasons": [],
+        "probe_log": [
+          {
+            "scenario": 1,
+            "construct": "combined",
+            "probe_fired": false,
+            "score_delta": 7.3,
+            "trigger_reason": null,
+            "pre_probe_score": 0,
+            "post_probe_score": 7.3
+          },
+          {
+            "scenario": 2,
+            "construct": "combined",
+            "probe_fired": false,
+            "score_delta": 8,
+            "trigger_reason": null,
+            "pre_probe_score": 0,
+            "post_probe_score": 8
+          },
+          {
+            "scenario": 3,
+            "construct": "combined",
+            "probe_fired": false,
+            "score_delta": 7.4,
+            "trigger_reason": null,
+            "pre_probe_score": 0,
+            "post_probe_score": 7.4
+          }
+        ],
+        "moment_4_concreteness": "high",
+        "moment_5_concreteness": "high",
+        "depth_signal_modifier": 0.2,
+        "score_modifier": 0.2,
+        "scenario_composites": {
+          "scenario_1": 7.333333333333333,
+          "scenario_2": 8,
+          "scenario_3": 7.428571428571429
+        },
+        "disclosure_calibration": "calibrated",
+        "ego_development_level": null,
+        "recomputeStatus": "success",
+        "recomputeNotes": [
+          "rollup_algorithm:scenario_only_integers_v2",
+          "gate: pass — all current rubric checks satisfied"
+        ]
+      },
+      {
+        "id": "138dca24-218c-4b55-a3e1-ee1293dbf7dd",
+        "user_id": "dcb7d41a-f027-41c8-9e9f-716f8e6d271a",
+        "completed_at": "2026-05-01T19:28:04.457+00:00",
+        "weighted_score": 7.6,
+        "modified_weighted_score": 7.6,
+        "modified_weighted_score_with_psychometrics": 7.6,
+        "passed": true,
+        "final_gate_pass": true,
+        "pillar_scores": {
+          "mentalizing": 8,
+          "accountability": 7,
+          "repair": 8,
+          "regulation": 8,
+          "attunement": 8,
+          "appreciation": 9,
+          "contempt": 7,
+          "commitment_threshold": 7
+        },
+        "gate_fail_reasons": [],
+        "probe_log": [
+          {
+            "scenario": 2,
+            "construct": "combined",
+            "probe_fired": false,
+            "score_delta": 8.2,
+            "trigger_reason": null,
+            "pre_probe_score": 0,
+            "post_probe_score": 8.2
+          },
+          {
+            "scenario": 1,
+            "construct": "combined",
+            "probe_fired": false,
+            "score_delta": 7.5,
+            "trigger_reason": null,
+            "pre_probe_score": 0,
+            "post_probe_score": 7.5
+          },
+          {
+            "scenario": 3,
+            "construct": "combined",
+            "probe_fired": false,
+            "score_delta": 7.3,
+            "trigger_reason": null,
+            "pre_probe_score": 0,
+            "post_probe_score": 7.3
+          }
+        ],
+        "moment_4_concreteness": "low",
+        "moment_5_concreteness": null,
+        "depth_signal_modifier": 0,
+        "score_modifier": 0,
+        "scenario_composites": {
+          "scenario_1": 7.5,
+          "scenario_2": 8.166666666666666,
+          "scenario_3": 7.285714285714286
+        },
+        "disclosure_calibration": "calibrated",
+        "ego_development_level": null,
+        "recomputeStatus": "success",
+        "recomputeNotes": [
+          "rollup_algorithm:scenario_only_integers_v2",
+          "gate: pass — all current rubric checks satisfied"
+        ]
+      },
+      {
+        "id": "fbc78d23-d63b-4144-a4c3-95b91157a5f2",
+        "user_id": "41039f68-d109-4ba4-8a9c-cea712731ff1",
+        "completed_at": "2026-05-02T04:50:04.579+00:00",
+        "weighted_score": 7.6,
+        "modified_weighted_score": 7.6,
+        "modified_weighted_score_with_psychometrics": 7.6,
+        "passed": true,
+        "final_gate_pass": true,
+        "pillar_scores": {
+          "mentalizing": 7,
+          "accountability": 7,
+          "repair": 8,
+          "regulation": 7,
+          "attunement": 8,
+          "appreciation": 8,
+          "contempt": 8,
+          "commitment_threshold": 7
+        },
+        "gate_fail_reasons": [],
+        "probe_log": [
+          {
+            "scenario": 2,
+            "construct": "combined",
+            "probe_fired": false,
+            "score_delta": 8,
+            "trigger_reason": null,
+            "pre_probe_score": 0,
+            "post_probe_score": 8
+          },
+          {
+            "scenario": 1,
+            "construct": "combined",
+            "probe_fired": false,
+            "score_delta": 7.7,
+            "trigger_reason": null,
+            "pre_probe_score": 0,
+            "post_probe_score": 7.7
+          },
+          {
+            "scenario": 3,
+            "construct": "combined",
+            "probe_fired": false,
+            "score_delta": 6.9,
+            "trigger_reason": null,
+            "pre_probe_score": 0,
+            "post_probe_score": 6.9
+          }
+        ],
+        "moment_4_concreteness": "high",
+        "moment_5_concreteness": null,
+        "depth_signal_modifier": 0,
+        "score_modifier": 0,
+        "scenario_composites": {
+          "scenario_1": 7.666666666666667,
+          "scenario_2": 8,
+          "scenario_3": 6.857142857142857
+        },
+        "disclosure_calibration": "calibrated",
+        "ego_development_level": null,
+        "recomputeStatus": "success",
+        "recomputeNotes": [
+          "rollup_algorithm:scenario_only_integers_v2",
+          "gate: pass — all current rubric checks satisfied"
+        ]
+      },
+      {
+        "id": "b12b7c7a-1fa7-4ad9-8256-8adf05df48ae",
+        "user_id": "1e685466-8c91-4299-a304-eaa67744290b",
+        "completed_at": "2026-05-07T21:43:24.496+00:00",
+        "weighted_score": 7.6,
+        "modified_weighted_score": 7.65,
+        "modified_weighted_score_with_psychometrics": 7.65,
+        "passed": true,
+        "final_gate_pass": true,
+        "pillar_scores": {
+          "mentalizing": 7,
+          "accountability": 7,
+          "repair": 7,
+          "regulation": 8,
+          "attunement": 7,
+          "appreciation": 8,
+          "contempt": 9,
+          "commitment_threshold": 7
+        },
+        "gate_fail_reasons": [],
+        "probe_log": [
+          {
+            "scenario": 1,
+            "construct": "combined",
+            "probe_fired": false,
+            "score_delta": 7.2,
+            "trigger_reason": null,
+            "pre_probe_score": 0,
+            "post_probe_score": 7.2
+          },
+          {
+            "scenario": 2,
+            "construct": "combined",
+            "probe_fired": false,
+            "score_delta": 7.8,
+            "trigger_reason": null,
+            "pre_probe_score": 0,
+            "post_probe_score": 7.8
+          },
+          {
+            "scenario": 3,
+            "construct": "accountability",
+            "probe_fired": true,
+            "score_delta": 0,
+            "trigger_reason": "lacks_explicit_self_accountability",
+            "pre_probe_score": 0,
+            "post_probe_score": 0
+          },
+          {
+            "scenario": 3,
+            "construct": "combined",
+            "probe_fired": false,
+            "score_delta": 7.3,
+            "trigger_reason": null,
+            "pre_probe_score": 0,
+            "post_probe_score": 7.3
+          }
+        ],
+        "moment_4_concreteness": "high",
+        "moment_5_concreteness": "high",
+        "depth_signal_modifier": 0.05,
+        "score_modifier": 0.05,
+        "scenario_composites": {
+          "scenario_1": 7.166666666666667,
+          "scenario_2": 7.833333333333333,
+          "scenario_3": 7.333333333333333
+        },
+        "disclosure_calibration": "overdisclosure",
+        "ego_development_level": null,
+        "recomputeStatus": "success",
+        "recomputeNotes": [
+          "rollup_algorithm:scenario_only_integers_v2",
+          "gate: pass — all current rubric checks satisfied"
+        ]
+      },
+      {
+        "id": "2840c8de-d8ae-4db0-9b99-21f9d978d2cf",
+        "user_id": "68577c70-cd64-4745-b52e-598a78c35da2",
+        "completed_at": "2026-06-09T22:33:02.627+00:00",
+        "weighted_score": 7.6,
+        "modified_weighted_score": 7.5,
+        "modified_weighted_score_with_psychometrics": 7.5,
+        "passed": true,
+        "final_gate_pass": true,
+        "pillar_scores": {
+          "mentalizing": 7,
+          "accountability": 8,
+          "repair": 8,
+          "regulation": 8,
+          "attunement": 7,
+          "appreciation": 8,
+          "contempt": 7,
+          "commitment_threshold": 8
+        },
+        "gate_fail_reasons": [],
+        "probe_log": [],
+        "moment_4_concreteness": "low",
+        "moment_5_concreteness": "moderate",
+        "depth_signal_modifier": -0.1,
+        "score_modifier": -0.1,
+        "scenario_composites": {
+          "scenario_1": 7,
+          "scenario_2": 8,
+          "scenario_3": 7.333333333333333
+        },
+        "disclosure_calibration": "underdisclosure",
+        "ego_development_level": 4,
+        "recomputeStatus": "success",
+        "recomputeNotes": [
+          "rollup_algorithm:scenario_only_integers_v2",
+          "gate: pass — all current rubric checks satisfied"
+        ]
+      },
+      {
+        "id": "f3d127a4-b3dd-4cec-bb5a-8dc6dbbaeaf5",
+        "user_id": "852fc964-c870-4a31-8a53-8845eb8d7f4b",
+        "completed_at": "2026-05-02T23:17:22.445+00:00",
+        "weighted_score": 7.5,
+        "modified_weighted_score": 7.5,
+        "modified_weighted_score_with_psychometrics": 7.5,
+        "passed": true,
+        "final_gate_pass": true,
+        "pillar_scores": {
+          "mentalizing": 7,
+          "accountability": 7,
+          "repair": 7,
+          "regulation": 8,
+          "attunement": 8,
+          "appreciation": 8,
+          "contempt": 8,
+          "commitment_threshold": 8
+        },
+        "gate_fail_reasons": [],
+        "probe_log": [
+          {
+            "scenario": 1,
+            "construct": "combined",
+            "probe_fired": false,
+            "score_delta": 6.8,
+            "trigger_reason": null,
+            "pre_probe_score": 0,
+            "post_probe_score": 6.8
+          },
+          {
+            "scenario": 2,
+            "construct": "combined",
+            "probe_fired": false,
+            "score_delta": 8.3,
+            "trigger_reason": null,
+            "pre_probe_score": 0,
+            "post_probe_score": 8.3
+          },
+          {
+            "scenario": 3,
+            "construct": "combined",
+            "probe_fired": false,
+            "score_delta": 7,
+            "trigger_reason": null,
+            "pre_probe_score": 0,
+            "post_probe_score": 7
+          }
+        ],
+        "moment_4_concreteness": "high",
+        "moment_5_concreteness": null,
+        "depth_signal_modifier": 0,
+        "score_modifier": 0,
+        "scenario_composites": {
+          "scenario_1": 6.833333333333333,
+          "scenario_2": 8.333333333333334,
+          "scenario_3": 7
+        },
+        "disclosure_calibration": "calibrated",
+        "ego_development_level": null,
+        "recomputeStatus": "success",
+        "recomputeNotes": [
+          "rollup_algorithm:scenario_only_integers_v2",
+          "gate: pass — all current rubric checks satisfied"
+        ]
+      }
+    ],
+    "bottom10": [
+      {
+        "id": "6c0470b7-c18c-4a1d-830f-cc0808001d07",
+        "user_id": "c1348dfe-06f7-4981-917a-7c935fb13da0",
+        "completed_at": "2026-06-12T22:25:33.393+00:00",
+        "weighted_score": 3.8,
+        "modified_weighted_score": 3.35,
+        "modified_weighted_score_with_psychometrics": 3.35,
+        "passed": false,
+        "final_gate_pass": false,
+        "pillar_scores": {
+          "mentalizing": 3,
+          "accountability": 3,
+          "repair": 4,
+          "regulation": 2,
+          "attunement": 3,
+          "appreciation": 4,
+          "contempt": 6,
+          "commitment_threshold": 5
+        },
+        "gate_fail_reasons": [
+          "scenario_floor"
+        ],
+        "probe_log": [],
+        "moment_4_concreteness": "absent",
+        "moment_5_concreteness": "moderate",
+        "depth_signal_modifier": -0.45,
+        "score_modifier": -0.45,
+        "scenario_composites": {
+          "scenario_1": 3.6666666666666665,
+          "scenario_2": 4.833333333333333,
+          "scenario_3": 3.5
+        },
+        "disclosure_calibration": "calibrated",
+        "ego_development_level": 2,
+        "recomputeStatus": "success",
+        "recomputeNotes": [
+          "rollup_algorithm:scenario_only_integers_v2",
+          "gate: floor_breach: accountability (3.0), regulation (2.0), repair (4.0)",
+          "scenario composite floor: S1=3.67; S2=4.83; S3=3.50"
+        ]
+      },
+      {
+        "id": "c1ebbcdc-bf39-4dc0-bdcc-422807cb617c",
+        "user_id": "6be604e2-acde-4987-9ad1-b15603b1edad",
+        "completed_at": "2026-04-26T23:07:50.36+00:00",
+        "weighted_score": 3.9,
+        "modified_weighted_score": 3.8,
+        "modified_weighted_score_with_psychometrics": 3.8,
+        "passed": false,
+        "final_gate_pass": false,
+        "pillar_scores": {
+          "mentalizing": 3,
+          "accountability": 3,
+          "repair": 4,
+          "attunement": 3,
+          "appreciation": 3,
+          "contempt": 5,
+          "commitment_threshold": 7
+        },
+        "gate_fail_reasons": [
+          "scenario_floor"
+        ],
+        "probe_log": [
+          {
+            "scenario": 3,
+            "construct": "combined",
+            "probe_fired": false,
+            "score_delta": 3.7,
+            "trigger_reason": null,
+            "pre_probe_score": 0,
+            "post_probe_score": 3.7
+          },
+          {
+            "scenario": 2,
+            "construct": "combined",
+            "probe_fired": false,
+            "score_delta": 3.7,
+            "trigger_reason": null,
+            "pre_probe_score": 0,
+            "post_probe_score": 3.7
+          },
+          {
+            "scenario": 1,
+            "construct": "combined",
+            "probe_fired": false,
+            "score_delta": 2.7,
+            "trigger_reason": null,
+            "pre_probe_score": 0,
+            "post_probe_score": 2.7
+          }
+        ],
+        "moment_4_concreteness": "moderate",
+        "moment_5_concreteness": "low",
+        "depth_signal_modifier": -0.1,
+        "score_modifier": -0.1,
+        "scenario_composites": {
+          "scenario_1": 2.6666666666666665,
+          "scenario_2": 3.6666666666666665,
+          "scenario_3": 3.6666666666666665
+        },
+        "disclosure_calibration": "calibrated",
+        "ego_development_level": null,
+        "recomputeStatus": "success",
+        "recomputeNotes": [
+          "rollup_algorithm:scenario_only_integers_v2",
+          "gate: floor_breach: accountability (3.0), repair (4.0)",
+          "scenario composite floor: S1=2.67; S2=3.67; S3=3.67"
+        ]
+      },
+      {
+        "id": "2faaf48b-25c3-4b92-9d11-955444680c1c",
+        "user_id": "435e2759-706b-4206-91d1-4bef01eec996",
+        "completed_at": "2026-05-08T04:35:27.082+00:00",
+        "weighted_score": 4.1,
+        "modified_weighted_score": 3.9,
+        "modified_weighted_score_with_psychometrics": 3.9,
+        "passed": false,
+        "final_gate_pass": false,
+        "pillar_scores": {
+          "mentalizing": 4,
+          "accountability": 4,
+          "repair": 3,
+          "regulation": 8,
+          "attunement": 3,
+          "appreciation": 1,
+          "contempt": 4,
+          "commitment_threshold": 6
+        },
+        "gate_fail_reasons": [
+          "scenario_floor"
+        ],
+        "probe_log": [
+          {
+            "scenario": 1,
+            "construct": "combined",
+            "probe_fired": false,
+            "score_delta": 3.7,
+            "trigger_reason": null,
+            "pre_probe_score": 0,
+            "post_probe_score": 3.7
+          },
+          {
+            "scenario": 2,
+            "construct": "combined",
+            "probe_fired": false,
+            "score_delta": 1.5,
+            "trigger_reason": null,
+            "pre_probe_score": 0,
+            "post_probe_score": 1.5
+          },
+          {
+            "scenario": 3,
+            "construct": "combined",
+            "probe_fired": false,
+            "score_delta": 6.2,
+            "trigger_reason": null,
+            "pre_probe_score": 0,
+            "post_probe_score": 6.2
+          }
+        ],
+        "moment_4_concreteness": "low",
+        "moment_5_concreteness": "high",
+        "depth_signal_modifier": -0.2,
+        "score_modifier": -0.2,
+        "scenario_composites": {
+          "scenario_1": 3.6666666666666665,
+          "scenario_2": 1.5,
+          "scenario_3": 6.166666666666667
+        },
+        "disclosure_calibration": "underdisclosure",
+        "ego_development_level": null,
+        "recomputeStatus": "success",
+        "recomputeNotes": [
+          "rollup_algorithm:scenario_only_integers_v2",
+          "gate: floor_breach: accountability (4.0), contempt (4.0), repair (3.0)",
+          "scenario composite floor: S1=3.67; S2=1.50"
+        ]
+      },
+      {
+        "id": "af88b820-b052-4515-9d11-faf36df6b245",
+        "user_id": "214f0ba8-baa9-4eb0-9b83-15ae71f46dd2",
+        "completed_at": "2026-05-07T17:13:30.08+00:00",
+        "weighted_score": 4.2,
+        "modified_weighted_score": 3.25,
+        "modified_weighted_score_with_psychometrics": 2.15,
+        "passed": false,
+        "final_gate_pass": false,
+        "pillar_scores": {
+          "mentalizing": 3,
+          "accountability": 3,
+          "repair": 3,
+          "regulation": 6,
+          "attunement": 3,
+          "appreciation": 4,
+          "contempt": 6,
+          "commitment_threshold": 6
+        },
+        "gate_fail_reasons": [
+          "scenario_floor"
+        ],
+        "probe_log": [
+          {
+            "scenario": 1,
+            "construct": "short_elaboration",
+            "probe_fired": true,
+            "score_delta": 0,
+            "trigger_reason": "short_elaboration",
+            "pre_probe_score": 0,
+            "post_probe_score": 0
+          },
+          {
+            "scenario": 1,
+            "construct": "combined",
+            "probe_fired": false,
+            "score_delta": 3.3,
+            "trigger_reason": null,
+            "pre_probe_score": 0,
+            "post_probe_score": 3.3
+          },
+          {
+            "scenario": 2,
+            "construct": "combined",
+            "probe_fired": false,
+            "score_delta": 4.8,
+            "trigger_reason": null,
+            "pre_probe_score": 0,
+            "post_probe_score": 4.8
+          },
+          {
+            "scenario": 3,
+            "construct": "accountability",
+            "probe_fired": true,
+            "score_delta": 0,
+            "trigger_reason": "lacks_explicit_self_accountability",
+            "pre_probe_score": 0,
+            "post_probe_score": 0
+          },
+          {
+            "scenario": 3,
+            "construct": "combined",
+            "probe_fired": false,
+            "score_delta": 4,
+            "trigger_reason": null,
+            "pre_probe_score": 0,
+            "post_probe_score": 4
+          }
+        ],
+        "moment_4_concreteness": "low",
+        "moment_5_concreteness": "low",
+        "depth_signal_modifier": -0.95,
+        "score_modifier": -0.95,
+        "scenario_composites": {
+          "scenario_1": 3.3333333333333335,
+          "scenario_2": 4.833333333333333,
+          "scenario_3": 4
+        },
+        "disclosure_calibration": "underdisclosure",
+        "ego_development_level": 2,
+        "recomputeStatus": "success",
+        "recomputeNotes": [
+          "rollup_algorithm:scenario_only_integers_v2",
+          "gate: floor_breach: accountability (3.0), repair (3.0)",
+          "scenario composite floor: S1=3.33; S2=4.83; S3=4.00"
+        ]
+      },
+      {
+        "id": "ad23da2d-c106-443c-b69c-efc6f65d64d0",
+        "user_id": "309253e8-f897-48f1-a044-5effd16e7a9a",
+        "completed_at": "2026-04-20T01:25:49.583+00:00",
+        "weighted_score": 4.3,
+        "modified_weighted_score": 3.85,
+        "modified_weighted_score_with_psychometrics": 3.85,
+        "passed": false,
+        "final_gate_pass": false,
+        "pillar_scores": {
+          "mentalizing": 4,
+          "accountability": 4,
+          "repair": 4,
+          "regulation": 4,
+          "attunement": 4,
+          "appreciation": 4,
+          "contempt": 5,
+          "commitment_threshold": 6
+        },
+        "gate_fail_reasons": [
+          "scenario_floor"
+        ],
+        "probe_log": [
+          {
+            "scenario": 1,
+            "construct": "combined",
+            "probe_fired": false,
+            "score_delta": 4.8,
+            "trigger_reason": null,
+            "pre_probe_score": 0,
+            "post_probe_score": 4.8
+          },
+          {
+            "scenario": 2,
+            "construct": "combined",
+            "probe_fired": false,
+            "score_delta": 4,
+            "trigger_reason": null,
+            "pre_probe_score": 0,
+            "post_probe_score": 4
+          },
+          {
+            "scenario": 3,
+            "construct": "combined",
+            "probe_fired": false,
+            "score_delta": 4.6,
+            "trigger_reason": null,
+            "pre_probe_score": 0,
+            "post_probe_score": 4.6
+          }
+        ],
+        "moment_4_concreteness": "low",
+        "moment_5_concreteness": "low",
+        "depth_signal_modifier": -0.45,
+        "score_modifier": -0.45,
+        "scenario_composites": {
+          "scenario_1": 4.833333333333333,
+          "scenario_2": 4,
+          "scenario_3": 4.571428571428571
+        },
+        "disclosure_calibration": "calibrated",
+        "ego_development_level": null,
+        "recomputeStatus": "success",
+        "recomputeNotes": [
+          "rollup_algorithm:scenario_only_integers_v2",
+          "gate: floor_breach: accountability (4.0), regulation (4.0), repair (4.0)",
+          "scenario composite floor: S1=4.83; S2=4.00; S3=4.57"
+        ]
+      },
+      {
+        "id": "db8efc65-df96-4adb-86de-d55b9ba340a6",
+        "user_id": "ab6139ff-af5a-4bbf-a966-bd42b10da746",
+        "completed_at": "2026-06-09T20:05:33.053+00:00",
+        "weighted_score": 4.5,
+        "modified_weighted_score": 3.7,
+        "modified_weighted_score_with_psychometrics": 2.85,
+        "passed": false,
+        "final_gate_pass": false,
+        "pillar_scores": {
+          "mentalizing": 4,
+          "accountability": 4,
+          "repair": 4,
+          "regulation": 4,
+          "attunement": 4,
+          "appreciation": 3,
+          "contempt": 6,
+          "commitment_threshold": 6
+        },
+        "gate_fail_reasons": [
+          "scenario_floor"
+        ],
+        "probe_log": [],
+        "moment_4_concreteness": "absent",
+        "moment_5_concreteness": "moderate",
+        "depth_signal_modifier": -0.8,
+        "score_modifier": -0.8,
+        "scenario_composites": {
+          "scenario_1": 6.666666666666667,
+          "scenario_2": 3.5,
+          "scenario_3": 4
+        },
+        "disclosure_calibration": "underdisclosure",
+        "ego_development_level": 2,
+        "recomputeStatus": "success",
+        "recomputeNotes": [
+          "rollup_algorithm:scenario_only_integers_v2",
+          "gate: floor_breach: accountability (4.0), regulation (4.0), repair (4.0)",
+          "scenario composite floor: S2=3.50; S3=4.00"
+        ]
+      },
+      {
+        "id": "7359ebfe-8166-4f0e-b574-da52129810bc",
+        "user_id": "4fd31c7c-a0d2-49a8-98b9-cc1c331da1d3",
+        "completed_at": "2026-05-08T21:38:15.835+00:00",
+        "weighted_score": 4.9,
+        "modified_weighted_score": 4.45,
+        "modified_weighted_score_with_psychometrics": 4.45,
+        "passed": false,
+        "final_gate_pass": false,
+        "pillar_scores": {
+          "mentalizing": 4,
+          "accountability": 5,
+          "repair": 5,
+          "regulation": 7,
+          "attunement": 3,
+          "appreciation": 2,
+          "contempt": 5,
+          "commitment_threshold": 7
+        },
+        "gate_fail_reasons": [
+          "weighted_score",
+          "scenario_floor"
+        ],
+        "probe_log": [
+          {
+            "scenario": 3,
+            "construct": "combined",
+            "probe_fired": false,
+            "score_delta": 6,
+            "trigger_reason": null,
+            "pre_probe_score": 0,
+            "post_probe_score": 6
+          }
+        ],
+        "moment_4_concreteness": "low",
+        "moment_5_concreteness": "high",
+        "depth_signal_modifier": -0.45,
+        "score_modifier": -0.45,
+        "scenario_composites": {
+          "scenario_1": 5.5,
+          "scenario_2": 2.3333333333333335,
+          "scenario_3": 6
+        },
+        "disclosure_calibration": "calibrated",
+        "ego_development_level": 2,
+        "recomputeStatus": "success",
+        "recomputeNotes": [
+          "rollup_algorithm:scenario_only_integers_v2",
+          "gate: weighted_score: 4.5 (required 6.5); scenario_floor: S2=2.33 (min 5); weighted_threshold_met",
+          "scenario composite floor: S2=2.33"
+        ]
+      },
+      {
+        "id": "e725cdad-e6b2-48d1-b1dc-e2dcdf19030b",
+        "user_id": "d9180764-011d-430b-9ee0-630fc24c8af4",
+        "completed_at": "2026-04-17T01:15:32.034+00:00",
+        "weighted_score": 5,
+        "modified_weighted_score": 4.7,
+        "modified_weighted_score_with_psychometrics": 4.7,
+        "passed": false,
+        "final_gate_pass": false,
+        "pillar_scores": {
+          "mentalizing": 5,
+          "accountability": 4,
+          "repair": 4,
+          "regulation": 6,
+          "attunement": 5,
+          "appreciation": 6,
+          "contempt": 6
+        },
+        "gate_fail_reasons": [
+          "scenario_floor"
+        ],
+        "probe_log": [
+          {
+            "scenario": 1,
+            "construct": "combined",
+            "probe_fired": false,
+            "score_delta": 6,
+            "trigger_reason": null,
+            "pre_probe_score": 0,
+            "post_probe_score": 6
+          },
+          {
+            "scenario": 2,
+            "construct": "combined",
+            "probe_fired": false,
+            "score_delta": 4.7,
+            "trigger_reason": null,
+            "pre_probe_score": 0,
+            "post_probe_score": 4.7
+          },
+          {
+            "scenario": 3,
+            "construct": "combined",
+            "probe_fired": false,
+            "score_delta": 4.7,
+            "trigger_reason": null,
+            "pre_probe_score": 0,
+            "post_probe_score": 4.7
+          }
+        ],
+        "moment_4_concreteness": "low",
+        "moment_5_concreteness": "low",
+        "depth_signal_modifier": -0.3,
+        "score_modifier": -0.3,
+        "scenario_composites": {
+          "scenario_1": 6,
+          "scenario_2": 4.666666666666667,
+          "scenario_3": 4.714285714285714
+        },
+        "disclosure_calibration": "calibrated",
+        "ego_development_level": null,
+        "recomputeStatus": "success",
+        "recomputeNotes": [
+          "rollup_algorithm:scenario_only_integers_v2",
+          "gate: floor_breach: accountability (4.0), repair (4.0)",
+          "scenario composite floor: S2=4.67; S3=4.71"
+        ]
+      },
+      {
+        "id": "fa365f2a-fb6f-4711-a4fa-36f9e5078ccc",
+        "user_id": "a246372c-cefe-4b50-9549-51898e0de968",
+        "completed_at": "2026-04-29T22:44:34.794+00:00",
+        "weighted_score": 5.3,
+        "modified_weighted_score": 5.3,
+        "modified_weighted_score_with_psychometrics": 5.3,
+        "passed": false,
+        "final_gate_pass": false,
+        "pillar_scores": {
+          "mentalizing": 5,
+          "accountability": 4,
+          "repair": 4,
+          "regulation": 7,
+          "attunement": 5,
+          "appreciation": 2,
+          "contempt": 8,
+          "commitment_threshold": 4
+        },
+        "gate_fail_reasons": [
+          "scenario_floor"
+        ],
+        "probe_log": [
+          {
+            "scenario": 1,
+            "construct": "combined",
+            "probe_fired": false,
+            "score_delta": 5.7,
+            "trigger_reason": null,
+            "pre_probe_score": 0,
+            "post_probe_score": 5.7
+          },
+          {
+            "scenario": 3,
+            "construct": "combined",
+            "probe_fired": false,
+            "score_delta": 6.6,
+            "trigger_reason": null,
+            "pre_probe_score": 0,
+            "post_probe_score": 6.6
+          },
+          {
+            "scenario": 2,
+            "construct": "combined",
+            "probe_fired": false,
+            "score_delta": 3.2,
+            "trigger_reason": null,
+            "pre_probe_score": 0,
+            "post_probe_score": 3.2
+          }
+        ],
+        "moment_4_concreteness": "low",
+        "moment_5_concreteness": null,
+        "depth_signal_modifier": 0,
+        "score_modifier": 0,
+        "scenario_composites": {
+          "scenario_1": 5.666666666666667,
+          "scenario_2": 3.1666666666666665,
+          "scenario_3": 6.571428571428571
+        },
+        "disclosure_calibration": "calibrated",
+        "ego_development_level": null,
+        "recomputeStatus": "success",
+        "recomputeNotes": [
+          "rollup_algorithm:scenario_only_integers_v2",
+          "gate: floor_breach: accountability (4.0), repair (4.0)",
+          "scenario composite floor: S2=3.17"
+        ]
+      },
+      {
+        "id": "324a9e98-fd3f-47c9-80ee-90e40877d395",
+        "user_id": "9745268f-5069-46bc-a124-47b5b7df60a2",
+        "completed_at": "2026-05-19T00:00:25.777+00:00",
+        "weighted_score": 5.4,
+        "modified_weighted_score": 5.4,
+        "modified_weighted_score_with_psychometrics": 5.4,
+        "passed": false,
+        "final_gate_pass": false,
+        "pillar_scores": {
+          "mentalizing": 5,
+          "accountability": 5,
+          "repair": 6,
+          "regulation": 7,
+          "attunement": 4,
+          "appreciation": 3,
+          "contempt": 6,
+          "commitment_threshold": 5
+        },
+        "gate_fail_reasons": [
+          "weighted_score",
+          "scenario_floor"
+        ],
+        "probe_log": [
+          {
+            "scenario": 1,
+            "construct": "combined",
+            "probe_fired": false,
+            "score_delta": 6.8,
+            "trigger_reason": null,
+            "pre_probe_score": 0,
+            "post_probe_score": 6.8
+          },
+          {
+            "scenario": 2,
+            "construct": "combined",
+            "probe_fired": false,
+            "score_delta": 3.7,
+            "trigger_reason": null,
+            "pre_probe_score": 0,
+            "post_probe_score": 3.7
+          },
+          {
+            "scenario": 3,
+            "construct": "commitment_threshold",
+            "probe_fired": true,
+            "score_delta": 0,
+            "trigger_reason": "moment4_low_specificity",
+            "pre_probe_score": 0,
+            "post_probe_score": 0
+          },
+          {
+            "scenario": 3,
+            "construct": "accountability",
+            "probe_fired": true,
+            "score_delta": 0,
+            "trigger_reason": "lacks_explicit_self_accountability",
+            "pre_probe_score": 0,
+            "post_probe_score": 0
+          },
+          {
+            "scenario": 3,
+            "construct": "combined",
+            "probe_fired": false,
+            "score_delta": 5.3,
+            "trigger_reason": null,
+            "pre_probe_score": 0,
+            "post_probe_score": 5.3
+          }
+        ],
+        "moment_4_concreteness": "low",
+        "moment_5_concreteness": "high",
+        "depth_signal_modifier": 0,
+        "score_modifier": 0,
+        "scenario_composites": {
+          "scenario_1": 6.833333333333333,
+          "scenario_2": 3.6666666666666665,
+          "scenario_3": 5.333333333333333
+        },
+        "disclosure_calibration": "calibrated",
+        "ego_development_level": null,
+        "recomputeStatus": "success",
+        "recomputeNotes": [
+          "rollup_algorithm:scenario_only_integers_v2",
+          "gate: weighted_score: 5.4 (required 6.5); scenario_floor: S2=3.67 (min 5); weighted_threshold_met",
+          "scenario composite floor: S2=3.67"
+        ]
+      }
+    ],
+    "scenarioStats": {
+      "1": {
+        "mean": 6.5,
+        "stdDev": 1.19,
+        "count": 75,
+        "label": "Scenario 1 (Emma/Ryan)"
+      },
+      "2": {
+        "mean": 6.31,
+        "stdDev": 1.85,
+        "count": 75,
+        "label": "Scenario 2 (Sarah/James)"
+      },
+      "3": {
+        "mean": 6.35,
+        "stdDev": 1.11,
+        "count": 75,
+        "label": "Scenario 3 (Sophie/Daniel)"
+      }
+    },
+    "s1s2AvgDelta": -0.19,
+    "s2s3AvgDelta": 0.05,
+    "disclosureCounts": {
+      "overdisclosure": 9,
+      "calibrated": 46,
+      "underdisclosure": 20
+    },
+    "disclosureTotal": 75
+  }
+}

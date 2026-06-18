@@ -105,7 +105,7 @@ export type RelationshipValidationStackParamList = {
   ValidationPartnerEmail: { newComparison?: boolean } | undefined;
   ValidationPreAssessment: undefined;
   ValidationPsychometricsHub: undefined;
-  ValidationInstrument: { instrument: 'ECR-36' | 'PVQ-21' };
+  ValidationInstrument: { instrument: 'SEXUAL_COMMUNICATION' | 'ECR-36' | 'PVQ-21' };
   ValidationConflict: undefined;
   ValidationReport: undefined;
   ValidationPostInterviewProcessing: undefined;

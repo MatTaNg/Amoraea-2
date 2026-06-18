@@ -4,6 +4,8 @@ import type {
   RelationshipValidationPostAssessment,
   RelationshipValidationPreAssessment,
 } from './constants';
+import { getPartnerEmailValidationError } from './partnerEmailValidation';
+import { fetchCurrentUserEmailForPartnerValidation } from './validationPsychometricsProgress';
 
 export type RelationshipValidationComparison = {
   id: string;
@@ -214,14 +216,79 @@ async function requireActiveComparisonId(userId: string): Promise<string> {
   return base.active_comparison_id;
 }
 
+export type ValidationShellRouting = {
+  track: string | null;
+  standardAppEnrolled: boolean;
+  flowActive: boolean;
+};
+
 export async function fetchUserValidationTrack(userId: string): Promise<string | null> {
+  const routing = await fetchValidationShellRouting(userId);
+  return routing.track;
+}
+
+export async function fetchValidationShellRouting(userId: string): Promise<ValidationShellRouting> {
   const { data, error } = await supabase
     .from('users')
-    .select('validation_track')
+    .select('validation_track, validation_standard_app_enrolled, validation_flow_active')
     .eq('id', userId)
     .maybeSingle();
   if (error) throw new Error(error.message);
-  return (data?.validation_track as string | null) ?? null;
+  return {
+    track: (data?.validation_track as string | null) ?? null,
+    standardAppEnrolled: data?.validation_standard_app_enrolled === true,
+    flowActive: data?.validation_flow_active === true,
+  };
+}
+
+/** Admin: enroll an existing standard-app user in the RELATIONSHIP validation cohort. */
+export async function enrollExistingUserInRelationshipValidation(userId: string): Promise<void> {
+  const { error } = await supabase
+    .from('users')
+    .update({
+      validation_track: 'relationship',
+      validation_standard_app_enrolled: true,
+      validation_flow_active: false,
+    })
+    .eq('id', userId);
+  if (error) throw new Error(error.message);
+}
+
+/** Admin: remove standard-app validation enrollment. */
+export async function unenrollExistingUserFromRelationshipValidation(userId: string): Promise<void> {
+  const { error } = await supabase
+    .from('users')
+    .update({
+      validation_track: null,
+      validation_standard_app_enrolled: false,
+      validation_flow_active: false,
+    })
+    .eq('id', userId);
+  if (error) throw new Error(error.message);
+}
+
+export async function enterValidationFlow(userId: string): Promise<void> {
+  const { data, error } = await supabase
+    .from('users')
+    .update({ validation_flow_active: true })
+    .eq('id', userId)
+    .eq('validation_standard_app_enrolled', true)
+    .select('validation_flow_active')
+    .maybeSingle();
+  if (error) throw new Error(error.message);
+  if (data?.validation_flow_active !== true) {
+    throw new Error(
+      'Could not start compatibility comparison. Please refresh and try again, or contact support if this continues.',
+    );
+  }
+}
+
+export async function exitValidationFlow(userId: string): Promise<void> {
+  const { error } = await supabase
+    .from('users')
+    .update({ validation_flow_active: false })
+    .eq('id', userId);
+  if (error) throw new Error(error.message);
 }
 
 export async function ensureRelationshipValidationRecord(userId: string): Promise<void> {
@@ -309,6 +376,11 @@ async function createOrActivateComparison(
   opts?: { resetSurveyFields?: boolean },
 ): Promise<RelationshipValidationComparison> {
   await ensureRelationshipValidationRecord(userId);
+  const ownEmail = await fetchCurrentUserEmailForPartnerValidation(userId);
+  const validationError = getPartnerEmailValidationError(email, ownEmail);
+  if (validationError) {
+    throw new Error(validationError);
+  }
   const normalized = normalizePartnerEmail(email);
   const existing = await fetchComparisonByPartnerEmail(userId, normalized);
 

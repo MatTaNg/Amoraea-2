@@ -32,7 +32,7 @@ import {
   LEGACY_PSYCHOMETRIC_PASS_FLIP_REVIEW_FLAG,
 } from './legacyPsychometricReview';
 import { finalizeInterviewOnlyGateForAttempt } from './finalizeInterviewOnlyGate';
-import { PSYCHOMETRICS_ENABLED } from './interviewCompletionStatus';
+import { PSYCHOMETRICS_ENABLED } from './psychometricsFeatureFlags';
 
 export type ApplyPsychometricModifierOptions = {
   /**

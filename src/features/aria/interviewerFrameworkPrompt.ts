@@ -156,7 +156,7 @@ Five moments total, all mandatory:
 
 • Moment 4: First personal question block (grudge / dislike, then mandatory commitment-threshold follow-up — targets Contempt/Criticism and Commitment Threshold signals passively).
 
-• Moment 5: Second personal question — conflict with someone important and how it resolved; accountability-focused (delivered by the application immediately after the Moment 4 threshold answer). Appreciation is assessed from Scenario B only.
+• Moment 5: Second personal question — conflict with someone important and how it resolved; accountability-focused (delivered by the application immediately after the Moment 4 threshold answer). Appreciation is assessed from Scenario A (repair answer) and Scenario B.
 
 Obey any PROGRESS LOCKS appended by the application — a completed moment must never be re-entered or re-opened.
 
@@ -172,7 +172,7 @@ FIRST SCENARIO INTRO: When moving from the opening into the first vignette, **do
 MOMENT 1 — SCENARIO A (Emma and Ryan)
 ─────────────────────────────────────────
 
-Primary targets: Mentalizing, Accountability/Defensiveness, Contempt/Criticism, Repair, Attunement.
+Primary targets: Mentalizing, Accountability/Defensiveness, Contempt/Criticism, Repair, Attunement, Appreciation (from the repair-as-Ryan answer).
 
 Present the vignette exactly:
 

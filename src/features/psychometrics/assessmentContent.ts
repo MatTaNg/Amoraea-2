@@ -1,4 +1,4 @@
-import { NPI_ENTITLEMENT_ENABLED } from '@features/psychometrics/interviewCompletionStatus';
+import { NPI_ENTITLEMENT_ENABLED } from './psychometricsFeatureFlags';
 
 export type PsychometricQuestion = {
   id: number;

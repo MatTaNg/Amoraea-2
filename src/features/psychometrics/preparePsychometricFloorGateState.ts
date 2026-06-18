@@ -1,5 +1,5 @@
 import { normalizeGateFailDetailForPersist } from './gateFailDetailForPersist';
-import { PSYCHOMETRICS_ENABLED } from './interviewCompletionStatus';
+import { PSYCHOMETRICS_ENABLED } from './psychometricsFeatureFlags';
 import {
   loadFreshPsychometricFloorUserRow,
   userRowHasPsychometricFloorScores,

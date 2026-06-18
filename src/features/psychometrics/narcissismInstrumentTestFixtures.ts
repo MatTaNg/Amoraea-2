@@ -1,4 +1,4 @@
-import { NPI_ENTITLEMENT_ENABLED } from './interviewCompletionStatus';
+import { NPI_ENTITLEMENT_ENABLED } from './psychometricsFeatureFlags';
 import { NPI_ENTITLEMENT_FLOOR_FAIL_CODE } from './npiEntitlementFloor';
 import { SD3_NARCISSISM_FLOOR_FAIL_CODE } from './sd3NarcissismFloor';
 

@@ -3,6 +3,8 @@ import { fetchMostRecentCompletedInterviewAttemptId } from '@features/psychometr
 import { invokeAnthropicMessages } from '@utilities/invokeAnthropicMessages';
 import { CLAUDE_SONNET_MODEL } from '@utilities/anthropicMessagesClient';
 import { resolveReportParticipantDisplayName } from '@utilities/adminInterviewIntroDisplayName';
+import type { GamingCorrectionResult } from './computeGamingCorrection';
+import { composeNarrativeCalibration } from '@features/reports/narrativeCalibration';
 import { convertMarkdownToHtml, fetchReportData } from './generateReport';
 import { getReportLogoSrc } from './reportBranding';
 import {
@@ -31,6 +33,10 @@ export type PartialReportData = {
     mentalizing_overcertainty_count: number | null;
     aiSummary: string | null;
     aiStrengths: string[];
+    finalGatePass: boolean | null;
+    gateFailReasons: string[];
+    gamingCorrection: GamingCorrectionResult | null;
+    finalScore: number | null;
   } | null;
 };
 
@@ -60,7 +66,13 @@ export async function fetchPartialReportData(userId: string): Promise<PartialRep
       mentalizing_overcertainty_count,
       transcript,
       ai_reasoning,
-      reasoning_pending
+      reasoning_pending,
+      final_gate_pass,
+      gate_fail_reasons,
+      gaming_correction,
+      modified_weighted_score_with_psychometrics,
+      modified_weighted_score,
+      weighted_score
     `,
     )
     .eq('user_id', userId)
@@ -91,6 +103,16 @@ export async function fetchPartialReportData(userId: string): Promise<PartialRep
     ? aiReasoning.overall_strengths.filter((s): s is string => typeof s === 'string' && s.length > 0)
     : [];
 
+  const gateFailReasons = Array.isArray(attempt?.gate_fail_reasons)
+    ? (attempt.gate_fail_reasons as unknown[]).filter((x): x is string => typeof x === 'string')
+    : [];
+  const gamingCorrection =
+    attempt?.gaming_correction != null &&
+    typeof attempt.gaming_correction === 'object' &&
+    !Array.isArray(attempt.gaming_correction)
+      ? (attempt.gaming_correction as GamingCorrectionResult)
+      : null;
+
   return {
     user: { name: displayName },
     attempt: attempt
@@ -110,6 +132,14 @@ export async function fetchPartialReportData(userId: string): Promise<PartialRep
           mentalizing_overcertainty_count: attempt.mentalizing_overcertainty_count ?? null,
           aiSummary,
           aiStrengths,
+          finalGatePass: attempt.final_gate_pass ?? null,
+          gateFailReasons,
+          gamingCorrection,
+          finalScore:
+            attempt.modified_weighted_score_with_psychometrics ??
+            attempt.modified_weighted_score ??
+            attempt.weighted_score ??
+            null,
         }
       : null,
   };
@@ -119,12 +149,9 @@ function buildPartialSystemPrompt(): string {
   return `You are generating a partial personal development preview for a user of Amoraea, a relationship-readiness platform. They have completed an AI-guided conversation but have NOT yet completed the self-assessment battery.
 
 CRITICAL RULES — PARTIAL PREVIEW:
-- Do NOT mention specific numerical scores, thresholds, or raw numbers
-- Do NOT reveal pillar names, construct names, interview structure, scenario names, or any scoring methodology
 - Do NOT describe what the AI interview is designed to test or measure
 - Do NOT use clinical diagnostic language
 - Do NOT reference psychometric instruments or self-assessments they have not yet taken
-- Do NOT use jargon like "mentalizing", "repair capacity", "attunement", "regulation", "accountability pillar", etc.
 - DO write in warm, direct, plain language a non-psychologist would understand
 - DO use second person throughout ("you", "your")
 - DO be honest about growth areas — constructive, not harsh
@@ -205,6 +232,14 @@ NARRATIVE HINTS FROM PRIOR ANALYSIS (use as inspiration only — rephrase in pla
 - Strength hints: ${attempt.aiStrengths.length > 0 ? attempt.aiStrengths.join('; ') : 'none'}`
       : '';
 
+  const narrativeCalibration = composeNarrativeCalibration({
+    finalGatePass: attempt?.finalGatePass,
+    gateFailReasons: attempt?.gateFailReasons ?? [],
+    gamingCorrection: attempt?.gamingCorrection ?? null,
+    pillarScores: attempt?.pillarScores ?? null,
+    modifiedWeightedScore: attempt?.finalScore,
+  });
+
   return `Generate a partial personal development preview for ${user.name ?? 'this user'}. This is based ONLY on their AI interview conversation — self-assessments are not yet complete. The report should feel genuinely insightful but must NOT reveal how Amoraea scores or structures the interview.
 
 INTERVIEW-DERIVED SIGNALS (internal bands — translate into plain relational language in the report, never use these labels):
@@ -226,6 +261,9 @@ DEEPER BEHAVIORAL SIGNALS:
 - Defense patterns observed: ${activeDefenses || 'none detected'}
 - Overcertainty about others' inner states: ${overcertaintyInterp}
 ${narrativeHint}
+
+NARRATIVE CALIBRATION (follow exactly):
+${narrativeCalibration}
 
 Write the report with exactly these sections:
 

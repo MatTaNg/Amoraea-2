@@ -1,0 +1,61 @@
+{
+  "generatedAt": "2026-06-17T05:30:39.140Z",
+  "runtimeSec": "2.0",
+  "algorithm": "scenario_only_integers_v2",
+  "m4": {
+    "momentLabel": "M4",
+    "totalAnalyzed": 75,
+    "lowAbsent": {
+      "count": 31,
+      "mentalizing": 5.39,
+      "accountability": 5.45,
+      "repair": 5.87,
+      "regulation": 6.9,
+      "attunement": 5.26,
+      "appreciation": 5.71,
+      "contempt": 6.77,
+      "commitment_threshold": 6.55,
+      "weighted_score": 6.01
+    },
+    "moderateHigh": {
+      "count": 44,
+      "mentalizing": 6.41,
+      "accountability": 5.95,
+      "repair": 6.57,
+      "regulation": 7.6,
+      "attunement": 6.52,
+      "appreciation": 6.66,
+      "contempt": 7.52,
+      "commitment_threshold": 7.26,
+      "weighted_score": 6.78
+    }
+  },
+  "m5": {
+    "momentLabel": "M5",
+    "totalAnalyzed": 49,
+    "lowAbsent": {
+      "count": 15,
+      "mentalizing": 5.4,
+      "accountability": 5.33,
+      "repair": 5.8,
+      "regulation": 7.14,
+      "attunement": 5.2,
+      "appreciation": 5.47,
+      "contempt": 6.73,
+      "commitment_threshold": 6.86,
+      "weighted_score": 5.96
+    },
+    "moderateHigh": {
+      "count": 34,
+      "mentalizing": 5.79,
+      "accountability": 6.03,
+      "repair": 6.38,
+      "regulation": 7.44,
+      "attunement": 5.56,
+      "appreciation": 6.35,
+      "contempt": 7.18,
+      "commitment_threshold": 6.82,
+      "weighted_score": 6.47
+    }
+  }
+}

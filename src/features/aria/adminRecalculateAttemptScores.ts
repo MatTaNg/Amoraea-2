@@ -23,7 +23,7 @@ import { fullScenarioReconciliation, type ReconcilableScenarioSlice } from './re
 import { scenarioCompositesToStorageJson } from './scenarioCompositeFloor';
 import { personalMomentWordCountsForDisclosure } from './aggregateMarkerScoresFromSlices';
 import { computeSkipPenaltyGateComputation } from './interviewSkipPenalties';
-import { normalizeResponseConcreteness } from './personalMomentConcreteness';
+import { normalizeResponseConcreteness, normalizeMoment4Concreteness } from './personalMomentConcreteness';
 import {
   extractPersonalMomentEmotionalVocabFromSlice,
   scenarioEmotionalVocabDensityPercentFromTranscript,
@@ -350,7 +350,7 @@ export function recalculateAttemptScoresFromStoredSlices(
             m4Raw != null && typeof m4Raw === 'object' && !Array.isArray(m4Raw)
               ? (m4Raw as Record<string, unknown>).mentalizing_overcertainty === true
               : false,
-          response_concreteness: normalizeResponseConcreteness(m4ForAgg.response_concreteness),
+          response_concreteness: normalizeMoment4Concreteness(m4ForAgg.response_concreteness),
           ...(m4Ev
             ? {
                 emotional_vocab_count: m4Ev.emotional_vocab_count ?? undefined,
@@ -432,7 +432,7 @@ export function recalculateAttemptScoresFromStoredSlices(
       : agg.disclosureCalibration;
   const gateMoment4Concreteness =
     usePersistedGateContext && typeof input.moment_4_concreteness === 'string'
-      ? normalizeResponseConcreteness(input.moment_4_concreteness)
+      ? normalizeMoment4Concreteness(input.moment_4_concreteness)
       : agg.moment4Concreteness;
   const gateMoment5Concreteness =
     usePersistedGateContext && typeof input.moment_5_concreteness === 'string'

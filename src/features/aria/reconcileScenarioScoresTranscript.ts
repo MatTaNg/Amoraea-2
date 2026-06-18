@@ -32,6 +32,7 @@ const SCENARIO_1_MARKER_IDS = [
   'contempt_expression',
   'repair',
   'attunement',
+  'appreciation',
 ] as const;
 
 const SCENARIO_3_MARKER_IDS = [

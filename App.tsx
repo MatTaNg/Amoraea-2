@@ -28,7 +28,18 @@ import { PsychometricAssessmentScreen } from '@app/screens/PsychometricAssessmen
 import { PsychometricsCompleteScreen } from '@app/screens/PsychometricsCompleteScreen';
 import { InterviewCompleteScreen } from '@features/onboarding/screens/InterviewCompleteScreen';
 import { AssessmentWelcomeScreen } from '@features/onboarding/screens/AssessmentWelcomeScreen';
-import { isEmailConfirmationCallback } from '@features/authentication/webAuthRecoveryRouting';
+import {
+  AUTH_EMAIL_CONFIRM_PATH,
+  AUTH_PASSWORD_RESET_PATH,
+  isAuthEmailConfirmPath,
+  isAuthPasswordResetPath,
+  isBarePasswordResetLanding,
+  isEmailConfirmationCallback,
+} from '@features/authentication/webAuthRecoveryRouting';
+import {
+  debugAuthCallbackLog,
+  sanitizeAuthUrlForLog,
+} from '@features/authentication/debugAuthCallbackLog';
 import { isAmoraeaAdminConsoleEmail } from '@/constants/adminConsole';
 import {
   fetchInterviewAttemptRevealSnapshot,
@@ -51,8 +62,12 @@ import { supabase } from './src/data/supabase/client';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { MarketResearchModal } from '@features/onboarding/MarketResearchModal';
 import { RelationshipValidationNavigator } from '@app/navigation/RelationshipValidationNavigator';
-import { RELATIONSHIP_VALIDATION_TRACK } from '@features/relationshipValidation/constants';
-import { fetchUserValidationTrack } from '@features/relationshipValidation/relationshipValidationRepo';
+import { fetchValidationShellRouting } from '@features/relationshipValidation/relationshipValidationRepo';
+import {
+  clearValidationStandardReturnRoute,
+  readValidationStandardReturnRoute,
+  shouldUseRelationshipValidationNavigator,
+} from '@features/relationshipValidation/validationShellRouting';
 import { StyleSheet, View, Text, ActivityIndicator } from 'react-native';
 import {
   initAudosFromEnv,
@@ -308,6 +323,7 @@ const LoggedInInterviewShell = ({ userId }: { userId: string }) => {
   const queryClient = useQueryClient();
   const { user } = useAuth();
   const lockedPostInterviewRouteRef = useRef<InterviewStackRoute | null>(null);
+  const [validationReturnRoute] = useState(() => readValidationStandardReturnRoute(queryClient, userId));
   const [marketResearchDismissed, setMarketResearchDismissed] = useState(false);
   const { data: profile, isPending, isError } = useQuery({
     queryKey: ['profile', userId],
@@ -366,6 +382,12 @@ const LoggedInInterviewShell = ({ userId }: { userId: string }) => {
   }, [userId]);
 
   useEffect(() => {
+    if (validationReturnRoute) {
+      clearValidationStandardReturnRoute(queryClient, userId);
+    }
+  }, [validationReturnRoute, queryClient, userId]);
+
+  useEffect(() => {
     if (userId) {
       onboardingUseCase.retryFailedUpdates();
     }
@@ -397,6 +419,7 @@ const LoggedInInterviewShell = ({ userId }: { userId: string }) => {
       deferralSnapshot: deferralAttempt?.snap,
       isAdminEmail,
       lockedPostInterviewRoute: lockedPostInterviewRouteRef.current,
+      validationStandardReturnRoute: validationReturnRoute,
     });
 
     if (isTerminalPostInterviewRoute(bootstrap.initialRouteName)) {
@@ -429,6 +452,7 @@ const LoggedInInterviewShell = ({ userId }: { userId: string }) => {
     deferralAttempt,
     isAdminEmail,
     userId,
+    validationReturnRoute,
     initialRoute?.interviewPassedAdminOverride,
     initialRoute?.interviewPassedComputed,
   ]);
@@ -613,15 +637,43 @@ const AUTH_STACK_LINKING_SCREENS = {
   Login: '',
   Register: 'register',
   ForgotPassword: 'forgot-password',
-  /** Supabase password-reset emails redirect here (`getPasswordResetRedirectTo`). */
-  SetNewPassword: 'reset-password',
+  /** Email confirmation callbacks (`getAuthEmailRedirectTo`). */
+  EmailConfirm: 'auth/confirm',
+  /** SetNewPassword is not URL-linked — only shown via `forcePasswordResetUi` + initialRouteName. */
 } as const;
 
 const RootNavigator = () => {
   const { user, loading, passwordRecoveryPending } = useAuth();
 
   const isLoggedIn = user?.email != null && user.email !== '';
-  const forcePasswordResetUi = passwordRecoveryPending;
+  const onEmailConfirmCallback =
+    Platform.OS === 'web' &&
+    typeof window !== 'undefined' &&
+    isEmailConfirmationCallback();
+  const forcePasswordResetUi = passwordRecoveryPending && !onEmailConfirmCallback;
+
+  useEffect(() => {
+    if (Platform.OS !== 'web' || typeof window === 'undefined' || loading) return;
+    // #region agent log
+    debugAuthCallbackLog(
+      'App.tsx:RootNavigator',
+      'auth shell routing',
+      {
+        ...sanitizeAuthUrlForLog(
+          window.location.pathname,
+          window.location.search,
+          window.location.hash,
+        ),
+        passwordRecoveryPending,
+        onEmailConfirmCallback,
+        forcePasswordResetUi,
+        isLoggedIn,
+        initialRoute: forcePasswordResetUi ? 'SetNewPassword' : 'Login',
+      },
+      'H5',
+    );
+    // #endregion
+  }, [loading, passwordRecoveryPending, onEmailConfirmCallback, forcePasswordResetUi, isLoggedIn]);
 
   useEffect(() => {
     initAudosFromEnv();
@@ -653,7 +705,7 @@ const RootNavigator = () => {
       /**
        * Native password-reset deep links: `app.json` has no custom URL scheme yet and Supabase
        * `detectSessionInUrl` is web-only (`client.ts`). Follow-up: add `scheme` to app.json,
-       * register `/reset-password` in Supabase redirect URLs, and handle `Linking.getInitialURL()`
+       * register `/auth/reset-password` in Supabase redirect URLs, and handle `Linking.getInitialURL()`
        * + session exchange before routing to SetNewPassword.
        */
       return undefined;
@@ -667,13 +719,29 @@ const RootNavigator = () => {
       config: { screens: AUTH_STACK_LINKING_SCREENS as Record<string, string | Record<string, unknown>> },
       getStateFromPath(path: string, options: Parameters<typeof getStateFromPathDefault>[1]) {
         const normalized = normalizeAuthWebPath(path);
+        if (
+          typeof window !== 'undefined' &&
+          isBarePasswordResetLanding(
+            window.location.pathname,
+            window.location.search,
+            window.location.hash,
+          )
+        ) {
+          window.history.replaceState(null, '', '/');
+          return getStateFromPathDefault('/', options);
+        }
         const confirmCallback =
           typeof window !== 'undefined' &&
-          (isEmailConfirmationCallback() || normalized.startsWith('/confirm-email'));
+          (isEmailConfirmationCallback() ||
+            isAuthEmailConfirmPath(normalized) ||
+            normalized.startsWith(AUTH_EMAIL_CONFIRM_PATH));
         if (confirmCallback) {
           return getStateFromPathDefault('/', options);
         }
-        if (normalized.startsWith('/reset-password') && !passwordRecoveryPending) {
+        if (isAuthPasswordResetPath(normalized)) {
+          if (typeof window !== 'undefined') {
+            window.history.replaceState(null, '', '/');
+          }
           return getStateFromPathDefault('/', options);
         }
         return getStateFromPathDefault(normalized, options);
@@ -699,7 +767,11 @@ const RootNavigator = () => {
 
   if (!isLoggedIn || forcePasswordResetUi) {
     return (
-      <NavigationContainer theme={navTheme} linking={authLinking}>
+      <NavigationContainer
+        key={forcePasswordResetUi ? 'auth-reset' : 'auth-login'}
+        theme={navTheme}
+        linking={forcePasswordResetUi ? undefined : authLinking}
+      >
         <AuthNavigator
           initialRouteName={forcePasswordResetUi ? 'SetNewPassword' : 'Login'}
         />
@@ -753,18 +825,18 @@ const LoggedInRootShell = ({
     };
   }, [userId, userEmail, user?.user_metadata]);
 
-  const { data: validationTrack, isPending: validationTrackPending } = useQuery({
-    queryKey: ['validationTrack', userId],
-    queryFn: () => fetchUserValidationTrack(userId),
+  const { data: validationShellRouting, isPending: validationShellRoutingPending } = useQuery({
+    queryKey: ['validationShellRouting', userId],
+    queryFn: () => fetchValidationShellRouting(userId),
     enabled: userBootstrapped,
-    staleTime: 60_000,
+    staleTime: 0,
   });
 
-  if (!userBootstrapped || validationTrackPending) {
+  if (!userBootstrapped || validationShellRoutingPending) {
     return <LoadingScreen />;
   }
 
-  if (validationTrack === RELATIONSHIP_VALIDATION_TRACK) {
+  if (shouldUseRelationshipValidationNavigator(validationShellRouting)) {
     return (
       <NavigationContainer theme={navTheme}>
         <RelationshipValidationNavigator userId={userId} />

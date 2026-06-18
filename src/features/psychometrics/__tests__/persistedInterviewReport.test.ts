@@ -37,6 +37,18 @@ const fullData: ReportData = {
     scsPublicScore: 18,
     scsPrivateScore: 22,
     psychometricModifier: 0.1,
+    psychometrics: {
+      brsScore: null,
+      scsSfScore: null,
+      scsSfSelfKindnessScore: null,
+      scsSfCommonHumanityScore: null,
+      scsSfMindfulnessScore: null,
+      mspssScore: null,
+      mspssFamilyScore: null,
+      mspssFriendsScore: null,
+      rfqScore: null,
+    },
+    psychometricStraightLineFlags: [],
   },
   attempt: {
     weightedScore: 7.1,
@@ -58,6 +70,9 @@ const fullData: ReportData = {
     splitting: false,
     rationalization: false,
     denial: false,
+    mentalizingProfile: null,
+    moment5Profile: null,
+    scenarioKeyEvidence: null,
   },
 };
 

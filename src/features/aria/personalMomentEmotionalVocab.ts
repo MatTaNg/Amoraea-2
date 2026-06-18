@@ -8,6 +8,10 @@ import {
   moment5ResponseIsAbstract,
 } from './probeAndScoringUtils';
 import {
+  inferMoment4ConcretenessFromText,
+  type Moment4ConcretenessLevel,
+} from './moment4ConcretenessClassification';
+import {
   normalizeResponseConcreteness,
   type ResponseConcretenessLevel,
 } from './personalMomentConcreteness';
@@ -371,31 +375,17 @@ export function inferResponseConcretenessFromTranscript(
   transcript: readonly PersonalMomentTranscriptTurn[] | null | undefined,
   moment: 4 | 5,
   scoringSliceUserText?: string,
-): ResponseConcretenessLevel | null {
+): ResponseConcretenessLevel | Moment4ConcretenessLevel | null {
   const combined = combineUserTextForPersonalMoment(transcript, moment, scoringSliceUserText);
   if (!combined) return null;
+
+  if (moment === 4) {
+    return inferMoment4ConcretenessFromText(combined);
+  }
+
   const wc = combined.split(/\s+/).filter(Boolean).length;
   if (wc === 0) return null;
   const lower = combined.toLowerCase();
-
-  if (moment === 4) {
-    const deflected =
-      (/\b(i don't (really )?hold grudges|can't think of anyone|nobody|no one comes to mind|nothing comes to mind)\b/.test(
-        lower,
-      ) &&
-        wc < 40) ||
-      (/\b(not really|don't have anyone|no grudges)\b/.test(lower) && wc < 25);
-    if (deflected) return 'absent';
-    const namedPerson =
-      /\b(my (friend|mom|dad|mother|father|brother|sister|partner|ex|boss|coworker|colleague|neighbor|roommate|husband|wife))\b/i.test(
-        combined,
-      ) || /\b(with|from)\s+[A-Z][a-z]{1,24}\b/.test(combined);
-    const hasEmotion = /\b(felt|feel|angry|hurt|frustrated|upset|bitter|resentful|ashamed|guilty)\b/i.test(lower);
-    if (namedPerson && wc >= 50 && hasEmotion) return 'high';
-    if (namedPerson && wc >= 25) return 'moderate';
-    if (wc >= 35) return 'low';
-    return 'low';
-  }
 
   if (moment5ResponseIsAbstract(combined) && wc < 50) return 'low';
   if (moment5PersonalNarrativeHasConcreteAnchor(combined)) {

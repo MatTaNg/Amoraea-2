@@ -1,15 +1,32 @@
 import { supabase } from '@data/supabase/client';
-import { RELATIONSHIP_VALIDATION_INSTRUMENT_IDS } from './constants';
+import {
+  RELATIONSHIP_VALIDATION_INSTRUMENT_IDS,
+  type RelationshipValidationInstrumentId,
+} from './constants';
 
-const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+export {
+  getPartnerEmailValidationError,
+  isValidPartnerEmail,
+  normalizePartnerEmail,
+} from './partnerEmailValidation';
 
-export function isValidPartnerEmail(email: string): boolean {
-  return EMAIL_RE.test(email.trim());
+export async function fetchCurrentUserEmailForPartnerValidation(
+  userId: string,
+): Promise<string | null> {
+  const { data: auth } = await supabase.auth.getUser();
+  if (auth.user?.email?.trim()) {
+    return auth.user.email.trim().toLowerCase();
+  }
+  const { data } = await supabase.from('users').select('email').eq('id', userId).maybeSingle();
+  if (typeof data?.email === 'string' && data.email.trim()) {
+    return data.email.trim().toLowerCase();
+  }
+  return null;
 }
 
 export async function validationInstrumentsCompleted(userId: string): Promise<{
   complete: boolean;
-  nextStep: 'ECR-36' | 'PVQ-21' | 'CONFLICT-30' | null;
+  nextStep: RelationshipValidationInstrumentId | null;
 }> {
   const { data: assessments, error } = await supabase
     .from('user_assessments')

@@ -1,4 +1,5 @@
 import type { ComputeGateResultOptions } from '@features/aria/computeGateResultCore';
+import { moment4Moment5ConcretenessDepthSignalDelta } from '@features/aria/moment4ConcretenessClassification';
 import { DEFAULT_DEFENSE_PATTERNS, type DefensePatternsJson } from '@features/aria/defensePatternsDetection';
 import { resolveEmotionRecognitionRawScoreForGate } from '@features/aria/emotionRecognitionInterview';
 
@@ -61,30 +62,9 @@ export function buildDepthSignalModifierLines(
 
   const m4 = (options?.moment4Concreteness ?? '').toString().trim().toLowerCase();
   const m5 = (options?.moment5Concreteness ?? '').toString().trim().toLowerCase();
-  let concretenessDelta = 0;
-  let concretenessDetail = '';
-  if (m4 === 'absent' && m5 === 'absent') {
-    concretenessDelta = -0.5;
-    concretenessDetail = 'Moment 4 absent · Moment 5 absent';
-  } else if ((m4 === 'absent' && m5 === 'low') || (m4 === 'low' && m5 === 'absent')) {
-    concretenessDelta = -0.35;
-    concretenessDetail = `Moment 4 ${m4} · Moment 5 ${m5}`;
-  } else if (m4 === 'low' && m5 === 'low') {
-    concretenessDelta = -0.3;
-    concretenessDetail = 'Moment 4 low · Moment 5 low';
-  } else if ((m4 === 'low' && m5 === 'moderate') || (m4 === 'moderate' && m5 === 'low')) {
-    concretenessDelta = -0.1;
-    concretenessDetail = `Moment 4 ${m4} · Moment 5 ${m5}`;
-  } else if (m4 === 'moderate' && m5 === 'moderate') {
-    concretenessDelta = 0;
-    concretenessDetail = 'Moment 4 moderate · Moment 5 moderate';
-  } else if ((m4 === 'high' && m5 === 'moderate') || (m4 === 'moderate' && m5 === 'high')) {
-    concretenessDelta = 0.1;
-    concretenessDetail = `Moment 4 ${m4} · Moment 5 ${m5}`;
-  } else if (m4 === 'high' && m5 === 'high') {
-    concretenessDelta = 0.2;
-    concretenessDetail = 'Moment 4 high · Moment 5 high';
-  }
+  const concretenessDelta = moment4Moment5ConcretenessDepthSignalDelta(m4, m5);
+  const concretenessDetail =
+    m4 && m5 ? `Moment 4 ${m4 || '—'} · Moment 5 ${m5 || '—'}` : '';
   if (concretenessDelta !== 0 && concretenessDetail) {
     lines.push({ label: 'Personal moment concreteness', detail: concretenessDetail, delta: concretenessDelta });
   } else if (concretenessDelta > 0 && concretenessDetail) {

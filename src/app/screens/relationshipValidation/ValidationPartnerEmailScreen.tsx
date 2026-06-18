@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import {
   View,
   Text,
@@ -12,7 +12,10 @@ import {
 import type { RouteProp } from '@react-navigation/native';
 import { SafeAreaContainer } from '@ui/components/SafeAreaContainer';
 import { authStyles } from '@app/screens/authStyles';
-import { isValidPartnerEmail } from '@features/relationshipValidation/validationPsychometricsProgress';
+import {
+  fetchCurrentUserEmailForPartnerValidation,
+  getPartnerEmailValidationError,
+} from '@features/relationshipValidation/validationPsychometricsProgress';
 import {
   savePartnerEmailEntered,
   startNewPartnerComparison,
@@ -20,6 +23,7 @@ import {
 } from '@features/relationshipValidation/relationshipValidationRepo';
 import {
   resolveValidationFlowStepAfterPartnerSwitch,
+  syncValidationPartnerPair,
 } from '@features/relationshipValidation/relationshipValidationService';
 import type { RelationshipValidationStackParamList } from '@app/navigation/RelationshipValidationNavigator';
 
@@ -51,13 +55,27 @@ type Props = {
 export function ValidationPartnerEmailScreen({ userId, navigation, route }: Props) {
   const newComparison = route.params?.newComparison === true;
   const [email, setEmail] = useState('');
+  const [userEmail, setUserEmail] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
 
+  useEffect(() => {
+    let cancelled = false;
+    void fetchCurrentUserEmailForPartnerValidation(userId).then((resolved) => {
+      if (!cancelled) setUserEmail(resolved);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [userId]);
+
   const handleContinue = async () => {
     const trimmed = email.trim();
-    if (!isValidPartnerEmail(trimmed)) {
-      setError('Please enter a valid email address.');
+    const ownEmail = userEmail ?? (await fetchCurrentUserEmailForPartnerValidation(userId));
+    if (ownEmail && !userEmail) setUserEmail(ownEmail);
+    const validationError = getPartnerEmailValidationError(trimmed, ownEmail);
+    if (validationError) {
+      setError(validationError);
       return;
     }
     setError(null);
@@ -68,10 +86,12 @@ export function ValidationPartnerEmailScreen({ userId, navigation, route }: Prop
       } else {
         await savePartnerEmailEntered(userId, trimmed);
       }
+      await syncValidationPartnerPair(userId);
       const nextScreen = await routeAfterPartnerEmail(userId, trimmed);
       navigation.replace(nextScreen);
-    } catch {
-      setError('Could not save your partner email. Please try again.');
+    } catch (err) {
+      const message = err instanceof Error ? err.message : null;
+      setError(message?.includes('email') ? message : 'Could not save your partner email. Please try again.');
     } finally {
       setSaving(false);
     }
@@ -103,12 +123,17 @@ export function ValidationPartnerEmailScreen({ userId, navigation, route }: Prop
           </Text>
           <TextInput
             value={email}
-            onChangeText={setEmail}
+            onChangeText={(text) => {
+              setEmail(text);
+              if (error) setError(null);
+            }}
             placeholder="partner@email.com"
             placeholderTextColor="#5B6B80"
             autoCapitalize="none"
             autoCorrect={false}
             keyboardType="email-address"
+            textContentType="emailAddress"
+            autoComplete="email"
             style={authStyles.input}
           />
           {error ? <Text style={authStyles.errorText}>{error}</Text> : null}

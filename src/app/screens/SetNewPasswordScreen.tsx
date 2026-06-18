@@ -10,6 +10,7 @@ import {
   ScrollView,
 } from 'react-native';
 import { useAuth, getAuthUpdatePasswordErrorMessage } from '@features/authentication/hooks/useAuth';
+import { debugAuthCallbackLog, sanitizeAuthUrlForLog } from '@features/authentication/debugAuthCallbackLog';
 import { SafeAreaContainer } from '@ui/components/SafeAreaContainer';
 import { FlameOrb } from '@app/screens/FlameOrb';
 import { authStyles } from '@app/screens/authStyles';
@@ -29,6 +30,28 @@ export const SetNewPasswordScreen: React.FC<{ navigation: { navigate: (route: st
   const [success, setSuccess] = useState(false);
   const { updatePassword, clearPasswordRecoveryPending, passwordRecoveryLinkError, session, loading: authLoading } =
     useAuth();
+
+  useEffect(() => {
+    if (Platform.OS !== 'web' || typeof window === 'undefined') return;
+    // #region agent log
+    debugAuthCallbackLog(
+      'SetNewPasswordScreen.tsx:mount',
+      'SetNewPassword screen mounted',
+      {
+        ...sanitizeAuthUrlForLog(
+          window.location.pathname,
+          window.location.search,
+          window.location.hash,
+        ),
+        hasSession: Boolean(session),
+        authLoading,
+        linkExpired: Boolean(passwordRecoveryLinkError),
+      },
+      'H5',
+      'post-fix',
+    );
+    // #endregion
+  }, []);
 
   useEffect(() => {
     if (Platform.OS !== 'web' || typeof document === 'undefined') return;

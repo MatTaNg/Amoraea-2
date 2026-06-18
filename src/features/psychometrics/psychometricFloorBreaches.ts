@@ -12,7 +12,7 @@ import {
   NPI_ENTITLEMENT_FLOOR_FAIL_CODE,
   wouldTriggerNpiEntitlementFloor,
 } from './npiEntitlementFloor';
-import { NPI_ENTITLEMENT_ENABLED } from './interviewCompletionStatus';
+import { NPI_ENTITLEMENT_ENABLED } from './psychometricsFeatureFlags';
 import { coercePsychometricScore } from './usersPsychometricsSchemaFallback';
 
 export const RFQ_LOW_REFLECTIVE_FUNCTIONING_FLOOR_THRESHOLD = 2.0;
@@ -264,7 +264,7 @@ export function logPsychometricFloorEvaluation(
   const rfqWould = wouldTriggerRfqLowReflectiveFunctioningFloor(scores.rfqScore, straightLineFlags);
   const sd3Would = wouldTriggerSd3NarcissismFloor(scores.sd3NarcissismScore, straightLineFlags);
   const npiWould = wouldTriggerNpiEntitlementFloor(scores.npiEntitlementScore);
-  if (__DEV__ || rfqWould || sd3Would || npiWould) {
+  if ((typeof __DEV__ !== 'undefined' && __DEV__) || rfqWould || sd3Would || npiWould) {
     console.log('[PsychometricFloor]', {
       ...context,
       psychometrics_rfq_score: scores.rfqScore,

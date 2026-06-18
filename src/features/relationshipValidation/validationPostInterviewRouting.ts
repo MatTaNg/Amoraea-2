@@ -1,7 +1,8 @@
 import { useEffect, useState } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import { RELATIONSHIP_VALIDATION_TRACK } from './constants';
-import { fetchUserValidationTrack } from './relationshipValidationRepo';
+import { fetchValidationShellRouting } from './relationshipValidationRepo';
+import { shouldUseRelationshipValidationNavigator } from './validationShellRouting';
 
 /** Main-app routes that standard onboarding uses after the AI interview. */
 export const STANDARD_POST_INTERVIEW_STACK_ROUTES = new Set([
@@ -27,8 +28,8 @@ export function validationStackRouteForStandardPostInterview(
 }
 
 /**
- * Standard PostInterview / processing screens: bounce RELATIONSHIP cohort users back into
- * the validation navigator (Your results), not "Your application is in review".
+ * Standard PostInterview / processing screens: bounce native RELATIONSHIP signup users back into
+ * the validation navigator. Standard-app enrollments stay on post-interview until they opt in.
  */
 export function useRedirectRelationshipValidationFromStandardPostInterview(userId: string): {
   isRedirecting: boolean;
@@ -44,9 +45,14 @@ export function useRedirectRelationshipValidationFromStandardPostInterview(userI
     let cancelled = false;
     void (async () => {
       try {
-        const track = await fetchUserValidationTrack(userId);
+        const routing = await fetchValidationShellRouting(userId);
         if (cancelled) return;
-        if (track === RELATIONSHIP_VALIDATION_TRACK) {
+        if (
+          routing.track === RELATIONSHIP_VALIDATION_TRACK &&
+          shouldUseRelationshipValidationNavigator(routing) &&
+          !routing.standardAppEnrolled
+        ) {
+          await queryClient.invalidateQueries({ queryKey: ['validationShellRouting', userId] });
           await queryClient.invalidateQueries({ queryKey: ['validationTrack', userId] });
           return;
         }

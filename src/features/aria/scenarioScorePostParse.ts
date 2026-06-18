@@ -21,7 +21,7 @@ import {
 } from './probeAndScoringUtils';
 
 export const SCENARIO_SCORE_MARKER_IDS: Record<1 | 2 | 3, readonly string[]> = {
-  1: ['mentalizing', 'accountability', 'contempt_recognition', 'contempt_expression', 'repair', 'attunement'],
+  1: ['mentalizing', 'accountability', 'contempt_recognition', 'contempt_expression', 'repair', 'attunement', 'appreciation'],
   2: ['appreciation', 'attunement', 'mentalizing', 'repair', 'accountability', 'contempt_expression'],
   3: ['regulation', 'repair', 'mentalizing', 'attunement', 'accountability', 'contempt_expression'],
 };

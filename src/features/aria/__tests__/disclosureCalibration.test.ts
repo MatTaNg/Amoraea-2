@@ -1,3 +1,4 @@
+import { describe, expect, it } from 'vitest';
 import { computeDisclosureCalibration, detectOverdisclosure } from '../disclosureCalibration';
 
 describe('disclosureCalibration', () => {
@@ -11,6 +12,40 @@ describe('disclosureCalibration', () => {
       [],
     );
     expect(calibration).toBe('calibrated');
+  });
+
+  it('underdisclosure requires low ratio and no substantive concreteness on either moment', () => {
+    // af88b820-like: low concreteness + ratio 33.5/134 < 0.4
+    expect(
+      computeDisclosureCalibration('low', 'low', 36, 31, 134, []),
+    ).toBe('underdisclosure');
+  });
+
+  it('does not flag underdisclosure when either moment is substantive despite low ratio (Jordan case)', () => {
+    expect(
+      computeDisclosureCalibration('valid_non_applicable', 'high', 131, 148, 460, []),
+    ).toBe('calibrated');
+  });
+
+  it('substantive M5 alone overrides low ratio even when M4 is thin', () => {
+    expect(
+      computeDisclosureCalibration('low', 'high', 36, 148, 460, []),
+    ).toBe('calibrated');
+  });
+
+  it('low concreteness with high word ratio stays calibrated (verbose but vague)', () => {
+    expect(
+      computeDisclosureCalibration('low', 'low', 400, 380, 200, []),
+    ).toBe('calibrated');
+  });
+
+  it('returns calibrated when word counts are unavailable (no default underdisclosure)', () => {
+    expect(
+      computeDisclosureCalibration('low', 'low', null, null, null, []),
+    ).toBe('calibrated');
+    expect(
+      computeDisclosureCalibration('low', 'low', null, null, 134, []),
+    ).toBe('calibrated');
   });
 
   it('detectOverdisclosure requires calibration plus length and secondary signal', () => {

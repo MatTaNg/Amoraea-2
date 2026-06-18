@@ -1,28 +1,70 @@
 import { useEffect, useSyncExternalStore } from 'react';
 import { Platform } from 'react-native';
 import { supabase } from '@data/supabase/client';
-import { Session, User } from '@supabase/supabase-js';
+import { Session, User, type EmailOtpType } from '@supabase/supabase-js';
 import type { Gender } from '@domain/models/Profile';
 import { isRelationshipValidationReferralCode } from '@features/relationshipValidation/constants';
 import {
+  AUTH_EMAIL_CONFIRM_PATH,
+  AUTH_PASSWORD_RESET_PATH,
   clearPasswordResetPendingInStorage,
+  hasExplicitRecoveryAuthContext,
   hasImplicitAuthHash,
   hasRecoveryAuthHash,
   hasWebAuthCallbackInUrl,
+  hasWebAuthCallbackQuery,
+  hasExplicitWebPasswordRecoveryContext,
+  isAuthEmailConfirmPath,
+  isAuthPasswordResetPath,
+  isBarePasswordResetLanding,
+  isConfirmEmailTokenType,
   isEmailConfirmationCallback,
+  isSignupConfirmAtLoad,
+  isPasswordResetPendingInStorage,
   markPasswordResetPendingInStorage,
   normalizeWebEmailConfirmationUrl,
   normalizeWebPasswordRecoveryUrl,
   parseWebAuthHashError,
+  readAuthCallbackTokenType,
   readInitialWebPasswordRecoveryState,
+  resolveWebAuthCallbackIntent,
   webEmailConfirmationLinkErrorMessage,
   webPasswordRecoveryLinkErrorMessage,
+  type WebAuthCallbackIntent,
 } from '@features/authentication/webAuthRecoveryRouting';
+import {
+  debugAuthCallbackLog,
+  sanitizeAuthUrlForLog,
+} from '@features/authentication/debugAuthCallbackLog';
 
 if (Platform.OS === 'web') {
   normalizeWebEmailConfirmationUrl();
   normalizeWebPasswordRecoveryUrl();
 }
+
+const initialWebAuthCallback =
+  Platform.OS === 'web' && typeof window !== 'undefined'
+    ? (() => {
+        const { pathname, search, hash } = window.location;
+        return {
+          intent: resolveWebAuthCallbackIntent(pathname, search, hash),
+          tokenType: readAuthCallbackTokenType(search, hash),
+          onConfirmPath: isAuthEmailConfirmPath(pathname),
+          signupConfirmAtLoad: isSignupConfirmAtLoad(
+            resolveWebAuthCallbackIntent(pathname, search, hash),
+            readAuthCallbackTokenType(search, hash),
+            pathname,
+          ),
+        };
+      })()
+    : {
+        intent: null as WebAuthCallbackIntent,
+        tokenType: null as string | null,
+        onConfirmPath: false,
+        signupConfirmAtLoad: false,
+      };
+
+const authBootstrapCompleteRef = { current: false };
 
 const webAuthCallbackAtLoadRef = {
   current:
@@ -43,6 +85,33 @@ type AuthSnapshot = {
 
 const initialRecovery = readInitialWebPasswordRecoveryState();
 const passwordRecoveryPendingRef = { current: initialRecovery.pending };
+
+if (Platform.OS === 'web' && typeof window !== 'undefined') {
+  const { pathname, search, hash } = window.location;
+  let firstLanding: Record<string, unknown> | null = null;
+  try {
+    firstLanding = JSON.parse(
+      sessionStorage.getItem('debug_auth_first_landing_28d27a') ?? 'null',
+    ) as Record<string, unknown> | null;
+  } catch {
+    firstLanding = null;
+  }
+  // #region agent log
+  debugAuthCallbackLog(
+    'useAuth.ts:module-init',
+    'initial recovery state',
+    {
+      ...sanitizeAuthUrlForLog(pathname, search, hash),
+      initialRecoveryPending: initialRecovery.pending,
+      initialLinkError: initialRecovery.linkError != null,
+      initialConfirmLinkError: initialRecovery.emailConfirmationLinkError != null,
+      resetPendingStorage: isPasswordResetPendingInStorage(),
+      firstLanding,
+    },
+    'H3',
+  );
+  // #endregion
+}
 
 let snapshot: AuthSnapshot = {
   session: null,
@@ -147,6 +216,58 @@ async function bootstrapWebAuthFromUrl(): Promise<void> {
   if (Platform.OS !== 'web' || typeof window === 'undefined') return;
 
   const { pathname, search, hash } = window.location;
+  const tokenType = readAuthCallbackTokenType(search, hash);
+  // #region agent log
+  debugAuthCallbackLog(
+    'useAuth.ts:bootstrapWebAuthFromUrl',
+    'bootstrap entry',
+    {
+      ...sanitizeAuthUrlForLog(pathname, search, hash),
+      tokenType,
+      intent: resolveWebAuthCallbackIntent(pathname, search, hash),
+      isConfirmCallback: isEmailConfirmationCallback(),
+      resetPending: isPasswordResetPendingInStorage(),
+      initialRecoveryPending: passwordRecoveryPendingRef.current,
+    },
+    'H3',
+  );
+  // #endregion
+
+  if (isBarePasswordResetLanding(pathname, search, hash)) {
+    // #region agent log
+    debugAuthCallbackLog(
+      'useAuth.ts:bootstrapWebAuthFromUrl',
+      'bare reset path — redirect home',
+      sanitizeAuthUrlForLog(pathname, search, hash),
+      'H6',
+      'post-fix',
+    );
+    // #endregion
+    await supabase.auth.signOut();
+    clearPasswordResetPendingInStorage();
+    passwordRecoveryPendingRef.current = false;
+    setSnapshot({
+      passwordRecoveryPending: false,
+      passwordRecoveryLinkError: null,
+      emailConfirmationLinkError: null,
+    });
+    window.history.replaceState(null, '', '/');
+    return;
+  }
+
+  const normalizedPath = pathname.replace(/\/+$/, '') || '/';
+  if (normalizedPath === '/' && !hasWebAuthCallbackQuery(search) && !hasImplicitAuthHash(hash)) {
+    clearPasswordResetPendingInStorage();
+  }
+
+  if (isEmailConfirmationCallback() || isConfirmEmailTokenType(tokenType)) {
+    clearPasswordResetPendingInStorage();
+  } else if (
+    hasWebAuthCallbackQuery(search) &&
+    !hasExplicitRecoveryAuthContext(search, hash)
+  ) {
+    clearPasswordResetPendingInStorage();
+  }
 
   const hashErr = parseWebAuthHashError(hash);
   if (hashErr) {
@@ -175,8 +296,6 @@ async function bootstrapWebAuthFromUrl(): Promise<void> {
   }
 
   if (hasRecoveryAuthHash(hash, { pathname, search })) {
-    passwordRecoveryPendingRef.current = true;
-    setSnapshot({ passwordRecoveryPending: true, emailConfirmationLinkError: null });
     normalizeWebPasswordRecoveryUrl();
   }
 
@@ -195,6 +314,7 @@ async function bootstrapWebAuthFromUrl(): Promise<void> {
   if (code) {
     const recoveryHash = hasRecoveryAuthHash(hash, { pathname, search });
     if (!recoveryHash) {
+      normalizeWebEmailConfirmationUrl();
       await supabase.auth.signOut();
       clearPasswordResetPendingInStorage();
       passwordRecoveryPendingRef.current = false;
@@ -224,22 +344,44 @@ async function bootstrapWebAuthFromUrl(): Promise<void> {
   }
 
   const tokenHash = searchParams.get('token_hash');
-  const tokenType = searchParams.get('type');
   if (tokenHash && tokenType) {
-    await supabase.auth.signOut();
-    clearPasswordResetPendingInStorage();
-    passwordRecoveryPendingRef.current = false;
+    const isRecovery = tokenType === 'recovery';
+    if (isRecovery) {
+      passwordRecoveryPendingRef.current = true;
+      markPasswordResetPendingInStorage();
+    } else {
+      await supabase.auth.signOut();
+      clearPasswordResetPendingInStorage();
+      passwordRecoveryPendingRef.current = false;
+    }
     const { error } = await supabase.auth.verifyOtp({
       token_hash: tokenHash,
-      type: tokenType as 'signup',
+      type: tokenType as EmailOtpType,
     });
     if (error) {
+      if (isRecovery) {
+        setSnapshot({
+          passwordRecoveryLinkError:
+            error.message ||
+            'This reset link is invalid or expired. Request a new reset email below.',
+        });
+      } else {
+        setSnapshot({
+          emailConfirmationLinkError:
+            error.message ||
+            'This confirmation link is invalid or expired. Sign in and request a new confirmation email.',
+        });
+        window.history.replaceState(null, '', '/');
+      }
+    } else if (!isRecovery) {
+      clearPasswordResetPendingInStorage();
+      passwordRecoveryPendingRef.current = false;
       setSnapshot({
-        emailConfirmationLinkError:
-          error.message ||
-          'This confirmation link is invalid or expired. Sign in and request a new confirmation email.',
+        passwordRecoveryPending: false,
+        passwordRecoveryLinkError: null,
+        emailConfirmationLinkError: null,
       });
-      window.history.replaceState(null, '', '/');
+      window.history.replaceState(null, '', '/?confirmEmail=1');
     }
     return;
   }
@@ -278,8 +420,61 @@ function startAuthInitOnce(): Promise<void> {
     };
 
     supabase.auth.onAuthStateChange((event, nextSession) => {
+      const { pathname, search, hash } =
+        Platform.OS === 'web' && typeof window !== 'undefined'
+          ? window.location
+          : { pathname: '', search: '', hash: '' };
+      let skipSessionSync = false;
+
+      if (event === 'PASSWORD_RECOVERY' || event === 'SIGNED_IN') {
+        const confirmLink =
+          event === 'PASSWORD_RECOVERY'
+            ? isConfirmEmailTokenType(initialWebAuthCallback.tokenType) ||
+              (isEmailConfirmationCallback() && !isPasswordResetPendingInStorage())
+            : null;
+        // #region agent log
+        debugAuthCallbackLog(
+          'useAuth.ts:onAuthStateChange',
+          'auth state change',
+          {
+            event,
+            ...sanitizeAuthUrlForLog(pathname, search, hash),
+            confirmLinkBranch: confirmLink,
+            passwordRecoveryPendingRef: passwordRecoveryPendingRef.current,
+            initialTokenType: initialWebAuthCallback.tokenType,
+            hasSession: Boolean(nextSession),
+          },
+          event === 'PASSWORD_RECOVERY' ? 'H2' : 'H2',
+        );
+        // #endregion
+      }
       if (event === 'PASSWORD_RECOVERY') {
-        if (isEmailConfirmationCallback()) {
+        const signupConfirmLoad = initialWebAuthCallback.signupConfirmAtLoad;
+        const confirmLink = signupConfirmLoad || isEmailConfirmationCallback();
+        const explicitRecovery = hasExplicitWebPasswordRecoveryContext(
+          pathname,
+          search,
+          hash,
+          initialWebAuthCallback.intent,
+        );
+        // #region agent log
+        debugAuthCallbackLog(
+          'useAuth.ts:onAuthStateChange:PASSWORD_RECOVERY',
+          'recovery event decision',
+          {
+            ...sanitizeAuthUrlForLog(pathname, search, hash),
+            signupConfirmLoad,
+            confirmLink,
+            explicitRecovery,
+            bootstrapComplete: authBootstrapCompleteRef.current,
+            initialTokenType: initialWebAuthCallback.tokenType,
+            onConfirmPath: initialWebAuthCallback.onConfirmPath,
+          },
+          'H8',
+          'post-fix',
+        );
+        // #endregion
+        if (confirmLink || signupConfirmLoad) {
           passwordRecoveryPendingRef.current = false;
           setSnapshot({
             passwordRecoveryPending: false,
@@ -287,41 +482,27 @@ function startAuthInitOnce(): Promise<void> {
             emailConfirmationLinkError: null,
           });
           clearPasswordResetPendingInStorage();
-          if (Platform.OS === 'web' && typeof window !== 'undefined') {
-            window.history.replaceState(null, '', '/');
-          }
+          skipSessionSync = true;
           webAuthCallbackAtLoadRef.current = false;
-        } else {
-          const onResetPath =
-            Platform.OS === 'web' &&
-            typeof window !== 'undefined' &&
-            window.location.pathname.includes('reset-password');
-          const recoveryHash = hasRecoveryAuthHash(window.location.hash, {
-            pathname: window.location.pathname,
-            search: window.location.search,
+        } else if (!explicitRecovery) {
+          passwordRecoveryPendingRef.current = false;
+          setSnapshot({
+            passwordRecoveryPending: false,
+            passwordRecoveryLinkError: null,
+            emailConfirmationLinkError: null,
           });
-          if (onResetPath || recoveryHash) {
-            passwordRecoveryPendingRef.current = true;
-            setSnapshot({
-              passwordRecoveryPending: true,
-              passwordRecoveryLinkError: null,
-              emailConfirmationLinkError: null,
-            });
-            clearPasswordResetPendingInStorage();
-            if (Platform.OS === 'web' && typeof window !== 'undefined') {
-              window.history.replaceState(null, '', '/reset-password');
-            }
-          } else {
-            passwordRecoveryPendingRef.current = false;
-            setSnapshot({
-              passwordRecoveryPending: false,
-              passwordRecoveryLinkError: null,
-              emailConfirmationLinkError: null,
-            });
-            if (Platform.OS === 'web' && typeof window !== 'undefined') {
-              window.history.replaceState(null, '', '/');
-            }
-          }
+          clearPasswordResetPendingInStorage();
+          webAuthCallbackAtLoadRef.current = false;
+          skipSessionSync = true;
+          void supabase.auth.signOut();
+        } else if (authBootstrapCompleteRef.current) {
+          passwordRecoveryPendingRef.current = true;
+          setSnapshot({
+            passwordRecoveryPending: true,
+            passwordRecoveryLinkError: null,
+            emailConfirmationLinkError: null,
+          });
+          clearPasswordResetPendingInStorage();
           webAuthCallbackAtLoadRef.current = false;
         }
       } else if (event === 'SIGNED_IN' && webAuthCallbackAtLoadRef.current) {
@@ -347,10 +528,13 @@ function startAuthInitOnce(): Promise<void> {
       ) {
         finishInitialAuthLoad();
       }
-      void sync(nextSession);
+      if (!skipSessionSync) {
+        void sync(nextSession);
+      }
     });
 
     await bootstrapWebAuthFromUrl();
+    authBootstrapCompleteRef.current = true;
 
     await supabase.auth.getSession();
     if (!initialSessionSeen) {
@@ -391,11 +575,11 @@ export function getAuthSiteOrigin(): string {
 }
 
 export function getAuthEmailRedirectTo(): string {
-  return `${getAuthSiteOrigin()}/confirm-email`;
+  return `${getAuthSiteOrigin()}${AUTH_EMAIL_CONFIRM_PATH}`;
 }
 
 export function getPasswordResetRedirectTo(): string {
-  return `${getAuthSiteOrigin()}/reset-password`;
+  return `${getAuthSiteOrigin()}${AUTH_PASSWORD_RESET_PATH}`;
 }
 
 export const AUTH_EMAIL_RESEND_COOLDOWN_MS = 60_000;
@@ -507,6 +691,7 @@ export const useAuth = () => {
   };
 
   const resendConfirmationEmail = async (email: string) => {
+    clearPasswordResetPendingInStorage();
     const { error } = await supabase.auth.resend({
       type: 'signup',
       email: email.trim(),

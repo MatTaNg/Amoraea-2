@@ -1,4 +1,30 @@
 import { Platform } from 'react-native';
+import {
+  debugAuthCallbackLog,
+  sanitizeAuthUrlForLog,
+} from './debugAuthCallbackLog';
+
+/** Supabase `emailRedirectTo` / `redirectTo` paths (must match Supabase redirect URL allowlist). */
+export const AUTH_EMAIL_CONFIRM_PATH = '/auth/confirm';
+export const AUTH_PASSWORD_RESET_PATH = '/auth/reset-password';
+
+/** Legacy paths kept for email links sent before `/auth/*` redirect URLs. */
+export const LEGACY_EMAIL_CONFIRM_PATH = '/confirm-email';
+export const LEGACY_PASSWORD_RESET_PATH = '/reset-password';
+
+export function isAuthEmailConfirmPath(pathname: string): boolean {
+  return (
+    pathname.includes(AUTH_EMAIL_CONFIRM_PATH) ||
+    pathname.includes(LEGACY_EMAIL_CONFIRM_PATH)
+  );
+}
+
+export function isAuthPasswordResetPath(pathname: string): boolean {
+  return (
+    pathname.includes(AUTH_PASSWORD_RESET_PATH) ||
+    pathname.includes(LEGACY_PASSWORD_RESET_PATH)
+  );
+}
 
 export const PASSWORD_RESET_PENDING_STORAGE_KEY = 'amoraea_password_reset_pending';
 export const PASSWORD_RESET_PENDING_TTL_MS = 30 * 60 * 1000;
@@ -54,10 +80,40 @@ export function hasEmailConfirmationAuthHash(hash: string): boolean {
 export function normalizeWebEmailConfirmationUrl(): void {
   if (Platform.OS !== 'web' || typeof window === 'undefined') return;
   const { pathname, search, hash } = window.location;
-  if (!pathname.includes('reset-password')) return;
-  if (isWebPasswordRecoveryCallback()) return;
-  if (!isEmailConfirmationContext(pathname, search, hash)) return;
-  window.history.replaceState(null, '', `/confirm-email${search}${hash}`);
+  const onReset = isAuthPasswordResetPath(pathname);
+  const recoveryCb = isWebPasswordRecoveryCallback();
+  const confirmCtx = isEmailConfirmationContext(pathname, search, hash);
+  // #region agent log
+  debugAuthCallbackLog(
+    'webAuthRecoveryRouting.ts:normalizeWebEmailConfirmationUrl',
+    'normalize confirm URL decision',
+    {
+      ...sanitizeAuthUrlForLog(pathname, search, hash),
+      onReset,
+      recoveryCb,
+      confirmCtx,
+      resetPending: isPasswordResetPendingInStorage(),
+      intent: resolveWebAuthCallbackIntent(pathname, search, hash),
+    },
+    'H4',
+  );
+  // #endregion
+  if (!onReset) return;
+  if (recoveryCb) return;
+  if (!confirmCtx) return;
+  const target = `${AUTH_EMAIL_CONFIRM_PATH}${search}${hash}`;
+  const current = `${pathname}${search}${hash}`;
+  if (current !== target) {
+    // #region agent log
+    debugAuthCallbackLog(
+      'webAuthRecoveryRouting.ts:normalizeWebEmailConfirmationUrl',
+      'redirecting reset path to confirm',
+      { targetPath: AUTH_EMAIL_CONFIRM_PATH },
+      'H4',
+    );
+    // #endregion
+    window.location.replace(target);
+  }
 }
 
 export function hasRecoveryAuthHash(
@@ -79,9 +135,11 @@ export function hasRecoveryAuthHash(
 
   if (!h.includes('error=')) return false;
 
-  // Expired/invalid links on `/reset-password` are recovery only when the user requested a reset.
-  if (pathname.includes('reset-password')) {
-    return isPasswordResetPendingInStorage() || h.includes('type=recovery');
+  // Expired/invalid links on reset-password are recovery only when explicitly typed as recovery.
+  if (isAuthPasswordResetPath(pathname)) {
+    return (
+      h.includes('type=recovery') || hasExplicitRecoveryAuthQuery(search)
+    );
   }
 
   return (
@@ -98,8 +156,17 @@ export function isEmailConfirmationLandingPath(pathname: string): boolean {
     path === '/login' ||
     path === '/register' ||
     path === '/welcome' ||
-    path === '/confirm-email'
+    path === AUTH_EMAIL_CONFIRM_PATH ||
+    path === LEGACY_EMAIL_CONFIRM_PATH
   );
+}
+
+/** Post-confirm success banner on Login (`/?confirmEmail=1`). */
+export function hasPostEmailConfirmLandingQuery(search: string): boolean {
+  if (!search || search === '?') return false;
+  const params = new URLSearchParams(search.startsWith('?') ? search.slice(1) : search);
+  const v = params.get('confirmEmail');
+  return v === '1' || v === 'true';
 }
 
 /** True when URL context is signup / email confirm — not password recovery. */
@@ -110,10 +177,22 @@ export function isEmailConfirmationContext(
 ): boolean {
   const h = hash.toLowerCase();
   if (h.includes('type=recovery')) return false;
+  if (hasPostEmailConfirmLandingQuery(search)) return true;
   if (hasEmailConfirmationAuthHash(hash)) return true;
   if (hasEmailConfirmationAuthQuery(search)) return true;
-  if (isEmailConfirmationLandingPath(pathname)) return true;
-  if (hasWebAuthCallbackQuery(search) && !pathname.includes('reset-password')) return true;
+  if (isAuthEmailConfirmPath(pathname)) return true;
+  if (hasWebAuthCallbackQuery(search)) {
+    if (!isAuthPasswordResetPath(pathname)) return true;
+    if (hasExplicitRecoveryAuthContext(search, hash)) return false;
+    return true;
+  }
+  if (
+    isAuthPasswordResetPath(pathname) &&
+    hasImplicitAuthHash(hash) &&
+    !h.includes('type=recovery')
+  ) {
+    return true;
+  }
   return false;
 }
 
@@ -122,6 +201,116 @@ export function hasEmailConfirmationAuthQuery(search: string): boolean {
   const params = new URLSearchParams(search.startsWith('?') ? search.slice(1) : search);
   const type = params.get('type')?.toLowerCase() ?? '';
   return EMAIL_CONFIRMATION_HASH_TYPES.has(type);
+}
+
+export type WebAuthCallbackIntent = 'confirm' | 'recovery' | null;
+
+const CONFIRM_EMAIL_TOKEN_TYPES = new Set(['signup', 'email', 'email_change', 'invite']);
+
+export function isConfirmEmailTokenType(type: string | null | undefined): boolean {
+  if (!type) return false;
+  return CONFIRM_EMAIL_TOKEN_TYPES.has(type.toLowerCase());
+}
+
+/** Snapshot at module load — signup confirm must not be treated as password recovery. */
+export function isSignupConfirmAtLoad(
+  intent: WebAuthCallbackIntent,
+  tokenType: string | null,
+  pathname: string,
+): boolean {
+  if (intent === 'confirm') return true;
+  if (isConfirmEmailTokenType(tokenType)) return true;
+  return isAuthEmailConfirmPath(pathname);
+}
+
+export function readAuthCallbackTokenType(search: string, hash: string): string | null {
+  const params = new URLSearchParams(search.startsWith('?') ? search.slice(1) : search);
+  return (params.get('type') || parseAuthHashType(hash))?.toLowerCase() ?? null;
+}
+
+/** Classify auth callback from URL before Supabase session exchange. */
+export function resolveWebAuthCallbackIntent(
+  pathname: string,
+  search: string,
+  hash: string,
+): WebAuthCallbackIntent {
+  const tokenType = readAuthCallbackTokenType(search, hash);
+  if (tokenType === 'recovery') return 'recovery';
+  if (isConfirmEmailTokenType(tokenType)) return 'confirm';
+  if (hasEmailConfirmationAuthHash(hash)) return 'confirm';
+  if (hasEmailConfirmationAuthQuery(search)) return 'confirm';
+  if (isAuthEmailConfirmPath(pathname) && (hasWebAuthCallbackQuery(search) || hasImplicitAuthHash(hash))) {
+    return 'confirm';
+  }
+  if (hasWebAuthCallbackQuery(search)) {
+    if (hasExplicitRecoveryAuthContext(search, hash)) return 'recovery';
+    if (isAuthPasswordResetPath(pathname)) return 'confirm';
+    return 'confirm';
+  }
+  if (
+    isAuthPasswordResetPath(pathname) &&
+    hasImplicitAuthHash(hash) &&
+    !hash.toLowerCase().includes('type=recovery')
+  ) {
+    return 'confirm';
+  }
+  return null;
+}
+
+export function shouldArmPasswordRecoveryUi(
+  intent: WebAuthCallbackIntent,
+  pathname?: string,
+  search?: string,
+  hash?: string,
+): boolean {
+  if (intent === 'confirm') return false;
+  if (Platform.OS === 'web' && typeof window !== 'undefined') {
+    const path = pathname ?? window.location.pathname;
+    const q = search ?? window.location.search;
+    const h = hash ?? window.location.hash;
+    const tokenType = readAuthCallbackTokenType(q, h);
+    if (isConfirmEmailTokenType(tokenType)) return false;
+    if (isEmailConfirmationContext(path, q, h) && !isPasswordResetPendingInStorage()) return false;
+  }
+  return intent === 'recovery';
+}
+
+/** True when the URL (or forgot-password flow) explicitly requested password recovery. */
+export function hasExplicitWebPasswordRecoveryContext(
+  pathname: string,
+  search: string,
+  hash: string,
+  intent?: WebAuthCallbackIntent | null,
+): boolean {
+  if (intent === 'recovery') return true;
+  if (hasExplicitRecoveryAuthContext(search, hash)) return true;
+  // Pending flag alone must not arm recovery on `/` or confirm paths — only on reset landing.
+  if (isPasswordResetPendingInStorage() && isAuthPasswordResetPath(pathname)) return true;
+  return false;
+}
+
+/** Bare reset-password URL with no auth params — usually a misconfigured Site URL redirect. */
+export function isBarePasswordResetLanding(pathname: string, search: string, hash: string): boolean {
+  if (!isAuthPasswordResetPath(pathname)) return false;
+  if (hasExplicitRecoveryAuthContext(search, hash)) return false;
+  if (hasWebAuthCallbackQuery(search)) return false;
+  if (hasImplicitAuthHash(hash)) return false;
+  return true;
+}
+
+export function hasExplicitRecoveryAuthQuery(search: string): boolean {
+  if (!search || search === '?') return false;
+  const params = new URLSearchParams(search.startsWith('?') ? search.slice(1) : search);
+  return params.get('type')?.toLowerCase() === 'recovery';
+}
+
+/** True when URL explicitly marks password recovery (not an ambiguous PKCE `code`). */
+export function hasExplicitRecoveryAuthContext(
+  search: string,
+  hash: string,
+): boolean {
+  if (hasExplicitRecoveryAuthQuery(search)) return true;
+  return parseAuthHashType(hash)?.toLowerCase() === 'recovery';
 }
 
 /** Signup / email-confirm link (not password recovery). */
@@ -193,8 +382,8 @@ export function normalizeWebPasswordRecoveryUrl(): void {
   if (Platform.OS !== 'web' || typeof window === 'undefined') return;
   if (!isWebPasswordRecoveryCallback()) return;
   const { pathname, search, hash } = window.location;
-  if (pathname.includes('reset-password')) return;
-  window.history.replaceState(null, '', `/reset-password${search}${hash}`);
+  if (isAuthPasswordResetPath(pathname)) return;
+  window.history.replaceState(null, '', `${AUTH_PASSWORD_RESET_PATH}${search}${hash}`);
 }
 
 export function webPasswordRecoveryLinkErrorMessage(err: WebAuthHashError | null): string | null {
@@ -243,13 +432,13 @@ export function readInitialWebPasswordRecoveryState(): {
       emailConfirmationLinkError: webEmailConfirmationLinkErrorMessage(hashErr),
     };
   }
-  if (!isWebPasswordRecoveryCallback()) {
-    return { pending: false, linkError: null, emailConfirmationLinkError: null };
+  if (hashErr && hasExplicitRecoveryAuthContext(search, hash)) {
+    return {
+      pending: false,
+      linkError: webPasswordRecoveryLinkErrorMessage(hashErr),
+      emailConfirmationLinkError: null,
+    };
   }
-  normalizeWebPasswordRecoveryUrl();
-  return {
-    pending: true,
-    linkError: webPasswordRecoveryLinkErrorMessage(hashErr),
-    emailConfirmationLinkError: null,
-  };
+  // Never arm reset UI from URL alone — wait for PASSWORD_RECOVERY or explicit recovery verifyOtp.
+  return { pending: false, linkError: null, emailConfirmationLinkError: null };
 }

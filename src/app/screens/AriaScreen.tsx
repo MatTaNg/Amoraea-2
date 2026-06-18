@@ -59,6 +59,8 @@ import {
   isInterviewClosingThanksFragment,
   looksLikeInterviewClosingAssistantMessage,
   moment5AnswerIncludesResolutionOutcome,
+  applyConsecutiveStreamSentenceDedup,
+  stripConsecutiveDuplicateSentencesWithinDraft,
   stripDuplicateInterviewClosingParagraphs,
   stripDuplicateInterviewClosingSentencesWithinDraft,
   stripInterviewClosingStreamingEcho,
@@ -549,6 +551,7 @@ import {
 import {
   countInterviewWords,
   deriveMoment4PostGrudgeSpecificityResolvedFromMessages,
+  evaluateMoment4SpecificityProbe,
   looksLikeMoment4SpecificityFollowUpEcho,
   looksLikeMoment4SpecificityFollowUpPrompt,
   MOMENT_4_SPECIFICITY_FOLLOW_UP_TEXT,
@@ -1680,6 +1683,10 @@ const DECLINE_PHRASE_SUBSTRINGS = [
   "not really",
   "nope",
   "can't think of anything",
+  "can't think of a time",
+  "can't point to someone",
+  "can't point to anyone",
+  "not holding on to anything",
   "don't have",
   "can't think",
   "no example",
@@ -4360,7 +4367,7 @@ interface ScenarioScoreResult {
 
 /** When user skips after first frustration offer — force null markers (excluded from aggregates), not zero. */
 const SCENARIO_FRUSTRATION_SKIP_NULL_MARKER_IDS: Record<1 | 2 | 3, string[]> = {
-  1: ['mentalizing', 'accountability', 'contempt_recognition', 'contempt_expression', 'repair', 'attunement'],
+  1: ['mentalizing', 'accountability', 'contempt_recognition', 'contempt_expression', 'repair', 'attunement', 'appreciation'],
   2: ['appreciation', 'attunement', 'mentalizing', 'repair', 'accountability', 'contempt_expression'],
   3: ['regulation', 'repair', 'mentalizing', 'attunement', 'accountability', 'contempt_expression'],
 };
@@ -4622,7 +4629,7 @@ function applyElaborationAbsenceAfterNormalizeMoment5(
 
 /** Fixed column order for scenario scorecards so unassessed markers (e.g. commitment_threshold) still show as — */
 const SCENARIO_SCORE_DISPLAY_ORDER: Record<number, readonly string[]> = {
-  1: ['mentalizing', 'accountability', 'contempt_recognition', 'contempt_expression', 'repair', 'attunement'],
+  1: ['mentalizing', 'accountability', 'contempt_recognition', 'contempt_expression', 'repair', 'attunement', 'appreciation'],
   2: ['appreciation', 'attunement', 'mentalizing', 'repair', 'accountability', 'contempt_expression'],
   3: ['regulation', 'repair', 'mentalizing', 'attunement', 'accountability', 'contempt_expression'],
 };
@@ -10373,7 +10380,7 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
               headers,
               body: JSON.stringify({
                 model: CLAUDE_SONNET_MODEL,
-                max_tokens: scenarioNumber === 1 ? 800 : 1200,
+                max_tokens: scenarioNumber === 1 ? 900 : 1200,
                 temperature: 0,
                 messages: [
                   {
@@ -10728,6 +10735,16 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
                   mentalizing: 7,
                 };
               }
+            }
+            if (scenarioNumber === 1) {
+              const appreciationScore = parsedScenario.pillarScores?.appreciation;
+              const appreciationEvidence = parsedScenario.keyEvidence?.appreciation;
+              console.log(
+                '[S1_APPRECIATION_DEBUG] score:',
+                appreciationScore,
+                '| evidence:',
+                typeof appreciationEvidence === 'string' ? appreciationEvidence.slice(0, 150) : appreciationEvidence,
+              );
             }
             return parsedScenario;
           },
@@ -12905,6 +12922,30 @@ The participant **confirmed** skipping after the skip confirmation prompt. In **
     if (currentInterviewMomentRef.current === 4 && looksLikeMoment4SpecificityFollowUpPrompt(lastAssistantContent)) {
       moment4PostGrudgeSpecificityResolvedRef.current = true;
     }
+    const moment4SpecificityProbeEval =
+      currentInterviewMomentRef.current === 4 &&
+      lastAssistantLooksLikeMoment4Grudge &&
+      !moment4AnswerLooksMisplaced &&
+      !answeringAfterMoment4SpecificityProbe
+        ? evaluateMoment4SpecificityProbe(trimmed)
+        : null;
+
+    if (moment4SpecificityProbeEval) {
+      const specificityEvalPayload = {
+        hasNamedPerson: moment4SpecificityProbeEval.hasNamedPerson,
+        hasSpecificEvent: moment4SpecificityProbeEval.hasSpecificEvent,
+        genericOpenerDetected: moment4SpecificityProbeEval.genericOpenerDetected,
+        wordCount: moment4SpecificityProbeEval.wordCount,
+        probeFired: moment4SpecificityProbeEval.probeShouldFire,
+        triggerReason: moment4SpecificityProbeEval.triggerReason,
+      };
+      console.log('[M4_SPECIFICITY_PROBE_EVAL]', specificityEvalPayload);
+      void remoteLog('[M4_SPECIFICITY_PROBE_EVAL]', {
+        interviewSessionId: interviewSessionIdRef.current,
+        ...specificityEvalPayload,
+      });
+    }
+
     if (
       currentInterviewMomentRef.current === 4 &&
       lastAssistantLooksLikeMoment4Grudge &&
@@ -12912,7 +12953,7 @@ The participant **confirmed** skipping after the skip confirmation prompt. In **
     ) {
       if (isDecline(trimmed)) {
         moment4PostGrudgeSpecificityResolvedRef.current = true;
-      } else if (!needsMoment4SpecificityFollowUp(trimmed)) {
+      } else if (moment4SpecificityProbeEval && !moment4SpecificityProbeEval.probeShouldFire) {
         moment4PostGrudgeSpecificityResolvedRef.current = true;
       }
     }
@@ -12975,14 +13016,14 @@ The participant **confirmed** skipping after the skip confirmation prompt. In **
       !moment4AnswerLooksMisplaced &&
       !isDecline(trimmed) &&
       !isInterviewHardStopUserTurn(trimmed) &&
-      countInterviewWords(trimmed) > 10 &&
-      needsMoment4SpecificityFollowUp(trimmed)
+      moment4SpecificityProbeEval?.probeShouldFire === true
     ) {
       moment4ClientSpecificityProbeInjectedRef.current = true;
       moment4ExpectingPostSpecificityUserTurnRef.current = true;
       void remoteLog('[M4_SPECIFICITY_FOLLOWUP_INJECT]', {
         interviewSessionId: interviewSessionIdRef.current,
-        wordCount: countInterviewWords(trimmed),
+        wordCount: moment4SpecificityProbeEval.wordCount,
+        triggerReason: moment4SpecificityProbeEval.triggerReason,
         preview: trimmed.slice(0, 240),
       });
       probeLogRef.current.push({
@@ -14118,10 +14159,13 @@ The participant **confirmed** skipping after the skip confirmation prompt. In **
       let parallelTtsBatchBuffer = '';
       let parallelTtsBatchPrefetch: { text: string; promise: Promise<ArrayBuffer | null> } | null =
         null;
+      let lastParallelStreamSentenceNorm: string | null = null;
       const parallelTtsBatchDeduped = () =>
-        dedupeAdjacentBoundaryValidationsBeforeParticipantName(
-          parallelTtsBatchBuffer.trim(),
-          participantFirstNameForSpoken,
+        stripConsecutiveDuplicateSentencesWithinDraft(
+          dedupeAdjacentBoundaryValidationsBeforeParticipantName(
+            parallelTtsBatchBuffer.trim(),
+            participantFirstNameForSpoken,
+          ),
         );
       const scheduleParallelTtsBatchPrefetch = () => {
         const snap = parallelTtsBatchDeduped();
@@ -14740,6 +14784,19 @@ The participant **confirmed** skipping after the skip confirmation prompt. In **
           )
         ) {
           deferredScenarioVignetteTailForOpeningMerge = spoken;
+          return;
+        }
+        const streamSentenceDedup = applyConsecutiveStreamSentenceDedup(
+          spoken,
+          lastParallelStreamSentenceNorm,
+        );
+        lastParallelStreamSentenceNorm = streamSentenceDedup.lastSentenceNorm;
+        spoken = streamSentenceDedup.text;
+        if (!spoken.trim()) {
+          void remoteLog('[STREAM_TTS_CONSECUTIVE_DUPLICATE_SUPPRESSED]', {
+            interviewSessionId: interviewSessionIdRef.current,
+            preview: sentence.slice(0, 160),
+          });
           return;
         }
         appendToParallelTtsBatch(spoken);
@@ -15523,6 +15580,14 @@ The participant **confirmed** skipping after the skip confirmation prompt. In **
     if (strippedText !== beforeClosingWithinTurnDupStrip) {
       void remoteLog('[INTERVIEW_CLOSING_STRIPPED_WITHIN_TURN_DUPLICATE]', {
         preview: beforeClosingWithinTurnDupStrip.slice(0, 260),
+        afterPreview: strippedText.slice(0, 260),
+      });
+    }
+    const beforeConsecutiveSentenceDupStrip = strippedText;
+    strippedText = stripConsecutiveDuplicateSentencesWithinDraft(strippedText);
+    if (strippedText !== beforeConsecutiveSentenceDupStrip) {
+      void remoteLog('[ASSISTANT_TURN_STRIPPED_CONSECUTIVE_DUPLICATE_SENTENCE]', {
+        preview: beforeConsecutiveSentenceDupStrip.slice(0, 260),
         afterPreview: strippedText.slice(0, 260),
       });
     }

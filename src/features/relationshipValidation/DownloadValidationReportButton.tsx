@@ -18,6 +18,7 @@ type Props = {
   userId: string;
   reportReady: boolean;
   waitingForPartner?: boolean;
+  waitingMessage?: string | null;
   refreshKey?: string;
   variant?: 'primary' | 'completion' | 'actions';
   reportTier?: ValidationReportTier;
@@ -29,6 +30,7 @@ export function DownloadValidationReportButton({
   userId,
   reportReady,
   waitingForPartner = false,
+  waitingMessage = null,
   refreshKey,
   variant = 'primary',
   reportTier = 'partial',
@@ -95,8 +97,8 @@ export function DownloadValidationReportButton({
         waitingForPartner ? (
           <>
             <Text style={styles.sectionHint}>
-              Your downloadable report includes couple compatibility analysis and will be ready
-              once your partner completes their assessment and enters your email on their account.
+              {waitingMessage ??
+                'Your downloadable report includes couple compatibility analysis and will be ready once your partner completes their assessment and enters your email on their account.'}
             </Text>
             <View style={styles.pendingCard}>
               <Ionicons name="hourglass-outline" size={22} color="#5BA8E8" />
