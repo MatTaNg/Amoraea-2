@@ -26,6 +26,15 @@ const partialData: PartialReportData = {
     mentalizing_overcertainty_count: 1,
     aiSummary: null,
     aiStrengths: [],
+    finalGatePass: null,
+    gateFailReasons: [],
+    gamingCorrection: null,
+    finalScore: null,
+    mentalizingProfile: null,
+    moment4Profile: null,
+    moment5Profile: null,
+    scenarioKeyEvidence: null,
+    scenarioScoreGrounding: null,
   },
 };
 
@@ -73,6 +82,7 @@ const fullData: ReportData = {
     mentalizingProfile: null,
     moment5Profile: null,
     scenarioKeyEvidence: null,
+    scenarioScoreGrounding: null,
   },
 };
 

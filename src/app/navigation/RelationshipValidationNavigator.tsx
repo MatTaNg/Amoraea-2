@@ -6,6 +6,7 @@ import type { RouteProp } from '@react-navigation/native';
 import { ValidationEntryScreen } from '@app/screens/relationshipValidation/ValidationEntryScreen';
 import { ValidationPartnerEmailScreen } from '@app/screens/relationshipValidation/ValidationPartnerEmailScreen';
 import { ValidationPreAssessmentScreen } from '@app/screens/relationshipValidation/ValidationPreAssessmentScreen';
+import { ValidationRelationshipTestModeScreen } from '@app/screens/relationshipValidation/ValidationRelationshipTestModeScreen';
 import { ValidationPsychometricsHubScreen } from '@app/screens/relationshipValidation/ValidationPsychometricsHubScreen';
 import { ValidationInstrumentScreen } from '@app/screens/relationshipValidation/ValidationInstrumentScreen';
 import { ValidationConflictScreen } from '@app/screens/relationshipValidation/ValidationConflictScreen';
@@ -104,6 +105,7 @@ export type RelationshipValidationStackParamList = {
   ValidationEntry: undefined;
   ValidationPartnerEmail: { newComparison?: boolean } | undefined;
   ValidationPreAssessment: undefined;
+  ValidationRelationshipTestMode: undefined;
   ValidationPsychometricsHub: undefined;
   ValidationInstrument: { instrument: 'SEXUAL_COMMUNICATION' | 'ECR-36' | 'PVQ-21' };
   ValidationConflict: undefined;
@@ -135,6 +137,11 @@ export function RelationshipValidationNavigator({ userId }: Props) {
       </Stack.Screen>
       <Stack.Screen name="ValidationPreAssessment">
         {(props) => <ValidationPreAssessmentScreen userId={userId} navigation={props.navigation} />}
+      </Stack.Screen>
+      <Stack.Screen name="ValidationRelationshipTestMode">
+        {(props) => (
+          <ValidationRelationshipTestModeScreen userId={userId} navigation={props.navigation} />
+        )}
       </Stack.Screen>
       <Stack.Screen name="ValidationPsychometricsHub">
         {(props) => <ValidationPsychometricsHubScreen userId={userId} navigation={props.navigation} />}

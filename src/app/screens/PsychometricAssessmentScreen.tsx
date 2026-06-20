@@ -47,7 +47,6 @@ import {
   PSYCHOMETRICS_FONT_BODY,
   PSYCHOMETRICS_FONT_DISPLAY,
   PSYCHOMETRICS_GLASS_BORDER,
-  psychometricsScrollContent,
 } from '@features/psychometrics/psychometricsTheme';
 import { spacing } from '@ui/theme/spacing';
 import { applyPsychometricModifierToAttempt } from '@features/psychometrics/applyPsychometricModifier';
@@ -57,6 +56,10 @@ import {
   PSYCHOMETRICS_ENABLED,
   type InterviewStackRoute,
 } from '@features/psychometrics/resolveInitialInterviewRoute';
+import {
+  useAssessmentScrollContent,
+  useNarrowAssessmentViewport,
+} from '@utilities/assessmentMobileLayout';
 
 type Props = {
   navigation: {
@@ -95,6 +98,8 @@ export function PsychometricAssessmentScreen({ navigation, route }: Props) {
   const [finishing, setFinishing] = useState(false);
   const [loading, setLoading] = useState(true);
   const [cameFromAssessments, setCameFromAssessments] = useState(false);
+  const scrollContentStyle = useAssessmentScrollContent({ paddingTop: 32 });
+  const narrowViewport = useNarrowAssessmentViewport();
 
   useEffect(() => {
     if (!route.params?.openAdminPanel || !isAdminUser) return;
@@ -526,7 +531,7 @@ export function PsychometricAssessmentScreen({ navigation, route }: Props) {
   return (
     <SafeAreaView style={styles.container}>
       {openAdminPanel ? <PsychometricsAdminPanelButton onPress={openAdminPanel} /> : null}
-      <ScrollView contentContainerStyle={styles.content} bounces={false}>
+      <ScrollView contentContainerStyle={scrollContentStyle} bounces={false}>
         <View style={styles.progressBarContainer}>
           <View style={[styles.progressBar, { width: `${questionProgress * 100}%` }]} />
         </View>
@@ -536,14 +541,18 @@ export function PsychometricAssessmentScreen({ navigation, route }: Props) {
             <Text style={styles.preambleText}>{instrumentPreamble}</Text>
           ) : null}
           {isForcedChoice ? (
-            <Text style={styles.questionText}>{assessment.description}</Text>
+            <Text style={[styles.questionText, narrowViewport && styles.questionTextNarrow]}>
+              {assessment.description}
+            </Text>
           ) : question.scenario && question.response ? (
             <>
               <Text style={styles.scenarioText}>{question.scenario}</Text>
               <Text style={styles.responsePrompt}>{question.response}</Text>
             </>
           ) : (
-            <Text style={styles.questionText}>{question.text}</Text>
+            <Text style={[styles.questionText, narrowViewport && styles.questionTextNarrow]}>
+              {question.text}
+            </Text>
           )}
         </View>
 
@@ -596,10 +605,6 @@ const styles = StyleSheet.create({
   loader: {
     marginTop: 48,
   },
-  content: {
-    ...psychometricsScrollContent,
-    paddingTop: 32,
-  },
   finishingText: {
     fontFamily: PSYCHOMETRICS_FONT_BODY,
     fontSize: 15,
@@ -639,6 +644,10 @@ const styles = StyleSheet.create({
     color: '#F4F8FC',
     lineHeight: 30,
     textAlign: 'center',
+  },
+  questionTextNarrow: {
+    fontSize: 20,
+    lineHeight: 28,
   },
   scenarioText: {
     fontFamily: PSYCHOMETRICS_FONT_BODY,

@@ -36,7 +36,10 @@ Examples: "Emma's response suggests this isn't about one dinner — she's questi
   - Addresses the core: "I would acknowledge she's been feeling like she comes second, and show her concretely that I want to renegotiate how we handle those competing priorities."
 
 **keyEvidence format (required every scenario for these markers):**
-- **mentalizing** and **attunement** keyEvidence strings must **begin** with exactly **Level 1 —** or **Level 2 —** (Unicode em dash U+2014), then your substantive evidence. Example: Level 2 — User infers Emma is questioning whether she matters…
+- **mentalizing** and **attunement** keyEvidence strings must **begin** with exactly **Level 1 —** or **Level 2 —** (Unicode em dash U+2014), then your substantive evidence. This prefix is mandatory — scoring will fail QA if omitted.
+- Example (Level 1): Level 1 — User restates that Emma walked away without inferring her felt experience.
+- Example (Level 2): Level 2 — User infers Emma is questioning whether she matters in this relationship at all.
+- Do **not** put pillarConfidence values (high/moderate/low) in keyEvidence — those belong only in pillarConfidence.
 - If you assign **Level 1** for a marker, the **numeric score for that marker must not exceed 5.** If you assign **Level 2**, scores may go to 6–10 per rubric quality.
 `;
 

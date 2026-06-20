@@ -70,9 +70,100 @@ export function getMechanicsHidingConstraints(): string {
   return `MECHANICS-HIDING (MANDATORY — all report text):
 - Do NOT mention specific numerical scores, thresholds, percentiles, or raw numbers from any assessment
 - Do NOT reveal pillar names, construct names, algorithm details, probe names, scenario labels, or scoring methodology
-- Do NOT use instrument names (AAQ-II, RSES, SCS, GASP, BRS, RFQ, ECR, PVQ, TKI, etc.)
+- Do NOT use instrument names (AAQ-II, RSES, SCS, GASP, BRS, RFQ, ECR, PVQ, TKI, Dweck, etc.)
 - Do NOT use the words "gate", "floor", "threshold", "pass", "fail", or "score" in an assessment sense
+- Do NOT reference confidence levels, gaming corrections, straight-lining flags, uncertainty mechanics, or any internal QA terminology
 - Describe patterns in plain relational language only`;
+}
+
+export type EvidenceAwareNarrativeOptions = {
+  /** Full personal / validation full reports may weave self-report psychometrics into narrative. */
+  includePsychometricLens?: boolean;
+};
+
+/** Verbatim — must appear in every live report narrative prompt (grep-verifiable). */
+export const SCENARIO_PERSONAL_PATTERN_CROSSREF_INSTRUCTION =
+  "If the user's highest-scoring scenario for a given construct involves a theme that mirrors their personal disclosure (e.g., they scored well identifying avoidance/withdrawal in a fictional character's behavior, and their own personal pattern also involves avoidance), this connection must be made explicit in the narrative — grounded in actual scenario pillar scores and keyEvidence (with Level tags), not a generic strong/weak contrast. Scores 5–6 with Level 1 evidence = 'competent at reading behavior' / 'moderate' — NOT 'strong,' 'accurate empathy,' or 'in every scenario you demonstrated strong empathy.' Reserve 'strong'/'accurate' for scores 7+ with Level 2 evidence. Cite highest scenario score + specific keyEvidence quote AND a specific M4/M5 quote/paraphrase.";
+
+/** Verbatim — include when psychometric profile data is in the prompt context. */
+export const PSYCHOMETRIC_INTEGRATION_INSTRUCTION =
+  "Where a populated psychometric instrument score (GASP, RSES, Dweck, RFQ, self-compassion subscales, etc.) provides a meaningful lens on the report's central theme or growth recommendations, incorporate it into the relevant section in plain language.";
+
+export type ReportSectionDistinctnessVariant = 'personal_full' | 'personal_partial' | 'relationship';
+
+export function getMandatoryNarrativeConnectionInstructions(
+  options: EvidenceAwareNarrativeOptions = {},
+): string {
+  const lines = [
+    'MANDATORY NARRATIVE CONNECTIONS (verbatim requirements):',
+    `- CROSS-REFERENCING: ${SCENARIO_PERSONAL_PATTERN_CROSSREF_INSTRUCTION}`,
+  ];
+  if (options.includePsychometricLens) {
+    lines.push(`- PSYCHOMETRIC INTEGRATION: ${PSYCHOMETRIC_INTEGRATION_INSTRUCTION}`);
+  }
+  return lines.join('\n');
+}
+
+export function getSectionDistinctnessInstructions(
+  variant: ReportSectionDistinctnessVariant,
+): string {
+  if (variant === 'personal_partial') {
+    return `SECTION DISTINCTNESS (MANDATORY — reduce repetitive phrasing):
+- Overview: state core themes once, briefly (2-3 sentences). Do not preview every section's argument.
+- What's Working Well For You and Where You Can Grow: each strength and growth area must cite specific, non-overlapping evidence from different slices (scenario vs M4 vs M5) — do not restate the same finding in different words across items.
+- Practical Next Steps: map directly to the distinct growth areas already named — do not reintroduce the same theme again.
+- Do not repeat the same 2-3 core findings (e.g. perspective-taking gap, emotional avoidance, understanding-vs-doing gap) in every section with synonym swaps.`;
+  }
+  if (variant === 'relationship') {
+    return `SECTION DISTINCTNESS (MANDATORY — reduce repetitive phrasing):
+- Overview: state core themes once, briefly. Do not preview every section's argument.
+- Strengths and Growth: each item must cite specific, non-overlapping evidence — interview slices, questionnaire patterns, or GASP/attachment/values data — not the same theme reworded.
+- "What a Partner Likely Experiences With You" vs growth/friction sections: do not both restate the same friction point — partner experience describes lived relational impact; growth names developmental edges; differentiate explicitly.
+- Practical Steps Forward: map to the distinct growth areas already named — no third or fourth restatement of the same theme.`;
+  }
+  return `SECTION DISTINCTNESS (MANDATORY — reduce repetitive phrasing):
+- Overview: state the core themes once, briefly (3-4 sentences). Do not preview every section's argument.
+- Your Relational Strengths and Where You Have Room to Grow: each strength and growth area must cite specific, non-overlapping evidence from different slices (scenario vs M5 vs psychometric lens) — do not restate the same finding in different words across items.
+- Your Relationship Style: portrait how you show up — communication, conflict, needs — using evidence not already used as the headline in Overview.
+- What Tends to Get in the Way: name friction patterns from self-assessment AND interview that were NOT already the primary growth headline — or go deeper on a distinct mechanism, not a synonym restatement.
+- Practical Steps Forward: map directly to the distinct growth areas already named in Where You Have Room to Grow — do not reintroduce the same theme a third or fourth time.
+- Do not repeat the same 2-3 core findings (e.g. perspective-taking gap, emotional avoidance, understanding-vs-doing gap) across Overview, Strengths, Growth, Relationship Style, What Gets In The Way, and Practical Steps.`;
+}
+
+/**
+ * Shared anti-template narrative rules — prevents single dominant theme from overriding evidence.
+ * Wire via composeNarrativeCalibration() for all report pipelines.
+ */
+export function getEvidenceAwareNarrativeInstructions(
+  options: EvidenceAwareNarrativeOptions = {},
+): string {
+  const psychometricBlock = options.includePsychometricLens
+    ? `
+PSYCHOMETRIC LENS (when populated in profile data):
+${PSYCHOMETRIC_INTEGRATION_INSTRUCTION}
+- Skip psychometric inputs flagged as unreliable in NARRATIVE CALIBRATION — do not mention their absence to the reader.`
+    : '';
+
+  return `EVIDENCE-AWARE NARRATIVE (MANDATORY — overrides single-theme templating):
+
+1) SELF-CORRECTING MOMENTS AS FEATURED CONTENT
+When the transcript contains a moment where the user spontaneously demonstrates insight that complicates the report's main theme (accountability inside an otherwise self-focused answer, other-perspective-taking that softens an earlier stance, naming their own contribution without prompting), pull that moment into a dedicated strength, nuance subsection, or construct_breakdown.nuance_and_context — NOT only the closing paragraph.
+Prioritize Moment 5 (personal conflict account) and any follow-up probes — these are the most likely places a self-correction appears.
+
+2) CROSS-REFERENCE SCENARIO AND PERSONAL SLICES
+${SCENARIO_PERSONAL_PATTERN_CROSSREF_INSTRUCTION}
+Before claiming a pattern is uniform (e.g. "mentalizing only works for hypothetical situations"), compare scenario-level scorer notes and bands against personal M4/M5 evidence.
+
+3) PRECISE WEAKNESS FRAMING — NO FLAT UNDERDEVELOPMENT CLAIMS
+When moment-level or scenario-level bands vary meaningfully (e.g. a construct is strongest specifically in M5, the most personally significant moment), reflect that the capacity is present and strongest in the most relevant context.
+Reframe weakness claims to name WHERE the gap actually is (scenarios vs personal moments vs specific markers), not flat "underdeveloped across the board."
+
+4) GROWTH SECTIONS MUST AUDIT FULL EVIDENCE
+Before finalizing each "Where You Have Room to Grow" / growth-area paragraph, check it against ALL available evidence: every scenario scorer note, M4/M5 keyEvidence, holistic bands, and (when applicable) psychometric lens data.
+Adjust framing to match the actual pattern — do not let the report's dominant narrative arc override contradictory evidence.
+
+5) AVOID SINGLE-ARC OVERRIDE
+Do not force all evidence into one dominant theme. When data contains genuine tensions or counter-examples, name them as tensions — that nuance is the value of the report.${psychometricBlock}`;
 }
 
 export function partitionGateFailReasons(gateFailReasons: string[] | null | undefined): {
@@ -146,16 +237,29 @@ export function isInstrumentFlaggedInGamingCorrection(
   );
 }
 
+export type NarrateInstrumentOptions = {
+  /** Include instruments stripped/flagged by gaming correction — report still uses PRIORITY PRINCIPLE when interview diverges. */
+  ignoreGamingCorrection?: boolean;
+};
+
+/** Default for personal full report prompts — weave self-report even when gaming correction stripped it from scoring. */
+export const REPORT_NARRATE_INSTRUMENT_OPTIONS: NarrateInstrumentOptions = {
+  ignoreGamingCorrection: true,
+};
+
 /** True when a self-report instrument may be narrated in a personal full report. */
 export function shouldNarrateInstrument(
   score: number | null,
   instrumentKey: string,
   gamingCorrection: GamingCorrectionResult | null | undefined,
   psychometricStraightLineFlags?: string[] | null | undefined,
+  options?: NarrateInstrumentOptions,
 ): boolean {
   if (score == null || !Number.isFinite(score)) return false;
-  if (gamingCorrection?.strippedInstruments.includes(instrumentKey)) return false;
-  if (isInstrumentFlaggedInGamingCorrection(gamingCorrection, instrumentKey)) return false;
+  if (!options?.ignoreGamingCorrection) {
+    if (gamingCorrection?.strippedInstruments.includes(instrumentKey)) return false;
+    if (isInstrumentFlaggedInGamingCorrection(gamingCorrection, instrumentKey)) return false;
+  }
   const straightLineFlag = `${instrumentKey}_straight_line`;
   if ((psychometricStraightLineFlags ?? []).includes(straightLineFlag)) return false;
   return true;
@@ -401,7 +505,7 @@ EVIDENCE GROUNDING RULE: Every specific behavioral claim about this user (e.g. "
 
 ${
   hasAnyEvidence
-    ? "PERSONAL REPORT EVIDENCE CALIBRATION (MANDATORY): Ground Relational Strengths, Where You Have Room to Grow, and accountability/self-reflection observations in the scorer notes above. Weight M5 accountability and mentalizing evidence more heavily than scenario-derived equivalents when they diverge — M5 reflects the user's own stated behavior in a real conflict, not analysis of fictional characters."
+    ? "PERSONAL REPORT EVIDENCE CALIBRATION (MANDATORY): Ground Relational Strengths, Where You Have Room to Grow, and accountability/self-reflection observations in the scorer notes above. Weight M5 accountability and mentalizing evidence more heavily than scenario-derived equivalents when they diverge — M5 reflects the user's own stated behavior in a real conflict, not analysis of fictional characters. Before any uniform-weakness claim, compare scenario vs M4/M5 bands; if M5 is stronger, say the capacity shows up most in personal disclosure. Surface self-correcting or accountability moments from M5 in strengths or nuance — not only Closing."
     : 'PERSONAL REPORT EVIDENCE CALIBRATION: No keyEvidence excerpts available — rely on pillar bands and transcript themes only; do not invent specific behavioral observations.'
 }`;
 }
@@ -439,13 +543,27 @@ INTERVIEW EVIDENCE CALIBRATION (MANDATORY): Ground interview-section claims in t
     strongScenarioEngagement
       ? 'When scenario engagement is strong/good, do NOT characterize the interview as broadly "surface-level" or lacking depth in emotional themes — that contradicts the evidence. Describe specific strengths you can support; name growth edges only where evidence supports them.'
       : 'Describe interview patterns proportionally — do not invent depth or thinness not supported by the evidence.'
-  }`;
+  } Cross-reference scenario scorer notes with personal M4/M5 moments before uniform-weakness claims; surface self-correcting insights from M5 in strengths or nuance sections, not only Closing.`;
 }
 
+const INTERVIEW_FAIL_PRIORITY_PRINCIPLE_CLARIFIER = `Note: PRIORITY PRINCIPLE (interview signal over self-report) applies to which SIGNAL to trust when they diverge — it does not override INTERVIEW FAIL TONE. A failing weighted_score IS the interview signal; do not use decent individual pillar bands to argue the interview was "actually strong despite the score."`;
+
 /** Compose all shared calibration blocks for injection into a report prompt. */
-export function composeNarrativeCalibration(input: ReportGateCalibrationInput): string {
+export function composeNarrativeCalibration(
+  input: ReportGateCalibrationInput,
+  options: EvidenceAwareNarrativeOptions = {},
+): string {
   const gateBlock = getGateAwarenessCalibration(input);
-  const parts = [getInterviewPriorityPrinciple(), getMechanicsHidingConstraints()];
+  const narrativeTier = resolveReportGateNarrativeTier(input);
+  const parts = [
+    getInterviewPriorityPrinciple(),
+    getMechanicsHidingConstraints(),
+    getEvidenceAwareNarrativeInstructions(options),
+    getMandatoryNarrativeConnectionInstructions(options),
+  ];
   if (gateBlock) parts.push(gateBlock);
+  if (narrativeTier === 'interview_fail') {
+    parts.push(INTERVIEW_FAIL_PRIORITY_PRINCIPLE_CLARIFIER);
+  }
   return parts.join('\n\n');
 }

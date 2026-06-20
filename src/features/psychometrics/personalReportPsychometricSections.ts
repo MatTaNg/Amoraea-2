@@ -1,5 +1,5 @@
 import type { GamingCorrectionResult } from './computeGamingCorrection';
-import { shouldNarrateInstrument } from '../reports/narrativeCalibration';
+import { shouldNarrateInstrument, REPORT_NARRATE_INSTRUMENT_OPTIONS } from '../reports/narrativeCalibration';
 
 export type PersonalReportPsychometricScores = {
   brsScore: number | null;
@@ -12,6 +12,11 @@ export type PersonalReportPsychometricScores = {
   mspssFriendsScore: number | null;
   /** Reflective Functioning Questionnaire mean (1–7) — higher = stronger reflective depth. */
   rfqScore: number | null;
+  /** GASP mean (1–7) — harm-response tendencies. */
+  gaspScore: number | null;
+  /** Dweck mindset mean — higher = more growth-oriented. */
+  dweckScore: number | null;
+  rsesScore: number | null;
 };
 
 const SELF_REPORT_FRAMING =
@@ -83,7 +88,7 @@ export function buildBrsPersonalReportInstruction(
   straightLineFlags: string[],
 ): string | null {
   const score = scores.brsScore;
-  if (!shouldNarrateInstrument(score, 'brs', gamingCorrection, straightLineFlags) || score == null) {
+  if (!shouldNarrateInstrument(score, 'brs', gamingCorrection, straightLineFlags, REPORT_NARRATE_INSTRUMENT_OPTIONS) || score == null) {
     return null;
   }
   const band = brsResilienceBand(score);
@@ -108,7 +113,7 @@ export function buildScsSfPersonalReportInstruction(
 ): string | null {
   const effectiveScore = effectiveScsSfScore(scores);
   if (
-    !shouldNarrateInstrument(effectiveScore, 'scs_sf', gamingCorrection, straightLineFlags) ||
+    !shouldNarrateInstrument(effectiveScore, 'scs_sf', gamingCorrection, straightLineFlags, REPORT_NARRATE_INSTRUMENT_OPTIONS) ||
     effectiveScore == null
   ) {
     return null;
@@ -145,7 +150,7 @@ export function buildMspssPersonalReportInstruction(
   straightLineFlags: string[],
 ): string | null {
   const score = effectiveMspssScore(scores);
-  if (!shouldNarrateInstrument(score, 'mspss', gamingCorrection, straightLineFlags) || score == null) {
+  if (!shouldNarrateInstrument(score, 'mspss', gamingCorrection, straightLineFlags, REPORT_NARRATE_INSTRUMENT_OPTIONS) || score == null) {
     return null;
   }
   const band = mspssSupportBand(score);
@@ -180,7 +185,7 @@ export function buildRfqPersonalReportInstruction(
   straightLineFlags: string[],
 ): string | null {
   const score = scores.rfqScore;
-  if (!shouldNarrateInstrument(score, 'rfq', gamingCorrection, straightLineFlags) || score == null) {
+  if (!shouldNarrateInstrument(score, 'rfq', gamingCorrection, straightLineFlags, REPORT_NARRATE_INSTRUMENT_OPTIONS) || score == null) {
     return null;
   }
   const band = rfqReflectiveBand(score);
@@ -201,6 +206,71 @@ In "## Your Relationship Style", add one ### subsection (e.g. "### How You Make 
 FUTURE NOTE (internal only — do not write to reader): When partner RFQ scores are available, relationship reports should eventually surface reflective-depth mismatch dynamics; out of scope for this personal report.`;
 }
 
+export function buildRsesPersonalReportInstruction(
+  scores: PersonalReportPsychometricScores,
+  gamingCorrection: GamingCorrectionResult | null,
+  straightLineFlags: string[],
+): string | null {
+  const score = scores.rsesScore;
+  if (!shouldNarrateInstrument(score, 'rses', gamingCorrection, straightLineFlags, REPORT_NARRATE_INSTRUMENT_OPTIONS) || score == null) {
+    return null;
+  }
+  const band =
+    score >= 30
+      ? 'generally stable positive self-regard'
+      : score >= 23
+        ? 'moderate self-regard with some variability'
+        : score >= 17
+          ? 'below-average self-regard that may amplify shame after conflict'
+          : 'significantly impaired self-regard';
+  return `${SELF_REPORT_FRAMING}
+
+SELF-WORTH PATTERN (internal — omit instrument name):
+Profile suggests ${band}. Where relevant to growth recommendations (owning mistakes, receiving feedback, repair after conflict), weave this in plain language — e.g. how harsh self-criticism vs stable self-regard may affect willingness to stay in difficult repair conversations. Do not quote numbers or name the measure.`;
+}
+
+export function buildGaspPersonalReportInstruction(
+  scores: PersonalReportPsychometricScores,
+  gamingCorrection: GamingCorrectionResult | null,
+  straightLineFlags: string[],
+): string | null {
+  const score = scores.gaspScore;
+  if (!shouldNarrateInstrument(score, 'gasp', gamingCorrection, straightLineFlags, REPORT_NARRATE_INSTRUMENT_OPTIONS) || score == null) {
+    return null;
+  }
+  const band =
+    score <= 3
+      ? 'tends toward repair-oriented responses after causing harm — guilt motivates making things right'
+      : score <= 5
+        ? 'mixed harm-response pattern — sometimes repair-oriented, sometimes withdrawal or externalization under stress'
+        : 'more withdrawal- or externalization-leaning after causing harm — may struggle to stay present for repair';
+  return `${SELF_REPORT_FRAMING}
+
+HARM-RESPONSE TENDENCY (internal — omit instrument name):
+${band}. In "## What Tends to Get in the Way" or conflict/repair growth sections, connect this to interview accountability/repair patterns when both signals align — in plain language only.`;
+}
+
+export function buildDweckPersonalReportInstruction(
+  scores: PersonalReportPsychometricScores,
+  gamingCorrection: GamingCorrectionResult | null,
+  straightLineFlags: string[],
+): string | null {
+  const score = scores.dweckScore;
+  if (!shouldNarrateInstrument(score, 'dweck', gamingCorrection, straightLineFlags, REPORT_NARRATE_INSTRUMENT_OPTIONS) || score == null) {
+    return null;
+  }
+  const band =
+    score >= 5
+      ? 'growth-oriented — more likely to treat relationship skills as learnable and stay curious after setbacks'
+      : score >= 3.5
+        ? 'mixed learning orientation — open to growth in some areas, defensive about change in others'
+        : 'fixed-leaning — may experience behavior-change suggestions as criticism of character rather than invitation to grow';
+  return `${SELF_REPORT_FRAMING}
+
+LEARNING ORIENTATION (internal — omit instrument name):
+${band}. In "## Practical Steps Forward" or growth sections, calibrate how directly to frame behavior-change suggestions — without naming mindset theory or scores.`;
+}
+
 export function buildPersonalPsychometricSectionInstructions(input: {
   psychometrics: PersonalReportPsychometricScores;
   gamingCorrection: GamingCorrectionResult | null;
@@ -208,6 +278,9 @@ export function buildPersonalPsychometricSectionInstructions(input: {
 }): string {
   const { psychometrics, gamingCorrection, psychometricStraightLineFlags: flags } = input;
   const blocks = [
+    buildRsesPersonalReportInstruction(psychometrics, gamingCorrection, flags),
+    buildGaspPersonalReportInstruction(psychometrics, gamingCorrection, flags),
+    buildDweckPersonalReportInstruction(psychometrics, gamingCorrection, flags),
     buildBrsPersonalReportInstruction(psychometrics, gamingCorrection, flags),
     buildScsSfPersonalReportInstruction(psychometrics, gamingCorrection, flags),
     buildMspssPersonalReportInstruction(psychometrics, gamingCorrection, flags),
@@ -215,4 +288,60 @@ export function buildPersonalPsychometricSectionInstructions(input: {
   ].filter(Boolean);
   if (blocks.length === 0) return '';
   return `\nADDITIONAL PSYCHOMETRIC NARRATIVE INSTRUCTIONS (personal full report only):\n${blocks.join('\n\n')}`;
+}
+
+/** Plain-language summaries for structural psychometric_integration field (not instrument names in output). */
+export function buildPopulatedPsychometricPlainLanguageBlock(input: {
+  aaq2Score: number | null;
+  psychometrics: PersonalReportPsychometricScores;
+  gamingCorrection: GamingCorrectionResult | null;
+  psychometricStraightLineFlags: string[];
+}): string {
+  const { psychometrics, gamingCorrection, flags } = {
+    psychometrics: input.psychometrics,
+    gamingCorrection: input.gamingCorrection,
+    flags: input.psychometricStraightLineFlags,
+  };
+  const lines: string[] = [];
+
+  const aaq2 = input.aaq2Score;
+  if (aaq2 != null && Number.isFinite(aaq2)) {
+    const band =
+      aaq2 <= 14
+        ? 'high psychological flexibility'
+        : aaq2 <= 24
+          ? 'moderate psychological flexibility'
+          : aaq2 <= 34
+            ? 'mild experiential avoidance'
+            : aaq2 <= 44
+              ? 'significant experiential avoidance'
+              : 'severe experiential avoidance';
+    lines.push(`- Experiential avoidance / emotion relationship (AAQ-II band): ${band}`);
+  }
+
+  const extractBand = (block: string | null): string | null => {
+    if (!block) return null;
+    const m = block.match(/Profile suggests ([^.]+)\./i) ?? block.match(/:\n([^\n]+)/);
+    return m?.[1]?.trim() ?? block.split('\n').find((l) => l.trim().length > 20)?.trim() ?? null;
+  };
+
+  const entries: Array<[string, string | null]> = [
+    ['Self-worth pattern (RSES)', extractBand(buildRsesPersonalReportInstruction(psychometrics, gamingCorrection, flags))],
+    ['Harm-response tendency (GASP)', extractBand(buildGaspPersonalReportInstruction(psychometrics, gamingCorrection, flags))],
+    ['Learning orientation (Dweck)', extractBand(buildDweckPersonalReportInstruction(psychometrics, gamingCorrection, flags))],
+    ['Resilience (BRS)', extractBand(buildBrsPersonalReportInstruction(psychometrics, gamingCorrection, flags))],
+    ['Self-compassion (SCS-SF)', extractBand(buildScsSfPersonalReportInstruction(psychometrics, gamingCorrection, flags))],
+    ['Perceived support (MSPSS)', extractBand(buildMspssPersonalReportInstruction(psychometrics, gamingCorrection, flags))],
+    ['Reflective depth (RFQ)', extractBand(buildRfqPersonalReportInstruction(psychometrics, gamingCorrection, flags))],
+  ];
+
+  for (const [label, summary] of entries) {
+    if (summary) lines.push(`- ${label}: ${summary}`);
+  }
+
+  if (lines.length === 0) {
+    return 'POPULATED PSYCHOMETRIC LENSES: none available (all instruments null or flagged unreliable).';
+  }
+
+  return `POPULATED PSYCHOMETRIC LENSES (REQUIRED for psychometric_integration when any non-AAQ2 instrument below is present — weave ONE OR MORE into narrative in plain language; never name instruments or scores to reader):\n${lines.join('\n')}`;
 }

@@ -142,8 +142,15 @@ export type ValidationFlowStep =
   | 'welcome'
   | 'partner_email'
   | 'pre_assessment'
+  | 'relationship_test_mode'
   | 'psychometrics'
   | 'report';
+
+export function needsRelationshipTestModeStep(
+  record: RelationshipValidationRecord | null,
+): boolean {
+  return record?.relationship_test_mode == null;
+}
 
 export async function resolveValidationFlowStep(
   userId: string,
@@ -151,6 +158,7 @@ export async function resolveValidationFlowStep(
 ): Promise<ValidationFlowStep> {
   if (!record?.welcome_completed_at) return 'welcome';
   if (!record.partner_email_entered) return 'partner_email';
+  if (needsRelationshipTestModeStep(record)) return 'relationship_test_mode';
   if (!record.pre_assessment) return 'pre_assessment';
   const psychometricsDone = await isValidationPsychometricsComplete(userId);
   if (!psychometricsDone) return 'psychometrics';
@@ -163,6 +171,8 @@ export async function resolveValidationFlowStepAfterPartnerSwitch(
 ): Promise<ValidationFlowStep> {
   const comparison = await fetchValidationComparison(comparisonId);
   if (!comparison) return 'partner_email';
+  const record = await fetchRelationshipValidationRecord(userId);
+  if (needsRelationshipTestModeStep(record)) return 'relationship_test_mode';
   if (!comparison.pre_assessment) return 'pre_assessment';
   const psychometricsDone = await isValidationPsychometricsComplete(userId);
   if (!psychometricsDone) return 'psychometrics';

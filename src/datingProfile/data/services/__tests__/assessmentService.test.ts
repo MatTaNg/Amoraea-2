@@ -4,6 +4,7 @@ import {
   getNextAssessmentStepMeta,
   getNextInstrument,
   getPreviousInstrument,
+  isDatingProfileTypologyBatteryComplete,
   lastTypologyBatteryInstrument,
 } from '@/data/services/assessmentService';
 
@@ -35,5 +36,19 @@ describe('dating profile ASSESSMENT_IDS', () => {
       nextTitle: null,
       nextMeta: null,
     });
+  });
+
+  it('detects when all four relationship questionnaires are already saved', () => {
+    expect(isDatingProfileTypologyBatteryComplete([])).toBe(false);
+    expect(
+      isDatingProfileTypologyBatteryComplete(['SEXUAL_COMMUNICATION', 'PVQ-21', 'CONFLICT-30']),
+    ).toBe(false);
+    expect(isDatingProfileTypologyBatteryComplete([...ASSESSMENT_IDS])).toBe(true);
+    expect(
+      isDatingProfileTypologyBatteryComplete([
+        ...ASSESSMENT_IDS,
+        'BFI-2',
+      ]),
+    ).toBe(true);
   });
 });

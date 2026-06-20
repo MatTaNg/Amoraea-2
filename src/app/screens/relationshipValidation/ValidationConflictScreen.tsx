@@ -1,4 +1,4 @@
-import React, { useCallback, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   View,
   Text,
@@ -14,6 +14,10 @@ import { CONFLICT_STYLE_PAIRS } from '@/data/assessments/instruments/conflictSty
 import type { ConflictStyleKey } from '@/data/assessments/instruments/conflictStyleTypes';
 import { shufflePair } from '@/data/assessments/instruments/conflictStyleShuffle';
 import { saveConflictStyleCompletion } from '@/data/services/conflictStyleService';
+import type { RelationshipValidationTestMode } from '@features/relationshipValidation/constants';
+import { fetchRelationshipTestMode } from '@features/relationshipValidation/relationshipValidationRepo';
+import { reframePlatonicAssessmentStem } from '@features/relationshipValidation/platonicAssessmentReframe';
+import { useAssessmentScrollContent } from '@utilities/assessmentMobileLayout';
 
 type Props = {
   navigation: {
@@ -22,18 +26,39 @@ type Props = {
 };
 
 export function ValidationConflictScreen({ navigation }: Props) {
+  const scrollContentStyle = useAssessmentScrollContent();
   const { user } = useAuth();
   const [currentIndex, setCurrentIndex] = useState(0);
   const [answers, setAnswers] = useState<
     Record<number, { style: ConflictStyleKey; selectedOptionIndex: number }>
   >({});
   const [saving, setSaving] = useState(false);
+  const [testMode, setTestMode] = useState<RelationshipValidationTestMode | null>(null);
+  const [testModeLoading, setTestModeLoading] = useState(true);
   const selectionInFlightRef = useRef<number | null>(null);
 
   const sessionSeed = useMemo(
     () => (user?.id || 'anon').split('').reduce((acc, ch) => acc + ch.charCodeAt(0), 0),
     [user?.id],
   );
+
+  useEffect(() => {
+    if (!user?.id) {
+      setTestModeLoading(false);
+      return;
+    }
+    let cancelled = false;
+    void fetchRelationshipTestMode(user.id)
+      .then((mode) => {
+        if (!cancelled) setTestMode(mode);
+      })
+      .finally(() => {
+        if (!cancelled) setTestModeLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [user?.id]);
 
   const pair = CONFLICT_STYLE_PAIRS[currentIndex];
   const shuffled = useMemo(
@@ -94,7 +119,7 @@ export function ValidationConflictScreen({ navigation }: Props) {
     }, 200);
   };
 
-  if (!pair || !shuffled) {
+  if (!pair || !shuffled || testModeLoading) {
     return (
       <View style={styles.overlay}>
         <ActivityIndicator size="large" color="#5BA8E8" />
@@ -103,22 +128,25 @@ export function ValidationConflictScreen({ navigation }: Props) {
   }
 
   const progress = ((currentIndex + 1) / total) * 100;
+  const prompt = reframePlatonicAssessmentStem(pair.prompt, testMode);
+  const optionA = reframePlatonicAssessmentStem(shuffled.first.text, testMode);
+  const optionB = reframePlatonicAssessmentStem(shuffled.second.text, testMode);
 
   return (
     <SafeAreaView style={styles.container} edges={['top', 'left', 'right']}>
       <View style={styles.track}>
         <View style={[styles.fill, { width: `${progress}%` }]} />
       </View>
-      <ScrollView contentContainerStyle={styles.scroll}>
+      <ScrollView contentContainerStyle={scrollContentStyle}>
         <Text style={styles.meta}>
           Conflict style · Situation {currentIndex + 1} of {total}
         </Text>
-        <Text style={styles.prompt}>{pair.prompt}</Text>
+        <Text style={styles.prompt}>{prompt}</Text>
         <Pressable style={styles.option} onPress={() => onSelect(0)} disabled={saving}>
-          <Text style={styles.optionText}>{shuffled.first.text}</Text>
+          <Text style={styles.optionText}>{optionA}</Text>
         </Pressable>
         <Pressable style={styles.option} onPress={() => onSelect(1)} disabled={saving}>
-          <Text style={styles.optionText}>{shuffled.second.text}</Text>
+          <Text style={styles.optionText}>{optionB}</Text>
         </Pressable>
         <Pressable onPress={goBack} disabled={saving} style={styles.backBtn}>
           <Text style={styles.backText}>← Back</Text>
@@ -137,7 +165,6 @@ const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: '#05060D' },
   track: { height: 4, backgroundColor: 'rgba(82,142,220,0.15)' },
   fill: { height: 4, backgroundColor: '#5BA8E8' },
-  scroll: { padding: 24, maxWidth: 560, alignSelf: 'center', width: '100%' },
   meta: { color: '#5BA8E8', marginBottom: 12, fontSize: 13 },
   prompt: { color: '#E8F0F8', fontSize: 18, lineHeight: 26, marginBottom: 20 },
   option: {

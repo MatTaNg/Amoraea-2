@@ -3,6 +3,11 @@ import {
   USER_INTERVIEW_ROUTING_TABLE,
   USER_LOGIN_ROUTING_SELECT,
 } from '@data/supabase/userInterviewRoutingSelect';
+import {
+  attemptIndicatesInterviewSessionFinished,
+  finalizeInterviewAttemptForRouting,
+  reconcileUnfinalizedInterviewAttemptForUser,
+} from '@features/interview/finalizeInterviewAttemptForRouting';
 
 import type { InterviewStackRoute } from './resolveInitialInterviewRoute';
 export { NPI_ENTITLEMENT_ENABLED, PSYCHOMETRICS_ENABLED } from './psychometricsFeatureFlags';
@@ -62,12 +67,25 @@ export async function resolveInterviewCompletedForUser(
   if (!interviewCompleted && latestAttemptId) {
     const { data: attemptRow } = await supabase
       .from('interview_attempts')
-      .select('completed_at')
+      .select(
+        'completed_at, transcript, is_phantom, scenario_1_scores, scenario_2_scores, scenario_3_scores',
+      )
       .eq('id', latestAttemptId)
       .eq('user_id', userId)
       .maybeSingle();
 
     interviewCompleted = !!attemptRow?.completed_at;
+    if (
+      !interviewCompleted &&
+      attemptRow &&
+      attemptIndicatesInterviewSessionFinished(attemptRow)
+    ) {
+      interviewCompleted = await finalizeInterviewAttemptForRouting(userId, latestAttemptId);
+    }
+  }
+
+  if (!interviewCompleted) {
+    interviewCompleted = await reconcileUnfinalizedInterviewAttemptForUser(userId);
   }
 
   return interviewCompleted;

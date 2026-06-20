@@ -6,6 +6,7 @@ import { PickerField } from '@ui/components/PickerField';
 import { colors } from '@ui/theme/colors';
 import { spacing } from '@ui/theme/spacing';
 import { getHumanDesign, setHumanDesign, HumanDesignData } from '@utilities/storage/HumanDesignStorage';
+import { maxBirthYearForMinimumAge } from '@/shared/utils/ageCalculator';
 
 const MONTHS = [
   { value: '01', label: 'January' },
@@ -27,10 +28,15 @@ const DAYS = Array.from({ length: 31 }, (_, i) => ({
   label: String(i + 1),
 }));
 
-const YEARS = Array.from({ length: 71 }, (_, i) => {
-  const y = 1955 + i;
-  return { value: String(y), label: String(y) };
-}).reverse();
+const BIRTH_YEAR_MIN = 1955;
+
+const YEARS = Array.from(
+  { length: maxBirthYearForMinimumAge() - BIRTH_YEAR_MIN + 1 },
+  (_, i) => {
+    const y = BIRTH_YEAR_MIN + i;
+    return { value: String(y), label: String(y) };
+  },
+).reverse();
 
 const HOURS = Array.from({ length: 24 }, (_, i) => ({
   value: String(i).padStart(2, '0'),

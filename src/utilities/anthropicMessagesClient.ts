@@ -31,7 +31,21 @@ function getResolvedSupabaseUrl(): string {
   return configured.replace(/\/+$/, '');
 }
 
-export const CLAUDE_SONNET_MODEL = 'claude-sonnet-4-6';
+export const DEFAULT_CLAUDE_SONNET_MODEL = 'claude-sonnet-4-6';
+
+/** Retired Sonnet 4 snapshots that return HTTP 404 from Anthropic. */
+const RETIRED_SONNET_MODELS: Record<string, string> = {
+  'claude-sonnet-4-20250514': DEFAULT_CLAUDE_SONNET_MODEL,
+  'claude-sonnet-4-0': DEFAULT_CLAUDE_SONNET_MODEL,
+};
+
+export function resolveAnthropicSonnetModel(requested?: string): string {
+  const trimmed = requested?.trim() ?? '';
+  if (!trimmed) return DEFAULT_CLAUDE_SONNET_MODEL;
+  return RETIRED_SONNET_MODELS[trimmed] ?? trimmed;
+}
+
+export const CLAUDE_SONNET_MODEL = DEFAULT_CLAUDE_SONNET_MODEL;
 
 export function getAnthropicEndpoint(): string {
   const configured = getPublicEnv('EXPO_PUBLIC_ANTHROPIC_PROXY_URL', 'anthropicProxyUrl');

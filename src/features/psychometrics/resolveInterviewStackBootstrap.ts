@@ -3,6 +3,10 @@ import { resolveStandardPostInterviewStackRoute } from '@utilities/postInterview
 
 import { PSYCHOMETRICS_ENABLED } from './psychometricsFeatureFlags';
 import type { ValidationStandardReturnRoute } from '@features/relationshipValidation/validationShellRouting';
+import {
+  mapInterviewStackRouteForLaunchMode,
+  standardApplicantPostInterviewDestination,
+} from '@features/onboarding/postInterviewLaunchMode';
 
 import type { InitialInterviewRouteResult, InterviewStackRoute } from './resolveInitialInterviewRoute';
 
@@ -24,6 +28,7 @@ export function shouldFetchPostInterviewDeferralSnapshot(
     initialRoute?.screen === 'PostInterviewPassed' ||
     initialRoute?.screen === 'PostInterviewFailed' ||
     initialRoute?.screen === 'PostInterview' ||
+    initialRoute?.screen === 'PostInterviewLaunch' ||
     profileShowsStandardInterviewComplete
   );
 }
@@ -64,7 +69,7 @@ export function resolveInterviewStackBootstrap(input: {
 
   if (profileShowsStandardInterviewComplete && (initialRouteName === 'Aria' || initialRouteName === 'AssessmentWelcome')) {
     if (!PSYCHOMETRICS_ENABLED) {
-      initialRouteName = 'PostInterview';
+      initialRouteName = standardApplicantPostInterviewDestination();
       interviewAlreadyCompleted = true;
       legacyPsychometricsMode = false;
     }
@@ -92,10 +97,12 @@ export function resolveInterviewStackBootstrap(input: {
   }
 
   if (validationStandardReturnRoute) {
-    initialRouteName = validationStandardReturnRoute;
+    initialRouteName = mapInterviewStackRouteForLaunchMode(validationStandardReturnRoute);
     interviewAlreadyCompleted = true;
     legacyPsychometricsMode = false;
   }
+
+  initialRouteName = mapInterviewStackRouteForLaunchMode(initialRouteName);
 
   return {
     initialRouteName,

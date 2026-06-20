@@ -312,8 +312,12 @@ async function bootstrapWebAuthFromUrl(): Promise<void> {
   const searchParams = new URLSearchParams(search.startsWith('?') ? search.slice(1) : search);
   const code = searchParams.get('code');
   if (code) {
+    const explicitRecovery = hasExplicitRecoveryAuthContext(search, hash);
     const recoveryHash = hasRecoveryAuthHash(hash, { pathname, search });
-    if (!recoveryHash) {
+    if (explicitRecovery) {
+      passwordRecoveryPendingRef.current = true;
+      markPasswordResetPendingInStorage();
+    } else if (!recoveryHash) {
       normalizeWebEmailConfirmationUrl();
       await supabase.auth.signOut();
       clearPasswordResetPendingInStorage();
@@ -339,6 +343,13 @@ async function bootstrapWebAuthFromUrl(): Promise<void> {
         });
         window.history.replaceState(null, '', '/');
       }
+    } else if (passwordRecoveryPendingRef.current) {
+      setSnapshot({
+        passwordRecoveryPending: true,
+        passwordRecoveryLinkError: null,
+        emailConfirmationLinkError: null,
+      });
+      window.history.replaceState(null, '', AUTH_PASSWORD_RESET_PATH);
     }
     return;
   }
@@ -373,7 +384,14 @@ async function bootstrapWebAuthFromUrl(): Promise<void> {
         });
         window.history.replaceState(null, '', '/');
       }
-    } else if (!isRecovery) {
+    } else if (isRecovery) {
+      setSnapshot({
+        passwordRecoveryPending: true,
+        passwordRecoveryLinkError: null,
+        emailConfirmationLinkError: null,
+      });
+      window.history.replaceState(null, '', AUTH_PASSWORD_RESET_PATH);
+    } else {
       clearPasswordResetPendingInStorage();
       passwordRecoveryPendingRef.current = false;
       setSnapshot({
@@ -390,6 +408,14 @@ async function bootstrapWebAuthFromUrl(): Promise<void> {
     if (isEmailConfirmationCallback()) {
       clearPasswordResetPendingInStorage();
       passwordRecoveryPendingRef.current = false;
+    } else if (hasRecoveryAuthHash(hash, { pathname, search })) {
+      passwordRecoveryPendingRef.current = true;
+      markPasswordResetPendingInStorage();
+      setSnapshot({
+        passwordRecoveryPending: true,
+        passwordRecoveryLinkError: null,
+        emailConfirmationLinkError: null,
+      });
     }
     await applySessionFromUrlHash(hash);
   }
@@ -495,7 +521,7 @@ function startAuthInitOnce(): Promise<void> {
           webAuthCallbackAtLoadRef.current = false;
           skipSessionSync = true;
           void supabase.auth.signOut();
-        } else if (authBootstrapCompleteRef.current) {
+        } else if (explicitRecovery) {
           passwordRecoveryPendingRef.current = true;
           setSnapshot({
             passwordRecoveryPending: true,
@@ -506,7 +532,13 @@ function startAuthInitOnce(): Promise<void> {
           webAuthCallbackAtLoadRef.current = false;
         }
       } else if (event === 'SIGNED_IN' && webAuthCallbackAtLoadRef.current) {
-        if (!passwordRecoveryPendingRef.current) {
+        if (passwordRecoveryPendingRef.current) {
+          setSnapshot({
+            passwordRecoveryPending: true,
+            passwordRecoveryLinkError: null,
+            emailConfirmationLinkError: null,
+          });
+        } else {
           clearPasswordResetPendingInStorage();
           setSnapshot({
             passwordRecoveryPending: false,

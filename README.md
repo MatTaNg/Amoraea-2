@@ -94,7 +94,11 @@ EXPO_PUBLIC_SUPABASE_ANON_KEY=your_supabase_anon_key
 # Optional — email confirmation redirect (defaults: dev http://localhost:8081/, prod https://www.amoraea.com/)
 # EXPO_PUBLIC_AUTH_REDIRECT_URL_DEV=http://localhost:8081/
 # EXPO_PUBLIC_AUTH_REDIRECT_URL=https://www.amoraea.com/
+# Proxy URLs (recommended for web) — see docs/PWA_DEPLOYMENT.md
+# EXPO_PUBLIC_ANTHROPIC_PROXY_URL=https://YOUR_PROJECT_REF.supabase.co/functions/v1/anthropic-proxy
 ```
+
+**API keys (OpenAI, Anthropic, ElevenLabs):** store in **Supabase Edge Function secrets**, not in `EXPO_PUBLIC_*`. Local `.env` may use unprefixed names (`ANTHROPIC_API_KEY`, etc.) for scripts only. Full split: [docs/PWA_DEPLOYMENT.md](docs/PWA_DEPLOYMENT.md).
 
 In **Supabase → Authentication → URL Configuration**, set **Site URL** to your deployed web app **root origin only** (e.g. `https://www.amoraea.com/` — **not** `/welcome` or `/auth/reset-password`). Under **Redirect URLs**, add **`https://www.amoraea.com/auth/confirm`**, `https://www.amoraea.com/auth/reset-password`, legacy paths if needed (`/confirm-email`, `/reset-password`), and your other origins (e.g. `https://www.amoraea.com/**`). Signup confirmation emails use `emailRedirectTo` `/auth/confirm`; if that URL is missing from the allowlist, Supabase falls back to Site URL and users may land on the wrong page (including the reset-password screen).
 
@@ -194,10 +198,19 @@ npm run test:watch
 
 ## Environment Variables
 
-Required environment variables:
+**Netlify (web app build)** — safe to expose in the browser bundle:
 
-- `EXPO_PUBLIC_SUPABASE_URL`: Your Supabase project URL
-- `EXPO_PUBLIC_SUPABASE_ANON_KEY`: Your Supabase anonymous key
+- `EXPO_PUBLIC_SUPABASE_URL` — Supabase project URL
+- `EXPO_PUBLIC_SUPABASE_ANON_KEY` — Supabase anonymous key
+- `EXPO_PUBLIC_ANTHROPIC_PROXY_URL` — Anthropic Edge Function URL (recommended)
+- `EXPO_PUBLIC_AUTH_REDIRECT_URL` / `EXPO_PUBLIC_AUTH_REDIRECT_URL_DEV` — OAuth callbacks
+- Optional: `EXPO_PUBLIC_AUDOS_*`
+
+**Supabase (Edge Function secrets)** — never `EXPO_PUBLIC_*`:
+
+- `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `ELEVENLABS_API_KEY`, `RESEND_API_KEY`
+
+Do **not** put provider API keys in Netlify env vars. See [docs/PWA_DEPLOYMENT.md](docs/PWA_DEPLOYMENT.md) for the full checklist and deploy flow.
 
 ## Limitations and Future Work
 

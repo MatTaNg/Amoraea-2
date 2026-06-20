@@ -42,6 +42,10 @@ function scenarioScoresMeaningfulOrAbsent(raw: unknown): boolean {
   return scenarioScoresMeaningful(raw);
 }
 
+export function interviewAttemptRollupPersisted(row: AttemptScoringRow | null | undefined): boolean {
+  return rowHasFullScoringPayload(row);
+}
+
 function rowHasFullScoringPayload(row: AttemptScoringRow | null | undefined): boolean {
   if (!row) return false;
   if (row.completed_at == null || row.completed_at === '') return false;

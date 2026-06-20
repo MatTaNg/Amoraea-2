@@ -29,8 +29,8 @@ The browser blocks direct calls to `api.anthropic.com` from your app (CORS). Thi
      ```
      EXPO_PUBLIC_ANTHROPIC_PROXY_URL=https://YOUR_PROJECT_REF.supabase.co/functions/v1/anthropic-proxy
      ```
-   - The app already sends your Supabase anon key (`EXPO_PUBLIC_SUPABASE_ANON_KEY`) as `Authorization: Bearer ...` when calling this URL — required so Supabase doesn’t return 401.
-   - Restart the Expo dev server.
+   - Add the same URL to **Netlify** environment variables for production builds (see `docs/PWA_DEPLOYMENT.md`).
+   - Store `ANTHROPIC_API_KEY` in Supabase secrets only — **not** `EXPO_PUBLIC_ANTHROPIC_API_KEY`.
 
 ---
 

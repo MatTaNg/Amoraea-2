@@ -7,6 +7,19 @@ const corsHeaders = {
 
 const OPENAI_PROXY_TIMEOUT_MS = 180_000;
 
+/** Strip accidental quotes/newlines from dashboard or PowerShell `secrets set` pastes. */
+function normalizeOpenAiApiKey(raw: string | undefined): string | undefined {
+  if (!raw) return undefined;
+  let key = raw.trim();
+  if (
+    (key.startsWith('"') && key.endsWith('"')) ||
+    (key.startsWith("'") && key.endsWith("'"))
+  ) {
+    key = key.slice(1, -1).trim();
+  }
+  return key.length > 0 ? key : undefined;
+}
+
 Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') {
     return new Response(null, { status: 204, headers: corsHeaders });
@@ -19,7 +32,7 @@ Deno.serve(async (req) => {
     });
   }
 
-  const apiKey = Deno.env.get('OPENAI_API_KEY')?.trim();
+  const apiKey = normalizeOpenAiApiKey(Deno.env.get('OPENAI_API_KEY'));
   if (!apiKey) {
     return new Response(
       JSON.stringify({

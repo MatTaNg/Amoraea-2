@@ -77,11 +77,17 @@ export function buildMentalizingAsymmetryNote(profile: PersonalReportMentalizing
     profile.moment4 != null ? profile.moment4.toFixed(0) : 'lower on self-directed reflection';
   const m4Evidence = profile.keyEvidence.moment4?.trim();
   const evidenceHint = m4Evidence ? ` Scorer note on your self-reflection moment: "${m4Evidence.slice(0, 220)}".` : '';
+  const scenarioReadLanguage =
+    profile.scenarioAverage != null && profile.scenarioAverage >= 7
+      ? "you read others' inner worlds with solid accuracy in fictional scenarios"
+      : profile.scenarioAverage != null && profile.scenarioAverage >= 6
+        ? 'you show competent, developing reads of others in fictional scenarios'
+        : "your scenario reads are moderate (Level-1-tagged bands) — competent at reading behavior, not uniformly strong or precise";
   return (
     `Other-directed mentalizing (reading fictional scenarios) averaged ~${scenarioAvg} across scenarios, ` +
     `while self-directed mentalizing on your personal grudge/reflection moment scored ${m4} — a gap of ${gap.toFixed(0)}+ points.${evidenceHint} ` +
-    `When this gap is present, name it explicitly: you read others' inner worlds with real precision, ` +
-    `but turn that same quality of attention toward your own experience less often — without averaging the gap away into uniform praise.`
+    `When this gap is present, name it explicitly: ${scenarioReadLanguage}, ` +
+    `but turn that same quality of attention toward your own experience less often — without averaging the gap away into uniform praise or "strong, accurate empathy in every scenario."`
   );
 }
 

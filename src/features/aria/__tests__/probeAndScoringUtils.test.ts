@@ -617,6 +617,34 @@ describe('probeAndScoringUtils', () => {
       ).toBe(true);
     });
 
+    it('skips when user echoes line without contraction (ASR: you made that really clear)', () => {
+      expect(
+        evaluateScenarioAQ1ContemptProbePreProbeSkip(
+          'Emma was being condescending with her statement. You made that really clear.',
+        ),
+      ).toEqual({ skip: true, reason: 'literal_quote_present' });
+    });
+
+    it('session transcript with condescending + her statement + you made that really clear skips contempt probe', () => {
+      const answer =
+        "Ryan should not have taken a 25-minute call during their date. That was very disrespectful. He should have set proper boundaries with his mother, told his mother he'll call her back, and committed to it. And Emma was being a bit condescending with her statement. You made that really clear. She's clearly really frustrated and is hiding it. So maybe this has happened before and she's kind of resigned. That's what I'm getting from Emma.";
+      expect(evaluateScenarioAQ1ContemptProbePreProbeSkip(answer).skip).toBe(true);
+      expect(hasScenarioAQ1ContemptProbeCoverage(answer)).toBe(true);
+    });
+
+    it('emma statement / emma words phrasing counts as closing-line engagement with register read', () => {
+      expect(
+        evaluateScenarioAQ1ContemptProbePreProbeSkip(
+          "Emma's statement was condescending — she's resigned and not really asking Ryan to change.",
+        ).skip,
+      ).toBe(true);
+      expect(
+        hasScenarioAQ1ContemptProbeCoverage(
+          "Emma's words were cutting and dismissive when she shut the conversation down.",
+        ),
+      ).toBe(true);
+    });
+
     it('made + that very clear in proximity skips', () => {
       expect(
         evaluateScenarioAQ1ContemptProbePreProbeSkip(

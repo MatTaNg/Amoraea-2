@@ -6,6 +6,24 @@ import {
   sliceTranscriptBeforeScenarioCToPersonalHandoff,
 } from './probeAndScoringUtils';
 
+export type DepthModifierWordCountSource = 'live_transcript' | 'cached' | 'retry_recomputed';
+export type LevelTagQaNote = {
+  marker: 'mentalizing' | 'attunement';
+  issue: 'level_tag_inferred_programmatically' | 'confidence_only_evidence_replaced';
+  inferred_level?: 1 | 2;
+};
+
+export type ResponseDepthModifierMeta = {
+  avg_words_per_turn_calculated: number;
+  word_count_source: DepthModifierWordCountSource;
+  depth_modifier_threshold: number;
+  depth_modifier_applied: boolean;
+  depth_modifier_applied_markers: string[];
+  depth_modifier_anomaly?: boolean;
+  /** Internal QA only — never written into keyEvidence. */
+  level_tag_qa?: LevelTagQaNote[];
+};
+
 const INTERNAL_STATE_CUES =
   /\b(feel|felt|feeling|feels|afraid|fear|feared|scared|hurt|hurting|need|needs|lonely|ashamed|overwhelm|vulnerable|embarrassed|wonder(?:ed|ing)?|maybe (?:he|she|they)|what (?:might|could|does)|internal|subjectively)\b/i;
 
@@ -25,20 +43,104 @@ const COMPENSATORY_WITHOUT_EMOTIONAL_CORE =
 const REPAIR_EMOTIONAL_DEPTH_CUES =
   /\b(acknowledge|felt\s+like|comes\s+second|matter(?:s|ed)?|priorit|rupture|hurt|impact|need|emotion|meaning|relationship|listen(?:ed|ing)?\s+to\s+(?:her|him|them))\b/i;
 
+function isConfidenceOnlyEvidence(ev: string | undefined): boolean {
+  if (!ev) return false;
+  const t = ev.trim().toLowerCase();
+  return t === 'high' || t === 'moderate' || t === 'low' || t === 'not_assessed';
+}
+
+function declaredLevelFromEvidence(ev: string | undefined): 1 | 2 | null {
+  if (!ev || typeof ev !== 'string') return null;
+  const m = /^\s*Level\s*(1|2)\b/i.exec(ev.trim());
+  return m ? (Number(m[1]) as 1 | 2) : null;
+}
+
+function inferInteriorLevel(userTranscript: string, substantiveEvidence: string): 1 | 2 {
+  const ev = substantiveEvidence.trim();
+  const combined = `${ev} ${userTranscript}`.trim();
+  if (DIAGNOSTIC_TYPING_PATTERN.test(combined) && !INTERNAL_STATE_CUES.test(ev)) return 1;
+  if (
+    /\b(questioning whether|what this means|emotional texture|unspoken|felt experience|internal conflict|flooded|shame|matters to (?:her|him|them)|read as indifference)\b/i.test(
+      ev,
+    )
+  ) {
+    return 2;
+  }
+  if (INTERNAL_STATE_CUES.test(ev) && ev.length > 25) return 2;
+  if (INTERNAL_STATE_CUES.test(userTranscript) && ev.length > 15) return 2;
+  return 1;
+}
+
+function truncateTranscriptSnippet(text: string, max = 240): string {
+  const t = text.replace(/\s+/g, ' ').trim();
+  return t.length > max ? `${t.slice(0, max)}…` : t;
+}
+
+function stripLegacyLevelTagLeak(ev: string): string {
+  return ev
+    .split('|')
+    .map((p) => p.trim())
+    .filter((p) => !/Level tag missing/i.test(p))
+    .join(' | ')
+    .trim();
+}
+
+function ensureLevelTaggedKeyEvidence(
+  marker: 'mentalizing' | 'attunement',
+  rawEvidence: string | undefined,
+  userTranscript: string,
+  qaNotes: LevelTagQaNote[],
+): string {
+  let ev = stripLegacyLevelTagLeak((rawEvidence ?? '').trim());
+  if (isConfidenceOnlyEvidence(ev)) {
+    qaNotes.push({ marker, issue: 'confidence_only_evidence_replaced' });
+    ev = '';
+  }
+  if (ev && evidenceAbsentForResponseDepthModifier(ev)) {
+    qaNotes.push({
+      marker,
+      issue: 'level_tag_inferred_programmatically',
+      inferred_level: 1,
+    });
+    return `Level 1 — ${ev.replace(/^\s*Level\s*[12]\s*[—–-]\s*/i, '').trim()}`;
+  }
+  const declared = declaredLevelFromEvidence(ev);
+  if (declared != null) {
+    return ev;
+  }
+  const inferred = inferInteriorLevel(userTranscript, ev);
+  qaNotes.push({
+    marker,
+    issue: 'level_tag_inferred_programmatically',
+    inferred_level: inferred,
+  });
+  if (typeof console !== 'undefined' && console.warn) {
+    console.warn(
+      `[LevelTagQA] scenario ${marker}: model omitted Level prefix; inferred Level ${inferred} (internal QA only)`,
+    );
+  }
+  const body =
+    ev ||
+    (userTranscript.trim()
+      ? `User (scenario slice): "${truncateTranscriptSnippet(userTranscript)}"`
+      : 'Insufficient assessable evidence in model output.');
+  const stripped = body.replace(/^\s*Level\s*[12]\s*[—–-]\s*/i, '').trim();
+  return `Level ${inferred} — ${stripped}`;
+}
+
+function normalizeMentalizingAttunementLevelTags(
+  keyEvidence: Record<string, string>,
+  userTranscript: string,
+  qaNotes: LevelTagQaNote[],
+): void {
+  for (const marker of ['mentalizing', 'attunement'] as const) {
+    keyEvidence[marker] = ensureLevelTaggedKeyEvidence(marker, keyEvidence[marker], userTranscript, qaNotes);
+  }
+}
+
 function evidenceOpensWithLevel1(ev: string | undefined): boolean {
   if (!ev || typeof ev !== 'string') return false;
   return /^\s*Level\s*1\b/i.test(ev.trim());
-}
-
-function annotateMissingLevelTag(keyEvidence: Record<string, string>, marker: 'mentalizing' | 'attunement'): void {
-  const ev = keyEvidence[marker];
-  if (ev == null || typeof ev !== 'string') return;
-  const trimmed = ev.trim();
-  if (/^\s*Level\s*[12]\b/i.test(trimmed)) return;
-  keyEvidence[marker] = mergeEvidence(
-    ev,
-    'Level tag missing — prefix keyEvidence with Level 1 — or Level 2 — per behavioral vs interior rubric.',
-  );
 }
 
 function enforceDeclaredLevel1VersusNumericScore(
@@ -46,6 +148,7 @@ function enforceDeclaredLevel1VersusNumericScore(
   keyEvidence: Record<string, string>,
   marker: 'mentalizing' | 'attunement',
 ): void {
+  if (evidenceAbsentForResponseDepthModifier(keyEvidence[marker])) return;
   if (!evidenceOpensWithLevel1(keyEvidence[marker])) return;
   capAt(
     pillarScores,
@@ -89,22 +192,13 @@ function subtractOne(
   keyEvidence[marker] = mergeEvidence(keyEvidence[marker], note);
 }
 
-export type DepthModifierWordCountSource = 'live_transcript' | 'cached' | 'retry_recomputed';
-export type ResponseDepthModifierMeta = {
-  avg_words_per_turn_calculated: number;
-  word_count_source: DepthModifierWordCountSource;
-  depth_modifier_threshold: number;
-  depth_modifier_applied: boolean;
-  depth_modifier_applied_markers: string[];
-  depth_modifier_anomaly?: boolean;
-};
-
 function buildDepthModifierMeta(
   avgWordsPerUserTurn: number,
   threshold: number,
   wordCountSource: DepthModifierWordCountSource,
   appliedMarkers: string[],
   communicationAvgResponseLength?: number | null,
+  levelTagQa?: LevelTagQaNote[],
 ): ResponseDepthModifierMeta {
   const depthModifierApplied = appliedMarkers.length > 0;
   return {
@@ -113,6 +207,7 @@ function buildDepthModifierMeta(
     depth_modifier_threshold: threshold,
     depth_modifier_applied: depthModifierApplied,
     depth_modifier_applied_markers: appliedMarkers,
+    ...(levelTagQa && levelTagQa.length > 0 ? { level_tag_qa: levelTagQa } : {}),
     ...(depthModifierApplied && (communicationAvgResponseLength ?? 0) > 60
       ? { depth_modifier_anomaly: true }
       : {}),
@@ -245,6 +340,7 @@ export function applyElaborationAbsencePenaltiesToScenarioScores(
 } {
   const ps: Record<string, number | null | undefined> = { ...pillarScores };
   const ke: Record<string, string> = { ...(keyEvidence ?? {}) };
+  const levelTagQa: LevelTagQaNote[] = [];
   const depthEvidenceBaseline: Record<string, string | undefined> = { ...ke };
   const t = userTurnsJoinedText.replace(/\s+/g, ' ').trim();
   const threshold = options?.depthModifierThreshold ?? 25;
@@ -289,10 +385,9 @@ export function applyElaborationAbsencePenaltiesToScenarioScores(
     );
   }
 
+  normalizeMentalizingAttunementLevelTags(ke, t, levelTagQa);
   enforceDeclaredLevel1VersusNumericScore(ps, ke, 'mentalizing');
   enforceDeclaredLevel1VersusNumericScore(ps, ke, 'attunement');
-  annotateMissingLevelTag(ke, 'mentalizing');
-  annotateMissingLevelTag(ke, 'attunement');
 
   if (maybeSubtractOneForShortSliceInsufficientEvidence(ps, ke, 'mentalizing', avgWordsPerUserTurn, threshold, depthEvidenceBaseline)) {
     appliedMarkers.push('mentalizing');
@@ -313,6 +408,7 @@ export function applyElaborationAbsencePenaltiesToScenarioScores(
       options?.wordCountSource ?? 'live_transcript',
       appliedMarkers,
       options?.communicationAvgResponseLength,
+      levelTagQa,
     ),
   };
 }

@@ -18,6 +18,7 @@ import {
   resolveReportGateNarrativeTier,
   composeNarrativeCalibration,
 } from '../src/features/reports/narrativeCalibration';
+import { REPORT_NARRATIVE_TOKEN_BUDGETS } from '../src/utilities/reportNarrativeGeneration';
 
 const CLAUDE_SONNET_MODEL = 'claude-sonnet-4-6';
 
@@ -138,7 +139,7 @@ async function callAnthropic(system: string, userPrompt: string): Promise<string
     },
     body: JSON.stringify({
       model: CLAUDE_SONNET_MODEL,
-      max_tokens: 2500,
+      max_tokens: REPORT_NARRATIVE_TOKEN_BUDGETS.personal_full_report.initial,
       system,
       messages: [{ role: 'user', content: userPrompt }],
     }),

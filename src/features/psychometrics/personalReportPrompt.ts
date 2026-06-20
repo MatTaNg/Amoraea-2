@@ -5,9 +5,43 @@ import {
 import {
   buildPersonalInterviewEvidenceBlock,
   composeNarrativeCalibration,
+  getSectionDistinctnessInstructions,
+  REPORT_NARRATE_INSTRUMENT_OPTIONS,
+  shouldNarrateInstrument,
 } from '@features/reports/narrativeCalibration';
-import { buildPersonalPsychometricSectionInstructions } from './personalReportPsychometricSections';
+import {
+  getMarkdownStructuralEnforcementInstructions,
+  listPopulatedNarrativeInstrumentLabels,
+  listPopulatedNonAaq2NarrativeInstrumentLabels,
+} from '@features/reports/reportNarrativeStructuralEnforcement';
+import { buildScenarioScoreGroundingContextBlock } from '@features/reports/scenarioScoreGrounding';
+import {
+  detectEvidenceConflicts,
+  getReportTransparencyPromptInstructions,
+} from '@features/reports/reportTransparency';
+import { buildPersonalPsychometricSectionInstructions, buildPopulatedPsychometricPlainLanguageBlock } from './personalReportPsychometricSections';
 import type { ReportData } from './personalReportData';
+import type { StructuralValidationContext } from '@features/reports/reportNarrativeStructuralEnforcement';
+
+export function buildPersonalReportStructuralValidationContext(
+  data: ReportData,
+): StructuralValidationContext {
+  const instrumentInput = {
+    aaq2Score: data.user.aaq2Score,
+    rsesScore: data.user.rsesScore,
+    psychometrics: data.user.psychometrics,
+    gamingCorrection: data.attempt?.gamingCorrection ?? null,
+    psychometricStraightLineFlags: data.user.psychometricStraightLineFlags,
+  };
+  return {
+    scenarioScoreGrounding: data.attempt?.scenarioScoreGrounding ?? null,
+    populatedNonAaq2InstrumentLabels: listPopulatedNonAaq2NarrativeInstrumentLabels(
+      instrumentInput,
+      { ignoreGamingCorrection: true },
+    ),
+    requirePsychometricIntegration: true,
+  };
+}
 
 export type { PersonalReportMentalizingProfile, ReportData } from './personalReportData';
 
@@ -151,17 +185,20 @@ export function buildReportPrompt(data: ReportData): string {
   })();
 
   const mentalizingNarrativeInstructions = mentalizingAsymmetryNote
-    ? `MENTALIZING ASYMMETRY (MANDATORY): ${mentalizingAsymmetryNote} In Relational Strengths or Where You Have Room to Grow, explicitly distinguish your strong other-directed perspective-taking (fictional scenarios) from comparatively thinner self-directed mentalizing on your personal reflection — name this gap as the genuine insight. Do NOT collapse this into uniform praise like "you mentalize strongly across the board" or "with notable consistency."`
-    : 'MENTALIZING: If scenario-level and personal-moment mentalizing are similar, you may describe mentalizing as a general strength. Do not invent an asymmetry that is not supported by the profile.';
+    ? `MENTALIZING ASYMMETRY (MANDATORY): ${mentalizingAsymmetryNote} In Relational Strengths or Where You Have Room to Grow, explicitly distinguish other-directed perspective-taking (fictional scenarios) from comparatively thinner self-directed mentalizing on your personal reflection — name this gap as the genuine insight. Match scenario language to actual score bands — do NOT collapse into uniform praise like "you mentalize strongly across the board," "strong, accurate empathy in every scenario," or "with notable consistency" when scenario scores are moderate (5–6).`
+    : 'MENTALIZING: If scenario-level and personal-moment mentalizing are similar, you may describe mentalizing as a general strength. Do not invent an asymmetry that is not supported by the profile. Match superlative language to score bands (7+ only for "strong/accurate").';
 
-  const narrativeCalibration = composeNarrativeCalibration({
-    finalGatePass: attempt?.finalGatePass,
-    gateFailReasons: attempt?.gateFailReasons ?? [],
-    gamingCorrection: attempt?.gamingCorrection ?? null,
-    pillarScores: attempt?.pillarScores ?? null,
-    aaq2Score: user.aaq2Score,
-    modifiedWeightedScore: attempt?.finalScore,
-  });
+  const narrativeCalibration = composeNarrativeCalibration(
+    {
+      finalGatePass: attempt?.finalGatePass,
+      gateFailReasons: attempt?.gateFailReasons ?? [],
+      gamingCorrection: attempt?.gamingCorrection ?? null,
+      pillarScores: attempt?.pillarScores ?? null,
+      aaq2Score: user.aaq2Score,
+      modifiedWeightedScore: attempt?.finalScore,
+    },
+    { includePsychometricLens: true },
+  );
 
   const mentalizingProfileBlock = mp
     ? `- Mentalizing profile (for narrative calibration — do not quote numbers to the reader): scenario readings averaged ${mp.scenarioAverage != null ? `~${mp.scenarioAverage.toFixed(1).replace(/\.0$/, '')}` : 'n/a'}; personal self-reflection moment ${mp.moment4 ?? 'not scored'}; holistic rollup band ${pillarBand(pillars?.mentalizing)}${mp.keyEvidence.moment4 ? `; personal-moment scorer note: "${mp.keyEvidence.moment4.slice(0, 220)}"` : ''}`
@@ -201,14 +238,55 @@ export function buildReportPrompt(data: ReportData): string {
     psychometricStraightLineFlags: user.psychometricStraightLineFlags,
   });
 
+  const psychometricPlainLanguageBlock = buildPopulatedPsychometricPlainLanguageBlock({
+    aaq2Score: user.aaq2Score,
+    psychometrics: user.psychometrics,
+    gamingCorrection: attempt?.gamingCorrection ?? null,
+    psychometricStraightLineFlags: user.psychometricStraightLineFlags,
+  });
+
+  const scenarioScoreGroundingBlock =
+    attempt?.scenarioScoreGrounding != null
+      ? buildScenarioScoreGroundingContextBlock(attempt.scenarioScoreGrounding)
+      : '';
+
+  const gamingCorrection = attempt?.gamingCorrection ?? null;
+  const straightLineFlags = user.psychometricStraightLineFlags;
+  // RSES is excluded from the base profile block (not just the second-pass
+  // enrichment sections) when straight-line flagged or gaming-correction-stripped.
+  // Confirmed gap: this field was previously always included unconditionally,
+  // meaning a flagged-unreliable score could still surface in or contradict
+  // other report narrative even though the suppression helper existed and was
+  // correctly applied elsewhere. Exclusion happens at data-assembly time so the
+  // model never sees the unreliable number, rather than relying on the model to
+  // voluntarily disregard a contradictory value it was shown.
+  const rsesLine = shouldNarrateInstrument(
+    user.rsesScore,
+    'rses',
+    gamingCorrection,
+    straightLineFlags,
+    REPORT_NARRATE_INSTRUMENT_OPTIONS,
+  )
+    ? `- Self-esteem and self-worth: ${rsesInterp}`
+    : null;
+
+  const selfAssessmentLines = [
+    `- Psychological flexibility / relationship with emotions: ${aaq2Interp}`,
+    rsesLine,
+    `- Self-awareness orientation: ${scsInterp}`,
+  ]
+    .filter(Boolean)
+    .join('\n');
+
+  const evidenceConflicts = detectEvidenceConflicts(data);
+  const transparencyInstructions = getReportTransparencyPromptInstructions(evidenceConflicts);
+
   return `Generate a comprehensive personal development report addressed directly to the reader in second person ("you/your") based on the following assessment profile. The report should be detailed, specific, and feel genuinely insightful — not generic. It should be approximately 1200-1800 words.
 
 ASSESSMENT PROFILE:
 
 SELF-ASSESSMENTS:
-- Psychological flexibility / relationship with emotions: ${aaq2Interp}
-- Self-esteem and self-worth: ${rsesInterp}
-- Self-awareness orientation: ${scsInterp}
+${selfAssessmentLines}
 
 RELATIONAL INTELLIGENCE FROM AI INTERVIEW:
 - Repair capacity (ability to acknowledge ruptures and initiate healing): ${pillarBand(pillars?.repair)}
@@ -228,11 +306,29 @@ DEEPER BEHAVIORAL SIGNALS:
 - Emotional vocabulary when discussing personal experience: ${vocabInterp}
 - Psychological defense patterns observed: ${activeDefenses || 'none detected'}
 - Overcertainty in understanding others: ${overcertaintyInterp}
-${mentalizingProfileBlock ? `${mentalizingProfileBlock}\n` : ''}${moment5ProfileBlock ? `${moment5ProfileBlock}\n` : ''}${interviewEvidenceBlock ? `\n${interviewEvidenceBlock}\n` : ''}
+${mentalizingProfileBlock ? `${mentalizingProfileBlock}\n` : ''}${moment5ProfileBlock ? `${moment5ProfileBlock}\n` : ''}${interviewEvidenceBlock ? `\n${interviewEvidenceBlock}\n` : ''}${scenarioScoreGroundingBlock ? `\n${scenarioScoreGroundingBlock}\n` : ''}${psychometricPlainLanguageBlock ? `\n${psychometricPlainLanguageBlock}\n` : ''}
 NARRATIVE CALIBRATION (follow exactly):
 ${narrativeCalibration}
 ${underdisclosureNarrativeInstructions}
 ${mentalizingNarrativeInstructions}${psychometricSectionInstructions}
+
+${transparencyInstructions}
+
+${getSectionDistinctnessInstructions('personal_full')}
+
+${getMarkdownStructuralEnforcementInstructions(
+  listPopulatedNarrativeInstrumentLabels(
+    {
+      aaq2Score: user.aaq2Score,
+      rsesScore: user.rsesScore,
+      psychometrics: user.psychometrics,
+      gamingCorrection: attempt?.gamingCorrection ?? null,
+      psychometricStraightLineFlags: user.psychometricStraightLineFlags,
+    },
+    { ignoreGamingCorrection: true },
+  ),
+  { includePsychometrics: true },
+)}
 
 Write the report with exactly these sections. Every section's body prose must use second person ("you/your") — never third person for the reader.
 
@@ -243,7 +339,7 @@ Write the report with exactly these sections. Every section's body prose must us
 Write 3-4 strengths. For each strength use a ### heading with a meaningful name (not generic like "Strength 1"). Write 3-4 sentences per strength explaining what this capacity looks like in you, why it matters in relationships, and how it showed up in your assessment. Be concrete — ground each strength in at least one keyEvidence observation from the evidence block when available. If mentalizing asymmetry applies, one strength should reflect other-directed perspective-taking; do not pretend self-directed mentalizing is equally strong unless the profile supports it.
 
 ## Where You Have Room to Grow
-Write 2-3 growth areas. For each use a ### heading. Write 3-4 sentences per area being honest about the pattern, what it tends to create in your relationships, and what growth looks like without being prescriptive or harsh. Ground accountability and self-reflection observations in M5 keyEvidence when present — M5 is your own first-person conflict account and should anchor those sections. Apply the underdisclosure tier rules above. If mentalizing asymmetry applies, include turning self-directed curiosity toward your own experience as a growth edge grounded in the actual gap.
+Write 2-3 growth areas. For each use a ### heading. Write 3-4 sentences per area being honest about the pattern, what it tends to create in your relationships, and what growth looks like without being prescriptive or harsh. Before finalizing each growth paragraph, audit ALL scenario scorer notes, M5 keyEvidence, holistic bands, and relevant self-report lens data — reframe if slice-level evidence contradicts a uniform-weakness template. Ground accountability and self-reflection observations in M5 keyEvidence when present — M5 is your own first-person conflict account and should anchor those sections. Surface self-correcting or accountability moments from M5 in a strength or nuance subsection when present. Apply the underdisclosure tier rules above. If mentalizing asymmetry applies, include turning self-directed curiosity toward your own experience as a growth edge grounded in the actual gap.
 
 ## Your Relationship Style
 2-3 paragraphs describing how you tend to show up in relationships — how you communicate, how you handle conflict, what you need from a partner, and what patterns you are likely to bring. Rich character portrait drawing from the full profile. Second person only.

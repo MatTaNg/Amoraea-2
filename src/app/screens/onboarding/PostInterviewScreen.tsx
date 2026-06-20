@@ -36,6 +36,7 @@ import { useInterviewAttemptEgoRepair } from '@features/aria/hooks/useInterviewA
 import { DownloadPersonalReportButton } from '@features/psychometrics/DownloadPersonalReportButton';
 import { PreparingResultsView } from '@app/screens/PreparingResultsView';
 import { useRedirectRelationshipValidationFromStandardPostInterview } from '@features/relationshipValidation/validationPostInterviewRouting';
+import { useRedirectPostInterviewLaunchWhenEnabled } from '@features/onboarding/postInterviewLaunchMode';
 import { ValidationFlowOptInCard } from '@features/relationshipValidation/ValidationFlowOptInCard';
 
 const BG = '#0a0a0f';
@@ -175,6 +176,7 @@ export const PostInterviewScreen: React.FC<{ navigation: any; route: { params: {
   const queryClient = useQueryClient();
   const { user } = useAuth();
   const userId = route.params?.userId ?? '';
+  useRedirectPostInterviewLaunchWhenEnabled(navigation, userId);
   const { isRedirecting: validationRedirecting } =
     useRedirectRelationshipValidationFromStandardPostInterview(userId);
   const isAdminEmail = isAmoraeaAdminConsoleEmail(user?.email ?? '');

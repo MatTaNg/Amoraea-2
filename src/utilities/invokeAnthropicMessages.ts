@@ -13,6 +13,8 @@ export type AnthropicMessagesPayload = {
 
 export type AnthropicMessagesResponse = {
   content?: Array<{ text?: string }>;
+  stop_reason?: string;
+  usage?: { input_tokens?: number; output_tokens?: number };
 };
 
 /**

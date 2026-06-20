@@ -1,5 +1,8 @@
 import { supabase } from '@data/supabase/client';
+import { resolvePillarScoresForNarrativeFromAttempt } from '@features/aria/resolvePillarScoresForNarrative';
 import { fetchMostRecentCompletedInterviewAttemptId } from '@features/psychometrics/interviewCompletionStatus';
+import { finalizeInterviewOnlyGateForAttempt } from '@features/psychometrics/finalizeInterviewOnlyGate';
+import { kickClientInterviewNarrativeIfPending } from '@utilities/kickClientInterviewNarrativeIfPending';
 
 export const INTERVIEW_REPORT_PILLAR_KEYS = [
   'repair',
@@ -60,32 +63,112 @@ export function readPillarScore(
   return typeof v === 'number' && Number.isFinite(v) ? v : null;
 }
 
-export async function loadInterviewReportAttempt(
-  userId: string,
-  attemptId?: string | null,
-): Promise<InterviewReportAttempt | null> {
-  const resolvedId = attemptId ?? (await fetchMostRecentCompletedInterviewAttemptId(userId));
-  if (!resolvedId) return null;
+const INTERVIEW_REPORT_ATTEMPT_SELECT = `
+  id,
+  weighted_score,
+  modified_weighted_score,
+  modified_weighted_score_with_psychometrics,
+  final_gate_pass,
+  passed,
+  gate_fail_reasons,
+  psychometric_modifier_applied,
+  corrected_psychometric_modifier,
+  reasoning_pending,
+  ai_reasoning,
+  pillar_scores,
+  gate_result_finalized_at,
+  transcript,
+  scenario_1_scores,
+  scenario_2_scores,
+  scenario_3_scores,
+  scenario_specific_patterns,
+  skip_count,
+  ego_development_level,
+  language_markers,
+  defense_patterns,
+  disclosure_calibration,
+  mentalizing_overcertainty_count,
+  skip_penalty_total,
+  auto_failed,
+  moment_4_concreteness,
+  moment_5_concreteness,
+  personal_moment_emotional_vocab_density,
+  personal_moment_emotional_vocab_low
+` as const;
 
-  const { data, error } = await supabase
-    .from('interview_attempts')
-    .select(
-      'id, weighted_score, modified_weighted_score, modified_weighted_score_with_psychometrics, final_gate_pass, passed, gate_fail_reasons, psychometric_modifier_applied, corrected_psychometric_modifier, reasoning_pending, ai_reasoning, pillar_scores, gate_result_finalized_at',
-    )
-    .eq('id', resolvedId)
-    .eq('user_id', userId)
-    .maybeSingle();
+export type InterviewAttemptPillarSourceRow = {
+  pillar_scores?: unknown;
+  transcript?: unknown;
+  scenario_1_scores?: unknown;
+  scenario_2_scores?: unknown;
+  scenario_3_scores?: unknown;
+  scenario_specific_patterns?: unknown;
+  weighted_score?: number | null;
+  skip_count?: number | string | null;
+  ego_development_level?: unknown;
+  language_markers?: unknown;
+  defense_patterns?: unknown;
+  disclosure_calibration?: unknown;
+  mentalizing_overcertainty_count?: number | null;
+  skip_penalty_total?: number | null;
+  auto_failed?: boolean | null;
+  moment_4_concreteness?: unknown;
+  moment_5_concreteness?: unknown;
+  personal_moment_emotional_vocab_density?: number | null;
+  personal_moment_emotional_vocab_low?: boolean | null;
+  passed?: boolean | null;
+};
 
-  if (error || !data) return null;
+/** Stored holistic pillars, or rollup from saved scenario/moment slices when inserts lag behind. */
+export function resolveAttemptPillarScoresForReport(
+  row: InterviewAttemptPillarSourceRow,
+): Record<string, number> | null {
+  const stored = normalizePillarScores(row.pillar_scores);
+  if (stored) return stored;
+  const resolution = resolvePillarScoresForNarrativeFromAttempt(row, row.passed === true);
+  if (resolution && Object.keys(resolution.pillar_scores).length > 0) {
+    return resolution.pillar_scores;
+  }
+  return averagePillarScoresFromScenarioBundles(row);
+}
 
+function averagePillarScoresFromScenarioBundles(
+  row: InterviewAttemptPillarSourceRow,
+): Record<string, number> | null {
+  const sums = new Map<string, number[]>();
+  for (const scenarioKey of ['scenario_1_scores', 'scenario_2_scores', 'scenario_3_scores'] as const) {
+    const bundle = normalizePillarScores(row[scenarioKey]);
+    if (!bundle) continue;
+    for (const [key, value] of Object.entries(bundle)) {
+      if (!Number.isFinite(value)) continue;
+      const bucket = sums.get(key) ?? [];
+      bucket.push(value);
+      sums.set(key, bucket);
+    }
+  }
+  if (sums.size === 0) return null;
+  const out: Record<string, number> = {};
+  for (const [key, values] of sums.entries()) {
+    out[key] = values.reduce((acc, n) => acc + n, 0) / values.length;
+  }
+  return Object.keys(out).length > 0 ? out : null;
+}
+
+function mapInterviewReportAttemptRow(data: Record<string, unknown>): InterviewReportAttempt {
   const aiReasoning =
     data.ai_reasoning != null && typeof data.ai_reasoning === 'object' && !Array.isArray(data.ai_reasoning)
       ? (data.ai_reasoning as Record<string, unknown>)
       : null;
+  const pillarSource = data as InterviewAttemptPillarSourceRow;
+  const resolvedPillars = resolveAttemptPillarScoresForReport(pillarSource);
+  const rollup = resolvePillarScoresForNarrativeFromAttempt(pillarSource, data.passed === true);
 
   return {
-    id: data.id,
-    weighted_score: typeof data.weighted_score === 'number' ? data.weighted_score : null,
+    id: String(data.id),
+    weighted_score:
+      typeof data.weighted_score === 'number'
+        ? data.weighted_score
+        : (rollup?.weighted_score ?? null),
     modified_weighted_score:
       typeof data.modified_weighted_score === 'number' ? data.modified_weighted_score : null,
     modified_weighted_score_with_psychometrics:
@@ -93,7 +176,7 @@ export async function loadInterviewReportAttempt(
         ? data.modified_weighted_score_with_psychometrics
         : null,
     final_gate_pass: typeof data.final_gate_pass === 'boolean' ? data.final_gate_pass : null,
-    passed: typeof data.passed === 'boolean' ? data.passed : null,
+    passed: typeof data.passed === 'boolean' ? data.passed : (rollup?.passed ?? null),
     gate_fail_reasons: asStringArray(data.gate_fail_reasons),
     psychometric_modifier_applied:
       typeof data.psychometric_modifier_applied === 'number' ? data.psychometric_modifier_applied : null,
@@ -103,8 +186,52 @@ export async function loadInterviewReportAttempt(
         : null,
     reasoning_pending: data.reasoning_pending === true,
     ai_reasoning: aiReasoning,
-    pillar_scores: normalizePillarScores(data.pillar_scores),
+    pillar_scores: resolvedPillars,
     gate_result_finalized_at:
       typeof data.gate_result_finalized_at === 'string' ? data.gate_result_finalized_at : null,
   };
+}
+
+/** Persist rollup / kick narrative backup when the partial-report screen loads. */
+export async function refreshInterviewReportAttemptForPartialReport(
+  userId: string,
+): Promise<InterviewReportAttempt | null> {
+  const row = await loadInterviewReportAttempt(userId);
+  if (!row?.id) return row;
+
+  const needsPersistedRollup = row.pillar_scores == null || row.weighted_score == null;
+  if (needsPersistedRollup) {
+    await finalizeInterviewOnlyGateForAttempt(userId, row.id);
+  }
+
+  const refreshed = (await loadInterviewReportAttempt(userId)) ?? row;
+
+  if (refreshed.reasoning_pending) {
+    void kickClientInterviewNarrativeIfPending(
+      userId,
+      refreshed.id,
+      'interview_complete_partial_report',
+    );
+  }
+
+  return refreshed;
+}
+
+export async function loadInterviewReportAttempt(
+  userId: string,
+  attemptId?: string | null,
+): Promise<InterviewReportAttempt | null> {
+  const resolvedId = attemptId ?? (await fetchMostRecentCompletedInterviewAttemptId(userId));
+  if (!resolvedId) return null;
+
+  const { data, error } = await supabase
+    .from('interview_attempts')
+    .select(INTERVIEW_REPORT_ATTEMPT_SELECT)
+    .eq('id', resolvedId)
+    .eq('user_id', userId)
+    .maybeSingle();
+
+  if (error || !data) return null;
+
+  return mapInterviewReportAttemptRow(data as Record<string, unknown>);
 }

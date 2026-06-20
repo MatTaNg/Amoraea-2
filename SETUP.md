@@ -19,6 +19,8 @@ EXPO_PUBLIC_SUPABASE_ANON_KEY=your-anon-key-here
 
 Get these values from your Supabase project settings → API.
 
+For AI features (reports, interview, TTS), add proxy URLs and Supabase secrets — **not** `EXPO_PUBLIC_*` API keys. See [docs/PWA_DEPLOYMENT.md](docs/PWA_DEPLOYMENT.md).
+
 ### 3. Set Up Supabase Database
 
 1. Open your Supabase project dashboard
@@ -69,8 +71,13 @@ Then press:
 
 ### "Missing Supabase environment variables"
 - Make sure `.env` file exists in the root directory
-- Verify variable names start with `EXPO_PUBLIC_`
+- Verify client variables use `EXPO_PUBLIC_SUPABASE_URL` and `EXPO_PUBLIC_SUPABASE_ANON_KEY`
 - Restart the Expo dev server after creating `.env`
+
+### Report / AI "invalid API key" on production
+- Provider keys belong in **Supabase Edge Function secrets**, not Netlify `EXPO_PUBLIC_*` vars
+- Redeploy Netlify after removing leaked `EXPO_PUBLIC_OPENAI_API_KEY` (or similar) from site env
+- See [docs/PWA_DEPLOYMENT.md](docs/PWA_DEPLOYMENT.md)
 
 ### "Failed to fetch profile"
 - Check that RLS policies are set up correctly

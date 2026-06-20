@@ -109,7 +109,6 @@ export const BirthDetailsModal: React.FC<BirthDetailsModalProps> = ({
             label="Birth Date *"
             value={birthDate}
             onValueChange={onBirthDateChange}
-            maxYear={new Date().getFullYear() - 18}
           />
 
           <TimePicker

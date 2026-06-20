@@ -30,6 +30,35 @@ describe('computeAvgUserWordsPerTurnScenario', () => {
 });
 
 describe('applyElaborationAbsencePenaltiesToScenarioScores', () => {
+  it('does not leak Level tag missing into keyEvidence when model omits prefix', () => {
+    const out = applyElaborationAbsencePenaltiesToScenarioScores(
+      1,
+      'She feels upset because he keeps prioritizing work.',
+      { mentalizing: 6, attunement: 6, repair: 6 },
+      { mentalizing: 'high', attunement: 'User notes she is upset.' },
+      40,
+    );
+    expect(out.keyEvidence.mentalizing).not.toMatch(/Level tag missing/i);
+    expect(out.keyEvidence.attunement).not.toMatch(/Level tag missing/i);
+    expect(out.keyEvidence.mentalizing).toMatch(/^Level [12] —/);
+    expect(out.keyEvidence.attunement).toMatch(/^Level [12] —/);
+    expect(out.depthModifierMeta.level_tag_qa?.length).toBeGreaterThan(0);
+  });
+
+  it('infers Level 1 and caps score when model omits tag and evidence is behavioral only', () => {
+    const out = applyElaborationAbsencePenaltiesToScenarioScores(
+      1,
+      'He walked away and came back later.',
+      { mentalizing: 8, attunement: 7, repair: 6 },
+      { mentalizing: 'User describes what Daniel did.', attunement: 'She was upset.' },
+      40,
+    );
+    expect(out.pillarScores.mentalizing).toBe(5);
+    expect(out.pillarScores.attunement).toBe(5);
+    expect(out.keyEvidence.mentalizing).toMatch(/^Level 1 —/);
+    expect(out.keyEvidence.attunement).toMatch(/^Level 1 —/);
+  });
+
   it('caps mentalizing at 5 for diagnostic label without internal-state language (Level 1)', () => {
     const text =
       'She is dismissive avoidant here — she walks away when he asks for time.';

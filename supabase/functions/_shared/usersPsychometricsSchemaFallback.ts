@@ -1,6 +1,6 @@
 /** Bridge unmigrated DBs (NARQ-S columns) and migrated DBs (SD3 narcissism columns). */
 
-import type { PsychometricFloorUserScores } from './psychometricFloorBreaches';
+import type { PsychometricFloorUserScores } from './psychometricFloorBreaches.ts';
 // type-only import — avoids circular dependency with psychometricFloorBreaches runtime
 
 /** PostgREST / SQL `numeric` often arrives as string — floors must coerce before `Number.isFinite` checks. */

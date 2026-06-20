@@ -26,19 +26,34 @@ function getExpoPublicOpenAiKey(): string | undefined {
 }
 
 type OpenAiCompletionResponse = {
-  choices?: Array<{ message?: { content?: string } }>;
+  choices?: Array<{
+    message?: { content?: string };
+    finish_reason?: string;
+  }>;
+  usage?: { prompt_tokens?: number; completion_tokens?: number; total_tokens?: number };
   error?: { message?: string };
 };
 
-function parseOpenAiCompletionResponse(data: OpenAiCompletionResponse): string {
+export type OpenAiChatWithMetaResult = {
+  text: string;
+  finishReason: string | null;
+  usage: { prompt_tokens?: number; completion_tokens?: number } | null;
+};
+
+function parseOpenAiCompletionResponse(data: OpenAiCompletionResponse): OpenAiChatWithMetaResult {
   if (data.error?.message) {
     throw new Error(data.error.message);
   }
-  const text = data.choices?.[0]?.message?.content?.trim();
+  const choice = data.choices?.[0];
+  const text = choice?.message?.content?.trim();
   if (!text) {
     throw new Error('No content returned from OpenAI');
   }
-  return text;
+  return {
+    text,
+    finishReason: choice?.finish_reason ?? null,
+    usage: data.usage ?? null,
+  };
 }
 
 async function getEdgeFunctionAuthHeaders(): Promise<Record<string, string>> {
@@ -64,7 +79,7 @@ function edgeProxyNotDeployedMessage(): string {
   );
 }
 
-async function invokeOpenAiViaProxyFetch(payload: OpenAiChatPayload): Promise<string> {
+async function invokeOpenAiViaProxyFetch(payload: OpenAiChatPayload): Promise<OpenAiChatWithMetaResult> {
   const endpoint = getOpenAiChatProxyEndpoint();
   if (!endpoint || endpoint.includes('api.openai.com')) {
     throw new Error(edgeProxyNotDeployedMessage());
@@ -111,7 +126,7 @@ async function invokeOpenAiViaProxyFetch(payload: OpenAiChatPayload): Promise<st
   return parseOpenAiCompletionResponse(data);
 }
 
-async function invokeOpenAiViaFunctionsInvoke(payload: OpenAiChatPayload): Promise<string> {
+async function invokeOpenAiViaFunctionsInvoke(payload: OpenAiChatPayload): Promise<OpenAiChatWithMetaResult> {
   const { data, error } = await supabase.functions.invoke<OpenAiCompletionResponse>(
     'openai-chat-proxy',
     { body: payload },
@@ -132,7 +147,7 @@ async function invokeOpenAiViaFunctionsInvoke(payload: OpenAiChatPayload): Promi
 async function invokeOpenAiDirectNative(
   apiKey: string,
   payload: OpenAiChatPayload,
-): Promise<string> {
+): Promise<OpenAiChatWithMetaResult> {
   const res = await fetch('https://api.openai.com/v1/chat/completions', {
     method: 'POST',
     headers: {
@@ -163,7 +178,7 @@ function mustUseEdgeProxy(): boolean {
  * Calls OpenAI chat completions for long-form report generation.
  * Browser / Expo web always uses the `openai-chat-proxy` Edge Function (never api.openai.com).
  */
-export async function invokeOpenAiChat(payload: OpenAiChatPayload): Promise<string> {
+export async function invokeOpenAiChatWithMeta(payload: OpenAiChatPayload): Promise<OpenAiChatWithMetaResult> {
   if (mustUseEdgeProxy()) {
     try {
       return await invokeOpenAiViaProxyFetch(payload);
@@ -186,4 +201,9 @@ export async function invokeOpenAiChat(payload: OpenAiChatPayload): Promise<stri
   }
 
   return invokeOpenAiViaProxyFetch(payload);
+}
+
+export async function invokeOpenAiChat(payload: OpenAiChatPayload): Promise<string> {
+  const result = await invokeOpenAiChatWithMeta(payload);
+  return result.text;
 }

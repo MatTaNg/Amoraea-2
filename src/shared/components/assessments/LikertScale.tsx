@@ -1,7 +1,6 @@
 import React from 'react';
-import { View, Pressable, Text, StyleSheet } from 'react-native';
+import { View, Pressable, Text, StyleSheet, useWindowDimensions } from 'react-native';
 
-const SCALE_CELL_W = 40;
 const SCALE_GAP = 8;
 
 export const LikertScale: React.FC<{
@@ -12,24 +11,25 @@ export const LikertScale: React.FC<{
   minLabel?: string;
   maxLabel?: string;
 }> = ({ min, max, value, onChange, minLabel, maxLabel }) => {
+  const { width } = useWindowDimensions();
+  const narrow = width < 420;
   const items: number[] = [];
   for (let i = min; i <= max; i++) items.push(i);
-  const scaleRowWidth = items.length * SCALE_CELL_W + (items.length - 1) * SCALE_GAP;
   return (
     <View style={styles.wrap}>
-      <View style={styles.row}>
+      <View style={[styles.row, narrow && styles.rowNarrow]}>
         {items.map((n) => (
           <Pressable
             key={n}
             onPress={() => onChange(n)}
-            style={[styles.dot, value === n && styles.dotOn]}
+            style={[styles.dot, narrow && styles.dotNarrow, value === n && styles.dotOn]}
           >
             <Text style={[styles.num, value === n && styles.numOn]}>{n}</Text>
           </Pressable>
         ))}
       </View>
       {(minLabel || maxLabel) && (
-        <View style={[styles.edgeLabelsRow, { width: scaleRowWidth }]}>
+        <View style={styles.edgeLabelsRow}>
           <Text style={[styles.edgeLabel, styles.edgeLabelMin]}>{minLabel ?? ''}</Text>
           <Text style={[styles.edgeLabel, styles.edgeLabelMax]}>{maxLabel ?? ''}</Text>
         </View>
@@ -42,14 +42,21 @@ const styles = StyleSheet.create({
   wrap: {
     gap: 8,
   },
-  row: { flexDirection: 'row', flexWrap: 'wrap', gap: SCALE_GAP },
+  row: { flexDirection: 'row', flexWrap: 'nowrap', gap: SCALE_GAP, width: '100%', maxWidth: 360, alignSelf: 'center' },
+  rowNarrow: { maxWidth: '100%' },
   dot: {
-    width: SCALE_CELL_W,
+    flex: 1,
+    minWidth: 32,
+    maxWidth: 44,
     paddingVertical: 10,
     borderRadius: 8,
     borderWidth: 1,
     borderColor: 'rgba(82,142,220,0.35)',
     alignItems: 'center',
+  },
+  dotNarrow: {
+    minWidth: 28,
+    paddingVertical: 8,
   },
   dotOn: { backgroundColor: 'rgba(91,168,232,0.2)', borderColor: '#5BA8E8' },
   num: { color: '#9CB4D8', fontSize: 14 },
@@ -58,7 +65,9 @@ const styles = StyleSheet.create({
   edgeLabelsRow: {
     flexDirection: 'row',
     alignItems: 'flex-start',
-    alignSelf: 'flex-start',
+    alignSelf: 'center',
+    width: '100%',
+    maxWidth: 360,
     gap: SCALE_GAP,
   },
   edgeLabel: {

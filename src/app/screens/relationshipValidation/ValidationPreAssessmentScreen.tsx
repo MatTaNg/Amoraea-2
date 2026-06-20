@@ -20,6 +20,8 @@ import {
   maybeComputeValidationPairScore,
 } from '@features/relationshipValidation/relationshipValidationService';
 
+import { useAssessmentScrollContent } from '@utilities/assessmentMobileLayout';
+
 type Props = {
   userId: string;
   navigation: { navigate: (screen: string) => void; replace: (screen: string) => void };
@@ -55,6 +57,7 @@ function SliderRow({
 }
 
 export function ValidationPreAssessmentScreen({ userId, navigation }: Props) {
+  const scrollContentStyle = useAssessmentScrollContent();
   const [duration, setDuration] = useState<string | null>(null);
   const [overallCompatibility, setOverallCompatibility] = useState(0);
   const [conflictHandling, setConflictHandling] = useState(0);
@@ -119,7 +122,7 @@ export function ValidationPreAssessmentScreen({ userId, navigation }: Props) {
 
   return (
     <SafeAreaContainer style={styles.safeBg}>
-      <ScrollView contentContainerStyle={styles.scroll} keyboardShouldPersistTaps="handled">
+      <ScrollView contentContainerStyle={scrollContentStyle} keyboardShouldPersistTaps="handled">
         <Text style={styles.title}>About your relationship</Text>
         <Text style={styles.progress}>
           {answeredCount} of 7 answered
@@ -207,13 +210,6 @@ export function ValidationPreAssessmentScreen({ userId, navigation }: Props) {
 
 const styles = StyleSheet.create({
   safeBg: { flex: 1, backgroundColor: '#05060D' },
-  scroll: {
-    padding: 24,
-    paddingBottom: 40,
-    maxWidth: 560,
-    width: '100%',
-    alignSelf: 'center',
-  },
   title: {
     fontSize: 24,
     color: '#E8F0F8',
@@ -251,11 +247,14 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     flexWrap: 'wrap',
     gap: 6,
+    width: '100%',
   },
   sliderChip: {
-    minWidth: 36,
+    flexGrow: 1,
+    flexBasis: '9%',
+    minWidth: 28,
+    maxWidth: 44,
     paddingVertical: 8,
-    paddingHorizontal: 6,
     borderRadius: 8,
     borderWidth: 1,
     borderColor: 'rgba(82, 142, 220, 0.25)',

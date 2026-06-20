@@ -14,13 +14,14 @@ import { FlameOrb } from '@app/screens/FlameOrb';
 import { useAuth } from '@/shared/hooks/AuthProvider';
 import { isAmoraeaAdminConsoleEmail } from '@/constants/adminConsole';
 import { DownloadPartialReportButton } from '@features/psychometrics/DownloadPartialReportButton';
+import { ValidationFlowOptInCard } from '@features/relationshipValidation/ValidationFlowOptInCard';
 import {
   PRE_INTERVIEW_PSYCHOMETRICS_ESTIMATED_MINUTES,
 } from '@features/psychometrics/assessmentContent';
 import { PSYCHOMETRICS_ENABLED } from '@features/psychometrics/interviewCompletionStatus';
 import type { InterviewStackRoute } from '@features/psychometrics/resolveInitialInterviewRoute';
 import {
-  loadInterviewReportAttempt,
+  refreshInterviewReportAttemptForPartialReport,
   type InterviewReportAttempt,
 } from '@features/onboarding/loadInterviewReportAttempt';
 import {
@@ -88,7 +89,7 @@ export function InterviewCompleteScreen({ navigation, route }: Props) {
 
   const refreshAttempt = useCallback(async () => {
     if (!userId) return null;
-    const row = await loadInterviewReportAttempt(userId);
+    const row = await refreshInterviewReportAttemptForPartialReport(userId);
     setAttempt(row);
     return row;
   }, [userId]);
@@ -181,6 +182,10 @@ export function InterviewCompleteScreen({ navigation, route }: Props) {
             scoringReady={scoringReady}
             variant="secondary"
           />
+        </View>
+
+        <View style={styles.compatibilitySection}>
+          <ValidationFlowOptInCard userId={userId} returnRoute="InterviewComplete" />
         </View>
 
         <View style={styles.nextStepSection}>
@@ -354,6 +359,12 @@ const styles = StyleSheet.create({
     maxWidth: 420,
     marginTop: spacing.sm,
     marginBottom: spacing.md,
+  },
+  compatibilitySection: {
+    width: '100%',
+    maxWidth: 420,
+    marginBottom: spacing.md,
+    paddingHorizontal: 4,
   },
   nextStepSection: {
     width: '100%',

@@ -161,6 +161,7 @@ import {
   ProfileIntentTab,
   type AdminUserProfileRecord,
 } from '@app/screens/admin/AdminProfileAssessmentTabs';
+import { AdminDatingProfileTab } from '@app/screens/admin/AdminDatingProfileTab';
 
 // Marker ids as stored in DB; construct keys match ai_reasoning.construct_breakdown
 const PILLAR_ROWS = [
@@ -2244,11 +2245,17 @@ function functionInvokeBodyError(data: unknown): string | null {
 
 type AdminAttemptInnerTabId =
   | 'profile_intent'
+  | 'dating_profile'
   | 'summary'
   | 'reasoning'
   | 'transcript'
   | 'depth'
   | 'full_assessment';
+
+const ADMIN_USER_LEVEL_INNER_TABS = new Set<AdminAttemptInnerTabId>([
+  'profile_intent',
+  'dating_profile',
+]);
 
 function adminDetailTabs(): { id: AdminAttemptInnerTabId; label: string }[] {
   return [
@@ -2257,6 +2264,7 @@ function adminDetailTabs(): { id: AdminAttemptInnerTabId; label: string }[] {
     { id: 'transcript', label: 'Tab 3: Transcript' },
     { id: 'depth', label: 'Tab 4: Depth Signals' },
     { id: 'profile_intent', label: 'Profile & Intent' },
+    { id: 'dating_profile', label: 'Dating Profile' },
     { id: 'full_assessment', label: 'Full Assessment' },
   ];
 }
@@ -2316,6 +2324,10 @@ function renderAdminDetailTabContent(
       );
     }
     return <ProfileIntentTab user={profileUser} />;
+  }
+
+  if (activeInnerTab === 'dating_profile') {
+    return <AdminDatingProfileTab userId={candidateUser.id} />;
   }
 
   if (!selectedAttempt) {
@@ -4613,11 +4625,11 @@ function UserDetails({
         onRefresh={onRefreshData}
       />
 
-      {attemptsLoading && activeInnerTab !== 'profile_intent' ? (
+      {attemptsLoading && !ADMIN_USER_LEVEL_INNER_TABS.has(activeInnerTab) ? (
         <View style={styles.emptyState}>
           <Text style={styles.emptyText}>Loading interview data…</Text>
         </View>
-      ) : attemptsError && activeInnerTab !== 'profile_intent' ? (
+      ) : attemptsError && !ADMIN_USER_LEVEL_INNER_TABS.has(activeInnerTab) ? (
         <View style={styles.emptyState}>
           <Text style={styles.listErrorTitle}>Could not load tests</Text>
           <Text style={styles.listErrorDetail} selectable>
@@ -4674,7 +4686,7 @@ function UserDetails({
             </View>
 
             {attempts.length === 0 &&
-            activeInnerTab !== 'profile_intent' &&
+            !ADMIN_USER_LEVEL_INNER_TABS.has(activeInnerTab) &&
             !attemptsLoading &&
             !attemptsError ? (
               <View style={styles.emptyState}>

@@ -1,10 +1,13 @@
-import { describe, expect, it } from 'vitest';
 import {
   buildInterviewEvidencePromptBlock,
   buildPersonalInterviewEvidenceBlock,
   composeNarrativeCalibration,
   getGateAwarenessCalibration,
+  getMandatoryNarrativeConnectionInstructions,
+  getSectionDistinctnessInstructions,
+  PSYCHOMETRIC_INTEGRATION_INSTRUCTION,
   resolveReportGateNarrativeTier,
+  SCENARIO_PERSONAL_PATTERN_CROSSREF_INSTRUCTION,
   shouldNarrateInstrument,
 } from '../narrativeCalibration';
 
@@ -84,7 +87,37 @@ describe('narrativeCalibration', () => {
     });
     expect(block).toMatch(/PRIORITY PRINCIPLE/i);
     expect(block).toMatch(/MECHANICS-HIDING/i);
+    expect(block).toMatch(/EVIDENCE-AWARE NARRATIVE/i);
     expect(block).not.toMatch(/PSYCHOMETRIC-ONLY CONCERN TONE/i);
+  });
+
+  it('composeNarrativeCalibration includes psychometric lens when requested', () => {
+    const block = composeNarrativeCalibration(
+      { finalGatePass: true, gateFailReasons: [] },
+      { includePsychometricLens: true },
+    );
+    expect(block).toMatch(/PSYCHOMETRIC LENS/i);
+    expect(block).toContain(PSYCHOMETRIC_INTEGRATION_INSTRUCTION);
+    expect(block).toContain(SCENARIO_PERSONAL_PATTERN_CROSSREF_INSTRUCTION);
+  });
+
+  it('composeNarrativeCalibration always includes verbatim crossref instruction', () => {
+    const block = composeNarrativeCalibration({ finalGatePass: true, gateFailReasons: [] });
+    expect(block).toContain(SCENARIO_PERSONAL_PATTERN_CROSSREF_INSTRUCTION);
+    expect(block).not.toContain(PSYCHOMETRIC_INTEGRATION_INSTRUCTION);
+  });
+
+  it('getMandatoryNarrativeConnectionInstructions includes psychometric verbatim when lens enabled', () => {
+    const block = getMandatoryNarrativeConnectionInstructions({ includePsychometricLens: true });
+    expect(block).toContain(PSYCHOMETRIC_INTEGRATION_INSTRUCTION);
+    expect(block).toContain('MANDATORY NARRATIVE CONNECTIONS');
+  });
+
+  it('getSectionDistinctnessInstructions differentiates personal full sections', () => {
+    const block = getSectionDistinctnessInstructions('personal_full');
+    expect(block).toMatch(/SECTION DISTINCTNESS/i);
+    expect(block).toMatch(/What Tends to Get in the Way/i);
+    expect(block).toMatch(/do not reintroduce the same theme/i);
   });
 
   it('shouldNarrateInstrument respects stripped instruments and straight-line flags', () => {

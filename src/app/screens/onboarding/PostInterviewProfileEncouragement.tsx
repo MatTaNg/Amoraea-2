@@ -1,7 +1,11 @@
 import React from 'react';
 import { View, Text, StyleSheet, Platform } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
-import { POST_INTERVIEW_PROFILE_BENEFITS } from '@features/onboarding/postInterviewProfileCompletion';
+import {
+  POST_INTERVIEW_PROFILE_BENEFITS,
+  POST_INTERVIEW_LAUNCH_PROFILE_BENEFITS,
+  POST_INTERVIEW_LAUNCH_PROFILE_LEAD,
+} from '@features/onboarding/postInterviewProfileCompletion';
 
 const ACCENT = '#3b82f6';
 const FONT_BODY = Platform.OS === 'web' ? "'DM Sans', system-ui, sans-serif" : undefined;
@@ -9,20 +13,29 @@ const FONT_DISPLAY = Platform.OS === 'web' ? "'Cormorant Garamond', serif" : und
 
 type Props = {
   timeEstimateLabel: string | null;
+  variant?: 'standard' | 'launch';
 };
 
 /**
- * Explains why completing the dating profile matters after passing the interview.
+ * Explains why completing the dating profile matters after the interview assessment.
  */
-export function PostInterviewProfileEncouragement({ timeEstimateLabel }: Props) {
+export function PostInterviewProfileEncouragement({
+  timeEstimateLabel,
+  variant = 'standard',
+}: Props) {
+  const isLaunch = variant === 'launch';
+  const title = isLaunch ? 'Get ahead before launch' : 'Complete your profile';
+  const lead = isLaunch
+    ? POST_INTERVIEW_LAUNCH_PROFILE_LEAD
+    : 'A few more details unlock compatibility matching, pre-event insights, and match emails.';
+  const benefits = isLaunch ? POST_INTERVIEW_LAUNCH_PROFILE_BENEFITS : POST_INTERVIEW_PROFILE_BENEFITS;
+
   return (
     <View style={styles.wrap}>
-      <Text style={styles.title}>Complete your profile</Text>
-      <Text style={styles.lead}>
-        A few more details unlock compatibility matching, pre-event insights, and match emails.
-      </Text>
+      <Text style={styles.title}>{title}</Text>
+      <Text style={styles.lead}>{lead}</Text>
       <View style={styles.benefits}>
-        {POST_INTERVIEW_PROFILE_BENEFITS.map((line) => (
+        {benefits.map((line) => (
           <View key={line} style={styles.benefitRow}>
             <Ionicons name="sparkles-outline" size={17} color={ACCENT} style={styles.benefitIcon} />
             <Text style={styles.benefitText}>{line}</Text>

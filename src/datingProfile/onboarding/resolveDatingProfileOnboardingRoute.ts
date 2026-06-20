@@ -5,8 +5,10 @@ import {
   getCompletedAssessments,
   getFirstIncompleteAssessment,
   isActiveAssessmentId,
+  isDatingProfileTypologyBatteryComplete,
   markAssessmentsStarted,
   resolveActiveAssessmentId,
+  syncProfileIfTypologyBatteryComplete,
   type AssessmentId,
 } from '@/data/services/assessmentService';
 import { modalOnboardingService } from '@/datingProfile/screens/onboarding/modals/services/modalOnboardingService';
@@ -60,10 +62,13 @@ export async function resolveDatingProfileOnboardingEntryRoute(
     return { screen: 'DatingProfileBuilder' };
   }
 
-  if (!profile?.assessmentsCompleted) {
-    const completed = await getCompletedAssessments(userId);
-    const completedList = completed.success ? completed.data : [];
+  const completed = await getCompletedAssessments(userId);
+  const completedList = completed.success ? completed.data : [];
+  const batteryComplete = isDatingProfileTypologyBatteryComplete(completedList);
 
+  if (!profile?.assessmentsCompleted && batteryComplete) {
+    await syncProfileIfTypologyBatteryComplete(userId, completedList, profile);
+  } else if (!profile?.assessmentsCompleted) {
     if (shouldShowRelationshipTypologyIntro(profile, completedList.length)) {
       return { screen: 'DatingTypologyIntro' };
     }
@@ -119,14 +124,7 @@ export async function resolvePostAssessmentsRoute(
     return { screen: 'DatingInstrument', params: { instrument: nextIncomplete } };
   }
 
-  if (!profile?.assessmentsCompleted) {
-    await profilesRepo.updateProfile(userId, {
-      assessmentsCompleted: true,
-      assessmentsCompletedAt: new Date().toISOString(),
-      currentAssessment: null,
-      currentAssessmentQuestion: null,
-    } as any);
-  }
+  await syncProfileIfTypologyBatteryComplete(userId, completedList, profile);
 
   const progress = await modalOnboardingService.getProgress(userId);
   const modalStep = progress.success ? progress.data?.currentStep : undefined;

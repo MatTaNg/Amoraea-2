@@ -4,7 +4,7 @@ import {
   moment4HasNamedOrReferencedPerson,
   moment4HasSpecificEventDescription,
 } from './moment4AnswerSignals';
-import { normalizeInterviewTypography } from './probeAndScoringUtils';
+import { normalizeInterviewTypography } from './interviewTypography';
 
 /** Moment 4 concreteness includes episodic levels plus coherent non-applicable grudge answers. */
 export type Moment4ConcretenessLevel =

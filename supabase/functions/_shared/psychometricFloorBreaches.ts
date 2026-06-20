@@ -5,8 +5,8 @@ import {
   SD3_NARCISSISM_FLOOR_THRESHOLD,
   SD3_NARCISSISM_STRAIGHT_LINE_FLAG,
   wouldTriggerSd3NarcissismFloor,
-} from './sd3NarcissismFloor';
-import { coercePsychometricScore } from './usersPsychometricsSchemaFallback';
+} from './sd3NarcissismFloor.ts';
+import { coercePsychometricScore } from './usersPsychometricsSchemaFallback.ts';
 
 export const RFQ_LOW_REFLECTIVE_FUNCTIONING_FLOOR_THRESHOLD = 2.0;
 export const RFQ_STRAIGHT_LINE_FLAG = 'rfq_straight_line';

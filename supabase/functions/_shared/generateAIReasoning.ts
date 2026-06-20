@@ -9,7 +9,23 @@ import {
   buildScoreAnchorBlock,
   prepareAIReasoningForPersistence,
 } from './aiReasoningPostProcess.ts';
-import { CLAUDE_SONNET_MODEL } from './anthropicModel.ts';
+import {
+  buildPersonalMomentEvidencePromptBlock,
+  getEvidenceAwareNarrativeInstructions,
+  getMandatoryNarrativeConnectionInstructions,
+  getAiReasoningStructuralEnforcementInstructions,
+  buildStructuralRetryUserPromptAddon,
+  validateAiReasoningStructuralEnforcement,
+  logStructuralValidationOutcome,
+  logNarrativeEvidenceAudit,
+  type NarrativeEvidenceContext,
+} from './narrativeEvidenceGuidance.ts';
+import { CLAUDE_SONNET_MODEL, resolveAnthropicSonnetModel } from './anthropicModel.ts';
+import {
+  REPORT_NARRATIVE_TOKEN_BUDGETS,
+  anthropicStoppedDueToMaxTokens,
+  logNarrativeGenerationOutcome,
+} from './reportNarrativeGeneration.ts';
 
 const ANTHROPIC_API_KEY = Deno.env.get('ANTHROPIC_API_KEY') ?? '';
 /** Full URL to anthropic-proxy, e.g. https://<ref>.supabase.co/functions/v1/anthropic-proxy */
@@ -180,6 +196,16 @@ Commitment_threshold growth_edge (strict): Never prescribe or praise movement to
 
 THIS ATTEMPT'S TRANSCRIPT ONLY (strict): Your reasoning must reference only content that appears in the transcript block provided in the user message for this assessment attempt. Treat that block as the sole source of truth about what was said. Do not reference any personal story, example, biographical detail, moment, or quote that does not appear in that transcript (verbatim or clearly the same incident in the participant's words). Do not borrow content from other attempts, prior sessions, or general inference. If you cannot find a specific moment to anchor a passage, use the strongest moment that does appear in the transcript — never invent or import one.
 
+${getEvidenceAwareNarrativeInstructions()}
+
+${getMandatoryNarrativeConnectionInstructions({ includePsychometricLens: false })}
+
+${getAiReasoningStructuralEnforcementInstructions()}
+
+SELF-CORRECTING MOMENTS (ai_reasoning JSON): When transcript or M5 scorer notes show spontaneous accountability, other-perspective-taking, or insight that complicates a dominant theme, feature it in overall_strengths (if score-gated), construct_breakdown.nuance_and_context, or scenario_observations — never bury it only in closing_reflection.
+
+GROWTH AREAS AUDIT: Before each overall_growth_areas item and each construct_breakdown.growth_edge, verify against ALL scenario bands, M4/M5 scorer notes, and transcript — reframe if slice-level evidence contradicts a uniform-weakness template.
+
 Scores use eight markers: mentalizing, accountability, contempt, repair, regulation, attunement, appreciation, commitment_threshold. Map each construct_breakdown key to the matching score from the payload. The stored **contempt** score already combines sub-signals (about 60% participant expression across moments, 40% recognition where assessed); if scenario answers used harsh character framing toward fictional people, the contempt score should reflect that — do not describe contempt as strong solely because personal-moment answers were respectful.
 
 UNASSESSED MARKERS (listed in the user payload): Treat these as not measured in this interview — missing or zero scores mean insufficient evidence, not a demonstrated deficit. For each such marker, construct_breakdown should state clearly that it was not directly assessed; do not frame it as a weakness. Do NOT name unassessed markers as growth-area themes in overall_growth_areas, readiness_assessment, or what_a_partner_would_experience. You MUST still populate overall_growth_areas with 2-3 synthesized themes from growth_edge fields of assessed markers (required for both pass and fail).
@@ -203,7 +229,8 @@ export function buildUserPrompt(
   transcript: Array<{ role: string; content?: string }>,
   weightedScore: number | null,
   passed: boolean,
-  unassessedMarkers: string[]
+  unassessedMarkers: string[],
+  evidenceContext?: NarrativeEvidenceContext | null,
 ): string {
   const fullTranscriptLines = transcript
     .filter((m) => m.role === 'user' || m.role === 'assistant')
@@ -225,6 +252,8 @@ export function buildUserPrompt(
   const pillarScoreBlock = buildPillarScoreBlock(pillarScores, weightedScore, passed);
   const authoritativeScoreRule = buildAuthoritativeScoreRule(pillarScores);
 
+  const personalMomentBlock = buildPersonalMomentEvidencePromptBlock(evidenceContext);
+
   return `
 ${scoreAnchorBlock}
 
@@ -244,6 +273,7 @@ ${JSON.stringify(unassessedMarkers, null, 2)}
 
 SCENARIO SCORES:
 ${JSON.stringify(scenarioPayload, null, 2)}
+${personalMomentBlock ? `\n${personalMomentBlock}\n` : ''}
 
 COMPLETE TRANSCRIPT FOR THIS ATTEMPT ONLY (Interviewer + Participant — use only this thread; no other context):
 ${fullTranscriptLines || '(no transcript)'}
@@ -312,7 +342,20 @@ For each construct_breakdown.where_you_struggled entry: include only observed ev
 
   "readiness_assessment": "A candid paragraph on their overall readiness for the kind of intimacy Amoraea is designed to support.",
 
-  "closing_reflection": "One final paragraph. Default: anchor on the single strongest or most revealing moment from THIS transcript (quote or close echo). Prefer one anchor over forcing a synthesis across unrelated beats. Reference a second moment only if the participant explicitly connected those ideas or they clearly share the same theme in their own words — never imply a thematic rhyme between unrelated content (e.g. colleague trust and a mentor letter) just to sound cohesive. Do not reference any story, example, or detail that does not appear in the transcript provided. If no vivid moment fits, anchor on the clearest on-topic answer that does appear. Do not invent interpretive claims ('there's something about recognizing when…') unless they said it. Do not attribute a strength to the whole interview or to 'the scenarios' when it only appeared in one moment. No evaluative trait language and no interview-performance framing: do not open with how clear, sophisticated, or impressive they were — use observational anchors ('when you described…,' 'the moment you said…,' 'what you raised about…'). Warm but do not spin low-scoring signals as strengths; if scores are broadly low, keep brief, neutral, and kind."
+  "scenario_personal_pattern_crossref": "REQUIRED. One paragraph explicitly connecting highest-scoring scenario themes to matching personal M4/M5 disclosure themes when both exist (e.g. strong avoidance read in a fictional character AND avoidance in their own account). If no mirror exists, exactly: 'Not applicable — [one-line reason].'",
+
+  "psychometric_integration": "REQUIRED. Exactly: 'none applicable — ai_reasoning payload has no populated psychometric instruments; available here: interview pillar scores and transcript only; full personal report carries GASP/RSES/Dweck/RFQ/etc.'",
+
+  "closing_reflection": "One final paragraph. Default: anchor on the single strongest or most revealing moment from THIS transcript (quote or close echo). Prefer one anchor over forcing a synthesis across unrelated beats. Reference a second moment only if the participant explicitly connected those ideas or they clearly share the same theme in their own words — never imply a thematic rhyme between unrelated content (e.g. colleague trust and a mentor letter) just to sound cohesive. Do not reference any story, example, or detail that does not appear in the transcript provided. If no vivid moment fits, anchor on the clearest on-topic answer that does appear. Do not invent interpretive claims ('there's something about recognizing when…') unless they said it. Do not attribute a strength to the whole interview or to 'the scenarios' when it only appeared in one moment. No evaluative trait language and no interview-performance framing: do not open with how clear, sophisticated, or impressive they were — use observational anchors ('when you described…,' 'the moment you said…,' 'what you raised about…'). Warm but do not spin low-scoring signals as strengths; if scores are broadly low, keep brief, neutral, and kind.",
+
+  "_narrative_evidence_map": {
+    "overall_summary": ["list slice ids used, e.g. scenario_2/mentalizing, moment_5/accountability"],
+    "overall_strengths": ["slice/marker per strength paragraph"],
+    "overall_growth_areas": ["slice/marker per growth item — must reflect full evidence audit"],
+    "construct_breakdown.mentalizing": ["slices cited"],
+    "construct_breakdown.accountability": ["slices cited"],
+    "closing_reflection": ["primary transcript/moment anchor"]
+  }
 }`;
 }
 
@@ -342,6 +385,9 @@ export interface AIReasoningResult {
   language_and_style_observations?: string;
   what_a_partner_would_experience?: string;
   readiness_assessment?: string;
+  scenario_personal_pattern_crossref?: string;
+  psychometric_integration?: string;
+  psychometric_integration_notes?: string;
   closing_reflection?: string;
 }
 
@@ -349,6 +395,7 @@ export interface AIReasoningResult {
 export type GenerateAIReasoningOptions = {
   perAttemptTimeoutMs?: number;
   maxAttempts?: number;
+  evidenceContext?: NarrativeEvidenceContext | null;
 };
 
 /** Long prompts + max_tokens; stay under single-invocation ~150s wall clock when maxAttempts is 1. */
@@ -392,12 +439,35 @@ export async function generateAIReasoning(
     transcript,
     weightedScore,
     passed,
-    unassessedMarkers
+    unassessedMarkers,
+    options?.evidenceContext,
   );
 
+  const sliceIds = [1, 2, 3]
+    .filter((n) => scenarioScores[n])
+    .map((n) => ({ id: `scenario_${n}`, label: `Scenario ${n}` }));
+  if (options?.evidenceContext?.moment5Profile) {
+    sliceIds.push({ id: 'moment_5', label: 'Personal conflict (M5)' });
+  }
+  logNarrativeEvidenceAudit('ai_reasoning', sliceIds);
+
+  console.log('[NarrativePrompt] live interpolated prompt verification', {
+    pipeline: 'ai_reasoning',
+    charCount: SYSTEM_PROMPT.length + userPrompt.length,
+    hasScenarioPersonalCrossrefInstruction: `${SYSTEM_PROMPT}\n${userPrompt}`.includes(
+      "If the user's highest-scoring scenario for a given construct involves a theme that mirrors their personal disclosure",
+    ),
+  });
+  console.log('[NarrativePrompt] FULL_SYSTEM_PROMPT', SYSTEM_PROMPT);
+  console.log('[NarrativePrompt] FULL_USER_PROMPT', userPrompt);
+
+  const aiReasoningBudgets = REPORT_NARRATIVE_TOKEN_BUDGETS.ai_reasoning;
+  let maxTokensForCall = aiReasoningBudgets.initial;
+  let retriedHigherBudget = false;
+
   const body: Record<string, unknown> = {
-    model: CLAUDE_SONNET_MODEL,
-    max_tokens: 8000,
+    model: resolveAnthropicSonnetModel(CLAUDE_SONNET_MODEL),
+    max_tokens: maxTokensForCall,
     system: SYSTEM_PROMPT,
     messages: [{ role: 'user', content: userPrompt }],
   };
@@ -465,12 +535,59 @@ export async function generateAIReasoning(
     throw lastErr ?? new Error('AI reasoning request failed after retries');
   }
 
-  let data: { content?: Array<{ text?: string }> };
+  type AnthropicEnvelope = {
+    content?: Array<{ text?: string }>;
+    stop_reason?: string;
+    usage?: { input_tokens?: number; output_tokens?: number };
+  };
+
+  let envelope = JSON.parse(responseText) as AnthropicEnvelope;
+
+  if (anthropicStoppedDueToMaxTokens(envelope.stop_reason)) {
+    console.warn(
+      `[Reasoning] stop_reason=max_tokens at ${maxTokensForCall} — retrying with ${aiReasoningBudgets.retry}`,
+    );
+    retriedHigherBudget = true;
+    maxTokensForCall = aiReasoningBudgets.retry;
+    const retryBody = { ...body, max_tokens: maxTokensForCall };
+    const retryAbort = new AbortController();
+    const retryTimer = setTimeout(() => retryAbort.abort(), REASONING_FETCH_PER_ATTEMPT_TIMEOUT_MS);
+    try {
+      const retryResponse = await fetch(apiUrl, {
+        method: 'POST',
+        headers,
+        body: JSON.stringify(retryBody),
+        signal: retryAbort.signal,
+      });
+      const retryText = await retryResponse.text();
+      clearTimeout(retryTimer);
+      if (!retryResponse.ok) {
+        throw new Error(`AI reasoning max_tokens retry failed: HTTP ${retryResponse.status}`);
+      }
+      responseText = retryText;
+      envelope = JSON.parse(retryText) as AnthropicEnvelope;
+    } catch (retryErr) {
+      clearTimeout(retryTimer);
+      console.error('[Reasoning] max_tokens retry failed:', retryErr);
+    }
+  }
+
+  logNarrativeGenerationOutcome({
+    pipeline: 'ai_reasoning',
+    provider: 'anthropic',
+    maxTokensRequested: maxTokensForCall,
+    inputTokens: envelope.usage?.input_tokens ?? null,
+    outputTokens: envelope.usage?.output_tokens ?? null,
+    stopReason: envelope.stop_reason ?? null,
+    narrativeTruncatedDueToMaxTokens: anthropicStoppedDueToMaxTokens(envelope.stop_reason),
+    retriedWithHigherBudget: retriedHigherBudget,
+    textLength: (envelope.content?.[0]?.text ?? '').length,
+  });
+
   let text: string;
   let parsed: AIReasoningResult;
   try {
-    data = JSON.parse(responseText) as { content?: Array<{ text?: string }> };
-    text = (data.content?.[0]?.text ?? '{}').replace(/```json|```/g, '').trim();
+    text = (envelope.content?.[0]?.text ?? '{}').replace(/```json|```/g, '').trim();
     parsed = JSON.parse(text) as AIReasoningResult;
   } catch (e) {
     const meta = classifyAIReasoningRequestError(e, null);
@@ -478,6 +595,44 @@ export async function generateAIReasoning(
       `AI reasoning: failed to parse model JSON [${meta.kind}] ${e instanceof Error ? e.message : String(e)}`
     );
   }
+
+  let structuralValidation = validateAiReasoningStructuralEnforcement(
+    parsed as unknown as Record<string, unknown>,
+  );
+  logStructuralValidationOutcome('ai_reasoning', structuralValidation, false);
+
+  if (!structuralValidation.ok) {
+    const retryUserPrompt = userPrompt + buildStructuralRetryUserPromptAddon(structuralValidation.issues);
+    body.messages = [{ role: 'user', content: retryUserPrompt }];
+    console.warn('[NarrativeStructural] ai_reasoning: retrying once after structural validation failure');
+    const retryAbort = new AbortController();
+    const retryTimer = setTimeout(() => retryAbort.abort(), REASONING_FETCH_PER_ATTEMPT_TIMEOUT_MS);
+    try {
+      const retryResponse = await fetch(apiUrl, {
+        method: 'POST',
+        headers,
+        body: JSON.stringify(body),
+        signal: retryAbort.signal,
+      });
+      const retryText = await retryResponse.text();
+      clearTimeout(retryTimer);
+      if (retryResponse.ok) {
+        const retryEnvelope = JSON.parse(retryText) as {
+          content?: Array<{ text?: string }>;
+        };
+        text = (retryEnvelope.content?.[0]?.text ?? '{}').replace(/```json|```/g, '').trim();
+        parsed = JSON.parse(text) as AIReasoningResult;
+        structuralValidation = validateAiReasoningStructuralEnforcement(
+          parsed as unknown as Record<string, unknown>,
+        );
+        logStructuralValidationOutcome('ai_reasoning', structuralValidation, true);
+      }
+    } catch (structuralRetryErr) {
+      clearTimeout(retryTimer);
+      console.error('[NarrativeStructural] ai_reasoning structural retry failed:', structuralRetryErr);
+    }
+  }
+
   const breakdown = parsed.construct_breakdown ?? {};
   Object.entries(breakdown).forEach(([, construct]) => {
     const score = construct?.score;

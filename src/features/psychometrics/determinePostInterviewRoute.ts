@@ -1,12 +1,18 @@
+import type { InterviewAttemptRevealFields } from '@utilities/postInterviewProcessingGate';
 import {
   evaluateStandardPostInterviewReveal,
   standardPostInterviewRouteFromReveal,
   type StandardPostInterviewReveal,
 } from '@utilities/postInterviewProcessingGate';
-import type { InterviewAttemptRevealFields } from '@utilities/postInterviewProcessingGate';
+import { mapPostInterviewStackRouteForLaunchMode } from '@features/onboarding/postInterviewLaunchMode';
 
 export type PostInterviewRouteDecision = {
-  route: 'PostInterview' | 'PostInterviewProcessing' | 'PostInterviewPassed' | 'PostInterviewFailed';
+  route:
+    | 'PostInterview'
+    | 'PostInterviewProcessing'
+    | 'PostInterviewPassed'
+    | 'PostInterviewFailed'
+    | 'PostInterviewLaunch';
   reveal: StandardPostInterviewReveal;
 };
 
@@ -18,7 +24,7 @@ export function determinePostInterviewRoute(
   const reveal = evaluateStandardPostInterviewReveal(revealAttempt, nowMs);
 
   return {
-    route: standardPostInterviewRouteFromReveal(reveal),
+    route: mapPostInterviewStackRouteForLaunchMode(standardPostInterviewRouteFromReveal(reveal)),
     reveal,
   };
 }

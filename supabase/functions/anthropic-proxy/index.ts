@@ -1,3 +1,8 @@
+import {
+  DEFAULT_CLAUDE_SONNET_MODEL,
+  resolveAnthropicSonnetModel,
+} from '../_shared/resolveAnthropicSonnetModel.ts';
+
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
@@ -5,7 +10,7 @@ const corsHeaders = {
   'Access-Control-Max-Age': '86400',
 };
 
-const ANTHROPIC_PROXY_TIMEOUT_MS = 120_000;
+const ANTHROPIC_PROXY_TIMEOUT_MS = 180_000;
 
 Deno.serve(async (req) => {
   // Preflight: must return 204 and CORS headers so browser allows the actual POST
@@ -46,6 +51,18 @@ Deno.serve(async (req) => {
     );
   }
 
+  const payload = body as Record<string, unknown>;
+  const requestedModel = typeof payload.model === 'string' ? payload.model : '';
+  const resolvedModel = resolveAnthropicSonnetModel(requestedModel);
+  if (resolvedModel !== requestedModel) {
+    console.warn(
+      `[anthropic-proxy] remapped retired model "${requestedModel}" -> "${resolvedModel}"`
+    );
+    payload.model = resolvedModel;
+  } else if (!requestedModel) {
+    payload.model = DEFAULT_CLAUDE_SONNET_MODEL;
+  }
+
   try {
     const abort = new AbortController();
     const timeout = setTimeout(() => abort.abort(), ANTHROPIC_PROXY_TIMEOUT_MS);
@@ -56,7 +73,7 @@ Deno.serve(async (req) => {
         'x-api-key': apiKey,
         'anthropic-version': '2023-06-01',
       },
-      body: JSON.stringify(body),
+      body: JSON.stringify(payload),
       signal: abort.signal,
     });
     const text = await res.text();

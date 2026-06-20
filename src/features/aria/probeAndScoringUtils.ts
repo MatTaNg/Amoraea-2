@@ -4,6 +4,9 @@ import {
   pillarScoresHaveNumericAssessment,
 } from './interviewCompletionGate';
 import { normalizeResponseConcreteness, normalizeMoment4Concreteness } from './personalMomentConcreteness';
+import { normalizeInterviewTypography } from './interviewTypography';
+
+export { normalizeInterviewTypography } from './interviewTypography';
 
 /** User-facing; when set in keyEvidence, participant skipped the remainder of this segment after a frustration offer. */
 export const SKIPPED_BY_USER_FRUSTRATION_EVIDENCE =
@@ -1507,12 +1510,7 @@ export function stripMoment5AccountabilityProbeStreamingEcho(
 
 /** Emma's closing line from Scenario A — verbatim or common ASR variants. */
 export function scenarioAEmmaVeryClearClosingLineMentioned(text: string): boolean {
-  const t = text.toLowerCase().replace(/\u2019/g, "'");
-  return (
-    t.includes("you've made that very clear") ||
-    t.includes('you have made that very clear') ||
-    /\byou\s+made\s+that\s+very\s+clear\b/.test(t)
-  );
+  return userReferencesEmmaClosingLineQuote(text);
 }
 
 /**
@@ -1583,6 +1581,7 @@ export function scenarioAContemptProbeResumeRepeatTtsText(storedAssistantText: s
   if (!stored) return storedAssistantText;
   if (
     stored.includes(SCENARIO_A_CONTEMPT_PROBE_DELIVERED_COPY) ||
+    stored.includes(SCENARIO_A_CONTEMPT_PROBE_TTS_SPOKEN_COPY) ||
     looksLikeScenarioAContemptProbeQuestion(stored)
   ) {
     return SCENARIO_A_CONTEMPT_PROBE_DELIVERED_COPY;
@@ -2340,6 +2339,7 @@ export function userReferencesEmmaClosingLineQuote(text: string): boolean {
 
   const variantPatterns: RegExp[] = [
     /\byou\s+made\s+that\s+very\s+clear\b/i,
+    /\byou\s+made\s+that\s+(?:really|pretty|so)\s+clear\b/i,
     /\byouve\s+made\s+that\s+very\s+clear\b/i,
     /\byou'?ve\s+made\s+that\s+(?:really|pretty|so)\s+clear\b/i,
     /\byou'?ve\s+made\s+(?:that\s+)?(?:it\s+)?very\s+clear\b/i,
@@ -2350,11 +2350,17 @@ export function userReferencesEmmaClosingLineQuote(text: string): boolean {
   ];
   if (variantPatterns.some((re) => re.test(lower))) return true;
 
+  if (
+    /\byou\s*(?:'ve\s+)?made\b[^.]{0,28}\bthat\s+(?:really|very|pretty|so)\s+clear\b/i.test(lower)
+  ) {
+    return true;
+  }
+
   const idxMade = lower.search(/\bmade\b/);
-  const idxThatVeryClear = lower.search(/\bthat\s+very\s+clear\b/);
-  if (idxMade >= 0 && idxThatVeryClear >= 0 && Math.abs(idxMade - idxThatVeryClear) <= 140) {
-    const before = lower.slice(0, idxThatVeryClear + 24);
-    if (/\byou\b/.test(before) || /\bemma\b/.test(before) || /\bshe\b/.test(before)) return true;
+  const idxThatClear = lower.search(/\bthat\s+(?:really|very|pretty|so)\s+clear\b/);
+  if (idxMade >= 0 && idxThatClear >= 0 && Math.abs(idxMade - idxThatClear) <= 80) {
+    const before = lower.slice(Math.max(0, idxMade - 24), idxMade);
+    if (/\b(you|emma|she)\b/.test(before)) return true;
   }
 
   return false;
@@ -2386,6 +2392,20 @@ export function aggregateScenario1Moment1UserTextForContemptGate(
     if (c) parts.push(c);
   }
   return parts.join('\n').trim();
+}
+
+/** User ties their read to Emma's closing line without necessarily quoting it verbatim. */
+const SCENARIO_A_EMMA_CLOSING_LINE_INTERPRETIVE_CUE_RE =
+  /\b(what\s+she\s+meant|what\s+emma\s+meant|what\s+emma\s+was\s+(?:getting\s+at|trying\s+to\s+say)|she\s+meant|when\s+she\s+said|she\s+was\s+basically\s+saying|emma'?s\s+point\s+was|that\s+(?:line|statement|comment|response|remark|phrase|phrasing)|her\s+statement|emma'?s\s+(?:statement|words|comment|line)|the\s+subtext\s+was|the\s+undertone\s+was|the\s+way\s+she\s+said|the\s+way\s+that\s+landed|that\s+came\s+across\s+as|it\s+landed\s+as|tone|that\s+comment\s+from\s+emma|emma'?s\s+(?:response|wording)\s+there)\b/i;
+
+function scenarioAEmmaClosingLineInterpretiveCueMatched(lower: string): boolean {
+  return SCENARIO_A_EMMA_CLOSING_LINE_INTERPRETIVE_CUE_RE.test(lower);
+}
+
+function scenarioAUserReferencesEmmaClearLineWithEmmaName(lower: string): boolean {
+  return (
+    (lower.includes('very clear') || lower.includes('really clear')) && /\bemma\b/.test(lower)
+  );
 }
 
 /** Skip reasons for {@link evaluateScenarioAQ1ContemptProbePreProbeSkip} (auditable). */
@@ -2432,14 +2452,11 @@ export function evaluateScenarioAQ1ContemptProbePreProbeSkip(text: string): {
   /** Condition 2 — register of the line (lexicon + closing-line engagement, or explicit deeper-than-frustration phrases). */
   const registerLexicon =
     /\b(sarcasm|sarcastic|passive[- ]aggressive|sharp(?:ness)?|resigned|resignation|bitter|contemptuous|cutting|dismissive|cold|loaded|pointed|snide|condescend(?:ing)?)\b/i;
-  const interpretiveCueForClosingLine =
-    /\b(what\s+she\s+meant|what\s+emma\s+meant|what\s+emma\s+was\s+(getting\s+at|trying\s+to\s+say)|she\s+meant|when\s+she\s+said|she\s+was\s+basically\s+saying|emma'?s\s+point\s+was|that\s+(line|statement|comment|response|remark|phrase|phrasing)|the\s+subtext\s+was|the\s+undertone\s+was|the\s+way\s+she\s+said|the\s+way\s+that\s+landed|that\s+came\s+across\s+as|it\s+landed\s+as|tone|that\s+comment\s+from\s+emma|emma'?s\s+(response|wording)\s+there)\b/.test(
-      lower,
-    );
+  const interpretiveCueForClosingLine = scenarioAEmmaClosingLineInterpretiveCueMatched(lower);
   /** Bare "Emma + condescending" in a general Q1 answer is not enough — must tie register to the closing line. */
   const engagesEmmaClosingLineSpecifically =
     userReferencesEmmaClosingLineQuote(t) ||
-    (lower.includes('very clear') && /\bemma\b/.test(lower)) ||
+    scenarioAUserReferencesEmmaClearLineWithEmmaName(lower) ||
     /\b(that\s+line|that\s+comment|what\s+she\s+said|final\s+line|last\s+thing\s+she|when\s+she\s+says|that\s+last\s+thing|closing\s+line)\b/i.test(
       lower,
     ) ||
@@ -2503,10 +2520,7 @@ export function hasScenarioAQ1ContemptProbeCoverage(text: string): boolean {
     .replace(/\s+/g, ' ')
     .toLowerCase();
 
-  const hasInterpretiveCue =
-    /\b(what\s+she\s+meant|what\s+emma\s+meant|what\s+emma\s+was\s+(getting\s+at|trying\s+to\s+say)|she\s+meant|when\s+she\s+said|she\s+was\s+basically\s+saying|emma'?s\s+point\s+was|that\s+(line|statement|comment|response|remark|phrase|phrasing)|the\s+subtext\s+was|the\s+undertone\s+was|the\s+way\s+she\s+said|the\s+way\s+that\s+landed|that\s+came\s+across\s+as|it\s+landed\s+as|tone|that\s+comment\s+from\s+emma|emma'?s\s+(response|wording)\s+there)\b/.test(
-      lower
-    );
+  const hasInterpretiveCue = scenarioAEmmaClosingLineInterpretiveCueMatched(lower);
   const referencesEmmaClosingRhetoric =
     /\bshe'?s\s+not\s+asking\s+(?:him|ryan|her)\s+to\s+stop\b/i.test(lower) ||
     /\bshe\s+isn'?t\s+asking\s+(?:him|ryan|her)\s+to\s+stop\b/i.test(lower) ||
@@ -2516,7 +2530,7 @@ export function hasScenarioAQ1ContemptProbeCoverage(text: string): boolean {
     /\balready\s+knows\s+(?:he|ryan)\s+won'?t\b/i.test(lower);
   const referencesEmmaFinalLine =
     userReferencesEmmaClosingLineQuote(t) ||
-    (lower.includes('very clear') && /\bemma\b/.test(lower)) ||
+    scenarioAUserReferencesEmmaClearLineWithEmmaName(lower) ||
     (/\bemma\b/.test(lower) && hasInterpretiveCue) ||
     (/\b(emma|ryan)\b/.test(lower) && referencesEmmaClosingRhetoric);
 
@@ -2574,10 +2588,7 @@ export function debugScenarioAQ1ContemptProbeCoverageDetail(text: string): {
   )
     .replace(/\s+/g, ' ')
     .toLowerCase();
-  const hasInterpretiveCue =
-    /\b(what\s+she\s+meant|what\s+emma\s+was\s+(getting\s+at|trying\s+to\s+say)|she\s+meant|when\s+she\s+said|she\s+was\s+basically\s+saying|emma'?s\s+point\s+was|that\s+(line|statement|comment|response|remark|phrase|phrasing)|the\s+subtext\s+was|the\s+undertone\s+was|the\s+way\s+she\s+said|the\s+way\s+that\s+landed|that\s+came\s+across\s+as|it\s+landed\s+as|tone|that\s+comment\s+from\s+emma|emma'?s\s+(response|wording)\s+there)\b/.test(
-      lower
-    );
+  const hasInterpretiveCue = scenarioAEmmaClosingLineInterpretiveCueMatched(lower);
   const referencesEmmaClosingRhetoric =
     /\bshe'?s\s+not\s+asking\s+(?:him|ryan|her)\s+to\s+stop\b/i.test(lower) ||
     /\bshe\s+isn'?t\s+asking\s+(?:him|ryan|her)\s+to\s+stop\b/i.test(lower) ||
@@ -2587,7 +2598,7 @@ export function debugScenarioAQ1ContemptProbeCoverageDetail(text: string): {
     /\balready\s+knows\s+(?:he|ryan)\s+won'?t\b/i.test(lower);
   const referencesEmmaFinalLine =
     userReferencesEmmaClosingLineQuote(t) ||
-    (lower.includes('very clear') && /\bemma\b/.test(lower)) ||
+    scenarioAUserReferencesEmmaClearLineWithEmmaName(lower) ||
     (/\bemma\b/.test(lower) && hasInterpretiveCue) ||
     (/\b(emma|ryan)\b/.test(lower) && referencesEmmaClosingRhetoric);
   const hasStrongContemptQualityRead =
@@ -3005,13 +3016,6 @@ export function hasMoment4PersonalNarrativeEngagement(text: string): boolean {
   const t = text.replace(/\s+/g, ' ').trim();
   if (t.length < 25) return false;
   return /\b(i|my|me|we|our|us)\b/i.test(t);
-}
-
-/** Curly / typographic apostrophes and quotes → ASCII so string checks match model output. */
-export function normalizeInterviewTypography(text: string): string {
-  return text
-    .replace(/\u2018|\u2019|\u201b/g, "'")
-    .replace(/\u201c|\u201d/g, '"');
 }
 
 export function isLikelyMisplacedPersonalNarrativeForScenarioCThreshold(text: string): boolean {

@@ -33,6 +33,7 @@ import {
   evaluateStandardPostInterviewReveal,
   standardPostInterviewRouteFromReveal,
 } from '@utilities/postInterviewProcessingGate';
+import { useRedirectPostInterviewLaunchWhenEnabled } from '@features/onboarding/postInterviewLaunchMode';
 import { fetchInterviewAttemptRevealSnapshot } from '@utilities/fetchInterviewAttemptRevealSnapshot';
 import { useInterviewAttemptEgoRepair } from '@features/aria/hooks/useInterviewAttemptEgoRepair';
 import { DownloadPersonalReportButton } from '@features/psychometrics/DownloadPersonalReportButton';
@@ -137,6 +138,7 @@ export const PostInterviewFailedScreen: React.FC<{
   const queryClient = useQueryClient();
   const { user } = useAuth();
   const userId = route.params?.userId ?? '';
+  useRedirectPostInterviewLaunchWhenEnabled(navigation, userId);
   const isAdminEmail = isAmoraeaAdminConsoleEmail(user?.email ?? '');
   useInterviewAttemptEgoRepair({
     userId,

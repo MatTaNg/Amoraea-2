@@ -26,6 +26,7 @@ import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { profilesRepo } from '@data/repos/profilesRepo';
 import { ProfileRepository } from '@data/repositories/ProfileRepository';
 import { useAuth } from '@features/authentication/hooks/useAuth';
+import { exitDatingProfileOnboardingToPostInterview } from '@/datingProfile/onboarding/exitDatingProfileOnboardingToPostInterview';
 import { showSimpleAlert } from '@utilities/alerts/confirmDialog';
 import { PersonalityDocumentsUpload } from '@/features/profile/PersonalityDocumentsUpload';
 import {
@@ -97,7 +98,7 @@ import {
   mapAttractionToDb,
   normalizeAttractedToUiLabels,
 } from '@/shared/utils/attractionMapper';
-import { calculateAgeFromBirthdate } from '@/shared/utils/ageCalculator';
+import { calculateAgeFromBirthdate, MIN_USER_AGE } from '@/shared/utils/ageCalculator';
 import { useLocationAutocomplete } from '@/shared/hooks/useLocationAutocomplete';
 import { requestMyLocationLabel } from '@/screens/profile/utils/locationHelpers';
 import { theme } from '@/shared/theme/theme';
@@ -139,7 +140,7 @@ import { LifeDomainQuestionsEditModal } from '@/screens/profile/editProfile/Life
 import { LifeDomainRequiredQuestionsSection } from '@/screens/profile/editProfile/LifeDomainRequiredQuestionsSection';
 
 const BG = '#0a0a0f';
-const MIN_PROFILE_AGE = 18;
+const MIN_PROFILE_AGE = MIN_USER_AGE;
 const ACCENT = '#3b82f6';
 const FONT_BODY =
   Platform.OS === 'web' ? "'DM Sans', system-ui, sans-serif" : undefined;
@@ -563,15 +564,6 @@ function ChoiceDropdown({
   );
 }
 
-type InterviewPostInterviewNavigation = NativeStackNavigationProp<
-  {
-    PostInterviewPassed: { userId: string };
-    DatingProfileOnboarding: { userId?: string };
-    DatingProfileEdit: { userId: string };
-  },
-  'DatingProfileEdit'
->;
-
 export const DatingProfileEditScreen: React.FC<{
   navigation: { goBack: () => void };
   route: { params: { userId: string } };
@@ -585,32 +577,7 @@ export const DatingProfileEditScreen: React.FC<{
   const effectiveUserId = user?.id ?? userId;
 
   const exitEditProfileToPostInterview = useCallback(() => {
-    const uid = userId.trim();
-    /** Mirror {@link ModalOnboardingScreen} exit: nested dating stack → interview stack → `PostInterviewPassed`. */
-    const nestedNav = navigation.getParent?.();
-    const interviewNav = nestedNav?.getParent?.() as
-      | InterviewPostInterviewNavigation
-      | undefined;
-
-    if (interviewNav?.canGoBack?.()) {
-      interviewNav.goBack();
-      return;
-    }
-    if (nestedNav?.canGoBack?.()) {
-      nestedNav.goBack();
-      return;
-    }
-    if (!uid) return;
-    if (nestedNav?.navigate) {
-      nestedNav.navigate('PostInterviewPassed', { userId: uid });
-      return;
-    }
-    (navigation as unknown as InterviewPostInterviewNavigation).navigate(
-      'PostInterviewPassed',
-      {
-        userId: uid,
-      },
-    );
+    exitDatingProfileOnboardingToPostInterview(navigation, userId.trim() || undefined);
   }, [navigation, userId]);
 
   useLayoutEffect(() => {
@@ -795,10 +762,6 @@ export const DatingProfileEditScreen: React.FC<{
     [draft.birthDate],
   );
 
-  const maxBirthYear = useMemo(
-    () => new Date().getFullYear() - MIN_PROFILE_AGE,
-    [],
-  );
   const birthDateStr = asStr(draft.birthDate);
   const birthAgeFromDraft = birthDateStr
     ? calculateAgeFromBirthdate(birthDateStr)
@@ -1245,7 +1208,7 @@ export const DatingProfileEditScreen: React.FC<{
                 value={birthDateStr}
                 onValueChange={setScalar('birthDate')}
                 minYear={1900}
-                maxYear={maxBirthYear}
+                minimumAge={MIN_PROFILE_AGE}
                 error={birthDateError}
               />
             </View>

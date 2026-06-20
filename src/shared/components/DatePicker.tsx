@@ -4,6 +4,14 @@ import { Picker } from '@react-native-picker/picker';
 import { theme } from '@/shared/theme/theme';
 import { formControlStyles } from '@/shared/ui/FormField';
 import { BirthTimeHourMinuteInput } from '@/shared/components/BirthTimeHourMinuteInput';
+import {
+  maxBirthYearForMinimumAge,
+  maxSelectableDayForBirthYearMonth,
+  maxSelectableMonthForBirthYear,
+  MIN_USER_AGE,
+  isBirthDateAllowedForMinimumAge,
+  parseBirthDateParts,
+} from '@/shared/utils/ageCalculator';
 
 export type DatePickerProps = {
   value: string;
@@ -11,6 +19,8 @@ export type DatePickerProps = {
   label?: string;
   minYear?: number;
   maxYear?: number;
+  /** When set (default 18), year/month/day options cannot produce an age below this. */
+  minimumAge?: number;
   error?: string;
 };
 
@@ -72,6 +82,21 @@ function applyPatch(prev: Draft, patch: Partial<Draft>): Draft {
   });
 }
 
+function clampDraftToMinimumAge(draft: Draft, minimumAge: number): Draft {
+  if (draft.y == null) return draft;
+  const maxMonth = maxSelectableMonthForBirthYear(draft.y, minimumAge);
+  let m = draft.m;
+  if (m != null && m > maxMonth) m = null;
+  let d = draft.d;
+  if (m == null) {
+    d = null;
+  } else {
+    const maxDay = maxSelectableDayForBirthYearMonth(draft.y, m, minimumAge);
+    if (d != null && d > maxDay) d = null;
+  }
+  return { y: draft.y, m, d };
+}
+
 const MONTH_OPTIONS: { label: string; value: number }[] = [
   { label: 'January', value: 1 },
   { label: 'February', value: 2 },
@@ -94,10 +119,11 @@ export const DatePicker: React.FC<DatePickerProps> = ({
   label,
   minYear,
   maxYear,
+  minimumAge = MIN_USER_AGE,
   error,
 }) => {
   const yMin = minYear ?? 1900;
-  const yMax = maxYear ?? new Date().getFullYear();
+  const yMax = maxYear ?? maxBirthYearForMinimumAge(minimumAge);
 
   const [draft, setDraft] = useState<Draft>({ y: null, m: null, d: null });
   /** Avoid stale `draft` in pickers when year/month change back-to-back (web / fast taps). */
@@ -108,12 +134,23 @@ export const DatePicker: React.FC<DatePickerProps> = ({
 
   useEffect(() => {
     const trimmed = value.trim();
-    const p = parseIsoDate(trimmed);
-    if (p && p.y >= yMin && p.y <= yMax) {
-      const normalized = normalizeDraft({ y: p.y, m: p.m, d: p.d });
+    const p = parseBirthDateParts(trimmed);
+    if (p && p.y >= yMin && p.y <= yMax && isBirthDateAllowedForMinimumAge(trimmed, minimumAge)) {
+      const normalized = clampDraftToMinimumAge(
+        normalizeDraft({ y: p.y, m: p.m, d: p.d }),
+        minimumAge,
+      );
       setDraft(normalized);
       draftRef.current = normalized;
       prevControlledValueRef.current = value;
+      return;
+    }
+    if (p && trimmed && !isBirthDateAllowedForMinimumAge(trimmed, minimumAge)) {
+      const empty = { y: null, m: null, d: null };
+      setDraft(empty);
+      draftRef.current = empty;
+      prevControlledValueRef.current = '';
+      if (trimmed) onValueChange('');
       return;
     }
     if (!trimmed) {
@@ -128,15 +165,36 @@ export const DatePicker: React.FC<DatePickerProps> = ({
       return;
     }
     prevControlledValueRef.current = value;
-  }, [value, yMin, yMax]);
+  }, [value, yMin, yMax, minimumAge]);
 
   const yearItems = useMemo(() => {
     const out: number[] = [];
-    for (let y = yMax; y >= yMin; y -= 1) out.push(y);
+    for (let y = yMax; y >= yMin; y -= 1) {
+      if (maxSelectableMonthForBirthYear(y, minimumAge) < 1) continue;
+      out.push(y);
+    }
     return out;
-  }, [yMin, yMax]);
+  }, [yMin, yMax, minimumAge]);
 
-  const dayCount = maxSelectableDays(draft.y, draft.m);
+  const monthOptions = useMemo(() => {
+    if (draft.y == null) return MONTH_OPTIONS;
+    const maxMonth = maxSelectableMonthForBirthYear(draft.y, minimumAge);
+    return MONTH_OPTIONS.filter((mo) => mo.value <= maxMonth);
+  }, [draft.y, minimumAge]);
+
+  const dayCount = useMemo(() => {
+    if (draft.y != null && draft.m != null) {
+      return maxSelectableDayForBirthYearMonth(draft.y, draft.m, minimumAge);
+    }
+    return maxSelectableDays(draft.y, draft.m);
+  }, [draft.y, draft.m, minimumAge]);
+
+  const patchDraft = (patch: Partial<Draft>): Draft => {
+    const next = clampDraftToMinimumAge(applyPatch(draftRef.current, patch), minimumAge);
+    draftRef.current = next;
+    setDraft(next);
+    return next;
+  };
 
   const emit = (next: Draft) => {
     const iso = draftToIso(next);
@@ -184,10 +242,7 @@ export const DatePicker: React.FC<DatePickerProps> = ({
                   emit(next);
                   return;
                 }
-                const next = applyPatch(draftRef.current, { y: Number(v) });
-                draftRef.current = next;
-                setDraft(next);
-                emit(next);
+                emit(patchDraft({ y: Number(v) }));
               }}
               {...pickerCommon}
             >
@@ -223,16 +278,10 @@ export const DatePicker: React.FC<DatePickerProps> = ({
               selectedValue={draft.m != null ? String(draft.m) : ''}
               onValueChange={(v) => {
                 if (v === '') {
-                  const next = applyPatch(draftRef.current, { m: null, d: null });
-                  draftRef.current = next;
-                  setDraft(next);
-                  emit(next);
+                  emit(patchDraft({ m: null, d: null }));
                   return;
                 }
-                const next = applyPatch(draftRef.current, { m: Number(v) });
-                draftRef.current = next;
-                setDraft(next);
-                emit(next);
+                emit(patchDraft({ m: Number(v) }));
               }}
               {...pickerCommon}
             >
@@ -242,7 +291,7 @@ export const DatePicker: React.FC<DatePickerProps> = ({
                 color={theme.colors.textSecondary}
                 style={styles.pickerItemPlaceholder}
               />
-              {MONTH_OPTIONS.map((mo) => (
+              {monthOptions.map((mo) => (
                 <Picker.Item
                   key={mo.value}
                   label={mo.label}
@@ -275,29 +324,17 @@ export const DatePicker: React.FC<DatePickerProps> = ({
                 draft.d != null && draft.d <= dayCount ? String(draft.d) : ''
               }
               onValueChange={(v) => {
-                const dc = maxSelectableDays(
-                  draftRef.current.y,
-                  draftRef.current.m,
-                );
+                const dc = dayCount;
                 if (v === '') {
-                  const next = applyPatch(draftRef.current, { d: null });
-                  draftRef.current = next;
-                  setDraft(next);
-                  emit(next);
+                  emit(patchDraft({ d: null }));
                   return;
                 }
                 const num = Number(v);
                 if (!Number.isFinite(num) || num < 1 || num > dc) {
-                  const next = applyPatch(draftRef.current, { d: null });
-                  draftRef.current = next;
-                  setDraft(next);
-                  emit(next);
+                  emit(patchDraft({ d: null }));
                   return;
                 }
-                const next = applyPatch(draftRef.current, { d: num });
-                draftRef.current = next;
-                setDraft(next);
-                emit(next);
+                emit(patchDraft({ d: num }));
               }}
               {...pickerCommon}
             >

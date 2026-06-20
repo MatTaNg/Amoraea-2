@@ -36,6 +36,8 @@ export async function fetchReportData(userId: string): Promise<ReportData> {
         psychometrics_mspss_family_score,
         psychometrics_mspss_friends_score,
         psychometrics_rfq_score,
+        psychometrics_gasp_score,
+        psychometrics_dweck_score,
         psychometric_straight_line_flags
       `,
       )
@@ -106,6 +108,8 @@ export async function fetchReportDataForAttempt(attemptId: string): Promise<Repo
       psychometrics_mspss_family_score,
       psychometrics_mspss_friends_score,
       psychometrics_rfq_score,
+      psychometrics_gasp_score,
+      psychometrics_dweck_score,
       psychometric_straight_line_flags
     `,
     )

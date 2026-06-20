@@ -16,6 +16,7 @@ import { LoginScreen } from './src/app/screens/LoginScreen';
 import { RegisterScreen } from './src/app/screens/RegisterScreen';
 import { ForgotPasswordScreen } from './src/app/screens/ForgotPasswordScreen';
 import { SetNewPasswordScreen } from './src/app/screens/SetNewPasswordScreen';
+import { PostInterviewLaunchScreen } from '@app/screens/onboarding/PostInterviewLaunchScreen';
 import { PostInterviewScreen } from '@app/screens/onboarding/PostInterviewScreen';
 import { PostInterviewPassedScreen } from '@app/screens/onboarding/PostInterviewPassedScreen';
 import { PostInterviewFailedScreen } from '@app/screens/onboarding/PostInterviewFailedScreen';
@@ -49,6 +50,9 @@ import {
   resolveInterviewStackBootstrap,
   shouldFetchPostInterviewDeferralSnapshot,
 } from '@features/psychometrics/resolveInterviewStackBootstrap';
+import {
+  isLaunchWaitlistPostInterviewModeEnabled,
+} from '@features/onboarding/postInterviewLaunchMode';
 import {
   resolveInitialInterviewRoute,
   type InterviewStackRoute,
@@ -196,6 +200,12 @@ const InterviewAppNavigator = ({
       options={{ headerShown: false }}
     />
     <Stack.Screen
+      name="PostInterviewLaunch"
+      component={PostInterviewLaunchScreen as unknown as React.ComponentType<Record<string, never>>}
+      initialParams={{ userId }}
+      options={POST_INTERVIEW_STACK_SCREEN_OPTIONS}
+    />
+    <Stack.Screen
       name="PostInterview"
       component={PostInterviewScreen as unknown as React.ComponentType<Record<string, never>>}
       initialParams={{ userId }}
@@ -255,7 +265,9 @@ async function fetchStandardPostInterviewDeferralSnapshot(userId: string) {
 
 function isTerminalPostInterviewRoute(
   route: InterviewStackRoute | null | undefined,
-): route is 'PostInterviewPassed' | 'PostInterviewFailed' {
+): route is 'PostInterviewPassed' | 'PostInterviewFailed' | 'PostInterviewLaunch' {
+  if (route === 'PostInterviewLaunch') return true;
+  if (isLaunchWaitlistPostInterviewModeEnabled()) return false;
   return route === 'PostInterviewPassed' || route === 'PostInterviewFailed';
 }
 
@@ -284,6 +296,7 @@ function buildInterviewStackInitialState(
       'PsychometricsComplete',
       'Aria',
       'PostInterview',
+      'PostInterviewLaunch',
       'PostInterviewProcessing',
       'PostInterviewPassed',
       'PostInterviewFailed',
@@ -559,6 +572,7 @@ const INTERVIEW_STACK_ROUTE_PATH: Record<InterviewStackRoute, string> = {
   PsychometricsComplete: 'psychometrics-complete',
   Aria: 'interview',
   PostInterview: 'post-interview',
+  PostInterviewLaunch: 'launch',
   PostInterviewProcessing: 'post-interview-processing',
   PostInterviewPassed: 'passed',
   PostInterviewFailed: 'failed',
@@ -597,7 +611,11 @@ function shouldRedirectWebPathToPreferredRoute(
   }
   const pathname = interviewStackPathname(path);
   if (isInterviewAliasWebPath(path)) return true;
-  if (preferredRoute === 'PostInterviewPassed' || preferredRoute === 'PostInterviewFailed') {
+  if (
+    preferredRoute === 'PostInterviewLaunch' ||
+    preferredRoute === 'PostInterviewPassed' ||
+    preferredRoute === 'PostInterviewFailed'
+  ) {
     return (
       pathname === '/post-interview-processing' ||
       pathname === 'post-interview-processing' ||
@@ -627,6 +645,7 @@ const INTERVIEW_STACK_LINKING_SCREENS = {
     },
   },
   PostInterview: 'post-interview',
+  PostInterviewLaunch: 'launch',
   PostInterviewProcessing: 'post-interview-processing',
   PostInterviewPassed: 'passed',
   PostInterviewFailed: 'failed',

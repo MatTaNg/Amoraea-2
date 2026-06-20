@@ -1,7 +1,8 @@
 import { fetchMostRecentCompletedInterviewAttemptId } from '@features/psychometrics/interviewCompletionStatus';
-import { invokeAnthropicMessages } from '@utilities/invokeAnthropicMessages';
+import { invokeAnthropicReportNarrativeWithStructuralValidation } from '@features/reports/invokeValidatedReportNarrative';
 import { CLAUDE_SONNET_MODEL } from '@utilities/anthropicMessagesClient';
 import { getReportLogoSrc } from './reportBranding';
+import { stripStructuralNarrativeBlock } from '@features/reports/reportNarrativeStructuralEnforcement';
 import {
   computePersonalReportSourceHash,
   loadStoredInterviewReports,
@@ -15,7 +16,18 @@ import {
 import {
   buildReportPrompt,
   buildSystemPrompt,
+  buildPersonalReportStructuralValidationContext,
 } from './personalReportPrompt';
+import {
+  buildPersonalReportEvidenceInventory,
+  logLiveNarrativePrompt,
+  logNarrativeEvidenceAudit,
+} from '@features/reports/narrativeEvidenceAudit';
+import {
+  finalizeUserFacingReportMarkdown,
+  finalizeUserFacingPartialReportMarkdown,
+  REPORT_FOOTER_DISCLAIMER,
+} from '@features/reports/reportTransparency';
 
 export type { PersonalReportMentalizingProfile, ReportData } from './personalReportData';
 export { buildReportPrompt, buildSystemPrompt } from './personalReportPrompt';
@@ -32,25 +44,36 @@ function escapeHtml(text: string): string {
 export async function generateUserReport(userId: string, prefetchedData?: ReportData): Promise<string> {
   const data = prefetchedData ?? (await fetchReportData(userId));
 
-  const result = await invokeAnthropicMessages({
-    model: CLAUDE_SONNET_MODEL,
-    max_tokens: 2500,
-    system: buildSystemPrompt(),
-    messages: [
+  const psychometricSignals: string[] = [];
+  const p = data.user.psychometrics;
+  if (p.rsesScore != null) psychometricSignals.push('rses');
+  if (p.gaspScore != null) psychometricSignals.push('gasp');
+  if (p.dweckScore != null) psychometricSignals.push('dweck');
+  if (p.brsScore != null) psychometricSignals.push('brs');
+  if (p.scsSfScore != null || p.scsSfSelfKindnessScore != null) psychometricSignals.push('scs_sf');
+  if (p.mspssScore != null) psychometricSignals.push('mspss');
+  if (p.rfqScore != null) psychometricSignals.push('rfq');
+
+  logNarrativeEvidenceAudit(
+    buildPersonalReportEvidenceInventory('personal_full_report', data.attempt, psychometricSignals),
+  );
+
+  const system = buildSystemPrompt();
+  const userPrompt = buildReportPrompt(data);
+  logLiveNarrativePrompt('personal_full_report', system, userPrompt);
+
+  return finalizeUserFacingReportMarkdown(
+    await invokeAnthropicReportNarrativeWithStructuralValidation(
+      'personal_full_report',
       {
-        role: 'user',
-        content: buildReportPrompt(data),
+        model: CLAUDE_SONNET_MODEL,
+        system,
       },
-    ],
-  });
-
-  const reportText = result.content?.[0]?.text;
-
-  if (!reportText?.trim()) {
-    throw new Error('No report content returned from Claude');
-  }
-
-  return reportText.trim();
+      userPrompt,
+      buildPersonalReportStructuralValidationContext(data),
+    ),
+    data,
+  );
 }
 
 export type ReportHtmlOptions = {
@@ -59,6 +82,10 @@ export type ReportHtmlOptions = {
   headerTitle?: string;
   headerSubtitle?: string;
   footerDisclaimer?: string;
+  /** When set, applies templated transparency sections before HTML render (e.g. cached reports). */
+  reportDataForTransparency?: ReportData;
+  /** Partial preview — confidence section only. */
+  applyPartialTransparency?: boolean;
 };
 
 /** Full branded HTML document for PDF export / print. */
@@ -79,6 +106,7 @@ export async function buildPersonalReportHtml(userId: string): Promise<string> {
         logoSrc,
         headerTitle: safeName ? `${safeName}'s Personal Report` : 'Your Personal Report',
         headerSubtitle: 'Personal Development Report',
+        reportDataForTransparency: reportData,
       });
     }
   }
@@ -95,12 +123,28 @@ export async function buildPersonalReportHtml(userId: string): Promise<string> {
     logoSrc,
     headerTitle: safeName ? `${safeName}'s Personal Report` : 'Your Personal Report',
     headerSubtitle: 'Personal Development Report',
+    reportDataForTransparency: reportData,
   });
 }
 
 export function convertMarkdownToHtml(markdown: string, options: ReportHtmlOptions): string {
-  const { userName, logoSrc, headerTitle, headerSubtitle, footerDisclaimer } = options;
-  const lines = markdown.split('\n');
+  const {
+    userName,
+    logoSrc,
+    headerTitle,
+    headerSubtitle,
+    footerDisclaimer,
+    reportDataForTransparency,
+    applyPartialTransparency,
+  } = options;
+  const withTransparency =
+    reportDataForTransparency != null
+      ? finalizeUserFacingReportMarkdown(markdown, reportDataForTransparency)
+      : applyPartialTransparency
+        ? finalizeUserFacingPartialReportMarkdown(markdown)
+        : markdown;
+  const cleanedMarkdown = stripStructuralNarrativeBlock(withTransparency);
+  const lines = cleanedMarkdown.split('\n');
   const htmlLines: string[] = [];
 
   for (const line of lines) {
@@ -131,8 +175,7 @@ export function convertMarkdownToHtml(markdown: string, options: ReportHtmlOptio
   });
   const subtitleLabel = headerSubtitle ?? 'Personal Development Report';
   const safeLogoSrc = escapeHtml(logoSrc);
-  const defaultFooter =
-    'This report is based on validated scientific instruments and behavioral assessment conducted through the Amoraea platform. It is intended for personal reflection and growth, not clinical diagnosis. Results reflect patterns observed during your assessment and may not capture the full complexity of who you are as a person.';
+  const defaultFooter = REPORT_FOOTER_DISCLAIMER;
 
   return `<!DOCTYPE html>
 <html>

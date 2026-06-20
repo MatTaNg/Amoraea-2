@@ -13,6 +13,7 @@ import { useAuth } from '@/shared/hooks/AuthProvider';
 import { isAmoraeaAdminConsoleEmail } from '@/constants/adminConsole';
 import { finalizeGateResultAfterPsychometrics } from '@features/onboarding/finalizeGateResultAfterPsychometrics';
 import { PSYCHOMETRICS_ENABLED } from '@features/psychometrics/interviewCompletionStatus';
+import { standardApplicantPostInterviewDestination } from '@features/onboarding/postInterviewLaunchMode';
 import type { InterviewStackRoute } from '@features/psychometrics/resolveInitialInterviewRoute';
 import {
   loadPsychometricsWebFontsOnce,
@@ -56,7 +57,7 @@ export function PsychometricsCompleteScreen({ navigation, route }: Props) {
       await queryClient.invalidateQueries({ queryKey: ['validationTrack', userId] });
       return;
     }
-    navigation.replace('PostInterview', { userId });
+    navigation.replace(standardApplicantPostInterviewDestination(), { userId });
   }, [navigation, queryClient, userId]);
 
   useEffect(() => {

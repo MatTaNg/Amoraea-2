@@ -29,6 +29,7 @@ import { useAuth } from '@features/authentication/hooks/useAuth';
 import { isAmoraeaAdminConsoleEmail } from '@/constants/adminConsole';
 import { showConfirmDialog, showSimpleAlert } from '@utilities/alerts/confirmDialog';
 import { resolveStandardPostInterviewStackRoute } from '@utilities/postInterviewProcessingGate';
+import { useRedirectPostInterviewLaunchWhenEnabled } from '@features/onboarding/postInterviewLaunchMode';
 import {
   fetchInterviewAttemptRevealSnapshot,
   fetchUserInterviewRevealPollRow,
@@ -40,6 +41,7 @@ import { useInterviewAttemptEgoRepair } from '@features/aria/hooks/useInterviewA
 import { DownloadPersonalReportButton } from '@features/psychometrics/DownloadPersonalReportButton';
 import { ValidationFlowOptInCard } from '@features/relationshipValidation/ValidationFlowOptInCard';
 import { navigateToDatingProfileOnboardingEntry } from '@/datingProfile/onboarding/navigateToDatingProfileOnboardingEntry';
+import { areDatingProfileAssessmentsComplete } from '@/data/services/assessmentService';
 
 const BG = '#0a0a0f';
 const ACCENT = '#3b82f6';
@@ -102,6 +104,7 @@ export const PostInterviewPassedScreen: React.FC<{ navigation: any; route: { par
   const queryClient = useQueryClient();
   const { user } = useAuth();
   const userId = route.params?.userId ?? '';
+  useRedirectPostInterviewLaunchWhenEnabled(navigation, userId);
   const isAdminEmail = isAmoraeaAdminConsoleEmail(user?.email ?? '');
   useInterviewAttemptEgoRepair({
     userId,
@@ -215,9 +218,10 @@ export const PostInterviewPassedScreen: React.FC<{ navigation: any; route: { par
           return;
         }
         try {
-          const [progress, profileResult] = await Promise.all([
+          const [progress, profileResult, assessmentsDone] = await Promise.all([
             modalOnboardingService.getProgress(uid),
             profilesRepo.getProfile(uid),
+            areDatingProfileAssessmentsComplete(uid),
           ]);
           if (cancelled) return;
           if (progress.success && progress.data?.currentStep) {
@@ -228,10 +232,10 @@ export const PostInterviewPassedScreen: React.FC<{ navigation: any; route: { par
           if (profileResult.success && profileResult.data) {
             const profile = profileResult.data as Record<string, unknown>;
             setDatingProfileFullyComplete(profile.onboardingCompleted === true);
-            setAssessmentsComplete(profile.assessmentsCompleted === true);
+            setAssessmentsComplete(assessmentsDone);
           } else {
             setDatingProfileFullyComplete(false);
-            setAssessmentsComplete(false);
+            setAssessmentsComplete(assessmentsDone);
           }
         } catch (e) {
           if (__DEV__) {
@@ -266,6 +270,7 @@ export const PostInterviewPassedScreen: React.FC<{ navigation: any; route: { par
     try {
       const progress = await modalOnboardingService.getProgress(uid);
       const profileResult = await profilesRepo.getProfile(uid);
+      const profileAssessmentsComplete = await areDatingProfileAssessmentsComplete(uid);
       let goEdit = datingProfileFullyComplete && assessmentsComplete;
       if (progress.success && progress.data?.currentStep) {
         const step = progress.data.currentStep;
@@ -273,7 +278,6 @@ export const PostInterviewPassedScreen: React.FC<{ navigation: any; route: { par
       }
       if (profileResult.success && profileResult.data) {
         const profile = profileResult.data as Record<string, unknown>;
-        const profileAssessmentsComplete = profile.assessmentsCompleted === true;
         const profileOnboardingComplete = profile.onboardingCompleted === true;
         goEdit = profileOnboardingComplete && profileAssessmentsComplete;
         setDatingProfileFullyComplete(profileOnboardingComplete);

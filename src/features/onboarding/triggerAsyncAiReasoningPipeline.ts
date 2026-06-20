@@ -17,6 +17,7 @@ export function triggerAsyncAiReasoningPipeline(userId: string, attemptId: strin
   });
 
   void (async () => {
+    const completedAt = new Date().toISOString();
     await supabase
       .from('interview_attempts')
       .update({
@@ -29,6 +30,47 @@ export function triggerAsyncAiReasoningPipeline(userId: string, attemptId: strin
       })
       .eq('id', attemptId)
       .eq('user_id', userId);
+
+    await supabase
+      .from('interview_attempts')
+      .update({ completed_at: completedAt })
+      .eq('id', attemptId)
+      .eq('user_id', userId)
+      .is('completed_at', null);
+
+    const { data: userRow } = await supabase
+      .from('users')
+      .select('interview_completed')
+      .eq('id', userId)
+      .maybeSingle();
+
+    if (userRow?.interview_completed !== true) {
+      const { data: attemptMeta } = await supabase
+        .from('interview_attempts')
+        .select('attempt_number, completed_at')
+        .eq('id', attemptId)
+        .eq('user_id', userId)
+        .maybeSingle();
+
+      const resolvedCompletedAt =
+        typeof attemptMeta?.completed_at === 'string' && attemptMeta.completed_at.length > 0
+          ? attemptMeta.completed_at
+          : completedAt;
+      const attemptNumber =
+        typeof attemptMeta?.attempt_number === 'number' && Number.isFinite(attemptMeta.attempt_number)
+          ? attemptMeta.attempt_number
+          : 1;
+
+      await supabase
+        .from('users')
+        .update({
+          interview_completed: true,
+          interview_completed_at: resolvedCompletedAt,
+          latest_attempt_id: attemptId,
+          interview_attempt_count: attemptNumber,
+        })
+        .eq('id', userId);
+    }
 
     await kickClientInterviewNarrativeIfPending(userId, attemptId, 'async_psychometrics_path');
   })();

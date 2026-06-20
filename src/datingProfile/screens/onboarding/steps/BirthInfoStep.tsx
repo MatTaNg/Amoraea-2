@@ -100,7 +100,6 @@ export const BirthInfoStep: React.FC<BirthInfoStepProps> = ({
         label="Birth Date *"
         value={birthDate}
         onValueChange={onBirthDateChange}
-        maxYear={new Date().getFullYear() - 18}
         error={showErrors && !birthDate.trim() ? "Birth date is required" : undefined}
       />
 

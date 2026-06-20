@@ -30,8 +30,8 @@ import {
   PSYCHOMETRICS_FONT_DISPLAY,
   PSYCHOMETRICS_TIP_CARD_BG,
   PSYCHOMETRICS_TIP_CARD_BORDER,
-  psychometricsScrollContent,
 } from './psychometricsTheme';
+import { useAssessmentScrollContent, useNarrowAssessmentViewport } from '@utilities/assessmentMobileLayout';
 
 export type WelcomeModalVariant = 'interviewFirst' | 'psychometricsFirst';
 
@@ -56,6 +56,8 @@ export function WelcomeModal({
   continueLabel,
 }: WelcomeModalProps) {
   const { signOut } = useAuth();
+  const scrollContentStyle = useAssessmentScrollContent({ alignItems: 'center' });
+  const narrowViewport = useNarrowAssessmentViewport();
 
   useEffect(() => {
     if (visible) loadPsychometricsWebFontsOnce();
@@ -138,7 +140,10 @@ export function WelcomeModal({
         {onOpenAdminPanel ? <PsychometricsAdminPanelButton onPress={onOpenAdminPanel} /> : null}
         <ScrollView
           style={styles.scroll}
-          contentContainerStyle={[styles.scrollContent, onBackPress ? styles.scrollContentWithBack : null]}
+          contentContainerStyle={[
+            scrollContentStyle,
+            onBackPress ? styles.scrollContentWithBack : null,
+          ]}
           showsVerticalScrollIndicator={false}
           keyboardShouldPersistTaps="handled"
         >
@@ -146,7 +151,7 @@ export function WelcomeModal({
             <FlameOrb state="idle" size={72} minimalGlow />
           </View>
 
-          <Text style={styles.title}>Welcome to Amoraea</Text>
+          <Text style={[styles.title, narrowViewport && styles.titleNarrow]}>Welcome to Amoraea</Text>
           <Text style={styles.subtitle}>
             Before you can be matched, we need to get to know you. These assessments help us understand
             how you show up in relationships and build a profile that reflects who you really are.
@@ -202,10 +207,6 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: PSYCHOMETRICS_BG,
   },
-  scrollContent: {
-    ...psychometricsScrollContent,
-    alignItems: 'center',
-  },
   scrollContentWithBack: {
     paddingTop: 56,
   },
@@ -221,6 +222,10 @@ const styles = StyleSheet.create({
     textAlign: 'center',
     marginBottom: spacing.sm,
     lineHeight: 34,
+  },
+  titleNarrow: {
+    fontSize: 24,
+    lineHeight: 30,
   },
   subtitle: {
     fontFamily: PSYCHOMETRICS_FONT_BODY,

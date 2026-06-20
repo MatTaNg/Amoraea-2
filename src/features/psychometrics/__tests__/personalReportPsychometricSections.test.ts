@@ -1,5 +1,5 @@
-import { describe, expect, it } from 'vitest';
-import { shouldNarrateInstrument } from '../../reports/narrativeCalibration';
+import { describe, expect, it } from '@jest/globals';
+import { shouldNarrateInstrument, REPORT_NARRATE_INSTRUMENT_OPTIONS } from '../../reports/narrativeCalibration';
 import type { GamingCorrectionResult } from '../computeGamingCorrection';
 import {
   buildBrsPersonalReportInstruction,
@@ -17,6 +17,9 @@ const emptyPsychometrics = {
   mspssFamilyScore: null,
   mspssFriendsScore: null,
   rfqScore: null,
+  gaspScore: null,
+  dweckScore: null,
+  rsesScore: null,
 };
 
 describe('shouldNarrateInstrument', () => {
@@ -37,6 +40,9 @@ describe('shouldNarrateInstrument', () => {
       explanation: 'test',
     };
     expect(shouldNarrateInstrument(3.2, 'brs', gaming, [])).toBe(false);
+    expect(
+      shouldNarrateInstrument(3.2, 'brs', gaming, [], REPORT_NARRATE_INSTRUMENT_OPTIONS),
+    ).toBe(true);
   });
 
   it('returns false when straight-line flag matches instrument', () => {
@@ -67,6 +73,26 @@ describe('personalReportPsychometricSections', () => {
     );
     expect(block).toMatch(/How You Recover From Hard Periods/i);
     expect(block).toMatch(/omit instrument name in report/i);
+  });
+
+  it('includes BRS instruction when gaming correction stripped BRS from scoring', () => {
+    const gaming: GamingCorrectionResult = {
+      correctedModifier: 0,
+      originalModifier: 0,
+      correctionApplied: 0,
+      additionalPenalty: 0,
+      strippedInstruments: ['brs'],
+      allPositivesStripped: false,
+      correctionLevel: 1,
+      activeTriggers: [],
+      explanation: 'test',
+    };
+    const block = buildBrsPersonalReportInstruction(
+      { ...emptyPsychometrics, brsScore: 3.8 },
+      gaming,
+      [],
+    );
+    expect(block).toMatch(/How You Recover From Hard Periods/i);
   });
 
   it('integrates SCS-SF subscale pattern guidance', () => {

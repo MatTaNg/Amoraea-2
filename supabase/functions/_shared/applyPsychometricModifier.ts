@@ -281,7 +281,14 @@ export async function applyPsychometricModifierToAttempt(
   );
 
   const depthSignalModifiedScore =
-    (attempt.modified_weighted_score as number | null) ?? (attempt.weighted_score as number | null) ?? 0;
+    finiteNumberOrNull(attempt.modified_weighted_score) ?? finiteNumberOrNull(attempt.weighted_score);
+  if (depthSignalModifiedScore == null) {
+    console.warn('[PsychometricModifier] interview rollup missing — refusing to finalize psychometric gate', {
+      userId,
+      attemptId,
+    });
+    return { applied: false, skipReason: 'interview_scores_not_ready' };
+  }
   const finalModifiedScore =
     Math.round((depthSignalModifiedScore + correctedPsychometricModifier) * 100) / 100;
 

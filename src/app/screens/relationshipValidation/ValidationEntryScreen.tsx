@@ -21,6 +21,7 @@ const STEP_TO_SCREEN: Record<string, string> = {
   welcome: 'ValidationEntry',
   partner_email: 'ValidationPartnerEmail',
   pre_assessment: 'ValidationPreAssessment',
+  relationship_test_mode: 'ValidationRelationshipTestMode',
   psychometrics: 'ValidationPsychometricsHub',
   report: 'ValidationReport',
 };

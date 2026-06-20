@@ -20,12 +20,15 @@ import {
   savePartnerEmailEntered,
   startNewPartnerComparison,
   fetchComparisonByPartnerEmail,
+  fetchRelationshipValidationRecord,
 } from '@features/relationshipValidation/relationshipValidationRepo';
 import {
+  needsRelationshipTestModeStep,
   resolveValidationFlowStepAfterPartnerSwitch,
   syncValidationPartnerPair,
 } from '@features/relationshipValidation/relationshipValidationService';
 import type { RelationshipValidationStackParamList } from '@app/navigation/RelationshipValidationNavigator';
+import { useAssessmentScrollContent } from '@utilities/assessmentMobileLayout';
 
 type Nav = {
   navigate: (screen: string) => void;
@@ -35,11 +38,16 @@ type Nav = {
 const STEP_TO_SCREEN: Record<string, string> = {
   partner_email: 'ValidationPartnerEmail',
   pre_assessment: 'ValidationPreAssessment',
+  relationship_test_mode: 'ValidationRelationshipTestMode',
   psychometrics: 'ValidationPsychometricsHub',
   report: 'ValidationReport',
 };
 
 async function routeAfterPartnerEmail(userId: string, email: string): Promise<string> {
+  const record = await fetchRelationshipValidationRecord(userId);
+  if (needsRelationshipTestModeStep(record)) {
+    return 'ValidationRelationshipTestMode';
+  }
   const comparison = await fetchComparisonByPartnerEmail(userId, email);
   if (!comparison) return 'ValidationPreAssessment';
   const step = await resolveValidationFlowStepAfterPartnerSwitch(userId, comparison.id);
@@ -53,6 +61,7 @@ type Props = {
 };
 
 export function ValidationPartnerEmailScreen({ userId, navigation, route }: Props) {
+  const scrollContentStyle = useAssessmentScrollContent({ flexGrow: 1, justifyContent: 'center' });
   const newComparison = route.params?.newComparison === true;
   const [email, setEmail] = useState('');
   const [userEmail, setUserEmail] = useState<string | null>(null);
@@ -103,7 +112,7 @@ export function ValidationPartnerEmailScreen({ userId, navigation, route }: Prop
         style={styles.flex}
         behavior={Platform.OS === 'ios' ? 'padding' : undefined}
       >
-        <ScrollView contentContainerStyle={styles.scroll} keyboardShouldPersistTaps="handled">
+        <ScrollView contentContainerStyle={scrollContentStyle} keyboardShouldPersistTaps="handled">
           {newComparison ? (
             <Pressable
               onPress={() => navigation.replace('ValidationReport')}
@@ -134,7 +143,7 @@ export function ValidationPartnerEmailScreen({ userId, navigation, route }: Prop
             keyboardType="email-address"
             textContentType="emailAddress"
             autoComplete="email"
-            style={authStyles.input}
+            style={[authStyles.input, styles.emailInput]}
           />
           {error ? <Text style={authStyles.errorText}>{error}</Text> : null}
           <Pressable
@@ -153,13 +162,8 @@ export function ValidationPartnerEmailScreen({ userId, navigation, route }: Prop
 const styles = StyleSheet.create({
   safeBg: { flex: 1, backgroundColor: '#05060D' },
   flex: { flex: 1 },
-  scroll: {
-    flexGrow: 1,
-    padding: 24,
-    justifyContent: 'center',
-    maxWidth: 480,
-    width: '100%',
-    alignSelf: 'center',
+  emailInput: {
+    fontSize: 16,
   },
   title: {
     fontSize: 24,

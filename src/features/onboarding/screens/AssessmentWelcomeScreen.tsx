@@ -5,8 +5,12 @@ import { useAuth } from '@/shared/hooks/AuthProvider';
 import { MarketResearchModal } from '@features/onboarding/MarketResearchModal';
 import { WelcomeModal } from '@features/psychometrics/WelcomeModal';
 import type { InterviewStackRoute } from '@features/psychometrics/resolveInitialInterviewRoute';
+import {
+  fetchUserLoginRoutingRow,
+  resolveInterviewCompletedForUser,
+} from '@features/psychometrics/interviewCompletionStatus';
 import { storedInterviewHasResumableScenarioProgress } from '@utilities/interviewResumeCursor';
-import { loadInterviewFromStorage } from '@utilities/storage/InterviewStorage';
+import { clearInterviewFromStorage, loadInterviewFromStorage } from '@utilities/storage/InterviewStorage';
 import { PSYCHOMETRICS_ACCENT, PSYCHOMETRICS_BG } from '@features/psychometrics/psychometricsTheme';
 
 type Props = {
@@ -32,6 +36,17 @@ export function AssessmentWelcomeScreen({ navigation, route }: Props) {
     }
     let cancelled = false;
     void (async () => {
+      const routingRow = await fetchUserLoginRoutingRow(userId);
+      const interviewCompleted = await resolveInterviewCompletedForUser(userId, routingRow);
+      if (cancelled) return;
+      if (interviewCompleted) {
+        await clearInterviewFromStorage(userId);
+        void queryClient.invalidateQueries({ queryKey: ['initialInterviewRoute', userId] });
+        void queryClient.invalidateQueries({ queryKey: ['profile', userId] });
+        navigation.replace('InterviewComplete', { userId });
+        return;
+      }
+
       const saved = await loadInterviewFromStorage(userId);
       if (cancelled) return;
       if (saved != null && storedInterviewHasResumableScenarioProgress(saved)) {
@@ -43,7 +58,7 @@ export function AssessmentWelcomeScreen({ navigation, route }: Props) {
     return () => {
       cancelled = true;
     };
-  }, [navigation, userId]);
+  }, [navigation, queryClient, userId]);
 
   function handleContinue() {
     if (!userId || needsMarketResearch) return;

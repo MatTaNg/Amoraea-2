@@ -1,3 +1,5 @@
+import { standardApplicantPostInterviewDestination } from '@features/onboarding/postInterviewLaunchMode';
+
 type StackNavigationLike = {
   getParent: () => StackNavigationLike | undefined;
   canGoBack?: () => boolean;
@@ -26,9 +28,11 @@ export function exitDatingProfileOnboardingToPostInterview(
   }
   if (!userId) return;
 
+  const destination = standardApplicantPostInterviewDestination();
+
   if (nestedNav?.navigate) {
-    nestedNav.navigate('PostInterviewPassed', { userId });
+    nestedNav.navigate(destination, { userId });
     return;
   }
-  navigation.navigate?.('PostInterviewPassed', { userId });
+  navigation.navigate?.(destination, { userId });
 }

@@ -7,6 +7,7 @@ import { shouldUseRelationshipValidationNavigator } from './validationShellRouti
 /** Main-app routes that standard onboarding uses after the AI interview. */
 export const STANDARD_POST_INTERVIEW_STACK_ROUTES = new Set([
   'PostInterview',
+  'PostInterviewLaunch',
   'PostInterviewProcessing',
   'PostInterviewPassed',
   'PostInterviewFailed',

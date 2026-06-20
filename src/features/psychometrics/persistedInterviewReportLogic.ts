@@ -1,4 +1,4 @@
-import type { PartialReportData } from './generatePartialReport';
+import type { PartialReportData } from './partialReportPrompt';
 import type { ReportData } from './personalReportData';
 
 export type StoredInterviewReports = {
@@ -49,6 +49,10 @@ export function computePartialReportSourceHash(data: PartialReportData): string 
     mentalizing_overcertainty_count: data.attempt?.mentalizing_overcertainty_count ?? null,
     finalGatePass: data.attempt?.finalGatePass ?? null,
     gateFailReasons: data.attempt?.gateFailReasons ?? [],
+    mentalizingProfile: data.attempt?.mentalizingProfile ?? null,
+    moment4Profile: data.attempt?.moment4Profile ?? null,
+    moment5Profile: data.attempt?.moment5Profile ?? null,
+    scenarioKeyEvidence: data.attempt?.scenarioKeyEvidence ?? null,
   });
 }
 

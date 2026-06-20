@@ -4,6 +4,7 @@
  */
 
 import type { AIReasoningResult } from './generateAIReasoning';
+import { logNarrativeEvidenceAudit } from '@features/reports/narrativeEvidenceAudit';
 
 export const PILLAR_CONSTRUCT_KEYS = [
   'mentalizing',
@@ -225,7 +226,7 @@ export function prepareAIReasoningForPersistence(
   reasoning: AIReasoningResult,
   pillarScores: Record<string, number>,
   unassessedMarkers: string[] = [],
-  weightedScore: number | null = null
+  weightedScore: number | null = null,
 ): Record<string, unknown> {
   if (weightedScore != null && Number.isFinite(weightedScore)) {
     validateAndCorrectReasoningScores(reasoning, weightedScore, pillarScores);
@@ -234,6 +235,14 @@ export function prepareAIReasoningForPersistence(
   }
   ensureOverallGrowthAreas(reasoning, unassessedMarkers);
   const asRecord = reasoning as unknown as Record<string, unknown>;
+  const claimMap = asRecord._narrative_evidence_map;
+  if (claimMap && typeof claimMap === 'object') {
+    logNarrativeEvidenceAudit(
+      { pipeline: 'ai_reasoning', slices: [] },
+      claimMap as Record<string, string[] | string>,
+    );
+    delete asRecord._narrative_evidence_map;
+  }
   const recovered = recoverFailedReasoningPayload(asRecord);
   return recovered ?? stripReasoningFailureMeta(asRecord);
 }

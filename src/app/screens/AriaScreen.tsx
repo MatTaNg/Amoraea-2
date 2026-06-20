@@ -186,8 +186,10 @@ import { applyPsychometricModifierToAttempt } from '@features/psychometrics/appl
 import {
   PSYCHOMETRICS_ENABLED,
   fetchMostRecentCompletedInterviewAttemptId,
+  resolveInterviewCompletedForUser,
 } from '@features/psychometrics/interviewCompletionStatus';
 import { triggerAsyncAiReasoningPipeline } from '@features/onboarding/triggerAsyncAiReasoningPipeline';
+import { standardApplicantPostInterviewDestination } from '@features/onboarding/postInterviewLaunchMode';
 import { normalizeGateFailDetailForPersist } from '@features/psychometrics/gateFailDetailForPersist';
 import {
   computeSkipPenaltyGateComputation,
@@ -4930,12 +4932,12 @@ function replaceWithStandardApplicantPostInterviewHandoffForUser(
     return;
   }
   void remoteLog('[RESULTS_SCREEN_TRANSITION]', {
-    destination: 'PostInterview',
+    destination: standardApplicantPostInterviewDestination(),
     userId,
     interviewSessionId: meta?.interviewSessionId ?? null,
     source: meta?.source ?? 'standard_handoff',
   });
-  navigation.replace('PostInterview', { userId });
+  navigation.replace(standardApplicantPostInterviewDestination(), { userId });
 }
 
 /** Same cohort as `checkInterviewStatus` → PostInterview (not admin). */
@@ -6843,9 +6845,7 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
     isInterviewCompleteRef.current = true;
     if (interviewStatusRef.current !== 'congratulations') {
       interviewStatusRef.current = 'preparing_results';
-      if (!PSYCHOMETRICS_ENABLED) {
-        setInterviewStatus('preparing_results');
-      }
+      setInterviewStatus('preparing_results');
     }
   }, [userId, isAdmin]);
 
@@ -6867,14 +6867,11 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
           ? data.latest_attempt_id
           : null;
       let interviewDoneForRouting = data?.interview_completed === true;
-      if (!interviewDoneForRouting && latestAttemptIdForRouting) {
-        const { data: latestAttemptMeta } = await supabase
-          .from('interview_attempts')
-          .select('completed_at')
-          .eq('id', latestAttemptIdForRouting)
-          .eq('user_id', userId)
-          .maybeSingle();
-        interviewDoneForRouting = !!latestAttemptMeta?.completed_at;
+      if (!interviewDoneForRouting) {
+        interviewDoneForRouting = await resolveInterviewCompletedForUser(userId, {
+          interview_completed: data?.interview_completed,
+          latest_attempt_id: latestAttemptIdForRouting,
+        });
       }
       /** Standard applicants: hand off to neutral post-interview review (no in-app scores). */
       const shouldHandOffToPostInterview =
@@ -6895,15 +6892,38 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
       }
 
       /**
-       * DB says interview is done — hand off before local-storage resume can mark `in_progress` and block this path.
+       * DB says interview is done — wait for rollup before post-interview handoff.
        * Also recovers refresh at `/interview` when stale checkpoint data is still on device.
        */
       if (shouldHandOffToPostInterview) {
-        await clearInterviewFromStorage(userId);
-        replaceWithStandardApplicantPostInterviewHandoffForUser(navigation, userId, {
-          interviewSessionId: interviewSessionIdRef.current,
-          source: 'checkInterviewStatus_db_completed',
-        });
+        const aidForHandoff = latestAttemptIdForRouting;
+        if (typeof aidForHandoff === 'string' && aidForHandoff.length > 0) {
+          interviewStatusRef.current = 'preparing_results';
+          setInterviewStatus('preparing_results');
+          if (userId) markPreparingResultsSession(userId);
+          const ready = await waitForInterviewAttemptScoringReady(supabase, aidForHandoff, {
+            maxMs: 90_000,
+            intervalMs: 500,
+          });
+          if (ready) {
+            setPendingScoringSyncAttemptId(null);
+            clearPreparingResultsSession(userId);
+            await clearInterviewFromStorage(userId);
+            replaceWithStandardApplicantPostInterviewHandoffForUser(navigation, userId, {
+              interviewSessionId: interviewSessionIdRef.current,
+              source: 'checkInterviewStatus_db_completed',
+              attemptId: aidForHandoff,
+            });
+          } else {
+            setPendingScoringSyncAttemptId(aidForHandoff);
+          }
+        } else {
+          await clearInterviewFromStorage(userId);
+          replaceWithStandardApplicantPostInterviewHandoffForUser(navigation, userId, {
+            interviewSessionId: interviewSessionIdRef.current,
+            source: 'checkInterviewStatus_db_completed_no_attempt',
+          });
+        }
         return;
       }
 
@@ -6957,14 +6977,6 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
         }
         setInterviewStatus('not_started');
       } else {
-        if (PSYCHOMETRICS_ENABLED && isInterviewAppRoute && !isAdminEmail) {
-          await clearInterviewFromStorage(userId);
-          replaceWithStandardApplicantPostInterviewHandoffForUser(navigation, userId, {
-            interviewSessionId: interviewSessionIdRef.current,
-            source: 'checkInterviewStatus_interview_done_recovery',
-          });
-          return;
-        }
         const aid = data.latest_attempt_id as string | null | undefined;
         if (typeof aid === 'string' && aid.length > 0) {
           const { data: attemptStillThere } = await supabase
@@ -6980,9 +6992,9 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
             setInterviewStatus('not_started');
             return;
           }
-          if (!PSYCHOMETRICS_ENABLED) {
-            setInterviewStatus('preparing_results');
-          }
+          interviewStatusRef.current = 'preparing_results';
+          setInterviewStatus('preparing_results');
+          if (userId) markPreparingResultsSession(userId);
           const ready = await waitForInterviewAttemptScoringReady(supabase, aid, {
             maxMs: 90_000,
             intervalMs: 500,
@@ -6991,13 +7003,25 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
             setPendingScoringSyncAttemptId(null);
             setAnalysisAttemptId(aid);
             clearPreparingResultsSession(userId);
-            setInterviewStatus('congratulations');
+            if (shouldHandOffToPostInterview) {
+              await clearInterviewFromStorage(userId);
+              replaceWithStandardApplicantPostInterviewHandoffForUser(navigation, userId, {
+                interviewSessionId: interviewSessionIdRef.current,
+                source: 'checkInterviewStatus_interview_done_scoring_ready',
+                attemptId: aid,
+              });
+            } else {
+              setInterviewStatus('congratulations');
+            }
           } else {
             setPendingScoringSyncAttemptId(aid);
-            if (!PSYCHOMETRICS_ENABLED) {
-              setInterviewStatus('preparing_results');
-            }
           }
+        } else if (shouldHandOffToPostInterview) {
+          await clearInterviewFromStorage(userId);
+          replaceWithStandardApplicantPostInterviewHandoffForUser(navigation, userId, {
+            interviewSessionId: interviewSessionIdRef.current,
+            source: 'checkInterviewStatus_interview_done_no_attempt',
+          });
         } else {
           setInterviewStatus('congratulations');
         }
@@ -7021,7 +7045,6 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
     const id = pendingScoringSyncAttemptId;
     (async () => {
       const ok = await waitForInterviewAttemptScoringReady(supabase, id, {
-        // Was 10m — that matched user reports of "stuck" with no new info. Same behavior after timeout: advance anyway.
         maxMs: 180_000,
         intervalMs: 600,
       });
@@ -7029,8 +7052,9 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
       if (!ok) {
         await remoteLog('[WARN] pending_scoring_sync_poll_exhausted', {
           attemptId: id,
-          action: 'advance_anyway',
+          action: 'stay_on_preparing_results',
         });
+        return;
       }
       setPendingScoringSyncAttemptId(null);
       setAnalysisAttemptId(id);
@@ -7038,16 +7062,36 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
       await runCommunicationStylePipelineAfterSave(userId, id, interviewSessionIdRef.current, {
         platform: getSessionLogRuntime().platform,
       });
+      const { data: sessionData } = await supabase.auth.getSession();
+      const sessionEmail = sessionData.session?.user?.email ?? null;
+      const handoff = await resolveStandardPostInterviewHandoffEligible(userId, {
+        isInterviewAppRoute,
+        sessionEmail,
+        profileEmail: user?.email,
+      });
+      if (handoff.shouldHandOff || isValidationTrackInterviewHandoffActive()) {
+        await clearInterviewFromStorage(userId);
+        replaceWithStandardApplicantPostInterviewHandoffForUser(navigation, userId, {
+          interviewSessionId: interviewSessionIdRef.current,
+          source: 'pending_scoring_sync',
+          attemptId: id,
+        });
+        await remoteLog('[8] post_scoring_handoff', {
+          via: 'pending_scoring_sync',
+          attemptId: id,
+        });
+        return;
+      }
       setInterviewStatus('congratulations');
       await remoteLog('[8] setInterviewStatus called', {
         screen: 'congratulations',
-        via: ok ? 'pending_scoring_sync' : 'pending_scoring_sync_timeout',
+        via: 'pending_scoring_sync',
       });
     })();
     return () => {
       cancelled = true;
     };
-  }, [pendingScoringSyncAttemptId, userId]);
+  }, [pendingScoringSyncAttemptId, userId, navigation, isInterviewAppRoute, user?.email]);
 
   // Failsafe: never stay on "Loading..." forever (e.g. slow auth in incognito)
   useEffect(() => {
@@ -9017,18 +9061,13 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
         }
       }
       interviewStatusRef.current = 'preparing_results';
-      if (!PSYCHOMETRICS_ENABLED) {
-        setInterviewStatus('preparing_results');
-      }
+      setInterviewStatus('preparing_results');
       if (userId) markPreparingResultsSession(userId);
       setPendingCompletion(true);
       setIsWaiting(false);
-      if (userId) {
-        replaceWithStandardApplicantPostInterviewHandoffForUser(navigation, userId, {
-          interviewSessionId: interviewSessionIdRef.current,
-          source: `post_closing_handoff_${source}`,
-          attemptId: interviewSessionAttemptIdRef.current,
-        });
+      const attemptForPoll = interviewSessionAttemptIdRef.current;
+      if (userId && typeof attemptForPoll === 'string' && attemptForPoll.length > 0) {
+        setPendingScoringSyncAttemptId(attemptForPoll);
       }
       return true;
     },
@@ -12450,9 +12489,7 @@ export const AriaScreen: React.FC<{ navigation: any; route: any }> = ({ navigati
           }
         }
         interviewStatusRef.current = 'preparing_results';
-        if (!PSYCHOMETRICS_ENABLED) {
-          setInterviewStatus('preparing_results');
-        }
+        setInterviewStatus('preparing_results');
         if (userId) markPreparingResultsSession(userId);
         setPendingCompletion(true);
         setIsWaiting(false);
@@ -16313,17 +16350,12 @@ The participant **confirmed** skipping after the skip confirmation prompt. In **
           }
         }
         interviewStatusRef.current = 'preparing_results';
-        if (!PSYCHOMETRICS_ENABLED) {
-          setInterviewStatus('preparing_results');
-        }
+        setInterviewStatus('preparing_results');
         if (userId) markPreparingResultsSession(userId);
         setPendingCompletion(true);
-        if (userId) {
-          replaceWithStandardApplicantPostInterviewHandoffForUser(navigation, userId, {
-            interviewSessionId: interviewSessionIdRef.current,
-            source: 'interview_complete_token',
-            attemptId: interviewSessionAttemptIdRef.current,
-          });
+        const attemptForPoll = interviewSessionAttemptIdRef.current;
+        if (userId && typeof attemptForPoll === 'string' && attemptForPoll.length > 0) {
+          setPendingScoringSyncAttemptId(attemptForPoll);
         }
         return;
       }
@@ -16813,9 +16845,7 @@ The participant **confirmed** skipping after the skip confirmation prompt. In **
             }
           }
           interviewStatusRef.current = 'preparing_results';
-          if (!PSYCHOMETRICS_ENABLED) {
-            setInterviewStatus('preparing_results');
-          }
+          setInterviewStatus('preparing_results');
           if (userId) markPreparingResultsSession(userId);
           setPendingCompletion(true);
           kickCompletionScoring('closing_duplicate_suppressed_handoff', transcriptForScoring);
@@ -16903,9 +16933,7 @@ The participant **confirmed** skipping after the skip confirmation prompt. In **
             scoreInterviewAttemptedRef.current = true;
           }
           interviewStatusRef.current = 'preparing_results';
-          if (!PSYCHOMETRICS_ENABLED) {
-            setInterviewStatus('preparing_results');
-          }
+          setInterviewStatus('preparing_results');
           if (userId) markPreparingResultsSession(userId);
           setPendingCompletion(true);
           return;
@@ -17030,9 +17058,7 @@ The participant **confirmed** skipping after the skip confirmation prompt. In **
             }
           }
           interviewStatusRef.current = 'preparing_results';
-          if (!PSYCHOMETRICS_ENABLED) {
-            setInterviewStatus('preparing_results');
-          }
+          setInterviewStatus('preparing_results');
           if (userId) markPreparingResultsSession(userId);
           setPendingCompletion(true);
           kickCompletionScoring('elongating_suppressed_m5_close', transcriptForScoring);
@@ -17415,9 +17441,7 @@ The participant **confirmed** skipping after the skip confirmation prompt. In **
             }
           }
           interviewStatusRef.current = 'preparing_results';
-          if (!PSYCHOMETRICS_ENABLED) {
-            setInterviewStatus('preparing_results');
-          }
+          setInterviewStatus('preparing_results');
           if (userId) markPreparingResultsSession(userId);
           setPendingCompletion(true);
           return;
@@ -19526,9 +19550,7 @@ The participant **confirmed** skipping after the skip confirmation prompt. In **
       isInterviewCompleteRef.current = true;
       if (userId) markPreparingResultsSession(userId);
       interviewStatusRef.current = 'preparing_results';
-      if (!PSYCHOMETRICS_ENABLED) {
-        setInterviewStatus('preparing_results');
-      }
+      setInterviewStatus('preparing_results');
       void remoteLog('[REENTRY_POST_CLOSING_HANDOFF]', {
         source,
         transcriptLen: transcript.length,
@@ -20882,9 +20904,7 @@ The participant **confirmed** skipping after the skip confirmation prompt. In **
       try {
         /** Show full-screen "Preparing your results" before rescore/DB/edge — avoids long awkward mic UI (rescore can take 15s+ per scenario). */
         interviewStatusRef.current = 'preparing_results';
-        if (!PSYCHOMETRICS_ENABLED) {
-          setInterviewStatus('preparing_results');
-        }
+        setInterviewStatus('preparing_results');
         void persistInterviewAttemptSessionLifecycle(interviewSessionAttemptIdRef.current, 'scoring');
         setStatus('scoring');
         await ensureValidSession();
@@ -21702,14 +21722,13 @@ The participant **confirmed** skipping after the skip confirmation prompt. In **
         });
         await applyPsychometricModifierToAttempt(userId, attemptId);
         await clearInterviewFromStorage(userId);
-        await remoteLog('[STANDARD] application saved; post-interview (server scoring complete)', {
+        await remoteLog('[STANDARD] application saved; awaiting rollup before post-interview', {
           attemptId,
         });
-        replaceWithStandardApplicantPostInterviewHandoffForUser(navigation, userId, {
-          interviewSessionId: interviewSessionIdRef.current,
-          source: 'scoreInterview_standard_server_delegate',
-          attemptId,
-        });
+        interviewStatusRef.current = 'preparing_results';
+        setInterviewStatus('preparing_results');
+        if (userId) markPreparingResultsSession(userId);
+        setPendingScoringSyncAttemptId(attemptId);
         setStatus('results');
         serverDelegateOk = true;
       } catch (err) {
@@ -21718,23 +21737,19 @@ The participant **confirmed** skipping after the skip confirmation prompt. In **
         });
       }
       if (serverDelegateOk) {
-        if (!PSYCHOMETRICS_ENABLED) {
-          const attemptIdForNarrativeBackup = interviewSessionAttemptIdRef.current;
-          if (userId && attemptIdForNarrativeBackup) {
-            void kickClientInterviewNarrativeIfPending(
-              userId,
-              attemptIdForNarrativeBackup,
-              'scoreInterview_standard_server_delegate'
-            );
-          }
+        const attemptIdForNarrativeBackup = interviewSessionAttemptIdRef.current;
+        if (userId && attemptIdForNarrativeBackup) {
+          void kickClientInterviewNarrativeIfPending(
+            userId,
+            attemptIdForNarrativeBackup,
+            'scoreInterview_standard_server_delegate'
+          );
         }
         return;
       }
     }
     interviewStatusRef.current = 'preparing_results';
-    if (!PSYCHOMETRICS_ENABLED || fromValidationTrack) {
-      setInterviewStatus('preparing_results');
-    }
+    setInterviewStatus('preparing_results');
     if (userId) markPreparingResultsSession(userId);
     const sessionAttemptForPoll = interviewSessionAttemptIdRef.current;
     if (typeof sessionAttemptForPoll === 'string' && sessionAttemptForPoll.length > 0) {
@@ -21779,10 +21794,10 @@ The participant **confirmed** skipping after the skip confirmation prompt. In **
       const standardNoApi = isOnboardingFlow && !!userId && !isAdminConsoleAccount;
       if (standardNoApi) {
         await ensureShareableReferralCodeForReferrer(userId);
-        replaceWithStandardApplicantPostInterviewHandoffForUser(navigation, userId, {
-          interviewSessionId: interviewSessionIdRef.current,
-          source: 'scoreInterview_standard_no_anthropic',
-        });
+        const attemptIdForPoll = interviewSessionAttemptIdRef.current;
+        if (typeof attemptIdForPoll === 'string' && attemptIdForPoll.length > 0) {
+          setPendingScoringSyncAttemptId(attemptIdForPoll);
+        }
         setStatus('results');
         return;
       }
@@ -23096,8 +23111,6 @@ The participant **confirmed** skipping after the skip confirmation prompt. In **
               });
               await ensureShareableReferralCodeForReferrer(userId);
               queryClient.invalidateQueries({ queryKey: ['profile', userId] });
-              interviewJustCompletedInSession = true;
-              await new Promise((resolve) => setTimeout(resolve, 100));
               writeSessionLog({
                 userId,
                 attemptId,
@@ -23105,11 +23118,8 @@ The participant **confirmed** skipping after the skip confirmation prompt. In **
                 eventData: { session_correlation_id: interviewSessionIdRef.current, path: 'standard_onboarding_post_insert' },
                 platform: getSessionLogRuntime().platform,
               });
-              replaceWithStandardApplicantPostInterviewHandoffForUser(navigation, userId, {
-                interviewSessionId: interviewSessionIdRef.current,
-                source: 'scoreInterview_alpha_insert_standard_onboarding',
-              });
-              await remoteLog('[8] standard_onboarding → PostInterview after interview_attempts insert', {
+              setPendingScoringSyncAttemptId(attemptId);
+              await remoteLog('[8] standard_onboarding awaiting rollup before post-interview', {
                 attemptId,
               });
             } else {
@@ -23135,28 +23145,10 @@ The participant **confirmed** skipping after the skip confirmation prompt. In **
                 await remoteLog('[8] setInterviewStatus called', { screen: 'congratulations' });
                 if (__DEV__) console.log('=== [8] Navigation complete ===');
               } else {
-                await remoteLog('[WARN] Attempt row scoring fields not confirmed after extended wait — advancing anyway', {
+                await remoteLog('[WARN] Attempt row scoring fields not confirmed after extended wait — stay on preparing_results', {
                   attemptId,
                 });
-                if (__DEV__) {
-                  console.warn('[Aria] Scoring row poll inconclusive; leaving preparing_results → congratulations', {
-                    attemptId,
-                  });
-                }
-                setPendingScoringSyncAttemptId(null);
-                setAnalysisAttemptId(attemptId);
-                await remoteLog('[6] setAnalysisAttemptId called', { id: attemptId, via: 'scoring_ready_fallback' });
-                interviewJustCompletedInSession = true;
-                await new Promise((resolve) => setTimeout(resolve, 100));
-                writeSessionLog({
-                  userId,
-                  attemptId,
-                  eventType: 'session_complete',
-                  eventData: { session_correlation_id: interviewSessionIdRef.current, via: 'scoring_ready_fallback' },
-                  platform: getSessionLogRuntime().platform,
-                });
-                setInterviewStatus('congratulations');
-                await remoteLog('[8] setInterviewStatus called', { screen: 'congratulations', via: 'scoring_ready_fallback' });
+                setPendingScoringSyncAttemptId(attemptId);
               }
               void triggerResultsReadyEmail(userId, attemptId);
             }
@@ -23447,16 +23439,12 @@ The participant **confirmed** skipping after the skip confirmation prompt. In **
               attemptIdForUserRow: attemptIdForCommit,
               gateOkForInterviewPassed: completionGateHolistic == null || completionGateHolistic.ok,
             });
+            setPendingScoringSyncAttemptId(attemptIdForCommit);
           }
           await ensureShareableReferralCodeForReferrer(userId!);
           if (!ALPHA_MODE) {
             queryClient.invalidateQueries({ queryKey: ['profile', userId] });
           }
-          replaceWithStandardApplicantPostInterviewHandoffForUser(navigation, userId!, {
-            interviewSessionId: interviewSessionIdRef.current,
-            source: 'scoreInterview_non_alpha_standard',
-            attemptId: attemptIdForCommit,
-          });
           setStatus('results');
         } else {
           void remoteLog('[RESULTS_SCREEN_TRANSITION]', {
@@ -23506,10 +23494,10 @@ The participant **confirmed** skipping after the skip confirmation prompt. In **
       const standardCatch = isOnboardingFlow && !!userId && !isAdminConsoleAccount;
       if (standardCatch) {
         await ensureShareableReferralCodeForReferrer(userId);
-        replaceWithStandardApplicantPostInterviewHandoffForUser(navigation, userId, {
-          interviewSessionId: interviewSessionIdRef.current,
-          source: 'scoreInterview_catch_standard_onboarding',
-        });
+        const attemptIdForPoll = interviewSessionAttemptIdRef.current;
+        if (typeof attemptIdForPoll === 'string' && attemptIdForPoll.length > 0) {
+          setPendingScoringSyncAttemptId(attemptIdForPoll);
+        }
         setStatus('results');
         return;
       }
@@ -23950,10 +23938,7 @@ The participant **confirmed** skipping after the skip confirmation prompt. In **
       interviewStatus === 'under_review' ||
       interviewStatus === 'congratulations');
 
-  if (
-    validationPreparingResultsVisible ||
-    (interviewStatus === 'preparing_results' && !PSYCHOMETRICS_ENABLED)
-  ) {
+  if (validationPreparingResultsVisible || interviewStatus === 'preparing_results') {
     return <PreparingResultsView />;
   }
   /*

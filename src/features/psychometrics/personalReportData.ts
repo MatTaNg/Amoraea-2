@@ -10,6 +10,10 @@ import {
   type PersonalReportScenarioKeyEvidence,
 } from './personalReportNarrativeGuidance';
 import {
+  buildScenarioScoreGroundingFromAttemptRows,
+  type ScenarioScoreGrounding,
+} from '@features/reports/scenarioScoreGrounding';
+import {
   parsePsychometricStraightLineFlags,
   type PersonalReportPsychometricScores,
 } from './personalReportPsychometricSections';
@@ -57,6 +61,7 @@ export interface ReportData {
     mentalizingProfile: PersonalReportMentalizingProfile | null;
     moment5Profile: PersonalReportMoment5Profile | null;
     scenarioKeyEvidence: PersonalReportScenarioKeyEvidence | null;
+    scenarioScoreGrounding: ScenarioScoreGrounding | null;
   } | null;
 }
 
@@ -79,6 +84,8 @@ export function buildReportDataFromRows(
     psychometrics_mspss_family_score?: number | null;
     psychometrics_mspss_friends_score?: number | null;
     psychometrics_rfq_score?: number | null;
+    psychometrics_gasp_score?: number | null;
+    psychometrics_dweck_score?: number | null;
     psychometric_straight_line_flags?: unknown;
   } | null,
   attempt: {
@@ -173,6 +180,11 @@ export function buildReportDataFromRows(
       ? (attempt.gaming_correction as GamingCorrectionResult)
       : null;
 
+  const rollupTrusted =
+    attempt != null &&
+    typeof attempt.weighted_score === 'number' &&
+    Number.isFinite(attempt.weighted_score);
+
   return {
     user: {
       name: displayName,
@@ -212,6 +224,11 @@ export function buildReportDataFromRows(
             : null,
         rfqScore:
           typeof user?.psychometrics_rfq_score === 'number' ? user.psychometrics_rfq_score : null,
+        gaspScore:
+          typeof user?.psychometrics_gasp_score === 'number' ? user.psychometrics_gasp_score : null,
+        dweckScore:
+          typeof user?.psychometrics_dweck_score === 'number' ? user.psychometrics_dweck_score : null,
+        rsesScore: user?.psychometrics_rses_score ?? null,
       },
       psychometricStraightLineFlags: parsePsychometricStraightLineFlags(
         user?.psychometric_straight_line_flags,
@@ -221,14 +238,15 @@ export function buildReportDataFromRows(
       ? {
           weightedScore: attempt.weighted_score ?? null,
           depthSignalModifier: attempt.depth_signal_modifier ?? attempt.score_modifier ?? null,
-          finalScore:
-            attempt.modified_weighted_score_with_psychometrics ??
-            attempt.modified_weighted_score ??
-            attempt.weighted_score ??
-            null,
-          passed: attempt.passed ?? null,
-          finalGatePass: attempt.final_gate_pass ?? null,
-          gateFailReasons,
+          finalScore: rollupTrusted
+            ? (attempt.modified_weighted_score_with_psychometrics ??
+              attempt.modified_weighted_score ??
+              attempt.weighted_score ??
+              null)
+            : null,
+          passed: rollupTrusted ? (attempt.passed ?? null) : null,
+          finalGatePass: rollupTrusted ? (attempt.final_gate_pass ?? null) : null,
+          gateFailReasons: rollupTrusted ? gateFailReasons : [],
           gamingCorrection,
           pillarScores: (attempt.pillar_scores as Record<string, number> | null) ?? null,
           egoDevLevel: attempt.ego_development_level ?? null,
@@ -247,6 +265,7 @@ export function buildReportDataFromRows(
           mentalizingProfile,
           moment5Profile,
           scenarioKeyEvidence: hasScenarioKeyEvidence ? scenarioKeyEvidence : null,
+          scenarioScoreGrounding: buildScenarioScoreGroundingFromAttemptRows(attempt),
         }
       : null,
   };

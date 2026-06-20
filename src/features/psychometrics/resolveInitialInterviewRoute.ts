@@ -7,6 +7,7 @@ import {
   PSYCHOMETRICS_ENABLED,
   resolveInterviewStackScreenFromStatus,
 } from '@features/psychometrics/interviewCompletionStatus';
+import { mapInterviewStackRouteForLaunchMode } from '@features/onboarding/postInterviewLaunchMode';
 
 export { PSYCHOMETRICS_ENABLED, NPI_ENTITLEMENT_ENABLED };
 
@@ -20,6 +21,7 @@ export type InterviewStackRoute =
   | 'PostInterviewProcessing'
   | 'PostInterviewPassed'
   | 'PostInterviewFailed'
+  | 'PostInterviewLaunch'
   | 'PostInterviewSexualCommunication';
 
 export type InitialInterviewRouteResult = {
@@ -63,7 +65,7 @@ export async function resolveInitialInterviewRoute(userId: string): Promise<Init
   });
 
   return {
-    screen: routed.screen,
+    screen: mapInterviewStackRouteForLaunchMode(routed.screen),
     legacyPsychometricsMode: routed.legacyPsychometricsMode,
     interviewAlreadyCompleted: routed.interviewAlreadyCompleted,
     needsMarketResearch,

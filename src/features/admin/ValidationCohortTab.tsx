@@ -2,11 +2,13 @@ import React, { useCallback, useEffect, useState } from 'react';
 import { View, Text, StyleSheet, ScrollView, ActivityIndicator, RefreshControl } from 'react-native';
 import { supabase } from '@data/supabase/client';
 import { RELATIONSHIP_VALIDATION_TRACK } from '@features/relationshipValidation/constants';
+import { filterValidationCohortRows } from '@features/relationshipValidation/validationCohortFilters';
 
 type CohortRow = {
   user_id: string;
   partner_user_id: string | null;
   pair_confirmed_at: string | null;
+  relationship_test_mode: 'romantic' | 'platonic' | null;
   pre_assessment: {
     overallCompatibility?: number;
     overallSatisfaction?: number;
@@ -64,11 +66,11 @@ export function ValidationCohortTab() {
     const { data, error: recErr } = await supabase
       .from('relationship_validation_records')
       .select(
-        'user_id, partner_user_id, pair_confirmed_at, pre_assessment, post_assessment, compatibility_score, psychometrics_completed_at',
+        'user_id, partner_user_id, pair_confirmed_at, relationship_test_mode, pre_assessment, post_assessment, compatibility_score, psychometrics_completed_at',
       )
       .in('user_id', ids);
     if (recErr) throw new Error(recErr.message);
-    setRows((data ?? []) as CohortRow[]);
+    setRows(filterValidationCohortRows((data ?? []) as CohortRow[], false));
   }, []);
 
   useEffect(() => {
@@ -130,6 +132,10 @@ export function ValidationCohortTab() {
       refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}
     >
       <Text style={styles.heading}>Relationship validation cohort</Text>
+      <Text style={styles.note}>
+        Stats exclude platonic test-mode participants (friend testers using a past-relationship
+        reference frame). Include them only for instrument-level psychometric checks.
+      </Text>
       {error ? <Text style={styles.error}>{error}</Text> : null}
       <Text style={styles.stat}>Participants: {rows.length}</Text>
       <Text style={styles.stat}>Couples both completed: {couplesBothComplete}</Text>
@@ -155,6 +161,7 @@ const styles = StyleSheet.create({
   content: { padding: 16, paddingBottom: 40 },
   center: { flex: 1, alignItems: 'center', justifyContent: 'center', padding: 24 },
   heading: { color: '#E8F0F8', fontSize: 18, fontWeight: '600', marginBottom: 16 },
+  note: { color: '#95A8BD', fontSize: 13, lineHeight: 20, marginBottom: 16 },
   stat: { color: '#C8E4FF', fontSize: 15, lineHeight: 24, marginBottom: 8 },
   error: { color: '#E85B5B', marginBottom: 12 },
 });

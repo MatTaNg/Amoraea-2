@@ -131,7 +131,7 @@ describe('resolveInterviewStackBootstrap', () => {
       validationStandardReturnRoute: 'PostInterview',
     });
 
-    expect(result.initialRouteName).toBe('PostInterview');
+    expect(result.initialRouteName).toBe('PostInterviewLaunch');
     expect(result.interviewAlreadyCompleted).toBe(true);
     expect(result.legacyPsychometricsMode).toBe(false);
   });

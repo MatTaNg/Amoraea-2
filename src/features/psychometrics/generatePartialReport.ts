@@ -1,11 +1,21 @@
 import { supabase } from '@data/supabase/client';
+import { resolveAttemptPillarScoresForReport } from '@features/onboarding/loadInterviewReportAttempt';
 import { fetchMostRecentCompletedInterviewAttemptId } from '@features/psychometrics/interviewCompletionStatus';
-import { invokeAnthropicMessages } from '@utilities/invokeAnthropicMessages';
+import {
+  averageNonNull,
+  parseKeyEvidenceFromStoredSlice,
+  parseMentalizingFromStoredSlice,
+  parseMoment5ProfileFromStoredPatterns,
+  type PersonalReportMentalizingProfile,
+  type PersonalReportScenarioKeyEvidence,
+} from './personalReportNarrativeGuidance';
+import { invokeAnthropicReportNarrativeWithStructuralValidation } from '@features/reports/invokeValidatedReportNarrative';
+import { buildScenarioScoreGroundingFromAttemptRows } from '@features/reports/scenarioScoreGrounding';
 import { CLAUDE_SONNET_MODEL } from '@utilities/anthropicMessagesClient';
 import { resolveReportParticipantDisplayName } from '@utilities/adminInterviewIntroDisplayName';
 import type { GamingCorrectionResult } from './computeGamingCorrection';
-import { composeNarrativeCalibration } from '@features/reports/narrativeCalibration';
 import { convertMarkdownToHtml, fetchReportData } from './generateReport';
+import { finalizeUserFacingPartialReportMarkdown, REPORT_FOOTER_DISCLAIMER } from '@features/reports/reportTransparency';
 import { getReportLogoSrc } from './reportBranding';
 import {
   computePartialReportSourceHash,
@@ -14,34 +24,23 @@ import {
   readCachedReportMarkdownForPartialDownload,
   savePartialReportMarkdown,
 } from './persistedInterviewReport';
+import {
+  buildPartialReportPrompt,
+  buildPartialSystemPrompt,
+  parseMoment4ProfileFromStoredPatterns,
+  type PartialReportData,
+} from './partialReportPrompt';
+import {
+  buildPersonalReportEvidenceInventory,
+  logLiveNarrativePrompt,
+  logNarrativeEvidenceAudit,
+} from '@features/reports/narrativeEvidenceAudit';
 
-export type PartialReportData = {
-  user: { name: string | null };
-  attempt: {
-    pillarScores: Record<string, number> | null;
-    egoDevLevel: number | null;
-    emotionRecognitionScore: number | null;
-    disclosureCalibration: string | null;
-    moment4Concreteness: string | null;
-    moment5Concreteness: string | null;
-    vocabDensity: number | null;
-    vocabLow: boolean | null;
-    projection: boolean;
-    splitting: boolean;
-    rationalization: boolean;
-    denial: boolean;
-    mentalizing_overcertainty_count: number | null;
-    aiSummary: string | null;
-    aiStrengths: string[];
-    finalGatePass: boolean | null;
-    gateFailReasons: string[];
-    gamingCorrection: GamingCorrectionResult | null;
-    finalScore: number | null;
-  } | null;
-};
+export type { PartialReportData } from './partialReportPrompt';
+export { buildPartialReportPrompt, buildPartialSystemPrompt } from './partialReportPrompt';
 
 const PARTIAL_FOOTER =
-  'This is a partial preview based on your AI interview conversation with Amoraea. Complete the self assessments in the app to unlock your full personal development report, including deeper psychological insights and compatibility analysis. This document is intended for personal reflection and growth, not clinical diagnosis.';
+  `${REPORT_FOOTER_DISCLAIMER} This is a partial preview based on your AI interview conversation only — complete the self assessments in the app to unlock your full personal development report.`;
 
 export async function fetchPartialReportData(userId: string): Promise<PartialReportData> {
   const { data: user } = await supabase
@@ -55,7 +54,13 @@ export async function fetchPartialReportData(userId: string): Promise<PartialRep
     .select(
       `
       pillar_scores,
+      scenario_1_scores,
+      scenario_2_scores,
+      scenario_3_scores,
+      scenario_specific_patterns,
+      skip_count,
       ego_development_level,
+      language_markers,
       emotion_recognition_score,
       disclosure_calibration,
       moment_4_concreteness,
@@ -64,6 +69,9 @@ export async function fetchPartialReportData(userId: string): Promise<PartialRep
       personal_moment_emotional_vocab_low,
       defense_patterns,
       mentalizing_overcertainty_count,
+      skip_penalty_total,
+      auto_failed,
+      passed,
       transcript,
       ai_reasoning,
       reasoning_pending,
@@ -113,11 +121,62 @@ export async function fetchPartialReportData(userId: string): Promise<PartialRep
       ? (attempt.gaming_correction as GamingCorrectionResult)
       : null;
 
+  const resolvedPillars = attempt ? resolveAttemptPillarScoresForReport(attempt) : null;
+  const patterns = (attempt?.scenario_specific_patterns as Record<string, unknown> | null) ?? null;
+  const m4Raw = patterns?.moment_4_scores ?? null;
+  const s1M = parseMentalizingFromStoredSlice(attempt?.scenario_1_scores);
+  const s2M = parseMentalizingFromStoredSlice(attempt?.scenario_2_scores);
+  const s3M = parseMentalizingFromStoredSlice(attempt?.scenario_3_scores);
+  const m4M = parseMentalizingFromStoredSlice(m4Raw);
+  const scenarioAverage = averageNonNull([s1M.mentalizing, s2M.mentalizing, s3M.mentalizing]);
+  const moment4GapFromScenarioAverage =
+    scenarioAverage != null && m4M.mentalizing != null
+      ? scenarioAverage - m4M.mentalizing
+      : null;
+  const holisticMentalizing =
+    typeof resolvedPillars?.mentalizing === 'number' ? resolvedPillars.mentalizing : null;
+  const moment4Profile = parseMoment4ProfileFromStoredPatterns(patterns);
+  const moment5Profile = parseMoment5ProfileFromStoredPatterns(patterns);
+  const scenarioKeyEvidence: PersonalReportScenarioKeyEvidence | null = attempt
+    ? {
+        scenario1: parseKeyEvidenceFromStoredSlice(attempt.scenario_1_scores),
+        scenario2: parseKeyEvidenceFromStoredSlice(attempt.scenario_2_scores),
+        scenario3: parseKeyEvidenceFromStoredSlice(attempt.scenario_3_scores),
+      }
+    : null;
+  const hasScenarioKeyEvidence =
+    scenarioKeyEvidence != null &&
+    (scenarioKeyEvidence.scenario1 != null ||
+      scenarioKeyEvidence.scenario2 != null ||
+      scenarioKeyEvidence.scenario3 != null);
+  const mentalizingProfile: PersonalReportMentalizingProfile | null = attempt
+    ? {
+        scenario1: s1M.mentalizing,
+        scenario2: s2M.mentalizing,
+        scenario3: s3M.mentalizing,
+        moment4: m4M.mentalizing,
+        holisticPillar: holisticMentalizing,
+        scenarioAverage,
+        moment4GapFromScenarioAverage,
+        keyEvidence: {
+          scenario1: s1M.keyEvidenceMentalizing,
+          scenario2: s2M.keyEvidenceMentalizing,
+          scenario3: s3M.keyEvidenceMentalizing,
+          moment4: m4M.keyEvidenceMentalizing,
+        },
+      }
+    : null;
+
+  const rollupTrusted =
+    attempt != null &&
+    typeof attempt.weighted_score === 'number' &&
+    Number.isFinite(attempt.weighted_score);
+
   return {
     user: { name: displayName },
     attempt: attempt
       ? {
-          pillarScores: (attempt.pillar_scores as Record<string, number> | null) ?? null,
+          pillarScores: resolvedPillars,
           egoDevLevel: attempt.ego_development_level ?? null,
           emotionRecognitionScore: attempt.emotion_recognition_score ?? null,
           disclosureCalibration: attempt.disclosure_calibration ?? null,
@@ -132,158 +191,23 @@ export async function fetchPartialReportData(userId: string): Promise<PartialRep
           mentalizing_overcertainty_count: attempt.mentalizing_overcertainty_count ?? null,
           aiSummary,
           aiStrengths,
-          finalGatePass: attempt.final_gate_pass ?? null,
-          gateFailReasons,
+          finalGatePass: rollupTrusted ? (attempt.final_gate_pass ?? null) : null,
+          gateFailReasons: rollupTrusted ? gateFailReasons : [],
           gamingCorrection,
-          finalScore:
-            attempt.modified_weighted_score_with_psychometrics ??
-            attempt.modified_weighted_score ??
-            attempt.weighted_score ??
-            null,
+          finalScore: rollupTrusted
+            ? (attempt.modified_weighted_score_with_psychometrics ??
+              attempt.modified_weighted_score ??
+              attempt.weighted_score ??
+              null)
+            : null,
+          mentalizingProfile,
+          moment4Profile,
+          moment5Profile,
+          scenarioKeyEvidence: hasScenarioKeyEvidence ? scenarioKeyEvidence : null,
+          scenarioScoreGrounding: buildScenarioScoreGroundingFromAttemptRows(attempt),
         }
       : null,
   };
-}
-
-function buildPartialSystemPrompt(): string {
-  return `You are generating a partial personal development preview for a user of Amoraea, a relationship-readiness platform. They have completed an AI-guided conversation but have NOT yet completed the self-assessment battery.
-
-CRITICAL RULES — PARTIAL PREVIEW:
-- Do NOT describe what the AI interview is designed to test or measure
-- Do NOT use clinical diagnostic language
-- Do NOT reference psychometric instruments or self-assessments they have not yet taken
-- DO write in warm, direct, plain language a non-psychologist would understand
-- DO use second person throughout ("you", "your")
-- DO be honest about growth areas — constructive, not harsh
-- DO be specific to the profile data — avoid generic advice
-- DO frame insights as patterns observed in how they spoke about relationships and conflict
-- DO tease that completing self assessments will unlock a fuller, richer report — without being salesy
-- Format section headings with ## and subsection headings with ###
-- Use **bold** for emphasis on key insights
-- Write in flowing prose, not bullet lists
-- Keep the report shorter than a full report — approximately 700-1000 words`;
-}
-
-function buildPartialReportPrompt(data: PartialReportData): string {
-  const { user, attempt } = data;
-  const pillars = attempt?.pillarScores ?? {};
-
-  const band = (score: number | undefined | null): string => {
-    if (score == null) return 'not assessed';
-    if (score >= 8) return 'strong';
-    if (score >= 7) return 'good';
-    if (score >= 6) return 'developing';
-    if (score >= 4) return 'needs attention';
-    return 'significant growth area';
-  };
-
-  const egoDevInterp = (() => {
-    const l = attempt?.egoDevLevel;
-    if (l === null || l === undefined) return 'not assessed';
-    if (l === 1) return 'concrete and rule-based — tends toward black-and-white thinking in relational situations';
-    if (l === 2) return 'developing complexity — aware of multiple perspectives but resolves them simply';
-    if (l === 3)
-      return 'holds complexity — psychologically aware, uses nuanced understanding of relational dynamics';
-    if (l === 4) return 'integrates contradictions — systemic relational thinker who tolerates ambiguity well';
-    return 'highly sophisticated — full systemic understanding of relational dynamics';
-  })();
-
-  const activeDefenses = [
-    attempt?.projection && 'attributing own patterns to others',
-    attempt?.splitting && 'black-and-white assignment of fault',
-    attempt?.rationalization && 'logical justification to avoid accountability',
-    attempt?.denial && 'claiming no conflict despite evidence',
-  ]
-    .filter(Boolean)
-    .join(', ');
-
-  const emotionInterp = (() => {
-    const raw = attempt?.emotionRecognitionScore;
-    if (raw == null) return 'not assessed';
-    const pct = raw <= 10 ? raw * 10 : raw;
-    if (pct >= 80) return 'strong — reads emotional cues accurately';
-    if (pct >= 60) return 'good — generally accurate with occasional misses';
-    if (pct >= 40) return 'developing — some difficulty reading subtle emotional cues';
-    return 'limited — notable difficulty identifying emotions in others';
-  })();
-
-  const vocabInterp = (() => {
-    if (attempt?.vocabLow) return 'limited — significantly below typical range';
-    const d = attempt?.vocabDensity;
-    if (d == null) return 'not assessed';
-    if (d < 0.8) return 'below average';
-    if (d < 1.5) return 'adequate';
-    return 'rich';
-  })();
-
-  const overcertaintyInterp = (() => {
-    const c = attempt?.mentalizing_overcertainty_count;
-    if (c == null) return 'not assessed';
-    if (c === 0) return 'none detected';
-    if (c <= 2) return 'mild — occasional overcertainty';
-    return "significant — frequent overcertainty about others' inner states";
-  })();
-
-  const narrativeHint =
-    attempt?.aiSummary || attempt?.aiStrengths.length
-      ? `
-NARRATIVE HINTS FROM PRIOR ANALYSIS (use as inspiration only — rephrase in plain language, do not quote verbatim):
-- Summary hint: ${attempt.aiSummary ?? 'none'}
-- Strength hints: ${attempt.aiStrengths.length > 0 ? attempt.aiStrengths.join('; ') : 'none'}`
-      : '';
-
-  const narrativeCalibration = composeNarrativeCalibration({
-    finalGatePass: attempt?.finalGatePass,
-    gateFailReasons: attempt?.gateFailReasons ?? [],
-    gamingCorrection: attempt?.gamingCorrection ?? null,
-    pillarScores: attempt?.pillarScores ?? null,
-    modifiedWeightedScore: attempt?.finalScore,
-  });
-
-  return `Generate a partial personal development preview for ${user.name ?? 'this user'}. This is based ONLY on their AI interview conversation — self-assessments are not yet complete. The report should feel genuinely insightful but must NOT reveal how Amoraea scores or structures the interview.
-
-INTERVIEW-DERIVED SIGNALS (internal bands — translate into plain relational language in the report, never use these labels):
-- Conflict recovery and repair: ${band(pillars?.repair)}
-- Emotional presence and reading others: ${band(pillars?.attunement)}
-- Managing emotional intensity in conflict: ${band(pillars?.regulation)}
-- Perspective-taking and uncertainty about others: ${band(pillars?.mentalizing)}
-- Recognizing partner's emotional needs: ${band(pillars?.appreciation)}
-- Owning contribution to difficulty: ${band(pillars?.accountability)}
-- Healthy persistence through difficulty: ${band(pillars?.commitment_threshold)}
-- Constructive communication under stress: ${band(pillars?.contempt)}
-
-DEEPER BEHAVIORAL SIGNALS:
-- Psychological maturity level: ${egoDevInterp}
-- Emotion recognition ability: ${emotionInterp}
-- Personal disclosure style: ${attempt?.disclosureCalibration ?? 'not assessed'}
-- Engagement with personal narrative: ${attempt?.moment4Concreteness ?? 'not assessed'} / ${attempt?.moment5Concreteness ?? 'not assessed'}
-- Emotional vocabulary when discussing personal experience: ${vocabInterp}
-- Defense patterns observed: ${activeDefenses || 'none detected'}
-- Overcertainty about others' inner states: ${overcertaintyInterp}
-${narrativeHint}
-
-NARRATIVE CALIBRATION (follow exactly):
-${narrativeCalibration}
-
-Write the report with exactly these sections:
-
-## Overview
-2-3 sentences capturing how this person tends to show up in close relationships based on the conversation. Warm, direct, specific. Do not mention scores or assessment structure.
-
-## What's Working Well For You
-Write 2-3 strengths. For each use a ### heading with a meaningful name. Write 2-3 sentences per strength in plain language about relational patterns that came through positively.
-
-## Where You Can Grow
-Write 2 growth areas. For each use a ### heading. Write 2-3 sentences per area — honest about the pattern and what it tends to create in relationships, framed as developmental rather than deficit. Do not reveal what the interview measured.
-
-## Practical Next Steps
-3-4 concrete, actionable suggestions specific to this person's profile. Each 2 sentences. Follow directly from patterns identified above.
-
-## What's Still to Come
-1 short paragraph explaining that completing the self assessments (~10 minutes) will unlock a fuller personal report with deeper psychological insights, compatibility analysis, and a more complete picture. Encourage them without being salesy.
-
-## Closing
-2 sentences — warm, honest, encouraging. Acknowledge the courage of reflective conversation work.`;
 }
 
 export async function generatePartialUserReport(
@@ -292,25 +216,28 @@ export async function generatePartialUserReport(
 ): Promise<string> {
   const data = prefetchedData ?? (await fetchPartialReportData(userId));
 
-  const result = await invokeAnthropicMessages({
-    model: CLAUDE_SONNET_MODEL,
-    max_tokens: 1800,
-    system: buildPartialSystemPrompt(),
-    messages: [
+  logNarrativeEvidenceAudit(
+    buildPersonalReportEvidenceInventory('personal_partial_report', data.attempt),
+  );
+
+  const system = buildPartialSystemPrompt();
+  const userPrompt = buildPartialReportPrompt(data);
+  logLiveNarrativePrompt('personal_partial_report', system, userPrompt);
+
+  return finalizeUserFacingPartialReportMarkdown(
+    await invokeAnthropicReportNarrativeWithStructuralValidation(
+      'personal_partial_report',
       {
-        role: 'user',
-        content: buildPartialReportPrompt(data),
+        model: CLAUDE_SONNET_MODEL,
+        system,
       },
-    ],
-  });
-
-  const reportText = result.content?.[0]?.text;
-
-  if (!reportText?.trim()) {
-    throw new Error('No partial report content returned from Claude');
-  }
-
-  return reportText.trim();
+      userPrompt,
+      {
+        scenarioScoreGrounding: data.attempt?.scenarioScoreGrounding ?? null,
+        requirePsychometricIntegration: false,
+      },
+    ),
+  );
 }
 
 export async function buildPartialReportHtml(userId: string): Promise<string> {
@@ -334,6 +261,7 @@ export async function buildPartialReportHtml(userId: string): Promise<string> {
           logoSrc,
           headerTitle: safeName ? `${safeName}'s Personal Report` : 'Your Personal Report',
           headerSubtitle: 'Personal Development Report',
+          reportDataForTransparency: fullReportData,
         });
       }
       return convertMarkdownToHtml(cached.markdown, {
@@ -342,6 +270,7 @@ export async function buildPartialReportHtml(userId: string): Promise<string> {
         headerTitle: safeName ? `${safeName}'s Partial Report` : 'Your Partial Personal Report',
         headerSubtitle: 'Partial Personal Report',
         footerDisclaimer: PARTIAL_FOOTER,
+        applyPartialTransparency: true,
       });
     }
   }
@@ -359,5 +288,6 @@ export async function buildPartialReportHtml(userId: string): Promise<string> {
     headerTitle: safeName ? `${safeName}'s Partial Report` : 'Your Partial Personal Report',
     headerSubtitle: 'Partial Personal Report',
     footerDisclaimer: PARTIAL_FOOTER,
+    applyPartialTransparency: true,
   });
 }

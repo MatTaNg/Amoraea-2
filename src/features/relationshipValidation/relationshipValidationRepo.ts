@@ -1,8 +1,12 @@
 import { supabase } from '@data/supabase/client';
+import { syncValidationTypologyToDatingProfile } from '@/data/services/assessmentService';
 import type {
+  PlatonicPastRelationshipEndedOption,
+  RelationshipDurationOption,
   RelationshipValidationCompatibilityBreakdown,
   RelationshipValidationPostAssessment,
   RelationshipValidationPreAssessment,
+  RelationshipValidationTestMode,
 } from './constants';
 import { getPartnerEmailValidationError } from './partnerEmailValidation';
 import { fetchCurrentUserEmailForPartnerValidation } from './validationPsychometricsProgress';
@@ -40,6 +44,10 @@ export type RelationshipValidationRecord = {
   profile_report_markdown: string | null;
   profile_report_source_hash: string | null;
   profile_report_generated_at: string | null;
+  relationship_test_mode: RelationshipValidationTestMode | null;
+  romantic_test_relationship_duration: RelationshipDurationOption | null;
+  platonic_test_past_relationship_ended: PlatonicPastRelationshipEndedOption | null;
+  platonic_test_past_relationship_duration: RelationshipDurationOption | null;
   created_at: string;
   updated_at: string;
 };
@@ -49,6 +57,10 @@ type BaseValidationRecord = {
   active_comparison_id: string | null;
   welcome_completed_at: string | null;
   psychometrics_completed_at: string | null;
+  relationship_test_mode: RelationshipValidationTestMode | null;
+  romantic_test_relationship_duration: RelationshipDurationOption | null;
+  platonic_test_past_relationship_ended: PlatonicPastRelationshipEndedOption | null;
+  platonic_test_past_relationship_duration: RelationshipDurationOption | null;
   created_at: string;
   updated_at: string;
 };
@@ -66,6 +78,10 @@ function mergeRecordWithComparison(
     active_comparison_id: comparison?.id ?? base.active_comparison_id,
     welcome_completed_at: base.welcome_completed_at,
     psychometrics_completed_at: base.psychometrics_completed_at,
+    relationship_test_mode: base.relationship_test_mode,
+    romantic_test_relationship_duration: base.romantic_test_relationship_duration,
+    platonic_test_past_relationship_ended: base.platonic_test_past_relationship_ended,
+    platonic_test_past_relationship_duration: base.platonic_test_past_relationship_duration,
     created_at: base.created_at,
     updated_at: comparison?.updated_at ?? base.updated_at,
     partner_email_entered: comparison?.partner_email_entered ?? null,
@@ -85,7 +101,7 @@ async function fetchBaseValidationRecord(userId: string): Promise<BaseValidation
   const { data, error } = await supabase
     .from('relationship_validation_records')
     .select(
-      'user_id, active_comparison_id, welcome_completed_at, psychometrics_completed_at, created_at, updated_at',
+      'user_id, active_comparison_id, welcome_completed_at, psychometrics_completed_at, relationship_test_mode, romantic_test_relationship_duration, platonic_test_past_relationship_ended, platonic_test_past_relationship_duration, created_at, updated_at',
     )
     .eq('user_id', userId)
     .maybeSingle();
@@ -328,6 +344,14 @@ export async function fetchRelationshipValidationRecord(
     active_comparison_id: (row.active_comparison_id as string | null) ?? null,
     welcome_completed_at: row.welcome_completed_at as string | null,
     psychometrics_completed_at: row.psychometrics_completed_at as string | null,
+    relationship_test_mode: (row.relationship_test_mode as RelationshipValidationTestMode | null) ?? null,
+    romantic_test_relationship_duration:
+      (row.romantic_test_relationship_duration as RelationshipDurationOption | null) ?? null,
+    platonic_test_past_relationship_ended:
+      (row.platonic_test_past_relationship_ended as PlatonicPastRelationshipEndedOption | null) ??
+      null,
+    platonic_test_past_relationship_duration:
+      (row.platonic_test_past_relationship_duration as RelationshipDurationOption | null) ?? null,
     created_at: row.created_at as string,
     updated_at: row.updated_at as string,
   };
@@ -352,10 +376,68 @@ export async function fetchRelationshipValidationRecord(
       profile_report_markdown: (row.profile_report_markdown as string | null) ?? null,
       profile_report_source_hash: (row.profile_report_source_hash as string | null) ?? null,
       profile_report_generated_at: (row.profile_report_generated_at as string | null) ?? null,
+      relationship_test_mode: base.relationship_test_mode,
+      romantic_test_relationship_duration: base.romantic_test_relationship_duration,
+      platonic_test_past_relationship_ended: base.platonic_test_past_relationship_ended,
+      platonic_test_past_relationship_duration: base.platonic_test_past_relationship_duration,
     };
   }
 
   return mergeRecordWithComparison(base, null);
+}
+
+export async function saveRelationshipTestMode(
+  userId: string,
+  mode: RelationshipValidationTestMode,
+): Promise<void> {
+  await ensureRelationshipValidationRecord(userId);
+  const { error } = await supabase
+    .from('relationship_validation_records')
+    .update({
+      relationship_test_mode: mode,
+      updated_at: new Date().toISOString(),
+    })
+    .eq('user_id', userId);
+  if (error) throw new Error(error.message);
+}
+
+export async function saveRomanticTestRelationshipDuration(
+  userId: string,
+  duration: RelationshipDurationOption,
+): Promise<void> {
+  await ensureRelationshipValidationRecord(userId);
+  const { error } = await supabase
+    .from('relationship_validation_records')
+    .update({
+      romantic_test_relationship_duration: duration,
+      updated_at: new Date().toISOString(),
+    })
+    .eq('user_id', userId);
+  if (error) throw new Error(error.message);
+}
+
+export async function savePlatonicTestPastRelationshipContext(
+  userId: string,
+  ended: PlatonicPastRelationshipEndedOption,
+  duration: RelationshipDurationOption,
+): Promise<void> {
+  await ensureRelationshipValidationRecord(userId);
+  const { error } = await supabase
+    .from('relationship_validation_records')
+    .update({
+      platonic_test_past_relationship_ended: ended,
+      platonic_test_past_relationship_duration: duration,
+      updated_at: new Date().toISOString(),
+    })
+    .eq('user_id', userId);
+  if (error) throw new Error(error.message);
+}
+
+export async function fetchRelationshipTestMode(
+  userId: string,
+): Promise<RelationshipValidationTestMode | null> {
+  const base = await fetchBaseValidationRecord(userId);
+  return base?.relationship_test_mode ?? null;
 }
 
 export async function markValidationWelcomeCompleted(userId: string): Promise<void> {
@@ -483,6 +565,7 @@ export async function markValidationPsychometricsCompleted(userId: string): Prom
     })
     .eq('user_id', userId);
   if (error) throw new Error(error.message);
+  await syncValidationTypologyToDatingProfile(userId);
 }
 
 export async function saveCompatibilityResultForComparison(

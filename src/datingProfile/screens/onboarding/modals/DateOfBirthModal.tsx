@@ -6,12 +6,12 @@ import { DatePicker } from '@/shared/components/DatePicker';
 import { BirthTimeQuarterHourPicker, isValidOptionalBirthTime24h } from '@/shared/components/BirthTimeQuarterHourPicker';
 import { Input } from '@/shared/ui/Input';
 import { OnboardingHeader } from './components/OnboardingHeader';
-import { calculateAgeFromBirthdate } from '@/shared/utils/ageCalculator';
+import { calculateAgeFromBirthdate, MIN_USER_AGE } from '@/shared/utils/ageCalculator';
 import { useLocationAutocomplete } from '@/shared/hooks/useLocationAutocomplete';
 import { theme } from '@/shared/theme/theme';
 import { styles } from './DateOfBirthModal.styled';
 
-const MIN_AGE = 18;
+const MIN_AGE = MIN_USER_AGE;
 
 interface DateOfBirthModalProps {
   dateOfBirth: string;
@@ -34,7 +34,6 @@ export const DateOfBirthModal: React.FC<DateOfBirthModalProps> = ({
   onNext,
   onBack,
 }) => {
-  const maxSelectableYear = useMemo(() => new Date().getFullYear() - MIN_AGE, []);
   const age = useMemo(
     () => (dateOfBirth ? calculateAgeFromBirthdate(dateOfBirth) : null),
     [dateOfBirth]
@@ -77,7 +76,7 @@ export const DateOfBirthModal: React.FC<DateOfBirthModalProps> = ({
             value={dateOfBirth || ''}
             onValueChange={onDateOfBirthChange}
             minYear={1900}
-            maxYear={maxSelectableYear}
+            minimumAge={MIN_AGE}
           />
           {isUnderage && (
             <Text style={styles.errorText}>

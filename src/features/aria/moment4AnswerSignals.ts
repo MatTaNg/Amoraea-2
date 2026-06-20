@@ -1,4 +1,4 @@
-import { normalizeInterviewTypography } from './probeAndScoringUtils';
+import { normalizeInterviewTypography } from './interviewTypography';
 
 export function countInterviewWords(text: string): number {
   const t = (text ?? '').trim();

@@ -7,11 +7,11 @@ import { BirthTimeQuarterHourPicker, isValidOptionalBirthTime24h } from '@/share
 import { Input } from '@/shared/ui/Input';
 import { theme } from '@/shared/theme/theme';
 import { OnboardingHeader } from './components/OnboardingHeader';
-import { calculateAgeFromBirthdate } from '@/shared/utils/ageCalculator';
+import { calculateAgeFromBirthdate, maxBirthYearForMinimumAge, MIN_USER_AGE } from '@/shared/utils/ageCalculator';
 import { useLocationAutocomplete } from '@/shared/hooks/useLocationAutocomplete';
 import { styles } from './DateOfBirthModal.styled';
 
-const MIN_AGE = 18;
+const MIN_AGE = MIN_USER_AGE;
 
 interface DateOfBirthModalProps {
   dateOfBirth: string;
@@ -34,7 +34,7 @@ export const DateOfBirthModal: React.FC<DateOfBirthModalProps> = ({
   onNext,
   onBack,
 }) => {
-  const maxSelectableYear = useMemo(() => new Date().getFullYear() - MIN_AGE, []);
+  const maxSelectableYear = useMemo(() => maxBirthYearForMinimumAge(MIN_AGE), []);
   const age = useMemo(
     () => (dateOfBirth ? calculateAgeFromBirthdate(dateOfBirth) : null),
     [dateOfBirth]

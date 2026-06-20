@@ -14,8 +14,10 @@ export type { ValidationShellRouting };
 /** Post-interview screens users can return to after exiting the validation flow. */
 export type ValidationStandardReturnRoute =
   | 'PostInterview'
+  | 'PostInterviewLaunch'
   | 'PostInterviewPassed'
-  | 'PostInterviewFailed';
+  | 'PostInterviewFailed'
+  | 'InterviewComplete';
 
 export function validationStandardReturnRouteQueryKey(userId: string) {
   return ['validationStandardReturnRoute', userId] as const;
@@ -26,8 +28,10 @@ export function isValidationStandardReturnRoute(
 ): route is ValidationStandardReturnRoute {
   return (
     route === 'PostInterview' ||
+    route === 'PostInterviewLaunch' ||
     route === 'PostInterviewPassed' ||
-    route === 'PostInterviewFailed'
+    route === 'PostInterviewFailed' ||
+    route === 'InterviewComplete'
   );
 }
 

@@ -28,8 +28,10 @@ import { fetchInterviewAttemptRevealSnapshot, fetchUserInterviewRevealPollRow } 
 import { useInterviewAttemptEgoRepair } from '@features/aria/hooks/useInterviewAttemptEgoRepair';
 import { DownloadPersonalReportButton } from '@features/psychometrics/DownloadPersonalReportButton';
 import { determinePostInterviewRoute } from '@features/psychometrics/determinePostInterviewRoute';
+import { mapInterviewStackRouteForLaunchMode } from '@features/onboarding/postInterviewLaunchMode';
 import { PreparingResultsView } from '@app/screens/PreparingResultsView';
 import { useRedirectRelationshipValidationFromStandardPostInterview } from '@features/relationshipValidation/validationPostInterviewRouting';
+import { useRedirectPostInterviewLaunchWhenEnabled } from '@features/onboarding/postInterviewLaunchMode';
 
 const BG = '#0a0a0f';
 const ACCENT = '#3b82f6';
@@ -138,6 +140,7 @@ export const PostInterviewProcessingScreen: React.FC<{
   const queryClient = useQueryClient();
   const { user } = useAuth();
   const userId = route.params?.userId ?? '';
+  useRedirectPostInterviewLaunchWhenEnabled(navigation, userId);
   const { isRedirecting: validationRedirecting } =
     useRedirectRelationshipValidationFromStandardPostInterview(userId);
   const isAdminEmail = isAmoraeaAdminConsoleEmail(user?.email ?? '');
@@ -167,25 +170,15 @@ export const PostInterviewProcessingScreen: React.FC<{
       if (navigatedRef.current) return;
       void (async () => {
         const decision = determinePostInterviewRoute(row ?? undefined);
+        const destination = mapInterviewStackRouteForLaunchMode(decision.route);
         if (navigatedRef.current) return;
-        if (decision.route === 'PostInterview' || decision.route === 'PostInterviewProcessing') {
-          navigatedRef.current = true;
-          navigation.replace('PostInterview', { userId });
-          return;
-        }
         navigatedRef.current = true;
-        if (attemptId) {
+        if (attemptId && destination !== 'PostInterviewLaunch') {
           void triggerResultsReadyEmail(userId, attemptId);
         }
         queryClient.invalidateQueries({ queryKey: ['profile', userId] });
         queryClient.invalidateQueries({ queryKey: ['standardPostInterviewDeferral', userId] });
-        if (decision.route === 'PostInterviewPassed') {
-          navigation.replace('PostInterviewPassed', { userId });
-          return;
-        }
-        if (decision.route === 'PostInterviewFailed') {
-          navigation.replace('PostInterviewFailed', { userId });
-        }
+        navigation.replace(destination, { userId });
       })();
     },
     [navigation, queryClient, userId],

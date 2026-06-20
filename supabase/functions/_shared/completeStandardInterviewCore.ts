@@ -13,6 +13,10 @@ import {
 } from './computeGateResultCore.ts';
 import { scenarioCompositesToStorageJson } from './scenarioCompositeFloor.ts';
 import { generateAIReasoning } from './generateAIReasoning.ts';
+import {
+  buildEvidenceContextFromAttemptPatterns,
+  type NarrativeEvidenceContext,
+} from './narrativeEvidenceGuidance.ts';
 import { CLAUDE_SONNET_MODEL } from './anthropicModel.ts';
 import { communicationFloorFieldsFromTranscript } from './communicationFloorFromTranscript.ts';
 import { evaluateInterviewCompletionGate, type CompletionGateFailure } from './interviewCompletionGate.ts';
@@ -390,6 +394,7 @@ type ReasoningBackgroundInputs = {
   transcript: Transcript;
   weightedScore: number | null;
   pass: boolean;
+  evidenceContext?: NarrativeEvidenceContext | null;
 };
 
 async function runStandardInterviewReasoningInBackground(
@@ -410,6 +415,7 @@ async function runStandardInterviewReasoningInBackground(
       {
         perAttemptTimeoutMs: STANDARD_REASONING_BACKGROUND_TIMEOUT_MS,
         maxAttempts: 1,
+        evidenceContext: inputs.evidenceContext,
       },
     );
     const { error } = await supabase
@@ -859,6 +865,14 @@ export async function runCompleteStandardInterview(
     transcript,
     weightedScore: gate.weightedScore,
     pass: gate.pass,
+    evidenceContext: buildEvidenceContextFromAttemptPatterns(
+      patterns as Record<string, unknown> | null | undefined,
+      {
+        scenario_1_scores: row.scenario_1_scores,
+        scenario_2_scores: row.scenario_2_scores,
+        scenario_3_scores: row.scenario_3_scores,
+      },
+    ),
   };
   const commFloor = communicationFloorFieldsFromTranscript(transcript);
   /** Narrative runs in background (300s) via EdgeRuntime.waitUntil — sync 140s calls routinely timed out. */

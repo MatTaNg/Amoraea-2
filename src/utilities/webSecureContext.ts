@@ -44,7 +44,7 @@ export function webInsecureContextHelpMessage(): string {
       '- Terminal 2: npm run web:cf-tunnel — open the https://…trycloudflare.com URL on your phone (no Expo account).\n' +
       '- Or: npm run web:tunnel — use the https:// URL Expo prints (command is `expo start`, not `expo strt`). ' +
       'If tunnel fails: turn off VPN, allow Node.js in Windows Firewall, or use web:cf-tunnel instead.\n' +
-      '- Or: npm run build:web and deploy the dist folder to Vercel/Netlify for HTTPS.'
+      '- Or: npm run build:web and deploy the dist folder to Netlify for HTTPS.'
     );
   }
 

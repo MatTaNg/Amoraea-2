@@ -7,9 +7,15 @@ import {
 import {
   buildInterviewEvidencePromptBlock,
   composeNarrativeCalibration,
+  getSectionDistinctnessInstructions,
 } from '@features/reports/narrativeCalibration';
+import {
+  getMarkdownStructuralEnforcementInstructions,
+  listPopulatedNarrativeInstrumentLabels,
+} from '@features/reports/reportNarrativeStructuralEnforcement';
 import { resolveReportParticipantDisplayName } from '@utilities/adminInterviewIntroDisplayName';
-import { invokeOpenAiChat } from '@utilities/invokeOpenAiChat';
+import { invokeOpenAiReportNarrativeWithStructuralValidation } from '@features/reports/invokeValidatedReportNarrative';
+import { logLiveNarrativePrompt, logNarrativeEvidenceAudit } from '@features/reports/narrativeEvidenceAudit';
 import { convertMarkdownToHtml } from '@features/psychometrics/generateReport';
 import { getReportLogoSrc } from '@features/psychometrics/reportBranding';
 import type {
@@ -30,9 +36,74 @@ import {
   type ValidationSelfProfileSummary,
 } from './validationProfileSummary';
 import {
+  buildInterviewToneCalibrationInstructions,
   deriveValidationInterviewPerformanceTier,
   type ValidationInterviewPerformanceTier,
 } from './validationInterviewPerformanceTier';
+
+/** Bump when validation report prompt calibration wiring changes (invalidates cached markdown). */
+export const VALIDATION_REPORT_PROMPT_CALIBRATION_VERSION = 2;
+
+type ValidationSectionGateKind =
+  | 'overview'
+  | 'attachment'
+  | 'values'
+  | 'conflict'
+  | 'gasp'
+  | 'relationship_now'
+  | 'interview_revealed'
+  | 'patterns'
+  | 'compatibility'
+  | 'growing_together'
+  | 'partner_pending'
+  | 'strengths'
+  | 'growth'
+  | 'partner_experience'
+  | 'practical'
+  | 'closing';
+
+/** Per-section gate tone clause — needs_development maps to interview_fail narrative tier. */
+export function buildValidationSectionGateClause(
+  performanceTier: ValidationInterviewPerformanceTier | null,
+  kind: ValidationSectionGateKind,
+): string {
+  if (performanceTier !== 'needs_development') {
+    return '';
+  }
+
+  const psychometricDerived =
+    ' GATE TONE (needs_development): This section is psychometric- or survey-derived — describe normally; interview fail tone does not restrict attachment, values, conflict, GASP, or pre-survey content here.';
+
+  const generalFail =
+    ' GATE TONE (needs_development): Do not default to unconditional warmth or unqualified strength claims about interview performance; ground any positive statements in specific evidence (psychometric profile, GASP, values alignment, pre-survey) rather than overall interview competence.';
+
+  switch (kind) {
+    case 'overview':
+      return ' GATE TONE (needs_development): Do NOT characterize overall interview performance as strong or use unqualified strength language about interview competence, even if individual scenario moments show some depth. Psychometric content (attachment, values, conflict, GASP) and pre-survey experience may still be described normally.';
+    case 'strengths':
+      return ' GATE TONE (needs_development): Draw strengths primarily from psychometric profile, GASP, values, and conflict-style data — not from general interview competence. If a strength is interview-derived, cite a specific transcript or evidence moment; no broad claims about overall interview performance.';
+    case 'closing':
+      return ' GATE TONE (needs_development): Do not close with unqualified celebration of interview performance or overall relational readiness. Acknowledge the work honestly; name psychometric strengths proportionally; avoid false reassurance about interview demonstration.';
+    case 'interview_revealed':
+    case 'patterns':
+      return ' GATE TONE (needs_development): Follow INTERVIEW TONE CALIBRATION above strictly — emotionally neutral, evidence-cited patterns only; no unqualified strength language about overall interview performance.';
+    case 'attachment':
+    case 'values':
+    case 'conflict':
+    case 'gasp':
+      return psychometricDerived;
+    case 'relationship_now':
+    case 'compatibility':
+    case 'growing_together':
+    case 'partner_pending':
+    case 'growth':
+    case 'partner_experience':
+    case 'practical':
+      return generalFail;
+    default:
+      return generalFail;
+  }
+}
 
 export type ValidationReportTier = 'partial' | 'full';
 
@@ -324,6 +395,7 @@ export function computeValidationReportSourceHash(data: ValidationReportData): s
     interviewPerformanceTier: data.interview?.performanceTier ?? null,
     interviewFinalGatePass: data.interview?.finalGatePass ?? null,
     interviewGateFailReasons: data.interview?.gateFailReasons ?? [],
+    promptCalibrationVersion: VALIDATION_REPORT_PROMPT_CALIBRATION_VERSION,
   });
 }
 
@@ -442,7 +514,7 @@ CRITICAL RULES:
 - Target length: approximately ${tier === 'full' ? '1800–2400' : '1400–2000'} words — exhaustive and detailed, not a summary${interviewRules}`;
 }
 
-function buildValidationReportUserPrompt(data: ValidationReportData): string {
+export function buildValidationReportUserPrompt(data: ValidationReportData): string {
   const {
     userName,
     preAssessment,
@@ -487,10 +559,13 @@ INTERNAL SCORE DATA (for your analysis only — never quote numbers or instrumen
     gaspProfile && compatibility.partnerGaspProfile
       ? buildValidationGaspCompatibilityNote(gaspProfile, compatibility.partnerGaspProfile)
       : '';
+  const performanceTier = interview?.performanceTier ?? null;
+  const gate = (kind: ValidationSectionGateKind) => buildValidationSectionGateClause(performanceTier, kind);
+
   const gaspSection = gaspProfile
     ? `
 ## How You Respond When Things Go Wrong
-2–3 paragraphs on what you tend to do when you realize you have hurt someone — follow the harm-response profile instructions above. Place behavioral emphasis on repair vs withdrawal patterns without clinical language.`
+2–3 paragraphs on what you tend to do when you realize you have hurt someone — follow the harm-response profile instructions above. Place behavioral emphasis on repair vs withdrawal patterns without clinical language.${gate('gasp')}`
     : '';
 
   const compatBlock = compatibility.partnerComplete
@@ -511,14 +586,22 @@ ${
     : `
 PAIR COMPATIBILITY: Partner has not completed their assessment yet. Write about the user's individual profile and note that couple compatibility analysis will be available once their partner finishes. Do not invent a compatibility score.`;
 
-  const narrativeCalibration = composeNarrativeCalibration({
-    finalGatePass: interview?.finalGatePass ?? null,
-    gateFailReasons: interview?.gateFailReasons ?? [],
-    gamingCorrection: interview?.gamingCorrection ?? null,
-    pillarScores: interview?.pillarScores ?? null,
-    aaq2Score: data.aaq2Score,
-    modifiedWeightedScore: interview?.modifiedWeightedScore ?? null,
-  });
+  const narrativeCalibration = composeNarrativeCalibration(
+    {
+      finalGatePass: interview?.finalGatePass ?? null,
+      gateFailReasons: interview?.gateFailReasons ?? [],
+      gamingCorrection: interview?.gamingCorrection ?? null,
+      pillarScores: interview?.pillarScores ?? null,
+      aaq2Score: data.aaq2Score,
+      modifiedWeightedScore: interview?.modifiedWeightedScore ?? null,
+    },
+    { includePsychometricLens: true },
+  );
+
+  const interviewToneCalibration =
+    reportTier === 'full' && interview
+      ? buildInterviewToneCalibrationInstructions(performanceTier, true)
+      : '';
 
   const interviewEvidenceBlock =
     reportTier === 'full' && interview
@@ -534,7 +617,7 @@ PAIR COMPATIBILITY: Partner has not completed their assessment yet. Write about 
       ? `
 AI INTERVIEW (completed — synthesize; do not quote verbatim):
 ${interviewEvidenceBlock}
-
+${interviewToneCalibration ? `\n${interviewToneCalibration}\n` : ''}
 TRANSCRIPT:
 ${interview.transcriptText || '[No transcript available]'}`
       : '';
@@ -543,10 +626,10 @@ ${interview.transcriptText || '[No transcript available]'}`
     reportTier === 'full'
       ? `
 ## What Your AI Interview Revealed
-3–4 paragraphs on how the user thinks about relationships under pressure — conflict, repair, perspective-taking, emotional attunement, and respect as shown in their spoken responses. Tie observations to scenario moments using descriptive pattern language only. Follow the interview tone tier strictly.
+3–4 paragraphs on how the user thinks about relationships under pressure — conflict, repair, perspective-taking, emotional attunement, and respect as shown in their spoken responses. Tie observations to scenario moments using descriptive pattern language only. Follow the interview tone tier and INTERVIEW TONE CALIBRATION above strictly.${gate('interview_revealed')}
 
 ## Patterns Across Conversation and Questionnaires
-2–3 paragraphs integrating psychometric profile with interview behavior — where they align, where conversation adds nuance questionnaires alone could not capture. Follow the interview tone tier for anything drawn from the interview.`
+2–3 paragraphs integrating psychometric profile with interview behavior — where they align, where conversation adds nuance questionnaires alone could not capture. Follow the interview tone tier and INTERVIEW TONE CALIBRATION for anything drawn from the interview.${gate('patterns')}`
       : '';
 
   return `Generate a ${reportTier === 'full' ? 'full' : 'partial'} relationship validation report for ${userName ?? 'this participant'}.
@@ -560,48 +643,71 @@ ${interviewBlock}
 NARRATIVE CALIBRATION (follow exactly):
 ${narrativeCalibration}
 
+${getSectionDistinctnessInstructions('relationship')}
+
+${getMarkdownStructuralEnforcementInstructions(
+  [
+    data.gaspProfile ? 'GASP/harm-response' : null,
+    data.assessments.ecr ? 'ECR/attachment' : null,
+    data.assessments.pvq ? 'PVQ/values' : null,
+    data.assessments.conflict ? 'TKI/conflict style' : null,
+    ...listPopulatedNarrativeInstrumentLabels({
+      aaq2Score: data.aaq2Score,
+      psychometrics: {
+        gaspScore: data.gaspProfile?.guiltRepairScore ?? data.gaspProfile?.shameWithdrawScore ?? null,
+        dweckScore: null,
+        rfqScore: null,
+        brsScore: null,
+        scsSfScore: null,
+        mspssScore: null,
+      },
+    }),
+  ].filter((x): x is string => Boolean(x)),
+  { includePsychometrics: true },
+)}
+
 Write the report with exactly these sections:
 
 ## Overview
-3–4 rich paragraphs synthesizing who this person is relationally — attachment, values, conflict approach, and how they experience their current relationship.${reportTier === 'full' ? ' Include how their interview responses deepen or refine the questionnaire picture.' : ''}${gaspProfile ? ' Include how they tend to respond after causing harm when relevant.' : ''} This should feel like being truly seen. Reference their pre-survey satisfaction and compatibility ratings alongside psychometric patterns.
+3–4 rich paragraphs synthesizing who this person is relationally — attachment, values, conflict approach, and how they experience their current relationship.${reportTier === 'full' ? ' Include how their interview responses deepen or refine the questionnaire picture where supported by evidence.' : ''}${gaspProfile ? ' Include how they tend to respond after causing harm when relevant.' : ''} Reference their pre-survey satisfaction and compatibility ratings alongside psychometric patterns.${performanceTier === 'needs_development' ? '' : ' This should feel like being truly seen.'}${gate('overview')}
 
 ## Your Attachment Style in Relationships
-2–3 paragraphs on their attachment pattern: what it tends to look like in intimacy, stress, and conflict; strengths it brings; common pitfalls. Use the attachment label and description provided but expand with relational nuance.
+2–3 paragraphs on their attachment pattern: what it tends to look like in intimacy, stress, and conflict; strengths it brings; common pitfalls. Use the attachment label and description provided but expand with relational nuance.${gate('attachment')}
 
 ## Your Values and What You Prioritize
-2–3 paragraphs on their Schwartz values profile — what they likely prioritize in life and partnership, where values may create harmony or tension with a partner, and how values show up in daily relationship decisions.
+2–3 paragraphs on their Schwartz values profile — what they likely prioritize in life and partnership, where values may create harmony or tension with a partner, and how values show up in daily relationship decisions.${gate('values')}
 
 ## How You Navigate Conflict
-2–3 paragraphs on their conflict style — default moves under pressure, what partners likely experience, and how this interacts with their attachment pattern.
+2–3 paragraphs on their conflict style — default moves under pressure, what partners likely experience, and how this interacts with their attachment pattern.${gate('conflict')}
 ${gaspSection}
 ## Your Relationship Right Now
-2–3 paragraphs weaving together their pre-survey responses (satisfaction, felt compatibility, conflict handling, values alignment, attunement, consideration of ending). Be honest and compassionate. Note any gaps between felt experience and psychometric patterns if evident.
+2–3 paragraphs weaving together their pre-survey responses (satisfaction, felt compatibility, conflict handling, values alignment, attunement, consideration of ending). Be honest and compassionate. Note any gaps between felt experience and psychometric patterns if evident.${gate('relationship_now')}
 ${interviewSections}
 ${
   compatibility.partnerComplete
     ? `## Compatibility With Your Partner
-3–4 paragraphs interpreting the couple compatibility result. Explain attachment, values, and conflict-style alignment in plain language. Describe where they likely mesh well and where friction may appear. Reference the partner's profile summary without comparing harshly.
+3–4 paragraphs interpreting the couple compatibility result. Explain attachment, values, and conflict-style alignment in plain language. Describe where they likely mesh well and where friction may appear. Reference the partner's profile summary without comparing harshly.${gate('compatibility')}
 
 ## Growing Together
-2–3 paragraphs with specific, actionable guidance for this couple based on the combined profiles — communication habits, repair strategies, and values conversations to prioritize.`
+2–3 paragraphs with specific, actionable guidance for this couple based on the combined profiles — communication habits, repair strategies, and values conversations to prioritize.${gate('growing_together')}`
     : `## When Your Partner Completes Their Assessment
-1 short paragraph explaining that a full couple compatibility analysis (attachment, values, and conflict-style alignment) will be available once their partner finishes — encourage patience without being salesy.`
+1 short paragraph explaining that a full couple compatibility analysis (attachment, values, and conflict-style alignment) will be available once their partner finishes — encourage patience without being salesy.${gate('partner_pending')}`
 }
 
 ## Your Relational Strengths
-3–4 strengths. Each uses a ### heading with a meaningful name. Write 3–4 sentences per strength grounded in their specific data.
+3–4 strengths. Each uses a ### heading with a meaningful name. Write 3–4 sentences per strength grounded in their specific data.${gate('strengths')}
 
 ## Where You Have Room to Grow
-2–3 growth areas. Each uses a ### heading. Write 3–4 sentences per area — honest about relational impact, framed developmentally.
+2–3 growth areas. Each uses a ### heading. Write 3–4 sentences per area — honest about relational impact, framed developmentally. Before finalizing each growth paragraph, audit ALL scenario scorer notes, personal M4/M5 moments (full report), GASP harm-response profile, and questionnaire data — do not let a single dominant theme override contradictory evidence. Surface self-correcting interview moments in strengths or nuance when present.${gate('growth')}
 
 ## What a Partner Likely Experiences With You
-1–2 frank, compassionate paragraphs describing the lived experience of being in a close relationship with this person.
+1–2 frank, compassionate paragraphs describing the lived experience of being in a close relationship with this person.${gate('partner_experience')}
 
 ## Practical Steps Forward
-4–5 concrete suggestions specific to this profile. Each 2–3 sentences. Not generic self-help.
+4–5 concrete suggestions specific to this profile. Each 2–3 sentences. Not generic self-help.${gate('practical')}
 
 ## Closing
-2–3 warm, honest sentences acknowledging the work they did and what they bring to a relationship.`;
+2–3 honest sentences acknowledging the work they did.${performanceTier === 'needs_development' ? ' Be warm but proportional — do not imply strong overall interview performance.' : ' Warm, honest closing acknowledging what they bring to a relationship.'}${gate('closing')}`;
 }
 
 export async function generateValidationReportMarkdown(
@@ -610,18 +716,44 @@ export async function generateValidationReportMarkdown(
 ): Promise<string> {
   const data = prefetchedData ?? (await fetchValidationReportData(userId));
 
-  return invokeOpenAiChat({
-    model: 'gpt-4o',
-    max_tokens: data.reportTier === 'full' ? 5500 : 4500,
-    temperature: 0.65,
-    messages: [
-      {
-        role: 'system',
-        content: buildValidationReportSystemPrompt(data.reportTier),
-      },
-      { role: 'user', content: buildValidationReportUserPrompt(data) },
-    ],
+  const psychometricSignals = [
+    data.gaspProfile ? 'gasp' : null,
+    data.assessments.ecr ? 'ecr' : null,
+    data.assessments.pvq ? 'pvq' : null,
+    data.assessments.conflict ? 'conflict' : null,
+    data.aaq2Score != null ? 'aaq2' : null,
+  ].filter(Boolean) as string[];
+  logNarrativeEvidenceAudit({
+    pipeline: `relationship_validation_${data.reportTier}`,
+    slices: data.interview
+      ? [
+          { id: 'scenario_1', label: 'Scenario 1' },
+          { id: 'scenario_2', label: 'Scenario 2' },
+          { id: 'scenario_3', label: 'Scenario 3' },
+          { id: 'moment_4', label: 'M4' },
+        ]
+      : [],
+    psychometricSignals,
   });
+
+  const pipeline =
+    data.reportTier === 'full'
+      ? ('relationship_validation_full' as const)
+      : ('relationship_validation_partial' as const);
+
+  const system = buildValidationReportSystemPrompt(data.reportTier);
+  const userPrompt = buildValidationReportUserPrompt(data);
+  logLiveNarrativePrompt(pipeline, system, userPrompt);
+
+  return invokeOpenAiReportNarrativeWithStructuralValidation(
+    pipeline,
+    {
+      model: 'gpt-4o',
+      temperature: 0.65,
+    },
+    userPrompt,
+    system,
+  );
 }
 
 export async function buildValidationReportHtml(userId: string): Promise<string> {

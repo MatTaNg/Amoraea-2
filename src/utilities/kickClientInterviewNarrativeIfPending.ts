@@ -8,6 +8,7 @@ import {
 } from '@features/aria/aiReasoningPostProcess';
 import { generateAIReasoning } from '@features/aria/generateAIReasoning';
 import { resolvePillarScoresForNarrativeFromAttempt } from '@features/aria/resolvePillarScoresForNarrative';
+import { buildEvidenceContextFromAttemptPatterns } from '@features/reports/narrativeEvidenceAudit';
 
 const CLIENT_NARRATIVE_BACKUP_TIMEOUT_MS = 300_000;
 
@@ -106,6 +107,10 @@ export async function kickClientInterviewNarrativeIfPending(
   }
 
   try {
+    const evidenceContext = buildEvidenceContextFromAttemptPatterns(
+      (row.scenario_specific_patterns ?? null) as Record<string, unknown> | null,
+      row,
+    );
     const reasoning = await generateAIReasoning(
       pillars,
       scenarioScoresFromAttemptRow(row),
@@ -113,7 +118,11 @@ export async function kickClientInterviewNarrativeIfPending(
       row.weighted_score ?? resolution.weighted_score,
       resolution.passed ?? row.passed === true,
       [],
-      { perAttemptTimeoutMs: CLIENT_NARRATIVE_BACKUP_TIMEOUT_MS, maxAttempts: 2 }
+      {
+        perAttemptTimeoutMs: CLIENT_NARRATIVE_BACKUP_TIMEOUT_MS,
+        maxAttempts: 2,
+        evidenceContext,
+      },
     );
     await supabase
       .from('interview_attempts')

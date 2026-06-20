@@ -389,6 +389,57 @@ export function getFirstIncompleteAssessment(
   return null;
 }
 
+/** All four post-interview relationship questionnaires are present in `user_assessments` (or sexual-comm users row). */
+export function isDatingProfileTypologyBatteryComplete(
+  completedInstrumentIds: readonly string[],
+): boolean {
+  const done = new Set(completedInstrumentIds);
+  return ASSESSMENT_IDS.every((id) => done.has(id));
+}
+
+/** Sync profile flags when instruments were finished elsewhere (e.g. relationship validation flow). */
+export async function syncProfileIfTypologyBatteryComplete(
+  userId: string,
+  completedInstrumentIds: readonly string[],
+  profile?: { assessmentsCompleted?: boolean | null } | null,
+): Promise<void> {
+  if (profile?.assessmentsCompleted === true) return;
+  if (!isDatingProfileTypologyBatteryComplete(completedInstrumentIds)) return;
+
+  const result = await profilesRepo.updateProfile(userId, {
+    assessmentsCompleted: true,
+    assessmentsCompletedAt: new Date().toISOString(),
+    assessmentsStarted: true,
+    currentAssessment: null,
+    currentAssessmentQuestion: null,
+  } as any);
+  if (!result.success) {
+    console.error('[assessmentService] syncProfileIfTypologyBatteryComplete failed:', result.error);
+  }
+}
+
+/** After relationship-validation typology hub finishes, mirror battery completion onto the dating profile. */
+export async function syncValidationTypologyToDatingProfile(userId: string): Promise<void> {
+  const [completedResult, profileResult] = await Promise.all([
+    getCompletedAssessments(userId),
+    profilesRepo.getProfile(userId),
+  ]);
+  const completedList = completedResult.success ? completedResult.data : [];
+  const profile = profileResult.success ? profileResult.data : null;
+  await syncProfileIfTypologyBatteryComplete(userId, completedList, profile);
+}
+
+/** Profile flag or persisted instrument rows (relationship validation saves with `skipProfileUpdate`). */
+export async function areDatingProfileAssessmentsComplete(userId: string): Promise<boolean> {
+  const profileResult = await profilesRepo.getProfile(userId);
+  if (profileResult.success && profileResult.data?.assessmentsCompleted === true) {
+    return true;
+  }
+  const completed = await getCompletedAssessments(userId);
+  const list = completed.success ? completed.data : [];
+  return isDatingProfileTypologyBatteryComplete(list);
+}
+
 /**
  * Stack route for an in-progress assessment. Conflict style is not InstrumentScreen (no shared Likert config).
  */

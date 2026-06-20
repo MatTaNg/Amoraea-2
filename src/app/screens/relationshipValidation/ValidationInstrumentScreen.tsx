@@ -18,6 +18,11 @@ import { getShuffledItems } from '@/data/assessments/instruments/ecrItems';
 import { saveAssessmentResult } from '@/data/services/assessmentService';
 import type { AssessmentId } from '@/data/services/assessmentService';
 import { theme } from '@/shared/theme/theme';
+import type { RelationshipValidationTestMode } from '@features/relationshipValidation/constants';
+import { fetchRelationshipTestMode } from '@features/relationshipValidation/relationshipValidationRepo';
+import { reframePlatonicAssessmentStem } from '@features/relationshipValidation/platonicAssessmentReframe';
+import { skipValidationSexualCommunication } from '@features/relationshipValidation/validationPsychometricsProgress';
+import { useAssessmentScrollContent } from '@utilities/assessmentMobileLayout';
 
 type Props = {
   navigation: { replace: (screen: string, params?: Record<string, unknown>) => void };
@@ -25,10 +30,12 @@ type Props = {
 };
 
 export function ValidationInstrumentScreen({ navigation, route }: Props) {
+  const scrollContentStyle = useAssessmentScrollContent();
   const { user } = useAuth();
   const instrumentId = (route.params?.instrument ?? 'ECR-36') as AssessmentId;
   const config = getInstrumentConfig(instrumentId);
   const ecrShuffle = instrumentId === 'ECR-36';
+  const sexualCommunication = instrumentId === 'SEXUAL_COMMUNICATION';
 
   const sessionSeed = useMemo(
     () => (user?.id || 'anon').split('').reduce((acc, ch) => acc + ch.charCodeAt(0), 0),
@@ -38,9 +45,30 @@ export function ValidationInstrumentScreen({ navigation, route }: Props) {
   const [responses, setResponses] = useState<Record<string, number>>({});
   const [currentIndex, setCurrentIndex] = useState(0);
   const [saving, setSaving] = useState(false);
+  const [skipping, setSkipping] = useState(false);
   const [ecrOrder, setEcrOrder] = useState<ECRItem[] | null>(null);
+  const [testMode, setTestMode] = useState<RelationshipValidationTestMode | null>(null);
+  const [testModeLoading, setTestModeLoading] = useState(true);
 
   const totalQuestions = config?.items.length ?? 0;
+
+  useEffect(() => {
+    if (!user?.id) {
+      setTestModeLoading(false);
+      return;
+    }
+    let cancelled = false;
+    void fetchRelationshipTestMode(user.id)
+      .then((mode) => {
+        if (!cancelled) setTestMode(mode);
+      })
+      .finally(() => {
+        if (!cancelled) setTestModeLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [user?.id]);
 
   useEffect(() => {
     if (ecrShuffle) {
@@ -71,6 +99,19 @@ export function ValidationInstrumentScreen({ navigation, route }: Props) {
     [user?.id, config, instrumentId, navigation],
   );
 
+  const handleSkipSection = useCallback(async () => {
+    if (!user?.id || !sexualCommunication) return;
+    setSkipping(true);
+    try {
+      await skipValidationSexualCommunication(user.id);
+      navigation.replace('ValidationPsychometricsHub');
+    } catch {
+      Alert.alert('Could not skip', 'Please try again.');
+    } finally {
+      setSkipping(false);
+    }
+  }, [navigation, sexualCommunication, user?.id]);
+
   const handleResponse = useCallback(
     (value: number) => {
       const idx = Math.max(0, Math.min(currentIndex, Math.max(totalQuestions - 1, 0)));
@@ -92,7 +133,7 @@ export function ValidationInstrumentScreen({ navigation, route }: Props) {
     [currentIndex, totalQuestions, ecrShuffle, ecrOrder, finalizeAssessment],
   );
 
-  if (!config || (ecrShuffle && !ecrOrder)) {
+  if (!config || (ecrShuffle && !ecrOrder) || testModeLoading) {
     return (
       <View style={styles.centered}>
         <ActivityIndicator size="large" color="#5BA8E8" />
@@ -102,19 +143,32 @@ export function ValidationInstrumentScreen({ navigation, route }: Props) {
 
   const questionNumber = currentIndex + 1;
   const activeEcrItem = ecrShuffle && ecrOrder ? ecrOrder[currentIndex] : null;
-  const itemText = activeEcrItem?.text ?? config.items[currentIndex];
+  const rawItemText = activeEcrItem?.text ?? config.items[currentIndex];
+  const itemText = reframePlatonicAssessmentStem(rawItemText, testMode);
   const canonicalId = activeEcrItem?.id ?? currentIndex + 1;
   const flowProgressPct = totalQuestions > 0 ? (questionNumber / totalQuestions) * 100 : 0;
+  const showSkipSection = sexualCommunication && currentIndex === 0;
 
   return (
     <SafeAreaView style={styles.container} edges={['top', 'left', 'right']}>
       <View style={styles.flowProgressTrack}>
         <View style={[styles.flowProgressFill, { width: `${flowProgressPct}%` }]} />
       </View>
-      <ScrollView contentContainerStyle={styles.scrollContent}>
+      <ScrollView contentContainerStyle={scrollContentStyle}>
         <Text style={styles.meta}>
           {config.title} · Question {questionNumber} of {totalQuestions}
         </Text>
+        {showSkipSection ? (
+          <Pressable
+            onPress={() => void handleSkipSection()}
+            disabled={saving || skipping}
+            style={styles.skipButton}
+          >
+            <Text style={styles.skipButtonText}>
+              {skipping ? 'Skipping…' : 'Skip this section'}
+            </Text>
+          </Pressable>
+        ) : null}
         <Text style={styles.questionText}>{itemText}</Text>
         <LikertScale
           value={responses[String(canonicalId)] ?? null}
@@ -155,17 +209,23 @@ const styles = StyleSheet.create({
     height: 4,
     backgroundColor: '#5BA8E8',
   },
-  scrollContent: {
-    padding: 24,
-    paddingBottom: 48,
-    maxWidth: 560,
-    width: '100%',
-    alignSelf: 'center',
-  },
   meta: {
     color: '#5BA8E8',
     fontSize: 13,
     marginBottom: 16,
+  },
+  skipButton: {
+    alignSelf: 'flex-start',
+    marginBottom: 16,
+    paddingVertical: 8,
+    paddingHorizontal: 12,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: 'rgba(82, 142, 220, 0.35)',
+  },
+  skipButtonText: {
+    color: '#95A8BD',
+    fontSize: 14,
   },
   questionText: {
     color: '#E8F0F8',
