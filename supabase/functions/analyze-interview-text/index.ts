@@ -452,7 +452,6 @@ Deno.serve(async (req) => {
     console.log(
       '[analyze-interview-text] nc_lexicon',
       JSON.stringify({
-        hypothesisId: 'H_nc_families',
         attempt_id: attempt.id,
         user_id: userId,
         ...ncLexiconDebug,

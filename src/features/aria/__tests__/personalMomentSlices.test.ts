@@ -2,6 +2,7 @@ import { describe, expect, it } from '@jest/globals';
 import {
   inferPersonalMomentSlices,
   findMoment4AssistantStartIndex,
+  resolveMoment5ScoringSlice,
   trimMoment5SliceForScoring,
 } from '../personalMomentSlices';
 import { MOMENT_4_HANDOFF_NO_NAME_LEAD } from '../interviewTransitionBundles';
@@ -90,5 +91,72 @@ describe('trimMoment5SliceForScoring', () => {
     expect(trimmed.some((m) => /good work getting through/i.test(m.content ?? ''))).toBe(false);
     expect(trimmed[trimmed.length - 1].role).toBe('user');
     expect(trimmed[trimmed.length - 1].content).toContain('conflict with my friend');
+  });
+
+  it('returns an empty slice when no user turn exists', () => {
+    const slice = [
+      { role: 'assistant' as const, content: MOMENT_5_ACCOUNTABILITY_QUESTION_TEXT },
+      { role: 'assistant' as const, content: 'How did it get resolved between you two?' },
+    ];
+    expect(trimMoment5SliceForScoring(slice)).toEqual([]);
+  });
+});
+
+describe('resolveMoment5ScoringSlice', () => {
+  const substantiveM5 =
+    'I had a serious conflict with my close friend Alex after missing her wedding rehearsal. We stopped talking for weeks until I called to apologize and explained how ashamed I felt.';
+
+  it('falls back to interviewMoment: 5 user turns when anchor inference yields an empty slice', () => {
+    const transcript = [
+      { role: 'assistant' as const, content: 'Paraphrased conflict question without canonical anchor strings.' },
+      { role: 'user' as const, content: substantiveM5, interviewMoment: 5 },
+      { role: 'assistant' as const, content: 'Good work getting through all of this — thank you for being open.' },
+    ];
+    const slice = resolveMoment5ScoringSlice(transcript);
+    expect(slice.some((m) => m.role === 'user' && m.content === substantiveM5)).toBe(true);
+    expect(slice.some((m) => /good work getting through/i.test(m.content ?? ''))).toBe(false);
+  });
+
+  it('finds paraphrased primary conflict question without interviewMoment tags', () => {
+    const paraphrase =
+      'Think of a time when you had a conflict with someone important in your life. What happened, and how did things get resolved?';
+    const transcript = [
+      { role: 'assistant' as const, content: paraphrase },
+      { role: 'user' as const, content: substantiveM5 },
+      {
+        role: 'assistant' as const,
+        content: 'What do you think you did or said that contributed to the conflict?',
+      },
+      {
+        role: 'user' as const,
+        content: 'I got defensive and shut down instead of listening when she raised the issue.',
+      },
+    ];
+    const slice = resolveMoment5ScoringSlice(transcript);
+    expect(slice.some((m) => m.content === substantiveM5)).toBe(true);
+    expect(slice.some((m) => /got defensive and shut down/i.test(m.content ?? ''))).toBe(true);
+  });
+
+  it('includes all three interview_moment: 5 user turns with resolution and probe assistants', () => {
+    const primary =
+      'My mother and I fought about her criticizing my marriage and I shut down instead of explaining how hurt I felt.';
+    const resolution =
+      'We eventually sat down and I walked her through why her comments landed so harshly for me.';
+    const probe =
+      'I was too emotional and terse when she first brought it up instead of staying curious about her worry.';
+    const transcript = [
+      { role: 'assistant' as const, content: 'Paraphrased conflict question without canonical anchor strings.' },
+      { role: 'user' as const, content: primary, interview_moment: 5 },
+      { role: 'assistant' as const, content: 'How did things get resolved between you and your mother?' },
+      { role: 'user' as const, content: resolution, interview_moment: 5 },
+      { role: 'assistant' as const, content: 'What do you think you did or said that contributed to the conflict?' },
+      { role: 'user' as const, content: probe, interview_moment: 5 },
+    ];
+    const slice = resolveMoment5ScoringSlice(transcript);
+    expect(slice.filter((m) => m.role === 'user')).toHaveLength(3);
+    expect(slice.some((m) => m.content === primary)).toBe(true);
+    expect(slice.some((m) => m.content === resolution)).toBe(true);
+    expect(slice.some((m) => m.content === probe)).toBe(true);
+    expect(slice.some((m) => /contributed to the conflict/i.test(m.content ?? ''))).toBe(true);
   });
 });

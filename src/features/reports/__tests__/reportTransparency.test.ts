@@ -88,14 +88,16 @@ describe('reportTransparency', () => {
   it('detects AAQ-II/regulation divergence when gaming correction flagged', () => {
     const conflicts = detectEvidenceConflicts(mattLikeData());
     expect(conflicts.some((c) => c.id === 'aaq2_regulation_divergence')).toBe(true);
-    expect(conflicts[0]?.paragraph).toMatch(/questionnaire responses suggested more/i);
+    expect(conflicts[0]?.paragraph).toMatch(/questionnaire\/self-report results suggested more/i);
     expect(conflicts[0]?.paragraph).not.toMatch(/gaming correction/i);
   });
 
-  it('does not emit mixed section without gaming correction flag', () => {
+  it('emits mixed section even without gaming correction flag if tension exists', () => {
     const data = mattLikeData();
     data.attempt!.gamingCorrection = null;
-    expect(detectEvidenceConflicts(data)).toEqual([]);
+    const conflicts = detectEvidenceConflicts(data);
+    expect(conflicts.length).toBeGreaterThan(0);
+    expect(conflicts.some((c) => c.id === 'aaq2_regulation_divergence')).toBe(true);
   });
 
   it('inserts mixed-evidence before Practical Steps and confidence before Closing', () => {
@@ -128,5 +130,49 @@ describe('reportTransparency', () => {
     expect(out).toMatch(/Where the Evidence Was Mixed/);
     expect(out).toMatch(/Devanshu/);
     expect(out).not.toMatch(/someone close to you and/i);
+  });
+
+  it('detects BRS/regulation divergence at config thresholds', () => {
+    const data = mattLikeData();
+    data.user.psychometrics.brsScore = 2.4;
+    data.attempt!.pillarScores = { ...data.attempt!.pillarScores!, regulation: 7.5 };
+    data.attempt!.gamingCorrection = {
+      ...data.attempt!.gamingCorrection!,
+      activeTriggers: [{ type: 'consistency_divergence', instrument: 'brs', detail: 'test', level: 2 }],
+    };
+    const conflicts = detectEvidenceConflicts(data);
+    expect(conflicts.some((c) => c.id === 'brs_regulation_divergence')).toBe(true);
+  });
+
+  it('detects RFQ/mentalizing high-self-report divergence at config thresholds', () => {
+    const data = mattLikeData();
+    data.user.psychometrics.rfqScore = 5.6;
+    data.attempt!.pillarScores = { ...data.attempt!.pillarScores!, mentalizing: 3.5 };
+    data.attempt!.gamingCorrection = {
+      ...data.attempt!.gamingCorrection!,
+      activeTriggers: [{ type: 'consistency_divergence', instrument: 'rfq', detail: 'test', level: 2 }],
+    };
+    const conflicts = detectEvidenceConflicts(data);
+    expect(conflicts.some((c) => c.id === 'rfq_mentalizing_divergence_high_self_report')).toBe(true);
+  });
+
+  it('detects AAQ-II 31 vs Regulation 6 divergence requested by user', () => {
+    const data = mattLikeData();
+    data.user.aaq2Score = 31;
+    data.attempt!.pillarScores = { ...data.attempt!.pillarScores!, regulation: 6 };
+    data.attempt!.gamingCorrection = {
+      ...data.attempt!.gamingCorrection!,
+      activeTriggers: [
+        {
+          type: 'consistency_divergence',
+          instrument: 'aaq2',
+          detail: 'AAQ-II 31 vs Regulation 6',
+          level: 1,
+        },
+      ],
+    };
+    const conflicts = detectEvidenceConflicts(data);
+    expect(conflicts.some((c) => c.id === 'aaq2_regulation_divergence')).toBe(true);
+    expect(conflicts[0]?.paragraph).toMatch(/questionnaire\/self-report results suggested more/i);
   });
 });

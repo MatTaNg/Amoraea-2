@@ -163,6 +163,51 @@ export function parseHolisticInterviewModelObjectFromModelText(raw: string): Rec
   return bestCoerced;
 }
 
+/** Collect every parseable top-level `{…}` object from model text (whole string + balanced slices). */
+export function collectJsonObjectsFromModelText(raw: string): unknown[] {
+  const cleaned = raw.replace(/```json|```/gi, '').trim();
+  const objectAttempts: unknown[] = [];
+  const pushParsed = (obj: unknown) => {
+    if (obj != null && typeof obj === 'object' && !Array.isArray(obj)) {
+      objectAttempts.push(obj);
+    }
+  };
+
+  try {
+    pushParsed(JSON.parse(cleaned));
+  } catch {
+    /* fall through */
+  }
+
+  let searchFrom = 0;
+  const maxTries = 100;
+  for (let t = 0; t < maxTries; t++) {
+    const start = cleaned.indexOf('{', searchFrom);
+    if (start < 0) break;
+    const extracted = extractBalancedJsonObjectFrom(cleaned, start);
+    if (!extracted) {
+      searchFrom = start + 1;
+      continue;
+    }
+    try {
+      pushParsed(JSON.parse(extracted));
+    } catch {
+      /* try next `{` */
+    }
+    searchFrom = start + 1;
+  }
+
+  const seen = new Set<string>();
+  const unique: unknown[] = [];
+  for (const c of objectAttempts) {
+    const sig = JSON.stringify(c);
+    if (seen.has(sig)) continue;
+    seen.add(sig);
+    unique.push(c);
+  }
+  return unique;
+}
+
 /** Parses model output that should be JSON; tolerates ``` fences, leading prose, and stray `{` snippets. */
 export function parseJsonObjectFromModelText(raw: string): unknown {
   const cleaned = raw.replace(/```json|```/gi, '').trim();

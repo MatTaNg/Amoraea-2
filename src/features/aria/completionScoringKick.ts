@@ -3,7 +3,12 @@
  * scoring is not blocked by React ref assignment order at the bottom of AriaScreen.
  */
 
-export type CompletionTranscriptMsg = { role: string; content: string };
+export type CompletionTranscriptMsg = {
+  role: string;
+  content: string;
+  interviewMoment?: number;
+  scenarioNumber?: number;
+};
 type ScoreInterviewFn = (messages: CompletionTranscriptMsg[]) => Promise<void>;
 
 let registeredScoreInterview: ScoreInterviewFn | null = null;

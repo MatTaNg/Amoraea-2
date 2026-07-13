@@ -15,7 +15,6 @@ import { Ionicons } from '@expo/vector-icons';
 import * as Clipboard from 'expo-clipboard';
 import { supabase } from '@data/supabase/client';
 import { clearReferralNoticePending } from '@data/repos/usersRoutingRepo';
-import { triggerResultsReadyEmail } from '@features/interview/triggerResultsReadyEmail';
 import {
   USER_INTERVIEW_ROUTING_TABLE,
   USER_REFERRAL_NOTICE_SELECT,
@@ -173,9 +172,6 @@ export const PostInterviewProcessingScreen: React.FC<{
         const destination = mapInterviewStackRouteForLaunchMode(decision.route);
         if (navigatedRef.current) return;
         navigatedRef.current = true;
-        if (attemptId && destination !== 'PostInterviewLaunch') {
-          void triggerResultsReadyEmail(userId, attemptId);
-        }
         queryClient.invalidateQueries({ queryKey: ['profile', userId] });
         queryClient.invalidateQueries({ queryKey: ['standardPostInterviewDeferral', userId] });
         navigation.replace(destination, { userId });
@@ -217,7 +213,7 @@ export const PostInterviewProcessingScreen: React.FC<{
       const { data: { session } } = await supabase.auth.getSession();
       const email = session?.user?.email ?? user?.email ?? null;
       if (cancelled || !isAmoraeaAdminConsoleEmail(email)) return;
-      navigation.replace('Aria', { userId, openAdminPanel: true });
+      navigation.replace('Amoraea', { userId, openAdminPanel: true });
     })();
     return () => {
       cancelled = true;
@@ -235,7 +231,7 @@ export const PostInterviewProcessingScreen: React.FC<{
       const uid = auth.user?.id ?? userId;
       if (!uid) return;
       const [{ data: codeRow }, { data: userRow }] = await Promise.all([
-        supabase.from('referral_codes').select('code').eq('referrer_user_id', uid).maybeSingle(),
+        supabase.from('users').select('invite_code').eq('id', uid).maybeSingle(),
         supabase
           .from(USER_INTERVIEW_ROUTING_TABLE)
           .select(USER_REFERRAL_NOTICE_SELECT)
@@ -243,7 +239,7 @@ export const PostInterviewProcessingScreen: React.FC<{
           .maybeSingle(),
       ]);
       if (cancelled) return;
-      setMyReferralCode(codeRow?.code ?? null);
+      setMyReferralCode(codeRow?.invite_code ?? null);
       setReferralNotice(userRow?.referral_notice_pending ?? null);
     })();
     return () => {

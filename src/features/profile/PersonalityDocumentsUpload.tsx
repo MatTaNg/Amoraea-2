@@ -150,7 +150,39 @@ export function PersonalityDocumentsUpload({
 
     if (error) {
       console.error('[PersonalityDocs] processing invoke failed:', error);
-      return { ok: false as const, message: error.message };
+      console.log('[PersonalityDocs] error details:', {
+        name: error.name,
+        message: error.message,
+        details: (error as any).details,
+        status: (error as any).status,
+      });
+
+      let msg = error.message;
+
+      // Attempt to extract more info from the response body if available
+      const context = (error as any).context;
+      if (context instanceof Response) {
+        try {
+          const body = await context.clone().json();
+          console.log('[PersonalityDocs] server error body:', body);
+          if (body.message) msg = body.message;
+          else if (body.error) msg = typeof body.error === 'string' ? body.error : JSON.stringify(body.error);
+        } catch (e) {
+          try {
+            const text = await context.clone().text();
+            console.log('[PersonalityDocs] server error text:', text);
+          } catch (e2) {
+            // ignore
+          }
+        }
+      }
+      
+      const details = (error as any).details;
+      if (details && !context) {
+        if (typeof details === 'string') msg = details;
+        else if (typeof details === 'object') msg = details.message || details.error || msg;
+      }
+      return { ok: false as const, message: msg };
     }
 
     if (data && typeof data === 'object' && 'error' in data && data.error) {

@@ -37,6 +37,8 @@ export const DEFAULT_CLAUDE_SONNET_MODEL = 'claude-sonnet-4-6';
 const RETIRED_SONNET_MODELS: Record<string, string> = {
   'claude-sonnet-4-20250514': DEFAULT_CLAUDE_SONNET_MODEL,
   'claude-sonnet-4-0': DEFAULT_CLAUDE_SONNET_MODEL,
+  'claude-3-5-sonnet-20241022': DEFAULT_CLAUDE_SONNET_MODEL,
+  'claude-3-5-sonnet-latest': DEFAULT_CLAUDE_SONNET_MODEL,
 };
 
 export function resolveAnthropicSonnetModel(requested?: string): string {

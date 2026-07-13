@@ -14,47 +14,22 @@ import {
 import {
   coerceScenarioScoreParsedModelRecord,
   coerceScoreToFiniteNumber,
-  fillScenarioKeyEvidenceWhenNumericScoreButMissingQuote,
+  finalizeScenarioKeyEvidenceAfterHeuristics,
   mergeSalvagedScenarioKeyEvidenceFromRaw,
   mergeSalvagedScenarioPillarScoresIntoParsed,
   normalizeScoresByEvidence,
+  prepareScenarioKeyEvidenceFromModelOutput,
 } from './probeAndScoringUtils';
+import {
+  ensureNumericScoreMap,
+  extractNumericScoresFromRawModelText,
+} from './scenarioScoreSalvageUtils';
 
 export const SCENARIO_SCORE_MARKER_IDS: Record<1 | 2 | 3, readonly string[]> = {
   1: ['mentalizing', 'accountability', 'contempt_recognition', 'contempt_expression', 'repair', 'attunement', 'appreciation'],
   2: ['appreciation', 'attunement', 'mentalizing', 'repair', 'accountability', 'contempt_expression'],
   3: ['regulation', 'repair', 'mentalizing', 'attunement', 'accountability', 'contempt_expression'],
 };
-
-function ensureNumericScoreMap(
-  candidate: unknown,
-  markerIds: readonly string[],
-): Record<string, number | null> {
-  if (!candidate || typeof candidate !== 'object' || Array.isArray(candidate)) return {};
-  const out: Record<string, number | null> = {};
-  for (const markerId of markerIds) {
-    const n = coerceScoreToFiniteNumber((candidate as Record<string, unknown>)[markerId]);
-    if (n !== undefined) out[markerId] = n;
-  }
-  return out;
-}
-
-function extractNumericScoresFromRawModelText(
-  rawText: string,
-  markerIds: readonly string[],
-): Record<string, number | null> {
-  const out: Record<string, number | null> = {};
-  for (const markerId of markerIds) {
-    const escaped = markerId.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-    const keyValuePattern = new RegExp(`["']?${escaped}["']?\\s*[:=]\\s*(-?\\d+(?:\\.\\d+)?)`, 'i');
-    const slashTenPattern = new RegExp(`["']?${escaped}["']?[^\\d\\n]{0,20}(\\d+(?:\\.\\d+)?)\\s*\\/\\s*10`, 'i');
-    const m = rawText.match(keyValuePattern) ?? rawText.match(slashTenPattern);
-    if (!m) continue;
-    const n = Number(m[1]);
-    if (Number.isFinite(n)) out[markerId] = n;
-  }
-  return out;
-}
 
 function hasNumericPillarScores(pillarScores: unknown): boolean {
   if (pillarScores == null || typeof pillarScores !== 'object' || Array.isArray(pillarScores)) return false;
@@ -105,7 +80,7 @@ export function postProcessScenarioScoreFromModelText(input: ScenarioScorePostPa
   );
 
   const scenarioUserText = userTurnTextForInterviewScenario(scoringMessages, scenarioNumber);
-  fillScenarioKeyEvidenceWhenNumericScoreButMissingQuote(markerIds, parsed, scenarioUserText);
+  prepareScenarioKeyEvidenceFromModelOutput(markerIds, parsed, scenarioUserText, rawModelText);
 
   const psRaw = parsed.pillarScores;
   if (psRaw && typeof psRaw === 'object' && !Array.isArray(psRaw)) {
@@ -115,7 +90,7 @@ export function postProcessScenarioScoreFromModelText(input: ScenarioScorePostPa
     }
   }
 
-  const primaryRawNumericScores = ensureNumericScoreMap(parsed.pillarScores, markerIds);
+  const primaryRawNumericScores = ensureNumericScoreMap(markerIds, parsed.pillarScores);
 
   parsed.pillarScores = normalizeScoresByEvidence(
     parsed.pillarScores as Record<string, unknown>,
@@ -124,14 +99,12 @@ export function postProcessScenarioScoreFromModelText(input: ScenarioScorePostPa
 
   if (!hasNumericPillarScores(parsed.pillarScores) && Object.keys(primaryRawNumericScores).length > 0) {
     parsed.pillarScores = primaryRawNumericScores;
-    fillScenarioKeyEvidenceWhenNumericScoreButMissingQuote(markerIds, parsed, scenarioUserText);
   }
 
   if (!hasNumericPillarScores(parsed.pillarScores)) {
-    const fallbackFromRaw = extractNumericScoresFromRawModelText(rawModelText, markerIds);
+    const fallbackFromRaw = extractNumericScoresFromRawModelText(markerIds, rawModelText);
     if (Object.keys(fallbackFromRaw).length > 0) {
       parsed.pillarScores = fallbackFromRaw;
-      fillScenarioKeyEvidenceWhenNumericScoreButMissingQuote(markerIds, parsed, scenarioUserText);
       const normalized = normalizeScoresByEvidence(
         parsed.pillarScores as Record<string, unknown>,
         parsed.keyEvidence as Record<string, string>,
@@ -160,10 +133,17 @@ export function postProcessScenarioScoreFromModelText(input: ScenarioScorePostPa
     {
       depthModifierThreshold: scenarioDepthModifierThreshold(scenarioUserTurnCount),
       wordCountSource: 'live_transcript',
+      scoringMetadata:
+        parsed.scoringMetadata != null &&
+        typeof parsed.scoringMetadata === 'object' &&
+        !Array.isArray(parsed.scoringMetadata)
+          ? (parsed.scoringMetadata as Record<string, unknown>)
+          : null,
     },
   );
   parsed.pillarScores = elabor.pillarScores;
   parsed.keyEvidence = elabor.keyEvidence;
+  finalizeScenarioKeyEvidenceAfterHeuristics(markerIds, parsed, scenarioUserText);
   parsed.pillarScores = finalizeScenarioPillarScores(parsed.pillarScores);
   parsed.mentalizing_overcertainty = parsed.mentalizing_overcertainty === true;
   parsed.scenarioNumber = scenarioNumber;

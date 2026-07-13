@@ -7,6 +7,14 @@ import type { AssessmentInsightSnapshot } from "@/src/types";
 import type { ConflictStyleKey } from "@/data/assessments/instruments/conflictStyleTypes";
 import { CONFLICT_STYLE_KEYS } from "@/data/assessments/instruments/conflictStyleTypes";
 import { styleDisplayName } from "@/data/assessments/conflictStyleResultsNarrative";
+import {
+  ATTACHMENT_HIGH_ANXIETY_OR_AVOIDANCE_MIN,
+  BRS_INSIGHT_HIGH_MIN,
+  BRS_INSIGHT_LOW_MAX,
+  DSIR_INSIGHT_HIGH_MIN,
+  DSIR_INSIGHT_LOW_MAX,
+  PVQ_INSIGHT_HIGH_DEVIATION_MIN,
+} from "@config/onboarding/assessmentInsightTiers";
 
 export interface InsightContent {
   headline: string;
@@ -28,9 +36,8 @@ function toTitleCase(input: string): string {
 
 /** ECR-R anxiety/avoidance means (1–7) → quadrant label (midpoint split at 4.0). */
 export function attachmentStyleFromScores(anxiety: number, avoidance: number): string {
-  const threshold = 4.0;
-  const highAnx = anxiety >= threshold;
-  const highAvo = avoidance >= threshold;
+  const highAnx = anxiety >= ATTACHMENT_HIGH_ANXIETY_OR_AVOIDANCE_MIN;
+  const highAvo = avoidance >= ATTACHMENT_HIGH_ANXIETY_OR_AVOIDANCE_MIN;
   if (!highAnx && !highAvo) return "Secure";
   if (highAnx && !highAvo) return "Anxious-Preoccupied";
   if (!highAnx && highAvo) return "Dismissive-Avoidant";
@@ -79,8 +86,8 @@ function attachmentBand(v: number): "Low" | "Moderate" | "High" {
 }
 
 function valueBand(v: number): "Low" | "Moderate" | "High" {
-  if (v <= -0.35) return "Low";
-  if (v >= 0.35) return "High";
+  if (v <= -PVQ_INSIGHT_HIGH_DEVIATION_MIN) return "Low";
+  if (v >= PVQ_INSIGHT_HIGH_DEVIATION_MIN) return "High";
   return "Moderate";
 }
 
@@ -304,7 +311,7 @@ function bfi2Insight(scores: Record<string, number>): InsightContent {
 function dsirInsight(scores: Record<string, number>): InsightContent {
   const overall = scores.overall ?? 0;
   const level =
-    overall >= 4.2 ? "high" : overall <= 2.8 ? "low" : "moderate";
+    overall >= DSIR_INSIGHT_HIGH_MIN ? "high" : overall <= DSIR_INSIGHT_LOW_MAX ? "low" : "moderate";
   const subscales = [
     { key: "emotional_reactivity", label: "Emotional Reactivity" },
     { key: "i_position", label: "I-Position" },
@@ -335,7 +342,8 @@ function dsirInsight(scores: Record<string, number>): InsightContent {
 
 function brsInsight(scores: Record<string, number>): InsightContent {
   const resilience = scores.resilience ?? 0;
-  const level = resilience >= 3.5 ? "High" : resilience <= 2.5 ? "Low" : "Moderate";
+  const level =
+    resilience >= BRS_INSIGHT_HIGH_MIN ? "High" : resilience <= BRS_INSIGHT_LOW_MAX ? "Low" : "Moderate";
   const headline = `${level} resilience.`;
   const body =
     "Resilience is how quickly you bounce back from stress. It doesn't mean you don't feel difficulty — it means you recover and adapt. This matters in relationships when conflicts or setbacks occur.";

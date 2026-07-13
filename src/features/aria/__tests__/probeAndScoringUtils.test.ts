@@ -1,4 +1,5 @@
 import { describe, expect, it } from '@jest/globals';
+import { stripDuplicateScenarioAContemptProbeParagraphs } from '../interviewAssistantDuplicateStrip';
 import { personalMomentBundleWasScored } from '../interviewCompletionGate';
 import { buildMoment4ThresholdAnswerToMoment5Bundle } from '../interviewTransitionBundles';
 import {
@@ -34,7 +35,6 @@ import {
   MOMENT_5_SPECIFICITY_REDIRECT_ALT_TEXT,
   MOMENT_5_SPECIFICITY_REDIRECT_TEXT,
   MOMENT_5_RESOLUTION_FOLLOWUP_TEXT,
-  MOMENT_5_ACCOUNTABILITY_PROBE_PHILOSOPHY_WITH_GRIEF_ACK_TEXT,
   looksLikeMoment5AccountabilityProbeAssistantPrompt,
   looksLikeMoment5ConflictValidityClarificationPrompt,
   looksLikeMoment5ResolutionFollowUpPrompt,
@@ -90,6 +90,7 @@ import {
   MOMENT4_SCORE_RECOVERED_EVIDENCE_LINE,
   mergeSalvagedMoment5PillarScoresIntoParsed,
   evaluateMoment5AccountabilityProbe,
+  moment5ConflictEpisodeContext,
   pickMoment5AccountabilityProbeSpokenText,
   shouldFireAccountabilityProbe,
   moment5AnswerHasExplicitSelfAccountability,
@@ -412,7 +413,7 @@ describe('probeAndScoringUtils', () => {
       "Ryan has been doing this for a while and Emma's had enough. She's not asking him to stop. She's telling him she already knows he won't. Lotline is a shutdown, not a complaint.";
     expect(evaluateScenarioAQ1ContemptProbePreProbeSkip(s)).toEqual({
       skip: true,
-      reason: 'register_addressed',
+      reason: 'indirect_closing_line_reference',
     });
     expect(hasScenarioAQ1ContemptProbeCoverage(s)).toBe(true);
   });
@@ -658,7 +659,7 @@ describe('probeAndScoringUtils', () => {
         evaluateScenarioAQ1ContemptProbePreProbeSkip(
           "That comment is about more than just this one call — it's the pattern.",
         ),
-      ).toEqual({ skip: true, reason: 'pattern_interpretation_tied_to_line' });
+      ).toEqual({ skip: true, reason: 'indirect_closing_line_reference' });
     });
 
     it('generic upset-only framing does not pre-skip', () => {
@@ -677,6 +678,44 @@ describe('probeAndScoringUtils', () => {
         reason: null,
       });
       expect(hasScenarioAQ1ContemptProbeCoverage(answer)).toBe(false);
+    });
+
+    it('skips with literal_quote_present when user quotes Emma closing line verbatim', () => {
+      expect(
+        evaluateScenarioAQ1ContemptProbePreProbeSkip(
+          "Emma and Ryan are stuck — when she says you've made that very clear you can tell she's given up.",
+        ),
+      ).toEqual({ skip: true, reason: 'literal_quote_present' });
+    });
+
+    it('skips with indirect_closing_line_reference for deictic Emma-line engagement', () => {
+      expect(
+        evaluateScenarioAQ1ContemptProbePreProbeSkip(
+          "Emma's line at the end really stuck with me — the way she said that sounds resigned.",
+        ),
+      ).toEqual({ skip: true, reason: 'indirect_closing_line_reference' });
+      expect(
+        evaluateScenarioAQ1ContemptProbePreProbeSkip(
+          "When Emma says that I think she's frustrated with Ryan taking the call.",
+        ),
+      ).toEqual({ skip: true, reason: 'indirect_closing_line_reference' });
+    });
+
+    it('does not pre-skip when user addresses Scenario A without engaging Emma closing line', () => {
+      const answer =
+        'Ryan should apologize and they need to talk about boundaries with his mother.';
+      expect(evaluateScenarioAQ1ContemptProbePreProbeSkip(answer)).toEqual({
+        skip: false,
+        reason: null,
+      });
+    });
+
+    it('skips with closing_line_significance_read for recurrence/resignation without verbatim quote', () => {
+      expect(
+        evaluateScenarioAQ1ContemptProbePreProbeSkip(
+          "You can tell this isn't the first time — Emma sounds resigned when she closes it out.",
+        ),
+      ).toEqual({ skip: true, reason: 'closing_line_significance_read' });
     });
   });
 
@@ -874,14 +913,23 @@ describe('probeAndScoringUtils', () => {
     expect(cleaned.mentalizing).toBe(6);
   });
 
-  it('fillMoment5KeyEvidenceWhenNumericScoreButMissingQuote adds recovery lines before normalize', () => {
+  it('fillMoment5KeyEvidenceWhenNumericScoreButMissingQuote uses transcript excerpts before normalize', () => {
+    const m5User =
+      'I had a long conflict with my friend after missing her wedding rehearsal and we eventually talked it through over coffee.';
     const row = {
       pillarScores: { accountability: 8, mentalizing: '7' } as Record<string, unknown>,
       keyEvidence: {} as Record<string, string>,
     };
-    fillMoment5KeyEvidenceWhenNumericScoreButMissingQuote(row);
-    expect(row.keyEvidence?.accountability).toContain('Score recovered');
-    expect(row.keyEvidence?.mentalizing).toContain('Score recovered');
+    const guard = {
+      transcript: [
+        { role: 'assistant', content: MOMENT_5_ACCOUNTABILITY_QUESTION_TEXT },
+        { role: 'user', content: m5User, interviewMoment: 5 },
+      ],
+      scoringSlice: [{ role: 'user', content: m5User }],
+    };
+    fillMoment5KeyEvidenceWhenNumericScoreButMissingQuote(row, guard);
+    expect(row.keyEvidence?.accountability).toMatch(/^User: "/);
+    expect(row.keyEvidence?.mentalizing).toMatch(/^User: "/);
   });
 
   it('coerceScenarioScoreParsedModelRecord lifts snake_case keys', () => {
@@ -902,7 +950,7 @@ describe('probeAndScoringUtils', () => {
     expect(merged.repair).toBe(6);
   });
 
-  it('fillScenarioKeyEvidenceWhenNumericScoreButMissingQuote uses transcript excerpt', () => {
+  it('fillScenarioKeyEvidenceWhenNumericScoreButMissingQuote uses recovered evidence line', () => {
     const row = {
       pillarScores: { mentalizing: 7 },
       keyEvidence: {} as Record<string, string>,
@@ -912,8 +960,7 @@ describe('probeAndScoringUtils', () => {
       row,
       'Emma felt hurt when Ryan took the call.',
     );
-    expect(row.keyEvidence?.mentalizing).toContain('Emma felt hurt');
-    expect(row.keyEvidence?.mentalizing).not.toContain('Score recovered');
+    expect(row.keyEvidence?.mentalizing).toBe(MOMENT4_SCORE_RECOVERED_EVIDENCE_LINE);
   });
 
   it('backfillMoment5KeyEvidenceIfScoresOtherwiseUnpersistable makes all-null bundles gate-persistable', () => {
@@ -921,7 +968,15 @@ describe('probeAndScoringUtils', () => {
     const merged = mergeMoment5PillarScoresAfterEvidenceNormalize({});
     const row = { pillarScores: merged, keyEvidence: {} as Record<string, string> };
     expect(personalMomentBundleWasScored(row)).toBe(false);
-    backfillMoment5KeyEvidenceIfScoresOtherwiseUnpersistable(row);
+    const m5User =
+      'I had a long conflict with my friend after missing her wedding rehearsal and we eventually talked it through over coffee.';
+    backfillMoment5KeyEvidenceIfScoresOtherwiseUnpersistable(row, undefined, {
+      transcript: [
+        { role: 'assistant', content: MOMENT_5_ACCOUNTABILITY_QUESTION_TEXT },
+        { role: 'user', content: m5User, interviewMoment: 5 },
+      ],
+      scoringSlice: [{ role: 'user', content: m5User }],
+    });
     expect(personalMomentBundleWasScored(row)).toBe(true);
     expect(row.keyEvidence?.accountability).toContain('Moment 5 incomplete model output');
     warnSpy.mockRestore();
@@ -1050,6 +1105,46 @@ describe('probeAndScoringUtils', () => {
       });
     });
 
+    it('fires for information-transfer resolution without explicit self-accountability (mom marriage pattern)', () => {
+      const combined =
+        'I had a massive conflict with my mom regarding when I was going to get married. I realized she lacked some of the context. I explained to her what was going on. I took time to logically explain to her my rationale and my side of things, and assured her that I wanted the same things as she did, but I just needed time.';
+      expect(moment5AnswerHasExplicitSelfAccountability(combined)).toBe(false);
+      expect(shouldFireAccountabilityProbe(combined)).toBe(true);
+      expect(evaluateMoment5AccountabilityProbe(combined)).toMatchObject({
+        shouldProbe: true,
+        reason: 'lacks_explicit_self_accountability',
+      });
+      expect(pickMoment5AccountabilityProbeSpokenText(combined, { griefAckPrefix: true })).toContain(
+        'contributed to the conflict',
+      );
+      expect(pickMoment5AccountabilityProbeSpokenText(combined, { griefAckPrefix: true })).not.toContain(
+        'specific time you had a conflict',
+      );
+    });
+
+    it('still fires accountability probe when initial M5 story includes emotional venting without ownership (Matt mom pattern)', () => {
+      const combined =
+        "I had a massive conflict with my mother regarding when I was going to get married. She understandably was concerned that I was taking too much time, but I was pissed because I thought she was pushing me too hard, but then I realized she lacked some of the context of why I was waiting. Then I explained to her that there's a lot of financial obligation to getting married and I needed to be ready financially and emotionally before I took that step. I took time to logically explain to her my rationale and my side of things and assured her that I wanted the same things that she did, but I just needed time.";
+      expect(moment5AnswerHasExplicitSelfAccountability(combined)).toBe(false);
+      expect(shouldFireAccountabilityProbe(combined)).toBe(true);
+      expect(evaluateMoment5AccountabilityProbe(combined)).toMatchObject({
+        shouldProbe: true,
+        reason: 'lacks_explicit_self_accountability',
+      });
+    });
+
+    it('detects conflict episode context for modified conflict phrasing (massive conflict)', () => {
+      const answer =
+        'I had a massive conflict with my mother regarding when I was going to get married. She was concerned I was taking too long.';
+      expect(moment5ConflictEpisodeContext(answer)).toBe(true);
+    });
+
+    it('does not treat incidental "I was" phrasing as strong accountability', () => {
+      const answer =
+        'I was going to get married next year and my mom and I had a big fight about the timeline.';
+      expect(shouldFireAccountabilityProbe(answer)).toBe(true);
+    });
+
     it('does not fire when the user anchors specific feelings or behavior in the conflict', () => {
       const answer =
         'I had a conflict with my brother. I felt hurt when he said that, got triggered, and later I realized I was being defensive.';
@@ -1068,8 +1163,22 @@ describe('probeAndScoringUtils', () => {
         shouldProbe: true,
         reason: 'lacks_explicit_self_accountability',
       });
-      expect(pickMoment5AccountabilityProbeSpokenText(answer, { griefAckPrefix: true })).toContain(
-        'specific time you had a conflict'
+      expect(pickMoment5AccountabilityProbeSpokenText(answer, { griefAckPrefix: true })).toBe(
+        MOMENT_5_ACCOUNTABILITY_PROBE_WITH_GRIEF_ACK_TEXT,
+      );
+    });
+
+    it('always uses canonical accountability probe text', () => {
+      const conflict =
+        'I had a massive conflict with my mom regarding when I was going to get married. I realized she lacked some of the context around my timeline.';
+      const resolution =
+        'I think I took time to logically explain to her my rationale and my side of things, and assured her that I wanted the same things as she did, but I just needed time.';
+      const combined = `${conflict} ${resolution}`;
+      expect(pickMoment5AccountabilityProbeSpokenText(resolution, { griefAckPrefix: true })).toBe(
+        MOMENT_5_ACCOUNTABILITY_PROBE_WITH_GRIEF_ACK_TEXT,
+      );
+      expect(pickMoment5AccountabilityProbeSpokenText(combined, { griefAckPrefix: true })).toBe(
+        MOMENT_5_ACCOUNTABILITY_PROBE_WITH_GRIEF_ACK_TEXT,
       );
     });
 
@@ -1161,12 +1270,6 @@ describe('probeAndScoringUtils', () => {
         looksLikeMoment5SpecificityRedirectPrompt(
           'Is there a specific person or situation that comes to mind when you think about \u201cconflict\u201d?',
         ),
-      ).toBe(true);
-    });
-
-    it('detects philosophy-style accountability probe as specificity-redirect phase', () => {
-      expect(
-        looksLikeMoment5SpecificityRedirectPrompt(MOMENT_5_ACCOUNTABILITY_PROBE_PHILOSOPHY_WITH_GRIEF_ACK_TEXT),
       ).toBe(true);
     });
 
@@ -1295,6 +1398,46 @@ describe('probeAndScoringUtils', () => {
           "What did you think when she said you've made that very clear?",
         ),
       ).toBe(true);
+      expect(
+        looksLikeScenarioAContemptProbeQuestion(
+          "The way you read Emma's closing line — is that contempt coming through, or something else?",
+        ),
+      ).toBe(true);
+      expect(
+        looksLikeScenarioAContemptProbeQuestion(
+          'What\'s going on for Emma when she says "you\'ve made that very clear"?',
+        ),
+      ).toBe(true);
+      expect(
+        looksLikeScenarioAContemptProbeQuestion(
+          'What did you make of Emma\'s closing line — "I know, you\'ve made that very clear"?',
+        ),
+      ).toBe(true);
+      expect(
+        looksLikeScenarioAContemptProbeQuestion(
+          'What do you think Emma meant when she said "you\'ve made that very clear"?',
+        ),
+      ).toBe(true);
+      expect(
+        looksLikeScenarioAContemptProbeQuestion(
+          'Reading that last line Emma says — "I know, you\'ve made that very clear" — how does that land for you?',
+        ),
+      ).toBe(true);
+      expect(
+        scenarioAEmmaVeryClearContemptReask(
+          'Reading that last line Emma says — "I know, you\'ve made that very clear" — how does that land for you? Is she just venting?',
+        ),
+      ).toBe(true);
+      expect(
+        scenarioAEmmaVeryClearContemptReask(
+          'Got it — and that closing line from Emma, "you\'ve made that very clear" — did that read as contempt to you, or something else?',
+        ),
+      ).toBe(true);
+      expect(
+        looksLikeScenarioAContemptProbeQuestion(
+          'Got it — and that closing line from Emma, "you\'ve made that very clear" — did that read as contempt to you, or something else?',
+        ),
+      ).toBe(true);
     });
 
     it('mergeDeferredScenarioAContemptProbeLeadWithNextSentence avoids duplicating full probe', () => {
@@ -1315,6 +1458,20 @@ describe('probeAndScoringUtils', () => {
       ).toBe(true);
       expect(isIncompleteScenarioAContemptProbeLeadSentence(SCENARIO_A_CONTEMPT_PROBE)).toBe(false);
     });
+
+  it('isIncompleteScenarioAContemptProbeLeadSentence detects truncated what do you think Emma cutoff', () => {
+    expect(
+      isIncompleteScenarioAContemptProbeLeadSentence(
+        'So your instinct is that repair lives in the structure you put in place. What do you think Emma',
+      ),
+    ).toBe(true);
+    expect(isIncompleteScenarioAContemptProbeLeadSentence('What about when Emma said')).toBe(true);
+    expect(
+      isIncompleteScenarioAContemptProbeLeadSentence(
+        "Got it. That line Emma said — does it come across to",
+      ),
+    ).toBe(true);
+  });
 
     it('stripScenarioAContemptProbeStreamingEcho drops duplicate contempt after probe already spoken', () => {
       expect(stripScenarioAContemptProbeStreamingEcho(SCENARIO_A_CONTEMPT_PROBE, true)).toBeNull();
@@ -1345,11 +1502,19 @@ describe('probeAndScoringUtils', () => {
       );
     });
 
-    it('scenarioAContemptProbeTtsSpokenText omits quoted Emma line for contempt-probe TTS', () => {
+    it('scenarioAContemptProbeTtsSpokenText maps contempt probe to delivered copy with Emma quote', () => {
       expect(scenarioAContemptProbeTtsSpokenText(SCENARIO_A_CONTEMPT_PROBE_DELIVERED_COPY)).toBe(
-        SCENARIO_A_CONTEMPT_PROBE_TTS_SPOKEN_COPY,
+        SCENARIO_A_CONTEMPT_PROBE_DELIVERED_COPY,
       );
-      expect(SCENARIO_A_CONTEMPT_PROBE_TTS_SPOKEN_COPY).not.toContain("you've made that very clear");
+      expect(scenarioAContemptProbeTtsSpokenText(SCENARIO_A_CONTEMPT_PROBE_TTS_SPOKEN_COPY)).toBe(
+        SCENARIO_A_CONTEMPT_PROBE_DELIVERED_COPY,
+      );
+      expect(
+        scenarioAContemptProbeTtsSpokenText(
+          "When Emma says you've made that very clear how does that read?",
+        ),
+      ).toBe(SCENARIO_A_CONTEMPT_PROBE_DELIVERED_COPY);
+      expect(SCENARIO_A_CONTEMPT_PROBE_DELIVERED_COPY).toContain("you've made that very clear");
       expect(scenarioAContemptProbeResumeRepeatTtsText(SCENARIO_A_CONTEMPT_PROBE_DELIVERED_COPY)).toBe(
         SCENARIO_A_CONTEMPT_PROBE_DELIVERED_COPY,
       );
@@ -1359,6 +1524,12 @@ describe('probeAndScoringUtils', () => {
       expect(
         scenarioAContemptProbeTtsSpokenText('How would you repair this if you were Ryan?'),
       ).toBe('How would you repair this if you were Ryan?');
+    });
+
+    it('looksLikeScenarioAContemptProbeQuestion matches truncated Emma says tail', () => {
+      expect(
+        looksLikeScenarioAContemptProbeQuestion('What about when Emma says, what do you make of that?'),
+      ).toBe(true);
     });
 
     it('looksLikeScenarioAContemptProbeQuestion matches deictic paraphrase from prior fix', () => {
@@ -1380,6 +1551,20 @@ describe('probeAndScoringUtils', () => {
       expect(stripEmbeddedScenarioAContemptProbeAsk(draft)).toBe(
         'That makes sense — how would you repair this if you were Ryan?',
       );
+    });
+
+    it('stripDuplicateScenarioAContemptProbeParagraphs removes closing-line paraphrase when contempt satisfied', () => {
+      const draft =
+        'What does Emma\'s closing line — "you\'ve made that very clear" — tell you about how she\'s feeling toward Ryan?';
+      const msgs = [
+        { role: 'assistant', content: "What's going on between these two?" },
+        {
+          role: 'user',
+          content:
+            "Emma is being condescending when she says, you've made that very clear. She sounds very frustrated.",
+        },
+      ];
+      expect(stripDuplicateScenarioAContemptProbeParagraphs(draft, msgs, 1, true)).toBe('');
     });
 
     it('stripScenarioAContemptProbeQuestion removes duplicate contempt paragraphs', () => {

@@ -34,7 +34,7 @@
         "NSLocationWhenInUseUsageDescription": "Amoraea needs your location to help you find compatible matches.",
         "NSPhotoLibraryUsageDescription": "Amoraea needs access to your photos to upload profile pictures.",
         "NSContactsUsageDescription": "Amoraea needs access to your contacts to sync them with the app and find matches.",
-        "NSMicrophoneUsageDescription": "Amoraea uses the microphone so you can answer Aria's questions by voice.",
+        "NSMicrophoneUsageDescription": "Amoraea uses the microphone so you can answer Amoraea's questions by voice.",
         "NSSpeechRecognitionUsageDescription": "Amoraea uses speech recognition to turn your voice answers into text.",
         "ITSAppUsesNonExemptEncryption": false
       },
@@ -91,7 +91,7 @@
       [
         "expo-speech-recognition",
         {
-          "microphonePermission": "Amoraea uses the microphone so you can answer Aria's questions by voice.",
+          "microphonePermission": "Amoraea uses the microphone so you can answer Amoraea's questions by voice.",
           "speechRecognitionPermission": "Amoraea uses speech recognition to turn your voice answers into text."
         }
       ],

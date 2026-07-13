@@ -1,3 +1,6 @@
+import { textContainsScenarioBVignetteBody, textContainsScenarioCVignetteBody } from '@features/aria/emotionScenarioTransitionInference';
+import { isMisplacedScenarioMetaRedirectText } from '@features/aria/misplacedScenarioAnswerLogic';
+
 /** Normalize assistant punctuation for scenario anchor regex (matches AriaScreen). */
 export function normalizeContentForScenarioDetection(text: string): string {
   return text
@@ -12,7 +15,7 @@ const SCENARIO_3_PATTERN =
   /sophie and daniel|daniel.*didn't know what to say|daniel.*didn't know how|here's the third situation|third situation|last one.*situation three|situation three|\bsituation\s*3\b|the third situation|shift to something more personal|something more personal/;
 
 const SCENARIO_2_PATTERN =
-  /sarah has been job hunting|second situation|on to the second|here's the next situation|\bsituation\s*2\b|the second situation|next situation/;
+  /sarah has been job hunting|second situation|on to the second|here's the next situation|\bsituation\s*2\b|the second situation|next situation|second one done|two more situations to get through/;
 
 function matchesScenario3SophieDaniel(c: string): boolean {
   return (
@@ -30,10 +33,30 @@ function matchesScenario2SarahJames(c: string): boolean {
   );
 }
 
+/**
+ * True when assistant copy opens a scenario vignette — stricter than {@link detectScenarioFromResponse}.
+ * Scenario C Q1 alone ("When Daniel comes back…") must not count as the S3 intro anchor.
+ */
+export function messageAnchorsScenarioIntro(responseText: string): 1 | 2 | 3 | null {
+  if (!responseText?.trim()) return null;
+  if (isMisplacedScenarioMetaRedirectText(responseText)) return null;
+  if (textContainsScenarioCVignetteBody(responseText)) return 3;
+  if (textContainsScenarioBVignetteBody(responseText)) return 2;
+  const c = normalizeContentForScenarioDetection(responseText).toLowerCase();
+  if (
+    SCENARIO_1_PATTERN.test(c) &&
+    (c.includes('emma and ryan') || c.includes('ryan takes a call'))
+  ) {
+    return 1;
+  }
+  return null;
+}
+
 /** Detect which scenario an AI response introduces from content. */
 export function detectScenarioFromResponse(responseText: string): 1 | 2 | 3 | null {
   if (!responseText?.trim()) return null;
   const c = normalizeContentForScenarioDetection(responseText).toLowerCase();
+  if (isMisplacedScenarioMetaRedirectText(responseText)) return null;
   if (SCENARIO_1_PATTERN.test(c)) return 1;
   // Scenario 3 before scenario 2 — S2→S3 wrap-ups often recap Sarah/James from scenario B.
   if (SCENARIO_3_PATTERN.test(c) || matchesScenario3SophieDaniel(c)) return 3;

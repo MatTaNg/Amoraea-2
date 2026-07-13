@@ -12,5 +12,7 @@ describe('buildMoment5AccountabilityScoringPrompt', () => {
     expect(prompt).toContain('emotional_vocab_count');
     expect(prompt).toContain('emotional_vocab_words');
     expect(prompt).toContain('user_slice_word_count');
+    expect(prompt).toContain('KEY EVIDENCE — ANALYTICAL NARRATIVE');
+    expect(prompt).not.toContain('quote or paraphrase the response that most informed the score');
   });
 });

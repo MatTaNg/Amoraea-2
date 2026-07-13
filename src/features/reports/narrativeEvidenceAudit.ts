@@ -13,6 +13,12 @@ import {
   type PersonalReportMoment5Profile,
   type PersonalReportScenarioKeyEvidence,
 } from '@features/psychometrics/personalReportNarrativeGuidance';
+import {
+  PILLAR_NARRATIVE_BAND_DEVELOPING_MIN,
+  PILLAR_NARRATIVE_BAND_GOOD_MIN,
+  PILLAR_NARRATIVE_BAND_NEEDS_ATTENTION_MIN,
+  PILLAR_NARRATIVE_BAND_STRONG_MIN,
+} from '@config/reports/pillarNarrativeBands';
 
 export type NarrativeEvidenceSlice = {
   id: string;
@@ -41,10 +47,10 @@ export type NarrativeEvidenceContext = {
 
 function pillarBand(score: number | undefined | null): string {
   if (score == null || !Number.isFinite(score)) return 'not assessed';
-  if (score >= 8) return 'strong';
-  if (score >= 7) return 'good';
-  if (score >= 6) return 'developing';
-  if (score >= 4) return 'needs attention';
+  if (score >= PILLAR_NARRATIVE_BAND_STRONG_MIN) return 'strong';
+  if (score >= PILLAR_NARRATIVE_BAND_GOOD_MIN) return 'good';
+  if (score >= PILLAR_NARRATIVE_BAND_DEVELOPING_MIN) return 'developing';
+  if (score >= PILLAR_NARRATIVE_BAND_NEEDS_ATTENTION_MIN) return 'needs attention';
   return 'significant growth area';
 }
 

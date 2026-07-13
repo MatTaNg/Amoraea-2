@@ -69,6 +69,31 @@ Deno.serve(async (req) => {
     const out = await runCompleteStandardInterview(supabase, id, uid);
     if (out.ok) {
       results.push({ id, ok: true, skipped: out.skipped });
+      if (out.runPostCompletionInBackground) {
+        try {
+          console.log('[narrative] process-deferred queueing post-completion (narrative + communication style)', {
+            attemptId: id,
+          });
+          EdgeRuntime.waitUntil(
+            Promise.resolve()
+              .then(() => out.runPostCompletionInBackground!())
+              .then(() => {
+                console.log('[narrative] process-deferred post-completion finished', { attemptId: id });
+              })
+              .catch((e) => {
+                console.error('[narrative] process-deferred post-completion failed', {
+                  attemptId: id,
+                  error: e instanceof Error ? e.message : String(e),
+                });
+              }),
+          );
+        } catch (e) {
+          console.error('[narrative] process-deferred EdgeRuntime.waitUntil failed', {
+            attemptId: id,
+            error: e instanceof Error ? e.message : String(e),
+          });
+        }
+      }
     } else {
       results.push({ id, ok: false, error: out.error });
     }

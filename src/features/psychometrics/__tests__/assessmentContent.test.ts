@@ -5,6 +5,11 @@ import {
   ASSESSMENTS,
   GASP_EXTERNALIZATION_ITEM_COUNT,
   GASP_EXTERNALIZATION_ITEM_IDS,
+  GASP_GUILT_REPAIR_ITEM_IDS,
+  GASP_SHAME_WITHDRAW_ITEM_IDS,
+  SCS_SF_COMMON_HUMANITY_ITEM_IDS,
+  SCS_SF_MINDFULNESS_ITEM_IDS,
+  SCS_SF_SELF_KINDNESS_ITEM_IDS,
   isUnfavorableLikertItemResponse,
   psychometricBatteryProgressPosition,
   psychometricBatteryTotalQuestions,
@@ -58,6 +63,9 @@ describe('scoreAssessment', () => {
     expect(scores.mindfulness).toBe(5);
     expect(ASSESSMENTS.scs_sf.questions).toHaveLength(8);
     expect(ASSESSMENTS.scs_sf.scoring.reverseItems).toEqual([1, 9, 11]);
+    expect(SCS_SF_SELF_KINDNESS_ITEM_IDS).toEqual([2, 6, 11]);
+    expect(SCS_SF_COMMON_HUMANITY_ITEM_IDS).toEqual([5]);
+    expect(SCS_SF_MINDFULNESS_ITEM_IDS).toEqual([1, 3, 7]);
   });
 
   it('flags unfavorable Likert poles using item keying direction, not keyed score alone', () => {
@@ -79,32 +87,57 @@ describe('scoreAssessment', () => {
     expect(isUnfavorableLikertItemResponse('anxiety_trait', anxiety, 2, 1)).toBe(true);
 
     const gasp = ASSESSMENTS.gasp;
-    expect(isUnfavorableLikertItemResponse('gasp', gasp, 1, 1)).toBe(false);
-    expect(isUnfavorableLikertItemResponse('gasp', gasp, 2, 2)).toBe(false);
-    expect(isUnfavorableLikertItemResponse('gasp', gasp, 3, 6)).toBe(true);
-    expect(isUnfavorableLikertItemResponse('gasp', gasp, 4, 7)).toBe(true);
+    // Guilt-proneness (1, 3) and Shame-proneness (2, 4) — high is favorable
+    expect(isUnfavorableLikertItemResponse('gasp', gasp, 1, 1)).toBe(true);
+    expect(isUnfavorableLikertItemResponse('gasp', gasp, 2, 2)).toBe(true);
+    expect(isUnfavorableLikertItemResponse('gasp', gasp, 1, 6)).toBe(false);
+    expect(isUnfavorableLikertItemResponse('gasp', gasp, 2, 7)).toBe(false);
+    // Externalization (5, 6, 7, 8) — high is unfavorable
+    expect(isUnfavorableLikertItemResponse('gasp', gasp, 5, 6)).toBe(true);
+    expect(isUnfavorableLikertItemResponse('gasp', gasp, 6, 7)).toBe(true);
   });
 
-  it('means GASP externalization only from items 1–4', () => {
-    const gasp = scoreAssessment('gasp', { 1: 3, 2: 3, 3: 3, 4: 3 });
-    expect(gasp.total).toBe(3);
-    expect(gasp.guilt_repair).toBeUndefined();
-    expect(gasp.shame_withdraw).toBeUndefined();
-    expect(ASSESSMENTS.gasp.questions).toHaveLength(4);
+  it('means GASP prosocial subscales and externalization subscale', () => {
+    const responses: Record<number, number> = {
+      1: 6,
+      2: 2,
+      3: 6,
+      4: 2,
+      5: 3,
+      6: 3,
+      7: 3,
+      8: 3,
+    };
+    const gasp = scoreAssessment('gasp', responses);
+    expect(gasp.total).toBe(4); // (6 + 2) / 2
+    expect(gasp.guilt_repair).toBe(6);
+    expect(gasp.shame_withdraw).toBe(2);
+    expect(gasp.externalization).toBe(3);
+    expect(ASSESSMENTS.gasp.questions).toHaveLength(8);
   });
 
-  it('persists GASP externalization mean only on save payload', () => {
-    const responses: Record<number, number> = { 1: 4, 2: 4, 3: 4, 4: 4 };
+  it('persists GASP subscores on save payload', () => {
+    const responses: Record<number, number> = {
+      1: 6,
+      2: 2,
+      3: 6,
+      4: 2,
+      5: 3,
+      6: 3,
+      7: 3,
+      8: 3,
+    };
     const payload = buildAssessmentSavePayload('gasp', responses);
     expect(payload.psychometrics_gasp_score).toBe(4);
-    expect(payload.psychometrics_gasp_guilt_repair_score).toBeUndefined();
-    expect(payload.psychometrics_gasp_shame_withdraw_score).toBeUndefined();
+    expect(payload.psychometrics_gasp_guilt_repair_score).toBe(6);
+    expect(payload.psychometrics_gasp_shame_withdraw_score).toBe(2);
     expect(payload.psychometrics_gasp_responses).toEqual(responses);
   });
 
-  it('GASP item id set matches 4-item externalization battery', () => {
-    expect(GASP_EXTERNALIZATION_ITEM_IDS).toEqual([1, 2, 3, 4]);
-    expect(GASP_EXTERNALIZATION_ITEM_COUNT).toBe(4);
+  it('GASP item id sets match 8-item battery', () => {
+    expect(GASP_GUILT_REPAIR_ITEM_IDS).toEqual([1, 3]);
+    expect(GASP_SHAME_WITHDRAW_ITEM_IDS).toEqual([2, 4]);
+    expect(GASP_EXTERNALIZATION_ITEM_IDS).toEqual([5, 6, 7, 8]);
   });
 
   it('scores combined relationship beliefs with Dweck and RBI subscales', () => {

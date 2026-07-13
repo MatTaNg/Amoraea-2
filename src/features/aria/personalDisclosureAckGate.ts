@@ -1,24 +1,16 @@
+import { isStandalonePersonalDisclosureAcknowledgment } from './personalDisclosureAckPatterns';
+export { isStandalonePersonalDisclosureAcknowledgment } from './personalDisclosureAckPatterns';
 import {
   SCENARIO_A_CONTEMPT_PROBE_DELIVERED_COPY,
   SCENARIO_A_REPAIR_QUESTION_AFTER_CONTEMPT_COPY,
-} from './probeAndScoringUtils';
+} from './scenarioAContemptProbeTtsStrip';
 import {
+  isActiveScenarioAConstructProbeTurn,
   scenarioFollowUpAlreadyInTranscript,
   transcriptContainsScenarioAContemptProbe,
   transcriptHasUserResponseAfterScenarioAContemptProbe,
   type ScenarioFollowUpTranscriptMessage,
 } from './scenarioFollowUpTranscriptGuard';
-
-/** True when assistant text is only a personal-disclosure thank-you (optional participant name). */
-export function isStandalonePersonalDisclosureAcknowledgment(text: string): boolean {
-  const t = (text ?? '').replace(/\s+/g, ' ').trim();
-  if (!t) return false;
-  return (
-    /^thank you for sharing(?: that| this)?(?:,\s+[A-Za-z][\w'-]*)?[.!]?\s*$/i.test(t) ||
-    /^thanks for sharing(?: that| this)?(?:,\s+[A-Za-z][\w'-]*)?[.!]?\s*$/i.test(t) ||
-    /^thank you for being so open(?: with me)?(?:,\s+[A-Za-z][\w'-]*)?[.!]?\s*$/i.test(t)
-  );
-}
 
 export function isPersonalMomentInterviewTurn(interviewMoment: number): boolean {
   return interviewMoment === 4 || interviewMoment === 5;
@@ -39,6 +31,7 @@ export function stripStandalonePersonalDisclosureAckOutsidePersonalMoments(
 
 export type ScenarioFollowUpAfterSuppressedResponseOpts = {
   interviewMoment: number;
+  currentScenario?: number | null;
   shouldForceScenarioAContemptProbe: boolean;
   assistantIssuedScenarioAContemptProbe: boolean;
   shouldInjectScenarioARepairAfterContemptAnswer: boolean;
@@ -81,11 +74,12 @@ export function resolveScenarioFollowUpAfterSuppressedResponse(
 
   if (
     (opts.shouldInjectScenarioARepairAfterContemptAnswer ||
-      (opts.interviewMoment === 1 &&
+      (isActiveScenarioAConstructProbeTurn(opts.currentScenario, opts.interviewMoment) &&
         opts.scenarioAContemptProbeAsked &&
         !opts.scenarioARepairQuestionAsked)) &&
     !opts.shouldForceScenarioAContemptProbe &&
-    transcriptHasUserResponseAfterScenarioAContemptProbe(transcript)
+    (transcriptHasUserResponseAfterScenarioAContemptProbe(transcript) ||
+      (opts.scenarioAContemptProbeAsked && !transcriptContainsScenarioAContemptProbe(transcript)))
   ) {
     const candidate = SCENARIO_A_REPAIR_QUESTION_AFTER_CONTEMPT_COPY;
     if (!scenarioFollowUpAlreadyInTranscript(transcript, candidate)) {

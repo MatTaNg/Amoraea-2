@@ -100,7 +100,7 @@ Browser (Netlify static app)
 
 ## iOS behaviour
 
-- **Audio:** Unlocked on first user gesture (tap/click) so Aira TTS is not blocked.
+- **Audio:** Unlocked on first user gesture (tap/click) so Amoraea TTS is not blocked.
 - **Microphone:** Permission is requested when the user taps "Start" on the interview intro screen (user gesture required on iOS PWA).
 - **Safe areas:** `index.html` and root styles use `env(safe-area-inset-*)` and `100dvh` so content is not hidden behind the notch or home bar.
 
@@ -112,3 +112,7 @@ Browser (Netlify static app)
 ## Other hosts
 
 Vercel or any static host can serve `dist/` with the same `EXPO_PUBLIC_*` Netlify list and the same Supabase secrets. This project’s production workflow is **Netlify + Supabase**, not Vercel.
+
+## Native store builds (EAS)
+
+iOS/Android release builds use the same client/proxy split. See [EAS_STORE_ENV.md](./EAS_STORE_ENV.md) — do not put provider API keys in `eas.json` or as `EXPO_PUBLIC_*` on EAS.

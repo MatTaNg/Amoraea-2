@@ -42,16 +42,29 @@ describe('resolveInterviewCompletedForUser', () => {
     mockReconcile.mockResolvedValue(false);
   });
 
-  it('returns true when users.interview_completed is already set', async () => {
+  it('returns true when users.interview_completed is already set with scored rollup', async () => {
+    mockAttemptSelect({
+      completed_at: '2026-01-01T00:00:00.000Z',
+      weighted_score: 7.4,
+    });
+
     const result = await resolveInterviewCompletedForUser('user-1', {
       interview_completed: true,
       latest_attempt_id: 'attempt-1',
     });
     expect(result).toBe(true);
+  });
+
+  it('returns true when users.interview_completed is set without latest_attempt_id', async () => {
+    const result = await resolveInterviewCompletedForUser('user-1', {
+      interview_completed: true,
+      latest_attempt_id: null,
+    });
+    expect(result).toBe(true);
     expect(supabase.from).not.toHaveBeenCalled();
   });
 
-  it('reconciles unfinalized finished attempt on latest_attempt_id', async () => {
+  it('reconciles unfinalized finished attempt on latest_attempt_id when scoring rollup exists', async () => {
     mockAttemptSelect({
       completed_at: null,
       transcript: [
@@ -65,6 +78,7 @@ describe('resolveInterviewCompletedForUser', () => {
       scenario_1_scores: { pillarScores: { repair: 5 } },
       scenario_2_scores: { pillarScores: { repair: 5 } },
       scenario_3_scores: { pillarScores: { repair: 5 } },
+      weighted_score: 7.2,
     });
     mockFinalize.mockResolvedValue(true);
 
@@ -75,6 +89,26 @@ describe('resolveInterviewCompletedForUser', () => {
 
     expect(result).toBe(true);
     expect(mockFinalize).toHaveBeenCalledWith('user-1', 'attempt-1');
+  });
+
+  it('does not treat users.interview_completed without rollup as complete', async () => {
+    mockAttemptSelect({
+      completed_at: '2026-07-07T06:09:09.616+00:00',
+      transcript: [],
+      scenario_1_scores: { pillarScores: { repair: 5 } },
+      scenario_2_scores: { pillarScores: { repair: 5 } },
+      scenario_3_scores: { pillarScores: { repair: 5 } },
+      weighted_score: null,
+      scenario_specific_patterns: null,
+    });
+
+    const result = await resolveInterviewCompletedForUser('user-1', {
+      interview_completed: true,
+      latest_attempt_id: 'attempt-1',
+    });
+
+    expect(result).toBe(false);
+    expect(mockFinalize).not.toHaveBeenCalled();
   });
 
   it('falls back to reconcileUnfinalizedInterviewAttemptForUser when latest attempt is still open', async () => {

@@ -1,7 +1,19 @@
-/** First confirmed scenario skip (moments 1–3). */
-export const SKIP_PENALTY_FIRST = -0.3;
-/** Second confirmed skip (additive with first). */
-export const SKIP_PENALTY_SECOND = -0.6;
+export {
+  SKIP_PENALTY_FIRST,
+  SKIP_PENALTY_SECOND,
+} from '@config/scoring/interviewSkipPenalties';
+
+import {
+  SKIP_PENALTY_FIRST,
+  SKIP_PENALTY_SECOND,
+} from '@config/scoring/interviewSkipPenalties';
+
+/** When user skips after first frustration offer — force null markers (excluded from aggregates), not zero. */
+export const SCENARIO_FRUSTRATION_SKIP_NULL_MARKER_IDS: Record<1 | 2 | 3, string[]> = {
+  1: ['mentalizing', 'accountability', 'contempt_recognition', 'contempt_expression', 'repair', 'attunement', 'appreciation'],
+  2: ['appreciation', 'attunement', 'mentalizing', 'repair', 'accountability', 'contempt_expression'],
+  3: ['regulation', 'repair', 'mentalizing', 'attunement', 'accountability', 'contempt_expression'],
+};
 
 export function individualPenaltyForSkipNumber(skipNumber: 1 | 2 | 3): number | null {
   if (skipNumber === 1) return SKIP_PENALTY_FIRST;

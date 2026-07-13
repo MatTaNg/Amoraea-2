@@ -4,6 +4,7 @@ import { PERSONAL_MOMENT_EMOTIONAL_VOCAB_SCORING_INSTRUCTION } from './personalM
 import {
   ELABORATION_ABSENCE_MOMENT4_MARKERS,
   ELABORATION_ABSENCE_SCORING_HEADER,
+  KEY_EVIDENCE_ANALYTICAL_NARRATIVE_RULES,
 } from './elaborationAbsencePenaltiesRubric';
 import {
   CONTEMPT_EXPRESSION_SCORING_RUBRIC,
@@ -11,6 +12,7 @@ import {
   CONTEMPT_TIER_BREAKDOWN_JSON_TEMPLATE,
 } from './contemptExpressionScoringRubric';
 import { MOMENT_4_GRUDGE_QUESTION_TEXT } from './moment4ProbeLogic';
+import { PILLAR_CONFIDENCE_METADATA_ONLY_RULES } from './holisticScoringPrompt';
 
 /** Shared across scenario + personal moment prompts; JSON field \`mentalizing_overcertainty\` (boolean, top-level; \`keyEvidence\` or \`scoringMetadata\` mirrors accepted — see {@link coerceMentalizingOvercertaintyFromModelJson}). */
 export const MENTALIZING_OVERCERTAINTY_SCORING_INSTRUCTION = `MENTALIZING OVERCERTAINTY FLAG
@@ -205,25 +207,22 @@ The M4 question is now episodically anchored: "${MOMENT_4_GRUDGE_QUESTION_TEXT}"
 
 The question explicitly asks for a specific person and what happened. This changes the baseline expectation for responses:
 
-CONCRETE RESPONSE (adequate baseline):
-User describes a specific person or situation — even minimally. Names or refers to someone specific, describes what the difficulty was, and indicates current state of the relationship or their feelings about it. Does not need to be emotionally deep or highly detailed to meet the concrete baseline. Score concrete responses no lower than 5 on mentalizing and accountability.
+CONCRETE RESPONSE (adequate baseline for concreteness metadata):
+User describes a specific person or situation — even minimally. Names or refers to someone specific, describes what the difficulty was, and indicates current state of the relationship or their feelings about it. This establishes episodic concreteness; it does **not** by itself require numeric scores on mentalizing or accountability when inner-state content is still too thin to assess.
+
+LOW CONCRETENESS / UNASSESSED INNER-STATE MARKERS (mentalizing, accountability, contempt_recognition):
+When disclosure is **low-concreteness** (no real personal conflict named, or conflict too thin to assess inner states), set **mentalizing** and **accountability** to JSON **null** — not 4–5. Null means unassessable and excludes those markers from rollup. Do **not** apply a low-specificity floor score.
+
+Assessability requires a named/referenced specific person **and** enough emotional/inner-state narrative to infer the user's or the other's inner state. A gaming misunderstanding resolved amicably without meaningful inner-state content: **mentalizing** and **accountability** = **null**.
 
 PHILOSOPHICAL BYPASS (below baseline):
-User responds with general reflections about grudges, forgiveness, or people in general without anchoring to a specific person or situation — e.g. "I've learned that people don't always have the same heart as you" with no specific person mentioned. This is a less adequate response to the new question because the question explicitly asked for someone specific.
+User responds with general reflections about grudges, forgiveness, or people in general without anchoring to a specific person or situation — e.g. "I've learned that people don't always have the same heart as you" with no specific person mentioned. Set **mentalizing** and **accountability** to JSON **null** unless valid_non_applicable applies. **Commitment_threshold** may still be scored when threshold framework language is present.
 
-Score philosophical bypass responses:
-- Mentalizing: 4 (attempted but not engaged with the specific question asked)
-- Accountability: 4 (no personal scenario to assess accountability against)
-- Commitment threshold: can still be scored if the philosophical answer contains threshold framework language
-
-The philosophical bypass ceiling remains — a philosophical answer cannot score 7+ — but the floor is 4 not 5, because the question now explicitly asked for something the user did not provide. This is a more appropriate penalty than under the old question, which did not clearly require a specific example.
-
-LOW SPECIFICITY BUT EPISODIC (partial concrete):
-User names a person or situation vaguely ("a friend," "someone at work," "a family member") but provides some narrative texture. This meets the minimal concrete threshold.
-Score no lower than 5 on mentalizing and accountability when the user has anchored to a real situation even vaguely.
+PARTIAL EPISODIC (thin but named):
+User names a person or situation vaguely ("a friend," "someone at work," "this one guy") with minimal narrative texture. Score **contempt_expression** and **commitment_threshold** when assessable. Set **mentalizing** and **accountability** to **null** unless the answer includes assessable inner-state content (emotional processing, perspective-taking, or ownership), not logistics-only resolution.
 
 CONCRETENESS CEILING:
-Scores of 7+ on mentalizing and accountability require genuine emotional depth — the user described their own emotional experience in the situation, what it meant to them, or what they learned about themselves. A concrete but emotionally flat narrative scores 5–6.
+Scores of 7+ on mentalizing and accountability require genuine emotional depth — the user described their own emotional experience in the situation, what it meant to them, or what they learned about themselves. A concrete but emotionally flat narrative should use **null** on mentalizing/accountability when unassessable, not 4–6 floor scores.
 
 MOMENT 4 CALIBRATION ANCHORS (when engagement exists — apply M4 QUESTION DESIGN above):
 ${ACCOUNTABILITY_BLAME_SHIFT_VS_CLARITY_REQUEST}
@@ -251,10 +250,17 @@ Other resolution-orientation indicators remain direct evidence when present: exp
 
 COMMITMENT_THRESHOLD (Moment 4 — first-person):
 - **Low scores (about 2–4):** Unconditional persistence, "I never walk away," "just keep trying no matter what," or no workable invest/communicate/assess/decide structure — **without** reflective limits or self-critique.
+- **7 (single internal exit marker):** One concrete, personally anchored internal shift as a threshold signal — e.g. switching from looking forward to meeting their partner every day to dreading the next time they would have to see them — scores **7** without requiring an explicit invest→communicate step. Do **not** score **6** solely because a communicate step was omitted when this marker is present.
 - **7–8 (positive, not a deficit):** The user admits tending to **stay too long** or struggling to leave **and** shows **differentiation** — e.g. working on recognizing **genuine irrecoverability** vs **fear of conflict** / avoidance, or growth-oriented framing of past over-staying. That is **self-knowledge and developing capacity**; **do not** score as unhealthy commitment threshold or conflate with "no limits" staying.
 
 COMMITMENT_THRESHOLD CONFIDENCE (this moment slice):
 Reserve "high" pillarConfidence for commitment_threshold when this slice includes clear first-person work-through versus walk-away reasoning (from the follow-up or embedded in the grudge answer) — including a concise but complete invest/communicate/assess/decide structure without procedural detail, **or** clear self-aware differentiation as in the 7–8 anchor above. If threshold signal is absent or purely vague ("just try harder"), use "moderate" or "low".
+
+MOMENT 4 — SITUATIONAL ACCOUNTABILITY EXEMPTION (metadata flag):
+When the disclosure describes a situation where the **other party's behavior is the primary or overwhelming cause** of the conflict — e.g. abuse or significant harm, abandonment/neglect/co-parenting failure, described narcissistic or personality-disordered behavior, severe betrayal (infidelity, financial fraud, deliberate cruelty), or the user appropriately frames no-contact/walking away as resolution **given what they described** — low **accountability** in this slice may reflect **accurate judgment**, not low construct capacity.
+- Set \`scoringMetadata.moment_4_accountability_situationally_exempt\` to **true** and a one-line \`scoringMetadata.moment_4_accountability_situationally_exempt_reason\` (e.g. "M4 disclosure involves co-parenting abandonment — accountability absence is situationally appropriate").
+- Do **not** inflate accountability solely because the user stayed in the injured-party position when that position matches the facts they described.
+- Do **not** set this flag for genuinely mutual or ambiguous conflicts where self-attribution would be expected.
 `;
   const prompt = `You are scoring one personal moment from a relationship assessment interview.
 
@@ -269,8 +275,9 @@ ${turns}
 
 SCORING INSTRUCTIONS:
 Score only the listed markers using only this moment transcript slice.
-For each marker: quote or paraphrase the response that most informed the score.
 If responses are generic and unspecific, cap that marker at 5.
+${KEY_EVIDENCE_ANALYTICAL_NARRATIVE_RULES}
+${PILLAR_CONFIDENCE_METADATA_ONLY_RULES}
 ${ELABORATION_ABSENCE_SCORING_HEADER}
 ${ELABORATION_ABSENCE_MOMENT4_MARKERS}
 ${specificityProbeCalibration}
@@ -293,6 +300,10 @@ Return ONLY valid JSON:
   "emotional_vocab_words": [],
   "user_slice_word_count": 0,
   "contempt_tier_breakdown": ${CONTEMPT_TIER_BREAKDOWN_JSON_TEMPLATE},
+  "scoringMetadata": {
+    "moment_4_accountability_situationally_exempt": false,
+    "moment_4_accountability_situationally_exempt_reason": ""
+  },
   "summary": "",
   "specificity": "high"
 }`;

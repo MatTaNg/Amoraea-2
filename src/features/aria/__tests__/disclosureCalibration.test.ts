@@ -1,4 +1,3 @@
-import { describe, expect, it } from 'vitest';
 import { computeDisclosureCalibration, detectOverdisclosure } from '../disclosureCalibration';
 
 describe('disclosureCalibration', () => {

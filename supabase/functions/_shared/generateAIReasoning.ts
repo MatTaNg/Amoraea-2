@@ -26,6 +26,11 @@ import {
   anthropicStoppedDueToMaxTokens,
   logNarrativeGenerationOutcome,
 } from './reportNarrativeGeneration.ts';
+import {
+  compactTranscriptForNarrativePrompt,
+  isWorkerResourceLimitError,
+  shouldAutoCompactTranscriptForNarrative,
+} from './narrativeTranscriptCompaction.ts';
 
 const ANTHROPIC_API_KEY = Deno.env.get('ANTHROPIC_API_KEY') ?? '';
 /** Full URL to anthropic-proxy, e.g. https://<ref>.supabase.co/functions/v1/anthropic-proxy */
@@ -231,6 +236,7 @@ export function buildUserPrompt(
   passed: boolean,
   unassessedMarkers: string[],
   evidenceContext?: NarrativeEvidenceContext | null,
+  transcriptCompacted = false,
 ): string {
   const fullTranscriptLines = transcript
     .filter((m) => m.role === 'user' || m.role === 'assistant')
@@ -275,7 +281,7 @@ SCENARIO SCORES:
 ${JSON.stringify(scenarioPayload, null, 2)}
 ${personalMomentBlock ? `\n${personalMomentBlock}\n` : ''}
 
-COMPLETE TRANSCRIPT FOR THIS ATTEMPT ONLY (Interviewer + Participant — use only this thread; no other context):
+${transcriptCompacted ? 'TRANSCRIPT NOTE: Scripted scenario cards and/or middle turns are abbreviated below — use SCENARIO SCORES and SLICE KEY EVIDENCE for full vignette context.\n' : ''}COMPLETE TRANSCRIPT FOR THIS ATTEMPT ONLY (Interviewer + Participant — use only this thread; no other context):
 ${fullTranscriptLines || '(no transcript)'}
 
 Hard rule for every narrative field (especially closing_reflection): Do not reference any personal story, example, or biographical detail that does not appear in the transcript above. If you cannot find a specific moment to anchor the closing reflection, use the strongest moment that does appear in the transcript rather than inventing or borrowing one. For closing_reflection specifically: observe content they shared; do not grade their performance (avoid openers like how clear they were, how sophisticated their understanding, what impressive insight they showed). Never use the phrase "going through the motions" to describe authentic celebration or concrete care they described — it implies hollow performance and contradicts their meaning.
@@ -396,6 +402,7 @@ export type GenerateAIReasoningOptions = {
   perAttemptTimeoutMs?: number;
   maxAttempts?: number;
   evidenceContext?: NarrativeEvidenceContext | null;
+  compactTranscript?: boolean;
 };
 
 /** Long prompts + max_tokens; stay under single-invocation ~150s wall clock when maxAttempts is 1. */
@@ -418,6 +425,11 @@ export async function generateAIReasoning(
 
   const apiUrl = getAnthropicEndpoint();
   const useProxy = apiUrl !== 'https://api.anthropic.com/v1/messages';
+  if (!useProxy && !ANTHROPIC_API_KEY.trim()) {
+    throw new Error(
+      'generateAIReasoning: ANTHROPIC_API_KEY or ANTHROPIC_PROXY_URL required (set Edge secrets)',
+    );
+  }
   const headers: Record<string, string> = { 'Content-Type': 'application/json' };
   if (useProxy) {
     const anon = SUPABASE_ANON_KEY?.trim();
@@ -433,15 +445,8 @@ export async function generateAIReasoning(
     headers['anthropic-version'] = '2023-06-01';
   }
 
-  const userPrompt = buildUserPrompt(
-    pillarScores,
-    scenarioScores,
-    transcript,
-    weightedScore,
-    passed,
-    unassessedMarkers,
-    options?.evidenceContext,
-  );
+  let useCompactTranscript =
+    options?.compactTranscript === true || shouldAutoCompactTranscriptForNarrative(transcript);
 
   const sliceIds = [1, 2, 3]
     .filter((n) => scenarioScores[n])
@@ -451,26 +456,9 @@ export async function generateAIReasoning(
   }
   logNarrativeEvidenceAudit('ai_reasoning', sliceIds);
 
-  console.log('[NarrativePrompt] live interpolated prompt verification', {
-    pipeline: 'ai_reasoning',
-    charCount: SYSTEM_PROMPT.length + userPrompt.length,
-    hasScenarioPersonalCrossrefInstruction: `${SYSTEM_PROMPT}\n${userPrompt}`.includes(
-      "If the user's highest-scoring scenario for a given construct involves a theme that mirrors their personal disclosure",
-    ),
-  });
-  console.log('[NarrativePrompt] FULL_SYSTEM_PROMPT', SYSTEM_PROMPT);
-  console.log('[NarrativePrompt] FULL_USER_PROMPT', userPrompt);
-
   const aiReasoningBudgets = REPORT_NARRATIVE_TOKEN_BUDGETS.ai_reasoning;
   let maxTokensForCall = aiReasoningBudgets.initial;
   let retriedHigherBudget = false;
-
-  const body: Record<string, unknown> = {
-    model: resolveAnthropicSonnetModel(CLAUDE_SONNET_MODEL),
-    max_tokens: maxTokensForCall,
-    system: SYSTEM_PROMPT,
-    messages: [{ role: 'user', content: userPrompt }],
-  };
 
   /** One fetch attempt should not block indefinitely; proxies can hang without closing the socket. */
   const REASONING_FETCH_PER_ATTEMPT_TIMEOUT_MS =
@@ -480,6 +468,48 @@ export async function generateAIReasoning(
   let response: Response | null = null;
   let responseText: string | null = null;
   for (let attempt = 0; attempt < maxAttempts; attempt++) {
+    if (attempt > 0) useCompactTranscript = true;
+    const narrativeTranscript = useCompactTranscript
+      ? compactTranscriptForNarrativePrompt(transcript)
+      : transcript;
+    const userPrompt = buildUserPrompt(
+      pillarScores,
+      scenarioScores,
+      narrativeTranscript,
+      weightedScore,
+      passed,
+      unassessedMarkers,
+      options?.evidenceContext,
+      useCompactTranscript,
+    );
+
+    if (attempt === 0) {
+      console.log('[NarrativePrompt] live interpolated prompt verification', {
+        pipeline: 'ai_reasoning',
+        charCount: SYSTEM_PROMPT.length + userPrompt.length,
+        transcriptCompacted: useCompactTranscript,
+        hasScenarioPersonalCrossrefInstruction: `${SYSTEM_PROMPT}\n${userPrompt}`.includes(
+          "If the user's highest-scoring scenario for a given construct involves a theme that mirrors their personal disclosure",
+        ),
+      });
+    } else {
+      console.warn('[NarrativePrompt] retry with compact transcript', {
+        attempt,
+        charCount: SYSTEM_PROMPT.length + userPrompt.length,
+        transcriptCompacted: useCompactTranscript,
+      });
+    }
+
+    const body: Record<string, unknown> = {
+      model: resolveAnthropicSonnetModel(CLAUDE_SONNET_MODEL),
+      max_tokens: maxTokensForCall,
+      system: SYSTEM_PROMPT,
+      messages: [{ role: 'user', content: userPrompt }],
+    };
+    if (attempt === 0) {
+      console.log('[narrative] calling Anthropic model:', body.model);
+    }
+
     let ourAbortTimerFired = false;
     const abort = new AbortController();
     const abortTimer = setTimeout(() => {
@@ -501,10 +531,20 @@ export async function generateAIReasoning(
       if (!response.ok) {
         const errText = await response.text();
         clearTimeout(abortTimer);
+        const resourceLimit = isWorkerResourceLimitError(response.status, errText);
         const meta = classifyAIReasoningRequestError(new Error(`HTTP ${response.status} ${errText}`), response);
         lastErr = new Error(
           `AI reasoning request failed: [${meta.kind}] ${response.status} ${errText.slice(0, 500)}`
         );
+        if (resourceLimit) {
+          console.warn('[narrative] WORKER_RESOURCE_LIMIT — retrying with compact transcript', {
+            attempt,
+            status: response.status,
+            promptChars: userPrompt.length,
+          });
+          useCompactTranscript = true;
+          continue;
+        }
         if (response.status >= 400 && response.status < 500 && response.status !== 429) {
           throw lastErr;
         }

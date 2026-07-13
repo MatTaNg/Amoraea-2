@@ -1,6 +1,7 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
 import type { ContemptTierBreakdown } from '@features/aria/contemptExpressionScoringRubric';
 import type { MentalizingInferenceSource } from '@features/aria/scenarioInferenceSourceCalibration';
+import { sanitizeScenarioScoreBundleForPersist } from '@features/aria/sanitizeScenarioKeyEvidenceForPersist';
 
 /** Stored JSON shape for `interview_attempts.scenario_N_scores` columns. */
 export type ScenarioAttemptScoreBundle = {
@@ -23,9 +24,10 @@ export async function persistScenarioScoreBundleToAttempt(
       : params.scenarioNumber === 2
         ? 'scenario_2_scores'
         : 'scenario_3_scores';
+  const bundle = sanitizeScenarioScoreBundleForPersist(params.bundle);
   const { error } = await client
     .from('interview_attempts')
-    .update({ [col]: params.bundle })
+    .update({ [col]: bundle })
     .eq('id', params.attemptId)
     .eq('user_id', params.userId);
   return { error: error ? new Error(error.message) : null };

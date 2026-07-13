@@ -4,7 +4,8 @@ import {
   SCENARIO_2_TO_3_TRANSITION_FALLBACK,
 } from './interviewTransitionBundles';
 
-export const EMOTION_ITEM_CORRECT_ANSWERS = ['B', 'C', 'C'] as const;
+export { EMOTION_ITEM_CORRECT_ANSWERS } from '@config/scoring/emotionRecognitionItems';
+import { EMOTION_ITEM_CORRECT_ANSWERS } from '@config/scoring/emotionRecognitionItems';
 
 export type EmotionChoiceLetter = 'A' | 'B' | 'C' | 'D';
 
@@ -13,7 +14,7 @@ export type EmotionIdentificationItem = {
   options: Record<EmotionChoiceLetter, string>;
 };
 
-/** In-scenario multiple choice after each scripted scenario block (UI-only; not spoken by Aira). */
+/** In-scenario multiple choice after each scripted scenario block (UI-only; not spoken by Amoraea). */
 export const INTERVIEW_EMOTION_IDENTIFICATION_ITEMS: readonly EmotionIdentificationItem[] = [
   {
     question:
@@ -26,7 +27,8 @@ export const INTERVIEW_EMOTION_IDENTIFICATION_ITEMS: readonly EmotionIdentificat
     },
   },
   {
-    question: 'Sarah tears up when James asks about her salary. What is Sarah most likely feeling?',
+    question:
+      'That evening James leads with questions about the salary, the start date, and the commute. Sarah tears up. What is Sarah most likely feeling in that moment?',
     options: {
       A: 'Grateful James is being practical about the opportunity',
       B: 'Embarrassed that she accepted a lower salary than expected',

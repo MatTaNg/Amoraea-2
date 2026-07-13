@@ -13,7 +13,7 @@ describe('postInterviewLaunchMode', () => {
     expect(mapPostInterviewStackRouteForLaunchMode('PostInterviewFailed')).toBe('PostInterviewLaunch');
     expect(mapPostInterviewStackRouteForLaunchMode('PostInterviewProcessing')).toBe('PostInterviewLaunch');
     expect(mapInterviewStackRouteForLaunchMode('PostInterview')).toBe('PostInterviewLaunch');
-    expect(mapInterviewStackRouteForLaunchMode('Aria')).toBe('Aria');
+    expect(mapInterviewStackRouteForLaunchMode('Amoraea')).toBe('Amoraea');
   });
 
   it('uses 500 as the launch waitlist goal', () => {

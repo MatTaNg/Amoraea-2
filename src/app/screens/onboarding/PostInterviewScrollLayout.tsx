@@ -6,13 +6,15 @@ export const POST_INTERVIEW_BG = '#05060D';
 
 type PostInterviewScrollLayoutProps = {
   children: React.ReactNode;
+  scrollViewRef?: React.RefObject<ScrollView | null>;
 };
 
 /** Scrollable body for post-interview stack screens (header is stack-owned). */
-export function PostInterviewScrollLayout({ children }: PostInterviewScrollLayoutProps) {
+export function PostInterviewScrollLayout({ children, scrollViewRef }: PostInterviewScrollLayoutProps) {
   return (
     <SafeAreaContainer style={styles.container}>
       <ScrollView
+        ref={scrollViewRef}
         style={styles.scroll}
         contentContainerStyle={styles.content}
         keyboardShouldPersistTaps="handled"

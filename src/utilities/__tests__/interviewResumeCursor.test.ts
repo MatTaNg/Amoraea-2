@@ -1,4 +1,3 @@
-import { describe, expect, it } from 'vitest';
 import {
   assignScenarioNumbersToTranscript,
   buildResumeWelcomeMessage,
@@ -15,9 +14,11 @@ import {
   stripEphemeralWelcomeBackMessages,
   resumeShouldSpeakEmotionCatchUpAfterModal,
   resumeTranscriptAlreadyDeliveredMoment4Question,
+  shouldResumeMidInterviewFromSaved,
   storedInterviewHasResumableScenarioProgress,
   transcriptNeedsScenarioNumberPatch,
 } from '../interviewResumeCursor';
+import { SHOW_SCENARIO_3_OPENING_EXACT, SHOW_SCENARIO_3_VIGNETTE_EXACT } from '../../features/aria/interviewShowScenarioExactCopy';
 
 describe('interviewResumeCursor', () => {
   it('lastFullyCompletedScenario prefers score bundles', () => {
@@ -278,6 +279,27 @@ describe('interviewResumeCursor', () => {
     expect(sliceMessagesBeforeScenarioIntro(msgs, 3)).toEqual(msgs);
   });
 
+  it('firstAssistantIndexForScenarioIntro ignores S3 Q1 without vignette setup', () => {
+    const msgs = [
+      { role: 'assistant', content: "Sarah has been job hunting — here's the next situation." },
+      { role: 'user', content: 'done s2' },
+      { role: 'assistant', content: SHOW_SCENARIO_3_OPENING_EXACT },
+      { role: 'user', content: 'partial s3' },
+    ];
+    expect(firstAssistantIndexForScenarioIntro(msgs, 3)).toBe(-1);
+    expect(sliceMessagesBeforeScenarioIntro(msgs, 3)).toEqual(msgs);
+  });
+
+  it('firstAssistantIndexForScenarioIntro finds scenario 3 when vignette is present', () => {
+    const msgs = [
+      { role: 'assistant', content: "Sarah has been job hunting — here's the next situation." },
+      { role: 'user', content: 'done s2' },
+      { role: 'assistant', content: SHOW_SCENARIO_3_VIGNETTE_EXACT },
+      { role: 'user', content: 'partial s3' },
+    ];
+    expect(firstAssistantIndexForScenarioIntro(msgs, 3)).toBe(2);
+  });
+
   it('storedInterviewHasResumableScenarioProgress rejects pre-scenario intro only (name + ready)', () => {
     const msgs = [
       { role: 'assistant', content: "Hi, I'm Amoraea. What can I call you?" },
@@ -296,6 +318,128 @@ describe('interviewResumeCursor', () => {
         currentScenario: 1,
       }),
     ).toBe(false);
+  });
+
+  it('computeInterviewResumePlan prefers transcript S2 anchor over stale resumeActive 1', () => {
+    const messages = [
+      { role: 'assistant', content: "Here's the first situation. Emma and Ryan have dinner plans." },
+      { role: 'user', content: 'Emma feels sidelined.' },
+      { role: 'assistant', content: "Here's the second situation. Sarah has been job hunting for four months." },
+      { role: 'user', content: 'James should listen more.' },
+    ];
+    const plan = computeInterviewResumePlan({
+      scenariosCompleted: [],
+      scenarioScores: {},
+      resumeActiveFromStorage: 1,
+      resumeActiveFromAttempt: 1,
+      transcriptMessages: messages,
+      syncedMoments: {
+        momentsComplete: { 1: false, 2: false, 3: false, 4: false, 5: false },
+        currentMoment: 2,
+        personalHandoffInjected: false,
+      },
+    });
+    expect(plan.resumeScenario).toBe(2);
+    expect(plan.mode).toBe('replay_incomplete');
+  });
+
+  it('computeInterviewResumePlan uses synced moment 2 when resumeActive is stale 1 and S2 anchor missing', () => {
+    const messages = [
+      { role: 'assistant', content: "Here's the first situation. Emma and Ryan have dinner plans." },
+      { role: 'user', content: 'Emma feels sidelined.' },
+      { role: 'assistant', content: "Good, that's helpful." },
+      { role: 'user', content: 'James should listen more.' },
+    ];
+    const plan = computeInterviewResumePlan({
+      scenariosCompleted: [],
+      scenarioScores: {},
+      resumeActiveFromStorage: 1,
+      resumeActiveFromAttempt: 1,
+      transcriptMessages: messages,
+      syncedMoments: {
+        momentsComplete: { 1: false, 2: false, 3: false, 4: false, 5: false },
+        currentMoment: 2,
+        personalHandoffInjected: false,
+      },
+    });
+    expect(plan.resumeScenario).toBe(2);
+    expect(plan.mode).toBe('replay_incomplete');
+  });
+
+  it('storedInterviewHasResumableScenarioProgress accepts resumeActiveScenario without vignette anchor yet', () => {
+    expect(
+      storedInterviewHasResumableScenarioProgress({
+        messages: [
+          { role: 'assistant', content: "Here's the first situation. Emma and Ryan." },
+          { role: 'user', content: 'Ryan should have set boundaries with his mother during dinner.' },
+        ],
+        scenariosCompleted: [1],
+        resumeActiveScenario: 2,
+        currentScenario: 2,
+      }),
+    ).toBe(true);
+  });
+
+  it('computeInterviewResumePlan uses resumeActiveFromStorage when attempt resume is null', () => {
+    const plan = computeInterviewResumePlan({
+      scenariosCompleted: [1],
+      scenarioScores: {},
+      resumeActiveFromStorage: 2,
+      resumeActiveFromAttempt: null,
+      syncedMoments: {
+        momentsComplete: { 1: true, 2: false, 3: false, 4: false, 5: false },
+        currentMoment: 2,
+        personalHandoffInjected: false,
+      },
+    });
+    expect(plan.resumeScenario).toBe(2);
+    expect(plan.mode).toBe('replay_incomplete');
+  });
+
+  it('shouldResumeMidInterviewFromSaved is true mid scenario 2 with saved transcript', () => {
+    expect(
+      shouldResumeMidInterviewFromSaved({
+        messages: [
+          { role: 'assistant', content: "Here's the first situation. Emma and Ryan." },
+          { role: 'user', content: 'Ryan should have set boundaries with his mother.' },
+          { role: 'assistant', content: "Here's the second situation. Sarah has been job hunting." },
+          { role: 'user', content: 'I think James should have been more supportive.' },
+        ],
+        scenariosCompleted: [1],
+        scenarioScores: {},
+        resumeActiveScenario: 2,
+        currentScenario: 2,
+      }),
+    ).toBe(true);
+  });
+
+  it('shouldResumeMidInterviewFromSaved is false for greeting-only save', () => {
+    expect(
+      shouldResumeMidInterviewFromSaved({
+        messages: [{ role: 'assistant', content: "Hi, I'm Amoraea. What can I call you?" }],
+        scenariosCompleted: [],
+        scenarioScores: {},
+        resumeActiveScenario: null,
+        currentScenario: 1,
+      }),
+    ).toBe(false);
+  });
+
+  it('shouldResumeMidInterviewFromSaved is true in Moment 4 after all three scenarios scored', () => {
+    expect(
+      shouldResumeMidInterviewFromSaved({
+        messages: [
+          { role: 'assistant', content: "Emma and Ryan have dinner plans. What's going on between these two?" },
+          { role: 'user', content: 'Ryan should have set boundaries.' },
+          { role: 'assistant', content: "Think of someone you've had a really hard time with" },
+          { role: 'user', content: 'I had a falling out with a friend.' },
+        ],
+        scenariosCompleted: [1, 2, 3],
+        scenarioScores: {},
+        resumeActiveScenario: 3,
+        currentScenario: 3,
+      }),
+    ).toBe(true);
   });
 
   it('storedInterviewHasResumableScenarioProgress accepts after Emma/Ryan vignette anchor', () => {

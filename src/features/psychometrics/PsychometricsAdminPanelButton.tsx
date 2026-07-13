@@ -6,7 +6,7 @@ type Props = {
   onPress: () => void;
 };
 
-/** Matches Aria pre-interview `◆ Panel` control. */
+/** Matches Amoraea pre-interview `◆ Panel` control. */
 export function PsychometricsAdminPanelButton({ onPress }: Props) {
   return (
     <TouchableOpacity

@@ -14,11 +14,10 @@ import {
   getAuthEmailSendErrorMessage,
   useAuth,
 } from '@features/authentication/hooks/useAuth';
-import { debugAuthCallbackLog, sanitizeAuthUrlForLog } from '@features/authentication/debugAuthCallbackLog';
 import { SafeAreaContainer } from '@ui/components/SafeAreaContainer';
 import { FlameOrb } from '@app/screens/FlameOrb';
 import { authStyles } from '@app/screens/authStyles';
-import { unlockWebAudioForAutoplay } from '@features/aria/utils/elevenLabsTts';
+import { unlockWebAudioForAutoplay } from '@features/aria/utils/webInterviewTtsDocumentLifecycle';
 
 const isEmailNotConfirmedError = (err: unknown): boolean => {
   const msg = err instanceof Error ? err.message : String(err);
@@ -60,23 +59,6 @@ export const LoginScreen: React.FC<{ navigation: any; route?: { params?: { confi
     (new URLSearchParams(window.location.search).get('confirmEmail') === '1' ||
       new URLSearchParams(window.location.search).get('confirmEmail') === 'true'));
   const passwordInputRef = useRef<React.ElementRef<typeof TextInput>>(null);
-
-  useEffect(() => {
-    if (Platform.OS !== 'web' || typeof window === 'undefined') return;
-    // #region agent log
-    debugAuthCallbackLog(
-      'LoginScreen.tsx:mount',
-      'Login screen mounted',
-      sanitizeAuthUrlForLog(
-        window.location.pathname,
-        window.location.search,
-        window.location.hash,
-      ),
-      'H7',
-      'post-fix',
-    );
-    // #endregion
-  }, []);
 
   useEffect(() => {
     if (!emailConfirmationLinkError) return;

@@ -1,0 +1,15 @@
+/**
+ * Interview-behavior thresholds used when cross-checking psychometric self-report.
+ */
+
+export const INTERVIEW_ACCOUNTABILITY_STRONG_MIN = 7;
+export const INTERVIEW_ACCOUNTABILITY_WEAK_MAX = 3;
+export const INTERVIEW_REGULATION_STRONG_MIN = 7;
+export const INTERVIEW_REGULATION_WEAK_MAX = 5;
+export const INTERVIEW_MENTALIZING_STRONG_MIN = 7;
+export const INTERVIEW_MENTALIZING_WEAK_MAX = 4;
+export const INTERVIEW_CONTEMPT_WEAK_MAX = 5;
+export const INTERVIEW_EGO_DEVELOPMENT_STRONG_MIN = 3;
+export const INTERVIEW_EGO_DEVELOPMENT_WEAK_MAX = 2;
+export const INTERVIEW_VOCAB_DENSITY_HEALTHY_MIN = 0.8;
+export const INTERVIEW_VOCAB_DENSITY_STRONG_MIN = 1.0;

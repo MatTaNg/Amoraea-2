@@ -28,7 +28,6 @@ import { ProfileRepository } from '@data/repositories/ProfileRepository';
 import { useAuth } from '@features/authentication/hooks/useAuth';
 import { exitDatingProfileOnboardingToPostInterview } from '@/datingProfile/onboarding/exitDatingProfileOnboardingToPostInterview';
 import { showSimpleAlert } from '@utilities/alerts/confirmDialog';
-import { PersonalityDocumentsUpload } from '@/features/profile/PersonalityDocumentsUpload';
 import {
   HEIGHT_CM_MIN,
   HEIGHT_CM_MAX,
@@ -155,7 +154,6 @@ const ATTRACTION_UI = ['Men', 'Women', 'Non-binary'] as const;
 const EDIT_PROFILE_TABS = [
   { id: 'basics', label: 'Basics' },
   { id: 'lifestyle', label: 'Lifestyle' },
-  { id: 'documents', label: 'Documents' },
   { id: 'compatibility', label: 'Compatibility' },
   { id: 'dealbreakers', label: 'Dealbreakers' },
 ] as const;
@@ -870,10 +868,25 @@ export const DatingProfileEditScreen: React.FC<{
       quality: 0.85,
     });
     if (result.canceled || !result.assets?.length) return;
-    const picked = result.assets
-      .slice(0, remaining)
-      .map((a) => a.uri.trim())
-      .filter(Boolean);
+
+    const getFileName = (u: string) => u.split('/').pop()?.split('?')[0] || '';
+    const existingNames = photoUrls.map((u) => getFileName(u));
+    const newlyPicked = result.assets.slice(0, remaining);
+
+    const duplicates = newlyPicked.filter((a) => {
+      const name = a.fileName || getFileName(a.uri);
+      return existingNames.includes(name);
+    });
+
+    if (duplicates.length > 0) {
+      showSimpleAlert(
+        'Duplicate Photo',
+        'One or more photos have the same name as existing ones. Please choose different photos.',
+      );
+      return;
+    }
+
+    const picked = newlyPicked.map((a) => a.uri.trim()).filter(Boolean);
     setPhotoUrls((prev) => {
       const seen = new Set(prev.map((x) => x.trim()));
       const next = [...prev];
@@ -1151,12 +1164,7 @@ export const DatingProfileEditScreen: React.FC<{
           })}
         </View>
 
-        {activeTab === 'documents' ? (
-          <>
-            <SectionTitle>Documents</SectionTitle>
-            <PersonalityDocumentsUpload userId={effectiveUserId} />
-          </>
-        ) : !typologyResultId ? (
+        {!typologyResultId ? (
           <>
         {activeTab === 'basics' ? (
           <>

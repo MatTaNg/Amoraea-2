@@ -1,4 +1,8 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
+import {
+  attemptRowMissingRollupArtifacts,
+  type InterviewRollupArtifactRow,
+} from '@features/psychometrics/ensureInterviewRollupArtifacts';
 
 type AttemptScoringRow = {
   completed_at: string | null;
@@ -7,6 +11,9 @@ type AttemptScoringRow = {
   scenario_1_scores: unknown;
   scenario_2_scores: unknown;
   scenario_3_scores: unknown;
+  scenario_composites?: unknown;
+  defense_patterns?: unknown;
+  defense_cross_reference?: unknown;
 };
 
 function objectNonEmpty(o: unknown): boolean {
@@ -55,6 +62,19 @@ function rowHasFullScoringPayload(row: AttemptScoringRow | null | undefined): bo
   if (!scenarioScoresMeaningfulOrAbsent(row.scenario_1_scores)) return false;
   if (!scenarioScoresMeaningfulOrAbsent(row.scenario_2_scores)) return false;
   if (!scenarioScoresMeaningfulOrAbsent(row.scenario_3_scores)) return false;
+  // Critical rollup artifacts must be present — otherwise readiness races ahead of rollup write.
+  if (
+    attemptRowMissingRollupArtifacts({
+      scenario_composites: row.scenario_composites,
+      defense_patterns: row.defense_patterns,
+      defense_cross_reference: row.defense_cross_reference,
+      scenario_1_scores: row.scenario_1_scores,
+      scenario_2_scores: row.scenario_2_scores,
+      scenario_3_scores: row.scenario_3_scores,
+    } as InterviewRollupArtifactRow)
+  ) {
+    return false;
+  }
   return true;
 }
 
@@ -73,7 +93,9 @@ export async function waitForInterviewAttemptScoringReady(
   while (Date.now() < deadline) {
     const { data, error } = await client
       .from('interview_attempts')
-      .select('completed_at, weighted_score, pillar_scores, scenario_1_scores, scenario_2_scores, scenario_3_scores')
+      .select(
+        'completed_at, weighted_score, pillar_scores, scenario_1_scores, scenario_2_scores, scenario_3_scores, scenario_composites, defense_patterns, defense_cross_reference',
+      )
       .eq('id', attemptId)
       .maybeSingle();
 

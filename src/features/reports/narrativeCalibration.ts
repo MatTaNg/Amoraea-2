@@ -7,9 +7,18 @@
 import type { GamingCorrectionResult } from '../psychometrics/computeGamingCorrection';
 import { isPsychometricGateFailFloorCode } from '../psychometrics/psychometricFloorBreaches';
 
-/** Keep in sync with GATE_PASS_WEIGHTED_MIN in computeGateResultCore (6.5). */
-const GATE_PASS_WEIGHTED_MIN = 6.5;
-const GATE_PASS_COMFORTABLE_MARGIN = 0.5;
+import {
+  GATE_PASS_COMFORTABLE_MARGIN,
+  GATE_PASS_WEIGHTED_MIN,
+} from '@config/reports/narrativeGateCalibration';
+import {
+  NARRATIVE_STRONG_PILLAR_AVG_MIN,
+  NARRATIVE_STRONG_SCENARIO_AVG_MIN,
+  PILLAR_NARRATIVE_BAND_DEVELOPING_MIN,
+  PILLAR_NARRATIVE_BAND_GOOD_MIN,
+  PILLAR_NARRATIVE_BAND_NEEDS_ATTENTION_MIN,
+  PILLAR_NARRATIVE_BAND_STRONG_MIN,
+} from '@config/reports/pillarNarrativeBands';
 
 export type ReportGateNarrativeTier = 'passed' | 'interview_fail' | 'psychometric_floor_only';
 
@@ -208,7 +217,7 @@ export function hasStrongInterviewDerivedPillars(
     .map((k) => pillarScores[k])
     .filter((v): v is number => typeof v === 'number' && Number.isFinite(v));
   if (vals.length < 4) return false;
-  return vals.reduce((a, b) => a + b, 0) / vals.length >= 7;
+  return vals.reduce((a, b) => a + b, 0) / vals.length >= NARRATIVE_STRONG_PILLAR_AVG_MIN;
 }
 
 function floorCodeToInstrumentKey(floorCode: string): string | null {
@@ -448,10 +457,10 @@ function formatMoment5PillarBands(pillarScores: Record<string, number | null> | 
 
 function pillarBand(score: number | undefined | null): string {
   if (score == null) return 'not assessed';
-  if (score >= 8) return 'strong';
-  if (score >= 7) return 'good';
-  if (score >= 6) return 'developing';
-  if (score >= 4) return 'needs attention';
+  if (score >= PILLAR_NARRATIVE_BAND_STRONG_MIN) return 'strong';
+  if (score >= PILLAR_NARRATIVE_BAND_GOOD_MIN) return 'good';
+  if (score >= PILLAR_NARRATIVE_BAND_DEVELOPING_MIN) return 'developing';
+  if (score >= PILLAR_NARRATIVE_BAND_NEEDS_ATTENTION_MIN) return 'needs attention';
   return 'significant growth area';
 }
 
@@ -525,7 +534,7 @@ export function buildInterviewEvidencePromptBlock(input: InterviewEvidencePrompt
     scenarioScores.length > 0
       ? scenarioScores.reduce((a, b) => a + b, 0) / scenarioScores.length
       : null;
-  const strongScenarioEngagement = scenarioAvg != null && scenarioAvg >= 7;
+  const strongScenarioEngagement = scenarioAvg != null && scenarioAvg >= NARRATIVE_STRONG_SCENARIO_AVG_MIN;
 
   const evidenceLines = [
     ke.scenario1 ? `Scenario 1 scorer note: "${ke.scenario1.slice(0, 280)}"` : null,

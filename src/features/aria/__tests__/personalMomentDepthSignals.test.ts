@@ -37,13 +37,19 @@ describe('personalMomentDepthSignals', () => {
       pillarScores: {} as Record<string, number | null>,
       keyEvidence: {} as Record<string, string>,
     };
-    applyMoment5PostParseCoercionAndSalvage(raw, parsed as unknown as Record<string, unknown>);
-    fillMoment5KeyEvidenceWhenNumericScoreButMissingQuote(parsed);
+    applyMoment5PostParseCoercionAndSalvage(raw, parsed as unknown as Record<string, unknown>, {
+      transcript: [...concreteM5Transcript],
+      scoringSlice,
+    });
+    fillMoment5KeyEvidenceWhenNumericScoreButMissingQuote(parsed, {
+      transcript: [...concreteM5Transcript],
+      scoringSlice,
+    });
     parsed.pillarScores = mergeMoment5PillarScoresAfterEvidenceNormalize(
       normalizeScoresByEvidence(parsed.pillarScores, parsed.keyEvidence),
     ) as Record<string, number | null>;
 
-    expect(parsed.keyEvidence.accountability).toBe(MOMENT5_SCORE_RECOVERED_EVIDENCE_LINE);
+    expect(parsed.keyEvidence.accountability).toMatch(/^User: "/);
     expect(parsed.pillarScores.accountability).toBe(7);
 
     const out = applyMoment5RecoveryPathDepthSignals({

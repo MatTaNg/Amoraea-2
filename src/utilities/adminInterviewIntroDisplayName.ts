@@ -1,7 +1,7 @@
 /**
  * Admin UI: derive a short interview "intro" label without showing corrupt `users.name`
  * (e.g. a full scenario answer accidentally stored in `name`).
- * Mirrors the Aria greeting gate: 1–2 name tokens, max 50 chars, letters / ' / - only.
+ * Mirrors the Amoraea greeting gate: 1–2 name tokens, max 50 chars, letters / ' / - only.
  */
 
 export type AdminInterviewIntroUserFields = {

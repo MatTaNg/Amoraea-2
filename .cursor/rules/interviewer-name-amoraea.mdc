@@ -1,0 +1,26 @@
+---
+description: AI interviewer product name is Amoraea (never Aria or Aira)
+alwaysApply: true
+---
+
+# Interviewer name: Amoraea
+
+The voice AI interviewer in Amoraea is named **Amoraea**, not **Aria** or **Aira**.
+
+## User-facing copy
+
+- Spoken intro, UI labels, permissions (`app.json`), welcome modals, and report copy must say **Amoraea**.
+- Avoid awkward duplication: prefer *"Welcome to Amoraea. Over the next…"* rather than *"My name is Amoraea"* when the app is already branded Amoraea.
+
+## Navigation routes
+
+- Standard interview stack screen: `'Amoraea'` (URL path remains `interview`).
+- Relationship validation interview: `'ValidationAmoraea'`.
+
+## Logging
+
+- Use `[Amoraea]` as the console / remoteLog prefix for interview runtime (not `[Aria]`).
+
+## Internal code (legacy paths)
+
+- The module folder `@features/aria/` and symbols like `AriaInterviewScreen` are **legacy internal names**; do not introduce new user-visible "Aria" strings. Prefer Amoraea in new copy even if the import path is still `@features/aria/...`.

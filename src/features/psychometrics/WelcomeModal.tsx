@@ -93,7 +93,7 @@ export function WelcomeModal({
           label: 'Part 1 — AI Interview',
           time: interviewTimeLabel,
           description:
-            'A conversational interview with Aira, our AI interviewer, exploring how you think about and navigate relationships.',
+            'A conversational interview with Amoraea, our AI interviewer, exploring how you think about and navigate relationships.',
         },
         {
           key: 'psychometrics',
@@ -119,7 +119,7 @@ export function WelcomeModal({
           label: 'Part 2 — AI Interview',
           time: interviewTimeLabel,
           description:
-            'A conversational interview with Aira, our AI interviewer, exploring how you think about and navigate relationships.',
+            'A conversational interview with Amoraea, our AI interviewer, exploring how you think about and navigate relationships.',
         },
       ];
 
@@ -142,6 +142,7 @@ export function WelcomeModal({
           style={styles.scroll}
           contentContainerStyle={[
             scrollContentStyle,
+            styles.scrollContent,
             onBackPress ? styles.scrollContentWithBack : null,
           ]}
           showsVerticalScrollIndicator={false}
@@ -207,6 +208,11 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: PSYCHOMETRICS_BG,
   },
+  scrollContent: {
+    flexGrow: 1,
+    width: '100%',
+    alignSelf: 'center',
+  },
   scrollContentWithBack: {
     paddingTop: 56,
   },
@@ -222,6 +228,7 @@ const styles = StyleSheet.create({
     textAlign: 'center',
     marginBottom: spacing.sm,
     lineHeight: 34,
+    alignSelf: 'stretch',
   },
   titleNarrow: {
     fontSize: 24,
@@ -235,6 +242,7 @@ const styles = StyleSheet.create({
     lineHeight: 22,
     marginBottom: spacing.xl,
     paddingHorizontal: spacing.xs,
+    alignSelf: 'stretch',
   },
   partCard: {
     width: '100%',

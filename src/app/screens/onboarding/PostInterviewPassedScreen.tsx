@@ -135,7 +135,7 @@ export const PostInterviewPassedScreen: React.FC<{ navigation: any; route: { par
       const { data: { session } } = await supabase.auth.getSession();
       const email = session?.user?.email ?? user?.email ?? null;
       if (cancelled || !isAmoraeaAdminConsoleEmail(email)) return;
-      navigation.replace('Aria', { userId, openAdminPanel: true });
+      navigation.replace('Amoraea', { userId, openAdminPanel: true });
     })();
     return () => {
       cancelled = true;
@@ -160,7 +160,7 @@ export const PostInterviewPassedScreen: React.FC<{ navigation: any; route: { par
       if (cancelled) return;
       if (userRow?.interview_completed !== true) {
         queryClient.invalidateQueries({ queryKey: ['profile', uid] });
-        navigation.replace('Aria', { userId: uid });
+        navigation.replace('Amoraea', { userId: uid });
         return;
       }
       const target = resolveStandardPostInterviewStackRoute(snap ?? undefined);
@@ -191,7 +191,7 @@ export const PostInterviewPassedScreen: React.FC<{ navigation: any; route: { par
       const uid = auth.user?.id ?? userId;
       if (!uid) return;
       const [{ data: codeRow }, { data: userRow }] = await Promise.all([
-        supabase.from('referral_codes').select('code').eq('referrer_user_id', uid).maybeSingle(),
+        supabase.from('users').select('invite_code').eq('id', uid).maybeSingle(),
         supabase
           .from(USER_INTERVIEW_ROUTING_TABLE)
           .select(USER_REFERRAL_NOTICE_SELECT)
@@ -199,7 +199,7 @@ export const PostInterviewPassedScreen: React.FC<{ navigation: any; route: { par
           .maybeSingle(),
       ]);
       if (cancelled) return;
-      setMyReferralCode(codeRow?.code ?? null);
+      setMyReferralCode(codeRow?.invite_code ?? null);
       setReferralNotice(userRow?.referral_notice_pending ?? null);
     })();
     return () => {
@@ -305,7 +305,7 @@ export const PostInterviewPassedScreen: React.FC<{ navigation: any; route: { par
         try {
           await enableInterviewRetake(uid);
           await queryClient.invalidateQueries({ queryKey: ['profile', uid] });
-          navigation.replace('Aria', { userId: uid });
+          navigation.replace('Amoraea', { userId: uid });
         } catch (e) {
           const detail =
             e instanceof Error ? e.message : typeof e === 'string' ? e : 'Could not reset the interview.';

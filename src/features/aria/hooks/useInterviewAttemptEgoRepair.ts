@@ -3,7 +3,7 @@ import { runInterviewAttemptEgoRepairFromLatestAttempt } from '@utilities/interv
 
 /**
  * Re-persists `ego_development_level` when the latest completed attempt row is missing ego (interrupt / RLS).
- * Runs from Aria and from post-interview stack screens — applicants navigate off Aria before this repair would run there alone.
+ * Runs from Amoraea and from post-interview stack screens — applicants navigate off Amoraea before this repair would run there alone.
  */
 export function useInterviewAttemptEgoRepair(opts: {
   userId: string;

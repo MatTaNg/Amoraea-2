@@ -1,8 +1,11 @@
-/** Per-scenario Mentalizing / Repair must be ≥ this value unless fewer than 2 scenarios breach together. */
-export const MENTALIZING_REPAIR_SCENARIO_PASS_MIN = 4;
-
-/** Fail when this many scenarios have an assessed pillar score strictly below {@link MENTALIZING_REPAIR_SCENARIO_PASS_MIN}. */
-export const MENTALIZING_REPAIR_LOW_SCENARIO_COUNT_FAIL = 2;
+export {
+  MENTALIZING_REPAIR_SCENARIO_PASS_MIN,
+  MENTALIZING_REPAIR_LOW_SCENARIO_COUNT_FAIL,
+} from '../../../src/config/scoring/scenarioFloors.ts';
+import {
+  MENTALIZING_REPAIR_LOW_SCENARIO_COUNT_FAIL,
+  MENTALIZING_REPAIR_SCENARIO_PASS_MIN,
+} from '../../../src/config/scoring/scenarioFloors.ts';
 
 export type ScenarioGateIndex = 1 | 2 | 3;
 

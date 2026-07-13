@@ -297,7 +297,7 @@ export function ValidationReportScreen({ userId, navigation }: Props) {
 
   const handleInterview = async () => {
     await markValidationInterviewOptIn(userId);
-    navigation.navigate('ValidationAria');
+    navigation.navigate('ValidationAmoraea');
   };
 
   const handleCompareAnotherPartner = () => {

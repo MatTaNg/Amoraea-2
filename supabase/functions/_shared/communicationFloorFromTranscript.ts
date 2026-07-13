@@ -1,6 +1,10 @@
-/** Keep in sync with src/features/aria/communicationFloorFromTranscript.ts (Deno bundle). */
+/**
+ * Admin-only “communication floor” signal: average unprompted word count across scenarios A–C + moments 4–5.
+ * Does not affect pass/fail — see product spec.
+ */
 
-export const COMMUNICATION_FLOOR_MIN_AVG_WORDS = 20;
+export { COMMUNICATION_FLOOR_MIN_AVG_WORDS } from '../../../src/config/scoring/communicationFloor.ts';
+import { COMMUNICATION_FLOOR_MIN_AVG_WORDS } from '../../../src/config/scoring/communicationFloor.ts';
 
 export type CommunicationFloorTranscriptLine = {
   role: string;

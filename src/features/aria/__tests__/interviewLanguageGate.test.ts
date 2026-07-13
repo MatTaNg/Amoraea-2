@@ -36,6 +36,10 @@ describe('isNamePromptInterviewMoment', () => {
     expect(isNamePromptInterviewMoment('What should I call you?')).toBe(true);
   });
 
+  it('matches split-stream opener before the name question sentence', () => {
+    expect(isNamePromptInterviewMoment("Hi, I'm Amoraea.")).toBe(true);
+  });
+
   it('still matches legacy phrasings', () => {
     expect(isNamePromptInterviewMoment("What's your name?")).toBe(true);
     expect(isNamePromptInterviewMoment('How should I call you?')).toBe(true);
@@ -345,6 +349,7 @@ describe('getWhisperReaskTurnContext', () => {
     expect(getWhisperReaskTurnContext("Hi, I'm Amoraea. What can I call you?")).toBe(
       'name_collection'
     );
+    expect(getWhisperReaskTurnContext("Hi, I'm Amoraea.")).toBe('name_collection');
     expect(getWhisperReaskTurnContext('Are you ready to begin?')).toBe(
       'readiness_confirmation'
     );
@@ -353,6 +358,19 @@ describe('getWhisperReaskTurnContext', () => {
         "Good to meet you, Matt. The way this works is I'll first give you three situations. Are you ready?"
       )
     ).toBe('readiness_confirmation');
+  });
+
+  it('keeps name collection active after ratio recovery while profile name is unset', () => {
+    expect(
+      getWhisperReaskTurnContext(
+        'I only caught part of that — could you answer again in a full sentence?',
+        {
+          interviewName: null,
+          lastQuestionText:
+            'I only caught part of that — could you answer again in a full sentence?',
+        },
+      ),
+    ).toBe('name_collection');
   });
 });
 
@@ -384,6 +402,11 @@ describe('isScenarioModalFollowUpProbe', () => {
     expect(isScenarioModalFollowUpProbe('Can you say more about that?')).toBe(true);
     expect(isScenarioModalFollowUpProbe('Just say whatever comes to mind.')).toBe(true);
     expect(isScenarioModalFollowUpProbe('Take your time — just say whatever comes to mind.')).toBe(true);
+    expect(
+      isScenarioModalFollowUpProbe(
+        'It sounds like something may have cut you off there — want to give that one another try?',
+      ),
+    ).toBe(true);
   });
 
   it('does not flag substantive scenario questions', () => {
@@ -392,6 +415,14 @@ describe('isScenarioModalFollowUpProbe', () => {
         "When Ryan takes a call from his mother during dinner — what's going on for Emma?"
       )
     ).toBe(false);
+  });
+
+  it('flags forbidden Scenario C Sophie prescriptive follow-up', () => {
+    expect(
+      isScenarioModalFollowUpProbe(
+        'And what do you think Sophie should do when Daniel comes back?',
+      ),
+    ).toBe(true);
   });
 });
 
@@ -464,7 +495,7 @@ describe('getLastSubstantiveScenarioModalQuestion', () => {
       },
     ];
     expect(getLastSubstantiveScenarioModalQuestion(transcript)).toBe(
-      'How would you repair this if you were Ryan?'
+      'How would you repair this relationship if you were Ryan?',
     );
   });
 });
@@ -603,6 +634,51 @@ describe('resolveMoment4ShowScenarioReferenceCard', () => {
         grudgeCardBody,
       }),
     ).toEqual({ active: true, cardBodyText: grudgeCardBody });
+  });
+
+  it('uses canonical threshold card body when streaming paraphrase is incomplete', () => {
+    const truncated = 'When you think about what it takes to fully work through something';
+    const transcript = [
+      { role: 'assistant', content: grudgeHandoff },
+      { role: 'user', content: 'I had a grudge with my friend.' },
+    ];
+    expect(
+      resolveMoment4ShowScenarioReferenceCard(transcript, {
+        grudgeCardBody,
+        currentSpokenContent: truncated,
+      }),
+    ).toEqual({
+      active: true,
+      cardBodyText:
+        'At what point do you decide when a relationship is something to work through versus something you need to walk away from?',
+    });
+  });
+
+  it('uses canonical threshold card body for complete model paraphrase', () => {
+    const paraphrase = "Got it. When do you decide it's worth working through versus walking away?";
+    expect(
+      resolveMoment4ShowScenarioReferenceCard([{ role: 'assistant', content: paraphrase }], {
+        grudgeCardBody,
+      }),
+    ).toEqual({
+      active: true,
+      cardBodyText:
+        'At what point do you decide when a relationship is something to work through versus something you need to walk away from?',
+    });
+  });
+
+  it('uses canonical threshold card body for trust-broken friendship threshold paraphrase (session log)', () => {
+    const paraphrase =
+      "When something like that comes up — where trust gets broken and the friendship changes — what's your threshold for working through it versus walking away entirely?";
+    expect(
+      resolveMoment4ShowScenarioReferenceCard([{ role: 'assistant', content: paraphrase }], {
+        grudgeCardBody,
+      }),
+    ).toEqual({
+      active: true,
+      cardBodyText:
+        'At what point do you decide when a relationship is something to work through versus something you need to walk away from?',
+    });
   });
 
   it('returns inactive when a later Moment 5 conflict anchor is in the transcript', () => {

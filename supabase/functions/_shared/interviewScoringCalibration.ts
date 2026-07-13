@@ -15,10 +15,12 @@ Scores of 8–10 should reflect increasing sophistication, nuance, and specifici
 Commitment-threshold anchors (structure beats procedural verbosity):
 - The healthy ceiling is: persist through real difficulty while keeping healthy limits. Unconditional staying without limits scores low; exiting at first difficulty scores low.
 - Do NOT treat lack of granular process (timelines, therapy modalities, step-by-step checklists) as low commitment capacity. The scoring question is whether the answer contains a complete decision structure: invest effort → communicate clearly about what's not working → assess whether the pattern changes → decide to stay or go. That structure alone can justify 6–7 without extra detail.
+- **Single internal exit marker (scores 7):** One concrete, personally anchored internal shift that functions as a walk-away/threshold signal — e.g. shifting from looking forward to seeing someone every day to dreading the next time they would have to see them — scores **7** even without an explicit invest→communicate→assess step. Do **not** score 6 solely because a communicate step was omitted when this marker is present.
 - 1–2: Exit immediately or unconditionally at first/minor difficulty; OR endorse staying no matter what in clearly harmful dynamics; OR no coherent threshold.
 - 3–4: Vague persistence or unconditional staying without a workable framework ("just keep trying / stick it out" with no invest→communicate→assess structure), OR exit framing without effort/communicate/assess logic.
+- 5–6: Structurally vague threshold scanning ("red flags", "something feels off") with no concrete internal criterion; OR thin invest/communicate/assess language without a personally anchored marker.
 - 6–7: Structurally sound path even without specificity — e.g. genuinely try, communicate openly, and exit (or call it done) if the pattern continues without meaningful change. No requirement to name timelines or interventions.
-- 7–8: Same structural completeness plus some concrete specificity about what would constitute irrecoverable breakdown or "not workable anymore" (patterns, betrayal, harm, repeated failure after real effort — need not be exhaustive).
+- 7–8: Same structural completeness plus some concrete specificity about what would constitute irrecoverable breakdown or "not workable anymore" (patterns, betrayal, harm, repeated failure after real effort — need not be exhaustive), **or** a single clear internal exit marker as above.
 - 9–10: Demonstrated or richly described persistence through significant relational challenge with healthy limits and clear criteria; still not gated on procedural detail.
 - Unconditional commitment with no limits ("never give up no matter what," "stick it out forever") remains about 2–3, not 6+.
 
@@ -65,7 +67,7 @@ Distinguish two response types in each scenario:
 
 **Weighting (approximate, for judgment — not a formula on numbers):** The unprompted initial response should carry **about 70%** of the weight when assigning **repair** and **accountability** in that scenario slice. The prompted response is **supplementary (~30%)**. A polished answer that appears **only** after the role-switch / repair prompt must **not**, by itself, lift **accountability** above what the unprompted evidence supports. **(Repair marker):** That unprompted-first rule does **not** bind **repair** the same way — use the **repair**-specific ceiling and **REPAIR — CONDITIONAL LANGUAGE, DIRECTIONALITY, AND PROMPTED FLOORS** block: a **prompted** repair can justify **7–8** on **repair** when the directionality/ownership pattern fits, even if unprompted was thin.
 
-**Ceiling when unprompted showed no repair instinct (accountability only):** If the unprompted turn(s) show **no** repair instinct (e.g. exit the situation, condemn the person at fault, no curiosity about the other’s perspective, no ownership relevant to the dynamic), a strong prompted role-switch answer may **not** push **accountability** above the **mid-range (5–6 maximum)** — they may be answering a scaffolded question, not necessarily showing genuine accountability. (This ceiling does **not** apply the same way to the **repair** marker; see next paragraph and **REPAIR — CONDITIONAL** block.)
+**Ceiling when unprompted showed no repair instinct (accountability only):** If the unprompted turn(s) show **no** repair instinct (e.g. exit the situation, condemn the person at fault, no curiosity about the other’s perspective, no ownership relevant to the dynamic), a prompted role-switch answer that is only polished apology-without-ownership may **not** push **accountability** above the **mid-range (5–6 maximum)**. **Exception — ownership + change commitment clears 7:** If the prompted role-switch / repair-as answer itself contains **explicit first-person ownership** of the failure or gap **plus** a **forward-looking commitment to change** (e.g. "I would apologize and be more mindful in the future"; "I would assure her this will not happen again and actually follow through"), score accountability **7** (or **8** with added reflection on cost/why). That pattern is genuine scenario accountability — do **not** keep it at 5–6 solely because unprompted was thin. (This ceiling does **not** apply the same way to the **repair** marker; see next paragraph and **REPAIR — CONDITIONAL** block.)
 
 **Ceiling when unprompted showed no repair instinct (repair — different rule):** The same thin-unprompted pattern does **not** auto-cap **repair** at 5–6. **Repair** measures repair capacity, not the same “script vs ownership” test as **accountability**. If the **prompted** repair answer (role-switch or general repair prompt) shows **humble ownership**, **gratitude** toward the other, **growth / learning** orientation, or **self-limitation** framed as a bridge to a repair move, **repair** may be scored in the **7–8** range from that turn **even** when the unprompted read was weak and **even** when they do not reference every specific incident. Apply **REPAIR — CONDITIONAL LANGUAGE, DIRECTIONALITY, AND PROMPTED FLOORS** (below) — in particular, do **not** lower **repair** for conditional clauses on phrase shape alone; judge **directionality** (see that block). **This exception applies only to the "repair" marker,** not to accountability.
 
@@ -92,16 +94,83 @@ REPAIR — CONDITIONAL LANGUAGE, DIRECTIONALITY, AND PROMPTED FLOORS (marker: **
 - **Prompted repair without every concrete detail:** A **prompted** repair (Ryan / James / Scenario C repair question) that shows **genuine ownership**, **growth** orientation, and **gratitude** (e.g. thankfulness for the other’s patience) may sit in the **7–8** **repair** range even if it does not enumerate every line of the conflict — **as long as** the relational stance and repair intent are clear and not blame-redirecting (per above). **Do not** use absence of a named incident as the sole reason to cap **repair** below 7 when the prompted answer is otherwise strong on ownership and care.
 `;
 
+/** Scenario A (Emma/Ryan) — appreciation anchors for slice scoring (repair-as-Ryan answer). */
+export const SCENARIO_A_APPRECIATION_ANCHORS = `
+SCENARIO A (Emma/Ryan) — APPRECIATION (assessed primarily from the repair answer):
+
+Score **appreciation** from the participant's **repair-as-Ryan** answer ("What if you were Ryan? How would you repair this situation?") and supporting context in this slice. The unprompted Q1 read may inform context but **appreciation** is anchored on whether the **repair** communicates that Emma is **prioritized and valued**, not only that Ryan will fix the phone-call incident.
+
+Emma's complaint is not really about one 25-minute phone call — it is about a pattern of feeling deprioritized ("you always put your family first before us"). Strong appreciation recognizes that repair requires more than apologizing for the specific incident; it requires Ryan communicating that Emma matters and is prioritized, not only that he will set a boundary with his mother going forward.
+
+• **Strong appreciation (7–8):** Explicitly addresses Emma's underlying need to feel valued/prioritized, not just the logistics of the phone call. May include reassurance, affirmation of her importance, or asking what would help her feel prioritized going forward — not only a boundary commitment with his mother.
+
+• **Adequate appreciation (6):** Repair-as-Ryan acknowledges Emma's **upset emotional state** and pivots to **mutual needs** or teamwork (e.g. "I see you're upset — let's talk about what we both need so this doesn't repeat"). That honors her experience in the moment even when the deprioritization **pattern** is not named explicitly — score **6**, not 4–5.
+
+• **Weaker appreciation (4–5):** Addresses only logistics/boundaries (phone off, call mom back later) without acknowledging Emma's feelings or shared needs. A purely logistical repair that never affirms Emma's value should score in the **4–5** range even if accountability/repair score higher.
+
+• **Floor:** A minimally adequate repair answer that addresses at least the immediate incident should score **at or above 5** on appreciation per the standard floor-and-bonus philosophy — this rubric differentiates further based on whether the deeper prioritization need is named.
+`;
+
 /** Scenario B (Sarah/James) — attunement/appreciation anchors for slice + holistic scoring models. */
 export const SCENARIO_B_ATTUNEMENT_APPRECIATION_ANCHORS = `
-SCENARIO B (Sarah/James) — ATTUNEMENT & APPRECIATION (canonical vignette):
+SCENARIO B (Sarah/James) — ATTUNEMENT, MENTALIZING & APPRECIATION (canonical vignette):
 Sarah tears up during the celebration; James says "hey don't cry, this is a good thing." James also led with logistics (salary, start date, commute) at the start of the evening.
 
-• **Attunement — primary:** Does the participant recognize that James **redirecting** Sarah's tears — treating them as something to stop or fix ("don't cry," "this is a good thing") — is a **failure to receive** her emotional response: her feeling is framed as a **problem to solve** rather than **witnessed** or **stayed with**? Strong attunement names that miss. Weaker answers read James as merely positive, reassuring, or "trying to help" without naming the attunement failure.
+**CALIBRATION PRESERVATION (Scenario B — attunement & mentalizing):**
+Do **not** compress toward **4–5** when the user identifies **emotional mismatch** between what Sarah needed (celebration, being witnessed in the moment) and what James offered (logistics, reassurance, stopping tears), or infers **interior experience / perspective** beyond observable behavior. That is **Level 2** evidence → **typically 6** for clear pattern/meaning inference, **7** when the mismatch or bilateral interior read is clear and specific. **Never 3–4** for Level 2 content.
+
+• **Attunement — primary:** Does the participant recognize that James **redirecting** Sarah's tears — treating them as something to stop or fix ("don't cry," "this is a good thing") — is a **failure to receive** her emotional response: her feeling is framed as a **problem to solve** rather than **witnessed** or **stayed with**? Strong attunement names that miss. **Level 2 attunement** also includes identifying the **emotional mismatch** between what Sarah needed and what James offered — **even when the participant does not quote the vignette lines verbatim**. Weaker answers read James as merely positive, reassuring, or "trying to help" without naming the attunement failure or need-mismatch.
+
+• **Mentalizing (Scenario B):** Does the participant infer **interior experience or perspective** beyond observable behavior — what Sarah or James is feeling underneath the celebration/logistics exchange? **Level 1** = behavioral read or surface emotion label only (cap **5**). **Level 2** = emotional-meaning or interior inference → **typically 6**; **7** when the answer identifies the **emotional mismatch between both characters' experiences** (what each needed emotionally in the moment vs what they received).
 
 • **Attunement / appreciation — secondary:** Does the participant notice James **led with logistics** at the celebration rather than emotional presence first?
 
 • **Appreciation:** Does the participant distinguish **honoring Sarah's experience** from **processing the outcome logistically** — consistent with the signals above?
 
+• **Mentalizing score anchors (Scenario B):**
+  - **7:** Identifies the **emotional mismatch** between characters and infers underlying **interior experience** — what each person's reaction **means** to them emotionally, beyond observable behavior. Example pattern: Sarah needed James to celebrate with her / be happy for her / witness her joy, while James focused on logistics or tried to stop tears; the participant infers the relational meaning of that gap. → **7**, not 4–5.
+  - **6:** Infers emotional significance or an underlying need beyond restating facts (e.g. partner needs emotional presence or appreciation at a milestone) without full bilateral interior texture. → **6**, not 4–5.
+  - **5:** **Level 1 ceiling** — names surface emotional state or behavioral problem without inferring emotional meaning beyond scenario facts. **Not Level 2.**
+
+• **Attunement score anchors (canonical):**
+  - **7:** Names the **specific unmet emotional need** **and** the mismatch with what was received — celebration/witnessing vs logistics, or receiving tears vs stopping/fixing them — with clear relational meaning. Example: "She needed him to just be happy for her, not ask about logistics" / recognizing James redirected tears instead of staying with her emotion. → **7**, not 5.
+  - **6:** User identifies the specific emotional need the character had and names the mismatch between that need and what they received. Goes beyond "they were upset" to "they needed X." Example: "She needed him to just be happy for her, not ask about logistics" / "He should have just been happy for her and appreciated her efforts."
+  - **5:** **Level 1 ceiling** — user identifies the character's emotional state or that something went wrong emotionally, but does **not** name the specific unmet need or need-mismatch. Example: "She was upset that he wasn't more supportive." **Do not** assign **5** when the answer names what the character **needed** vs what they **received** — that is Level 2 (**6+**).
+  - **4:** User identifies the behavioral problem but not the emotional dimension. Example: "He should have celebrated with her instead of asking questions."
+
+• **Appreciation score anchors (canonical):**
+  - **8:** Prompted repair-as-James **names concrete celebration alternatives**, acknowledges impact ("I'm so sorry"), and **explicitly validates** that Sarah **did not feel appreciated** (or equivalent) — e.g. "you might have wanted to go out for a drink or dinner or dancing… instead I just asked you questions and I hear you, you didn't feel appreciated." That is specific appreciation behavior **in context** → **8**, not 6.
+  - **7:** User names the specific behavior that constitutes appreciation in this context AND what it recognizes or validates in the other person. Concrete and behavioral. Does **not** require the word "appreciation"/"feel appreciated" or an elaborate description. Example: "He should have just been happy for her and appreciated her efforts" — names the emotional stance (happiness for her) and what it honors (her efforts).
+  - **6:** User identifies that appreciation was missing or needed but describes it generically without repair-level validation. Example: "He should have been more appreciative" or "She needed to feel valued."
+  - **5:** User acknowledges the appreciation gap only implicitly or in passing.
+
+**REFERENCE CALIBRATION (Scenario B — attunement, mentalizing & appreciation):**
+When the user identifies the **emotional mismatch** between Sarah needing a **different type of celebration** / emotional presence and James offering **logistics** or **questions** — e.g. "she wanted a different type of celebration… James thought he was celebrating by engaging and asking questions" — assign **attunement 7** and **mentalizing 7**. Canonical example from a calibrated reference response: "He should have been just happy for her and appreciated her efforts" **instead of** "leading with pointed offer questions" while celebrating. That pattern is **Level 2** with clear need-mismatch **and** interior/perspective inference → **7**, not 4–6.
+
+**Do not withhold 7 on attunement or mentalizing solely because the participant did not quote the "don't cry" / tears-redirect line** when they already named the celebration-vs-logistics (or celebration-vs-questions) mismatch and James's interior logic ("thought he was celebrating"). The tears moment is **one** path to 7, not a mandatory checklist item when the need-mismatch is already clear.
+
+**Appreciation 7–8 on prompted repair:** When the repair-as-James turn names **concrete alternatives** Sarah might have wanted **and** acknowledges she **did not feel appreciated** (or honors her experience with equivalent specificity), assign **appreciation 8** (or **7** if thinner). Do **not** cap at **6** as "generic" when that language is present — that pattern matches calibrated reference interviews.
+
 Do **not** use deprecated fiction beats (Sarah trailing off mid-sentence; James saying "well it was worth it") as primary scoring anchors — they are not in the current vignette.
+`;
+
+/** Shared keyEvidence contract for scenario slices, personal moments, and holistic scoring. */
+export const KEY_EVIDENCE_ANALYTICAL_NARRATIVE_RULES = `
+KEY EVIDENCE — ANALYTICAL NARRATIVE (required for every \`pillarScores\` marker in scenario slices and personal moments):
+
+Each \`keyEvidence\` entry must be a **scoring rationale** — an explanation of what the user's response demonstrates about the construct being assessed, why it scores at the assigned level, and what was missing that prevented a higher score.
+
+Write an analytical narrative that:
+(1) Names the specific behavior or language pattern observed.
+(2) Explains what construct-relevant information it provides.
+(3) States the assigned score level and why it fits the rubric.
+(4) Notes what was absent that prevented a higher score (or states that nothing material prevented a higher score when at the ceiling).
+
+Direct quotes may appear **only as brief supporting evidence inside the narrative** — never as the entire entry.
+
+**Forbidden:** keyEvidence that is only a transcript excerpt; only \`User: "…"\`; only a pasted quote with no interpretation; duplicating the same quote across multiple markers.
+
+**Example (repair, score 7):** "Self-corrective repair through internal reflection rather than interpersonal discussion. User processed the misunderstanding privately and reached resolution ('the resolution was me later when I wasn't stressed thinking about that conversation and realizing she was actually being kind'). Repair is valid but limited — no direct interpersonal conversation occurred, capping the score below 8."
+
+**Example (mentalizing, score 6):** "Level 2 — User infers a recurring deprioritization pattern (shared time redirected to family) rather than restating the phone-call incident alone; demonstrates emotional-meaning inference beyond scenario facts. Score 6 because interior texture is present but not deep bilateral perspective-taking."
 `;

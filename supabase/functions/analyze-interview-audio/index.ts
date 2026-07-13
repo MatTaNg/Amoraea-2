@@ -290,7 +290,6 @@ async function setAudioConfidenceZero(
   console.log(
     '[analyze-interview-audio] setAudioConfidenceZero nc_lexicon',
     JSON.stringify({
-      hypothesisId: 'H_audio_zero',
       userId,
       aid,
       nc: narrativeFromCorpus,
@@ -597,7 +596,6 @@ async function finalizeSession(body: Body, admin: ReturnType<typeof createClient
   console.log(
     '[analyze-interview-audio] finalize nc_lexicon',
     JSON.stringify({
-      hypothesisId: 'H_finalize',
       attempt_id: attemptId,
       user_id: userId,
       ...finalizeNcLex,

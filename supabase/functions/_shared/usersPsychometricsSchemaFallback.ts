@@ -99,6 +99,8 @@ export function psychometricFloorScoresFromUserRow(
   return {
     rfqScore: coercePsychometricScore(row.psychometrics_rfq_score),
     gaspScore: coercePsychometricScore(row.psychometrics_gasp_score),
+    gaspGuiltRepairScore: coercePsychometricScore(row.psychometrics_gasp_guilt_repair_score),
+    gaspShameWithdrawScore: coercePsychometricScore(row.psychometrics_gasp_shame_withdraw_score),
     dweckScore: coercePsychometricScore(row.psychometrics_dweck_score),
     scsSfScore: coercePsychometricScore(row.psychometrics_scs_sf_score),
     sd3NarcissismScore: sd3NarcissismScoreForFloorFromUserRow(row),

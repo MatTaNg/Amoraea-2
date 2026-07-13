@@ -3,6 +3,12 @@ import {
   parseKeyEvidenceFromStoredSlice,
   parsePillarScoresFromStoredSlice,
 } from '@features/psychometrics/personalReportNarrativeGuidance';
+import {
+  PILLAR_NARRATIVE_BAND_DEVELOPING_MIN,
+  PILLAR_NARRATIVE_BAND_GOOD_MIN,
+  PILLAR_NARRATIVE_BAND_NEEDS_ATTENTION_MIN,
+  PILLAR_NARRATIVE_BAND_STRONG_MIN,
+} from '@config/reports/pillarNarrativeBands';
 
 export type ScenarioScoreGroundingSlice = {
   scenarioLabel: string;
@@ -25,18 +31,18 @@ const SCENARIO_LABELS = ['Scenario 1 (Emma/Ryan)', 'Scenario 2 (Sarah/James)', '
 
 export function narrativeBandForScore(score: number | null | undefined): string {
   if (score == null || !Number.isFinite(score)) return 'not assessed';
-  if (score >= 8) return 'strong (8+)';
-  if (score >= 7) return 'good (7–7.9)';
-  if (score >= 6) return 'developing/competent (6–6.9)';
-  if (score >= 5) return 'moderate/Level-1-tagged (5–5.9)';
-  if (score >= 4) return 'needs attention (4–4.9)';
+  if (score >= PILLAR_NARRATIVE_BAND_STRONG_MIN) return 'strong (8+)';
+  if (score >= PILLAR_NARRATIVE_BAND_GOOD_MIN) return 'good (7–7.9)';
+  if (score >= PILLAR_NARRATIVE_BAND_DEVELOPING_MIN) return 'developing/competent (6–6.9)';
+  if (score >= PILLAR_NARRATIVE_BAND_DEVELOPING_MIN - 1) return 'moderate/Level-1-tagged (5–5.9)';
+  if (score >= PILLAR_NARRATIVE_BAND_NEEDS_ATTENTION_MIN) return 'needs attention (4–4.9)';
   return 'significant growth area (<4)';
 }
 
 export function allowedScenarioLanguageForScore(score: number | null | undefined): string {
   if (score == null || !Number.isFinite(score)) return 'describe cautiously — score not available';
-  if (score >= 7) return 'may use "strong," "accurate," "solid" when grounded in keyEvidence';
-  if (score >= 6) return 'use "competent," "developing," "some capacity" — NOT "strong" or "consistently accurate"';
+  if (score >= PILLAR_NARRATIVE_BAND_GOOD_MIN) return 'may use "strong," "accurate," "solid" when grounded in keyEvidence';
+  if (score >= PILLAR_NARRATIVE_BAND_DEVELOPING_MIN) return 'use "competent," "developing," "some capacity" — NOT "strong" or "consistently accurate"';
   return 'use "moderate," "surface-level," "competent at reading behavior" — NOT "strong," "excellent," "accurate empathy," or "in every scenario you demonstrated strong empathy"';
 }
 

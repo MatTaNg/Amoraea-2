@@ -46,7 +46,6 @@ export type OnboardingStep =
   | 'lifeDomains'
   | LifeDomainRequiredQuestionOnboardingStep
   | LifeDomainOptionalOpenEndedOnboardingStep
-  | 'personalityDocuments'
   | 'typology'
   | 'archetypes'
   | 'photos'
@@ -100,7 +99,6 @@ export const ONBOARDING_STEPS_ORDER: OnboardingStep[] = [
   'lifeDomains',
   ...LIFE_DOMAIN_OPTIONAL_OPEN_ENDED_ONBOARDING_STEPS.map((s) => s.step),
   'typology',
-  'personalityDocuments',
   'profileComplete',
   'complete',
 ];

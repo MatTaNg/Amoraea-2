@@ -34,6 +34,10 @@ import {
 } from '../src/features/aria/adminRecalculateAttemptScores';
 import { INTERVIEW_MARKER_IDS } from '../src/features/aria/interviewMarkers';
 import { normalizeGateFailDetailForPersist } from '../src/features/psychometrics/gateFailDetailForPersist';
+import {
+  buildRecalculationConsistencyPatch,
+  detectLlmRescoreEvidenceDegradation,
+} from '../src/features/aria/recalculationPersistConsistency';
 import { runLlmRescorePipeline, type TranscriptTurn } from './lib/rescoreInterviewLlm';
 
 const DEFAULT_USER_IDS = [
@@ -55,7 +59,7 @@ const DEFAULT_DISPLAY_NAMES: Record<string, string> = {
 const BASELINE_TOLERANCE = 0.1;
 
 const ATTEMPT_SELECT =
-  'id, user_id, attempt_number, completed_at, transcript, scenario_1_scores, scenario_2_scores, scenario_3_scores, scenario_specific_patterns, ego_development_level, language_markers, skip_count, skip_penalty_total, auto_failed, pillar_scores, weighted_score, modified_weighted_score, modified_weighted_score_with_psychometrics, passed, final_gate_pass, gate_fail_reasons, gate_fail_detail, scenario_composites, original_scores, defense_patterns, disclosure_calibration, mentalizing_overcertainty_count, moment_4_concreteness, moment_5_concreteness, personal_moment_emotional_vocab_density, personal_moment_emotional_vocab_low';
+  'id, user_id, attempt_number, completed_at, transcript, scenario_1_scores, scenario_2_scores, scenario_3_scores, scenario_specific_patterns, ego_development_level, language_markers, skip_count, skip_penalty_total, auto_failed, pillar_scores, weighted_score, modified_weighted_score, modified_weighted_score_with_psychometrics, passed, final_gate_pass, gate_fail_reasons, gate_fail_detail, gate_result_finalized_at, scenario_composites, original_scores, defense_patterns, disclosure_calibration, mentalizing_overcertainty_count, moment_4_concreteness, moment_5_concreteness, personal_moment_emotional_vocab_density, personal_moment_emotional_vocab_low, ai_reasoning, reasoning_pending, review_flags';
 
 type RescoreMode = 'aggregate' | 'llm';
 
@@ -82,8 +86,12 @@ type AttemptRow = {
   final_gate_pass: boolean | null;
   gate_fail_reasons: string[] | null;
   gate_fail_detail: unknown;
+  gate_result_finalized_at: string | null;
   scenario_composites: unknown;
   original_scores: unknown;
+  ai_reasoning: unknown;
+  reasoning_pending: boolean | null;
+  review_flags: string[] | null;
   defense_patterns: unknown;
   disclosure_calibration: string | null;
   mentalizing_overcertainty_count: number | null;
@@ -106,6 +114,13 @@ type RescoreOutcome = {
   llmPrompts?: Array<{ label: string; charCount: number; preview: string }>;
   /** True only when `--dry-run` was passed (not for failed LLM aggregation). */
   llmDryRun?: boolean;
+  /** LLM path only — scenario/moment slices to persist alongside rollup. */
+  llmPersist?: {
+    scenario_1_scores?: unknown;
+    scenario_2_scores?: unknown;
+    scenario_3_scores?: unknown;
+    scenario_specific_patterns?: unknown;
+  };
 };
 
 type ParsedArgs = {
@@ -442,6 +457,28 @@ async function computeLlmOutcome(
   }
   const outcome = outcomeFromRecalculate(pipeline.recalculate);
   outcome.llmPrompts = pipeline.prompts;
+  if (
+    pipeline.moment4Scores != null ||
+    pipeline.moment5Scores != null ||
+    pipeline.scenarioScores[1] ||
+    pipeline.scenarioScores[2] ||
+    pipeline.scenarioScores[3]
+  ) {
+    outcome.llmPersist = {
+      scenario_1_scores: pipeline.scenarioScores[1],
+      scenario_2_scores: pipeline.scenarioScores[2],
+      scenario_3_scores: pipeline.scenarioScores[3],
+      scenario_specific_patterns: {
+        ...(typeof attempt.scenario_specific_patterns === 'object' &&
+        attempt.scenario_specific_patterns != null &&
+        !Array.isArray(attempt.scenario_specific_patterns)
+          ? (attempt.scenario_specific_patterns as Record<string, unknown>)
+          : {}),
+        ...(pipeline.moment4Scores ? { moment_4_scores: pipeline.moment4Scores } : {}),
+        ...(pipeline.moment5Scores ? { moment_5_scores: pipeline.moment5Scores } : {}),
+      },
+    };
+  }
   return outcome;
 }
 
@@ -617,6 +654,15 @@ async function commitRescore(
     console.log('  Skip commit - incomplete outcome');
     return;
   }
+  if (outcome.llmPersist) {
+    const degradation = detectLlmRescoreEvidenceDegradation(attempt, outcome.llmPersist);
+    if (degradation.blocked) {
+      console.error('  COMMIT BLOCKED — LLM rescore would degrade substantive keyEvidence to salvage placeholders:');
+      for (const reason of degradation.reasons) console.error(`    - ${reason}`);
+      console.error('  Use --mode aggregate to re-run rollup/gate only, or fix scoring output before commit.');
+      throw new Error('rescore_commit_blocked_evidence_degradation');
+    }
+  }
   const result = outcome.successResult;
   const oldPillars = normalizePillarMap(attempt.pillar_scores);
   const delta = computePillarScoreDelta(oldPillars, outcome.pillarScores);
@@ -625,11 +671,36 @@ async function commitRescore(
   const gateFailReasons = result.gate.failReasonCodes ?? [];
   const gateFailDetail = normalizeGateFailDetailForPersist(result.gate.failReasonDetail);
   const passedAfterFloors = gateFailReasons.length === 0 ? result.gate.pass : false;
+  const consistencyPatch = buildRecalculationConsistencyPatch({
+    attempt,
+    newPassed: passedAfterFloors,
+    newWeightedScore: result.gate.weightedScore,
+    newPillarScores: result.pillar_scores,
+    recalculatedAt: nowIso,
+  });
+  const reviewFlags = Array.isArray(attempt.review_flags) ? [...attempt.review_flags] : [];
+  if (consistencyPatch.review_flags) {
+    for (const flag of consistencyPatch.review_flags) {
+      if (!reviewFlags.includes(flag)) reviewFlags.push(flag);
+    }
+  }
 
   const { error } = await admin
     .from('interview_attempts')
     .update({
       ...(snap ? { original_scores: snap } : {}),
+      ...(outcome.llmPersist?.scenario_1_scores != null
+        ? { scenario_1_scores: outcome.llmPersist.scenario_1_scores }
+        : {}),
+      ...(outcome.llmPersist?.scenario_2_scores != null
+        ? { scenario_2_scores: outcome.llmPersist.scenario_2_scores }
+        : {}),
+      ...(outcome.llmPersist?.scenario_3_scores != null
+        ? { scenario_3_scores: outcome.llmPersist.scenario_3_scores }
+        : {}),
+      ...(outcome.llmPersist?.scenario_specific_patterns != null
+        ? { scenario_specific_patterns: outcome.llmPersist.scenario_specific_patterns }
+        : {}),
       pillar_scores: result.pillar_scores,
       weighted_score: result.gate.weightedScore,
       passed: passedAfterFloors,
@@ -640,7 +711,19 @@ async function commitRescore(
       recalculated_at: nowIso,
       recalculation_delta: delta,
       recalculation_notes: result.notes,
-      review_flags: result.gate.reviewFlags ?? [],
+      review_flags: [
+        ...new Set([
+          ...(result.gate.reviewFlags ?? []),
+          ...reviewFlags,
+        ]),
+      ],
+      ...(consistencyPatch.ai_reasoning != null ? { ai_reasoning: consistencyPatch.ai_reasoning } : {}),
+      ...(consistencyPatch.reasoning_pending != null
+        ? { reasoning_pending: consistencyPatch.reasoning_pending }
+        : {}),
+      ...(consistencyPatch.final_gate_pass !== undefined
+        ? { final_gate_pass: consistencyPatch.final_gate_pass }
+        : {}),
       mentalizing_overcertainty_count: result.mentalizingOvercertaintyCount,
       defense_patterns: result.defense_patterns,
       moment_4_concreteness: result.moment_4_concreteness ?? result.gate.moment4Concreteness ?? null,

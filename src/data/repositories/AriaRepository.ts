@@ -14,7 +14,7 @@ export class AriaRepository {
       .select()
       .single();
 
-    if (error) throw new Error(`Failed to create Aria session: ${error.message}`);
+    if (error) throw new Error(`Failed to create Amoraea session: ${error.message}`);
     return this.mapToSession(data);
   }
 
@@ -27,7 +27,7 @@ export class AriaRepository {
       .limit(1)
       .maybeSingle();
 
-    if (error) throw new Error(`Failed to fetch Aria session: ${error.message}`);
+    if (error) throw new Error(`Failed to fetch Amoraea session: ${error.message}`);
     if (!data) return null;
     return this.mapToSession(data);
   }

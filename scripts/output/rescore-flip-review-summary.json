@@ -1,0 +1,289 @@
+{
+  "scorableFlipCount": 23,
+  "passToFailCount": 22,
+  "failToPassCount": 1,
+  "withFullNarrative": 4,
+  "withScoringEvidenceOnly": 19,
+  "withNeither": 0,
+  "attempts": [
+    {
+      "userId": "a246372c-cefe-4b50-9549-51898e0de968",
+      "attemptId": "fa365f2a-fb6f-4711-a4fa-36f9e5078ccc",
+      "flipDirection": "pass_to_fail",
+      "persistedInterviewPass": true,
+      "recomputedInterviewPass": false,
+      "recomputedModifiedScore": 5.3,
+      "recomputedFailReasons": [
+        "scenario_floor"
+      ],
+      "hasFullNarrative": false
+    },
+    {
+      "userId": "15b65e57-2356-41a3-95d4-064869b1c251",
+      "attemptId": "ee99a4aa-85d8-4d5a-b320-de6b640e5640",
+      "flipDirection": "pass_to_fail",
+      "persistedInterviewPass": true,
+      "recomputedInterviewPass": false,
+      "recomputedModifiedScore": 5.5,
+      "recomputedFailReasons": [
+        "weighted_score",
+        "scenario_floor"
+      ],
+      "hasFullNarrative": false
+    },
+    {
+      "userId": "5dca7cf1-749e-4eb9-b0c3-c3d0c7187179",
+      "attemptId": "98a75fe5-1037-4d43-8dac-5e39e2861f5f",
+      "flipDirection": "pass_to_fail",
+      "persistedInterviewPass": true,
+      "recomputedInterviewPass": false,
+      "recomputedModifiedScore": 5.5,
+      "recomputedFailReasons": [
+        "weighted_score",
+        "scenario_floor",
+        "mentalizing_floor"
+      ],
+      "hasFullNarrative": false
+    },
+    {
+      "userId": "77eecdf6-39ad-442a-982b-c2868020a8ea",
+      "attemptId": "044a9993-47ec-4250-b743-b687cc37e4f8",
+      "flipDirection": "pass_to_fail",
+      "persistedInterviewPass": true,
+      "recomputedInterviewPass": false,
+      "recomputedModifiedScore": 5.5,
+      "recomputedFailReasons": [
+        "weighted_score"
+      ],
+      "hasFullNarrative": false
+    },
+    {
+      "userId": "086fc5a1-22f4-4a32-87f3-cc19c2323538",
+      "attemptId": "6a5f057e-766e-403d-83b2-bcf9442a41ed",
+      "flipDirection": "pass_to_fail",
+      "persistedInterviewPass": true,
+      "recomputedInterviewPass": false,
+      "recomputedModifiedScore": 5.6,
+      "recomputedFailReasons": [
+        "weighted_score",
+        "scenario_floor"
+      ],
+      "hasFullNarrative": false
+    },
+    {
+      "userId": "855fc366-1c40-48f8-9289-6ab4527aacb4",
+      "attemptId": "86f783ed-fc75-4b01-a466-ef26eca39158",
+      "flipDirection": "pass_to_fail",
+      "persistedInterviewPass": true,
+      "recomputedInterviewPass": false,
+      "recomputedModifiedScore": 5.6,
+      "recomputedFailReasons": [],
+      "hasFullNarrative": false
+    },
+    {
+      "userId": "86eb10f4-594f-4563-a53e-e4e811cfd2cb",
+      "attemptId": "31ff2788-afca-432e-9822-ff59d64996bf",
+      "flipDirection": "pass_to_fail",
+      "persistedInterviewPass": true,
+      "recomputedInterviewPass": false,
+      "recomputedModifiedScore": 5.8,
+      "recomputedFailReasons": [
+        "weighted_score",
+        "scenario_floor"
+      ],
+      "hasFullNarrative": false
+    },
+    {
+      "userId": "12d2fe21-e102-402f-9431-ee3f4d6be34b",
+      "attemptId": "c13df507-fb38-4aa7-9219-a3d159ab41ba",
+      "flipDirection": "pass_to_fail",
+      "persistedInterviewPass": true,
+      "recomputedInterviewPass": false,
+      "recomputedModifiedScore": 5.9,
+      "recomputedFailReasons": [
+        "scenario_floor"
+      ],
+      "hasFullNarrative": false
+    },
+    {
+      "userId": "04cf579a-ac6e-4b04-8d83-01b7cf26481c",
+      "attemptId": "51e53c4d-ba87-459a-bbc1-a09088cd52a4",
+      "flipDirection": "pass_to_fail",
+      "persistedInterviewPass": true,
+      "recomputedInterviewPass": false,
+      "recomputedModifiedScore": 6,
+      "recomputedFailReasons": [
+        "scenario_floor"
+      ],
+      "hasFullNarrative": false
+    },
+    {
+      "userId": "9e19b7d5-4e52-49a9-9066-48e50107df1e",
+      "attemptId": "58c5d715-a018-4929-9fda-017af15c645b",
+      "flipDirection": "pass_to_fail",
+      "persistedInterviewPass": true,
+      "recomputedInterviewPass": false,
+      "recomputedModifiedScore": 6.1,
+      "recomputedFailReasons": [
+        "weighted_score",
+        "scenario_floor"
+      ],
+      "hasFullNarrative": false
+    },
+    {
+      "userId": "a429020a-8557-4508-8233-b9f83c42616e",
+      "attemptId": "664dfe29-d7df-42c9-a085-bbeb78bfc5c4",
+      "flipDirection": "pass_to_fail",
+      "persistedInterviewPass": true,
+      "recomputedInterviewPass": false,
+      "recomputedModifiedScore": 6.1,
+      "recomputedFailReasons": [
+        "weighted_score"
+      ],
+      "hasFullNarrative": true
+    },
+    {
+      "userId": "ea13107b-91c1-406d-b480-ec3cf6cee164",
+      "attemptId": "60eee704-54d5-4abe-b23a-a51ac622b052",
+      "flipDirection": "pass_to_fail",
+      "persistedInterviewPass": true,
+      "recomputedInterviewPass": false,
+      "recomputedModifiedScore": 6.15,
+      "recomputedFailReasons": [],
+      "hasFullNarrative": false
+    },
+    {
+      "userId": "042172fe-906a-4a26-b621-25e3987aba5b",
+      "attemptId": "2fec04ab-73ea-4eb5-83a0-7ba5a0da969d",
+      "flipDirection": "pass_to_fail",
+      "persistedInterviewPass": true,
+      "recomputedInterviewPass": false,
+      "recomputedModifiedScore": 6.2,
+      "recomputedFailReasons": [
+        "weighted_score",
+        "scenario_floor"
+      ],
+      "hasFullNarrative": false
+    },
+    {
+      "userId": "e26d1c90-ae9f-4f4d-ba80-45460f083250",
+      "attemptId": "45590186-a6df-4a5e-92a3-220f6cb45dc8",
+      "flipDirection": "pass_to_fail",
+      "persistedInterviewPass": true,
+      "recomputedInterviewPass": false,
+      "recomputedModifiedScore": 6.8,
+      "recomputedFailReasons": [],
+      "hasFullNarrative": false
+    },
+    {
+      "userId": "e395037c-420c-48fc-b5db-e0bb33e5884b",
+      "attemptId": "f9494ec1-1d1c-49f1-bfa6-4a8abc3752a5",
+      "flipDirection": "pass_to_fail",
+      "persistedInterviewPass": true,
+      "recomputedInterviewPass": false,
+      "recomputedModifiedScore": 6.2,
+      "recomputedFailReasons": [
+        "weighted_score"
+      ],
+      "hasFullNarrative": false
+    },
+    {
+      "userId": "a3846e03-97ef-42cb-81e3-f0d522da5c70",
+      "attemptId": "0c1cf5b1-be61-4de7-b838-8efd19c86a39",
+      "flipDirection": "pass_to_fail",
+      "persistedInterviewPass": true,
+      "recomputedInterviewPass": false,
+      "recomputedModifiedScore": 6.3,
+      "recomputedFailReasons": [
+        "weighted_score"
+      ],
+      "hasFullNarrative": true
+    },
+    {
+      "userId": "ec65d400-458f-44a6-9eae-d566cb8dbc63",
+      "attemptId": "1ba58fff-c81f-47af-a786-73b91ec38cd4",
+      "flipDirection": "pass_to_fail",
+      "persistedInterviewPass": true,
+      "recomputedInterviewPass": false,
+      "recomputedModifiedScore": 6.4,
+      "recomputedFailReasons": [
+        "weighted_score",
+        "scenario_floor"
+      ],
+      "hasFullNarrative": false
+    },
+    {
+      "userId": "09fab59b-ab39-40db-9965-23fef8f3f4f8",
+      "attemptId": "eb4c73fc-c715-4151-9f34-4f0a9532b2cb",
+      "flipDirection": "pass_to_fail",
+      "persistedInterviewPass": true,
+      "recomputedInterviewPass": false,
+      "recomputedModifiedScore": 6.4,
+      "recomputedFailReasons": [
+        "weighted_score"
+      ],
+      "hasFullNarrative": true
+    },
+    {
+      "userId": "cef82897-15d7-44de-9e84-c7e02d94ce81",
+      "attemptId": "bb89a602-a382-462d-aca8-056a5e2c42fc",
+      "flipDirection": "pass_to_fail",
+      "persistedInterviewPass": true,
+      "recomputedInterviewPass": false,
+      "recomputedModifiedScore": 6.4,
+      "recomputedFailReasons": [
+        "weighted_score",
+        "scenario_floor"
+      ],
+      "hasFullNarrative": false
+    },
+    {
+      "userId": "3ac30567-38d8-4f8b-a00f-13f6af3c543a",
+      "attemptId": "b3dcb5fd-a735-410d-9493-ee1fbb7c8b46",
+      "flipDirection": "pass_to_fail",
+      "persistedInterviewPass": true,
+      "recomputedInterviewPass": false,
+      "recomputedModifiedScore": 6.4,
+      "recomputedFailReasons": [
+        "weighted_score"
+      ],
+      "hasFullNarrative": true
+    },
+    {
+      "userId": "d00be80e-9bff-4ce9-81ec-614377d73358",
+      "attemptId": "721ef7f7-c311-48b2-9002-fdacf756f1de",
+      "flipDirection": "pass_to_fail",
+      "persistedInterviewPass": true,
+      "recomputedInterviewPass": false,
+      "recomputedModifiedScore": 6.45,
+      "recomputedFailReasons": [
+        "weighted_score",
+        "scenario_floor"
+      ],
+      "hasFullNarrative": false
+    },
+    {
+      "userId": "aa8c081c-49f9-4d4b-a7ce-c9d4347646bd",
+      "attemptId": "824326a2-3312-4d9c-85c2-c649dce9b146",
+      "flipDirection": "pass_to_fail",
+      "persistedInterviewPass": true,
+      "recomputedInterviewPass": false,
+      "recomputedModifiedScore": 6.45,
+      "recomputedFailReasons": [
+        "weighted_score",
+        "scenario_floor"
+      ],
+      "hasFullNarrative": false
+    },
+    {
+      "userId": "852fc964-c870-4a31-8a53-8845eb8d7f4b",
+      "attemptId": "f3d127a4-b3dd-4cec-bb5a-8dc6dbbaeaf5",
+      "flipDirection": "fail_to_pass",
+      "persistedInterviewPass": false,
+      "recomputedInterviewPass": true,
+      "recomputedModifiedScore": 7.5,
+      "recomputedFailReasons": [],
+      "hasFullNarrative": false
+    }
+  ]
+}

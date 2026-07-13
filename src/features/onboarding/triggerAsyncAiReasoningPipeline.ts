@@ -1,5 +1,8 @@
 import { supabase } from '@data/supabase/client';
-import { kickClientInterviewNarrativeIfPending } from '@utilities/kickClientInterviewNarrativeIfPending';
+import {
+  interviewAiReasoningIsSubstantive,
+  kickClientInterviewNarrativeIfPending,
+} from '@utilities/kickClientInterviewNarrativeIfPending';
 import { writeSessionLog } from '@utilities/sessionLogging/writeSessionLog';
 
 /** Fire-and-forget AI narrative generation after interview (psychometrics-enabled path). */
@@ -17,20 +20,44 @@ export function triggerAsyncAiReasoningPipeline(userId: string, attemptId: strin
   });
 
   void (async () => {
-    const completedAt = new Date().toISOString();
-    await supabase
+    const { data: existing } = await supabase
       .from('interview_attempts')
-      .update({
-        reasoning_pending: true,
-        ai_reasoning: {
-          _reasoningPending: true,
-          note: 'Narrative generation queued (async psychometrics path).',
-          _queuedAt: triggeredAt,
-        },
-      })
+      .select('ai_reasoning, reasoning_pending, completed_at, attempt_number')
       .eq('id', attemptId)
-      .eq('user_id', userId);
+      .eq('user_id', userId)
+      .maybeSingle();
 
+    const existingReasoning = (existing?.ai_reasoning ?? null) as Record<string, unknown> | null;
+    if (interviewAiReasoningIsSubstantive(existingReasoning)) {
+      if (existing?.reasoning_pending === true) {
+        await supabase
+          .from('interview_attempts')
+          .update({ reasoning_pending: false })
+          .eq('id', attemptId)
+          .eq('user_id', userId);
+      }
+      await kickClientInterviewNarrativeIfPending(userId, attemptId, 'async_psychometrics_path_substantive');
+      return;
+    }
+
+    const alreadyQueued =
+      existing?.reasoning_pending === true && existingReasoning?._reasoningPending === true;
+    if (!alreadyQueued) {
+      await supabase
+        .from('interview_attempts')
+        .update({
+          reasoning_pending: true,
+          ai_reasoning: {
+            _reasoningPending: true,
+            note: 'Narrative generation queued (async psychometrics path).',
+            _queuedAt: triggeredAt,
+          },
+        })
+        .eq('id', attemptId)
+        .eq('user_id', userId);
+    }
+
+    const completedAt = new Date().toISOString();
     await supabase
       .from('interview_attempts')
       .update({ completed_at: completedAt })
@@ -45,20 +72,13 @@ export function triggerAsyncAiReasoningPipeline(userId: string, attemptId: strin
       .maybeSingle();
 
     if (userRow?.interview_completed !== true) {
-      const { data: attemptMeta } = await supabase
-        .from('interview_attempts')
-        .select('attempt_number, completed_at')
-        .eq('id', attemptId)
-        .eq('user_id', userId)
-        .maybeSingle();
-
       const resolvedCompletedAt =
-        typeof attemptMeta?.completed_at === 'string' && attemptMeta.completed_at.length > 0
-          ? attemptMeta.completed_at
+        typeof existing?.completed_at === 'string' && existing.completed_at.length > 0
+          ? existing.completed_at
           : completedAt;
       const attemptNumber =
-        typeof attemptMeta?.attempt_number === 'number' && Number.isFinite(attemptMeta.attempt_number)
-          ? attemptMeta.attempt_number
+        typeof existing?.attempt_number === 'number' && Number.isFinite(existing.attempt_number)
+          ? existing.attempt_number
           : 1;
 
       await supabase

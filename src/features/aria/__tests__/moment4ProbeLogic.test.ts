@@ -1,10 +1,13 @@
-import { describe, expect, it } from 'vitest';
 import {
   evaluateMoment4RelationshipType,
   isAnsweringFirstUserTurnAfterMoment4Threshold,
+  isIncompleteMoment4ThresholdLeadSentence,
   looksLikeMisplacedNonGrudgeMoment4Answer,
   looksLikeMoment4GrudgePrompt,
   looksLikeMoment4ThresholdQuestion,
+  coerceMoment4ThresholdQuestionForTts,
+  MOMENT_4_COMMITMENT_THRESHOLD_QUESTION_CARD_BODY,
+  MOMENT_4_COMMITMENT_THRESHOLD_QUESTION_TEXT,
   MOMENT_4_GRUDGE_QUESTION_TEXT,
   shouldForceMoment4ThresholdProbe,
   transcriptIncludesMoment4ThresholdAssistant,
@@ -15,8 +18,7 @@ const M4_GRUDGE_CARD = MOMENT_4_GRUDGE_QUESTION_TEXT;
 const M4_THRESHOLD =
   '"At what point do you decide when a relationship is something to work through versus something you need to walk away from?"';
 
-const M4_THRESHOLD_FORCED_INJECT =
-  'Thanks for sharing that. At what point do you decide when a relationship is something to work through versus something you need to walk away from?';
+const M4_THRESHOLD_FORCED_INJECT = MOMENT_4_COMMITMENT_THRESHOLD_QUESTION_TEXT;
 
 describe('moment4ProbeLogic', () => {
   it('detects canonical episodic grudge question', () => {
@@ -24,6 +26,11 @@ describe('moment4ProbeLogic', () => {
     expect(
       looksLikeMoment4GrudgePrompt(
         "Have you ever held a grudge against someone, or had someone in your life you really didn't like?",
+      ),
+    ).toBe(true);
+    expect(
+      looksLikeMoment4GrudgePrompt(
+        'Is there anyone in your life — past or present — that you really struggle to like or that you hold a grudge against?',
       ),
     ).toBe(true);
   });
@@ -41,6 +48,60 @@ describe('moment4ProbeLogic', () => {
         'When would you decide if a relationship is worth working through or it is time to walk away?',
       )
     ).toBe(true);
+    expect(
+      looksLikeMoment4ThresholdQuestion(
+        "When Devon said that — was there a moment where you considered whether the friendship was worth continuing, or did you always know you'd work through it?",
+      ),
+    ).toBe(true);
+    expect(
+      looksLikeMoment4ThresholdQuestion(
+        "When something like that comes up — where trust gets broken and the friendship changes — what's your threshold for working through it versus walking away entirely?",
+      ),
+    ).toBe(true);
+    expect(
+      looksLikeMoment4ThresholdQuestion(
+        "When something like that comes up — where there's real tension with another person — are you someone who tends to work through it, or are there situations where you'd rather just walk away?",
+      ),
+    ).toBe(true);
+  });
+
+  it('detects incomplete streaming commitment-threshold paraphrases', () => {
+    const truncated = 'When you think about what it takes to fully work through something';
+    expect(isIncompleteMoment4ThresholdLeadSentence(truncated)).toBe(true);
+    expect(looksLikeMoment4ThresholdQuestion(truncated)).toBe(false);
+    expect(coerceMoment4ThresholdQuestionForTts(truncated)).toBe(M4_THRESHOLD_FORCED_INJECT);
+  });
+
+  it('detects session-log truncated threshold lead before walk-away fork', () => {
+    const truncated =
+      "Got it. When it comes to that situation — or relationships in general — what's your";
+    expect(isIncompleteMoment4ThresholdLeadSentence(truncated)).toBe(true);
+    expect(looksLikeMoment4ThresholdQuestion(truncated)).toBe(false);
+    expect(coerceMoment4ThresholdQuestionForTts(truncated)).toBe(
+      `Got it. Thanks for sharing that. ${MOMENT_4_COMMITMENT_THRESHOLD_QUESTION_CARD_BODY}`,
+    );
+  });
+
+  it('detects past-tense truncated threshold paraphrase from live session', () => {
+    const truncated = 'Got it. When it came to that situation — is there a point';
+    expect(isIncompleteMoment4ThresholdLeadSentence(truncated)).toBe(true);
+    expect(looksLikeMoment4ThresholdQuestion(truncated)).toBe(false);
+    expect(coerceMoment4ThresholdQuestionForTts(truncated)).toBe(
+      `Got it. Thanks for sharing that. ${MOMENT_4_COMMITMENT_THRESHOLD_QUESTION_CARD_BODY}`,
+    );
+  });
+
+  it('coerces complete model paraphrase to canonical threshold copy (session log)', () => {
+    const paraphrase = "Got it. When do you decide it's worth working through versus walking away?";
+    expect(coerceMoment4ThresholdQuestionForTts(paraphrase)).toBe(
+      `Got it. Thanks for sharing that. ${MOMENT_4_COMMITMENT_THRESHOLD_QUESTION_CARD_BODY}`,
+    );
+  });
+
+  it('strips leading reflection before threshold question for TTS', () => {
+    const withReflection =
+      'You named who this was with and what still weighs on you from that falling-out. Thanks for sharing that. At what point do you decide when a relationship is something to work through versus something you need to walk away from?';
+    expect(coerceMoment4ThresholdQuestionForTts(withReflection)).toBe(M4_THRESHOLD_FORCED_INJECT);
   });
 
   it('transcriptIncludesMoment4ThresholdAssistant finds a threshold line among assistants', () => {

@@ -16,7 +16,7 @@ export type InterviewStackRoute =
   | 'PsychometricAssessment'
   | 'PsychometricsComplete'
   | 'InterviewComplete'
-  | 'Aria'
+  | 'Amoraea'
   | 'PostInterview'
   | 'PostInterviewProcessing'
   | 'PostInterviewPassed'

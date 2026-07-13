@@ -1,0 +1,205 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta httpEquiv="X-UA-Compatible" content="IE=edge" />
+    <!-- No shrink-to-fit=no — on iOS it prevents the default “fit layout to screen width” behavior. -->
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <title>Amoraea</title>
+
+    <!-- PWA -->
+    <meta name="theme-color" content="#05060D" />
+    <meta name="mobile-web-app-capable" content="yes" />
+    <link rel="manifest" href="/manifest.webmanifest" />
+
+    <!-- iOS — required for full-screen install on iPhone -->
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+    <meta name="apple-mobile-web-app-title" content="Amoraea" />
+    <link rel="apple-touch-icon" href="/icons/apple-touch-icon.png" />
+    <link rel="apple-touch-icon" sizes="120x120" href="/icons/apple-touch-icon-120x120.png" />
+    <link rel="apple-touch-icon" sizes="152x152" href="/icons/apple-touch-icon-152x152.png" />
+    <link rel="apple-touch-icon" sizes="167x167" href="/icons/apple-touch-icon-167x167.png" />
+    <link rel="apple-touch-icon" sizes="180x180" href="/icons/apple-touch-icon.png" />
+
+    <!-- Favicons -->
+    <link rel="icon" type="image/png" sizes="32x32" href="/icons/favicon-32x32.png" />
+    <link rel="icon" type="image/png" sizes="16x16" href="/icons/favicon-16x16.png" />
+
+    <!-- The `react-native-web` recommended style reset + PWA safe areas -->
+    <style id="expo-reset">
+      html {
+        box-sizing: border-box;
+        max-width: 100%;
+        -webkit-text-size-adjust: 100%;
+        text-size-adjust: 100%;
+      }
+      *,
+      *::before,
+      *::after {
+        box-sizing: inherit;
+      }
+      html,
+      body {
+        height: 100%;
+        min-height: 100dvh;
+        width: 100%;
+        max-width: 100%;
+        overflow-x: hidden;
+        margin: 0;
+        padding-top: env(safe-area-inset-top);
+        padding-bottom: env(safe-area-inset-bottom);
+        padding-left: env(safe-area-inset-left);
+        padding-right: env(safe-area-inset-right);
+      }
+      body {
+        overflow: hidden;
+      }
+      #root {
+        display: flex;
+        height: 100%;
+        min-height: 100dvh;
+        max-width: 100%;
+        overflow-x: hidden;
+        flex: 1;
+      }
+    </style>
+    <!-- react-native-web <Picker> renders <select>/<option>; RN inline styles often win without !important. -->
+    <style id="dark-native-selects">
+      html,
+      body {
+        color-scheme: dark;
+      }
+      /* Open list + highlighted row (Chromium / Firefox; Safari varies) */
+      select option,
+      select optgroup,
+      option {
+        background-color: #0f1419 !important;
+        color: #e8f0f8 !important;
+      }
+      select {
+        color-scheme: dark;
+        border: none;
+        outline: none;
+      }
+      select:focus,
+      select:focus-visible,
+      select:active {
+        outline: none !important;
+        outline-width: 0 !important;
+        box-shadow: none !important;
+        border: none !important;
+        border-width: 0 !important;
+      }
+      /* Date of birth → optional birth time picker (narrow wrapper id from nativeID on web) */
+      #birth-time-quarter-hour-picker select option,
+      #birth-time-quarter-hour-picker option {
+        background-color: #0f1419 !important;
+        color: #e8f0f8 !important;
+      }
+    </style>
+  <meta name="theme-color" content="#05060D">
+<link rel="icon" href="/favicon.ico" /></head>
+
+  <body>
+    <!-- Use static rendering with Expo Router to support running without JavaScript. -->
+    <noscript>
+      You need to enable JavaScript to run this app.
+    </noscript>
+    <!-- The root element for your Expo app. -->
+    <div id="root"></div>
+    <script>
+      (function () {
+        try {
+          var path = window.location.pathname || '';
+          var search = window.location.search || '';
+          var hash = window.location.hash || '';
+          try {
+            sessionStorage.setItem(
+              'debug_auth_first_landing_28d27a',
+              JSON.stringify({
+                pathname: path,
+                hasCode: search.indexOf('code=') !== -1,
+                hasTokenHash: search.indexOf('token_hash=') !== -1,
+                queryTypeSignup: search.toLowerCase().indexOf('type=signup') !== -1,
+                onConfirmPath:
+                  path.indexOf('auth/confirm') !== -1 || path.indexOf('confirm-email') !== -1,
+                onResetPath:
+                  path.indexOf('auth/reset-password') !== -1 ||
+                  path.indexOf('reset-password') !== -1,
+                host: window.location.host || '',
+                timestamp: Date.now(),
+              }),
+            );
+          } catch (eStore) {}
+          var hashLower = hash.toLowerCase();
+          var isRecoveryHash = hashLower.indexOf('type=recovery') !== -1;
+          var isConfirmHash =
+            hashLower.indexOf('type=signup') !== -1 ||
+            hashLower.indexOf('type=email') !== -1 ||
+            hashLower.indexOf('type=email_change') !== -1 ||
+            hashLower.indexOf('type=invite') !== -1;
+          var onResetPath =
+            path.indexOf('auth/reset-password') !== -1 || path.indexOf('reset-password') !== -1;
+          var onConfirmPath =
+            path.indexOf('auth/confirm') !== -1 || path.indexOf('confirm-email') !== -1;
+          var searchLower = search.toLowerCase();
+          var isConfirmQuery =
+            searchLower.indexOf('type=signup') !== -1 ||
+            searchLower.indexOf('type=email') !== -1 ||
+            searchLower.indexOf('type=email_change') !== -1 ||
+            searchLower.indexOf('type=invite') !== -1;
+          if (onResetPath && (isConfirmHash || isConfirmQuery) && !isRecoveryHash) {
+            try { window.localStorage.removeItem('amoraea_password_reset_pending'); } catch (eClr) {}
+            window.location.replace('/auth/confirm' + search + hash);
+            return;
+          }
+          var resetPending = false;
+          try {
+            var rawPending = window.localStorage.getItem('amoraea_password_reset_pending');
+            if (rawPending) {
+              var ts = Number(rawPending);
+              resetPending =
+                Number.isFinite(ts) && Date.now() - ts <= 30 * 60 * 1000;
+            }
+          } catch (ePending) {
+            resetPending = false;
+          }
+          var hasAuthCode =
+            search.indexOf('code=') !== -1 || search.indexOf('token_hash=') !== -1;
+          var hasImplicitAuthHash =
+            hashLower.indexOf('access_token=') !== -1 && hashLower.indexOf('error=') === -1;
+          if (
+            onResetPath &&
+            !isRecoveryHash &&
+            searchLower.indexOf('type=recovery') === -1 &&
+            (hasAuthCode || hasImplicitAuthHash)
+          ) {
+            if (!resetPending || isConfirmQuery || isConfirmHash) {
+              try { window.localStorage.removeItem('amoraea_password_reset_pending'); } catch (eClr2) {}
+              window.location.replace('/auth/confirm' + search + hash);
+              return;
+            }
+          }
+          if (isRecoveryHash && !onResetPath) {
+            window.location.replace('/auth/reset-password' + search + hash);
+            return;
+          }
+          if (
+            onResetPath &&
+            !isRecoveryHash &&
+            searchLower.indexOf('type=recovery') === -1 &&
+            !hasAuthCode &&
+            !hasImplicitAuthHash
+          ) {
+            window.location.replace('/');
+            return;
+          }
+        } catch (e) {
+          /* ignore */
+        }
+      })();
+    </script>
+  <script src="/_expo/static/js/web/index-d835cd12efc22ead0e7e99c0dca8c0da.js" defer></script>
+</body>
+</html>

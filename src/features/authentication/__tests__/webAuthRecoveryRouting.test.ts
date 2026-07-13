@@ -12,7 +12,9 @@ import {
   isEmailConfirmationLandingPath,
   isSignupConfirmAtLoad,
   isWebPasswordRecoveryCallback,
+  readInitialWebPasswordRecoveryState,
   resolveWebAuthCallbackIntent,
+  shouldArmPasswordRecoveryUi,
   shouldForceWebPasswordResetUi,
 } from '@features/authentication/webAuthRecoveryRouting';
 
@@ -96,6 +98,12 @@ describe('webAuthRecoveryRouting', () => {
         '',
       ),
     ).toBe('confirm');
+  });
+
+  it('resolves recovery token type as recovery intent', () => {
+    expect(
+      resolveWebAuthCallbackIntent('/', '?token_hash=abc&type=recovery', ''),
+    ).toBe('recovery');
   });
 
   it('treats explicit recovery query on reset-password as not email confirmation', () => {
@@ -204,5 +212,34 @@ describe('webAuthRecoveryRouting', () => {
   it('detects auth callback query params', () => {
     expect(hasWebAuthCallbackQuery('?code=abc')).toBe(true);
     expect(hasWebAuthCallbackQuery('?foo=bar')).toBe(false);
+  });
+
+  it('shouldArmPasswordRecoveryUi arms only for recovery intent', () => {
+    expect(shouldArmPasswordRecoveryUi('recovery', '/', '', '')).toBe(true);
+    expect(shouldArmPasswordRecoveryUi('confirm', '/', '', '')).toBe(false);
+    expect(shouldArmPasswordRecoveryUi(null, '/', '', '')).toBe(false);
+  });
+
+  it('shouldArmPasswordRecoveryUi rejects confirm token type even when intent is recovery', () => {
+    mockLocation(AUTH_PASSWORD_RESET_PATH, '?token_hash=abc&type=signup');
+    expect(shouldArmPasswordRecoveryUi('recovery')).toBe(false);
+  });
+
+  it('readInitialWebPasswordRecoveryState surfaces recovery link errors without arming UI', () => {
+    const hash = '#error=access_denied&error_code=otp_expired';
+    mockLocation(AUTH_PASSWORD_RESET_PATH, '?type=recovery', hash);
+    const state = readInitialWebPasswordRecoveryState();
+    expect(state.pending).toBe(false);
+    expect(state.linkError).toMatch(/expired/i);
+    expect(state.emailConfirmationLinkError).toBeNull();
+  });
+
+  it('readInitialWebPasswordRecoveryState surfaces email confirmation errors on confirm paths', () => {
+    const hash = '#error=access_denied&error_code=otp_expired';
+    mockLocation(AUTH_EMAIL_CONFIRM_PATH, '', hash);
+    const state = readInitialWebPasswordRecoveryState();
+    expect(state.pending).toBe(false);
+    expect(state.emailConfirmationLinkError).toMatch(/expired|confirmation/i);
+    expect(state.linkError).toBeNull();
   });
 });

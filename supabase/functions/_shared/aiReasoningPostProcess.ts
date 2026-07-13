@@ -1,8 +1,13 @@
 /**
- * Deno copy — keep aligned with src/features/aria/aiReasoningPostProcess.ts
+ * Canonical AI interview reasoning post-process helpers (app + edge).
+ * @see src/features/aria/aiReasoningPostProcess.ts
  */
 
 import type { AIReasoningResult } from './generateAIReasoning.ts';
+
+export type PrepareAIReasoningForPersistenceOptions = {
+  onClaimMapAudit?: (claimMap: Record<string, string[] | string>) => void;
+};
 
 export const PILLAR_CONSTRUCT_KEYS = [
   'mentalizing',
@@ -205,6 +210,7 @@ export function stripReasoningFailureMeta(reasoning: Record<string, unknown>): R
   return out;
 }
 
+/** Remove false failure flags when substantive narrative fields are present. */
 export function recoverFailedReasoningPayload(
   reasoning: Record<string, unknown> | null | undefined
 ): Record<string, unknown> | null {
@@ -224,6 +230,7 @@ export function prepareAIReasoningForPersistence(
   pillarScores: Record<string, number>,
   unassessedMarkers: string[] = [],
   weightedScore: number | null = null,
+  options?: PrepareAIReasoningForPersistenceOptions,
 ): Record<string, unknown> {
   if (weightedScore != null && Number.isFinite(weightedScore)) {
     validateAndCorrectReasoningScores(reasoning, weightedScore, pillarScores);
@@ -234,13 +241,19 @@ export function prepareAIReasoningForPersistence(
   const asRecord = reasoning as unknown as Record<string, unknown>;
   const claimMap = asRecord._narrative_evidence_map;
   if (claimMap && typeof claimMap === 'object') {
-    console.log('[NarrativeEvidence] model claim map', claimMap);
+    const typedClaimMap = claimMap as Record<string, string[] | string>;
+    if (options?.onClaimMapAudit) {
+      options.onClaimMapAudit(typedClaimMap);
+    } else {
+      console.log('[NarrativeEvidence] model claim map', claimMap);
+    }
     delete asRecord._narrative_evidence_map;
   }
   const recovered = recoverFailedReasoningPayload(asRecord);
   return recovered ?? stripReasoningFailureMeta(asRecord);
 }
 
+/** Failure patch that does not set _generationFailed when substantive content already exists. */
 export function buildReasoningFailurePatch(
   existing: Record<string, unknown> | null,
   error: string,

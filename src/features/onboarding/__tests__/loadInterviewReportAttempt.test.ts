@@ -20,4 +20,13 @@ describe('resolveAttemptPillarScoresForReport', () => {
 
     expect(pillars).toEqual({ repair: 6, attunement: 6 });
   });
+
+  it('prefers stored pillar_scores over scenario-bundle averages', () => {
+    expect(
+      resolveAttemptPillarScoresForReport({
+        pillar_scores: { repair: 8 },
+        scenario_1_scores: { pillarScores: { repair: 4 } },
+      }),
+    ).toEqual({ repair: 8 });
+  });
 });

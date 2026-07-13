@@ -1,0 +1,136 @@
+import { Platform } from 'react-native';
+
+export const ariaFeedbackModalStyles = {
+  feedbackModalBackdrop: {
+    flex: 1,
+    zIndex: 9999,
+    backgroundColor: 'rgba(5,6,13,0.75)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: 16,
+    ...Platform.select({
+      android: { elevation: 9999 },
+      default: {},
+    }),
+  },
+  feedbackModalCard: {
+    width: '100%',
+    maxWidth: 860,
+    maxHeight: '90%',
+    backgroundColor: '#0D1120',
+    borderWidth: 1,
+    borderColor: 'rgba(82,142,220,0.22)',
+    borderRadius: 14,
+    padding: 16,
+  },
+  feedbackModalTitle: {
+    color: '#E8F0F8',
+    fontSize: 20,
+    fontWeight: '600',
+    marginBottom: 6,
+  },
+  feedbackModalHint: {
+    color: '#9FB8D2',
+    fontSize: 12,
+    marginBottom: 10,
+  },
+  feedbackModalError: {
+    color: '#FCA5A5',
+    fontSize: 12,
+    marginBottom: 8,
+  },
+  feedbackModalScroll: {
+    width: '100%',
+  },
+  feedbackQuestionBlock: {
+    marginTop: 10,
+    padding: 12,
+    borderWidth: 1,
+    borderColor: 'rgba(82,142,220,0.12)',
+    borderRadius: 10,
+    backgroundColor: 'rgba(13,17,32,0.6)',
+  },
+  feedbackQuestionTitle: {
+    color: '#C8E4FF',
+    fontSize: 14,
+    fontWeight: '600',
+    marginBottom: 4,
+  },
+  feedbackQuestionPrompt: {
+    color: '#9FB8D2',
+    fontSize: 12,
+    lineHeight: 18,
+    marginBottom: 10,
+  },
+  feedbackScaleRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8,
+    marginBottom: 10,
+  },
+  feedbackScalePill: {
+    minWidth: 32,
+    borderWidth: 1,
+    borderColor: 'rgba(82,142,220,0.25)',
+    borderRadius: 8,
+    paddingVertical: 6,
+    paddingHorizontal: 8,
+    alignItems: 'center',
+    backgroundColor: '#111827',
+  },
+  feedbackScalePillActive: {
+    backgroundColor: '#1E6FD9',
+    borderColor: 'rgba(107,185,255,0.85)',
+  },
+  feedbackScalePillText: {
+    color: '#9FB8D2',
+    fontSize: 12,
+    fontWeight: '600',
+  },
+  feedbackScalePillTextActive: {
+    color: '#F4F8FC',
+  },
+  feedbackCommentInput: {
+    borderWidth: 1,
+    borderColor: 'rgba(82,142,220,0.22)',
+    borderRadius: 8,
+    minHeight: 74,
+    color: '#E8F0F8',
+    padding: 10,
+    textAlignVertical: 'top',
+    backgroundColor: '#0B0F1D',
+    fontSize: 12,
+  },
+  feedbackModalActions: {
+    marginTop: 12,
+    flexDirection: 'row',
+    justifyContent: 'flex-end',
+    gap: 10,
+  },
+  feedbackActionButton: {
+    borderRadius: 8,
+    borderWidth: 1,
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+  },
+  feedbackActionCancel: {
+    borderColor: 'rgba(122,154,190,0.45)',
+    backgroundColor: 'rgba(122,154,190,0.12)',
+  },
+  feedbackActionCancelText: {
+    color: '#C8D9EB',
+    fontSize: 12,
+    fontWeight: '600',
+    letterSpacing: 0.4,
+  },
+  feedbackActionSubmit: {
+    borderColor: 'rgba(107,185,255,0.85)',
+    backgroundColor: '#1E6FD9',
+  },
+  feedbackActionSubmitText: {
+    color: '#F4F8FC',
+    fontSize: 12,
+    fontWeight: '700',
+    letterSpacing: 0.4,
+  },
+} as const;

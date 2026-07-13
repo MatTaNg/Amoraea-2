@@ -251,6 +251,7 @@ export function isInterviewRecordingRetryLine(text: string): boolean {
   if (stripped === INTERVIEW_NAME_REPEAT_REASK_LINE) return true;
   if (stripped === INTERVIEW_NAME_EARLY_MIC_REASK_LINE) return true;
   if (stripped === INTERVIEW_NAME_PROCEDURAL_MISHEAR_LINE) return true;
+  if (/^i only caught part of that\b/i.test(stripped)) return true;
   if (/^i didn't catch any speech on that try\b/i.test(stripped)) return true;
   return false;
 }

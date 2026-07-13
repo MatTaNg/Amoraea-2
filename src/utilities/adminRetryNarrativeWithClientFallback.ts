@@ -54,20 +54,6 @@ async function waitForEdgeNarrativeOrClientFallback(
       return { ok: true, via: 'edge' };
     }
   }
-  // #region agent log
-  fetch('http://127.0.0.1:7789/ingest/668e0bd5-3283-4492-9f48-e33846c18218', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json', 'X-Debug-Session-Id': '4b3376' },
-    body: JSON.stringify({
-      sessionId: '4b3376',
-      hypothesisId: 'H_admin_auto_retry',
-      location: 'adminRetryNarrativeWithClientFallback.ts',
-      message: 'admin_auto_retry_edge_poll_timeout_client_fallback',
-      data: { attemptId, waitedMs: EDGE_NARRATIVE_POLL_MAX_MS },
-      timestamp: Date.now(),
-    }),
-  }).catch(() => {});
-  // #endregion
   const client = await kickClientInterviewNarrativeIfPending(
     ownerUserId,
     attemptId,
@@ -98,20 +84,6 @@ export async function adminRetryNarrativeWithClientFallback(
   }
 
   const edgeError = 'error' in edge ? edge.error : 'edge_invoke_failed';
-  // #region agent log
-  fetch('http://127.0.0.1:7789/ingest/668e0bd5-3283-4492-9f48-e33846c18218', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json', 'X-Debug-Session-Id': '4b3376' },
-    body: JSON.stringify({
-      sessionId: '4b3376',
-      hypothesisId: 'H_admin_auto_retry',
-      location: 'adminRetryNarrativeWithClientFallback.ts',
-      message: 'admin_auto_retry_client_fallback_start',
-      data: { attemptId, edgeError: edgeError.slice(0, 200) },
-      timestamp: Date.now(),
-    }),
-  }).catch(() => {});
-  // #endregion
   const client = await kickClientInterviewNarrativeIfPending(
     ownerUserId,
     attemptId,

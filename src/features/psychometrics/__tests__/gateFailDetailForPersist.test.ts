@@ -1,4 +1,5 @@
 import { describe, expect, it } from '@jest/globals';
+import { GATE_PASS_WEIGHTED_MIN } from '@config/scoring/interviewGateThresholds';
 import {
   EMPTY_GATE_FAIL_DETAIL_FOR_PERSIST,
   normalizeGateFailDetailForPersist,
@@ -31,13 +32,23 @@ describe('normalizeGateFailDetailForPersist', () => {
     });
   });
 
-  it('preserves interview gate keys and adds empty psychometric_floors', () => {
+  it('preserves interview gate keys and canonicalizes requiredMin', () => {
     const normalized = normalizeGateFailDetailForPersist({
       weighted_score: { score: 5.4, requiredMin: 6 },
     });
     expect(normalized).toEqual({
-      weighted_score: { score: 5.4, requiredMin: 6 },
+      weighted_score: { score: 5.4, requiredMin: GATE_PASS_WEIGHTED_MIN },
       psychometric_floors: {},
+    });
+  });
+
+  it('rewrites legacy referral requiredMin 6.0 to canonical threshold', () => {
+    const normalized = normalizeGateFailDetailForPersist({
+      weighted_score: { score: 6.1, requiredMin: 6.0 },
+    });
+    expect(normalized.weighted_score).toEqual({
+      score: 6.1,
+      requiredMin: GATE_PASS_WEIGHTED_MIN,
     });
   });
 

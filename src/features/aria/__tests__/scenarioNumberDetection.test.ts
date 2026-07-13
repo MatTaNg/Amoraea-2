@@ -1,5 +1,5 @@
-import { describe, expect, it } from 'vitest';
-import { detectScenarioFromResponse, getScenarioNumberForNewMessage } from '../scenarioNumberDetection';
+import { detectScenarioFromResponse, getScenarioNumberForNewMessage, messageAnchorsScenarioIntro } from '../scenarioNumberDetection';
+import { SHOW_SCENARIO_3_OPENING_EXACT, SHOW_SCENARIO_3_VIGNETTE_EXACT } from '../interviewShowScenarioExactCopy';
 
 describe('detectScenarioFromResponse', () => {
   it('detects scenario 3 on S2→S3 wrap that recaps Sarah and James', () => {
@@ -22,6 +22,28 @@ describe('detectScenarioFromResponse', () => {
 
   it('detects scenario 1 on Emma/Ryan opening', () => {
     expect(detectScenarioFromResponse("Here's the first situation: Emma and Ryan are at dinner.")).toBe(1);
+  });
+
+  it('does not treat misplaced Situation 2 meta redirect as scenario handoff', () => {
+    expect(
+      detectScenarioFromResponse(
+        "Makes sense. That's Situation 2 — we haven't quite gotten there yet. We",
+      ),
+    ).toBeNull();
+  });
+
+  it('detects scenario 3 from Daniel return line for tagging but not as intro anchor', () => {
+    expect(detectScenarioFromResponse(SHOW_SCENARIO_3_OPENING_EXACT)).toBe(3);
+    expect(messageAnchorsScenarioIntro(SHOW_SCENARIO_3_OPENING_EXACT)).toBeNull();
+  });
+
+  it('messageAnchorsScenarioIntro accepts full Sophie/Daniel vignette', () => {
+    expect(messageAnchorsScenarioIntro(SHOW_SCENARIO_3_VIGNETTE_EXACT)).toBe(3);
+    expect(
+      messageAnchorsScenarioIntro(
+        `Nice work, Matt. Here's the third situation.\n\n${SHOW_SCENARIO_3_VIGNETTE_EXACT}`,
+      ),
+    ).toBe(3);
   });
 });
 

@@ -120,6 +120,20 @@ describe('aggregateMarkerScoresFromLabeledSlices (moment matrix)', () => {
     expect(scores.appreciation).toBe(6);
   });
 
+  it('excludes recovered-only scenario_1 appreciation regardless of recovered raw score', () => {
+    const { scores: lowRecovered } = aggregateMarkerScoresFromLabeledSlices([
+      labeled('scenario_1', { appreciation: 5 }, { appreciation: 'Score recovered from model output.' }),
+      labeled('scenario_2', { appreciation: 8 }, { appreciation: 's2 substantive' }),
+    ]);
+    expect(lowRecovered.appreciation).toBe(8);
+
+    const { scores: highRecovered } = aggregateMarkerScoresFromLabeledSlices([
+      labeled('scenario_1', { appreciation: 6 }, { appreciation: 'Score recovered from model output.' }),
+      labeled('scenario_2', { appreciation: 8 }, { appreciation: 's2 substantive' }),
+    ]);
+    expect(highRecovered.appreciation).toBe(8);
+  });
+
   it('averages mentalizing and accountability from scenarios only (ignores M4/M5)', () => {
     const { scores } = aggregateMarkerScoresFromLabeledSlices([
       labeled('scenario_1', { mentalizing: 8, accountability: 7 }, { mentalizing: 's1', accountability: 's1' }),

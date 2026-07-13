@@ -229,7 +229,7 @@ export function InterviewCompleteScreen({ navigation, route }: Props) {
         {isAlphaTester ? (
           <TouchableOpacity
             style={styles.adminLink}
-            onPress={() => navigation.replace('Aria', { userId, openAdminPanel: true })}
+            onPress={() => navigation.replace('Amoraea', { userId, openAdminPanel: true })}
           >
             <Text style={styles.adminLinkText}>Open admin panel</Text>
           </TouchableOpacity>

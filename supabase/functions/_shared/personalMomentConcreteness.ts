@@ -1,4 +1,16 @@
-/** Duplicated from `src/features/aria/personalMomentConcreteness.ts` for Edge — keep in sync. */
+import {
+  CONCRETENESS_DEPTH_DELTA_BOTH_ABSENT,
+  CONCRETENESS_DEPTH_DELTA_BOTH_HIGH,
+  CONCRETENESS_DEPTH_DELTA_BOTH_LOW,
+  CONCRETENESS_DEPTH_DELTA_BOTH_MODERATE,
+  CONCRETENESS_DEPTH_DELTA_HIGH_MODERATE,
+  CONCRETENESS_DEPTH_DELTA_LOW_MODERATE,
+  CONCRETENESS_DEPTH_DELTA_MIXED_ABSENT_LOW,
+  CONCRETENESS_GATE_MODIFIER_BOTH_ABSENT,
+  CONCRETENESS_GATE_MODIFIER_BOTH_LOW,
+  CONCRETENESS_GATE_MODIFIER_MIXED_ABSENT_LOW,
+} from '../../../src/config/scoring/personalMomentConcretenessModifiers.ts';
+
 export type ResponseConcretenessLevel = 'absent' | 'low' | 'moderate' | 'high';
 
 export type Moment4ConcretenessLevel = ResponseConcretenessLevel | 'valid_non_applicable';
@@ -55,9 +67,11 @@ export function computePersonalMomentConcretenessModifier(
   if (a === 'valid_non_applicable') return 0;
   if (a == null || b == null) return 0;
   if (a === 'moderate' || a === 'high' || b === 'moderate' || b === 'high') return 0;
-  if (a === 'absent' && b === 'absent') return -0.3;
-  if (a === 'low' && b === 'low') return -0.2;
-  if ((a === 'absent' && b === 'low') || (a === 'low' && b === 'absent')) return -0.25;
+  if (a === 'absent' && b === 'absent') return CONCRETENESS_GATE_MODIFIER_BOTH_ABSENT;
+  if (a === 'low' && b === 'low') return CONCRETENESS_GATE_MODIFIER_BOTH_LOW;
+  if ((a === 'absent' && b === 'low') || (a === 'low' && b === 'absent')) {
+    return CONCRETENESS_GATE_MODIFIER_MIXED_ABSENT_LOW;
+  }
   return 0;
 }
 
@@ -68,13 +82,19 @@ export function moment4Moment5ConcretenessDepthSignalDelta(
   const m4 = normalizeMoment4Concreteness(moment4) ?? '';
   const m5 = (moment5 ?? '').toString().trim().toLowerCase();
   if (m4 === 'valid_non_applicable') return 0;
-  if (m4 === 'absent' && m5 === 'absent') return -0.5;
-  if ((m4 === 'absent' && m5 === 'low') || (m4 === 'low' && m5 === 'absent')) return -0.35;
-  if (m4 === 'low' && m5 === 'low') return -0.3;
-  if ((m4 === 'low' && m5 === 'moderate') || (m4 === 'moderate' && m5 === 'low')) return -0.1;
-  if (m4 === 'moderate' && m5 === 'moderate') return 0;
-  if ((m4 === 'high' && m5 === 'moderate') || (m4 === 'moderate' && m5 === 'high')) return 0.1;
-  if (m4 === 'high' && m5 === 'high') return 0.2;
+  if (m4 === 'absent' && m5 === 'absent') return CONCRETENESS_DEPTH_DELTA_BOTH_ABSENT;
+  if ((m4 === 'absent' && m5 === 'low') || (m4 === 'low' && m5 === 'absent')) {
+    return CONCRETENESS_DEPTH_DELTA_MIXED_ABSENT_LOW;
+  }
+  if (m4 === 'low' && m5 === 'low') return CONCRETENESS_DEPTH_DELTA_BOTH_LOW;
+  if ((m4 === 'low' && m5 === 'moderate') || (m4 === 'moderate' && m5 === 'low')) {
+    return CONCRETENESS_DEPTH_DELTA_LOW_MODERATE;
+  }
+  if (m4 === 'moderate' && m5 === 'moderate') return CONCRETENESS_DEPTH_DELTA_BOTH_MODERATE;
+  if ((m4 === 'high' && m5 === 'moderate') || (m4 === 'moderate' && m5 === 'high')) {
+    return CONCRETENESS_DEPTH_DELTA_HIGH_MODERATE;
+  }
+  if (m4 === 'high' && m5 === 'high') return CONCRETENESS_DEPTH_DELTA_BOTH_HIGH;
   return 0;
 }
 

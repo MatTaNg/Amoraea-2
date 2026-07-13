@@ -7,6 +7,10 @@ import { join } from 'node:path';
 import { createClient } from '@supabase/supabase-js';
 import { applyElaborationAbsencePenaltiesToScenarioScores } from '../src/features/aria/elaborationAbsencePenaltiesHeuristic';
 import { userTurnTextForInterviewScenario } from '../src/features/aria/contemptExpressionScenarioHeuristic';
+import {
+  storedKeyEvidenceHasLevelTagLeak,
+  stripLegacyLevelTagLeakFromEvidence,
+} from '../src/features/aria/sanitizeScenarioKeyEvidenceForPersist';
 
 function mergeEnvFromDotenvFile(): void {
   try {
@@ -43,13 +47,32 @@ async function main(): Promise<void> {
   }
   const sb = createClient(url, key);
 
-  const { data: attempts, error } = await sb
+  const { data: recent, error } = await sb
+    .from('interview_attempts')
+    .select('id, completed_at, transcript, scenario_1_scores, scenario_2_scores, scenario_3_scores')
+    .not('completed_at', 'is', null)
+    .order('completed_at', { ascending: false })
+    .limit(5);
+  if (error) throw error;
+
+  let storedLeaks = 0;
+  for (const row of recent ?? []) {
+    for (const raw of [row.scenario_1_scores, row.scenario_2_scores, row.scenario_3_scores]) {
+      const ke = (raw as { keyEvidence?: Record<string, string> } | null)?.keyEvidence;
+      if (storedKeyEvidenceHasLevelTagLeak(ke)) storedLeaks += 1;
+    }
+  }
+  console.log(
+    `Last ${(recent ?? []).length} attempts — stored keyEvidence leaks: ${storedLeaks} (legacy rows may still contain leaks until rescore)`,
+  );
+
+  const { data: attempts, error: err2 } = await sb
     .from('interview_attempts')
     .select('id, completed_at, transcript, scenario_1_scores, scenario_2_scores, scenario_3_scores')
     .not('completed_at', 'is', null)
     .order('completed_at', { ascending: false })
     .limit(30);
-  if (error) throw error;
+  if (err2) throw err2;
 
   let checked = 0;
   let leaksAfterFix = 0;
@@ -81,8 +104,13 @@ async function main(): Promise<void> {
       for (const marker of ['mentalizing', 'attunement'] as const) {
         const ev = out.keyEvidence[marker] ?? '';
         if (ev.includes(LEAK)) leaksAfterFix += 1;
+        if (stripLegacyLevelTagLeakFromEvidence(ev).includes(LEAK)) {
+          console.warn(`Sanitize failed on attempt ${String(row.id).slice(0, 8)} S${n} ${marker}`);
+        }
         if (!/^Level [12] —/.test(ev.trim())) {
-          console.warn(`Missing Level prefix after fix: attempt ${String(row.id).slice(0, 8)} S${n} ${marker}: ${ev.slice(0, 80)}`);
+          console.warn(
+            `Missing Level prefix after fix: attempt ${String(row.id).slice(0, 8)} S${n} ${marker}: ${ev.slice(0, 80)}`,
+          );
         }
       }
     }

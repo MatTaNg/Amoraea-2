@@ -125,4 +125,38 @@ describe('evaluateInterviewCompletionGate', () => {
     expect(r.ok).toBe(false);
     if (!r.ok) expect(r.detail).toContain('moment_4_scores missing scored pillar evidence');
   });
+
+  it('fails when transcript reached Moment 5 but moment_5_scores are missing', () => {
+    const r = evaluateInterviewCompletionGate({
+      scenario1: bundle(1),
+      scenario2: bundle(2),
+      scenario3: bundle(3),
+      moment4: { pillarScores: { commitment_threshold: 5 } },
+      moment5: null,
+      transcript: [
+        { role: 'assistant', content: 'Think of a time when you had a conflict with someone important to you.' },
+        { role: 'user', content: 'My roommate Christy and I argued about dishes for weeks.' },
+      ],
+    });
+    expect(r.ok).toBe(false);
+    if (!r.ok) {
+      expect(r.incomplete_reason).toBe('missing_moment_5');
+      expect(r.missingMoment5).toBe(true);
+    }
+  });
+
+  it('passes when transcript never reached Moment 5 without moment_5_scores', () => {
+    const r = evaluateInterviewCompletionGate({
+      scenario1: bundle(1),
+      scenario2: bundle(2),
+      scenario3: bundle(3),
+      moment4: { pillarScores: { commitment_threshold: 5 } },
+      moment5: null,
+      transcript: [
+        { role: 'assistant', content: 'What do you think is going on here?' },
+        { role: 'user', content: 'Emma felt dismissed.' },
+      ],
+    });
+    expect(r.ok).toBe(true);
+  });
 });

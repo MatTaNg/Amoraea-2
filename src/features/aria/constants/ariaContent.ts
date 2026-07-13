@@ -1,10 +1,10 @@
 /**
- * Aria – Voice-only matchmaker content.
+ * Amoraea – Voice-only matchmaker content.
  * Pillars grounded in Gottman, Sue Johnson, and relationship science.
  */
 
 export const ARIA_INTRO =
-  "Welcome to Amoraea. My name is Aria, and over the next 20 to 30 minutes I'd like to get to know you better so I can match you with partners you truly align with. " +
+  "Welcome to Amoraea. Over the next 20 to 30 minutes I'd like to get to know you better so I can match you with partners you truly align with. " +
   "I'll ask you six focused questions about emotional regulation, how you resolve conflict, assert boundaries, and more. " +
   "These questions are designed to understand how you behave in relationships. " +
   "This approach is grounded in decades of relationship research, including the work of John Gottman, Sue Johnson, and other leading scientists studying what actually predicts long-term relationship success. " +

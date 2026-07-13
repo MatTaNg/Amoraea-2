@@ -1,9 +1,13 @@
+import { isGreetingOnly } from '../features/aria/interviewLocalPersistence';
 import { transcriptHasInterviewClosingAssistantMessage } from '../features/aria/elongatingProbe';
 import { SCENARIO_2_TO_3_TRANSITION_FALLBACK } from '../features/aria/interviewTransitionBundles';
 import { looksLikeMoment4GrudgePrompt, looksLikeMoment4ThresholdQuestion } from '../features/aria/moment4ProbeLogic';
 import { looksLikeMoment4SpecificityFollowUpEcho } from '../features/aria/moment4SpecificityFollowUp';
-import { detectScenarioFromResponse } from '../features/aria/scenarioNumberDetection';
-import type { StoredScenarioScores } from './storage/InterviewStorage';
+import {
+  detectScenarioFromResponse,
+  messageAnchorsScenarioIntro,
+} from '../features/aria/scenarioNumberDetection';
+import type { StoredInterviewData, StoredScenarioScores } from './storage/InterviewStorage';
 
 export type InterviewMomentIndex = 1 | 2 | 3 | 4 | 5;
 
@@ -60,7 +64,7 @@ export function firstAssistantIndexForScenarioIntro(
   for (let i = 0; i < msgs.length; i++) {
     const m = msgs[i];
     if (m.role !== 'assistant') continue;
-    if (detectScenarioAnchor(m.content ?? '') === scenario) return i;
+    if (messageAnchorsScenarioIntro(m.content ?? '') === scenario) return i;
   }
   return -1;
 }
@@ -93,6 +97,11 @@ export function storedInterviewHasResumableScenarioProgress(input: {
   const lastCompleted = lastFullyCompletedScenario(input.scenariosCompleted ?? [], input.scenarioScores);
   if (lastCompleted > 0 && userTurnsTotal >= 1) return true;
 
+  const activeScenario = input.resumeActiveScenario ?? input.currentScenario ?? null;
+  if (activeScenario != null && activeScenario >= 2 && activeScenario <= 3 && userTurnsTotal >= 1) {
+    return true;
+  }
+
   for (const scenario of [1, 2, 3] as const) {
     if (firstAssistantIndexForScenarioIntro(input.messages, scenario) >= 0 && userTurnsTotal >= 1) {
       return true;
@@ -122,6 +131,42 @@ export function lastFullyCompletedScenario(
   return max;
 }
 
+/** True when local storage holds an in-progress interview that should hydrate on refresh (not closing / greeting-only). */
+export function shouldResumeMidInterviewFromSaved(
+  saved: Pick<
+    StoredInterviewData,
+    | 'messages'
+    | 'scenariosCompleted'
+    | 'scenarioScores'
+    | 'resumeActiveScenario'
+    | 'currentScenario'
+    | 'pendingCompletion'
+  >,
+): boolean {
+  if (!saved.messages?.length) return false;
+  if (savedInterviewReachedClosingState(saved)) return false;
+  if (isGreetingOnly(saved.messages)) return false;
+  const hasScenarioProgress = storedInterviewHasResumableScenarioProgress({
+    messages: saved.messages,
+    scenariosCompleted: saved.scenariosCompleted,
+    scenarioScores: saved.scenarioScores,
+    resumeActiveScenario: saved.resumeActiveScenario ?? null,
+    currentScenario: saved.currentScenario ?? undefined,
+  });
+  const hasCompletedScenario =
+    (saved.scenariosCompleted?.length ?? 0) > 0 ||
+    lastFullyCompletedScenario(saved.scenariosCompleted ?? [], saved.scenarioScores) > 0;
+  if (!hasScenarioProgress && !hasCompletedScenario) return false;
+  const completedCount = saved.scenariosCompleted?.length ?? 0;
+  const allScenarioVignettesScored =
+    completedCount >= 3 ||
+    lastFullyCompletedScenario(saved.scenariosCompleted ?? [], saved.scenarioScores) >= 3;
+  if (allScenarioVignettesScored) {
+    return !saved.pendingCompletion;
+  }
+  return completedCount < 3;
+}
+
 function coerceResumeActive(
   fromStorage: 1 | 2 | 3 | null | undefined,
   fromAttempt: number | null | undefined
@@ -129,6 +174,19 @@ function coerceResumeActive(
   const raw = fromAttempt ?? fromStorage ?? null;
   if (raw === 1 || raw === 2 || raw === 3) return raw;
   return null;
+}
+
+/** Latest scenario vignette anchor in transcript order — used when resume_active_scenario lags behind. */
+export function inferLatestScenarioIntroFromTranscript(
+  messages: ReadonlyArray<{ role: string; content?: string }>,
+): 1 | 2 | 3 | null {
+  let last: 1 | 2 | 3 | null = null;
+  for (const m of messages) {
+    if (m.role !== 'assistant') continue;
+    const anchor = detectScenarioAnchor(m.content ?? '');
+    if (anchor != null) last = anchor;
+  }
+  return last;
 }
 
 export type InterviewResumeMode = 'replay_incomplete' | 'resume_next' | 'resume_post_scenarios';
@@ -153,6 +211,7 @@ export function computeInterviewResumePlan(input: {
   scenarioScores: StoredScenarioScores | undefined;
   resumeActiveFromStorage: 1 | 2 | 3 | null | undefined;
   resumeActiveFromAttempt: number | null | undefined;
+  transcriptMessages?: ReadonlyArray<{ role: string; content?: string }>;
   syncedMoments: {
     momentsComplete: Record<InterviewMomentIndex, boolean>;
     currentMoment: InterviewMomentIndex;
@@ -160,7 +219,13 @@ export function computeInterviewResumePlan(input: {
   };
 }): InterviewResumePlan {
   const lastC = lastFullyCompletedScenario(input.scenariosCompleted, input.scenarioScores);
-  const activeRaw = coerceResumeActive(input.resumeActiveFromStorage, input.resumeActiveFromAttempt);
+  let activeRaw = coerceResumeActive(input.resumeActiveFromStorage, input.resumeActiveFromAttempt);
+  const inferredFromTranscript = input.transcriptMessages
+    ? inferLatestScenarioIntroFromTranscript(input.transcriptMessages)
+    : null;
+  if (inferredFromTranscript != null && (activeRaw == null || inferredFromTranscript > activeRaw)) {
+    activeRaw = inferredFromTranscript;
+  }
   const effectiveActive =
     activeRaw != null && !scenarioHasPersistedScores(activeRaw, input.scenarioScores) ? activeRaw : null;
 
@@ -181,19 +246,31 @@ export function computeInterviewResumePlan(input: {
   }
 
   if (effectiveActive != null) {
+    const syncedMoment = input.syncedMoments.currentMoment;
+    const progressHint = Math.max(
+      inferredFromTranscript ?? 0,
+      syncedMoment >= 1 && syncedMoment <= 3 ? syncedMoment : 0,
+    );
+    let resumeAt = effectiveActive;
+    if (
+      progressHint > effectiveActive &&
+      progressHint <= 3 &&
+      !scenarioHasPersistedScores(progressHint, input.scenarioScores)
+    ) {
+      resumeAt = progressHint as 1 | 2 | 3;
+    }
     const mc = createMomentCompletionFromLastC(lastC);
     for (const i of [1, 2, 3] as const) {
-      if (i < effectiveActive) mc[i] = true;
+      if (i < resumeAt) mc[i] = true;
     }
-    mc[effectiveActive] = false;
+    mc[resumeAt] = false;
     /**
      * Transcript-derived moment (e.g. Moment 4 threshold) can be ahead of `resume_active_scenario` (still 3).
      * Previously we forced `effectiveMoment` to the scenario index, which snapped `currentInterviewMomentRef`
      * back to 3 after resume and skipped client M5 bundle inject (model streamed only the conflict line).
      */
-    const syncedMoment = input.syncedMoments.currentMoment;
     const effectiveMoment = Math.max(
-      effectiveActive,
+      resumeAt,
       syncedMoment
     ) as InterviewMomentIndex;
     const personalHandoffInjected = input.syncedMoments.personalHandoffInjected;
@@ -202,7 +279,7 @@ export function computeInterviewResumePlan(input: {
     }
     return {
       lastCompletedScenario: lastC,
-      resumeScenario: effectiveActive,
+      resumeScenario: resumeAt,
       effectiveMoment,
       momentsComplete: mc,
       personalHandoffInjected,
@@ -211,7 +288,42 @@ export function computeInterviewResumePlan(input: {
     };
   }
 
+  /**
+   * Unscored S1→S2 transitions can leave no `resume_active_scenario` while synced moment is already 2.
+   * Only bump ahead of the default `lastCompleted + 1` cursor — not when S1 is fully scored and S2 is next.
+   */
+  const syncedMoment = input.syncedMoments.currentMoment;
+  const progressHint = Math.max(
+    inferredFromTranscript ?? 0,
+    syncedMoment >= 1 && syncedMoment <= 3 ? syncedMoment : 0,
+    activeRaw ?? 0,
+  );
   const nextScenario = (Math.min(lastC + 1, 3) as 1 | 2 | 3) as 1 | 2 | 3;
+  if (progressHint > nextScenario && progressHint <= 3) {
+    const candidate = progressHint as 1 | 2 | 3;
+    if (!scenarioHasPersistedScores(candidate, input.scenarioScores)) {
+      const mc = createMomentCompletionFromLastC(lastC);
+      for (const i of [1, 2, 3] as const) {
+        if (i < candidate) mc[i] = true;
+      }
+      mc[candidate] = false;
+      const effectiveMoment = Math.max(candidate, syncedMoment) as InterviewMomentIndex;
+      const personalHandoffInjected = input.syncedMoments.personalHandoffInjected;
+      if (syncedMoment >= 4 && personalHandoffInjected) {
+        mc[3] = true;
+      }
+      return {
+        lastCompletedScenario: lastC,
+        resumeScenario: candidate,
+        effectiveMoment,
+        momentsComplete: mc,
+        personalHandoffInjected,
+        mode: 'replay_incomplete',
+        partialScenarioDataWritten: true,
+      };
+    }
+  }
+
   const mc = createMomentCompletionFromLastC(lastC);
   return {
     lastCompletedScenario: lastC,

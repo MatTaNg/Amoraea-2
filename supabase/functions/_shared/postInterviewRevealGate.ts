@@ -45,14 +45,3 @@ export function evaluateStandardPostInterviewRevealWithUsersPassedFallback(
 ): StandardPostInterviewReveal {
   return evaluateStandardPostInterviewReveal(att, nowMs);
 }
-
-/** True when pass/fail is revealed (admin override or 48h window elapsed). */
-export function isResultsEmailRevealReady(
-  att: InterviewAttemptRevealFields | null | undefined,
-  _usersInterviewPassed?: boolean | null | undefined,
-  nowMs: number = Date.now(),
-  _usersInterviewPassedAdminOverride?: boolean | null,
-  _usersInterviewPassedComputed?: boolean | null,
-): boolean {
-  return evaluateStandardPostInterviewReveal(att, nowMs).kind !== 'processing';
-}

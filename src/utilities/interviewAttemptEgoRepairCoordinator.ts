@@ -81,7 +81,7 @@ const SUPABASE_ANON_KEY = getResolvedSupabaseAnonKey();
 
 type TranscriptMsg = { role: string; content?: string; scenarioNumber?: number | null };
 
-/** Dedupe transcript-based ego repair across Aria + post-interview screens (same session). */
+/** Dedupe transcript-based ego repair across Amoraea + post-interview screens (same session). */
 export const egoRepairHandledAttemptIds = new Set<string>();
 
 /**

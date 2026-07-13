@@ -41,6 +41,7 @@ describe('computeGateResultCore', () => {
     expect(down.pass).toBe(false);
     expect(down.reason).toBe('floor_breach');
     expect(down.failReason).toContain('repair');
+    expect(down.failReasonCodes).toContain('weighted_score');
   });
 
   it('still computes scenario composites and scenario_floor when holistic floor_breach fires first', () => {

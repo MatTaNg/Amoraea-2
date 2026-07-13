@@ -8,14 +8,17 @@ import {
   BEHAVIORAL_VS_EMOTIONAL_INTERIOR_SCENARIO,
   ELABORATION_ABSENCE_SCORING_HEADER,
   ELABORATION_ABSENCE_SCENARIO_MARKERS,
+  SCENARIO_KEY_EVIDENCE_PER_PILLAR_RULES,
 } from './elaborationAbsencePenaltiesRubric';
 import {
   FLOOR_AND_BONUS_SCORING_PHILOSOPHY,
+  PILLAR_CONFIDENCE_METADATA_ONLY_RULES,
   SCENARIO_MENTALIZING_CONTEMPT_FLOOR_CLARIFICATIONS,
   SCORING_CONFIDENCE_INSTRUCTIONS,
 } from './holisticScoringPrompt';
 import {
   ACCOUNTABILITY_BLAME_SHIFT_VS_CLARITY_REQUEST,
+  KEY_EVIDENCE_ANALYTICAL_NARRATIVE_RULES,
   REPAIR_AND_ACCOUNTABILITY_UNPROMPTED_VS_PROMPTED_WEIGHTING,
   REPAIR_CONDITIONAL_AND_PROMPTED_SCORING,
   SCENARIO_A_APPRECIATION_ANCHORS,
@@ -190,7 +193,7 @@ Apply the **CONTEMPT_EXPRESSION** tier rubric **with Tier 2 and Tier 3 proportio
       ? `
 Scenario C mentalizing calibration:
 - Accurately noting an obvious on-vignette dynamic (e.g. Daniel acknowledging a communication problem or taking partial responsibility for avoidance) is competent basic perspective-taking: **5–6** when that is **all** the answer offers.
-- **CALIBRATION PRESERVATION (Scenario C):** Do not compress toward 5–6 when the user infers **emotional interior** — discomfort, shame, flooding, fear of confrontation, difficulty being authentic under pressure, or why conflict feels unsafe — even in analytical/clinical register. That is **Level 2** mentalizing and should score **7–8** for this slice when accurate (see Q1 block below).
+- **CALIBRATION PRESERVATION (Scenario C):** Do not compress toward 3–4 or park at 5–6 when the user infers **emotional interior** — discomfort, shame, flooding, fear of confrontation, difficulty being authentic under pressure, or why conflict feels unsafe — even in analytical/clinical register. That is **Level 2** mentalizing: typically **6** for clear pattern/emotional-meaning inference, **7** for deep interior (e.g. "Daniel felt genuinely at a loss… unresolved things he wanted to say but doesn't know how"), **8** for richer bilateral/pattern depth. See Q1 block below.
 - Reserve 9–10 only when mentalizing in this answer is markedly richer than solid Level 2 interior inference.
 
 SCENARIO C Q1 MENTALIZING CALIBRATION (Q1-specific — "what do you make of that" re Daniel's "I didn't know what to say"):
@@ -201,17 +204,21 @@ WHAT TO SCORE ON Q1:
 - Mentalizing is evaluated only on the user's inference about Daniel's internal state — what he is experiencing emotionally, why he doesn't know what to say, what is happening inside him that produces this behavior.
 - A response that accurately describes Daniel's internal experience (feeling put on the spot, not knowing how to face emotional confrontation, processing difficulty) is demonstrating genuine mentalizing even if it stays focused on Daniel only.
 - Do NOT penalize the user for not volunteering Sophie's experience in response to Q1. The question did not ask about Sophie.
+- Evaluate the **full Q1 answer across all user turns in this scenario before the repair prompt**. Do **not** lock the level to the user's opening reaction alone. If they open with "I'm on Sophie's side" or a surface behavioral read but then later say Daniel was honest, didn't know what to say, was emotionally uncomfortable, was avoiding the real conversation, or that the avoidance creates friction and distance, that later-developed reasoning counts and can support **Level 2**.
 
 LEVEL DEFINITIONS FOR Q1:
-- Level 1 (scores 5–6): User describes Daniel's **behavioral logistics only** — he needed time, he walked away, he returned later — with **no** inference about emotional interior, discomfort, or internal conflict.
-- Level 2 (scores 7–8): User infers Daniel's **emotional interior** — discomfort with emotional confrontation, fear of saying the wrong thing, avoidance of authentic feeling, people-pleasing under pressure, shame/flooding, or internal conflict about facing Sophie. **Analytical/clinical wording counts** when the inference is accurate (e.g. "he focuses on what he thinks she wants to hear rather than what he feels," "he's trying to avoid the emotional weight of the conversation").
+- Level 1 (scores 3–5, cap **5**): User describes Daniel's **behavioral logistics only** — he needed time, he walked away, he returned later — with **no** inference about emotional interior, discomfort, or internal conflict. Correct behavioral motivation without interior → typically **5**.
+- Level 2 (scores **5–7** typical; **8** for richer depth): User infers Daniel's **emotional interior** — discomfort with emotional confrontation, fear of saying the wrong thing, avoidance of authentic feeling, people-pleasing under pressure, shame/flooding, or internal conflict about facing Sophie. Clear pattern/emotional-meaning inference → **6**. Deep interior (e.g. "felt genuinely at a loss… unresolved things he wanted to say but doesn't know how") → **7**. **Analytical/clinical wording counts** when the inference is accurate. Statements like "he was honest and didn't know what to say," "this is an incredibly uncomfortable situation for him," or "avoiding the real conversation just creates more friction and distance" are **not** merely behavioral logistics when they explain Daniel's interior. **Never score Level 2 at 3–4.**
 - Level 3 (scores 9–10): Rich bilateral or pattern-level inference beyond solid Level 2 (Sophie's experience volunteered unprompted **plus** nuanced read of Daniel's inner state, or sophisticated linkage to recurring relational pattern with clear interior states for both).
 
 SOPHIE BONUS:
 If the user volunteers inference about Sophie's emotional experience (what this pattern has been like for her, what she is feeling while waiting, what the recurring dynamic means for her) without being asked, treat this as additional mentalizing evidence that supports a higher score. It is not required for a high Q1 score and should not reduce the score if absent.
 
 FLOOR ADJUSTMENT:
-A response that accurately describes Daniel's behavioral motivation at Level 1 should score no lower than 5 for Q1 mentalizing. The floor of 4 (below average) is reserved for responses that restate the scenario without any inference about Daniel's internal state or motivation — e.g. "he came back and said he was ready" with no attempt to explain why he didn't know what to say.
+A response that accurately describes Daniel's behavioral motivation at Level 1 should score no lower than 5 for Q1 mentalizing. The floor of 4 (below average) is reserved for responses that restate the scenario without any inference about Daniel's internal state or motivation — e.g. "he came back and said he was ready" with no attempt to explain why he didn't know what to say. Level 2 interior must score **at least 6**.
+
+**REFERENCE CALIBRATION (Scenario C — mentalizing = 7):**
+When the user infers Daniel's avoidance / uncertainty ("didn't know what to say," needs help with emotional intelligence or conversation tools, "really avoidant") **and** infers Sophie's cumulative experience of the leaving pattern ("hurt," "rejection," "abandonment," incomplete resolution), assign mentalizing **7** for the slice — matches calibrated reference interviews. Diagnostic shorthand ("avoidant") **with** bilateral interior inference on Sophie is **Level 2**, not Level 1. Reserve **5–6** only when the answer stays behavioral/skills-framing **without** emotional interior on either character across the full scenario transcript.
 `
       : '';
   const scenario3AttunementFloorCalibration =
@@ -222,7 +229,7 @@ Q1 asks specifically about Daniel. Attunement for Q1 is evaluated on whether the
 
 Score no lower than 5 when the user correctly identified Daniel's emotional state in their Q1 response.
 Score 4 only when the user showed no emotional recognition of Daniel — treating his behavior as purely logistical with no acknowledgment of an emotional dimension.
-Score 7+ only when the user described the emotional experience of both characters or the recurring pattern without being specifically asked.
+Score **7** when the user clearly recognized Daniel's emotional state with concrete evidence (even if brief). Score **8+** when they also describe Sophie's experience or the recurring pattern with real specificity. Do **not** require unprompted bilateral coverage merely to reach 7 on Daniel.
 `
       : '';
   const scenario3SophiePerspectiveProbeScoringNote =
@@ -262,8 +269,10 @@ ${scenario3RepairAccountabilityEvidenceBlock}
 
 SCORING INSTRUCTIONS:
 Score only the listed markers, based only on this transcript slice.
-For each marker: quote or paraphrase the response that most informed the score; behavioral > attitudinal.
 GENERIC responses: cap at 5 for that marker.
+${KEY_EVIDENCE_ANALYTICAL_NARRATIVE_RULES}
+${SCENARIO_KEY_EVIDENCE_PER_PILLAR_RULES}
+Every marker with a finite numeric score MUST include substantive analytical keyEvidence per the rules above. Never leave keyEvidence empty, quote-only (\`User: "…"\` alone), or duplicated across markers for scored pillars.
 ${BEHAVIORAL_VS_EMOTIONAL_INTERIOR_SCENARIO}
 ${ELABORATION_ABSENCE_SCORING_HEADER}
 ${ELABORATION_ABSENCE_SCENARIO_MARKERS}
@@ -300,7 +309,8 @@ ${scenario3MentalizingCalibration}
 ${scenario3SophiePerspectiveProbeScoringNote}
 ${scenario3MentalizingInterviewPatternCalibration}
 
-CONFIDENCE: high / moderate / low per scored marker.
+CONFIDENCE: high / moderate / low per scored marker (metadata only — must not change numeric scores).
+${PILLAR_CONFIDENCE_METADATA_ONLY_RULES}
 ${SCORING_CONFIDENCE_INSTRUCTIONS}
 
 ${CONTEMPT_TIER_BREAKDOWN_JSON_INSTRUCTION}
@@ -310,10 +320,13 @@ OUTPUT CONTRACT (STRICT):
 - Response must start with "{" and end with "}".
 - Do not include markdown fences, prose, analysis text, or comments.
 - Do not wrap output under alternate keys like "scorecard", "scores", "result", or "data".
-- Use exactly these top-level keys: scenarioNumber, scenarioName, pillarScores, pillarConfidence, keyEvidence, mentalizing_inference_source, mentalizing_overcertainty, contempt_tier_breakdown, specificity, repairCoherenceIssue. Optional: scoringMetadata (object) — if present, mentalizing_overcertainty may be duplicated inside scoringMetadata instead of top-level; prefer top-level + boolean.
+- Use exactly these top-level keys: scenarioNumber, scenarioName, pillarScores, pillarConfidence, keyEvidence, mentalizing_inference_source, mentalizing_overcertainty, contempt_tier_breakdown, specificity, repairCoherenceIssue, scoringMetadata.
 - Include every marker in pillarScores/pillarConfidence/keyEvidence for this scenario.
+- keyEvidence values must be analytical scoring rationales (level + why + what was missing), not transcript excerpts alone.
 - Include \`mentalizing_inference_source\` as exactly one of: "scenario_restatement", "surface_addition", "independent_inference".
 - Include boolean \`mentalizing_overcertainty\` (true or false) per the MENTALIZING OVERCERTAINTY instructions above (top-level required; duplicate under \`keyEvidence\` or \`scoringMetadata\` optional if present).
+- Include required \`scoringMetadata.evidence_levels.mentalizing\` and \`scoringMetadata.evidence_levels.attunement\` as \`1\` or \`2\`, based on the **full content of the user's answer across all turns for this scenario**, not the opening reaction alone.
+- Include required \`scoringMetadata.evidence_level_basis.mentalizing\` and \`scoringMetadata.evidence_level_basis.attunement\` as short notes naming the specific full-answer content that justified each level.
 
 Return ONLY valid JSON:
 {
@@ -326,6 +339,13 @@ Return ONLY valid JSON:
   "mentalizing_overcertainty": false,
   "contempt_tier_breakdown": ${CONTEMPT_TIER_BREAKDOWN_JSON_TEMPLATE},
   "specificity": "high",
-  "repairCoherenceIssue": null
+  "repairCoherenceIssue": null,
+  "scoringMetadata": {
+    "evidence_levels": { "mentalizing": 2, "attunement": 2 },
+    "evidence_level_basis": {
+      "mentalizing": "Brief note citing full-answer interior reasoning across all user turns.",
+      "attunement": "Brief note citing full-answer emotional stakes across all user turns."
+    }
+  }
 }`;
 }

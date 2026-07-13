@@ -1,10 +1,15 @@
 import {
   scenarioFollowUpAlreadyInTranscript,
+  scenarioAMinimumEngagementForHandoff,
   scenarioOneFollowUpFlagsFromTranscript,
   shouldDeliverScenarioFollowUpQuestion,
+  stripPrematureScenarioABoundaryFromDraft,
   transcriptContainsScenarioAContemptProbe,
   transcriptContainsScenarioARepairQuestion,
+  transcriptContainsScenarioCRepairQuestion,
+  userIsAnsweringAfterStreamDeliveredScenarioAContemptProbe,
 } from '../scenarioFollowUpTranscriptGuard';
+import { shouldAllowScenarioARepairAfterContemptAnswer } from '../scenarioARepairQuestionHelpers';
 import {
   SCENARIO_A_CONTEMPT_PROBE_DELIVERED_COPY,
   SCENARIO_A_REPAIR_QUESTION_AFTER_CONTEMPT_COPY,
@@ -70,6 +75,22 @@ describe('scenarioFollowUpTranscriptGuard', () => {
     ).toBe(true);
   });
 
+  it('treats repair glued into contempt compound turn as phantom — repair still deliverable after contempt answer', () => {
+    const compound = {
+      role: 'assistant' as const,
+      content: `${SCENARIO_A_CONTEMPT_PROBE_DELIVERED_COPY}\n\n${SCENARIO_A_REPAIR_QUESTION_AFTER_CONTEMPT_COPY}`,
+    };
+    const msgs = [
+      { role: 'user', content: 'q1 answer with quote' },
+      compound,
+      { role: 'user', content: 'Probably some contempt, frustration.' },
+    ];
+    expect(scenarioOneFollowUpFlagsFromTranscript(msgs).repairQuestionAsked).toBe(false);
+    expect(
+      shouldDeliverScenarioFollowUpQuestion(msgs, SCENARIO_A_REPAIR_QUESTION_AFTER_CONTEMPT_COPY),
+    ).toBe(true);
+  });
+
   it('ignores welcome-back and score-card assistant turns', () => {
     const msgs = [
       { role: 'assistant', content: SCENARIO_A_CONTEMPT_PROBE_DELIVERED_COPY, isWelcomeBack: true },
@@ -87,5 +108,110 @@ describe('scenarioFollowUpTranscriptGuard', () => {
     expect(shouldDeliverScenarioFollowUpQuestion(msgs, SCENARIO_A_CONTEMPT_PROBE_DELIVERED_COPY)).toBe(
       false,
     );
+  });
+
+  it('detects Scenario C repair Q2 in transcript', () => {
+    const msgs = [
+      {
+        role: 'assistant' as const,
+        content: 'How do you think this situation could be repaired?',
+      },
+    ];
+    expect(transcriptContainsScenarioCRepairQuestion(msgs)).toBe(true);
+  });
+
+  it('blocks duplicate Scenario C repair delivery when already in transcript', () => {
+    const msgs = [
+      {
+        role: 'assistant' as const,
+        content: 'How do you think this situation could be repaired?',
+      },
+      { role: 'user', content: 'Daniel should apologize to Sophie.' },
+    ];
+    expect(
+      shouldDeliverScenarioFollowUpQuestion(msgs, 'How do you think this situation could be repaired?'),
+    ).toBe(false);
+  });
+
+  it('scenarioAMinimumEngagementForHandoff is false after Q1 only', () => {
+    const msgs = [
+      { role: 'assistant', content: 'What do you think is going on between these two?' },
+      { role: 'user', content: 'They need clearer boundaries about phone use on dates.' },
+    ];
+    expect(scenarioAMinimumEngagementForHandoff(msgs)).toBe(false);
+  });
+
+  it('scenarioAMinimumEngagementForHandoff is true after repair answer even when repair context finder misses', () => {
+    const msgs = [
+      { role: 'assistant', content: SCENARIO_A_CONTEMPT_PROBE_DELIVERED_COPY },
+      { role: 'user', content: 'That sounds dismissive and contemptuous to me.' },
+      { role: 'assistant', content: SCENARIO_A_REPAIR_QUESTION_AFTER_CONTEMPT_COPY },
+      {
+        role: 'user',
+        content:
+          "I would set boundaries so all calls go to voicemail during dates and commit to that with Emma.",
+      },
+    ];
+    expect(scenarioAMinimumEngagementForHandoff(msgs)).toBe(true);
+  });
+
+  it('stripPrematureScenarioABoundaryFromDraft keeps contempt probe when bundled with wrap', () => {
+    const bundled = `${SCENARIO_A_CONTEMPT_PROBE_DELIVERED_COPY}\n\nThat's a wrap on that one. Nice work — You focused on putting concrete limits on calls during dates.`;
+    expect(stripPrematureScenarioABoundaryFromDraft(bundled)).toBe(
+      SCENARIO_A_CONTEMPT_PROBE_DELIVERED_COPY,
+    );
+  });
+
+  it('userIsAnsweringAfterStreamDeliveredScenarioAContemptProbe when contempt missing from transcript', () => {
+    const msgs = [
+      { role: 'assistant', content: 'What do you think is going on between these two?' },
+      { role: 'user', content: 'They need clearer boundaries about phone use on dates.' },
+      {
+        role: 'user',
+        content:
+          'That feels like a snide comment, but we should work through it together as a couple.',
+      },
+    ];
+    expect(
+      userIsAnsweringAfterStreamDeliveredScenarioAContemptProbe({
+        scenarioAContemptProbeAsked: true,
+        scenarioARepairQuestionAsked: false,
+        lastDeliveredQuestionText: SCENARIO_A_CONTEMPT_PROBE_DELIVERED_COPY,
+        messagesToUse: msgs,
+      }),
+    ).toBe(true);
+  });
+
+  it('shouldAllowScenarioARepairAfterContemptAnswer when contempt delivered via stream-only TTS', () => {
+    const msgs = [
+      { role: 'user', content: 'q1' },
+      { role: 'user', content: 'contempt answer' },
+    ];
+    expect(
+      shouldAllowScenarioARepairAfterContemptAnswer({
+        currentScenario: 1,
+        currentMoment: 1,
+        scenarioAContemptProbeAsked: true,
+        scenarioARepairQuestionAsked: false,
+        replyingToScenarioAQ1: false,
+        specificEmmaLineAlreadyAddressed: false,
+        shouldForceScenarioAContemptProbe: false,
+        messagesToUse: msgs,
+        lastDeliveredQuestionText: SCENARIO_A_CONTEMPT_PROBE_DELIVERED_COPY,
+      }),
+    ).toBe(true);
+  });
+
+  it('scenarioAMinimumEngagementForHandoff after stream-only contempt when answer includes repair substance', () => {
+    const msgs = [
+      { role: 'assistant', content: 'What do you think is going on between these two?' },
+      { role: 'user', content: 'They need clearer boundaries about phone use on dates.' },
+      {
+        role: 'user',
+        content:
+          "I would talk it through with her together and set a clear agreement about what is okay on dates instead of snide comments.",
+      },
+    ];
+    expect(scenarioAMinimumEngagementForHandoff(msgs)).toBe(true);
   });
 });

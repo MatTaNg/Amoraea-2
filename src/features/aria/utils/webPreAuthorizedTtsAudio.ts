@@ -51,7 +51,8 @@ let recordingStartShouldLogPreAuthorized = false;
 export function preAuthorizeAudioElementOnMicTapGesture(): void {
   if (Platform.OS !== 'web' || typeof window === 'undefined') return;
   // eslint-disable-next-line @typescript-eslint/no-require-imports
-  const { isWebInterviewMidUtteranceTabResumeActive } = require('./elevenLabsTts') as typeof import('./elevenLabsTts');
+  const { isWebInterviewMidUtteranceTabResumeActive } =
+    require('./webInterviewHtmlAudioTabResume') as typeof import('./webInterviewHtmlAudioTabResume');
   if (isWebInterviewMidUtteranceTabResumeActive()) return;
   const AudioCtor = (globalThis as unknown as { Audio?: new (src?: string) => HTMLAudioElement }).Audio;
   if (!AudioCtor) return;

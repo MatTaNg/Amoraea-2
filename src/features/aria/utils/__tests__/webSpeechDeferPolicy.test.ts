@@ -1,4 +1,13 @@
-import { getWebSpeechDeferFromNavigatorSnapshot } from '../webSpeechDeferPolicy';
+import { describe, expect, it, jest } from '@jest/globals';
+
+jest.mock('react-native', () => ({
+  Platform: { OS: 'web' },
+}));
+
+import {
+  getWebSpeechDeferFromNavigatorSnapshot,
+  webSpeechShouldDeferToUserGesture,
+} from '../webSpeechDeferPolicy';
 
 describe('getWebSpeechDeferFromNavigatorSnapshot', () => {
   it('defers for iPhone UA', () => {
@@ -60,5 +69,28 @@ describe('getWebSpeechDeferFromNavigatorSnapshot', () => {
         maxTouchPoints: 1,
       })
     ).toBe(false);
+  });
+});
+
+describe('webSpeechShouldDeferToUserGesture', () => {
+  it('defers on mobile web when navigator reports Android', () => {
+    (global as unknown as { navigator: Navigator }).navigator = {
+      userAgent: 'Mozilla/5.0 (Linux; Android 14)',
+      platform: 'Linux armv8l',
+      maxTouchPoints: 5,
+    } as Navigator;
+
+    expect(webSpeechShouldDeferToUserGesture()).toBe(true);
+  });
+
+  it('does not defer on desktop web', () => {
+    (global as unknown as { navigator: Navigator }).navigator = {
+      userAgent:
+        'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+      platform: 'Win32',
+      maxTouchPoints: 0,
+    } as Navigator;
+
+    expect(webSpeechShouldDeferToUserGesture()).toBe(false);
   });
 });

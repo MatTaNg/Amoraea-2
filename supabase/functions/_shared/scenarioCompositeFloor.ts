@@ -1,5 +1,6 @@
 /** Minimum mean pillar score per scenario (1–3) for gate pass; Moment 4/5 excluded by caller. */
-export const SCENARIO_COMPOSITE_PASS_MIN = 5.0;
+export { SCENARIO_COMPOSITE_PASS_MIN } from '../../../src/config/scoring/scenarioFloors.ts';
+import { SCENARIO_COMPOSITE_PASS_MIN } from '../../../src/config/scoring/scenarioFloors.ts';
 
 export type ScenarioGateIndex = 1 | 2 | 3;
 
@@ -8,6 +9,41 @@ export type ScenarioCompositesTriple = Record<'1' | '2' | '3', number | null>;
 /** Counts every finite numeric pillar value (null/undefined omitted). Zero counts toward the mean. */
 function isPresentPillarScore(v: unknown): v is number {
   return typeof v === 'number' && Number.isFinite(v);
+}
+
+/** Read pillar scores from a stored scenario bundle (camelCase or snake_case). */
+export function readPillarScoresFromScenarioBundle(
+  bundle: unknown,
+): Record<string, number | null | undefined> | null | undefined {
+  if (bundle == null || typeof bundle !== 'object' || Array.isArray(bundle)) return undefined;
+  const o = bundle as Record<string, unknown>;
+  const ps = o.pillarScores ?? o.pillar_scores;
+  if (ps == null || typeof ps !== 'object' || Array.isArray(ps)) return undefined;
+  return ps as Record<string, number | null | undefined>;
+}
+
+function normalizeScenarioPillarScoresInput(
+  raw: Record<string, number | null | undefined> | null | undefined,
+): Record<string, number | null | undefined> | null | undefined {
+  if (raw == null) return null;
+  if (typeof raw !== 'object' || Array.isArray(raw)) return undefined;
+  const asRecord = raw as Record<string, unknown>;
+  if ('pillarScores' in asRecord || 'pillar_scores' in asRecord) {
+    return readPillarScoresFromScenarioBundle(asRecord);
+  }
+  return raw;
+}
+
+export function buildScenarioPillarMapsFromStoredBundles(
+  scenario1: unknown,
+  scenario2: unknown,
+  scenario3: unknown,
+): Partial<Record<ScenarioGateIndex, Record<string, number | null | undefined> | null | undefined>> {
+  return {
+    1: readPillarScoresFromScenarioBundle(scenario1),
+    2: readPillarScoresFromScenarioBundle(scenario2),
+    3: readPillarScoresFromScenarioBundle(scenario3),
+  };
 }
 
 /**
@@ -36,7 +72,9 @@ export function buildScenarioCompositesTriple(
 ): ScenarioCompositesTriple {
   const triple: ScenarioCompositesTriple = { '1': null, '2': null, '3': null };
   for (const idx of [1, 2, 3] as const) {
-    const ps = scenarioPillarScoresByScenario[idx];
+    const ps = normalizeScenarioPillarScoresInput(
+      scenarioPillarScoresByScenario[idx] as Record<string, number | null | undefined> | null | undefined,
+    );
     const key = String(idx) as keyof ScenarioCompositesTriple;
     triple[key] = meanScenarioCompositeFromPillarScores(ps as Record<string, unknown> | null | undefined);
   }

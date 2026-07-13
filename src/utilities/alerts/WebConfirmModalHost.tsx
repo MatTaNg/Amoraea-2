@@ -1,7 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { Modal, Platform, Pressable, StyleSheet, Text, View } from 'react-native';
 import { getWebConfirmState, subscribeWebConfirm, type WebConfirmState } from './webConfirmBridge';
-import { remoteLog } from '@utilities/remoteLog';
 
 /**
  * Renders in-app confirm/alert on **web** so mobile browsers never rely on `window.confirm` / `window.alert`
@@ -11,17 +10,6 @@ export function WebConfirmModalHost(): React.ReactElement | null {
   const [snap, setSnap] = useState<WebConfirmState>(() => getWebConfirmState());
 
   useEffect(() => subscribeWebConfirm(() => setSnap(getWebConfirmState())), []);
-
-  useEffect(() => {
-    if (Platform.OS !== 'web' || snap == null) return;
-    // #region agent log
-    void remoteLog('[DBG] WebConfirmModal_visible', {
-      hypothesisId: 'H4_fix_verify',
-      kind: snap.kind,
-      runId: 'post-fix',
-    });
-    // #endregion
-  }, [snap]);
 
   if (Platform.OS !== 'web' || snap == null) {
     return null;

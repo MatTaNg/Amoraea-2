@@ -42,7 +42,7 @@ const styles = StyleSheet.create({
   wrap: {
     gap: 8,
   },
-  row: { flexDirection: 'row', flexWrap: 'nowrap', gap: SCALE_GAP, width: '100%', maxWidth: 360, alignSelf: 'center' },
+  row: { flexDirection: 'row', flexWrap: 'nowrap', gap: SCALE_GAP, width: '100%', maxWidth: 360, alignSelf: 'flex-start' },
   rowNarrow: { maxWidth: '100%' },
   dot: {
     flex: 1,
@@ -65,7 +65,7 @@ const styles = StyleSheet.create({
   edgeLabelsRow: {
     flexDirection: 'row',
     alignItems: 'flex-start',
-    alignSelf: 'center',
+    alignSelf: 'flex-start',
     width: '100%',
     maxWidth: 360,
     gap: SCALE_GAP,

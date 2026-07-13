@@ -1,4 +1,3 @@
-import { describe, expect, it, vi } from 'vitest';
 import {
   appendAssistantTurn,
   appendAssistantTurnMergingConcurrentUsers,
@@ -12,7 +11,7 @@ import {
 
 describe('interviewTranscriptTurns', () => {
   it('appendAssistantTurn skips empty and whitespace-only content', () => {
-    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const warn = jest.spyOn(console, 'warn').mockImplementation(() => {});
     const base = [{ role: 'user', content: 'hi' }];
     expect(appendAssistantTurn(base, '')).toBe(base);
     expect(appendAssistantTurn(base, '   ')).toBe(base);

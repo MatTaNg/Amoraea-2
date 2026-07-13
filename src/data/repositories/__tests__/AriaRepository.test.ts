@@ -54,7 +54,7 @@ describe('AriaRepository', () => {
       })),
     });
 
-    await expect(repo.createSession('p1', [])).rejects.toThrow(/Failed to create Aria session/);
+    await expect(repo.createSession('p1', [])).rejects.toThrow(/Failed to create Amoraea session/);
   });
 
   it('getLatestSession returns mapped row', async () => {
@@ -109,6 +109,6 @@ describe('AriaRepository', () => {
       })),
     });
 
-    await expect(repo.getLatestSession('p1')).rejects.toThrow(/Failed to fetch Aria session/);
+    await expect(repo.getLatestSession('p1')).rejects.toThrow(/Failed to fetch Amoraea session/);
   });
 });

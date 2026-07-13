@@ -106,7 +106,7 @@ describe('computeGamingCorrection', () => {
     expect(result.additionalPenalty).toBe(0);
   });
 
-  it('level 3 straight-line strips all positives and applies -0.3 penalty', () => {
+  it('level 3 straight-line strips all positives without additional penalty', () => {
     const components = { ...POSITIVE_COMPONENTS };
     const total = totalModifier(components);
     const result = computeGamingCorrection({
@@ -118,8 +118,10 @@ describe('computeGamingCorrection', () => {
       psychometricScores: ZERO_PSYCH,
     });
     expect(result.correctionLevel).toBe(3);
-    expect(result.correctedModifier).toBe(-0.7);
-    expect(result.additionalPenalty).toBe(-0.3);
+    expect(result.correctedModifier).toBe(-0.4);
+    expect(result.additionalPenalty).toBe(0);
+    expect(result.explanation).toMatch(/Instrument strip applied/);
+    expect(result.explanation).toMatch(/No additional penalty applied \(straight-line flags present/);
   });
 
   it('level 1 consistency divergence strips RFQ only', () => {
@@ -207,7 +209,7 @@ describe('computeGamingCorrection', () => {
     expect(result.correctedModifier).toBe(-0.7);
   });
 
-  it('applies -0.3 penalty only once when multiple level 3 triggers fire', () => {
+  it('does not apply additional penalty when level 3 high uncertainty coincides with straight-line flags', () => {
     const components = { ...POSITIVE_COMPONENTS };
     const total = totalModifier(components);
     const result = computeGamingCorrection({
@@ -217,6 +219,27 @@ describe('computeGamingCorrection', () => {
       uncertaintyScore: 0.85,
       pillarScores: ZERO_PILLARS,
       psychometricScores: ZERO_PSYCH,
+    });
+    expect(result.correctionLevel).toBe(3);
+    expect(result.additionalPenalty).toBe(0);
+    expect(result.correctedModifier).toBe(-0.4);
+  });
+
+  it('applies -0.3 penalty when level 3 consistency divergence fires with straight-line flags', () => {
+    const components = { ...POSITIVE_COMPONENTS };
+    const total = totalModifier(components);
+    const result = computeGamingCorrection({
+      instrumentComponents: components,
+      totalModifier: total,
+      straightLineFlags: ['gasp_straight_line'],
+      uncertaintyScore: 0.3,
+      pillarScores: { mentalizing: 4.0, accountability: 4.0, contempt: 4.0, regulation: 4.0 },
+      psychometricScores: {
+        ...ZERO_PSYCH,
+        rfq: 5.5,
+        brs: 4.5,
+        scs_sf: 4.5,
+      },
     });
     expect(result.correctionLevel).toBe(3);
     expect(result.additionalPenalty).toBe(-0.3);
@@ -235,6 +258,37 @@ describe('computeGamingCorrection', () => {
       psychometricScores: ZERO_PSYCH,
     });
     expect(result.correctedModifier).toBe(-0.4);
+  });
+
+  it('Gina-like case: gasp straight-line + high uncertainty strips without additional penalty', () => {
+    const components: InstrumentModifierComponents = {
+      gasp: 0,
+      brs: 0,
+      anxiety_trait: 0,
+      aaq2: 0,
+      rfq: 0,
+      mspss: 0,
+      sd3_narcissism: 0,
+      npi_entitlement: 0,
+      dweck: 0,
+      rses: -0.2,
+      scs_sf: 0,
+      scs: 0,
+    };
+    const total = -0.2;
+    const result = computeGamingCorrection({
+      instrumentComponents: components,
+      totalModifier: total,
+      straightLineFlags: ['gasp_straight_line'],
+      uncertaintyScore: 1.0,
+      pillarScores: ZERO_PILLARS,
+      psychometricScores: ZERO_PSYCH,
+    });
+    expect(result.correctionLevel).toBe(3);
+    expect(result.additionalPenalty).toBe(0);
+    expect(result.correctedModifier).toBe(-0.2);
+    expect(result.explanation).toMatch(/Instrument strip applied/);
+    expect(result.explanation).toMatch(/No additional penalty applied \(straight-line flags present/);
   });
 
   it('gate pass impact: level 2 correction removes positive boost', () => {

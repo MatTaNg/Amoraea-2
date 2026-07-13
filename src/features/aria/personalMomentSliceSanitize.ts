@@ -12,6 +12,7 @@ export type PersonalMomentSliceForSanitize = {
   emotional_vocab_count?: number | null;
   emotional_vocab_words?: string[];
   user_slice_word_count?: number | null;
+  scoringMetadata?: Record<string, unknown> | null;
 };
 
 const M4_REMOVE: readonly string[] = [
@@ -62,6 +63,7 @@ export type PersonalMoment5SliceForSanitize = {
   emotional_vocab_count?: number | null;
   emotional_vocab_words?: string[];
   user_slice_word_count?: number | null;
+  scoringMetadata?: Record<string, unknown> | null;
 };
 
 /**

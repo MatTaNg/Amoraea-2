@@ -1,4 +1,4 @@
-import React, { useRef, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import {
   Modal,
   View,
@@ -10,9 +10,7 @@ import {
   ActivityIndicator,
   KeyboardAvoidingView,
   Platform,
-  Pressable,
   Alert,
-  type TextInputProps,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { supabase } from '@data/supabase/client';
@@ -42,15 +40,43 @@ function MarketResearchTextField({
   onChangeText,
   placeholder,
   autoFocus,
-}: Pick<TextInputProps, 'value' | 'onChangeText' | 'placeholder' | 'autoFocus'>) {
+}: {
+  value: string;
+  onChangeText: (text: string) => void;
+  placeholder: string;
+  autoFocus?: boolean;
+}) {
   const [focused, setFocused] = useState(false);
   const inputRef = useRef<TextInput>(null);
 
+  const focusInput = () => {
+    inputRef.current?.focus();
+  };
+
+  useEffect(() => {
+    if (!autoFocus) return;
+    const timer = setTimeout(focusInput, Platform.OS === 'web' ? 50 : 0);
+    return () => clearTimeout(timer);
+  }, [autoFocus]);
+
+  const shellProps =
+    Platform.OS === 'web'
+      ? ({
+          onMouseDown: (event: { stopPropagation?: () => void }) => {
+            event.stopPropagation?.();
+            focusInput();
+          },
+        } as const)
+      : {};
+
   return (
-    <Pressable
-      style={[styles.textInputShell, focused && styles.textInputShellFocused]}
-      onPress={() => inputRef.current?.focus()}
-      accessibilityRole="none"
+    <View
+      style={[
+        styles.textInputShell,
+        focused && styles.textInputShellFocused,
+        Platform.OS === 'web' ? styles.textInputShellWeb : null,
+      ]}
+      {...shellProps}
     >
       <TextInput
         ref={inputRef}
@@ -59,13 +85,14 @@ function MarketResearchTextField({
         placeholderTextColor="#aaa"
         value={value}
         onChangeText={onChangeText}
-        autoFocus={autoFocus}
+        autoFocus={Platform.OS !== 'web' ? autoFocus : undefined}
         onFocus={() => setFocused(true)}
         onBlur={() => setFocused(false)}
+        onPressIn={(event) => event.stopPropagation?.()}
         underlineColorAndroid="transparent"
-        editable
+        accessibilityLabel={placeholder}
       />
-    </Pressable>
+    </View>
   );
 }
 
@@ -206,36 +233,24 @@ export function MarketResearchModal({ visible, userId, onComplete }: Props) {
 
   const isLastQuestion = currentIndex === TOTAL_QUESTIONS - 1;
 
-  return (
-    <Modal visible={visible} transparent animationType="fade" statusBarTranslucent>
-      <KeyboardAvoidingView
-        style={styles.overlay}
-        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
-      >
-        <ScrollView
-          style={styles.overlayScroll}
-          contentContainerStyle={styles.overlayScrollContent}
-          showsVerticalScrollIndicator={false}
-          keyboardShouldPersistTaps="handled"
-          bounces={false}
-        >
-          <View style={styles.card}>
-            <Text style={styles.title}>Let's get to know you first</Text>
+  const card = (
+    <View style={[styles.card, Platform.OS === 'web' ? styles.cardWeb : null]}>
+      <Text style={styles.title}>Let's get to know you first</Text>
 
-            <View style={styles.dotsRow}>
-              {QUESTION_ORDER.map((_, i) => (
-                <View
-                  key={i}
-                  style={[
-                    styles.dot,
-                    i === currentIndex && styles.dotActive,
-                    i < currentIndex && styles.dotComplete,
-                  ]}
-                />
-              ))}
-            </View>
+      <View style={styles.dotsRow}>
+        {QUESTION_ORDER.map((_, i) => (
+          <View
+            key={i}
+            style={[
+              styles.dot,
+              i === currentIndex && styles.dotActive,
+              i < currentIndex && styles.dotComplete,
+            ]}
+          />
+        ))}
+      </View>
 
-            <View style={styles.body}>
+      <View style={styles.body}>
             {currentQuestion === 'referral' && (
               <View>
                 <Text style={styles.questionText}>How did you hear about us?</Text>
@@ -267,6 +282,7 @@ export function MarketResearchModal({ visible, userId, onComplete }: Props) {
                 ))}
                 {referralSource === 'Other' ? (
                   <MarketResearchTextField
+                    key="referral-other"
                     placeholder="Please specify..."
                     value={referralOther}
                     onChangeText={setReferralOther}
@@ -280,6 +296,7 @@ export function MarketResearchModal({ visible, userId, onComplete }: Props) {
               <View>
                 <Text style={styles.questionText}>What is your occupation?</Text>
                 <MarketResearchTextField
+                  key="occupation"
                   placeholder="e.g. Software engineer, teacher, student..."
                   value={occupation}
                   onChangeText={setOccupation}
@@ -461,6 +478,7 @@ export function MarketResearchModal({ visible, userId, onComplete }: Props) {
                       <Text style={styles.optional}>(optional)</Text>
                     </Text>
                     <MarketResearchTextField
+                      key="spend-context"
                       placeholder="e.g. relationship coaching, men's work, therapy..."
                       value={spendContext}
                       onChangeText={setSpendContext}
@@ -507,8 +525,36 @@ export function MarketResearchModal({ visible, userId, onComplete }: Props) {
               )}
             </View>
           </View>
-        </ScrollView>
-      </KeyboardAvoidingView>
+  );
+
+  return (
+    <Modal
+      visible={visible}
+      transparent
+      animationType="fade"
+      statusBarTranslucent
+      {...(Platform.OS === 'web' ? ({ style: { zIndex: 100000 } as const } as const) : {})}
+    >
+      <View style={[styles.overlay, Platform.OS === 'web' ? styles.overlayWeb : null]}>
+        {Platform.OS === 'web' ? (
+          <View style={[styles.overlayScrollContent, styles.overlayScrollContentWeb]}>{card}</View>
+        ) : (
+          <KeyboardAvoidingView
+            style={styles.overlayScroll}
+            behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+          >
+            <ScrollView
+              style={styles.overlayScroll}
+              contentContainerStyle={styles.overlayScrollContent}
+              showsVerticalScrollIndicator={false}
+              keyboardShouldPersistTaps="always"
+              bounces={false}
+            >
+              {card}
+            </ScrollView>
+          </KeyboardAvoidingView>
+        )}
+      </View>
     </Modal>
   );
 }
@@ -517,6 +563,11 @@ const styles = StyleSheet.create({
   overlay: {
     flex: 1,
     backgroundColor: 'rgba(0,0,0,0.65)',
+  },
+  overlayWeb: {
+    flex: 1,
+    pointerEvents: 'auto',
+    zIndex: 100000,
   },
   overlayScroll: {
     flex: 1,
@@ -528,12 +579,21 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     padding: 20,
   },
+  overlayScrollContentWeb: {
+    flex: 1,
+    width: '100%',
+  },
   card: {
     backgroundColor: '#fff',
     borderRadius: 16,
     padding: 24,
     width: '100%',
     maxWidth: 420,
+  },
+  cardWeb: {
+    pointerEvents: 'auto',
+    position: 'relative',
+    zIndex: 1,
   },
   body: {
     width: '100%',
@@ -620,10 +680,13 @@ const styles = StyleSheet.create({
     borderRadius: 8,
     marginTop: 8,
     backgroundColor: '#fff',
-    overflow: 'hidden',
     alignSelf: 'stretch',
     width: '100%',
-    ...(Platform.OS === 'web' ? { cursor: 'text' as const } : {}),
+  },
+  textInputShellWeb: {
+    position: 'relative',
+    zIndex: 2,
+    pointerEvents: 'auto',
   },
   textInputShellFocused: {
     borderColor: '#111',
@@ -634,14 +697,15 @@ const styles = StyleSheet.create({
     fontSize: 14,
     color: '#111',
     borderWidth: 0,
-    outlineStyle: 'none',
-    outlineWidth: 0,
     width: '100%',
     minHeight: 44,
+    backgroundColor: 'transparent',
   },
   textInputWeb: {
-    outlineStyle: 'none',
-    cursor: 'text',
+    flex: 1,
+    alignSelf: 'stretch',
+    outlineStyle: 'solid',
+    outlineWidth: 0,
   },
   spendContextBlock: {
     marginTop: 16,

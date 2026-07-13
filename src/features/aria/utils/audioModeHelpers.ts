@@ -60,7 +60,8 @@ export async function applyWebInterviewForegroundTtsSettle(
 
 async function applyWebMobileTtsRouteSettle(context: 'after_recording' | 'after_foreground'): Promise<void> {
   // eslint-disable-next-line @typescript-eslint/no-require-imports
-  const { isWebInterviewMidUtteranceTabResumeActive } = require('./elevenLabsTts') as typeof import('./elevenLabsTts');
+  const { isWebInterviewMidUtteranceTabResumeActive } =
+    require('./webInterviewHtmlAudioTabResume') as typeof import('./webInterviewHtmlAudioTabResume');
   if (isWebInterviewMidUtteranceTabResumeActive()) return;
   // eslint-disable-next-line @typescript-eslint/no-require-imports
   const { getWebSpeechDeferFromNavigatorSnapshot } = require('./webSpeechDeferPolicy') as typeof import('./webSpeechDeferPolicy');
@@ -118,10 +119,11 @@ export async function prepareInterviewTtsPlayback(
     }
     if (!options?.parallelStreamContinuation) {
       // eslint-disable-next-line @typescript-eslint/no-require-imports
-      const {
-        ensureWebInterviewTtsOutputVolumePrimed,
-        isWebInterviewMidUtteranceTabResumeActive,
-      } = require('./elevenLabsTts') as typeof import('./elevenLabsTts');
+      const { isWebInterviewMidUtteranceTabResumeActive } =
+        require('./webInterviewHtmlAudioTabResume') as typeof import('./webInterviewHtmlAudioTabResume');
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      const { ensureWebInterviewTtsOutputVolumePrimed } =
+        require('./webInterviewTtsOutputVolume') as typeof import('./webInterviewTtsOutputVolume');
       if (!isWebInterviewMidUtteranceTabResumeActive()) {
         ensureWebInterviewTtsOutputVolumePrimed();
       }

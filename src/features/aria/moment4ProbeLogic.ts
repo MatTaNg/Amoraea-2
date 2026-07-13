@@ -1,3 +1,7 @@
+import type { BuildPersonalMomentHandoffReflectionOptions } from './personalMomentHandoffReflection';
+import { extractLeadingReflectionFromMoment4ThresholdProbe } from './deliveredReflectionRegistry';
+import { normalizeInterviewTypography } from './interviewTypography';
+
 export type Moment4RelationshipType = 'close' | 'non_close' | 'mixed' | 'unknown';
 
 export function evaluateMoment4RelationshipType(text: string): {
@@ -36,6 +40,25 @@ export function evaluateMoment4RelationshipType(text: string): {
 export const MOMENT_4_GRUDGE_QUESTION_TEXT =
   "Think of someone you've had a really hard time with — maybe a falling out, a grudge, or just someone who got under your skin. Tell me what happened there, and where things stand now." as const;
 
+/** Client-injected Moment 4 commitment-threshold follow-up (verbatim ack + question). */
+export const MOMENT_4_COMMITMENT_THRESHOLD_QUESTION_TEXT =
+  'Thanks for sharing that. At what point do you decide when a relationship is something to work through versus something you need to walk away from?' as const;
+
+/**
+ * Moment 4 grudge answer → commitment-threshold follow-up.
+ * No leading reflection — interviewer instructions require the threshold question alone after the grudge answer.
+ */
+export function buildMoment4ThresholdProbeWithReflection(
+  _lastGrudgeAnswer: string,
+  _reflectionOpts?: BuildPersonalMomentHandoffReflectionOptions,
+): string {
+  return MOMENT_4_COMMITMENT_THRESHOLD_QUESTION_TEXT;
+}
+
+/** Show-scenario card body (question only, no leading ack). */
+export const MOMENT_4_COMMITMENT_THRESHOLD_QUESTION_CARD_BODY =
+  'At what point do you decide when a relationship is something to work through versus something you need to walk away from?' as const;
+
 export function looksLikeMoment4ThresholdQuestion(text: string): boolean {
   const normalized = (text ?? '')
     .replace(/\u2019/g, "'")
@@ -48,13 +71,162 @@ export function looksLikeMoment4ThresholdQuestion(text: string): boolean {
     t.includes(
       'at what point do you decide when a relationship is something to work through versus something you need to walk away from',
     );
+  const walkAwayPhrase = /\bwalk(?:ing)? away\b/.test(t);
+  const workThroughPhrase = /\bwork(?:ing)? through\b/.test(t);
   const workVsLeaveFork =
-    /\bwork(?:ing)? through\b/.test(t) &&
-    /\bwalk away\b/.test(t) &&
+    workThroughPhrase &&
+    walkAwayPhrase &&
     (/\b(at what point|what point|when (?:do you|would you|have you|did you) decide)\b/.test(t) ||
       /\b(decide (?:if|whether)|worth working through|stay and work|leave or stay)\b/.test(t) ||
       t.includes('point'));
-  return canonicalPhrase || workVsLeaveFork;
+  const friendshipContinuingFork =
+    (/\b(friendship|relationship)\b/.test(t) &&
+      /\b(worth continuing|continue the (friendship|relationship)|always know you'?d|considered whether)\b/.test(
+        t,
+      ) &&
+      /\b(work through|worth continuing|walk away|walking away|end (?:it|the friendship))\b/.test(t)) ||
+    (/\bconsidered whether\b/.test(t) &&
+      /\b(worth continuing|work through it|work through)\b/.test(t));
+  const thresholdVersusWalkAwayFork =
+    /\bthreshold\b/.test(t) && workThroughPhrase && walkAwayPhrase && /\bversus\b/.test(t);
+  const trustBrokenFriendshipFork =
+    /\b(trust gets broken|trust was broken|broken trust)\b/.test(t) &&
+    /\bfriendship\b/.test(t) &&
+    workThroughPhrase &&
+    walkAwayPhrase;
+  const workThroughVersusWalkAwayPersonalityFork =
+    workThroughPhrase &&
+    walkAwayPhrase &&
+    (/\btends to work through\b/.test(t) ||
+      /\bwork through it\b/.test(t) ||
+      /\bwhen something like that comes up\b/.test(t) ||
+      /\breal tension with another person\b/.test(t) ||
+      (/\bare you someone who\b/.test(t) && /\b(?:walk away|walking away)\b/.test(t)));
+  return (
+    canonicalPhrase ||
+    workVsLeaveFork ||
+    friendshipContinuingFork ||
+    thresholdVersusWalkAwayFork ||
+    trustBrokenFriendshipFork ||
+    workThroughVersusWalkAwayPersonalityFork
+  );
+}
+
+function normalizeMoment4ThresholdCompare(text: string): string {
+  return normalizeInterviewTypography(text ?? '')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .toLowerCase()
+    .replace(/[.!?…]+$/, '');
+}
+
+/** True when assistant copy is already the scripted threshold line (full inject or card body only). */
+export function isCanonicalMoment4ThresholdQuestionText(text: string): boolean {
+  const norm = normalizeMoment4ThresholdCompare(text);
+  const canonicalFull = normalizeMoment4ThresholdCompare(MOMENT_4_COMMITMENT_THRESHOLD_QUESTION_TEXT);
+  const canonicalBody = normalizeMoment4ThresholdCompare(MOMENT_4_COMMITMENT_THRESHOLD_QUESTION_CARD_BODY);
+  if (norm === canonicalFull || norm === canonicalBody) return true;
+  return norm.endsWith(canonicalBody) && norm.includes('thanks for sharing');
+}
+
+function extractBriefAckBeforeMoment4ThresholdProbe(text: string): string | null {
+  const match = /^(got it|thanks|thank you|okay|ok|i hear you|i understand)\b[,.!?…\s—–-]*/i.exec(
+    text.trim(),
+  );
+  if (!match) return null;
+  const ack = match[1].trim();
+  return ack.length > 0 ? ack.charAt(0).toUpperCase() + ack.slice(1).toLowerCase() : null;
+}
+
+/** Streaming may flush before the walk-away fork arrives (model paraphrase of the threshold question). */
+export function isIncompleteMoment4ThresholdLeadSentence(text: string): boolean {
+  const t = (text ?? '').replace(/\s+/g, ' ').trim();
+  if (!t || looksLikeMoment4ThresholdQuestion(t)) return false;
+  const low = t.toLowerCase();
+  if (/\bwhen you think about what it takes\b/.test(low)) return true;
+  if (/\bwhat it takes to fully work through\b/.test(low)) return true;
+  if (/\bwork through something\b/.test(low) && !/\bwalk away\b/.test(low)) return true;
+  if (
+    /\b(?:at what point|what point).*\bwork(?:ing)? through\b/.test(low) &&
+    !/\bwalk away\b/.test(low) &&
+    !/\?\s*$/.test(t)
+  ) {
+    return true;
+  }
+  if (
+    /\b(?:decide|know).*\bwork(?:ing)? through\b/.test(low) &&
+    !/\bwalk away\b/.test(low) &&
+    !/\?\s*$/.test(t)
+  ) {
+    return true;
+  }
+  if (
+    /\bwhen it comes to\b/.test(low) &&
+    /\brelationships?\b/.test(low) &&
+    (/\bwhat'?s your\b/.test(low) || /\bwhat is your\b/.test(low) || /\bthreshold\b/.test(low)) &&
+    !/\?\s*$/.test(t)
+  ) {
+    return true;
+  }
+  if (/\bwhen it came to that situation\b/.test(low)) return true;
+  if (/\bwhen it came to\b/.test(low) &&
+    /\b(?:that situation|relationships?)\b/.test(low) &&
+    !/\?\s*$/.test(t)
+  ) {
+    return true;
+  }
+  if (/\bwhen things go sideways\b/.test(low)) return true;
+  if (/\bwhether it'?s that\s*$/i.test(t)) return true;
+  if (/[—–-]\s*whether\b/i.test(t) && !/\?\s*$/.test(t)) return true;
+  if (/\bis there a point\b/.test(low) && !/\bwalk away\b/.test(low)) return true;
+  if (
+    /\brelationships?\b/.test(low) &&
+    /\bwhat'?s your\s*$/i.test(t) &&
+    !/\?\s*$/.test(t)
+  ) {
+    return true;
+  }
+  return (
+    /\b(?:relationship|friendship)\b/.test(low) &&
+    /\bwork(?:ing)? through\b/.test(low) &&
+    !/\bwalk away\b/.test(low) &&
+    !/\?\s*$/.test(t)
+  );
+}
+
+/** Partial threshold paraphrase without the full walk-away fork — not yet a complete question. */
+export function looksLikeMoment4ThresholdParaphraseInProgress(text: string): boolean {
+  const t = (text ?? '').replace(/\s+/g, ' ').trim();
+  if (!t || looksLikeMoment4ThresholdQuestion(t)) return false;
+  if (isIncompleteMoment4ThresholdLeadSentence(t)) return true;
+  const low = t.toLowerCase();
+  return (
+    /\bwork(?:ing)? through\b/.test(low) &&
+    /\b(?:walk away|walking away|versus|vs\.?)\b/.test(low) &&
+    !/\?\s*$/.test(t)
+  );
+}
+
+/** Expand truncated / paraphrased M4 commitment-threshold copy to the canonical scripted question. */
+export function coerceMoment4ThresholdQuestionForTts(text: string): string {
+  const t = (text ?? '').replace(/\s+/g, ' ').trim();
+  if (!t) return MOMENT_4_COMMITMENT_THRESHOLD_QUESTION_TEXT;
+  if (extractLeadingReflectionFromMoment4ThresholdProbe(t)) {
+    return MOMENT_4_COMMITMENT_THRESHOLD_QUESTION_TEXT;
+  }
+  if (isCanonicalMoment4ThresholdQuestionText(t)) return t;
+  if (
+    looksLikeMoment4ThresholdQuestion(t) ||
+    looksLikeMoment4ThresholdParaphraseInProgress(t) ||
+    isIncompleteMoment4ThresholdLeadSentence(t)
+  ) {
+    const ack = extractBriefAckBeforeMoment4ThresholdProbe(t);
+    if (ack) {
+      return `${ack}. Thanks for sharing that. ${MOMENT_4_COMMITMENT_THRESHOLD_QUESTION_CARD_BODY}`;
+    }
+    return MOMENT_4_COMMITMENT_THRESHOLD_QUESTION_TEXT;
+  }
+  return t;
 }
 
 /** True if any assistant line in the transcript is (or contains) the Moment 4 commitment-threshold follow-up. */
@@ -101,10 +273,14 @@ export function looksLikeMoment4GrudgePrompt(text: string): boolean {
   }
   return (
     t.includes('held a grudge') ||
+    /\bhold(?:s|ing)? a grudge\b/.test(t) ||
     (t.includes("really didn't like") && (t.includes('someone') || t.includes('your life'))) ||
-    (t.includes('grudge') && t.includes('someone')) ||
+    (/\bstruggle to like\b/.test(t) && /\b(anyone|someone)\b/.test(t)) ||
+    (t.includes('grudge') && (t.includes('someone') || t.includes('anyone'))) ||
     (t.includes('really hard time with') &&
       (t.includes('what happened') || t.includes('where things stand'))) ||
+    (/\bhad a hard time with\b/.test(t) && /\b(anyone|someone)\b/.test(t)) ||
+    (/\bis there anyone in your life\b/.test(t) && /\bhard time\b/.test(t)) ||
     (t.includes('got under your skin') &&
       (t.includes('what happened') || t.includes('where things stand'))) ||
     (t.includes('falling out') && t.includes('what happened'))
@@ -152,5 +328,42 @@ export function shouldForceMoment4ThresholdProbe(params: {
   if (!looksLikeMoment4GrudgePrompt(params.lastAssistantContent)) return false;
   if (looksLikeMisplacedNonGrudgeMoment4Answer(params.userAnswerText)) return false;
   return true;
+}
+
+function transcriptHasSubstantiveUserAnswerAfterMoment4Grudge(
+  messages: ReadonlyArray<{ role: string; content?: string | null }>,
+): boolean {
+  let lastGrudgeIdx = -1;
+  for (let i = 0; i < messages.length; i++) {
+    const m = messages[i];
+    if (m.role === 'assistant' && looksLikeMoment4GrudgePrompt(m.content ?? '')) {
+      lastGrudgeIdx = i;
+    }
+  }
+  if (lastGrudgeIdx < 0) return false;
+  return messages.slice(lastGrudgeIdx + 1).some((m) => {
+    if (m.role !== 'user') return false;
+    const text = (m.content ?? '').trim();
+    if (text.split(/\s+/).filter(Boolean).length < 5) return false;
+    return !looksLikeMisplacedNonGrudgeMoment4Answer(text);
+  });
+}
+
+/**
+ * When repeat-request lands after only a neutral personal ack, replay the pending M4 commitment
+ * threshold follow-up instead of the grudge prompt or the useless ack line.
+ */
+export function resolveMoment4ConfusionRepeatReplayFallback(
+  messages: ReadonlyArray<{ role: string; content?: string | null }>,
+  options: {
+    currentInterviewMoment: number;
+    moment4ThresholdProbeAsked: boolean;
+  },
+): string | null {
+  if (options.currentInterviewMoment !== 4) return null;
+  if (options.moment4ThresholdProbeAsked) return null;
+  if (transcriptIncludesMoment4ThresholdAssistant(messages)) return null;
+  if (!transcriptHasSubstantiveUserAnswerAfterMoment4Grudge(messages)) return null;
+  return MOMENT_4_COMMITMENT_THRESHOLD_QUESTION_TEXT;
 }
 

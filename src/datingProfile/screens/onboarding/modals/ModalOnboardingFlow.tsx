@@ -23,6 +23,7 @@ import {
   findLifeDomainQuestionStepRow,
   getActiveLifeDomainOptionalOpenEndedSteps,
   getActiveLifeDomainRequiredQuestionSteps,
+  isLifeDomainOptionalOpenEndedStep,
   isLifeDomainRequiredQuestionStep,
   normalizeLifeDomainQuestionOnboardingStep,
 } from '@/shared/constants/lifeDomainOnboardingQuestions';
@@ -38,7 +39,6 @@ import { mergeAndPersistMatchPreferences } from '@/screens/profile/editProfile/m
 import { MatchPreferencesModal } from './MatchPreferencesModal';
 import { AttractionPreferencesModal } from './AttractionPreferencesModal';
 import { ProfileOnboardingCompleteModal } from '../ProfileOnboardingCompleteModal';
-import { PersonalityDocumentsOnboardingStep } from '../PersonalityDocumentsOnboardingStep';
 import { SexInterestsOnboardingModal } from './SexInterestsOnboardingModal';
 import {
   workoutOptions,
@@ -91,7 +91,7 @@ import { OnboardingHeaderExitContext } from './components/onboardingHeaderExitCo
 export type { OnboardingStep } from './onboardingStepOrder';
 
 const TOTAL_STEPS = ONBOARDING_STEPS_ORDER.filter(
-  (s) => s !== 'complete' && s !== 'profileComplete' && s !== 'personalityDocuments',
+  (s) => s !== 'complete' && s !== 'profileComplete',
 ).length;
 const PARTNER_SUBSTANCE_ALIGNMENT_CHOICES = PARTNER_SUBSTANCE_ALIGNMENT_OPTIONS.map((label) => ({
   label,
@@ -117,16 +117,15 @@ function OnboardingProgressBar({
   currentStep: OnboardingStep;
   navigationCtx: ReturnType<typeof getOnboardingNavigationContext>;
 }) {
-  const steps = getEffectiveOnboardingStepsOrder(navigationCtx);
+  const steps = getEffectiveOnboardingStepsOrder(navigationCtx, currentStep);
   const index = steps.indexOf(currentStep);
   const total = steps.filter(
-    (s) => s !== 'complete' && s !== 'profileComplete' && s !== 'personalityDocuments',
+    (s) => s !== 'complete' && s !== 'profileComplete',
   ).length;
   const progress =
     index < 0 ||
     currentStep === 'complete' ||
-    currentStep === 'profileComplete' ||
-    currentStep === 'personalityDocuments'
+    currentStep === 'profileComplete'
       ? 1
       : (index + 1) / total;
   return (
@@ -198,10 +197,27 @@ export const ModalOnboardingFlow: React.FC<ModalOnboardingFlowProps> = ({
                     rawStep,
                     progress.data.onboardingData?.wantKids,
                   ) ?? rawStep;
-            setCurrentStep(normalizedStep as OnboardingStep);
-            if (normalizedStep !== rawStep && user?.id) {
+
+            // Check if the normalized step is valid in the current step order
+            const validSteps = ONBOARDING_STEPS_ORDER;
+            const isValidStep = validSteps.includes(normalizedStep as OnboardingStep);
+
+            // Also check if it's a life domain optional step that might not be active
+            const activeOptionalSteps = getActiveLifeDomainOptionalOpenEndedSteps(
+              progress.data.onboardingData?.wantKids,
+              progress.data.onboardingData?.lifeDomainAnswers,
+            );
+            const isActiveOptionalStep = activeOptionalSteps.some(({ step }) => step === normalizedStep);
+
+            // If step is invalid or not active (e.g., removed personalityDocuments or completed optional steps), redirect to a safe default
+            const finalStep = isValidStep && (isActiveOptionalStep || !isLifeDomainOptionalOpenEndedStep(normalizedStep as OnboardingStep))
+              ? normalizedStep
+              : 'typology';
+
+            setCurrentStep(finalStep as OnboardingStep);
+            if (finalStep !== rawStep && user?.id) {
               void modalOnboardingService.saveProgress(user.id, {
-                currentStep: normalizedStep,
+                currentStep: finalStep,
                 onboardingData: progress.data.onboardingData ?? {},
               });
             }
@@ -724,7 +740,10 @@ export const ModalOnboardingFlow: React.FC<ModalOnboardingFlowProps> = ({
   };
 
   const goToNextStep = () => {
-    if (stepTransitionLockRef.current) return;
+    if (stepTransitionLockRef.current) {
+      console.log('[ModalOnboarding] goToNextStep locked');
+      return;
+    }
     const stepWeLeave = currentStep;
     const uid = user?.id;
     if (uid) {
@@ -733,11 +752,20 @@ export const ModalOnboardingFlow: React.FC<ModalOnboardingFlowProps> = ({
       });
     }
 
-    const nextStep = getNextOnboardingStep(
+    const navCtx = getOnboardingNavigationContext(onboardingDataRef.current);
+    const nextStep = getNextOnboardingStep(currentStep, navCtx);
+
+    console.log('[ModalOnboarding] goToNextStep', {
       currentStep,
-      getOnboardingNavigationContext(onboardingDataRef.current),
-    );
-    if (!nextStep) return;
+      nextStep,
+      hasTypology: !!navCtx.typology,
+      hasUser: !!uid,
+    });
+
+    if (!nextStep) {
+      console.warn('[ModalOnboarding] no next step found from', currentStep);
+      return;
+    }
     const latestData = onboardingDataRef.current;
 
     if (saveTimeoutRef.current) {
@@ -1045,7 +1073,7 @@ export const ModalOnboardingFlow: React.FC<ModalOnboardingFlowProps> = ({
   return (
     <OnboardingHeaderExitContext.Provider value={onExitToPostInterview}>
     <View style={{ flex: 1 }}>
-      {currentStep !== 'profileComplete' && currentStep !== 'personalityDocuments' ? (
+      {currentStep !== 'profileComplete' ? (
         <OnboardingProgressBar
           currentStep={currentStep}
           navigationCtx={getOnboardingNavigationContext(onboardingData)}
@@ -1688,14 +1716,6 @@ export const ModalOnboardingFlow: React.FC<ModalOnboardingFlowProps> = ({
           onBack={goToPrevStep}
         />
       )}
-
-      {currentStep === 'personalityDocuments' && user?.id ? (
-        <PersonalityDocumentsOnboardingStep
-          userId={user.id}
-          onNext={goToNextStep}
-          onBack={goToPrevStep}
-        />
-      ) : null}
 
       {currentStep === 'profileComplete' && (
         <ProfileOnboardingCompleteModal onContinue={handleComplete} />

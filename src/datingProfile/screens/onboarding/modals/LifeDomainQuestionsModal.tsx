@@ -5,6 +5,7 @@ import {
   Text,
   TextInput,
   Platform,
+  ActivityIndicator,
 } from 'react-native';
 import { Picker } from '@react-native-picker/picker';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -67,7 +68,7 @@ interface LifeDomainQuestionsModalProps {
   wantKids?: string | null;
   /** When true, blocks Next until required questions are answered (onboarding only). */
   enforceRequired?: boolean;
-  /** Show only unanswered optional open-ended questions (post-slider onboarding). */
+  /** Show only unanswered optional follow-up questions (post-slider onboarding). */
   optionalOpenEndedLeftover?: boolean;
   onNext: () => void;
   onBack: () => void;
@@ -89,9 +90,11 @@ export const LifeDomainQuestionsModal: React.FC<LifeDomainQuestionsModalProps> =
   const [answers, setAnswers] = useState<LifeDomainAnswersMap>(() =>
     mergeLifeDomainAnswerMaps({}, initialAnswers),
   );
+  const [loading, setLoading] = useState(true);
   const [validationError, setValidationError] = useState<string | null>(null);
   const [pickerSheet, setPickerSheet] = useState<PickerSheet | null>(null);
   const [questionSuggestion, setQuestionSuggestion] = useState('');
+  const [questions, setQuestions] = useState<LifeDomainQuestionDef[]>([]);
   const answersBaselineRef = useRef<LifeDomainAnswersMap>({});
   const draftSeedRef = useRef(initialAnswers);
 
@@ -102,6 +105,7 @@ export const LifeDomainQuestionsModal: React.FC<LifeDomainQuestionsModalProps> =
   }, [domainId, userId]);
 
   useEffect(() => {
+    setLoading(true);
     const merged = mergeLifeDomainAnswerMaps({}, draftSeedRef.current);
     setAnswers(merged);
     answersBaselineRef.current = JSON.parse(JSON.stringify(merged)) as LifeDomainAnswersMap;
@@ -123,12 +127,32 @@ export const LifeDomainQuestionsModal: React.FC<LifeDomainQuestionsModalProps> =
         answersBaselineRef.current = JSON.parse(JSON.stringify(merged)) as LifeDomainAnswersMap;
       } catch (e) {
         if (__DEV__) console.warn('[LifeDomainQuestionsModal] load', e);
+      } finally {
+        if (!cancelled) setLoading(false);
       }
     })();
     return () => {
       cancelled = true;
     };
   }, [domainId, lifeDomains, userId]);
+
+  // Stable questions list for the current view — prevents disappearing questions while typing
+  useEffect(() => {
+    if (loading) return;
+
+    if (optionalOpenEndedLeftover) {
+      // Use baseline answers for filtering so that typing doesn't remove questions from the current view
+      const domainAnswers = answersBaselineRef.current[domainId] ?? {};
+      setQuestions(getLeftoverOptionalOpenEndedQuestionsForDomain(domainId, domainAnswers, { wantKids }));
+    } else {
+      const all = LIFE_DOMAIN_ONBOARDING_QUESTIONS[domainId] ?? [];
+      if (!enforceRequired) {
+        setQuestions(all);
+      } else {
+        setQuestions(all.filter((q) => isLifeDomainQuestionRequiredForOnboarding(q, { wantKids })));
+      }
+    }
+  }, [domainId, optionalOpenEndedLeftover, wantKids, enforceRequired, loading]);
 
   const setAnswer = useCallback((questionId: string, value: string) => {
     setValidationError(null);
@@ -280,28 +304,17 @@ export const LifeDomainQuestionsModal: React.FC<LifeDomainQuestionsModalProps> =
 
   const domainAnswers = answers[domainId] ?? {};
 
-  const questions = useMemo(() => {
-    if (optionalOpenEndedLeftover) {
-      return getLeftoverOptionalOpenEndedQuestionsForDomain(domainId, domainAnswers, { wantKids });
-    }
-    const all = LIFE_DOMAIN_ONBOARDING_QUESTIONS[domainId];
-    if (!enforceRequired) return all;
-    return all.filter((q) => isLifeDomainQuestionRequiredForOnboarding(q, { wantKids }));
-  }, [domainAnswers, domainId, wantKids, enforceRequired, optionalOpenEndedLeftover]);
-
   const { answered, total } = useMemo(() => {
     if (optionalOpenEndedLeftover) {
-      const leftover = getLeftoverOptionalOpenEndedQuestionsForDomain(domainId, domainAnswers, {
-        wantKids,
-      });
-      const answeredCount = leftover.filter((q) => isLifeDomainAnswerFilled(domainAnswers[q.id])).length;
-      return { answered: answeredCount, total: leftover.length };
+      // For progress count, we still want to filter the current questions list to see which of them are answered
+      const answeredCount = questions.filter((q) => isLifeDomainAnswerFilled(domainAnswers[q.id])).length;
+      return { answered: answeredCount, total: questions.length };
     }
     return countAnsweredInDomain(domainId, domainAnswers, {
       wantKids,
       countRequiredOnly: enforceRequired,
     });
-  }, [domainAnswers, domainId, wantKids, enforceRequired, optionalOpenEndedLeftover]);
+  }, [domainAnswers, domainId, wantKids, enforceRequired, optionalOpenEndedLeftover, questions]);
 
   return (
     <SafeAreaView style={styles.screen} edges={['top', 'left', 'right']}>
@@ -329,7 +342,14 @@ export const LifeDomainQuestionsModal: React.FC<LifeDomainQuestionsModalProps> =
             <Text style={styles.validationError}>{validationError}</Text>
           ) : null}
           <View style={styles.domainBody}>
-            {questions.map((q) => renderQuestion(q))}
+            {loading ? (
+              <ActivityIndicator
+                color={theme.colors.primary}
+                style={{ marginVertical: 32 }}
+              />
+            ) : (
+              questions.map((q) => renderQuestion(q))
+            )}
           </View>
         </View>
       </ScrollView>

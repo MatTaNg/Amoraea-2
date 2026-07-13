@@ -86,7 +86,7 @@ describe('resolveInterviewStackScreenFromStatus', () => {
     });
   }
 
-  it('failed interview legacy user completes psychometrics → post-interview failed (not Aria)', () => {
+  it('failed interview legacy user completes psychometrics → post-interview failed (not Amoraea)', () => {
     if (!PSYCHOMETRICS_ENABLED) {
       const result = resolveInterviewStackScreenFromStatus({
         psychometricsCompletedAt: '2026-06-01T00:00:00Z',

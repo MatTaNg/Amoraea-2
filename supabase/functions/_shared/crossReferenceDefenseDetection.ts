@@ -14,6 +14,99 @@ export interface DefenseCrossReferenceFlag {
   description: string;
 }
 
+export type DefensePatternsCrossRefInput = {
+  projection_detected: boolean;
+  splitting_detected: boolean;
+  rationalization_detected: boolean;
+  denial_detected: boolean;
+};
+
+/** Valid empty cross-reference — completed attempts must persist this shape, never null. */
+export const EMPTY_DEFENSE_CROSS_REFERENCE_RESULT: DefenseCrossReferenceResult = {
+  overallConfidence: 'high',
+  flags: [],
+  recommendAdminReview: false,
+  modifierAdjustment: 0,
+};
+
+function finitePsychScore(v: unknown): number | null {
+  if (typeof v === 'number' && Number.isFinite(v)) return v;
+  if (typeof v === 'string') {
+    const t = v.trim();
+    if (!t) return null;
+    const n = Number(t);
+    return Number.isFinite(n) ? n : null;
+  }
+  return null;
+}
+
+export function normalizeDefensePatternsForCrossReference(
+  raw: Record<string, unknown> | null | undefined,
+): DefensePatternsCrossRefInput {
+  return {
+    projection_detected: raw?.projection_detected === true,
+    splitting_detected: raw?.splitting_detected === true,
+    rationalization_detected: raw?.rationalization_detected === true,
+    denial_detected: raw?.denial_detected === true,
+  };
+}
+
+export function psychometricScoresForDefenseCrossReferenceFromUserRow(
+  user: Record<string, unknown> | null | undefined,
+): {
+  gasp_externalization: number | null;
+  rfq_score: number | null;
+  sd3_narcissism_score: number | null;
+  rses_score: number | null;
+  scs_sf_score: number | null;
+  aaq2_score: number | null;
+} {
+  return {
+    gasp_externalization: finitePsychScore(user?.psychometrics_gasp_score),
+    rfq_score: finitePsychScore(user?.psychometrics_rfq_score),
+    sd3_narcissism_score: finitePsychScore(user?.psychometrics_sd3_narcissism_score),
+    rses_score: finitePsychScore(user?.psychometrics_rses_score),
+    scs_sf_score: finitePsychScore(user?.psychometrics_scs_sf_score),
+    aaq2_score: finitePsychScore(user?.psychometrics_aaq2_score),
+  };
+}
+
+/**
+ * Always returns a populated cross-reference object for completed attempts.
+ * Never skips when defense patterns are present; falls back to empty flags on error.
+ */
+export function buildDefenseCrossReferenceForAttempt(params: {
+  defensePatterns: Record<string, unknown> | DefensePatternsCrossRefInput | null | undefined;
+  userPsychometrics: Record<string, unknown> | null | undefined;
+  depthSignalModifierApplied?: number | null;
+}): DefenseCrossReferenceResult {
+  try {
+    const defensePatterns =
+      params.defensePatterns != null &&
+      typeof params.defensePatterns === 'object' &&
+      'projection_detected' in params.defensePatterns
+        ? (params.defensePatterns as DefensePatternsCrossRefInput)
+        : normalizeDefensePatternsForCrossReference(
+            params.defensePatterns as Record<string, unknown> | null | undefined,
+          );
+    const depthSignalModifierApplied =
+      typeof params.depthSignalModifierApplied === 'number' &&
+      Number.isFinite(params.depthSignalModifierApplied)
+        ? params.depthSignalModifierApplied
+        : 0;
+    return crossReferenceDefenseDetection({
+      defensePatterns,
+      psychometricScores: psychometricScoresForDefenseCrossReferenceFromUserRow(
+        params.userPsychometrics,
+      ),
+      depthSignalModifierApplied,
+    });
+  } catch (error) {
+    console.error('[DefenseCrossRef] buildDefenseCrossReferenceForAttempt failed:', error);
+    return { ...EMPTY_DEFENSE_CROSS_REFERENCE_RESULT, overallConfidence: 'low' };
+  }
+}
+
 export function crossReferenceDefenseDetection(params: {
   defensePatterns: {
     projection_detected: boolean;

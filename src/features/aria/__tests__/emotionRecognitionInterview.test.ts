@@ -27,6 +27,7 @@ import {
   isScenarioThreeToMoment4EmotionModalHandoff,
   resolveNaturalLanguageEmotionModalGate,
 } from '../emotionRecognitionInterview';
+import { resolveHandoffPriorScenario } from '../emotionScenarioTransitionInference';
 
 describe('emotionRecognitionInterview', () => {
   it('scoreEmotionItems returns proportion for three answers', () => {
@@ -389,7 +390,7 @@ describe('emotionRecognitionInterview', () => {
     expect(isNaturalLanguageScenarioHandoffTransition(combined)).toBe(true);
     const gate = resolveNaturalLanguageEmotionModalGate({
       displayText: combined,
-      priorScenario: 3,
+      priorScenario: 2,
       detectedScenario: 3,
     });
     expect(gate.emotionNaturalForward).toBe(true);
@@ -401,6 +402,46 @@ describe('emotionRecognitionInterview', () => {
       "That's the end of this scenario — great work! Nice work, Matt — you saw Emma's frustration. Here's the next situation: Sarah has been job hunting for four months.";
     expect(isNaturalLanguageScenarioHandoffTransition(combined)).toBe(true);
     expect(isNaturalLanguageScenarioHandoffTransition('How would you repair this if you were Ryan?')).toBe(false);
+  });
+
+  it('detects S1 wrap-only with Situation 1 phrasing and opens emotion modal at scenario 1', () => {
+    const wrapOnly =
+      "That's a wrap on Situation 1 — thanks for working through that one. Nice work, Matt — you read Emma's closing line as condescending and dismissive.";
+    expect(isNaturalLanguageScenarioHandoffTransition(wrapOnly)).toBe(true);
+    const gate = resolveNaturalLanguageEmotionModalGate({
+      displayText: wrapOnly,
+      priorScenario: 1,
+      detectedScenario: 1,
+    });
+    expect(gate.emotionNaturalForward).toBe(true);
+    expect(gate.completedScenario).toBe(1);
+  });
+
+  it('detects S1 wrap when model glues duplicate repair ask after reflection', () => {
+    const glued =
+      "That's a wrap on Situation 1 — thanks for working through that one. Nice work, Matt — you read Emma's closing line as condescending and dismissive. How would you repair this situation if you were Ryan?";
+    expect(isNaturalLanguageScenarioHandoffTransition(glued)).toBe(true);
+  });
+
+  it('resolveNaturalLanguageEmotionModalGate blocks premature S1 handoff after Q1 only', () => {
+    const handoff =
+      "That's a wrap on that one. Nice work, Matt — You focused on putting concrete limits on calls during dates so the same interruption does not repeat. We've got two more situations to get through.\n\nSarah has been job hunting for four months.";
+    const messages = [
+      { role: 'assistant', content: 'What do you think is going on between these two?' },
+      {
+        role: 'user',
+        content:
+          'They need clearer boundaries about phone use on dates and agreement on what is okay.',
+      },
+    ];
+    const gate = resolveNaturalLanguageEmotionModalGate({
+      displayText: handoff,
+      priorScenario: 1,
+      detectedScenario: 2,
+      messages,
+    });
+    expect(gate.emotionNaturalForward).toBe(false);
+    expect(gate.completedScenario).toBeNull();
   });
 
   it('resolveNaturalLanguageEmotionModalGate opens S3 modal on M4 handoff without detectedScenario', () => {
@@ -415,6 +456,18 @@ describe('emotionRecognitionInterview', () => {
     expect(gate.emotionNaturalForward).toBe(true);
     expect(gate.completedScenario).toBe(3);
     expect(gate.deferBlocked).toBe(false);
+  });
+
+  it('resolveNaturalLanguageEmotionModalGate blocks stale S1→S2 handoff when priorScenario is already 3', () => {
+    const staleS1Bundle =
+      "That's a wrap on that one. Nice work, Matt — You focused on putting concrete limits on calls during dates so the same interruption does not repeat. We've got two more situations to get through.\n\nSarah has been job hunting for four months.";
+    const gate = resolveNaturalLanguageEmotionModalGate({
+      displayText: staleS1Bundle,
+      priorScenario: 3,
+      detectedScenario: 2,
+    });
+    expect(gate.emotionNaturalForward).toBe(false);
+    expect(gate.completedScenario).toBeNull();
   });
 
   it('resolveNaturalLanguageEmotionModalGate runs when prior already equals detected (parallel stream)', () => {
@@ -455,5 +508,27 @@ describe('emotionRecognitionInterview', () => {
     expect(gate.emotionNaturalForward).toBe(false);
     expect(gate.completedScenario).toBeNull();
     expect(gate.deferBlocked).toBe(false);
+  });
+
+  it('resolveNaturalLanguageEmotionModalGate infers scenario 2 completed when prior ref lags at S2→S3', () => {
+    const combined =
+      "That's a wrap on this situation. Nice work, Matt — you recognized that James's gesture landed wrong because Sarah had been running on empty. Here's the next situation. Sophie and Daniel have had the same argument for the third time. Sophie feels unheard because Daniel goes silent or leaves. Daniel says \"I need ten minutes.\" Sophie says he didn't know what to say and she's still upset.";
+    const gate = resolveNaturalLanguageEmotionModalGate({
+      displayText: combined,
+      priorScenario: 1,
+      detectedScenario: 3,
+    });
+    expect(gate.emotionNaturalForward).toBe(true);
+    expect(gate.completedScenario).toBe(2);
+  });
+
+  it('resolveHandoffPriorScenario uses transcript user tags when currentScenarioRef lags', () => {
+    const prior = resolveHandoffPriorScenario(
+      1,
+      1,
+      [{ role: 'user', content: 'repair answer', scenarioNumber: 2 }],
+      "Here's the next situation. Sophie and Daniel have had the same argument. Daniel says \"I need ten minutes.\" Sophie says he didn't know what to say and she's still upset.",
+    );
+    expect(prior).toBe(2);
   });
 });

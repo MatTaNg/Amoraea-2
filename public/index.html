@@ -191,11 +191,9 @@
             !hasAuthCode &&
             !hasImplicitAuthHash
           ) {
-            fetch('http://127.0.0.1:7668/ingest/668e0bd5-3283-4492-9f48-e33846c18218',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'28d27a'},body:JSON.stringify({sessionId:'28d27a',location:'index.html:auth-bootstrap',message:'redirect bare reset path to home',data:{pathname:path},hypothesisId:'H6',timestamp:Date.now(),runId:'post-fix'})}).catch(function(){});
             window.location.replace('/');
             return;
           }
-          fetch('http://127.0.0.1:7668/ingest/668e0bd5-3283-4492-9f48-e33846c18218',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'28d27a'},body:JSON.stringify({sessionId:'28d27a',location:'index.html:auth-bootstrap',message:'early auth URL',data:{pathname:path,hasCode:search.indexOf('code=')!==-1,hasTokenHash:search.indexOf('token_hash=')!==-1,queryTypeSignup:isConfirmQuery,queryTypeRecovery:searchLower.indexOf('type=recovery')!==-1,hashTypeSignup:isConfirmHash,hashTypeRecovery:isRecoveryHash,onResetPath,resetPending:resetPending,hasImplicitAuthHash:hashLower.indexOf('access_token=')!==-1&&hashLower.indexOf('error=')===-1,hrefLen:(window.location.href||'').length},hypothesisId:'H1',timestamp:Date.now(),runId:'post-fix'})}).catch(function(){});
         } catch (e) {
           /* ignore */
         }

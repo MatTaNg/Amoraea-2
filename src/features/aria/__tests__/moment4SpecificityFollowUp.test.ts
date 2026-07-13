@@ -1,9 +1,10 @@
-import { describe, expect, it } from 'vitest';
 import {
   countInterviewWords,
+  coerceMoment4SpecificityFollowUpForTts,
   deriveMoment4PostGrudgeSpecificityResolvedFromMessages,
   evaluateMoment4SpecificityProbe,
   hasMoment4PersonRelationshipOrSituationAnchor,
+  isIncompleteMoment4SpecificityFollowUpLeadSentence,
   looksLikeMoment4SpecificityFollowUpEcho,
   looksLikeMoment4SpecificityFollowUpPrompt,
   MOMENT_4_SPECIFICITY_FOLLOW_UP_TEXT,
@@ -41,13 +42,23 @@ describe('moment4SpecificityFollowUp', () => {
     expect(looksLikeMoment4SpecificityFollowUpPrompt('Random text')).toBe(false);
   });
 
-  it('fires for Vaishnava-style generic opener with thin example (no named person)', () => {
+  it('does not fire for Vaishnava-style opener when answer names a specific guy and episode', () => {
     const evalResult = evaluateMoment4SpecificityProbe(VAISHNAVA_PATTERN);
-    expect(evalResult.hasNamedPerson).toBe(false);
+    expect(evalResult.hasNamedPerson).toBe(true);
+    expect(evalResult.hasSpecificEvent).toBe(true);
     expect(evalResult.genericOpenerDetected).toBe(true);
-    expect(evalResult.probeShouldFire).toBe(true);
-    expect(evalResult.triggerReason).toBe('no_named_person');
-    expect(needsMoment4SpecificityFollowUp(VAISHNAVA_PATTERN)).toBe(true);
+    expect(evalResult.probeShouldFire).toBe(false);
+    expect(needsMoment4SpecificityFollowUp(VAISHNAVA_PATTERN)).toBe(false);
+  });
+
+  it('does not fire for session-log grudge answer with "this one guy" and game episode', () => {
+    const sessionAnswer =
+      "I'm generally too nice and don't take offense to many things, so in my life I never really had anyone that has ever tried to get under my skin But there was one time with this one guy who thought I had a crush on his girlfriend Tried to get back to me, get back on me in a game that we had just talked Afterwards and figured out that it was just a misunderstanding and we parted ways and make it bleed after that";
+    const evalResult = evaluateMoment4SpecificityProbe(sessionAnswer);
+    expect(evalResult.hasNamedPerson).toBe(true);
+    expect(evalResult.hasSpecificEvent).toBe(true);
+    expect(evalResult.probeShouldFire).toBe(false);
+    expect(needsMoment4SpecificityFollowUp(sessionAnswer)).toBe(false);
   });
 
   it('does not fire for brief answer with referenced person and specific event', () => {
@@ -83,6 +94,26 @@ describe('moment4SpecificityFollowUp', () => {
     expect(countInterviewWords(t)).toBeGreaterThanOrEqual(30);
     expect(moment4HasNamedOrReferencedPerson(t)).toBe(true);
     expect(moment4HasSpecificEventDescription(t)).toBe(true);
+    expect(needsMoment4SpecificityFollowUp(t)).toBe(false);
+  });
+
+  it('does not fire for session-log grudge answer naming Michelle via appositive (woman, Michelle)', () => {
+    const michelleAnswer =
+      "Yeah, the most recent one was I moved in with a woman, Michelle, when my other housemates fell through. When I just moved to Austin six weeks ago, and she was not just listening. She was giving me a lot of advice and kind of inserting herself into my life. So when I would say this is the five different jobs that I'm looking for, she then would tell me which one she thought was okay with me and which were not, and I didn't ask her for advice. She just wanted someone to listen and help me sort of through, maybe. So I did just accept the job that she was kind of against, and I don't like that conversation style, or she had a pushier personality and a louder tone of voice than I like. So where I stand now is I kind of just let things settle. I moved out two weeks ago, and I just let things settle in having gotten together with her. She hasn't sent a text, and she hasn't responded, so I guess I will wait to see if she responds to the text or just even send a cute, funny video.";
+    const evalResult = evaluateMoment4SpecificityProbe(michelleAnswer);
+    expect(evalResult.hasNamedPerson).toBe(true);
+    expect(evalResult.hasSpecificEvent).toBe(true);
+    expect(evalResult.probeShouldFire).toBe(false);
+    expect(needsMoment4SpecificityFollowUp(michelleAnswer)).toBe(false);
+  });
+
+  it('does not fire for close-friend narrative with pronoun reference (session log)', () => {
+    const t =
+      "I had a close friend about three years ago who I felt completely betrayed by. She shared something I thought was incompetence with a group of mutual friends. I was furious and I pulled back for about six months. What I eventually realized was that I never actually told her explicitly that I needed that kept private. We talked it out, but it's not the same friendship.";
+    const evalResult = evaluateMoment4SpecificityProbe(t);
+    expect(evalResult.hasNamedPerson).toBe(true);
+    expect(evalResult.hasSpecificEvent).toBe(true);
+    expect(evalResult.probeShouldFire).toBe(false);
     expect(needsMoment4SpecificityFollowUp(t)).toBe(false);
   });
 
@@ -135,8 +166,22 @@ describe('moment4SpecificityFollowUp', () => {
         'Is there a specific person or situation that comes to mind when you think about that?',
       ),
     ).toBe(true);
+    expect(
+      looksLikeMoment4SpecificityFollowUpEcho(
+        "When you think about situations like that — where there's real hurt",
+      ),
+    ).toBe(true);
     expect(looksLikeMoment4SpecificityFollowUpEcho('How do you think this situation could be repaired?')).toBe(
       false,
+    );
+  });
+
+  it('detects truncated M4 specificity paraphrase from session logs and coerces to canonical copy', () => {
+    const truncated =
+      "Got it. When you think about situations like that — where there's real hurt";
+    expect(isIncompleteMoment4SpecificityFollowUpLeadSentence(truncated)).toBe(true);
+    expect(coerceMoment4SpecificityFollowUpForTts(truncated)).toBe(
+      `Got it. ${MOMENT_4_SPECIFICITY_FOLLOW_UP_TEXT}`,
     );
   });
 

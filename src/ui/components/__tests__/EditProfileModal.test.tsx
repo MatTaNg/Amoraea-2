@@ -12,7 +12,7 @@ jest.mock('@data/repositories/ProfileRepository', () => ({
 }));
 jest.mock('@domain/useCases/PhotoUseCase', () => ({
   PhotoUseCase: jest.fn().mockImplementation(() => ({
-    pickPhotos: jest.fn(),
+    pickPhotos: jest.fn(() => Promise.resolve([])),
     addPhotos: jest.fn(),
     removePhoto: jest.fn(),
   })),

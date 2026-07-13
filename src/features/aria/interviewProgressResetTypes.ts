@@ -1,0 +1,116 @@
+import type { Dispatch, MutableRefObject, SetStateAction } from 'react';
+
+import type { Moment4ClientScoringMetadata } from '@features/aria/personalMomentScoringPrompt';
+import type { Moment5ClientScoringMetadata } from '@features/aria/moment5AccountabilityScoringPrompt';
+import type { InterviewMomentIndex } from '@features/aria/interviewScenarioScoringSlice';
+import type { GestureContextLostReason } from '@features/aria/utils/webInterviewGestureContext';
+
+export type ResetScenarioCClientGatesDeps = {
+  scenarioCRepairOnlyEvidenceRef: MutableRefObject<string | null>;
+  scenarioCSophiePerspectiveProbeFiredRef: MutableRefObject<boolean>;
+};
+
+export type ResetInterviewProgressRefsDeps = ResetScenarioCClientGatesDeps & {
+  userId: string;
+  resetScenarioCClientGatesOnly: () => void;
+  resumeRepeatChoicePendingRef: MutableRefObject<boolean>;
+  resumeLastAssistantTextRef: MutableRefObject<string | null>;
+  resumeRepeatPrefetchMpegRef: MutableRefObject<{ text: string; buffer: ArrayBuffer } | null>;
+  resumeClosingRepeatSpeakInFlightRef: MutableRefObject<boolean>;
+  interviewNameRef: MutableRefObject<string | null>;
+  interviewNameReaskPendingRef: MutableRefObject<boolean>;
+  interviewNameReaskUsedRef: MutableRefObject<boolean>;
+  interviewMomentsCompleteRef: MutableRefObject<Record<InterviewMomentIndex, boolean>>;
+  currentInterviewMomentRef: MutableRefObject<InterviewMomentIndex>;
+  personalHandoffInjectedRef: MutableRefObject<boolean>;
+  moment4ThresholdProbeAskedRef: MutableRefObject<boolean>;
+  deliveredReflectionRegistryRef: MutableRefObject<
+    import('@features/aria/deliveredReflectionRegistry').DeliveredReflectionRecord[]
+  >;
+  moment4ClientSpecificityProbeInjectedRef: MutableRefObject<boolean>;
+  moment4PostGrudgeSpecificityResolvedRef: MutableRefObject<boolean>;
+  moment4ExpectingPostSpecificityUserTurnRef: MutableRefObject<boolean>;
+  moment4SpecificityScoringRef: MutableRefObject<Moment4ClientScoringMetadata | null>;
+  moment5QuestionDeliveredRef: MutableRefObject<boolean>;
+  moment5QuestionDeliveryInFlightRef: MutableRefObject<boolean>;
+  moment5PrimaryAnchorDeliveredSessionRef: MutableRefObject<boolean>;
+  moment5PostPromptUserTurnCountRef: MutableRefObject<number>;
+  moment5AccountabilityProbeFiredRef: MutableRefObject<boolean>;
+  moment5ConflictValidityClarificationIssuedRef: MutableRefObject<boolean>;
+  moment5SpecificityRedirectIssuedRef: MutableRefObject<boolean>;
+  moment5ResolutionFollowUpIssuedRef: MutableRefObject<boolean>;
+  moment5ResolutionDeliveredRef: MutableRefObject<boolean>;
+  moment5ClientScoringMetaRef: MutableRefObject<Moment5ClientScoringMetadata | null>;
+  deferredMoment4NarrativeRef: MutableRefObject<string | null>;
+  lastUserTurnAudioDurationMsRef: MutableRefObject<number | null>;
+  scenarioAContemptProbeAskedRef: MutableRefObject<boolean>;
+  scenarioAContemptProbePlaybackConfirmedRef: MutableRefObject<boolean>;
+  showScenarioCardCanonicalPlaybackConfirmedKindsRef: MutableRefObject<
+    import('@features/aria/showScenarioCardCanonicalTts').ShowScenarioCardCanonicalPlaybackConfirmedKinds
+  >;
+  scenarioAContemptProbeTtsDeliveredSessionRef: MutableRefObject<boolean>;
+  pendingScenarioAContemptProbeStreamMuteRef: MutableRefObject<boolean>;
+  pendingS3ToM4HandoffStreamMuteRef: MutableRefObject<boolean>;
+  scenarioARepairQuestionAskedRef: MutableRefObject<boolean>;
+  s2RepairProbeDeliveredRef: MutableRefObject<boolean>;
+  s3RepairProbeDeliveredRef: MutableRefObject<boolean>;
+  turnAudioIndexRef: MutableRefObject<number>;
+  whisperRatioReaskAttemptsForCurrentQuestionRef: MutableRefObject<number>;
+  ttsSessionHardFailureCountRef: MutableRefObject<number>;
+  setTtsPlaybackReliabilityNotice: Dispatch<SetStateAction<string | null>>;
+  setConversationErrorNotice: Dispatch<SetStateAction<string | null>>;
+  interviewSessionIdRef: MutableRefObject<string>;
+  firstScenarioLifecyclePersistedRef: MutableRefObject<boolean>;
+  scoreInterviewAttemptedRef: MutableRefObject<boolean>;
+  scoreInterviewInFlightRef: MutableRefObject<boolean>;
+  resetCompletionScoringSession: () => void;
+  resetAudioInterviewTurnCounters: () => void;
+  resetTtsDurationCalibration: () => void;
+  hasCachedWebMicTrackSettings: () => boolean;
+  resetWebAudioRouteSessionFingerprint: () => void;
+  resetInterviewVadSession: () => void;
+  resetWebInterviewGestureContext: () => void;
+  resetInterviewClosingTtsSession: () => void;
+  gestureContextLostAtRef: MutableRefObject<{ atMs: number; reason: GestureContextLostReason } | null>;
+  lastSuccessfulTtsTextNormalizedRef: MutableRefObject<string | null>;
+  lastSuccessfulTtsDeliveredPreviewRef: MutableRefObject<string>;
+  scenarioSkipConfirmedCountRef: MutableRefObject<number>;
+  scenarioSkipPenaltySumRef: MutableRefObject<number>;
+  consecutiveDigitalSilenceForMicFallbackRef: MutableRefObject<number>;
+  micFallbackSuccessPendingRef: MutableRefObject<boolean>;
+  elongatingProbeFiredRef: MutableRefObject<boolean>;
+  resumeActiveScenarioRef: MutableRefObject<1 | 2 | 3 | null>;
+  resumeWelcomeMessageRef: MutableRefObject<string>;
+  resumeOfferWelcomeTtsRef: MutableRefObject<boolean>;
+  resumeEmotionAfterModalTextRef: MutableRefObject<string | null>;
+  webResumeWelcomeTapHandledRef: MutableRefObject<boolean>;
+  webResumeWelcomeTapPendingRef: MutableRefObject<boolean>;
+  resumeWelcomeHydrationAttemptRef: MutableRefObject<string | null>;
+  clearResumeWelcomePlaybackLock: () => void;
+  webTtsUtteranceInFlightRef: MutableRefObject<unknown>;
+  webTtsUtteranceInFlightOptionsRef: MutableRefObject<unknown>;
+  webTtsTabInterruptPendingReplayRef: MutableRefObject<boolean>;
+  webTtsSpeakGenerationRef: MutableRefObject<number>;
+  webTabRestoreReplayInFlightRef: MutableRefObject<boolean>;
+  parallelStreamingTtsRef: MutableRefObject<{
+    active: boolean;
+    cancelRequested: boolean;
+    accumulatedFullText: string;
+    spokenCompleteText: string;
+  }>;
+  pendingScenarioIntroAfterResumeWelcomeRef: MutableRefObject<string | null>;
+  transcriptScenarioLogCursorRef: MutableRefObject<number>;
+  emotionItemResponsesRef: MutableRefObject<string[]>;
+  emotionModalResolveRef: MutableRefObject<((value: unknown) => void) | null>;
+  emotionModalPendingTransitionRef: MutableRefObject<boolean>;
+  pendingEmotionModalTransitionRef: MutableRefObject<unknown>;
+  emotionModalShownForScenarioRef: MutableRefObject<Set<number>>;
+  emotionModalTimeoutRef: MutableRefObject<ReturnType<typeof setTimeout> | null>;
+  setEmotionModalVisible: Dispatch<SetStateAction<boolean>>;
+  setEmotionModalItemIndex: Dispatch<SetStateAction<number>>;
+  setEmotionItemResponses: Dispatch<SetStateAction<string[]>>;
+  setEmotionItemsComplete: Dispatch<SetStateAction<boolean>>;
+  newInterviewSessionId: (userId: string) => string;
+  resumeWelcomeBackMessage: string;
+  createInitialMomentCompletion: () => Record<InterviewMomentIndex, boolean>;
+};

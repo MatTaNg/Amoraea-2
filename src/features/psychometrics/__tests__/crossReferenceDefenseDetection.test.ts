@@ -1,5 +1,9 @@
 import { describe, expect, it } from '@jest/globals';
-import { crossReferenceDefenseDetection } from '../crossReferenceDefenseDetection';
+import {
+  buildDefenseCrossReferenceForAttempt,
+  crossReferenceDefenseDetection,
+  EMPTY_DEFENSE_CROSS_REFERENCE_RESULT,
+} from '../crossReferenceDefenseDetection';
 
 const NO_DEFENSES = {
   projection_detected: false,
@@ -110,5 +114,48 @@ describe('crossReferenceDefenseDetection', () => {
     expect(result.modifierAdjustment).toBe(0);
     expect(result.recommendAdminReview).toBe(false);
     expect(result.overallConfidence).toBe('high');
+  });
+
+  it('buildDefenseCrossReferenceForAttempt always returns an object when splitting is detected', () => {
+    const result = buildDefenseCrossReferenceForAttempt({
+      defensePatterns: { splitting_detected: true },
+      userPsychometrics: {
+        psychometrics_sd3_narcissism_score: 4.2,
+        psychometrics_rfq_score: 2.5,
+      },
+      depthSignalModifierApplied: -0.2,
+    });
+
+    expect(result).not.toBeNull();
+    expect(result.flags.length).toBeGreaterThan(0);
+    expect(result.flags.some((f) => f.defense === 'splitting')).toBe(true);
+    expect(result.overallConfidence).toMatch(/^(high|moderate|low)$/);
+  });
+
+  it('buildDefenseCrossReferenceForAttempt returns empty flags object when no defenses detected', () => {
+    const result = buildDefenseCrossReferenceForAttempt({
+      defensePatterns: NO_DEFENSES,
+      userPsychometrics: {
+        psychometrics_gasp_score: 2.0,
+        psychometrics_rfq_score: 5.5,
+        psychometrics_sd3_narcissism_score: 1.5,
+      },
+      depthSignalModifierApplied: 0,
+    });
+
+    expect(result).toEqual(EMPTY_DEFENSE_CROSS_REFERENCE_RESULT);
+  });
+
+  it('buildDefenseCrossReferenceForAttempt never returns null when psychometrics are missing', () => {
+    const result = buildDefenseCrossReferenceForAttempt({
+      defensePatterns: { projection_detected: true },
+      userPsychometrics: null,
+      depthSignalModifierApplied: -0.15,
+    });
+
+    expect(result).not.toBeNull();
+    expect(result.flags.some((f) => f.flagName === 'projection_insufficient_psychometric_data')).toBe(
+      true,
+    );
   });
 });

@@ -10,7 +10,7 @@ Breaching scenario: S2 | Composite: 1.50
 Other scenarios: S1=7.00, S3=7.14
 
 --- Full S2 question sequence and responses ---
-[ARIA] That's the end of this scenario — great work! You focused on the boundary issue with Ryan's mother and how Emma's frustration built up over time. You also laid out a clear repair plan that addresses both relationships.
+[Amoraea] That's the end of this scenario — great work! You focused on the boundary issue with Ryan's mother and how Emma's frustration built up over time. You also laid out a clear repair plan that addresses both relationships.
 
 Here's the next situation:
 
@@ -20,11 +20,11 @@ What do you think is going on here?
 
 [USER] Well, one thing is for clear, this is Sarah's issue. It seems like the guy was wonderful. He was excited for her. He conveyed that on the phone call. He talked about it at dinner. He opened the conversation. He wasn't talking about himself. He was talking about how excited this is. He was pointing out to her when she was tearing up, this is a great thing. For her to say she's not appreciated is kind of ridiculous, unless there was something prior to this that we don't know about, but it seems to me that his behavior is that of someone who does appreciate his partner and is demonstrating that. So I think she has to look at herself and what her issue is, and I think to cry when you get a fantastic opportunity like this indicates there may be some level of instability.
 
-[ARIA] Got it — what do you think James could have done differently that might have helped Sarah feel appreciated?
+[Amoraea] Got it — what do you think James could have done differently that might have helped Sarah feel appreciated?
 
 [USER] I don't think this is on James. I think this is on Emma. I think he behaved like a stand-up guy who did appreciate her. I don't know why it escalated into a fight. Sometimes people start accusing you of things and you respond from a place of defensiveness. Maybe that's why it escalated into a fight, but I don't see that he did anything wrong.
 
-[ARIA] And if you were James, how would you repair?
+[Amoraea] And if you were James, how would you repair?
 
 [USER] I don't think there's anything to repair, I don't think James has to do anything. I think James needs to find out if he wants to continue to be involved with someone who's so unstable and so unable to see that he does appreciate her. So this is on Emma.
 
@@ -47,7 +47,7 @@ Breaching scenario: S2 | Composite: 2.33
 Other scenarios: S1=5.50, S3=6.00
 
 --- Full S2 question sequence and responses ---
-[ARIA] That's the end of this scenario — Nice work, John — you saw Ryan as breaking their agreement and focused on his need to apologize and set boundaries with his mother going forward. Here's the next situation:
+[Amoraea] That's the end of this scenario — Nice work, John — you saw Ryan as breaking their agreement and focused on his need to apologize and set boundaries with his mother going forward. Here's the next situation:
 
 Sarah has been job hunting for four months. She gets an offer and calls James from the street, too excited to wait. James is on a deadline, says 'that's amazing, let's celebrate tonight.' That evening James leads with questions about the salary, the start date, and the commute. At one point Sarah tears up. James says 'hey don't cry, this is a good thing'. The next day Sarah tells James she never feels appreciated. James is blindsided, he showed up, he celebrated, he asked questions. A fight starts.
 
@@ -55,11 +55,11 @@ What do you think is going on here?
 
 [USER] There's no way to know without more context. Why did she cry, feel unappreciated, and fight? Is Sarah not communicating sufficiently or effectively?
 
-[ARIA] Got it — what do you think James could have done differently that might have helped Sarah feel appreciated?
+[Amoraea] Got it — what do you think James could have done differently that might have helped Sarah feel appreciated?
 
 [USER] There's no way to know without more context. Why did she cry, feel unappreciated and fight? Is Sarah not communicating sufficiently or effectively?
 
-[ARIA] And if you were James, how would you repair?
+[Amoraea] And if you were James, how would you repair?
 
 [USER] I would ask the same questions, why did she cry, why does she feel unappreciated?
 
@@ -82,7 +82,7 @@ Breaching scenario: S2 | Composite: 2.67
 Other scenarios: S1=6.67, S3=5.17
 
 --- Full S2 question sequence and responses ---
-[ARIA] That's the end of this scenario — Nice work, Trey — you recognized that Emma has allowed this pattern to continue and focused on Ryan listening fully to understand both the issue and why it upsets her. Here's the next situation:
+[Amoraea] That's the end of this scenario — Nice work, Trey — you recognized that Emma has allowed this pattern to continue and focused on Ryan listening fully to understand both the issue and why it upsets her. Here's the next situation:
 
 Sarah has been job hunting for four months. She gets an offer and calls James from the street, too excited to wait. James is on a deadline, says 'that's amazing, let's celebrate tonight.' That evening James leads with questions about the salary, the start date, and the commute. At one point Sarah tears up. James says 'hey don't cry, this is a good thing'. The next day Sarah tells James she never feels appreciated. James is blindsided, he showed up, he celebrated, he asked questions. A fight starts.
 
@@ -90,11 +90,11 @@ What do you think is going on here?
 
 [USER] At first glance, it sounds like Sarah had unrealistic expectations on the excitement she was going to receive from James. And when she didn't get what she was expecting, then she immediately internalized that and held on to it until she couldn't hold on to it anymore and exploded and that's when the fight started.
 
-[ARIA] Got it — what do you think James could have done differently that might have helped Sarah feel appreciated?
+[Amoraea] Got it — what do you think James could have done differently that might have helped Sarah feel appreciated?
 
 [USER] Had he have taken an extra two minutes, just maybe even one minute, enough to congratulate her on X, Y, Z, fill in the blank, to be there emotionally instead of, hey, I'm at my job. That's great. I got to go. If he would have acknowledged that there was a true emotional response needed in that situation, I think a lot of things would have gone better.
 
-[ARIA] And if you were James, how would you repair?
+[Amoraea] And if you were James, how would you repair?
 
 [USER] If i'm james, this is not my situation to prepare to repair this is james understands that he Did not give all that she thought he should give but just because She thinks he should give something does not make it Unactive it has to happen This is not james's situation to repair. She Was unrealistic with her expectations She was upset with him because she thought he Should do more. That's not his fault. If she didn't voice that then he has nothing to repair
 
@@ -117,7 +117,7 @@ Breaching scenario: S2 | Composite: 3.17
 Other scenarios: S1=5.67, S3=6.57
 
 --- Full S2 question sequence and responses ---
-[ARIA] That's the end of this scenario — great work! You focused on communication gaps and boundary issues between them, and saw Emma's closing line as passive-aggressive. Here's the next situation:
+[Amoraea] That's the end of this scenario — great work! You focused on communication gaps and boundary issues between them, and saw Emma's closing line as passive-aggressive. Here's the next situation:
 
 Sarah has been job hunting for four months. She gets an offer and calls James from the street, too excited to wait. James is on a deadline, says 'that's amazing, let's celebrate tonight.' That evening James leads with questions about the salary, the start date, and the commute. At one point Sarah tears up. James says 'hey don't cry, this is a good thing'. The next day Sarah tells James she never feels appreciated. James is blindsided, he showed up, he celebrated, he asked questions. A fight starts.
 
@@ -142,7 +142,7 @@ Breaching scenario: S2 | Composite: 3.33
 Other scenarios: S1=7.00, S3=7.17
 
 --- Full S2 question sequence and responses ---
-[ARIA] That's the end of this scenario — great work! You framed this as Emma needing to feel prioritized while Ryan struggles with boundaries around his mother, and you focused on Ryan needing to set clearer limits going forward. Here's the next situation:
+[Amoraea] That's the end of this scenario — great work! You framed this as Emma needing to feel prioritized while Ryan struggles with boundaries around his mother, and you focused on Ryan needing to set clearer limits going forward. Here's the next situation:
 
 Sarah has been job hunting for four months. She gets an offer and calls James from the street, too excited to wait. James is on a deadline, says 'that's amazing, let's celebrate tonight.' That evening James leads with questions about the salary, the start date, and the commute. At one point Sarah tears up. James says 'hey don't cry, this is a good thing'. The next day Sarah tells James she never feels appreciated. James is blindsided, he showed up, he celebrated, he asked questions. A fight starts.
 
@@ -150,15 +150,15 @@ What do you think is going on here?
 
 [USER] Eat the question.
 
-[ARIA] Just say whatever comes to mind.
+[Amoraea] Just say whatever comes to mind.
 
 [USER] Yeah, she is not respectful of his life and schedule.
 
-[ARIA] Got it — what do you think James could have done differently that might have helped Sarah feel appreciated?
+[Amoraea] Got it — what do you think James could have done differently that might have helped Sarah feel appreciated?
 
 [USER] communicated that he's on a very tight deadline and he's happy for her but he would, he needs to focus on his work right now and he will celebrate with her tonight just so she knows what's going on in his life and doesn't think like she is being blown off for work.
 
-[ARIA] And if you were James, how would you repair?
+[Amoraea] And if you were James, how would you repair?
 
 [USER] Apologize and tell her what you're going to do next time to prevent this from happening again.
 

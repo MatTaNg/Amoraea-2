@@ -25,6 +25,8 @@ export {
 export {
   SCENARIO_COMPOSITE_PASS_MIN,
   buildScenarioCompositesTriple,
+  buildScenarioPillarMapsFromStoredBundles,
+  readPillarScoresFromScenarioBundle,
   scenarioCompositesToStorageJson,
   scenarioFloorBreaches,
   type ScenarioCompositesTriple,
@@ -58,6 +60,10 @@ export function computeGateResult(
     | 'closingIntegration'
     | 'mentalizingOvercertaintyCount'
     | 'precomputedWeightedScore'
+    | 'runtimeReviewFlags'
+    | 'moment4AccountabilitySituationallyExempt'
+    | 'moment4AccountabilityExemptReason'
+    | 'emotionRecognitionResponses'
   >,
 ): GateResult {
   return computeGateResultCore(pillarScores, skepticismModifier, {
@@ -72,6 +78,7 @@ export function computeGateResult(
     personalMomentConcretenessModifier: options?.personalMomentConcretenessModifier,
     emotionRecognitionRawScore: options?.emotionRecognitionRawScore,
     emotionRecognitionCorrectCount: options?.emotionRecognitionCorrectCount,
+    emotionRecognitionResponses: options?.emotionRecognitionResponses,
     disclosureCalibration: options?.disclosureCalibration,
     moment4WordCount: options?.moment4WordCount,
     moment5WordCount: options?.moment5WordCount,
@@ -80,6 +87,9 @@ export function computeGateResult(
     closingIntegration: options?.closingIntegration,
     mentalizingOvercertaintyCount: options?.mentalizingOvercertaintyCount,
     precomputedWeightedScore: options?.precomputedWeightedScore,
+    runtimeReviewFlags: options?.runtimeReviewFlags,
+    moment4AccountabilitySituationallyExempt: options?.moment4AccountabilitySituationallyExempt,
+    moment4AccountabilityExemptReason: options?.moment4AccountabilityExemptReason,
     onWeightedBreakdown: (data) => {
       void remoteLog('[WEIGHTED_SCORE_BREAKDOWN]', data);
     },

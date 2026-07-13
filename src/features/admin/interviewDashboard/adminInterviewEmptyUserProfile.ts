@@ -1,0 +1,37 @@
+import type { AdminUserProfileRecord } from '@app/screens/admin/AdminProfileAssessmentTabs';
+
+export function emptyAdminUserProfile(userId: string): AdminUserProfileRecord {
+  return {
+    id: userId,
+    market_research_completed_at: null,
+    market_research_referral_source: null,
+    market_research_referral_other: null,
+    market_research_relationship_seriousness: null,
+    market_research_search_duration: null,
+    market_research_dating_status: null,
+    market_research_max_spend: null,
+    market_research_spend_context: null,
+    psychometrics_completed_at: null,
+    psychometrics_brs_score: null,
+    psychometrics_scs_sf_score: null,
+    psychometrics_scs_sf_self_kindness_score: null,
+    psychometrics_scs_sf_common_humanity_score: null,
+    psychometrics_scs_sf_mindfulness_score: null,
+    psychometrics_gasp_score: null,
+    psychometrics_dweck_score: null,
+    psychometrics_aaq2_score: null,
+    psychometrics_rses_score: null,
+    psychometrics_scs_public_score: null,
+    psychometrics_scs_private_score: null,
+    psychometrics_mspss_score: null,
+    psychometrics_mspss_family_score: null,
+    psychometrics_mspss_friends_score: null,
+    psychometrics_sd3_narcissism_score: null,
+    psychometrics_rfq_score: null,
+    psychometrics_sexual_communication_score: null,
+    psychometrics_sexual_communication_completed_at: null,
+    psychometric_modifier: null,
+    psychometric_consistency_flags: null,
+    psychometric_straight_line_flags: null,
+  };
+}

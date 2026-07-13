@@ -19,7 +19,6 @@ import { FlameOrb } from '@app/screens/FlameOrb';
 import { authStyles } from '@app/screens/authStyles';
 import { supabase } from '@data/supabase/client';
 import { isAlphaTesterReferralCode } from '@/constants/alphaReferral';
-import { normalizeShareableReferralCode } from '@features/referrals/shareableReferralCode';
 import { isRelationshipValidationReferralCode } from '@features/relationshipValidation/constants';
 import type { Gender } from '@domain/models/Profile';
 
@@ -100,23 +99,18 @@ export const RegisterScreen: React.FC<{ navigation: any }> = ({ navigation }) =>
         } else if (isAlphaTesterReferralCode(raw)) {
           codeToSend = raw;
         } else {
-          const normalizedShareable = normalizeShareableReferralCode(raw);
-          if (normalizedShareable) {
-            const { data: available, error: rpcErr } = await supabase.rpc('referral_code_is_available', {
-              p_raw: raw,
-            });
-            if (rpcErr) {
-              setError('Could not verify referral code. Try again or continue without one.');
-              setLoading(false);
-              return;
-            }
-            if (available === true) {
-              codeToSend = raw;
-            } else {
-              setReferralHint("That code doesn't look right or has already been used.");
-            }
-          } else {
+          const { data: available, error: rpcErr } = await supabase.rpc('invite_code_is_available', {
+            p_raw: raw,
+          });
+          if (rpcErr) {
+            setError('Could not verify referral code. Try again or continue without one.');
+            setLoading(false);
+            return;
+          }
+          if (available === true) {
             codeToSend = raw;
+          } else {
+            setReferralHint("That code doesn't look right.");
           }
         }
       }

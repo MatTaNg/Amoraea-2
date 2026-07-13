@@ -29,6 +29,29 @@ describe('buildPersonalMomentScoringPrompt', () => {
     expect(prompt).toContain('user_slice_word_count');
   });
 
+  it('instructs null (not floor scores) for low-concreteness M4 inner-state markers', () => {
+    const prompt = buildPersonalMomentScoringPrompt([
+      { role: 'assistant', content: MOMENT_4_GRUDGE_QUESTION_TEXT },
+      { role: 'user', content: 'Thin gaming misunderstanding example.' },
+    ]);
+
+    expect(prompt).toContain('LOW CONCRETENESS / UNASSESSED INNER-STATE MARKERS');
+    expect(prompt).toContain('set **mentalizing** and **accountability** to JSON **null**');
+    expect(prompt).toContain('Do **not** apply a low-specificity floor score');
+    expect(prompt).toContain('gaming misunderstanding resolved amicably');
+  });
+
+  it('anchors single internal exit marker at commitment_threshold 7', () => {
+    const prompt = buildPersonalMomentScoringPrompt([
+      { role: 'assistant', content: MOMENT_4_GRUDGE_QUESTION_TEXT },
+      { role: 'user', content: 'dreading the next time' },
+    ]);
+
+    expect(prompt).toContain('7 (single internal exit marker)');
+    expect(prompt).toContain('looking forward to meeting their partner every day to dreading');
+    expect(prompt).toContain('Do **not** score **6** solely because a communicate step was omitted');
+  });
+
   it('truncates very long user turns before embedding in the prompt', () => {
     const long = 'word '.repeat(MOMENT4_MAX_USER_TURN_CHARS_FOR_SCORING + 500);
     const truncated = truncateTranscriptTurnsForMoment4Scoring([

@@ -53,12 +53,6 @@ const PERSONAL_FULL_REQUIRED_SECTIONS = [
   '## Practical Steps Forward',
   '## Closing',
 ];
-  '## Overview',
-  '## Your Relational Strengths',
-  '## Where You Have Room to Grow',
-  '## Practical Steps Forward',
-  '## Closing',
-];
 
 type AuditRow = {
   id: string;

@@ -1,0 +1,2 @@
+# Netlify SPA fallback — serve the Expo web bundle for all routes (email confirm links, deep links).
+/*    /index.html   200

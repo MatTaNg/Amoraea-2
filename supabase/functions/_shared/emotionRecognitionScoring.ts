@@ -4,8 +4,9 @@
  * Legacy rows may store a fractional proportion in (0, 1) only when it is not an integer count.
  */
 import { finiteNumberOrNull } from './attemptScoreSliceParsing.ts';
+import { EMOTION_ITEM_CORRECT_ANSWERS } from '../../../src/config/scoring/emotionRecognitionItems.ts';
 
-export const EMOTION_ITEM_CORRECT_ANSWERS = ['B', 'C', 'C'] as const;
+export { EMOTION_ITEM_CORRECT_ANSWERS } from '../../../src/config/scoring/emotionRecognitionItems.ts';
 export const EMOTION_ITEM_COUNT = EMOTION_ITEM_CORRECT_ANSWERS.length;
 
 export function isStoredEmotionCorrectCount(raw: number): boolean {
@@ -215,4 +216,68 @@ export function emotionRecognitionDisplayScoreFromRow(row: {
   const reconciled = emotionRecognitionPersistFieldsFromRow(row).displayPercent;
   if (reconciled !== null) return reconciled;
   return emotionRecognitionDisplayPercentFromRow(row);
+}
+
+/** Proportion correct in [0, 1] — used by gate/modifier and legacy helpers. */
+export function emotionRecognitionProportionFromResponses(responses: readonly string[]): number | null {
+  const correct = emotionRecognitionCorrectCountFromResponses(responses);
+  return correct === null ? null : correct / EMOTION_ITEM_COUNT;
+}
+
+/**
+ * Gate / modifier input: returns null for incomplete batteries even when a stale stored raw score exists.
+ * Prefer {@link emotionRecognitionResponses} when available.
+ */
+export function resolveEmotionRecognitionRawScoreForGate(params: {
+  emotionRecognitionRawScore?: number | null;
+  emotionRecognitionCorrectCount?: 0 | 1 | 2 | 3 | null;
+  emotionRecognitionResponses?: unknown;
+}): number | null {
+  const hydrated =
+    params.emotionRecognitionResponses != null
+      ? hydrateEmotionResponsesFromStorage(params.emotionRecognitionResponses)
+      : null;
+  if (hydrated != null && !isEmotionRecognitionBatteryComplete(hydrated)) {
+    console.warn(
+      '[EmotionRecognition] incomplete battery —',
+      countAnsweredEmotionItems(hydrated),
+      'of',
+      EMOTION_ITEM_COUNT,
+      'responses recorded — excluding from gate/modifier',
+    );
+    return null;
+  }
+  if (hydrated != null && isEmotionRecognitionBatteryComplete(hydrated)) {
+    const fromResponses = emotionRecognitionProportionFromResponses(hydrated);
+    if (fromResponses !== null) return fromResponses;
+  }
+  const r = params.emotionRecognitionRawScore;
+  if (typeof r === 'number' && Number.isFinite(r)) {
+    const stored = storedEmotionCorrectCountFromRaw(r);
+    if (stored !== null) return stored / EMOTION_ITEM_COUNT;
+    const legacy = legacyEmotionProportionFromRaw(r);
+    if (legacy !== null) return legacy;
+    return null;
+  }
+  if (typeof r === 'string' && String(r).trim() !== '') {
+    const n = Number(String(r).trim());
+    if (!Number.isFinite(n)) return null;
+    const stored = storedEmotionCorrectCountFromRaw(n);
+    if (stored !== null) return stored / EMOTION_ITEM_COUNT;
+    const legacy = legacyEmotionProportionFromRaw(n);
+    if (legacy !== null) return legacy;
+    return null;
+  }
+  const c = params.emotionRecognitionCorrectCount;
+  if (c === null || c === undefined) return null;
+  if (typeof c === 'string' && String(c).trim() !== '') {
+    const n = parseInt(String(c).trim(), 10);
+    if (Number.isFinite(n) && n >= 0 && n <= EMOTION_ITEM_COUNT) return n / EMOTION_ITEM_COUNT;
+  }
+  if (typeof c === 'number' && Number.isFinite(c)) {
+    const stored = storedEmotionCorrectCountFromRaw(c);
+    if (stored !== null) return stored / EMOTION_ITEM_COUNT;
+    return c / EMOTION_ITEM_COUNT;
+  }
+  return null;
 }

@@ -446,6 +446,13 @@ export async function rearmWebMicPreInitAfterTtsPlaybackComplete(): Promise<void
   await beginInterviewMicPreInitDuringTts('tts_playback', { allowOnMobileWebRecordingArm: true });
 }
 
+/** Name-entry: discard stale TTS-era pre-init only when the warm recorder is not already live. */
+export function webMicPreInitNeedsRefreshForNameEntry(): boolean {
+  if (isWebInterviewMicPreInitReady()) return false;
+  const trigger = getLastPreInitTriggerDuring();
+  return trigger === 'greeting' || trigger === 'tts_playback';
+}
+
 /** Debug / telemetry: active input deviceId from the pre-init stream (after getUserMedia). */
 export function getPreInitAudioInputDeviceId(): string | undefined {
   if (!preInitStream) return undefined;

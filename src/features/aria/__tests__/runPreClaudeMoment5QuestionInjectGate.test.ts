@@ -1,0 +1,125 @@
+import { describe, expect, it, jest } from '@jest/globals';
+
+import { MOMENT_4_GRUDGE_QUESTION_TEXT } from '@features/aria/moment4ProbeLogic';
+import { MOMENT_5_ACCOUNTABILITY_QUESTION_TEXT } from '@features/aria/probeAndScoringUtils';
+import { runPreClaudeMoment5QuestionInjectGate } from '@features/aria/runPreClaudeMoment5QuestionInjectGate';
+import { createMockPreClaudeDeps } from './preClaudeGateTestHelpers';
+
+jest.mock('@utilities/storage/InterviewStorage', () => ({
+  getCurrentScenario: jest.fn().mockReturnValue(3),
+  loadInterviewFromStorage: jest.fn().mockResolvedValue(null),
+  mergeInterviewStoragePayload: jest.fn((prior: unknown, patch: Record<string, unknown>) => ({
+    ...(prior as object),
+    ...patch,
+  })),
+  saveInterviewToStorage: jest.fn().mockResolvedValue(undefined),
+}));
+
+const M4_THRESHOLD_QUESTION =
+  'Thanks for sharing that. At what point do you decide when a relationship is something to work through versus something you need to walk away from?';
+
+describe('runPreClaudeMoment5QuestionInjectGate', () => {
+  it('returns handled:false when not answering first turn after M4 threshold', async () => {
+    const deps = createMockPreClaudeDeps({
+      currentInterviewMomentRef: { current: 4 },
+    });
+    const messagesToUse = [
+      { role: 'assistant', content: M4_THRESHOLD_QUESTION },
+      { role: 'user', content: 'First answer about trust.' },
+      { role: 'assistant', content: 'Can you say more?' },
+      { role: 'user', content: 'Second answer.' },
+    ];
+
+    const result = await runPreClaudeMoment5QuestionInjectGate(deps, messagesToUse, 'Alex');
+
+    expect(result).toEqual({ handled: false });
+  });
+
+  it('injects Moment 5 anchor after first user answer to M4 threshold probe', async () => {
+    const speakTextSafe = jest.fn().mockResolvedValue(undefined);
+    const setMessages = jest.fn();
+    const deps = createMockPreClaudeDeps({
+      currentInterviewMomentRef: { current: 4 },
+      moment4ThresholdProbeAskedRef: { current: true },
+      moment5QuestionDeliveredRef: { current: false },
+      moment5QuestionDeliveryInFlightRef: { current: false },
+      speakTextSafe,
+      setMessages,
+    });
+    const userAnswer = 'I would walk away when trust is broken and repair feels impossible.';
+    const messagesToUse = [
+      { role: 'assistant', content: M4_THRESHOLD_QUESTION },
+      { role: 'user', content: userAnswer },
+    ];
+
+    const result = await runPreClaudeMoment5QuestionInjectGate(deps, messagesToUse, 'Alex');
+
+    expect(result).toEqual({ handled: true });
+    expect(deps.moment5QuestionDeliveredRef.current).toBe(true);
+    expect(deps.currentInterviewMomentRef.current).toBe(5);
+    expect(deps.moment5PrimaryAnchorDeliveredSessionRef.current).toBe(true);
+    expect(deps.lastQuestionTextRef.current).toBe(MOMENT_5_ACCOUNTABILITY_QUESTION_TEXT);
+    expect(speakTextSafe).toHaveBeenCalledWith(
+      expect.stringMatching(/conflict with someone important/i),
+      expect.any(Object),
+    );
+    expect(setMessages).toHaveBeenCalledWith(
+      expect.arrayContaining([
+        expect.objectContaining({
+          role: 'assistant',
+          content: expect.stringMatching(/Alex|conflict/i),
+        }),
+      ]),
+    );
+    expect(MOMENT_5_ACCOUNTABILITY_QUESTION_TEXT.length).toBeGreaterThan(20);
+  });
+
+  it('does not inject Moment 5 while resume welcome flow owns playback', async () => {
+    const speakTextSafe = jest.fn().mockResolvedValue(undefined);
+    const deps = createMockPreClaudeDeps({
+      currentInterviewMomentRef: { current: 4 },
+      moment4ThresholdProbeAskedRef: { current: true },
+      moment5QuestionDeliveredRef: { current: false },
+      moment5QuestionDeliveryInFlightRef: { current: false },
+      resumeLoadingFlowActiveRef: { current: true },
+      speakTextSafe,
+    });
+    const messagesToUse = [
+      { role: 'assistant', content: M4_THRESHOLD_QUESTION },
+      { role: 'user', content: 'I would walk away when trust is broken.' },
+    ];
+
+    const result = await runPreClaudeMoment5QuestionInjectGate(deps, messagesToUse, 'Alex');
+
+    expect(result).toEqual({ handled: false });
+    expect(speakTextSafe).not.toHaveBeenCalled();
+  });
+
+  it('injects Moment 5 after explicit pass on the grudge question (threshold skipped)', async () => {
+    const speakTextSafe = jest.fn().mockResolvedValue(undefined);
+    const setMessages = jest.fn();
+    const deps = createMockPreClaudeDeps({
+      currentInterviewMomentRef: { current: 4 },
+      moment4ThresholdProbeAskedRef: { current: false },
+      moment5QuestionDeliveredRef: { current: false },
+      moment5QuestionDeliveryInFlightRef: { current: false },
+      speakTextSafe,
+      setMessages,
+    });
+    const messagesToUse = [
+      { role: 'assistant', content: MOMENT_4_GRUDGE_QUESTION_TEXT },
+      { role: 'user', content: 'not really' },
+    ];
+
+    const result = await runPreClaudeMoment5QuestionInjectGate(deps, messagesToUse, 'Alex');
+
+    expect(result).toEqual({ handled: true });
+    expect(deps.moment4ThresholdProbeAskedRef.current).toBe(false);
+    expect(deps.moment5QuestionDeliveredRef.current).toBe(true);
+    expect(deps.currentInterviewMomentRef.current).toBe(5);
+    expect(speakTextSafe).toHaveBeenCalledWith(
+      expect.stringContaining(MOMENT_5_ACCOUNTABILITY_QUESTION_TEXT),
+      expect.any(Object),
+    );
+  });
+});

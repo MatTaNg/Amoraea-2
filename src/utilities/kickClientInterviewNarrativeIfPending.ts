@@ -63,6 +63,10 @@ async function persistRollupIfNeeded(
       pillar_scores: resolution.pillar_scores,
       ...(resolution.weighted_score != null ? { weighted_score: resolution.weighted_score } : {}),
       ...(resolution.passed != null ? { passed: resolution.passed } : {}),
+      depth_signal_modifier: resolution.depth_signal_modifier ?? 0,
+      score_modifier: resolution.score_modifier ?? 0,
+      modified_weighted_score:
+        resolution.modified_weighted_score ?? resolution.weighted_score ?? null,
     })
     .eq('id', attemptId)
     .eq('user_id', userId);
@@ -73,6 +77,7 @@ export async function kickClientInterviewNarrativeIfPending(
   attemptId: string,
   source: string
 ): Promise<{ skipped: boolean; ok?: boolean; error?: string }> {
+  console.log(`[narrative] Starting for attempt ${attemptId} (source=${source})`);
   const { data: row, error: fetchErr } = await supabase
     .from('interview_attempts')
     .select(
@@ -84,17 +89,42 @@ export async function kickClientInterviewNarrativeIfPending(
     .maybeSingle();
 
   if (fetchErr || !row) {
+    console.error(`[narrative] Attempt ${attemptId} not found:`, fetchErr?.message ?? 'not_found');
     return { skipped: true, error: fetchErr?.message ?? 'attempt_not_found' };
   }
 
   const ar = (row.ai_reasoning ?? null) as Record<string, unknown> | null;
   if (interviewAiReasoningIsSubstantive(ar)) {
+    console.log(`[narrative] Attempt ${attemptId} already has substantive narrative — skipping client backup`);
+    if (row.reasoning_pending === true) {
+      await supabase
+        .from('interview_attempts')
+        .update({ reasoning_pending: false })
+        .eq('id', attemptId)
+        .eq('user_id', userId);
+    }
     return { skipped: true };
   }
 
   const resolution = resolvePillarScoresForNarrativeFromAttempt(row, row.passed === true);
   if (!resolution) {
-    return { skipped: true, error: 'missing_pillar_scores' };
+    const error = 'missing_pillar_scores';
+    console.error(`[narrative] ${error} for attempt ${attemptId}`);
+    if (row.reasoning_pending === true) {
+      await supabase
+        .from('interview_attempts')
+        .update({
+          ai_reasoning: {
+            ...buildReasoningFailurePatch(ar, error, { generationFailed: true }),
+            _clientNarrativeBackupSource: source,
+            _failedAt: new Date().toISOString(),
+          },
+          reasoning_pending: false,
+        })
+        .eq('id', attemptId)
+        .eq('user_id', userId);
+    }
+    return { skipped: true, error };
   }
   const pillars = resolution.pillar_scores;
   await persistRollupIfNeeded(attemptId, userId, resolution);
@@ -103,10 +133,27 @@ export async function kickClientInterviewNarrativeIfPending(
     ? (row.transcript as Array<{ role: string; content?: string }>)
     : [];
   if (transcript.length === 0) {
-    return { skipped: true, error: 'missing_transcript' };
+    const error = 'missing_transcript';
+    console.error(`[narrative] ${error} for attempt ${attemptId}`);
+    if (row.reasoning_pending === true) {
+      await supabase
+        .from('interview_attempts')
+        .update({
+          ai_reasoning: {
+            ...buildReasoningFailurePatch(ar, error, { generationFailed: true }),
+            _clientNarrativeBackupSource: source,
+            _failedAt: new Date().toISOString(),
+          },
+          reasoning_pending: false,
+        })
+        .eq('id', attemptId)
+        .eq('user_id', userId);
+    }
+    return { skipped: true, error };
   }
 
   try {
+    console.log(`[narrative] Attempt ${attemptId} fetched, calling model`);
     const evidenceContext = buildEvidenceContextFromAttemptPatterns(
       (row.scenario_specific_patterns ?? null) as Record<string, unknown> | null,
       row,
@@ -120,10 +167,11 @@ export async function kickClientInterviewNarrativeIfPending(
       [],
       {
         perAttemptTimeoutMs: CLIENT_NARRATIVE_BACKUP_TIMEOUT_MS,
-        maxAttempts: 2,
+        maxAttempts: 4,
         evidenceContext,
       },
     );
+    console.log(`[narrative] Model returned response, writing to DB for attempt ${attemptId}`);
     await supabase
       .from('interview_attempts')
       .update({
@@ -137,12 +185,14 @@ export async function kickClientInterviewNarrativeIfPending(
       })
       .eq('id', attemptId)
       .eq('user_id', userId);
+    console.log(`[narrative] Completed successfully for attempt ${attemptId}`);
     return { skipped: false, ok: true };
   } catch (e) {
     const err = e instanceof Error ? e.message : String(e);
     if (e instanceof Error && (e.name === 'AbortError' || /aborted/i.test(e.message))) {
-      console.error('[Reasoning] AbortError on client narrative backup:', err);
+      console.error('[narrative] AbortError on client narrative backup:', err);
     }
+    console.error(`[narrative] Unhandled error for attempt ${attemptId}:`, e);
     await supabase
       .from('interview_attempts')
       .update({

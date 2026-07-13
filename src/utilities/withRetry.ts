@@ -5,6 +5,7 @@
  */
 
 import { writeSessionLog, type SessionPlatform } from '@utilities/sessionLogging/writeSessionLog';
+import { isScenarioScoreDegradedError } from '@features/aria/scenarioScoreDegradedRetry';
 
 export type ErrorClassification = 'retryable' | 'unrecoverable' | 'unknown';
 
@@ -15,6 +16,9 @@ export type ErrorClassification = 'retryable' | 'unrecoverable' | 'unknown';
  * - unknown: treat as retry once then unrecoverable
  */
 export function classifyError(err: unknown): ErrorClassification {
+  if (isScenarioScoreDegradedError(err)) {
+    return 'retryable';
+  }
   if (err instanceof Error && err.name === 'WebTtsRequiresUserGestureError') {
     return 'unrecoverable';
   }
@@ -30,6 +34,7 @@ export function classifyError(err: unknown): ErrorClassification {
   if (status === 502) return 'retryable';
   if (message.includes('rate limit')) return 'retryable';
   if (message.includes('timeout')) return 'retryable';
+  if (message.includes('scenario score degraded')) return 'retryable';
   if (message.includes('network')) return 'retryable';
   if (message.includes('failed to fetch')) return 'retryable';
   if (message.includes('econnreset')) return 'retryable';
@@ -45,6 +50,8 @@ export function classifyError(err: unknown): ErrorClassification {
   if (message.includes('unauthorized')) return 'unrecoverable';
   if (message.includes('forbidden')) return 'unrecoverable';
   if (message.includes('not found')) return 'unrecoverable';
+  if (message.includes('is not defined')) return 'unrecoverable';
+  if (message.includes('is not a function')) return 'unrecoverable';
 
   return 'unknown';
 }

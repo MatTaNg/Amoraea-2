@@ -7,6 +7,7 @@ import {
   pickPersistedNumber,
   sliceScoresFromAttemptField,
 } from '../../../../supabase/functions/_shared/attemptScoreSliceParsing';
+import { GATE_PASS_WEIGHTED_MIN } from '../computeGateResultCore';
 
 describe('sliceScoresFromAttemptField', () => {
   it('reads camelCase and snake_case pillar fields', () => {
@@ -107,7 +108,7 @@ describe('buildInterviewAttemptGateCompletionFields', () => {
       passed: false,
       gate_fail_reasons: ['weighted_score', 'scenario_floor'],
       gate_fail_detail: {
-        weighted_score: { score: 5.4, requiredMin: 6 },
+        weighted_score: { score: 5.4, requiredMin: GATE_PASS_WEIGHTED_MIN },
         psychometric_floors: {},
       },
     });

@@ -27,7 +27,7 @@ Four sequential stages: Basic Info → AI Interview → Psychometrics (Gate 2, a
 |------|---------|
 | `src/domain/models/Profile.ts` | Add BasicInfo, Gate2Psychometrics, Gate3Compatibility, onboardingStage, applicationStatus, profileVisible; extend ProfileUpdate |
 | `src/data/repositories/ProfileRepository.ts` | Map new columns in getProfile/upsertProfile; parse/serialize basic_info, gate2_psychometrics, gate3_compatibility |
-| `App.tsx` | Replace current onboarding vs completed check with routing by onboardingStage + applicationStatus. Routes: basic_info → Stage1; interview → framing or Aria or post-interview; psychometrics → approved ? Gate2 reentry + Stage3 : under_review or post-interview; compatibility → Stage4; complete → main app |
+| `App.tsx` | Replace current onboarding vs completed check with routing by onboardingStage + applicationStatus. Routes: basic_info → Stage1; interview → framing or Amoraea or post-interview; psychometrics → approved ? Gate2 reentry + Stage3 : under_review or post-interview; compatibility → Stage4; complete → main app |
 | `src/app/screens/AriaScreen.tsx` | Accept optional params (e.g. fromOnboarding); after scoring upsert applicationStatus; navigate to PostInterviewScreen (no results UI for onboarding flow) |
 | `src/features/compatibility/compatibilityQuestions.ts` | Reorder/group COMPATIBILITY_SECTIONS into the 12 sections specified (Relationship Intent, Children, Location, Time & Lifestyle, Finances, Intimacy, Living Environment, Faith & Values, Substance Use, Pets, Physical Preference, Profile Prompts) |
 | `src/app/screens/CompatibilityScreen.tsx` | When used as Stage 4: load/save gate3Compatibility, pass userHeightCm/userWeightKg to BMI selector, enforce prompt subset and 20–300 chars; on complete set onboardingStage = complete, profileVisible = true |
@@ -62,7 +62,7 @@ Four sequential stages: Basic Info → AI Interview → Psychometrics (Gate 2, a
 | onboardingStage   | applicationStatus | Screen |
 |-------------------|-------------------|--------|
 | basic_info        | *                 | Stage 1 Basic Info |
-| interview         | pending           | Framing → Aria → Post-interview (after complete) |
+| interview         | pending           | Framing → Amoraea → Post-interview (after complete) |
 | interview         | under_review      | Post-interview then on next open → Under Review |
 | interview         | approved          | Post-interview then on next open → Gate 2 reentry |
 | psychometrics     | approved          | Gate 2 reentry → Stage 3 |

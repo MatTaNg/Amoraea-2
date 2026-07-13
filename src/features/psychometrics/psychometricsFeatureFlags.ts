@@ -1,7 +1,5 @@
-/** Feature flags for psychometrics — no Supabase / React Native imports (safe for Node scripts). */
-
-/** When true: interview → congratulations → psychometric battery → post-interview report. */
-export const PSYCHOMETRICS_ENABLED = true;
-
-/** When true: use NPI Entitlement forced-choice instrument instead of SD3 narcissism Likert scale. */
-export const NPI_ENTITLEMENT_ENABLED = true;
+/**
+ * Re-export canonical psychometrics feature flags (single source of truth for app + edge).
+ * @see supabase/functions/_shared/psychometricsFeatureFlags.ts
+ */
+export * from '../../../supabase/functions/_shared/psychometricsFeatureFlags';

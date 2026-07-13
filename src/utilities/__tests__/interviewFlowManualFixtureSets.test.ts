@@ -1,6 +1,6 @@
 /**
  * Regression fixtures inspired by manual interview calibration ("Test Sets" 1–6) and moment probes.
- * These tests do not run the full Aria LLM pipeline; they lock:
+ * These tests do not run the full Amoraea LLM pipeline; they lock:
  * - `translateStyleProfile` chip outputs for synthetic DB rows + transcript shape
  * - `probeAndScoringUtils` gates on canonical user strings from the calibration doc
  *

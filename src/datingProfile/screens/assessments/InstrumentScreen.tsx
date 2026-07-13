@@ -382,14 +382,14 @@ const styles = StyleSheet.create({
     paddingHorizontal: 24,
     paddingVertical: 28,
     paddingBottom: 56,
-    alignItems: "center",
+    alignItems: "flex-start",
   },
   introScrollContent: {
     flexGrow: 1,
     paddingHorizontal: 24,
     paddingVertical: 40,
     paddingBottom: 56,
-    alignItems: "center",
+    alignItems: "flex-start",
   },
   flowProgressTrack: {
     height: 4,

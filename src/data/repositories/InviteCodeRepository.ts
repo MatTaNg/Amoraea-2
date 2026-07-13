@@ -2,7 +2,6 @@ import { supabase } from '../supabase/client';
 import { profilesRepo } from '../repos/profilesRepo';
 import { signOutIfUsersAuthFkViolation } from '../supabase/signOutIfUsersAuthFkViolation';
 import { isAlphaTesterReferralCode } from '@/constants/alphaReferral';
-import { normalizeShareableReferralCode } from '@features/referrals/shareableReferralCode';
 import {
   isRelationshipValidationReferralCode,
   RELATIONSHIP_VALIDATION_TRACK,
@@ -73,7 +72,6 @@ export class InviteCodeRepository {
 
     let inviteCode = generateCode();
     let referredById: string | null = null;
-    let pendingReferralCode: string | null = null;
     let isAlphaTester = false;
 
     const raw = options.referralCode?.trim() ?? '';
@@ -84,17 +82,7 @@ export class InviteCodeRepository {
       } else if (isAlphaTesterReferralCode(raw)) {
         isAlphaTester = true;
       } else {
-        const normalizedShareable = normalizeShareableReferralCode(raw);
-        if (normalizedShareable) {
-          const { data: available, error: rpcErr } = await supabase.rpc('referral_code_is_available', {
-            p_raw: raw,
-          });
-          if (!rpcErr && available === true) {
-            pendingReferralCode = normalizedShareable;
-          }
-        } else {
-          referredById = await this.findUserIdByCode(raw);
-        }
+        referredById = await this.findUserIdByCode(raw);
       }
     }
 
@@ -115,7 +103,7 @@ export class InviteCodeRepository {
       invite_code: inviteCode,
       referred_by_id: referredById,
       is_alpha_tester: isAlphaTester,
-      pending_referral_code: pendingReferralCode,
+      referral_boost_active: referredById != null,
       ...(isRelationshipValidation ? { validation_track: RELATIONSHIP_VALIDATION_TRACK } : {}),
     });
 

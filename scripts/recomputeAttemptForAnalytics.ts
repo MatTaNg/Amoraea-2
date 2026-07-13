@@ -12,10 +12,10 @@ import {
 import { computePsychometricModifier } from '../src/features/psychometrics/computePsychometricModifier';
 import { computeUncertaintyScore } from '../src/features/psychometrics/computeUncertaintyScore';
 import { mergePsychometricFloorsIntoGateState } from '../src/features/psychometrics/psychometricFloorBreaches';
+import { psychometricRawResponsesFromUserRow } from '../src/features/psychometrics/psychometricStraightLineDetection';
 import {
   coercePsychometricScore,
   psychometricFloorScoresFromUserRow,
-  sd3NarcissismResponsesFromUserRow,
   sd3NarcissismScoreFromUserRow,
   userHasPsychometricScoresForScoring,
 } from '../src/features/psychometrics/usersPsychometricsSchemaFallback';
@@ -40,6 +40,11 @@ export type RawAttemptForAnalytics = {
   mentalizing_overcertainty_count: number | null;
   personal_moment_emotional_vocab_density: number | null;
   personal_moment_emotional_vocab_low: boolean | null;
+  moment_4_concreteness?: string | null;
+  moment_5_concreteness?: string | null;
+  disclosure_calibration?: string | null;
+  skip_penalty_total?: number | null;
+  auto_failed?: boolean | null;
   review_flags: unknown;
   reasoning_pending: boolean | null;
   defense_cross_reference?: unknown;
@@ -93,6 +98,9 @@ function buildRecalculateInput(row: RawAttemptForAnalytics): AdminRecalculateAtt
     auto_failed: row.auto_failed,
     personal_moment_emotional_vocab_density: row.personal_moment_emotional_vocab_density,
     personal_moment_emotional_vocab_low: row.personal_moment_emotional_vocab_low,
+    moment_4_concreteness: row.moment_4_concreteness,
+    moment_5_concreteness: row.moment_5_concreteness,
+    disclosure_calibration: row.disclosure_calibration,
   };
 }
 
@@ -196,17 +204,7 @@ function applyPsychometricOverlay(
       contemptPillar: pillars.contempt ?? null,
       mentalizingPillar: pillars.mentalizing ?? null,
     },
-    {
-      brs: user.psychometrics_brs_responses as Record<number, number> | undefined,
-      anxiety_trait: user.psychometrics_anxiety_trait_responses as Record<number, number> | undefined,
-      scs_sf: user.psychometrics_scs_sf_responses as Record<number, number> | undefined,
-      gasp: user.psychometrics_gasp_responses as Record<number, number> | undefined,
-      dweck: user.psychometrics_dweck_responses as Record<number, number> | undefined,
-      aaq2: user.psychometrics_aaq2_responses as Record<number, number> | undefined,
-      rses: user.psychometrics_rses_responses as Record<number, number> | undefined,
-      sd3_narcissism: sd3NarcissismResponsesFromUserRow(user) as Record<number, number> | undefined,
-      rfq: user.psychometrics_rfq_responses as Record<number, number> | undefined,
-    },
+    psychometricRawResponsesFromUserRow(user),
   );
 
   const uncertaintyPass1 = computeUncertaintyScore(

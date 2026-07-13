@@ -93,6 +93,170 @@ describe('applyElaborationAbsencePenaltiesToScenarioScores', () => {
     expect(out.keyEvidence.mentalizing).toMatch(/Declared Level 1/i);
   });
 
+  it('does not cap scores when scoringMetadata marks the full answer as Level 2 despite a Level 1 display snippet', () => {
+    const out = applyElaborationAbsencePenaltiesToScenarioScores(
+      3,
+      "Well at first it seems like he's just avoiding it, but later it sounds like he genuinely didn't know what to say and that kind of emotional confrontation is deeply uncomfortable for him, which is exactly why this creates more distance for Sophie.",
+      {
+        mentalizing: 7,
+        attunement: 7,
+        repair: 5,
+      },
+      {
+        mentalizing: 'Level 1 — Okay, he walked away and came back later.',
+        attunement: 'Level 1 — Sophie is upset.',
+      },
+      40,
+      {
+        scoringMetadata: {
+          evidence_levels: { mentalizing: 2, attunement: 2 },
+          evidence_level_basis: {
+            mentalizing: "User later infers that he genuinely didn't know what to say and finds confrontation emotionally uncomfortable.",
+            attunement: 'User later explains why the pattern creates distance and leaves Sophie in an incomplete emotional exchange.',
+          },
+        },
+      },
+    );
+    expect(out.pillarScores.mentalizing).toBe(7);
+    expect(out.pillarScores.attunement).toBe(7);
+    expect(out.keyEvidence.mentalizing).toMatch(/^Level 2 —/);
+    expect(out.keyEvidence.attunement).toMatch(/^Level 2 —/);
+  });
+
+  it('does not cap mentalizing when scoringMetadata says Level 1 but full transcript supports Level 2', () => {
+    const transcript =
+      "Okay, I'm on Sophie's side at first, but Daniel was honest that he didn't know what to say, this is an incredibly uncomfortable situation for him, and avoiding those real conversations just creates more friction and distance.";
+    const out = applyElaborationAbsencePenaltiesToScenarioScores(
+      3,
+      transcript,
+      { mentalizing: 7, attunement: 7, repair: 6 },
+      {
+        mentalizing: 'Level 1 — User sided with Sophie initially.',
+        attunement: 'Level 1 — Sophie is upset.',
+      },
+      40,
+      {
+        scoringMetadata: {
+          evidence_levels: { mentalizing: 1, attunement: 1 },
+          evidence_level_basis: {
+            mentalizing: 'Opening reaction only.',
+            attunement: 'Opening reaction only.',
+          },
+        },
+      },
+    );
+    expect(out.pillarScores.mentalizing).toBe(7);
+    expect(out.pillarScores.attunement).toBe(7);
+    expect(out.keyEvidence.mentalizing).toMatch(/^Level 2 —/);
+    expect(out.keyEvidence.attunement).toMatch(/^Level 2 —/);
+  });
+
+  it('uses full-transcript holistic cues to infer Level 2 when the snippet is shallow but the answer later develops', () => {
+    const out = applyElaborationAbsencePenaltiesToScenarioScores(
+      3,
+      "Okay, I'm on Sophie's side at first, but what stands out is that he genuinely didn't know what to say, this kind of emotional confrontation is really uncomfortable for him, and avoiding those real conversations just creates more friction and distance.",
+      {
+        mentalizing: 7,
+        attunement: 7,
+        repair: 5,
+      },
+      {
+        mentalizing: "Okay, I'm on Sophie's side at first.",
+        attunement: "Sophie is upset about the incomplete conversation.",
+      },
+      40,
+    );
+    expect(out.pillarScores.mentalizing).toBe(7);
+    expect(out.pillarScores.attunement).toBe(7);
+    expect(out.keyEvidence.mentalizing).toMatch(/^Level 2 —/);
+    expect(out.keyEvidence.attunement).toMatch(/^Level 2 —/);
+  });
+
+  it('normalizes curly apostrophes before inferring holistic Level 2 from the full transcript', () => {
+    const out = applyElaborationAbsencePenaltiesToScenarioScores(
+      3,
+      "Okay, I’m on Sophie’s side at first, but he genuinely didn’t know what to say, this is an incredibly uncomfortable situation for him, and avoiding those real conversations just creates more friction and distance.",
+      {
+        mentalizing: 7,
+        attunement: 7,
+        repair: 5,
+      },
+      {
+        mentalizing: "Okay, I’m on Sophie’s side at first.",
+        attunement: 'Sophie is upset.',
+      },
+      40,
+    );
+    expect(out.pillarScores.mentalizing).toBe(7);
+    expect(out.pillarScores.attunement).toBe(7);
+    expect(out.keyEvidence.mentalizing).toMatch(/^Level 2 —/);
+    expect(out.keyEvidence.attunement).toMatch(/^Level 2 —/);
+  });
+
+  it('infers Level 2 from the full transcript even when model keyEvidence is confidence-only', () => {
+    const out = applyElaborationAbsencePenaltiesToScenarioScores(
+      3,
+      "Okay, I'm on Sophie's side at first, but Daniel was honest that he didn't know what to say, this is an incredibly uncomfortable situation for him, and avoiding those real conversations just creates more friction and distance.",
+      {
+        mentalizing: 7,
+        attunement: 7,
+        repair: 5,
+      },
+      {
+        mentalizing: 'high',
+        attunement: 'moderate',
+      },
+      40,
+    );
+    expect(out.pillarScores.mentalizing).toBe(7);
+    expect(out.pillarScores.attunement).toBe(7);
+    expect(out.keyEvidence.mentalizing).toMatch(/^Level 2 —/);
+    expect(out.keyEvidence.attunement).toMatch(/^Level 2 —/);
+  });
+
+  it('does not cap Vaishnava-like Scenario A scores when model returns confidence-only keyEvidence', () => {
+    const transcript =
+      "They have a difference in priorities. Ryan should be able to tell their family. That they will call them back. If they really liked Emma and wanted to spend time with her. Emma's frustrated. I'm assuming she's referring to him always taking time, taking shared time that they were supposed to spend together, to spend it with their family, with his family. If I'm Ryan and if I really liked Emma. I would assure her that this will not happen again and actually follow through.";
+    const out = applyElaborationAbsencePenaltiesToScenarioScores(
+      1,
+      transcript,
+      {
+        mentalizing: 6,
+        attunement: 5,
+        repair: 7,
+        accountability: 7,
+      },
+      {
+        mentalizing: 'high',
+        attunement: 'moderate',
+        repair: 'high',
+        accountability: 'high',
+      },
+      35,
+      { depthModifierThreshold: 20 },
+    );
+    expect(out.pillarScores.mentalizing).toBe(6);
+    expect(out.pillarScores.repair).toBe(7);
+    expect(out.pillarScores.accountability).toBe(7);
+    expect(out.keyEvidence.mentalizing).toMatch(/^Level 2 —/);
+  });
+
+  it('does not apply depth modifier when keyEvidence is confidence-only but transcript is substantive', () => {
+    const transcript =
+      "Emma felt dismissed and is questioning whether she matters in this relationship at all.";
+    const out = applyElaborationAbsencePenaltiesToScenarioScores(
+      1,
+      transcript,
+      { mentalizing: 7, attunement: 7, repair: 6 },
+      { mentalizing: 'moderate', attunement: 'high', repair: 'moderate' },
+      12,
+    );
+    expect(out.pillarScores.mentalizing).toBe(7);
+    expect(out.pillarScores.attunement).toBe(7);
+    expect(out.pillarScores.repair).toBe(6);
+    expect(out.depthModifierMeta.depth_modifier_applied).toBe(false);
+  });
+
   it('caps repair at 5 for compensatory line without emotional core', () => {
     const out = applyElaborationAbsencePenaltiesToScenarioScores(
       3,
@@ -172,18 +336,55 @@ describe('applyElaborationAbsencePenaltiesToScenarioScores', () => {
     expect(out.pillarScores.attunement).toBe(5);
     expect(out.pillarScores.repair).toBe(5);
   });
+
+  it('floors Level 2 mentalizing and attunement at 6 when model under-scores interior inference', () => {
+    const out = applyElaborationAbsencePenaltiesToScenarioScores(
+      1,
+      "I'm assuming she's referring to him always taking shared time they were supposed to spend together to spend it with his family",
+      { mentalizing: 4, attunement: 4, repair: 7 },
+      {
+        mentalizing:
+          'Level 2 — Infers emotional meaning of shared-time pattern beyond scenario facts.',
+        attunement:
+          'Level 2 — Recognizes mismatch between what Emma needed emotionally and what she received.',
+        repair: 'Concrete follow-through commitment.',
+      },
+      40,
+    );
+    expect(out.pillarScores.mentalizing).toBe(6);
+    expect(out.pillarScores.attunement).toBe(6);
+    expect(out.keyEvidence.mentalizing).toMatch(/Floor 6/i);
+    expect(out.keyEvidence.attunement).toMatch(/Floor 6/i);
+  });
+
+  it('does not raise Level 1 scores via Level 2 floor', () => {
+    const out = applyElaborationAbsencePenaltiesToScenarioScores(
+      1,
+      'Emma is frustrated',
+      { mentalizing: 4, attunement: 4, repair: 5 },
+      {
+        mentalizing: 'Level 1 — Surface label only.',
+        attunement: 'Level 1 — Names frustration without pattern.',
+        repair: 'Apologize.',
+      },
+      40,
+    );
+    expect(out.pillarScores.mentalizing).toBe(4);
+    expect(out.pillarScores.attunement).toBe(4);
+    expect(out.keyEvidence.mentalizing ?? '').not.toMatch(/Floor 5/i);
+  });
 });
 
 describe('applyElaborationAbsencePenaltiesMoment4', () => {
-  it('caps mentalizing and accountability when low specificity after probe', () => {
+  it('nulls mentalizing and accountability when low specificity after probe', () => {
     const out = applyElaborationAbsencePenaltiesMoment4(
       { mentalizing: 8, accountability: 8 },
       {},
       { clientSpecificityFollowUpAsked: true, lowSpecificityAfterProbe: true },
       50,
     );
-    expect(out.pillarScores.mentalizing).toBe(5);
-    expect(out.pillarScores.accountability).toBe(4);
+    expect(out.pillarScores.mentalizing).toBeNull();
+    expect(out.pillarScores.accountability).toBeNull();
   });
 });
 

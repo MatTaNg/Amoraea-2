@@ -1,7 +1,7 @@
 import { Platform } from 'react-native';
 import { spacing } from '@ui/theme/spacing';
 
-/** Matches Aria pre-interview (`#05060D`) and post-interview stack (`#0a0a0f`). */
+/** Matches Amoraea pre-interview (`#05060D`) and post-interview stack (`#0a0a0f`). */
 export const PSYCHOMETRICS_BG = '#05060D';
 
 export const PSYCHOMETRICS_ACCENT = '#5BA8E8';

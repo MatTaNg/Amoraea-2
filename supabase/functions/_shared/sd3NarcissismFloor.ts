@@ -1,4 +1,6 @@
-export const SD3_NARCISSISM_FLOOR_THRESHOLD = 4.0;
+export { SD3_NARCISSISM_FLOOR_THRESHOLD } from '../../../src/config/psychometrics/floors.ts';
+import { SD3_NARCISSISM_FLOOR_THRESHOLD } from '../../../src/config/psychometrics/floors.ts';
+
 export const SD3_NARCISSISM_STRAIGHT_LINE_FLAG = 'sd3_narcissism_straight_line';
 export const SD3_NARCISSISM_FLOOR_FAIL_CODE = 'sd3_narcissism_floor';
 export const SD3_NARCISSISM_ITEM_COUNT = 9;

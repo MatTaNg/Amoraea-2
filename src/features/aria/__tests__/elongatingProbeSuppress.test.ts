@@ -1,7 +1,9 @@
 import {
   buildMoment5ClosingFallbackAfterSuppressedElongating,
   buildNeutralAckAfterSuppressedElongatingProbe,
+  coerceIncompleteInterviewClosingForTts,
   elongatingProbePlaybackBlockReason,
+  isIncompleteInterviewClosingForSpeak,
   isLenientInterviewCloseAfterClosingSpeech,
   isMoment5ReadyForInterviewClose,
   moment5AnswerIncludesResolutionOutcome,
@@ -12,15 +14,58 @@ import {
   isInterviewClosingStreamFragment,
   isInterviewClosingThanksFragment,
   applyConsecutiveStreamSentenceDedup,
+  coerceInvalidContinuationAssistantDraft,
+  isInvalidInformalContinuationAssistantText,
   stripConsecutiveDuplicateSentencesWithinDraft,
   stripDuplicateInterviewClosingSentencesWithinDraft,
+  stripPrematureInterviewClosingFromScenarioDraft,
+  parallelStreamDeliveredMoment5ClosingAttempt,
+  streamSpokeAudibleInterviewClosingContent,
+  streamSpokeIncompleteInterviewClosingOnly,
   stripInterviewClosingStreamingEcho,
   transcriptHasInterviewClosingAssistantMessage,
   transcriptHasInterviewClosingSpokenFragment,
   userTurnHasMultipleDistinctIdeasOrHypotheses,
   userTurnLooksLikeSingleSurfaceLabelOnly,
+  userTurnTrailsOffMidSentence,
   userTurnSuppressesElongatingProbe,
 } from '../elongatingProbe';
+
+describe('userTurnTrailsOffMidSentence', () => {
+  it('detects ellipsis and dangling conjunction endings', () => {
+    expect(
+      userTurnTrailsOffMidSentence(
+        'If I really liked Emma, I would assure her that this would not happen again and actually...',
+      ),
+    ).toBe(true);
+    expect(userTurnTrailsOffMidSentence('I would apologize and then')).toBe(true);
+    expect(
+      userTurnTrailsOffMidSentence(
+        'Ryan should not have taken that call during their date with Emma.',
+      ),
+    ).toBe(false);
+  });
+});
+
+describe('coerceInvalidContinuationAssistantDraft', () => {
+  it('replaces broken go-on echo with approved elongating probe', () => {
+    const user =
+      'If I really liked Emma, I would assure her that this would not happen again and actually...';
+    expect(coerceInvalidContinuationAssistantDraft('Makes sense. And actually — go on?', user)).toBe(
+      'Can you say more about that?',
+    );
+    expect(coerceInvalidContinuationAssistantDraft('And actually — go on?', user)).toBe(
+      'Can you say more about that?',
+    );
+  });
+
+  it('leaves full repair questions unchanged', () => {
+    const user = 'I would stay and talk it through with her.';
+    expect(
+      coerceInvalidContinuationAssistantDraft('Got it. What if you were Ryan — how would you repair this?', user),
+    ).toBe('Got it. What if you were Ryan — how would you repair this?');
+  });
+});
 
 describe('userTurnSuppressesElongatingProbe', () => {
   it('suppresses for 25+ words (session log regression: 127-word hypotheses)', () => {
@@ -48,6 +93,14 @@ describe('userTurnSuppressesElongatingProbe', () => {
 
   it('does not suppress thin vague under 15 words that is not a single-label pattern', () => {
     expect(userTurnSuppressesElongatingProbe('I dont know')).toBe(false);
+  });
+
+  it('does not suppress when the user trails off mid-sentence despite word count', () => {
+    expect(
+      userTurnSuppressesElongatingProbe(
+        'If I really liked Emma, I would assure her that this would not happen again and actually...',
+      ),
+    ).toBe(false);
   });
 
   it('suppresses session-log Scenario A verbose answer (32 words)', () => {
@@ -92,11 +145,15 @@ describe('elongatingProbePlaybackBlockReason', () => {
 });
 
 describe('suppressed elongating fallbacks', () => {
-  it('buildMoment5ClosingFallbackAfterSuppressedElongating uses one thanks line and complete token', () => {
-    const t = buildMoment5ClosingFallbackAfterSuppressedElongating('Matt');
+  it('buildMoment5ClosingFallbackAfterSuppressedElongating uses thanks, optional reflection, and complete token', () => {
+    const conflictAnswer =
+      "I had a conflict with my best friend last year where I'd been pulling away and not showing up for her the way I normally would. She called me out on it directly.";
+    const t = buildMoment5ClosingFallbackAfterSuppressedElongating('Matt', conflictAnswer);
     expect(t).toContain('Matt');
     expect(t).toContain('[INTERVIEW_COMPLETE]');
     expect(t).toMatch(/Thank you for being so open with me/i);
+    expect(t).toMatch(/good work getting through all of this/i);
+    expect(t).toMatch(/what (?:i heard|i got|came through|landed for me) was that/i);
     expect(t).not.toMatch(/walking through/i);
     expect((t.match(/thank you/gi) ?? []).length).toBe(1);
   });
@@ -114,7 +171,7 @@ describe('suppressed elongating fallbacks', () => {
     ).toBe(false);
   });
 
-  it('isMoment5ReadyForInterviewClose allows single turn when resolution is described', () => {
+  it('isMoment5ReadyForInterviewClose blocks single turn when resolution is described without self-accountability', () => {
     expect(
       isMoment5ReadyForInterviewClose({
         currentInterviewMoment: 5,
@@ -123,6 +180,19 @@ describe('suppressed elongating fallbacks', () => {
         accountabilityProbeFired: false,
         moment5CombinedUserText:
           'We talked it through and apologized. Things are better now.',
+      }),
+    ).toBe(false);
+  });
+
+  it('isMoment5ReadyForInterviewClose allows single turn when resolution and explicit self-accountability are present', () => {
+    expect(
+      isMoment5ReadyForInterviewClose({
+        currentInterviewMoment: 5,
+        moment5QuestionDelivered: true,
+        postM5UserTurns: 1,
+        accountabilityProbeFired: false,
+        moment5CombinedUserText:
+          'We talked it through and I apologized for snapping at him. Things are better now.',
       }),
     ).toBe(true);
   });
@@ -140,6 +210,14 @@ describe('suppressed elongating fallbacks', () => {
     expect(
       moment5AnswerIncludesResolutionOutcome(
         'He called me a bad coach and walked away. I was really angry and thought he was out of line.',
+      ),
+    ).toBe(false);
+  });
+
+  it('moment5AnswerIncludesResolutionOutcome stays false for third-party apology without repair outcome', () => {
+    expect(
+      moment5AnswerIncludesResolutionOutcome(
+        'My roommate started a fight over dishes, it was ridiculous. She blew it out of proportion completely. I was being reasonable, and she needed to calm down. She eventually apologized.',
       ),
     ).toBe(false);
   });
@@ -264,6 +342,29 @@ describe('suppressed elongating fallbacks', () => {
         'Thanks for sticking with all of this. Thank you for being so open with me.',
       ),
     ).toBe(false);
+    expect(
+      isIncompleteInterviewClosingLeadSentence(
+        'Thank you for getting through all of this. What stood out to me',
+      ),
+    ).toBe(true);
+  });
+
+  it('coerceIncompleteInterviewClosingForTts expands truncated good-work / what-stuck cutoff', () => {
+    const truncated = 'Good work getting through all of this, Matt. What stuck';
+    expect(isIncompleteInterviewClosingForSpeak(truncated)).toBe(true);
+    expect(looksLikeInterviewClosingAssistantMessage(truncated)).toBe(false);
+    const out = coerceIncompleteInterviewClosingForTts(truncated, 'Matt');
+    expect(out).toMatch(/good work getting through all of this/i);
+    expect(out).toMatch(/thank you for being so open with me, matt/i);
+    expect(out).not.toMatch(/what stuck/i);
+    expect(looksLikeInterviewClosingAssistantMessage(out)).toBe(true);
+  });
+
+  it('coerceIncompleteInterviewClosingForTts strips truncated what-you cutoff', () => {
+    const truncated = 'Good work getting through all of this, Matt. What you.';
+    const out = coerceIncompleteInterviewClosingForTts(truncated, 'Matt');
+    expect(out).not.toMatch(/\bwhat you\.?\b/i);
+    expect(out).toMatch(/thank you for being so open with me, matt/i);
   });
 
   it('defers thanks for being open reflective lead before final thank-you', () => {
@@ -320,12 +421,73 @@ describe('suppressed elongating fallbacks', () => {
     ).toBeNull();
   });
 
+  it('parallelStreamDeliveredMoment5ClosingAttempt detects incomplete reflective stream audio', () => {
+    const spoken =
+      'Good work getting through all of this, Matt. What stood out to me was that you';
+    expect(
+      parallelStreamDeliveredMoment5ClosingAttempt({
+        spokenCompleteText: spoken,
+        streamFullText: '',
+        closingSpokenInStream: false,
+      }),
+    ).toBe(true);
+    expect(
+      streamSpokeIncompleteInterviewClosingOnly({
+        parallelStreamingPlaybackUsed: true,
+        spokenCompleteText: spoken,
+        closingSpokenInStream: false,
+      }),
+    ).toBe(true);
+  });
+
+  it('streamSpokeIncompleteInterviewClosingOnly is false after final thank-you', () => {
+    expect(
+      streamSpokeIncompleteInterviewClosingOnly({
+        parallelStreamingPlaybackUsed: true,
+        spokenCompleteText: 'Thank you for being so open with me, Matt.',
+        closingSpokenInStream: false,
+      }),
+    ).toBe(false);
+  });
+
+  it('closingSpoken flag alone does not count as delivered closing attempt', () => {
+    const probe =
+      'Looking back — do you think there was anything you could have owned on your side?';
+    expect(streamSpokeAudibleInterviewClosingContent(probe)).toBe(false);
+    expect(
+      parallelStreamDeliveredMoment5ClosingAttempt({
+        spokenCompleteText: probe,
+        streamFullText: '',
+        closingSpokenInStream: true,
+      }),
+    ).toBe(false);
+  });
+
+  it('streamSpokeIncompleteInterviewClosingOnly stays true when closingSpoken flag set prematurely', () => {
+    const spoken =
+      'Good work getting through all of this, Matt. What stood out to me was that you';
+    expect(
+      streamSpokeIncompleteInterviewClosingOnly({
+        parallelStreamingPlaybackUsed: true,
+        spokenCompleteText: spoken,
+        closingSpokenInStream: true,
+      }),
+    ).toBe(true);
+  });
+
   it('stripDuplicateInterviewClosingSentencesWithinDraft collapses duplicate thanks in one turn', () => {
     const draft =
       'Thank you for walking through that with me, Matt. Thanks for sticking with all of this — you stayed with it. Thank you for being so open with me.';
     const out = stripDuplicateInterviewClosingSentencesWithinDraft(draft);
     expect(out).toContain('Thank you for being so open with me');
-    expect(out).not.toContain('Thank you for walking through');
+    expect(out).toContain('Thank you for walking through');
+    expect(out).not.toContain('Thanks for sticking with all of this');
+  });
+
+  it('stripPrematureInterviewClosingFromScenarioDraft keeps brief ack and drops closing tail', () => {
+    const draft =
+      'Got it. Good work getting through all of this, Match. Thank you for being so open with me, Match.';
+    expect(stripPrematureInterviewClosingFromScenarioDraft(draft)).toBe('Got it.');
   });
 
   it('stripDuplicateInterviewClosingSentencesWithinDraft collapses duplicate good-work reflective openers', () => {
@@ -374,7 +536,21 @@ describe('suppressed elongating fallbacks', () => {
     ).toBe(false);
   });
 
-  it('isMoment5ReadyForInterviewClose allows close after resolution follow-up exchange', () => {
+  it('isMoment5ReadyForInterviewClose allows close after resolution follow-up exchange when probe fired', () => {
+    expect(
+      isMoment5ReadyForInterviewClose({
+        currentInterviewMoment: 5,
+        moment5QuestionDelivered: true,
+        postM5UserTurns: 2,
+        accountabilityProbeFired: true,
+        moment5CombinedUserText:
+          'I snapped at him about it. We talked it through the next day and apologized.',
+        resolutionFollowUpStillRequired: false,
+      }),
+    ).toBe(true);
+  });
+
+  it('isMoment5ReadyForInterviewClose blocks close after resolution follow-up when probe still required', () => {
     expect(
       isMoment5ReadyForInterviewClose({
         currentInterviewMoment: 5,
@@ -382,10 +558,11 @@ describe('suppressed elongating fallbacks', () => {
         postM5UserTurns: 2,
         accountabilityProbeFired: false,
         moment5CombinedUserText:
-          'I snapped at him about it. We talked it through the next day and apologized.',
+          'I had a conflict with my mom about marriage. I explained my rationale and assured her we wanted the same things.',
         resolutionFollowUpStillRequired: false,
+        accountabilityProbeStillRequired: true,
       }),
-    ).toBe(true);
+    ).toBe(false);
   });
 
   it('isMoment5ReadyForInterviewClose does not allow single turn with explicit self-accountability alone', () => {

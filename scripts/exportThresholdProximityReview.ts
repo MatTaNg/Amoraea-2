@@ -259,7 +259,7 @@ function renderTranscript(turns: TranscriptTurn[]): string[] {
   if (turns.length === 0) return ['(no transcript)', ''];
   const lines: string[] = [];
   for (const t of turns) {
-    const role = t.role === 'user' ? 'USER' : t.role === 'assistant' ? 'ARIA' : t.role.toUpperCase();
+    const role = t.role === 'user' ? 'USER' : t.role === 'assistant' ? 'Amoraea' : t.role.toUpperCase();
     const meta: string[] = [];
     if (t.scenarioNumber != null) meta.push(`S${t.scenarioNumber}`);
     if (t.interviewMoment != null) meta.push(`M${t.interviewMoment}`);

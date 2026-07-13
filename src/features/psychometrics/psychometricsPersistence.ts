@@ -149,6 +149,8 @@ export function buildAssessmentSavePayload(
   } else if (assessmentId === 'gasp') {
     updatePayload.psychometrics_gasp_responses = finalResponses;
     updatePayload.psychometrics_gasp_score = scores.total;
+    updatePayload.psychometrics_gasp_guilt_repair_score = scores.guilt_repair;
+    updatePayload.psychometrics_gasp_shame_withdraw_score = scores.shame_withdraw;
   } else if (assessmentId === 'sd3_narcissism') {
     Object.assign(
       updatePayload,

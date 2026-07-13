@@ -29,6 +29,10 @@ const FULL_SCORES = {
   dweckScore: null as number | null,
   aaq2Score: null as number | null,
   rsesScore: null as number | null,
+  scsPublicScore: null as number | null,
+  scsPrivateScore: null as number | null,
+  mspssFriendsScore: null as number | null,
+  mspssFamilyScore: null as number | null,
   sd3NarcissismScore: null as number | null,
   npiEntitlementScore: null as number | null,
   rfqScore: null as number | null,
@@ -204,7 +208,7 @@ describe('computePsychometricModifier', () => {
     const result = computePsychometricModifier(
       { ...FULL_SCORES, gaspScore: 4.75 },
       undefined,
-      { gasp: { 1: 7, 2: 7, 3: 7, 4: 7 } },
+      { gasp: Object.fromEntries([1, 2, 3, 4, 5, 6, 7, 8].map((id) => [id, 7])) },
     );
     expect(result.straightLineFlags).toContain('gasp_straight_line');
     expect(result.psychometricFloorBreaches).toContain(GASP_EXTREME_EXTERNALIZATION_FLOOR_CODE);

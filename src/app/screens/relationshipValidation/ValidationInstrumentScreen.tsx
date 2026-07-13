@@ -232,6 +232,7 @@ const styles = StyleSheet.create({
     fontSize: 18,
     lineHeight: 26,
     marginBottom: 24,
+    textAlign: 'left',
     fontFamily: Platform.OS === 'web' ? "'Jost', sans-serif" : undefined,
   },
   backText: {

@@ -32,10 +32,6 @@ import {
   webPasswordRecoveryLinkErrorMessage,
   type WebAuthCallbackIntent,
 } from '@features/authentication/webAuthRecoveryRouting';
-import {
-  debugAuthCallbackLog,
-  sanitizeAuthUrlForLog,
-} from '@features/authentication/debugAuthCallbackLog';
 
 if (Platform.OS === 'web') {
   normalizeWebEmailConfirmationUrl();
@@ -85,33 +81,6 @@ type AuthSnapshot = {
 
 const initialRecovery = readInitialWebPasswordRecoveryState();
 const passwordRecoveryPendingRef = { current: initialRecovery.pending };
-
-if (Platform.OS === 'web' && typeof window !== 'undefined') {
-  const { pathname, search, hash } = window.location;
-  let firstLanding: Record<string, unknown> | null = null;
-  try {
-    firstLanding = JSON.parse(
-      sessionStorage.getItem('debug_auth_first_landing_28d27a') ?? 'null',
-    ) as Record<string, unknown> | null;
-  } catch {
-    firstLanding = null;
-  }
-  // #region agent log
-  debugAuthCallbackLog(
-    'useAuth.ts:module-init',
-    'initial recovery state',
-    {
-      ...sanitizeAuthUrlForLog(pathname, search, hash),
-      initialRecoveryPending: initialRecovery.pending,
-      initialLinkError: initialRecovery.linkError != null,
-      initialConfirmLinkError: initialRecovery.emailConfirmationLinkError != null,
-      resetPendingStorage: isPasswordResetPendingInStorage(),
-      firstLanding,
-    },
-    'H3',
-  );
-  // #endregion
-}
 
 let snapshot: AuthSnapshot = {
   session: null,
@@ -217,33 +186,8 @@ async function bootstrapWebAuthFromUrl(): Promise<void> {
 
   const { pathname, search, hash } = window.location;
   const tokenType = readAuthCallbackTokenType(search, hash);
-  // #region agent log
-  debugAuthCallbackLog(
-    'useAuth.ts:bootstrapWebAuthFromUrl',
-    'bootstrap entry',
-    {
-      ...sanitizeAuthUrlForLog(pathname, search, hash),
-      tokenType,
-      intent: resolveWebAuthCallbackIntent(pathname, search, hash),
-      isConfirmCallback: isEmailConfirmationCallback(),
-      resetPending: isPasswordResetPendingInStorage(),
-      initialRecoveryPending: passwordRecoveryPendingRef.current,
-    },
-    'H3',
-  );
-  // #endregion
 
   if (isBarePasswordResetLanding(pathname, search, hash)) {
-    // #region agent log
-    debugAuthCallbackLog(
-      'useAuth.ts:bootstrapWebAuthFromUrl',
-      'bare reset path — redirect home',
-      sanitizeAuthUrlForLog(pathname, search, hash),
-      'H6',
-      'post-fix',
-    );
-    // #endregion
-    await supabase.auth.signOut();
     clearPasswordResetPendingInStorage();
     passwordRecoveryPendingRef.current = false;
     setSnapshot({
@@ -452,28 +396,6 @@ function startAuthInitOnce(): Promise<void> {
           : { pathname: '', search: '', hash: '' };
       let skipSessionSync = false;
 
-      if (event === 'PASSWORD_RECOVERY' || event === 'SIGNED_IN') {
-        const confirmLink =
-          event === 'PASSWORD_RECOVERY'
-            ? isConfirmEmailTokenType(initialWebAuthCallback.tokenType) ||
-              (isEmailConfirmationCallback() && !isPasswordResetPendingInStorage())
-            : null;
-        // #region agent log
-        debugAuthCallbackLog(
-          'useAuth.ts:onAuthStateChange',
-          'auth state change',
-          {
-            event,
-            ...sanitizeAuthUrlForLog(pathname, search, hash),
-            confirmLinkBranch: confirmLink,
-            passwordRecoveryPendingRef: passwordRecoveryPendingRef.current,
-            initialTokenType: initialWebAuthCallback.tokenType,
-            hasSession: Boolean(nextSession),
-          },
-          event === 'PASSWORD_RECOVERY' ? 'H2' : 'H2',
-        );
-        // #endregion
-      }
       if (event === 'PASSWORD_RECOVERY') {
         const signupConfirmLoad = initialWebAuthCallback.signupConfirmAtLoad;
         const confirmLink = signupConfirmLoad || isEmailConfirmationCallback();
@@ -483,23 +405,6 @@ function startAuthInitOnce(): Promise<void> {
           hash,
           initialWebAuthCallback.intent,
         );
-        // #region agent log
-        debugAuthCallbackLog(
-          'useAuth.ts:onAuthStateChange:PASSWORD_RECOVERY',
-          'recovery event decision',
-          {
-            ...sanitizeAuthUrlForLog(pathname, search, hash),
-            signupConfirmLoad,
-            confirmLink,
-            explicitRecovery,
-            bootstrapComplete: authBootstrapCompleteRef.current,
-            initialTokenType: initialWebAuthCallback.tokenType,
-            onConfirmPath: initialWebAuthCallback.onConfirmPath,
-          },
-          'H8',
-          'post-fix',
-        );
-        // #endregion
         if (confirmLink || signupConfirmLoad) {
           passwordRecoveryPendingRef.current = false;
           setSnapshot({

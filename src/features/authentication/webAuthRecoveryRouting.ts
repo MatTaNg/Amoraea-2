@@ -1,8 +1,4 @@
 import { Platform } from 'react-native';
-import {
-  debugAuthCallbackLog,
-  sanitizeAuthUrlForLog,
-} from './debugAuthCallbackLog';
 
 /** Supabase `emailRedirectTo` / `redirectTo` paths (must match Supabase redirect URL allowlist). */
 export const AUTH_EMAIL_CONFIRM_PATH = '/auth/confirm';
@@ -83,35 +79,12 @@ export function normalizeWebEmailConfirmationUrl(): void {
   const onReset = isAuthPasswordResetPath(pathname);
   const recoveryCb = isWebPasswordRecoveryCallback();
   const confirmCtx = isEmailConfirmationContext(pathname, search, hash);
-  // #region agent log
-  debugAuthCallbackLog(
-    'webAuthRecoveryRouting.ts:normalizeWebEmailConfirmationUrl',
-    'normalize confirm URL decision',
-    {
-      ...sanitizeAuthUrlForLog(pathname, search, hash),
-      onReset,
-      recoveryCb,
-      confirmCtx,
-      resetPending: isPasswordResetPendingInStorage(),
-      intent: resolveWebAuthCallbackIntent(pathname, search, hash),
-    },
-    'H4',
-  );
-  // #endregion
   if (!onReset) return;
   if (recoveryCb) return;
   if (!confirmCtx) return;
   const target = `${AUTH_EMAIL_CONFIRM_PATH}${search}${hash}`;
   const current = `${pathname}${search}${hash}`;
   if (current !== target) {
-    // #region agent log
-    debugAuthCallbackLog(
-      'webAuthRecoveryRouting.ts:normalizeWebEmailConfirmationUrl',
-      'redirecting reset path to confirm',
-      { targetPath: AUTH_EMAIL_CONFIRM_PATH },
-      'H4',
-    );
-    // #endregion
     window.location.replace(target);
   }
 }

@@ -239,7 +239,7 @@ export const PostInterviewScreen: React.FC<{ navigation: any; route: { params: {
     return () => clearInterval(id);
   }, [userId, navigation, queryClient]);
 
-  /** Admin account uses cohort tools on Aria, not this branded applicant screen. */
+  /** Admin account uses cohort tools on Amoraea, not this branded applicant screen. */
   useEffect(() => {
     if (!userId) return;
     let cancelled = false;
@@ -247,7 +247,7 @@ export const PostInterviewScreen: React.FC<{ navigation: any; route: { params: {
       const { data: { session } } = await supabase.auth.getSession();
       const email = session?.user?.email ?? user?.email ?? null;
       if (cancelled || !isAmoraeaAdminConsoleEmail(email)) return;
-      navigation.replace('Aria', { userId, openAdminPanel: true });
+      navigation.replace('Amoraea', { userId, openAdminPanel: true });
     })();
     return () => {
       cancelled = true;
@@ -264,7 +264,7 @@ export const PostInterviewScreen: React.FC<{ navigation: any; route: { params: {
         const meta = auth.user?.user_metadata as { referral_code?: string } | undefined;
         void meta;
         const [{ data: codeRow }, { data: userRow }] = await Promise.all([
-          supabase.from('referral_codes').select('code').eq('referrer_user_id', uid).maybeSingle(),
+          supabase.from('users').select('invite_code').eq('id', uid).maybeSingle(),
           supabase
             .from(USER_INTERVIEW_ROUTING_TABLE)
             .select(USER_POST_INTERVIEW_CONTACT_SELECT)
@@ -274,10 +274,10 @@ export const PostInterviewScreen: React.FC<{ navigation: any; route: { params: {
         if (cancelled) return;
         if (userRow?.interview_completed !== true) {
           queryClient.invalidateQueries({ queryKey: ['profile', uid] });
-          navigation.replace('Aria', { userId: uid });
+          navigation.replace('Amoraea', { userId: uid });
           return;
         }
-        setMyReferralCode(codeRow?.code ?? null);
+        setMyReferralCode(codeRow?.invite_code ?? null);
         setReferralNotice(userRow?.referral_notice_pending ?? null);
         const storedPhone =
           typeof userRow?.launch_notification_phone === 'string'
@@ -315,7 +315,7 @@ export const PostInterviewScreen: React.FC<{ navigation: any; route: { params: {
         try {
           await enableInterviewRetake(uid);
           await queryClient.invalidateQueries({ queryKey: ['profile', uid] });
-          navigation.replace('Aria', { userId: uid });
+          navigation.replace('Amoraea', { userId: uid });
         } catch (e) {
           if (__DEV__) console.warn('[PostInterview] QA retake failed', e);
           const detail =

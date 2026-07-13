@@ -9,6 +9,7 @@ describe('resolveAnthropicSonnetModel', () => {
   it('remaps retired Sonnet 4 snapshot to current default', () => {
     expect(resolveAnthropicSonnetModel('claude-sonnet-4-20250514')).toBe(DEFAULT_CLAUDE_SONNET_MODEL);
     expect(resolveAnthropicSonnetModel('claude-sonnet-4-0')).toBe(DEFAULT_CLAUDE_SONNET_MODEL);
+    expect(resolveAnthropicSonnetModel('claude-3-5-sonnet-20241022')).toBe(DEFAULT_CLAUDE_SONNET_MODEL);
   });
 
   it('passes through current model ids unchanged', () => {

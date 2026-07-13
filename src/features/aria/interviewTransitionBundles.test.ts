@@ -1,9 +1,10 @@
-import { describe, expect, it } from 'vitest';
 import {
   assistantTextLooksLikeMoment4HandoffLead,
+  buildClientScenarioBoundaryHandoffBundle,
   buildMoment4HandoffForInterview,
   buildMoment4ThresholdAnswerToMoment5Bundle,
   buildScenario1To2BundleForInterview,
+  buildScenarioBoundaryLeadForInterview,
   buildScenario2To3TransitionBody,
   ensureScenario2BundleWhenOpeningWithoutVignette,
   MOMENT_4_HANDOFF_NO_NAME_LEAD,
@@ -14,8 +15,35 @@ import { MOMENT_4_GRUDGE_QUESTION_TEXT } from './moment4ProbeLogic';
 import { MOMENT_5_ACCOUNTABILITY_QUESTION_TEXT } from './probeAndScoringUtils';
 
 const STUB_S2 = 'SARAH_VIGNETTE\n\nWhat do you think is going on here?';
+const REFLECTION_ANCHOR =
+  /(?:what (?:i heard|i got|came through)|landed for me|stuck with me|you (?:focused on|named|framed|pointed to|highlighted|spelled out))/i;
 const STUB_S3 = 'SOPHIE_VIGNETTE\n\nWhen Daniel comes back — what do you make of that?';
 const STUB_M4_CARD = 'Grudge question line one. Grudge question line two.';
+
+describe('buildClientScenarioBoundaryHandoffBundle', () => {
+  it('returns S1→S2 bundle with canonical scenario 2 text', () => {
+    const out = buildClientScenarioBoundaryHandoffBundle(
+      1,
+      'Matt',
+      { scenario1: 'Emma needed Ryan to prioritize their time together.' },
+      STUB_M4_CARD,
+    );
+    expect(out).toMatch(/Sarah has been job hunting/i);
+    expect(out).toContain("We've got two more situations to get through.");
+    expect(out).not.toMatch(/last of the three|two short personal|two questions left/i);
+  });
+
+  it('returns S3→M4 bundle with personal card', () => {
+    const out = buildClientScenarioBoundaryHandoffBundle(
+      3,
+      'Matt',
+      { scenario3: 'Daniel needed to return and stay present.' },
+      STUB_M4_CARD,
+    );
+    expect(out).toContain(STUB_M4_CARD);
+    expect(out).toMatch(/three described situations|two questions left/i);
+  });
+});
 
 describe('buildScenario1To2BundleForInterview', () => {
   it('uses fallback transition when first name is empty', () => {
@@ -28,6 +56,45 @@ describe('buildScenario1To2BundleForInterview', () => {
     const out = buildScenario1To2BundleForInterview('  Alex  ', STUB_S2);
     expect(out.startsWith(SCENARIO_1_TO_2_TRANSITION_FALLBACK)).toBe(true);
     expect(out).toContain(STUB_S2);
+  });
+
+  it('includes boundary reflection when last user answer is provided', () => {
+    const corpus = [
+      'James should have listened more instead of jumping to logistics when Sarah was upset about the trip.',
+      'She must have felt dismissed because he went straight to fixing the plan instead of hearing her out.',
+      "Just wait until she brings it up again when she's ready to talk about it.",
+    ].join('\n');
+    const out = buildScenario1To2BundleForInterview('Alex', STUB_S2, corpus);
+    expect(out).toContain("That's a wrap on that one.");
+    expect(out).toMatch(REFLECTION_ANCHOR);
+    expect(out).toContain('Nice work, Alex');
+    expect(out).not.toContain('Great work');
+    expect(out).not.toContain('James should have asked');
+    expect(out).toContain("We've got two more situations to get through.");
+    expect(out).not.toMatch(/last of the three|two short personal|two questions left/i);
+    expect(out).toContain('SARAH_VIGNETTE');
+  });
+
+  it('includes boundary reflection for a substantive Ryan repair answer alone', () => {
+    const repair =
+      'I would make sure all calls go to voicemail during dates and commit to it.';
+    const out = buildScenario1To2BundleForInterview('Alex', STUB_S2, repair);
+    expect(out).toContain("That's a wrap on that one.");
+    expect(out).toMatch(REFLECTION_ANCHOR);
+    expect(out).toContain('Nice work, Alex');
+    expect(out).not.toContain(SCENARIO_1_TO_2_TRANSITION_FALLBACK);
+  });
+});
+
+describe('buildScenarioBoundaryLeadForInterview', () => {
+  it('returns ack + reflection + transition without the next vignette', () => {
+    const repair =
+      'I would assure her that this would not happen again and actually follow through.';
+    const lead = buildScenarioBoundaryLeadForInterview(1, 'Vaishnava', repair);
+    expect(lead).toContain("That's a wrap on that one.");
+    expect(lead).toContain('Nice work, Vaishnava');
+    expect(lead).toContain("We've got two more situations to get through.");
+    expect(lead).not.toContain('Sarah has been job hunting');
   });
 });
 
@@ -43,19 +110,49 @@ describe('buildScenario2To3TransitionBody', () => {
     expect(out.startsWith(SCENARIO_2_TO_3_TRANSITION_FALLBACK)).toBe(true);
     expect(out).toContain(STUB_S3);
   });
+
+  it('includes boundary reflection for deferral repair answers', () => {
+    const corpus = [
+      'James should have listened more instead of jumping to logistics when Sarah was upset about the trip.',
+      'She must have felt dismissed because he went straight to fixing the plan instead of hearing her out.',
+      "Just wait until she brings it up again when she's ready to talk about it.",
+    ].join('\n');
+    const out = buildScenario2To3TransitionBody('Jordan', STUB_S3, corpus);
+    expect(out).toContain("That's the second one done.");
+    expect(out).toMatch(REFLECTION_ANCHOR);
+    expect(out).toContain('Nice work, Jordan');
+    expect(out).toContain("One more situation and then we'll get personal.");
+    expect(out).not.toMatch(/brings it up again/i);
+    expect(out).toContain('SOPHIE_VIGNETTE');
+  });
 });
 
 describe('buildMoment4ThresholdAnswerToMoment5Bundle', () => {
-  it('includes reflection, pivot, and the scripted Moment 5 question', () => {
+  it('includes pivot and the scripted Moment 5 question without praise when no threshold answer', () => {
     const out = buildMoment4ThresholdAnswerToMoment5Bundle('', MOMENT_5_ACCOUNTABILITY_QUESTION_TEXT);
-    expect(out).toContain('worth working through');
+    expect(out).not.toContain('Great work');
     expect(out.toLowerCase()).toContain('one more question about you');
     expect(out).toContain(MOMENT_5_ACCOUNTABILITY_QUESTION_TEXT);
   });
 
-  it('uses first name in the reflection when provided', () => {
-    const out = buildMoment4ThresholdAnswerToMoment5Bundle('Alex', MOMENT_5_ACCOUNTABILITY_QUESTION_TEXT);
-    expect(out).toContain('Great work, Alex');
+  it('includes brief ack when reflection pipeline returns empty but threshold answer is substantive', () => {
+    const out = buildMoment4ThresholdAnswerToMoment5Bundle(
+      'Alex',
+      MOMENT_5_ACCOUNTABILITY_QUESTION_TEXT,
+      'It really depends on many different factors each time honestly.',
+    );
+    expect(out).toContain('Thanks for sharing that.');
+    expect(out).toContain(MOMENT_5_ACCOUNTABILITY_QUESTION_TEXT);
+  });
+
+  it('includes pattern reflection when threshold answer is provided', () => {
+    const out = buildMoment4ThresholdAnswerToMoment5Bundle(
+      'Alex',
+      MOMENT_5_ACCOUNTABILITY_QUESTION_TEXT,
+      'I would keep trying to work through it unless there is no path forward and then I walk away.',
+    );
+    expect(out).toMatch(REFLECTION_ANCHOR);
+    expect(out).not.toContain('Great work');
   });
 });
 
@@ -98,6 +195,11 @@ describe('ensureScenario2BundleWhenOpeningWithoutVignette', () => {
   it('returns original text when interview moment is not 1', () => {
     const t = 'What do you think is going on here?';
     expect(ensureScenario2BundleWhenOpeningWithoutVignette(t, 2, 'Alex', STUB_S2)).toBe(t);
+  });
+
+  it('returns original when already in scenario 2 even if moment index still 1', () => {
+    const t = 'What do you think is going on here?';
+    expect(ensureScenario2BundleWhenOpeningWithoutVignette(t, 1, 'Alex', STUB_S2, 2)).toBe(t);
   });
 
   it('returns original when text is empty', () => {

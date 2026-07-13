@@ -1,4 +1,3 @@
-import { describe, expect, it } from 'vitest';
 import { evaluateInterviewCompletionGate, pillarScoresHaveNumericAssessment } from '../interviewCompletionGate';
 import {
   fillScenarioKeyEvidenceWhenNumericScoreButMissingQuote,

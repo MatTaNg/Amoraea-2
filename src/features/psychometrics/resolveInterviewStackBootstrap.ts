@@ -62,12 +62,12 @@ export function resolveInterviewStackBootstrap(input: {
     validationStandardReturnRoute,
   } = input;
 
-  let initialRouteName: InterviewStackRoute = initialRoute?.screen ?? 'Aria';
+  let initialRouteName: InterviewStackRoute = initialRoute?.screen ?? 'Amoraea';
   let interviewAlreadyCompleted =
     initialRoute?.interviewAlreadyCompleted === true || profileShowsStandardInterviewComplete;
   let legacyPsychometricsMode = initialRoute?.legacyPsychometricsMode === true;
 
-  if (profileShowsStandardInterviewComplete && (initialRouteName === 'Aria' || initialRouteName === 'AssessmentWelcome')) {
+  if (profileShowsStandardInterviewComplete && (initialRouteName === 'Amoraea' || initialRouteName === 'AssessmentWelcome')) {
     if (!PSYCHOMETRICS_ENABLED) {
       initialRouteName = standardApplicantPostInterviewDestination();
       interviewAlreadyCompleted = true;

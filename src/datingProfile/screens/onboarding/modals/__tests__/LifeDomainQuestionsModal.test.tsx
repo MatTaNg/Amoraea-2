@@ -65,4 +65,33 @@ describe('LifeDomainQuestionsModal', () => {
       expect(onNext).toHaveBeenCalled();
     });
   });
+
+  it('shows optional family dropdown questions in post-slider follow-up flow', async () => {
+    const screen = renderModal('family', {
+      optionalOpenEndedLeftover: true,
+      wantKids: 'Want kids',
+    });
+    await waitFor(() => {
+      expect(screen.getByText('How many kids do you want?')).toBeTruthy();
+      expect(screen.getByText('When do you want kids?')).toBeTruthy();
+      expect(screen.getByText('Adoption preferences')).toBeTruthy();
+      expect(
+        screen.getByText('What are your thoughts on how children should be educated?'),
+      ).toBeTruthy();
+    });
+  });
+
+  it('shows optional health dropdown questions in post-slider follow-up flow', async () => {
+    const screen = renderModal('health', {
+      optionalOpenEndedLeftover: true,
+    });
+    await waitFor(() => {
+      expect(screen.getByText('What is your diet?')).toBeTruthy();
+      expect(
+        screen.getByText(
+          'Do you have any chronic health conditions or disabilities that significantly affect your daily life or relationships?',
+        ),
+      ).toBeTruthy();
+    });
+  });
 });

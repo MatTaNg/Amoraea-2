@@ -22,7 +22,7 @@ export class PhotoUseCase {
     }
   }
 
-  async pickPhotos(): Promise<string[]> {
+  async pickPhotos(): Promise<{ uri: string; fileName: string }[]> {
     const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
     if (status !== 'granted') {
       throw new Error('Photo library permission not granted');
@@ -39,7 +39,10 @@ export class PhotoUseCase {
       return [];
     }
 
-    return result.assets.map((asset) => asset.uri);
+    return result.assets.map((asset) => ({
+      uri: asset.uri,
+      fileName: asset.fileName || asset.uri.split('/').pop()?.split('?')[0] || 'photo.jpg',
+    }));
   }
 
   async uploadPhotos(userId: string, photoUris: string[]): Promise<ProfilePhoto[]> {

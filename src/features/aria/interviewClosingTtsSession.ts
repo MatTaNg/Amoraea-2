@@ -44,11 +44,9 @@ export function shouldSuppressDuplicateInterviewClosingTts(
 ): boolean {
   if (!sessionKey?.trim()) return false;
   const key = sessionKey.trim();
-  if (looksLikeInterviewClosingAssistantMessage(text)) {
-    if (hasInterviewClosingTtsDeliveredForSession(key)) return true;
-    if (closingSpeakInFlightSessionKey === key) return true;
-  }
   if (!looksLikeInterviewClosingAssistantMessage(text)) return false;
+  // tryAcquireInterviewClosingSpeak gates concurrent enqueue; do not treat in-flight alone as delivered.
+  if (hasInterviewClosingTtsDeliveredForSession(key)) return true;
   const norm = normalizeClosingTtsKey(text);
   if (!norm) return false;
   return lastClosingSessionKey === key && lastClosingTextNorm === norm;

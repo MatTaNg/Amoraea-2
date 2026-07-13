@@ -119,12 +119,59 @@ describe('lifeDomainOnboardingQuestions validation', () => {
     expect(wantsKids).toContain('raisingChildrenInFaith');
   });
 
+  it('keeps compatibility questions in the required-question step list', () => {
+    const noKids = getActiveLifeDomainRequiredQuestionSteps("Don't want kids");
+    const noKidsIds = noKids.map((row) => `${row.domainId}:${row.questionId}`);
+    expect(noKidsIds).toEqual(
+      expect.arrayContaining([
+        'intimacy:livingLocation',
+        'intimacy:sexFrequency',
+        'finance:yearlyIncome',
+        'finance:financesPooled',
+        'finance:debtAmount',
+        'finance:debtPayoffPlan',
+        'spirituality:spiritualPracticeWeeklyHours',
+        'family:petStatus',
+        'health:sleepSchedule',
+      ]),
+    );
+
+    const wantsKids = getActiveLifeDomainRequiredQuestionSteps('Want kids');
+    const wantsKidsIds = wantsKids.map(
+      (row) => `${row.domainId}:${row.questionId}`,
+    );
+    expect(wantsKidsIds).toEqual(
+      expect.arrayContaining(['spirituality:raisingChildrenInFaith']),
+    );
+  });
+
   it('orders optional open-ended domain steps after sliders', () => {
     expect(lifeDomainOptionalOpenEndedStepId('intimacy')).toBe('lifeDomainOptional__intimacy');
     const domainOrder = getActiveLifeDomainOptionalOpenEndedSteps('Want kids', {}).map(
       (row) => row.domainId,
     );
     expect(domainOrder).toEqual(['intimacy', 'finance', 'spirituality', 'family', 'health']);
+  });
+
+  it('includes optional dropdown follow-up questions in post-slider life-domain steps', () => {
+    const familyOptionalIds = getLeftoverOptionalOpenEndedQuestionsForDomain('family', {}, {
+      wantKids: 'Want kids',
+    }).map((q) => q.id);
+    expect(familyOptionalIds).toEqual(
+      expect.arrayContaining([
+        'kidsNumber',
+        'kidsWhen',
+        'adoptionPreferences',
+        'childrenEducation',
+      ]),
+    );
+
+    const healthOptionalIds = getLeftoverOptionalOpenEndedQuestionsForDomain('health', {}, {
+      wantKids: 'Want kids',
+    }).map((q) => q.id);
+    expect(healthOptionalIds).toEqual(
+      expect.arrayContaining(['diet', 'chronicIllnessStatus']),
+    );
   });
 
   it('skips optional open-ended steps when no unanswered optional text remains', () => {

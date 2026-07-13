@@ -6,7 +6,10 @@
  *
  * Ordinary moral language about bad behavior (rude, wrong, hurtful) is **not** listed here; the LLM rubric handles it.
  */
-import { sliceTranscriptBeforeScenarioCToPersonalHandoff } from './probeAndScoringUtils';
+import {
+  resolveScenarioUserTurnsForScoring,
+  type MessageWithScenario,
+} from './interviewScenarioScoringSlice';
 
 /** Insults, dehumanization, global “trash person” stance — *not* “rude / wrong / inconsiderate” re actions. */
 export const SCENARIO_CONTEMPT_VERDICT_REGEXES: readonly RegExp[] = [
@@ -28,19 +31,9 @@ export function userTurnTextForInterviewScenario(
   scenarioNum: 1 | 2 | 3,
 ): string {
   if (!Array.isArray(transcript)) return '';
-  const base =
-    scenarioNum === 3 ? sliceTranscriptBeforeScenarioCToPersonalHandoff(transcript) : transcript;
-  return base
-    .filter(
-      (m): m is { role: string; content: string; scenarioNumber?: number } =>
-        !!m &&
-        m.role === 'user' &&
-        m.scenarioNumber === scenarioNum &&
-        typeof m.content === 'string',
-    )
-    .map((m) => m.content.trim())
-    .filter(Boolean)
-    .join(' ');
+  const tagged = resolveScenarioUserTurnsForScoring(transcript as MessageWithScenario[], scenarioNum);
+  if (tagged.length > 0) return tagged.join(' ');
+  return '';
 }
 
 export function countScenarioContemptVerdictSignals(text: string): number {
@@ -109,9 +102,9 @@ export function absentCharacterEngagementCapApplies(text: string): boolean {
   return countCharacterEngagementSignals(text) < 2;
 }
 
-const ABSENT_ENGAGEMENT_CAP = 6;
+import { CONTEMPT_EXPRESSION_ABSENT_ENGAGEMENT_CAP } from '@config/scoring/contemptHeuristics';
 
-export const CONTEMPT_EXPRESSION_ABSENT_ENGAGEMENT_CAP = ABSENT_ENGAGEMENT_CAP;
+export { CONTEMPT_EXPRESSION_ABSENT_ENGAGEMENT_CAP } from '@config/scoring/contemptHeuristics';
 
 /**
  * Max allowed **good** `contempt_expression` score (higher = healthier) when egregious lexicon hits
@@ -154,10 +147,10 @@ export function applyContemptExpressionHeuristicToScenarioScores(
   if (absentCharacterEngagementCapApplies(userTurnsText)) {
     const cur = nextPs.contempt_expression;
     const curN = typeof cur === 'number' && Number.isFinite(cur) ? cur : null;
-    if (curN != null && curN > ABSENT_ENGAGEMENT_CAP) {
-      nextPs.contempt_expression = Math.min(curN, ABSENT_ENGAGEMENT_CAP);
+    if (curN != null && curN > CONTEMPT_EXPRESSION_ABSENT_ENGAGEMENT_CAP) {
+      nextPs.contempt_expression = Math.min(curN, CONTEMPT_EXPRESSION_ABSENT_ENGAGEMENT_CAP);
       const note =
-        `Relationship-level dismissal without sufficient character-engagement cues (<2 internal-state/curiosity signals); caps contempt_expression at ${ABSENT_ENGAGEMENT_CAP} per rubric.`;
+        `Relationship-level dismissal without sufficient character-engagement cues (<2 internal-state/curiosity signals); caps contempt_expression at ${CONTEMPT_EXPRESSION_ABSENT_ENGAGEMENT_CAP} per rubric.`;
       const prev = (ke.contempt_expression ?? '').trim();
       ke.contempt_expression = prev ? `${prev} | ${note}` : note;
     }

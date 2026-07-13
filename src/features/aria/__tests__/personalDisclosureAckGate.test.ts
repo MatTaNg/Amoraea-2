@@ -123,6 +123,26 @@ describe('personalDisclosureAckGate', () => {
     ).toBeNull();
   });
 
+  it('resolveScenarioFollowUpAfterSuppressedResponse returns repair when contempt satisfied without probe at moment 2', () => {
+    expect(
+      resolveScenarioFollowUpAfterSuppressedResponse({
+        interviewMoment: 2,
+        currentScenario: 1,
+        shouldForceScenarioAContemptProbe: false,
+        assistantIssuedScenarioAContemptProbe: false,
+        shouldInjectScenarioARepairAfterContemptAnswer: true,
+        shouldForceScenarioBFullAppreciationProbe: false,
+        assistantIssuedScenarioBFullProbe: false,
+        needsScenarioBJamesDifferentlyInsert: false,
+        scenarioAContemptProbeAsked: true,
+        scenarioARepairQuestionAsked: false,
+        transcriptMessages: [
+          { role: 'user', content: 'Emma is frustrated when she says you made that very clear.' },
+        ],
+      }),
+    ).toBe(SCENARIO_A_REPAIR_QUESTION_AFTER_CONTEMPT_COPY);
+  });
+
   it('resolveScenarioFollowUpAfterSuppressedResponse returns null for personal moments', () => {
     expect(
       resolveScenarioFollowUpAfterSuppressedResponse({

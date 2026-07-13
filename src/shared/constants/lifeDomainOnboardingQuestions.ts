@@ -159,7 +159,7 @@ export const LIFE_DOMAIN_ONBOARDING_DOMAIN_ORDER: LifeDomainId[] = [
   'health',
 ];
 
-/** Optional open-ended screens after life-domain sliders. */
+/** Optional life-domain follow-up screens after life-domain sliders. */
 export const LIFE_DOMAIN_OPTIONAL_OPEN_ENDED_DOMAIN_ORDER: LifeDomainId[] = [
   'intimacy',
   'finance',
@@ -173,7 +173,7 @@ export function isLifeDomainOptionalOpenEndedQuestion(
   context?: { wantKids?: string | null },
 ): boolean {
   if (isLifeDomainQuestionRequiredForOnboarding(q, context)) return false;
-  return q.input !== 'dropdown';
+  return true;
 }
 
 export function getOptionalOpenEndedQuestionsForDomain(

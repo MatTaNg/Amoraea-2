@@ -111,7 +111,7 @@ describe('PostInterviewScreen', () => {
     expect(queryByText(/Retake test/i)).toBeNull();
   });
 
-  it('shows Retake test for QA signup (trim/case) and on confirm calls reset + navigates to Aria', async () => {
+  it('shows Retake test for QA signup (trim/case) and on confirm calls reset + navigates to Amoraea', async () => {
     mockUsePostInterviewRetakeEligibility.mockReturnValue({
       showRetake: true,
       retakeEligibleOnLabel: null,
@@ -150,7 +150,7 @@ describe('PostInterviewScreen', () => {
     await waitFor(() => {
       expect(enableInterviewRetake).toHaveBeenCalledWith('auth-user-3');
       expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: ['profile', 'auth-user-3'] });
-      expect(navigation.replace).toHaveBeenCalledWith('Aria', { userId: 'auth-user-3' });
+      expect(navigation.replace).toHaveBeenCalledWith('Amoraea', { userId: 'auth-user-3' });
     });
 
     alertSpy.mockRestore();
@@ -201,7 +201,7 @@ describe('PostInterviewScreen', () => {
       expect(confirmMock).toHaveBeenCalled();
       expect(alertSpy).not.toHaveBeenCalled();
       expect(enableInterviewRetake).toHaveBeenCalledWith('web-user');
-      expect(navigation.replace).toHaveBeenCalledWith('Aria', { userId: 'web-user' });
+      expect(navigation.replace).toHaveBeenCalledWith('Amoraea', { userId: 'web-user' });
     });
 
     alertSpy.mockRestore();

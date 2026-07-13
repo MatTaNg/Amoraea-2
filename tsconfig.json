@@ -48,6 +48,12 @@
       ],
       "@utilities/*": [
         "src/utilities/*"
+      ],
+      "@config/*": [
+        "src/config/*"
+      ],
+      "@config": [
+        "src/config/index.ts"
       ]
     }
   },

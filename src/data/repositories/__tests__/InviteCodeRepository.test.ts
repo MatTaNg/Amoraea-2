@@ -112,6 +112,42 @@ describe('InviteCodeRepository', () => {
       });
     });
 
+    it('sets referred_by_id and referral_boost_active for a valid canonical referral code', async () => {
+      let fromCalls = 0;
+      let insertedPayload: Record<string, unknown> | null = null;
+      jest.spyOn(repo, 'findUserIdByCode').mockResolvedValue('referrer-1');
+      (supabase.from as jest.Mock).mockImplementation((table: string) => {
+        expect(table).toBe('users');
+        fromCalls += 1;
+        if (fromCalls === 1 || fromCalls === 2) {
+          return {
+            select: jest.fn(() => ({
+              eq: jest.fn(() => ({
+                maybeSingle: jest.fn(() => Promise.resolve({ data: null, error: null })),
+              })),
+            })),
+          };
+        }
+        return {
+          insert: jest.fn((payload: Record<string, unknown>) => {
+            insertedPayload = payload;
+            return Promise.resolve({ error: null });
+          }),
+        };
+      });
+
+      await repo.ensureUserWithInviteCode('u-ref', {
+        email: 'ref@example.com',
+        referralCode: 'ABC123',
+      });
+
+      expect(repo.findUserIdByCode).toHaveBeenCalledWith('ABC123');
+      expect(insertedPayload).toMatchObject({
+        referred_by_id: 'referrer-1',
+        referral_boost_active: true,
+      });
+    });
+
     it('throws when insert fails', async () => {
       let fromCalls = 0;
       (supabase.from as jest.Mock).mockImplementation(() => {

@@ -39,6 +39,7 @@ import {
   verifyAllPsychometricsPersisted,
 } from '@features/psychometrics/psychometricsPersistence';
 import { MarketResearchModal } from '@features/onboarding/MarketResearchModal';
+import { useMarketResearchCompletion } from '@features/referrals/MarketResearchCompletionContext';
 import { WelcomeModal } from '@features/psychometrics/WelcomeModal';
 import {
   loadPsychometricsWebFontsOnce,
@@ -79,6 +80,7 @@ type Props = {
 
 export function PsychometricAssessmentScreen({ navigation, route }: Props) {
   const { user } = useAuth();
+  const { notifyMarketResearchComplete } = useMarketResearchCompletion();
   const userId = route.params?.userId ?? '';
   const legacyPsychometricsMode =
     route.params?.legacyPsychometricsMode === true ||
@@ -125,26 +127,18 @@ export function PsychometricAssessmentScreen({ navigation, route }: Props) {
       if (!userId) return;
       const adminPanelParams = isAdminUser ? { openAdminPanel: true as const } : {};
       if (interviewAlreadyCompleted) {
-        if (PSYCHOMETRICS_ENABLED) {
-          navigation.replace('PsychometricsComplete', { userId });
-          return;
-        }
         const { screen } = await resolveInitialInterviewRoute(userId);
         if (screen !== 'PsychometricAssessment') {
           navigation.replace(screen, {
             userId,
-            ...(screen === 'Aria' ? adminPanelParams : {}),
+            ...(screen === 'Amoraea' ? adminPanelParams : {}),
           });
           return;
         }
         navigation.replace('PostInterview', { userId });
         return;
       }
-      if (options?.showCongrats && PSYCHOMETRICS_ENABLED) {
-        navigation.replace('PsychometricsComplete', { userId });
-        return;
-      }
-      navigation.replace('Aria', { userId, ...adminPanelParams });
+      navigation.replace('Amoraea', { userId, ...adminPanelParams });
     },
     [interviewAlreadyCompleted, isAdminUser, navigation, userId],
   );
@@ -438,6 +432,7 @@ export function PsychometricAssessmentScreen({ navigation, route }: Props) {
   }
 
   function handleMarketResearchComplete() {
+    notifyMarketResearchComplete();
     setNeedsMarketResearch(false);
     if (interviewAlreadyCompleted) {
       setShowWelcome(false);
@@ -634,7 +629,7 @@ const styles = StyleSheet.create({
     fontSize: 14,
     color: '#7A9ABE',
     lineHeight: 21,
-    textAlign: 'center',
+    textAlign: 'left',
     marginBottom: spacing.md,
   },
   questionText: {
@@ -643,7 +638,7 @@ const styles = StyleSheet.create({
     fontWeight: '500',
     color: '#F4F8FC',
     lineHeight: 30,
-    textAlign: 'center',
+    textAlign: 'left',
   },
   questionTextNarrow: {
     fontSize: 20,
@@ -654,7 +649,7 @@ const styles = StyleSheet.create({
     fontSize: 16,
     color: '#B8C9DC',
     lineHeight: 24,
-    textAlign: 'center',
+    textAlign: 'left',
     marginBottom: 12,
   },
   responsePrompt: {
@@ -663,7 +658,7 @@ const styles = StyleSheet.create({
     fontWeight: '500',
     color: '#F4F8FC',
     lineHeight: 28,
-    textAlign: 'center',
+    textAlign: 'left',
   },
   optionsContainer: {
     gap: 10,
@@ -675,7 +670,7 @@ const styles = StyleSheet.create({
     borderRadius: 10,
     paddingVertical: 14,
     paddingHorizontal: 16,
-    alignItems: 'center',
+    alignItems: 'flex-start',
     backgroundColor: 'rgba(255,255,255,0.04)',
   },
   optionButtonSelected: {
@@ -686,7 +681,7 @@ const styles = StyleSheet.create({
     fontFamily: PSYCHOMETRICS_FONT_BODY,
     fontSize: 15,
     color: '#E8F0F8',
-    textAlign: 'center',
+    textAlign: 'left',
   },
   savingSpinner: {
     marginTop: 16,

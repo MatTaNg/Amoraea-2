@@ -5,6 +5,13 @@ import type {
 } from '@features/aria/personalMomentSliceSanitize';
 import { normalizeResponseConcreteness } from '@features/aria/personalMomentConcreteness';
 
+import {
+  isDefensePatternsShapeIncomplete,
+  normalizeDefensePatternsForPersist,
+} from '@features/aria/defensePatternsDetection';
+import { markScoringStageComplete } from '@features/psychometrics/ensureInterviewRollupArtifacts';
+import type { DefenseCrossReferenceResult } from '@features/psychometrics/crossReferenceDefenseDetection';
+
 export type AttemptScoringBaseline = {
   patterns: Record<string, unknown>;
   moment_4_concreteness: string | null;
@@ -59,8 +66,9 @@ export async function fetchAttemptScoringBaseline(
     defense_patterns:
       row?.defense_patterns != null &&
       typeof row.defense_patterns === 'object' &&
-      !Array.isArray(row.defense_patterns)
-        ? (row.defense_patterns as Record<string, unknown>)
+      !Array.isArray(row.defense_patterns) &&
+      !isDefensePatternsShapeIncomplete(row.defense_patterns as Record<string, unknown>)
+        ? normalizeDefensePatternsForPersist(row.defense_patterns as Record<string, unknown>)
         : null,
     mentalizing_overcertainty_count:
       typeof row?.mentalizing_overcertainty_count === 'number' &&
@@ -96,6 +104,7 @@ export function buildMoment4ScoresRecord(
     emotional_vocab_words: moment4.emotional_vocab_words ?? [],
     user_slice_word_count: moment4.user_slice_word_count ?? null,
     ...(specificityScoringMetadata ? { specificityScoringMetadata } : {}),
+    ...(moment4.scoringMetadata ? { scoringMetadata: moment4.scoringMetadata } : {}),
   };
 }
 
@@ -130,8 +139,10 @@ export function resolveMomentScoresForFinalPersist(
   freshRecord: Record<string, unknown> | null | undefined,
   baseline: AttemptScoringBaseline,
   key: 'moment_4_scores' | 'moment_5_scores',
+  opts?: { suppressBaselineBackfill?: boolean },
 ): unknown {
   if (freshRecord) return freshRecord;
+  if (opts?.suppressBaselineBackfill) return null;
   const existing = baseline.patterns[key];
   return existing ?? null;
 }
@@ -139,9 +150,11 @@ export function resolveMomentScoresForFinalPersist(
 export function coalesceConcretenessForFinalPersist(
   freshSlice: { response_concreteness?: string | null } | null | undefined,
   baselineValue: string | null,
+  suppressBaselineBackfill = false,
 ): string | null {
   const fromFresh = normalizeResponseConcreteness(freshSlice?.response_concreteness);
   if (fromFresh != null) return fromFresh;
+  if (suppressBaselineBackfill) return null;
   return baselineValue;
 }
 
@@ -167,6 +180,11 @@ export async function persistMoment4ScoresImmediate(
     console.error('[M4 Persist] failed to persist Moment 4 scores:', error);
   } else {
     console.log('[M4 Persist] Moment 4 scores persisted immediately');
+    void markScoringStageComplete(supabase, attemptId, userId, 'moment4', {
+      trigger: 'persistMoment4ScoresImmediate',
+    }).catch((e) => {
+      console.warn('[M4 Persist] gated rollup after M4 persist failed:', e);
+    });
   }
   const next: AttemptScoringBaseline = {
     ...baseline,
@@ -180,6 +198,8 @@ export type PersistMoment5Extras = {
   personal_moment_emotional_vocab_low?: boolean;
   personal_moment_emotional_vocab_density?: number | null;
   disclosure_calibration?: string | null;
+  /** When set, written with M5 scores so probe_log is not solely dependent on final deferred persist. */
+  probe_log?: unknown[] | null;
 };
 
 export async function persistMoment5ScoresImmediate(
@@ -209,6 +229,9 @@ export async function persistMoment5ScoresImmediate(
   if (extras?.disclosure_calibration !== undefined) {
     update.disclosure_calibration = extras.disclosure_calibration;
   }
+  if (extras?.probe_log !== undefined) {
+    update.probe_log = extras.probe_log ?? [];
+  }
   const { error } = await supabase
     .from('interview_attempts')
     .update(update)
@@ -217,7 +240,15 @@ export async function persistMoment5ScoresImmediate(
   if (error) {
     console.error('[M5 Persist] failed to persist Moment 5 scores:', error);
   } else {
-    console.log('[M5 Persist] Moment 5 scores persisted immediately');
+    console.log('[M5 Persist] Moment 5 scores persisted immediately', {
+      hasProbeLog: extras?.probe_log != null,
+      accountabilityProbeFired: scoringMetadata.accountabilityProbeFired === true,
+    });
+    void markScoringStageComplete(supabase, attemptId, userId, 'moment5', {
+      trigger: 'persistMoment5ScoresImmediate',
+    }).catch((e) => {
+      console.warn('[M5 Persist] gated rollup after M5 persist failed:', e);
+    });
   }
   const next: AttemptScoringBaseline = {
     ...baseline,
@@ -244,6 +275,7 @@ export async function persistHolisticModifiersImmediate(
     egoDevelopmentLevel: number | null;
     mentalizingOvercertaintyCount?: number;
     defensePatterns?: Record<string, unknown>;
+    defenseCrossReference?: DefenseCrossReferenceResult;
   },
   baseline: AttemptScoringBaseline,
 ): Promise<AttemptScoringBaseline> {
@@ -255,8 +287,11 @@ export async function persistHolisticModifiersImmediate(
     update.mentalizing_overcertainty_count = input.mentalizingOvercertaintyCount;
   }
   if (input.defensePatterns !== undefined) {
-    update.defense_patterns = input.defensePatterns;
+    update.defense_patterns = normalizeDefensePatternsForPersist(
+      input.defensePatterns as Record<string, unknown>,
+    );
   }
+  // defense_cross_reference is written only by the gated rollup (never here — avoids partial rollup races).
   if (Object.keys(update).length === 0) return baseline;
 
   const { error } = await supabase

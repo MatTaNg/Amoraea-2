@@ -207,8 +207,23 @@ export const EditProfileModal: React.FC<EditProfileModalProps> = ({
 
   const addPhotos = async () => {
     try {
-      const uris = await photoUseCase.pickPhotos();
-      if (uris.length === 0) return;
+      const pickedAssets = await photoUseCase.pickPhotos();
+      if (pickedAssets.length === 0) return;
+
+      const existingNames = profilePhotos.map(
+        (p) => p.publicUrl.split('/').pop()?.split('?')[0] || '',
+      );
+
+      const duplicates = pickedAssets.filter((a) => existingNames.includes(a.fileName));
+      if (duplicates.length > 0) {
+        Alert.alert(
+          'Duplicate Photo',
+          'One or more photos have the same name as existing ones. Please choose different photos.',
+        );
+        return;
+      }
+
+      const uris = pickedAssets.map((a) => a.uri);
       if (profilePhotos.length + uris.length > 6) {
         Alert.alert('Limit', 'You can have at most 6 photos.');
         return;

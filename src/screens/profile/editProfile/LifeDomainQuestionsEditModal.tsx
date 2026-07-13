@@ -272,12 +272,19 @@ export const LifeDomainQuestionsEditModal: React.FC<Props> = ({
     () =>
       countAnsweredInDomain(domainId, answers[domainId] ?? {}, {
         wantKids,
-        countRequiredOnly: true,
+        countRequiredOnly: questionScope !== 'optional',
+        countOptionalOnly: questionScope === 'optional',
       }),
-    [answers, domainId, wantKids],
+    [answers, domainId, questionScope, wantKids],
   );
 
-  const questions = LIFE_DOMAIN_ONBOARDING_QUESTIONS[domainId];
+  const questions = useMemo(
+    () =>
+      questionScope === 'optional'
+        ? getOptionalLifeDomainQuestionsForDomain(domainId, { wantKids })
+        : LIFE_DOMAIN_ONBOARDING_QUESTIONS[domainId],
+    [domainId, questionScope, wantKids],
+  );
 
   return (
     <Modal visible={visible} animationType="slide" transparent onRequestClose={handleCancel}>

@@ -2,6 +2,7 @@ import { SCORE_CALIBRATION_0_10 } from './interviewScoringCalibration';
 import {
   ELABORATION_ABSENCE_MOMENT5_MARKERS,
   ELABORATION_ABSENCE_SCORING_HEADER,
+  KEY_EVIDENCE_ANALYTICAL_NARRATIVE_RULES,
 } from './elaborationAbsencePenaltiesRubric';
 import {
   CONTEMPT_EXPRESSION_SCORING_RUBRIC,
@@ -229,7 +230,7 @@ ${turns}
 
 SCORING INSTRUCTIONS:
 Score only the listed markers using only this moment transcript slice.
-For each marker: quote or paraphrase the response that most informed the score.
+${KEY_EVIDENCE_ANALYTICAL_NARRATIVE_RULES}
 ${ELABORATION_ABSENCE_SCORING_HEADER}
 ${ELABORATION_ABSENCE_MOMENT5_MARKERS}
 ${probeCalibrationResolved}
@@ -237,6 +238,7 @@ ${MOMENT5_CONFLICT_VALIDITY_FRAMEWORK}
 ${bandCalibration}
 
 When any marker uses JSON null per instructions above, output null (not 0) for that key.
+Every marker with a finite numeric score MUST include substantive analytical keyEvidence per the rules above. Never leave keyEvidence empty for scored markers.
 
 ${CONTEMPT_TIER_BREAKDOWN_JSON_INSTRUCTION}
 

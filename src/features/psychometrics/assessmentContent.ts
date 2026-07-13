@@ -77,12 +77,19 @@ export function hasPsychometricQuestionResponse(
 }
 
 /** Published GASP externalization vignettes (battery ids 1–4). Unchanged for floor/modifier compatibility. */
-export const GASP_EXTERNALIZATION_ITEM_IDS = [1, 2, 3, 4] as const;
+export const GASP_GUILT_REPAIR_ITEM_IDS = [1, 3] as const;
+export const GASP_SHAME_WITHDRAW_ITEM_IDS = [2, 4] as const;
+export const GASP_EXTERNALIZATION_ITEM_IDS = [5, 6, 7, 8] as const;
 
 export const GASP_EXTERNALIZATION_ITEM_COUNT = GASP_EXTERNALIZATION_ITEM_IDS.length;
 
 /** Reverse-scored Emotional Patterns Assessment items (calm / low-tension statements). */
 export const ANXIETY_TRAIT_REVERSE_ITEMS = [2, 4] as const;
+
+/** SCS-SF 8-item battery — published subscale ids (full-scale numbering retained). */
+export const SCS_SF_SELF_KINDNESS_ITEM_IDS = [2, 6, 11] as const;
+export const SCS_SF_COMMON_HUMANITY_ITEM_IDS = [5] as const;
+export const SCS_SF_MINDFULNESS_ITEM_IDS = [1, 3, 7] as const;
 
 export const ASSESSMENTS = {
   brs: {
@@ -179,6 +186,7 @@ export const ASSESSMENTS = {
       {
         id: 1,
         text: 'When I fail at something important to me I become consumed by feelings of inadequacy.',
+        subscale: 'mindfulness',
         reverse: true,
       },
       {
@@ -219,6 +227,7 @@ export const ASSESSMENTS = {
       {
         id: 11,
         text: "I'm disapproving and judgmental about my own flaws and inadequacies.",
+        subscale: 'self_kindness',
         reverse: true,
       },
     ],
@@ -251,25 +260,49 @@ export const ASSESSMENTS = {
     questions: [
       {
         id: 1,
+        subscale: 'guilt_repair',
+        scenario: 'You do something that might harm another person.',
+        response: 'You would say "I\'m sorry" and try to make things right.',
+      },
+      {
+        id: 2,
+        subscale: 'shame_withdraw',
+        scenario: 'You do something that you know is wrong.',
+        response: 'You would feel like you are a bad person.',
+      },
+      {
+        id: 3,
+        subscale: 'guilt_repair',
+        scenario: 'You make a mistake at work.',
+        response: 'You would try to fix it right away.',
+      },
+      {
+        id: 4,
+        subscale: 'shame_withdraw',
+        scenario: 'You do something that hurts a friend.',
+        response: 'You would feel ashamed of yourself.',
+      },
+      {
+        id: 5,
         subscale: 'externalization',
         scenario: 'You make a mistake at work and your supervisor criticizes you.',
         response: 'You think your supervisor is being unfair.',
       },
       {
-        id: 2,
+        id: 6,
         subscale: 'externalization',
         scenario: 'You are driving and you hit a parked car.',
         response: 'You find yourself thinking the other driver could have parked better.',
       },
       {
-        id: 3,
+        id: 7,
         subscale: 'externalization',
         scenario:
           'At a party, you make a negative comment about a mutual friend and then realize they overheard you.',
         response: "You think they shouldn't have been listening to your conversation.",
       },
       {
-        id: 4,
+        id: 8,
         subscale: 'externalization',
         scenario: 'You and a coworker get in an argument and they get visibly upset.',
         response: 'You think they are overreacting.',
@@ -827,7 +860,7 @@ export const ASSESSMENT_HIGHER_SCORE_IS_FAVORABLE: Record<string, boolean> = {
   dweck: true,
   aaq2: false,
   anxiety_trait: false,
-  gasp: false,
+  gasp: true,
   sd3_narcissism: false,
   sexual_communication: true,
 };
@@ -858,6 +891,12 @@ export function isUnfavorableLikertItemResponse(
     // Reverse-scored healthy statement on a pathology scale (e.g. "I am calm"): disagreement is unfavorable.
     return raw <= assessment.scale.min + 1;
   }
+  if (assessmentId === 'gasp' && questionId >= 5) {
+    // GASP items 5-8 are externalization subscale: pathology-worded non-reverse items.
+    // Endorsement at top of scale is unfavorable.
+    return raw >= assessment.scale.max - 1;
+  }
+
   if (higherConstructIsFavorable) {
     // Agreement is favorable — Disagree / Strongly Disagree (bottom of scale) is unfavorable.
     return raw <= assessment.scale.min + 1;
@@ -997,15 +1036,24 @@ export function scoreAssessment(
     );
     return {
       total,
-      self_kindness: meanOfItems(assessment, responses, [2, 6]),
-      common_humanity: meanOfItems(assessment, responses, [5]),
-      mindfulness: meanOfItems(assessment, responses, [3, 7]),
+      self_kindness: meanOfItems(assessment, responses, [...SCS_SF_SELF_KINDNESS_ITEM_IDS]),
+      common_humanity: meanOfItems(assessment, responses, [...SCS_SF_COMMON_HUMANITY_ITEM_IDS]),
+      mindfulness: meanOfItems(assessment, responses, [...SCS_SF_MINDFULNESS_ITEM_IDS]),
     };
   }
 
   if (assessmentId === 'gasp') {
+    const guilt_repair = meanOfItems(assessment, responses, [...GASP_GUILT_REPAIR_ITEM_IDS]);
+    const shame_withdraw = meanOfItems(assessment, responses, [...GASP_SHAME_WITHDRAW_ITEM_IDS]);
     const externalization = meanOfItems(assessment, responses, [...GASP_EXTERNALIZATION_ITEM_IDS]);
-    return { total: externalization };
+    // GASP total score traditionally focuses on the prosocial subscales (Guilt-Proneness and Shame-Proneness)
+    const total = (guilt_repair + shame_withdraw) / 2;
+    return {
+      total,
+      guilt_repair,
+      shame_withdraw,
+      externalization,
+    };
   }
 
   if (assessmentId === 'dweck') {

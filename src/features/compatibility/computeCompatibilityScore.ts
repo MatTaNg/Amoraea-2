@@ -3,8 +3,58 @@
  * Pure functions — no I/O except computeNarrativeFitScore (TODO stub).
  */
 
-/** Max distance (km) before geography hard-blocks when neither user will relocate. */
-export const MAX_DISTANCE_KM = 100;
+export { MAX_DISTANCE_KM } from '@config/matching/compatibilityScoring';
+import {
+  ADJUSTMENT_CONFLICT_STYLE_MAX,
+  ADJUSTMENT_CONFLICT_STYLE_MIN,
+  ADJUSTMENT_POLITICS_MISMATCH,
+  ADJUSTMENT_PSYCHOMETRIC_MAX,
+  ADJUSTMENT_PSYCHOMETRIC_MIN,
+  ADJUSTMENT_SEXUAL_COMM_CLOSE_BONUS,
+  ADJUSTMENT_SEXUAL_COMM_CLOSE_MAX_DIFF,
+  ADJUSTMENT_SEXUAL_COMM_FAR_MIN_DIFF,
+  ADJUSTMENT_SEXUAL_COMM_FAR_PENALTY,
+  ATTACHMENT_ANXIOUS_MIN,
+  ATTACHMENT_AVOIDANT_MIN,
+  ATTACHMENT_DUAL_DISTRESS_MEAN_MIN,
+  CAPACITY_ACCOUNTABILITY_WEIGHT,
+  CAPACITY_ANXIETY_DISCOUNT_FACTOR,
+  CAPACITY_CONTEMPT_WEIGHT,
+  CAPACITY_DISCOUNT_BASE,
+  CAPACITY_DISCOUNT_MULTIPLIER,
+  CAPACITY_DWECK_WEIGHT,
+  CAPACITY_EXTERNALIZE_WEIGHT,
+  CAPACITY_MENTALIZING_WEIGHT,
+  CAPACITY_REGULATION_WEIGHT,
+  CAPACITY_REPAIR_WEIGHT,
+  CAPACITY_RESILIENCE_WEIGHT,
+  CAPACITY_RFQ_WEIGHT,
+  CAPACITY_SELF_COMPASSION_WEIGHT,
+  COMPAT_ATTACHMENT_WEIGHT,
+  COMPAT_BASELINE_WEIGHT,
+  COMPAT_FINANCE_WEIGHT,
+  COMPAT_INTERVIEW_PROCESS_WEIGHT,
+  COMPAT_SEMANTIC_WEIGHT,
+  COMPAT_VALUES_WEIGHT,
+  DWECK_GROWTH_PAIR_MIN,
+  FINANCE_INCOME_WEIGHT,
+  FINANCE_POOLING_MISMATCH_SCORE,
+  FINANCE_POOLING_WEIGHT,
+  FINANCE_RISK_WEIGHT,
+  INTERVIEW_DISCOUNT_TIERS,
+  INTERVIEW_PROCESS_CONTEMPT_PENALTY_MULTIPLIER,
+  INTERVIEW_PROCESS_CONTEMPT_PENALTY_THRESHOLD,
+  MAX_DISTANCE_KM,
+  NPI_ENTITLEMENT_DIFF_PENALTY_MIN,
+  NPI_ENTITLEMENT_HIGH_PAIR_MIN,
+  SCS_SF_COMPASSION_PAIR_MIN,
+  SEMANTIC_DEFAULT_NARRATIVE_FIT,
+  SEMANTIC_LIFE_DOMAIN_WEIGHT,
+  SEMANTIC_NARRATIVE_FIT_WEIGHT,
+  VALUES_HIGH_SALIENCE_MAX_DIFF,
+  VALUES_PEARSON_VS_ABSOLUTE_BLEND,
+  VALUES_PROSOCIAL_BLEND,
+} from '@config/matching/compatibilityScoring';
 
 export type AttachmentProfile = {
   anxiety: number;
@@ -300,24 +350,24 @@ export function computeRelationalCapacity(user: RelationalCapacityInput): number
   const dweck = normPsychOrNeutral(user.dweckScore, (s) => (s - 1) / 5);
 
   const capacity =
-    0.2 * rfq +
-    0.15 * contemptNorm +
-    0.2 * repairNorm +
-    0.14 * accountabilityNorm +
-    0.08 * regulationNorm +
-    0.08 * mentalizingNorm +
-    0.08 * externalize +
-    0.03 * selfCompassion +
-    0.02 * resilience +
-    0.02 * dweck;
+    CAPACITY_RFQ_WEIGHT * rfq +
+    CAPACITY_CONTEMPT_WEIGHT * contemptNorm +
+    CAPACITY_REPAIR_WEIGHT * repairNorm +
+    CAPACITY_ACCOUNTABILITY_WEIGHT * accountabilityNorm +
+    CAPACITY_REGULATION_WEIGHT * regulationNorm +
+    CAPACITY_MENTALIZING_WEIGHT * mentalizingNorm +
+    CAPACITY_EXTERNALIZE_WEIGHT * externalize +
+    CAPACITY_SELF_COMPASSION_WEIGHT * selfCompassion +
+    CAPACITY_RESILIENCE_WEIGHT * resilience +
+    CAPACITY_DWECK_WEIGHT * dweck;
 
-  const anxietyDiscount = 1 - 0.1 * (1 - lowAnxiety);
+  const anxietyDiscount = 1 - CAPACITY_ANXIETY_DISCOUNT_FACTOR * (1 - lowAnxiety);
   return clamp01(capacity * anxietyDiscount);
 }
 
 export function computeCapacityDiscount(capacityA: number, capacityB: number): number {
   const geometric = Math.sqrt(clamp01(capacityA) * clamp01(capacityB));
-  return Math.max(0, (0.65 - geometric) * 0.3);
+  return Math.max(0, (CAPACITY_DISCOUNT_BASE - geometric) * CAPACITY_DISCOUNT_MULTIPLIER);
 }
 
 export function computeAttachmentScore(
@@ -338,10 +388,10 @@ export function computeAttachmentScore(
       0.55 * Math.abs(a.avoidance - b.avoidance)) /
       6;
 
-  const aAnxious = a.anxiety >= 4.0 && a.avoidance < 4.0;
-  const aAvoidant = a.avoidance >= 4.0 && a.anxiety < 4.0;
-  const bAnxious = b.anxiety >= 4.0 && b.avoidance < 4.0;
-  const bAvoidant = b.avoidance >= 4.0 && b.anxiety < 4.0;
+  const aAnxious = a.anxiety >= ATTACHMENT_ANXIOUS_MIN && a.avoidance < ATTACHMENT_ANXIOUS_MIN;
+  const aAvoidant = a.avoidance >= ATTACHMENT_AVOIDANT_MIN && a.anxiety < ATTACHMENT_ANXIOUS_MIN;
+  const bAnxious = b.anxiety >= ATTACHMENT_ANXIOUS_MIN && b.avoidance < ATTACHMENT_ANXIOUS_MIN;
+  const bAvoidant = b.avoidance >= ATTACHMENT_AVOIDANT_MIN && b.anxiety < ATTACHMENT_ANXIOUS_MIN;
   const isAA = (aAnxious && bAvoidant) || (aAvoidant && bAnxious);
 
   const Panx_avo = isAA
@@ -364,8 +414,8 @@ export function computeAttachmentScore(
   const aMean = (a.anxiety + a.avoidance) / 2;
   const bMean = (b.anxiety + b.avoidance) / 2;
   const Pdual =
-    aMean > 4.5 && bMean > 4.5
-      ? 0.07 * Math.min(1, (aMean - 4.5 + bMean - 4.5) / 3.0)
+    aMean > ATTACHMENT_DUAL_DISTRESS_MEAN_MIN && bMean > ATTACHMENT_DUAL_DISTRESS_MEAN_MIN
+      ? 0.07 * Math.min(1, (aMean - ATTACHMENT_DUAL_DISTRESS_MEAN_MIN + bMean - ATTACHMENT_DUAL_DISTRESS_MEAN_MIN) / 3.0)
       : 0;
 
   const simBonus = a.avoidance >= 4.0 && b.avoidance >= 4.0 ? 0 : 0.15 * Ssim;
@@ -395,7 +445,7 @@ export function computeValuesScore(aScores: ValuesProfile, bScores: ValuesProfil
   const pearsonSimilarity = (r + 1) / 2;
 
   const highSalienceDims = ['self_direction', 'tradition', 'conformity', 'security'] as const;
-  const MAX_DIFF = 4.0;
+  const MAX_DIFF = VALUES_HIGH_SALIENCE_MAX_DIFF;
   const absoluteSimilarity =
     1 -
     highSalienceDims.reduce((sum, dim) => {
@@ -403,7 +453,7 @@ export function computeValuesScore(aScores: ValuesProfile, bScores: ValuesProfil
     }, 0) /
       (highSalienceDims.length * MAX_DIFF);
 
-  const Sval_sim = 0.6 * pearsonSimilarity + 0.4 * absoluteSimilarity;
+  const Sval_sim = VALUES_PEARSON_VS_ABSOLUTE_BLEND.pearson * pearsonSimilarity + VALUES_PEARSON_VS_ABSOLUTE_BLEND.absolute * absoluteSimilarity;
 
   const maxV = 2.0;
   const minV = -2.0;
@@ -416,7 +466,7 @@ export function computeValuesScore(aScores: ValuesProfile, bScores: ValuesProfil
   );
   const Sprosocial = (Spro_A + Spro_B) / 2;
 
-  return clamp01(0.8 * Sval_sim + 0.2 * Sprosocial);
+  return clamp01(VALUES_PROSOCIAL_BLEND.similarity * Sval_sim + VALUES_PROSOCIAL_BLEND.prosocial * Sprosocial);
 }
 
 export function incomeToMidpoint(bracket: string | null | undefined): number | null {
@@ -439,7 +489,7 @@ export function computeFinanceAlignment(a: FinanceProfile, b: FinanceProfile): n
     a.financesPooled != null && b.financesPooled != null
       ? a.financesPooled === b.financesPooled
         ? 1.0
-        : 0.4
+        : FINANCE_POOLING_MISMATCH_SCORE
       : 0.5;
 
   const riskSimilarity =
@@ -454,7 +504,7 @@ export function computeFinanceAlignment(a: FinanceProfile, b: FinanceProfile): n
       ? Math.log(1 + Math.min(aInc, bInc) / (Math.max(aInc, bInc) + 1))
       : 0.5;
 
-  return clamp01(0.55 * poolingMatch + 0.35 * riskSimilarity + 0.1 * incomeRatio);
+  return clamp01(FINANCE_POOLING_WEIGHT * poolingMatch + FINANCE_RISK_WEIGHT * riskSimilarity + FINANCE_INCOME_WEIGHT * incomeRatio);
 }
 
 export function computeLifeDomainAlignment(
@@ -479,11 +529,11 @@ export function computeLifeDomainAlignment(
  * Return score 0-1, default 0.5 when insufficient data
  */
 export async function computeNarrativeFitScore(_userIdA: string, _userIdB: string): Promise<number> {
-  return 0.5;
+  return SEMANTIC_DEFAULT_NARRATIVE_FIT;
 }
 
 export function computeSemanticScore(lifeDomainAlignment: number, narrativeFitScore: number): number {
-  return clamp01(lifeDomainAlignment * 0.4 + narrativeFitScore * 0.6);
+  return clamp01(lifeDomainAlignment * SEMANTIC_LIFE_DOMAIN_WEIGHT + narrativeFitScore * SEMANTIC_NARRATIVE_FIT_WEIGHT);
 }
 
 export function computeInterviewProcessScore(
@@ -493,7 +543,10 @@ export function computeInterviewProcessScore(
   const repairAlignment = 1 - Math.abs(a.repair - b.repair) / 10;
   const accountabilityAlignment = 1 - Math.abs(a.accountability - b.accountability) / 10;
   const contemptRisk = Math.max(a.contempt, b.contempt) / 10;
-  const contemptPenalty = contemptRisk > 0.5 ? (contemptRisk - 0.5) * 0.3 : 0;
+  const contemptPenalty =
+    contemptRisk > INTERVIEW_PROCESS_CONTEMPT_PENALTY_THRESHOLD
+      ? (contemptRisk - INTERVIEW_PROCESS_CONTEMPT_PENALTY_THRESHOLD) * INTERVIEW_PROCESS_CONTEMPT_PENALTY_MULTIPLIER
+      : 0;
   const base = repairAlignment * 0.5 + accountabilityAlignment * 0.5;
   return clamp01(base - contemptPenalty);
 }
@@ -508,20 +561,20 @@ export function computeConflictStyleAdjustment(
   const dwPenalty = (Cdw / (2 * maxProduct)) * 0.08;
   const Bcollab = (a.collaborating * b.collaborating) / maxProduct;
   const collabBonus = Bcollab * 0.03;
-  return Math.max(-0.08, Math.min(0.03, collabBonus - dwPenalty));
+  return Math.max(ADJUSTMENT_CONFLICT_STYLE_MIN, Math.min(ADJUSTMENT_CONFLICT_STYLE_MAX, collabBonus - dwPenalty));
 }
 
 export function computePoliticsAdjustment(a: PoliticsProfile, b: PoliticsProfile): number {
   const polA = normalizeReligionKey(a.politics);
   const polB = normalizeReligionKey(b.politics);
   if (!polA || !polB) return 0;
-  return polA !== polB ? -0.02 : 0;
+  return polA !== polB ? ADJUSTMENT_POLITICS_MISMATCH : 0;
 }
 
 export function computeSexualCommAdjustment(scoreA: number, scoreB: number): number {
   const diff = Math.abs(scoreA - scoreB);
-  if (diff <= 0.5) return 0.03;
-  if (diff > 1.5) return -0.05;
+  if (diff <= ADJUSTMENT_SEXUAL_COMM_CLOSE_MAX_DIFF) return ADJUSTMENT_SEXUAL_COMM_CLOSE_BONUS;
+  if (diff > ADJUSTMENT_SEXUAL_COMM_FAR_MIN_DIFF) return ADJUSTMENT_SEXUAL_COMM_FAR_PENALTY;
   return 0;
 }
 
@@ -532,26 +585,28 @@ export function computePsychometricSoftAdjustments(
   let adj = 0;
 
   if (a.npiEntitlementScore != null && b.npiEntitlementScore != null) {
-    if (a.npiEntitlementScore >= 4 && b.npiEntitlementScore >= 4) adj -= 0.04;
-    if (Math.abs(a.npiEntitlementScore - b.npiEntitlementScore) > 3) adj -= 0.03;
+    if (a.npiEntitlementScore >= NPI_ENTITLEMENT_HIGH_PAIR_MIN && b.npiEntitlementScore >= NPI_ENTITLEMENT_HIGH_PAIR_MIN) {
+      adj -= 0.04;
+    }
+    if (Math.abs(a.npiEntitlementScore - b.npiEntitlementScore) > NPI_ENTITLEMENT_DIFF_PENALTY_MIN) adj -= 0.03;
   }
 
   if (a.dweckScore != null && b.dweckScore != null) {
-    if (a.dweckScore >= 4.5 && b.dweckScore >= 4.5) adj += 0.02;
+    if (a.dweckScore >= DWECK_GROWTH_PAIR_MIN && b.dweckScore >= DWECK_GROWTH_PAIR_MIN) adj += 0.02;
   }
 
   if (a.scsSfScore != null && b.scsSfScore != null) {
-    if (a.scsSfScore >= 4.0 && b.scsSfScore >= 4.0) adj += 0.02;
+    if (a.scsSfScore >= SCS_SF_COMPASSION_PAIR_MIN && b.scsSfScore >= SCS_SF_COMPASSION_PAIR_MIN) adj += 0.02;
   }
 
-  return Math.max(-0.1, Math.min(0.06, adj));
+  return Math.max(ADJUSTMENT_PSYCHOMETRIC_MIN, Math.min(ADJUSTMENT_PSYCHOMETRIC_MAX, adj));
 }
 
 export function computeInterviewConfidenceDiscount(weightedScore: number): number {
-  if (weightedScore >= 7.5) return 1.0;
-  if (weightedScore >= 7.0) return 0.95;
-  if (weightedScore >= 6.5) return 0.9;
-  return 0.85;
+  for (const tier of INTERVIEW_DISCOUNT_TIERS) {
+    if (weightedScore >= tier.minWeightedScore) return tier.discount;
+  }
+  return INTERVIEW_DISCOUNT_TIERS[INTERVIEW_DISCOUNT_TIERS.length - 1]!.discount;
 }
 
 export function computeFinalCompatibilityScore(params: {
@@ -577,12 +632,12 @@ export function computeFinalCompatibilityScore(params: {
   const capacityDiscount = computeCapacityDiscount(params.capacityA, params.capacityB);
 
   const coreScore =
-    params.attachmentScore * 0.4 +
-    params.valuesScore * 0.4 * interviewDiscount +
-    params.semanticScore * 0.02 +
-    params.financeScore * 0.08 +
-    params.interviewProcessScore * 0.05 +
-    0.05;
+    params.attachmentScore * COMPAT_ATTACHMENT_WEIGHT +
+    params.valuesScore * COMPAT_VALUES_WEIGHT * interviewDiscount +
+    params.semanticScore * COMPAT_SEMANTIC_WEIGHT +
+    params.financeScore * COMPAT_FINANCE_WEIGHT +
+    params.interviewProcessScore * COMPAT_INTERVIEW_PROCESS_WEIGHT +
+    COMPAT_BASELINE_WEIGHT;
 
   const totalAdjustments =
     params.sexualCommAdjustment +
@@ -596,12 +651,12 @@ export function computeFinalCompatibilityScore(params: {
   return {
     finalScore,
     breakdown: {
-      attachment: params.attachmentScore * 0.4,
-      values: params.valuesScore * 0.4 * interviewDiscount,
-      semantic: params.semanticScore * 0.02,
-      finance: params.financeScore * 0.08,
-      interviewProcess: params.interviewProcessScore * 0.05,
-      baseline: 0.05,
+      attachment: params.attachmentScore * COMPAT_ATTACHMENT_WEIGHT,
+      values: params.valuesScore * COMPAT_VALUES_WEIGHT * interviewDiscount,
+      semantic: params.semanticScore * COMPAT_SEMANTIC_WEIGHT,
+      finance: params.financeScore * COMPAT_FINANCE_WEIGHT,
+      interviewProcess: params.interviewProcessScore * COMPAT_INTERVIEW_PROCESS_WEIGHT,
+      baseline: COMPAT_BASELINE_WEIGHT,
       capacityDiscount,
       interviewDiscount,
       adjustments: totalAdjustments,

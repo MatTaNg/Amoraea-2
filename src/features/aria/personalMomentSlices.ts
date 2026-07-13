@@ -1,19 +1,96 @@
 import { assistantTextLooksLikeMoment4HandoffLead } from './interviewTransitionBundles';
 import { looksLikeMoment4GrudgePrompt } from './moment4ProbeLogic';
-import { isMoment5AssistantAnchor } from './probeAndScoringUtils';
+import { MOMENT_5_ACCOUNTABILITY_QUESTION_TEXT } from './moment5ProbeCopy';
+import { scoringSliceHasAssessableMoment5UserResponse } from './moment5ScoringGuard';
+import {
+  collectMoment5TaggedUserTurns,
+  isMoment5TaggedUserTurn,
+  readTranscriptTurnInterviewMoment,
+} from './moment5TranscriptHelpers';
+import {
+  isMoment5AssistantAnchor,
+  transcriptAssistantContainsMoment5PrimaryConflictQuestion,
+} from './probeAndScoringUtils';
 
-export type TranscriptTurn = { role: string; content: string; interviewMoment?: number };
+export type TranscriptTurn = {
+  role: string;
+  content: string;
+  interviewMoment?: number;
+  interview_moment?: number;
+  moment?: number;
+};
+
+function isMoment5SliceAssistantStart(content: string | null | undefined): boolean {
+  return (
+    isMoment5AssistantAnchor(content) ||
+    transcriptAssistantContainsMoment5PrimaryConflictQuestion(content)
+  );
+}
+
+function combinedUserWordCount(slice: TranscriptTurn[]): number {
+  return slice
+    .filter((m) => m.role === 'user')
+    .map((m) => (m.content ?? '').trim())
+    .filter(Boolean)
+    .join(' ')
+    .split(/\s+/)
+    .filter(Boolean).length;
+}
+
+/**
+ * Rebuild M5 scoring corpus from all user turns tagged moment 5, including assistant
+ * follow-ups (resolution, accountability probe) between them.
+ */
+export function rebuildMoment5SliceFromTaggedUsers(transcript: TranscriptTurn[]): TranscriptTurn[] {
+  const taggedIndices: number[] = [];
+  for (let i = 0; i < transcript.length; i++) {
+    if (isMoment5TaggedUserTurn(transcript[i])) taggedIndices.push(i);
+  }
+  if (taggedIndices.length === 0) return [];
+
+  const firstTagged = taggedIndices[0]!;
+  const lastTagged = taggedIndices[taggedIndices.length - 1]!;
+
+  let anchorIdx = -1;
+  for (let i = firstTagged - 1; i >= 0; i--) {
+    const row = transcript[i];
+    if (row?.role === 'assistant' && isMoment5SliceAssistantStart(row.content ?? '')) {
+      anchorIdx = i;
+      break;
+    }
+  }
+
+  if (anchorIdx < 0) {
+    const out: TranscriptTurn[] = [
+      { role: 'assistant', content: MOMENT_5_ACCOUNTABILITY_QUESTION_TEXT },
+    ];
+    for (let t = 0; t < taggedIndices.length; t++) {
+      const userIdx = taggedIndices[t]!;
+      const rangeStart = t === 0 ? 0 : taggedIndices[t - 1]! + 1;
+      for (let j = rangeStart; j < userIdx; j++) {
+        const row = transcript[j];
+        if (row?.role === 'assistant') out.push(row);
+      }
+      out.push(transcript[userIdx]!);
+    }
+    return out;
+  }
+
+  return transcript
+    .slice(anchorIdx, lastTagged + 1)
+    .filter((m) => m.role === 'assistant' || m.role === 'user');
+}
 
 function findMoment5AssistantStartIndex(transcript: TranscriptTurn[], m4Start: number): number {
   const from = m4Start >= 0 ? m4Start : 0;
   for (let i = from; i < transcript.length; i++) {
     const m = transcript[i];
-    if (m.role === 'assistant' && isMoment5AssistantAnchor(m.content ?? '')) return i;
+    if (m.role === 'assistant' && isMoment5SliceAssistantStart(m.content ?? '')) return i;
   }
   if (m4Start >= 0) {
     for (let i = 0; i < m4Start; i++) {
       const m = transcript[i];
-      if (m.role === 'assistant' && isMoment5AssistantAnchor(m.content ?? '')) return i;
+      if (m.role === 'assistant' && isMoment5SliceAssistantStart(m.content ?? '')) return i;
     }
   }
   return -1;
@@ -88,5 +165,65 @@ export function trimMoment5SliceForScoring(slice: TranscriptTurn[]): TranscriptT
       break;
     }
   }
-  return lastUser >= 0 ? filtered.slice(0, lastUser + 1) : filtered;
+  if (lastUser < 0) return [];
+  return filtered.slice(0, lastUser + 1);
+}
+
+/**
+ * Moment 5 scoring corpus: prefer anchor-inferred slice; fall back to `interviewMoment: 5` user turns
+ * when the assistant anchor was paraphrased or missing from the stored transcript.
+ */
+export function resolveMoment5ScoringSlice(transcript: TranscriptTurn[]): TranscriptTurn[] {
+  const taggedRebuild = trimMoment5SliceForScoring(rebuildMoment5SliceFromTaggedUsers(transcript));
+  const { moment5 } = inferPersonalMomentSlices(transcript);
+  const inferred = trimMoment5SliceForScoring(moment5);
+
+  const candidates: TranscriptTurn[][] = [];
+  if (taggedRebuild.length > 0 && scoringSliceHasAssessableMoment5UserResponse(taggedRebuild)) {
+    candidates.push(taggedRebuild);
+  }
+  if (inferred.length > 0 && scoringSliceHasAssessableMoment5UserResponse(inferred)) {
+    candidates.push(inferred);
+  }
+
+  if (candidates.length > 0) {
+    return [...candidates].sort((a, b) => {
+      const aUsers = a.filter((m) => m.role === 'user').length;
+      const bUsers = b.filter((m) => m.role === 'user').length;
+      if (bUsers !== aUsers) return bUsers - aUsers;
+      return combinedUserWordCount(b) - combinedUserWordCount(a);
+    })[0]!;
+  }
+
+  if (collectMoment5TaggedUserTurns(transcript).length > 0) {
+    return taggedRebuild.length > 0 ? taggedRebuild : inferred;
+  }
+
+  const taggedUserIdx = transcript.findIndex(
+    (m) => m.role === 'user' && readTranscriptTurnInterviewMoment(m) === 5 && (m.content ?? '').trim().length > 0,
+  );
+  if (taggedUserIdx < 0) return inferred;
+
+  let anchorIdx = -1;
+  for (let i = taggedUserIdx - 1; i >= 0; i--) {
+    const row = transcript[i];
+    if (row?.role === 'assistant' && isMoment5SliceAssistantStart(row.content ?? '')) {
+      anchorIdx = i;
+      break;
+    }
+  }
+
+  const rebuilt: TranscriptTurn[] = [];
+  if (anchorIdx >= 0) {
+    rebuilt.push(transcript[anchorIdx]!);
+  } else {
+    rebuilt.push({ role: 'assistant', content: MOMENT_5_ACCOUNTABILITY_QUESTION_TEXT });
+  }
+  for (let i = anchorIdx >= 0 ? anchorIdx + 1 : 0; i < transcript.length; i++) {
+    const row = transcript[i];
+    if (!row) continue;
+    if (row.role === 'user' && readTranscriptTurnInterviewMoment(row) === 5) rebuilt.push(row);
+  }
+  const trimmed = trimMoment5SliceForScoring(rebuilt);
+  return trimmed.length > 0 ? trimmed : inferred;
 }

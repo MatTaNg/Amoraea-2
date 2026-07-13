@@ -1,6 +1,19 @@
 import { waitForInterviewAttemptScoringReady } from '../waitForInterviewAttemptScoringReady';
 import type { SupabaseClient } from '@supabase/supabase-js';
 
+const completeDefensePatterns = {
+  projection_detected: false,
+  splitting_detected: false,
+  rationalization_detected: false,
+  denial_detected: false,
+};
+
+const completeRollup = {
+  scenario_composites: { scenario_1: 6, scenario_2: 6, scenario_3: 6 },
+  defense_patterns: completeDefensePatterns,
+  defense_cross_reference: { flags: [], overallConfidence: 'high', modifierAdjustment: 0 },
+};
+
 function mockClient(rows: unknown[]) {
   let i = 0;
   return {
@@ -25,6 +38,7 @@ describe('waitForInterviewAttemptScoringReady', () => {
       scenario_1_scores: null,
       scenario_2_scores: null,
       scenario_3_scores: null,
+      ...completeRollup,
     };
     const client = mockClient([row]);
     const ok = await waitForInterviewAttemptScoringReady(client, 'attempt-1', {
@@ -42,10 +56,28 @@ describe('waitForInterviewAttemptScoringReady', () => {
       scenario_1_scores: { pillarScores: { trust: 5 } },
       scenario_2_scores: { pillarScores: { trust: 5 } },
       scenario_3_scores: { pillarScores: { trust: 5 } },
+      ...completeRollup,
     };
     const client = mockClient([row]);
     const ok = await waitForInterviewAttemptScoringReady(client, 'a', { maxMs: 500, intervalMs: 5 });
     expect(ok).toBe(true);
+  });
+
+  it('returns false when scores exist but rollup artifacts are missing', async () => {
+    const row = {
+      completed_at: new Date().toISOString(),
+      weighted_score: 6.2,
+      pillar_scores: { trust: 5 },
+      scenario_1_scores: { pillarScores: { trust: 5 } },
+      scenario_2_scores: { pillarScores: { trust: 5 } },
+      scenario_3_scores: { pillarScores: { trust: 5 } },
+      scenario_composites: null,
+      defense_patterns: {},
+      defense_cross_reference: null,
+    };
+    const client = mockClient([row]);
+    const ok = await waitForInterviewAttemptScoringReady(client, 'a', { maxMs: 80, intervalMs: 20 });
+    expect(ok).toBe(false);
   });
 
   it('returns false before deadline when row never becomes ready', async () => {

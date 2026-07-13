@@ -5,6 +5,8 @@
 
 import { normalizeMoment4Concreteness, normalizeResponseConcreteness } from './personalMomentConcreteness.ts';
 
+import { UNDERDISCLOSURE_RATIO_THRESHOLD } from '../../../src/config/scoring/disclosureLevels.ts';
+
 export type DisclosureCalibrationTurn = {
   role?: string;
   content?: string;
@@ -13,7 +15,6 @@ export type DisclosureCalibrationTurn = {
 
 export type DisclosureCalibration = 'underdisclosure' | 'calibrated' | 'overdisclosure';
 
-const UNDERDISCLOSURE_RATIO_THRESHOLD = 0.4;
 const SUBSTANTIVE_PERSONAL_CONCRETENESS = new Set(['high', 'valid_non_applicable']);
 
 /** Direct evidence of substantive personal disclosure — overrides low word-count ratio alone. */

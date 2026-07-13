@@ -217,6 +217,19 @@ describe('getPriorSubstantiveNonMetaUserContentInMoment', () => {
     ];
     expect(getPriorSubstantiveNonMetaUserContentInMoment(msgs as never, 1, 2)).toBeNull();
   });
+
+  it('includes the latest substantive turn when the current meta line is not yet appended', () => {
+    const msgs = [
+      {
+        role: 'user',
+        content:
+          "Yeah, he needs help with tools and techniques to be guided through conversation because it sounds like he's just really avoided.",
+        scenarioNumber: 3,
+        interviewMoment: 3,
+      },
+    ];
+    expect(getPriorSubstantiveNonMetaUserContentInMoment(msgs as never, 3, 3)).toMatch(/tools/);
+  });
 });
 
 describe('isSufficiencyChallengeFrustrationUtterance', () => {
@@ -322,7 +335,7 @@ describe('buildMetaCommentHandlingSuffix', () => {
     });
     expect(s).toContain('CHECKING-IN + FRUSTRATION ADJACENT');
     expect(s).toContain('Do not re-ask the same question');
-    expect(s).toContain('Do **not** re-ask "What was your part in how it unfolded?"');
+    expect(s).toContain('Do **not** re-ask "What do you think you did or said that contributed to the conflict?"');
   });
 });
 
@@ -434,6 +447,35 @@ describe('resolveMetaCommentForInterviewTurn', () => {
     expect(resolved.raw?.type).toBe('ambiguous_short');
     expect(resolved.exemptMetaCommentTurn).toBe(true);
     expect(resolved.exemptMetaCommentTurnReason).toBe('name_entry_turn');
+    expect(resolved.effective).toBeNull();
+  });
+
+  it('exempts short name replies after ratio recovery while profile name is unset', () => {
+    const resolved = resolveMetaCommentForInterviewTurn('Matt.', {
+      lastQuestionText:
+        'I only caught part of that — could you answer again in a full sentence?',
+      priorUserUtteranceCount: 1,
+      isInterviewAppRoute: true,
+      hasProfileFirstName: false,
+      interviewName: null,
+      lastAssistantCue:
+        'I only caught part of that — could you answer again in a full sentence?',
+    });
+    expect(resolved.exemptMetaCommentTurn).toBe(true);
+    expect(resolved.exemptMetaCommentTurnReason).toBe('name_entry_turn');
+    expect(resolved.effective).toBeNull();
+  });
+
+  it('exempts readiness assent during post-name preamble briefing', () => {
+    const resolved = resolveMetaCommentForInterviewTurn('Yes.', {
+      lastQuestionText:
+        "Good to meet you, Matt. The way this works is I'll first give you three situations. Are you ready?",
+      priorUserUtteranceCount: 2,
+      isInterviewAppRoute: true,
+      hasProfileFirstName: false,
+    });
+    expect(resolved.exemptMetaCommentTurn).toBe(true);
+    expect(resolved.exemptMetaCommentTurnReason).toBe('preamble_readiness_turn');
     expect(resolved.effective).toBeNull();
   });
 

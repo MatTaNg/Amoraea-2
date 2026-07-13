@@ -3,7 +3,10 @@
  * Kept separate from the screen to use in the scoring pipeline and scripts.
  */
 
-import { looksLikeScenarioBRepairAsJamesQuestion } from './interviewDisengagementProbes';
+import {
+  looksLikeScenarioBRepairAsJamesQuestion,
+  looksLikeScenarioBJamesDifferentlyQuestion,
+} from './scenarioBProbeLogic';
 
 /** Legacy assistant line when Q3 was skipped (older sessions). Kept for transcript reconciliation. */
 const SCENARIO_B_REPAIR_COVERED_SKIP_LEGACY =
@@ -16,18 +19,7 @@ export function isScenarioBRepairAsJamesQuestion(text: string | null | undefined
 
 export function isScenarioBJamesDifferentlyOrAppreciationPathQuestion(text: string | null | undefined): boolean {
   if (!text?.trim()) return false;
-  const t = text.toLowerCase();
-  if (t.includes("what do you think james could've done differently so sarah feels better")) return true;
-  const jamesCtx = /\bjames\b/.test(t);
-  const differently =
-    /\b(could'?ve done differently|could have done differently|done differently|anything james could|what james could)\b/.test(
-      t
-    );
-  const beforeFight =
-    jamesCtx &&
-    /\b(before (the )?(fight|blow|blow-?up)|might have helped|so sarah feels|feel appreciated|helped sarah)\b/.test(t);
-  const leanJamesProbe = /\bis there anything james could have done\b/.test(t) && /\bhelp(ed)?\b/.test(t);
-  return (jamesCtx && differently) || beforeFight || leanJamesProbe;
+  return looksLikeScenarioBJamesDifferentlyQuestion(text);
 }
 
 export function isScenarioBRepairCoveredInPriorTurnAssistant(text: string | null | undefined): boolean {

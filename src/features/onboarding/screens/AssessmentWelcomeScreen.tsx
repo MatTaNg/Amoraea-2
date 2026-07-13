@@ -3,6 +3,7 @@ import { ActivityIndicator, SafeAreaView, StyleSheet } from 'react-native';
 import { useQueryClient } from '@tanstack/react-query';
 import { useAuth } from '@/shared/hooks/AuthProvider';
 import { MarketResearchModal } from '@features/onboarding/MarketResearchModal';
+import { useMarketResearchCompletion } from '@features/referrals/MarketResearchCompletionContext';
 import { WelcomeModal } from '@features/psychometrics/WelcomeModal';
 import type { InterviewStackRoute } from '@features/psychometrics/resolveInitialInterviewRoute';
 import {
@@ -23,6 +24,7 @@ type Props = {
 export function AssessmentWelcomeScreen({ navigation, route }: Props) {
   const queryClient = useQueryClient();
   const { user } = useAuth();
+  const { notifyMarketResearchComplete } = useMarketResearchCompletion();
   const userId = route.params?.userId ?? user?.id ?? '';
   const [needsMarketResearch, setNeedsMarketResearch] = useState(
     () => route.params?.needsMarketResearch === true,
@@ -50,7 +52,7 @@ export function AssessmentWelcomeScreen({ navigation, route }: Props) {
       const saved = await loadInterviewFromStorage(userId);
       if (cancelled) return;
       if (saved != null && storedInterviewHasResumableScenarioProgress(saved)) {
-        navigation.replace('Aria', { userId });
+        navigation.replace('Amoraea', { userId });
         return;
       }
       setCheckingResume(false);
@@ -62,10 +64,11 @@ export function AssessmentWelcomeScreen({ navigation, route }: Props) {
 
   function handleContinue() {
     if (!userId || needsMarketResearch) return;
-    navigation.replace('Aria', { userId });
+    navigation.replace('Amoraea', { userId });
   }
 
   function handleMarketResearchComplete() {
+    notifyMarketResearchComplete();
     setNeedsMarketResearch(false);
     void queryClient.invalidateQueries({ queryKey: ['initialInterviewRoute', userId] });
   }
@@ -81,7 +84,7 @@ export function AssessmentWelcomeScreen({ navigation, route }: Props) {
   return (
     <>
       <WelcomeModal
-        visible
+        visible={!needsMarketResearch}
         variant="interviewFirst"
         continueLabel="Continue"
         continueDisabled={needsMarketResearch}

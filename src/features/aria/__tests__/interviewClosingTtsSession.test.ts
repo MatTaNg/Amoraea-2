@@ -1,5 +1,4 @@
 import {
-  looksLikeInterviewClosingAssistantMessage,
   markInterviewClosingTtsDelivered,
   resetInterviewClosingTtsSession,
   hasInterviewClosingTtsDeliveredForSession,
@@ -7,6 +6,7 @@ import {
   tryAcquireInterviewClosingSpeak,
   shouldSuppressDuplicateInterviewClosingTts,
 } from '../interviewClosingTtsSession';
+import { looksLikeInterviewClosingAssistantMessage } from '../elongatingProbe';
 
 describe('interviewClosingTtsSession', () => {
   beforeEach(() => {
@@ -42,6 +42,11 @@ describe('interviewClosingTtsSession', () => {
     markInterviewClosingTtsDelivered('attempt-1', closing);
     expect(hasInterviewClosingSpeakInFlightForSession('attempt-1')).toBe(false);
     expect(tryAcquireInterviewClosingSpeak('attempt-1')).toBe(false);
+  });
+
+  it('does not suppress closing TTS solely because speak is in-flight', () => {
+    expect(tryAcquireInterviewClosingSpeak('attempt-1')).toBe(true);
+    expect(shouldSuppressDuplicateInterviewClosingTts('attempt-1', closing)).toBe(false);
   });
 
   it('ignores non-closing assistant text', () => {

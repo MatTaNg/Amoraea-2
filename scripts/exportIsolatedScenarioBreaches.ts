@@ -79,7 +79,7 @@ type ReviewRow = {
   s2Composite: number;
   s1Composite: number | null;
   s3Composite: number | null;
-  s2Turns: Array<{ role: 'ARIA' | 'USER'; content: string }>;
+  s2Turns: Array<{ role: 'Amoraea' | 'USER'; content: string }>;
   s2: ScenarioSlice;
   s1: ScenarioSlice;
   s3: ScenarioSlice;
@@ -181,7 +181,7 @@ function extractS2Turns(transcript: TranscriptMsg[]): ReviewRow['s2Turns'] {
   for (const m of msgs) {
     if (m.role !== 'assistant' && m.role !== 'user') continue;
     turns.push({
-      role: m.role === 'user' ? 'USER' : 'ARIA',
+      role: m.role === 'user' ? 'USER' : 'Amoraea',
       content: (m.content ?? '').trim(),
     });
   }

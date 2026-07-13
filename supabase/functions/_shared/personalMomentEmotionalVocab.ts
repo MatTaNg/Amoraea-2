@@ -244,8 +244,10 @@ export function computePersonalMomentEmotionalVocabDensityPercent(
   return Math.round((counts / words) * 100 * 1000) / 1000;
 }
 
-const VOCAB_LOW_ABS_THRESHOLD = 0.3;
-const VOCAB_LOW_RATIO_TO_REFERENCE = 0.4;
+import {
+  VOCAB_LOW_ABS_THRESHOLD,
+  VOCAB_LOW_RATIO_TO_REFERENCE,
+} from '../../../src/config/scoring/emotionalVocabThresholds.ts';
 
 /**
  * Low personal-moment emotional vocabulary flag.

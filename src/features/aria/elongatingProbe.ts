@@ -1,3 +1,14 @@
+import { buildTwoSentenceClosingWithoutObservation } from './closingReflectionGrounding';
+import { dedupeDuplicateParticipantNameInClosing } from './interviewClosingLanguageSanitize';
+import {
+  assembleClosingWithOptionalReflection,
+  buildPersonalMomentHandoffReflection,
+} from './personalMomentHandoffReflection';
+import {
+  moment5AnswerHasExplicitSelfAccountability,
+  shouldFireAccountabilityProbe,
+} from './moment5AccountabilityProbe';
+
 /**
  * Elongating probe lines and client/model contract for the relationship interview.
  * Single source of truth for approved verbatim probes (see INTERVIEWER_SYSTEM_FRAMEWORK).
@@ -89,9 +100,58 @@ export function userTurnLooksLikeSingleSurfaceLabelOnly(text: string): boolean {
  * emit an elongating probe — the user's answer is already substantive (see session logs: 127-word
  * hypotheses still received "Can you say more about that?" when this was always false).
  */
+export function userTurnTrailsOffMidSentence(userText: string): boolean {
+  const t = (userText ?? '').replace(/\s+/g, ' ').trim();
+  if (!t) return false;
+  if (/(\.\.\.|…)\s*$/.test(t)) return true;
+  if (
+    /\b(and|but|or|so|because|actually|like|when|that|which|who|would|could|will|to|for|with|if|and if|and then)\s*(\.\.\.|…)?\s*$/i.test(
+      t,
+    )
+  ) {
+    return true;
+  }
+  return false;
+}
+
+/** Model invented "go on?" / echoed user fragment — not an approved elongating probe or real question. */
+export function isInvalidInformalContinuationAssistantText(text: string): boolean {
+  const t = (text ?? '').replace(/\s+/g, ' ').trim();
+  if (!t) return false;
+  if (isApprovedElongatingProbeOnly(t)) return false;
+  const lower = t.toLowerCase();
+  if (/\bgo on\b/i.test(lower)) return true;
+  if (/\btell me more\b/i.test(lower) && t.length < 72) return true;
+  if (/\bkeep going\b/i.test(lower) && t.length < 72) return true;
+  if (
+    /^(got it|makes sense|good|great|nice|okay|ok|that makes a lot of sense|i'?m with you)[.,]?\s+(and|but)\s+/i.test(
+      t,
+    ) &&
+    t.length < 96 &&
+    !/\bhow would you\b/i.test(lower) &&
+    !/\bwhat (?:do you|would you|about)\b/i.test(lower)
+  ) {
+    return true;
+  }
+  if (/\band actually\b.*\bgo on\b/i.test(lower)) return true;
+  return false;
+}
+
+/** Replace broken continuation prompts with the canonical approved elongating probe. */
+export function coerceInvalidContinuationAssistantDraft(draft: string, userTurn: string): string {
+  const t = (draft ?? '').trim();
+  if (!t) return t;
+  if (!isInvalidInformalContinuationAssistantText(t)) return t;
+  if (!userTurnTrailsOffMidSentence(userTurn) && t.length > 72 && /\?\s*$/.test(t)) {
+    return t;
+  }
+  return APPROVED_ELONGATING_PROBE_LINES[0];
+}
+
 export function userTurnSuppressesElongatingProbe(userText: string): boolean {
   const t = userText.trim();
   if (!t) return false;
+  if (userTurnTrailsOffMidSentence(t)) return false;
   const wc = wordCountSpoken(t);
   if (wc >= 25) return true;
   if (userTurnHasMultipleDistinctIdeasOrHypotheses(t)) return true;
@@ -114,12 +174,77 @@ export function buildNeutralAckAfterSuppressedElongatingProbe(participantFirstNa
  */
 export function buildMoment5ClosingFallbackAfterSuppressedElongating(
   participantFirstName: string,
+  lastUserAnswer?: string | null,
 ): string {
+  const neutral = buildTwoSentenceClosingWithoutObservation(participantFirstName);
+  const reflection = buildPersonalMomentHandoffReflection(lastUserAnswer ?? '', { context: 'closing' });
+  const closing = dedupeDuplicateParticipantNameInClosing(
+    assembleClosingWithOptionalReflection(neutral, reflection),
+    participantFirstName,
+  );
+  return `${closing} [INTERVIEW_COMPLETE]`.trim();
+}
+
+/**
+ * Closing-shaped assistant copy that streamed or flushed without the final thank-you
+ * (e.g. "Good work getting through all of this, Matt. What stuck").
+ */
+export function isIncompleteInterviewClosingForSpeak(text: string): boolean {
+  const t = (text ?? '').replace(/\s+/g, ' ').trim();
+  if (!t || t.length < 20) return false;
+  if (looksLikeInterviewClosingAssistantMessage(t)) return false;
+  const lower = t.toLowerCase();
+  if (/\bthank you for being so open with me\b/i.test(lower)) return false;
+  if (isInterviewClosingReflectiveAckFragment(t)) return true;
+  if (/\bgood work getting through\b/i.test(lower)) return true;
+  if (/\bthanks for sticking with\b/i.test(lower)) return true;
+  if (/\bwhat stuck\b/i.test(lower) && !/\?\s*$/.test(t)) return true;
+  if (/\bwhat (?:stood|stands) out\b/i.test(lower)) return true;
+  return false;
+}
+
+/** Expand truncated M5 closing fragments to ack + final thank-you (spoken; no control token). */
+export function coerceIncompleteInterviewClosingForTts(
+  text: string,
+  participantFirstName = '',
+): string {
+  const t = (text ?? '').replace(/\s+/g, ' ').trim();
+  if (!t || looksLikeInterviewClosingAssistantMessage(t)) return t;
+  if (!isIncompleteInterviewClosingForSpeak(t)) return t;
   const name = participantFirstName.trim();
+  let ack = stripIncompleteClosingReflectionTail(t);
+  if (!/\bgood work getting through\b/i.test(ack.toLowerCase())) {
+    ack = name ? `Good work getting through all of this, ${name}.` : 'Good work getting through all of this.';
+  } else if (!/[.!?]\s*$/.test(ack)) {
+    ack = `${ack}.`;
+  }
   const thanks = name
     ? `Thank you for being so open with me, ${name}.`
     : 'Thank you for being so open with me.';
-  return `${thanks} [INTERVIEW_COMPLETE]`;
+  return `${ack} ${thanks}`.replace(/\s+/g, ' ').trim();
+}
+
+function stripIncompleteClosingReflectionTail(ack: string): string {
+  return ack
+    .replace(/\s+what stuck\b.*$/i, '')
+    .replace(/\s+what (?:stood|stands) out\b.*$/i, '')
+    .replace(/\s+what you[.!?…]+\s*$/i, '')
+    .replace(/\s+what you\s*$/i, '')
+    .trim();
+}
+
+/**
+ * Streaming cutoff mid-reflection before a real synthesis (e.g. "What you said about." + thanks).
+ * Must not count as a finished closing for routing or handoff until enriched.
+ */
+export function isTruncatedPersonalMomentClosingReflection(text: string): boolean {
+  const lower = (text ?? '').replace(/\s+/g, ' ').trim().toLowerCase();
+  if (!lower) return false;
+  if (/\bwhat you said about[.!…]?\s*$/i.test(lower)) return true;
+  if (/\bwhat you said about[.!…]?\s+thank you\b/i.test(lower)) return true;
+  if (/\bwhat you[.!…]+\s+thank you\b/i.test(lower)) return true;
+  if (/\bwhat you said[.!…]?\s*$/i.test(lower)) return true;
+  return false;
 }
 
 /**
@@ -129,6 +254,9 @@ export function buildMoment5ClosingFallbackAfterSuppressedElongating(
 export function looksLikeInterviewClosingAssistantMessage(text: string): boolean {
   const t = (text ?? '').replace(/\s+/g, ' ').trim();
   if (!t || t.length < 24) return false;
+  if (isTruncatedPersonalMomentClosingReflection(t)) return false;
+  if (/\breflection_reasoning\s*:/i.test(t)) return false;
+  if (/\b(specific_element_from_answer|relational_orientation_identified)\s*:/i.test(t)) return false;
   const lower = t.toLowerCase();
   if (/\[(interview_complete|scenario_complete|closing_question)/i.test(t)) return false;
   if (/\bhere'?s the (first|second|third|next) situation\b/i.test(lower)) return false;
@@ -199,8 +327,10 @@ export function isInterviewClosingReflectiveAckFragment(text: string): boolean {
     (/\bthanks for working through\b/i.test(lower) && t.length >= 32) ||
     /\bgood work on sticking with\b/i.test(lower) ||
     /\bgood work getting through\b/i.test(lower) ||
+    /\bthank you for getting through\b/i.test(lower) ||
     /\bthanks for sticking with\b/i.test(lower) ||
     /\bthanks for walking through\b/i.test(lower) ||
+    (/\bwhat stood out to me\b/i.test(lower) && t.length < 120) ||
     (/\bwhat stands out\b/i.test(lower) &&
       /\b(stuck with|ownership|really|clearly|open with me)\b/i.test(lower)) ||
     (/\bit sounds like you\b/i.test(lower) &&
@@ -221,6 +351,7 @@ export function isInterviewClosingThanksFragment(text: string): boolean {
     /\bgood work on sticking with\b/i.test(lower) ||
     /\bthanks for walking through\b/i.test(lower) ||
     /\bthank you for walking through\b/i.test(lower) ||
+    /\bthank you for getting through\b/i.test(lower) ||
     (/\bgood work getting through\b/i.test(lower) && /\bthank you\b/i.test(lower))
   );
 }
@@ -245,6 +376,7 @@ export function isIncompleteInterviewClosingLeadSentence(text: string): boolean 
     /\b(thanks for sticking|good work on sticking|thanks for walking through|thank you for walking through|good work getting through)\b/i.test(
       lower,
     ) ||
+    /\bwhat stuck\b/i.test(lower) ||
     isInterviewClosingReflectiveAckFragment(t) ||
     (looksLikeInterviewClosingAssistantMessage(t) && t.length >= 48)
   );
@@ -328,6 +460,71 @@ export function isInterviewClosingStreamFragment(text: string): boolean {
     isIncompleteInterviewClosingLeadSentence(text) ||
     looksLikeInterviewClosingAssistantMessage(text)
   );
+}
+
+/** True when parallel-stream TTS audio actually included closing copy (not merely any prior line). */
+export function streamSpokeAudibleInterviewClosingContent(spokenCompleteText: string): boolean {
+  const spoken = (spokenCompleteText ?? '').replace(/\s+/g, ' ').trim();
+  if (!spoken) return false;
+  if (isInterviewClosingThanksFragment(spoken)) return true;
+  if (looksLikeInterviewClosingAssistantMessage(spoken)) return true;
+  if (isInterviewClosingReflectiveAckFragment(spoken)) return true;
+  if (isIncompleteInterviewClosingForSpeak(spoken)) return true;
+  if (isInterviewClosingStreamFragment(spoken)) return true;
+  return false;
+}
+
+/** True when parallel stream TTS already delivered (or attempted) a Moment 5 closing remark. */
+export function parallelStreamDeliveredMoment5ClosingAttempt(params: {
+  spokenCompleteText: string;
+  streamFullText: string;
+  closingSpokenInStream: boolean;
+}): boolean {
+  const spoken = (params.spokenCompleteText ?? '').replace(/\s+/g, ' ').trim();
+  if (streamSpokeAudibleInterviewClosingContent(spoken)) return true;
+  const full = (params.streamFullText ?? '').replace(/\s+/g, ' ').trim();
+  if (!full) return false;
+  if (looksLikeInterviewClosingAssistantMessage(full)) return true;
+  if (isIncompleteInterviewClosingForSpeak(full)) return true;
+  if (isInterviewClosingStreamFragment(full)) return true;
+  return false;
+}
+
+/** Stream played reflective closing copy without the final thank-you line. */
+export function streamSpokeIncompleteInterviewClosingOnly(params: {
+  parallelStreamingPlaybackUsed: boolean;
+  spokenCompleteText: string;
+  closingSpokenInStream: boolean;
+}): boolean {
+  if (!params.parallelStreamingPlaybackUsed) return false;
+  const spoken = (params.spokenCompleteText ?? '').replace(/\s+/g, ' ').trim();
+  if (!spoken) return false;
+  if (isInterviewClosingThanksFragment(spoken)) return false;
+  if (looksLikeInterviewClosingAssistantMessage(spoken)) return false;
+  return (
+    isInterviewClosingReflectiveAckFragment(spoken) ||
+    isIncompleteInterviewClosingForSpeak(spoken) ||
+    isInterviewClosingStreamFragment(spoken)
+  );
+}
+
+/**
+ * Drop premature Moment-5-style closing copy during scenarios 1–3 so satisfied-repair
+ * advance can inject the canonical next-scenario bundle instead of speaking a dead-end ack.
+ */
+export function stripPrematureInterviewClosingFromScenarioDraft(draft: string): string {
+  const t = (draft ?? '').replace(/\s+/g, ' ').trim();
+  if (!t) return draft;
+  const parts =
+    t.match(/[^.!?]+[.!?]+|[^.!?]+$/g)?.map((s) => s.trim()).filter(Boolean) ?? [t];
+  const kept = parts.filter(
+    (p) =>
+      !isInterviewClosingThanksFragment(p) &&
+      !isInterviewClosingReflectiveAckFragment(p) &&
+      !looksLikeInterviewClosingAssistantMessage(p),
+  );
+  if (kept.length === parts.length) return draft;
+  return kept.join(' ').trim();
 }
 
 /** Collapse multiple closing thank-you sentences in one assistant turn (model duplicate thanks). */
@@ -435,6 +632,19 @@ export function isLenientInterviewCloseAfterClosingSpeech(params: {
 export function moment5AnswerIncludesResolutionOutcome(text: string): boolean {
   const lower = text.replace(/\s+/g, ' ').trim().toLowerCase();
   if (!lower) return false;
+
+  /** Their apology alone — without how things landed — is not a resolution outcome. */
+  const thirdPartyApologyOnly =
+    /\b(she|he|they) (eventually )?apologized\b/i.test(lower) &&
+    !/\b(i|we) (also )?apologized\b/i.test(lower) &&
+    !/\b(we|things?|it) (are|were|got|became|is) (okay|ok|fine|good|cool|better|resolved|sorted|worked out)\b/i.test(
+      lower,
+    ) &&
+    !/\b(talked (it )?through|worked (it )?out|made up|reconciled|cleared the air|made peace|mended|forgave)\b/i.test(
+      lower,
+    );
+  if (thirdPartyApologyOnly) return false;
+
   if (
     /\b(resolved|resolution|worked (it )?out|talked (it )?through|made up|reconciled|sorted (it )?out|moved past|got past|forgave|apologized|made peace|mended (things|fences)|patch(ed)? things up|we'?re (okay|ok|fine|good|cool|better) now|we (are|were) (okay|ok|fine|good|cool|better)|things (got|are) better|made amends|cleared the air|talked it through|brought it up|without interruption|facilitated|mediated|mediator|sat down (and )?(talk|listen)|heard each other out)\b/i.test(
       lower,
@@ -479,7 +689,19 @@ export function isMoment5ReadyForInterviewClose(params: {
     if (params.accountabilityProbeFired) {
       return params.postM5UserTurns >= 2;
     }
-    return true;
+    /**
+     * Align with accountability-probe skip: ownership that suppresses the scripted probe
+     * (e.g. "I raised my voice") must also allow single-turn close after resolution.
+     * Strict {@link moment5AnswerHasExplicitSelfAccountability} alone is too narrow and left
+     * sessions stuck after a final closing thank-you with no preparing_results handoff.
+     */
+    if (
+      moment5AnswerHasExplicitSelfAccountability(combined) ||
+      !shouldFireAccountabilityProbe(combined)
+    ) {
+      return true;
+    }
+    return false;
   }
 
   /** Require at least one follow-up exchange (resolution detail and/or accountability probe answer). */
@@ -487,17 +709,13 @@ export function isMoment5ReadyForInterviewClose(params: {
   return params.postM5UserTurns >= minTurns;
 }
 
-export function buildElongatingProbeStateSuffix(elongatingProbeFired: boolean): string {
+export function buildElongatingProbeStateSuffix(_elongatingProbeFired = true): string {
   return `
 ─────────────────────────────────────────
 ELONGATING PROBE STATE (CLIENT-ENFORCED)
 ─────────────────────────────────────────
-**elongating_probe_fired:** ${elongatingProbeFired ? 'true' : 'false'}
+**elongating_probe_fired:** true
 
-When **elongating_probe_fired** is **true** for this user turn: you MUST **not** deliver any elongating probe — accept the user's last message and proceed with normal interview rules (including UNIVERSAL CHECK-BEFORE-ASKING and the scripted sequence). **Never** invent a substitute elongation line.
-
-When **elongating_probe_fired** is **false**: the ELONGATING PROBE — WORD COUNT GATE above applies as written.
-
-The approved elongating probe list is **exhaustive**. If you cannot choose **exactly one** verbatim line from that list, **do not** elongate; proceed without probing. **Never** output phrases such as "Would it help to hear the scenario again?" or any other novel elongation.
+Do **not** deliver any elongating probe ("Can you say more about that?" or similar) based on answer length or word count. Accept thin answers as-is and proceed with normal interview rules (including UNIVERSAL CHECK-BEFORE-ASKING and the scripted sequence). **Never** invent substitute elongation lines.
 `;
 }

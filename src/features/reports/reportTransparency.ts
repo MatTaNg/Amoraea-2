@@ -1,4 +1,26 @@
 import type { ReportData } from '@features/psychometrics/personalReportData';
+import {
+  CONFLICT_AAQ2_HIGH_MIN,
+  CONFLICT_AAQ2_LOW_MAX,
+  CONFLICT_ACCOUNTABILITY_STRONG_MIN,
+  CONFLICT_ACCOUNTABILITY_WEAK_MAX,
+  CONFLICT_ATTUNEMENT_STRONG_MIN,
+  CONFLICT_BRS_HIGH_MIN,
+  CONFLICT_BRS_LOW_MAX,
+  CONFLICT_COMMITMENT_STRONG_MIN,
+  CONFLICT_DWECK_LOW_MAX,
+  CONFLICT_GASP_HIGH_MIN,
+  CONFLICT_GASP_LOW_MAX,
+  CONFLICT_MENTALIZING_STRONG_MIN,
+  CONFLICT_MENTALIZING_WEAK_MAX,
+  CONFLICT_REGULATION_STRONG_MIN,
+  CONFLICT_REGULATION_WEAK_MAX,
+  CONFLICT_RFQ_HIGH_MIN,
+  CONFLICT_RFQ_LOW_MAX,
+  CONFLICT_RSES_HIGH_MIN,
+  CONFLICT_RSES_LOW_MAX,
+  CONFLICT_SCS_LOW_MAX,
+} from '@config/reports/evidenceConflictThresholds';
 
 export const REPORT_FOOTER_DISCLAIMER =
   'This report combines questionnaire responses and interview responses using automated scoring and AI-generated writing. Some source instruments may have published validation evidence, but this report should not be interpreted as a clinical diagnosis or as a complete measure of your personality.';
@@ -17,9 +39,21 @@ export type EvidenceConflict = {
 
 function conflictParagraph(questionnaireMore: string, interviewMore: string): string {
   return (
-    `Your questionnaire responses suggested more ${questionnaireMore} than your interview responses did on ${interviewMore}. ` +
+    `Your questionnaire/self-report results suggested more ${questionnaireMore} than your interview responses did on ${interviewMore}. ` +
     `Because these two sources didn't fully agree, this is worth treating as something to explore rather than a settled conclusion.`
   );
+}
+
+function normalizePsychometricTo10(
+  score: number | null | undefined,
+  min: number,
+  max: number,
+  inverted = false,
+): number | null {
+  if (score == null || !Number.isFinite(score)) return null;
+  const normalized = ((score - min) / (max - min)) * 9 + 1;
+  const clamped = Math.max(1, Math.min(10, normalized));
+  return inverted ? 11 - clamped : clamped;
 }
 
 type ConflictDetector = (input: {
@@ -32,7 +66,7 @@ const CONFLICT_DETECTORS: ConflictDetector[] = [
     const aaq2 = user.aaq2Score;
     const regulation = pillars.regulation;
     if (aaq2 == null || regulation == null) return null;
-    if (aaq2 >= 35 && regulation >= 7) {
+    if (aaq2 >= CONFLICT_AAQ2_HIGH_MIN && regulation >= CONFLICT_REGULATION_STRONG_MIN) {
       return {
         id: 'aaq2_regulation_divergence',
         paragraph: conflictParagraph(
@@ -41,7 +75,7 @@ const CONFLICT_DETECTORS: ConflictDetector[] = [
         ),
       };
     }
-    if (aaq2 <= 14 && regulation <= 4.5) {
+    if (aaq2 <= CONFLICT_AAQ2_LOW_MAX && regulation <= CONFLICT_REGULATION_WEAK_MAX) {
       return {
         id: 'aaq2_regulation_low_both',
         paragraph: conflictParagraph(
@@ -56,7 +90,7 @@ const CONFLICT_DETECTORS: ConflictDetector[] = [
     const aaq2 = user.aaq2Score;
     const attunement = pillars.attunement;
     if (aaq2 == null || attunement == null) return null;
-    if (aaq2 >= 35 && attunement >= 7) {
+    if (aaq2 >= CONFLICT_AAQ2_HIGH_MIN && attunement >= CONFLICT_ATTUNEMENT_STRONG_MIN) {
       return {
         id: 'aaq2_attunement_divergence',
         paragraph: conflictParagraph(
@@ -71,7 +105,7 @@ const CONFLICT_DETECTORS: ConflictDetector[] = [
     const gasp = user.psychometrics.gaspScore;
     const accountability = pillars.accountability;
     if (gasp == null || accountability == null) return null;
-    if (gasp >= 5 && accountability >= 7) {
+    if (gasp >= CONFLICT_GASP_HIGH_MIN && accountability >= CONFLICT_ACCOUNTABILITY_STRONG_MIN) {
       return {
         id: 'gasp_accountability_divergence',
         paragraph: conflictParagraph(
@@ -80,7 +114,7 @@ const CONFLICT_DETECTORS: ConflictDetector[] = [
         ),
       };
     }
-    if (gasp <= 2.5 && accountability <= 4.5) {
+    if (gasp <= CONFLICT_GASP_LOW_MAX && accountability <= CONFLICT_ACCOUNTABILITY_WEAK_MAX) {
       return {
         id: 'gasp_accountability_low_both',
         paragraph: conflictParagraph(
@@ -95,7 +129,7 @@ const CONFLICT_DETECTORS: ConflictDetector[] = [
     const brs = user.psychometrics.brsScore;
     const regulation = pillars.regulation;
     if (brs == null || regulation == null) return null;
-    if (brs < 2.5 && regulation >= 7) {
+    if (brs < CONFLICT_BRS_LOW_MAX && regulation >= CONFLICT_REGULATION_STRONG_MIN) {
       return {
         id: 'brs_regulation_divergence',
         paragraph: conflictParagraph(
@@ -104,7 +138,7 @@ const CONFLICT_DETECTORS: ConflictDetector[] = [
         ),
       };
     }
-    if (brs >= 4 && regulation <= 4.5) {
+    if (brs >= CONFLICT_BRS_HIGH_MIN && regulation <= CONFLICT_REGULATION_WEAK_MAX) {
       return {
         id: 'brs_regulation_high_questionnaire',
         paragraph: conflictParagraph(
@@ -119,7 +153,7 @@ const CONFLICT_DETECTORS: ConflictDetector[] = [
     const rses = user.rsesScore;
     const accountability = pillars.accountability;
     if (rses == null || accountability == null) return null;
-    if (rses <= 15 && accountability >= 7) {
+    if (rses <= CONFLICT_RSES_LOW_MAX && accountability >= CONFLICT_ACCOUNTABILITY_STRONG_MIN) {
       return {
         id: 'rses_accountability_divergence',
         paragraph: conflictParagraph(
@@ -128,7 +162,7 @@ const CONFLICT_DETECTORS: ConflictDetector[] = [
         ),
       };
     }
-    if (rses >= 30 && accountability <= 4.5) {
+    if (rses >= CONFLICT_RSES_HIGH_MIN && accountability <= CONFLICT_ACCOUNTABILITY_WEAK_MAX) {
       return {
         id: 'rses_accountability_high_questionnaire',
         paragraph: conflictParagraph(
@@ -222,8 +256,111 @@ export function detectEvidenceConflicts(data: ReportData): EvidenceConflict[] {
     (c): c is EvidenceConflict => c != null,
   );
 
+  // Add conflicts from gaming correction triggers
+  const gamingTriggers = data.attempt?.gamingCorrection?.activeTriggers ?? [];
+  for (const trigger of gamingTriggers) {
+    if (trigger.type === 'consistency_divergence' && trigger.instrument) {
+      if (trigger.instrument === 'aaq2' && !detected.some((c) => c.id === 'aaq2_regulation_divergence')) {
+        detected.push({
+          id: 'aaq2_regulation_divergence',
+          paragraph: conflictParagraph(
+            'experiential avoidance or difficulty staying with painful emotions',
+            'emotional regulation when working through conflict scenarios',
+          ),
+        });
+      }
+      if (trigger.instrument === 'rfq' && !detected.some((c) => c.id.startsWith('rfq_mentalizing_divergence'))) {
+        detected.push({
+          id: 'rfq_mentalizing_divergence_gaming',
+          paragraph: conflictParagraph(
+            'reflective depth on questionnaires',
+            'perspective-taking in the interview',
+          ),
+        });
+      }
+      if (trigger.instrument === 'brs' && !detected.some((c) => c.id.startsWith('brs_regulation'))) {
+        detected.push({
+          id: 'brs_regulation_divergence_gaming',
+          paragraph: conflictParagraph(
+            'resilience on questionnaires',
+            'emotional regulation in the interview',
+          ),
+        });
+      }
+    }
+  }
+
+  // Add conflicts for >2 points difference in direction
+  const p = data.user.psychometrics;
+  const aaq2Flexibility = normalizePsychometricTo10(data.user.aaq2Score, 7, 49, true);
+  const gaspAccountability = normalizePsychometricTo10(p.gaspScore, 1, 7, true);
+  const brsRegulation = normalizePsychometricTo10(p.brsScore, 1, 5);
+  const rsesAccountability = normalizePsychometricTo10(data.user.rsesScore, 0, 30);
+  const scsAccountability = normalizePsychometricTo10(
+    p.scsSfScore ??
+      averageNonNull([p.scsSfSelfKindnessScore, p.scsSfCommonHumanityScore, p.scsSfMindfulnessScore]),
+    1,
+    5,
+  );
+  const dweckCommitment = normalizePsychometricTo10(p.dweckScore, 1, 6);
+  const rfqMentalizing = normalizePsychometricTo10(p.rfqScore, 1, 7);
+
+  const checkTension = (id: string, psych: number | null, interview: number | null, psychLabel: string, interviewLabel: string) => {
+    if (psych === null || interview === null || detected.some((c) => c.id === id)) return;
+    // Tension defined as opposite sides of neutral (5.5) with gap > 2
+    const inTension = (psych > 5.5 && interview < 5.5 && psych - interview > 2) ||
+                     (psych < 5.5 && interview > 5.5 && interview - psych > 2);
+    if (inTension) {
+      detected.push({ id, paragraph: conflictParagraph(psychLabel, interviewLabel) });
+    }
+  };
+
+  checkTension('aaq2_regulation_tension', aaq2Flexibility, pillars.regulation, 'experiential avoidance or difficulty staying with painful emotions', 'emotional regulation in the interview');
+  checkTension('gasp_accountability_tension', gaspAccountability, pillars.accountability, 'harm-response patterns on questionnaires', 'accountability and ownership in the interview');
+  checkTension('brs_regulation_tension', brsRegulation, pillars.regulation, 'stress sensitivity or slower recovery on questionnaires', 'emotional regulation in the interview');
+  checkTension('rses_accountability_tension', rsesAccountability, pillars.accountability, 'self-doubt or lower self-worth on questionnaires', 'accountability and ownership in the interview');
+  checkTension('scs_accountability_tension', scsAccountability, pillars.accountability, 'self-criticism or limited self-compassion on questionnaires', 'accountability and repair in the interview');
+  checkTension('dweck_commitment_tension', dweckCommitment, pillars.commitment_threshold, 'fixed-leaning responses to change on questionnaires', 'persistence through difficulty in the interview');
+  checkTension('rfq_mentalizing_tension', rfqMentalizing, pillars.mentalizing, 'reflective depth on questionnaires', 'perspective-taking in the interview');
+
+  // Add conflict for gaming correction applied
+  const gamingCorrection = data.attempt?.gamingCorrection;
+  if (gamingCorrection && gamingCorrection.correctionLevel > 0) {
+    detected.push({
+      id: 'gaming_correction_applied',
+      paragraph: conflictParagraph(
+        'inconsistent response patterns on questionnaires',
+        'more consistent patterns in the interview',
+      ),
+    });
+  }
+
+  // Add conflict for psychometric floor breaches (auto-fail thresholds)
+  const gateFailReasons = data.attempt?.gateFailReasons ?? [];
+  const floorCodes = [
+    'rfq_low_reflective_functioning_floor',
+    'gasp_extreme_externalization_floor',
+    'dweck_extreme_fixed_mindset_floor',
+    'scs_sf_low_self_compassion_floor',
+    'brs_low_resilience_floor',
+    'anxiety_trait_high_floor',
+    'aaq2_high_experiential_avoidance_floor',
+    'rses_low_self_esteem_floor',
+    'sd3_narcissism_floor',
+    'npi_entitlement_floor',
+  ];
+  const triggeredFloor = gateFailReasons.find((r) => floorCodes.includes(r));
+  if (triggeredFloor) {
+    detected.push({
+      id: 'psychometric_floor_breach',
+      paragraph: conflictParagraph(
+        'extreme scores on self-report questionnaires that triggered automatic review thresholds',
+        'more moderate patterns in the interview',
+      ),
+    });
+  }
+
   if (detected.length === 0) return [];
-  if (!gamingCorrectionTriggersConflict(data)) return [];
 
   const seen = new Set<string>();
   return detected.filter((c) => {

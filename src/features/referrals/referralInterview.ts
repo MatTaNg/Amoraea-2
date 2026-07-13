@@ -1,21 +1,24 @@
 import { supabase } from '@data/supabase/client';
 import { GATE_PASS_WEIGHTED_MIN, REFERRAL_WEIGHTED_PASS_MIN } from '@features/aria/computeGateResult';
-import { generateShareableReferralCode } from './shareableReferralCode';
+
+export const REFERRAL_BASE_DISCOUNT = 40;
+export const REFERRAL_STEP_DISCOUNT = 20;
+export const REFERRAL_MAX_DISCOUNT = 100;
 
 /**
- * Runs referral fulfillment (referred user completed interview), then returns the weighted
- * pass threshold to use for this completion's gate scoring.
+ * Runs referral-completion side effects (best-effort), then returns the weighted pass threshold
+ * to use for this completion's gate scoring.
  */
-export async function resolveWeightedPassMinAfterReferralFulfillment(
+export async function resolveWeightedPassMinAfterReferralEffects(
   userId: string | null | undefined
 ): Promise<number> {
   if (!userId) return GATE_PASS_WEIGHTED_MIN;
   try {
-    const { error: rpcErr } = await supabase.rpc('fulfill_referral_after_interview', {
+    const { error: rpcErr } = await supabase.rpc('apply_referral_completion_effects', {
       p_user_id: userId,
     });
     if (rpcErr && __DEV__) {
-      console.warn('[referral] fulfill_referral_after_interview', rpcErr.message);
+      console.warn('[referral] apply_referral_completion_effects', rpcErr.message);
     }
   } catch (e) {
     if (__DEV__) console.warn('[referral] fulfill RPC failed', e);
@@ -23,42 +26,60 @@ export async function resolveWeightedPassMinAfterReferralFulfillment(
 
   const { data, error } = await supabase
     .from('users')
-    .select('referral_boost_active')
+    .select('referral_boost_active, referred_by_id')
     .eq('id', userId)
     .maybeSingle();
 
   if (error && __DEV__) {
-    console.warn('[referral] fetch referral_boost_active', error.message);
+    console.warn('[referral] fetch referral weighting flags', error.message);
   }
-  return data?.referral_boost_active === true ? REFERRAL_WEIGHTED_PASS_MIN : GATE_PASS_WEIGHTED_MIN;
+  return data?.referral_boost_active === true || !!data?.referred_by_id
+    ? REFERRAL_WEIGHTED_PASS_MIN
+    : GATE_PASS_WEIGHTED_MIN;
 }
 
-/** After a standard applicant finishes the interview, ensure they have one shareable referral row. */
-export async function ensureShareableReferralCodeForReferrer(userId: string | null | undefined): Promise<void> {
-  if (!userId) return;
-  const { data: existing, error: selErr } = await supabase
-    .from('referral_codes')
-    .select('id')
-    .eq('referrer_user_id', userId)
-    .maybeSingle();
+export type ReferralDiscountStatus = {
+  referralCode: string | null;
+  signedUpWithReferral: boolean;
+  completedReferrals: number;
+  progressCurrent: number;
+  progressTotal: number;
+  remainingReferralsToCap: number;
+  totalDiscount: number;
+  atCap: boolean;
+};
 
-  if (selErr) {
-    if (__DEV__) console.warn('[referral] select referral_codes', selErr.message);
-    return;
-  }
-  if (existing?.id) return;
+export function buildReferralShareMessage(referralCode: string): string {
+  return `I just completed my relationship assessment on Amoraea. Use my code ${referralCode} when you sign up — when you finish your interview, we both get an extra 20% off. amoraea.com`;
+}
 
-  for (let attempt = 0; attempt < 12; attempt++) {
-    const code = generateShareableReferralCode();
-    const { error: insErr } = await supabase.from('referral_codes').insert({
-      code,
-      referrer_user_id: userId,
-      fulfilled: false,
-    });
-    if (!insErr) return;
-    if (insErr.code !== '23505' && __DEV__) {
-      console.warn('[referral] insert referral_codes', insErr.message);
-      return;
-    }
+/** Canonical referral status for post-interview discount UI. */
+export async function fetchReferralDiscountStatus(
+  userId: string | null | undefined,
+): Promise<ReferralDiscountStatus | null> {
+  if (!userId) return null;
+  const { data, error } = await supabase.rpc('get_referral_discount_status', {
+    p_user_id: userId,
+  });
+  if (error) {
+    if (__DEV__) console.warn('[referral] get_referral_discount_status', error.message);
+    return null;
   }
+  const row = Array.isArray(data) ? data[0] : data;
+  if (!row || typeof row !== 'object') return null;
+  const record = row as Record<string, unknown>;
+  return {
+    referralCode: typeof record.referral_code === 'string' ? record.referral_code : null,
+    signedUpWithReferral: record.signed_up_with_referral === true,
+    completedReferrals:
+      typeof record.completed_referrals === 'number' ? record.completed_referrals : 0,
+    progressCurrent: typeof record.progress_current === 'number' ? record.progress_current : 0,
+    progressTotal: typeof record.progress_total === 'number' ? record.progress_total : 3,
+    remainingReferralsToCap:
+      typeof record.remaining_referrals_to_cap === 'number'
+        ? record.remaining_referrals_to_cap
+        : 0,
+    totalDiscount: typeof record.total_discount === 'number' ? record.total_discount : 40,
+    atCap: record.at_cap === true,
+  };
 }

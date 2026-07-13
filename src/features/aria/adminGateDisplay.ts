@@ -12,11 +12,15 @@ import {
   type InterviewMarkerId,
 } from '@features/aria/interviewMarkers';
 
-/** Weighted average within this many points of the pass minimum → "almost" (human review). */
-export const ADMIN_ALMOST_WEIGHTED_MARGIN = 0.4;
+import {
+  ADMIN_ALMOST_FLOOR_MARGIN,
+  ADMIN_ALMOST_WEIGHTED_MARGIN,
+} from '@config/scoring/adminDisplayMargins';
 
-/** Floor miss within this many points of the floor → "almost" on that construct. */
-export const ADMIN_ALMOST_FLOOR_MARGIN = 0.35;
+export {
+  ADMIN_ALMOST_FLOOR_MARGIN,
+  ADMIN_ALMOST_WEIGHTED_MARGIN,
+} from '@config/scoring/adminDisplayMargins';
 
 export type AdminGateOutcomeLabel = 'pass' | 'fail' | 'almost' | 'none';
 

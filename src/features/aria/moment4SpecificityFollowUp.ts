@@ -126,6 +126,111 @@ export function looksLikeMoment4SpecificityFollowUpPrompt(text: string): boolean
   return newScript || legacyScript;
 }
 
+/** Pushback when the interviewer re-asked for specificity after the user already gave a concrete grudge story. */
+export function moment4UserDeclinesSpecificityReask(userText: string): boolean {
+  const t = userText.replace(/\s+/g, ' ').trim().toLowerCase();
+  if (!t) return false;
+  return (
+    /\bi\s+just\s+gave\s+you\b/.test(t) ||
+    /\bi\s+already\s+gave\s+you\b/.test(t) ||
+    /\bi\s+gave\s+you\s+one\b/.test(t) ||
+    /\bi\s+just\s+told\s+you\b/.test(t) ||
+    /\bi\s+already\s+told\s+you\b/.test(t) ||
+    /\bi\s+just\s+said\b/.test(t) ||
+    /\bi\s+already\s+(said|answered|shared|described)\b/.test(t) ||
+    /\bdidn'?t\s+i\s+already\b/.test(t)
+  );
+}
+
+export function lastAssistantContentBeforeCurrentUser(
+  messages: ReadonlyArray<{ role: string; content?: string | null }>,
+): string {
+  if (!messages.length) return '';
+  const endIdx =
+    messages[messages.length - 1]?.role === 'user' ? messages.length - 2 : messages.length - 1;
+  for (let i = endIdx; i >= 0; i--) {
+    if (messages[i].role === 'assistant') return (messages[i].content ?? '').trim();
+  }
+  return '';
+}
+
+export function isAnsweringMoment4SpecificityFollowUp(
+  messages: ReadonlyArray<{ role: string; content?: string | null }>,
+  lastAssistantContent?: string,
+): boolean {
+  const lastAssistant =
+    (lastAssistantContent ?? '').trim() || lastAssistantContentBeforeCurrentUser(messages);
+  return looksLikeMoment4SpecificityFollowUpPrompt(lastAssistant);
+}
+
+export function extractLastMoment4GrudgeUserAnswer(
+  messages: ReadonlyArray<{ role: string; content?: string | null }>,
+): string | null {
+  let lastGrudgeIdx = -1;
+  for (let i = 0; i < messages.length; i++) {
+    const m = messages[i];
+    if (m.role === 'assistant' && looksLikeMoment4GrudgePrompt(m.content ?? '')) {
+      lastGrudgeIdx = i;
+    }
+  }
+  if (lastGrudgeIdx < 0) return null;
+  for (let i = lastGrudgeIdx + 1; i < messages.length; i++) {
+    const m = messages[i];
+    if (m.role !== 'user') continue;
+    const text = (m.content ?? '').trim();
+    if (text && !moment4UserDeclinesSpecificityReask(text)) return text;
+  }
+  return null;
+}
+
+export function resolveMoment4GrudgeAnswerForThresholdReflection(
+  messages: ReadonlyArray<{ role: string; content?: string | null }>,
+  currentUserAnswer: string,
+): string {
+  if (moment4UserDeclinesSpecificityReask(currentUserAnswer)) {
+    return extractLastMoment4GrudgeUserAnswer(messages) ?? currentUserAnswer;
+  }
+  return currentUserAnswer;
+}
+
+/** Model elaboration after a grudge answer — user must respond before commitment-threshold probe. */
+export function looksLikeMoment4GrudgeElaborationFollowUp(text: string): boolean {
+  if (looksLikeMoment4SpecificityFollowUpPrompt(text)) return true;
+  if (looksLikeMoment4SpecificityFollowUpEcho(text)) return true;
+  const t = (text ?? '').replace(/\s+/g, ' ').trim();
+  if (!t || looksLikeMoment4ThresholdQuestion(t)) return false;
+  const low = t.toLowerCase();
+  if (/\bwhat actually happened\b/.test(low)) return true;
+  if (
+    /\b(tell me|walk me through|share)( a bit)? more\b/.test(low) &&
+    /\b(happened|between you|what went on|between you two)\b/.test(low)
+  ) {
+    return true;
+  }
+  if (/\bcan you tell me\b/.test(low) && /\b(more about|what happened|actually happened)\b/.test(low)) {
+    return true;
+  }
+  if (/\blike a\b/.test(low) && /\b(tell me|bit more|what happened)\b/.test(low)) {
+    return true;
+  }
+  if (/\bwhen you think about (?:that |the )?relationship\b/.test(low) && /\bis there a part\b/.test(low)) {
+    return true;
+  }
+  if (/\bwhen you think about that relationship now\b/.test(low)) return true;
+  return false;
+}
+
+/** Model ack after specificity pushback without the commitment-threshold question. */
+export function looksLikeMoment4SpecificityCorrectionAck(text: string): boolean {
+  const t = (text ?? '').replace(/\s+/g, ' ').trim();
+  if (!t || looksLikeMoment4ThresholdQuestion(t)) return false;
+  const low = t.toLowerCase();
+  return (
+    (/\byou'?re right\b/.test(low) || /\bmy mistake\b/.test(low) || /\byou gave me\b/.test(low)) &&
+    !/\?\s*$/.test(t)
+  );
+}
+
 /**
  * Broader than {@link looksLikeMoment4SpecificityFollowUpPrompt}: model paraphrases the same intent
  * after the client already spoke the scripted line — used to strip duplicate paragraphs / streaming TTS.
@@ -147,7 +252,55 @@ export function looksLikeMoment4SpecificityFollowUpEcho(text: string): boolean {
   ) {
     return true;
   }
+  if (/\bwhen you think about situations like that\b/.test(n)) return true;
+  if (/\bwhere there(?:'s| is) real hurt\b/.test(n)) return true;
   return false;
+}
+
+/** Streaming / API may flush before the specificity ask completes (model paraphrase of the grudge follow-up). */
+export function isIncompleteMoment4SpecificityFollowUpLeadSentence(text: string): boolean {
+  const t = (text ?? '').replace(/\s+/g, ' ').trim();
+  if (!t || looksLikeMoment4SpecificityFollowUpPrompt(t)) return false;
+  if (looksLikeMoment4ThresholdQuestion(t)) return false;
+  if (looksLikeMoment4GrudgePrompt(t)) return false;
+  if (/\?\s*$/.test(t) && looksLikeMoment4SpecificityFollowUpEcho(t)) return false;
+  const low = t.toLowerCase();
+  if (/\bwhen you think about situations like that\b/.test(low)) return true;
+  if (/\bwhere there(?:'s| is) real hurt\b/.test(low)) return true;
+  if (/\breal hurt\b/.test(low) && !/\?\s*$/.test(t)) return true;
+  if (looksLikeMoment4SpecificityFollowUpEcho(t) && !/\?\s*$/.test(t)) return true;
+  return false;
+}
+
+function extractBriefAckBeforeIncompleteMoment4SpecificityProbe(text: string): string | null {
+  const match = /^(got it|thanks|thank you|okay|ok|i hear you|i understand)\b[,.!?…\s—–-]*/i.exec(
+    text.trim(),
+  );
+  if (!match) return null;
+  const ack = match[1].trim();
+  return ack.length > 0 ? ack.charAt(0).toUpperCase() + ack.slice(1).toLowerCase() : null;
+}
+
+/** Replace truncated / paraphrased M4 specificity follow-up copy with the canonical scripted line. */
+export function coerceMoment4SpecificityFollowUpForTts(text: string): string {
+  const t = (text ?? '').replace(/\s+/g, ' ').trim();
+  if (!t) return MOMENT_4_SPECIFICITY_FOLLOW_UP_TEXT;
+  if (looksLikeMoment4ThresholdQuestion(t) || looksLikeMoment4GrudgePrompt(t)) return t;
+  if (looksLikeMoment4SpecificityFollowUpPrompt(t) && /\?\s*$/.test(t)) {
+    if (t.toLowerCase() !== MOMENT_4_SPECIFICITY_FOLLOW_UP_TEXT.toLowerCase()) {
+      return MOMENT_4_SPECIFICITY_FOLLOW_UP_TEXT;
+    }
+    return t;
+  }
+  if (
+    isIncompleteMoment4SpecificityFollowUpLeadSentence(t) ||
+    (looksLikeMoment4SpecificityFollowUpEcho(t) && !/\?\s*$/.test(t))
+  ) {
+    const ack = extractBriefAckBeforeIncompleteMoment4SpecificityProbe(t);
+    if (ack) return `${ack}. ${MOMENT_4_SPECIFICITY_FOLLOW_UP_TEXT}`;
+    return MOMENT_4_SPECIFICITY_FOLLOW_UP_TEXT;
+  }
+  return t;
 }
 
 /**

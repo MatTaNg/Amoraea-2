@@ -4,6 +4,7 @@ import {
   USER_LOGIN_ROUTING_SELECT,
 } from '@data/supabase/userInterviewRoutingSelect';
 import {
+  attemptCompletedAtReflectsScoredInterview,
   attemptIndicatesInterviewSessionFinished,
   finalizeInterviewAttemptForRouting,
   reconcileUnfinalizedInterviewAttemptForUser,
@@ -51,33 +52,45 @@ export async function fetchUserLoginRoutingRow(userId: string): Promise<UserLogi
 }
 
 /**
- * Interview complete when `users.interview_completed` is true, or the user's
- * `latest_attempt_id` row has `completed_at` set (same rules as post-login routing).
+ * Interview complete when `users.interview_completed` is true with a scored attempt rollup,
+ * or the user's `latest_attempt_id` row has `completed_at` plus persisted scoring.
  */
 export async function resolveInterviewCompletedForUser(
   userId: string,
   routingRow: UserLoginRoutingRow | null,
 ): Promise<boolean> {
-  let interviewCompleted = routingRow?.interview_completed === true;
   const latestAttemptId =
     typeof routingRow?.latest_attempt_id === 'string' && routingRow.latest_attempt_id.length > 0
       ? routingRow.latest_attempt_id
       : null;
 
-  if (!interviewCompleted && latestAttemptId) {
-    const { data: attemptRow } = await supabase
+  const attemptSelect =
+    'completed_at, transcript, is_phantom, scenario_1_scores, scenario_2_scores, scenario_3_scores, weighted_score, scenario_specific_patterns';
+
+  let attemptRow: Record<string, unknown> | null = null;
+  if (latestAttemptId) {
+    const { data } = await supabase
       .from('interview_attempts')
-      .select(
-        'completed_at, transcript, is_phantom, scenario_1_scores, scenario_2_scores, scenario_3_scores',
-      )
+      .select(attemptSelect)
       .eq('id', latestAttemptId)
       .eq('user_id', userId)
       .maybeSingle();
+    attemptRow = (data as Record<string, unknown> | null) ?? null;
+  }
 
-    interviewCompleted = !!attemptRow?.completed_at;
+  let interviewCompleted = false;
+  if (routingRow?.interview_completed === true) {
+    if (!latestAttemptId) {
+      interviewCompleted = true;
+    } else if (attemptRow != null) {
+      interviewCompleted = attemptCompletedAtReflectsScoredInterview(attemptRow);
+    }
+  }
+
+  if (!interviewCompleted && latestAttemptId && attemptRow) {
+    interviewCompleted = attemptCompletedAtReflectsScoredInterview(attemptRow);
     if (
       !interviewCompleted &&
-      attemptRow &&
       attemptIndicatesInterviewSessionFinished(attemptRow)
     ) {
       interviewCompleted = await finalizeInterviewAttemptForRouting(userId, latestAttemptId);
@@ -201,14 +214,6 @@ export function resolveInterviewStackScreenFromStatus(
     return {
       screen: 'InterviewComplete',
       legacyPsychometricsMode: true,
-      interviewAlreadyCompleted: true,
-    };
-  }
-
-  if (input.gateResultFinalizedAt == null) {
-    return {
-      screen: 'PsychometricsComplete',
-      legacyPsychometricsMode: false,
       interviewAlreadyCompleted: true,
     };
   }

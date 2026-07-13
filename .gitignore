@@ -20,5 +20,8 @@ web-build/
 .env*.local
 
 # EAS / App Store / Play Store — do not commit secrets
-eas.json
+# eas.json is safe to commit (no API keys; uses EAS Environment Variables).
 google-service-account.json
+credentials.json
+*.keystore
+upload-keystore.jks

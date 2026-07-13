@@ -18,16 +18,16 @@ import {
   VALIDATION_POST_INTERVIEW_HANDOFF_ROUTE,
 } from '@features/relationshipValidation/validationPostInterviewRouting';
 
-const AriaScreenLazy = lazy(() => import('@app/screens/AriaScreen'));
+const AriaScreenLazy = lazy(() => import('@features/aria/screens/AriaInterviewScreen'));
 
 function redirectValidationPostInterview(
-  navigation: NativeStackNavigationProp<RelationshipValidationStackParamList, 'ValidationAria'>,
+  navigation: NativeStackNavigationProp<RelationshipValidationStackParamList, 'ValidationAmoraea'>,
 ): void {
   navigation.replace('ValidationPostInterviewProcessing');
 }
 
 function maybeRedirectValidationPostInterview(
-  navigation: NativeStackNavigationProp<RelationshipValidationStackParamList, 'ValidationAria'>,
+  navigation: NativeStackNavigationProp<RelationshipValidationStackParamList, 'ValidationAmoraea'>,
   name: string,
 ): boolean {
   if (name === VALIDATION_POST_INTERVIEW_HANDOFF_ROUTE || name === 'ValidationReport') {
@@ -45,13 +45,13 @@ function maybeRedirectValidationPostInterview(
   return false;
 }
 
-type ValidationAriaScreenProps = {
+type ValidationAmoraeaScreenProps = {
   userId: string;
-  navigation: NativeStackNavigationProp<RelationshipValidationStackParamList, 'ValidationAria'>;
-  route: RouteProp<RelationshipValidationStackParamList, 'ValidationAria'>;
+  navigation: NativeStackNavigationProp<RelationshipValidationStackParamList, 'ValidationAmoraea'>;
+  route: RouteProp<RelationshipValidationStackParamList, 'ValidationAmoraea'>;
 };
 
-function ValidationAriaScreen({ userId, navigation, route }: ValidationAriaScreenProps) {
+function ValidationAmoraeaScreen({ userId, navigation, route }: ValidationAmoraeaScreenProps) {
   const interviewNavigation = useMemo(
     () => ({
       ...navigation,
@@ -70,7 +70,7 @@ function ValidationAriaScreen({ userId, navigation, route }: ValidationAriaScree
   const interviewRoute = useMemo(
     () => ({
       ...route,
-      name: 'ValidationAria' as const,
+      name: 'ValidationAmoraea' as const,
       params: { userId, fromValidationTrack: true as const },
     }),
     [route, userId],
@@ -111,7 +111,7 @@ export type RelationshipValidationStackParamList = {
   ValidationConflict: undefined;
   ValidationReport: undefined;
   ValidationPostInterviewProcessing: undefined;
-  ValidationAria: { userId: string };
+  ValidationAmoraea: { userId: string };
 };
 
 const Stack = createNativeStackNavigator<RelationshipValidationStackParamList>();
@@ -156,9 +156,9 @@ export function RelationshipValidationNavigator({ userId }: Props) {
           <ValidationPostInterviewProcessingScreen userId={userId} navigation={props.navigation} />
         )}
       </Stack.Screen>
-      <Stack.Screen name="ValidationAria">
+      <Stack.Screen name="ValidationAmoraea">
         {(props) => (
-          <ValidationAriaScreen userId={userId} navigation={props.navigation} route={props.route} />
+          <ValidationAmoraeaScreen userId={userId} navigation={props.navigation} route={props.route} />
         )}
       </Stack.Screen>
     </Stack.Navigator>

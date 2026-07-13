@@ -1,6 +1,9 @@
 import { describe, expect, it } from '@jest/globals';
 import {
+  attemptCompletedAtReflectsScoredInterview,
+  attemptHasPersistedScoringForRoutingFinalize,
   attemptIndicatesInterviewSessionFinished,
+  attemptTranscriptInterviewContentComplete,
   attemptTranscriptHasSubstantiveMoment5UserAnswer,
 } from '../finalizeInterviewAttemptForRouting';
 
@@ -32,6 +35,11 @@ const SCENARIO_SCORES = {
   pillarScores: { repair: 5, attunement: 5 },
 };
 
+const MOMENT_4_SCORES = {
+  pillarScores: { commitment: 4 },
+  keyEvidence: { commitment: 'User described working through conflict.' },
+};
+
 describe('finalizeInterviewAttemptForRouting', () => {
   it('detects substantive Moment 5 user answer in transcript', () => {
     expect(attemptTranscriptHasSubstantiveMoment5UserAnswer([])).toBe(false);
@@ -46,9 +54,9 @@ describe('finalizeInterviewAttemptForRouting', () => {
     expect(attemptTranscriptHasSubstantiveMoment5UserAnswer(transcriptWithoutMomentTag)).toBe(true);
   });
 
-  it('treats Matt session as finished when scenario bundles are saved but completed_at is null', () => {
+  it('treats transcript content as complete when scenario bundles are saved', () => {
     expect(
-      attemptIndicatesInterviewSessionFinished({
+      attemptTranscriptInterviewContentComplete({
         completed_at: null,
         transcript: MATT_SESSION_TRANSCRIPT,
         scenario_1_scores: SCENARIO_SCORES,
@@ -58,14 +66,92 @@ describe('finalizeInterviewAttemptForRouting', () => {
     ).toBe(true);
   });
 
-  it('does not treat mid-interview Scenario A-only progress as finished', () => {
+  it('does not treat transcript-only progress as routing-finished without scoring rollup', () => {
     expect(
       attemptIndicatesInterviewSessionFinished({
+        completed_at: null,
+        transcript: MATT_SESSION_TRANSCRIPT,
+        scenario_1_scores: SCENARIO_SCORES,
+        scenario_2_scores: SCENARIO_SCORES,
+        scenario_3_scores: SCENARIO_SCORES,
+      }),
+    ).toBe(false);
+  });
+
+  it('allows routing finalize when weighted_score is persisted', () => {
+    expect(
+      attemptIndicatesInterviewSessionFinished({
+        completed_at: null,
+        transcript: MATT_SESSION_TRANSCRIPT,
+        scenario_1_scores: SCENARIO_SCORES,
+        scenario_2_scores: SCENARIO_SCORES,
+        scenario_3_scores: SCENARIO_SCORES,
+        weighted_score: 6.8,
+      }),
+    ).toBe(true);
+  });
+
+  it('allows routing finalize when moment_4_scores are persisted', () => {
+    expect(
+      attemptIndicatesInterviewSessionFinished({
+        completed_at: null,
+        transcript: MATT_SESSION_TRANSCRIPT,
+        scenario_1_scores: SCENARIO_SCORES,
+        scenario_2_scores: SCENARIO_SCORES,
+        scenario_3_scores: SCENARIO_SCORES,
+        scenario_specific_patterns: { moment_4_scores: MOMENT_4_SCORES },
+      }),
+    ).toBe(true);
+  });
+
+  it('does not treat completed_at without rollup as scored for routing', () => {
+    expect(
+      attemptCompletedAtReflectsScoredInterview({
+        completed_at: '2026-07-07T06:09:09.616+00:00',
+        transcript: MATT_SESSION_TRANSCRIPT,
+        scenario_1_scores: SCENARIO_SCORES,
+        scenario_2_scores: SCENARIO_SCORES,
+        scenario_3_scores: SCENARIO_SCORES,
+      }),
+    ).toBe(false);
+    expect(
+      attemptHasPersistedScoringForRoutingFinalize({
+        completed_at: '2026-07-07T06:09:09.616+00:00',
+        weighted_score: 7.1,
+      }),
+    ).toBe(true);
+  });
+
+  it('does not treat mid-interview Scenario A-only progress as finished', () => {
+    expect(
+      attemptTranscriptInterviewContentComplete({
         completed_at: null,
         transcript: [MATT_SESSION_TRANSCRIPT[0], MATT_SESSION_TRANSCRIPT[1]],
         scenario_1_scores: SCENARIO_SCORES,
         scenario_2_scores: null,
         scenario_3_scores: null,
+      }),
+    ).toBe(false);
+  });
+
+  it('ignores truncated stream-cutoff closings for transcript completion', () => {
+    const truncatedClosingTranscript = [
+      ...MATT_SESSION_TRANSCRIPT.slice(0, 3),
+      {
+        role: 'assistant',
+        content:
+          'That makes a lot of sense. Good work getting through all of this. What you said about. Thank you for being so open with me, Matt.',
+        scenarioNumber: 3,
+        interviewMoment: 5,
+      },
+    ];
+    expect(
+      attemptTranscriptInterviewContentComplete({
+        completed_at: null,
+        transcript: truncatedClosingTranscript,
+        scenario_1_scores: SCENARIO_SCORES,
+        scenario_2_scores: SCENARIO_SCORES,
+        scenario_3_scores: SCENARIO_SCORES,
       }),
     ).toBe(false);
   });

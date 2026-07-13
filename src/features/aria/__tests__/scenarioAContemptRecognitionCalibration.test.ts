@@ -1,4 +1,3 @@
-import { describe, it, expect } from 'vitest';
 import { SCENARIO_A_CONTEMPT_RECOGNITION_CALIBRATION } from '../scenarioAContemptRecognitionCalibration';
 
 describe('SCENARIO_A_CONTEMPT_RECOGNITION_CALIBRATION', () => {

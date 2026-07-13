@@ -1,7 +1,7 @@
 module.exports = {
   preset: 'jest-expo',
   setupFilesAfterEnv: ['<rootDir>/jest.setup.js'],
-  testPathIgnorePatterns: ['/node_modules/', '/__tests__/fixtures/'],
+  testPathIgnorePatterns: ['/node_modules/', '/__tests__/fixtures/', 'GateTestHelpers\\.ts$'],
   transformIgnorePatterns: [
     'node_modules/(?!((jest-)?react-native|@react-native(-community)?)|expo(nent)?|@expo(nent)?/.*|@expo-google-fonts/.*|react-navigation|@react-navigation/.*|@unimodules/.*|unimodules|sentry-expo|native-base|react-native-svg)',
   ],
@@ -13,9 +13,12 @@ module.exports = {
     '^@data/(.*)$': '<rootDir>/src/data/$1',
     '^@ui/(.*)$': '<rootDir>/src/ui/$1',
     '^@utilities/(.*)$': '<rootDir>/src/utilities/$1',
+    '^@config/(.*)$': '<rootDir>/src/config/$1',
+    '^@config$': '<rootDir>/src/config/index.ts',
   },
   collectCoverageFrom: [
     'src/**/*.{ts,tsx}',
+    'supabase/functions/_shared/computeGateResultCore.ts',
     '!src/**/*.d.ts',
     '!src/**/*.stories.{ts,tsx}',
     '!src/**/__tests__/**',
@@ -36,7 +39,7 @@ module.exports = {
       functions: 100,
       lines: 100,
     },
-    'src/features/aria/computeGateResultCore.ts': {
+    'supabase/functions/_shared/computeGateResultCore.ts': {
       statements: 90,
       branches: 80,
       functions: 100,

@@ -14,6 +14,7 @@ import {
 import { buildScenarioScoringPrompt } from '../../src/features/aria/scenarioScoringPrompt';
 import { postProcessScenarioScoreFromModelText } from '../../src/features/aria/scenarioScorePostParse';
 import { inferPersonalMomentSlices, trimMoment5SliceForScoring } from '../../src/features/aria/personalMomentSlices';
+import { moment5ScoringAllowed } from '../../src/features/aria/moment5ScoringGuard';
 import {
   promoteMoment5LegacyContemptForScoringResult,
   sanitizeMoment5PersonalScoresForAggregate,
@@ -24,6 +25,12 @@ import {
   applyElaborationAbsencePenaltiesMoment4,
   applyElaborationAbsencePenaltiesMoment5,
 } from '../../src/features/aria/elaborationAbsencePenaltiesHeuristic';
+import {
+  applyMoment4AccountabilitySituationalExemptToScoreResult,
+  userTextFromTranscriptTurns,
+} from '../../src/features/aria/moment4AccountabilitySituationalExempt';
+import { finalizePersonalMomentDepthSignals } from '../../src/features/aria/personalMomentDepthSignals';
+import { applyMoment4UnassessableNullRules } from '../../src/features/aria/moment4UnassessableNullRules';
 import {
   applyMoment4PostParseCoercionAndSalvage,
   applyMoment5PostParseCoercionAndSalvage,
@@ -38,6 +45,7 @@ import {
   looksLikeMoment5ConflictValidityClarificationPrompt,
   type ScenarioCorpusMessageSlice,
 } from '../../src/features/aria/probeAndScoringUtils';
+import { parseScenarioScoreJsonFromModelText } from '../../src/features/aria/scenarioScoringParse';
 import { parseJsonObjectFromModelText } from '../../src/utilities/parseHolisticModelJson';
 import { callAnthropicUserPrompt } from './anthropicScriptClient';
 import { logScenarioSliceDebug } from './rescoreDebugLogging';
@@ -116,9 +124,9 @@ async function scoreScenarioLlm(
     repairFocus,
   );
   const raw = await callAnthropicUserPrompt(prompt, {
-    maxTokens: scenarioNumber === 1 ? 800 : 1200,
+    maxTokens: scenarioNumber === 1 ? 2000 : 2500,
   });
-  const parsed = parseJsonObjectFromModelText(raw) as Record<string, unknown>;
+  const parsed = parseScenarioScoreJsonFromModelText(raw) as Record<string, unknown>;
   postProcessScenarioScoreFromModelText({
     scenarioNumber,
     rawModelText: raw,
@@ -145,6 +153,22 @@ async function scoreMoment4Llm(slice: TranscriptTurn[]): Promise<{ parsed: Recor
   );
   parsed.pillarScores = m4Elabor.pillarScores;
   parsed.keyEvidence = m4Elabor.keyEvidence;
+  applyMoment4AccountabilitySituationalExemptToScoreResult(
+    parsed as { pillarScores?: Record<string, number | null>; keyEvidence?: Record<string, string>; scoringMetadata?: Record<string, unknown> },
+    userTextFromTranscriptTurns(slice),
+  );
+  finalizePersonalMomentDepthSignals(parsed, {
+    transcript: slice,
+    scoringSlice: slice,
+    moment: 4,
+  });
+  applyMoment4UnassessableNullRules({
+    pillarScores: (parsed.pillarScores as Record<string, number | null | undefined>) ?? {},
+    keyEvidence: (parsed.keyEvidence as Record<string, string>) ?? {},
+    pillarConfidence: parsed.pillarConfidence as Record<string, string> | undefined,
+    response_concreteness: (parsed.response_concreteness as string) ?? null,
+    userText: userTextFromTranscriptTurns(slice),
+  });
   backfillMoment4KeyEvidenceIfScoresOtherwiseUnpersistable(
     parsed as { pillarScores?: Record<string, number | null>; keyEvidence?: Record<string, string> },
   );
@@ -152,9 +176,15 @@ async function scoreMoment4Llm(slice: TranscriptTurn[]): Promise<{ parsed: Recor
 }
 
 async function scoreMoment5Llm(
+  fullTranscript: TranscriptTurn[],
   slice: TranscriptTurn[],
   meta: Moment5ClientScoringMetadata | null,
 ): Promise<{ parsed: Record<string, unknown>; prompt: string }> {
+  const m5Guard = { transcript: fullTranscript, scoringSlice: slice };
+  if (!moment5ScoringAllowed(fullTranscript, slice)) {
+    console.warn('[M5_RESCORE] guard blocked — slice not assessable against transcript');
+    return { parsed: {}, prompt: '' };
+  }
   const conflictValidityUsed =
     meta?.conflictValidity ??
     (meta?.conflictValidityLow === true ? 'no_conflict' : null);
@@ -163,9 +193,9 @@ async function scoreMoment5Llm(
   console.log('[M5_SCORING_PROMPT_CONFLICT_VALIDITY] prompt excerpt (first 500 chars):', prompt.slice(0, 500));
   const raw = await callAnthropicUserPrompt(prompt, { maxTokens: 900 });
   const parsed = parseJsonObjectFromModelText(raw) as Record<string, unknown>;
-  applyMoment5PostParseCoercionAndSalvage(raw, parsed);
+  applyMoment5PostParseCoercionAndSalvage(raw, parsed, m5Guard);
   promoteMoment5LegacyContemptForScoringResult(parsed);
-  fillMoment5KeyEvidenceWhenNumericScoreButMissingQuote(parsed as never);
+  fillMoment5KeyEvidenceWhenNumericScoreButMissingQuote(parsed as never, m5Guard);
   parsed.pillarScores = normalizeScoresByEvidence(
     (parsed.pillarScores as Record<string, number | null>) ?? {},
     (parsed.keyEvidence as Record<string, string>) ?? {},
@@ -181,6 +211,8 @@ async function scoreMoment5Llm(
   parsed.keyEvidence = m5Elabor.keyEvidence;
   backfillMoment5KeyEvidenceIfScoresOtherwiseUnpersistable(
     parsed as { pillarScores?: Record<string, number | null>; keyEvidence?: Record<string, string> },
+    undefined,
+    m5Guard,
   );
   if (meta) parsed.scoringMetadata = meta;
   return { parsed, prompt };
@@ -388,10 +420,14 @@ function logRollupPillarTrace(opts: {
 function logCalibrationPreservationNoteCheck(): void {
   const holisticPrompt = FLOOR_AND_BONUS_SCORING_PHILOSOPHY;
   console.log(
-    '[CALIBRATION_NOTE_CHECK] holisticPrompt excerpt around calibration:',
-    holisticPrompt.includes('CALIBRATION PRESERVATION NOTE')
+    '[CALIBRATION_NOTE_CHECK] CANONICAL SCORE ANCHORS:',
+    holisticPrompt.includes('CANONICAL SCORE ANCHORS')
       ? 'FOUND'
       : 'NOT FOUND - prompt changes may not have landed',
+  );
+  console.log(
+    '[CALIBRATION_NOTE_CHECK] BONUS PRINCIPLE deflation:',
+    holisticPrompt.includes('BONUS PRINCIPLE') ? 'STILL PRESENT' : 'REMOVED',
   );
   if (holisticPrompt.includes('Do not compress scores toward the middle')) {
     console.log('[CALIBRATION_NOTE_CHECK] "Do not compress scores toward the middle" text: FOUND');
@@ -472,6 +508,7 @@ export async function runLlmRescorePipeline(opts: {
           incomplete_reason: 'dry_run',
           missingScenarioNumbers: [],
           missingMoment4: false,
+          missingMoment5: false,
           detail: 'dry-run',
         },
       },
@@ -538,7 +575,7 @@ export async function runLlmRescorePipeline(opts: {
   let moment5Scores: Record<string, unknown> | null = null;
   const m5Slice = m5SliceForDebug;
   if (m5Slice.filter((m) => m.role === 'user').length >= 1) {
-    const m5 = await scoreMoment5Llm(m5Slice, m5Meta);
+    const m5 = await scoreMoment5Llm(transcript, m5Slice, m5Meta);
     prompts.push(promptPreview('Moment 5', m5.prompt));
     logMoment5RescorePillarDebug(m5.parsed);
     const sanitized = sanitizeMoment5PersonalScoresForAggregate({

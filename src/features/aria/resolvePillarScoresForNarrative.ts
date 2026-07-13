@@ -1,4 +1,5 @@
 import { recalculateAttemptScoresFromStoredSlices } from './adminRecalculateAttemptScores';
+import { interviewModifierFieldsFromGateResult } from './interviewModifierPersist';
 
 export type NarrativeAttemptRowInput = {
   transcript?: unknown;
@@ -28,6 +29,9 @@ export type NarrativePillarResolution = {
   passed: boolean | null;
   fromRollup: boolean;
   rollupNotes?: string[];
+  depth_signal_modifier?: number;
+  score_modifier?: number;
+  modified_weighted_score?: number | null;
 };
 
 function pillarScoresRecord(raw: unknown): Record<string, number> {
@@ -82,11 +86,14 @@ export function resolvePillarScoresForNarrativeFromAttempt(
 
   if (result.kind !== 'success') return null;
 
+  const modifierFields = interviewModifierFieldsFromGateResult(result.gate);
+
   return {
     pillar_scores: result.pillar_scores,
     weighted_score: result.gate.weightedScore ?? null,
     passed: result.gate.pass,
     fromRollup: true,
     rollupNotes: result.notes,
+    ...modifierFields,
   };
 }

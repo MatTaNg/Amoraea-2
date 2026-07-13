@@ -127,7 +127,7 @@ export function PsychometricsCompleteScreen({ navigation, route }: Props) {
         {isAdminUser ? (
           <TouchableOpacity
             style={styles.adminLink}
-            onPress={() => navigation.replace('Aria', { userId, openAdminPanel: true })}
+            onPress={() => navigation.replace('Amoraea', { userId, openAdminPanel: true })}
           >
             <Text style={styles.adminLinkText}>Open admin panel</Text>
           </TouchableOpacity>

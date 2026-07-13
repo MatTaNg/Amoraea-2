@@ -70,7 +70,7 @@ export function useRedirectRelationshipValidationFromStandardPostInterview(userI
   return { isRedirecting };
 }
 
-/** Module flag set while ValidationAria is mounted — used by shared post-interview handoff. */
+/** Module flag set while ValidationAmoraea is mounted — used by shared post-interview handoff. */
 let validationTrackInterviewHandoffActive = false;
 
 export function setValidationTrackInterviewHandoffActive(active: boolean): void {

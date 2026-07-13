@@ -37,10 +37,6 @@ import {
   isBarePasswordResetLanding,
   isEmailConfirmationCallback,
 } from '@features/authentication/webAuthRecoveryRouting';
-import {
-  debugAuthCallbackLog,
-  sanitizeAuthUrlForLog,
-} from '@features/authentication/debugAuthCallbackLog';
 import { isAmoraeaAdminConsoleEmail } from '@/constants/adminConsole';
 import {
   fetchInterviewAttemptRevealSnapshot,
@@ -65,6 +61,11 @@ import { AsyncStorageService } from './src/utilities/storage/AsyncStorageService
 import { supabase } from './src/data/supabase/client';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { MarketResearchModal } from '@features/onboarding/MarketResearchModal';
+import {
+  MarketResearchCompletionProvider,
+  useMarketResearchCompletion,
+} from '@features/referrals/MarketResearchCompletionContext';
+import { ReferralCodeIntroShell } from '@features/referrals/ReferralCodeIntroShell';
 import { RelationshipValidationNavigator } from '@app/navigation/RelationshipValidationNavigator';
 import { fetchValidationShellRouting } from '@features/relationshipValidation/relationshipValidationRepo';
 import {
@@ -80,7 +81,7 @@ import {
 
 const AriaScreenLazy = lazy(async () => {
   try {
-    const mod = await import('./src/app/screens/AriaScreen');
+    const mod = await import('@features/aria/screens/AriaInterviewScreen');
     return mod;
   } catch (err) {
     const e = err as Error;
@@ -107,7 +108,7 @@ const AriaScreenLazy = lazy(async () => {
   }
 });
 
-const AriaScreenWithSuspense = (props: { navigation: unknown; route: unknown }) => (
+const AriaScreenWithSuspense = (props: React.ComponentProps<typeof AriaScreenLazy>) => (
   <Suspense fallback={<LoadingScreen />}>
     <AriaScreenLazy {...props} />
   </Suspense>
@@ -194,7 +195,7 @@ const InterviewAppNavigator = ({
       options={{ headerShown: false }}
     />
     <Stack.Screen
-      name="Aria"
+      name="Amoraea"
       component={AriaScreenWithSuspense}
       initialParams={{ userId }}
       options={{ headerShown: false }}
@@ -294,7 +295,7 @@ function buildInterviewStackInitialState(
       'InterviewComplete',
       'PsychometricAssessment',
       'PsychometricsComplete',
-      'Aria',
+      'Amoraea',
       'PostInterview',
       'PostInterviewLaunch',
       'PostInterviewProcessing',
@@ -330,6 +331,73 @@ function createInterviewStackLinking(
       return getStateFromPathDefault(mapped, options);
     },
   };
+}
+
+type LoggedInInterviewShellReadyProps = {
+  userId: string;
+  needsMarketResearch: boolean;
+  initialRouteName: InterviewStackRoute;
+  interviewAlreadyCompleted: boolean;
+  legacyPsychometricsMode: boolean;
+  navInitialState: NavigationState | undefined;
+  interviewLinking: LinkingOptions<Record<string, unknown>> | undefined;
+  showMarketResearchOverlay: boolean;
+  onMarketResearchDismissed: () => void;
+};
+
+function LoggedInInterviewShellReady({
+  userId,
+  needsMarketResearch,
+  initialRouteName,
+  interviewAlreadyCompleted,
+  legacyPsychometricsMode,
+  navInitialState,
+  interviewLinking,
+  showMarketResearchOverlay,
+  onMarketResearchDismissed,
+}: LoggedInInterviewShellReadyProps) {
+  const { notifyMarketResearchComplete, marketResearchComplete } = useMarketResearchCompletion();
+
+  useEffect(() => {
+    if (!needsMarketResearch) {
+      notifyMarketResearchComplete();
+    }
+  }, [needsMarketResearch, notifyMarketResearchComplete]);
+
+  const onMarketResearchComplete = useCallback(() => {
+    notifyMarketResearchComplete();
+    onMarketResearchDismissed();
+  }, [notifyMarketResearchComplete, onMarketResearchDismissed]);
+
+  const navTheme = {
+    ...DarkTheme,
+    colors: {
+      primary: '#5BA8E8',
+      background: '#05060D',
+      card: '#05060D',
+      text: '#E8F0F8',
+      border: 'rgba(82,142,220,0.2)',
+      notification: '#5BA8E8',
+    },
+  };
+
+  return (
+    <NavigationContainer theme={navTheme} linking={interviewLinking} initialState={navInitialState}>
+      <View style={ROOT_STYLE}>
+        <InterviewAppNavigator
+          userId={userId}
+          initialRouteName={initialRouteName}
+          interviewAlreadyCompleted={interviewAlreadyCompleted}
+          legacyPsychometricsMode={legacyPsychometricsMode}
+          needsMarketResearch={needsMarketResearch}
+        />
+        {showMarketResearchOverlay ? (
+          <MarketResearchModal visible userId={userId} onComplete={onMarketResearchComplete} />
+        ) : null}
+        <ReferralCodeIntroShell userId={userId} marketResearchComplete={marketResearchComplete} />
+      </View>
+    </NavigationContainer>
+  );
 }
 
 const LoggedInInterviewShell = ({ userId }: { userId: string }) => {
@@ -488,41 +556,20 @@ const LoggedInInterviewShell = ({ userId }: { userId: string }) => {
     initialRouteName !== 'PsychometricAssessment' &&
     initialRouteName !== 'AssessmentWelcome';
 
-  const navTheme = {
-    ...DarkTheme,
-    colors: {
-      primary: '#5BA8E8',
-      background: '#05060D',
-      card: '#05060D',
-      text: '#E8F0F8',
-      border: 'rgba(82,142,220,0.2)',
-      notification: '#5BA8E8',
-    },
-  };
-
   return (
-    <NavigationContainer
-      theme={navTheme}
-      linking={interviewLinking}
-      initialState={navInitialState}
-    >
-      <View style={ROOT_STYLE}>
-        <InterviewAppNavigator
-          userId={userId}
-          initialRouteName={initialRouteName}
-          interviewAlreadyCompleted={interviewAlreadyCompleted}
-          legacyPsychometricsMode={legacyPsychometricsMode}
-          needsMarketResearch={needsMarketResearch}
-        />
-        {showMarketResearchOverlay ? (
-          <MarketResearchModal
-            visible
-            userId={userId}
-            onComplete={handleMarketResearchComplete}
-          />
-        ) : null}
-      </View>
-    </NavigationContainer>
+    <MarketResearchCompletionProvider initialComplete={!needsMarketResearch}>
+      <LoggedInInterviewShellReady
+        userId={userId}
+        needsMarketResearch={needsMarketResearch}
+        initialRouteName={initialRouteName}
+        interviewAlreadyCompleted={interviewAlreadyCompleted}
+        legacyPsychometricsMode={legacyPsychometricsMode}
+        navInitialState={navInitialState}
+        interviewLinking={interviewLinking}
+        showMarketResearchOverlay={showMarketResearchOverlay}
+        onMarketResearchDismissed={handleMarketResearchComplete}
+      />
+    </MarketResearchCompletionProvider>
   );
 };
 
@@ -534,7 +581,7 @@ const LoadingScreen = () => (
 );
 
 /**
- * Logged-in stack: `Aria` uses path `interview` so the browser URL stays `/interview` (not rewritten to `/`).
+ * Logged-in stack: `Amoraea` uses path `interview` so the browser URL stays `/interview` (not rewritten to `/`).
  * `/` still opens the same screen by parsing as `interview`.
  */
 function mapInterviewStackPath(path: string): string {
@@ -570,7 +617,7 @@ const INTERVIEW_STACK_ROUTE_PATH: Record<InterviewStackRoute, string> = {
   InterviewComplete: 'interview-complete',
   PsychometricAssessment: 'psychometrics',
   PsychometricsComplete: 'psychometrics-complete',
-  Aria: 'interview',
+  Amoraea: 'interview',
   PostInterview: 'post-interview',
   PostInterviewLaunch: 'launch',
   PostInterviewProcessing: 'post-interview-processing',
@@ -606,7 +653,7 @@ function shouldRedirectWebPathToPreferredRoute(
   if (preferredRoute === 'AssessmentWelcome' && isInterviewAliasWebPath(path)) {
     return true;
   }
-  if (preferredRoute === 'Aria' || preferredRoute === 'PsychometricAssessment') {
+  if (preferredRoute === 'Amoraea' || preferredRoute === 'PsychometricAssessment') {
     return false;
   }
   const pathname = interviewStackPathname(path);
@@ -637,7 +684,7 @@ const INTERVIEW_STACK_LINKING_SCREENS = {
     },
   },
   PsychometricsComplete: 'psychometrics-complete',
-  Aria: {
+  Amoraea: {
     path: 'interview',
     parse: {
       openAdminPanel: (value: string | undefined) =>
@@ -670,29 +717,6 @@ const RootNavigator = () => {
     typeof window !== 'undefined' &&
     isEmailConfirmationCallback();
   const forcePasswordResetUi = passwordRecoveryPending && !onEmailConfirmCallback;
-
-  useEffect(() => {
-    if (Platform.OS !== 'web' || typeof window === 'undefined' || loading) return;
-    // #region agent log
-    debugAuthCallbackLog(
-      'App.tsx:RootNavigator',
-      'auth shell routing',
-      {
-        ...sanitizeAuthUrlForLog(
-          window.location.pathname,
-          window.location.search,
-          window.location.hash,
-        ),
-        passwordRecoveryPending,
-        onEmailConfirmCallback,
-        forcePasswordResetUi,
-        isLoggedIn,
-        initialRoute: forcePasswordResetUi ? 'SetNewPassword' : 'Login',
-      },
-      'H5',
-    );
-    // #endregion
-  }, [loading, passwordRecoveryPending, onEmailConfirmCallback, forcePasswordResetUi, isLoggedIn]);
 
   useEffect(() => {
     initAudosFromEnv();

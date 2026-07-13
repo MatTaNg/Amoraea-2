@@ -7,42 +7,13 @@
  * or an external cron hitting POST with Authorization: Bearer <CRON_SECRET>.
  */
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.49.1';
-import { generateAIReasoning } from '../_shared/generateAIReasoning.ts';
+import { processNarrativeForAttempt } from '../_shared/processNarrativeForAttempt.ts';
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type, x-cron-secret',
   'Access-Control-Allow-Methods': 'POST, GET, OPTIONS',
 };
-
-type AttemptRow = {
-  id: string;
-  pillar_scores: Record<string, number> | null;
-  scenario_1_scores: Record<string, unknown> | null;
-  scenario_2_scores: Record<string, unknown> | null;
-  scenario_3_scores: Record<string, unknown> | null;
-  transcript: Array<{ role: string; content?: string }> | null;
-  weighted_score: number | null;
-  passed: boolean | null;
-};
-
-function scenarioScoresFromAttempt(row: AttemptRow): Record<
-  number,
-  { pillarScores: Record<string, number | null>; scenarioName?: string } | undefined
-> {
-  const out: Record<number, { pillarScores: Record<string, number | null>; scenarioName?: string } | undefined> = {};
-  ([1, 2, 3] as const).forEach((n) => {
-    const raw = row[`scenario_${n}_scores` as keyof AttemptRow] as Record<string, unknown> | null | undefined;
-    if (!raw || typeof raw !== 'object') return;
-    const ps = (raw as { pillarScores?: Record<string, number | null>; scenarioName?: string }).pillarScores;
-    if (!ps || typeof ps !== 'object') return;
-    out[n] = {
-      pillarScores: ps,
-      scenarioName: (raw as { scenarioName?: string }).scenarioName,
-    };
-  });
-  return out;
-}
 
 function authorized(req: Request): boolean {
   const secret = Deno.env.get('CRON_SECRET') ?? '';
@@ -80,58 +51,44 @@ Deno.serve(async (req) => {
     });
   }
 
+  console.log('[narrative] retry-pending-ai-reasoning worker started');
+
   const supabase = createClient(url, serviceKey);
   const { data: rows, error: qErr } = await supabase
     .from('interview_attempts')
-    .select(
-      'id, pillar_scores, scenario_1_scores, scenario_2_scores, scenario_3_scores, transcript, weighted_score, passed'
-    )
+    .select('id')
     .eq('reasoning_pending', true)
     .order('completed_at', { ascending: true })
     .limit(5);
 
   if (qErr) {
+    console.error('[narrative] retry-pending-ai-reasoning query failed:', qErr.message);
     return new Response(JSON.stringify({ error: qErr.message }), {
       status: 500,
       headers: { ...corsHeaders, 'Content-Type': 'application/json' },
     });
   }
 
-  const results: { id: string; ok: boolean; error?: string }[] = [];
+  const results: { id: string; ok: boolean; error?: string; skipped?: boolean }[] = [];
 
   for (const raw of rows ?? []) {
-    const row = raw as AttemptRow;
-    const pillarScores = (row.pillar_scores ?? {}) as Record<string, number>;
-    const transcript = (row.transcript ?? []) as Array<{ role: string; content?: string }>;
-    const scenarioScores = scenarioScoresFromAttempt(row);
-
-    try {
-      const reasoning = await generateAIReasoning(
-        pillarScores,
-        scenarioScores,
-        transcript,
-        row.weighted_score,
-        row.passed === true,
-        []
-      );
-      const { error: upErr } = await supabase
-        .from('interview_attempts')
-        .update({
-          ai_reasoning: reasoning as unknown as Record<string, unknown>,
-          reasoning_pending: false,
-        })
-        .eq('id', row.id);
-      if (upErr) {
-        results.push({ id: row.id, ok: false, error: upErr.message });
-      } else {
-        results.push({ id: row.id, ok: true });
-      }
-    } catch (e) {
-      const msg = e instanceof Error ? e.message : String(e);
-      console.error(`retry-pending-ai-reasoning: attempt ${row.id} failed:`, msg);
-      results.push({ id: row.id, ok: false, error: msg });
-    }
+    const id = (raw as { id: string }).id;
+    const out = await processNarrativeForAttempt(supabase, id, {
+      source: 'retry-pending-ai-reasoning',
+    });
+    results.push({
+      id,
+      ok: out.ok,
+      error: out.error,
+      skipped: out.skipped,
+    });
   }
+
+  console.log('[narrative] retry-pending-ai-reasoning worker finished', {
+    processed: results.length,
+    ok: results.filter((r) => r.ok).length,
+    failed: results.filter((r) => !r.ok).length,
+  });
 
   return new Response(JSON.stringify({ processed: results.length, results }), {
     status: 200,

@@ -3,8 +3,7 @@
  * Usage: npx tsx --env-file=.env scripts/verifyRsesPromptGating.ts [attemptId]
  */
 import { createClient } from '@supabase/supabase-js';
-import { buildReportDataFromRows } from '../src/features/psychometrics/personalReportData';
-import { buildReportPrompt } from '../src/features/psychometrics/personalReportPrompt';
+import { loadPersonalReportPromptForAttempt, extractSelfAssessmentsBlock } from './lib/reportPromptHarness';
 import { shouldNarrateInstrument } from '../src/features/reports/narrativeCalibration';
 
 const mattAttemptId = '9199fd17-b9be-46f0-9fba-76460691c7a7';
@@ -19,16 +18,11 @@ if (!url || !key) {
 const supabase = createClient(url, key);
 
 async function checkAttempt(label: string, attemptId: string) {
-  const { data: attempt } = await supabase.from('interview_attempts').select('*').eq('id', attemptId).maybeSingle();
-  if (!attempt?.user_id) throw new Error(`Attempt not found: ${attemptId}`);
-  const { data: user } = await supabase.from('users').select('*').eq('id', attempt.user_id).maybeSingle();
-  const data = buildReportDataFromRows(user, attempt);
+  const { data, userPrompt: prompt } = await loadPersonalReportPromptForAttempt(supabase, attemptId);
   const gc = data.attempt?.gamingCorrection ?? null;
   const flags = data.user.psychometricStraightLineFlags;
   const narrateRses = shouldNarrateInstrument(data.user.rsesScore, 'rses', gc, flags);
-  const prompt = buildReportPrompt(data);
-  const selfBlockStart = prompt.indexOf('SELF-ASSESSMENTS:');
-  const selfBlock = prompt.slice(selfBlockStart, selfBlockStart + 500);
+  const selfBlock = extractSelfAssessmentsBlock(prompt) ?? '(missing SELF-ASSESSMENTS block)';
   const hasRsesLine = /Self-esteem and self-worth:/.test(prompt);
 
   console.log(`\n=== ${label} (${attemptId}) ===`);

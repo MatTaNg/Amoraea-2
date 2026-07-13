@@ -1,3 +1,30 @@
+/** Canonical gate scoring — imported by app (`@features/aria/computeGateResultCore`) and edge functions. */
+import {
+  DEFENSE_PATTERN_COUNT_MODIFIERS,
+  DEFENSE_PATTERN_FAIL_MIN_COUNT,
+  DEFENSE_PATTERN_REVIEW_MIN_COUNT,
+  DISCLOSURE_OVER_MODIFIER,
+  DISCLOSURE_UNDER_MODIFIER,
+  EGO_DEVELOPMENT_AUTO_FAIL_LEVEL,
+  EGO_DEVELOPMENT_LEVEL_MODIFIERS,
+  EGO_DEVELOPMENT_REVIEW_LEVEL,
+  EMOTIONAL_VOCAB_LOW_MODIFIER,
+  EMOTION_RECOGNITION_FLOOR_EXCLUSIVE_MAX,
+  EMOTION_RECOGNITION_MODIFIER_BELOW_FLOOR,
+  EMOTION_RECOGNITION_MODIFIER_BELOW_REVIEW,
+  EMOTION_RECOGNITION_MODIFIER_PERFECT,
+  EMOTION_RECOGNITION_PERFECT_MIN_SCORE,
+  EMOTION_RECOGNITION_REVIEW_EXCLUSIVE_MAX,
+  MENTALIZING_OVERCERTAINTY_COUNT_MODIFIERS,
+  MENTALIZING_OVERCERTAINTY_REVIEW_MIN_COUNT,
+} from '../../../src/config/scoring/depthSignalModifiers.ts';
+import {
+  GATE_MARKER_BASE_WEIGHTS,
+  GATE_MARKER_FLOORS,
+  GATE_PASS_WEIGHTED_MIN,
+  PASS_THRESHOLD,
+  REFERRAL_WEIGHTED_PASS_MIN,
+} from '../../../src/config/scoring/interviewGateThresholds.ts';
 import {
   INTERVIEW_MARKER_IDS,
   INTERVIEW_MARKER_LABELS,
@@ -8,7 +35,7 @@ import {
   type DefensePatternsJson,
 } from './defensePatternsDetection.ts';
 import { detectOverdisclosure } from './disclosureCalibration.ts';
-import { normalizeResponseConcreteness } from './personalMomentConcreteness.ts';
+import { normalizeResponseConcreteness, normalizeMoment4Concreteness, moment4Moment5ConcretenessDepthSignalDelta } from './personalMomentConcreteness.ts';
 import {
   buildScenarioCompositesTriple,
   formatScenarioFloorFailReason,
@@ -21,12 +48,9 @@ import {
   mentalizingRepairFloorTriggered,
   type ScenarioPillarLow,
 } from './mentalizingRepairScenarioFloor.ts';
-import {
-  emotionRecognitionProportionForGate,
-  legacyEmotionProportionFromRaw,
-  storedEmotionCorrectCountFromRaw,
-} from './emotionRecognitionScoring.ts';
+import { resolveEmotionRecognitionRawScoreForGate } from './emotionRecognitionScoring.ts';
 import { normalizeGateFailDetailForPersist } from './gateFailDetailForPersist.ts';
+import { orderGateFailCodes } from './gateFailReasonsNormalize.ts';
 
 function gateFailDetailForResult(
   detail: GateFailDetailJson | Record<string, unknown> | null | undefined,
@@ -34,32 +58,16 @@ function gateFailDetailForResult(
   return normalizeGateFailDetailForPersist(detail) as GateFailDetailJson;
 }
 
-/** Research-based weights (sum = 1.0). Renormalized over assessed constructs only. */
-export const GATE_MARKER_BASE_WEIGHTS: Record<InterviewMarkerId, number> = {
-  contempt: 0.2,
-  accountability: 0.18,
-  repair: 0.18,
-  regulation: 0.12,
-  attunement: 0.12,
-  mentalizing: 0.1,
-  commitment_threshold: 0.05,
-  appreciation: 0.05,
+export {
+  GATE_MARKER_BASE_WEIGHTS,
+  GATE_MARKER_FLOORS,
+  GATE_PASS_WEIGHTED_MIN,
+  PASS_THRESHOLD,
+  REFERRAL_WEIGHTED_PASS_MIN,
 };
 
-/** Minimum score for an assessed construct; omitted = no floor. */
-export const GATE_MARKER_FLOORS: Partial<Record<InterviewMarkerId, number>> = {
-  contempt: 5.0,
-  accountability: 5.0,
-  repair: 5.0,
-  regulation: 4.5,
-};
-
-export const GATE_PASS_WEIGHTED_MIN = 6.5;
-
-/** Emotion recognition raw (0–1): depth signal modifier only; review flag between floor and review max. */
-const EMOTION_RECOGNITION_FLOOR_EXCLUSIVE_MAX = 0.34;
-const EMOTION_RECOGNITION_REVIEW_EXCLUSIVE_MAX = 0.67;
-const EMOTION_RECOGNITION_ITEM_COUNT = 3;
+/** @deprecated Import from @config/scoring/interviewGateThresholds — re-exported for backward compatibility. */
+export type GateMarkerBaseWeights = typeof GATE_MARKER_BASE_WEIGHTS;
 
 export type GateResultReason =
   | 'pass'
@@ -95,6 +103,7 @@ export type GateFailDetailJson = {
   };
   mentalizing_floor?: { lowScenarios: ScenarioPillarLow[] };
   repair_floor?: { lowScenarios: ScenarioPillarLow[] };
+  psychometric_floors?: Record<string, { score: number; description: string }>;
 };
 
 export interface GateResult {
@@ -113,7 +122,7 @@ export interface GateResult {
   failReasonCodes?: GateFailCode[];
   /** Structured detail aligned with {@link failReasonCodes}. */
   failReasonDetail?: GateFailDetailJson | null;
-  /** Present when per-scenario pillar maps were supplied (standard interview scenarios 1â€“3 only). */
+  /** Present when per-scenario pillar maps were supplied (standard interview scenarios 1–3 only). */
   scenarioComposites?: ScenarioCompositesTriple | null;
   /**
    * Non-fatal review tags (routing to human / elevated AI review). Never imply automatic fail by themselves.
@@ -122,6 +131,7 @@ export interface GateResult {
   reviewFlags: string[];
   /** Sum of ego, defense, and personal-moment concreteness modifiers before threshold comparison. */
   scoreModifier?: number | null;
+  /** Recalibrated depth-signal modifier (same value as {@link scoreModifier} for new scoring). */
   depthSignalModifier?: number | null;
   /** Marker + skip composite plus {@link scoreModifier}; compared to {@link GATE_PASS_WEIGHTED_MIN} / referral min. */
   modifiedWeightedScore?: number | null;
@@ -148,13 +158,13 @@ export type ComputeGateResultOptions = {
   /** Third skip: final weighted score forced to 0 and gate fails (floors still from markers only). */
   skipAutoFail?: boolean;
   /**
-   * When set, after weighted threshold passes, each scenarioâ€™s composite (mean of present pillar scores in that
-   * scenarioâ€™s slice) must be â‰¥ 5.0. Omit for holistic-only / scripts.
+   * When set, after weighted threshold passes, each scenario’s composite (mean of present pillar scores in that
+   * scenario’s slice) must be ≥ 5.0. Omit for holistic-only / scripts.
    */
   scenarioPillarScoresByScenario?: Partial<
     Record<1 | 2 | 3, Record<string, number | null | undefined> | null | undefined>
   >;
-  /** Holistic-only: 1â€“5 from transcript meta-score; drives ego gate / modifier (omit when unknown). */
+  /** Holistic-only: 1–5 from transcript meta-score; drives ego gate / modifier (omit when unknown). */
   egoDevelopmentLevel?: number | null;
   /** When supplied with aggregated slices, adjusts weighted threshold score and may set review / fail codes. */
   defensePatterns?: DefensePatternsJson | null;
@@ -163,33 +173,40 @@ export type ComputeGateResultOptions = {
   moment5Concreteness?: string | null;
   personalMomentConcretenessModifier?: number | null;
   /**
-   * Proportion correct (0â€“1) from in-interview emotion MC items. When `null`/`undefined`, emotion gate/review omitted.
-   * Prefer this over {@link emotionRecognitionCorrectCount}.
+   * Proportion correct (0–1) from in-interview emotion MC items. When `null`/`undefined`, emotion modifier/review omitted.
+   * Prefer {@link emotionRecognitionResponses} with {@link resolveEmotionRecognitionRawScoreForGate} for incomplete batteries.
    */
   emotionRecognitionRawScore?: number | null;
   /**
-   * Legacy: 0â€“3 correct count; converted to `correct/3` when {@link emotionRecognitionRawScore} is absent.
+   * Legacy: 0–3 correct count; converted to `correct/3` when {@link emotionRecognitionRawScore} is absent.
    */
   emotionRecognitionCorrectCount?: 0 | 1 | 2 | 3 | null;
+  /** Stored `emotion_recognition_responses`; incomplete batteries (< 3 answers) exclude emotion from gate/modifier. */
   emotionRecognitionResponses?: unknown;
   disclosureCalibration?: string | null;
+  /** Personal-moment user word counts for {@link detectOverdisclosure}. */
   moment4WordCount?: number | null;
   moment5WordCount?: number | null;
+  /** Percent density from aggregate (moments 4–5). */
   personalMomentEmotionalVocabDensity?: number | null;
-  /** When `'absent'` and ego â‰¤ 2, adds `closing_integration_absent` review flag. */
+  /** When `'absent'` and ego ≤ 2, adds `closing_integration_absent` review flag. */
   closingIntegration?: string | null;
-  /** Count of marker slices with mentalizing overcertainty; â‰¥ 2 adds `mentalizing_overcertainty` review flag. */
+  /** Count of marker slices with mentalizing overcertainty; ≥ 2 adds `mentalizing_overcertainty` review flag. */
   mentalizingOvercertaintyCount?: number | null;
+  /** When true, applies personal-moment emotional vocabulary low modifier. */
   personalMomentEmotionalVocabLow?: boolean;
+  /** Runtime review flags collected during the interview session. */
+  runtimeReviewFlags?: string[] | null;
+  /** M4 situational accountability exemption fired during rollup. */
+  moment4AccountabilitySituationallyExempt?: boolean;
+  moment4AccountabilityExemptReason?: string | null;
   /**
-   * When set, used as the composite weighted score (marker + skips) for modifier math and for {@link GateResult.weightedScore}.
-   * Must match `interview_attempts.weighted_score` when callers align persistence to this value.
+   * When set, used as the composite weighted score (marker average + skip penalties) for modifier math and for
+   * {@link GateResult.weightedScore} — must match the value persisted to `interview_attempts.weighted_score`.
+   * When omitted, the gate recomputes from {@link pillarScores} (must match callers that persist from the same map).
    */
   precomputedWeightedScore?: number | null;
 };
-
-/** Weighted pass threshold when referral boost is active (floors unchanged). */
-export const REFERRAL_WEIGHTED_PASS_MIN = 6.0;
 
 const GATE_FAIL_CODE_ORDER: GateFailCode[] = [
   'weighted_score',
@@ -199,6 +216,10 @@ const GATE_FAIL_CODE_ORDER: GateFailCode[] = [
   'mentalizing_floor',
   'repair_floor',
 ];
+
+function uniqueGateFailsOrdered(gateFailReasons: GateFailCode[]): GateFailCode[] {
+  return orderGateFailCodes(gateFailReasons) as GateFailCode[];
+}
 
 function pickPrimaryGateReason(codes: GateFailCode[]): GateResultReason {
   for (const o of GATE_FAIL_CODE_ORDER) {
@@ -304,36 +325,11 @@ function formatFloorBreachFailReason(
 
 function resolveEmotionRecognitionRawScore(options: ComputeGateResultOptions | undefined): number | null {
   if (!options) return null;
-  const fromRow = emotionRecognitionProportionForGate({
-    emotion_recognition_responses: options.emotionRecognitionResponses,
-    emotion_recognition_raw_score: options.emotionRecognitionRawScore,
+  return resolveEmotionRecognitionRawScoreForGate({
+    emotionRecognitionRawScore: options.emotionRecognitionRawScore,
+    emotionRecognitionCorrectCount: options.emotionRecognitionCorrectCount,
+    emotionRecognitionResponses: options.emotionRecognitionResponses,
   });
-  if (fromRow !== null) return fromRow;
-  const c = options.emotionRecognitionCorrectCount;
-  if (c === null || c === undefined) return null;
-  if (typeof c === 'string' && String(c).trim() !== '') {
-    const n = parseInt(String(c).trim(), 10);
-    if (Number.isFinite(n) && n >= 0 && n <= EMOTION_RECOGNITION_ITEM_COUNT) {
-      return n / EMOTION_RECOGNITION_ITEM_COUNT;
-    }
-  }
-  if (typeof c === 'number' && Number.isFinite(c)) {
-    const stored = storedEmotionCorrectCountFromRaw(c);
-    if (stored !== null) return stored / EMOTION_RECOGNITION_ITEM_COUNT;
-    const legacy = legacyEmotionProportionFromRaw(c);
-    if (legacy !== null) return legacy;
-  }
-  const r = options.emotionRecognitionRawScore;
-  const parsed =
-    typeof r === 'number' && Number.isFinite(r)
-      ? r
-      : typeof r === 'string' && String(r).trim() !== ''
-        ? Number(String(r).trim())
-        : NaN;
-  if (!Number.isFinite(parsed)) return null;
-  const stored = storedEmotionCorrectCountFromRaw(parsed);
-  if (stored !== null) return stored / EMOTION_RECOGNITION_ITEM_COUNT;
-  return legacyEmotionProportionFromRaw(parsed);
 }
 
 function parseNonNegativeGateInt(v: unknown): number {
@@ -345,6 +341,7 @@ function parseNonNegativeGateInt(v: unknown): number {
   return 0;
 }
 
+/** Accept number or numeric string (e.g. JSON); must match aggregate / DB coercion. */
 function parseEgoDevelopmentLevelForGate(raw: unknown): 1 | 2 | 3 | 4 | 5 | null {
   if (raw === null || raw === undefined) return null;
   const n =
@@ -359,7 +356,11 @@ function parseEgoDevelopmentLevelForGate(raw: unknown): 1 | 2 | 3 | 4 | 5 | null
   return r as 1 | 2 | 3 | 4 | 5;
 }
 
-/** Same composite math as the gate (no modifiers). See app `computeGateResultCore`. */
+/**
+ * Marker renormalized weighted average + skip composite (same math as the gate’s internal composite, no modifiers).
+ * Use to supply {@link ComputeGateResultOptions.precomputedWeightedScore} when the persisted `weighted_score` is
+ * sourced outside the gate (e.g. must match aggregate merge) or to preview before calling {@link computeGateResultCore}.
+ */
 export function computeInterviewWeightedCompositeFromPillars(
   pillarScores: Record<string, number | null | undefined>,
   skepticismModifier?: { pillarId: number | string | null; adjustment: number; reason?: string } | null,
@@ -388,7 +389,8 @@ export function computeInterviewWeightedCompositeFromPillars(
   });
   const markerWeightedScore = Math.round(weightedSum * 10) / 10;
   const skip = typeof skipPenaltyTotal === 'number' && Number.isFinite(skipPenaltyTotal) ? skipPenaltyTotal : 0;
-  if (skipAutoFail === true) return 0;
+  const fail = skipAutoFail === true;
+  if (fail) return 0;
   return Math.round((markerWeightedScore + skip) * 10) / 10;
 }
 
@@ -401,7 +403,6 @@ export function computeGateResultCore(
   skepticismModifier?: { pillarId: number | string | null; adjustment: number; reason?: string } | null,
   options?: ComputeGateResultOptions,
 ): GateResult {
-  const gateModifierDebug = Deno.env.get('INTERVIEW_DEBUG_GATE') === '1';
   const adjustedScores: Record<string, number | undefined> = { ...pillarScores } as Record<string, number | undefined>;
   if (skepticismModifier && skepticismModifier.pillarId != null && skepticismModifier.adjustment !== 0) {
     const id = String(skepticismModifier.pillarId);
@@ -498,7 +499,7 @@ export function computeGateResultCore(
 
   const m4cOpt = options?.moment4Concreteness;
   const m5cOpt = options?.moment5Concreteness;
-  const m4n = normalizeResponseConcreteness(m4cOpt);
+  const m4n = normalizeMoment4Concreteness(m4cOpt);
   const m5n = normalizeResponseConcreteness(m5cOpt);
 
   const gateFailReasons: GateFailCode[] = [];
@@ -508,11 +509,9 @@ export function computeGateResultCore(
   let depthSignalModifier = 0;
 
   const egoLevel = egoLv;
-  if (egoLevel === 1) depthSignalModifier += -0.8;
-  else if (egoLevel === 2) depthSignalModifier += -0.3;
-  else if (egoLevel === 3) depthSignalModifier += 0;
-  else if (egoLevel === 4) depthSignalModifier += 0.2;
-  else if (egoLevel === 5) depthSignalModifier += 0.3;
+  if (egoLevel >= 1 && egoLevel <= 5) {
+    depthSignalModifier += EGO_DEVELOPMENT_LEVEL_MODIFIERS[egoLevel as 1 | 2 | 3 | 4 | 5];
+  }
 
   const _defenseCount = [
     dpMerged.projection_detected === true,
@@ -521,59 +520,50 @@ export function computeGateResultCore(
     dpMerged.denial_detected === true,
   ].filter(Boolean).length;
 
-  if (_defenseCount === 1) depthSignalModifier += -0.15;
-  else if (_defenseCount === 2) depthSignalModifier += -0.35;
-  else if (_defenseCount === 3) depthSignalModifier += -0.6;
-  else if (_defenseCount >= 4) depthSignalModifier += -0.8;
+  const defenseCountCapped = Math.min(4, _defenseCount) as 0 | 1 | 2 | 3 | 4;
+  depthSignalModifier += DEFENSE_PATTERN_COUNT_MODIFIERS[defenseCountCapped];
 
-  const _m4 = (options?.moment4Concreteness ?? '').toString().trim().toLowerCase();
-  const _m5 = (options?.moment5Concreteness ?? '').toString().trim().toLowerCase();
-
-  if (_m4 === 'absent' && _m5 === 'absent') depthSignalModifier += -0.5;
-  else if ((_m4 === 'absent' && _m5 === 'low') || (_m4 === 'low' && _m5 === 'absent')) depthSignalModifier += -0.35;
-  else if (_m4 === 'low' && _m5 === 'low') depthSignalModifier += -0.3;
-  else if ((_m4 === 'low' && _m5 === 'moderate') || (_m4 === 'moderate' && _m5 === 'low')) depthSignalModifier += -0.1;
-  else if (_m4 === 'moderate' && _m5 === 'moderate') depthSignalModifier += 0;
-  else if ((_m4 === 'high' && _m5 === 'moderate') || (_m4 === 'moderate' && _m5 === 'high')) depthSignalModifier += 0.1;
-  else if (_m4 === 'high' && _m5 === 'high') depthSignalModifier += 0.2;
+  depthSignalModifier += moment4Moment5ConcretenessDepthSignalDelta(m4n, m5n);
 
   const _overcertaintyCount = parseNonNegativeGateInt(options?.mentalizingOvercertaintyCount);
-  if (_overcertaintyCount === 1) depthSignalModifier += -0.1;
-  else if (_overcertaintyCount === 2) depthSignalModifier += -0.2;
-  else if (_overcertaintyCount === 3) depthSignalModifier += -0.35;
-  else if (_overcertaintyCount >= 4) depthSignalModifier += -0.5;
+  if (_overcertaintyCount >= 1) {
+    const overcertaintyCapped = Math.min(4, _overcertaintyCount) as 1 | 2 | 3 | 4;
+    depthSignalModifier += MENTALIZING_OVERCERTAINTY_COUNT_MODIFIERS[overcertaintyCapped];
+  }
 
   const _erScore = resolveEmotionRecognitionRawScore(options);
   if (_erScore !== null) {
     if (_erScore < EMOTION_RECOGNITION_FLOOR_EXCLUSIVE_MAX) {
-      depthSignalModifier += -0.2;
+      depthSignalModifier += EMOTION_RECOGNITION_MODIFIER_BELOW_FLOOR;
     } else if (_erScore < EMOTION_RECOGNITION_REVIEW_EXCLUSIVE_MAX) {
-      depthSignalModifier += -0.2;
-    } else if (_erScore >= 0.99) {
-      depthSignalModifier += 0.1;
+      depthSignalModifier += EMOTION_RECOGNITION_MODIFIER_BELOW_REVIEW;
+    } else if (_erScore >= EMOTION_RECOGNITION_PERFECT_MIN_SCORE) {
+      depthSignalModifier += EMOTION_RECOGNITION_MODIFIER_PERFECT;
     }
   }
 
   const _disclosure = options?.disclosureCalibration ?? null;
-  if (_disclosure === 'underdisclosure') depthSignalModifier += -0.2;
-  else if (_disclosure === 'overdisclosure') depthSignalModifier += -0.15;
+  if (_disclosure === 'underdisclosure') depthSignalModifier += DISCLOSURE_UNDER_MODIFIER;
+  else if (_disclosure === 'overdisclosure') depthSignalModifier += DISCLOSURE_OVER_MODIFIER;
 
   const _vocabLow = options?.personalMomentEmotionalVocabLow === true;
-  if (_vocabLow) depthSignalModifier += -0.15;
+  if (_vocabLow) depthSignalModifier += EMOTIONAL_VOCAB_LOW_MODIFIER;
 
   depthSignalModifier = Math.round(depthSignalModifier * 100) / 100;
 
-  if (_defenseCount === 2) reviewFlags.push('defense_pattern_review');
-  if (_defenseCount >= 3) gateFailReasons.push('immature_defense_pattern');
+  if (_defenseCount === DEFENSE_PATTERN_REVIEW_MIN_COUNT) reviewFlags.push('defense_pattern_review');
+  if (_defenseCount >= DEFENSE_PATTERN_FAIL_MIN_COUNT) gateFailReasons.push('immature_defense_pattern');
 
   if (_erScore !== null && _erScore < EMOTION_RECOGNITION_REVIEW_EXCLUSIVE_MAX) {
     reviewFlags.push('emotion_recognition_review');
   }
 
-  if (_overcertaintyCount >= 2) reviewFlags.push('mentalizing_overcertainty');
+  if (_overcertaintyCount >= MENTALIZING_OVERCERTAINTY_REVIEW_MIN_COUNT) {
+    reviewFlags.push('mentalizing_overcertainty');
+  }
 
-  if (egoLevel === 1) gateFailReasons.push('ego_development_floor');
-  else if (egoLevel === 2) reviewFlags.push('ego_development_review');
+  if (egoLevel === EGO_DEVELOPMENT_AUTO_FAIL_LEVEL) gateFailReasons.push('ego_development_floor');
+  else if (egoLevel === EGO_DEVELOPMENT_REVIEW_LEVEL) reviewFlags.push('ego_development_review');
 
   const _baseScore =
     typeof precomputedOpt === 'number' && Number.isFinite(precomputedOpt) && !Number.isNaN(precomputedOpt)
@@ -586,7 +576,14 @@ export function computeGateResultCore(
     gateFailReasons.push('weighted_score');
   }
 
-  if (gateModifierDebug) {
+  if (
+    (typeof Deno !== 'undefined' &&
+      typeof Deno.env?.get === 'function' &&
+      Deno.env.get('INTERVIEW_DEBUG_GATE') === '1') ||
+    (typeof __DEV__ !== 'undefined' &&
+      __DEV__ &&
+      (typeof process === 'undefined' || process.env.JEST_WORKER_ID === undefined))
+  ) {
     console.log(
       '[Gate] depthSignalModifier:',
       depthSignalModifier,
@@ -601,9 +598,9 @@ export function computeGateResultCore(
       'defenseCount:',
       _defenseCount,
       'm4:',
-      _m4,
+      m4n,
       'm5:',
-      _m5,
+      m5n,
       'er:',
       _erScore,
       'overcertainty:',
@@ -651,6 +648,7 @@ export function computeGateResultCore(
   if (
     m4n !== null &&
     m5n !== null &&
+    m4n !== 'valid_non_applicable' &&
     (m4n === 'absent' || m4n === 'low') &&
     (m5n === 'absent' || m5n === 'low') &&
     modifiedScore >= 6.0 &&
@@ -670,6 +668,18 @@ export function computeGateResultCore(
   ) {
     reviewFlags.push('overdisclosure_review');
     console.log('[Disclosure] overdisclosure_review flag added');
+  }
+  if (options?.moment4AccountabilitySituationallyExempt === true) {
+    const reason =
+      options.moment4AccountabilityExemptReason?.trim() ||
+      'situationally appropriate harm or abandonment disclosure';
+    reviewFlags.push(
+      `M4 accountability absence flagged as situationally appropriate — ${reason}. Accountability pillar weighted toward M5. Manual review recommended if accountability is borderline.`,
+    );
+  }
+  for (const flag of options?.runtimeReviewFlags ?? []) {
+    const trimmed = typeof flag === 'string' ? flag.trim() : '';
+    if (trimmed) reviewFlags.push(trimmed);
   }
   if (options?.closingIntegration === 'absent' && egoLv !== null && egoLv <= 2) {
     reviewFlags.push('closing_integration_absent');
@@ -718,7 +728,7 @@ export function computeGateResultCore(
           moment_5_concreteness: m5cOpt ?? null,
         }
       : {};
-  if (gateModifierDebug) {
+  if (typeof __DEV__ !== 'undefined' && __DEV__) {
     console.log('[WEIGHTED_SCORE_BREAKDOWN]', {
       contributions,
       weightSumAssessed,
@@ -760,34 +770,30 @@ export function computeGateResultCore(
 
   if (floorBreaches.length > 0) {
     const first = floorBreaches.slice().sort((a, b) => a.id.localeCompare(b.id))[0];
-    // #region agent log
-    {
-      const expectedMod = Math.round((weightedScoreForPersistence + scoreModifier) * 100) / 100;
-      const invBroken = Math.abs(expectedMod - modifiedScore) > 0.01;
-      fetch('http://127.0.0.1:7789/ingest/668e0bd5-3283-4492-9f48-e33846c18218', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'X-Debug-Session-Id': '4b3376' },
-        body: JSON.stringify({
-          sessionId: '4b3376',
-          hypothesisId: 'H2_precomputed_vs_marker',
-          location: 'supabase/computeGateResultCore.ts:floor_breach',
-          message: 'floor_breach_modifier_base',
-          data: {
-            markerWeightedScore,
-            finalWeightedScore,
-            precomputedOpt: precomputedOpt ?? null,
-            weightedScoreForPersistence,
-            scoreModifier,
-            modifiedScore,
-            expectedMod,
-            invBroken,
-            floorBreaches: floorBreaches.map((b) => b.id),
-          },
-          timestamp: Date.now(),
-        }),
-      }).catch(() => {});
+    const earlyScenarioCodes: GateFailCode[] = [];
+    if (scenarioFloorGateDetail) earlyScenarioCodes.push('scenario_floor');
+    if (scenarioMaps != null) {
+      const mrEarly = mentalizingRepairFloorTriggered(scenarioMaps);
+      if (mrEarly.mentalizingFloorFails) earlyScenarioCodes.push('mentalizing_floor');
+      if (mrEarly.repairFloorFails) earlyScenarioCodes.push('repair_floor');
     }
-    // #endregion
+    let earlyFailCodes = uniqueGateFailsOrdered([...gateFailReasons, ...earlyScenarioCodes]);
+    if (earlyFailCodes.length === 0) {
+      earlyFailCodes = ['weighted_score'];
+    }
+    const earlyDetail: GateFailDetailJson = { ...(scenarioFloorGateDetail ?? {}) };
+    if (earlyFailCodes.includes('weighted_score')) {
+      earlyDetail.weighted_score = { score: modifiedScore, requiredMin: GATE_PASS_WEIGHTED_MIN };
+    }
+    if (scenarioMaps != null) {
+      const mrEarly = mentalizingRepairFloorTriggered(scenarioMaps);
+      if (earlyFailCodes.includes('mentalizing_floor') && mrEarly.mentalizingFloorFails) {
+        earlyDetail.mentalizing_floor = { lowScenarios: mrEarly.mentalizingLowScenarios };
+      }
+      if (earlyFailCodes.includes('repair_floor') && mrEarly.repairFloorFails) {
+        earlyDetail.repair_floor = { lowScenarios: mrEarly.repairLowScenarios };
+      }
+    }
     return {
       pass: false,
       reason: 'floor_breach',
@@ -799,8 +805,8 @@ export function computeGateResultCore(
       excludedMarkers,
       failReason: formatFloorBreachFailReason(floorBreaches),
       scenarioComposites,
-      failReasonCodes: scenarioFloorGateDetail ? ['scenario_floor'] : undefined,
-      failReasonDetail: gateFailDetailForResult(scenarioFloorGateDetail),
+      failReasonCodes: earlyFailCodes,
+      failReasonDetail: gateFailDetailForResult(earlyDetail),
       ...gateExtras(),
     };
   }
@@ -819,22 +825,11 @@ export function computeGateResultCore(
     }
   }
 
-  const uniqueGateFailsOrdered = (): GateFailCode[] => {
-    const set = new Set(gateFailReasons);
-    const out: GateFailCode[] = [];
-    for (const c of GATE_FAIL_CODE_ORDER) {
-      if (set.has(c)) out.push(c);
-    }
-    for (const c of gateFailReasons) {
-      if (!out.includes(c)) out.push(c);
-    }
-    return out;
-  };
-  const failCodesOrdered = uniqueGateFailsOrdered();
+  const failCodesOrdered = uniqueGateFailsOrdered(gateFailReasons);
 
   const detail: GateFailDetailJson = {};
   if (failCodesOrdered.includes('weighted_score')) {
-    detail.weighted_score = { score: modifiedScore, requiredMin: weightedMin };
+    detail.weighted_score = { score: modifiedScore, requiredMin: GATE_PASS_WEIGHTED_MIN };
   }
   if (failCodesOrdered.includes('immature_defense_pattern')) {
     detail.immature_defense_pattern = {
@@ -862,8 +857,13 @@ export function computeGateResultCore(
   const passedAggregate = failCodesOrdered.length === 0 && modifiedScore >= weightedMin;
 
   if (!passedAggregate) {
-    const primary = pickPrimaryGateReason(failCodesOrdered);
-    const { failingConstruct, failingScore } = pickPrimaryFailingConstructAndScore(failCodesOrdered, detail);
+    const resolvedFailCodes: GateFailCode[] =
+      failCodesOrdered.length > 0 ? failCodesOrdered : ['weighted_score'];
+    if (resolvedFailCodes.includes('weighted_score') && !detail.weighted_score) {
+      detail.weighted_score = { score: modifiedScore, requiredMin: GATE_PASS_WEIGHTED_MIN };
+    }
+    const primary = pickPrimaryGateReason(resolvedFailCodes);
+    const { failingConstruct, failingScore } = pickPrimaryFailingConstructAndScore(resolvedFailCodes, detail);
     return {
       pass: false,
       reason: primary,
@@ -873,8 +873,8 @@ export function computeGateResultCore(
       failingScore,
       assessedMarkerCount: assessedMarkerIds.length,
       excludedMarkers,
-      failReason: formatAggregateGateFailReason(failCodesOrdered, detail, modifiedScore, weightedMin),
-      failReasonCodes: failCodesOrdered,
+      failReason: formatAggregateGateFailReason(resolvedFailCodes, detail, modifiedScore, weightedMin),
+      failReasonCodes: resolvedFailCodes,
       failReasonDetail: gateFailDetailForResult(detail),
       scenarioComposites,
       ...gateExtras(),

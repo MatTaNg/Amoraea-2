@@ -77,6 +77,7 @@ async function runReasoningRetryInBackground(
   _attemptSnapshot: AttemptRow
 ): Promise<void> {
   const startedAt = Date.now();
+  console.log(`[narrative] Starting for attempt ${attemptId} (source=admin-retry-ai-reasoning)`);
   const { data: freshRow, error: refetchErr } = await admin
     .from('interview_attempts')
     .select(
@@ -122,6 +123,7 @@ async function runReasoningRetryInBackground(
   }
 
   try {
+    console.log(`[narrative] Attempt ${attemptId} fetched, calling model`);
     const reasoning = await generateAIReasoning(
       pillarScores,
       scenarioScoresFromAttempt(attempt),
@@ -131,6 +133,7 @@ async function runReasoningRetryInBackground(
       [],
       { perAttemptTimeoutMs: ADMIN_AI_REASONING_BACKGROUND_TIMEOUT_MS, maxAttempts: 1 }
     );
+    console.log(`[narrative] Model returned response, writing to DB for attempt ${attemptId}`);
     await admin
       .from('interview_attempts')
       .update({
@@ -142,11 +145,15 @@ async function runReasoningRetryInBackground(
         reasoning_pending: false,
       })
       .eq('id', attemptId);
+    console.log(`[narrative] Completed successfully for attempt ${attemptId}`, {
+      elapsed_ms: Date.now() - startedAt,
+    });
   } catch (e) {
     const error = e instanceof Error ? e.message : String(e);
     if (error.includes('aborted') || (e instanceof Error && e.name === 'AbortError')) {
-      console.error('[Reasoning] AbortError on admin retry:', error);
+      console.error('[narrative] AbortError on admin retry:', error);
     }
+    console.error(`[narrative] Unhandled error for attempt ${attemptId}:`, e);
     await admin
       .from('interview_attempts')
       .update({

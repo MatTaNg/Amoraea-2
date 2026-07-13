@@ -1,7 +1,8 @@
+import { isExplicitRepeatRequestPreClassification } from '@features/aria/metaCommentClassification';
+
 /**
  * Resume welcome-back gate: classify whether the user's next turn is repeat/continue vs a substantive answer.
  */
-
 export function looksLikeRepeatCueInAmbiguousReply(text: string): boolean {
   const t = text.trim().toLowerCase();
   if (!t) return false;
@@ -48,4 +49,24 @@ export const RESUME_GATE_LONG_ANSWER_WORD_THRESHOLD = 18;
 
 export function shouldBypassResumeRepeatGateForLongAnswer(wordCount: number): boolean {
   return wordCount > RESUME_GATE_LONG_ANSWER_WORD_THRESHOLD;
+}
+
+/** Substantive mic turn after resume welcome — process normally instead of blocking on repeat-choice gate. */
+export function shouldTreatTranscriptAsResumeGateSubstantiveBypass(
+  userText: string,
+  wordCount: number,
+  lastQuestionText: string | null | undefined,
+): boolean {
+  if (shouldBypassResumeRepeatGateForLongAnswer(wordCount)) return true;
+  return looksLikeDirectResumeAnswer(userText, lastQuestionText ?? null);
+}
+
+/** Allow explicit repeat requests and substantive answers through while repeat-choice is pending. */
+export function shouldAllowResumeRepeatChoiceTurnProcessing(
+  userText: string,
+  wordCount: number,
+  lastQuestionText: string | null | undefined,
+): boolean {
+  if (isExplicitRepeatRequestPreClassification(userText)) return true;
+  return shouldTreatTranscriptAsResumeGateSubstantiveBypass(userText, wordCount, lastQuestionText ?? null);
 }

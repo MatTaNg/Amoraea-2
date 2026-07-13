@@ -73,6 +73,8 @@ interface UserInterviewLayoutProps {
   webInsecureContextMessage?: string | null;
   /** One-time device / thermal / routing notice at interview start (cleared when mic is used). */
   sessionAudioHealthNotice?: string | null;
+  /** Shown when the conversation API fails — refresh / try again later. */
+  conversationErrorNotice?: string | null;
   /** 0–1 live mic level while recording (expo metering / web analyser). */
   micInputLevel?: number;
   /** When true, keep level bars visible even at silence (mic pre-init or active recording). */
@@ -136,6 +138,7 @@ export const UserInterviewLayout: React.FC<UserInterviewLayoutProps> = ({
   micLabelOverride,
   webInsecureContextMessage = null,
   sessionAudioHealthNotice = null,
+  conversationErrorNotice = null,
   micInputLevel = 0,
   showMicInputMeter = false,
   micSessionRecovering = false,
@@ -377,6 +380,12 @@ export const UserInterviewLayout: React.FC<UserInterviewLayoutProps> = ({
 
         {ttsPlaybackReliabilityNotice && !micError ? (
           <Text style={styles.insecureContextBanner}>{ttsPlaybackReliabilityNotice}</Text>
+        ) : null}
+
+        {conversationErrorNotice && !micError ? (
+          <Text style={styles.conversationErrorBanner} accessibilityLiveRegion="assertive">
+            {conversationErrorNotice}
+          </Text>
         ) : null}
 
         {lateStartRecordingCue && voiceState === 'idle' ? (
@@ -1053,6 +1062,17 @@ const styles = StyleSheet.create({
     marginTop: 10,
     marginHorizontal: 12,
     paddingHorizontal: 8,
+  },
+  conversationErrorBanner: {
+    fontFamily: FONT_UI,
+    fontSize: 13,
+    fontWeight: '500',
+    lineHeight: 20,
+    color: '#E87A7A',
+    textAlign: 'center',
+    marginTop: 10,
+    marginHorizontal: 16,
+    paddingHorizontal: 10,
   },
   waitingRow: {
     flexDirection: 'row',

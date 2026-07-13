@@ -10,7 +10,7 @@ const WARM_RATE = 0.78;   // Slower pace (0.8–0.9) sounds much more natural in
 const WARM_PITCH = 0.95;  // Slight drop avoids flat “robot” tone
 const WARM_VOLUME = 1.0;
 
-/** Preferred voice gender for Aria: opposite of user (female for male user, male for female user) */
+/** Preferred voice gender for Amoraea: opposite of user (female for male user, male for female user) */
 export type AriaVoiceGender = 'female' | 'male';
 
 export function getPreferredAriaVoiceGender(userGender: Gender | null): AriaVoiceGender {
@@ -116,7 +116,7 @@ export interface AriaSpeechOptions {
 }
 
 /**
- * Resolves TTS options for Aria: warm, friendly voice opposite to user gender.
+ * Resolves TTS options for Amoraea: warm, friendly voice opposite to user gender.
  * Female voice for male users, male voice for female users.
  * Works on iOS, Android, and web (npm run web): uses expo-speech and the
  * browser’s Speech Synthesis API when running in the browser.

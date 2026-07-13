@@ -1,0 +1,76 @@
+{
+  "scorableCount": 75,
+  "oldPassCount": 46,
+  "newPassCount": 37,
+  "productionNewPassCount": 37,
+  "passToFailCount": 9,
+  "failToPassCount": 0,
+  "withFullNarrative": 4,
+  "withScoringEvidenceOnly": 5,
+  "withNeither": 0,
+  "attempts": [
+    {
+      "userId": "a429020a-8557-4508-8233-b9f83c42616e",
+      "attemptId": "664dfe29-d7df-42c9-a085-bbeb78bfc5c4",
+      "flipReason": "score_threshold_only",
+      "modifiedScore": 6.1,
+      "hasFullNarrative": true
+    },
+    {
+      "userId": "e395037c-420c-48fc-b5db-e0bb33e5884b",
+      "attemptId": "f9494ec1-1d1c-49f1-bfa6-4a8abc3752a5",
+      "flipReason": "score_threshold_only",
+      "modifiedScore": 6.2,
+      "hasFullNarrative": false
+    },
+    {
+      "userId": "a3846e03-97ef-42cb-81e3-f0d522da5c70",
+      "attemptId": "0c1cf5b1-be61-4de7-b838-8efd19c86a39",
+      "flipReason": "score_threshold_only",
+      "modifiedScore": 6.3,
+      "hasFullNarrative": true
+    },
+    {
+      "userId": "09fab59b-ab39-40db-9965-23fef8f3f4f8",
+      "attemptId": "eb4c73fc-c715-4151-9f34-4f0a9532b2cb",
+      "flipReason": "score_threshold_only",
+      "modifiedScore": 6.4,
+      "hasFullNarrative": true
+    },
+    {
+      "userId": "3ac30567-38d8-4f8b-a00f-13f6af3c543a",
+      "attemptId": "b3dcb5fd-a735-410d-9493-ee1fbb7c8b46",
+      "flipReason": "score_threshold_only",
+      "modifiedScore": 6.4,
+      "hasFullNarrative": true
+    },
+    {
+      "userId": "f52aa4b6-7d54-422f-990f-623ba43f7bc5",
+      "attemptId": "37b1ec35-7ad2-46b9-af75-315f762be109",
+      "flipReason": "score_threshold_only",
+      "modifiedScore": 6.4,
+      "hasFullNarrative": false
+    },
+    {
+      "userId": "042172fe-906a-4a26-b621-25e3987aba5b",
+      "attemptId": "2fec04ab-73ea-4eb5-83a0-7ba5a0da969d",
+      "flipReason": "both",
+      "modifiedScore": 6.2,
+      "hasFullNarrative": false
+    },
+    {
+      "userId": "ec65d400-458f-44a6-9eae-d566cb8dbc63",
+      "attemptId": "1ba58fff-c81f-47af-a786-73b91ec38cd4",
+      "flipReason": "both",
+      "modifiedScore": 6.4,
+      "hasFullNarrative": false
+    },
+    {
+      "userId": "d00be80e-9bff-4ce9-81ec-614377d73358",
+      "attemptId": "721ef7f7-c311-48b2-9002-fdacf756f1de",
+      "flipReason": "both",
+      "modifiedScore": 6.45,
+      "hasFullNarrative": false
+    }
+  ]
+}

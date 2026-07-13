@@ -24,7 +24,9 @@ import { mergeMomentConcretenessForGate, normalizeMoment4Concreteness, normalize
 import { scenarioEmotionalVocabDensityPercentFromTranscript } from './personalMomentEmotionalVocab.ts';
 import { applyPsychometricModifierToAttempt } from './applyPsychometricModifier.ts';
 import { normalizeGateFailDetailForPersist } from './gateFailDetailForPersist.ts';
-import { crossReferenceDefenseDetection } from './crossReferenceDefenseDetection.ts';
+import { buildDefenseCrossReferenceForAttempt } from './crossReferenceDefenseDetection.ts';
+import { normalizeDefensePatternsForPersist } from './defensePatternsDetection.ts';
+import { markScoringStageComplete } from './ensureInterviewRollupArtifacts.ts';
 import {
   computeAvgScenarioTotalUserWords,
   computeDisclosureCalibration,
@@ -61,6 +63,7 @@ async function markAttemptIncompleteNoScore(
     detail: failure.detail,
     missingScenarioNumbers: failure.missingScenarioNumbers,
     missingMoment4: failure.missingMoment4,
+    missingMoment5: failure.missingMoment5,
   });
   const { error: upA } = await supabase
     .from('interview_attempts')
@@ -217,8 +220,12 @@ function scenarioScoresFromAttempt(
   ([1, 2, 3] as const).forEach((n) => {
     const raw = n === 1 ? s1 : n === 2 ? s2 : s3;
     if (!raw || typeof raw !== 'object') return;
-    const o = raw as { pillarScores?: Record<string, number | null>; scenarioName?: string };
-    const ps = o.pillarScores;
+    const o = raw as {
+      pillarScores?: Record<string, number | null>;
+      pillar_scores?: Record<string, number | null>;
+      scenarioName?: string;
+    };
+    const ps = o.pillarScores ?? o.pillar_scores;
     if (!ps || typeof ps !== 'object') return;
     out[n] = { pillarScores: ps, scenarioName: o.scenarioName };
   });
@@ -404,7 +411,9 @@ async function runStandardInterviewReasoningInBackground(
   inputs: ReasoningBackgroundInputs,
 ): Promise<void> {
   const startedAt = Date.now();
+  console.log(`[narrative] Starting for attempt ${attemptId} (source=complete-standard-interview-background)`);
   try {
+    console.log(`[narrative] Attempt ${attemptId} fetched, calling model`);
     const reasoning = await generateAIReasoning(
       inputs.pillarForReasoning,
       inputs.scenarioMap,
@@ -414,10 +423,16 @@ async function runStandardInterviewReasoningInBackground(
       [],
       {
         perAttemptTimeoutMs: STANDARD_REASONING_BACKGROUND_TIMEOUT_MS,
-        maxAttempts: 1,
+        maxAttempts: 4,
         evidenceContext: inputs.evidenceContext,
       },
     );
+    if (!reasoning || typeof reasoning !== 'object') {
+      const error = 'model_returned_null';
+      console.error(`[narrative] Model returned null for attempt ${attemptId}`);
+      throw new Error(error);
+    }
+    console.log(`[narrative] Model returned response, writing to DB for attempt ${attemptId}`);
     const { error } = await supabase
       .from('interview_attempts')
       .update({
@@ -427,7 +442,7 @@ async function runStandardInterviewReasoningInBackground(
       .eq('id', attemptId)
       .eq('user_id', userId);
     if (error) {
-      console.error('[complete-standard-interview] reasoning background persist failed', error.message);
+      console.error(`[narrative] DB write failed for attempt ${attemptId}:`, error.message);
       try {
         await supabase
           .from('interview_attempts')
@@ -437,22 +452,21 @@ async function runStandardInterviewReasoningInBackground(
           })
           .eq('id', attemptId)
           .eq('user_id', userId);
-        console.log('[Reasoning] save retry succeeded after initial failure');
+        console.log('[narrative] save retry succeeded after initial failure');
       } catch (retryErr) {
-        console.error('[Reasoning] save retry failed:', retryErr);
+        console.error('[narrative] save retry failed:', retryErr);
       }
     } else {
-      console.log('[complete-standard-interview] reasoning background ok', {
-        attemptId,
+      console.log(`[narrative] Completed successfully for attempt ${attemptId}`, {
         elapsed_ms: Date.now() - startedAt,
       });
     }
   } catch (e) {
     const error = e instanceof Error ? e.message : String(e);
     if (error.includes('aborted') || (e instanceof Error && e.name === 'AbortError')) {
-      console.error('[Reasoning] AbortError on background reasoning:', error);
+      console.error('[narrative] AbortError on background reasoning:', error);
     }
-    console.error('[complete-standard-interview] reasoning background failed', { attemptId, error });
+    console.error(`[narrative] Unhandled error for attempt ${attemptId}:`, e);
     await supabase
       .from('interview_attempts')
       .update({
@@ -465,6 +479,7 @@ async function runStandardInterviewReasoningInBackground(
           note: 'Narrative AI reasoning failed or timed out; scores saved.',
           last_error: error,
           failed_at: new Date().toISOString(),
+          _failedAt: new Date().toISOString(),
         },
         reasoning_pending: false,
       })
@@ -594,7 +609,7 @@ export async function runCompleteStandardInterview(
   }
 
   try {
-    await supabase.rpc('fulfill_referral_after_interview', { p_user_id: userId });
+    await supabase.rpc('apply_referral_completion_effects', { p_user_id: userId });
   } catch {
     /* best-effort */
   }
@@ -729,7 +744,7 @@ export async function runCompleteStandardInterview(
     aggregatedResult.personal_moment_emotional_vocab_low ||
     rowTyped.personal_moment_emotional_vocab_low === true;
   const mentalizingOvercertaintyCountForAttempt = aggregatedResult.mentalizingOvercertaintyCount ?? 0;
-  const defensePatternsForAttempt = aggregatedResult.defensePatterns;
+  const defensePatternsForAttempt = normalizeDefensePatternsForPersist(aggregatedResult.defensePatterns);
 
   const emotionRow = row as {
     emotion_recognition_score?: unknown;
@@ -766,7 +781,7 @@ export async function runCompleteStandardInterview(
       : null;
 
   const precomputedWeighted = computeInterviewWeightedCompositeFromPillars(
-    parsed.pillarScores ?? {},
+    aggregatedResult.scores,
     parsed.skepticismModifier ?? null,
     skipPenaltyTotal,
     skipAutoFail,
@@ -787,7 +802,14 @@ export async function runCompleteStandardInterview(
     vocabLow: vocabLowForAttempt,
   });
   const personalWordCounts = personalMomentWordCountsForDisclosure(markerSlices, transcript);
-  const gate = computeGateResultCore(parsed.pillarScores ?? {}, parsed.skepticismModifier ?? null, {
+  const pillarScoresForGate: Record<string, number> =
+    Object.keys(aggregatedResult.scores).length > 0
+      ? { ...aggregatedResult.scores }
+      : { ...((parsed.pillarScores ?? {}) as Record<string, number>) };
+  const pillarScoresForPersist =
+    Object.keys(aggregatedResult.scores).length > 0 ? aggregatedResult.scores : (parsed.pillarScores ?? null);
+  console.log('[rollup] Computing scenario composites and gate for attempt', attemptId);
+  const gate = computeGateResultCore(pillarScoresForGate, parsed.skepticismModifier ?? null, {
     weightedPassMin: weightedMin,
     scenarioPillarScoresByScenario,
     skipPenaltyTotal,
@@ -805,9 +827,18 @@ export async function runCompleteStandardInterview(
     emotionRecognitionResponses: emotionResponsesForAttempt,
     mentalizingOvercertaintyCount: mentalizingOvercertaintyCountForAttempt,
     ...(closingIntegrationForGate != null ? { closingIntegration: closingIntegrationForGate } : {}),
+    moment4AccountabilitySituationallyExempt: aggregatedResult.moment4AccountabilitySituationallyExempt === true,
+    moment4AccountabilityExemptReason: aggregatedResult.moment4AccountabilityExemptReason ?? null,
     ...(typeof precomputedWeighted === 'number' && Number.isFinite(precomputedWeighted)
       ? { precomputedWeightedScore: precomputedWeighted }
       : {}),
+  });
+  console.log('[rollup] Gate result', {
+    attemptId,
+    pass: gate.pass,
+    weightedScore: gate.weightedScore,
+    scenarioComposites: gate.scenarioComposites ?? null,
+    gateFailReasons: gate.failReasonCodes ?? [],
   });
   console.log('[EdgeEgoDev] final ego_development_level to persist:', egoLevelForAttempt);
   console.log('[EdgeGate] scoreModifier:', gate.scoreModifier, 'modifiedScore:', gate.modifiedWeightedScore);
@@ -825,21 +856,9 @@ export async function runCompleteStandardInterview(
 
   const dpRaw = defensePatternsForAttempt as Record<string, unknown> | null;
   const preCrossRefDepthModifier = gate.depthSignalModifier ?? gate.scoreModifier ?? 0;
-  const defenseCrossReference = crossReferenceDefenseDetection({
-    defensePatterns: {
-      projection_detected: dpRaw?.projection_detected === true,
-      splitting_detected: dpRaw?.splitting_detected === true,
-      rationalization_detected: dpRaw?.rationalization_detected === true,
-      denial_detected: dpRaw?.denial_detected === true,
-    },
-    psychometricScores: {
-      gasp_externalization: finiteNumberOrNull(userPsych?.psychometrics_gasp_score),
-      rfq_score: finiteNumberOrNull(userPsych?.psychometrics_rfq_score),
-      sd3_narcissism_score: finiteNumberOrNull(userPsych?.psychometrics_sd3_narcissism_score),
-      rses_score: finiteNumberOrNull(userPsych?.psychometrics_rses_score),
-      scs_sf_score: finiteNumberOrNull(userPsych?.psychometrics_scs_sf_score),
-      aaq2_score: finiteNumberOrNull(userPsych?.psychometrics_aaq2_score),
-    },
+  const defenseCrossReference = buildDefenseCrossReferenceForAttempt({
+    defensePatterns: dpRaw,
+    userPsychometrics: userPsych as Record<string, unknown> | null | undefined,
     depthSignalModifierApplied: preCrossRefDepthModifier,
   });
   const crossRefAdjustedDepthModifier =
@@ -858,7 +877,9 @@ export async function runCompleteStandardInterview(
     recommendAdminReview: defenseCrossReference.recommendAdminReview,
     flagCount: defenseCrossReference.flags.length,
   });
-  const pillarForReasoning = toNumericPillarMap(parsed.pillarScores as Record<string, number | null>);
+  const pillarForReasoning = toNumericPillarMap(
+    (pillarScoresForPersist ?? parsed.pillarScores) as Record<string, number | null>,
+  );
   const reasoningBackgroundInputs: ReasoningBackgroundInputs = {
     pillarForReasoning,
     scenarioMap,
@@ -961,10 +982,19 @@ export async function runCompleteStandardInterview(
     .eq('user_id', userId);
   if (incrementalHolisticErr) {
     console.error('[Holistic Persist] edge incremental save failed:', incrementalHolisticErr.message);
+    const { error: crossRefOnlyErr } = await supabase
+      .from('interview_attempts')
+      .update({ defense_cross_reference: defenseCrossReference })
+      .eq('id', attemptId)
+      .eq('user_id', userId);
+    if (crossRefOnlyErr) {
+      console.error('[DefenseCrossRef] isolated persist after holistic failure:', crossRefOnlyErr.message);
+    }
   } else {
     console.log('[Holistic Persist] holistic scores persisted immediately — ego dev:', egoLevelForAttempt);
   }
 
+  console.log('[rollup] Writing rollup fields to DB for attempt', attemptId);
   const { error: upA } = await supabase
     .from('interview_attempts')
     .update({
@@ -974,7 +1004,7 @@ export async function runCompleteStandardInterview(
       gate_fail_reasons: gate.failReasonCodes ?? [],
       gate_fail_detail: normalizeGateFailDetailForPersist(gate.failReasonDetail),
       scenario_composites: scenarioCompositesToStorageJson(gate.scenarioComposites),
-      pillar_scores: parsed.pillarScores ?? null,
+      pillar_scores: pillarScoresForPersist,
       /** Preserve client-written slices; holistic output does not include per-scenario JSON. */
       scenario_1_scores: row.scenario_1_scores,
       scenario_2_scores: row.scenario_2_scores,
@@ -987,14 +1017,15 @@ export async function runCompleteStandardInterview(
       communication_floor_flag: commFloor.communication_floor_flag,
       communication_floor_avg_unprompted_words: commFloor.communication_floor_avg_unprompted_words,
       ego_development_level: egoLevelForAttempt ?? existingEgo,
-      review_flags: gate.reviewFlags,
+      review_flags: reviewFlagsForPersist,
       depth_signal_modifier: persistedDepthModifier,
       score_modifier: persistedScoreModifier,
       modified_weighted_score: persistedModifiedWeighted,
       disclosure_calibration: disclosureCalibrationForAttempt ?? existingDisclosure,
       mentalizing_overcertainty_count:
         mentalizingOvercertaintyCountForAttempt ?? existingMentalizingCount,
-      defense_patterns: defensePatternsForAttempt ?? rowTyped.defense_patterns,
+      defense_patterns: defensePatternsForAttempt,
+      defense_cross_reference: defenseCrossReference,
       moment_4_concreteness: moment4ConcretenessPersist ?? rowTyped.moment_4_concreteness ?? null,
       moment_5_concreteness: moment5ConcretenessPersist ?? rowTyped.moment_5_concreteness ?? null,
       personal_moment_emotional_vocab_density: vocabDensityForAttempt,
@@ -1009,6 +1040,36 @@ export async function runCompleteStandardInterview(
   if (upA) {
     return { ok: false, error: upA.message };
   }
+  console.log('[rollup] Rollup persist complete for attempt', attemptId, {
+    scenario_composites: scenarioCompositesToStorageJson(gate.scenarioComposites),
+    gate_fail_reasons: gate.failReasonCodes ?? [],
+    defense_cross_reference: defenseCrossReference != null,
+  });
+
+  // Atomic verify + backfill any fields the main write missed (never fire-and-forget).
+  const fullRollup = await markScoringStageComplete(supabase, attemptId, userId, 'moment5', {
+    force: true,
+    trigger: 'completeStandardInterviewCore:holistic_complete',
+    overrides: {
+      scenario_composites: scenarioCompositesToStorageJson(gate.scenarioComposites),
+      gate_fail_reasons: gate.failReasonCodes ?? [],
+      defense_patterns: defensePatternsForAttempt,
+      defense_cross_reference: defenseCrossReference,
+      ego_development_level: egoLevelForAttempt ?? existingEgo,
+      disclosure_calibration: disclosureCalibrationForAttempt ?? existingDisclosure,
+      personal_moment_emotional_vocab_density: vocabDensityForAttempt,
+      personal_moment_emotional_vocab_low: vocabLowForAttempt,
+      depth_signal_modifier: persistedDepthModifier,
+      score_modifier: persistedScoreModifier,
+      modified_weighted_score: persistedModifiedWeighted,
+    },
+  });
+  console.log('[rollup] Full rollup verify for attempt', attemptId, {
+    ok: fullRollup.ok,
+    verified: fullRollup.verified,
+    skipped: fullRollup.skipped ?? null,
+    error: fullRollup.error ?? null,
+  });
 
   await applyPsychometricModifierToAttempt(supabase, userId, attemptId);
 
