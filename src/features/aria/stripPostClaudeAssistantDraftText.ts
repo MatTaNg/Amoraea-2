@@ -58,6 +58,7 @@ import {
   stripHollowSystemInterviewerPhrases,
   coerceMidScenarioRelationalReflectionToBriefAck,
 } from '@features/aria/interviewAssistantReflection';
+import { stripScenarioBoundaryContentReflection } from '@features/aria/stripScenarioBoundaryContentReflection';
 import {
   cleanupScenarioWrapAfterRepairStrip,
   findLastUserWithPriorAssistantContent,
@@ -128,6 +129,7 @@ import {
   stripInterviewClosingBundledWithMoment5ResolutionFollowUp,
 } from '@features/aria/moment5SpecificityRedirect';
 import { remoteLog } from '@utilities/remoteLog';
+import { isShortAckOnlySentence } from '@features/aria/interviewerFrameworkPrompt';
 
 export type StripPostClaudeAssistantDraftResult = {
   strippedText: string;
@@ -169,6 +171,7 @@ export function stripPostClaudeAssistantDraftText(
     strippedText,
     params.messagesToUse.filter((m) => m.role === 'assistant') as PostClaudeInterviewMessage[],
   );
+  strippedText = stripScenarioBoundaryContentReflection(strippedText);
   strippedText = stripFlatReflectionAcknowledgmentOpeners(strippedText);
   strippedText = stripGenericReflectionFillersFirstParagraph(strippedText);
   strippedText = stripStandalonePersonalDisclosureAckOutsidePersonalMoments(
@@ -534,8 +537,11 @@ export function stripPostClaudeAssistantDraftText(
   }
   if (
     scenarioAConstructProbeTurn &&
-    deps.scenarioARepairQuestionAskedRef.current &&
-    !repairSatisfiedForScenarioAAdvance
+    !repairSatisfiedForScenarioAAdvance &&
+    !shouldDeliverScenarioFollowUpQuestion(
+      params.messagesToUse,
+      SCENARIO_A_REPAIR_QUESTION_AFTER_CONTEMPT_COPY,
+    )
   ) {
     const shouldStripRepairEcho =
       hasScenarioWrapPhrase || !scenarioHandoffAssistantTurn;
@@ -550,6 +556,24 @@ export function stripPostClaudeAssistantDraftText(
         scenarioHandoffAssistantTurn,
       });
     }
+  }
+  if (
+    scenarioAConstructProbeTurn &&
+    !repairSatisfiedForScenarioAAdvance &&
+    shouldDeliverScenarioFollowUpQuestion(
+      params.messagesToUse,
+      SCENARIO_A_REPAIR_QUESTION_AFTER_CONTEMPT_COPY,
+    ) &&
+    isShortAckOnlySentence(strippedText) &&
+    !looksLikeScenarioARepairQuestion(strippedText)
+  ) {
+    const beforeRepairReinject = strippedText;
+    strippedText = `${strippedText.trim()} ${SCENARIO_A_REPAIR_QUESTION_AFTER_CONTEMPT_COPY}`.trim();
+    void remoteLog('[S1_REPAIR_REINJECTED_AFTER_SHORT_ACK_STRIP]', {
+      interviewSessionId: deps.interviewSessionIdRef.current,
+      beforePreview: beforeRepairReinject.slice(0, 80),
+      afterPreview: strippedText.slice(0, 220),
+    });
   }
 
   const scenarioBConstructProbeTurn =

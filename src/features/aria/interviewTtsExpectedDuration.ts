@@ -27,5 +27,7 @@ export function computeExpectedTtsWallClockMs(
 }
 
 export const MAX_TTS_PLAYBACK_COMPLETION_ATTEMPTS = 3;
-export const TTS_PREMATURE_RATIO_STABILITY_EPSILON = 0.02;
-export const TTS_REPLAY_PREMATURE_ACCEPT_MIN_RATIO = 0.65;
+/** Consecutive premature attempts within this delta are treated as estimate overshoot, not true truncation. */
+export const TTS_PREMATURE_RATIO_STABILITY_EPSILON = 0.05;
+/** Replay / long assistant turns: accept if wall-clock reached at least this share of the estimate. */
+export const TTS_REPLAY_PREMATURE_ACCEPT_MIN_RATIO = 0.55;

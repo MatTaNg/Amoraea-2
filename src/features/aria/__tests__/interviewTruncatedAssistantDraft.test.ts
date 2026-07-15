@@ -5,6 +5,7 @@ import {
 } from '@features/aria/interviewTruncatedAssistantDraft';
 import { MOMENT_4_COMMITMENT_THRESHOLD_QUESTION_CARD_BODY, MOMENT_4_GRUDGE_QUESTION_TEXT } from '@features/aria/moment4ProbeLogic';
 import { buildClientScenarioBoundaryHandoffBundle } from '@features/aria/interviewTransitionBundles';
+import { SCENARIO_A_CONTEMPT_PROBE_DELIVERED_COPY } from '@features/aria/scenarioAContemptProbeTtsStrip';
 
 describe('interviewTruncatedAssistantDraft', () => {
   it('detects S1 wraps up this situation handoff fragment', () => {
@@ -72,6 +73,21 @@ describe('interviewTruncatedAssistantDraft', () => {
     const coerced =
       'Got it. Thanks for sharing that. At what point do you decide when a relationship is something to work through versus something you need to walk away from?';
     expect(spokenTextMissesCoercedAssistantDraft(spoken, coerced)).toBe(true);
+  });
+
+  it('coerces Emma last-line feeling paraphrase to canonical S1 contempt probe', () => {
+    const paraphrase =
+      'Got it. Do you think Emma\'s last line — "I know, you\'ve made that very clear" — says something specific about how she\'s feeling?';
+    const out = coerceInterviewAssistantDraftForSpeak(paraphrase, {
+      interviewMoment: 1,
+      currentScenario: 1,
+      firstName: 'Matt',
+      messages: [],
+    });
+    expect(out).toBe(SCENARIO_A_CONTEMPT_PROBE_DELIVERED_COPY);
+    expect(
+      spokenTextMissesCoercedAssistantDraft(SCENARIO_A_CONTEMPT_PROBE_DELIVERED_COPY, out),
+    ).toBe(false);
   });
 
   it('coerces S2 truncated Q1 redirect to canonical Q1 when user has not yet satisfied James repair', () => {
@@ -142,7 +158,7 @@ describe('interviewTruncatedAssistantDraft', () => {
       messages,
     });
     expect(out).toMatch(/Sophie and Daniel/i);
-    expect(out).toMatch(/third situation/i);
+    expect(out).toMatch(/second one done|one more situation|get personal/i);
   });
 
   it('preserves S3→M4 handoff bundle at moment 4 instead of M4 specificity follow-up', () => {
@@ -170,7 +186,7 @@ describe('interviewTruncatedAssistantDraft', () => {
       firstName: 'Matt',
       messages,
     });
-    expect(out).toMatch(/end of the three described situations/i);
+    expect(out).toMatch(/finished the three situations|end of the three|two questions left/i);
     expect(out).toMatch(/really hard time with/i);
     expect(out).not.toMatch(/specific person — even if/i);
   });

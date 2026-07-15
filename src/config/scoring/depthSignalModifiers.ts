@@ -5,9 +5,9 @@
 
 /** Ego development level (1–5) → modifier added to weighted score. Level 1 also triggers auto-fail. */
 export const EGO_DEVELOPMENT_LEVEL_MODIFIERS: Record<1 | 2 | 3 | 4 | 5, number> = {
-  1: -0.8,
-  2: -0.3,
-  3: 0,
+  1: -0.3,
+  2: 0,
+  3: 0.1,
   4: 0.2,
   5: 0.3,
 };

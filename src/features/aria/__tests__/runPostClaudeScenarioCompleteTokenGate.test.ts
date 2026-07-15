@@ -142,8 +142,8 @@ describe('runPostClaudeScenarioCompleteTokenGate', () => {
       .filter((m) => m.role === 'assistant')
       .map((m) => m.content ?? '')
       .join('\n');
-    expect(assistantText).toMatch(/You (?:focused on|named|framed|pointed to|highlighted|saw|recognized|picked up on|read)|What (?:I got|I heard|came through|landed for me) was that/i);
-    expect(assistantText).toContain('Nice work, Alex');
+    expect(assistantText).toMatch(/second one done|one more situation|Sophie|Daniel/i);
+    expect(assistantText).not.toContain('Nice work, Alex');
     expect(assistantText).toMatch(/Sophie|Daniel/i);
   });
 

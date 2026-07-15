@@ -404,6 +404,22 @@ describe('emotionRecognitionInterview', () => {
     expect(isNaturalLanguageScenarioHandoffTransition('How would you repair this if you were Ryan?')).toBe(false);
   });
 
+  it('detects canonical short S1→S2 wrap alone and opens emotion modal at scenario 1', () => {
+    const wrapOnly =
+      "Good work — that's the end of this scenario. Here's the next situation.";
+    expect(isNaturalLanguageScenarioHandoffTransition(wrapOnly)).toBe(true);
+    const split = splitScenarioTransitionForEmotionModal(wrapOnly);
+    expect(split.afterModal).toBe('');
+    expect(split.beforeModal).toBe(wrapOnly);
+    const gate = resolveNaturalLanguageEmotionModalGate({
+      displayText: wrapOnly,
+      priorScenario: 1,
+      detectedScenario: 1,
+    });
+    expect(gate.emotionNaturalForward).toBe(true);
+    expect(gate.completedScenario).toBe(1);
+  });
+
   it('detects S1 wrap-only with Situation 1 phrasing and opens emotion modal at scenario 1', () => {
     const wrapOnly =
       "That's a wrap on Situation 1 — thanks for working through that one. Nice work, Matt — you read Emma's closing line as condescending and dismissive.";
@@ -442,6 +458,33 @@ describe('emotionRecognitionInterview', () => {
     });
     expect(gate.emotionNaturalForward).toBe(false);
     expect(gate.completedScenario).toBeNull();
+  });
+
+  it('resolveNaturalLanguageEmotionModalGate allows S1→S2 when Situation 2 playback already confirmed', () => {
+    const handoff =
+      "That's a wrap on that one. Nice work, Matt. Here's the next situation.\n\nSarah has been job hunting for four months.";
+    const messages = [
+      {
+        role: 'user',
+        content: 'Emma feels secondary to his mother.',
+      },
+    ];
+    const blocked = resolveNaturalLanguageEmotionModalGate({
+      displayText: handoff,
+      priorScenario: 1,
+      detectedScenario: 2,
+      messages,
+    });
+    expect(blocked.emotionNaturalForward).toBe(false);
+    const gate = resolveNaturalLanguageEmotionModalGate({
+      displayText: handoff,
+      priorScenario: 1,
+      detectedScenario: 2,
+      messages,
+      situation2PlaybackConfirmed: true,
+    });
+    expect(gate.emotionNaturalForward).toBe(true);
+    expect(gate.completedScenario).toBe(1);
   });
 
   it('resolveNaturalLanguageEmotionModalGate opens S3 modal on M4 handoff without detectedScenario', () => {
@@ -530,5 +573,15 @@ describe('emotionRecognitionInterview', () => {
       "Here's the next situation. Sophie and Daniel have had the same argument. Daniel says \"I need ten minutes.\" Sophie says he didn't know what to say and she's still upset.",
     );
     expect(prior).toBe(2);
+  });
+
+  it('resolveHandoffPriorScenario keeps S1 prior when refs already advanced past S2 vignette', () => {
+    const prior = resolveHandoffPriorScenario(
+      2,
+      2,
+      [{ role: 'user', content: 'repair answer', scenarioNumber: 1 }],
+      "That's a wrap on that one. Nice work, Matt — reflection.\n\nSarah has been job hunting for four months. She gets an offer and calls James from the street. James is on a deadline. Sarah never feels appreciated. A fight starts.",
+    );
+    expect(prior).toBe(1);
   });
 });

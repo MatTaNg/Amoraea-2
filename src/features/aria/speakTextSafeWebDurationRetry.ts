@@ -7,7 +7,6 @@ import {
 } from '@features/aria/interviewLanguageGate';
 import { isInterviewRecordingRetryLine } from '@features/aria/interviewNameValidation';
 import { transcriptAssistantContainsMoment5PrimaryConflictQuestion } from '@features/aria/moment5TranscriptHelpers';
-import { looksLikeScenarioAContemptProbeQuestion } from '@features/aria/scenarioAContemptProbeLogic';
 import type { TtsTelemetrySource } from '@features/aria/telemetry/tsAutoplayTelemetry';
 import {
   TTS_PREMATURE_RATIO_STABILITY_EPSILON,
@@ -18,6 +17,25 @@ import { getSessionLogRuntime } from '@utilities/sessionLogging';
 import { TTS_CALIBRATION_MIN_RATIO_TO_INCLUDE } from '@utilities/sessionLogging/ttsDurationCalibration';
 import { writeSessionLog } from '@utilities/sessionLogging/writeSessionLog';
 import { remoteLog } from '@utilities/remoteLog';
+
+/** Lightweight — keep TTS retry free of probe-logic / Expo import graphs. */
+function textLooksLikeMoment4CommitmentThreshold(text: string): boolean {
+  const t = (text ?? '').toLowerCase();
+  return (
+    t.includes('at what point do you decide when a relationship is something to work through') &&
+    t.includes('walk away')
+  );
+}
+
+/** Lightweight — canonical Emma contempt probe shape used for duration-retry bypass. */
+function textLooksLikeScenarioAContemptProbeQuestion(text: string): boolean {
+  const t = (text ?? '').toLowerCase().replace(/\u2019/g, "'");
+  return (
+    /\bemma\b/.test(t) &&
+    (/\byou'?ve made that very clear\b/.test(t) || /\byou made that very clear\b/.test(t)) &&
+    (/\bwhat about when\b/.test(t) || /\bwhat do you make of\b/.test(t) || /\bwhat did you make of\b/.test(t))
+  );
+}
 
 export function shouldUseWebTtsDurationVerification(args: {
   silent: boolean;
@@ -69,6 +87,20 @@ export function evaluateTtsDurationVerificationBypass(args: {
     };
   }
 
+  const isMoment4CommitmentThresholdTts =
+    args.telemetrySource === 'turn' &&
+    args.interviewSpeechRole === 'assistant_response' &&
+    args.currentInterviewMoment === 4 &&
+    textLooksLikeMoment4CommitmentThreshold(args.text);
+
+  if (args.attemptIx === 0 && isMoment4CommitmentThresholdTts) {
+    return {
+      accept: true,
+      acceptStableTruncation: args.wouldBePremature,
+      reason: 'avoid_replaying_moment4_commitment_threshold',
+    };
+  }
+
   const ttsPlaybackLikelySilent =
     Platform.OS === 'web' && args.actualTtsMs < 250 && !isWebInterviewPlaybackSurfaceActive();
   const isScenarioAContemptProbeTts =
@@ -76,7 +108,7 @@ export function evaluateTtsDurationVerificationBypass(args: {
     args.interviewSpeechRole === 'assistant_response' &&
     args.currentInterviewMoment === 1 &&
     args.currentScenario === 1 &&
-    looksLikeScenarioAContemptProbeQuestion(stripped);
+    textLooksLikeScenarioAContemptProbeQuestion(stripped);
 
   if (args.attemptIx === 0 && isScenarioAContemptProbeTts && !ttsPlaybackLikelySilent) {
     return {
@@ -195,6 +227,11 @@ export function logTtsDurationVerificationBypassSideEffects(args: {
     case 'avoid_replaying_long_moment5_primary_prompt':
       if (args.wouldBePremature) {
         void remoteLog('[TTS_M5_DURATION_VERIFY_BYPASSED]', base);
+      }
+      return;
+    case 'avoid_replaying_moment4_commitment_threshold':
+      if (args.wouldBePremature) {
+        void remoteLog('[TTS_M4_THRESHOLD_DURATION_VERIFY_BYPASSED]', base);
       }
       return;
     case 'avoid_replaying_contempt_probe_on_duration_estimation_overshoot':

@@ -19,7 +19,7 @@ export function isElevenLabsEnabledForEnvironment(): boolean {
   });
 }
 
-/** When false on iOS (default), use expo-speech so output stays on loudspeaker after recording. */
+/** When false on iOS, use expo-speech fallback instead of warm ElevenLabs MP3 (opt-out via env). */
 export function iosUseElevenLabsMp3Playback(): boolean {
   return computeIosUseElevenLabsMp3Playback({
     EXPO_PUBLIC_IOS_ELEVENLABS_TTS_PLAYBACK:

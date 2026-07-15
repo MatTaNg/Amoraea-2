@@ -9,8 +9,8 @@ import {
   SCENARIO_A_REPAIR_QUESTION_AFTER_CONTEMPT_COPY,
 } from '@features/aria/scenarioAContemptProbeTtsStrip';
 
-const CONCLUSION_ANCHOR =
-  /You (?:focused on|named|framed|pointed to|highlighted|saw|recognized|picked up on|read)|What (?:I got|I heard|came through|landed for me) was that/i;
+const WRAP_LEAD_ANCHOR =
+  /that's the end of this scenario|That's a wrap on that one|That's the second one done|finished the three situations|two questions left/i;
 
 const SCENARIO_B_CORPUS_MESSAGES = [
   {
@@ -84,26 +84,105 @@ describe('coerceScenarioBoundaryHandoffDisplayText', () => {
     expect(out).not.toMatch(/Sophie and Daniel/i);
   });
 
-  it('coerces S2→S3 handoff missing reflection for deferral repair answer', () => {
+  it('coerces S2→S3 handoff into short wrap without content reflection', () => {
     const bareHandoff =
       "That scenario is complete. Here's the third situation — after this we'll move to something more personal.\n\nSophie and Daniel have had the same argument for the third time.";
     const messages = [
       ...SCENARIO_B_CORPUS_MESSAGES,
-      { role: 'assistant', content: 'And if you were James, how would you repair?' },
+      {
+        role: 'assistant',
+        content: 'What do you think James could have done differently to help Sarah feel appreciated?',
+        scenarioNumber: 2,
+      },
       {
         role: 'user',
-        content: "Just wait until she brings it up again when she's ready.",
+        content: 'He should have celebrated her before asking about salary and commute.',
+        scenarioNumber: 2,
+      },
+      { role: 'assistant', content: 'And if you were James, how would you repair?', scenarioNumber: 2 },
+      {
+        role: 'user',
+        content:
+          "I'd apologize for leading with logistics, ask how she'd like to be celebrated, and commit to doing that next time.",
         scenarioNumber: 2,
       },
     ];
     const out = coerceScenarioBoundaryHandoffDisplayText(bareHandoff, 'Matt', messages, 2, 2);
     const split = splitScenarioTransitionForEmotionModal(out);
-    expect(split.beforeModal).toMatch(CONCLUSION_ANCHOR);
-    expect(split.beforeModal).toMatch(/on her terms|logistics|emotional acknowledgment/i);
+    expect(split.beforeModal).toMatch(WRAP_LEAD_ANCHOR);
+    expect(split.beforeModal).not.toMatch(/Nice work|You (focused on|named|framed)/i);
     expect(split.afterModal).toMatch(/Sophie and Daniel/i);
   });
 
-  it('coerces S2→S3 handoff missing reflection when Sophie vignette present', () => {
+  it('blocks premature S2→S3 when James differently / repair never asked (handoff cue alone)', () => {
+    const premature =
+      "That's the second one done. One more situation and then we'll get personal.\n\nSophie and Daniel have had the same argument for the third time.";
+    const messages = [
+      {
+        role: 'assistant',
+        content: 'What do you think is going on here?',
+        scenarioNumber: 2,
+      },
+      {
+        role: 'user',
+        content:
+          'James focused on logistics instead of celebrating Sarah emotionally, so she felt unappreciated.',
+        scenarioNumber: 2,
+      },
+      {
+        role: 'user',
+        content: 'He should have noticed she was tearing up.',
+        scenarioNumber: 2,
+      },
+    ];
+    const out = coerceScenarioBoundaryHandoffDisplayText(premature, 'Matt', messages, 2, 2);
+    expect(out).toBe(
+      'What do you think James could have done differently to help Sarah feel appreciated?',
+    );
+    expect(out).not.toMatch(/Sophie and Daniel/i);
+  });
+
+  it('blocks premature S2→S3 after refs already advanced to 3 without James repair satisfied', () => {
+    const premature =
+      "That's the second one done. One more situation and then we'll get personal. Sophie and Daniel have had the same argument for the third time.";
+    const messages = [
+      {
+        role: 'assistant',
+        content: 'What do you think is going on here?',
+        scenarioNumber: 2,
+      },
+      {
+        role: 'user',
+        content: 'Sarah feels unappreciated because James led with logistics.',
+        scenarioNumber: 2,
+      },
+    ];
+    const out = coerceScenarioBoundaryHandoffDisplayText(premature, 'Matt', messages, 3, 3);
+    expect(out).toMatch(/James could have done differently|if you were James, how would you repair/i);
+    expect(out).not.toMatch(/Sophie and Daniel/i);
+  });
+
+  it('blocks premature S2→S3 after James differently but before repair Q3', () => {
+    const premature =
+      "Here's the third situation.\n\nSophie and Daniel have had the same argument for the third time.";
+    const messages = [
+      {
+        role: 'assistant',
+        content: 'What do you think James could have done differently to help Sarah feel appreciated?',
+        scenarioNumber: 2,
+      },
+      {
+        role: 'user',
+        content: 'He should have led with celebration before asking about salary.',
+        scenarioNumber: 2,
+      },
+    ];
+    const out = coerceScenarioBoundaryHandoffDisplayText(premature, 'Matt', messages, 2, 2);
+    expect(out).toBe('And if you were James, how would you repair?');
+    expect(out).not.toMatch(/Sophie and Daniel/i);
+  });
+
+  it('coerces S2→S3 handoff when Sophie vignette present into short wrap', () => {
     const bareHandoff =
       "Here's the third situation — after this we'll move to something more personal.\n\nSophie and Daniel have had the same argument for the third time.";
     const messages = [
@@ -117,7 +196,8 @@ describe('coerceScenarioBoundaryHandoffDisplayText', () => {
     ];
     const out = coerceScenarioBoundaryHandoffDisplayText(bareHandoff, 'Matt', messages, 2, 2);
     const split = splitScenarioTransitionForEmotionModal(out);
-    expect(split.beforeModal).toMatch(CONCLUSION_ANCHOR);
+    expect(split.beforeModal).toMatch(WRAP_LEAD_ANCHOR);
+    expect(split.beforeModal).not.toMatch(/Nice work|You (focused on|named|framed)/i);
     expect(split.afterModal).toMatch(/Sophie and Daniel/i);
   });
 
@@ -159,8 +239,9 @@ describe('coerceScenarioBoundaryHandoffDisplayText', () => {
       },
     ];
     const out = coerceScenarioBoundaryHandoffDisplayText(s1ToS2Bare, 'Matt', messages, 1, 1);
-    expect(out).toMatch(CONCLUSION_ANCHOR);
-    expect(out).toContain('Nice work, Matt');
+    expect(out).toMatch(WRAP_LEAD_ANCHOR);
+    expect(out).not.toContain('Nice work, Matt');
+    expect(out).not.toMatch(/You (focused on|named|framed)/i);
     expect(out).toMatch(/Sarah has been job hunting/i);
     expect(out).not.toMatch(/Sophie and Daniel/i);
   });
@@ -198,6 +279,40 @@ describe('coerceScenarioBoundaryHandoffDisplayText', () => {
     expect(out).not.toContain('Sarah has been job hunting');
   });
 
+  it('does not redirect to Ryan repair after Situation 2 card already played (emotion handoff must finish)', () => {
+    const modelCanned =
+      "Here's the next situation. Sarah has been job hunting for four months. She gets an offer and calls James from the street, too excited to wait.";
+    const messages = [
+      {
+        role: 'user',
+        content: 'Emma feels secondary to his mother.',
+        scenarioNumber: 1,
+      },
+    ];
+    const out = coerceScenarioBoundaryHandoffDisplayText(modelCanned, 'Matt', messages, 2, 2, {
+      situation2PlaybackConfirmed: true,
+    });
+    expect(out).toContain('Sarah has been job hunting');
+    expect(out).not.toMatch(/if you were ryan|how would you repair/i);
+  });
+
+  it('does not redirect to Ryan repair when stream already spoke Situation 2 vignette', () => {
+    const modelCanned =
+      "That's a wrap on that one. Nice work, Matt. Here's the next situation. Sarah has been job hunting for four months.";
+    const messages = [
+      {
+        role: 'user',
+        content: 'Emma feels secondary to his mother.',
+        scenarioNumber: 1,
+      },
+    ];
+    const out = coerceScenarioBoundaryHandoffDisplayText(modelCanned, 'Matt', messages, 2, 2, {
+      situation2AlreadySpoken: true,
+    });
+    expect(out).toContain('Sarah has been job hunting');
+    expect(out).not.toMatch(/if you were ryan|how would you repair/i);
+  });
+
   it('coerces S1→S2 when model streams client segment-close + canned reflection without Sarah vignette', () => {
     const modelCanned =
       "That's a wrap on that one. Nice work, Matt — You focused on putting concrete limits on calls during dates so the same interruption does not repeat. We've got two more situations to get through.";
@@ -218,10 +333,10 @@ describe('coerceScenarioBoundaryHandoffDisplayText', () => {
       },
     ];
     const out = coerceScenarioBoundaryHandoffDisplayText(modelCanned, 'Matt', messages, 1, 1);
-    expect(out).toMatch(CONCLUSION_ANCHOR);
+    expect(out).toMatch(WRAP_LEAD_ANCHOR);
     expect(out).toContain('Sarah has been job hunting');
     expect(out).not.toMatch(/putting concrete limits on calls during dates so the same interruption does not repeat/i);
-    expect(out).toMatch(/voicemail|date time|structural limits|calls/i);
+    expect(out).not.toContain('Nice work, Matt');
   });
 
   it('coerces S1→S2 when scenario ref already advanced to 2 after repair satisfied', () => {
@@ -284,8 +399,8 @@ describe('coerceScenarioBoundaryHandoffDisplayText', () => {
       },
     ];
     const out = coerceScenarioBoundaryHandoffDisplayText(garbled, 'Matt', messages, 1, 1);
-    expect(out).toMatch(CONCLUSION_ANCHOR);
-    expect(out).toContain('Nice work, Matt');
+    expect(out).toMatch(WRAP_LEAD_ANCHOR);
+    expect(out).not.toContain('Nice work, Matt');
     expect(out).toContain('Sarah has been job hunting for four months');
     expect(out).toContain('What do you think is going on here?');
     expect(out).not.toMatch(/birthday dinner/i);
@@ -310,19 +425,32 @@ describe('coerceScenarioBoundaryHandoffDisplayText', () => {
     expect(out).not.toMatch(/third situation/i);
   });
 
-  it('injects S2 reflection when scenario ref already advanced to 3', () => {
-    const celebrationAnswer =
-      "I'd wait until she's ready to talk about it and let her bring it up when she feels up to it.";
+  it('injects short S2→S3 wrap when scenario ref already advanced to 3', () => {
     const bareHandoff =
-      "That scenario is complete. Here's the third situation — after this we'll move to something more personal.";
+      "That scenario is complete. Here's the third situation — after this we'll move to something more personal.\n\nSophie and Daniel have had the same argument for the third time.";
     const messages = [
       ...SCENARIO_B_CORPUS_MESSAGES,
-      { role: 'user', content: celebrationAnswer, scenarioNumber: 2 },
-      { role: 'assistant', content: bareHandoff, scenarioNumber: 2 },
+      {
+        role: 'assistant',
+        content: 'What do you think James could have done differently to help Sarah feel appreciated?',
+        scenarioNumber: 2,
+      },
+      {
+        role: 'user',
+        content: 'He should have celebrated her before asking about salary and commute.',
+        scenarioNumber: 2,
+      },
+      { role: 'assistant', content: 'And if you were James, how would you repair?', scenarioNumber: 2 },
+      {
+        role: 'user',
+        content:
+          "I'd apologize for leading with logistics, ask how she'd like to be celebrated, and commit to doing that next time.",
+        scenarioNumber: 2,
+      },
     ];
     const out = coerceScenarioBoundaryHandoffDisplayText(bareHandoff, 'Matt', messages, 3, 3);
-    expect(out).toMatch(CONCLUSION_ANCHOR);
-    expect(out).toContain('Nice work, Matt');
+    expect(out).toMatch(WRAP_LEAD_ANCHOR);
+    expect(out).not.toContain('Nice work, Matt');
     expect(out).toContain('Sophie');
   });
 
@@ -346,7 +474,7 @@ describe('coerceScenarioBoundaryHandoffDisplayText', () => {
     expect(out).toContain(MOMENT_4_GRUDGE_QUESTION_TEXT);
   });
 
-  it('coerces S3→M4 handoff missing reflection for compatibility deferral close', () => {
+  it('coerces S3→M4 handoff into short wrap without content reflection', () => {
     const bareHandoff =
       "That makes a lot of sense. Good work — you just finished the three situations. There are only two questions left. Now I want to ask you about something a bit more personal. Think of someone you've had a really hard time with";
     const messages = [
@@ -372,8 +500,8 @@ describe('coerceScenarioBoundaryHandoffDisplayText', () => {
     ];
     const out = coerceScenarioBoundaryHandoffDisplayText(bareHandoff, 'Matt', messages, 3, 4);
     const split = splitScenarioTransitionForEmotionModal(out);
-    expect(split.beforeModal).toMatch(CONCLUSION_ANCHOR);
-    expect(split.beforeModal).toMatch(/fit is real|dismissed|confusion/i);
+    expect(split.beforeModal).toMatch(WRAP_LEAD_ANCHOR);
+    expect(split.beforeModal).not.toMatch(/You (focused on|named|framed)|Nice work, Matt/i);
     expect(split.afterModal).toMatch(/really hard time with|held a grudge/i);
   });
 });

@@ -62,8 +62,9 @@ describe('applyPostClaudeScenarioAdvanceBundleOverride', () => {
     );
     expect(out).toMatch(/\[SCENARIO_COMPLETE:1\]/i);
     expect(out).toMatch(/Sarah has been job hunting/i);
-    expect(out).toMatch(/You (focused on|named|framed|pointed to|highlighted)/i);
-    expect(out).toContain('Nice work, Matt');
+    expect(out).toMatch(/that's the end of this scenario|here's the next situation/i);
+    expect(out).not.toContain('Nice work, Matt');
+    expect(out).not.toMatch(/You (focused on|named|framed|pointed to|highlighted)/i);
   });
 
   it('injects S1→S2 bundle when Ryan repair uses voicemail/commit phrasing', () => {
@@ -297,8 +298,9 @@ describe('applyPostClaudeScenarioAdvanceBundleOverride', () => {
     );
     expect(out).toMatch(/\[SCENARIO_COMPLETE:2\]/i);
     expect(out).toMatch(/Sophie and Daniel/i);
-    expect(out).toMatch(/You (focused on|named|framed|pointed to|highlighted)/i);
-    expect(out).toContain('Nice work, Matt');
+    expect(out).toContain("That's the second one done.");
+    expect(out).not.toContain('Nice work, Matt');
+    expect(out).not.toMatch(/You (focused on|named|framed|pointed to|highlighted)/i);
     expect(out).not.toMatch(/that for you, matching/i);
   });
 

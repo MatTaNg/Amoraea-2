@@ -30,18 +30,25 @@ describe('elevenLabsTtsAvailability', () => {
     expect(isElevenLabsEnabledForEnvironment()).toBe(false);
   });
 
-  it('disables ElevenLabs for configured dev accounts even in production', () => {
+  it('enables ElevenLabs for configured dev accounts on production builds when env allows', () => {
     (global as { __DEV__?: boolean }).__DEV__ = false;
     process.env.EXPO_PUBLIC_ELEVENLABS_TTS = '1';
+    setInterviewTtsSessionEmail('ng5280@hotmail.com');
+    expect(isElevenLabsEnabledForEnvironment()).toBe(true);
+  });
+
+  it('disables ElevenLabs for configured dev accounts in dev bundle', () => {
+    (global as { __DEV__?: boolean }).__DEV__ = true;
+    process.env.EXPO_PUBLIC_ELEVENLABS_TTS_IN_DEV = '1';
     setInterviewTtsSessionEmail('ng5280@hotmail.com');
     expect(isElevenLabsEnabledForEnvironment()).toBe(false);
   });
 
-  it('blocks iOS MP3 fetch unless explicitly enabled', () => {
-    expect(iosUseElevenLabsMp3Playback()).toBe(false);
-    expect(isElevenLabsMp3FetchAllowedOnPlatform()).toBe(false);
-    process.env.EXPO_PUBLIC_IOS_ELEVENLABS_TTS_PLAYBACK = '1';
+  it('allows iOS MP3 fetch by default; opt-out via env', () => {
     expect(iosUseElevenLabsMp3Playback()).toBe(true);
     expect(isElevenLabsMp3FetchAllowedOnPlatform()).toBe(true);
+    process.env.EXPO_PUBLIC_IOS_ELEVENLABS_TTS_PLAYBACK = '0';
+    expect(iosUseElevenLabsMp3Playback()).toBe(false);
+    expect(isElevenLabsMp3FetchAllowedOnPlatform()).toBe(false);
   });
 });

@@ -20,10 +20,24 @@ jest.mock('@utilities/remoteLog', () => ({
   remoteLog: jest.fn(),
 }));
 
-import { buildMoment4ThresholdAnswerToMoment5Bundle } from '@features/aria/interviewTransitionBundles';
-import { INTERVIEW_NAME_AMBIENT_REASK_LINE } from '@features/aria/interviewNameValidation';
-import { MOMENT_5_ACCOUNTABILITY_QUESTION_TEXT } from '@features/aria/moment5ProbeCopy';
-import { SCENARIO_A_CONTEMPT_PROBE_DELIVERED_COPY } from '@features/aria/scenarioAContemptProbeLogic';
+/** Keep this unit suite off Expo/Supabase graphs pulled by probe helpers. */
+jest.mock('@features/aria/moment5TranscriptHelpers', () => ({
+  transcriptAssistantContainsMoment5PrimaryConflictQuestion: (text: string) =>
+    /biggest conflict|accountability|primary conflict/i.test(text),
+}));
+
+jest.mock('@features/aria/interviewLanguageGate', () => ({
+  isInterviewPreambleBriefingMoment: (text: string) =>
+    /five parts together/i.test(text) && /are you ready/i.test(text),
+}));
+
+jest.mock('@features/aria/interviewNameValidation', () => ({
+  isInterviewRecordingRetryLine: (text: string) =>
+    /didn't catch that|try again|speak a bit louder/i.test(text),
+  INTERVIEW_NAME_AMBIENT_REASK_LINE:
+    "I didn't catch that — could you try again and speak a bit louder?",
+}));
+
 import { TTS_REPLAY_PREMATURE_ACCEPT_MIN_RATIO } from '@features/aria/interviewTtsExpectedDuration';
 import {
   evaluateTtsDurationVerificationBypass,
@@ -36,6 +50,18 @@ const playbackSurfaceActive = jest.mocked(isWebInterviewPlaybackSurfaceActive);
 
 const preambleBriefing =
   'Good to meet you, Maya. The way this works is we will go through five parts together. Are you ready?';
+
+const moment4CommitmentThreshold =
+  'Thanks for sharing that. At what point do you decide when a relationship is something to work through versus something you need to walk away from?';
+
+const scenarioAContemptProbe =
+  "What about when Emma says 'you've made that very clear' — what do you make of that?";
+
+const moment5PrimaryConflictPrompt =
+  'Thanks for that. Thinking about accountability — what was the biggest conflict you were part of recently?';
+
+const recordingRetryLine =
+  "I didn't catch that — could you try again and speak a bit louder?";
 
 describe('shouldUseWebTtsDurationVerification', () => {
   it('enables verification for normal web turn playback', () => {
@@ -72,7 +98,6 @@ describe('evaluateTtsDurationVerificationBypass', () => {
   });
 
   it('bypasses moment 5 primary conflict prompts on the first attempt', () => {
-    const text = buildMoment4ThresholdAnswerToMoment5Bundle('Sam', MOMENT_5_ACCOUNTABILITY_QUESTION_TEXT);
     expect(
       evaluateTtsDurationVerificationBypass({
         attemptIx: 0,
@@ -82,7 +107,7 @@ describe('evaluateTtsDurationVerificationBypass', () => {
         interviewSpeechRole: 'assistant_response',
         currentInterviewMoment: 5,
         currentScenario: 1,
-        text,
+        text: moment5PrimaryConflictPrompt,
         skipLastQuestionRef: false,
         ratioActualToExpected: 0.4,
         actualTtsMs: 4_000,
@@ -91,6 +116,28 @@ describe('evaluateTtsDurationVerificationBypass', () => {
       accept: true,
       acceptStableTruncation: true,
       reason: 'avoid_replaying_long_moment5_primary_prompt',
+    });
+  });
+
+  it('bypasses Moment 4 commitment threshold so duration overshoot cannot replay 3x', () => {
+    expect(
+      evaluateTtsDurationVerificationBypass({
+        attemptIx: 0,
+        wouldBePremature: true,
+        premature: true,
+        telemetrySource: 'turn',
+        interviewSpeechRole: 'assistant_response',
+        currentInterviewMoment: 4,
+        currentScenario: 3,
+        text: moment4CommitmentThreshold,
+        skipLastQuestionRef: false,
+        ratioActualToExpected: 0.58,
+        actualTtsMs: 9_000,
+      }),
+    ).toEqual({
+      accept: true,
+      acceptStableTruncation: true,
+      reason: 'avoid_replaying_moment4_commitment_threshold',
     });
   });
 
@@ -104,7 +151,7 @@ describe('evaluateTtsDurationVerificationBypass', () => {
         interviewSpeechRole: 'assistant_response',
         currentInterviewMoment: 1,
         currentScenario: 1,
-        text: SCENARIO_A_CONTEMPT_PROBE_DELIVERED_COPY,
+        text: scenarioAContemptProbe,
         skipLastQuestionRef: false,
         ratioActualToExpected: 0.5,
         actualTtsMs: 2_000,
@@ -123,7 +170,7 @@ describe('evaluateTtsDurationVerificationBypass', () => {
         interviewSpeechRole: 'assistant_response',
         currentInterviewMoment: 1,
         currentScenario: 1,
-        text: SCENARIO_A_CONTEMPT_PROBE_DELIVERED_COPY,
+        text: scenarioAContemptProbe,
         skipLastQuestionRef: false,
         ratioActualToExpected: 0.5,
         actualTtsMs: 100,
@@ -195,7 +242,7 @@ describe('evaluateTtsDurationVerificationBypass', () => {
         interviewSpeechRole: 'assistant_response',
         currentInterviewMoment: 1,
         currentScenario: 1,
-        text: INTERVIEW_NAME_AMBIENT_REASK_LINE,
+        text: recordingRetryLine,
         skipLastQuestionRef: true,
         ratioActualToExpected: 0.5,
         actualTtsMs: 800,
@@ -211,6 +258,16 @@ describe('shouldAcceptStablePrematureRatioOnSecondAttempt', () => {
         attemptIx: 1,
         ratioActualToExpected: 0.71,
         firstPrematureActualToExpectedRatio: 0.72,
+      }),
+    ).toBe(true);
+  });
+
+  it('accepts near-stable ~0.55–0.58 ratios that used to restart mobile M4 TTS thrice', () => {
+    expect(
+      shouldAcceptStablePrematureRatioOnSecondAttempt({
+        attemptIx: 1,
+        ratioActualToExpected: 0.555,
+        firstPrematureActualToExpectedRatio: 0.58,
       }),
     ).toBe(true);
   });

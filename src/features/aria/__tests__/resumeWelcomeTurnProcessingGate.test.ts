@@ -88,7 +88,8 @@ describe('resumeWelcomeTurnProcessingGate', () => {
     ).toBe(true);
   });
 
-  it('allows explicit repeat requests while repeat-choice is pending after resume welcome', () => {
+  it('does not block mid-length S3 answers while repeat-choice is pending without token overlap', () => {
+    const sessionAnswer = 'Daniel is very avoidant and he had to leave to regulate his emotions.';
     expect(
       isResumeWelcomeFlowBlockingTurnProcessing(
         {
@@ -99,9 +100,9 @@ describe('resumeWelcomeTurnProcessingGate', () => {
         },
         {
           substantiveTranscript: {
-            text: 'Repeat what you said.',
-            wordCount: 4,
-            lastQuestionText: 'How would you repair this as Ryan?',
+            text: sessionAnswer,
+            wordCount: 13,
+            lastQuestionText: 'Got it. How do you think this situation could be repaired?',
           },
         },
       ),

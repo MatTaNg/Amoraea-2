@@ -1,6 +1,7 @@
 import { describe, expect, it } from '@jest/globals';
 
 import {
+  advanceInterviewScenarioRefsAfterCanonicalShowScenarioCard,
   inferActiveScenarioFromTranscriptMessages,
   syncInterviewScenarioRefsFromSpokenDelivery,
   syncInterviewScenarioRefsFromTranscript,
@@ -40,6 +41,26 @@ describe('interviewScenarioRefSync', () => {
     expect(deps.interviewMomentsCompleteRef.current[1]).toBe(true);
   });
 
+  it('does not advance refs from accumulated model stream text (muted vignettes)', () => {
+    const deps = {
+      currentScenarioRef: { current: 1 },
+      currentInterviewMomentRef: { current: 1 as const },
+      interviewMomentsCompleteRef: { current: { 1: false, 2: false, 3: false } },
+      resumeActiveScenarioRef: { current: 1 },
+      interviewSessionIdRef: { current: 'session-1' },
+    };
+    const result = syncInterviewScenarioRefsFromSpokenDelivery(deps, {
+      parallelStreamingTtsRef: {
+        current: {
+          spokenCompleteText: "That's a wrap on this situation.",
+          accumulatedFullText: SCENARIO_2_TEXT,
+        },
+      },
+    });
+    expect(result.advanced).toBe(false);
+    expect(deps.currentScenarioRef.current).toBe(1);
+  });
+
   it('advances refs from spoken delivery text when transcript was not persisted', () => {
     const deps = {
       currentScenarioRef: { current: 1 },
@@ -55,6 +76,23 @@ describe('interviewScenarioRefSync', () => {
     expect(result.advanced).toBe(true);
     expect(deps.currentScenarioRef.current).toBe(2);
     expect(deps.currentInterviewMomentRef.current).toBe(2);
+  });
+
+  it('advances refs immediately after canonical situation_2 card playback', () => {
+    const deps = {
+      currentScenarioRef: { current: 1 },
+      currentInterviewMomentRef: { current: 1 as const },
+      interviewMomentsCompleteRef: { current: { 1: false, 2: false, 3: false } },
+      resumeActiveScenarioRef: { current: 1 },
+      interviewSessionIdRef: { current: 'session-1' },
+    };
+    const result = advanceInterviewScenarioRefsAfterCanonicalShowScenarioCard(deps, 'situation_2');
+    expect(result.advanced).toBe(true);
+    expect(result.effectiveScenario).toBe(2);
+    expect(deps.currentScenarioRef.current).toBe(2);
+    expect(deps.currentInterviewMomentRef.current).toBe(2);
+    expect(deps.interviewMomentsCompleteRef.current[1]).toBe(true);
+    expect(deps.resumeActiveScenarioRef.current).toBe(2);
   });
 });
 

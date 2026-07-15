@@ -1,5 +1,6 @@
 import { buildTwoSentenceClosingWithoutObservation } from './closingReflectionGrounding';
 import { dedupeDuplicateParticipantNameInClosing } from './interviewClosingLanguageSanitize';
+import { INCLUDE_SCENARIO_BOUNDARY_REFLECTIONS } from './interviewTransitionBundles';
 import {
   assembleClosingWithOptionalReflection,
   buildPersonalMomentHandoffReflection,
@@ -177,7 +178,9 @@ export function buildMoment5ClosingFallbackAfterSuppressedElongating(
   lastUserAnswer?: string | null,
 ): string {
   const neutral = buildTwoSentenceClosingWithoutObservation(participantFirstName);
-  const reflection = buildPersonalMomentHandoffReflection(lastUserAnswer ?? '', { context: 'closing' });
+  const reflection = INCLUDE_SCENARIO_BOUNDARY_REFLECTIONS
+    ? buildPersonalMomentHandoffReflection(lastUserAnswer ?? '', { context: 'closing' })
+    : '';
   const closing = dedupeDuplicateParticipantNameInClosing(
     assembleClosingWithOptionalReflection(neutral, reflection),
     participantFirstName,

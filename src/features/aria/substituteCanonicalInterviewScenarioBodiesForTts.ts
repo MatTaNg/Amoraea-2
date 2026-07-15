@@ -58,7 +58,7 @@ function textContainsScenarioCVignetteBody(text: string): boolean {
   if (textContainsScenarioCVignetteBodyStrict(text)) return true;
   const t = (text ?? '').trim().toLowerCase();
   if (!t) return false;
-  if (!/\bsophie and daniel\b/.test(t)) return false;
+  if (!/\bsophie\b/.test(t) || !/\bdaniel\b/.test(t)) return false;
   if (
     (/\bten minutes\b/.test(t) || /\bi need ten minutes\b/.test(t)) &&
     (/\bdidn'?t know what to say\b/.test(t) ||
@@ -67,11 +67,20 @@ function textContainsScenarioCVignetteBody(text: string): boolean {
   ) {
     return true;
   }
-  /** Model fiction that borrows S2 "together for two years" framing for Sophie/Daniel. */
+  /** Model fiction — rewrite to the authoritative same-argument / leave vignette. */
   if (
     /\bhave been together for two years\b/.test(t) ||
     (/\bwhen they fight\b/.test(t) && /\b(leave the room|goes quiet|feels abandoned|needs space)\b/.test(t)) ||
-    (/\bfeels abandoned\b/.test(t) && /\b(leave|quiet|space)\b/.test(t))
+    (/\bfeels abandoned\b/.test(t) && /\b(leave|quiet|space)\b/.test(t)) ||
+    /\btrying to get closer\b/.test(t) ||
+    /\blaunches into (?:his|her) own story\b/.test(t) ||
+    /\bi'?ve been through that too\b/.test(t) ||
+    /\bsophie has been\b/.test(t) ||
+    /\bdating for (?:a few|\d+|eight|six)\b/.test(t) ||
+    /\boutsider in (?:her|his) own family\b/.test(t) ||
+    /\bi guess i just don'?t belong anywhere\b/.test(t) ||
+    /\bclose to (?:her|his) family and sees them every sunday\b/.test(t) ||
+    /\bdaniel has started coming along\b/.test(t)
   ) {
     return true;
   }
@@ -180,7 +189,7 @@ function ensureFullCanonicalVignetteBeforeOpening(
 
 const SCENARIO_VIGNETTE_START: Record<string, RegExp> = {
   'Situation 1': /\bEmma and Ryan\b/i,
-  'Situation 2': /\bSarah (?:and James|has been)\b/i,
+  'Situation 2': /\bSarah (?:and James|has been|has just)\b/i,
   'Situation 3': /\bSophie and Daniel\b/i,
 };
 
@@ -190,6 +199,7 @@ function findScenario2FictionStartIndex(text: string): number {
     /\bSarah has been looking for work\b/i,
     /\bSarah was looking for work\b/i,
     /\bSarah has been planning a birthday\b/i,
+    /\bSarah has just got(?:ten)? a promotion\b/i,
     /\bSarah and James have been together\b/i,
     /\bSarah and James\b/i,
     /\bSarah has been feeling underappreciated\b/i,
@@ -246,9 +256,18 @@ function rewriteDetectedScenarioFictionForTts(text: string): string {
 
   const prefix = text.slice(0, startMatch.index).trimEnd();
   if (openingIdx > startMatch.index && canonicalOpening) {
-    const suffix = text.slice(openingIdx + canonicalOpening.length).trimStart();
-    const body = `${canonicalVignette}\n\n${canonicalOpening}`;
-    return suffix ? `${prefix}${prefix ? '\n\n' : ''}${body}\n\n${suffix}`.trim() : `${prefix}${prefix ? '\n\n' : ''}${body}`.trim();
+    const atOpening = text.slice(openingIdx, openingIdx + canonicalOpening.length);
+    const openingIsCanonical =
+      normalizeForCanonicalCompare(atOpening) === normalizeForCanonicalCompare(canonicalOpening);
+    if (openingIsCanonical) {
+      const suffix = text.slice(openingIdx + canonicalOpening.length).trimStart();
+      const body = `${canonicalVignette}\n\n${canonicalOpening}`;
+      return suffix
+        ? `${prefix}${prefix ? '\n\n' : ''}${body}\n\n${suffix}`.trim()
+        : `${prefix}${prefix ? '\n\n' : ''}${body}`.trim();
+    }
+    /** Wrong/non-scripted Q after fiction — drop it; Situation card always ends with the opening. */
+    return `${prefix}${prefix ? '\n\n' : ''}${canonicalVignette}\n\n${canonicalOpening}`.trim();
   }
 
   return `${prefix}${prefix ? '\n\n' : ''}${canonicalVignette}`.trim();
@@ -391,13 +410,19 @@ export function substituteCanonicalInterviewScenarioBodiesForTts(text: string): 
     textContainsScenarioBVignetteBody,
     SCENARIO_B_VIGNETTE,
     SCENARIO_2_OPENING,
-    [/\bSarah and James\b/i, /\bSarah has been\b/i, /\bShe gets an offer\b/i],
+    [
+      /\bSarah and James\b/i,
+      /\bSarah has been\b/i,
+      /\bSarah has just got(?:ten)?\b/i,
+      /\bShe gets an offer\b/i,
+    ],
     [
       /(?:A )?fight starts\.?/i,
       /fight starts\.?/i,
       /hey don't cry[^.?!]*[.?!]/i,
       /Sarah tears up\.?/i,
       /What do you think is going on here\??/i,
+      /What do you think Sarah felt[^.?!]*\??/i,
     ],
   );
   out = ensureFullCanonicalVignetteBeforeOpening(
@@ -405,7 +430,7 @@ export function substituteCanonicalInterviewScenarioBodiesForTts(text: string): 
     textContainsScenarioBVignetteBody,
     SCENARIO_B_VIGNETTE,
     SCENARIO_2_OPENING,
-    /\bSarah (?:and James|has been)\b/i,
+    /\bSarah (?:and James|has been|has just)\b/i,
   );
 
   out = replaceVignetteBody(
@@ -417,6 +442,9 @@ export function substituteCanonicalInterviewScenarioBodiesForTts(text: string): 
       /\bSophie and Daniel\b/i,
       /\bSophie and Daniel keep\b/i,
       /\bSophie and Daniel have been together\b/i,
+      /\bSophie has been\b/i,
+      /\bShe's close to her family\b/i,
+      /\bDaniel has started coming along\b/i,
     ],
     [
       /Sophie is still upset\.?/i,
@@ -425,6 +453,8 @@ export function substituteCanonicalInterviewScenarioBodiesForTts(text: string): 
       /didn'?t know what to say[^.?!]*[.?!]/i,
       /needs space to[^.?!]*[.?!]/i,
       /feels abandoned[^.?!]*[.?!]/i,
+      /went to bed early\.?/i,
+      /I guess I just don't belong anywhere[^.?!]*[.?!]/i,
       /What do you make of that\??/i,
       /What(?:'s| is) going on (?:here|between them)\??/i,
     ],

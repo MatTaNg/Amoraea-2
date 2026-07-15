@@ -21,8 +21,10 @@ import {
   parallelStreamDeliveredBundledHandoffViaCanonicalCard,
   resolveClientScenarioBoundaryPrefixForCanonicalTts,
   resolveShowScenarioCardTransitionAlreadySpoken,
+  resolveCanonicalShowScenarioCardTransitionSpeakDecision,
   resolveShowScenarioCardKindForInterview,
   streamAlreadySpokeScenarioBoundaryClosingLead,
+  showScenarioCardPrefetchBufferMatchesSpeakText,
 } from '@features/aria/showScenarioCardCanonicalTts';
 import { SHOW_SCENARIO_2_VIGNETTE_EXACT } from '@features/aria/interviewShowScenarioExactCopy';
 import { SCENARIO_A_REPAIR_QUESTION_AFTER_CONTEMPT_COPY } from '@features/aria/scenarioAContemptProbeTtsStrip';
@@ -98,7 +100,7 @@ describe('showScenarioCardCanonicalTts', () => {
       extractedPrefix:
         "That's a wrap on this situation. Nice work, Matt — You recognized Daniel's genuine confusion about how to communicate and how Sophie felt dismissed.",
     });
-    expect(prefix).toMatch(/that's a wrap on that one|two more situations/i);
+    expect(prefix).toMatch(/that's the end of this scenario|here'?s the next situation/i);
     expect(prefix).not.toMatch(/Daniel|Sophie/i);
   });
 
@@ -294,6 +296,31 @@ describe('showScenarioCardCanonicalTts', () => {
     expect(out.startsWith('Makes sense.')).toBe(false);
   });
 
+  it('composeShowScenarioCardTtsWithTransitionPrefix keeps wrap when cancelled stream text must be ignored', () => {
+    const prefix =
+      "That's a wrap on that one. Nice work, Matt — You framed emotional acknowledgment before fixes. We've got two more situations to get through.";
+    const canonical = buildCanonicalShowScenarioCardTtsBody('situation_2');
+    /**
+     * After cancel, callers clear spokenCompleteText and force transitionAlreadySpoken:false
+     * so merge does not treat the killed audio as already delivered.
+     */
+    const out = composeShowScenarioCardTtsWithTransitionPrefix({
+      prefix,
+      canonicalText: canonical,
+      spokenSoFar: '',
+      transitionAlreadySpoken: false,
+    });
+    expect(out).toContain("That's a wrap on that one");
+    expect(out).toContain(SHOW_SCENARIO_2_VIGNETTE_EXACT);
+    expect(
+      resolveShowScenarioCardTransitionAlreadySpoken({
+        prefix,
+        spokenSoFar: '',
+        scenarioJustCompleted: 1,
+      }),
+    ).toBe(false);
+  });
+
   it('mergeShowScenarioCardTransitionPrefixWithSpoken strips transition phrase already spoken in stream', () => {
     const prefix =
       "That's a wrap on this situation. Nice work, Matt — you read the recurring pattern clearly. Here's the next situation.";
@@ -337,7 +364,7 @@ describe('showScenarioCardCanonicalTts', () => {
     ).toBe(true);
   });
 
-  it('resolveClientScenarioBoundaryPrefixForCanonicalTts injects full boundary lead when model prefix is empty', () => {
+  it('resolveClientScenarioBoundaryPrefixForCanonicalTts injects short wrap lead when model prefix is empty', () => {
     const prefix = resolveClientScenarioBoundaryPrefixForCanonicalTts({
       kind: 'situation_2',
       messages: [
@@ -351,9 +378,24 @@ describe('showScenarioCardCanonicalTts', () => {
       firstName: 'Vaishnava',
       extractedPrefix: '',
     });
-    expect(prefix).toContain("That's a wrap on that one.");
-    expect(prefix).toContain('Nice work, Vaishnava');
-    expect(prefix).toContain("We've got two more situations to get through.");
+    expect(prefix).toContain("Good work — that's the end of this scenario.");
+    expect(prefix).not.toContain('Nice work, Vaishnava');
+    expect(prefix).not.toMatch(/You (focused on|named|framed)/i);
+    expect(prefix).toContain("Here's the next situation.");
+  });
+
+  it('showScenarioCardPrefetchBufferMatchesSpeakText requires exact line (not vignette substring)', () => {
+    const vignetteOnly = buildCanonicalShowScenarioCardTtsBody('situation_2');
+    const wrap =
+      "Good work — that's the end of this scenario. Here's the next situation.";
+    const wrapPlusVignette = `${wrap}\n\n${vignetteOnly}`;
+    expect(showScenarioCardPrefetchBufferMatchesSpeakText(wrapPlusVignette, vignetteOnly)).toBe(
+      false,
+    );
+    expect(showScenarioCardPrefetchBufferMatchesSpeakText(wrapPlusVignette, wrapPlusVignette)).toBe(
+      true,
+    );
+    expect(showScenarioCardPrefetchBufferMatchesSpeakText(vignetteOnly, vignetteOnly)).toBe(true);
   });
 
   it('shouldSuppressParallelStreamNonExactShowScenarioCardSpeech mutes S1 wrap lead during S2 handoff', () => {
@@ -525,7 +567,7 @@ describe('showScenarioCardCanonicalTts', () => {
     ).toBe(false);
     expect(
       streamAlreadySpokeScenarioBoundaryClosingLead(
-        "That's the end of the three described situations. Good work, Matt — You recognized Daniel's confusion. There are only two questions left.",
+        "That's the end of the three described situations. Good work, Matt — You recognized Daniel's confusion.",
         3,
       ),
     ).toBe(false);
@@ -535,6 +577,51 @@ describe('showScenarioCardCanonicalTts', () => {
         3,
       ),
     ).toBe(true);
+  });
+
+  it('resolveCanonicalShowScenarioCardTransitionSpeakDecision forces wrap after cancelled parallel audio', () => {
+    for (const kind of ['situation_2', 'situation_3', 'moment_4'] as const) {
+      const decision = resolveCanonicalShowScenarioCardTransitionSpeakDecision({
+        kind,
+        effectivePrefix: "That's a wrap on this situation. Here's the next situation.",
+        spokenLive: "That's a wrap on this situation. Here's the next situation.",
+        cancelledParallelPlayback: true,
+      });
+      expect(decision.transitionAlreadySpoken).toBe(false);
+      expect(decision.spokenSoFarForCompose).toBe('');
+    }
+  });
+
+  it('resolveCanonicalShowScenarioCardTransitionSpeakDecision skips wrap only when full boundary lead already played', () => {
+    const s2Decision = resolveCanonicalShowScenarioCardTransitionSpeakDecision({
+      kind: 'situation_2',
+      effectivePrefix:
+        "That's a wrap on that one. Nice work, Matt — reflection. We've got two more situations to get through.",
+      spokenLive:
+        "That's a wrap on that one. Nice work, Matt — reflection. We've got two more situations to get through.",
+      cancelledParallelPlayback: false,
+    });
+    expect(s2Decision.transitionAlreadySpoken).toBe(true);
+
+    const s3Decision = resolveCanonicalShowScenarioCardTransitionSpeakDecision({
+      kind: 'situation_3',
+      effectivePrefix:
+        "That scenario is complete. Nice work, Matt — reflection. Here's the third situation.",
+      spokenLive:
+        "That scenario is complete. Nice work, Matt — reflection. Here's the third situation.",
+      cancelledParallelPlayback: false,
+    });
+    expect(s3Decision.transitionAlreadySpoken).toBe(true);
+
+    const m4Decision = resolveCanonicalShowScenarioCardTransitionSpeakDecision({
+      kind: 'moment_4',
+      effectivePrefix:
+        "That's the end of the three described situations. Good work, Matt — reflection. There are only two questions left.",
+      spokenLive: 'Sarah has been job hunting for four months.',
+      cancelledParallelPlayback: false,
+    });
+    expect(m4Decision.transitionAlreadySpoken).toBe(false);
+    expect(m4Decision.spokenSoFarForCompose).toContain('Sarah');
   });
 
   it('streamAlreadySpokeScenarioBoundaryClosingLead recognizes model S3 close without described wording', () => {
@@ -557,6 +644,15 @@ describe('showScenarioCardCanonicalTts', () => {
         spokenSoFar: streamClose,
         scenarioJustCompleted: 1,
       }),
+    ).toBe(true);
+  });
+
+  it('streamAlreadySpokeScenarioBoundaryClosingLead recognizes canonical short S1→S2 close', () => {
+    expect(
+      streamAlreadySpokeScenarioBoundaryClosingLead(
+        "Good work — that's the end of this scenario. Here's the next situation.",
+        1,
+      ),
     ).toBe(true);
   });
 

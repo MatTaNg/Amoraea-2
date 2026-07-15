@@ -15,6 +15,8 @@ import {
 } from '@features/aria/postClaudeForcedConstructProbeShared';
 import {
   looksLikeScenarioBRepairAsJamesQuestion,
+  looksLikeScenarioBJamesDifferentlyQuestion,
+  looksLikeScenarioBQ1Question,
   SCENARIO_B_JAMES_REPAIR_CANONICAL,
 } from '@features/aria/scenarioBProbeLogic';
 import type { PostClaudeSpeakAssistantTurn } from '@features/aria/createPostClaudeSpeakAssistantTurn';
@@ -54,14 +56,24 @@ export async function runPostClaudeScenarioBJamesRepairForcedProbeGate(
   const repairParaphraseOnly =
     !!strippedText && looksLikeScenarioBRepairAsJamesQuestion(strippedText.trim());
   const leadInIsBriefAckOnly = forcedConstructProbeStrippedTextIsBriefAckOnly(strippedText);
+  const leadInIsWrongBeatQuestion =
+    !!strippedText &&
+    !leadInIsBriefAckOnly &&
+    (looksLikeScenarioBJamesDifferentlyQuestion(strippedText) ||
+      looksLikeScenarioBQ1Question(strippedText));
   let stagedMessages = params.messagesToUse;
-  if (strippedText && !repairParaphraseOnly && !leadInIsBriefAckOnly) {
+  if (strippedText && !repairParaphraseOnly && !leadInIsBriefAckOnly && !leadInIsWrongBeatQuestion) {
     stagedMessages = await stageAndSpeakForcedConstructProbeLeadIn(
       deps,
       params,
       strippedText,
       speakAssistantTurn,
     );
+  } else if (leadInIsWrongBeatQuestion) {
+    void remoteLog('[S2_JAMES_REPAIR_FORCED_DISCARDED_WRONG_BEAT_LEADIN]', {
+      interviewSessionId: deps.interviewSessionIdRef.current,
+      preview: strippedText.slice(0, 220),
+    });
   }
 
   const leadAck = leadInIsBriefAckOnly

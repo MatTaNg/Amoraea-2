@@ -14,6 +14,8 @@ Native iOS/Android builds use **EAS Environment Variables**, not secrets pasted 
 
 Optional (same as PWA): auth redirects, Audos, `EXPO_PUBLIC_ELEVENLABS_TTS_PROXY_URL`, `EXPO_PUBLIC_OPENAI_WHISPER_PROXY_URL`.
 
+**Interviewer voice (ElevenLabs Jessica):** iOS native uses warm ElevenLabs MP3 by default when Supabase URL is set (proxy derived automatically). Set `EXPO_PUBLIC_IOS_ELEVENLABS_TTS_PLAYBACK=0` only if TTS routes to the earpiece after mic capture.
+
 ## Never put these in EAS as `EXPO_PUBLIC_*`
 
 They ship inside the app binary / JS bundle and can be extracted:

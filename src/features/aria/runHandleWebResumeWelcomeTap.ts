@@ -146,5 +146,9 @@ export async function runHandleWebResumeWelcomeTap(deps: WebResumeWelcomeTapDeps
   } finally {
     /** Repeat gate only when welcome TTS invited "repeat what I said". */
     deps.resumeRepeatChoicePendingRef.current = offerWelcome && spokeWelcome;
+    /** Welcome already played (or skipped) — do not keep offer flag for turn-processing blocks. */
+    if (spokeWelcome || !offerWelcome) {
+      deps.resumeOfferWelcomeTtsRef.current = false;
+    }
   }
 }

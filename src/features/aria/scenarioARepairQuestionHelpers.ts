@@ -11,11 +11,13 @@ import { coerceScenarioCBoundaryHandoffForTts, SCENARIO_C_REPAIR_QUESTION_CANONI
 import { coerceMoment4ThresholdQuestionForTts } from './moment4ProbeLogic';
 import { coerceScenarioCRepairQuestionForTts } from './scenarioCPromptDetection';
 import { coerceIncompleteInterviewClosingForTts } from './elongatingProbe';
+import { looksLikeScenarioAContemptProbeQuestion } from './scenarioAContemptProbeTextMatch';
 import {
   coerceScenarioBJamesRepairQuestionForTts,
   looksLikeScenarioBJamesDifferentlyQuestion,
   looksLikeScenarioBRepairAsJamesQuestion,
   SCENARIO_B_JAMES_REPAIR_CANONICAL,
+  SCENARIO_B_Q1_CANONICAL,
 } from './scenarioBProbeLogic';
 
 /** Scenario A repair-as-Ryan (canonical + paraphrases aligned with interviewerFrameworkPrompt). */
@@ -379,6 +381,9 @@ function coerceRepeatQuestionForActiveScenario(
     return resolvedText;
   }
   if (activeScenario !== 2) return resolvedText;
+  if (looksLikeScenarioAContemptProbeQuestion(resolvedText)) {
+    return SCENARIO_B_Q1_CANONICAL;
+  }
   const low = normalizeApostrophes(resolvedText).toLowerCase();
   const isScenarioARepairResolved =
     resolvedText === SCENARIO_A_REPAIR_QUESTION_AFTER_CONTEMPT_COPY ||

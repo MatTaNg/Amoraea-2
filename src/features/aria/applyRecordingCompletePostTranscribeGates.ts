@@ -30,6 +30,7 @@ import {
   setLastWhisperRatioTelemetry,
   writeAudioSessionLog,
 } from '@utilities/sessionLogging/audioSessionLogEnvelope';
+import { remoteLog } from '@utilities/remoteLog';
 
 export async function applyRecordingCompletePostTranscribeGates(
   deps: OnRecordingCompleteDeps,
@@ -255,6 +256,17 @@ export async function applyRecordingCompletePostTranscribeGates(
       },
     )
   ) {
+    void remoteLog('[RESUME_WELCOME] post_transcribe_turn_blocked', {
+      attemptId: deps.interviewSessionAttemptIdRef.current,
+      wordCount: wc,
+      resumeLoading: deps.resumeLoadingFlowActiveRef.current,
+      welcomeTapPending: deps.webResumeWelcomeTapPendingRef.current,
+      welcomeOffered: deps.resumeOfferWelcomeTtsRef.current,
+      welcomeTapHandled: deps.webResumeWelcomeTapHandledRef.current,
+      repeatChoicePending: deps.resumeRepeatChoicePendingRef.current,
+      lastQuestionPreview: (deps.lastQuestionTextRef.current ?? '').slice(0, 120),
+      transcriptPreview: userText.slice(0, 120),
+    });
     deps.setVoiceState('idle');
     return false;
   }

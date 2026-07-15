@@ -18,23 +18,26 @@ import {
 } from '@features/aria/situation2ExactModalPrompt';
 import { SHOW_SCENARIO_CARD_CANONICAL_SPEECH } from '@features/aria/interviewTtsSpeakOptions';
 import {
-  __showScenarioCardCanonicalTtsTest,
   buildCanonicalShowScenarioCardTtsBody,
   buildLockedShowScenarioCardTtsText,
   composeShowScenarioCardTtsWithTransitionPrefix,
   detectShowScenarioCardKind,
   extractShowScenarioCardTransitionPrefix,
   resolveClientScenarioBoundaryPrefixForCanonicalTts,
-  resolveShowScenarioCardTransitionAlreadySpoken,
+  resolveCanonicalShowScenarioCardTransitionSpeakDecision,
+  streamAlreadySpokeScenarioBoundaryClosingLead,
   isShowScenarioCardCanonicalPlaybackConfirmed,
   resolveShowScenarioCardKindForInterview,
   shouldSkipSituation1CanonicalReplay,
   shouldTreatShowScenarioCardCanonicalAsAlreadyDelivered,
+  showScenarioCardPrefetchBufferMatchesSpeakText,
   streamSpokenTextAlreadyMatchesCanonicalCard,
+  completedScenarioForShowScenarioCardKind,
 } from '@features/aria/showScenarioCardCanonicalTts';
 import { triggerCompletedScenarioScoringIfNeeded } from '@features/aria/runScenarioBoundaryScoring';
-import { completedScenarioForShowScenarioCardKind } from '@features/aria/showScenarioCardCanonicalTts';
+import { advanceInterviewScenarioRefsAfterCanonicalShowScenarioCard } from '@features/aria/interviewScenarioRefSync';
 import { scenarioAMinimumEngagementForHandoff } from '@features/aria/scenarioFollowUpTranscriptGuard';
+import { scenarioBJamesRepairProbeAlreadySatisfied } from '@features/aria/scenarioBProbeLogic';
 import { remoteLog } from '@utilities/remoteLog';
 import { scenarioCRepairConstructStillPending } from '@features/aria/scenarioCPromptDetection';
 import { fetchElevenLabsMpegArrayBuffer } from '@features/aria/utils/elevenLabsTtsFetch';
@@ -48,7 +51,6 @@ export function createParallelStreamSpeakShowScenarioCardOnce(
   batch: ParallelStreamTtsBatchController,
 ) {
   const { deps, params, state } = ctx;
-  const { normalizeForCompare } = __showScenarioCardCanonicalTtsTest;
 
   return async function speakShowScenarioCardStreamOnce(): Promise<void> {
     if (state.showScenarioCardCanonicalSpokenThisStream) return;
@@ -72,6 +74,30 @@ export function createParallelStreamSpeakShowScenarioCardOnce(
         interviewSessionId: deps.interviewSessionIdRef.current,
         kind,
         reason: 's3_repair_q2_still_pending',
+      });
+      return;
+    }
+
+    if (
+      kind === 'situation_2' &&
+      !scenarioAMinimumEngagementForHandoff(params.messagesToUse)
+    ) {
+      void remoteLog('[SHOW_SCENARIO_CARD_CANONICAL_SPEAK_SKIPPED]', {
+        interviewSessionId: deps.interviewSessionIdRef.current,
+        kind,
+        reason: 's1_repair_engagement_incomplete',
+      });
+      return;
+    }
+
+    if (
+      kind === 'situation_3' &&
+      !scenarioBJamesRepairProbeAlreadySatisfied(params.messagesToUse)
+    ) {
+      void remoteLog('[SHOW_SCENARIO_CARD_CANONICAL_SPEAK_SKIPPED]', {
+        interviewSessionId: deps.interviewSessionIdRef.current,
+        kind,
+        reason: 's2_james_repair_incomplete',
       });
       return;
     }
@@ -105,8 +131,24 @@ export function createParallelStreamSpeakShowScenarioCardOnce(
 
     const lockedExact = buildLockedShowScenarioCardTtsText(kind);
     const earlyCanonicalBody = lockedExact ?? buildCanonicalShowScenarioCardTtsBody(kind);
-    const canonicalPrefetchPromise = earlyCanonicalBody
-      ? fetchElevenLabsMpegArrayBuffer(earlyCanonicalBody)
+    /**
+     * Prefetch the exact line we intend to speak (wrap + vignette when applicable).
+     * Prefetching vignette-only while speaking wrap+vignette silently drops the transition.
+     */
+    const earlyPrefetchPrefix = earlyCanonicalBody
+      ? resolveClientScenarioBoundaryPrefixForCanonicalTts({
+          kind,
+          messages: params.messagesToUse,
+          firstName: params.participantFirstNameForSpoken,
+          extractedPrefix: extractShowScenarioCardTransitionPrefix(fullStream, kind),
+        }).trim()
+      : '';
+    const earlyPrefetchText =
+      earlyCanonicalBody && earlyPrefetchPrefix
+        ? `${earlyPrefetchPrefix}\n\n${earlyCanonicalBody}`.replace(/\n{3,}/g, '\n\n').trim()
+        : earlyCanonicalBody;
+    const canonicalPrefetchPromise = earlyPrefetchText
+      ? fetchElevenLabsMpegArrayBuffer(earlyPrefetchText)
       : Promise.resolve(null as ArrayBuffer | null);
 
     if (
@@ -147,12 +189,31 @@ export function createParallelStreamSpeakShowScenarioCardOnce(
     batch.flushParallelTtsBatch(true);
     await state.ttsChain;
 
-    if (spokenSoFar && !streamSpokenTextAlreadyMatchesCanonicalCard(spokenSoFar, fullStream)) {
+    /**
+     * Cancel any in-flight parallel batch (often the model wrap lead) before replacing with the
+     * locked card. Text already queued into spokenCompleteText must NOT count as "transition
+     * already spoken" — that audio was stopped and the user never heard it.
+     */
+    let cancelledParallelPrefixForCanonical = false;
+    const spokenBeforeCancel = deps.parallelStreamingTtsRef.current.spokenCompleteText.trim();
+    const completedForKind =
+      kind === 'moment_4' ? 3 : kind === 'situation_3' ? 2 : kind === 'situation_2' ? 1 : null;
+    const boundaryLeadAlreadyAudible =
+      completedForKind != null &&
+      streamAlreadySpokeScenarioBoundaryClosingLead(spokenBeforeCancel, completedForKind);
+    if (
+      spokenBeforeCancel &&
+      !streamSpokenTextAlreadyMatchesCanonicalCard(spokenBeforeCancel, fullStream) &&
+      !boundaryLeadAlreadyAudible
+    ) {
       deps.parallelStreamingTtsRef.current.cancelRequested = true;
       state.ttsCancelled = true;
+      cancelledParallelPrefixForCanonical = true;
       await deps.stopElevenLabsPlayback();
       state.parallelTtsBatchBuffer = '';
       state.parallelTtsBatchPrefetch = null;
+      state.showScenarioCardTransitionPrefixSpoken = false;
+      deps.parallelStreamingTtsRef.current.spokenCompleteText = '';
     }
 
     const canonicalBody = lockedExact ?? buildCanonicalShowScenarioCardTtsBody(kind);
@@ -163,12 +224,14 @@ export function createParallelStreamSpeakShowScenarioCardOnce(
       firstName: params.participantFirstNameForSpoken,
       extractedPrefix: prefix,
     });
-    const transitionAlreadySpoken = resolveShowScenarioCardTransitionAlreadySpoken({
-      prefix: effectivePrefix,
-      spokenSoFar,
-      scenarioJustCompleted:
-        kind === 'moment_4' ? 3 : kind === 'situation_3' ? 2 : kind === 'situation_2' ? 1 : undefined,
-    });
+    const spokenLiveAfterCancelGate = deps.parallelStreamingTtsRef.current.spokenCompleteText.trim();
+    const { transitionAlreadySpoken, spokenSoFarForCompose } =
+      resolveCanonicalShowScenarioCardTransitionSpeakDecision({
+        kind,
+        effectivePrefix,
+        spokenLive: spokenLiveAfterCancelGate,
+        cancelledParallelPlayback: cancelledParallelPrefixForCanonical,
+      });
     const canonicalText = lockedExact ?? canonicalBody;
 
     if (!canonicalText) {
@@ -179,7 +242,7 @@ export function createParallelStreamSpeakShowScenarioCardOnce(
     const textToSpeak = composeShowScenarioCardTtsWithTransitionPrefix({
       prefix: effectivePrefix,
       canonicalText,
-      spokenSoFar,
+      spokenSoFar: spokenSoFarForCompose,
       transitionAlreadySpoken,
     });
 
@@ -187,6 +250,7 @@ export function createParallelStreamSpeakShowScenarioCardOnce(
       interviewSessionId: deps.interviewSessionIdRef.current,
       kind,
       transitionAlreadySpoken,
+      cancelledParallelPrefixForCanonical,
       includesTransitionPrefix: textToSpeak !== canonicalText,
       preview: textToSpeak.slice(0, 220),
     });
@@ -213,16 +277,18 @@ export function createParallelStreamSpeakShowScenarioCardOnce(
 
     const prefetchedBuffer =
       (await canonicalPrefetchPromise.catch(() => null)) ?? null;
-    const prefetchMatches =
-      !prefetchedBuffer?.byteLength ||
-      normalizeForCompare(textToSpeak).includes(normalizeForCompare(earlyCanonicalBody ?? ''));
+    const prefetchMatches = showScenarioCardPrefetchBufferMatchesSpeakText(
+      textToSpeak,
+      earlyPrefetchText,
+    );
     let htmlMp3Played = false;
     try {
       try {
         htmlMp3Played = await speakLongFormInterviewHtmlMp3({
           text: textToSpeak,
           telemetrySource: 'turn',
-          prefetchedBuffer: prefetchMatches ? prefetchedBuffer : null,
+          prefetchedBuffer:
+            prefetchMatches && prefetchedBuffer?.byteLength ? prefetchedBuffer : null,
           onPlaybackStarted: () => deps.setVoiceState('speaking'),
         });
       } catch {
@@ -256,6 +322,18 @@ export function createParallelStreamSpeakShowScenarioCardOnce(
     if (!playbackConfirmed) {
       state.showScenarioCardCanonicalSpokenThisStream = false;
       return;
+    }
+    if (kind === 'situation_2' || kind === 'situation_3' || kind === 'moment_4') {
+      advanceInterviewScenarioRefsAfterCanonicalShowScenarioCard(
+        {
+          currentScenarioRef: deps.currentScenarioRef,
+          currentInterviewMomentRef: deps.currentInterviewMomentRef,
+          interviewMomentsCompleteRef: deps.interviewMomentsCompleteRef,
+          resumeActiveScenarioRef: deps.resumeActiveScenarioRef,
+          interviewSessionIdRef: deps.interviewSessionIdRef,
+        },
+        kind,
+      );
     }
     deps.parallelStreamingTtsRef.current.spokenCompleteText = textToSpeak;
     params.textToParallelStream.full = textToSpeak;

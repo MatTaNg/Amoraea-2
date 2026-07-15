@@ -153,7 +153,7 @@ describe('suppressed elongating fallbacks', () => {
     expect(t).toContain('[INTERVIEW_COMPLETE]');
     expect(t).toMatch(/Thank you for being so open with me/i);
     expect(t).toMatch(/good work getting through all of this/i);
-    expect(t).toMatch(/what (?:i heard|i got|came through|landed for me) was that/i);
+    expect(t).toMatch(/You named|What (?:I heard|I got|came through|landed for me) was that/i);
     expect(t).not.toMatch(/walking through/i);
     expect((t.match(/thank you/gi) ?? []).length).toBe(1);
   });

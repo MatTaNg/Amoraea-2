@@ -2,6 +2,7 @@ import type { ComputeGateResultOptions } from '@features/aria/computeGateResultC
 import { moment4Moment5ConcretenessDepthSignalDelta } from '@features/aria/moment4ConcretenessClassification';
 import { DEFAULT_DEFENSE_PATTERNS, type DefensePatternsJson } from '@features/aria/defensePatternsDetection';
 import { resolveEmotionRecognitionRawScoreForGate } from '@features/aria/emotionRecognitionInterview';
+import { EGO_DEVELOPMENT_LEVEL_MODIFIERS } from '@config/scoring/depthSignalModifiers';
 
 const EMOTION_RECOGNITION_FLOOR_EXCLUSIVE_MAX = 0.34;
 const EMOTION_RECOGNITION_REVIEW_EXCLUSIVE_MAX = 0.67;
@@ -33,20 +34,29 @@ function parseNonNegativeInt(raw: unknown): number {
   return Math.max(0, Math.round(raw));
 }
 
+const EGO_LEVEL_LINE_DETAIL: Record<1 | 2 | 3 | 4 | 5, string> = {
+  1: 'Level 1 — concrete, rule-based',
+  2: 'Level 2 — multiple perspectives',
+  3: 'Level 3 — holds complexity',
+  4: 'Level 4 — integrates contradictions',
+  5: 'Level 5 — systemic relational understanding',
+};
+
 /** Line-item depth signal adjustments — mirrors computeGateResultCore depth modifier block. */
 export function buildDepthSignalModifierLines(
   options?: ComputeGateResultOptions,
 ): DepthSignalModifierLine[] {
   const lines: DepthSignalModifierLine[] = [];
   const egoLevel = parseEgoLevel(options?.egoDevelopmentLevel);
-  if (egoLevel === 1) {
-    lines.push({ label: 'Ego development', detail: 'Level 1 — concrete, rule-based', delta: -0.8 });
-  } else if (egoLevel === 2) {
-    lines.push({ label: 'Ego development', detail: 'Level 2 — multiple perspectives', delta: -0.3 });
-  } else if (egoLevel === 4) {
-    lines.push({ label: 'Ego development', detail: 'Level 4 — integrates contradictions', delta: 0.2 });
-  } else if (egoLevel === 5) {
-    lines.push({ label: 'Ego development', detail: 'Level 5 — systemic relational understanding', delta: 0.3 });
+  if (egoLevel != null) {
+    const delta = EGO_DEVELOPMENT_LEVEL_MODIFIERS[egoLevel as 1 | 2 | 3 | 4 | 5];
+    if (delta !== 0) {
+      lines.push({
+        label: 'Ego development',
+        detail: EGO_LEVEL_LINE_DETAIL[egoLevel as 1 | 2 | 3 | 4 | 5],
+        delta,
+      });
+    }
   }
 
   const defenseCount = parseDefenseCount(options?.defensePatterns);

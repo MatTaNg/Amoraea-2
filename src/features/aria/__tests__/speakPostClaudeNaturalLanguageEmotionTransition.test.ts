@@ -7,6 +7,8 @@ import {
   speakPostClaudeNaturalLanguageEmotionTransition,
 } from '@features/aria/speakPostClaudeNaturalLanguageEmotionTransition';
 import { buildCanonicalShowScenarioCardTtsBody } from '@features/aria/showScenarioCardCanonicalTts';
+import { SCENARIO_1_TO_2_TRANSITION } from '@features/aria/interviewTransitionBundles';
+import { SHOW_SCENARIO_2_VIGNETTE_EXACT } from '@features/aria/interviewShowScenarioExactCopy';
 import { SCENARIO_B_JAMES_DIFFERENTLY_CANONICAL } from '@features/aria/scenarioBProbeLogic';
 import {
   createMockPostClaudeDeps,
@@ -131,7 +133,7 @@ describe('speakPostClaudeNaturalLanguageEmotionTransition', () => {
     const speakTextSafe = jest.fn().mockResolvedValue(undefined);
     const speak = createMockSpeakAssistantTurn();
     const s2Opening =
-      "Sarah has been job hunting for four months. She gets an offer and calls James from the street, too excited to wait. What do you think is going on here?";
+      `${SHOW_SCENARIO_2_VIGNETTE_EXACT}\n\nWhat do you think is going on here?`;
     const deps = createMockPostClaudeDeps({
       runEmotionModalAfterScenarioTransition,
       speakTextSafe,
@@ -140,7 +142,7 @@ describe('speakPostClaudeNaturalLanguageEmotionTransition', () => {
       parallelStreamingTtsRef: {
         current: {
           active: false,
-          spokenCompleteText: s2Opening,
+          spokenCompleteText: `${SCENARIO_1_TO_2_TRANSITION}\n\n${s2Opening}`,
           accumulatedFullText: '',
           cancelRequested: false,
         },
@@ -158,12 +160,13 @@ describe('speakPostClaudeNaturalLanguageEmotionTransition', () => {
     await speakPostClaudeNaturalLanguageEmotionTransition(deps, updatedMessages, speak, {
       ...baseArgs,
       emotionSplit: {
-        beforeModal: 'Nice work, Alex.',
+        beforeModal: SCENARIO_1_TO_2_TRANSITION,
         afterModal: SCENARIO_B_JAMES_DIFFERENTLY_CANONICAL,
       },
     });
 
     expect(runEmotionModalAfterScenarioTransition).toHaveBeenCalled();
+    expect(speak).not.toHaveBeenCalled();
     expect(speakTextSafe).not.toHaveBeenCalled();
     expect(deps.setVoiceState).toHaveBeenCalledWith('idle');
     expect(deps.setIsWaiting).toHaveBeenCalledWith(false);

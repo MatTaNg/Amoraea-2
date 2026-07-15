@@ -1,0 +1,202 @@
+import { runPreClaudeClientOwnedCanonicalConstructGate } from '@features/aria/runPreClaudeClientOwnedCanonicalConstructGate';
+import type { PreClaudeTurnGateDeps } from '@features/aria/preClaudeTurnGateTypes';
+import type { PreClaudeScenarioConstructProbeFlags } from '@features/aria/resolvePreClaudeScenarioConstructProbeFlags';
+import {
+  SCENARIO_A_CONTEMPT_PROBE_DELIVERED_COPY,
+  SCENARIO_A_REPAIR_QUESTION_AFTER_CONTEMPT_COPY,
+} from '@features/aria/scenarioAContemptProbeTtsStrip';
+import {
+  SCENARIO_B_JAMES_DIFFERENTLY_CANONICAL,
+  SCENARIO_B_JAMES_REPAIR_CANONICAL,
+} from '@features/aria/scenarioBProbeLogic';
+
+function baseFlags(
+  overrides: Partial<PreClaudeScenarioConstructProbeFlags> = {},
+): PreClaudeScenarioConstructProbeFlags {
+  return {
+    replyingToScenarioAQ1: false,
+    replyingToScenarioBQ1: false,
+    replyingToScenarioCQ1: false,
+    scenarioAContemptGateUserText: '',
+    shouldForceScenarioAContemptProbe: false,
+    shouldForceScenarioBFullAppreciationProbe: false,
+    shouldForceScenarioBJamesRepairProbe: false,
+    shouldForceScenarioCRepairProbe: false,
+    shouldForceScenarioCSophiePerspectiveProbe: false,
+    specificEmmaLineAlreadyAddressed: false,
+    sidedEntirelyWithJames: false,
+    scenarioBQ1Engaged: false,
+    muteParallelTtsForScenarioAContemptProbeStream: false,
+    muteParallelTtsForS3ToM4HandoffStream: false,
+    allowScenarioARepairAfterContemptAnswer: false,
+    ...overrides,
+  };
+}
+
+function buildDeps(overrides: Partial<PreClaudeTurnGateDeps> = {}): PreClaudeTurnGateDeps {
+  return {
+    currentScenarioRef: { current: 2 },
+    currentInterviewMomentRef: { current: 2 },
+    currentMessagesRef: { current: [] },
+    scenarioAContemptProbeAskedRef: { current: false },
+    scenarioARepairQuestionAskedRef: { current: false },
+    pendingScenarioAContemptProbeStreamMuteRef: { current: false },
+    s2RepairProbeDeliveredRef: { current: false },
+    lastQuestionTextRef: { current: '' },
+    interviewSessionIdRef: { current: 'session-1' },
+    setMessages: jest.fn(),
+    speakTextSafe: jest.fn().mockResolvedValue(undefined),
+    setVoiceState: jest.fn(),
+    setIsWaiting: jest.fn(),
+    messages: [],
+    ...overrides,
+  } as unknown as PreClaudeTurnGateDeps;
+}
+
+describe('runPreClaudeClientOwnedCanonicalConstructGate', () => {
+  it('delivers canonical James differently after Q1 without Claude', async () => {
+    const messages = [
+      {
+        role: 'assistant' as const,
+        content: 'What do you think is going on here?',
+        scenarioNumber: 2 as const,
+      },
+      {
+        role: 'user' as const,
+        content: 'Sarah needed emotional celebration, not logistics questions.',
+        scenarioNumber: 2 as const,
+      },
+    ];
+    const deps = buildDeps({
+      messages,
+      currentMessagesRef: { current: messages },
+    });
+
+    const result = await runPreClaudeClientOwnedCanonicalConstructGate(
+      deps,
+      messages[1].content,
+      messages,
+      messages[0].content,
+      baseFlags({ replyingToScenarioBQ1: true, scenarioBQ1Engaged: true }),
+    );
+
+    expect(result.handled).toBe(true);
+    expect(deps.speakTextSafe).toHaveBeenCalledWith(
+      expect.stringContaining(SCENARIO_B_JAMES_DIFFERENTLY_CANONICAL),
+      expect.anything(),
+    );
+  });
+
+  it('delivers canonical James repair after differently Q2 without Claude', async () => {
+    const messages = [
+      {
+        role: 'assistant' as const,
+        content: SCENARIO_B_JAMES_DIFFERENTLY_CANONICAL,
+        scenarioNumber: 2 as const,
+      },
+      {
+        role: 'user' as const,
+        content:
+          "I'm guessing you wanted me to comment on how James was asking detailed questions and not asking how she felt.",
+        scenarioNumber: 2 as const,
+      },
+    ];
+    const deps = buildDeps({
+      messages,
+      currentMessagesRef: { current: messages },
+    });
+
+    const result = await runPreClaudeClientOwnedCanonicalConstructGate(
+      deps,
+      messages[1].content,
+      messages,
+      messages[0].content,
+      baseFlags({ shouldForceScenarioBJamesRepairProbe: true }),
+    );
+
+    expect(result.handled).toBe(true);
+    expect(deps.s2RepairProbeDeliveredRef.current).toBe(true);
+    expect(deps.speakTextSafe).toHaveBeenCalledWith(
+      expect.stringContaining(SCENARIO_B_JAMES_REPAIR_CANONICAL),
+      expect.anything(),
+    );
+    expect(deps.speakTextSafe).toHaveBeenCalledWith(
+      expect.not.stringMatching(/before the fight/i),
+      expect.anything(),
+    );
+  });
+
+  it('delivers canonical S1 contempt without Claude when forced', async () => {
+    const messages = [
+      {
+        role: 'assistant' as const,
+        content: "What's going on between these two?",
+        scenarioNumber: 1 as const,
+      },
+      {
+        role: 'user' as const,
+        content: 'Ryan put his mother above Emma.',
+        scenarioNumber: 1 as const,
+      },
+    ];
+    const deps = buildDeps({
+      currentScenarioRef: { current: 1 },
+      currentInterviewMomentRef: { current: 1 },
+      pendingScenarioAContemptProbeStreamMuteRef: { current: true },
+      messages,
+      currentMessagesRef: { current: messages },
+    });
+
+    const result = await runPreClaudeClientOwnedCanonicalConstructGate(
+      deps,
+      messages[1].content,
+      messages,
+      messages[0].content,
+      baseFlags({ shouldForceScenarioAContemptProbe: true }),
+    );
+
+    expect(result.handled).toBe(true);
+    expect(deps.scenarioAContemptProbeAskedRef.current).toBe(true);
+    expect(deps.pendingScenarioAContemptProbeStreamMuteRef.current).toBe(false);
+    expect(deps.speakTextSafe).toHaveBeenCalledWith(
+      SCENARIO_A_CONTEMPT_PROBE_DELIVERED_COPY,
+      expect.anything(),
+    );
+  });
+
+  it('delivers canonical S1 repair without Claude after contempt answer', async () => {
+    const messages = [
+      {
+        role: 'assistant' as const,
+        content: SCENARIO_A_CONTEMPT_PROBE_DELIVERED_COPY,
+        scenarioNumber: 1 as const,
+      },
+      {
+        role: 'user' as const,
+        content: "She feels subordinate to his mother.",
+        scenarioNumber: 1 as const,
+      },
+    ];
+    const deps = buildDeps({
+      currentScenarioRef: { current: 1 },
+      currentInterviewMomentRef: { current: 1 },
+      messages,
+      currentMessagesRef: { current: messages },
+    });
+
+    const result = await runPreClaudeClientOwnedCanonicalConstructGate(
+      deps,
+      messages[1].content,
+      messages,
+      messages[0].content,
+      baseFlags({ allowScenarioARepairAfterContemptAnswer: true }),
+    );
+
+    expect(result.handled).toBe(true);
+    expect(deps.scenarioARepairQuestionAskedRef.current).toBe(true);
+    expect(deps.speakTextSafe).toHaveBeenCalledWith(
+      SCENARIO_A_REPAIR_QUESTION_AFTER_CONTEMPT_COPY,
+      expect.anything(),
+    );
+  });
+});

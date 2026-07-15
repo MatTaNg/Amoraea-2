@@ -23,7 +23,12 @@ import {
   resolveMoment4GrudgeAnswerForThresholdReflection,
 } from '@features/aria/moment4SpecificityFollowUp';
 import type { PostClaudeInterviewMessage } from '@features/aria/postClaudeAssistantTurnTypes';
-import { isScenarioABoundaryReflectionWithoutNextVignette } from '@features/aria/scenarioAContemptProbeTextMatch';
+import {
+  isIncompleteScenarioAContemptProbeLeadSentence,
+  isScenarioABoundaryReflectionWithoutNextVignette,
+  looksLikeScenarioAContemptProbeQuestion,
+} from '@features/aria/scenarioAContemptProbeTextMatch';
+import { coerceScenarioAContemptProbeForTts } from '@features/aria/scenarioAContemptProbeTtsStrip';
 import { substituteCanonicalInterviewScenarioBodiesForTts } from '@features/aria/substituteCanonicalInterviewScenarioBodiesForTts';
 import {
   coerceScenarioBQ1QuestionForTts,
@@ -47,6 +52,8 @@ export type CoerceInterviewAssistantDraftContext = {
   currentScenario: number | null | undefined;
   firstName: string;
   messages: PostClaudeInterviewMessage[];
+  situation2PlaybackConfirmed?: boolean;
+  situation2AlreadySpoken?: boolean;
 };
 
 /**
@@ -111,6 +118,10 @@ export function coerceInterviewAssistantDraftForSpeak(
     ctx.messages,
     ctx.currentScenario,
     ctx.interviewMoment,
+    {
+      situation2PlaybackConfirmed: ctx.situation2PlaybackConfirmed,
+      situation2AlreadySpoken: ctx.situation2AlreadySpoken,
+    },
   );
 
   if (isResolvedScenarioThreeToMoment4HandoffBundle(t)) {
@@ -134,7 +145,12 @@ export function coerceInterviewAssistantDraftForSpeak(
   }
 
   if (ctx.interviewMoment === 1 && (ctx.currentScenario === 1 || ctx.currentScenario == null)) {
-    if (!shouldSkipScenarioARepairDraftNormalization(t)) {
+    if (
+      looksLikeScenarioAContemptProbeQuestion(t) ||
+      isIncompleteScenarioAContemptProbeLeadSentence(t)
+    ) {
+      t = coerceScenarioAContemptProbeForTts(t);
+    } else if (!shouldSkipScenarioARepairDraftNormalization(t)) {
       if (
         looksLikeScenarioARepairQuestion(t) ||
         looksLikeScenarioARepairStreamFragment(t) ||
@@ -157,6 +173,10 @@ export function coerceInterviewAssistantDraftForSpeak(
         ctx.messages,
         1,
         1,
+        {
+          situation2PlaybackConfirmed: ctx.situation2PlaybackConfirmed,
+          situation2AlreadySpoken: ctx.situation2AlreadySpoken,
+        },
       );
     } else if (ctx.interviewMoment === 2 && (ctx.currentScenario === 2 || ctx.currentScenario == null)) {
       t = coerceScenarioBQ1QuestionForTts(t);

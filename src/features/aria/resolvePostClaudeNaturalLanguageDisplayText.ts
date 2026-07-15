@@ -3,6 +3,7 @@ import type { SanitizePostClaudeAssistantDraftResult } from '@features/aria/sani
 import { coerceScenarioBoundaryHandoffDisplayText } from '@features/aria/coerceScenarioBoundaryHandoffDisplayText';
 import { coerceInterviewAssistantDraftForSpeak } from '@features/aria/interviewTruncatedAssistantDraft';
 import { ensureAcknowledgmentBeforeMove } from '@features/aria/interviewAssistantReflection';
+import { textContainsScenarioBVignetteBody } from '@features/aria/emotionScenarioTransitionInference';
 import {
   isPersonalMomentInterviewTurn,
   isStandalonePersonalDisclosureAcknowledgment,
@@ -102,12 +103,24 @@ export function resolvePostClaudeNaturalLanguageDisplayText(
       params.messagesToUse,
       deps.currentScenarioRef.current,
       deps.currentInterviewMomentRef.current,
+      {
+        situation2PlaybackConfirmed:
+          deps.showScenarioCardCanonicalPlaybackConfirmedKindsRef?.current?.situation_2 === true,
+        situation2AlreadySpoken: textContainsScenarioBVignetteBody(
+          deps.parallelStreamingTtsRef?.current?.spokenCompleteText ?? '',
+        ),
+      },
     ),
     {
       interviewMoment: deps.currentInterviewMomentRef.current,
       currentScenario: deps.currentScenarioRef.current,
       firstName: params.participantFirstNameForSpoken,
       messages: params.messagesToUse,
+      situation2PlaybackConfirmed:
+        deps.showScenarioCardCanonicalPlaybackConfirmedKindsRef?.current?.situation_2 === true,
+      situation2AlreadySpoken: textContainsScenarioBVignetteBody(
+        deps.parallelStreamingTtsRef?.current?.spokenCompleteText ?? '',
+      ),
     },
   );
 }

@@ -135,7 +135,7 @@ export interface GateResult {
   depthSignalModifier?: number | null;
   /** Marker + skip composite plus {@link scoreModifier}; compared to {@link GATE_PASS_WEIGHTED_MIN} / referral min. */
   modifiedWeightedScore?: number | null;
-  /** Holistic ego-development adjustment applied before weighted threshold (currently -0.2 for level 2 only). */
+  /** Holistic ego-development adjustment applied before weighted threshold (see EGO_DEVELOPMENT_LEVEL_MODIFIERS). */
   egoDevelopmentModifier?: number | null;
   /** Cross-scenario defense pattern heuristics passed into the gate (from aggregate / transcript). */
   defensePatterns?: DefensePatternsJson | null;
@@ -624,17 +624,7 @@ export function computeGateResultCore(
     m5cOpt !== undefined;
 
   const egoDevelopmentModifier: number | null =
-    egoLv === null
-      ? null
-      : egoLv === 1
-        ? -0.8
-        : egoLv === 2
-          ? -0.3
-          : egoLv === 4
-            ? 0.2
-            : egoLv === 5
-              ? 0.3
-              : null;
+    egoLv === null ? null : EGO_DEVELOPMENT_LEVEL_MODIFIERS[egoLv as 1 | 2 | 3 | 4 | 5];
   const defensePatternScoreAdjustment =
     _defenseCount === 1
       ? -0.15

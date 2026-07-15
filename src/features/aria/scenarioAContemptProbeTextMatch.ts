@@ -155,6 +155,12 @@ export function scenarioAEmmaVeryClearContemptReask(text: string): boolean {
     /\bwhat (?:did|do) you think (?:she|emma) meant when (?:she|emma) said\b/.test(t) ||
     /\bwhat (?:did|do) you think emma (?:meant|was saying|was getting at|was trying to say)\b/.test(t) ||
     /\bwhat (?:did|do) you think (?:about )?when\b/.test(t) ||
+    /** Model paraphrase: "Do you think Emma's last line … says something about how she's feeling?" */
+    /\bdo you think emma'?s (?:last |closing )?line\b/.test(t) ||
+    (/\bemma'?s (?:last |closing )?line\b/.test(t) &&
+      (/\bsays something\b/.test(t) ||
+        /\bhow she'?s feeling\b/.test(t) ||
+        /\babout how she(?:'s| is) feeling\b/.test(t))) ||
     /\bhow do you (?:read|take|understand)\b/.test(t) ||
     /\bhow does that read\b/.test(t) ||
     /\bhow does that land\b/.test(t) ||

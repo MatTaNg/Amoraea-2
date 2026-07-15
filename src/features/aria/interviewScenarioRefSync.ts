@@ -74,8 +74,8 @@ export function buildPreClaudeSessionSpokenDeliveryHints(
 export function collectSessionSpokenDeliveryTexts(hints: SessionSpokenDeliveryHints): string[] {
   const out: string[] = [];
   const ps = hints.parallelStreamingTtsRef?.current;
+  /** Only spokenCompleteText counts — accumulatedFullText is the full model stream and may include muted S2/S3 vignettes. */
   if (ps?.spokenCompleteText?.trim()) out.push(ps.spokenCompleteText.trim());
-  if (ps?.accumulatedFullText?.trim()) out.push(ps.accumulatedFullText.trim());
   const lastQuestion = hints.lastQuestionTextRef?.current?.trim();
   if (lastQuestion) out.push(lastQuestion);
   const deliveredNorm = hints.webTabRestoreDeliveredNormRef?.current?.trim();
@@ -97,6 +97,35 @@ export function inferScenarioFromSpokenDeliveryTexts(texts: readonly string[]): 
     }
   }
   return maxScenario > 1 ? maxScenario : null;
+}
+
+export function advanceInterviewScenarioRefsAfterCanonicalShowScenarioCard(
+  deps: InterviewScenarioRefSyncTarget,
+  kind: 'situation_2' | 'situation_3' | 'moment_4',
+): { advanced: boolean; effectiveScenario: 1 | 2 | 3 } {
+  if (kind === 'moment_4') {
+    deps.interviewMomentsCompleteRef.current[3] = true;
+    deps.currentInterviewMomentRef.current = 4;
+    void remoteLog('[SCENARIO_REFS_ADVANCED_CANONICAL_MOMENT_4]', {
+      interviewSessionId: deps.interviewSessionIdRef?.current ?? null,
+      interviewMoment: 4,
+    });
+    const currentScenario =
+      deps.currentScenarioRef.current === 1 ||
+      deps.currentScenarioRef.current === 2 ||
+      deps.currentScenarioRef.current === 3
+        ? deps.currentScenarioRef.current
+        : 3;
+    return { advanced: true, effectiveScenario: currentScenario as 1 | 2 | 3 };
+  }
+  const targetScenario = kind === 'situation_2' ? 2 : 3;
+  return advanceInterviewScenarioRefsTo(
+    deps,
+    targetScenario,
+    kind === 'situation_2'
+      ? '[SCENARIO_REFS_ADVANCED_CANONICAL_SITUATION_2]'
+      : '[SCENARIO_REFS_ADVANCED_CANONICAL_SITUATION_3]',
+  );
 }
 
 function advanceInterviewScenarioRefsTo(

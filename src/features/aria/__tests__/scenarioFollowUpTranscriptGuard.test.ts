@@ -155,6 +155,38 @@ describe('scenarioFollowUpTranscriptGuard', () => {
     expect(scenarioAMinimumEngagementForHandoff(msgs)).toBe(true);
   });
 
+  it('scenarioAMinimumEngagementForHandoff is true after Ryan sit-down / boundaries repair answer', () => {
+    const msgs = [
+      {
+        role: 'assistant',
+        content: "What about when Emma says 'you've made that very clear' — what do you make of that?",
+      },
+      {
+        role: 'user',
+        content: "She definitely feels like she's in a subordinate position to his mother.",
+      },
+      { role: 'assistant', content: 'Got it. If you were Ryan, how would you repair this?' },
+      {
+        role: 'user',
+        content:
+          "If I were Ryan, which I'm not, I would have a sit down with both my mother and with Emma. For my mother, I would be setting boundaries, letting her know that she doesn't have instant constant access to me. As for Emma, I would truly assert in how she feels, not only what's happening right in the now, I would go deeper into her emotional state and her triggering in her past to find out why this is so triggering for her.",
+      },
+    ];
+    expect(scenarioAMinimumEngagementForHandoff(msgs)).toBe(true);
+  });
+
+  it('scenarioAMinimumEngagementForHandoff accepts If I\'m Ryan / I assure repair phrasing', () => {
+    const msgs = [
+      { role: 'assistant', content: 'Got it. If you were Ryan, how would you repair this?' },
+      {
+        role: 'user',
+        content:
+          "If I'm Ryan and I really liked Emma, I assure her that this would not happen again and actually follow through.",
+      },
+    ];
+    expect(scenarioAMinimumEngagementForHandoff(msgs)).toBe(true);
+  });
+
   it('stripPrematureScenarioABoundaryFromDraft keeps contempt probe when bundled with wrap', () => {
     const bundled = `${SCENARIO_A_CONTEMPT_PROBE_DELIVERED_COPY}\n\nThat's a wrap on that one. Nice work — You focused on putting concrete limits on calls during dates.`;
     expect(stripPrematureScenarioABoundaryFromDraft(bundled)).toBe(

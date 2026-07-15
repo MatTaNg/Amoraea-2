@@ -46,7 +46,11 @@ export function detectActiveScenarioFromMessage(content: string): InterviewDetec
     c.includes('Sarah has been job hunting') ||
     c.includes('Sarah has been looking for work') ||
     c.includes('Sarah was looking for work') ||
-    /\bSarah (?:and James|has been)\b/i.test(c)
+    /\bSarah has just got(?:ten)? a promotion\b/i.test(c) ||
+    /\bSarah has been planning a birthday\b/i.test(c) ||
+    /\bSarah has been working late\b/i.test(c) ||
+    /\bSarah has been feeling underappreciated\b/i.test(c) ||
+    /\bSarah (?:and James|has been|has just)\b/i.test(c)
   ) {
     return { label: SCENARIO_2_LABEL, text: SCENARIO_2_VIGNETTE };
   }
@@ -61,7 +65,7 @@ export function detectActiveScenarioFromMessage(content: string): InterviewDetec
   if (
     c.includes('Sarah') &&
     c.includes('James') &&
-    /job hunting|looking for work|gets an offer|fight starts|blindsided|together for two years|mentions in passing|never feels appreciated|salary|deadline|commute/.test(
+    /job hunting|looking for work|gets an offer|fight starts|blindsided|together for two years|mentions in passing|never feels appreciated|salary|deadline|commute|promotion|comes home excited|working late|birthday dinner|must be nice to finally/.test(
       c,
     )
   ) {

@@ -208,6 +208,8 @@ export function persistPostClaudeNaturalLanguageTranscriptTurn(
     priorScenario: priorScenarioNum,
     detectedScenario,
     messages: updatedMessages,
+    situation2PlaybackConfirmed:
+      deps.showScenarioCardCanonicalPlaybackConfirmedKindsRef?.current?.situation_2 === true,
   });
   const emotionCompletedScenario = emotionGate.completedScenario;
   const emotionNaturalForward =

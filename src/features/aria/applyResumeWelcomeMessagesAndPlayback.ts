@@ -204,8 +204,12 @@ export async function applyResumeWelcomeMessagesAndPlayback(params: {
         }
       }
       deps.resumeRepeatChoicePendingRef.current = offerWelcome && spokeWelcome;
+      if (spokeWelcome || !offerWelcome) {
+        deps.resumeOfferWelcomeTtsRef.current = false;
+      }
     } catch {
       deps.resumeRepeatChoicePendingRef.current = false;
+      deps.resumeOfferWelcomeTtsRef.current = false;
     }
   })();
 }

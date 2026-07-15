@@ -235,6 +235,25 @@ export function scenarioBMinimumEngagementForHandoff(messages: readonly MessageW
   return false;
 }
 
+/**
+ * Next scripted Scenario B beat when a premature S2→S3 handoff is blocked.
+ * Prefer Q2 (James differently / before the fight) before Q3 (repair-as-James).
+ */
+export function resolveScenarioBNextRequiredFollowUpPrompt(
+  messages: readonly MessageWithScenario[],
+): string {
+  const hasJamesDifferentlyOrAppreciation = messages.some(
+    (m) =>
+      m.role === 'assistant' &&
+      looksLikeScenarioBJamesDifferentlyQuestion(m.content ?? '') &&
+      !looksLikeScenarioBRepairAsJamesQuestion(m.content ?? ''),
+  );
+  if (!hasJamesDifferentlyOrAppreciation) {
+    return SCENARIO_B_JAMES_DIFFERENTLY_CANONICAL;
+  }
+  return SCENARIO_B_JAMES_REPAIR_CANONICAL;
+}
+
 /** Scenario B Q3 repair-as-James already answered — skip re-asking Q2 or Q3. */
 export function scenarioBJamesRepairProbeAlreadySatisfied(
   messages: readonly MessageWithScenario[],

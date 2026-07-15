@@ -495,7 +495,7 @@ describe('getLastSubstantiveScenarioModalQuestion', () => {
       },
     ];
     expect(getLastSubstantiveScenarioModalQuestion(transcript)).toBe(
-      'How would you repair this relationship if you were Ryan?',
+      'Got it. If you were Ryan, how would you repair this?',
     );
   });
 });

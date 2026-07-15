@@ -35,7 +35,11 @@ import {
 } from '../interviewDisengagementProbes';
 import { applyPostClaudeScenarioAdvanceBundleOverride } from '../interviewScenarioAdvanceAfterRepair';
 import { SCENARIO_A_REPAIR_QUESTION_AFTER_CONTEMPT_COPY, SCENARIO_A_CONTEMPT_PROBE_DELIVERED_COPY } from '../probeAndScoringUtils';
-import { SCENARIO_B_JAMES_DIFFERENTLY_CANONICAL, SCENARIO_B_JAMES_REPAIR_CANONICAL } from '../scenarioBProbeLogic';
+import {
+  SCENARIO_B_JAMES_DIFFERENTLY_CANONICAL,
+  SCENARIO_B_JAMES_REPAIR_CANONICAL,
+  SCENARIO_B_Q1_CANONICAL,
+} from '../scenarioBProbeLogic';
 import { SCENARIO_C_REPAIR_QUESTION_CANONICAL } from '../scenarioCPromptDetection';
 import { SCENARIO_3_TEXT } from '../interviewScenarioVignetteCopy';
 import { isScenarioBRepairAsJamesQuestion } from '../scenarioBTranscriptGates';
@@ -230,6 +234,15 @@ describe('interviewDisengagementProbes', () => {
     ).toBe('Got it. And if you were James, how would you repair?');
   });
 
+  it('resolveInterviewQuestionRepeatTtsText maps Scenario A contempt bleed to S2 Q1 during Scenario 2', () => {
+    expect(
+      resolveInterviewQuestionRepeatTtsText(
+        "What about when Emma says 'you've made that very clear' — what do you make of that?",
+        { activeScenario: 2 },
+      ),
+    ).toBe(SCENARIO_B_Q1_CANONICAL);
+  });
+
   it('resolveInterviewQuestionRepeatTtsText coerces Scenario 2 James repair bleed during Scenario 3', () => {
     expect(
       resolveInterviewQuestionRepeatTtsText(SCENARIO_B_JAMES_REPAIR_CANONICAL, { activeScenario: 3 }),
@@ -407,6 +420,33 @@ describe('interviewDisengagementProbes', () => {
     expect(userAnswerSatisfiesScenarioARepairPrompt(userAnswer, 'How would you repair this if you were Ryan?')).toBe(
       true,
     );
+  });
+
+  it('treats first-person Ryan sit-down / setting-boundaries answers as concrete repair content', () => {
+    const userAnswer =
+      "If I were Ryan, which I'm not, I would have a sit down with both my mother and with Emma. For my mother, I would be setting boundaries, letting her know that she doesn't have instant constant access to me. As for Emma, I would truly assert in how she feels, not only what's happening right in the now, I would go deeper into her emotional state and her triggering in her past to find out why this is so triggering for her.";
+    expect(repairAnswerHasConcreteSuggestionActionOrStep(userAnswer)).toBe(true);
+    expect(
+      evaluateRepairRefusalDetection(userAnswer, userAnswer.split(/\s+/).length).has_concrete_repair_content,
+    ).toBe(true);
+    expect(
+      userAnswerSatisfiesScenarioARepairPrompt(
+        userAnswer,
+        'Got it. If you were Ryan, how would you repair this?',
+      ),
+    ).toBe(true);
+  });
+
+  it('treats "If I\'m Ryan… I assure her…" as a satisfied Scenario A repair answer', () => {
+    const userAnswer =
+      "If I'm Ryan and I really liked Emma, I assure her that this would not happen again and actually follow through.";
+    expect(repairAnswerHasConcreteSuggestionActionOrStep(userAnswer)).toBe(true);
+    expect(
+      userAnswerSatisfiesScenarioARepairPrompt(
+        userAnswer,
+        'Got it. If you were Ryan, how would you repair this?',
+      ),
+    ).toBe(true);
   });
 
   it('does not pick repair refusal for third-person or bilateral repair plans', () => {
@@ -1175,5 +1215,20 @@ describe('findLastRepeatableInterviewQuestionText', () => {
         activeScenario: 3,
       }),
     ).toBe(SCENARIO_C_REPAIR_QUESTION_CANONICAL);
+  });
+
+  it('skips S1 contempt bleed and falls back to S2 Q1 when Scenario 2 is active', () => {
+    const emmaContempt = SCENARIO_A_CONTEMPT_PROBE_DELIVERED_COPY;
+    const messages = [
+      { role: 'assistant', content: 'If you were Ryan, how would you repair this?', scenarioNumber: 1 },
+      { role: 'user', content: 'I would apologize and put the phone away.', scenarioNumber: 1 },
+      { role: 'assistant', content: emmaContempt, scenarioNumber: 2 },
+      { role: 'user', content: 'Can you repeat?', scenarioNumber: 2 },
+    ];
+    expect(
+      findLastRepeatableInterviewQuestionText(messages, emmaContempt, {
+        activeScenario: 2,
+      }),
+    ).toBe(SCENARIO_B_Q1_CANONICAL);
   });
 });

@@ -48,6 +48,7 @@ import {
   scenarioAEmmaVeryClearContemptReask,
   mergeDeferredScenarioAContemptProbeLeadWithNextSentence,
   isIncompleteScenarioAContemptProbeLeadSentence,
+  coerceScenarioAContemptProbeForTts,
   stripScenarioAContemptProbeQuestion,
   stripEmbeddedScenarioAContemptProbeAsk,
   stripScenarioAContemptProbeStreamingEcho,
@@ -1438,6 +1439,16 @@ describe('probeAndScoringUtils', () => {
           'Got it — and that closing line from Emma, "you\'ve made that very clear" — did that read as contempt to you, or something else?',
         ),
       ).toBe(true);
+      expect(
+        looksLikeScenarioAContemptProbeQuestion(
+          'Got it. Do you think Emma\'s last line — "I know, you\'ve made that very clear" — says something specific about how she\'s feeling?',
+        ),
+      ).toBe(true);
+      expect(
+        coerceScenarioAContemptProbeForTts(
+          'Got it. Do you think Emma\'s last line — "I know, you\'ve made that very clear" — says something specific about how she\'s feeling?',
+        ),
+      ).toBe(SCENARIO_A_CONTEMPT_PROBE_DELIVERED_COPY);
     });
 
     it('mergeDeferredScenarioAContemptProbeLeadWithNextSentence avoids duplicating full probe', () => {

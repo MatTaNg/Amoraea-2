@@ -41,8 +41,8 @@ function textIsEmotionModalClosingQuestion(text: string): boolean {
  */
 /** Inline handoff openers when the model omits blank lines between wrap and next segment. */
 const INLINE_EMOTION_MODAL_NEXT_SEGMENT_MARKERS: readonly RegExp[] = [
-  /here'?s the next situation\s*:/i,
-  /here'?s the third situation\s*:/i,
+  /here'?s the next situation\b/i,
+  /here'?s the third situation\b/i,
   /on to the second situation/i,
   /on to the third situation/i,
   /after this we(?:'|’)ll shift to something more personal/i,
@@ -86,9 +86,20 @@ export function splitScenarioTransitionForEmotionModal(fullText: string): {
     }
   }
   if (inlineSplitAt >= 0) {
+    const afterModal = t.slice(inlineSplitAt).trim();
+    /**
+     * Canonical short wraps end with "Here's the next situation." (no vignette yet).
+     * That lead-in is still pre-modal speech — do not treat it as afterModal.
+     */
+    if (
+      /^here'?s the next situation\.?$/i.test(afterModal) ||
+      /^here'?s the third situation\.?$/i.test(afterModal)
+    ) {
+      return { beforeModal: t, afterModal: '' };
+    }
     return {
       beforeModal: t.slice(0, inlineSplitAt).trim(),
-      afterModal: t.slice(inlineSplitAt).trim(),
+      afterModal,
     };
   }
   return { beforeModal: t, afterModal: '' };
@@ -179,9 +190,11 @@ function hasScenarioWrapReflectionWithoutNextSegment(text: string): boolean {
   if (/\bhow would you repair\b/i.test(lower)) return false;
   if (/\bwhat if you were ryan\b/i.test(lower)) return false;
   return (
-    /\b(?:nice|great) work\b/i.test(lower) ||
+    /\b(?:nice|great|good) work\b/i.test(lower) ||
     /\byou (?:read|saw|noticed|focused|picked up)\b/i.test(lower) ||
-    lower.includes('thanks for working through')
+    lower.includes('thanks for working through') ||
+    /here'?s the next situation\b/i.test(lower) ||
+    /one more situation and then we'?ll get personal\b/i.test(lower)
   );
 }
 
@@ -223,6 +236,8 @@ export function resolveNaturalLanguageEmotionModalGate(params: {
   priorScenario: 1 | 2 | 3;
   detectedScenario: 1 | 2 | 3 | null;
   messages?: ReadonlyArray<{ role: string; content?: string | null }>;
+  /** Canonical Situation 2 card already played — do not treat S1→S2 as premature. */
+  situation2PlaybackConfirmed?: boolean;
 }): {
   emotionNaturalForward: boolean;
   completedScenario: 1 | 2 | 3 | null;
@@ -232,8 +247,15 @@ export function resolveNaturalLanguageEmotionModalGate(params: {
   const emotionSplit = splitScenarioTransitionForEmotionModal(displayText);
   const deferEmotionModal = shouldDeferEmotionModalForTransitionText(displayText);
   const deferBlocked = deferEmotionModal && !emotionSplit.afterModal.trim();
+  const s2AlreadyDelivered =
+    params.situation2PlaybackConfirmed === true ||
+    (messages != null &&
+      messages.some(
+        (m) => m.role === 'assistant' && textContainsScenarioBVignetteBody(m.content ?? ''),
+      ));
   const blockPrematureScenarioOneHandoff =
     messages != null &&
+    !s2AlreadyDelivered &&
     !scenarioAMinimumEngagementForHandoff(messages) &&
     (priorScenario === 1 ||
       textContainsScenarioBVignetteBody(displayText) ||

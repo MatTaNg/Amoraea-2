@@ -1,16 +1,18 @@
 import { Platform } from 'react-native';
 
-import { shouldUseDefaultVoiceInsteadOfElevenLabs } from './interviewTtsDevAccount';
+import { isLocalWebDevHost, shouldUseDefaultVoiceInsteadOfElevenLabs } from './interviewTtsDevAccount';
 
 const FAST_PLAYBACK_RATE = 2;
 
+/**
+ * 2× only for local development. Production builds and non-localhost web hosts always return 1.
+ */
 export function getLocalDevPlaybackRateMultiplier(): number {
-  if (shouldUseDefaultVoiceInsteadOfElevenLabs()) return FAST_PLAYBACK_RATE;
   if (!(typeof __DEV__ !== 'undefined' && __DEV__)) return 1;
-  if (Platform.OS !== 'web' || typeof window === 'undefined') return 1;
-  const h = window.location.hostname.toLowerCase();
-  const isLocal = h === 'localhost' || h === '127.0.0.1' || h === '::1';
-  return isLocal ? FAST_PLAYBACK_RATE : 1;
+  if (Platform.OS === 'web') {
+    return isLocalWebDevHost() ? FAST_PLAYBACK_RATE : 1;
+  }
+  return shouldUseDefaultVoiceInsteadOfElevenLabs() ? FAST_PLAYBACK_RATE : 1;
 }
 
 export function getEffectivePlaybackRateMultiplier(explicit?: number): number {

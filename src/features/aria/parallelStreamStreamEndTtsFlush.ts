@@ -15,7 +15,14 @@ import { deriveClosingPillarContextFromScenarioScores } from '@features/aria/clo
 import { enrichPersonalMomentClosingForTts } from '@features/aria/personalMomentClosingEnrichment';
 import { stripInternalReflectionSchemaLeak } from '@features/aria/interviewReflectionTextStrips';
 import { stripDuplicateScenarioAContemptProbeParagraphs, stripDuplicateScenarioARepairQuestionParagraphs } from '@features/aria/interviewAssistantDuplicateStrip';
-import { resolveInterviewQuestionRepeatTtsText, shouldSuppressScenarioARepairBeforeContemptAnswer, looksLikeScenarioARepairStreamFragment, clearParallelTtsBatchIfScenarioARepairLeakBeforeContempt } from '@features/aria/interviewDisengagementProbes';
+import { isShortAckOnlySentence } from '@features/aria/interviewerFrameworkPrompt';
+import {
+  looksLikeScenarioARepairQuestion,
+  looksLikeScenarioARepairStreamFragment,
+  resolveInterviewQuestionRepeatTtsText,
+  shouldSuppressScenarioARepairBeforeContemptAnswer,
+  clearParallelTtsBatchIfScenarioARepairLeakBeforeContempt,
+} from '@features/aria/interviewDisengagementProbes';
 import {
   normalizeScenarioARepairQuestionInAssistantDraft,
   shouldSkipScenarioARepairDraftNormalization,
@@ -64,7 +71,8 @@ import {
   applyPostClaudeScenarioAdvanceBundleOverride,
   resolveScenarioUserTextForBoundaryReflection,
 } from '@features/aria/interviewScenarioAdvanceAfterRepair';
-import { textContainsScenarioBVignetteBody, textContainsScenarioCVignetteBody } from '@features/aria/emotionScenarioTransitionInference';
+import { textContainsScenarioBVignetteBody } from '@features/aria/emotionScenarioTransitionInference';
+import { isExactShowScenario3VignetteText } from '@features/aria/showScenarioCardCanonicalTts';
 import { buildScenario1To2BundleForInterview, buildScenario2To3BundleForInterview, scenarioHandoffBundleMissingNextSegmentVignette } from '@features/aria/interviewTransitionBundles';
 import { SCENARIO_2_TEXT, SCENARIO_3_TEXT } from '@features/aria/interviewScenarioVignetteCopy';
 import { SCENARIO_2_OPENING, SCENARIO_3_OPENING } from '@features/aria/interviewScenarioOpeningStreamGate';
@@ -224,6 +232,12 @@ export async function flushParallelStreamDeferredSentencesAtEnd(args: {
         } else {
           deps.setVoiceState('idle');
         }
+        if (deps.showScenarioCardCanonicalPlaybackConfirmedKindsRef) {
+          deps.showScenarioCardCanonicalPlaybackConfirmedKindsRef.current = {
+            ...deps.showScenarioCardCanonicalPlaybackConfirmedKindsRef.current,
+            situation_2: true,
+          };
+        }
       } finally {
         if (!deps.webTtsTabInterruptPendingReplayRef.current) {
           if (deps.webTtsUtteranceInFlightRef) {
@@ -272,7 +286,7 @@ export async function flushParallelStreamDeferredSentencesAtEnd(args: {
         preview: handoffToSpeak.slice(0, 280),
       });
     }
-    if (handoffToSpeak && !textContainsScenarioCVignetteBody(spokenSoFar)) {
+    if (handoffToSpeak && !isExactShowScenario3VignetteText(spokenSoFar)) {
       state.s2RepairSatisfiedHandoffSpokenThisStream = true;
       batch.flushParallelTtsBatch(true);
       await state.ttsChain;
@@ -306,6 +320,12 @@ export async function flushParallelStreamDeferredSentencesAtEnd(args: {
           await deps.speakTextSafe(handoffToSpeak, SHOW_SCENARIO_CARD_CANONICAL_SPEECH);
         } else {
           deps.setVoiceState('idle');
+        }
+        if (deps.showScenarioCardCanonicalPlaybackConfirmedKindsRef) {
+          deps.showScenarioCardCanonicalPlaybackConfirmedKindsRef.current = {
+            ...deps.showScenarioCardCanonicalPlaybackConfirmedKindsRef.current,
+            situation_3: true,
+          };
         }
       } finally {
         if (!deps.webTtsTabInterruptPendingReplayRef.current) {
@@ -373,7 +393,6 @@ export async function flushParallelStreamDeferredSentencesAtEnd(args: {
   } else if (
     isActiveScenarioAConstructProbeTurn(deps.currentScenarioRef.current, deps.currentInterviewMomentRef.current) &&
     deps.scenarioAContemptProbeAskedRef.current &&
-    !deps.scenarioARepairQuestionAskedRef.current &&
     !state.scenarioARepairQuestionSpokenThisStream &&
     (params.allowScenarioARepairAfterContemptAnswer || state.pendingScenarioARepairAfterContemptFlush) &&
     shouldDeliverScenarioFollowUpQuestion(params.messagesToUse, SCENARIO_A_REPAIR_QUESTION_AFTER_CONTEMPT_COPY)
@@ -388,7 +407,10 @@ export async function flushParallelStreamDeferredSentencesAtEnd(args: {
     if (
       (params.allowScenarioARepairAfterContemptAnswer ||
         state.pendingScenarioARepairAfterContemptFlush) &&
-      !deps.scenarioARepairQuestionAskedRef.current &&
+      shouldDeliverScenarioFollowUpQuestion(
+        params.messagesToUse,
+        SCENARIO_A_REPAIR_QUESTION_AFTER_CONTEMPT_COPY,
+      ) &&
       !state.scenarioARepairQuestionSpokenThisStream
     ) {
       state.pendingScenarioARepairAfterContemptFlush = false;
@@ -403,6 +425,26 @@ export async function flushParallelStreamDeferredSentencesAtEnd(args: {
         preview: holdAck.slice(0, 80),
         s1ContemptFixVersion: 24,
       });
+    }
+  }
+  if (
+    isActiveScenarioAConstructProbeTurn(deps.currentScenarioRef.current, deps.currentInterviewMomentRef.current) &&
+    deps.scenarioAContemptProbeAskedRef.current &&
+    !state.scenarioARepairQuestionSpokenThisStream &&
+    shouldDeliverScenarioFollowUpQuestion(params.messagesToUse, SCENARIO_A_REPAIR_QUESTION_AFTER_CONTEMPT_COPY)
+  ) {
+    const spokenSoFar = deps.parallelStreamingTtsRef.current.spokenCompleteText.trim();
+    if (
+      spokenSoFar &&
+      isShortAckOnlySentence(spokenSoFar) &&
+      !looksLikeScenarioARepairQuestion(spokenSoFar)
+    ) {
+      state.scenarioARepairQuestionSpokenThisStream = true;
+      void remoteLog('[S1_REPAIR_SHORT_ACK_SPOKEN_FLUSH_CANONICAL]', {
+        preview: spokenSoFar.slice(0, 80),
+        s1ContemptFixVersion: 25,
+      });
+      maybeQueueSentenceForTts(SCENARIO_A_REPAIR_QUESTION_AFTER_CONTEMPT_COPY, false);
     }
   }
   if (state.deferredScenarioBJamesShortAckSentence) {

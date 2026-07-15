@@ -208,7 +208,7 @@ describe('computeGateResultCore', () => {
     expect(r.weightedScore).toBeGreaterThan(6);
   });
 
-  it('adds ego_development_floor when holistic ego level is 1 and final weighted score is below 7', () => {
+  it('adds ego_development_floor when holistic ego level is 1', () => {
     const pillars = allMarkers(7.5);
     const hi = allMarkers(7);
     const r = computeGateResultCore(pillars, null, {
@@ -218,10 +218,11 @@ describe('computeGateResultCore', () => {
     expect(r.pass).toBe(false);
     expect(r.failReasonCodes).toContain('ego_development_floor');
     expect(r.reason).toBe('ego_development_floor');
-    expect(r.failReasonDetail?.ego_development_floor).toEqual({ level: 1, weightedScore: 6.7 });
+    expect(r.egoDevelopmentModifier).toBe(-0.3);
+    expect(r.failReasonDetail?.ego_development_floor).toEqual({ level: 1, weightedScore: 7.2 });
   });
 
-  it('fails ego_development_floor when ego level is 1 even if modified score clears 7', () => {
+  it('fails ego_development_floor when ego level is 1 even if modified score clears threshold', () => {
     const pillars = allMarkers(7.6);
     const r = computeGateResultCore(pillars, null, {
       egoDevelopmentLevel: 1,
@@ -231,36 +232,37 @@ describe('computeGateResultCore', () => {
     expect(r.failReasonCodes).toContain('ego_development_floor');
   });
 
-  it('applies -0.3 ego modifier for level 2 before weighted threshold check', () => {
+  it('applies 0 ego modifier for level 2 and still flags review', () => {
     const pillars = allMarkers(6.1);
     const r = computeGateResultCore(pillars, null, {
       egoDevelopmentLevel: 2,
       scenarioPillarScoresByScenario: { 1: pillars, 2: pillars, 3: pillars },
     });
-    expect(r.egoDevelopmentModifier).toBe(-0.3);
+    expect(r.egoDevelopmentModifier).toBe(0);
+    expect(r.reviewFlags).toContain('ego_development_review');
     expect(r.pass).toBe(false);
     expect(r.reason).toBe('weighted_below_threshold');
   });
 
-  it('fails weighted gate at 6.4 with ego level 2 after -0.3 modifier vs 6.5 min', () => {
+  it('fails weighted gate at 6.4 with ego level 2 (no score modifier) vs 6.5 min', () => {
     const pillars = allMarkers(6.4);
     const r = computeGateResultCore(pillars, null, {
       egoDevelopmentLevel: 2,
       scenarioPillarScoresByScenario: { 1: pillars, 2: pillars, 3: pillars },
     });
-    expect(r.egoDevelopmentModifier).toBe(-0.3);
-    expect(r.modifiedWeightedScore).toBe(6.1);
+    expect(r.egoDevelopmentModifier).toBe(0);
+    expect(r.modifiedWeightedScore).toBe(6.4);
     expect(r.pass).toBe(false);
     expect(r.reason).toBe('weighted_below_threshold');
   });
 
-  it('passes weighted gate at 6.8 with ego level 2 after -0.3 modifier vs 6.5 min', () => {
+  it('passes weighted gate at 6.8 with ego level 2 (no score modifier) vs 6.5 min', () => {
     const pillars = allMarkers(6.8);
     const r = computeGateResultCore(pillars, null, {
       egoDevelopmentLevel: 2,
       scenarioPillarScoresByScenario: { 1: pillars, 2: pillars, 3: pillars },
     });
-    expect(r.modifiedWeightedScore).toBe(6.5);
+    expect(r.modifiedWeightedScore).toBe(6.8);
     expect(r.pass).toBe(true);
   });
 
@@ -279,7 +281,7 @@ describe('computeGateResultCore', () => {
     expect(r.scenarioComposites?.['3']).toBe(4.9);
   });
 
-  it('parses string ego level 2 and accumulates concreteness modifier (e.g. absent+low → -0.65 total)', () => {
+  it('parses string ego level 2 and accumulates concreteness modifier (e.g. absent+low → -0.35 total)', () => {
     const pillars = allMarkers(7);
     const r = computeGateResultCore(pillars, null, {
       egoDevelopmentLevel: '2' as unknown as number,
@@ -287,18 +289,19 @@ describe('computeGateResultCore', () => {
       moment4Concreteness: 'absent',
       moment5Concreteness: 'low',
     });
-    expect(r.egoDevelopmentModifier).toBe(-0.3);
-    expect(r.scoreModifier).toBeCloseTo(-0.65, 5);
-    expect(r.modifiedWeightedScore).toBe(6.35);
+    expect(r.egoDevelopmentModifier).toBe(0);
+    expect(r.scoreModifier).toBeCloseTo(-0.35, 5);
+    expect(r.modifiedWeightedScore).toBe(6.65);
   });
 
-  it('does not apply ego modifier for level 3', () => {
+  it('applies +0.1 ego modifier for level 3', () => {
     const pillars = allMarkers(6.5);
     const r = computeGateResultCore(pillars, null, {
       egoDevelopmentLevel: 3,
       scenarioPillarScoresByScenario: { 1: pillars, 2: pillars, 3: pillars },
     });
-    expect(r.egoDevelopmentModifier).toBeUndefined();
+    expect(r.egoDevelopmentModifier).toBe(0.1);
+    expect(r.modifiedWeightedScore).toBe(6.6);
     expect(r.pass).toBe(true);
   });
 
@@ -355,7 +358,7 @@ describe('computeGateResultCore', () => {
     expect(r.failReasonCodes).toContain('immature_defense_pattern');
   });
 
-  it('stacks ego level 2 modifier with a single defense flag', () => {
+  it('stacks ego level 2 (0 modifier) with a single defense flag', () => {
     const pillars = allMarkers(7);
     const r = computeGateResultCore(pillars, null, {
       egoDevelopmentLevel: 2,
@@ -367,7 +370,7 @@ describe('computeGateResultCore', () => {
         denial_detected: false,
       },
     });
-    expect(r.scoreModifier).toBeCloseTo(-0.45, 5);
+    expect(r.scoreModifier).toBeCloseTo(-0.15, 5);
   });
 
   it('coerces string emotionRecognitionCorrectCount 0 into raw score and applies review flag only', () => {

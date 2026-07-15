@@ -1,6 +1,6 @@
 import { describe, expect, it } from '@jest/globals';
 
-import { SHOW_SCENARIO_3_VIGNETTE_EXACT } from '@features/aria/interviewShowScenarioExactCopy';
+import { SHOW_SCENARIO_2_VIGNETTE_EXACT, SHOW_SCENARIO_3_VIGNETTE_EXACT } from '@features/aria/interviewShowScenarioExactCopy';
 import {
   prepareEmotionTransitionAfterModalForTts,
   prepareEmotionTransitionBeforeModalForTts,
@@ -102,8 +102,7 @@ describe('emotionTransitionModalTtsGuards', () => {
       prepareEmotionTransitionAfterModalForTts(SCENARIO_B_JAMES_DIFFERENTLY_CANONICAL, {
         scenarioJustCompleted: 1,
         streamAlreadySpokeBefore: true,
-        streamSpokeText:
-          "Sarah has been job hunting for four months. What do you think is going on here?",
+        streamSpokeText: `${SHOW_SCENARIO_2_VIGNETTE_EXACT}\n\nWhat do you think is going on here?`,
         playbackConfirmedKinds: { situation_2: true },
         messages,
         interviewMoment: 1,
@@ -111,11 +110,25 @@ describe('emotionTransitionModalTtsGuards', () => {
     ).toBe('');
   });
 
+  it('speaks S2 afterModal when confirmed flag is set but only the wrap was spoken', () => {
+    const afterModal =
+      `${SHOW_SCENARIO_2_VIGNETTE_EXACT}\n\nWhat do you think is going on here?`;
+    expect(
+      prepareEmotionTransitionAfterModalForTts(afterModal, {
+        scenarioJustCompleted: 1,
+        streamAlreadySpokeBefore: true,
+        streamSpokeText: "Good work — that's the end of this scenario. Here's the next situation.",
+        playbackConfirmedKinds: { situation_2: true },
+        messages: [],
+        interviewMoment: 2,
+      }),
+    ).toMatch(/job hunting for four months/i);
+  });
+
   it('prepareEmotionTransitionBeforeModalForTts skips S3 closing when stream already spoke wrap lead', () => {
     const beforeModal =
       "That's the end of the three described situations. Good work, Matt — You recognized that the pattern won't shift without both of them staying in the room for an honest conversation. There are only two questions left. Now I want to ask you about something a bit more personal.";
-    const streamSpoke =
-      "That's the end of the three described situations. Good work, Matt — You recognized that the pattern won't shift without both of them staying in the room for an honest conversation.";
+    const streamSpoke = beforeModal;
     expect(
       prepareEmotionTransitionBeforeModalForTts(beforeModal, {
         scenarioJustCompleted: 3,
@@ -132,7 +145,7 @@ describe('emotionTransitionModalTtsGuards', () => {
     const beforeModal =
       "That's a wrap on this situation. Nice work, Matz — You recognized that putting guardrails in place has to come before the same rupture can repeat. Here's the next situation.";
     const streamSpoke =
-      "That's a wrap on this situation. Nice work, Matz — You recognized that putting guardrails in place has to come before the same rupture can repeat.";
+      "That's a wrap on this situation. Nice work, Matz — You recognized that putting guardrails in place has to come before the same rupture can repeat. Here's the next situation.";
     expect(
       prepareEmotionTransitionBeforeModalForTts(beforeModal, {
         scenarioJustCompleted: 1,
@@ -145,9 +158,52 @@ describe('emotionTransitionModalTtsGuards', () => {
     ).toBe('');
   });
 
+  it('prepareEmotionTransitionBeforeModalForTts skips canonical short S1→S2 close when stream already spoke it', () => {
+    const beforeModal =
+      "Good work — that's the end of this scenario. Here's the next situation.";
+    expect(
+      prepareEmotionTransitionBeforeModalForTts(beforeModal, {
+        scenarioJustCompleted: 1,
+        streamAlreadySpokeBefore: true,
+        streamSpokeText: beforeModal,
+        playbackConfirmedKinds: { situation_2: true },
+        messages: [],
+        interviewMoment: 2,
+      }),
+    ).toBe('');
+  });
+
+  it('keeps S1 wrap when canonical S2 confirmed but spoken audio never included the wrap lead', () => {
+    const beforeModal =
+      "Good work — that's the end of this scenario. Here's the next situation.";
+    expect(
+      prepareEmotionTransitionBeforeModalForTts(beforeModal, {
+        scenarioJustCompleted: 1,
+        streamAlreadySpokeBefore: true,
+        streamSpokeText:
+          'Sarah has been job hunting for four months. What do you think is going on here?',
+        playbackConfirmedKinds: { situation_2: true },
+        messages: [],
+        interviewMoment: 2,
+      }),
+    ).toMatch(/end of this scenario|next situation/i);
+  });
+
+  it('keeps S2 wrap when canonical S3 confirmed but spoken audio never included the wrap lead', () => {
+    expect(
+      prepareEmotionTransitionBeforeModalForTts(s2To3BeforeModal, {
+        scenarioJustCompleted: 2,
+        streamAlreadySpokeBefore: true,
+        streamSpokeText: SHOW_SCENARIO_3_VIGNETTE_EXACT,
+        playbackConfirmedKinds: { situation_3: true },
+        messages: [],
+        interviewMoment: 3,
+      }),
+    ).toMatch(/scenario is complete|third situation/i);
+  });
+
   it('prepareEmotionTransitionBeforeModalForTts skips S2 closing when stream already spoke client bundle lead', () => {
-    const streamSpoke =
-      "That scenario is complete. Nice work, Matz — You saw James's focus on logistics instead of emotions and recognized the need for him to be more present and appreciative. Here's the third situation — after this we'll move to something more personal.";
+    const streamSpoke = s2To3BeforeModal;
     expect(
       prepareEmotionTransitionBeforeModalForTts(s2To3BeforeModal, {
         scenarioJustCompleted: 2,

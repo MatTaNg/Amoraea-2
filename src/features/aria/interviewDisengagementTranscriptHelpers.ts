@@ -13,17 +13,25 @@ import {
 } from './interviewDisengagementProbeCopy';
 import { isRepairRefusalProbeAssistantLine } from './interviewRepairQuestionDetection';
 import {
+  isIncompleteScenarioARepairLeadSentence,
   looksLikeScenarioARepairQuestion,
+  looksLikeScenarioARepairStreamFragment,
 } from './scenarioARepairQuestionHelpers';
 import {
   coerceScenarioBJamesDifferentlyQuestionForTts,
   coerceScenarioBJamesRepairQuestionForTts,
   looksLikeScenarioBJamesDifferentlyQuestion,
+  looksLikeScenarioBQ1Question,
   looksLikeScenarioBRepairAsJamesQuestion,
+  SCENARIO_B_Q1_CANONICAL,
 } from './scenarioBProbeLogic';
 import { detectActiveScenarioFromMessage } from './interviewScenarioOpeningStreamGate';
 import { resolveSituation3ExactModalPrompt } from './situation3ExactModalPrompt';
-import { isScenarioABoundaryReflectionWithoutNextVignette } from './scenarioAContemptProbeTextMatch';
+import {
+  isScenarioABoundaryReflectionWithoutNextVignette,
+  looksLikeScenarioAContemptProbeQuestion,
+} from './scenarioAContemptProbeTextMatch';
+import { isScenarioAQ1Prompt } from './scenarioAContemptProbeCoverage';
 import { getScenarioResumeIntroAssistantBody } from './interviewScenarioVignetteCopy';
 import {
   SCENARIO_C_REPAIR_QUESTION_CANONICAL,
@@ -200,18 +208,26 @@ function inferActiveScenarioForRepeat(
   return undefined;
 }
 
+function isScenarioAConstructProbeBleed(raw: string): boolean {
+  return (
+    looksLikeScenarioARepairQuestion(raw) ||
+    looksLikeScenarioAContemptProbeQuestion(raw) ||
+    isScenarioAQ1Prompt(raw)
+  );
+}
+
 /** Prior-scenario assistant lines must not win repeat/resume when a later scenario is active. */
 export function isPriorScenarioBleedForActiveScenario(raw: string, activeScenario: number): boolean {
   if (activeScenario === 3) {
     return (
-      looksLikeScenarioARepairQuestion(raw) ||
+      isScenarioAConstructProbeBleed(raw) ||
       looksLikeScenarioBRepairAsJamesQuestion(raw) ||
       looksLikeScenarioBJamesDifferentlyQuestion(raw)
     );
   }
   if (activeScenario === 2) {
     return (
-      looksLikeScenarioARepairQuestion(raw) ||
+      isScenarioAConstructProbeBleed(raw) ||
       looksLikeScenarioCSophiePerspectiveQuestion(raw) ||
       isScenarioCRepairAssistantPrompt(raw) ||
       looksLikeScenarioCRepairAsDanielQuestion(raw)
@@ -245,7 +261,44 @@ function finalizeRepeatableInterviewQuestionText(
   if (activeScenario === 3 && isPriorScenarioBleedForActiveScenario(resolved, 3)) {
     return resolveSituation3ExactModalPrompt(messages);
   }
+  if (activeScenario === 2 && isPriorScenarioBleedForActiveScenario(resolved, 2)) {
+    /**
+     * S1 repair bleed stays repair-shaped so {@link resolveInterviewQuestionRepeatTtsText}
+     * can remap it to James repair. Contempt/Q1 bleed falls back to Situation 2 Q1.
+     */
+    if (
+      looksLikeScenarioARepairQuestion(resolved) ||
+      looksLikeScenarioARepairStreamFragment(resolved) ||
+      isIncompleteScenarioARepairLeadSentence(resolved)
+    ) {
+      return resolved;
+    }
+    return resolveScenario2RepeatFallbackQuestion(messages);
+  }
   return resolved;
+}
+
+function resolveScenario2RepeatFallbackQuestion(
+  messages: Array<{ role: string; content?: string | null }>,
+): string {
+  for (let i = messages.length - 1; i >= 0; i--) {
+    const m = messages[i];
+    if (m.role !== 'assistant') continue;
+    const raw = (m.content ?? '').trim();
+    if (!raw) continue;
+    if (isNonRepeatableAssistantLineForVerbatimReplay(raw)) continue;
+    if (isPriorScenarioBleedForActiveScenario(raw, 2)) continue;
+    if (
+      looksLikeScenarioBQ1Question(raw) ||
+      looksLikeScenarioBJamesDifferentlyQuestion(raw) ||
+      looksLikeScenarioBRepairAsJamesQuestion(raw)
+    ) {
+      return coerceScenarioBJamesDifferentlyQuestionForTts(
+        coerceScenarioBJamesRepairQuestionForTts(raw),
+      );
+    }
+  }
+  return SCENARIO_B_Q1_CANONICAL;
 }
 
 function resolveScenario3RepeatFallbackQuestion(
@@ -287,12 +340,18 @@ export function findLastRepeatableInterviewQuestionText(
       if (activeScenario === 3) {
         return resolveScenario3RepeatFallbackQuestion(messages);
       }
+      if (activeScenario === 2) {
+        return finalizeRepeatableInterviewQuestionText(messages, fb, activeScenario);
+      }
     } else {
       return finalizeRepeatableInterviewQuestionText(messages, fb, activeScenario);
     }
   }
   if (activeScenario === 3) {
     return resolveScenario3RepeatFallbackQuestion(messages);
+  }
+  if (activeScenario === 2) {
+    return resolveScenario2RepeatFallbackQuestion(messages);
   }
   return looksLikeScenarioCSophieReceiveMisparaphraseQuestion(fb)
     ? SCENARIO_C_REPAIR_QUESTION_CANONICAL

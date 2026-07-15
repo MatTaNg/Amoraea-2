@@ -137,6 +137,8 @@ export function syncAriaInterviewTtsPipelineDeps(
         pendingGestureRestoreSpeakRef: ctx.pendingGestureRestoreSpeakRef,
         currentInterviewMomentRef: ctx.currentInterviewMomentRef,
         currentScenarioRef: ctx.currentScenarioRef,
+        interviewMomentsCompleteRef: ctx.interviewMomentsCompleteRef,
+        resumeActiveScenarioRef: ctx.resumeActiveScenarioRef,
         interviewSessionAttemptIdRef: ctx.interviewSessionAttemptIdRef,
         interviewSessionIdRef: ctx.interviewSessionIdRef,
         interviewNameRef: ctx.interviewNameRef,

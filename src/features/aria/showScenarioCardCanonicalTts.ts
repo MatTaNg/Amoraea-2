@@ -17,6 +17,7 @@ import {
 import { looksLikeMoment4GrudgePrompt, MOMENT_4_GRUDGE_QUESTION_TEXT } from '@features/aria/moment4ProbeLogic';
 import { assistantTextLooksLikeMoment4HandoffLead } from '@features/aria/interviewTransitionBundles';
 import { hasScenarioBoundaryWrapPhrase } from '@features/aria/emotionModalTransitionOrchestration';
+import { looksLikeNonCanonicalScenarioCVignetteFiction } from '@features/aria/scenarioVignetteBodyDetection';
 import { isPrematureStandaloneM4PersonalTransitionLine } from '@features/aria/prematureMoment4HandoffPlaybackGuard';
 import { MOMENT_5_ACCOUNTABILITY_QUESTION_TEXT } from '@features/aria/moment5ProbeCopy';
 import {
@@ -343,6 +344,7 @@ export function shouldSuppressParallelStreamNonExactShowScenarioCardSpeech(args:
   // Canonical card delivers S3 at S2→S3 boundaries — never duplicate via parallel stream.
   if (handoffSituation3) {
     if (textContainsScenario3VignetteMarkers(spoken)) return true;
+    if (looksLikeNonCanonicalScenarioCVignetteFiction(spoken)) return true;
     if (hasScenarioBoundaryWrapPhrase(spoken)) return true;
     if (isScenarioHandoffTransitionPhraseOnly(spoken)) return true;
     if (isScenarioBBoundaryReflectionWithoutNextVignette(spoken)) return true;
@@ -556,6 +558,35 @@ export function composeShowScenarioCardTtsWithTransitionPrefix(args: {
   return `${mergedPrefix}\n\n${canonical}`.replace(/\n{3,}/g, '\n\n').trim();
 }
 
+/**
+ * Decide whether the S1→S2 / S2→S3 / S3→M4 wrap must still be included in canonical TTS.
+ * Cancelled parallel-stream audio must never count as already spoken.
+ */
+export function resolveCanonicalShowScenarioCardTransitionSpeakDecision(args: {
+  kind: ShowScenarioCardKind;
+  effectivePrefix: string;
+  spokenLive: string;
+  cancelledParallelPlayback: boolean;
+}): { transitionAlreadySpoken: boolean; spokenSoFarForCompose: string } {
+  const prefix = (args.effectivePrefix ?? '').trim();
+  if (!prefix) {
+    return { transitionAlreadySpoken: true, spokenSoFarForCompose: '' };
+  }
+  const completedScenario =
+    args.kind === 'situation_2' ? 1 : args.kind === 'situation_3' ? 2 : args.kind === 'moment_4' ? 3 : null;
+  if (args.cancelledParallelPlayback || !completedScenario) {
+    return { transitionAlreadySpoken: false, spokenSoFarForCompose: '' };
+  }
+  const spokenLive = (args.spokenLive ?? '').trim();
+  if (streamAlreadySpokeScenarioBoundaryClosingLead(spokenLive, completedScenario)) {
+    return { transitionAlreadySpoken: true, spokenSoFarForCompose: spokenLive };
+  }
+  return {
+    transitionAlreadySpoken: false,
+    spokenSoFarForCompose: spokenLive,
+  };
+}
+
 /** True when parallel stream already delivered the boundary closing lead, not just the next card body. */
 export function streamAlreadySpokeScenarioBoundaryClosingLead(
   streamSpokeText: string,
@@ -574,6 +605,7 @@ export function streamAlreadySpokeScenarioBoundaryClosingLead(
         streamLower.includes("that's a wrap on that one") ||
         streamLower.includes("that's the end of this situation") ||
         streamLower.includes("that's the end of that situation") ||
+        streamLower.includes("that's the end of this scenario") ||
         streamLower.includes("we've got two more situations")) &&
       (/\bnext situation\b/.test(streamLower) ||
         /\btwo more situations\b/.test(streamLower) ||
@@ -591,10 +623,11 @@ export function streamAlreadySpokeScenarioBoundaryClosingLead(
     );
   }
   return (
-    /\bend of the three described situations\b/.test(streamLower) ||
-    /\bend of the three situations\b/.test(streamLower) ||
-    (/\b(?:nice|good) work\b/.test(streamLower) && /\btwo questions left\b/.test(streamLower)) ||
-    (/\b(?:nice|good) work\b/.test(streamLower) &&
+    (/\btwo questions left\b/.test(streamLower) &&
+      (/\bend of the three (?:described )?situations\b/.test(streamLower) ||
+        /\b(?:nice|good) work\b/.test(streamLower) ||
+        /\b(?:more personal|personal questions)\b/.test(streamLower))) ||
+    (/\bend of the three (?:described )?situations\b/.test(streamLower) &&
       /\b(?:more personal|personal questions)\b/.test(streamLower))
   );
 }
@@ -854,6 +887,21 @@ export function streamSpokenTextAlreadyMatchesCanonicalCard(
 }
 
 /** @internal test hooks */
+/**
+ * Prefetch may race ahead with vignette-only audio. Only reuse it when it is the *exact*
+ * line we will speak — never when wrap + vignette is spoken but only the body was fetched
+ * (`includes` falsely matches and drops the S1→S2 / S2→S3 transition for the user).
+ */
+export function showScenarioCardPrefetchBufferMatchesSpeakText(
+  textToSpeak: string,
+  prefetchedSourceText: string | null | undefined,
+): boolean {
+  const speak = (textToSpeak ?? '').trim();
+  const source = (prefetchedSourceText ?? '').trim();
+  if (!speak || !source) return false;
+  return normalizeForCompare(speak) === normalizeForCompare(source);
+}
+
 export const __showScenarioCardCanonicalTtsTest = {
   normalizeForCompare,
   findShowScenarioCardBodyStartIndex,

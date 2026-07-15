@@ -117,6 +117,91 @@ describe('runPreClaudeConfusionRepeatReplayGates', () => {
     );
   });
 
+  it('syncs currentMessagesRef when replaying so the next turn sees the repeated question', async () => {
+    const speakTextSafe = jest.fn().mockResolvedValue(undefined);
+    const setMessages = jest.fn();
+    const commitInterviewMessages = jest.fn();
+    const currentMessagesRef = { current: [] as Array<{ role: string; content?: string }> };
+    const lastQuestionTextRef = { current: 'If you were Ryan, how would you repair this?' };
+    const deps = createMockPreClaudeDeps({
+      currentInterviewMomentRef: { current: 2 },
+      currentScenarioRef: { current: 2 },
+      lastQuestionTextRef,
+      currentMessagesRef,
+      commitInterviewMessages,
+      speakTextSafe,
+      setMessages,
+    });
+    const s2Question = 'What do you think is going on here?';
+    const messagesToUse = [
+      { role: 'assistant', content: s2Question, interviewMoment: 2, scenarioNumber: 2 },
+      { role: 'user', content: 'Can you repeat?', interviewMoment: 2, scenarioNumber: 2 },
+    ];
+
+    const result = await runPreClaudeConfusionRepeatReplayGates(
+      deps,
+      REPEAT_REQUEST_META,
+      messagesToUse,
+      s2Question,
+      2,
+    );
+
+    expect(result).toEqual({ handled: true });
+    expect(currentMessagesRef.current.at(-1)).toEqual(
+      expect.objectContaining({ role: 'assistant', content: s2Question, scenarioNumber: 2 }),
+    );
+    expect(lastQuestionTextRef.current).toBe(s2Question);
+    expect(commitInterviewMessages).toHaveBeenCalled();
+  });
+
+  it('maps Scenario A contempt bleed to S2 Q1 instead of replaying Emma line on Scenario 2', async () => {
+    const speakTextSafe = jest.fn().mockResolvedValue(undefined);
+    const setMessages = jest.fn();
+    const currentMessagesRef = { current: [] as Array<{ role: string; content?: string }> };
+    const emmaContempt =
+      "What about when Emma says 'you've made that very clear' — what do you make of that?";
+    const deps = createMockPreClaudeDeps({
+      currentInterviewMomentRef: { current: 2 },
+      currentScenarioRef: { current: 2 },
+      lastQuestionTextRef: { current: emmaContempt },
+      currentMessagesRef,
+      speakTextSafe,
+      setMessages,
+    });
+    const messagesToUse = [
+      {
+        role: 'assistant',
+        content: 'If you were Ryan, how would you repair this?',
+        interviewMoment: 1,
+        scenarioNumber: 1,
+      },
+      { role: 'user', content: 'I would own it.', interviewMoment: 1, scenarioNumber: 1 },
+      { role: 'assistant', content: emmaContempt, interviewMoment: 2, scenarioNumber: 2 },
+      { role: 'user', content: 'Can you repeat?', interviewMoment: 2, scenarioNumber: 2 },
+    ];
+
+    const result = await runPreClaudeConfusionRepeatReplayGates(
+      deps,
+      REPEAT_REQUEST_META,
+      messagesToUse,
+      emmaContempt,
+      2,
+    );
+
+    expect(result).toEqual({ handled: true });
+    expect(speakTextSafe).toHaveBeenCalledWith(
+      'What do you think is going on here?',
+      expect.objectContaining({ allowDuplicateConsecutiveTts: true }),
+    );
+    expect(currentMessagesRef.current.at(-1)).toEqual(
+      expect.objectContaining({
+        role: 'assistant',
+        content: 'What do you think is going on here?',
+        scenarioNumber: 2,
+      }),
+    );
+  });
+
   it('replays the pending Scenario B James repair when stream left a truncated Scenario A Ryan repair', async () => {
     const speakTextSafe = jest.fn().mockResolvedValue(undefined);
     const setMessages = jest.fn();

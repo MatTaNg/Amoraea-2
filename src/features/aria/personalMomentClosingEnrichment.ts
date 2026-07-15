@@ -16,6 +16,7 @@ import {
   stripInternalReflectionSchemaLeak,
 } from './interviewReflectionTextStrips';
 import { dedupeDuplicateParticipantNameInClosing } from './interviewClosingLanguageSanitize';
+import { INCLUDE_SCENARIO_BOUNDARY_REFLECTIONS } from './interviewTransitionBundles';
 import {
   assembleClosingWithOptionalReflection,
   buildPersonalMomentHandoffReflection,
@@ -156,6 +157,12 @@ export function enrichPersonalMomentClosingForTts(
   const source = sanitized || (looksLikeInternalReflectionSchemaLeak(text) ? '' : text);
   const base = coerceIncompleteInterviewClosingForTts(source, participantFirstName);
   const userAnswer = (lastUserAnswer ?? '').trim();
+
+  /** Mirror scenario boundaries: ack + thanks only — no content reflection at M5 close. */
+  if (!INCLUDE_SCENARIO_BOUNDARY_REFLECTIONS) {
+    return dedupeDuplicateParticipantNameInClosing(neutralClosing, participantFirstName);
+  }
+
   const ungroundedEcho =
     userAnswer.length > 0 && closingReflectionEchoesUngroundedUserWord(base, userAnswer);
   const unsupportedAccountability =
@@ -201,8 +208,8 @@ export function enrichPersonalMomentClosingForTts(
 }
 
 /**
- * Canonical Moment 5 interview closing: task ack + grounded reflection + thanks.
- * Used when the model omits reflection or only a suppressed elongating probe remains.
+ * Canonical Moment 5 interview closing: task ack + thanks
+ * (content reflection omitted while {@link INCLUDE_SCENARIO_BOUNDARY_REFLECTIONS} is false).
  */
 export function buildMoment5InterviewClosingBundle(
   participantFirstName: string,

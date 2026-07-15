@@ -34,11 +34,13 @@ export function computeElevenLabsEnabled(options: {
 }
 
 /**
- * When false (default), iOS uses expo-speech so output stays on loudspeaker after recording.
- * Set `EXPO_PUBLIC_IOS_ELEVENLABS_TTS_PLAYBACK=1` to force ElevenLabs MP3 on iOS.
+ * iOS native: warm ElevenLabs Jessica MP3 by default (`expo-av` + playback mode before TTS).
+ * Set `EXPO_PUBLIC_IOS_ELEVENLABS_TTS_PLAYBACK=0` to fall back to expo-speech (robotic).
  */
 export function computeIosUseElevenLabsMp3Playback(env: {
   EXPO_PUBLIC_IOS_ELEVENLABS_TTS_PLAYBACK?: string;
 }): boolean {
-  return parseEnvBool(env.EXPO_PUBLIC_IOS_ELEVENLABS_TTS_PLAYBACK) === true;
+  const explicit = parseEnvBool(env.EXPO_PUBLIC_IOS_ELEVENLABS_TTS_PLAYBACK);
+  if (explicit === false) return false;
+  return true;
 }

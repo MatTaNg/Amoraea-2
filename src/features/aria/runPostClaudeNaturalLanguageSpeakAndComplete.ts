@@ -31,8 +31,20 @@ import {
   shouldSuppressScenarioARepairBeforeContemptAnswer,
   spokenTextContainsScenarioARepairQuestion,
 } from '@features/aria/interviewDisengagementProbes';
-import { SCENARIO_A_REPAIR_QUESTION_AFTER_CONTEMPT_COPY } from '@features/aria/probeAndScoringUtils';
-import { parallelStreamDeliveredBundledHandoffViaCanonicalCard } from '@features/aria/showScenarioCardCanonicalTts';
+import {
+  looksLikeScenarioAContemptProbeQuestion,
+  SCENARIO_A_CONTEMPT_PROBE_DELIVERED_COPY,
+  SCENARIO_A_REPAIR_QUESTION_AFTER_CONTEMPT_COPY,
+} from '@features/aria/probeAndScoringUtils';
+import {
+  isShowScenarioCardCanonicalPlaybackConfirmed,
+  parallelStreamDeliveredBundledHandoffViaCanonicalCard,
+} from '@features/aria/showScenarioCardCanonicalTts';
+import {
+  emotionModalIndexForCompletedScenario,
+  isEmotionItemAnsweredAt,
+  splitScenarioTransitionForEmotionModal,
+} from '@features/aria/emotionRecognitionInterview';
 import {
   looksLikeScenarioBJamesDifferentlyQuestion,
   looksLikeScenarioBQ1Question,
@@ -130,18 +142,121 @@ export async function runPostClaudeNaturalLanguageSpeakAndComplete(
     };
   }
 
-  if (
-    await handlePostClaudePendingBundledHandoffSpeak(deps, speakAssistantTurn, {
+  const bundledHandoffHandled = await handlePostClaudePendingBundledHandoffSpeak(
+    deps,
+    speakAssistantTurn,
+    {
       pendingBundledHandoff,
       parallelStreamingPlaybackUsed,
       assistantContentToPersist,
       streamSpokenCompleteText: deps.parallelStreamingTtsRef.current.spokenCompleteText,
       currentInterviewMoment: deps.currentInterviewMomentRef.current,
-    })
+    },
+  );
+  if (bundledHandoffHandled) {
+    const playbackConfirmedKinds =
+      deps.showScenarioCardCanonicalPlaybackConfirmedKindsRef?.current ?? {};
+    const canonicalScenarioCardHandoffConfirmed =
+      isShowScenarioCardCanonicalPlaybackConfirmed(playbackConfirmedKinds, 'situation_2') ||
+      isShowScenarioCardCanonicalPlaybackConfirmed(playbackConfirmedKinds, 'situation_3') ||
+      isShowScenarioCardCanonicalPlaybackConfirmed(playbackConfirmedKinds, 'moment_4');
+    const shouldRunEmotionAfterCanonicalBundled =
+      parallelStreamingPlaybackUsed &&
+      canonicalScenarioCardHandoffConfirmed &&
+      (emotionNaturalForward ||
+        emotionNaturalS3ToM4 ||
+        (deferEmotionModal && emotionSplit.afterModal.trim().length > 0));
+    if (shouldRunEmotionAfterCanonicalBundled) {
+      deps.pendingEmotionModalTransitionRef.current = null;
+      if (emotionNaturalForward || deferEmotionModal) {
+        await speakPostClaudeNaturalLanguageEmotionTransition(
+          deps,
+          updatedMessages,
+          speakAssistantTurn,
+          {
+            displayText: coercedDisplayText,
+            priorScenarioNum,
+            emotionSplit,
+            deferEmotionModal: false,
+            aiMsg,
+            scenarioJustCompleted: emotionCompletedScenario ?? priorScenarioNum,
+          },
+        );
+      } else if (emotionNaturalS3ToM4) {
+        await speakPostClaudeNaturalLanguageEmotionTransition(
+          deps,
+          updatedMessages,
+          speakAssistantTurn,
+          {
+            displayText: coercedDisplayText,
+            priorScenarioNum,
+            emotionSplit,
+            deferEmotionModal: false,
+            aiMsg,
+            scenarioJustCompleted: 3,
+          },
+        );
+      }
+    }
+    return;
+  }
+
+  const situation2CanonicalConfirmed = isShowScenarioCardCanonicalPlaybackConfirmed(
+    deps.showScenarioCardCanonicalPlaybackConfirmedKindsRef?.current ?? {},
+    'situation_2',
+  );
+  const s1EmotionItemIndex = emotionModalIndexForCompletedScenario(1);
+  const s1EmotionStillPending = !isEmotionItemAnsweredAt(
+    deps.emotionItemResponsesRef.current,
+    s1EmotionItemIndex,
+  );
+  const looksLikePrematureS1RepairRedirect =
+    coercedDisplayText.trim() === SCENARIO_A_REPAIR_QUESTION_AFTER_CONTEMPT_COPY ||
+    looksLikeScenarioARepairQuestion(coercedDisplayText) ||
+    looksLikeScenarioARepairStreamFragment(coercedDisplayText) ||
+    looksLikeScenarioAContemptProbeQuestion(coercedDisplayText);
+  /**
+   * Stream card may play Situation 2 and advance refs before post-Claude NL flags are set.
+   * If a premature-handoff rewrite cleared emotionNaturalForward back to an S1 probe, still force
+   * the S1 emotion modal so the user is not left on S2 with no modal.
+   */
+  if (
+    parallelStreamingPlaybackUsed &&
+    situation2CanonicalConfirmed &&
+    s1EmotionStillPending &&
+    !emotionNaturalForward &&
+    !emotionNaturalS3ToM4 &&
+    priorScenarioNum <= 2 &&
+    looksLikePrematureS1RepairRedirect
   ) {
-    // #region agent log
-    fetch('http://127.0.0.1:7668/ingest/668e0bd5-3283-4492-9f48-e33846c18218',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'28d27a'},body:JSON.stringify({sessionId:'28d27a',location:'runPostClaudeNaturalLanguageSpeakAndComplete.ts:bundled_early_return',message:'bundled_handoff_early_return',data:{pendingBundledHandoff,deferEmotionModal,hasPendingEmotion:!!deps.pendingEmotionModalTransitionRef.current},timestamp:Date.now(),hypothesisId:'H3'})}).catch(()=>{});
-    // #endregion
+    const spoken = deps.parallelStreamingTtsRef.current.spokenCompleteText.trim();
+    const forcedDisplay = textContainsScenarioBVignetteBody(spoken)
+      ? spoken
+      : textContainsScenarioBVignetteBody(coercedDisplayText)
+        ? coercedDisplayText
+        : spoken || coercedDisplayText;
+    const forcedSplit = splitScenarioTransitionForEmotionModal(forcedDisplay);
+    void remoteLog('[S1_EMOTION_FORCED_AFTER_CANONICAL_S2]', {
+      interviewSessionId: deps.interviewSessionIdRef.current,
+      preview: forcedDisplay.slice(0, 220),
+      coercedWasRepairLike: /if you were ryan|how would you repair/i.test(coercedDisplayText),
+    });
+    deps.pendingEmotionModalTransitionRef.current = null;
+    await speakPostClaudeNaturalLanguageEmotionTransition(
+      deps,
+      updatedMessages,
+      speakAssistantTurn,
+      {
+        displayText: forcedDisplay,
+        priorScenarioNum: 1,
+        emotionSplit: forcedSplit.afterModal.trim()
+          ? forcedSplit
+          : { beforeModal: forcedSplit.beforeModal || '', afterModal: forcedDisplay },
+        deferEmotionModal: false,
+        aiMsg,
+        scenarioJustCompleted: 1,
+      },
+    );
     return;
   }
 
@@ -245,6 +360,17 @@ export async function runPostClaudeNaturalLanguageSpeakAndComplete(
           (coercedDisplayText.trim() === SCENARIO_A_REPAIR_QUESTION_AFTER_CONTEMPT_COPY ||
             looksLikeScenarioARepairQuestion(coercedDisplayText) ||
             looksLikeScenarioARepairStreamFragment(coercedDisplayText));
+        const streamDeliveredContemptProbe =
+          looksLikeScenarioAContemptProbeQuestion(streamSpokeTextEarly) ||
+          streamSpokeTextEarly.includes(SCENARIO_A_CONTEMPT_PROBE_DELIVERED_COPY);
+        const suppressContemptProbeRespeakAfterStream =
+          isActiveScenarioAConstructProbeTurn(
+            deps.currentScenarioRef.current,
+            deps.currentInterviewMomentRef.current,
+          ) &&
+          streamDeliveredContemptProbe &&
+          (coercedDisplayText.trim() === SCENARIO_A_CONTEMPT_PROBE_DELIVERED_COPY ||
+            looksLikeScenarioAContemptProbeQuestion(coercedDisplayText));
         const streamMissedScenarioBProbe = streamMissedScenarioBScriptedProbeDelivery(
           streamSpokeTextEarly,
           coercedDisplayText,
@@ -280,6 +406,7 @@ export async function runPostClaudeNaturalLanguageSpeakAndComplete(
           !suppressS2ProbeRespeakAfterSatisfiedRepair &&
           !suppressRepairRespeakBeforeContempt &&
           !suppressRepairRespeakAfterStreamDelivered &&
+          !suppressContemptProbeRespeakAfterStream &&
           !showScenarioHandoffDeliveredViaCanonical &&
           !suppressS3RespeakAfterCanonical &&
           coercedDisplayText.trim().length > 0 &&
@@ -300,6 +427,14 @@ export async function runPostClaudeNaturalLanguageSpeakAndComplete(
             streamSpokePreview: streamSpokeTextEarly.slice(0, 160),
             coercedPreview: coercedDisplayText.slice(0, 160),
             s1ContemptFixVersion: 25,
+          });
+        }
+        if (suppressContemptProbeRespeakAfterStream) {
+          void remoteLog('[S1_CONTEMPT_PROBE_RESPEAK_SUPPRESSED_AFTER_STREAM]', {
+            interviewSessionId: deps.interviewSessionIdRef.current,
+            streamSpokePreview: streamSpokeTextEarly.slice(0, 160),
+            coercedPreview: coercedDisplayText.slice(0, 160),
+            s1ContemptFixVersion: 26,
           });
         }
         if (suppressPrematureJamesQ2Speak) {

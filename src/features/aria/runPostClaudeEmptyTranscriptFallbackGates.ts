@@ -289,79 +289,79 @@ export async function runPostClaudeEmptyTranscriptFallbackGates(
             interviewSessionId: deps.interviewSessionIdRef.current,
             preview: scenarioFollowUp.slice(0, 200),
           });
-          void remoteLog('[SCENARIO_SUPPRESSED_ELONGATING_NO_FALLBACK]', {
+        } else {
+          nextDisplayText = scenarioFollowUp;
+          void remoteLog('[SCENARIO_FOLLOWUP_FALLBACK_AFTER_SUPPRESSED_ELONGATING]', {
             interviewSessionId: deps.interviewSessionIdRef.current,
             interviewMoment: deps.currentInterviewMomentRef.current,
+            preview: nextDisplayText.slice(0, 200),
           });
-          deps.setVoiceState('idle');
-          return { handled: true };
         }
-        nextDisplayText = scenarioFollowUp;
-        void remoteLog('[SCENARIO_FOLLOWUP_FALLBACK_AFTER_SUPPRESSED_ELONGATING]', {
-          interviewSessionId: deps.interviewSessionIdRef.current,
-          interviewMoment: deps.currentInterviewMomentRef.current,
-          preview: nextDisplayText.slice(0, 200),
-        });
-      } else if (
-        deps.currentInterviewMomentRef.current === 1 &&
-        (shouldAdvanceScenarioAAfterSatisfiedRepair(
-          params.messagesToUse,
-          '',
-          deps.currentInterviewMomentRef.current,
-        ) ||
-          scenarioAMinimumEngagementForHandoff(params.messagesToUse))
-      ) {
-        nextText = `[SCENARIO_COMPLETE:1]\n\n${buildScenario1To2BundleForInterview(
-          params.participantFirstNameForSpoken,
-          SCENARIO_2_TEXT,
-          resolveScenarioUserTextForBoundaryReflection(params.messagesToUse, 1),
-        )}`;
-        nextDisplayText = stripControlTokens(nextText);
-        void remoteLog('[S1_REPAIR_SATISFIED_EMPTY_FALLBACK]', {
-          interviewSessionId: deps.interviewSessionIdRef.current,
-          preview: nextDisplayText.slice(0, 280),
-        });
-      } else if (
-        deps.currentInterviewMomentRef.current === 1 &&
-        deps.scenarioARepairQuestionAskedRef.current &&
-        scenarioAMinimumEngagementForHandoff(params.messagesToUse) &&
-        (hasScenarioBoundaryWrapPhrase(ctx.streamFullTrimmed) ||
-          textContainsScenarioBVignetteBody(ctx.streamFullTrimmed) ||
-          hasScenarioBoundaryWrapPhrase(text))
-      ) {
-        nextText = `[SCENARIO_COMPLETE:1]\n\n${buildScenario1To2BundleForInterview(
-          params.participantFirstNameForSpoken,
-          SCENARIO_2_TEXT,
-          resolveScenarioUserTextForBoundaryReflection(params.messagesToUse, 1),
-        )}`;
-        nextDisplayText = stripControlTokens(nextText);
-        void remoteLog('[S1_STREAM_HANDOFF_EMPTY_FALLBACK]', {
-          interviewSessionId: deps.interviewSessionIdRef.current,
-          preview: nextDisplayText.slice(0, 280),
-        });
-      } else {
-        const advanceBundle = applyPostClaudeScenarioAdvanceBundleOverride(
-          '',
-          params.participantFirstNameForSpoken,
-          params.messagesToUse,
-          deps.currentInterviewMomentRef.current,
-          deps.currentScenarioRef.current,
-        );
-        if (advanceBundle) {
-          nextText = advanceBundle;
-          nextDisplayText = stripControlTokens(advanceBundle);
-          void remoteLog('[SCENARIO_ADVANCE_EMPTY_FALLBACK]', {
+      }
+      if (!nextDisplayText) {
+        if (
+          deps.currentInterviewMomentRef.current === 1 &&
+          (shouldAdvanceScenarioAAfterSatisfiedRepair(
+            params.messagesToUse,
+            '',
+            deps.currentInterviewMomentRef.current,
+          ) ||
+            scenarioAMinimumEngagementForHandoff(params.messagesToUse))
+        ) {
+          nextText = `[SCENARIO_COMPLETE:1]\n\n${buildScenario1To2BundleForInterview(
+            params.participantFirstNameForSpoken,
+            SCENARIO_2_TEXT,
+            resolveScenarioUserTextForBoundaryReflection(params.messagesToUse, 1),
+          )}`;
+          nextDisplayText = stripControlTokens(nextText);
+          void remoteLog('[S1_REPAIR_SATISFIED_EMPTY_FALLBACK]', {
             interviewSessionId: deps.interviewSessionIdRef.current,
-            interviewMoment: deps.currentInterviewMomentRef.current,
             preview: nextDisplayText.slice(0, 280),
           });
-        } else {
-          void remoteLog('[SCENARIO_SUPPRESSED_ELONGATING_NO_FALLBACK]', {
+        } else if (
+          deps.currentInterviewMomentRef.current === 1 &&
+          deps.scenarioARepairQuestionAskedRef.current &&
+          (hasScenarioBoundaryWrapPhrase(ctx.streamFullTrimmed) ||
+            textContainsScenarioBVignetteBody(ctx.streamFullTrimmed) ||
+            hasScenarioBoundaryWrapPhrase(text) ||
+            textContainsScenarioBVignetteBody(text))
+        ) {
+          /** Stream tried S1→S2 after a repair answer — never go silent even if engagement helper lags. */
+          nextText = `[SCENARIO_COMPLETE:1]\n\n${buildScenario1To2BundleForInterview(
+            params.participantFirstNameForSpoken,
+            SCENARIO_2_TEXT,
+            resolveScenarioUserTextForBoundaryReflection(params.messagesToUse, 1),
+          )}`;
+          nextDisplayText = stripControlTokens(nextText);
+          void remoteLog('[S1_STREAM_HANDOFF_EMPTY_FALLBACK]', {
             interviewSessionId: deps.interviewSessionIdRef.current,
-            interviewMoment: deps.currentInterviewMomentRef.current,
+            preview: nextDisplayText.slice(0, 280),
+            engagementMet: scenarioAMinimumEngagementForHandoff(params.messagesToUse),
           });
-          deps.setVoiceState('idle');
-          return { handled: true };
+        } else {
+          const advanceBundle = applyPostClaudeScenarioAdvanceBundleOverride(
+            '',
+            params.participantFirstNameForSpoken,
+            params.messagesToUse,
+            deps.currentInterviewMomentRef.current,
+            deps.currentScenarioRef.current,
+          );
+          if (advanceBundle) {
+            nextText = advanceBundle;
+            nextDisplayText = stripControlTokens(advanceBundle);
+            void remoteLog('[SCENARIO_ADVANCE_EMPTY_FALLBACK]', {
+              interviewSessionId: deps.interviewSessionIdRef.current,
+              interviewMoment: deps.currentInterviewMomentRef.current,
+              preview: nextDisplayText.slice(0, 280),
+            });
+          } else {
+            void remoteLog('[SCENARIO_SUPPRESSED_ELONGATING_NO_FALLBACK]', {
+              interviewSessionId: deps.interviewSessionIdRef.current,
+              interviewMoment: deps.currentInterviewMomentRef.current,
+            });
+            deps.setVoiceState('idle');
+            return { handled: true };
+          }
         }
       }
     }

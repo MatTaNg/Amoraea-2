@@ -1,6 +1,7 @@
 /**
  * Client-injected scenario → scenario and Moment 4 handoff copy for the live interview.
- * Transition leads omit the participant's first name; the model uses it in boundary **reflection** only.
+ * Transition leads omit the participant's first name; optional boundary reflections can be
+ * re-enabled via {@link INCLUDE_SCENARIO_BOUNDARY_REFLECTIONS}.
  */
 
 import { resolveBoundaryReflectionForBundle } from './relationalPatternReflection';
@@ -15,7 +16,23 @@ import { textContainsScenarioBVignetteBody, textContainsScenarioCVignetteBody } 
 /** Brief ack when M4 threshold reflection pipeline returns empty but the user did answer. */
 const M4_THRESHOLD_TO_M5_ACK_FALLBACK = 'Thanks for sharing that.';
 
+/**
+ * When false, scenario + personal-moment boundary handoffs use only short wrap / pivot lines
+ * (no "Nice work, {name} — …" or closing content reflections). Flip back to true to restore.
+ * Covers S1→S2, S2→S3, S3→M4, M4→M5, and Moment 5 interview closings.
+ */
+export const INCLUDE_SCENARIO_BOUNDARY_REFLECTIONS = false;
+
 const BOUNDARY_POSITIVE_ADDRESSES = ['Nice work', 'Good work'] as const;
+
+function resolveScenarioBoundaryReflection(
+  firstName: string,
+  lastUserAnswer: string | null | undefined,
+  opts: { scenario: 1 | 2 | 3; reflectionOverride?: string },
+): string {
+  if (!INCLUDE_SCENARIO_BOUNDARY_REFLECTIONS) return '';
+  return resolveBoundaryReflectionForBundle(firstName, lastUserAnswer, opts);
+}
 
 function formatScenarioBoundaryLead(args: {
   segmentClose: string;
@@ -28,7 +45,7 @@ function formatScenarioBoundaryLead(args: {
 }): string {
   const reflection = args.reflection.trim();
   if (!reflection) {
-    if (args.completedScenario) {
+    if (args.completedScenario && INCLUDE_SCENARIO_BOUNDARY_REFLECTIONS) {
       void remoteLog('[BOUNDARY_REFLECTION_GENERIC_FALLBACK]', {
         completedScenario: args.completedScenario,
         reason: 'no_grounded_client_reflection',
@@ -65,8 +82,9 @@ export function scenarioHandoffBundleMissingNextSegmentVignette(
  * Scenario boundary transitions — named per completed scenario (not an index array).
  * S1/S2 must never use S3→M4 "last of the three / two personal questions" language.
  */
+/** Short S1→S2 close — no content reflection. Do not paraphrase Situation 2 vignette after this. */
 export const SCENARIO_1_TO_2_TRANSITION =
-  "That's a wrap on that one. We've got two more situations to get through.";
+  "Good work — that's the end of this scenario. Here's the next situation.";
 
 export const SCENARIO_2_TO_3_TRANSITION =
   "That's the second one done. One more situation and then we'll get personal.";
@@ -103,9 +121,9 @@ export function buildScenario1To2BundleForInterview(
   lastUserAnswer?: string | null,
   opts?: { reflectionOverride?: string },
 ): string {
-  const segmentClose = "That's a wrap on that one.";
-  const transition = "We've got two more situations to get through.";
-  const reflection = resolveBoundaryReflectionForBundle(firstName, lastUserAnswer, {
+  const segmentClose = "Good work — that's the end of this scenario.";
+  const transition = "Here's the next situation.";
+  const reflection = resolveScenarioBoundaryReflection(firstName, lastUserAnswer, {
     scenario: 1,
     reflectionOverride: opts?.reflectionOverride,
   });
@@ -153,7 +171,7 @@ export function buildScenario2To3BundleForInterview(
 ): string {
   const segmentClose = "That's the second one done.";
   const transition = "One more situation and then we'll get personal.";
-  const reflection = resolveBoundaryReflectionForBundle(firstName, lastUserAnswer, {
+  const reflection = resolveScenarioBoundaryReflection(firstName, lastUserAnswer, {
     scenario: 2,
     reflectionOverride: opts?.reflectionOverride,
   });
@@ -222,7 +240,7 @@ export function buildScenario3ToMoment4BundleForInterview(
   const segmentClose = "That's the end of the three described situations.";
   const transition =
     'There are only two questions left. Now I want to ask you about something a bit more personal.';
-  const reflection = resolveBoundaryReflectionForBundle(firstName, lastUserAnswer, {
+  const reflection = resolveScenarioBoundaryReflection(firstName, lastUserAnswer, {
     scenario: 3,
     reflectionOverride: opts?.reflectionOverride,
   });
@@ -270,8 +288,8 @@ export function buildMoment4HandoffForInterview(
 }
 
 /**
- * After the user answers the Moment 4 commitment-threshold follow-up: short reflection + warm pivot + scripted Moment 5
- * (mirrors scenario boundary rhythm; the conflict question text is canonical from {@link MOMENT_5_ACCOUNTABILITY_QUESTION_TEXT}).
+ * After the user answers the Moment 4 commitment-threshold follow-up: warm pivot + scripted Moment 5.
+ * Content reflections are omitted while {@link INCLUDE_SCENARIO_BOUNDARY_REFLECTIONS} is false.
  */
 export function buildMoment4ThresholdAnswerToMoment5Bundle(
   firstName: string,
@@ -280,11 +298,14 @@ export function buildMoment4ThresholdAnswerToMoment5Bundle(
   reflectionOpts?: BuildPersonalMomentHandoffReflectionOptions,
 ): string {
   void firstName;
+  const pivot = "Here's one more question about you — still personal, and then we'll wrap up.";
+  if (!INCLUDE_SCENARIO_BOUNDARY_REFLECTIONS) {
+    return `${pivot}\n\n${moment5Question}`.trim();
+  }
   const reflection = buildPersonalMomentHandoffReflection(lastThresholdAnswer ?? '', {
     ...reflectionOpts,
     context: 'm4_threshold_to_m5',
   });
-  const pivot = "Here's one more question about you — still personal, and then we'll wrap up.";
   const ackOrReflection =
     reflection ||
     ((lastThresholdAnswer ?? '').trim().split(/\s+/).filter(Boolean).length >= 5

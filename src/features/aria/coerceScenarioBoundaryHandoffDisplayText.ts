@@ -31,9 +31,9 @@ import {
   isScenarioBQ1Prompt,
   looksLikeScenarioBJamesDifferentlyQuestion,
   looksLikeScenarioBRepairAsJamesQuestion,
+  resolveScenarioBNextRequiredFollowUpPrompt,
   scenarioBMinimumEngagementForHandoff,
   scenarioBJamesRepairProbeAlreadySatisfied,
-  SCENARIO_B_JAMES_DIFFERENTLY_CANONICAL,
 } from '@features/aria/scenarioBProbeLogic';
 import {
   resolveScenarioANextRequiredFollowUpPrompt,
@@ -187,6 +187,18 @@ function looksLikeScenarioBInProgressAssistantProbe(text: string): boolean {
   return false;
 }
 
+export type CoerceScenarioBoundaryHandoffOptions = {
+  /**
+   * Parallel-stream canonical Situation 2 card already played and advanced refs.
+   * Do not yank the user back to S1 repair after that delivery (emotion + handoff must finish).
+   */
+  situation2PlaybackConfirmed?: boolean;
+  /**
+   * Stream/speak already contains the Scenario B vignette body (even if transcript lag).
+   */
+  situation2AlreadySpoken?: boolean;
+};
+
 /**
  * At scenario boundaries the client injects canonical vignette / personal-card copy.
  * The model supplies boundary closure only; this replaces handoff text with client bundles.
@@ -197,6 +209,7 @@ export function coerceScenarioBoundaryHandoffDisplayText(
   messages: PostClaudeInterviewMessage[],
   currentScenario: number | null | undefined,
   interviewMoment: number,
+  options?: CoerceScenarioBoundaryHandoffOptions,
 ): string {
   const raw = (displayText ?? '').trim();
   if (!raw) return displayText;
@@ -213,9 +226,15 @@ export function coerceScenarioBoundaryHandoffDisplayText(
   const s1HandoffCue = isScenarioOneBoundaryHandoffCue(raw);
   const s1Handoff =
     scenarioOneHandoffContext(activeScenario, interviewMoment) && s1HandoffCue;
+  const s2DeliveryIrrevocable =
+    options?.situation2PlaybackConfirmed === true ||
+    options?.situation2AlreadySpoken === true ||
+    messages.some(
+      (m) => m.role === 'assistant' && textContainsScenarioBVignetteBody(m.content ?? ''),
+    );
 
   if (s1Handoff) {
-    if (!scenarioAMinimumEngagementForHandoff(messages)) {
+    if (!scenarioAMinimumEngagementForHandoff(messages) && !s2DeliveryIrrevocable) {
       const stripped = stripPrematureScenarioABoundaryFromDraft(raw);
       const redirect = resolveScenarioANextRequiredFollowUpPrompt(messages);
       void remoteLog('[S1_PREMATURE_S2_HANDOFF_BLOCKED]', {
@@ -225,6 +244,14 @@ export function coerceScenarioBoundaryHandoffDisplayText(
         viaBoundaryReflection: isScenarioABoundaryReflectionWithoutNextVignette(raw),
       });
       return stripped.trim() || redirect;
+    }
+    if (!scenarioAMinimumEngagementForHandoff(messages) && s2DeliveryIrrevocable) {
+      void remoteLog('[S1_PREMATURE_S2_HANDOFF_UNBLOCKED_AFTER_S2_DELIVERY]', {
+        userTurns: messages.filter((m) => m.role === 'user').length,
+        preview: raw.slice(0, 200),
+        situation2PlaybackConfirmed: options?.situation2PlaybackConfirmed === true,
+        situation2AlreadySpoken: options?.situation2AlreadySpoken === true,
+      });
     }
     const coerced = clientBundle(
       1,
@@ -240,23 +267,28 @@ export function coerceScenarioBoundaryHandoffDisplayText(
   }
 
   if (
-    activeScenario === 2 &&
+    (activeScenario === 2 || (activeScenario === 3 && interviewMoment <= 3)) &&
     !s1HandoffCue &&
     (hasS3Vignette || s2ToS3HandoffCue || isScenarioBBoundaryReflectionWithoutNextVignette(raw)) &&
-    !scenarioBMinimumEngagementForHandoff(messages)
+    !scenarioBJamesRepairProbeAlreadySatisfied(messages)
   ) {
+    const redirect = resolveScenarioBNextRequiredFollowUpPrompt(messages);
     void remoteLog('[S2_PREMATURE_S3_HANDOFF_BLOCKED]', {
       userTurns: messages.filter((m) => m.role === 'user').length,
       preview: raw.slice(0, 200),
+      redirectPreview: redirect.slice(0, 200),
+      engagementMet: scenarioBMinimumEngagementForHandoff(messages),
+      activeScenario,
     });
-    return SCENARIO_B_JAMES_DIFFERENTLY_CANONICAL;
+    return redirect;
   }
 
   if (
     activeScenario === 1 &&
     !isScenarioABoundaryReflectionWithoutNextVignette(raw) &&
     (textContainsScenarioBVignetteBody(raw) || isScenarioAHandoffWithoutNextVignette(raw)) &&
-    !scenarioAMinimumEngagementForHandoff(messages)
+    !scenarioAMinimumEngagementForHandoff(messages) &&
+    !s2DeliveryIrrevocable
   ) {
     const redirect = resolveScenarioANextRequiredFollowUpPrompt(messages);
     void remoteLog('[S1_PREMATURE_S2_HANDOFF_BLOCKED]', {
@@ -350,7 +382,7 @@ export function coerceScenarioBoundaryHandoffDisplayText(
     s2ToS3HandoffContext &&
     s2ToS3BoundaryCue &&
     scenarioBMinimumEngagementForHandoff(messages) &&
-    (scenarioBJamesRepairProbeAlreadySatisfied(messages) || s2ToS3HandoffCue);
+    scenarioBJamesRepairProbeAlreadySatisfied(messages);
 
   if (s2ToS3Handoff) {
     const coerced = clientBundle(

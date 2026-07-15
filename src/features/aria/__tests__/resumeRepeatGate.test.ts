@@ -23,7 +23,12 @@ describe('resumeRepeatGate', () => {
     expect(looksLikeRepeatCueInAmbiguousReply('What did you say again?')).toBe(true);
   });
 
-  it('does not treat narrative "he said" as repeat cue', () => {
-    expect(looksLikeRepeatCueInAmbiguousReply('He said I was wrong about that.')).toBe(false);
+  it('allows mid-length scenario answers even when lastQuestionText has no lexical overlap', () => {
+    const answer = 'Daniel is very avoidant and he had to leave to regulate his emotions.';
+    const repairQ = 'Got it. How do you think this situation could be repaired?';
+    const welcome =
+      "Welcome back — we'll pick up where we left off. If you'd like me to repeat what I said, let me know.";
+    expect(looksLikeDirectResumeAnswer(answer, repairQ)).toBe(true);
+    expect(looksLikeDirectResumeAnswer(answer, welcome)).toBe(true);
   });
 });

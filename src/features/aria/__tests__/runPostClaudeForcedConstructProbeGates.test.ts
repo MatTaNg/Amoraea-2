@@ -293,6 +293,54 @@ describe('runPostClaudeForcedConstructProbeGates', () => {
     expect(deps.setMessages).toHaveBeenCalled();
   });
 
+  it('skips S3 Sophie forced probe when parallel stream already spoke the Sophie probe', async () => {
+    const sophieProbe =
+      'Got it. What do you think this pattern of leaving has been like for Sophie over time?';
+    const deps = createMockPostClaudeDeps({
+      currentInterviewMomentRef: { current: 3 },
+      currentScenarioRef: { current: 3 },
+      parallelStreamingTtsRef: {
+        current: {
+          active: false,
+          cancelRequested: false,
+          accumulatedFullText: sophieProbe,
+          spokenCompleteText: sophieProbe,
+        },
+      },
+    });
+    const params = createMockPostClaudeParams({
+      shouldForceScenarioCSophiePerspectiveProbe: true,
+      trimmed: 'He probably left because he had to regulate himself.',
+      messagesToUse: [
+        {
+          role: 'assistant',
+          content: "When Daniel comes back and says 'I didn't know what to say' — what do you make of that?",
+        },
+        {
+          role: 'user',
+          content: 'He probably left because he had to regulate himself.',
+        },
+      ],
+    });
+    const speak = createMockSpeakAssistantTurn();
+    const draft = createMockSanitizeDraftResult({
+      strippedText: sophieProbe,
+    });
+
+    const result = await runPostClaudeForcedConstructProbeGates(
+      deps,
+      params,
+      'Got it. What would you say to Sophie at that point?',
+      draft,
+      true,
+      speak,
+    );
+
+    expect(result?.handled).toBe(true);
+    expect(deps.scenarioCSophiePerspectiveProbeFiredRef.current).toBe(true);
+    expect(speak).not.toHaveBeenCalled();
+  });
+
   it('skips S3 repair forced probe when parallel stream already delivered repair TTS', async () => {
     const deps = createMockPostClaudeDeps({
       currentInterviewMomentRef: { current: 3 },
@@ -304,13 +352,18 @@ describe('runPostClaudeForcedConstructProbeGates', () => {
     const params = createMockPostClaudeParams({
       shouldForceScenarioCRepairProbe: true,
       trimmed:
-        "She must have felt dismissed and left hanging and didn't know what Daniel was feeling.",
+        'I would apologize and commit to coming back after the ten minutes.',
       messagesToUse: [
         { role: 'assistant', content: sophieProbe },
         {
           role: 'user',
           content:
             "She must have felt dismissed and left hanging and didn't know what Daniel was feeling.",
+        },
+        { role: 'assistant', content: SCENARIO_C_REPAIR_QUESTION_CANONICAL },
+        {
+          role: 'user',
+          content: 'I would apologize and commit to coming back after the ten minutes.',
         },
       ],
     });

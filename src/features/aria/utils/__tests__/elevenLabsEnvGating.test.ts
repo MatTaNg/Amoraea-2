@@ -64,11 +64,11 @@ describe('computeElevenLabsEnabled', () => {
 });
 
 describe('computeIosUseElevenLabsMp3Playback', () => {
-  it('defaults to false when unset', () => {
-    expect(computeIosUseElevenLabsMp3Playback({})).toBe(false);
+  it('defaults to true when unset (warm ElevenLabs Jessica on iOS)', () => {
+    expect(computeIosUseElevenLabsMp3Playback({})).toBe(true);
   });
 
-  it('enables when EXPO_PUBLIC_IOS_ELEVENLABS_TTS_PLAYBACK is truthy', () => {
+  it('stays enabled for explicit truthy values', () => {
     expect(
       computeIosUseElevenLabsMp3Playback({ EXPO_PUBLIC_IOS_ELEVENLABS_TTS_PLAYBACK: '1' }),
     ).toBe(true);
@@ -77,9 +77,12 @@ describe('computeIosUseElevenLabsMp3Playback', () => {
     ).toBe(true);
   });
 
-  it('stays false for explicit disable values', () => {
+  it('disables for explicit false values (expo-speech fallback)', () => {
     expect(
       computeIosUseElevenLabsMp3Playback({ EXPO_PUBLIC_IOS_ELEVENLABS_TTS_PLAYBACK: '0' }),
+    ).toBe(false);
+    expect(
+      computeIosUseElevenLabsMp3Playback({ EXPO_PUBLIC_IOS_ELEVENLABS_TTS_PLAYBACK: 'false' }),
     ).toBe(false);
   });
 });

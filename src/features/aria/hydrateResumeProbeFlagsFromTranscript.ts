@@ -16,7 +16,9 @@ import {
   transcriptAssistantContainsMoment5PrimaryConflictQuestion,
   transcriptHasMoment5ResolutionFollowUpAsked,
 } from '@features/aria/probeAndScoringUtils';
-import { looksLikeScenarioARepairQuestion } from '@features/aria/scenarioARepairQuestionHelpers';
+import {
+  scenarioOneFollowUpFlagsFromTranscript,
+} from '@features/aria/scenarioFollowUpTranscriptGuard';
 import {
   aggregateScenario1Moment1UserTextForContemptGate,
   evaluateScenarioAQ1ContemptProbePreProbeSkip,
@@ -184,9 +186,8 @@ export function hydrateResumeProbeFlagsFromTranscript(
     }
   }
   deps.showScenarioCardCanonicalPlaybackConfirmedKindsRef.current = playbackConfirmedKinds;
-  deps.scenarioARepairQuestionAskedRef.current = transcriptMessages.some(
-    (m) => m.role === 'assistant' && looksLikeScenarioARepairQuestion(m.content ?? ''),
-  );
+  const scenarioOneFollowUp = scenarioOneFollowUpFlagsFromTranscript(transcriptMessages);
+  deps.scenarioARepairQuestionAskedRef.current = scenarioOneFollowUp.repairQuestionAsked;
   deps.s2RepairProbeDeliveredRef.current = transcriptMessages.some(
     (m) =>
       m.role === 'assistant' && looksLikeScenarioBRepairAsJamesQuestion(m.content ?? ''),

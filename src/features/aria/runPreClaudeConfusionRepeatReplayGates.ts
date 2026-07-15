@@ -1,5 +1,6 @@
 import {
   findLastRepeatableInterviewQuestionText,
+  looksLikeScenarioARepairQuestion,
   resolveInterviewQuestionRepeatTtsText,
 } from '@features/aria/interviewDisengagementProbes';
 import type { MessageWithScenario } from '@features/aria/interviewScenarioScoringSlice';
@@ -13,9 +14,48 @@ import { isStandalonePersonalDisclosureAcknowledgment } from '@features/aria/per
 import type { PreClaudeTurnGateDeps } from '@features/aria/preClaudeTurnGateTypes';
 import {
   buildMoment5ConfusionRepeatReplayAfterPriorAnswer,
+  looksLikeScenarioAContemptProbeQuestion,
   moment5TranscriptHasConcreteAnchor,
 } from '@features/aria/probeAndScoringUtils';
+import {
+  looksLikeScenarioBQ1Question,
+  looksLikeScenarioBJamesDifferentlyQuestion,
+  looksLikeScenarioBRepairAsJamesQuestion,
+} from '@features/aria/scenarioBProbeLogic';
+import {
+  isScenarioCRepairAssistantPrompt,
+  looksLikeScenarioCSophiePerspectiveQuestion,
+} from '@features/aria/scenarioCPromptDetection';
 import { remoteLog } from '@utilities/remoteLog';
+
+function inferScenarioNumberForRepeatReplay(
+  replayText: string,
+  fallbackScenario: number,
+): 1 | 2 | 3 {
+  if (
+    looksLikeScenarioAContemptProbeQuestion(replayText) ||
+    looksLikeScenarioARepairQuestion(replayText)
+  ) {
+    return 1;
+  }
+  if (
+    looksLikeScenarioBQ1Question(replayText) ||
+    looksLikeScenarioBJamesDifferentlyQuestion(replayText) ||
+    looksLikeScenarioBRepairAsJamesQuestion(replayText)
+  ) {
+    return 2;
+  }
+  if (
+    looksLikeScenarioCSophiePerspectiveQuestion(replayText) ||
+    isScenarioCRepairAssistantPrompt(replayText)
+  ) {
+    return 3;
+  }
+  if (fallbackScenario === 1 || fallbackScenario === 2 || fallbackScenario === 3) {
+    return fallbackScenario;
+  }
+  return 1;
+}
 
 export type PreClaudeConfusionRepeatReplayGatesResult = {
   handled: boolean;
@@ -64,7 +104,11 @@ export async function runPreClaudeConfusionRepeatReplayGates(
       content: replayText,
       scenarioNumber: 3,
     };
-    deps.setMessages([...messagesToUse, replayMsg]);
+    const nextMessages = [...messagesToUse, replayMsg];
+    deps.currentMessagesRef.current = nextMessages as PreClaudeTurnGateDeps['messages'];
+    deps.lastQuestionTextRef.current = replayText;
+    deps.commitInterviewMessages(nextMessages as PreClaudeTurnGateDeps['messages']);
+    deps.setMessages(nextMessages as PreClaudeTurnGateDeps['messages']);
     await deps.speakTextSafe(replayText, ASSISTANT_INTERVIEW_SPEECH);
     deps.setVoiceState('idle');
     deps.setIsWaiting(false);
@@ -101,13 +145,26 @@ export async function runPreClaudeConfusionRepeatReplayGates(
         preview: replayText.slice(0, 220),
         preclassified: metaCommentClassification.confidence === 1.0,
       });
+      const replayScenarioNumber = inferScenarioNumberForRepeatReplay(
+        replayText,
+        deps.currentScenarioRef.current ?? userScenarioTag,
+      );
       const replayMsg: MessageWithScenario = {
         role: 'assistant',
         content: replayText,
-        scenarioNumber: userScenarioTag as 1 | 2 | 3,
+        scenarioNumber: replayScenarioNumber,
         interviewMoment: deps.currentInterviewMomentRef.current,
       };
-      deps.setMessages([...messagesToUse, replayMsg]);
+      const nextMessages = [...messagesToUse, replayMsg];
+      /**
+       * commitPreClaudeUserTurn prefers currentMessagesRef over React state. Keep the
+       * replayed question in the same transcript source or the next turn evaluates against
+       * a stale last-assistant line (e.g. ghost S1 repair after a spoken S1 contempt replay).
+       */
+      deps.currentMessagesRef.current = nextMessages as PreClaudeTurnGateDeps['messages'];
+      deps.lastQuestionTextRef.current = replayText;
+      deps.commitInterviewMessages(nextMessages as PreClaudeTurnGateDeps['messages']);
+      deps.setMessages(nextMessages as PreClaudeTurnGateDeps['messages']);
       await deps.speakTextSafe(replayText, {
         ...ASSISTANT_INTERVIEW_SPEECH,
         allowDuplicateConsecutiveTts: true,

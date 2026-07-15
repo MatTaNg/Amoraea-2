@@ -62,13 +62,18 @@ export function repairAnswerHasConcreteSuggestionActionOrStep(text: string): boo
     /\bvoicemail\b/i.test(t) ||
     /\b(i|we)\s+shouldn'?t have\b/i.test(t) ||
     /\b(i|we)\s+(would|will)\s+(apologiz\w*|say sorry|listen|acknowledg\w*|own)\b/i.test(t) ||
+    /** "I would have a sit down…" / "I would be setting boundaries…" */
+    (/\b(i|we)\s+(would|will)\s+(have|be)\b/i.test(t) &&
+      /\b(sit\s*-?\s*down|conversation|chat|talk|boundar(?:y|ies))\b/i.test(t)) ||
+    /\bsit\s*-?\s*down\b/i.test(t) ||
+    /\blett?ing\s+\w+\s+know\b/i.test(t) ||
     /\b(i|we|he|she|they|daniel|sophie|james|sarah|ryan|emma)\s+(would|could|should|need(?:s)? to|might|can)\s+(say|tell|ask|apologiz\w*|acknowledg\w*|own|admit|listen|validat\w*|explain|share|talk|communicat\w*|set|agree|commit|change|repair|fix|resolv\w*|revisit|come back|take|give|try)\b/i.test(
       t,
     ) ||
     /\b(both|each|together)\s+(of\s+them\s+)?(need|should|could|would|can)\s+(to\s+)?(talk|communicat|listen|agree|set|work|repair|resolve|try)\b/i.test(
       t,
     ) ||
-    /\b(apologiz|listen|validate|acknowledge|own(?:ership)?|take responsibility|make amends|talk it through|communicat|counsel(?:ing|ling)|therapy|therapist|mediator|friend|support|boundary|agreement|next step|follow[- ]?up|follow through|check in|assure)\b/i.test(
+    /\b(apologiz|listen|validate|acknowledge|own(?:ership)?|take responsibility|make amends|talk it through|communicat|counsel(?:ing|ling)|therapy|therapist|mediator|friend|support|boundar(?:y|ies)|agreement|next step|follow[- ]?up|follow through|check in|assure)\b/i.test(
       t,
     ) ||
     /\b(talk|discuss|listen|explain|share|ask|apologiz\w*|acknowledg\w*|validat\w*)\b/i.test(t) ||
@@ -121,13 +126,15 @@ export function userAnswerSatisfiesScenarioARepairPrompt(
   if (!t) return false;
 
   const firstPersonRepair =
-    /\bif i were ryan\b/.test(t) ||
+    /\bif i (?:were|'?m|am) ryan\b/.test(t) ||
     /\b(as ryan|being ryan)\b/.test(t) ||
-    /\b(i would|i'd|i will|i commit|i shouldn't have|i should have|i should|i apologize|i apologise)\b/.test(t);
+    /\b(i would|i'd|i will|i'?m going to|i am going to|i commit|i assure|i shouldn't have|i should have|i should|i apologize|i apologise)\b/.test(
+      t,
+    );
 
   const ryanOwnership =
     /\b(ryan|he)\b/.test(t) &&
-    /\b(apolog|sorry|shouldn't have|should not have|commit|won't|will not|listen|acknowledg|own|responsib|priorit|call|date|emergency)\b/.test(
+    /\b(apolog|sorry|shouldn't have|should not have|commit|assure|follow\s+through|won't|will not|listen|acknowledg|own|responsib|priorit|call|date|emergency)\b/.test(
       t,
     );
 

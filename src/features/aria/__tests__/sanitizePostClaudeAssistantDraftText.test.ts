@@ -286,7 +286,8 @@ describe('sanitizePostClaudeAssistantDraftText', () => {
 
     const result = sanitizePostClaudeAssistantDraftText(deps, params, draft, '', false);
 
-    expect(result.strippedText).toBe('');
+    expect(result.strippedText).toMatch(/that's the end of this scenario|job hunting for four months/i);
+    expect(result.strippedText).not.toMatch(/made that very clear|contempt/i);
   });
 
   it('strips post-repair Emma meant when she said contempt re-ask', () => {
@@ -318,7 +319,8 @@ describe('sanitizePostClaudeAssistantDraftText', () => {
 
     const result = sanitizePostClaudeAssistantDraftText(deps, params, draft, '', false);
 
-    expect(result.strippedText).toBe('');
+    expect(result.strippedText).toMatch(/that's the end of this scenario|job hunting for four months/i);
+    expect(result.strippedText).not.toMatch(/Emma meant when she said/i);
   });
 
   it('strips post-repair how does that land contempt re-ask from session logs', () => {
@@ -350,7 +352,8 @@ describe('sanitizePostClaudeAssistantDraftText', () => {
 
     const result = sanitizePostClaudeAssistantDraftText(deps, params, draft, '', false);
 
-    expect(result.strippedText).toBe('');
+    expect(result.strippedText).toMatch(/that's the end of this scenario|job hunting for four months/i);
+    expect(result.strippedText).not.toMatch(/how does that land/i);
   });
 
   it('strips post-repair read-as-contempt paraphrase from session logs', () => {
@@ -382,6 +385,7 @@ describe('sanitizePostClaudeAssistantDraftText', () => {
 
     const result = sanitizePostClaudeAssistantDraftText(deps, params, draft, '', false);
 
-    expect(result.strippedText).toBe('');
+    expect(result.strippedText).toMatch(/that's the end of this scenario|job hunting for four months/i);
+    expect(result.strippedText).not.toMatch(/read as contempt/i);
   });
 });

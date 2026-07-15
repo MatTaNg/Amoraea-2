@@ -62,6 +62,26 @@ describe('substituteCanonicalInterviewScenarioBodiesForTts', () => {
     expect(out).not.toMatch(/feels abandoned/i);
   });
 
+  it('replaces "Sophie trying to get closer" fiction with canonical Scenario 3', () => {
+    const fiction =
+      "That's the second one done. One more situation and then we'll get personal.\n\nSophie has been trying to get closer to Daniel. Every time she brings up something personal he says yeah I've been through that too and launches into his own story. What do you make of that?";
+    const out = substituteCanonicalInterviewScenarioBodiesForTts(fiction);
+    expect(out).toContain(SCENARIO_3_VIGNETTE);
+    expect(out).toContain("When Daniel comes back and says 'I didn't know what to say'");
+    expect(out).not.toMatch(/trying to get closer/i);
+    expect(out).not.toMatch(/launches into (?:his|her) own story/i);
+  });
+
+  it('replaces family-Sunday Sophie fiction with canonical Scenario 3', () => {
+    const fiction =
+      "That's the second one done. One more situation and then we'll get personal.\n\nSophie has been dating Daniel for eight months. She's close to her family and sees them every Sunday. Over the last month Daniel has started coming along. Last Sunday Sophie's sister made a comment that made Sophie feel like an outsider in her own family. Daniel saw it happen. On the drive home Sophie waited for Daniel to say something. He didn't. When they got home Sophie said \"I guess I just don't belong anywhere.\" Daniel said \"don't say that, it's not true.\" Sophie went quiet and went to bed early.";
+    const out = substituteCanonicalInterviewScenarioBodiesForTts(fiction);
+    expect(out).toContain(SCENARIO_3_VIGNETTE);
+    expect(out).not.toMatch(/eight months/i);
+    expect(out).not.toMatch(/every Sunday/i);
+    expect(out).not.toMatch(/belong anywhere/i);
+  });
+
   it('replaces paraphrased Moment 4 grudge prompt with Show Scenario modal copy', () => {
     const paraphrased =
       "Good work — you finished the three situations. Think about someone you really didn't like and tell me what went wrong.";
@@ -110,6 +130,17 @@ describe('substituteCanonicalInterviewScenarioBodiesForTts', () => {
     expect(out).not.toMatch(/working late most nights/i);
     expect(out).not.toMatch(/Must be nice to finally/i);
     expect(out).not.toMatch(/list on his phone/i);
+  });
+
+  it('replaces comes-home-with-promotion wrong S2 variant with canonical job-offer copy', () => {
+    const wrong =
+      "Here's the second situation: Sarah has just got a promotion at work. She comes home excited. James has had a hard day and is tired. Sarah tells him her news. What could James have done differently in that moment when Sarah came home with her news?";
+    const out = substituteCanonicalInterviewScenarioBodiesForTts(wrong);
+    expect(out).toContain(SHOW_SCENARIO_2_VIGNETTE_EXACT);
+    expect(out).toContain('What do you think is going on here?');
+    expect(out).not.toMatch(/just got a promotion/i);
+    expect(out).not.toMatch(/comes home excited/i);
+    expect(out).not.toMatch(/What could James have done differently/i);
   });
 
   it('strips concatenated wrong S2 variants when model appends multiple legacy vignettes', () => {

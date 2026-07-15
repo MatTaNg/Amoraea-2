@@ -58,6 +58,8 @@ export type ClaudeParallelStreamTtsCallDeps = {
   pendingGestureRestoreSpeakRef: MutableRefObject<import('@features/aria/hooks/useAriaInterviewSession').PendingGestureRestoreSpeakEntry | null>;
   currentInterviewMomentRef: MutableRefObject<number>;
   currentScenarioRef: MutableRefObject<number>;
+  interviewMomentsCompleteRef: MutableRefObject<Record<number, boolean>>;
+  resumeActiveScenarioRef: MutableRefObject<number | null | undefined>;
   interviewSessionAttemptIdRef: MutableRefObject<string | null>;
   interviewSessionIdRef: MutableRefObject<string>;
   interviewNameRef: MutableRefObject<string | null>;

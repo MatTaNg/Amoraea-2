@@ -1,5 +1,3 @@
-import type { MetaCommentClassification } from '@features/aria/metaCommentClassification';
-import type { MessageWithScenario } from '@features/aria/interviewScenarioScoringSlice';
 import type { PreClaudeTurnGateDeps } from '@features/aria/preClaudeTurnGateTypes';
 import {
   resolvePreClaudeAssistantTurnContext,
@@ -11,6 +9,9 @@ import {
 import {
   runPreClaudeClientDisengagementProbeGate,
 } from '@features/aria/runPreClaudeClientDisengagementProbeGate';
+import {
+  runPreClaudeClientOwnedCanonicalConstructGate,
+} from '@features/aria/runPreClaudeClientOwnedCanonicalConstructGate';
 import {
   runPreClaudeConfusionRepeatReplayGates,
 } from '@features/aria/runPreClaudeConfusionRepeatReplayGates';
@@ -30,6 +31,8 @@ import {
   syncMoment5ClientInjectRefsFromTranscript,
   syncMoment5PostPromptUserTurnCount,
 } from '@features/aria/syncPreClaudeMoment5RefsFromTranscript';
+import type { MetaCommentClassification } from '@features/aria/metaCommentClassification';
+import type { MessageWithScenario } from '@features/aria/interviewScenarioScoringSlice';
 
 export type PreClaudeLateInterceptGatesPass = {
   handled: false;
@@ -135,6 +138,18 @@ export async function runPreClaudeLateInterceptGates(
     isNameEntryTurn,
   );
   if (clientDisengagement.handled) {
+    return { handled: true };
+  }
+
+  const clientOwnedCanonical = await runPreClaudeClientOwnedCanonicalConstructGate(
+    deps,
+    trimmed,
+    messagesToUse,
+    lastAssistantContent,
+    constructProbeFlags,
+    suppressForcedConstructProbesForMetaFrustration,
+  );
+  if (clientOwnedCanonical.handled) {
     return { handled: true };
   }
 

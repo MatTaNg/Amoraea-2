@@ -16,6 +16,7 @@ import {
 } from '@features/aria/postClaudeForcedConstructProbeShared';
 import { commitDedupedAssistantTranscriptTurn } from '@features/aria/interviewTranscriptDedup';
 import { shouldDeliverScenarioFollowUpQuestion } from '@features/aria/scenarioFollowUpTranscriptGuard';
+import { looksLikeScenarioCSophiePerspectiveQuestion } from '@features/aria/scenarioCPromptDetection';
 import { remoteLog } from '@utilities/remoteLog';
 
 export async function runPostClaudeScenarioCSophieForcedProbeGate(
@@ -39,9 +40,47 @@ export async function runPostClaudeScenarioCSophieForcedProbeGate(
     return null;
   }
 
+  const streamAlreadySpokeSophie = looksLikeScenarioCSophiePerspectiveQuestion(
+    deps.parallelStreamingTtsRef.current.spokenCompleteText,
+  );
+
   if (
-    !shouldDeliverScenarioFollowUpQuestion(params.messagesToUse, SCENARIO_C_SOPHIE_PERSPECTIVE_PROBE)
+    !shouldDeliverScenarioFollowUpQuestion(params.messagesToUse, SCENARIO_C_SOPHIE_PERSPECTIVE_PROBE) ||
+    streamAlreadySpokeSophie
   ) {
+    deps.scenarioCSophiePerspectiveProbeFiredRef.current = true;
+    if (streamAlreadySpokeSophie) {
+      const wrappedSophieProbe = wrapForcedProbeWithAck(
+        params.trimmed,
+        strippedText,
+        SCENARIO_C_SOPHIE_PERSPECTIVE_PROBE,
+        recentAsstForAck,
+      );
+      if (shouldDeliverScenarioFollowUpQuestion(params.messagesToUse, wrappedSophieProbe)) {
+        const liveTranscript = (deps.currentMessagesRef.current.length > 0
+          ? deps.currentMessagesRef.current
+          : params.messagesToUse) as PostClaudeInterviewMessage[];
+        commitDedupedAssistantTranscriptTurn(
+          liveTranscript,
+          params.messagesToUse,
+          wrappedSophieProbe,
+          {
+            scenarioNumber: deps.resolveAssistantScenarioNumber(wrappedSophieProbe, params.messagesToUse),
+            interviewMoment: deps.currentInterviewMomentRef.current,
+          },
+          (next) => deps.setMessages(next),
+        );
+      }
+      void remoteLog('[S3_SOPHIE_FORCED_SKIPPED_STREAM_ALREADY_SPOKE]', {
+        interviewSessionId: deps.interviewSessionIdRef.current,
+        spokenPreview: deps.parallelStreamingTtsRef.current.spokenCompleteText.slice(0, 220),
+      });
+      return finishPostClaudeForcedConstructProbeGate(deps, {
+        strippedText,
+        scenarioBSkippedJamesIntermediate: jamesState.scenarioBSkippedJamesIntermediate,
+        needsScenarioBJamesDifferentlyInsert: jamesState.needsScenarioBJamesDifferentlyInsert,
+      });
+    }
     void remoteLog('[S3_SOPHIE_FORCED_SKIPPED_TRANSCRIPT_DEDUP]', {
       interviewSessionId: deps.interviewSessionIdRef.current,
     });

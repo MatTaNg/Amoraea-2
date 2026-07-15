@@ -298,8 +298,9 @@ export async function playElevenLabsMp3WithWebHtmlAudio(
                 outcome: 'play_ok',
                 telemetrySource: params.telemetrySource,
                 html_audio_volume: htmlAudio.volume,
+                errorMessagePreview: 'autoplay_retry_play_ok_await_ended',
               });
-              finish('resolve');
+              /** Do not finish here — same as the primary play path: wait for onended/safety. */
               return;
             } catch {
               /* fall through to web speech */

@@ -4,6 +4,8 @@ import { detectConstructs, formatScoreMessage } from '@features/aria/interviewCo
 import type { ScenarioScoreResult } from '@features/aria/scoreInterviewScoringHelpers';
 import { SCENARIO_B_JAMES_DIFFERENTLY_CANONICAL } from '@features/aria/scenarioBProbeLogic';
 import { SCENARIO_A_REPAIR_QUESTION_AFTER_CONTEMPT_COPY } from '@features/aria/probeAndScoringUtils';
+import { SCENARIO_1_TO_2_TRANSITION } from '@features/aria/interviewTransitionBundles';
+import { SHOW_SCENARIO_2_VIGNETTE_EXACT } from '@features/aria/interviewShowScenarioExactCopy';
 import { runPostClaudeNaturalLanguageSpeakAndComplete } from '@features/aria/runPostClaudeNaturalLanguageSpeakAndComplete';
 import { createPostClaudeSpeakAssistantTurn } from '@features/aria/createPostClaudeSpeakAssistantTurn';
 import type { PostClaudeNaturalLanguageClosingHandoffEval } from '@features/aria/evaluatePostClaudeNaturalLanguageClosingHandoff';
@@ -13,6 +15,10 @@ import {
   createMockPostClaudeParams,
   createMockSpeakAssistantTurn,
 } from './postClaudeGateTestHelpers';
+
+jest.mock('@features/aria/utils/speakLongFormInterviewHtmlMp3', () => ({
+  speakLongFormInterviewHtmlMp3: jest.fn(async () => false),
+}));
 
 describe('interviewConstructAndScoreDisplay', () => {
   it('detectConstructs maps repair and accountability cues', () => {
@@ -166,6 +172,108 @@ describe('runPostClaudeNaturalLanguageSpeakAndComplete', () => {
     expect(setVoiceState).toHaveBeenCalledWith('idle');
   });
 
+  it('runs emotion modal after bundled handoff when canonical situation_2 already played', async () => {
+    const runEmotionModalAfterScenarioTransition = jest.fn().mockResolvedValue(undefined);
+    const speak = createMockSpeakAssistantTurn();
+    const setVoiceState = jest.fn();
+    const deps = createMockPostClaudeDeps({
+      runEmotionModalAfterScenarioTransition,
+      setVoiceState,
+      showScenarioCardCanonicalPlaybackConfirmedKindsRef: {
+        current: { situation_2: true },
+      },
+      parallelStreamingTtsRef: {
+        current: {
+          active: false,
+          cancelRequested: false,
+          accumulatedFullText: '',
+          spokenCompleteText:
+            "That's a wrap on that one. Nice work, Matt.\n\nSarah has been job hunting for four months.",
+        },
+      },
+    });
+    const params = createMockPostClaudeParams();
+    const displayText =
+      "That's a wrap on that one. Nice work, Matt.\n\nSarah has been job hunting for four months. She gets an offer.";
+
+    await runPostClaudeNaturalLanguageSpeakAndComplete({
+      deps,
+      params,
+      parallelStreamingPlaybackUsed: true,
+      displayText,
+      transcript: baseTranscript({
+        pendingBundledHandoff: true,
+        deferEmotionModal: true,
+        assistantContentToPersist: "That's a wrap on that one. Nice work, Matt.",
+        emotionSplit: {
+          beforeModal: "That's a wrap on that one. Nice work, Matt.",
+          afterModal: 'Sarah has been job hunting for four months. She gets an offer.',
+        },
+        emotionNaturalForward: false,
+        emotionCompletedScenario: 1,
+      }),
+      closingHandoff: baseClosingHandoff(),
+      speakAssistantTurn: speak,
+    });
+
+    expect(runEmotionModalAfterScenarioTransition).toHaveBeenCalledWith(1, expect.any(Object));
+    expect(deps.pendingEmotionModalTransitionRef.current).toBeNull();
+    expect(setVoiceState).toHaveBeenCalledWith('idle');
+  });
+
+  it('forces S1 emotion modal when Situation 2 card already played but premature coerce cleared emotion flags', async () => {
+    const runEmotionModalAfterScenarioTransition = jest.fn().mockResolvedValue(undefined);
+    const speak = createMockSpeakAssistantTurn();
+    const setVoiceState = jest.fn();
+    const spokenS2 =
+      "That's a wrap on that one. Nice work, Matt.\n\nSarah has been job hunting for four months. She gets an offer and calls James.";
+    const deps = createMockPostClaudeDeps({
+      runEmotionModalAfterScenarioTransition,
+      setVoiceState,
+      showScenarioCardCanonicalPlaybackConfirmedKindsRef: {
+        current: { situation_2: true },
+      },
+      emotionItemResponsesRef: { current: [] },
+      parallelStreamingTtsRef: {
+        current: {
+          active: false,
+          cancelRequested: false,
+          accumulatedFullText: '',
+          spokenCompleteText: spokenS2,
+        },
+      },
+    });
+    const params = createMockPostClaudeParams();
+
+    await runPostClaudeNaturalLanguageSpeakAndComplete({
+      deps,
+      params,
+      parallelStreamingPlaybackUsed: true,
+      // Mirrors session: premature block rewrote handoff to Ryan repair after S2 already played.
+      displayText: SCENARIO_A_REPAIR_QUESTION_AFTER_CONTEMPT_COPY,
+      transcript: baseTranscript({
+        priorScenarioNum: 1,
+        pendingBundledHandoff: false,
+        emotionNaturalForward: false,
+        emotionCompletedScenario: null,
+        deferEmotionModal: false,
+        emotionSplit: {
+          beforeModal: SCENARIO_A_REPAIR_QUESTION_AFTER_CONTEMPT_COPY,
+          afterModal: '',
+        },
+        assistantContentToPersist: SCENARIO_A_REPAIR_QUESTION_AFTER_CONTEMPT_COPY,
+      }),
+      closingHandoff: baseClosingHandoff(),
+      speakAssistantTurn: speak,
+    });
+
+    expect(runEmotionModalAfterScenarioTransition).toHaveBeenCalledWith(1, expect.any(Object));
+    expect(speak).not.toHaveBeenCalledWith(
+      expect.stringMatching(/if you were ryan/i),
+      expect.any(Object),
+    );
+  });
+
   it('runs M5 failsafe completion when shouldFailsafeComplete is true', async () => {
     const setVoiceState = jest.fn();
     const persistInterviewAttemptSessionLifecycle = jest.fn().mockResolvedValue(undefined);
@@ -203,7 +311,7 @@ describe('runPostClaudeNaturalLanguageSpeakAndComplete', () => {
       speakTextSafe,
       commitInterviewMessages,
       setVoiceState,
-      interviewNameRef: { current: null },
+      interviewNameRef: { current: 'Matt' },
       currentInterviewMomentRef: { current: 1 },
       currentScenarioRef: { current: 1 },
       lastQuestionTextRef: { current: briefing },
@@ -249,7 +357,7 @@ describe('runPostClaudeNaturalLanguageSpeakAndComplete', () => {
       speakTextSafe,
       commitInterviewMessages,
       setVoiceState,
-      interviewNameRef: { current: null },
+      interviewNameRef: { current: 'Matt' },
       currentInterviewMomentRef: { current: 2 },
       currentScenarioRef: { current: 1 },
       lastQuestionTextRef: { current: briefing },
@@ -460,7 +568,7 @@ describe('runPostClaudeNaturalLanguageSpeakAndComplete', () => {
     const runEmotionModalAfterScenarioTransition = jest.fn().mockResolvedValue(undefined);
     const speak = createMockSpeakAssistantTurn();
     const s2Opening =
-      "Sarah has been job hunting for four months. What do you think is going on here?";
+      `${SHOW_SCENARIO_2_VIGNETTE_EXACT}\n\nWhat do you think is going on here?`;
     const messages = [
       { role: 'assistant', content: 'If you were Ryan, how would you repair this?' },
       {
@@ -479,7 +587,7 @@ describe('runPostClaudeNaturalLanguageSpeakAndComplete', () => {
       parallelStreamingTtsRef: {
         current: {
           active: false,
-          spokenCompleteText: s2Opening,
+          spokenCompleteText: `${SCENARIO_1_TO_2_TRANSITION}\n\n${s2Opening}`,
           accumulatedFullText: '',
           cancelRequested: false,
         },
@@ -497,7 +605,7 @@ describe('runPostClaudeNaturalLanguageSpeakAndComplete', () => {
         emotionNaturalForward: true,
         emotionCompletedScenario: 1,
         emotionSplit: {
-          beforeModal: "That's a wrap on this situation.",
+          beforeModal: SCENARIO_1_TO_2_TRANSITION,
           afterModal: SCENARIO_B_JAMES_DIFFERENTLY_CANONICAL,
         },
         aiMsg: {

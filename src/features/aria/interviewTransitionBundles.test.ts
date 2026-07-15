@@ -29,7 +29,7 @@ describe('buildClientScenarioBoundaryHandoffBundle', () => {
       STUB_M4_CARD,
     );
     expect(out).toMatch(/Sarah has been job hunting/i);
-    expect(out).toContain("We've got two more situations to get through.");
+    expect(out).toContain(SCENARIO_1_TO_2_TRANSITION_FALLBACK);
     expect(out).not.toMatch(/last of the three|two short personal|two questions left/i);
   });
 
@@ -52,48 +52,44 @@ describe('buildScenario1To2BundleForInterview', () => {
     expect(out).toContain('\n\nSARAH_VIGNETTE');
   });
 
-  it('uses the same no-name transition when a first name is provided (name lives in model reflection)', () => {
+  it('uses short wrap transition with no content reflection when a first name is provided', () => {
     const out = buildScenario1To2BundleForInterview('  Alex  ', STUB_S2);
     expect(out.startsWith(SCENARIO_1_TO_2_TRANSITION_FALLBACK)).toBe(true);
     expect(out).toContain(STUB_S2);
   });
 
-  it('includes boundary reflection when last user answer is provided', () => {
+  it('omits boundary reflections for now (short wrap only)', () => {
     const corpus = [
       'James should have listened more instead of jumping to logistics when Sarah was upset about the trip.',
       'She must have felt dismissed because he went straight to fixing the plan instead of hearing her out.',
       "Just wait until she brings it up again when she's ready to talk about it.",
     ].join('\n');
     const out = buildScenario1To2BundleForInterview('Alex', STUB_S2, corpus);
-    expect(out).toContain("That's a wrap on that one.");
-    expect(out).toMatch(REFLECTION_ANCHOR);
-    expect(out).toContain('Nice work, Alex');
-    expect(out).not.toContain('Great work');
-    expect(out).not.toContain('James should have asked');
-    expect(out).toContain("We've got two more situations to get through.");
+    expect(out.startsWith(SCENARIO_1_TO_2_TRANSITION_FALLBACK)).toBe(true);
+    expect(out).not.toMatch(REFLECTION_ANCHOR);
+    expect(out).not.toContain('Nice work, Alex');
+    expect(out).toContain(SCENARIO_1_TO_2_TRANSITION_FALLBACK);
     expect(out).not.toMatch(/last of the three|two short personal|two questions left/i);
     expect(out).toContain('SARAH_VIGNETTE');
   });
 
-  it('includes boundary reflection for a substantive Ryan repair answer alone', () => {
+  it('omits boundary reflections for a substantive Ryan repair answer alone', () => {
     const repair =
       'I would make sure all calls go to voicemail during dates and commit to it.';
     const out = buildScenario1To2BundleForInterview('Alex', STUB_S2, repair);
-    expect(out).toContain("That's a wrap on that one.");
-    expect(out).toMatch(REFLECTION_ANCHOR);
-    expect(out).toContain('Nice work, Alex');
-    expect(out).not.toContain(SCENARIO_1_TO_2_TRANSITION_FALLBACK);
+    expect(out.startsWith(SCENARIO_1_TO_2_TRANSITION_FALLBACK)).toBe(true);
+    expect(out).not.toMatch(REFLECTION_ANCHOR);
+    expect(out).not.toContain('Nice work, Alex');
   });
 });
 
 describe('buildScenarioBoundaryLeadForInterview', () => {
-  it('returns ack + reflection + transition without the next vignette', () => {
+  it('returns short wrap transition without reflection or next vignette', () => {
     const repair =
       'I would assure her that this would not happen again and actually follow through.';
     const lead = buildScenarioBoundaryLeadForInterview(1, 'Vaishnava', repair);
-    expect(lead).toContain("That's a wrap on that one.");
-    expect(lead).toContain('Nice work, Vaishnava');
-    expect(lead).toContain("We've got two more situations to get through.");
+    expect(lead).toBe(SCENARIO_1_TO_2_TRANSITION_FALLBACK);
+    expect(lead).not.toContain('Nice work, Vaishnava');
     expect(lead).not.toContain('Sarah has been job hunting');
   });
 });
@@ -111,18 +107,17 @@ describe('buildScenario2To3TransitionBody', () => {
     expect(out).toContain(STUB_S3);
   });
 
-  it('includes boundary reflection for deferral repair answers', () => {
+  it('omits boundary reflections for deferral repair answers', () => {
     const corpus = [
       'James should have listened more instead of jumping to logistics when Sarah was upset about the trip.',
       'She must have felt dismissed because he went straight to fixing the plan instead of hearing her out.',
       "Just wait until she brings it up again when she's ready to talk about it.",
     ].join('\n');
     const out = buildScenario2To3TransitionBody('Jordan', STUB_S3, corpus);
-    expect(out).toContain("That's the second one done.");
-    expect(out).toMatch(REFLECTION_ANCHOR);
-    expect(out).toContain('Nice work, Jordan');
+    expect(out.startsWith(SCENARIO_2_TO_3_TRANSITION_FALLBACK)).toBe(true);
+    expect(out).not.toMatch(REFLECTION_ANCHOR);
+    expect(out).not.toContain('Nice work, Jordan');
     expect(out).toContain("One more situation and then we'll get personal.");
-    expect(out).not.toMatch(/brings it up again/i);
     expect(out).toContain('SOPHIE_VIGNETTE');
   });
 });
@@ -135,24 +130,27 @@ describe('buildMoment4ThresholdAnswerToMoment5Bundle', () => {
     expect(out).toContain(MOMENT_5_ACCOUNTABILITY_QUESTION_TEXT);
   });
 
-  it('includes brief ack when reflection pipeline returns empty but threshold answer is substantive', () => {
+  it('omits ack/reflection when boundary reflections are disabled (current default)', () => {
     const out = buildMoment4ThresholdAnswerToMoment5Bundle(
       'Alex',
       MOMENT_5_ACCOUNTABILITY_QUESTION_TEXT,
       'It really depends on many different factors each time honestly.',
     );
-    expect(out).toContain('Thanks for sharing that.');
+    expect(out).not.toContain('Thanks for sharing that.');
+    expect(out).not.toMatch(REFLECTION_ANCHOR);
+    expect(out).toContain('one more question about you');
     expect(out).toContain(MOMENT_5_ACCOUNTABILITY_QUESTION_TEXT);
   });
 
-  it('includes pattern reflection when threshold answer is provided', () => {
+  it('omits pattern reflection when threshold answer is provided (reflections disabled)', () => {
     const out = buildMoment4ThresholdAnswerToMoment5Bundle(
       'Alex',
       MOMENT_5_ACCOUNTABILITY_QUESTION_TEXT,
       'I would keep trying to work through it unless there is no path forward and then I walk away.',
     );
-    expect(out).toMatch(REFLECTION_ANCHOR);
+    expect(out).not.toMatch(REFLECTION_ANCHOR);
     expect(out).not.toContain('Great work');
+    expect(out).toContain(MOMENT_5_ACCOUNTABILITY_QUESTION_TEXT);
   });
 });
 

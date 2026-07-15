@@ -41,7 +41,14 @@ export function looksLikeDirectResumeAnswer(userText: string, lastQuestionText: 
     .filter((w) => w.length >= 4 && !stop.has(w));
   if (qTokens.length === 0) return words.length >= 8;
   const overlap = qTokens.filter((w) => lowered.includes(w)).length;
-  return overlap >= 1;
+  if (overlap >= 1) return true;
+  /**
+   * After resume welcome, `lastQuestionText` is often welcome-back meta or a stale probe,
+   * so lexical overlap with a real scenario answer can be zero (e.g. 13-word Daniel answer
+   * vs "How do you think this situation could be repaired?"). Still treat mid-length
+   * narrative turns as substantive so we do not silently drop the turn.
+   */
+  return words.length >= 8;
 }
 
 /** Long turns after welcome-back are substantive answers — never verbatim replay. */

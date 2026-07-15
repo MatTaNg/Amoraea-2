@@ -4,7 +4,11 @@ import {
   textContainsScenarioCVignetteBody,
 } from './scenarioVignetteBodyDetection';
 
-export { textContainsScenarioBVignetteBody, textContainsScenarioCVignetteBody } from './scenarioVignetteBodyDetection';
+export {
+  textContainsScenarioBVignetteBody,
+  textContainsScenarioCVignetteBody,
+  looksLikeNonCanonicalScenarioCVignetteFiction,
+} from './scenarioVignetteBodyDetection';
 
 /**
  * Models sometimes emit `[SCENARIO_COMPLETE:2]` when finishing Situation 1 (body introduces Sarah/James).
@@ -80,11 +84,18 @@ export function resolveHandoffPriorScenario(
     interviewMoment,
     messages,
   );
+  /**
+   * Handoff text is authoritative for which scenario was just completed. Prefer vignette body
+   * over live refs — refs may already have advanced from canonical show-scenario playback.
+   */
+  if (assistantTextLooksLikeMoment4HandoffLead(transitionText)) {
+    return 3;
+  }
   if (textContainsScenarioCVignetteBody(transitionText)) {
-    return Math.max(active, 2) as 1 | 2 | 3;
+    return 2;
   }
   if (textContainsScenarioBVignetteBody(transitionText)) {
-    return Math.max(active, 1) as 1 | 2 | 3;
+    return 1;
   }
   return active;
 }

@@ -1,9 +1,14 @@
-import { Platform } from 'react-native';
-
+import {
+  shouldAdvanceScenarioAAfterSatisfiedRepair,
+  shouldAdvanceScenarioBAfterSatisfiedRepair,
+} from '@features/aria/interviewRepairRefusalDetection';
+import { scenarioBMinimumEngagementForHandoff } from '@features/aria/scenarioBProbeLogic';
+import { scenarioAMinimumEngagementForHandoff } from '@features/aria/scenarioFollowUpTranscriptGuard';
 import { transcriptHasInterviewClosingSpokenFragment } from '@features/aria/elongatingProbe';
 import { ensureSharedHtmlAudioElementForInterviewTts } from '@features/aria/utils/webInterviewSharedHtmlAudio';
 import { setTtsPlaybackActive } from '@utilities/sessionLogging';
 import { remoteLog } from '@utilities/remoteLog';
+import { Platform } from 'react-native';
 
 import type {
   ClaudeParallelStreamTtsCallDeps,
@@ -115,9 +120,14 @@ export async function runClaudeParallelStreamTtsCall(
     await deps.prepareInterviewTtsPlayback('parallel_stream_post_recording', { afterRecording: true });
   }
 
+  /** Never mute an entire S1 stream for contempt once that probe was already delivered client-side. */
+  const contemptAlreadyDelivered =
+    deps.scenarioAContemptProbeAskedRef.current ||
+    deps.scenarioARepairQuestionAskedRef.current;
   const streamContemptProbeMuteActive =
-    deps.pendingScenarioAContemptProbeStreamMuteRef.current ||
-    params.muteParallelTtsForScenarioAContemptProbeStream;
+    !contemptAlreadyDelivered &&
+    (deps.pendingScenarioAContemptProbeStreamMuteRef.current ||
+      params.muteParallelTtsForScenarioAContemptProbeStream);
   const streamContemptProbeMuteArmedFromStart = streamContemptProbeMuteActive;
   deps.pendingScenarioAContemptProbeStreamMuteRef.current = false;
 
@@ -131,13 +141,38 @@ export async function runClaudeParallelStreamTtsCall(
     });
   }
 
+  /**
+   * Backup if a client-owned S2/S3 open gate was skipped: mute all vignette inventing from stream
+   * start so fiction cannot speak before canonical card speak.
+   */
+  const playbackConfirmed = deps.showScenarioCardCanonicalPlaybackConfirmedKindsRef?.current ?? {};
+  const scenarioOpenHandoffMuteFromStart =
+    !streamS3ToM4HandoffMuteFromStart &&
+    ((deps.currentScenarioRef.current === 1 &&
+      deps.currentInterviewMomentRef.current === 1 &&
+      !playbackConfirmed.situation_2 &&
+      scenarioAMinimumEngagementForHandoff(params.messagesToUse) &&
+      shouldAdvanceScenarioAAfterSatisfiedRepair(params.messagesToUse, '', 1)) ||
+      (deps.currentScenarioRef.current === 2 &&
+        deps.currentInterviewMomentRef.current === 2 &&
+        !playbackConfirmed.situation_3 &&
+        scenarioBMinimumEngagementForHandoff(params.messagesToUse) &&
+        shouldAdvanceScenarioBAfterSatisfiedRepair(params.messagesToUse, '', 2)));
+  if (scenarioOpenHandoffMuteFromStart) {
+    void remoteLog('[SCENARIO_OPEN_HANDOFF_STREAM_MUTE_ARMED_FROM_START]', {
+      interviewSessionId: deps.interviewSessionIdRef.current,
+      scenario: deps.currentScenarioRef.current,
+    });
+  }
+
   const ctx: ParallelStreamTtsPlaybackContext = {
     deps,
     params,
     state: createParallelStreamTtsRuntimeState({
       streamContemptProbeMuteActive,
       moment5StickyCloseBufferAll: params.bufferAllStreamTtsForMoment5Close,
-      streamShowScenarioCardMuteActive: streamS3ToM4HandoffMuteFromStart,
+      streamShowScenarioCardMuteActive:
+        streamS3ToM4HandoffMuteFromStart || scenarioOpenHandoffMuteFromStart,
     }),
     postRecordingSettleForThisParallelStream,
     closingAlreadyInTranscriptForStream: transcriptHasInterviewClosingSpokenFragment(params.messagesToUse),

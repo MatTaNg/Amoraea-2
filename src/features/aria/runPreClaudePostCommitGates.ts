@@ -2,6 +2,10 @@ import type { MessageWithScenario } from '@features/aria/interviewScenarioScorin
 import type { PreClaudeTurnGateDeps } from '@features/aria/preClaudeTurnGateTypes';
 import type { PreClaudeTurnSkipMetaState } from '@features/aria/runPreClaudeTurnOpeningPipeline';
 import {
+  deliverClientOwnedScenario2OpeningAfterS1Repair,
+  deliverClientOwnedScenario3OpeningAfterS2Repair,
+} from '@features/aria/deliverClientOwnedScenarioHandoffOpening';
+import {
   runPreClaudePostClosingCompletionGate,
 } from '@features/aria/runPreClaudePostClosingCompletionGate';
 import {
@@ -15,7 +19,7 @@ export type PreClaudePostCommitGatesResult = {
   handled: boolean;
 };
 
-/** Intro, post-closing completion, and skip-injection gates after user turn commit. */
+/** Intro, client-owned S2/S3 opens, post-closing completion, and skip-injection gates after user turn commit. */
 export async function runPreClaudePostCommitGates(
   deps: PreClaudeTurnGateDeps,
   trimmed: string,
@@ -30,6 +34,24 @@ export async function runPreClaudePostCommitGates(
     participantFirstNameForSpoken,
   );
   if (introGate.handled) {
+    return { handled: true };
+  }
+
+  const deliveredS2 = await deliverClientOwnedScenario2OpeningAfterS1Repair(
+    deps,
+    messagesToUse,
+    participantFirstNameForSpoken,
+  );
+  if (deliveredS2) {
+    return { handled: true };
+  }
+
+  const deliveredS3 = await deliverClientOwnedScenario3OpeningAfterS2Repair(
+    deps,
+    messagesToUse,
+    participantFirstNameForSpoken,
+  );
+  if (deliveredS3) {
     return { handled: true };
   }
 

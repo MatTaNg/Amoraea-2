@@ -139,7 +139,7 @@ SKIP ACCEPTED (CLIENT) — SCENARIO ${momentNum} COMPLETE
 ─────────────────────────────────────────
 The participant **confirmed** skipping after the skip confirmation prompt. They have skipped the **last** required question in this scenario.
 
-In **one** assistant reply: open with **exactly** "Okay, we can skip this one" (minor contractions OK), then deliver **BOUNDARY CLOSURE** for Scenario ${momentNum === 1 ? 'A' : momentNum === 2 ? 'B' : 'C'} per the framework (segment close + one relational-pattern reflection + transition) and emit **[SCENARIO_COMPLETE:${momentNum}]**. **Do not** re-ask the skipped prompt. **Do not** offer skip confirmation again.
+In **one** assistant reply: open with **exactly** "Okay, we can skip this one" (minor contractions OK), then deliver **BOUNDARY CLOSURE** for Scenario ${momentNum === 1 ? 'A' : momentNum === 2 ? 'B' : 'C'} per the framework (segment close + short transition, no content reflection) and emit **[SCENARIO_COMPLETE:${momentNum}]**. **Do not** re-ask the skipped prompt. **Do not** offer skip confirmation again.
 `;
   }
   return `

@@ -3,7 +3,13 @@ import { stripControlTokens } from '@features/aria/interviewControlTokens';
 import { recentAssistantMessagesForAck } from '@features/aria/interviewReflectionAckVariation';
 import type { MessageWithScenario } from '@features/aria/interviewScenarioScoringSlice';
 import { remoteLog } from '@utilities/remoteLog';
-import { isActiveScenarioAConstructProbeTurn, scenarioAMinimumEngagementForHandoff, userIsAnsweringAfterStreamDeliveredScenarioAContemptProbe } from '@features/aria/scenarioFollowUpTranscriptGuard';
+import {
+  isActiveScenarioAConstructProbeTurn,
+  scenarioAMinimumEngagementForHandoff,
+  shouldDeliverScenarioFollowUpQuestion,
+  userIsAnsweringAfterStreamDeliveredScenarioAContemptProbe,
+} from '@features/aria/scenarioFollowUpTranscriptGuard';
+import { SCENARIO_A_REPAIR_QUESTION_AFTER_CONTEMPT_COPY } from '@features/aria/probeAndScoringUtils';
 import { shouldAllowScenarioARepairAfterContemptAnswer } from '@features/aria/scenarioARepairQuestionHelpers';
 import { isScenarioModalFollowUpProbe } from '@features/aria/interviewScenarioModalPrompt';
 import { isScenarioANonScriptedModalParaphrase } from '@features/aria/situation1ExactModalPrompt';
@@ -125,6 +131,7 @@ import {
   shouldArmShowScenarioCardStreamMute,
   splitParallelBatchBeforeShowScenarioCardBody,
   resolveShowScenarioCardKindForInterview,
+  isExactShowScenario3VignetteText,
 } from '@features/aria/showScenarioCardCanonicalTts';
 import {
   introBriefingSpeechEndsWithReadinessQuestion,
@@ -135,12 +142,17 @@ import {
   shouldRedirectPrematureMoment4ToScenario2To3Handoff,
 } from '@features/aria/prematureMoment4HandoffPlaybackGuard';
 import { isScenarioBoundaryPositiveAddressReflection } from '@features/aria/interviewReflectionTextStrips';
+import {
+  shouldDropScenarioBoundaryContentReflectionSentence,
+  stripScenarioBoundaryContentReflection,
+} from '@features/aria/stripScenarioBoundaryContentReflection';
+import { INCLUDE_SCENARIO_BOUNDARY_REFLECTIONS } from '@features/aria/interviewTransitionBundles';
 import { resolveScenarioUserTextForBoundaryReflection } from '@features/aria/interviewScenarioAdvanceAfterRepair';
 import {
   extractScenarioBoundaryReflectionFromHandoff,
   extractedBoundaryReflectionIsUnsafeForUserCorpus,
 } from '@features/aria/relationalPatternReflection';
-import { resolveEffectiveActiveScenarioFromTranscript, textContainsScenarioCVignetteBody } from '@features/aria/emotionScenarioTransitionInference';
+import { resolveEffectiveActiveScenarioFromTranscript, textContainsScenarioBVignetteBody, textContainsScenarioCVignetteBody, looksLikeNonCanonicalScenarioCVignetteFiction } from '@features/aria/emotionScenarioTransitionInference';
 import { hasScenarioBoundaryWrapPhrase } from '@features/aria/emotionModalTransitionOrchestration';
 import type { ParallelStreamTtsBatchController } from './parallelStreamTtsBatchController';
 import type { ParallelStreamTtsPlaybackContext } from './parallelStreamTtsRuntimeState';
@@ -237,6 +249,15 @@ export function createParallelStreamMaybeQueueSentenceForTts(
         }
         let spoken = stripControlTokens(sentence).trim();
         if (!spoken || state.ttsCancelled) return;
+        if (shouldDropScenarioBoundaryContentReflectionSentence(spoken)) {
+          void remoteLog('[BOUNDARY_REFLECTION_STREAM_DROPPED]', {
+            interviewSessionId: deps.interviewSessionIdRef.current,
+            preview: spoken.slice(0, 220),
+          });
+          return;
+        }
+        spoken = stripScenarioBoundaryContentReflection(spoken);
+        if (!spoken) return;
         if (looksLikeCanonicalScenarioOpeningQuestion(spoken) && state.deferredScenarioVignetteTailForOpeningMerge) {
           spoken = `${state.deferredScenarioVignetteTailForOpeningMerge} ${spoken}`.trim();
           state.deferredScenarioVignetteTailForOpeningMerge = null;
@@ -254,6 +275,18 @@ export function createParallelStreamMaybeQueueSentenceForTts(
           void remoteLog('[S1_CONTEMPT_PROBE_STREAM_MUTE_ARMED_MIDSTREAM]', {
             preview: spoken.slice(0, 200),
             s1ContemptFixVersion: 8,
+          });
+        }
+        if (
+          state.streamContemptProbeMuteActive &&
+          (deps.scenarioAContemptProbeAskedRef.current ||
+            deps.scenarioARepairQuestionAskedRef.current)
+        ) {
+          state.streamContemptProbeMuteActive = false;
+          void remoteLog('[S1_CONTEMPT_PROBE_STREAM_MUTE_CLEARED_ALREADY_DELIVERED]', {
+            askedRef: deps.scenarioAContemptProbeAskedRef.current,
+            repairAskedRef: deps.scenarioARepairQuestionAskedRef.current,
+            s1ContemptFixVersion: 26,
           });
         }
         if (state.streamContemptProbeMuteActive) {
@@ -292,12 +325,23 @@ export function createParallelStreamMaybeQueueSentenceForTts(
             batchBefore,
             kind,
           );
-          if (transitionPrefix) {
+          /**
+           * When boundary reflections are disabled, do not flush the model's wrap/reflection
+           * prefix — canonical card TTS speaks the short client wrap only.
+           */
+          if (transitionPrefix && INCLUDE_SCENARIO_BOUNDARY_REFLECTIONS) {
             batch.appendToParallelTtsBatch(transitionPrefix);
             batch.flushParallelTtsBatch(true);
+          } else if (transitionPrefix) {
+            void remoteLog('[SHOW_SCENARIO_CARD_TRANSITION_PREFIX_FLUSH_SKIPPED]', {
+              interviewSessionId: deps.interviewSessionIdRef.current,
+              reason: 'boundary_reflections_disabled',
+              preview: transitionPrefix.slice(0, 180),
+            });
           }
           state.streamShowScenarioCardMuteActive = true;
-          state.showScenarioCardTransitionPrefixSpoken = !!transitionPrefix;
+          state.showScenarioCardTransitionPrefixSpoken =
+            INCLUDE_SCENARIO_BOUNDARY_REFLECTIONS && !!transitionPrefix;
           state.showScenarioCardStreamBuffer = spoken;
           void remoteLog('[SHOW_SCENARIO_CARD_STREAM_MUTE_ARMED]', {
             interviewSessionId: deps.interviewSessionIdRef.current,
@@ -671,7 +715,12 @@ export function createParallelStreamMaybeQueueSentenceForTts(
           }
         }
         if (isActiveScenarioAConstructProbeTurn(deps.currentScenarioRef.current, deps.currentInterviewMomentRef.current)) {
-          if (deps.scenarioARepairQuestionAskedRef.current || state.scenarioARepairQuestionSpokenThisStream) {
+          const scenarioARepairAlreadyDelivered =
+            !shouldDeliverScenarioFollowUpQuestion(
+              params.messagesToUse,
+              SCENARIO_A_REPAIR_QUESTION_AFTER_CONTEMPT_COPY,
+            ) || state.scenarioARepairQuestionSpokenThisStream;
+          if (scenarioARepairAlreadyDelivered) {
             const afterRepairEchoStrip = stripScenarioARepairQuestionStreamingEcho(spoken, true);
             if (afterRepairEchoStrip === null) {
               return;
@@ -793,6 +842,19 @@ export function createParallelStreamMaybeQueueSentenceForTts(
           });
           return;
         }
+        if (
+          s1ToS2CanonicalHandoffPending &&
+          !state.showScenarioCardCanonicalSpokenThisStream &&
+          textContainsScenarioBVignetteBody(spoken) &&
+          !/job hunting for four months/i.test(spoken)
+        ) {
+          state.pendingS1RepairSatisfiedHandoff = true;
+          state.streamShowScenarioCardMuteActive = true;
+          void remoteLog('[S1_NONCANONICAL_S2_STREAM_SUPPRESSED_FOR_CANONICAL]', {
+            preview: spoken.slice(0, 220),
+          });
+          return;
+        }
         const s2ToS3CanonicalHandoffPending =
           effectiveActiveScenario === 2 &&
           deps.currentInterviewMomentRef.current === 2 &&
@@ -819,6 +881,36 @@ export function createParallelStreamMaybeQueueSentenceForTts(
         ) {
           state.pendingS2RepairSatisfiedHandoff = true;
           void remoteLog('[S2_BOUNDARY_STREAM_SUPPRESSED_FOR_CANONICAL]', {
+            preview: spoken.slice(0, 220),
+          });
+          return;
+        }
+        if (
+          s2ToS3CanonicalHandoffPending &&
+          !state.showScenarioCardCanonicalSpokenThisStream &&
+          looksLikeNonCanonicalScenarioCVignetteFiction(spoken) &&
+          !isExactShowScenario3VignetteText(spoken)
+        ) {
+          state.pendingS2RepairSatisfiedHandoff = true;
+          /** Keep mute armed so multi-sentence invented Sophie fiction cannot leak mid-paragraph. */
+          state.streamShowScenarioCardMuteActive = true;
+          void remoteLog('[S2_NONCANONICAL_S3_STREAM_SUPPRESSED_FOR_CANONICAL]', {
+            interviewSessionId: deps.interviewSessionIdRef.current,
+            preview: spoken.slice(0, 220),
+          });
+          return;
+        }
+        if (
+          s2ToS3CanonicalHandoffPending &&
+          state.streamShowScenarioCardMuteActive &&
+          !state.showScenarioCardCanonicalSpokenThisStream &&
+          !isExactShowScenario3VignetteText(spoken)
+        ) {
+          state.showScenarioCardStreamBuffer = state.showScenarioCardStreamBuffer
+            ? `${state.showScenarioCardStreamBuffer} ${spoken}`.trim()
+            : spoken;
+          void remoteLog('[S2_NONCANONICAL_S3_STREAM_MUTED_CONTINUATION]', {
+            interviewSessionId: deps.interviewSessionIdRef.current,
             preview: spoken.slice(0, 220),
           });
           return;
@@ -905,7 +997,10 @@ export function createParallelStreamMaybeQueueSentenceForTts(
             deps.currentInterviewMomentRef.current,
           ) &&
           scenarioARepairAfterContemptAnswerDue() &&
-          !deps.scenarioARepairQuestionAskedRef.current &&
+          shouldDeliverScenarioFollowUpQuestion(
+            params.messagesToUse,
+            SCENARIO_A_REPAIR_QUESTION_AFTER_CONTEMPT_COPY,
+          ) &&
           !state.scenarioARepairQuestionSpokenThisStream &&
           isShortAckOnlySentence(spoken) &&
           !looksLikeScenarioARepairQuestion(spoken)
