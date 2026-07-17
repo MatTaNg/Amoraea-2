@@ -15,6 +15,7 @@ import {
   type RepairRefusalDetectionDetail,
 } from './interviewRepairRefusalDetection';
 import { looksLikeRepairInterviewQuestion } from './interviewRepairQuestionDetection';
+import { looksLikeUnassessableScenarioAnswer } from './interviewAnswerRelevance';
 import { isMisplacedScenarioCQ1Answer, isScenarioCQ1Prompt } from './probeAndScoringUtils';
 
 export type ClientDisengagementProbePick =
@@ -66,6 +67,10 @@ export function pickClientDisengagementProbe(input: {
 
   if (!lastAssistantContent.trim()) return null;
   if (answeringAfterProbe || exemptMetaTurn || isGreetingNameTurn || isAssistantRecoveryOrMetaLine) {
+    return null;
+  }
+  // Identity / off-topic nonsense is handled by the irrelevant-answer gate — never probe.
+  if (looksLikeUnassessableScenarioAnswer(userAnswer)) {
     return null;
   }
 

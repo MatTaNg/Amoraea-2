@@ -11,7 +11,7 @@ export async function runPerformAdminInterviewReset(
   }
   await deps.stopElevenLabsPlayback();
   deps.stopElevenLabsSpeech();
-  if (deps.useMediaRecorderPath && deps.audioRecorder.isRecording) {
+  if (true && deps.audioRecorder.isRecording) {
     try {
       await deps.audioRecorder.stopRecording();
     } catch {

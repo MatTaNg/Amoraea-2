@@ -7,6 +7,7 @@ import {
   detectScenarioFromResponse,
   messageAnchorsScenarioIntro,
 } from '../features/aria/scenarioNumberDetection';
+import { pillarScoresHaveNumericAssessment } from '../features/aria/interviewCompletionGate';
 import type { StoredInterviewData, StoredScenarioScores } from './storage/InterviewStorage';
 
 export type InterviewMomentIndex = 1 | 2 | 3 | 4 | 5;
@@ -70,6 +71,43 @@ export function firstAssistantIndexForScenarioIntro(
 }
 
 /**
+ * True when the user is already mid-scenario (answered, asked Q1/probes, skip confirm, etc.)
+ * even if the vignette intro anchor is missing from the stored transcript.
+ * Used to avoid replaying the full scenario opening on resume.
+ */
+export function transcriptHasInScenarioProgressPastOpening(
+  msgs: ReadonlyArray<{
+    role: string;
+    content?: string | null;
+    scenarioNumber?: number;
+    isWelcomeBack?: boolean;
+    isScoreCard?: boolean;
+  }>,
+  scenario: 1 | 2 | 3,
+): boolean {
+  for (const m of msgs) {
+    if (m.isWelcomeBack || m.isScoreCard) continue;
+    if (m.role === 'user' && m.scenarioNumber === scenario) return true;
+    if (m.role !== 'assistant') continue;
+    const c = (m.content ?? '').trim();
+    if (!c) continue;
+    if (messageAnchorsScenarioIntro(c) === scenario) continue;
+    if (m.scenarioNumber === scenario && (/\?/.test(c) || c.length >= 24)) return true;
+    if (scenario === 1 && /\bwhat(?:'s| is) going on between these two\b/i.test(c)) return true;
+    if (scenario === 2 && /\bwhat do you think is going on here\b/i.test(c)) return true;
+    if (
+      scenario === 3 &&
+      (/\bwhen daniel comes back\b/i.test(c) ||
+        (/\bsophie\b/i.test(c) && /\?/.test(c)) ||
+        /\bhow do you think this situation could be repaired\b/i.test(c))
+    ) {
+      return true;
+    }
+  }
+  return false;
+}
+
+/**
  * Drop any partial turns for `scenario` (and later) so we can re-deliver the scenario from its opening.
  * Keeps messages before the first assistant line that anchors this scenario.
  */
@@ -80,6 +118,119 @@ export function sliceMessagesBeforeScenarioIntro<T extends { role: string; conte
   const idx = firstAssistantIndexForScenarioIntro(msgs, scenario);
   if (idx < 0) return msgs;
   return msgs.slice(0, idx);
+}
+
+/** Index of the first assistant message that opens Moment 4 (grudge / S3→M4 handoff). */
+export function firstAssistantIndexForMoment4Intro(
+  msgs: ReadonlyArray<{ role: string; content?: string }>,
+): number {
+  for (let i = 0; i < msgs.length; i++) {
+    const m = msgs[i];
+    if (m.role !== 'assistant') continue;
+    if (resumeTranscriptCrossedMoment4Boundary(m.content ?? '')) return i;
+  }
+  return -1;
+}
+
+/** Drop Moment 4+ turns so we can re-deliver the personal-moment opening. */
+export function sliceMessagesBeforeMoment4Intro<T extends { role: string; content?: string }>(
+  msgs: T[],
+): T[] {
+  const idx = firstAssistantIndexForMoment4Intro(msgs);
+  if (idx < 0) return msgs;
+  return msgs.slice(0, idx);
+}
+
+/**
+ * True when a stored scenario score bundle is assessable (finite numeric pillar scores).
+ * Thin shells (`{}`, null-only pillars) and missing bundles are not intact.
+ */
+export function scenarioScoreBundleIntact(
+  scenario: number,
+  scores: StoredScenarioScores | undefined,
+): boolean {
+  const s = scores?.[scenario];
+  if (!s) return false;
+  return pillarScoresHaveNumericAssessment(s.pillarScores);
+}
+
+/**
+ * True when local/DB scenario scores are present and assessable.
+ * Prefer this over treating `scenariosCompleted` alone as completion (parallel scoring can mark
+ * complete before persist finishes).
+ */
+export function scenarioHasPersistedScores(
+  scenario: number,
+  scores: StoredScenarioScores | undefined,
+): boolean {
+  return scenarioScoreBundleIntact(scenario, scores);
+}
+
+/**
+ * Scenario was claimed complete (optimistic `scenariosCompleted`, scoringFailed, or a score shell)
+ * but the score bundle is missing or not assessable — typical after interrupted parallel scoring.
+ */
+export function scenarioScoringCorruptOrInterrupted(
+  scenario: 1 | 2 | 3,
+  scenariosCompleted: number[],
+  scenarioScores: StoredScenarioScores | undefined,
+  scoringFailed?: ReadonlyArray<{ scenario: number }> | null,
+): boolean {
+  if (scenarioScoreBundleIntact(scenario, scenarioScores)) return false;
+  if (scoringFailed?.some((f) => f.scenario === scenario)) return true;
+  if ((scenariosCompleted ?? []).includes(scenario)) return true;
+  const shell = scenarioScores?.[scenario];
+  if (shell != null && typeof shell === 'object') {
+    const ps = shell.pillarScores;
+    if (ps != null && typeof ps === 'object' && !Array.isArray(ps)) return true;
+  }
+  return false;
+}
+
+/** Earliest scenario 1–3 with interrupted/corrupt parallel scoring, if any. */
+export function earliestCorruptOrInterruptedScenarioScore(
+  scenariosCompleted: number[],
+  scenarioScores: StoredScenarioScores | undefined,
+  scoringFailed?: ReadonlyArray<{ scenario: number }> | null,
+): 1 | 2 | 3 | null {
+  for (const n of [1, 2, 3] as const) {
+    if (scenarioScoringCorruptOrInterrupted(n, scenariosCompleted, scenarioScores, scoringFailed)) {
+      return n;
+    }
+  }
+  return null;
+}
+
+/**
+ * Strip score shells / completed markers from `fromScenario` onward after a corrupt-score rewind.
+ */
+export function clearScenarioScoresFromCorruptRewind(
+  scenarioScores: StoredScenarioScores | undefined,
+  scenariosCompleted: number[],
+  fromScenario: 1 | 2 | 3,
+): { scenarioScores: StoredScenarioScores; scenariosCompleted: number[] } {
+  const nextScores: StoredScenarioScores = { ...(scenarioScores ?? {}) };
+  for (const n of [1, 2, 3] as const) {
+    if (n >= fromScenario) delete nextScores[n];
+  }
+  return {
+    scenarioScores: nextScores,
+    scenariosCompleted: (scenariosCompleted ?? []).filter((n) => n >= 1 && n < fromScenario),
+  };
+}
+
+export function lastFullyCompletedScenario(
+  scenariosCompleted: number[],
+  scenarioScores: StoredScenarioScores | undefined
+): number {
+  // Only intact score bundles count. Optimistic `scenariosCompleted` entries (added when parallel
+  // scoring starts) must not advance the resume cursor past an unfinished score.
+  void scenariosCompleted;
+  let max = 0;
+  for (const n of [1, 2, 3] as const) {
+    if (scenarioScoreBundleIntact(n, scenarioScores)) max = n;
+  }
+  return max;
 }
 
 /**
@@ -108,27 +259,6 @@ export function storedInterviewHasResumableScenarioProgress(input: {
     }
   }
   return false;
-}
-
-export function scenarioHasPersistedScores(scenario: number, scores: StoredScenarioScores | undefined): boolean {
-  const s = scores?.[scenario];
-  if (!s) return false;
-  const ps = s.pillarScores;
-  return ps != null && typeof ps === 'object' && Object.keys(ps).length > 0;
-}
-
-export function lastFullyCompletedScenario(
-  scenariosCompleted: number[],
-  scenarioScores: StoredScenarioScores | undefined
-): number {
-  let max = 0;
-  for (const n of scenariosCompleted ?? []) {
-    if (n >= 1 && n <= 3) max = Math.max(max, n);
-  }
-  for (const n of [1, 2, 3] as const) {
-    if (scenarioHasPersistedScores(n, scenarioScores)) max = Math.max(max, n);
-  }
-  return max;
 }
 
 /** True when local storage holds an in-progress interview that should hydrate on refresh (not closing / greeting-only). */
@@ -200,6 +330,13 @@ export type InterviewResumePlan = {
   mode: InterviewResumeMode;
   /** True when the active scenario had no full score bundle yet (mid-scenario dropout). */
   partialScenarioDataWritten: boolean;
+  /**
+   * Parallel scoring was interrupted / left a corrupt shell — rewind transcript to this scenario's
+   * (or Moment 4) opening instead of picking up mid-vignette.
+   */
+  rewindDueToCorruptScoring: boolean;
+  /** When set, rewind to Moment 4 opening (S1–S3 scores intact but M4 score interrupted). */
+  rewindToMoment4DueToCorruptScoring: boolean;
 };
 
 function cloneMoments(m: Record<InterviewMomentIndex, boolean>): Record<InterviewMomentIndex, boolean> {
@@ -217,8 +354,36 @@ export function computeInterviewResumePlan(input: {
     currentMoment: InterviewMomentIndex;
     personalHandoffInjected: boolean;
   };
+  scoringFailed?: ReadonlyArray<{ scenario: number }> | null;
+  /** When known from DB `scenario_specific_patterns.moment_4_scores` (null = unknown / not fetched). */
+  moment4ScoresIntact?: boolean | null;
 }): InterviewResumePlan {
   const lastC = lastFullyCompletedScenario(input.scenariosCompleted, input.scenarioScores);
+  const earliestCorrupt = earliestCorruptOrInterruptedScenarioScore(
+    input.scenariosCompleted,
+    input.scenarioScores,
+    input.scoringFailed,
+  );
+
+  if (earliestCorrupt != null) {
+    const mc = createMomentCompletionFromLastC(lastC);
+    for (const i of [1, 2, 3] as const) {
+      if (i < earliestCorrupt) mc[i] = true;
+      else mc[i] = false;
+    }
+    return {
+      lastCompletedScenario: lastC,
+      resumeScenario: earliestCorrupt,
+      effectiveMoment: earliestCorrupt,
+      momentsComplete: mc,
+      personalHandoffInjected: false,
+      mode: 'replay_incomplete',
+      partialScenarioDataWritten: true,
+      rewindDueToCorruptScoring: true,
+      rewindToMoment4DueToCorruptScoring: false,
+    };
+  }
+
   let activeRaw = coerceResumeActive(input.resumeActiveFromStorage, input.resumeActiveFromAttempt);
   const inferredFromTranscript = input.transcriptMessages
     ? inferLatestScenarioIntroFromTranscript(input.transcriptMessages)
@@ -233,7 +398,36 @@ export function computeInterviewResumePlan(input: {
     effectiveActive != null && !scenarioHasPersistedScores(effectiveActive, input.scenarioScores)
   );
 
+  const transcriptReachedM5 =
+    input.syncedMoments.currentMoment >= 5 ||
+    (input.transcriptMessages != null &&
+      input.transcriptMessages.some(
+        (m) =>
+          m.role === 'assistant' &&
+          typeof m.content === 'string' &&
+          /conflict with someone important/i.test(m.content),
+      ));
+  /** Live M4 scoring starts at M5 entry — only then is a missing M4 bundle "interrupted". */
+  const m4CorruptInterrupted =
+    lastC >= 3 &&
+    transcriptReachedM5 &&
+    input.moment4ScoresIntact === false;
+
   if (lastC >= 3) {
+    if (m4CorruptInterrupted) {
+      const mc = createMomentCompletionFromLastC(3);
+      return {
+        lastCompletedScenario: 3,
+        resumeScenario: 3,
+        effectiveMoment: 4,
+        momentsComplete: mc,
+        personalHandoffInjected: false,
+        mode: 'resume_post_scenarios',
+        partialScenarioDataWritten: true,
+        rewindDueToCorruptScoring: true,
+        rewindToMoment4DueToCorruptScoring: true,
+      };
+    }
     return {
       lastCompletedScenario: lastC,
       resumeScenario: 3,
@@ -242,6 +436,8 @@ export function computeInterviewResumePlan(input: {
       personalHandoffInjected: input.syncedMoments.personalHandoffInjected,
       mode: 'resume_post_scenarios',
       partialScenarioDataWritten,
+      rewindDueToCorruptScoring: false,
+      rewindToMoment4DueToCorruptScoring: false,
     };
   }
 
@@ -285,6 +481,8 @@ export function computeInterviewResumePlan(input: {
       personalHandoffInjected,
       mode: 'replay_incomplete',
       partialScenarioDataWritten,
+      rewindDueToCorruptScoring: false,
+      rewindToMoment4DueToCorruptScoring: false,
     };
   }
 
@@ -320,6 +518,8 @@ export function computeInterviewResumePlan(input: {
         personalHandoffInjected,
         mode: 'replay_incomplete',
         partialScenarioDataWritten: true,
+        rewindDueToCorruptScoring: false,
+        rewindToMoment4DueToCorruptScoring: false,
       };
     }
   }
@@ -333,6 +533,8 @@ export function computeInterviewResumePlan(input: {
     personalHandoffInjected: false,
     mode: 'resume_next',
     partialScenarioDataWritten,
+    rewindDueToCorruptScoring: false,
+    rewindToMoment4DueToCorruptScoring: false,
   };
 }
 

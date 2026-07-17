@@ -55,6 +55,11 @@ describe('interviewAssistantReflection', () => {
     expect(out.toLowerCase()).toContain('emma');
   });
 
+  it('stripFlatReflectionAcknowledgmentOpeners keeps Sure. before a repeated question', () => {
+    const text = "Sure. What about when Emma says you've made that very clear — what do you make of that?";
+    expect(stripFlatReflectionAcknowledgmentOpeners(text)).toBe(text);
+  });
+
   it('stripForbiddenReflectionLead removes leading quoted user paste', () => {
     const text = '"She already knows he will not change" — I hear you naming resignation.';
     const out = stripForbiddenReflectionLead(text);

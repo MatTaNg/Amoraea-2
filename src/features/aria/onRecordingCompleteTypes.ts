@@ -27,7 +27,6 @@ export type OnRecordingCompleteParams = {
 export type OnRecordingCompleteDeps = {
   userId: string;
   isInterviewAppRoute: boolean;
-  useMediaRecorderPath: boolean;
   messages: ReadonlyArray<{ role: string; content?: string; isWelcomeBack?: boolean }>;
   recordingCompleteInFlightRef: React.MutableRefObject<boolean>;
   recordingPeakMeteringRef: React.MutableRefObject<number | null>;
@@ -88,10 +87,8 @@ export type OnRecordingCompleteDeps = {
   }) => Promise<void>;
   processUserSpeech: (userText: string) => void | Promise<void>;
   resumeLoadingFlowActiveRef: React.MutableRefObject<boolean>;
-  webResumeWelcomeTapPendingRef: React.MutableRefObject<boolean>;
   resumeOfferWelcomeTtsRef: React.MutableRefObject<boolean>;
   resumeRepeatChoicePendingRef: React.MutableRefObject<boolean>;
-  webResumeWelcomeTapHandledRef: React.MutableRefObject<boolean>;
   interviewUserTurnEpochRef: React.MutableRefObject<number>;
   interviewSessionAttemptIdRef?: React.MutableRefObject<string>;
 };

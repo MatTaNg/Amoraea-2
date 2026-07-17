@@ -4,7 +4,7 @@ jest.mock('@features/aria/interviewClosingTtsSession', () => ({
   markInterviewClosingTtsDelivered: jest.fn(),
 }));
 
-jest.mock('@features/aria/runSpeakTextSafeImmediateWebGreeting', () => ({
+jest.mock('@features/aria/speakTextSafeSuccessfulDelivery', () => ({
   markSpeakTextSafeSuccessfulDelivery: jest.fn(),
 }));
 
@@ -12,7 +12,7 @@ import { markInterviewClosingTtsDelivered } from '@features/aria/interviewClosin
 import { SCENARIO_1_OPENING } from '@features/aria/interviewScenarioOpeningStreamGate';
 import { SCENARIO_1_VIGNETTE } from '@features/aria/interviewScenarioVignetteCopy';
 import { applySpeakTextSafePostPlaybackSuccess } from '@features/aria/applySpeakTextSafePostPlaybackSuccess';
-import { markSpeakTextSafeSuccessfulDelivery } from '@features/aria/runSpeakTextSafeImmediateWebGreeting';
+import { markSpeakTextSafeSuccessfulDelivery } from '@features/aria/speakTextSafeSuccessfulDelivery';
 
 describe('applySpeakTextSafePostPlaybackSuccess', () => {
   beforeEach(() => {

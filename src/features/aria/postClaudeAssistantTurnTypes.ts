@@ -56,7 +56,6 @@ export type PostClaudeAssistantTurnDeps = {
   setMessages: React.Dispatch<React.SetStateAction<InterviewTranscriptRow[]>>;
   setInterviewStatus: (status: 'preparing_results') => void;
   setPendingCompletion: (pending: boolean) => void;
-  setWebTabGestureRestoreOverlay: (visible: boolean) => void;
   setReferenceCardPrompt: (prompt: string | null) => void;
   setReferenceCardScenario?: (scenario: import('@app/screens/UserInterviewLayout').ActiveScenario | null) => void;
   setInterviewUiPhase?: (phase: import('@features/aria/sessionLifecycleTypes').InterviewUiPhase) => void;
@@ -142,7 +141,7 @@ export type PostClaudeAssistantTurnDeps = {
   parallelStreamingTtsRef: MutableRefObject<import('@features/aria/interviewParallelTtsBatch').ParallelStreamingTtsState>;
   /** Optional: readiness→S1 HTML speak arms these for tab-hide Tap-to-continue. */
   ttsLineInFlightRef?: MutableRefObject<boolean>;
-  webTtsUtteranceInFlightRef?: MutableRefObject<string | null>;
+  ttsUtteranceInFlightRef?: MutableRefObject<string | null>;
   pendingCompletionTranscriptRef: MutableRefObject<Array<{ role: string; content: string }> | null>;
   pendingEmotionModalTransitionRef: MutableRefObject<{
     completedScenario: 1 | 2 | 3;
@@ -150,7 +149,6 @@ export type PostClaudeAssistantTurnDeps = {
     transitionText: string;
     priorScenario: number | null;
   } | null>;
-  pendingGestureRestoreSpeakRef: MutableRefObject<import('@features/aria/hooks/useAriaInterviewSession').PendingGestureRestoreSpeakEntry | null>;
   personalHandoffInjectedRef: MutableRefObject<boolean>;
   resumeActiveScenarioRef: MutableRefObject<1 | 2 | 3 | null>;
   scenarioAContemptProbeAskedRef: MutableRefObject<boolean>;
@@ -170,7 +168,6 @@ export type PostClaudeAssistantTurnDeps = {
   >;
   scoreInterviewAttemptedRef: MutableRefObject<boolean>;
   scoredScenariosRef: MutableRefObject<Set<number>>;
-  webTtsTabInterruptPendingReplayRef: MutableRefObject<boolean>;
   s2RepairProbeDeliveredRef: MutableRefObject<boolean>;
   s3RepairProbeDeliveredRef: MutableRefObject<boolean>;
   scenarioCSophiePerspectiveProbeFiredRef: MutableRefObject<boolean>;

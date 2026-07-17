@@ -8,6 +8,11 @@ import {
   buildSkipAcceptedSystemSuffix,
   resolveQuestionSkipProgression,
 } from '@features/aria/interviewQuestionSkipProgression';
+import {
+  SCENARIO_B_JAMES_DIFFERENTLY_CANONICAL,
+  SCENARIO_B_Q1_CANONICAL,
+} from '@features/aria/scenarioBProbeLogic';
+import { SCENARIO_A_CONTEMPT_PROBE_DELIVERED_COPY } from '@features/aria/scenarioAContemptProbeTtsStrip';
 
 const S3_Q1_ANSWER =
   "Yeah, I'll make of it that he needs some time and knowing some tools and techniques to be guided through conversation or some help with emotional intelligence because it sounds like he's just really avoiding it.";
@@ -47,6 +52,39 @@ describe('resolveQuestionSkipProgression', () => {
     ];
 
     expect(resolveQuestionSkipProgression(messages, 3, 3).scenarioMomentComplete).toBe(true);
+  });
+
+  it('advances past unanswered Scenario B Q1 to James-differently (does not re-ask Q1)', () => {
+    const messages = [
+      { role: 'assistant', content: SCENARIO_B_Q1_CANONICAL, scenarioNumber: 2 },
+      { role: 'user', content: 'Can we skip this scenario?', scenarioNumber: 2 },
+      { role: 'assistant', content: SCENARIO_SKIP_CONFIRMATION_PROMPT_LINE, scenarioNumber: 2 },
+      { role: 'user', content: 'Yes', scenarioNumber: 2 },
+    ];
+
+    const result = resolveQuestionSkipProgression(messages, 2, 2);
+
+    expect(result.scenarioMomentComplete).toBe(false);
+    expect(result.nextPrompt).toBe(SCENARIO_B_JAMES_DIFFERENTLY_CANONICAL);
+    expect(result.nextPrompt).not.toBe(SCENARIO_B_Q1_CANONICAL);
+  });
+
+  it('advances past unanswered Scenario A Q1 to contempt probe', () => {
+    const messages = [
+      {
+        role: 'assistant',
+        content: "What's going on between these two?",
+        scenarioNumber: 1,
+      },
+      { role: 'user', content: 'Can we skip this?', scenarioNumber: 1 },
+      { role: 'assistant', content: SCENARIO_SKIP_CONFIRMATION_PROMPT_LINE, scenarioNumber: 1 },
+      { role: 'user', content: 'Yes', scenarioNumber: 1 },
+    ];
+
+    const result = resolveQuestionSkipProgression(messages, 1, 1);
+
+    expect(result.scenarioMomentComplete).toBe(false);
+    expect(result.nextPrompt).toBe(SCENARIO_A_CONTEMPT_PROBE_DELIVERED_COPY);
   });
 
   it('buildSkipAcceptedSystemSuffix forbids scenario-complete language for in-scenario skip', () => {

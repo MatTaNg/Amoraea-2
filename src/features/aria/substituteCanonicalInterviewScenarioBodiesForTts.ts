@@ -23,6 +23,7 @@ import {
   looksLikeScenarioBRepairAsJamesQuestion,
   looksLikeScenarioBJamesDifferentlyQuestion,
 } from '@features/aria/scenarioBProbeLogic';
+import { coerceScenario1MetaPlayNarrationForTts } from '@features/aria/situation1ExactModalPrompt';
 import {
   buildCanonicalShowScenarioCardTtsBody,
   buildCanonicalShowScenarioCardTtsFromStream,
@@ -345,6 +346,8 @@ function findMoment5ConflictQuestionStartIndex(text: string): number {
   const patterns = [
     /\bThink of a time when you had a conflict with someone important to you\b/i,
     /\bThink of a time when you had a conflict with someone important\b/i,
+    /\bThink of a time when you had a real conflict with someone\b/i,
+    /\bThink of a time when you had a conflict with someone close\b/i,
     /\bTell me about a specific conflict with someone important\b/i,
     /\bTell me about a time you had a conflict\b/i,
   ];
@@ -387,7 +390,9 @@ function substituteMoment5ConflictQuestionForTts(text: string): string {
 export function substituteCanonicalInterviewScenarioBodiesForTts(text: string): string {
   if (!text.trim()) return text;
 
-  let out = text;
+  // Model meta-narration ("The app will now play Situation 1…") — never speak; inject vignette.
+  let out = coerceScenario1MetaPlayNarrationForTts(text);
+  if (out !== text) return out;
 
   out = replaceVignetteBody(
     out,

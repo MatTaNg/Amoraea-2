@@ -18,7 +18,7 @@ export type InterviewTtsPipelineScreenRefs = Omit<InterviewTtsPipelineLocalScope
 
 export type InterviewMicClusterScreenRefs = {
   coreGateServicesBaseCtx: AriaInterviewDepsSyncContext;
-  webRuntimeCtx: AriaInterviewDepsSyncContext;
+  runtimeCtx: AriaInterviewDepsSyncContext;
   micCluster: InterviewMicClusterLocalScope;
 };
 
@@ -49,7 +49,7 @@ export function createInterviewMicClusterSyncCtxFromScreen(
   refs: InterviewMicClusterScreenRefs,
 ): AriaInterviewDepsSyncContext {
   return mergeAriaInterviewSyncCtx(
-    mergeAriaInterviewSyncCtx(refs.coreGateServicesBaseCtx, refs.webRuntimeCtx),
+    mergeAriaInterviewSyncCtx(refs.coreGateServicesBaseCtx, refs.runtimeCtx),
     buildInterviewMicClusterLocalSyncExtra(refs.micCluster),
   );
 }

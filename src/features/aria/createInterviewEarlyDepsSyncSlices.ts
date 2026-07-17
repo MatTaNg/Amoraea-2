@@ -30,9 +30,6 @@ export function createInterviewEarlyDepsOrchestrationSyncSlice(params: SyncExtra
     maybeAwaitEmotionAfterScenarioTransitionRef: params.maybeAwaitEmotionAfterScenarioTransitionRef,
     runEmotionModalAfterScenarioTransitionRef: params.runEmotionModalAfterScenarioTransitionRef,
     tryRunEmotionModalFromScenarioTransitionRef: params.tryRunEmotionModalFromScenarioTransitionRef,
-    waitForWebInterviewTtsQuiescentBeforeEmotionModal: params.waitForWebInterviewTtsQuiescentBeforeEmotionModal,
-    waitForWebInterviewTtsAudiblePlaybackBeforeEmotionModal:
-      params.waitForWebInterviewTtsAudiblePlaybackBeforeEmotionModal,
   };
 }
 

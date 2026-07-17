@@ -29,10 +29,6 @@ jest.mock('../elevenLabsSpokenContext', () => ({
   takePreviousTextForElevenLabsRequest: jest.fn(() => undefined),
 }));
 
-jest.mock('../playElevenLabsPcmStreamPlayback', () => ({
-  playElevenLabsPcmStreamFromResponse: jest.fn(async () => true),
-}));
-
 jest.mock('../elevenLabsTtsAvailability', () => ({
   isElevenLabsEnabledForEnvironment: jest.fn(() => false),
   isElevenLabsMp3FetchAllowedOnPlatform: jest.fn(() => true),

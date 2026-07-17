@@ -15,11 +15,6 @@ import {
   prepareEmotionTransitionBeforeModalForTts,
 } from '@features/aria/emotionTransitionModalTtsGuards';
 import {
-  kickOffEmotionTransitionAfterModalPrefetch,
-  takeEmotionTransitionAfterModalPrefetch,
-} from '@features/aria/emotionTransitionAfterModalPrefetch';
-import { speakLongFormInterviewHtmlMp3 } from '@features/aria/utils/speakLongFormInterviewHtmlMp3';
-import {
   streamAlreadySpokeScenarioBoundaryClosingLead,
   parallelStreamDeliveredBundledHandoffViaCanonicalCard,
   type ShowScenarioCardCanonicalPlaybackConfirmedKinds,
@@ -113,9 +108,6 @@ export async function speakPostClaudeNaturalLanguageEmotionTransition(
     });
   }
   const afterModalForTts = prepareEmotionTransitionAfterModalForTts(afterModal, emotionModalTtsCtx);
-  if (afterModalForTts.trim()) {
-    kickOffEmotionTransitionAfterModalPrefetch(afterModalForTts);
-  }
   await deps.runEmotionModalAfterScenarioTransition(scenarioJustCompleted, {
     transitionText: displayText,
     priorScenario: priorScenarioNum,
@@ -160,21 +152,10 @@ export async function speakPostClaudeNaturalLanguageEmotionTransition(
     });
   }
   if (afterModalForTts.trim()) {
-    const prefetchedBuffer = takeEmotionTransitionAfterModalPrefetch(afterModalForTts);
-    const htmlMp3Played = await speakLongFormInterviewHtmlMp3({
-      text: afterModalForTts,
-      telemetrySource: 'turn',
-      prefetchedBuffer,
-      onPlaybackStarted: () => deps.setVoiceState('speaking'),
-    });
-    if (!htmlMp3Played) {
-      if (streamAlreadySpokeBefore) {
-        await deps.speakTextSafe(afterModalForTts, ASSISTANT_INTERVIEW_SPEECH);
-      } else {
-        await speakAssistantTurn(afterModalForTts, ASSISTANT_INTERVIEW_SPEECH);
-      }
+    if (streamAlreadySpokeBefore) {
+      await deps.speakTextSafe(afterModalForTts, ASSISTANT_INTERVIEW_SPEECH);
     } else {
-      deps.setVoiceState('idle');
+      await speakAssistantTurn(afterModalForTts, ASSISTANT_INTERVIEW_SPEECH);
     }
   } else if (__DEV__ && afterModal.trim()) {
     console.warn('[Amoraea] emotion modal natural transition: afterModal suppressed after transition guard');

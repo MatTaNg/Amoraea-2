@@ -7,7 +7,6 @@ import {
   createApplyRouteProbeAfterResumeSyncCtxFromScreen,
   createHandleRecordingErrorSyncCtxFromScreen,
   createHandleSendTypedSyncCtxFromScreen,
-  createWebTabRestoreSessionSyncCtxFromScreen,
 } from '@features/aria/buildAriaInterviewAuxClusterScreenParams';
 import {
   createInterviewMicClusterSyncCtxFromScreen,
@@ -42,9 +41,8 @@ import type { SaveScenarioCheckpointDeps } from '@features/aria/saveScenarioChec
 import type { ScenarioBoundaryScoringDeps } from '@features/aria/scenarioBoundaryScoringTypes';
 import type { ScoreScenarioDeps } from '@features/aria/scoreScenarioTypes';
 import type { TranscribeSafeDeps } from '@features/aria/transcribeSafeTypes';
-import type { WebMicPressLifecycleDeps } from '@features/aria/webMicPressLifecycleTypes';
+import type { InterviewMicPressLifecycleDeps } from '@features/aria/interviewMicPressLifecycleTypes';
 import type { HandleNativeOrWhisperMicPressDeps } from '@features/aria/handleNativeOrWhisperMicPressTypes';
-import type { InterviewWebTabRestoreSessionDeps } from '@features/aria/webTabRestoreSessionDeps';
 import {
   syncApplyRouteProbeAfterResumeDeps,
   syncAriaInterviewMicCluster,
@@ -56,7 +54,6 @@ import {
 
 export type TurnHandlerUiStageDepScreenRefs = Pick<
   PostClaudeAssistantTurnDeps,
-  'setWebTabGestureRestoreOverlay' | 'setReferenceCardPrompt' | 'setHighestScenarioReached' | 'setStageResults'
 >;
 
 export type TurnHandlerDepScreenRefs = Omit<InterviewTurnHandlerLocalScope, 'scenarioScoring' | 'uiStage'> & {
@@ -74,10 +71,8 @@ export type MicClusterDepScreenRefs = Omit<
     'handleRecordingError' | 'processUserSpeech' | 'transcribeSafe' | 'applyRouteProbeAfterResume' | 'deliverRecordingRetryLine'
   >;
   recordingRefs: Omit<InterviewMicClusterLocalScope['recordingRefs'], 'releaseRecordingFnRef'>;
-  webTtsResume: Omit<InterviewMicClusterLocalScope['webTtsResume'], 'syncInterviewTtsAfterScreenReturn'>;
   pressHandlers: Omit<
     InterviewMicClusterLocalScope['pressHandlers'],
-    'startRecordingAfterPendingTts' | 'handlePressEnd' | 'handlePressStart' | 'waitUntilInterviewerQuiescentForWebMic'
   >;
 };
 
@@ -90,11 +85,10 @@ export type AriaInterviewTurnClusterDepSyncWiringParams = {
   coreCtx: AriaInterviewDepsSyncContext;
   coreGateServicesBaseCtx: AriaInterviewDepsSyncContext;
   gateSyncCtx: AriaInterviewDepsSyncContext;
-  webRuntimeCtx: AriaInterviewDepsSyncContext;
+  runtimeCtx: AriaInterviewDepsSyncContext;
   servicesGateCtx: AriaInterviewDepsSyncContext;
   queryClient: QueryClient;
   turnHandlerShellExtras: AriaInterviewDepsSyncContext;
-  webTabRestoreSessionDepsRef: MutableRefObject<InterviewWebTabRestoreSessionDeps>;
   claudeParallelStreamTtsDepsRef: MutableRefObject<ClaudeParallelStreamTtsCallDeps>;
   fetchStageScoreDepsRef: MutableRefObject<FetchStageScoreDeps>;
   saveScenarioCheckpointDepsRef: MutableRefObject<SaveScenarioCheckpointDeps>;
@@ -102,12 +96,10 @@ export type AriaInterviewTurnClusterDepSyncWiringParams = {
     ((scenarioNumber: 1 | 2 | 3, allMessages: { role: string; content: string }[]) => Promise<void>) | null
   >;
   audioRecorderIsRecordingForRouteRef: MutableRefObject<boolean>;
-  runWebGestureTtsFlush: () => void;
   typedAnswer: string;
   handleSendTypedLocal: HandleSendTypedDepScreenRefs;
   routeProbe: { setAudioRouteKind: (kind: AudioRouteKind) => void };
   deliverRecordingRetryLine: InterviewMicClusterLocalScope['recordingPipeline']['deliverRecordingRetryLine'];
-  syncInterviewTtsAfterScreenReturn: InterviewMicClusterLocalScope['webTtsResume']['syncInterviewTtsAfterScreenReturn'];
   turnHandler: TurnHandlerDepScreenRefs;
   micCluster: MicClusterDepScreenRefs;
 };
@@ -118,20 +110,17 @@ export function useAriaInterviewTurnClusterDepSyncWiring(params: AriaInterviewTu
     coreCtx,
     coreGateServicesBaseCtx,
     gateSyncCtx,
-    webRuntimeCtx,
+    runtimeCtx,
     servicesGateCtx,
-    webTabRestoreSessionDepsRef,
     claudeParallelStreamTtsDepsRef,
     fetchStageScoreDepsRef,
     saveScenarioCheckpointDepsRef,
     scoreScenarioRef,
     audioRecorderIsRecordingForRouteRef,
-    runWebGestureTtsFlush,
     typedAnswer,
     handleSendTypedLocal,
     routeProbe,
     deliverRecordingRetryLine,
-    syncInterviewTtsAfterScreenReturn,
     queryClient,
     turnHandlerShellExtras,
     turnHandler,
@@ -195,16 +184,11 @@ export function useAriaInterviewTurnClusterDepSyncWiring(params: AriaInterviewTu
   // Full merged ctx — not the stripped turn-handler slice — carries scoredScenariosRef and other refs.
   syncScenarioBoundaryScoringDeps(scenarioBoundaryScoringDepsRef, turnHandlerMergedSyncCtx);
 
-  const runtimeSyncCtx = createWebTabRestoreSessionSyncCtxFromScreen({
-    coreGateServicesBaseCtx,
-    webRuntimeCtx,
-    coreCtx,
-  });
+  const runtimeSyncCtx = { ...coreGateServicesBaseCtx, ...runtimeCtx, ...coreCtx };
 
   syncAriaInterviewTurnHandlerCluster(
     {
       kickPostClosingCompletionDepsRef,
-      webTabRestoreSessionDepsRef,
       scoreScenarioDepsRef,
       postClaudeTurnDepsRef,
       preClaudeTurnGateDepsRef,
@@ -220,6 +204,12 @@ export function useAriaInterviewTurnClusterDepSyncWiring(params: AriaInterviewTu
     { deliverRecordingRetryLine, queryClient, ...turnHandlerShellExtras },
     gateSyncCtx,
   );
+
+  // TTS pipeline sync runs before scoring callbacks exist — patch handoff scoring onto live Claude TTS deps.
+  claudeParallelStreamTtsDepsRef.current = {
+    ...claudeParallelStreamTtsDepsRef.current,
+    ensureCompletedScenarioScored,
+  };
 
   const handleRecordingErrorDepsRef = useRef({} as HandleRecordingErrorDeps);
   syncHandleRecordingErrorDeps(
@@ -251,21 +241,18 @@ export function useAriaInterviewTurnClusterDepSyncWiring(params: AriaInterviewTu
   const audioRecorderDepsRef = useRef({} as AriaInterviewAudioRecorderDeps);
   const audioRecorder = useAriaInterviewAudioRecorder(audioRecorderDepsRef);
 
-  const webMicPressLifecycleDepsRef = useRef({} as WebMicPressLifecycleDeps);
+  const webMicPressLifecycleDepsRef = useRef({} as InterviewMicPressLifecycleDeps);
   const handleNativeOrWhisperMicPressDepsRef = useRef({} as HandleNativeOrWhisperMicPressDeps);
   const {
-    waitUntilInterviewerQuiescentForWebMic,
     startRecordingAfterPendingTts,
     handlePressStart,
     handlePressEnd,
-    handleWebMicPressIn,
     applyRouteProbeAfterResume,
     handleNativeOrWhisperMicPress,
   } = useInterviewMicPressCallbacks({
     webMicPressLifecycleDepsRef,
     applyRouteProbeAfterResumeDepsRef,
     handleNativeOrWhisperMicPressDepsRef,
-    runWebGestureTtsFlush,
   });
 
   const handleSendTypedDepsRef = useRef({} as HandleSendTypedDeps);
@@ -284,7 +271,7 @@ export function useAriaInterviewTurnClusterDepSyncWiring(params: AriaInterviewTu
   const micLifecycleDepsRef = useRef({} as InterviewMicLifecycleDeps);
   const micClusterSyncCtx = createInterviewMicClusterSyncCtxFromScreen({
     coreGateServicesBaseCtx,
-    webRuntimeCtx,
+    runtimeCtx,
     micCluster: {
       ...micCluster,
       liveState: {
@@ -305,14 +292,12 @@ export function useAriaInterviewTurnClusterDepSyncWiring(params: AriaInterviewTu
       },
       webTtsResume: {
         ...micCluster.webTtsResume,
-        syncInterviewTtsAfterScreenReturn,
       },
       pressHandlers: {
         ...micCluster.pressHandlers,
         startRecordingAfterPendingTts,
         handlePressEnd,
         handlePressStart,
-        waitUntilInterviewerQuiescentForWebMic,
       },
     },
   });
@@ -340,11 +325,9 @@ export function useAriaInterviewTurnClusterDepSyncWiring(params: AriaInterviewTu
     handleRecordingError,
     transcribeSafe,
     audioRecorder,
-    waitUntilInterviewerQuiescentForWebMic,
     startRecordingAfterPendingTts,
     handlePressStart,
     handlePressEnd,
-    handleWebMicPressIn,
     applyRouteProbeAfterResume,
     handleNativeOrWhisperMicPress,
     handleSendTyped,

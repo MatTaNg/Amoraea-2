@@ -20,7 +20,7 @@ export function restoreResumeScenarioDisplayState(
   saved: SavedInterviewSnapshot,
   transcriptMessages: MessageWithScenario[],
 ): { role: string; content: string; isScoreCard?: boolean }[] {
-  const scoredNums = new Set<number>(saved.scenariosCompleted ?? []);
+  const scoredNums = new Set<number>();
   for (const n of [1, 2, 3] as const) {
     if (scenarioHasPersistedScores(n, saved.scenarioScores)) scoredNums.add(n);
   }
@@ -102,7 +102,7 @@ export function restoreResumeScoredScenariosRef(
   saved: SavedInterviewSnapshot,
   scoredScenariosRef: { current: Set<number> },
 ): number {
-  const completedSet = new Set<number>(saved.scenariosCompleted ?? []);
+  const completedSet = new Set<number>();
   for (const n of [1, 2, 3] as const) {
     if (scenarioHasPersistedScores(n, saved.scenarioScores)) completedSet.add(n);
   }

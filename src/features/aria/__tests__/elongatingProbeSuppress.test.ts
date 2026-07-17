@@ -145,7 +145,7 @@ describe('elongatingProbePlaybackBlockReason', () => {
 });
 
 describe('suppressed elongating fallbacks', () => {
-  it('buildMoment5ClosingFallbackAfterSuppressedElongating uses thanks, optional reflection, and complete token', () => {
+  it('buildMoment5ClosingFallbackAfterSuppressedElongating uses thanks, completion line, and complete token', () => {
     const conflictAnswer =
       "I had a conflict with my best friend last year where I'd been pulling away and not showing up for her the way I normally would. She called me out on it directly.";
     const t = buildMoment5ClosingFallbackAfterSuppressedElongating('Matt', conflictAnswer);
@@ -153,7 +153,7 @@ describe('suppressed elongating fallbacks', () => {
     expect(t).toContain('[INTERVIEW_COMPLETE]');
     expect(t).toMatch(/Thank you for being so open with me/i);
     expect(t).toMatch(/good work getting through all of this/i);
-    expect(t).toMatch(/You named|What (?:I heard|I got|came through|landed for me) was that/i);
+    expect(t).toMatch(/your interview is complete/i);
     expect(t).not.toMatch(/walking through/i);
     expect((t.match(/thank you/gi) ?? []).length).toBe(1);
   });

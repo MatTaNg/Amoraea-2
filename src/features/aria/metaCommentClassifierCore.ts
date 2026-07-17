@@ -174,7 +174,7 @@ export function getMetaCommentCanonicalResponseSummary(
     case 'confusion':
       return confusionSubtype === 'repeat_request'
         ? 'Re-read current interview question in full (verbatim); no reframing, no elaboration/content probe.'
-        : 'Simpler reframing of essential ask unless repeat-request subtype; no full vignette paste unless explicit repeat.';
+        : 'Offer to repeat the current interview question; no reframing, no elongating probe.';
     case 'checking_in':
       return checkingInFrustrationAdjacent === true
         ? 'Ownership + salient reflection + pivot forward (no same-question re-ask).'
@@ -182,7 +182,7 @@ export function getMetaCommentCanonicalResponseSummary(
     case 'skip_request':
       return 'Are you sure you want to skip this one? We can, but it may affect your score.';
     case 'inability':
-      return 'Low-pressure invitation to share whatever comes to mind; same question beat; no skip counted.';
+      return "We can skip this question if you'd like, but it may affect your score, do you want to skip it?";
     case 'already_answered':
       return 'Verify transcript — ownership + advance if prior substantive; otherwise frustration-style re-ask with skip offer.';
     case 'ambiguous_short':

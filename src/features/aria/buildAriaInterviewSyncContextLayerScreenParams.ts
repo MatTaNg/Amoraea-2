@@ -1,7 +1,7 @@
 import type { AriaInterviewDepsSyncContext } from '@features/aria/syncAriaInterviewDepsRefs';
 import type { InterviewCoreLocalScope } from '@features/aria/buildInterviewCoreLocalSyncExtra';
 import type { InterviewEarlyDepsLocalScope } from '@features/aria/buildInterviewEarlyDepsLocalSyncExtra';
-import type { InterviewWebRuntimeLocalScope } from '@features/aria/buildInterviewWebRuntimeLocalSyncExtra';
+import type { InterviewRuntimeLocalScope } from '@features/aria/buildInterviewRuntimeLocalSyncExtra';
 import {
   composeAriaInterviewCoreSyncContextLayer,
   composeAriaInterviewRuntimeSyncContextLayer,
@@ -14,7 +14,7 @@ import {
 export type AriaInterviewRuntimeLayerScreenRefs = {
   gateCtx: AriaInterviewDepsSyncContext;
   servicesGateCtx: AriaInterviewDepsSyncContext;
-  webRuntime: InterviewWebRuntimeLocalScope;
+  webRuntime: InterviewRuntimeLocalScope;
   earlyDeps: InterviewEarlyDepsLocalScope;
 };
 
@@ -32,7 +32,7 @@ export function buildAriaInterviewRuntimeLayerInput(
   return {
     gateCtx: refs.gateCtx,
     servicesGateCtx: refs.servicesGateCtx,
-    webRuntimeLocal: refs.webRuntime,
+    runtimeLocal: refs.webRuntime,
     earlyDepsLocal: refs.earlyDeps,
   };
 }

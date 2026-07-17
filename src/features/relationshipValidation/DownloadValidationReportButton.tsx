@@ -58,7 +58,9 @@ export function DownloadValidationReportButton({
     setExporting(true);
     try {
       const html = await ensureHtml();
-      await exportReportPdfFromHtml(html);
+      await exportReportPdfFromHtml(html, {
+        reportKind: isFull ? 'full' : 'partial',
+      });
 
       if (Platform.OS === 'web') {
         Alert.alert(

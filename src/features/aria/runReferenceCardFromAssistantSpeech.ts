@@ -74,12 +74,15 @@ import {
 import {
   spokenTextStartsMoment5PrimaryConflictQuestion,
   transcriptAssistantContainsMoment5PrimaryConflictQuestion,
-
   looksLikeScenarioAContemptProbeQuestion,
-
   SCENARIO_A_REPAIR_QUESTION_AFTER_CONTEMPT_COPY,
-
   MOMENT_5_ACCOUNTABILITY_QUESTION_TEXT,
+  MOMENT_5_ACCOUNTABILITY_PROBE_TEXT,
+  MOMENT_5_SPECIFICITY_REDIRECT_TEXT,
+  MOMENT_5_CONFLICT_VALIDITY_CLARIFICATION_TEXT,
+  looksLikeMoment5AccountabilityProbeAssistantPrompt,
+  looksLikeMoment5SpecificityRedirectPrompt,
+  looksLikeMoment5ConflictValidityClarificationPrompt,
 } from '@features/aria/probeAndScoringUtils';
 import { reconcileMoment5DeliveryFromAssistantText } from '@features/aria/moment5DeliveryReconcile';
 
@@ -142,23 +145,33 @@ import {
 
 
 
-function readSituation1DeliveryState(
-
+function applyMoment5PersonalReflectionCard(
   deps: ApplyReferenceCardFromAssistantSpeechDeps,
-
-): Situation1ModalDeliveryState {
-
-  return {
-
-    contemptProbeAsked: deps.scenarioAContemptProbeAskedRef?.current ?? false,
-
-    repairQuestionAsked: deps.scenarioARepairQuestionAskedRef?.current ?? false,
-
+  questionText: string,
+): void {
+  const personalScenario = {
+    label: MOMENT_4_PERSONAL_LABEL,
+    text: questionText.trim(),
   };
-
+  if (deps.committedScenarioRef) {
+    deps.committedScenarioRef.current = personalScenario;
+  }
+  deps.setReferenceCardScenario(personalScenario);
+  deps.setReferenceCardPrompt(null);
+  deps.setInterviewUiPhase('scenario_active');
+  if (deps.lastQuestionTextRef) {
+    deps.lastQuestionTextRef.current = questionText.trim();
+  }
 }
 
-
+function readSituation1DeliveryState(
+  deps: ApplyReferenceCardFromAssistantSpeechDeps,
+): Situation1ModalDeliveryState {
+  return {
+    contemptProbeAsked: deps.scenarioAContemptProbeAskedRef?.current ?? false,
+    repairQuestionAsked: deps.scenarioARepairQuestionAskedRef?.current ?? false,
+  };
+}
 
 function withExactScenarioVignetteBody(scenario: InterviewDetectedScenario): InterviewDetectedScenario {
 
@@ -394,7 +407,9 @@ export function runApplyReferenceCardFromAssistantSpeech(
       label: MOMENT_4_PERSONAL_LABEL,
       text: MOMENT_4_COMMITMENT_THRESHOLD_QUESTION_CARD_BODY,
     };
-    deps.committedScenarioRef.current = personalScenario;
+    if (deps.committedScenarioRef) {
+      deps.committedScenarioRef.current = personalScenario;
+    }
     deps.setReferenceCardScenario(personalScenario);
     deps.setReferenceCardPrompt(null);
     deps.setInterviewUiPhase('scenario_active');
@@ -433,17 +448,22 @@ export function runApplyReferenceCardFromAssistantSpeech(
       stripInterviewClosingBundledWithMoment5ResolutionFollowUp(cleaned).trim() ||
       extractScenarioModalQuestionFromAssistantText(cleaned) ||
       cleaned.trim();
-    const personalScenario = {
-      label: MOMENT_4_PERSONAL_LABEL,
-      text: cardBody,
-    };
-    deps.committedScenarioRef.current = personalScenario;
-    deps.setReferenceCardScenario(personalScenario);
-    deps.setReferenceCardPrompt(null);
-    deps.setInterviewUiPhase('scenario_active');
-    if (deps.lastQuestionTextRef) {
-      deps.lastQuestionTextRef.current = cardBody;
-    }
+    applyMoment5PersonalReflectionCard(deps, cardBody);
+    return;
+  }
+
+  if (looksLikeMoment5AccountabilityProbeAssistantPrompt(cleaned)) {
+    applyMoment5PersonalReflectionCard(deps, MOMENT_5_ACCOUNTABILITY_PROBE_TEXT);
+    return;
+  }
+
+  if (looksLikeMoment5SpecificityRedirectPrompt(cleaned)) {
+    applyMoment5PersonalReflectionCard(deps, MOMENT_5_SPECIFICITY_REDIRECT_TEXT);
+    return;
+  }
+
+  if (looksLikeMoment5ConflictValidityClarificationPrompt(cleaned)) {
+    applyMoment5PersonalReflectionCard(deps, MOMENT_5_CONFLICT_VALIDITY_CLARIFICATION_TEXT);
     return;
   }
 
@@ -473,7 +493,9 @@ export function runApplyReferenceCardFromAssistantSpeech(
 
     reconcileMoment5DeliveryFromAssistantText(deps, cleaned);
 
-    deps.committedScenarioRef.current = MOMENT_5_REFERENCE_SCENARIO;
+    if (deps.committedScenarioRef) {
+      deps.committedScenarioRef.current = MOMENT_5_REFERENCE_SCENARIO;
+    }
 
     deps.setReferenceCardScenario(MOMENT_5_REFERENCE_SCENARIO);
 
@@ -509,7 +531,9 @@ export function runApplyReferenceCardFromAssistantSpeech(
 
     };
 
-    deps.committedScenarioRef.current = personalScenario;
+    if (deps.committedScenarioRef) {
+      deps.committedScenarioRef.current = personalScenario;
+    }
 
     deps.setReferenceCardScenario(personalScenario);
 
@@ -529,7 +553,9 @@ export function runApplyReferenceCardFromAssistantSpeech(
 
     const scenario = withExactScenarioVignetteBody(detectedScenario);
 
-    deps.committedScenarioRef.current = scenario;
+    if (deps.committedScenarioRef) {
+      deps.committedScenarioRef.current = scenario;
+    }
 
     deps.setReferenceCardScenario(scenario);
 
@@ -623,7 +649,7 @@ export function runApplyReferenceCardFromAssistantSpeech(
 
 
 
-  if (!deps.committedScenarioRef.current) return;
+  if (!deps.committedScenarioRef?.current) return;
 
 
 
@@ -714,6 +740,9 @@ export function runReferenceCardShouldUpdateOnPlaybackStart(rawText: string): bo
   }
 
   if (looksLikeMoment5ResolutionFollowUpPrompt(cleaned)) return true;
+  if (looksLikeMoment5AccountabilityProbeAssistantPrompt(cleaned)) return true;
+  if (looksLikeMoment5SpecificityRedirectPrompt(cleaned)) return true;
+  if (looksLikeMoment5ConflictValidityClarificationPrompt(cleaned)) return true;
 
   return resolveMoment4ShowScenarioReferenceCard([{ role: 'assistant', content: cleaned }], {
 
@@ -737,12 +766,6 @@ export function runApplyInterviewSpeechComplete(
     syncInterviewScenarioRefsFromSpokenDelivery(deps.scenarioRefSync, {
       extraTexts: [rawText],
     });
-  }
-
-  if (Platform.OS === 'web' && deps.webTtsTabInterruptPendingReplayRef.current) {
-
-    return;
-
   }
 
   deps.applyReferenceCardFromAssistantSpeech(rawText);

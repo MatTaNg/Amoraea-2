@@ -11,7 +11,6 @@ type SyncExtraParams = AriaInterviewDepsSyncContext;
 export type PerformAdminInterviewResetLocalScope = {
   media: Pick<
     SyncExtraParams,
-    | 'useMediaRecorderPath'
     | 'audioRecorder'
     | 'recognitionRef'
     | 'stopElevenLabsPlayback'

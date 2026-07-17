@@ -61,4 +61,40 @@ describe('runPreClaudePostCommitGates', () => {
     expect(result).toEqual({ handled: true });
     expect(speakTextSafe).toHaveBeenCalled();
   });
+
+  it('returns handled:true when a score-status ask is declined client-side', async () => {
+    const speakTextSafe = jest.fn().mockResolvedValue(undefined);
+    const deps = createMockPreClaudeDeps({
+      currentInterviewMomentRef: { current: 2 },
+      speakTextSafe,
+    });
+
+    const result = await runPreClaudePostCommitGates(
+      deps,
+      "What's my score?",
+      baseMessages,
+      'Alex',
+      {
+        frustrationSkipDeclinePipeline: false,
+        skipConfirmationGreetingReconnectInjection: false,
+        inabilityInvitationClientInjection: false,
+        inabilityEscalationSkipInjection: false,
+        proactiveScenarioSkipConfirmationInjection: false,
+        skipRequestMetaConfirmationInjection: false,
+        frustrationSkipAcceptancePipeline: false,
+        skipRequestConfirmationSpeech: '',
+        metaCommentClassification: null,
+        alreadyAnsweredPriorSubstantiveVerified: undefined,
+        checkingInFrustrationAdjacent: false,
+        repeatedFrustrationInMoment: false,
+        suppressForcedConstructProbesForMetaFrustration: false,
+      },
+    );
+
+    expect(result).toEqual({ handled: true });
+    expect(speakTextSafe).toHaveBeenCalledWith(
+      expect.stringMatching(/can't reveal scores/i),
+      expect.any(Object),
+    );
+  });
 });

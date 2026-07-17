@@ -18,7 +18,8 @@ export type {
 
 /**
  * Client-injected skip / inability / frustration confirmation turns (TTS + state).
- * Skip acceptance sets continuation suffix and falls through to the model.
+ * Skip acceptance client-delivers the next question/scenario when possible; otherwise
+ * sets a continuation suffix and falls through to the model.
  */
 export async function runPreClaudeTurnSkipInjectionGates(
   deps: PreClaudeTurnGateDeps,

@@ -117,8 +117,9 @@ export function resolvePreClaudeMetaCommentGateState(
   let inabilityCountInMomentLog: number | undefined;
   let inabilityEscalatedToSkipLog: boolean | undefined;
   if (metaCommentClassification?.type === 'inability' && inabilityPrevForLog !== undefined) {
-    inabilityCountInMomentLog = inabilityPrevForLog === 0 ? 1 : 2;
-    inabilityEscalatedToSkipLog = inabilityPrevForLog >= 1;
+    inabilityCountInMomentLog = inabilityPrevForLog === 0 ? 1 : inabilityPrevForLog + 1;
+    // First "I don't know" already offers skip confirmation (same as skip_request).
+    inabilityEscalatedToSkipLog = true;
   }
 
   const priorNonMetaExcerptForSkip = getPriorSubstantiveNonMetaUserContentInMoment(
@@ -199,12 +200,8 @@ export function resolvePreClaudeMetaCommentGateState(
   ) {
     const mIn = deps.currentInterviewMomentRef.current;
     if (mIn >= 1 && mIn <= 3) {
-      const prevIn = deps.inabilityCountByMomentRef.current[mIn] ?? 0;
-      if (prevIn === 0) {
-        inabilityInvitationClientInjection = true;
-      } else {
-        inabilityEscalationSkipInjection = true;
-      }
+      // Same branch as an explicit skip request: offer skip confirmation (score impact if accepted).
+      inabilityEscalationSkipInjection = true;
     }
   }
 

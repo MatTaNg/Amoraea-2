@@ -151,11 +151,9 @@ export type AriaInterviewScreenSessionGateState = {
     ttsSessionHardFailureCountRef: React.MutableRefObject<number>;
     lastSuccessfulTtsTextNormalizedRef: React.MutableRefObject<string | null>;
     lastSuccessfulTtsDeliveredPreviewRef: React.MutableRefObject<string>;
-    webTtsUtteranceInFlightRef: React.MutableRefObject<string | null>;
-    webTtsUtteranceInFlightOptionsRef: React.MutableRefObject<WebTtsUtteranceReplayOptions | null>;
-    webTtsTabInterruptPendingReplayRef: React.MutableRefObject<boolean>;
-    webTtsSpeakGenerationRef: React.MutableRefObject<number>;
-    webTabRestoreReplayInFlightRef: React.MutableRefObject<boolean>;
+    ttsUtteranceInFlightRef: React.MutableRefObject<string | null>;
+    ttsUtteranceInFlightOptionsRef: React.MutableRefObject<WebTtsUtteranceReplayOptions | null>;
+    ttsSpeakGenerationRef: React.MutableRefObject<number>;
     parallelStreamingTtsRef: React.MutableRefObject<ReturnType<typeof createInitialParallelStreamingTtsState>>;
     webTabRestoreTapSessionRef: React.MutableRefObject<number>;
     webTabRestoreDeliveredNormRef: React.MutableRefObject<string | null>;
@@ -170,8 +168,6 @@ export type AriaInterviewScreenSessionGateState = {
     resumeWelcomeMessageRef: React.MutableRefObject<string>;
     resumeOfferWelcomeTtsRef: React.MutableRefObject<boolean>;
     resumeEmotionAfterModalTextRef: React.MutableRefObject<string | null>;
-    webResumeWelcomeTapHandledRef: React.MutableRefObject<boolean>;
-    webResumeWelcomeTapPendingRef: React.MutableRefObject<boolean>;
     resumeWelcomeHydrationAttemptRef: React.MutableRefObject<string | null>;
     pendingScenarioIntroAfterResumeWelcomeRef: React.MutableRefObject<string | null>;
     emotionItemResponsesRef: React.MutableRefObject<string[]>;
@@ -312,18 +308,12 @@ export type AriaInterviewScreenSessionShellState = {
   conversationErrorNotice: string | null;
   setConversationErrorNotice: React.Dispatch<React.SetStateAction<string | null>>;
   ttsLineInFlightRef: React.MutableRefObject<boolean>;
-  tabHiddenDuringActiveTtsLineRef: React.MutableRefObject<boolean>;
-  handleWebTabGestureRestoreTapRef: React.MutableRefObject<() => void>;
   speakingWithoutPlaybackSinceMsRef: React.MutableRefObject<number | null>;
-  staleWebTtsRuntimeLockSinceMsRef: React.MutableRefObject<number | null>;
-  mobileTabHideLetPlaybackContinueRef: React.MutableRefObject<boolean>;
-  mobileTabHideBackgroundUtteranceRef: React.MutableRefObject<string | null>;
+  staleTtsRuntimeLockSinceMsRef: React.MutableRefObject<number | null>;
   lastVoiceTurnLanguageRef: React.MutableRefObject<string | null>;
   lastVoiceTurnConfidenceRef: React.MutableRefObject<number | null>;
   networkStatus: 'checking' | 'good' | 'poor';
   setNetworkStatus: React.Dispatch<React.SetStateAction<'checking' | 'good' | 'poor'>>;
-  webResumeWelcomeTapPending: boolean;
-  setWebResumeWelcomeTapPending: React.Dispatch<React.SetStateAction<boolean>>;
   commitInterviewMessages: React.Dispatch<React.SetStateAction<{ role: string; content: string; scenarioNumber?: number }[]>>;
   statusRef: React.MutableRefObject<InterviewSessionStatus>;
   interviewStatusRef: React.MutableRefObject<

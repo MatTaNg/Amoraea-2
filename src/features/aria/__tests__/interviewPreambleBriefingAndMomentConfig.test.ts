@@ -6,7 +6,7 @@ import {
 } from '@features/aria/interviewMomentScenarioConfig';
 import { MOMENT_4_HANDOFF_NO_NAME_LEAD } from '@features/aria/interviewTransitionBundles';
 import { buildFallbackIntroBriefingText, coerceOpeningNamePromptForTts, ensureCanonicalIntroBriefingForTts, insertPreambleBriefingIfMissing, introBriefingSpeechEndsWithReadinessQuestion, isIncompleteOpeningNamePrompt, isIntroBriefingReadinessOnlySentence } from '@features/aria/interviewPreambleBriefing';
-import { WEB_INTERVIEW_OPENING_GREETING } from '@features/aria/utils/webInterviewGreetingAudio';
+import { INTERVIEW_OPENING_GREETING } from '@features/aria/utils/interviewOpeningGreeting';
 import { MOMENT_5_CONFLICT_VALIDITY_CLARIFICATION_TEXT } from '@features/aria/probeAndScoringUtils';
 
 describe('interviewPreambleBriefing', () => {
@@ -42,7 +42,7 @@ describe('interviewPreambleBriefing', () => {
   it('coerces truncated opening name prompt to canonical greeting', () => {
     expect(isIncompleteOpeningNamePrompt("Hi, I'm Amoraea. What can")).toBe(true);
     expect(coerceOpeningNamePromptForTts("Hi, I'm Amoraea. What can")).toBe(
-      WEB_INTERVIEW_OPENING_GREETING,
+      INTERVIEW_OPENING_GREETING,
     );
   });
 

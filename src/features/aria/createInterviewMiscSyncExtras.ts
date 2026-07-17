@@ -78,7 +78,7 @@ export function createProfileNameSourceDebugSyncExtra(params: SyncExtraParams) {
 
 
 
-export function createInterviewWebRuntimeSyncExtra(params: SyncExtraParams): AriaInterviewDepsSyncContext {
+export function createInterviewRuntimeSyncExtra(params: SyncExtraParams): AriaInterviewDepsSyncContext {
 
   return params;
 

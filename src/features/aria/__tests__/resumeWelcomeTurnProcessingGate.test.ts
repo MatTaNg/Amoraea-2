@@ -1,5 +1,4 @@
 import { describe, expect, it } from '@jest/globals';
-import { Platform } from 'react-native';
 
 import {
   isResumeWelcomeFlowBlockingTurnProcessing,
@@ -10,22 +9,21 @@ describe('resumeWelcomeTurnProcessingGate', () => {
     expect(
       isResumeWelcomeFlowBlockingTurnProcessing({
         resumeLoadingFlowActiveRef: { current: true },
-        webResumeWelcomeTapPendingRef: { current: false },
         resumeOfferWelcomeTtsRef: { current: false },
         resumeRepeatChoicePendingRef: { current: false },
       }),
     ).toBe(true);
   });
 
-  it('blocks turn processing while web welcome tap is pending', () => {
+  it('does not block solely because resumeOfferWelcomeTtsRef is set', () => {
+    // Welcome TTS offer is tracked for orchestration; turn blocking uses loading / repeat-choice / playback lock.
     expect(
       isResumeWelcomeFlowBlockingTurnProcessing({
         resumeLoadingFlowActiveRef: { current: false },
-        webResumeWelcomeTapPendingRef: { current: true },
         resumeOfferWelcomeTtsRef: { current: true },
         resumeRepeatChoicePendingRef: { current: false },
       }),
-    ).toBe(true);
+    ).toBe(false);
   });
 
   it('detects stale user-turn epochs after resume invalidation', () => {
@@ -34,14 +32,12 @@ describe('resumeWelcomeTurnProcessingGate', () => {
     expect(isStaleInterviewUserTurn(2, epochRef)).toBe(false);
   });
 
-  it('does not block fresh web turns when resume welcome TTS is not offered', () => {
+  it('does not block fresh turns when resume welcome is idle', () => {
     expect(
       isResumeWelcomeFlowBlockingTurnProcessing({
         resumeLoadingFlowActiveRef: { current: false },
-        webResumeWelcomeTapPendingRef: { current: false },
         resumeOfferWelcomeTtsRef: { current: false },
         resumeRepeatChoicePendingRef: { current: false },
-        webResumeWelcomeTapHandledRef: { current: false },
       }),
     ).toBe(false);
   });
@@ -53,7 +49,6 @@ describe('resumeWelcomeTurnProcessingGate', () => {
       isResumeWelcomeFlowBlockingTurnProcessing(
         {
           resumeLoadingFlowActiveRef: { current: false },
-          webResumeWelcomeTapPendingRef: { current: false },
           resumeOfferWelcomeTtsRef: { current: false },
           resumeRepeatChoicePendingRef: { current: true },
         },
@@ -68,12 +63,11 @@ describe('resumeWelcomeTurnProcessingGate', () => {
     ).toBe(false);
   });
 
-  it('still blocks short procedural replies while repeat-choice is pending', () => {
+  it('does not block short continue/repeat intents while repeat-choice is pending', () => {
     expect(
       isResumeWelcomeFlowBlockingTurnProcessing(
         {
           resumeLoadingFlowActiveRef: { current: false },
-          webResumeWelcomeTapPendingRef: { current: false },
           resumeOfferWelcomeTtsRef: { current: false },
           resumeRepeatChoicePendingRef: { current: true },
         },
@@ -85,7 +79,122 @@ describe('resumeWelcomeTurnProcessingGate', () => {
           },
         },
       ),
+    ).toBe(false);
+  });
+
+  it('does not block Whisper-mangled repeat requests while repeat-choice is pending', () => {
+    expect(
+      isResumeWelcomeFlowBlockingTurnProcessing(
+        {
+          resumeLoadingFlowActiveRef: { current: false },
+          resumeOfferWelcomeTtsRef: { current: false },
+          resumeRepeatChoicePendingRef: { current: true },
+        },
+        {
+          substantiveTranscript: {
+            text: 'He what you said',
+            wordCount: 4,
+            lastQuestionText:
+              "Welcome back — we'll pick up where we left off. If you'd like me to repeat what I said, let me know.",
+          },
+        },
+      ),
+    ).toBe(false);
+    expect(
+      isResumeWelcomeFlowBlockingTurnProcessing(
+        {
+          resumeLoadingFlowActiveRef: { current: false },
+          resumeOfferWelcomeTtsRef: { current: false },
+          resumeRepeatChoicePendingRef: { current: true },
+        },
+        {
+          substantiveTranscript: {
+            text: 'Pee at what you said.',
+            wordCount: 5,
+            lastQuestionText:
+              "Welcome back — we'll pick up where we left off. If you'd like me to repeat what I said, let me know.",
+          },
+        },
+      ),
+    ).toBe(false);
+  });
+
+  it('still blocks short non-choice replies while repeat-choice is pending', () => {
+    expect(
+      isResumeWelcomeFlowBlockingTurnProcessing(
+        {
+          resumeLoadingFlowActiveRef: { current: false },
+          resumeOfferWelcomeTtsRef: { current: false },
+          resumeRepeatChoicePendingRef: { current: true },
+        },
+        {
+          substantiveTranscript: {
+            text: 'um',
+            wordCount: 1,
+            lastQuestionText: null,
+          },
+        },
+      ),
     ).toBe(true);
+  });
+
+  it('does not block identity / off-topic asks while repeat-choice is pending', () => {
+    expect(
+      isResumeWelcomeFlowBlockingTurnProcessing(
+        {
+          resumeLoadingFlowActiveRef: { current: false },
+          resumeOfferWelcomeTtsRef: { current: false },
+          resumeRepeatChoicePendingRef: { current: true },
+        },
+        {
+          substantiveTranscript: {
+            text: 'Are you an alien?',
+            wordCount: 4,
+            lastQuestionText: 'Got it. If you were Ryan, how would you repair this?',
+          },
+        },
+      ),
+    ).toBe(false);
+  });
+
+  it('does not block "I don\'t understand the question" while repeat-choice is pending', () => {
+    expect(
+      isResumeWelcomeFlowBlockingTurnProcessing(
+        {
+          resumeLoadingFlowActiveRef: { current: false },
+          resumeOfferWelcomeTtsRef: { current: false },
+          resumeRepeatChoicePendingRef: { current: true },
+        },
+        {
+          substantiveTranscript: {
+            text: "I don't understand the question.",
+            wordCount: 5,
+            lastQuestionText:
+              "What about when Emma says 'you've made that very clear' — what do you make of that?",
+          },
+        },
+      ),
+    ).toBe(false);
+  });
+
+  it('does not block "I don\'t know" while repeat-choice is pending (inability → skip offer)', () => {
+    expect(
+      isResumeWelcomeFlowBlockingTurnProcessing(
+        {
+          resumeLoadingFlowActiveRef: { current: false },
+          resumeOfferWelcomeTtsRef: { current: false },
+          resumeRepeatChoicePendingRef: { current: true },
+        },
+        {
+          substantiveTranscript: {
+            text: "I don't know",
+            wordCount: 3,
+            lastQuestionText:
+              "What about when Emma says 'you've made that very clear' — what do you make of that?",
+          },
+        },
+      ),
+    ).toBe(false);
   });
 
   it('does not block mid-length S3 answers while repeat-choice is pending without token overlap', () => {
@@ -94,7 +203,6 @@ describe('resumeWelcomeTurnProcessingGate', () => {
       isResumeWelcomeFlowBlockingTurnProcessing(
         {
           resumeLoadingFlowActiveRef: { current: false },
-          webResumeWelcomeTapPendingRef: { current: false },
           resumeOfferWelcomeTtsRef: { current: false },
           resumeRepeatChoicePendingRef: { current: true },
         },

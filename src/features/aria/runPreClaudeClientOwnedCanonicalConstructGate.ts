@@ -1,4 +1,5 @@
 import { isDecline } from '@features/aria/interviewControlTokens';
+import { looksLikeUnassessableScenarioAnswer } from '@features/aria/interviewAnswerRelevance';
 import {
   chooseBriefScenarioAck,
   recentAssistantMessagesForAck,
@@ -86,16 +87,20 @@ export async function runPreClaudeClientOwnedCanonicalConstructGate(
   if (isDecline(trimmed) || suppressForcedConstructProbesForMetaFrustration) {
     return { handled: false };
   }
+  // Incomplete / off-topic answers must not advance via client-owned construct delivery
+  // (irrelevant-answer retry gate should speak first; this is defense in depth).
+  if (looksLikeUnassessableScenarioAnswer(trimmed)) {
+    return { handled: false };
+  }
 
   const {
     shouldForceScenarioAContemptProbe,
     allowScenarioARepairAfterContemptAnswer,
     shouldForceScenarioBJamesRepairProbe,
-    muteParallelTtsForScenarioAContemptProbeStream,
   } = constructProbeFlags;
 
   if (
-    (shouldForceScenarioAContemptProbe || muteParallelTtsForScenarioAContemptProbeStream) &&
+    shouldForceScenarioAContemptProbe &&
     shouldDeliverScenarioFollowUpQuestion(messagesToUse, SCENARIO_A_CONTEMPT_PROBE_DELIVERED_COPY) &&
     !transcriptContainsScenarioAContemptProbe(messagesToUse)
   ) {

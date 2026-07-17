@@ -1,19 +1,13 @@
-import { Platform } from 'react-native';
-
 import { applySpeakTextSafePostPlaybackSuccess } from '@features/aria/applySpeakTextSafePostPlaybackSuccess';
 import { applySpeakTextSafeQuestionDeliveredTelemetry, resolveSpeakTextSafeInterviewLineDelivery } from '@features/aria/applySpeakTextSafeQuestionDeliveredTelemetry';
 import { finalizeSpeakTextSafeTtsSession } from '@features/aria/finalizeSpeakTextSafeTtsSession';
 import { handleSpeakTextSafeTtsPlaybackError } from '@features/aria/handleSpeakTextSafeTtsPlaybackError';
 import { stripControlTokens } from '@features/aria/interviewControlTokens';
 import type { SpeakTextSafeMainPlaybackPrep } from '@features/aria/prepareSpeakTextSafeMainPlayback';
-import {
-  runSpeakTextSafeWebDurationVerificationLoop,
-} from '@features/aria/runSpeakTextSafeWebDurationVerificationLoop';
 import type { SpeakTextSafeResolvedOptions } from '@features/aria/runSpeakTextSafeEntry';
-import type { SpeakTextSafeTtsTriggerSource } from '@features/aria/runSpeakTextSafeImmediateWebGreeting';
 import type { SpeakTextSafeDeps } from '@features/aria/speakTextSafeDeps';
+import type { SpeakTextSafeTtsTriggerSource } from '@features/aria/speakTextSafeSuccessfulDelivery';
 import { writeSpeakTextSafePlaybackCompletionTelemetry } from '@features/aria/speakTextSafePlaybackCompletionTelemetry';
-import { shouldUseWebTtsDurationVerification } from '@features/aria/speakTextSafeWebDurationRetry';
 import { withRetry } from '@utilities/withRetry';
 
 export type SpeakTextSafeMainSpeakBodyArgs = {
@@ -46,18 +40,10 @@ export async function runSpeakTextSafeMainSpeakBody(
   const {
     userId,
     setVoiceState,
-    setWebTabGestureRestoreOverlay,
-    setWebDesktopPendingTtsGestureOverlay,
-    setTtsPlaybackReliabilityNotice,
     setLastTtsCompletionCallbackMs,
     speak,
     applyInterviewSpeechComplete,
-    ensureWebGestureFlushListener,
-    stopElevenLabsPlayback,
-    webSpeechShouldDeferToUserGesture,
-    rearmWebMicPreInitAfterTtsPlaybackComplete,
-    scheduleWebMicPreInitRefreshAfterTtsCompletes,
-    webTtsSpeakGenerationRef,
+    ttsSpeakGenerationRef,
     currentInterviewMomentRef,
     currentScenarioRef,
     s2RepairProbeDeliveredRef,
@@ -65,20 +51,12 @@ export async function runSpeakTextSafeMainSpeakBody(
     lastSuccessfulTtsTextNormalizedRef,
     lastSuccessfulTtsDeliveredPreviewRef,
     interviewSessionAttemptIdRef,
-    interviewSessionIdRef,
     scenarioAContemptProbePlaybackConfirmedRef,
     showScenarioCardCanonicalPlaybackConfirmedKindsRef,
     scenarioAContemptProbeTtsDeliveredSessionRef,
-    webTtsTabInterruptPendingReplayRef,
-    pendingGestureRestoreSpeakRef,
-    needsGestureRestoreRef,
-    tabHiddenDuringActiveTtsLineRef,
-    webTtsUtteranceInFlightRef,
-    webTtsUtteranceInFlightOptionsRef,
+    ttsUtteranceInFlightRef,
+    ttsUtteranceInFlightOptionsRef,
     firstScenarioLifecyclePersistedRef,
-    ttsSessionHardFailureCountRef,
-    timingRef,
-    pendingWebSpeechForGestureRef,
     persistInterviewAttemptSessionLifecycle,
     recordInterviewAssistantDeliveryForMetaExemptionRef,
     ttsLineInFlightRef,
@@ -101,83 +79,33 @@ export async function runSpeakTextSafeMainSpeakBody(
     priorRec,
     sessionRuntime: rt0,
     onScenarioPlaybackStarted,
-    shouldYieldInFlightSpeakToTabRestore,
     ttsStart,
   } = playbackPrep;
 
   try {
     const charCount = stripControlTokens(text).trim().length;
-    const useWebDurationVerification = shouldUseWebTtsDurationVerification({
-      silent,
-      charCount,
-      telemetrySource,
-    });
 
-    let speakOutcome:
-      | { scenarioSplitDelivery?: { segment1_expected_duration_ms: number; segment2_expected_duration_ms: number } }
-      | void
-      | undefined;
-    let actualTtsMs = 0;
-    let verificationOk = true;
-    let acceptedStableTruncationAsEstimationError = false;
-
-    if (useWebDurationVerification) {
-      ({
-        speakOutcome,
-        actualTtsMs,
-        verificationOk,
-        acceptedStableTruncationAsEstimationError,
-      } = await runSpeakTextSafeWebDurationVerificationLoop({
-        speak,
-        textForAudio,
-        text,
-        charCount,
-        telemetrySource,
-        interviewSpeechRole,
-        skipLastQuestionRef,
-        skipPcmStream,
-        skipMicPreInitDuringPlayback: priorRec,
-        effectiveTtsTriggerSource,
-        prefetchedMpegArrayBuffer,
-        onScenarioPlaybackStarted,
-        priorRec,
-        userId,
-        interviewSessionId: interviewSessionIdRef.current,
-        stopElevenLabsPlayback,
-        shouldYieldInFlightSpeakToTabRestore,
-        tabHiddenDuringActiveTtsLine: tabHiddenDuringActiveTtsLineRef.current,
-        currentInterviewMoment: currentInterviewMomentRef.current,
-        currentScenario: currentScenarioRef.current,
-        s2RepairProbeDeliveredRef,
-        s3RepairProbeDeliveredRef,
-        ttsSessionHardFailureCountRef,
-        setTtsPlaybackReliabilityNotice,
-        skipQuestionTiming,
-        timingRef,
-      }));
-    } else {
-      speakOutcome = await withRetry(
-        () =>
-          speak(textForAudio, {
-            telemetrySource,
-            skipQuestionTiming,
-            skipLastQuestionRef,
-            ttsTriggerSource: effectiveTtsTriggerSource,
-            skipPcmStream,
-            skipMicPreInitDuringPlayback: priorRec,
-            prefetchedMpegArrayBuffer,
-            onPlaybackStarted: onScenarioPlaybackStarted,
-          }),
-        {
-          retries: 1,
-          baseDelay: 3000,
-          context: 'TTS',
-          sessionLog:
-            userId ? { userId, attemptId: rt0.attemptId, platform: rt0.platform } : undefined,
-        },
-      );
-      actualTtsMs = Date.now() - ttsStart;
-    }
+    const speakOutcome = await withRetry(
+      () =>
+        speak(textForAudio, {
+          telemetrySource,
+          skipQuestionTiming,
+          skipLastQuestionRef,
+          ttsTriggerSource: effectiveTtsTriggerSource,
+          skipPcmStream,
+          skipMicPreInitDuringPlayback: priorRec,
+          prefetchedMpegArrayBuffer,
+          onPlaybackStarted: onScenarioPlaybackStarted,
+        }),
+      {
+        retries: 1,
+        baseDelay: 3000,
+        context: 'TTS',
+        sessionLog:
+          userId ? { userId, attemptId: rt0.attemptId, platform: rt0.platform } : undefined,
+      },
+    );
+    const actualTtsMs = Date.now() - ttsStart;
 
     let audioPlaybackTruncated = false;
     if (userId) {
@@ -188,9 +116,9 @@ export async function runSpeakTextSafeMainSpeakBody(
         speakOutcome,
         actualTtsMs,
         charCount,
-        useWebDurationVerification,
-        verificationOk,
-        acceptedStableTruncationAsEstimationError,
+        useWebDurationVerification: false,
+        verificationOk: true,
+        acceptedStableTruncationAsEstimationError: false,
         currentInterviewMoment: currentInterviewMomentRef.current,
         scenarioAContemptProbePlaybackConfirmedRef,
         showScenarioCardCanonicalPlaybackConfirmedKindsRef,
@@ -198,11 +126,11 @@ export async function runSpeakTextSafeMainSpeakBody(
     }
 
     const { skipDeliveryForTabInterrupt, isInterviewLine } = resolveSpeakTextSafeInterviewLineDelivery({
-      isWeb: Platform.OS === 'web',
-      webTtsTabInterruptPendingReplay: webTtsTabInterruptPendingReplayRef.current,
-      tabHiddenDuringActiveTtsLine: tabHiddenDuringActiveTtsLineRef.current,
+      isWeb: false,
+      webTtsTabInterruptPendingReplay: false,
+      tabHiddenDuringActiveTtsLine: false,
       speakGenerationAtStart,
-      webTtsSpeakGeneration: webTtsSpeakGenerationRef.current,
+      webTtsSpeakGeneration: ttsSpeakGenerationRef.current,
       skipQuestionDeliveredTelemetry,
       interviewSpeechRole,
       telemetrySource,
@@ -240,38 +168,40 @@ export async function runSpeakTextSafeMainSpeakBody(
       closingTtsSessionKey,
     });
   } catch (err) {
+    if (__DEV__ && err instanceof TypeError && /current/.test(err.message)) {
+      const missing = [
+        ['showScenarioCardCanonicalPlaybackConfirmedKindsRef', showScenarioCardCanonicalPlaybackConfirmedKindsRef],
+        ['scenarioAContemptProbePlaybackConfirmedRef', scenarioAContemptProbePlaybackConfirmedRef],
+        ['recordInterviewAssistantDeliveryForMetaExemptionRef', recordInterviewAssistantDeliveryForMetaExemptionRef],
+        ['firstScenarioLifecyclePersistedRef', firstScenarioLifecyclePersistedRef],
+        ['lastSuccessfulTtsTextNormalizedRef', lastSuccessfulTtsTextNormalizedRef],
+        ['currentInterviewMomentRef', currentInterviewMomentRef],
+        ['currentScenarioRef', currentScenarioRef],
+      ]
+        .filter(([, ref]) => ref == null)
+        .map(([name]) => name);
+      if (missing.length > 0) {
+        console.warn('[TTS] speakTextSafe missing deps refs:', missing.join(', '));
+      }
+    }
     handleSpeakTextSafeTtsPlaybackError({
       err,
       text,
       interviewSpeechRole,
       skipInterviewSpeechAdvance,
-      isWeb: Platform.OS === 'web',
-      webTtsTabInterruptPendingReplay: webTtsTabInterruptPendingReplayRef.current,
-      speakGenerationAtStart,
-      webTtsSpeakGeneration: webTtsSpeakGenerationRef.current,
       setVoiceState,
-      pendingGestureRestoreSpeakRef,
-      needsGestureRestoreRef,
-      setWebTabGestureRestoreOverlay,
-      pendingWebSpeechForGestureRef,
-      ensureWebGestureFlushListener,
-      setWebDesktopPendingTtsGestureOverlay,
       applyInterviewSpeechComplete,
     });
   } finally {
     finalizeSpeakTextSafeTtsSession({
       userId,
-      isWeb: Platform.OS === 'web',
+      isWeb: false,
       telemetrySource,
       ttsLineInFlightRef,
-      webTtsTabInterruptPendingReplay: webTtsTabInterruptPendingReplayRef.current,
-      tabHiddenDuringActiveTtsLineRef,
-      webTtsUtteranceInFlightRef,
-      webTtsUtteranceInFlightOptionsRef,
+      webTtsTabInterruptPendingReplay: false,
+      ttsUtteranceInFlightRef,
+      ttsUtteranceInFlightOptionsRef,
       setLastTtsCompletionCallbackMs,
-      webSpeechShouldDeferToUserGesture,
-      scheduleWebMicPreInitRefreshAfterTtsCompletes,
-      rearmWebMicPreInitAfterTtsPlaybackComplete,
     });
   }
 }

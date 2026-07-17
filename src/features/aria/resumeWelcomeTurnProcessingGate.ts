@@ -1,4 +1,3 @@
-import { Platform } from 'react-native';
 import type { MutableRefObject } from 'react';
 
 import { isResumeWelcomePlaybackLocked } from '@features/aria/interviewLocalPersistence';
@@ -6,10 +5,8 @@ import { shouldAllowResumeRepeatChoiceTurnProcessing } from '@features/aria/resu
 
 export type ResumeWelcomeTurnProcessingGateRefs = {
   resumeLoadingFlowActiveRef: MutableRefObject<boolean>;
-  webResumeWelcomeTapPendingRef: MutableRefObject<boolean>;
   resumeOfferWelcomeTtsRef: MutableRefObject<boolean>;
   resumeRepeatChoicePendingRef: MutableRefObject<boolean>;
-  webResumeWelcomeTapHandledRef?: MutableRefObject<boolean>;
   interviewSessionAttemptIdRef?: MutableRefObject<string | null>;
 };
 
@@ -28,7 +25,6 @@ export function isResumeWelcomeFlowBlockingTurnProcessing(
   options?: ResumeWelcomeTurnProcessingGateOptions,
 ): boolean {
   if (refs.resumeLoadingFlowActiveRef.current) return true;
-  if (refs.webResumeWelcomeTapPendingRef.current) return true;
   if (refs.resumeRepeatChoicePendingRef.current) {
     const bypass = options?.substantiveTranscript;
     if (
@@ -45,14 +41,6 @@ export function isResumeWelcomeFlowBlockingTurnProcessing(
   }
   const attemptId = refs.interviewSessionAttemptIdRef?.current;
   if (isResumeWelcomePlaybackLocked(attemptId)) return true;
-  if (
-    Platform.OS === 'web' &&
-    refs.resumeOfferWelcomeTtsRef.current &&
-    refs.webResumeWelcomeTapHandledRef &&
-    !refs.webResumeWelcomeTapHandledRef.current
-  ) {
-    return true;
-  }
   return false;
 }
 

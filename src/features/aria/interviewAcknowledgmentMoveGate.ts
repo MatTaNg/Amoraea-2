@@ -1,4 +1,5 @@
 import { isApprovedElongatingProbeOnly } from './elongatingProbe';
+import { looksLikeInterviewerIdentityOrOffTopicAsk } from './interviewAnswerRelevance';
 import { chooseBriefScenarioAck } from './interviewReflectionAckVariation';
 import { enrichPersonalMomentClosingForTts } from './personalMomentClosingEnrichment';
 import {
@@ -238,6 +239,8 @@ export function prependBriefAckIfMissingBeforeMove(
   if (!draft) return draft;
   if (isApprovedElongatingProbeOnly(draft)) return draft;
   if (/^\[(INTERVIEW_COMPLETE|STAGE_[123]_COMPLETE)/i.test(draft)) return draft;
+  // Identity / interviewer off-topic asks must not get a "Got it" receipt before the response.
+  if (looksLikeInterviewerIdentityOrOffTopicAsk(userTurn)) return draft;
 
   const parts = draft.split(/\n\n/);
   let first = parts[0] ?? '';

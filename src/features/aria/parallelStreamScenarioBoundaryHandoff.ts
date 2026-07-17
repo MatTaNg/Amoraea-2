@@ -6,7 +6,6 @@ import { SHOW_SCENARIO_CARD_CANONICAL_SPEECH } from '@features/aria/interviewTts
 import {
   mergeShowScenarioCardTransitionPrefixWithSpoken,
 } from '@features/aria/showScenarioCardCanonicalTts';
-import { speakLongFormInterviewHtmlMp3 } from '@features/aria/utils/speakLongFormInterviewHtmlMp3';
 import { remoteLog } from '@utilities/remoteLog';
 
 import type { ParallelStreamTtsPlaybackContext } from './parallelStreamTtsRuntimeState';
@@ -110,21 +109,7 @@ export async function speakMissedScenarioBoundaryLeadAtStreamEnd(
     preview: toSpeak.slice(0, 280),
     streamSpokePreview: spokenSoFar.slice(0, 120),
   });
-  let htmlMp3Played = false;
-  try {
-    htmlMp3Played = await speakLongFormInterviewHtmlMp3({
-      text: toSpeak,
-      telemetrySource: 'turn',
-      onPlaybackStarted: () => deps.setVoiceState('speaking'),
-    });
-  } catch {
-    htmlMp3Played = false;
-  }
-  if (!htmlMp3Played) {
-    await deps.speakTextSafe(toSpeak, SHOW_SCENARIO_CARD_CANONICAL_SPEECH);
-  } else {
-    deps.setVoiceState('idle');
-  }
+  await deps.speakTextSafe(toSpeak, SHOW_SCENARIO_CARD_CANONICAL_SPEECH);
   deps.parallelStreamingTtsRef.current.spokenCompleteText = spokenSoFar
     ? `${spokenSoFar} ${toSpeak}`.trim()
     : toSpeak;

@@ -1,5 +1,10 @@
 import { textContainsScenarioBVignetteBody } from './emotionScenarioTransitionInference';
 import { normalizeApostrophes } from './disengagementProbeNormalize';
+import { looksLikeUnassessableScenarioAnswer } from './interviewAnswerRelevance';
+import {
+  stripSkipAcceptedNextQuestionBridge,
+  withSkipAcceptedNextQuestionBridgePreserved,
+} from './skipAcceptedNextQuestionBridge';
 import { SCENARIO_A_REPAIR_QUESTION_AFTER_CONTEMPT_COPY } from './probeAndScoringUtils';
 import {
   transcriptContainsScenarioAContemptProbe,
@@ -19,6 +24,7 @@ import {
   SCENARIO_B_JAMES_REPAIR_CANONICAL,
   SCENARIO_B_Q1_CANONICAL,
 } from './scenarioBProbeLogic';
+import { stripBriefInterviewAcknowledgmentPrefixForRepeat } from './interviewRepeatRequestTarget';
 
 /** Scenario A repair-as-Ryan (canonical + paraphrases aligned with interviewerFrameworkPrompt). */
 export function looksLikeScenarioARepairQuestion(text: string): boolean {
@@ -43,11 +49,12 @@ export function looksLikeScenarioARepairQuestion(text: string): boolean {
 
 /** TTS + Show scenario modal copy for the Ryan repair ask (matches {@link SCENARIO_A_REPAIR_QUESTION_AFTER_CONTEMPT_COPY}). */
 export function coerceScenarioARepairQuestionForTts(text: string): string {
-  const t = (text ?? '').replace(/\s+/g, ' ').trim();
-  if (!t) return text;
+  return withSkipAcceptedNextQuestionBridgePreserved(text, (raw) => {
+  const t = (raw ?? '').replace(/\s+/g, ' ').trim();
+  if (!t) return raw;
   // Preserve the second repair re-ask — coercing to the canonical first ask triggers duplicate_consecutive TTS suppression.
   if (looksLikeScenarioARepairReAskQuestion(t)) {
-    return text;
+    return raw;
   }
   if (
     looksLikeScenarioARepairQuestion(t) ||
@@ -64,7 +71,8 @@ export function coerceScenarioARepairQuestionForTts(text: string): string {
   if (/\bhow would you repair this with\b/.test(low) && /\bryan\b/.test(low)) {
     return SCENARIO_A_REPAIR_QUESTION_AFTER_CONTEMPT_COPY;
   }
-  return text;
+  return raw;
+  });
 }
 
 /** S1→S2 boundary reflections often include "makes sense" + Emma — not repair asks. */
@@ -313,8 +321,17 @@ export function shouldAllowScenarioARepairAfterContemptAnswer(params: {
   shouldForceScenarioAContemptProbe: boolean;
   messagesToUse: readonly ScenarioFollowUpTranscriptMessage[];
   lastDeliveredQuestionText?: string | null;
+  /** Latest user turn — when unassessable/off-topic, do not advance to repair. */
+  userAnswer?: string | null;
 }): boolean {
   if (!isScenarioAConstructProbeContext(params.currentScenario, params.currentMoment)) {
+    return false;
+  }
+  if (
+    typeof params.userAnswer === 'string' &&
+    params.userAnswer.trim() &&
+    looksLikeUnassessableScenarioAnswer(params.userAnswer)
+  ) {
     return false;
   }
   const contemptSatisfiedWithoutProbe =
@@ -405,25 +422,29 @@ export function resolveInterviewQuestionRepeatTtsText(
     activeScenario?: number;
   },
 ): string {
-  const t = (storedText ?? '').trim();
+  const t = stripSkipAcceptedNextQuestionBridge((storedText ?? '').trim());
   if (!t) return t;
+  let resolved: string;
   if (isIncompleteScenarioARepairLeadSentence(t)) {
-    return coerceRepeatQuestionForActiveScenario(
+    resolved = coerceRepeatQuestionForActiveScenario(
       SCENARIO_A_REPAIR_QUESTION_AFTER_CONTEMPT_COPY,
       t,
       options?.activeScenario,
     );
+  } else {
+    resolved = coerceIncompleteInterviewClosingForTts(
+      coerceMoment4ThresholdQuestionForTts(
+        coerceScenarioCBoundaryHandoffForTts(t, options?.firstName ?? '', options?.lastUserAnswer),
+      ),
+      options?.firstName ?? '',
+    );
+    resolved = coerceScenarioARepairQuestionForTts(resolved);
+    resolved = coerceScenarioBJamesRepairQuestionForTts(resolved);
+    resolved = coerceScenarioCRepairQuestionForTts(resolved);
+    resolved = coerceRepeatQuestionForActiveScenario(resolved, t, options?.activeScenario);
   }
-  let resolved = coerceIncompleteInterviewClosingForTts(
-    coerceMoment4ThresholdQuestionForTts(
-      coerceScenarioCBoundaryHandoffForTts(t, options?.firstName ?? '', options?.lastUserAnswer),
-    ),
-    options?.firstName ?? '',
-  );
-  resolved = coerceScenarioARepairQuestionForTts(resolved);
-  resolved = coerceScenarioBJamesRepairQuestionForTts(resolved);
-  resolved = coerceScenarioCRepairQuestionForTts(resolved);
-  return coerceRepeatQuestionForActiveScenario(resolved, t, options?.activeScenario);
+  // Repeat should re-ask the question only — not re-speak the prior answer acknowledgment.
+  return stripBriefInterviewAcknowledgmentPrefixForRepeat(resolved);
 }
 
 /**

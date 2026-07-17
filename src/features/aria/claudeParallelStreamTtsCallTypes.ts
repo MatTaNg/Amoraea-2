@@ -50,12 +50,10 @@ export type ClaudeParallelStreamTtsCallDeps = {
   pendingScenarioAContemptProbeStreamMuteRef: MutableRefObject<boolean>;
   pendingS3ToM4HandoffStreamMuteRef: MutableRefObject<boolean>;
   parallelStreamingTtsRef: MutableRefObject<ParallelStreamingTtsState>;
-  webTtsSpeakGenerationRef: MutableRefObject<number>;
-  webTtsTabInterruptPendingReplayRef: MutableRefObject<boolean>;
-  webTtsUtteranceInFlightRef: MutableRefObject<string | null>;
-  webTtsUtteranceInFlightOptionsRef: MutableRefObject<WebTtsUtteranceReplayOptions | null>;
+  ttsSpeakGenerationRef: MutableRefObject<number>;
+  ttsUtteranceInFlightRef: MutableRefObject<string | null>;
+  ttsUtteranceInFlightOptionsRef: MutableRefObject<WebTtsUtteranceReplayOptions | null>;
   ttsLineInFlightRef: MutableRefObject<boolean>;
-  pendingGestureRestoreSpeakRef: MutableRefObject<import('@features/aria/hooks/useAriaInterviewSession').PendingGestureRestoreSpeakEntry | null>;
   currentInterviewMomentRef: MutableRefObject<number>;
   currentScenarioRef: MutableRefObject<number>;
   interviewMomentsCompleteRef: MutableRefObject<Record<number, boolean>>;
@@ -98,7 +96,6 @@ export type ClaudeParallelStreamTtsCallDeps = {
   applyReferenceCardFromAssistantSpeechRef: MutableRefObject<(text: string) => void>;
   speakTextSafe: (text: string, options?: SpeakTextSafeOptions) => Promise<void>;
   setVoiceState: (state: VoiceState) => void;
-  setWebTabGestureRestoreOverlay: (visible: boolean) => void;
   setReferenceCardPrompt: (prompt: string | null) => void;
   setReferenceCardScenario: (
     scenario: import('@app/screens/UserInterviewLayout').ActiveScenario | null,
@@ -112,7 +109,6 @@ export type ClaudeParallelStreamTtsCallDeps = {
     opts?: { afterRecording?: boolean },
   ) => Promise<void>;
   stopElevenLabsPlayback: () => Promise<void>;
-  scheduleWebMicPreInitRefreshAfterTtsCompletes: () => void;
   referenceCardShouldUpdateOnPlaybackStart: (text: string) => boolean;
   ensureCompletedScenarioScored?: (
     completedScenario: 1 | 2 | 3,

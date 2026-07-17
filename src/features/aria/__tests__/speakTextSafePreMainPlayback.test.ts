@@ -10,11 +10,6 @@ jest.mock('react-native', () => ({
   Platform: { OS: 'web' },
 }));
 
-jest.mock('@features/aria/utils/webInterviewPlaybackSurface', () => ({
-  isWebInterviewPlaybackAudiblyActive: jest.fn(() => false),
-  isWebInterviewPlaybackSurfaceActive: jest.fn(() => false),
-}));
-
 jest.mock('@utilities/sessionLogging', () => ({
   getSessionLogRuntime: jest.fn(),
   setRecordingSessionActive: jest.fn(),
@@ -26,10 +21,6 @@ jest.mock('@utilities/sessionLogging/writeSessionLog', () => ({
 }));
 
 import {
-  isWebInterviewPlaybackAudiblyActive,
-  isWebInterviewPlaybackSurfaceActive,
-} from '@features/aria/utils/webInterviewPlaybackSurface';
-import {
   getSessionLogRuntime,
   setRecordingSessionActive,
   setTtsPlaybackActive,
@@ -37,8 +28,6 @@ import {
 import { writeSessionLog } from '@utilities/sessionLogging/writeSessionLog';
 
 const getRuntime = jest.mocked(getSessionLogRuntime);
-const surfaceActive = jest.mocked(isWebInterviewPlaybackSurfaceActive);
-const audiblyActive = jest.mocked(isWebInterviewPlaybackAudiblyActive);
 
 describe('consumePriorRecordingFlagsForTts', () => {
   it('returns and clears prior recording flags', () => {
@@ -103,8 +92,6 @@ describe('drainPriorTtsPlaybackBeforeSpeak', () => {
       recordingSessionActive: false,
       ttsPlaybackActive: false,
     } as ReturnType<typeof getSessionLogRuntime>);
-    surfaceActive.mockReturnValue(false);
-    audiblyActive.mockReturnValue(false);
   });
 
   afterEach(() => {
@@ -133,7 +120,6 @@ describe('drainPriorTtsPlaybackBeforeSpeak', () => {
       recordingSessionActive: false,
       ttsPlaybackActive: true,
     } as ReturnType<typeof getSessionLogRuntime>);
-    surfaceActive.mockReturnValue(true);
 
     const stopElevenLabsPlayback = jest.fn().mockResolvedValue(undefined);
     const ttsLineInFlightRef = { current: true };

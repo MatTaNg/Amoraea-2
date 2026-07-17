@@ -10,14 +10,10 @@ import { runHandleSendTyped } from '@features/aria/runHandleSendTyped';
 import type { HandleSendTypedDeps } from '@features/aria/handleSendTypedTypes';
 import { runDeliverRecordingRetryLine } from '@features/aria/runDeliverRecordingRetryLine';
 import type { DeliverRecordingRetryLineDeps } from '@features/aria/deliverRecordingRetryLineTypes';
-import { runInterruptInterviewTtsForDocumentHidden } from '@features/aria/runInterruptInterviewTtsForDocumentHidden';
-import type { InterruptInterviewTtsForDocumentHiddenDeps } from '@features/aria/interruptDocumentHiddenTtsTypes';
 import { runEnsureValidSession } from '@features/aria/runEnsureValidSession';
 import type { EnsureValidSessionDeps } from '@features/aria/runEnsureValidSession';
 import { runSubmitPostInterviewFeedback } from '@features/aria/runSubmitPostInterviewFeedback';
 import type { SubmitPostInterviewFeedbackDeps } from '@features/aria/submitPostInterviewFeedbackTypes';
-import { runHandleWebResumeWelcomeTap } from '@features/aria/runHandleWebResumeWelcomeTap';
-import type { WebResumeWelcomeTapDeps } from '@features/aria/webResumeWelcomeTapTypes';
 
 export function useInterviewTurnProcessingCallbacks(deps: {
   processUserSpeechDepsRef: React.MutableRefObject<ProcessUserSpeechDeps>;
@@ -71,14 +67,6 @@ export function useDeliverRecordingRetryLine(depsRef: React.MutableRefObject<Del
   );
 }
 
-export function useInterruptInterviewTtsForDocumentHidden(
-  depsRef: React.MutableRefObject<InterruptInterviewTtsForDocumentHiddenDeps>,
-) {
-  return useCallback(() => {
-    runInterruptInterviewTtsForDocumentHidden(depsRef.current);
-  }, [depsRef]);
-}
-
 export function useEnsureValidSessionCallback(depsRef: React.MutableRefObject<EnsureValidSessionDeps>) {
   return useCallback(async () => {
     await runEnsureValidSession(depsRef.current);
@@ -93,8 +81,3 @@ export function useSubmitPostInterviewFeedbackCallback(
   }, [depsRef]);
 }
 
-export function useHandleWebResumeWelcomeTap(depsRef: React.MutableRefObject<WebResumeWelcomeTapDeps>) {
-  return useCallback(async () => {
-    await runHandleWebResumeWelcomeTap(depsRef.current);
-  }, [depsRef]);
-}

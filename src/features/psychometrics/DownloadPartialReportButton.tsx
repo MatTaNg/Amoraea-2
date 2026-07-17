@@ -23,6 +23,8 @@ type Props = {
   scoringReady: boolean;
   variant?: 'primary' | 'secondary';
   style?: ViewStyle;
+  /** Refresh attempt / rollup before regenerating (e.g. InterviewComplete). */
+  onBeforeRetry?: () => void | Promise<void>;
 };
 
 export function DownloadPartialReportButton({
@@ -30,8 +32,9 @@ export function DownloadPartialReportButton({
   scoringReady,
   variant = 'primary',
   style,
+  onBeforeRetry,
 }: Props) {
-  const { status, retry, ensureHtml } = usePrefetchedPartialReport(userId, scoringReady);
+  const { status, errorMessage, retry, ensureHtml } = usePrefetchedPartialReport(userId, scoringReady);
   const [exporting, setExporting] = useState(false);
 
   if (!userId) {
@@ -42,7 +45,7 @@ export function DownloadPartialReportButton({
     setExporting(true);
     try {
       const html = await ensureHtml();
-      await exportReportPdfFromHtml(html);
+      await exportReportPdfFromHtml(html, { reportKind: 'partial' });
 
       if (Platform.OS === 'web') {
         Alert.alert(
@@ -61,6 +64,17 @@ export function DownloadPartialReportButton({
     } finally {
       setExporting(false);
     }
+  }
+
+  async function handleRetry() {
+    try {
+      if (onBeforeRetry) {
+        await onBeforeRetry();
+      }
+    } catch (err) {
+      console.warn('[PartialReport] onBeforeRetry failed:', err);
+    }
+    retry();
   }
 
   const isSecondary = variant === 'secondary';
@@ -94,9 +108,14 @@ export function DownloadPartialReportButton({
           <Text style={styles.sectionHint}>
             We couldn&apos;t generate your partial report. You can try again — this is usually temporary.
           </Text>
+          {errorMessage ? (
+            <Text style={styles.errorDetail} numberOfLines={3}>
+              {errorMessage}
+            </Text>
+          ) : null}
           <TouchableOpacity
             style={isSecondary ? styles.reportButtonSecondary : styles.reportButton}
-            onPress={retry}
+            onPress={() => void handleRetry()}
             accessibilityRole="button"
             accessibilityLabel="Retry generating your partial report"
           >
@@ -177,6 +196,15 @@ const styles = StyleSheet.create({
     color: '#B8C9DC',
     textAlign: 'center',
     marginBottom: 14,
+  },
+  errorDetail: {
+    fontFamily: PSYCHOMETRICS_FONT_BODY,
+    fontSize: 12,
+    lineHeight: 18,
+    color: '#fca5a5',
+    textAlign: 'center',
+    marginBottom: 12,
+    paddingHorizontal: 8,
   },
   loadingCard: {
     flexDirection: 'row',

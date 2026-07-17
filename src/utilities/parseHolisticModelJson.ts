@@ -208,33 +208,36 @@ export function collectJsonObjectsFromModelText(raw: string): unknown[] {
   return unique;
 }
 
+function rankParseableJsonObjectCandidate(obj: unknown): number {
+  if (obj == null || typeof obj !== 'object' || Array.isArray(obj)) return 0;
+  const o = obj as Record<string, unknown>;
+  const keys = Object.keys(o).length;
+  const hasPillar = o.pillarScores != null || o.pillar_scores != null ? 1000 : 0;
+  const hasEvidence = o.keyEvidence != null || o.key_evidence != null ? 500 : 0;
+  const hasMoment = o.momentNumber != null || o.momentName != null ? 200 : 0;
+  return hasPillar + hasEvidence + hasMoment + keys;
+}
+
 /** Parses model output that should be JSON; tolerates ``` fences, leading prose, and stray `{` snippets. */
 export function parseJsonObjectFromModelText(raw: string): unknown {
-  const cleaned = raw.replace(/```json|```/gi, '').trim();
-  try {
-    return JSON.parse(cleaned);
-  } catch {
-    /* fall through */
+  const unique = collectJsonObjectsFromModelText(raw);
+  if (unique.length === 0) {
+    throw new SyntaxError('no JSON object found in model output (expected { … })');
   }
-  let searchFrom = 0;
-  let lastErr = 'no JSON object found in model output (expected { … })';
-  const maxTries = 100;
-  for (let t = 0; t < maxTries; t++) {
-    const start = cleaned.indexOf('{', searchFrom);
-    if (start < 0) break;
-    const extracted = extractBalancedJsonObjectFrom(cleaned, start);
-    if (!extracted) {
-      searchFrom = start + 1;
-      continue;
-    }
-    try {
-      return JSON.parse(extracted);
-    } catch (e) {
-      lastErr = e instanceof Error ? e.message : String(e);
-      searchFrom = start + 1;
+  if (unique.length === 1) return unique[0];
+  // Truncated responses often balance nested objects first (e.g. pillarScores) before the outer `{…}`.
+  // Prefer the richest candidate when multiple regions parse.
+  let best = unique[0]!;
+  let bestRank = rankParseableJsonObjectCandidate(best);
+  for (let i = 1; i < unique.length; i++) {
+    const c = unique[i]!;
+    const r = rankParseableJsonObjectCandidate(c);
+    if (r > bestRank) {
+      bestRank = r;
+      best = c;
     }
   }
-  throw new SyntaxError(lastErr);
+  return best;
 }
 
 /**

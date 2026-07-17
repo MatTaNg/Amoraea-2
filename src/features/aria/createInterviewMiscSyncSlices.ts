@@ -35,16 +35,24 @@ export function createShowChatErrorSyncSlice(params: SyncExtraParams): SyncExtra
 }
 
 export function createApplyInterviewSpeechCompleteSyncSlice(params: SyncExtraParams): SyncExtraParams {
+  const hasScenarioRefSync =
+    params.currentScenarioRef != null &&
+    params.currentInterviewMomentRef != null &&
+    params.interviewMomentsCompleteRef != null &&
+    params.resumeActiveScenarioRef != null;
   return {
-    webTtsTabInterruptPendingReplayRef: params.webTtsTabInterruptPendingReplayRef,
     applyReferenceCardFromAssistantSpeech: params.applyReferenceCardFromAssistantSpeech,
-    scenarioRefSync: {
-      currentScenarioRef: params.currentScenarioRef,
-      currentInterviewMomentRef: params.currentInterviewMomentRef,
-      interviewMomentsCompleteRef: params.interviewMomentsCompleteRef,
-      resumeActiveScenarioRef: params.resumeActiveScenarioRef,
-      interviewSessionIdRef: params.interviewSessionIdRef,
-    },
+    ...(hasScenarioRefSync
+      ? {
+          scenarioRefSync: {
+            currentScenarioRef: params.currentScenarioRef,
+            currentInterviewMomentRef: params.currentInterviewMomentRef,
+            interviewMomentsCompleteRef: params.interviewMomentsCompleteRef,
+            resumeActiveScenarioRef: params.resumeActiveScenarioRef,
+            interviewSessionIdRef: params.interviewSessionIdRef,
+          },
+        }
+      : {}),
   };
 }
 

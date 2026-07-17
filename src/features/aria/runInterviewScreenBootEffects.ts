@@ -39,7 +39,7 @@ export function runLogAriaScreenMounted(
 }
 
 export function runBumpAriaScreenMountGeneration(
-  bumpAriaScreenMountGeneration: AriaScreenBootEffectsDeps['bumpAriaScreenMountGeneration'],
+  _bumpAriaScreenMountGeneration: AriaScreenBootEffectsDeps['bumpAriaScreenMountGeneration'],
 ): void {
-  bumpAriaScreenMountGeneration();
+  /* no-op — browser mount-generation gesture tracking removed */
 }

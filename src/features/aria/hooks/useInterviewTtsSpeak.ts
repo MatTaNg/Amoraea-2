@@ -1,6 +1,6 @@
 import { useCallback } from 'react';
-import { Platform } from 'react-native';
 
+import { isNonRepeatableAssistantLineForVerbatimReplay } from '@features/aria/interviewDisengagementProbes';
 import {
   SCENARIO_SPLIT_INTER_SEGMENT_GAP_MS,
   type InterviewTtsSpeakOpts,
@@ -12,12 +12,9 @@ import { prepareInterviewTtsPlayback, setPlaybackMode } from '@features/aria/uti
 import { fetchElevenLabsMpegArrayBuffer } from '@features/aria/utils/elevenLabsTtsFetch';
 import { speakWithElevenLabs } from '@features/aria/utils/speakWithElevenLabsCore';
 import { stopElevenLabsPlayback } from '@features/aria/utils/elevenLabsTtsPlaybackStop';
-import { isPreAuthorizedAudioPendingForNextTts } from '@features/aria/utils/webPreAuthorizedTtsAudio';
-import type { PreInitTriggerDuring } from '@features/aria/utils/webInterviewMicPreInit';
-import { getLastWebInterviewUserGestureMs } from '@features/aria/utils/webInterviewGestureContext';
+import type { PreInitTriggerDuring } from '@features/aria/utils/interviewMicPreInitTypes';
 import type { VoiceState } from '@features/aria/hooks/useAriaInterviewSession';
-import { getSessionLogRuntime, markQuestionDelivered } from '@utilities/sessionLogging';
-import { writeSessionLog } from '@utilities/sessionLogging/writeSessionLog';
+import { markQuestionDelivered } from '@utilities/sessionLogging';
 
 export type UseInterviewTtsSpeakDeps = {
   awaitTtsScreenReadyGate: (reason: string) => Promise<void>;
@@ -38,7 +35,7 @@ export function useInterviewTtsSpeak(deps: UseInterviewTtsSpeakDeps) {
   const {
     awaitTtsScreenReadyGate,
     setVoiceState,
-    userIdRef,
+    userIdRef: _userIdRef,
     lastQuestionTextRef,
     isSpeakingRef,
     timingRef,
@@ -52,49 +49,21 @@ export function useInterviewTtsSpeak(deps: UseInterviewTtsSpeakDeps) {
       if (!speakOpts?.prefetchedMpegArrayBuffer?.byteLength) {
         await stopElevenLabsPlayback();
       }
-      if (!speakOpts?.skipLastQuestionRef) {
+      if (
+        !speakOpts?.skipLastQuestionRef &&
+        !isNonRepeatableAssistantLineForVerbatimReplay(text)
+      ) {
         lastQuestionTextRef.current = text;
       }
       setVoiceState('processing');
       isSpeakingRef.current = true;
       const telemetrySource: TtsTelemetrySource = speakOpts?.telemetrySource ?? 'other';
-      const ttsTriggerSource:
-        | 'gesture_handler'
-        | 'effect'
-        | 'callback'
-        | 'timeout'
-        | 'preauthorized_element' =
-        Platform.OS === 'web' && isPreAuthorizedAudioPendingForNextTts()
-          ? 'preauthorized_element'
-          : (speakOpts?.ttsTriggerSource ?? 'callback');
       const preInitTriggerDuring: PreInitTriggerDuring =
         speakOpts?.preInitTriggerDuring ??
         (telemetrySource === 'greeting' ? 'greeting' : 'tts_playback');
       const split = trySplitFictionalScenarioIntroLongDelivery(text);
-      const logWebFirstAudioPlay = () => {
-        if (Platform.OS !== 'web') return;
-        const uid = userIdRef.current;
-        const anchor = getLastWebInterviewUserGestureMs();
-        const gestureToPlayMs = anchor != null ? Date.now() - anchor : null;
-        if (uid) {
-          const r = getSessionLogRuntime();
-          writeSessionLog({
-            userId: uid,
-            attemptId: r.attemptId,
-            eventType: 'tts_first_audio_play',
-            eventData: {
-              gesture_to_play_ms: gestureToPlayMs,
-              telemetry_source: telemetrySource,
-              tts_trigger_source: ttsTriggerSource,
-              gesture_to_play_exceeds_100ms: gestureToPlayMs != null && gestureToPlayMs > 100,
-            },
-            platform: r.platform,
-          });
-        }
-      };
       const firePlaybackStarted = () => {
         setVoiceState('speaking');
-        logWebFirstAudioPlay();
         speakOpts?.onPlaybackStarted?.();
       };
       try {
@@ -163,7 +132,6 @@ export function useInterviewTtsSpeak(deps: UseInterviewTtsSpeakDeps) {
       setVoiceState,
       timingRef,
       trySplitFictionalScenarioIntroLongDelivery,
-      userIdRef,
     ],
   );
 

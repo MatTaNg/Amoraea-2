@@ -7,6 +7,7 @@ import {
   sanitizeMoment5PersonalScoresForAggregate,
   sanitizePersonalMomentScoresForAggregate,
 } from '@features/aria/personalMomentSliceSanitize';
+import { sanitizeScenarioScoreBundleForPersist } from '@features/aria/sanitizeScenarioKeyEvidenceForPersist';
 import type { AttemptScoringBaseline } from '@utilities/persistPersonalMomentScoresIncremental';
 import {
   resolveResponseTimingsForPersist,

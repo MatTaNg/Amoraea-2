@@ -1,6 +1,5 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import {
-  SafeAreaView,
   ScrollView,
   Text,
   View,
@@ -8,7 +7,9 @@ import {
   ActivityIndicator,
   TouchableOpacity,
 } from 'react-native';
+import { SafeAreaContainer } from '@ui/components/SafeAreaContainer';
 import { FlameOrb } from '@app/screens/FlameOrb';
+import { INTRO_FLAME_ORB_SIZE } from '@app/screens/flameOrbLogo';
 import { useAuth } from '@/shared/hooks/AuthProvider';
 import { isAmoraeaAdminConsoleEmail } from '@/constants/adminConsole';
 import { finalizeGateResultAfterPsychometrics } from '@features/onboarding/finalizeGateResultAfterPsychometrics';
@@ -88,21 +89,21 @@ export function PsychometricsCompleteScreen({ navigation, route }: Props) {
 
   if (!PSYCHOMETRICS_ENABLED) {
     return (
-      <SafeAreaView style={styles.container}>
+      <SafeAreaContainer style={styles.container}>
         <View style={styles.center}>
           <TouchableOpacity style={styles.cta} onPress={advanceToFullReport}>
             <Text style={styles.ctaText}>Continue</Text>
           </TouchableOpacity>
         </View>
-      </SafeAreaView>
+      </SafeAreaContainer>
     );
   }
 
   return (
-    <SafeAreaView style={styles.container}>
+    <SafeAreaContainer style={styles.container}>
       <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
         <View style={styles.logoWrap}>
-          <FlameOrb state="idle" size={72} minimalGlow />
+          <FlameOrb state="idle" size={INTRO_FLAME_ORB_SIZE} minimalGlow />
         </View>
 
         <Text style={styles.eyebrow}>Assessment Complete</Text>
@@ -133,7 +134,7 @@ export function PsychometricsCompleteScreen({ navigation, route }: Props) {
           </TouchableOpacity>
         ) : null}
       </ScrollView>
-    </SafeAreaView>
+    </SafeAreaContainer>
   );
 }
 

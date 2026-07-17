@@ -176,9 +176,6 @@ export async function runAwaitEmotionModalForIndex(
       emotionModalPendingTransitionRef.current = true;
       setEmotionModalItemIndex(itemIndex as 0 | 1 | 2);
       setEmotionModalVisible(true);
-      // #region agent log
-      fetch('http://127.0.0.1:7668/ingest/668e0bd5-3283-4492-9f48-e33846c18218',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'28d27a'},body:JSON.stringify({sessionId:'28d27a',location:'runEmotionModalOrchestration.ts:visible',message:'emotion_modal_visible_set',data:{itemIndex},timestamp:Date.now(),hypothesisId:'H4'})}).catch(()=>{});
-      // #endregion
       console.log('[EmotionModal] setEmotionModalVisible(true) called');
 
       console.log('[EmotionModal] modal set visible for index:', itemIndex);
@@ -216,11 +213,7 @@ export async function runEmotionModalAfterScenarioTransition(
   scenarioNum: 1 | 2 | 3,
   opts?: EmotionModalAfterScenarioTransitionOpts,
 ): Promise<void> {
-  const {
-    emotionModalShownForScenarioRef,
-    waitForWebInterviewTtsQuiescentBeforeEmotionModal,
-    waitForWebInterviewTtsAudiblePlaybackBeforeEmotionModal,
-  } = deps;
+  const { emotionModalShownForScenarioRef } = deps;
       void remoteLog('[EMOTION_MODAL] transition_modal_attempt', {
         scenarioNum,
         priorScenario: opts?.priorScenario ?? null,
@@ -244,22 +237,6 @@ export async function runEmotionModalAfterScenarioTransition(
       }
       if (emotionModalShownForScenarioRef.current.has(completed)) {
         void remoteLog('[EMOTION_MODAL] transition_modal_skip_duplicate', { completed });
-        return;
-      }
-      // #region agent log
-      const _modalWaitStartedAt = Date.now();
-      fetch('http://127.0.0.1:7668/ingest/668e0bd5-3283-4492-9f48-e33846c18218',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'28d27a'},body:JSON.stringify({sessionId:'28d27a',location:'runEmotionModalOrchestration.ts:pre_wait',message:'emotion_modal_pre_tts_wait',data:{completed,afterBeforeModalPlayback:!!opts?.afterBeforeModalPlayback,waitMode:opts?.afterBeforeModalPlayback?'audible':'quiescent'},timestamp:_modalWaitStartedAt,hypothesisId:'H1,H4'})}).catch(()=>{});
-      // #endregion
-      if (opts?.afterBeforeModalPlayback) {
-        await waitForWebInterviewTtsAudiblePlaybackBeforeEmotionModal();
-      } else {
-        await waitForWebInterviewTtsQuiescentBeforeEmotionModal();
-      }
-      // #region agent log
-      fetch('http://127.0.0.1:7668/ingest/668e0bd5-3283-4492-9f48-e33846c18218',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'28d27a'},body:JSON.stringify({sessionId:'28d27a',location:'runEmotionModalOrchestration.ts:post_wait',message:'emotion_modal_post_tts_wait',data:{completed,waitMs:Date.now()-_modalWaitStartedAt},timestamp:Date.now(),hypothesisId:'H1,H4'})}).catch(()=>{});
-      // #endregion
-      if (emotionModalShownForScenarioRef.current.has(completed)) {
-        void remoteLog('[EMOTION_MODAL] transition_modal_skip_duplicate_post_quiesce', { completed });
         return;
       }
       emotionModalShownForScenarioRef.current.add(completed);

@@ -2,6 +2,7 @@ import { describe, expect, it } from '@jest/globals';
 import {
   applyMoment5PostParseCoercionAndSalvage,
   backfillMoment5KeyEvidenceIfScoresOtherwiseUnpersistable,
+  coerceMoment5ParsedModelRecord,
   finalizeMoment5ParsedModelScore,
   mergeMoment5PillarScoresAfterEvidenceNormalize,
   moment5PrimaryParseIsComplete,
@@ -10,6 +11,7 @@ import {
   salvagePersonalMomentDepthFieldsFromRawModelText,
 } from '../moment5ScoringParse';
 import { MOMENT_5_ACCOUNTABILITY_QUESTION_TEXT } from '@features/aria/moment5ProbeCopy';
+import { parseJsonObjectFromModelText } from '@utilities/parseHolisticModelJson';
 
 const M5_SUBSTANTIVE_USER =
   'I had a long conflict with my friend after missing her wedding rehearsal and we eventually talked it through over coffee.';
@@ -136,5 +138,52 @@ describe('moment5ScoringParse', () => {
     const scoredVia = finalizeMoment5ParsedModelScore(raw, parsed, thinGuard);
     expect(scoredVia).toBe('recovery');
     expect(parsed.keyEvidence).toEqual({});
+  });
+
+  it('lifts flat pillarScores when truncated JSON parses the nested scores object as root', () => {
+    // Session ef5ea437: max_tokens cut mid-keyEvidence; only nested {accountability:6,...} balances.
+    const truncated = `\`\`\`json
+{
+  "momentNumber": 5,
+  "momentName": "Moment 5 (Personal Conflict / Accountability)",
+  "pillarScores": {
+    "accountability": 6,
+    "mentalizing": 5,
+    "repair": 5,
+    "regulation": 5,
+    "contempt_expression": 7
+  },
+  "pillarConfidence": {
+    "accountability": "high",
+    "mentalizing": "medium",
+    "repair": "medium",
+    "regulation": "medium",
+    "contempt_expression": "high"
+  },
+  "keyEvidence": {
+    "accountability": "MODERATE accountability band. The participant's f`;
+    const parsedRoot = parseJsonObjectFromModelText(truncated) as Record<string, unknown>;
+    expect(parsedRoot.pillarScores).toBeUndefined();
+    expect(parsedRoot.accountability).toBe(6);
+
+    const coerced = coerceMoment5ParsedModelRecord(parsedRoot);
+    expect(coerced.pillarScores).toEqual(
+      expect.objectContaining({
+        accountability: 6,
+        mentalizing: 5,
+        repair: 5,
+        regulation: 5,
+        contempt_expression: 7,
+      }),
+    );
+
+    const scoredVia = finalizeMoment5ParsedModelScore(truncated, parsedRoot, M5_TEST_GUARD, {
+      parsedSnapshot: { pillarScores: parsedRoot.pillarScores, keyEvidence: parsedRoot.keyEvidence },
+    });
+    // Flat scores lift + transcript quote backfill → primary (session previously hit recovery via empty {}).
+    expect(scoredVia).toBe('primary');
+    expect(parsedRoot.pillarScores).toEqual(
+      expect.objectContaining({ accountability: 6, contempt_expression: 7 }),
+    );
   });
 });

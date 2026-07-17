@@ -10,7 +10,7 @@ export const ariaPreInterviewStyles = {
     width: '100%',
     alignSelf: 'center',
   },
-  preInterviewLogoWrap: { alignItems: 'center', marginBottom: spacing.md },
+  preInterviewLogoWrap: { alignItems: 'center', marginBottom: spacing.lg },
   preInterviewMainTitle: {
     fontSize: 24,
     fontWeight: '700',

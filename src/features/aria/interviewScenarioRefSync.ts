@@ -47,7 +47,6 @@ export type SessionSpokenDeliveryHints = {
   };
   lastQuestionTextRef?: { current: string | null };
   webTabRestoreDeliveredNormRef?: { current: string | null };
-  pendingGestureRestoreSpeakRef?: { current: { text?: string | null } | null };
   extraTexts?: readonly string[];
 };
 
@@ -56,18 +55,15 @@ export type PreClaudeSessionSpokenDeliverySource = Pick<
   | 'parallelStreamingTtsRef'
   | 'lastQuestionTextRef'
   | 'webTabRestoreDeliveredNormRef'
-  | 'pendingGestureRestoreSpeakRef'
 >;
 
 export function buildPreClaudeSessionSpokenDeliveryHints(
   deps: PreClaudeSessionSpokenDeliverySource,
 ): SessionSpokenDeliveryHints {
-  const pendingText = deps.pendingGestureRestoreSpeakRef?.current?.text?.trim();
   return {
     parallelStreamingTtsRef: deps.parallelStreamingTtsRef,
     lastQuestionTextRef: deps.lastQuestionTextRef,
     webTabRestoreDeliveredNormRef: deps.webTabRestoreDeliveredNormRef,
-    extraTexts: pendingText ? [pendingText] : undefined,
   };
 }
 
@@ -103,6 +99,16 @@ export function advanceInterviewScenarioRefsAfterCanonicalShowScenarioCard(
   deps: InterviewScenarioRefSyncTarget,
   kind: 'situation_2' | 'situation_3' | 'moment_4',
 ): { advanced: boolean; effectiveScenario: 1 | 2 | 3 } {
+  if (!deps.currentScenarioRef || !deps.currentInterviewMomentRef || !deps.interviewMomentsCompleteRef) {
+    void remoteLog('[SCENARIO_REFS_ADVANCE_SKIPPED_MISSING_REFS]', {
+      kind,
+      interviewSessionId: deps.interviewSessionIdRef?.current ?? null,
+      hasCurrentScenarioRef: !!deps.currentScenarioRef,
+      hasMomentRef: !!deps.currentInterviewMomentRef,
+      hasMomentsCompleteRef: !!deps.interviewMomentsCompleteRef,
+    });
+    return { advanced: false, effectiveScenario: 3 };
+  }
   if (kind === 'moment_4') {
     deps.interviewMomentsCompleteRef.current[3] = true;
     deps.currentInterviewMomentRef.current = 4;
@@ -149,7 +155,9 @@ function advanceInterviewScenarioRefsTo(
   }
   deps.currentInterviewMomentRef.current = effectiveScenario;
   deps.currentScenarioRef.current = effectiveScenario;
-  deps.resumeActiveScenarioRef.current = effectiveScenario;
+  if (deps.resumeActiveScenarioRef) {
+    deps.resumeActiveScenarioRef.current = effectiveScenario;
+  }
   void remoteLog(source, {
     interviewSessionId: deps.interviewSessionIdRef?.current ?? null,
     fromScenario: currentScenario,
@@ -167,6 +175,9 @@ export function syncInterviewScenarioRefsFromSpokenDelivery(
   deps: InterviewScenarioRefSyncTarget,
   hints: SessionSpokenDeliveryHints,
 ): { advanced: boolean; effectiveScenario: 1 | 2 | 3 } {
+  if (!deps.currentScenarioRef || !deps.currentInterviewMomentRef || !deps.interviewMomentsCompleteRef) {
+    return { advanced: false, effectiveScenario: 1 };
+  }
   const inferred = inferScenarioFromSpokenDeliveryTexts(collectSessionSpokenDeliveryTexts(hints));
   if (!inferred) {
     const currentScenario =

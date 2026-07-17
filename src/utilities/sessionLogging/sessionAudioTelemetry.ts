@@ -6,11 +6,6 @@ import {
   getInterviewSessionVadThresholdFloored,
   getInterviewSessionVadThresholdUnusuallyHigh,
 } from '@features/aria/utils/interviewVadSession';
-import {
-  getLastPreInitTriggerDuring,
-  takeRecorderRefreshedOnLateStartForTelemetry,
-} from '@features/aria/utils/webInterviewMicPreInit';
-import { takeRecordingStartPreauthorizedFlag } from '@features/aria/utils/webPreAuthorizedTtsAudio';
 import { takeSessionResumedForFirstRecordingStart } from '@utilities/sessionLogging/sessionResumeRecordingTelemetry';
 import { getSessionLogRuntime } from './sessionLogContext';
 import { getAudioCorrelationFields, type SessionOutputRouteLabel } from './audioSessionLogEnvelope';
@@ -102,9 +97,9 @@ export function gatherRecordingStartTelemetry(): AudioSessionTelemetryPayload {
     ambient_noise_fallback: getInterviewSessionAmbientNoiseFallback(),
     vad_threshold_floored: getInterviewSessionVadThresholdFloored(),
     vad_threshold_unusually_high: getInterviewSessionVadThresholdUnusuallyHigh(),
-    pre_init_triggered_during: getLastPreInitTriggerDuring(),
-    audio_element_preauthorized: takeRecordingStartPreauthorizedFlag(),
-    recorder_refreshed_on_late_start: takeRecorderRefreshedOnLateStartForTelemetry(),
+    pre_init_triggered_during: null,
+    audio_element_preauthorized: false,
+    recorder_refreshed_on_late_start: false,
     session_resumed: takeSessionResumedForFirstRecordingStart(),
   };
 }

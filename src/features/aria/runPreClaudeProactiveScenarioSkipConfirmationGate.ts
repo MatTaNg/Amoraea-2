@@ -52,6 +52,7 @@ export async function runPreClaudeProactiveScenarioSkipConfirmationGate(
   await deps.speakTextSafe(SCENARIO_SKIP_CONFIRMATION_PROMPT_LINE, {
     ...ASSISTANT_INTERVIEW_SPEECH,
     allowDuplicateConsecutiveTts: true,
+    skipLastQuestionRef: true,
   });
   return finishPreClaudeSkipInjectionTurn(deps);
 }

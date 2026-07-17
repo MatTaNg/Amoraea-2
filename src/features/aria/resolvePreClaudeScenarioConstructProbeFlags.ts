@@ -1,4 +1,5 @@
 import { isDecline } from '@features/aria/interviewControlTokens';
+import { looksLikeUnassessableScenarioAnswer } from '@features/aria/interviewAnswerRelevance';
 import type { MessageWithScenario } from '@features/aria/interviewScenarioScoringSlice';
 import type { PreClaudeTurnGateDeps } from '@features/aria/preClaudeTurnGateTypes';
 import {
@@ -111,15 +112,23 @@ export function resolvePreClaudeScenarioConstructProbeFlags(
   }
   const scenarioAContemptProbeCoverage = legacyScenarioAQ1ContemptCoverage || scenarioAQ1PreProbeSkip.skip;
   const specificEmmaLineAlreadyAddressed = scenarioAContemptProbeCoverage;
+  // Character names (e.g. "Ryan") can look "engaged" while the utterance is still a cut-off
+  // ("If I were Ryan, I would") — never force construct advance without scorable material.
+  const unassessableAnswer = looksLikeUnassessableScenarioAnswer(trimmed);
   const shouldForceScenarioAContemptProbe =
+    !unassessableAnswer &&
     !suppressForcedConstructProbesForMetaFrustration &&
     replyingToScenarioAQ1 &&
     !isDecline(trimmed) &&
     !scenarioAContemptProbeCoverage &&
     !deps.scenarioAContemptProbeAskedRef.current;
+  // Mute only when we still need the contempt probe — not when Q1 already covered Emma's line
+  // (otherwise client-owned delivery treated mute as a force and re-asked the probe).
   const muteParallelTtsForScenarioAContemptProbeStream =
+    !unassessableAnswer &&
     deps.currentInterviewMomentRef.current === 1 &&
     !deps.scenarioAContemptProbeAskedRef.current &&
+    !scenarioAContemptProbeCoverage &&
     (replyingToScenarioAQ1 || shouldForceScenarioAContemptProbe) &&
     !isDecline(trimmed);
   if (muteParallelTtsForScenarioAContemptProbeStream) {
@@ -146,13 +155,15 @@ export function resolvePreClaudeScenarioConstructProbeFlags(
     suppressForcedConstructProbesForMetaFrustration,
     repairProbeDelivered: deps.s3RepairProbeDeliveredRef?.current ?? false,
   });
-  const muteParallelTtsForS3ToM4HandoffStream = shouldMuteParallelTtsForS3ToM4HandoffStream({
-    currentMoment: deps.currentInterviewMomentRef.current,
-    currentScenario: deps.currentScenarioRef.current,
-    lastAssistantContent,
-    messagesToUse,
-    shouldForceScenarioCRepairProbe,
-  });
+  const muteParallelTtsForS3ToM4HandoffStream =
+    !unassessableAnswer &&
+    shouldMuteParallelTtsForS3ToM4HandoffStream({
+      currentMoment: deps.currentInterviewMomentRef.current,
+      currentScenario: deps.currentScenarioRef.current,
+      lastAssistantContent,
+      messagesToUse,
+      shouldForceScenarioCRepairProbe,
+    });
   if (muteParallelTtsForS3ToM4HandoffStream) {
     deps.pendingS3ToM4HandoffStreamMuteRef.current = true;
     void remoteLog('[S3_TO_M4_HANDOFF_STREAM_MUTE_ARMED_PRE_CLAUDE]', {
@@ -175,29 +186,35 @@ export function resolvePreClaudeScenarioConstructProbeFlags(
   const sidedEntirelyWithJames = userSidesEntirelyWithJames(trimmed);
   const scenarioBQ1Engaged = hasScenarioBQ1OnTopicEngagement(trimmed);
   const shouldForceScenarioBFullAppreciationProbe =
+    !unassessableAnswer &&
     !suppressForcedConstructProbesForMetaFrustration &&
     replyingToScenarioBQ1 &&
     !isDecline(trimmed) &&
     !sidedEntirelyWithJames &&
     !scenarioBQ1Engaged;
-  const shouldForceScenarioBJamesRepairProbe = evaluateScenarioBJamesRepairProbeEligibility({
-    currentMoment: deps.currentInterviewMomentRef.current,
-    messages: messagesToUse,
-    lastAssistantContent,
-    userAnswer: trimmed,
-    suppressForcedConstructProbesForMetaFrustration,
-  });
-  const allowScenarioARepairAfterContemptAnswer = shouldAllowScenarioARepairAfterContemptAnswer({
-    currentScenario: deps.currentScenarioRef.current,
-    currentMoment: deps.currentInterviewMomentRef.current,
-    scenarioAContemptProbeAsked: deps.scenarioAContemptProbeAskedRef.current,
-    scenarioARepairQuestionAsked: deps.scenarioARepairQuestionAskedRef.current,
-    replyingToScenarioAQ1,
-    specificEmmaLineAlreadyAddressed,
-    shouldForceScenarioAContemptProbe,
-    messagesToUse,
-    lastDeliveredQuestionText: deps.lastQuestionTextRef.current,
-  });
+  const shouldForceScenarioBJamesRepairProbe =
+    !unassessableAnswer &&
+    evaluateScenarioBJamesRepairProbeEligibility({
+      currentMoment: deps.currentInterviewMomentRef.current,
+      messages: messagesToUse,
+      lastAssistantContent,
+      userAnswer: trimmed,
+      suppressForcedConstructProbesForMetaFrustration,
+    });
+  const allowScenarioARepairAfterContemptAnswer =
+    !unassessableAnswer &&
+    shouldAllowScenarioARepairAfterContemptAnswer({
+      currentScenario: deps.currentScenarioRef.current,
+      currentMoment: deps.currentInterviewMomentRef.current,
+      scenarioAContemptProbeAsked: deps.scenarioAContemptProbeAskedRef.current,
+      scenarioARepairQuestionAsked: deps.scenarioARepairQuestionAskedRef.current,
+      replyingToScenarioAQ1,
+      specificEmmaLineAlreadyAddressed,
+      shouldForceScenarioAContemptProbe,
+      messagesToUse,
+      lastDeliveredQuestionText: deps.lastQuestionTextRef.current,
+      userAnswer: trimmed,
+    });
 
   return {
     replyingToScenarioAQ1,
@@ -207,8 +224,9 @@ export function resolvePreClaudeScenarioConstructProbeFlags(
     shouldForceScenarioAContemptProbe,
     shouldForceScenarioBFullAppreciationProbe,
     shouldForceScenarioBJamesRepairProbe,
-    shouldForceScenarioCRepairProbe,
-    shouldForceScenarioCSophiePerspectiveProbe,
+    shouldForceScenarioCRepairProbe: !unassessableAnswer && shouldForceScenarioCRepairProbe,
+    shouldForceScenarioCSophiePerspectiveProbe:
+      !unassessableAnswer && shouldForceScenarioCSophiePerspectiveProbe,
     specificEmmaLineAlreadyAddressed,
     sidedEntirelyWithJames,
     scenarioBQ1Engaged,

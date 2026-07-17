@@ -79,7 +79,6 @@ export type PreClaudeTurnGateDeps = {
   setStatus: React.Dispatch<React.SetStateAction<InterviewSessionStatus>>;
   setTouchedConstructs: React.Dispatch<React.SetStateAction<number[]>>;
   setUsedPersonalExamples: React.Dispatch<React.SetStateAction<boolean>>;
-  setWebTabGestureRestoreOverlay: (visible: boolean) => void;
   setReferenceCardPrompt: (prompt: string | null) => void;
   setReferenceCardScenario?: (scenario: import('@app/screens/UserInterviewLayout').ActiveScenario | null) => void;
   setInterviewUiPhase?: (phase: import('@features/aria/sessionLifecycleTypes').InterviewUiPhase) => void;
@@ -135,10 +134,9 @@ export type PreClaudeTurnGateDeps = {
   lastQuestionTextRef: MutableRefObject<string>;
   parallelStreamingTtsRef: MutableRefObject<ParallelStreamingTtsState>;
   webTabRestoreDeliveredNormRef?: MutableRefObject<string | null>;
-  pendingGestureRestoreSpeakRef?: MutableRefObject<{ text?: string | null } | null>;
   /** Optional: readiness→S1 HTML speak arms these for tab-hide Tap-to-continue. */
   ttsLineInFlightRef?: MutableRefObject<boolean>;
-  webTtsUtteranceInFlightRef?: MutableRefObject<string | null>;
+  ttsUtteranceInFlightRef?: MutableRefObject<string | null>;
   interviewSessionIdRef: MutableRefObject<string>;
   interviewSessionAttemptIdRef: MutableRefObject<string | null>;
   interviewAttemptCreationInFlightRef: MutableRefObject<boolean>;
@@ -189,6 +187,7 @@ export type PreClaudeTurnGateDeps = {
   moment4ExpectingPostSpecificityUserTurnRef: MutableRefObject<boolean>;
   moment4PostGrudgeSpecificityResolvedRef: MutableRefObject<boolean>;
   moment4SpecificityScoringRef: MutableRefObject<unknown>;
+  deferredMoment4NarrativeRef: MutableRefObject<string | null>;
   moment5AccountabilityProbeFiredRef: MutableRefObject<boolean>;
   moment5PostPromptUserTurnCountRef: MutableRefObject<number>;
   moment5PrimaryAnchorDeliveredSessionRef: MutableRefObject<boolean>;
@@ -230,8 +229,6 @@ export type PreClaudeTurnGateDeps = {
   responseTimingsRef: MutableRefObject<unknown[]>;
   timingRef: MutableRefObject<unknown>;
   resumeLoadingFlowActiveRef: MutableRefObject<boolean>;
-  webResumeWelcomeTapPendingRef: MutableRefObject<boolean>;
   resumeOfferWelcomeTtsRef: MutableRefObject<boolean>;
-  webResumeWelcomeTapHandledRef: MutableRefObject<boolean>;
   interviewUserTurnEpochRef: MutableRefObject<number>;
 };

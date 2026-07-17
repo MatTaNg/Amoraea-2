@@ -8,27 +8,22 @@ import type {
   AriaInterviewGateMomentsLocalScope,
   AriaInterviewGateProgressResetLocalScope,
   AriaInterviewGateResumeEmotionLocalScope,
+  AriaInterviewGateWebTtsLocalScope,
 } from '@features/aria/buildAriaInterviewGateLocalSyncScope';
-import type { AriaInterviewGateWebTtsSyncScope } from '@features/aria/ariaInterviewGateSyncScopeTypes';
 import { RESUME_WELCOME_BACK_MESSAGE } from '@features/aria/interviewMomentScenarioConfig';
 import type { AriaInterviewDepsSyncContext } from '@features/aria/syncAriaInterviewDepsRefs';
-import type { ResetInterviewProgressRefsDeps } from '@features/aria/interviewProgressResetTypes';
-import type { GestureContextLostReason } from '@features/aria/utils/webInterviewGestureContext';
-import type { MutableRefObject } from 'react';
 
 export type AriaInterviewGateScreenRefsInput = {
   identity: Omit<AriaInterviewGateIdentityLocalScope, 'resumeWelcomeBackMessage'>;
   closing: AriaInterviewDepsSyncContext;
   metaSkip: AriaInterviewGateMetaSkipLocalScope;
   moments: AriaInterviewGateMomentsLocalScope;
-  webTts: Omit<AriaInterviewGateWebTtsSyncScope, 'gestureContextLostAtRef'> & {
-    gestureContextLostAtRef: MutableRefObject<{ atMs: number; reason: GestureContextLostReason } | null>;
-  };
+  webTts: AriaInterviewGateWebTtsLocalScope;
   resumeEmotion: AriaInterviewGateResumeEmotionLocalScope;
   progressReset: AriaInterviewGateProgressResetLocalScope;
 };
 
-/** Assemble grouped gate screen scope from live refs (injects resume welcome copy + webTts cast). */
+/** Assemble grouped gate screen scope from live refs (injects resume welcome copy). */
 export function buildAriaInterviewGateScreenScopeInputFromRefs(
   refs: AriaInterviewGateScreenRefsInput,
 ): AriaInterviewGateScreenScopeInput {
@@ -40,11 +35,7 @@ export function buildAriaInterviewGateScreenScopeInputFromRefs(
     closing: refs.closing,
     metaSkip: refs.metaSkip,
     moments: refs.moments,
-    webTts: {
-      ...refs.webTts,
-      gestureContextLostAtRef:
-        refs.webTts.gestureContextLostAtRef as ResetInterviewProgressRefsDeps['gestureContextLostAtRef'],
-    },
+    webTts: refs.webTts,
     resumeEmotion: refs.resumeEmotion,
     progressReset: refs.progressReset,
   };

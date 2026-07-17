@@ -38,7 +38,7 @@ export type InterviewTtsSpeakOpts = {
   telemetrySource?: TtsTelemetrySource;
   skipQuestionTiming?: boolean;
   skipLastQuestionRef?: boolean;
-  preInitTriggerDuring?: import('@features/aria/utils/webInterviewMicPreInit').PreInitTriggerDuring;
+  preInitTriggerDuring?: import('@features/aria/utils/interviewMicPreInitTypes').PreInitTriggerDuring;
   skipPcmStream?: boolean;
   prefetchedMpegArrayBuffer?: ArrayBuffer;
   afterRecordingForScenarioSplitSeg2?: boolean;

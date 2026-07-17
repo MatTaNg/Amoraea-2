@@ -1,5 +1,5 @@
 import { renderHook, act } from '@testing-library/react-native';
-import { InteractionManager, Platform } from 'react-native';
+import { InteractionManager } from 'react-native';
 
 import { useAriaInterviewSession } from '../useAriaInterviewSession';
 
@@ -13,15 +13,6 @@ jest.mock('@utilities/sessionLogging/writeSessionLog', () => ({
 
 jest.mock('@utilities/sessionLogging/sessionAudioTelemetry', () => ({
   gatherRecordingStartTelemetry: jest.fn(() => ({ source: 'test' })),
-}));
-
-jest.mock('@utilities/webSecureContext', () => ({
-  isWebInsecureDevUrl: jest.fn(() => false),
-  webInsecureContextHelpMessage: jest.fn(() => 'Use HTTPS'),
-}));
-
-jest.mock('@features/aria/utils/webInterviewGestureContext', () => ({
-  markWebSessionResumeReady: jest.fn(),
 }));
 
 jest.mock('@features/aria/interviewScenarioScoringSlice', () => ({
@@ -90,19 +81,11 @@ describe('useAriaInterviewSession', () => {
     expect(result.current.exchangeCount).toBe(0);
   });
 
-  it('enables whisper-on-web when proxy URL is configured', () => {
+  it('keeps web Whisper disabled for native apps', () => {
     const { result } = renderHook(() =>
       useAriaInterviewSession('user-1', { whisperProxyUrl: 'https://example.com/whisper' }),
     );
-    expect(result.current.useWhisperOnWeb).toBe(Platform.OS === 'web');
-  });
-
-  it('setWebTabRestoreOverlayVisible keeps ref in sync with state', () => {
-    const { result } = renderHook(() => useAriaInterviewSession('user-1'));
-    act(() => {
-      result.current.setWebTabRestoreOverlayVisible(true);
-    });
-    expect(result.current.webTabGestureRestoreOverlay).toBe(true);
-    expect(result.current.webTabGestureRestoreOverlayRef.current).toBe(true);
+    expect(result.current.useWhisperOnWeb).toBe(false);
+    expect(result.current.useTapMicUi).toBe(true);
   });
 });

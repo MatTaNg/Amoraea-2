@@ -62,7 +62,9 @@ export function applySpeakTextSafeQuestionDeliveredTelemetry(args: {
       stripControlTokens(args.incomingAssistantTtsTextForS2Repair).trim(),
     )
   ) {
-    args.s2RepairProbeDeliveredRef.current = true;
+    if (args.s2RepairProbeDeliveredRef) {
+      args.s2RepairProbeDeliveredRef.current = true;
+    }
   }
   if (
     args.isInterviewLine &&
@@ -72,7 +74,9 @@ export function applySpeakTextSafeQuestionDeliveredTelemetry(args: {
       stripControlTokens(args.incomingAssistantTtsTextForS2Repair).trim(),
     )
   ) {
-    args.s3RepairProbeDeliveredRef.current = true;
+    if (args.s3RepairProbeDeliveredRef) {
+      args.s3RepairProbeDeliveredRef.current = true;
+    }
   }
 
   if (!args.isInterviewLine) {
@@ -81,7 +85,9 @@ export function applySpeakTextSafeQuestionDeliveredTelemetry(args: {
 
   const rtd = getSessionLogRuntime();
   const deliveredQuestionText = stripControlTokens(args.text).trim().slice(0, 2000);
-  args.recordInterviewAssistantDeliveryForMetaExemptionRef.current(stripControlTokens(args.text).trim());
+  args.recordInterviewAssistantDeliveryForMetaExemptionRef?.current?.(
+    stripControlTokens(args.text).trim(),
+  );
   writeSessionLog({
     userId: args.userId,
     attemptId: rtd.attemptId,
@@ -98,8 +104,8 @@ export function applySpeakTextSafeQuestionDeliveredTelemetry(args: {
   });
 
   const sn = args.currentScenario;
-  if (!args.firstScenarioLifecyclePersistedRef.current && sn >= 1 && sn <= 3) {
+  if (args.firstScenarioLifecyclePersistedRef && !args.firstScenarioLifecyclePersistedRef.current && sn >= 1 && sn <= 3) {
     args.firstScenarioLifecyclePersistedRef.current = true;
-    void args.persistInterviewAttemptSessionLifecycle(args.interviewSessionAttemptIdRef.current, 'in_progress');
+    void args.persistInterviewAttemptSessionLifecycle(args.interviewSessionAttemptIdRef?.current, 'in_progress');
   }
 }

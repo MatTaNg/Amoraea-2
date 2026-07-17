@@ -48,6 +48,4 @@ export type EmotionModalOrchestrationDeps = {
   setEmotionItemsComplete: React.Dispatch<React.SetStateAction<boolean>>;
   setEmotionModalVisible: (v: boolean) => void;
   setEmotionModalItemIndex: React.Dispatch<React.SetStateAction<number>>;
-  waitForWebInterviewTtsQuiescentBeforeEmotionModal: () => Promise<void>;
-  waitForWebInterviewTtsAudiblePlaybackBeforeEmotionModal: () => Promise<void>;
 };

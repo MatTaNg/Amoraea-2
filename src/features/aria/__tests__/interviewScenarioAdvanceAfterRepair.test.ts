@@ -594,6 +594,24 @@ describe('applyPostClaudeScenarioAdvanceBundleOverride', () => {
     expect(out).toMatch(/held a grudge|really hard time with/i);
   });
 
+  it('advances Scenario C after resume welcome sits between repair prompt and user answer', () => {
+    const messages = [
+      { role: 'assistant', content: 'How do you think this situation could be repaired?' },
+      {
+        role: 'assistant',
+        content:
+          "Welcome back! Lets continue where we left off. If you'd like me to repeat what I said, let me know.",
+        isWelcomeBack: true,
+      },
+      {
+        role: 'user',
+        content:
+          'They need to figure out why Daniel has to leave. He needs to feel safe before they can discuss what Sophie wants.',
+      },
+    ];
+    expect(shouldAdvanceScenarioCAfterSatisfiedDanielRepair(messages, '', 3)).toBe(true);
+  });
+
   it('does not inject scenario-complete bundles during moment 5 interview close', () => {
     const messages = [
       { role: 'assistant', content: 'How did it get resolved between you two?' },

@@ -13,7 +13,6 @@ import type {
   InterviewAttemptBootstrap,
   InterviewSessionLifecycleDeps,
 } from '@features/aria/sessionLifecycleTypes';
-import { unlockWebAudioForAutoplay } from '@features/aria/utils/webInterviewTtsDocumentLifecycle';
 import {
   savedInterviewReachedClosingState,
   shouldResumeMidInterviewFromSaved,
@@ -34,7 +33,6 @@ export type InterviewSessionLifecycleEffectInputs = {
     | 'congratulations'
     | 'analysis';
   interviewAttemptBootstrap: InterviewAttemptBootstrap;
-  webSpeechShouldDeferToUserGesture: () => boolean;
 };
 
 export function useInterviewSessionLifecycle(
@@ -48,7 +46,6 @@ export function useInterviewSessionLifecycle(
     status,
     interviewStatus,
     interviewAttemptBootstrap,
-    webSpeechShouldDeferToUserGesture,
   } = effectInputs;
 
   const handleResume = useCallback(async (saved: Parameters<typeof runHandleResume>[1]['saved']) => {
@@ -58,18 +55,6 @@ export function useInterviewSessionLifecycle(
   const startInterview = useCallback(async (opts?: { fromUserGesture?: boolean }) => {
     await runStartInterview(depsRef.current, opts);
   }, [depsRef]);
-
-  const handleMobileWebTapToBegin = useCallback(
-    (shouldStartInterview: boolean) => {
-      const deps = depsRef.current;
-      deps.setMobileWebTapToBeginDone?.(true);
-      if (shouldStartInterview && deps.onboardingAutoStartRef) {
-        deps.onboardingAutoStartRef.current = true;
-        void startInterview({ fromUserGesture: true });
-      }
-    },
-    [depsRef, startInterview],
-  );
 
   useEffect(() => {
     if (!userId || isAdmin) return;
@@ -181,77 +166,7 @@ export function useInterviewSessionLifecycle(
   }, [isInterviewAppRoute, status, interviewStatus, startInterview, interviewAttemptBootstrap, depsRef]);
 
   useEffect(() => {
-    const setWebDesktopAwaitingStartOverlay = depsRef.current.setWebDesktopAwaitingStartOverlay;
+  }, [depsRef]);
 
-    if (Platform.OS !== 'web' || typeof window === 'undefined') {
-      setWebDesktopAwaitingStartOverlay?.(false);
-      return;
-    }
-
-    if (webSpeechShouldDeferToUserGesture()) {
-      setWebDesktopAwaitingStartOverlay?.(false);
-      return;
-    }
-
-    if (!isInterviewAppRoute) {
-      setWebDesktopAwaitingStartOverlay?.(false);
-      return;
-    }
-
-    if (status !== 'starting_interview' || interviewStatus !== 'not_started') {
-      setWebDesktopAwaitingStartOverlay?.(false);
-      return;
-    }
-
-    if (depsRef.current.resumeLoadingFlowActiveRef?.current) {
-      setWebDesktopAwaitingStartOverlay?.(false);
-      return;
-    }
-
-    const onboardingAutoStartRef = depsRef.current.onboardingAutoStartRef;
-    if (onboardingAutoStartRef?.current) {
-      setWebDesktopAwaitingStartOverlay?.(false);
-      return;
-    }
-
-    if (interviewAttemptBootstrap !== 'ready') {
-      setWebDesktopAwaitingStartOverlay?.(false);
-      return;
-    }
-
-    setWebDesktopAwaitingStartOverlay?.(true);
-
-    const onFirstPointer = () => {
-      const deps = depsRef.current;
-      if (deps.onboardingAutoStartRef?.current) return;
-      if (deps.resumeLoadingFlowActiveRef?.current) return;
-      if (deps.interviewStatusRef?.current === 'in_progress') return;
-
-      deps.setWebDesktopAwaitingStartOverlay?.(false);
-      unlockWebAudioForAutoplay();
-
-      if (deps.onboardingAutoStartRef) {
-        deps.onboardingAutoStartRef.current = true;
-      }
-
-      void startInterview({ fromUserGesture: true });
-    };
-
-    window.addEventListener('pointerdown', onFirstPointer, { capture: true, once: true });
-
-    return () => {
-      depsRef.current.setWebDesktopAwaitingStartOverlay?.(false);
-      window.removeEventListener('pointerdown', onFirstPointer, { capture: true });
-    };
-  }, [
-    isInterviewAppRoute,
-    status,
-    interviewStatus,
-    startInterview,
-    webSpeechShouldDeferToUserGesture,
-    interviewAttemptBootstrap,
-    depsRef,
-  ]);
-
-  return { handleResume, startInterview, handleMobileWebTapToBegin };
+  return { handleResume, startInterview };
 }

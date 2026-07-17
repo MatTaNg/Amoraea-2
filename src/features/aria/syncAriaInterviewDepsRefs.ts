@@ -2,7 +2,7 @@ export type {
   AriaInterviewDepsRefs,
   AriaInterviewDepsSyncContext,
 } from '@features/aria/syncAriaInterviewDepsTypes';
-export { mergeAriaInterviewSyncCtx } from '@features/aria/syncAriaInterviewDepsTypes';
+export { mergeAriaInterviewSyncCtx, assignDefinedSyncSlices } from '@features/aria/syncAriaInterviewDepsTypes';
 export {
   syncAriaInterviewEarlyDeps,
   syncAriaInterviewTtsPipelineDeps,
@@ -12,7 +12,6 @@ export {
   syncAriaInterviewTurnHandlerDeps,
   syncAriaInterviewTurnHandlerCluster,
   syncProcessUserSpeechDeps,
-  syncWebTabRestoreSessionDeps,
 } from '@features/aria/syncAriaInterviewTurnHandlerDepsRefs';
 
 export { syncAriaInterviewMicPipelineDeps } from '@features/aria/syncAriaInterviewMicPipelineDepsRefs';
@@ -23,19 +22,13 @@ export {
   syncAriaInterviewLifecycleDeps,
 } from '@features/aria/syncAriaInterviewLifecycleDepsRefs';
 
-export {
-  syncDeliverRecordingRetryLineDeps,
-  syncInterruptDocumentHiddenTtsDeps,
-  syncInterviewDocumentVisibilityTtsDeps,
-  syncTabRestoreWatchdogDeps,
-} from '@features/aria/syncAriaInterviewDocumentTtsDepsRefs';
+export { syncDeliverRecordingRetryLineDeps } from '@features/aria/syncAriaInterviewDocumentTtsDepsRefs';
 
 export {
   syncPerformInterviewRetakeDeps,
   syncHandleRecordingErrorDeps,
   syncApplyRouteProbeAfterResumeDeps,
   syncPerformAdminInterviewResetDeps,
-  syncInterviewWebSpeechRecognitionDeps,
   syncHandleSendTypedDeps,
   syncFetchStageScoreDeps,
   syncSubmitPostInterviewFeedbackDeps,
@@ -53,7 +46,6 @@ export {
 
 export {
   syncInterviewAttemptBootstrapDeps,
-  syncInterviewWebGreetingPrefetchDeps,
   syncEnsureValidSessionDeps,
   syncInterviewUnhandledRejectionSaveDeps,
   syncInterviewAuthSignedOutSaveDeps,
@@ -70,11 +62,10 @@ export {
 } from '@features/aria/syncAriaInterviewPostScoringDepsRefs';
 
 export {
-  syncWebMicPressLifecycleDeps,
+  syncInterviewMicPressLifecycleDeps,
   syncPreparingResultsFailsafeDeps,
-  syncWebResumeWelcomeTapDeps,
   syncAriaInterviewMicCluster,
-} from '@features/aria/syncAriaInterviewWebMicDepsRefs';
+} from '@features/aria/syncAriaInterviewMicDepsRefs';
 
 export {
   syncResetScenarioCClientGatesDeps,

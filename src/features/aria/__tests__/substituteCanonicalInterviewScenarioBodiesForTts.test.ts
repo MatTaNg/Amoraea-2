@@ -9,6 +9,14 @@ import {
 } from '@features/aria/substituteCanonicalInterviewScenarioBodiesForTts';
 
 describe('substituteCanonicalInterviewScenarioBodiesForTts', () => {
+  it('replaces Situation 1 meta-play narration with the canonical vignette intro', () => {
+    const filler = 'The app will now play Situation 1 for you.';
+    const out = substituteCanonicalInterviewScenarioBodiesForTts(filler);
+    expect(out).toContain(SCENARIO_1_VIGNETTE);
+    expect(out).toContain("What's going on between these two?");
+    expect(out).not.toMatch(/play Situation 1/i);
+  });
+
   it('replaces paraphrased Scenario 1 vignette with canonical copy', () => {
     const paraphrased =
       "Here's the first situation. Emma and Ryan are at dinner when Ryan's mom calls for twenty-five minutes. Emma pays and seems upset. Later she tells Ryan she thinks he always puts family first. Ryan pushes back. Emma says he has made that very clear. What's going on between them?";

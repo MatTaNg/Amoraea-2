@@ -26,12 +26,10 @@ export function createInterviewTurnHandlerEmotionModalSyncSlice(params: SyncExtr
 
 export function createInterviewTurnHandlerWebTabRestoreSyncSlice(params: SyncExtraParams): SyncExtraParams {
   return {
-    webTabRestoreReplayInFlightRef: params.webTabRestoreReplayInFlightRef,
     webTabRestoreTapSessionRef: params.webTabRestoreTapSessionRef,
     webTabRestoreDeliveredNormRef: params.webTabRestoreDeliveredNormRef,
     tabRestoreInFlightWithoutPlaybackSinceMsRef: params.tabRestoreInFlightWithoutPlaybackSinceMsRef,
-    clearStaleWebInterviewTtsRuntimeLocks: params.clearStaleWebInterviewTtsRuntimeLocks,
-    queueMobileWebHtmlResumeAfterScreenReturn: params.queueMobileWebHtmlResumeAfterScreenReturn,
+    clearStaleInterviewTtsRuntimeLocks: params.clearStaleInterviewTtsRuntimeLocks,
   };
 }
 
@@ -81,7 +79,6 @@ export function createInterviewTurnHandlerProgressPersistenceSyncSlice(params: S
 
 export function createInterviewTurnHandlerUiStageSyncSlice(params: SyncExtraParams): SyncExtraParams {
   return {
-    setWebTabGestureRestoreOverlay: params.setWebTabGestureRestoreOverlay,
     setReferenceCardPrompt: params.setReferenceCardPrompt,
     setHighestScenarioReached: params.setHighestScenarioReached,
     setStageResults: params.setStageResults,
@@ -112,6 +109,7 @@ export function createInterviewTurnHandlerMomentProbeRefsSyncSlice(params: SyncE
     moment4ExpectingPostSpecificityUserTurnRef: params.moment4ExpectingPostSpecificityUserTurnRef,
     moment4PostGrudgeSpecificityResolvedRef: params.moment4PostGrudgeSpecificityResolvedRef,
     moment4SpecificityScoringRef: params.moment4SpecificityScoringRef,
+    deferredMoment4NarrativeRef: params.deferredMoment4NarrativeRef,
     moment5AccountabilityProbeFiredRef: params.moment5AccountabilityProbeFiredRef,
     moment5ClientScoringMetaRef: params.moment5ClientScoringMetaRef,
     moment5ConflictValidityClarificationIssuedRef: params.moment5ConflictValidityClarificationIssuedRef,

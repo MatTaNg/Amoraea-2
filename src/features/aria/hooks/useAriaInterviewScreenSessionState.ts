@@ -21,7 +21,7 @@ import { useAriaInterviewSessionResumeEmotionGateRefs } from '@features/aria/hoo
 import { useAriaInterviewSessionRoutingState } from '@features/aria/hooks/useAriaInterviewSessionRoutingState';
 import { useAriaInterviewSessionScenarioGateRefs } from '@features/aria/hooks/useAriaInterviewSessionScenarioGateRefs';
 import { useAriaInterviewSessionShellState } from '@features/aria/hooks/useAriaInterviewSessionShellState';
-import { useAriaInterviewSessionWebTtsGateRefs } from '@features/aria/hooks/useAriaInterviewSessionWebTtsGateRefs';
+import { useAriaInterviewSessionTtsGateRefs } from '@features/aria/hooks/useAriaInterviewSessionTtsGateRefs';
 
 /** Session-scoped state and refs between `useAriaInterviewSession` and gate dep-sync wiring. */
 export function useAriaInterviewScreenSessionState(
@@ -37,7 +37,7 @@ export function useAriaInterviewScreenSessionState(
   });
   const metaSkip = useAriaInterviewSessionMetaSkipGateRefs();
   const scenario = useAriaInterviewSessionScenarioGateRefs();
-  const webTts = useAriaInterviewSessionWebTtsGateRefs();
+  const webTts = useAriaInterviewSessionTtsGateRefs();
   const resumeEmotion = useAriaInterviewSessionResumeEmotionGateRefs({
     setEmotionModalVisible: shell.setEmotionModalVisible,
     setEmotionModalItemIndex: shell.setEmotionModalItemIndex,

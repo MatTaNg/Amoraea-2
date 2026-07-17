@@ -28,6 +28,7 @@ export async function runPreClaudeSkipConfirmationGreetingReconnectGate(
   await deps.speakTextSafe(SKIP_CONFIRMATION_GREETING_REOPEN_LINE, {
     ...ASSISTANT_INTERVIEW_SPEECH,
     allowDuplicateConsecutiveTts: true,
+    skipLastQuestionRef: true,
   });
   return finishPreClaudeSkipInjectionTurn(deps);
 }

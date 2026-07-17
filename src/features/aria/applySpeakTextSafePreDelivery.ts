@@ -48,6 +48,10 @@ import { ensureCanonicalIntroBriefingForTts, coerceOpeningNamePromptForTts } fro
 import { SCENARIO_3_TEXT } from '@features/aria/interviewScenarioVignetteCopy';
 import { buildScenario2To3BundleForInterview } from '@features/aria/interviewTransitionBundles';
 import { shouldRedirectPrematureMoment4ToScenario2To3Handoff } from '@features/aria/prematureMoment4HandoffPlaybackGuard';
+import {
+  peelRepeatRequestAcknowledgmentPrefix,
+  withRepeatRequestAcknowledgment,
+} from '@features/aria/interviewRepeatRequestTarget';
 import { substituteCanonicalInterviewScenarioBodiesForTts } from '@features/aria/substituteCanonicalInterviewScenarioBodiesForTts';
 import { isLockedShowScenarioExactTtsText } from '@features/aria/showScenarioCardCanonicalTts';
 import { remoteLog } from '@utilities/remoteLog';
@@ -78,6 +82,10 @@ export type ApplySpeakTextSafePreDeliveryArgs = {
   closingTtsSessionKey: string | null;
   interviewSessionId: string;
   scenarioAContemptProbePlaybackConfirmed: boolean;
+  /** When true, Situation 3 canonical card TTS already confirmed this session. */
+  situation3CanonicalPlaybackConfirmed?: boolean;
+  /** When true, Situation 3 repair probe was already delivered. */
+  s3RepairProbeDelivered?: boolean;
   setVoiceState: (state: VoiceState) => void;
 };
 
@@ -119,6 +127,13 @@ export function applySpeakTextSafePreDelivery(
   }
 
   if (args.interviewSpeechRole === 'assistant_response' && !args.silent) {
+    // Explicit repeat requests prefix "Sure." — peel it so canonical probe coercions
+    // (contempt/repair/etc.) do not drop the ack, then restore before playback.
+    const peeledRepeatAck = peelRepeatRequestAcknowledgmentPrefix(text);
+    const restoreRepeatAck = peeledRepeatAck.prefix != null;
+    if (restoreRepeatAck) {
+      text = peeledRepeatAck.body;
+    }
     if (!isLockedShowScenarioExactTtsText(text)) {
       const interviewNameForTts = resolvePlausibleInterviewFirstName(args.interviewName) ?? '';
       text = dedupeAdjacentBoundaryValidationsBeforeParticipantName(
@@ -132,9 +147,21 @@ export function applySpeakTextSafePreDelivery(
           currentInterviewMoment: args.currentInterviewMoment,
           lastQuestionText: args.lastQuestionText,
           lastSuccessfulTtsDeliveredPreview: args.lastSuccessfulTtsDeliveredPreview,
+          situation3CanonicalPlaybackConfirmed: args.situation3CanonicalPlaybackConfirmed,
+          s3RepairProbeDelivered: args.s3RepairProbeDelivered,
         })
       ) {
+        const beforeRedirectPreview = stripControlTokens(text).trim().slice(0, 180);
         text = buildScenario2To3BundleForInterview(interviewNameForTts, SCENARIO_3_TEXT);
+        void remoteLog('[PREMATURE_M4_REDIRECTED_TO_S2_S3]', {
+          interviewSessionId: args.interviewSessionId,
+          moment: args.currentInterviewMoment,
+          scenario: args.currentScenario,
+          situation3Confirmed: !!args.situation3CanonicalPlaybackConfirmed,
+          s3RepairDelivered: !!args.s3RepairProbeDelivered,
+          beforePreview: beforeRedirectPreview,
+          afterPreview: stripControlTokens(text).trim().slice(0, 180),
+        });
       }
       text = ensureCanonicalIntroBriefingForTts(text, interviewNameForTts);
       if (!args.allowDuplicateConsecutiveTts) {
@@ -194,6 +221,9 @@ export function applySpeakTextSafePreDelivery(
         const interviewNameForClosing = resolvePlausibleInterviewFirstName(args.interviewName) ?? '';
         text = coerceIncompleteInterviewClosingForTts(text, interviewNameForClosing);
       }
+    }
+    if (restoreRepeatAck) {
+      text = withRepeatRequestAcknowledgment(text);
     }
   }
 

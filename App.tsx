@@ -744,19 +744,21 @@ const RootNavigator = () => {
   }, [isLoggedIn, user?.id, user?.email]);
 
   const authLinking: LinkingOptions<Record<string, unknown>> | undefined = useMemo(() => {
-    if (Platform.OS !== 'web') {
-      /**
-       * Native password-reset deep links: `app.json` has no custom URL scheme yet and Supabase
-       * `detectSessionInUrl` is web-only (`client.ts`). Follow-up: add `scheme` to app.json,
-       * register `/auth/reset-password` in Supabase redirect URLs, and handle `Linking.getInitialURL()`
-       * + session exchange before routing to SetNewPassword.
-       */
-      return undefined;
-    }
     const prefixes = [
-      ...(typeof window !== 'undefined' ? [`${window.location.protocol}//${window.location.host}`] : []),
+      ...(Platform.OS === 'web' && typeof window !== 'undefined'
+        ? [`${window.location.protocol}//${window.location.host}`]
+        : []),
+      'amoraea://',
       ExpoLinking.createURL('/'),
     ];
+    if (Platform.OS !== 'web') {
+      // Auth callbacks are consumed in useAuth (verifyOtp / recovery). Keep prefixes so
+      // cold-start deep links are recognized; avoid stacking SetNewPassword via path config.
+      return {
+        prefixes,
+        config: { screens: { Login: '' } },
+      };
+    }
     return {
       prefixes,
       config: { screens: AUTH_STACK_LINKING_SCREENS as Record<string, string | Record<string, unknown>> },

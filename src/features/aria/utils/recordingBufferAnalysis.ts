@@ -61,23 +61,31 @@ export async function analyzeRecordingBuffer(
 
   if (nativePeakMeteringDb != null && Number.isFinite(nativePeakMeteringDb) && nativePeakMeteringDb > SILENCE_PEAK_DB) {
     return {
+      // Native metering cannot decode clip length; leave duration unknown so
+      // post-transcribe "near empty" gates do not reject valid Whisper text.
       audio_duration_ms: 0,
       buffer_size_bytes,
       has_non_zero_audio: true,
       peak_amplitude_db: nativePeakMeteringDb,
-      firstSpeechOffsetMs: 0,
+      firstSpeechOffsetMs: null,
       vad_threshold_db: vadThresholdDb,
       ambient_noise_floor_db: ambientForLog,
       vad_first_frame_accepted_db: nativePeakMeteringDb,
     };
   }
 
+  // Native cannot decode m4a in JS. Prefer metering when present — a large AAC
+  // buffer of near-silence used to pass `buffer_size > 2000` and Whisper hallucinated
+  // prompt echoes ("You", "That's it.") on name turns.
   if (Platform.OS !== 'web' || typeof AudioContext === 'undefined' || typeof blob.arrayBuffer !== 'function') {
+    const meteringKnown =
+      nativePeakMeteringDb != null && Number.isFinite(nativePeakMeteringDb);
+    const meteringSaysSilent = meteringKnown && nativePeakMeteringDb! <= SILENCE_PEAK_DB;
     return {
       audio_duration_ms: 0,
       buffer_size_bytes,
-      has_non_zero_audio: buffer_size_bytes > 2000,
-      peak_amplitude_db: nativePeakMeteringDb ?? -120,
+      has_non_zero_audio: meteringSaysSilent ? false : buffer_size_bytes > 2000,
+      peak_amplitude_db: meteringKnown ? (nativePeakMeteringDb as number) : -120,
       firstSpeechOffsetMs: null,
       vad_threshold_db: vadThresholdDb,
       ambient_noise_floor_db: ambientForLog,

@@ -27,18 +27,27 @@ export function classifyError(err: unknown): ErrorClassification {
     ?? null;
   const message = (err instanceof Error ? err.message : String(err)).toLowerCase();
 
-  // Retryable — transient
+  const isTransientTransport =
+    message.includes('rate limit') ||
+    message.includes('timeout') ||
+    message.includes('scenario score degraded') ||
+    message.includes('network') ||
+    message.includes('failed to fetch') ||
+    message.includes('econnreset') ||
+    message.includes('enotfound') ||
+    message.includes('connection reset') ||
+    message.includes('connection error') ||
+    message.includes('error sending request') ||
+    message.includes('sendrequest') ||
+    message.includes('temporarily unavailable') ||
+    message.includes('overloaded');
+
+  // Retryable — transient (message checks before status so proxy 500 + connection reset retries)
   if (status === 429) return 'retryable';
   if (status === 503) return 'retryable';
   if (status === 504) return 'retryable';
   if (status === 502) return 'retryable';
-  if (message.includes('rate limit')) return 'retryable';
-  if (message.includes('timeout')) return 'retryable';
-  if (message.includes('scenario score degraded')) return 'retryable';
-  if (message.includes('network')) return 'retryable';
-  if (message.includes('failed to fetch')) return 'retryable';
-  if (message.includes('econnreset')) return 'retryable';
-  if (message.includes('enotfound')) return 'retryable';
+  if (isTransientTransport) return 'retryable';
 
   // Unrecoverable — won't fix with retry
   if (status === 400) return 'unrecoverable';
@@ -46,12 +55,15 @@ export function classifyError(err: unknown): ErrorClassification {
   if (status === 403) return 'unrecoverable';
   if (status === 404) return 'unrecoverable';
   if (status === 500) return 'unrecoverable';
+  if (message.includes('anthropic_api_key')) return 'unrecoverable';
+  if (message.includes('invalid anthropic')) return 'unrecoverable';
   if (message.includes('invalid')) return 'unrecoverable';
   if (message.includes('unauthorized')) return 'unrecoverable';
   if (message.includes('forbidden')) return 'unrecoverable';
   if (message.includes('not found')) return 'unrecoverable';
   if (message.includes('is not defined')) return 'unrecoverable';
   if (message.includes('is not a function')) return 'unrecoverable';
+  if (message.includes('cannot read propert')) return 'unrecoverable';
 
   return 'unknown';
 }

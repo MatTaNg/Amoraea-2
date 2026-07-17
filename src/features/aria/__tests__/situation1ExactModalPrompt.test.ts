@@ -1,6 +1,8 @@
 import {
   coerceExactScenarioModalQuestionDisplay,
+  coerceScenario1MetaPlayNarrationForTts,
   isScenarioANonScriptedModalParaphrase,
+  looksLikeScenario1MetaPlayNarration,
   looksLikeScenarioAEmmaCoachingParaphrase,
   resolveSituation1ExactModalPrompt,
 } from '../situation1ExactModalPrompt';
@@ -9,6 +11,7 @@ import {
   SCENARIO_A_CONTEMPT_PROBE_DELIVERED_COPY,
   SCENARIO_A_REPAIR_QUESTION_AFTER_CONTEMPT_COPY,
 } from '../probeAndScoringUtils';
+import { SHOW_SCENARIO_1_VIGNETTE_EXACT } from '../interviewShowScenarioExactCopy';
 
 const S1_VIGNETTE_SNIPPET =
   'Emma and Ryan have dinner plans. Ryan takes a call from his mother halfway through.';
@@ -113,5 +116,15 @@ describe('situation1ExactModalPrompt', () => {
     expect(
       coerceExactScenarioModalQuestionDisplay('Now, things with Emma?', 'Situation 1'),
     ).toBe(SCENARIO_A_REPAIR_QUESTION_AFTER_CONTEMPT_COPY);
+  });
+
+  it('detects and coerces meta "play Situation 1" narration into the canonical vignette', () => {
+    const filler = 'The app will now play Situation 1 for you.';
+    expect(looksLikeScenario1MetaPlayNarration(filler)).toBe(true);
+    expect(looksLikeScenario1MetaPlayNarration('I will now play situation 1 for you')).toBe(true);
+    const out = coerceScenario1MetaPlayNarrationForTts(filler);
+    expect(out).toContain(SHOW_SCENARIO_1_VIGNETTE_EXACT);
+    expect(out).toContain(SCENARIO_1_OPENING);
+    expect(looksLikeScenario1MetaPlayNarration(out)).toBe(false);
   });
 });

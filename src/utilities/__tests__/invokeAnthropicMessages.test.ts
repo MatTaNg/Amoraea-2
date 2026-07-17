@@ -1,16 +1,10 @@
-import { Platform } from 'react-native';
-
-import { supabase } from '@data/supabase/client';
 import { invokeAnthropicMessages } from '../invokeAnthropicMessages';
+import { supabase } from '@data/supabase/client';
 
 jest.mock('@utilities/anthropicMessagesClient', () => ({
   getAnthropicEndpoint: jest.fn(),
   getAnthropicRequestHeaders: jest.fn(),
   CLAUDE_SONNET_MODEL: 'claude-sonnet-4-6',
-}));
-
-jest.mock('react-native', () => ({
-  Platform: { OS: 'web' },
 }));
 
 jest.mock('@data/supabase/client', () => ({
@@ -28,7 +22,7 @@ describe('invokeAnthropicMessages', () => {
     jest.clearAllMocks();
   });
 
-  it('uses anthropic-proxy edge invoke on web', async () => {
+  it('uses anthropic-proxy edge invoke', async () => {
     mockInvoke.mockResolvedValue({
       data: { content: [{ text: '# Report\n\nHello' }] },
       error: null,
@@ -48,7 +42,6 @@ describe('invokeAnthropicMessages', () => {
       },
     });
     expect(result.content?.[0]?.text).toContain('Report');
-    expect(Platform.OS).toBe('web');
   });
 
   it('throws with proxy error detail when invoke fails', async () => {
@@ -65,4 +58,30 @@ describe('invokeAnthropicMessages', () => {
       }),
     ).rejects.toThrow(/ANTHROPIC_API_KEY not set|anthropic-proxy/i);
   });
+
+  it('retries then succeeds after transient connection reset', async () => {
+    mockInvoke
+      .mockResolvedValueOnce({
+        data: {
+          error: {
+            message:
+              'TypeError: error sending request for https://api.anthropic.com/v1/messages: connection reset',
+          },
+        },
+        error: { message: 'Edge Function returned a non-2xx status code' },
+      })
+      .mockResolvedValueOnce({
+        data: { content: [{ text: 'ok' }] },
+        error: null,
+      });
+
+    const result = await invokeAnthropicMessages({
+      model: 'claude-sonnet-4-6',
+      max_tokens: 100,
+      messages: [{ role: 'user', content: 'hi' }],
+    });
+
+    expect(result.content?.[0]?.text).toBe('ok');
+    expect(mockInvoke).toHaveBeenCalledTimes(2);
+  }, 20000);
 });

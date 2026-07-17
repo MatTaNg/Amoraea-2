@@ -174,15 +174,22 @@ export function buildPersonalMomentHandoffReflection(
   return applyDeliveredRegistryDedup(grounded, context, opts.deliveredRegistry);
 }
 
-/** Insert a reflection sentence between the task-ack and thanks lines of a neutral closing. */
+/** Insert a reflection sentence between the task-ack and the completion/thanks lines. */
 export function assembleClosingWithOptionalReflection(
   neutralClosing: string,
   reflection: string,
 ): string {
   const trimmedReflection = reflection.trim();
   if (!trimmedReflection) return neutralClosing;
+  const reflectionBody = trimmedReflection.endsWith('.') ? trimmedReflection : `${trimmedReflection}.`;
+  const completeSplit = neutralClosing.match(
+    /^(.*?)\s*(Your interview is complete\.)\s*(Thank you\b[\s\S]*)$/i,
+  );
+  if (completeSplit) {
+    const [, ack, completeLine, thanks] = completeSplit;
+    return `${ack.trim()} ${reflectionBody} ${completeLine} ${thanks.trim()}`.replace(/\s+/g, ' ').trim();
+  }
   const ack = neutralClosing.replace(/\s*thank you\b.*$/i, '').trim();
   const thanks = neutralClosing.match(/\bthank you\b.*$/i)?.[0] ?? '';
-  const reflectionBody = trimmedReflection.endsWith('.') ? trimmedReflection : `${trimmedReflection}.`;
   return `${ack} ${reflectionBody} ${thanks}`.replace(/\s+/g, ' ').trim();
 }

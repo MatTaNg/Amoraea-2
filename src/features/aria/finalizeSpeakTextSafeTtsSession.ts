@@ -1,5 +1,4 @@
 import type { MutableRefObject } from 'react';
-import { Platform } from 'react-native';
 
 import type { WebTtsUtteranceReplayOptions } from '@features/aria/speakTextSafeDeps';
 import type { TtsTelemetrySource } from '@features/aria/telemetry/tsAutoplayTelemetry';
@@ -11,32 +10,26 @@ export function finalizeSpeakTextSafeTtsSession(args: {
   isWeb: boolean;
   telemetrySource: TtsTelemetrySource;
   ttsLineInFlightRef: MutableRefObject<boolean>;
-  webTtsTabInterruptPendingReplay: boolean;
-  tabHiddenDuringActiveTtsLineRef: MutableRefObject<boolean>;
-  webTtsUtteranceInFlightRef: MutableRefObject<string | null>;
-  webTtsUtteranceInFlightOptionsRef: MutableRefObject<WebTtsUtteranceReplayOptions | null>;
+  ttsUtteranceInFlightRef: MutableRefObject<string | null>;
+  ttsUtteranceInFlightOptionsRef: MutableRefObject<WebTtsUtteranceReplayOptions | null>;
   setLastTtsCompletionCallbackMs: (ms: number) => void;
-  webSpeechShouldDeferToUserGesture: () => boolean;
-  scheduleWebMicPreInitRefreshAfterTtsCompletes: () => void;
-  rearmWebMicPreInitAfterTtsPlaybackComplete: () => Promise<void>;
 }): void {
   if (args.userId) {
     setTtsPlaybackActive(false);
-    args.ttsLineInFlightRef.current = false;
+    if (args.ttsLineInFlightRef) {
+      args.ttsLineInFlightRef.current = false;
+    }
   }
 
-  if (args.isWeb) {
-    if (!args.webTtsTabInterruptPendingReplay) {
-      args.tabHiddenDuringActiveTtsLineRef.current = false;
-    }
-    if (!args.webTtsTabInterruptPendingReplay) {
-      args.webTtsUtteranceInFlightRef.current = null;
-      args.webTtsUtteranceInFlightOptionsRef.current = null;
-    }
+  if (args.ttsUtteranceInFlightRef) {
+    args.ttsUtteranceInFlightRef.current = null;
+  }
+  if (args.ttsUtteranceInFlightOptionsRef) {
+    args.ttsUtteranceInFlightOptionsRef.current = null;
   }
 
   const ttsResolvedAt = Date.now();
-  args.setLastTtsCompletionCallbackMs(ttsResolvedAt);
+  args.setLastTtsCompletionCallbackMs?.(ttsResolvedAt);
 
   if (!args.userId || !args.isWeb) {
     return;
@@ -56,10 +49,4 @@ export function finalizeSpeakTextSafeTtsSession(args: {
     },
     platform: r.platform,
   });
-  args.scheduleWebMicPreInitRefreshAfterTtsCompletes();
-  if (args.telemetrySource === 'greeting' && args.webSpeechShouldDeferToUserGesture()) {
-    void args.rearmWebMicPreInitAfterTtsPlaybackComplete();
-  } else if (args.telemetrySource !== 'greeting' && !args.webSpeechShouldDeferToUserGesture()) {
-    void args.rearmWebMicPreInitAfterTtsPlaybackComplete();
-  }
 }

@@ -1,23 +1,20 @@
 import React from 'react';
-import { Platform, View } from 'react-native';
+import { View } from 'react-native';
 
 import type { VoiceState } from '@features/aria/hooks/useAriaInterviewSession';
-import { isWebInterviewMicPreInitReady } from '@features/aria/utils/webInterviewMicPreInit';
 import { UserInterviewLayout, type ActiveScenario } from '@app/screens/UserInterviewLayout';
 import type { FlameState } from '@app/screens/FlameOrb';
 
 export function AriaInterviewerActivePanel({
-  useMediaRecorderPath,
   audioRecorderIsRecording,
   audioRecorderInputMeterLevel,
   reinitializeMicrophoneSession,
   voiceState,
-  webInterviewerOutputActive,
+  interviewerOutputActive,
   interviewUiPhase,
   referenceCardScenario,
   referenceCardPrompt,
   ttsPlaybackReliabilityNotice,
-  webInsecureContextMessage,
   sessionAudioHealthNotice,
   conversationErrorNotice,
   micPermissionDenied,
@@ -29,7 +26,6 @@ export function AriaInterviewerActivePanel({
   inputDisabled,
   useTapMicUi,
   handleNativeOrWhisperMicPress,
-  handleWebMicPressIn,
   handleInterviewSignOut,
   preInitMeterLevel,
   micSessionRecovering,
@@ -37,17 +33,15 @@ export function AriaInterviewerActivePanel({
   setMicNeedsReconnect,
   lateStartIdleCueVisible,
 }: {
-  useMediaRecorderPath: boolean;
   audioRecorderIsRecording: boolean;
   audioRecorderInputMeterLevel: number;
   reinitializeMicrophoneSession: () => Promise<boolean>;
   voiceState: VoiceState;
-  webInterviewerOutputActive: boolean;
+  interviewerOutputActive: boolean;
   interviewUiPhase: string;
   referenceCardScenario: ActiveScenario | null;
   referenceCardPrompt: string | null;
   ttsPlaybackReliabilityNotice: string | null;
-  webInsecureContextMessage: string | null;
   sessionAudioHealthNotice: string | null;
   conversationErrorNotice: string | null;
   micPermissionDenied: boolean;
@@ -59,7 +53,6 @@ export function AriaInterviewerActivePanel({
   inputDisabled: boolean;
   useTapMicUi: boolean;
   handleNativeOrWhisperMicPress: () => void;
-  handleWebMicPressIn: () => void;
   handleInterviewSignOut: () => void;
   preInitMeterLevel: number;
   micSessionRecovering: boolean;
@@ -67,31 +60,18 @@ export function AriaInterviewerActivePanel({
   setMicNeedsReconnect: (value: boolean) => void;
   lateStartIdleCueVisible: boolean;
 }): React.ReactElement {
-  const flameState: FlameState =
-    useMediaRecorderPath && audioRecorderIsRecording
-      ? 'recording'
-      : Platform.OS === 'web' && voiceState === 'speaking' && !webInterviewerOutputActive
-        ? 'idle'
-        : voiceState;
+  const flameState: FlameState = audioRecorderIsRecording ? 'recording' : voiceState;
 
-  const interviewMicMeterActive =
-    useMediaRecorderPath &&
-    (audioRecorderIsRecording ||
-      voiceState === 'recording' ||
-      (Platform.OS === 'web' && isWebInterviewMicPreInitReady()));
+  const interviewMicMeterActive = audioRecorderIsRecording || voiceState === 'recording';
 
   const interviewMicInputLevel = interviewMicMeterActive
     ? Math.max(audioRecorderInputMeterLevel, preInitMeterLevel)
     : 0;
 
   const micLabelOverride = useTapMicUi
-    ? useMediaRecorderPath
-      ? audioRecorderIsRecording
-        ? 'Tap to stop'
-        : 'Tap to speak'
-      : voiceState === 'listening'
-        ? 'Tap to stop'
-        : 'Tap to speak'
+    ? audioRecorderIsRecording
+      ? 'Tap to stop'
+      : 'Tap to speak'
     : undefined;
 
   return (
@@ -102,21 +82,19 @@ export function AriaInterviewerActivePanel({
         referenceCardScenario={referenceCardScenario}
         referenceCardPrompt={referenceCardPrompt}
         ttsPlaybackReliabilityNotice={ttsPlaybackReliabilityNotice}
-        webInsecureContextMessage={webInsecureContextMessage}
         sessionAudioHealthNotice={sessionAudioHealthNotice}
         conversationErrorNotice={conversationErrorNotice}
         micPermissionDenied={micPermissionDenied}
-        isWaiting={isWaiting && voiceState === 'processing' && !webInterviewerOutputActive}
+        isWaiting={isWaiting && voiceState === 'processing' && !interviewerOutputActive}
         onPressStart={handlePressStart}
         onPressEnd={handlePressEnd}
-        voiceState={useMediaRecorderPath && audioRecorderIsRecording ? 'recording' : voiceState}
-        interviewerOutputActive={webInterviewerOutputActive}
+        voiceState={audioRecorderIsRecording ? 'recording' : voiceState}
+        interviewerOutputActive={interviewerOutputActive}
         micError={micError}
         micWarning={micWarning}
         inputDisabled={inputDisabled}
         micToggleMode={useTapMicUi}
         onMicPress={useTapMicUi ? handleNativeOrWhisperMicPress : undefined}
-        onMicPressIn={Platform.OS === 'web' ? handleWebMicPressIn : undefined}
         micLabelOverride={micLabelOverride}
         onExit={handleInterviewSignOut}
         micInputLevel={interviewMicInputLevel}

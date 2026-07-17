@@ -13,6 +13,7 @@ import {
   isShowScenarioCardCanonicalDeliveryText,
   isShowScenarioCardCanonicalPlaybackConfirmed,
   shouldArmShowScenarioCardStreamMute,
+  shouldSkipPersonalMomentCanonicalReplay,
   shouldSkipSituation1CanonicalReplay,
   shouldSuppressParallelStreamNonExactShowScenarioCardSpeech,
   shouldTreatShowScenarioCardCanonicalAsAlreadyDelivered,
@@ -24,6 +25,7 @@ import {
   resolveCanonicalShowScenarioCardTransitionSpeakDecision,
   resolveShowScenarioCardKindForInterview,
   streamAlreadySpokeScenarioBoundaryClosingLead,
+  streamSpokenTextAlreadyMatchesCanonicalCard,
   showScenarioCardPrefetchBufferMatchesSpeakText,
 } from '@features/aria/showScenarioCardCanonicalTts';
 import { SHOW_SCENARIO_2_VIGNETTE_EXACT } from '@features/aria/interviewShowScenarioExactCopy';
@@ -130,6 +132,22 @@ describe('showScenarioCardCanonicalTts', () => {
   it('builds canonical Moment 4 and 5 card copy', () => {
     expect(buildCanonicalShowScenarioCardTtsBody('moment_4')).toBe(MOMENT_4_GRUDGE_QUESTION_TEXT);
     expect(buildCanonicalShowScenarioCardTtsBody('moment_5')).toBe(MOMENT_5_ACCOUNTABILITY_QUESTION_TEXT);
+  });
+
+  it('skips Moment 5 canonical replay when stream already spoke the conflict question', () => {
+    const spoken =
+      "I'm with you. Here's one more question about you. " + MOMENT_5_ACCOUNTABILITY_QUESTION_TEXT;
+    const fullStream =
+      "I'm with you. Here's one more question about you.\n\nTell me about a time you had a conflict with someone close to you — how did it start, and how did it get resolved?";
+    expect(streamSpokenTextAlreadyMatchesCanonicalCard(spoken, fullStream, 'moment_5')).toBe(true);
+    expect(
+      shouldSkipPersonalMomentCanonicalReplay({
+        kind: 'moment_5',
+        spokenCompleteText: spoken,
+        fullStream,
+        playbackConfirmedKinds: {},
+      }),
+    ).toBe(true);
   });
 
   it('does not treat transcript-only canonical as delivered without playback confirmation', () => {
@@ -468,6 +486,19 @@ describe('showScenarioCardCanonicalTts', () => {
         interviewScenario: 3,
         showScenarioCardCanonicalSpokenThisStream: false,
         fullStream: prematureBridge,
+      }),
+    ).toBe(true);
+  });
+
+  it('shouldSuppressParallelStreamNonExactShowScenarioCardSpeech mutes standalone two-questions-left cue', () => {
+    const twoLeft = 'There are only two questions left.';
+    expect(
+      shouldSuppressParallelStreamNonExactShowScenarioCardSpeech({
+        spokenForTts: twoLeft,
+        interviewMoment: 3,
+        interviewScenario: 3,
+        showScenarioCardCanonicalSpokenThisStream: false,
+        fullStream: twoLeft,
       }),
     ).toBe(true);
   });

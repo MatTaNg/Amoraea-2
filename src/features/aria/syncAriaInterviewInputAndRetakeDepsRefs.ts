@@ -4,7 +4,6 @@ import type { ApplyRouteProbeAfterResumeDeps } from '@features/aria/applyRoutePr
 import type { FetchStageScoreDeps } from '@features/aria/fetchStageScoreTypes';
 import type { HandleRecordingErrorDeps } from '@features/aria/handleRecordingErrorTypes';
 import type { HandleSendTypedDeps } from '@features/aria/handleSendTypedTypes';
-import type { InterviewWebSpeechRecognitionDeps } from '@features/aria/interviewWebSpeechRecognitionTypes';
 import type { LoadPostInterviewFeedbackDeps } from '@features/aria/loadPostInterviewFeedbackTypes';
 import type { PerformAdminInterviewResetDeps } from '@features/aria/performAdminInterviewResetTypes';
 import type { PerformInterviewRetakeDeps } from '@features/aria/performInterviewRetakeTypes';
@@ -89,7 +88,6 @@ export function syncPerformAdminInterviewResetDeps(
   ref.current = {
     userId: ctx.userId,
     isAdmin: ctx.isAdmin,
-    useMediaRecorderPath: ctx.useMediaRecorderPath,
     audioRecorder: ctx.audioRecorder,
     recognitionRef: ctx.recognitionRef,
     stopElevenLabsPlayback: ctx.stopElevenLabsPlayback,
@@ -147,20 +145,6 @@ export function syncPerformAdminInterviewResetDeps(
     resetInterviewProgressRefs: ctx.resetInterviewProgressRefs,
     startInterview: ctx.startInterview,
   } as PerformAdminInterviewResetDeps;
-}
-
-export function syncInterviewWebSpeechRecognitionDeps(
-  ref: MutableRefObject<InterviewWebSpeechRecognitionDeps>,
-  ctx: AriaInterviewDepsSyncContext,
-): void {
-  ref.current = {
-    useMediaRecorderPath: ctx.useMediaRecorderPath,
-    recognitionRef: ctx.recognitionRef,
-    setCurrentTranscript: ctx.setCurrentTranscript,
-    transcriptAtReleaseRef: ctx.transcriptAtReleaseRef,
-    setMicError: ctx.setMicError,
-    setMicWarning: ctx.setMicWarning,
-  } as InterviewWebSpeechRecognitionDeps;
 }
 
 export function syncHandleSendTypedDeps(

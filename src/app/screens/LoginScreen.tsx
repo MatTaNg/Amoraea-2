@@ -17,7 +17,6 @@ import {
 import { SafeAreaContainer } from '@ui/components/SafeAreaContainer';
 import { FlameOrb } from '@app/screens/FlameOrb';
 import { authStyles } from '@app/screens/authStyles';
-import { unlockWebAudioForAutoplay } from '@features/aria/utils/webInterviewTtsDocumentLifecycle';
 
 const isEmailNotConfirmedError = (err: unknown): boolean => {
   const msg = err instanceof Error ? err.message : String(err);
@@ -85,9 +84,6 @@ export const LoginScreen: React.FC<{ navigation: any; route?: { params?: { confi
     setError(null);
     setResendSent(false);
     clearEmailConfirmationLinkError();
-    if (Platform.OS === 'web') {
-      unlockWebAudioForAutoplay();
-    }
     setLoading(true);
     try {
       await signIn(email.trim(), password);
@@ -346,7 +342,7 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   flameScale: {
-    transform: [{ scale: 0.52 }],
+    transform: [{ scale: 0.78 }],
   },
   button: {
     marginBottom: 12,

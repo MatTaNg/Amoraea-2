@@ -38,7 +38,6 @@ export function buildShowChatErrorLocalSyncExtra(scope: ShowChatErrorLocalScope)
 
 export type ApplyInterviewSpeechCompleteLocalScope = Pick<
   AriaInterviewDepsSyncContext,
-  | 'webTtsTabInterruptPendingReplayRef'
   | 'applyReferenceCardFromAssistantSpeech'
   | 'currentScenarioRef'
   | 'currentInterviewMomentRef'

@@ -5,6 +5,7 @@ import {
   scenarioAEmmaVeryClearClosingLineMentioned,
   scenarioAEmmaVeryClearContemptReask,
 } from './scenarioAContemptProbeTextMatch';
+import { withSkipAcceptedNextQuestionBridgePreserved } from './skipAcceptedNextQuestionBridge';
 
 /** Canonical Scenario A contempt probe — client-forced and orphan-stream fallback. */
 export const SCENARIO_A_CONTEMPT_PROBE_DELIVERED_COPY =
@@ -43,8 +44,9 @@ function extractBriefAckBeforeIncompleteEmmaContemptProbe(text: string): string 
 
 /** Expand truncated Emma contempt probe fragments (stream/model cutoff) to canonical copy. */
 export function coerceScenarioAContemptProbeForTts(text: string): string {
-  const t = (text ?? '').replace(/\s+/g, ' ').trim();
-  if (!t) return text;
+  return withSkipAcceptedNextQuestionBridgePreserved(text, (raw) => {
+  const t = (raw ?? '').replace(/\s+/g, ' ').trim();
+  if (!t) return raw;
   if (
     looksLikeScenarioAContemptProbeQuestion(t) ||
     scenarioAEmmaVeryClearContemptReask(t)
@@ -56,7 +58,8 @@ export function coerceScenarioAContemptProbeForTts(text: string): string {
     if (ack) return `${ack}. ${SCENARIO_A_CONTEMPT_PROBE_DELIVERED_COPY}`;
     return SCENARIO_A_CONTEMPT_PROBE_DELIVERED_COPY;
   }
-  return text;
+  return raw;
+  });
 }
 
 /**

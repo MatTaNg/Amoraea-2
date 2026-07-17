@@ -2,7 +2,6 @@ import { Platform } from 'react-native';
 
 import type { AriaInterviewDepsSyncContext } from '@features/aria/syncAriaInterviewDepsRefs';
 import { mergeAriaInterviewSyncCtx } from '@features/aria/syncAriaInterviewDepsRefs';
-import { TAB_RESTORE_HTML_PLAY_START_TIMEOUT_MS } from '@features/aria/interviewTtsSpeakOptions';
 import {
   createDeliverRecordingRetryLineSyncExtra,
   createHandleRecordingErrorSyncExtra,
@@ -12,20 +11,13 @@ import {
   createSaveScenarioCheckpointSyncExtra,
 } from '@features/aria/createInterviewTtsAuxSyncExtras';
 import {
-  createInterruptDocumentHiddenTtsSyncExtra,
-  createInterviewDocumentVisibilityTtsSyncExtra,
-} from '@features/aria/createInterviewDocumentTtsSyncExtras';
-import {
   createLoadPostInterviewFeedbackSyncExtra,
   createPerformAdminInterviewResetSyncExtra,
   createPerformInterviewRetakeSyncExtra,
   createSubmitPostInterviewFeedbackSyncExtra,
-  createWebResumeWelcomeTapSyncExtra,
 } from '@features/aria/createInterviewAdminActionSyncExtras';
 import { createInterviewCompletionScoringSyncExtra } from '@features/aria/createInterviewCompletionScoringSyncExtra';
 import { buildDeliverRecordingRetryLineSyncExtra } from '@features/aria/buildDeliverRecordingRetryLineSyncExtra';
-import { buildInterruptDocumentHiddenTtsSyncExtra } from '@features/aria/buildInterruptDocumentHiddenTtsSyncExtra';
-import { buildInterviewDocumentVisibilityTtsSyncExtra } from '@features/aria/buildInterviewDocumentVisibilityTtsSyncExtra';
 import {
   buildApplyRouteProbeAfterResumeSyncExtra,
   buildHandleRecordingErrorSyncExtra,
@@ -47,19 +39,11 @@ import {
   buildInterviewWebSpeechRecognitionMergedSyncCtx,
   buildSaveScenarioCheckpointMergedSyncCtx,
 } from '@features/aria/buildInterviewClusterMergedSyncCtx';
-import {
-  buildDeliverRecordingRetryLineMergedSyncCtx,
-  buildInterruptDocumentHiddenTtsMergedSyncCtx,
-  buildInterviewDocumentVisibilityTtsMergedSyncCtx,
-} from '@features/aria/buildInterviewDocumentTtsMergedSyncCtx';
+import { buildDeliverRecordingRetryLineMergedSyncCtx } from '@features/aria/buildInterviewDocumentTtsMergedSyncCtx';
 import { buildInterviewCompletionScoringSyncExtra } from '@features/aria/buildInterviewCompletionScoringSyncExtra';
 import { buildPerformAdminInterviewResetSyncExtra } from '@features/aria/buildPerformAdminInterviewResetSyncExtra';
 import { buildPerformInterviewRetakeSyncExtra } from '@features/aria/buildPerformInterviewRetakeSyncExtra';
 import type { DeliverRecordingRetryLineLocalScope } from '@features/aria/buildDeliverRecordingRetryLineSyncExtra';
-import type { InterruptDocumentHiddenTtsLocalScope } from '@features/aria/buildInterruptDocumentHiddenTtsSyncExtra';
-import type { InterviewDocumentVisibilityTtsLocalScope } from '@features/aria/buildInterviewDocumentVisibilityTtsSyncExtra';
-import type { TabRestoreWatchdogLocalScope } from '@features/aria/buildInterviewTabRestoreLocalSyncExtras';
-import { buildTabRestoreWatchdogLocalSyncExtra } from '@features/aria/buildInterviewTabRestoreLocalSyncExtras';
 import type {
   ApplyRouteProbeAfterResumeLocalScope,
   HandleRecordingErrorLocalScope,
@@ -67,8 +51,6 @@ import type {
   InterviewWebSpeechRecognitionLocalScope,
 } from '@features/aria/buildInterviewMicTurnAuxSyncExtras';
 import type { SaveScenarioCheckpointLocalScope } from '@features/aria/buildInterviewScenarioScoringAuxSyncExtras';
-import type { WebResumeWelcomeTapLocalScope } from '@features/aria/buildWebResumeWelcomeTapSyncExtra';
-import { buildWebResumeWelcomeTapMergedSyncCtx, buildWebResumeWelcomeTapSyncExtra } from '@features/aria/buildWebResumeWelcomeTapSyncExtra';
 import type {
   InterviewCompletionScoringLocalScope,
   LoadPostInterviewFeedbackLocalScope,
@@ -78,22 +60,10 @@ import type { PerformAdminInterviewResetLocalScope } from '@features/aria/buildP
 import type { PerformInterviewRetakeLocalScope } from '@features/aria/buildPerformInterviewRetakeLocalSyncExtra';
 
 export type DeliverRecordingRetryLineScreenRefs = DeliverRecordingRetryLineLocalScope;
-export type InterruptDocumentHiddenTtsScreenRefs = InterruptDocumentHiddenTtsLocalScope;
-export type InterviewDocumentVisibilityTtsScreenRefs = InterviewDocumentVisibilityTtsLocalScope;
-export type TabRestoreWatchdogLocalScreenRefs = Omit<
-  TabRestoreWatchdogLocalScope,
-  'tabRestoreHtmlPlayStartTimeoutMs'
->;
-
-export type TabRestoreWatchdogScreenRefs = {
-  coreGateServicesBaseCtx: AriaInterviewDepsSyncContext;
-  webRuntimeCtx: AriaInterviewDepsSyncContext;
-  tabRestoreWatchdog: TabRestoreWatchdogLocalScreenRefs;
-};
 
 export type WebTabRestoreSessionScreenRefs = {
   coreGateServicesBaseCtx: AriaInterviewDepsSyncContext;
-  webRuntimeCtx: AriaInterviewDepsSyncContext;
+  runtimeCtx: AriaInterviewDepsSyncContext;
   coreCtx: AriaInterviewDepsSyncContext;
 };
 export type HandleRecordingErrorScreenRefs = Omit<HandleRecordingErrorLocalScope, 'useWebCopy'>;
@@ -101,7 +71,6 @@ export type ApplyRouteProbeAfterResumeScreenRefs = ApplyRouteProbeAfterResumeLoc
 export type HandleSendTypedScreenRefs = HandleSendTypedLocalScope;
 export type InterviewWebSpeechRecognitionScreenRefs = InterviewWebSpeechRecognitionLocalScope;
 export type SaveScenarioCheckpointScreenRefs = SaveScenarioCheckpointLocalScope;
-export type WebResumeWelcomeTapScreenRefs = WebResumeWelcomeTapLocalScope;
 export type InterviewCompletionScoringScreenRefs = InterviewCompletionScoringLocalScope;
 export type PerformInterviewRetakeScreenRefs = PerformInterviewRetakeLocalScope;
 export type PerformAdminInterviewResetScreenRefs = PerformAdminInterviewResetLocalScope;
@@ -117,44 +86,12 @@ export function createDeliverRecordingRetryLineSyncCtxFromScreen(
   );
 }
 
-export function createInterruptDocumentHiddenTtsSyncCtxFromScreen(
-  coreCtx: AriaInterviewDepsSyncContext,
-  local: InterruptDocumentHiddenTtsScreenRefs,
-): AriaInterviewDepsSyncContext {
-  return createInterruptDocumentHiddenTtsSyncExtra(
-    buildInterruptDocumentHiddenTtsSyncExtra(buildInterruptDocumentHiddenTtsMergedSyncCtx(coreCtx, local)),
-  );
-}
-
-export function createInterviewDocumentVisibilityTtsSyncCtxFromScreen(
-  coreCtx: AriaInterviewDepsSyncContext,
-  local: InterviewDocumentVisibilityTtsScreenRefs,
-): AriaInterviewDepsSyncContext {
-  return createInterviewDocumentVisibilityTtsSyncExtra(
-    buildInterviewDocumentVisibilityTtsSyncExtra(
-      buildInterviewDocumentVisibilityTtsMergedSyncCtx(coreCtx, local),
-    ),
-  );
-}
-
-export function createTabRestoreWatchdogSyncCtxFromScreen(
-  refs: TabRestoreWatchdogScreenRefs,
-): AriaInterviewDepsSyncContext {
-  return mergeAriaInterviewSyncCtx(
-    mergeAriaInterviewSyncCtx(refs.coreGateServicesBaseCtx, refs.webRuntimeCtx),
-    buildTabRestoreWatchdogLocalSyncExtra({
-      ...refs.tabRestoreWatchdog,
-      tabRestoreHtmlPlayStartTimeoutMs: TAB_RESTORE_HTML_PLAY_START_TIMEOUT_MS,
-    }),
-  );
-}
-
 /** Full sync ctx for tab-restore tap replay (web runtime + core TTS refs). */
 export function createWebTabRestoreSessionSyncCtxFromScreen(
   refs: WebTabRestoreSessionScreenRefs,
 ): AriaInterviewDepsSyncContext {
   return mergeAriaInterviewSyncCtx(
-    mergeAriaInterviewSyncCtx(refs.coreGateServicesBaseCtx, refs.webRuntimeCtx),
+    mergeAriaInterviewSyncCtx(refs.coreGateServicesBaseCtx, refs.runtimeCtx),
     refs.coreCtx,
   );
 }
@@ -210,15 +147,6 @@ export function createSaveScenarioCheckpointSyncCtxFromScreen(
     buildSaveScenarioCheckpointSyncExtra(
       buildSaveScenarioCheckpointMergedSyncCtx(servicesBaseCtx, local),
     ),
-  );
-}
-
-export function createWebResumeWelcomeTapSyncCtxFromScreen(
-  coreCtx: AriaInterviewDepsSyncContext,
-  local: WebResumeWelcomeTapScreenRefs,
-): AriaInterviewDepsSyncContext {
-  return createWebResumeWelcomeTapSyncExtra(
-    buildWebResumeWelcomeTapSyncExtra(buildWebResumeWelcomeTapMergedSyncCtx(coreCtx, local)),
   );
 }
 

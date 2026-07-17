@@ -14,7 +14,6 @@ export function buildInterviewWebSpeechRecognitionSyncExtra(
 
 export type InterviewWebSpeechRecognitionLocalScope = Pick<
   AriaInterviewDepsSyncContext,
-  | 'useMediaRecorderPath'
   | 'recognitionRef'
   | 'setCurrentTranscript'
   | 'transcriptAtReleaseRef'

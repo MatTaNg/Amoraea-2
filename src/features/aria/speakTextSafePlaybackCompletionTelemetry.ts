@@ -61,14 +61,17 @@ export function writeSpeakTextSafePlaybackCompletionTelemetry(args: {
   });
 
   if (looksLikeScenarioAContemptProbeQuestion(stripControlTokens(args.text).trim())) {
-    args.scenarioAContemptProbePlaybackConfirmedRef.current = true;
+    if (args.scenarioAContemptProbePlaybackConfirmedRef) {
+      args.scenarioAContemptProbePlaybackConfirmedRef.current = true;
+    }
   }
 
   const showScenarioCardKind = isShowScenarioCardCanonicalDeliveryText(args.text);
   if (
     showScenarioCardKind &&
     !audioPlaybackTruncated &&
-    durationMatch
+    durationMatch &&
+    args.showScenarioCardCanonicalPlaybackConfirmedKindsRef
   ) {
     args.showScenarioCardCanonicalPlaybackConfirmedKindsRef.current = {
       ...args.showScenarioCardCanonicalPlaybackConfirmedKindsRef.current,

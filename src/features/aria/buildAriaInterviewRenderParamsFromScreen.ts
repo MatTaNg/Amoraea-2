@@ -18,13 +18,8 @@ export type BuildAriaInterviewRenderParamsFromScreenInput = {
     status: string;
     voiceState: AriaInterviewScreenRenderScope['activeShell']['interviewerMic']['voiceState'];
     currentTranscript: string;
-    useMediaRecorderPath: boolean;
-    webInterviewerOutputActive: boolean;
+    interviewerOutputActive: boolean;
     useTapMicUi: boolean;
-    mobileWebTapToBeginDone: boolean;
-    webDesktopAwaitingStartOverlay: boolean;
-    webDesktopPendingTtsGestureOverlay: boolean;
-    webTabGestureRestoreOverlay: boolean;
     interviewStartInFlight: boolean;
     onboardingAutoStartRef: MutableRefObject<boolean>;
     micError: string | null;
@@ -35,9 +30,7 @@ export type BuildAriaInterviewRenderParamsFromScreenInput = {
     micNeedsReconnect: boolean;
     setMicNeedsReconnect: (value: boolean) => void;
     lateStartIdleCueVisible: boolean;
-    webInsecureContextMessage: string | null;
     audioRecorder: AriaInterviewScreenRenderScope['activeShell']['interviewerMic']['audioRecorder'];
-    setWebDesktopAwaitingStartOverlay: (value: boolean) => void;
     setMicError: (value: string | null) => void;
   };
   handlers: {
@@ -46,17 +39,12 @@ export type BuildAriaInterviewRenderParamsFromScreenInput = {
     handleSubmitPostInterviewFeedback: AriaInterviewScreenRenderScope['router']['postInterviewFeedback']['handlers']['handleSubmitPostInterviewFeedback'];
     handleBackToValidationReport: AriaInterviewScreenRenderScope['router']['postInterviewFeedback']['handlers']['handleBackToValidationReport'];
     startInterview: AriaInterviewScreenRenderScope['router']['startConsent']['startInterview'];
-    handleMobileWebTapToBegin: AriaInterviewScreenRenderScope['router']['startConsent']['handleMobileWebTapToBegin'];
     handleRetake: AriaInterviewScreenRenderScope['router']['sessionAuth']['handleRetake'];
     handleEmotionInterviewAnswer: AriaInterviewScreenRenderScope['activeShell']['emotionModal']['onEmotionInterviewAnswer'];
     handlePressStart: AriaInterviewScreenRenderScope['activeShell']['interviewerMic']['handlePressStart'];
     handlePressEnd: AriaInterviewScreenRenderScope['activeShell']['interviewerMic']['handlePressEnd'];
     handleNativeOrWhisperMicPress: AriaInterviewScreenRenderScope['activeShell']['interviewerMic']['handleNativeOrWhisperMicPress'];
-    handleWebMicPressIn: AriaInterviewScreenRenderScope['activeShell']['interviewerMic']['handleWebMicPressIn'];
     handleSendTyped: AriaInterviewScreenRenderScope['activeShell']['adminResults']['handleSendTyped'];
-    runWebGestureTtsFlush: AriaInterviewScreenRenderScope['activeShell']['webGestures']['runWebGestureTtsFlush'];
-    handleWebTabGestureRestoreTap: AriaInterviewScreenRenderScope['activeShell']['webGestures']['handleWebTabGestureRestoreTap'];
-    handleWebResumeWelcomeTap: AriaInterviewScreenRenderScope['activeShell']['webGestures']['handleWebResumeWelcomeTap'];
   };
 };
 
@@ -116,22 +104,14 @@ export function buildAriaInterviewRenderParamsFromScreen(
     setInterviewStatus,
     setStandardResultsReferralCopyFeedback,
     interviewSessionAttemptIdRef,
-    webResumeWelcomeTapPending,
   } = shell;
-  const { resumeOfferWelcomeTtsRef } = gate.resumeEmotion;
-  const { webTabRestoreReplayInFlightRef } = gate.webTts;
   const { interviewSessionIdRef } = gate.progressReset;
   const {
     status,
     voiceState,
     currentTranscript,
-    useMediaRecorderPath,
-    webInterviewerOutputActive,
+    interviewerOutputActive,
     useTapMicUi,
-    mobileWebTapToBeginDone,
-    webDesktopAwaitingStartOverlay,
-    webDesktopPendingTtsGestureOverlay,
-    webTabGestureRestoreOverlay,
     interviewStartInFlight,
     onboardingAutoStartRef,
     micError,
@@ -142,9 +122,7 @@ export function buildAriaInterviewRenderParamsFromScreen(
     micNeedsReconnect,
     setMicNeedsReconnect,
     lateStartIdleCueVisible,
-    webInsecureContextMessage,
     audioRecorder,
-    setWebDesktopAwaitingStartOverlay,
     setMicError,
   } = interviewSession;
 
@@ -183,20 +161,15 @@ export function buildAriaInterviewRenderParamsFromScreen(
         micError,
         micPermission,
         micWarning,
-        mobileWebTapToBeginDone,
-        webDesktopAwaitingStartOverlay,
         preInterviewConsentAge,
         preInterviewConsentData,
         interviewStartInFlight,
         interviewAttemptBootstrap,
         onboardingAutoStartRef,
-        webSpeechShouldDeferToUserGesture: wiring.webSpeechShouldDeferToUserGesture,
         setMicError,
-        setWebDesktopAwaitingStartOverlay,
         setPreInterviewConsentAge,
         setPreInterviewConsentData,
         startInterview: handlers.startInterview,
-        handleMobileWebTapToBegin: handlers.handleMobileWebTapToBegin,
       },
       sessionAuth: {
         supabase: wiring.supabase,
@@ -212,9 +185,6 @@ export function buildAriaInterviewRenderParamsFromScreen(
         isAdmin,
         status,
         emotionModalVisible,
-        webTabGestureRestoreOverlay,
-        webResumeWelcomeTapPending,
-        webDesktopPendingTtsGestureOverlay,
       },
       emotionModal: {
         emotionModalVisible,
@@ -223,15 +193,13 @@ export function buildAriaInterviewRenderParamsFromScreen(
         onEmotionInterviewAnswer: handlers.handleEmotionInterviewAnswer,
       },
       interviewerMic: {
-        useMediaRecorderPath,
         audioRecorder,
         voiceState,
-        webInterviewerOutputActive,
+        interviewerOutputActive,
         interviewUiPhase,
         referenceCardScenario,
         referenceCardPrompt,
         ttsPlaybackReliabilityNotice,
-        webInsecureContextMessage,
         sessionAudioHealthNotice,
         conversationErrorNotice,
         micPermission,
@@ -242,7 +210,6 @@ export function buildAriaInterviewRenderParamsFromScreen(
         micWarning,
         useTapMicUi,
         handleNativeOrWhisperMicPress: handlers.handleNativeOrWhisperMicPress,
-        handleWebMicPressIn: handlers.handleWebMicPressIn,
         handleInterviewSignOut: handlers.handleInterviewSignOut,
         preInitMeterLevel,
         micSessionRecovering,
@@ -276,11 +243,6 @@ export function buildAriaInterviewRenderParamsFromScreen(
           preamble.replaceWithStandardApplicantPostInterviewHandoffForUser,
       },
       webGestures: {
-        resumeOfferWelcomeTtsRef,
-        webTabRestoreReplayInFlightRef,
-        runWebGestureTtsFlush: handlers.runWebGestureTtsFlush,
-        handleWebTabGestureRestoreTap: handlers.handleWebTabGestureRestoreTap,
-        handleWebResumeWelcomeTap: handlers.handleWebResumeWelcomeTap,
         interviewSessionAttemptIdRef,
       },
     },

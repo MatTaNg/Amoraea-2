@@ -90,10 +90,9 @@ describe('runPreClaudeFrustrationSkipDeclineGate', () => {
     expect(result).toEqual({ haltTurn: true });
     expect(deps.frustrationSkipOfferPendingRef.current).toBe(false);
     expect(deps.inabilityCountByMomentRef.current[2]).toBe(0);
-    expect(speakTextSafe).toHaveBeenCalledWith(
-      expect.stringMatching(/stay on this one/i),
-      expect.any(Object),
-    );
+    const spoken = String(speakTextSafe.mock.calls[0]?.[0] ?? '');
+    expect(spoken).toMatch(/stay on this one/i);
+    expect(spoken).not.toMatch(/—|–|_/);
     expect(setMessages).toHaveBeenCalledWith(
       expect.arrayContaining([
         expect.objectContaining({

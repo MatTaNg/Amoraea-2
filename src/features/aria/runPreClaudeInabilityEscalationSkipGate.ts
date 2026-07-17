@@ -1,6 +1,6 @@
 import type { MessageWithScenario } from '@features/aria/interviewScenarioScoringSlice';
 import { ASSISTANT_INTERVIEW_SPEECH } from '@features/aria/interviewTtsSpeakOptions';
-import { SKIP_REQUEST_CONFIRMATION_PROMPT_LINE } from '@features/aria/metaCommentClassification';
+import { INABILITY_SKIP_CONFIRMATION_PROMPT_LINE } from '@features/aria/metaCommentClassification';
 import type { PreClaudeTurnGateDeps } from '@features/aria/preClaudeTurnGateTypes';
 import {
   finishPreClaudeSkipInjectionTurn,
@@ -23,19 +23,21 @@ export async function runPreClaudeInabilityEscalationSkipGate(
   deps.frustrationSkipOfferPendingRef.current = true;
   deps.frustrationSkipAwaitingConfirmationRef.current = true;
   deps.frustrationSkipHadPriorAnswerRef.current = false;
+  const prevInability = deps.inabilityCountByMomentRef.current[momentEs] ?? 0;
   deps.inabilityCountByMomentRef.current = {
     ...deps.inabilityCountByMomentRef.current,
-    [momentEs]: 2,
+    [momentEs]: Math.max(1, prevInability + 1),
   };
   const escMsg: MessageWithScenario = {
     role: 'assistant',
-    content: SKIP_REQUEST_CONFIRMATION_PROMPT_LINE,
+    content: INABILITY_SKIP_CONFIRMATION_PROMPT_LINE,
     scenarioNumber: tagEs as 1 | 2 | 3,
   };
   deps.setMessages([...messagesToUse, escMsg]);
-  await deps.speakTextSafe(SKIP_REQUEST_CONFIRMATION_PROMPT_LINE, {
+  await deps.speakTextSafe(INABILITY_SKIP_CONFIRMATION_PROMPT_LINE, {
     ...ASSISTANT_INTERVIEW_SPEECH,
     allowDuplicateConsecutiveTts: true,
+    skipLastQuestionRef: true,
   });
   return finishPreClaudeSkipInjectionTurn(deps);
 }

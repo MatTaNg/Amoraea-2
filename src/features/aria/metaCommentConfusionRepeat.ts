@@ -18,8 +18,12 @@ export const CONFUSION_REPEAT_REQUEST_RES: RegExp[] = [
   /\b(say|run) (that|it) again\b/i,
   /\bcome again\b/i,
   /\brepeat the question\b/i,
+  /\brepeat (the |this |that )?(scenario|situation|story|vignette)\b/i,
+  /\b(can you |could you )?repeat (the |this )?(scenario|situation)\b/i,
+  /\bhear (the |this )?(scenario|situation) again\b/i,
+  /\brun through (it|the scenario|the situation) again\b/i,
   /\b(yes|yeah|yep|sure),?\s+repeat\b/i,
-  /\brepeat\s+what you (said|say|see|asked|meant)\b/i,
+  /\brepeat\s+what (you|she) (said|say|see|asked|meant)\b/i,
   /\bplease\s+repeat\b/i,
 ];
 
@@ -35,10 +39,12 @@ export function isConfusionRepeatRequestText(text: string): boolean {
  */
 const EXPLICIT_REPEAT_REQUEST_PRECLASS_RES: RegExp[] = [
   /\brepeat the questions?\b/i,
+  /\brepeat (the |this |that )?(scenario|situation|story|vignette)\b/i,
+  /\b(can you |could you )?repeat (the |this )?(scenario|situation)\b/i,
   /\bask the questions? again\b/i,
   /\bsay that again\b/i,
   /\bcan you repeat\b/i,
-  /\bwhat did you say\b/i,
+  /\bwhat did (you|she) say\b/i,
   /\bdidn'?t hear you\b/i,
   /\bdidn'?t catch that\b/i,
   /\bsay it again\b/i,
@@ -48,9 +54,9 @@ const EXPLICIT_REPEAT_REQUEST_PRECLASS_RES: RegExp[] = [
   /\bpardon\b/i,
   /\bhuh\b/i,
   /\b(yes|yeah|yep|sure),?\s+repeat\b/i,
-  /\b(yes|yeah|yep|sure),?\s+repeat what you said\b/i,
-  /\brepeat\w* what you (said|just said)\b/i,
-  /\brepeat\s+what you (said|say|see|asked|meant)\b/i,
+  /\b(yes|yeah|yep|sure),?\s+repeat what (you|she) said\b/i,
+  /\brepeat\w* what (you|she) (said|just said)\b/i,
+  /\brepeat\s+what (you|she) (said|say|see|asked|meant)\b/i,
   /\bplease\s+repeat\b/i,
   /^\s*repeat\s*$/i,
 ];

@@ -1,6 +1,7 @@
 import {
   looksLikeDirectResumeAnswer,
   looksLikeRepeatCueInAmbiguousReply,
+  shouldAllowResumeRepeatChoiceTurnProcessing,
   shouldBypassResumeRepeatGateForLongAnswer,
 } from '../resumeRepeatGate';
 
@@ -21,6 +22,20 @@ describe('resumeRepeatGate', () => {
     expect(looksLikeRepeatCueInAmbiguousReply('Can you repeat what you said?')).toBe(true);
     expect(looksLikeRepeatCueInAmbiguousReply('Repeat what you see.')).toBe(true);
     expect(looksLikeRepeatCueInAmbiguousReply('What did you say again?')).toBe(true);
+  });
+
+  it('allows Whisper-mangled repeat phrases through post-transcribe gate', () => {
+    const welcome =
+      "Welcome back — we'll pick up where we left off. If you'd like me to repeat what I said, let me know.";
+    expect(shouldAllowResumeRepeatChoiceTurnProcessing('He what you said', 4, welcome)).toBe(true);
+    expect(shouldAllowResumeRepeatChoiceTurnProcessing('Pee at what you said.', 5, welcome)).toBe(true);
+    expect(looksLikeRepeatCueInAmbiguousReply('He what you said')).toBe(true);
+  });
+
+  it('allows identity / off-topic asks through post-transcribe gate while repeat-choice pending', () => {
+    const repairQ = 'Got it. If you were Ryan, how would you repair this?';
+    expect(shouldAllowResumeRepeatChoiceTurnProcessing('Are you an alien?', 4, repairQ)).toBe(true);
+    expect(shouldAllowResumeRepeatChoiceTurnProcessing('Are you AI?', 3, repairQ)).toBe(true);
   });
 
   it('allows mid-length scenario answers even when lastQuestionText has no lexical overlap', () => {

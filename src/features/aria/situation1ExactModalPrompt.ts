@@ -5,6 +5,11 @@ import {
   SCENARIO_1_OPENING,
 } from '@features/aria/interviewScenarioOpeningStreamGate';
 import {
+  SHOW_SCENARIO_1_OPENING_EXACT,
+  SHOW_SCENARIO_1_VIGNETTE_EXACT,
+} from '@features/aria/interviewShowScenarioExactCopy';
+import { buildScenario1VignetteIntroBundle } from '@features/aria/interviewTransitionBundles';
+import {
   looksLikeScenarioAContemptProbeQuestion,
   SCENARIO_A_CONTEMPT_PROBE_DELIVERED_COPY,
   SCENARIO_A_REPAIR_QUESTION_AFTER_CONTEMPT_COPY,
@@ -17,6 +22,36 @@ import {
   looksLikeScenarioBJamesDifferentlyQuestion,
   SCENARIO_B_JAMES_DIFFERENTLY_CANONICAL,
 } from '@features/aria/scenarioBProbeLogic';
+
+/** Model meta-narration instead of the Situation 1 vignette (often after tab restore / readiness). */
+export function looksLikeScenario1MetaPlayNarration(text: string | null | undefined): boolean {
+  const t = (text ?? '')
+    .trim()
+    .toLowerCase()
+    .replace(/\u2019/g, "'");
+  if (!t) return false;
+  if (/\bemma and ryan\b/.test(t) || /\bryan takes a call\b/.test(t)) return false;
+  if (/\bplay\s+situation\s*1\b/.test(t)) return true;
+  if (/\b(will|going to|gonna)\s+(now\s+)?(play|start|begin)\s+situation\s*1\b/.test(t)) return true;
+  if (/\b(app|i|we|amoraea)\b[\s\S]{0,40}\b(now\s+)?play\b[\s\S]{0,40}\bsituation\s*1\b/.test(t)) {
+    return true;
+  }
+  if (
+    /\bhere(?:'s| is)\s+(?:the\s+)?(?:first\s+)?situation\b/.test(t) &&
+    t.length < 90 &&
+    !/\bemma\b/.test(t) &&
+    !/\bryan\b/.test(t)
+  ) {
+    return true;
+  }
+  return false;
+}
+
+/** Replace Situation 1 meta-play filler with the client-owned vignette + opening. */
+export function coerceScenario1MetaPlayNarrationForTts(text: string): string {
+  if (!looksLikeScenario1MetaPlayNarration(text)) return text;
+  return buildScenario1VignetteIntroBundle(SHOW_SCENARIO_1_VIGNETTE_EXACT, SHOW_SCENARIO_1_OPENING_EXACT);
+}
 
 /** Emma coaching / mentalizing paraphrases — match with or without trailing `?` (streaming may cut mid-sentence). */
 export function looksLikeScenarioAEmmaCoachingParaphrase(text: string | null | undefined): boolean {

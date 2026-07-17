@@ -1,6 +1,5 @@
 import { Platform } from 'react-native';
 
-import { bootstrapWebInterviewStartAudio } from '@features/aria/bootstrapWebInterviewStartAudio';
 import { applyInterviewStartUnavailableFailure } from '@features/aria/applyInterviewStartUnavailableFailure';
 import { deliverInterviewOpeningGreeting } from '@features/aria/deliverInterviewOpeningGreeting';
 import { isGreetingOnly } from '@features/aria/interviewLocalPersistence';
@@ -31,7 +30,7 @@ export async function runStartInterview(
     hasResumedRef,
     resumeLoadingFlowActiveRef,
     interviewStatusRef,
-    interruptAllWebInterviewTtsOutput,
+    interruptAllInterviewTtsOutput,
     setVoiceState,
     setMicError,
     setStatus,
@@ -89,40 +88,13 @@ export async function runStartInterview(
         !isAdmin &&
         shouldResumeMidInterviewFromSaved(savedForResumeDecision),
     );
-    const skipInterruptForFreshWebGestureStart =
-      Platform.OS === 'web' &&
-      params?.fromUserGesture === true &&
-      !hasResumedRef.current &&
-      !willResumeMidInterview &&
-      interviewStatusRef.current !== 'in_progress';
-    if (!skipInterruptForFreshWebGestureStart) {
-      interruptAllWebInterviewTtsOutput();
-    }
-    const interviewStartTapClockMs = Date.now();
-    const webBootstrap = await bootstrapWebInterviewStartAudio(deps, params, interviewStartTapClockMs, {
-      skipOpeningGreetingSync:
-        willResumeMidInterview ||
-        resumeLoadingFlowActiveRef.current ||
-        hasResumedRef.current ||
-        hydratedMidInterviewInMemory,
-    });
-    if (webBootstrap.aborted) {
-      return;
-    }
+    interruptAllInterviewTtsOutput();
 
-    if (Platform.OS === 'web' && params?.fromUserGesture) {
-      void remoteLog('[START] startInterview called', {
-        userId: userId ?? null,
-        isAdmin,
-        platform: Platform.OS,
-      });
-    } else {
-      await remoteLog('[START] startInterview called', {
-        userId: userId ?? null,
-        isAdmin,
-        platform: Platform.OS,
-      });
-    }
+    await remoteLog('[START] startInterview called', {
+      userId: userId ?? null,
+      isAdmin,
+      platform: Platform.OS,
+    });
     if (userId && !isAdmin) {
       if (interviewAttemptBootstrap === 'failed') {
         setMicError('Could not create your interview session. Please refresh the page and try again.');
@@ -163,8 +135,8 @@ export async function runStartInterview(
     try {
       await deliverInterviewOpeningGreeting(deps, {
         opts: params,
-        greetingSyncStarted: webBootstrap.greetingSyncStarted,
-        earlyWebRouteProbe: webBootstrap.earlyWebRouteProbe,
+        greetingSyncStarted: false,
+        earlyWebRouteProbe: null,
         interviewAttemptBootstrap,
         runSessionStartLogging: (probe) => runInterviewSessionStartLogging(deps, probe),
       });

@@ -2,7 +2,7 @@ import { stripControlTokens } from '@features/aria/interviewControlTokens';
 import { isInterviewPreambleBriefingMoment } from '@features/aria/interviewLanguageGate';
 import type { MessageWithScenario } from '@features/aria/interviewScenarioScoringSlice';
 import { appendAssistantTurn, assistantTurnHasPersistableContent } from '@features/aria/interviewTranscriptTurns';
-import { WEB_INTERVIEW_OPENING_GREETING } from '@features/aria/utils/webInterviewGreetingAudio';
+import { INTERVIEW_OPENING_GREETING } from '@features/aria/utils/interviewOpeningGreeting';
 
 export function transcriptHasScenario1VignetteAssistant(
   msgs: Array<{ role: string; content?: string }> | undefined,
@@ -42,11 +42,15 @@ export function extractFirstNameFromIntroBriefingLead(text: string): string | nu
   return m?.[1]?.trim() ?? null;
 }
 
-function looksLikeIntroBriefingSpeech(text: string): boolean {
+/** Opening name handshake + post-name briefing — never the mid-interview question to verbatim-repeat. */
+export function looksLikeIntroBriefingSpeech(text: string): boolean {
   const t = stripControlTokens(text).trim();
   if (!t) return false;
   if (isInterviewPreambleBriefingMoment(t)) return true;
   const lower = t.toLowerCase();
+  if (/\bhi,?\s+i'?m\s+amoraea\b/.test(lower) && /\bwhat can i call you\b/.test(lower)) {
+    return true;
+  }
   return (
     /good to meet you/i.test(lower) &&
     (/the way this works/i.test(lower) || /three situations/i.test(lower) || /five parts/i.test(lower))
@@ -65,7 +69,7 @@ export function isIncompleteOpeningNamePrompt(text: string): boolean {
 export function coerceOpeningNamePromptForTts(text: string): string {
   const t = stripControlTokens(text).trim();
   if (!t) return text;
-  if (isIncompleteOpeningNamePrompt(t)) return WEB_INTERVIEW_OPENING_GREETING;
+  if (isIncompleteOpeningNamePrompt(t)) return INTERVIEW_OPENING_GREETING;
   return text;
 }
 

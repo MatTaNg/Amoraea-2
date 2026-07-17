@@ -63,6 +63,19 @@ describe('moment4ProbeLogic', () => {
         "When something like that comes up — where there's real tension with another person — are you someone who tends to work through it, or are there situations where you'd rather just walk away?",
       ),
     ).toBe(true);
+    expect(
+      looksLikeMoment4ThresholdQuestion(
+        "Makes sense. If something like that happened with someone you care about — is that more the kind of thing you'd work through, or would you walk away?",
+      ),
+    ).toBe(true);
+  });
+
+  it('coerces unauthorized care-about work-through/walk-away paraphrase to canonical threshold', () => {
+    const unauthorized =
+      "Makes sense. If something like that happened with someone you care about — is that more the kind of thing you'd work through, or would you walk away?";
+    expect(coerceMoment4ThresholdQuestionForTts(unauthorized)).toBe(
+      `Makes sense. Thanks for sharing that. ${MOMENT_4_COMMITMENT_THRESHOLD_QUESTION_CARD_BODY}`,
+    );
   });
 
   it('detects incomplete streaming commitment-threshold paraphrases', () => {
@@ -96,6 +109,22 @@ describe('moment4ProbeLogic', () => {
     expect(coerceMoment4ThresholdQuestionForTts(paraphrase)).toBe(
       `Got it. Thanks for sharing that. ${MOMENT_4_COMMITMENT_THRESHOLD_QUESTION_CARD_BODY}`,
     );
+  });
+
+  it('coerces cuts-deep / where\'s-your-line threshold paraphrase to canonical commitment copy', () => {
+    const paraphrase =
+      "Got it. When something like that happens — when someone you care about says something that cuts deep — where's your line between working through it or walking away from it?";
+    expect(looksLikeMoment4ThresholdQuestion(paraphrase)).toBe(true);
+    expect(coerceMoment4ThresholdQuestionForTts(paraphrase)).toBe(
+      `Got it. Thanks for sharing that. ${MOMENT_4_COMMITMENT_THRESHOLD_QUESTION_CARD_BODY}`,
+    );
+  });
+
+  it('detects incomplete cuts-deep threshold lead before walk-away fork', () => {
+    const truncated =
+      "When something like that happens — when someone you care about says something that cuts deep — where's your line between working through it";
+    expect(isIncompleteMoment4ThresholdLeadSentence(truncated)).toBe(true);
+    expect(coerceMoment4ThresholdQuestionForTts(truncated)).toBe(M4_THRESHOLD_FORCED_INJECT);
   });
 
   it('strips leading reflection before threshold question for TTS', () => {

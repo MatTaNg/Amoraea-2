@@ -35,7 +35,11 @@ export function prefetchPartialReport(userId: string): Promise<string> {
       return html;
     })
     .catch((err: unknown) => {
-      cacheByUserId.delete(userId);
+      // Drop failed in-flight entry so retry never reuses a rejected promise.
+      const current = cacheByUserId.get(userId);
+      if (current?.promise === promise) {
+        cacheByUserId.delete(userId);
+      }
       throw err instanceof Error ? err : new Error('Partial report generation failed');
     });
 

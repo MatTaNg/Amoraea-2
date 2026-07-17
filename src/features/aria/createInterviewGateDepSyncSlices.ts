@@ -81,14 +81,11 @@ export function createInterviewResetInterviewProgressWebTtsSyncSlice(params: Syn
   return {
     whisperRatioReaskAttemptsForCurrentQuestionRef: params.whisperRatioReaskAttemptsForCurrentQuestionRef,
     ttsSessionHardFailureCountRef: params.ttsSessionHardFailureCountRef,
-    gestureContextLostAtRef: params.gestureContextLostAtRef,
     lastSuccessfulTtsTextNormalizedRef: params.lastSuccessfulTtsTextNormalizedRef,
     lastSuccessfulTtsDeliveredPreviewRef: params.lastSuccessfulTtsDeliveredPreviewRef,
-    webTtsUtteranceInFlightRef: params.webTtsUtteranceInFlightRef,
-    webTtsUtteranceInFlightOptionsRef: params.webTtsUtteranceInFlightOptionsRef,
-    webTtsTabInterruptPendingReplayRef: params.webTtsTabInterruptPendingReplayRef,
-    webTtsSpeakGenerationRef: params.webTtsSpeakGenerationRef,
-    webTabRestoreReplayInFlightRef: params.webTabRestoreReplayInFlightRef,
+    ttsUtteranceInFlightRef: params.ttsUtteranceInFlightRef,
+    ttsUtteranceInFlightOptionsRef: params.ttsUtteranceInFlightOptionsRef,
+    ttsSpeakGenerationRef: params.ttsSpeakGenerationRef,
     parallelStreamingTtsRef: params.parallelStreamingTtsRef,
   };
 }
@@ -103,8 +100,6 @@ export function createInterviewResetInterviewProgressResumeEmotionSyncSlice(para
     resumeWelcomeMessageRef: params.resumeWelcomeMessageRef,
     resumeOfferWelcomeTtsRef: params.resumeOfferWelcomeTtsRef,
     resumeEmotionAfterModalTextRef: params.resumeEmotionAfterModalTextRef,
-    webResumeWelcomeTapHandledRef: params.webResumeWelcomeTapHandledRef,
-    webResumeWelcomeTapPendingRef: params.webResumeWelcomeTapPendingRef,
     resumeWelcomeHydrationAttemptRef: params.resumeWelcomeHydrationAttemptRef,
     pendingScenarioIntroAfterResumeWelcomeRef: params.pendingScenarioIntroAfterResumeWelcomeRef,
     transcriptScenarioLogCursorRef: params.transcriptScenarioLogCursorRef,

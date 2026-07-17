@@ -5,7 +5,6 @@ export const ariaAdminInterviewStyles = {
   adminActiveContainer: { flex: 1, backgroundColor: '#05060D' },
   introBackButton: {
     position: 'absolute',
-    top: 16,
     left: 16,
     flexDirection: 'row',
     alignItems: 'center',
@@ -20,7 +19,6 @@ export const ariaAdminInterviewStyles = {
   },
   introLogoutButton: {
     position: 'absolute',
-    top: 16,
     right: 16,
     flexDirection: 'row',
     alignItems: 'center',
@@ -42,7 +40,6 @@ export const ariaAdminInterviewStyles = {
   },
   adminPanelButton: {
     position: 'absolute',
-    top: 16,
     left: 16,
     paddingVertical: 6,
     paddingHorizontal: 12,
@@ -54,7 +51,6 @@ export const ariaAdminInterviewStyles = {
   },
   adminTopBarRow: {
     position: 'absolute',
-    top: 16,
     left: 16,
     flexDirection: 'row',
     alignItems: 'center',

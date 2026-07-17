@@ -1,5 +1,7 @@
 import React from 'react';
 import { TouchableOpacity, Text, StyleSheet, Platform } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { interviewOverlayTop } from '@features/aria/utils/interviewOverlayInsets';
 import { PSYCHOMETRICS_ACCENT } from './psychometricsTheme';
 
 type Props = {
@@ -8,9 +10,10 @@ type Props = {
 
 /** Matches Amoraea pre-interview `◆ Panel` control. */
 export function PsychometricsAdminPanelButton({ onPress }: Props) {
+  const overlayTop = interviewOverlayTop(useSafeAreaInsets());
   return (
     <TouchableOpacity
-      style={styles.button}
+      style={[styles.button, { top: overlayTop }]}
       onPress={onPress}
       activeOpacity={0.8}
       accessibilityRole="button"
@@ -24,7 +27,6 @@ export function PsychometricsAdminPanelButton({ onPress }: Props) {
 const styles = StyleSheet.create({
   button: {
     position: 'absolute',
-    top: 16,
     right: 16,
     left: undefined,
     paddingVertical: 6,

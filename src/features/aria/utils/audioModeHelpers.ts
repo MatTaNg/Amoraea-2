@@ -11,7 +11,7 @@ function getExpoAvAudio(): typeof import('expo-av').Audio {
 }
 
 /** Last mode applied via `setPlaybackMode` / `setRecordingMode` — for session_logs telemetry only. */
-let lastAppliedAudioModeLabel: 'playback' | 'recording' | 'web' = 'web';
+let lastAppliedAudioModeLabel: 'playback' | 'recording' | 'web' = 'playback';
 
 type RecordingPlaybackTransitionInfo = { succeeded: boolean; errorMessage?: string };
 let recordingPlaybackTransitionHook: ((info: RecordingPlaybackTransitionInfo) => void) | undefined;
@@ -45,91 +45,17 @@ function logSessionTransition(
  * Prepare native speaker route for TTS. Use `afterRecording: true` immediately after mic capture
  * (full deactivate/reactivate cycle); otherwise apply playback mode only.
  */
-/** Android Chrome: brief pause after mic capture before speaker TTS avoids a loud route snap. */
-const WEB_TTS_SETTLE_AFTER_RECORDING_MS = 350;
-/** After app/tab foreground or session resume, avoid speaker snap before the next TTS. */
-const WEB_TTS_SETTLE_AFTER_FOREGROUND_MS = 350;
-const WEB_FOREGROUND_RESUME_SETTLE_WINDOW_MS = 20000;
-
-/** Brief mobile-web settle before TTS after tab/app return or post-recording (avoids Android speaker snap). */
+/** Prepare native speaker route for TTS. */
 export async function applyWebInterviewForegroundTtsSettle(
-  context: 'after_recording' | 'after_foreground',
+  _context: 'after_recording' | 'after_foreground',
 ): Promise<void> {
-  await applyWebMobileTtsRouteSettle(context);
-}
-
-async function applyWebMobileTtsRouteSettle(context: 'after_recording' | 'after_foreground'): Promise<void> {
-  // eslint-disable-next-line @typescript-eslint/no-require-imports
-  const { isWebInterviewMidUtteranceTabResumeActive } =
-    require('./webInterviewHtmlAudioTabResume') as typeof import('./webInterviewHtmlAudioTabResume');
-  if (isWebInterviewMidUtteranceTabResumeActive()) return;
-  // eslint-disable-next-line @typescript-eslint/no-require-imports
-  const { getWebSpeechDeferFromNavigatorSnapshot } = require('./webSpeechDeferPolicy') as typeof import('./webSpeechDeferPolicy');
-  const deferMobile =
-    typeof navigator !== 'undefined' &&
-    getWebSpeechDeferFromNavigatorSnapshot({
-      userAgent: navigator.userAgent || '',
-      platform: navigator.platform,
-      maxTouchPoints: navigator.maxTouchPoints,
-    });
-  if (!deferMobile) return;
-  const delayMs =
-    context === 'after_recording' ? WEB_TTS_SETTLE_AFTER_RECORDING_MS : WEB_TTS_SETTLE_AFTER_FOREGROUND_MS;
-  await new Promise<void>((r) => setTimeout(r, delayMs));
-  // eslint-disable-next-line @typescript-eslint/no-require-imports
-  const routeCache = require('@utilities/sessionLogging/webMediaDeviceAudioRoute') as typeof import('@utilities/sessionLogging/webMediaDeviceAudioRoute');
-  routeCache.syncWebAudioRouteSessionEnvelopeFromCache();
+  /* no-op — browser settle delays removed */
 }
 
 export async function prepareInterviewTtsPlayback(
   context: string,
   options?: { afterRecording?: boolean; parallelStreamContinuation?: boolean },
 ): Promise<void> {
-  if (Platform.OS === 'web') {
-    // eslint-disable-next-line @typescript-eslint/no-require-imports
-    const mic = require('./webInterviewMicPreInit') as typeof import('./webInterviewMicPreInit');
-    if (!options?.parallelStreamContinuation) {
-      mic.suspendWebInterviewMicPreInitForTtsPlayback();
-    }
-    if (options?.afterRecording) {
-      await applyWebMobileTtsRouteSettle('after_recording');
-    } else if (!options?.parallelStreamContinuation) {
-      // eslint-disable-next-line @typescript-eslint/no-require-imports
-      const { getWebSpeechDeferFromNavigatorSnapshot } = require('./webSpeechDeferPolicy') as typeof import('./webSpeechDeferPolicy');
-      // eslint-disable-next-line @typescript-eslint/no-require-imports
-      const {
-        getMsSinceWebTabBecameVisible,
-        getMsSinceWebSessionResumeReady,
-      } = require('./webInterviewGestureContext') as typeof import('./webInterviewGestureContext');
-      const deferMobile =
-        typeof navigator !== 'undefined' &&
-        getWebSpeechDeferFromNavigatorSnapshot({
-          userAgent: navigator.userAgent || '',
-          platform: navigator.platform,
-          maxTouchPoints: navigator.maxTouchPoints,
-        });
-      const msSinceTabVisible = getMsSinceWebTabBecameVisible();
-      const msSinceResumeReady = getMsSinceWebSessionResumeReady();
-      const recentForeground =
-        (msSinceTabVisible != null && msSinceTabVisible < WEB_FOREGROUND_RESUME_SETTLE_WINDOW_MS) ||
-        (msSinceResumeReady != null && msSinceResumeReady < WEB_FOREGROUND_RESUME_SETTLE_WINDOW_MS);
-      if (deferMobile && recentForeground) {
-        await applyWebMobileTtsRouteSettle('after_foreground');
-      }
-    }
-    if (!options?.parallelStreamContinuation) {
-      // eslint-disable-next-line @typescript-eslint/no-require-imports
-      const { isWebInterviewMidUtteranceTabResumeActive } =
-        require('./webInterviewHtmlAudioTabResume') as typeof import('./webInterviewHtmlAudioTabResume');
-      // eslint-disable-next-line @typescript-eslint/no-require-imports
-      const { ensureWebInterviewTtsOutputVolumePrimed } =
-        require('./webInterviewTtsOutputVolume') as typeof import('./webInterviewTtsOutputVolume');
-      if (!isWebInterviewMidUtteranceTabResumeActive()) {
-        ensureWebInterviewTtsOutputVolumePrimed();
-      }
-    }
-    return;
-  }
   if (options?.afterRecording) {
     await transitionFromRecordingToPlaybackNative(context);
   } else {
@@ -139,10 +65,6 @@ export async function prepareInterviewTtsPlayback(
 
 /** Call BEFORE every TTS playback so Amoraea speaks through the speaker at full volume. */
 export async function setPlaybackMode(): Promise<void> {
-  if (Platform.OS === 'web') {
-    lastAppliedAudioModeLabel = 'web';
-    return;
-  }
   lastAppliedAudioModeLabel = 'playback';
   const Audio = getExpoAvAudio();
   const playbackMode = {
@@ -166,7 +88,6 @@ export async function setPlaybackMode(): Promise<void> {
  * Mitigates iOS routing stuck in PlayAndRecord / quiet speaker after mic.
  */
 export async function transitionFromRecordingToPlaybackNative(context: string): Promise<void> {
-  if (Platform.OS === 'web') return;
   const Audio = getExpoAvAudio();
   logSessionTransition('recording_ended', context, { next: 'deactivate_audio_module' });
   let deactivateOk = true;
@@ -213,10 +134,6 @@ export async function applyPlaybackBridgeBeforeTtsIfIos(context: string): Promis
  * Call after stopping any prior playback/recording.
  */
 export async function logAndApplyPlaybackModeForTts(context: string): Promise<void> {
-  if (Platform.OS === 'web') {
-    console.log('[Audio/TTS] pre-playback', { context, platform: 'web' });
-    return;
-  }
   console.log('[Audio/TTS] pre-playback', { context, platform: Platform.OS, phase: 'before_setPlaybackMode' });
   await setPlaybackMode();
   const snapshot = {
@@ -236,16 +153,11 @@ export async function logAndApplyPlaybackModeForTts(context: string): Promise<vo
 /** Call BEFORE every mic recording so input is captured correctly. */
 /** After input route change (e.g. headphones unplugged) — re-apply playback baseline so session is not stale. */
 export async function refreshAudioSessionAfterRouteChange(context: string): Promise<void> {
-  if (Platform.OS === 'web') return;
   logSessionTransition('route_change_refresh', context, { action: 'transition_from_recording_to_playback' });
   await transitionFromRecordingToPlaybackNative(`route_change:${context}`);
 }
 
 export async function setRecordingMode(): Promise<void> {
-  if (Platform.OS === 'web') {
-    lastAppliedAudioModeLabel = 'web';
-    return;
-  }
   lastAppliedAudioModeLabel = 'recording';
   const Audio = getExpoAvAudio();
   const recordingMode = {

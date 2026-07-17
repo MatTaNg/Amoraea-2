@@ -76,19 +76,28 @@ export async function generatePartialUserReport(
 export async function buildPartialReportHtml(userId: string): Promise<string> {
   const [reportData, fullReportData, stored, logoSrc] = await Promise.all([
     fetchPartialReportData(userId),
-    fetchReportData(userId),
+    fetchReportData(userId).catch((err: unknown) => {
+      console.warn('[PartialReport] full report data fetch failed (continuing with partial only):', err);
+      return null;
+    }),
     loadStoredInterviewReports(userId),
     getReportLogoSrc(),
   ]);
 
+  if (!reportData.attempt?.pillarScores || Object.keys(reportData.attempt.pillarScores).length === 0) {
+    throw new Error(
+      'Interview scores are still saving. Please wait a moment and try again.',
+    );
+  }
+
   const partialHash = computePartialReportSourceHash(reportData);
-  const personalHash = computePersonalReportSourceHash(fullReportData);
+  const personalHash = fullReportData ? computePersonalReportSourceHash(fullReportData) : '';
   const safeName = reportData.user.name;
 
   if (stored) {
     const cached = readCachedReportMarkdownForPartialDownload(stored, partialHash, personalHash);
     if (cached) {
-      if (cached.isFullReport) {
+      if (cached.isFullReport && fullReportData) {
         return convertMarkdownToHtml(cached.markdown, {
           userName: safeName,
           logoSrc,
@@ -97,14 +106,16 @@ export async function buildPartialReportHtml(userId: string): Promise<string> {
           reportDataForTransparency: fullReportData,
         });
       }
-      return convertMarkdownToHtml(cached.markdown, {
-        userName: safeName,
-        logoSrc,
-        headerTitle: safeName ? `${safeName}'s Partial Report` : 'Your Partial Personal Report',
-        headerSubtitle: 'Partial Personal Report',
-        footerDisclaimer: PARTIAL_FOOTER,
-        applyPartialTransparency: true,
-      });
+      if (!cached.isFullReport) {
+        return convertMarkdownToHtml(cached.markdown, {
+          userName: safeName,
+          logoSrc,
+          headerTitle: safeName ? `${safeName}'s Partial Report` : 'Your Partial Personal Report',
+          headerSubtitle: 'Partial Personal Report',
+          footerDisclaimer: PARTIAL_FOOTER,
+          applyPartialTransparency: true,
+        });
+      }
     }
   }
 

@@ -1,11 +1,6 @@
 import type { MutableRefObject } from 'react';
-import { Platform } from 'react-native';
 
 import type { TtsTelemetrySource } from '@features/aria/telemetry/tsAutoplayTelemetry';
-import {
-  isWebInterviewPlaybackAudiblyActive,
-  isWebInterviewPlaybackSurfaceActive,
-} from '@features/aria/utils/webInterviewPlaybackSurface';
 import {
   getSessionLogRuntime,
   setRecordingSessionActive,
@@ -20,27 +15,18 @@ export async function drainPriorTtsPlaybackBeforeSpeak(args: {
   ttsLineInFlightRef: MutableRefObject<boolean>;
 }): Promise<void> {
   const rt0 = getSessionLogRuntime();
-  const ttsPlaybackActiveImmediatelyPrior = rt0.ttsPlaybackActive;
-  const webPriorPlaybackStillActive = () =>
-    Platform.OS === 'web' &&
-    (isWebInterviewPlaybackSurfaceActive() || isWebInterviewPlaybackAudiblyActive());
-
-  if (!ttsPlaybackActiveImmediatelyPrior && !webPriorPlaybackStillActive()) {
+  if (!rt0.ttsPlaybackActive) {
     return;
   }
 
   const waitStartMs = Date.now();
   const deadline = waitStartMs + 8000;
-  while (
-    Date.now() < deadline &&
-    (getSessionLogRuntime().ttsPlaybackActive || webPriorPlaybackStillActive())
-  ) {
+  while (Date.now() < deadline && getSessionLogRuntime().ttsPlaybackActive) {
     await new Promise<void>((res) => setTimeout(res, 80));
   }
 
   const waitedMs = Date.now() - waitStartMs;
-  const priorStillActive =
-    getSessionLogRuntime().ttsPlaybackActive || webPriorPlaybackStillActive();
+  const priorStillActive = getSessionLogRuntime().ttsPlaybackActive;
 
   if (priorStillActive) {
     if (args.userId) {
@@ -51,8 +37,8 @@ export async function drainPriorTtsPlaybackBeforeSpeak(args: {
         eventData: {
           telemetry_source: args.telemetrySource,
           waited_ms: waitedMs,
-          playback_surface_still_active: isWebInterviewPlaybackSurfaceActive(),
-          playback_audibly_still_active: isWebInterviewPlaybackAudiblyActive(),
+          playback_surface_still_active: false,
+          playback_audibly_still_active: false,
         },
         platform: rt0.platform,
       });

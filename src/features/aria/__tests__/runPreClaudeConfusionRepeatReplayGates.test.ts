@@ -1,7 +1,11 @@
 import { describe, expect, it, jest } from '@jest/globals';
 
 import type { MetaCommentClassification } from '@features/aria/metaCommentClassification';
-import { MOMENT_4_COMMITMENT_THRESHOLD_QUESTION_TEXT, MOMENT_4_GRUDGE_QUESTION_TEXT } from '@features/aria/moment4ProbeLogic';
+import {
+  SHOW_SCENARIO_1_VIGNETTE_EXACT,
+  SHOW_SCENARIO_2_VIGNETTE_EXACT,
+} from '@features/aria/interviewShowScenarioExactCopy';
+import { MOMENT_4_COMMITMENT_THRESHOLD_QUESTION_CARD_BODY, MOMENT_4_GRUDGE_QUESTION_TEXT } from '@features/aria/moment4ProbeLogic';
 import { runPreClaudeConfusionRepeatReplayGates } from '@features/aria/runPreClaudeConfusionRepeatReplayGates';
 import { createMockPreClaudeDeps } from './preClaudeGateTestHelpers';
 
@@ -57,14 +61,14 @@ describe('runPreClaudeConfusionRepeatReplayGates', () => {
 
     expect(result).toEqual({ handled: true });
     expect(speakTextSafe).toHaveBeenCalledWith(
-      'Got it — How did it get resolved between you two?',
+      'Sure. How did it get resolved between you two?',
       expect.any(Object),
     );
     expect(setMessages).toHaveBeenCalledWith(
       expect.arrayContaining([
         expect.objectContaining({
           role: 'assistant',
-          content: 'Got it — How did it get resolved between you two?',
+          content: 'How did it get resolved between you two?',
           scenarioNumber: 3,
         }),
       ]),
@@ -99,7 +103,7 @@ describe('runPreClaudeConfusionRepeatReplayGates', () => {
 
     expect(result).toEqual({ handled: true });
     expect(speakTextSafe).toHaveBeenCalledWith(
-      scenarioQuestion,
+      expect.stringMatching(/^Sure\.\s/),
       expect.objectContaining({
         allowDuplicateConsecutiveTts: true,
         skipScenarioAContemptProbeSessionDedup: true,
@@ -109,7 +113,7 @@ describe('runPreClaudeConfusionRepeatReplayGates', () => {
       expect.arrayContaining([
         expect.objectContaining({
           role: 'assistant',
-          content: scenarioQuestion,
+          content: expect.stringMatching(/What's going on between these two\?/i),
           scenarioNumber: 1,
           interviewMoment: 1,
         }),
@@ -190,7 +194,7 @@ describe('runPreClaudeConfusionRepeatReplayGates', () => {
 
     expect(result).toEqual({ handled: true });
     expect(speakTextSafe).toHaveBeenCalledWith(
-      'What do you think is going on here?',
+      'Sure. What do you think is going on here?',
       expect.objectContaining({ allowDuplicateConsecutiveTts: true }),
     );
     expect(currentMessagesRef.current.at(-1)).toEqual(
@@ -231,7 +235,7 @@ describe('runPreClaudeConfusionRepeatReplayGates', () => {
 
     expect(result).toEqual({ handled: true });
     expect(speakTextSafe).toHaveBeenCalledWith(
-      'Got it. And if you were James, how would you repair?',
+      'Sure. And if you were James, how would you repair?',
       expect.objectContaining({
         allowDuplicateConsecutiveTts: true,
         skipScenarioAContemptProbeSessionDedup: true,
@@ -266,7 +270,105 @@ describe('runPreClaudeConfusionRepeatReplayGates', () => {
 
     expect(result).toEqual({ handled: true });
     expect(speakTextSafe).toHaveBeenCalledWith(
-      'How do you think this situation could be repaired?',
+      expect.stringMatching(/^Sure\.\s/),
+      expect.objectContaining({
+        allowDuplicateConsecutiveTts: true,
+        skipScenarioAContemptProbeSessionDedup: true,
+      }),
+    );
+  });
+
+  it('replays scenario main prompt after skip-decline encouragement, not the encouragement line', async () => {
+    const speakTextSafe = jest.fn().mockResolvedValue(undefined);
+    const setMessages = jest.fn();
+    const scenarioQuestion =
+      "Here's the first situation:\n\nEmma and Ryan have dinner plans. What's going on between these two?";
+    const declineEncouragement =
+      "Great, let's stay on this one then. Just try your best. You've got this.";
+    const deps = createMockPreClaudeDeps({
+      currentInterviewMomentRef: { current: 1 },
+      currentScenarioRef: { current: 1 },
+      lastQuestionTextRef: { current: declineEncouragement },
+      speakTextSafe,
+      setMessages,
+    });
+    const messagesToUse = [
+      { role: 'assistant', content: scenarioQuestion, scenarioNumber: 1 },
+      { role: 'user', content: 'Can we skip?', scenarioNumber: 1 },
+      {
+        role: 'assistant',
+        content: 'Are you sure you want to skip this one? We can, but it may affect your score.',
+        scenarioNumber: 1,
+      },
+      { role: 'user', content: 'No', scenarioNumber: 1 },
+      { role: 'assistant', content: declineEncouragement, scenarioNumber: 1 },
+      { role: 'user', content: 'Can you repeat what you said?', scenarioNumber: 1 },
+    ];
+
+    const result = await runPreClaudeConfusionRepeatReplayGates(
+      deps,
+      REPEAT_REQUEST_META,
+      messagesToUse,
+      declineEncouragement,
+      1,
+    );
+
+    expect(result).toEqual({ handled: true });
+    const spoken = String(speakTextSafe.mock.calls[0]?.[0] ?? '');
+    expect(spoken).toMatch(/^Sure\./);
+    expect(spoken).toContain(SHOW_SCENARIO_1_VIGNETTE_EXACT);
+    expect(spoken).toMatch(/What's going on between these two\?/i);
+    expect(spoken).not.toMatch(/stay on this one|you've got this/i);
+    expect(speakTextSafe).toHaveBeenCalledWith(
+      expect.any(String),
+      expect.objectContaining({
+        allowDuplicateConsecutiveTts: true,
+        skipScenarioAContemptProbeSessionDedup: true,
+      }),
+    );
+  });
+
+  it('replays only the next question after skip-accept bridge, not the skip framing', async () => {
+    const speakTextSafe = jest.fn().mockResolvedValue(undefined);
+    const setMessages = jest.fn();
+    const nextQuestion = 'What do you think is going on here?';
+    const skipBridgeWithQuestion = `Okay, we can skip this one, the next question is ${nextQuestion}`;
+    const deps = createMockPreClaudeDeps({
+      currentInterviewMomentRef: { current: 2 },
+      currentScenarioRef: { current: 2 },
+      lastQuestionTextRef: { current: skipBridgeWithQuestion },
+      speakTextSafe,
+      setMessages,
+    });
+    const messagesToUse = [
+      { role: 'assistant', content: nextQuestion, scenarioNumber: 2 },
+      { role: 'user', content: 'Skip this one.', scenarioNumber: 2 },
+      {
+        role: 'assistant',
+        content: 'Are you sure you want to skip this one? We can, but it may affect your score.',
+        scenarioNumber: 2,
+      },
+      { role: 'user', content: 'Yes.', scenarioNumber: 2 },
+      { role: 'assistant', content: skipBridgeWithQuestion, scenarioNumber: 2 },
+      { role: 'user', content: 'Repeat what you said.', scenarioNumber: 2 },
+    ];
+
+    const result = await runPreClaudeConfusionRepeatReplayGates(
+      deps,
+      REPEAT_REQUEST_META,
+      messagesToUse,
+      skipBridgeWithQuestion,
+      2,
+    );
+
+    expect(result).toEqual({ handled: true });
+    const spoken = String(speakTextSafe.mock.calls[0]?.[0] ?? '');
+    expect(spoken).toMatch(/^Sure\./);
+    expect(spoken).toContain(SHOW_SCENARIO_2_VIGNETTE_EXACT);
+    expect(spoken).toContain(nextQuestion);
+    expect(spoken).not.toMatch(/we can skip this one/i);
+    expect(speakTextSafe).toHaveBeenCalledWith(
+      expect.any(String),
       expect.objectContaining({
         allowDuplicateConsecutiveTts: true,
         skipScenarioAContemptProbeSessionDedup: true,
@@ -306,11 +408,77 @@ describe('runPreClaudeConfusionRepeatReplayGates', () => {
 
     expect(result).toEqual({ handled: true });
     expect(speakTextSafe).toHaveBeenCalledWith(
-      MOMENT_4_COMMITMENT_THRESHOLD_QUESTION_TEXT,
+      `Sure. ${MOMENT_4_COMMITMENT_THRESHOLD_QUESTION_CARD_BODY}`,
       expect.objectContaining({
         allowDuplicateConsecutiveTts: true,
         skipScenarioAContemptProbeSessionDedup: true,
       }),
     );
+  });
+
+  it('replays vignette + question when user asks to repeat the scenario', async () => {
+    const speakTextSafe = jest.fn().mockResolvedValue(undefined);
+    const setMessages = jest.fn();
+    const question = 'What do you think is going on here?';
+    const deps = createMockPreClaudeDeps({
+      currentInterviewMomentRef: { current: 2 },
+      currentScenarioRef: { current: 2 },
+      lastQuestionTextRef: { current: question },
+      speakTextSafe,
+      setMessages,
+    });
+    const messagesToUse = [
+      { role: 'assistant', content: question, scenarioNumber: 2 },
+      { role: 'user', content: 'Repeat the scenario', scenarioNumber: 2 },
+    ];
+
+    const result = await runPreClaudeConfusionRepeatReplayGates(
+      deps,
+      REPEAT_REQUEST_META,
+      messagesToUse,
+      question,
+      2,
+    );
+
+    expect(result).toEqual({ handled: true });
+    const spoken = String(speakTextSafe.mock.calls[0]?.[0] ?? '');
+    expect(spoken).toMatch(/^Sure\./);
+    expect(spoken).toMatch(/Sarah has been job hunting/i);
+    expect(spoken).toContain(question);
+    expect(deps.lastQuestionTextRef.current).toBe(question);
+  });
+
+  it('replays only the question when user asks to repeat the question', async () => {
+    const speakTextSafe = jest.fn().mockResolvedValue(undefined);
+    const question = 'What do you think is going on here?';
+    const deps = createMockPreClaudeDeps({
+      currentInterviewMomentRef: { current: 2 },
+      currentScenarioRef: { current: 2 },
+      lastQuestionTextRef: { current: question },
+      speakTextSafe,
+    });
+    const messagesToUse = [
+      { role: 'assistant', content: question, scenarioNumber: 2 },
+      { role: 'user', content: 'Repeat the question', scenarioNumber: 2 },
+    ];
+
+    const result = await runPreClaudeConfusionRepeatReplayGates(
+      deps,
+      REPEAT_REQUEST_META,
+      messagesToUse,
+      question,
+      2,
+    );
+
+    expect(result).toEqual({ handled: true });
+    expect(speakTextSafe).toHaveBeenCalledWith(
+      `Sure. ${question}`,
+      expect.objectContaining({
+        allowDuplicateConsecutiveTts: true,
+        skipScenarioAContemptProbeSessionDedup: true,
+      }),
+    );
+    const spoken = String(speakTextSafe.mock.calls[0]?.[0] ?? '');
+    expect(spoken).not.toMatch(/Sarah has been job hunting/i);
   });
 });

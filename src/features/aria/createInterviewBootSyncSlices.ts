@@ -2,12 +2,6 @@ import type { AriaInterviewDepsSyncContext } from '@features/aria/syncAriaInterv
 
 type SyncExtraParams = AriaInterviewDepsSyncContext;
 
-export function createInterviewWebGreetingPrefetchSyncSlice(params: SyncExtraParams): SyncExtraParams {
-  return {
-    hasAnthropicConfigured: params.hasAnthropicConfigured,
-  };
-}
-
 export function createInterviewAttemptBootstrapSyncSlice(params: SyncExtraParams): SyncExtraParams {
   return {
     userId: params.userId,

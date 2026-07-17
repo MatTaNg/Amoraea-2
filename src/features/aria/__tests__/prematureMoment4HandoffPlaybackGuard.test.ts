@@ -25,6 +25,17 @@ describe('prematureMoment4HandoffPlaybackGuard', () => {
     ).toBe(true);
   });
 
+  it('detects standalone two-questions-left cue before canonical M4 bundle', () => {
+    expect(isPrematureStandaloneM4PersonalTransitionLine('There are only two questions left.')).toBe(
+      true,
+    );
+    expect(
+      isPrematureStandaloneM4PersonalTransitionLine(
+        'There are only two questions left. Now I want to ask you about something a bit more personal.',
+      ),
+    ).toBe(true);
+  });
+
   it('does not treat full S3→M4 handoff lead as premature standalone personal bridge', () => {
     expect(isPrematureStandaloneM4PersonalTransitionLine(MOMENT_4_HANDOFF_NO_NAME_LEAD)).toBe(false);
     const withReflection =
@@ -68,6 +79,40 @@ describe('prematureMoment4HandoffPlaybackGuard', () => {
         text: prematureM4,
         currentInterviewMoment: 3,
         messages: [{ role: 'assistant', content: SCENARIO_3_TEXT }],
+      }),
+    ).toBe(false);
+  });
+
+  it('redirects client M4 lead when vignette history is missing (speakTextSafe preDelivery gap)', () => {
+    const clientM4 = `${MOMENT_4_HANDOFF_NO_NAME_LEAD}\n\n${MOMENT_4_GRUDGE_QUESTION_TEXT}`;
+    expect(
+      shouldRedirectPrematureMoment4ToScenario2To3Handoff({
+        text: clientM4,
+        currentInterviewMoment: 3,
+        lastQuestionText: 'So what would the repair look like for Daniel?',
+        lastSuccessfulTtsDeliveredPreview: 'So what would the repair look like for Daniel?',
+      }),
+    ).toBe(true);
+  });
+
+  it('does not redirect client M4 lead when situation_3 playback was already confirmed', () => {
+    const clientM4 = `${MOMENT_4_HANDOFF_NO_NAME_LEAD}\n\n${MOMENT_4_GRUDGE_QUESTION_TEXT}`;
+    expect(
+      shouldRedirectPrematureMoment4ToScenario2To3Handoff({
+        text: clientM4,
+        currentInterviewMoment: 3,
+        situation3CanonicalPlaybackConfirmed: true,
+      }),
+    ).toBe(false);
+  });
+
+  it('does not redirect client M4 lead when S3 repair probe was already delivered', () => {
+    const clientM4 = `${MOMENT_4_HANDOFF_NO_NAME_LEAD}\n\n${MOMENT_4_GRUDGE_QUESTION_TEXT}`;
+    expect(
+      shouldRedirectPrematureMoment4ToScenario2To3Handoff({
+        text: clientM4,
+        currentInterviewMoment: 3,
+        s3RepairProbeDelivered: true,
       }),
     ).toBe(false);
   });

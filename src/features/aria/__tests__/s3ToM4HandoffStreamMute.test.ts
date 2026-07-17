@@ -46,6 +46,24 @@ describe('s3ToM4HandoffStreamMute', () => {
     expect(deps.pendingS3ToM4HandoffStreamMuteRef.current).toBe(true);
   });
 
+  it('arms mute when last assistant is resume welcome but repair was already answered', () => {
+    const welcome =
+      "Welcome back! Lets continue where we left off. If you'd like me to repeat what I said, let me know.";
+    expect(
+      shouldMuteParallelTtsForS3ToM4HandoffStream({
+        currentMoment: 3,
+        currentScenario: 3,
+        lastAssistantContent: welcome,
+        messagesToUse: [
+          { role: 'assistant', content: repairAssistant },
+          { role: 'assistant', content: welcome, isWelcomeBack: true },
+          { role: 'user', content: repairAnswer },
+        ],
+        shouldForceScenarioCRepairProbe: false,
+      }),
+    ).toBe(true);
+  });
+
   it('does not arm mute while S3 repair construct is still pending', () => {
     expect(
       shouldMuteParallelTtsForS3ToM4HandoffStream({

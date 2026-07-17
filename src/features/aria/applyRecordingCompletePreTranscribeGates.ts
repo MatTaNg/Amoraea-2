@@ -65,7 +65,7 @@ export async function applyRecordingCompletePreTranscribeGates(
   const peakDbForMicFallback = analysis.peak_amplitude_db;
   const isDigitalSilenceForMicFallback =
     Platform.OS === 'web' &&
-    deps.useMediaRecorderPath &&
+    true &&
     !analysis.has_non_zero_audio &&
     typeof peakDbForMicFallback === 'number' &&
     Number.isFinite(peakDbForMicFallback) &&
@@ -80,7 +80,7 @@ export async function applyRecordingCompletePreTranscribeGates(
   if (
     deps.userId &&
     Platform.OS === 'web' &&
-    deps.useMediaRecorderPath &&
+    true &&
     deps.micFallbackSuccessPendingRef.current &&
     analysis.has_non_zero_audio
   ) {
@@ -98,7 +98,7 @@ export async function applyRecordingCompletePreTranscribeGates(
   if (!analysis.has_non_zero_audio || blockWhisperForVadBypassNoSpeech) {
     if (
       Platform.OS === 'web' &&
-      deps.useMediaRecorderPath &&
+      true &&
       isDigitalSilenceForMicFallback &&
       deps.consecutiveDigitalSilenceForMicFallbackRef.current >= 2
     ) {

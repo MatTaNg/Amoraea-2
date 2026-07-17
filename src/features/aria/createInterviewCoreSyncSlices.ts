@@ -5,8 +5,6 @@ type SyncExtraParams = AriaInterviewDepsSyncContext;
 export function createInterviewCoreSpeechControlSyncSlice(params: SyncExtraParams): SyncExtraParams {
   return {
     speakTextSafe: params.speakTextSafe,
-    dismissTabRestoreOverlay: params.dismissTabRestoreOverlay,
-    dismissAfterAndroidBackgroundPlaybackEnd: params.dismissAfterAndroidBackgroundPlaybackEnd,
   };
 }
 

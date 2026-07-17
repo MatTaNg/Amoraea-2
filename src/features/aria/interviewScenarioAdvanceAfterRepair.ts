@@ -101,7 +101,7 @@ export function shouldAdvanceScenarioCAfterSatisfiedDanielRepair(
 ): boolean {
   if (currentScenario !== 3) return false;
 
-  const { lastUserContent, priorAssistantContent } = findLastUserWithPriorAssistantContent(messages);
+  const { lastUserContent, priorAssistantContent } = findLastUserWithPriorScenarioCRepairContext(messages);
   if (!lastUserContent || !priorAssistantContent) return false;
   if (!isScenarioCRepairAssistantPrompt(priorAssistantContent)) return false;
   if (!scenarioCUserAnswerSatisfiesRepairQuestionAnswer(lastUserContent)) return false;
@@ -112,6 +112,29 @@ export function shouldAdvanceScenarioCAfterSatisfiedDanielRepair(
   if (isShortAckOnlySentence(draft)) return true;
 
   return false;
+}
+
+/** Walk past resume welcome / non-repair assistants to the Scenario C repair prompt before the user turn. */
+function findLastUserWithPriorScenarioCRepairContext(
+  messages: PostClaudeScenarioAdvanceMessage[],
+): { lastUserContent: string | null; priorAssistantContent: string | null } {
+  for (let i = messages.length - 1; i >= 0; i -= 1) {
+    if (messages[i].role !== 'user') continue;
+    if ((messages[i] as { isWelcomeBack?: boolean }).isWelcomeBack) continue;
+    const lastUserContent = (messages[i].content ?? '').trim();
+    if (!lastUserContent) continue;
+    for (let j = i - 1; j >= 0; j -= 1) {
+      if (messages[j].role !== 'assistant') continue;
+      if ((messages[j] as { isWelcomeBack?: boolean }).isWelcomeBack) continue;
+      const content = (messages[j].content ?? '').trim();
+      if (!content || /^welcome back\b/i.test(content)) continue;
+      if (isScenarioCRepairAssistantPrompt(content)) {
+        return { lastUserContent, priorAssistantContent: content };
+      }
+    }
+    return { lastUserContent, priorAssistantContent: null };
+  }
+  return { lastUserContent: null, priorAssistantContent: null };
 }
 
 function incompleteWrapMissingNextSegment(strippedDraft: string, hasNextSegment: (t: string) => boolean): boolean {

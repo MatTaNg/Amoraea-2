@@ -1,22 +1,18 @@
 import { useState, useRef, useCallback } from 'react';
-import { Platform } from 'react-native';
 
 import { logAudioInterviewConfigOnce } from '@features/aria/config/audioInterviewConfig';
 
 import type { AudioRecorderPermissionStatus, UseAudioRecorderParams } from './audioRecorderTypes';
 export type { AudioRecorderPermissionStatus } from './audioRecorderTypes';
 import { useNativeInterviewRecorder } from './useNativeInterviewRecorder';
-import { useWebInterviewMediaRecorder } from './useWebInterviewMediaRecorder';
 
 /**
- * Unified audio recording hook:
- * - expo-av for native iOS/Android
- * - MediaRecorder for web
+ * Audio recording for native iOS/Android (expo-av).
+ * Browser MediaRecorder path removed.
  */
 export function useAudioRecorder({
   onRecordingComplete,
   onError,
-  onBeforeWebRecorderStop,
   onMediaServicesReset,
   onRecordingEnginePrimed,
   onRecordingTapIntent,
@@ -60,22 +56,9 @@ export function useAudioRecorder({
     ...sharedControls,
   });
 
-  const web = useWebInterviewMediaRecorder({
-    onRecordingComplete,
-    onError,
-    onBeforeWebRecorderStop,
-    onRecordingEnginePrimed,
-    onRecordingTapIntent,
-    setPermissionStatus,
-    ...sharedControls,
-  });
-
   const requestPermission = useCallback(async (): Promise<boolean> => {
-    if (Platform.OS === 'web') {
-      return web.requestWebPermission();
-    }
     return native.requestNativePermission();
-  }, [native.requestNativePermission, web.requestWebPermission]);
+  }, [native.requestNativePermission]);
 
   const startRecording = useCallback(
     async (opts?: { postAudioSessionDelayMs?: number; tapIntentAtMs?: number }): Promise<boolean> => {
@@ -86,28 +69,20 @@ export function useAudioRecorder({
       }
 
       try {
-        if (Platform.OS === 'web') {
-          await web.startWebRecording(opts);
-        } else {
-          await native.startNativeRecording(opts);
-        }
+        await native.startNativeRecording(opts);
         return true;
       } catch {
         return false;
       }
     },
-    [permissionStatus, requestPermission, web.startWebRecording, native.startNativeRecording, onError],
+    [permissionStatus, requestPermission, native.startNativeRecording, onError],
   );
 
   const stopRecording = useCallback(
-    (opts?: { bypassMinDuration?: boolean }) => {
-      if (Platform.OS === 'web') {
-        web.stopWebRecording(opts);
-      } else {
-        void native.stopNativeRecording();
-      }
+    (_opts?: { bypassMinDuration?: boolean }) => {
+      void native.stopNativeRecording();
     },
-    [web.stopWebRecording, native.stopNativeRecording],
+    [native.stopNativeRecording],
   );
 
   const toggleRecording = useCallback(async () => {
@@ -123,21 +98,14 @@ export function useAudioRecorder({
       momentNumber?: number;
       logCleanupFailed?: (payload: { message: string; moment_number?: number }) => void;
     }) => {
-      if (Platform.OS === 'web') {
-        await web.releaseWebRecording(opts);
-        return;
-      }
       await native.releaseNativeRecording(opts);
     },
-    [native.releaseNativeRecording, web.releaseWebRecording],
+    [native.releaseNativeRecording],
   );
 
   const reinitializeMicrophoneSession = useCallback(async (): Promise<boolean> => {
-    if (Platform.OS === 'web') {
-      return requestPermission();
-    }
     return native.reinitializeNativeMicrophoneSession();
-  }, [requestPermission, native.reinitializeNativeMicrophoneSession]);
+  }, [native.reinitializeNativeMicrophoneSession]);
 
   return {
     isRecording,
@@ -147,14 +115,22 @@ export function useAudioRecorder({
     stopRecording,
     releaseRecordingInstance,
     requestPermission,
-    markWebMicPermissionGranted: web.markWebMicPermissionGranted,
+    markWebMicPermissionGranted: () => {
+      /* no-op — web mic path removed */
+    },
     inputMeterLevel,
     lastRecordingPeakMeteringDb: maxMeteringDbRef,
     reinitializeMicrophoneSession,
-    prepareWebRecordingSession: web.prepareWebRecordingSession,
-    abandonPreparedWebRecording: web.abandonPreparedWebRecording,
-    getLastWebMicCaptureDeviceId: web.getLastWebMicCaptureDeviceId,
-    switchWebInputToDefaultDevice: web.switchWebInputToDefaultDevice,
-    resetWebMicInputFallbackState: web.resetWebMicInputFallbackState,
+    prepareWebRecordingSession: async () => {
+      /* no-op — web mic path removed */
+    },
+    abandonPreparedWebRecording: () => {
+      /* no-op */
+    },
+    getLastWebMicCaptureDeviceId: () => null as string | null,
+    switchWebInputToDefaultDevice: async () => false,
+    resetWebMicInputFallbackState: () => {
+      /* no-op */
+    },
   };
 }

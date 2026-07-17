@@ -1,5 +1,3 @@
-import { Platform } from 'react-native';
-
 import { substituteCanonicalInterviewScenarioBodiesForTts } from '@features/aria/substituteCanonicalInterviewScenarioBodiesForTts';
 import { isElevenLabsEnabledForEnvironment } from '@features/aria/utils/elevenLabsTtsAvailability';
 import { fetchElevenLabsMpegArrayBuffer } from '@features/aria/utils/elevenLabsTtsFetch';
@@ -10,7 +8,7 @@ let afterModalPrefetch: { text: string; buffer: ArrayBuffer } | null = null;
 /** Fire-and-forget ElevenLabs prefetch while the emotion modal is open. */
 export function kickOffEmotionTransitionAfterModalPrefetch(text: string): void {
   const raw = (text ?? '').trim();
-  if (!raw || Platform.OS !== 'web') return;
+  if (!raw) return;
   if (shouldUseDefaultVoiceInsteadOfElevenLabs() || !isElevenLabsEnabledForEnvironment()) return;
   const spoken = substituteCanonicalInterviewScenarioBodiesForTts(raw);
   if (!spoken) return;

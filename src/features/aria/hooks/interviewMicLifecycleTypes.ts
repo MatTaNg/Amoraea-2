@@ -1,8 +1,4 @@
-import type { GestureContextLostReason } from '@features/aria/utils/webInterviewGestureContext';
-import type {
-  PendingGestureRestoreSpeakEntry,
-  VoiceState,
-} from '@features/aria/hooks/useAriaInterviewSession';
+import type { VoiceState } from '@features/aria/hooks/useAriaInterviewSession';
 
 export type InterviewMicLifecycleDeps = {
   navigation: { addListener: (event: string, callback: () => void) => () => void };
@@ -11,7 +7,6 @@ export type InterviewMicLifecycleDeps = {
   voiceState: VoiceState;
   interviewStatus: string;
   interviewStatusRef: React.MutableRefObject<string>;
-  useMediaRecorderPath: boolean;
   audioRecorder: {
     isRecording: boolean;
     reinitializeMicrophoneSession: () => Promise<boolean>;
@@ -24,34 +19,16 @@ export type InterviewMicLifecycleDeps = {
   setPreInitMeterLevel: (v: number) => void;
   setVoiceState: (state: VoiceState) => void;
   setEmotionModalVisible: (v: boolean) => void;
-  setWebTabRestoreOverlayVisible: (v: boolean) => void;
-  gestureContextLostAtRef: React.MutableRefObject<{
-    atMs: number;
-    reason: GestureContextLostReason;
-  } | null>;
-  recognitionRef: React.MutableRefObject<{ stop: () => void } | null>;
   parallelStreamingTtsRef: React.MutableRefObject<{ cancelRequested: boolean }>;
-  webTtsSpeakGenerationRef: React.MutableRefObject<number>;
+  ttsSpeakGenerationRef: React.MutableRefObject<number>;
   interviewSessionAttemptIdRef: React.MutableRefObject<string | null>;
   interviewSessionIdRef: React.MutableRefObject<string>;
   currentInterviewMomentRef: React.MutableRefObject<number>;
   currentScenarioRef: React.MutableRefObject<number | null>;
   lastQuestionTextRef: React.MutableRefObject<string | null>;
   emotionModalPendingTransitionRef: React.MutableRefObject<boolean>;
-  pendingGestureRestoreSpeakRef: React.MutableRefObject<PendingGestureRestoreSpeakEntry | null>;
-  webTtsTabInterruptPendingReplayRef: React.MutableRefObject<boolean>;
-  mobileTabHideLetPlaybackContinueRef: React.MutableRefObject<boolean>;
-  needsGestureRestoreRef: React.MutableRefObject<boolean>;
-  syncInterviewTtsAfterScreenReturn: () => void;
-  dismissTabRestoreOverlay: () => void;
-  ensureWebGestureFlushListener: () => void;
-  interruptAllWebInterviewTtsOutput: () => void;
+  interruptAllInterviewTtsOutput: () => void;
   stopElevenLabsPlayback: () => Promise<void>;
-  isWebInterviewPlaybackAudiblyActive: () => boolean;
-  armMobileWebBackgroundTtsContinue: () => boolean;
-  isMobileWebInterviewTtsSessionActive: () => boolean;
-  hasWebInterviewHtmlAudioTabResumePending: () => boolean;
-  holdTabStashedHtmlAudioForGestureResume: () => void;
   hasInterviewClosingSpeakInFlightForSession: (key: string | null) => boolean;
   classifyInterviewQuestionType: (
     text: string,

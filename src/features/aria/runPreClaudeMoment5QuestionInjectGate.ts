@@ -34,6 +34,7 @@ import {
   isStaleInterviewUserTurn,
 } from '@features/aria/resumeWelcomeTurnProcessingGate';
 import { commitDedupedAssistantTranscriptTurn } from '@features/aria/interviewTranscriptDedup';
+import { triggerLiveMoment4ScoringOnM5Entry } from '@features/aria/liveMoment4ScoringOnM5Entry';
 import { remoteLog } from '@utilities/remoteLog';
 import {
   getCurrentScenario,
@@ -81,6 +82,23 @@ export async function runPreClaudeMoment5QuestionInjectGate(
     (looksLikeMoment4GrudgePrompt(lastAssistantContent) ||
       looksLikeMoment4SpecificityFollowUpPrompt(lastAssistantContent));
   const m5HandoffEligible = m5HandoffAfterThresholdAnswer || m5HandoffAfterGrudgeExplicitPass;
+
+  /**
+   * After reopen, moment refs often lag at 2–3 while the threshold was already asked.
+   * Heal to Moment 4 so client-owned M5 inject runs instead of a model paraphrase.
+   */
+  if (
+    deps.currentInterviewMomentRef.current < 4 &&
+    m5HandoffEligible &&
+    !priorTranscriptAlreadyHasM5Primary
+  ) {
+    deps.currentInterviewMomentRef.current = 4;
+    deps.interviewMomentsCompleteRef.current[3] = true;
+    deps.personalHandoffInjectedRef.current = true;
+    void remoteLog('[M5_INJECT_MOMENT_HEALED_FROM_THRESHOLD_CONTEXT]', {
+      interviewSessionId: deps.interviewSessionIdRef.current,
+    });
+  }
 
   if (
     !deps.isInterviewAppRoute ||
@@ -236,6 +254,17 @@ export async function runPreClaudeMoment5QuestionInjectGate(
       : 'client_inject_after_m4_threshold',
     contentLen: m5BundleSpoken.length,
     preview: m5BundleSpoken.slice(0, 160),
+  });
+  triggerLiveMoment4ScoringOnM5Entry({
+    trigger: m5HandoffAfterGrudgeExplicitPass
+      ? 'm5_client_inject_after_m4_grudge_explicit_pass'
+      : 'm5_client_inject_after_m4_threshold',
+    userId: deps.userId,
+    isAdmin: deps.isAdmin,
+    attemptId: deps.interviewSessionAttemptIdRef.current,
+    messages: injectedMessages as MessageWithScenario[],
+    deferredMoment4NarrativeRef: deps.deferredMoment4NarrativeRef,
+    moment4SpecificityScoringRef: deps.moment4SpecificityScoringRef,
   });
   deps.setVoiceState('idle');
   deps.setIsWaiting(false);

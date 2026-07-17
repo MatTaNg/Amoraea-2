@@ -12,6 +12,7 @@ import {
   userAnswerSatisfiesScenarioARepairPrompt,
   userAnswerSatisfiesScenarioBJamesRepairPrompt,
 } from './interviewRepairRefusalDetection';
+import { withSkipAcceptedNextQuestionBridgePreserved } from './skipAcceptedNextQuestionBridge';
 
 export function looksLikeScenarioBFullAppreciationProbeQuestion(text: string): boolean {
   const t = text.toLowerCase();
@@ -341,7 +342,8 @@ export function coerceScenarioBJamesDifferentlyQuestionForTts(
   text: string,
   ctx?: ScenarioBJamesDifferentlyCoerceContext,
 ): string {
-  const t = (text ?? '').replace(/\s+/g, ' ').trim();
+  return withSkipAcceptedNextQuestionBridgePreserved(text, (raw) => {
+  const t = (raw ?? '').replace(/\s+/g, ' ').trim();
   if (!t) return SCENARIO_B_JAMES_DIFFERENTLY_CANONICAL;
   const suppressPrematureQ2 = ctx && shouldSuppressPrematureScenarioBJamesQ2Coercion(ctx);
   if (suppressPrematureQ2) {
@@ -388,6 +390,7 @@ export function coerceScenarioBJamesDifferentlyQuestionForTts(
     return SCENARIO_B_JAMES_DIFFERENTLY_CANONICAL;
   }
   return t;
+  });
 }
 
 /** Off-script James role-play elicitation (e.g. "How would you actually say that to James?") — not Q2/Q3 canonical. */
@@ -522,7 +525,8 @@ export function looksLikeScenarioBLegacyThirdPersonJamesRepairQuestion(text: str
 
 /** Replace truncated / garbled James-repair asks with the canonical scripted Q3. */
 export function coerceScenarioBJamesRepairQuestionForTts(text: string): string {
-  const t = (text ?? '').replace(/\s+/g, ' ').trim();
+  return withSkipAcceptedNextQuestionBridgePreserved(text, (raw) => {
+  const t = (raw ?? '').replace(/\s+/g, ' ').trim();
   if (!t) return SCENARIO_B_JAMES_REPAIR_CANONICAL;
   if (looksLikeScenarioBLegacyThirdPersonJamesRepairQuestion(t)) {
     const ack = extractBriefAckBeforeIncompleteJamesRepairProbe(t);
@@ -542,6 +546,7 @@ export function coerceScenarioBJamesRepairQuestionForTts(text: string): string {
     return SCENARIO_B_JAMES_REPAIR_CANONICAL;
   }
   return t;
+  });
 }
 
 /** Canonical Scenario B Q3 — client inject when the model closes early after James-differently. */
@@ -899,7 +904,8 @@ export function isIncompleteScenarioBQ1LeadSentence(text: string): boolean {
 
 /** Replace truncated / garbled S2 Q1 asks with the canonical scripted opening question. */
 export function coerceScenarioBQ1QuestionForTts(text: string): string {
-  const t = (text ?? '').replace(/\s+/g, ' ').trim();
+  return withSkipAcceptedNextQuestionBridgePreserved(text, (raw) => {
+  const t = (raw ?? '').replace(/\s+/g, ' ').trim();
   if (!t) return SCENARIO_B_Q1_CANONICAL;
   /** Jump-ahead repair on vignette Q1 → mandatory Q2, not another pass at Q1. */
   if (
@@ -919,6 +925,7 @@ export function coerceScenarioBQ1QuestionForTts(text: string): string {
     return SCENARIO_B_Q1_CANONICAL;
   }
   return t;
+  });
 }
 
 export function userSidesEntirelyWithJames(text: string): boolean {

@@ -22,7 +22,6 @@ export type ApplyReferenceCardFromAssistantSpeechDeps = {
 };
 
 export type ApplyInterviewSpeechCompleteDeps = {
-  webTtsTabInterruptPendingReplayRef: MutableRefObject<boolean>;
   applyReferenceCardFromAssistantSpeech: (rawText: string) => void;
   scenarioRefSync?: InterviewScenarioRefSyncTarget;
 };

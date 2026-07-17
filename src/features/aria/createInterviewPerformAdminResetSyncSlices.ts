@@ -11,7 +11,6 @@ export function createInterviewPerformAdminResetIdentitySyncSlice(params: SyncEx
 
 export function createInterviewPerformAdminResetMediaSyncSlice(params: SyncExtraParams): SyncExtraParams {
   return {
-    useMediaRecorderPath: params.useMediaRecorderPath,
     audioRecorder: params.audioRecorder,
     recognitionRef: params.recognitionRef,
     stopElevenLabsPlayback: params.stopElevenLabsPlayback,

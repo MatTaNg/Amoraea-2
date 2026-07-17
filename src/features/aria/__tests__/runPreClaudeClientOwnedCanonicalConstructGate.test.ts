@@ -164,6 +164,83 @@ describe('runPreClaudeClientOwnedCanonicalConstructGate', () => {
     );
   });
 
+  it('does not advance S1 contempt for incomplete cut-off answers', async () => {
+    const incomplete = 'If I were Ryan, I would';
+    const messages = [
+      {
+        role: 'assistant' as const,
+        content: "What's going on between these two?",
+        scenarioNumber: 1 as const,
+      },
+      { role: 'user' as const, content: incomplete, scenarioNumber: 1 as const },
+    ];
+    const deps = buildDeps({
+      currentScenarioRef: { current: 1 },
+      currentInterviewMomentRef: { current: 1 },
+      messages,
+      currentMessagesRef: { current: messages },
+    });
+
+    const result = await runPreClaudeClientOwnedCanonicalConstructGate(
+      deps,
+      incomplete,
+      messages,
+      messages[0].content,
+      baseFlags({ shouldForceScenarioAContemptProbe: true, replyingToScenarioAQ1: true }),
+    );
+
+    expect(result.handled).toBe(false);
+    expect(deps.speakTextSafe).not.toHaveBeenCalled();
+    expect(deps.scenarioAContemptProbeAskedRef.current).toBe(false);
+  });
+
+  it('does not re-ask S1 contempt when mute was armed but user already covered Emma line', async () => {
+    const messages = [
+      {
+        role: 'assistant' as const,
+        content: "What's going on between these two?",
+        scenarioNumber: 1 as const,
+      },
+      {
+        role: 'user' as const,
+        content:
+          'Emma is being condescending when she says you made that very clear.',
+        scenarioNumber: 1 as const,
+      },
+    ];
+    const deps = buildDeps({
+      currentScenarioRef: { current: 1 },
+      currentInterviewMomentRef: { current: 1 },
+      scenarioAContemptProbeAskedRef: { current: true },
+      pendingScenarioAContemptProbeStreamMuteRef: { current: true },
+      messages,
+      currentMessagesRef: { current: messages },
+    });
+
+    const result = await runPreClaudeClientOwnedCanonicalConstructGate(
+      deps,
+      messages[1].content,
+      messages,
+      messages[0].content,
+      baseFlags({
+        shouldForceScenarioAContemptProbe: false,
+        specificEmmaLineAlreadyAddressed: true,
+        muteParallelTtsForScenarioAContemptProbeStream: true,
+        allowScenarioARepairAfterContemptAnswer: true,
+      }),
+    );
+
+    expect(result.handled).toBe(true);
+    expect(deps.speakTextSafe).toHaveBeenCalledWith(
+      SCENARIO_A_REPAIR_QUESTION_AFTER_CONTEMPT_COPY,
+      expect.anything(),
+    );
+    expect(deps.speakTextSafe).not.toHaveBeenCalledWith(
+      SCENARIO_A_CONTEMPT_PROBE_DELIVERED_COPY,
+      expect.anything(),
+    );
+  });
+
   it('delivers canonical S1 repair without Claude after contempt answer', async () => {
     const messages = [
       {

@@ -18,10 +18,6 @@ jest.mock('@utilities/remoteLog', () => ({
   remoteLog: jest.fn(),
 }));
 
-jest.mock('@features/aria/utils/speakLongFormInterviewHtmlMp3', () => ({
-  speakLongFormInterviewHtmlMp3: jest.fn(async () => false),
-}));
-
 const s1RepairMessages = [
   {
     role: 'assistant' as const,
@@ -166,7 +162,7 @@ describe('deliverClientOwnedScenario2OpeningAfterS1Repair', () => {
     jest.clearAllMocks();
   });
 
-  it('speaks hardcoded wrap+vignette, advances refs, and scores situation 1', async () => {
+  it('speaks wrap, then emotion modal, then vignette; advances refs and scores situation 1', async () => {
     const speakTextSafe = jest.fn().mockResolvedValue(undefined);
     const runEmotionModal = jest.fn().mockResolvedValue(undefined);
     const ensureCompletedScenarioScored = jest.fn();
@@ -193,10 +189,22 @@ describe('deliverClientOwnedScenario2OpeningAfterS1Repair', () => {
     );
 
     expect(delivered).toBe(true);
-    expect(speakTextSafe).toHaveBeenCalled();
-    const spoken = String(speakTextSafe.mock.calls[0]?.[0] ?? '');
-    expect(spoken).toContain('Sarah has been job hunting');
-    expect(spoken.toLowerCase()).toMatch(/next|situation|wrap|nice work|good work/);
+    expect(speakTextSafe).toHaveBeenCalledTimes(2);
+    const wrapSpoken = String(speakTextSafe.mock.calls[0]?.[0] ?? '');
+    const vignetteSpoken = String(speakTextSafe.mock.calls[1]?.[0] ?? '');
+    expect(wrapSpoken.toLowerCase()).toMatch(/next|situation|wrap|nice work|good work/);
+    expect(wrapSpoken).not.toContain('Sarah has been job hunting');
+    expect(vignetteSpoken).toContain('Sarah has been job hunting');
+    expect(runEmotionModal).toHaveBeenCalledWith(1, {
+      transitionText: expect.stringContaining('Sarah has been job hunting'),
+      priorScenario: 1,
+      afterBeforeModalPlayback: true,
+    });
+    const speakOrder = speakTextSafe.mock.invocationCallOrder[0]!;
+    const modalOrder = runEmotionModal.mock.invocationCallOrder[0]!;
+    const vignetteOrder = speakTextSafe.mock.invocationCallOrder[1]!;
+    expect(speakOrder).toBeLessThan(modalOrder);
+    expect(modalOrder).toBeLessThan(vignetteOrder);
     expect(deps.currentScenarioRef.current).toBe(2);
     expect(deps.currentInterviewMomentRef.current).toBe(2);
     expect(deps.resumeActiveScenarioRef.current).toBe(2);
@@ -207,7 +215,6 @@ describe('deliverClientOwnedScenario2OpeningAfterS1Repair', () => {
     );
     expect(commitInterviewMessages).toHaveBeenCalled();
     expect(notifyScenarioStarted).toHaveBeenCalledWith(2, expect.any(Array));
-    expect(runEmotionModal).toHaveBeenCalledWith(1, { afterBeforeModalPlayback: true });
     expect(parallelStreamingTtsRef.current.spokenCompleteText.length).toBeGreaterThan(40);
   });
 });

@@ -153,7 +153,16 @@ enabled = true
 # in emails.
 site_url = "http://127.0.0.1:3000"
 # A list of *exact* URLs that auth providers are permitted to redirect to post authentication.
-additional_redirect_urls = ["https://127.0.0.1:3000"]
+# Include native app deep links used by confirm / reset emails (must also be in hosted Dashboard).
+additional_redirect_urls = [
+  "https://127.0.0.1:3000",
+  "http://localhost:8081/auth/confirm",
+  "http://localhost:8081/auth/reset-password",
+  "amoraea://auth/confirm",
+  "amoraea://auth/reset-password",
+  "https://www.amoraea.com/auth/confirm",
+  "https://www.amoraea.com/auth/reset-password",
+]
 # How long tokens are valid for, in seconds. Defaults to 3600 (1 hour), maximum 604,800 (1 week).
 jwt_expiry = 3600
 # JWT issuer URL. If not set, defaults to the local API URL (http://127.0.0.1:<port>/auth/v1).
@@ -226,15 +235,15 @@ otp_expiry = 3600
 # admin_email = "admin@email.com"
 # sender_name = "Admin"
 
-# Uncomment to customize email template (also paste into Supabase Dashboard → Auth → Email Templates for production).
-# Links use {{ .SiteURL }} (amoraea.com) + token_hash so Hotmail/Outlook see your domain, not *.supabase.co.
-# [auth.email.template.confirmation]
-# subject = "Confirm your Amoraea account"
-# content_path = "./supabase/templates/confirm-signup.html"
-#
-# [auth.email.template.recovery]
-# subject = "Reset your Amoraea password"
-# content_path = "./supabase/templates/recovery.html"
+# Customize email templates (also paste into Supabase Dashboard → Auth → Email Templates for production).
+# Use {{ .ConfirmationURL }} so redirects honor emailRedirectTo / redirectTo (app deep links).
+[auth.email.template.confirmation]
+subject = "Confirm your Amoraea account"
+content_path = "./supabase/templates/confirm-signup.html"
+
+[auth.email.template.recovery]
+subject = "Reset your Amoraea password"
+content_path = "./supabase/templates/recovery.html"
 
 # Uncomment to customize notification email template
 # [auth.email.notification.password_changed]

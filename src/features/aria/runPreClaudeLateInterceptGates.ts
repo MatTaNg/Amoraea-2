@@ -13,6 +13,12 @@ import {
   runPreClaudeClientOwnedCanonicalConstructGate,
 } from '@features/aria/runPreClaudeClientOwnedCanonicalConstructGate';
 import {
+  runPreClaudeConfusionOfferRepeatGate,
+} from '@features/aria/runPreClaudeConfusionOfferRepeatGate';
+import {
+  runPreClaudeIrrelevantAnswerRetryGate,
+} from '@features/aria/runPreClaudeIrrelevantAnswerRetryGate';
+import {
   runPreClaudeConfusionRepeatReplayGates,
 } from '@features/aria/runPreClaudeConfusionRepeatReplayGates';
 import {
@@ -84,6 +90,16 @@ export async function runPreClaudeLateInterceptGates(
     return { handled: true };
   }
 
+  const confusionOfferRepeat = await runPreClaudeConfusionOfferRepeatGate(
+    deps,
+    trimmed,
+    messagesToUse,
+    metaCommentClassification,
+  );
+  if (confusionOfferRepeat.handled) {
+    return { handled: true };
+  }
+
   const moment5QuestionInject = await runPreClaudeMoment5QuestionInjectGate(
     deps,
     messagesToUse,
@@ -125,6 +141,18 @@ export async function runPreClaudeLateInterceptGates(
     participantFirstNameForSpoken,
   );
   if (s1RepairHardStop.handled) {
+    return { handled: true };
+  }
+
+  // Unassessable / identity asks (e.g. "Are you an alien?") must win over disengagement
+  // probes and construct advance — speak inability-to-score only, no ack / re-ask.
+  const irrelevantAnswerRetry = await runPreClaudeIrrelevantAnswerRetryGate(
+    deps,
+    trimmed,
+    messagesToUse,
+    lastAssistantContent,
+  );
+  if (irrelevantAnswerRetry.handled) {
     return { handled: true };
   }
 

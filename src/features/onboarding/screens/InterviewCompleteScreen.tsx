@@ -3,14 +3,15 @@ import {
   View,
   Text,
   StyleSheet,
-  SafeAreaView,
   ScrollView,
   TouchableOpacity,
   Platform,
   ViewStyle,
 } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { FlameOrb } from '@app/screens/FlameOrb';
+import { INTRO_FLAME_ORB_SIZE } from '@app/screens/flameOrbLogo';
 import { useAuth } from '@/shared/hooks/AuthProvider';
 import { isAmoraeaAdminConsoleEmail } from '@/constants/adminConsole';
 import { DownloadPartialReportButton } from '@features/psychometrics/DownloadPartialReportButton';
@@ -34,6 +35,8 @@ import {
   PSYCHOMETRICS_TIP_CARD_BORDER,
   psychometricsScrollContent,
 } from '@features/psychometrics/psychometricsTheme';
+import { interviewOverlayTop } from '@features/aria/utils/interviewOverlayInsets';
+import { SafeAreaContainer } from '@ui/components/SafeAreaContainer';
 import { spacing } from '@ui/theme/spacing';
 import { showConfirmDialog } from '@utilities/alerts/confirmDialog';
 
@@ -70,6 +73,8 @@ type Props = {
 
 export function InterviewCompleteScreen({ navigation, route }: Props) {
   const { user, signOut } = useAuth();
+  const insets = useSafeAreaInsets();
+  const overlayTop = interviewOverlayTop(insets);
   const userId = route.params?.userId ?? user?.id ?? '';
   const isAlphaTester = isAmoraeaAdminConsoleEmail(user?.email);
   const [attempt, setAttempt] = useState<InterviewReportAttempt | null>(null);
@@ -99,7 +104,8 @@ export function InterviewCompleteScreen({ navigation, route }: Props) {
   }, []);
 
   useEffect(() => {
-    const shouldKeepPolling = (row: InterviewReportAttempt | null) => !row || row.pillar_scores == null;
+    const shouldKeepPolling = (row: InterviewReportAttempt | null) =>
+      !row || !row.hasPersistedPillarScores || row.pillar_scores == null;
 
     void (async () => {
       const row = await refreshAttempt();
@@ -137,9 +143,9 @@ export function InterviewCompleteScreen({ navigation, route }: Props) {
   }
 
   return (
-    <SafeAreaView style={styles.container}>
+    <SafeAreaContainer edges={['bottom', 'left', 'right']} style={styles.container}>
       <TouchableOpacity
-        style={styles.logoutButton}
+        style={[styles.logoutButton, { top: overlayTop }]}
         onPress={handleLogOut}
         activeOpacity={0.8}
         accessibilityRole="button"
@@ -148,9 +154,12 @@ export function InterviewCompleteScreen({ navigation, route }: Props) {
         <Ionicons name="log-out-outline" size={16} color="#5BA8E8" />
         <Text style={styles.logoutButtonText}>Log out</Text>
       </TouchableOpacity>
-      <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
+      <ScrollView
+        contentContainerStyle={[styles.content, { paddingTop: overlayTop + 48 }]}
+        showsVerticalScrollIndicator={false}
+      >
         <View style={styles.logoWrap}>
-          <FlameOrb state="idle" size={64} minimalGlow />
+          <FlameOrb state="idle" size={INTRO_FLAME_ORB_SIZE} minimalGlow />
         </View>
 
         <Text style={styles.eyebrow}>Interview complete</Text>
@@ -181,6 +190,9 @@ export function InterviewCompleteScreen({ navigation, route }: Props) {
             userId={userId}
             scoringReady={scoringReady}
             variant="secondary"
+            onBeforeRetry={async () => {
+              await refreshAttempt();
+            }}
           />
         </View>
 
@@ -235,15 +247,15 @@ export function InterviewCompleteScreen({ navigation, route }: Props) {
           </TouchableOpacity>
         ) : null}
       </ScrollView>
-    </SafeAreaView>
+    </SafeAreaContainer>
   );
 }
+
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: PSYCHOMETRICS_BG },
   logoutButton: {
     position: 'absolute',
-    top: 16,
     right: 16,
     flexDirection: 'row',
     alignItems: 'center',
@@ -267,10 +279,9 @@ const styles = StyleSheet.create({
   content: {
     ...psychometricsScrollContent,
     alignItems: 'center',
-    paddingTop: 32,
     paddingBottom: spacing.xl,
-  },
-  logoWrap: { alignItems: 'center', marginBottom: spacing.sm },
+  } as ViewStyle,
+  logoWrap: { alignItems: 'center', marginBottom: spacing.md },
   eyebrow: {
     fontFamily: PSYCHOMETRICS_FONT_BODY,
     fontSize: 13,

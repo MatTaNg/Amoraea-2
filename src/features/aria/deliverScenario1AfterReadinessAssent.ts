@@ -23,7 +23,6 @@ import {
 import type { ParallelStreamingTtsState } from '@features/aria/interviewParallelTtsBatch';
 import { substituteCanonicalInterviewScenarioBodiesForTts } from '@features/aria/substituteCanonicalInterviewScenarioBodiesForTts';
 import type { ShowScenarioCardCanonicalPlaybackConfirmedKinds } from '@features/aria/showScenarioCardCanonicalTts';
-import { speakLongFormInterviewHtmlMp3 } from '@features/aria/utils/speakLongFormInterviewHtmlMp3';
 import {
   dedupeAdjacentBoundaryValidationsBeforeParticipantName,
   ensureSpokenTextIncludesParticipantFirstName,
@@ -45,11 +44,10 @@ export type Scenario1ReadinessDeliveryDeps = {
   lastQuestionTextRef: { current: string | null };
   parallelStreamingTtsRef: { current: ParallelStreamingTtsState };
   /**
-   * HTML long-form speak bypasses speakTextSafe — arm these so tab-hide during
-   * ElevenLabs fetch / playback still queues Tap-to-continue (same as S2/S3 card speak).
+   * Arm before speak so tab-hide during TTS still queues Tap-to-continue (same as S2/S3 card speak).
    */
   ttsLineInFlightRef?: { current: boolean };
-  webTtsUtteranceInFlightRef?: { current: string | null };
+  ttsUtteranceInFlightRef?: { current: string | null };
   showScenarioCardCanonicalPlaybackConfirmedKindsRef?: {
     current: ShowScenarioCardCanonicalPlaybackConfirmedKinds;
   };
@@ -191,40 +189,20 @@ export async function deliverScenario1VignetteAfterReadinessAssent(
     recoveredNameFromBriefing: participantFirstName || null,
   });
   /**
-   * Arm before fetch/playback: tab-hide during the ElevenLabs gap otherwise hits
-   * interrupt_early_return_inactive (no surface / ttsLine / pending) and never shows
-   * Tap-to-continue. Mirror parallelStreamShowScenarioCardTts for situation_1.
+   * Arm before speak: tab-hide during TTS otherwise hits interrupt_early_return_inactive
+   * (no surface / ttsLine / pending) and never shows Tap-to-continue.
    */
-  if (deps.webTtsUtteranceInFlightRef) {
-    deps.webTtsUtteranceInFlightRef.current = displayText;
+  if (deps.ttsUtteranceInFlightRef) {
+    deps.ttsUtteranceInFlightRef.current = displayText;
   }
   if (deps.ttsLineInFlightRef) {
     deps.ttsLineInFlightRef.current = true;
   }
   deps.parallelStreamingTtsRef.current.accumulatedFullText = displayText;
   deps.lastQuestionTextRef.current = SCENARIO_1_OPENING;
-  let htmlMp3Played = false;
-  try {
-    htmlMp3Played = await speakLongFormInterviewHtmlMp3({
-      text: displayText,
-      telemetrySource: 'turn',
-      onPlaybackStarted: () => deps.setVoiceState('speaking'),
-    });
-  } catch {
-    htmlMp3Played = false;
-  }
-  if (htmlMp3Played) {
-    if (deps.showScenarioCardCanonicalPlaybackConfirmedKindsRef) {
-      deps.showScenarioCardCanonicalPlaybackConfirmedKindsRef.current = {
-        ...deps.showScenarioCardCanonicalPlaybackConfirmedKindsRef.current,
-        situation_1: true,
-      };
-    }
-  } else {
-    await deps.speakTextSafe(displayText, SHOW_SCENARIO_CARD_CANONICAL_SPEECH);
-  }
-  if (deps.webTtsUtteranceInFlightRef) {
-    deps.webTtsUtteranceInFlightRef.current = null;
+  await deps.speakTextSafe(displayText, SHOW_SCENARIO_CARD_CANONICAL_SPEECH);
+  if (deps.ttsUtteranceInFlightRef) {
+    deps.ttsUtteranceInFlightRef.current = null;
   }
   if (deps.ttsLineInFlightRef) {
     deps.ttsLineInFlightRef.current = false;

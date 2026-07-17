@@ -2,23 +2,17 @@ import type { MutableRefObject } from 'react';
 import { Platform } from 'react-native';
 
 import { stripControlTokens } from '@features/aria/interviewControlTokens';
+import { getAudioPostSessionRecordingDelayMs } from '@features/aria/config/audioInterviewConfig';
 import {
   findLastRepeatableInterviewQuestionText,
   resolveInterviewQuestionRepeatTtsText,
 } from '@features/aria/interviewDisengagementProbes';
-import { isNamePromptInterviewMoment } from '@features/aria/interviewLanguageGate';
-import { handleWebMicPressPreRecordingGestures } from '@features/aria/handleWebMicPressPreRecordingGestures';
+import { withRepeatRequestAcknowledgment } from '@features/aria/interviewRepeatRequestTarget';
 import { logMicRecordingStartTelemetry } from '@features/aria/logMicRecordingStartTelemetry';
 import { scenarioAContemptProbeResumeRepeatTtsText } from '@features/aria/scenarioAContemptProbeLogic';
 import type { HeadphoneProbeResult } from '@features/aria/utils/audioRouteHeadphones';
 import type { VoiceState } from '@features/aria/hooks/useAriaInterviewSession';
 import { fetchElevenLabsMpegArrayBuffer } from '@features/aria/utils/elevenLabsTtsFetch';
-import {
-  isWebInterviewMicPreInitReady,
-  rearmWebMicPreInitAfterRecordingStop,
-  rearmWebMicPreInitAfterTtsPlaybackComplete,
-  webMicPreInitNeedsRefreshForNameEntry,
-} from '@features/aria/utils/webInterviewMicPreInit';
 import {
   peekRecordingDelayExtraFromEarlyCutoffMs,
   takeRecordingDelayExtraFromEarlyCutoffMs,
@@ -30,7 +24,6 @@ export type HandleNativeOrWhisperMicPressDeps = {
   userId: string | undefined;
   voiceState: VoiceState;
   useTapMicUi: boolean;
-  useMediaRecorderPath: boolean;
   audioRecorder: {
     isRecording: boolean;
     stopRecording: (opts?: { bypassMinDuration?: boolean }) => void | Promise<void>;
@@ -50,23 +43,10 @@ export type HandleNativeOrWhisperMicPressDeps = {
   isInterviewerOutputActiveForMicGate: () => boolean;
   voiceStateRef: MutableRefObject<VoiceState>;
   setVoiceState: React.Dispatch<React.SetStateAction<VoiceState>>;
-  mobileTabHideLetPlaybackContinueRef: MutableRefObject<boolean>;
   webMicArmInFlightRef: MutableRefObject<boolean>;
-  webTabGestureRestoreOverlayRef: MutableRefObject<boolean>;
-  webTtsTabInterruptPendingReplayRef: MutableRefObject<boolean>;
-  webTabRestoreReplayInFlightRef: MutableRefObject<boolean>;
-  pendingGestureRestoreSpeakRef: MutableRefObject<unknown>;
-  handleWebTabGestureRestoreTapRef: MutableRefObject<() => void>;
-  setWebTabGestureRestoreOverlay: (v: boolean) => void;
-  ensureWebGestureFlushListener: () => void;
-  pendingMicStartAfterIdleFlushRef: MutableRefObject<boolean>;
   startRecordingAfterPendingTts: () => Promise<void>;
-  pendingWebSpeechForGestureRef: MutableRefObject<string | null>;
-  webGestureTtsConsumedPressRef: MutableRefObject<boolean>;
-  webGestureConsumeClearTimeoutRef: MutableRefObject<ReturnType<typeof setTimeout> | null>;
   handlePressEnd: () => Promise<void>;
   handlePressStart: () => Promise<void>;
-  waitUntilInterviewerQuiescentForWebMic: () => Promise<void>;
   ttsLineInFlightRef: MutableRefObject<boolean>;
   interviewNameRef: MutableRefObject<string | null>;
   interviewNameReaskPendingRef: MutableRefObject<boolean>;
@@ -82,8 +62,6 @@ export type HandleNativeOrWhisperMicPressDeps = {
   currentScenarioRef: MutableRefObject<number | null>;
   resumeRepeatPrefetchMpegRef: MutableRefObject<{ text: string; buffer: ArrayBuffer } | null>;
   takeRecordingStartEventDataWithVadBypassRestart: () => Record<string, unknown>;
-  isWebInterviewPlaybackAudiblyActive: () => boolean;
-  webSpeechShouldDeferToUserGesture: () => boolean;
 };
 
 export async function runHandleNativeOrWhisperMicPress(
@@ -91,7 +69,6 @@ export async function runHandleNativeOrWhisperMicPress(
 ): Promise<void> {
   const {
     userId,
-    useMediaRecorderPath,
     audioRecorder,
     handleRecordingError,
     isInterviewerOutputActiveForMicGate,
@@ -104,19 +81,11 @@ export async function runHandleNativeOrWhisperMicPress(
     resumeLastAssistantTextRef,
     lastQuestionTextRef,
     resumeRepeatPrefetchMpegRef,
-    waitUntilInterviewerQuiescentForWebMic,
-    interviewNameRef,
-    interviewNameReaskPendingRef,
     micTapWhileTtsActiveRef,
     setMicEnginePrimed,
     recordingDelayMeasurementRef,
     ttsLineInFlightRef,
   } = deps;
-
-  const preRecording = await handleWebMicPressPreRecordingGestures(deps);
-  if (preRecording === 'handled') {
-    return;
-  }
 
   if (__DEV__) console.log('[Amoraea] MIC PRESSED, isRecording:', audioRecorder.isRecording);
   try {
@@ -142,20 +111,10 @@ export async function runHandleNativeOrWhisperMicPress(
             platform: r.platform,
           });
         }
-        const nameEntryTurn =
-          !interviewNameRef.current &&
-          (interviewNameReaskPendingRef.current ||
-            isNamePromptInterviewMoment(lastQuestionTextRef.current));
-        await waitUntilInterviewerQuiescentForWebMic();
-        if (Platform.OS === 'web' && !isWebInterviewMicPreInitReady()) {
-          await rearmWebMicPreInitAfterTtsPlaybackComplete();
-        } else if (nameEntryTurn && webMicPreInitNeedsRefreshForNameEntry()) {
-          await rearmWebMicPreInitAfterRecordingStop();
-        }
       }
       setVoiceState('recording');
-      const intendedDelayMs =
-        Platform.OS === 'web' ? 0 : 500 + peekRecordingDelayExtraFromEarlyCutoffMs();
+      const baseDelayMs = Platform.OS === 'web' ? 0 : getAudioPostSessionRecordingDelayMs();
+      const intendedDelayMs = baseDelayMs + peekRecordingDelayExtraFromEarlyCutoffMs();
       const extraDelayMs = takeRecordingDelayExtraFromEarlyCutoffMs();
       recordingDelayMeasurementRef.current = null;
       if (Platform.OS === 'web' && resumeRepeatChoicePendingRef.current) {
@@ -171,15 +130,16 @@ export async function runHandleNativeOrWhisperMicPress(
           ),
         );
         if (prefetchText.length > 0) {
-          void fetchElevenLabsMpegArrayBuffer(prefetchText).then((buffer) => {
+          const prefetchSpoken = withRepeatRequestAcknowledgment(prefetchText);
+          void fetchElevenLabsMpegArrayBuffer(prefetchSpoken).then((buffer) => {
             if (buffer && buffer.byteLength > 0) {
-              resumeRepeatPrefetchMpegRef.current = { text: prefetchText, buffer };
+              resumeRepeatPrefetchMpegRef.current = { text: prefetchSpoken, buffer };
             }
           });
         }
       }
       await audioRecorder.startRecording({
-        postAudioSessionDelayMs: Platform.OS === 'web' ? 0 : 500 + extraDelayMs,
+        postAudioSessionDelayMs: baseDelayMs + extraDelayMs,
         tapIntentAtMs,
       });
       if (!audioRecorder.isRecording) {

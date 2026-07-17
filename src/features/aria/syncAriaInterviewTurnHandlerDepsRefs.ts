@@ -2,7 +2,6 @@ import type { MutableRefObject } from 'react';
 
 import type { ClaudeParallelStreamTtsCallDeps } from '@features/aria/claudeParallelStreamTtsCallTypes';
 import type { KickPostClosingInterviewCompletionDeps } from '@features/aria/hooks/useKickPostClosingInterviewCompletion';
-import type { InterviewWebTabRestoreSessionDeps } from '@features/aria/hooks/useInterviewWebTabRestoreSession';
 import type { ScoreScenarioDeps } from '@features/aria/scoreScenarioTypes';
 import type { PostClaudeAssistantTurnDeps } from '@features/aria/postClaudeAssistantTurnTypes';
 import type { PreClaudeTurnGateDeps } from '@features/aria/preClaudeTurnGateTypes';
@@ -18,62 +17,6 @@ export type ProcessUserSpeechDepRefs = {
   claudeParallelStreamTtsDepsRef: MutableRefObject<ClaudeParallelStreamTtsCallDeps>;
   postClaudeTurnDepsRef: MutableRefObject<PostClaudeAssistantTurnDeps>;
 };
-
-export function syncWebTabRestoreSessionDeps(
-  ref: MutableRefObject<InterviewWebTabRestoreSessionDeps>,
-  ctx: AriaInterviewDepsSyncContext,
-): void {
-  ref.current = {
-    userIdRef: ctx.userIdRef,
-    voiceStateRef: ctx.voiceStateRef,
-    setVoiceState: ctx.setVoiceState,
-    setWebTabRestoreOverlayVisible: ctx.setWebTabRestoreOverlayVisible,
-    setMobileWebTapToBeginDone: ctx.setMobileWebTapToBeginDone,
-    setEmotionModalVisible: ctx.setEmotionModalVisible,
-    pendingGestureRestoreSpeakRef: ctx.pendingGestureRestoreSpeakRef,
-    webTabRestoreReplayInFlightRef: ctx.webTabRestoreReplayInFlightRef,
-    webTabRestoreTapSessionRef: ctx.webTabRestoreTapSessionRef,
-    webTabRestoreDeliveredNormRef: ctx.webTabRestoreDeliveredNormRef,
-    webTtsTabInterruptPendingReplayRef: ctx.webTtsTabInterruptPendingReplayRef,
-    webTtsSpeakGenerationRef: ctx.webTtsSpeakGenerationRef,
-    webTtsUtteranceInFlightRef: ctx.webTtsUtteranceInFlightRef,
-    webTtsUtteranceInFlightOptionsRef: ctx.webTtsUtteranceInFlightOptionsRef,
-    parallelStreamingTtsRef: ctx.parallelStreamingTtsRef,
-    ttsLineInFlightRef: ctx.ttsLineInFlightRef,
-    tabHiddenDuringActiveTtsLineRef: ctx.tabHiddenDuringActiveTtsLineRef,
-    tabRestoreInFlightWithoutPlaybackSinceMsRef: ctx.tabRestoreInFlightWithoutPlaybackSinceMsRef,
-    needsGestureRestoreRef: ctx.needsGestureRestoreRef,
-    mobileTabHideLetPlaybackContinueRef: ctx.mobileTabHideLetPlaybackContinueRef,
-    mobileTabHideBackgroundUtteranceRef: ctx.mobileTabHideBackgroundUtteranceRef,
-    lastQuestionTextRef: ctx.lastQuestionTextRef,
-    lastSuccessfulTtsTextNormalizedRef: ctx.lastSuccessfulTtsTextNormalizedRef,
-    emotionModalPendingTransitionRef: ctx.emotionModalPendingTransitionRef,
-    pendingEmotionModalTransitionRef: ctx.pendingEmotionModalTransitionRef,
-    emotionModalShownForScenarioRef: ctx.emotionModalShownForScenarioRef,
-    runEmotionModalAfterScenarioTransition: ctx.runEmotionModalAfterScenarioTransition,
-    scenarioRefSync: {
-      currentScenarioRef: ctx.currentScenarioRef,
-      currentInterviewMomentRef: ctx.currentInterviewMomentRef,
-      interviewMomentsCompleteRef: ctx.interviewMomentsCompleteRef,
-      resumeActiveScenarioRef: ctx.resumeActiveScenarioRef,
-      interviewSessionIdRef: ctx.interviewSessionIdRef,
-    },
-    gestureContextLostAtRef: ctx.gestureContextLostAtRef,
-    interviewStatusRef: ctx.interviewStatusRef,
-    isInterviewCompleteRef: ctx.isInterviewCompleteRef,
-    currentMessagesRef: ctx.currentMessagesRef,
-    resumeRepeatPrefetchMpegRef: ctx.resumeRepeatPrefetchMpegRef,
-    speakTextSafe: ctx.speakTextSafe,
-    dismissTabRestoreOverlay: ctx.dismissTabRestoreOverlay,
-    dismissAfterAndroidBackgroundPlaybackEnd: ctx.dismissAfterAndroidBackgroundPlaybackEnd,
-    ensureWebGestureFlushListener: ctx.ensureWebGestureFlushListener,
-    detachWebGestureFlushListener: ctx.detachWebGestureFlushListener,
-    interruptAllWebInterviewTtsOutput: ctx.interruptAllWebInterviewTtsOutput,
-    clearStaleWebInterviewTtsRuntimeLocks: ctx.clearStaleWebInterviewTtsRuntimeLocks,
-    queueMobileWebHtmlResumeAfterScreenReturn: ctx.queueMobileWebHtmlResumeAfterScreenReturn,
-    applyInterviewSpeechComplete: ctx.applyInterviewSpeechComplete,
-  } as InterviewWebTabRestoreSessionDeps;
-}
 
 export function syncAriaInterviewTurnHandlerDeps(
   refs: Pick<AriaInterviewDepsRefs, 'kickPostClosingCompletionDepsRef' | 'scoreScenarioDepsRef' | 'postClaudeTurnDepsRef' | 'preClaudeTurnGateDepsRef'>,
@@ -129,7 +72,6 @@ export function syncAriaInterviewTurnHandlerDeps(
         setMessages: ctx.setMessages,
         setInterviewStatus: ctx.setInterviewStatus,
         setPendingCompletion: ctx.setPendingCompletion,
-        setWebTabGestureRestoreOverlay: ctx.setWebTabGestureRestoreOverlay,
         setReferenceCardPrompt: ctx.setReferenceCardPrompt,
         setReferenceCardScenario: ctx.setReferenceCardScenario,
         setInterviewUiPhase: ctx.setInterviewUiPhase,
@@ -191,10 +133,9 @@ export function syncAriaInterviewTurnHandlerDeps(
         moment5QuestionDeliveryInFlightRef: ctx.moment5QuestionDeliveryInFlightRef,
         parallelStreamingTtsRef: ctx.parallelStreamingTtsRef,
         ttsLineInFlightRef: ctx.ttsLineInFlightRef,
-        webTtsUtteranceInFlightRef: ctx.webTtsUtteranceInFlightRef,
+        ttsUtteranceInFlightRef: ctx.ttsUtteranceInFlightRef,
         pendingCompletionTranscriptRef: ctx.pendingCompletionTranscriptRef,
         pendingEmotionModalTransitionRef: ctx.pendingEmotionModalTransitionRef,
-        pendingGestureRestoreSpeakRef: ctx.pendingGestureRestoreSpeakRef,
         personalHandoffInjectedRef: ctx.personalHandoffInjectedRef,
         resumeActiveScenarioRef: ctx.resumeActiveScenarioRef,
         scenarioAContemptProbeAskedRef: ctx.scenarioAContemptProbeAskedRef,
@@ -204,7 +145,6 @@ export function syncAriaInterviewTurnHandlerDeps(
         scenarioScoresRef: ctx.scenarioScoresRef,
         scoreInterviewAttemptedRef: ctx.scoreInterviewAttemptedRef,
         scoredScenariosRef: ctx.scoredScenariosRef,
-        webTtsTabInterruptPendingReplayRef: ctx.webTtsTabInterruptPendingReplayRef,
         s2RepairProbeDeliveredRef: ctx.s2RepairProbeDeliveredRef,
         s3RepairProbeDeliveredRef: ctx.s3RepairProbeDeliveredRef,
         scenarioCSophiePerspectiveProbeFiredRef: ctx.scenarioCSophiePerspectiveProbeFiredRef,
@@ -239,7 +179,6 @@ export function syncAriaInterviewTurnHandlerDeps(
         setStatus: ctx.setStatus,
         setTouchedConstructs: ctx.setTouchedConstructs,
         setUsedPersonalExamples: ctx.setUsedPersonalExamples,
-        setWebTabGestureRestoreOverlay: ctx.setWebTabGestureRestoreOverlay,
         setReferenceCardPrompt: ctx.setReferenceCardPrompt,
         setReferenceCardScenario: ctx.setReferenceCardScenario,
         setInterviewUiPhase: ctx.setInterviewUiPhase,
@@ -275,9 +214,8 @@ export function syncAriaInterviewTurnHandlerDeps(
         lastQuestionTextRef: ctx.lastQuestionTextRef,
         parallelStreamingTtsRef: ctx.parallelStreamingTtsRef,
         webTabRestoreDeliveredNormRef: ctx.webTabRestoreDeliveredNormRef,
-        pendingGestureRestoreSpeakRef: ctx.pendingGestureRestoreSpeakRef,
         ttsLineInFlightRef: ctx.ttsLineInFlightRef,
-        webTtsUtteranceInFlightRef: ctx.webTtsUtteranceInFlightRef,
+        ttsUtteranceInFlightRef: ctx.ttsUtteranceInFlightRef,
         interviewSessionIdRef: ctx.interviewSessionIdRef,
         interviewSessionAttemptIdRef: ctx.interviewSessionAttemptIdRef,
         interviewAttemptCreationInFlightRef: ctx.interviewAttemptCreationInFlightRef,
@@ -316,6 +254,7 @@ export function syncAriaInterviewTurnHandlerDeps(
         moment4ExpectingPostSpecificityUserTurnRef: ctx.moment4ExpectingPostSpecificityUserTurnRef,
         moment4PostGrudgeSpecificityResolvedRef: ctx.moment4PostGrudgeSpecificityResolvedRef,
         moment4SpecificityScoringRef: ctx.moment4SpecificityScoringRef,
+        deferredMoment4NarrativeRef: ctx.deferredMoment4NarrativeRef,
         moment5AccountabilityProbeFiredRef: ctx.moment5AccountabilityProbeFiredRef,
         moment5PostPromptUserTurnCountRef: ctx.moment5PostPromptUserTurnCountRef,
         moment5PrimaryAnchorDeliveredSessionRef: ctx.moment5PrimaryAnchorDeliveredSessionRef,
@@ -355,9 +294,7 @@ export function syncAriaInterviewTurnHandlerDeps(
         responseTimingsRef: ctx.responseTimingsRef,
         timingRef: ctx.timingRef,
         resumeLoadingFlowActiveRef: ctx.resumeLoadingFlowActiveRef,
-        webResumeWelcomeTapPendingRef: ctx.webResumeWelcomeTapPendingRef,
         resumeOfferWelcomeTtsRef: ctx.resumeOfferWelcomeTtsRef,
-        webResumeWelcomeTapHandledRef: ctx.webResumeWelcomeTapHandledRef,
         interviewUserTurnEpochRef: ctx.interviewUserTurnEpochRef,
   } as PreClaudeTurnGateDeps;
 
@@ -367,7 +304,6 @@ export function syncAriaInterviewTurnHandlerCluster(
   refs: Pick<
     AriaInterviewDepsRefs,
     | 'kickPostClosingCompletionDepsRef'
-    | 'webTabRestoreSessionDepsRef'
     | 'scoreScenarioDepsRef'
     | 'postClaudeTurnDepsRef'
     | 'preClaudeTurnGateDepsRef'
@@ -388,12 +324,6 @@ export function syncAriaInterviewTurnHandlerCluster(
     gateSyncCtx,
   );
   syncAriaInterviewTurnHandlerDeps(refs, fullTurnHandlerCtx);
-  /**
-   * Must use fullTurnHandlerCtx (not runtimeSyncCtx alone): `applyInterviewSpeechComplete`
-   * lives on turn-handler extras. Syncing only runtimeSyncCtx left it undefined, so
-   * finishTabRestore threw and the orchestration catch re-queued Tap-to-continue.
-   */
-  syncWebTabRestoreSessionDeps(refs.webTabRestoreSessionDepsRef, fullTurnHandlerCtx);
   syncProcessUserSpeechDeps(
     refs.processUserSpeechDepsRef,
     fullTurnHandlerCtx,
@@ -434,9 +364,7 @@ export function syncProcessUserSpeechDeps(
     scenarioScoresRef: ctx.scenarioScoresRef,
     resumeActiveScenarioRef: ctx.resumeActiveScenarioRef,
     resumeLoadingFlowActiveRef: ctx.resumeLoadingFlowActiveRef,
-    webResumeWelcomeTapPendingRef: ctx.webResumeWelcomeTapPendingRef,
     resumeOfferWelcomeTtsRef: ctx.resumeOfferWelcomeTtsRef,
-    webResumeWelcomeTapHandledRef: ctx.webResumeWelcomeTapHandledRef,
     interviewUserTurnEpochRef: ctx.interviewUserTurnEpochRef,
     interviewSessionAttemptIdRef: ctx.interviewSessionAttemptIdRef,
   } as ProcessUserSpeechDeps;

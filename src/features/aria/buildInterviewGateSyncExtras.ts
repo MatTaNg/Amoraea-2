@@ -46,10 +46,10 @@ export function mergeAriaInterviewServicesGateSyncCtx(
 }
 
 export function mergeAriaInterviewRuntimeGateSyncCtx(
-  webRuntimeCtx: AriaInterviewDepsSyncContext,
+  runtimeCtx: AriaInterviewDepsSyncContext,
   gateCtx: AriaInterviewDepsSyncContext,
 ): AriaInterviewDepsSyncContext {
-  return mergeAriaInterviewSyncCtx(webRuntimeCtx, gateCtx);
+  return mergeAriaInterviewSyncCtx(runtimeCtx, gateCtx);
 }
 
 export function mergeAriaInterviewCoreGateSyncCtx(
@@ -61,11 +61,11 @@ export function mergeAriaInterviewCoreGateSyncCtx(
 
 export function mergeAriaInterviewMicClusterBaseSyncCtx(
   coreCtx: AriaInterviewDepsSyncContext,
-  webRuntimeCtx: AriaInterviewDepsSyncContext,
+  runtimeCtx: AriaInterviewDepsSyncContext,
   servicesGateCtx: AriaInterviewDepsSyncContext,
 ): AriaInterviewDepsSyncContext {
   return mergeAriaInterviewSyncCtx(
-    mergeAriaInterviewSyncCtx(coreCtx, webRuntimeCtx),
+    mergeAriaInterviewSyncCtx(coreCtx, runtimeCtx),
     servicesGateCtx,
   );
 }

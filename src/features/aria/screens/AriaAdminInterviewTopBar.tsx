@@ -1,7 +1,9 @@
 import React from 'react';
 import { Text, TouchableOpacity, View } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { ariaScreenStyles as styles } from '@features/aria/ariaScreenStyles';
+import { interviewOverlayTop } from '@features/aria/utils/interviewOverlayInsets';
 
 export function AriaAdminInterviewTopBar({
   onOpenPanel,
@@ -12,8 +14,10 @@ export function AriaAdminInterviewTopBar({
   onResetInterview: () => void;
   onSignOut: () => void;
 }): React.ReactElement {
+  const overlayTop = interviewOverlayTop(useSafeAreaInsets());
+
   return (
-    <View style={styles.adminTopBarRow}>
+    <View style={[styles.adminTopBarRow, { top: overlayTop }]}>
       <TouchableOpacity
         style={styles.adminBarButton}
         onPress={onOpenPanel}

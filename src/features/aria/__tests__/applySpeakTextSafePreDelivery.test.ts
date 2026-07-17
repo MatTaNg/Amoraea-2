@@ -91,17 +91,43 @@ describe('applySpeakTextSafePreDelivery', () => {
     expect(args.setVoiceState).toHaveBeenCalledWith('idle');
   });
 
-  it('allows duplicate consecutive TTS when explicitly opted in', () => {
-    const text = 'Can you say that again?';
+  it('preserves Sure. before Scenario A contempt probe after canonical coerce', () => {
+    const {
+      SCENARIO_A_CONTEMPT_PROBE_DELIVERED_COPY,
+    } = require('@features/aria/scenarioAContemptProbeTtsStrip') as {
+      SCENARIO_A_CONTEMPT_PROBE_DELIVERED_COPY: string;
+    };
     const args = baseArgs({
-      text,
+      text: `Sure. ${SCENARIO_A_CONTEMPT_PROBE_DELIVERED_COPY}`,
       allowDuplicateConsecutiveTts: true,
-      lastSuccessfulTtsTextNormalized: normalizeTtsTextForConsecutiveDedup(text),
+      currentInterviewMoment: 1,
+      currentScenario: 1,
     });
 
     const result = applySpeakTextSafePreDelivery(args);
 
     expect(result.suppressed).toBe(false);
+    if (result.suppressed) return;
+    expect(result.text).toMatch(/^Sure\.\s/);
+    expect(result.text).toContain(SCENARIO_A_CONTEMPT_PROBE_DELIVERED_COPY);
+    expect(result.textForAudio).toMatch(/^Sure\.\s/);
+  });
+
+  it('preserves Sure. before Scenario A repair after canonical coerce', () => {
+    const repair = 'If you were Ryan, how would you repair this?';
+    const args = baseArgs({
+      text: `Sure. ${repair}`,
+      allowDuplicateConsecutiveTts: true,
+      currentInterviewMoment: 1,
+      currentScenario: 1,
+    });
+
+    const result = applySpeakTextSafePreDelivery(args);
+
+    expect(result.suppressed).toBe(false);
+    if (result.suppressed) return;
+    expect(result.text).toMatch(/^Sure\.\s/);
+    expect(result.text.toLowerCase()).toMatch(/if you were ryan/);
   });
 
   it('does not suppress Scenario A repair re-ask after the canonical first repair question was spoken', () => {
@@ -134,5 +160,28 @@ describe('applySpeakTextSafePreDelivery', () => {
 
     expect(result).toEqual({ suppressed: true, reason: 'duplicate_closing_session' });
     expect(shouldSuppressDuplicateInterviewClosingTts('session-closing', closing)).toBe(true);
+  });
+
+  it('does not rewrite S3→M4 handoff into Sophie vignette when Situation 3 already played', () => {
+    const m4 =
+      "Good work — you just finished the three situations. There are only two questions left. Now I want to ask you about something a bit more personal.\n\nThink of someone you've had a really hard time with — maybe a falling out, a grudge, or just someone who got under your skin.";
+    const args = baseArgs({
+      text: m4,
+      currentInterviewMoment: 3,
+      currentScenario: 3,
+      situation3CanonicalPlaybackConfirmed: true,
+      s3RepairProbeDelivered: true,
+      lastQuestionText: 'So what would the repair look like for Daniel?',
+    });
+
+    const result = applySpeakTextSafePreDelivery(args);
+
+    expect(result.suppressed).toBe(false);
+    if (!result.suppressed) {
+      expect(result.text).toMatch(/finished the three situations/i);
+      expect(result.text).toMatch(/really hard time with/i);
+      expect(result.text).not.toMatch(/That's the second one done/i);
+      expect(result.text).not.toMatch(/Sophie and Daniel have had the same argument/i);
+    }
   });
 });

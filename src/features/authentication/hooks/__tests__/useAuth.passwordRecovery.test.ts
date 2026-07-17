@@ -90,6 +90,11 @@ describe('useAuth password recovery helpers', () => {
     expect(getPasswordResetRedirectTo()).toMatch(new RegExp(`${AUTH_PASSWORD_RESET_PATH}$`));
   });
 
+  it('getPasswordResetRedirectTo uses the amoraea scheme on native', () => {
+    Platform.OS = 'ios';
+    expect(getPasswordResetRedirectTo()).toBe('amoraea://auth/reset-password');
+  });
+
   it('resetPasswordForEmail marks reset pending and uses the reset redirect URL', async () => {
     const storage: Record<string, string> = {};
     mockWebWindow('/', '', '', storage);

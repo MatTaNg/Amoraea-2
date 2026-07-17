@@ -12,7 +12,6 @@ export type PerformAdminInterviewResetAudioRecorder = {
 export type PerformAdminInterviewResetDeps = {
   userId: string | undefined;
   isAdmin: boolean;
-  useMediaRecorderPath: boolean;
   audioRecorder: PerformAdminInterviewResetAudioRecorder;
   recognitionRef: MutableRefObject<{ start(): void; stop(): void } | null>;
   stopElevenLabsPlayback: () => Promise<void>;

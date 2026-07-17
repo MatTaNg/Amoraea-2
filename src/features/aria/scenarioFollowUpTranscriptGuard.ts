@@ -33,19 +33,13 @@ export type ScenarioFollowUpTranscriptMessage = {
 };
 
 /** S1 scripted follow-ups (contempt / repair) — use scenario ref; moment index can drift to 2 before S2. */
-export function isActiveScenarioAConstructProbeTurn(
-  currentScenario: number | null | undefined,
-  currentInterviewMoment: number,
-): boolean {
-  if (currentScenario === 1) return true;
-  return currentInterviewMoment === 1 && (currentScenario == null || currentScenario <= 1);
-}
-
 /** S3 scripted follow-ups (Sophie perspective / repair-as-Daniel) — use scenario ref; moment index can drift before M4. */
 export function isActiveScenarioCConstructProbeTurn(
   currentScenario: number | null | undefined,
   currentInterviewMoment: number,
 ): boolean {
+  // Personal moments keep scenarioRef at 3 — do not treat as Situation 3 construct turns.
+  if (currentInterviewMoment >= 4) return false;
   if (currentScenario === 3) return true;
   return currentInterviewMoment === 3 && (currentScenario == null || currentScenario <= 3);
 }
@@ -55,8 +49,18 @@ export function isActiveScenarioBConstructProbeTurn(
   currentScenario: number | null | undefined,
   currentInterviewMoment: number,
 ): boolean {
+  if (currentInterviewMoment >= 4) return false;
   if (currentScenario === 2) return true;
   return currentInterviewMoment === 2 && (currentScenario == null || currentScenario <= 2);
+}
+
+export function isActiveScenarioAConstructProbeTurn(
+  currentScenario: number | null | undefined,
+  currentInterviewMoment: number,
+): boolean {
+  if (currentInterviewMoment >= 4) return false;
+  if (currentScenario === 1) return true;
+  return currentInterviewMoment === 1 && (currentScenario == null || currentScenario <= 1);
 }
 
 function priorAssistantTurns(msgs: readonly ScenarioFollowUpTranscriptMessage[]) {

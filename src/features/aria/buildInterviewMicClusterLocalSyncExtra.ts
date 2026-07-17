@@ -6,7 +6,6 @@ export type InterviewMicClusterLocalScope = {
   liveState: Pick<
     SyncExtraParams,
     | 'voiceState'
-    | 'useMediaRecorderPath'
     | 'currentTranscript'
     | 'audioRecorder'
     | 'interviewStatus'
@@ -32,8 +31,6 @@ export type InterviewMicClusterLocalScope = {
     | 'stopElevenLabsSpeech'
     | 'checkMicPermission'
     | 'isInterviewerOutputActiveForMicGate'
-    | 'isWebInterviewPlaybackSurfaceActive'
-    | 'webSpeechShouldDeferToUserGesture'
     | 'classifyInterviewQuestionType'
   >;
   recordingPipeline: Pick<
@@ -65,26 +62,13 @@ export type InterviewMicClusterLocalScope = {
   >;
   webTtsResume: Pick<
     SyncExtraParams,
-    | 'syncInterviewTtsAfterScreenReturn'
-    | 'isWebInterviewPlaybackAudiblyActive'
-    | 'armMobileWebBackgroundTtsContinue'
-    | 'isMobileWebInterviewTtsSessionActive'
-    | 'hasWebInterviewHtmlAudioTabResumePending'
-    | 'holdTabStashedHtmlAudioForGestureResume'
     | 'hasInterviewClosingSpeakInFlightForSession'
   >;
   pressHandlers: Pick<
     SyncExtraParams,
-    | 'webTabGestureRestoreOverlayRef'
-    | 'handleWebTabGestureRestoreTapRef'
-    | 'setWebTabGestureRestoreOverlay'
-    | 'pendingMicStartAfterIdleFlushRef'
     | 'startRecordingAfterPendingTts'
-    | 'webGestureTtsConsumedPressRef'
-    | 'webGestureConsumeClearTimeoutRef'
     | 'handlePressEnd'
     | 'handlePressStart'
-    | 'waitUntilInterviewerQuiescentForWebMic'
   >;
 };
 

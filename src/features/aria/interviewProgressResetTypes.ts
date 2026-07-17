@@ -3,7 +3,6 @@ import type { Dispatch, MutableRefObject, SetStateAction } from 'react';
 import type { Moment4ClientScoringMetadata } from '@features/aria/personalMomentScoringPrompt';
 import type { Moment5ClientScoringMetadata } from '@features/aria/moment5AccountabilityScoringPrompt';
 import type { InterviewMomentIndex } from '@features/aria/interviewScenarioScoringSlice';
-import type { GestureContextLostReason } from '@features/aria/utils/webInterviewGestureContext';
 
 export type ResetScenarioCClientGatesDeps = {
   scenarioCRepairOnlyEvidenceRef: MutableRefObject<string | null>;
@@ -71,7 +70,6 @@ export type ResetInterviewProgressRefsDeps = ResetScenarioCClientGatesDeps & {
   resetInterviewVadSession: () => void;
   resetWebInterviewGestureContext: () => void;
   resetInterviewClosingTtsSession: () => void;
-  gestureContextLostAtRef: MutableRefObject<{ atMs: number; reason: GestureContextLostReason } | null>;
   lastSuccessfulTtsTextNormalizedRef: MutableRefObject<string | null>;
   lastSuccessfulTtsDeliveredPreviewRef: MutableRefObject<string>;
   scenarioSkipConfirmedCountRef: MutableRefObject<number>;
@@ -83,15 +81,11 @@ export type ResetInterviewProgressRefsDeps = ResetScenarioCClientGatesDeps & {
   resumeWelcomeMessageRef: MutableRefObject<string>;
   resumeOfferWelcomeTtsRef: MutableRefObject<boolean>;
   resumeEmotionAfterModalTextRef: MutableRefObject<string | null>;
-  webResumeWelcomeTapHandledRef: MutableRefObject<boolean>;
-  webResumeWelcomeTapPendingRef: MutableRefObject<boolean>;
   resumeWelcomeHydrationAttemptRef: MutableRefObject<string | null>;
   clearResumeWelcomePlaybackLock: () => void;
-  webTtsUtteranceInFlightRef: MutableRefObject<unknown>;
-  webTtsUtteranceInFlightOptionsRef: MutableRefObject<unknown>;
-  webTtsTabInterruptPendingReplayRef: MutableRefObject<boolean>;
-  webTtsSpeakGenerationRef: MutableRefObject<number>;
-  webTabRestoreReplayInFlightRef: MutableRefObject<boolean>;
+  ttsUtteranceInFlightRef: MutableRefObject<unknown>;
+  ttsUtteranceInFlightOptionsRef: MutableRefObject<unknown>;
+  ttsSpeakGenerationRef: MutableRefObject<number>;
   parallelStreamingTtsRef: MutableRefObject<{
     active: boolean;
     cancelRequested: boolean;

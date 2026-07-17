@@ -96,6 +96,8 @@ describe('looksLikeReadinessAffirmation', () => {
     expect(looksLikeReadinessAffirmation('Yeah.')).toBe(true);
     expect(looksLikeReadinessAffirmation("I'm ready")).toBe(true);
     expect(looksLikeReadinessAffirmation("Let's go")).toBe(true);
+    expect(looksLikeReadinessAffirmation('S.')).toBe(true);
+    expect(looksLikeReadinessAffirmation('Y')).toBe(true);
   });
 
   it('treats Whisper yes homophones as readiness assent', () => {
@@ -590,6 +592,15 @@ describe('isScenarioModalEligibleScenarioQuestionPrompt', () => {
 
   it('rejects name-collection prompts', () => {
     expect(isScenarioModalEligibleScenarioQuestionPrompt("Hi, I'm Amoraea. What can I call you?")).toBe(false);
+  });
+
+  it('rejects intro briefing readiness questions', () => {
+    expect(isScenarioModalEligibleScenarioQuestionPrompt('Are you ready?')).toBe(false);
+    expect(
+      isScenarioModalEligibleScenarioQuestionPrompt(
+        "Good to meet you, Matt. The way this works is I'll first give you three situations. Are you ready?",
+      ),
+    ).toBe(false);
   });
 });
 

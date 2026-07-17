@@ -1,10 +1,6 @@
 import type { MutableRefObject } from 'react';
 import { Platform } from 'react-native';
 
-import { webMicPreInitNeedsRefreshForNameEntry } from '@features/aria/utils/webInterviewMicPreInit';
-
-export { webMicPreInitNeedsRefreshForNameEntry };
-
 export async function raceTranscribeWithTimeout<T>(p: Promise<T>, ms: number, label: string): Promise<T> {
   let timer: ReturnType<typeof setTimeout> | undefined;
   const timeoutPromise = new Promise<never>((_, rej) => {

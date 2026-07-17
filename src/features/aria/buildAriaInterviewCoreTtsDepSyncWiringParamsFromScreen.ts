@@ -16,14 +16,9 @@ export type BuildAriaInterviewCoreTtsDepSyncWiringParamsFromScreenInput = {
   interviewSession: {
     setMessages: AriaInterviewCoreTtsDepSyncWiringParams['coreLocal']['setMessages'];
     currentMessagesRef: MutableRefObject<Array<{ role: string; content?: string }>>;
-    mobileWebTapToBeginDone: boolean;
-    setWebDesktopPendingTtsGestureOverlay: (value: boolean) => void;
-    setWebTabGestureRestoreOverlay: (value: boolean) => void;
     awaitTtsScreenReadyGate: AriaInterviewCoreTtsDepSyncWiringParams['ttsPipeline']['awaitTtsScreenReadyGate'];
   };
   webTts: {
-    dismissTabRestoreOverlay: AriaInterviewCoreTtsDepSyncWiringParams['coreLocal']['dismissTabRestoreOverlay'];
-    dismissAfterAndroidBackgroundPlaybackEnd: AriaInterviewCoreTtsDepSyncWiringParams['coreLocal']['dismissAfterAndroidBackgroundPlaybackEnd'];
     speak: AriaInterviewCoreTtsDepSyncWiringParams['ttsPipeline']['speak'];
   };
   boot: {
@@ -51,21 +46,17 @@ export function buildAriaInterviewCoreTtsDepSyncWiringParamsFromScreen(
     setReferenceCardPrompt,
     setReferenceCardScenario,
     setInterviewUiPhase,
+    committedScenarioRef,
   } = shell;
   const {
     setMessages,
     currentMessagesRef,
-    mobileWebTapToBeginDone,
-    setWebDesktopPendingTtsGestureOverlay,
-    setWebTabGestureRestoreOverlay,
     awaitTtsScreenReadyGate,
   } = interviewSession;
 
   return {
     ...syncContexts,
     coreLocal: {
-      dismissTabRestoreOverlay: webTts.dismissTabRestoreOverlay,
-      dismissAfterAndroidBackgroundPlaybackEnd: webTts.dismissAfterAndroidBackgroundPlaybackEnd,
       setMessages,
       setEmotionModalVisible,
       setScenarioScores,
@@ -78,24 +69,19 @@ export function buildAriaInterviewCoreTtsDepSyncWiringParamsFromScreen(
       scenarioScoresRef,
     },
     ttsPipeline: {
-      mobileWebTapToBeginDone,
-      setWebTabGestureRestoreOverlay,
-      setWebDesktopPendingTtsGestureOverlay,
       setTtsPlaybackReliabilityNotice,
       setLastTtsCompletionCallbackMs: wiring.setLastTtsCompletionCallbackMs,
       speak: webTts.speak,
       applyInterviewSpeechComplete: boot.applyInterviewSpeechComplete,
       awaitTtsScreenReadyGate,
       stopElevenLabsPlayback: wiring.stopElevenLabsPlayback,
-      webSpeechShouldDeferToUserGesture: wiring.webSpeechShouldDeferToUserGesture,
-      rearmWebMicPreInitAfterTtsPlaybackComplete: wiring.rearmWebMicPreInitAfterTtsPlaybackComplete,
-      scheduleWebMicPreInitRefreshAfterTtsCompletes: wiring.scheduleWebMicPreInitRefreshAfterTtsCompletes,
       persistInterviewAttemptSessionLifecycle: wiring.persistInterviewAttemptSessionLifecycle,
       applyReferenceCardFromAssistantSpeechRef: boot.applyReferenceCardFromAssistantSpeechRef,
       setReferenceCardPrompt,
       setReferenceCardScenario,
       setInterviewUiPhase,
       prepareInterviewTtsPlayback: wiring.prepareInterviewTtsPlayback,
+      committedScenarioRef,
     },
   };
 }

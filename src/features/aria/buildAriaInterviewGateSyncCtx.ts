@@ -9,14 +9,14 @@ import {
   createInterviewGateResumeEmotionSyncSlice,
   createInterviewGateWebTtsSyncSlice,
 } from '@features/aria/createInterviewGateSyncSlices';
+import { assignDefinedSyncSlices } from '@features/aria/syncAriaInterviewDepsTypes';
 
 export type { AriaInterviewGateSyncScope } from '@features/aria/ariaInterviewGateSyncScopeTypes';
 
 type SyncExtraParams = AriaInterviewDepsSyncContext;
 /** Merge grouped gate sync slices into one context object for dep sync. */
 export function buildAriaInterviewGateSyncCtx(scope: AriaInterviewGateSyncScope): SyncExtraParams {
-  return Object.assign(
-    {},
+  return assignDefinedSyncSlices(
     createInterviewGateIdentitySyncSlice(scope.identity),
     createInterviewGateClosingSyncSlice(scope.closing),
     createInterviewGateMetaSkipSyncSlice(scope.metaSkip),

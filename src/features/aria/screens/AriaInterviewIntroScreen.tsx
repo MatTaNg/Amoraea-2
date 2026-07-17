@@ -1,8 +1,11 @@
 import React from 'react';
 import { Pressable, ScrollView, Text, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { ariaScreenStyles as styles } from '@features/aria/ariaScreenStyles';
+import { interviewOverlayTop } from '@features/aria/utils/interviewOverlayInsets';
 import { FlameOrb } from '@app/screens/FlameOrb';
+import { INTRO_FLAME_ORB_SIZE } from '@app/screens/flameOrbLogo';
 import { SafeAreaContainer } from '@ui/components/SafeAreaContainer';
 import { Button } from '@ui/components/Button';
 
@@ -21,7 +24,6 @@ const DATA_PRIVACY_ITEMS = [
 const PRE_INTERVIEW_TIPS = [
   { icon: 'headset-outline' as const, label: 'Use headphones if possible' },
   { icon: 'volume-mute-outline' as const, label: 'Find a quiet space' },
-  { icon: 'desktop-outline' as const, label: 'Laptop works best' },
 ];
 
 export function AriaInterviewIntroScreen({
@@ -59,12 +61,18 @@ export function AriaInterviewIntroScreen({
   onToggleConsentData: () => void;
   onBeginInterview: () => void;
 }): React.ReactElement {
+  const insets = useSafeAreaInsets();
+  const overlayTop = interviewOverlayTop(insets);
+
   return (
-    <SafeAreaContainer style={{ position: 'relative', flex: 1, backgroundColor: '#05060D' }}>
+    <SafeAreaContainer
+      edges={['bottom', 'left', 'right']}
+      style={{ position: 'relative', flex: 1, backgroundColor: '#05060D' }}
+    >
       {adminTopBar}
       {fromValidationTrack ? (
         <Pressable
-          style={styles.introBackButton}
+          style={[styles.introBackButton, { top: overlayTop }]}
           onPress={onBackToValidationReport}
           accessibilityRole="button"
           accessibilityLabel="Back to your results"
@@ -74,7 +82,7 @@ export function AriaInterviewIntroScreen({
         </Pressable>
       ) : null}
       <Pressable
-        style={styles.introLogoutButton}
+        style={[styles.introLogoutButton, { top: overlayTop }]}
         onPress={onSignOut}
         accessibilityRole="button"
         accessibilityLabel="Log out"
@@ -84,11 +92,15 @@ export function AriaInterviewIntroScreen({
       </Pressable>
       <ScrollView
         style={[styles.container, { backgroundColor: '#05060D' }]}
-        contentContainerStyle={styles.preInterviewScrollContent}
+        contentContainerStyle={[
+          styles.preInterviewScrollContent,
+          // Top edge is intentionally open for absolute logout; pad content below status bar + chrome.
+          { paddingTop: overlayTop + 48 },
+        ]}
         keyboardShouldPersistTaps="handled"
       >
         <View style={styles.preInterviewLogoWrap}>
-          <FlameOrb state="idle" size={72} minimalGlow />
+          <FlameOrb state="idle" size={INTRO_FLAME_ORB_SIZE} minimalGlow />
         </View>
         <Text style={styles.preInterviewMainTitle}>Before you begin</Text>
 

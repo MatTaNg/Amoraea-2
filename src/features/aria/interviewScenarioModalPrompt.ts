@@ -2,9 +2,12 @@ import { isClientOrElongatingInterviewProbeAssistant } from '@features/aria/inte
 import { isMisplacedScenarioMetaRedirectText } from '@features/aria/misplacedScenarioAnswerLogic';
 import {
   isClientAudioRecoveryAssistantLine,
+  isInterviewPreambleBriefingMoment,
   isNamePromptInterviewMoment,
   isResumeReentryWelcomePrompt,
+  isSimpleYesNoInterviewMoment,
 } from '@features/aria/interviewProceduralMoments';
+import { isIntroBriefingReadinessOnlySentence } from '@features/aria/interviewPreambleBriefing';
 import {
   looksLikeMoment4GrudgePrompt,
   looksLikeMoment4ThresholdQuestion,
@@ -27,8 +30,15 @@ import { resolveSituation2ExactModalPrompt } from '@features/aria/situation2Exac
 import { resolveSituation3ExactModalPrompt } from '@features/aria/situation3ExactModalPrompt';
 import {
   isForbiddenScenarioCSophiePrescriptiveFollowUpQuestion,
+  isScenarioCRepairAssistantPrompt,
+  looksLikeScenarioCRepairAsDanielQuestion,
   looksLikeScenarioCSophiePerspectiveQuestion,
 } from '@features/aria/scenarioCPromptDetection';
+import { looksLikeScenarioARepairQuestion } from '@features/aria/scenarioARepairQuestionHelpers';
+import {
+  looksLikeScenarioBJamesDifferentlyQuestion,
+  looksLikeScenarioBRepairAsJamesQuestion,
+} from '@features/aria/scenarioBProbeLogic';
 
 /** Clarification / elongating probes — never the "current question" in Show scenario modal. */
 const SCENARIO_MODAL_FOLLOW_UP_PROBE_PATTERNS = [
@@ -59,6 +69,26 @@ const SCENARIO_MODAL_FOLLOW_UP_PROBE_PATTERNS = [
 ] as const;
 
 /**
+ * Scripted construct probes that ARE the current Show scenario question (not thin follow-ups).
+ * Sophie is also listed under client elongating helpers for disengagement chaining — carve it out here.
+ */
+function isScriptedScenarioConstructProbeForModal(text: string): boolean {
+  if (looksLikeScenarioCSophiePerspectiveQuestion(text)) return true;
+  if (isScenarioCRepairAssistantPrompt(text) || looksLikeScenarioCRepairAsDanielQuestion(text)) {
+    return true;
+  }
+  if (looksLikeScenarioAContemptProbeQuestion(text)) return true;
+  if (looksLikeScenarioARepairQuestion(text)) return true;
+  if (
+    looksLikeScenarioBJamesDifferentlyQuestion(text) ||
+    looksLikeScenarioBRepairAsJamesQuestion(text)
+  ) {
+    return true;
+  }
+  return false;
+}
+
+/**
  * Reference-card ("Show scenario") modal: bottom line must be a real scenario question, never
  * infra / retry / mic / connectivity copy from AriaScreen. Display layer uses this with a
  * last-known-good fallback.
@@ -67,6 +97,7 @@ const SCENARIO_MODAL_FOLLOW_UP_PROBE_PATTERNS = [
 export function isScenarioModalFollowUpProbe(text: string | null | undefined): boolean {
   const raw = (text ?? '').trim();
   if (!raw) return false;
+  if (isScriptedScenarioConstructProbeForModal(raw)) return false;
   if (isForbiddenScenarioCSophiePrescriptiveFollowUpQuestion(raw)) return true;
   if (isMisplacedScenarioMetaRedirectText(raw)) return true;
   if (isClientOrElongatingInterviewProbeAssistant(raw)) return true;
@@ -221,6 +252,7 @@ export function getLastSubstantiveScenarioModalQuestion(
     if (turn.role !== 'assistant') continue;
     const content = (turn.content ?? '').trim();
     if (!content) continue;
+    if (isInterviewPreambleBriefingMoment(content)) continue;
     if (isScenarioModalFollowUpProbe(content)) continue;
     if (isScenarioModalPureTransitionTurn(content)) continue;
     const extracted = extractScenarioModalQuestionFromAssistantText(content);
@@ -407,6 +439,11 @@ export function isScenarioModalEligibleScenarioQuestionPrompt(text: string | nul
   if (isScenarioModalExcludedAssistantPrompt(raw)) return false;
   if (isResumeReentryWelcomePrompt(raw)) return false;
   if (isNamePromptInterviewMoment(raw)) return false;
+  // Opening briefing / "Are you ready?" must never become the Show scenario footer.
+  if (isInterviewPreambleBriefingMoment(raw)) return false;
+  if (isIntroBriefingReadinessOnlySentence(raw)) return false;
+  if (/^are you ready\b/i.test(raw)) return false;
+  if (isSimpleYesNoInterviewMoment(raw) && /\bready\b/i.test(raw)) return false;
   return true;
 }
 

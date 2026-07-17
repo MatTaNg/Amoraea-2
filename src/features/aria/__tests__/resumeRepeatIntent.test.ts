@@ -6,6 +6,9 @@ describe('classifyResumeRepeatIntent', () => {
     expect(classifyResumeRepeatIntent('Can you say that again?')).toBe('repeat');
     expect(classifyResumeRepeatIntent('What you just said')).toBe('repeat');
     expect(classifyResumeRepeatIntent('Yes, repeat')).toBe('repeat');
+    // Whisper often drops "repeat" → leftover "…what you said"
+    expect(classifyResumeRepeatIntent('He what you said')).toBe('repeat');
+    expect(classifyResumeRepeatIntent('Pee at what you said.')).toBe('repeat');
   });
 
   it('treats short affirmatives as continue (ready to proceed after welcome)', () => {

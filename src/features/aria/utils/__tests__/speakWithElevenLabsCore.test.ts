@@ -34,10 +34,6 @@ jest.mock('../elevenLabsSpokenContext', () => ({
   recordElevenLabsSpokenContext: jest.fn(),
 }));
 
-jest.mock('../speakElevenLabsWebMp3', () => ({
-  speakElevenLabsWebMp3: jest.fn(async () => 'played'),
-}));
-
 jest.mock('../interviewTtsSpeakFallback', () => ({
   speakFallback: jest.fn(async () => undefined),
 }));

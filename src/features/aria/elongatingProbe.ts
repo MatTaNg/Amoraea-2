@@ -224,7 +224,7 @@ export function coerceIncompleteInterviewClosingForTts(
   const thanks = name
     ? `Thank you for being so open with me, ${name}.`
     : 'Thank you for being so open with me.';
-  return `${ack} ${thanks}`.replace(/\s+/g, ' ').trim();
+  return `${ack} Your interview is complete. ${thanks}`.replace(/\s+/g, ' ').trim();
 }
 
 function stripIncompleteClosingReflectionTail(ack: string): string {

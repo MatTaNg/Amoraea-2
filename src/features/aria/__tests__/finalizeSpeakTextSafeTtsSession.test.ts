@@ -28,12 +28,9 @@ import { writeAudioSessionLog } from '@utilities/sessionLogging/audioSessionLogE
 describe('finalizeSpeakTextSafeTtsSession', () => {
   it('clears in-flight playback state and logs web deactivation telemetry', () => {
     const ttsLineInFlightRef = { current: true };
-    const tabHiddenDuringActiveTtsLineRef = { current: true };
-    const webTtsUtteranceInFlightRef = { current: 'line' };
-    const webTtsUtteranceInFlightOptionsRef = { current: { silent: false } };
+    const ttsUtteranceInFlightRef = { current: 'line' };
+    const ttsUtteranceInFlightOptionsRef = { current: { silent: false } };
     const setLastTtsCompletionCallbackMs = jest.fn();
-    const scheduleWebMicPreInitRefreshAfterTtsCompletes = jest.fn();
-    const rearmWebMicPreInitAfterTtsPlaybackComplete = jest.fn().mockResolvedValue(undefined);
 
     finalizeSpeakTextSafeTtsSession({
       userId: 'user-test',
@@ -41,31 +38,23 @@ describe('finalizeSpeakTextSafeTtsSession', () => {
       telemetrySource: 'turn',
       ttsLineInFlightRef,
       webTtsTabInterruptPendingReplay: false,
-      tabHiddenDuringActiveTtsLineRef,
-      webTtsUtteranceInFlightRef,
-      webTtsUtteranceInFlightOptionsRef,
+      ttsUtteranceInFlightRef,
+      ttsUtteranceInFlightOptionsRef,
       setLastTtsCompletionCallbackMs,
-      webSpeechShouldDeferToUserGesture: () => false,
-      scheduleWebMicPreInitRefreshAfterTtsCompletes,
-      rearmWebMicPreInitAfterTtsPlaybackComplete,
     });
 
     expect(setTtsPlaybackActive).toHaveBeenCalledWith(false);
     expect(ttsLineInFlightRef.current).toBe(false);
-    expect(tabHiddenDuringActiveTtsLineRef.current).toBe(false);
-    expect(webTtsUtteranceInFlightRef.current).toBeNull();
+    expect(ttsUtteranceInFlightRef.current).toBeNull();
     expect(setLastTtsCompletionCallbackMs).toHaveBeenCalled();
     expect(markLastAudioSessionEventType).toHaveBeenCalledWith('audio_session_deactivation_confirmed');
     expect(writeAudioSessionLog).toHaveBeenCalledWith(
       expect.objectContaining({ eventType: 'audio_session_deactivation_confirmed' }),
     );
-    expect(scheduleWebMicPreInitRefreshAfterTtsCompletes).toHaveBeenCalled();
-    expect(rearmWebMicPreInitAfterTtsPlaybackComplete).toHaveBeenCalled();
   });
 
-  it('preserves tab-interrupt replay refs while a replay is still pending', () => {
-    const tabHiddenDuringActiveTtsLineRef = { current: true };
-    const webTtsUtteranceInFlightRef = { current: 'pending replay' };
+  it('clears stale playback state regardless of prior replay state', () => {
+    const ttsUtteranceInFlightRef = { current: 'pending replay' };
 
     finalizeSpeakTextSafeTtsSession({
       userId: 'user-test',
@@ -73,16 +62,11 @@ describe('finalizeSpeakTextSafeTtsSession', () => {
       telemetrySource: 'turn',
       ttsLineInFlightRef: { current: true },
       webTtsTabInterruptPendingReplay: true,
-      tabHiddenDuringActiveTtsLineRef,
-      webTtsUtteranceInFlightRef,
-      webTtsUtteranceInFlightOptionsRef: { current: { silent: false } },
+      ttsUtteranceInFlightRef,
+      ttsUtteranceInFlightOptionsRef: { current: { silent: false } },
       setLastTtsCompletionCallbackMs: jest.fn(),
-      webSpeechShouldDeferToUserGesture: () => false,
-      scheduleWebMicPreInitRefreshAfterTtsCompletes: jest.fn(),
-      rearmWebMicPreInitAfterTtsPlaybackComplete: jest.fn(),
     });
 
-    expect(tabHiddenDuringActiveTtsLineRef.current).toBe(true);
-    expect(webTtsUtteranceInFlightRef.current).toBe('pending replay');
+    expect(ttsUtteranceInFlightRef.current).toBeNull();
   });
 });

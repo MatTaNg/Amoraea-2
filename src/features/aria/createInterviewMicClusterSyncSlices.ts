@@ -5,7 +5,6 @@ type SyncExtraParams = AriaInterviewDepsSyncContext;
 export function createInterviewMicClusterLiveStateSyncSlice(params: SyncExtraParams): SyncExtraParams {
   return {
     voiceState: params.voiceState,
-    useMediaRecorderPath: params.useMediaRecorderPath,
     currentTranscript: params.currentTranscript,
     audioRecorder: params.audioRecorder,
     interviewStatus: params.interviewStatus,
@@ -36,8 +35,6 @@ export function createInterviewMicClusterPlaybackGateSyncSlice(params: SyncExtra
     stopElevenLabsSpeech: params.stopElevenLabsSpeech,
     checkMicPermission: params.checkMicPermission,
     isInterviewerOutputActiveForMicGate: params.isInterviewerOutputActiveForMicGate,
-    isWebInterviewPlaybackSurfaceActive: params.isWebInterviewPlaybackSurfaceActive,
-    webSpeechShouldDeferToUserGesture: params.webSpeechShouldDeferToUserGesture,
     classifyInterviewQuestionType: params.classifyInterviewQuestionType,
   };
 }
@@ -87,12 +84,6 @@ export function createInterviewMicClusterRouteProbeSyncSlice(params: SyncExtraPa
 
 export function createInterviewMicClusterWebTtsResumeSyncSlice(params: SyncExtraParams): SyncExtraParams {
   return {
-    syncInterviewTtsAfterScreenReturn: params.syncInterviewTtsAfterScreenReturn,
-    isWebInterviewPlaybackAudiblyActive: params.isWebInterviewPlaybackAudiblyActive,
-    armMobileWebBackgroundTtsContinue: params.armMobileWebBackgroundTtsContinue,
-    isMobileWebInterviewTtsSessionActive: params.isMobileWebInterviewTtsSessionActive,
-    hasWebInterviewHtmlAudioTabResumePending: params.hasWebInterviewHtmlAudioTabResumePending,
-    holdTabStashedHtmlAudioForGestureResume: params.holdTabStashedHtmlAudioForGestureResume,
     hasInterviewClosingSpeakInFlightForSession: params.hasInterviewClosingSpeakInFlightForSession,
     resumeRepeatPrefetchMpegRef: params.resumeRepeatPrefetchMpegRef,
   };
@@ -102,14 +93,6 @@ export function createInterviewMicClusterPressHandlersSyncSlice(params: SyncExtr
   return {
     handlePressStart: params.handlePressStart,
     handlePressEnd: params.handlePressEnd,
-    waitUntilInterviewerQuiescentForWebMic: params.waitUntilInterviewerQuiescentForWebMic,
     startRecordingAfterPendingTts: params.startRecordingAfterPendingTts,
-    webTabGestureRestoreOverlayRef: params.webTabGestureRestoreOverlayRef,
-    webTabRestoreReplayInFlightRef: params.webTabRestoreReplayInFlightRef,
-    handleWebTabGestureRestoreTapRef: params.handleWebTabGestureRestoreTapRef,
-    setWebTabGestureRestoreOverlay: params.setWebTabGestureRestoreOverlay,
-    pendingMicStartAfterIdleFlushRef: params.pendingMicStartAfterIdleFlushRef,
-    webGestureTtsConsumedPressRef: params.webGestureTtsConsumedPressRef,
-    webGestureConsumeClearTimeoutRef: params.webGestureConsumeClearTimeoutRef,
   };
 }

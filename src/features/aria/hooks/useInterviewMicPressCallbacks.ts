@@ -12,20 +12,14 @@ import {
   runHandlePressEnd,
   runHandlePressStart,
   runStartRecordingAfterPendingTts,
-  runWaitUntilInterviewerQuiescentForWebMic,
-  type WebMicPressLifecycleDeps,
-} from '@features/aria/webMicPressLifecycleTypes';
+  type InterviewMicPressLifecycleDeps,
+} from '@features/aria/interviewMicPressLifecycleTypes';
 
 export function useInterviewMicPressCallbacks(deps: {
-  webMicPressLifecycleDepsRef: React.MutableRefObject<WebMicPressLifecycleDeps>;
+  webMicPressLifecycleDepsRef: React.MutableRefObject<InterviewMicPressLifecycleDeps>;
   applyRouteProbeAfterResumeDepsRef: React.MutableRefObject<ApplyRouteProbeAfterResumeDeps>;
   handleNativeOrWhisperMicPressDepsRef: React.MutableRefObject<HandleNativeOrWhisperMicPressDeps>;
-  runWebGestureTtsFlush: (source: 'mic' | 'pending_tts_gesture_overlay') => void | Promise<void>;
 }) {
-  const waitUntilInterviewerQuiescentForWebMic = useCallback(async () => {
-    await runWaitUntilInterviewerQuiescentForWebMic(deps.webMicPressLifecycleDepsRef.current);
-  }, [deps.webMicPressLifecycleDepsRef]);
-
   const startRecordingAfterPendingTts = useCallback(async () => {
     await runStartRecordingAfterPendingTts(deps.webMicPressLifecycleDepsRef.current);
   }, [deps.webMicPressLifecycleDepsRef]);
@@ -37,10 +31,6 @@ export function useInterviewMicPressCallbacks(deps: {
   const handlePressEnd = useCallback(async () => {
     await runHandlePressEnd(deps.webMicPressLifecycleDepsRef.current);
   }, [deps.webMicPressLifecycleDepsRef]);
-
-  const handleWebMicPressIn = useCallback(() => {
-    void deps.runWebGestureTtsFlush('mic');
-  }, [deps.runWebGestureTtsFlush]);
 
   const applyRouteProbeAfterResume = useCallback(
     async (source: 'app_resume' | 'media_services_reset') => {
@@ -54,11 +44,9 @@ export function useInterviewMicPressCallbacks(deps: {
   }, [deps.handleNativeOrWhisperMicPressDepsRef]);
 
   return {
-    waitUntilInterviewerQuiescentForWebMic,
     startRecordingAfterPendingTts,
     handlePressStart,
     handlePressEnd,
-    handleWebMicPressIn,
     applyRouteProbeAfterResume,
     handleNativeOrWhisperMicPress,
   };

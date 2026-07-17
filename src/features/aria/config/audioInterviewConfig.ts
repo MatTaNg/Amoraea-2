@@ -61,6 +61,16 @@ export function getAudioMinRecordingDurationMs(): number {
   return Math.max(800, v);
 }
 
+/**
+ * Delay after `setRecordingMode` before `Recording.createAsync` (native only).
+ * Default 0 so speech right after mic tap is captured; prior 500ms caused clipped openings.
+ * Override via `EXPO_PUBLIC_AUDIO_POST_SESSION_RECORDING_DELAY_MS` (clamped 0…1000).
+ */
+export function getAudioPostSessionRecordingDelayMs(): number {
+  const v = envInt('AUDIO_POST_SESSION_RECORDING_DELAY_MS', 0);
+  return Math.max(0, Math.min(1000, v));
+}
+
 /** Metering poll interval for native recording status updates (UI + peak tracking). */
 export function getAudioMeteringPollIntervalMs(): number {
   const v = envInt('AUDIO_METERING_POLL_INTERVAL_MS', 250);
@@ -128,6 +138,7 @@ export function logAudioInterviewConfigOnce(): void {
     AUDIO_AMBIENT_NOISE_CEILING_DB: getAudioAmbientNoiseCeilingDb(),
     effective_AMBIENT_CEILING_DB: getEffectiveAmbientNoiseCeilingDb(),
     AUDIO_MIN_RECORDING_MS: getAudioMinRecordingDurationMs(),
+    AUDIO_POST_SESSION_RECORDING_DELAY_MS: getAudioPostSessionRecordingDelayMs(),
     AUDIO_METERING_POLL_INTERVAL_MS: getAudioMeteringPollIntervalMs(),
     AUDIO_WHISPER_TIMEOUT_MS: getAudioWhisperTimeoutMs(),
     AUDIO_WHISPER_TIMEOUT_MS_60S_CLIP: getAudioWhisperTranscriptionTimeoutMs(60_000),

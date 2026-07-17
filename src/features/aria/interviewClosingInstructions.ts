@@ -52,7 +52,7 @@ CLOSING — ONE MESSAGE, ANCHORED (THIS TRANSCRIPT ONLY):
 
 After the personal questions (Moments 4–5), deliver a warm sign-off. Structure:
 
-"Good work getting through all of this[, Name]. [Optional observation.] Thank you for being so open with me[, Name]." Then [INTERVIEW_COMPLETE].
+"Good work getting through all of this[, Name]. [Optional observation.] Your interview is complete. Thank you for being so open with me[, Name]." Then [INTERVIEW_COMPLETE].
 
 The **observation sentence is optional**. Include it only when ALL of these are true:
 - Grammatically complete (clear subject, verb, and object — not a fragment)
@@ -83,14 +83,14 @@ Do NOT reframe low-scoring signals as strengths. If signals were broadly low, st
 
 EXAMPLES (illustrative only — do not copy verbatim):
 
-Good: "Good work getting through all of this — what you said about pulling off that surprise for your brother really stuck with me." Good: "Thanks for sticking with it; naming Emma's line as contempt while still seeing a path for Ryan is specific in a way most people gloss over." Good (no observation): "Good work getting through all of this. Thank you for being so open with me."
+Good: "Good work getting through all of this — what you said about pulling off that surprise for your brother really stuck with me. Your interview is complete." Good: "Thanks for sticking with it; naming Emma's line as contempt while still seeing a path for Ryan is specific in a way most people gloss over. Your interview is complete." Good (no observation): "Good work getting through all of this. Your interview is complete. Thank you for being so open with me."
 
 Bad: "What came through was that you remember what happened between you and how it felt." (vague, incomplete, not grounded)
 Bad: "I appreciate you walking through all of this — you've been direct and thoughtful throughout." (generic / trait-only, no concrete anchor)
 `;
 
 export const PERSONAL_CLOSING_INSTRUCTION = `
-CLOSING: The user shared personal experiences across Moments 4 and 5. **One** assistant message only: "Good work getting through all of this" + optional **one** grounded observation + "Thank you for being so open with me". The observation is optional — include it only when grammatically complete and anchored in something they specifically said (prefer Moment 5 conflict/resolution, else Moment 4 grudge/threshold, else a scenario detail). **Omit the observation entirely** when nothing specific and accurate is available. **No** generic trait-only praise ("direct and thoughtful throughout," "very clear," "self-aware"). Do not start with "Sure," "Okay," "Absolutely," "That makes sense," "That checks out," or "That lands." Do not reframe low-scoring signals as positives. No clinical/theoretical labels. Then output [INTERVIEW_COMPLETE].`;
+CLOSING: The user shared personal experiences across Moments 4 and 5. **One** assistant message only: "Good work getting through all of this" + optional **one** grounded observation + "Your interview is complete" + "Thank you for being so open with me". The observation is optional — include it only when grammatically complete and anchored in something they specifically said (prefer Moment 5 conflict/resolution, else Moment 4 grudge/threshold, else a scenario detail). **Omit the observation entirely** when nothing specific and accurate is available. **No** generic trait-only praise ("direct and thoughtful throughout," "very clear," "self-aware"). Do not start with "Sure," "Okay," "Absolutely," "That makes sense," "That checks out," or "That lands." Do not reframe low-scoring signals as positives. No clinical/theoretical labels. Then output [INTERVIEW_COMPLETE].`;
 
 export const SCENARIO_ONLY_CLOSING_INSTRUCTION = `
-CLOSING: The user gave limited personal detail. **One** assistant message only: "Good work getting through all of this" + optional **one** grounded observation from the scenarios (a named character, a line they quoted, or how they framed the conflict) + "Thank you for being so open with me". **Omit the observation** when nothing specific and accurate is available. Do not start with "Sure," "Okay," "Absolutely," "That makes sense," "That checks out," or "That lands." No hollow trait evaluation. No biographical content that does not appear in this transcript. Then output [INTERVIEW_COMPLETE].`;
+CLOSING: The user gave limited personal detail. **One** assistant message only: "Good work getting through all of this" + optional **one** grounded observation from the scenarios (a named character, a line they quoted, or how they framed the conflict) + "Your interview is complete" + "Thank you for being so open with me". **Omit the observation** when nothing specific and accurate is available. Do not start with "Sure," "Okay," "Absolutely," "That makes sense," "That checks out," or "That lands." No hollow trait evaluation. No biographical content that does not appear in this transcript. Then output [INTERVIEW_COMPLETE].`;

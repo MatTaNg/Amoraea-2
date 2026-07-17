@@ -384,4 +384,53 @@ describe('runPostClaudeForcedConstructProbeGates', () => {
     expect(result?.handled).toBe(false);
     expect(speak).not.toHaveBeenCalled();
   });
+
+  it('skips re-speaking S3 repair when stream already spoke it but transcript still lags', async () => {
+    const repairSpoken = `Got it. ${SCENARIO_C_REPAIR_QUESTION_CANONICAL}`;
+    const deps = createMockPostClaudeDeps({
+      currentInterviewMomentRef: { current: 3 },
+      currentScenarioRef: { current: 3 },
+      s3RepairProbeDeliveredRef: { current: true },
+      parallelStreamingTtsRef: {
+        current: {
+          active: false,
+          cancelRequested: false,
+          accumulatedFullText: repairSpoken,
+          spokenCompleteText: repairSpoken,
+        },
+      },
+    });
+    const sophieProbe =
+      "I'm with you. What do you think this pattern of leaving has been like for Sophie over time?";
+    const params = createMockPostClaudeParams({
+      shouldForceScenarioCRepairProbe: true,
+      trimmed:
+        "She must have felt dismissed and left hanging and didn't know what Daniel was feeling.",
+      messagesToUse: [
+        { role: 'assistant', content: sophieProbe },
+        {
+          role: 'user',
+          content:
+            "She must have felt dismissed and left hanging and didn't know what Daniel was feeling.",
+        },
+      ],
+    });
+    const speak = createMockSpeakAssistantTurn();
+    const draft = createMockSanitizeDraftResult({
+      strippedText: SCENARIO_C_REPAIR_QUESTION_CANONICAL,
+    });
+
+    const result = await runPostClaudeForcedConstructProbeGates(
+      deps,
+      params,
+      SCENARIO_C_REPAIR_QUESTION_CANONICAL,
+      draft,
+      true,
+      speak,
+    );
+
+    expect(result?.handled).toBe(true);
+    expect(speak).not.toHaveBeenCalled();
+    expect(deps.setMessages).toHaveBeenCalled();
+  });
 });

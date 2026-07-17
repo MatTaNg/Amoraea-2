@@ -2,18 +2,12 @@ import type { AriaInterviewDepsSyncContext } from '@features/aria/syncAriaInterv
 
 export type InterviewTtsPipelineLocalScope = Pick<
   AriaInterviewDepsSyncContext,
-  | 'mobileWebTapToBeginDone'
-  | 'setWebTabGestureRestoreOverlay'
-  | 'setWebDesktopPendingTtsGestureOverlay'
   | 'setTtsPlaybackReliabilityNotice'
   | 'setLastTtsCompletionCallbackMs'
   | 'speak'
   | 'applyInterviewSpeechComplete'
   | 'awaitTtsScreenReadyGate'
   | 'stopElevenLabsPlayback'
-  | 'webSpeechShouldDeferToUserGesture'
-  | 'rearmWebMicPreInitAfterTtsPlaybackComplete'
-  | 'scheduleWebMicPreInitRefreshAfterTtsCompletes'
   | 'referenceCardShouldUpdateOnPlaybackStart'
   | 'persistInterviewAttemptSessionLifecycle'
   | 'applyReferenceCardFromAssistantSpeechRef'
@@ -22,6 +16,7 @@ export type InterviewTtsPipelineLocalScope = Pick<
   | 'setReferenceCardScenario'
   | 'setInterviewUiPhase'
   | 'prepareInterviewTtsPlayback'
+  | 'committedScenarioRef'
 >;
 
 export function buildInterviewTtsPipelineLocalSyncExtra(

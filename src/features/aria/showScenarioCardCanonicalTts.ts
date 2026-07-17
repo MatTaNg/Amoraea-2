@@ -357,9 +357,8 @@ export function shouldSuppressParallelStreamNonExactShowScenarioCardSpeech(args:
     if (isPrematureStandaloneM4PersonalTransitionLine(spoken)) return true;
     if (/\bend of the three described situations\b/i.test(spoken)) return true;
     if (/\bend of the three situations\b/i.test(spoken)) return true;
-    if (/\btwo questions left\b/i.test(spoken) && /\bmore personal\b/i.test(spoken)) {
-      return true;
-    }
+    // Standalone "two questions left" (or with personal bridge) — never speak before canonical M4.
+    if (/\btwo questions left\b/i.test(spoken)) return true;
   }
   // Canonical S1 scripted follow-ups must always reach TTS (repair contains "if you were Ryan").
   if (
@@ -742,10 +741,10 @@ export function buildCanonicalShowScenarioCardTtsFromStream(fullText: string): s
 }
 
 export function isShowScenarioCardCanonicalPlaybackConfirmed(
-  confirmed: ShowScenarioCardCanonicalPlaybackConfirmedKinds,
+  confirmed: ShowScenarioCardCanonicalPlaybackConfirmedKinds | null | undefined,
   kind: ShowScenarioCardKind,
 ): boolean {
-  return confirmed[kind] === true;
+  return confirmed?.[kind] === true;
 }
 
 /** Skip replaying the Situation 1 opening card after contempt/repair or when opening TTS already confirmed. */
@@ -872,18 +871,41 @@ export function shouldArmShowScenarioCardStreamMute(args: {
 export function streamSpokenTextAlreadyMatchesCanonicalCard(
   spokenCompleteText: string,
   fullStream: string,
+  kindHint?: ShowScenarioCardKind | null,
 ): boolean {
-  const kind = detectShowScenarioCardKind(fullStream);
+  const kind = kindHint ?? detectShowScenarioCardKind(fullStream);
   if (!kind) return false;
   if (kind === 'situation_2') return isExactShowScenario2FullText(spokenCompleteText);
   if (kind === 'situation_1') return isExactShowScenario1FullText(spokenCompleteText);
   if (kind === 'situation_3') return isExactShowScenario3FullText(spokenCompleteText);
+  const spokenNorm = normalizeForCompare(spokenCompleteText);
+  const bodyNorm = normalizeForCompare(buildCanonicalShowScenarioCardTtsBody(kind));
+  if (bodyNorm && spokenNorm.includes(bodyNorm)) return true;
   const canonical = buildCanonicalShowScenarioCardTtsFromStream(fullStream);
   if (!canonical) return false;
-  const spokenNorm = normalizeForCompare(spokenCompleteText);
   const canonicalNorm = normalizeForCompare(canonical);
-  const bodyNorm = normalizeForCompare(buildCanonicalShowScenarioCardTtsBody(kind));
-  return spokenNorm.includes(canonicalNorm) || spokenNorm.includes(bodyNorm);
+  return spokenNorm.includes(canonicalNorm);
+}
+
+/**
+ * Moment 4/5 are often coerced+spoken on the parallel stream without speakTextSafe
+ * confirmation telemetry. Skip replaying the locked card when that stream body already played.
+ */
+export function shouldSkipPersonalMomentCanonicalReplay(args: {
+  kind: ShowScenarioCardKind;
+  spokenCompleteText: string;
+  fullStream: string;
+  playbackConfirmedKinds: ShowScenarioCardCanonicalPlaybackConfirmedKinds;
+}): boolean {
+  if (args.kind !== 'moment_4' && args.kind !== 'moment_5') return false;
+  if (isShowScenarioCardCanonicalPlaybackConfirmed(args.playbackConfirmedKinds, args.kind)) {
+    return true;
+  }
+  return streamSpokenTextAlreadyMatchesCanonicalCard(
+    args.spokenCompleteText,
+    args.fullStream,
+    args.kind,
+  );
 }
 
 /** @internal test hooks */

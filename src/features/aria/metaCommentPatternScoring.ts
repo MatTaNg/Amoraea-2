@@ -41,7 +41,15 @@ const CONFUSION_RES: RegExp[] = [
   /\bwhat does that mean\b/i,
   /\b(clarify|rephrase).{0,40}(question|that)\b/i,
   /\bi don'?t (quite )?understand the question\b/i,
+  /\bi don'?t (quite )?get the question\b/i,
   /\bcan you (say|put) that (another way|differently)\b/i,
+  /\b(no|wasn'?t|was not|never|didn'?t|did not)\s+(a\s+)?question\s+(was\s+)?(asked|said)\b/i,
+  /\byou (didn'?t|did not|never)\s+(ask|asked|say|said)\s+(a\s+)?question\b/i,
+  /\b(there was|there'?s|theres)\s+no\s+question\b/i,
+  /\bi (didn'?t|did not)\s+(hear|get|catch)\s+(a\s+)?question\b/i,
+  /\bi'?m confused\b/i,
+  /\bthat (doesn'?t|does not|didn'?t|did not)\s+make sense\b/i,
+  /\bi'?m lost\b/i,
 ];
 
 /**

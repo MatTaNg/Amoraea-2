@@ -32,6 +32,14 @@ import {
 import { markMoment5ResolutionFollowUpTtsDelivered } from '@features/aria/moment5DeliveryReconcile';
 import { markS3RepairProbeTtsDelivered } from '@features/aria/scenarioCDeliveryReconcile';
 import { looksLikeMoment5ResolutionFollowUpPrompt } from '@features/aria/moment5SpecificityRedirect';
+import {
+  spokenTextStartsMoment5PrimaryConflictQuestion,
+  transcriptAssistantContainsMoment5PrimaryConflictQuestion,
+} from '@features/aria/moment5TranscriptHelpers';
+import {
+  looksLikeMoment4GrudgePrompt,
+  looksLikeMoment4ThresholdQuestion,
+} from '@features/aria/moment4ProbeLogic';
 import { isIncompleteScenarioAContemptProbeLeadSentence } from '@features/aria/scenarioAContemptProbeLogic';
 import {
   coerceScenarioARepairQuestionForTts,
@@ -52,9 +60,6 @@ import {
   isShowScenarioCardFollowUpProbeSentence,
 } from '@features/aria/showScenarioCardCanonicalTts';
 import { speakWithElevenLabs } from '@features/aria/utils/speakWithElevenLabsCore';
-import { getActiveWebHtmlAudioVolumeForTelemetry } from '@features/aria/utils/webInterviewActiveHtmlAudio';
-import { isWebInterviewPlaybackSurfaceActive } from '@features/aria/utils/webInterviewPlaybackSurface';
-import { looksLikeScenarioHandoffOrVignetteBundle } from '@features/aria/computeParallelStreamTabRestoreText';
 import { gatherParallelStreamingTtsPlaybackTelemetry } from '@utilities/sessionLogging/sessionAudioTelemetry';
 import {
   getSessionLogRuntime,
@@ -77,12 +82,12 @@ export function createParallelStreamEnqueueTtsUtterance(
   const { deps, params, state, postRecordingSettleForThisParallelStream } = ctx;
 
   return (spoken: string, prefetched?: Promise<ArrayBuffer | null> | null) => {
-    const speakGenAtEnqueue = deps.webTtsSpeakGenerationRef.current;
+    const speakGenAtEnqueue = deps.ttsSpeakGenerationRef.current;
     state.ttsChain = state.ttsChain.then(async () => {
       if (state.ttsCancelled || deps.parallelStreamingTtsRef.current.cancelRequested) {
         return;
       }
-      if (Platform.OS === 'web' && speakGenAtEnqueue !== deps.webTtsSpeakGenerationRef.current) {
+      if (Platform.OS === 'web' && speakGenAtEnqueue !== deps.ttsSpeakGenerationRef.current) {
         void remoteLog('[parallel_stream] utterance_skipped_speak_generation', {
           preview: spoken.slice(0, 120),
         });
@@ -235,8 +240,8 @@ export function createParallelStreamEnqueueTtsUtterance(
         const afterRecordingTelemetry =
           postRecordingSettleForThisParallelStream && state.parallelStreamSentenceIndex === 0;
         state.parallelStreamSentenceIndex += 1;
-        deps.webTtsUtteranceInFlightRef.current = spokenForTts;
-        deps.webTtsUtteranceInFlightOptionsRef.current = {
+        deps.ttsUtteranceInFlightRef.current = spokenForTts;
+        deps.ttsUtteranceInFlightOptionsRef.current = {
           interviewSpeechRole: 'assistant_response',
           telemetrySource: 'turn',
           skipInterviewSpeechAdvance: false,
@@ -281,7 +286,7 @@ export function createParallelStreamEnqueueTtsUtterance(
               momentNumber: deps.currentInterviewMomentRef.current,
               scenarioNumber: deps.currentScenarioRef.current,
               prefetchedMpeg: !!(prefetchedBuf?.byteLength),
-              htmlAudioVolume: getActiveWebHtmlAudioVolumeForTelemetry(),
+              htmlAudioVolume: null,
             }),
             platform: rtdPlayback.platform,
           });
@@ -302,7 +307,7 @@ export function createParallelStreamEnqueueTtsUtterance(
             onPlaybackStarted: () => {
               if (
                 Platform.OS === 'web' &&
-                (deps.webTtsTabInterruptPendingReplayRef.current ||
+                (false ||
                   deps.parallelStreamingTtsRef.current.cancelRequested ||
                   (typeof document !== 'undefined' && document.visibilityState === 'hidden'))
               ) {
@@ -327,7 +332,20 @@ export function createParallelStreamEnqueueTtsUtterance(
                     /\b(if you were ryan|you were ryan)\b/i.test(spokenForTts));
                 if (!skipModalForPrematureS1FollowUp) {
                   const cleanedSpoken = stripControlTokens(spokenForTts).trim();
-                  if (
+                  /**
+                   * Personal moments keep scenarioRef at 3. Prefer M4/M5 card updates over
+                   * Situation 3 footer resolution whenever spoken text is personal.
+                   */
+                  const personalMomentShowCardSpeech =
+                    spokenTextStartsMoment5PrimaryConflictQuestion(cleanedSpoken) ||
+                    transcriptAssistantContainsMoment5PrimaryConflictQuestion(cleanedSpoken) ||
+                    looksLikeMoment4ThresholdQuestion(cleanedSpoken) ||
+                    looksLikeMoment4GrudgePrompt(cleanedSpoken) ||
+                    looksLikeMoment5ResolutionFollowUpPrompt(cleanedSpoken) ||
+                    deps.currentInterviewMomentRef.current >= 4;
+                  if (personalMomentShowCardSpeech) {
+                    deps.applyReferenceCardFromAssistantSpeechRef.current(spokenForTts);
+                  } else if (
                     isActiveScenarioAConstructProbeTurn(
                       deps.currentScenarioRef.current,
                       deps.currentInterviewMomentRef.current,
@@ -474,14 +492,14 @@ export function createParallelStreamEnqueueTtsUtterance(
               eventData: {
                 telemetry_source: 'turn',
                 tts_pipeline: 'parallel_streaming',
-                html_audio_volume: getActiveWebHtmlAudioVolumeForTelemetry(),
+                html_audio_volume: null,
               },
               durationMs: Date.now() - parallelTtsStartMs,
               platform: rtdComplete.platform,
             });
           }
           if (
-            !deps.webTtsTabInterruptPendingReplayRef.current &&
+            !false &&
             !deps.parallelStreamingTtsRef.current.cancelRequested
           ) {
             const chunk = stripControlTokens(spokenForTts).trim();
@@ -500,15 +518,9 @@ export function createParallelStreamEnqueueTtsUtterance(
             releaseInterviewClosingSpeak(closingTtsSessionKey);
           }
         } finally {
-          if (!deps.webTtsTabInterruptPendingReplayRef.current) {
-            const inFlight = (deps.webTtsUtteranceInFlightRef.current ?? '').trim();
-            const scenarioHandoffHtmlSpeakActive =
-              inFlight.length >= 12 &&
-              looksLikeScenarioHandoffOrVignetteBundle(inFlight) &&
-              isWebInterviewPlaybackSurfaceActive();
-            if (!scenarioHandoffHtmlSpeakActive) {
-              deps.ttsLineInFlightRef.current = false;
-            }
+          if (!false) {
+            /** HTML surface removed — never keep the in-flight line alive for browser handoff playback. */
+            deps.ttsLineInFlightRef.current = false;
             /** Keep session TTS active between parallel-stream chunks (avoids mic pre-init / route churn). */
             if (deps.userId && !deps.parallelStreamingTtsRef.current.active) {
               setTtsPlaybackActive(false);

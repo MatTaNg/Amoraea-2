@@ -8,8 +8,6 @@ export type InterviewSessionLifecycleLocalScope = {
     | 'interviewStatus'
     | 'interviewAttemptBootstrap'
     | 'onboardingAutoStartRef'
-    | 'webSpeechShouldDeferToUserGesture'
-    | 'setWebDesktopAwaitingStartOverlay'
     | 'awaitScreenReadySignal'
     | 'logSessionResumeState'
     | 'awaitEmotionModalForIndex'
@@ -34,14 +32,12 @@ export type InterviewSessionLifecycleLocalScope = {
     | 'setInterviewStatus'
     | 'setStageResults'
     | 'setTouchedConstructs'
-    | 'setWebDesktopPendingTtsGestureOverlay'
     | 'setStatus'
     | 'setReferenceCardScenario'
     | 'setReferenceCardPrompt'
     | 'setInterviewUiPhase'
     | 'setMicError'
     | 'setMicPermission'
-    | 'setWebResumeWelcomeTapPending'
   >;
   audioDevice: Pick<
     SyncExtraParams,

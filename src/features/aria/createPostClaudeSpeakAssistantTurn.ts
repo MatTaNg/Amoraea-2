@@ -1,6 +1,5 @@
-import { Platform } from 'react-native';
-
 import { stripControlTokens } from '@features/aria/interviewControlTokens';
+import { isNonRepeatableAssistantLineForVerbatimReplay } from '@features/aria/interviewDisengagementProbes';
 import { ASSISTANT_INTERVIEW_SPEECH } from '@features/aria/interviewTtsSpeakOptions';
 import type { PostClaudeAssistantTurnDeps } from '@features/aria/postClaudeAssistantTurnTypes';
 import type { SpeakTextSafeOptions } from '@features/aria/speakTextSafeDeps';
@@ -35,19 +34,10 @@ export function createPostClaudeSpeakAssistantTurn(
   return async (spokenText: string, opts?: PostClaudeSpeakAssistantTurnOptions) => {
     if (parallelStreamingPlaybackUsed && !opts?.forceSpeakDespiteParallelStream) {
       if (opts?.interviewSpeechRole === 'assistant_response' && !opts?.skipLastQuestionRef) {
-        deps.lastQuestionTextRef.current = stripControlTokens(spokenText).trim();
-      }
-      if (Platform.OS === 'web' && deps.webTtsTabInterruptPendingReplayRef.current) {
-        const fullReplay = stripControlTokens(spokenText).trim();
-        if (fullReplay.length > 0 && deps.pendingGestureRestoreSpeakRef.current) {
-          deps.pendingGestureRestoreSpeakRef.current = {
-            ...deps.pendingGestureRestoreSpeakRef.current,
-            text: fullReplay,
-            queuedAtMs: deps.pendingGestureRestoreSpeakRef.current?.queuedAtMs ?? Date.now(),
-          };
+        const cleaned = stripControlTokens(spokenText).trim();
+        if (!isNonRepeatableAssistantLineForVerbatimReplay(cleaned)) {
+          deps.lastQuestionTextRef.current = cleaned;
         }
-        deps.setWebTabGestureRestoreOverlay(true);
-        return;
       }
       if (opts?.interviewSpeechRole === 'assistant_response' && !opts?.skipInterviewSpeechAdvance) {
         deps.applyInterviewSpeechComplete(spokenText);

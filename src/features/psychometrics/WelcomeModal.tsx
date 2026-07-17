@@ -5,12 +5,13 @@ import {
   Text,
   StyleSheet,
   ScrollView,
-  SafeAreaView,
   TouchableOpacity,
   Platform,
 } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { FlameOrb } from '@app/screens/FlameOrb';
+import { INTRO_FLAME_ORB_SIZE } from '@app/screens/flameOrbLogo';
 import { Button } from '@/shared/ui/Button';
 import { spacing } from '@ui/theme/spacing';
 import { useAuth } from '@/shared/hooks/AuthProvider';
@@ -32,6 +33,7 @@ import {
   PSYCHOMETRICS_TIP_CARD_BORDER,
 } from './psychometricsTheme';
 import { useAssessmentScrollContent, useNarrowAssessmentViewport } from '@utilities/assessmentMobileLayout';
+import { interviewOverlayTop } from '@features/aria/utils/interviewOverlayInsets';
 
 export type WelcomeModalVariant = 'interviewFirst' | 'psychometricsFirst';
 
@@ -56,6 +58,9 @@ export function WelcomeModal({
   continueLabel,
 }: WelcomeModalProps) {
   const { signOut } = useAuth();
+  const insets = useSafeAreaInsets();
+  const overlayTop = interviewOverlayTop(insets);
+  const bottomInset = Math.max(insets.bottom, 0);
   const scrollContentStyle = useAssessmentScrollContent({ alignItems: 'center' });
   const narrowViewport = useNarrowAssessmentViewport();
 
@@ -125,10 +130,13 @@ export function WelcomeModal({
 
   return (
     <Modal visible={visible} animationType="fade" statusBarTranslucent>
-      <SafeAreaView style={styles.safe}>
+      <View style={[styles.safe, { paddingBottom: bottomInset }]}>
         {onBackPress ? <PsychometricsBackButton onPress={onBackPress} /> : null}
         <TouchableOpacity
-          style={[styles.logoutButton, onOpenAdminPanel ? styles.logoutButtonWithAdmin : null]}
+          style={[
+            styles.logoutButton,
+            { top: onOpenAdminPanel ? overlayTop + 40 : overlayTop },
+          ]}
           onPress={handleLogOut}
           activeOpacity={0.8}
           accessibilityRole="button"
@@ -143,13 +151,14 @@ export function WelcomeModal({
           contentContainerStyle={[
             scrollContentStyle,
             styles.scrollContent,
-            onBackPress ? styles.scrollContentWithBack : null,
+            // Top edge is open for absolute chrome; pad content below status bar + logout row.
+            { paddingTop: overlayTop + (onBackPress || onOpenAdminPanel ? 56 : 48) },
           ]}
           showsVerticalScrollIndicator={false}
           keyboardShouldPersistTaps="handled"
         >
           <View style={styles.logoWrap}>
-            <FlameOrb state="idle" size={72} minimalGlow />
+            <FlameOrb state="idle" size={INTRO_FLAME_ORB_SIZE} minimalGlow />
           </View>
 
           <Text style={[styles.title, narrowViewport && styles.titleNarrow]}>Welcome to Amoraea</Text>
@@ -194,7 +203,7 @@ export function WelcomeModal({
             />
           </View>
         </ScrollView>
-      </SafeAreaView>
+      </View>
     </Modal>
   );
 }
@@ -213,12 +222,9 @@ const styles = StyleSheet.create({
     width: '100%',
     alignSelf: 'center',
   },
-  scrollContentWithBack: {
-    paddingTop: 56,
-  },
   logoWrap: {
     alignItems: 'center',
-    marginBottom: spacing.md,
+    marginBottom: spacing.lg,
   },
   title: {
     fontFamily: PSYCHOMETRICS_FONT_DISPLAY,
@@ -331,7 +337,6 @@ const styles = StyleSheet.create({
   },
   logoutButton: {
     position: 'absolute',
-    top: 16,
     right: 16,
     flexDirection: 'row',
     alignItems: 'center',
@@ -343,9 +348,6 @@ const styles = StyleSheet.create({
     borderColor: 'rgba(82,142,220,0.2)',
     borderRadius: 6,
     zIndex: 100,
-  },
-  logoutButtonWithAdmin: {
-    top: 56,
   },
   logoutButtonText: {
     fontFamily: PSYCHOMETRICS_FONT_BODY,

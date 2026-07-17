@@ -73,11 +73,18 @@ export function looksLikeMoment4ThresholdQuestion(text: string): boolean {
     );
   const walkAwayPhrase = /\bwalk(?:ing)? away\b/.test(t);
   const workThroughPhrase = /\bwork(?:ing)? through\b/.test(t);
+  const lineBetweenWorkAndLeaveFork =
+    workThroughPhrase &&
+    walkAwayPhrase &&
+    (/\bwhere(?:'s| is) your line\b/.test(t) ||
+      /\byour line between\b/.test(t) ||
+      /\bcuts deep\b/.test(t));
   const workVsLeaveFork =
     workThroughPhrase &&
     walkAwayPhrase &&
     (/\b(at what point|what point|when (?:do you|would you|have you|did you) decide)\b/.test(t) ||
       /\b(decide (?:if|whether)|worth working through|stay and work|leave or stay)\b/.test(t) ||
+      /\bwhere(?:'s| is) your line\b/.test(t) ||
       t.includes('point'));
   const friendshipContinuingFork =
     (/\b(friendship|relationship)\b/.test(t) &&
@@ -98,12 +105,18 @@ export function looksLikeMoment4ThresholdQuestion(text: string): boolean {
     workThroughPhrase &&
     walkAwayPhrase &&
     (/\btends to work through\b/.test(t) ||
-      /\bwork through it\b/.test(t) ||
-      /\bwhen something like that comes up\b/.test(t) ||
+      /\bwork(?:ing)? through it\b/.test(t) ||
+      /\bwhen something like that (?:comes up|happens)\b/.test(t) ||
+      /\bif something like that (?:comes up|happened|happens)\b/.test(t) ||
+      /\bsomeone you care about\b/.test(t) ||
+      /\bkind of thing you(?:'|’)d work through\b/.test(t) ||
+      /\bmore the kind of thing\b/.test(t) ||
       /\breal tension with another person\b/.test(t) ||
+      /\bcuts deep\b/.test(t) ||
       (/\bare you someone who\b/.test(t) && /\b(?:walk away|walking away)\b/.test(t)));
   return (
     canonicalPhrase ||
+    lineBetweenWorkAndLeaveFork ||
     workVsLeaveFork ||
     friendshipContinuingFork ||
     thresholdVersusWalkAwayFork ||
@@ -130,9 +143,10 @@ export function isCanonicalMoment4ThresholdQuestionText(text: string): boolean {
 }
 
 function extractBriefAckBeforeMoment4ThresholdProbe(text: string): string | null {
-  const match = /^(got it|thanks|thank you|okay|ok|i hear you|i understand)\b[,.!?…\s—–-]*/i.exec(
-    text.trim(),
-  );
+  const match =
+    /^(got it|thanks|thank you|okay|ok|i hear you|i understand|makes sense)\b[,.!?…\s—–-]*/i.exec(
+      text.trim(),
+    );
   if (!match) return null;
   const ack = match[1].trim();
   return ack.length > 0 ? ack.charAt(0).toUpperCase() + ack.slice(1).toLowerCase() : null;
@@ -145,6 +159,9 @@ export function isIncompleteMoment4ThresholdLeadSentence(text: string): boolean 
   const low = t.toLowerCase();
   if (/\bwhen you think about what it takes\b/.test(low)) return true;
   if (/\bwhat it takes to fully work through\b/.test(low)) return true;
+  if (/\bwhen something like that (?:comes up|happens)\b/.test(low)) return true;
+  if (/\bcuts deep\b/.test(low)) return true;
+  if (/\bwhere(?:'s| is) your line\b/.test(low) && !/\bwalk away\b/.test(low)) return true;
   if (/\bwork through something\b/.test(low) && !/\bwalk away\b/.test(low)) return true;
   if (
     /\b(?:at what point|what point).*\bwork(?:ing)? through\b/.test(low) &&

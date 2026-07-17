@@ -1,6 +1,6 @@
 import type { ClaudeParallelStreamTtsCallDeps } from '@features/aria/claudeParallelStreamTtsCallTypes';
 import type { EmotionModalOrchestrationDeps } from '@features/aria/emotionModalOrchestrationTypes';
-import type { InterviewWebTtsRuntimeDeps } from '@features/aria/hooks/useInterviewWebTtsRuntime';
+import type { InterviewTtsRuntimeDeps } from '@features/aria/hooks/useInterviewTtsRuntime';
 import type { SpeakTextSafeDeps } from '@features/aria/speakTextSafeDeps';
 import type {
   AriaInterviewDepsRefs,
@@ -8,7 +8,7 @@ import type {
 } from '@features/aria/syncAriaInterviewDepsTypes';
 
 export function syncAriaInterviewEarlyDeps(
-  refs: Pick<AriaInterviewDepsRefs, 'emotionModalOrchestrationDepsRef' | 'webTtsRuntimeDepsRef'>,
+  refs: Pick<AriaInterviewDepsRefs, 'emotionModalOrchestrationDepsRef' | 'ttsRuntimeDepsRef'>,
   ctx: AriaInterviewDepsSyncContext,
 ): void {
   refs.emotionModalOrchestrationDepsRef.current = {
@@ -36,31 +36,18 @@ export function syncAriaInterviewEarlyDeps(
         setEmotionItemsComplete: ctx.setEmotionItemsComplete,
         setEmotionModalVisible: ctx.setEmotionModalVisible,
         setEmotionModalItemIndex: ctx.setEmotionModalItemIndex,
-        waitForWebInterviewTtsQuiescentBeforeEmotionModal: ctx.waitForWebInterviewTtsQuiescentBeforeEmotionModal,
-        waitForWebInterviewTtsAudiblePlaybackBeforeEmotionModal:
-          ctx.waitForWebInterviewTtsAudiblePlaybackBeforeEmotionModal,
   } as EmotionModalOrchestrationDeps;
 
-  refs.webTtsRuntimeDepsRef.current = {
+  refs.ttsRuntimeDepsRef.current = {
     voiceStateRef: ctx.voiceStateRef,
         setVoiceState: ctx.setVoiceState,
         parallelStreamingTtsRef: ctx.parallelStreamingTtsRef,
         ttsLineInFlightRef: ctx.ttsLineInFlightRef,
-        webTabRestoreReplayInFlightRef: ctx.webTabRestoreReplayInFlightRef,
-        webTtsTabInterruptPendingReplayRef: ctx.webTtsTabInterruptPendingReplayRef,
-        webTtsSpeakGenerationRef: ctx.webTtsSpeakGenerationRef,
-        webTtsUtteranceInFlightRef: ctx.webTtsUtteranceInFlightRef,
-        webTtsUtteranceInFlightOptionsRef: ctx.webTtsUtteranceInFlightOptionsRef,
-        pendingGestureRestoreSpeakRef: ctx.pendingGestureRestoreSpeakRef,
-        mobileTabHideLetPlaybackContinueRef: ctx.mobileTabHideLetPlaybackContinueRef,
-        mobileTabHideBackgroundUtteranceRef: ctx.mobileTabHideBackgroundUtteranceRef,
-        tabHiddenDuringActiveTtsLineRef: ctx.tabHiddenDuringActiveTtsLineRef,
-        needsGestureRestoreRef: ctx.needsGestureRestoreRef,
-        tabVisibilityGestureLossPendingRef: ctx.tabVisibilityGestureLossPendingRef,
+        ttsSpeakGenerationRef: ctx.ttsSpeakGenerationRef,
+        ttsUtteranceInFlightRef: ctx.ttsUtteranceInFlightRef,
+        ttsUtteranceInFlightOptionsRef: ctx.ttsUtteranceInFlightOptionsRef,
         lastQuestionTextRef: ctx.lastQuestionTextRef,
-        setWebTabRestoreOverlayVisible: ctx.setWebTabRestoreOverlayVisible,
-        ensureWebGestureFlushListener: ctx.ensureWebGestureFlushListener,
-  } as InterviewWebTtsRuntimeDeps;
+  } as InterviewTtsRuntimeDeps;
 
 }
 
@@ -70,23 +57,16 @@ export function syncAriaInterviewTtsPipelineDeps(
 ): void {
   refs.speakTextSafeDepsRef.current = {
     userId: ctx.userId,
-        mobileWebTapToBeginDone: ctx.mobileWebTapToBeginDone,
         setVoiceState: ctx.setVoiceState,
-        setWebTabGestureRestoreOverlay: ctx.setWebTabGestureRestoreOverlay,
-        setWebDesktopPendingTtsGestureOverlay: ctx.setWebDesktopPendingTtsGestureOverlay,
         setTtsPlaybackReliabilityNotice: ctx.setTtsPlaybackReliabilityNotice,
         setLastTtsCompletionCallbackMs: ctx.setLastTtsCompletionCallbackMs,
         speak: ctx.speak,
         applyInterviewSpeechComplete: ctx.applyInterviewSpeechComplete,
-        ensureWebGestureFlushListener: ctx.ensureWebGestureFlushListener,
         awaitTtsScreenReadyGate: ctx.awaitTtsScreenReadyGate,
         stopElevenLabsPlayback: ctx.stopElevenLabsPlayback,
-        webSpeechShouldDeferToUserGesture: ctx.webSpeechShouldDeferToUserGesture,
-        rearmWebMicPreInitAfterTtsPlaybackComplete: ctx.rearmWebMicPreInitAfterTtsPlaybackComplete,
-        scheduleWebMicPreInitRefreshAfterTtsCompletes: ctx.scheduleWebMicPreInitRefreshAfterTtsCompletes,
         referenceCardShouldUpdateOnPlaybackStart: ctx.referenceCardShouldUpdateOnPlaybackStart,
         persistInterviewAttemptSessionLifecycle: ctx.persistInterviewAttemptSessionLifecycle,
-        webTtsSpeakGenerationRef: ctx.webTtsSpeakGenerationRef,
+        ttsSpeakGenerationRef: ctx.ttsSpeakGenerationRef,
         currentInterviewMomentRef: ctx.currentInterviewMomentRef,
         currentScenarioRef: ctx.currentScenarioRef,
         s2RepairProbeDeliveredRef: ctx.s2RepairProbeDeliveredRef,
@@ -102,22 +82,15 @@ export function syncAriaInterviewTtsPipelineDeps(
         scenarioAContemptProbeTtsDeliveredSessionRef: ctx.scenarioAContemptProbeTtsDeliveredSessionRef,
         lastQuestionTextRef: ctx.lastQuestionTextRef,
         ttsLineInFlightRef: ctx.ttsLineInFlightRef,
-        needsGestureRestoreRef: ctx.needsGestureRestoreRef,
-        tabVisibilityGestureLossPendingRef: ctx.tabVisibilityGestureLossPendingRef,
-        gestureContextLostAtRef: ctx.gestureContextLostAtRef,
-        webTtsTabInterruptPendingReplayRef: ctx.webTtsTabInterruptPendingReplayRef,
-        pendingGestureRestoreSpeakRef: ctx.pendingGestureRestoreSpeakRef,
         interviewStatusRef: ctx.interviewStatusRef,
         applyReferenceCardFromAssistantSpeechRef: ctx.applyReferenceCardFromAssistantSpeechRef,
         recordingJustFinishedBeforeNextTtsRef: ctx.recordingJustFinishedBeforeNextTtsRef,
         postRecordingParallelStreamSettleRef: ctx.postRecordingParallelStreamSettleRef,
-        tabHiddenDuringActiveTtsLineRef: ctx.tabHiddenDuringActiveTtsLineRef,
-        webTtsUtteranceInFlightRef: ctx.webTtsUtteranceInFlightRef,
-        webTtsUtteranceInFlightOptionsRef: ctx.webTtsUtteranceInFlightOptionsRef,
+        ttsUtteranceInFlightRef: ctx.ttsUtteranceInFlightRef,
+        ttsUtteranceInFlightOptionsRef: ctx.ttsUtteranceInFlightOptionsRef,
         firstScenarioLifecyclePersistedRef: ctx.firstScenarioLifecyclePersistedRef,
         ttsSessionHardFailureCountRef: ctx.ttsSessionHardFailureCountRef,
         timingRef: ctx.timingRef,
-        pendingWebSpeechForGestureRef: ctx.pendingWebSpeechForGestureRef,
         recordInterviewAssistantDeliveryForMetaExemptionRef: ctx.recordInterviewAssistantDeliveryForMetaExemptionRef,
         s1ContemptFixVersion: ctx.s1ContemptFixVersion,
   } as SpeakTextSafeDeps;
@@ -129,12 +102,10 @@ export function syncAriaInterviewTtsPipelineDeps(
         pendingScenarioAContemptProbeStreamMuteRef: ctx.pendingScenarioAContemptProbeStreamMuteRef,
         pendingS3ToM4HandoffStreamMuteRef: ctx.pendingS3ToM4HandoffStreamMuteRef,
         parallelStreamingTtsRef: ctx.parallelStreamingTtsRef,
-        webTtsSpeakGenerationRef: ctx.webTtsSpeakGenerationRef,
-        webTtsTabInterruptPendingReplayRef: ctx.webTtsTabInterruptPendingReplayRef,
-        webTtsUtteranceInFlightRef: ctx.webTtsUtteranceInFlightRef,
-        webTtsUtteranceInFlightOptionsRef: ctx.webTtsUtteranceInFlightOptionsRef,
+        ttsSpeakGenerationRef: ctx.ttsSpeakGenerationRef,
+        ttsUtteranceInFlightRef: ctx.ttsUtteranceInFlightRef,
+        ttsUtteranceInFlightOptionsRef: ctx.ttsUtteranceInFlightOptionsRef,
         ttsLineInFlightRef: ctx.ttsLineInFlightRef,
-        pendingGestureRestoreSpeakRef: ctx.pendingGestureRestoreSpeakRef,
         currentInterviewMomentRef: ctx.currentInterviewMomentRef,
         currentScenarioRef: ctx.currentScenarioRef,
         interviewMomentsCompleteRef: ctx.interviewMomentsCompleteRef,
@@ -166,14 +137,12 @@ export function syncAriaInterviewTtsPipelineDeps(
         applyReferenceCardFromAssistantSpeechRef: ctx.applyReferenceCardFromAssistantSpeechRef,
         speakTextSafe: ctx.speakTextSafe,
         setVoiceState: ctx.setVoiceState,
-        setWebTabGestureRestoreOverlay: ctx.setWebTabGestureRestoreOverlay,
         setReferenceCardPrompt: ctx.setReferenceCardPrompt,
         setReferenceCardScenario: ctx.setReferenceCardScenario,
         setInterviewUiPhase: ctx.setInterviewUiPhase,
         awaitTtsScreenReadyGate: ctx.awaitTtsScreenReadyGate,
         prepareInterviewTtsPlayback: ctx.prepareInterviewTtsPlayback,
         stopElevenLabsPlayback: ctx.stopElevenLabsPlayback,
-        scheduleWebMicPreInitRefreshAfterTtsCompletes: ctx.scheduleWebMicPreInitRefreshAfterTtsCompletes,
         referenceCardShouldUpdateOnPlaybackStart: ctx.referenceCardShouldUpdateOnPlaybackStart,
         ensureCompletedScenarioScored: ctx.ensureCompletedScenarioScored,
   } as ClaudeParallelStreamTtsCallDeps;

@@ -18,10 +18,20 @@ import {
   SCENARIO_B_Q1_CANONICAL,
 } from './scenarioBProbeLogic';
 import {
-  scenarioCQ1InterpretationSatisfiedInTranscript,
   SCENARIO_C_REPAIR_QUESTION_CANONICAL,
 } from './scenarioCPromptDetection';
 import { SCENARIO_1_OPENING, SCENARIO_3_OPENING } from './interviewScenarioOpeningStreamGate';
+import {
+  SKIP_ACCEPTED_NEXT_QUESTION_BRIDGE,
+  SKIP_ACCEPTED_SCENARIO_COMPLETE_BRIDGE,
+} from './skipAcceptedNextQuestionBridge';
+
+export {
+  SKIP_ACCEPTED_NEXT_QUESTION_BRIDGE,
+  SKIP_ACCEPTED_SCENARIO_COMPLETE_BRIDGE,
+  looksLikeSkipAcceptedNextQuestionBridgeLine,
+  stripSkipAcceptedNextQuestionBridge,
+} from './skipAcceptedNextQuestionBridge';
 
 export type QuestionSkipProgressionResult = {
   nextPrompt: string;
@@ -36,33 +46,27 @@ function substantiveMessages(messages: readonly MessageWithScenario[]) {
   );
 }
 
-function userAnsweredAfterAssistantPrompt(
+/** True when an assistant turn already delivered this beat (answered or about to be skipped). */
+function transcriptHasAssistantPrompt(
   messages: readonly MessageWithScenario[],
   matchesPrompt: (content: string) => boolean,
-  minWords = 5,
 ): boolean {
-  const filtered = substantiveMessages(messages);
-  for (let i = 0; i < filtered.length; i++) {
-    const m = filtered[i];
-    if (m.role !== 'assistant' || !matchesPrompt((m.content ?? '').trim())) continue;
-    for (let j = i + 1; j < filtered.length; j++) {
-      if (filtered[j].role !== 'user') continue;
-      const words = (filtered[j].content ?? '').trim().split(/\s+/).filter(Boolean).length;
-      return words >= minWords;
-    }
-    return false;
-  }
-  return false;
+  return substantiveMessages(messages).some(
+    (m) => m.role === 'assistant' && matchesPrompt((m.content ?? '').trim()),
+  );
 }
 
 function resolveScenarioAQuestionSkipProgression(
   messages: readonly MessageWithScenario[],
 ): QuestionSkipProgressionResult {
-  const q1Answered = userAnsweredAfterAssistantPrompt(
+  const q1Asked = transcriptHasAssistantPrompt(
     messages,
-    (c) => c.includes(SCENARIO_1_OPENING) || /\bwhat(?:'s| is) going on between these two\b/i.test(c),
+    (c) =>
+      c.includes(SCENARIO_1_OPENING) ||
+      /\bwhat(?:'s| is) going on between these two\b/i.test(c),
   );
-  if (!q1Answered) {
+  // Skip advances past the active asked beat — never re-deliver the same question.
+  if (!q1Asked) {
     return { nextPrompt: SCENARIO_1_OPENING, scenarioMomentComplete: false };
   }
   if (!transcriptContainsScenarioAContemptProbe(messages)) {
@@ -80,11 +84,13 @@ function resolveScenarioAQuestionSkipProgression(
 function resolveScenarioBQuestionSkipProgression(
   messages: readonly MessageWithScenario[],
 ): QuestionSkipProgressionResult {
-  const q1Answered = userAnsweredAfterAssistantPrompt(
+  const q1Asked = transcriptHasAssistantPrompt(
     messages,
-    (c) => c.includes(SCENARIO_B_Q1_CANONICAL) || /\bwhat do you think is going on here\b/i.test(c),
+    (c) =>
+      c.includes(SCENARIO_B_Q1_CANONICAL) ||
+      /\bwhat do you think is going on here\b/i.test(c),
   );
-  if (!q1Answered) {
+  if (!q1Asked) {
     return { nextPrompt: SCENARIO_B_Q1_CANONICAL, scenarioMomentComplete: false };
   }
   if (
@@ -102,7 +108,14 @@ function resolveScenarioBQuestionSkipProgression(
 function resolveScenarioCQuestionSkipProgression(
   messages: readonly MessageWithScenario[],
 ): QuestionSkipProgressionResult {
-  if (!scenarioCQ1InterpretationSatisfiedInTranscript(messages)) {
+  const q1Asked = transcriptHasAssistantPrompt(
+    messages,
+    (c) =>
+      c.includes(SCENARIO_3_OPENING) ||
+      /\bwhat do you make of (?:that|this|daniel|sophie)\b/i.test(c) ||
+      /\bwhat(?:'s| is) going on (?:here|between|with)\b/i.test(c),
+  );
+  if (!q1Asked) {
     return { nextPrompt: SCENARIO_3_OPENING, scenarioMomentComplete: false };
   }
   if (!transcriptContainsScenarioCRepairQuestion(messages)) {
@@ -139,7 +152,7 @@ SKIP ACCEPTED (CLIENT) — SCENARIO ${momentNum} COMPLETE
 ─────────────────────────────────────────
 The participant **confirmed** skipping after the skip confirmation prompt. They have skipped the **last** required question in this scenario.
 
-In **one** assistant reply: open with **exactly** "Okay, we can skip this one" (minor contractions OK), then deliver **BOUNDARY CLOSURE** for Scenario ${momentNum === 1 ? 'A' : momentNum === 2 ? 'B' : 'C'} per the framework (segment close + short transition, no content reflection) and emit **[SCENARIO_COMPLETE:${momentNum}]**. **Do not** re-ask the skipped prompt. **Do not** offer skip confirmation again.
+In **one** assistant reply: open with **exactly** "${SKIP_ACCEPTED_SCENARIO_COMPLETE_BRIDGE}" (minor contractions OK), then deliver **BOUNDARY CLOSURE** for Scenario ${momentNum === 1 ? 'A' : momentNum === 2 ? 'B' : 'C'} per the framework (segment close + short transition, no content reflection) and emit **[SCENARIO_COMPLETE:${momentNum}]**. **Do not** re-ask the skipped prompt. **Do not** offer skip confirmation again.
 `;
   }
   return `
@@ -150,7 +163,7 @@ The participant **confirmed** skipping the **active question only** — **not** 
 
 **Forbidden this turn:** segment-close / "finished the three situations" / personal-handoff language, **[SCENARIO_COMPLETE:${momentNum}]**, or any next-scenario vignette.
 
-In **one** assistant reply: open with **exactly** "Okay, we can skip this one, the next question is" (minor contractions OK), then speak **only** this scripted question verbatim (no reflective preamble):
+In **one** assistant reply: open with **exactly** "${SKIP_ACCEPTED_NEXT_QUESTION_BRIDGE}" (minor contractions OK), then speak **only** this scripted question verbatim (no reflective preamble):
 "${progression.nextPrompt}"
 `;
 }

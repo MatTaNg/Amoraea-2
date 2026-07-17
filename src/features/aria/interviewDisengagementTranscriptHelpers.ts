@@ -41,6 +41,27 @@ import {
   looksLikeScenarioCSophiePerspectiveQuestion,
   looksLikeScenarioCSophieReceiveMisparaphraseQuestion,
 } from './scenarioCPromptDetection';
+import { looksLikeIntroBriefingSpeech } from './interviewPreambleBriefing';
+import {
+  GO_BACK_REQUEST_DECLINE_LINE,
+  INABILITY_INVITATION_ROTATING_LINES,
+  SCENARIO_SKIP_CONFIRMATION_PROMPT_LINE,
+  SCORE_REQUEST_DECLINE_LINE,
+} from './interviewPromptInstructions';
+import { isClientAudioRecoveryAssistantLine } from './interviewProceduralMoments';
+import { IRRELEVANT_ANSWER_RETRY_LINE } from './interviewAnswerRelevance';
+import {
+  SKIP_ACCEPTED_NEXT_QUESTION_BRIDGE,
+  SKIP_ACCEPTED_SCENARIO_COMPLETE_BRIDGE,
+  stripSkipAcceptedNextQuestionBridge,
+} from './skipAcceptedNextQuestionBridge';
+import {
+  FRUSTRATION_SKIP_DECLINE_ENCOURAGEMENT_LINE,
+  INABILITY_SKIP_CONFIRMATION_PROMPT_LINE,
+  SKIP_CONFIRMATION_GREETING_REOPEN_LINE,
+  SKIP_REQUEST_CONFIRMATION_PROMPT_LINE,
+} from './metaCommentSkipFrustration';
+import { CONFUSION_REPEAT_OFFER_LINE } from './confusionRepeatOfferState';
 
 function transcriptContainsScenarioCRepairQuestion(
   messages: Array<{ role: string; content?: string | null; isWelcomeBack?: boolean; isScoreCard?: boolean }>,
@@ -87,15 +108,88 @@ const NON_REPEATABLE_ASSISTANT_LINE_PATTERNS = [
   'thanks for going deep',
   "that's the end of this scenario",
   "that's a wrap on this situation",
+  // Skip-offer / decline / inability meta — repeat should re-ask the scenario question.
+  'stay on this one',
+  "you've got this",
+  'just try your best',
+  'want to skip',
+  'do you still want to skip',
+  'are you sure you want to skip',
+  'may affect your score',
+  'no right answer here',
+  'no pressure',
+  "can't reveal scores",
+  'cannot reveal scores',
+  "can't go back",
+  'cannot go back',
+  // Audio / silent-buffer / mic recovery — never re-speak as the interview question.
+  "didn't catch any speech",
+  'on that try',
+  'tap the mic when',
+  'only caught part of that',
+  "couldn't hear anything",
+  'couldnt hear anything',
+  "couldn't hear you",
+  'couldnt hear you',
+  'mic did not start',
+  'trouble starting the microphone',
 ] as const;
+
+const NON_REPEATABLE_SKIP_META_EXACT_LINES = [
+  FRUSTRATION_SKIP_DECLINE_ENCOURAGEMENT_LINE,
+  SKIP_REQUEST_CONFIRMATION_PROMPT_LINE,
+  INABILITY_SKIP_CONFIRMATION_PROMPT_LINE,
+  SCENARIO_SKIP_CONFIRMATION_PROMPT_LINE,
+  SKIP_CONFIRMATION_GREETING_REOPEN_LINE,
+  SCORE_REQUEST_DECLINE_LINE,
+  GO_BACK_REQUEST_DECLINE_LINE,
+  CONFUSION_REPEAT_OFFER_LINE,
+  IRRELEVANT_ANSWER_RETRY_LINE,
+  SKIP_ACCEPTED_NEXT_QUESTION_BRIDGE,
+  SKIP_ACCEPTED_SCENARIO_COMPLETE_BRIDGE,
+  ...INABILITY_INVITATION_ROTATING_LINES,
+].map((line) => normalizeWhitespace(line).toLowerCase());
+
+/**
+ * Short scenario-transition bridge without a question (e.g. "Got it — moving on. Here's the next
+ * situation.") — repeat must re-ask the scenario prompt, not replay the bridge.
+ */
+export function looksLikeScenarioTransitionBridgeAssistantLine(content: string): boolean {
+  const t = normalizeWhitespace(content ?? '').trim();
+  if (!t || t.length > 160) return false;
+  if (/\?/.test(t)) return false;
+  return /\b(here'?s the next (situation|one)|moving on|on to the next (situation|one)|let'?s (move|go) (on )?to the next|next situation)\b/i.test(
+    t,
+  );
+}
 
 export function isNonRepeatableAssistantLineForVerbatimReplay(content: string): boolean {
   if (isStandalonePersonalDisclosureAcknowledgment(content)) return true;
+  // Sophie / construct probes are the current question — allow verbatim repeat.
+  if (looksLikeScenarioCSophiePerspectiveQuestion(content)) return false;
+  if (isClientAudioRecoveryAssistantLine(content)) return true;
+  if (looksLikeScenarioTransitionBridgeAssistantLine(content)) return true;
+  // Bridge-only skip-accept line (no trailing question) — never verbatim-repeat.
+  const afterSkipBridge = stripSkipAcceptedNextQuestionBridge(content);
+  if (
+    afterSkipBridge !== normalizeWhitespace(content ?? '').trim() &&
+    !afterSkipBridge
+  ) {
+    return true;
+  }
   if (isClientOrElongatingInterviewProbeAssistant(content)) return true;
   if (looksLikeScenarioCSophieReceiveMisparaphraseQuestion(content)) return true;
   if (isFullScenarioVignetteIntroAssistantLine(content)) return true;
+  if (looksLikeIntroBriefingSpeech(content)) return true;
   const lower = content.trim().toLowerCase();
   if (!lower) return false;
+  if (/^welcome back\b/i.test(lower)) return true;
+  const normalizedLower = normalizeWhitespace(content).toLowerCase();
+  if (NON_REPEATABLE_SKIP_META_EXACT_LINES.some((line) => normalizedLower === line || normalizedLower.includes(line))) {
+    return true;
+  }
+  // Skip confirmation may prefix a short reflection clause before the canonical prompt.
+  if (/may affect your score/i.test(lower) && /skip/i.test(lower)) return true;
   return NON_REPEATABLE_ASSISTANT_LINE_PATTERNS.some((pattern) => lower.includes(pattern));
 }
 
@@ -164,6 +258,7 @@ function userTurnIsRepeatRequest(text: string): boolean {
     /\brepeat\w* what you said\b/i.test(t) ||
     /\brepeat what you said\b/i.test(t) ||
     /\brepeat the questions?\b/i.test(t) ||
+    /\brepeat (the |this |that )?(scenario|situation|story|vignette)\b/i.test(t) ||
     /\bsay (that|it) again\b/i.test(t) ||
     /\bwhat was the question\b/i.test(t) ||
     /\bwhat did you (say|ask)\b/i.test(t) ||
@@ -325,7 +420,7 @@ export function findLastRepeatableInterviewQuestionText(
     if (m.role !== 'assistant') continue;
     if (m.isScoreCard) continue;
     if (m.isWelcomeBack) continue;
-    const raw = (m.content ?? '').trim();
+    const raw = stripSkipAcceptedNextQuestionBridge((m.content ?? '').trim());
     if (!raw) continue;
     if (isNonRepeatableAssistantLineForVerbatimReplay(raw)) continue;
     if (/^i only caught part of that\b/i.test(raw)) continue;
@@ -334,7 +429,7 @@ export function findLastRepeatableInterviewQuestionText(
     if (activeScenario && isPriorScenarioBleedForActiveScenario(raw, activeScenario)) continue;
     return finalizeRepeatableInterviewQuestionText(messages, raw, activeScenario);
   }
-  const fb = (fallbackLastQuestionText ?? '').trim();
+  const fb = stripSkipAcceptedNextQuestionBridge((fallbackLastQuestionText ?? '').trim());
   if (fb && !isNonRepeatableAssistantLineForVerbatimReplay(fb) && !looksLikeScenarioCSophieReceiveMisparaphraseQuestion(fb)) {
     if (activeScenario && isPriorScenarioBleedForActiveScenario(fb, activeScenario)) {
       if (activeScenario === 3) {

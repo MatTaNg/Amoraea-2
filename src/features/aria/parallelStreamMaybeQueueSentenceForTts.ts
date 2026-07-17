@@ -1242,10 +1242,9 @@ export function createParallelStreamMaybeQueueSentenceForTts(
           if (
             s3RepairSatisfied &&
             !state.showScenarioCardCanonicalSpokenThisStream &&
-            assistantTextIsPrematureMoment4HandoffDuringScenarioC(spoken) &&
-            !isScenarioCBoundaryReflectionWithoutMoment4Handoff(spoken) &&
-            !/\bthere are only two questions left\b/i.test(spoken) &&
-            !/\bsomething (?:a bit )?more personal\b/i.test(spoken)
+            (isPrematureStandaloneM4PersonalTransitionLine(spoken) ||
+              (assistantTextIsPrematureMoment4HandoffDuringScenarioC(spoken) &&
+                !isScenarioCBoundaryReflectionWithoutMoment4Handoff(spoken)))
           ) {
             void remoteLog('[S3_M4_FRAGMENT_STREAM_SUPPRESSED_BEFORE_CANONICAL]', {
               preview: spoken.slice(0, 200),
@@ -1409,7 +1408,8 @@ export function createParallelStreamMaybeQueueSentenceForTts(
           }
         }
         if (
-          deps.currentInterviewMomentRef.current === 4 &&
+          (deps.currentInterviewMomentRef.current === 4 ||
+            looksLikeMoment4GrudgePrompt(deps.lastQuestionTextRef.current ?? '')) &&
           params.shouldForceMoment4ThresholdProbe &&
           (looksLikeMoment4ThresholdQuestion(spoken) ||
             isIncompleteMoment4ThresholdLeadSentence(spoken) ||
@@ -1421,7 +1421,8 @@ export function createParallelStreamMaybeQueueSentenceForTts(
           return;
         }
         if (
-          deps.currentInterviewMomentRef.current === 4 &&
+          (deps.currentInterviewMomentRef.current === 4 ||
+            looksLikeMoment4GrudgePrompt(deps.lastQuestionTextRef.current ?? '')) &&
           !params.shouldForceMoment4ThresholdProbe &&
           !deps.moment4ThresholdProbeAskedRef.current &&
           (looksLikeMoment4ThresholdQuestion(spoken) ||
@@ -1444,7 +1445,10 @@ export function createParallelStreamMaybeQueueSentenceForTts(
           });
           return;
         }
-        if (deps.currentInterviewMomentRef.current === 4) {
+        if (
+          deps.currentInterviewMomentRef.current === 4 ||
+          looksLikeMoment4GrudgePrompt(deps.lastQuestionTextRef.current ?? '')
+        ) {
           spoken = coerceMoment4SpecificityFollowUpForTts(spoken);
           spoken = coerceMoment4ThresholdQuestionForTts(spoken);
         }

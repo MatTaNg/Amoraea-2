@@ -2,6 +2,8 @@ import type {
   ResetInterviewProgressRefsDeps,
   ResetScenarioCClientGatesDeps,
 } from '@features/aria/interviewProgressResetTypes';
+import { clearLiveMoment4ScoringRegistry } from '@features/aria/liveMoment4ScoringOnM5Entry';
+import { clearConfusionRepeatOfferPending } from '@features/aria/confusionRepeatOfferState';
 
 export function runResetScenarioCClientGatesOnly(deps: ResetScenarioCClientGatesDeps): void {
   deps.scenarioCRepairOnlyEvidenceRef.current = null;
@@ -9,6 +11,8 @@ export function runResetScenarioCClientGatesOnly(deps: ResetScenarioCClientGates
 }
 
 export function runResetInterviewProgressRefs(deps: ResetInterviewProgressRefsDeps): void {
+  clearLiveMoment4ScoringRegistry();
+  clearConfusionRepeatOfferPending();
   deps.resumeRepeatChoicePendingRef.current = false;
   deps.resumeLastAssistantTextRef.current = null;
   deps.resumeRepeatPrefetchMpegRef.current = null;
@@ -63,9 +67,7 @@ export function runResetInterviewProgressRefs(deps: ResetInterviewProgressRefsDe
     deps.resetWebAudioRouteSessionFingerprint();
   }
   deps.resetInterviewVadSession();
-  deps.resetWebInterviewGestureContext();
   deps.resetInterviewClosingTtsSession();
-  deps.gestureContextLostAtRef.current = null;
   deps.lastSuccessfulTtsTextNormalizedRef.current = null;
   deps.lastSuccessfulTtsDeliveredPreviewRef.current = '';
   deps.scenarioSkipConfirmedCountRef.current = 0;
@@ -78,15 +80,11 @@ export function runResetInterviewProgressRefs(deps: ResetInterviewProgressRefsDe
   /** Fresh starts deliver the opening greeting — not resume welcome-back TTS (that would block name capture on web). */
   deps.resumeOfferWelcomeTtsRef.current = false;
   deps.resumeEmotionAfterModalTextRef.current = null;
-  deps.webResumeWelcomeTapHandledRef.current = false;
-  deps.webResumeWelcomeTapPendingRef.current = false;
   deps.resumeWelcomeHydrationAttemptRef.current = null;
   deps.clearResumeWelcomePlaybackLock();
-  deps.webTtsUtteranceInFlightRef.current = null;
-  deps.webTtsUtteranceInFlightOptionsRef.current = null;
-  deps.webTtsTabInterruptPendingReplayRef.current = false;
-  deps.webTtsSpeakGenerationRef.current = 0;
-  deps.webTabRestoreReplayInFlightRef.current = false;
+  deps.ttsUtteranceInFlightRef.current = null;
+  deps.ttsUtteranceInFlightOptionsRef.current = null;
+  deps.ttsSpeakGenerationRef.current = 0;
   deps.parallelStreamingTtsRef.current = {
     active: false,
     cancelRequested: false,

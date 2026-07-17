@@ -1,5 +1,5 @@
 import { Asset } from 'expo-asset';
-import * as FileSystem from 'expo-file-system';
+import * as FileSystem from 'expo-file-system/legacy';
 import { Platform } from 'react-native';
 
 // eslint-disable-next-line @typescript-eslint/no-require-imports
@@ -14,14 +14,19 @@ export async function getReportLogoSrc(): Promise<string> {
     return '/amoraea-logo.png';
   }
 
-  const asset = Asset.fromModule(logoModule);
-  await asset.downloadAsync();
-  const uri = asset.localUri ?? asset.uri;
-  if (!uri) {
-    throw new Error('Report logo asset unavailable');
+  try {
+    const asset = Asset.fromModule(logoModule);
+    await asset.downloadAsync();
+    const uri = asset.localUri ?? asset.uri;
+    if (!uri) {
+      return '';
+    }
+    const base64 = await FileSystem.readAsStringAsync(uri, {
+      encoding: FileSystem.EncodingType.Base64,
+    });
+    return `data:image/png;base64,${base64}`;
+  } catch (err) {
+    console.warn('[ReportBranding] logo embed failed:', err);
+    return '';
   }
-  const base64 = await FileSystem.readAsStringAsync(uri, {
-    encoding: FileSystem.EncodingType.Base64,
-  });
-  return `data:image/png;base64,${base64}`;
 }

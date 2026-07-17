@@ -61,7 +61,18 @@ async function main() {
   await pngSquare(152, path.join(publicIcons, 'apple-touch-icon-152x152.png'));
   await pngSquare(167, path.join(publicIcons, 'apple-touch-icon-167x167.png'));
 
-  await pngSquare(512, path.join(root, 'assets', 'icons', 'icon-512x512.png'));
+  // Expo / store icons: solid brand background (iOS rejects transparent App Store icons).
+  await sharp(source)
+    .resize(512, 512, {
+      fit: 'contain',
+      background: themeBg,
+      kernel: sharp.kernel.lanczos3,
+      position: 'center',
+    })
+    .flatten({ background: themeBg })
+    .removeAlpha()
+    .png({ compressionLevel: 9 })
+    .toFile(path.join(root, 'assets', 'icons', 'icon-512x512.png'));
   await maskable512(path.join(root, 'assets', 'icons', 'icon-512x512-maskable.png'));
 
   const meta = await sharp(source).metadata();

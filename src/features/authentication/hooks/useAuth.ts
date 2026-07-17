@@ -5,7 +5,6 @@ import { Session, User, type EmailOtpType } from '@supabase/supabase-js';
 import type { Gender } from '@domain/models/Profile';
 import { isRelationshipValidationReferralCode } from '@features/relationshipValidation/constants';
 import {
-  AUTH_EMAIL_CONFIRM_PATH,
   AUTH_PASSWORD_RESET_PATH,
   clearPasswordResetPendingInStorage,
   hasExplicitRecoveryAuthContext,
@@ -15,10 +14,10 @@ import {
   hasWebAuthCallbackQuery,
   hasExplicitWebPasswordRecoveryContext,
   isAuthEmailConfirmPath,
-  isAuthPasswordResetPath,
   isBarePasswordResetLanding,
   isConfirmEmailTokenType,
   isEmailConfirmationCallback,
+  isEmailConfirmationContext,
   isSignupConfirmAtLoad,
   isPasswordResetPendingInStorage,
   markPasswordResetPendingInStorage,
@@ -32,6 +31,19 @@ import {
   webPasswordRecoveryLinkErrorMessage,
   type WebAuthCallbackIntent,
 } from '@features/authentication/webAuthRecoveryRouting';
+import {
+  getAuthEmailRedirectTo,
+  getPasswordResetRedirectTo,
+  isAuthCallbackDeepLink,
+  parseAuthCallbackUrl,
+} from '@features/authentication/authDeepLink';
+import * as ExpoLinking from 'expo-linking';
+
+export {
+  getAuthEmailRedirectTo,
+  getPasswordResetRedirectTo,
+  getAuthWebSiteOrigin as getAuthSiteOrigin,
+} from '@features/authentication/authDeepLink';
 
 if (Platform.OS === 'web') {
   normalizeWebEmailConfirmationUrl();
@@ -181,11 +193,19 @@ async function applySessionFromUrlHash(hash: string): Promise<void> {
   await supabase.auth.setSession({ access_token, refresh_token });
 }
 
-async function bootstrapWebAuthFromUrl(): Promise<void> {
-  if (Platform.OS !== 'web' || typeof window === 'undefined') return;
-
-  const { pathname, search, hash } = window.location;
+async function bootstrapAuthFromLocationParts(parts: {
+  pathname: string;
+  search: string;
+  hash: string;
+}): Promise<void> {
+  const { pathname, search, hash } = parts;
   const tokenType = readAuthCallbackTokenType(search, hash);
+
+  const replaceHistory = (path: string) => {
+    if (Platform.OS === 'web' && typeof window !== 'undefined') {
+      window.history.replaceState(null, '', path);
+    }
+  };
 
   if (isBarePasswordResetLanding(pathname, search, hash)) {
     clearPasswordResetPendingInStorage();
@@ -195,7 +215,7 @@ async function bootstrapWebAuthFromUrl(): Promise<void> {
       passwordRecoveryLinkError: null,
       emailConfirmationLinkError: null,
     });
-    window.history.replaceState(null, '', '/');
+    replaceHistory('/');
     return;
   }
 
@@ -204,7 +224,7 @@ async function bootstrapWebAuthFromUrl(): Promise<void> {
     clearPasswordResetPendingInStorage();
   }
 
-  if (isEmailConfirmationCallback() || isConfirmEmailTokenType(tokenType)) {
+  if (isEmailConfirmationContext(pathname, search, hash) || isConfirmEmailTokenType(tokenType)) {
     clearPasswordResetPendingInStorage();
   } else if (
     hasWebAuthCallbackQuery(search) &&
@@ -215,7 +235,7 @@ async function bootstrapWebAuthFromUrl(): Promise<void> {
 
   const hashErr = parseWebAuthHashError(hash);
   if (hashErr) {
-    if (isEmailConfirmationCallback()) {
+    if (isEmailConfirmationContext(pathname, search, hash)) {
       clearPasswordResetPendingInStorage();
       passwordRecoveryPendingRef.current = false;
       setSnapshot({
@@ -224,7 +244,7 @@ async function bootstrapWebAuthFromUrl(): Promise<void> {
         emailConfirmationLinkError: webEmailConfirmationLinkErrorMessage(hashErr),
       });
       await supabase.auth.signOut();
-      window.history.replaceState(null, '', '/');
+      replaceHistory('/');
       return;
     }
     if (hasRecoveryAuthHash(hash, { pathname, search })) {
@@ -243,7 +263,7 @@ async function bootstrapWebAuthFromUrl(): Promise<void> {
     normalizeWebPasswordRecoveryUrl();
   }
 
-  if (isEmailConfirmationCallback()) {
+  if (isEmailConfirmationContext(pathname, search, hash)) {
     clearPasswordResetPendingInStorage();
     passwordRecoveryPendingRef.current = false;
     setSnapshot({
@@ -285,7 +305,7 @@ async function bootstrapWebAuthFromUrl(): Promise<void> {
             error.message ||
             'This confirmation link is invalid or expired. Sign in and request a new confirmation email.',
         });
-        window.history.replaceState(null, '', '/');
+        replaceHistory('/');
       }
     } else if (passwordRecoveryPendingRef.current) {
       setSnapshot({
@@ -293,7 +313,7 @@ async function bootstrapWebAuthFromUrl(): Promise<void> {
         passwordRecoveryLinkError: null,
         emailConfirmationLinkError: null,
       });
-      window.history.replaceState(null, '', AUTH_PASSWORD_RESET_PATH);
+      replaceHistory(AUTH_PASSWORD_RESET_PATH);
     }
     return;
   }
@@ -326,7 +346,7 @@ async function bootstrapWebAuthFromUrl(): Promise<void> {
             error.message ||
             'This confirmation link is invalid or expired. Sign in and request a new confirmation email.',
         });
-        window.history.replaceState(null, '', '/');
+        replaceHistory('/');
       }
     } else if (isRecovery) {
       setSnapshot({
@@ -334,7 +354,7 @@ async function bootstrapWebAuthFromUrl(): Promise<void> {
         passwordRecoveryLinkError: null,
         emailConfirmationLinkError: null,
       });
-      window.history.replaceState(null, '', AUTH_PASSWORD_RESET_PATH);
+      replaceHistory(AUTH_PASSWORD_RESET_PATH);
     } else {
       clearPasswordResetPendingInStorage();
       passwordRecoveryPendingRef.current = false;
@@ -343,13 +363,13 @@ async function bootstrapWebAuthFromUrl(): Promise<void> {
         passwordRecoveryLinkError: null,
         emailConfirmationLinkError: null,
       });
-      window.history.replaceState(null, '', '/?confirmEmail=1');
+      replaceHistory('/?confirmEmail=1');
     }
     return;
   }
 
   if (hasImplicitAuthHash(hash)) {
-    if (isEmailConfirmationCallback()) {
+    if (isEmailConfirmationContext(pathname, search, hash)) {
       clearPasswordResetPendingInStorage();
       passwordRecoveryPendingRef.current = false;
     } else if (hasRecoveryAuthHash(hash, { pathname, search })) {
@@ -363,6 +383,21 @@ async function bootstrapWebAuthFromUrl(): Promise<void> {
     }
     await applySessionFromUrlHash(hash);
   }
+}
+
+async function bootstrapWebAuthFromUrl(): Promise<void> {
+  if (Platform.OS !== 'web' || typeof window === 'undefined') return;
+  await bootstrapAuthFromLocationParts({
+    pathname: window.location.pathname,
+    search: window.location.search,
+    hash: window.location.hash,
+  });
+}
+
+async function bootstrapNativeAuthFromUrl(url: string | null): Promise<void> {
+  if (Platform.OS === 'web' || !url || !isAuthCallbackDeepLink(url)) return;
+  webAuthCallbackAtLoadRef.current = true;
+  await bootstrapAuthFromLocationParts(parseAuthCallbackUrl(url));
 }
 
 let authInitPromise: Promise<void> | null = null;
@@ -399,12 +434,14 @@ function startAuthInitOnce(): Promise<void> {
       if (event === 'PASSWORD_RECOVERY') {
         const signupConfirmLoad = initialWebAuthCallback.signupConfirmAtLoad;
         const confirmLink = signupConfirmLoad || isEmailConfirmationCallback();
-        const explicitRecovery = hasExplicitWebPasswordRecoveryContext(
-          pathname,
-          search,
-          hash,
-          initialWebAuthCallback.intent,
-        );
+        const explicitRecovery =
+          passwordRecoveryPendingRef.current ||
+          hasExplicitWebPasswordRecoveryContext(
+            pathname,
+            search,
+            hash,
+            initialWebAuthCallback.intent,
+          );
         if (confirmLink || signupConfirmLoad) {
           passwordRecoveryPendingRef.current = false;
           setSnapshot({
@@ -471,6 +508,17 @@ function startAuthInitOnce(): Promise<void> {
     });
 
     await bootstrapWebAuthFromUrl();
+    if (Platform.OS !== 'web') {
+      try {
+        const initialUrl = await ExpoLinking.getInitialURL();
+        await bootstrapNativeAuthFromUrl(initialUrl);
+      } catch (err) {
+        console.warn('[Auth] native initial URL bootstrap failed:', err);
+      }
+      ExpoLinking.addEventListener('url', ({ url }) => {
+        void bootstrapNativeAuthFromUrl(url);
+      });
+    }
     authBootstrapCompleteRef.current = true;
 
     await supabase.auth.getSession();
@@ -480,43 +528,6 @@ function startAuthInitOnce(): Promise<void> {
   })();
 
   return authInitPromise;
-}
-
-/**
- * Site origin for Supabase auth redirects (always root — never `/welcome` or other app paths).
- */
-export function getAuthSiteOrigin(): string {
-  if (process.env.NODE_ENV === 'development') {
-    const dev = process.env.EXPO_PUBLIC_AUTH_REDIRECT_URL_DEV?.trim();
-    if (dev) {
-      try {
-        return new URL(dev).origin;
-      } catch {
-        /* fall through */
-      }
-    }
-    return 'http://localhost:8081';
-  }
-  const fromEnv = process.env.EXPO_PUBLIC_AUTH_REDIRECT_URL?.trim();
-  if (fromEnv) {
-    try {
-      return new URL(fromEnv).origin;
-    } catch {
-      /* fall through */
-    }
-  }
-  if (typeof window !== 'undefined' && window.location?.origin) {
-    return window.location.origin;
-  }
-  return 'https://www.amoraea.com';
-}
-
-export function getAuthEmailRedirectTo(): string {
-  return `${getAuthSiteOrigin()}${AUTH_EMAIL_CONFIRM_PATH}`;
-}
-
-export function getPasswordResetRedirectTo(): string {
-  return `${getAuthSiteOrigin()}${AUTH_PASSWORD_RESET_PATH}`;
 }
 
 export const AUTH_EMAIL_RESEND_COOLDOWN_MS = 60_000;
@@ -654,7 +665,7 @@ export const useAuth = () => {
     } = await supabase.auth.getSession();
     if (!currentSession) {
       throw new Error(
-        'Your reset session is missing. Open the latest link from your email in this browser tab, then try again.',
+        'Your reset session is missing. Open the latest link from your email in the Amoraea app, then try again.',
       );
     }
 

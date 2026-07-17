@@ -16,10 +16,6 @@ import {
   createMockSpeakAssistantTurn,
 } from './postClaudeGateTestHelpers';
 
-jest.mock('@features/aria/utils/speakLongFormInterviewHtmlMp3', () => ({
-  speakLongFormInterviewHtmlMp3: jest.fn(async () => false),
-}));
-
 describe('interviewConstructAndScoreDisplay', () => {
   it('detectConstructs maps repair and accountability cues', () => {
     const hits = detectConstructs('I was wrong and I should apologize to repair things.');

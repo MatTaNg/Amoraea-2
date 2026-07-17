@@ -1,10 +1,7 @@
 import type { MutableRefObject } from 'react';
 import type { SupabaseClient } from '@supabase/supabase-js';
 
-import {
-  applyElaborationAbsenceAfterNormalizeMoment4,
-  applyElaborationAbsenceAfterNormalizeMoment5,
-} from '@features/aria/interviewElaborationAbsenceScoring';
+import { applyElaborationAbsenceAfterNormalizeMoment5 } from '@features/aria/interviewElaborationAbsenceScoring';
 import { personalMomentBundleWasScored } from '@features/aria/interviewCompletionGate';
 import type { MessageWithScenario } from '@features/aria/interviewScenarioScoringSlice';
 import {
@@ -17,10 +14,10 @@ import {
   diagnoseMoment5ScoringGuard,
 } from '@features/aria/resolveInterviewTranscriptForCompletionScoring';
 import { finalizePersonalMomentDepthSignals } from '@features/aria/personalMomentDepthSignals';
-import { applyMoment4UnassessableNullRules } from '@features/aria/moment4UnassessableNullRules';
-import { userTextFromTranscriptTurns } from '@features/aria/moment4AccountabilitySituationalExempt';
-import { buildPersonalMomentScoringPrompt } from '@features/aria/personalMomentScoringPrompt';
-import { inferPersonalMomentSlices, resolveMoment5ScoringSlice } from '@features/aria/personalMomentSlices';
+import {
+  awaitLiveMoment4ScoringIfPending,
+} from '@features/aria/liveMoment4ScoringOnM5Entry';
+import { resolveMoment5ScoringSlice } from '@features/aria/personalMomentSlices';
 import {
   promoteMoment5LegacyContemptForScoringResult,
   sanitizeMoment5PersonalScoresForAggregate,
@@ -28,32 +25,30 @@ import {
 } from '@features/aria/personalMomentSliceSanitize';
 import type {
   PersonalMoment5SliceForSanitize,
-  PersonalMomentSliceForSanitize,
 } from '@features/aria/personalMomentSliceSanitize';
 import {
-  applyMoment4PostParseCoercionAndSalvage,
-  backfillMoment4KeyEvidenceIfScoresOtherwiseUnpersistable,
-  fillMoment4KeyEvidenceWhenNumericScoreButMissingQuote,
   finalizeMoment5ParsedModelScore,
-  mergeMoment4PillarScoresAfterEvidenceNormalize,
   mergeMoment5PillarScoresAfterEvidenceNormalize,
   normalizeScoresByEvidence,
   stampMoment5ScoringMetadata,
 } from '@features/aria/probeAndScoringUtils';
 import {
   DEFERRED_MOMENT_ANTHROPIC_TIMEOUT_MS,
-  MOMENT_4_HANDOFF,
 } from '@features/aria/scoreInterviewModuleConstants';
 import {
   finalizePersonalMomentMentalizingOvercertaintyFromModel,
   normalizePersonalMomentContemptTierBreakdown,
 } from '@features/aria/scoreInterviewScoringHelpers';
 import type { PersonalMomentScoreResult } from '@features/aria/scoreInterviewScoringHelpers';
+import {
+  moment4AggregateFromBaselinePatterns,
+  scoreAndPersistMoment4Slice,
+} from '@features/aria/scoreAndPersistMoment4Slice';
 import { CLAUDE_SONNET_MODEL } from '@utilities/anthropicMessagesClient';
 import { fetchWithTimeout } from '@utilities/fetchWithTimeout';
 import { parseJsonObjectFromModelText } from '@utilities/parseHolisticModelJson';
 import {
-  persistMoment4ScoresImmediate,
+  fetchAttemptScoringBaseline,
   persistMoment5ScoresImmediate,
 } from '@utilities/persistPersonalMomentScoresIncremental';
 import type { AttemptScoringBaseline } from '@utilities/persistPersonalMomentScoresIncremental';
@@ -109,175 +104,38 @@ export async function scoreStandardDeferredPersonalMoments(
   let moment4ForAggregate: ReturnType<typeof sanitizePersonalMomentScoresForAggregate> | null = null;
   let moment5ForAggregate: ReturnType<typeof sanitizeMoment5PersonalScoresForAggregate> | null = null;
 
-  const personalSlices = inferPersonalMomentSlices(msgsDeferred);
-  const slice = personalSlices.moment4;
-  const userTurnsM4 = slice.filter((m) => m.role === 'user').length;
-  logM4Debug('standard_deferred_m4_infer', {
-    transcriptLen: msgsDeferred.length,
-    m4Start: personalSlices.m4Start,
-    m5Start: personalSlices.m5Start,
-    moment4SliceLen: slice.length,
-    moment4UserTurns: userTurnsM4,
-  });
-  logM4Debug('standard_deferred_last_10_moments', {
-    turns: msgsDeferred.slice(-10).map((m) => ({
-      role: m.role,
-      moment: m.interviewMoment ?? null,
-      scenario: m.scenarioNumber ?? null,
-      preview: (m.content ?? '').slice(0, 48),
-    })),
-  });
-  logM4Debug('standard_deferred_m4_gate', {
-    moment4UserTurnsLength: userTurnsM4,
-    willScoreM4: userTurnsM4 >= 1,
-  });
-
-  if (userTurnsM4 >= 1) {
-    const deferredMoment4Narrative = deferredMoment4NarrativeRef.current;
-    const scoringSlice = deferredMoment4Narrative
-      ? [
-          slice[0] ?? { role: 'assistant', content: MOMENT_4_HANDOFF },
-          { role: 'user', content: deferredMoment4Narrative },
-          ...slice.slice(1),
-        ]
-      : slice;
-    const m4PromptBuilt = buildPersonalMomentScoringPrompt(scoringSlice, moment4SpecificityScoringRef.current);
-    logM4Debug('standard_deferred_m4_prompt', {
-      promptLen: m4PromptBuilt.length,
-      scoringSliceTurns: scoringSlice.length,
-      scoringSliceJsonLen: JSON.stringify(scoringSlice).length,
+  await awaitLiveMoment4ScoringIfPending(attemptIdForIncremental);
+  if (attemptIdForIncremental && userId) {
+    scoringBaseline = await fetchAttemptScoringBaseline(supabase, attemptIdForIncremental, userId);
+  }
+  const hydratedLiveM4 = moment4AggregateFromBaselinePatterns(scoringBaseline.patterns);
+  if (hydratedLiveM4) {
+    moment4ForAggregate = hydratedLiveM4;
+    logM4Debug('standard_deferred_m4_skipped_already_persisted', {
+      attemptId: attemptIdForIncremental,
     });
-    const m4ScoreStartedAt = Date.now();
-    try {
-      const scored = await withRetry(
-        async (): Promise<PersonalMomentScoreResult> => {
-          logM4Debug('standard_deferred_m4_claude_request', { at: Date.now() });
-          const res = await fetchWithTimeout(apiUrl, {
-            method: 'POST',
-            headers,
-            timeoutMs: DEFERRED_MOMENT_ANTHROPIC_TIMEOUT_MS,
-            body: JSON.stringify({
-              model: CLAUDE_SONNET_MODEL,
-              max_tokens: 2048,
-              messages: [{ role: 'user', content: m4PromptBuilt }],
-            }),
-          });
-          const data = await res.json();
-          logM4Debug('standard_deferred_m4_claude_response', {
-            ok: res.ok,
-            status: res.status,
-            contentBlocks: Array.isArray((data as { content?: unknown[] })?.content)
-              ? (data as { content: unknown[] }).content.length
-              : 0,
-          });
-          if (!res.ok) {
-            const e = new Error(
-              (data as { error?: { message?: string } })?.error?.message ?? `HTTP ${res.status}`,
-            );
-            (e as Error & { status?: number }).status = res.status;
-            throw e;
-          }
-          const raw = (data.content?.[0]?.text ?? '{}') as string;
-          const parsedM4 = parseJsonObjectFromModelText(raw) as PersonalMomentScoreResult;
-          applyMoment4PostParseCoercionAndSalvage(raw, parsedM4 as unknown as Record<string, unknown>);
-          parsedM4.pillarScores = mergeMoment4PillarScoresAfterEvidenceNormalize(
-            normalizeScoresByEvidence(
-              parsedM4.pillarScores as Record<string, unknown>,
-              parsedM4.keyEvidence,
-            ),
-          ) as PersonalMomentScoreResult['pillarScores'];
-          fillMoment4KeyEvidenceWhenNumericScoreButMissingQuote(parsedM4);
-          const depthModifierMeta = applyElaborationAbsenceAfterNormalizeMoment4(
-            parsedM4,
-            scoringSlice,
-            moment4SpecificityScoringRef.current,
-            msgsDeferred,
-          );
-          void remoteLog('[SCORING_DEPTH_MODIFIER]', {
-            scoring_slice: 'moment_4',
-            ...depthModifierMeta,
-          });
-          normalizePersonalMomentContemptTierBreakdown(parsedM4);
-          finalizePersonalMomentMentalizingOvercertaintyFromModel(parsedM4);
-          finalizePersonalMomentDepthSignals(parsedM4, {
-            rawModelText: raw,
-            transcript: msgsDeferred,
-            scoringSlice,
-            moment: 4,
-          });
-          applyMoment4UnassessableNullRules({
-            pillarScores: parsedM4.pillarScores as Record<string, number | null | undefined>,
-            keyEvidence: parsedM4.keyEvidence ?? {},
-            pillarConfidence: parsedM4.pillarConfidence as Record<string, string> | undefined,
-            response_concreteness: parsedM4.response_concreteness,
-            userText: userTextFromTranscriptTurns(scoringSlice),
-            lowSpecificityAfterProbe: moment4SpecificityScoringRef.current?.lowSpecificityAfterProbe,
-          });
-          backfillMoment4KeyEvidenceIfScoresOtherwiseUnpersistable(parsedM4, {
-            rawModelResponse: raw,
-            parsedSnapshot: {
-              pillarScores: parsedM4.pillarScores,
-              keyEvidence: parsedM4.keyEvidence,
-            },
-          });
-          logM4Debug('standard_deferred_m4_model_parsed', {
-            pillarKeys: parsedM4.pillarScores ? Object.keys(parsedM4.pillarScores) : [],
-            keyEvidenceKeys: parsedM4.keyEvidence ? Object.keys(parsedM4.keyEvidence) : [],
-          });
-          return parsedM4;
-        },
-        {
-          retries: 1,
-          baseDelay: 4000,
-          maxDelay: 12000,
-          context: 'standard deferred moment 4',
-          sessionLog: userId
-            ? {
-                userId,
-                attemptId: getSessionLogRuntime().attemptId,
-                platform: getSessionLogRuntime().platform,
-              }
-            : undefined,
-        },
-      );
-      logM4Debug('standard_deferred_m4_scoring_finished', {
-        elapsedMs: Date.now() - m4ScoreStartedAt,
-      });
-      if (deferredMoment4NarrativeRef.current) {
-        deferredMoment4NarrativeRef.current = null;
-      }
-      moment4ForAggregate = sanitizePersonalMomentScoresForAggregate(
-        scored as unknown as PersonalMomentSliceForSanitize,
-      );
-      logM4Debug('standard_deferred_m4_after_sanitize', {
-        hasAggregate: !!moment4ForAggregate,
-        bundleAssessable: moment4ForAggregate ? personalMomentBundleWasScored(moment4ForAggregate) : false,
-      });
-      if (moment4ForAggregate && !personalMomentBundleWasScored(moment4ForAggregate)) {
-        await remoteLog('[STANDARD] moment 4 slice not assessable after sanitize; storing null', {
-          attemptId: interviewSessionAttemptId,
-        });
-        moment4ForAggregate = null;
-      } else if (moment4ForAggregate && attemptIdForIncremental && userId) {
-        scoringBaseline = await persistMoment4ScoresImmediate(
-          supabase,
-          attemptIdForIncremental,
-          userId,
-          moment4ForAggregate,
-          scoringBaseline,
-          moment4SpecificityScoringRef.current,
-        );
-      }
-    } catch (err) {
-      const message = err instanceof Error ? err.message : String(err);
-      const stack = err instanceof Error ? err.stack?.slice(0, 1200) : undefined;
-      await remoteLog('[STANDARD] moment 4 scoring failed', { message, stack });
-      if (__DEV__) {
-        console.error('[M4 Debug] standard deferred moment 4 scoring threw:', err);
-      }
-    }
+    void remoteLog('[STANDARD] moment 4 already persisted (live m5-entry); skipping rescore', {
+      attemptId: interviewSessionAttemptId ?? attemptIdForIncremental,
+    });
   } else {
-    logM4Debug('standard_deferred_m4_skipped_no_user_turns', { userTurnsM4 });
+    const m4Result = await scoreAndPersistMoment4Slice({
+      apiUrl,
+      headers,
+      msgs: msgsDeferred,
+      userId,
+      attemptId: attemptIdForIncremental,
+      scoringBaseline,
+      supabase,
+      deferredMoment4Narrative: deferredMoment4NarrativeRef.current,
+      moment4SpecificityScoring: moment4SpecificityScoringRef.current,
+      retryContext: 'standard deferred moment 4',
+      elaborationAvgTranscript: msgsDeferred,
+      clearDeferredMoment4Narrative: () => {
+        if (deferredMoment4NarrativeRef.current) deferredMoment4NarrativeRef.current = null;
+      },
+    });
+    moment4ForAggregate = m4Result.moment4ForAggregate;
+    scoringBaseline = m4Result.scoringBaseline;
   }
 
   const sliceM5 = resolveMoment5ScoringSlice(msgsDeferred);
@@ -306,7 +164,8 @@ export async function scoreStandardDeferredPersonalMoments(
             timeoutMs: DEFERRED_MOMENT_ANTHROPIC_TIMEOUT_MS,
             body: JSON.stringify({
               model: CLAUDE_SONNET_MODEL,
-              max_tokens: 900,
+              // Match M4: keyEvidence + contempt_tier_breakdown routinely exceed 900 tokens and truncate mid-JSON.
+              max_tokens: 2048,
               messages: [{ role: 'user', content: buildMoment5AccountabilityScoringPrompt(sliceM5, m5Meta) }],
             }),
           });

@@ -1,4 +1,4 @@
-import type { getLastPreInitTriggerDuring } from '@features/aria/utils/webInterviewMicPreInit';
+import type { PreInitTriggerDuring } from '@features/aria/utils/interviewMicPreInitTypes';
 
 export type AudioRecorderPermissionStatus = 'granted' | 'denied' | null;
 
@@ -12,7 +12,7 @@ export type WebRecordingTiming = {
   chunkLatencyMs: number | null;
   preInitFallbackReason: string | null;
   streamReactivated: boolean;
-  preInitTriggeredDuring: ReturnType<typeof getLastPreInitTriggerDuring>;
+  preInitTriggeredDuring: PreInitTriggerDuring | null;
 };
 
 export type AudioRecordingCompleteMeta = {

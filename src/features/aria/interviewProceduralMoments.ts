@@ -26,9 +26,20 @@ export function isResumeReentryWelcomePrompt(lastQuestionText: string | null | u
 export function isClientAudioRecoveryAssistantLine(lastQuestionText: string | null | undefined): boolean {
   const q = (lastQuestionText ?? '').trim();
   if (!q) return false;
+  const lower = q.toLowerCase();
   if (/^i only caught part of that\b/i.test(q)) return true;
   if (/^i didn't catch any speech on that try\b/i.test(q)) return true;
   if (/^i'm having a little trouble on my end\b/i.test(q)) return true;
+  // Silent / mic / transcription recovery — never verbatim-repeat these as the interview prompt.
+  if (/\bon that try\b/.test(lower) && /\b(catch|hear|missed|speech|audio)\b/.test(lower)) return true;
+  if (/\bcouldn'?t hear (anything|you|that)\b/.test(lower)) return true;
+  if (/\bcould not hear (anything|you|that)\b/.test(lower)) return true;
+  if (/\bdidn'?t (quite )?catch (that|any speech|you)\b/.test(lower)) return true;
+  if (/\bi missed that\b/.test(lower) && /\b(say|tap|try|again|once more)\b/.test(lower)) return true;
+  if (/\btap the mic\b/.test(lower) && /\b(ready|again|try)\b/.test(lower)) return true;
+  if (/\bmic did not start cleanly\b/.test(lower)) return true;
+  if (/\bhaving trouble starting the microphone\b/.test(lower)) return true;
+  if (/\bseems like an interruption happened\b/.test(lower)) return true;
   return false;
 }
 
@@ -87,6 +98,8 @@ const READINESS_AFFIRMATION_PATTERNS: RegExp[] = [
   /^yeah\b/i,
   /^yep\b/i,
   /^yup\b/i,
+  /** Whisper often clips "Yes" to a single letter on readiness turns. */
+  /^[sy]$/i,
   /^sure\b/i,
   /^ok(?:ay)?\b/i,
   /^ready\b/i,

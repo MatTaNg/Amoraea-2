@@ -4,14 +4,12 @@ import {
   createInterviewAttemptBootstrapSyncExtra,
   createInterviewAuthSignedOutSaveSyncExtra,
   createInterviewUnhandledRejectionSaveSyncExtra,
-  createInterviewWebGreetingPrefetchSyncExtra,
 } from '@features/aria/createInterviewBootSyncExtras';
 import {
   buildEnsureValidSessionSyncExtra,
   buildInterviewAttemptBootstrapSyncExtra,
   buildInterviewAuthSignedOutSaveSyncExtra,
   buildInterviewUnhandledRejectionSaveSyncExtra,
-  buildInterviewWebGreetingPrefetchSyncExtra,
   type AriaInterviewServicesExtendedLocalScope,
 } from '@features/aria/buildInterviewBootSyncExtras';
 import {
@@ -195,14 +193,6 @@ export function createAriaScreenMountedLogSyncCtxFromScreen(
   servicesBaseCtx: AriaInterviewDepsSyncContext,
 ): AriaInterviewDepsSyncContext {
   return createAriaScreenMountedLogSyncExtra(buildAriaScreenMountedLogSyncExtra(servicesBaseCtx));
-}
-
-export function createInterviewWebGreetingPrefetchSyncCtxFromScreen(
-  servicesBaseCtx: AriaInterviewDepsSyncContext,
-): AriaInterviewDepsSyncContext {
-  return createInterviewWebGreetingPrefetchSyncExtra(
-    buildInterviewWebGreetingPrefetchSyncExtra(servicesBaseCtx),
-  );
 }
 
 export function createInterviewAttemptBootstrapSyncCtxFromScreen(

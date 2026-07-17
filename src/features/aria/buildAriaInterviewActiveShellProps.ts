@@ -3,7 +3,7 @@ import type { AriaInterviewActiveShellProps } from '@features/aria/screens/AriaI
 export type AriaInterviewActiveShellScope = {
   layout: Pick<
     AriaInterviewActiveShellProps,
-    'adminInterviewTopBar' | 'isAdmin' | 'status' | 'isInterviewerView' | 'webActiveGestureOverlayKind' | 'inputDisabled'
+    'adminInterviewTopBar' | 'isAdmin' | 'status' | 'isInterviewerView' | 'inputDisabled'
   >;
   emotionModal: Pick<
     AriaInterviewActiveShellProps,
@@ -14,15 +14,13 @@ export type AriaInterviewActiveShellScope = {
   >;
   interviewerMic: Pick<
     AriaInterviewActiveShellProps,
-    | 'useMediaRecorderPath'
     | 'audioRecorder'
     | 'voiceState'
-    | 'webInterviewerOutputActive'
+    | 'interviewerOutputActive'
     | 'interviewUiPhase'
     | 'referenceCardScenario'
     | 'referenceCardPrompt'
     | 'ttsPlaybackReliabilityNotice'
-    | 'webInsecureContextMessage'
     | 'sessionAudioHealthNotice'
     | 'conversationErrorNotice'
     | 'micPermission'
@@ -33,7 +31,6 @@ export type AriaInterviewActiveShellScope = {
     | 'micWarning'
     | 'useTapMicUi'
     | 'handleNativeOrWhisperMicPress'
-    | 'handleWebMicPressIn'
     | 'handleInterviewSignOut'
     | 'preInitMeterLevel'
     | 'micSessionRecovering'
@@ -68,15 +65,7 @@ export type AriaInterviewActiveShellScope = {
     | 'replaceWithStandardApplicantPostInterviewHandoffForUser'
     | 'routeOnComplete'
   >;
-  webGestures: Pick<
-    AriaInterviewActiveShellProps,
-    | 'resumeOfferWelcomeTtsRef'
-    | 'webTabRestoreReplayInFlightRef'
-    | 'runWebGestureTtsFlush'
-    | 'handleWebTabGestureRestoreTap'
-    | 'handleWebResumeWelcomeTap'
-    | 'interviewSessionAttemptIdRef'
-  >;
+  webGestures: Pick<AriaInterviewActiveShellProps, 'interviewSessionAttemptIdRef'>;
 };
 
 /** Merge grouped active-shell props into the flat shape expected by AriaInterviewActiveShell. */

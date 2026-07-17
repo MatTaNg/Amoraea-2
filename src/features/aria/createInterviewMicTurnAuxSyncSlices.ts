@@ -4,7 +4,6 @@ type SyncExtraParams = AriaInterviewDepsSyncContext;
 
 export function createInterviewWebSpeechRecognitionSyncSlice(params: SyncExtraParams): SyncExtraParams {
   return {
-    useMediaRecorderPath: params.useMediaRecorderPath,
     recognitionRef: params.recognitionRef,
     setCurrentTranscript: params.setCurrentTranscript,
     transcriptAtReleaseRef: params.transcriptAtReleaseRef,

@@ -4,7 +4,6 @@ import * as preamble from '@features/aria/ariaInterviewScreenPreambleBindings';
 import * as wiring from '@features/aria/ariaInterviewScreenWiringImports';
 import type { AriaInterviewScreenSessionState } from '@features/aria/hooks/useAriaInterviewScreenSessionState';
 import type { AriaInterviewGateDepSyncWiringParams } from '@features/aria/hooks/useAriaInterviewGateDepSyncWiring';
-import type { GestureContextLostReason } from '@features/aria/utils/webInterviewGestureContext';
 
 export type BuildAriaInterviewGateDepSyncWiringParamsFromScreenInput = {
   userId: string;
@@ -13,7 +12,6 @@ export type BuildAriaInterviewGateDepSyncWiringParamsFromScreenInput = {
     lastHeadphoneProbeRef: MutableRefObject<unknown>;
     lastAudioRouteFingerprintRef: MutableRefObject<unknown>;
     routeChangedDuringRecordingRef: MutableRefObject<boolean>;
-    gestureContextLostAtRef: MutableRefObject<{ atMs: number; reason: GestureContextLostReason } | null>;
   };
 };
 
@@ -47,7 +45,6 @@ export function buildAriaInterviewGateDepSyncWiringParamsFromScreen(
       ...gate.webTts,
       lastHeadphoneProbeRef: micSession.lastHeadphoneProbeRef,
       lastAudioRouteFingerprintRef: micSession.lastAudioRouteFingerprintRef,
-      gestureContextLostAtRef: micSession.gestureContextLostAtRef,
     },
     resumeEmotion: {
       ...gate.resumeEmotion,

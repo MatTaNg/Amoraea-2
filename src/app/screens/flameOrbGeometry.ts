@@ -25,10 +25,10 @@ export const INNER_FLAME_PATH = `
   Z
 `;
 
-/** Matches `CONFIG` scale in `FlameOrb.tsx` (CSS transform on SVG). */
+/** Matches `CONFIG` scale in `FlameOrb.tsx` (CSS transform on logo). */
 export const FLAME_STATE_SCALE = {
   idle: 1,
-  speaking: 1.35,
-  listening: 0.88,
-  processing: 1.05,
+  speaking: 1.55,
+  listening: 0.86,
+  processing: 1.08,
 } as const;

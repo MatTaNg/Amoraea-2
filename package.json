@@ -1,6 +1,6 @@
 {
   "name": "amoraea",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "main": "index.js",
   "scripts": {
     "postinstall": "patch-package",
@@ -14,13 +14,11 @@
     "web:cf-tunnel": "npx --yes cloudflared tunnel --url http://localhost:8081",
     "build:web": "expo export -p web",
     "generate:pwa-icons": "node scripts/generate-pwa-icons.mjs",
-
     "//mobile": "--- Device testing (dev client): build/install ONCE, then start:dev-client each session ---",
     "//start:dev-client": "Daily coding: Metro for installed development builds on phone (Fast Refresh). Not Expo Go.",
     "start:dev-client": "expo start --dev-client",
     "//start:dev-client:tunnel": "Same as start:dev-client when phone cannot reach your PC on local Wi-Fi.",
     "start:dev-client:tunnel": "expo start --dev-client --tunnel",
-
     "//eas:build:development": "ONE-TIME (or after native/permission/SDK changes): cloud build of the installable development shell for phones.",
     "eas:build:development": "eas build --profile development --platform all",
     "eas:build:development:android": "eas build --profile development --platform android",

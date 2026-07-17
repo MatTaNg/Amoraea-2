@@ -1,12 +1,9 @@
-import { Platform } from 'react-native';
-
 import { stripControlTokens } from '@features/aria/interviewControlTokens';
 import { findLastRepeatableInterviewQuestionText } from '@features/aria/interviewDisengagementProbes';
 import {
   isAssistantBubbleForTranscript,
   syncReferenceCardStateFromAssistantMessages,
 } from '@features/aria/interviewReferenceCardResumeHelpers';
-import { clearPendingWebSpeechGesturePair } from '@features/aria/interviewWebPendingSpeechGesture';
 import {
   clearResumeWelcomeSpokenForHydration,
   markResumeWelcomeSpoken,
@@ -15,7 +12,6 @@ import {
 import type { MessageWithScenario } from '@features/aria/interviewScenarioScoringSlice';
 import type { HandleResumeDeps } from '@features/aria/sessionLifecycleTypes';
 import { markSessionResumedForNextRecordingStart } from '@utilities/sessionLogging/sessionResumeRecordingTelemetry';
-import { syncWebAudioRouteSessionEnvelopeFromCache } from '@utilities/sessionLogging/webMediaDeviceAudioRoute';
 import type { InterviewResumePlan } from '@utilities/interviewResumeCursor';
 import {
   buildResumeWelcomeMessage,
@@ -26,21 +22,15 @@ type ResumeWelcomeDeps = Pick<
   HandleResumeDeps,
   | 'speakTextSafe'
   | 'awaitEmotionModalForIndex'
-  | 'detachWebGestureFlushListener'
   | 'currentScenarioRef'
   | 'resumeOfferWelcomeTtsRef'
   | 'resumeWelcomeMessageRef'
   | 'resumeWelcomeHydrationAttemptRef'
-  | 'webResumeWelcomeTapHandledRef'
-  | 'webResumeWelcomeTapPendingRef'
-  | 'setWebResumeWelcomeTapPending'
   | 'resumeLastAssistantTextRef'
   | 'lastQuestionTextRef'
   | 'setMessages'
   | 'pendingScenarioIntroAfterResumeWelcomeRef'
   | 'resumeRepeatChoicePendingRef'
-  | 'pendingWebSpeechForGestureRef'
-  | 'setWebDesktopPendingTtsGestureOverlay'
   | 'committedScenarioRef'
   | 'setReferenceCardScenario'
   | 'setReferenceCardPrompt'
@@ -99,7 +89,6 @@ export async function applyResumeWelcomeMessagesAndPlayback(params: {
     deps.resumeWelcomeHydrationAttemptRef.current !== persistenceAttemptIdForWelcome;
   if (isFirstWelcomeHydrationForAttempt) {
     deps.resumeWelcomeHydrationAttemptRef.current = persistenceAttemptIdForWelcome;
-    deps.webResumeWelcomeTapHandledRef.current = false;
     if (deps.resumeOfferWelcomeTtsRef.current) {
       await clearResumeWelcomeSpokenForHydration(persistenceAttemptIdForWelcome);
     }
@@ -129,28 +118,15 @@ export async function applyResumeWelcomeMessagesAndPlayback(params: {
   deps.setReferenceCardScenario(refSync.scenario);
   deps.setReferenceCardPrompt(refSync.prompt);
   deps.setInterviewUiPhase(refSync.phase);
+  if (refSync.prompt?.trim()) {
+    deps.lastQuestionTextRef.current = refSync.prompt;
+    deps.resumeLastAssistantTextRef.current = refSync.prompt;
+  }
 
-  deps.pendingScenarioIntroAfterResumeWelcomeRef.current =
-    Platform.OS === 'web' && scenarioIntroBody ? scenarioIntroBody : null;
+  deps.pendingScenarioIntroAfterResumeWelcomeRef.current = null;
 
   deps.resumeRepeatChoicePendingRef.current = false;
   markSessionResumedForNextRecordingStart();
-
-  if (Platform.OS === 'web') {
-    clearPendingWebSpeechGesturePair(deps.pendingWebSpeechForGestureRef);
-    deps.detachWebGestureFlushListener();
-    deps.setWebDesktopPendingTtsGestureOverlay(false);
-    syncWebAudioRouteSessionEnvelopeFromCache();
-    if (
-      deps.resumeOfferWelcomeTtsRef.current &&
-      !welcomeAlreadySpoken &&
-      !deps.webResumeWelcomeTapHandledRef.current
-    ) {
-      deps.webResumeWelcomeTapPendingRef.current = true;
-      deps.setWebResumeWelcomeTapPending(true);
-    }
-    return;
-  }
 
   void (async () => {
     try {
@@ -165,7 +141,15 @@ export async function applyResumeWelcomeMessagesAndPlayback(params: {
       const attemptId = deps.interviewSessionAttemptIdRef.current;
       let spokeWelcome = false;
       if (offerWelcome && !(await wasResumeWelcomeSpoken(attemptId))) {
-        await deps.speakTextSafe(welcomeBack, { telemetrySource: 'greeting', ttsTriggerSource: 'callback' });
+        await deps.speakTextSafe(welcomeBack, {
+          telemetrySource: 'greeting',
+          ttsTriggerSource: 'callback',
+          // Do not overwrite lastQuestionTextRef with welcome-back meta.
+          skipLastQuestionRef: true,
+          skipQuestionDeliveredTelemetry: true,
+          skipInterviewSpeechAdvance: true,
+          skipQuestionTiming: true,
+        });
         await markResumeWelcomeSpoken(attemptId);
         spokeWelcome = true;
       }
@@ -174,6 +158,7 @@ export async function applyResumeWelcomeMessagesAndPlayback(params: {
         await deps.speakTextSafe(scenarioIntroBody, {
           telemetrySource: 'greeting',
           ttsTriggerSource: 'callback',
+          // Scenario restart intro is the question to resume; keep lastQuestionTextRef in sync.
         });
       } else if (hadCatchUp && deps.resumeEmotionAfterModalTextRef.current?.trim()) {
         const afterModal = deps.resumeEmotionAfterModalTextRef.current;

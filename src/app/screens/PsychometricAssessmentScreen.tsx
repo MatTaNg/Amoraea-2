@@ -5,11 +5,11 @@ import {
   TouchableOpacity,
   Pressable,
   StyleSheet,
-  SafeAreaView,
   ScrollView,
   ActivityIndicator,
   Alert,
 } from 'react-native';
+import { SafeAreaContainer } from '@ui/components/SafeAreaContainer';
 import { AdminInterviewDashboard } from '@app/screens/AdminInterviewDashboard';
 import { useAuth } from '@/shared/hooks/AuthProvider';
 import { isAmoraeaAdminConsoleEmail } from '@/constants/adminConsole';
@@ -448,13 +448,13 @@ export function PsychometricAssessmentScreen({ navigation, route }: Props) {
 
   if (loading || finishing) {
     return (
-      <SafeAreaView style={styles.container}>
+      <SafeAreaContainer style={styles.container}>
         {openAdminPanel ? <PsychometricsAdminPanelButton onPress={openAdminPanel} /> : null}
         <ActivityIndicator size="large" color={PSYCHOMETRICS_ACCENT} style={styles.loader} />
         {finishing ? (
           <Text style={styles.finishingText}>Saving your results…</Text>
         ) : null}
-      </SafeAreaView>
+      </SafeAreaContainer>
     );
   }
 
@@ -490,9 +490,9 @@ export function PsychometricAssessmentScreen({ navigation, route }: Props) {
 
   if (!assessment || !question) {
     return (
-      <SafeAreaView style={styles.container}>
+      <SafeAreaContainer style={styles.container}>
         <ActivityIndicator size="large" color={PSYCHOMETRICS_ACCENT} style={styles.loader} />
-      </SafeAreaView>
+      </SafeAreaContainer>
     );
   }
   const batteryProgress = psychometricBatteryProgressPosition(
@@ -524,7 +524,7 @@ export function PsychometricAssessmentScreen({ navigation, route }: Props) {
       : null;
 
   return (
-    <SafeAreaView style={styles.container}>
+    <SafeAreaContainer style={styles.container}>
       {openAdminPanel ? <PsychometricsAdminPanelButton onPress={openAdminPanel} /> : null}
       <ScrollView contentContainerStyle={scrollContentStyle} bounces={false}>
         <View style={styles.progressBarContainer}>
@@ -588,7 +588,7 @@ export function PsychometricAssessmentScreen({ navigation, route }: Props) {
 
         {saving ? <ActivityIndicator size="small" color={PSYCHOMETRICS_ACCENT} style={styles.savingSpinner} /> : null}
       </ScrollView>
-    </SafeAreaView>
+    </SafeAreaContainer>
   );
 }
 

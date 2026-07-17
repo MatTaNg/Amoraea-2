@@ -38,6 +38,17 @@ export const SKIP_REQUEST_CONFIRMATION_PROMPT_LINE =
   'Are you sure you want to skip this one? We can, but it may affect your score.';
 
 /**
+ * Softer skip confirmation after inability / "I don't know" (not an explicit skip ask).
+ * Keep distinct from {@link SKIP_REQUEST_CONFIRMATION_PROMPT_LINE}.
+ */
+export const INABILITY_SKIP_CONFIRMATION_PROMPT_LINE =
+  "We can skip this question if you'd like, but it may affect your score, do you want to skip it?";
+
+/** Client TTS when the user declines a skip offer — not a scenario question for repeat-request replay. */
+export const FRUSTRATION_SKIP_DECLINE_ENCOURAGEMENT_LINE =
+  "Great, let's stay on this one then. Just try your best. You've got this.";
+
+/**
  * One short extract from prior user words only — for skip-request reflection and already-answered ownership.
  */
 export function extractSalientReflectionClause(excerpt: string): string | null {

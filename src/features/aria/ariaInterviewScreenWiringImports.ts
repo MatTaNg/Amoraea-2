@@ -20,14 +20,12 @@ export { looksLikeMoment4SpecificityFollowUpPrompt } from '@features/aria/moment
 export { isMoment5AssistantAnchor, isScenarioCQ1Prompt, looksLikeMoment5AccountabilityProbeAssistantPrompt } from '@features/aria/probeAndScoringUtils';
 export { detectScenarioFromResponse, getScenarioNumberForNewMessage } from '@features/aria/scenarioNumberDetection';
 export { prepareInterviewTtsPlayback } from '@features/aria/utils/audioModeHelpers';
-export { hasWebInterviewHtmlAudioTabResumePending, isWebInterviewMidUtteranceTabResumeActive } from '@features/aria/utils/webInterviewHtmlAudioTabResume';
-export { holdTabStashedHtmlAudioForGestureResume } from '@features/aria/utils/webInterviewHtmlAudioTabRestoreOrchestration';
-export { isWebInterviewPlaybackAudiblyActive, isWebInterviewPlaybackSurfaceActive } from '@features/aria/utils/webInterviewPlaybackSurface';
 export { stopElevenLabsPlayback, stopElevenLabsSpeech } from '@features/aria/utils/elevenLabsTtsPlaybackStop';
-export { webSpeechShouldDeferToUserGesture } from '@features/aria/utils/webSpeechDeferPolicy';
 export { resetInterviewVadSession } from '@features/aria/utils/interviewVadSession';
-export { bumpAriaScreenMountGeneration, markAiProcessingTurnStarted, resetWebInterviewGestureContext } from '@features/aria/utils/webInterviewGestureContext';
-export { rearmWebMicPreInitAfterTtsPlaybackComplete, scheduleWebMicPreInitRefreshAfterTtsCompletes } from '@features/aria/utils/webInterviewMicPreInit';
+/** Legacy browser-gesture hooks — retained as no-ops for SyncExtra wiring. */
+export const bumpAriaScreenMountGeneration = (): void => {};
+export const markAiProcessingTurnStarted = (): void => {};
+export const resetWebInterviewGestureContext = (): void => {};
 export { resolveInterviewCompletedForUser } from '@features/psychometrics/interviewCompletionStatus';
 export { isValidationTrackInterviewHandoffActive } from '@features/relationshipValidation/validationPostInterviewRouting';
 export { showConfirmDialog, showSimpleAlert } from '@utilities/alerts/confirmDialog';

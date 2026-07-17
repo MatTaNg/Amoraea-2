@@ -19,8 +19,6 @@ export type InterviewEarlyDepsLocalScope = Pick<
   | 'setEmotionItemsComplete'
   | 'setEmotionModalVisible'
   | 'setEmotionModalItemIndex'
-  | 'waitForWebInterviewTtsQuiescentBeforeEmotionModal'
-  | 'waitForWebInterviewTtsAudiblePlaybackBeforeEmotionModal'
 >;
 
 export function buildInterviewEarlyDepsLocalSyncExtra(

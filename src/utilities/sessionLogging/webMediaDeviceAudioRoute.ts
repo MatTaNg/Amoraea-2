@@ -317,12 +317,6 @@ export async function inferWebAudioRoutesFromDevices(
     };
   }
 
-  // eslint-disable-next-line @typescript-eslint/no-require-imports
-  const greetingMod = require('@features/aria/utils/webInterviewGreetingAudio') as typeof import('@features/aria/utils/webInterviewGreetingAudio');
-  if (greetingMod.isWebGreetingAudiblePlaybackActive()) {
-    return buildCachedRouteRefreshResult().inference;
-  }
-
   const probeMicrophone = options?.probeMicrophone !== false;
   const { permission_obtained, settings: media_track_settings, permissionGrantedAtMs } = probeMicrophone
     ? await getMicStreamAndSettings()
@@ -469,16 +463,6 @@ export function getCachedWebAudioRouteInference(): WebAudioRouteInference {
 export async function refreshWebAudioRoutesForSession(
   options?: WebAudioRouteRefreshOptions,
 ): Promise<WebRouteRefreshResult> {
-  if (Platform.OS === 'web') {
-    // eslint-disable-next-line @typescript-eslint/no-require-imports
-    const greeting = require('@features/aria/utils/webInterviewGreetingAudio') as typeof import('@features/aria/utils/webInterviewGreetingAudio');
-    if (greeting.isWebGreetingAudiblePlaybackActive()) {
-      void remoteLog('[AUDIO_ROUTE] refresh_skipped_during_greeting');
-      const cached = buildCachedRouteRefreshResult();
-      applyWebRouteInferenceToSessionEnvelope(cached.inference);
-      return cached;
-    }
-  }
   if (Platform.OS === 'web' && getSessionLogRuntime().recordingSessionActive) {
     void remoteLog('[AUDIO_ROUTE] refresh_skipped_during_recording', {
       mic_probe_skipped: options?.probeMicrophone === false,

@@ -1,6 +1,6 @@
 import type { ActiveScenario } from '@app/screens/UserInterviewLayout';
 import type { Dispatch, MutableRefObject, SetStateAction } from 'react';
-import { looksLikeScenarioHandoffOrVignetteBundle } from '@features/aria/computeParallelStreamTabRestoreText';
+import { looksLikeScenarioHandoffOrVignetteBundle } from '@features/aria/interviewSpokenTextHeuristics';
 import { stripControlTokens } from '@features/aria/interviewControlTokens';
 import {
   extractScenarioModalQuestionFromAssistantText,
@@ -12,9 +12,32 @@ import {
   getSituationOpeningQuestion,
   normalizeScenarioOpeningForCompare,
 } from '@features/aria/interviewScenarioOpeningStreamGate';
+import {
+  SHOW_SCENARIO_1_VIGNETTE_EXACT,
+  SHOW_SCENARIO_2_VIGNETTE_EXACT,
+  SHOW_SCENARIO_3_VIGNETTE_EXACT,
+} from '@features/aria/interviewShowScenarioExactCopy';
+import { resolveSituation1ExactModalPrompt } from '@features/aria/situation1ExactModalPrompt';
+import { resolveSituation2ExactModalPrompt } from '@features/aria/situation2ExactModalPrompt';
+import { resolveSituation3ExactModalPrompt } from '@features/aria/situation3ExactModalPrompt';
 import { isLockedShowScenarioExactTtsText } from '@features/aria/showScenarioCardCanonicalTts';
 import { MOMENT_4_GRUDGE_QUESTION_TEXT } from '@features/aria/moment4ProbeLogic';
-import { MOMENT_5_ACCOUNTABILITY_QUESTION_TEXT, transcriptAssistantContainsMoment5PrimaryConflictQuestion } from '@features/aria/moment5ProbeLogic';
+import {
+  MOMENT_5_ACCOUNTABILITY_QUESTION_TEXT,
+  transcriptAssistantContainsMoment5PrimaryConflictQuestion,
+} from '@features/aria/moment5ProbeLogic';
+import {
+  MOMENT_5_ACCOUNTABILITY_PROBE_TEXT,
+  MOMENT_5_CONFLICT_VALIDITY_CLARIFICATION_TEXT,
+  MOMENT_5_SPECIFICITY_REDIRECT_TEXT,
+} from '@features/aria/moment5ProbeCopy';
+import { looksLikeMoment5AccountabilityProbeAssistantPrompt } from '@features/aria/moment5AccountabilityProbe';
+import { looksLikeMoment5ConflictValidityClarificationPrompt } from '@features/aria/moment5ConflictValidity';
+import {
+  looksLikeMoment5ResolutionFollowUpPrompt,
+  looksLikeMoment5SpecificityRedirectPrompt,
+  stripInterviewClosingBundledWithMoment5ResolutionFollowUp,
+} from '@features/aria/moment5SpecificityRedirect';
 import { getTtsExpectedDurationMsFromCharCount } from '@utilities/sessionLogging/ttsDurationCalibration';
 
 const MOMENT_4_PERSONAL_LABEL = 'Personal reflection';
@@ -146,6 +169,41 @@ export function syncReferenceCardStateFromAssistantMessages(
   }
   for (let i = assistantMessages.length - 1; i >= 0; i--) {
     const raw = stripControlTokens(assistantMessages[i].content ?? '').trim();
+    if (looksLikeMoment5AccountabilityProbeAssistantPrompt(raw)) {
+      return {
+        scenario: { label: MOMENT_4_PERSONAL_LABEL, text: MOMENT_5_ACCOUNTABILITY_PROBE_TEXT.trim() },
+        prompt: null,
+        phase: 'scenario_active',
+      };
+    }
+    if (looksLikeMoment5ResolutionFollowUpPrompt(raw)) {
+      const cardBody =
+        stripInterviewClosingBundledWithMoment5ResolutionFollowUp(raw).trim() ||
+        extractScenarioModalQuestionFromAssistantText(raw) ||
+        raw;
+      return {
+        scenario: { label: MOMENT_4_PERSONAL_LABEL, text: cardBody },
+        prompt: null,
+        phase: 'scenario_active',
+      };
+    }
+    if (looksLikeMoment5SpecificityRedirectPrompt(raw)) {
+      return {
+        scenario: { label: MOMENT_4_PERSONAL_LABEL, text: MOMENT_5_SPECIFICITY_REDIRECT_TEXT.trim() },
+        prompt: null,
+        phase: 'scenario_active',
+      };
+    }
+    if (looksLikeMoment5ConflictValidityClarificationPrompt(raw)) {
+      return {
+        scenario: {
+          label: MOMENT_4_PERSONAL_LABEL,
+          text: MOMENT_5_CONFLICT_VALIDITY_CLARIFICATION_TEXT.trim(),
+        },
+        prompt: null,
+        phase: 'scenario_active',
+      };
+    }
     if (transcriptAssistantContainsMoment5PrimaryConflictQuestion(raw)) {
       return { scenario: MOMENT_5_REFERENCE_SCENARIO, prompt: null, phase: 'scenario_active' };
     }
@@ -178,24 +236,45 @@ export function syncReferenceCardStateFromAssistantMessages(
   if (!anchorScenario || anchorIdx < 0) {
     return { scenario: null, prompt: null, phase: 'pre_scenario' };
   }
-  const lastIdx = assistantMessages.length - 1;
+  const assistantTurns = assistantMessages.map((m) => ({
+    role: m.role,
+    content: stripControlTokens(m.content ?? '').trim(),
+  }));
+  const scenario: ActiveScenario =
+    anchorScenario.label === 'Situation 1'
+      ? { label: anchorScenario.label, text: SHOW_SCENARIO_1_VIGNETTE_EXACT }
+      : anchorScenario.label === 'Situation 2'
+        ? { label: anchorScenario.label, text: SHOW_SCENARIO_2_VIGNETTE_EXACT }
+        : anchorScenario.label === 'Situation 3'
+          ? { label: anchorScenario.label, text: SHOW_SCENARIO_3_VIGNETTE_EXACT }
+          : anchorScenario;
+
+  // Match live Show scenario footer resolution so mid-scenario probes (Sophie, James, repair, etc.)
+  // survive app reopen instead of falling back to the situation opening question.
   let prompt: string | null = null;
-  if (lastIdx > anchorIdx) {
-    const scoped = assistantMessages.slice(anchorIdx).map((m) => ({
-      role: m.role,
-      content: stripControlTokens(m.content ?? '').trim(),
-    }));
-    prompt = getLastSubstantiveScenarioModalQuestion(scoped);
-    if (prompt && isResumeOrScenarioReplayUiPrompt(prompt)) {
-      prompt = null;
+  if (scenario.label === 'Situation 1') {
+    prompt = resolveSituation1ExactModalPrompt(assistantTurns);
+  } else if (scenario.label === 'Situation 2') {
+    prompt = resolveSituation2ExactModalPrompt(assistantTurns);
+  } else if (scenario.label === 'Situation 3') {
+    prompt = resolveSituation3ExactModalPrompt(assistantTurns);
+  } else {
+    const lastIdx = assistantMessages.length - 1;
+    if (lastIdx > anchorIdx) {
+      const scoped = assistantTurns.slice(anchorIdx);
+      prompt = getLastSubstantiveScenarioModalQuestion(scoped);
+      if (prompt && isResumeOrScenarioReplayUiPrompt(prompt)) {
+        prompt = null;
+      }
     }
     if (prompt === null) {
-      prompt = getSituationOpeningQuestion(anchorScenario);
+      prompt = getSituationOpeningQuestion(scenario);
     }
-  } else {
-    prompt = getSituationOpeningQuestion(anchorScenario);
   }
-  return { scenario: anchorScenario, prompt, phase: 'scenario_active' };
+  if (prompt && isResumeOrScenarioReplayUiPrompt(prompt)) {
+    prompt = getSituationOpeningQuestion(scenario);
+  }
+  return { scenario, prompt, phase: 'scenario_active' };
 }
 
 export function isResumeOrScenarioReplayUiPrompt(content: string): boolean {

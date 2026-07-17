@@ -9,11 +9,9 @@ export type AriaInterviewGateWebTtsSyncScope = Pick<
   | 'ttsSessionHardFailureCountRef'
   | 'lastSuccessfulTtsTextNormalizedRef'
   | 'lastSuccessfulTtsDeliveredPreviewRef'
-  | 'webTtsUtteranceInFlightRef'
-  | 'webTtsUtteranceInFlightOptionsRef'
-  | 'webTtsTabInterruptPendingReplayRef'
-  | 'webTtsSpeakGenerationRef'
-  | 'webTabRestoreReplayInFlightRef'
+  | 'ttsUtteranceInFlightRef'
+  | 'ttsUtteranceInFlightOptionsRef'
+  | 'ttsSpeakGenerationRef'
   | 'parallelStreamingTtsRef'
   | 'webTabRestoreTapSessionRef'
   | 'webTabRestoreDeliveredNormRef'
@@ -21,7 +19,6 @@ export type AriaInterviewGateWebTtsSyncScope = Pick<
   | 'lastHeadphoneProbeRef'
   | 'lastAudioRouteFingerprintRef'
 > & {
-  gestureContextLostAtRef: ResetInterviewProgressRefsDeps['gestureContextLostAtRef'];
 };
 
 export type AriaInterviewGateSyncScope = {

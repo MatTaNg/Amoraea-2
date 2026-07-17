@@ -43,6 +43,29 @@ export async function runPreClaudeMoment4SpecificityGate(
   messagesToUse: MessageWithScenario[],
   lastAssistantContent: string,
 ): Promise<PreClaudeMoment4SpecificityGateResult> {
+  const lastAssistantLooksLikeMoment4Grudge = looksLikeMoment4GrudgePrompt(lastAssistantContent);
+  const lastQuestionLooksLikeMoment4Grudge = looksLikeMoment4GrudgePrompt(
+    deps.lastQuestionTextRef.current ?? '',
+  );
+  /**
+   * Canonical M4 grudge may have been spoken (show-card / confusion replay) while moment refs
+   * lagged at 2–3 — heal before eligibility so we inject the scripted threshold instead of
+   * letting the model invent a "work through or walk away" paraphrase.
+   */
+  if (
+    deps.currentInterviewMomentRef.current < 4 &&
+    (lastAssistantLooksLikeMoment4Grudge || lastQuestionLooksLikeMoment4Grudge)
+  ) {
+    deps.currentInterviewMomentRef.current = 4;
+    deps.interviewMomentsCompleteRef.current[3] = true;
+    deps.personalHandoffInjectedRef.current = true;
+    void remoteLog('[M4_MOMENT_HEALED_FROM_GRUDGE_CONTEXT]', {
+      interviewSessionId: deps.interviewSessionIdRef.current,
+      fromLastAssistant: lastAssistantLooksLikeMoment4Grudge,
+      fromLastQuestion: lastQuestionLooksLikeMoment4Grudge,
+    });
+  }
+
   const answeringAfterMoment4SpecificityProbe =
     deps.currentInterviewMomentRef.current === 4 &&
     isAnsweringMoment4SpecificityFollowUp(messagesToUse, lastAssistantContent);
@@ -57,7 +80,6 @@ export async function runPreClaudeMoment4SpecificityGate(
     };
   }
 
-  const lastAssistantLooksLikeMoment4Grudge = looksLikeMoment4GrudgePrompt(lastAssistantContent);
   const moment4AnswerLooksMisplaced = looksLikeMisplacedNonGrudgeMoment4Answer(trimmed);
   const moment4ThresholdHintInAnswer = hasCommitmentThresholdSignal(trimmed);
 

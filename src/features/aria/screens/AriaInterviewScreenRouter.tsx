@@ -1,5 +1,4 @@
 import React from 'react';
-import { Platform } from 'react-native';
 import type { SupabaseClient } from '@supabase/supabase-js';
 
 import { AriaSessionExpiredScreen } from '@features/aria/screens/AriaSessionExpiredScreen';
@@ -12,8 +11,6 @@ import type { PostInterviewFeedbackKey } from '@features/aria/interviewPostInter
 import { PreparingResultsView } from '@app/screens/PreparingResultsView';
 import { InterviewAnalysisScreen } from '@app/screens/InterviewAnalysisScreen';
 import { AdminInterviewDashboard } from '@app/screens/AdminInterviewDashboard';
-import { primeHtmlAudioForMobileTtsFromMicGesture } from '@features/aria/utils/webInterviewSharedHtmlAudio';
-import { unlockWebAudioForAutoplay } from '@features/aria/utils/webInterviewTtsDocumentLifecycle';
 
 export type AriaInterviewScreenRouterProps = {
   sessionExpired: boolean;
@@ -38,8 +35,6 @@ export type AriaInterviewScreenRouterProps = {
   micError: string | null;
   micPermission: string;
   micWarning: string | null;
-  mobileWebTapToBeginDone: boolean;
-  webDesktopAwaitingStartOverlay: boolean;
   preInterviewConsentAge: boolean;
   preInterviewConsentData: boolean;
   interviewStartInFlight: boolean;
@@ -58,17 +53,14 @@ export type AriaInterviewScreenRouterProps = {
   >;
   setPostInterviewGeneralFeedback: React.Dispatch<React.SetStateAction<string>>;
   setMicError: React.Dispatch<React.SetStateAction<string | null>>;
-  setWebDesktopAwaitingStartOverlay: React.Dispatch<React.SetStateAction<boolean>>;
   setPreInterviewConsentAge: React.Dispatch<React.SetStateAction<boolean>>;
   setPreInterviewConsentData: React.Dispatch<React.SetStateAction<boolean>>;
   onboardingAutoStartRef: React.MutableRefObject<boolean>;
-  webSpeechShouldDeferToUserGesture: () => boolean;
   handleInterviewSignOut: () => void;
   handleRetake: () => void;
   handleSubmitPostInterviewFeedback: () => void;
   handleBackToValidationReport: () => void;
   startInterview: (opts?: { fromUserGesture?: boolean }) => Promise<void>;
-  handleMobileWebTapToBegin: (fromUserGesture: boolean) => void;
 };
 
 /** Returns an early-return screen when routing applies; otherwise null for the active interview shell. */
@@ -173,31 +165,10 @@ export function AriaInterviewScreenRouter(
         adminTopBar={props.adminInterviewTopBar}
         micError={props.micError}
         micPermissionDenied={props.micPermission === 'denied'}
-        showMobileWebTapToBegin={
-          Platform.OS === 'web' &&
-          props.webSpeechShouldDeferToUserGesture() &&
-          !props.mobileWebTapToBeginDone &&
-          props.status === 'starting_interview'
-        }
-        showDesktopAwaitingStartOverlay={
-          Platform.OS === 'web' &&
-          !props.webSpeechShouldDeferToUserGesture() &&
-          props.webDesktopAwaitingStartOverlay &&
-          props.status === 'starting_interview' &&
-          props.interviewStatus === 'not_started'
-        }
         onSignOut={props.handleInterviewSignOut}
         onRetryMic={() => {
           props.onboardingAutoStartRef.current = false;
           props.setMicError(null);
-          void props.startInterview({ fromUserGesture: true });
-        }}
-        onMobileWebTapToBegin={() => props.handleMobileWebTapToBegin(true)}
-        onDesktopBeginInterview={() => {
-          unlockWebAudioForAutoplay();
-          primeHtmlAudioForMobileTtsFromMicGesture();
-          props.onboardingAutoStartRef.current = true;
-          props.setWebDesktopAwaitingStartOverlay(false);
           void props.startInterview({ fromUserGesture: true });
         }}
       />
@@ -230,8 +201,6 @@ export function AriaInterviewScreenRouter(
         onToggleConsentAge={() => props.setPreInterviewConsentAge((v) => !v)}
         onToggleConsentData={() => props.setPreInterviewConsentData((v) => !v)}
         onBeginInterview={() => {
-          unlockWebAudioForAutoplay();
-          primeHtmlAudioForMobileTtsFromMicGesture();
           void props.startInterview({ fromUserGesture: true });
         }}
       />

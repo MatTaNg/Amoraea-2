@@ -12,6 +12,7 @@ import {
   SCENARIO_3_OPENING,
   SCENARIO_3_TEXT,
 } from '@features/aria/interviewScenarioVignetteCopy';
+import { splitScenarioTransitionForEmotionModal } from '@features/aria/emotionRecognitionInterview';
 import {
   SHOW_SCENARIO_2_VIGNETTE_EXACT,
   SHOW_SCENARIO_3_VIGNETTE_EXACT,
@@ -25,7 +26,6 @@ import { SHOW_SCENARIO_CARD_CANONICAL_SPEECH } from '@features/aria/interviewTts
 import type { PreClaudeTurnGateDeps } from '@features/aria/preClaudeTurnGateTypes';
 import { scenarioBMinimumEngagementForHandoff } from '@features/aria/scenarioBProbeLogic';
 import { scenarioAMinimumEngagementForHandoff } from '@features/aria/scenarioFollowUpTranscriptGuard';
-import { speakLongFormInterviewHtmlMp3 } from '@features/aria/utils/speakLongFormInterviewHtmlMp3';
 import {
   textContainsScenarioBVignetteBody,
   textContainsScenarioCVignetteBody,
@@ -47,7 +47,7 @@ export type ClientOwnedScenarioHandoffDeps = Pick<
   | 'lastQuestionTextRef'
   | 'parallelStreamingTtsRef'
   | 'ttsLineInFlightRef'
-  | 'webTtsUtteranceInFlightRef'
+  | 'ttsUtteranceInFlightRef'
   | 'showScenarioCardCanonicalPlaybackConfirmedKindsRef'
   | 'commitInterviewMessages'
   | 'speakTextSafe'
@@ -123,36 +123,54 @@ export function shouldDeliverClientOwnedScenario3Opening(
   return shouldAdvanceScenarioBAfterSatisfiedRepair(messages, '', 2);
 }
 
-async function speakClientOwnedHandoffBundle(
+/**
+ * Speak wrap → emotion modal → next vignette (same order as Claude / hard-stop handoffs).
+ * Speaking the full bundle first left the modal interrupting Situation 2/3 mid-vignette.
+ */
+async function speakClientOwnedHandoffBundleWithEmotionModal(
   deps: ClientOwnedScenarioHandoffDeps,
   displayText: string,
   openingQuestion: string,
   kind: 'situation_2' | 'situation_3',
+  completedScenario: 1 | 2,
 ): Promise<boolean> {
-  if (deps.webTtsUtteranceInFlightRef) {
-    deps.webTtsUtteranceInFlightRef.current = displayText;
+  const { beforeModal, afterModal } = splitScenarioTransitionForEmotionModal(displayText);
+  const wrapText = beforeModal.trim() || displayText;
+  const vignetteText = afterModal.trim();
+
+  if (deps.ttsUtteranceInFlightRef) {
+    deps.ttsUtteranceInFlightRef.current = wrapText;
   }
   if (deps.ttsLineInFlightRef) {
     deps.ttsLineInFlightRef.current = true;
   }
   deps.parallelStreamingTtsRef.current.accumulatedFullText = displayText;
-  deps.lastQuestionTextRef.current = openingQuestion;
 
-  let htmlMp3Played = false;
   try {
-    htmlMp3Played = await speakLongFormInterviewHtmlMp3({
-      text: displayText,
-      telemetrySource: 'turn',
-      onPlaybackStarted: () => deps.setVoiceState('speaking'),
-    });
+    await deps.speakTextSafe(wrapText, SHOW_SCENARIO_CARD_CANONICAL_SPEECH);
   } catch {
-    htmlMp3Played = false;
+    /* still open modal + continue */
   }
 
-  if (htmlMp3Played) {
-    /* confirmed below */
+  await deps.runEmotionModalAfterScenarioTransition(completedScenario, {
+    transitionText: displayText,
+    priorScenario: completedScenario,
+    afterBeforeModalPlayback: true,
+  });
+
+  const tail = vignetteText || (!beforeModal.trim() ? displayText : '');
+  if (tail) {
+    if (deps.ttsUtteranceInFlightRef) {
+      deps.ttsUtteranceInFlightRef.current = tail;
+    }
+    deps.lastQuestionTextRef.current = openingQuestion;
+    try {
+      await deps.speakTextSafe(tail, SHOW_SCENARIO_CARD_CANONICAL_SPEECH);
+    } catch {
+      /* refs still advance below */
+    }
   } else {
-    await deps.speakTextSafe(displayText, SHOW_SCENARIO_CARD_CANONICAL_SPEECH);
+    deps.lastQuestionTextRef.current = openingQuestion;
   }
 
   if (deps.showScenarioCardCanonicalPlaybackConfirmedKindsRef) {
@@ -162,8 +180,8 @@ async function speakClientOwnedHandoffBundle(
     };
   }
 
-  if (deps.webTtsUtteranceInFlightRef) {
-    deps.webTtsUtteranceInFlightRef.current = null;
+  if (deps.ttsUtteranceInFlightRef) {
+    deps.ttsUtteranceInFlightRef.current = null;
   }
   if (deps.ttsLineInFlightRef) {
     deps.ttsLineInFlightRef.current = false;
@@ -203,7 +221,13 @@ export async function deliverClientOwnedScenario2OpeningAfterS1Repair(
     preview: displayText.slice(0, 220),
   });
 
-  await speakClientOwnedHandoffBundle(deps, displayText, SCENARIO_2_OPENING, 'situation_2');
+  await speakClientOwnedHandoffBundleWithEmotionModal(
+    deps,
+    displayText,
+    SCENARIO_2_OPENING,
+    'situation_2',
+    1,
+  );
 
   advanceInterviewScenarioRefsAfterCanonicalShowScenarioCard(
     {
@@ -233,7 +257,6 @@ export async function deliverClientOwnedScenario2OpeningAfterS1Repair(
   markQuestionDelivered(new Date().toISOString());
 
   await deps.notifyScenarioStarted?.(2, updatedMessages);
-  await deps.runEmotionModalAfterScenarioTransition(1, { afterBeforeModalPlayback: true });
   return true;
 }
 
@@ -268,7 +291,13 @@ export async function deliverClientOwnedScenario3OpeningAfterS2Repair(
     preview: displayText.slice(0, 220),
   });
 
-  await speakClientOwnedHandoffBundle(deps, displayText, SCENARIO_3_OPENING, 'situation_3');
+  await speakClientOwnedHandoffBundleWithEmotionModal(
+    deps,
+    displayText,
+    SCENARIO_3_OPENING,
+    'situation_3',
+    2,
+  );
 
   advanceInterviewScenarioRefsAfterCanonicalShowScenarioCard(
     {
@@ -298,6 +327,5 @@ export async function deliverClientOwnedScenario3OpeningAfterS2Repair(
   markQuestionDelivered(new Date().toISOString());
 
   await deps.notifyScenarioStarted?.(3, updatedMessages);
-  await deps.runEmotionModalAfterScenarioTransition(2, { afterBeforeModalPlayback: true });
   return true;
 }

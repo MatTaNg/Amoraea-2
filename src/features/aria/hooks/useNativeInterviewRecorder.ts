@@ -4,6 +4,7 @@ import { Platform } from 'react-native';
 import {
   getAudioMaxRecordingDurationMs,
   getAudioMeteringPollIntervalMs,
+  getAudioPostSessionRecordingDelayMs,
 } from '@features/aria/config/audioInterviewConfig';
 import { logNativeMicRecordingStopped } from '@features/aria/telemetry/tsAutoplayTelemetry';
 import {
@@ -115,7 +116,10 @@ export function useNativeInterviewRecorder(params: UseNativeInterviewRecorderPar
             console.warn('[useAudioRecorder] expected recording audio mode after setRecordingMode');
           }
         }
-        const delayMs = Math.max(0, opts?.postAudioSessionDelayMs ?? 500);
+        const delayMs = Math.max(
+          0,
+          opts?.postAudioSessionDelayMs ?? getAudioPostSessionRecordingDelayMs(),
+        );
         await sleep(delayMs);
 
         const Audio = getExpoAvAudio();

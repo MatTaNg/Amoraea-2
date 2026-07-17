@@ -1,7 +1,9 @@
-import { Platform } from 'react-native';
-
 import { supabase } from '@data/supabase/client';
 import { applyResumeWelcomeMessagesAndPlayback } from '@features/aria/applyResumeWelcomeMessagesAndPlayback';
+import {
+  fetchResumeScoringIntegritySnapshot,
+  mergeLocalAndDbScenarioScores,
+} from '@features/aria/fetchResumeScoringIntegritySnapshot';
 import { hydrateResumeEmotionCatchUp } from '@features/aria/hydrateResumeEmotionCatchUp';
 import { hydrateResumeProbeFlagsFromTranscript } from '@features/aria/hydrateResumeProbeFlagsFromTranscript';
 import { syncInterviewMomentsFromTranscript } from '@features/aria/interviewProgressSync';
@@ -18,22 +20,25 @@ import {
 import { runHydratePostClosingFromSaved } from '@features/aria/runHydratePostClosingFromSaved';
 import type { HandleResumeDeps, HandleResumeParams } from '@features/aria/sessionLifecycleTypes';
 import { clearResumeWelcomePlaybackLock } from '@features/aria/interviewLocalPersistence';
-import { clearWebInterviewHtmlTabRestoreState } from '@features/aria/utils/webInterviewHtmlAudioTabRestoreOrchestration';
 import { remoteLog } from '@utilities/remoteLog';
 import {
   assignScenarioNumbersToTranscript,
+  clearScenarioScoresFromCorruptRewind,
   computeInterviewResumePlan,
   firstAssistantIndexForScenarioIntro,
-  inferLatestScenarioIntroFromTranscript,
   savedInterviewReachedClosingState,
+  sliceMessagesBeforeMoment4Intro,
   sliceMessagesBeforeScenarioIntro,
   stripEphemeralWelcomeBackMessages,
+  transcriptHasInScenarioProgressPastOpening,
 } from '@utilities/interviewResumeCursor';
 import { isScenarioABoundaryReflectionWithoutNextVignette } from '@features/aria/scenarioAContemptProbeTextMatch';
 import { textContainsScenarioBVignetteBody, textContainsScenarioCVignetteBody } from '@features/aria/emotionScenarioTransitionInference';
 import { isScenarioBBoundaryReflectionWithoutNextVignette } from '@features/aria/scenarioBProbeLogic';
 import { isScenarioCQ1Prompt } from '@features/aria/scenarioCPromptDetection';
+import { MOMENT_4_GRUDGE_QUESTION_TEXT } from '@features/aria/moment4ProbeLogic';
 import { saveInterviewToStorage } from '@utilities/storage/InterviewStorage';
+import type { StoredScenarioScores } from '@utilities/storage/InterviewStorage';
 
 export async function runHandleResume(
   deps: HandleResumeDeps,
@@ -58,21 +63,18 @@ export async function runHandleResume(
     setStatus,
     hasResumedRef,
     interviewStatusRef,
-    interruptAllWebInterviewTtsOutput,
+    interruptAllInterviewTtsOutput,
     moment5QuestionDeliveryInFlightRef,
     interviewUserTurnEpochRef,
   } = deps;
 
-  interruptAllWebInterviewTtsOutput();
+  interruptAllInterviewTtsOutput();
   moment5QuestionDeliveryInFlightRef.current = false;
   interviewUserTurnEpochRef.current += 1;
   clearResumeWelcomePlaybackLock();
   resumeLoadingFlowActiveRef.current = true;
   setResumeLoadingVisible(true);
   logSessionResumeState('loading');
-  if (Platform.OS === 'web') {
-    clearWebInterviewHtmlTabRestoreState();
-  }
 
   const bootstrapAttemptId = interviewSessionAttemptIdRef.current;
   const savedAttemptId = saved.sessionAttemptId ?? null;
@@ -115,38 +117,92 @@ export async function runHandleResume(
     (saved.currentScenario === 1 || saved.currentScenario === 2 || saved.currentScenario === 3
       ? saved.currentScenario
       : null);
+
+  const attemptIdForIntegrity =
+    interviewSessionAttemptIdRef.current ?? saved.sessionAttemptId ?? null;
+  const integrity = await fetchResumeScoringIntegritySnapshot(
+    supabase,
+    attemptIdForIntegrity,
+    userId,
+  );
+  const scoresForPlan = mergeLocalAndDbScenarioScores({
+    local: saved.scenarioScores,
+    dbCells: {
+      scenario_1_scores: integrity.dbScenarioScores[1] ?? null,
+      scenario_2_scores: integrity.dbScenarioScores[2] ?? null,
+      scenario_3_scores: integrity.dbScenarioScores[3] ?? null,
+    },
+  });
+
   const resumePlan = computeInterviewResumePlan({
     scenariosCompleted: saved.scenariosCompleted ?? [],
-    scenarioScores: saved.scenarioScores,
+    scenarioScores: scoresForPlan,
     resumeActiveFromStorage: resumeActiveFromLocal,
     resumeActiveFromAttempt: planAttemptMismatch
       ? resumeAttemptResumeScenario ?? resumeActiveFromLocal
       : resumeAttemptResumeScenario,
     transcriptMessages: restoredForPlan,
     syncedMoments: syncedForPlan,
+    scoringFailed: saved.scoringFailed ?? null,
+    moment4ScoresIntact: integrity.moment4ScoresIntact,
   });
 
   const missingIntroAnchor =
     resumePlan.mode !== 'resume_post_scenarios' &&
+    !resumePlan.rewindToMoment4DueToCorruptScoring &&
     firstAssistantIndexForScenarioIntro(restoredForPlan, resumePlan.resumeScenario) < 0;
+  const hasInScenarioProgress = transcriptHasInScenarioProgressPastOpening(
+    restoredForPlan,
+    resumePlan.resumeScenario,
+  );
+  // Missing vignette + mid-scenario progress (Q1 / probes / user turns) must not replay the
+  // full scenario opening — welcome-back + current question is enough.
   const shouldRestartIncompleteScenario =
-    missingIntroAnchor &&
-    (resumePlan.partialScenarioDataWritten ||
-      (planAttemptMismatch && !didOrphanAttemptRebind));
-  const transcriptMessages = (shouldRestartIncompleteScenario
-    ? sliceMessagesBeforeScenarioIntro(restoredForPlan, resumePlan.resumeScenario)
-    : restoredForPlan) as MessageWithScenario[];
+    resumePlan.rewindDueToCorruptScoring ||
+    (missingIntroAnchor &&
+      !hasInScenarioProgress &&
+      (resumePlan.partialScenarioDataWritten ||
+        (planAttemptMismatch && !didOrphanAttemptRebind)));
+
+  let transcriptMessages = restoredForPlan as MessageWithScenario[];
+  let scoresAfterRewind: StoredScenarioScores = scoresForPlan;
+  let completedAfterRewind = saved.scenariosCompleted ?? [];
+  let scenarioIntroBody: string | null = null;
+
+  if (shouldRestartIncompleteScenario) {
+    if (resumePlan.rewindToMoment4DueToCorruptScoring) {
+      transcriptMessages = sliceMessagesBeforeMoment4Intro(restoredForPlan) as MessageWithScenario[];
+      scenarioIntroBody = MOMENT_4_GRUDGE_QUESTION_TEXT;
+    } else {
+      transcriptMessages = sliceMessagesBeforeScenarioIntro(
+        restoredForPlan,
+        resumePlan.resumeScenario,
+      ) as MessageWithScenario[];
+      scenarioIntroBody = getScenarioResumeIntroAssistantBody(resumePlan.resumeScenario);
+      const cleared = clearScenarioScoresFromCorruptRewind(
+        scoresForPlan,
+        saved.scenariosCompleted ?? [],
+        resumePlan.resumeScenario,
+      );
+      scoresAfterRewind = cleared.scenarioScores;
+      completedAfterRewind = cleared.scenariosCompleted;
+    }
+  }
 
   void remoteLog('[REENTRY_RESUME]', {
     lastCompletedScenario: resumePlan.lastCompletedScenario,
     resumeScenario: resumePlan.resumeScenario,
     mode: resumePlan.mode,
     partialScenarioDataWritten: resumePlan.partialScenarioDataWritten,
+    rewindDueToCorruptScoring: resumePlan.rewindDueToCorruptScoring,
+    rewindToMoment4DueToCorruptScoring: resumePlan.rewindToMoment4DueToCorruptScoring,
     resumeActiveFromAttempt: resumeAttemptResumeScenario,
     resumeActiveFromStorage: saved.resumeActiveScenario ?? null,
     resumeActiveFromLocal: resumeActiveFromLocal ?? null,
     attemptMismatch: planAttemptMismatch,
     didOrphanAttemptRebind,
+    missingIntroAnchor,
+    hasInScenarioProgress,
     shouldRestartIncompleteScenario,
     transcriptLenBefore: restoredForPlan.length,
     transcriptLenAfter: transcriptMessages.length,
@@ -162,19 +218,40 @@ export async function runHandleResume(
 
   interviewMomentsCompleteRef.current = resumePlan.momentsComplete;
   currentInterviewMomentRef.current = resumePlan.effectiveMoment;
-  personalHandoffInjectedRef.current = resumePlan.personalHandoffInjected;
+  personalHandoffInjectedRef.current = resumePlan.rewindToMoment4DueToCorruptScoring
+    ? false
+    : resumePlan.personalHandoffInjected;
 
-  const moment5ClarificationFired = hydrateResumeProbeFlagsFromTranscript(deps, saved, transcriptMessages);
-  const maxCompleted = restoreResumeScoredScenariosRef(saved, scoredScenariosRef);
+  const savedForRestore = {
+    ...saved,
+    scenarioScores: scoresAfterRewind,
+    scenariosCompleted: completedAfterRewind,
+    scoringFailed: resumePlan.rewindDueToCorruptScoring
+      ? (saved.scoringFailed ?? []).filter(
+          (f) =>
+            resumePlan.rewindToMoment4DueToCorruptScoring ||
+            f.scenario < resumePlan.resumeScenario,
+        )
+      : saved.scoringFailed,
+  };
+
+  const moment5ClarificationFired = hydrateResumeProbeFlagsFromTranscript(
+    deps,
+    savedForRestore,
+    transcriptMessages,
+  );
+  const maxCompleted = restoreResumeScoredScenariosRef(savedForRestore, scoredScenariosRef);
   setHighestScenarioReached((prev) => Math.max(prev, maxCompleted));
 
   currentScenarioRef.current = resumePlan.resumeScenario;
   resumeActiveScenarioRef.current =
-    resumePlan.mode === 'resume_post_scenarios' ? null : resumePlan.resumeScenario;
+    resumePlan.mode === 'resume_post_scenarios' && !resumePlan.rewindToMoment4DueToCorruptScoring
+      ? null
+      : resumePlan.resumeScenario;
 
   hydrateResumeEmotionCatchUp({
     deps,
-    saved,
+    saved: savedForRestore,
     resumePlan,
     transcriptMessages,
     resumeAttemptEmotionResponses,
@@ -188,7 +265,7 @@ export async function runHandleResume(
       .eq('id', persistenceAttemptId)
       .eq('user_id', userId);
     await saveInterviewToStorage(userId, {
-      ...saved,
+      ...savedForRestore,
       sessionAttemptId: persistenceAttemptId,
       messages: transcriptMessages,
       resumeActiveScenario: resumeActiveScenarioRef.current,
@@ -196,16 +273,19 @@ export async function runHandleResume(
     });
   }
 
-  const scoreCards = restoreResumeScenarioDisplayState(deps, saved, transcriptMessages);
-  let scenarioIntroBody = shouldRestartIncompleteScenario
-    ? getScenarioResumeIntroAssistantBody(resumePlan.resumeScenario)
-    : null;
+  const scoreCards = restoreResumeScenarioDisplayState(deps, savedForRestore, transcriptMessages);
+  if (!scenarioIntroBody && shouldRestartIncompleteScenario) {
+    scenarioIntroBody = resumePlan.rewindToMoment4DueToCorruptScoring
+      ? MOMENT_4_GRUDGE_QUESTION_TEXT
+      : getScenarioResumeIntroAssistantBody(resumePlan.resumeScenario);
+  }
 
   const lastAssistantContent = [...transcriptMessages]
     .reverse()
     .find((m) => m.role === 'assistant' && !(m as { isWelcomeBack?: boolean }).isWelcomeBack)
     ?.content;
   const truncatedScenarioOneBoundary =
+    !resumePlan.rewindDueToCorruptScoring &&
     typeof lastAssistantContent === 'string' &&
     isScenarioABoundaryReflectionWithoutNextVignette(lastAssistantContent) &&
     !transcriptMessages.some(
@@ -219,6 +299,7 @@ export async function runHandleResume(
   }
 
   const truncatedScenarioTwoBoundary =
+    !resumePlan.rewindDueToCorruptScoring &&
     typeof lastAssistantContent === 'string' &&
     (isScenarioBBoundaryReflectionWithoutNextVignette(lastAssistantContent) ||
       isScenarioCQ1Prompt(lastAssistantContent)) &&

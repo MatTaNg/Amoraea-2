@@ -86,7 +86,6 @@ export async function commitPreClaudeUserTurn(
   deps.commitInterviewMessages(messagesToUse);
   deps.setCurrentTranscript('');
   deps.transcriptAtReleaseRef.current = '';
-  deps.markAiProcessingTurnStarted();
   deps.setVoiceState('processing');
   deps.setIsWaiting(true);
   deps.setExchangeCount((c) => c + 1);

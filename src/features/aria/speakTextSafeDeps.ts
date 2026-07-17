@@ -1,9 +1,7 @@
 import type { MutableRefObject } from 'react';
 
-import type { PendingGestureRestoreSpeakEntry } from '@features/aria/hooks/useAriaInterviewSession';
 import type { VoiceState } from '@features/aria/hooks/useAriaInterviewSession';
 import type { InterviewTtsSpeakOpts, InterviewTtsSpeakOutcome } from '@features/aria/interviewTtsSpeakOptions';
-import type { GestureContextLostReason } from '@features/aria/utils/webInterviewGestureContext';
 
 export type WebTtsUtteranceReplayOptions = {
   interviewSpeechRole?: 'assistant_response';
@@ -49,26 +47,19 @@ export type SpeakTextSafeOptions = {
 
 export type SpeakTextSafeDeps = {
   userId: string;
-  mobileWebTapToBeginDone: boolean;
   setVoiceState: (state: VoiceState) => void;
-  setWebTabGestureRestoreOverlay: (visible: boolean) => void;
-  setWebDesktopPendingTtsGestureOverlay: (visible: boolean) => void;
   setTtsPlaybackReliabilityNotice: (notice: string | null) => void;
   setLastTtsCompletionCallbackMs: (ms: number) => void;
   speak: (text: string, speakOpts?: InterviewTtsSpeakOpts) => Promise<InterviewTtsSpeakOutcome>;
   applyInterviewSpeechComplete: (rawText: string) => void;
-  ensureWebGestureFlushListener: () => void;
   awaitTtsScreenReadyGate: (reason: string) => Promise<void>;
   stopElevenLabsPlayback: () => Promise<void>;
-  webSpeechShouldDeferToUserGesture: () => boolean;
-  rearmWebMicPreInitAfterTtsPlaybackComplete: () => Promise<void>;
-  scheduleWebMicPreInitRefreshAfterTtsCompletes: () => void;
   referenceCardShouldUpdateOnPlaybackStart: (rawText: string) => boolean;
   persistInterviewAttemptSessionLifecycle: (
     attemptId: string | null | undefined,
     lifecycle: 'in_progress' | 'completed',
   ) => Promise<void>;
-  webTtsSpeakGenerationRef: MutableRefObject<number>;
+  ttsSpeakGenerationRef: MutableRefObject<number>;
   currentInterviewMomentRef: MutableRefObject<number>;
   currentScenarioRef: MutableRefObject<1 | 2 | 3>;
   s2RepairProbeDeliveredRef: MutableRefObject<boolean>;
@@ -85,18 +76,12 @@ export type SpeakTextSafeDeps = {
   scenarioAContemptProbeTtsDeliveredSessionRef: MutableRefObject<boolean>;
   lastQuestionTextRef: MutableRefObject<string>;
   ttsLineInFlightRef: MutableRefObject<boolean>;
-  needsGestureRestoreRef: MutableRefObject<boolean>;
-  tabVisibilityGestureLossPendingRef: MutableRefObject<boolean>;
-  gestureContextLostAtRef: MutableRefObject<{ atMs: number; reason: GestureContextLostReason } | null>;
-  webTtsTabInterruptPendingReplayRef: MutableRefObject<boolean>;
-  pendingGestureRestoreSpeakRef: MutableRefObject<PendingGestureRestoreSpeakEntry | null>;
   interviewStatusRef: MutableRefObject<string>;
   applyReferenceCardFromAssistantSpeechRef: MutableRefObject<(rawText: string) => void>;
   recordingJustFinishedBeforeNextTtsRef: MutableRefObject<boolean>;
   postRecordingParallelStreamSettleRef: MutableRefObject<boolean>;
-  tabHiddenDuringActiveTtsLineRef: MutableRefObject<boolean>;
-  webTtsUtteranceInFlightRef: MutableRefObject<string | null>;
-  webTtsUtteranceInFlightOptionsRef: MutableRefObject<WebTtsUtteranceReplayOptions | null>;
+  ttsUtteranceInFlightRef: MutableRefObject<string | null>;
+  ttsUtteranceInFlightOptionsRef: MutableRefObject<WebTtsUtteranceReplayOptions | null>;
   firstScenarioLifecyclePersistedRef: MutableRefObject<boolean>;
   ttsSessionHardFailureCountRef: MutableRefObject<number>;
   timingRef: MutableRefObject<{
@@ -104,7 +89,6 @@ export type SpeakTextSafeDeps = {
     recordingStartTime: number | null;
     recordingEndTime: number | null;
   }>;
-  pendingWebSpeechForGestureRef: MutableRefObject<string | null>;
   recordInterviewAssistantDeliveryForMetaExemptionRef: MutableRefObject<(deliveredQuestionText: string) => void>;
   s1ContemptFixVersion: number | string;
 };

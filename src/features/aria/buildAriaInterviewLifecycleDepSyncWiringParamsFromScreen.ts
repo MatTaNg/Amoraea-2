@@ -31,14 +31,13 @@ export type BuildAriaInterviewLifecycleDepSyncWiringParamsFromScreenInput = {
     onboardingAutoStartRef: MutableRefObject<boolean>;
     startInterviewInFlightRef: MutableRefObject<boolean>;
     setInterviewStartInFlight: (value: boolean) => void;
-    useMediaRecorderPath: boolean;
   };
   boot: {
     ensureValidSession: AriaInterviewLifecycleDepSyncWiringParams['completionScoring']['actions']['ensureValidSession'];
     resetInterviewProgressRefs: AriaInterviewLifecycleDepSyncWiringParams['sessionLifecycle']['status']['resetInterviewProgressRefs'];
   };
   emotion: {
-    awaitEmotionModalForIndex: AriaInterviewLifecycleDepSyncWiringParams['webResumeWelcomeTap']['awaitEmotionModalForIndex'];
+    awaitEmotionModalForIndex: AriaInterviewLifecycleDepSyncWiringParams['sessionLifecycle']['status']['awaitEmotionModalForIndex'];
     loadEmotionResponsesForCompletion: AriaInterviewLifecycleDepSyncWiringParams['completionScoring']['actions']['loadEmotionResponsesForCompletion'];
     applyEmotionResponsesToSession: AriaInterviewLifecycleDepSyncWiringParams['completionScoring']['actions']['applyEmotionResponsesToSession'];
   };
@@ -74,7 +73,6 @@ export function buildAriaInterviewLifecycleDepSyncWiringParamsFromScreen(
   } = input;
   const { status, voiceState, awaitScreenReadySignal, logSessionResumeState } = interview;
   const {
-    setWebDesktopPendingTtsGestureOverlay,
     setStatus,
     setMicError,
     setMicPermission,
@@ -83,20 +81,9 @@ export function buildAriaInterviewLifecycleDepSyncWiringParamsFromScreen(
     setCurrentTranscript,
     transcriptAtReleaseRef,
     isSpeakingRef,
-    setWebDesktopAwaitingStartOverlay,
   } = interview;
   const { closingQuestion, gate, shell, routing } = session;
   const { isInterviewAppRoute, resumeLoadingFlowActiveRef, setResumeLoadingVisible } = routing;
-  const {
-    webResumeWelcomeTapHandledRef,
-    webResumeWelcomeTapPendingRef,
-    resumeOfferWelcomeTtsRef,
-    emotionModalPendingTransitionRef,
-    resumeWelcomeMessageRef,
-    pendingScenarioIntroAfterResumeWelcomeRef,
-    resumeEmotionAfterModalTextRef,
-    resumeRepeatChoicePendingRef,
-  } = gate.resumeEmotion;
   const { currentInterviewMomentRef, responseTimingsRef } = gate.moments;
   const { scoreInterviewAttemptedRef } = gate.progressReset;
   const {
@@ -121,7 +108,6 @@ export function buildAriaInterviewLifecycleDepSyncWiringParamsFromScreen(
     setReferenceCardPrompt,
     setInterviewUiPhase,
     setSessionAudioHealthNotice,
-    setWebResumeWelcomeTapPending,
     setPreInterviewConsentAge,
     setPreInterviewConsentData,
     setResults,
@@ -139,34 +125,17 @@ export function buildAriaInterviewLifecycleDepSyncWiringParamsFromScreen(
     onboardingAutoStartRef,
     startInterviewInFlightRef,
     setInterviewStartInFlight,
-    useMediaRecorderPath,
   } = interviewSession;
 
   return {
     ...syncContexts,
     showSimpleAlert: wiring.showSimpleAlert,
     showConfirmDialog: wiring.showConfirmDialog,
-    webResumeWelcomeTap: {
-      webResumeWelcomeTapHandledRef,
-      webResumeWelcomeTapPendingRef,
-      setWebResumeWelcomeTapPending,
-      resumeOfferWelcomeTtsRef,
-      emotionModalPendingTransitionRef,
-      resumeEmotionCatchUpIndicesRef,
-      awaitEmotionModalForIndex: emotion.awaitEmotionModalForIndex,
-      resumeWelcomeMessageRef,
-      pendingScenarioIntroAfterResumeWelcomeRef,
-      resumeEmotionAfterModalTextRef,
-      resumeRepeatChoicePendingRef,
-      setWebDesktopPendingTtsGestureOverlay,
-    },
     sessionLifecycle: {
       status: {
         interviewStatus,
         interviewAttemptBootstrap,
         onboardingAutoStartRef,
-        webSpeechShouldDeferToUserGesture: wiring.webSpeechShouldDeferToUserGesture,
-        setWebDesktopAwaitingStartOverlay,
         awaitScreenReadySignal,
         logSessionResumeState,
         awaitEmotionModalForIndex: emotion.awaitEmotionModalForIndex,
@@ -190,14 +159,12 @@ export function buildAriaInterviewLifecycleDepSyncWiringParamsFromScreen(
         setInterviewStatus,
         setStageResults,
         setTouchedConstructs,
-        setWebDesktopPendingTtsGestureOverlay,
         setStatus,
         setReferenceCardScenario,
         setReferenceCardPrompt,
         setInterviewUiPhase,
         setMicError,
         setMicPermission,
-        setWebResumeWelcomeTapPending,
       },
       audioDevice: {
         setAudioRouteKind: wiring.setAudioRouteKind,
@@ -215,7 +182,6 @@ export function buildAriaInterviewLifecycleDepSyncWiringParamsFromScreen(
       status,
       interviewStatus,
       interviewAttemptBootstrap,
-      webSpeechShouldDeferToUserGesture: wiring.webSpeechShouldDeferToUserGesture,
     },
     completionScoring: {
       identity: {
@@ -284,7 +250,6 @@ export function buildAriaInterviewLifecycleDepSyncWiringParamsFromScreen(
     },
     performAdminInterviewReset: {
       media: {
-        useMediaRecorderPath,
         audioRecorder: turnCluster.audioRecorder,
         recognitionRef,
         stopElevenLabsPlayback: wiring.stopElevenLabsPlayback,

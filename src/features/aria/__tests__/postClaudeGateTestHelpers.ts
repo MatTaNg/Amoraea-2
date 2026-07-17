@@ -60,7 +60,6 @@ export function createMockPostClaudeDeps(
     setMessages: noop,
     setInterviewStatus: noop,
     setPendingCompletion: noop,
-    setWebTabGestureRestoreOverlay: noop,
     setReferenceCardPrompt: noop,
     setHighestScenarioReached: jest.fn((updater) => {
       if (typeof updater === 'function') updater(1);
@@ -126,10 +125,9 @@ export function createMockPostClaudeDeps(
     moment5QuestionDeliveryInFlightRef: mockRef(false),
     parallelStreamingTtsRef: mockRef(createInitialParallelStreamingTtsState()),
     ttsLineInFlightRef: mockRef(false),
-    webTtsUtteranceInFlightRef: mockRef(null),
+    ttsUtteranceInFlightRef: mockRef(null),
     pendingCompletionTranscriptRef: mockRef(null),
     pendingEmotionModalTransitionRef: mockRef(null),
-    pendingGestureRestoreSpeakRef: mockRef(null),
     personalHandoffInjectedRef: mockRef(false),
     resumeActiveScenarioRef: mockRef<1 | 2 | 3 | null>(null),
     scenarioAContemptProbeAskedRef: mockRef(false),
@@ -139,7 +137,6 @@ export function createMockPostClaudeDeps(
     scenarioScoresRef: mockRef({}),
     scoreInterviewAttemptedRef: mockRef(false),
     scoredScenariosRef: mockRef(new Set<number>()),
-    webTtsTabInterruptPendingReplayRef: mockRef(false),
     s2RepairProbeDeliveredRef: mockRef(false),
     s3RepairProbeDeliveredRef: mockRef(false),
     scenarioCSophiePerspectiveProbeFiredRef: mockRef(false),

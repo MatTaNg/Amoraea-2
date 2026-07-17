@@ -11,28 +11,33 @@ import {
 
 type TranscriptMessage = { role: string; content?: string | null };
 
+function hasS3ToM4SegmentWrapCue(low: string, text: string): boolean {
+  return (
+    hasScenarioBoundaryWrapPhrase(text) ||
+    /\b(?:end of the three|finished the three|wraps up the three|done with those three)\b/.test(low)
+  );
+}
+
 /**
- * Model sometimes streams only the M4 personal bridge before S3 boundary closure.
- * Canonical moment_4 handoff speaks the full bundle once (reflection + bridge + grudge Q).
+ * Model sometimes streams only the M4 personal bridge / "two questions left" cue before
+ * S3 boundary closure. Canonical moment_4 handoff speaks the full bundle once.
  */
 export function isPrematureStandaloneM4PersonalTransitionLine(text: string): boolean {
   const t = (text ?? '').replace(/\s+/g, ' ').trim();
   if (!t || looksLikeMoment4GrudgePrompt(t)) return false;
   const low = t.toLowerCase();
+  if (hasS3ToM4SegmentWrapCue(low, t)) return false;
+
+  const hasQuestionsLeftCue = /\btwo questions left\b/.test(low);
+  if (hasQuestionsLeftCue) return true;
+
   const hasPersonalBridge =
     /\bnow (?:for|i want to ask you about) something (?:a bit )?more personal\b/.test(low) ||
     /\bnow (?:let's move to|let us move to) something (?:a bit )?more personal\b/.test(low) ||
     /\b(?:ask you about|shift to) something (?:a bit )?more personal\b/.test(low) ||
     /\bnow (?:for|it's| is) time for the personal questions\b/.test(low) ||
     /\bnow for the personal questions\b/.test(low);
-  if (!hasPersonalBridge) return false;
-  if (
-    hasScenarioBoundaryWrapPhrase(t) ||
-    /\b(?:end of the three|finished the three|wraps up the three|done with those three)\b/.test(low)
-  ) {
-    return false;
-  }
-  return true;
+  return hasPersonalBridge;
 }
 
 /** True when Sophie/Daniel vignette already appears in transcript or recent playback history. */
@@ -65,12 +70,18 @@ export function shouldRedirectPrematureMoment4ToScenario2To3Handoff(args: {
   messages?: ReadonlyArray<TranscriptMessage>;
   lastQuestionText?: string;
   lastSuccessfulTtsDeliveredPreview?: string;
+  /** Canonical Situation 3 card already played this session. */
+  situation3CanonicalPlaybackConfirmed?: boolean;
+  /** Situation 3 repair probe already delivered — Scenario C is in progress / complete. */
+  s3RepairProbeDelivered?: boolean;
 }): boolean {
   if (!assistantTextIsPrematureMoment4HandoffDuringScenarioC(args.text)) return false;
   if (textContainsScenarioCVignetteBody(args.text)) return false;
   if (args.currentInterviewMoment >= 4) return false;
   if (isScenarioCBoundaryReflectionWithoutMoment4Handoff(args.text)) return false;
   if (isIncompleteScenarioCBoundaryClosureLeadSentence(args.text)) return false;
+  if (args.situation3CanonicalPlaybackConfirmed) return false;
+  if (args.s3RepairProbeDelivered) return false;
   if (
     interviewHistoryContainsDeliveredScenarioCVignette({
       messages: args.messages,

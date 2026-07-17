@@ -80,10 +80,15 @@ export async function applyRecordingCompletePostTranscribeGates(
   const wc = countSpokenWords(userText);
   const durMs = analysis.audio_duration_ms;
   const speechAfterVadMs =
-    analysis.firstSpeechOffsetMs != null && analysis.firstSpeechOffsetMs >= 0
+    analysis.firstSpeechOffsetMs != null &&
+    analysis.firstSpeechOffsetMs >= 0 &&
+    durMs > 0
       ? Math.max(0, durMs - analysis.firstSpeechOffsetMs)
       : null;
+  // Native recordings often lack decoded duration; never treat unknown duration as near-empty
+  // when Whisper already returned speech (e.g. name replies like "Matt!").
   const nearEmptyMicCapture =
+    durMs > 0 &&
     speechAfterVadMs != null &&
     speechAfterVadMs < MIN_SPEECH_AFTER_VAD_FOR_WHISPER_MS &&
     wc <= 2 &&
@@ -241,10 +246,8 @@ export async function applyRecordingCompletePostTranscribeGates(
     isResumeWelcomeFlowBlockingTurnProcessing(
       {
         resumeLoadingFlowActiveRef: deps.resumeLoadingFlowActiveRef,
-        webResumeWelcomeTapPendingRef: deps.webResumeWelcomeTapPendingRef,
         resumeOfferWelcomeTtsRef: deps.resumeOfferWelcomeTtsRef,
         resumeRepeatChoicePendingRef: deps.resumeRepeatChoicePendingRef,
-        webResumeWelcomeTapHandledRef: deps.webResumeWelcomeTapHandledRef,
         interviewSessionAttemptIdRef: deps.interviewSessionAttemptIdRef,
       },
       {
@@ -260,9 +263,7 @@ export async function applyRecordingCompletePostTranscribeGates(
       attemptId: deps.interviewSessionAttemptIdRef.current,
       wordCount: wc,
       resumeLoading: deps.resumeLoadingFlowActiveRef.current,
-      welcomeTapPending: deps.webResumeWelcomeTapPendingRef.current,
       welcomeOffered: deps.resumeOfferWelcomeTtsRef.current,
-      welcomeTapHandled: deps.webResumeWelcomeTapHandledRef.current,
       repeatChoicePending: deps.resumeRepeatChoicePendingRef.current,
       lastQuestionPreview: (deps.lastQuestionTextRef.current ?? '').slice(0, 120),
       transcriptPreview: userText.slice(0, 120),

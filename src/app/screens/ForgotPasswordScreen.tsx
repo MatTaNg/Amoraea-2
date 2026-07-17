@@ -234,7 +234,7 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   flameScale: {
-    transform: [{ scale: 0.52 }],
+    transform: [{ scale: 0.78 }],
   },
   button: {
     marginBottom: 12,

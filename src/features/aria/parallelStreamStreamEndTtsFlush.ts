@@ -76,13 +76,12 @@ import { isExactShowScenario3VignetteText } from '@features/aria/showScenarioCar
 import { buildScenario1To2BundleForInterview, buildScenario2To3BundleForInterview, scenarioHandoffBundleMissingNextSegmentVignette } from '@features/aria/interviewTransitionBundles';
 import { SCENARIO_2_TEXT, SCENARIO_3_TEXT } from '@features/aria/interviewScenarioVignetteCopy';
 import { SCENARIO_2_OPENING, SCENARIO_3_OPENING } from '@features/aria/interviewScenarioOpeningStreamGate';
-import { speakLongFormInterviewHtmlMp3 } from '@features/aria/utils/speakLongFormInterviewHtmlMp3';
 import {
-  isUnauthorizedS1TabRestoreFollowUp,
+  isUnauthorizedS1FollowUp,
   looksLikeBriefStreamAckOnly,
   looksLikeScenarioHandoffOrVignetteBundle,
   looksLikeShortProbeFallback,
-} from '@features/aria/computeParallelStreamTabRestoreText';
+} from '@features/aria/interviewSpokenTextHeuristics';
 
 import type { MaybeQueueParallelStreamSentenceForTts } from './parallelStreamMaybeQueueSentenceForTts';
 import { speakMissedScenarioBoundaryLeadAtStreamEnd } from './parallelStreamScenarioBoundaryHandoff';
@@ -204,11 +203,11 @@ export async function flushParallelStreamDeferredSentencesAtEnd(args: {
         usedFallbackBundle: !advanceBundle,
       });
       /**
-       * HTML handoff bypasses speakTextSafe — arm in-flight so tab-hide during S2 open
-       * restores the vignette, not a suppressed Ryan follow-up still in stream accum.
+       * Arm in-flight so tab-hide during S2 open restores the vignette, not a suppressed
+       * Ryan follow-up still in stream accum.
        */
-      if (deps.webTtsUtteranceInFlightRef) {
-        deps.webTtsUtteranceInFlightRef.current = handoffToSpeak;
+      if (deps.ttsUtteranceInFlightRef) {
+        deps.ttsUtteranceInFlightRef.current = handoffToSpeak;
       }
       deps.ttsLineInFlightRef.current = true;
       if (deps.userId) {
@@ -216,22 +215,8 @@ export async function flushParallelStreamDeferredSentencesAtEnd(args: {
       }
       deps.parallelStreamingTtsRef.current.accumulatedFullText = handoffToSpeak;
       deps.lastQuestionTextRef.current = SCENARIO_2_OPENING;
-      let htmlMp3Played = false;
       try {
-        try {
-          htmlMp3Played = await speakLongFormInterviewHtmlMp3({
-            text: handoffToSpeak,
-            telemetrySource: 'turn',
-            onPlaybackStarted: () => deps.setVoiceState('speaking'),
-          });
-        } catch {
-          htmlMp3Played = false;
-        }
-        if (!htmlMp3Played) {
-          await deps.speakTextSafe(handoffToSpeak, SHOW_SCENARIO_CARD_CANONICAL_SPEECH);
-        } else {
-          deps.setVoiceState('idle');
-        }
+        await deps.speakTextSafe(handoffToSpeak, SHOW_SCENARIO_CARD_CANONICAL_SPEECH);
         if (deps.showScenarioCardCanonicalPlaybackConfirmedKindsRef) {
           deps.showScenarioCardCanonicalPlaybackConfirmedKindsRef.current = {
             ...deps.showScenarioCardCanonicalPlaybackConfirmedKindsRef.current,
@@ -239,9 +224,9 @@ export async function flushParallelStreamDeferredSentencesAtEnd(args: {
           };
         }
       } finally {
-        if (!deps.webTtsTabInterruptPendingReplayRef.current) {
-          if (deps.webTtsUtteranceInFlightRef) {
-            deps.webTtsUtteranceInFlightRef.current = null;
+        if (!false) {
+          if (deps.ttsUtteranceInFlightRef) {
+            deps.ttsUtteranceInFlightRef.current = null;
           }
           deps.ttsLineInFlightRef.current = false;
           if (deps.userId && !deps.parallelStreamingTtsRef.current.active) {
@@ -296,8 +281,8 @@ export async function flushParallelStreamDeferredSentencesAtEnd(args: {
         streamSpokePreview: spokenSoFar.slice(0, 120),
         usedFallbackBundle: !advanceBundle,
       });
-      if (deps.webTtsUtteranceInFlightRef) {
-        deps.webTtsUtteranceInFlightRef.current = handoffToSpeak;
+      if (deps.ttsUtteranceInFlightRef) {
+        deps.ttsUtteranceInFlightRef.current = handoffToSpeak;
       }
       deps.ttsLineInFlightRef.current = true;
       if (deps.userId) {
@@ -305,22 +290,8 @@ export async function flushParallelStreamDeferredSentencesAtEnd(args: {
       }
       deps.parallelStreamingTtsRef.current.accumulatedFullText = handoffToSpeak;
       deps.lastQuestionTextRef.current = SCENARIO_3_OPENING;
-      let htmlMp3Played = false;
       try {
-        try {
-          htmlMp3Played = await speakLongFormInterviewHtmlMp3({
-            text: handoffToSpeak,
-            telemetrySource: 'turn',
-            onPlaybackStarted: () => deps.setVoiceState('speaking'),
-          });
-        } catch {
-          htmlMp3Played = false;
-        }
-        if (!htmlMp3Played) {
-          await deps.speakTextSafe(handoffToSpeak, SHOW_SCENARIO_CARD_CANONICAL_SPEECH);
-        } else {
-          deps.setVoiceState('idle');
-        }
+        await deps.speakTextSafe(handoffToSpeak, SHOW_SCENARIO_CARD_CANONICAL_SPEECH);
         if (deps.showScenarioCardCanonicalPlaybackConfirmedKindsRef) {
           deps.showScenarioCardCanonicalPlaybackConfirmedKindsRef.current = {
             ...deps.showScenarioCardCanonicalPlaybackConfirmedKindsRef.current,
@@ -328,9 +299,9 @@ export async function flushParallelStreamDeferredSentencesAtEnd(args: {
           };
         }
       } finally {
-        if (!deps.webTtsTabInterruptPendingReplayRef.current) {
-          if (deps.webTtsUtteranceInFlightRef) {
-            deps.webTtsUtteranceInFlightRef.current = null;
+        if (!false) {
+          if (deps.ttsUtteranceInFlightRef) {
+            deps.ttsUtteranceInFlightRef.current = null;
           }
           deps.ttsLineInFlightRef.current = false;
           if (deps.userId && !deps.parallelStreamingTtsRef.current.active) {
@@ -671,80 +642,19 @@ export async function flushParallelStreamDeferredSentencesAtEnd(args: {
 }
 
 export async function finalizeParallelStreamPlaybackSession(ctx: ParallelStreamTtsPlaybackContext): Promise<void> {
-  const { deps, params, state } = ctx;
+  const { deps, params } = ctx;
   deps.recordingJustFinishedBeforeNextTtsRef.current = false;
   deps.postRecordingParallelStreamSettleRef.current = false;
-  if (!deps.webTtsTabInterruptPendingReplayRef.current) {
-    deps.parallelStreamingTtsRef.current.active = false;
-    if (deps.userId) {
-      setTtsPlaybackActive(false);
-      deps.ttsLineInFlightRef.current = false;
-    }
-  }
-  if (
-    Platform.OS === 'web' &&
-    deps.webTtsTabInterruptPendingReplayRef.current &&
-    !params.metaFrustrationFirstSignalBuffered
-  ) {
-    const fullReplay = stripControlTokens(params.textToParallelStream.full).trim();
-    if (fullReplay.length > 0) {
-      const isClosingReplay =
-        isInterviewClosingThanksFragment(fullReplay) ||
-        isInterviewClosingReflectiveAckFragment(fullReplay) ||
-        looksLikeInterviewClosingAssistantMessage(fullReplay);
-      if (isClosingReplay) {
-        deps.webTtsTabInterruptPendingReplayRef.current = false;
-      } else {
-        const prior = deps.pendingGestureRestoreSpeakRef.current;
-        const preserveHtmlResume =
-          prior?.restoreMode === 'resume_html' || hasWebInterviewHtmlAudioTabResumePending();
-        const spokenComplete = deps.parallelStreamingTtsRef.current.spokenCompleteText.trim();
-        /**
-         * Do not replace a queued restore (or a spoken S1→S2 handoff) with stream leftovers
-         * that are only a brief ack / unauthorized Ryan follow-up.
-         */
-        const fullIsStaleFollowUp =
-          isUnauthorizedS1TabRestoreFollowUp(fullReplay) ||
-          looksLikeBriefStreamAckOnly(fullReplay) ||
-          (looksLikeShortProbeFallback(fullReplay) &&
-            looksLikeScenarioHandoffOrVignetteBundle(spokenComplete));
-        const preferSpokenHandoff =
-          looksLikeScenarioHandoffOrVignetteBundle(spokenComplete) && fullIsStaleFollowUp;
-        const preferPrior =
-          !!prior?.text?.trim() &&
-          (preserveHtmlResume ||
-            (fullIsStaleFollowUp &&
-              (looksLikeScenarioHandoffOrVignetteBundle(prior.text) ||
-                prior.text.trim().length >= fullReplay.length)));
-        const restoreText = substituteCanonicalInterviewScenarioBodiesForTts(
-          preferSpokenHandoff
-            ? spokenComplete
-            : preferPrior && prior?.text
-              ? prior.text
-              : preserveHtmlResume && prior?.text
-                ? prior.text
-                : fullReplay,
-        );
-        deps.pendingGestureRestoreSpeakRef.current = {
-          text: restoreText,
-          restoreMode: preserveHtmlResume ? 'resume_html' : prior?.restoreMode ?? 'replay',
-          queuedAtMs: prior?.queuedAtMs ?? Date.now(),
-          options: prior?.options ?? { ...TAB_RESTORE_PENDING_SPEAK_OPTIONS },
-          resolve: prior?.resolve ?? (() => {}),
-          reject: prior?.reject ?? (() => {}),
-        };
-        deps.setWebTabGestureRestoreOverlay(true);
-      }
-    }
+  deps.parallelStreamingTtsRef.current.active = false;
+  if (deps.userId) {
+    setTtsPlaybackActive(false);
+    deps.ttsLineInFlightRef.current = false;
   }
   if (params.metaFrustrationFirstSignalBuffered) {
     await runParallelStreamMetaFrustrationBufferedTts(ctx);
   }
   if (params.textToParallelStream.spokenStarted) {
     deps.setVoiceState('idle');
-    if (Platform.OS === 'web') {
-      deps.scheduleWebMicPreInitRefreshAfterTtsCompletes();
-    }
   }
 }
 
@@ -752,7 +662,6 @@ export async function runParallelStreamMetaFrustrationBufferedTts(
   ctx: ParallelStreamTtsPlaybackContext,
 ): Promise<void> {
   const { deps, params } = ctx;
-  deps.webTtsTabInterruptPendingReplayRef.current = false;
   let display = stripControlTokens(params.textToParallelStream.full).trim();
   if (isApprovedElongatingProbeOnly(display)) {
     const excerpt = lastSubstantivePriorUserExcerptInScenario(

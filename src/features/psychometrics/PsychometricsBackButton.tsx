@@ -1,6 +1,8 @@
 import React from 'react';
 import { TouchableOpacity, Text, View, StyleSheet, Platform } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
+import { interviewOverlayTop } from '@features/aria/utils/interviewOverlayInsets';
 import { PSYCHOMETRICS_ACCENT, PSYCHOMETRICS_FONT_BODY } from './psychometricsTheme';
 
 type Props = {
@@ -11,6 +13,7 @@ type Props = {
 };
 
 export function PsychometricsBackButton({ onPress, disabled, variant = 'floating' }: Props) {
+  const overlayTop = interviewOverlayTop(useSafeAreaInsets());
   if (variant === 'inline') {
     return (
       <TouchableOpacity
@@ -32,7 +35,7 @@ export function PsychometricsBackButton({ onPress, disabled, variant = 'floating
 
   return (
     <TouchableOpacity
-      style={styles.buttonFloating}
+      style={[styles.buttonFloating, { top: overlayTop }]}
       onPress={onPress}
       disabled={disabled}
       activeOpacity={0.8}
@@ -49,7 +52,6 @@ export function PsychometricsBackButton({ onPress, disabled, variant = 'floating
 const styles = StyleSheet.create({
   buttonFloating: {
     position: 'absolute',
-    top: 16,
     left: 16,
     flexDirection: 'row',
     alignItems: 'center',

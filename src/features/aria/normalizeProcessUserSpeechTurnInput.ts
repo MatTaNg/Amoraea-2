@@ -9,10 +9,8 @@ import {
   isResumeWelcomeFlowBlockingTurnProcessing,
   isStaleInterviewUserTurn,
 } from '@features/aria/resumeWelcomeTurnProcessingGate';
-import {
-  classifyResumeRepeatIntent,
-  isExplicitRepeatRequestPreClassification,
-} from '@features/aria/resumeRepeatIntent';
+import { isExplicitRepeatRequestPreClassification } from '@features/aria/metaCommentClassification';
+import { classifyResumeRepeatIntent } from '@features/aria/resumeRepeatIntent';
 import { remoteLog } from '@utilities/remoteLog';
 
 export type NormalizedProcessUserSpeechTurn =
@@ -38,9 +36,7 @@ export function normalizeProcessUserSpeechTurnInput(
     interviewSessionIdRef,
     metaClassificationForPendingAssistantRef,
     resumeLoadingFlowActiveRef,
-    webResumeWelcomeTapPendingRef,
     resumeOfferWelcomeTtsRef,
-    webResumeWelcomeTapHandledRef,
     interviewSessionAttemptIdRef,
   } = deps;
 
@@ -48,10 +44,8 @@ export function normalizeProcessUserSpeechTurnInput(
     isResumeWelcomeFlowBlockingTurnProcessing(
       {
         resumeLoadingFlowActiveRef,
-        webResumeWelcomeTapPendingRef,
         resumeOfferWelcomeTtsRef,
         resumeRepeatChoicePendingRef,
-        webResumeWelcomeTapHandledRef,
         interviewSessionAttemptIdRef,
       },
       {
@@ -66,7 +60,6 @@ export function normalizeProcessUserSpeechTurnInput(
     void remoteLog('[RESUME_WELCOME] process_user_speech_blocked', {
       interviewSessionId: interviewSessionIdRef.current,
       resumeLoading: resumeLoadingFlowActiveRef.current,
-      welcomeTapPending: webResumeWelcomeTapPendingRef.current,
       welcomeOffered: resumeOfferWelcomeTtsRef.current,
       repeatChoicePending: resumeRepeatChoicePendingRef.current,
     });

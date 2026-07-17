@@ -3,6 +3,13 @@ import {
   looksLikeScenarioARepairQuestion,
   resolveInterviewQuestionRepeatTtsText,
 } from '@features/aria/interviewDisengagementProbes';
+import {
+  buildScenarioPlusQuestionRepeatTts,
+  getScenarioVignetteBodyForRepeat,
+  resolveInterviewRepeatRequestTarget,
+  shouldAttachScenarioVignetteForRepeat,
+  withRepeatRequestAcknowledgment,
+} from '@features/aria/interviewRepeatRequestTarget';
 import type { MessageWithScenario } from '@features/aria/interviewScenarioScoringSlice';
 import { ASSISTANT_INTERVIEW_SPEECH } from '@features/aria/interviewTtsSpeakOptions';
 import type { MetaCommentClassification } from '@features/aria/metaCommentClassification';
@@ -26,6 +33,9 @@ import {
   isScenarioCRepairAssistantPrompt,
   looksLikeScenarioCSophiePerspectiveQuestion,
 } from '@features/aria/scenarioCPromptDetection';
+import { resolveSituation1ExactModalPrompt } from '@features/aria/situation1ExactModalPrompt';
+import { resolveSituation2ExactModalPrompt } from '@features/aria/situation2ExactModalPrompt';
+import { resolveSituation3ExactModalPrompt } from '@features/aria/situation3ExactModalPrompt';
 import { remoteLog } from '@utilities/remoteLog';
 
 function inferScenarioNumberForRepeatReplay(
@@ -109,7 +119,10 @@ export async function runPreClaudeConfusionRepeatReplayGates(
     deps.lastQuestionTextRef.current = replayText;
     deps.commitInterviewMessages(nextMessages as PreClaudeTurnGateDeps['messages']);
     deps.setMessages(nextMessages as PreClaudeTurnGateDeps['messages']);
-    await deps.speakTextSafe(replayText, ASSISTANT_INTERVIEW_SPEECH);
+    await deps.speakTextSafe(
+      withRepeatRequestAcknowledgment(replayText),
+      ASSISTANT_INTERVIEW_SPEECH,
+    );
     deps.setVoiceState('idle');
     deps.setIsWaiting(false);
     return { handled: true };
@@ -117,11 +130,16 @@ export async function runPreClaudeConfusionRepeatReplayGates(
 
   if (isConfusionRepeatRequest(metaCommentClassification) && baseConfusionRepeatEligible(deps)) {
     const lastUserAnswer = [...messagesToUse].reverse().find((m) => m.role === 'user')?.content;
+    const lastUserText = (lastUserAnswer ?? '').trim();
+    const repeatTarget = resolveInterviewRepeatRequestTarget(lastUserText);
     let repeatableQuestion = findLastRepeatableInterviewQuestionText(
       messagesToUse,
-      deps.lastQuestionTextRef.current,
+      deps.resumeLastAssistantTextRef.current ?? deps.lastQuestionTextRef.current,
       { activeScenario: deps.currentScenarioRef.current },
     );
+    if (repeatableQuestion?.trim()) {
+      deps.resumeLastAssistantTextRef.current = null;
+    }
     const m4ReplayFallback = resolveMoment4ConfusionRepeatReplayFallback(messagesToUse, {
       currentInterviewMoment: deps.currentInterviewMomentRef.current,
       moment4ThresholdProbeAsked: deps.moment4ThresholdProbeAskedRef.current,
@@ -134,20 +152,38 @@ export async function runPreClaudeConfusionRepeatReplayGates(
     ) {
       repeatableQuestion = m4ReplayFallback;
     }
-    const replayText = resolveInterviewQuestionRepeatTtsText(repeatableQuestion, {
+    const questionOnlyText = resolveInterviewQuestionRepeatTtsText(repeatableQuestion, {
       firstName: deps.interviewNameRef.current ?? '',
       lastUserAnswer,
       activeScenario: deps.currentScenarioRef.current,
     });
-    if (replayText.length > 0) {
-      void remoteLog('[META_CONFUSION_REPEAT_VERBATIM_REPLAY]', {
-        interviewSessionId: deps.interviewSessionIdRef.current,
-        preview: replayText.slice(0, 220),
-        preclassified: metaCommentClassification.confidence === 1.0,
-      });
+    if (questionOnlyText.length > 0) {
       const replayScenarioNumber = inferScenarioNumberForRepeatReplay(
-        replayText,
+        questionOnlyText,
         deps.currentScenarioRef.current ?? userScenarioTag,
+      );
+      const attachVignette = shouldAttachScenarioVignetteForRepeat({
+        target: repeatTarget,
+        interviewMoment: deps.currentInterviewMomentRef.current,
+        scenarioNumber: replayScenarioNumber,
+      });
+      const replayText = attachVignette
+        ? buildScenarioPlusQuestionRepeatTts(
+            getScenarioVignetteBodyForRepeat(replayScenarioNumber),
+            questionOnlyText,
+          )
+        : questionOnlyText;
+      void remoteLog(
+        attachVignette
+          ? '[META_CONFUSION_REPEAT_SCENARIO_REPLAY]'
+          : '[META_CONFUSION_REPEAT_VERBATIM_REPLAY]',
+        {
+          interviewSessionId: deps.interviewSessionIdRef.current,
+          preview: replayText.slice(0, 220),
+          questionPreview: questionOnlyText.slice(0, 120),
+          repeatTarget,
+          preclassified: metaCommentClassification.confidence === 1.0,
+        },
       );
       const replayMsg: MessageWithScenario = {
         role: 'assistant',
@@ -162,10 +198,34 @@ export async function runPreClaudeConfusionRepeatReplayGates(
        * a stale last-assistant line (e.g. ghost S1 repair after a spoken S1 contempt replay).
        */
       deps.currentMessagesRef.current = nextMessages as PreClaudeTurnGateDeps['messages'];
-      deps.lastQuestionTextRef.current = replayText;
+      // Keep last-question pointer on the probe only (not the vignette body).
+      deps.lastQuestionTextRef.current = questionOnlyText;
+      if (looksLikeMoment4GrudgePrompt(questionOnlyText) && deps.currentInterviewMomentRef.current < 4) {
+        deps.currentInterviewMomentRef.current = 4;
+        deps.interviewMomentsCompleteRef.current[3] = true;
+        deps.personalHandoffInjectedRef.current = true;
+        void remoteLog('[M4_MOMENT_HEALED_FROM_CONFUSION_REPLAY]', {
+          interviewSessionId: deps.interviewSessionIdRef.current,
+        });
+      }
+      // Keep Show scenario footer on the repeated question — never fall back to intro "Are you ready?".
+      const assistantForModal = nextMessages.map((m) => ({
+        role: m.role,
+        content: m.content,
+      }));
+      const exactFooter =
+        replayScenarioNumber === 3
+          ? resolveSituation3ExactModalPrompt(assistantForModal, questionOnlyText)
+          : replayScenarioNumber === 2
+            ? resolveSituation2ExactModalPrompt(assistantForModal, questionOnlyText)
+            : resolveSituation1ExactModalPrompt(assistantForModal, questionOnlyText);
+      if (exactFooter.trim()) {
+        deps.setReferenceCardPrompt(exactFooter);
+        deps.lastQuestionTextRef.current = exactFooter;
+      }
       deps.commitInterviewMessages(nextMessages as PreClaudeTurnGateDeps['messages']);
       deps.setMessages(nextMessages as PreClaudeTurnGateDeps['messages']);
-      await deps.speakTextSafe(replayText, {
+      await deps.speakTextSafe(withRepeatRequestAcknowledgment(replayText), {
         ...ASSISTANT_INTERVIEW_SPEECH,
         allowDuplicateConsecutiveTts: true,
         /**

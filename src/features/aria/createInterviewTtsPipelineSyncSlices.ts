@@ -2,26 +2,15 @@ import type { AriaInterviewDepsSyncContext } from '@features/aria/syncAriaInterv
 
 type SyncExtraParams = AriaInterviewDepsSyncContext;
 
-export function createInterviewTtsPipelineWebUiSyncSlice(params: SyncExtraParams): SyncExtraParams {
-  return {
-    mobileWebTapToBeginDone: params.mobileWebTapToBeginDone,
-    setWebTabGestureRestoreOverlay: params.setWebTabGestureRestoreOverlay,
-    setWebDesktopPendingTtsGestureOverlay: params.setWebDesktopPendingTtsGestureOverlay,
-    setTtsPlaybackReliabilityNotice: params.setTtsPlaybackReliabilityNotice,
-    setLastTtsCompletionCallbackMs: params.setLastTtsCompletionCallbackMs,
-    webSpeechShouldDeferToUserGesture: params.webSpeechShouldDeferToUserGesture,
-  };
-}
-
 export function createInterviewTtsPipelinePlaybackSyncSlice(params: SyncExtraParams): SyncExtraParams {
   return {
+    setTtsPlaybackReliabilityNotice: params.setTtsPlaybackReliabilityNotice,
+    setLastTtsCompletionCallbackMs: params.setLastTtsCompletionCallbackMs,
     speak: params.speak,
     applyInterviewSpeechComplete: params.applyInterviewSpeechComplete,
     awaitTtsScreenReadyGate: params.awaitTtsScreenReadyGate,
     stopElevenLabsPlayback: params.stopElevenLabsPlayback,
     prepareInterviewTtsPlayback: params.prepareInterviewTtsPlayback,
-    rearmWebMicPreInitAfterTtsPlaybackComplete: params.rearmWebMicPreInitAfterTtsPlaybackComplete,
-    scheduleWebMicPreInitRefreshAfterTtsCompletes: params.scheduleWebMicPreInitRefreshAfterTtsCompletes,
     referenceCardShouldUpdateOnPlaybackStart: params.referenceCardShouldUpdateOnPlaybackStart,
     persistInterviewAttemptSessionLifecycle: params.persistInterviewAttemptSessionLifecycle,
     setReferenceCardPrompt: params.setReferenceCardPrompt,
@@ -43,6 +32,9 @@ export function createInterviewTtsPipelineDeliveryRefsSyncSlice(params: SyncExtr
     firstScenarioLifecyclePersistedRef: params.firstScenarioLifecyclePersistedRef,
     ttsSessionHardFailureCountRef: params.ttsSessionHardFailureCountRef,
     recordInterviewAssistantDeliveryForMetaExemptionRef: params.recordInterviewAssistantDeliveryForMetaExemptionRef,
+    /** Required by parallel-stream show-scenario advance; must not be missing on TTS deps. */
+    committedScenarioRef: params.committedScenarioRef,
+    ensureCompletedScenarioScored: params.ensureCompletedScenarioScored,
   };
 }
 

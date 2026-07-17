@@ -1,5 +1,3 @@
-import { Platform } from 'react-native';
-
 import { runSpeakTextSafeEntry } from '@features/aria/runSpeakTextSafeEntry';
 import { runSpeakTextSafeMainSpeakBody } from '@features/aria/runSpeakTextSafeMainSpeakBody';
 import type { SpeakTextSafeDeps, SpeakTextSafeOptions } from '@features/aria/speakTextSafeDeps';
@@ -41,7 +39,6 @@ export async function runSpeakTextSafe(
     text,
     options,
     userId: deps.userId,
-    mobileWebTapToBeginDone: deps.mobileWebTapToBeginDone,
     effectiveTtsTriggerSource,
     speakGenerationAtStart,
     skipGestureGate,
@@ -58,24 +55,13 @@ export async function runSpeakTextSafe(
     referenceCardShouldUpdateOnPlaybackStart: deps.referenceCardShouldUpdateOnPlaybackStart,
     applyReferenceCardFromAssistantSpeechRef: deps.applyReferenceCardFromAssistantSpeechRef,
     interviewStatusRef: deps.interviewStatusRef,
-    needsGestureRestoreRef: deps.needsGestureRestoreRef,
-    pendingGestureRestoreSpeakRef: deps.pendingGestureRestoreSpeakRef,
-    setWebTabGestureRestoreOverlay: deps.setWebTabGestureRestoreOverlay,
-    webTtsTabInterruptPendingReplayRef: deps.webTtsTabInterruptPendingReplayRef,
-    tabHiddenDuringActiveTtsLineRef: deps.tabHiddenDuringActiveTtsLineRef,
-    webTtsSpeakGenerationRef: deps.webTtsSpeakGenerationRef,
+    ttsSpeakGenerationRef: deps.ttsSpeakGenerationRef,
     recordingJustFinishedBeforeNextTtsRef: deps.recordingJustFinishedBeforeNextTtsRef,
     postRecordingParallelStreamSettleRef: deps.postRecordingParallelStreamSettleRef,
     ttsLineInFlightRef: deps.ttsLineInFlightRef,
-    webTtsUtteranceInFlightRef: deps.webTtsUtteranceInFlightRef,
-    webTtsUtteranceInFlightOptionsRef: deps.webTtsUtteranceInFlightOptionsRef,
-    tabVisibilityGestureLossPendingRef: deps.tabVisibilityGestureLossPendingRef,
-    gestureContextLostAtRef: deps.gestureContextLostAtRef,
+    ttsUtteranceInFlightRef: deps.ttsUtteranceInFlightRef,
+    ttsUtteranceInFlightOptionsRef: deps.ttsUtteranceInFlightOptionsRef,
   });
-  if (playbackPrep.status === 'gesture_queued') {
-    return;
-  }
-
   await runSpeakTextSafeMainSpeakBody({
     deps,
     text,

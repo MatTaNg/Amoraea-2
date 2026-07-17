@@ -19,8 +19,7 @@ export type InterviewTurnHandlerLocalScope = {
   >;
   webTtsResume: Pick<
     SyncExtraParams,
-    | 'clearStaleWebInterviewTtsRuntimeLocks'
-    | 'queueMobileWebHtmlResumeAfterScreenReturn'
+    | 'clearStaleInterviewTtsRuntimeLocks'
     | 'applyInterviewSpeechComplete'
   >;
   scenarioScoring: Pick<
@@ -35,7 +34,6 @@ export type InterviewTurnHandlerLocalScope = {
   >;
   uiStage: Pick<
     SyncExtraParams,
-    | 'setWebTabGestureRestoreOverlay'
     | 'setReferenceCardPrompt'
     | 'setHighestScenarioReached'
     | 'setStageResults'

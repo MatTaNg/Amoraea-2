@@ -34,8 +34,6 @@ export async function runHydratePostClosingFromSaved(
     interviewStatusRef,
     setInterviewStatus,
     resumeOfferWelcomeTtsRef,
-    webResumeWelcomeTapPendingRef,
-    setWebResumeWelcomeTapPending,
   } = deps;
   const { saved, source } = params;
 
@@ -68,8 +66,6 @@ export async function runHydratePostClosingFromSaved(
       resumeLoadingFlowActiveRef.current = false;
       setResumeLoadingVisible(false);
       resumeOfferWelcomeTtsRef.current = false;
-      webResumeWelcomeTapPendingRef.current = false;
-      setWebResumeWelcomeTapPending(false);
       const restored = assignScenarioNumbersToTranscript(
         stripEphemeralWelcomeBackMessages(saved.messages ?? []),
       );

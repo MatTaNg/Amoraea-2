@@ -16,7 +16,7 @@ import { buildAriaInterviewRenderParamsFromScreen } from '@features/aria/buildAr
 import { buildAriaInterviewRuntimeDepSyncWiringParamsFromScreen } from '@features/aria/buildAriaInterviewRuntimeDepSyncWiringParamsFromScreen';
 import { buildAriaInterviewServicesSyncCtxBaseParamsFromScreen } from '@features/aria/buildAriaInterviewServicesSyncCtxBaseParamsFromScreen';
 import { buildAriaInterviewTurnClusterDepSyncWiringParamsFromScreen } from '@features/aria/buildAriaInterviewTurnClusterDepSyncWiringParamsFromScreen';
-import { buildAriaInterviewWebTtsPreCoreDepSyncWiringParamsFromScreen } from '@features/aria/buildAriaInterviewWebTtsPreCoreDepSyncWiringParamsFromScreen';
+import { buildAriaInterviewTtsPreCoreDepSyncWiringParamsFromScreen } from '@features/aria/buildAriaInterviewTtsPreCoreDepSyncWiringParamsFromScreen';
 import { useAriaInterviewBootEffectWiring } from '@features/aria/hooks/useAriaInterviewBootEffectWiring';
 import { useAriaInterviewBootMiscDepSyncWiring } from '@features/aria/hooks/useAriaInterviewBootMiscDepSyncWiring';
 import { useAriaInterviewCoreTtsDepSyncWiring } from '@features/aria/hooks/useAriaInterviewCoreTtsDepSyncWiring';
@@ -29,7 +29,7 @@ import { useAriaInterviewRuntimeDepSyncWiring } from '@features/aria/hooks/useAr
 import type { AriaInterviewScreenSessionState } from '@features/aria/hooks/useAriaInterviewScreenSessionState';
 import { useAriaInterviewServicesSyncCtxBase } from '@features/aria/hooks/useAriaInterviewServicesSyncCtxBase';
 import { useAriaInterviewTurnClusterDepSyncWiring } from '@features/aria/hooks/useAriaInterviewTurnClusterDepSyncWiring';
-import { useAriaInterviewWebTtsPreCoreDepSyncWiring } from '@features/aria/hooks/useAriaInterviewWebTtsPreCoreDepSyncWiring';
+import { useAriaInterviewTtsPreCoreDepSyncWiring } from '@features/aria/hooks/useAriaInterviewTtsPreCoreDepSyncWiring';
 import { useAriaScreenDevEnvCheck } from '@features/aria/hooks/useInterviewScreenBootEffects';
 import type { AriaInterviewScreenSetupInput } from '@features/aria/ariaInterviewScreenTypes';
 import type { AriaInterviewScreenRenderScope } from '@features/aria/renderAriaInterviewScreen';
@@ -179,48 +179,32 @@ export function useAriaInterviewScreenWiring(
   });
 
   const {
-    webTtsRuntimeDepsRef,
+    ttsRuntimeDepsRef,
     isInterviewerOutputActiveForMicGate,
-    waitForWebInterviewTtsQuiescentBeforeEmotionModal,
-    waitForWebInterviewTtsAudiblePlaybackBeforeEmotionModal,
-    clearStaleWebInterviewTtsRuntimeLocks,
-    interruptAllWebInterviewTtsOutput,
-    resolveStaleWebTtsRuntimeLockThresholdMs,
-    isMobileWebInterviewTtsSessionActive,
-    armMobileWebBackgroundTtsContinue,
-    queueMobileWebHtmlResumeAfterScreenReturn,
+    clearStaleInterviewTtsRuntimeLocks,
+    interruptAllInterviewTtsOutput,
     speak,
-    runWebGestureTtsFlush,
-    ensureWebGestureFlushListener,
-    detachWebGestureFlushListener,
-    dismissTabRestoreOverlay,
-    dismissAfterAndroidBackgroundPlaybackEnd,
-  } = useAriaInterviewWebTtsPreCoreDepSyncWiring(
-    buildAriaInterviewWebTtsPreCoreDepSyncWiringParamsFromScreen({
+  } = useAriaInterviewTtsPreCoreDepSyncWiring(
+    buildAriaInterviewTtsPreCoreDepSyncWiringParamsFromScreen({
       session,
       userIdRef,
-      boot: { applyInterviewSpeechComplete },
       interviewSession: interviewBindings.webTtsPreCore,
     }),
   );
 
-  const { ariaInterviewWebRuntimeSyncCtx, ariaInterviewRuntimeGateSyncCtx } =
+  const { ariaInterviewRuntimeSyncCtx, ariaInterviewRuntimeGateSyncCtx } =
     useAriaInterviewRuntimeDepSyncWiring(
       buildAriaInterviewRuntimeDepSyncWiringParamsFromScreen({
         gateCtx: ariaInterviewGateSyncCtx,
         servicesGateCtx: ariaInterviewServicesGateSyncCtx,
         emotionModalOrchestrationDepsRef,
-        webTtsRuntimeDepsRef,
+        ttsRuntimeDepsRef,
         session,
         interview,
         userIdRef,
         interviewSession: interviewBindings.runtime,
         webTts: {
-          ensureWebGestureFlushListener,
-          detachWebGestureFlushListener,
-          interruptAllWebInterviewTtsOutput,
-          waitForWebInterviewTtsQuiescentBeforeEmotionModal,
-          waitForWebInterviewTtsAudiblePlaybackBeforeEmotionModal,
+          interruptAllInterviewTtsOutput,
         },
       }),
     );
@@ -241,8 +225,6 @@ export function useAriaInterviewScreenWiring(
       session,
       interviewSession: interviewBindings.coreTts,
       webTts: {
-        dismissTabRestoreOverlay,
-        dismissAfterAndroidBackgroundPlaybackEnd,
         speak,
       },
       boot: {
@@ -253,34 +235,19 @@ export function useAriaInterviewScreenWiring(
   );
 
   const {
-    webTabRestoreSessionDepsRef,
     deliverRecordingRetryLine,
     fetchStageScoreDepsRef,
     saveScenarioCheckpointDepsRef,
-    syncInterviewTtsAfterScreenReturn,
-    handleWebTabGestureRestoreTap,
   } = useAriaInterviewDocumentTtsDepSyncWiring(
     buildAriaInterviewDocumentTtsDepSyncWiringParamsFromScreen({
       syncContexts: {
         coreCtx: ariaInterviewCoreSyncCtx,
         servicesBaseCtx: ariaInterviewServicesSyncCtxBase,
         coreGateServicesBaseCtx: ariaInterviewCoreGateServicesBaseSyncCtx,
-        webRuntimeCtx: ariaInterviewWebRuntimeSyncCtx,
+        runtimeCtx: ariaInterviewRuntimeSyncCtx,
       },
       session,
       typologyContext,
-      interviewSession: interviewBindings.documentTts,
-      webTts: {
-        ensureWebGestureFlushListener,
-        isMobileWebInterviewTtsSessionActive,
-        armMobileWebBackgroundTtsContinue,
-        isInterviewerOutputActiveForMicGate,
-        queueMobileWebHtmlResumeAfterScreenReturn,
-        resolveStaleWebTtsRuntimeLockThresholdMs,
-        clearStaleWebInterviewTtsRuntimeLocks,
-        dismissAfterAndroidBackgroundPlaybackEnd,
-        dismissTabRestoreOverlay,
-      },
     }),
   );
 
@@ -290,7 +257,6 @@ export function useAriaInterviewScreenWiring(
     audioRecorder,
     handlePressStart,
     handlePressEnd,
-    handleWebMicPressIn,
     handleNativeOrWhisperMicPress,
     handleSendTyped,
   } = useAriaInterviewTurnClusterDepSyncWiring(
@@ -299,24 +265,18 @@ export function useAriaInterviewScreenWiring(
         coreCtx: ariaInterviewCoreSyncCtx,
         coreGateServicesBaseCtx: ariaInterviewCoreGateServicesBaseSyncCtx,
         gateSyncCtx: ariaInterviewGateSyncCtx,
-        webRuntimeCtx: ariaInterviewWebRuntimeSyncCtx,
+        runtimeCtx: ariaInterviewRuntimeSyncCtx,
         servicesGateCtx: ariaInterviewServicesGateSyncCtx,
       },
       documentTts: {
-        webTabRestoreSessionDepsRef,
         claudeParallelStreamTtsDepsRef,
         fetchStageScoreDepsRef,
         saveScenarioCheckpointDepsRef,
         deliverRecordingRetryLine,
-        syncInterviewTtsAfterScreenReturn,
       },
       webTts: {
-        runWebGestureTtsFlush,
-        clearStaleWebInterviewTtsRuntimeLocks,
-        queueMobileWebHtmlResumeAfterScreenReturn,
+        clearStaleInterviewTtsRuntimeLocks,
         isInterviewerOutputActiveForMicGate,
-        isMobileWebInterviewTtsSessionActive,
-        armMobileWebBackgroundTtsContinue,
       },
       boot: {
         applyInterviewSpeechComplete,
@@ -340,9 +300,7 @@ export function useAriaInterviewScreenWiring(
   );
 
   const {
-    handleWebResumeWelcomeTap,
     startInterview,
-    handleMobileWebTapToBegin,
     handleRetake,
     handleAdminResetInterview,
     handleSubmitPostInterviewFeedback,
@@ -403,17 +361,12 @@ export function useAriaInterviewScreenWiring(
       handleSubmitPostInterviewFeedback,
       handleBackToValidationReport,
       startInterview,
-      handleMobileWebTapToBegin,
       handleRetake,
       handleEmotionInterviewAnswer,
       handlePressStart,
       handlePressEnd,
       handleNativeOrWhisperMicPress,
-      handleWebMicPressIn,
       handleSendTyped,
-      runWebGestureTtsFlush,
-      handleWebTabGestureRestoreTap,
-      handleWebResumeWelcomeTap,
     },
   });
 }

@@ -20,6 +20,7 @@ import {
   isScenarioModalEligibleScenarioQuestionPrompt,
   resolveScenarioModalDisplayParts,
 } from '@features/aria/interviewLanguageGate';
+import { resolveInterviewTopInset } from '@features/aria/utils/interviewOverlayInsets';
 // Design tokens — Amoraea interviewer
 const BG = '#05060D';
 const SURFACE = '#0D1120';
@@ -151,6 +152,7 @@ export const UserInterviewLayout: React.FC<UserInterviewLayoutProps> = ({
   const rippleAnim = useRef(new Animated.Value(0)).current;
   const { width: windowWidth, height: windowHeight } = useWindowDimensions();
   const safeInsets = useSafeAreaInsets();
+  const headerTopInset = Platform.OS === 'web' ? 0 : resolveInterviewTopInset(safeInsets);
   /** Mobile Safari: `useWindowDimensions` can exceed the visible viewport (URL bar / home indicator). */
   const [visualViewportH, setVisualViewportH] = useState<number | null>(null);
   useEffect(() => {
@@ -304,7 +306,7 @@ export const UserInterviewLayout: React.FC<UserInterviewLayoutProps> = ({
 
   /** Shrink orb on short viewports so mic + SHOW SCENARIO stay above the fold (esp. mobile Safari + home indicator). */
   const flameOrbSize = useMemo(
-    () => Math.round(Math.min(170, Math.max(96, layoutHeight * 0.2))),
+    () => Math.round(Math.min(240, Math.max(140, layoutHeight * 0.28))),
     [layoutHeight]
   );
 
@@ -677,29 +679,31 @@ export const UserInterviewLayout: React.FC<UserInterviewLayoutProps> = ({
         />
       )}
 
-      {/* Header */}
-      <View style={styles.header}>
-        <View style={styles.wordmarkRow}>
-          <Text style={styles.wordmarkText}>
-            amor<Text style={styles.wordmarkAe}>æ</Text>a
-          </Text>
-          <Text style={styles.wordmarkBeta}>(BETA)</Text>
+      {/* Header — background under status bar; controls only in the 56px band below it */}
+      <View style={[styles.headerShell, { paddingTop: headerTopInset }]}>
+        <View style={styles.header}>
+          <View style={styles.wordmarkRow}>
+            <Text style={styles.wordmarkText}>
+              amor<Text style={styles.wordmarkAe}>æ</Text>a
+            </Text>
+            <Text style={styles.wordmarkBeta}>(BETA)</Text>
+          </View>
+          <Text style={styles.headerLabel}>Interview</Text>
+          {onExit ? (
+            <Pressable
+              onPress={onExit}
+              style={styles.exitButton}
+              hitSlop={12}
+              accessibilityRole="button"
+              accessibilityLabel="Log out"
+            >
+              <Ionicons name="log-out-outline" size={20} color={FLAME_MID} />
+              <Text style={styles.exitButtonLabel}>Log out</Text>
+            </Pressable>
+          ) : (
+            <View style={styles.exitPlaceholder} />
+          )}
         </View>
-        <Text style={styles.headerLabel}>Interview</Text>
-        {onExit ? (
-          <Pressable
-            onPress={onExit}
-            style={styles.exitButton}
-            hitSlop={12}
-            accessibilityRole="button"
-            accessibilityLabel="Log out"
-          >
-            <Ionicons name="log-out-outline" size={20} color={FLAME_MID} />
-            <Text style={styles.exitButtonLabel}>Log out</Text>
-          </Pressable>
-        ) : (
-          <View style={styles.exitPlaceholder} />
-        )}
       </View>
 
       {/* Main content */}
@@ -790,16 +794,19 @@ const styles = StyleSheet.create({
         }
       : {}),
   },
+  headerShell: {
+    backgroundColor: BG,
+    borderBottomWidth: 1,
+    borderBottomColor: 'rgba(82, 142, 220, 0.08)',
+    zIndex: 10,
+  },
   header: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
     paddingHorizontal: 24,
     height: 56,
-    borderBottomWidth: 1,
-    borderBottomColor: 'rgba(82, 142, 220, 0.08)',
     backgroundColor: BG,
-    zIndex: 10,
   },
   wordmarkRow: {
     flexDirection: 'row',

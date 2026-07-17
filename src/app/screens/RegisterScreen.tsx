@@ -437,13 +437,13 @@ const styles = StyleSheet.create({
     marginBottom: 12,
     alignItems: 'center',
     justifyContent: 'center',
-    minHeight: 120,
+    minHeight: 180,
     width: '100%',
     overflow: 'visible',
   },
   /** Match LoginScreen scale so the flame stays visible on narrow / mobile web. */
   flameScale: {
-    transform: [{ scale: 0.52 }],
+    transform: [{ scale: 0.78 }],
   },
   demographicsRow: {
     width: '100%',

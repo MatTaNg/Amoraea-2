@@ -41,9 +41,7 @@ export type ProcessUserSpeechDeps = {
   scenarioScoresRef: MutableRefObject<Record<number, ScenarioScoreResult>>;
   resumeActiveScenarioRef: MutableRefObject<1 | 2 | 3 | null>;
   resumeLoadingFlowActiveRef: MutableRefObject<boolean>;
-  webResumeWelcomeTapPendingRef: MutableRefObject<boolean>;
   resumeOfferWelcomeTtsRef: MutableRefObject<boolean>;
-  webResumeWelcomeTapHandledRef: MutableRefObject<boolean>;
   interviewUserTurnEpochRef: MutableRefObject<number>;
   interviewSessionAttemptIdRef: MutableRefObject<string | null>;
 };

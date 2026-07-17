@@ -65,7 +65,6 @@ export {
   checkMicPermission,
   raceTranscribeWithTimeout,
   recordingDelayMsFromRef,
-  webMicPreInitNeedsRefreshForNameEntry,
 } from '@features/aria/interviewMicAndRecordingHelpers';
 
 export { createInterviewAttemptOnFirstSubstantiveResponse } from '@features/aria/createInterviewAttemptOnFirstSubstantiveResponse';

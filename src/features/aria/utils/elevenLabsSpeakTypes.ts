@@ -1,5 +1,5 @@
 import type { TtsTelemetrySource } from '@features/aria/telemetry/tsAutoplayTelemetry';
-import type { PreInitTriggerDuring } from '@features/aria/utils/webInterviewMicPreInit';
+import type { PreInitTriggerDuring } from '@features/aria/utils/interviewMicPreInitTypes';
 
 /** Options for {@link speakWithElevenLabs} and fallback TTS paths. */
 export type ElevenLabsSpeakOptions = {

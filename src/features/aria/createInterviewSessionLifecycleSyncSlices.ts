@@ -7,8 +7,6 @@ export function createInterviewSessionLifecycleStatusSyncSlice(params: SyncExtra
     interviewStatus: params.interviewStatus,
     interviewAttemptBootstrap: params.interviewAttemptBootstrap,
     onboardingAutoStartRef: params.onboardingAutoStartRef,
-    webSpeechShouldDeferToUserGesture: params.webSpeechShouldDeferToUserGesture,
-    setWebDesktopAwaitingStartOverlay: params.setWebDesktopAwaitingStartOverlay,
     awaitScreenReadySignal: params.awaitScreenReadySignal,
     logSessionResumeState: params.logSessionResumeState,
     awaitEmotionModalForIndex: params.awaitEmotionModalForIndex,
@@ -32,9 +30,6 @@ export function createInterviewSessionLifecycleResumeWelcomeSyncSlice(params: Sy
     resumeOfferWelcomeTtsRef: params.resumeOfferWelcomeTtsRef,
     resumeWelcomeMessageRef: params.resumeWelcomeMessageRef,
     resumeWelcomeHydrationAttemptRef: params.resumeWelcomeHydrationAttemptRef,
-    webResumeWelcomeTapHandledRef: params.webResumeWelcomeTapHandledRef,
-    webResumeWelcomeTapPendingRef: params.webResumeWelcomeTapPendingRef,
-    setWebResumeWelcomeTapPending: params.setWebResumeWelcomeTapPending,
     pendingScenarioIntroAfterResumeWelcomeRef: params.pendingScenarioIntroAfterResumeWelcomeRef,
   };
 }
@@ -76,7 +71,6 @@ export function createInterviewSessionLifecycleSettersSyncSlice(params: SyncExtr
     setInterviewStatus: params.setInterviewStatus,
     setStageResults: params.setStageResults,
     setTouchedConstructs: params.setTouchedConstructs,
-    setWebDesktopPendingTtsGestureOverlay: params.setWebDesktopPendingTtsGestureOverlay,
     setStatus: params.setStatus,
     setReferenceCardScenario: params.setReferenceCardScenario,
     setReferenceCardPrompt: params.setReferenceCardPrompt,

@@ -17,7 +17,6 @@ import {
   createInterviewScenarioTransitionUiSyncCtxFromScreen,
   createInterviewScrollToEndSyncCtxFromScreen,
   createInterviewUnhandledRejectionSaveSyncCtxFromScreen,
-  createInterviewWebGreetingPrefetchSyncCtxFromScreen,
   createLoadStandardResultsReferralCodeSyncCtxFromScreen,
   createPendingScoringSyncPollSyncCtxFromScreen,
   createProfileNameSourceDebugSyncCtxFromScreen,
@@ -42,7 +41,6 @@ import {
   syncInterviewScenarioTransitionUiDeps,
   syncInterviewScrollToEndDeps,
   syncInterviewUnhandledRejectionSaveDeps,
-  syncInterviewWebGreetingPrefetchDeps,
   syncLoadStandardResultsReferralCodeDeps,
   syncPendingScoringSyncPollDeps,
   syncProfileNameSourceDebugDeps,
@@ -59,7 +57,6 @@ import {
 } from '@features/aria/syncAriaInterviewDepsRefs';
 import type { AriaScreenBootEffectsDeps } from '@features/aria/interviewClosingQuestionTypes';
 import type { EnsureValidSessionDeps } from '@features/aria/runEnsureValidSession';
-import type { InterviewWebGreetingPrefetchDeps } from '@features/aria/runPrefetchWebInterviewGreetingOnConsent';
 import type { InterviewAttemptBootstrapDeps } from '@features/aria/interviewAttemptBootstrapTypes';
 import type {
   AdminScoreCardRenderLogDeps,
@@ -107,7 +104,6 @@ import {
   useSyncCurrentMessagesRef,
 } from '@features/aria/hooks/useInterviewDiagnosticEffects';
 import { useInterviewAttemptBootstrap } from '@features/aria/hooks/useInterviewAttemptBootstrap';
-import { useInterviewWebGreetingPrefetch } from '@features/aria/hooks/useInterviewWebGreetingPrefetch';
 import { useInterviewUnhandledRejectionSave } from '@features/aria/hooks/useInterviewUnhandledRejectionSave';
 import { useInterviewAuthSignedOutSave } from '@features/aria/hooks/useInterviewAuthSignedOutSave';
 import { useRestorePreparingResultsInterviewStatus } from '@features/aria/hooks/useRestorePreparingResultsInterviewStatus';
@@ -153,8 +149,6 @@ export type AriaInterviewBootEffectWiringParams = {
   preparingHandoffPollTick: number;
   alphaMode: boolean;
   results: unknown;
-  preInterviewConsentAge: boolean;
-  preInterviewConsentData: boolean;
   currentMessagesRef: MutableRefObject<Array<{ role: string; content?: string }>>;
   setUsingMemoryFallback: (value: boolean) => void;
   setMicPermission: (value: 'granted' | 'denied' | 'prompt' | 'unavailable') => void;
@@ -168,10 +162,17 @@ export type AriaInterviewBootEffectWiringParams = {
   scrollViewRef: InterviewScrollToEndDeps['scrollViewRef'];
   setMessages: ShowChatErrorDeps['setMessages'];
   setConversationErrorNotice: ShowChatErrorDeps['setConversationErrorNotice'];
-  webTtsTabInterruptPendingReplayRef: ApplyInterviewSpeechCompleteDeps['webTtsTabInterruptPendingReplayRef'];
   lastQuestionTextRef: MutableRefObject<string>;
   scenarioAContemptProbeAskedRef: MutableRefObject<boolean>;
   scenarioARepairQuestionAskedRef: MutableRefObject<boolean>;
+  /** Scenario-ref sync for applyInterviewSpeechComplete — live shell/gate refs (not services-base alone). */
+  speechCompleteScenarioRefs: {
+    currentScenarioRef: MutableRefObject<unknown>;
+    currentInterviewMomentRef: MutableRefObject<unknown>;
+    interviewMomentsCompleteRef: MutableRefObject<unknown>;
+    resumeActiveScenarioRef: MutableRefObject<unknown>;
+    interviewSessionIdRef: MutableRefObject<unknown>;
+  };
 };
 
 export function useAriaInterviewBootEffectWiring(params: AriaInterviewBootEffectWiringParams) {
@@ -193,8 +194,6 @@ export function useAriaInterviewBootEffectWiring(params: AriaInterviewBootEffect
     preparingHandoffPollTick,
     alphaMode,
     results,
-    preInterviewConsentAge,
-    preInterviewConsentData,
     currentMessagesRef,
     setUsingMemoryFallback,
     setMicPermission,
@@ -208,10 +207,10 @@ export function useAriaInterviewBootEffectWiring(params: AriaInterviewBootEffect
     scrollViewRef,
     setMessages,
     setConversationErrorNotice,
-    webTtsTabInterruptPendingReplayRef,
     lastQuestionTextRef,
     scenarioAContemptProbeAskedRef,
     scenarioARepairQuestionAskedRef,
+    speechCompleteScenarioRefs,
   } = params;
 
   const ariaScreenMountedLogDepsRef = useRef({ remoteLog } as Pick<AriaScreenBootEffectsDeps, 'remoteLog'>);
@@ -220,17 +219,6 @@ export function useAriaInterviewBootEffectWiring(params: AriaInterviewBootEffect
     createAriaScreenMountedLogSyncCtxFromScreen(servicesBaseCtx),
   );
   useAriaScreenMountedLog(ariaScreenMountedLogDepsRef, { userId, isAdmin });
-
-  const webGreetingPrefetchDepsRef = useRef({} as InterviewWebGreetingPrefetchDeps);
-  syncInterviewWebGreetingPrefetchDeps(
-    webGreetingPrefetchDepsRef,
-    createInterviewWebGreetingPrefetchSyncCtxFromScreen(servicesBaseCtx),
-  );
-  useInterviewWebGreetingPrefetch(webGreetingPrefetchDepsRef, {
-    status,
-    preInterviewConsentAge,
-    preInterviewConsentData,
-  });
 
   const interviewAttemptBootstrapDepsRef = useRef({} as InterviewAttemptBootstrapDeps);
   syncInterviewAttemptBootstrapDeps(
@@ -466,13 +454,8 @@ export function useAriaInterviewBootEffectWiring(params: AriaInterviewBootEffect
   syncApplyInterviewSpeechCompleteDeps(
     applyInterviewSpeechCompleteDepsRef,
     createApplyInterviewSpeechCompleteSyncCtxFromScreen({
-      webTtsTabInterruptPendingReplayRef,
       applyReferenceCardFromAssistantSpeech,
-      currentScenarioRef: servicesBaseCtx.currentScenarioRef,
-      currentInterviewMomentRef: servicesBaseCtx.currentInterviewMomentRef,
-      interviewMomentsCompleteRef: servicesBaseCtx.interviewMomentsCompleteRef,
-      resumeActiveScenarioRef: servicesBaseCtx.resumeActiveScenarioRef,
-      interviewSessionIdRef: servicesBaseCtx.interviewSessionIdRef,
+      ...speechCompleteScenarioRefs,
     }),
   );
   const applyInterviewSpeechComplete = useCallback(

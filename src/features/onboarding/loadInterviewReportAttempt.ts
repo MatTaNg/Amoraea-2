@@ -29,7 +29,12 @@ export type InterviewReportAttempt = {
   corrected_psychometric_modifier: number | null;
   reasoning_pending: boolean;
   ai_reasoning: Record<string, unknown> | null;
+  /** Resolved for UI — may be rolled up client-side from scenario slices when DB pillars lag. */
   pillar_scores: Record<string, number> | null;
+  /** True when `interview_attempts.pillar_scores` itself has numeric values. */
+  hasPersistedPillarScores: boolean;
+  /** True when `interview_attempts.weighted_score` is stored (not only client rollup). */
+  hasPersistedWeightedScore: boolean;
   gate_result_finalized_at: string | null;
 };
 
@@ -160,15 +165,16 @@ function mapInterviewReportAttemptRow(data: Record<string, unknown>): InterviewR
       ? (data.ai_reasoning as Record<string, unknown>)
       : null;
   const pillarSource = data as InterviewAttemptPillarSourceRow;
+  const storedPillars = normalizePillarScores(data.pillar_scores);
   const resolvedPillars = resolveAttemptPillarScoresForReport(pillarSource);
   const rollup = resolvePillarScoresForNarrativeFromAttempt(pillarSource, data.passed === true);
+  const hasPersistedWeightedScore = typeof data.weighted_score === 'number';
 
   return {
     id: String(data.id),
-    weighted_score:
-      typeof data.weighted_score === 'number'
-        ? data.weighted_score
-        : (rollup?.weighted_score ?? null),
+    weighted_score: hasPersistedWeightedScore
+      ? (data.weighted_score as number)
+      : (rollup?.weighted_score ?? null),
     modified_weighted_score:
       typeof data.modified_weighted_score === 'number' ? data.modified_weighted_score : null,
     modified_weighted_score_with_psychometrics:
@@ -187,6 +193,8 @@ function mapInterviewReportAttemptRow(data: Record<string, unknown>): InterviewR
     reasoning_pending: data.reasoning_pending === true,
     ai_reasoning: aiReasoning,
     pillar_scores: resolvedPillars,
+    hasPersistedPillarScores: storedPillars != null,
+    hasPersistedWeightedScore,
     gate_result_finalized_at:
       typeof data.gate_result_finalized_at === 'string' ? data.gate_result_finalized_at : null,
   };
@@ -199,7 +207,9 @@ export async function refreshInterviewReportAttemptForPartialReport(
   const row = await loadInterviewReportAttempt(userId);
   if (!row?.id) return row;
 
-  const needsPersistedRollup = row.pillar_scores == null || row.weighted_score == null;
+  // Must check persisted DB columns — client-resolved pillars from S1–S3 used to mask
+  // missing holistic rollup and skip finalize, so partial report generation had thin/empty data.
+  const needsPersistedRollup = !row.hasPersistedPillarScores || !row.hasPersistedWeightedScore;
   if (needsPersistedRollup) {
     await finalizeInterviewOnlyGateForAttempt(userId, row.id);
   }

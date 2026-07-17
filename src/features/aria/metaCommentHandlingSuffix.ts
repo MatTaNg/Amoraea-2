@@ -52,19 +52,16 @@ The participant asked to move on or for the next question (meta only — **not**
 ─────────────────────────────────────────
 META-COMMENT: INABILITY (CANNOT ANSWER)
 ─────────────────────────────────────────
-They are signaling genuine inability to produce content — **not** refusal and **not** a request to skip.
+They are signaling genuine inability to produce content — **not** refusal.
 
 **elongating_probe override:** Do **not** deliver any elongating probe this turn.
 
-**First signal (or personal moments handled by model):** Do **not** re-read the vignette, do **not** repeat the full question verbatim, and do **not** push for more detail. Offer **one** low-pressure invitation only, same beat — examples:
-• "No pressure — just say whatever comes to mind, even if it's just a few words."
-• "There's no right answer here — just whatever feels true to you."
+**Moments 1–3 (client):** On inability the client offers a softer skip confirmation:
+"We can skip this question if you'd like, but it may affect your score, do you want to skip it?"
 
-If the client already delivered this invitation client-side, your reply must **not** contradict it — continue the scripted sequence only when the user provides a substantive answer on a **later** turn.
+**App pipeline:** Prefer the client skip-confirmation line. If you still speak this turn, ask whether they want to skip and mention score impact in one short sentence — do **not** re-read the vignette or push for more detail.
 
-**Second signal in the same moment (client):** Routes to the standard skip-confirmation line — you may not see model traffic for that confirmation on mobile.
-
-Never consume a skip or threaten score impact on the **first** inability signal.
+If the client already delivered skip confirmation, your reply must **not** contradict it.
 `;
   }
 
@@ -181,7 +178,7 @@ The participant asked to hear the question again, but they **already gave a subs
 
 **Do not** re-read the full conflict vignette, the Moment 4→5 transition bundle, or the long "think of a time when you had a conflict…" setup again.
 
-**Delivery rule:** In **one** short spoken turn, restate **only** the **immediate** last question they were answering (the latest assistant line before this meta turn — typically a follow-up probe). Prefix lightly ("Got it —" / "Sure —") then the question. If the client already delivered this replay, do not contradict it.
+**Delivery rule:** In **one** short spoken turn, start with **Sure.** then restate **only** the **immediate** last question they were answering (the latest assistant line before this meta turn — typically a follow-up probe). If the client already delivered this replay, do not contradict it.
 
 **Forbidden:** Full scenario re-introduction, elongating probes, or treating this as a fresh conflict prompt.
 
@@ -195,9 +192,9 @@ META-COMMENT (CLIENT): CONFUSION — REPEAT REQUEST (heard / misheard the questi
 ${noElongating}
 The participant asked to **hear the interview question again** (repeat / didn't catch / what did you ask) — **not** a request for reframing, examples, or more detail.
 
-**Delivery rule:** Re-read the **current active scripted question in full** — the same wording the participant was answering before this meta turn (verbatim is ideal; fix only tiny clarity glitches). **Do not** replace it with a paraphrase, a simplification, a different angle, or a vignette excerpt unless the scripted prompt itself is the vignette setup.
+**Delivery rule:** Start with **Sure.** then re-read the **current active scripted question in full** — the same wording the participant was answering before this meta turn (verbatim is ideal; fix only tiny clarity glitches). **Do not** replace it with a paraphrase, a simplification, a different angle, or a vignette excerpt unless the scripted prompt itself is the vignette setup.
 
-**Forbidden this turn:** "Can you say more about that?", any elongating probe, asking them to elaborate, or answering on their behalf.
+**Forbidden this turn:** "Can you say more about that?", any elongating probe, asking them to elaborate, or answering on their behalf. Do **not** skip the leading **Sure.**
 
 After you finish reading the question, **stop** and wait for their mic reply.
 `;
@@ -209,16 +206,14 @@ After you finish reading the question, **stop** and wait for their mic reply.
 META-COMMENT (CLIENT): CONFUSION ABOUT THE QUESTION
 ─────────────────────────────────────────
 ${noElongating}
-They are asking for clarification about what you're asking — **not** a verbatim repeat request (see REPEAT REQUEST subtype when they asked to hear the question again).
+They are confused about what you're asking (don't understand / unclear / think no question was asked) — **not** an explicit "repeat what you said" ask.
 
-**Do not** repeat the last question verbatim unless they explicitly asked to hear it again. Reframe in **simpler, concrete** terms.
+**Delivery rule (client usually injects this):** Offer to re-read the current interview question. Prefer exactly:
+"No worries — want me to repeat the question?"
 
-**Never** re-read the scenario vignette or paste the situation block unless the user **explicitly** asked to hear it again. You may offer **one short** restatement of what you're asking — not the full vignette.
+Do **not** reframe into a different question. Do **not** paste the full vignette. Do **not** fire an elongating probe.
 
-Example tone:
-"Just tell me what you think is happening between the two of them. If you want, I can repeat the question in one sentence — otherwise go with your read."
-
-Then wait for their next reply on the mic. No elongating probe.
+If you speak this turn (client did not), keep it to that short offer, then wait for their mic reply.
 `;
   }
 

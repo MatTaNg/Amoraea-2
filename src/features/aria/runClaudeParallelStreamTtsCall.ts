@@ -1,3 +1,6 @@
+import { fetch as expoFetch } from 'expo/fetch';
+import { Platform } from 'react-native';
+
 import {
   shouldAdvanceScenarioAAfterSatisfiedRepair,
   shouldAdvanceScenarioBAfterSatisfiedRepair,
@@ -5,10 +8,8 @@ import {
 import { scenarioBMinimumEngagementForHandoff } from '@features/aria/scenarioBProbeLogic';
 import { scenarioAMinimumEngagementForHandoff } from '@features/aria/scenarioFollowUpTranscriptGuard';
 import { transcriptHasInterviewClosingSpokenFragment } from '@features/aria/elongatingProbe';
-import { ensureSharedHtmlAudioElementForInterviewTts } from '@features/aria/utils/webInterviewSharedHtmlAudio';
 import { setTtsPlaybackActive } from '@utilities/sessionLogging';
 import { remoteLog } from '@utilities/remoteLog';
-import { Platform } from 'react-native';
 
 import type {
   ClaudeParallelStreamTtsCallDeps,
@@ -77,12 +78,61 @@ function processSseChunk(
   return sseBuffer;
 }
 
+/** Native RN fetch often leaves Response.body null for SSE; expo/fetch provides ReadableStream. */
+function fetchClaudeSseStream(
+  apiUrl: string,
+  init: { method: string; headers: HeadersInit; body: string },
+): Promise<Response> {
+  if (Platform.OS === 'web') {
+    return fetch(apiUrl, init);
+  }
+  return expoFetch(apiUrl, init) as Promise<Response>;
+}
+
+async function consumeClaudeSseResponse(
+  res: Response,
+  processTextDelta: (deltaText: string) => void,
+): Promise<void> {
+  const reader = res.body?.getReader?.();
+  if (reader) {
+    const decoder = new TextDecoder();
+    let sseBuffer = '';
+    for (;;) {
+      const { done, value } = await reader.read();
+      const chunk = decoder.decode(value ?? new Uint8Array(), { stream: !done });
+      sseBuffer = processSseChunk(sseBuffer, chunk, processTextDelta);
+      if (done) break;
+    }
+    if (sseBuffer.trim()) {
+      processSseChunk(sseBuffer, '\n', processTextDelta);
+    }
+    return;
+  }
+
+  // Buffered fallback when the runtime exposes no ReadableStream body (still HTTP 200).
+  const text = await res.text();
+  if (!text.trim()) {
+    const e = new Error('Invalid response stream');
+    (e as Error & { status?: number }).status = res.status;
+    throw e;
+  }
+  void remoteLog('[conversation] claude_sse_buffered_fallback', {
+    platform: Platform.OS,
+    bytes: text.length,
+    status: res.status,
+  });
+  let sseBuffer = processSseChunk('', text, processTextDelta);
+  if (sseBuffer.trim()) {
+    processSseChunk(sseBuffer, '\n', processTextDelta);
+  }
+}
+
 export async function runClaudeParallelStreamTtsCall(
   deps: ClaudeParallelStreamTtsCallDeps,
   params: ClaudeParallelStreamTtsCallParams,
 ): Promise<ClaudeParallelStreamTtsCallResult> {
   const streamBody = { ...params.requestBody, stream: true };
-  const res = await fetch(params.apiUrl, {
+  const res = await fetchClaudeSseStream(params.apiUrl, {
     method: 'POST',
     headers: params.headers,
     body: JSON.stringify(streamBody),
@@ -99,18 +149,10 @@ export async function runClaudeParallelStreamTtsCall(
     (e as Error & { status?: number }).status = res.status;
     throw e;
   }
-  if (!res.body) {
-    const e = new Error('Invalid response stream');
-    (e as Error & { status?: number }).status = res.status;
-    throw e;
-  }
 
   deps.parallelStreamingTtsRef.current.active = true;
   if (deps.userId) {
     setTtsPlaybackActive(true);
-  }
-  if (Platform.OS === 'web') {
-    ensureSharedHtmlAudioElementForInterviewTts();
   }
 
   const postRecordingSettleForThisParallelStream =
@@ -187,17 +229,8 @@ export async function runClaudeParallelStreamTtsCall(
   const speakShowScenarioCardStreamOnce = createParallelStreamSpeakShowScenarioCardOnce(ctx, batch);
   const processTextDelta = createParallelStreamProcessTextDelta(ctx, maybeQueueSentenceForTts);
 
-  const reader = res.body.getReader();
-  const decoder = new TextDecoder();
-  let sseBuffer = '';
-
   try {
-    for (;;) {
-      const { done, value } = await reader.read();
-      const chunk = decoder.decode(value ?? new Uint8Array(), { stream: !done });
-      sseBuffer = processSseChunk(sseBuffer, chunk, processTextDelta);
-      if (done) break;
-    }
+    await consumeClaudeSseResponse(res, processTextDelta);
 
     await flushParallelStreamDeferredSentencesAtEnd({
       ctx,

@@ -4,14 +4,7 @@ import {
   createInterviewAttemptBootstrapSyncSlice,
   createInterviewAuthSignedOutSaveSyncSlice,
   createInterviewUnhandledRejectionSaveSyncSlice,
-  createInterviewWebGreetingPrefetchSyncSlice,
 } from '@features/aria/createInterviewBootSyncSlices';
-
-export function buildInterviewWebGreetingPrefetchSyncExtra(
-  params: AriaInterviewDepsSyncContext,
-): AriaInterviewDepsSyncContext {
-  return createInterviewWebGreetingPrefetchSyncSlice(params);
-}
 
 export function buildInterviewAttemptBootstrapSyncExtra(
   params: AriaInterviewDepsSyncContext,

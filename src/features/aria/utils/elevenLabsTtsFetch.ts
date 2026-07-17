@@ -1,6 +1,3 @@
-import { Platform } from 'react-native';
-
-import { runWithThreeAttemptsFixedBackoff } from '@utilities/networkRetry';
 import { classifyError } from '@utilities/withRetry';
 
 import { takePreviousTextForElevenLabsRequest } from './elevenLabsSpokenContext';
@@ -18,10 +15,6 @@ import {
   ELEVENLABS_VOICE_SETTINGS,
   resolveElevenLabsVoiceId,
 } from './elevenLabsTtsVoice';
-import { playElevenLabsPcmStreamFromResponse } from './playElevenLabsPcmStreamPlayback';
-import type { PreInitTriggerDuring } from './webInterviewMicPreInit';
-import { isWebInterviewAudioUnlocked } from './webInterviewWebAudioContext';
-import type { TtsTelemetrySource } from '@features/aria/telemetry/tsAutoplayTelemetry';
 
 const ELEVENLABS_TTS_FETCH_TIMEOUT_MS = 45000;
 const ELEVENLABS_TTS_ARRAY_BUFFER_READ_TIMEOUT_MS = 90000;
@@ -107,7 +100,6 @@ export async function fetchElevenLabsMpegArrayBuffer(
   const useProxy = !apiKey && !!proxyUrl;
   const voiceId = resolveElevenLabsVoiceId();
   if (!apiKey && !useProxy) return null;
-  if (Platform.OS === 'web' && !isWebInterviewAudioUnlocked() && !opts?.allowBeforeWebUnlock) return null;
 
   try {
     const bodyPayload = buildElevenLabsMpegRequestBody(spokenText);
@@ -193,123 +185,21 @@ export async function fetchElevenLabsMpegArrayBuffer(
 }
 
 /**
- * Web: opens ElevenLabs **streaming** PCM (raw s16le mono) for low time-to-first-sample vs full MP3 buffer.
- * Returns the Response or null on failure. Caller must read the body; do not use with non-stream proxy.
+ * @deprecated Browser PCM stream TTS — disabled for native apps.
  */
-export async function openElevenLabsPcmStreamRequest(spokenText: string): Promise<Response | null> {
-  if (!isElevenLabsEnabledForEnvironment()) return null;
-  if (Platform.OS === 'web' && !isWebInterviewAudioUnlocked()) return null;
-  if (!spokenText.trim()) return null;
-  const proxyUrl = getTtsProxyUrl();
-  const apiKey = getElevenLabsApiKey();
-  const useProxy = !apiKey && !!proxyUrl;
-  const voiceId = resolveElevenLabsVoiceId();
-  if (!apiKey && !useProxy) return null;
-
-  const bodyPayload = buildElevenLabsMpegRequestBody(spokenText);
-  const q = new URLSearchParams({
-    output_format: 'pcm_24000',
-    optimize_streaming_latency: '2',
-  });
-  const proxyAuth = await resolveElevenLabsTtsAuth(useProxy);
-
-  const doOnePcmStreamFetch = async (): Promise<Response> => {
-    const ac = new AbortController();
-    const fetchTimer = setTimeout(() => ac.abort(), ELEVENLABS_TTS_FETCH_TIMEOUT_MS);
-    try {
-      const r = await fetch(
-        useProxy
-          ? proxyUrl
-          : `https://api.elevenlabs.io/v1/text-to-speech/${voiceId}/stream?${q.toString()}`,
-        useProxy
-          ? {
-              signal: ac.signal,
-              method: 'POST',
-              headers: {
-                'Content-Type': 'application/json',
-                Accept: 'audio/pcm, audio/*, */*',
-                ...proxyAuth,
-              },
-              body: JSON.stringify({
-                text: bodyPayload.text,
-                voiceId,
-                modelId: bodyPayload.model_id,
-                voiceSettings: bodyPayload.voice_settings,
-                stream: true,
-                outputFormat: 'pcm_24000',
-                ...(bodyPayload.previous_text ? { previousText: bodyPayload.previous_text } : {}),
-              }),
-            }
-          : {
-              signal: ac.signal,
-              method: 'POST',
-              headers: {
-                'xi-api-key': apiKey!,
-                'Content-Type': 'application/json',
-                Accept: 'audio/pcm, audio/*, */*',
-              },
-              body: JSON.stringify(bodyPayload),
-            }
-      );
-      if (!r.ok) {
-        const errText = await r.text();
-        const err = new Error(errText.slice(0, 200));
-        Object.assign(err, { status: r.status });
-        throw err;
-      }
-      if (!r.body) {
-        throw new Error('pcm_stream_no_body');
-      }
-      return r;
-    } catch (e) {
-      if (isAbortError(e)) {
-        const err = new Error('tts_fetch_timeout');
-        Object.assign(err, { status: 504 });
-        throw err;
-      }
-      throw e;
-    } finally {
-      clearTimeout(fetchTimer);
-    }
-  };
-
-  try {
-    if (!useProxy) {
-      return await runWithThreeAttemptsFixedBackoff({
-        delaysMs: [1000, 2000],
-        shouldRetry: (err) => ttsFetchShouldRetry(err),
-        onRetry: ({ nextAttempt, delayMs, error }) => {
-          if (__DEV__) {
-            console.warn('[TTS] ElevenLabs PCM stream fetch retry', { nextAttempt, delayMs, error });
-          }
-        },
-        run: async () => doOnePcmStreamFetch(),
-      });
-    }
-    return await doOnePcmStreamFetch();
-  } catch (e) {
-    if (__DEV__) {
-      console.warn('[TTS] ElevenLabs PCM stream open failed', e);
-    }
-    return null;
-  }
+export async function openElevenLabsPcmStreamRequest(
+  _spokenText: string,
+): Promise<Response | null> {
+  return null;
 }
 
+/** @deprecated Browser PCM stream playback — always false for native apps. */
 export async function tryPlayElevenLabsPcmStream(
-  spokenText: string,
-  onPlaybackStarted: (() => void) | undefined,
-  telemetrySource: TtsTelemetrySource,
-  preInitTriggerDuring: PreInitTriggerDuring,
-  playbackRateMultiplier: number = 1
+  _spokenText: string,
+  _onPlaybackStarted: (() => void) | undefined,
+  _telemetrySource: unknown,
+  _preInitTriggerDuring: unknown,
+  _playbackRateMultiplier: number = 1,
 ): Promise<boolean> {
-  if (Platform.OS !== 'web') return false;
-  const res = await openElevenLabsPcmStreamRequest(spokenText);
-  if (!res) return false;
-  return playElevenLabsPcmStreamFromResponse(
-    res,
-    onPlaybackStarted,
-    telemetrySource,
-    preInitTriggerDuring,
-    playbackRateMultiplier
-  );
+  return false;
 }

@@ -1,6 +1,5 @@
 import { Platform } from 'react-native';
 import type { HeadphoneProbeResult } from '@features/aria/utils/audioRouteHeadphones';
-import { isWebGreetingAudiblePlaybackActive } from '@features/aria/utils/webInterviewGreetingAudio';
 import type { InterviewDeviceEnvironmentPayload } from './audioSessionLogEnvelope';
 import { hasCachedWebMicTrackSettings } from './webMediaDeviceAudioRoute';
 
@@ -46,9 +45,8 @@ export async function collectInterviewDeviceEnvironment(
       : null;
 
   let other_app_using_microphone = false;
-  /** Opening mic during greeting TTS ducks Android speaker output — skip when permission is already known. */
-  const skipMicContentionProbe =
-    isWebGreetingAudiblePlaybackActive() || hasCachedWebMicTrackSettings();
+  /** Opening mic during TTS ducks Android speaker output — skip when permission is already known. */
+  const skipMicContentionProbe = hasCachedWebMicTrackSettings();
   if (
     Platform.OS === 'web' &&
     !skipMicContentionProbe &&

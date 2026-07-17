@@ -12,6 +12,13 @@ import {
   resolveInterviewQuestionRepeatTtsText,
 } from '@features/aria/interviewDisengagementProbes';
 import {
+  buildScenarioPlusQuestionRepeatTts,
+  getScenarioVignetteBodyForRepeat,
+  resolveInterviewRepeatRequestTarget,
+  shouldAttachScenarioVignetteForRepeat,
+  withRepeatRequestAcknowledgment,
+} from '@features/aria/interviewRepeatRequestTarget';
+import {
   countSpokenWords,
   looksLikeReadinessAffirmation,
   looksLikeReadinessYesHomophone,
@@ -95,8 +102,9 @@ export async function runPreClaudeResumeRepeatGate(
       args.metaCommentClassification?.confusion_subtype === 'repeat_request') ||
     isExplicitRepeatRequestPreClassification(args.trimmed);
   if (deferRepeatToMetaVerbatimHandler) {
-    deps.resumeLastAssistantTextRef.current = null;
-    return { haltTurn: false, reentryTypeForLogging: null };
+    // Keep resumeLastAssistantTextRef — meta verbatim replay uses it as fallback so a
+    // post-reentry "repeat what you said" does not fall through to the opening briefing.
+    return { haltTurn: false, reentryTypeForLogging: 'repeat_requested' };
   }
 
   let intent = classifyResumeRepeatIntent(args.trimmed);
@@ -155,7 +163,7 @@ export async function runPreClaudeResumeRepeatGate(
       try {
         const strippedRepeat = stripControlTokens(last).trim();
         const lastUserAnswer = [...deps.messages].reverse().find((m) => m.role === 'user')?.content;
-        const repeatTtsText = resolveInterviewQuestionRepeatTtsText(
+        const questionOnlyText = resolveInterviewQuestionRepeatTtsText(
           scenarioAContemptProbeResumeRepeatTtsText(strippedRepeat),
           {
             firstName: deps.interviewNameRef.current ?? '',
@@ -163,11 +171,30 @@ export async function runPreClaudeResumeRepeatGate(
             activeScenario: deps.currentScenarioRef.current,
           },
         );
-        const usedContemptResumeRepeatTts = repeatTtsText !== strippedRepeat;
+        const scenarioNumRaw = deps.currentScenarioRef.current ?? 1;
+        const scenarioNum = (scenarioNumRaw === 2 || scenarioNumRaw === 3 ? scenarioNumRaw : 1) as
+          | 1
+          | 2
+          | 3;
+        const attachVignette = shouldAttachScenarioVignetteForRepeat({
+          target: resolveInterviewRepeatRequestTarget(args.trimmed),
+          interviewMoment: deps.currentInterviewMomentRef.current,
+          scenarioNumber: scenarioNum,
+        });
+        const repeatTtsText = withRepeatRequestAcknowledgment(
+          attachVignette
+            ? buildScenarioPlusQuestionRepeatTts(
+                getScenarioVignetteBodyForRepeat(scenarioNum),
+                questionOnlyText,
+              )
+            : questionOnlyText,
+        );
+        const usedContemptResumeRepeatTts = questionOnlyText !== strippedRepeat;
         void remoteLog('[S1_CONTEMPT_PROBE_RESUME_REPEAT_TTS]', {
           usedContemptResumeRepeatTts,
           storedPreview: strippedRepeat.slice(0, 200),
           ttsPreview: repeatTtsText.slice(0, 200),
+          repeatTarget: attachVignette ? 'scenario' : 'question',
           s1ContemptFixVersion: 13,
         });
         const prefetched = deps.resumeRepeatPrefetchMpegRef.current;

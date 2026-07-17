@@ -45,6 +45,20 @@ function isPreservedAckBeforeScenarioBJamesRepair(text: string): boolean {
   return looksLikeScenarioBRepairAsJamesQuestion(afterAck);
 }
 
+function isPreservedRepeatRequestSurePrefix(text: string): boolean {
+  const t = text.trim();
+  // Brief procedural ack before a re-read ("Sure. [question/vignette]") — keep for TTS.
+  const m = t.match(/^sure[.!]\s*(?:\n\n+|\s+)([\s\S]+)/i);
+  if (!m) return false;
+  const body = (m[1] ?? '').trim();
+  if (body.length < 12) return false;
+  return (
+    /\?/.test(body) ||
+    /emma and ryan|sarah has been job hunting|sophie and daniel/i.test(body) ||
+    body.length >= 40
+  );
+}
+
 /**
  * Hard blocklist: empty acknowledgments before the real reflection (applied on every assistant line before TTS/display).
  * Does not remove phrases that are integrated into one idea (e.g. "That makes sense that you'd feel…").
@@ -52,6 +66,7 @@ function isPreservedAckBeforeScenarioBJamesRepair(text: string): boolean {
 export function stripFlatReflectionAcknowledgmentOpeners(text: string): string {
   const original = text.trim();
   if (!original) return original;
+  if (isPreservedRepeatRequestSurePrefix(original)) return original;
   if (isPreservedAckBeforeScenarioARepairLead(original)) return original;
   if (isPreservedAckBeforeScenarioBJamesQ2(original)) return original;
   if (isPreservedAckBeforeScenarioBJamesRepair(original)) return original;

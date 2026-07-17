@@ -24,6 +24,7 @@ import {
 } from '@features/aria/runPreClaudeTurnOpeningPipeline';
 import type { PreClaudeTurnGateDeps, PreClaudeTurnGateParams } from '@features/aria/preClaudeTurnGateTypes';
 import type { MessageWithScenario } from '@features/aria/interviewScenarioScoringSlice';
+import { triggerLiveMoment4ScoringOnM5Entry } from '@features/aria/liveMoment4ScoringOnM5Entry';
 import { reconcileMoment5DeliveryFromTranscript } from '@features/aria/moment5DeliveryReconcile';
 
 export async function runPreClaudeTurnGates(
@@ -43,7 +44,19 @@ export async function runPreClaudeTurnGates(
     return false;
   }
 
+  const m5DeliveredBeforeReconcile = deps.moment5QuestionDeliveredRef.current === true;
   reconcileMoment5DeliveryFromTranscript(deps, deps.messages as MessageWithScenario[]);
+  if (!m5DeliveredBeforeReconcile && deps.moment5QuestionDeliveredRef.current === true) {
+    triggerLiveMoment4ScoringOnM5Entry({
+      trigger: 'm5_reconcile_from_transcript',
+      userId: deps.userId,
+      isAdmin: deps.isAdmin,
+      attemptId: deps.interviewSessionAttemptIdRef.current,
+      messages: deps.messages as MessageWithScenario[],
+      deferredMoment4NarrativeRef: deps.deferredMoment4NarrativeRef,
+      moment4SpecificityScoringRef: deps.moment4SpecificityScoringRef,
+    });
+  }
 
   const userTurn = await commitPreClaudeUserTurn(deps, params.trimmed);
   const { messagesToUse, userScenarioTag } = userTurn;

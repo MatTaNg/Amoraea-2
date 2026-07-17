@@ -168,6 +168,7 @@ export function moment5UserDeclinesConcreteReask(userText: string): boolean {
 /**
  * Short replay when the user asks to hear the question again in Moment 5 but already answered substantively.
  * Replays the immediate last interviewer question — not the full M4→5 bundle.
+ * No leading "Got it" — repeat TTS adds its own brief ack ("Sure.") separately.
  */
 export function buildMoment5ConfusionRepeatReplayAfterPriorAnswer(args: {
   lastInterviewerText: string;
@@ -177,16 +178,10 @@ export function buildMoment5ConfusionRepeatReplayAfterPriorAnswer(args: {
     const questions = last.match(/[^.!?]*\?/g);
     const lastQuestion = questions?.[questions.length - 1]?.trim();
     if (lastQuestion && lastQuestion.length >= 12) {
-      return `Got it — ${lastQuestion}`;
+      return lastQuestion.replace(/^(?:got it|i hear you|makes sense)\b\s*[—–\-:,.!…]?\s*/i, '').trim() || lastQuestion;
     }
   }
-  if (
-    isMoment5AssistantAnchor(last) ||
-    transcriptAssistantContainsMoment5PrimaryConflictQuestion(last)
-  ) {
-    return `Got it — ${MOMENT_5_ACCOUNTABILITY_QUESTION_TEXT}`;
-  }
-  return `Got it — ${MOMENT_5_ACCOUNTABILITY_QUESTION_TEXT}`;
+  return MOMENT_5_ACCOUNTABILITY_QUESTION_TEXT;
 }
 
 export function isMoment5InexperienceFallbackPrompt(text: string): boolean {
@@ -209,11 +204,25 @@ export function transcriptAssistantContainsMoment5PrimaryConflictQuestion(conten
   if (looksLikeMoment5AccountabilityProbeAssistantPrompt(content)) return false;
   if (isMoment5AssistantAnchor(content)) return true;
   const lower = content.replace(/\s+/g, ' ').trim().toLowerCase();
-  const hasConflictIntro = lower.includes('think of a time when you had a conflict with someone important');
+  const hasConflictIntro = looksLikeMoment5ConflictQuestionIntro(lower);
   const hasResolutionAsk =
     lower.includes('how did things get resolved') ||
-    (lower.includes('what happened') && lower.includes('resolved'));
+    lower.includes('how did it get resolved') ||
+    (lower.includes('what happened') && lower.includes('resolved')) ||
+    lower.includes('hard to take back');
   return hasConflictIntro && hasResolutionAsk;
+}
+
+/** Shared intro matcher for canonical + common model paraphrases of the M5 conflict ask. */
+export function looksLikeMoment5ConflictQuestionIntro(lowerNormalized: string): boolean {
+  const lower = lowerNormalized.toLowerCase();
+  return (
+    lower.includes('think of a time when you had a conflict with someone important') ||
+    lower.includes('think of a time when you had a real conflict with someone') ||
+    lower.includes('think of a time when you had a conflict with someone close') ||
+    (/\bthink of a time when you had a (?:real )?conflict\b/.test(lower) &&
+      /\b(?:someone (?:important|close)|important to you|close to you)\b/.test(lower))
+  );
 }
 
 /**
@@ -224,7 +233,7 @@ export function spokenTextStartsMoment5PrimaryConflictQuestion(content: string |
   if (content == null || typeof content !== 'string') return false;
   if (looksLikeMoment5AccountabilityProbeAssistantPrompt(content)) return false;
   const lower = content.replace(/\s+/g, ' ').trim().toLowerCase();
-  return lower.includes('think of a time when you had a conflict with someone important');
+  return looksLikeMoment5ConflictQuestionIntro(lower);
 }
 
 /**
@@ -238,16 +247,19 @@ export function isMoment5AssistantAnchor(content: string | null | undefined): bo
   const lower = c.toLowerCase();
   if (lower.includes('conflict or disagreement with someone important')) return true;
   if (
-    lower.includes('think of a time when you had a conflict with someone important') &&
-    lower.includes('how did things get resolved')
+    looksLikeMoment5ConflictQuestionIntro(lower) &&
+    (lower.includes('how did things get resolved') ||
+      lower.includes('how did it get resolved') ||
+      (lower.includes('what happened') && lower.includes('resolved')) ||
+      lower.includes('hard to take back'))
   ) {
     return true;
   }
   /** Common Sonnet paraphrase of the scripted conflict prompt (not matched by canonical strings). */
   if (
     /\btell me about a specific conflict\b/i.test(c) &&
-    /\b(someone important|important in your life|important to you)\b/i.test(lower) &&
-    /\b(resolved|resolution|didn'?t)\b/i.test(lower)
+    /\b(someone important|important in your life|important to you|someone close)\b/i.test(lower) &&
+    /\b(resolved|resolution|didn'?t|hard to take back)\b/i.test(lower)
   ) {
     return true;
   }

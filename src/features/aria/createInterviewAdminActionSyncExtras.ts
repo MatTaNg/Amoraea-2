@@ -32,10 +32,3 @@ export function createLoadPostInterviewFeedbackSyncExtra(
   return params;
 }
 
-export type WebResumeWelcomeTapSyncExtraParams = AriaInterviewDepsSyncContext;
-
-export function createWebResumeWelcomeTapSyncExtra(
-  params: WebResumeWelcomeTapSyncExtraParams,
-): WebResumeWelcomeTapSyncExtraParams {
-  return params;
-}

@@ -4,14 +4,6 @@ jest.mock('react-native', () => ({
   Platform: { OS: 'web' },
 }));
 
-jest.mock('@features/aria/speakTextSafeWebDurationRetry', () => ({
-  shouldUseWebTtsDurationVerification: jest.fn(() => false),
-}));
-
-jest.mock('@features/aria/runSpeakTextSafeWebDurationVerificationLoop', () => ({
-  runSpeakTextSafeWebDurationVerificationLoop: jest.fn(),
-}));
-
 jest.mock('@utilities/withRetry', () => ({
   withRetry: jest.fn((fn: () => Promise<unknown>) => fn()),
 }));
@@ -50,31 +42,22 @@ import {
   runSpeakTextSafeMainSpeakBody,
   type SpeakTextSafeMainSpeakBodyArgs,
 } from '@features/aria/runSpeakTextSafeMainSpeakBody';
-import { runSpeakTextSafeWebDurationVerificationLoop } from '@features/aria/runSpeakTextSafeWebDurationVerificationLoop';
 import type { SpeakTextSafeDeps } from '@features/aria/speakTextSafeDeps';
-import { shouldUseWebTtsDurationVerification } from '@features/aria/speakTextSafeWebDurationRetry';
 import { withRetry } from '@utilities/withRetry';
 
 function makeDeps(): SpeakTextSafeDeps {
   return {
     userId: 'user-test',
-    mobileWebTapToBeginDone: true,
     setVoiceState: jest.fn(),
-    setWebTabGestureRestoreOverlay: jest.fn(),
-    setWebDesktopPendingTtsGestureOverlay: jest.fn(),
     setTtsPlaybackReliabilityNotice: jest.fn(),
     setLastTtsCompletionCallbackMs: jest.fn(),
     speak: jest.fn().mockResolvedValue(undefined),
     applyInterviewSpeechComplete: jest.fn(),
-    ensureWebGestureFlushListener: jest.fn(),
     awaitTtsScreenReadyGate: jest.fn(),
     stopElevenLabsPlayback: jest.fn().mockResolvedValue(undefined),
-    webSpeechShouldDeferToUserGesture: jest.fn(() => false),
-    rearmWebMicPreInitAfterTtsPlaybackComplete: jest.fn().mockResolvedValue(undefined),
-    scheduleWebMicPreInitRefreshAfterTtsCompletes: jest.fn(),
     referenceCardShouldUpdateOnPlaybackStart: jest.fn(() => false),
     persistInterviewAttemptSessionLifecycle: jest.fn().mockResolvedValue(undefined),
-    webTtsSpeakGenerationRef: { current: 1 },
+    ttsSpeakGenerationRef: { current: 1 },
     currentInterviewMomentRef: { current: 1 },
     currentScenarioRef: { current: 1 },
     s2RepairProbeDeliveredRef: { current: false },
@@ -88,22 +71,15 @@ function makeDeps(): SpeakTextSafeDeps {
     scenarioAContemptProbeTtsDeliveredSessionRef: { current: false },
     lastQuestionTextRef: { current: '' },
     ttsLineInFlightRef: { current: true },
-    needsGestureRestoreRef: { current: false },
-    tabVisibilityGestureLossPendingRef: { current: false },
-    gestureContextLostAtRef: { current: null },
-    webTtsTabInterruptPendingReplayRef: { current: false },
-    pendingGestureRestoreSpeakRef: { current: null },
     interviewStatusRef: { current: 'in_progress' },
     applyReferenceCardFromAssistantSpeechRef: { current: jest.fn() },
     recordingJustFinishedBeforeNextTtsRef: { current: false },
     postRecordingParallelStreamSettleRef: { current: false },
-    tabHiddenDuringActiveTtsLineRef: { current: false },
-    webTtsUtteranceInFlightRef: { current: null },
-    webTtsUtteranceInFlightOptionsRef: { current: null },
+    ttsUtteranceInFlightRef: { current: null },
+    ttsUtteranceInFlightOptionsRef: { current: null },
     firstScenarioLifecyclePersistedRef: { current: false },
     ttsSessionHardFailureCountRef: { current: 0 },
     timingRef: { current: {} },
-    pendingWebSpeechForGestureRef: { current: null },
     recordInterviewAssistantDeliveryForMetaExemptionRef: { current: jest.fn() },
     s1ContemptFixVersion: 'test',
   } as SpeakTextSafeDeps;
@@ -153,10 +129,9 @@ function baseArgs(overrides: Partial<SpeakTextSafeMainSpeakBodyArgs> = {}): Spea
 describe('runSpeakTextSafeMainSpeakBody', () => {
   beforeEach(() => {
     jest.clearAllMocks();
-    jest.mocked(shouldUseWebTtsDurationVerification).mockReturnValue(false);
   });
 
-  it('speaks via withRetry when web duration verification is disabled', async () => {
+  it('speaks via withRetry', async () => {
     const args = baseArgs();
     await runSpeakTextSafeMainSpeakBody(args);
 
@@ -165,25 +140,8 @@ describe('runSpeakTextSafeMainSpeakBody', () => {
       args.textForAudio,
       expect.objectContaining({ telemetrySource: 'turn', ttsTriggerSource: 'callback' }),
     );
-    expect(runSpeakTextSafeWebDurationVerificationLoop).not.toHaveBeenCalled();
     expect(applySpeakTextSafePostPlaybackSuccess).toHaveBeenCalled();
     expect(applySpeakTextSafeQuestionDeliveredTelemetry).toHaveBeenCalled();
-    expect(finalizeSpeakTextSafeTtsSession).toHaveBeenCalled();
-  });
-
-  it('uses the web duration verification loop when enabled', async () => {
-    jest.mocked(shouldUseWebTtsDurationVerification).mockReturnValue(true);
-    jest.mocked(runSpeakTextSafeWebDurationVerificationLoop).mockResolvedValue({
-      speakOutcome: undefined,
-      actualTtsMs: 1200,
-      verificationOk: true,
-      acceptedStableTruncationAsEstimationError: false,
-    });
-
-    await runSpeakTextSafeMainSpeakBody(baseArgs());
-
-    expect(runSpeakTextSafeWebDurationVerificationLoop).toHaveBeenCalled();
-    expect(withRetry).not.toHaveBeenCalled();
     expect(finalizeSpeakTextSafeTtsSession).toHaveBeenCalled();
   });
 

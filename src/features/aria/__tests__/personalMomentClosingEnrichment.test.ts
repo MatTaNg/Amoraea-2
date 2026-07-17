@@ -36,7 +36,7 @@ describe('enrichPersonalMomentClosingForTts', () => {
     const vagueClosing =
       'Good work getting through all of this. What came through was that you remember what happened between you and how it felt. Thank you for being so open with me, Matt.';
     const out = enrichPersonalMomentClosingForTts(vagueClosing, 'Matt', 'We had a fight.');
-    expect(out).toBe('Good work getting through all of this. Thank you for being so open with me, Matt.');
+    expect(out).toBe('Good work getting through all of this. Your interview is complete. Thank you for being so open with me, Matt.');
     expect(out.toLowerCase()).not.toContain('remember what happened');
   });
 
@@ -51,7 +51,7 @@ describe('enrichPersonalMomentClosingForTts', () => {
       repair: 3,
       averagePillar: 3.5,
     });
-    expect(out).toBe('Good work getting through all of this. Thank you for being so open with me, Matt.');
+    expect(out).toBe('Good work getting through all of this. Your interview is complete. Thank you for being so open with me, Matt.');
   });
 
   it('omits content reflection on M5 close when boundary reflections are disabled', () => {
@@ -61,7 +61,7 @@ describe('enrichPersonalMomentClosingForTts', () => {
       'Good work getting through all of this, Matt. Thank you for being so open with me, Matt.';
     const out = enrichPersonalMomentClosingForTts(ackOnly, 'Matt', grudgeAnswer);
     expect(out).not.toMatch(REFLECTION_ANCHOR);
-    expect(out).toBe('Good work getting through all of this. Thank you for being so open with me, Matt.');
+    expect(out).toBe('Good work getting through all of this. Your interview is complete. Thank you for being so open with me, Matt.');
   });
 
   it('uses neutral closing for substantive Moment 5 narratives when reflections are disabled', () => {
@@ -71,7 +71,7 @@ describe('enrichPersonalMomentClosingForTts', () => {
       'Good work getting through all of this, Matt. What landed for me was how you named pulling away. Thank you for being so open with me, Matt.';
     const out = enrichPersonalMomentClosingForTts(withModelReflection, 'Matt', conflictAnswer);
     expect(out).not.toMatch(REFLECTION_ANCHOR);
-    expect(out).toBe('Good work getting through all of this. Thank you for being so open with me, Matt.');
+    expect(out).toBe('Good work getting through all of this. Your interview is complete. Thank you for being so open with me, Matt.');
   });
 
   it('uses neutral closing for family conflict corpus when reflections are disabled', () => {
@@ -80,7 +80,7 @@ describe('enrichPersonalMomentClosingForTts', () => {
     const resolutionFollowUp =
       'I took time to logically explain to her my rationale and my side of things, and assured her that I wanted the same things as she did, but I just needed time.';
     const ackOnly =
-      'Good work getting through all of this. Thank you for being so open with me, Matt.';
+      'Good work getting through all of this. Your interview is complete. Thank you for being so open with me, Matt.';
     const corpus = extractMoment5AnswerForClosingReflection([
       { role: 'user', interviewMoment: 5, content: momConflict },
       { role: 'user', interviewMoment: 5, content: resolutionFollowUp },
@@ -89,7 +89,7 @@ describe('enrichPersonalMomentClosingForTts', () => {
     expect(corpus).toContain('explain to her my rationale');
     const out = enrichPersonalMomentClosingForTts(ackOnly, 'Matt', corpus);
     expect(out).not.toMatch(REFLECTION_ANCHOR);
-    expect(out).toBe('Good work getting through all of this. Thank you for being so open with me, Matt.');
+    expect(out).toBe('Good work getting through all of this. Your interview is complete. Thank you for being so open with me, Matt.');
   });
 
   it('does not inject Christy conflict reflections when boundary reflections are disabled', () => {
@@ -98,7 +98,7 @@ describe('enrichPersonalMomentClosingForTts', () => {
     const ackOnly =
       'Good work getting through all of this, Matt. Thank you for being so open with me, Matt.';
     const out = enrichPersonalMomentClosingForTts(ackOnly, 'Matt', christyAnswer);
-    expect(out).toBe('Good work getting through all of this. Thank you for being so open with me, Matt.');
+    expect(out).toBe('Good work getting through all of this. Your interview is complete. Thank you for being so open with me, Matt.');
     expect(out.toLowerCase()).not.toContain('triggered');
     expect(out.toLowerCase()).not.toContain('kindness');
   });
@@ -107,7 +107,7 @@ describe('enrichPersonalMomentClosingForTts', () => {
     const doubled =
       'Good work getting through all of this, Matt. Thank you for being so open with me, Matt.';
     const out = enrichPersonalMomentClosingForTts(doubled, 'Matt', 'We talked it through.');
-    expect(out).toBe('Good work getting through all of this. Thank you for being so open with me, Matt.');
+    expect(out).toBe('Good work getting through all of this. Your interview is complete. Thank you for being so open with me, Matt.');
   });
 
   it('replaces malformed M5 closing from session logs with neutral thanks when reflection is not grounded', () => {
@@ -129,7 +129,7 @@ describe('enrichPersonalMomentClosingForTts', () => {
       'Good work getting through all of this, Matt. What you. Thank you for being so open with me, Matt.';
     const out = enrichPersonalMomentClosingForTts(malformed, 'Matt', roommateAnswer);
     expect(out).toBe(
-      'Good work getting through all of this. Thank you for being so open with me, Matt.',
+      'Good work getting through all of this. Your interview is complete. Thank you for being so open with me, Matt.',
     );
     expect(out.toLowerCase()).not.toContain('own in it');
     expect(out.toLowerCase()).not.toContain('accountab');
@@ -142,7 +142,7 @@ describe('enrichPersonalMomentClosingForTts', () => {
       'Good work getting through all of this, Matt. What landed for me was how you name what happened between you and what you own in it. Thank you for being so open with me, Matt.';
     const out = enrichPersonalMomentClosingForTts(modelClosing, 'Matt', roommateAnswer);
     expect(out).toBe(
-      'Good work getting through all of this. Thank you for being so open with me, Matt.',
+      'Good work getting through all of this. Your interview is complete. Thank you for being so open with me, Matt.',
     );
   });
 
@@ -150,7 +150,7 @@ describe('enrichPersonalMomentClosingForTts', () => {
     const good =
       'Good work getting through all of this — what you shared about listening really stuck with me. Thank you for being so open with me, Matt.';
     const out = enrichPersonalMomentClosingForTts(good, 'Matt', 'We talked it through.');
-    expect(out).toBe('Good work getting through all of this. Thank you for being so open with me, Matt.');
+    expect(out).toBe('Good work getting through all of this. Your interview is complete. Thank you for being so open with me, Matt.');
     expect(out).not.toMatch(/stuck with me/i);
   });
 
@@ -162,7 +162,7 @@ describe('enrichPersonalMomentClosingForTts', () => {
     expect(closingReflectionEchoesUngroundedUserWord(modelClosing, userAnswer)).toBe(true);
     const out = enrichPersonalMomentClosingForTts(modelClosing, 'Matt', userAnswer);
     expect(out.toLowerCase()).not.toContain('catching');
-    expect(out).toBe('Good work getting through all of this. Thank you for being so open with me, Matt.');
+    expect(out).toBe('Good work getting through all of this. Your interview is complete. Thank you for being so open with me, Matt.');
   });
 
   it('extractMoment5AnswerForClosingReflection prefers substantive conflict narrative', () => {

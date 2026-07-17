@@ -1809,8 +1809,9 @@ describe('probeAndScoringUtils', () => {
       const replay = buildMoment5ConfusionRepeatReplayAfterPriorAnswer({
         lastInterviewerText: 'I hear you. How did it get resolved between you two?',
       });
-      expect(replay).toBe('Got it — How did it get resolved between you two?');
+      expect(replay).toBe('How did it get resolved between you two?');
       expect(replay).not.toContain('Think of a time when you had a conflict');
+      expect(replay).not.toMatch(/got it/i);
     });
 
     it('falls back to canonical M5 anchor when last line has no question mark', () => {
@@ -1818,6 +1819,7 @@ describe('probeAndScoringUtils', () => {
         lastInterviewerText: 'Thanks for sharing that with me.',
       });
       expect(replay).toContain(MOMENT_5_ACCOUNTABILITY_QUESTION_TEXT);
+      expect(replay).not.toMatch(/^got it/i);
     });
   });
 

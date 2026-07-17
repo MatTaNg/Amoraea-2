@@ -5,7 +5,6 @@ import { recordingDelayMsFromRef } from '@features/aria/interviewMicAndRecording
 import { getAudioRouteKind } from '@features/aria/config/audioRouteRuntime';
 import type { HeadphoneProbeResult } from '@features/aria/utils/audioRouteHeadphones';
 import { getLateStartThresholdMs } from '@features/aria/config/audioInterviewConfig';
-import { refreshWebMicPreInitIfStaleAfterLateStartWindow } from '@features/aria/utils/webInterviewMicPreInit';
 import {
   getAudioCorrelationFields,
   getLastTtsCompletionCallbackMs,
@@ -27,7 +26,6 @@ export function logMicRecordingStartTelemetry(
     lastAudioRouteFingerprintRef,
     currentInterviewMomentRef,
     currentScenarioRef,
-    webSpeechShouldDeferToUserGesture,
     takeRecordingStartEventDataWithVadBypassRestart,
   } = deps;
   if (!userId) return;
@@ -109,7 +107,7 @@ export function logMicRecordingStartTelemetry(
     },
     platform: r.platform,
   });
-  if (sinceTts != null && sinceTts > lateTh && !webSpeechShouldDeferToUserGesture()) {
+  if (sinceTts != null && sinceTts > lateTh) {
     writeAudioSessionLog({
       userId,
       attemptId: r.attemptId,
@@ -121,7 +119,6 @@ export function logMicRecordingStartTelemetry(
       },
       platform: r.platform,
     });
-    void refreshWebMicPreInitIfStaleAfterLateStartWindow();
   }
   markLastAudioSessionEventType('recording_start');
   writeSessionLog({

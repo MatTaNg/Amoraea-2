@@ -63,44 +63,84 @@ Deno.serve(async (req) => {
     payload.model = DEFAULT_CLAUDE_SONNET_MODEL;
   }
 
-  try {
-    const abort = new AbortController();
-    const timeout = setTimeout(() => abort.abort(), ANTHROPIC_PROXY_TIMEOUT_MS);
-    const res = await fetch('https://api.anthropic.com/v1/messages', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'x-api-key': apiKey,
-        'anthropic-version': '2023-06-01',
-      },
-      body: JSON.stringify(payload),
-      signal: abort.signal,
-    });
-    const text = await res.text();
-    clearTimeout(timeout);
-    if (res.status === 401) {
-      return new Response(
-        JSON.stringify({
-          error: {
-            message: 'Invalid Anthropic API key. In Supabase: Project Settings → Edge Functions → Secrets, set ANTHROPIC_API_KEY to your key from console.anthropic.com (starts with sk-ant-). No quotes or extra spaces.',
+  const maxAttempts = 3;
+  let lastTransportError: string | null = null;
+
+  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+    try {
+      const abort = new AbortController();
+      const timeout = setTimeout(() => abort.abort(), ANTHROPIC_PROXY_TIMEOUT_MS);
+      let res: Response;
+      try {
+        res = await fetch('https://api.anthropic.com/v1/messages', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'x-api-key': apiKey,
+            'anthropic-version': '2023-06-01',
           },
-        }),
-        { status: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-      );
+          body: JSON.stringify(payload),
+          signal: abort.signal,
+        });
+      } finally {
+        clearTimeout(timeout);
+      }
+      const text = await res.text();
+      if (res.status === 401) {
+        return new Response(
+          JSON.stringify({
+            error: {
+              message:
+                'Invalid Anthropic API key. In Supabase: Project Settings → Edge Functions → Secrets, set ANTHROPIC_API_KEY to your key from console.anthropic.com (starts with sk-ant-). No quotes or extra spaces.',
+            },
+          }),
+          { status: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' } },
+        );
+      }
+      // Retry Anthropic transient overload / upstream blips from the edge.
+      if ((res.status === 529 || res.status === 503 || res.status === 502) && attempt < maxAttempts) {
+        console.warn(
+          `[anthropic-proxy] Anthropic HTTP ${res.status} on attempt ${attempt}/${maxAttempts}; retrying`,
+        );
+        await new Promise((r) => setTimeout(r, 400 * attempt));
+        continue;
+      }
+      // Forward response (including 400) so client sees Anthropic's error message
+      return new Response(text, {
+        status: res.status,
+        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+      });
+    } catch (err) {
+      const message =
+        err instanceof Error && err.name === 'AbortError'
+          ? `Anthropic proxy timed out after ${Math.round(ANTHROPIC_PROXY_TIMEOUT_MS / 1000)}s`
+          : String(err);
+      lastTransportError = message;
+      const retryable =
+        /connection reset|connection error|error sending request|SendRequest|temporarily|network/i.test(
+          message,
+        ) && !(err instanceof Error && err.name === 'AbortError');
+      if (retryable && attempt < maxAttempts) {
+        console.warn(
+          `[anthropic-proxy] transport error on attempt ${attempt}/${maxAttempts}; retrying:`,
+          message.slice(0, 160),
+        );
+        await new Promise((r) => setTimeout(r, 400 * attempt));
+        continue;
+      }
+      return new Response(JSON.stringify({ error: { message } }), {
+        status: 500,
+        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+      });
     }
-    // Forward response (including 400) so client sees Anthropic's error message
-    return new Response(text, {
-      status: res.status,
-      headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-    });
-  } catch (err) {
-    const message =
-      err instanceof Error && err.name === 'AbortError'
-        ? `Anthropic proxy timed out after ${Math.round(ANTHROPIC_PROXY_TIMEOUT_MS / 1000)}s`
-        : String(err);
-    return new Response(
-      JSON.stringify({ error: { message } }),
-      { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-    );
   }
+
+  return new Response(
+    JSON.stringify({
+      error: {
+        message: lastTransportError ?? 'Anthropic proxy failed after retries',
+      },
+    }),
+    { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } },
+  );
 });

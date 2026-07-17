@@ -5,6 +5,13 @@ import { MOMENT_5_ACCOUNTABILITY_QUESTION_TEXT } from '@features/aria/probeAndSc
 import { runPreClaudeMoment5QuestionInjectGate } from '@features/aria/runPreClaudeMoment5QuestionInjectGate';
 import { createMockPreClaudeDeps } from './preClaudeGateTestHelpers';
 
+const mockTriggerLiveMoment4ScoringOnM5Entry = jest.fn();
+
+jest.mock('@features/aria/liveMoment4ScoringOnM5Entry', () => ({
+  triggerLiveMoment4ScoringOnM5Entry: (...args: unknown[]) =>
+    mockTriggerLiveMoment4ScoringOnM5Entry(...args),
+}));
+
 jest.mock('@utilities/storage/InterviewStorage', () => ({
   getCurrentScenario: jest.fn().mockReturnValue(3),
   loadInterviewFromStorage: jest.fn().mockResolvedValue(null),
@@ -20,6 +27,7 @@ const M4_THRESHOLD_QUESTION =
 
 describe('runPreClaudeMoment5QuestionInjectGate', () => {
   it('returns handled:false when not answering first turn after M4 threshold', async () => {
+    mockTriggerLiveMoment4ScoringOnM5Entry.mockClear();
     const deps = createMockPreClaudeDeps({
       currentInterviewMomentRef: { current: 4 },
     });
@@ -33,9 +41,11 @@ describe('runPreClaudeMoment5QuestionInjectGate', () => {
     const result = await runPreClaudeMoment5QuestionInjectGate(deps, messagesToUse, 'Alex');
 
     expect(result).toEqual({ handled: false });
+    expect(mockTriggerLiveMoment4ScoringOnM5Entry).not.toHaveBeenCalled();
   });
 
   it('injects Moment 5 anchor after first user answer to M4 threshold probe', async () => {
+    mockTriggerLiveMoment4ScoringOnM5Entry.mockClear();
     const speakTextSafe = jest.fn().mockResolvedValue(undefined);
     const setMessages = jest.fn();
     const deps = createMockPreClaudeDeps({
@@ -43,6 +53,7 @@ describe('runPreClaudeMoment5QuestionInjectGate', () => {
       moment4ThresholdProbeAskedRef: { current: true },
       moment5QuestionDeliveredRef: { current: false },
       moment5QuestionDeliveryInFlightRef: { current: false },
+      interviewSessionAttemptIdRef: { current: 'attempt-live-m4' },
       speakTextSafe,
       setMessages,
     });
@@ -72,6 +83,12 @@ describe('runPreClaudeMoment5QuestionInjectGate', () => {
       ]),
     );
     expect(MOMENT_5_ACCOUNTABILITY_QUESTION_TEXT.length).toBeGreaterThan(20);
+    expect(mockTriggerLiveMoment4ScoringOnM5Entry).toHaveBeenCalledWith(
+      expect.objectContaining({
+        trigger: 'm5_client_inject_after_m4_threshold',
+        attemptId: 'attempt-live-m4',
+      }),
+    );
   });
 
   it('does not inject Moment 5 while resume welcome flow owns playback', async () => {

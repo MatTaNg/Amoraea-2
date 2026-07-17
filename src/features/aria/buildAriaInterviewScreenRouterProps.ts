@@ -41,20 +41,15 @@ export type AriaInterviewScreenRouterScope = {
     | 'micError'
     | 'micPermission'
     | 'micWarning'
-    | 'mobileWebTapToBeginDone'
-    | 'webDesktopAwaitingStartOverlay'
     | 'preInterviewConsentAge'
     | 'preInterviewConsentData'
     | 'interviewStartInFlight'
     | 'interviewAttemptBootstrap'
     | 'onboardingAutoStartRef'
-    | 'webSpeechShouldDeferToUserGesture'
     | 'setMicError'
-    | 'setWebDesktopAwaitingStartOverlay'
     | 'setPreInterviewConsentAge'
     | 'setPreInterviewConsentData'
     | 'startInterview'
-    | 'handleMobileWebTapToBegin'
   >;
   sessionAuth: Pick<
     AriaInterviewScreenRouterProps,

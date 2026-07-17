@@ -5,6 +5,7 @@
     "name": "Amoraea",
     "slug": "amoraea",
     "version": "1.0.0",
+    "scheme": "amoraea",
     "orientation": "portrait",
     "icon": "./assets/icons/icon-512x512.png",
     "splash": {
@@ -38,7 +39,7 @@
         "NSSpeechRecognitionUsageDescription": "Amoraea uses speech recognition to turn your voice answers into text.",
         "ITSAppUsesNonExemptEncryption": false
       },
-      "buildNumber": "1"
+      "buildNumber": "4"
     },
     "android": {
       "adaptiveIcon": {
@@ -57,7 +58,7 @@
         "android.permission.MODIFY_AUDIO_SETTINGS",
         "android.permission.WRITE_CONTACTS"
       ],
-      "versionCode": 1
+      "versionCode": 2
     },
     "web": {
       "favicon": "./public/icons/favicon-32x32.png",

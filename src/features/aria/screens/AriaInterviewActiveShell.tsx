@@ -1,5 +1,5 @@
 import React from 'react';
-import { Platform, ScrollView, View } from 'react-native';
+import { ScrollView, View } from 'react-native';
 import * as Clipboard from 'expo-clipboard';
 
 import { FeedbackBubble } from '@/components/FeedbackBubble';
@@ -10,19 +10,9 @@ import {
   AriaAdminInterviewPanel,
   type AriaAdminReasoningProgress,
 } from '@features/aria/screens/AriaAdminInterviewPanel';
-import { AriaWebGestureOverlays } from '@features/aria/screens/AriaWebGestureOverlays';
 import { ariaScreenStyles as styles } from '@features/aria/ariaScreenStyles';
 import type { VoiceState, InterviewSessionStatus } from '@features/aria/hooks/useAriaInterviewSession';
 import type { InterviewResults } from '@features/aria/interviewResultsTypes';
-import {
-  resolveWebActiveGestureOverlayKind,
-  type WebActiveGestureOverlayKind,
-} from '@features/aria/webInterviewGestureOverlay';
-import {
-  markWebInterviewUserGestureNow,
-} from '@features/aria/utils/webInterviewGestureContext';
-import { preAuthorizeAudioElementOnMicTapGesture } from '@features/aria/utils/webPreAuthorizedTtsAudio';
-import { unlockWebAudioForAutoplay } from '@features/aria/utils/webInterviewTtsDocumentLifecycle';
 import type { ActiveScenario } from '@app/screens/UserInterviewLayout';
 import type { InterviewUiPhase } from '@features/aria/sessionLifecycleTypes';
 
@@ -44,20 +34,17 @@ export type AriaInterviewActiveShellProps = {
   isAdmin: boolean;
   status: InterviewSessionStatus;
   isInterviewerView: boolean;
-  webActiveGestureOverlayKind: WebActiveGestureOverlayKind;
-  useMediaRecorderPath: boolean;
   audioRecorder: {
     isRecording: boolean;
     inputMeterLevel: number;
     reinitializeMicrophoneSession: () => void;
   };
   voiceState: VoiceState;
-  webInterviewerOutputActive: boolean;
+  interviewerOutputActive: boolean;
   interviewUiPhase: InterviewUiPhase;
   referenceCardScenario: ActiveScenario | null;
   referenceCardPrompt: string | null;
   ttsPlaybackReliabilityNotice: string | null;
-  webInsecureContextMessage: string | null;
   sessionAudioHealthNotice: string | null;
   conversationErrorNotice: string | null;
   micPermission: string;
@@ -69,7 +56,6 @@ export type AriaInterviewActiveShellProps = {
   inputDisabled: boolean;
   useTapMicUi: boolean;
   handleNativeOrWhisperMicPress: () => void;
-  handleWebMicPressIn: () => void;
   handleInterviewSignOut: () => void;
   preInitMeterLevel: number;
   micSessionRecovering: boolean;
@@ -101,11 +87,6 @@ export type AriaInterviewActiveShellProps = {
     meta?: { interviewSessionId?: string | null; source?: string; attemptId?: string | null },
   ) => void;
   routeOnComplete?: (results: InterviewResults) => void;
-  resumeOfferWelcomeTtsRef: React.MutableRefObject<boolean>;
-  webTabRestoreReplayInFlightRef: React.MutableRefObject<boolean>;
-  runWebGestureTtsFlush: (source: string) => void;
-  handleWebTabGestureRestoreTap: () => void;
-  handleWebResumeWelcomeTap: () => void;
   interviewSessionAttemptIdRef: React.MutableRefObject<string | null>;
 };
 
@@ -122,7 +103,10 @@ export function AriaInterviewActiveShell(props: AriaInterviewActiveShellProps): 
   }
 
   return (
-    <SafeAreaContainer style={{ position: 'relative', backgroundColor: '#05060D' }}>
+    <SafeAreaContainer
+      edges={['bottom', 'left', 'right']}
+      style={{ position: 'relative', backgroundColor: '#05060D' }}
+    >
       <AriaEmotionInterviewModal
         visible={props.emotionModalVisible}
         itemIndex={props.emotionModalItemIndex}
@@ -132,17 +116,15 @@ export function AriaInterviewActiveShell(props: AriaInterviewActiveShellProps): 
       <View style={[styles.activeContainer, props.isAdmin ? styles.adminActiveContainer : undefined]}>
         {props.isInterviewerView ? (
           <AriaInterviewerActivePanel
-            useMediaRecorderPath={props.useMediaRecorderPath}
             audioRecorderIsRecording={props.audioRecorder.isRecording}
             audioRecorderInputMeterLevel={props.audioRecorder.inputMeterLevel}
             reinitializeMicrophoneSession={props.audioRecorder.reinitializeMicrophoneSession}
             voiceState={props.voiceState}
-            webInterviewerOutputActive={props.webInterviewerOutputActive}
+            interviewerOutputActive={props.interviewerOutputActive}
             interviewUiPhase={props.interviewUiPhase}
             referenceCardScenario={props.referenceCardScenario}
             referenceCardPrompt={props.referenceCardPrompt}
             ttsPlaybackReliabilityNotice={props.ttsPlaybackReliabilityNotice}
-            webInsecureContextMessage={props.webInsecureContextMessage}
             sessionAudioHealthNotice={props.sessionAudioHealthNotice}
             conversationErrorNotice={props.conversationErrorNotice}
             micPermissionDenied={props.micPermission === 'denied'}
@@ -154,7 +136,6 @@ export function AriaInterviewActiveShell(props: AriaInterviewActiveShellProps): 
             inputDisabled={props.inputDisabled}
             useTapMicUi={props.useTapMicUi}
             handleNativeOrWhisperMicPress={props.handleNativeOrWhisperMicPress}
-            handleWebMicPressIn={props.handleWebMicPressIn}
             handleInterviewSignOut={props.handleInterviewSignOut}
             preInitMeterLevel={props.preInitMeterLevel}
             micSessionRecovering={props.micSessionRecovering}
@@ -183,7 +164,7 @@ export function AriaInterviewActiveShell(props: AriaInterviewActiveShellProps): 
             emotionModalVisible={props.emotionModalVisible}
             micError={props.micError}
             micWarning={props.micWarning}
-            webInterviewerOutputActive={props.webInterviewerOutputActive}
+            interviewerOutputActive={props.interviewerOutputActive}
             onPressStart={props.handlePressStart}
             onPressEnd={props.handlePressEnd}
             onSendTyped={props.handleSendTyped}
@@ -216,47 +197,10 @@ export function AriaInterviewActiveShell(props: AriaInterviewActiveShellProps): 
           />
         )}
       </View>
-      <AriaWebGestureOverlays
-        overlayKind={props.webActiveGestureOverlayKind}
-        resumeWelcomeOffersTts={!!props.resumeOfferWelcomeTtsRef.current}
-        onPendingTtsPress={() => void props.runWebGestureTtsFlush('pending_tts_gesture_overlay')}
-        onTabRestorePressIn={() => {
-          markWebInterviewUserGestureNow();
-          preAuthorizeAudioElementOnMicTapGesture();
-          unlockWebAudioForAutoplay();
-        }}
-        onTabRestorePress={() => {
-          if (props.webTabRestoreReplayInFlightRef.current) return;
-          void props.handleWebTabGestureRestoreTap();
-        }}
-        onResumeWelcomePressIn={() => {
-          markWebInterviewUserGestureNow();
-          preAuthorizeAudioElementOnMicTapGesture();
-          unlockWebAudioForAutoplay();
-        }}
-        onResumeWelcomePress={() => void props.handleWebResumeWelcomeTap()}
-      />
       <FeedbackBubble
         attemptId={props.interviewSessionAttemptIdRef.current ?? undefined}
         userId={props.userId || undefined}
       />
     </SafeAreaContainer>
   );
-}
-
-export function resolveAriaInterviewActiveShellOverlayKind(params: {
-  status: InterviewSessionStatus;
-  isAdmin: boolean;
-  webTabGestureRestoreOverlay: boolean;
-  webResumeWelcomeTapPending: boolean;
-  webDesktopPendingTtsGestureOverlay: boolean;
-}): WebActiveGestureOverlayKind {
-  return resolveWebActiveGestureOverlayKind({
-    platformIsWeb: Platform.OS === 'web',
-    status: params.status,
-    webTabGestureRestoreOverlay: params.webTabGestureRestoreOverlay,
-    webResumeWelcomeTapPending: params.webResumeWelcomeTapPending,
-    isInterviewerView: params.status === 'active' && !params.isAdmin,
-    webDesktopPendingTtsGestureOverlay: params.webDesktopPendingTtsGestureOverlay,
-  });
 }

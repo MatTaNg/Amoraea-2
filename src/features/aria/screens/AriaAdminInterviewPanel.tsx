@@ -53,7 +53,7 @@ export function AriaAdminInterviewPanel({
   emotionModalVisible,
   micError,
   micWarning,
-  webInterviewerOutputActive,
+  interviewerOutputActive,
   onPressStart,
   onPressEnd,
   onSendTyped,
@@ -82,7 +82,7 @@ export function AriaAdminInterviewPanel({
   emotionModalVisible: boolean;
   micError: string | null;
   micWarning: string | null;
-  webInterviewerOutputActive: boolean;
+  interviewerOutputActive: boolean;
   onPressStart: () => void;
   onPressEnd: () => void;
   onSendTyped: () => void;
@@ -374,7 +374,7 @@ export function AriaAdminInterviewPanel({
               !!micError ||
               emotionModalVisible ||
               voiceState === 'processing' ||
-              (Platform.OS === 'web' ? webInterviewerOutputActive : voiceState === 'speaking')
+              (Platform.OS === 'web' ? interviewerOutputActive : voiceState === 'speaking')
             }
             style={[
               styles.micOrb,

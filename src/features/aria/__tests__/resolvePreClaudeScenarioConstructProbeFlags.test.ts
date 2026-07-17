@@ -54,6 +54,35 @@ describe('resolvePreClaudeScenarioConstructProbeFlags', () => {
     expect(flags.shouldForceScenarioBFullAppreciationProbe).toBe(false);
   });
 
+  it('does not force S1 contempt for incomplete cut-off answers that only name Ryan', () => {
+    const opening = "What's going on between these two?";
+    const deps = createMockPreClaudeDeps({
+      currentInterviewMomentRef: { current: 1 },
+      currentScenarioRef: { current: 1 },
+      scenarioAContemptProbeAskedRef: { current: false },
+      pendingScenarioAContemptProbeStreamMuteRef: { current: false },
+      lastQuestionTextRef: { current: opening },
+    });
+    const incomplete = 'If I were Ryan, I would';
+
+    const flags = resolvePreClaudeScenarioConstructProbeFlags(
+      deps,
+      incomplete,
+      [
+        { role: 'assistant', content: opening },
+        { role: 'user', content: incomplete },
+      ],
+      opening,
+      opening,
+      false,
+    );
+
+    expect(flags.replyingToScenarioAQ1).toBe(true);
+    expect(flags.shouldForceScenarioAContemptProbe).toBe(false);
+    expect(flags.muteParallelTtsForScenarioAContemptProbeStream).toBe(false);
+    expect(deps.pendingScenarioAContemptProbeStreamMuteRef.current).toBe(false);
+  });
+
   it('forces S2 appreciation probe when BQ1 answer lacks on-topic engagement', () => {
     const scenarioBQ1 =
       'Sarah got a job offer and James reacted oddly. What do you think is going on here?';
@@ -97,7 +126,36 @@ describe('resolvePreClaudeScenarioConstructProbeFlags', () => {
 
     expect(flags.specificEmmaLineAlreadyAddressed).toBe(true);
     expect(flags.shouldForceScenarioAContemptProbe).toBe(false);
+    expect(flags.muteParallelTtsForScenarioAContemptProbeStream).toBe(false);
     expect(deps.scenarioAContemptProbeAskedRef.current).toBe(true);
+  });
+
+  it('does not arm contempt stream mute when user already quoted Emma closing line (session 770bfb1c)', () => {
+    const deps = createMockPreClaudeDeps({
+      currentInterviewMomentRef: { current: 1 },
+      scenarioAContemptProbeAskedRef: { current: false },
+      pendingScenarioAContemptProbeStreamMuteRef: { current: false },
+    });
+    const answer =
+      'Ryan should not have taken a 25 minute call during their date, that was very disrespectful to Emma. Emma is being condescending when she says you made that very clear.';
+
+    const flags = resolvePreClaudeScenarioConstructProbeFlags(
+      deps,
+      answer,
+      [
+        { role: 'assistant', content: scenarioAQ1Assistant },
+        { role: 'user', content: answer },
+      ],
+      scenarioAQ1Assistant,
+      scenarioAQ1Assistant,
+      false,
+    );
+
+    expect(flags.specificEmmaLineAlreadyAddressed).toBe(true);
+    expect(flags.shouldForceScenarioAContemptProbe).toBe(false);
+    expect(flags.muteParallelTtsForScenarioAContemptProbeStream).toBe(false);
+    expect(flags.allowScenarioARepairAfterContemptAnswer).toBe(true);
+    expect(deps.pendingScenarioAContemptProbeStreamMuteRef.current).toBe(false);
   });
 
   it('syncs Scenario C Sophie perspective probe ref from transcript on resume', () => {

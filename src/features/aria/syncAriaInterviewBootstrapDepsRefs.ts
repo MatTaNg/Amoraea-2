@@ -5,7 +5,6 @@ import type {
   RestorePreparingResultsInterviewStatusDeps,
 } from '@features/aria/checkInterviewStatusTypes';
 import type { InterviewAttemptBootstrapDeps } from '@features/aria/interviewAttemptBootstrapTypes';
-import type { InterviewWebGreetingPrefetchDeps } from '@features/aria/runPrefetchWebInterviewGreetingOnConsent';
 import type { EnsureValidSessionDeps } from '@features/aria/runEnsureValidSession';
 import type {
   InterviewAuthSignedOutSaveDeps,
@@ -31,15 +30,6 @@ export function syncInterviewAttemptBootstrapDeps(
     syncWebAudioRouteSessionEnvelopeFromCache: ctx.syncWebAudioRouteSessionEnvelopeFromCache,
     responseTimingsRef: ctx.responseTimingsRef,
   } as InterviewAttemptBootstrapDeps;
-}
-
-export function syncInterviewWebGreetingPrefetchDeps(
-  ref: MutableRefObject<InterviewWebGreetingPrefetchDeps>,
-  ctx: AriaInterviewDepsSyncContext,
-): void {
-  ref.current = {
-    hasAnthropicConfigured: ctx.hasAnthropicConfigured,
-  } as InterviewWebGreetingPrefetchDeps;
 }
 
 export function syncEnsureValidSessionDeps(

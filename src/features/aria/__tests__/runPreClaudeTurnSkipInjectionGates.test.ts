@@ -2,6 +2,7 @@ import { describe, expect, it, jest } from '@jest/globals';
 
 import { SCENARIO_SKIP_CONFIRMATION_PROMPT_LINE } from '@features/aria/interviewPromptInstructions';
 import {
+  INABILITY_SKIP_CONFIRMATION_PROMPT_LINE,
   SKIP_CONFIRMATION_GREETING_REOPEN_LINE,
   SKIP_REQUEST_CONFIRMATION_PROMPT_LINE,
 } from '@features/aria/metaCommentClassification';
@@ -11,6 +12,7 @@ import { createMockPreClaudeDeps } from './preClaudeGateTestHelpers';
 jest.mock('@utilities/sessionLogging', () => ({
   getSessionLogRuntime: jest.fn().mockReturnValue({ attemptId: 'attempt-test', platform: 'web' }),
   writeSessionLog: jest.fn(),
+  markQuestionDelivered: jest.fn(),
 }));
 
 jest.mock('@data/supabase/client', () => ({
@@ -107,7 +109,7 @@ describe('runPreClaudeTurnSkipInjectionGates', () => {
     );
   });
 
-  it('injects inability invitation on first inability signal', async () => {
+  it('routes inability to skip confirmation (same as skip_request)', async () => {
     const speakTextSafe = jest.fn().mockResolvedValue(undefined);
     const deps = createMockPreClaudeDeps({
       currentInterviewMomentRef: { current: 1 },
@@ -116,21 +118,24 @@ describe('runPreClaudeTurnSkipInjectionGates', () => {
 
     const result = await runPreClaudeTurnSkipInjectionGates(
       deps,
-      baseSkipArgs({ inabilityInvitationClientInjection: true }),
+      baseSkipArgs({ inabilityEscalationSkipInjection: true }),
     );
 
     expect(result).toEqual({ haltTurn: true });
+    expect(deps.scenarioSkipOfferSourceRef.current).toBe('inability_escalation');
+    expect(deps.frustrationSkipAwaitingConfirmationRef.current).toBe(true);
     expect(deps.inabilityCountByMomentRef.current[1]).toBe(1);
     expect(speakTextSafe).toHaveBeenCalledWith(
-      expect.stringMatching(/no pressure|no right answer/i),
+      INABILITY_SKIP_CONFIRMATION_PROMPT_LINE,
       expect.objectContaining({ allowDuplicateConsecutiveTts: true }),
     );
   });
 
-  it('escalates inability to skip confirmation prompt', async () => {
+  it('offers skip confirmation when inability escalation injection is selected', async () => {
     const speakTextSafe = jest.fn().mockResolvedValue(undefined);
     const deps = createMockPreClaudeDeps({
       currentInterviewMomentRef: { current: 2 },
+      inabilityCountByMomentRef: { current: { 2: 1 } },
       speakTextSafe,
     });
 
@@ -144,7 +149,7 @@ describe('runPreClaudeTurnSkipInjectionGates', () => {
     expect(deps.frustrationSkipOfferPendingRef.current).toBe(true);
     expect(deps.inabilityCountByMomentRef.current[2]).toBe(2);
     expect(speakTextSafe).toHaveBeenCalledWith(
-      SKIP_REQUEST_CONFIRMATION_PROMPT_LINE,
+      INABILITY_SKIP_CONFIRMATION_PROMPT_LINE,
       expect.objectContaining({ allowDuplicateConsecutiveTts: true }),
     );
   });
@@ -192,8 +197,26 @@ describe('runPreClaudeTurnSkipInjectionGates', () => {
     );
   });
 
-  it('accepts skip confirmation, keeps moment when scripted questions remain, and falls through to the model', async () => {
+  it('accepts skip confirmation and client-delivers the next scripted question', async () => {
     const speakTextSafe = jest.fn().mockResolvedValue(undefined);
+    const messagesToUse = [
+      {
+        role: 'assistant' as const,
+        content: 'What do you think is going on here?',
+        scenarioNumber: 2 as const,
+      },
+      {
+        role: 'user' as const,
+        content: 'Sarah needed emotional celebration, not logistics questions about the commute.',
+        scenarioNumber: 2 as const,
+      },
+      {
+        role: 'assistant' as const,
+        content: SKIP_REQUEST_CONFIRMATION_PROMPT_LINE,
+        scenarioNumber: 2 as const,
+      },
+      { role: 'user' as const, content: 'Yes.', scenarioNumber: 2 as const },
+    ];
     const deps = createMockPreClaudeDeps({
       currentInterviewMomentRef: { current: 2 },
       currentScenarioRef: { current: 2 },
@@ -203,20 +226,28 @@ describe('runPreClaudeTurnSkipInjectionGates', () => {
       scenarioSkipConfirmedCountRef: { current: 0 },
       scenarioSkipPenaltySumRef: { current: 0 },
       interviewSessionAttemptIdRef: { current: 'attempt-1' },
+      currentMessagesRef: { current: messagesToUse },
       speakTextSafe,
     });
 
     const result = await runPreClaudeTurnSkipInjectionGates(
       deps,
-      baseSkipArgs({ frustrationSkipAcceptancePipeline: true }),
+      baseSkipArgs({
+        frustrationSkipAcceptancePipeline: true,
+        messagesToUse,
+        trimmed: 'Yes.',
+      }),
     );
 
-    expect(result).toEqual({ haltTurn: false });
+    expect(result).toEqual({ haltTurn: true });
     expect(deps.frustrationSkipOfferPendingRef.current).toBe(false);
     expect(deps.currentInterviewMomentRef.current).toBe(2);
     expect(deps.interviewMomentsCompleteRef.current[2]).toBeFalsy();
     expect(deps.scenarioSkipConfirmedCountRef.current).toBe(1);
-    expect(deps.skipContinuationSystemSuffixRef.current).toContain('NEXT QUESTION IN SAME SCENARIO');
-    expect(speakTextSafe).not.toHaveBeenCalled();
+    expect(deps.skipContinuationSystemSuffixRef.current).toBe('');
+    expect(speakTextSafe).toHaveBeenCalledWith(
+      expect.stringMatching(/Okay, we(?:'ve| can) skip(?:ped)? this one[.,]?\s+the next question is/i),
+      expect.anything(),
+    );
   });
 });

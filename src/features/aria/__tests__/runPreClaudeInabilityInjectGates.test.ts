@@ -1,6 +1,6 @@
 import { describe, expect, it, jest } from '@jest/globals';
 
-import { SKIP_REQUEST_CONFIRMATION_PROMPT_LINE } from '@features/aria/metaCommentClassification';
+import { INABILITY_SKIP_CONFIRMATION_PROMPT_LINE } from '@features/aria/metaCommentClassification';
 import { runPreClaudeInabilityEscalationSkipGate } from '@features/aria/runPreClaudeInabilityEscalationSkipGate';
 import { runPreClaudeInabilityInvitationInjectGate } from '@features/aria/runPreClaudeInabilityInvitationInjectGate';
 import { createMockPreClaudeDeps } from './preClaudeGateTestHelpers';
@@ -41,7 +41,7 @@ describe('runPreClaudeInabilityInvitationInjectGate', () => {
 });
 
 describe('runPreClaudeInabilityEscalationSkipGate', () => {
-  it('escalates to skip confirmation on second inability signal', async () => {
+  it('offers skip confirmation on inability (same path as skip_request)', async () => {
     const speakTextSafe = jest.fn().mockResolvedValue(undefined);
     const deps = createMockPreClaudeDeps({
       currentInterviewMomentRef: { current: 3 },
@@ -53,9 +53,9 @@ describe('runPreClaudeInabilityEscalationSkipGate', () => {
     expect(result).toEqual({ haltTurn: true });
     expect(deps.scenarioSkipOfferSourceRef.current).toBe('inability_escalation');
     expect(deps.frustrationSkipAwaitingConfirmationRef.current).toBe(true);
-    expect(deps.inabilityCountByMomentRef.current[3]).toBe(2);
+    expect(deps.inabilityCountByMomentRef.current[3]).toBe(1);
     expect(speakTextSafe).toHaveBeenCalledWith(
-      SKIP_REQUEST_CONFIRMATION_PROMPT_LINE,
+      INABILITY_SKIP_CONFIRMATION_PROMPT_LINE,
       expect.objectContaining({ allowDuplicateConsecutiveTts: true }),
     );
   });

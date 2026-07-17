@@ -44,8 +44,6 @@ export type HydratePostClosingFromSavedDeps = {
     >
   >;
   resumeOfferWelcomeTtsRef: MutableRefObject<boolean>;
-  webResumeWelcomeTapPendingRef: MutableRefObject<boolean>;
-  setWebResumeWelcomeTapPending: (v: boolean) => void;
 };
 
 export type HandleResumeParams = {
@@ -59,7 +57,6 @@ export type HandleResumeDeps = HydratePostClosingFromSavedDeps & {
   ) => Promise<void>;
   awaitScreenReadySignal: () => Promise<void>;
   logSessionResumeState: (state: 'loading' | 'ready') => void;
-  detachWebGestureFlushListener: () => void;
   awaitEmotionModalForIndex: (itemIndex: number) => Promise<void>;
   interviewSessionAttemptIdRef: MutableRefObject<string | null>;
   interviewSessionIdRef: MutableRefObject<string>;
@@ -110,9 +107,6 @@ export type HandleResumeDeps = HydratePostClosingFromSavedDeps & {
   resumeOfferWelcomeTtsRef: MutableRefObject<boolean>;
   resumeWelcomeMessageRef: MutableRefObject<string | null>;
   resumeWelcomeHydrationAttemptRef: MutableRefObject<string | null>;
-  webResumeWelcomeTapHandledRef: MutableRefObject<boolean>;
-  webResumeWelcomeTapPendingRef: MutableRefObject<boolean>;
-  setWebResumeWelcomeTapPending: (v: boolean) => void;
   resumeLastAssistantTextRef: MutableRefObject<string | null>;
   lastQuestionTextRef: MutableRefObject<string | null>;
   setScenarioScores: React.Dispatch<React.SetStateAction<Record<number, ScenarioScoreResult>>>;
@@ -122,15 +116,13 @@ export type HandleResumeDeps = HydratePostClosingFromSavedDeps & {
   setTouchedConstructs: React.Dispatch<React.SetStateAction<number[]>>;
   pendingScenarioIntroAfterResumeWelcomeRef: MutableRefObject<string | null>;
   resumeRepeatChoicePendingRef: MutableRefObject<boolean>;
-  pendingWebSpeechForGestureRef: MutableRefObject<string | null>;
-  setWebDesktopPendingTtsGestureOverlay: (v: boolean) => void;
   setStatus: React.Dispatch<React.SetStateAction<InterviewSessionStatus>>;
   committedScenarioRef: MutableRefObject<ActiveScenario | null>;
   setReferenceCardScenario: React.Dispatch<React.SetStateAction<ActiveScenario | null>>;
   setReferenceCardPrompt: React.Dispatch<React.SetStateAction<string | null>>;
   setInterviewUiPhase: React.Dispatch<React.SetStateAction<InterviewUiPhase>>;
   currentMessagesRef: MutableRefObject<{ role: string; content: string; [key: string]: unknown }[]>;
-  interruptAllWebInterviewTtsOutput: () => void;
+  interruptAllInterviewTtsOutput: () => void;
   moment5QuestionDeliveryInFlightRef: MutableRefObject<boolean>;
   interviewUserTurnEpochRef: MutableRefObject<number>;
 };
@@ -159,7 +151,7 @@ export type StartInterviewDeps = {
     opts?: { allowMessageHistoryShrink?: boolean },
   ) => Promise<void>;
   resetInterviewProgressRefs: () => void;
-  interruptAllWebInterviewTtsOutput: () => void;
+  interruptAllInterviewTtsOutput: () => void;
   startInterviewInFlightRef: MutableRefObject<boolean>;
   setInterviewStartInFlight: (v: boolean) => void;
   hasResumedRef: MutableRefObject<boolean>;
@@ -170,7 +162,6 @@ export type StartInterviewDeps = {
   lastHeadphoneProbeRef: MutableRefObject<HeadphoneProbeResult | null>;
   setAudioRouteKind: (kind: AudioRouteKind) => void;
   lastAudioRouteFingerprintRef: MutableRefObject<string | null>;
-  setMobileWebTapToBeginDone: (v: boolean) => void;
   setMicError: React.Dispatch<React.SetStateAction<string | null>>;
   setVoiceState: React.Dispatch<
     React.SetStateAction<'idle' | 'listening' | 'processing' | 'speaking' | 'recording'>
@@ -210,6 +201,4 @@ export type InterviewSessionLifecycleDeps = HandleResumeDeps &
       | 'congratulations'
       | 'analysis';
     onboardingAutoStartRef: MutableRefObject<boolean>;
-    webSpeechShouldDeferToUserGesture: () => boolean;
-    setWebDesktopAwaitingStartOverlay: (v: boolean) => void;
   };

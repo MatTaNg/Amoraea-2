@@ -1,4 +1,5 @@
 import {
+  getAudioPostSessionRecordingDelayMs,
   getAudioWhisperTranscriptionTimeoutMs,
   getAudioWhisperTimeoutMs,
 } from './audioInterviewConfig';
@@ -20,5 +21,11 @@ describe('getAudioWhisperTranscriptionTimeoutMs', () => {
 
   it('caps at 120s', () => {
     expect(getAudioWhisperTranscriptionTimeoutMs(300_000)).toBe(120_000);
+  });
+});
+
+describe('getAudioPostSessionRecordingDelayMs', () => {
+  it('defaults to 0 so mic tap starts capture without a warm-up wait', () => {
+    expect(getAudioPostSessionRecordingDelayMs()).toBe(0);
   });
 });

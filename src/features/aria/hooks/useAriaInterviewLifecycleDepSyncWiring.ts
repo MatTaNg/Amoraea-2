@@ -8,7 +8,6 @@ import {
   createPerformAdminInterviewResetSyncCtxFromScreen,
   createPerformInterviewRetakeSyncCtxFromScreen,
   createSubmitPostInterviewFeedbackSyncCtxFromScreen,
-  createWebResumeWelcomeTapSyncCtxFromScreen,
 } from '@features/aria/buildAriaInterviewAuxClusterScreenParams';
 import { createInterviewSessionLifecycleSyncCtxFromScreen } from '@features/aria/buildAriaInterviewClusterScreenParams';
 import { createPostInterviewFeedbackAlertSyncCtxFromScreen } from '@features/aria/buildAriaInterviewBootMiscScreenParams';
@@ -20,13 +19,9 @@ import type {
 } from '@features/aria/buildInterviewPostInterviewFeedbackLocalSyncExtras';
 import type { PerformAdminInterviewResetLocalScope } from '@features/aria/buildPerformAdminInterviewResetLocalSyncExtra';
 import type { PerformInterviewRetakeLocalScope } from '@features/aria/buildPerformInterviewRetakeLocalSyncExtra';
-import type { WebResumeWelcomeTapLocalScope } from '@features/aria/buildWebResumeWelcomeTapSyncExtra';
 import type { AudioRouteKind } from '@features/aria/config/audioRouteRuntime';
 import type { AriaPostInterviewFeedbackState } from '@features/aria/hooks/useAriaPostInterviewFeedbackState';
-import {
-  useHandleWebResumeWelcomeTap,
-  useSubmitPostInterviewFeedbackCallback,
-} from '@features/aria/hooks/useInterviewTurnProcessingCallbacks';
+import { useSubmitPostInterviewFeedbackCallback } from '@features/aria/hooks/useInterviewTurnProcessingCallbacks';
 import {
   useInterviewAdminResetActions,
   useInterviewRetakeActions,
@@ -49,7 +44,6 @@ import type { PreparingResultsFailsafeDeps } from '@features/aria/preparingResul
 import type { ScoreInterviewDeps } from '@features/aria/scoreInterviewTypes';
 import type { InterviewSessionLifecycleDeps } from '@features/aria/sessionLifecycleTypes';
 import type { SubmitPostInterviewFeedbackDeps } from '@features/aria/submitPostInterviewFeedbackTypes';
-import type { WebResumeWelcomeTapDeps } from '@features/aria/webResumeWelcomeTapTypes';
 import {
   runShowFeedbackNotice,
   runShowMissingInterviewAttemptAlert,
@@ -61,7 +55,6 @@ import {
   syncPostInterviewFeedbackAlertDeps,
   syncSessionLifecycleDeps,
   syncSubmitPostInterviewFeedbackDeps,
-  syncWebResumeWelcomeTapDeps,
 } from '@features/aria/syncAriaInterviewDepsRefs';
 
 export type SessionLifecycleAudioDeviceDepScreenRefs = Omit<
@@ -95,7 +88,6 @@ export type AriaInterviewLifecycleDepSyncWiringParams = {
   servicesBaseCtx: AriaInterviewDepsSyncContext;
   showSimpleAlert: PostInterviewFeedbackAlertDeps['showSimpleAlert'];
   showConfirmDialog: ShowInterviewConfirmDialog;
-  webResumeWelcomeTap: WebResumeWelcomeTapLocalScope;
   sessionLifecycle: SessionLifecycleDepScreenRefs;
   sessionLifecycleEffects: InterviewSessionLifecycleEffectInputs;
   completionScoring: InterviewCompletionScoringLocalScope;
@@ -134,7 +126,6 @@ export function useAriaInterviewLifecycleDepSyncWiring(params: AriaInterviewLife
     servicesBaseCtx,
     showSimpleAlert,
     showConfirmDialog,
-    webResumeWelcomeTap,
     sessionLifecycle,
     sessionLifecycleEffects,
     completionScoring,
@@ -148,20 +139,13 @@ export function useAriaInterviewLifecycleDepSyncWiring(params: AriaInterviewLife
     loadPostInterviewFeedbackEffects,
   } = params;
 
-  const webResumeWelcomeTapDepsRef = useRef({} as WebResumeWelcomeTapDeps);
-  syncWebResumeWelcomeTapDeps(
-    webResumeWelcomeTapDepsRef,
-    createWebResumeWelcomeTapSyncCtxFromScreen(coreCtx, webResumeWelcomeTap),
-  );
-  const handleWebResumeWelcomeTap = useHandleWebResumeWelcomeTap(webResumeWelcomeTapDepsRef);
-
   const sessionLifecycleDepsRef = useRef({} as InterviewSessionLifecycleDeps);
   syncSessionLifecycleDeps(
     sessionLifecycleDepsRef,
     createInterviewSessionLifecycleSyncCtxFromScreen(coreGateServicesBaseCtx, sessionLifecycle),
   );
 
-  const { startInterview, handleMobileWebTapToBegin } = useInterviewSessionLifecycle(
+  const { startInterview } = useInterviewSessionLifecycle(
     sessionLifecycleDepsRef,
     sessionLifecycleEffects,
   );
@@ -246,9 +230,7 @@ export function useAriaInterviewLifecycleDepSyncWiring(params: AriaInterviewLife
   useLoadPostInterviewFeedback(loadPostInterviewFeedbackDepsRef, loadPostInterviewFeedbackEffects);
 
   return {
-    handleWebResumeWelcomeTap,
     startInterview,
-    handleMobileWebTapToBegin,
     handleRetake,
     handleAdminResetInterview,
     handleSubmitPostInterviewFeedback,

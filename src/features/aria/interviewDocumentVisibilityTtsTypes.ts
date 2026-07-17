@@ -10,18 +10,7 @@ export type InterviewDocumentVisibilityTtsDeps = {
   interviewStatusRef: MutableRefObject<string>;
   isInterviewCompleteRef: MutableRefObject<boolean>;
   currentMessagesRef: MutableRefObject<Array<{ role: string; content: string }>>;
-  syncInterviewTtsAfterScreenReturn: () => void;
-  webTabRestoreReplayInFlightRef: MutableRefObject<boolean>;
-  needsGestureRestoreRef: MutableRefObject<boolean>;
-  tabVisibilityGestureLossPendingRef: MutableRefObject<boolean>;
   setWebTabRestoreOverlayVisible: (visible: boolean) => void;
-  ensureWebGestureFlushListener: () => void;
-  handleWebTabGestureRestoreTapRef: MutableRefObject<(() => void) | null>;
-  mobileTabHideLetPlaybackContinueRef: MutableRefObject<boolean>;
-  pendingGestureRestoreSpeakRef: MutableRefObject<PendingGestureRestoreSpeakEntry | null>;
-  tabHiddenDuringActiveTtsLineRef: MutableRefObject<boolean>;
-  hasWebInterviewHtmlAudioTabResumePending: () => boolean;
-  isWebInterviewPlaybackAudiblyActive: () => boolean;
   committedScenarioRef: MutableRefObject<ActiveScenario | null>;
   isAssistantBubbleForTranscript: (m: { role: string; content?: string }) => boolean;
   setInterviewUiPhase: (phase: 'pre_scenario' | 'scenario_transitioning' | 'scenario_active') => void;

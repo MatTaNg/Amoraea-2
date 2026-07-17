@@ -1,11 +1,13 @@
 import { beforeEach, describe, expect, it, jest } from '@jest/globals';
 
 jest.mock('react-native', () => ({
-  Platform: { OS: 'web' },
+  Platform: { OS: 'ios' },
 }));
 
 jest.mock('expo-speech', () => ({
-  speak: jest.fn(),
+  speak: jest.fn((_text: string, opts?: { onDone?: () => void }) => {
+    opts?.onDone?.();
+  }),
   stop: jest.fn(),
 }));
 
@@ -13,47 +15,44 @@ jest.mock('../elevenLabsTtsPlaybackStop', () => ({
   stopElevenLabsPlayback: jest.fn(async () => undefined),
 }));
 
-jest.mock('../interviewWebSpeechSynthesis', () => ({
-  speakWithWebSpeechSynthesis: jest.fn(async () => ({ ok: true })),
+jest.mock('../audioModeHelpers', () => ({
+  logAndApplyPlaybackModeForTts: jest.fn(async () => undefined),
 }));
 
 jest.mock('../interviewTtsPlaybackRate', () => ({
-  getEffectivePlaybackRateMultiplier: jest.fn(() => 1),
   getLocalDevPlaybackRateMultiplier: jest.fn(() => 1),
 }));
 
-jest.mock('../webSpeechDeferPolicy', () => ({
-  webSpeechShouldDeferToUserGesture: jest.fn(() => false),
+jest.mock('expo-constants', () => ({
+  __esModule: true,
+  default: {
+    expoConfig: { extra: {} },
+  },
 }));
 
+import * as Speech from 'expo-speech';
 import { speakFallback } from '../interviewTtsSpeakFallback';
 import { stopElevenLabsPlayback } from '../elevenLabsTtsPlaybackStop';
-import { speakWithWebSpeechSynthesis } from '../interviewWebSpeechSynthesis';
-import { WebTtsRequiresUserGestureError } from '../webTtsGestureErrors';
 
 describe('speakFallback', () => {
   beforeEach(() => {
     jest.clearAllMocks();
   });
 
-  it('uses web speech synthesis on web', async () => {
+  it('uses expo-speech on native', async () => {
     await speakFallback('Hello there');
     expect(stopElevenLabsPlayback).toHaveBeenCalled();
-    expect(speakWithWebSpeechSynthesis).toHaveBeenCalledWith(
+    expect(Speech.speak).toHaveBeenCalledWith(
       'Hello there',
-      undefined,
-      'tts_playback',
-      expect.any(Number),
+      expect.objectContaining({ language: 'en-US' }),
     );
   });
 
-  it('throws when web speech fails instead of silently resolving', async () => {
-    jest.mocked(speakWithWebSpeechSynthesis).mockResolvedValueOnce({
-      ok: false,
-      error: 'synthesis-failed',
-    });
-    await expect(speakFallback('Long scenario vignette text')).rejects.toBeInstanceOf(
-      WebTtsRequiresUserGestureError,
+  it('does not pass hyphenated Amoraea pronunciation to expo-speech', async () => {
+    await speakFallback("Hi, I'm Amoraea. What can I call you?");
+    expect(Speech.speak).toHaveBeenCalledWith(
+      "Hi, I'm Ah mor AY ah. What can I call you?",
+      expect.objectContaining({ language: 'en-US' }),
     );
   });
 });

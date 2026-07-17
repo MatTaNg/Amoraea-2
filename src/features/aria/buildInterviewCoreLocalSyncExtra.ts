@@ -3,8 +3,6 @@ import type { AriaInterviewDepsSyncContext } from '@features/aria/syncAriaInterv
 export type InterviewCoreLocalScope = Pick<
   AriaInterviewDepsSyncContext,
   | 'speakTextSafe'
-  | 'dismissTabRestoreOverlay'
-  | 'dismissAfterAndroidBackgroundPlaybackEnd'
   | 'setMessages'
   | 'setEmotionModalVisible'
   | 'setScenarioScores'

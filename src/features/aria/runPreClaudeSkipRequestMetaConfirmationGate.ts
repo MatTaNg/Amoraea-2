@@ -35,6 +35,7 @@ export async function runPreClaudeSkipRequestMetaConfirmationGate(
   await deps.speakTextSafe(skipRequestConfirmationSpeech, {
     ...ASSISTANT_INTERVIEW_SPEECH,
     allowDuplicateConsecutiveTts: true,
+    skipLastQuestionRef: true,
   });
   return finishPreClaudeSkipInjectionTurn(deps);
 }

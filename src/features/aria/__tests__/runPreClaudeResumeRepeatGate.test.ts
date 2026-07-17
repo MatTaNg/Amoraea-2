@@ -77,9 +77,9 @@ describe('runPreClaudeResumeRepeatGate', () => {
       }),
     );
 
-    expect(result).toEqual({ haltTurn: false, reentryTypeForLogging: null });
+    expect(result).toEqual({ haltTurn: false, reentryTypeForLogging: 'repeat_requested' });
     expect(deps.resumeRepeatChoicePendingRef.current).toBe(false);
-    expect(deps.resumeLastAssistantTextRef.current).toBeNull();
+    expect(deps.resumeLastAssistantTextRef.current).toBe(LAST_QUESTION);
     expect(speakTextSafe).not.toHaveBeenCalled();
   });
 
@@ -95,7 +95,7 @@ describe('runPreClaudeResumeRepeatGate', () => {
 
     expect(result).toEqual({ haltTurn: true, reentryTypeForLogging: 'repeat_requested' });
     expect(speakTextSafe).toHaveBeenCalledWith(
-      LAST_QUESTION,
+      `Sure. ${LAST_QUESTION}`,
       expect.objectContaining({
         skipQuestionDeliveredTelemetry: true,
         skipInterviewSpeechAdvance: true,

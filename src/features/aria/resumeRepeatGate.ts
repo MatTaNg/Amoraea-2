@@ -1,4 +1,10 @@
-import { isExplicitRepeatRequestPreClassification } from '@features/aria/metaCommentClassification';
+import { looksLikeQuestionContentConfusion } from '@features/aria/confusionRepeatOfferState';
+import { looksLikeInterviewerIdentityOrOffTopicAsk } from '@features/aria/interviewAnswerRelevance';
+import {
+  classifyUserMetaComment,
+  isExplicitRepeatRequestPreClassification,
+} from '@features/aria/metaCommentClassification';
+import { classifyResumeRepeatIntent } from '@features/aria/resumeRepeatIntent';
 
 /**
  * Resume welcome-back gate: classify whether the user's next turn is repeat/continue vs a substantive answer.
@@ -68,12 +74,26 @@ export function shouldTreatTranscriptAsResumeGateSubstantiveBypass(
   return looksLikeDirectResumeAnswer(userText, lastQuestionText ?? null);
 }
 
-/** Allow explicit repeat requests and substantive answers through while repeat-choice is pending. */
+/**
+ * Allow resume-choice turns through while repeat-choice is pending.
+ * Whisper often drops "repeat" ("He what you said" / "Pee at what you said") — still match via
+ * {@link classifyResumeRepeatIntent} / {@link looksLikeRepeatCueInAmbiguousReply}.
+ * Short continue intents must also pass so pre-Claude / assent can clear the gate.
+ */
 export function shouldAllowResumeRepeatChoiceTurnProcessing(
   userText: string,
   wordCount: number,
   lastQuestionText: string | null | undefined,
 ): boolean {
   if (isExplicitRepeatRequestPreClassification(userText)) return true;
+  if (looksLikeQuestionContentConfusion(userText)) return true;
+  // Identity / off-topic interviewer asks must reach the irrelevant-answer gate — not die silently.
+  if (looksLikeInterviewerIdentityOrOffTopicAsk(userText)) return true;
+  // "I don't know" / inability must reach skip-confirmation — not die on the resume choice gate.
+  const metaType = classifyUserMetaComment(userText)?.type;
+  if (metaType === 'inability' || metaType === 'skip_request') return true;
+  const intent = classifyResumeRepeatIntent(userText);
+  if (intent === 'repeat' || intent === 'continue') return true;
+  if (looksLikeRepeatCueInAmbiguousReply(userText)) return true;
   return shouldTreatTranscriptAsResumeGateSubstantiveBypass(userText, wordCount, lastQuestionText ?? null);
 }

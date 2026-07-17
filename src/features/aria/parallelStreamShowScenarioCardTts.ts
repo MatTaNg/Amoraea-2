@@ -28,23 +28,38 @@ import {
   streamAlreadySpokeScenarioBoundaryClosingLead,
   isShowScenarioCardCanonicalPlaybackConfirmed,
   resolveShowScenarioCardKindForInterview,
+  shouldSkipPersonalMomentCanonicalReplay,
   shouldSkipSituation1CanonicalReplay,
   shouldTreatShowScenarioCardCanonicalAsAlreadyDelivered,
-  showScenarioCardPrefetchBufferMatchesSpeakText,
   streamSpokenTextAlreadyMatchesCanonicalCard,
   completedScenarioForShowScenarioCardKind,
 } from '@features/aria/showScenarioCardCanonicalTts';
+import { MOMENT_5_ACCOUNTABILITY_QUESTION_TEXT } from '@features/aria/moment5ProbeCopy';
+import { MOMENT_4_GRUDGE_QUESTION_TEXT } from '@features/aria/moment4ProbeLogic';
 import { triggerCompletedScenarioScoringIfNeeded } from '@features/aria/runScenarioBoundaryScoring';
 import { advanceInterviewScenarioRefsAfterCanonicalShowScenarioCard } from '@features/aria/interviewScenarioRefSync';
 import { scenarioAMinimumEngagementForHandoff } from '@features/aria/scenarioFollowUpTranscriptGuard';
 import { scenarioBJamesRepairProbeAlreadySatisfied } from '@features/aria/scenarioBProbeLogic';
 import { remoteLog } from '@utilities/remoteLog';
 import { scenarioCRepairConstructStillPending } from '@features/aria/scenarioCPromptDetection';
-import { fetchElevenLabsMpegArrayBuffer } from '@features/aria/utils/elevenLabsTtsFetch';
-import { speakLongFormInterviewHtmlMp3 } from '@features/aria/utils/speakLongFormInterviewHtmlMp3';
 import { setTtsPlaybackActive } from '@utilities/sessionLogging';
 import type { ParallelStreamTtsBatchController } from './parallelStreamTtsBatchController';
 import type { ParallelStreamTtsPlaybackContext } from './parallelStreamTtsRuntimeState';
+
+/** Parallel sentences can chain onto `ttsChain` while we await — drain until stable. */
+async function awaitSettledParallelStreamTtsChain(
+  state: ParallelStreamTtsPlaybackContext['state'],
+  deps: ParallelStreamTtsPlaybackContext['deps'],
+): Promise<void> {
+  for (let i = 0; i < 24; i++) {
+    const chain = state.ttsChain;
+    await chain;
+    const stillChaining = state.ttsChain !== chain;
+    const lineBusy = deps.ttsLineInFlightRef.current === true;
+    const parallelBusy = deps.parallelStreamingTtsRef.current.active === true;
+    if (!stillChaining && !lineBusy && !parallelBusy) return;
+  }
+}
 
 export function createParallelStreamSpeakShowScenarioCardOnce(
   ctx: ParallelStreamTtsPlaybackContext,
@@ -129,28 +144,6 @@ export function createParallelStreamSpeakShowScenarioCardOnce(
       }
     }
 
-    const lockedExact = buildLockedShowScenarioCardTtsText(kind);
-    const earlyCanonicalBody = lockedExact ?? buildCanonicalShowScenarioCardTtsBody(kind);
-    /**
-     * Prefetch the exact line we intend to speak (wrap + vignette when applicable).
-     * Prefetching vignette-only while speaking wrap+vignette silently drops the transition.
-     */
-    const earlyPrefetchPrefix = earlyCanonicalBody
-      ? resolveClientScenarioBoundaryPrefixForCanonicalTts({
-          kind,
-          messages: params.messagesToUse,
-          firstName: params.participantFirstNameForSpoken,
-          extractedPrefix: extractShowScenarioCardTransitionPrefix(fullStream, kind),
-        }).trim()
-      : '';
-    const earlyPrefetchText =
-      earlyCanonicalBody && earlyPrefetchPrefix
-        ? `${earlyPrefetchPrefix}\n\n${earlyCanonicalBody}`.replace(/\n{3,}/g, '\n\n').trim()
-        : earlyCanonicalBody;
-    const canonicalPrefetchPromise = earlyPrefetchText
-      ? fetchElevenLabsMpegArrayBuffer(earlyPrefetchText)
-      : Promise.resolve(null as ArrayBuffer | null);
-
     if (
       shouldTreatShowScenarioCardCanonicalAsAlreadyDelivered({
         messages: params.messagesToUse,
@@ -167,27 +160,55 @@ export function createParallelStreamSpeakShowScenarioCardOnce(
       return;
     }
 
+    state.showScenarioCardCanonicalSpokenThisStream = true;
+    batch.flushParallelTtsBatch(true);
+    /**
+     * Drain the live chain (not a snapshot). Parallel stream often queues the coerced
+     * Moment 5 question onto `ttsChain` while this card path is waiting on the lead-in —
+     * awaiting a single hop then canceling caused the conflict question to play twice.
+     */
+    await awaitSettledParallelStreamTtsChain(state, deps);
+
     const spokenSoFar = deps.parallelStreamingTtsRef.current.spokenCompleteText.trim();
+    const streamMatchesCanonical = streamSpokenTextAlreadyMatchesCanonicalCard(
+      spokenSoFar,
+      fullStream,
+      kind,
+    );
     if (
-      spokenSoFar &&
-      streamSpokenTextAlreadyMatchesCanonicalCard(spokenSoFar, fullStream) &&
-      isShowScenarioCardCanonicalPlaybackConfirmed(
+      streamMatchesCanonical &&
+      (isShowScenarioCardCanonicalPlaybackConfirmed(
         deps.showScenarioCardCanonicalPlaybackConfirmedKindsRef.current,
         kind,
-      )
+      ) ||
+        shouldSkipPersonalMomentCanonicalReplay({
+          kind,
+          spokenCompleteText: spokenSoFar,
+          fullStream,
+          playbackConfirmedKinds: deps.showScenarioCardCanonicalPlaybackConfirmedKindsRef.current,
+        }))
     ) {
+      deps.showScenarioCardCanonicalPlaybackConfirmedKindsRef.current = {
+        ...deps.showScenarioCardCanonicalPlaybackConfirmedKindsRef.current,
+        [kind]: true,
+      };
+      if (kind === 'moment_5') {
+        deps.moment5QuestionDeliveredRef.current = true;
+        deps.moment5PrimaryAnchorDeliveredSessionRef.current = true;
+        if (deps.currentInterviewMomentRef.current < 5) {
+          deps.currentInterviewMomentRef.current = 5;
+        }
+        deps.lastQuestionTextRef.current = MOMENT_5_ACCOUNTABILITY_QUESTION_TEXT;
+      } else if (kind === 'moment_4') {
+        deps.lastQuestionTextRef.current = MOMENT_4_GRUDGE_QUESTION_TEXT;
+      }
       void remoteLog('[SHOW_SCENARIO_CARD_CANONICAL_SPEAK_SKIPPED]', {
         interviewSessionId: deps.interviewSessionIdRef.current,
         kind,
-        reason: 'stream_spoken_playback_confirmed',
+        reason: 'stream_spoken_canonical_body',
       });
-      state.showScenarioCardCanonicalSpokenThisStream = true;
       return;
     }
-
-    state.showScenarioCardCanonicalSpokenThisStream = true;
-    batch.flushParallelTtsBatch(true);
-    await state.ttsChain;
 
     /**
      * Cancel any in-flight parallel batch (often the model wrap lead) before replacing with the
@@ -203,7 +224,7 @@ export function createParallelStreamSpeakShowScenarioCardOnce(
       streamAlreadySpokeScenarioBoundaryClosingLead(spokenBeforeCancel, completedForKind);
     if (
       spokenBeforeCancel &&
-      !streamSpokenTextAlreadyMatchesCanonicalCard(spokenBeforeCancel, fullStream) &&
+      !streamSpokenTextAlreadyMatchesCanonicalCard(spokenBeforeCancel, fullStream, kind) &&
       !boundaryLeadAlreadyAudible
     ) {
       deps.parallelStreamingTtsRef.current.cancelRequested = true;
@@ -216,7 +237,7 @@ export function createParallelStreamSpeakShowScenarioCardOnce(
       deps.parallelStreamingTtsRef.current.spokenCompleteText = '';
     }
 
-    const canonicalBody = lockedExact ?? buildCanonicalShowScenarioCardTtsBody(kind);
+    const canonicalBody = buildLockedShowScenarioCardTtsText(kind) ?? buildCanonicalShowScenarioCardTtsBody(kind);
     const prefix = extractShowScenarioCardTransitionPrefix(fullStream, kind);
     const effectivePrefix = resolveClientScenarioBoundaryPrefixForCanonicalTts({
       kind,
@@ -232,7 +253,7 @@ export function createParallelStreamSpeakShowScenarioCardOnce(
         spokenLive: spokenLiveAfterCancelGate,
         cancelledParallelPlayback: cancelledParallelPrefixForCanonical,
       });
-    const canonicalText = lockedExact ?? canonicalBody;
+    const canonicalText = buildLockedShowScenarioCardTtsText(kind) ?? canonicalBody;
 
     if (!canonicalText) {
       state.showScenarioCardCanonicalSpokenThisStream = false;
@@ -256,11 +277,11 @@ export function createParallelStreamSpeakShowScenarioCardOnce(
     });
 
     /**
-     * HTML long-form speak does not go through speakTextSafe, so without this tab-hide
-     * restore falls back to a stale lastQuestion (e.g. S2 James repair during S3 open).
+     * Arm in-flight refs before speak so tab-hide restore uses the canonical card text,
+     * not a stale lastQuestion (e.g. S2 James repair during S3 open).
      */
-    if (deps.webTtsUtteranceInFlightRef) {
-      deps.webTtsUtteranceInFlightRef.current = textToSpeak;
+    if (deps.ttsUtteranceInFlightRef) {
+      deps.ttsUtteranceInFlightRef.current = textToSpeak;
     }
     deps.ttsLineInFlightRef.current = true;
     if (deps.userId) {
@@ -273,54 +294,42 @@ export function createParallelStreamSpeakShowScenarioCardOnce(
       deps.lastQuestionTextRef.current = SCENARIO_2_OPENING;
     } else if (kind === 'situation_1' && deps.lastQuestionTextRef) {
       deps.lastQuestionTextRef.current = SCENARIO_1_OPENING;
+    } else if (kind === 'moment_4' && deps.lastQuestionTextRef) {
+      deps.lastQuestionTextRef.current = MOMENT_4_GRUDGE_QUESTION_TEXT;
+    } else if (kind === 'moment_5' && deps.lastQuestionTextRef) {
+      deps.lastQuestionTextRef.current = MOMENT_5_ACCOUNTABILITY_QUESTION_TEXT;
     }
 
-    const prefetchedBuffer =
-      (await canonicalPrefetchPromise.catch(() => null)) ?? null;
-    const prefetchMatches = showScenarioCardPrefetchBufferMatchesSpeakText(
-      textToSpeak,
-      earlyPrefetchText,
-    );
-    let htmlMp3Played = false;
     try {
-      try {
-        htmlMp3Played = await speakLongFormInterviewHtmlMp3({
-          text: textToSpeak,
-          telemetrySource: 'turn',
-          prefetchedBuffer:
-            prefetchMatches && prefetchedBuffer?.byteLength ? prefetchedBuffer : null,
-          onPlaybackStarted: () => deps.setVoiceState('speaking'),
-        });
-      } catch {
-        htmlMp3Played = false;
-      }
-
-      if (htmlMp3Played) {
-        deps.showScenarioCardCanonicalPlaybackConfirmedKindsRef.current = {
-          ...deps.showScenarioCardCanonicalPlaybackConfirmedKindsRef.current,
-          [kind]: true,
-        };
-        deps.setVoiceState('idle');
-      } else {
-        await deps.speakTextSafe(textToSpeak, SHOW_SCENARIO_CARD_CANONICAL_SPEECH);
-      }
+      await deps.speakTextSafe(textToSpeak, SHOW_SCENARIO_CARD_CANONICAL_SPEECH);
     } finally {
-      if (!deps.webTtsTabInterruptPendingReplayRef.current) {
-        if (deps.webTtsUtteranceInFlightRef) {
-          deps.webTtsUtteranceInFlightRef.current = null;
-        }
-        deps.ttsLineInFlightRef.current = false;
-        if (deps.userId && !deps.parallelStreamingTtsRef.current.active) {
-          setTtsPlaybackActive(false);
-        }
+      if (deps.ttsUtteranceInFlightRef) {
+        deps.ttsUtteranceInFlightRef.current = null;
+      }
+      deps.ttsLineInFlightRef.current = false;
+      if (deps.userId && !deps.parallelStreamingTtsRef.current.active) {
+        setTtsPlaybackActive(false);
       }
     }
     const playbackConfirmed = isShowScenarioCardCanonicalPlaybackConfirmed(
-      deps.showScenarioCardCanonicalPlaybackConfirmedKindsRef.current,
+      deps.showScenarioCardCanonicalPlaybackConfirmedKindsRef?.current,
       kind,
     );
     if (!playbackConfirmed) {
       state.showScenarioCardCanonicalSpokenThisStream = false;
+      // S3→M4: still advance moment so a TTS crash cannot leave resume stuck replaying Situation 3.
+      if (kind === 'moment_4') {
+        advanceInterviewScenarioRefsAfterCanonicalShowScenarioCard(
+          {
+            currentScenarioRef: deps.currentScenarioRef,
+            currentInterviewMomentRef: deps.currentInterviewMomentRef,
+            interviewMomentsCompleteRef: deps.interviewMomentsCompleteRef,
+            resumeActiveScenarioRef: deps.resumeActiveScenarioRef,
+            interviewSessionIdRef: deps.interviewSessionIdRef,
+          },
+          kind,
+        );
+      }
       return;
     }
     if (kind === 'situation_2' || kind === 'situation_3' || kind === 'moment_4') {
@@ -338,7 +347,7 @@ export function createParallelStreamSpeakShowScenarioCardOnce(
     deps.parallelStreamingTtsRef.current.spokenCompleteText = textToSpeak;
     params.textToParallelStream.full = textToSpeak;
     params.textToParallelStream.spokenStarted = true;
-    deps.recordInterviewAssistantDeliveryForMetaExemptionRef.current(textToSpeak);
+    deps.recordInterviewAssistantDeliveryForMetaExemptionRef?.current?.(textToSpeak);
     const completedScenario = completedScenarioForShowScenarioCardKind(kind);
     if (
       completedScenario !== 1 ||
@@ -374,7 +383,9 @@ export function createParallelStreamSpeakShowScenarioCardOnce(
       }
     } else if (kind === 'situation_2') {
       const s2Scenario = { label: 'Situation 2', text: SHOW_SCENARIO_2_VIGNETTE_EXACT };
-      deps.committedScenarioRef.current = s2Scenario;
+      if (deps.committedScenarioRef) {
+        deps.committedScenarioRef.current = s2Scenario;
+      }
       deps.setReferenceCardScenario(s2Scenario);
       deps.setInterviewUiPhase('scenario_active');
       const s2Delivery = {
@@ -399,7 +410,9 @@ export function createParallelStreamSpeakShowScenarioCardOnce(
       }
     } else if (kind === 'situation_3') {
       const s3Scenario = { label: 'Situation 3', text: SHOW_SCENARIO_3_VIGNETTE_EXACT };
-      deps.committedScenarioRef.current = s3Scenario;
+      if (deps.committedScenarioRef) {
+        deps.committedScenarioRef.current = s3Scenario;
+      }
       deps.setReferenceCardScenario(s3Scenario);
       deps.setInterviewUiPhase('scenario_active');
       const s3Delivery = readSituation3DeliveryState(
@@ -443,7 +456,7 @@ export function createParallelStreamSpeakShowScenarioCardOnce(
       !(kind === 'situation_1' && s1AdvancedPastOpening) &&
       deps.referenceCardShouldUpdateOnPlaybackStart(textToSpeak)
     ) {
-      deps.applyReferenceCardFromAssistantSpeechRef.current(textToSpeak);
+      deps.applyReferenceCardFromAssistantSpeechRef?.current?.(textToSpeak);
     }
     state.showScenarioCardStreamBuffer = '';
     state.streamShowScenarioCardMuteActive = false;

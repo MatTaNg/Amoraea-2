@@ -36,7 +36,7 @@ export function DownloadPersonalReportButton({ userId, style, variant = 'dark' }
     setExporting(true);
     try {
       const html = await ensureHtml();
-      await exportReportPdfFromHtml(html);
+      await exportReportPdfFromHtml(html, { reportKind: 'full' });
 
       if (Platform.OS === 'web') {
         Alert.alert(

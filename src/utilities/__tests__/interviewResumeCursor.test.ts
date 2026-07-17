@@ -16,6 +16,7 @@ import {
   resumeTranscriptAlreadyDeliveredMoment4Question,
   shouldResumeMidInterviewFromSaved,
   storedInterviewHasResumableScenarioProgress,
+  transcriptHasInScenarioProgressPastOpening,
   transcriptNeedsScenarioNumberPatch,
 } from '../interviewResumeCursor';
 import { SHOW_SCENARIO_3_OPENING_EXACT, SHOW_SCENARIO_3_VIGNETTE_EXACT } from '../../features/aria/interviewShowScenarioExactCopy';
@@ -262,6 +263,24 @@ describe('interviewResumeCursor', () => {
     expect(firstAssistantIndexForScenarioIntro(msgs, 2)).toBe(2);
   });
 
+  it('transcriptHasInScenarioProgressPastOpening is true mid-S2 without vignette anchor', () => {
+    const msgs = [
+      { role: 'assistant', content: "Got it — moving on. Here's the next situation.", scenarioNumber: 2 },
+      { role: 'assistant', content: 'What do you think is going on here?', scenarioNumber: 2 },
+      { role: 'user', content: 'Can we skip this scenario?', scenarioNumber: 2 },
+    ];
+    expect(firstAssistantIndexForScenarioIntro(msgs, 2)).toBe(-1);
+    expect(transcriptHasInScenarioProgressPastOpening(msgs, 2)).toBe(true);
+  });
+
+  it('transcriptHasInScenarioProgressPastOpening is false before any S2 Q1/user turn', () => {
+    const msgs = [
+      { role: 'assistant', content: "Here's the first situation — Emma and Ryan.", scenarioNumber: 1 },
+      { role: 'user', content: 'done', scenarioNumber: 1 },
+    ];
+    expect(transcriptHasInScenarioProgressPastOpening(msgs, 2)).toBe(false);
+  });
+
   it('sliceMessagesBeforeScenarioIntro drops partial scenario 2 and later', () => {
     const msgs = [
       { role: 'assistant', content: "Here's the first situation — Emma and Ryan." },
@@ -383,7 +402,9 @@ describe('interviewResumeCursor', () => {
   it('computeInterviewResumePlan uses resumeActiveFromStorage when attempt resume is null', () => {
     const plan = computeInterviewResumePlan({
       scenariosCompleted: [1],
-      scenarioScores: {},
+      scenarioScores: {
+        1: { pillarScores: { mentalizing: 6 }, pillarConfidence: {}, keyEvidence: {} },
+      },
       resumeActiveFromStorage: 2,
       resumeActiveFromAttempt: null,
       syncedMoments: {
@@ -394,6 +415,96 @@ describe('interviewResumeCursor', () => {
     });
     expect(plan.resumeScenario).toBe(2);
     expect(plan.mode).toBe('replay_incomplete');
+    expect(plan.rewindDueToCorruptScoring).toBe(false);
+  });
+
+  it('rewinds to scenario 1 when scenariosCompleted claims 1 but scores were interrupted', () => {
+    const plan = computeInterviewResumePlan({
+      scenariosCompleted: [1],
+      scenarioScores: {},
+      resumeActiveFromStorage: 2,
+      resumeActiveFromAttempt: null,
+      syncedMoments: {
+        momentsComplete: { 1: true, 2: false, 3: false, 4: false, 5: false },
+        currentMoment: 2,
+        personalHandoffInjected: false,
+      },
+    });
+    expect(plan.resumeScenario).toBe(1);
+    expect(plan.mode).toBe('replay_incomplete');
+    expect(plan.rewindDueToCorruptScoring).toBe(true);
+    expect(plan.lastCompletedScenario).toBe(0);
+  });
+
+  it('rewinds to earliest corrupt scenario when thin null-only score shell exists', () => {
+    const plan = computeInterviewResumePlan({
+      scenariosCompleted: [1, 2],
+      scenarioScores: {
+        1: { pillarScores: { mentalizing: 7 }, pillarConfidence: {}, keyEvidence: {} },
+        2: { pillarScores: { mentalizing: null }, pillarConfidence: {}, keyEvidence: {} },
+      },
+      resumeActiveFromStorage: 3,
+      resumeActiveFromAttempt: 3,
+      syncedMoments: {
+        momentsComplete: { 1: true, 2: true, 3: false, 4: false, 5: false },
+        currentMoment: 3,
+        personalHandoffInjected: false,
+      },
+    });
+    expect(plan.resumeScenario).toBe(2);
+    expect(plan.rewindDueToCorruptScoring).toBe(true);
+    expect(plan.lastCompletedScenario).toBe(1);
+  });
+
+  it('rewinds to Moment 4 when M5 was reached but moment_4_scores are missing', () => {
+    const plan = computeInterviewResumePlan({
+      scenariosCompleted: [1, 2, 3],
+      scenarioScores: {
+        1: { pillarScores: { repair: 6 }, pillarConfidence: {}, keyEvidence: {} },
+        2: { pillarScores: { repair: 6 }, pillarConfidence: {}, keyEvidence: {} },
+        3: { pillarScores: { repair: 6 }, pillarConfidence: {}, keyEvidence: {} },
+      },
+      resumeActiveFromStorage: null,
+      resumeActiveFromAttempt: null,
+      transcriptMessages: [
+        {
+          role: 'assistant',
+          content: 'Tell me about a real conflict with someone important to you.',
+        },
+      ],
+      syncedMoments: {
+        momentsComplete: { 1: true, 2: true, 3: true, 4: true, 5: true },
+        currentMoment: 5,
+        personalHandoffInjected: true,
+      },
+      moment4ScoresIntact: false,
+    });
+    expect(plan.rewindToMoment4DueToCorruptScoring).toBe(true);
+    expect(plan.rewindDueToCorruptScoring).toBe(true);
+    expect(plan.effectiveMoment).toBe(4);
+    expect(plan.mode).toBe('resume_post_scenarios');
+  });
+
+  it('does not treat mid-Moment-4 (before M5) as corrupt M4 scoring', () => {
+    const plan = computeInterviewResumePlan({
+      scenariosCompleted: [1, 2, 3],
+      scenarioScores: {
+        1: { pillarScores: { repair: 6 }, pillarConfidence: {}, keyEvidence: {} },
+        2: { pillarScores: { repair: 6 }, pillarConfidence: {}, keyEvidence: {} },
+        3: { pillarScores: { repair: 6 }, pillarConfidence: {}, keyEvidence: {} },
+      },
+      resumeActiveFromStorage: null,
+      resumeActiveFromAttempt: null,
+      syncedMoments: {
+        momentsComplete: { 1: true, 2: true, 3: true, 4: false, 5: false },
+        currentMoment: 4,
+        personalHandoffInjected: true,
+      },
+      moment4ScoresIntact: false,
+    });
+    expect(plan.rewindToMoment4DueToCorruptScoring).toBe(false);
+    expect(plan.mode).toBe('resume_post_scenarios');
+    expect(plan.effectiveMoment).toBe(4);
   });
 
   it('shouldResumeMidInterviewFromSaved is true mid scenario 2 with saved transcript', () => {

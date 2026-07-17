@@ -1,5 +1,3 @@
-import { Platform } from 'react-native';
-
 import { applyRecordingCompletePostTranscribeGates } from '@features/aria/applyRecordingCompletePostTranscribeGates';
 import { applyRecordingCompletePreTranscribeGates } from '@features/aria/applyRecordingCompletePreTranscribeGates';
 import { computeRecordingCompleteBufferContext } from '@features/aria/computeRecordingCompleteBufferContext';
@@ -7,7 +5,6 @@ import type {
   OnRecordingCompleteDeps,
   OnRecordingCompleteParams,
 } from '@features/aria/onRecordingCompleteTypes';
-import { preAuthorizeAudioElementOnMicTapGesture } from '@features/aria/utils/webPreAuthorizedTtsAudio';
 import { remoteLog } from '@utilities/remoteLog';
 import { getSessionLogRuntime } from '@utilities/sessionLogging';
 import { writeAudioSessionLog } from '@utilities/sessionLogging/audioSessionLogEnvelope';
@@ -27,9 +24,6 @@ export async function runOnRecordingComplete(
   }
   deps.recordingCompleteInFlightRef.current = true;
   try {
-    if (Platform.OS === 'web') {
-      preAuthorizeAudioElementOnMicTapGesture();
-    }
     deps.recordingPeakMeteringRef.current = params.meta?.peakMeteringDb ?? null;
     deps.lastRecordingVadSpeechDetectedRef.current = null;
     deps.recordingJustFinishedBeforeNextTtsRef.current = true;

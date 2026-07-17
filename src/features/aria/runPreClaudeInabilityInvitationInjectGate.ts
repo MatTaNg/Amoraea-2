@@ -37,6 +37,7 @@ export async function runPreClaudeInabilityInvitationInjectGate(
   await deps.speakTextSafe(inviteLine, {
     ...ASSISTANT_INTERVIEW_SPEECH,
     allowDuplicateConsecutiveTts: true,
+    skipLastQuestionRef: true,
   });
   return finishPreClaudeSkipInjectionTurn(deps);
 }

@@ -1,9 +1,9 @@
 import type { AriaInterviewDepsSyncContext } from '@features/aria/syncAriaInterviewDepsRefs';
 import type { InterviewEarlyDepsLocalScope } from '@features/aria/buildInterviewEarlyDepsLocalSyncExtra';
 import type { InterviewCoreLocalScope } from '@features/aria/buildInterviewCoreLocalSyncExtra';
-import type { InterviewWebRuntimeLocalScope } from '@features/aria/buildInterviewWebRuntimeLocalSyncExtra';
+import type { InterviewRuntimeLocalScope } from '@features/aria/buildInterviewRuntimeLocalSyncExtra';
 import {
-  buildAriaInterviewWebRuntimeMergedSyncCtx,
+  buildAriaInterviewRuntimeMergedSyncCtx,
   buildInterviewCoreMergedSyncCtx,
   buildInterviewEarlyDepsMergedSyncCtx,
 } from '@features/aria/buildAriaInterviewRuntimeMergedSyncCtx';
@@ -20,7 +20,7 @@ import {
 export type ComposeAriaInterviewRuntimeLayerInput = {
   gateCtx: AriaInterviewDepsSyncContext;
   servicesGateCtx: AriaInterviewDepsSyncContext;
-  webRuntimeLocal: InterviewWebRuntimeLocalScope;
+  runtimeLocal: InterviewRuntimeLocalScope;
   earlyDepsLocal: InterviewEarlyDepsLocalScope;
 };
 
@@ -33,7 +33,7 @@ export type ComposeAriaInterviewCoreLayerInput = {
 };
 
 export type AriaInterviewRuntimeSyncContextLayer = {
-  webRuntimeCtx: AriaInterviewDepsSyncContext;
+  runtimeCtx: AriaInterviewDepsSyncContext;
   runtimeGateCtx: AriaInterviewDepsSyncContext;
   earlyDepsCtx: AriaInterviewDepsSyncContext;
 };
@@ -55,10 +55,10 @@ export function composeAriaInterviewServicesGateSyncContextLayer(
 export function composeAriaInterviewRuntimeSyncContextLayer(
   input: ComposeAriaInterviewRuntimeLayerInput,
 ): AriaInterviewRuntimeSyncContextLayer {
-  const webRuntimeCtx = buildAriaInterviewWebRuntimeMergedSyncCtx(input.servicesGateCtx, input.webRuntimeLocal);
-  const runtimeGateCtx = mergeAriaInterviewRuntimeGateSyncCtx(webRuntimeCtx, input.gateCtx);
+  const runtimeCtx = buildAriaInterviewRuntimeMergedSyncCtx(input.servicesGateCtx, input.runtimeLocal);
+  const runtimeGateCtx = mergeAriaInterviewRuntimeGateSyncCtx(runtimeCtx, input.gateCtx);
   const earlyDepsCtx = buildInterviewEarlyDepsMergedSyncCtx(runtimeGateCtx, input.earlyDepsLocal);
-  return { webRuntimeCtx, runtimeGateCtx, earlyDepsCtx };
+  return { runtimeCtx, runtimeGateCtx, earlyDepsCtx };
 }
 
 export function composeAriaInterviewCoreSyncContextLayer(

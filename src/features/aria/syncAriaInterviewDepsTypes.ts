@@ -1,11 +1,10 @@
 import type { MutableRefObject } from 'react';
 
 import type { EmotionModalOrchestrationDeps } from '@features/aria/emotionModalOrchestrationTypes';
-import type { InterviewWebTtsRuntimeDeps } from '@features/aria/hooks/useInterviewWebTtsRuntime';
+import type { InterviewTtsRuntimeDeps } from '@features/aria/hooks/useInterviewTtsRuntime';
 import type { SpeakTextSafeDeps } from '@features/aria/speakTextSafeDeps';
 import type { ClaudeParallelStreamTtsCallDeps } from '@features/aria/claudeParallelStreamTtsCallTypes';
 import type { KickPostClosingInterviewCompletionDeps } from '@features/aria/hooks/useKickPostClosingInterviewCompletion';
-import type { InterviewWebTabRestoreSessionDeps } from '@features/aria/hooks/useInterviewWebTabRestoreSession';
 import type { ScoreScenarioDeps } from '@features/aria/scoreScenarioTypes';
 import type { PostClaudeAssistantTurnDeps } from '@features/aria/postClaudeAssistantTurnTypes';
 import type { PreClaudeTurnGateDeps } from '@features/aria/preClaudeTurnGateTypes';
@@ -32,13 +31,31 @@ export function mergeAriaInterviewSyncCtx(
   return merged;
 }
 
+/**
+ * Like Object.assign for sync slices, but skips undefined values so thin scopes cannot
+ * wipe live refs (e.g. showScenarioCard / committedScenario) with `key: undefined`.
+ */
+export function assignDefinedSyncSlices(
+  ...slices: Array<AriaInterviewDepsSyncContext | null | undefined>
+): AriaInterviewDepsSyncContext {
+  const merged: AriaInterviewDepsSyncContext = {};
+  for (const slice of slices) {
+    if (!slice) continue;
+    for (const [key, value] of Object.entries(slice)) {
+      if (value !== undefined) {
+        merged[key] = value;
+      }
+    }
+  }
+  return merged;
+}
+
 export type AriaInterviewDepsRefs = {
   emotionModalOrchestrationDepsRef: MutableRefObject<EmotionModalOrchestrationDeps>;
-  webTtsRuntimeDepsRef: MutableRefObject<InterviewWebTtsRuntimeDeps>;
+  ttsRuntimeDepsRef: MutableRefObject<InterviewTtsRuntimeDeps>;
   speakTextSafeDepsRef: MutableRefObject<SpeakTextSafeDeps>;
   claudeParallelStreamTtsDepsRef: MutableRefObject<ClaudeParallelStreamTtsCallDeps>;
   kickPostClosingCompletionDepsRef: MutableRefObject<KickPostClosingInterviewCompletionDeps>;
-  webTabRestoreSessionDepsRef: MutableRefObject<InterviewWebTabRestoreSessionDeps>;
   scoreScenarioDepsRef: MutableRefObject<ScoreScenarioDeps>;
   postClaudeTurnDepsRef: MutableRefObject<PostClaudeAssistantTurnDeps>;
   preClaudeTurnGateDepsRef: MutableRefObject<PreClaudeTurnGateDeps>;

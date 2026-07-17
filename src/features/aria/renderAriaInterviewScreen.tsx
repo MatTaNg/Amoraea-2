@@ -8,10 +8,7 @@ import type { AriaPostInterviewFeedbackState } from '@features/aria/hooks/useAri
 import { toAriaInterviewScreenRouterPostInterviewFeedbackScope } from '@features/aria/hooks/useAriaPostInterviewFeedbackState';
 import type { InterviewResults } from '@features/aria/interviewResultsTypes';
 import { AriaAdminInterviewTopBar } from '@features/aria/screens/AriaAdminInterviewTopBar';
-import {
-  AriaInterviewActiveShell,
-  resolveAriaInterviewActiveShellOverlayKind,
-} from '@features/aria/screens/AriaInterviewActiveShell';
+import { AriaInterviewActiveShell } from '@features/aria/screens/AriaInterviewActiveShell';
 import { AriaInterviewScreenRouter } from '@features/aria/screens/AriaInterviewScreenRouter';
 
 export type AriaInterviewScreenRenderScope = {
@@ -37,9 +34,6 @@ export type AriaInterviewScreenRenderScope = {
   activeShell: {
     layout: Pick<AriaInterviewActiveShellScope['layout'], 'isAdmin' | 'status'> & {
       emotionModalVisible: boolean;
-      webTabGestureRestoreOverlay: boolean;
-      webResumeWelcomeTapPending: boolean;
-      webDesktopPendingTtsGestureOverlay: boolean;
     };
     emotionModal: AriaInterviewActiveShellScope['emotionModal'];
     interviewerMic: AriaInterviewActiveShellScope['interviewerMic'];
@@ -83,15 +77,9 @@ export function renderAriaInterviewScreen(scope: AriaInterviewScreenRenderScope)
   }
 
   const { layout, handoff, ...activeShellRest } = activeShell;
-  const inputDisabled = layout.status === 'scoring' || layout.status === 'results' || layout.emotionModalVisible;
+  const inputDisabled =
+    layout.status === 'scoring' || layout.status === 'results' || layout.emotionModalVisible;
   const isInterviewerView = layout.status === 'active' && !layout.isAdmin;
-  const webActiveGestureOverlayKind = resolveAriaInterviewActiveShellOverlayKind({
-    status: layout.status,
-    isAdmin: layout.isAdmin,
-    webTabGestureRestoreOverlay: layout.webTabGestureRestoreOverlay,
-    webResumeWelcomeTapPending: layout.webResumeWelcomeTapPending,
-    webDesktopPendingTtsGestureOverlay: layout.webDesktopPendingTtsGestureOverlay,
-  });
   const routeOnComplete = handoff.route.params?.onComplete;
 
   return (
@@ -102,7 +90,6 @@ export function renderAriaInterviewScreen(scope: AriaInterviewScreenRenderScope)
           isAdmin: layout.isAdmin,
           status: layout.status,
           isInterviewerView,
-          webActiveGestureOverlayKind,
           inputDisabled,
         },
         ...activeShellRest,

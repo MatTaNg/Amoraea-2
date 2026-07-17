@@ -3,7 +3,7 @@ import type { MutableRefObject } from 'react';
 import type { AriaInterviewRuntimeDepSyncWiringParams } from '@features/aria/hooks/useAriaInterviewRuntimeDepSyncWiring';
 import type { EmotionModalOrchestrationDeps } from '@features/aria/emotionModalOrchestrationTypes';
 import type { useAriaInterviewSession } from '@features/aria/hooks/useAriaInterviewSession';
-import type { InterviewWebTtsRuntimeDeps } from '@features/aria/hooks/useInterviewWebTtsRuntime';
+import type { InterviewTtsRuntimeDeps } from '@features/aria/hooks/useInterviewTtsRuntime';
 import type { AriaInterviewScreenSessionState } from '@features/aria/hooks/useAriaInterviewScreenSessionState';
 import type { AriaInterviewDepsSyncContext } from '@features/aria/syncAriaInterviewDepsRefs';
 
@@ -11,27 +11,17 @@ export type BuildAriaInterviewRuntimeDepSyncWiringParamsFromScreenInput = {
   gateCtx: AriaInterviewDepsSyncContext;
   servicesGateCtx: AriaInterviewDepsSyncContext;
   emotionModalOrchestrationDepsRef: MutableRefObject<EmotionModalOrchestrationDeps>;
-  webTtsRuntimeDepsRef: MutableRefObject<InterviewWebTtsRuntimeDeps>;
+  ttsRuntimeDepsRef: MutableRefObject<InterviewTtsRuntimeDeps>;
   session: AriaInterviewScreenSessionState;
   interview: ReturnType<typeof useAriaInterviewSession>;
   userIdRef: MutableRefObject<string>;
   interviewSession: {
     voiceStateRef: MutableRefObject<unknown>;
     setVoiceState: AriaInterviewRuntimeDepSyncWiringParams['webRuntime']['setVoiceState'];
-    pendingGestureRestoreSpeakRef: MutableRefObject<unknown>;
-    tabVisibilityGestureLossPendingRef: MutableRefObject<unknown>;
-    needsGestureRestoreRef: MutableRefObject<unknown>;
-    setMobileWebTapToBeginDone: (value: boolean) => void;
-    pendingWebSpeechForGestureRef: MutableRefObject<unknown>;
     transcriptAtReleaseRef: MutableRefObject<unknown>;
-    setWebTabRestoreOverlayVisible: (value: boolean) => void;
   };
   webTts: {
-    ensureWebGestureFlushListener: AriaInterviewRuntimeDepSyncWiringParams['webRuntime']['ensureWebGestureFlushListener'];
-    detachWebGestureFlushListener: AriaInterviewRuntimeDepSyncWiringParams['webRuntime']['detachWebGestureFlushListener'];
-    interruptAllWebInterviewTtsOutput: AriaInterviewRuntimeDepSyncWiringParams['webRuntime']['interruptAllWebInterviewTtsOutput'];
-    waitForWebInterviewTtsQuiescentBeforeEmotionModal: AriaInterviewRuntimeDepSyncWiringParams['earlyDeps']['waitForWebInterviewTtsQuiescentBeforeEmotionModal'];
-    waitForWebInterviewTtsAudiblePlaybackBeforeEmotionModal: AriaInterviewRuntimeDepSyncWiringParams['earlyDeps']['waitForWebInterviewTtsAudiblePlaybackBeforeEmotionModal'];
+    interruptAllInterviewTtsOutput: AriaInterviewRuntimeDepSyncWiringParams['webRuntime']['interruptAllInterviewTtsOutput'];
   };
 };
 
@@ -43,7 +33,7 @@ export function buildAriaInterviewRuntimeDepSyncWiringParamsFromScreen(
     gateCtx,
     servicesGateCtx,
     emotionModalOrchestrationDepsRef,
-    webTtsRuntimeDepsRef,
+    ttsRuntimeDepsRef,
     session,
     interview,
     userIdRef,
@@ -71,29 +61,21 @@ export function buildAriaInterviewRuntimeDepSyncWiringParamsFromScreen(
     lastVoiceTurnLanguageRef,
     lastVoiceTurnConfidenceRef,
     postRecordingParallelStreamSettleRef,
-    mobileTabHideLetPlaybackContinueRef,
     recordingJustFinishedBeforeNextTtsRef,
-    tabHiddenDuringActiveTtsLineRef,
   } = shell;
   const { emotionModalResolveRef, emotionModalTimeoutRef, emotionModalShownForScenarioRef } = gate.resumeEmotion;
   const { tryRunEmotionModalFromScenarioTransitionRef } = gate.metaSkip;
   const {
     voiceStateRef,
     setVoiceState,
-    pendingGestureRestoreSpeakRef,
-    tabVisibilityGestureLossPendingRef,
-    needsGestureRestoreRef,
-    setMobileWebTapToBeginDone,
-    pendingWebSpeechForGestureRef,
     transcriptAtReleaseRef,
-    setWebTabRestoreOverlayVisible,
   } = interviewSession;
 
   return {
     gateCtx,
     servicesGateCtx,
     emotionModalOrchestrationDepsRef,
-    webTtsRuntimeDepsRef,
+    ttsRuntimeDepsRef,
     webRuntime: {
       isInterviewAppRoute,
       userIdRef,
@@ -101,23 +83,13 @@ export function buildAriaInterviewRuntimeDepSyncWiringParamsFromScreen(
       setVoiceState,
       lastQuestionTextRef,
       ttsLineInFlightRef,
-      pendingGestureRestoreSpeakRef,
-      mobileTabHideLetPlaybackContinueRef,
-      tabHiddenDuringActiveTtsLineRef,
-      needsGestureRestoreRef,
-      tabVisibilityGestureLossPendingRef,
-      ensureWebGestureFlushListener: webTts.ensureWebGestureFlushListener,
-      detachWebGestureFlushListener: webTts.detachWebGestureFlushListener,
-      setWebTabRestoreOverlayVisible,
-      setMobileWebTapToBeginDone,
-      pendingWebSpeechForGestureRef,
       recordingJustFinishedBeforeNextTtsRef,
       postRecordingParallelStreamSettleRef,
       transcriptAtReleaseRef,
       timingRef,
       lastVoiceTurnLanguageRef,
       lastVoiceTurnConfidenceRef,
-      interruptAllWebInterviewTtsOutput: webTts.interruptAllWebInterviewTtsOutput,
+      interruptAllInterviewTtsOutput: webTts.interruptAllInterviewTtsOutput,
     },
     earlyDeps: {
       emotionItemsComplete,
@@ -137,9 +109,6 @@ export function buildAriaInterviewRuntimeDepSyncWiringParamsFromScreen(
       setEmotionItemsComplete,
       setEmotionModalVisible,
       setEmotionModalItemIndex,
-      waitForWebInterviewTtsQuiescentBeforeEmotionModal: webTts.waitForWebInterviewTtsQuiescentBeforeEmotionModal,
-      waitForWebInterviewTtsAudiblePlaybackBeforeEmotionModal:
-        webTts.waitForWebInterviewTtsAudiblePlaybackBeforeEmotionModal,
     },
   };
 }

@@ -2,6 +2,7 @@ import {
   buildTwoSentenceClosingWithoutObservation,
   closingAttributesUnsupportedAccountability,
   closingObservationFailsPillarGate,
+  ensureInterviewCompleteSpokenLine,
   isVagueOrWeakClosingObservation,
   type ClosingPillarContext,
 } from './closingReflectionGrounding';
@@ -160,7 +161,10 @@ export function enrichPersonalMomentClosingForTts(
 
   /** Mirror scenario boundaries: ack + thanks only — no content reflection at M5 close. */
   if (!INCLUDE_SCENARIO_BOUNDARY_REFLECTIONS) {
-    return dedupeDuplicateParticipantNameInClosing(neutralClosing, participantFirstName);
+    return dedupeDuplicateParticipantNameInClosing(
+      ensureInterviewCompleteSpokenLine(neutralClosing),
+      participantFirstName,
+    );
   }
 
   const ungroundedEcho =
@@ -174,7 +178,10 @@ export function enrichPersonalMomentClosingForTts(
     looksLikeInterviewClosingAssistantMessage(base) &&
     closingObservationMeetsQualityBar(base, userAnswer, pillarContext)
   ) {
-    return dedupeDuplicateParticipantNameInClosing(base, participantFirstName);
+    return dedupeDuplicateParticipantNameInClosing(
+      ensureInterviewCompleteSpokenLine(base),
+      participantFirstName,
+    );
   }
 
   if (!lowScoringRun) {
@@ -185,10 +192,10 @@ export function enrichPersonalMomentClosingForTts(
         skipUngroundedEchoCheck: true,
       })
     ) {
-      const ack = neutralClosing.replace(/\s*thank you\b.*$/i, '').trim();
-      const thanks = neutralClosing.match(/\bthank you\b.*$/i)?.[0] ?? '';
       return dedupeDuplicateParticipantNameInClosing(
-        assembleClosingWithOptionalReflection(`${ack} ${thanks}`.replace(/\s+/g, ' ').trim(), reflection),
+        ensureInterviewCompleteSpokenLine(
+          assembleClosingWithOptionalReflection(neutralClosing, reflection),
+        ),
         participantFirstName,
       );
     }
@@ -202,9 +209,15 @@ export function enrichPersonalMomentClosingForTts(
     personalMomentClosingLacksConcreteAnchor(base) ||
     isVagueOrWeakClosingObservation(base)
   ) {
-    return dedupeDuplicateParticipantNameInClosing(neutralClosing, participantFirstName);
+    return dedupeDuplicateParticipantNameInClosing(
+      ensureInterviewCompleteSpokenLine(neutralClosing),
+      participantFirstName,
+    );
   }
-  return dedupeDuplicateParticipantNameInClosing(base, participantFirstName);
+  return dedupeDuplicateParticipantNameInClosing(
+    ensureInterviewCompleteSpokenLine(base),
+    participantFirstName,
+  );
 }
 
 /**

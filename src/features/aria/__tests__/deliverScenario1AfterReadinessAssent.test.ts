@@ -8,22 +8,22 @@ jest.mock('@utilities/remoteLog', () => ({
   remoteLog: jest.fn(),
 }));
 
-jest.mock('@features/aria/utils/speakLongFormInterviewHtmlMp3', () => ({
-  speakLongFormInterviewHtmlMp3: jest.fn(async () => {
-    await new Promise((r) => setTimeout(r, 30));
-    return true;
-  }),
-}));
-
 describe('deliverScenario1VignetteAfterReadinessAssent', () => {
   beforeEach(() => {
     jest.clearAllMocks();
   });
 
-  it('arms tts in-flight refs before HTML speak so tab-hide can queue restore', async () => {
+  it('arms tts in-flight refs before speakTextSafe so tab-hide can queue restore', async () => {
     const ttsLineInFlightRef = { current: false };
-    const webTtsUtteranceInFlightRef = { current: null as string | null };
+    const ttsUtteranceInFlightRef = { current: null as string | null };
     const parallelStreamingTtsRef = { current: createInitialParallelStreamingTtsState() };
+    let resolveSpeak: (() => void) | undefined;
+    const speakTextSafe = jest.fn(
+      () =>
+        new Promise<void>((resolve) => {
+          resolveSpeak = resolve;
+        }),
+    );
     const briefing =
       "Good to meet you, Matt. The way this works is I'll first give you three situations. Are you ready?";
     const deps: Scenario1ReadinessDeliveryDeps = {
@@ -38,9 +38,9 @@ describe('deliverScenario1VignetteAfterReadinessAssent', () => {
       lastQuestionTextRef: { current: briefing },
       parallelStreamingTtsRef,
       ttsLineInFlightRef,
-      webTtsUtteranceInFlightRef,
+      ttsUtteranceInFlightRef,
       commitInterviewMessages: jest.fn(),
-      speakTextSafe: jest.fn().mockResolvedValue(undefined),
+      speakTextSafe,
       setVoiceState: jest.fn(),
       setIsWaiting: jest.fn(),
     };
@@ -59,13 +59,15 @@ describe('deliverScenario1VignetteAfterReadinessAssent', () => {
 
     await Promise.resolve();
     expect(ttsLineInFlightRef.current).toBe(true);
-    expect((webTtsUtteranceInFlightRef.current ?? '').length).toBeGreaterThan(40);
+    expect((ttsUtteranceInFlightRef.current ?? '').length).toBeGreaterThan(40);
     expect(parallelStreamingTtsRef.current.accumulatedFullText.length).toBeGreaterThan(40);
 
+    resolveSpeak?.();
     const delivered = await deliveryPromise;
     expect(delivered).toBe(true);
+    expect(deps.speakTextSafe).toHaveBeenCalled();
     expect(ttsLineInFlightRef.current).toBe(false);
-    expect(webTtsUtteranceInFlightRef.current).toBeNull();
+    expect(ttsUtteranceInFlightRef.current).toBeNull();
     expect(parallelStreamingTtsRef.current.spokenCompleteText.length).toBeGreaterThan(40);
   });
 });

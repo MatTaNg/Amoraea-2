@@ -54,6 +54,45 @@ describe('runPreClaudeMoment4SpecificityGate', () => {
     );
   });
 
+  it('heals lagged moment refs and injects canonical threshold after grudge (not invented paraphrase)', async () => {
+    const speakTextSafe = jest.fn().mockResolvedValue(undefined);
+    const setMessages = jest.fn();
+    const deps = createMockPreClaudeDeps({
+      currentInterviewMomentRef: { current: 2 },
+      currentScenarioRef: { current: 3 },
+      moment4ThresholdProbeAskedRef: { current: false },
+      personalHandoffInjectedRef: { current: false },
+      lastQuestionTextRef: { current: MOMENT_4_GRUDGE_QUESTION_TEXT },
+      speakTextSafe,
+      setMessages,
+    });
+    const jacketGrudge =
+      "I got into a fight with my friend, he said I had a bad jacket and I spent a lot of money on that jacket, so I really didn't like him. I still have a grudge against him.";
+    const messagesToUse = [
+      { role: 'assistant', content: MOMENT_4_GRUDGE_QUESTION_TEXT },
+      { role: 'user', content: jacketGrudge },
+    ];
+
+    const result = await runPreClaudeMoment4SpecificityGate(
+      deps,
+      jacketGrudge,
+      messagesToUse,
+      MOMENT_4_GRUDGE_QUESTION_TEXT,
+    );
+
+    expect(deps.currentInterviewMomentRef.current).toBe(4);
+    expect(deps.personalHandoffInjectedRef.current).toBe(true);
+    expect(result.handled).toBe(true);
+    expect(speakTextSafe).toHaveBeenCalledWith(
+      expect.stringMatching(/At what point do you decide when a relationship/i),
+      expect.any(Object),
+    );
+    expect(speakTextSafe).not.toHaveBeenCalledWith(
+      expect.stringMatching(/someone you care about/i),
+      expect.any(Object),
+    );
+  });
+
   it('injects M4 specificity follow-up for generic low-specificity grudge answer', async () => {
     const speakTextSafe = jest.fn().mockResolvedValue(undefined);
     const setMessages = jest.fn();

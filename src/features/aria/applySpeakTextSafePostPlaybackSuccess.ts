@@ -4,7 +4,7 @@ import { Platform } from 'react-native';
 import { looksLikeInterviewClosingAssistantMessage } from '@features/aria/elongatingProbe';
 import { stripControlTokens } from '@features/aria/interviewControlTokens';
 import { markInterviewClosingTtsDelivered } from '@features/aria/interviewClosingTtsSession';
-import { markSpeakTextSafeSuccessfulDelivery } from '@features/aria/runSpeakTextSafeImmediateWebGreeting';
+import { markSpeakTextSafeSuccessfulDelivery } from '@features/aria/speakTextSafeSuccessfulDelivery';
 import {
   isShowScenarioCardCanonicalDeliveryText,
   isShowScenarioCardCanonicalPlaybackConfirmed,
@@ -26,12 +26,11 @@ export function applySpeakTextSafePostPlaybackSuccess(args: {
   closingTtsSessionKey: string;
 }): void {
   const canonicalKind = isShowScenarioCardCanonicalDeliveryText(args.text);
+  const confirmedKinds = args.showScenarioCardCanonicalPlaybackConfirmedKindsRef?.current;
   const canonicalPlaybackConfirmed =
     !canonicalKind ||
-    isShowScenarioCardCanonicalPlaybackConfirmed(
-      args.showScenarioCardCanonicalPlaybackConfirmedKindsRef.current,
-      canonicalKind,
-    );
+    (confirmedKinds != null &&
+      isShowScenarioCardCanonicalPlaybackConfirmed(confirmedKinds, canonicalKind));
 
   if (
     !args.skipDeliveryForTabInterrupt &&

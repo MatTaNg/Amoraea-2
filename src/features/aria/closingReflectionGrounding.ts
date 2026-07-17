@@ -70,7 +70,26 @@ export function buildTwoSentenceClosingWithoutObservation(participantFirstName: 
   const ack = name
     ? `Good work getting through all of this, ${name}.`
     : 'Good work getting through all of this.';
-  return `${ack} ${thanks}`.replace(/\s+/g, ' ').trim();
+  return `${ack} Your interview is complete. ${thanks}`.replace(/\s+/g, ' ').trim();
+}
+
+/**
+ * Ensure spoken closings state completion before the thanks line (model often omits it).
+ */
+export function ensureInterviewCompleteSpokenLine(closing: string): string {
+  const t = (closing ?? '').replace(/\s+/g, ' ').trim();
+  if (!t) return t;
+  if (/\byour interview is complete\b/i.test(t)) return t;
+  if (/\bthank you for being so open with me\b/i.test(t)) {
+    return t
+      .replace(
+        /\bthank you for being so open with me\b/i,
+        'Your interview is complete. Thank you for being so open with me',
+      )
+      .replace(/\s+/g, ' ')
+      .trim();
+  }
+  return `${t.replace(/[.!?]\s*$/, '')}. Your interview is complete.`.replace(/\s+/g, ' ').trim();
 }
 
 /** Average pillar scores across completed scenario bundles (1–3). */

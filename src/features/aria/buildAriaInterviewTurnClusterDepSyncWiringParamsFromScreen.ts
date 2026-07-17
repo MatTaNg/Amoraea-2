@@ -8,7 +8,6 @@ import type { useAriaInterviewSession } from '@features/aria/hooks/useAriaInterv
 import type { AriaInterviewTurnClusterDepSyncWiringParams } from '@features/aria/hooks/useAriaInterviewTurnClusterDepSyncWiring';
 import type { FetchStageScoreDeps } from '@features/aria/fetchStageScoreTypes';
 import type { SaveScenarioCheckpointDeps } from '@features/aria/saveScenarioCheckpointTypes';
-import type { InterviewWebTabRestoreSessionDeps } from '@features/aria/webTabRestoreSessionDeps';
 import type { ClaudeParallelStreamTtsCallDeps } from '@features/aria/claudeParallelStreamTtsCallTypes';
 import type { AriaInterviewDepsSyncContext } from '@features/aria/syncAriaInterviewDepsRefs';
 
@@ -17,24 +16,18 @@ export type BuildAriaInterviewTurnClusterDepSyncWiringParamsFromScreenInput = {
     coreCtx: AriaInterviewDepsSyncContext;
     coreGateServicesBaseCtx: AriaInterviewDepsSyncContext;
     gateSyncCtx: AriaInterviewDepsSyncContext;
-    webRuntimeCtx: AriaInterviewDepsSyncContext;
+    runtimeCtx: AriaInterviewDepsSyncContext;
     servicesGateCtx: AriaInterviewDepsSyncContext;
   };
   documentTts: {
-    webTabRestoreSessionDepsRef: MutableRefObject<InterviewWebTabRestoreSessionDeps>;
     claudeParallelStreamTtsDepsRef: MutableRefObject<ClaudeParallelStreamTtsCallDeps>;
     fetchStageScoreDepsRef: MutableRefObject<FetchStageScoreDeps>;
     saveScenarioCheckpointDepsRef: MutableRefObject<SaveScenarioCheckpointDeps>;
     deliverRecordingRetryLine: AriaInterviewTurnClusterDepSyncWiringParams['deliverRecordingRetryLine'];
-    syncInterviewTtsAfterScreenReturn: AriaInterviewTurnClusterDepSyncWiringParams['syncInterviewTtsAfterScreenReturn'];
   };
   webTts: {
-    runWebGestureTtsFlush: AriaInterviewTurnClusterDepSyncWiringParams['runWebGestureTtsFlush'];
-    clearStaleWebInterviewTtsRuntimeLocks: AriaInterviewTurnClusterDepSyncWiringParams['turnHandler']['webTtsResume']['clearStaleWebInterviewTtsRuntimeLocks'];
-    queueMobileWebHtmlResumeAfterScreenReturn: AriaInterviewTurnClusterDepSyncWiringParams['turnHandler']['webTtsResume']['queueMobileWebHtmlResumeAfterScreenReturn'];
+    clearStaleInterviewTtsRuntimeLocks: AriaInterviewTurnClusterDepSyncWiringParams['turnHandler']['webTtsResume']['clearStaleInterviewTtsRuntimeLocks'];
     isInterviewerOutputActiveForMicGate: AriaInterviewTurnClusterDepSyncWiringParams['micCluster']['playbackGate']['isInterviewerOutputActiveForMicGate'];
-    isMobileWebInterviewTtsSessionActive: AriaInterviewTurnClusterDepSyncWiringParams['micCluster']['webTtsResume']['isMobileWebInterviewTtsSessionActive'];
-    armMobileWebBackgroundTtsContinue: AriaInterviewTurnClusterDepSyncWiringParams['micCluster']['webTtsResume']['armMobileWebBackgroundTtsContinue'];
   };
   boot: {
     applyInterviewSpeechComplete: AriaInterviewTurnClusterDepSyncWiringParams['turnHandler']['webTtsResume']['applyInterviewSpeechComplete'];
@@ -58,15 +51,10 @@ export type BuildAriaInterviewTurnClusterDepSyncWiringParamsFromScreenInput = {
     recognitionRef: MutableRefObject<unknown>;
     webMicArmInFlightRef: MutableRefObject<boolean>;
     micTapWhileTtsActiveRef: MutableRefObject<boolean>;
-    useMediaRecorderPath: boolean;
     useTapMicUi: boolean;
     currentTranscript: string;
     takeRecordingStartEventDataWithVadBypassRestart: AriaInterviewTurnClusterDepSyncWiringParams['micCluster']['recordingPipeline']['takeRecordingStartEventDataWithVadBypassRestart'];
     pendingRecordingRestartAfterVadBypassRef: MutableRefObject<unknown>;
-    pendingMicStartAfterIdleFlushRef: MutableRefObject<unknown>;
-    webGestureTtsConsumedPressRef: MutableRefObject<unknown>;
-    webGestureConsumeClearTimeoutRef: MutableRefObject<unknown>;
-    webTabGestureRestoreOverlayRef: MutableRefObject<unknown>;
   };
 };
 
@@ -88,7 +76,6 @@ export function buildAriaInterviewTurnClusterDepSyncWiringParamsFromScreen(
   } = input;
   const { status, voiceState, setStatus } = interview;
   const {
-    setWebTabGestureRestoreOverlay,
     setCurrentTranscript,
     setExchangeCount,
     setMicWarning,
@@ -125,22 +112,16 @@ export function buildAriaInterviewTurnClusterDepSyncWiringParamsFromScreen(
     transcriptionFailureStreakRef,
     lastRecordingRetryDeliveredNormRef,
     recordingCompleteInFlightRef,
-    handleWebTabGestureRestoreTapRef,
   } = shell;
   const {
     audioRecorderIsRecordingForRouteRef,
     recognitionRef,
     webMicArmInFlightRef,
     micTapWhileTtsActiveRef,
-    useMediaRecorderPath,
     useTapMicUi,
     currentTranscript,
     takeRecordingStartEventDataWithVadBypassRestart,
     pendingRecordingRestartAfterVadBypassRef,
-    pendingMicStartAfterIdleFlushRef,
-    webGestureTtsConsumedPressRef,
-    webGestureConsumeClearTimeoutRef,
-    webTabGestureRestoreOverlayRef,
   } = interviewSession;
 
   return {
@@ -152,13 +133,11 @@ export function buildAriaInterviewTurnClusterDepSyncWiringParamsFromScreen(
       setResults,
       setStatus,
     },
-    webTabRestoreSessionDepsRef: documentTts.webTabRestoreSessionDepsRef,
     claudeParallelStreamTtsDepsRef: documentTts.claudeParallelStreamTtsDepsRef,
     fetchStageScoreDepsRef: documentTts.fetchStageScoreDepsRef,
     saveScenarioCheckpointDepsRef: documentTts.saveScenarioCheckpointDepsRef,
     scoreScenarioRef,
     audioRecorderIsRecordingForRouteRef,
-    runWebGestureTtsFlush: webTts.runWebGestureTtsFlush,
     typedAnswer,
     handleSendTypedLocal: {
       touchActivity: wiring.touchActivity,
@@ -168,7 +147,6 @@ export function buildAriaInterviewTurnClusterDepSyncWiringParamsFromScreen(
     },
     routeProbe: { setAudioRouteKind: wiring.setAudioRouteKind },
     deliverRecordingRetryLine: documentTts.deliverRecordingRetryLine,
-    syncInterviewTtsAfterScreenReturn: documentTts.syncInterviewTtsAfterScreenReturn,
     turnHandler: {
       kickCompletionScoring: wiring.kickCompletionScoring,
       statusSetters: {
@@ -184,12 +162,10 @@ export function buildAriaInterviewTurnClusterDepSyncWiringParamsFromScreen(
         runEmotionModalAfterScenarioTransition: emotion.runEmotionModalAfterScenarioTransition,
       },
       webTtsResume: {
-        clearStaleWebInterviewTtsRuntimeLocks: webTts.clearStaleWebInterviewTtsRuntimeLocks,
-        queueMobileWebHtmlResumeAfterScreenReturn: webTts.queueMobileWebHtmlResumeAfterScreenReturn,
+        clearStaleInterviewTtsRuntimeLocks: webTts.clearStaleInterviewTtsRuntimeLocks,
         applyInterviewSpeechComplete: boot.applyInterviewSpeechComplete,
       },
       uiStage: {
-        setWebTabGestureRestoreOverlay,
         setReferenceCardPrompt,
         setHighestScenarioReached,
         setStageResults,
@@ -227,7 +203,6 @@ export function buildAriaInterviewTurnClusterDepSyncWiringParamsFromScreen(
     micCluster: {
       liveState: {
         voiceState,
-        useMediaRecorderPath,
         currentTranscript,
         interviewStatus,
         useTapMicUi,
@@ -250,8 +225,6 @@ export function buildAriaInterviewTurnClusterDepSyncWiringParamsFromScreen(
         stopElevenLabsSpeech: wiring.stopElevenLabsSpeech,
         checkMicPermission: preamble.checkMicPermission,
         isInterviewerOutputActiveForMicGate: webTts.isInterviewerOutputActiveForMicGate,
-        isWebInterviewPlaybackSurfaceActive: wiring.isWebInterviewPlaybackSurfaceActive,
-        webSpeechShouldDeferToUserGesture: wiring.webSpeechShouldDeferToUserGesture,
         classifyInterviewQuestionType: preamble.classifyInterviewQuestionType,
       },
       recordingPipeline: {
@@ -274,21 +247,9 @@ export function buildAriaInterviewTurnClusterDepSyncWiringParamsFromScreen(
         pendingRecordingRestartAfterVadBypassRef,
       },
       webTtsResume: {
-        isWebInterviewPlaybackAudiblyActive: wiring.isWebInterviewPlaybackAudiblyActive,
-        armMobileWebBackgroundTtsContinue: webTts.armMobileWebBackgroundTtsContinue,
-        isMobileWebInterviewTtsSessionActive: webTts.isMobileWebInterviewTtsSessionActive,
-        hasWebInterviewHtmlAudioTabResumePending: wiring.hasWebInterviewHtmlAudioTabResumePending,
-        holdTabStashedHtmlAudioForGestureResume: wiring.holdTabStashedHtmlAudioForGestureResume,
         hasInterviewClosingSpeakInFlightForSession: wiring.hasInterviewClosingSpeakInFlightForSession,
       },
-      pressHandlers: {
-        webTabGestureRestoreOverlayRef,
-        handleWebTabGestureRestoreTapRef,
-        setWebTabGestureRestoreOverlay,
-        pendingMicStartAfterIdleFlushRef,
-        webGestureTtsConsumedPressRef,
-        webGestureConsumeClearTimeoutRef,
-      },
+      pressHandlers: {},
     },
   };
 }

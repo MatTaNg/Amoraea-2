@@ -99,8 +99,6 @@ export type AriaInterviewGateResumeEmotionLocalScope = Pick<
   | 'resumeWelcomeMessageRef'
   | 'resumeOfferWelcomeTtsRef'
   | 'resumeEmotionAfterModalTextRef'
-  | 'webResumeWelcomeTapHandledRef'
-  | 'webResumeWelcomeTapPendingRef'
   | 'resumeWelcomeHydrationAttemptRef'
   | 'pendingScenarioIntroAfterResumeWelcomeRef'
   | 'emotionItemResponsesRef'

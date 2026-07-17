@@ -1,10 +1,6 @@
-import { Platform } from 'react-native';
-
 import { runOnRecordingComplete } from '@features/aria/runOnRecordingComplete';
 import type { OnRecordingCompleteDeps } from '@features/aria/onRecordingCompleteTypes';
 import { useAudioRecorder } from '@features/aria/hooks/useAudioRecorder';
-import { primeHtmlAudioForMobileTtsFromMicGesture } from '@features/aria/utils/webInterviewSharedHtmlAudio';
-import { unlockWebAudioForAutoplay } from '@features/aria/utils/webInterviewTtsDocumentLifecycle';
 import { setRecordingSessionActive } from '@utilities/sessionLogging';
 
 export type AriaInterviewAudioRecorderDeps = OnRecordingCompleteDeps & {
@@ -30,16 +26,8 @@ export function useAriaInterviewAudioRecorder(
       setRecordingSessionActive(true);
       depsRef.current.setMicEnginePrimed(true);
     },
-    onBeforeWebRecorderStop:
-      Platform.OS === 'web'
-        ? () => {
-            unlockWebAudioForAutoplay();
-            primeHtmlAudioForMobileTtsFromMicGesture();
-          }
-        : undefined,
     onMediaServicesReset: () => {
       depsRef.current.setMicNeedsReconnect(true);
-      if (Platform.OS === 'web') return;
       if (depsRef.current.interviewStatusRef.current !== 'in_progress') return;
       void depsRef.current.applyRouteProbeAfterResume('media_services_reset');
     },

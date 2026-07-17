@@ -105,16 +105,11 @@ export function useAriaInterviewSessionShellState(
   const [ttsPlaybackReliabilityNotice, setTtsPlaybackReliabilityNotice] = useState<string | null>(null);
   const [conversationErrorNotice, setConversationErrorNotice] = useState<string | null>(null);
   const ttsLineInFlightRef = useRef(false);
-  const tabHiddenDuringActiveTtsLineRef = useRef(false);
-  const handleWebTabGestureRestoreTapRef = useRef<() => void>(() => {});
   const speakingWithoutPlaybackSinceMsRef = useRef<number | null>(null);
-  const staleWebTtsRuntimeLockSinceMsRef = useRef<number | null>(null);
-  const mobileTabHideLetPlaybackContinueRef = useRef(false);
-  const mobileTabHideBackgroundUtteranceRef = useRef<string | null>(null);
+  const staleTtsRuntimeLockSinceMsRef = useRef<number | null>(null);
   const lastVoiceTurnLanguageRef = useRef<string | null>(null);
   const lastVoiceTurnConfidenceRef = useRef<number | null>(null);
   const [networkStatus, setNetworkStatus] = useState<'checking' | 'good' | 'poor'>('checking');
-  const [webResumeWelcomeTapPending, setWebResumeWelcomeTapPending] = useState(false);
 
   const statusRef = useRef(status);
   statusRef.current = status;
@@ -213,18 +208,12 @@ export function useAriaInterviewSessionShellState(
     conversationErrorNotice,
     setConversationErrorNotice,
     ttsLineInFlightRef,
-    tabHiddenDuringActiveTtsLineRef,
-    handleWebTabGestureRestoreTapRef,
     speakingWithoutPlaybackSinceMsRef,
-    staleWebTtsRuntimeLockSinceMsRef,
-    mobileTabHideLetPlaybackContinueRef,
-    mobileTabHideBackgroundUtteranceRef,
+    staleTtsRuntimeLockSinceMsRef,
     lastVoiceTurnLanguageRef,
     lastVoiceTurnConfidenceRef,
     networkStatus,
     setNetworkStatus,
-    webResumeWelcomeTapPending,
-    setWebResumeWelcomeTapPending,
     commitInterviewMessages: setMessages,
     statusRef,
     interviewStatusRef,

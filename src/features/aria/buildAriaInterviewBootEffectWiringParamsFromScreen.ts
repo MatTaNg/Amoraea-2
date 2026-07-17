@@ -24,10 +24,10 @@ export function buildAriaInterviewBootEffectWiringParamsFromScreen(
   const { messages, status, currentMessagesRef, setMessages, setMicPermission } = interview;
   const { shell, gate, routing } = session;
   const { elongatingProbeFiredRef } = gate.metaSkip;
-  const { transcriptScenarioLogCursorRef } = gate.resumeEmotion;
-  const { currentInterviewMomentRef } = gate.moments;
-  const { webTtsTabInterruptPendingReplayRef } = gate.webTts;
+  const { transcriptScenarioLogCursorRef, resumeActiveScenarioRef } = gate.resumeEmotion;
   const {
+    currentInterviewMomentRef,
+    interviewMomentsCompleteRef,
     scenarioAContemptProbeAskedRef,
     scenarioARepairQuestionAskedRef,
   } = gate.moments;
@@ -39,8 +39,6 @@ export function buildAriaInterviewBootEffectWiringParamsFromScreen(
     pendingCompletion,
     pendingScoringSyncAttemptId,
     results,
-    preInterviewConsentAge,
-    preInterviewConsentData,
     setUsingMemoryFallback,
     lastAdminScoreCardCountRef,
     setReasoningProgress,
@@ -49,8 +47,10 @@ export function buildAriaInterviewBootEffectWiringParamsFromScreen(
     setUserEmail,
     scrollViewRef,
     lastQuestionTextRef,
+    currentScenarioRef,
   } = shell;
   const { isInterviewAppRoute, preparingHandoffPollTick } = routing;
+  const { interviewSessionIdRef } = gate.progressReset;
 
   return {
     servicesBaseCtx,
@@ -86,8 +86,6 @@ export function buildAriaInterviewBootEffectWiringParamsFromScreen(
     preparingHandoffPollTick,
     alphaMode: preamble.ALPHA_MODE,
     results,
-    preInterviewConsentAge,
-    preInterviewConsentData,
     currentMessagesRef,
     setUsingMemoryFallback,
     setMicPermission,
@@ -101,9 +99,15 @@ export function buildAriaInterviewBootEffectWiringParamsFromScreen(
     scrollViewRef,
     setMessages,
     setConversationErrorNotice: shell.setConversationErrorNotice,
-    webTtsTabInterruptPendingReplayRef,
     lastQuestionTextRef,
     scenarioAContemptProbeAskedRef,
     scenarioARepairQuestionAskedRef,
+    speechCompleteScenarioRefs: {
+      currentScenarioRef,
+      currentInterviewMomentRef,
+      interviewMomentsCompleteRef,
+      resumeActiveScenarioRef,
+      interviewSessionIdRef,
+    },
   };
 }

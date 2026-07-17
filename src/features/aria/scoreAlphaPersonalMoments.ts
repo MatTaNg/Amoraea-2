@@ -288,7 +288,8 @@ export async function scoreAlphaPersonalMoments(
             headers,
             body: JSON.stringify({
               model: CLAUDE_SONNET_MODEL,
-              max_tokens: 900,
+              // Match M4: keyEvidence + contempt_tier_breakdown routinely exceed 900 tokens and truncate mid-JSON.
+              max_tokens: 2048,
               messages: [{ role: 'user', content: buildMoment5AccountabilityScoringPrompt(slice, m5Meta) }],
             }),
           });

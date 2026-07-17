@@ -1,10 +1,9 @@
 import type { AriaInterviewDepsSyncContext } from '@features/aria/syncAriaInterviewDepsRefs';
 import { mergeAriaInterviewSyncCtx } from '@features/aria/syncAriaInterviewDepsRefs';
-import { createAriaInterviewWebRuntimeSyncCtx } from '@features/aria/createAriaInterviewWebRuntimeSyncCtx';
-import { buildAriaInterviewWebRuntimeSyncCtx } from '@features/aria/buildAriaInterviewWebRuntimeSyncCtx';
-import type { InterviewWebRuntimeLocalScope } from '@features/aria/buildInterviewWebRuntimeLocalSyncExtra';
-import { buildInterviewWebRuntimeLocalSyncExtra } from '@features/aria/buildInterviewWebRuntimeLocalSyncExtra';
-import { createInterviewWebRuntimeSyncExtra } from '@features/aria/createInterviewMiscSyncExtras';
+import { buildAriaInterviewRuntimeSyncCtx } from '@features/aria/buildAriaInterviewRuntimeSyncCtx';
+import type { InterviewRuntimeLocalScope } from '@features/aria/buildInterviewRuntimeLocalSyncExtra';
+import { buildInterviewRuntimeLocalSyncExtra } from '@features/aria/buildInterviewRuntimeLocalSyncExtra';
+import { createInterviewRuntimeSyncExtra } from '@features/aria/createInterviewMiscSyncExtras';
 import type { InterviewEarlyDepsLocalScope } from '@features/aria/buildInterviewEarlyDepsLocalSyncExtra';
 import { buildInterviewEarlyDepsLocalSyncExtra } from '@features/aria/buildInterviewEarlyDepsLocalSyncExtra';
 import { createInterviewEarlyDepsSyncExtra } from '@features/aria/createInterviewEarlyDepsSyncExtra';
@@ -18,16 +17,14 @@ import { buildInterviewMicClusterLocalSyncExtra } from '@features/aria/buildInte
 import { mergeAriaInterviewMicClusterBaseSyncCtx } from '@features/aria/buildInterviewGateSyncExtras';
 import { mergeAriaInterviewCoreWithLocalSyncCtx } from '@features/aria/mergeAriaInterviewSyncContextHelpers';
 
-export function buildAriaInterviewWebRuntimeMergedSyncCtx(
+export function buildAriaInterviewRuntimeMergedSyncCtx(
   servicesGateCtx: AriaInterviewDepsSyncContext,
-  localScope: InterviewWebRuntimeLocalScope,
+  localScope: InterviewRuntimeLocalScope,
 ): AriaInterviewDepsSyncContext {
-  return createAriaInterviewWebRuntimeSyncCtx(
-    buildAriaInterviewWebRuntimeSyncCtx(
-      mergeAriaInterviewSyncCtx(
-        servicesGateCtx,
-        createInterviewWebRuntimeSyncExtra(buildInterviewWebRuntimeLocalSyncExtra(localScope)),
-      ),
+  return buildAriaInterviewRuntimeSyncCtx(
+    mergeAriaInterviewSyncCtx(
+      servicesGateCtx,
+      createInterviewRuntimeSyncExtra(buildInterviewRuntimeLocalSyncExtra(localScope)),
     ),
   );
 }
@@ -58,12 +55,12 @@ export function buildInterviewCoreMergedSyncCtx(
 
 export function buildInterviewMicClusterMergedSyncCtx(
   coreCtx: AriaInterviewDepsSyncContext,
-  webRuntimeCtx: AriaInterviewDepsSyncContext,
+  runtimeCtx: AriaInterviewDepsSyncContext,
   servicesGateCtx: AriaInterviewDepsSyncContext,
   localScope: InterviewMicClusterLocalScope,
 ): AriaInterviewDepsSyncContext {
   return mergeAriaInterviewSyncCtx(
-    mergeAriaInterviewMicClusterBaseSyncCtx(coreCtx, webRuntimeCtx, servicesGateCtx),
+    mergeAriaInterviewMicClusterBaseSyncCtx(coreCtx, runtimeCtx, servicesGateCtx),
     buildInterviewMicClusterLocalSyncExtra(localScope),
   );
 }

@@ -1,40 +1,44 @@
 import React from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { ariaScreenStyles as styles } from '@features/aria/ariaScreenStyles';
+import { interviewOverlayTop } from '@features/aria/utils/interviewOverlayInsets';
 import { FlameOrb } from '@app/screens/FlameOrb';
+import { INTRO_FLAME_ORB_SIZE } from '@app/screens/flameOrbLogo';
 import { SafeAreaContainer } from '@ui/components/SafeAreaContainer';
 import { Button } from '@ui/components/Button';
 
+/**
+ * Pre-interview loading / mic-permission screen.
+ * Browser Tap-to-begin overlays have been removed (native apps do not need autoplay unlock).
+ */
 export function AriaInterviewStartingScreen({
   adminTopBar,
   micError,
   micPermissionDenied,
-  showMobileWebTapToBegin,
-  showDesktopAwaitingStartOverlay,
   onSignOut,
   onRetryMic,
-  onMobileWebTapToBegin,
-  onDesktopBeginInterview,
 }: {
   adminTopBar: React.ReactNode;
   micError: string | null;
   micPermissionDenied: boolean;
-  showMobileWebTapToBegin: boolean;
-  showDesktopAwaitingStartOverlay: boolean;
   onSignOut: () => void;
   onRetryMic: () => void;
-  onMobileWebTapToBegin: () => void;
-  onDesktopBeginInterview: () => void;
 }): React.ReactElement {
+  const insets = useSafeAreaInsets();
+  const overlayTop = interviewOverlayTop(insets);
   const showMicRetry = !!micError || micPermissionDenied;
 
   return (
-    <SafeAreaContainer style={{ position: 'relative', backgroundColor: '#05060D' }}>
+    <SafeAreaContainer
+      edges={['bottom', 'left', 'right']}
+      style={{ position: 'relative', backgroundColor: '#05060D' }}
+    >
       {adminTopBar}
       <Pressable
-        style={styles.introLogoutButton}
+        style={[styles.introLogoutButton, { top: overlayTop }]}
         onPress={onSignOut}
         accessibilityRole="button"
         accessibilityLabel="Log out"
@@ -56,7 +60,7 @@ export function AriaInterviewStartingScreen({
           },
         ]}
       >
-        <FlameOrb state="idle" size={72} />
+        <FlameOrb state="idle" size={INTRO_FLAME_ORB_SIZE} />
         <Text
           style={[
             styles.introNote,
@@ -86,32 +90,6 @@ export function AriaInterviewStartingScreen({
           />
         ) : null}
       </View>
-      {showMobileWebTapToBegin ? (
-        <Pressable
-          style={styles.mobileWebTapToBeginOverlay}
-          onPress={onMobileWebTapToBegin}
-          accessibilityRole="button"
-          accessibilityLabel="Tap the screen to begin"
-        >
-          <Text style={styles.mobileWebTapToBeginTitle}>Tap the screen to begin</Text>
-          <Text style={styles.mobileWebTapToBeginSubtitle}>
-            One quick tap unlocks audio for the interviewer on this device.
-          </Text>
-        </Pressable>
-      ) : null}
-      {showDesktopAwaitingStartOverlay ? (
-        <Pressable
-          style={styles.mobileWebTapToBeginOverlay}
-          accessibilityRole="button"
-          accessibilityLabel="Click to begin the interview audio"
-          onPress={onDesktopBeginInterview}
-        >
-          <Text style={styles.mobileWebTapToBeginTitle}>Tap to begin</Text>
-          <Text style={styles.mobileWebTapToBeginSubtitle}>
-            Tap once to unlock audio for the interviewer (required by your browser after opening this page).
-          </Text>
-        </Pressable>
-      ) : null}
     </SafeAreaContainer>
   );
 }

@@ -71,10 +71,25 @@ export function coerceMoment5ParsedModelRecord(parsed: unknown): {
   }
   const o = parsed as Record<string, unknown>;
   const psRaw = o.pillarScores ?? o.pillar_scores;
-  const pillarScores =
+  const pillarScores: Record<string, unknown> =
     psRaw != null && typeof psRaw === 'object' && !Array.isArray(psRaw)
       ? { ...(psRaw as Record<string, unknown>) }
       : {};
+  // Truncated model JSON: parseJsonObjectFromModelText often returns the nested pillarScores
+  // object as root (balanced before the cut mid-keyEvidence string). Lift flat marker numbers.
+  if (Object.keys(pillarScores).length === 0) {
+    const looksLikeFlatScores =
+      o.momentNumber == null &&
+      o.momentName == null &&
+      MOMENT5_SCORE_MARKER_IDS.some((id) => coerceScoreToFiniteNumber(o[id]) !== undefined);
+    if (looksLikeFlatScores) {
+      for (const id of MOMENT5_SCORE_MARKER_IDS) {
+        if (coerceScoreToFiniteNumber(o[id]) !== undefined) {
+          pillarScores[id] = o[id];
+        }
+      }
+    }
+  }
   const keRaw = o.keyEvidence ?? o.key_evidence;
   const keyEvidence: Record<string, string> = {};
   if (keRaw != null && typeof keRaw === 'object' && !Array.isArray(keRaw)) {

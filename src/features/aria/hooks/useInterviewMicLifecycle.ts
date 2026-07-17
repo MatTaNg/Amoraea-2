@@ -1,18 +1,6 @@
 import { useEffect, useRef } from 'react';
 import { AppState, Platform } from 'react-native';
 
-import { getWebAutoplayContext } from '@features/aria/telemetry/tsAutoplayTelemetry';
-import {
-  isWebInterviewMicPreInitReady,
-  samplePreInitInputMeterNormalized,
-} from '@features/aria/utils/webInterviewMicPreInit';
-import { holdTabStashedHtmlAudioForGestureResume } from '@features/aria/utils/webInterviewHtmlAudioTabRestoreOrchestration';
-import { hasWebInterviewHtmlAudioTabResumePending } from '@features/aria/utils/webInterviewHtmlAudioTabResume';
-import {
-  isWebInterviewPlaybackAudiblyActive,
-} from '@features/aria/utils/webInterviewPlaybackSurface';
-import { stopElevenLabsPlayback } from '@features/aria/utils/elevenLabsTtsPlaybackStop';
-import { markWebTabBecameVisible } from '@features/aria/utils/webInterviewGestureContext';
 import { setRecordingPlaybackTransitionTelemetryHook } from '@features/aria/utils/audioModeHelpers';
 import { getLateStartThresholdMs } from '@features/aria/config/audioInterviewConfig';
 import { remoteLog } from '@utilities/remoteLog';
@@ -47,32 +35,12 @@ export function useInterviewMicLifecycle(
 
   audioRecorderRefForLeave.current = depsRef.current.audioRecorder;
   stopInterviewAudioForNavigationRef.current = () => {
-    const deps = depsRef.current;
-    if (
-      Platform.OS === 'web' &&
-      getWebAutoplayContext().isMobileWeb &&
-      deps.isMobileWebInterviewTtsSessionActive()
-    ) {
-      deps.gestureContextLostAtRef.current = {
-        atMs: Date.now(),
-        reason: 'navigation_away',
-      };
-    }
-    if (deps.armMobileWebBackgroundTtsContinue()) {
-      return;
-    }
     hardStopInterviewAudioForNavigationRef.current();
   };
   hardStopInterviewAudioForNavigationRef.current = () => {
     const deps = depsRef.current;
-    deps.interruptAllWebInterviewTtsOutput();
-    deps.dismissTabRestoreOverlay();
-    deps.gestureContextLostAtRef.current = null;
-    void deps.stopElevenLabsPlayback().then(() => {
-      if (deps.isWebInterviewPlaybackAudiblyActive()) {
-        void deps.stopElevenLabsPlayback();
-      }
-    });
+    deps.interruptAllInterviewTtsOutput();
+    void deps.stopElevenLabsPlayback();
     deps.setVoiceState('idle');
     try {
       if (audioRecorderRefForLeave.current.isRecording) {
@@ -81,26 +49,14 @@ export function useInterviewMicLifecycle(
     } catch {
       /* ignore */
     }
-    if (Platform.OS === 'web' && deps.recognitionRef.current) {
-      try {
-        deps.recognitionRef.current.stop();
-      } catch {
-        /* ignore */
-      }
-    }
   };
 
   const voiceState = depsRef.current.voiceState;
   const interviewStatus = depsRef.current.interviewStatus;
   const userId = depsRef.current.userId;
   const navigation = depsRef.current.navigation;
-  const useMediaRecorderPath = depsRef.current.useMediaRecorderPath;
   const audioRecorder = depsRef.current.audioRecorder;
   const applyRouteProbeAfterResume = depsRef.current.applyRouteProbeAfterResume;
-  const syncInterviewTtsAfterScreenReturn = depsRef.current.syncInterviewTtsAfterScreenReturn;
-  const dismissTabRestoreOverlay = depsRef.current.dismissTabRestoreOverlay;
-  const ensureWebGestureFlushListener = depsRef.current.ensureWebGestureFlushListener;
-  const setWebTabRestoreOverlayVisible = depsRef.current.setWebTabRestoreOverlayVisible;
 
   useEffect(() => {
     const deps = depsRef.current;
@@ -209,8 +165,8 @@ export function useInterviewMicLifecycle(
         if (deps.parallelStreamingTtsRef?.current) {
           deps.parallelStreamingTtsRef.current.cancelRequested = true;
         }
-        if (deps.webTtsSpeakGenerationRef) {
-          deps.webTtsSpeakGenerationRef.current += 1;
+        if (deps.ttsSpeakGenerationRef) {
+          deps.ttsSpeakGenerationRef.current += 1;
         }
         void remoteLog('[ARIA_UNMOUNT] parallel_stream_cancelled', {
           interviewSessionId: sessionIdRef?.current,
@@ -235,31 +191,6 @@ export function useInterviewMicLifecycle(
         eventData: { moment_number: deps.currentInterviewMomentRef.current },
         platform: r.platform,
       });
-      if (Platform.OS === 'web' && deps.interviewStatusRef.current === 'in_progress') {
-        if (deps.hasWebInterviewHtmlAudioTabResumePending()) {
-          deps.holdTabStashedHtmlAudioForGestureResume();
-        }
-        deps.syncInterviewTtsAfterScreenReturn();
-        if (
-          !deps.mobileTabHideLetPlaybackContinueRef.current &&
-          !deps.isWebInterviewPlaybackAudiblyActive() &&
-          !deps.hasWebInterviewHtmlAudioTabResumePending() &&
-          deps.pendingGestureRestoreSpeakRef.current?.restoreMode !== 'resume_html' &&
-          (deps.pendingGestureRestoreSpeakRef.current != null ||
-            deps.webTtsTabInterruptPendingReplayRef.current)
-        ) {
-          deps.dismissTabRestoreOverlay();
-        }
-        if (
-          deps.pendingGestureRestoreSpeakRef.current?.restoreMode === 'resume_html' ||
-          (deps.mobileTabHideLetPlaybackContinueRef.current &&
-            deps.hasWebInterviewHtmlAudioTabResumePending())
-        ) {
-          deps.needsGestureRestoreRef.current = true;
-          deps.setWebTabRestoreOverlayVisible(true);
-          deps.ensureWebGestureFlushListener();
-        }
-      }
     });
     const unsubBlurNav = navigation.addListener('blur', () => {
       const deps = depsRef.current;
@@ -298,10 +229,6 @@ export function useInterviewMicLifecycle(
   }, [
     navigation,
     userId,
-    syncInterviewTtsAfterScreenReturn,
-    dismissTabRestoreOverlay,
-    ensureWebGestureFlushListener,
-    setWebTabRestoreOverlayVisible,
     depsRef,
   ]);
 
@@ -312,9 +239,6 @@ export function useInterviewMicLifecycle(
       const fn = () => {
         const deps = depsRef.current;
         const vis = document.visibilityState === 'visible';
-        if (vis) {
-          markWebTabBecameVisible();
-        }
         if (vis && deps.emotionModalPendingTransitionRef.current) {
           deps.setEmotionModalVisible(true);
         }
@@ -360,24 +284,6 @@ export function useInterviewMicLifecycle(
   }, [userId, depsRef]);
 
   useEffect(() => {
-    const deps = depsRef.current;
-    if (Platform.OS !== 'web' || !useMediaRecorderPath) {
-      deps.setPreInitMeterLevel(0);
-      return;
-    }
-    const showPreInitMeter =
-      (deps.voiceState === 'recording' && !deps.audioRecorder.isRecording) ||
-      (deps.voiceState === 'idle' && isWebInterviewMicPreInitReady());
-    if (!showPreInitMeter) {
-      deps.setPreInitMeterLevel(0);
-      return;
-    }
-    let raf = 0;
-    const tick = () => {
-      deps.setPreInitMeterLevel(samplePreInitInputMeterNormalized());
-      raf = requestAnimationFrame(tick);
-    };
-    raf = requestAnimationFrame(tick);
-    return () => cancelAnimationFrame(raf);
-  }, [depsRef, voiceState, audioRecorder.isRecording, useMediaRecorderPath]);
+    depsRef.current.setPreInitMeterLevel(0);
+  }, [depsRef, voiceState, audioRecorder.isRecording]);
 }

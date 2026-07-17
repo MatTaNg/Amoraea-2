@@ -65,7 +65,6 @@ function makeResetDeps(
     resetInterviewVadSession: () => {},
     resetWebInterviewGestureContext: () => {},
     resetInterviewClosingTtsSession: () => {},
-    gestureContextLostAtRef: { current: null },
     lastSuccessfulTtsTextNormalizedRef: { current: null },
     lastSuccessfulTtsDeliveredPreviewRef: { current: '' },
     scenarioSkipConfirmedCountRef: { current: 0 },
@@ -77,15 +76,11 @@ function makeResetDeps(
     resumeWelcomeMessageRef: { current: 'Welcome back' },
     resumeOfferWelcomeTtsRef: { current: true },
     resumeEmotionAfterModalTextRef: { current: null },
-    webResumeWelcomeTapHandledRef: { current: false },
-    webResumeWelcomeTapPendingRef: { current: false },
     resumeWelcomeHydrationAttemptRef: { current: null },
     clearResumeWelcomePlaybackLock: () => {},
-    webTtsUtteranceInFlightRef: { current: null },
-    webTtsUtteranceInFlightOptionsRef: { current: null },
-    webTtsTabInterruptPendingReplayRef: { current: false },
-    webTtsSpeakGenerationRef: { current: 0 },
-    webTabRestoreReplayInFlightRef: { current: false },
+    ttsUtteranceInFlightRef: { current: null },
+    ttsUtteranceInFlightOptionsRef: { current: null },
+    ttsSpeakGenerationRef: { current: 0 },
     parallelStreamingTtsRef: {
       current: {
         active: false,
@@ -134,7 +129,5 @@ describe('runResetInterviewProgressRefs', () => {
     const deps = makeResetDeps();
     runResetInterviewProgressRefs(deps);
     expect(deps.resumeOfferWelcomeTtsRef.current).toBe(false);
-    expect(deps.webResumeWelcomeTapHandledRef.current).toBe(false);
-    expect(deps.webResumeWelcomeTapPendingRef.current).toBe(false);
   });
 });

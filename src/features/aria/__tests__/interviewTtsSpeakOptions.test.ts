@@ -4,11 +4,6 @@ import {
   SHOW_SCENARIO_CARD_CANONICAL_SPEECH,
   TAB_RESTORE_PENDING_SPEAK_OPTIONS,
 } from '../interviewTtsSpeakOptions';
-import {
-  clearPendingWebSpeechGesturePair,
-  peekPendingWebSpeechGesture,
-  setPendingWebSpeechGesturePair,
-} from '../interviewWebPendingSpeechGesture';
 
 describe('interviewTtsSpeakOptions', () => {
   it('ASSISTANT_INTERVIEW_SPEECH marks turn assistant responses', () => {
@@ -31,20 +26,5 @@ describe('interviewTtsSpeakOptions', () => {
 
   it('exports scenario split gap constant', () => {
     expect(SCENARIO_SPLIT_INTER_SEGMENT_GAP_MS).toBe(200);
-  });
-});
-
-describe('interviewWebPendingSpeechGesture', () => {
-  const ref = { current: null as string | null };
-
-  beforeEach(() => {
-    ref.current = null;
-  });
-
-  it('set/clear/peek round-trips through ref', () => {
-    setPendingWebSpeechGesturePair(ref, 'queued line');
-    expect(peekPendingWebSpeechGesture(ref)).toBe('queued line');
-    clearPendingWebSpeechGesturePair(ref);
-    expect(peekPendingWebSpeechGesture(ref)).toBe(null);
   });
 });

@@ -100,15 +100,17 @@ EXPO_PUBLIC_SUPABASE_ANON_KEY=your_supabase_anon_key
 
 **API keys (OpenAI, Anthropic, ElevenLabs):** store in **Supabase Edge Function secrets**, not in `EXPO_PUBLIC_*`. Local `.env` may use unprefixed names (`ANTHROPIC_API_KEY`, etc.) for scripts only. Full split: [docs/PWA_DEPLOYMENT.md](docs/PWA_DEPLOYMENT.md).
 
-In **Supabase → Authentication → URL Configuration**, set **Site URL** to your deployed web app **root origin only** (e.g. `https://www.amoraea.com/` — **not** `/welcome` or `/auth/reset-password`). Under **Redirect URLs**, add **`https://www.amoraea.com/auth/confirm`**, `https://www.amoraea.com/auth/reset-password`, legacy paths if needed (`/confirm-email`, `/reset-password`), and your other origins (e.g. `https://www.amoraea.com/**`). Signup confirmation emails use `emailRedirectTo` `/auth/confirm`; if that URL is missing from the allowlist, Supabase falls back to Site URL and users may land on the wrong page (including the reset-password screen).
+In **Supabase → Authentication → URL Configuration**, set **Site URL** to your deployed web app **root origin only** (e.g. `https://www.amoraea.com/` — **not** `/welcome` or `/auth/reset-password`). Under **Redirect URLs**, add:
 
-**Hotmail / Outlook junk folder:** Supabase’s default template uses `{{ .ConfirmationURL }}`, which points at `https://<project>.supabase.co/auth/v1/verify?...` — that third-party domain is a common spam signal. Replace it in **Authentication → Email Templates → Confirm signup** with the branded link from `supabase/templates/confirm-signup.html`:
+- Native app: `amoraea://auth/confirm`, `amoraea://auth/reset-password`
+- Web: `https://www.amoraea.com/auth/confirm`, `https://www.amoraea.com/auth/reset-password`
+- Legacy paths if needed (`/confirm-email`, `/reset-password`) and other origins
 
-```html
-<a href="{{ .SiteURL }}/auth/confirm?token_hash={{ .TokenHash }}&type=signup">Confirm email address</a>
-```
+Signup / reset emails use `emailRedirectTo` / `redirectTo` (`amoraea://…` on native, `https://…/auth/…` on web). If those URLs are missing from the allowlist, Supabase falls back to Site URL and users land on the website.
 
-The app already verifies `token_hash` on `/auth/confirm`. Also enable **Custom SMTP** (e.g. [Resend](https://resend.com)) with a `@amoraea.com` sender and SPF/DKIM/DMARC on your domain — inbox placement improves more from SMTP + domain auth than from redirect URL alone. Optional: Supabase **Custom Auth Domain** (`auth.amoraea.com`) on Pro plans.
+**Email templates:** use `{{ .ConfirmationURL }}` (see `supabase/templates/confirm-signup.html` and `recovery.html`) so the link honors the app redirect. Paste those templates into **Authentication → Email Templates** on the hosted project. Also enable **Custom SMTP** (e.g. [Resend](https://resend.com)) with a `@amoraea.com` sender and SPF/DKIM/DMARC — inbox placement improves more from SMTP + domain auth than from redirect URL alone.
+
+**Native rebuild:** after adding the `amoraea` URL scheme in `app.json`, ship a new development/production build so confirm/reset links open the app.
 
 **Netlify:** `netlify.toml` and `public/_redirects` configure SPA fallback so `/` and deep paths return `index.html` (fixes “Page not found” after email confirmation). Redeploy after pulling these files.
 
