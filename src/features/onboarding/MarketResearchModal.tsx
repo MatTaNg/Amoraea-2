@@ -28,10 +28,10 @@ const TOTAL_QUESTIONS = 6;
 
 const QUESTION_ORDER: Question[] = [
   'referral',
-  'occupation',
   'seriousness',
   'duration',
   'dating_status',
+  'occupation',
   'spend',
 ];
 
@@ -105,7 +105,6 @@ export function MarketResearchModal({ visible, userId, onComplete }: Props) {
   const [duration, setDuration] = useState<string | null>(null);
   const [datingStatus, setDatingStatus] = useState<string | null>(null);
   const [spend, setSpend] = useState<string | null>(null);
-  const [spendContext, setSpendContext] = useState('');
   const [saving, setSaving] = useState(false);
 
   const currentQuestion = QUESTION_ORDER[currentIndex];
@@ -154,24 +153,12 @@ export function MarketResearchModal({ visible, userId, onComplete }: Props) {
     }
   }
 
-  function showSpendContextForValue(spendValue: string | null): boolean {
-    return spendValue !== null && spendValue !== '0' && spendValue !== '1 - 100';
-  }
-
-  function showSpendContext(): boolean {
-    return showSpendContextForValue(spend);
-  }
-
   function stepNeedsManualAdvance(selectedValue?: string): boolean {
     if (currentQuestion === 'occupation') return true;
     if (currentQuestion === 'referral') {
       // Use the incoming choice when auto-advancing — referralSource state is still stale here.
       const effective = selectedValue ?? referralSource;
       return effective === 'Other';
-    }
-    if (currentQuestion === 'spend') {
-      const effective = selectedValue ?? spend;
-      return showSpendContextForValue(effective);
     }
     return false;
   }
@@ -206,9 +193,7 @@ export function MarketResearchModal({ visible, userId, onComplete }: Props) {
           market_research_search_duration: duration,
           market_research_dating_status: datingStatus,
           market_research_max_spend: resolvedSpend,
-          market_research_spend_context: showSpendContextForValue(resolvedSpend)
-            ? spendContext.trim() || null
-            : null,
+          market_research_spend_context: null,
         })
         .eq('id', userId);
 
@@ -470,21 +455,6 @@ export function MarketResearchModal({ visible, userId, onComplete }: Props) {
                     </Text>
                   </TouchableOpacity>
                 ))}
-
-                {showSpendContext() ? (
-                  <View style={styles.spendContextBlock}>
-                    <Text style={styles.spendContextLabel}>
-                      If you'd like to share, what was the coach, or workshop name?{' '}
-                      <Text style={styles.optional}>(optional)</Text>
-                    </Text>
-                    <MarketResearchTextField
-                      key="spend-context"
-                      placeholder="e.g. relationship coaching, men's work, therapy..."
-                      value={spendContext}
-                      onChangeText={setSpendContext}
-                    />
-                  </View>
-                ) : null}
               </View>
             )}
             </View>
@@ -706,19 +676,6 @@ const styles = StyleSheet.create({
     alignSelf: 'stretch',
     outlineStyle: 'solid',
     outlineWidth: 0,
-  },
-  spendContextBlock: {
-    marginTop: 16,
-  },
-  spendContextLabel: {
-    fontSize: 14,
-    color: '#444',
-    marginBottom: 6,
-    lineHeight: 20,
-  },
-  optional: {
-    color: '#aaa',
-    fontWeight: '400',
   },
   footerRow: {
     flexDirection: 'row',

@@ -2,9 +2,10 @@ import type { ClaudeParallelStreamTtsCallDeps } from '@features/aria/claudeParal
 import type { EmotionModalOrchestrationDeps } from '@features/aria/emotionModalOrchestrationTypes';
 import type { InterviewTtsRuntimeDeps } from '@features/aria/hooks/useInterviewTtsRuntime';
 import type { SpeakTextSafeDeps } from '@features/aria/speakTextSafeDeps';
-import type {
-  AriaInterviewDepsRefs,
-  AriaInterviewDepsSyncContext,
+import {
+  assignDefinedSyncSlices,
+  type AriaInterviewDepsRefs,
+  type AriaInterviewDepsSyncContext,
 } from '@features/aria/syncAriaInterviewDepsTypes';
 
 export function syncAriaInterviewEarlyDeps(
@@ -55,7 +56,9 @@ export function syncAriaInterviewTtsPipelineDeps(
   refs: Pick<AriaInterviewDepsRefs, 'speakTextSafeDepsRef' | 'claudeParallelStreamTtsDepsRef'>,
   ctx: AriaInterviewDepsSyncContext,
 ): void {
-  refs.speakTextSafeDepsRef.current = {
+  refs.speakTextSafeDepsRef.current = assignDefinedSyncSlices(
+    refs.speakTextSafeDepsRef.current,
+    {
     userId: ctx.userId,
         setVoiceState: ctx.setVoiceState,
         setTtsPlaybackReliabilityNotice: ctx.setTtsPlaybackReliabilityNotice,
@@ -93,9 +96,12 @@ export function syncAriaInterviewTtsPipelineDeps(
         timingRef: ctx.timingRef,
         recordInterviewAssistantDeliveryForMetaExemptionRef: ctx.recordInterviewAssistantDeliveryForMetaExemptionRef,
         s1ContemptFixVersion: ctx.s1ContemptFixVersion,
-  } as SpeakTextSafeDeps;
+  },
+  ) as SpeakTextSafeDeps;
 
-  refs.claudeParallelStreamTtsDepsRef.current = {
+  refs.claudeParallelStreamTtsDepsRef.current = assignDefinedSyncSlices(
+    refs.claudeParallelStreamTtsDepsRef.current,
+    {
     userId: ctx.userId,
         recordingJustFinishedBeforeNextTtsRef: ctx.recordingJustFinishedBeforeNextTtsRef,
         postRecordingParallelStreamSettleRef: ctx.postRecordingParallelStreamSettleRef,
@@ -129,6 +135,7 @@ export function syncAriaInterviewTtsPipelineDeps(
         scenarioScoresRef: ctx.scenarioScoresRef,
         moment5ClientScoringMetaRef: ctx.moment5ClientScoringMetaRef,
         moment4ClientSpecificityProbeInjectedRef: ctx.moment4ClientSpecificityProbeInjectedRef,
+        moment4ThresholdProbeAskedRef: ctx.moment4ThresholdProbeAskedRef,
         moment5SpecificityRedirectIssuedRef: ctx.moment5SpecificityRedirectIssuedRef,
         elongatingProbeFiredRef: ctx.elongatingProbeFiredRef,
         lastQuestionTextRef: ctx.lastQuestionTextRef,
@@ -145,6 +152,7 @@ export function syncAriaInterviewTtsPipelineDeps(
         stopElevenLabsPlayback: ctx.stopElevenLabsPlayback,
         referenceCardShouldUpdateOnPlaybackStart: ctx.referenceCardShouldUpdateOnPlaybackStart,
         ensureCompletedScenarioScored: ctx.ensureCompletedScenarioScored,
-  } as ClaudeParallelStreamTtsCallDeps;
+  },
+  ) as ClaudeParallelStreamTtsCallDeps;
 
 }

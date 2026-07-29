@@ -51,6 +51,7 @@ import {
 } from '@features/psychometrics/psychometricsTheme';
 import { spacing } from '@ui/theme/spacing';
 import { applyPsychometricModifierToAttempt } from '@features/psychometrics/applyPsychometricModifier';
+import { finalizeGateResultAfterPsychometrics } from '@features/onboarding/finalizeGateResultAfterPsychometrics';
 import { fetchMostRecentCompletedInterviewAttemptId } from '@features/psychometrics/interviewCompletionStatus';
 import {
   resolveInitialInterviewRoute,
@@ -161,12 +162,15 @@ export function PsychometricAssessmentScreen({ navigation, route }: Props) {
       return false;
     }
 
-    if (legacyPsychometricsMode && !PSYCHOMETRICS_ENABLED) {
+    if (PSYCHOMETRICS_ENABLED) {
+      const finalizeResult = await finalizeGateResultAfterPsychometrics(userId);
+      if (!finalizeResult.ok && __DEV__) {
+        console.warn('[PsychometricAssessment] gate finalization after battery', finalizeResult.message);
+      }
+    } else if (legacyPsychometricsMode) {
       const completedAttemptId = await fetchMostRecentCompletedInterviewAttemptId(userId);
       if (completedAttemptId) {
-        await applyPsychometricModifierToAttempt(userId, completedAttemptId, {
-          preservePassIfPreviouslyPassing: true,
-        });
+        await applyPsychometricModifierToAttempt(userId, completedAttemptId);
       }
     }
 

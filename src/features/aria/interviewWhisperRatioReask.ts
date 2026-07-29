@@ -1,3 +1,4 @@
+import { looksLikeCompleteShortUserReply } from '@features/aria/interviewAnswerRelevance';
 import { countSpokenWords } from '@features/aria/interviewWhisperTranscription';
 import {
   isInterviewNameCollectionActive,
@@ -116,6 +117,7 @@ export function getWhisperRatioReaskSuppressionReason(
     return 'valid_hard_stop';
   }
   if (MULTIWORD_HARD_STOP_TRANSCRIPTS_NORMALIZED.has(n)) return 'valid_hard_stop';
+  if (looksLikeCompleteShortUserReply(trimmed)) return 'valid_hard_stop';
   if (looksLikeReadinessAffirmation(trimmed)) return 'valid_hard_stop';
   return null;
 }

@@ -276,6 +276,7 @@ export async function runProcessUserSpeech(
       cancelRequested: false,
       accumulatedFullText: '',
       spokenCompleteText: '',
+      s3SophiePerspectiveProbeDeliveredThisStream: false,
     };
     const metaFrustrationFirstSignalBuffered =
       metaCommentClassification?.type === 'frustration' && !repeatedFrustrationInMoment;

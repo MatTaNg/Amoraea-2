@@ -13,6 +13,7 @@ describe('interviewParallelTtsBatch', () => {
       cancelRequested: false,
       accumulatedFullText: '',
       spokenCompleteText: '',
+      s3SophiePerspectiveProbeDeliveredThisStream: false,
     });
   });
 

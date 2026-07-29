@@ -2,6 +2,7 @@ import type { SaveInterviewResultsParams } from '@features/aria/saveInterviewRes
 import { supabase } from '@data/supabase/client';
 import { buildUsersRowInterviewPassFromGate } from '@utilities/interviewPassEffective';
 import { clearInterviewFromStorage } from '@utilities/storage/InterviewStorage';
+import { clearUserEnteredInterviewFlow } from '@utilities/interviewEntryLock';
 
 export async function runSaveInterviewResults(params: SaveInterviewResultsParams): Promise<void> {
   const { results, gateResult, uid } = params;
@@ -19,6 +20,7 @@ export async function runSaveInterviewResults(params: SaveInterviewResultsParams
     if (error) console.error('Failed to save interview results:', error);
     else {
       await clearInterviewFromStorage(uid);
+      await clearUserEnteredInterviewFlow(uid);
     }
   } catch (err) {
     console.error('Interview save error:', err);

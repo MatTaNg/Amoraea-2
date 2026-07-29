@@ -18,24 +18,24 @@ describe('interviewTtsPlaybackRate', () => {
     });
   });
 
-  it('uses 1x for configured accounts on production builds', () => {
+  it('uses 2x for configured accounts on production builds', () => {
     Object.defineProperty(window, 'location', {
       configurable: true,
       value: { hostname: 'app.amoraea.com' },
     });
     (global as { __DEV__?: boolean }).__DEV__ = false;
     setInterviewTtsSessionEmail('mattang5280@gmail.com');
-    expect(getLocalDevPlaybackRateMultiplier()).toBe(1);
+    expect(getLocalDevPlaybackRateMultiplier()).toBe(2);
   });
 
-  it('uses 1x on production hostname even in a dev bundle', () => {
+  it('uses 2x for configured accounts on production hostname in a dev bundle', () => {
     Object.defineProperty(window, 'location', {
       configurable: true,
       value: { hostname: 'app.amoraea.com' },
     });
     (global as { __DEV__?: boolean }).__DEV__ = true;
     setInterviewTtsSessionEmail('mattang5280@gmail.com');
-    expect(getLocalDevPlaybackRateMultiplier()).toBe(1);
+    expect(getLocalDevPlaybackRateMultiplier()).toBe(2);
   });
 
   it('uses 2x on localhost in dev for any account', () => {

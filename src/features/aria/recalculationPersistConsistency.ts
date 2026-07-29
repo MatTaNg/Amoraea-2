@@ -1,3 +1,6 @@
+import type { SupabaseClient } from '@supabase/supabase-js';
+import { USER_INTERVIEW_ROUTING_TABLE } from '@data/supabase/userInterviewRoutingSelect';
+import { buildUsersRowInterviewPassFromGate } from '@utilities/interviewPassEffective';
 import { MOMENT4_SCORE_RECOVERED_EVIDENCE_LINE } from './moment4ScoringParse';
 import { evidenceAbsentForResponseDepthModifier, isIntentionallyRecoveredScoreEvidence } from './probeEvidenceUtils';
 
@@ -6,6 +9,9 @@ export const RESCORE_EVIDENCE_DEGRADED_REVIEW_FLAG = 'rescore_evidence_degraded'
 
 /** Review flag when ai_reasoning verdict fields disagreed with top-level rollup at recalc time. */
 export const AI_REASONING_VERDICT_MISMATCH_REVIEW_FLAG = 'ai_reasoning_verdict_mismatch';
+
+/** Review flag when admin/bulk recalculation changed pass/fail or final_gate_pass. */
+export const SCORE_RECOMPUTE_GATE_FLIP_REVIEW_FLAG = 'score_recompute_gate_flip';
 
 export type ScoreBundleLike = {
   keyEvidence?: unknown;
@@ -226,11 +232,49 @@ export function resolveFinalGatePassAfterInterviewRecalc(input: {
   passed: boolean | null | undefined;
   final_gate_pass: boolean | null | undefined;
   gate_result_finalized_at?: string | null;
+  /** Admin recalculate: align final_gate_pass with interview rollup even when psych gate was finalized. */
+  forceSync?: boolean;
 }): boolean | null | 'unchanged' {
-  if (input.gate_result_finalized_at != null) return 'unchanged';
+  if (!input.forceSync && input.gate_result_finalized_at != null) return 'unchanged';
   if (typeof input.passed !== 'boolean') return 'unchanged';
   if (input.final_gate_pass === input.passed) return 'unchanged';
   return input.passed;
+}
+
+/** Matches bulk recompute audit: treat non-true stored values as false for flip detection. */
+export function gateVerdictFlippedStored(
+  oldPassed: unknown,
+  oldFinalGatePass: unknown,
+  newPassed: unknown,
+  newFinalGatePass: unknown,
+): boolean {
+  const oldPass = oldPassed === true;
+  const newPass = newPassed === true;
+  const oldFinal = oldFinalGatePass === true;
+  const newFinal = newFinalGatePass === true;
+  return oldPass !== newPass || oldFinal !== newFinal;
+}
+
+export function effectiveFinalGatePassFromAttempt(input: {
+  passed?: unknown;
+  final_gate_pass?: unknown;
+}): boolean | null {
+  if (input.final_gate_pass === true || input.final_gate_pass === false) {
+    return input.final_gate_pass;
+  }
+  if (input.passed === true || input.passed === false) {
+    return input.passed;
+  }
+  return null;
+}
+
+function mergeReviewFlags(existing: unknown, additions: string[]): string[] | undefined {
+  if (additions.length === 0) return undefined;
+  const flags = Array.isArray(existing) ? [...(existing as string[])] : [];
+  for (const flag of additions) {
+    if (!flags.includes(flag)) flags.push(flag);
+  }
+  return flags;
 }
 
 export function buildInvalidatedAiReasoningAfterRecalc(input: {
@@ -275,6 +319,7 @@ export function buildRecalculationConsistencyPatch(input: {
   newWeightedScore: number | null;
   newPillarScores: Record<string, number> | null | undefined;
   recalculatedAt: string;
+  forceFinalGateSync?: boolean;
 }): RecalculationConsistencyPatch {
   const patch: RecalculationConsistencyPatch = {};
   const priorAr =
@@ -314,10 +359,167 @@ export function buildRecalculationConsistencyPatch(input: {
     passed: input.newPassed,
     final_gate_pass: input.attempt.final_gate_pass,
     gate_result_finalized_at: input.attempt.gate_result_finalized_at,
+    forceSync: input.forceFinalGateSync === true,
   });
   if (finalGate !== 'unchanged') {
     patch.final_gate_pass = finalGate;
   }
 
   return patch;
+}
+
+export function buildPostRecalculationGateOutcomePatch(input: {
+  attempt: {
+    ai_reasoning?: unknown;
+    passed?: unknown;
+    final_gate_pass?: unknown;
+    review_flags?: unknown;
+    weighted_score?: unknown;
+  };
+  oldPassed: unknown;
+  oldFinalGatePass: unknown;
+  newPassed: unknown;
+  newFinalGatePass: unknown;
+  newWeightedScore: number | null;
+  newPillarScores: Record<string, number> | null | undefined;
+  recalculatedAt: string;
+}): RecalculationConsistencyPatch | null {
+  if (
+    !gateVerdictFlippedStored(
+      input.oldPassed,
+      input.oldFinalGatePass,
+      input.newPassed,
+      input.newFinalGatePass,
+    )
+  ) {
+    return null;
+  }
+
+  const patch: RecalculationConsistencyPatch = {};
+  const reviewFlags = mergeReviewFlags(input.attempt.review_flags, [SCORE_RECOMPUTE_GATE_FLIP_REVIEW_FLAG]);
+  if (reviewFlags) patch.review_flags = reviewFlags;
+
+  const priorAr =
+    input.attempt.ai_reasoning != null &&
+    typeof input.attempt.ai_reasoning === 'object' &&
+    !Array.isArray(input.attempt.ai_reasoning)
+      ? (input.attempt.ai_reasoning as Record<string, unknown>)
+      : null;
+
+  const effectiveOldPassed = effectiveFinalGatePassFromAttempt({
+    passed: input.oldPassed,
+    final_gate_pass: input.oldFinalGatePass,
+  });
+  const effectiveNewPassed = effectiveFinalGatePassFromAttempt({
+    passed: input.newPassed,
+    final_gate_pass: input.newFinalGatePass,
+  });
+  const newWeightedScore =
+    input.newWeightedScore ??
+    (typeof input.attempt.weighted_score === 'number' && Number.isFinite(input.attempt.weighted_score)
+      ? input.attempt.weighted_score
+      : null);
+
+  const invalidate = shouldInvalidateAiReasoningAfterRecalculation({
+    aiReasoning: priorAr,
+    oldPassed: effectiveOldPassed,
+    oldWeightedScore: input.attempt.weighted_score,
+    newPassed: effectiveNewPassed,
+    newWeightedScore,
+  });
+
+  if (invalidate) {
+    patch.ai_reasoning = buildInvalidatedAiReasoningAfterRecalc({
+      priorAiReasoning: priorAr,
+      newPassed: effectiveNewPassed,
+      newWeightedScore,
+      newPillarScores: input.newPillarScores,
+      recalculatedAt: input.recalculatedAt,
+      invalidationReason: 'recalculation_gate_flip',
+    });
+    patch.reasoning_pending = true;
+    const flags = mergeReviewFlags(patch.review_flags ?? input.attempt.review_flags, [
+      AI_REASONING_VERDICT_MISMATCH_REVIEW_FLAG,
+    ]);
+    if (flags) patch.review_flags = flags;
+  }
+
+  return patch;
+}
+
+/** After admin recalculate + psych apply, sync review flags, narrative, and user routing when gate flips. */
+export async function applyPostRecalculationGateOutcomeSync(
+  supabase: SupabaseClient,
+  input: {
+    attemptId: string;
+    userId: string;
+    oldPassed: unknown;
+    oldFinalGatePass: unknown;
+    recalculatedAt: string;
+    afterAttempt: {
+      passed?: unknown;
+      final_gate_pass?: unknown;
+      review_flags?: unknown;
+      ai_reasoning?: unknown;
+      weighted_score?: unknown;
+    };
+    newPillarScores?: Record<string, number> | null;
+    newWeightedScore?: number | null;
+  },
+): Promise<{ gateFlipped: boolean; userPassSynced: boolean }> {
+  const gateFlipped = gateVerdictFlippedStored(
+    input.oldPassed,
+    input.oldFinalGatePass,
+    input.afterAttempt.passed,
+    input.afterAttempt.final_gate_pass,
+  );
+
+  const outcomePatch = buildPostRecalculationGateOutcomePatch({
+    attempt: input.afterAttempt,
+    oldPassed: input.oldPassed,
+    oldFinalGatePass: input.oldFinalGatePass,
+    newPassed: input.afterAttempt.passed,
+    newFinalGatePass: input.afterAttempt.final_gate_pass,
+    newWeightedScore: input.newWeightedScore ?? null,
+    newPillarScores: input.newPillarScores ?? null,
+    recalculatedAt: input.recalculatedAt,
+  });
+
+  if (outcomePatch) {
+    const { error } = await supabase
+      .from('interview_attempts')
+      .update({
+        ...(outcomePatch.review_flags != null ? { review_flags: outcomePatch.review_flags } : {}),
+        ...(outcomePatch.ai_reasoning != null ? { ai_reasoning: outcomePatch.ai_reasoning } : {}),
+        ...(outcomePatch.reasoning_pending != null
+          ? { reasoning_pending: outcomePatch.reasoning_pending }
+          : {}),
+      })
+      .eq('id', input.attemptId)
+      .eq('user_id', input.userId);
+    if (error) {
+      console.warn('[Recalculation] post-recalc gate outcome patch failed', error.message);
+    }
+  }
+
+  const effectivePass = effectiveFinalGatePassFromAttempt(input.afterAttempt);
+  if (effectivePass == null) {
+    return { gateFlipped, userPassSynced: false };
+  }
+
+  if (!gateFlipped) {
+    return { gateFlipped: false, userPassSynced: false };
+  }
+
+  const passFields = await buildUsersRowInterviewPassFromGate(supabase, input.userId, effectivePass);
+  const { error: userErr } = await supabase
+    .from(USER_INTERVIEW_ROUTING_TABLE)
+    .update(passFields)
+    .eq('id', input.userId);
+  if (userErr) {
+    console.warn('[Recalculation] user interview_pass sync failed', userErr.message);
+    return { gateFlipped, userPassSynced: false };
+  }
+
+  return { gateFlipped, userPassSynced: true };
 }

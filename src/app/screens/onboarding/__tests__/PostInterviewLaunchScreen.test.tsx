@@ -1,7 +1,6 @@
 import React from 'react';
-import AsyncStorage from '@react-native-async-storage/async-storage';
-import { fireEvent, render, waitFor } from '@testing-library/react-native';
-import { Animated } from 'react-native';
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
+import { render, waitFor } from '@testing-library/react-native';
 
 import { PostInterviewLaunchScreen } from '../PostInterviewLaunchScreen';
 
@@ -53,12 +52,10 @@ jest.mock('@features/onboarding/usePostInterviewProfileCta', () => ({
   }),
 }));
 
-let latestFocusEffect: (() => void | (() => void)) | null = null;
 jest.mock('@react-navigation/native', () => {
   const React = require('react');
   return {
     useFocusEffect: (cb: () => void | (() => void)) => {
-      latestFocusEffect = cb;
       React.useEffect(() => cb(), [cb]);
     },
   };
@@ -74,7 +71,21 @@ jest.mock('@data/supabase/client', () => ({
       getUser: jest.fn(() => Promise.resolve({ data: { user: { id: 'user-1' } } })),
     },
     from: jest.fn(),
+    rpc: jest.fn(() =>
+      Promise.resolve({
+        data: [{ cohort_average_final_score: 6.2, scored_user_count: 12 }],
+        error: null,
+      }),
+    ),
   },
+}));
+
+jest.mock('@features/onboarding/loadInterviewReportAttempt', () => ({
+  loadInterviewReportAttempt: jest.fn(() =>
+    Promise.resolve({
+      modified_weighted_score_with_psychometrics: 6.7,
+    }),
+  ),
 }));
 
 jest.mock('expo-clipboard', () => ({
@@ -95,6 +106,7 @@ type ReferralStatus = {
   remainingReferralsToCap: number;
   totalDiscount: number;
   atCap: boolean;
+  fullyComplete: boolean;
 };
 
 const defaultStatus: ReferralStatus = {
@@ -106,6 +118,7 @@ const defaultStatus: ReferralStatus = {
   remainingReferralsToCap: 3,
   totalDiscount: 40,
   atCap: false,
+  fullyComplete: true,
 };
 
 const navigation = {
@@ -115,6 +128,7 @@ const navigation = {
 };
 const originalConsoleError = console.error.bind(console);
 let consoleErrorSpy: jest.SpyInstance;
+let queryClient: QueryClient;
 
 function mockUserRoutingRow(referralNoticePending: string | null = null) {
   return {
@@ -133,23 +147,31 @@ function mockUserRoutingRow(referralNoticePending: string | null = null) {
 
 function renderScreen() {
   return render(
-    <PostInterviewLaunchScreen
-      navigation={navigation}
-      route={{ params: { userId: 'user-1' } }}
-    />,
+    <QueryClientProvider client={queryClient}>
+      <PostInterviewLaunchScreen
+        navigation={navigation}
+        route={{ params: { userId: 'user-1' } }}
+      />
+    </QueryClientProvider>,
   );
 }
 
 describe('PostInterviewLaunchScreen', () => {
   beforeEach(async () => {
     jest.clearAllMocks();
-    latestFocusEffect = null;
+    queryClient = new QueryClient({
+      defaultOptions: {
+        queries: { retry: false },
+      },
+    });
+    const AsyncStorage = require('@react-native-async-storage/async-storage');
     await AsyncStorage.clear();
     mockFetchReferralDiscountStatus.mockResolvedValue(defaultStatus);
     const { supabase } = require('@data/supabase/client') as {
       supabase: { from: jest.Mock };
     };
     supabase.from.mockImplementation(() => mockUserRoutingRow());
+    const { Animated } = require('react-native');
     jest.spyOn(Animated, 'timing').mockImplementation(
       (value: Animated.Value, config: Animated.TimingAnimationConfig) =>
         ({
@@ -192,6 +214,7 @@ describe('PostInterviewLaunchScreen', () => {
       remainingReferralsToCap: 2,
       totalDiscount: 60,
     });
+    const AsyncStorage = require('@react-native-async-storage/async-storage');
     await AsyncStorage.setItem('@amoraea:post_interview_launch_referral_popup_seen:user-1', '1');
 
     const screen = renderScreen();
@@ -213,6 +236,7 @@ describe('PostInterviewLaunchScreen', () => {
       totalDiscount: 100,
       atCap: true,
     });
+    const AsyncStorage = require('@react-native-async-storage/async-storage');
     await AsyncStorage.setItem('@amoraea:post_interview_launch_referral_popup_seen:user-1', '1');
 
     const screen = renderScreen();
@@ -224,5 +248,4 @@ describe('PostInterviewLaunchScreen', () => {
       ).toBeTruthy();
     });
   });
-
 });

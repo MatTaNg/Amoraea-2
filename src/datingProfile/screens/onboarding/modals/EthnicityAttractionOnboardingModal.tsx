@@ -1,4 +1,5 @@
 import React, { useMemo, useCallback } from 'react';
+import { ONBOARDING_STEP_SCREEN_EDGES, ONBOARDING_STEP_SCREEN_EDGES_WITH_BOTTOM } from './onboardingStepScreenEdges';
 import { View, Text, ScrollView, Pressable } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Button } from '@/shared/ui/Button';
@@ -48,7 +49,7 @@ export const EthnicityAttractionOnboardingModal: React.FC<EthnicityAttractionOnb
   const canContinue = normalizedAttraction.length > 0;
 
   return (
-    <SafeAreaView style={styles.screen} edges={['top', 'left', 'right']}>
+    <SafeAreaView style={styles.screen} edges={ONBOARDING_STEP_SCREEN_EDGES}>
       <OnboardingHeader title="Attraction" onBack={onBack} />
       <ScrollView
         style={styles.scrollView}

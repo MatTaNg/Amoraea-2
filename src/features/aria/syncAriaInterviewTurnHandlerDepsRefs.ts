@@ -233,6 +233,7 @@ export function syncAriaInterviewTurnHandlerDeps(
         scenarioSkipOfferSourceRef: ctx.scenarioSkipOfferSourceRef,
         metaCommentAckAwaitingSubstantiveBaselineSeqRef: ctx.metaCommentAckAwaitingSubstantiveBaselineSeqRef,
         substantiveInterviewQuestionDeliveredSeqRef: ctx.substantiveInterviewQuestionDeliveredSeqRef,
+        recoveryAssistantSpokenAtSubstantiveSeqRef: ctx.recoveryAssistantSpokenAtSubstantiveSeqRef,
         metaCommentFrustrationCountByMomentRef: ctx.metaCommentFrustrationCountByMomentRef,
         inabilityCountByMomentRef: ctx.inabilityCountByMomentRef,
         skipRequestClassificationSeenByMomentRef: ctx.skipRequestClassificationSeenByMomentRef,

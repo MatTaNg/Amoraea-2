@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { Pressable, Text, View, StyleSheet } from 'react-native';
 
 export type ChoiceOption = { label: string; value: string };
@@ -18,16 +18,28 @@ export const SingleChoiceOptionList: React.FC<{
   onSelect: (v: string) => void;
 }> = ({ options, value, onSelect }) => {
   const [hoveredValue, setHoveredValue] = useState<string | null>(null);
+  const [pendingValue, setPendingValue] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (pendingValue != null && value === pendingValue) {
+      setPendingValue(null);
+    }
+  }, [pendingValue, value]);
+
+  const displayedValue = pendingValue ?? value;
 
   return (
     <View style={styles.col}>
       {(options ?? []).map((o) => {
-        const isSelected = value === o.value;
+        const isSelected = displayedValue === o.value;
         const isHovered = hoveredValue === o.value;
         return (
           <Pressable
             key={o.value}
-            onPress={() => onSelect(o.value)}
+            onPress={() => {
+              setPendingValue(o.value);
+              onSelect(o.value);
+            }}
             onHoverIn={() => setHoveredValue(o.value)}
             onHoverOut={() => setHoveredValue(null)}
             style={[styles.row, isSelected && styles.rowOn, isHovered && styles.rowHover]}

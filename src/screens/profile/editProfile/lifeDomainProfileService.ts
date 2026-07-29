@@ -93,6 +93,7 @@ export type OnboardingLifeDomainsSliders = {
 export async function syncLifeDomainImportanceFromOnboarding(
   userId: string,
   lifeDomains: OnboardingLifeDomainsSliders,
+  options?: { syncProfileJson?: boolean },
 ): Promise<void> {
   const mappedSettings = [
     { domain_id: 'intimacy', importance: Number(lifeDomains.intimacy ?? 0) },
@@ -115,6 +116,10 @@ export async function syncLifeDomainImportanceFromOnboarding(
     { onConflict: 'user_id,domain_id' },
   );
   if (error) throw new Error(error.message);
+
+  if (options?.syncProfileJson === false) {
+    return;
+  }
 
   await profilesRepo.updateProfile(userId, {
     lifeDomains: {
@@ -180,16 +185,37 @@ export async function saveLifeDomainAnswersFromOnboarding(
   userId: string,
   answersByDomain: LifeDomainAnswersMap,
 ): Promise<void> {
+  const updatedAt = new Date().toISOString();
+  const rows: Array<{
+    user_id: string;
+    domain_id: LifeDomainId;
+    question_id: string;
+    show_on_match: boolean;
+    answer: string;
+    updated_at: string;
+  }> = [];
+
   for (const domainId of Object.keys(answersByDomain) as LifeDomainId[]) {
     const domainAnswers = answersByDomain[domainId];
     if (!domainAnswers) continue;
     for (const [questionId, raw] of Object.entries(domainAnswers)) {
       const answer = raw?.trim() ?? '';
       if (!answer) continue;
-      await upsertLifeDomainAnswer(userId, domainId, questionId, {
-        answer,
+      rows.push({
+        user_id: userId,
+        domain_id: domainId,
+        question_id: questionId,
         show_on_match: false,
+        answer,
+        updated_at: updatedAt,
       });
     }
   }
+
+  if (rows.length === 0) return;
+
+  const { error } = await supabase.from('life_domain_answers').upsert(rows, {
+    onConflict: 'user_id,domain_id,question_id',
+  });
+  if (error) throw new Error(error.message);
 }

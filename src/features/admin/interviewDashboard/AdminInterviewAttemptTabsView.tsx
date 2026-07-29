@@ -137,6 +137,19 @@ export function AdminInterviewAttemptTabsView({
 
   const resolvedUserId = userId ?? attempt?.user_id ?? candidateUser?.id ?? null;
 
+  const refreshProfile = useCallback(() => {
+    if (!resolvedUserId) {
+      setProfileUser(null);
+      setProfileLoading(false);
+      return;
+    }
+    setProfileLoading(true);
+    void fetchAdminUserProfile(resolvedUserId).then((data) => {
+      setProfileUser(data ?? emptyAdminUserProfile(resolvedUserId));
+      setProfileLoading(false);
+    });
+  }, [resolvedUserId]);
+
   useEffect(() => {
     if (!resolvedUserId) {
       setProfileUser(null);
@@ -193,7 +206,10 @@ export function AdminInterviewAttemptTabsView({
         profileUser: profileRecord,
         profileLoading,
         selectedAttempt: attempt,
-        onRefreshData: () => void refreshAttempt(),
+        onRefreshData: () => {
+          void refreshAttempt();
+          refreshProfile();
+        },
         candidateUser: candidateUser ?? ({ id: attempt.user_id } as UserRow),
       })}
     </View>

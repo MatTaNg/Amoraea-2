@@ -4,6 +4,7 @@ import {
   classifyUserMetaComment,
   isExplicitRepeatRequestPreClassification,
 } from '@features/aria/metaCommentClassification';
+import { classifyResumeWelcomeBackRepeatIntent } from '@features/aria/resumeWelcomeBackRepeat';
 import { classifyResumeRepeatIntent } from '@features/aria/resumeRepeatIntent';
 
 /**
@@ -92,6 +93,14 @@ export function shouldAllowResumeRepeatChoiceTurnProcessing(
   // "I don't know" / inability must reach skip-confirmation — not die on the resume choice gate.
   const metaType = classifyUserMetaComment(userText)?.type;
   if (metaType === 'inability' || metaType === 'skip_request') return true;
+  const welcomeIntent = classifyResumeWelcomeBackRepeatIntent(userText);
+  if (
+    welcomeIntent === 'repeat_scenario' ||
+    welcomeIntent === 'repeat_question' ||
+    welcomeIntent === 'continue'
+  ) {
+    return true;
+  }
   const intent = classifyResumeRepeatIntent(userText);
   if (intent === 'repeat' || intent === 'continue') return true;
   if (looksLikeRepeatCueInAmbiguousReply(userText)) return true;

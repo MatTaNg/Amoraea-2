@@ -55,7 +55,6 @@ describe('disclosureCalibration', () => {
         moment5WordCount: 100,
         moment4Concreteness: 'high',
         moment5Concreteness: 'low',
-        vocabDensity: 1.2,
       }),
     ).toBe(false);
 
@@ -66,7 +65,6 @@ describe('disclosureCalibration', () => {
         moment5WordCount: 100,
         moment4Concreteness: 'high',
         moment5Concreteness: 'low',
-        vocabDensity: 1.2,
       }),
     ).toBe(true);
 
@@ -77,7 +75,6 @@ describe('disclosureCalibration', () => {
         moment5WordCount: 180,
         moment4Concreteness: 'moderate',
         moment5Concreteness: 'moderate',
-        vocabDensity: 1.0,
       }),
     ).toBe(false);
   });

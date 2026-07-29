@@ -96,6 +96,12 @@ export interface StoredInterviewData {
   /** Set by unhandled-rejection safety net */
   emergencySave?: boolean;
   savedAt?: string;
+  /** Scenarios whose first assessable opening question TTS completed (resume checkpoint). */
+  scenarioOpeningDeliveredFor?: Array<1 | 2 | 3>;
+  /** Confirmed scenario skip count (moments 1–3) — survives resume when in-memory refs reset. */
+  scenarioSkipConfirmedCount?: number;
+  /** Last assessable question text at save time — used to replay question-only on resume. */
+  lastQuestionText?: string | null;
 }
 
 /** Merge prior disk snapshot with a patch without dropping fields omitted from `patch` (partial saves). */

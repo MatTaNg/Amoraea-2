@@ -1,4 +1,5 @@
 import React, { useEffect, useState } from 'react';
+import { ONBOARDING_STEP_SCREEN_EDGES, ONBOARDING_STEP_SCREEN_EDGES_WITH_BOTTOM } from './onboardingStepScreenEdges';
 import { Pressable, ScrollView, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Button } from '@/shared/ui/Button';
@@ -69,7 +70,7 @@ export const AttractionPreferencesModal: React.FC<AttractionPreferencesModalProp
     Array.isArray(preferencesAgeRange) && heightDynamicPreference.length > 0;
 
   return (
-    <SafeAreaView style={styles.screen} edges={['top', 'left', 'right']}>
+    <SafeAreaView style={styles.screen} edges={ONBOARDING_STEP_SCREEN_EDGES}>
       <OnboardingHeader title="What are you usually attracted to?" onBack={onBack} />
       <ScrollView
         style={styles.scrollView}

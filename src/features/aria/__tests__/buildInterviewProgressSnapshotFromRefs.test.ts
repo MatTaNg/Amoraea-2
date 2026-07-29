@@ -13,6 +13,7 @@ describe('buildInterviewProgressSnapshotFromRefs', () => {
       scenarioScores: {},
       currentScenario: 1,
       resumeActiveScenario: null,
+      lastQuestionText: null,
     });
   });
 

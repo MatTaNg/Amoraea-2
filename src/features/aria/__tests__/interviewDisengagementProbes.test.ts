@@ -5,6 +5,7 @@ import {
   SCENARIO_C_SOPHIE_PERSPECTIVE_PROBE,
   evaluateRepairRefusalDetection,
   findLastRepeatableInterviewQuestionText,
+  findLastMoment4RepeatableQuestionText,
   isClientOrElongatingInterviewProbeAssistant,
   isInterviewHardStopUserTurn,
   isRepairRefusalProbeAssistantLine,
@@ -15,6 +16,7 @@ import {
   looksLikeScenarioBRepairAsJamesQuestion,
   shouldAdvanceScenarioAAfterSatisfiedRepair,
   findLastUserWithPriorScenarioARepairContext,
+  shouldSuppressScenarioAAssistantLineAfterSatisfiedRepair,
   streamMissedScenarioARepairSatisfiedHandoffDelivery,
   stripScenarioARepairQuestion,
   stripEmbeddedScenarioARepairQuestionAsk,
@@ -35,6 +37,7 @@ import {
 } from '../interviewDisengagementProbes';
 import { applyPostClaudeScenarioAdvanceBundleOverride } from '../interviewScenarioAdvanceAfterRepair';
 import { SCENARIO_A_REPAIR_QUESTION_AFTER_CONTEMPT_COPY, SCENARIO_A_CONTEMPT_PROBE_DELIVERED_COPY } from '../probeAndScoringUtils';
+import { scenarioAMinimumEngagementForHandoff } from '../scenarioFollowUpTranscriptGuard';
 import {
   SCENARIO_B_JAMES_DIFFERENTLY_CANONICAL,
   SCENARIO_B_JAMES_REPAIR_CANONICAL,
@@ -42,6 +45,9 @@ import {
 } from '../scenarioBProbeLogic';
 import { SCENARIO_C_REPAIR_QUESTION_CANONICAL } from '../scenarioCPromptDetection';
 import { SCENARIO_3_TEXT } from '../interviewScenarioVignetteCopy';
+import { MOMENT_4_COMMITMENT_THRESHOLD_QUESTION_TEXT, MOMENT_4_GRUDGE_QUESTION_TEXT } from '../moment4ProbeLogic';
+import { buildMoment4ThresholdAnswerToMoment5Bundle, buildScenario3ToMoment4BundleForInterview } from '../interviewTransitionBundles';
+import { MOMENT_5_ACCOUNTABILITY_QUESTION_TEXT } from '../probeAndScoringUtils';
 import { isScenarioBRepairAsJamesQuestion } from '../scenarioBTranscriptGates';
 
 describe('interviewDisengagementProbes', () => {
@@ -729,6 +735,19 @@ describe('interviewDisengagementProbes', () => {
     ).toBe(true);
   });
 
+  it('does not treat contempt-only analysis as satisfied repair for Scenario A handoff', () => {
+    const messages = [
+      { role: 'assistant', content: SCENARIO_A_CONTEMPT_PROBE_DELIVERED_COPY },
+      {
+        role: 'user',
+        content:
+          "Emma's frustrated I'm assuming she's referring to him always taking time taking share time that they're supposed to spend together to spend with their family with his family",
+      },
+    ];
+    expect(shouldAdvanceScenarioAAfterSatisfiedRepair(messages, '', 1)).toBe(false);
+    expect(scenarioAMinimumEngagementForHandoff(messages)).toBe(false);
+  });
+
   it('advances Scenario A when contempt answer already includes concrete repair substance', () => {
     const messages = [
       { role: 'assistant', content: SCENARIO_A_CONTEMPT_PROBE_DELIVERED_COPY },
@@ -800,6 +819,37 @@ describe('interviewDisengagementProbes', () => {
       shouldAdvanceScenarioAAfterSatisfiedRepair(
         messages,
         'Makes sense. What could Ryan have done differently to avoid the situation getting to this point?',
+        1,
+      ),
+    ).toBe(true);
+  });
+
+  it('findLastUserWithPriorScenarioARepairContext skips score-decline meta before repair answer', () => {
+    const messages = [
+      { role: 'assistant', content: 'If you were Ryan, how would you repair this?' },
+      {
+        role: 'assistant',
+        content:
+          "Unfortunately I can't reveal scores at this moment, just do the best you can, you're doing great!",
+      },
+      {
+        role: 'user',
+        content:
+          "If I were Ryan, I would say, oh I see you're upset, let's talk about what we both need so the situation doesn't repeat itself.",
+      },
+    ];
+    const ctx = findLastUserWithPriorScenarioARepairContext(messages);
+    expect(ctx.priorRepairAssistantContent).toMatch(/how would you repair this/i);
+    expect(
+      shouldSuppressScenarioAAssistantLineAfterSatisfiedRepair(
+        'How would you actually say that to Emma — what would those words sound like?',
+        messages,
+      ),
+    ).toBe(true);
+    expect(
+      shouldAdvanceScenarioAAfterSatisfiedRepair(
+        messages,
+        'How would you actually say that to Emma — what would those words sound like?',
         1,
       ),
     ).toBe(true);
@@ -1135,7 +1185,7 @@ describe('interviewDisengagementProbes', () => {
     expect(pick?.probe).toBe(SCENARIO_C_SOPHIE_PERSPECTIVE_PROBE);
   });
 
-  it('Scenario C Q1 Sophie perspective probe does not fire when mentalizing surface probe already fired', () => {
+  it('Scenario C Q1 Sophie perspective probe still fires when mentalizing surface probe already fired', () => {
     const answer =
       "He feels put on the spot and he's buying time to figure out what to say — Daniel probably needs a moment before he can face her.";
     const pick = pickClientDisengagementProbe({
@@ -1150,7 +1200,8 @@ describe('interviewDisengagementProbes', () => {
       scenarioCSophiePerspectiveProbeAlreadyFired: false,
       mentalizingSurfaceProbeAlreadyFired: true,
     });
-    expect(pick).toBeNull();
+    expect(pick?.kind).toBe('scenario_c_sophie_perspective');
+    expect(pick?.probe).toBe(SCENARIO_C_SOPHIE_PERSPECTIVE_PROBE);
   });
 });
 
@@ -1288,6 +1339,24 @@ describe('findLastRepeatableInterviewQuestionText', () => {
     ).toBe(SCENARIO_C_REPAIR_QUESTION_CANONICAL);
   });
 
+  it('falls back to Situation 3 prompt when last assistant is S2 Q1 during Scenario 3 resume', () => {
+    const s2Q1 =
+      'Sarah has been job hunting for four months. What do you think is going on here?';
+    const s3Q1 =
+      "When Daniel comes back and says 'I didn't know what to say,' what do you make of that?";
+    const messages = [
+      { role: 'assistant', content: s2Q1, scenarioNumber: 2, interviewMoment: 2 },
+      { role: 'assistant', content: s3Q1, scenarioNumber: 2, interviewMoment: 3 },
+      { role: 'user', content: 'Daniel shut down.', scenarioNumber: 2, interviewMoment: 3 },
+      { role: 'assistant', content: s2Q1, scenarioNumber: 2, interviewMoment: 3 },
+    ];
+    expect(
+      findLastRepeatableInterviewQuestionText(messages, s2Q1, {
+        activeScenario: 3,
+      }),
+    ).toMatch(/what do you make of that\?/i);
+  });
+
   it('skips opening briefing after resume and falls back to Situation 3 prompt', () => {
     const briefing =
       "Good to meet you, Matt. The way this works is I'll first give you three situations, and you just tell me what you'd do in each situation. Then I'll give you two short personal questions. The whole thing usually takes about 20 to 30 minutes. Are you ready?";
@@ -1341,6 +1410,24 @@ describe('findLastRepeatableInterviewQuestionText', () => {
     expect(out).toBe(SCENARIO_B_Q1_CANONICAL);
   });
 
+  it('skips S2→S3 boundary pivot without a question and returns the S3 main prompt', () => {
+    const pivot = "Got it. One more situation and then we'll get personal.";
+    const s3Question =
+      "Sophie and Daniel have had the same argument for the third time. When Daniel comes back and says 'I didn't know what to say,' what do you make of that?";
+    const messages = [
+      { role: 'assistant', content: 'If you were James, how would you repair this?', scenarioNumber: 2 },
+      { role: 'user', content: 'I would listen first.', scenarioNumber: 2 },
+      { role: 'assistant', content: pivot, scenarioNumber: 2 },
+      { role: 'assistant', content: s3Question, scenarioNumber: 3 },
+      { role: 'user', content: 'I think Daniel shut down.', scenarioNumber: 3 },
+    ];
+    const out = findLastRepeatableInterviewQuestionText(messages, pivot, {
+      activeScenario: 3,
+    });
+    expect(out).not.toMatch(/one more situation|get personal/i);
+    expect(out).toMatch(/what do you make of that\?/i);
+  });
+
   it('strips skip-accepted bridge and returns only the next question', () => {
     const skipBridgeWithQuestion =
       'Okay, we can skip this one, the next question is What do you think is going on here?';
@@ -1357,5 +1444,43 @@ describe('findLastRepeatableInterviewQuestionText', () => {
     });
     expect(out).not.toMatch(/we can skip this one/i);
     expect(out).toBe('What do you think is going on here?');
+  });
+
+  it('prefers grudge question over Scenario 2 James repair when interviewMoment 4 is persisted', () => {
+    const messages = [
+      { role: 'assistant', content: SCENARIO_B_JAMES_REPAIR_CANONICAL, scenarioNumber: 2 },
+      { role: 'assistant', content: 'How do you think this situation could be repaired?', scenarioNumber: 3 },
+      { role: 'user', content: 'Daniel should listen more.', scenarioNumber: 3, interviewMoment: 3 },
+      { role: 'user', content: 'My coworker and I had a falling out.', interviewMoment: 4 },
+    ];
+    expect(findLastMoment4RepeatableQuestionText(messages)).toBe(MOMENT_4_GRUDGE_QUESTION_TEXT);
+    expect(
+      findLastRepeatableInterviewQuestionText(messages, SCENARIO_B_JAMES_REPAIR_CANONICAL, {
+        activeScenario: 3,
+      }),
+    ).toBe(MOMENT_4_GRUDGE_QUESTION_TEXT);
+  });
+
+  it('prefers Moment 5 conflict question over older S3→M4 handoff on resume replay', () => {
+    const s3ToM4 = buildScenario3ToMoment4BundleForInterview(
+      'Alex',
+      MOMENT_4_GRUDGE_QUESTION_TEXT,
+      'They need to stop walking away.',
+    );
+    const m5Bundle = buildMoment4ThresholdAnswerToMoment5Bundle(
+      'Alex',
+      MOMENT_5_ACCOUNTABILITY_QUESTION_TEXT,
+      'I would work through it unless trust is gone.',
+    );
+    const messages = [
+      { role: 'assistant', content: s3ToM4, scenarioNumber: 3, interviewMoment: 5 },
+      { role: 'user', content: 'My friend betrayed me.', interviewMoment: 4 },
+      { role: 'assistant', content: MOMENT_4_COMMITMENT_THRESHOLD_QUESTION_TEXT, interviewMoment: 5 },
+      { role: 'user', content: 'I try to work through conflict.', interviewMoment: 5 },
+      { role: 'assistant', content: m5Bundle, interviewMoment: 5 },
+    ];
+    expect(findLastRepeatableInterviewQuestionText(messages, s3ToM4, { activeScenario: 3 })).toBe(
+      MOMENT_5_ACCOUNTABILITY_QUESTION_TEXT,
+    );
   });
 });

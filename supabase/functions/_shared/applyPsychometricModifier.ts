@@ -217,8 +217,6 @@ function buildUncertaintyInput(
     mentalizing_overcertainty_count: finiteNumberOrNull(attempt.mentalizing_overcertainty_count),
     defense_patterns: (attempt.defense_patterns as Record<string, boolean> | null) ?? null,
     review_flags: Array.isArray(attempt.review_flags) ? (attempt.review_flags as string[]) : null,
-    personal_moment_emotional_vocab_low:
-      attempt.personal_moment_emotional_vocab_low === true ? true : null,
     disclosure_calibration:
       typeof attempt.disclosure_calibration === 'string' ? attempt.disclosure_calibration : null,
     scenario_1_scores: (attempt.scenario_1_scores as Record<string, unknown> | null) ?? null,
@@ -341,7 +339,6 @@ export async function applyPsychometricModifierToAttempt(
       disclosureCalibration: attempt.disclosure_calibration as string | null,
       moment5Concreteness: attempt.moment_5_concreteness as string | null,
       moment4Concreteness: attempt.moment_4_concreteness as string | null,
-      personalMomentVocabDensity: attempt.personal_moment_emotional_vocab_density as number | null,
       regulationPillar: pillars.regulation,
       accountabilityPillar: pillars.accountability,
       egoDevelopmentLevel: attempt.ego_development_level as number | null,

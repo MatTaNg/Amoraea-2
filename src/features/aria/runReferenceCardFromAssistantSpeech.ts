@@ -12,12 +12,11 @@ import {
 
 } from '@features/aria/interviewMomentScenarioConfig';
 
+import { isIrrelevantAnswerRetryAssistantLine } from '@features/aria/interviewAnswerRelevance';
 import {
-
+  applyMoment4ThresholdReferenceCard,
   isAssistantBubbleForTranscript,
-
   isResumeOrScenarioReplayUiPrompt,
-
 } from '@features/aria/interviewReferenceCardResumeHelpers';
 
 import { stripControlTokens } from '@features/aria/interviewControlTokens';
@@ -71,6 +70,7 @@ import {
   syncInterviewScenarioRefsFromSpokenDelivery,
   type InterviewScenarioRefSyncTarget,
 } from '@features/aria/interviewScenarioRefSync';
+import { textContainsScenarioCVignetteBody } from '@features/aria/emotionScenarioTransitionInference';
 import {
   spokenTextStartsMoment5PrimaryConflictQuestion,
   transcriptAssistantContainsMoment5PrimaryConflictQuestion,
@@ -107,15 +107,16 @@ import {
   looksLikeScenarioCSophiePerspectiveQuestion,
   looksLikeScenarioCSophieRolePlayMisparaphraseQuestion,
   looksLikeScenarioCRepairAsDanielQuestion,
-  SCENARIO_C_REPAIR_QUESTION_CANONICAL,
 } from '@features/aria/scenarioCPromptDetection';
-import { SCENARIO_C_SOPHIE_PERSPECTIVE_PROBE } from '@features/aria/interviewDisengagementProbeCopy';
 import {
   isIncompleteMoment4ThresholdLeadSentence,
+  looksLikeMoment4GrudgePrompt,
   looksLikeMoment4ThresholdParaphraseInProgress,
   looksLikeMoment4ThresholdQuestion,
   MOMENT_4_COMMITMENT_THRESHOLD_QUESTION_CARD_BODY,
+  MOMENT_4_GRUDGE_QUESTION_TEXT,
 } from '@features/aria/moment4ProbeLogic';
+import { looksLikeMoment4SpecificityFollowUpEcho } from '@features/aria/moment4SpecificityFollowUp';
 
 import {
 
@@ -134,7 +135,7 @@ import {
   type Situation2ModalDeliveryState,
 } from '@features/aria/situation2ExactModalPrompt';
 import {
-  applySituation3ExactModalPrompt,
+  applySituation3ReferenceCard,
   readSituation3DeliveryState,
 } from '@features/aria/situation3ExactModalPrompt';
 import { transcriptContainsScenarioBJamesDifferentlyProbe } from '@features/aria/scenarioFollowUpTranscriptGuard';
@@ -156,9 +157,9 @@ function applyMoment5PersonalReflectionCard(
   if (deps.committedScenarioRef) {
     deps.committedScenarioRef.current = personalScenario;
   }
-  deps.setReferenceCardScenario(personalScenario);
+  deps.setReferenceCardScenario?.(personalScenario);
   deps.setReferenceCardPrompt(null);
-  deps.setInterviewUiPhase('scenario_active');
+  deps.setInterviewUiPhase?.('scenario_active');
   if (deps.lastQuestionTextRef) {
     deps.lastQuestionTextRef.current = questionText.trim();
   }
@@ -217,6 +218,170 @@ function applySituation2ExactModalPrompt(
   }
 }
 
+/** S2 follow-up probes (James differently / repair) must show Situation 2 even when committedScenarioRef is stale. */
+export function applySituation2FollowUpProbeReferenceCard(
+  deps: Pick<
+    ApplyReferenceCardFromAssistantSpeechDeps,
+    | 'committedScenarioRef'
+    | 'setReferenceCardScenario'
+    | 'setReferenceCardPrompt'
+    | 'setInterviewUiPhase'
+    | 'lastQuestionTextRef'
+  >,
+  prompt: string,
+): void {
+  const s2Scenario = { label: 'Situation 2', text: SHOW_SCENARIO_2_VIGNETTE_EXACT };
+  if (deps.committedScenarioRef) {
+    deps.committedScenarioRef.current = s2Scenario;
+  }
+  deps.setReferenceCardScenario?.(s2Scenario);
+  deps.setReferenceCardPrompt(prompt);
+  deps.setInterviewUiPhase?.('scenario_active');
+  if (deps.lastQuestionTextRef) {
+    deps.lastQuestionTextRef.current = prompt;
+  }
+}
+
+export type RestoreReferenceCardFromAssessableQuestionDeps = Pick<
+  ApplyReferenceCardFromAssistantSpeechDeps,
+  | 'committedScenarioRef'
+  | 'setReferenceCardScenario'
+  | 'setReferenceCardPrompt'
+  | 'setInterviewUiPhase'
+  | 'lastQuestionTextRef'
+  | 'messages'
+>;
+
+/** Re-pin Show scenario modal to the assessable question after cut-off / irrelevant-answer retry infra. */
+export function restoreReferenceCardPromptFromAssessableQuestion(
+  deps: RestoreReferenceCardFromAssessableQuestionDeps,
+  questionText: string,
+): void {
+  const q = questionText.trim();
+  if (!q) return;
+  const preservedLastQuestion = deps.lastQuestionTextRef?.current;
+  const restoreLastQuestion = (): void => {
+    if (deps.lastQuestionTextRef && preservedLastQuestion != null) {
+      deps.lastQuestionTextRef.current = preservedLastQuestion;
+    }
+  };
+
+  if (looksLikeScenarioBRepairAsJamesQuestion(q)) {
+    applySituation2FollowUpProbeReferenceCard(deps, SCENARIO_B_JAMES_REPAIR_CANONICAL);
+    restoreLastQuestion();
+    return;
+  }
+  if (looksLikeScenarioBJamesDifferentlyQuestion(q)) {
+    applySituation2FollowUpProbeReferenceCard(deps, SCENARIO_B_JAMES_DIFFERENTLY_CANONICAL);
+    restoreLastQuestion();
+    return;
+  }
+  if (looksLikeScenarioAContemptProbeQuestion(q)) {
+    deps.setReferenceCardPrompt(SCENARIO_A_CONTEMPT_PROBE_DELIVERED_COPY);
+    restoreLastQuestion();
+    return;
+  }
+  if (looksLikeScenarioARepairQuestion(q) || looksLikeScenarioARepairStreamFragment(q)) {
+    deps.setReferenceCardPrompt(SCENARIO_A_REPAIR_QUESTION_AFTER_CONTEMPT_COPY);
+    restoreLastQuestion();
+    return;
+  }
+  if (
+    looksLikeScenarioCSophiePerspectiveQuestion(q) ||
+    looksLikeScenarioCRepairAsDanielQuestion(q) ||
+    isScenarioCRepairAssistantPrompt(q)
+  ) {
+    const assistantForModal = (deps.messages ?? [])
+      .filter((m) => m.role === 'assistant' && isAssistantBubbleForTranscript(m))
+      .map((m) => ({
+        role: m.role,
+        content: stripControlTokens(m.content ?? '').trim(),
+      }));
+    applySituation3ReferenceCard(
+      deps as ApplyReferenceCardFromAssistantSpeechDeps,
+      assistantForModal,
+      q,
+    );
+    restoreLastQuestion();
+    return;
+  }
+  if (
+    looksLikeMoment4ThresholdQuestion(q) ||
+    q === MOMENT_4_COMMITMENT_THRESHOLD_QUESTION_CARD_BODY
+  ) {
+    applyMoment4ThresholdReferenceCard(deps);
+    restoreLastQuestion();
+    return;
+  }
+  if (looksLikeMoment4GrudgePrompt(q) || q === MOMENT_4_GRUDGE_QUESTION_TEXT) {
+    applyMoment5PersonalReflectionCard(deps as ApplyReferenceCardFromAssistantSpeechDeps, MOMENT_4_GRUDGE_QUESTION_TEXT);
+    restoreLastQuestion();
+    return;
+  }
+  if (looksLikeMoment4SpecificityFollowUpEcho(q)) {
+    applyMoment5PersonalReflectionCard(deps as ApplyReferenceCardFromAssistantSpeechDeps, q);
+    restoreLastQuestion();
+    return;
+  }
+  if (transcriptAssistantContainsMoment5PrimaryConflictQuestion(q)) {
+    if (deps.committedScenarioRef) {
+      deps.committedScenarioRef.current = MOMENT_5_REFERENCE_SCENARIO;
+    }
+    deps.setReferenceCardScenario?.(MOMENT_5_REFERENCE_SCENARIO);
+    deps.setReferenceCardPrompt(null);
+    deps.setInterviewUiPhase?.('scenario_active');
+    restoreLastQuestion();
+    return;
+  }
+  if (looksLikeMoment5ResolutionFollowUpPrompt(q)) {
+    const cardBody = stripInterviewClosingBundledWithMoment5ResolutionFollowUp(q).trim() || q;
+    applyMoment5PersonalReflectionCard(deps as ApplyReferenceCardFromAssistantSpeechDeps, cardBody);
+    restoreLastQuestion();
+    return;
+  }
+  if (looksLikeMoment5AccountabilityProbeAssistantPrompt(q)) {
+    applyMoment5PersonalReflectionCard(
+      deps as ApplyReferenceCardFromAssistantSpeechDeps,
+      MOMENT_5_ACCOUNTABILITY_PROBE_TEXT.trim(),
+    );
+    restoreLastQuestion();
+    return;
+  }
+  if (looksLikeMoment5SpecificityRedirectPrompt(q)) {
+    applyMoment5PersonalReflectionCard(
+      deps as ApplyReferenceCardFromAssistantSpeechDeps,
+      MOMENT_5_SPECIFICITY_REDIRECT_TEXT.trim(),
+    );
+    restoreLastQuestion();
+    return;
+  }
+  if (looksLikeMoment5ConflictValidityClarificationPrompt(q)) {
+    applyMoment5PersonalReflectionCard(
+      deps as ApplyReferenceCardFromAssistantSpeechDeps,
+      MOMENT_5_CONFLICT_VALIDITY_CLARIFICATION_TEXT.trim(),
+    );
+    restoreLastQuestion();
+    return;
+  }
+
+  if (deps.committedScenarioRef?.current) {
+    deps.setReferenceCardPrompt?.(q);
+    deps.setInterviewUiPhase?.('scenario_active');
+    restoreLastQuestion();
+  }
+}
+
+function buildAssistantForModal(
+  messages: ApplyReferenceCardFromAssistantSpeechDeps['messages'],
+): Array<{ role: string; content?: string | null }> {
+  return messages
+    .filter((m) => m.role === 'assistant' && isAssistantBubbleForTranscript(m))
+    .map((m) => ({
+      role: m.role,
+      content: stripControlTokens(m.content ?? '').trim(),
+    }));
+}
+
 function applySituation1ExactModalPrompt(
 
   deps: ApplyReferenceCardFromAssistantSpeechDeps,
@@ -255,11 +420,33 @@ export function runApplyReferenceCardFromAssistantSpeech(
 
   if (!cleaned) return;
 
-
+  const assistantForModal = buildAssistantForModal(deps.messages);
 
   const committedLabel = deps.committedScenarioRef?.current?.label;
 
+  if (
+    looksLikeScenarioCRepairAsDanielQuestion(cleaned) ||
+    isScenarioCRepairAssistantPrompt(cleaned)
+  ) {
+    applySituation3ReferenceCard(deps, assistantForModal, cleaned);
+    return;
+  }
 
+  if (
+    looksLikeScenarioCSophiePerspectiveQuestion(cleaned) ||
+    looksLikeScenarioCSophieRolePlayMisparaphraseQuestion(cleaned)
+  ) {
+    applySituation3ReferenceCard(deps, assistantForModal, cleaned);
+    return;
+  }
+
+  if (
+    textContainsScenarioCVignetteBody(cleaned) ||
+    detectActiveScenarioFromMessage(cleaned)?.label === 'Situation 3'
+  ) {
+    applySituation3ReferenceCard(deps, assistantForModal, cleaned);
+    return;
+  }
 
   if (looksLikeScenarioAContemptProbeQuestion(cleaned)) {
 
@@ -303,100 +490,33 @@ export function runApplyReferenceCardFromAssistantSpeech(
 
 
   if (
-    (committedLabel === 'Situation 2' || !committedLabel) &&
-    (looksLikeScenarioBJamesSayToJamesRolePlayQuestion(cleaned) ||
-      isIncompleteScenarioBJamesSayToJamesLeadSentence(cleaned))
+    looksLikeScenarioBJamesSayToJamesRolePlayQuestion(cleaned) ||
+    isIncompleteScenarioBJamesSayToJamesLeadSentence(cleaned)
   ) {
     const prompt =
       looksLikeScenarioBRepairAsJamesQuestion(cleaned) ||
       isIncompleteScenarioBJamesRepairLeadSentence(cleaned)
         ? SCENARIO_B_JAMES_REPAIR_CANONICAL
         : SCENARIO_B_JAMES_DIFFERENTLY_CANONICAL;
-    deps.setReferenceCardPrompt(prompt);
-    if (deps.lastQuestionTextRef) {
-      deps.lastQuestionTextRef.current = prompt;
-    }
+    applySituation2FollowUpProbeReferenceCard(deps, prompt);
     return;
   }
 
   if (
-    (committedLabel === 'Situation 2' || !committedLabel) &&
-    (looksLikeScenarioBJamesDifferentlyQuestion(cleaned) || isIncompleteScenarioBJamesDifferentlyLeadSentence(cleaned))
+    looksLikeScenarioBJamesDifferentlyQuestion(cleaned) ||
+    isIncompleteScenarioBJamesDifferentlyLeadSentence(cleaned)
   ) {
-
-    deps.setReferenceCardPrompt(SCENARIO_B_JAMES_DIFFERENTLY_CANONICAL);
-
-    if (deps.lastQuestionTextRef) {
-
-      deps.lastQuestionTextRef.current = SCENARIO_B_JAMES_DIFFERENTLY_CANONICAL;
-
-    }
-
+    applySituation2FollowUpProbeReferenceCard(deps, SCENARIO_B_JAMES_DIFFERENTLY_CANONICAL);
     return;
-
   }
-
-
 
   if (
-    (committedLabel === 'Situation 2' || !committedLabel) &&
-    (
-      looksLikeScenarioBRepairAsJamesQuestion(cleaned) ||
-      isIncompleteScenarioBJamesRepairLeadSentence(cleaned)
-    )
+    looksLikeScenarioBRepairAsJamesQuestion(cleaned) ||
+    isIncompleteScenarioBJamesRepairLeadSentence(cleaned)
   ) {
-
-    deps.setReferenceCardPrompt(SCENARIO_B_JAMES_REPAIR_CANONICAL);
-
-    if (deps.lastQuestionTextRef) {
-
-      deps.lastQuestionTextRef.current = SCENARIO_B_JAMES_REPAIR_CANONICAL;
-
-    }
-
+    applySituation2FollowUpProbeReferenceCard(deps, SCENARIO_B_JAMES_REPAIR_CANONICAL);
     return;
-
   }
-
-
-
-  if (
-    (committedLabel === 'Situation 3' || !committedLabel) &&
-    (looksLikeScenarioCRepairAsDanielQuestion(cleaned) || isScenarioCRepairAssistantPrompt(cleaned))
-  ) {
-
-    deps.setReferenceCardPrompt(SCENARIO_C_REPAIR_QUESTION_CANONICAL);
-
-    if (deps.lastQuestionTextRef) {
-
-      deps.lastQuestionTextRef.current = SCENARIO_C_REPAIR_QUESTION_CANONICAL;
-
-    }
-
-    return;
-
-  }
-
-
-
-  if (
-    looksLikeScenarioCSophiePerspectiveQuestion(cleaned) ||
-    looksLikeScenarioCSophieRolePlayMisparaphraseQuestion(cleaned)
-  ) {
-
-    deps.setReferenceCardPrompt(SCENARIO_C_SOPHIE_PERSPECTIVE_PROBE);
-
-    if (deps.lastQuestionTextRef) {
-
-      deps.lastQuestionTextRef.current = SCENARIO_C_SOPHIE_PERSPECTIVE_PROBE;
-
-    }
-
-    return;
-
-  }
-
-
 
   if (
     looksLikeMoment4ThresholdQuestion(cleaned) ||
@@ -419,29 +539,9 @@ export function runApplyReferenceCardFromAssistantSpeech(
     return;
   }
 
-
-
-  const assistantForModal = deps.messages
-
-    .filter((m) => m.role === 'assistant' && isAssistantBubbleForTranscript(m))
-
-    .map((m) => ({
-
-      role: m.role,
-
-      content: stripControlTokens(m.content ?? '').trim(),
-
-    }));
-
-
-
   const activatesMoment5ShowScenario =
-
     transcriptAssistantContainsMoment5PrimaryConflictQuestion(cleaned) ||
-
     spokenTextStartsMoment5PrimaryConflictQuestion(cleaned);
-
-
 
   if (looksLikeMoment5ResolutionFollowUpPrompt(cleaned)) {
     const cardBody =
@@ -621,7 +721,7 @@ export function runApplyReferenceCardFromAssistantSpeech(
 
     if (scenario.label === 'Situation 3') {
       const delivery = readSituation3DeliveryState(assistantForModal);
-      applySituation3ExactModalPrompt(deps, assistantForModal, cleaned, delivery);
+      applySituation3ReferenceCard(deps, assistantForModal, cleaned, delivery);
       return;
     }
 
@@ -672,11 +772,8 @@ export function runApplyReferenceCardFromAssistantSpeech(
   }
 
   if (deps.committedScenarioRef.current.label === 'Situation 3') {
-
-    applySituation3ExactModalPrompt(deps, assistantForModal, cleaned);
-
+    applySituation3ReferenceCard(deps, assistantForModal, cleaned);
     return;
-
   }
 
 
@@ -720,6 +817,8 @@ export function runReferenceCardShouldUpdateOnPlaybackStart(rawText: string): bo
   const cleaned = stripControlTokens(rawText).trim();
 
   if (!cleaned) return false;
+
+  if (isIrrelevantAnswerRetryAssistantLine(cleaned)) return false;
 
   if (isScenarioANonScriptedModalParaphrase(cleaned)) return false;
 

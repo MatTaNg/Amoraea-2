@@ -55,8 +55,6 @@ export function computeGateResult(
     | 'disclosureCalibration'
     | 'moment4WordCount'
     | 'moment5WordCount'
-    | 'personalMomentEmotionalVocabDensity'
-    | 'personalMomentEmotionalVocabLow'
     | 'closingIntegration'
     | 'mentalizingOvercertaintyCount'
     | 'precomputedWeightedScore'
@@ -82,8 +80,6 @@ export function computeGateResult(
     disclosureCalibration: options?.disclosureCalibration,
     moment4WordCount: options?.moment4WordCount,
     moment5WordCount: options?.moment5WordCount,
-    personalMomentEmotionalVocabDensity: options?.personalMomentEmotionalVocabDensity,
-    personalMomentEmotionalVocabLow: options?.personalMomentEmotionalVocabLow,
     closingIntegration: options?.closingIntegration,
     mentalizingOvercertaintyCount: options?.mentalizingOvercertaintyCount,
     precomputedWeightedScore: options?.precomputedWeightedScore,

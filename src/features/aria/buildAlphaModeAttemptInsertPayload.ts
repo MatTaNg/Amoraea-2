@@ -63,8 +63,6 @@ export function buildAlphaModeAttemptInsertPayload(params: {
     defensePatternsForAttempt,
     moment4ConcretenessForAttempt,
     moment5ConcretenessForAttempt,
-    personalMomentEmotionalVocabDensityForAttempt,
-    personalMomentEmotionalVocabLowForAttempt,
     mentalizingOvercertaintyCountForAttempt,
   } = gateAggregate;
 
@@ -220,23 +218,11 @@ export function buildAlphaModeAttemptInsertPayload(params: {
     defense_patterns: defensePatternsForAttempt ?? alphaScoringBaseline.defense_patterns,
     moment_4_concreteness: moment4ConcretenessForAttempt ?? alphaScoringBaseline.moment_4_concreteness,
     moment_5_concreteness: moment5ConcretenessForAttempt ?? alphaScoringBaseline.moment_5_concreteness,
-    personal_moment_emotional_vocab_density:
-      personalMomentEmotionalVocabDensityForAttempt ??
-      alphaScoringBaseline.personal_moment_emotional_vocab_density,
-    personal_moment_emotional_vocab_low:
-      personalMomentEmotionalVocabLowForAttempt ?? alphaScoringBaseline.personal_moment_emotional_vocab_low,
+    personal_moment_emotional_vocab_density: null,
+    personal_moment_emotional_vocab_low: false,
     ...emotionPersistAlpha,
     disclosure_calibration: disclosureCalibrationForAttempt ?? alphaScoringBaseline.disclosure_calibration,
   };
-
-  if (typeof __DEV__ !== 'undefined' && __DEV__) {
-    console.log(
-      '[VocabFlag] persisting personal_moment_emotional_vocab_low:',
-      personalMomentEmotionalVocabLowForAttempt,
-      'density:',
-      personalMomentEmotionalVocabDensityForAttempt,
-    );
-  }
 
   return insertPayload;
 }

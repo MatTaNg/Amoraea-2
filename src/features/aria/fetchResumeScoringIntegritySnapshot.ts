@@ -40,27 +40,39 @@ export async function fetchResumeScoringIntegritySnapshot(
 ): Promise<{
   dbScenarioScores: StoredScenarioScores;
   moment4ScoresIntact: boolean | null;
+  dbSkipCount: number | null;
 }> {
   if (!attemptId || !userId) {
-    return { dbScenarioScores: {}, moment4ScoresIntact: null };
+    return { dbScenarioScores: {}, moment4ScoresIntact: null, dbSkipCount: null };
   }
-  const [cells, patternsRow] = await Promise.all([
+  const [cells, attemptRow] = await Promise.all([
     fetchAttemptScenarioScoreCells(supabase, attemptId),
     supabase
       .from('interview_attempts')
-      .select('scenario_specific_patterns')
+      .select('scenario_specific_patterns, skip_count')
       .eq('id', attemptId)
       .eq('user_id', userId)
       .maybeSingle(),
   ]);
   const dbScenarioScores = mergeLocalAndDbScenarioScores({ local: {}, dbCells: cells });
-  const patterns = patternsRow.data?.scenario_specific_patterns;
+  const patterns = attemptRow.data?.scenario_specific_patterns;
   let moment4ScoresIntact: boolean | null = null;
   if (patterns != null && typeof patterns === 'object' && !Array.isArray(patterns)) {
     const m4 = (patterns as Record<string, unknown>).moment_4_scores;
     moment4ScoresIntact = personalMomentBundleWasScored(m4);
-  } else if (patternsRow.data) {
+  } else if (attemptRow.data) {
     moment4ScoresIntact = false;
   }
-  return { dbScenarioScores, moment4ScoresIntact };
+  const rawSkip = attemptRow.data?.skip_count;
+  const dbSkipCount =
+    typeof rawSkip === 'number' && Number.isFinite(rawSkip)
+      ? rawSkip
+      : typeof rawSkip === 'string' && rawSkip.trim() !== ''
+        ? Number.parseInt(rawSkip, 10)
+        : null;
+  return {
+    dbScenarioScores,
+    moment4ScoresIntact,
+    dbSkipCount: dbSkipCount != null && Number.isFinite(dbSkipCount) ? dbSkipCount : null,
+  };
 }

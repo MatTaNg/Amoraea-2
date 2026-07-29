@@ -1,4 +1,6 @@
 import { isDecline, isExplicitPassForMoment4CommitmentFollowUp } from '@features/aria/interviewControlTokens';
+import { looksLikeIncompleteCutOffUserAnswer } from '@features/aria/interviewAnswerRelevance';
+import { looksLikeGoBackToPreviousScenarioRequest } from '@features/aria/interviewGoBackRequest';
 import { isInterviewHardStopUserTurn } from '@features/aria/interviewDisengagementProbes';
 import type { MessageWithScenario } from '@features/aria/interviewScenarioScoringSlice';
 import { ASSISTANT_INTERVIEW_SPEECH } from '@features/aria/interviewTtsSpeakOptions';
@@ -16,7 +18,7 @@ import {
   MOMENT4_SPECIFICITY_LOW_WORD_THRESHOLD,
   evaluateMoment4SpecificityProbe,
   isAnsweringMoment4SpecificityFollowUp,
-  looksLikeMoment4SpecificityFollowUpPrompt,
+  looksLikeMoment4SpecificityFollowUpEcho,
   needsMoment4SpecificityFollowUp,
   resolveMoment4GrudgeAnswerForThresholdReflection,
 } from '@features/aria/moment4SpecificityFollowUp';
@@ -24,6 +26,7 @@ import {
   extractLeadingReflectionFromMoment4ThresholdProbe,
   registerDeliveredReflection,
 } from '@features/aria/deliveredReflectionRegistry';
+import { applyMoment4ThresholdReferenceCard } from '@features/aria/interviewReferenceCardResumeHelpers';
 import type { PreClaudeTurnGateDeps } from '@features/aria/preClaudeTurnGateTypes';
 import { remoteLog } from '@utilities/remoteLog';
 
@@ -66,14 +69,20 @@ export async function runPreClaudeMoment4SpecificityGate(
     });
   }
 
+  const expectingPostSpecificityAnswer =
+    deps.currentInterviewMomentRef.current === 4 &&
+    deps.moment4ExpectingPostSpecificityUserTurnRef.current === true;
+
   const answeringAfterMoment4SpecificityProbe =
     deps.currentInterviewMomentRef.current === 4 &&
-    isAnsweringMoment4SpecificityFollowUp(messagesToUse, lastAssistantContent);
+    (isAnsweringMoment4SpecificityFollowUp(messagesToUse, lastAssistantContent) ||
+      expectingPostSpecificityAnswer);
 
   if (deps.currentInterviewMomentRef.current === 4 && answeringAfterMoment4SpecificityProbe) {
-    if (deps.moment4ExpectingPostSpecificityUserTurnRef.current) {
+    if (expectingPostSpecificityAnswer) {
       deps.moment4ExpectingPostSpecificityUserTurnRef.current = false;
     }
+    deps.moment4PostGrudgeSpecificityResolvedRef.current = true;
     deps.moment4SpecificityScoringRef.current = {
       clientSpecificityFollowUpAsked: true,
       lowSpecificityAfterProbe: needsMoment4SpecificityFollowUp(trimmed),
@@ -83,7 +92,10 @@ export async function runPreClaudeMoment4SpecificityGate(
   const moment4AnswerLooksMisplaced = looksLikeMisplacedNonGrudgeMoment4Answer(trimmed);
   const moment4ThresholdHintInAnswer = hasCommitmentThresholdSignal(trimmed);
 
-  if (deps.currentInterviewMomentRef.current === 4 && looksLikeMoment4SpecificityFollowUpPrompt(lastAssistantContent)) {
+  if (
+    deps.currentInterviewMomentRef.current === 4 &&
+    looksLikeMoment4SpecificityFollowUpEcho(lastAssistantContent)
+  ) {
     deps.moment4PostGrudgeSpecificityResolvedRef.current = true;
   }
 
@@ -116,13 +128,12 @@ export async function runPreClaudeMoment4SpecificityGate(
     lastAssistantLooksLikeMoment4Grudge &&
     !moment4AnswerLooksMisplaced
   ) {
-    if (isDecline(trimmed)) {
+    if (isDecline(trimmed) && !looksLikeIncompleteCutOffUserAnswer(trimmed)) {
       deps.moment4PostGrudgeSpecificityResolvedRef.current = true;
     } else if (moment4SpecificityProbeEval && !moment4SpecificityProbeEval.probeShouldFire) {
       if (
-        moment4SpecificityProbeEval.hasNamedPerson &&
-        (moment4SpecificityProbeEval.hasSpecificEvent ||
-          moment4SpecificityProbeEval.wordCount >= MOMENT4_SPECIFICITY_LOW_WORD_THRESHOLD)
+        moment4SpecificityProbeEval.triggerReason !== 'cutoff' &&
+        !looksLikeIncompleteCutOffUserAnswer(trimmed)
       ) {
         deps.moment4PostGrudgeSpecificityResolvedRef.current = true;
       }
@@ -140,7 +151,8 @@ export async function runPreClaudeMoment4SpecificityGate(
   const shouldForceMoment4ThresholdProbe =
     moment4CommitmentFollowUpBaseEligible &&
     !moment4UserExplicitPass &&
-    deps.moment4PostGrudgeSpecificityResolvedRef.current;
+    deps.moment4PostGrudgeSpecificityResolvedRef.current &&
+    !looksLikeIncompleteCutOffUserAnswer(trimmed);
   const moment4ThresholdFollowUpAlreadyInSession =
     deps.moment4ThresholdProbeAskedRef.current ||
     transcriptIncludesMoment4ThresholdAssistant(messagesToUse.slice(0, -1));
@@ -155,8 +167,10 @@ export async function runPreClaudeMoment4SpecificityGate(
       moment4CommitmentFollowUpReasonIfFalse = 'not_replying_to_grudge_or_specificity_prompt';
     } else if (moment4AnswerLooksMisplaced) {
       moment4CommitmentFollowUpReasonIfFalse = 'misplaced_non_grudge_answer';
-    } else if (!deps.moment4PostGrudgeSpecificityResolvedRef.current) {
+    }     else if (!deps.moment4PostGrudgeSpecificityResolvedRef.current) {
       moment4CommitmentFollowUpReasonIfFalse = 'post_grudge_specificity_unresolved';
+    } else if (looksLikeIncompleteCutOffUserAnswer(trimmed)) {
+      moment4CommitmentFollowUpReasonIfFalse = 'incomplete_cutoff_answer';
     }
   }
 
@@ -194,6 +208,7 @@ export async function runPreClaudeMoment4SpecificityGate(
     !shouldForceMoment4ThresholdProbe &&
     lastAssistantLooksLikeMoment4Grudge &&
     !moment4AnswerLooksMisplaced &&
+    !looksLikeIncompleteCutOffUserAnswer(trimmed) &&
     !isDecline(trimmed) &&
     !isInterviewHardStopUserTurn(trimmed) &&
     moment4SpecificityProbeEval?.probeShouldFire === true
@@ -241,7 +256,9 @@ export async function runPreClaudeMoment4SpecificityGate(
     deps.waitingForClosingAdditionRef.current === null &&
     deps.currentInterviewMomentRef.current === 4 &&
     shouldForceMoment4ThresholdProbe &&
-    !moment4ThresholdFollowUpAlreadyInSession
+    !moment4ThresholdFollowUpAlreadyInSession &&
+    !looksLikeIncompleteCutOffUserAnswer(trimmed) &&
+    !looksLikeGoBackToPreviousScenarioRequest(trimmed)
   ) {
     const grudgeAnswerForReflection = resolveMoment4GrudgeAnswerForThresholdReflection(
       messagesToUse,
@@ -255,6 +272,13 @@ export async function runPreClaudeMoment4SpecificityGate(
       interviewSessionId: deps.interviewSessionIdRef.current,
       preview: thresholdProbeText.slice(0, 240),
     });
+    if (deps.parallelStreamingTtsRef.current.active) {
+      deps.parallelStreamingTtsRef.current.cancelRequested = true;
+      void remoteLog('[M4_THRESHOLD_PRE_INJECT_STREAM_CANCEL]', {
+        interviewSessionId: deps.interviewSessionIdRef.current,
+        spokenPreview: deps.parallelStreamingTtsRef.current.spokenCompleteText.slice(0, 220),
+      });
+    }
     deps.probeLogRef.current.push({
       scenario: (deps.currentScenarioRef.current ?? 3) as number,
       construct: 'commitment_threshold',
@@ -271,6 +295,7 @@ export async function runPreClaudeMoment4SpecificityGate(
       scenarioNumber,
     };
     deps.setMessages([...messagesToUse, thresholdMsg]);
+    applyMoment4ThresholdReferenceCard(deps);
     await deps.speakTextSafe(thresholdProbeText, ASSISTANT_INTERVIEW_SPEECH);
     const deliveredReflection = extractLeadingReflectionFromMoment4ThresholdProbe(thresholdProbeText);
     if (deliveredReflection) {

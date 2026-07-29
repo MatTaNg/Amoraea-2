@@ -58,6 +58,7 @@ export async function finalizeStandardDeferredServerDelegate(params: {
     onboardingStage: 'complete',
   });
   deps.queryClient.invalidateQueries({ queryKey: ['profile', deps.userId] });
+  deps.queryClient.invalidateQueries({ queryKey: ['initialInterviewRoute', deps.userId] });
   const { data: edgeData, error: edgeInvokeError } = await supabase.functions.invoke<{
     ok?: boolean;
     error?: string;

@@ -154,6 +154,7 @@ export type PreClaudeTurnGateDeps = {
   scenarioSkipOfferSourceRef: MutableRefObject<string | null>;
   metaCommentAckAwaitingSubstantiveBaselineSeqRef: MutableRefObject<number | null>;
   substantiveInterviewQuestionDeliveredSeqRef: MutableRefObject<number>;
+  recoveryAssistantSpokenAtSubstantiveSeqRef?: MutableRefObject<number | null>;
   metaCommentFrustrationCountByMomentRef: MutableRefObject<Record<number, number>>;
   inabilityCountByMomentRef: MutableRefObject<Record<number, number>>;
   skipRequestClassificationSeenByMomentRef: MutableRefObject<Record<number, boolean>>;

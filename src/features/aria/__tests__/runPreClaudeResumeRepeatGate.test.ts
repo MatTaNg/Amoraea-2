@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it, jest } from '@jest/globals';
 
+import { SHOW_SCENARIO_2_VIGNETTE_EXACT } from '@features/aria/interviewShowScenarioExactCopy';
 import type { MetaCommentClassification } from '@features/aria/metaCommentClassification';
 import { runPreClaudeResumeRepeatGate } from '@features/aria/runPreClaudeResumeRepeatGate';
 import { createMockPreClaudeDeps } from './preClaudeGateTestHelpers';
@@ -64,15 +65,15 @@ describe('runPreClaudeResumeRepeatGate', () => {
     expect(result).toEqual({ haltTurn: false, reentryTypeForLogging: null });
   });
 
-  it('defers repeat requests to the meta verbatim replay handler', async () => {
+  it('defers ambiguous repeat requests to the meta verbatim replay handler', async () => {
     const speakTextSafe = jest.fn().mockResolvedValue(undefined);
     const deps = resumeDeps({ speakTextSafe });
 
     const result = await runPreClaudeResumeRepeatGate(
       deps,
       gateArgs({
-        trimmed: 'Can you repeat the question?',
-        spokenText: 'Can you repeat the question?',
+        trimmed: 'sorry what',
+        spokenText: 'sorry what',
         metaCommentClassification: REPEAT_REQUEST_META,
       }),
     );
@@ -83,10 +84,58 @@ describe('runPreClaudeResumeRepeatGate', () => {
     expect(speakTextSafe).not.toHaveBeenCalled();
   });
 
-  it('replays the last question when user asks to repeat', async () => {
+  it('replays scenario vignette plus question when user says yes after welcome back', async () => {
     const speakTextSafe = jest.fn().mockResolvedValue(undefined);
     const setVoiceState = jest.fn();
-    const deps = resumeDeps({ speakTextSafe, setVoiceState });
+    const deps = resumeDeps({
+      speakTextSafe,
+      setVoiceState,
+      currentScenarioRef: { current: 2 },
+      currentInterviewMomentRef: { current: 2 },
+    });
+
+    const result = await runPreClaudeResumeRepeatGate(
+      deps,
+      gateArgs({ trimmed: 'yes', spokenText: 'yes' }),
+    );
+
+    expect(result).toEqual({ haltTurn: true, reentryTypeForLogging: 'repeat_requested' });
+    expect(speakTextSafe).toHaveBeenCalledWith(
+      expect.stringContaining(SHOW_SCENARIO_2_VIGNETTE_EXACT.slice(0, 40)),
+      expect.objectContaining({
+        skipQuestionDeliveredTelemetry: true,
+        skipInterviewSpeechAdvance: true,
+      }),
+    );
+    expect(speakTextSafe.mock.calls[0]?.[0]).toContain(LAST_QUESTION);
+    expect(setVoiceState).toHaveBeenCalledWith('idle');
+  });
+
+  it('replays question only when user asks to repeat the question after welcome back', async () => {
+    const speakTextSafe = jest.fn().mockResolvedValue(undefined);
+    const deps = resumeDeps({ speakTextSafe });
+
+    await runPreClaudeResumeRepeatGate(
+      deps,
+      gateArgs({ trimmed: 'repeat the question', spokenText: 'repeat the question' }),
+    );
+
+    expect(speakTextSafe).toHaveBeenCalledWith(
+      `Sure. ${LAST_QUESTION}`,
+      expect.any(Object),
+    );
+    expect(speakTextSafe.mock.calls[0]?.[0]).not.toContain(SHOW_SCENARIO_2_VIGNETTE_EXACT.slice(0, 20));
+  });
+
+  it('replays scenario plus question for vague repeat cues after welcome back', async () => {
+    const speakTextSafe = jest.fn().mockResolvedValue(undefined);
+    const setVoiceState = jest.fn();
+    const deps = resumeDeps({
+      speakTextSafe,
+      setVoiceState,
+      currentScenarioRef: { current: 2 },
+      currentInterviewMomentRef: { current: 2 },
+    });
 
     const result = await runPreClaudeResumeRepeatGate(
       deps,
@@ -95,24 +144,25 @@ describe('runPreClaudeResumeRepeatGate', () => {
 
     expect(result).toEqual({ haltTurn: true, reentryTypeForLogging: 'repeat_requested' });
     expect(speakTextSafe).toHaveBeenCalledWith(
-      `Sure. ${LAST_QUESTION}`,
+      expect.stringContaining(SHOW_SCENARIO_2_VIGNETTE_EXACT.slice(0, 40)),
       expect.objectContaining({
         skipQuestionDeliveredTelemetry: true,
         skipInterviewSpeechAdvance: true,
         allowDuplicateConsecutiveTts: true,
       }),
     );
+    expect(speakTextSafe.mock.calls[0]?.[0]).toContain(LAST_QUESTION);
     expect(setVoiceState).toHaveBeenCalledWith('idle');
   });
 
-  it('halts without replay when user chooses to continue', async () => {
+  it('halts without replay when user chooses to continue explicitly', async () => {
     const speakTextSafe = jest.fn().mockResolvedValue(undefined);
     const setVoiceState = jest.fn();
     const deps = resumeDeps({ speakTextSafe, setVoiceState });
 
     const result = await runPreClaudeResumeRepeatGate(
       deps,
-      gateArgs({ trimmed: 'yes', spokenText: 'yes' }),
+      gateArgs({ trimmed: "I'm ready to continue", spokenText: "I'm ready to continue" }),
     );
 
     expect(result).toEqual({ haltTurn: true, reentryTypeForLogging: 'continue_requested' });

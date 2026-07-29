@@ -83,7 +83,13 @@ export function buildAriaInterviewLifecycleDepSyncWiringParamsFromScreen(
     isSpeakingRef,
   } = interview;
   const { closingQuestion, gate, shell, routing } = session;
-  const { isInterviewAppRoute, resumeLoadingFlowActiveRef, setResumeLoadingVisible } = routing;
+  const {
+    isInterviewAppRoute,
+    resumeLoadingFlowActiveRef,
+    resumeHandleInFlightRef,
+    setResumeLoadingVisible,
+    setResumeHydrationPending,
+  } = routing;
   const { currentInterviewMomentRef, responseTimingsRef } = gate.moments;
   const { scoreInterviewAttemptedRef } = gate.progressReset;
   const {
@@ -146,7 +152,9 @@ export function buildAriaInterviewLifecycleDepSyncWiringParamsFromScreen(
         hasResumedRef,
     interviewUserTurnEpochRef,
         resumeLoadingFlowActiveRef,
+        resumeHandleInFlightRef,
         setResumeLoadingVisible,
+        setResumeHydrationPending,
         startInterviewInFlightRef,
         setInterviewStartInFlight,
       },

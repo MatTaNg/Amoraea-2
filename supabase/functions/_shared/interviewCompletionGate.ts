@@ -54,9 +54,28 @@ export function personalMomentBundleWasScored(bundle: unknown): boolean {
   return keyEvidenceHasNonEmptyAssessedText(keyEvidence);
 }
 
+/** Align with app {@link MIN_FIRST_SUBSTANTIVE_RESPONSE_WORDS} / Moment 5 scoring guard. */
+const MIN_MOMENT5_ROLLUP_USER_WORDS = 10;
+const MIN_MOMENT5_ROLLUP_USER_CHARS = 5;
+
+function countInterviewWords(text: string): number {
+  return text
+    .trim()
+    .split(/\s+/)
+    .filter((w) => w.length > 0).length;
+}
+
+/** True when a user turn is long enough to trigger Moment 5 scoring (not skip/meta-only). */
+export function moment5UserTurnAssessableForRollup(content: string | null | undefined): boolean {
+  const trimmed = (content ?? '').trim();
+  if (trimmed.length < MIN_MOMENT5_ROLLUP_USER_CHARS) return false;
+  return countInterviewWords(trimmed) >= MIN_MOMENT5_ROLLUP_USER_WORDS;
+}
+
 /**
- * Lightweight M5 eligibility: true when the transcript shows Moment 5 was reached
- * (tagged user turn or primary conflict question + substantive user answer).
+ * Lightweight M5 eligibility: true when the transcript shows Moment 5 was reached with an
+ * assessable user answer (tagged user turn or primary conflict question + substantive reply).
+ * Thin/meta turns (e.g. "Can we skip this one?") do not require moment_5_scores for rollup.
  */
 export function transcriptReachedMoment5ForRollup(transcript: unknown): boolean {
   if (!Array.isArray(transcript)) return false;
@@ -64,7 +83,12 @@ export function transcriptReachedMoment5ForRollup(transcript: unknown): boolean 
   for (const turn of transcript) {
     if (turn == null || typeof turn !== 'object') continue;
     const t = turn as { role?: string; content?: string; interviewMoment?: number };
-    if (t.interviewMoment === 5 && t.role === 'user' && typeof t.content === 'string' && t.content.trim().length >= 5) {
+    if (
+      t.interviewMoment === 5 &&
+      t.role === 'user' &&
+      typeof t.content === 'string' &&
+      moment5UserTurnAssessableForRollup(t.content)
+    ) {
       return true;
     }
     if (
@@ -78,7 +102,7 @@ export function transcriptReachedMoment5ForRollup(transcript: unknown): boolean 
       sawPrimaryConflictQuestion &&
       t.role === 'user' &&
       typeof t.content === 'string' &&
-      t.content.trim().length >= 5
+      moment5UserTurnAssessableForRollup(t.content)
     ) {
       return true;
     }

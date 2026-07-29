@@ -56,13 +56,17 @@ export const PREF_PARTNER_SHARES_SEXUAL_INTERESTS_OPTIONS = [
   'Dealbreaker',
 ] as const;
 
-/** Shown in onboarding + edit profile dealbreakers (must-have wording). */
+import {
+  PARTNER_SPECIFIC_SEX_INTERESTS_DEALBREAKER_QUESTION,
+} from '@/shared/constants/dealbreakerQuestionCopy';
+
+/** Shown in onboarding + edit profile dealbreakers. */
 export const PREF_PARTNER_SHARES_SPECIFIC_SEX_INTERESTS_QUESTION =
-  'Is it a must have that your partner shares your specific sex interests?';
+  PARTNER_SPECIFIC_SEX_INTERESTS_DEALBREAKER_QUESTION;
 
 /** Bottom sheet title when picking Yes/No for {@link PREF_PARTNER_SHARES_SPECIFIC_SEX_INTERESTS_QUESTION}. */
 export const PREF_PARTNER_SPECIFIC_SEX_INTERESTS_SHEET_TITLE =
-  'Specific sex interests — must-have?';
+  'Specific sex interests — dealbreaker?';
 
 /** Yes/No rows for {@link PREF_PARTNER_SHARES_SPECIFIC_SEX_INTERESTS_QUESTION} (onboarding inline pickers). */
 export const PARTNER_SPECIFIC_SEX_MUST_HAVE_YES_NO_OPTIONS: { label: string; value: string }[] = [

@@ -29,12 +29,13 @@ import {
   type HolisticClientScoringState,
 } from '@features/aria/holisticClientFallbackTypes';
 import { countMentalizingOvercertaintyInMarkerSlices } from '@features/aria/mentalizingOvercertaintyFromTranscript';
-import { mergeMomentConcretenessForGate } from '@features/aria/personalMomentConcreteness';
-import type { ResponseConcretenessLevel } from '@features/aria/personalMomentConcreteness';
 import {
-  aggregatePersonalMomentEmotionalVocab,
-  scenarioEmotionalVocabDensityPercentFromTranscript,
-} from '@features/aria/personalMomentEmotionalVocab';
+  mergeMoment4ConcretenessForGate,
+  mergeMomentConcretenessForGate,
+  type Moment4ConcretenessLevel,
+} from '@features/aria/personalMomentConcreteness';
+import { resolveMoment4UserTextForGate } from '@features/aria/personalMomentSliceEnrichment';
+import type { ResponseConcretenessLevel } from '@features/aria/personalMomentConcreteness';
 import type { InterviewResults } from '@features/aria/interviewResultsTypes';
 import type { MessageWithScenario } from '@features/aria/interviewScenarioScoringSlice';
 import { resolveWeightedPassMinAfterReferralEffects } from '@features/referrals/referralInterview';
@@ -82,7 +83,7 @@ export async function computeHolisticClientScoring(
 
   let holisticStoredPatterns: Record<string, unknown> | null = null;
   let moment4FromAttemptRow: unknown = null;
-  let moment4ConcretenessHolisticGate: ResponseConcretenessLevel | null = null;
+  let moment4ConcretenessHolisticGate: Moment4ConcretenessLevel | null = null;
   let moment5ConcretenessHolisticGate: ResponseConcretenessLevel | null = null;
   let completionGateHolistic: InterviewCompletionGateResult | null = null;
 
@@ -96,9 +97,10 @@ export async function computeHolisticClientScoring(
     moment4FromAttemptRow = holisticStoredPatterns?.moment_4_scores ?? null;
     const m4StoredHolistic = holisticStoredPatterns?.moment_4_scores;
     const m5StoredHolistic = holisticStoredPatterns?.moment_5_scores;
-    moment4ConcretenessHolisticGate = mergeMomentConcretenessForGate(
+    moment4ConcretenessHolisticGate = mergeMoment4ConcretenessForGate(
       m4StoredHolistic,
       (attRowHolistic as Record<string, unknown> | null | undefined)?.moment_4_concreteness,
+      resolveMoment4UserTextForGate(finalMessages),
     );
     moment5ConcretenessHolisticGate = mergeMomentConcretenessForGate(
       m5StoredHolistic,
@@ -184,8 +186,6 @@ export async function computeHolisticClientScoring(
       egoDevelopmentLevel: extractEgoDevelopmentLevel(parsed),
       defensePatternTranscript: msgs,
       disclosureCalibrationTranscript: msgs,
-      scenarioEmotionalVocabDensityPercent: scenarioEmotionalVocabDensityPercentFromTranscript(msgs),
-      communicationStyleEmotionalVocabDensityPercent: null,
     });
     if (Object.keys(mergedPillars.scores).length > 0) {
       parsed = { ...parsed, pillarScores: mergedPillars.scores };
@@ -259,14 +259,6 @@ export async function computeHolisticClientScoring(
   );
 
   let holisticWeightedScoreForPersist: number | null = null;
-  const pevHolisticForGate = aggregatePersonalMomentEmotionalVocab(
-    holisticStoredPatterns?.moment_4_scores,
-    holisticStoredPatterns?.moment_5_scores,
-    {
-      scenarioEmotionalVocabDensityPercent: scenarioEmotionalVocabDensityPercentFromTranscript(msgs),
-      communicationStyleEmotionalVocabDensityPercent: null,
-    },
-  );
 
   let gateResult: GateResult;
   if (gateBlockedHolistic && completionGateHolistic && !completionGateHolistic.ok) {
@@ -326,7 +318,6 @@ export async function computeHolisticClientScoring(
       moment4Concreteness: moment4ConcretenessHolisticGate ?? null,
       moment5Concreteness: moment5ConcretenessHolisticGate ?? null,
       disclosureCalibration: holisticDisclosureCalibration,
-      personalMomentEmotionalVocabLow: pevHolisticForGate.personal_moment_emotional_vocab_low,
       mentalizingOvercertaintyCount: mentalizingOvercertaintyCountHolistic ?? 0,
       emotionRecognitionRawScore: emotionRawScoreForGate(),
       emotionRecognitionResponses: emotionResponsesForGate(),

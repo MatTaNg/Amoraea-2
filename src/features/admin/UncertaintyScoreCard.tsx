@@ -56,7 +56,6 @@ const FLAG_DESCRIPTIONS: Record<string, string> = {
   defense_possible_false_negative:
     'Psychometric profile suggests possible missed defense detection in the interview.',
   ego_development_review: 'Ego development level flagged for manual review.',
-  low_emotional_vocab: 'Personal moment showed low emotional vocabulary density.',
   underdisclosure: 'Disclosure calibration suggests underdisclosure.',
   overdisclosure: 'Disclosure calibration suggests overdisclosure.',
   reasoning_pending: 'AI narrative reasoning still pending at scoring time.',

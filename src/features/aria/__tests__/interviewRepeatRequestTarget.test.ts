@@ -24,11 +24,17 @@ describe('interviewRepeatRequestTarget', () => {
     expect(resolveInterviewRepeatRequestTarget('Repeat the question')).toBe('question');
   });
 
-  it('treats "repeat what you/she said" as scenario repeat', () => {
-    expect(looksLikeScenarioRepeatRequest('Repeat what you said.')).toBe(true);
-    expect(looksLikeScenarioRepeatRequest('Can you repeat what she said?')).toBe(true);
-    expect(looksLikeScenarioRepeatRequest('What did you say?')).toBe(true);
-    expect(resolveInterviewRepeatRequestTarget('Repeat what she said')).toBe('scenario');
+  it('treats generic "repeat what you/she said" as question-only repeat', () => {
+    expect(looksLikeScenarioRepeatRequest('Repeat what you said.')).toBe(false);
+    expect(looksLikeScenarioRepeatRequest('Can you repeat what she said?')).toBe(false);
+    expect(looksLikeScenarioRepeatRequest('What did you say?')).toBe(false);
+    expect(resolveInterviewRepeatRequestTarget('Repeat what she said')).toBe('question');
+  });
+
+  it('treats explicit entire-scenario phrasing as scenario repeat', () => {
+    expect(looksLikeScenarioRepeatRequest('Repeat the entire scenario')).toBe(true);
+    expect(looksLikeScenarioRepeatRequest('Can you repeat the whole situation?')).toBe(true);
+    expect(resolveInterviewRepeatRequestTarget('Repeat the full scenario please')).toBe('scenario');
   });
 
   it('builds vignette + question TTS for scenario repeat', () => {

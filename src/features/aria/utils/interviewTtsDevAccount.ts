@@ -1,6 +1,8 @@
 import { Platform } from 'react-native';
 
-/** Dev-bundle + localhost only: browser/default TTS (no ElevenLabs) and 2× playback for faster local testing. */
+/**
+ * Internal test accounts: device TTS (no ElevenLabs credits) and 2× speech rate on any platform/build.
+ */
 const DEFAULT_VOICE_FAST_PLAYBACK_EMAILS = new Set([
   'mattang5280@gmail.com',
   'ng5280@hotmail.com',
@@ -34,12 +36,7 @@ export function getInterviewTtsSessionEmail(): string | null {
   return sessionEmail;
 }
 
-/**
- * Dev-only fast path: skip ElevenLabs for listed accounts.
- * Never on production builds; never on non-localhost web (even if `__DEV__` is accidentally true).
- */
+/** Skip ElevenLabs network TTS for configured internal test accounts (saves credits, uses expo-speech). */
 export function shouldUseDefaultVoiceInsteadOfElevenLabs(): boolean {
-  if (!(typeof __DEV__ !== 'undefined' && __DEV__)) return false;
-  if (Platform.OS === 'web' && !isLocalWebDevHost()) return false;
   return isDefaultVoiceFastPlaybackAccountEmail(sessionEmail);
 }

@@ -116,6 +116,37 @@ export async function finalizeInterviewAttemptForRouting(
 
   if (error || !attempt?.id) return false;
   if (attemptCompletedAtReflectsScoredInterview(attempt as InterviewAttemptRoutingRow)) {
+    const { data: userRow, error: userReadErr } = await supabase
+      .from('users')
+      .select('interview_completed')
+      .eq('id', userId)
+      .maybeSingle();
+    if (userReadErr) {
+      console.warn('[finalizeInterviewAttemptForRouting] users read failed:', userReadErr.message);
+      return true;
+    }
+    if (userRow?.interview_completed === true) return true;
+
+    const completedAt =
+      typeof attempt.completed_at === 'string' && attempt.completed_at.length > 0
+        ? attempt.completed_at
+        : new Date().toISOString();
+    const attemptNumber =
+      typeof attempt.attempt_number === 'number' && Number.isFinite(attempt.attempt_number)
+        ? attempt.attempt_number
+        : 1;
+    const { error: userErr } = await supabase
+      .from('users')
+      .update({
+        interview_completed: true,
+        interview_completed_at: completedAt,
+        latest_attempt_id: attemptId,
+        interview_attempt_count: attemptNumber,
+      })
+      .eq('id', userId);
+    if (userErr) {
+      console.warn('[finalizeInterviewAttemptForRouting] users backfill failed:', userErr.message);
+    }
     return true;
   }
   if (!attemptIndicatesInterviewSessionFinished(attempt as InterviewAttemptRoutingRow)) {

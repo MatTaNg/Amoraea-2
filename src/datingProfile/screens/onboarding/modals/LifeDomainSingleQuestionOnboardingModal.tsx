@@ -1,4 +1,5 @@
 import React from 'react';
+import { ONBOARDING_STEP_SCREEN_EDGES, ONBOARDING_STEP_SCREEN_EDGES_WITH_BOTTOM } from './onboardingStepScreenEdges';
 import { View, Text, TextInput, ScrollView } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Button } from '@/shared/ui/Button';
@@ -55,7 +56,7 @@ export const LifeDomainSingleQuestionOnboardingModal: React.FC<Props> = ({
   const canContinue = value.trim().length > 0;
 
   return (
-    <SafeAreaView style={styles.screen} edges={['top', 'left', 'right']}>
+    <SafeAreaView style={styles.screen} edges={ONBOARDING_STEP_SCREEN_EDGES}>
       <OnboardingHeader title={`${domainMeta.icon} ${domainMeta.name}`} onBack={onBack} />
       <ScrollView
         style={styles.scrollView}

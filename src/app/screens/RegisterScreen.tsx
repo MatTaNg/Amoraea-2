@@ -16,9 +16,14 @@ import {
 } from '@features/authentication/hooks/useAuth';
 import { SafeAreaContainer } from '@ui/components/SafeAreaContainer';
 import { FlameOrb } from '@app/screens/FlameOrb';
+import { AUTH_FLAME_ORB_SIZE } from '@app/screens/flameOrbLogo';
 import { authStyles } from '@app/screens/authStyles';
 import { supabase } from '@data/supabase/client';
 import { isAlphaTesterReferralCode } from '@/constants/alphaReferral';
+import {
+  isBareDevScenarioJumpReferralCode,
+  isDevScenarioJumpEmail,
+} from '@features/aria/devScenarioJumpReferral';
 import { isRelationshipValidationReferralCode } from '@features/relationshipValidation/constants';
 import type { Gender } from '@domain/models/Profile';
 
@@ -94,7 +99,14 @@ export const RegisterScreen: React.FC<{ navigation: any }> = ({ navigation }) =>
       const raw = inviteCode.trim();
       let codeToSend: string | undefined;
       if (raw) {
-        if (isRelationshipValidationReferralCode(raw)) {
+        if (isBareDevScenarioJumpReferralCode(raw)) {
+          if (!isDevScenarioJumpEmail(email.trim())) {
+            setReferralHint("That code doesn't look right.");
+            setLoading(false);
+            return;
+          }
+          codeToSend = raw;
+        } else if (isRelationshipValidationReferralCode(raw)) {
           codeToSend = raw;
         } else if (isAlphaTesterReferralCode(raw)) {
           codeToSend = raw;
@@ -111,6 +123,8 @@ export const RegisterScreen: React.FC<{ navigation: any }> = ({ navigation }) =>
             codeToSend = raw;
           } else {
             setReferralHint("That code doesn't look right.");
+            setLoading(false);
+            return;
           }
         }
       }
@@ -234,9 +248,7 @@ export const RegisterScreen: React.FC<{ navigation: any }> = ({ navigation }) =>
             <Text style={styles.wordmarkBeta}>(BETA)</Text>
           </View>
           <View style={styles.flameWrap}>
-            <View style={styles.flameScale}>
-              <FlameOrb state="idle" minimalGlow />
-            </View>
+            <FlameOrb state="idle" size={AUTH_FLAME_ORB_SIZE} minimalGlow />
           </View>
           <Text style={[authStyles.tagline, styles.taglineTight]}>Begin with honesty.</Text>
 
@@ -437,13 +449,9 @@ const styles = StyleSheet.create({
     marginBottom: 12,
     alignItems: 'center',
     justifyContent: 'center',
-    minHeight: 180,
+    minHeight: AUTH_FLAME_ORB_SIZE,
     width: '100%',
     overflow: 'visible',
-  },
-  /** Match LoginScreen scale so the flame stays visible on narrow / mobile web. */
-  flameScale: {
-    transform: [{ scale: 0.78 }],
   },
   demographicsRow: {
     width: '100%',

@@ -98,6 +98,7 @@ export async function runPreClaudePostClosingCompletionGate(
         resumeActiveScenario: deps.resumeActiveScenarioRef.current,
         emotionItemResponses: [...deps.emotionItemResponsesRef.current],
         pendingCompletion: true,
+        scenarioSkipConfirmedCount: deps.scenarioSkipConfirmedCountRef.current,
       });
     } catch (persistErr) {
       void remoteLog('[WARN] saveInterviewProgress_failed_before_pending_completion', {

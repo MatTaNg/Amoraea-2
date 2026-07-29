@@ -15,16 +15,16 @@ import {
   Platform,
   TouchableOpacity,
   ActivityIndicator,
+  Alert,
 } from 'react-native';
 import { SafeAreaContainer } from '@ui/components/SafeAreaContainer';
 import * as ImagePicker from 'expo-image-picker';
 import { Image as ExpoImage } from 'expo-image';
-import { useFocusEffect, useNavigation } from '@react-navigation/native';
+import { useNavigation } from '@react-navigation/native';
+import type { NavigationAction } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
-import { Picker } from '@react-native-picker/picker';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { profilesRepo } from '@data/repos/profilesRepo';
-import { ProfileRepository } from '@data/repositories/ProfileRepository';
 import { useAuth } from '@features/authentication/hooks/useAuth';
 import { exitDatingProfileOnboardingToPostInterview } from '@/datingProfile/onboarding/exitDatingProfileOnboardingToPostInterview';
 import { showSimpleAlert } from '@utilities/alerts/confirmDialog';
@@ -120,23 +120,51 @@ import {
 import { SelectTriggerRow } from '@/shared/ui/SelectTriggerRow';
 import { SingleChoiceOptionList } from '@/shared/components/profileFields/SingleChoiceOptionList';
 import { ArchetypeSelector } from '@/shared/components/profileFields/ArchetypeSelector';
-import { ArchetypeDisplayChips } from '@/shared/components/profileFields/ArchetypeDisplayChips';
+import { HobbiesFields } from '@/shared/components/profileFields/HobbiesFields';
+import { ProfilePromptsFields } from '@/shared/components/profileFields/ProfilePromptsFields';
+import {
+  loadEditProfileSnapshot,
+  saveEditProfilePrompts,
+} from '@/data/repos/editProfileRepo';
+import { validateProfilePromptsForSave } from '@/features/profile/profilePromptValidation';
+import type { ProfilePromptAnswer } from '@domain/models/Profile';
+import { normalizePhotoFileNameKey } from '@/shared/components/ModeratedPhotoUpload';
 import {
   normalizeArchetypesFromProfile,
+  isCompleteArchetypeSelection,
+  MAX_PROFILE_ARCHETYPES,
+  MIN_PROFILE_ARCHETYPES,
   type ArchetypeId,
 } from '@/shared/constants/archetypes';
 import type { LifeDomainId } from '@/shared/constants/lifeDomainOnboardingQuestions';
 import {
-  fetchLifeDomainAnswersMap,
   onboardingLifeDomainKeyToId,
-  resolveLifeDomainSlidersForEdit,
   saveLifeDomainAnswersFromOnboarding,
   syncLifeDomainImportanceFromOnboarding,
   type LifeDomainAnswersMap,
 } from '@/screens/profile/editProfile/lifeDomainProfileService';
-import { resolveMatchPreferencesForEdit } from '@/screens/profile/editProfile/matchPreferencesProfileService';
+import {
+  patchEditProfileQueryCache,
+  useEditProfileBlobQuery,
+  useEditProfileLifeDomainAnswersQuery,
+  useEditProfileLifeDomainSlidersQuery,
+  useEditProfileMatchPrefsQuery,
+} from '@/screens/profile/editProfile/editProfileQueries';
 import { LifeDomainQuestionsEditModal } from '@/screens/profile/editProfile/LifeDomainQuestionsEditModal';
 import { LifeDomainRequiredQuestionsSection } from '@/screens/profile/editProfile/LifeDomainRequiredQuestionsSection';
+import {
+  jsonSnapshotEqual,
+  photoUrlsNeedUpload,
+  resolvePhotoUrlsForSave,
+} from '@/screens/profile/editProfile/editProfileSaveHelpers';
+import { EditProfileUnsavedChangesModal } from '@/screens/profile/editProfile/EditProfileUnsavedChangesModal';
+import {
+  buildEditProfileFormSnapshot,
+  editProfileFormSnapshotsEqual,
+  patchEditProfileFormSnapshotLocation,
+  type EditProfileFormSnapshot,
+  type EditProfileFormSnapshotInput,
+} from '@/screens/profile/editProfile/editProfileDraftSnapshot';
 
 const BG = '#0a0a0f';
 const MIN_PROFILE_AGE = MIN_USER_AGE;
@@ -144,8 +172,6 @@ const ACCENT = '#3b82f6';
 const FONT_BODY =
   Platform.OS === 'web' ? "'DM Sans', system-ui, sans-serif" : undefined;
 const KG_PER_LB = 2.2046;
-
-const profilePhotoRepo = new ProfileRepository();
 
 const GENDER_UI_OPTIONS = ['Man', 'Woman', 'Non-binary'] as const;
 
@@ -404,28 +430,39 @@ function profileToTypology(p: Record<string, unknown>): TypologyPickerValue {
   return out;
 }
 
-async function resolvePhotoUrlsForSave(
-  userId: string,
-  urls: string[],
-): Promise<string[]> {
-  const out: string[] = [];
-  for (let i = 0; i < urls.length; i++) {
-    const u = urls[i]?.trim();
-    if (!u) continue;
-    if (/^https?:\/\//i.test(u)) {
-      out.push(u);
-      continue;
-    }
-    const fn =
-      u
-        .split('/')
-        .pop()
-        ?.split('?')[0]
-        ?.replace(/[^a-zA-Z0-9._-]/g, '_') || `photo_${Date.now()}_${i}.jpg`;
-    const { publicUrl } = await profilePhotoRepo.uploadPhoto(userId, u, fn);
-    out.push(publicUrl);
-  }
-  return out;
+function buildEditProfileBaselineInputFromProfile(
+  pb: Record<string, unknown>,
+  resolvedPhotos: string[],
+): EditProfileFormSnapshotInput {
+  const rawSex = pb.sexInterestCategories;
+  const savedBirthLoc = asStr(pb.birthLocation);
+  const profileArchetypes = normalizeArchetypesFromProfile(pb.archetypes);
+  return {
+    draft: { ...pb, photos: resolvedPhotos },
+    photoUrls: resolvedPhotos,
+    attractedUi: normalizeAttractedToUiLabels(
+      (pb.attractedTo as string[] | undefined) ??
+        (pb.lookingFor as string[] | undefined),
+    ),
+    sexInterestSelected: Array.isArray(rawSex)
+      ? rawSex.map((x) => String(x))
+      : [],
+    lifeDomainsState: { ...DEFAULT_ONBOARDING_LIFE_DOMAINS },
+    weightLbsStr: resolveWeightLbsStrFromProfile(pb),
+    heightCmPick: resolveHeightCmFromProfile(pb),
+    typologyValues: profileToTypology(pb),
+    matchPrefs: {},
+    prefPhysicalCompatImportance: asStr(pb.prefPhysicalCompatImportance),
+    prefPartnerSharesSexualInterests: asStr(pb.prefPartnerSharesSexualInterests),
+    prefPartnerHasChildren: asStr(pb.prefPartnerHasChildren),
+    prefPartnerPoliticalAlignmentImportance: asStr(
+      pb.prefPartnerPoliticalAlignmentImportance,
+    ),
+    archetypeSelection: profileArchetypes,
+    lifeDomainAnswers: {},
+    validatedBirthLocation: savedBirthLoc ? savedBirthLoc : undefined,
+    profilePrompts: [],
+  };
 }
 
 function SectionTitle({ children }: { children: string }) {
@@ -490,74 +527,37 @@ function ChoiceDropdown({
     // eslint-disable-next-line react-hooks/exhaustive-deps -- coerce empty/unknown DB values once options exist; avoid churn from unstable callbacks
   }, [value, options, validSelection, allowUnset]);
 
-  if (Platform.OS === 'web') {
-    return (
-      <FormField label={label}>
-        <OptionPickerTrigger
-          style={[formControlStyles.control, formControlStyles.controlSelectLike]}
-          onOpen={(anchor) => setSheetAnchor(anchor)}
-        >
-          <SelectTriggerRow
-            label={selectedLabel}
-            isPlaceholder={unsetOk}
-            labelStyle={formControlStyles.valueText}
-            placeholderStyle={formControlStyles.placeholderText}
-            chevronStyle={styles.dropdownChevron}
-          />
-        </OptionPickerTrigger>
-        <BottomSheet
-          visible={!!sheetAnchor}
-          title={label}
-          anchor={sheetAnchor}
-          onClose={() => setSheetAnchor(null)}
-        >
-          <SingleChoiceOptionList
-            options={options}
-            value={selectedValue}
-            onSelect={(v) => {
-              onValueChange(String(v));
-              setSheetAnchor(null);
-            }}
-          />
-        </BottomSheet>
-      </FormField>
-    );
-  }
+  if (!options.length) return null;
 
   return (
     <FormField label={label}>
-      <View
-        style={[
-          formControlStyles.control,
-          formControlStyles.controlSelectLike,
-          styles.choicePickerWrap,
-        ]}
+      <OptionPickerTrigger
+        style={[formControlStyles.control, formControlStyles.controlSelectLike]}
+        onOpen={(anchor) => setSheetAnchor(anchor)}
       >
-        <Picker
-          selectedValue={selectedValue}
-          onValueChange={(v) => onValueChange(String(v))}
-          mode={Platform.OS === 'android' ? 'dropdown' : undefined}
-          style={styles.choicePicker}
-          dropdownIconColor={theme.colors.textSecondary}
-          itemStyle={
-            Platform.OS === 'ios'
-              ? { color: theme.colors.text, fontSize: 17 }
-              : undefined
-          }
-        >
-          {allowUnset ? (
-            <Picker.Item label="—" value="" color={theme.colors.textSecondary} />
-          ) : null}
-          {options.map((o) => (
-            <Picker.Item
-              key={o.value}
-              label={o.label}
-              value={o.value}
-              color={theme.colors.text}
-            />
-          ))}
-        </Picker>
-      </View>
+        <SelectTriggerRow
+          label={selectedLabel}
+          isPlaceholder={unsetOk}
+          labelStyle={formControlStyles.valueText}
+          placeholderStyle={formControlStyles.placeholderText}
+          chevronStyle={styles.dropdownChevron}
+        />
+      </OptionPickerTrigger>
+      <BottomSheet
+        visible={!!sheetAnchor}
+        title={label}
+        anchor={sheetAnchor}
+        onClose={() => setSheetAnchor(null)}
+      >
+        <SingleChoiceOptionList
+          options={options}
+          value={selectedValue}
+          onSelect={(v) => {
+            onValueChange(String(v));
+            setSheetAnchor(null);
+          }}
+        />
+      </BottomSheet>
     </FormField>
   );
 }
@@ -574,26 +574,37 @@ export const DatingProfileEditScreen: React.FC<{
   const { user } = useAuth();
   const effectiveUserId = user?.id ?? userId;
 
+  const allowExitWithoutPromptRef = useRef(false);
+  const pendingNavigationActionRef = useRef<NavigationAction | null>(null);
+  const serverBaselineRef = useRef<EditProfileFormSnapshotInput | null>(null);
+  const baselineCommittedRef = useRef(false);
+  const pendingEditBeforeBaselineRef = useRef(false);
+  const handleBackPressRef = useRef<() => void>(() => {});
+  const hasUnsavedChangesRef = useRef(false);
+  const completePendingExitRef = useRef<() => void>(() => {});
+  const handleUnsavedPromptSaveRef = useRef<() => void>(() => {});
+
   const exitEditProfileToPostInterview = useCallback(() => {
+    allowExitWithoutPromptRef.current = true;
     exitDatingProfileOnboardingToPostInterview(navigation, userId.trim() || undefined);
   }, [navigation, userId]);
 
-  useLayoutEffect(() => {
-    navigation.setOptions({
-      headerShown: true,
-      header: () => (
-        <OnboardingHeader
-          variant="dark"
-          onBackPress={exitEditProfileToPostInterview}
-        />
-      ),
-    });
-  }, [navigation, exitEditProfileToPostInterview]);
+  const [savedSnapshot, setSavedSnapshot] = useState<EditProfileFormSnapshot | null>(
+    null,
+  );
+  const [baselineReady, setBaselineReady] = useState(false);
+  const [formDirty, setFormDirty] = useState(false);
+  const [unsavedPromptVisible, setUnsavedPromptVisible] = useState(false);
+  const [unsavedPromptSaving, setUnsavedPromptSaving] = useState(false);
   const qc = useQueryClient();
   const [draft, setDraft] = useState<Record<string, unknown>>({});
   /** Avoid replacing the whole form from `profileBlob` on every refetch — that wipes unsaved edits (e.g. typing birth location). */
   const draftHydratedForUserIdRef = useRef<string | null>(null);
   const [photoUrls, setPhotoUrls] = useState<string[]>([]);
+  const existingPhotoAssetIdsRef = useRef<Set<string>>(new Set());
+  const photoAssetIdByUrlRef = useRef<Map<string, string>>(new Map());
+  const existingPhotoFileNameKeysRef = useRef<Set<string>>(new Set());
+  const photoFileNameKeyByUrlRef = useRef<Map<string, string>>(new Map());
   const [attractedUi, setAttractedUi] = useState<string[]>([]);
   const [sexInterestSelected, setSexInterestSelected] = useState<string[]>([]);
   const [lifeDomainsState, setLifeDomainsState] =
@@ -631,34 +642,75 @@ export const DatingProfileEditScreen: React.FC<{
     string | undefined
   >(undefined);
   const [archetypeSelection, setArchetypeSelection] = useState<ArchetypeId[]>([]);
-  const [savedArchetypes, setSavedArchetypes] = useState<ArchetypeId[]>([]);
+  const [profilePrompts, setProfilePrompts] = useState<ProfilePromptAnswer[]>([]);
   const [lifeDomainAnswers, setLifeDomainAnswers] = useState<LifeDomainAnswersMap>({});
   const [lifeDomainQuestionsDomainId, setLifeDomainQuestionsDomainId] =
     useState<LifeDomainId | null>(null);
 
-  const { data: profileBlob } = useQuery({
-    queryKey: ['dating-profile', userId],
-    queryFn: async () => {
-      const r = await profilesRepo.getProfile(userId);
-      if (!r.success) throw r.error;
-      return r.data ?? {};
-    },
-    enabled: !!userId,
+  const { data: profileBlob } = useEditProfileBlobQuery(userId);
+  const { data: hydratedLifeDomainSliders } = useEditProfileLifeDomainSlidersQuery(
+    userId,
+    profileBlob,
+  );
+  const { data: hydratedMatchPrefs } = useEditProfileMatchPrefsQuery(userId, profileBlob);
+  const { data: hydratedLifeDomainAnswers } = useEditProfileLifeDomainAnswersQuery(userId);
+  const { data: interviewEditSnapshot } = useQuery({
+    queryKey: ['editProfileInterviewFields', userId],
+    queryFn: () => loadEditProfileSnapshot(userId),
+    enabled: Boolean(userId),
   });
 
-  useEffect(() => {
-    if (!userId) {
-      draftHydratedForUserIdRef.current = null;
+  const clearFormDirty = useCallback(() => {
+    pendingEditBeforeBaselineRef.current = false;
+    setFormDirty(false);
+  }, []);
+
+  const markFormDirty = useCallback(() => {
+    if (baselineCommittedRef.current) {
+      setFormDirty(true);
       return;
     }
-    if (!profileBlob) return;
+    pendingEditBeforeBaselineRef.current = true;
+  }, []);
+
+  useLayoutEffect(() => {
+    if (!userId) {
+      draftHydratedForUserIdRef.current = null;
+      serverBaselineRef.current = null;
+      baselineCommittedRef.current = false;
+      setSavedSnapshot(null);
+      setBaselineReady(false);
+      clearFormDirty();
+      return;
+    }
+    if (!profileBlob || hydratedLifeDomainSliders == null || hydratedMatchPrefs == null) {
+      return;
+    }
+    if (hydratedLifeDomainAnswers == null) {
+      return;
+    }
+    if (!interviewEditSnapshot) {
+      return;
+    }
     if (draftHydratedForUserIdRef.current === userId) {
       return;
     }
     draftHydratedForUserIdRef.current = userId;
+    serverBaselineRef.current = null;
+    baselineCommittedRef.current = false;
+    setSavedSnapshot(null);
+    setBaselineReady(false);
+    clearFormDirty();
 
     const pb = profileBlob as Record<string, unknown>;
     const resolvedPhotos = resolvePhotoUrlsFromProfile(pb);
+    serverBaselineRef.current = {
+      ...buildEditProfileBaselineInputFromProfile(pb, resolvedPhotos),
+      lifeDomainsState: hydratedLifeDomainSliders,
+      matchPrefs: hydratedMatchPrefs,
+      lifeDomainAnswers: hydratedLifeDomainAnswers,
+      profilePrompts: interviewEditSnapshot.prompts,
+    };
     setPhotoUrls(resolvedPhotos);
     setDraft({ ...pb, photos: resolvedPhotos });
     setAttractedUi(
@@ -687,44 +739,30 @@ export const DatingProfileEditScreen: React.FC<{
     setValidatedBirthLocation(savedBirthLoc ? savedBirthLoc : undefined);
     const profileArchetypes = normalizeArchetypesFromProfile(pb.archetypes);
     setArchetypeSelection(profileArchetypes);
-    setSavedArchetypes(profileArchetypes);
     setBirthLocationSuggestions([]);
-    void fetchLifeDomainAnswersMap(userId)
-      .then(setLifeDomainAnswers)
-      .catch((e) => {
-        if (__DEV__) console.warn('[DatingProfileEdit] life domain answers', e);
-      });
-  }, [profileBlob, userId]);
+    setLifeDomainsState(hydratedLifeDomainSliders);
+    setMatchPrefs(hydratedMatchPrefs);
+    setLifeDomainAnswers(hydratedLifeDomainAnswers);
+    setProfilePrompts(interviewEditSnapshot.prompts);
 
-  useEffect(() => {
-    if (!userId || !profileBlob) return;
-    let cancelled = false;
-    void resolveLifeDomainSlidersForEdit(userId, profileBlob as Record<string, unknown>)
-      .then((sliders) => {
-        if (!cancelled) setLifeDomainsState(sliders);
-      })
-      .catch((e) => {
-        if (__DEV__) console.warn('[DatingProfileEdit] life domain sliders', e);
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [profileBlob, userId]);
-
-  useEffect(() => {
-    if (!userId || !profileBlob) return;
-    let cancelled = false;
-    void resolveMatchPreferencesForEdit(userId, profileBlob as Record<string, unknown>)
-      .then((prefs) => {
-        if (!cancelled) setMatchPrefs(prefs);
-      })
-      .catch((e) => {
-        if (__DEV__) console.warn('[DatingProfileEdit] match preferences', e);
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [profileBlob, userId]);
+    baselineCommittedRef.current = true;
+    setSavedSnapshot(
+      buildEditProfileFormSnapshot(serverBaselineRef.current),
+    );
+    setBaselineReady(true);
+    if (pendingEditBeforeBaselineRef.current) {
+      pendingEditBeforeBaselineRef.current = false;
+      setFormDirty(true);
+    }
+  }, [
+    clearFormDirty,
+    hydratedLifeDomainAnswers,
+    hydratedLifeDomainSliders,
+    hydratedMatchPrefs,
+    profileBlob,
+    interviewEditSnapshot,
+    userId,
+  ]);
 
   const selectProfileTab = useCallback((id: EditProfileTabId) => {
     setTypologyResultId(null);
@@ -792,28 +830,86 @@ export const DatingProfileEditScreen: React.FC<{
     return counts;
   }, [lifeDomainAnswers, draft.wantKids]);
 
+  const formSnapshotInput = useMemo(
+    (): EditProfileFormSnapshotInput => ({
+      draft,
+      photoUrls,
+      attractedUi,
+      sexInterestSelected,
+      lifeDomainsState,
+      weightLbsStr,
+      heightCmPick,
+      typologyValues,
+      matchPrefs,
+      prefPhysicalCompatImportance,
+      prefPartnerSharesSexualInterests,
+      prefPartnerHasChildren,
+      prefPartnerPoliticalAlignmentImportance,
+      archetypeSelection,
+      lifeDomainAnswers,
+      validatedBirthLocation,
+      profilePrompts,
+    }),
+    [
+      draft,
+      photoUrls,
+      attractedUi,
+      sexInterestSelected,
+      lifeDomainsState,
+      weightLbsStr,
+      heightCmPick,
+      typologyValues,
+      matchPrefs,
+      prefPhysicalCompatImportance,
+      prefPartnerSharesSexualInterests,
+      prefPartnerHasChildren,
+      prefPartnerPoliticalAlignmentImportance,
+      archetypeSelection,
+      lifeDomainAnswers,
+      validatedBirthLocation,
+      profilePrompts,
+    ],
+  );
+
+  const currentFormSnapshot = useMemo(
+    () => buildEditProfileFormSnapshot(formSnapshotInput),
+    [formSnapshotInput],
+  );
+
+  const hasUnsavedChanges =
+    formDirty ||
+    (baselineReady &&
+      savedSnapshot !== null &&
+      !editProfileFormSnapshotsEqual(savedSnapshot, currentFormSnapshot));
+
+  hasUnsavedChangesRef.current = hasUnsavedChanges;
+
   const refreshLocation = useCallback(async () => {
     setLocationLoading(true);
     try {
       const lab = await requestMyLocationLabel();
       if (lab?.trim()) {
-        setDraft((d) => ({ ...d, location: lab.trim() }));
+        const trimmed = lab.trim();
+        setDraft((d) => ({ ...d, location: trimmed }));
+        setSavedSnapshot((prev) =>
+          prev ? patchEditProfileFormSnapshotLocation(prev, trimmed) : prev,
+        );
+        if (serverBaselineRef.current) {
+          serverBaselineRef.current = {
+            ...serverBaselineRef.current,
+            draft: { ...serverBaselineRef.current.draft, location: trimmed },
+          };
+        }
       }
     } finally {
       setLocationLoading(false);
     }
   }, []);
 
-  useFocusEffect(
-    useCallback(() => {
-      void refreshLocation();
-      // Intentionally do not invalidate `dating-profile` here: refetch re-runs the hydrate effect
-      // and would reset the local draft, wiping unsaved edits (often triggered by focus changes when editing fields).
-    }, [refreshLocation]),
-  );
-
-  const setScalar = (key: string) => (t: string) =>
+  const setScalar = (key: string) => (t: string) => {
+    markFormDirty();
     setDraft((d) => ({ ...d, [key]: t }));
+  };
 
   const onMatchEmbeddedPatch = useCallback(
     (patch: {
@@ -822,6 +918,7 @@ export const DatingProfileEditScreen: React.FC<{
       prefPartnerHasChildren?: string;
       prefPartnerPoliticalAlignmentImportance?: string;
     }) => {
+      markFormDirty();
       if (patch.matchPreferences) setMatchPrefs(patch.matchPreferences);
       if (patch.prefPartnerSharesSexualInterests !== undefined)
         setPrefPartnerSharesSexualInterests(
@@ -834,7 +931,7 @@ export const DatingProfileEditScreen: React.FC<{
           patch.prefPartnerPoliticalAlignmentImportance,
         );
     },
-    [],
+    [markFormDirty],
   );
 
   useEffect(() => {
@@ -842,6 +939,32 @@ export const DatingProfileEditScreen: React.FC<{
       setSexInterestSelected([sexInterestSelected[0]]);
     }
   }, [sexInterestSelected]);
+
+  useEffect(() => {
+    const allowed = new Set(photoUrls.map((p) => p.trim()).filter(Boolean));
+    for (const url of [...photoFileNameKeyByUrlRef.current.keys()]) {
+      if (!allowed.has(url)) {
+        const fileKey = photoFileNameKeyByUrlRef.current.get(url);
+        if (fileKey) existingPhotoFileNameKeysRef.current.delete(fileKey);
+        photoFileNameKeyByUrlRef.current.delete(url);
+      }
+    }
+    for (const url of [...photoAssetIdByUrlRef.current.keys()]) {
+      if (!allowed.has(url)) {
+        const assetId = photoAssetIdByUrlRef.current.get(url);
+        if (assetId) existingPhotoAssetIdsRef.current.delete(assetId);
+        photoAssetIdByUrlRef.current.delete(url);
+      }
+    }
+    for (const url of allowed) {
+      if (photoFileNameKeyByUrlRef.current.has(url)) continue;
+      const fileKey = normalizePhotoFileNameKey(url);
+      if (fileKey) {
+        photoFileNameKeyByUrlRef.current.set(url, fileKey);
+        existingPhotoFileNameKeysRef.current.add(fileKey);
+      }
+    }
+  }, [photoUrls]);
 
   useEffect(() => {
     if (!saveSucceeded) return;
@@ -869,31 +992,67 @@ export const DatingProfileEditScreen: React.FC<{
     });
     if (result.canceled || !result.assets?.length) return;
 
-    const getFileName = (u: string) => u.split('/').pop()?.split('?')[0] || '';
-    const existingNames = photoUrls.map((u) => getFileName(u));
     const newlyPicked = result.assets.slice(0, remaining);
+    const seenLocalUris = new Set<string>();
+    const seenFileKeysInBatch = new Set<string>();
+    const toAdd: Array<{ uri: string; fileKey: string; assetId: string | null }> = [];
 
-    const duplicates = newlyPicked.filter((a) => {
-      const name = a.fileName || getFileName(a.uri);
-      return existingNames.includes(name);
-    });
+    for (let i = 0; i < newlyPicked.length; i++) {
+      const asset = newlyPicked[i];
+      const uri = asset.uri.trim();
+      if (!uri) continue;
 
-    if (duplicates.length > 0) {
-      showSimpleAlert(
-        'Duplicate Photo',
-        'One or more photos have the same name as existing ones. Please choose different photos.',
-      );
-      return;
+      if (seenLocalUris.has(uri)) {
+        showSimpleAlert('Already added', 'You selected the same photo more than once.');
+        continue;
+      }
+      seenLocalUris.add(uri);
+
+      const assetId = asset.assetId?.trim() || null;
+      if (assetId && existingPhotoAssetIdsRef.current.has(assetId)) {
+        showSimpleAlert('Already added', 'This photo has already been added.');
+        continue;
+      }
+
+      const pickerName =
+        asset.fileName?.replace(/[^a-zA-Z0-9._-]/g, '_') ||
+        uri.split('/').pop()?.split('?')[0] ||
+        `photo_${Date.now()}_${i}.jpg`;
+      const fileKey = normalizePhotoFileNameKey(pickerName);
+      if (fileKey && existingPhotoFileNameKeysRef.current.has(fileKey)) {
+        showSimpleAlert('Already added', 'This photo has already been added.');
+        continue;
+      }
+      if (fileKey && seenFileKeysInBatch.has(fileKey)) {
+        showSimpleAlert('Already added', 'This photo has already been added.');
+        continue;
+      }
+      if (fileKey) seenFileKeysInBatch.add(fileKey);
+
+      toAdd.push({ uri, fileKey, assetId });
     }
 
-    const picked = newlyPicked.map((a) => a.uri.trim()).filter(Boolean);
+    if (toAdd.length === 0) return;
+
+    markFormDirty();
     setPhotoUrls((prev) => {
       const seen = new Set(prev.map((x) => x.trim()));
       const next = [...prev];
-      for (const u of picked) {
-        if (!seen.has(u)) {
-          seen.add(u);
-          next.push(u);
+      for (const item of toAdd) {
+        if (seen.has(item.uri)) continue;
+        seen.add(item.uri);
+        next.push(item.uri);
+        if (item.fileKey) {
+          const prevKey = photoFileNameKeyByUrlRef.current.get(item.uri);
+          if (prevKey && prevKey !== item.fileKey) {
+            existingPhotoFileNameKeysRef.current.delete(prevKey);
+          }
+          existingPhotoFileNameKeysRef.current.add(item.fileKey);
+          photoFileNameKeyByUrlRef.current.set(item.uri, item.fileKey);
+        }
+        if (item.assetId) {
+          existingPhotoAssetIdsRef.current.add(item.assetId);
+          photoAssetIdByUrlRef.current.set(item.uri, item.assetId);
         }
       }
       return next.slice(0, 6);
@@ -901,6 +1060,7 @@ export const DatingProfileEditScreen: React.FC<{
   };
 
   const toggleAttraction = (option: string) => {
+    markFormDirty();
     setAttractedUi((prev) => {
       const isSelected = prev.includes(option);
       if (isSelected) {
@@ -911,8 +1071,8 @@ export const DatingProfileEditScreen: React.FC<{
     });
   };
 
-  const onSave = async () => {
-    if (!userId || saving) return;
+  const onSave = async (): Promise<boolean> => {
+    if (!userId || saving) return false;
 
     const birthForAge = asStr(draft.birthDate);
     const ageSave = birthForAge ? calculateAgeFromBirthdate(birthForAge) : null;
@@ -921,7 +1081,7 @@ export const DatingProfileEditScreen: React.FC<{
         'Age requirement',
         'You must be 18 or older to use this app.',
       );
-      return;
+      return false;
     }
 
     const birthTimeRaw = asStr(draft.birthTime);
@@ -930,7 +1090,7 @@ export const DatingProfileEditScreen: React.FC<{
         'Birth time',
         'Use 24-hour format HH:MM (e.g. 09:05), choose from the list, or pick Not specified.',
       );
-      return;
+      return false;
     }
 
     if (lifeDomainsTotal !== 100) {
@@ -938,15 +1098,23 @@ export const DatingProfileEditScreen: React.FC<{
         'Life domains',
         `Your life domain sliders must add up to exactly 100 (they are ${lifeDomainsTotal} right now). Open the Lifestyle tab and adjust them until the total shows 100 / 100, then save again.`,
       );
-      return;
+      return false;
     }
 
     if (archetypeSelection.length === 1) {
       showSimpleAlert(
         'Archetypes',
-        'Select exactly two archetypes, or clear your selection and save the rest of your profile.',
+        'Select two or three archetypes, or clear your selection and save the rest of your profile.',
       );
-      return;
+      return false;
+    }
+
+    const promptValidation = validateProfilePromptsForSave(profilePrompts, {
+      requireSetupFloor: true,
+    });
+    if (!promptValidation.ok) {
+      showSimpleAlert('Profile prompts', promptValidation.message);
+      return false;
     }
 
     const {
@@ -960,17 +1128,29 @@ export const DatingProfileEditScreen: React.FC<{
     setSaving(true);
     setSaveSucceeded(false);
 
+    const lifeDomainsChanged =
+      !savedSnapshot ||
+      !jsonSnapshotEqual(savedSnapshot.lifeDomainsState, lifeDomainsState);
+    const lifeAnswersChanged =
+      !savedSnapshot ||
+      !jsonSnapshotEqual(savedSnapshot.lifeDomainAnswers, lifeDomainAnswers);
+    const promptsChanged =
+      !savedSnapshot ||
+      !jsonSnapshotEqual(savedSnapshot.profilePrompts, profilePrompts);
+
     let resolvedPhotos = photoUrls;
-    try {
-      resolvedPhotos = await resolvePhotoUrlsForSave(userId, photoUrls);
-    } catch (e) {
-      if (__DEV__) console.warn('[DatingProfileEdit] photo upload', e);
-      showSimpleAlert(
-        'Could Not Upload Photos',
-        e instanceof Error ? e.message : 'Unknown error',
-      );
-      setSaving(false);
-      return;
+    if (photoUrlsNeedUpload(photoUrls)) {
+      try {
+        resolvedPhotos = await resolvePhotoUrlsForSave(userId, photoUrls);
+      } catch (e) {
+        if (__DEV__) console.warn('[DatingProfileEdit] photo upload', e);
+        showSimpleAlert(
+          'Could Not Upload Photos',
+          e instanceof Error ? e.message : 'Unknown error',
+        );
+        setSaving(false);
+        return false;
+      }
     }
 
     const wKg = lbsInputToKg(weightLbsStr);
@@ -1000,7 +1180,7 @@ export const DatingProfileEditScreen: React.FC<{
     delete next.yearlyIncome;
     delete next.yearlyIncomeCurrency;
 
-    if (archetypeSelection.length === 2) {
+    if (isCompleteArchetypeSelection(archetypeSelection.length)) {
       next.archetypes = archetypeSelection;
     }
 
@@ -1054,33 +1234,178 @@ export const DatingProfileEditScreen: React.FC<{
       next.myersBriggs = typologyValues.myersBriggs.trim();
 
     try {
-      const r = await profilesRepo.updateProfile(userId, omitUndefined(next));
-      if (!r.success) throw r.error;
-      try {
-        await syncLifeDomainImportanceFromOnboarding(userId, lifeDomainsState);
-        await saveLifeDomainAnswersFromOnboarding(userId, lifeDomainAnswers);
-      } catch (syncErr) {
-        if (__DEV__) console.warn('[DatingProfileEdit] life domain settings sync', syncErr);
+      const sideSyncTasks: Promise<unknown>[] = [];
+      if (lifeDomainsChanged) {
+        sideSyncTasks.push(
+          syncLifeDomainImportanceFromOnboarding(userId, lifeDomainsState, {
+            syncProfileJson: false,
+          }),
+        );
       }
+      if (lifeAnswersChanged) {
+        sideSyncTasks.push(saveLifeDomainAnswersFromOnboarding(userId, lifeDomainAnswers));
+      }
+
+      const saveResults = await Promise.allSettled([
+        profilesRepo.updateProfile(userId, omitUndefined(next)),
+        ...sideSyncTasks,
+      ]);
+      const profileResult = saveResults[0];
+      if (profileResult.status === 'rejected') {
+        throw profileResult.reason;
+      }
+      if (!profileResult.value.success) {
+        throw profileResult.value.error;
+      }
+
+      for (const sideResult of saveResults.slice(1)) {
+        if (sideResult.status === 'rejected') {
+          if (__DEV__) {
+            console.warn('[DatingProfileEdit] life domain settings sync', sideResult.reason);
+          }
+        }
+      }
+
+      if (promptsChanged) {
+        await saveEditProfilePrompts(userId, profilePrompts);
+        void qc.invalidateQueries({ queryKey: ['editProfileInterviewFields', userId] });
+      }
+
       setPhotoUrls(Array.isArray(resolvedPhotos) ? resolvedPhotos : []);
-      if (archetypeSelection.length === 2) {
-        setSavedArchetypes(archetypeSelection);
-      }
-      await qc.invalidateQueries({ queryKey: ['dating-profile', userId] });
-      await qc.invalidateQueries({ queryKey: ['profile', userId] });
+      patchEditProfileQueryCache(qc, userId, {
+        profileBlob: next,
+        lifeDomainsState,
+        matchPrefs,
+        lifeDomainAnswers,
+      });
+      void qc.invalidateQueries({ queryKey: ['profile', userId] });
       setSaveSucceeded(true);
+      setSavedSnapshot(
+        buildEditProfileFormSnapshot({
+          ...formSnapshotInput,
+          photoUrls: Array.isArray(resolvedPhotos) ? resolvedPhotos : [],
+        }),
+      );
+      serverBaselineRef.current = {
+        ...formSnapshotInput,
+        photoUrls: Array.isArray(resolvedPhotos) ? resolvedPhotos : [],
+      };
+      clearFormDirty();
+      return true;
     } catch (e) {
       if (__DEV__) console.warn('[DatingProfileEdit]', e);
       showSimpleAlert(
         'Could Not Save',
         e instanceof Error ? e.message : 'Unknown error',
       );
+      return false;
     } finally {
       setSaving(false);
     }
   };
 
+  const completePendingExit = useCallback(() => {
+    const pendingAction = pendingNavigationActionRef.current;
+    pendingNavigationActionRef.current = null;
+    setUnsavedPromptVisible(false);
+    allowExitWithoutPromptRef.current = true;
+    if (pendingAction) {
+      navigation.dispatch(pendingAction);
+      return;
+    }
+    exitEditProfileToPostInterview();
+  }, [exitEditProfileToPostInterview, navigation]);
+
+  const showUnsavedChangesPrompt = useCallback(() => {
+    if (Platform.OS === 'web') {
+      setUnsavedPromptVisible(true);
+      return;
+    }
+    Alert.alert(
+      'Unsaved changes',
+      'You have unsaved changes. Would you like to save them before leaving?',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: "Don't save",
+          style: 'destructive',
+          onPress: () => completePendingExitRef.current(),
+        },
+        {
+          text: 'Save',
+          onPress: () => {
+            void handleUnsavedPromptSaveRef.current();
+          },
+        },
+      ],
+    );
+  }, []);
+
+  const promptUnsavedChanges = useCallback(() => {
+    pendingNavigationActionRef.current = null;
+    showUnsavedChangesPrompt();
+  }, [showUnsavedChangesPrompt]);
+
+  const handleBackPress = useCallback(() => {
+    if (!hasUnsavedChangesRef.current) {
+      exitEditProfileToPostInterview();
+      return;
+    }
+    promptUnsavedChanges();
+  }, [exitEditProfileToPostInterview, promptUnsavedChanges]);
+
+  handleBackPressRef.current = handleBackPress;
+
+  useLayoutEffect(() => {
+    navigation.setOptions({
+      headerShown: true,
+      header: () => (
+        <OnboardingHeader
+          variant="dark"
+          onBackPress={() => handleBackPressRef.current()}
+        />
+      ),
+    });
+  }, [navigation]);
+
+  useEffect(() => {
+    const unsubscribe = navigation.addListener('beforeRemove', (e) => {
+      if (allowExitWithoutPromptRef.current) return;
+      if (!hasUnsavedChangesRef.current) return;
+      e.preventDefault();
+      pendingNavigationActionRef.current = e.data.action;
+      showUnsavedChangesPrompt();
+    });
+    return unsubscribe;
+  }, [navigation, showUnsavedChangesPrompt]);
+
+  const handleUnsavedPromptCancel = useCallback(() => {
+    pendingNavigationActionRef.current = null;
+    setUnsavedPromptVisible(false);
+  }, []);
+
+  const handleUnsavedPromptDiscard = useCallback(() => {
+    completePendingExit();
+  }, [completePendingExit]);
+
+  const handleUnsavedPromptSave = useCallback(async () => {
+    if (unsavedPromptSaving || saving) return;
+    setUnsavedPromptSaving(true);
+    try {
+      const saved = await onSave();
+      if (saved) completePendingExit();
+    } finally {
+      setUnsavedPromptSaving(false);
+    }
+  }, [completePendingExit, onSave, saving, unsavedPromptSaving]);
+
+  completePendingExitRef.current = completePendingExit;
+  handleUnsavedPromptSaveRef.current = () => {
+    void handleUnsavedPromptSave();
+  };
+
   const saveFeedbackText = saveSucceeded ? 'Changes saved successfully.' : '';
+  const saveButtonDisabled = saving || !userId || !hasUnsavedChanges;
 
   return (
     <>
@@ -1093,14 +1418,11 @@ export const DatingProfileEditScreen: React.FC<{
         <Text style={styles.lead}>
           Modify these fields so we can better learn about you so that we can better match you with your perfect partner.
         </Text>
-        {savedArchetypes.length === 2 ? (
-          <ArchetypeDisplayChips archetypeIds={savedArchetypes} />
-        ) : null}
 
         <Pressable
           onPress={() => void onSave()}
-          disabled={saving || !userId}
-          style={[styles.primaryBtn, saving && styles.primaryBtnDisabled]}
+          disabled={saveButtonDisabled}
+          style={[styles.primaryBtn, saveButtonDisabled && styles.primaryBtnDisabled]}
         >
           <View style={styles.saveButtonContent}>
             {saving ? <ActivityIndicator size="small" color="#fff" /> : null}
@@ -1171,19 +1493,23 @@ export const DatingProfileEditScreen: React.FC<{
             <SectionTitle>About you</SectionTitle>
             <Field
               label="Name"
-              value={asStr(draft.displayName)}
-              onChangeText={setScalar('displayName')}
+              value={asStr(draft.displayName ?? draft.name)}
+              onChangeText={(t) => {
+                markFormDirty();
+                setDraft((d) => ({ ...d, displayName: t, name: t }));
+              }}
             />
             <ChoiceDropdown
               label="Gender"
               value={genderUiValue}
               options={GENDER_UI_OPTIONS.map((g) => ({ label: g, value: g }))}
-              onValueChange={(ui) =>
+              onValueChange={(ui) => {
+                markFormDirty();
                 setDraft((d) => ({
                   ...d,
                   gender: ui ? (mapGenderToDb(ui) ?? ui) : '',
-                }))
-              }
+                }));
+              }}
             />
             <ChoiceDropdown
               label="Ethnicity"
@@ -1318,6 +1644,31 @@ export const DatingProfileEditScreen: React.FC<{
               value={asStr(draft.educationLevel)}
               options={EDUCATION_LEVEL_CHOICES}
               onValueChange={setScalar('educationLevel')}
+            />
+
+            <SectionTitle>Hobbies</SectionTitle>
+            <HobbiesFields
+              hobbies={asStr(draft.hobbies)}
+              professionalHobbyId={
+                draft.professionalHobbyId == null
+                  ? null
+                  : String(draft.professionalHobbyId)
+              }
+              onHobbiesChange={(hobbies) =>
+                setDraft((d) => ({ ...d, hobbies }))
+              }
+              onProfessionalHobbyIdChange={(professionalHobbyId) =>
+                setDraft((d) => ({ ...d, professionalHobbyId }))
+              }
+            />
+
+            <SectionTitle>Profile prompts</SectionTitle>
+            <ProfilePromptsFields
+              prompts={profilePrompts}
+              onChange={(next) => {
+                setProfilePrompts(next);
+                markFormDirty();
+              }}
             />
           </>
         ) : null}
@@ -1570,7 +1921,7 @@ export const DatingProfileEditScreen: React.FC<{
               onChange={setArchetypeSelection}
             />
             <Text style={styles.mutedSmall}>
-              Select exactly two archetypes, then use Save changes at the top.
+              Select {MIN_PROFILE_ARCHETYPES}–{MAX_PROFILE_ARCHETYPES} archetypes, then use Save changes at the top.
             </Text>
           </>
         ) : null}
@@ -1608,10 +1959,10 @@ export const DatingProfileEditScreen: React.FC<{
 
         <Pressable
           onPress={() => void onSave()}
-          disabled={saving || !userId}
+          disabled={saveButtonDisabled}
           style={[
             styles.primaryBtn,
-            saving && styles.primaryBtnDisabled,
+            saveButtonDisabled && styles.primaryBtnDisabled,
             { marginTop: 8 },
           ]}
         >
@@ -1655,6 +2006,13 @@ export const DatingProfileEditScreen: React.FC<{
         onClose={() => setLifeDomainQuestionsDomainId(null)}
       />
     ) : null}
+    <EditProfileUnsavedChangesModal
+      visible={unsavedPromptVisible}
+      saving={unsavedPromptSaving || saving}
+      onCancel={handleUnsavedPromptCancel}
+      onDiscard={handleUnsavedPromptDiscard}
+      onSave={() => void handleUnsavedPromptSave()}
+    />
     </>
   );
 };

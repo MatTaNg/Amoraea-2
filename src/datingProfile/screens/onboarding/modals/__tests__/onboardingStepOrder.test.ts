@@ -3,6 +3,16 @@ import { getNextOnboardingStep } from '../onboardingStepNavigation';
 import { ONBOARDING_STEPS_ORDER } from '../onboardingStepOrder';
 
 describe('onboardingStepOrder', () => {
+  it('places hobbies immediately after name and dealbreaker after hobbies', () => {
+    const nameIdx = ONBOARDING_STEPS_ORDER.indexOf('name');
+    const hobbiesIdx = ONBOARDING_STEPS_ORDER.indexOf('hobbies');
+    const dealbreakerIdx = ONBOARDING_STEPS_ORDER.indexOf('hobbyDealbreaker');
+    const attractionIdx = ONBOARDING_STEPS_ORDER.indexOf('attraction');
+    expect(hobbiesIdx).toBe(nameIdx + 1);
+    expect(dealbreakerIdx).toBe(hobbiesIdx + 1);
+    expect(attractionIdx).toBe(dealbreakerIdx + 1);
+  });
+
   it('places life-domain required questions before space and lifestyle dealbreakers', () => {
     const yearlyIncomeIdx = ONBOARDING_STEPS_ORDER.indexOf('lifeDomainQ__finance__yearlyIncome');
     const sleepScheduleIdx = ONBOARDING_STEPS_ORDER.indexOf('lifeDomainQ__health__sleepSchedule');
@@ -16,6 +26,13 @@ describe('onboardingStepOrder', () => {
     expect(spaceIdx).toBeGreaterThan(sleepScheduleIdx);
     expect(matchPrefsIdx).toBeGreaterThan(spaceIdx);
     expect(lifeDomainsIdx).toBeGreaterThan(matchPrefsIdx);
+  });
+
+  it('places profile prompts before profile complete', () => {
+    const promptsIdx = ONBOARDING_STEPS_ORDER.indexOf('profilePrompts');
+    const completeIdx = ONBOARDING_STEPS_ORDER.indexOf('profileComplete');
+    expect(promptsIdx).toBeGreaterThan(-1);
+    expect(completeIdx).toBe(promptsIdx + 1);
   });
 
   it('advances from recent dating to first finance question', () => {

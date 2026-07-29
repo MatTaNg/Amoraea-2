@@ -12,9 +12,6 @@ import { attachSkipPenaltyGateOptions } from '@features/aria/interviewSessionUti
 import type { MessageWithScenario } from '@features/aria/interviewScenarioScoringSlice';
 import { countMentalizingOvercertaintyInMarkerSlices } from '@features/aria/mentalizingOvercertaintyFromTranscript';
 import { normalizeResponseConcreteness } from '@features/aria/personalMomentConcreteness';
-import {
-  extractPersonalMomentEmotionalVocabFromSlice,
-} from '@features/aria/personalMomentEmotionalVocab';
 import { fullScenarioReconciliation } from '@features/aria/reconcileScenarioScoresTranscript';
 import type { ScenarioScoreResult } from '@features/aria/scoreInterviewScoringHelpers';
 import type { ScoreInterviewDeps } from '@features/aria/scoreInterviewTypes';
@@ -106,8 +103,6 @@ export function buildAlphaMarkerSlicesForAggregate(
       mentalizing_overcertainty: b.mentalizing_overcertainty === true,
     };
   };
-  const m4EvAgg = moment4ForAggregate ? extractPersonalMomentEmotionalVocabFromSlice(moment4ForAggregate) : null;
-  const m5EvAgg = moment5ForAggregate ? extractPersonalMomentEmotionalVocabFromSlice(moment5ForAggregate) : null;
   return [
     sliceFromRef(1),
     sliceFromRef(2),
@@ -118,10 +113,6 @@ export function buildAlphaMarkerSlicesForAggregate(
           keyEvidence: moment4ForAggregate.keyEvidence,
           mentalizing_overcertainty: moment4ForAggregate.mentalizing_overcertainty === true,
           response_concreteness: normalizeResponseConcreteness(moment4ForAggregate.response_concreteness),
-          emotional_vocab_count: m4EvAgg?.emotional_vocab_count ?? undefined,
-          emotional_vocab_words:
-            m4EvAgg && m4EvAgg.emotional_vocab_words.length > 0 ? m4EvAgg.emotional_vocab_words : undefined,
-          user_slice_word_count: m4EvAgg?.user_slice_word_count ?? undefined,
         }
       : null,
     moment5ForAggregate
@@ -130,10 +121,6 @@ export function buildAlphaMarkerSlicesForAggregate(
           keyEvidence: moment5ForAggregate.keyEvidence,
           mentalizing_overcertainty: moment5ForAggregate.mentalizing_overcertainty === true,
           response_concreteness: normalizeResponseConcreteness(moment5ForAggregate.response_concreteness),
-          emotional_vocab_count: m5EvAgg?.emotional_vocab_count ?? undefined,
-          emotional_vocab_words:
-            m5EvAgg && m5EvAgg.emotional_vocab_words.length > 0 ? m5EvAgg.emotional_vocab_words : undefined,
-          user_slice_word_count: m5EvAgg?.user_slice_word_count ?? undefined,
         }
       : null,
   ];

@@ -5,7 +5,7 @@ import {
   setTtsBufferCompleteBeforePlaybackForNextPlayback,
   setTtsPlaybackStrategyForNextPlayback,
 } from '@features/aria/telemetry/ttsBufferTelemetry';
-import { logAndApplyPlaybackModeForTts } from './audioModeHelpers';
+import { applyNativeTtsPrePlaybackAudioMode, setPlaybackMode } from './audioModeHelpers';
 import type { ElevenLabsSpeakOptions } from './elevenLabsSpeakTypes';
 import { stopElevenLabsPlayback } from './elevenLabsTtsPlaybackStop';
 import { getLocalDevPlaybackRateMultiplier } from './interviewTtsPlaybackRate';
@@ -25,7 +25,10 @@ export function speakFallback(
   return new Promise((resolve, reject) => {
     const run = async () => {
       await stopElevenLabsPlayback();
-      await logAndApplyPlaybackModeForTts('speakFallback:before_expo_speech').catch(() => {});
+      await applyNativeTtsPrePlaybackAudioMode('speakFallback:before_expo_speech').catch(() => {});
+      if (Platform.OS === 'android') {
+        await setPlaybackMode().catch(() => {});
+      }
       onPlaybackStarted?.();
       // iOS: false = AVSpeechSynthesizer uses its own playback session (speaker).
       const iosSpeechSession = Platform.OS === 'ios' ? { useApplicationAudioSession: false as const } : {};

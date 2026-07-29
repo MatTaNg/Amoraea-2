@@ -2,6 +2,7 @@ import { describe, expect, it } from '@jest/globals';
 import {
   applyMoment5PostParseCoercionAndSalvage,
   backfillMoment5KeyEvidenceIfScoresOtherwiseUnpersistable,
+  buildMoment5UserSkippedScoresAggregate,
   coerceMoment5ParsedModelRecord,
   finalizeMoment5ParsedModelScore,
   mergeMoment5PillarScoresAfterEvidenceNormalize,
@@ -10,6 +11,7 @@ import {
   MOMENT5_SCORE_RECOVERED_EVIDENCE_LINE,
   salvagePersonalMomentDepthFieldsFromRawModelText,
 } from '../moment5ScoringParse';
+import { personalMomentBundleWasScored } from '../interviewCompletionGate';
 import { MOMENT_5_ACCOUNTABILITY_QUESTION_TEXT } from '@features/aria/moment5ProbeCopy';
 import { parseJsonObjectFromModelText } from '@utilities/parseHolisticModelJson';
 
@@ -25,6 +27,13 @@ const M5_TEST_GUARD = {
 };
 
 describe('moment5ScoringParse', () => {
+  it('buildMoment5UserSkippedScoresAggregate passes personalMomentBundleWasScored', () => {
+    const skipped = buildMoment5UserSkippedScoresAggregate();
+    expect(personalMomentBundleWasScored(skipped)).toBe(true);
+    expect(skipped.pillarScores?.accountability).toBeNull();
+    expect(skipped.keyEvidence?.accountability).toMatch(/skip/i);
+  });
+
   it('mergeMoment5PillarScoresAfterEvidenceNormalize restores explicit nulls', () => {
     expect(mergeMoment5PillarScoresAfterEvidenceNormalize({})).toEqual({
       accountability: null,

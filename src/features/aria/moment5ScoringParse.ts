@@ -18,11 +18,13 @@ import {
 } from './scenarioConstructEvidenceExtraction';
 import { mergeSalvagedScenarioKeyEvidenceFromRaw } from './scenarioScoringParse';
 import {
+  SKIPPED_BY_USER_FRUSTRATION_EVIDENCE,
   coerceScoreToFiniteNumber,
   evidenceAbsentForResponseDepthModifier,
   isPillarConfidenceOnlyEvidence,
   migratePillarConfidenceLeakedIntoKeyEvidence,
 } from './probeEvidenceUtils';
+import type { PersonalMoment5SliceForSanitize } from './personalMomentSliceSanitize';
 
 export const MOMENT5_SCORE_MARKER_IDS = [
   'accountability',
@@ -50,6 +52,24 @@ export function mergeMoment5PillarScoresAfterEvidenceNormalize(
 /** When every marker is null and there is no real evidence — minimal row so persistence sees a full key shape. */
 export const MOMENT5_BUNDLE_INCOMPLETE_EVIDENCE_LINE =
   'Moment 5 incomplete model output; null scores retained for persistence.';
+
+/** Participant confirmed skip on the final conflict question — persist scored skip markers for rollup. */
+export function buildMoment5UserSkippedScoresAggregate(): PersonalMoment5SliceForSanitize {
+  const pillarScores: Record<string, number | null> = {};
+  const keyEvidence: Record<string, string> = {};
+  const pillarConfidence: Record<string, string> = {};
+  for (const id of MOMENT5_SCORE_MARKER_IDS) {
+    pillarScores[id] = null;
+    keyEvidence[id] = SKIPPED_BY_USER_FRUSTRATION_EVIDENCE;
+    pillarConfidence[id] = 'not_assessed';
+  }
+  return {
+    pillarScores,
+    keyEvidence,
+    pillarConfidence,
+    scoringMetadata: { skipped_by_user: true, skip_trigger: 'm5_skip_request_confirmed' },
+  };
+}
 
 /** Model returned a numeric pillar but no assessable quote (truncated JSON, lazy completion, etc.). */
 export const MOMENT5_SCORE_RECOVERED_EVIDENCE_LINE = MOMENT4_SCORE_RECOVERED_EVIDENCE_LINE;

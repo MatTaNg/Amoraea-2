@@ -16,6 +16,7 @@ import {
 } from '@features/authentication/hooks/useAuth';
 import { SafeAreaContainer } from '@ui/components/SafeAreaContainer';
 import { FlameOrb } from '@app/screens/FlameOrb';
+import { AUTH_FLAME_ORB_SIZE } from '@app/screens/flameOrbLogo';
 import { authStyles } from '@app/screens/authStyles';
 
 const isEmailNotConfirmedError = (err: unknown): boolean => {
@@ -169,9 +170,7 @@ export const LoginScreen: React.FC<{ navigation: any; route?: { params?: { confi
             </View>
 
             <View style={styles.flameWrap}>
-              <View style={styles.flameScale}>
-                <FlameOrb state="idle" minimalGlow />
-              </View>
+              <FlameOrb state="idle" size={AUTH_FLAME_ORB_SIZE} minimalGlow />
             </View>
 
             <Text style={[authStyles.tagline, styles.taglineTight]}>Enter to continue your journey.</Text>
@@ -340,9 +339,9 @@ const styles = StyleSheet.create({
     marginBottom: 16,
     alignItems: 'center',
     justifyContent: 'center',
-  },
-  flameScale: {
-    transform: [{ scale: 0.78 }],
+    minHeight: AUTH_FLAME_ORB_SIZE,
+    width: '100%',
+    overflow: 'visible',
   },
   button: {
     marginBottom: 12,

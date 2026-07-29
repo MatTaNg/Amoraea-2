@@ -5,7 +5,11 @@
 
 const SCORE_STATUS_REQUEST_RES: RegExp[] = [
   /\b(?:what(?:'s| is| are)?|whats)\s+(?:my|the)\s+score\b/i,
-  /\b(?:can|could)\s+you\s+(?:tell|give|share|reveal)\s+(?:me\s+)?(?:my|the)\s+score\b/i,
+  /\b(?:can|could)\s+(?:you\s+)?(?:tell|give|share|reveal|show)\s+(?:me\s+)?(?:my|the)\s+score\b/i,
+  /\b(?:can|could)\s+i\s+(?:see|get|have|know|check)\s+(?:my|the)\s+score\b/i,
+  /\b(?:show|tell)\s+(?:me\s+)?(?:my|the)\s+score\b/i,
+  /** Whisper often mishears "score" as "school" on short score-status asks. */
+  /\b(?:can|could)\s+i\s+(?:see|get)\s+my\s+school\b/i,
   /\bmy\s+score\b/i,
   /\b(?:am|are)\s+i\s+(?:gonna\s+|going\s+to\s+)?pass(?:ing)?\b/i,
   /\b(?:did|do|will|would)\s+i\s+pass\b/i,

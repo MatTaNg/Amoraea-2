@@ -160,8 +160,8 @@ export function useAriaInterviewSession(
 
   useEffect(() => {
     let cancelled = false;
-    const releaseGate = () => {
-      if (cancelled || ttsScreenReadyRef.current) return;
+    const flushPendingGateWaiters = (reason: string) => {
+      if (ttsScreenReadyRef.current) return;
       ttsScreenReadyRef.current = true;
       const pending = pendingTtsGateResolversRef.current.splice(0, pendingTtsGateResolversRef.current.length);
       const pendingScreenReady = pendingScreenReadyResolversRef.current.splice(
@@ -169,17 +169,25 @@ export function useAriaInterviewSession(
         pendingScreenReadyResolversRef.current.length,
       );
       if (pending.length > 0) {
-        logTtsGateState('released', 'screen_ready', pending.length);
+        logTtsGateState('released', reason, pending.length);
       }
       pending.forEach((resolve) => resolve());
       pendingScreenReady.forEach((resolve) => resolve());
     };
+    const releaseGate = () => {
+      if (cancelled) return;
+      flushPendingGateWaiters('screen_ready');
+    };
     const interaction = InteractionManager.runAfterInteractions(() => {
       setTimeout(releaseGate, 0);
     });
+    const fallbackTimer = setTimeout(releaseGate, 500);
     return () => {
       cancelled = true;
       interaction.cancel();
+      clearTimeout(fallbackTimer);
+      // Effect re-runs must not strand resume/TTS waiters registered before the next release.
+      flushPendingGateWaiters('screen_ready_cleanup');
     };
   }, [logTtsGateState]);
 

@@ -167,6 +167,7 @@ export type AriaInterviewScreenSessionGateState = {
     resumeActiveScenarioRef: React.MutableRefObject<1 | 2 | 3 | null>;
     resumeWelcomeMessageRef: React.MutableRefObject<string>;
     resumeOfferWelcomeTtsRef: React.MutableRefObject<boolean>;
+    resumeInPersonalPartRef: React.MutableRefObject<boolean>;
     resumeEmotionAfterModalTextRef: React.MutableRefObject<string | null>;
     resumeWelcomeHydrationAttemptRef: React.MutableRefObject<string | null>;
     pendingScenarioIntroAfterResumeWelcomeRef: React.MutableRefObject<string | null>;
@@ -195,8 +196,11 @@ export type AriaInterviewScreenSessionGateState = {
 export type AriaInterviewScreenSessionRoutingState = {
   isInterviewAppRoute: boolean;
   resumeLoadingFlowActiveRef: React.MutableRefObject<boolean>;
+  resumeHandleInFlightRef: React.MutableRefObject<boolean>;
   resumeLoadingVisible: boolean;
   setResumeLoadingVisible: React.Dispatch<React.SetStateAction<boolean>>;
+  resumeHydrationPending: boolean;
+  setResumeHydrationPending: React.Dispatch<React.SetStateAction<boolean>>;
   preparingHandoffPollTick: number;
 };
 

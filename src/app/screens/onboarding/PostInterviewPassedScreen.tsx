@@ -42,6 +42,7 @@ import { DownloadPersonalReportButton } from '@features/psychometrics/DownloadPe
 import { ValidationFlowOptInCard } from '@features/relationshipValidation/ValidationFlowOptInCard';
 import { navigateToDatingProfileOnboardingEntry } from '@/datingProfile/onboarding/navigateToDatingProfileOnboardingEntry';
 import { areDatingProfileAssessmentsComplete } from '@/data/services/assessmentService';
+import { PostInterviewReferFriendSection } from '@features/referrals/PostInterviewReferFriendSection';
 
 const BG = '#0a0a0f';
 const ACCENT = '#3b82f6';
@@ -448,25 +449,12 @@ export const PostInterviewPassedScreen: React.FC<{ navigation: any; route: { par
           <ValidationFlowOptInCard userId={userId} returnRoute="PostInterviewPassed" />
 
           {myReferralCode ? (
-            <View style={styles.referFriendSection}>
-              <View style={styles.referFriendDivider} />
-              <Text style={styles.referFriendTitle}>Know someone who can pass?</Text>
-              <Text style={styles.referFriendBody}>
-                Share your personal code with someone you think is ready. If they complete the full interview,
-                you will both receive a 20% discount at our next event!
-              </Text>
-              <View style={styles.codeBlockRow}>
-                <Text style={styles.codeBlockText} selectable>
-                  {myReferralCode}
-                </Text>
-                <Pressable
-                  onPress={copyReferralCode}
-                  style={({ pressed }) => [styles.copyCodeBtn, pressed && { opacity: 0.85 }]}
-                >
-                  <Text style={styles.copyCodeBtnLabel}>{copyFeedback ? 'Copied' : 'Copy'}</Text>
-                </Pressable>
-              </View>
-            </View>
+            <PostInterviewReferFriendSection
+              referralCode={myReferralCode}
+              copyFeedback={copyFeedback}
+              onCopyPress={() => void copyReferralCode()}
+              style={styles.referFriendSectionSpacing}
+            />
           ) : null}
         </View>
         {showPostInterviewRetake ? (
@@ -645,43 +633,7 @@ const styles = StyleSheet.create({
   },
   referralNoticeDismiss: { alignSelf: 'flex-end' },
   referralNoticeDismissLabel: { fontFamily: FONT_BODY, fontSize: 13, fontWeight: '600', color: ACCENT },
-  referFriendSection: { width: '100%', marginTop: 20, marginBottom: 4 },
-  referFriendDivider: { height: 1, backgroundColor: 'rgba(255,255,255,0.08)', marginBottom: 20 },
-  referFriendTitle: {
-    fontFamily: FONT_DISPLAY,
-    fontSize: 19,
-    fontWeight: '600',
-    color: '#f4f4f5',
-    marginBottom: 10,
-  },
-  referFriendBody: {
-    fontFamily: FONT_BODY,
-    fontSize: 14,
-    lineHeight: 21,
-    color: 'rgba(255,255,255,0.78)',
-    marginBottom: 14,
-  },
-  codeBlockRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 12,
-    backgroundColor: 'rgba(0,0,0,0.35)',
-    borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.12)',
-    borderRadius: 10,
-    paddingVertical: 12,
-    paddingHorizontal: 14,
-  },
-  codeBlockText: {
-    flex: 1,
-    fontFamily: Platform.OS === 'ios' ? 'Menlo' : 'monospace',
-    fontSize: 17,
-    fontWeight: '600',
-    letterSpacing: 1.2,
-    color: '#f8fafc',
-  },
-  copyCodeBtn: { backgroundColor: 'rgba(59,130,246,0.25)', borderRadius: 8, paddingVertical: 8, paddingHorizontal: 14 },
-  copyCodeBtnLabel: { fontFamily: FONT_BODY, fontSize: 13, fontWeight: '600', color: '#93c5fd' },
+  referFriendSectionSpacing: { marginTop: 20 },
   retakeSection: { width: '100%', maxWidth: 440, alignSelf: 'center', marginTop: 28, paddingHorizontal: 4, alignItems: 'center' },
   retakeButton: {
     width: '100%',

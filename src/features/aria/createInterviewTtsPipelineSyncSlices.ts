@@ -51,6 +51,7 @@ export function createInterviewTtsPipelineScenarioProbeRefsSyncSlice(params: Syn
     moment5AccountabilityProbeFiredRef: params.moment5AccountabilityProbeFiredRef,
     moment5ClientScoringMetaRef: params.moment5ClientScoringMetaRef,
     moment4ClientSpecificityProbeInjectedRef: params.moment4ClientSpecificityProbeInjectedRef,
+    moment4ThresholdProbeAskedRef: params.moment4ThresholdProbeAskedRef,
     moment5SpecificityRedirectIssuedRef: params.moment5SpecificityRedirectIssuedRef,
     elongatingProbeFiredRef: params.elongatingProbeFiredRef,
   };

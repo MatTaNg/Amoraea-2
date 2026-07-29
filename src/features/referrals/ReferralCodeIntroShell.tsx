@@ -10,24 +10,81 @@ import {
   Text,
   View,
 } from 'react-native';
+import type { NavigationState } from '@react-navigation/native';
 
+import { isLaunchWaitlistPostInterviewModeEnabled } from '@features/onboarding/postInterviewLaunchMode';
 import {
   fetchReferralDiscountStatus,
+  resolveProspectiveCompletionDiscount,
   type ReferralDiscountStatus,
 } from '@features/referrals/referralInterview';
 import { referralCodeIntroSeenStorageKey } from '@features/referrals/referralCodeIntroStorage';
+import { PostInterviewLaunchReferralCard } from '@features/referrals/PostInterviewLaunchReferralCard';
+import { PostInterviewReferFriendSection } from '@features/referrals/PostInterviewReferFriendSection';
 
-const FONT_DISPLAY = Platform.OS === 'web' ? "'Cormorant Garamond', serif" : undefined;
 const FONT_BODY = Platform.OS === 'web' ? "'DM Sans', system-ui, sans-serif" : undefined;
+
+/** Routes that already surface referral UI inline — hide the global floating chip/modal. */
+export const REFERRAL_CODE_INTRO_SUPPRESSED_ROUTES = [
+  'PostInterviewLaunch',
+  'DatingProfileEdit',
+] as const;
+
+/** Parent stack route — suppress on all nested onboarding steps. */
+export const REFERRAL_CODE_INTRO_SUPPRESSED_ROUTE_PREFIXES = ['DatingProfileOnboarding'] as const;
+
+export function resolveActiveNavigationRouteName(
+  state: NavigationState | undefined,
+): string | undefined {
+  if (!state) return undefined;
+  let node = state;
+  while (node.routes[node.index ?? 0]?.state) {
+    node = node.routes[node.index ?? 0].state as NavigationState;
+  }
+  return node.routes[node.index ?? 0]?.name;
+}
+
+function navigationTreeContainsRoute(
+  state: NavigationState | undefined,
+  routeName: string,
+): boolean {
+  if (!state) return false;
+  for (const route of state.routes) {
+    if (route.name === routeName) return true;
+    if (route.state && navigationTreeContainsRoute(route.state as NavigationState, routeName)) {
+      return true;
+    }
+  }
+  return false;
+}
+
+export function isReferralCodeIntroSuppressedRoute(
+  routeName: string | undefined,
+  navigationState?: NavigationState,
+): boolean {
+  if (
+    routeName != null &&
+    (REFERRAL_CODE_INTRO_SUPPRESSED_ROUTES as readonly string[]).includes(routeName)
+  ) {
+    return true;
+  }
+
+  return (REFERRAL_CODE_INTRO_SUPPRESSED_ROUTE_PREFIXES as readonly string[]).some((name) =>
+    navigationTreeContainsRoute(navigationState, name),
+  );
+}
 
 type ReferralCodeIntroShellProps = {
   userId: string;
   marketResearchComplete: boolean;
+  /** When true, hide floating chip/modal (e.g. PostInterviewLaunch already shows referral inline). */
+  suppressReferralIntro?: boolean;
 };
 
 export function ReferralCodeIntroShell({
   userId,
   marketResearchComplete,
+  suppressReferralIntro = false,
 }: ReferralCodeIntroShellProps) {
   const [referralStatus, setReferralStatus] = useState<ReferralDiscountStatus | null>(null);
   const [popupVisible, setPopupVisible] = useState(false);
@@ -35,7 +92,7 @@ export function ReferralCodeIntroShell({
   const copyFeedbackTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
-    if (!userId || !marketResearchComplete) return;
+    if (!userId || !marketResearchComplete || suppressReferralIntro) return;
     let cancelled = false;
     void (async () => {
       const status = await fetchReferralDiscountStatus(userId);
@@ -45,7 +102,7 @@ export function ReferralCodeIntroShell({
     return () => {
       cancelled = true;
     };
-  }, [marketResearchComplete, userId]);
+  }, [marketResearchComplete, suppressReferralIntro, userId]);
 
   useEffect(() => {
     return () => {
@@ -87,7 +144,7 @@ export function ReferralCodeIntroShell({
   }, [referralStatus?.referralCode]);
 
   useEffect(() => {
-    if (!userId || !marketResearchComplete || !referralStatus?.referralCode) {
+    if (!userId || !marketResearchComplete || suppressReferralIntro || !referralStatus?.referralCode) {
       return;
     }
     let cancelled = false;
@@ -100,15 +157,18 @@ export function ReferralCodeIntroShell({
     return () => {
       cancelled = true;
     };
-  }, [marketResearchComplete, referralStatus?.referralCode, userId]);
+  }, [marketResearchComplete, referralStatus?.referralCode, suppressReferralIntro, userId]);
 
-  const popupBody = referralStatus?.atCap
-    ? "Share this code with people you think are ready for a real relationship. You've maxed out your discount."
-    : `Share this code with people you think are ready for a real relationship. When they complete the interview, you both unlock an extra 20% off — every membership tier, forever. You can stack this up to ${referralStatus?.remainingReferralsToCap ?? 0} more ${referralStatus?.remainingReferralsToCap === 1 ? 'time' : 'times'}.`;
-
-  if (!marketResearchComplete || !referralStatus?.referralCode) {
+  if (suppressReferralIntro || !marketResearchComplete || !referralStatus?.referralCode) {
     return null;
   }
+
+  const useLaunchReferralCard = isLaunchWaitlistPostInterviewModeEnabled();
+  const isProspective = !referralStatus.fullyComplete;
+  const displayDiscount = isProspective
+    ? resolveProspectiveCompletionDiscount(referralStatus.signedUpWithReferral)
+    : referralStatus.totalDiscount;
+  const referralCardVariant = isProspective ? 'prospective' : 'earned';
 
   return (
     <>
@@ -138,13 +198,24 @@ export function ReferralCodeIntroShell({
             >
               <Ionicons name="close" size={20} color="rgba(255,255,255,0.72)" />
             </Pressable>
-            <Text style={styles.modalTitle}>
-              Your referral code is {referralStatus.referralCode}
-            </Text>
-            <Text style={styles.modalBody}>{popupBody}</Text>
-            <Pressable onPress={() => void copyReferralCode()} style={styles.modalPrimaryButton}>
-              <Text style={styles.modalPrimaryText}>{copyFeedback ? 'Copied ✓' : 'Copy Code'}</Text>
-            </Pressable>
+            {useLaunchReferralCard ? (
+              <PostInterviewLaunchReferralCard
+                referralStatus={referralStatus}
+                displayDiscount={displayDiscount}
+                copyFeedback={copyFeedback}
+                onCopyPress={() => void copyReferralCode()}
+                style={styles.modalLaunchReferralCard}
+                variant={referralCardVariant}
+              />
+            ) : (
+              <PostInterviewReferFriendSection
+                referralCode={referralStatus.referralCode}
+                copyFeedback={copyFeedback}
+                onCopyPress={() => void copyReferralCode()}
+                showTopDivider={false}
+                style={styles.modalReferSection}
+              />
+            )}
             <Pressable onPress={() => void dismissPopup()} style={styles.modalSecondaryButton}>
               <Text style={styles.modalSecondaryText}>Got it</Text>
             </Pressable>
@@ -215,39 +286,17 @@ const styles = StyleSheet.create({
     right: 14,
     padding: 6,
   },
-  modalTitle: {
-    fontFamily: FONT_DISPLAY,
-    fontSize: 28,
-    lineHeight: 34,
-    fontWeight: '600',
-    color: '#F7FBFF',
-    textAlign: 'center',
-    marginBottom: 12,
-    paddingHorizontal: 12,
-  },
-  modalBody: {
-    fontFamily: FONT_BODY,
-    fontSize: 15,
-    lineHeight: 22,
-    color: 'rgba(255,255,255,0.78)',
-    textAlign: 'center',
-    marginBottom: 18,
-  },
-  modalPrimaryButton: {
-    backgroundColor: 'rgba(91,168,232,0.26)',
-    borderWidth: 1,
-    borderColor: 'rgba(91,168,232,0.5)',
-    borderRadius: 12,
-    paddingVertical: 14,
-    paddingHorizontal: 16,
-    alignItems: 'center',
+  modalReferSection: {
+    marginTop: 0,
     marginBottom: 8,
   },
-  modalPrimaryText: {
-    fontFamily: FONT_BODY,
-    fontSize: 15,
-    fontWeight: '700',
-    color: '#E8F4FF',
+  modalLaunchReferralCard: {
+    marginTop: 0,
+    marginBottom: 8,
+    backgroundColor: 'transparent',
+    borderWidth: 0,
+    paddingHorizontal: 0,
+    paddingVertical: 0,
   },
   modalSecondaryButton: {
     alignItems: 'center',

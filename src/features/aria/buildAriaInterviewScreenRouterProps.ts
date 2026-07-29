@@ -9,6 +9,7 @@ export type AriaInterviewScreenRouterScope = {
     | 'fromValidationTrack'
     | 'pendingCompletion'
     | 'resumeLoadingVisible'
+    | 'resumeHydrationPending'
   >;
   adminAccess: Pick<
     AriaInterviewScreenRouterProps,

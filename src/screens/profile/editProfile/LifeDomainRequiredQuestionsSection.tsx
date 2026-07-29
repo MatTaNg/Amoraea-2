@@ -1,6 +1,5 @@
 import React, { useMemo } from 'react';
-import { View, Text, StyleSheet, Platform } from 'react-native';
-import { Picker } from '@react-native-picker/picker';
+import { View, Text, StyleSheet } from 'react-native';
 import {
   getActiveRequiredLifeDomainQuestionsByDomain,
   getLifeDomainOnboardingMeta,
@@ -39,54 +38,34 @@ function QuestionDropdown({
   const [sheetAnchor, setSheetAnchor] = React.useState<OptionAnchor | null>(null);
   const selectedLabel = options.find((o) => o.value === value)?.label ?? 'Choose…';
 
-  if (Platform.OS === 'web') {
-    return (
-      <FormField label={label}>
-        <OptionPickerTrigger
-          style={styles.dropdownTrigger}
-          onOpen={(anchor) => setSheetAnchor(anchor)}
-        >
-          <SelectTriggerRow
-            label={selectedLabel}
-            isPlaceholder={!value}
-            labelStyle={styles.dropdownValue}
-            placeholderStyle={styles.dropdownPlaceholder}
-          />
-        </OptionPickerTrigger>
-        <BottomSheet
-          visible={!!sheetAnchor}
-          title={label}
-          anchor={sheetAnchor}
-          onClose={() => setSheetAnchor(null)}
-        >
-          <SingleChoiceOptionList
-            options={options}
-            value={value}
-            onSelect={(v) => {
-              onValueChange(String(v));
-              setSheetAnchor(null);
-            }}
-          />
-        </BottomSheet>
-      </FormField>
-    );
-  }
-
   return (
     <FormField label={label}>
-      <View style={styles.pickerWrap}>
-        <Picker
-          selectedValue={value || (options[0]?.value ?? '')}
-          onValueChange={(v) => onValueChange(String(v))}
-          mode={Platform.OS === 'android' ? 'dropdown' : undefined}
-          style={styles.picker}
-          dropdownIconColor={theme.colors.textSecondary}
-        >
-          {options.map((o) => (
-            <Picker.Item key={o.value} label={o.label} value={o.value} />
-          ))}
-        </Picker>
-      </View>
+      <OptionPickerTrigger
+        style={styles.dropdownTrigger}
+        onOpen={(anchor) => setSheetAnchor(anchor)}
+      >
+        <SelectTriggerRow
+          label={selectedLabel}
+          isPlaceholder={!value}
+          labelStyle={styles.dropdownValue}
+          placeholderStyle={styles.dropdownPlaceholder}
+        />
+      </OptionPickerTrigger>
+      <BottomSheet
+        visible={!!sheetAnchor}
+        title={label}
+        anchor={sheetAnchor}
+        onClose={() => setSheetAnchor(null)}
+      >
+        <SingleChoiceOptionList
+          options={options}
+          value={value}
+          onSelect={(v) => {
+            onValueChange(String(v));
+            setSheetAnchor(null);
+          }}
+        />
+      </BottomSheet>
     </FormField>
   );
 }
@@ -186,15 +165,5 @@ const styles = StyleSheet.create({
   dropdownPlaceholder: {
     color: theme.colors.textSecondary,
     fontSize: 16,
-  },
-  pickerWrap: {
-    borderWidth: 1,
-    borderColor: 'rgba(123,154,190,0.35)',
-    borderRadius: 10,
-    backgroundColor: 'rgba(15,23,42,0.6)',
-    overflow: 'hidden',
-  },
-  picker: {
-    color: theme.colors.text,
   },
 });

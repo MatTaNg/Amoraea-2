@@ -9,6 +9,7 @@ import {
   isResumeWelcomeFlowBlockingTurnProcessing,
   isStaleInterviewUserTurn,
 } from '@features/aria/resumeWelcomeTurnProcessingGate';
+import { queueResumeDeferredUserSpeech } from '@features/aria/resumeDeferredUserSpeech';
 import { isExplicitRepeatRequestPreClassification } from '@features/aria/metaCommentClassification';
 import { classifyResumeRepeatIntent } from '@features/aria/resumeRepeatIntent';
 import { remoteLog } from '@utilities/remoteLog';
@@ -63,6 +64,7 @@ export function normalizeProcessUserSpeechTurnInput(
       welcomeOffered: resumeOfferWelcomeTtsRef.current,
       repeatChoicePending: resumeRepeatChoicePendingRef.current,
     });
+    queueResumeDeferredUserSpeech(spokenText.trim());
     setVoiceState('idle');
     setIsWaiting(false);
     return { continue: false };

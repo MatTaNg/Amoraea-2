@@ -41,6 +41,7 @@ import {
   looksLikeScenarioCSophieReceiveMisparaphraseQuestion,
 } from '@features/aria/scenarioCPromptDetection';
 import { coerceMidScenarioRelationalReflectionToBriefAck } from '@features/aria/interviewReflectionTextStrips';
+import { isActiveScenarioBConstructProbeTurn } from '@features/aria/scenarioFollowUpTranscriptGuard';
 import { coerceMoment4ThresholdQuestionForTts } from '@features/aria/moment4ProbeLogic';
 import { coerceMoment4SpecificityFollowUpForTts } from '@features/aria/moment4SpecificityFollowUp';
 import { coerceIncompleteInterviewClosingForTts } from '@features/aria/elongatingProbe';
@@ -55,6 +56,7 @@ import {
 import { substituteCanonicalInterviewScenarioBodiesForTts } from '@features/aria/substituteCanonicalInterviewScenarioBodiesForTts';
 import { isLockedShowScenarioExactTtsText } from '@features/aria/showScenarioCardCanonicalTts';
 import { remoteLog } from '@utilities/remoteLog';
+import { isResumeWelcomeBackAssistantText } from '@utilities/interviewResumeCursor';
 import { getSessionLogRuntime, writeSessionLog } from '@utilities/sessionLogging';
 
 export type SpeakTextSafePreDeliverySuppressionReason =
@@ -100,6 +102,7 @@ export function applySpeakTextSafePreDelivery(
   args: ApplySpeakTextSafePreDeliveryArgs,
 ): ApplySpeakTextSafePreDeliveryResult {
   let { text } = args;
+  const resumeWelcomeBackTts = isResumeWelcomeBackAssistantText(stripControlTokens(text).trim());
   const telemetryEarlyForS2Repair =
     args.telemetrySourceOpt ?? (args.interviewSpeechRole === 'assistant_response' ? 'turn' : 'other');
 
@@ -113,8 +116,7 @@ export function applySpeakTextSafePreDelivery(
   if (
     !args.silent &&
     (args.interviewSpeechRole === 'assistant_response' || telemetryEarlyForS2Repair === 'turn') &&
-    args.currentInterviewMoment === 2 &&
-    args.currentScenario === 2 &&
+    isActiveScenarioBConstructProbeTurn(args.currentScenario, args.currentInterviewMoment) &&
     looksLikeScenarioBRepairAsJamesQuestion(stripControlTokens(text).trim()) &&
     args.s2RepairProbeDelivered
   ) {
@@ -164,10 +166,12 @@ export function applySpeakTextSafePreDelivery(
         });
       }
       text = ensureCanonicalIntroBriefingForTts(text, interviewNameForTts);
-      if (!args.allowDuplicateConsecutiveTts) {
+      if (!args.allowDuplicateConsecutiveTts && !resumeWelcomeBackTts) {
         text = coerceMidScenarioRelationalReflectionToBriefAck(text);
       }
-      if (args.currentInterviewMoment === 2 && args.currentScenario === 2) {
+      if (
+        isActiveScenarioBConstructProbeTurn(args.currentScenario, args.currentInterviewMoment)
+      ) {
         const beforeCoerce = text;
         text = coerceScenarioBQ1QuestionForTts(text);
         text = coerceScenarioBJamesSayToJamesQuestionForTts(text);
@@ -176,7 +180,7 @@ export function applySpeakTextSafePreDelivery(
         if (text !== beforeCoerce) {
         }
       }
-      if (args.currentInterviewMoment === 1 && args.currentScenario === 1) {
+      if (args.currentInterviewMoment === 1 && args.currentScenario === 1 && !resumeWelcomeBackTts) {
         const beforeContemptCoerce = text;
         text = coerceScenarioAContemptProbeForTts(text);
         if (text !== beforeContemptCoerce) {
@@ -267,14 +271,16 @@ export function applySpeakTextSafePreDelivery(
     return { suppressed: true, reason: 'duplicate_closing_session' };
   }
 
+  const strippedForDedup = stripControlTokens(text).trim();
   if (
     !args.skipScenarioAContemptProbeSessionDedup &&
     args.scenarioAContemptProbePlaybackConfirmed &&
-    looksLikeScenarioAContemptProbeQuestion(stripControlTokens(text).trim())
+    !resumeWelcomeBackTts &&
+    looksLikeScenarioAContemptProbeQuestion(strippedForDedup)
   ) {
     void remoteLog('[S1_CONTEMPT_PROBE_TTS_SUPPRESSED_SESSION_DEDUP]', {
       interviewSessionId: args.interviewSessionId,
-      preview: stripControlTokens(text).trim().slice(0, 220),
+      preview: strippedForDedup.slice(0, 220),
       s1ContemptFixVersion: S1_CONTEMPT_FIX_VERSION,
     });
     args.setVoiceState('idle');

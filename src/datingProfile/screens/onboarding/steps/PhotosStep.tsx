@@ -135,7 +135,7 @@ export const PhotosStep: React.FC<PhotosStepProps> = ({
               if (fileKey && existingFileNameKeysRef.current.has(fileKey)) {
                 Alert.alert(
                   "Already added",
-                  "A photo with this file name is already in your profile.",
+                  "This photo has already been added.",
                 );
                 return;
               }

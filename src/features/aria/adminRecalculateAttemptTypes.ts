@@ -33,6 +33,9 @@ export type AdminRecalculateAttemptInput = {
   moment_5_concreteness?: unknown;
   personal_moment_emotional_vocab_density?: number | null;
   personal_moment_emotional_vocab_low?: boolean | null;
+  emotion_recognition_raw_score?: number | null;
+  emotion_recognition_responses?: unknown;
+  closing_integration?: string | null;
   /** When `usePersistedGateContext`, use as gate `precomputedWeightedScore` for baseline parity. */
   persisted_weighted_score?: number | null;
 };

@@ -169,6 +169,29 @@ export function countUserTurnsAfterLastMoment5PrimaryAnchor(
   return n;
 }
 
+/** All user turns after the last M5 primary anchor — includes rows missing `interviewMoment: 5`. */
+export function combinePostAnchorMoment5UserTurnText(
+  msgs: ReadonlyArray<{ role: string; content?: string; isWelcomeBack?: boolean }>,
+): string {
+  const parts: string[] = [];
+  let sawAnchor = false;
+  for (const m of msgs) {
+    if (m.isWelcomeBack) continue;
+    if (
+      m.role === 'assistant' &&
+      transcriptAssistantContainsMoment5PrimaryConflictQuestion(m.content ?? '')
+    ) {
+      sawAnchor = true;
+      continue;
+    }
+    if (sawAnchor && m.role === 'user') {
+      const c = (m.content ?? '').trim();
+      if (c) parts.push(c);
+    }
+  }
+  return parts.join(' ');
+}
+
 export type Moment5CloseGateSnapshot = {
   postM5UserTurns: number;
   hasMoment5PrimaryAnchorInTranscript: boolean;
@@ -246,21 +269,13 @@ export function computeMoment5InterviewCloseGate(
     interviewMoment?: number;
   }>;
   let moment5CombinedForCloseGate = combineMoment5UserTurnText(nonWelcome);
-  /** Resume / remount paths can omit `interviewMoment: 5` on user rows — still use post-anchor user text. */
-  if (!moment5CombinedForCloseGate.trim() && hasMoment5PrimaryAnchorInTranscript) {
-    const postAnchorParts: string[] = [];
-    let sawAnchor = false;
-    for (const m of nonWelcome) {
-      if (m.role === 'assistant' && transcriptAssistantContainsMoment5PrimaryConflictQuestion(m.content ?? '')) {
-        sawAnchor = true;
-        continue;
-      }
-      if (sawAnchor && m.role === 'user') {
-        const c = (m.content ?? '').trim();
-        if (c) postAnchorParts.push(c);
-      }
+  if (hasMoment5PrimaryAnchorInTranscript) {
+    const postAnchorCombined = combinePostAnchorMoment5UserTurnText(transcriptSlice);
+    if (postAnchorCombined.length > moment5CombinedForCloseGate.length) {
+      moment5CombinedForCloseGate = postAnchorCombined;
+    } else if (!moment5CombinedForCloseGate.trim() && postAnchorCombined.trim()) {
+      moment5CombinedForCloseGate = postAnchorCombined;
     }
-    moment5CombinedForCloseGate = postAnchorParts.join(' ');
   }
   const accountabilityProbeStillRequired =
     (refs.moment5QuestionDelivered || hasMoment5PrimaryAnchorInTranscript) &&

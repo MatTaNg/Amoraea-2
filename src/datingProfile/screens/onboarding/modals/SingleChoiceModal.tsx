@@ -1,8 +1,11 @@
 import React from 'react';
+import { ONBOARDING_STEP_SCREEN_EDGES, ONBOARDING_STEP_SCREEN_EDGES_WITH_BOTTOM } from './onboardingStepScreenEdges';
 import { View, ScrollView, Text } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Button } from '@/shared/ui/Button';
 import { SingleChoiceOptionList } from '@/shared/components/profileFields/SingleChoiceOptionList';
+import { renderDealbreakerQuestionHighlight } from '@/shared/components/profileFields/dealbreakerQuestionHighlight';
+import { deferAfterPaint } from '@/shared/utils/deferAfterPaint';
 import { OnboardingHeader } from './components/OnboardingHeader';
 import { styles } from './SingleChoiceModal.styled';
 
@@ -11,18 +14,8 @@ export interface ChoiceOption {
   value: string;
 }
 
-function renderMustHaveHighlight(text: string) {
-  const phrase = 'must have';
-  const index = text.indexOf(phrase);
-  if (index < 0) return text;
-
-  return (
-    <>
-      {text.slice(0, index)}
-      <Text style={styles.mustHaveEmphasis}>{phrase}</Text>
-      {text.slice(index + phrase.length)}
-    </>
-  );
+function renderDealbreakerHighlight(text: string) {
+  return renderDealbreakerQuestionHighlight(text, styles.dealbreakerEmphasis);
 }
 
 interface SingleChoiceModalProps {
@@ -61,7 +54,7 @@ export const SingleChoiceModal: React.FC<SingleChoiceModalProps> = ({
   const handleSelect = (optionValue: string) => {
     onValueChange(optionValue);
     if (autoAdvanceOnSelect && !hasSecondaryQuestion) {
-      onNext();
+      deferAfterPaint(onNext);
     }
   };
   const hasPrimarySelection = options.some((option) => option.value === value);
@@ -74,7 +67,7 @@ export const SingleChoiceModal: React.FC<SingleChoiceModalProps> = ({
   const nextDisabled = !hasPrimarySelection || !hasSecondarySelection;
 
   return (
-    <SafeAreaView style={styles.screen} edges={['top', 'left', 'right']}>
+    <SafeAreaView style={styles.screen} edges={ONBOARDING_STEP_SCREEN_EDGES}>
       <OnboardingHeader title={title} onBack={onBack} />
       <ScrollView
         style={styles.scrollView}
@@ -87,7 +80,7 @@ export const SingleChoiceModal: React.FC<SingleChoiceModalProps> = ({
           {hasSecondaryQuestion ? (
             <View style={styles.secondaryQuestionBlock}>
               <Text style={styles.secondaryQuestionTitle}>
-                {renderMustHaveHighlight(secondaryTitle ?? '')}
+                {renderDealbreakerHighlight(secondaryTitle ?? '')}
               </Text>
               <SingleChoiceOptionList
                 options={secondaryOptions}

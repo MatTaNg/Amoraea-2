@@ -14,6 +14,7 @@ export type { OnboardingStage, ApplicationStatus, BasicInfo } from './Onboarding
 /** One profile prompt answer (UX only, not used by algorithm). */
 export interface ProfilePromptAnswer {
   promptId: string;
+  categoryId: string;
   answer: string;
 }
 

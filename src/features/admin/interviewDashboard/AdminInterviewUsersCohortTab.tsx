@@ -1,4 +1,4 @@
-import React, { useCallback, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   View,
   Text,
@@ -24,6 +24,8 @@ import {
   collectFilteredUserEmails,
   triggerAdminCohortCsvDownload,
 } from '@features/admin/interviewDashboard/adminInterviewCohortExport';
+import { AdminCohortDemographicsBanner } from '@features/admin/interviewDashboard/AdminCohortDemographicsBanner';
+import { computeAdminCohortDemographics } from '@features/admin/interviewDashboard/adminCohortDemographics';
 import { cohortListStyles as styles } from '@features/admin/interviewDashboard/adminInterviewCohortListStyles';
 import {
   computeCohortHeaderStats,
@@ -31,6 +33,7 @@ import {
   formatYmdLocal,
   sortUserGroups,
 } from '@features/admin/interviewDashboard/adminInterviewDashboardCohortUtils';
+import { fetchAdminCohortProfileDemographics } from '@features/admin/interviewDashboard/fetchAdminCohortProfileDemographics';
 import type {
   AdminUserStatusFilter,
   BookmarkCohortFilter,
@@ -72,6 +75,8 @@ export function AdminInterviewUsersCohortTab({
   const [userListSort, setUserListSort] = useState<UserListSort>('date');
   const [hideIncomplete, setHideIncomplete] = useState(true);
   const [userSearchQuery, setUserSearchQuery] = useState('');
+  const [profileJsonByUserId, setProfileJsonByUserId] = useState<Map<string, unknown>>(new Map());
+  const [demographicsProfilesLoading, setDemographicsProfilesLoading] = useState(false);
 
   const pipelineFiltered = useMemo(
     () =>
@@ -106,6 +111,48 @@ export function AdminInterviewUsersCohortTab({
   );
 
   const cohortStats = useMemo(() => computeCohortHeaderStats(pipelineFiltered), [pipelineFiltered]);
+
+  const filteredUserIdsKey = useMemo(
+    () =>
+      pipelineFiltered
+        .map((g) => g.user.id)
+        .sort()
+        .join(','),
+    [pipelineFiltered],
+  );
+
+  useEffect(() => {
+    let cancelled = false;
+    const userIds = filteredUserIdsKey ? filteredUserIdsKey.split(',') : [];
+    if (userIds.length === 0) {
+      setProfileJsonByUserId(new Map());
+      setDemographicsProfilesLoading(false);
+      return () => {
+        cancelled = true;
+      };
+    }
+
+    setDemographicsProfilesLoading(true);
+    void fetchAdminCohortProfileDemographics(userIds).then((map) => {
+      if (!cancelled) {
+        setProfileJsonByUserId(map);
+        setDemographicsProfilesLoading(false);
+      }
+    });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [filteredUserIdsKey]);
+
+  const cohortDemographics = useMemo(
+    () =>
+      computeAdminCohortDemographics(
+        pipelineFiltered.map((g) => ({ id: g.user.id, basic_info: g.user.basic_info })),
+        profileJsonByUserId,
+      ),
+    [pipelineFiltered, profileJsonByUserId],
+  );
 
   const handleExportCsv = useCallback(() => {
     if (pipelineFiltered.length === 0) {
@@ -187,6 +234,10 @@ export function AdminInterviewUsersCohortTab({
           <Text style={styles.exportCsvButtonText}>Copy Emails</Text>
         </TouchableOpacity>
       </View>
+      <AdminCohortDemographicsBanner
+        demographics={cohortDemographics}
+        loadingProfiles={demographicsProfilesLoading}
+      />
       <View style={styles.userSearchBar}>
         <Text style={styles.filterClusterLabel}>Search</Text>
         <TextInput

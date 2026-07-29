@@ -21,6 +21,7 @@ export function useAriaInterviewSessionResumeEmotionGateRefs(
   const pendingEmotionModalTransitionRef = useRef<PendingEmotionModalTransition | null>(null);
   const resumeEmotionAfterModalTextRef = useRef<string | null>(null);
   const resumeOfferWelcomeTtsRef = useRef(true);
+  const resumeInPersonalPartRef = useRef(false);
   const resumeWelcomeHydrationAttemptRef = useRef<string | null>(null);
   const resumeActiveScenarioRef = useRef<1 | 2 | 3 | null>(null);
   const resumeWelcomeMessageRef = useRef(preamble.RESUME_WELCOME_BACK_MESSAGE);
@@ -40,6 +41,7 @@ export function useAriaInterviewSessionResumeEmotionGateRefs(
     pendingEmotionModalTransitionRef,
     resumeEmotionAfterModalTextRef,
     resumeOfferWelcomeTtsRef,
+    resumeInPersonalPartRef,
     resumeWelcomeHydrationAttemptRef,
     resumeActiveScenarioRef,
     resumeWelcomeMessageRef,

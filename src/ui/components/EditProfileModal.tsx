@@ -40,8 +40,11 @@ import { LocationPermissionService } from '@utilities/permissions/LocationPermis
 import {
   PROMPT_CATEGORIES,
   MAX_PROMPTS,
+  PROFILE_PROMPT_ANSWER_MAX_LENGTH,
   getPromptById,
+  getPromptCategoryId,
 } from '@features/profile/promptsByCategory';
+import { wouldRemovalBreakRequiredCategoryFloor } from '@/features/profile/profilePromptValidation';
 import { WEIGHT_OPTIONS } from '@features/compatibility/compatibilityQuestions';
 import type { PromptCategory, PromptOption } from '@features/profile/promptsByCategory';
 import type { CompatibilityFormData } from '@domain/models/CompatibilityForm';
@@ -326,10 +329,13 @@ export const EditProfileModal: React.FC<EditProfileModalProps> = ({
   };
 
   const saveNewPrompt = async () => {
-    if (!promptFlowPrompt || !promptFlowAnswer.trim()) return;
+    const trimmed = promptFlowAnswer.trim();
+    if (!promptFlowPrompt || !trimmed || trimmed.length > PROFILE_PROMPT_ANSWER_MAX_LENGTH) return;
+    const categoryId = getPromptCategoryId(promptFlowPrompt.id);
+    if (!categoryId) return;
     const next: ProfilePromptAnswer[] = [
       ...currentPrompts,
-      { promptId: promptFlowPrompt.id, answer: promptFlowAnswer.trim() },
+      { promptId: promptFlowPrompt.id, categoryId, answer: trimmed },
     ];
     setPromptsSaving(true);
     try {
@@ -344,8 +350,10 @@ export const EditProfileModal: React.FC<EditProfileModalProps> = ({
   };
 
   const updatePromptAnswer = async (index: number, newAnswer: string) => {
+    const trimmed = newAnswer.trim();
+    if (!trimmed || trimmed.length > PROFILE_PROMPT_ANSWER_MAX_LENGTH) return;
     const next = [...currentPrompts];
-    next[index] = { ...next[index], answer: newAnswer.trim() };
+    next[index] = { ...next[index], answer: trimmed };
     setPromptsSaving(true);
     try {
       await saveEditProfilePrompts(userId, next);
@@ -360,6 +368,13 @@ export const EditProfileModal: React.FC<EditProfileModalProps> = ({
   };
 
   const removePrompt = async (index: number) => {
+    if (wouldRemovalBreakRequiredCategoryFloor(currentPrompts, index)) {
+      Alert.alert(
+        'Required prompt',
+        'Keep at least one prompt from "What Matters To Me" or "How I Show Up".',
+      );
+      return;
+    }
     const next = currentPrompts.filter((_, i) => i !== index);
     setPromptsSaving(true);
     try {
@@ -521,6 +536,7 @@ export const EditProfileModal: React.FC<EditProfileModalProps> = ({
                 {currentPrompts.map((p, index) => {
                   const promptMeta = getPromptById(p.promptId);
                   const isEditing = editingPromptIndex === index;
+                  const removalBlocked = wouldRemovalBreakRequiredCategoryFloor(currentPrompts, index);
                   return (
                     <View key={`${p.promptId}-${index}`} style={styles.promptCard}>
                       <Text style={styles.promptQuestion}>
@@ -530,16 +546,23 @@ export const EditProfileModal: React.FC<EditProfileModalProps> = ({
                         <View style={styles.promptEditRow}>
                           <TextInput
                             value={editingAnswer}
-                            onChangeText={setEditingAnswer}
+                            onChangeText={(t) =>
+                              setEditingAnswer(t.slice(0, PROFILE_PROMPT_ANSWER_MAX_LENGTH))
+                            }
                             placeholder="Your answer"
                             multiline
+                            maxLength={PROFILE_PROMPT_ANSWER_MAX_LENGTH}
                             style={styles.promptAnswerInput}
                           />
                           <View style={styles.promptEditActions}>
                             <Button
                               title="Save"
                               onPress={() => updatePromptAnswer(index, editingAnswer)}
-                              disabled={!editingAnswer.trim() || promptsSaving}
+                              disabled={
+                                !editingAnswer.trim() ||
+                                editingAnswer.length > PROFILE_PROMPT_ANSWER_MAX_LENGTH ||
+                                promptsSaving
+                              }
                               variant="outline"
                               style={styles.promptEditBtn}
                             />
@@ -569,7 +592,7 @@ export const EditProfileModal: React.FC<EditProfileModalProps> = ({
                             </TouchableOpacity>
                             <TouchableOpacity
                               onPress={() => removePrompt(index)}
-                              disabled={promptsSaving}
+                              disabled={promptsSaving || removalBlocked}
                               style={styles.promptActionLink}
                             >
                               <Ionicons name="trash-outline" size={16} color={colors.error} />
@@ -700,15 +723,25 @@ export const EditProfileModal: React.FC<EditProfileModalProps> = ({
                   <Text style={styles.promptQuestionDisplay}>{promptFlowPrompt.text}</Text>
                   <TextInput
                     value={promptFlowAnswer}
-                    onChangeText={setPromptFlowAnswer}
+                    onChangeText={(t) =>
+                      setPromptFlowAnswer(t.slice(0, PROFILE_PROMPT_ANSWER_MAX_LENGTH))
+                    }
                     placeholder="Type your answer..."
                     multiline
+                    maxLength={PROFILE_PROMPT_ANSWER_MAX_LENGTH}
                     style={styles.promptAnswerInputLarge}
                   />
+                  <Text style={styles.photoCount}>
+                    {promptFlowAnswer.length}/{PROFILE_PROMPT_ANSWER_MAX_LENGTH}
+                  </Text>
                   <Button
                     title={promptsSaving ? 'Saving…' : 'Save prompt'}
                     onPress={saveNewPrompt}
-                    disabled={!promptFlowAnswer.trim() || promptsSaving}
+                    disabled={
+                      !promptFlowAnswer.trim() ||
+                      promptFlowAnswer.length > PROFILE_PROMPT_ANSWER_MAX_LENGTH ||
+                      promptsSaving
+                    }
                     style={styles.promptFlowBack}
                   />
                   <Button

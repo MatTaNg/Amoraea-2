@@ -6,6 +6,8 @@ export type ParallelStreamingTtsState = {
   accumulatedFullText: string;
   /** Sentences fully spoken before a tab interrupt (parallel Claude SSE TTS). */
   spokenCompleteText: string;
+  /** Sophie perspective Q passed to parallel-stream TTS (set at question_delivered, before spokenCompleteText). */
+  s3SophiePerspectiveProbeDeliveredThisStream: boolean;
 };
 
 export function createInitialParallelStreamingTtsState(): ParallelStreamingTtsState {
@@ -14,6 +16,7 @@ export function createInitialParallelStreamingTtsState(): ParallelStreamingTtsSt
     cancelRequested: false,
     accumulatedFullText: '',
     spokenCompleteText: '',
+    s3SophiePerspectiveProbeDeliveredThisStream: false,
   };
 }
 

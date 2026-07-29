@@ -9,22 +9,34 @@ import { ASSISTANT_INTERVIEW_SPEECH } from '@features/aria/interviewTtsSpeakOpti
 import { commitDedupedAssistantTranscriptTurn } from '@features/aria/interviewTranscriptDedup';
 import type { PreClaudeTurnGateDeps } from '@features/aria/preClaudeTurnGateTypes';
 import type { PreClaudeScenarioConstructProbeFlags } from '@features/aria/resolvePreClaudeScenarioConstructProbeFlags';
+import { SCENARIO_C_SOPHIE_PERSPECTIVE_PROBE } from '@features/aria/interviewDisengagementProbeCopy';
 import {
   SCENARIO_A_CONTEMPT_PROBE_DELIVERED_COPY,
   SCENARIO_A_REPAIR_QUESTION_AFTER_CONTEMPT_COPY,
 } from '@features/aria/scenarioAContemptProbeTtsStrip';
 import {
   lastAssistantPromptIsScenarioBQ1OrPrematureRedirect,
+  isDeliveredScenarioBJamesDifferentlyProbe,
   looksLikeScenarioBJamesDifferentlyQuestion,
+  looksLikeScenarioBRepairAsJamesQuestion,
   SCENARIO_B_JAMES_DIFFERENTLY_CANONICAL,
   SCENARIO_B_JAMES_REPAIR_CANONICAL,
 } from '@features/aria/scenarioBProbeLogic';
+import { looksLikeIncompleteCutOffUserAnswer } from '@features/aria/interviewAnswerRelevance';
 import {
   shouldDeliverScenarioFollowUpQuestion,
   transcriptContainsScenarioAContemptProbe,
 } from '@features/aria/scenarioFollowUpTranscriptGuard';
+import {
+  looksLikeScenarioCSophiePerspectiveAssessableShortAnswer,
+  looksLikeScenarioCSophiePerspectiveQuestion,
+} from '@features/aria/scenarioCPromptDetection';
+import { looksLikeScenarioAContemptProbeAssessableShortAnswer } from '@features/aria/scenarioAContemptProbeCoverage';
+import { looksLikeScenarioAContemptProbeQuestion } from '@features/aria/scenarioAContemptProbeLogic';
 import { remoteLog } from '@utilities/remoteLog';
+import { assessablePromptQuestionBody } from '@features/aria/interviewAssessablePromptText';
 import { markQuestionDelivered } from '@utilities/sessionLogging';
+import { applySituation2FollowUpProbeReferenceCard } from '@features/aria/runReferenceCardFromAssistantSpeech';
 
 export type PreClaudeClientOwnedCanonicalConstructGateResult = {
   handled: boolean;
@@ -49,6 +61,7 @@ async function deliverCanonicalProbe(
   const liveTranscript = (deps.currentMessagesRef.current.length > 0
     ? deps.currentMessagesRef.current
     : messagesToUse) as MessageWithScenario[];
+  const questionBody = assessablePromptQuestionBody(probeText);
   commitDedupedAssistantTranscriptTurn(
     liveTranscript,
     messagesToUse,
@@ -59,7 +72,17 @@ async function deliverCanonicalProbe(
     },
     (next) => deps.setMessages(next),
   );
-  deps.lastQuestionTextRef.current = probeText;
+  deps.lastQuestionTextRef.current = questionBody;
+  if (
+    scenarioNumber === 2 &&
+    deps.setReferenceCardScenario &&
+    deps.committedScenarioRef &&
+    deps.setInterviewUiPhase &&
+    (looksLikeScenarioBJamesDifferentlyQuestion(probeText) ||
+      looksLikeScenarioBRepairAsJamesQuestion(probeText))
+  ) {
+    applySituation2FollowUpProbeReferenceCard(deps, questionBody);
+  }
   void remoteLog(logTag, {
     interviewSessionId: deps.interviewSessionIdRef.current,
     preview: probeText.slice(0, 220),
@@ -87,9 +110,23 @@ export async function runPreClaudeClientOwnedCanonicalConstructGate(
   if (isDecline(trimmed) || suppressForcedConstructProbesForMetaFrustration) {
     return { handled: false };
   }
+  const questionToAssess =
+    (deps.lastQuestionTextRef.current ?? '').trim() || lastAssistantContent.trim();
+  const contemptProbeShortAnswer =
+    (looksLikeScenarioAContemptProbeQuestion(questionToAssess) ||
+      looksLikeScenarioAContemptProbeQuestion(lastAssistantContent)) &&
+    looksLikeScenarioAContemptProbeAssessableShortAnswer(trimmed);
+  const sophiePerspectiveShortAnswer =
+    (looksLikeScenarioCSophiePerspectiveQuestion(questionToAssess) ||
+      looksLikeScenarioCSophiePerspectiveQuestion(lastAssistantContent)) &&
+    looksLikeScenarioCSophiePerspectiveAssessableShortAnswer(trimmed);
   // Incomplete / off-topic answers must not advance via client-owned construct delivery
   // (irrelevant-answer retry gate should speak first; this is defense in depth).
-  if (looksLikeUnassessableScenarioAnswer(trimmed)) {
+  if (
+    looksLikeUnassessableScenarioAnswer(trimmed) &&
+    !contemptProbeShortAnswer &&
+    !sophiePerspectiveShortAnswer
+  ) {
     return { handled: false };
   }
 
@@ -97,6 +134,7 @@ export async function runPreClaudeClientOwnedCanonicalConstructGate(
     shouldForceScenarioAContemptProbe,
     allowScenarioARepairAfterContemptAnswer,
     shouldForceScenarioBJamesRepairProbe,
+    shouldForceScenarioCSophiePerspectiveProbe,
   } = constructProbeFlags;
 
   if (
@@ -144,11 +182,10 @@ export async function runPreClaudeClientOwnedCanonicalConstructGate(
   const transcriptHasJamesDifferently = messagesToUse.some(
     (m) =>
       m.role === 'assistant' &&
-      looksLikeScenarioBJamesDifferentlyQuestion(m.content ?? '') &&
-      !/if you were james/i.test((m.content ?? '').toLowerCase()),
+      isDeliveredScenarioBJamesDifferentlyProbe(m.content ?? ''),
   );
   const needsJamesDifferently =
-    answeringScenarioBQ1 &&
+    (answeringScenarioBQ1 || constructProbeFlags.replyingToScenarioBQ1) &&
     !transcriptHasJamesDifferently &&
     shouldDeliverScenarioFollowUpQuestion(messagesToUse, SCENARIO_B_JAMES_DIFFERENTLY_CANONICAL);
 
@@ -176,6 +213,22 @@ export async function runPreClaudeClientOwnedCanonicalConstructGate(
       probeText,
       2,
       '[S2_JAMES_REPAIR_CLIENT_OWNED_SKIP_CLAUDE]',
+    );
+    return { handled: true };
+  }
+
+  if (
+    shouldForceScenarioCSophiePerspectiveProbe &&
+    shouldDeliverScenarioFollowUpQuestion(messagesToUse, SCENARIO_C_SOPHIE_PERSPECTIVE_PROBE)
+  ) {
+    const probeText = withOptionalBriefAck(SCENARIO_C_SOPHIE_PERSPECTIVE_PROBE, messagesToUse);
+    deps.scenarioCSophiePerspectiveProbeFiredRef.current = true;
+    await deliverCanonicalProbe(
+      deps,
+      messagesToUse,
+      probeText,
+      3,
+      '[S3_SOPHIE_CLIENT_OWNED_SKIP_CLAUDE]',
     );
     return { handled: true };
   }

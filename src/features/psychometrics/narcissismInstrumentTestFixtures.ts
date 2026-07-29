@@ -2,6 +2,9 @@ import { NPI_ENTITLEMENT_ENABLED } from './psychometricsFeatureFlags';
 import { NPI_ENTITLEMENT_FLOOR_FAIL_CODE } from './npiEntitlementFloor';
 import { SD3_NARCISSISM_FLOOR_FAIL_CODE } from './sd3NarcissismFloor';
 
+/** Values Assessment (NPI) is profile/matching only — SD3 still has a psychometric gate floor. */
+export const NARCISSISM_PSYCHOMETRIC_GATE_FLOOR_ENABLED = !NPI_ENTITLEMENT_ENABLED;
+
 export const ACTIVE_NARCISSISM_FLOOR_CODE = NPI_ENTITLEMENT_ENABLED
   ? NPI_ENTITLEMENT_FLOOR_FAIL_CODE
   : SD3_NARCISSISM_FLOOR_FAIL_CODE;

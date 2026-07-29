@@ -25,21 +25,21 @@ describe('elevenLabsTtsAvailability', () => {
     delete process.env.EXPO_PUBLIC_IOS_ELEVENLABS_TTS_PLAYBACK;
   });
 
-  it('disables ElevenLabs in dev bundle by default', () => {
+  it('disables ElevenLabs in dev bundle by default when no proxy or IN_DEV flag', () => {
     (global as { __DEV__?: boolean }).__DEV__ = true;
     expect(isElevenLabsEnabledForEnvironment()).toBe(false);
   });
 
-  it('enables ElevenLabs for configured dev accounts on production builds when env allows', () => {
-    (global as { __DEV__?: boolean }).__DEV__ = false;
-    process.env.EXPO_PUBLIC_ELEVENLABS_TTS = '1';
-    setInterviewTtsSessionEmail('ng5280@hotmail.com');
-    expect(isElevenLabsEnabledForEnvironment()).toBe(true);
-  });
-
-  it('disables ElevenLabs for configured dev accounts in dev bundle', () => {
+  it('disables ElevenLabs for configured internal test accounts even when env allows', () => {
     (global as { __DEV__?: boolean }).__DEV__ = true;
     process.env.EXPO_PUBLIC_ELEVENLABS_TTS_IN_DEV = '1';
+    setInterviewTtsSessionEmail('ng5280@hotmail.com');
+    expect(isElevenLabsEnabledForEnvironment()).toBe(false);
+  });
+
+  it('disables ElevenLabs for configured accounts on production builds even when env allows', () => {
+    (global as { __DEV__?: boolean }).__DEV__ = false;
+    process.env.EXPO_PUBLIC_ELEVENLABS_TTS = '1';
     setInterviewTtsSessionEmail('ng5280@hotmail.com');
     expect(isElevenLabsEnabledForEnvironment()).toBe(false);
   });

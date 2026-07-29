@@ -46,6 +46,7 @@ export async function runPendingScoringSyncPoll(
       source: 'pending_scoring_sync',
       attemptId,
     });
+    deps.queryClient.invalidateQueries({ queryKey: ['initialInterviewRoute', userId] });
     await deps.remoteLog('[8] post_scoring_handoff', {
       via: 'pending_scoring_sync',
       attemptId,

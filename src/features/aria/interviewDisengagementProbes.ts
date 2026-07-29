@@ -47,9 +47,12 @@ export {
 export {
   isClientOrElongatingInterviewProbeAssistant,
   isNonRepeatableAssistantLineForVerbatimReplay,
+  isRepeatableMainInterviewQuestionLine,
+  looksLikeNonQuestionScenarioTransitionLine,
   transcriptContainsMentalizingSurfaceProbe,
   transcriptContainsScenarioCSophiePerspectiveProbe,
   scenarioALastAssistantIsRepairProbeOrFollowUp,
+  findLastMoment4RepeatableQuestionText,
   findLastRepeatableInterviewQuestionText,
 } from './interviewDisengagementTranscriptHelpers';
 
@@ -62,6 +65,8 @@ export {
   findLastUserWithPriorAssistantContent,
   findLastUserWithPriorScenarioARepairContext,
   findLastUserWithPriorScenarioBJamesRepairContext,
+  scenarioARepairAnswerAlreadySatisfiedInTranscript,
+  shouldSuppressScenarioAAssistantLineAfterSatisfiedRepair,
   shouldAdvanceScenarioAAfterSatisfiedRepair,
   shouldAdvanceScenarioBAfterSatisfiedRepair,
   streamMissedScenarioARepairSatisfiedHandoffDelivery,

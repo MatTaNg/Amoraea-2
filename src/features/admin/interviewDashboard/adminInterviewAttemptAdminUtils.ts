@@ -10,12 +10,10 @@ import {
   sanitizeMoment5PersonalScoresForAggregate,
   sanitizePersonalMomentScoresForAggregate,
 } from '@features/aria/personalMomentSliceSanitize';
-import {
-  extractPersonalMomentEmotionalVocabFromSlice,
-  scenarioEmotionalVocabDensityPercentFromTranscript,
-} from '@features/aria/personalMomentEmotionalVocab';
 import { DEFAULT_DEFENSE_PATTERNS } from '@features/aria/defensePatternsDetection';
 import type { ComputeGateResultOptions } from '@features/aria/computeGateResultCore';
+import { mergeMoment4ConcretenessForGate } from '@features/aria/moment4ConcretenessClassification';
+import { resolveMoment4UserTextForGate } from '@features/aria/personalMomentSliceEnrichment';
 import {
   emotionRecognitionCorrectCount,
   hydrateEmotionResponsesFromStorage,
@@ -45,6 +43,7 @@ import {
   normalizePillarScoresMap,
   parseObject,
 } from '@features/admin/interviewDashboard/adminInterviewDashboardScoreUtils';
+import type { AdminRecalculateAttemptInput } from '@features/aria/adminRecalculateAttemptTypes';
 import type { AttemptRow, CommunicationStyleProfileRow } from '@features/admin/interviewDashboard/adminInterviewDashboardTypes';
 
 export function delay(ms: number): Promise<void> {
@@ -291,15 +290,15 @@ export function extractSanitizedMomentSlice(raw: unknown): MarkerScoreSlice {
     keyEvidence: slice.keyEvidence,
   });
   if (!sanitized?.pillarScores) return slice;
-  const ev = extractPersonalMomentEmotionalVocabFromSlice(obj ?? sanitized);
   return {
     pillarScores: sanitized.pillarScores,
     keyEvidence: sanitized.keyEvidence,
     mentalizing_overcertainty: obj?.mentalizing_overcertainty === true,
     response_concreteness: typeof obj?.response_concreteness === 'string' ? obj.response_concreteness : undefined,
-    emotional_vocab_count: ev.emotional_vocab_count,
-    emotional_vocab_words: ev.emotional_vocab_words.length > 0 ? ev.emotional_vocab_words : undefined,
-    user_slice_word_count: ev.user_slice_word_count,
+    user_slice_word_count:
+      typeof obj?.user_slice_word_count === 'number' && Number.isFinite(obj.user_slice_word_count)
+        ? obj.user_slice_word_count
+        : undefined,
   };
 }
 
@@ -312,15 +311,15 @@ export function extractSanitizedMoment5Slice(raw: unknown): MarkerScoreSlice {
     keyEvidence: slice.keyEvidence,
   });
   if (!sanitized?.pillarScores) return slice;
-  const ev = extractPersonalMomentEmotionalVocabFromSlice(obj ?? sanitized);
   return {
     pillarScores: sanitized.pillarScores,
     keyEvidence: sanitized.keyEvidence,
     mentalizing_overcertainty: obj?.mentalizing_overcertainty === true,
     response_concreteness: typeof obj?.response_concreteness === 'string' ? obj.response_concreteness : undefined,
-    emotional_vocab_count: ev.emotional_vocab_count,
-    emotional_vocab_words: ev.emotional_vocab_words.length > 0 ? ev.emotional_vocab_words : undefined,
-    user_slice_word_count: ev.user_slice_word_count,
+    user_slice_word_count:
+      typeof obj?.user_slice_word_count === 'number' && Number.isFinite(obj.user_slice_word_count)
+        ? obj.user_slice_word_count
+        : undefined,
   };
 }
 
@@ -343,9 +342,6 @@ export function computeMarkerAggregateFromAttempt(
     disclosureCalibrationTranscript: Array.isArray(tx)
       ? (tx as Array<{ role?: string; content?: string; interviewMoment?: number }>)
       : null,
-    scenarioEmotionalVocabDensityPercent: scenarioEmotionalVocabDensityPercentFromTranscript(
-      Array.isArray(tx) ? (tx as Array<{ role?: string; content?: string; scenarioNumber?: number | null }>) : [],
-    ),
     communicationStyleEmotionalVocabDensityPercent: (() => {
       const lm = attempt.language_markers as Record<string, unknown> | null | undefined;
       const v = lm?.emotional_vocab_density;
@@ -429,6 +425,33 @@ export function functionInvokeBodyError(data: unknown): string | null {
 }
 
 
+/** Full stored-slice input for admin score recalculation (fresh gate modifiers, stored skip/emotion aux). */
+export function buildAdminRecalculateAttemptInput(
+  attempt: AttemptRow,
+  overrides?: { ego_development_level?: number | null },
+): AdminRecalculateAttemptInput {
+  return {
+    transcript: attempt.transcript,
+    scenario_1_scores: attempt.scenario_1_scores,
+    scenario_2_scores: attempt.scenario_2_scores,
+    scenario_3_scores: attempt.scenario_3_scores,
+    scenario_specific_patterns: attempt.scenario_specific_patterns,
+    skip_count: (attempt as { skip_count?: number | string | null }).skip_count,
+    ego_development_level: overrides?.ego_development_level ?? attempt.ego_development_level,
+    language_markers: attempt.language_markers,
+    defense_patterns: attempt.defense_patterns,
+    disclosure_calibration: attempt.disclosure_calibration,
+    mentalizing_overcertainty_count: attempt.mentalizing_overcertainty_count,
+    skip_penalty_total: attempt.skip_penalty_total,
+    auto_failed: attempt.auto_failed,
+    moment_4_concreteness: attempt.moment_4_concreteness,
+    moment_5_concreteness: attempt.moment_5_concreteness,
+    emotion_recognition_raw_score: attempt.emotion_recognition_raw_score,
+    emotion_recognition_responses: attempt.emotion_recognition_responses,
+    closing_integration: attempt.closing_integration,
+  };
+}
+
 export function buildAdminGateComputeOptions(attempt: AttemptRow): ComputeGateResultOptions {
   const rawSkip = attempt.skip_penalty_total;
   const skipNum =
@@ -441,12 +464,19 @@ export function buildAdminGateComputeOptions(attempt: AttemptRow): ComputeGateRe
     emotionRecognitionCorrectCount: correctOpt,
     emotionRecognitionResponses: attempt.emotion_recognition_responses,
   });
+  const patterns = parseObject(attempt.scenario_specific_patterns);
+  const m4Raw = parseObject(patterns?.moment_4_scores);
+  const moment4UserText = resolveMoment4UserTextForGate(attempt.transcript);
+  const moment4Concreteness =
+    mergeMoment4ConcretenessForGate(m4Raw, attempt.moment_4_concreteness, moment4UserText) ??
+    attempt.moment_4_concreteness ??
+    null;
   return {
     skipPenaltyTotal,
     skipAutoFail: attempt.auto_failed === true,
     egoDevelopmentLevel: attempt.ego_development_level ?? null,
     defensePatterns: attempt.defense_patterns ?? DEFAULT_DEFENSE_PATTERNS,
-    moment4Concreteness: attempt.moment_4_concreteness ?? null,
+    moment4Concreteness,
     moment5Concreteness: attempt.moment_5_concreteness ?? null,
     emotionRecognitionRawScore: rawEmotion ?? undefined,
     emotionRecognitionCorrectCount: correctOpt ?? undefined,
@@ -454,7 +484,6 @@ export function buildAdminGateComputeOptions(attempt: AttemptRow): ComputeGateRe
     mentalizingOvercertaintyCount: attempt.mentalizing_overcertainty_count ?? null,
     disclosureCalibration: attempt.disclosure_calibration ?? null,
     closingIntegration: attempt.closing_integration ?? null,
-    personalMomentEmotionalVocabLow: attempt.personal_moment_emotional_vocab_low === true,
   };
 }
 

@@ -197,6 +197,10 @@ export type CoerceScenarioBoundaryHandoffOptions = {
    * Stream/speak already contains the Scenario B vignette body (even if transcript lag).
    */
   situation2AlreadySpoken?: boolean;
+  /** Canonical Situation 3 card already played this session. */
+  situation3PlaybackConfirmed?: boolean;
+  /** Situation 3 repair probe already delivered. */
+  s3RepairProbeDelivered?: boolean;
 };
 
 /**
@@ -304,6 +308,8 @@ export function coerceScenarioBoundaryHandoffDisplayText(
       text: raw,
       currentInterviewMoment: interviewMoment,
       messages,
+      situation3CanonicalPlaybackConfirmed: options?.situation3PlaybackConfirmed,
+      s3RepairProbeDelivered: options?.s3RepairProbeDelivered,
     }) &&
     !hasS3Vignette
   ) {

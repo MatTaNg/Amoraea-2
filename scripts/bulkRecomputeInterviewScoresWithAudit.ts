@@ -2,8 +2,9 @@
  * Bulk recompute interview scores with audit trail, gate-flip flags, and ai_reasoning queue.
  *
  * Usage:
- *   npx tsx --env-file=.env scripts/bulkRecomputeInterviewScoresWithAudit.ts --dry-run
- *   npx tsx --env-file=.env scripts/bulkRecomputeInterviewScoresWithAudit.ts --commit --since=2026-06-01
+ *   npx tsx --import ./scripts/nodeRnStubs.mjs --env-file=.env scripts/bulkRecomputeInterviewScoresWithAudit.ts --dry-run
+ *   npx tsx --import ./scripts/nodeRnStubs.mjs --env-file=.env scripts/bulkRecomputeInterviewScoresWithAudit.ts --commit
+ *   npx tsx --import ./scripts/nodeRnStubs.mjs --env-file=.env scripts/bulkRecomputeInterviewScoresWithAudit.ts --commit --since=2026-06-01
  */
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
@@ -18,6 +19,7 @@ import {
   buildRecalculationConsistencyPatch,
   aiReasoningContradictsAttemptVerdict,
 } from '../src/features/aria/recalculationPersistConsistency';
+import { normalizeGateFailDetailForPersist } from '../src/features/psychometrics/gateFailDetailForPersist';
 import { recomputeAttemptForAnalytics, type RawAttemptForAnalytics } from './recomputeAttemptForAnalytics';
 import { fetchUsersByIds } from './thresholdFlipAuditCore';
 

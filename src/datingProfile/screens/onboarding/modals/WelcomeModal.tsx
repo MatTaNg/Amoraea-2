@@ -1,4 +1,5 @@
 import React from 'react';
+import { ONBOARDING_STEP_SCREEN_EDGES, ONBOARDING_STEP_SCREEN_EDGES_WITH_BOTTOM } from './onboardingStepScreenEdges';
 import { View, Text, ScrollView } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Button } from '@/shared/ui/Button';
@@ -10,7 +11,7 @@ interface WelcomeModalProps {
 
 export const WelcomeModal: React.FC<WelcomeModalProps> = ({ onNext }) => {
   return (
-    <SafeAreaView style={styles.screen} edges={['top', 'left', 'right']}>
+    <SafeAreaView style={styles.screen} edges={ONBOARDING_STEP_SCREEN_EDGES}>
       <ScrollView 
         style={styles.scrollView}
         contentContainerStyle={styles.scrollContent}

@@ -1,4 +1,5 @@
 import React, { useState, useRef, useEffect } from 'react';
+import { ONBOARDING_STEP_SCREEN_EDGES, ONBOARDING_STEP_SCREEN_EDGES_WITH_BOTTOM } from './onboardingStepScreenEdges';
 import { View, Text, TouchableOpacity, ActivityIndicator, ScrollView, Alert } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Image } from 'expo-image';
@@ -93,7 +94,7 @@ export const PhotosVideoModal: React.FC<PhotosVideoModalProps> = ({
         ? normalizePhotoFileNameKey(meta.fileName)
         : normalizePhotoFileNameKey(url);
     if (fileKey && existingFileNameKeysRef.current.has(fileKey)) {
-      Alert.alert('Already added', 'A photo with this file name is already in your profile.');
+      Alert.alert('Already added', 'This photo has already been added.');
       return;
     }
 
@@ -143,7 +144,7 @@ export const PhotosVideoModal: React.FC<PhotosVideoModalProps> = ({
   const canContinue = photos.filter((p) => p && p.trim() !== "").length > 0 && uploadingPhotosCount === 0;
 
   return (
-    <SafeAreaView style={styles.screen} edges={['top', 'left', 'right']}>
+    <SafeAreaView style={styles.screen} edges={ONBOARDING_STEP_SCREEN_EDGES}>
       <OnboardingHeader title="Add your photos" onBack={onBack} />
       <ScrollView 
         style={styles.scrollView}

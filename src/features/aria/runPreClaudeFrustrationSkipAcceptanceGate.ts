@@ -2,12 +2,19 @@ import { sanitizeAssistantInterviewerCharacterNames } from '@/constants/intervie
 import { supabase } from '@data/supabase/client';
 import { splitScenarioTransitionForEmotionModal } from '@features/aria/emotionRecognitionInterview';
 import type { InterviewMomentIndex, InterviewProgressRefs } from '@features/aria/interviewProgressSync';
+import { deriveClosingPillarContextFromScenarioScores } from '@features/aria/closingReflectionGrounding';
+import { markPreparingResultsSession, saveInterviewProgress } from '@features/aria/interviewLocalPersistence';
+import { compactInterviewTranscriptTurns } from '@features/aria/interviewTranscriptDedup';
+import { enrichPersonalMomentClosingForTts } from '@features/aria/personalMomentClosingEnrichment';
+import { buildMoment5UserSkippedScoresAggregate } from '@features/aria/moment5ScoringParse';
+import { sanitizeMoment5PersonalScoresForAggregate } from '@features/aria/personalMomentSliceSanitize';
 import {
   SKIP_ACCEPTED_NEXT_QUESTION_BRIDGE,
   SKIP_ACCEPTED_SCENARIO_COMPLETE_BRIDGE,
   buildSkipAcceptedSystemSuffix,
   resolveQuestionSkipProgression,
 } from '@features/aria/interviewQuestionSkipProgression';
+import { assessablePromptQuestionBody } from '@features/aria/interviewAssessablePromptText';
 import { resolveScenarioUserTextForBoundaryReflection } from '@features/aria/interviewScenarioAdvanceAfterRepair';
 import type { MessageWithScenario } from '@features/aria/interviewScenarioScoringSlice';
 import { SCENARIO_2_TEXT, SCENARIO_3_TEXT } from '@features/aria/interviewScenarioVignetteCopy';
@@ -38,6 +45,62 @@ import {
 import { getScenarioNumberForNewMessage } from '@features/aria/scenarioNumberDetection';
 import { remoteLog } from '@utilities/remoteLog';
 import { getSessionLogRuntime, markQuestionDelivered, writeSessionLog } from '@utilities/sessionLogging';
+import { persistInterviewAttemptSessionLifecycle } from '@utilities/interviewAttemptLifecycle';
+import { getCurrentScenario } from '@utilities/storage/InterviewStorage';
+import {
+  fetchAttemptScoringBaseline,
+  persistMoment5ScoresImmediate,
+} from '@utilities/persistPersonalMomentScoresIncremental';
+
+function momentCountsTowardSkipPenaltyLadder(momentNum: number): boolean {
+  return (momentNum >= 1 && momentNum <= 3) || momentNum === 5;
+}
+
+function recordConfirmedInterviewSkipPenalty(
+  deps: PreClaudeTurnGateDeps,
+  momentNum: number,
+): void {
+  if (!momentCountsTowardSkipPenaltyLadder(momentNum)) return;
+  deps.scenarioSkipConfirmedCountRef.current += 1;
+  const skipNum = deps.scenarioSkipConfirmedCountRef.current;
+  const individualPenalty = individualPenaltyForSkipNumber(skipNum as 1 | 2 | 3);
+  if (individualPenalty != null) {
+    deps.scenarioSkipPenaltySumRef.current += individualPenalty;
+  }
+  const cumulativeSkipPenalty = deps.scenarioSkipPenaltySumRef.current;
+  if (deps.userId) {
+    const r = getSessionLogRuntime();
+    writeSessionLog({
+      userId: deps.userId,
+      attemptId: r.attemptId,
+      eventType: 'skip_penalty_applied',
+      eventData: {
+        moment_number: momentNum,
+        skip_number: skipNum,
+        individual_penalty: individualPenalty,
+        auto_fail_triggered: skipNum === 3,
+        cumulative_skip_penalty: cumulativeSkipPenalty,
+      },
+      platform: r.platform,
+    });
+  }
+  const attemptIdSkip = deps.interviewSessionAttemptIdRef.current;
+  if (attemptIdSkip && deps.userId) {
+    const gateSnap = computeSkipPenaltyGateComputation(skipNum);
+    void supabase
+      .from('interview_attempts')
+      .update({
+        skip_count: gateSnap.skips_taken,
+        skip_penalties: gateSnap.skip_penalties,
+        skip_penalty_total: gateSnap.skip_penalty_total,
+        ...(gateSnap.skipAutoFail
+          ? { auto_failed: true, auto_fail_reason: 'exceeded_skip_limit' }
+          : {}),
+      })
+      .eq('id', attemptIdSkip)
+      .eq('user_id', deps.userId);
+  }
+}
 
 function markConstructProbeRefsForDeliveredPrompt(
   deps: PreClaudeTurnGateDeps,
@@ -60,7 +123,8 @@ async function deliverSkipAcceptedNextQuestion(
   nextPrompt: string,
   scenarioTag: 1 | 2 | 3,
 ): Promise<void> {
-  const spoken = `${SKIP_ACCEPTED_NEXT_QUESTION_BRIDGE} ${nextPrompt}`.replace(/\s+/g, ' ').trim();
+  const questionBody = assessablePromptQuestionBody(nextPrompt);
+  const spoken = `${SKIP_ACCEPTED_NEXT_QUESTION_BRIDGE} ${questionBody}`.replace(/\s+/g, ' ').trim();
   const liveTranscript = (deps.currentMessagesRef.current.length > 0
     ? deps.currentMessagesRef.current
     : messagesToUse) as MessageWithScenario[];
@@ -74,15 +138,15 @@ async function deliverSkipAcceptedNextQuestion(
     },
     (next) => deps.setMessages(next),
   );
-  deps.lastQuestionTextRef.current = nextPrompt;
-  markConstructProbeRefsForDeliveredPrompt(deps, nextPrompt);
+  deps.lastQuestionTextRef.current = questionBody;
+  markConstructProbeRefsForDeliveredPrompt(deps, questionBody);
   // Keep Show-scenario footer on the next scripted question — never S1 bleed / bridge text.
-  deps.setReferenceCardPrompt?.(nextPrompt);
+  deps.setReferenceCardPrompt?.(questionBody);
   void remoteLog('[SKIP_ACCEPTED_NEXT_QUESTION_CLIENT]', {
     interviewSessionId: deps.interviewSessionIdRef.current,
     preview: spoken.slice(0, 220),
     scenarioNumber: scenarioTag,
-    nextPromptPreview: nextPrompt.slice(0, 120),
+    nextPromptPreview: questionBody.slice(0, 120),
   });
   await deps.speakTextSafe(spoken, {
     ...ASSISTANT_INTERVIEW_SPEECH,
@@ -172,6 +236,130 @@ async function deliverSkipAcceptedScenarioHandoff(
   return true;
 }
 
+async function deliverSkipAcceptedMoment5InterviewComplete(
+  deps: PreClaudeTurnGateDeps,
+  messagesToUse: MessageWithScenario[],
+): Promise<PreClaudeTurnSkipInjectionResult> {
+  deps.interviewMomentsCompleteRef.current[4] = true;
+  deps.interviewMomentsCompleteRef.current[5] = true;
+  deps.isInterviewCompleteRef.current = true;
+  deps.skipContinuationSystemSuffixRef.current = '';
+
+  const participantFirstName = (deps.interviewNameRef.current ?? '').trim();
+  const closing = enrichPersonalMomentClosingForTts(
+    '',
+    participantFirstName,
+    null,
+    deriveClosingPillarContextFromScenarioScores(deps.scenarioScoresRef.current),
+  );
+  const liveTranscript = (deps.currentMessagesRef.current.length > 0
+    ? deps.currentMessagesRef.current
+    : messagesToUse) as MessageWithScenario[];
+  commitDedupedAssistantTranscriptTurn(
+    liveTranscript,
+    messagesToUse,
+    closing,
+    {
+      scenarioNumber: 3,
+      interviewMoment: 5,
+    },
+    (next) => deps.setMessages(next),
+  );
+  void remoteLog('[SKIP_ACCEPTED_M5_INTERVIEW_COMPLETE_CLIENT]', {
+    interviewSessionId: deps.interviewSessionIdRef.current,
+    preview: closing.slice(0, 220),
+  });
+  await deps.speakTextSafe(closing, {
+    ...ASSISTANT_INTERVIEW_SPEECH,
+    skipLastQuestionRef: true,
+  });
+  markQuestionDelivered(new Date().toISOString());
+
+  const attemptId = deps.interviewSessionAttemptIdRef.current;
+  if (attemptId && deps.userId) {
+    const skippedM5 = sanitizeMoment5PersonalScoresForAggregate(buildMoment5UserSkippedScoresAggregate());
+    if (skippedM5) {
+      try {
+        const baseline = await fetchAttemptScoringBaseline(supabase, attemptId, deps.userId);
+        await persistMoment5ScoresImmediate(
+          supabase,
+          attemptId,
+          deps.userId,
+          skippedM5,
+          baseline,
+          { skipped_by_user: true, skip_trigger: 'm5_skip_request_confirmed' },
+        );
+      } catch (persistErr) {
+        void remoteLog('[WARN] persistMoment5ScoresImmediate_failed_m5_skip', {
+          message: persistErr instanceof Error ? persistErr.message : String(persistErr),
+        });
+      }
+    }
+  }
+
+  void persistInterviewAttemptSessionLifecycle(deps.interviewSessionAttemptIdRef.current, 'completed');
+  const transcriptForScoring = compactInterviewTranscriptTurns(
+    [...messagesToUse, { role: 'assistant', content: closing, scenarioNumber: 3, interviewMoment: 5 }].filter(
+      (m) => m.role === 'user' || m.role === 'assistant',
+    ),
+  );
+  deps.pendingCompletionTranscriptRef.current = transcriptForScoring;
+  if (deps.userId) {
+    const completed = Array.from(deps.scoredScenariosRef.current);
+    const scenarioScoresPayload: Record<
+      number,
+      {
+        pillarScores: Record<string, number | null>;
+        pillarConfidence: Record<string, string>;
+        keyEvidence: Record<string, string>;
+        scenarioName?: string;
+      }
+    > = {};
+    [1, 2, 3].forEach((n) => {
+      const s = deps.scenarioScoresRef.current[n] as
+        | {
+            pillarScores: Record<string, number | null>;
+            pillarConfidence: Record<string, string>;
+            keyEvidence: Record<string, string>;
+            scenarioName?: string;
+          }
+        | undefined;
+      if (s) {
+        scenarioScoresPayload[n] = {
+          pillarScores: s.pillarScores,
+          pillarConfidence: s.pillarConfidence,
+          keyEvidence: s.keyEvidence,
+          scenarioName: s.scenarioName,
+        };
+      }
+    });
+    try {
+      await saveInterviewProgress(deps.userId, {
+        messages: transcriptForScoring,
+        scenariosCompleted: completed,
+        scenarioScores: scenarioScoresPayload,
+        currentScenario: getCurrentScenario(deps.scoredScenariosRef.current),
+        resumeActiveScenario: deps.resumeActiveScenarioRef.current,
+        emotionItemResponses: [...deps.emotionItemResponsesRef.current],
+        pendingCompletion: true,
+        scenarioSkipConfirmedCount: deps.scenarioSkipConfirmedCountRef.current,
+      });
+    } catch (persistErr) {
+      void remoteLog('[WARN] saveInterviewProgress_failed_before_m5_skip_completion', {
+        message: persistErr instanceof Error ? persistErr.message : String(persistErr),
+      });
+    }
+  }
+  deps.kickCompletionScoring('m5_skip_accepted', transcriptForScoring);
+  deps.interviewStatusRef.current = 'preparing_results';
+  deps.setInterviewStatus('preparing_results');
+  if (deps.userId) markPreparingResultsSession(deps.userId);
+  deps.setPendingCompletion(true);
+  deps.setVoiceState('idle');
+  deps.setIsWaiting(false);
+  return { haltTurn: true };
+}
+
 /**
  * Skip acceptance: apply penalties/state, then client-deliver the next prompt or scenario
  * (do not leave progression solely to the model).
@@ -203,47 +391,7 @@ export async function runPreClaudeFrustrationSkipAcceptanceGate(
   if (skipProgression.scenarioMomentComplete && momentNum >= 1 && momentNum <= 3) {
     deps.scenarioFrustrationSkipNullMarkersRef.current[scenarioTag] = true;
   }
-  if (momentNum >= 1 && momentNum <= 3) {
-    deps.scenarioSkipConfirmedCountRef.current += 1;
-    const skipNum = deps.scenarioSkipConfirmedCountRef.current;
-    const individualPenalty = individualPenaltyForSkipNumber(skipNum as 1 | 2 | 3);
-    if (individualPenalty != null) {
-      deps.scenarioSkipPenaltySumRef.current += individualPenalty;
-    }
-    const cumulativeSkipPenalty = deps.scenarioSkipPenaltySumRef.current;
-    if (deps.userId) {
-      const r = getSessionLogRuntime();
-      writeSessionLog({
-        userId: deps.userId,
-        attemptId: r.attemptId,
-        eventType: 'skip_penalty_applied',
-        eventData: {
-          moment_number: momentNum,
-          skip_number: skipNum,
-          individual_penalty: individualPenalty,
-          auto_fail_triggered: skipNum === 3,
-          cumulative_skip_penalty: cumulativeSkipPenalty,
-        },
-        platform: r.platform,
-      });
-    }
-    const attemptIdSkip = deps.interviewSessionAttemptIdRef.current;
-    if (attemptIdSkip && deps.userId) {
-      const gateSnap = computeSkipPenaltyGateComputation(skipNum);
-      void supabase
-        .from('interview_attempts')
-        .update({
-          skip_count: gateSnap.skips_taken,
-          skip_penalties: gateSnap.skip_penalties,
-          skip_penalty_total: gateSnap.skip_penalty_total,
-          ...(gateSnap.skipAutoFail
-            ? { auto_failed: true, auto_fail_reason: 'exceeded_skip_limit' }
-            : {}),
-        })
-        .eq('id', attemptIdSkip)
-        .eq('user_id', deps.userId);
-    }
-  }
+  recordConfirmedInterviewSkipPenalty(deps, momentNum);
   const skipTrigger =
     deps.scenarioSkipOfferSourceRef.current === 'proactive_utterance'
       ? 'proactive_skip_request'
@@ -321,6 +469,11 @@ export async function runPreClaudeFrustrationSkipAcceptanceGate(
     return { haltTurn: true };
   }
 
-  // S3 complete / M4–M5: keep model continuation suffix (personal handoff / later moments).
+  // M5 final question skipped — close interview client-side and hand off to preparing_results.
+  if (momentNum === 5) {
+    return deliverSkipAcceptedMoment5InterviewComplete(deps, messagesToUse);
+  }
+
+  // S3 complete / M4: keep model continuation suffix (personal handoff / later moments).
   return { haltTurn: false };
 }

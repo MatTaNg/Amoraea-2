@@ -7,6 +7,7 @@ import type { SpeakTextSafeMainPlaybackPrep } from '@features/aria/prepareSpeakT
 import type { SpeakTextSafeResolvedOptions } from '@features/aria/runSpeakTextSafeEntry';
 import type { SpeakTextSafeDeps } from '@features/aria/speakTextSafeDeps';
 import type { SpeakTextSafeTtsTriggerSource } from '@features/aria/speakTextSafeSuccessfulDelivery';
+import { maybePersistScenarioOpeningDeliveredAfterSpeakTextSafePlayback } from '@features/aria/scenarioDeliveryResumeCheckpoint';
 import { writeSpeakTextSafePlaybackCompletionTelemetry } from '@features/aria/speakTextSafePlaybackCompletionTelemetry';
 import { withRetry } from '@utilities/withRetry';
 
@@ -60,6 +61,7 @@ export async function runSpeakTextSafeMainSpeakBody(
     persistInterviewAttemptSessionLifecycle,
     recordInterviewAssistantDeliveryForMetaExemptionRef,
     ttsLineInFlightRef,
+    lastQuestionTextRef,
   } = deps;
 
   const {
@@ -108,8 +110,9 @@ export async function runSpeakTextSafeMainSpeakBody(
     const actualTtsMs = Date.now() - ttsStart;
 
     let audioPlaybackTruncated = false;
+    let durationMatch = false;
     if (userId) {
-      ({ audioPlaybackTruncated } = writeSpeakTextSafePlaybackCompletionTelemetry({
+      ({ audioPlaybackTruncated, durationMatch } = writeSpeakTextSafePlaybackCompletionTelemetry({
         userId,
         text,
         telemetrySource,
@@ -123,6 +126,15 @@ export async function runSpeakTextSafeMainSpeakBody(
         scenarioAContemptProbePlaybackConfirmedRef,
         showScenarioCardCanonicalPlaybackConfirmedKindsRef,
       }));
+      void maybePersistScenarioOpeningDeliveredAfterSpeakTextSafePlayback({
+        userId,
+        text,
+        audioPlaybackTruncated,
+        durationMatch,
+        lastQuestionText: lastQuestionTextRef?.current ?? null,
+        sessionAttemptId: interviewSessionAttemptIdRef?.current ?? null,
+        currentScenario: currentScenarioRef.current,
+      });
     }
 
     const { skipDeliveryForTabInterrupt, isInterviewLine } = resolveSpeakTextSafeInterviewLineDelivery({

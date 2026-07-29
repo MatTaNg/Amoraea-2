@@ -1,11 +1,21 @@
-import { useCallback, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { StackActions, useFocusEffect } from '@react-navigation/native';
+import { useQueryClient } from '@tanstack/react-query';
 import { supabase } from '@data/supabase/client';
 import { modalOnboardingService } from '@/datingProfile/screens/onboarding/modals/services/modalOnboardingService';
 import { navigateToDatingProfileOnboardingEntry } from '@/datingProfile/onboarding/navigateToDatingProfileOnboardingEntry';
 import { profilesRepo } from '@/data/repos/profilesRepo';
 import { areDatingProfileAssessmentsComplete } from '@/data/services/assessmentService';
 import { POST_INTERVIEW_PROFILE_TIME_ESTIMATE } from '@features/onboarding/postInterviewProfileCompletion';
+import {
+  postInterviewLaunchQueryKeys,
+  usePostInterviewProfileCtaQuery,
+} from '@features/onboarding/postInterviewLaunchQueries';
+import {
+  invalidateEditProfileQueries,
+  isEditProfileQueryCacheWarm,
+  prefetchEditProfileQueries,
+} from '@/screens/profile/editProfile/editProfileQueries';
 
 type NavigationLike = {
   dispatch: (action: ReturnType<typeof StackActions.push>) => void;
@@ -13,52 +23,34 @@ type NavigationLike = {
 };
 
 export function usePostInterviewProfileCta(userId: string, navigation: NavigationLike) {
-  const [datingProfileFullyComplete, setDatingProfileFullyComplete] = useState(false);
-  const [assessmentsComplete, setAssessmentsComplete] = useState(false);
-  const [profileCtaLoaded, setProfileCtaLoaded] = useState(false);
+  const queryClient = useQueryClient();
+  const onboardingFlowOpenedRef = useRef(false);
   const [profileCtaBusy, setProfileCtaBusy] = useState(false);
+  const { data, isPending } = usePostInterviewProfileCtaQuery(userId);
+
+  const datingProfileFullyComplete = data?.datingProfileFullyComplete ?? false;
+  const assessmentsComplete = data?.assessmentsComplete ?? false;
+  const profileReadyForMatching = datingProfileFullyComplete && assessmentsComplete;
+
+  useEffect(() => {
+    if (!userId || !profileReadyForMatching) return;
+    void prefetchEditProfileQueries(queryClient, userId);
+  }, [profileReadyForMatching, queryClient, userId]);
 
   useFocusEffect(
     useCallback(() => {
-      let cancelled = false;
-      void (async () => {
-        const { data: auth } = await supabase.auth.getUser();
-        const uid = auth.user?.id ?? userId;
-        if (!uid) {
-          if (!cancelled) setProfileCtaLoaded(true);
-          return;
-        }
-        try {
-          const [progress, profileResult, assessmentsDone] = await Promise.all([
-            modalOnboardingService.getProgress(uid),
-            profilesRepo.getProfile(uid),
-            areDatingProfileAssessmentsComplete(uid),
-          ]);
-          if (cancelled) return;
-          if (profileResult.success && profileResult.data) {
-            const profile = profileResult.data as Record<string, unknown>;
-            setDatingProfileFullyComplete(profile.onboardingCompleted === true);
-            setAssessmentsComplete(assessmentsDone);
-          } else {
-            setDatingProfileFullyComplete(false);
-            setAssessmentsComplete(assessmentsDone);
-          }
-          void progress;
-        } catch (e) {
-          if (__DEV__) {
-            console.warn('[usePostInterviewProfileCta] profile progress refresh', e);
-          }
-        } finally {
-          if (!cancelled) setProfileCtaLoaded(true);
-        }
-      })();
-      return () => {
-        cancelled = true;
-      };
-    }, [userId]),
+      if (!onboardingFlowOpenedRef.current || !userId) {
+        return undefined;
+      }
+      onboardingFlowOpenedRef.current = false;
+      void queryClient.invalidateQueries({
+        queryKey: postInterviewLaunchQueryKeys.profileCta(userId),
+      });
+      invalidateEditProfileQueries(queryClient, userId);
+      return undefined;
+    }, [queryClient, userId]),
   );
 
-  const profileReadyForMatching = datingProfileFullyComplete && assessmentsComplete;
   const profileCtaLabel = profileReadyForMatching ? 'Edit your profile' : 'Complete your profile';
   const profileTimeEstimateLabel = profileReadyForMatching
     ? null
@@ -68,6 +60,20 @@ export function usePostInterviewProfileCta(userId: string, navigation: Navigatio
     const { data: auth } = await supabase.auth.getUser();
     const uid = auth.user?.id ?? userId;
     if (!uid) return;
+
+    if (profileReadyForMatching) {
+      if (!isEditProfileQueryCacheWarm(queryClient, uid)) {
+        setProfileCtaBusy(true);
+        try {
+          await prefetchEditProfileQueries(queryClient, uid);
+        } finally {
+          setProfileCtaBusy(false);
+        }
+      }
+      navigation.dispatch(StackActions.push('DatingProfileEdit', { userId: uid }));
+      return;
+    }
+
     setProfileCtaBusy(true);
     try {
       const progress = await modalOnboardingService.getProgress(uid);
@@ -79,21 +85,34 @@ export function usePostInterviewProfileCta(userId: string, navigation: Navigatio
         const profile = profileResult.data as Record<string, unknown>;
         const profileOnboardingComplete = profile.onboardingCompleted === true;
         goEdit = profileOnboardingComplete && profileAssessmentsComplete;
-        setDatingProfileFullyComplete(profileOnboardingComplete);
-        setAssessmentsComplete(profileAssessmentsComplete);
+        queryClient.setQueryData(postInterviewLaunchQueryKeys.profileCta(userId), {
+          datingProfileFullyComplete: profileOnboardingComplete,
+          assessmentsComplete: profileAssessmentsComplete,
+        });
       }
       if (goEdit) {
+        if (!isEditProfileQueryCacheWarm(queryClient, uid)) {
+          await prefetchEditProfileQueries(queryClient, uid);
+        }
         navigation.dispatch(StackActions.push('DatingProfileEdit', { userId: uid }));
       } else {
+        onboardingFlowOpenedRef.current = true;
         navigateToDatingProfileOnboardingEntry(navigation, uid);
       }
     } finally {
       setProfileCtaBusy(false);
     }
-  }, [userId, navigation, datingProfileFullyComplete, assessmentsComplete]);
+  }, [
+    userId,
+    navigation,
+    datingProfileFullyComplete,
+    assessmentsComplete,
+    profileReadyForMatching,
+    queryClient,
+  ]);
 
   return {
-    profileCtaLoaded,
+    profileCtaLoaded: Boolean(userId) ? !isPending : true,
     profileCtaBusy,
     profileCtaLabel,
     profileTimeEstimateLabel,

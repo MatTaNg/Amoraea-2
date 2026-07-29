@@ -8,6 +8,8 @@ import {
   standardApplicantPostInterviewDestination,
 } from '@features/onboarding/postInterviewLaunchMode';
 
+import { userHasEnteredInterviewFlow } from '@utilities/interviewEntryLock';
+
 import type { InitialInterviewRouteResult, InterviewStackRoute } from './resolveInitialInterviewRoute';
 
 export function shouldFetchPostInterviewDeferralSnapshot(
@@ -23,14 +25,18 @@ export function shouldFetchPostInterviewDeferralSnapshot(
     return false;
   }
 
-  return (
+  if (
     initialRoute?.screen === 'PostInterviewProcessing' ||
     initialRoute?.screen === 'PostInterviewPassed' ||
     initialRoute?.screen === 'PostInterviewFailed' ||
     initialRoute?.screen === 'PostInterview' ||
-    initialRoute?.screen === 'PostInterviewLaunch' ||
-    profileShowsStandardInterviewComplete
-  );
+    initialRoute?.screen === 'PostInterviewLaunch'
+  ) {
+    return true;
+  }
+
+  // Legacy path only — psychometrics-enabled users must reach InterviewComplete first.
+  return profileShowsStandardInterviewComplete && !PSYCHOMETRICS_ENABLED;
 }
 
 export type ResolvedInterviewStackBootstrap = {
@@ -52,6 +58,11 @@ export function resolveInterviewStackBootstrap(input: {
   lockedPostInterviewRoute: InterviewStackRoute | null;
   /** Restores the post-interview screen after exiting the validation flow. */
   validationStandardReturnRoute?: ValidationStandardReturnRoute | null;
+  /** Skip AssessmentWelcome when local storage holds a resumable in-progress interview. */
+  localResumableInterviewProgress?: boolean;
+  userId?: string;
+  /** User tapped Continue on AssessmentWelcome (memory or persisted). */
+  userEnteredInterviewFlow?: boolean;
 }): ResolvedInterviewStackBootstrap {
   const {
     initialRoute,
@@ -60,6 +71,9 @@ export function resolveInterviewStackBootstrap(input: {
     isAdminEmail,
     lockedPostInterviewRoute,
     validationStandardReturnRoute,
+    localResumableInterviewProgress = false,
+    userId = '',
+    userEnteredInterviewFlow = false,
   } = input;
 
   let initialRouteName: InterviewStackRoute = initialRoute?.screen ?? 'Amoraea';
@@ -72,6 +86,11 @@ export function resolveInterviewStackBootstrap(input: {
       initialRouteName = standardApplicantPostInterviewDestination();
       interviewAlreadyCompleted = true;
       legacyPsychometricsMode = false;
+    } else {
+      // Profile can refresh before initialInterviewRoute — keep psychometrics handoff, not deferral.
+      initialRouteName = 'InterviewComplete';
+      interviewAlreadyCompleted = true;
+      legacyPsychometricsMode = true;
     }
   }
 
@@ -103,6 +122,18 @@ export function resolveInterviewStackBootstrap(input: {
   }
 
   initialRouteName = mapInterviewStackRouteForLaunchMode(initialRouteName);
+
+  if (localResumableInterviewProgress && initialRouteName === 'AssessmentWelcome') {
+    initialRouteName = 'Amoraea';
+  }
+
+  if (
+    userId &&
+    (userEnteredInterviewFlow || userHasEnteredInterviewFlow(userId)) &&
+    initialRouteName === 'AssessmentWelcome'
+  ) {
+    initialRouteName = 'Amoraea';
+  }
 
   return {
     initialRouteName,

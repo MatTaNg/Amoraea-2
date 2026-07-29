@@ -22,6 +22,12 @@ import {
   runPreClaudeConfusionRepeatReplayGates,
 } from '@features/aria/runPreClaudeConfusionRepeatReplayGates';
 import {
+  runPreClaudeGoBackRequestInjectGate,
+} from '@features/aria/runPreClaudeGoBackRequestInjectGate';
+import {
+  runPreClaudeScoreRequestInjectGate,
+} from '@features/aria/runPreClaudeScoreRequestInjectGate';
+import {
   runPreClaudeMoment4SpecificityGate,
 } from '@features/aria/runPreClaudeMoment4SpecificityGate';
 import {
@@ -66,6 +72,17 @@ export async function runPreClaudeLateInterceptGates(
 ): Promise<PreClaudeLateInterceptGatesResult> {
   const assistantTurnContext = resolvePreClaudeAssistantTurnContext(deps, trimmed, messagesToUse);
   const { lastAssistantContent, lastInterviewerContent, isPersonalOpening } = assistantTurnContext;
+
+  // Go-back asks must decline before M4 threshold inject (which otherwise treats the ask as an answer).
+  const goBackRequest = await runPreClaudeGoBackRequestInjectGate(deps, trimmed, messagesToUse);
+  if (goBackRequest?.haltTurn) {
+    return { handled: true };
+  }
+
+  const scoreRequest = await runPreClaudeScoreRequestInjectGate(deps, trimmed, messagesToUse);
+  if (scoreRequest?.haltTurn) {
+    return { handled: true };
+  }
 
   const moment4SpecificityGate = await runPreClaudeMoment4SpecificityGate(
     deps,
@@ -139,20 +156,9 @@ export async function runPreClaudeLateInterceptGates(
     lastAssistantContent,
     userScenarioTag,
     participantFirstNameForSpoken,
+    metaCommentClassification,
   );
   if (s1RepairHardStop.handled) {
-    return { handled: true };
-  }
-
-  // Unassessable / identity asks (e.g. "Are you an alien?") must win over disengagement
-  // probes and construct advance — speak inability-to-score only, no ack / re-ask.
-  const irrelevantAnswerRetry = await runPreClaudeIrrelevantAnswerRetryGate(
-    deps,
-    trimmed,
-    messagesToUse,
-    lastAssistantContent,
-  );
-  if (irrelevantAnswerRetry.handled) {
     return { handled: true };
   }
 
@@ -178,6 +184,18 @@ export async function runPreClaudeLateInterceptGates(
     suppressForcedConstructProbesForMetaFrustration,
   );
   if (clientOwnedCanonical.handled) {
+    return { handled: true };
+  }
+
+  // Cut-off / unassessable retry is last — after score/meta/disengagement checks (e.g. "Can I see my score?").
+  // Still before Claude; M5 inject stays earlier so incomplete threshold answers do not advance.
+  const irrelevantAnswerRetry = await runPreClaudeIrrelevantAnswerRetryGate(
+    deps,
+    trimmed,
+    messagesToUse,
+    lastAssistantContent,
+  );
+  if (irrelevantAnswerRetry.handled) {
     return { handled: true };
   }
 

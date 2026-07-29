@@ -162,6 +162,49 @@ describe('applySpeakTextSafePreDelivery', () => {
     expect(shouldSuppressDuplicateInterviewClosingTts('session-closing', closing)).toBe(true);
   });
 
+  it('does not suppress resume welcome-back TTS that quotes the Scenario A contempt probe', () => {
+    const {
+      SCENARIO_A_CONTEMPT_PROBE_DELIVERED_COPY,
+    } = require('@features/aria/scenarioAContemptProbeTtsStrip') as {
+      SCENARIO_A_CONTEMPT_PROBE_DELIVERED_COPY: string;
+    };
+    const welcomeBack = `Welcome back, we'll pick up where we left off, we were in Scenario one and I just said ${SCENARIO_A_CONTEMPT_PROBE_DELIVERED_COPY}.`;
+    const args = baseArgs({
+      text: welcomeBack,
+      interviewSpeechRole: undefined,
+      telemetrySourceOpt: 'greeting',
+      scenarioAContemptProbePlaybackConfirmed: true,
+      skipScenarioAContemptProbeSessionDedup: true,
+    });
+
+    const result = applySpeakTextSafePreDelivery(args);
+
+    expect(result).toEqual({
+      suppressed: false,
+      text: welcomeBack,
+      textForAudio: welcomeBack,
+    });
+  });
+
+  it('does not suppress resume welcome-back via session dedup guard even without explicit skip flag', () => {
+    const {
+      SCENARIO_A_CONTEMPT_PROBE_DELIVERED_COPY,
+    } = require('@features/aria/scenarioAContemptProbeTtsStrip') as {
+      SCENARIO_A_CONTEMPT_PROBE_DELIVERED_COPY: string;
+    };
+    const welcomeBack = `Welcome back, we'll pick up where we left off, we were in Scenario one and I just said ${SCENARIO_A_CONTEMPT_PROBE_DELIVERED_COPY}.`;
+    const args = baseArgs({
+      text: welcomeBack,
+      interviewSpeechRole: undefined,
+      telemetrySourceOpt: 'greeting',
+      scenarioAContemptProbePlaybackConfirmed: true,
+    });
+
+    const result = applySpeakTextSafePreDelivery(args);
+
+    expect(result.suppressed).toBe(false);
+  });
+
   it('does not rewrite S3→M4 handoff into Sophie vignette when Situation 3 already played', () => {
     const m4 =
       "Good work — you just finished the three situations. There are only two questions left. Now I want to ask you about something a bit more personal.\n\nThink of someone you've had a really hard time with — maybe a falling out, a grudge, or just someone who got under your skin.";

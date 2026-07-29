@@ -79,6 +79,7 @@ export function createMockPreClaudeDeps(
     scenarioSkipOfferSourceRef: mockRef(null),
     metaCommentAckAwaitingSubstantiveBaselineSeqRef: mockRef(null),
     substantiveInterviewQuestionDeliveredSeqRef: mockRef(0),
+    recoveryAssistantSpokenAtSubstantiveSeqRef: mockRef(null),
     metaCommentFrustrationCountByMomentRef: mockRef({}),
     inabilityCountByMomentRef: mockRef({}),
     skipRequestClassificationSeenByMomentRef: mockRef({}),

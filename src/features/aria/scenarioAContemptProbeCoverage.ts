@@ -205,6 +205,25 @@ export function evaluateScenarioAQ1ContemptProbePreProbeSkip(text: string): {
   return { skip: false, reason: null };
 }
 
+const SCENARIO_A_CONTEMPT_PROBE_SHORT_AFFECT_RE =
+  /\b(?:frustrated|disappointed|condescending|contemptuous|dismissive|sarcastic|hostile|hurt|angry|upset|resentful|resigned|passive[- ]aggressive|contempt|cold|harsh|sharp|loaded|bitter|exasperated|annoyed|disdainful|demeaning|belittling|shutting\s+down|given\s+up|fed\s+up)\b/i;
+
+/**
+ * Scenario A contempt probe ("what do you make of that?") accepts brief Emma-line reads —
+ * e.g. "Emma was frustrated", "she's being condescending", "So, I think she's very frustrated and disappointed."
+ */
+export function looksLikeScenarioAContemptProbeAssessableShortAnswer(userText: string): boolean {
+  const t = userText.replace(/\s+/g, ' ').trim();
+  if (!t || t.length < 6) return false;
+  const low = t.toLowerCase().replace(/[\u201c\u201d\u2018\u2019]/g, "'");
+  if (!/\b(?:emma|she|her)\b/i.test(low)) return false;
+  if (SCENARIO_A_CONTEMPT_PROBE_SHORT_AFFECT_RE.test(low)) return true;
+  if (/\b(?:sounds?|seems?|looks?|reads?|feels?)\s+(?:done|over\s+it|fed\s+up|through)\b/i.test(low)) {
+    return true;
+  }
+  return false;
+}
+
 /**
  * Scenario A Q1: user already showed a **contempt-quality** read of Emma's "you've made that very clear" line —
  * hostile, dismissive, verdict-issuing, or relationally closing — not mere indirectness or minimization.

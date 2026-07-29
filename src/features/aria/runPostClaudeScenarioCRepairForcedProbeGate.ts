@@ -16,7 +16,11 @@ import {
   SCENARIO_C_REPAIR_QUESTION_CANONICAL,
   scenarioCRepairConstructStillPending,
 } from '@features/aria/scenarioCPromptDetection';
-import { markS3RepairProbeTtsDelivered } from '@features/aria/scenarioCDeliveryReconcile';
+import {
+  clearS3RepairProbeDeliveredRefIfFalsePositive,
+  isS3RepairProbeAudiblyDelivered,
+  markS3RepairProbeTtsDelivered,
+} from '@features/aria/scenarioCDeliveryReconcile';
 import { shouldDeliverScenarioFollowUpQuestion } from '@features/aria/scenarioFollowUpTranscriptGuard';
 import { commitDedupedAssistantTranscriptTurn } from '@features/aria/interviewTranscriptDedup';
 import { remoteLog } from '@utilities/remoteLog';
@@ -73,17 +77,19 @@ export async function runPostClaudeScenarioCRepairForcedProbeGate(
     return null;
   }
 
+  const clearedFalsePositive = clearS3RepairProbeDeliveredRefIfFalsePositive(
+    deps,
+    params.messagesToUse,
+  );
   const streamAlreadySpokeRepair = isScenarioCRepairAssistantPrompt(
     deps.parallelStreamingTtsRef.current.spokenCompleteText,
   );
-  const alreadyDeliveredToTts =
-    deps.s3RepairProbeDeliveredRef.current || streamAlreadySpokeRepair;
+  const alreadyDeliveredToTts = isS3RepairProbeAudiblyDelivered(deps, params.messagesToUse);
 
   /**
-   * Parallel stream often speaks repair and marks {@link markS3RepairProbeTtsDelivered} before the
-   * assistant turn is committed to transcript. `repairStillPending` stays true (transcript lag),
-   * and the old gate re-spoke with forceSpeakDespiteParallelStream — user heard repair twice.
+   * Parallel stream often speaks repair before the assistant turn is committed to transcript.
    * When repair is already satisfied in transcript, return null so later M4 handoff speech can run.
+   * When the delivery ref was set optimistically but audio never played, clear it and speak below.
    */
   if (alreadyDeliveredToTts) {
     if (!repairStillPending) {
@@ -95,6 +101,7 @@ export async function runPostClaudeScenarioCRepairForcedProbeGate(
       interviewSessionId: deps.interviewSessionIdRef.current,
       deliveredRef: deps.s3RepairProbeDeliveredRef.current,
       streamSpokeRepair: streamAlreadySpokeRepair,
+      clearedFalsePositive,
       spokenPreview: deps.parallelStreamingTtsRef.current.spokenCompleteText.slice(0, 220),
     });
     return finishPostClaudeForcedConstructProbeGate(deps, {

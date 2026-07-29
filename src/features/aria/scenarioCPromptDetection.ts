@@ -6,7 +6,9 @@ import {
 } from './interviewTransitionBundles';
 import { hasScenarioBoundaryWrapPhrase, isScenarioThreeToMoment4EmotionModalHandoff, splitScenarioTransitionForEmotionModal } from './emotionModalTransitionOrchestration';
 import { isTruncatedScenarioABoundaryReflectionOpener } from './scenarioAContemptProbeTextMatch';
+import { looksLikeMoment4GrudgePrompt, looksLikeMoment4ThresholdQuestion } from './moment4ProbeLogic';
 import { MOMENT_4_PERSONAL_CARD, assistantTextIsPrematureMoment4HandoffDuringScenarioC } from './interviewMomentScenarioConfig';
+import { transcriptAssistantContainsMoment5PrimaryConflictQuestion } from './probeAndScoringUtils';
 import { isDecline } from './interviewControlTokens';
 import { normalizeInterviewTypography } from './interviewTypography';
 import { looksLikeScenarioCCommitmentThresholdAssistantPrompt } from './scenarioCCommitmentThresholdLogic';
@@ -308,9 +310,9 @@ export function coerceScenarioCBoundaryHandoffForTts(
   return coerced;
 }
 
-/** Canonical Scenario C Q2 (repair / resolve the conflict) — injected when the model closes early. */
+/** Canonical Scenario C Q2 (repair / resolve the conflict) — question only (ack is spoken separately). */
 export const SCENARIO_C_REPAIR_QUESTION_CANONICAL =
-  'Got it. How do you think this situation could be repaired?';
+  'How do you think this situation could be repaired?';
 
 /** @deprecated Alias — Scenario C repair is always {@link SCENARIO_C_REPAIR_QUESTION_CANONICAL}. */
 export const SCENARIO_C_REPAIR_AS_DANIEL_CANONICAL = SCENARIO_C_REPAIR_QUESTION_CANONICAL;
@@ -649,6 +651,34 @@ export function scenarioCSophiePerspectiveProbeAlreadyDelivered(
   );
 }
 
+/** Sophie perspective probe accepts brief affect reads — e.g. "Probably annoying", "It must've been frustrating". */
+const SCENARIO_C_SOPHIE_PERSPECTIVE_SHORT_AFFECT_RE =
+  /\b(?:frustrating|frustrated|annoying|annoyed|hurt|hurting|painful|hard|difficult|lonely|exhausting|exhausted|draining|invalidating|invalidated|dismissed|unheard|abandoned|disappointed|upset|sad|scared|anxious|resigned|tired|awful|terrible|suck|sucks|reject(?:ed|ion)?|abandon(?:ment|ed)?)\b/i;
+
+export function looksLikeScenarioCSophiePerspectiveAssessableShortAnswer(userText: string): boolean {
+  const t = userText.replace(/\s+/g, ' ').trim();
+  if (!t || t.length < 6) return false;
+  const low = t.toLowerCase().replace(/[\u201c\u201d\u2018\u2019]/g, "'");
+  if (/^i\s+(?:think|guess|feel|believe|suppose)(?:\s+that)?\s*[.,;:!?…—–-]*$/i.test(low)) {
+    return false;
+  }
+  if (
+    /^i\s+(?:think|guess|feel|believe|suppose)\s+(?:(?:that\s+)(?:the\s+)?)?(?:sophie|daniel|he|she|they|it)\s*[.,;:!?…—–-]*$/i.test(
+      low,
+    )
+  ) {
+    return false;
+  }
+  if (!SCENARIO_C_SOPHIE_PERSPECTIVE_SHORT_AFFECT_RE.test(low)) return false;
+  if (/\b(?:sophie|she|her)\b/i.test(low)) return true;
+  if (/\b(?:for|to)\s+(?:so|soph|her|she)\s*[.,;:!?…—–-]*$/i.test(low)) return true;
+  if (/\b(?:must(?:'ve| have) been|probably|maybe|really|very|pretty|so|just|quite)\b/i.test(low)) {
+    return true;
+  }
+  if (countSpokenWords(t) <= 6) return true;
+  return false;
+}
+
 /** User answered the Sophie perspective probe with substantive emotional read (with or without naming Sophie). */
 export function userAnswerSatisfiesScenarioCSophiePerspectiveProbe(
   text: string | null | undefined,
@@ -656,6 +686,7 @@ export function userAnswerSatisfiesScenarioCSophiePerspectiveProbe(
   const raw = (text ?? '').trim();
   if (!raw || isDecline(raw)) return false;
   if (userAnswerHasSophiePerspectiveLanguage(raw)) return true;
+  if (looksLikeScenarioCSophiePerspectiveAssessableShortAnswer(raw)) return true;
   if (countSpokenWords(raw) < 8) return false;
   const t = normalizeInterviewTypography(raw).replace(/\s+/g, ' ').trim().toLowerCase();
   const emotionalImpact =
@@ -771,7 +802,8 @@ export function scenarioCUserAnswerHasSubstantiveRepairContent(text: string | nu
     );
   const explicitRepairOutcome =
     /\b(?:repair|repaired|be repaired|never be repaired|fix this|make it right|work(?:ing)? through)\b/.test(t);
-  return (danielLeavingPrescription || couplesRepairPath) && explicitRepairOutcome;
+  if (couplesRepairPath || danielLeavingPrescription) return true;
+  return explicitRepairOutcome;
 }
 
 /** Substantive answer to Scenario C repair Q2 — used for S3→M4 advance when the model emits thin follow-ups. */
@@ -855,10 +887,41 @@ export function scenarioCSophiePerspectivePrerequisiteMet(
   return false;
 }
 
+/** True when transcript after `fromIndex` shows Moment 4+ personal gameplay (handoff, grudge, threshold, M5). */
+function transcriptHasPersonalPartProgressAfterIndex(
+  messages: readonly MessageWithScenario[],
+  fromIndex: number,
+): boolean {
+  for (let i = fromIndex + 1; i < messages.length; i++) {
+    const m = messages[i];
+    if (typeof m.interviewMoment === 'number' && m.interviewMoment >= 4) {
+      return true;
+    }
+    if (m.role !== 'assistant') continue;
+    const c = m.content ?? '';
+    if (looksLikeMoment4GrudgePrompt(c) || looksLikeMoment4ThresholdQuestion(c)) {
+      return true;
+    }
+    if (assistantTextLooksLikeMoment4HandoffLead(c)) {
+      return true;
+    }
+    if (/\b(?:held a grudge|really hard time with|got under your skin|two questions left)\b/i.test(c)) {
+      return true;
+    }
+    if (transcriptAssistantContainsMoment5PrimaryConflictQuestion(c)) {
+      return true;
+    }
+  }
+  return false;
+}
+
 /** Repair Q2 still owed after Sophie perspective is satisfied (blocks premature S3→M4 advance). */
 export function scenarioCRepairConstructStillPending(
   messages: readonly MessageWithScenario[],
 ): boolean {
+  if (transcriptHasPersonalPartProgressAfterIndex(messages, -1)) {
+    return false;
+  }
   if (transcriptAlreadyContainsScenarioCRepairQuestion(messages)) {
     const hasScenarioCQ1InTranscript = messages.some(
       (m) => m.role === 'assistant' && isScenarioCQ1Prompt(m.content ?? ''),
@@ -884,6 +947,9 @@ export function scenarioCRepairConstructStillPending(
       }
     }
     if (repairAnchorIndex < 0) return true;
+    if (transcriptHasPersonalPartProgressAfterIndex(messages, repairAnchorIndex)) {
+      return false;
+    }
     const userTurnsAfterRepair = messages
       .slice(repairAnchorIndex + 1)
       .filter(
@@ -891,6 +957,10 @@ export function scenarioCRepairConstructStillPending(
           m.role === 'user' && (m.content ?? '').trim().length > 0 && !isDecline(m.content ?? ''),
       );
     if (userTurnsAfterRepair.length === 0) return true;
+    /** Gameplay advanced past repair Q2 (e.g. grudge answer) even when repair-content heuristics miss. */
+    if (userTurnsAfterRepair.length >= 2) {
+      return false;
+    }
     if (
       userTurnsAfterRepair.some((m) =>
         scenarioCUserAnswerHasSubstantiveRepairContent((m.content ?? '').trim()),

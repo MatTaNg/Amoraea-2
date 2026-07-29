@@ -325,14 +325,27 @@ export function extractEmotionAfterModalForResumeCatchUp(
   transcriptMessages: ReadonlyArray<{ role: string; content?: string }>,
   catchUpIndices: readonly number[],
 ): string | null {
-  if (!catchUpIndices.includes(2)) return null;
-  for (let i = transcriptMessages.length - 1; i >= 0; i--) {
-    const m = transcriptMessages[i];
-    if (m?.role !== 'assistant') continue;
-    const content = m.content ?? '';
-    if (!/three described|grudge|two questions|more personal/i.test(content)) continue;
-    const { afterModal } = splitScenarioTransitionForEmotionModal(content);
-    if (afterModal.trim().length >= 20) return afterModal;
+  if (catchUpIndices.includes(2)) {
+    for (let i = transcriptMessages.length - 1; i >= 0; i--) {
+      const m = transcriptMessages[i];
+      if (m?.role !== 'assistant') continue;
+      const content = m.content ?? '';
+      if (!/three described|grudge|two questions|more personal/i.test(content)) continue;
+      const { afterModal } = splitScenarioTransitionForEmotionModal(content);
+      if (afterModal.trim().length >= 20) return afterModal;
+    }
+  }
+  if (catchUpIndices.includes(0)) {
+    for (let i = transcriptMessages.length - 1; i >= 0; i--) {
+      const m = transcriptMessages[i];
+      if (m?.role !== 'assistant') continue;
+      const content = m.content ?? '';
+      if (!textContainsScenarioBVignetteBody(content)) continue;
+      const { afterModal } = splitScenarioTransitionForEmotionModal(content);
+      const tail = afterModal.trim();
+      if (tail.length >= 20) return tail;
+      if (content.trim().length >= 20) return content.trim();
+    }
   }
   return null;
 }

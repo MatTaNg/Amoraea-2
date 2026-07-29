@@ -5,6 +5,7 @@ import {
   looksLikeMisplacedNonGrudgeMoment4Answer,
   looksLikeMoment4GrudgePrompt,
   looksLikeMoment4ThresholdQuestion,
+  looksLikeUnassessableMoment4ThresholdAnswer,
   coerceMoment4ThresholdQuestionForTts,
   MOMENT_4_COMMITMENT_THRESHOLD_QUESTION_CARD_BODY,
   MOMENT_4_COMMITMENT_THRESHOLD_QUESTION_TEXT,
@@ -163,6 +164,29 @@ describe('moment4ProbeLogic', () => {
     expect(isAnsweringFirstUserTurnAfterMoment4Threshold(prior)).toBe(false);
   });
 
+  it('isAnsweringFirstUserTurnAfterMoment4Threshold: true after unassessable threshold retry before first assessable answer', () => {
+    const prior = [
+      { role: 'assistant', content: M4_GRUDGE_CARD },
+      { role: 'user', content: 'Short grudge story.' },
+      { role: 'assistant', content: M4_THRESHOLD_FORCED_INJECT },
+      {
+        role: 'user',
+        content: 'I think it depends. If you really love each other, then you should try your best to make it work.',
+      },
+      {
+        role: 'assistant',
+        content: "I wasn't able to understand that — you may have gotten cut off. Can you try again?",
+      },
+    ];
+    expect(isAnsweringFirstUserTurnAfterMoment4Threshold(prior)).toBe(true);
+  });
+
+  it('does not classify Moment 5 conflict paraphrase as grudge prompt', () => {
+    const m5Paraphrase =
+      'Think of a time you had a conflict with someone close to you — maybe a fight, a falling out, or just a moment where things got tense. What happened, and how did things get resolved?';
+    expect(looksLikeMoment4GrudgePrompt(m5Paraphrase)).toBe(false);
+  });
+
   it('isAnsweringFirstUserTurnAfterMoment4Threshold: false when threshold never appeared', () => {
     const prior = [
       { role: 'assistant', content: M4_GRUDGE_CARD },
@@ -220,6 +244,26 @@ describe('moment4ProbeLogic', () => {
     ).toBe(false);
   });
 
+  it('does not force threshold when user asks to go back to a previous scenario', () => {
+    expect(
+      shouldForceMoment4ThresholdProbe({
+        isMoment4: true,
+        probeAlreadyAsked: false,
+        lastAssistantContent: M4_GRUDGE_CARD,
+        userAnswerText: 'Can we go back?',
+      })
+    ).toBe(false);
+    expect(
+      shouldForceMoment4ThresholdProbe({
+        isMoment4: true,
+        probeAlreadyAsked: false,
+        lastAssistantContent: M4_GRUDGE_CARD,
+        userAnswerText: 'Can we go back?',
+        answeringSpecificityFollowUp: true,
+      })
+    ).toBe(false);
+  });
+
   it('does not force threshold when last assistant was the threshold question (user answering follow-up)', () => {
     expect(
       shouldForceMoment4ThresholdProbe({
@@ -243,6 +287,45 @@ describe('moment4ProbeLogic', () => {
         userAnswerText: misplaced,
       })
     ).toBe(false);
+  });
+
+  describe('looksLikeUnassessableMoment4ThresholdAnswer', () => {
+    it('flags mic-stop conditionals and partner-only replies that skip the stay/leave fork', () => {
+      expect(looksLikeUnassessableMoment4ThresholdAnswer('If someone is willing')).toBe(true);
+      expect(
+        looksLikeUnassessableMoment4ThresholdAnswer(
+          "If my partner is with me, I can't do anything about it.",
+        ),
+      ).toBe(true);
+      expect(
+        looksLikeUnassessableMoment4ThresholdAnswer(
+          "If my partner is with me, I can't do anything about it. If my partner is with me, I can't do anything about it.",
+        ),
+      ).toBe(true);
+    });
+
+    it('accepts substantive threshold answers', () => {
+      expect(
+        looksLikeUnassessableMoment4ThresholdAnswer(
+          'I would walk away when trust is broken and repair feels impossible.',
+        ),
+      ).toBe(false);
+      expect(
+        looksLikeUnassessableMoment4ThresholdAnswer(
+          'when I switch from looking forward to meeting my partner every day to dreading the next time that I would have to see them',
+        ),
+      ).toBe(false);
+      expect(
+        looksLikeUnassessableMoment4ThresholdAnswer(
+          "I think it depends on the person, but if you really love each other and you really need to work together, then it's worth saving.",
+        ),
+      ).toBe(false);
+      expect(
+        looksLikeUnassessableMoment4ThresholdAnswer(
+          "I think if two partners are willing to do the work, no matter how hard it gets, it's worth saving if you really love each other.",
+        ),
+      ).toBe(false);
+    });
   });
 });
 

@@ -36,6 +36,7 @@ import { remoteLog } from '@utilities/remoteLog';
 import { getSessionLogRuntime, writeSessionLog } from '@utilities/sessionLogging';
 import { loadInterviewFromStorage } from '@utilities/storage/InterviewStorage';
 import { saveInterviewProgress } from '@features/aria/interviewLocalPersistence';
+import { trackScenarioScoringInFlight } from '@features/aria/scenarioScoringInFlight';
 import { withRetry } from '@utilities/withRetry';
 
 function scoringStageIdForScenario(scenarioNumber: 1 | 2 | 3): ScoringStageId {
@@ -45,6 +46,15 @@ function scoringStageIdForScenario(scenarioNumber: 1 | 2 | 3): ScoringStageId {
 }
 
 export async function runScoreScenario(
+  deps: ScoreScenarioDeps,
+  params: ScoreScenarioParams,
+): Promise<void> {
+  const scoringPromise = runScoreScenarioBody(deps, params);
+  trackScenarioScoringInFlight(params.scenarioNumber, scoringPromise);
+  await scoringPromise;
+}
+
+async function runScoreScenarioBody(
   deps: ScoreScenarioDeps,
   params: ScoreScenarioParams,
 ): Promise<void> {

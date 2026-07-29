@@ -139,6 +139,30 @@ describe('runPreClaudeMoment5AccountabilityInjectGates', () => {
     );
   });
 
+  it('skips accountability injects for narrative opener cut-offs like "This one time"', async () => {
+    const speakTextSafe = jest.fn().mockResolvedValue(undefined);
+    const setMessages = jest.fn();
+    const deps = baseMoment5Deps({ speakTextSafe, setMessages });
+    const messagesToUse = [
+      { role: 'assistant', content: MOMENT_5_ACCOUNTABILITY_QUESTION_TEXT, interviewMoment: 5 },
+      { role: 'user', content: 'This one time', interviewMoment: 5 },
+    ];
+
+    const result = await runPreClaudeMoment5AccountabilityInjectGates(
+      deps,
+      'This one time',
+      messagesToUse,
+      MOMENT_5_ACCOUNTABILITY_QUESTION_TEXT,
+    );
+
+    expect(result).toEqual({ handled: false, moment5CombinedUserText: 'This one time' });
+    expect(speakTextSafe).not.toHaveBeenCalled();
+    expect(setMessages).not.toHaveBeenCalled();
+    expect(deps.moment5SpecificityRedirectIssuedRef.current).toBe(false);
+    expect(deps.moment5ResolutionFollowUpIssuedRef.current).toBe(false);
+    expect(deps.moment5AccountabilityProbeFiredRef.current).toBe(false);
+  });
+
   it('issues specificity redirect for abstract answers without a concrete anchor', async () => {
     const speakTextSafe = jest.fn().mockResolvedValue(undefined);
     const setMessages = jest.fn();

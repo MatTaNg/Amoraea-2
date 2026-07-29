@@ -182,6 +182,15 @@ describe('substituteCanonicalInterviewScenarioBodiesForTts', () => {
     expect(out).toContain('Good work, Matt');
   });
 
+  it('does not replace Moment 5 conflict paraphrase with grudge copy when model omits "when"', () => {
+    const m5Paraphrase =
+      'Makes sense. Here\'s one more question about you. Think of a time you had a conflict with someone close to you — maybe a fight, a falling out, or just a moment where things got tense. What happened, and how did things get resolved?';
+    const out = substituteCanonicalInterviewScenarioBodiesForTts(m5Paraphrase);
+    expect(out).toContain(MOMENT_5_ACCOUNTABILITY_QUESTION_TEXT);
+    expect(out).not.toContain(MOMENT_4_GRUDGE_QUESTION_TEXT);
+    expect(out).toContain("Here's one more question");
+  });
+
   it('substituteMoment4GrudgeCardForTts replaces question-only paraphrase', () => {
     const out = __substituteCanonicalInterviewScenarioBodiesForTtsTest.substituteMoment4GrudgeCardForTts(
       'Have you ever held a grudge against someone close to you?',

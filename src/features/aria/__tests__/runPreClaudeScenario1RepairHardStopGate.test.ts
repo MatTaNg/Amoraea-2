@@ -30,6 +30,31 @@ describe('runPreClaudeScenario1RepairHardStopGate', () => {
     expect(deps.currentInterviewMomentRef.current).toBe(1);
   });
 
+  it('does not advance when inability meta should offer skip confirmation instead', async () => {
+    const deps = createMockPreClaudeDeps({
+      currentInterviewMomentRef: { current: 1 },
+      currentScenarioRef: { current: 1 },
+    });
+    const messagesToUse = [
+      { role: 'assistant', content: REPAIR_FOLLOW_UP, scenarioNumber: 1 },
+      { role: 'user', content: "I don't know", scenarioNumber: 1 },
+    ];
+
+    const result = await runPreClaudeScenario1RepairHardStopGate(
+      deps,
+      "I don't know",
+      messagesToUse,
+      REPAIR_FOLLOW_UP,
+      1,
+      'Alex',
+      { type: 'inability', confidence: 0.89 },
+    );
+
+    expect(result).toEqual({ handled: false });
+    expect(deps.currentInterviewMomentRef.current).toBe(1);
+    expect(deps.currentScenarioRef.current).toBe(1);
+  });
+
   it('advances to Scenario 2 when user hard-stops after a repair follow-up', async () => {
     const speakTextSafe = jest.fn().mockResolvedValue(undefined);
     const setMessages = jest.fn();

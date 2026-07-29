@@ -1,6 +1,7 @@
 import { applyProfileUpdate, loadEditProfileSnapshot } from '@data/repos/editProfileRepo';
 import { profilesRepo } from '@data/repos/profilesRepo';
 import { updateUserOnboardingFlags } from '@data/repos/usersRoutingRepo';
+import { readLocalFileForUpload } from '@utilities/readLocalFileForUpload';
 import { supabase } from '../supabase/client';
 import { PROFILE_PHOTO_SELECT } from '../supabase/tableSelects';
 import { USERS_PROFILE_SELECT } from '../supabase/userInterviewRoutingSelect';
@@ -12,16 +13,10 @@ import {
   BasicInfo,
 } from '@domain/models/Profile';
 import type { OnboardingStage, ApplicationStatus } from '@domain/models/OnboardingGates';
+import { normalizeProfilePromptAnswers } from '@/features/profile/profilePromptValidation';
 
 function parseProfilePrompts(v: unknown): ProfilePromptAnswer[] {
-  if (!Array.isArray(v)) return [];
-  return v
-    .filter((item): item is Record<string, unknown> => item !== null && typeof item === 'object')
-    .map((item) => ({
-      promptId: typeof item.promptId === 'string' ? item.promptId : '',
-      answer: typeof item.answer === 'string' ? item.answer : '',
-    }))
-    .filter((p) => p.promptId.length > 0);
+  return normalizeProfilePromptAnswers(v);
 }
 
 const ONBOARDING_STAGES: OnboardingStage[] = ['basic_info', 'interview', 'psychometrics', 'compatibility', 'complete'];
@@ -140,9 +135,8 @@ export class ProfileRepository {
     if (fileName.toLowerCase().endsWith('.gif') || fileUri.split('?')[0]?.toLowerCase().endsWith('.gif')) {
       throw new Error('GIFs cannot be uploaded as profile photos.');
     }
-    const response = await fetch(fileUri);
-    const blob = await response.blob();
-    if (blob.type.toLowerCase() === 'image/gif') {
+    const { body, contentType } = await readLocalFileForUpload(fileUri, fileName);
+    if (contentType.toLowerCase() === 'image/gif') {
       throw new Error('GIFs cannot be uploaded as profile photos.');
     }
     const fileExt = fileName.split('.').pop() || 'jpg';
@@ -150,8 +144,8 @@ export class ProfileRepository {
 
     const { error: uploadError } = await supabase.storage
       .from('profile-photos')
-      .upload(storagePath, blob, {
-        contentType: blob.type,
+      .upload(storagePath, body, {
+        contentType,
         upsert: false,
       });
 

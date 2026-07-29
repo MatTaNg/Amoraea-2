@@ -1,3 +1,4 @@
+import { reconcileMoment4Concreteness } from '../../../src/features/aria/moment4ConcretenessClassification.ts';
 import {
   CONCRETENESS_DEPTH_DELTA_BOTH_ABSENT,
   CONCRETENESS_DEPTH_DELTA_BOTH_HIGH,
@@ -45,6 +46,37 @@ export function responseConcretenessFromStoredMomentBundle(raw: unknown): Respon
     normalizeResponseConcreteness(o.response_concreteness) ??
     normalizeResponseConcreteness(o.specificity)
   );
+}
+
+/** M4 slice / column — includes `valid_non_applicable`. */
+export function moment4ResponseConcretenessFromStoredMomentBundle(
+  raw: unknown,
+): Moment4ConcretenessLevel | null {
+  if (raw == null || typeof raw !== 'object' || Array.isArray(raw)) return null;
+  const o = raw as Record<string, unknown>;
+  return (
+    normalizeMoment4Concreteness(o.response_concreteness) ??
+    normalizeMoment4Concreteness(o.specificity)
+  );
+}
+
+/**
+ * Resolve Moment 4 concreteness for gate/modifier paths.
+ * Reconciles model "low"/"absent" to `valid_non_applicable` when grudge transcript qualifies.
+ */
+export function mergeMoment4ConcretenessForGate(
+  storedMoment: unknown,
+  rowColumnFallback: unknown,
+  moment4UserText?: string | null,
+): Moment4ConcretenessLevel | null {
+  const fromStored = moment4ResponseConcretenessFromStoredMomentBundle(storedMoment);
+  const fromColumn = normalizeMoment4Concreteness(rowColumnFallback);
+  const raw = fromStored ?? fromColumn;
+  const text = (moment4UserText ?? '').trim();
+  if (text) {
+    return reconcileMoment4Concreteness(raw, text);
+  }
+  return raw;
 }
 
 /** Prefer scorer JSON; fall back to denormalized `interview_attempts.moment_*_concreteness` columns. */

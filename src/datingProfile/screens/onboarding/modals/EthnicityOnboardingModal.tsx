@@ -1,9 +1,11 @@
 import React, { useCallback } from 'react';
+import { ONBOARDING_STEP_SCREEN_EDGES, ONBOARDING_STEP_SCREEN_EDGES_WITH_BOTTOM } from './onboardingStepScreenEdges';
 import { View, Text, ScrollView } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Button } from '@/shared/ui/Button';
 import { SingleChoiceOptionList } from '@/shared/components/profileFields/SingleChoiceOptionList';
 import type { ChoiceOption } from '@/shared/components/profileFields/SingleChoiceOptionList';
+import { deferAfterPaint } from '@/shared/utils/deferAfterPaint';
 import { OnboardingHeader } from './components/OnboardingHeader';
 import { styles } from './EthnicityOnboardingModal.styled';
 
@@ -25,13 +27,13 @@ export const EthnicityOnboardingModal: React.FC<EthnicityOnboardingModalProps> =
   const onHeritageSelect = useCallback(
     (value: string) => {
       onEthnicityChange(value);
-      onNext();
+      deferAfterPaint(onNext);
     },
     [onEthnicityChange, onNext],
   );
 
   return (
-    <SafeAreaView style={styles.screen} edges={['top', 'left', 'right']}>
+    <SafeAreaView style={styles.screen} edges={ONBOARDING_STEP_SCREEN_EDGES}>
       <OnboardingHeader title="Ethnicity" onBack={onBack} />
       <ScrollView
         style={styles.scrollView}

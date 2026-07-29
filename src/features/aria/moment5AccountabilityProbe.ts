@@ -310,6 +310,7 @@ export function moment5AnswerHasExplicitSelfAccountability(userText: string): bo
     /\bi\s+crossed\s+a\s+line\b/i.test(lower) ||
     /\bi\s+did\s+(yell|raise\s+my\s+voice|snap|shut\s+down|stonewall|withdraw|avoid)\b/i.test(lower) ||
     /\bi\s+raised\s+my\s+voice\b/i.test(lower) ||
+    /\braised\s+my\s+voice\b/i.test(lower) ||
     /\bi\s+(yelled|shouted|snapped)\b/i.test(lower) ||
     /\bi\s+shut\s+(him|her|them)\s+out\b/i.test(lower) ||
     /\bi\s+(wasn'?t|was\s+not|didn'?t)\s+listen(?:ing)?\b/i.test(lower) ||

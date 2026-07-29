@@ -18,8 +18,10 @@ import {
   buildMoment4ScoresRecord,
   buildMoment5ScoresRecord,
   coalesceConcretenessForFinalPersist,
+  coalesceMoment4ConcretenessForFinalPersist,
   resolveMomentScoresForFinalPersist,
 } from '@utilities/persistPersonalMomentScoresIncremental';
+import { resolveMoment4UserTextForGate } from '@features/aria/personalMomentSliceEnrichment';
 
 type ScenarioBundle = NonNullable<ReturnType<typeof scenarioBundleForDeferred>>;
 
@@ -36,10 +38,6 @@ export type BuildDeferredPersistRowPayloadParams = {
   moment5ForAggregate: ReturnType<typeof sanitizeMoment5PersonalScoresForAggregate> | null;
   scoringBaseline: AttemptScoringBaseline;
   defensePatternsForDeferredRow: Record<string, unknown>;
-  pevDeferred: {
-    personal_moment_emotional_vocab_density: number | null;
-    personal_moment_emotional_vocab_low: boolean;
-  };
   disclosureCalibrationForDeferredRow: number | null;
   mentalizingOvercertaintyCountDeferred: number;
   typologyContext: string;
@@ -63,7 +61,6 @@ export function buildDeferredPersistRowPayload(
     moment5ForAggregate,
     scoringBaseline,
     defensePatternsForDeferredRow,
-    pevDeferred,
     disclosureCalibrationForDeferredRow,
     mentalizingOvercertaintyCountDeferred,
     typologyContext,
@@ -129,23 +126,18 @@ export function buildDeferredPersistRowPayload(
       ),
     },
     defense_patterns: normalizeDefensePatternsForPersist(defensePatternsForDeferredRow),
-    moment_4_concreteness: coalesceConcretenessForFinalPersist(
+    moment_4_concreteness: coalesceMoment4ConcretenessForFinalPersist(
       moment4ForAggregate,
       scoringBaseline.moment_4_concreteness,
+      resolveMoment4UserTextForGate(finalMessages),
     ),
     moment_5_concreteness: coalesceConcretenessForFinalPersist(
       moment5ForPersist,
       scoringBaseline.moment_5_concreteness,
       suppressMoment5BaselineBackfill,
     ),
-    personal_moment_emotional_vocab_density: suppressMoment5BaselineBackfill
-      ? pevDeferred.personal_moment_emotional_vocab_density
-      : pevDeferred.personal_moment_emotional_vocab_density ??
-        scoringBaseline.personal_moment_emotional_vocab_density,
-    personal_moment_emotional_vocab_low: suppressMoment5BaselineBackfill
-      ? pevDeferred.personal_moment_emotional_vocab_low
-      : pevDeferred.personal_moment_emotional_vocab_low ??
-        scoringBaseline.personal_moment_emotional_vocab_low,
+    personal_moment_emotional_vocab_density: null,
+    personal_moment_emotional_vocab_low: false,
     disclosure_calibration: suppressMoment5BaselineBackfill
       ? disclosureCalibrationForDeferredRow
       : disclosureCalibrationForDeferredRow ?? scoringBaseline.disclosure_calibration,

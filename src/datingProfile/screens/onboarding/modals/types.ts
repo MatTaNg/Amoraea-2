@@ -1,4 +1,5 @@
 import { AvailabilitySlot } from '@/src/types';
+import type { ProfilePromptAnswer } from '@domain/models/Profile';
 import { MatchPreferences } from '@/shared/hooks/filterPreferences/types';
 import type { ArchetypeId } from '@/shared/constants/archetypes';
 
@@ -61,7 +62,7 @@ export interface OnboardingData {
     eroticBlueprintType?: string;
     spiralDynamics?: string;
   };
-  /** Jungian brand archetypes (`profile_json.archetypes`) — exactly two when set. */
+  /** Jungian brand archetypes (`profile_json.archetypes`) — two or three when set. */
   archetypes?: ArchetypeId[];
   /** Full location from GPS (for countryCode → imperial vs metric) */
   userLocation?: OnboardingUserLocation;
@@ -105,6 +106,10 @@ export interface OnboardingData {
   prefPartnerPoliticalAlignmentImportance?: string;
   hobbies?: string;
   professionalHobbyId?: string | null;
+  /** Hobby that would be a dealbreaker if a partner did not share it; null = none. */
+  hobbyDealbreakerId?: string | null;
+  /** Set when the hobby-dealbreaker step has been completed in onboarding. */
+  hobbyDealbreakerAnswered?: boolean;
   availability?: AvailabilitySlot[];
   contactPreference?: string;
   phoneNumber?: string;
@@ -128,6 +133,8 @@ export interface OnboardingData {
     >
   >;
   matchPreferences?: OnboardingDealbreakerPreferences;
+  /** Hinge-style profile prompts (stored on `users.profile_prompts`). */
+  profilePrompts?: ProfilePromptAnswer[];
 }
 
 export interface OnboardingProgress {

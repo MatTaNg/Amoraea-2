@@ -8,6 +8,11 @@ import { hydrateResumeEmotionCatchUp } from '@features/aria/hydrateResumeEmotion
 import { hydrateResumeProbeFlagsFromTranscript } from '@features/aria/hydrateResumeProbeFlagsFromTranscript';
 import { syncInterviewMomentsFromTranscript } from '@features/aria/interviewProgressSync';
 import type { MessageWithScenario } from '@features/aria/interviewScenarioScoringSlice';
+import {
+  hydrateShowScenarioCardPlaybackConfirmedFromStorage,
+  resolveScenarioResumeIntroBodyForReplay,
+  transcriptHasScenarioOpeningQuestionDelivered,
+} from '@features/aria/scenarioDeliveryResumeCheckpoint';
 import { getScenarioResumeIntroAssistantBody } from '@features/aria/interviewScenarioVignetteCopy';
 import {
   reconcileResumeAttemptRow,
@@ -19,13 +24,15 @@ import {
 } from '@features/aria/restoreResumeScenarioDisplayState';
 import { runHydratePostClosingFromSaved } from '@features/aria/runHydratePostClosingFromSaved';
 import type { HandleResumeDeps, HandleResumeParams } from '@features/aria/sessionLifecycleTypes';
-import { clearResumeWelcomePlaybackLock } from '@features/aria/interviewLocalPersistence';
+import { clearResumeWelcomePlaybackLock, bumpResumeWelcomePlaybackGeneration } from '@features/aria/interviewLocalPersistence';
 import { remoteLog } from '@utilities/remoteLog';
 import {
   assignScenarioNumbersToTranscript,
   clearScenarioScoresFromCorruptRewind,
   computeInterviewResumePlan,
   firstAssistantIndexForScenarioIntro,
+  inferLatestScenarioIntroFromTranscript,
+  resumeTranscriptAlreadyDeliveredMoment4Question,
   savedInterviewReachedClosingState,
   sliceMessagesBeforeMoment4Intro,
   sliceMessagesBeforeScenarioIntro,
@@ -37,6 +44,9 @@ import { textContainsScenarioBVignetteBody, textContainsScenarioCVignetteBody } 
 import { isScenarioBBoundaryReflectionWithoutNextVignette } from '@features/aria/scenarioBProbeLogic';
 import { isScenarioCQ1Prompt } from '@features/aria/scenarioCPromptDetection';
 import { MOMENT_4_GRUDGE_QUESTION_TEXT } from '@features/aria/moment4ProbeLogic';
+import { awaitInterviewScreenReadyWithTimeout } from '@features/aria/awaitInterviewScreenReadyWithTimeout';
+import { hydrateScenarioSkipConfirmedCount } from '@features/aria/scenarioSkipCountHydration';
+import { startResumeLoadingFailsafe } from '@features/aria/runResumeLoadingFailsafe';
 import { saveInterviewToStorage } from '@utilities/storage/InterviewStorage';
 import type { StoredScenarioScores } from '@utilities/storage/InterviewStorage';
 
@@ -44,6 +54,23 @@ export async function runHandleResume(
   deps: HandleResumeDeps,
   params: HandleResumeParams,
 ): Promise<void> {
+  return runCoalescedInterviewResume(deps.userId, () => runHandleResumeInner(deps, params));
+}
+
+async function runHandleResumeInner(
+  deps: HandleResumeDeps,
+  params: HandleResumeParams,
+): Promise<void> {
+  if (deps.resumeHandleInFlightRef) {
+    deps.resumeHandleInFlightRef.current = true;
+  }
+
+  const releaseResumeHandleInFlight = (): void => {
+    if (deps.resumeHandleInFlightRef) {
+      deps.resumeHandleInFlightRef.current = false;
+    }
+  };
+
   const { saved } = params;
   const {
     userId,
@@ -51,6 +78,7 @@ export async function runHandleResume(
     logSessionResumeState,
     resumeLoadingFlowActiveRef,
     setResumeLoadingVisible,
+    setResumeHydrationPending,
     interviewSessionAttemptIdRef,
     interviewMomentsCompleteRef,
     currentInterviewMomentRef,
@@ -68,6 +96,10 @@ export async function runHandleResume(
     interviewUserTurnEpochRef,
   } = deps;
 
+  let clearResumeLoadingFailsafe: (() => void) | undefined;
+
+  try {
+  bumpResumeWelcomePlaybackGeneration();
   interruptAllInterviewTtsOutput();
   moment5QuestionDeliveryInFlightRef.current = false;
   interviewUserTurnEpochRef.current += 1;
@@ -75,6 +107,13 @@ export async function runHandleResume(
   resumeLoadingFlowActiveRef.current = true;
   setResumeLoadingVisible(true);
   logSessionResumeState('loading');
+  clearResumeLoadingFailsafe = startResumeLoadingFailsafe({
+    userId: userId ?? undefined,
+    resumeLoadingFlowActiveRef,
+    resumeHandleInFlightRef: deps.resumeHandleInFlightRef,
+    setResumeLoadingVisible,
+    logSessionResumeState,
+  });
 
   const bootstrapAttemptId = interviewSessionAttemptIdRef.current;
   const savedAttemptId = saved.sessionAttemptId ?? null;
@@ -89,10 +128,14 @@ export async function runHandleResume(
     interviewSessionAttemptIdRef,
   });
   if (attemptReconcile.kind === 'abort_stale') {
+    clearResumeLoadingFailsafe();
     resumeLoadingFlowActiveRef.current = false;
     setResumeLoadingVisible(false);
+    setResumeHydrationPending?.(false);
     setInterviewStatus('not_started');
+    interviewStatusRef.current = 'not_started';
     hasResumedRef.current = false;
+    releaseResumeHandleInFlight();
     return;
   }
 
@@ -107,7 +150,9 @@ export async function runHandleResume(
     stripEphemeralWelcomeBackMessages(saved.messages ?? []),
   );
   if (savedInterviewReachedClosingState({ pendingCompletion: saved.pendingCompletion, messages: restoredForPlan })) {
+    clearResumeLoadingFailsafe();
     await runHydratePostClosingFromSaved(deps, { saved, source: 'handle_resume_post_closing' });
+    releaseResumeHandleInFlight();
     return;
   }
 
@@ -147,22 +192,48 @@ export async function runHandleResume(
     moment4ScoresIntact: integrity.moment4ScoresIntact,
   });
 
+  const resumeProgressScenario = Math.max(
+    resumePlan.resumeScenario,
+    resumeActiveFromLocal ?? 0,
+    inferLatestScenarioIntroFromTranscript(restoredForPlan) ?? 0,
+  ) as 1 | 2 | 3;
+
   const missingIntroAnchor =
     resumePlan.mode !== 'resume_post_scenarios' &&
     !resumePlan.rewindToMoment4DueToCorruptScoring &&
-    firstAssistantIndexForScenarioIntro(restoredForPlan, resumePlan.resumeScenario) < 0;
+    firstAssistantIndexForScenarioIntro(restoredForPlan, resumeProgressScenario) < 0;
   const hasInScenarioProgress = transcriptHasInScenarioProgressPastOpening(
     restoredForPlan,
-    resumePlan.resumeScenario,
+    resumeProgressScenario,
   );
   // Missing vignette + mid-scenario progress (Q1 / probes / user turns) must not replay the
   // full scenario opening — welcome-back + current question is enough.
+  const openingQuestionDelivered = transcriptHasScenarioOpeningQuestionDelivered(
+    restoredForPlan,
+    resumeProgressScenario,
+    saved.scenarioOpeningDeliveredFor,
+  );
   const shouldRestartIncompleteScenario =
-    resumePlan.rewindDueToCorruptScoring ||
-    (missingIntroAnchor &&
-      !hasInScenarioProgress &&
-      (resumePlan.partialScenarioDataWritten ||
-        (planAttemptMismatch && !didOrphanAttemptRebind)));
+    resumeProgressScenario <= resumePlan.resumeScenario &&
+    !openingQuestionDelivered &&
+    ((resumePlan.rewindDueToCorruptScoring && !hasInScenarioProgress) ||
+      (missingIntroAnchor &&
+        !hasInScenarioProgress &&
+        (resumePlan.partialScenarioDataWritten ||
+          (planAttemptMismatch && !didOrphanAttemptRebind))));
+  const resolvedResumeScenario = (
+    shouldRestartIncompleteScenario
+      ? resumePlan.resumeScenario
+      : Math.max(resumePlan.resumeScenario, resumeProgressScenario)
+  ) as 1 | 2 | 3;
+
+  if (saved.lastQuestionText?.trim()) {
+    deps.lastQuestionTextRef.current = saved.lastQuestionText.trim();
+  }
+  if (saved.scenarioOpeningDeliveredFor?.length) {
+    deps.showScenarioCardCanonicalPlaybackConfirmedKindsRef.current =
+      hydrateShowScenarioCardPlaybackConfirmedFromStorage(saved.scenarioOpeningDeliveredFor);
+  }
 
   let transcriptMessages = restoredForPlan as MessageWithScenario[];
   let scoresAfterRewind: StoredScenarioScores = scoresForPlan;
@@ -203,7 +274,10 @@ export async function runHandleResume(
     didOrphanAttemptRebind,
     missingIntroAnchor,
     hasInScenarioProgress,
+    openingQuestionDelivered,
+    resumeProgressScenario,
     shouldRestartIncompleteScenario,
+    resolvedResumeScenario,
     transcriptLenBefore: restoredForPlan.length,
     transcriptLenAfter: transcriptMessages.length,
   });
@@ -226,13 +300,14 @@ export async function runHandleResume(
     ...saved,
     scenarioScores: scoresAfterRewind,
     scenariosCompleted: completedAfterRewind,
-    scoringFailed: resumePlan.rewindDueToCorruptScoring
-      ? (saved.scoringFailed ?? []).filter(
-          (f) =>
-            resumePlan.rewindToMoment4DueToCorruptScoring ||
-            f.scenario < resumePlan.resumeScenario,
-        )
-      : saved.scoringFailed,
+    scoringFailed:
+      resumePlan.rewindDueToCorruptScoring && shouldRestartIncompleteScenario
+        ? (saved.scoringFailed ?? []).filter(
+            (f) =>
+              resumePlan.rewindToMoment4DueToCorruptScoring ||
+              f.scenario < resumePlan.resumeScenario,
+          )
+        : saved.scoringFailed,
   };
 
   const moment5ClarificationFired = hydrateResumeProbeFlagsFromTranscript(
@@ -240,14 +315,44 @@ export async function runHandleResume(
     savedForRestore,
     transcriptMessages,
   );
+  const hydratedSkipCount = await hydrateScenarioSkipConfirmedCount({
+    scenarioSkipConfirmedCountRef: deps.scenarioSkipConfirmedCountRef,
+    scenarioSkipPenaltySumRef: deps.scenarioSkipPenaltySumRef,
+    transcriptMessages,
+    storedCount: saved.scenarioSkipConfirmedCount ?? savedForRestore.scenarioSkipConfirmedCount,
+    attemptId: interviewSessionAttemptIdRef.current ?? saved.sessionAttemptId ?? null,
+    userId,
+  });
   const maxCompleted = restoreResumeScoredScenariosRef(savedForRestore, scoredScenariosRef);
   setHighestScenarioReached((prev) => Math.max(prev, maxCompleted));
 
-  currentScenarioRef.current = resumePlan.resumeScenario;
+  currentScenarioRef.current = resolvedResumeScenario;
   resumeActiveScenarioRef.current =
     resumePlan.mode === 'resume_post_scenarios' && !resumePlan.rewindToMoment4DueToCorruptScoring
       ? null
-      : resumePlan.resumeScenario;
+      : resolvedResumeScenario;
+
+  const situation2VignetteInTranscript = transcriptMessages.some(
+    (m) => m.role === 'assistant' && textContainsScenarioBVignetteBody(m.content ?? ''),
+  );
+  const situation2OpeningPlaybackConfirmed =
+    saved.scenarioOpeningDeliveredFor?.includes(2) === true ||
+    deps.showScenarioCardCanonicalPlaybackConfirmedKindsRef.current?.situation_2 === true;
+  const interruptedSituation2Handoff =
+    !resumePlan.rewindDueToCorruptScoring &&
+    situation2VignetteInTranscript &&
+    !situation2OpeningPlaybackConfirmed &&
+    resumePlan.mode !== 'resume_post_scenarios';
+  if (interruptedSituation2Handoff) {
+    currentScenarioRef.current = 2;
+    resumeActiveScenarioRef.current = 2;
+    currentInterviewMomentRef.current = Math.max(currentInterviewMomentRef.current, 2) as 1 | 2 | 3 | 4 | 5;
+    (interviewMomentsCompleteRef.current as Record<number, boolean>)[1] = true;
+    void remoteLog('[REENTRY_RESUME] interrupted_s2_handoff_recovery', {
+      hasInScenarioProgress,
+      transcriptLen: transcriptMessages.length,
+    });
+  }
 
   hydrateResumeEmotionCatchUp({
     deps,
@@ -270,6 +375,7 @@ export async function runHandleResume(
       messages: transcriptMessages,
       resumeActiveScenario: resumeActiveScenarioRef.current,
       moment_5_clarification_fired: moment5ClarificationFired,
+      scenarioSkipConfirmedCount: hydratedSkipCount,
     });
   }
 
@@ -278,6 +384,16 @@ export async function runHandleResume(
     scenarioIntroBody = resumePlan.rewindToMoment4DueToCorruptScoring
       ? MOMENT_4_GRUDGE_QUESTION_TEXT
       : getScenarioResumeIntroAssistantBody(resumePlan.resumeScenario);
+  } else if (
+    !scenarioIntroBody &&
+    !shouldRestartIncompleteScenario &&
+    resumePlan.mode !== 'resume_post_scenarios'
+  ) {
+    scenarioIntroBody = resolveScenarioResumeIntroBodyForReplay({
+      scenario: resolvedResumeScenario,
+      transcriptMessages,
+      persistedOpeningDeliveredFor: saved.scenarioOpeningDeliveredFor,
+    });
   }
 
   const lastAssistantContent = [...transcriptMessages]
@@ -291,7 +407,7 @@ export async function runHandleResume(
     !transcriptMessages.some(
       (m) => m.role === 'assistant' && textContainsScenarioBVignetteBody(m.content ?? ''),
     );
-  if (truncatedScenarioOneBoundary) {
+  if (truncatedScenarioOneBoundary && resumePlan.mode !== 'resume_post_scenarios') {
     currentScenarioRef.current = 2;
     resumeActiveScenarioRef.current = 2;
     currentInterviewMomentRef.current = Math.max(currentInterviewMomentRef.current, 2) as 1 | 2 | 3 | 4 | 5;
@@ -306,14 +422,26 @@ export async function runHandleResume(
     !transcriptMessages.some(
       (m) => m.role === 'assistant' && textContainsScenarioCVignetteBody(m.content ?? ''),
     );
-  if (truncatedScenarioTwoBoundary) {
+  if (truncatedScenarioTwoBoundary && resumePlan.mode !== 'resume_post_scenarios') {
     currentScenarioRef.current = 3;
     resumeActiveScenarioRef.current = 3;
     currentInterviewMomentRef.current = Math.max(currentInterviewMomentRef.current, 3) as 1 | 2 | 3 | 4 | 5;
     scenarioIntroBody = getScenarioResumeIntroAssistantBody(3);
   }
 
+  /** S3 repair satisfied but M4 grudge not persisted before app close — deliver grudge, not S3 repair replay. */
+  if (
+    !scenarioIntroBody &&
+    resumePlan.mode === 'resume_post_scenarios' &&
+    !resumePlan.rewindToMoment4DueToCorruptScoring &&
+    !resumeTranscriptAlreadyDeliveredMoment4Question(transcriptMessages)
+  ) {
+    scenarioIntroBody = MOMENT_4_GRUDGE_QUESTION_TEXT;
+  }
+
   const fullMessages = [...transcriptMessages, ...scoreCards] as MessageWithScenario[];
+
+  await deps.prepareInterviewAudioForResumePlayback?.();
 
   await applyResumeWelcomeMessagesAndPlayback({
     deps,
@@ -329,10 +457,28 @@ export async function runHandleResume(
   setStatus('active');
   hasResumedRef.current = true;
   void (async () => {
-    await awaitScreenReadySignal();
-    if (!resumeLoadingFlowActiveRef.current) return;
+    try {
+      await awaitInterviewScreenReadyWithTimeout(awaitScreenReadySignal);
+      if (!resumeLoadingFlowActiveRef.current) return;
+      resumeLoadingFlowActiveRef.current = false;
+      setResumeLoadingVisible(false);
+      setResumeHydrationPending?.(false);
+      logSessionResumeState('ready');
+    } finally {
+      clearResumeLoadingFailsafe?.();
+      releaseResumeHandleInFlight();
+    }
+  })();
+  } catch (err) {
+    clearResumeLoadingFailsafe?.();
     resumeLoadingFlowActiveRef.current = false;
     setResumeLoadingVisible(false);
-    logSessionResumeState('ready');
-  })();
+    setResumeHydrationPending?.(false);
+    hasResumedRef.current = false;
+    releaseResumeHandleInFlight();
+    void remoteLog('[REENTRY_RESUME] failed', {
+      message: err instanceof Error ? err.message : String(err),
+    });
+    throw err;
+  }
 }

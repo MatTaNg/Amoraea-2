@@ -59,6 +59,8 @@ import {
   coerceScenarioBJamesRepairQuestionForTts,
   coerceScenarioBJamesSayToJamesQuestionForTts,
   collapseScenarioBJamesSayToJamesWithRepairDuplicate,
+  isBeforeFightOnlyScenarioBJamesQ2Paraphrase,
+  isDeliveredScenarioBJamesDifferentlyProbe,
   isIncompleteScenarioBJamesSayToJamesLeadSentence,
   looksLikeScenarioBJamesSayToJamesRolePlayQuestion,
   isIncompleteScenarioBQ1LeadSentence,
@@ -66,6 +68,7 @@ import {
   isIncompleteScenarioBJamesRepairLeadSentence,
 } from '@features/aria/scenarioBProbeLogic';
 import { textContainsScenarioCVignetteBody } from '@features/aria/scenarioCProbeLogic';
+import { isActiveScenarioBConstructProbeTurn } from '@features/aria/scenarioFollowUpTranscriptGuard';
 import { remoteLog } from '@utilities/remoteLog';
 
 export type PostClaudeAssistantDraftProbeFlags = {
@@ -99,6 +102,19 @@ export function finalizePostClaudeAssistantDraftProbeSequence(
     deps.currentInterviewMomentRef.current === 4 &&
     ((/\?$/.test(strippedText.trim()) && strippedText.trim().length > 10) ||
       moment4ThresholdParaphraseInFlight);
+  if (
+    deps.currentInterviewMomentRef.current === 4 &&
+    deps.moment4ThresholdProbeAskedRef.current &&
+    (assistantIssuedMoment4ThresholdProbe || moment4ThresholdParaphraseInFlight)
+  ) {
+    void remoteLog('[M4_THRESHOLD_DRAFT_SUPPRESSED_ALREADY_ASKED]', {
+      interviewSessionId: deps.interviewSessionIdRef.current,
+      preview: strippedText.slice(0, 220),
+    });
+    strippedText = '';
+    assistantIssuedMoment4ThresholdProbe = false;
+    assistantIssuedMoment4AnyQuestion = false;
+  }
   if (
     params.shouldForceMoment4ThresholdProbe &&
     (assistantIssuedMoment4ThresholdProbe || moment4ThresholdParaphraseInFlight)
@@ -223,8 +239,10 @@ export function finalizePostClaudeAssistantDraftProbeSequence(
   }
 
   if (
-    deps.currentInterviewMomentRef.current === 2 &&
-    (deps.currentScenarioRef.current ?? 1) === 2 &&
+    isActiveScenarioBConstructProbeTurn(
+      deps.currentScenarioRef.current,
+      deps.currentInterviewMomentRef.current,
+    ) &&
     isIncompleteScenarioBQ1LeadSentence(strippedText)
   ) {
     const beforeQ1Coerce = strippedText;
@@ -237,23 +255,33 @@ export function finalizePostClaudeAssistantDraftProbeSequence(
   }
 
   if (
-    deps.currentInterviewMomentRef.current === 2 &&
-    (deps.currentScenarioRef.current ?? 1) === 2 &&
-    isIncompleteScenarioBJamesDifferentlyLeadSentence(strippedText)
+    isActiveScenarioBConstructProbeTurn(
+      deps.currentScenarioRef.current,
+      deps.currentInterviewMomentRef.current,
+    ) &&
+    (isIncompleteScenarioBJamesDifferentlyLeadSentence(strippedText) ||
+      isBeforeFightOnlyScenarioBJamesQ2Paraphrase(strippedText) ||
+      (looksLikeScenarioBJamesDifferentlyQuestion(strippedText) &&
+        !isDeliveredScenarioBJamesDifferentlyProbe(strippedText)))
   ) {
     const beforeJamesCoerce = strippedText;
-    strippedText = coerceScenarioBJamesDifferentlyQuestionForTts(strippedText);
+    strippedText = coerceScenarioBJamesDifferentlyQuestionForTts(strippedText, {
+      messages: params.messagesToUse,
+      interviewMoment: deps.currentInterviewMomentRef.current,
+    });
     assistantIssuedScenarioBJamesDifferently = looksLikeScenarioBJamesDifferentlyQuestion(strippedText);
     logPostClaudeAssistantDraftSanitizeChange(
-      '[S2_JAMES_DIFFERENTLY_INCOMPLETE_COERCED]',
+      '[S2_JAMES_DIFFERENTLY_COERCED]',
       beforeJamesCoerce,
       strippedText,
     );
   }
 
   if (
-    deps.currentInterviewMomentRef.current === 2 &&
-    (deps.currentScenarioRef.current ?? 1) === 2 &&
+    isActiveScenarioBConstructProbeTurn(
+      deps.currentScenarioRef.current,
+      deps.currentInterviewMomentRef.current,
+    ) &&
     (looksLikeScenarioBJamesSayToJamesRolePlayQuestion(strippedText) ||
       isIncompleteScenarioBJamesSayToJamesLeadSentence(strippedText))
   ) {
@@ -272,8 +300,10 @@ export function finalizePostClaudeAssistantDraftProbeSequence(
   }
 
   if (
-    deps.currentInterviewMomentRef.current === 2 &&
-    (deps.currentScenarioRef.current ?? 1) === 2 &&
+    isActiveScenarioBConstructProbeTurn(
+      deps.currentScenarioRef.current,
+      deps.currentInterviewMomentRef.current,
+    ) &&
     isIncompleteScenarioBJamesRepairLeadSentence(strippedText)
   ) {
     const beforeRepairCoerce = strippedText;

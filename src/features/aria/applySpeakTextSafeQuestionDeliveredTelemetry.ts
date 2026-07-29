@@ -4,7 +4,7 @@ import { Platform } from 'react-native';
 import { stripControlTokens } from '@features/aria/interviewControlTokens';
 import { looksLikeScenarioBRepairAsJamesQuestion } from '@features/aria/scenarioBProbeLogic';
 import { isScenarioCRepairAssistantPrompt } from '@features/aria/probeAndScoringUtils';
-import type { TtsTelemetrySource } from '@features/aria/telemetry/tsAutoplayTelemetry';
+import { resolveAssessableQuestionTextForResponseTiming } from '@features/aria/resolveAssessableQuestionTextForResponseTiming';
 import { getSessionLogRuntime } from '@utilities/sessionLogging';
 import { writeSessionLog } from '@utilities/sessionLogging/writeSessionLog';
 
@@ -84,9 +84,11 @@ export function applySpeakTextSafeQuestionDeliveredTelemetry(args: {
   }
 
   const rtd = getSessionLogRuntime();
-  const deliveredQuestionText = stripControlTokens(args.text).trim().slice(0, 2000);
-  args.recordInterviewAssistantDeliveryForMetaExemptionRef?.current?.(
+  const deliveredQuestionText = resolveAssessableQuestionTextForResponseTiming(
     stripControlTokens(args.text).trim(),
+  ).slice(0, 2000);
+  args.recordInterviewAssistantDeliveryForMetaExemptionRef?.current?.(
+    deliveredQuestionText,
   );
   writeSessionLog({
     userId: args.userId,

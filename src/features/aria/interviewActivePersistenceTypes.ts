@@ -2,7 +2,9 @@ import type { MutableRefObject } from 'react';
 
 import type { SupabaseClient } from '@supabase/supabase-js';
 
+import { mergeScenarioOpeningDeliveredFromPlaybackConfirmed } from '@features/aria/scenarioDeliveryResumeCheckpoint';
 import { buildTaggedInterviewTranscriptSnapshot } from '@features/aria/interviewTranscriptPersistenceHelpers';
+import type { ShowScenarioCardCanonicalPlaybackConfirmedKinds } from '@features/aria/showScenarioCardCanonicalTts';
 import { isGenuineScenarioTransitionSignal } from '@features/aria/interviewReferenceCardResumeHelpers';
 import type { ScenarioScoreResult } from '@features/aria/scoreInterviewScoringHelpers';
 import { getCurrentScenario } from '@utilities/storage/InterviewStorage';
@@ -30,6 +32,8 @@ export type SaveActiveInterviewProgressDeps = {
   emotionItemResponsesRef: MutableRefObject<string[]>;
   interviewStatusRef: MutableRefObject<string>;
   interviewSessionAttemptIdRef: MutableRefObject<string | null>;
+  lastQuestionTextRef?: MutableRefObject<string | null>;
+  showScenarioCardCanonicalPlaybackConfirmedKindsRef?: MutableRefObject<ShowScenarioCardCanonicalPlaybackConfirmedKinds>;
   saveInterviewProgress: (
     userId: string,
     data: Record<string, unknown>,
@@ -123,6 +127,11 @@ export function runSaveActiveInterviewProgress(
     pendingCompletion:
       trigger.pendingCompletion || deps.interviewStatusRef.current === 'preparing_results',
     sessionAttemptId: deps.interviewSessionAttemptIdRef.current ?? undefined,
+    lastQuestionText: deps.lastQuestionTextRef?.current?.trim() || null,
+    scenarioOpeningDeliveredFor: mergeScenarioOpeningDeliveredFromPlaybackConfirmed(
+      undefined,
+      deps.showScenarioCardCanonicalPlaybackConfirmedKindsRef?.current,
+    ),
   });
 }
 

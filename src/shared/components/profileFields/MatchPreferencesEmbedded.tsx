@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo, useCallback } from 'react';
+import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import { View, Text, StyleSheet, Pressable } from 'react-native';
 import {
   MatchPreferences,
@@ -25,13 +25,23 @@ import {
   normalizeEthnicityAttractionStored,
 } from '@/shared/constants/ethnicityAttractionOptions';
 import {
-  PREF_PARTNER_SHARES_SEXUAL_INTERESTS_YES_NO,
+  PARTNER_ALIGNMENT_ALCOHOL_DEALBREAKER_QUESTION,
+  PARTNER_ALIGNMENT_CANNABIS_DEALBREAKER_QUESTION,
+  PARTNER_ALIGNMENT_PSYCHEDELICS_DEALBREAKER_QUESTION,
+  PARTNER_ALIGNMENT_RECREATIONAL_DRUGS_DEALBREAKER_QUESTION,
+  PARTNER_ALIGNMENT_TOBACCO_DEALBREAKER_QUESTION,
+  PARTNER_POLITICAL_VIEWS_DEALBREAKER_QUESTION,
+  PARTNER_SAME_RELIGION_DEALBREAKER_QUESTION,
+} from '@/shared/constants/dealbreakerQuestionCopy';
+import {
   PREF_PARTNER_SHARES_SPECIFIC_SEX_INTERESTS_QUESTION,
   PREF_PARTNER_SPECIFIC_SEX_INTERESTS_SHEET_TITLE,
+  PREF_PARTNER_SHARES_SEXUAL_INTERESTS_YES_NO,
   prefPartnerSharesSexualInterestsFromYesNo,
   prefPartnerSharesSexualInterestsYesNoSelected,
   labelForPrefPartnerSharesSexualInterestsYesNoPicker,
 } from '@/shared/constants/sexualCompatibilityOptions';
+import { renderDealbreakerQuestionHighlight } from '@/shared/components/profileFields/dealbreakerQuestionHighlight';
 import {
   BottomSheet,
   OptionPickerTrigger,
@@ -92,18 +102,8 @@ function truncDealbreaker(s: string, max = 80): string {
   return t.length > max ? `${t.slice(0, max)}…` : t;
 }
 
-function renderMustHaveHighlight(text: string) {
-  const phrase = 'must have';
-  const index = text.indexOf(phrase);
-  if (index < 0) return text;
-
-  return (
-    <>
-      {text.slice(0, index)}
-      <Text style={styles.mustHaveEmphasis}>{phrase}</Text>
-      {text.slice(index + phrase.length)}
-    </>
-  );
+function renderQuestionHighlight(text: string) {
+  return renderDealbreakerQuestionHighlight(text, styles.dealbreakerEmphasis);
 }
 
 const SUBSTANCE_PARTNER_DEALBREAKERS: {
@@ -112,28 +112,23 @@ const SUBSTANCE_PARTNER_DEALBREAKERS: {
 }[] = [
   {
     key: 'partnerAlignmentTobacco',
-    question:
-      'Is it a must have that your partner shares your relationship with cigarettes or vaping?',
+    question: PARTNER_ALIGNMENT_TOBACCO_DEALBREAKER_QUESTION,
   },
   {
     key: 'partnerAlignmentRecreationalDrugs',
-    question:
-      'Is it a must have that your partner shares your relationship with recreational drugs?',
+    question: PARTNER_ALIGNMENT_RECREATIONAL_DRUGS_DEALBREAKER_QUESTION,
   },
   {
     key: 'partnerAlignmentPsychedelics',
-    question:
-      'Is it a must have that your partner shares your relationship with psychedelics or plant medicines?',
+    question: PARTNER_ALIGNMENT_PSYCHEDELICS_DEALBREAKER_QUESTION,
   },
   {
     key: 'partnerAlignmentCannabis',
-    question:
-      'Is it a must have that your partner shares your relationship with cannabis or tobacco?',
+    question: PARTNER_ALIGNMENT_CANNABIS_DEALBREAKER_QUESTION,
   },
   {
     key: 'partnerAlignmentAlcohol',
-    question:
-      'Is it a must have that your partner shares your relationship with alcohol?',
+    question: PARTNER_ALIGNMENT_ALCOHOL_DEALBREAKER_QUESTION,
   },
 ];
 
@@ -144,8 +139,7 @@ const LIFESTYLE_DEALBREAKERS: {
 }[] = [
   {
     key: 'partnerSameReligionRequired',
-    question:
-      'Is it a must have for your partner to have the same religion as you?',
+    question: PARTNER_SAME_RELIGION_DEALBREAKER_QUESTION,
     options: PREF_PARTNER_SAME_RELIGION_OPTIONS,
   },
 ];
@@ -218,14 +212,15 @@ export const MatchPreferencesEmbedded: React.FC<
     }
   }, [matchPreferences]);
 
+  const preferencesRef = useRef(preferences);
+  preferencesRef.current = preferences;
+
   const setPref = useCallback(
     (patch: Partial<DealbreakerPreferences>) => {
-      setPreferences((prevPrefs) => {
-        const newPrefs = { ...prevPrefs, ...patch };
-        onPreferencesPatch({
-          matchPreferences: withoutRelationshipType(newPrefs),
-        });
-        return newPrefs;
+      const newPrefs = { ...preferencesRef.current, ...patch };
+      setPreferences(newPrefs);
+      onPreferencesPatch({
+        matchPreferences: withoutRelationshipType(newPrefs),
       });
     },
     [onPreferencesPatch],
@@ -266,18 +261,16 @@ export const MatchPreferencesEmbedded: React.FC<
 
   const onBodyTypeAttractionChange = useCallback(
     (next: BodyTypeAttractionId[]) => {
-      setPreferences((prevPrefs) => {
-        const {
-          bmiRange: _legacyBmi,
-          bodyTypeAttraction: _bodyTypeAttraction,
-          ...rest
-        } = prevPrefs;
-        const newPrefs: DealbreakerPreferences =
-          next.length > 0 ? { ...rest, bodyTypeAttraction: next } : { ...rest };
-        onPreferencesPatch({
-          matchPreferences: withoutRelationshipType(newPrefs),
-        });
-        return newPrefs;
+      const {
+        bmiRange: _legacyBmi,
+        bodyTypeAttraction: _bodyTypeAttraction,
+        ...rest
+      } = preferencesRef.current;
+      const newPrefs: DealbreakerPreferences =
+        next.length > 0 ? { ...rest, bodyTypeAttraction: next } : { ...rest };
+      setPreferences(newPrefs);
+      onPreferencesPatch({
+        matchPreferences: withoutRelationshipType(newPrefs),
       });
     },
     [onPreferencesPatch],
@@ -311,7 +304,7 @@ export const MatchPreferencesEmbedded: React.FC<
         </View>
 
         <Text style={styles.question}>
-          {renderMustHaveHighlight(PREF_PARTNER_SHARES_SPECIFIC_SEX_INTERESTS_QUESTION)}
+          {renderQuestionHighlight(PREF_PARTNER_SHARES_SPECIFIC_SEX_INTERESTS_QUESTION)}
         </Text>
         <OptionPickerTrigger
           style={[styles.pickRow, formControlStyles.control]}
@@ -361,9 +354,7 @@ export const MatchPreferencesEmbedded: React.FC<
         </OptionPickerTrigger>
 
         <Text style={styles.question}>
-          {renderMustHaveHighlight(
-            'Is it a must have that your partner shares the same political views as you?',
-          )}
+          {renderQuestionHighlight(PARTNER_POLITICAL_VIEWS_DEALBREAKER_QUESTION)}
         </Text>
         <OptionPickerTrigger
           style={[styles.pickRow, formControlStyles.control]}
@@ -395,9 +386,7 @@ export const MatchPreferencesEmbedded: React.FC<
 
         {LIFESTYLE_DEALBREAKERS.map(({ key, question, options }) => (
           <View key={key}>
-            <Text style={styles.question}>
-              {renderMustHaveHighlight(question)}
-            </Text>
+            <Text style={styles.question}>{renderQuestionHighlight(question)}</Text>
             <OptionPickerTrigger
               style={[styles.pickRow, formControlStyles.control]}
               onOpen={(anchor) =>
@@ -432,9 +421,7 @@ export const MatchPreferencesEmbedded: React.FC<
 
         {SUBSTANCE_PARTNER_DEALBREAKERS.map(({ key, question }) => (
           <View key={key}>
-            <Text style={styles.question}>
-              {renderMustHaveHighlight(question)}
-            </Text>
+            <Text style={styles.question}>{renderQuestionHighlight(question)}</Text>
             <OptionPickerTrigger
               style={[styles.pickRow, formControlStyles.control]}
               onOpen={(anchor) =>
@@ -577,7 +564,7 @@ const styles = StyleSheet.create({
     marginBottom: 8,
     lineHeight: 18,
   },
-  mustHaveEmphasis: {
+  dealbreakerEmphasis: {
     fontWeight: '800',
   },
   pickRow: {

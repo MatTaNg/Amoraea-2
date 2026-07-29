@@ -23,7 +23,6 @@ import {
 } from '@features/aria/interviewCompletionGate';
 import type { MessageWithScenario } from '@features/aria/interviewScenarioScoringSlice';
 import { resolveMoment5ClientScoringMeta } from '@features/aria/moment5ClientScoringMetaUtils';
-import { aggregatePersonalMomentEmotionalVocab } from '@features/aria/personalMomentEmotionalVocab';
 import type { ResponseConcretenessLevel } from '@features/aria/personalMomentConcreteness';
 import type { InterviewResults } from '@features/aria/interviewResultsTypes';
 import type { ScoreInterviewDeps } from '@features/aria/scoreInterviewTypes';
@@ -43,8 +42,6 @@ export type AlphaGateAggregateResult = {
   defensePatternsForAttempt: DefensePatternsJson;
   moment4ConcretenessForAttempt: ResponseConcretenessLevel | null;
   moment5ConcretenessForAttempt: ResponseConcretenessLevel | null;
-  personalMomentEmotionalVocabDensityForAttempt: number | null;
-  personalMomentEmotionalVocabLowForAttempt: boolean;
   mentalizingOvercertaintyCountForAttempt: number;
   scoringBaseline: AttemptScoringBaseline;
 };
@@ -96,8 +93,6 @@ export async function computeAlphaModeGateAndPillars(params: {
   let defensePatternsForAttempt: DefensePatternsJson = { ...DEFAULT_DEFENSE_PATTERNS };
   let moment4ConcretenessForAttempt: ResponseConcretenessLevel | null = null;
   let moment5ConcretenessForAttempt: ResponseConcretenessLevel | null = null;
-  let personalMomentEmotionalVocabDensityForAttempt: number | null = null;
-  let personalMomentEmotionalVocabLowForAttempt = false;
   let disclosureCalibrationForAttempt: 'underdisclosure' | 'calibrated' | 'overdisclosure' = 'calibrated';
   let egoLevelForAttempt: number | null = null;
   let weightedScoreForAttempt: number | null = null;
@@ -110,14 +105,10 @@ export async function computeAlphaModeGateAndPillars(params: {
       egoDevelopmentLevel: extractEgoDevelopmentLevel(parsed),
       defensePatternTranscript: finalMessages,
       disclosureCalibrationTranscript: finalMessages,
-      scenarioEmotionalVocabDensityPercent: languageMarkers.scenario_emotional_vocab_density,
-      communicationStyleEmotionalVocabDensityPercent: null,
     });
     defensePatternsForAttempt = mergedPillar.defensePatterns;
     moment4ConcretenessForAttempt = mergedPillar.moment4Concreteness ?? null;
     moment5ConcretenessForAttempt = mergedPillar.moment5Concreteness ?? null;
-    personalMomentEmotionalVocabDensityForAttempt = mergedPillar.personal_moment_emotional_vocab_density;
-    personalMomentEmotionalVocabLowForAttempt = mergedPillar.personal_moment_emotional_vocab_low;
     disclosureCalibrationForAttempt = mergedPillar.disclosureCalibration;
     const aggregatedPillarScores = mergedPillar.scores;
     egoLevelForAttempt = mergedPillar.egoDevelopmentLevel ?? extractEgoDevelopmentLevel(parsed) ?? null;
@@ -146,8 +137,6 @@ export async function computeAlphaModeGateAndPillars(params: {
             unknown
           >,
           {
-            personal_moment_emotional_vocab_low: personalMomentEmotionalVocabLowForAttempt,
-            personal_moment_emotional_vocab_density: personalMomentEmotionalVocabDensityForAttempt,
             disclosure_calibration: disclosureCalibrationForAttempt,
             probe_log: [...deps.probeLogRef.current],
           },
@@ -215,8 +204,6 @@ export async function computeAlphaModeGateAndPillars(params: {
       disclosureCalibration: mergedPillar.disclosureCalibration,
       moment4WordCount: personalWordCountsForGate.moment4WordCount,
       moment5WordCount: personalWordCountsForGate.moment5WordCount,
-      personalMomentEmotionalVocabDensity: personalMomentEmotionalVocabDensityForAttempt,
-      personalMomentEmotionalVocabLow: personalMomentEmotionalVocabLowForAttempt,
       moment4AccountabilitySituationallyExempt: mergedPillar.moment4AccountabilitySituationallyExempt === true,
       moment4AccountabilityExemptReason: mergedPillar.moment4AccountabilityExemptReason ?? null,
       emotionRecognitionRawScore: emotionRawScoreForGate(),
@@ -235,12 +222,6 @@ export async function computeAlphaModeGateAndPillars(params: {
     pillarContributorCounts = {};
     pillarScores = {};
     finalGateResult = buildIncompleteInterviewGateResult(completionGateAlpha);
-    const pevBlocked = aggregatePersonalMomentEmotionalVocab(moment4ForAggregate, moment5ForAggregate, {
-      scenarioEmotionalVocabDensityPercent: languageMarkers.scenario_emotional_vocab_density,
-      communicationStyleEmotionalVocabDensityPercent: null,
-    });
-    personalMomentEmotionalVocabDensityForAttempt = pevBlocked.personal_moment_emotional_vocab_density;
-    personalMomentEmotionalVocabLowForAttempt = pevBlocked.personal_moment_emotional_vocab_low;
     disclosureCalibrationForAttempt = disclosureCalibrationFromMarkerSlices(
       markerSlicesForAggregate,
       finalMessages,
@@ -257,8 +238,6 @@ export async function computeAlphaModeGateAndPillars(params: {
     defensePatternsForAttempt,
     moment4ConcretenessForAttempt,
     moment5ConcretenessForAttempt,
-    personalMomentEmotionalVocabDensityForAttempt,
-    personalMomentEmotionalVocabLowForAttempt,
     mentalizingOvercertaintyCountForAttempt,
     scoringBaseline,
   };

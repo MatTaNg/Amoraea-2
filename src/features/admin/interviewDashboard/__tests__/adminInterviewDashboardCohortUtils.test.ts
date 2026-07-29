@@ -97,6 +97,52 @@ describe('adminInterviewDashboardCohortUtils', () => {
     expect(classifyAdminUserListStatus(g)).toBe('in_progress');
   });
 
+  it('classifyAdminUserListStatus does not treat scored completed attempt as in progress', () => {
+    const g = makeGroup(
+      { interview_completed: false, latest_attempt_id: 'a1' },
+      {
+        id: 'a1',
+        user_id: 'u1',
+        attempt_number: 1,
+        created_at: '2026-07-29T03:19:13.369724+00:00',
+        completed_at: '2026-07-29T03:42:22.732+00:00',
+        weighted_score: 5.2,
+        passed: false,
+        reasoning_pending: null,
+        pillar_scores: null,
+        override_status: null,
+        override_set_at: null,
+        scenario_composites: null,
+        scenario_floor_grandfather_review: null,
+        gate_fail_reasons: null,
+        gate_fail_detail: null,
+        mentalizing_repair_floor_grandfather_review: null,
+        review_flags: null,
+        score_modifier: null,
+        depth_signal_modifier: null,
+        modified_weighted_score: null,
+        psychometric_modifier_applied: null,
+        modified_weighted_score_with_psychometrics: null,
+        final_gate_pass: null,
+        ego_development_level: null,
+        defense_patterns: null,
+        moment_4_concreteness: null,
+        moment_5_concreteness: null,
+        personal_moment_emotional_vocab_low: null,
+        disclosure_calibration: null,
+        mentalizing_overcertainty_count: null,
+        emotion_recognition_raw_score: null,
+        emotion_recognition_score: null,
+        emotion_recognition_responses: null,
+        uncertainty_score: null,
+        requires_clarification_battery: null,
+        post_clarification_uncertainty_score: null,
+        uncertainty_pending_admin_review: null,
+      },
+    );
+    expect(classifyAdminUserListStatus(g)).toBe('fail');
+  });
+
   it('filterAdminUserCohort respects hideIncomplete', () => {
     const done = makeGroup({ interview_completed: true });
     const open = makeGroup({ id: 'u2', interview_completed: false });

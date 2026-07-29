@@ -10,6 +10,7 @@ import {
   userIsAnsweringAfterStreamDeliveredScenarioAContemptProbe,
 } from '../scenarioFollowUpTranscriptGuard';
 import { shouldAllowScenarioARepairAfterContemptAnswer } from '../scenarioARepairQuestionHelpers';
+import { SCORE_REQUEST_DECLINE_LINE } from '../interviewPromptInstructions';
 import {
   SCENARIO_A_CONTEMPT_PROBE_DELIVERED_COPY,
   SCENARIO_A_REPAIR_QUESTION_AFTER_CONTEMPT_COPY,
@@ -60,6 +61,21 @@ describe('scenarioFollowUpTranscriptGuard', () => {
       shouldDeliverScenarioFollowUpQuestion(msgs, SCENARIO_A_REPAIR_QUESTION_AFTER_CONTEMPT_COPY),
     ).toBe(false);
     expect(scenarioOneFollowUpFlagsFromTranscript(msgs).repairQuestionAsked).toBe(true);
+  });
+
+  it('treats repair as complete when score-decline meta sits between repair ask and user answer', () => {
+    const msgs = [
+      contemptAssistant,
+      repairAssistant,
+      { role: 'assistant', content: SCORE_REQUEST_DECLINE_LINE },
+      {
+        role: 'user',
+        content:
+          "If I were Ryan, I would say, oh I see you're upset, let's talk about what we both need so the situation doesn't repeat itself.",
+      },
+    ];
+    expect(scenarioOneFollowUpFlagsFromTranscript(msgs).repairQuestionAsked).toBe(true);
+    expect(scenarioAMinimumEngagementForHandoff(msgs)).toBe(true);
   });
 
   it('treats repair before contempt probe as phantom — repair still deliverable after contempt answer', () => {

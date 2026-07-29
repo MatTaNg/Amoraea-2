@@ -407,6 +407,7 @@ function startAuthInitOnce(): Promise<void> {
 
   authInitPromise = (async () => {
     let initialSessionSeen = false;
+    let initialAuthBootstrapInFlight = false;
 
     const sync = async (nextSession: Session | null) => {
       const next = await applySessionForApp(nextSession, {
@@ -420,8 +421,19 @@ function startAuthInitOnce(): Promise<void> {
     };
 
     const finishInitialAuthLoad = () => {
+      if (initialSessionSeen) return;
       initialSessionSeen = true;
       setSnapshot({ loading: false });
+    };
+
+    const finishInitialAuthLoadAfterSync = (nextSession: Session | null, skipSync: boolean) => {
+      if (initialSessionSeen || initialAuthBootstrapInFlight) return;
+      initialAuthBootstrapInFlight = true;
+      if (skipSync) {
+        finishInitialAuthLoad();
+        return;
+      }
+      void sync(nextSession).finally(finishInitialAuthLoad);
     };
 
     supabase.auth.onAuthStateChange((event, nextSession) => {
@@ -500,9 +512,12 @@ function startAuthInitOnce(): Promise<void> {
         event === 'PASSWORD_RECOVERY' ||
         event === 'SIGNED_IN'
       ) {
-        finishInitialAuthLoad();
-      }
-      if (!skipSessionSync) {
+        if (!initialSessionSeen) {
+          finishInitialAuthLoadAfterSync(nextSession, skipSessionSync);
+        } else if (!skipSessionSync) {
+          void sync(nextSession);
+        }
+      } else if (!skipSessionSync) {
         void sync(nextSession);
       }
     });
@@ -521,9 +536,11 @@ function startAuthInitOnce(): Promise<void> {
     }
     authBootstrapCompleteRef.current = true;
 
-    await supabase.auth.getSession();
-    if (!initialSessionSeen) {
-      finishInitialAuthLoad();
+    const {
+      data: { session: bootstrapSession },
+    } = await supabase.auth.getSession();
+    if (!initialSessionSeen && !initialAuthBootstrapInFlight) {
+      finishInitialAuthLoadAfterSync(bootstrapSession, false);
     }
   })();
 

@@ -1,6 +1,5 @@
 import { ACCOUNTABILITY_BLAME_SHIFT_VS_CLARITY_REQUEST, SCORE_CALIBRATION_0_10 } from './interviewScoringCalibration';
 import { MOMENT4_RESPONSE_CONCRETENESS_SCORING_INSTRUCTION } from './moment4ConcretenessClassification';
-import { PERSONAL_MOMENT_EMOTIONAL_VOCAB_SCORING_INSTRUCTION } from './personalMomentEmotionalVocab';
 import {
   ELABORATION_ABSENCE_MOMENT4_MARKERS,
   ELABORATION_ABSENCE_SCORING_HEADER,
@@ -231,8 +230,6 @@ ${MENTALIZING_OVERCERTAINTY_SCORING_INSTRUCTION}
 
 ${MOMENT4_RESPONSE_CONCRETENESS_SCORING_INSTRUCTION}
 
-${PERSONAL_MOMENT_EMOTIONAL_VOCAB_SCORING_INSTRUCTION}
-
 RESOLUTION ORIENTATION / "MOVED ON" HANDLING:
 Do not treat "I moved on", "I don't think about them anymore", "I don't think about it", or similar phrases as standalone evidence of resolution orientation or its absence. These phrases are ambiguous: they can indicate genuine emotional release or suppression of unresolved hostility depending on context.
 
@@ -296,8 +293,6 @@ Return ONLY valid JSON:
   "keyEvidence": { ${ids.map((id) => `"${id}": ""`).join(', ')} },
   "mentalizing_overcertainty": false,
   "response_concreteness": "moderate",
-  "emotional_vocab_count": 0,
-  "emotional_vocab_words": [],
   "user_slice_word_count": 0,
   "contempt_tier_breakdown": ${CONTEMPT_TIER_BREAKDOWN_JSON_TEMPLATE},
   "scoringMetadata": {

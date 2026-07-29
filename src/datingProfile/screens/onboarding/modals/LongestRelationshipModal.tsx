@@ -1,9 +1,11 @@
 import React from "react";
+import { ONBOARDING_STEP_SCREEN_EDGES, ONBOARDING_STEP_SCREEN_EDGES_WITH_BOTTOM } from './onboardingStepScreenEdges';
 import { View, ScrollView } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { Button } from "@/shared/ui/Button";
 import { SingleChoiceOptionList } from "@/shared/components/profileFields/SingleChoiceOptionList";
 import { LONGEST_ROMANTIC_RELATIONSHIP_OPTIONS } from "@/shared/constants/longestRomanticRelationshipOptions";
+import { deferAfterPaint } from '@/shared/utils/deferAfterPaint';
 import { OnboardingHeader } from "./components/OnboardingHeader";
 import { styles } from "./RelationshipStyleModal.styled";
 
@@ -21,7 +23,7 @@ export const LongestRelationshipModal: React.FC<LongestRelationshipModalProps> =
   onBack,
 }) => {
   return (
-    <SafeAreaView style={styles.screen} edges={["top", "left", "right"]}>
+    <SafeAreaView style={styles.screen} edges={ONBOARDING_STEP_SCREEN_EDGES}>
       <OnboardingHeader title="Relationship history" onBack={onBack} />
       <ScrollView
         style={styles.scrollView}
@@ -34,7 +36,7 @@ export const LongestRelationshipModal: React.FC<LongestRelationshipModalProps> =
             value={value}
             onSelect={(v) => {
               onValueChange(v);
-              onNext();
+              deferAfterPaint(onNext);
             }}
             variant="onboarding"
             description="How long was your longest romantic relationship?"

@@ -174,7 +174,7 @@ describe('lifeDomainOnboardingQuestions validation', () => {
     );
   });
 
-  it('skips optional open-ended steps when no unanswered optional text remains', () => {
+  it('keeps all five optional open-ended domain steps in onboarding navigation', () => {
     const optionalIds = getLeftoverOptionalOpenEndedQuestionsForDomain('finance', {}, {
       wantKids: "Don't want kids",
     }).map((q) => q.id);
@@ -182,7 +182,6 @@ describe('lifeDomainOnboardingQuestions validation', () => {
     const active = getActiveLifeDomainOptionalOpenEndedSteps("Don't want kids", {
       finance: allAnswered,
     }).map((row) => row.domainId);
-    expect(active).not.toContain('finance');
-    expect(active.length).toBeGreaterThan(0);
+    expect(active).toEqual(['intimacy', 'finance', 'spirituality', 'family', 'health']);
   });
 });

@@ -90,6 +90,7 @@ export function runResetInterviewProgressRefs(deps: ResetInterviewProgressRefsDe
     cancelRequested: false,
     accumulatedFullText: '',
     spokenCompleteText: '',
+    s3SophiePerspectiveProbeDeliveredThisStream: false,
   };
   deps.pendingScenarioIntroAfterResumeWelcomeRef.current = null;
   deps.transcriptScenarioLogCursorRef.current = 0;

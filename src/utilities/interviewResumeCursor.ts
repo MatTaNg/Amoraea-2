@@ -1,12 +1,25 @@
 import { isGreetingOnly } from '../features/aria/interviewLocalPersistence';
+import { isRepeatableMainInterviewQuestionLine } from '../features/aria/interviewDisengagementProbes';
 import { transcriptHasInterviewClosingAssistantMessage } from '../features/aria/elongatingProbe';
 import { SCENARIO_2_TO_3_TRANSITION_FALLBACK } from '../features/aria/interviewTransitionBundles';
 import { looksLikeMoment4GrudgePrompt, looksLikeMoment4ThresholdQuestion } from '../features/aria/moment4ProbeLogic';
 import { looksLikeMoment4SpecificityFollowUpEcho } from '../features/aria/moment4SpecificityFollowUp';
+import { transcriptAssistantContainsMoment5PrimaryConflictQuestion } from '../features/aria/moment5TranscriptHelpers';
 import {
   detectScenarioFromResponse,
   messageAnchorsScenarioIntro,
 } from '../features/aria/scenarioNumberDetection';
+import {
+  isScenarioCRepairAssistantPrompt,
+  isScenarioCQ1Prompt,
+  looksLikeScenarioCSophiePerspectiveQuestion,
+  scenarioCRepairConstructStillPending,
+} from '../features/aria/scenarioCPromptDetection';
+import {
+  textContainsScenarioBVignetteBody,
+  textContainsScenarioCVignetteBody,
+} from '../features/aria/scenarioVignetteBodyDetection';
+import type { MessageWithScenario } from '../features/aria/interviewScenarioScoringSlice';
 import { pillarScoresHaveNumericAssessment } from '../features/aria/interviewCompletionGate';
 import type { StoredInterviewData, StoredScenarioScores } from './storage/InterviewStorage';
 
@@ -80,6 +93,7 @@ export function transcriptHasInScenarioProgressPastOpening(
     role: string;
     content?: string | null;
     scenarioNumber?: number;
+    interviewMoment?: number;
     isWelcomeBack?: boolean;
     isScoreCard?: boolean;
   }>,
@@ -87,21 +101,37 @@ export function transcriptHasInScenarioProgressPastOpening(
 ): boolean {
   for (const m of msgs) {
     if (m.isWelcomeBack || m.isScoreCard) continue;
-    if (m.role === 'user' && m.scenarioNumber === scenario) return true;
+    const moment =
+      typeof m.interviewMoment === 'number' && m.interviewMoment >= 1 && m.interviewMoment <= 5
+        ? m.interviewMoment
+        : undefined;
+    if (m.role === 'user') {
+      if (m.scenarioNumber === scenario || moment === scenario) return true;
+      continue;
+    }
     if (m.role !== 'assistant') continue;
     const c = (m.content ?? '').trim();
     if (!c) continue;
     if (messageAnchorsScenarioIntro(c) === scenario) continue;
-    if (m.scenarioNumber === scenario && (/\?/.test(c) || c.length >= 24)) return true;
-    if (scenario === 1 && /\bwhat(?:'s| is) going on between these two\b/i.test(c)) return true;
-    if (scenario === 2 && /\bwhat do you think is going on here\b/i.test(c)) return true;
     if (
-      scenario === 3 &&
-      (/\bwhen daniel comes back\b/i.test(c) ||
-        (/\bsophie\b/i.test(c) && /\?/.test(c)) ||
-        /\bhow do you think this situation could be repaired\b/i.test(c))
+      (m.scenarioNumber === scenario || moment === scenario) &&
+      (/\?/.test(c) || c.length >= 24)
     ) {
       return true;
+    }
+    if (scenario === 1 && /\bwhat(?:'s| is) going on between these two\b/i.test(c)) return true;
+    if (scenario === 2 && /\bwhat do you think is going on here\b/i.test(c)) return true;
+    if (scenario === 3) {
+      if (isScenarioCQ1Prompt(c)) return true;
+      if (looksLikeScenarioCSophiePerspectiveQuestion(c)) return true;
+      if (isScenarioCRepairAssistantPrompt(c)) return true;
+      if (
+        /\bwhen daniel comes back\b/i.test(c) ||
+        (/\bsophie\b/i.test(c) && /\?/.test(c)) ||
+        /\bhow do you think this situation could be repaired\b/i.test(c)
+      ) {
+        return true;
+      }
     }
   }
   return false;
@@ -343,6 +373,96 @@ function cloneMoments(m: Record<InterviewMomentIndex, boolean>): Record<Intervie
   return { ...m };
 }
 
+/**
+ * Resume at Moment 4+ when S3 repair is satisfied or personal part already started —
+ * including when parallel scoring never persisted (`lastCompletedScenario` < 3).
+ */
+function tryBuildResumePostScenariosPersonalPartPlan(input: {
+  lastC: number;
+  partialScenarioDataWritten: boolean;
+  transcriptMessages?: ReadonlyArray<{ role: string; content?: string }>;
+  syncedMoments: {
+    momentsComplete: Record<InterviewMomentIndex, boolean>;
+    currentMoment: InterviewMomentIndex;
+    personalHandoffInjected: boolean;
+  };
+}): InterviewResumePlan | null {
+  const transcriptForRepair = (input.transcriptMessages ?? []) as MessageWithScenario[];
+  const hasS3TranscriptProgress = transcriptHasInScenarioProgressPastOpening(
+    input.transcriptMessages ?? [],
+    3,
+  );
+
+  const personalPartActive = resumeTranscriptIndicatesPersonalPartActive(
+    input.transcriptMessages,
+    input.syncedMoments,
+  );
+  if (personalPartActive) {
+    return {
+      lastCompletedScenario: input.lastC,
+      resumeScenario: 3,
+      effectiveMoment: Math.max(input.syncedMoments.currentMoment, 4) as InterviewMomentIndex,
+      momentsComplete: cloneMoments(input.syncedMoments.momentsComplete),
+      personalHandoffInjected: input.syncedMoments.personalHandoffInjected,
+      mode: 'resume_post_scenarios',
+      partialScenarioDataWritten: input.partialScenarioDataWritten,
+      rewindDueToCorruptScoring: false,
+      rewindToMoment4DueToCorruptScoring: false,
+    };
+  }
+
+  if (!hasS3TranscriptProgress && input.lastC < 3) {
+    return null;
+  }
+
+  const personalPartMarkersInTranscript =
+    resumeTranscriptAlreadyDeliveredMoment4Question(input.transcriptMessages ?? []) ||
+    transcriptHasPersistedPersonalPartProgress(input.transcriptMessages ?? []);
+  const s3RepairConstructStillPending =
+    transcriptForRepair.length > 0 &&
+    scenarioCRepairConstructStillPending(transcriptForRepair);
+
+  /** S3 repair Q2 satisfied but app closed before/during M4 handoff — resume at Moment 4, not S3 replay. */
+  if (!s3RepairConstructStillPending || personalPartMarkersInTranscript) {
+    const mc = createMomentCompletionFromLastC(input.lastC);
+    mc[3] = true;
+    return {
+      lastCompletedScenario: input.lastC,
+      resumeScenario: 3,
+      effectiveMoment: 4,
+      momentsComplete: mc,
+      personalHandoffInjected: false,
+      mode: 'resume_post_scenarios',
+      partialScenarioDataWritten: input.partialScenarioDataWritten,
+      rewindDueToCorruptScoring: false,
+      rewindToMoment4DueToCorruptScoring: false,
+    };
+  }
+
+  /** Mid-S3 replay only applies once all scenario score bundles exist (legacy scored path). */
+  if (input.lastC < 3) {
+    return null;
+  }
+
+  const mc = createMomentCompletionFromLastC(input.lastC);
+  mc[3] = false;
+  const stillMidScenario3 = hasS3TranscriptProgress;
+  const effectiveMoment = (
+    stillMidScenario3 ? 3 : Math.min(input.syncedMoments.currentMoment, 3)
+  ) as InterviewMomentIndex;
+  return {
+    lastCompletedScenario: input.lastC,
+    resumeScenario: 3,
+    effectiveMoment,
+    momentsComplete: mc,
+    personalHandoffInjected: false,
+    mode: stillMidScenario3 ? 'replay_incomplete' : 'resume_next',
+    partialScenarioDataWritten: input.partialScenarioDataWritten,
+    rewindDueToCorruptScoring: false,
+    rewindToMoment4DueToCorruptScoring: false,
+  };
+}
+
 export function computeInterviewResumePlan(input: {
   scenariosCompleted: number[];
   scenarioScores: StoredScenarioScores | undefined;
@@ -366,6 +486,54 @@ export function computeInterviewResumePlan(input: {
   );
 
   if (earliestCorrupt != null) {
+    const activeRaw = coerceResumeActive(input.resumeActiveFromStorage, input.resumeActiveFromAttempt);
+    const inferredFromTranscript = input.transcriptMessages
+      ? inferLatestScenarioIntroFromTranscript(input.transcriptMessages)
+      : null;
+    const syncedMoment = input.syncedMoments.currentMoment;
+    const candidateProgress = Math.max(
+      activeRaw ?? 0,
+      inferredFromTranscript ?? 0,
+      syncedMoment >= 1 && syncedMoment <= 3 ? syncedMoment : 0,
+    ) as 1 | 2 | 3;
+    const hasTranscriptProgressAtCandidate =
+      transcriptHasInScenarioProgressPastOpening(input.transcriptMessages ?? [], candidateProgress) ||
+      (inferredFromTranscript != null &&
+        inferredFromTranscript >= candidateProgress &&
+        inferredFromTranscript > earliestCorrupt);
+    const canResumePastCorrupt =
+      candidateProgress > earliestCorrupt &&
+      input.transcriptMessages != null &&
+      hasTranscriptProgressAtCandidate;
+
+    /** Gameplay moved past a scenario whose parallel score never finished — resume mid-scenario, not replay. */
+    if (canResumePastCorrupt) {
+      const mc = createMomentCompletionFromLastC(lastC);
+      for (const i of [1, 2, 3] as const) {
+        if (i < candidateProgress) mc[i] = true;
+      }
+      mc[candidateProgress] = false;
+      const effectiveMoment = Math.max(candidateProgress, syncedMoment) as InterviewMomentIndex;
+      const personalHandoffInjected = input.syncedMoments.personalHandoffInjected;
+      if (syncedMoment >= 4 && personalHandoffInjected) {
+        mc[3] = true;
+      }
+      return {
+        lastCompletedScenario: lastC,
+        resumeScenario: candidateProgress,
+        effectiveMoment,
+        momentsComplete: mc,
+        personalHandoffInjected,
+        mode: 'replay_incomplete',
+        partialScenarioDataWritten: !scenarioHasPersistedScores(
+          candidateProgress,
+          input.scenarioScores,
+        ),
+        rewindDueToCorruptScoring: false,
+        rewindToMoment4DueToCorruptScoring: false,
+      };
+    }
+
     const mc = createMomentCompletionFromLastC(lastC);
     for (const i of [1, 2, 3] as const) {
       if (i < earliestCorrupt) mc[i] = true;
@@ -413,32 +581,29 @@ export function computeInterviewResumePlan(input: {
     transcriptReachedM5 &&
     input.moment4ScoresIntact === false;
 
-  if (lastC >= 3) {
-    if (m4CorruptInterrupted) {
-      const mc = createMomentCompletionFromLastC(3);
-      return {
-        lastCompletedScenario: 3,
-        resumeScenario: 3,
-        effectiveMoment: 4,
-        momentsComplete: mc,
-        personalHandoffInjected: false,
-        mode: 'resume_post_scenarios',
-        partialScenarioDataWritten: true,
-        rewindDueToCorruptScoring: true,
-        rewindToMoment4DueToCorruptScoring: true,
-      };
-    }
+  if (lastC >= 3 && m4CorruptInterrupted) {
+    const mc = createMomentCompletionFromLastC(3);
     return {
-      lastCompletedScenario: lastC,
+      lastCompletedScenario: 3,
       resumeScenario: 3,
-      effectiveMoment: input.syncedMoments.currentMoment,
-      momentsComplete: cloneMoments(input.syncedMoments.momentsComplete),
-      personalHandoffInjected: input.syncedMoments.personalHandoffInjected,
+      effectiveMoment: 4,
+      momentsComplete: mc,
+      personalHandoffInjected: false,
       mode: 'resume_post_scenarios',
-      partialScenarioDataWritten,
-      rewindDueToCorruptScoring: false,
-      rewindToMoment4DueToCorruptScoring: false,
+      partialScenarioDataWritten: true,
+      rewindDueToCorruptScoring: true,
+      rewindToMoment4DueToCorruptScoring: true,
     };
+  }
+
+  const postScenariosPlan = tryBuildResumePostScenariosPersonalPartPlan({
+    lastC,
+    partialScenarioDataWritten,
+    transcriptMessages: input.transcriptMessages,
+    syncedMoments: input.syncedMoments,
+  });
+  if (postScenariosPlan) {
+    return postScenariosPlan;
   }
 
   if (effectiveActive != null) {
@@ -553,8 +718,13 @@ export function isResumeWelcomeBackAssistantText(text: string | null | undefined
   const c = (text ?? '').toLowerCase().replace(/\s+/g, ' ');
   return (
     c.includes('welcome back') &&
-    (c.includes('pick up where we left off') ||
+    (c.includes('we were in scenario') ||
+      c.includes("you're on situation") ||
       c.includes('left off in the personal part') ||
+      c.includes('pick up where we left off') ||
+      c.includes('i just said') ||
+      c.includes('i just asked you') ||
+      c.includes('repeat the scenario') ||
       c.includes('repeat what i said'))
   );
 }
@@ -612,6 +782,13 @@ export function emotionModalCatchUpThroughScenarioFromResume(params: {
       through = Math.max(through, 3);
       break;
     }
+    if (textContainsScenarioCVignetteBody(content)) {
+      if (through < 2) bumpReason = `transcript_s3_vignette@${i}`;
+      through = Math.max(through, 2);
+    } else if (textContainsScenarioBVignetteBody(content)) {
+      if (through < 1) bumpReason = `transcript_s2_vignette@${i}`;
+      through = Math.max(through, 1);
+    }
   }
   return {
     through: emotionModalCatchUpThroughScenario(through),
@@ -647,23 +824,73 @@ export function shouldOfferResumeWelcomeTts(params: {
   return true;
 }
 
+function resumeScenarioLabel(scenario: 1 | 2 | 3): string {
+  if (scenario === 1) return 'Scenario one';
+  if (scenario === 2) return 'Scenario two';
+  return 'Scenario three';
+}
+
+function normalizeResumeWelcomeLastQuestionText(text: string | null | undefined): string | null {
+  const cleaned = (text ?? '').replace(/\s+/g, ' ').trim();
+  return cleaned || null;
+}
+
+export function resumeWelcomeMessageEmbedsLastQuestion(welcomeMessage: string): boolean {
+  return /\bi just (?:said|asked you)\b/i.test(welcomeMessage);
+}
+
+type PersonalPartTranscriptTurn = {
+  role: string;
+  content?: string;
+  interviewMoment?: number;
+};
+
+/** Persisted `interviewMoment: 4+` on any turn — grudge may be card/TTS-only without a full assistant row. */
+export function transcriptHasPersistedPersonalPartProgress(
+  transcriptMessages: ReadonlyArray<PersonalPartTranscriptTurn> | undefined,
+): boolean {
+  return (transcriptMessages ?? []).some(
+    (m) => typeof m.interviewMoment === 'number' && m.interviewMoment >= 4,
+  );
+}
+
+/** True when Moment 4+ personal segment has actually started — not merely S1–S3 scored. */
+export function resumeTranscriptIndicatesPersonalPartActive(
+  transcriptMessages: ReadonlyArray<PersonalPartTranscriptTurn> | undefined,
+  synced: {
+    currentMoment: InterviewMomentIndex;
+    personalHandoffInjected: boolean;
+  },
+): boolean {
+  if (synced.personalHandoffInjected) return true;
+  const msgs = transcriptMessages ?? [];
+  if (transcriptHasPersistedPersonalPartProgress(msgs)) return true;
+  if (resumeTranscriptAlreadyDeliveredMoment4Question(msgs)) return true;
+  if (synced.currentMoment >= 5) return true;
+  return msgs.some(
+    (m) =>
+      m.role === 'assistant' &&
+      typeof m.content === 'string' &&
+      transcriptAssistantContainsMoment5PrimaryConflictQuestion(m.content),
+  );
+}
+
 export function buildResumeWelcomeMessage(params: {
   mode: InterviewResumeMode;
   resumeScenario: 1 | 2 | 3;
+  lastQuestionText?: string | null;
 }): string {
-  const tail =
-    " If you'd like me to repeat what I said, let me know.";
-  let msg: string;
+  const lastQuestion = normalizeResumeWelcomeLastQuestionText(params.lastQuestionText);
+  const questionTail =
+    lastQuestion && isRepeatableMainInterviewQuestionLine(lastQuestion)
+      ? ` and I just said ${lastQuestion}`
+      : '';
   if (params.mode === 'resume_post_scenarios') {
-    msg =
-      `Welcome back — we left off in the personal part of the interview. Let's continue from there.` + tail;
-  } else if (params.mode === 'replay_incomplete') {
-    // Omit vignette ordinal — resume moment can be past "situation 3" (e.g. conflict); TTS reads this verbatim.
-    msg = `Welcome back — we'll pick up where we left off.` + tail;
-  } else {
-    msg = `Welcome back — we'll pick up where we left off.` + tail;
+    const base = `Welcome back, we'll pick up where we left off, we were in the personal part of the interview`;
+    return questionTail ? `${base}${questionTail}.` : `${base}.`;
   }
-  return msg;
+  const base = `Welcome back, we'll pick up where we left off, we were in ${resumeScenarioLabel(params.resumeScenario)}`;
+  return questionTail ? `${base}${questionTail}.` : `${base}.`;
 }
 
 /** True when any assistant turn already delivered the grudge or a later Moment 4 question. */
@@ -727,9 +954,13 @@ export function assignScenarioNumbersToTranscript<T extends ScenarioTaggedTransc
     if (resumeTranscriptCrossedMoment4Boundary(content) || (moment != null && moment >= 4)) {
       passedMoment4 = true;
     }
+    if (!passedMoment4 && moment != null && moment >= 1 && moment <= 3) {
+      cur = Math.max(cur, moment) as 1 | 2 | 3;
+    }
     if (!passedMoment4 && m.role === 'assistant') {
       const d = detectScenarioAnchor(content);
       if (d != null) cur = d;
+      if (isScenarioCQ1Prompt(content)) cur = 3;
     }
     if (m.role === 'user' || m.role === 'assistant') {
       const scenarioNumber: 1 | 2 | 3 = passedMoment4 ? 3 : cur;

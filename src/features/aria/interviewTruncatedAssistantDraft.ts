@@ -54,6 +54,8 @@ export type CoerceInterviewAssistantDraftContext = {
   messages: PostClaudeInterviewMessage[];
   situation2PlaybackConfirmed?: boolean;
   situation2AlreadySpoken?: boolean;
+  situation3PlaybackConfirmed?: boolean;
+  s3RepairProbeDelivered?: boolean;
 };
 
 /**
@@ -121,6 +123,8 @@ export function coerceInterviewAssistantDraftForSpeak(
     {
       situation2PlaybackConfirmed: ctx.situation2PlaybackConfirmed,
       situation2AlreadySpoken: ctx.situation2AlreadySpoken,
+      situation3PlaybackConfirmed: ctx.situation3PlaybackConfirmed,
+      s3RepairProbeDelivered: ctx.s3RepairProbeDelivered,
     },
   );
 
@@ -176,6 +180,8 @@ export function coerceInterviewAssistantDraftForSpeak(
         {
           situation2PlaybackConfirmed: ctx.situation2PlaybackConfirmed,
           situation2AlreadySpoken: ctx.situation2AlreadySpoken,
+          situation3PlaybackConfirmed: ctx.situation3PlaybackConfirmed,
+          s3RepairProbeDelivered: ctx.s3RepairProbeDelivered,
         },
       );
     } else if (ctx.interviewMoment === 2 && (ctx.currentScenario === 2 || ctx.currentScenario == null)) {

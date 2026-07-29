@@ -109,6 +109,9 @@ export function resolvePostClaudeNaturalLanguageDisplayText(
         situation2AlreadySpoken: textContainsScenarioBVignetteBody(
           deps.parallelStreamingTtsRef?.current?.spokenCompleteText ?? '',
         ),
+        situation3PlaybackConfirmed:
+          deps.showScenarioCardCanonicalPlaybackConfirmedKindsRef?.current?.situation_3 === true,
+        s3RepairProbeDelivered: deps.s3RepairProbeDeliveredRef?.current === true,
       },
     ),
     {
@@ -121,6 +124,9 @@ export function resolvePostClaudeNaturalLanguageDisplayText(
       situation2AlreadySpoken: textContainsScenarioBVignetteBody(
         deps.parallelStreamingTtsRef?.current?.spokenCompleteText ?? '',
       ),
+      situation3PlaybackConfirmed:
+        deps.showScenarioCardCanonicalPlaybackConfirmedKindsRef?.current?.situation_3 === true,
+      s3RepairProbeDelivered: deps.s3RepairProbeDeliveredRef?.current === true,
     },
   );
 }

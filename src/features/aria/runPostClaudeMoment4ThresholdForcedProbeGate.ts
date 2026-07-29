@@ -29,6 +29,7 @@ import {
   type ForcedConstructProbeContext,
   type PostClaudeForcedConstructProbeGatesResult,
 } from '@features/aria/postClaudeForcedConstructProbeShared';
+import { applyMoment4ThresholdReferenceCard } from '@features/aria/interviewReferenceCardResumeHelpers';
 import { remoteLog } from '@utilities/remoteLog';
 
 const FORCED_M4_THRESHOLD_PROBE = MOMENT_4_COMMITMENT_THRESHOLD_QUESTION_TEXT;
@@ -99,6 +100,7 @@ export async function runPostClaudeMoment4ThresholdForcedProbeGate(
   };
   stagedMessages = [...stagedMessages, combinedMsg];
   deps.setMessages(stagedMessages);
+  applyMoment4ThresholdReferenceCard(deps);
   await speakAssistantTurn(thresholdProbeText, {
     ...ASSISTANT_INTERVIEW_SPEECH,
     forceSpeakDespiteParallelStream: true,

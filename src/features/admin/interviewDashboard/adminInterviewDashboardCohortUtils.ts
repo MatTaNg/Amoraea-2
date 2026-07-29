@@ -102,6 +102,7 @@ export function userHasInProgressInterview(
   latestAttempt?: AttemptSummary | null,
 ): boolean {
   if (user.interview_completed === true) return false;
+  if (latestAttempt?.completed_at != null) return false;
   if (latestAttempt != null && latestAttempt.completed_at == null) return true;
   return !!user.latest_attempt_id;
 }

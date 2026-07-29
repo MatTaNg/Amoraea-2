@@ -55,7 +55,9 @@ describe('loadEditProfileSnapshot', () => {
       },
     });
     mockUsersRow({
-      profile_prompts: [{ promptId: 'p1', answer: 'Hello' }],
+      profile_prompts: [
+        { promptId: 'wmtm_partnership', answer: 'Honesty and warmth.' },
+      ],
       basic_info: { firstName: 'Sam', age: 28, gender: '', attractedTo: [], locationCity: '', locationCountry: '', photoUrl: '', heightCm: 0 },
     });
 
@@ -70,7 +72,13 @@ describe('loadEditProfileSnapshot', () => {
         heightCentimeters: 175,
         occupation: 'Engineer',
         primaryPhotoUrl: 'https://cdn.example.com/a.jpg',
-        prompts: [{ promptId: 'p1', answer: 'Hello' }],
+        prompts: [
+          {
+            promptId: 'wmtm_partnership',
+            categoryId: 'what_matters_to_me',
+            answer: 'Honesty and warmth.',
+          },
+        ],
       }),
     );
     expect(supabase.from).toHaveBeenCalledWith('users');
@@ -146,14 +154,26 @@ describe('applyProfileUpdate', () => {
 
   it('routes prompts and gates to users via updateUserInterviewApplication', async () => {
     await applyProfileUpdate('user-1', {
-      prompts: [{ promptId: 'p1', answer: 'A' }],
+      prompts: [
+        {
+          promptId: 'wmtm_partnership',
+          categoryId: 'what_matters_to_me',
+          answer: 'Honesty and warmth.',
+        },
+      ],
       onboardingStage: 'interview',
       applicationStatus: 'pending',
     });
 
     expect(profilesRepo.updateProfile).not.toHaveBeenCalled();
     expect(updateUserInterviewApplication).toHaveBeenCalledWith('user-1', {
-      prompts: [{ promptId: 'p1', answer: 'A' }],
+      prompts: [
+        {
+          promptId: 'wmtm_partnership',
+          categoryId: 'what_matters_to_me',
+          answer: 'Honesty and warmth.',
+        },
+      ],
       onboardingStage: 'interview',
       applicationStatus: 'pending',
     });
@@ -195,10 +215,22 @@ describe('applyProfileUpdate', () => {
 });
 
 describe('saveEditProfilePrompts', () => {
-  it('delegates to updateUserInterviewApplication', async () => {
-    const prompts = [{ promptId: 'p2', answer: 'B' }];
+  it('delegates to updateUserInterviewApplication with normalized prompts', async () => {
+    const prompts = [
+      {
+        promptId: 'wmtm_partnership',
+        categoryId: 'what_matters_to_me',
+        answer: 'Honesty and warmth.',
+      },
+    ];
     await saveEditProfilePrompts('user-1', prompts);
     expect(updateUserInterviewApplication).toHaveBeenCalledWith('user-1', { prompts });
+  });
+
+  it('rejects invalid prompts before save', async () => {
+    await expect(
+      saveEditProfilePrompts('user-1', [{ promptId: 'fun_date', categoryId: 'fun_chemistry', answer: 'Nope' }]),
+    ).rejects.toThrow(/What Matters To Me|How I Show Up/);
   });
 });
 

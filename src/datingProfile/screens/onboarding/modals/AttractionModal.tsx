@@ -1,4 +1,5 @@
-import React from 'react';
+import React, { useEffect, useState } from 'react';
+import { ONBOARDING_STEP_SCREEN_EDGES } from './onboardingStepScreenEdges';
 import { View, Text, TouchableOpacity, ScrollView } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Button } from '@/shared/ui/Button';
@@ -21,54 +22,49 @@ export const AttractionModal: React.FC<AttractionModalProps> = ({
   onNext,
   onBack,
 }) => {
-  const handleOptionPress = (option: string) => {
-    const isSelected = attractedTo.includes(option);
-    let newSelection: string[];
-    if (isSelected) {
-      if (attractedTo.length <= 1) {
-        // Sole chip tap would clear selection and strand the user (no Next button). Treat as confirm + continue.
-        void onNext(attractedTo);
-        return;
-      }
-      newSelection = attractedTo.filter((item) => item !== option);
-    } else {
-      newSelection = [...attractedTo, option];
-    }
-    onAttractedToChange(newSelection);
-    if (newSelection.length >= 1) {
-      void onNext(newSelection);
-    }
+  const [selection, setSelection] = useState<string[]>(attractedTo);
+
+  useEffect(() => {
+    setSelection(attractedTo);
+  }, [attractedTo.join('|')]);
+
+  const toggleOption = (option: string) => {
+    let nextSelection = selection;
+    setSelection((prev) => {
+      nextSelection = prev.includes(option)
+        ? prev.filter((item) => item !== option)
+        : [...prev, option];
+      return nextSelection;
+    });
+    onAttractedToChange(nextSelection);
+  };
+
+  const handleNext = () => {
+    if (selection.length === 0) return;
+    void onNext(selection);
   };
 
   return (
-    <SafeAreaView style={styles.screen} edges={['top', 'left', 'right']}>
+    <SafeAreaView style={styles.screen} edges={ONBOARDING_STEP_SCREEN_EDGES}>
       <OnboardingHeader title="Attracted to" onBack={onBack} />
-      <ScrollView 
+      <ScrollView
         style={styles.scrollView}
         contentContainerStyle={styles.scrollContent}
         keyboardShouldPersistTaps="handled"
       >
         <View style={styles.container}>
           {ATTRACTION_OPTIONS.map((option) => {
-            const isSelected = attractedTo.includes(option);
+            const isSelected = selection.includes(option);
             return (
               <TouchableOpacity
                 key={option}
-                style={[
-                  styles.option,
-                  isSelected && styles.optionSelected,
-                ]}
-                onPress={() => handleOptionPress(option)}
+                style={[styles.option, isSelected && styles.optionSelected]}
+                onPress={() => toggleOption(option)}
               >
-                <Text style={[
-                  styles.optionText,
-                  isSelected && styles.optionTextSelected,
-                ]}>
+                <Text style={[styles.optionText, isSelected && styles.optionTextSelected]}>
                   {option}
                 </Text>
-                {isSelected && (
-                  <Text style={styles.checkmark}>✓</Text>
-                )}
+                {isSelected && <Text style={styles.checkmark}>✓</Text>}
               </TouchableOpacity>
             );
           })}
@@ -76,15 +72,15 @@ export const AttractionModal: React.FC<AttractionModalProps> = ({
       </ScrollView>
       <SafeAreaView style={styles.buttonContainer} edges={['bottom', 'left', 'right']}>
         <View style={styles.buttonRow}>
+          <Button title="Back" variant="outline" onPress={onBack} style={styles.backButton} />
           <Button
-            title="Back"
-            variant="outline"
-            onPress={onBack}
-            style={styles.backButton}
+            title="Next"
+            onPress={handleNext}
+            disabled={selection.length === 0}
+            style={styles.nextButton}
           />
         </View>
       </SafeAreaView>
     </SafeAreaView>
   );
 };
-

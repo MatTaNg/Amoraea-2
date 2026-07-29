@@ -37,12 +37,18 @@ export function moment4StatesAbsenceOfCurrentGrudge(text: string): boolean {
     .toLowerCase();
   if (!lower) return false;
   return (
-    /\b(don'?t (really )?hold grudges|don'?t hold grudges|don'?t have.*grudges|no grudges|not hold grudges)\b/.test(
+    /\b(don'?t (really )?hold grudges|don'?t hold grudges|don'?t usually hold grudges|usually don'?t hold grudges|don'?t have.*grudges|no grudges|not hold grudges)\b/.test(
       lower,
     ) ||
     /\b(no one comes to mind|nobody comes to mind|can'?t think of anyone|don'?t have anyone|nothing comes to mind)\b/.test(
       lower,
     ) ||
+    /\b(no specific person|not a specific person|don'?t have a specific person|doesn'?t have a specific person|does not have a specific person|do not have a specific person)\b/.test(
+      lower,
+    ) ||
+    /\b((a )?person|no one|nobody|anyone) (doesn'?t|does not|didn'?t) come to mind\b/.test(lower) ||
+    /\b(can'?t|cannot) think of (a )?(specific )?(person|anyone|someone)\b/.test(lower) ||
+    /\b(can'?t|cannot) think of anyone specific\b/.test(lower) ||
     /\b(not|don'?t think i'?m?) holding on to anything\b/.test(lower) ||
     /\b(genuinely )?can'?t point to (someone|anyone|a person)\b/.test(lower) ||
     /\b(can'?t|cannot) think of (a )?time\b/.test(lower) ||
@@ -57,6 +63,29 @@ export function moment4StatesAbsenceOfCurrentGrudge(text: string): boolean {
     /\b(held grudges when i was younger|grudges when i was younger)\b/.test(lower) ||
     (/\bheld grudges when i was younger\b/.test(lower) &&
       /\b(learned|reflect|forgive|move on|childhood|trauma|trust)\b/.test(lower))
+  );
+}
+
+/**
+ * User explicitly declines to name a specific person or states no one comes to mind.
+ * Skips the client-injected specificity follow-up even when the answer is brief.
+ */
+export function moment4UserDeclinesToNameSpecificPerson(text: string): boolean {
+  const lower = normalizeInterviewTypography(text ?? '')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .toLowerCase();
+  if (!lower) return false;
+  if (moment4StatesAbsenceOfCurrentGrudge(text)) return true;
+  return (
+    /\b(no specific person|not a specific person|don'?t have a specific person|doesn'?t have a specific person|does not have a specific person|do not have a specific person)\b/.test(
+      lower,
+    ) ||
+    /\b((a )?person|no one|nobody|anyone) (doesn'?t|does not|didn'?t) come to mind\b/.test(lower) ||
+    /\b(can'?t|cannot) think of (a )?(specific )?(person|anyone|someone)\b/.test(lower) ||
+    /\b(can'?t|cannot) think of anyone specific\b/.test(lower) ||
+    /\bnothing comes to mind\b/.test(lower) ||
+    /\bno one in particular\b/.test(lower)
   );
 }
 
@@ -198,6 +227,26 @@ export function reconcileMoment4Concreteness(
     return 'absent';
   }
   return normalized ?? heuristic;
+}
+
+/** Resolve M4 concreteness for gate/modifier paths (client-safe — no edge re-export chain). */
+export function mergeMoment4ConcretenessForGate(
+  storedMoment: unknown,
+  rowColumnFallback: unknown,
+  moment4UserText?: string | null,
+): Moment4ConcretenessLevel | null {
+  let fromStored: Moment4ConcretenessLevel | null = null;
+  if (storedMoment != null && typeof storedMoment === 'object' && !Array.isArray(storedMoment)) {
+    const o = storedMoment as Record<string, unknown>;
+    fromStored =
+      normalizeMoment4Concreteness(o.response_concreteness) ??
+      normalizeMoment4Concreteness(o.specificity);
+  }
+  const fromColumn = normalizeMoment4Concreteness(rowColumnFallback);
+  const raw = fromStored ?? fromColumn;
+  const text = (moment4UserText ?? '').trim();
+  if (text) return reconcileMoment4Concreteness(raw, text);
+  return raw;
 }
 
 /**

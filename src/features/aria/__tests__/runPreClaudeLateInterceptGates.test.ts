@@ -5,6 +5,7 @@ import { runPreClaudeClientDisengagementProbeGate } from '@features/aria/runPreC
 import { runPreClaudeClientOwnedCanonicalConstructGate } from '@features/aria/runPreClaudeClientOwnedCanonicalConstructGate';
 import { runPreClaudeConfusionRepeatReplayGates } from '@features/aria/runPreClaudeConfusionRepeatReplayGates';
 import { runPreClaudeIrrelevantAnswerRetryGate } from '@features/aria/runPreClaudeIrrelevantAnswerRetryGate';
+import { runPreClaudeGoBackRequestInjectGate } from '@features/aria/runPreClaudeGoBackRequestInjectGate';
 import { runPreClaudeMoment4SpecificityGate } from '@features/aria/runPreClaudeMoment4SpecificityGate';
 import { runPreClaudeMoment5AccountabilityInjectGates } from '@features/aria/runPreClaudeMoment5AccountabilityInjectGates';
 import { runPreClaudeMoment5QuestionInjectGate } from '@features/aria/runPreClaudeMoment5QuestionInjectGate';
@@ -18,9 +19,15 @@ jest.mock('@features/aria/runPreClaudeMoment5AccountabilityInjectGates');
 jest.mock('@features/aria/runPreClaudeScenario1RepairHardStopGate');
 jest.mock('@features/aria/runPreClaudeClientDisengagementProbeGate');
 jest.mock('@features/aria/runPreClaudeIrrelevantAnswerRetryGate');
+jest.mock('@features/aria/runPreClaudeGoBackRequestInjectGate');
+jest.mock('@features/aria/runPreClaudeScoreRequestInjectGate');
 jest.mock('@features/aria/runPreClaudeClientOwnedCanonicalConstructGate');
 
+import { runPreClaudeScoreRequestInjectGate } from '@features/aria/runPreClaudeScoreRequestInjectGate';
+
 const mockMoment4 = jest.mocked(runPreClaudeMoment4SpecificityGate);
+const mockGoBack = jest.mocked(runPreClaudeGoBackRequestInjectGate);
+const mockScoreRequest = jest.mocked(runPreClaudeScoreRequestInjectGate);
 const mockConfusionRepeat = jest.mocked(runPreClaudeConfusionRepeatReplayGates);
 const mockMoment5Question = jest.mocked(runPreClaudeMoment5QuestionInjectGate);
 const mockMoment5Accountability = jest.mocked(runPreClaudeMoment5AccountabilityInjectGates);
@@ -46,6 +53,8 @@ function moment4Pass() {
 describe('runPreClaudeLateInterceptGates', () => {
   beforeEach(() => {
     jest.clearAllMocks();
+    mockGoBack.mockResolvedValue(null);
+    mockScoreRequest.mockResolvedValue(null);
     mockMoment4.mockResolvedValue(moment4Pass());
     mockConfusionRepeat.mockResolvedValue({ handled: false });
     mockMoment5Question.mockResolvedValue({ handled: false });
@@ -92,6 +101,26 @@ describe('runPreClaudeLateInterceptGates', () => {
     expect(mockClientOwned).toHaveBeenCalled();
   });
 
+  it('short-circuits on go-back request before moment 4 specificity gate', async () => {
+    mockGoBack.mockResolvedValue({ haltTurn: true });
+    const deps = createMockPreClaudeDeps();
+
+    const result = await runPreClaudeLateInterceptGates(
+      deps,
+      'Can we go back?',
+      messagesToUse,
+      3,
+      'Maya',
+      null,
+      false,
+      false,
+    );
+
+    expect(result).toEqual({ handled: true });
+    expect(mockGoBack).toHaveBeenCalled();
+    expect(mockMoment4).not.toHaveBeenCalled();
+  });
+
   it('short-circuits when moment 4 specificity gate handles', async () => {
     mockMoment4.mockResolvedValue({
       handled: true,
@@ -117,7 +146,27 @@ describe('runPreClaudeLateInterceptGates', () => {
     expect(mockMoment5Question).not.toHaveBeenCalled();
   });
 
-  it('short-circuits when irrelevant-answer retry handles before disengagement', async () => {
+  it('short-circuits on score request before irrelevant-answer retry', async () => {
+    mockScoreRequest.mockResolvedValue({ haltTurn: true });
+    const deps = createMockPreClaudeDeps();
+
+    const result = await runPreClaudeLateInterceptGates(
+      deps,
+      'Can I see my school',
+      messagesToUse,
+      1,
+      'Maya',
+      null,
+      false,
+      false,
+    );
+
+    expect(result).toEqual({ handled: true });
+    expect(mockScoreRequest).toHaveBeenCalled();
+    expect(mockIrrelevantRetry).not.toHaveBeenCalled();
+  });
+
+  it('short-circuits when irrelevant-answer retry handles after other intercepts', async () => {
     mockIrrelevantRetry.mockResolvedValue({ handled: true });
     const deps = createMockPreClaudeDeps();
 
@@ -133,9 +182,9 @@ describe('runPreClaudeLateInterceptGates', () => {
     );
 
     expect(result).toEqual({ handled: true });
+    expect(mockDisengagement).toHaveBeenCalled();
+    expect(mockClientOwned).toHaveBeenCalled();
     expect(mockIrrelevantRetry).toHaveBeenCalled();
-    expect(mockDisengagement).not.toHaveBeenCalled();
-    expect(mockClientOwned).not.toHaveBeenCalled();
   });
 
   it('short-circuits when client disengagement probe handles', async () => {

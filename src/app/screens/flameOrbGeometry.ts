@@ -29,6 +29,7 @@ export const INNER_FLAME_PATH = `
 export const FLAME_STATE_SCALE = {
   idle: 1,
   speaking: 1.55,
-  listening: 0.86,
+  /** Keep interview logo at idle size while the user records — mic button carries listening UI. */
+  listening: 1,
   processing: 1.08,
 } as const;

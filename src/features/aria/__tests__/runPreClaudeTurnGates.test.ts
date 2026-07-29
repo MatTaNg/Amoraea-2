@@ -17,6 +17,8 @@ jest.mock('@features/aria/commitPreClaudeUserTurn', () => ({
 
 jest.mock('@features/aria/runPreClaudePostCommitGates', () => ({
   runPreClaudePostCommitGates: jest.fn(),
+  runPreClaudePostCommitIntroGatesOnly: jest.fn(),
+  runPreClaudePostCommitHandoffAndSkipGates: jest.fn(),
 }));
 
 jest.mock('@features/aria/runPreClaudeLateInterceptGates', () => ({
@@ -35,7 +37,7 @@ import { assertPreClaudeAnthropicConfigured } from '@features/aria/assertPreClau
 import { buildPreClaudeTurnApiParams } from '@features/aria/buildPreClaudeTurnApiParams';
 import { commitPreClaudeUserTurn } from '@features/aria/commitPreClaudeUserTurn';
 import { runPreClaudeLateInterceptGates } from '@features/aria/runPreClaudeLateInterceptGates';
-import { runPreClaudePostCommitGates } from '@features/aria/runPreClaudePostCommitGates';
+import { runPreClaudePostCommitHandoffAndSkipGates, runPreClaudePostCommitIntroGatesOnly } from '@features/aria/runPreClaudePostCommitGates';
 import { runPreClaudePreCommitGates } from '@features/aria/runPreClaudePreCommitGates';
 import { runPreClaudeTurnOpeningPipeline } from '@features/aria/runPreClaudeTurnOpeningPipeline';
 
@@ -62,6 +64,10 @@ const baseSkipMeta = {
 };
 
 describe('runPreClaudeTurnGates', () => {
+  beforeEach(() => {
+    jest.clearAllMocks();
+  });
+
   it('returns false when the opening pipeline halts', async () => {
     jest.mocked(runPreClaudeTurnOpeningPipeline).mockResolvedValue({ continue: false });
 
@@ -89,7 +95,7 @@ describe('runPreClaudeTurnGates', () => {
     expect(commitPreClaudeUserTurn).not.toHaveBeenCalled();
   });
 
-  it('returns false when post-commit gates handle the turn', async () => {
+  it('returns false when post-commit handoff gates handle the turn before Claude', async () => {
     jest.mocked(runPreClaudeTurnOpeningPipeline).mockResolvedValue({
       continue: true,
       participantFirstNameForSpoken: 'Alex',
@@ -104,12 +110,72 @@ describe('runPreClaudeTurnGates', () => {
       messagesToUse: [{ role: 'user', content: baseParams.trimmed, scenarioNumber: 1 }],
       userScenarioTag: 1,
     });
-    jest.mocked(runPreClaudePostCommitGates).mockResolvedValue({ handled: true });
+    jest.mocked(runPreClaudePostCommitIntroGatesOnly).mockResolvedValue({ handled: false });
+    jest.mocked(runPreClaudeLateInterceptGates).mockResolvedValue({
+      handled: false,
+      isPersonalOpening: false,
+      lastAssistantContent: 'What is going on between these two?',
+      lastInterviewerContent: 'What is going on between these two?',
+      shouldForceMoment4ThresholdProbe: false,
+      moment4ThresholdHintInAnswer: false,
+      moment5CombinedUserText: baseParams.trimmed,
+      constructProbeFlags: {},
+    });
+    jest.mocked(runPreClaudePostCommitHandoffAndSkipGates).mockResolvedValue({ handled: true });
+
+    const result = await runPreClaudeTurnGates(createMockPreClaudeDeps(), baseParams);
+
+    expect(result).toBe(false);
+    expect(buildPreClaudeTurnApiParams).not.toHaveBeenCalled();
+  });
+
+  it('returns false when post-commit intro gates handle the turn', async () => {
+    jest.mocked(runPreClaudeTurnOpeningPipeline).mockResolvedValue({
+      continue: true,
+      participantFirstNameForSpoken: 'Alex',
+      skipMeta: baseSkipMeta,
+    });
+    jest.mocked(runPreClaudePreCommitGates).mockResolvedValue({
+      handled: false,
+      participantFirstNameForSpoken: 'Alex',
+      isNameEntryTurn: false,
+    });
+    jest.mocked(commitPreClaudeUserTurn).mockResolvedValue({
+      messagesToUse: [{ role: 'user', content: baseParams.trimmed, scenarioNumber: 1 }],
+      userScenarioTag: 1,
+    });
+    jest.mocked(runPreClaudePostCommitIntroGatesOnly).mockResolvedValue({ handled: true });
 
     const result = await runPreClaudeTurnGates(createMockPreClaudeDeps(), baseParams);
 
     expect(result).toBe(false);
     expect(runPreClaudeLateInterceptGates).not.toHaveBeenCalled();
+  });
+
+  it('runs late intercept before post-commit handoff gates', async () => {
+    jest.mocked(runPreClaudeTurnOpeningPipeline).mockResolvedValue({
+      continue: true,
+      participantFirstNameForSpoken: 'Alex',
+      skipMeta: baseSkipMeta,
+    });
+    jest.mocked(runPreClaudePreCommitGates).mockResolvedValue({
+      handled: false,
+      participantFirstNameForSpoken: 'Alex',
+      isNameEntryTurn: false,
+    });
+    jest.mocked(commitPreClaudeUserTurn).mockResolvedValue({
+      messagesToUse: [{ role: 'user', content: baseParams.trimmed, scenarioNumber: 1 }],
+      userScenarioTag: 1,
+    });
+    jest.mocked(runPreClaudePostCommitIntroGatesOnly).mockResolvedValue({ handled: false });
+    jest.mocked(runPreClaudeLateInterceptGates).mockResolvedValue({ handled: true });
+    jest.mocked(runPreClaudePostCommitHandoffAndSkipGates).mockResolvedValue({ handled: false });
+
+    const result = await runPreClaudeTurnGates(createMockPreClaudeDeps(), baseParams);
+
+    expect(result).toBe(false);
+    expect(runPreClaudeLateInterceptGates).toHaveBeenCalled();
+    expect(runPreClaudePostCommitHandoffAndSkipGates).not.toHaveBeenCalled();
   });
 
   it('returns false when late intercept gates handle the turn', async () => {
@@ -127,16 +193,18 @@ describe('runPreClaudeTurnGates', () => {
       messagesToUse: [{ role: 'user', content: baseParams.trimmed, scenarioNumber: 1 }],
       userScenarioTag: 1,
     });
-    jest.mocked(runPreClaudePostCommitGates).mockResolvedValue({ handled: false });
+    jest.mocked(runPreClaudePostCommitIntroGatesOnly).mockResolvedValue({ handled: false });
     jest.mocked(runPreClaudeLateInterceptGates).mockResolvedValue({
       handled: true,
       isPersonalOpening: false,
       lastAssistantContent: 'What is going on between these two?',
+      lastInterviewerContent: 'What is going on between these two?',
       shouldForceMoment4ThresholdProbe: false,
       moment4ThresholdHintInAnswer: false,
       moment5CombinedUserText: baseParams.trimmed,
       constructProbeFlags: {},
     });
+    jest.mocked(runPreClaudePostCommitHandoffAndSkipGates).mockResolvedValue({ handled: false });
 
     const result = await runPreClaudeTurnGates(createMockPreClaudeDeps(), baseParams);
 
@@ -159,16 +227,18 @@ describe('runPreClaudeTurnGates', () => {
       messagesToUse: [{ role: 'user', content: baseParams.trimmed, scenarioNumber: 1 }],
       userScenarioTag: 1,
     });
-    jest.mocked(runPreClaudePostCommitGates).mockResolvedValue({ handled: false });
+    jest.mocked(runPreClaudePostCommitIntroGatesOnly).mockResolvedValue({ handled: false });
     jest.mocked(runPreClaudeLateInterceptGates).mockResolvedValue({
       handled: false,
       isPersonalOpening: false,
       lastAssistantContent: 'What is going on between these two?',
+      lastInterviewerContent: 'What is going on between these two?',
       shouldForceMoment4ThresholdProbe: false,
       moment4ThresholdHintInAnswer: false,
       moment5CombinedUserText: baseParams.trimmed,
       constructProbeFlags: {},
     });
+    jest.mocked(runPreClaudePostCommitHandoffAndSkipGates).mockResolvedValue({ handled: false });
     jest.mocked(assertPreClaudeAnthropicConfigured).mockReturnValue(false);
 
     const result = await runPreClaudeTurnGates(createMockPreClaudeDeps(), baseParams);
@@ -192,16 +262,18 @@ describe('runPreClaudeTurnGates', () => {
       messagesToUse: [{ role: 'user', content: baseParams.trimmed, scenarioNumber: 1 }],
       userScenarioTag: 1,
     });
-    jest.mocked(runPreClaudePostCommitGates).mockResolvedValue({ handled: false });
+    jest.mocked(runPreClaudePostCommitIntroGatesOnly).mockResolvedValue({ handled: false });
     jest.mocked(runPreClaudeLateInterceptGates).mockResolvedValue({
       handled: false,
       isPersonalOpening: false,
       lastAssistantContent: 'What is going on between these two?',
+      lastInterviewerContent: 'What is going on between these two?',
       shouldForceMoment4ThresholdProbe: false,
       moment4ThresholdHintInAnswer: false,
       moment5CombinedUserText: baseParams.trimmed,
       constructProbeFlags: { shouldForceScenarioAContemptProbe: false },
     });
+    jest.mocked(runPreClaudePostCommitHandoffAndSkipGates).mockResolvedValue({ handled: false });
     jest.mocked(assertPreClaudeAnthropicConfigured).mockReturnValue(true);
 
     const deps = createMockPreClaudeDeps();

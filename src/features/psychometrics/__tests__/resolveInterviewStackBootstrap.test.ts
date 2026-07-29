@@ -3,6 +3,10 @@ import {
   shouldFetchPostInterviewDeferralSnapshot,
 } from '../resolveInterviewStackBootstrap';
 import { PSYCHOMETRICS_ENABLED } from '../interviewCompletionStatus';
+import {
+  clearUserEnteredInterviewFlow,
+  markUserEnteredInterviewFlow,
+} from '@utilities/interviewEntryLock';
 
 describe('shouldFetchPostInterviewDeferralSnapshot', () => {
   it('returns false when psychometrics are still required', () => {
@@ -24,6 +28,13 @@ describe('shouldFetchPostInterviewDeferralSnapshot', () => {
     expect(
       shouldFetchPostInterviewDeferralSnapshot({ screen: 'PostInterview' }, true),
     ).toBe(true);
+  });
+
+  it('does not fetch deferral for profile-complete users still on psychometrics path', () => {
+    expect(
+      shouldFetchPostInterviewDeferralSnapshot({ screen: 'AssessmentWelcome' }, true),
+    ).toBe(false);
+    expect(shouldFetchPostInterviewDeferralSnapshot({ screen: 'Amoraea' }, true)).toBe(false);
   });
 });
 
@@ -114,6 +125,67 @@ describe('resolveInterviewStackBootstrap', () => {
 
     expect(result.initialRouteName).toBe('AssessmentWelcome');
     expect(result.legacyPsychometricsMode).toBe(false);
+  });
+
+  it('routes profile-complete users to InterviewComplete when server route lags', () => {
+    const result = resolveInterviewStackBootstrap({
+      initialRoute: {
+        screen: 'AssessmentWelcome',
+        legacyPsychometricsMode: false,
+        interviewAlreadyCompleted: false,
+        needsMarketResearch: false,
+      },
+      profileShowsStandardInterviewComplete: true,
+      deferralSnapshot: {
+        completed_at: '2026-01-01T00:00:00Z',
+        passed: null,
+        override_status: null,
+      },
+      isAdminEmail: false,
+      lockedPostInterviewRoute: null,
+    });
+
+    expect(result.initialRouteName).toBe('InterviewComplete');
+    expect(result.legacyPsychometricsMode).toBe(true);
+    expect(result.interviewAlreadyCompleted).toBe(true);
+  });
+
+  it('skips AssessmentWelcome when local interview progress is resumable', () => {
+    const result = resolveInterviewStackBootstrap({
+      initialRoute: {
+        screen: 'AssessmentWelcome',
+        legacyPsychometricsMode: false,
+        interviewAlreadyCompleted: false,
+        needsMarketResearch: true,
+      },
+      profileShowsStandardInterviewComplete: false,
+      deferralSnapshot: null,
+      isAdminEmail: false,
+      lockedPostInterviewRoute: null,
+      localResumableInterviewProgress: true,
+    });
+
+    expect(result.initialRouteName).toBe('Amoraea');
+  });
+
+  it('skips AssessmentWelcome after user tapped Continue on welcome modal', () => {
+    markUserEnteredInterviewFlow('user-entered-interview');
+    const result = resolveInterviewStackBootstrap({
+      initialRoute: {
+        screen: 'AssessmentWelcome',
+        legacyPsychometricsMode: false,
+        interviewAlreadyCompleted: false,
+        needsMarketResearch: false,
+      },
+      profileShowsStandardInterviewComplete: false,
+      deferralSnapshot: null,
+      isAdminEmail: false,
+      lockedPostInterviewRoute: null,
+      userId: 'user-entered-interview',
+      userEnteredInterviewFlow: true,
+    });
+    void clearUserEnteredInterviewFlow('user-entered-interview');
+    expect(result.initialRouteName).toBe('Amoraea');
   });
 
   it('restores the post-interview screen after exiting the validation flow', () => {

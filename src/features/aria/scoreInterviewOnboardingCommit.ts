@@ -43,9 +43,4 @@ export async function commitStandardOnboardingUsersAfterAttempt(
     })
     .eq('id', userId);
   if (userUpErr) throw new Error(userUpErr.message);
-  try {
-    await supabase.rpc('apply_referral_completion_effects', { p_user_id: userId });
-  } catch {
-    /* non-fatal */
-  }
 }

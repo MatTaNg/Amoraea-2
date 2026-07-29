@@ -1,7 +1,10 @@
 type ScenarioModalTranscriptTurn = { role: string; content?: string | null };
 
+import { isIrrelevantAnswerRetryAssistantLine } from '@features/aria/interviewAnswerRelevance';
+import { getLastSubstantiveScenarioModalQuestion } from '@features/aria/interviewScenarioModalPrompt';
 import {
   detectActiveScenarioFromMessage,
+  normalizeScenarioOpeningForCompare,
   SCENARIO_1_OPENING,
 } from '@features/aria/interviewScenarioOpeningStreamGate';
 import {
@@ -154,49 +157,53 @@ export function isSituation1ModalAdvancedPastOpening(
  * Situation 1 Show scenario footer — exact scripted copy only (opening → contempt → repair).
  * Never surfaces model paraphrases in the modal.
  */
+function resolveSituation1ModalPromptFromSubstantiveQuestion(question: string): string | null {
+  const q = question.trim();
+  if (!q) return null;
+  if (looksLikeScenarioARepairQuestion(q) || looksLikeScenarioARepairStreamFragment(q)) {
+    return SCENARIO_A_REPAIR_QUESTION_AFTER_CONTEMPT_COPY;
+  }
+  if (looksLikeScenarioAContemptProbeQuestion(q)) {
+    return SCENARIO_A_CONTEMPT_PROBE_DELIVERED_COPY;
+  }
+  if (normalizeScenarioOpeningForCompare(q) === normalizeScenarioOpeningForCompare(SCENARIO_1_OPENING)) {
+    return SCENARIO_1_OPENING;
+  }
+  return null;
+}
+
 export function resolveSituation1ExactModalPrompt(
   transcript: ScenarioModalTranscriptTurn[],
   currentSpoken?: string | null,
   delivery?: Situation1ModalDeliveryState | null,
 ): string {
   const spoken = (currentSpoken ?? '').trim();
-  if (spoken) {
-    if (looksLikeScenarioAContemptProbeQuestion(spoken)) {
-      return SCENARIO_A_CONTEMPT_PROBE_DELIVERED_COPY;
-    }
-    if (
-      looksLikeScenarioARepairQuestion(spoken) ||
-      looksLikeScenarioARepairStreamFragment(spoken)
-    ) {
-      return SCENARIO_A_REPAIR_QUESTION_AFTER_CONTEMPT_COPY;
+  if (spoken && !isIrrelevantAnswerRetryAssistantLine(spoken)) {
+    const fromSpoken = resolveSituation1ModalPromptFromSubstantiveQuestion(spoken);
+    if (fromSpoken) return fromSpoken;
+  }
+
+  const scoped = scopedSituation1AssistantTurns(transcript);
+  const lastSubstantive = getLastSubstantiveScenarioModalQuestion(scoped);
+  if (lastSubstantive) {
+    const fromTranscript = resolveSituation1ModalPromptFromSubstantiveQuestion(lastSubstantive);
+    if (fromTranscript && fromTranscript !== SCENARIO_1_OPENING) {
+      return fromTranscript;
     }
   }
 
   if (delivery?.repairQuestionAsked) {
     return SCENARIO_A_REPAIR_QUESTION_AFTER_CONTEMPT_COPY;
   }
-
-  const scoped = scopedSituation1AssistantTurns(transcript);
-  let lastContemptIdx = -1;
-  let lastRepairIdx = -1;
-  for (let i = 0; i < scoped.length; i++) {
-    if (scoped[i]?.role !== 'assistant') continue;
-    const c = (scoped[i]?.content ?? '').trim();
-    if (looksLikeScenarioAContemptProbeQuestion(c)) lastContemptIdx = i;
-    if (looksLikeScenarioARepairQuestion(c) || looksLikeScenarioARepairStreamFragment(c)) {
-      lastRepairIdx = i;
-    }
-  }
-
-  if (lastRepairIdx > lastContemptIdx && lastRepairIdx >= 0) {
-    return SCENARIO_A_REPAIR_QUESTION_AFTER_CONTEMPT_COPY;
-  }
   if (delivery?.contemptProbeAsked) {
     return SCENARIO_A_CONTEMPT_PROBE_DELIVERED_COPY;
   }
-  if (lastContemptIdx >= 0) {
-    return SCENARIO_A_CONTEMPT_PROBE_DELIVERED_COPY;
+
+  if (lastSubstantive) {
+    const fromTranscript = resolveSituation1ModalPromptFromSubstantiveQuestion(lastSubstantive);
+    if (fromTranscript) return fromTranscript;
   }
+
   return SCENARIO_1_OPENING;
 }
 

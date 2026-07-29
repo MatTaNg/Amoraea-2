@@ -9,7 +9,7 @@ import {
   mergePsychometricFloorsIntoGateState,
 } from '../psychometricFloorBreaches';
 import { NPI_ENTITLEMENT_ENABLED } from '../interviewCompletionStatus';
-import { narcissismFloorBreachScores } from '../narcissismInstrumentTestFixtures';
+import { narcissismFloorBreachScores, NARCISSISM_PSYCHOMETRIC_GATE_FLOOR_ENABLED } from '../narcissismInstrumentTestFixtures';
 
 const REGRESSION_FLOOR_SCORES = {
   rfqScore: 1.75,
@@ -109,7 +109,7 @@ describe('admin recalculation psychometric floor merge', () => {
 
   it('produces eight active floor breaches with rich keyed psychometric_floors detail', () => {
     const breaches = collectPsychometricFloorGateFailReasons(REGRESSION_FLOOR_SCORES, []);
-    expect(breaches).toHaveLength(8);
+    expect(breaches).toHaveLength(NARCISSISM_PSYCHOMETRIC_GATE_FLOOR_ENABLED ? 8 : 7);
 
     const merged = mergePsychometricFloorsIntoGateState({
       existingFailReasons: [],
@@ -118,7 +118,7 @@ describe('admin recalculation psychometric floor merge', () => {
       straightLineFlags: [],
     });
 
-    expect(merged.gateFailReasons).toHaveLength(8);
+    expect(merged.gateFailReasons).toHaveLength(NARCISSISM_PSYCHOMETRIC_GATE_FLOOR_ENABLED ? 8 : 7);
     const psychFloors = merged.gateFailDetail.psychometric_floors as Record<
       string,
       { score: number; description: string }

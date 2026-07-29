@@ -14,7 +14,8 @@ import {
   runPreClaudeLateInterceptGates,
 } from '@features/aria/runPreClaudeLateInterceptGates';
 import {
-  runPreClaudePostCommitGates,
+  runPreClaudePostCommitHandoffAndSkipGates,
+  runPreClaudePostCommitIntroGatesOnly,
 } from '@features/aria/runPreClaudePostCommitGates';
 import {
   runPreClaudePreCommitGates,
@@ -62,14 +63,13 @@ export async function runPreClaudeTurnGates(
   const { messagesToUse, userScenarioTag } = userTurn;
   logPreClaudeTurnResponseTiming(deps, params.trimmed);
 
-  const postCommit = await runPreClaudePostCommitGates(
+  const postCommitIntro = await runPreClaudePostCommitIntroGatesOnly(
     deps,
     params.trimmed,
     messagesToUse,
     participantFirstNameForSpoken,
-    skipMeta,
   );
-  if (postCommit.handled) {
+  if (postCommitIntro.handled) {
     return false;
   }
 
@@ -84,6 +84,17 @@ export async function runPreClaudeTurnGates(
     skipMeta.suppressForcedConstructProbesForMetaFrustration,
   );
   if (lateIntercept.handled) {
+    return false;
+  }
+
+  const postCommitHandoff = await runPreClaudePostCommitHandoffAndSkipGates(
+    deps,
+    params.trimmed,
+    messagesToUse,
+    participantFirstNameForSpoken,
+    skipMeta,
+  );
+  if (postCommitHandoff.handled) {
     return false;
   }
 

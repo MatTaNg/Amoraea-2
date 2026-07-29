@@ -1,4 +1,5 @@
 import React from 'react';
+import { ONBOARDING_STEP_SCREEN_EDGES, ONBOARDING_STEP_SCREEN_EDGES_WITH_BOTTOM } from './onboardingStepScreenEdges';
 import { View, Text, TouchableOpacity, ScrollView, ActivityIndicator } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Input } from '@/shared/ui/Input';
@@ -50,11 +51,13 @@ export const BirthDetailsModal: React.FC<BirthDetailsModalProps> = ({
     setLocationSuggestions([]);
   };
 
-  // Allow continuing if birth place is filled (validation is optional for now)
-  const canContinue = birthPlace.trim() && birthDate.trim() && birthTime.trim();
+  const birthPlaceTrimmed = birthPlace.trim();
+  const locationOk = !!validatedLocation && validatedLocation === birthPlaceTrimmed;
+  const canContinue =
+    !!birthPlaceTrimmed && !!birthDate.trim() && !!birthTime.trim() && locationOk;
 
   return (
-    <SafeAreaView style={styles.screen} edges={['top', 'left', 'right']}>
+    <SafeAreaView style={styles.screen} edges={ONBOARDING_STEP_SCREEN_EDGES}>
       <OnboardingHeader title="Birth Details" onBack={onBack} />
       <ScrollView 
         style={styles.scrollView}
@@ -91,7 +94,7 @@ export const BirthDetailsModal: React.FC<BirthDetailsModalProps> = ({
             </View>
           ) : null}
 
-          {birthPlace.trim() && locationSuggestions.length > 0 && (
+          {birthPlaceTrimmed && locationSuggestions.length > 0 && !validatedLocation && (
             <View style={styles.suggestionsContainer}>
               {locationSuggestions.map((s, idx) => (
                 <TouchableOpacity
@@ -104,6 +107,13 @@ export const BirthDetailsModal: React.FC<BirthDetailsModalProps> = ({
               ))}
             </View>
           )}
+          {birthPlaceTrimmed && !locationOk && !birthPlacePlacesLoading ? (
+            <Text style={styles.errorText}>
+              {locationSuggestions.length > 0
+                ? 'Please select a birth place from the suggestions above.'
+                : 'Keep typing until matching places appear, then select one from the list.'}
+            </Text>
+          ) : null}
 
           <DatePicker
             label="Birth Date *"

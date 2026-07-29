@@ -164,7 +164,6 @@ export type DetectOverdisclosureInput = {
   disclosureCalibration: string | null;
   moment4Concreteness: string | null;
   moment5Concreteness: string | null;
-  vocabDensity: number | null;
 };
 
 export function detectOverdisclosure(input: DetectOverdisclosureInput): boolean {
@@ -174,9 +173,7 @@ export function detectOverdisclosure(input: DetectOverdisclosureInput): boolean 
   const m5Long = (input.moment5WordCount ?? 0) > 400;
   if (!m4Long && !m5Long) return false;
 
-  const highVocab = (input.vocabDensity ?? 0) > 2.5;
-  const bothConcrete =
-    input.moment4Concreteness === 'high' || input.moment5Concreteness === 'high';
-
-  return highVocab || bothConcrete;
+  return (
+    input.moment4Concreteness === 'high' || input.moment5Concreteness === 'high'
+  );
 }

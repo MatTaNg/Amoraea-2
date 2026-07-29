@@ -250,7 +250,7 @@ export function AdminInterviewDepthSignalsTab({
               {EGO_LEVEL_ADMIN_SHORT_DESC[egoLevel] ?? ''}
             </Text>
             <Text style={styles.depthSignalFootnote}>
-              {`Holistic assessment of response sophistication across the full interview. Based on Loevinger's ego development framework — measures the complexity and maturity of how someone makes meaning of relational situations.\n\nLevel 1 — Concrete and rule-based. Black and white framing. Characters are simply right or wrong. No complexity held. Gate modifier: -0.3. Auto-fail.\nLevel 2 — Aware of multiple perspectives but resolves them simplistically. "Both people need to communicate better." Gate modifier: 0. Review flag.\nLevel 3 — Holds complexity without resolving it prematurely. Recognizes patterns. Uses psychological concepts naturally. Gate modifier: +0.1.\nLevel 4 — Integrates contradictions. Connects behavior to broader relational patterns. Tolerates ambiguity. Gate modifier: +0.2.\nLevel 5 — Systemic relational understanding. Recognizes how internal states drive patterns across relationships. Gate modifier: +0.3.`}
+              {`Holistic assessment of response sophistication across the full interview. Based on Loevinger's ego development framework — measures the complexity and maturity of how someone makes meaning of relational situations.\n\nLevel 1 — Concrete and rule-based. Black and white framing. Characters are simply right or wrong. No complexity held. Gate modifier: -0.3.\nLevel 2 — Aware of multiple perspectives but resolves them simplistically. "Both people need to communicate better." Gate modifier: 0. Review flag.\nLevel 3 — Holds complexity without resolving it prematurely. Recognizes patterns. Uses psychological concepts naturally. Gate modifier: +0.1.\nLevel 4 — Integrates contradictions. Connects behavior to broader relational patterns. Tolerates ambiguity. Gate modifier: +0.2.\nLevel 5 — Systemic relational understanding. Recognizes how internal states drive patterns across relationships. Gate modifier: +0.3.`}
             </Text>
           </>
         ) : (
@@ -330,19 +330,9 @@ export function AdminInterviewDepthSignalsTab({
       </View>
 
       <View style={[styles.block, { marginTop: 12 }]}>
-        <Text style={styles.blockTitle}>Personal moment emotional vocabulary</Text>
-        <Text style={styles.depthSignalFootnote}>
-          {`Measures whether the user uses emotional vocabulary words when describing their own personal experiences — words that name or characterize internal emotional states (angry, hurt, ashamed, proud, anxious, relieved, etc.).\n\nCompares emotional vocabulary density in personal moment responses against scenario responses. A significant gap — analytically rich in scenarios but emotionally flat in personal moments — signals possible alexithymia: difficulty accessing or describing one's own feelings.\n\nNormal — density is adequate or consistent with scenario responses.\nLow — personal moment emotional vocabulary significantly below scenario average. Review flag when combined with low concreteness.`}
-        </Text>
-        <Text style={styles.blockText}>
-          {attempt.personal_moment_emotional_vocab_low === true ? 'Low ⚑' : 'Normal ✓'}
-        </Text>
-      </View>
-
-      <View style={[styles.block, { marginTop: 12 }]}>
         <Text style={styles.blockTitle}>Disclosure calibration</Text>
         <Text style={styles.depthSignalFootnote}>
-          {`Assesses whether the user's personal moment disclosures were appropriate for the interview context — neither too guarded nor overwhelming.\n\nCalibrated — personal disclosures were specific and emotionally honest without being either avoidant or excessive. No flag.\n\nUnderdisclosure — personal responses significantly shorter and less specific than scenario responses, with both moments at absent or low concreteness. The user engages analytically with fictional others but closes down when asked about their own experience. Signals low private self-awareness or experiential avoidance.\n\nOverdisclosure — personal responses exceeded appropriate scope: very high word count, unsolicited clinical trauma vocabulary, or extensive detail about third parties not relevant to the question. Signals poor social calibration or boundary awareness. Adds overdisclosure_review flag.`}
+          {`Assesses whether the user's personal moment disclosures were appropriate for the interview context — neither too guarded nor overwhelming.\n\nCalibrated — personal disclosures were specific and emotionally honest without being either avoidant or excessive. No flag.\n\nUnderdisclosure — personal responses significantly shorter than scenario responses (below 40% of scenario average) when neither moment is substantively concrete. Gate modifier: -0.2.\n\nOverdisclosure — personal responses exceeded appropriate scope: very high word count or unsolicited clinical trauma vocabulary. Review flag only (no score modifier).`}
         </Text>
         <Text
           style={[
@@ -358,7 +348,7 @@ export function AdminInterviewDepthSignalsTab({
 
       <Text style={[styles.sectionTitle, { marginTop: 22 }]}>Section D — Defense patterns</Text>
       <Text style={[styles.depthSignalFootnote, { marginTop: 4, marginBottom: 6 }]}>
-        {`Cross-scenario detection of immature psychological defenses. Each flag fires when a consistent pattern is detected across the full interview. Individual flags apply a -0.1 score modifier. Three or more flags active simultaneously applies an additional penalty and triggers gate fail consideration.`}
+        {`Cross-scenario detection of immature psychological defenses. Projection is tracked for review but does not count toward the depth modifier. Rationalization, splitting, and denial stack: 1 flag -0.1, 2 flags -0.2, 3+ flags -0.35. Two flags adds defense_pattern_review.`}
       </Text>
       <View style={styles.defenseGrid}>
         {(

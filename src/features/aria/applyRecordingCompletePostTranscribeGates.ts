@@ -11,6 +11,10 @@ import {
   shouldRejectVoiceForNonEnglish,
   WHISPER_RATIO_REASK_MAX_ATTEMPTS_PER_QUESTION,
 } from '@features/aria/interviewLanguageGate';
+import {
+  hasQuestionRecoveryPromptAlreadySpokenForSeq,
+  looksLikeCompleteShortUserReply,
+} from '@features/aria/interviewAnswerRelevance';
 import { resolveMetaCommentForInterviewTurn } from '@features/aria/metaCommentClassification';
 import {
   SILENT_BUFFER_RETAKE_PROMPT,
@@ -22,6 +26,7 @@ import type { OnRecordingCompleteDeps, OnRecordingCompleteParams } from '@featur
 import type { TranscribeSafeResult } from '@features/aria/transcribeSafeTypes';
 import { resolvePlausibleInterviewFirstName } from '@features/aria/interviewNameValidation';
 import { getWhisperInfraExhaustedUserMessage } from '@features/aria/interviewUserFacingErrors';
+import { queueResumeDeferredUserSpeech, flushResumeDeferredUserSpeechWhenUnblocked } from '@features/aria/resumeDeferredUserSpeech';
 import { isResumeWelcomeFlowBlockingTurnProcessing } from '@features/aria/resumeWelcomeTurnProcessingGate';
 import { getSessionLogRuntime } from '@utilities/sessionLogging';
 import {
@@ -123,6 +128,16 @@ export async function applyRecordingCompletePostTranscribeGates(
   if (
     willRatioReask &&
     deps.whisperRatioReaskAttemptsForCurrentQuestionRef.current >= WHISPER_RATIO_REASK_MAX_ATTEMPTS_PER_QUESTION
+  ) {
+    willRatioReask = false;
+  }
+  if (
+    willRatioReask &&
+    hasQuestionRecoveryPromptAlreadySpokenForSeq(
+      deps.recoveryAssistantSpokenAtSubstantiveSeqRef.current,
+      deps.substantiveInterviewQuestionDeliveredSeqRef.current,
+    ) &&
+    looksLikeCompleteShortUserReply(userText)
   ) {
     willRatioReask = false;
   }
@@ -259,6 +274,7 @@ export async function applyRecordingCompletePostTranscribeGates(
       },
     )
   ) {
+    queueResumeDeferredUserSpeech(userText);
     void remoteLog('[RESUME_WELCOME] post_transcribe_turn_blocked', {
       attemptId: deps.interviewSessionAttemptIdRef.current,
       wordCount: wc,
@@ -267,6 +283,14 @@ export async function applyRecordingCompletePostTranscribeGates(
       repeatChoicePending: deps.resumeRepeatChoicePendingRef.current,
       lastQuestionPreview: (deps.lastQuestionTextRef.current ?? '').slice(0, 120),
       transcriptPreview: userText.slice(0, 120),
+      deferredForAfterResumePlayback: true,
+    });
+    void flushResumeDeferredUserSpeechWhenUnblocked({
+      processUserSpeech: deps.processUserSpeech,
+      resumeLoadingFlowActiveRef: deps.resumeLoadingFlowActiveRef,
+      resumeOfferWelcomeTtsRef: deps.resumeOfferWelcomeTtsRef,
+      resumeRepeatChoicePendingRef: deps.resumeRepeatChoicePendingRef,
+      interviewSessionAttemptIdRef: deps.interviewSessionAttemptIdRef,
     });
     deps.setVoiceState('idle');
     return false;

@@ -4,6 +4,7 @@ import {
   Animated,
   AppState,
   Easing,
+  Image,
   Platform,
   Pressable,
   ScrollView,
@@ -12,28 +13,26 @@ import {
   View,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
+import { useQueryClient } from '@tanstack/react-query';
 import { PostInterviewScrollLayout } from '@app/screens/onboarding/PostInterviewScrollLayout';
 import { PostInterviewProfileEncouragement } from '@app/screens/onboarding/PostInterviewProfileEncouragement';
-import { FlameOrb } from '@app/screens/FlameOrb';
+import { AMORAEA_FLAME_ORB_LOGO } from '@app/screens/flameOrbLogo';
 import { DownloadPersonalReportButton } from '@features/psychometrics/DownloadPersonalReportButton';
+import { PostInterviewLaunchScoreSummary } from '@features/onboarding/PostInterviewLaunchScoreSummary';
 import { useInterviewAttemptEgoRepair } from '@features/aria/hooks/useInterviewAttemptEgoRepair';
 import { useAuth } from '@features/authentication/hooks/useAuth';
 import { isAmoraeaAdminConsoleEmail } from '@/constants/adminConsole';
-import { fetchLaunchWaitlistPassedCount } from '@features/onboarding/fetchLaunchWaitlistPassedCount';
 import { LAUNCH_WAITLIST_USER_GOAL, LAUNCH_WAITLIST_VALUE_PROPS } from '@features/onboarding/postInterviewLaunchMode';
+import {
+  postInterviewLaunchQueryKeys,
+  useLaunchWaitlistPassedCountQuery,
+  usePostInterviewReferralStateQuery,
+} from '@features/onboarding/postInterviewLaunchQueries';
 import { usePostInterviewProfileCta } from '@features/onboarding/usePostInterviewProfileCta';
 import * as Clipboard from 'expo-clipboard';
-import { useFocusEffect } from '@react-navigation/native';
 import { supabase } from '@data/supabase/client';
 import { clearReferralNoticePending } from '@data/repos/usersRoutingRepo';
-import {
-  fetchReferralDiscountStatus,
-  type ReferralDiscountStatus,
-} from '@features/referrals/referralInterview';
-import {
-  USER_INTERVIEW_ROUTING_TABLE,
-  USER_REFERRAL_NOTICE_SELECT,
-} from '@data/supabase/userInterviewRoutingSelect';
+import { PostInterviewLaunchReferralCard } from '@features/referrals/PostInterviewLaunchReferralCard';
 
 const ACCENT = '#3b82f6';
 const GLASS_BG = 'rgba(255,255,255,0.06)';
@@ -44,6 +43,9 @@ const FONT_BODY = Platform.OS === 'web' ? "'DM Sans', system-ui, sans-serif" : u
 const GOOGLE_FONTS_HREF =
   'https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,400;0,500;0,600;1,400&family=DM+Sans:ital,opsz,wght@0,9..40,400;0,9..40,500;0,9..40,600;1,9..40,400&display=swap';
 
+/** Static hero flame on the launch congratulations screen. */
+const CONGRATS_FLAME_ORB_SIZE = 140;
+
 function loadWebFontsOnce() {
   if (Platform.OS !== 'web' || typeof document === 'undefined') return;
   if (document.querySelector(`link[href="${GOOGLE_FONTS_HREF}"]`)) return;
@@ -51,36 +53,6 @@ function loadWebFontsOnce() {
   link.rel = 'stylesheet';
   link.href = GOOGLE_FONTS_HREF;
   document.head.appendChild(link);
-}
-
-function FlickeringFlame({ size = 104 }: { size?: number }) {
-  const flicker = useRef(new Animated.Value(1)).current;
-  useEffect(() => {
-    const loop = Animated.loop(
-      Animated.sequence([
-        Animated.timing(flicker, {
-          toValue: 0.78,
-          duration: 240,
-          easing: Easing.inOut(Easing.quad),
-          useNativeDriver: Platform.OS !== 'web',
-        }),
-        Animated.timing(flicker, {
-          toValue: 1,
-          duration: 420,
-          easing: Easing.inOut(Easing.quad),
-          useNativeDriver: Platform.OS !== 'web',
-        }),
-        Animated.delay(1400),
-      ]),
-    );
-    loop.start();
-    return () => loop.stop();
-  }, [flicker]);
-  return (
-    <Animated.View style={{ opacity: flicker, alignItems: 'center' }}>
-      <FlameOrb state="idle" size={size} minimalGlow />
-    </Animated.View>
-  );
 }
 
 export const PostInterviewLaunchScreen: React.FC<{
@@ -91,6 +63,7 @@ export const PostInterviewLaunchScreen: React.FC<{
   };
   route: { params: { userId: string } };
 }> = ({ route, navigation }) => {
+  const queryClient = useQueryClient();
   const { user } = useAuth();
   const userId = route.params?.userId ?? '';
   const isAdminEmail = isAmoraeaAdminConsoleEmail(user?.email ?? '');
@@ -98,12 +71,15 @@ export const PostInterviewLaunchScreen: React.FC<{
   const discountAnim = useRef(new Animated.Value(0)).current;
   const discountValueRef = useRef(0);
   const copyFeedbackTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const [passedCount, setPassedCount] = useState<number | null>(null);
-  const [referralStatus, setReferralStatus] = useState<ReferralDiscountStatus | null>(null);
-  const [referralNotice, setReferralNotice] = useState<string | null>(null);
-  const [referralLoading, setReferralLoading] = useState(true);
   const [copyFeedback, setCopyFeedback] = useState(false);
   const [animatedDiscount, setAnimatedDiscount] = useState(0);
+  const { data: passedCount } = useLaunchWaitlistPassedCountQuery();
+  const {
+    data: referralState,
+    isPending: referralLoading,
+  } = usePostInterviewReferralStateQuery(userId);
+  const referralStatus = referralState?.referralStatus ?? null;
+  const referralNotice = referralState?.referralNotice ?? null;
   const {
     profileCtaLoaded,
     profileCtaBusy,
@@ -124,57 +100,17 @@ export const PostInterviewLaunchScreen: React.FC<{
   }, []);
 
   useEffect(() => {
-    let cancelled = false;
-    void (async () => {
-      const count = await fetchLaunchWaitlistPassedCount();
-      if (!cancelled) setPassedCount(count);
-    })();
-    return () => {
-      cancelled = true;
+    if (!userId) return;
+    const refetchStaleReferralState = () => {
+      void queryClient.refetchQueries({
+        queryKey: postInterviewLaunchQueryKeys.referralState(userId),
+        stale: true,
+      });
     };
-  }, []);
-
-  const refreshReferralState = useCallback(async () => {
-    if (!userId) return;
-    setReferralLoading(true);
-    try {
-      const { data: auth } = await supabase.auth.getUser();
-      const uid = auth.user?.id ?? userId;
-      if (!uid) {
-        setReferralStatus(null);
-        setReferralNotice(null);
-        return;
-      }
-      const [status, userRow] = await Promise.all([
-        fetchReferralDiscountStatus(uid),
-        supabase
-          .from(USER_INTERVIEW_ROUTING_TABLE)
-          .select(USER_REFERRAL_NOTICE_SELECT)
-          .eq('id', uid)
-          .maybeSingle(),
-      ]);
-      setReferralStatus(status);
-      setReferralNotice(userRow.data?.referral_notice_pending ?? null);
-    } catch (e) {
-      if (__DEV__) console.warn('[PostInterviewLaunch] refresh referral state', e);
-    } finally {
-      setReferralLoading(false);
-    }
-  }, [userId]);
-
-  useFocusEffect(
-    useCallback(() => {
-      void refreshReferralState();
-      return undefined;
-    }, [refreshReferralState]),
-  );
-
-  useEffect(() => {
-    if (!userId) return;
     if (Platform.OS === 'web' && typeof document !== 'undefined') {
       const onVisibilityChange = () => {
         if (document.visibilityState === 'visible') {
-          void refreshReferralState();
+          refetchStaleReferralState();
         }
       };
       document.addEventListener('visibilitychange', onVisibilityChange);
@@ -182,11 +118,11 @@ export const PostInterviewLaunchScreen: React.FC<{
     }
     const sub = AppState.addEventListener('change', (next) => {
       if (next === 'active') {
-        void refreshReferralState();
+        refetchStaleReferralState();
       }
     });
     return () => sub.remove();
-  }, [refreshReferralState, userId]);
+  }, [queryClient, userId]);
 
   useEffect(() => {
     let listenerId: string | null = null;
@@ -257,19 +193,34 @@ export const PostInterviewLaunchScreen: React.FC<{
       const uid = auth.user?.id ?? userId;
       if (!uid) return;
       await clearReferralNoticePending(uid);
-      setReferralNotice(null);
+      queryClient.setQueryData(
+        postInterviewLaunchQueryKeys.referralState(userId),
+        (current) =>
+          current
+            ? {
+                ...current,
+                referralNotice: null,
+              }
+            : current,
+      );
     } catch (e) {
       if (__DEV__) console.warn('[PostInterviewLaunch] clear referral notice', e);
     }
-  }, [referralNotice, userId]);
+  }, [queryClient, referralNotice, userId]);
 
   const counterDisplay = passedCount == null ? '—' : String(passedCount);
-  const progressRatio = Math.min(animatedDiscount / 100, 1);
 
   return (
     <>
     <PostInterviewScrollLayout scrollViewRef={scrollViewRef}>
-      <FlickeringFlame size={104} />
+      <View style={styles.logoWrap}>
+        <Image
+          source={AMORAEA_FLAME_ORB_LOGO}
+          accessibilityLabel="Amoraea"
+          style={styles.logoImage}
+          resizeMode="contain"
+        />
+      </View>
       <Text style={styles.h1}>Congratulations on completing your assessment</Text>
       <Text style={styles.sub}>
         You&apos;re part of an early cohort helping us refine Amoraea before launch.
@@ -341,84 +292,31 @@ export const PostInterviewLaunchScreen: React.FC<{
         )}
       </View>
 
+      <PostInterviewLaunchScoreSummary userId={userId} />
       <DownloadPersonalReportButton userId={userId} variant="dark" />
-      <View style={styles.referralCard}>
-        <Text style={styles.referralEyebrow}>Referral Discount</Text>
-        {referralNotice ? (
-          <View style={styles.referralNoticeBanner}>
-            <Text style={styles.referralNoticeText}>{referralNotice}</Text>
-            <Pressable onPress={() => void dismissReferralNotice()} style={styles.referralNoticeDismiss}>
-              <Text style={styles.referralNoticeDismissLabel}>Dismiss</Text>
-            </Pressable>
-          </View>
-        ) : null}
-        {referralLoading ? (
-          <View style={styles.referralLoading}>
-            <ActivityIndicator color="#93c5fd" />
-          </View>
-        ) : referralStatus ? (
-          <>
-            <Text style={styles.discountValue}>{animatedDiscount}%</Text>
-            <Text style={styles.discountCaption}>off every membership tier, forever</Text>
-
-            {referralStatus.atCap ? (
-              <Text style={styles.progressCapText}>
-                You&apos;ve unlocked the maximum discount. Every tier is 100% off for you.
-              </Text>
-            ) : (
-              <View style={styles.progressWrap}>
-                <View style={styles.progressTrack}>
-                  <View style={[styles.progressFill, { width: `${progressRatio * 100}%` }]} />
-                </View>
-                <Text style={styles.progressText}>{animatedDiscount}% toward 100% off</Text>
-              </View>
-            )}
-
-            <View style={styles.referralExplanationBox}>
-              <Text style={styles.referralExplanationTitle}>How to get more discounts:</Text>
-              <View style={styles.referralStepsList}>
-                <Text style={styles.referralStep}>
-                  1) Your friend inputs your code during their account setup
-                </Text>
-                <Text style={styles.referralStep}>2) Your friend completes the interview</Text>
-                <Text style={styles.referralStep}>
-                  3) You and your friend get an additional{' '}
-                  <Text style={styles.referralExplanationHighlight}>20% off future subscription for LIFE!</Text>
-                </Text>
-              </View>
-            </View>
-
-            <View style={styles.codeBox}>
-              <Text style={styles.codeLabel}>Your referral code</Text>
-              <Text style={styles.codeValue}>{referralStatus.referralCode ?? '—'}</Text>
-              <View style={styles.codeActions}>
-                <Pressable
-                  onPress={() => void copyReferralCode()}
-                  disabled={!referralStatus.referralCode}
-                  style={({ pressed }) => [
-                    styles.codeActionButton,
-                    pressed && referralStatus.referralCode ? { opacity: 0.92 } : null,
-                    !referralStatus.referralCode ? styles.codeActionDisabled : null,
-                  ]}
-                >
-                  <Ionicons name="copy-outline" size={16} color="#E8F4FF" style={{ marginRight: 6 }} />
-                  <Text style={styles.codeActionText}>{copyFeedback ? 'Copied ✓' : 'Copy Code'}</Text>
-                </Pressable>
-              </View>
-            </View>
-          </>
-        ) : (
-          <Text style={styles.referralFallback}>
-            We couldn&apos;t load your referral discount right now. Try reopening this screen in a moment.
-          </Text>
-        )}
-      </View>
+      <PostInterviewLaunchReferralCard
+        referralStatus={referralStatus}
+        displayDiscount={animatedDiscount}
+        copyFeedback={copyFeedback}
+        onCopyPress={() => void copyReferralCode()}
+        loading={referralLoading}
+        referralNotice={referralNotice}
+        onDismissReferralNotice={() => void dismissReferralNotice()}
+      />
     </PostInterviewScrollLayout>
     </>
   );
 };
 
 const styles = StyleSheet.create({
+  logoWrap: {
+    alignItems: 'center',
+    marginBottom: 4,
+  },
+  logoImage: {
+    width: CONGRATS_FLAME_ORB_SIZE,
+    height: CONGRATS_FLAME_ORB_SIZE,
+  },
   h1: {
     fontFamily: FONT_DISPLAY,
     fontSize: 26,
@@ -529,199 +427,5 @@ const styles = StyleSheet.create({
     lineHeight: 19,
     color: 'rgba(255,255,255,0.58)',
     textAlign: 'center',
-  },
-  referralCard: {
-    width: '100%',
-    backgroundColor: 'rgba(12,19,34,0.96)',
-    borderWidth: 1,
-    borderColor: 'rgba(91,168,232,0.28)',
-    borderRadius: 18,
-    paddingVertical: 26,
-    paddingHorizontal: 20,
-    marginTop: 4,
-    alignItems: 'center',
-  },
-  referralEyebrow: {
-    fontFamily: FONT_BODY,
-    fontSize: 12,
-    letterSpacing: 1.5,
-    textTransform: 'uppercase',
-    color: '#8FBFFF',
-    marginBottom: 10,
-  },
-  referralLoading: {
-    minHeight: 120,
-    width: '100%',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  discountValue: {
-    fontFamily: FONT_DISPLAY,
-    fontSize: 78,
-    lineHeight: 80,
-    fontWeight: '600',
-    color: '#F8FBFF',
-    textAlign: 'center',
-  },
-  discountCaption: {
-    fontFamily: FONT_BODY,
-    fontSize: 15,
-    lineHeight: 22,
-    color: 'rgba(255,255,255,0.76)',
-    textAlign: 'center',
-    marginTop: 8,
-    marginBottom: 18,
-  },
-  progressWrap: {
-    width: '100%',
-    marginBottom: 18,
-  },
-  progressTrack: {
-    width: '100%',
-    height: 10,
-    borderRadius: 999,
-    backgroundColor: 'rgba(255,255,255,0.08)',
-    overflow: 'hidden',
-    marginBottom: 10,
-  },
-  progressFill: {
-    height: '100%',
-    borderRadius: 999,
-    backgroundColor: '#5BA8E8',
-  },
-  progressText: {
-    fontFamily: FONT_BODY,
-    fontSize: 14,
-    lineHeight: 20,
-    color: '#DCEBFF',
-    textAlign: 'center',
-  },
-  progressCapText: {
-    fontFamily: FONT_BODY,
-    fontSize: 14,
-    lineHeight: 21,
-    color: '#DCEBFF',
-    textAlign: 'center',
-    marginBottom: 18,
-  },
-  codeBox: {
-    width: '100%',
-    backgroundColor: 'rgba(255,255,255,0.04)',
-    borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.08)',
-    borderRadius: 14,
-    paddingVertical: 18,
-    paddingHorizontal: 16,
-    marginTop: 0,
-    marginBottom: 0,
-  },
-  codeLabel: {
-    fontFamily: FONT_BODY,
-    fontSize: 12,
-    letterSpacing: 1.2,
-    textTransform: 'uppercase',
-    color: 'rgba(255,255,255,0.55)',
-    marginBottom: 8,
-  },
-  codeValue: {
-    fontFamily: FONT_BODY,
-    fontSize: 28,
-    fontWeight: '700',
-    letterSpacing: 2,
-    color: '#F5FAFF',
-    textAlign: 'center',
-    marginBottom: 16,
-  },
-  codeActions: {
-    flexDirection: 'row',
-    justifyContent: 'center',
-    gap: 10,
-  },
-  codeActionButton: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    backgroundColor: 'rgba(91,168,232,0.24)',
-    borderWidth: 1,
-    borderColor: 'rgba(91,168,232,0.5)',
-    borderRadius: 12,
-    paddingVertical: 12,
-    paddingHorizontal: 14,
-  },
-  codeActionDisabled: {
-    opacity: 0.45,
-  },
-  codeActionText: {
-    fontFamily: FONT_BODY,
-    fontSize: 14,
-    fontWeight: '700',
-    color: '#E8F4FF',
-  },
-  referralExplanationBox: {
-    width: '100%',
-    backgroundColor: 'rgba(91,168,232,0.14)',
-    borderWidth: 1,
-    borderColor: 'rgba(91,168,232,0.38)',
-    borderRadius: 14,
-    paddingVertical: 16,
-    paddingHorizontal: 16,
-    marginTop: 4,
-    marginBottom: 16,
-  },
-  referralExplanationTitle: {
-    fontFamily: FONT_BODY,
-    fontSize: 16,
-    lineHeight: 22,
-    fontWeight: '700',
-    color: '#F5FAFF',
-    marginBottom: 12,
-  },
-  referralStepsList: {
-    width: '100%',
-    gap: 10,
-  },
-  referralStep: {
-    fontFamily: FONT_BODY,
-    fontSize: 15,
-    lineHeight: 22,
-    fontWeight: '500',
-    color: 'rgba(255,255,255,0.92)',
-  },
-  referralExplanationHighlight: {
-    fontWeight: '700',
-    color: '#C8E4FF',
-  },
-  referralFallback: {
-    fontFamily: FONT_BODY,
-    fontSize: 14,
-    lineHeight: 21,
-    color: 'rgba(255,255,255,0.7)',
-    textAlign: 'center',
-  },
-  referralNoticeBanner: {
-    width: '100%',
-    backgroundColor: 'rgba(34,197,94,0.14)',
-    borderWidth: 1,
-    borderColor: 'rgba(74,222,128,0.32)',
-    borderRadius: 12,
-    paddingVertical: 12,
-    paddingHorizontal: 14,
-    marginBottom: 18,
-  },
-  referralNoticeText: {
-    fontFamily: FONT_BODY,
-    fontSize: 13,
-    lineHeight: 19,
-    color: '#CFFBDD',
-  },
-  referralNoticeDismiss: {
-    alignSelf: 'flex-start',
-    marginTop: 8,
-  },
-  referralNoticeDismissLabel: {
-    fontFamily: FONT_BODY,
-    fontSize: 13,
-    fontWeight: '700',
-    color: '#9FE3B4',
   },
 });

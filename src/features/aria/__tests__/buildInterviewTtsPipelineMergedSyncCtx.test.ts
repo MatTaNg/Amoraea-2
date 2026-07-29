@@ -44,6 +44,34 @@ describe('buildInterviewTtsPipelineMergedSyncCtx', () => {
     expect(merged.setLastTtsCompletionCallbackMs).toEqual(expect.any(Function));
   });
 
+  it('preserves moment4ThresholdProbeAskedRef from core for parallel-stream M4 gates', () => {
+    const thresholdRef = { current: true };
+    const coreCtx = {
+      moment4ThresholdProbeAskedRef: thresholdRef,
+      committedScenarioRef: { current: null },
+    } as unknown as AriaInterviewDepsSyncContext;
+
+    const merged = buildInterviewTtsPipelineMergedSyncCtx(coreCtx, {
+      setTtsPlaybackReliabilityNotice: jest.fn(),
+      setLastTtsCompletionCallbackMs: jest.fn(),
+      speak: jest.fn(),
+      applyInterviewSpeechComplete: jest.fn(),
+      awaitTtsScreenReadyGate: jest.fn(async () => undefined),
+      stopElevenLabsPlayback: jest.fn(async () => undefined),
+      referenceCardShouldUpdateOnPlaybackStart: () => false,
+      persistInterviewAttemptSessionLifecycle: jest.fn(async () => undefined),
+      applyReferenceCardFromAssistantSpeechRef: { current: jest.fn() },
+      s1ContemptFixVersion: 21,
+      setReferenceCardPrompt: jest.fn(),
+      setReferenceCardScenario: jest.fn(),
+      setInterviewUiPhase: jest.fn(),
+      prepareInterviewTtsPlayback: jest.fn(async () => undefined),
+      committedScenarioRef: { current: null },
+    });
+
+    expect(merged.moment4ThresholdProbeAskedRef).toBe(thresholdRef);
+  });
+
   it('does not wipe core showScenarioCard when local scope omits it', () => {
     const kindsRef = { current: { moment_4: true } };
     const coreCtx = {

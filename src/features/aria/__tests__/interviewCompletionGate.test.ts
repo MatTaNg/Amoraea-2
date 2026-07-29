@@ -145,6 +145,21 @@ describe('evaluateInterviewCompletionGate', () => {
     }
   });
 
+  it('passes when thin skip/meta answers after M5 question do not require moment_5_scores', () => {
+    const r = evaluateInterviewCompletionGate({
+      scenario1: bundle(1),
+      scenario2: bundle(2),
+      scenario3: bundle(3),
+      moment4: { pillarScores: { commitment_threshold: 5 } },
+      moment5: null,
+      transcript: [
+        { role: 'assistant', content: 'Think of a time when you had a conflict with someone important to you.' },
+        { role: 'user', content: 'Can we skip this one?' },
+      ],
+    });
+    expect(r.ok).toBe(true);
+  });
+
   it('passes when transcript never reached Moment 5 without moment_5_scores', () => {
     const r = evaluateInterviewCompletionGate({
       scenario1: bundle(1),

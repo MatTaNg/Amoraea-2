@@ -395,18 +395,59 @@ const styles = StyleSheet.create({
     fontWeight: '500',
     lineHeight: 18,
   },
-  /** Compact row: do not stretch to full screen width. */
   row: {
-    flexDirection: 'row',
-    gap: 10,
+    gap: 12,
     alignItems: 'flex-start',
-    alignSelf: 'flex-start',
-    flexWrap: 'wrap',
     maxWidth: '100%',
+    ...Platform.select({
+      android: {
+        flexDirection: 'column',
+        alignSelf: 'stretch',
+        width: '100%',
+      },
+      default: {
+        flexDirection: 'row',
+        alignSelf: 'flex-start',
+        flexWrap: 'wrap',
+      },
+    }),
   },
-  pickerColYear: { width: 96, flexShrink: 0 },
-  pickerColMonth: { width: 144, flexShrink: 0 },
-  pickerColDay: { width: 72, flexShrink: 0 },
+  pickerColYear: Platform.select({
+    android: {
+      width: '100%',
+      minWidth: 128,
+      alignSelf: 'stretch',
+    },
+    default: {
+      width: 128,
+      minWidth: 128,
+      flexShrink: 0,
+    },
+  }),
+  pickerColMonth: Platform.select({
+    android: {
+      width: '100%',
+      minWidth: 180,
+      alignSelf: 'stretch',
+    },
+    default: {
+      width: 180,
+      minWidth: 180,
+      flexShrink: 0,
+    },
+  }),
+  pickerColDay: Platform.select({
+    android: {
+      width: '100%',
+      minWidth: 112,
+      alignSelf: 'stretch',
+    },
+    default: {
+      width: 112,
+      minWidth: 112,
+      flexShrink: 0,
+    },
+  }),
   /** Inner surface: inherits border/background from `formControlStyles.control`; strip padding so Picker fills. */
   pickerWrap: {
     paddingHorizontal: 0,
@@ -421,20 +462,23 @@ const styles = StyleSheet.create({
     ...(Platform.OS === 'ios'
       ? { height: 152 }
       : Platform.OS === 'android'
-        ? { height: 56 }
+        ? { height: 56, paddingHorizontal: 12 }
         : {}),
   },
   /** Web <select>: dark surface + readable text; avoids default white native styling. */
   pickerWeb: {
     cursor: 'pointer' as const,
-    paddingHorizontal: 10,
+    paddingHorizontal: 12,
     paddingVertical: 12,
     minHeight: 56,
+    minWidth: 112,
     borderWidth: 0,
     outlineStyle: 'none',
     outlineWidth: 0,
     color: '#E8F0F8',
     backgroundColor: 'transparent',
+    fontSize: 16,
+    fontWeight: '500',
   },
   pickerItem: {
     color: '#E8F0F8',

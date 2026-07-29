@@ -13,6 +13,10 @@ function getExpoAvAudio(): typeof import('expo-av').Audio {
 /** Last mode applied via `setPlaybackMode` / `setRecordingMode` — for session_logs telemetry only. */
 let lastAppliedAudioModeLabel: 'playback' | 'recording' | 'web' = 'playback';
 
+/** Set when mic/recording or resume may leave native audio stuck until the next clip plays. */
+let nativePlaybackBridgeBeforeNextTts = false;
+let nativePlaybackBridgeMarkReason: string | null = null;
+
 type RecordingPlaybackTransitionInfo = { succeeded: boolean; errorMessage?: string };
 let recordingPlaybackTransitionHook: ((info: RecordingPlaybackTransitionInfo) => void) | undefined;
 
@@ -127,6 +131,34 @@ export async function transitionFromRecordingToPlaybackNative(context: string): 
 export async function applyPlaybackBridgeBeforeTtsIfIos(context: string): Promise<void> {
   if (Platform.OS !== 'ios') return;
   await transitionFromRecordingToPlaybackNative(`pre_tts:${context}`);
+}
+
+/** Request full recording→playback bridge immediately before the next native TTS clip (after any async fetch gap). */
+export function markNativePlaybackBridgeBeforeNextTts(reason: string): void {
+  if (Platform.OS === 'web') return;
+  nativePlaybackBridgeBeforeNextTts = true;
+  nativePlaybackBridgeMarkReason = reason;
+  logSessionTransition('mark_playback_bridge_before_next_tts', reason);
+}
+
+export function consumeNativePlaybackBridgeBeforeNextTts(): { needed: boolean; reason: string | null } {
+  if (!nativePlaybackBridgeBeforeNextTts) {
+    return { needed: false, reason: null };
+  }
+  nativePlaybackBridgeBeforeNextTts = false;
+  const reason = nativePlaybackBridgeMarkReason;
+  nativePlaybackBridgeMarkReason = null;
+  return { needed: true, reason };
+}
+
+/** Apply playback audio mode immediately before native Sound.createAsync / expo-speech. */
+export async function applyNativeTtsPrePlaybackAudioMode(context: string): Promise<void> {
+  const bridge = consumeNativePlaybackBridgeBeforeNextTts();
+  if (bridge.needed) {
+    await transitionFromRecordingToPlaybackNative(`pre_play:${context}:${bridge.reason ?? 'unknown'}`);
+    return;
+  }
+  await logAndApplyPlaybackModeForTts(context);
 }
 
 /**

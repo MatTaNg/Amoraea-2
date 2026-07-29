@@ -3,9 +3,9 @@ import { NPI_ENTITLEMENT_FLOOR_THRESHOLD } from '../../../src/config/psychometri
 
 export const NPI_ENTITLEMENT_FLOOR_FAIL_CODE = 'npi_entitlement_floor';
 
-export function wouldTriggerNpiEntitlementFloor(npiScore: number | null): boolean {
-  if (npiScore === null || !Number.isFinite(npiScore)) return false;
-  return npiScore >= NPI_ENTITLEMENT_FLOOR_THRESHOLD;
+export function wouldTriggerNpiEntitlementFloor(_npiScore: number | null): boolean {
+  // Values Assessment (NPI entitlement) is collected for profile/matching only — no gate auto-fail.
+  return false;
 }
 
 export function formatNpiEntitlementFloorAdminDescription(npiScore: number): string {

@@ -1,4 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useState } from "react";
+import { ONBOARDING_STEP_SCREEN_EDGES, ONBOARDING_STEP_SCREEN_EDGES_WITH_BOTTOM } from './onboardingStepScreenEdges';
 import { View, Text, ScrollView, TouchableOpacity } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { Button } from "@/shared/ui/Button";
@@ -10,6 +11,7 @@ import {
 } from "@/screens/profile/editProfile/BottomSheet";
 import { SingleChoiceOptionList } from "@/shared/components/profileFields/SingleChoiceOptionList";
 import { SexInterestCheckboxList } from "@/shared/components/profileFields/SexInterestCheckboxList";
+import { renderDealbreakerQuestionHighlight } from '@/shared/components/profileFields/dealbreakerQuestionHighlight';
 import {
   PREF_PHYSICAL_COMPAT_CENTRALITY_OPTIONS,
   PREF_PARTNER_SHARES_SPECIFIC_SEX_INTERESTS_QUESTION,
@@ -42,17 +44,8 @@ function truncLabel(s: string, max = 72): string {
   return t.length > max ? `${t.slice(0, max)}…` : t;
 }
 
-function renderMustHaveHighlight(text: string) {
-  const phrase = 'must have';
-  const index = text.indexOf(phrase);
-  if (index < 0) return text;
-  return (
-    <>
-      {text.slice(0, index)}
-      <Text style={styles.mustHaveEmphasis}>{phrase}</Text>
-      {text.slice(index + phrase.length)}
-    </>
-  );
+function renderDealbreakerHighlight(text: string) {
+  return renderDealbreakerQuestionHighlight(text, styles.dealbreakerEmphasis);
 }
 
 export const SexualCompatibilityModal: React.FC<SexualCompatibilityModalProps> = ({
@@ -109,7 +102,7 @@ export const SexualCompatibilityModal: React.FC<SexualCompatibilityModalProps> =
   );
 
   return (
-    <SafeAreaView style={styles.screen} edges={["top", "left", "right"]}>
+    <SafeAreaView style={styles.screen} edges={ONBOARDING_STEP_SCREEN_EDGES}>
       <OnboardingHeader title="Sexual compatibility" />
       <ScrollView
         style={styles.scroll}
@@ -133,7 +126,7 @@ export const SexualCompatibilityModal: React.FC<SexualCompatibilityModalProps> =
         </OptionPickerTrigger>
 
         <Text style={styles.dealbreakerQuestion}>
-          {renderMustHaveHighlight(PREF_PARTNER_SHARES_SPECIFIC_SEX_INTERESTS_QUESTION)}
+          {renderDealbreakerHighlight(PREF_PARTNER_SHARES_SPECIFIC_SEX_INTERESTS_QUESTION)}
         </Text>
         <SexInterestCheckboxList
           singleSelect

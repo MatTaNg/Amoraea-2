@@ -1,9 +1,11 @@
 import React, { useCallback, useEffect } from 'react';
+import { ONBOARDING_STEP_SCREEN_EDGES, ONBOARDING_STEP_SCREEN_EDGES_WITH_BOTTOM } from './onboardingStepScreenEdges';
 import { View, Text, ScrollView } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Button } from '@/shared/ui/Button';
 import { OnboardingHeader } from './components/OnboardingHeader';
 import { SexInterestCheckboxList } from '@/shared/components/profileFields/SexInterestCheckboxList';
+import { deferAfterPaint } from '@/shared/utils/deferAfterPaint';
 import { styles } from './SexualCompatibilityModal.styled';
 
 interface Props {
@@ -29,14 +31,14 @@ export const SexInterestsOnboardingModal: React.FC<Props> = ({
     (next: string[]) => {
       onCategoriesChange(next);
       if (next.length === 1) {
-        onNext();
+        deferAfterPaint(onNext);
       }
     },
     [onCategoriesChange, onNext],
   );
 
   return (
-    <SafeAreaView style={styles.screen} edges={['top', 'left', 'right']}>
+    <SafeAreaView style={styles.screen} edges={ONBOARDING_STEP_SCREEN_EDGES}>
       <OnboardingHeader title="Sexual interests" onBack={onBack} />
       <ScrollView
         style={styles.scroll}

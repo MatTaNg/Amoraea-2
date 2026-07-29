@@ -28,6 +28,11 @@ describe('moment5SpecificityRedirect resolution follow-up', () => {
     expect(looksLikeMoment5ResolutionFollowUpPrompt(sessionLogFollowUp)).toBe(true);
     expect(looksLikeMoment5ResolutionFollowUpPrompt(sessionLogResolutionCompleteFollowUp)).toBe(true);
     expect(looksLikeMoment5ResolutionFollowUpPrompt(sessionLogTensionResolutionFollowUp)).toBe(true);
+    expect(
+      looksLikeMoment5ResolutionFollowUpPrompt(
+        'That makes a lot of sense. When you explained your reasons to her, how did she take it, and did things feel resolved between you two after that?',
+      ),
+    ).toBe(true);
   });
 
   it('strips bundled closing and keeps only the resolution follow-up question', () => {

@@ -65,7 +65,8 @@ export function buildAriaInterviewRenderParamsFromScreen(
     interviewSession,
     handlers,
   } = input;
-  const { shell, gate } = session;
+  const { shell, gate, routing } = session;
+  const { resumeHydrationPending } = routing;
   const {
     sessionExpired,
     setSessionExpired,
@@ -141,6 +142,7 @@ export function buildAriaInterviewRenderParamsFromScreen(
         fromValidationTrack,
         pendingCompletion,
         resumeLoadingVisible,
+        resumeHydrationPending,
       },
       adminAccess: {
         shouldShowAdminPanel,

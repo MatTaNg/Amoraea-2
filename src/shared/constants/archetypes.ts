@@ -1,4 +1,4 @@
-/** Jungian brand-archetype ids stored on `profile_json.archetypes` (exactly two when set). */
+/** Jungian brand-archetype ids stored on `profile_json.archetypes` (two or three when set). */
 export const ARCHETYPE_IDS = [
   'innocent',
   'sage',
@@ -13,6 +13,13 @@ export const ARCHETYPE_IDS = [
   'rebel',
   'jester',
 ] as const;
+
+export const MIN_PROFILE_ARCHETYPES = 2;
+export const MAX_PROFILE_ARCHETYPES = 3;
+
+export function isCompleteArchetypeSelection(count: number): boolean {
+  return count >= MIN_PROFILE_ARCHETYPES && count <= MAX_PROFILE_ARCHETYPES;
+}
 
 export type ArchetypeId = (typeof ARCHETYPE_IDS)[number];
 
@@ -139,7 +146,7 @@ export function archetypeIdFromStored(value: string): ArchetypeId | null {
   return null;
 }
 
-/** Read `archetypes` from merged profile JSON (max two, stable order). */
+/** Read `archetypes` from merged profile JSON (max three, stable order). */
 export function normalizeArchetypesFromProfile(raw: unknown): ArchetypeId[] {
   if (!Array.isArray(raw)) return [];
   const out: ArchetypeId[] = [];
@@ -148,7 +155,7 @@ export function normalizeArchetypesFromProfile(raw: unknown): ArchetypeId[] {
     const id = archetypeIdFromStored(item);
     if (!id || out.includes(id)) continue;
     out.push(id);
-    if (out.length >= 2) break;
+    if (out.length >= MAX_PROFILE_ARCHETYPES) break;
   }
   return out;
 }

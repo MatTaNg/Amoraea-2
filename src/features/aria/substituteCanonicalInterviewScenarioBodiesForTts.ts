@@ -322,6 +322,12 @@ function findMoment4GrudgePromptStartIndex(text: string): number {
 }
 
 function substituteMoment4GrudgeCardForTts(text: string): string {
+  if (
+    spokenTextStartsMoment5PrimaryConflictQuestion(text) ||
+    transcriptAssistantContainsMoment5PrimaryConflictQuestion(text)
+  ) {
+    return text;
+  }
   if (!looksLikeMoment4GrudgePromptForTts(text)) return text;
   const canonical = MOMENT_4_GRUDGE_QUESTION_TEXT;
   if (normalizeForCanonicalCompare(text) === normalizeForCanonicalCompare(canonical)) return text;
@@ -348,6 +354,7 @@ function findMoment5ConflictQuestionStartIndex(text: string): number {
     /\bThink of a time when you had a conflict with someone important\b/i,
     /\bThink of a time when you had a real conflict with someone\b/i,
     /\bThink of a time when you had a conflict with someone close\b/i,
+    /\bThink of a time you had a conflict with someone close\b/i,
     /\bTell me about a specific conflict with someone important\b/i,
     /\bTell me about a time you had a conflict\b/i,
   ];
@@ -474,8 +481,8 @@ export function substituteCanonicalInterviewScenarioBodiesForTts(text: string): 
 
   out = substituteCanonicalScenarioOpeningQuestionForTts(out);
   out = rewriteDetectedScenarioFictionForTts(out);
-  out = substituteMoment4GrudgeCardForTts(out);
   out = substituteMoment5ConflictQuestionForTts(out);
+  out = substituteMoment4GrudgeCardForTts(out);
 
   const showScenarioKind = detectShowScenarioCardKind(out);
   if (showScenarioKind) {

@@ -3,12 +3,7 @@ import { scenarioCompositesToStorageJson } from '@features/aria/computeGateResul
 import { extractEgoDevelopmentLevel } from '@features/aria/aggregateMarkerScoresFromSlices';
 import { emotionRecognitionPersistSpreadIfComplete } from '@features/aria/emotionRecognitionInterview';
 import type { FinalizeStandardHolisticClientFallbackParams } from '@features/aria/holisticClientFallbackTypes';
-import { computeSkipPenaltyGateComputation } from '@features/aria/interviewSkipPenalties';
-import {
-  aggregatePersonalMomentEmotionalVocab,
-  scenarioEmotionalVocabDensityPercentFromTranscript,
-} from '@features/aria/personalMomentEmotionalVocab';
-import type { MessageWithScenario } from '@features/aria/interviewScenarioScoringSlice';
+import { skipPenaltyPersistFieldsFromConfirmedCount } from '@features/aria/scenarioSkipCountHydration';
 import { commitStandardOnboardingUsersAfterAttempt } from '@features/aria/scoreInterviewOnboardingCommit';
 import {
   ALPHA_MODE,
@@ -53,7 +48,6 @@ export async function finalizeStandardHolisticClientFallback(
     moment5ConcretenessHolisticGate,
     holisticWeightedScoreForPersist,
   } = state;
-  const msgs = finalMessages as MessageWithScenario[];
   const deferredForHolistic = deps.interviewSessionAttemptIdRef.current;
 
   if (isStandardOnboardingApplicant && deferredForHolistic && deps.userId) {
@@ -65,22 +59,6 @@ export async function finalizeStandardHolisticClientFallback(
       moment_4_scores?: unknown;
       moment_5_scores?: unknown;
     };
-    const pevHolisticPersist = aggregatePersonalMomentEmotionalVocab(
-      holisticPatterns.moment_4_scores,
-      holisticPatterns.moment_5_scores,
-      {
-        scenarioEmotionalVocabDensityPercent: scenarioEmotionalVocabDensityPercentFromTranscript(msgs),
-        communicationStyleEmotionalVocabDensityPercent: null,
-      },
-    );
-    if (typeof __DEV__ !== 'undefined' && __DEV__) {
-      console.log(
-        '[VocabFlag] persisting personal_moment_emotional_vocab_low:',
-        pevHolisticPersist.personal_moment_emotional_vocab_low,
-        'density:',
-        pevHolisticPersist.personal_moment_emotional_vocab_density,
-      );
-    }
     const egoForStandardHolisticUpdate = extractEgoDevelopmentLevel(parsed);
     let holisticScoringBaseline = await fetchAttemptScoringBaseline(supabase, deferredForHolistic, deps.userId);
     logScorePipelineBaseline(holisticScoringBaseline);
@@ -164,13 +142,15 @@ export async function finalizeStandardHolisticClientFallback(
           ? { incomplete_reason: completionGateHolistic.incomplete_reason }
           : {}),
         ...(() => {
-          const snap = computeSkipPenaltyGateComputation(deps.scenarioSkipConfirmedCountRef.current);
+          const skipFields = skipPenaltyPersistFieldsFromConfirmedCount(
+            deps.scenarioSkipConfirmedCountRef.current,
+          );
           return {
-            skip_count: snap.skips_taken,
-            skip_penalties: snap.skip_penalties,
-            skip_penalty_total: snap.skip_penalty_total,
-            auto_failed: snap.skipAutoFail,
-            auto_fail_reason: snap.skipAutoFail ? 'exceeded_skip_limit' : null,
+            skip_count: skipFields.skip_count,
+            skip_penalties: skipFields.skip_penalties,
+            skip_penalty_total: skipFields.skip_penalty_total,
+            auto_failed: skipFields.auto_failed,
+            auto_fail_reason: skipFields.auto_fail_reason,
           };
         })(),
         ...communicationFloorFieldsFromTranscript(finalMessages),
@@ -201,12 +181,8 @@ export async function finalizeStandardHolisticClientFallback(
         defense_cross_reference: defenseCrossReference,
         ...emotionPersistStandard,
         disclosure_calibration: holisticDisclosureCalibration ?? holisticScoringBaseline.disclosure_calibration,
-        personal_moment_emotional_vocab_density:
-          pevHolisticPersist.personal_moment_emotional_vocab_density ??
-          holisticScoringBaseline.personal_moment_emotional_vocab_density,
-        personal_moment_emotional_vocab_low:
-          pevHolisticPersist.personal_moment_emotional_vocab_low ??
-          holisticScoringBaseline.personal_moment_emotional_vocab_low,
+        personal_moment_emotional_vocab_density: null,
+        personal_moment_emotional_vocab_low: false,
         moment_4_concreteness: moment4ConcretenessHolisticGate ?? holisticScoringBaseline.moment_4_concreteness,
         moment_5_concreteness: moment5ConcretenessHolisticGate ?? holisticScoringBaseline.moment_5_concreteness,
       })
@@ -244,12 +220,8 @@ export async function finalizeStandardHolisticClientFallback(
               egoForStandardHolisticUpdate ?? holisticScoringBaseline.ego_development_level,
             disclosure_calibration:
               holisticDisclosureCalibration ?? holisticScoringBaseline.disclosure_calibration,
-            personal_moment_emotional_vocab_density:
-              pevHolisticPersist.personal_moment_emotional_vocab_density ??
-              holisticScoringBaseline.personal_moment_emotional_vocab_density,
-            personal_moment_emotional_vocab_low:
-              pevHolisticPersist.personal_moment_emotional_vocab_low ??
-              holisticScoringBaseline.personal_moment_emotional_vocab_low,
+            personal_moment_emotional_vocab_density: null,
+            personal_moment_emotional_vocab_low: false,
             depth_signal_modifier: crossRefAdjustedDepthModifier,
             score_modifier: crossRefAdjustedDepthModifier,
             modified_weighted_score:
@@ -360,7 +332,7 @@ export async function finalizeStandardHolisticClientFallback(
       deps.setPendingScoringSyncAttemptId(attemptIdForCommit);
     }
     if (!ALPHA_MODE) {
-      deps.queryClient.invalidateQueries({ queryKey: ['deps.profile', deps.userId] });
+      deps.queryClient.invalidateQueries({ queryKey: ['profile', deps.userId] });
     }
     deps.setStatus('results');
   } else {

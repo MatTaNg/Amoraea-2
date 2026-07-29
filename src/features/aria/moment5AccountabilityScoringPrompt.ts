@@ -11,7 +11,6 @@ import {
 } from './contemptExpressionScoringRubric';
 import { MENTALIZING_OVERCERTAINTY_SCORING_INSTRUCTION } from './personalMomentScoringPrompt';
 import { RESPONSE_CONCRETENESS_SCORING_INSTRUCTION } from './personalMomentConcreteness';
-import { PERSONAL_MOMENT_EMOTIONAL_VOCAB_SCORING_INSTRUCTION } from './personalMomentEmotionalVocab';
 import type { ConflictValidityResult } from './probeAndScoringUtils';
 
 const MOMENT5_CONFLICT_VALIDITY_FRAMEWORK = `
@@ -212,8 +211,6 @@ ${MENTALIZING_OVERCERTAINTY_SCORING_INSTRUCTION}
 
 ${RESPONSE_CONCRETENESS_SCORING_INSTRUCTION}
 
-${PERSONAL_MOMENT_EMOTIONAL_VOCAB_SCORING_INSTRUCTION}
-
 contempt_expression (same CONTEMPT_EXPRESSION tier rubric as scenarios — full block below).
 `;
 
@@ -251,8 +248,6 @@ Return ONLY valid JSON:
   "keyEvidence": { ${ids.map((id) => `"${id}": ""`).join(', ')} },
   "mentalizing_overcertainty": false,
   "response_concreteness": "moderate",
-  "emotional_vocab_count": 0,
-  "emotional_vocab_words": [],
   "user_slice_word_count": 0,
   "contempt_tier_breakdown": ${CONTEMPT_TIER_BREAKDOWN_JSON_TEMPLATE},
   "summary": "",

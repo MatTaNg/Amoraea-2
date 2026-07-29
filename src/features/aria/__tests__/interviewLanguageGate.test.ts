@@ -330,6 +330,22 @@ describe('getWhisperRatioReaskSuppressionReason', () => {
   it('suppresses multi-word readiness affirmations', () => {
     expect(getWhisperRatioReaskSuppressionReason('Yes, yes.', 2)).toBe('valid_hard_stop');
   });
+
+  it('suppresses ratio re-ask for complete short auxiliary replies like "I did"', () => {
+    expect(getWhisperRatioReaskSuppressionReason('I did.', 2)).toBe('valid_hard_stop');
+    expect(getWhisperRatioReaskSuppressionReason('I have', 2)).toBe('valid_hard_stop');
+    expect(getWhisperRatioReaskSuppressionReason('I already did.', 3)).toBe('valid_hard_stop');
+    expect(getWhisperRatioReaskSuppressionReason('I already did it.', 4)).toBe('valid_hard_stop');
+    expect(
+      shouldFireWhisperRatioReask({
+        turnContext: 'substantive',
+        transcriptText: 'I did.',
+        wordCount: 2,
+        wordsPerSecond: 0,
+        shortAnswerOk: false,
+      }),
+    ).toBe(false);
+  });
 });
 
 describe('computeWhisperRatioReaskState — fragment single words', () => {
@@ -407,6 +423,14 @@ describe('isScenarioModalFollowUpProbe', () => {
     expect(
       isScenarioModalFollowUpProbe(
         'It sounds like something may have cut you off there — want to give that one another try?',
+      ),
+    ).toBe(true);
+  });
+
+  it('flags irrelevant-answer cut-off retry infra', () => {
+    expect(
+      isScenarioModalFollowUpProbe(
+        "I wasn't able to understand that — you may have gotten cut off. Can you try again?",
       ),
     ).toBe(true);
   });
@@ -497,7 +521,7 @@ describe('getLastSubstantiveScenarioModalQuestion', () => {
       },
     ];
     expect(getLastSubstantiveScenarioModalQuestion(transcript)).toBe(
-      'Got it. If you were Ryan, how would you repair this?',
+      'If you were Ryan, how would you repair this?',
     );
   });
 });

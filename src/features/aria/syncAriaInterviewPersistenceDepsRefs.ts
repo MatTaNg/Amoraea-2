@@ -32,6 +32,9 @@ export function syncSaveActiveInterviewProgressDeps(
     emotionItemResponsesRef: ctx.emotionItemResponsesRef,
     interviewStatusRef: ctx.interviewStatusRef,
     interviewSessionAttemptIdRef: ctx.interviewSessionAttemptIdRef,
+    lastQuestionTextRef: ctx.lastQuestionTextRef,
+    showScenarioCardCanonicalPlaybackConfirmedKindsRef:
+      ctx.showScenarioCardCanonicalPlaybackConfirmedKindsRef,
     saveInterviewProgress: ctx.saveInterviewProgress,
   } as SaveActiveInterviewProgressDeps;
 }

@@ -36,4 +36,6 @@ export const ADMIN_REVIEW_FLAG_DESCRIPTIONS: Record<string, string> = {
   denial_self_report_neutral: 'Denial detected — self-report profile neither confirms nor contradicts',
   legacy_psychometric_pass_flip_review:
     'Psychometric modifier applied after interview completion would change pass to fail — held for admin review',
+  score_recompute_gate_flip:
+    'Score recalculation changed pass/fail or final gate outcome — review narrative and routing',
 };

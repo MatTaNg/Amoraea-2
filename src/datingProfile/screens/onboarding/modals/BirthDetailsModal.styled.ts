@@ -45,6 +45,12 @@ export const styles = StyleSheet.create({
     fontSize: 16,
     color: theme.colors.text,
   },
+  errorText: {
+    fontSize: 14,
+    color: theme.colors.error,
+    marginTop: 8,
+    marginBottom: 8,
+  },
   buttonContainer: {
     borderTopWidth: 1,
     borderTopColor: theme.colors.border,

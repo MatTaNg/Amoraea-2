@@ -208,28 +208,28 @@ describe('computeGateResultCore', () => {
     expect(r.weightedScore).toBeGreaterThan(6);
   });
 
-  it('adds ego_development_floor when holistic ego level is 1', () => {
+  it('applies ego level 1 modifier without auto-fail when score clears threshold', () => {
     const pillars = allMarkers(7.5);
     const hi = allMarkers(7);
     const r = computeGateResultCore(pillars, null, {
       egoDevelopmentLevel: 1,
       scenarioPillarScoresByScenario: { 1: hi, 2: hi, 3: hi },
     });
-    expect(r.pass).toBe(false);
-    expect(r.failReasonCodes).toContain('ego_development_floor');
-    expect(r.reason).toBe('ego_development_floor');
+    expect(r.pass).toBe(true);
+    expect(r.failReasonCodes ?? []).not.toContain('ego_development_floor');
     expect(r.egoDevelopmentModifier).toBe(-0.3);
-    expect(r.failReasonDetail?.ego_development_floor).toEqual({ level: 1, weightedScore: 7.2 });
+    expect(r.modifiedWeightedScore).toBe(7.2);
   });
 
-  it('fails ego_development_floor when ego level is 1 even if modified score clears threshold', () => {
-    const pillars = allMarkers(7.6);
+  it('fails weighted gate for ego level 1 when modified score is below threshold', () => {
+    const pillars = allMarkers(6.4);
     const r = computeGateResultCore(pillars, null, {
       egoDevelopmentLevel: 1,
       scenarioPillarScoresByScenario: { 1: pillars, 2: pillars, 3: pillars },
     });
     expect(r.pass).toBe(false);
-    expect(r.failReasonCodes).toContain('ego_development_floor');
+    expect(r.failReasonCodes ?? []).not.toContain('ego_development_floor');
+    expect(r.failReasonCodes).toContain('weighted_score');
   });
 
   it('applies 0 ego modifier for level 2 and still flags review', () => {
@@ -305,7 +305,7 @@ describe('computeGateResultCore', () => {
     expect(r.pass).toBe(true);
   });
 
-  it('applies defense-pattern score adjustment (per-flag cap -0.4 plus -0.5 when 3+ flags)', () => {
+  it('applies defense-pattern score adjustment (projection excluded from count)', () => {
     const pillars = allMarkers(6.2);
     const hi = allMarkers(7);
     const r = computeGateResultCore(pillars, null, {
@@ -317,32 +317,12 @@ describe('computeGateResultCore', () => {
         denial_detected: true,
       },
     });
-    expect(r.defensePatternScoreAdjustment).toBe(-0.8);
-    expect(r.pass).toBe(false);
-    expect(r.failReasonCodes).toContain('immature_defense_pattern');
-    expect(r.reviewFlags).not.toContain('defense_pattern_review');
-  });
-
-  it('adds defense_pattern_review when exactly two defense flags fire', () => {
-    const pillars = allMarkers(6.05);
-    const hi = allMarkers(7);
-    const r = computeGateResultCore(pillars, null, {
-      scenarioPillarScoresByScenario: { 1: hi, 2: hi, 3: hi },
-      defensePatterns: {
-        projection_detected: true,
-        rationalization_detected: true,
-        splitting_detected: false,
-        denial_detected: false,
-      },
-    });
-    expect(r.reviewFlags).toContain('defense_pattern_review');
-    expect(r.reviewFlags).not.toContain('immature_defense_pattern');
     expect(r.defensePatternScoreAdjustment).toBe(-0.35);
-    expect(r.pass).toBe(false);
+    expect(r.failReasonCodes ?? []).not.toContain('immature_defense_pattern');
   });
 
-  it('records immature_defense_pattern when 3+ flags and weighted threshold fails', () => {
-    const pillars = allMarkers(6.0);
+  it('adds defense_pattern_review when exactly two non-projection defense flags fire', () => {
+    const pillars = allMarkers(6.05);
     const hi = allMarkers(7);
     const r = computeGateResultCore(pillars, null, {
       scenarioPillarScoresByScenario: { 1: hi, 2: hi, 3: hi },
@@ -353,12 +333,27 @@ describe('computeGateResultCore', () => {
         denial_detected: false,
       },
     });
-    expect(r.pass).toBe(false);
-    expect(r.failReasonCodes).toContain('weighted_score');
-    expect(r.failReasonCodes).toContain('immature_defense_pattern');
+    expect(r.reviewFlags).toContain('defense_pattern_review');
+    expect(r.defensePatternScoreAdjustment).toBe(-0.2);
   });
 
-  it('stacks ego level 2 (0 modifier) with a single defense flag', () => {
+  it('does not auto-fail on three non-projection defense flags', () => {
+    const pillars = allMarkers(6.0);
+    const hi = allMarkers(7);
+    const r = computeGateResultCore(pillars, null, {
+      scenarioPillarScoresByScenario: { 1: hi, 2: hi, 3: hi },
+      defensePatterns: {
+        projection_detected: false,
+        rationalization_detected: true,
+        splitting_detected: true,
+        denial_detected: true,
+      },
+    });
+    expect(r.failReasonCodes ?? []).not.toContain('immature_defense_pattern');
+    expect(r.defensePatternScoreAdjustment).toBe(-0.35);
+  });
+
+  it('does not penalize projection-only defense flag', () => {
     const pillars = allMarkers(7);
     const r = computeGateResultCore(pillars, null, {
       egoDevelopmentLevel: 2,
@@ -370,7 +365,7 @@ describe('computeGateResultCore', () => {
         denial_detected: false,
       },
     });
-    expect(r.scoreModifier).toBeCloseTo(-0.15, 5);
+    expect(r.scoreModifier).toBe(0);
   });
 
   it('coerces string emotionRecognitionCorrectCount 0 into raw score and applies review flag only', () => {

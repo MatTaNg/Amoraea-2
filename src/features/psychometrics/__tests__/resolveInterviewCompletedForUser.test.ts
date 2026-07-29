@@ -91,6 +91,25 @@ describe('resolveInterviewCompletedForUser', () => {
     expect(mockFinalize).toHaveBeenCalledWith('user-1', 'attempt-1');
   });
 
+  it('backfills users row when latest attempt is scored but users.interview_completed is stale', async () => {
+    mockAttemptSelect({
+      completed_at: '2026-07-29T03:42:22.732+00:00',
+      scenario_1_scores: { pillarScores: { repair: 5 } },
+      scenario_2_scores: { pillarScores: { repair: 5 } },
+      scenario_3_scores: { pillarScores: { repair: 5 } },
+      weighted_score: 5.2,
+    });
+    mockFinalize.mockResolvedValue(true);
+
+    const result = await resolveInterviewCompletedForUser('user-1', {
+      interview_completed: false,
+      latest_attempt_id: 'attempt-1',
+    });
+
+    expect(result).toBe(true);
+    expect(mockFinalize).toHaveBeenCalledWith('user-1', 'attempt-1');
+  });
+
   it('does not treat users.interview_completed without rollup as complete', async () => {
     mockAttemptSelect({
       completed_at: '2026-07-07T06:09:09.616+00:00',

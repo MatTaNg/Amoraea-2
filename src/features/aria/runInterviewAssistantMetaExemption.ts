@@ -9,6 +9,7 @@ export function runRecordInterviewAssistantDeliveryForMetaExemption(
   if (deps.countsAsSubstantiveInterviewQuestionDelivery(cleaned)) {
     deps.substantiveInterviewQuestionDeliveredSeqRef.current += 1;
     deps.metaCommentAckAwaitingSubstantiveBaselineSeqRef.current = null;
+    deps.recoveryAssistantSpokenAtSubstantiveSeqRef.current = null;
   }
 }
 

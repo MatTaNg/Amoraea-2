@@ -193,10 +193,6 @@ export function computeUncertaintyScore(attempt: {
     depthConcerns += 0.1;
     activeFlags.push('ego_development_review');
   }
-  if (attempt.personal_moment_emotional_vocab_low) {
-    depthConcerns += 0.1;
-    activeFlags.push('low_emotional_vocab');
-  }
   if (attempt.disclosure_calibration === 'underdisclosure') {
     depthConcerns += 0.1;
     activeFlags.push('underdisclosure');

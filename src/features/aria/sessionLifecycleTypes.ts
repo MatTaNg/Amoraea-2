@@ -29,7 +29,9 @@ export type HydratePostClosingFromSavedDeps = {
   userId: string | undefined;
   hasResumedRef: MutableRefObject<boolean>;
   resumeLoadingFlowActiveRef: MutableRefObject<boolean>;
+  resumeHandleInFlightRef?: MutableRefObject<boolean>;
   setResumeLoadingVisible: (v: boolean) => void;
+  setResumeHydrationPending?: (v: boolean) => void;
   setMessages: React.Dispatch<React.SetStateAction<{ role: string; content: string; [key: string]: unknown }[]>>;
   pendingCompletionTranscriptRef: MutableRefObject<{ role: string; content: string }[] | null>;
   emotionItemResponsesRef: MutableRefObject<string[]>;
@@ -44,6 +46,9 @@ export type HydratePostClosingFromSavedDeps = {
     >
   >;
   resumeOfferWelcomeTtsRef: MutableRefObject<boolean>;
+  scenarioSkipConfirmedCountRef?: MutableRefObject<number>;
+  scenarioSkipPenaltySumRef?: MutableRefObject<number>;
+  interviewSessionAttemptIdRef?: MutableRefObject<string | null>;
 };
 
 export type HandleResumeParams = {
@@ -105,10 +110,13 @@ export type HandleResumeDeps = HydratePostClosingFromSavedDeps & {
   resumeEmotionCatchUpIndicesRef: MutableRefObject<number[] | null>;
   resumeEmotionAfterModalTextRef: MutableRefObject<string | null>;
   resumeOfferWelcomeTtsRef: MutableRefObject<boolean>;
+  resumeInPersonalPartRef: MutableRefObject<boolean>;
   resumeWelcomeMessageRef: MutableRefObject<string | null>;
   resumeWelcomeHydrationAttemptRef: MutableRefObject<string | null>;
   resumeLastAssistantTextRef: MutableRefObject<string | null>;
   lastQuestionTextRef: MutableRefObject<string | null>;
+  scenarioSkipConfirmedCountRef: MutableRefObject<number>;
+  scenarioSkipPenaltySumRef: MutableRefObject<number>;
   setScenarioScores: React.Dispatch<React.SetStateAction<Record<number, ScenarioScoreResult>>>;
   setStageResults: React.Dispatch<
     React.SetStateAction<Array<{ stage: number; results: InterviewResults }>>
@@ -125,6 +133,8 @@ export type HandleResumeDeps = HydratePostClosingFromSavedDeps & {
   interruptAllInterviewTtsOutput: () => void;
   moment5QuestionDeliveryInFlightRef: MutableRefObject<boolean>;
   interviewUserTurnEpochRef: MutableRefObject<number>;
+  processUserSpeech?: (spokenText: string) => void | Promise<void>;
+  prepareInterviewAudioForResumePlayback?: () => Promise<void>;
 };
 
 export type StartInterviewParams = {
@@ -156,6 +166,7 @@ export type StartInterviewDeps = {
   setInterviewStartInFlight: (v: boolean) => void;
   hasResumedRef: MutableRefObject<boolean>;
   resumeLoadingFlowActiveRef: MutableRefObject<boolean>;
+  resumeHandleInFlightRef?: MutableRefObject<boolean>;
   interviewStatusRef: MutableRefObject<string>;
   interviewSessionAttemptIdRef: MutableRefObject<string | null>;
   interviewSessionIdRef: MutableRefObject<string>;

@@ -14,7 +14,6 @@ export * from './scoring/pillarRollup';
 export * from './scoring/emotionRecognitionItems';
 export * from './scoring/contemptHeuristics';
 export * from './scoring/adminDisplayMargins';
-export * from './scoring/emotionalVocabThresholds';
 
 export * from './psychometrics/floors';
 export * from './psychometrics/modifierBandPenalties';

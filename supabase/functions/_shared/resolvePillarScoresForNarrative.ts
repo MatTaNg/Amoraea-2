@@ -1,6 +1,5 @@
 import { aggregatePillarScoresWithCommitmentMergeDetailed } from './aggregateMarkerScoresFromSlices.ts';
 import { markerSlicesFromAttemptRow } from './attemptScoreSliceParsing.ts';
-import { scenarioEmotionalVocabDensityPercentFromTranscript } from './personalMomentEmotionalVocab.ts';
 
 type AttemptRowForRollup = {
   transcript?: unknown;
@@ -33,8 +32,6 @@ export function rollupPillarScoresFromStoredAttemptRow(
     egoDevelopmentLevel: finiteNumber(row.ego_development_level),
     defensePatternTranscript: transcript,
     disclosureCalibrationTranscript: transcript,
-    scenarioEmotionalVocabDensityPercent: scenarioEmotionalVocabDensityPercentFromTranscript(transcript),
-    communicationStyleEmotionalVocabDensityPercent: null,
   });
 
   const scores = agg.scores;

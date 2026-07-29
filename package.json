@@ -57,6 +57,7 @@
     "export-rescore-flip-review": "npx tsx --env-file=.env scripts/exportRescoreFlipReview.ts",
     "verify-report-narrative-grounding": "npx tsx --env-file=.env scripts/verifyReportNarrativeGrounding.ts",
     "rescore-users": "npx tsx --import ./scripts/nodeRnStubs.mjs --env-file=.env scripts/rescoreUsers.ts",
+    "bulk-recompute-interview-scores": "npx tsx --import ./scripts/nodeRnStubs.mjs --env-file=.env scripts/bulkRecomputeInterviewScoresWithAudit.ts",
     "flag-scenario-floor-grandfather": "npx tsx --env-file=.env scripts/flag-scenario-floor-grandfather-review.ts",
     "flag-mentalizing-repair-floor-grandfather": "npx tsx --env-file=.env scripts/flag-mentalizing-repair-floor-grandfather-review.ts",
     "backfill:communication-floor": "npx tsx --env-file=.env scripts/backfill-communication-floor-flags.ts",

@@ -1,4 +1,5 @@
 import React from 'react';
+import { ONBOARDING_STEP_SCREEN_EDGES, ONBOARDING_STEP_SCREEN_EDGES_WITH_BOTTOM } from './onboardingStepScreenEdges';
 import { View, Text, ScrollView } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Input } from '@/shared/ui/Input';
@@ -23,7 +24,7 @@ export const BioModal: React.FC<BioModalProps> = ({
   const canComplete = bio && bio.trim().length > 0;
 
   return (
-    <SafeAreaView style={styles.screen} edges={['top', 'left', 'right']}>
+    <SafeAreaView style={styles.screen} edges={ONBOARDING_STEP_SCREEN_EDGES}>
       <OnboardingHeader title="Bio description" onBack={onBack} />
       <ScrollView 
         style={styles.scrollView}

@@ -7,10 +7,42 @@ import {
   recoverFailedReasoningPayload,
 } from '@features/aria/aiReasoningPostProcess';
 import { generateAIReasoning } from '@features/aria/generateAIReasoning';
-import { resolvePillarScoresForNarrativeFromAttempt } from '@features/aria/resolvePillarScoresForNarrative';
+import {
+  resolvePillarScoresForNarrativeFromAttempt,
+  type NarrativeAttemptRowInput,
+  type NarrativePillarResolution,
+} from '@features/aria/resolvePillarScoresForNarrative';
+import { finalizeInterviewOnlyGateForAttempt } from '@features/psychometrics/finalizeInterviewOnlyGate';
 import { buildEvidenceContextFromAttemptPatterns } from '@features/reports/narrativeEvidenceAudit';
 
 const CLIENT_NARRATIVE_BACKUP_TIMEOUT_MS = 300_000;
+const NARRATIVE_ATTEMPT_SELECT =
+  'id, user_id, pillar_scores, scenario_1_scores, scenario_2_scores, scenario_3_scores, scenario_specific_patterns, transcript, weighted_score, passed, ai_reasoning, reasoning_pending, skip_count, ego_development_level, language_markers, defense_patterns, disclosure_calibration, mentalizing_overcertainty_count, skip_penalty_total, auto_failed, moment_4_concreteness, moment_5_concreteness, personal_moment_emotional_vocab_density, personal_moment_emotional_vocab_low';
+
+type NarrativeAttemptRow = NarrativeAttemptRowInput & {
+  id: string;
+  user_id: string;
+  ai_reasoning?: unknown;
+  reasoning_pending?: boolean | null;
+  passed?: boolean | null;
+  weighted_score?: number | null;
+  transcript?: unknown;
+  scenario_specific_patterns?: unknown;
+};
+
+const NARRATIVE_PILLAR_WAIT_MS = [1500, 2500, 4000] as const;
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+export function narrativeFailedWithMissingPillarScores(
+  ar: Record<string, unknown> | null | undefined,
+): boolean {
+  if (!ar || typeof ar !== 'object') return false;
+  const lastError = ar.last_error ?? ar._lastError;
+  return ar._generationFailed === true && lastError === 'missing_pillar_scores';
+}
 
 export function interviewAiReasoningIsSubstantive(ar: Record<string, unknown> | null | undefined): boolean {
   if (!ar || typeof ar !== 'object') return false;
@@ -51,6 +83,47 @@ function scenarioScoresFromAttemptRow(row: {
   return out;
 }
 
+async function fetchNarrativeAttemptRow(
+  userId: string,
+  attemptId: string,
+): Promise<NarrativeAttemptRow | null> {
+  const { data, error } = await supabase
+    .from('interview_attempts')
+    .select(NARRATIVE_ATTEMPT_SELECT)
+    .eq('id', attemptId)
+    .eq('user_id', userId)
+    .maybeSingle();
+  if (error || !data) return null;
+  return data as NarrativeAttemptRow;
+}
+
+async function resolvePillarScoresForNarrativeWithWait(
+  userId: string,
+  attemptId: string,
+  initialRow: NarrativeAttemptRow,
+): Promise<{ row: NarrativeAttemptRow; resolution: NarrativePillarResolution | null }> {
+  let row = initialRow;
+  let resolution = resolvePillarScoresForNarrativeFromAttempt(row, row.passed === true);
+  if (resolution) return { row, resolution };
+
+  for (const delayMs of NARRATIVE_PILLAR_WAIT_MS) {
+    await sleep(delayMs);
+    const refetched = await fetchNarrativeAttemptRow(userId, attemptId);
+    if (!refetched) continue;
+    row = refetched;
+    resolution = resolvePillarScoresForNarrativeFromAttempt(row, row.passed === true);
+    if (resolution) return { row, resolution };
+  }
+
+  await finalizeInterviewOnlyGateForAttempt(userId, attemptId);
+  const afterFinalize = await fetchNarrativeAttemptRow(userId, attemptId);
+  if (afterFinalize) {
+    row = afterFinalize;
+    resolution = resolvePillarScoresForNarrativeFromAttempt(row, row.passed === true);
+  }
+  return { row, resolution };
+}
+
 async function persistRollupIfNeeded(
   attemptId: string,
   userId: string,
@@ -78,19 +151,10 @@ export async function kickClientInterviewNarrativeIfPending(
   source: string
 ): Promise<{ skipped: boolean; ok?: boolean; error?: string }> {
   console.log(`[narrative] Starting for attempt ${attemptId} (source=${source})`);
-  const { data: row, error: fetchErr } = await supabase
-    .from('interview_attempts')
-    .select(
-      'id, user_id, pillar_scores, scenario_1_scores, scenario_2_scores, scenario_3_scores, scenario_specific_patterns, transcript, weighted_score, passed, ai_reasoning, reasoning_pending, skip_count, ego_development_level, language_markers, defense_patterns, disclosure_calibration, mentalizing_overcertainty_count, skip_penalty_total, auto_failed, moment_4_concreteness, moment_5_concreteness, personal_moment_emotional_vocab_density, personal_moment_emotional_vocab_low'
-    )
-
-    .eq('id', attemptId)
-    .eq('user_id', userId)
-    .maybeSingle();
-
-  if (fetchErr || !row) {
-    console.error(`[narrative] Attempt ${attemptId} not found:`, fetchErr?.message ?? 'not_found');
-    return { skipped: true, error: fetchErr?.message ?? 'attempt_not_found' };
+  const row = await fetchNarrativeAttemptRow(userId, attemptId);
+  if (!row) {
+    console.error(`[narrative] Attempt ${attemptId} not found`);
+    return { skipped: true, error: 'attempt_not_found' };
   }
 
   const ar = (row.ai_reasoning ?? null) as Record<string, unknown> | null;
@@ -106,36 +170,40 @@ export async function kickClientInterviewNarrativeIfPending(
     return { skipped: true };
   }
 
-  const resolution = resolvePillarScoresForNarrativeFromAttempt(row, row.passed === true);
+  const resolved = await resolvePillarScoresForNarrativeWithWait(userId, attemptId, row);
+  const rowForNarrative = resolved.row;
+  const resolution = resolved.resolution;
   if (!resolution) {
     const error = 'missing_pillar_scores';
-    console.error(`[narrative] ${error} for attempt ${attemptId}`);
-    if (row.reasoning_pending === true) {
-      await supabase
-        .from('interview_attempts')
-        .update({
-          ai_reasoning: {
-            ...buildReasoningFailurePatch(ar, error, { generationFailed: true }),
-            _clientNarrativeBackupSource: source,
-            _failedAt: new Date().toISOString(),
-          },
-          reasoning_pending: false,
-        })
-        .eq('id', attemptId)
-        .eq('user_id', userId);
-    }
+    console.error(
+      `[narrative] ${error} for attempt ${attemptId} — rollup still in flight; keeping reasoning_pending`,
+    );
+    await supabase
+      .from('interview_attempts')
+      .update({
+        reasoning_pending: true,
+        ai_reasoning: {
+          ...(ar ?? {}),
+          _reasoningPending: true,
+          note: 'Narrative generation queued (waiting for interview scores).',
+          _queuedAt: new Date().toISOString(),
+          _clientNarrativeBackupSource: source,
+        },
+      })
+      .eq('id', attemptId)
+      .eq('user_id', userId);
     return { skipped: true, error };
   }
   const pillars = resolution.pillar_scores;
   await persistRollupIfNeeded(attemptId, userId, resolution);
 
-  const transcript = Array.isArray(row.transcript)
-    ? (row.transcript as Array<{ role: string; content?: string }>)
+  const transcript = Array.isArray(rowForNarrative.transcript)
+    ? (rowForNarrative.transcript as Array<{ role: string; content?: string }>)
     : [];
   if (transcript.length === 0) {
     const error = 'missing_transcript';
     console.error(`[narrative] ${error} for attempt ${attemptId}`);
-    if (row.reasoning_pending === true) {
+    if (rowForNarrative.reasoning_pending === true) {
       await supabase
         .from('interview_attempts')
         .update({
@@ -155,15 +223,15 @@ export async function kickClientInterviewNarrativeIfPending(
   try {
     console.log(`[narrative] Attempt ${attemptId} fetched, calling model`);
     const evidenceContext = buildEvidenceContextFromAttemptPatterns(
-      (row.scenario_specific_patterns ?? null) as Record<string, unknown> | null,
-      row,
+      (rowForNarrative.scenario_specific_patterns ?? null) as Record<string, unknown> | null,
+      rowForNarrative,
     );
     const reasoning = await generateAIReasoning(
       pillars,
-      scenarioScoresFromAttemptRow(row),
+      scenarioScoresFromAttemptRow(rowForNarrative),
       transcript,
-      row.weighted_score ?? resolution.weighted_score,
-      resolution.passed ?? row.passed === true,
+      rowForNarrative.weighted_score ?? resolution.weighted_score,
+      resolution.passed ?? rowForNarrative.passed === true,
       [],
       {
         perAttemptTimeoutMs: CLIENT_NARRATIVE_BACKUP_TIMEOUT_MS,

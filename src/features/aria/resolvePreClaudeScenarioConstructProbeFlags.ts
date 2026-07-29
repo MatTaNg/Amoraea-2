@@ -23,9 +23,12 @@ import {
 } from '@features/aria/scenarioFollowUpTranscriptGuard';
 import {
   isScenarioCQ1Prompt,
+  looksLikeScenarioCSophiePerspectiveAssessableShortAnswer,
+  looksLikeScenarioCSophiePerspectiveQuestion,
   shouldForceScenarioCRepairProbe as evaluateScenarioCRepairProbeEligibility,
   shouldForceScenarioCSophiePerspectiveProbe as evaluateScenarioCSophiePerspectiveProbeEligibility,
 } from '@features/aria/scenarioCPromptDetection';
+import { looksLikeScenarioAContemptProbeAssessableShortAnswer } from '@features/aria/scenarioAContemptProbeCoverage';
 import {
   looksLikeScenarioBRepairAsJamesQuestion,
   shouldForceScenarioBJamesRepairProbe as evaluateScenarioBJamesRepairProbeEligibility,
@@ -114,7 +117,20 @@ export function resolvePreClaudeScenarioConstructProbeFlags(
   const specificEmmaLineAlreadyAddressed = scenarioAContemptProbeCoverage;
   // Character names (e.g. "Ryan") can look "engaged" while the utterance is still a cut-off
   // ("If I were Ryan, I would") — never force construct advance without scorable material.
-  const unassessableAnswer = looksLikeUnassessableScenarioAnswer(trimmed);
+  const questionToAssess =
+    (deps.lastQuestionTextRef.current ?? '').trim() || lastAssistantContent.trim();
+  const sophiePerspectiveQuestion =
+    looksLikeScenarioCSophiePerspectiveQuestion(questionToAssess) ||
+    looksLikeScenarioCSophiePerspectiveQuestion(lastAssistantContent);
+  const contemptProbeQuestion =
+    looksLikeScenarioAContemptProbeQuestion(questionToAssess) ||
+    looksLikeScenarioAContemptProbeQuestion(lastAssistantContent);
+  const unassessableAnswer =
+    looksLikeUnassessableScenarioAnswer(trimmed) &&
+    !(
+      (contemptProbeQuestion && looksLikeScenarioAContemptProbeAssessableShortAnswer(trimmed)) ||
+      (sophiePerspectiveQuestion && looksLikeScenarioCSophiePerspectiveAssessableShortAnswer(trimmed))
+    );
   const shouldForceScenarioAContemptProbe =
     !unassessableAnswer &&
     !suppressForcedConstructProbesForMetaFrustration &&

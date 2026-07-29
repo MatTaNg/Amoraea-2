@@ -1,3 +1,4 @@
+import { markUserEnteredInterviewFlow } from '@utilities/interviewEntryLock';
 import type { AriaScreenBootEffectsDeps } from '@features/aria/interviewClosingQuestionTypes';
 
 export function runSyncValidationTrackInterviewHandoff(
@@ -32,6 +33,9 @@ export function runLogAriaScreenMounted(
   deps: Pick<AriaScreenBootEffectsDeps, 'remoteLog'>,
   trigger: { userId: string | undefined; isAdmin: boolean },
 ): void {
+  if (trigger.userId && !trigger.isAdmin) {
+    markUserEnteredInterviewFlow(trigger.userId);
+  }
   void deps.remoteLog('[INIT] Amoraea interview mounted', {
     userId: trigger.userId ?? null,
     isAdmin: trigger.isAdmin,

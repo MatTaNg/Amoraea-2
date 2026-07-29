@@ -10,10 +10,11 @@ import { isExplicitPassForMoment4CommitmentFollowUp } from '@features/aria/inter
 import {
   isAnsweringFirstUserTurnAfterMoment4Threshold,
   looksLikeMoment4GrudgePrompt,
+  looksLikeUnassessableMoment4ThresholdAnswer,
   transcriptIncludesMoment4ThresholdAssistant,
 } from '@features/aria/moment4ProbeLogic';
 import {
-  looksLikeMoment4SpecificityFollowUpPrompt,
+  looksLikeMoment4SpecificityFollowUpEcho,
   resolveMoment4GrudgeAnswerForThresholdReflection,
 } from '@features/aria/moment4SpecificityFollowUp';
 import type { MessageWithScenario } from '@features/aria/interviewScenarioScoringSlice';
@@ -80,8 +81,15 @@ export async function runPreClaudeMoment5QuestionInjectGate(
     !moment4ThresholdDeliveredInTranscript &&
     isExplicitPassForMoment4CommitmentFollowUp(currentUserAnswer) &&
     (looksLikeMoment4GrudgePrompt(lastAssistantContent) ||
-      looksLikeMoment4SpecificityFollowUpPrompt(lastAssistantContent));
+      looksLikeMoment4SpecificityFollowUpEcho(lastAssistantContent));
   const m5HandoffEligible = m5HandoffAfterThresholdAnswer || m5HandoffAfterGrudgeExplicitPass;
+
+  if (
+    m5HandoffAfterThresholdAnswer &&
+    looksLikeUnassessableMoment4ThresholdAnswer(currentUserAnswer)
+  ) {
+    return { handled: false };
+  }
 
   /**
    * After reopen, moment refs often lag at 2–3 while the threshold was already asked.

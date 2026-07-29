@@ -16,8 +16,16 @@ describe('looksLikeInterviewScoreStatusRequest', () => {
     'Can you tell me my score',
     "What's my results",
     'Am I doing well',
+    'Can I see my score',
+    'Can I see my score?',
+    'Can I get my score',
+    'Show me my score',
   ])('matches score/status ask: %s', (utterance) => {
     expect(looksLikeInterviewScoreStatusRequest(utterance)).toBe(true);
+  });
+
+  it('matches common Whisper mishearing of score as school', () => {
+    expect(looksLikeInterviewScoreStatusRequest('Can I see my school')).toBe(true);
   });
 
   it.each([

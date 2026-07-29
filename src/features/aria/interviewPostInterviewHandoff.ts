@@ -55,33 +55,26 @@ export function replaceWithStandardApplicantPostInterviewHandoffForUser(
     return;
   }
   if (PSYCHOMETRICS_ENABLED) {
-    if (wasPsychometricsInterviewHandoffIssued()) {
-      void remoteLog('[RESULTS_SCREEN_TRANSITION]', {
-        destination: 'InterviewComplete',
-        skipped_duplicate: true,
-        userId,
-        interviewSessionId: meta?.interviewSessionId ?? null,
-        source: meta?.source ?? 'standard_handoff_psychometrics_enabled',
-        attemptId: meta?.attemptId ?? null,
-      });
-      return;
+    const duplicateHandoff = wasPsychometricsInterviewHandoffIssued();
+    if (!duplicateHandoff) {
+      markPsychometricsInterviewHandoffIssued();
+      const attemptId = meta?.attemptId;
+      if (typeof attemptId === 'string' && attemptId.length > 0) {
+        triggerAsyncAiReasoningPipeline(userId, attemptId);
+      } else {
+        void fetchMostRecentCompletedInterviewAttemptId(userId).then((resolvedId) => {
+          if (resolvedId) triggerAsyncAiReasoningPipeline(userId, resolvedId);
+        });
+      }
     }
-    markPsychometricsInterviewHandoffIssued();
     void remoteLog('[RESULTS_SCREEN_TRANSITION]', {
       destination: 'InterviewComplete',
+      skipped_duplicate: duplicateHandoff,
       userId,
       interviewSessionId: meta?.interviewSessionId ?? null,
       source: meta?.source ?? 'standard_handoff_psychometrics_enabled',
       attemptId: meta?.attemptId ?? null,
     });
-    const attemptId = meta?.attemptId;
-    if (typeof attemptId === 'string' && attemptId.length > 0) {
-      triggerAsyncAiReasoningPipeline(userId, attemptId);
-    } else {
-      void fetchMostRecentCompletedInterviewAttemptId(userId).then((resolvedId) => {
-        if (resolvedId) triggerAsyncAiReasoningPipeline(userId, resolvedId);
-      });
-    }
     navigation.replace('InterviewComplete', { userId });
     return;
   }
@@ -198,11 +191,6 @@ export async function recoverStuckPreparingResultsForStandardUser(
       latest_attempt_id: attemptId,
     })
     .eq('id', userId);
-  try {
-    await supabase.rpc('apply_referral_completion_effects', { p_user_id: userId });
-  } catch {
-    /* non-fatal */
-  }
   clearPreparingResultsSession(userId);
   await clearInterviewFromStorage(userId);
   replaceWithStandardApplicantPostInterviewHandoffForUser(navigation, userId, {

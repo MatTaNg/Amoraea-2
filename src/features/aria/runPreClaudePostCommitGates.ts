@@ -25,13 +25,12 @@ export type PreClaudePostCommitGatesResult = {
   handled: boolean;
 };
 
-/** Intro, client-owned S2/S3 opens, post-closing completion, and skip-injection gates after user turn commit. */
-export async function runPreClaudePostCommitGates(
+/** Intro-only post-commit gates (readiness / S1 vignette) — runs before construct-probe intercepts. */
+export async function runPreClaudePostCommitIntroGatesOnly(
   deps: PreClaudeTurnGateDeps,
   trimmed: string,
   messagesToUse: MessageWithScenario[],
   participantFirstNameForSpoken: string,
-  skipMeta: PreClaudeTurnSkipMetaState,
 ): Promise<PreClaudePostCommitGatesResult> {
   const introGate = await runPreClaudePostCommitIntroGates(
     deps,
@@ -42,7 +41,17 @@ export async function runPreClaudePostCommitGates(
   if (introGate.handled) {
     return { handled: true };
   }
+  return { handled: false };
+}
 
+/** S2/S3 handoffs, post-closing, and skip injection — runs after construct-probe intercepts. */
+export async function runPreClaudePostCommitHandoffAndSkipGates(
+  deps: PreClaudeTurnGateDeps,
+  trimmed: string,
+  messagesToUse: MessageWithScenario[],
+  participantFirstNameForSpoken: string,
+  skipMeta: PreClaudeTurnSkipMetaState,
+): Promise<PreClaudePostCommitGatesResult> {
   const deliveredS2 = await deliverClientOwnedScenario2OpeningAfterS1Repair(
     deps,
     messagesToUse,
@@ -93,4 +102,31 @@ export async function runPreClaudePostCommitGates(
   }
 
   return { handled: false };
+}
+
+/** Intro, client-owned S2/S3 opens, post-closing completion, and skip-injection gates after user turn commit. */
+export async function runPreClaudePostCommitGates(
+  deps: PreClaudeTurnGateDeps,
+  trimmed: string,
+  messagesToUse: MessageWithScenario[],
+  participantFirstNameForSpoken: string,
+  skipMeta: PreClaudeTurnSkipMetaState,
+): Promise<PreClaudePostCommitGatesResult> {
+  const intro = await runPreClaudePostCommitIntroGatesOnly(
+    deps,
+    trimmed,
+    messagesToUse,
+    participantFirstNameForSpoken,
+  );
+  if (intro.handled) {
+    return { handled: true };
+  }
+
+  return runPreClaudePostCommitHandoffAndSkipGates(
+    deps,
+    trimmed,
+    messagesToUse,
+    participantFirstNameForSpoken,
+    skipMeta,
+  );
 }

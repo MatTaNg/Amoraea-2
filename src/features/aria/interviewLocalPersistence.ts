@@ -78,6 +78,33 @@ const resumeWelcomeSpokenWebMemory = new Set<string>();
 /** Synchronous guard: one in-flight welcome TTS per attempt (gesture flush + tap race). */
 let resumeWelcomePlaybackLockAttemptId: string | null = null;
 
+/** Invalidates in-flight resume welcome playback async tasks across remounts / duplicate resume. */
+let resumeWelcomePlaybackGeneration = 0;
+
+export function bumpResumeWelcomePlaybackGeneration(): number {
+  resumeWelcomePlaybackGeneration += 1;
+  return resumeWelcomePlaybackGeneration;
+}
+
+export function getResumeWelcomePlaybackGeneration(): number {
+  return resumeWelcomePlaybackGeneration;
+}
+
+/** Set when interview audio (mic or TTS) is interrupted by app background — replay on foreground return. */
+let pendingBackgroundAudioInterrupt: 'recording' | 'tts' | null = null;
+
+export function markInterviewAudioInterruptedByBackground(
+  kind: 'recording' | 'tts',
+): void {
+  pendingBackgroundAudioInterrupt = kind;
+}
+
+export function takeInterviewAudioInterruptedByBackground(): 'recording' | 'tts' | null {
+  const kind = pendingBackgroundAudioInterrupt;
+  pendingBackgroundAudioInterrupt = null;
+  return kind;
+}
+
 export function resumeWelcomeSpokenKey(attemptId: string): string {
   return `${RESUME_WELCOME_SPOKEN_PREFIX}${attemptId}`;
 }
@@ -154,6 +181,12 @@ export function tryAcquireResumeWelcomePlayback(attemptId: string | null | undef
   if (resumeWelcomePlaybackLockAttemptId === attemptId) return false;
   resumeWelcomePlaybackLockAttemptId = attemptId;
   return true;
+}
+
+/** Block turn processing for the full resume playback window (even if welcome was spoken before). */
+export function acquireResumeWelcomePlaybackLock(attemptId: string | null | undefined): void {
+  if (!attemptId) return;
+  resumeWelcomePlaybackLockAttemptId = attemptId;
 }
 
 export function releaseResumeWelcomePlaybackLock(attemptId: string | null | undefined): void {

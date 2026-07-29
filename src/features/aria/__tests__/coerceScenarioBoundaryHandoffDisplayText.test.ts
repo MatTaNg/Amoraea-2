@@ -474,6 +474,21 @@ describe('coerceScenarioBoundaryHandoffDisplayText', () => {
     expect(out).toContain(MOMENT_4_GRUDGE_QUESTION_TEXT);
   });
 
+  it('does not redirect S3→M4 handoff to Sophie vignette when Situation 3 already played', () => {
+    const m4Handoff = `${MOMENT_4_HANDOFF_NO_NAME_LEAD}\n\n${MOMENT_4_GRUDGE_QUESTION_TEXT}`;
+    const messages = [
+      { role: 'assistant', content: 'And if you were James, how would you repair?' },
+      { role: 'user', content: "I'd let her define what support looks like." },
+    ];
+    const out = coerceScenarioBoundaryHandoffDisplayText(m4Handoff, 'Matt', messages, 3, 3, {
+      situation3PlaybackConfirmed: true,
+      s3RepairProbeDelivered: true,
+    });
+    expect(out).toMatch(/finished the three situations/i);
+    expect(out).toMatch(/really hard time with/i);
+    expect(out).not.toMatch(/Sophie and Daniel have had the same argument/i);
+  });
+
   it('coerces S3→M4 handoff into short wrap without content reflection', () => {
     const bareHandoff =
       "That makes a lot of sense. Good work — you just finished the three situations. There are only two questions left. Now I want to ask you about something a bit more personal. Think of someone you've had a really hard time with";

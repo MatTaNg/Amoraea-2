@@ -19,8 +19,6 @@ export type NarrativeAttemptRowInput = {
   auto_failed?: boolean | null;
   moment_4_concreteness?: unknown;
   moment_5_concreteness?: unknown;
-  personal_moment_emotional_vocab_density?: number | null;
-  personal_moment_emotional_vocab_low?: boolean | null;
 };
 
 export type NarrativePillarResolution = {
@@ -78,8 +76,6 @@ export function resolvePillarScoresForNarrativeFromAttempt(
       auto_failed: row.auto_failed,
       moment_4_concreteness: row.moment_4_concreteness,
       moment_5_concreteness: row.moment_5_concreteness,
-      personal_moment_emotional_vocab_density: row.personal_moment_emotional_vocab_density,
-      personal_moment_emotional_vocab_low: row.personal_moment_emotional_vocab_low,
     },
     { skipScenarioTranscriptMutations: true, usePersistedGateContext: true },
   );

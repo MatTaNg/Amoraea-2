@@ -1,5 +1,6 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, startTransition } from 'react';
 import { View, ActivityIndicator, Text, StyleSheet } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
 import { useAuth } from '@/shared/hooks/AuthProvider';
 import { useProfile } from '@/shared/hooks/useProfile';
 import { NameModal } from './NameModal';
@@ -14,7 +15,7 @@ import { EthnicityOnboardingModal } from './EthnicityOnboardingModal';
 import { EthnicityAttractionOnboardingModal } from './EthnicityAttractionOnboardingModal';
 import { TypologyModal } from './TypologyModal';
 import { ArchetypesOnboardingModal } from './ArchetypesOnboardingModal';
-import { normalizeArchetypesFromProfile, type ArchetypeId } from '@/shared/constants/archetypes';
+import { normalizeArchetypesFromProfile, isCompleteArchetypeSelection, type ArchetypeId } from '@/shared/constants/archetypes';
 import { PhotosVideoModal } from './PhotosVideoModal';
 import { LifeDomainsModal } from './LifeDomainsModal';
 import { LifeDomainQuestionsModal } from './LifeDomainQuestionsModal';
@@ -23,7 +24,6 @@ import {
   findLifeDomainQuestionStepRow,
   getActiveLifeDomainOptionalOpenEndedSteps,
   getActiveLifeDomainRequiredQuestionSteps,
-  isLifeDomainOptionalOpenEndedStep,
   isLifeDomainRequiredQuestionStep,
   normalizeLifeDomainQuestionOnboardingStep,
 } from '@/shared/constants/lifeDomainOnboardingQuestions';
@@ -32,6 +32,7 @@ import {
   getNextOnboardingStep,
   getOnboardingNavigationContext,
   getPrevOnboardingStep,
+  resolveRestoredOnboardingStep,
 } from './onboardingStepNavigation';
 import { upsertLifeDomainAnswer } from '@/screens/profile/editProfile/lifeDomainProfileService';
 import { syncLifeDomainImportanceFromOnboarding } from '@/screens/profile/editProfile/lifeDomainProfileService';
@@ -40,6 +41,12 @@ import { MatchPreferencesModal } from './MatchPreferencesModal';
 import { AttractionPreferencesModal } from './AttractionPreferencesModal';
 import { ProfileOnboardingCompleteModal } from '../ProfileOnboardingCompleteModal';
 import { SexInterestsOnboardingModal } from './SexInterestsOnboardingModal';
+import { HobbiesOnboardingModal } from './HobbiesOnboardingModal';
+import { HobbyDealbreakerOnboardingModal } from './HobbyDealbreakerOnboardingModal';
+import { hobbiesIdsToString, hobbiesStringToIds } from '@/shared/utils/hobbiesHelpers';
+import { ProfilePromptsOnboardingModal } from './ProfilePromptsOnboardingModal';
+import { saveEditProfilePrompts } from '@/data/repos/editProfileRepo';
+import type { ProfilePromptAnswer } from '@domain/models/Profile';
 import {
   workoutOptions,
   smokingOptions,
@@ -75,6 +82,15 @@ import {
   prefPartnerSharesSexualInterestsFromYesNo,
   prefPartnerSharesSexualInterestsYesNoSelected,
 } from '@/shared/constants/sexualCompatibilityOptions';
+import {
+  PARTNER_ALIGNMENT_ALCOHOL_DEALBREAKER_QUESTION,
+  PARTNER_ALIGNMENT_CANNABIS_DEALBREAKER_QUESTION,
+  PARTNER_ALIGNMENT_PSYCHEDELICS_DEALBREAKER_QUESTION,
+  PARTNER_ALIGNMENT_RECREATIONAL_DRUGS_DEALBREAKER_QUESTION,
+  PARTNER_ALIGNMENT_TOBACCO_DEALBREAKER_QUESTION,
+  PARTNER_POLITICAL_VIEWS_DEALBREAKER_QUESTION,
+  PARTNER_SAME_RELIGION_DEALBREAKER_QUESTION,
+} from '@/shared/constants/dealbreakerQuestionCopy';
 import { ONBOARDING_STEPS_ORDER, type OnboardingStep } from './onboardingStepOrder';
 import {
   PREF_PARTNER_HAS_CHILDREN_OPTIONS,
@@ -117,7 +133,7 @@ function OnboardingProgressBar({
   currentStep: OnboardingStep;
   navigationCtx: ReturnType<typeof getOnboardingNavigationContext>;
 }) {
-  const steps = getEffectiveOnboardingStepsOrder(navigationCtx, currentStep);
+  const steps = getEffectiveOnboardingStepsOrder(navigationCtx);
   const index = steps.indexOf(currentStep);
   const total = steps.filter(
     (s) => s !== 'complete' && s !== 'profileComplete',
@@ -165,6 +181,8 @@ export const ModalOnboardingFlow: React.FC<ModalOnboardingFlowProps> = ({
   const isInitialLoad = React.useRef(true);
   /** Prevents double step advances on rapid taps (saves run in the background). */
   const stepTransitionLockRef = React.useRef(false);
+  /** Furthest step reached — persisted on save; back navigation does not regress this. */
+  const persistedStepRef = React.useRef<OnboardingStep>('name');
 
   // Use a ref to track the latest onboarding data for saves (declare early)
   const onboardingDataRef = React.useRef<OnboardingData>(onboardingData);
@@ -201,20 +219,15 @@ export const ModalOnboardingFlow: React.FC<ModalOnboardingFlowProps> = ({
             // Check if the normalized step is valid in the current step order
             const validSteps = ONBOARDING_STEPS_ORDER;
             const isValidStep = validSteps.includes(normalizedStep as OnboardingStep);
+            const navCtx = getOnboardingNavigationContext(progress.data.onboardingData ?? {});
 
-            // Also check if it's a life domain optional step that might not be active
-            const activeOptionalSteps = getActiveLifeDomainOptionalOpenEndedSteps(
-              progress.data.onboardingData?.wantKids,
-              progress.data.onboardingData?.lifeDomainAnswers,
-            );
-            const isActiveOptionalStep = activeOptionalSteps.some(({ step }) => step === normalizedStep);
-
-            // If step is invalid or not active (e.g., removed personalityDocuments or completed optional steps), redirect to a safe default
-            const finalStep = isValidStep && (isActiveOptionalStep || !isLifeDomainOptionalOpenEndedStep(normalizedStep as OnboardingStep))
-              ? normalizedStep
-              : 'typology';
+            const finalStep =
+              isValidStep
+                ? resolveRestoredOnboardingStep(normalizedStep as OnboardingStep, navCtx)
+                : 'name';
 
             setCurrentStep(finalStep as OnboardingStep);
+            persistedStepRef.current = finalStep as OnboardingStep;
             if (finalStep !== rawStep && user?.id) {
               void modalOnboardingService.saveProgress(user.id, {
                 currentStep: finalStep,
@@ -248,6 +261,27 @@ export const ModalOnboardingFlow: React.FC<ModalOnboardingFlowProps> = ({
     };
     // Progress + step restore only once per user — do not re-run when profile fields update (avoids step reset loops).
   }, [user?.id]);
+
+  // Recover from stale/inactive saved steps that have no screen to render.
+  useEffect(() => {
+    if (loading || !user?.id) return;
+    const navCtx = getOnboardingNavigationContext(onboardingDataRef.current);
+    const activeSteps = getEffectiveOnboardingStepsOrder(navCtx);
+    if (activeSteps.includes(currentStep)) return;
+
+    const resolved = resolveRestoredOnboardingStep(currentStep, navCtx);
+    if (resolved === currentStep) return;
+
+    setCurrentStep(resolved);
+    void modalOnboardingService
+      .saveProgress(user.id, {
+        currentStep: resolved,
+        onboardingData: onboardingDataRef.current,
+      })
+      .catch((e) => {
+        if (__DEV__) console.warn('[ModalOnboarding] resolve stale step', e);
+      });
+  }, [loading, user?.id, currentStep]);
 
   // Prefill empty onboarding fields from profile without changing currentStep.
   useEffect(() => {
@@ -338,6 +372,42 @@ export const ModalOnboardingFlow: React.FC<ModalOnboardingFlowProps> = ({
       setOnboardingData((prev) => {
         if (prev.occupation?.trim()) return prev;
         const updated = { ...prev, occupation: String((profile as { occupation?: string }).occupation) };
+        onboardingDataRef.current = updated;
+        return updated;
+      });
+    }
+
+    const profileHobbies = (profile as { hobbies?: string })?.hobbies;
+    if (profileHobbies?.trim()) {
+      setOnboardingData((prev) => {
+        if (prev.hobbies?.trim()) return prev;
+        const updated = { ...prev, hobbies: String(profileHobbies) };
+        onboardingDataRef.current = updated;
+        return updated;
+      });
+    }
+
+    const profileProfessionalHobbyId = (profile as { professionalHobbyId?: string | null })
+      ?.professionalHobbyId;
+    if (profileProfessionalHobbyId) {
+      setOnboardingData((prev) => {
+        if (prev.professionalHobbyId) return prev;
+        const updated = { ...prev, professionalHobbyId: profileProfessionalHobbyId };
+        onboardingDataRef.current = updated;
+        return updated;
+      });
+    }
+
+    if (profile && 'hobbyDealbreakerId' in profile) {
+      const profileHobbyDealbreakerId = (profile as { hobbyDealbreakerId?: string | null })
+        .hobbyDealbreakerId;
+      setOnboardingData((prev) => {
+        if (prev.hobbyDealbreakerAnswered) return prev;
+        const updated = {
+          ...prev,
+          hobbyDealbreakerId: profileHobbyDealbreakerId ?? null,
+          hobbyDealbreakerAnswered: true,
+        };
         onboardingDataRef.current = updated;
         return updated;
       });
@@ -457,10 +527,14 @@ export const ModalOnboardingFlow: React.FC<ModalOnboardingFlowProps> = ({
   const profileSaveTimeoutRef = React.useRef<NodeJS.Timeout | null>(null);
   const lastSavedDataRef = React.useRef<string>('');
   
-  const updateData = React.useCallback((newData: Partial<OnboardingData>) => {
+  const updateData = React.useCallback((newData: Partial<OnboardingData>, options?: { refOnly?: boolean }) => {
     // Merge into ref synchronously so goToNextStep (same tick as onValueChange) sees updates.
     const updatedData = { ...onboardingDataRef.current, ...newData };
     onboardingDataRef.current = updatedData;
+
+    if (options?.refOnly) {
+      return;
+    }
 
     const dataString = JSON.stringify(updatedData);
     if (dataString === lastSavedDataRef.current) {
@@ -483,7 +557,7 @@ export const ModalOnboardingFlow: React.FC<ModalOnboardingFlowProps> = ({
           if (latestDataString !== lastSavedDataRef.current) {
             lastSavedDataRef.current = latestDataString;
             modalOnboardingService.saveProgress(user.id, {
-              currentStep,
+              currentStep: persistedStepRef.current,
               onboardingData: latestData,
             }).then((saveResult) => {
               if (!saveResult.success) {
@@ -558,6 +632,15 @@ export const ModalOnboardingFlow: React.FC<ModalOnboardingFlowProps> = ({
         }
         if (newData.educationLevel && newData.educationLevel.trim() !== '') {
           profileUpdates.educationLevel = newData.educationLevel;
+        }
+        if (newData.hobbies !== undefined) {
+          profileUpdates.hobbies = newData.hobbies;
+        }
+        if (newData.professionalHobbyId !== undefined) {
+          (profileUpdates as any).professionalHobbyId = newData.professionalHobbyId;
+        }
+        if (newData.hobbyDealbreakerAnswered) {
+          (profileUpdates as any).hobbyDealbreakerId = newData.hobbyDealbreakerId ?? null;
         }
         if (newData.workout && String(newData.workout).trim() !== '') {
           profileUpdates.workout = newData.workout as any;
@@ -663,7 +746,7 @@ export const ModalOnboardingFlow: React.FC<ModalOnboardingFlowProps> = ({
           }
         }
         const archetypesDraft = normalizeArchetypesFromProfile(newData.archetypes);
-        if (archetypesDraft.length === 2) {
+        if (isCompleteArchetypeSelection(archetypesDraft.length)) {
           profileUpdates.archetypes = archetypesDraft;
         }
 
@@ -697,6 +780,12 @@ export const ModalOnboardingFlow: React.FC<ModalOnboardingFlowProps> = ({
     setOnboardingData(updatedData);
   }, [user?.id, currentStep]);
 
+  /** Fast path for auto-advance single-choice taps — ref only; persisted on step change. */
+  const setChoice = React.useCallback(
+    (patch: Partial<OnboardingData>) => updateData(patch, { refOnly: true }),
+    [updateData],
+  );
+
   const goToPrevStep = () => {
     if (stepTransitionLockRef.current) return;
     const prevStep = getPrevOnboardingStep(
@@ -712,7 +801,7 @@ export const ModalOnboardingFlow: React.FC<ModalOnboardingFlowProps> = ({
       if (user?.id) {
         void modalOnboardingService
           .saveProgress(user.id, {
-            currentStep: prevStep,
+            currentStep: persistedStepRef.current,
             onboardingData: latestData,
           })
           .then((saveResult) => {
@@ -779,7 +868,11 @@ export const ModalOnboardingFlow: React.FC<ModalOnboardingFlowProps> = ({
 
     stepTransitionLockRef.current = true;
     try {
-      setCurrentStep(nextStep);
+      startTransition(() => {
+        setOnboardingData(latestData);
+        setCurrentStep(nextStep);
+      });
+      persistedStepRef.current = nextStep;
 
       if (!uid) return;
 
@@ -879,6 +972,15 @@ export const ModalOnboardingFlow: React.FC<ModalOnboardingFlowProps> = ({
           if (latestData.educationLevel && latestData.educationLevel.trim() !== '') {
             profileUpdates.educationLevel = latestData.educationLevel;
           }
+          if (latestData.hobbies !== undefined) {
+            profileUpdates.hobbies = latestData.hobbies;
+          }
+          if (latestData.professionalHobbyId !== undefined) {
+            (profileUpdates as any).professionalHobbyId = latestData.professionalHobbyId;
+          }
+          if (latestData.hobbyDealbreakerAnswered) {
+            (profileUpdates as any).hobbyDealbreakerId = latestData.hobbyDealbreakerId ?? null;
+          }
           if (latestData.workout && latestData.workout.trim() !== '') {
             profileUpdates.workout = latestData.workout as any;
           }
@@ -934,6 +1036,9 @@ export const ModalOnboardingFlow: React.FC<ModalOnboardingFlowProps> = ({
             (profileUpdates as any).sexualFocusPreference = latestData.sexualFocusPreference;
           if (latestData.hobbies !== undefined) profileUpdates.hobbies = latestData.hobbies;
           if (latestData.professionalHobbyId !== undefined) (profileUpdates as any).professionalHobbyId = latestData.professionalHobbyId;
+          if (latestData.hobbyDealbreakerAnswered) {
+            (profileUpdates as any).hobbyDealbreakerId = latestData.hobbyDealbreakerId ?? null;
+          }
           if (latestData.availability && Array.isArray(latestData.availability) && latestData.availability.length > 0) {
             profileUpdates.availability = latestData.availability;
           }
@@ -987,7 +1092,7 @@ export const ModalOnboardingFlow: React.FC<ModalOnboardingFlowProps> = ({
             }
           }
           const archetypesStep = normalizeArchetypesFromProfile(latestData.archetypes);
-          if (archetypesStep.length === 2) {
+          if (isCompleteArchetypeSelection(archetypesStep.length)) {
             profileUpdates.archetypes = archetypesStep;
           }
 
@@ -1061,7 +1166,7 @@ export const ModalOnboardingFlow: React.FC<ModalOnboardingFlowProps> = ({
     onComplete();
   };
 
-  if (loading || (profileLoading && profile === undefined)) {
+  if (loading) {
     return (
       <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center' }}>
         <ActivityIndicator size="large" />
@@ -1072,7 +1177,8 @@ export const ModalOnboardingFlow: React.FC<ModalOnboardingFlowProps> = ({
 
   return (
     <OnboardingHeaderExitContext.Provider value={onExitToPostInterview}>
-    <View style={{ flex: 1 }}>
+    <SafeAreaView style={flowStyles.root} edges={['top', 'left', 'right']}>
+    <View style={flowStyles.content}>
       {currentStep !== 'profileComplete' ? (
         <OnboardingProgressBar
           currentStep={currentStep}
@@ -1088,10 +1194,52 @@ export const ModalOnboardingFlow: React.FC<ModalOnboardingFlowProps> = ({
         />
       )}
 
+      {currentStep === 'hobbies' && (
+        <HobbiesOnboardingModal
+          hobbies={onboardingData.hobbies || ''}
+          professionalHobbyId={onboardingData.professionalHobbyId}
+          onHobbiesChange={(hobbies) => {
+            const nextIds = hobbiesStringToIds(hobbies);
+            const prevIds = hobbiesStringToIds(onboardingData.hobbies);
+            const hobbiesChanged = hobbiesIdsToString(prevIds) !== hobbiesIdsToString(nextIds);
+            updateData({
+              hobbies,
+              ...(hobbiesChanged
+                ? {
+                    hobbyDealbreakerId: undefined,
+                    hobbyDealbreakerAnswered: false,
+                  }
+                : {}),
+              ...(onboardingData.professionalHobbyId &&
+              !nextIds.includes(onboardingData.professionalHobbyId)
+                ? { professionalHobbyId: null }
+                : {}),
+            });
+          }}
+          onProfessionalHobbyIdChange={(professionalHobbyId) =>
+            updateData({ professionalHobbyId })
+          }
+          onNext={goToNextStep}
+          onBack={goToPrevStep}
+        />
+      )}
+
+      {currentStep === 'hobbyDealbreaker' && (
+        <HobbyDealbreakerOnboardingModal
+          hobbies={onboardingData.hobbies || ''}
+          hobbyDealbreakerId={onboardingData.hobbyDealbreakerId}
+          onHobbyDealbreakerChange={(hobbyDealbreakerId) =>
+            updateData({ hobbyDealbreakerId, hobbyDealbreakerAnswered: true })
+          }
+          onNext={goToNextStep}
+          onBack={goToPrevStep}
+        />
+      )}
+
       {currentStep === 'ethnicity' && (
         <EthnicityOnboardingModal
           ethnicity={onboardingData.ethnicity || ''}
-          onEthnicityChange={(ethnicity) => updateData({ ethnicity })}
+          onEthnicityChange={(ethnicity) => setChoice({ ethnicity })}
           heritageOptions={ETHNICITY_CHOICES}
           onNext={goToNextStep}
           onBack={goToPrevStep}
@@ -1159,7 +1307,7 @@ export const ModalOnboardingFlow: React.FC<ModalOnboardingFlowProps> = ({
       {currentStep === 'relationshipStyle' && (
         <RelationshipStyleModal
           relationshipStyle={onboardingData.relationshipStyle || ''}
-          onRelationshipStyleChange={(style) => updateData({ relationshipStyle: style })}
+          onRelationshipStyleChange={(style) => setChoice({ relationshipStyle: style })}
           onNext={() => {
             const latestData = onboardingDataRef.current;
             if (latestData.relationshipStyle && latestData.relationshipStyle.trim() !== '' && user?.id) {
@@ -1187,7 +1335,7 @@ export const ModalOnboardingFlow: React.FC<ModalOnboardingFlowProps> = ({
       {currentStep === 'longestRelationship' && (
         <LongestRelationshipModal
           value={onboardingData.longestRomanticRelationship || ''}
-          onValueChange={(v) => updateData({ longestRomanticRelationship: v })}
+          onValueChange={(v) => setChoice({ longestRomanticRelationship: v })}
           onNext={goToNextStep}
           onBack={goToPrevStep}
         />
@@ -1228,7 +1376,7 @@ export const ModalOnboardingFlow: React.FC<ModalOnboardingFlowProps> = ({
           title="Education level"
           options={EDUCATION_LEVEL_CHOICES}
           value={onboardingData.educationLevel || ''}
-          onValueChange={(v) => updateData({ educationLevel: v })}
+          onValueChange={(v) => setChoice({ educationLevel: v })}
           onNext={goToNextStep}
           onBack={goToPrevStep}
         />
@@ -1250,7 +1398,7 @@ export const ModalOnboardingFlow: React.FC<ModalOnboardingFlowProps> = ({
           title="Workout frequency"
           options={workoutOptions}
           value={onboardingData.workout || ''}
-          onValueChange={(v) => updateData({ workout: v })}
+          onValueChange={(v) => setChoice({ workout: v })}
           onNext={goToNextStep}
           onBack={goToPrevStep}
         />
@@ -1261,7 +1409,7 @@ export const ModalOnboardingFlow: React.FC<ModalOnboardingFlowProps> = ({
           title="Smoking & vaping"
           options={smokingOptions}
           value={onboardingData.smoking || ''}
-          onValueChange={(v) => updateData({ smoking: v })}
+          onValueChange={(v) => setChoice({ smoking: v })}
           onNext={goToNextStep}
           onBack={goToPrevStep}
         />
@@ -1269,11 +1417,11 @@ export const ModalOnboardingFlow: React.FC<ModalOnboardingFlowProps> = ({
 
       {currentStep === 'partnerAlignmentTobacco' && (
         <SingleChoiceModal
-          title="Is it a must have that your partner shares your relationship with cigarettes or vaping?"
+          title={PARTNER_ALIGNMENT_TOBACCO_DEALBREAKER_QUESTION}
           options={PARTNER_SUBSTANCE_ALIGNMENT_CHOICES}
           value={String(onboardingData.matchPreferences?.partnerAlignmentTobacco ?? '')}
           onValueChange={(v) =>
-            updateData({
+            setChoice({
               matchPreferences: {
                 ...(onboardingDataRef.current.matchPreferences || {}),
                 partnerAlignmentTobacco: v,
@@ -1290,7 +1438,7 @@ export const ModalOnboardingFlow: React.FC<ModalOnboardingFlowProps> = ({
           title="What is your relationship with alcohol"
           options={drinkingOptions}
           value={onboardingData.drinking || ''}
-          onValueChange={(v) => updateData({ drinking: v })}
+          onValueChange={(v) => setChoice({ drinking: v })}
           onNext={goToNextStep}
           onBack={goToPrevStep}
         />
@@ -1298,11 +1446,11 @@ export const ModalOnboardingFlow: React.FC<ModalOnboardingFlowProps> = ({
 
       {currentStep === 'partnerAlignmentAlcohol' && (
         <SingleChoiceModal
-          title="Is it a must have that your partner shares your relationship with alcohol?"
+          title={PARTNER_ALIGNMENT_ALCOHOL_DEALBREAKER_QUESTION}
           options={PARTNER_SUBSTANCE_ALIGNMENT_CHOICES}
           value={String(onboardingData.matchPreferences?.partnerAlignmentAlcohol ?? '')}
           onValueChange={(v) =>
-            updateData({
+            setChoice({
               matchPreferences: {
                 ...(onboardingDataRef.current.matchPreferences || {}),
                 partnerAlignmentAlcohol: v,
@@ -1320,7 +1468,7 @@ export const ModalOnboardingFlow: React.FC<ModalOnboardingFlowProps> = ({
           description="Examples include MDMA, cocaine, or similar in social settings. Cannabis and psychedelics/plant medicines are asked separately."
           options={recreationalDrugsSocialOptions}
           value={onboardingData.recreationalDrugsSocial || ''}
-          onValueChange={(v) => updateData({ recreationalDrugsSocial: v })}
+          onValueChange={(v) => setChoice({ recreationalDrugsSocial: v })}
           onNext={goToNextStep}
           onBack={goToPrevStep}
         />
@@ -1328,11 +1476,11 @@ export const ModalOnboardingFlow: React.FC<ModalOnboardingFlowProps> = ({
 
       {currentStep === 'partnerAlignmentRecreationalDrugs' && (
         <SingleChoiceModal
-          title="Is it a must have that your partner shares your relationship with recreational drugs?"
+          title={PARTNER_ALIGNMENT_RECREATIONAL_DRUGS_DEALBREAKER_QUESTION}
           options={PARTNER_SUBSTANCE_ALIGNMENT_CHOICES}
           value={String(onboardingData.matchPreferences?.partnerAlignmentRecreationalDrugs ?? '')}
           onValueChange={(v) =>
-            updateData({
+            setChoice({
               matchPreferences: {
                 ...(onboardingDataRef.current.matchPreferences || {}),
                 partnerAlignmentRecreationalDrugs: v,
@@ -1350,7 +1498,7 @@ export const ModalOnboardingFlow: React.FC<ModalOnboardingFlowProps> = ({
           description="Psychedelics and traditional plant medicines (e.g. ayahuasca, peyote in lawful ceremonial contexts). This is separate from alcohol and cannabis."
           options={psychedelicsRelationshipOptions}
           value={onboardingData.relationshipWithPsychedelics || ''}
-          onValueChange={(v) => updateData({ relationshipWithPsychedelics: v })}
+          onValueChange={(v) => setChoice({ relationshipWithPsychedelics: v })}
           onNext={goToNextStep}
           onBack={goToPrevStep}
         />
@@ -1358,11 +1506,11 @@ export const ModalOnboardingFlow: React.FC<ModalOnboardingFlowProps> = ({
 
       {currentStep === 'partnerAlignmentPsychedelics' && (
         <SingleChoiceModal
-          title="Is it a must have that your partner shares your relationship with psychedelics or plant medicines?"
+          title={PARTNER_ALIGNMENT_PSYCHEDELICS_DEALBREAKER_QUESTION}
           options={PARTNER_SUBSTANCE_ALIGNMENT_CHOICES}
           value={String(onboardingData.matchPreferences?.partnerAlignmentPsychedelics ?? '')}
           onValueChange={(v) =>
-            updateData({
+            setChoice({
               matchPreferences: {
                 ...(onboardingDataRef.current.matchPreferences || {}),
                 partnerAlignmentPsychedelics: v,
@@ -1379,7 +1527,7 @@ export const ModalOnboardingFlow: React.FC<ModalOnboardingFlowProps> = ({
           title="What is your relationship with cannabis or tobacco?"
           options={cannabisRelationshipOptions}
           value={onboardingData.relationshipWithCannabis || ''}
-          onValueChange={(v) => updateData({ relationshipWithCannabis: v })}
+          onValueChange={(v) => setChoice({ relationshipWithCannabis: v })}
           onNext={goToNextStep}
           onBack={goToPrevStep}
         />
@@ -1387,11 +1535,11 @@ export const ModalOnboardingFlow: React.FC<ModalOnboardingFlowProps> = ({
 
       {currentStep === 'partnerAlignmentCannabis' && (
         <SingleChoiceModal
-          title="Is it a must have that your partner shares your relationship with cannabis or tobacco?"
+          title={PARTNER_ALIGNMENT_CANNABIS_DEALBREAKER_QUESTION}
           options={PARTNER_SUBSTANCE_ALIGNMENT_CHOICES}
           value={String(onboardingData.matchPreferences?.partnerAlignmentCannabis ?? '')}
           onValueChange={(v) =>
-            updateData({
+            setChoice({
               matchPreferences: {
                 ...(onboardingDataRef.current.matchPreferences || {}),
                 partnerAlignmentCannabis: v,
@@ -1408,7 +1556,7 @@ export const ModalOnboardingFlow: React.FC<ModalOnboardingFlowProps> = ({
           title="Do you have kids?"
           options={haveKidsOptions}
           value={onboardingData.haveKids || ''}
-          onValueChange={(v) => updateData({ haveKids: v })}
+          onValueChange={(v) => setChoice({ haveKids: v })}
           onNext={goToNextStep}
           onBack={goToPrevStep}
         />
@@ -1419,7 +1567,7 @@ export const ModalOnboardingFlow: React.FC<ModalOnboardingFlowProps> = ({
           title="Do you want children?"
           options={wantChildrenYesNoOptions}
           value={onboardingData.wantKids || ''}
-          onValueChange={(v) => updateData({ wantKids: v })}
+          onValueChange={(v) => setChoice({ wantKids: v })}
           onNext={goToNextStep}
           onBack={goToPrevStep}
         />
@@ -1430,7 +1578,7 @@ export const ModalOnboardingFlow: React.FC<ModalOnboardingFlowProps> = ({
           title="Is it OK if your match already has children?"
           options={PARTNER_HAS_CHILDREN_CHOICES}
           value={onboardingData.prefPartnerHasChildren || ''}
-          onValueChange={(v) => updateData({ prefPartnerHasChildren: v })}
+          onValueChange={(v) => setChoice({ prefPartnerHasChildren: v })}
           onNext={goToNextStep}
           onBack={goToPrevStep}
         />
@@ -1441,7 +1589,7 @@ export const ModalOnboardingFlow: React.FC<ModalOnboardingFlowProps> = ({
           title="Politics"
           options={politicsOptions}
           value={onboardingData.politics || ''}
-          onValueChange={(v) => updateData({ politics: v })}
+          onValueChange={(v) => setChoice({ politics: v })}
           onNext={goToNextStep}
           onBack={goToPrevStep}
         />
@@ -1449,10 +1597,10 @@ export const ModalOnboardingFlow: React.FC<ModalOnboardingFlowProps> = ({
 
       {currentStep === 'prefPartnerPoliticalAlignment' && (
         <SingleChoiceModal
-          title="Is it a must have that your partner shares the same political views as you?"
+          title={PARTNER_POLITICAL_VIEWS_DEALBREAKER_QUESTION}
           options={PARTNER_POLITICAL_SHARING_CHOICES}
           value={onboardingData.prefPartnerPoliticalAlignmentImportance || ''}
-          onValueChange={(v) => updateData({ prefPartnerPoliticalAlignmentImportance: v })}
+          onValueChange={(v) => setChoice({ prefPartnerPoliticalAlignmentImportance: v })}
           onNext={goToNextStep}
           onBack={goToPrevStep}
         />
@@ -1463,7 +1611,7 @@ export const ModalOnboardingFlow: React.FC<ModalOnboardingFlowProps> = ({
           title="Religion"
           options={religionOptions}
           value={onboardingData.religion || ''}
-          onValueChange={(v) => updateData({ religion: v })}
+          onValueChange={(v) => setChoice({ religion: v })}
           onNext={goToNextStep}
           onBack={goToPrevStep}
         />
@@ -1471,11 +1619,11 @@ export const ModalOnboardingFlow: React.FC<ModalOnboardingFlowProps> = ({
 
       {currentStep === 'partnerSameReligionRequired' && (
         <SingleChoiceModal
-          title="Is it a must have that your partner shares the same religious faith as you?"
+          title={PARTNER_SAME_RELIGION_DEALBREAKER_QUESTION}
           options={PARTNER_SAME_RELIGION_CHOICES}
           value={String(onboardingData.matchPreferences?.partnerSameReligionRequired ?? '')}
           onValueChange={(v) =>
-            updateData({
+            setChoice({
               matchPreferences: {
                 ...(onboardingData.matchPreferences ?? {}),
                 partnerSameReligionRequired: v,
@@ -1492,7 +1640,7 @@ export const ModalOnboardingFlow: React.FC<ModalOnboardingFlowProps> = ({
           title="In a relationship, what feels like your natural rhythm for sex?"
           options={SEX_DRIVE_OPTIONS}
           value={onboardingData.sexDrive || ''}
-          onValueChange={(v) => updateData({ sexDrive: v })}
+          onValueChange={(v) => setChoice({ sexDrive: v })}
           onNext={goToNextStep}
           onBack={goToPrevStep}
         />
@@ -1501,7 +1649,7 @@ export const ModalOnboardingFlow: React.FC<ModalOnboardingFlowProps> = ({
       {currentStep === 'sexInterests' && (
         <SexInterestsOnboardingModal
           categories={onboardingData.sexInterestCategories || []}
-          onCategoriesChange={(sexInterestCategories) => updateData({ sexInterestCategories })}
+          onCategoriesChange={(sexInterestCategories) => setChoice({ sexInterestCategories })}
           onNext={goToNextStep}
           onBack={goToPrevStep}
         />
@@ -1515,7 +1663,7 @@ export const ModalOnboardingFlow: React.FC<ModalOnboardingFlowProps> = ({
             onboardingData.prefPartnerSharesSexualInterests || '',
           )}
           onValueChange={(v) =>
-            updateData({ prefPartnerSharesSexualInterests: prefPartnerSharesSexualInterestsFromYesNo(v) })
+            setChoice({ prefPartnerSharesSexualInterests: prefPartnerSharesSexualInterestsFromYesNo(v) })
           }
           onNext={goToNextStep}
           onBack={goToPrevStep}
@@ -1527,7 +1675,7 @@ export const ModalOnboardingFlow: React.FC<ModalOnboardingFlowProps> = ({
           title="When my partner is in the mood and I'm not, I generally..."
           options={PARTNER_MOOD_MISMATCH_RESPONSE_OPTIONS}
           value={onboardingData.partnerMoodMismatchResponse || ''}
-          onValueChange={(v) => updateData({ partnerMoodMismatchResponse: v })}
+          onValueChange={(v) => setChoice({ partnerMoodMismatchResponse: v })}
           onNext={goToNextStep}
           onBack={goToPrevStep}
         />
@@ -1538,7 +1686,7 @@ export const ModalOnboardingFlow: React.FC<ModalOnboardingFlowProps> = ({
           title="During sex, I'm more focused on..."
           options={SEXUAL_FOCUS_OPTIONS}
           value={onboardingData.sexualFocusPreference || ''}
-          onValueChange={(v) => updateData({ sexualFocusPreference: v })}
+          onValueChange={(v) => setChoice({ sexualFocusPreference: v })}
           onNext={goToNextStep}
           onBack={goToPrevStep}
         />
@@ -1549,7 +1697,7 @@ export const ModalOnboardingFlow: React.FC<ModalOnboardingFlowProps> = ({
           title="After the initial excitement of meeting someone, what pace feels most natural for you?"
           options={DATING_PACE_AFTER_EXCITEMENT_OPTIONS}
           value={onboardingData.datingPaceAfterExcitement || ''}
-          onValueChange={(v) => updateData({ datingPaceAfterExcitement: v })}
+          onValueChange={(v) => setChoice({ datingPaceAfterExcitement: v })}
           onNext={goToNextStep}
           onBack={goToPrevStep}
         />
@@ -1560,7 +1708,7 @@ export const ModalOnboardingFlow: React.FC<ModalOnboardingFlowProps> = ({
           title="Think about your most recent dating experience. In the first 2-3 weeks, what actually happened?"
           options={RECENT_DATING_EARLY_WEEKS_OPTIONS}
           value={onboardingData.recentDatingEarlyWeeks || ''}
-          onValueChange={(v) => updateData({ recentDatingEarlyWeeks: v })}
+          onValueChange={(v) => setChoice({ recentDatingEarlyWeeks: v })}
           onNext={goToNextStep}
           onBack={goToPrevStep}
         />
@@ -1571,7 +1719,7 @@ export const ModalOnboardingFlow: React.FC<ModalOnboardingFlowProps> = ({
           title="How much space do you realistically have for a new relationship right now?"
           options={SPACE_FOR_NEW_RELATIONSHIP_OPTIONS}
           value={onboardingData.spaceForNewRelationship || ''}
-          onValueChange={(v) => updateData({ spaceForNewRelationship: v })}
+          onValueChange={(v) => setChoice({ spaceForNewRelationship: v })}
           onNext={goToNextStep}
           onBack={goToPrevStep}
         />
@@ -1645,10 +1793,33 @@ export const ModalOnboardingFlow: React.FC<ModalOnboardingFlowProps> = ({
         />
       )}
 
+      {currentStep === 'profilePrompts' && (
+        <ProfilePromptsOnboardingModal
+          prompts={(onboardingData.profilePrompts ?? []) as ProfilePromptAnswer[]}
+          onPromptsChange={(profilePrompts) => {
+            updateData({ profilePrompts });
+            if (user?.id) {
+              void saveEditProfilePrompts(user.id, profilePrompts).catch((e) => {
+                if (__DEV__) console.warn('[ModalOnboarding] profile prompts save', e);
+              });
+            }
+          }}
+          onNext={goToNextStep}
+          onBack={goToPrevStep}
+        />
+      )}
+
       {currentStep === 'matchPreferences' && (
         <MatchPreferencesModal
           matchPreferences={onboardingData.matchPreferences}
-          onMatchPreferencesChange={(matchPreferences) => updateData({ matchPreferences })}
+          onMatchPreferencesChange={(matchPreferences) =>
+            updateData({
+              matchPreferences: {
+                ...(onboardingDataRef.current.matchPreferences ?? {}),
+                ...matchPreferences,
+              },
+            })
+          }
           onNext={goToNextStep}
           onBack={goToPrevStep}
         />
@@ -1700,7 +1871,14 @@ export const ModalOnboardingFlow: React.FC<ModalOnboardingFlowProps> = ({
         <AttractionPreferencesModal
           matchPreferences={onboardingData.matchPreferences}
           userAge={typeof profile?.age === 'number' ? profile.age : undefined}
-          onMatchPreferencesChange={(matchPreferences) => updateData({ matchPreferences })}
+          onMatchPreferencesChange={(matchPreferences) =>
+            updateData({
+              matchPreferences: {
+                ...(onboardingDataRef.current.matchPreferences ?? {}),
+                ...matchPreferences,
+              },
+            })
+          }
           onNext={() => {
             void goToNextStep();
             const latest = onboardingDataRef.current;
@@ -1721,7 +1899,17 @@ export const ModalOnboardingFlow: React.FC<ModalOnboardingFlowProps> = ({
         <ProfileOnboardingCompleteModal onContinue={handleComplete} />
       )}
     </View>
+    </SafeAreaView>
     </OnboardingHeaderExitContext.Provider>
   );
 };
+
+const flowStyles = StyleSheet.create({
+  root: {
+    flex: 1,
+  },
+  content: {
+    flex: 1,
+  },
+});
 

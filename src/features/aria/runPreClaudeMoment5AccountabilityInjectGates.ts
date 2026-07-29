@@ -1,4 +1,5 @@
 import { buildPreClaudeMoment5AccountabilityEvalContext } from '@features/aria/buildPreClaudeMoment5AccountabilityEvalContext';
+import { looksLikeIncompleteCutOffUserAnswer } from '@features/aria/interviewAnswerRelevance';
 import type { MessageWithScenario } from '@features/aria/interviewScenarioScoringSlice';
 import { reconcileMoment5DeliveryFromTranscript, moment5DeliveryRefsIndicateQuestionDelivered, transcriptHasMoment5PrimaryConflictAnchor } from '@features/aria/moment5DeliveryReconcile';
 import type { PreClaudeTurnGateDeps } from '@features/aria/preClaudeTurnGateTypes';
@@ -25,6 +26,13 @@ export async function runPreClaudeMoment5AccountabilityInjectGates(
   lastInterviewerContent: string,
 ): Promise<PreClaudeMoment5AccountabilityInjectGatesResult> {
   reconcileMoment5DeliveryFromTranscript(deps, messagesToUse);
+  if (looksLikeIncompleteCutOffUserAnswer(trimmed)) {
+    console.log('[M5] accountability inject gates — skip cut-off answer', {
+      attemptId: deps.interviewSessionAttemptIdRef.current ?? null,
+      preview: trimmed.slice(0, 120),
+    });
+    return { handled: false, moment5CombinedUserText: trimmed };
+  }
   console.log('[M5] accountability inject gates — entry', {
     attemptId: deps.interviewSessionAttemptIdRef.current ?? null,
     responseWordCount: trimmed.trim().split(/\s+/).filter(Boolean).length,

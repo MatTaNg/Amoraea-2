@@ -20,53 +20,103 @@ export type OnboardingNavigationContext = {
 /** Steps order with inactive conditional steps removed. */
 export function getEffectiveOnboardingStepsOrder(
   ctx?: OnboardingNavigationContext | null,
-  currentStep?: OnboardingStep,
 ): OnboardingStep[] {
   const wantKids = ctx?.wantKids;
   const activeLifeDomainSteps = new Set(
     getActiveLifeDomainRequiredQuestionSteps(wantKids).map((row) => row.step),
   );
+  const activeOptionalSteps = new Set(
+    getActiveLifeDomainOptionalOpenEndedSteps(
+      wantKids,
+      ctx?.lifeDomainAnswers ?? undefined,
+    ).map((row) => row.step),
+  );
   const includeTypology = shouldShowTypologyOnboardingStep(ctx?.typology);
 
-  const result = ONBOARDING_STEPS_ORDER.filter((step) => {
-    if (step === currentStep) return true;
+  return ONBOARDING_STEPS_ORDER.filter((step) => {
     if (isLifeDomainRequiredQuestionStep(step)) {
       return activeLifeDomainSteps.has(step);
+    }
+    if (isLifeDomainOptionalOpenEndedStep(step)) {
+      return activeOptionalSteps.has(step);
     }
     if (step === 'typology') {
       return includeTypology;
     }
     return true;
   });
+}
 
-  if (__DEV__ && currentStep === 'typology') {
-    console.log('[OnboardingNav] effective steps from typology:', {
-      includeTypology,
-      nextThree: result.slice(result.indexOf('typology') + 1, result.indexOf('typology') + 4),
-    });
+/** Map a stale/inactive saved step to the nearest active step in canonical order. */
+export function resolveRestoredOnboardingStep(
+  rawStep: OnboardingStep,
+  ctx?: OnboardingNavigationContext | null,
+): OnboardingStep {
+  const activeSteps = getEffectiveOnboardingStepsOrder(ctx);
+  if (activeSteps.includes(rawStep)) return rawStep;
+
+  const canonicalIndex = ONBOARDING_STEPS_ORDER.indexOf(rawStep);
+  if (canonicalIndex < 0) return activeSteps[0] ?? 'name';
+
+  for (let i = canonicalIndex + 1; i < ONBOARDING_STEPS_ORDER.length; i++) {
+    const candidate = ONBOARDING_STEPS_ORDER[i];
+    if (activeSteps.includes(candidate)) return candidate;
   }
+  for (let i = canonicalIndex - 1; i >= 0; i--) {
+    const candidate = ONBOARDING_STEPS_ORDER[i];
+    if (activeSteps.includes(candidate)) return candidate;
+  }
+  return activeSteps[0] ?? 'name';
+}
 
-  return result;
+function findPrevActiveStep(
+  currentStep: OnboardingStep,
+  activeSteps: OnboardingStep[],
+): OnboardingStep | null {
+  const index = activeSteps.indexOf(currentStep);
+  if (index > 0) return activeSteps[index - 1] ?? null;
+  if (index === 0) return null;
+
+  const canonicalIndex = ONBOARDING_STEPS_ORDER.indexOf(currentStep);
+  if (canonicalIndex <= 0) return null;
+  for (let i = canonicalIndex - 1; i >= 0; i--) {
+    const candidate = ONBOARDING_STEPS_ORDER[i];
+    if (activeSteps.includes(candidate)) return candidate;
+  }
+  return null;
+}
+
+function findNextActiveStep(
+  currentStep: OnboardingStep,
+  activeSteps: OnboardingStep[],
+): OnboardingStep | null {
+  const index = activeSteps.indexOf(currentStep);
+  if (index >= 0 && index < activeSteps.length - 1) {
+    return activeSteps[index + 1] ?? null;
+  }
+  if (index >= 0) return null;
+
+  const canonicalIndex = ONBOARDING_STEPS_ORDER.indexOf(currentStep);
+  if (canonicalIndex < 0 || canonicalIndex >= ONBOARDING_STEPS_ORDER.length - 1) return null;
+  for (let i = canonicalIndex + 1; i < ONBOARDING_STEPS_ORDER.length; i++) {
+    const candidate = ONBOARDING_STEPS_ORDER[i];
+    if (activeSteps.includes(candidate)) return candidate;
+  }
+  return null;
 }
 
 export function getNextOnboardingStep(
   currentStep: OnboardingStep,
   ctx?: OnboardingNavigationContext | null,
 ): OnboardingStep | null {
-  const steps = getEffectiveOnboardingStepsOrder(ctx, currentStep);
-  const index = steps.indexOf(currentStep);
-  if (index < 0 || index >= steps.length - 1) return null;
-  return steps[index + 1] ?? null;
+  return findNextActiveStep(currentStep, getEffectiveOnboardingStepsOrder(ctx));
 }
 
 export function getPrevOnboardingStep(
   currentStep: OnboardingStep,
   ctx?: OnboardingNavigationContext | null,
 ): OnboardingStep | null {
-  const steps = getEffectiveOnboardingStepsOrder(ctx, currentStep);
-  const index = steps.indexOf(currentStep);
-  if (index <= 0) return null;
-  return steps[index - 1] ?? null;
+  return findPrevActiveStep(currentStep, getEffectiveOnboardingStepsOrder(ctx));
 }
 
 export function getOnboardingNavigationContext(

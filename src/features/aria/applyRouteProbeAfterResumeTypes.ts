@@ -4,6 +4,7 @@ import { Platform } from 'react-native';
 import type { AudioRouteKind } from '@features/aria/config/audioRouteRuntime';
 import {
   refreshAudioSessionAfterRouteChange,
+  setPlaybackMode,
 } from '@features/aria/utils/audioModeHelpers';
 import { probeHeadphoneRoute } from '@features/aria/utils/audioRouteHeadphones';
 import type { HeadphoneProbeResult } from '@features/aria/utils/audioRouteHeadphones';
@@ -54,5 +55,8 @@ export async function runApplyRouteProbeAfterResume(
     deps.lastHeadphoneProbeRef.current = p;
     deps.lastAudioRouteFingerprintRef.current = p.fingerprint;
     deps.setAudioRouteKind(p.kind);
+  }
+  if (source === 'app_resume' && Platform.OS !== 'web') {
+    await setPlaybackMode().catch(() => {});
   }
 }

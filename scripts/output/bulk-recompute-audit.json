@@ -3,18 +3,119 @@
   "committed": true,
   "rollupAlgorithm": "scenario_only_integers_v3_m4_exempt_accountability",
   "since": null,
-  "scanned": 90,
-  "gateFlips": 70,
-  "reasoningQueued": 50,
+  "scanned": 91,
+  "gateFlips": 15,
+  "reasoningQueued": 39,
   "results": [
+    {
+      "attemptId": "7c5b7695-bdab-469e-bbf7-de6fc285865c",
+      "userId": "bedb93f5-2afc-433b-b938-358aa97990aa",
+      "completedAt": "2026-07-29T03:42:22.732+00:00",
+      "rollupAlgorithm": "scenario_only_integers_v3_m4_exempt_accountability",
+      "old": {
+        "weightedScore": 5.2,
+        "modifiedWeightedScore": 4.9,
+        "passed": false,
+        "finalGatePass": false,
+        "pillarScores": {
+          "repair": 4,
+          "contempt": 5,
+          "attunement": 6,
+          "regulation": 8,
+          "mentalizing": 5,
+          "appreciation": 4,
+          "accountability": 4,
+          "commitment_threshold": 7
+        }
+      },
+      "new": {
+        "weightedScore": 5.2,
+        "modifiedWeightedScore": 5.1,
+        "passed": false,
+        "finalGatePass": false,
+        "pillarScores": {
+          "mentalizing": 5,
+          "accountability": 4,
+          "repair": 4,
+          "regulation": 8,
+          "attunement": 6,
+          "appreciation": 4,
+          "contempt": 5,
+          "commitment_threshold": 7
+        },
+        "gateFailReasons": [
+          "weighted_score",
+          "scenario_floor",
+          "aaq2_high_experiential_avoidance_floor"
+        ]
+      },
+      "weightedDelta": 0,
+      "passFlipped": false,
+      "needsReasoningRegen": false,
+      "recomputeNotes": [
+        "rollup_algorithm:scenario_only_integers_v3_m4_exempt_accountability",
+        "gate: floor_breach: accountability (4.0), repair (4.0)",
+        "scenario composite floor: S1=2.57"
+      ]
+    },
+    {
+      "attemptId": "bb3fddfd-93b0-4454-87d8-371ad2fdd5fa",
+      "userId": "19e8bb2f-48b4-494b-8f45-3423701baf7c",
+      "completedAt": "2026-07-11T19:46:21.906+00:00",
+      "rollupAlgorithm": "scenario_only_integers_v3_m4_exempt_accountability",
+      "old": {
+        "weightedScore": 4.7,
+        "modifiedWeightedScore": 4.25,
+        "passed": false,
+        "finalGatePass": false,
+        "pillarScores": {
+          "repair": 5,
+          "contempt": 5,
+          "attunement": 4,
+          "regulation": 5,
+          "mentalizing": 4,
+          "appreciation": 6,
+          "accountability": 4,
+          "commitment_threshold": 7
+        }
+      },
+      "new": {
+        "weightedScore": 4.7,
+        "modifiedWeightedScore": 4.6,
+        "passed": false,
+        "finalGatePass": false,
+        "pillarScores": {
+          "mentalizing": 4,
+          "accountability": 4,
+          "repair": 5,
+          "regulation": 5,
+          "attunement": 4,
+          "appreciation": 6,
+          "contempt": 5,
+          "commitment_threshold": 7
+        },
+        "gateFailReasons": [
+          "weighted_score",
+          "scenario_floor"
+        ]
+      },
+      "weightedDelta": 0,
+      "passFlipped": false,
+      "needsReasoningRegen": false,
+      "recomputeNotes": [
+        "rollup_algorithm:scenario_only_integers_v3_m4_exempt_accountability",
+        "gate: floor_breach: accountability (4.0)",
+        "scenario composite floor: S2=4.17; S3=4.83"
+      ]
+    },
     {
       "attemptId": "04ede010-efba-488a-a10a-b3ef84142e81",
       "userId": "43893ee4-7f9e-432e-9efe-ffb98dda6295",
       "completedAt": "2026-07-03T04:28:16.758+00:00",
       "rollupAlgorithm": "scenario_only_integers_v3_m4_exempt_accountability",
       "old": {
-        "weightedScore": 5.9,
-        "modifiedWeightedScore": null,
+        "weightedScore": 6.1,
+        "modifiedWeightedScore": 6.15,
         "passed": false,
         "finalGatePass": false,
         "pillarScores": {
@@ -24,13 +125,13 @@
           "regulation": 7,
           "mentalizing": 5,
           "appreciation": 5,
-          "accountability": 5,
+          "accountability": 6,
           "commitment_threshold": 7
         }
       },
       "new": {
         "weightedScore": 6.1,
-        "modifiedWeightedScore": 6.15,
+        "modifiedWeightedScore": 6.4,
         "passed": false,
         "finalGatePass": false,
         "pillarScores": {
@@ -47,12 +148,12 @@
           "weighted_score"
         ]
       },
-      "weightedDelta": 0.2,
+      "weightedDelta": 0,
       "passFlipped": false,
       "needsReasoningRegen": false,
       "recomputeNotes": [
         "rollup_algorithm:scenario_only_integers_v3_m4_exempt_accountability",
-        "gate: weighted_score: 6.2 (required 6.5)",
+        "gate: weighted_score: 6.4 (required 6.5)",
         "accountability_reweight:m4_situational_exempt:5->6 (M4 disclosure involves described narcissistic or personality-disordered behavior by the other party)"
       ]
     },
@@ -62,9 +163,9 @@
       "completedAt": "2026-06-19T22:54:05.808+00:00",
       "rollupAlgorithm": "scenario_only_integers_v3_m4_exempt_accountability",
       "old": {
-        "weightedScore": 6.3,
-        "modifiedWeightedScore": 6.4,
-        "passed": false,
+        "weightedScore": 6.5,
+        "modifiedWeightedScore": 6.6,
+        "passed": true,
         "finalGatePass": false,
         "pillarScores": {
           "repair": 6,
@@ -73,13 +174,13 @@
           "regulation": 7,
           "mentalizing": 6,
           "appreciation": 6,
-          "accountability": 6,
+          "accountability": 7,
           "commitment_threshold": 6
         }
       },
       "new": {
         "weightedScore": 6.5,
-        "modifiedWeightedScore": 6.6,
+        "modifiedWeightedScore": 6.7,
         "passed": true,
         "finalGatePass": false,
         "pillarScores": {
@@ -96,8 +197,8 @@
           "aaq2_high_experiential_avoidance_floor"
         ]
       },
-      "weightedDelta": 0.2,
-      "passFlipped": true,
+      "weightedDelta": 0,
+      "passFlipped": false,
       "needsReasoningRegen": false,
       "recomputeNotes": [
         "rollup_algorithm:scenario_only_integers_v3_m4_exempt_accountability",
@@ -112,7 +213,7 @@
       "old": {
         "weightedScore": 6.7,
         "modifiedWeightedScore": 6.7,
-        "passed": false,
+        "passed": true,
         "finalGatePass": false,
         "pillarScores": {
           "repair": 7,
@@ -127,7 +228,7 @@
       },
       "new": {
         "weightedScore": 6.7,
-        "modifiedWeightedScore": 6.7,
+        "modifiedWeightedScore": 6.8,
         "passed": true,
         "finalGatePass": false,
         "pillarScores": {
@@ -143,7 +244,7 @@
         "gateFailReasons": []
       },
       "weightedDelta": 0,
-      "passFlipped": true,
+      "passFlipped": false,
       "needsReasoningRegen": false,
       "recomputeNotes": [
         "rollup_algorithm:scenario_only_integers_v3_m4_exempt_accountability",
@@ -156,26 +257,26 @@
       "completedAt": "2026-06-13T21:50:07.455+00:00",
       "rollupAlgorithm": "scenario_only_integers_v3_m4_exempt_accountability",
       "old": {
-        "weightedScore": 7.5,
-        "modifiedWeightedScore": 7.65,
-        "passed": true,
-        "finalGatePass": true,
-        "pillarScores": {
-          "repair": 8,
-          "contempt": 8,
-          "attunement": 8,
-          "regulation": 7,
-          "mentalizing": 8,
-          "appreciation": 7,
-          "accountability": 7,
-          "commitment_threshold": 6
-        }
-      },
-      "new": {
         "weightedScore": 6.9,
         "modifiedWeightedScore": 6.95,
         "passed": true,
         "finalGatePass": false,
+        "pillarScores": {
+          "repair": 7,
+          "contempt": 7,
+          "attunement": 6,
+          "regulation": 7,
+          "mentalizing": 7,
+          "appreciation": 8,
+          "accountability": 7,
+          "commitment_threshold": 7
+        }
+      },
+      "new": {
+        "weightedScore": 6.9,
+        "modifiedWeightedScore": 7.2,
+        "passed": true,
+        "finalGatePass": true,
         "pillarScores": {
           "mentalizing": 7,
           "accountability": 7,
@@ -188,9 +289,9 @@
         },
         "gateFailReasons": []
       },
-      "weightedDelta": -0.6,
+      "weightedDelta": 0,
       "passFlipped": true,
-      "needsReasoningRegen": true,
+      "needsReasoningRegen": false,
       "recomputeNotes": [
         "rollup_algorithm:scenario_only_integers_v3_m4_exempt_accountability",
         "gate: pass — all current rubric checks satisfied"
@@ -202,24 +303,24 @@
       "completedAt": "2026-06-12T22:25:33.393+00:00",
       "rollupAlgorithm": "scenario_only_integers_v3_m4_exempt_accountability",
       "old": {
-        "weightedScore": 5.4,
-        "modifiedWeightedScore": 4.9,
+        "weightedScore": 3.8,
+        "modifiedWeightedScore": 3.35,
         "passed": false,
         "finalGatePass": false,
         "pillarScores": {
-          "repair": 5,
+          "repair": 4,
           "contempt": 6,
           "attunement": 3,
-          "regulation": 6,
-          "mentalizing": 4,
-          "appreciation": 7,
-          "accountability": 6,
-          "commitment_threshold": 7
+          "regulation": 2,
+          "mentalizing": 3,
+          "appreciation": 4,
+          "accountability": 3,
+          "commitment_threshold": 5
         }
       },
       "new": {
         "weightedScore": 3.8,
-        "modifiedWeightedScore": 3.35,
+        "modifiedWeightedScore": 3.8,
         "passed": false,
         "finalGatePass": false,
         "pillarScores": {
@@ -233,15 +334,20 @@
           "commitment_threshold": 5
         },
         "gateFailReasons": [
-          "scenario_floor"
+          "weighted_score",
+          "scenario_floor",
+          "mentalizing_floor",
+          "repair_floor"
         ]
       },
-      "weightedDelta": -1.6,
+      "weightedDelta": 0,
       "passFlipped": false,
-      "needsReasoningRegen": true,
+      "needsReasoningRegen": false,
       "recomputeNotes": [
         "rollup_algorithm:scenario_only_integers_v3_m4_exempt_accountability",
         "gate: floor_breach: accountability (3.0), regulation (2.0), repair (4.0)",
+        "mentalizing floor: scenarios 1, 2, 3",
+        "repair floor: scenarios 1, 3",
         "scenario composite floor: S1=3.67; S2=4.83; S3=3.50"
       ]
     },
@@ -251,25 +357,25 @@
       "completedAt": "2026-06-12T19:45:47.21+00:00",
       "rollupAlgorithm": "scenario_only_integers_v3_m4_exempt_accountability",
       "old": {
-        "weightedScore": 7.1,
-        "modifiedWeightedScore": 7.1,
+        "weightedScore": 6.2,
+        "modifiedWeightedScore": 6.5,
         "passed": true,
         "finalGatePass": true,
         "pillarScores": {
           "repair": 7,
-          "contempt": 8,
-          "attunement": 7,
+          "contempt": 6,
+          "attunement": 6,
           "regulation": 7,
-          "mentalizing": 8,
-          "appreciation": 6,
-          "accountability": 6,
+          "mentalizing": 6,
+          "appreciation": 7,
+          "accountability": 5,
           "commitment_threshold": 7
         }
       },
       "new": {
         "weightedScore": 6.2,
-        "modifiedWeightedScore": 6.1,
-        "passed": false,
+        "modifiedWeightedScore": 6.5,
+        "passed": true,
         "finalGatePass": false,
         "pillarScores": {
           "mentalizing": 6,
@@ -281,16 +387,13 @@
           "contempt": 6,
           "commitment_threshold": 7
         },
-        "gateFailReasons": [
-          "weighted_score"
-        ]
+        "gateFailReasons": []
       },
-      "weightedDelta": -0.9,
+      "weightedDelta": 0,
       "passFlipped": true,
       "needsReasoningRegen": true,
       "recomputeNotes": [
         "rollup_algorithm:scenario_only_integers_v3_m4_exempt_accountability",
-        "gate: weighted_score: 6.1 (required 6.5)",
         "accountability_reweight:m4_situational_exempt:5->5 (M4 frames walking away or no-contact as appropriate given described harm)"
       ]
     },
@@ -739,69 +842,23 @@
       ]
     },
     {
-      "attemptId": "ea8005bc-951a-4fd9-aa4a-a10ebdcd7912",
-      "userId": "d6c5b015-6d8a-46d1-82a1-cc17dd5c57b3",
-      "completedAt": "2026-06-10T18:01:47.139+00:00",
-      "rollupAlgorithm": "scenario_only_integers_v3_m4_exempt_accountability",
-      "old": {
-        "weightedScore": 6.9,
-        "modifiedWeightedScore": 6.65,
-        "passed": true,
-        "finalGatePass": true,
-        "pillarScores": {
-          "repair": 7,
-          "contempt": 7,
-          "attunement": 7,
-          "regulation": 7,
-          "mentalizing": 7,
-          "appreciation": 8,
-          "accountability": 6,
-          "commitment_threshold": 7
-        }
-      },
-      "new": {
-        "weightedScore": 6.9,
-        "modifiedWeightedScore": 6.65,
-        "passed": true,
-        "finalGatePass": false,
-        "pillarScores": {
-          "mentalizing": 7,
-          "accountability": 6,
-          "repair": 7,
-          "regulation": 7,
-          "attunement": 7,
-          "appreciation": 8,
-          "contempt": 7,
-          "commitment_threshold": 7
-        },
-        "gateFailReasons": []
-      },
-      "weightedDelta": 0,
-      "passFlipped": true,
-      "needsReasoningRegen": false,
-      "recomputeNotes": [
-        "rollup_algorithm:scenario_only_integers_v3_m4_exempt_accountability",
-        "gate: pass — all current rubric checks satisfied"
-      ]
-    },
-    {
       "attemptId": "2840c8de-d8ae-4db0-9b99-21f9d978d2cf",
       "userId": "68577c70-cd64-4745-b52e-598a78c35da2",
       "completedAt": "2026-06-09T22:33:02.627+00:00",
       "rollupAlgorithm": "scenario_only_integers_v3_m4_exempt_accountability",
       "old": {
-        "weightedScore": 8.2,
-        "modifiedWeightedScore": 8.4,
+        "weightedScore": 7.2,
+        "modifiedWeightedScore": 7.1,
         "passed": true,
         "finalGatePass": true,
         "pillarScores": {
-          "repair": 9,
-          "contempt": 8,
-          "attunement": 9,
-          "regulation": 7,
-          "mentalizing": 8,
-          "appreciation": 9,
-          "accountability": 8,
+          "repair": 8,
+          "contempt": 7,
+          "attunement": 7,
+          "regulation": 8,
+          "mentalizing": 7,
+          "appreciation": 8,
+          "accountability": 6,
           "commitment_threshold": 8
         }
       },
@@ -822,9 +879,9 @@
         },
         "gateFailReasons": []
       },
-      "weightedDelta": -1,
+      "weightedDelta": 0,
       "passFlipped": false,
-      "needsReasoningRegen": true,
+      "needsReasoningRegen": false,
       "recomputeNotes": [
         "rollup_algorithm:scenario_only_integers_v3_m4_exempt_accountability",
         "accountability_reweight:m4_situational_exempt:8->6 (M4 disclosure involves abandonment, neglect, or severe parental failure)"
@@ -837,23 +894,23 @@
       "rollupAlgorithm": "scenario_only_integers_v3_m4_exempt_accountability",
       "old": {
         "weightedScore": 7.2,
-        "modifiedWeightedScore": 6.65,
+        "modifiedWeightedScore": 6.55,
         "passed": true,
-        "finalGatePass": true,
+        "finalGatePass": false,
         "pillarScores": {
           "repair": 7,
-          "contempt": 8,
-          "attunement": 7,
+          "contempt": 9,
+          "attunement": 6,
           "regulation": 7,
-          "mentalizing": 8,
+          "mentalizing": 6,
           "appreciation": 8,
-          "accountability": 6,
+          "accountability": 7,
           "commitment_threshold": 7
         }
       },
       "new": {
         "weightedScore": 7.2,
-        "modifiedWeightedScore": 6.55,
+        "modifiedWeightedScore": 6.8,
         "passed": true,
         "finalGatePass": false,
         "pillarScores": {
@@ -869,7 +926,7 @@
         "gateFailReasons": []
       },
       "weightedDelta": 0,
-      "passFlipped": true,
+      "passFlipped": false,
       "needsReasoningRegen": false,
       "recomputeNotes": [
         "rollup_algorithm:scenario_only_integers_v3_m4_exempt_accountability",
@@ -882,24 +939,24 @@
       "completedAt": "2026-06-09T20:05:33.053+00:00",
       "rollupAlgorithm": "scenario_only_integers_v3_m4_exempt_accountability",
       "old": {
-        "weightedScore": 4.3,
-        "modifiedWeightedScore": 3.95,
+        "weightedScore": 4.5,
+        "modifiedWeightedScore": 3.7,
         "passed": false,
         "finalGatePass": false,
         "pillarScores": {
           "repair": 4,
           "contempt": 6,
-          "attunement": 3,
-          "regulation": 5,
+          "attunement": 4,
+          "regulation": 4,
           "mentalizing": 4,
-          "appreciation": 4,
-          "accountability": 3,
+          "appreciation": 3,
+          "accountability": 4,
           "commitment_threshold": 6
         }
       },
       "new": {
         "weightedScore": 4.5,
-        "modifiedWeightedScore": 3.7,
+        "modifiedWeightedScore": 4.3,
         "passed": false,
         "finalGatePass": false,
         "pillarScores": {
@@ -913,12 +970,13 @@
           "commitment_threshold": 6
         },
         "gateFailReasons": [
+          "weighted_score",
           "scenario_floor"
         ]
       },
-      "weightedDelta": 0.2,
+      "weightedDelta": 0,
       "passFlipped": false,
-      "needsReasoningRegen": true,
+      "needsReasoningRegen": false,
       "recomputeNotes": [
         "rollup_algorithm:scenario_only_integers_v3_m4_exempt_accountability",
         "gate: floor_breach: accountability (4.0), regulation (4.0), repair (4.0)",
@@ -931,18 +989,18 @@
       "completedAt": "2026-05-19T00:07:44.672+00:00",
       "rollupAlgorithm": "scenario_only_integers_v3_m4_exempt_accountability",
       "old": {
-        "weightedScore": 6.7,
-        "modifiedWeightedScore": 6.4,
+        "weightedScore": 7.3,
+        "modifiedWeightedScore": 7,
         "passed": true,
-        "finalGatePass": false,
+        "finalGatePass": true,
         "pillarScores": {
-          "repair": 6.8,
+          "repair": 8,
           "contempt": 7,
-          "attunement": 6.7,
-          "regulation": 7,
+          "attunement": 7,
+          "regulation": 8,
           "mentalizing": 6,
           "appreciation": 8,
-          "accountability": 5.8,
+          "accountability": 7,
           "commitment_threshold": 7
         }
       },
@@ -963,9 +1021,9 @@
         },
         "gateFailReasons": []
       },
-      "weightedDelta": 0.6,
-      "passFlipped": true,
-      "needsReasoningRegen": true,
+      "weightedDelta": 0,
+      "passFlipped": false,
+      "needsReasoningRegen": false,
       "recomputeNotes": [
         "rollup_algorithm:scenario_only_integers_v3_m4_exempt_accountability",
         "gate: pass — all current rubric checks satisfied"
@@ -977,18 +1035,18 @@
       "completedAt": "2026-05-19T00:00:25.777+00:00",
       "rollupAlgorithm": "scenario_only_integers_v3_m4_exempt_accountability",
       "old": {
-        "weightedScore": 5.5,
-        "modifiedWeightedScore": 5.5,
+        "weightedScore": 5.4,
+        "modifiedWeightedScore": 5.4,
         "passed": false,
         "finalGatePass": false,
         "pillarScores": {
-          "repair": 5.7,
+          "repair": 6,
           "contempt": 6,
-          "attunement": 4.3,
-          "regulation": 7.5,
-          "mentalizing": 5.2,
+          "attunement": 4,
+          "regulation": 7,
+          "mentalizing": 5,
           "appreciation": 3,
-          "accountability": 5.4,
+          "accountability": 5,
           "commitment_threshold": 5
         }
       },
@@ -1012,7 +1070,7 @@
           "scenario_floor"
         ]
       },
-      "weightedDelta": -0.1,
+      "weightedDelta": 0,
       "passFlipped": false,
       "needsReasoningRegen": false,
       "recomputeNotes": [
@@ -1027,24 +1085,24 @@
       "completedAt": "2026-05-18T22:37:07.155+00:00",
       "rollupAlgorithm": "scenario_only_integers_v3_m4_exempt_accountability",
       "old": {
-        "weightedScore": 6.8,
-        "modifiedWeightedScore": 6.85,
+        "weightedScore": 6.7,
+        "modifiedWeightedScore": 6.75,
         "passed": true,
-        "finalGatePass": false,
+        "finalGatePass": true,
         "pillarScores": {
-          "repair": 6.8,
+          "repair": 7,
           "contempt": 7,
-          "attunement": 5.7,
+          "attunement": 6,
           "regulation": 8,
-          "mentalizing": 6.6,
+          "mentalizing": 6,
           "appreciation": 7,
-          "accountability": 6.6,
+          "accountability": 6,
           "commitment_threshold": 7
         }
       },
       "new": {
         "weightedScore": 6.7,
-        "modifiedWeightedScore": 6.75,
+        "modifiedWeightedScore": 7,
         "passed": true,
         "finalGatePass": true,
         "pillarScores": {
@@ -1059,8 +1117,8 @@
         },
         "gateFailReasons": []
       },
-      "weightedDelta": -0.1,
-      "passFlipped": true,
+      "weightedDelta": 0,
+      "passFlipped": false,
       "needsReasoningRegen": false,
       "recomputeNotes": [
         "rollup_algorithm:scenario_only_integers_v3_m4_exempt_accountability",
@@ -1076,21 +1134,21 @@
         "weightedScore": 7.2,
         "modifiedWeightedScore": 7.45,
         "passed": true,
-        "finalGatePass": false,
+        "finalGatePass": true,
         "pillarScores": {
           "repair": 7,
-          "contempt": 8.2,
-          "attunement": 6.3,
+          "contempt": 8,
+          "attunement": 6,
           "regulation": 8,
-          "mentalizing": 6.8,
+          "mentalizing": 6,
           "appreciation": 8,
-          "accountability": 6.6,
+          "accountability": 7,
           "commitment_threshold": 7
         }
       },
       "new": {
         "weightedScore": 7.2,
-        "modifiedWeightedScore": 7.45,
+        "modifiedWeightedScore": 7.6,
         "passed": true,
         "finalGatePass": true,
         "pillarScores": {
@@ -1106,7 +1164,7 @@
         "gateFailReasons": []
       },
       "weightedDelta": 0,
-      "passFlipped": true,
+      "passFlipped": false,
       "needsReasoningRegen": false,
       "recomputeNotes": [
         "rollup_algorithm:scenario_only_integers_v3_m4_exempt_accountability",
@@ -1119,24 +1177,24 @@
       "completedAt": "2026-05-18T18:13:38.33+00:00",
       "rollupAlgorithm": "scenario_only_integers_v3_m4_exempt_accountability",
       "old": {
-        "weightedScore": 5.6,
-        "modifiedWeightedScore": 5.7,
+        "weightedScore": 6,
+        "modifiedWeightedScore": 6.1,
         "passed": false,
         "finalGatePass": false,
         "pillarScores": {
-          "repair": 5.5,
+          "repair": 6,
           "contempt": 7,
-          "attunement": 4.7,
-          "regulation": 6,
+          "attunement": 5,
+          "regulation": 8,
           "mentalizing": 5,
           "appreciation": 4,
-          "accountability": 4.8,
+          "accountability": 5,
           "commitment_threshold": 7
         }
       },
       "new": {
         "weightedScore": 6,
-        "modifiedWeightedScore": 6.1,
+        "modifiedWeightedScore": 6.2,
         "passed": false,
         "finalGatePass": false,
         "pillarScores": {
@@ -1154,12 +1212,12 @@
           "scenario_floor"
         ]
       },
-      "weightedDelta": 0.4,
+      "weightedDelta": 0,
       "passFlipped": false,
-      "needsReasoningRegen": true,
+      "needsReasoningRegen": false,
       "recomputeNotes": [
         "rollup_algorithm:scenario_only_integers_v3_m4_exempt_accountability",
-        "gate: weighted_score: 6.1 (required 6.5); scenario_floor: S2=4.17 (min 5); weighted_threshold_met",
+        "gate: weighted_score: 6.2 (required 6.5); scenario_floor: S2=4.17 (min 5); weighted_threshold_met",
         "scenario composite floor: S2=4.17"
       ]
     },
@@ -1169,18 +1227,18 @@
       "completedAt": "2026-05-18T18:03:07.84+00:00",
       "rollupAlgorithm": "scenario_only_integers_v3_m4_exempt_accountability",
       "old": {
-        "weightedScore": 7.5,
-        "modifiedWeightedScore": 7.7,
+        "weightedScore": 7.8,
+        "modifiedWeightedScore": 8.2,
         "passed": true,
-        "finalGatePass": false,
+        "finalGatePass": true,
         "pillarScores": {
-          "repair": 7.8,
-          "contempt": 8.6,
+          "repair": 8,
+          "contempt": 9,
           "attunement": 7,
           "regulation": 8,
-          "mentalizing": 6.2,
+          "mentalizing": 7,
           "appreciation": 8,
-          "accountability": 6.6,
+          "accountability": 7,
           "commitment_threshold": 8
         }
       },
@@ -1201,9 +1259,9 @@
         },
         "gateFailReasons": []
       },
-      "weightedDelta": 0.3,
-      "passFlipped": true,
-      "needsReasoningRegen": true,
+      "weightedDelta": 0,
+      "passFlipped": false,
+      "needsReasoningRegen": false,
       "recomputeNotes": [
         "rollup_algorithm:scenario_only_integers_v3_m4_exempt_accountability",
         "accountability_reweight:m4_situational_exempt:8->7 (M4 disclosure involves severe betrayal where reasonable self-attribution is minimal)"
@@ -1215,24 +1273,24 @@
       "completedAt": "2026-05-11T03:19:38.815+00:00",
       "rollupAlgorithm": "scenario_only_integers_v3_m4_exempt_accountability",
       "old": {
-        "weightedScore": 7.6,
-        "modifiedWeightedScore": null,
+        "weightedScore": 7.4,
+        "modifiedWeightedScore": 7.25,
         "passed": true,
-        "finalGatePass": false,
+        "finalGatePass": true,
         "pillarScores": {
-          "repair": 7,
+          "repair": 8,
           "contempt": 8,
-          "attunement": 9,
-          "regulation": 7,
-          "mentalizing": 8,
+          "attunement": 6,
+          "regulation": 8,
+          "mentalizing": 6,
           "appreciation": 8,
           "accountability": 7,
-          "commitment_threshold": 7
+          "commitment_threshold": 8
         }
       },
       "new": {
         "weightedScore": 7.4,
-        "modifiedWeightedScore": 7.25,
+        "modifiedWeightedScore": 7.4,
         "passed": true,
         "finalGatePass": true,
         "pillarScores": {
@@ -1247,9 +1305,9 @@
         },
         "gateFailReasons": []
       },
-      "weightedDelta": -0.2,
-      "passFlipped": true,
-      "needsReasoningRegen": true,
+      "weightedDelta": 0,
+      "passFlipped": false,
+      "needsReasoningRegen": false,
       "recomputeNotes": [
         "rollup_algorithm:scenario_only_integers_v3_m4_exempt_accountability",
         "gate: pass — all current rubric checks satisfied"
@@ -1261,24 +1319,24 @@
       "completedAt": "2026-05-10T23:37:59.457+00:00",
       "rollupAlgorithm": "scenario_only_integers_v3_m4_exempt_accountability",
       "old": {
-        "weightedScore": 8,
-        "modifiedWeightedScore": null,
+        "weightedScore": 6.9,
+        "modifiedWeightedScore": 6.7,
         "passed": true,
-        "finalGatePass": false,
+        "finalGatePass": true,
         "pillarScores": {
-          "repair": 8,
+          "repair": 7,
           "contempt": 8,
-          "attunement": 8,
-          "regulation": 7,
-          "mentalizing": 9,
-          "appreciation": 8,
-          "accountability": 8,
+          "attunement": 6,
+          "regulation": 8,
+          "mentalizing": 7,
+          "appreciation": 4,
+          "accountability": 6,
           "commitment_threshold": 8
         }
       },
       "new": {
         "weightedScore": 6.9,
-        "modifiedWeightedScore": 6.7,
+        "modifiedWeightedScore": 7,
         "passed": true,
         "finalGatePass": true,
         "pillarScores": {
@@ -1293,8 +1351,8 @@
         },
         "gateFailReasons": []
       },
-      "weightedDelta": -1.1,
-      "passFlipped": true,
+      "weightedDelta": 0,
+      "passFlipped": false,
       "needsReasoningRegen": true,
       "recomputeNotes": [
         "rollup_algorithm:scenario_only_integers_v3_m4_exempt_accountability",
@@ -1307,44 +1365,35 @@
       "completedAt": "2026-05-10T13:29:25.469+00:00",
       "rollupAlgorithm": "scenario_only_integers_v3_m4_exempt_accountability",
       "old": {
-        "weightedScore": 7.7,
-        "modifiedWeightedScore": null,
-        "passed": true,
-        "finalGatePass": false,
-        "pillarScores": {
-          "repair": 8,
-          "contempt": 8,
-          "attunement": 8,
-          "regulation": 7,
-          "mentalizing": 8,
-          "appreciation": 8,
-          "accountability": 7,
-          "commitment_threshold": 8
-        }
-      },
-      "new": {
         "weightedScore": 7,
         "modifiedWeightedScore": 7.1,
         "passed": true,
         "finalGatePass": true,
         "pillarScores": {
-          "mentalizing": 6,
-          "accountability": 6,
           "repair": 7,
-          "regulation": 8,
-          "attunement": 6,
-          "appreciation": 8,
           "contempt": 8,
+          "attunement": 6,
+          "regulation": 8,
+          "mentalizing": 6,
+          "appreciation": 8,
+          "accountability": 6,
           "commitment_threshold": 7
-        },
+        }
+      },
+      "new": {
+        "weightedScore": null,
+        "modifiedWeightedScore": null,
+        "passed": false,
+        "finalGatePass": false,
+        "pillarScores": null,
         "gateFailReasons": []
       },
-      "weightedDelta": -0.7,
+      "weightedDelta": null,
       "passFlipped": true,
-      "needsReasoningRegen": true,
+      "needsReasoningRegen": false,
       "recomputeNotes": [
-        "rollup_algorithm:scenario_only_integers_v3_m4_exempt_accountability",
-        "gate: pass — all current rubric checks satisfied"
+        "completion gate: moment_5_scores missing scored pillar evidence",
+        "weighted score withheld — incomplete data"
       ]
     },
     {
@@ -1353,19 +1402,19 @@
       "completedAt": "2026-05-09T21:18:45.754+00:00",
       "rollupAlgorithm": "scenario_only_integers_v3_m4_exempt_accountability",
       "old": {
-        "weightedScore": 5.8,
-        "modifiedWeightedScore": null,
+        "weightedScore": 6,
+        "modifiedWeightedScore": 5.5,
         "passed": false,
         "finalGatePass": false,
         "pillarScores": {
-          "repair": 6,
-          "contempt": 7,
+          "repair": 7,
+          "contempt": 5,
           "attunement": 5,
-          "regulation": 6,
-          "mentalizing": 6,
+          "regulation": 7,
+          "mentalizing": 5,
           "appreciation": 7,
-          "accountability": 4,
-          "commitment_threshold": 6
+          "accountability": 6,
+          "commitment_threshold": 7
         }
       },
       "new": {
@@ -1388,7 +1437,7 @@
           "scenario_floor"
         ]
       },
-      "weightedDelta": 0.2,
+      "weightedDelta": 0,
       "passFlipped": false,
       "needsReasoningRegen": false,
       "recomputeNotes": [
@@ -1403,24 +1452,24 @@
       "completedAt": "2026-05-08T22:48:04.912+00:00",
       "rollupAlgorithm": "scenario_only_integers_v3_m4_exempt_accountability",
       "old": {
-        "weightedScore": 7.1,
-        "modifiedWeightedScore": 6.9,
+        "weightedScore": 7.2,
+        "modifiedWeightedScore": 6.85,
         "passed": true,
-        "finalGatePass": false,
+        "finalGatePass": true,
         "pillarScores": {
-          "repair": 7.3,
+          "repair": 7,
           "contempt": 8,
-          "attunement": 6.3,
+          "attunement": 6,
           "regulation": 8,
-          "mentalizing": 6.4,
+          "mentalizing": 6,
           "appreciation": 8,
-          "accountability": 6,
+          "accountability": 7,
           "commitment_threshold": 7
         }
       },
       "new": {
         "weightedScore": 7.2,
-        "modifiedWeightedScore": 6.85,
+        "modifiedWeightedScore": 7.4,
         "passed": true,
         "finalGatePass": true,
         "pillarScores": {
@@ -1435,8 +1484,8 @@
         },
         "gateFailReasons": []
       },
-      "weightedDelta": 0.1,
-      "passFlipped": true,
+      "weightedDelta": 0,
+      "passFlipped": false,
       "needsReasoningRegen": false,
       "recomputeNotes": [
         "rollup_algorithm:scenario_only_integers_v3_m4_exempt_accountability",
@@ -1449,24 +1498,24 @@
       "completedAt": "2026-05-08T21:40:30.763+00:00",
       "rollupAlgorithm": "scenario_only_integers_v3_m4_exempt_accountability",
       "old": {
-        "weightedScore": 7.1,
-        "modifiedWeightedScore": null,
+        "weightedScore": 6.8,
+        "modifiedWeightedScore": 6.65,
         "passed": true,
-        "finalGatePass": false,
+        "finalGatePass": true,
         "pillarScores": {
           "repair": 7,
-          "contempt": 8,
-          "attunement": 6,
-          "regulation": 7,
-          "mentalizing": 8,
-          "appreciation": 6,
+          "contempt": 7,
+          "attunement": 5,
+          "regulation": 8,
+          "mentalizing": 6,
+          "appreciation": 8,
           "accountability": 7,
-          "commitment_threshold": 6
+          "commitment_threshold": 7
         }
       },
       "new": {
         "weightedScore": 6.8,
-        "modifiedWeightedScore": 6.65,
+        "modifiedWeightedScore": 6.8,
         "passed": true,
         "finalGatePass": true,
         "pillarScores": {
@@ -1481,9 +1530,9 @@
         },
         "gateFailReasons": []
       },
-      "weightedDelta": -0.3,
-      "passFlipped": true,
-      "needsReasoningRegen": true,
+      "weightedDelta": 0,
+      "passFlipped": false,
+      "needsReasoningRegen": false,
       "recomputeNotes": [
         "rollup_algorithm:scenario_only_integers_v3_m4_exempt_accountability",
         "gate: pass — all current rubric checks satisfied"
@@ -1495,17 +1544,17 @@
       "completedAt": "2026-05-08T21:39:44.283+00:00",
       "rollupAlgorithm": "scenario_only_integers_v3_m4_exempt_accountability",
       "old": {
-        "weightedScore": 6.9,
-        "modifiedWeightedScore": null,
-        "passed": true,
+        "weightedScore": 6.2,
+        "modifiedWeightedScore": 6.3,
+        "passed": false,
         "finalGatePass": false,
         "pillarScores": {
-          "repair": 7,
+          "repair": 6,
           "contempt": 8,
-          "attunement": 6,
-          "regulation": 7,
-          "mentalizing": 7,
-          "appreciation": 7,
+          "attunement": 4,
+          "regulation": 8,
+          "mentalizing": 4,
+          "appreciation": 6,
           "accountability": 6,
           "commitment_threshold": 7
         }
@@ -1529,9 +1578,9 @@
           "weighted_score"
         ]
       },
-      "weightedDelta": -0.7,
-      "passFlipped": true,
-      "needsReasoningRegen": true,
+      "weightedDelta": 0,
+      "passFlipped": false,
+      "needsReasoningRegen": false,
       "recomputeNotes": [
         "rollup_algorithm:scenario_only_integers_v3_m4_exempt_accountability",
         "gate: weighted_score: 6.3 (required 6.5)"
@@ -1560,7 +1609,7 @@
       },
       "new": {
         "weightedScore": 4.9,
-        "modifiedWeightedScore": 4.45,
+        "modifiedWeightedScore": 4.9,
         "passed": false,
         "finalGatePass": false,
         "pillarScores": {
@@ -1583,7 +1632,7 @@
       "needsReasoningRegen": false,
       "recomputeNotes": [
         "rollup_algorithm:scenario_only_integers_v3_m4_exempt_accountability",
-        "gate: weighted_score: 4.5 (required 6.5); scenario_floor: S2=2.33 (min 5); weighted_threshold_met",
+        "gate: weighted_score: 4.9 (required 6.5); scenario_floor: S2=2.33 (min 5); weighted_threshold_met",
         "scenario composite floor: S2=2.33"
       ]
     },
@@ -1593,18 +1642,18 @@
       "completedAt": "2026-05-08T20:48:10.13+00:00",
       "rollupAlgorithm": "scenario_only_integers_v3_m4_exempt_accountability",
       "old": {
-        "weightedScore": 6.6,
-        "modifiedWeightedScore": 6.6,
+        "weightedScore": 6.7,
+        "modifiedWeightedScore": 6.7,
         "passed": true,
-        "finalGatePass": false,
+        "finalGatePass": true,
         "pillarScores": {
-          "repair": 7.5,
-          "contempt": 6.8,
-          "attunement": 5.3,
-          "regulation": 7.5,
-          "mentalizing": 5.3,
+          "repair": 7,
+          "contempt": 7,
+          "attunement": 5,
+          "regulation": 8,
+          "mentalizing": 5,
           "appreciation": 8,
-          "accountability": 6.4,
+          "accountability": 7,
           "commitment_threshold": 6
         }
       },
@@ -1625,9 +1674,9 @@
         },
         "gateFailReasons": []
       },
-      "weightedDelta": 0.1,
-      "passFlipped": true,
-      "needsReasoningRegen": true,
+      "weightedDelta": 0,
+      "passFlipped": false,
+      "needsReasoningRegen": false,
       "recomputeNotes": [
         "rollup_algorithm:scenario_only_integers_v3_m4_exempt_accountability",
         "gate: pass — all current rubric checks satisfied"
@@ -1639,16 +1688,16 @@
       "completedAt": "2026-05-08T16:32:50.439+00:00",
       "rollupAlgorithm": "scenario_only_integers_v3_m4_exempt_accountability",
       "old": {
-        "weightedScore": 7.4,
-        "modifiedWeightedScore": null,
+        "weightedScore": 7.2,
+        "modifiedWeightedScore": 7.25,
         "passed": true,
-        "finalGatePass": false,
+        "finalGatePass": true,
         "pillarScores": {
-          "repair": 8,
-          "contempt": 7,
-          "attunement": 8,
-          "regulation": 6,
-          "mentalizing": 8,
+          "repair": 7,
+          "contempt": 8,
+          "attunement": 6,
+          "regulation": 8,
+          "mentalizing": 6,
           "appreciation": 8,
           "accountability": 7,
           "commitment_threshold": 8
@@ -1656,7 +1705,7 @@
       },
       "new": {
         "weightedScore": 7.2,
-        "modifiedWeightedScore": 7.25,
+        "modifiedWeightedScore": 7.4,
         "passed": true,
         "finalGatePass": true,
         "pillarScores": {
@@ -1671,9 +1720,9 @@
         },
         "gateFailReasons": []
       },
-      "weightedDelta": -0.2,
-      "passFlipped": true,
-      "needsReasoningRegen": true,
+      "weightedDelta": 0,
+      "passFlipped": false,
+      "needsReasoningRegen": false,
       "recomputeNotes": [
         "rollup_algorithm:scenario_only_integers_v3_m4_exempt_accountability",
         "gate: pass — all current rubric checks satisfied"
@@ -1685,18 +1734,18 @@
       "completedAt": "2026-05-08T08:27:33.249+00:00",
       "rollupAlgorithm": "scenario_only_integers_v3_m4_exempt_accountability",
       "old": {
-        "weightedScore": 7,
-        "modifiedWeightedScore": null,
-        "passed": true,
+        "weightedScore": 6.1,
+        "modifiedWeightedScore": 6.1,
+        "passed": false,
         "finalGatePass": false,
         "pillarScores": {
-          "repair": 7,
-          "contempt": 8,
-          "attunement": 6,
+          "repair": 6,
+          "contempt": 7,
+          "attunement": 5,
           "regulation": 8,
-          "mentalizing": 7,
+          "mentalizing": 5,
           "appreciation": 6,
-          "accountability": 6,
+          "accountability": 5,
           "commitment_threshold": 7
         }
       },
@@ -1719,8 +1768,8 @@
           "weighted_score"
         ]
       },
-      "weightedDelta": -0.9,
-      "passFlipped": true,
+      "weightedDelta": 0,
+      "passFlipped": false,
       "needsReasoningRegen": true,
       "recomputeNotes": [
         "rollup_algorithm:scenario_only_integers_v3_m4_exempt_accountability",
@@ -1734,19 +1783,19 @@
       "completedAt": "2026-05-08T04:35:27.082+00:00",
       "rollupAlgorithm": "scenario_only_integers_v3_m4_exempt_accountability",
       "old": {
-        "weightedScore": 5.2,
-        "modifiedWeightedScore": null,
+        "weightedScore": 4.1,
+        "modifiedWeightedScore": 4.1,
         "passed": false,
         "finalGatePass": false,
         "pillarScores": {
-          "repair": 6,
-          "contempt": 5,
-          "attunement": 4,
-          "regulation": 6,
-          "mentalizing": 7,
-          "appreciation": 4,
+          "repair": 3,
+          "contempt": 4,
+          "attunement": 3,
+          "regulation": 8,
+          "mentalizing": 4,
+          "appreciation": 1,
           "accountability": 4,
-          "commitment_threshold": 7
+          "commitment_threshold": 6
         }
       },
       "new": {
@@ -1765,10 +1814,11 @@
           "commitment_threshold": 6
         },
         "gateFailReasons": [
+          "weighted_score",
           "scenario_floor"
         ]
       },
-      "weightedDelta": -1.1,
+      "weightedDelta": 0,
       "passFlipped": false,
       "needsReasoningRegen": true,
       "recomputeNotes": [
@@ -1783,18 +1833,18 @@
       "completedAt": "2026-05-08T00:46:52.446+00:00",
       "rollupAlgorithm": "scenario_only_integers_v3_m4_exempt_accountability",
       "old": {
-        "weightedScore": 7.6,
-        "modifiedWeightedScore": 7.85,
+        "weightedScore": 7.5,
+        "modifiedWeightedScore": 7.9,
         "passed": true,
-        "finalGatePass": false,
+        "finalGatePass": true,
         "pillarScores": {
-          "repair": 7.3,
+          "repair": 7,
           "contempt": 8,
-          "attunement": 7.3,
+          "attunement": 7,
           "regulation": 8,
-          "mentalizing": 7.8,
+          "mentalizing": 8,
           "appreciation": 8,
-          "accountability": 6.8,
+          "accountability": 7,
           "commitment_threshold": 8
         }
       },
@@ -1815,8 +1865,8 @@
         },
         "gateFailReasons": []
       },
-      "weightedDelta": -0.1,
-      "passFlipped": true,
+      "weightedDelta": 0,
+      "passFlipped": false,
       "needsReasoningRegen": false,
       "recomputeNotes": [
         "rollup_algorithm:scenario_only_integers_v3_m4_exempt_accountability",
@@ -1829,24 +1879,24 @@
       "completedAt": "2026-05-07T23:01:35.34+00:00",
       "rollupAlgorithm": "scenario_only_integers_v3_m4_exempt_accountability",
       "old": {
-        "weightedScore": 5.6,
-        "modifiedWeightedScore": 5.8,
+        "weightedScore": 5.4,
+        "modifiedWeightedScore": 5.6,
         "passed": false,
         "finalGatePass": false,
         "pillarScores": {
-          "repair": 5.3,
-          "contempt": 6.2,
-          "attunement": 4.3,
-          "regulation": 7,
-          "mentalizing": 5.8,
+          "repair": 5,
+          "contempt": 6,
+          "attunement": 4,
+          "regulation": 8,
+          "mentalizing": 5,
           "appreciation": 2,
-          "accountability": 5.6,
+          "accountability": 5,
           "commitment_threshold": 7
         }
       },
       "new": {
         "weightedScore": 5.4,
-        "modifiedWeightedScore": 5.6,
+        "modifiedWeightedScore": 5.7,
         "passed": false,
         "finalGatePass": false,
         "pillarScores": {
@@ -1864,12 +1914,12 @@
           "scenario_floor"
         ]
       },
-      "weightedDelta": -0.2,
+      "weightedDelta": 0,
       "passFlipped": false,
       "needsReasoningRegen": true,
       "recomputeNotes": [
         "rollup_algorithm:scenario_only_integers_v3_m4_exempt_accountability",
-        "gate: weighted_score: 5.6 (required 6.5); scenario_floor: S2=2.67 (min 5); weighted_threshold_met",
+        "gate: weighted_score: 5.7 (required 6.5); scenario_floor: S2=2.67 (min 5); weighted_threshold_met",
         "scenario composite floor: S2=2.67"
       ]
     },
@@ -1879,24 +1929,24 @@
       "completedAt": "2026-05-07T21:43:24.496+00:00",
       "rollupAlgorithm": "scenario_only_integers_v3_m4_exempt_accountability",
       "old": {
-        "weightedScore": 7.3,
-        "modifiedWeightedScore": null,
+        "weightedScore": 7.6,
+        "modifiedWeightedScore": 7.65,
         "passed": true,
-        "finalGatePass": false,
+        "finalGatePass": true,
         "pillarScores": {
           "repair": 7,
-          "contempt": 8,
+          "contempt": 9,
           "attunement": 7,
-          "regulation": 7,
-          "mentalizing": 8,
-          "appreciation": 7,
+          "regulation": 8,
+          "mentalizing": 7,
+          "appreciation": 8,
           "accountability": 7,
           "commitment_threshold": 7
         }
       },
       "new": {
         "weightedScore": 7.6,
-        "modifiedWeightedScore": 7.65,
+        "modifiedWeightedScore": 7.8,
         "passed": true,
         "finalGatePass": true,
         "pillarScores": {
@@ -1911,8 +1961,8 @@
         },
         "gateFailReasons": []
       },
-      "weightedDelta": 0.3,
-      "passFlipped": true,
+      "weightedDelta": 0,
+      "passFlipped": false,
       "needsReasoningRegen": true,
       "recomputeNotes": [
         "rollup_algorithm:scenario_only_integers_v3_m4_exempt_accountability",
@@ -1925,18 +1975,18 @@
       "completedAt": "2026-05-07T20:53:47.835+00:00",
       "rollupAlgorithm": "scenario_only_integers_v3_m4_exempt_accountability",
       "old": {
-        "weightedScore": 7.7,
-        "modifiedWeightedScore": 7.9,
+        "weightedScore": 7.9,
+        "modifiedWeightedScore": 8.1,
         "passed": true,
-        "finalGatePass": false,
+        "finalGatePass": true,
         "pillarScores": {
-          "repair": 7.8,
-          "contempt": 8.5,
-          "attunement": 7.7,
-          "regulation": 8.5,
-          "mentalizing": 7.2,
+          "repair": 8,
+          "contempt": 8,
+          "attunement": 8,
+          "regulation": 9,
+          "mentalizing": 8,
           "appreciation": 8,
-          "accountability": 6.4,
+          "accountability": 7,
           "commitment_threshold": 7
         }
       },
@@ -1957,8 +2007,8 @@
         },
         "gateFailReasons": []
       },
-      "weightedDelta": 0.2,
-      "passFlipped": true,
+      "weightedDelta": 0,
+      "passFlipped": false,
       "needsReasoningRegen": false,
       "recomputeNotes": [
         "rollup_algorithm:scenario_only_integers_v3_m4_exempt_accountability",
@@ -1971,16 +2021,16 @@
       "completedAt": "2026-05-07T19:51:43.991+00:00",
       "rollupAlgorithm": "scenario_only_integers_v3_m4_exempt_accountability",
       "old": {
-        "weightedScore": 6.6,
-        "modifiedWeightedScore": null,
-        "passed": true,
+        "weightedScore": 5.5,
+        "modifiedWeightedScore": 5.5,
+        "passed": false,
         "finalGatePass": false,
         "pillarScores": {
-          "repair": 7,
-          "contempt": 8,
-          "attunement": 5,
-          "regulation": 6,
-          "mentalizing": 7,
+          "repair": 6,
+          "contempt": 5,
+          "attunement": 4,
+          "regulation": 7,
+          "mentalizing": 4,
           "appreciation": 6,
           "accountability": 6,
           "commitment_threshold": 7
@@ -2005,8 +2055,8 @@
           "weighted_score"
         ]
       },
-      "weightedDelta": -1.1,
-      "passFlipped": true,
+      "weightedDelta": 0,
+      "passFlipped": false,
       "needsReasoningRegen": true,
       "recomputeNotes": [
         "rollup_algorithm:scenario_only_integers_v3_m4_exempt_accountability",
@@ -2019,18 +2069,18 @@
       "completedAt": "2026-05-07T19:26:50.855+00:00",
       "rollupAlgorithm": "scenario_only_integers_v3_m4_exempt_accountability",
       "old": {
-        "weightedScore": 7.1,
-        "modifiedWeightedScore": 7.1,
+        "weightedScore": 7.3,
+        "modifiedWeightedScore": 7.3,
         "passed": true,
-        "finalGatePass": false,
+        "finalGatePass": true,
         "pillarScores": {
-          "repair": 7.3,
-          "contempt": 8.4,
+          "repair": 7,
+          "contempt": 8,
           "attunement": 6,
-          "regulation": 7.5,
+          "regulation": 8,
           "mentalizing": 6,
           "appreciation": 7,
-          "accountability": 6.4,
+          "accountability": 8,
           "commitment_threshold": 7
         }
       },
@@ -2051,8 +2101,8 @@
         },
         "gateFailReasons": []
       },
-      "weightedDelta": 0.2,
-      "passFlipped": true,
+      "weightedDelta": 0,
+      "passFlipped": false,
       "needsReasoningRegen": false,
       "recomputeNotes": [
         "rollup_algorithm:scenario_only_integers_v3_m4_exempt_accountability",
@@ -2065,19 +2115,19 @@
       "completedAt": "2026-05-07T18:34:47.432+00:00",
       "rollupAlgorithm": "scenario_only_integers_v3_m4_exempt_accountability",
       "old": {
-        "weightedScore": 6.8,
-        "modifiedWeightedScore": null,
-        "passed": true,
+        "weightedScore": 5.8,
+        "modifiedWeightedScore": 5.8,
+        "passed": false,
         "finalGatePass": false,
         "pillarScores": {
-          "repair": 7,
-          "contempt": 8,
-          "attunement": 5,
+          "repair": 6,
+          "contempt": 7,
+          "attunement": 4,
           "regulation": 7,
-          "mentalizing": 6,
-          "appreciation": 6,
-          "accountability": 7,
-          "commitment_threshold": 7
+          "mentalizing": 4,
+          "appreciation": 4,
+          "accountability": 6,
+          "commitment_threshold": 6
         }
       },
       "new": {
@@ -2101,8 +2151,8 @@
           "mentalizing_floor"
         ]
       },
-      "weightedDelta": -1,
-      "passFlipped": true,
+      "weightedDelta": 0,
+      "passFlipped": false,
       "needsReasoningRegen": true,
       "recomputeNotes": [
         "rollup_algorithm:scenario_only_integers_v3_m4_exempt_accountability",
@@ -2118,23 +2168,23 @@
       "rollupAlgorithm": "scenario_only_integers_v3_m4_exempt_accountability",
       "old": {
         "weightedScore": 4.2,
-        "modifiedWeightedScore": null,
+        "modifiedWeightedScore": 3.25,
         "passed": false,
         "finalGatePass": false,
         "pillarScores": {
-          "repair": 5,
+          "repair": 3,
           "contempt": 6,
           "attunement": 3,
-          "regulation": 3,
-          "mentalizing": 4,
+          "regulation": 6,
+          "mentalizing": 3,
           "appreciation": 4,
           "accountability": 3,
-          "commitment_threshold": 5
+          "commitment_threshold": 6
         }
       },
       "new": {
         "weightedScore": 4.2,
-        "modifiedWeightedScore": 3.25,
+        "modifiedWeightedScore": 3.7,
         "passed": false,
         "finalGatePass": false,
         "pillarScores": {
@@ -2148,7 +2198,10 @@
           "commitment_threshold": 6
         },
         "gateFailReasons": [
-          "scenario_floor"
+          "weighted_score",
+          "scenario_floor",
+          "mentalizing_floor",
+          "repair_floor"
         ]
       },
       "weightedDelta": 0,
@@ -2157,6 +2210,8 @@
       "recomputeNotes": [
         "rollup_algorithm:scenario_only_integers_v3_m4_exempt_accountability",
         "gate: floor_breach: accountability (3.0), repair (3.0)",
+        "mentalizing floor: scenarios 1, 3",
+        "repair floor: scenarios 1, 3",
         "scenario composite floor: S1=3.33; S2=4.83; S3=4.00"
       ]
     },
@@ -2166,17 +2221,17 @@
       "completedAt": "2026-05-07T17:04:10.713+00:00",
       "rollupAlgorithm": "scenario_only_integers_v3_m4_exempt_accountability",
       "old": {
-        "weightedScore": 6.9,
-        "modifiedWeightedScore": null,
-        "passed": true,
+        "weightedScore": 6.3,
+        "modifiedWeightedScore": 5.8,
+        "passed": false,
         "finalGatePass": false,
         "pillarScores": {
           "repair": 7,
-          "contempt": 8,
+          "contempt": 7,
           "attunement": 5,
           "regulation": 8,
-          "mentalizing": 7,
-          "appreciation": 6,
+          "mentalizing": 5,
+          "appreciation": 3,
           "accountability": 6,
           "commitment_threshold": 7
         }
@@ -2201,8 +2256,8 @@
           "scenario_floor"
         ]
       },
-      "weightedDelta": -0.6,
-      "passFlipped": true,
+      "weightedDelta": 0,
+      "passFlipped": false,
       "needsReasoningRegen": true,
       "recomputeNotes": [
         "rollup_algorithm:scenario_only_integers_v3_m4_exempt_accountability",
@@ -2216,19 +2271,19 @@
       "completedAt": "2026-05-04T22:47:57.939+00:00",
       "rollupAlgorithm": "scenario_only_integers_v3_m4_exempt_accountability",
       "old": {
-        "weightedScore": 6,
-        "modifiedWeightedScore": null,
-        "passed": true,
+        "weightedScore": 6.1,
+        "modifiedWeightedScore": 6.1,
+        "passed": false,
         "finalGatePass": false,
         "pillarScores": {
-          "repair": 5.3,
-          "contempt": 8.2,
+          "repair": 5,
+          "contempt": 8,
           "attunement": 6,
           "regulation": 6,
-          "mentalizing": 5.8,
+          "mentalizing": 6,
           "appreciation": 6,
-          "accountability": 4.7,
-          "commitment_threshold": 5
+          "accountability": 5,
+          "commitment_threshold": 7
         }
       },
       "new": {
@@ -2251,9 +2306,9 @@
           "scenario_floor"
         ]
       },
-      "weightedDelta": 0.1,
-      "passFlipped": true,
-      "needsReasoningRegen": false,
+      "weightedDelta": 0,
+      "passFlipped": false,
+      "needsReasoningRegen": true,
       "recomputeNotes": [
         "rollup_algorithm:scenario_only_integers_v3_m4_exempt_accountability",
         "gate: weighted_score: 6.1 (required 6.5); scenario_floor: S3=4.29 (min 5); weighted_threshold_met",
@@ -2266,18 +2321,18 @@
       "completedAt": "2026-05-04T20:22:20.935+00:00",
       "rollupAlgorithm": "scenario_only_integers_v3_m4_exempt_accountability",
       "old": {
-        "weightedScore": 7.2,
-        "modifiedWeightedScore": null,
+        "weightedScore": 6.9,
+        "modifiedWeightedScore": 6.9,
         "passed": true,
-        "finalGatePass": false,
+        "finalGatePass": true,
         "pillarScores": {
-          "repair": 7,
+          "repair": 6,
           "contempt": 8,
-          "attunement": 6,
-          "regulation": 7,
-          "mentalizing": 8,
-          "appreciation": 7,
-          "accountability": 7,
+          "attunement": 7,
+          "regulation": 8,
+          "mentalizing": 6,
+          "appreciation": 6,
+          "accountability": 6,
           "commitment_threshold": 8
         }
       },
@@ -2298,8 +2353,8 @@
         },
         "gateFailReasons": []
       },
-      "weightedDelta": -0.3,
-      "passFlipped": true,
+      "weightedDelta": 0,
+      "passFlipped": false,
       "needsReasoningRegen": true,
       "recomputeNotes": [
         "rollup_algorithm:scenario_only_integers_v3_m4_exempt_accountability",
@@ -2312,19 +2367,19 @@
       "completedAt": "2026-05-04T20:00:20.066+00:00",
       "rollupAlgorithm": "scenario_only_integers_v3_m4_exempt_accountability",
       "old": {
-        "weightedScore": 6.9,
-        "modifiedWeightedScore": null,
-        "passed": true,
+        "weightedScore": 6.2,
+        "modifiedWeightedScore": 6.2,
+        "passed": false,
         "finalGatePass": false,
         "pillarScores": {
           "repair": 7,
-          "contempt": 8,
-          "attunement": 6,
+          "contempt": 7,
+          "attunement": 5,
           "regulation": 7,
-          "mentalizing": 7,
-          "appreciation": 6,
+          "mentalizing": 5,
+          "appreciation": 3,
           "accountability": 6,
-          "commitment_threshold": 7
+          "commitment_threshold": 8
         }
       },
       "new": {
@@ -2346,8 +2401,8 @@
           "weighted_score"
         ]
       },
-      "weightedDelta": -0.7,
-      "passFlipped": true,
+      "weightedDelta": 0,
+      "passFlipped": false,
       "needsReasoningRegen": true,
       "recomputeNotes": [
         "rollup_algorithm:scenario_only_integers_v3_m4_exempt_accountability",
@@ -2361,19 +2416,18 @@
       "completedAt": "2026-05-04T04:03:21.014+00:00",
       "rollupAlgorithm": "scenario_only_integers_v3_m4_exempt_accountability",
       "old": {
-        "weightedScore": 6,
-        "modifiedWeightedScore": null,
+        "weightedScore": 6.1,
+        "modifiedWeightedScore": 6.1,
         "passed": false,
         "finalGatePass": false,
         "pillarScores": {
-          "repair": 6,
-          "contempt": 8,
-          "attunement": 5,
-          "regulation": 7,
-          "mentalizing": 7,
-          "appreciation": 4,
-          "accountability": 4,
-          "commitment_threshold": 6
+          "repair": 7,
+          "contempt": 6,
+          "attunement": 6,
+          "regulation": 8,
+          "mentalizing": 6,
+          "appreciation": 3,
+          "accountability": 5
         }
       },
       "new": {
@@ -2395,7 +2449,7 @@
           "scenario_floor"
         ]
       },
-      "weightedDelta": 0.1,
+      "weightedDelta": 0,
       "passFlipped": false,
       "needsReasoningRegen": false,
       "recomputeNotes": [
@@ -2410,18 +2464,18 @@
       "completedAt": "2026-05-03T20:15:27.644+00:00",
       "rollupAlgorithm": "scenario_only_integers_v3_m4_exempt_accountability",
       "old": {
-        "weightedScore": 7.8,
-        "modifiedWeightedScore": null,
+        "weightedScore": 7.2,
+        "modifiedWeightedScore": 7.2,
         "passed": true,
-        "finalGatePass": false,
+        "finalGatePass": true,
         "pillarScores": {
-          "repair": 8,
+          "repair": 7,
           "contempt": 8,
           "attunement": 7,
           "regulation": 8,
-          "mentalizing": 8,
+          "mentalizing": 7,
           "appreciation": 8,
-          "accountability": 7,
+          "accountability": 6,
           "commitment_threshold": 8
         }
       },
@@ -2442,8 +2496,8 @@
         },
         "gateFailReasons": []
       },
-      "weightedDelta": -0.6,
-      "passFlipped": true,
+      "weightedDelta": 0,
+      "passFlipped": false,
       "needsReasoningRegen": true,
       "recomputeNotes": [
         "rollup_algorithm:scenario_only_integers_v3_m4_exempt_accountability",
@@ -2456,18 +2510,18 @@
       "completedAt": "2026-05-03T13:52:53.218+00:00",
       "rollupAlgorithm": "scenario_only_integers_v3_m4_exempt_accountability",
       "old": {
-        "weightedScore": 8.3,
-        "modifiedWeightedScore": null,
+        "weightedScore": 7.2,
+        "modifiedWeightedScore": 7.2,
         "passed": true,
-        "finalGatePass": false,
+        "finalGatePass": true,
         "pillarScores": {
-          "repair": 8,
-          "contempt": 8,
-          "attunement": 9,
-          "regulation": 7,
-          "mentalizing": 9,
-          "appreciation": 9,
-          "accountability": 8,
+          "repair": 7,
+          "contempt": 7,
+          "attunement": 8,
+          "regulation": 8,
+          "mentalizing": 7,
+          "appreciation": 8,
+          "accountability": 6,
           "commitment_threshold": 8
         }
       },
@@ -2488,8 +2542,8 @@
         },
         "gateFailReasons": []
       },
-      "weightedDelta": -1.1,
-      "passFlipped": true,
+      "weightedDelta": 0,
+      "passFlipped": false,
       "needsReasoningRegen": true,
       "recomputeNotes": [
         "rollup_algorithm:scenario_only_integers_v3_m4_exempt_accountability",
@@ -2502,24 +2556,24 @@
       "completedAt": "2026-05-02T23:34:54.178+00:00",
       "rollupAlgorithm": "scenario_only_integers_v3_m4_exempt_accountability",
       "old": {
-        "weightedScore": 6.8,
-        "modifiedWeightedScore": null,
-        "passed": true,
+        "weightedScore": 6.3,
+        "modifiedWeightedScore": 6.15,
+        "passed": false,
         "finalGatePass": false,
         "pillarScores": {
-          "repair": 7,
+          "repair": 6,
           "contempt": 8,
-          "attunement": 6,
+          "attunement": 7,
           "regulation": 7,
-          "mentalizing": 7,
-          "appreciation": 7,
-          "accountability": 5,
+          "mentalizing": 6,
+          "appreciation": 6,
+          "accountability": 4,
           "commitment_threshold": 7
         }
       },
       "new": {
         "weightedScore": 6.3,
-        "modifiedWeightedScore": 6.15,
+        "modifiedWeightedScore": 6.3,
         "passed": false,
         "finalGatePass": false,
         "pillarScores": {
@@ -2532,10 +2586,12 @@
           "contempt": 8,
           "commitment_threshold": 7
         },
-        "gateFailReasons": []
+        "gateFailReasons": [
+          "weighted_score"
+        ]
       },
-      "weightedDelta": -0.5,
-      "passFlipped": true,
+      "weightedDelta": 0,
+      "passFlipped": false,
       "needsReasoningRegen": true,
       "recomputeNotes": [
         "rollup_algorithm:scenario_only_integers_v3_m4_exempt_accountability",
@@ -2548,19 +2604,18 @@
       "completedAt": "2026-05-02T23:19:57.504+00:00",
       "rollupAlgorithm": "scenario_only_integers_v3_m4_exempt_accountability",
       "old": {
-        "weightedScore": 6.1,
-        "modifiedWeightedScore": null,
-        "passed": true,
+        "weightedScore": 6,
+        "modifiedWeightedScore": 6,
+        "passed": false,
         "finalGatePass": false,
         "pillarScores": {
-          "repair": 7,
+          "repair": 6,
           "contempt": 7,
-          "attunement": 5,
-          "regulation": 6,
+          "attunement": 6,
           "mentalizing": 6,
           "appreciation": 8,
-          "accountability": 5,
-          "commitment_threshold": 5
+          "accountability": 4,
+          "commitment_threshold": 7
         }
       },
       "new": {
@@ -2578,11 +2633,12 @@
           "commitment_threshold": 7
         },
         "gateFailReasons": [
+          "weighted_score",
           "scenario_floor"
         ]
       },
-      "weightedDelta": -0.1,
-      "passFlipped": true,
+      "weightedDelta": 0,
+      "passFlipped": false,
       "needsReasoningRegen": true,
       "recomputeNotes": [
         "rollup_algorithm:scenario_only_integers_v3_m4_exempt_accountability",
@@ -2596,11 +2652,20 @@
       "completedAt": "2026-05-02T23:17:22.445+00:00",
       "rollupAlgorithm": "scenario_only_integers_v3_m4_exempt_accountability",
       "old": {
-        "weightedScore": null,
-        "modifiedWeightedScore": null,
-        "passed": false,
-        "finalGatePass": false,
-        "pillarScores": null
+        "weightedScore": 7.5,
+        "modifiedWeightedScore": 7.5,
+        "passed": true,
+        "finalGatePass": true,
+        "pillarScores": {
+          "repair": 7,
+          "contempt": 8,
+          "attunement": 8,
+          "regulation": 8,
+          "mentalizing": 7,
+          "appreciation": 8,
+          "accountability": 7,
+          "commitment_threshold": 8
+        }
       },
       "new": {
         "weightedScore": 7.5,
@@ -2619,9 +2684,9 @@
         },
         "gateFailReasons": []
       },
-      "weightedDelta": null,
-      "passFlipped": true,
-      "needsReasoningRegen": false,
+      "weightedDelta": 0,
+      "passFlipped": false,
+      "needsReasoningRegen": true,
       "recomputeNotes": [
         "rollup_algorithm:scenario_only_integers_v3_m4_exempt_accountability",
         "accountability_reweight:m4_situational_exempt:7->7 (M4 disclosure involves described narcissistic or personality-disordered behavior by the other party)"
@@ -2633,18 +2698,18 @@
       "completedAt": "2026-05-02T22:56:57.585+00:00",
       "rollupAlgorithm": "scenario_only_integers_v3_m4_exempt_accountability",
       "old": {
-        "weightedScore": 7.1,
-        "modifiedWeightedScore": null,
-        "passed": true,
+        "weightedScore": 5.9,
+        "modifiedWeightedScore": 5.9,
+        "passed": false,
         "finalGatePass": false,
         "pillarScores": {
-          "repair": 7,
+          "repair": 5,
           "contempt": 8,
-          "attunement": 7,
-          "regulation": 7,
-          "mentalizing": 8,
-          "appreciation": 6,
-          "accountability": 6,
+          "attunement": 6,
+          "regulation": 6,
+          "mentalizing": 5,
+          "appreciation": 7,
+          "accountability": 4,
           "commitment_threshold": 8
         }
       },
@@ -2664,11 +2729,12 @@
           "commitment_threshold": 8
         },
         "gateFailReasons": [
+          "weighted_score",
           "scenario_floor"
         ]
       },
-      "weightedDelta": -1.2,
-      "passFlipped": true,
+      "weightedDelta": 0,
+      "passFlipped": false,
       "needsReasoningRegen": true,
       "recomputeNotes": [
         "rollup_algorithm:scenario_only_integers_v3_m4_exempt_accountability",
@@ -2682,24 +2748,24 @@
       "completedAt": "2026-05-02T19:55:37.968+00:00",
       "rollupAlgorithm": "scenario_only_integers_v3_m4_exempt_accountability",
       "old": {
-        "weightedScore": 8,
-        "modifiedWeightedScore": null,
+        "weightedScore": 7.3,
+        "modifiedWeightedScore": 7.15,
         "passed": true,
-        "finalGatePass": false,
+        "finalGatePass": true,
         "pillarScores": {
-          "repair": 8,
+          "repair": 7,
           "contempt": 8,
-          "attunement": 9,
+          "attunement": 8,
           "regulation": 7,
-          "mentalizing": 9,
+          "mentalizing": 8,
           "appreciation": 8,
-          "accountability": 8,
+          "accountability": 6,
           "commitment_threshold": 7
         }
       },
       "new": {
         "weightedScore": 7.3,
-        "modifiedWeightedScore": 7.15,
+        "modifiedWeightedScore": 7.3,
         "passed": true,
         "finalGatePass": true,
         "pillarScores": {
@@ -2714,8 +2780,8 @@
         },
         "gateFailReasons": []
       },
-      "weightedDelta": -0.7,
-      "passFlipped": true,
+      "weightedDelta": 0,
+      "passFlipped": false,
       "needsReasoningRegen": true,
       "recomputeNotes": [
         "rollup_algorithm:scenario_only_integers_v3_m4_exempt_accountability",
@@ -2728,19 +2794,18 @@
       "completedAt": "2026-05-02T16:18:10.321+00:00",
       "rollupAlgorithm": "scenario_only_integers_v3_m4_exempt_accountability",
       "old": {
-        "weightedScore": 7.4,
-        "modifiedWeightedScore": null,
+        "weightedScore": 7.1,
+        "modifiedWeightedScore": 7.1,
         "passed": true,
-        "finalGatePass": false,
+        "finalGatePass": true,
         "pillarScores": {
           "repair": 7,
           "contempt": 8,
           "attunement": 8,
           "regulation": 7,
-          "mentalizing": 8,
-          "appreciation": 8,
-          "accountability": 7,
-          "commitment_threshold": 6
+          "mentalizing": 7,
+          "appreciation": 7,
+          "accountability": 6
         }
       },
       "new": {
@@ -2759,8 +2824,8 @@
         },
         "gateFailReasons": []
       },
-      "weightedDelta": -0.3,
-      "passFlipped": true,
+      "weightedDelta": 0,
+      "passFlipped": false,
       "needsReasoningRegen": true,
       "recomputeNotes": [
         "rollup_algorithm:scenario_only_integers_v3_m4_exempt_accountability",
@@ -2773,18 +2838,18 @@
       "completedAt": "2026-05-02T15:21:09.983+00:00",
       "rollupAlgorithm": "scenario_only_integers_v3_m4_exempt_accountability",
       "old": {
-        "weightedScore": 8.1,
-        "modifiedWeightedScore": null,
+        "weightedScore": 7.4,
+        "modifiedWeightedScore": 7.4,
         "passed": true,
-        "finalGatePass": false,
+        "finalGatePass": true,
         "pillarScores": {
-          "repair": 8,
+          "repair": 7,
           "contempt": 8,
-          "attunement": 9,
-          "regulation": 7,
-          "mentalizing": 9,
-          "appreciation": 9,
-          "accountability": 8,
+          "attunement": 8,
+          "regulation": 8,
+          "mentalizing": 8,
+          "appreciation": 8,
+          "accountability": 6,
           "commitment_threshold": 7
         }
       },
@@ -2805,8 +2870,8 @@
         },
         "gateFailReasons": []
       },
-      "weightedDelta": -0.7,
-      "passFlipped": true,
+      "weightedDelta": 0,
+      "passFlipped": false,
       "needsReasoningRegen": true,
       "recomputeNotes": [
         "rollup_algorithm:scenario_only_integers_v3_m4_exempt_accountability",
@@ -2819,18 +2884,18 @@
       "completedAt": "2026-05-02T08:41:46.314+00:00",
       "rollupAlgorithm": "scenario_only_integers_v3_m4_exempt_accountability",
       "old": {
-        "weightedScore": 8.3,
-        "modifiedWeightedScore": null,
+        "weightedScore": 7.2,
+        "modifiedWeightedScore": 7.2,
         "passed": true,
-        "finalGatePass": false,
+        "finalGatePass": true,
         "pillarScores": {
-          "repair": 9,
+          "repair": 7,
           "contempt": 8,
-          "attunement": 9,
+          "attunement": 8,
           "regulation": 7,
-          "mentalizing": 9,
+          "mentalizing": 7,
           "appreciation": 8,
-          "accountability": 8,
+          "accountability": 6,
           "commitment_threshold": 8
         }
       },
@@ -2851,12 +2916,12 @@
         },
         "gateFailReasons": []
       },
-      "weightedDelta": -1.1,
-      "passFlipped": true,
+      "weightedDelta": 0,
+      "passFlipped": false,
       "needsReasoningRegen": true,
       "recomputeNotes": [
         "rollup_algorithm:scenario_only_integers_v3_m4_exempt_accountability",
-        "gate: pass — all current rubric checks satisfied"
+        "accountability_reweight:m4_situational_exempt:6->6 (M4 disclosure involves abandonment, neglect, or severe parental failure)"
       ]
     },
     {
@@ -2865,18 +2930,18 @@
       "completedAt": "2026-05-02T05:21:47.037+00:00",
       "rollupAlgorithm": "scenario_only_integers_v3_m4_exempt_accountability",
       "old": {
-        "weightedScore": 7.3,
-        "modifiedWeightedScore": null,
+        "weightedScore": 7.1,
+        "modifiedWeightedScore": 7.1,
         "passed": true,
-        "finalGatePass": false,
+        "finalGatePass": true,
         "pillarScores": {
-          "repair": 8,
-          "contempt": 8,
-          "attunement": 7,
+          "repair": 7,
+          "contempt": 7,
+          "attunement": 8,
           "regulation": 7,
           "mentalizing": 8,
-          "appreciation": 6,
-          "accountability": 7,
+          "appreciation": 8,
+          "accountability": 6,
           "commitment_threshold": 7
         }
       },
@@ -2897,8 +2962,8 @@
         },
         "gateFailReasons": []
       },
-      "weightedDelta": -0.2,
-      "passFlipped": true,
+      "weightedDelta": 0,
+      "passFlipped": false,
       "needsReasoningRegen": false,
       "recomputeNotes": [
         "rollup_algorithm:scenario_only_integers_v3_m4_exempt_accountability",
@@ -2911,19 +2976,18 @@
       "completedAt": "2026-05-02T04:52:16.961+00:00",
       "rollupAlgorithm": "scenario_only_integers_v3_m4_exempt_accountability",
       "old": {
-        "weightedScore": 6.1,
-        "modifiedWeightedScore": null,
-        "passed": true,
+        "weightedScore": 6.4,
+        "modifiedWeightedScore": 6.4,
+        "passed": false,
         "finalGatePass": false,
         "pillarScores": {
-          "repair": 7,
-          "contempt": 8,
-          "attunement": 5,
+          "repair": 6,
+          "contempt": 9,
+          "attunement": 6,
           "regulation": 7,
           "mentalizing": 6,
-          "appreciation": 6,
-          "accountability": 4,
-          "commitment_threshold": 6
+          "appreciation": 2,
+          "accountability": 5
         }
       },
       "new": {
@@ -2945,9 +3009,9 @@
           "scenario_floor"
         ]
       },
-      "weightedDelta": 0.3,
-      "passFlipped": true,
-      "needsReasoningRegen": true,
+      "weightedDelta": 0,
+      "passFlipped": false,
+      "needsReasoningRegen": false,
       "recomputeNotes": [
         "rollup_algorithm:scenario_only_integers_v3_m4_exempt_accountability",
         "gate: weighted_score: 6.4 (required 6.5); scenario_floor: S2=4.33 (min 5); weighted_threshold_met",
@@ -2960,19 +3024,19 @@
       "completedAt": "2026-05-02T04:50:04.579+00:00",
       "rollupAlgorithm": "scenario_only_integers_v3_m4_exempt_accountability",
       "old": {
-        "weightedScore": 8.3,
-        "modifiedWeightedScore": null,
+        "weightedScore": 7.6,
+        "modifiedWeightedScore": 7.6,
         "passed": true,
-        "finalGatePass": false,
+        "finalGatePass": true,
         "pillarScores": {
           "repair": 8,
-          "contempt": 9,
-          "attunement": 9,
+          "contempt": 8,
+          "attunement": 8,
           "regulation": 7,
-          "mentalizing": 8,
-          "appreciation": 9,
-          "accountability": 8,
-          "commitment_threshold": 8
+          "mentalizing": 7,
+          "appreciation": 8,
+          "accountability": 7,
+          "commitment_threshold": 7
         }
       },
       "new": {
@@ -2992,8 +3056,8 @@
         },
         "gateFailReasons": []
       },
-      "weightedDelta": -0.7,
-      "passFlipped": true,
+      "weightedDelta": 0,
+      "passFlipped": false,
       "needsReasoningRegen": true,
       "recomputeNotes": [
         "rollup_algorithm:scenario_only_integers_v3_m4_exempt_accountability",
@@ -3006,18 +3070,18 @@
       "completedAt": "2026-05-02T01:07:42.832+00:00",
       "rollupAlgorithm": "scenario_only_integers_v3_m4_exempt_accountability",
       "old": {
-        "weightedScore": 7,
-        "modifiedWeightedScore": null,
+        "weightedScore": 6.6,
+        "modifiedWeightedScore": 6.6,
         "passed": true,
-        "finalGatePass": false,
+        "finalGatePass": true,
         "pillarScores": {
-          "repair": 7,
+          "repair": 6,
           "contempt": 8,
-          "attunement": 6,
+          "attunement": 7,
           "regulation": 8,
-          "mentalizing": 7,
-          "appreciation": 6,
-          "accountability": 6,
+          "mentalizing": 6,
+          "appreciation": 4,
+          "accountability": 5,
           "commitment_threshold": 8
         }
       },
@@ -3038,12 +3102,12 @@
         },
         "gateFailReasons": []
       },
-      "weightedDelta": -0.4,
-      "passFlipped": true,
+      "weightedDelta": 0,
+      "passFlipped": false,
       "needsReasoningRegen": true,
       "recomputeNotes": [
         "rollup_algorithm:scenario_only_integers_v3_m4_exempt_accountability",
-        "gate: pass — all current rubric checks satisfied"
+        "accountability_reweight:m4_situational_exempt:5->5 (M4 disclosure involves deliberate cruelty or sustained harm by the other party)"
       ]
     },
     {
@@ -3052,18 +3116,18 @@
       "completedAt": "2026-05-01T23:58:34.084+00:00",
       "rollupAlgorithm": "scenario_only_integers_v3_m4_exempt_accountability",
       "old": {
-        "weightedScore": 8.5,
-        "modifiedWeightedScore": null,
+        "weightedScore": 8,
+        "modifiedWeightedScore": 8,
         "passed": true,
-        "finalGatePass": false,
+        "finalGatePass": true,
         "pillarScores": {
-          "repair": 9,
-          "contempt": 8,
+          "repair": 7,
+          "contempt": 9,
           "attunement": 9,
           "regulation": 8,
-          "mentalizing": 9,
-          "appreciation": 9,
-          "accountability": 8,
+          "mentalizing": 8,
+          "appreciation": 8,
+          "accountability": 7,
           "commitment_threshold": 8
         }
       },
@@ -3084,12 +3148,12 @@
         },
         "gateFailReasons": []
       },
-      "weightedDelta": -0.5,
-      "passFlipped": true,
+      "weightedDelta": 0,
+      "passFlipped": false,
       "needsReasoningRegen": true,
       "recomputeNotes": [
         "rollup_algorithm:scenario_only_integers_v3_m4_exempt_accountability",
-        "gate: pass — all current rubric checks satisfied"
+        "accountability_reweight:m4_situational_exempt:7->7 (M4 disclosure involves abandonment, neglect, or severe parental failure)"
       ]
     },
     {
@@ -3098,18 +3162,18 @@
       "completedAt": "2026-05-01T20:47:28.081+00:00",
       "rollupAlgorithm": "scenario_only_integers_v3_m4_exempt_accountability",
       "old": {
-        "weightedScore": 5.7,
-        "modifiedWeightedScore": 5.7,
+        "weightedScore": 5.8,
+        "modifiedWeightedScore": 5.8,
         "passed": false,
         "finalGatePass": false,
         "pillarScores": {
-          "repair": 5.7,
-          "contempt": 6.2,
-          "attunement": 5.7,
+          "repair": 6,
+          "contempt": 6,
+          "attunement": 6,
           "regulation": 5,
           "mentalizing": 5,
           "appreciation": 8,
-          "accountability": 4.8,
+          "accountability": 5,
           "commitment_threshold": 7
         }
       },
@@ -3133,7 +3197,7 @@
           "scenario_floor"
         ]
       },
-      "weightedDelta": 0.1,
+      "weightedDelta": 0,
       "passFlipped": false,
       "needsReasoningRegen": false,
       "recomputeNotes": [
@@ -3148,18 +3212,18 @@
       "completedAt": "2026-05-01T19:28:04.457+00:00",
       "rollupAlgorithm": "scenario_only_integers_v3_m4_exempt_accountability",
       "old": {
-        "weightedScore": 8.4,
-        "modifiedWeightedScore": null,
+        "weightedScore": 7.6,
+        "modifiedWeightedScore": 7.6,
         "passed": true,
-        "finalGatePass": false,
+        "finalGatePass": true,
         "pillarScores": {
-          "repair": 9,
-          "contempt": 8,
-          "attunement": 9,
+          "repair": 8,
+          "contempt": 7,
+          "attunement": 8,
           "regulation": 8,
-          "mentalizing": 9,
+          "mentalizing": 8,
           "appreciation": 9,
-          "accountability": 8,
+          "accountability": 7,
           "commitment_threshold": 7
         }
       },
@@ -3180,8 +3244,8 @@
         },
         "gateFailReasons": []
       },
-      "weightedDelta": -0.8,
-      "passFlipped": true,
+      "weightedDelta": 0,
+      "passFlipped": false,
       "needsReasoningRegen": true,
       "recomputeNotes": [
         "rollup_algorithm:scenario_only_integers_v3_m4_exempt_accountability",
@@ -3232,18 +3296,18 @@
       "rollupAlgorithm": "scenario_only_integers_v3_m4_exempt_accountability",
       "old": {
         "weightedScore": 6.4,
-        "modifiedWeightedScore": null,
-        "passed": true,
+        "modifiedWeightedScore": 6.4,
+        "passed": false,
         "finalGatePass": false,
         "pillarScores": {
           "repair": 6,
           "contempt": 7,
           "attunement": 6,
           "regulation": 8,
-          "mentalizing": 5.8,
-          "appreciation": 6.5,
-          "accountability": 5.5,
-          "commitment_threshold": 6.6
+          "mentalizing": 6,
+          "appreciation": 7,
+          "accountability": 5,
+          "commitment_threshold": 7
         }
       },
       "new": {
@@ -3266,7 +3330,7 @@
         ]
       },
       "weightedDelta": 0,
-      "passFlipped": true,
+      "passFlipped": false,
       "needsReasoningRegen": false,
       "recomputeNotes": [
         "rollup_algorithm:scenario_only_integers_v3_m4_exempt_accountability",
@@ -3279,18 +3343,18 @@
       "completedAt": "2026-04-30T17:02:53.252+00:00",
       "rollupAlgorithm": "scenario_only_integers_v3_m4_exempt_accountability",
       "old": {
-        "weightedScore": 7.7,
-        "modifiedWeightedScore": null,
+        "weightedScore": 7.6,
+        "modifiedWeightedScore": 7.8,
         "passed": true,
-        "finalGatePass": false,
+        "finalGatePass": true,
         "pillarScores": {
-          "repair": 6.7,
-          "contempt": 8.6,
-          "attunement": 8.3,
+          "repair": 7,
+          "contempt": 9,
+          "attunement": 8,
           "regulation": 8,
-          "mentalizing": 7.4,
+          "mentalizing": 7,
           "appreciation": 9,
-          "accountability": 6.3,
+          "accountability": 6,
           "commitment_threshold": 7
         }
       },
@@ -3311,9 +3375,9 @@
         },
         "gateFailReasons": []
       },
-      "weightedDelta": -0.1,
-      "passFlipped": true,
-      "needsReasoningRegen": false,
+      "weightedDelta": 0,
+      "passFlipped": false,
+      "needsReasoningRegen": true,
       "recomputeNotes": [
         "rollup_algorithm:scenario_only_integers_v3_m4_exempt_accountability",
         "gate: pass — all current rubric checks satisfied"
@@ -3362,18 +3426,18 @@
       "rollupAlgorithm": "scenario_only_integers_v3_m4_exempt_accountability",
       "old": {
         "weightedScore": 5.3,
-        "modifiedWeightedScore": null,
-        "passed": true,
+        "modifiedWeightedScore": 5.3,
+        "passed": false,
         "finalGatePass": false,
         "pillarScores": {
-          "repair": 4.3,
-          "contempt": 7.4,
-          "attunement": 5.3,
+          "repair": 4,
+          "contempt": 8,
+          "attunement": 5,
           "regulation": 7,
           "mentalizing": 5,
-          "appreciation": 4,
+          "appreciation": 2,
           "accountability": 4,
-          "commitment_threshold": 5.2
+          "commitment_threshold": 4
         }
       },
       "new": {
@@ -3392,11 +3456,12 @@
           "commitment_threshold": 4
         },
         "gateFailReasons": [
+          "weighted_score",
           "scenario_floor"
         ]
       },
       "weightedDelta": 0,
-      "passFlipped": true,
+      "passFlipped": false,
       "needsReasoningRegen": true,
       "recomputeNotes": [
         "rollup_algorithm:scenario_only_integers_v3_m4_exempt_accountability",
@@ -3410,24 +3475,24 @@
       "completedAt": "2026-04-29T22:40:29.721+00:00",
       "rollupAlgorithm": "scenario_only_integers_v3_m4_exempt_accountability",
       "old": {
-        "weightedScore": 6.7,
-        "modifiedWeightedScore": null,
-        "passed": true,
+        "weightedScore": 6.5,
+        "modifiedWeightedScore": 6.45,
+        "passed": false,
         "finalGatePass": false,
         "pillarScores": {
           "repair": 6,
-          "contempt": 7.6,
-          "attunement": 6.8,
+          "contempt": 7,
+          "attunement": 6,
           "regulation": 7,
-          "mentalizing": 6.6,
-          "appreciation": 7.5,
-          "accountability": 5.8,
-          "commitment_threshold": 6.6
+          "mentalizing": 6,
+          "appreciation": 8,
+          "accountability": 6,
+          "commitment_threshold": 7
         }
       },
       "new": {
         "weightedScore": 6.5,
-        "modifiedWeightedScore": 6.45,
+        "modifiedWeightedScore": 6.6,
         "passed": false,
         "finalGatePass": false,
         "pillarScores": {
@@ -3441,16 +3506,15 @@
           "commitment_threshold": 7
         },
         "gateFailReasons": [
-          "weighted_score",
           "scenario_floor"
         ]
       },
-      "weightedDelta": -0.2,
-      "passFlipped": true,
+      "weightedDelta": 0,
+      "passFlipped": false,
       "needsReasoningRegen": true,
       "recomputeNotes": [
         "rollup_algorithm:scenario_only_integers_v3_m4_exempt_accountability",
-        "gate: weighted_score: 6.5 (required 6.5); scenario_floor: S3=4.29 (min 5); weighted_threshold_met",
+        "gate: scenario_floor: S3=4.29 (min 5); weighted_threshold_met",
         "scenario composite floor: S3=4.29"
       ]
     },
@@ -3460,19 +3524,19 @@
       "completedAt": "2026-04-29T22:03:55.435+00:00",
       "rollupAlgorithm": "scenario_only_integers_v3_m4_exempt_accountability",
       "old": {
-        "weightedScore": 6.8,
-        "modifiedWeightedScore": null,
+        "weightedScore": 6.9,
+        "modifiedWeightedScore": 6.9,
         "passed": true,
-        "finalGatePass": false,
+        "finalGatePass": true,
         "pillarScores": {
           "repair": 6,
-          "contempt": 8.2,
-          "attunement": 7.3,
+          "contempt": 8,
+          "attunement": 7,
           "regulation": 7,
-          "mentalizing": 6,
-          "appreciation": 7,
+          "mentalizing": 7,
+          "appreciation": 8,
           "accountability": 6,
-          "commitment_threshold": 6.6
+          "commitment_threshold": 7
         }
       },
       "new": {
@@ -3492,9 +3556,9 @@
         },
         "gateFailReasons": []
       },
-      "weightedDelta": 0.1,
-      "passFlipped": true,
-      "needsReasoningRegen": true,
+      "weightedDelta": 0,
+      "passFlipped": false,
+      "needsReasoningRegen": false,
       "recomputeNotes": [
         "rollup_algorithm:scenario_only_integers_v3_m4_exempt_accountability",
         "accountability_reweight:m4_situational_exempt:6->6 (M4 disclosure involves abuse or significant emotional harm by the other party)"
@@ -3506,17 +3570,17 @@
       "completedAt": "2026-04-29T19:32:48.452+00:00",
       "rollupAlgorithm": "scenario_only_integers_v3_m4_exempt_accountability",
       "old": {
-        "weightedScore": 5.6,
-        "modifiedWeightedScore": null,
-        "passed": true,
+        "weightedScore": 5.8,
+        "modifiedWeightedScore": 5.5,
+        "passed": false,
         "finalGatePass": false,
         "pillarScores": {
-          "repair": 5.3,
-          "contempt": 8.2,
+          "repair": 5,
+          "contempt": 8,
           "attunement": 4,
           "regulation": 8,
-          "mentalizing": 4.8,
-          "appreciation": 3.5,
+          "mentalizing": 5,
+          "appreciation": 3,
           "accountability": 5,
           "commitment_threshold": 6
         }
@@ -3541,8 +3605,8 @@
           "scenario_floor"
         ]
       },
-      "weightedDelta": 0.2,
-      "passFlipped": true,
+      "weightedDelta": 0,
+      "passFlipped": false,
       "needsReasoningRegen": false,
       "recomputeNotes": [
         "rollup_algorithm:scenario_only_integers_v3_m4_exempt_accountability",
@@ -3556,18 +3620,18 @@
       "completedAt": "2026-04-29T18:57:30.84+00:00",
       "rollupAlgorithm": "scenario_only_integers_v3_m4_exempt_accountability",
       "old": {
-        "weightedScore": 7.1,
-        "modifiedWeightedScore": null,
-        "passed": true,
+        "weightedScore": 6.6,
+        "modifiedWeightedScore": 6.8,
+        "passed": false,
         "finalGatePass": false,
         "pillarScores": {
-          "repair": 4.7,
-          "contempt": 8.2,
-          "attunement": 7.5,
+          "repair": 5,
+          "contempt": 8,
+          "attunement": 7,
           "regulation": 8,
-          "mentalizing": 7.8,
-          "appreciation": 8.5,
-          "accountability": 5.3,
+          "mentalizing": 8,
+          "appreciation": 8,
+          "accountability": 4,
           "commitment_threshold": 7
         }
       },
@@ -3586,10 +3650,12 @@
           "contempt": 8,
           "commitment_threshold": 7
         },
-        "gateFailReasons": []
+        "gateFailReasons": [
+          "weighted_score"
+        ]
       },
-      "weightedDelta": -0.5,
-      "passFlipped": true,
+      "weightedDelta": 0,
+      "passFlipped": false,
       "needsReasoningRegen": true,
       "recomputeNotes": [
         "rollup_algorithm:scenario_only_integers_v3_m4_exempt_accountability",
@@ -3602,24 +3668,24 @@
       "completedAt": "2026-04-29T17:53:57.243+00:00",
       "rollupAlgorithm": "scenario_only_integers_v3_m4_exempt_accountability",
       "old": {
-        "weightedScore": 6.7,
-        "modifiedWeightedScore": null,
-        "passed": true,
+        "weightedScore": 6.6,
+        "modifiedWeightedScore": 6.45,
+        "passed": false,
         "finalGatePass": false,
         "pillarScores": {
-          "repair": 6.3,
+          "repair": 6,
           "contempt": 5,
-          "attunement": 7.5,
+          "attunement": 8,
           "regulation": 8,
           "mentalizing": 7,
-          "appreciation": 7,
-          "accountability": 5.7,
-          "commitment_threshold": 7.2
+          "appreciation": 8,
+          "accountability": 6,
+          "commitment_threshold": 8
         }
       },
       "new": {
         "weightedScore": 6.6,
-        "modifiedWeightedScore": 6.45,
+        "modifiedWeightedScore": 6.6,
         "passed": false,
         "finalGatePass": false,
         "pillarScores": {
@@ -3633,16 +3699,15 @@
           "commitment_threshold": 8
         },
         "gateFailReasons": [
-          "weighted_score",
           "scenario_floor"
         ]
       },
-      "weightedDelta": -0.1,
-      "passFlipped": true,
-      "needsReasoningRegen": false,
+      "weightedDelta": 0,
+      "passFlipped": false,
+      "needsReasoningRegen": true,
       "recomputeNotes": [
         "rollup_algorithm:scenario_only_integers_v3_m4_exempt_accountability",
-        "gate: weighted_score: 6.5 (required 6.5); scenario_floor: S1=4.67 (min 5); weighted_threshold_met",
+        "gate: scenario_floor: S1=4.67 (min 5); weighted_threshold_met",
         "scenario composite floor: S1=4.67"
       ]
     },
@@ -3653,18 +3718,18 @@
       "rollupAlgorithm": "scenario_only_integers_v3_m4_exempt_accountability",
       "old": {
         "weightedScore": 6.6,
-        "modifiedWeightedScore": null,
+        "modifiedWeightedScore": 6.6,
         "passed": true,
-        "finalGatePass": false,
+        "finalGatePass": true,
         "pillarScores": {
           "repair": 6,
-          "contempt": 7.6,
-          "attunement": 7.3,
+          "contempt": 7,
+          "attunement": 7,
           "regulation": 7,
-          "mentalizing": 6.4,
-          "appreciation": 7.5,
-          "accountability": 5.5,
-          "commitment_threshold": 5.2
+          "mentalizing": 7,
+          "appreciation": 7,
+          "accountability": 6,
+          "commitment_threshold": 6
         }
       },
       "new": {
@@ -3685,7 +3750,7 @@
         "gateFailReasons": []
       },
       "weightedDelta": 0,
-      "passFlipped": true,
+      "passFlipped": false,
       "needsReasoningRegen": true,
       "recomputeNotes": [
         "rollup_algorithm:scenario_only_integers_v3_m4_exempt_accountability",
@@ -3699,17 +3764,17 @@
       "rollupAlgorithm": "scenario_only_integers_v3_m4_exempt_accountability",
       "old": {
         "weightedScore": 6.2,
-        "modifiedWeightedScore": null,
+        "modifiedWeightedScore": 6.4,
         "passed": false,
         "finalGatePass": false,
         "pillarScores": {
           "repair": 7,
-          "contempt": 6.6,
-          "attunement": 5.3,
+          "contempt": 6,
+          "attunement": 5,
           "regulation": 8,
-          "mentalizing": 5.8,
-          "appreciation": 3.5,
-          "accountability": 6.3,
+          "mentalizing": 6,
+          "appreciation": 3,
+          "accountability": 6,
           "commitment_threshold": 7
         }
       },
@@ -3735,7 +3800,7 @@
       },
       "weightedDelta": 0,
       "passFlipped": false,
-      "needsReasoningRegen": false,
+      "needsReasoningRegen": true,
       "recomputeNotes": [
         "rollup_algorithm:scenario_only_integers_v3_m4_exempt_accountability",
         "gate: weighted_score: 6.4 (required 6.5); scenario_floor: S2=4.50 (min 5); weighted_threshold_met",
@@ -3748,18 +3813,18 @@
       "completedAt": "2026-04-26T23:07:50.36+00:00",
       "rollupAlgorithm": "scenario_only_integers_v3_m4_exempt_accountability",
       "old": {
-        "weightedScore": 4.3,
-        "modifiedWeightedScore": null,
+        "weightedScore": 3.9,
+        "modifiedWeightedScore": 3.8,
         "passed": false,
         "finalGatePass": false,
         "pillarScores": {
-          "repair": 3.7,
+          "repair": 4,
           "contempt": 5,
-          "attunement": 4,
-          "mentalizing": 4.6,
-          "appreciation": 4.5,
-          "accountability": 3.5,
-          "commitment_threshold": 5
+          "attunement": 3,
+          "mentalizing": 3,
+          "appreciation": 3,
+          "accountability": 3,
+          "commitment_threshold": 7
         }
       },
       "new": {
@@ -3777,15 +3842,18 @@
           "commitment_threshold": 7
         },
         "gateFailReasons": [
-          "scenario_floor"
+          "weighted_score",
+          "scenario_floor",
+          "repair_floor"
         ]
       },
-      "weightedDelta": -0.4,
+      "weightedDelta": 0,
       "passFlipped": false,
       "needsReasoningRegen": true,
       "recomputeNotes": [
         "rollup_algorithm:scenario_only_integers_v3_m4_exempt_accountability",
         "gate: floor_breach: accountability (3.0), repair (4.0)",
+        "repair floor: scenarios 1, 3",
         "scenario composite floor: S1=2.67; S2=3.67; S3=3.67"
       ]
     },
@@ -3795,18 +3863,18 @@
       "completedAt": "2026-04-21T18:28:15.903+00:00",
       "rollupAlgorithm": "scenario_only_integers_v3_m4_exempt_accountability",
       "old": {
-        "weightedScore": 6.1,
-        "modifiedWeightedScore": null,
+        "weightedScore": 6.2,
+        "modifiedWeightedScore": 5.9,
         "passed": false,
         "finalGatePass": false,
         "pillarScores": {
           "repair": 5,
-          "contempt": 7.9,
+          "contempt": 7,
           "attunement": 6,
           "regulation": 7,
-          "mentalizing": 5.6,
+          "mentalizing": 7,
           "appreciation": 8,
-          "accountability": 4.3,
+          "accountability": 5,
           "commitment_threshold": 7
         }
       },
@@ -3829,7 +3897,7 @@
           "weighted_score"
         ]
       },
-      "weightedDelta": 0.1,
+      "weightedDelta": 0,
       "passFlipped": false,
       "needsReasoningRegen": false,
       "recomputeNotes": [
@@ -3843,18 +3911,18 @@
       "completedAt": "2026-04-20T05:19:44.084+00:00",
       "rollupAlgorithm": "scenario_only_integers_v3_m4_exempt_accountability",
       "old": {
-        "weightedScore": 7.1,
-        "modifiedWeightedScore": null,
+        "weightedScore": 7,
+        "modifiedWeightedScore": 7,
         "passed": true,
-        "finalGatePass": false,
+        "finalGatePass": true,
         "pillarScores": {
-          "repair": 6.3,
+          "repair": 6,
           "contempt": 9,
           "attunement": 7,
           "regulation": 8,
-          "mentalizing": 6.8,
-          "appreciation": 7,
-          "accountability": 6,
+          "mentalizing": 7,
+          "appreciation": 8,
+          "accountability": 5,
           "commitment_threshold": 7
         }
       },
@@ -3875,8 +3943,8 @@
         },
         "gateFailReasons": []
       },
-      "weightedDelta": -0.1,
-      "passFlipped": true,
+      "weightedDelta": 0,
+      "passFlipped": false,
       "needsReasoningRegen": false,
       "recomputeNotes": [
         "rollup_algorithm:scenario_only_integers_v3_m4_exempt_accountability",
@@ -3889,24 +3957,24 @@
       "completedAt": "2026-04-20T01:25:49.583+00:00",
       "rollupAlgorithm": "scenario_only_integers_v3_m4_exempt_accountability",
       "old": {
-        "weightedScore": 4.4,
-        "modifiedWeightedScore": null,
+        "weightedScore": 4.3,
+        "modifiedWeightedScore": 3.85,
         "passed": false,
         "finalGatePass": false,
         "pillarScores": {
-          "repair": 4.3,
+          "repair": 4,
           "contempt": 5,
-          "attunement": 4.3,
+          "attunement": 4,
           "regulation": 4,
           "mentalizing": 4,
           "appreciation": 4,
           "accountability": 4,
-          "commitment_threshold": 5.6
+          "commitment_threshold": 6
         }
       },
       "new": {
         "weightedScore": 4.3,
-        "modifiedWeightedScore": 3.85,
+        "modifiedWeightedScore": 3.95,
         "passed": false,
         "finalGatePass": false,
         "pillarScores": {
@@ -3920,10 +3988,11 @@
           "commitment_threshold": 6
         },
         "gateFailReasons": [
+          "weighted_score",
           "scenario_floor"
         ]
       },
-      "weightedDelta": -0.1,
+      "weightedDelta": 0,
       "passFlipped": false,
       "needsReasoningRegen": true,
       "recomputeNotes": [
@@ -3938,17 +4007,17 @@
       "completedAt": "2026-04-19T17:26:31.064+00:00",
       "rollupAlgorithm": "scenario_only_integers_v3_m4_exempt_accountability",
       "old": {
-        "weightedScore": 5.8,
-        "modifiedWeightedScore": null,
-        "passed": true,
+        "weightedScore": 5.7,
+        "modifiedWeightedScore": 5.6,
+        "passed": false,
         "finalGatePass": false,
         "pillarScores": {
-          "repair": 4.7,
-          "contempt": 5.8,
-          "attunement": 5.3,
+          "repair": 5,
+          "contempt": 6,
+          "attunement": 5,
           "regulation": 8,
-          "mentalizing": 5.8,
-          "appreciation": 3.5,
+          "mentalizing": 6,
+          "appreciation": 1,
           "accountability": 6,
           "commitment_threshold": 7
         }
@@ -3973,9 +4042,9 @@
           "scenario_floor"
         ]
       },
-      "weightedDelta": -0.1,
-      "passFlipped": true,
-      "needsReasoningRegen": true,
+      "weightedDelta": 0,
+      "passFlipped": false,
+      "needsReasoningRegen": false,
       "recomputeNotes": [
         "rollup_algorithm:scenario_only_integers_v3_m4_exempt_accountability",
         "gate: weighted_score: 5.6 (required 6.5); scenario_floor: S2=1.50 (min 5); weighted_threshold_met",
@@ -3989,17 +4058,17 @@
       "rollupAlgorithm": "scenario_only_integers_v3_m4_exempt_accountability",
       "old": {
         "weightedScore": 6.2,
-        "modifiedWeightedScore": null,
-        "passed": true,
+        "modifiedWeightedScore": 6.2,
+        "passed": false,
         "finalGatePass": false,
         "pillarScores": {
-          "repair": 5.7,
-          "contempt": 6.6,
+          "repair": 6,
+          "contempt": 7,
           "attunement": 6,
           "regulation": 7,
           "mentalizing": 6,
           "appreciation": 6,
-          "accountability": 5.5,
+          "accountability": 5,
           "commitment_threshold": 7
         }
       },
@@ -4024,8 +4093,8 @@
         ]
       },
       "weightedDelta": 0,
-      "passFlipped": true,
-      "needsReasoningRegen": false,
+      "passFlipped": false,
+      "needsReasoningRegen": true,
       "recomputeNotes": [
         "rollup_algorithm:scenario_only_integers_v3_m4_exempt_accountability",
         "gate: weighted_score: 6.2 (required 6.5); scenario_floor: S2=4.80 (min 5); weighted_threshold_met",
@@ -4038,8 +4107,8 @@
       "completedAt": "2026-04-17T01:15:32.034+00:00",
       "rollupAlgorithm": "scenario_only_integers_v3_m4_exempt_accountability",
       "old": {
-        "weightedScore": 4.7,
-        "modifiedWeightedScore": null,
+        "weightedScore": 5,
+        "modifiedWeightedScore": 4.7,
         "passed": false,
         "finalGatePass": false,
         "pillarScores": {
@@ -4047,10 +4116,9 @@
           "contempt": 6,
           "attunement": 5,
           "regulation": 6,
-          "mentalizing": 4.8,
-          "appreciation": 5,
-          "accountability": 3.7,
-          "commitment_threshold": 3
+          "mentalizing": 5,
+          "appreciation": 6,
+          "accountability": 4
         }
       },
       "new": {
@@ -4068,12 +4136,13 @@
           "contempt": 6
         },
         "gateFailReasons": [
+          "weighted_score",
           "scenario_floor"
         ]
       },
-      "weightedDelta": 0.3,
+      "weightedDelta": 0,
       "passFlipped": false,
-      "needsReasoningRegen": true,
+      "needsReasoningRegen": false,
       "recomputeNotes": [
         "rollup_algorithm:scenario_only_integers_v3_m4_exempt_accountability",
         "gate: floor_breach: accountability (4.0), repair (4.0)",
@@ -4086,24 +4155,24 @@
       "completedAt": "2026-04-15T20:21:52.07+00:00",
       "rollupAlgorithm": "scenario_only_integers_v3_m4_exempt_accountability",
       "old": {
-        "weightedScore": 8,
-        "modifiedWeightedScore": null,
+        "weightedScore": 8.3,
+        "modifiedWeightedScore": 8.35,
         "passed": true,
-        "finalGatePass": false,
+        "finalGatePass": true,
         "pillarScores": {
-          "repair": 8.7,
+          "repair": 9,
           "contempt": 9,
-          "attunement": 8.8,
+          "attunement": 8,
           "regulation": 7,
-          "mentalizing": 8.2,
-          "appreciation": 9.5,
-          "accountability": 8.3,
-          "commitment_threshold": 4.6
+          "mentalizing": 8,
+          "appreciation": 9,
+          "accountability": 9,
+          "commitment_threshold": 5
         }
       },
       "new": {
         "weightedScore": 8.3,
-        "modifiedWeightedScore": 8.35,
+        "modifiedWeightedScore": 8.5,
         "passed": true,
         "finalGatePass": true,
         "pillarScores": {
@@ -4118,8 +4187,8 @@
         },
         "gateFailReasons": []
       },
-      "weightedDelta": 0.3,
-      "passFlipped": true,
+      "weightedDelta": 0,
+      "passFlipped": false,
       "needsReasoningRegen": true,
       "recomputeNotes": [
         "rollup_algorithm:scenario_only_integers_v3_m4_exempt_accountability",

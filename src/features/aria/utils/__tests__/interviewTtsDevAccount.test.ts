@@ -48,17 +48,17 @@ describe('interviewTtsDevAccount', () => {
     expect(isLocalWebDevHost()).toBe(false);
   });
 
-  it('never routes production builds through default voice for listed emails', () => {
+  it('skips ElevenLabs for configured accounts on production builds', () => {
     Object.defineProperty(window, 'location', {
       configurable: true,
       value: { hostname: 'app.amoraea.com' },
     });
     (global as { __DEV__?: boolean }).__DEV__ = false;
     setInterviewTtsSessionEmail('mattang5280@gmail.com');
-    expect(shouldUseDefaultVoiceInsteadOfElevenLabs()).toBe(false);
+    expect(shouldUseDefaultVoiceInsteadOfElevenLabs()).toBe(true);
   });
 
-  it('routes default voice only on localhost in a dev bundle for listed emails', () => {
+  it('skips ElevenLabs for configured accounts on localhost in a dev bundle', () => {
     Object.defineProperty(window, 'location', {
       configurable: true,
       value: { hostname: 'localhost' },
@@ -71,13 +71,24 @@ describe('interviewTtsDevAccount', () => {
     expect(shouldUseDefaultVoiceInsteadOfElevenLabs()).toBe(false);
   });
 
-  it('keeps ElevenLabs on production host even if __DEV__ is true', () => {
+  it('does not skip ElevenLabs for other accounts on production host', () => {
     Object.defineProperty(window, 'location', {
       configurable: true,
       value: { hostname: 'app.amoraea.com' },
     });
     (global as { __DEV__?: boolean }).__DEV__ = true;
     setInterviewTtsSessionEmail('mattang5280@gmail.com');
+    expect(shouldUseDefaultVoiceInsteadOfElevenLabs()).toBe(true);
+    setInterviewTtsSessionEmail('other@example.com');
     expect(shouldUseDefaultVoiceInsteadOfElevenLabs()).toBe(false);
+  });
+
+  it('skips ElevenLabs on native builds for configured accounts', () => {
+    jest.resetModules();
+    jest.doMock('react-native', () => ({ Platform: { OS: 'android' } }));
+    const nativeModule = require('../interviewTtsDevAccount') as typeof import('../interviewTtsDevAccount');
+    (global as { __DEV__?: boolean }).__DEV__ = true;
+    nativeModule.setInterviewTtsSessionEmail('mattang5280@gmail.com');
+    expect(nativeModule.shouldUseDefaultVoiceInsteadOfElevenLabs()).toBe(true);
   });
 });

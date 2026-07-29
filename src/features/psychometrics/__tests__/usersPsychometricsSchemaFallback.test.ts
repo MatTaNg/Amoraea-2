@@ -11,7 +11,7 @@ import {
   collectPsychometricFloorGateFailReasons,
   RFQ_LOW_REFLECTIVE_FUNCTIONING_FLOOR_CODE,
 } from '../psychometricFloorBreaches';
-import { ACTIVE_NARCISSISM_FLOOR_CODE } from '../narcissismInstrumentTestFixtures';
+import { ACTIVE_NARCISSISM_FLOOR_CODE, NARCISSISM_PSYCHOMETRIC_GATE_FLOOR_ENABLED } from '../narcissismInstrumentTestFixtures';
 import { NPI_ENTITLEMENT_ENABLED } from '../interviewCompletionStatus';
 
 describe('usersPsychometricsSchemaFallback', () => {
@@ -70,10 +70,10 @@ describe('usersPsychometricsSchemaFallback', () => {
       'scs_straight_line',
     ]);
     expect(floors).toContain(RFQ_LOW_REFLECTIVE_FUNCTIONING_FLOOR_CODE);
-    if (NPI_ENTITLEMENT_ENABLED) {
+    if (NARCISSISM_PSYCHOMETRIC_GATE_FLOOR_ENABLED) {
       expect(floors).toContain(ACTIVE_NARCISSISM_FLOOR_CODE);
     } else {
-      expect(floors).toContain('sd3_narcissism_floor');
+      expect(floors).not.toContain(ACTIVE_NARCISSISM_FLOOR_CODE);
     }
   });
 

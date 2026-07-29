@@ -1,8 +1,13 @@
 import type { ComputeGateResultOptions } from '@features/aria/computeGateResultCore';
 import { moment4Moment5ConcretenessDepthSignalDelta } from '@features/aria/moment4ConcretenessClassification';
-import { DEFAULT_DEFENSE_PATTERNS, type DefensePatternsJson } from '@features/aria/defensePatternsDetection';
+import type { DefensePatternsJson } from '@features/aria/defensePatternsDetection';
 import { resolveEmotionRecognitionRawScoreForGate } from '@features/aria/emotionRecognitionInterview';
-import { EGO_DEVELOPMENT_LEVEL_MODIFIERS } from '@config/scoring/depthSignalModifiers';
+import {
+  countDefensePatternsForDepthModifier,
+  DEFENSE_PATTERN_COUNT_MODIFIERS,
+  EGO_DEVELOPMENT_LEVEL_MODIFIERS,
+  MENTALIZING_OVERCERTAINTY_COUNT_MODIFIERS,
+} from '@config/scoring/depthSignalModifiers';
 
 const EMOTION_RECOGNITION_FLOOR_EXCLUSIVE_MAX = 0.34;
 const EMOTION_RECOGNITION_REVIEW_EXCLUSIVE_MAX = 0.67;
@@ -20,13 +25,7 @@ function parseEgoLevel(raw: unknown): number | null {
 }
 
 function parseDefenseCount(dp: DefensePatternsJson | null | undefined): number {
-  const merged = { ...DEFAULT_DEFENSE_PATTERNS, ...(dp ?? {}) };
-  return [
-    merged.projection_detected === true,
-    merged.rationalization_detected === true,
-    merged.splitting_detected === true,
-    merged.denial_detected === true,
-  ].filter(Boolean).length;
+  return countDefensePatternsForDepthModifier(dp);
 }
 
 function parseNonNegativeInt(raw: unknown): number {
@@ -60,14 +59,16 @@ export function buildDepthSignalModifierLines(
   }
 
   const defenseCount = parseDefenseCount(options?.defensePatterns);
+  const defenseCountCapped = Math.min(4, defenseCount) as 0 | 1 | 2 | 3 | 4;
+  const defenseDelta = DEFENSE_PATTERN_COUNT_MODIFIERS[defenseCountCapped];
   if (defenseCount === 1) {
-    lines.push({ label: 'Defense patterns', detail: '1 immature defense flagged', delta: -0.15 });
+    lines.push({ label: 'Defense patterns', detail: '1 immature defense flagged (projection excluded)', delta: defenseDelta });
   } else if (defenseCount === 2) {
-    lines.push({ label: 'Defense patterns', detail: '2 immature defenses flagged', delta: -0.35 });
+    lines.push({ label: 'Defense patterns', detail: '2 immature defenses flagged (projection excluded)', delta: defenseDelta });
   } else if (defenseCount === 3) {
-    lines.push({ label: 'Defense patterns', detail: '3 immature defenses flagged', delta: -0.6 });
+    lines.push({ label: 'Defense patterns', detail: '3 immature defenses flagged (projection excluded)', delta: defenseDelta });
   } else if (defenseCount >= 4) {
-    lines.push({ label: 'Defense patterns', detail: '4+ immature defenses flagged', delta: -0.8 });
+    lines.push({ label: 'Defense patterns', detail: '4+ immature defenses flagged (projection excluded)', delta: defenseDelta });
   }
 
   const m4 = (options?.moment4Concreteness ?? '').toString().trim().toLowerCase();
@@ -82,14 +83,16 @@ export function buildDepthSignalModifierLines(
   }
 
   const overcertaintyCount = parseNonNegativeInt(options?.mentalizingOvercertaintyCount);
-  if (overcertaintyCount === 1) {
-    lines.push({ label: 'Mentalizing overcertainty', detail: '1 moment flagged', delta: -0.1 });
-  } else if (overcertaintyCount === 2) {
-    lines.push({ label: 'Mentalizing overcertainty', detail: '2 moments flagged', delta: -0.2 });
-  } else if (overcertaintyCount === 3) {
-    lines.push({ label: 'Mentalizing overcertainty', detail: '3 moments flagged', delta: -0.35 });
-  } else if (overcertaintyCount >= 4) {
-    lines.push({ label: 'Mentalizing overcertainty', detail: '4+ moments flagged', delta: -0.5 });
+  if (overcertaintyCount >= 1) {
+    const overcertaintyCapped = Math.min(4, overcertaintyCount) as 1 | 2 | 3 | 4;
+    const delta = MENTALIZING_OVERCERTAINTY_COUNT_MODIFIERS[overcertaintyCapped];
+    if (delta !== 0) {
+      const detail =
+        overcertaintyCount >= 4
+          ? '4+ moments flagged'
+          : `${overcertaintyCount} moment${overcertaintyCount === 1 ? '' : 's'} flagged`;
+      lines.push({ label: 'Mentalizing overcertainty', detail, delta });
+    }
   }
 
   const erScore = resolveEmotionRecognitionRawScoreForGate({
@@ -122,16 +125,6 @@ export function buildDepthSignalModifierLines(
   const disclosure = options?.disclosureCalibration ?? null;
   if (disclosure === 'underdisclosure') {
     lines.push({ label: 'Disclosure calibration', detail: 'Underdisclosure', delta: -0.2 });
-  } else if (disclosure === 'overdisclosure') {
-    lines.push({ label: 'Disclosure calibration', detail: 'Overdisclosure', delta: -0.15 });
-  }
-
-  if (options?.personalMomentEmotionalVocabLow === true) {
-    lines.push({
-      label: 'Personal moment emotional vocabulary',
-      detail: 'Low density vs scenario responses',
-      delta: -0.15,
-    });
   }
 
   return lines;

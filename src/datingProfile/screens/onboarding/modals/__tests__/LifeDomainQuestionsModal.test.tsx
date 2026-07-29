@@ -84,6 +84,9 @@ describe('LifeDomainQuestionsModal', () => {
   it('shows optional health dropdown questions in post-slider follow-up flow', async () => {
     const screen = renderModal('health', {
       optionalOpenEndedLeftover: true,
+      initialAnswers: {
+        health: { diet: 'Vegetarian' },
+      },
     });
     await waitFor(() => {
       expect(screen.getByText('What is your diet?')).toBeTruthy();

@@ -2,7 +2,7 @@
  * Scenario skip penalties applied after marker weighted score.
  */
 
-/** First confirmed scenario skip (moments 1–3). */
+/** First confirmed skip (scenarios 1–3 or Moment 5). */
 export const SKIP_PENALTY_FIRST = -0.3;
 
 /** Second confirmed skip (additive with first). */

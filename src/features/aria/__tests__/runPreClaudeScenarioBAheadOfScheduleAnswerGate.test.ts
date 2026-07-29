@@ -74,6 +74,18 @@ describe('runPreClaudeScenarioBAheadOfScheduleAnswerGate', () => {
     expect(deps.setMessages).not.toHaveBeenCalled();
   });
 
+  it('does not accept truncated repair-as-James openers on Q1', async () => {
+    const deps = buildDeps();
+    const result = await runPreClaudeScenarioBAheadOfScheduleAnswerGate(
+      deps,
+      'If I were James, I would...',
+    );
+
+    expect(result.handled).toBe(false);
+    expect(deps.setMessages).not.toHaveBeenCalled();
+    expect(deps.speakTextSafe).not.toHaveBeenCalled();
+  });
+
   it('accepts ahead-of-schedule repair after a model Q1 redirect', async () => {
     const deps = buildDeps({
       messages: [

@@ -1,9 +1,11 @@
 import React, { useEffect, useState, useRef } from 'react';
+import { ONBOARDING_STEP_SCREEN_EDGES, ONBOARDING_STEP_SCREEN_EDGES_WITH_BOTTOM } from './onboardingStepScreenEdges';
 import { View, ScrollView, Text, ActivityIndicator, Platform } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Button } from '@/shared/ui/Button';
 import * as Location from 'expo-location';
 import { requestMyLocationLabel } from '@/screens/profile/utils/locationHelpers';
+import { looksLikeRawCoordinates } from '@/shared/utils/geocoding';
 import { OnboardingHeader } from './components/OnboardingHeader';
 import { styles } from './LocationModal.styled';
 
@@ -29,6 +31,11 @@ export const LocationModal: React.FC<LocationModalProps> = ({
   useEffect(() => {
     // Web browsers are more reliable when geolocation permission is requested from an explicit user action.
     if (Platform.OS === 'web') return;
+    if (location.trim() && looksLikeRawCoordinates(location)) {
+      onLocationChange('');
+      getLocation();
+      return;
+    }
     if (!location.trim() && !hasAttemptedLocation) {
       getLocation();
     } else if (location.trim()) {
@@ -107,7 +114,7 @@ export const LocationModal: React.FC<LocationModalProps> = ({
   const canContinue = location.trim().length > 0;
 
   return (
-    <SafeAreaView style={styles.screen} edges={['top', 'left', 'right']}>
+    <SafeAreaView style={styles.screen} edges={ONBOARDING_STEP_SCREEN_EDGES}>
       <OnboardingHeader title="I am located at" onBack={onBack} />
       <ScrollView 
         style={styles.scrollView}

@@ -1,17 +1,25 @@
 import {
+  hasQuestionRecoveryPromptAlreadySpokenForSeq,
   IRRELEVANT_ANSWER_RETRY_LINE,
   isIrrelevantAnswerRetryAssistantLine,
+  looksLikeCompleteShortUserReply,
   looksLikeUnassessableScenarioAnswer,
 } from '@features/aria/interviewAnswerRelevance';
+import { looksLikeInterviewScoreStatusRequest } from '@features/aria/interviewScoreStatusRequest';
 import { isInterviewHardStopUserTurn } from '@features/aria/interviewMentalizingAndAnswerSignals';
 import type { MessageWithScenario } from '@features/aria/interviewScenarioScoringSlice';
 import { ASSISTANT_INTERVIEW_SPEECH } from '@features/aria/interviewTtsSpeakOptions';
 import { commitDedupedAssistantTranscriptTurn } from '@features/aria/interviewTranscriptDedup';
+import { restoreReferenceCardPromptFromAssessableQuestion } from '@features/aria/runReferenceCardFromAssistantSpeech';
 import {
   looksLikeFrustrationSkipConfirmationAffirmative,
+  looksLikeSkipConfirmationAssistantPrompt,
 } from '@features/aria/metaCommentSkipFrustration';
 import type { PreClaudeTurnGateDeps } from '@features/aria/preClaudeTurnGateTypes';
-import { isScenarioAQ1Prompt } from '@features/aria/scenarioAContemptProbeCoverage';
+import {
+  isScenarioAQ1Prompt,
+  looksLikeScenarioAContemptProbeAssessableShortAnswer,
+} from '@features/aria/scenarioAContemptProbeCoverage';
 import { looksLikeScenarioAContemptProbeQuestion } from '@features/aria/scenarioAContemptProbeLogic';
 import { looksLikeScenarioARepairQuestion } from '@features/aria/scenarioARepairQuestionHelpers';
 import {
@@ -19,14 +27,16 @@ import {
   looksLikeScenarioBQ1Question,
   looksLikeScenarioBRepairAsJamesQuestion,
 } from '@features/aria/scenarioBProbeLogic';
+import {
+  looksLikeScenarioCSophiePerspectiveAssessableShortAnswer,
+  looksLikeScenarioCSophiePerspectiveQuestion,
+} from '@features/aria/scenarioCPromptDetection';
+import {
+  looksLikeMoment4ThresholdQuestion,
+  looksLikeUnassessableMoment4ThresholdAnswer,
+} from '@features/aria/moment4ProbeLogic';
 import { remoteLog } from '@utilities/remoteLog';
 import { markQuestionDelivered } from '@utilities/sessionLogging';
-
-function looksLikeSkipConfirmationAssistantPrompt(text: string): boolean {
-  const t = (text ?? '').trim();
-  if (!t) return false;
-  return /may affect your score/i.test(t) && /\bskip\b/i.test(t);
-}
 
 function lastAssistantLooksLikeAssessableInterviewPrompt(lastAssistantContent: string): boolean {
   const t = (lastAssistantContent ?? '').trim();
@@ -41,6 +51,7 @@ function lastAssistantLooksLikeAssessableInterviewPrompt(lastAssistantContent: s
   if (looksLikeScenarioBQ1Question(t)) return true;
   if (looksLikeScenarioBJamesDifferentlyQuestion(t)) return true;
   if (looksLikeScenarioBRepairAsJamesQuestion(t)) return true;
+  if (looksLikeScenarioCSophiePerspectiveQuestion(t)) return true;
   // Moment / other scenario questions: substantive interviewer ask ending in ?
   if (/\?\s*$/.test(t) && t.length >= 24) return true;
   return false;
@@ -57,6 +68,9 @@ export async function runPreClaudeIrrelevantAnswerRetryGate(
   lastAssistantContent: string,
 ): Promise<{ handled: boolean }> {
   if (!trimmed || isInterviewHardStopUserTurn(trimmed)) {
+    return { handled: false };
+  }
+  if (looksLikeInterviewScoreStatusRequest(trimmed)) {
     return { handled: false };
   }
   // Skip acceptance already queued the next beat for the model / client delivery.
@@ -86,7 +100,35 @@ export async function runPreClaudeIrrelevantAnswerRetryGate(
   if (!assessablePrompt && !onInterviewContentBeat) {
     return { handled: false };
   }
-  if (!looksLikeUnassessableScenarioAnswer(trimmed)) {
+  const contemptProbeQuestion =
+    looksLikeScenarioAContemptProbeQuestion(questionToKeep) ||
+    looksLikeScenarioAContemptProbeQuestion(lastAssistantContent);
+  if (contemptProbeQuestion && looksLikeScenarioAContemptProbeAssessableShortAnswer(trimmed)) {
+    return { handled: false };
+  }
+  const sophiePerspectiveQuestion =
+    looksLikeScenarioCSophiePerspectiveQuestion(questionToKeep) ||
+    looksLikeScenarioCSophiePerspectiveQuestion(lastAssistantContent);
+  if (sophiePerspectiveQuestion && looksLikeScenarioCSophiePerspectiveAssessableShortAnswer(trimmed)) {
+    return { handled: false };
+  }
+  if (
+    hasQuestionRecoveryPromptAlreadySpokenForSeq(
+      deps.recoveryAssistantSpokenAtSubstantiveSeqRef?.current,
+      deps.substantiveInterviewQuestionDeliveredSeqRef?.current ?? 0,
+    ) &&
+    looksLikeCompleteShortUserReply(trimmed)
+  ) {
+    return { handled: false };
+  }
+  const thresholdQuestion =
+    looksLikeMoment4ThresholdQuestion(questionToKeep) ||
+    looksLikeMoment4ThresholdQuestion(lastAssistantContent);
+  if (thresholdQuestion) {
+    if (!looksLikeUnassessableMoment4ThresholdAnswer(trimmed)) {
+      return { handled: false };
+    }
+  } else if (!looksLikeUnassessableScenarioAnswer(trimmed)) {
     return { handled: false };
   }
 
@@ -115,12 +157,18 @@ export async function runPreClaudeIrrelevantAnswerRetryGate(
   );
   // Keep lastQuestion on the assessable question (not the retry line).
   deps.lastQuestionTextRef.current = questionToKeep;
+  restoreReferenceCardPromptFromAssessableQuestion(deps, questionToKeep);
   await deps.speakTextSafe(spoken, {
     ...ASSISTANT_INTERVIEW_SPEECH,
     skipLastQuestionRef: true,
+    skipInterviewSpeechAdvance: true,
     // Same line can fire repeatedly for repeated off-topic asks — still speak it.
     allowDuplicateConsecutiveTts: true,
   });
+  if (deps.recoveryAssistantSpokenAtSubstantiveSeqRef) {
+    deps.recoveryAssistantSpokenAtSubstantiveSeqRef.current =
+      deps.substantiveInterviewQuestionDeliveredSeqRef?.current ?? 0;
+  }
   markQuestionDelivered(new Date().toISOString());
   deps.setVoiceState('idle');
   deps.setIsWaiting(false);

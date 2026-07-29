@@ -2,6 +2,7 @@ import React from 'react';
 import { ScrollView, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Button } from '@/shared/ui/Button';
+import { ONBOARDING_STEP_SCREEN_EDGES_WITH_BOTTOM } from './modals/onboardingStepScreenEdges';
 import { theme } from '@/shared/theme/theme';
 
 type Props = {
@@ -13,7 +14,7 @@ type Props = {
  */
 export function ProfileOnboardingCompleteModal({ onContinue }: Props) {
   return (
-    <SafeAreaView style={styles.safe} edges={['top', 'left', 'right', 'bottom']}>
+    <SafeAreaView style={styles.safe} edges={ONBOARDING_STEP_SCREEN_EDGES_WITH_BOTTOM}>
       <ScrollView
         style={styles.scroll}
         contentContainerStyle={styles.scrollContent}

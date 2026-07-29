@@ -9,6 +9,12 @@ import {
   NON_ENGLISH_VOICE_PROMPT,
 } from './interviewLanguageGate';
 import { isApprovedElongatingProbeOnly } from './elongatingProbe';
+import {
+  looksLikeMicStopCutOffExemptFromMetaComment,
+  looksLikeRepairQuestionEchoAnswer,
+} from './interviewAnswerRelevance';
+import { looksLikeGoBackToPreviousScenarioRequest } from './interviewGoBackRequest';
+import { looksLikeInterviewScoreStatusRequest } from './interviewScoreStatusRequest';
 import { classifyExplicitRepeatRequestPreClassification } from './metaCommentConfusionRepeat';
 import {
   metaScores,
@@ -116,6 +122,14 @@ export function classifyUserMetaComment(text: string): MetaCommentClassification
 
   const explicitRepeat = classifyExplicitRepeatRequestPreClassification(t);
   if (explicitRepeat) return explicitRepeat;
+
+  if (looksLikeMicStopCutOffExemptFromMetaComment(t)) return null;
+
+  if (looksLikeRepairQuestionEchoAnswer(t)) return null;
+
+  if (looksLikeGoBackToPreviousScenarioRequest(t)) return null;
+
+  if (looksLikeInterviewScoreStatusRequest(t)) return null;
 
   const wc = wordCount(t);
   const scores = metaScores(t);

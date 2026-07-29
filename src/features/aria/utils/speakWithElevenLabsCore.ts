@@ -1,6 +1,10 @@
 import { Platform } from 'react-native';
 
-import { logAndApplyPlaybackModeForTts } from './audioModeHelpers';
+import {
+  applyNativeTtsPrePlaybackAudioMode,
+  logAndApplyPlaybackModeForTts,
+  markNativePlaybackBridgeBeforeNextTts,
+} from './audioModeHelpers';
 import { getEffectivePlaybackRateMultiplier } from './interviewTtsPlaybackRate';
 import { speakFallback } from './interviewTtsSpeakFallback';
 import { playNativeElevenLabsMpegArrayBuffer } from './nativeElevenLabsMp3Playback';
@@ -14,6 +18,39 @@ import { getElevenLabsApiKey, getTtsProxyUrl } from './elevenLabsTtsCredentials'
 import { fetchElevenLabsMpegArrayBuffer } from './elevenLabsTtsFetch';
 import { applyAmoraeaPronunciation, applyAmoraeaPronunciationForDeviceSpeech } from './elevenLabsTtsVoice';
 import { recordElevenLabsSpokenContext } from './elevenLabsSpokenContext';
+
+async function fallbackToDeviceSpeech(
+  deviceSpeechText: string,
+  onFallback: (() => void) | undefined,
+  options: ElevenLabsSpeakOptions | undefined,
+): Promise<void> {
+  await speakFallback(deviceSpeechText, onFallback, {
+    ...options,
+    elevenLabsPostBridgeFetchRetried: true,
+  });
+}
+
+async function fetchElevenLabsBufferWithOptionalAndroidRetry(
+  text: string,
+  options: ElevenLabsSpeakOptions | undefined,
+): Promise<ArrayBuffer | null> {
+  let arrayBuffer: ArrayBuffer | null =
+    options?.prefetchedMpegArrayBuffer && options.prefetchedMpegArrayBuffer.byteLength > 0
+      ? options.prefetchedMpegArrayBuffer
+      : await fetchElevenLabsMpegArrayBuffer(text);
+
+  if (
+    arrayBuffer ||
+    Platform.OS !== 'android' ||
+    options?.elevenLabsPostBridgeFetchRetried
+  ) {
+    return arrayBuffer;
+  }
+
+  markNativePlaybackBridgeBeforeNextTts('elevenlabs_android_fetch_retry');
+  await applyNativeTtsPrePlaybackAudioMode('speakWithElevenLabs:androidFetchRetry');
+  return fetchElevenLabsMpegArrayBuffer(text);
+}
 
 /**
  * Speak text using ElevenLabs TTS (warm, natural voice).
@@ -40,12 +77,12 @@ export async function speakWithElevenLabs(
   const iosBlocksMp3 = Platform.OS === 'ios' && !iosUseElevenLabsMp3Playback();
 
   if (!spokenText.trim()) {
-    await speakFallback(deviceSpeechText, onFallback, options);
+    await fallbackToDeviceSpeech(deviceSpeechText, onFallback, options);
     return;
   }
 
   if (!envAllowsEleven) {
-    await speakFallback(deviceSpeechText, onFallback, options);
+    await fallbackToDeviceSpeech(deviceSpeechText, onFallback, options);
     return;
   }
 
@@ -54,33 +91,27 @@ export async function speakWithElevenLabs(
   const useProxy = !apiKey && !!proxyUrl;
   if (!apiKey && !useProxy) {
     console.warn('ElevenLabs: No API key (EXPO_PUBLIC_ELEVENLABS_API_KEY or app config). Using fallback TTS — set the key for natural voice.');
-    await speakFallback(deviceSpeechText, onFallback, options);
+    await fallbackToDeviceSpeech(deviceSpeechText, onFallback, options);
     return;
   }
 
   if (iosBlocksMp3) {
-    await speakFallback(deviceSpeechText, onFallback, options);
+    await fallbackToDeviceSpeech(deviceSpeechText, onFallback, options);
     return;
   }
 
   try {
-    let arrayBuffer: ArrayBuffer;
-    if (options?.prefetchedMpegArrayBuffer && options.prefetchedMpegArrayBuffer.byteLength > 0) {
-      arrayBuffer = options.prefetchedMpegArrayBuffer;
-    } else {
-      const downloaded = await fetchElevenLabsMpegArrayBuffer(text);
-      if (!downloaded) {
-        await speakFallback(deviceSpeechText, onFallback, options);
-        return;
-      }
-      arrayBuffer = downloaded;
+    const arrayBuffer = await fetchElevenLabsBufferWithOptionalAndroidRetry(text, options);
+    if (!arrayBuffer) {
+      await fallbackToDeviceSpeech(deviceSpeechText, onFallback, options);
+      return;
     }
 
     try {
       await playNativeElevenLabsMpegArrayBuffer(arrayBuffer, onPlaybackStarted, telemetrySource);
     } catch (e) {
       if (e instanceof Error && e.message === 'native_tts_no_cache_dir') {
-        await speakFallback(deviceSpeechText, onFallback, options);
+        await fallbackToDeviceSpeech(deviceSpeechText, onFallback, options);
         return;
       }
       throw e;
@@ -88,6 +119,6 @@ export async function speakWithElevenLabs(
     recordElevenLabsSpokenContext(spokenText);
   } catch (err) {
     console.warn('ElevenLabs TTS failed, using fallback:', err);
-    await speakFallback(deviceSpeechText, onFallback, options);
+    await fallbackToDeviceSpeech(deviceSpeechText, onFallback, options);
   }
 }

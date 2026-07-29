@@ -15,10 +15,6 @@ import { evaluateInterviewCompletionGate } from '@features/aria/interviewComplet
 import type { InterviewResults } from '@features/aria/interviewResultsTypes';
 import { countMentalizingOvercertaintyInMarkerSlices } from '@features/aria/mentalizingOvercertaintyFromTranscript';
 import { normalizeResponseConcreteness } from '@features/aria/personalMomentConcreteness';
-import {
-  aggregatePersonalMomentEmotionalVocab,
-  scenarioEmotionalVocabDensityPercentFromTranscript,
-} from '@features/aria/personalMomentEmotionalVocab';
 import type { ScoreStandardDeferredPersistGateParams } from '@features/aria/standardDeferredPersistGateTypes';
 import { scenarioBundleForDeferred } from '@features/aria/standardDeferredPersistGateTypes';
 import {
@@ -149,10 +145,6 @@ export async function prepareStandardDeferredPersistSnapshot(
       : { ...DEFAULT_DEFENSE_PATTERNS },
   );
   const existingAttemptId = deps.interviewSessionAttemptIdRef.current;
-  const pevDeferred = aggregatePersonalMomentEmotionalVocab(moment4ForAggregate, moment5ForAggregate, {
-    scenarioEmotionalVocabDensityPercent: scenarioEmotionalVocabDensityPercentFromTranscript(msgsDeferred),
-    communicationStyleEmotionalVocabDensityPercent: null,
-  });
   const disclosureSlicesForDeferredRow: MarkerScoreSlice[] = [
     bundle1
       ? {
@@ -227,8 +219,6 @@ export async function prepareStandardDeferredPersistSnapshot(
           unknown
         >,
         {
-          personal_moment_emotional_vocab_low: pevDeferred.personal_moment_emotional_vocab_low,
-          personal_moment_emotional_vocab_density: pevDeferred.personal_moment_emotional_vocab_density,
           disclosure_calibration: disclosureCalibrationForDeferredRow,
           probe_log: [...deps.probeLogRef.current],
         },
@@ -273,7 +263,6 @@ export async function prepareStandardDeferredPersistSnapshot(
     moment5ForAggregate,
     scoringBaseline,
     defensePatternsForDeferredRow: defensePatternsForDeferredRow as Record<string, unknown>,
-    pevDeferred,
     disclosureCalibrationForDeferredRow,
     mentalizingOvercertaintyCountDeferred,
     typologyContext,

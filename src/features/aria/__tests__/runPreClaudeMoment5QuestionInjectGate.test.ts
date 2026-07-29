@@ -112,6 +112,114 @@ describe('runPreClaudeMoment5QuestionInjectGate', () => {
     expect(speakTextSafe).not.toHaveBeenCalled();
   });
 
+  it('does not inject Moment 5 when threshold answer is an incomplete cut-off', async () => {
+    mockTriggerLiveMoment4ScoringOnM5Entry.mockClear();
+    const speakTextSafe = jest.fn().mockResolvedValue(undefined);
+    const deps = createMockPreClaudeDeps({
+      currentInterviewMomentRef: { current: 4 },
+      moment4ThresholdProbeAskedRef: { current: true },
+      moment5QuestionDeliveredRef: { current: false },
+      moment5QuestionDeliveryInFlightRef: { current: false },
+      speakTextSafe,
+    });
+    const messagesToUse = [
+      { role: 'assistant', content: M4_THRESHOLD_QUESTION },
+      { role: 'user', content: 'It depends on' },
+    ];
+
+    const result = await runPreClaudeMoment5QuestionInjectGate(deps, messagesToUse, 'Alex');
+
+    expect(result).toEqual({ handled: false });
+    expect(speakTextSafe).not.toHaveBeenCalled();
+    expect(mockTriggerLiveMoment4ScoringOnM5Entry).not.toHaveBeenCalled();
+  });
+
+  it('does not inject Moment 5 when threshold answer is "If someone is willing" cut-off', async () => {
+    mockTriggerLiveMoment4ScoringOnM5Entry.mockClear();
+    const speakTextSafe = jest.fn().mockResolvedValue(undefined);
+    const deps = createMockPreClaudeDeps({
+      currentInterviewMomentRef: { current: 4 },
+      moment4ThresholdProbeAskedRef: { current: true },
+      moment5QuestionDeliveredRef: { current: false },
+      moment5QuestionDeliveryInFlightRef: { current: false },
+      speakTextSafe,
+    });
+    const messagesToUse = [
+      { role: 'assistant', content: M4_THRESHOLD_QUESTION },
+      { role: 'user', content: 'If someone is willing' },
+    ];
+
+    const result = await runPreClaudeMoment5QuestionInjectGate(deps, messagesToUse, 'Alex');
+
+    expect(result).toEqual({ handled: false });
+    expect(speakTextSafe).not.toHaveBeenCalled();
+  });
+
+  it('does not inject Moment 5 when threshold answer mentions partner but not stay vs leave', async () => {
+    mockTriggerLiveMoment4ScoringOnM5Entry.mockClear();
+    const speakTextSafe = jest.fn().mockResolvedValue(undefined);
+    const deps = createMockPreClaudeDeps({
+      currentInterviewMomentRef: { current: 4 },
+      moment4ThresholdProbeAskedRef: { current: true },
+      moment5QuestionDeliveredRef: { current: false },
+      moment5QuestionDeliveryInFlightRef: { current: false },
+      speakTextSafe,
+    });
+    const garbledThresholdAnswer =
+      "If my partner is with me, I can't do anything about it. If my partner is with me, I can't do anything about it.";
+    const messagesToUse = [
+      { role: 'assistant', content: M4_THRESHOLD_QUESTION },
+      { role: 'user', content: garbledThresholdAnswer },
+    ];
+
+    const result = await runPreClaudeMoment5QuestionInjectGate(deps, messagesToUse, 'Alex');
+
+    expect(result).toEqual({ handled: false });
+    expect(speakTextSafe).not.toHaveBeenCalled();
+  });
+
+  it('injects Moment 5 after unassessable threshold answer retry then first assessable answer', async () => {
+    mockTriggerLiveMoment4ScoringOnM5Entry.mockClear();
+    const speakTextSafe = jest.fn().mockResolvedValue(undefined);
+    const setMessages = jest.fn();
+    const deps = createMockPreClaudeDeps({
+      currentInterviewMomentRef: { current: 4 },
+      moment4ThresholdProbeAskedRef: { current: true },
+      moment5QuestionDeliveredRef: { current: false },
+      moment5QuestionDeliveryInFlightRef: { current: false },
+      interviewSessionAttemptIdRef: { current: 'attempt-retry-m4' },
+      speakTextSafe,
+      setMessages,
+    });
+    const messagesToUse = [
+      { role: 'assistant', content: M4_THRESHOLD_QUESTION },
+      {
+        role: 'user',
+        content: 'I think it depends. If you really love each other, then you should try your best to make it work.',
+      },
+      {
+        role: 'assistant',
+        content: "I wasn't able to understand that — you may have gotten cut off. Can you try again?",
+      },
+      {
+        role: 'user',
+        content:
+          'I think you should try your best to make it work, but if you cannot then you should go your separate ways.',
+      },
+    ];
+
+    const result = await runPreClaudeMoment5QuestionInjectGate(deps, messagesToUse, 'Matt');
+
+    expect(result).toEqual({ handled: true });
+    expect(deps.moment5QuestionDeliveredRef.current).toBe(true);
+    expect(deps.currentInterviewMomentRef.current).toBe(5);
+    expect(speakTextSafe).toHaveBeenCalledWith(
+      expect.stringMatching(/conflict with someone important/i),
+      expect.any(Object),
+    );
+    expect(mockTriggerLiveMoment4ScoringOnM5Entry).toHaveBeenCalled();
+  });
+
   it('injects Moment 5 after explicit pass on the grudge question (threshold skipped)', async () => {
     const speakTextSafe = jest.fn().mockResolvedValue(undefined);
     const setMessages = jest.fn();

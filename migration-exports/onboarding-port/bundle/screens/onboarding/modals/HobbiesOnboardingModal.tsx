@@ -62,7 +62,7 @@ export const HobbiesOnboardingModal: React.FC<HobbiesOnboardingModalProps> = ({
           {selectedIds.length > 0 && (
             <>
               <Text style={styles.proLabel}>
-                Optionally, mark one as your "professional hobby" (you spend 20+ hours a week on it — the center of your life).
+              If you met someone amazing who didn't share these hobbies with you, would that still be a dealbreaker? If so, which one?
               </Text>
               <View style={styles.proOptions}>
                 <TouchableOpacity

@@ -46,6 +46,7 @@ import {
   resolveInterviewStackBootstrap,
   shouldFetchPostInterviewDeferralSnapshot,
 } from '@features/psychometrics/resolveInterviewStackBootstrap';
+import { shouldRedirectWebPathToPreferredRoute } from '@features/onboarding/interviewStackWebLinking';
 import {
   isLaunchWaitlistPostInterviewModeEnabled,
 } from '@features/onboarding/postInterviewLaunchMode';
@@ -53,6 +54,9 @@ import {
   resolveInitialInterviewRoute,
   type InterviewStackRoute,
 } from '@features/psychometrics/resolveInitialInterviewRoute';
+import { storedInterviewHasResumableScenarioProgress } from '@utilities/interviewResumeCursor';
+import { loadInterviewFromStorage } from '@utilities/storage/InterviewStorage';
+import { hydrateUserEnteredInterviewFlowFromStorage } from '@utilities/interviewEntryLock';
 import { OnboardingHeader } from './src/ui/components/OnboardingHeader';
 import { ProfileRepository } from './src/data/repositories/ProfileRepository';
 import { InviteCodeRepository } from './src/data/repositories/InviteCodeRepository';
@@ -65,7 +69,12 @@ import {
   MarketResearchCompletionProvider,
   useMarketResearchCompletion,
 } from '@features/referrals/MarketResearchCompletionContext';
-import { ReferralCodeIntroShell } from '@features/referrals/ReferralCodeIntroShell';
+import {
+  ReferralCodeIntroShell,
+  isReferralCodeIntroSuppressedRoute,
+  resolveActiveNavigationRouteName,
+} from '@features/referrals/ReferralCodeIntroShell';
+import { ReferralCompletionCongratulationsShell } from '@features/referrals/ReferralCompletionCongratulationsShell';
 import { RelationshipValidationNavigator } from '@app/navigation/RelationshipValidationNavigator';
 import { fetchValidationShellRouting } from '@features/relationshipValidation/relationshipValidationRepo';
 import {
@@ -247,10 +256,7 @@ const InterviewAppNavigator = ({
       name="DatingProfileEdit"
       component={DatingProfileEditScreen as unknown as React.ComponentType<Record<string, never>>}
       initialParams={{ userId }}
-      options={{
-        headerShown: true,
-        header: () => <OnboardingHeader variant="dark" />,
-      }}
+      options={{ headerShown: true }}
     />
   </Stack.Navigator>
 );
@@ -340,7 +346,6 @@ type LoggedInInterviewShellReadyProps = {
   interviewAlreadyCompleted: boolean;
   legacyPsychometricsMode: boolean;
   navInitialState: NavigationState | undefined;
-  interviewLinking: LinkingOptions<Record<string, unknown>> | undefined;
   showMarketResearchOverlay: boolean;
   onMarketResearchDismissed: () => void;
 };
@@ -352,11 +357,29 @@ function LoggedInInterviewShellReady({
   interviewAlreadyCompleted,
   legacyPsychometricsMode,
   navInitialState,
-  interviewLinking,
   showMarketResearchOverlay,
   onMarketResearchDismissed,
 }: LoggedInInterviewShellReadyProps) {
   const { notifyMarketResearchComplete, marketResearchComplete } = useMarketResearchCompletion();
+  const [activeRouteName, setActiveRouteName] = useState<string | undefined>(initialRouteName);
+  const [navigationState, setNavigationState] = useState<NavigationState | undefined>(navInitialState);
+  const frozenNavInitialStateRef = useRef(navInitialState);
+  const interviewLinking = useMemo(
+    () => createInterviewStackLinking(initialRouteName),
+    [initialRouteName],
+  );
+
+  useEffect(() => {
+    setActiveRouteName(initialRouteName);
+  }, [initialRouteName]);
+
+  const handleNavigationStateChange = useCallback(
+    (state: NavigationState | undefined) => {
+      setNavigationState(state);
+      setActiveRouteName(resolveActiveNavigationRouteName(state) ?? initialRouteName);
+    },
+    [initialRouteName],
+  );
 
   useEffect(() => {
     if (!needsMarketResearch) {
@@ -382,7 +405,12 @@ function LoggedInInterviewShellReady({
   };
 
   return (
-    <NavigationContainer theme={navTheme} linking={interviewLinking} initialState={navInitialState}>
+    <NavigationContainer
+      theme={navTheme}
+      linking={interviewLinking}
+      initialState={frozenNavInitialStateRef.current}
+      onStateChange={handleNavigationStateChange}
+    >
       <View style={ROOT_STYLE}>
         <InterviewAppNavigator
           userId={userId}
@@ -394,7 +422,12 @@ function LoggedInInterviewShellReady({
         {showMarketResearchOverlay ? (
           <MarketResearchModal visible userId={userId} onComplete={onMarketResearchComplete} />
         ) : null}
-        <ReferralCodeIntroShell userId={userId} marketResearchComplete={marketResearchComplete} />
+        <ReferralCodeIntroShell
+          userId={userId}
+          marketResearchComplete={marketResearchComplete}
+          suppressReferralIntro={isReferralCodeIntroSuppressedRoute(activeRouteName, navigationState)}
+        />
+        <ReferralCompletionCongratulationsShell userId={userId} />
       </View>
     </NavigationContainer>
   );
@@ -404,9 +437,24 @@ const LoggedInInterviewShell = ({ userId }: { userId: string }) => {
   const queryClient = useQueryClient();
   const { user } = useAuth();
   const lockedPostInterviewRouteRef = useRef<InterviewStackRoute | null>(null);
+  const interviewShellBootstrappedRef = useRef(false);
+  const lastResolvedInterviewStackRef = useRef<{
+    initialRouteName: InterviewStackRoute;
+    interviewAlreadyCompleted: boolean;
+    legacyPsychometricsMode: boolean;
+    needsMarketResearch: boolean;
+    navInitialState: NavigationState;
+  } | null>(null);
   const [validationReturnRoute] = useState(() => readValidationStandardReturnRoute(queryClient, userId));
   const [marketResearchDismissed, setMarketResearchDismissed] = useState(false);
-  const { data: profile, isPending, isError } = useQuery({
+  const { data: userEnteredInterviewFlow = false, isLoading: interviewEntryLockLoading } = useQuery({
+    queryKey: ['interviewEntryLock', userId],
+    queryFn: () => hydrateUserEnteredInterviewFlowFromStorage(userId),
+    enabled: !!userId,
+    staleTime: Infinity,
+  });
+
+  const { data: profile, isPending: profilePending, isError } = useQuery({
     queryKey: ['profile', userId],
     queryFn: async () => {
       let p = await profileRepository.getProfile(userId);
@@ -437,9 +485,9 @@ const LoggedInInterviewShell = ({ userId }: { userId: string }) => {
     profile?.interviewCompleted === true && !isAdminEmail;
 
   /** Wait until `ensureUserWithInviteCode` has created the `users` row before routing (avoids missing market research on first login). */
-  const profileBootstrapped = !!profile && !isPending && !isError;
+  const profileBootstrapped = !!profile && !profilePending && !isError;
 
-  const { data: initialRoute, isPending: initialRoutePending } = useQuery({
+  const { data: initialRoute, isLoading: initialRouteLoading } = useQuery({
     queryKey: ['initialInterviewRoute', userId],
     queryFn: () => resolveInitialInterviewRoute(userId),
     enabled: !!userId && profileBootstrapped,
@@ -451,15 +499,37 @@ const LoggedInInterviewShell = ({ userId }: { userId: string }) => {
     profileShowsStandardInterviewComplete,
   );
 
-  const { data: deferralAttempt, isPending: deferralPending } = useQuery({
+  const { data: deferralAttempt, isLoading: deferralLoading } = useQuery({
     queryKey: ['standardPostInterviewDeferral', userId],
     queryFn: () => fetchStandardPostInterviewDeferralSnapshot(userId),
     enabled: !!userId && needsPostInterviewDeferralSnapshot,
     staleTime: 0,
   });
 
+  const serverRoutesToAssessmentWelcome =
+    initialRoute?.screen === 'AssessmentWelcome' && !profileShowsStandardInterviewComplete;
+
+  const { data: localResumableInterviewProgress, isLoading: localResumeLoading } = useQuery({
+    queryKey: ['localInterviewResume', userId],
+    queryFn: async () => {
+      const saved = await loadInterviewFromStorage(userId);
+      if (saved == null) return false;
+      return storedInterviewHasResumableScenarioProgress({
+        messages: saved.messages,
+        scenariosCompleted: saved.scenariosCompleted,
+        scenarioScores: saved.scenarioScores,
+        resumeActiveScenario: saved.resumeActiveScenario,
+        currentScenario: saved.currentScenario ?? undefined,
+      });
+    },
+    enabled: !!userId && profileBootstrapped && serverRoutesToAssessmentWelcome,
+    staleTime: 0,
+  });
+
   useEffect(() => {
     lockedPostInterviewRouteRef.current = null;
+    interviewShellBootstrappedRef.current = false;
+    lastResolvedInterviewStackRef.current = null;
   }, [userId]);
 
   useEffect(() => {
@@ -485,12 +555,17 @@ const LoggedInInterviewShell = ({ userId }: { userId: string }) => {
   const bootstrapPending =
     !profileBootstrapped ||
     !profile ||
-    initialRoutePending ||
+    interviewEntryLockLoading ||
+    initialRouteLoading ||
     initialRoute === undefined ||
-    (needsPostInterviewDeferralSnapshot && deferralPending);
+    (needsPostInterviewDeferralSnapshot && deferralLoading) ||
+    (serverRoutesToAssessmentWelcome && localResumeLoading);
 
   const resolvedInterviewStack = useMemo(() => {
-    if (bootstrapPending || !profile) {
+    if (!profile) {
+      return null;
+    }
+    if (bootstrapPending && !interviewShellBootstrappedRef.current) {
       return null;
     }
 
@@ -501,6 +576,9 @@ const LoggedInInterviewShell = ({ userId }: { userId: string }) => {
       isAdminEmail,
       lockedPostInterviewRoute: lockedPostInterviewRouteRef.current,
       validationStandardReturnRoute: validationReturnRoute,
+      localResumableInterviewProgress: localResumableInterviewProgress === true,
+      userId,
+      userEnteredInterviewFlow: userEnteredInterviewFlow === true,
     });
 
     if (isTerminalPostInterviewRoute(bootstrap.initialRouteName)) {
@@ -510,7 +588,7 @@ const LoggedInInterviewShell = ({ userId }: { userId: string }) => {
     const { initialRouteName, interviewAlreadyCompleted, legacyPsychometricsMode, needsMarketResearch } =
       bootstrap;
 
-    return {
+    const stack = {
       initialRouteName,
       interviewAlreadyCompleted,
       legacyPsychometricsMode,
@@ -522,8 +600,10 @@ const LoggedInInterviewShell = ({ userId }: { userId: string }) => {
         legacyPsychometricsMode,
         needsMarketResearch,
       ),
-      interviewLinking: createInterviewStackLinking(initialRouteName),
     };
+    interviewShellBootstrappedRef.current = true;
+    lastResolvedInterviewStackRef.current = stack;
+    return stack;
   }, [
     bootstrapPending,
     profile,
@@ -536,9 +616,13 @@ const LoggedInInterviewShell = ({ userId }: { userId: string }) => {
     validationReturnRoute,
     initialRoute?.interviewPassedAdminOverride,
     initialRoute?.interviewPassedComputed,
+    localResumableInterviewProgress,
+    userEnteredInterviewFlow,
   ]);
 
-  if (bootstrapPending || !resolvedInterviewStack) {
+  const stackToRender = resolvedInterviewStack ?? lastResolvedInterviewStackRef.current;
+
+  if (!stackToRender) {
     return <LoadingScreen />;
   }
 
@@ -548,8 +632,7 @@ const LoggedInInterviewShell = ({ userId }: { userId: string }) => {
     legacyPsychometricsMode,
     needsMarketResearch,
     navInitialState,
-    interviewLinking,
-  } = resolvedInterviewStack;
+  } = stackToRender;
 
   const showMarketResearchOverlay =
     showMarketResearch &&
@@ -565,7 +648,6 @@ const LoggedInInterviewShell = ({ userId }: { userId: string }) => {
         interviewAlreadyCompleted={interviewAlreadyCompleted}
         legacyPsychometricsMode={legacyPsychometricsMode}
         navInitialState={navInitialState}
-        interviewLinking={interviewLinking}
         showMarketResearchOverlay={showMarketResearchOverlay}
         onMarketResearchDismissed={handleMarketResearchComplete}
       />
@@ -625,53 +707,6 @@ const INTERVIEW_STACK_ROUTE_PATH: Record<InterviewStackRoute, string> = {
   PostInterviewFailed: 'failed',
   PostInterviewSexualCommunication: 'post-interview-sexual-communication',
 };
-
-function interviewStackPathname(path: string): string {
-  const qIndex = path.indexOf('?');
-  const pathnameRaw = qIndex >= 0 ? path.slice(0, qIndex) : path;
-  return pathnameRaw.replace(/\/+$/, '') || '/';
-}
-
-function isInterviewAliasWebPath(path: string): boolean {
-  const pathname = interviewStackPathname(path);
-  return (
-    pathname === '/' ||
-    pathname === '' ||
-    pathname === '/interview' ||
-    pathname === 'interview'
-  );
-}
-
-/** When reveal is ready, do not keep the user on stale processing / interview URLs after login. */
-function shouldRedirectWebPathToPreferredRoute(
-  path: string,
-  preferredRoute: InterviewStackRoute | undefined,
-): boolean {
-  if (!preferredRoute) {
-    return false;
-  }
-  if (preferredRoute === 'AssessmentWelcome' && isInterviewAliasWebPath(path)) {
-    return true;
-  }
-  if (preferredRoute === 'Amoraea' || preferredRoute === 'PsychometricAssessment') {
-    return false;
-  }
-  const pathname = interviewStackPathname(path);
-  if (isInterviewAliasWebPath(path)) return true;
-  if (
-    preferredRoute === 'PostInterviewLaunch' ||
-    preferredRoute === 'PostInterviewPassed' ||
-    preferredRoute === 'PostInterviewFailed'
-  ) {
-    return (
-      pathname === '/post-interview-processing' ||
-      pathname === 'post-interview-processing' ||
-      pathname === '/post-interview' ||
-      pathname === 'post-interview'
-    );
-  }
-  return false;
-}
 
 const INTERVIEW_STACK_LINKING_SCREENS = {
   AssessmentWelcome: 'welcome',

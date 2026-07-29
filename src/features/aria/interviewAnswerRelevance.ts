@@ -1,3 +1,5 @@
+import { looksLikeInterviewScoreStatusRequest } from './interviewScoreStatusRequest';
+
 /**
  * Detect answers that cannot be scored against the current interview question
  * (identity/off-topic asks, interviewer-directed questions, empty engagement,
@@ -9,6 +11,46 @@ export const IRRELEVANT_ANSWER_RETRY_LINE =
 
 function normalizeIrrelevantCompare(text: string): string {
   return (text ?? '').replace(/\s+/g, ' ').trim().toLowerCase();
+}
+
+function normalizeUserReplyCompare(text: string): string {
+  let s = normalizeIrrelevantCompare(text);
+  s = s.replace(/[\u2019\u2018]/g, "'");
+  s = s.replace(/[.,!?;:…—–-]+$/g, '').trim();
+  return s;
+}
+
+/**
+ * Complete short replies to yes/no or auxiliary questions (e.g. "I did.", "I have.")
+ * — not mic-stop cut-offs and not ratio-reask fodder.
+ */
+export function looksLikeCompleteShortUserReply(text: string): boolean {
+  const n = normalizeUserReplyCompare(text);
+  if (!n) return false;
+  const wordCount = n.split(/\s+/).filter(Boolean).length;
+  if (wordCount > 4) return false;
+  if (
+    /^i\s+(?:did(?:n'?t|\s+not)?|have(?:n'?t|\s+not)?|was(?:n'?t|\s+not)?|do(?:n'?t|\s+not)?)$/.test(
+      n,
+    )
+  ) {
+    return true;
+  }
+  if (/^i\s+(?:did|have|was|do)\s+(?:that|it|so|this|before|already)$/.test(n)) {
+    return true;
+  }
+  if (/^i\s+already\s+did(?:\s+it)?$/.test(n)) {
+    return true;
+  }
+  return false;
+}
+
+/** True when a ratio / cut-off recovery prompt already fired for this substantive question seq. */
+export function hasQuestionRecoveryPromptAlreadySpokenForSeq(
+  recoverySpokenAtSeq: number | null | undefined,
+  currentSubstantiveSeq: number,
+): boolean {
+  return recoverySpokenAtSeq != null && recoverySpokenAtSeq === currentSubstantiveSeq;
 }
 
 /** True for the client irrelevant-answer retry line (current or legacy copy). */
@@ -31,7 +73,7 @@ const INTERVIEWER_IDENTITY_OR_OFF_TOPIC_ASK_RE =
 
 /** Shared scenario / relationship vocabulary that indicates an assessable attempt. */
 const ASSESSABLE_ENGAGEMENT_RE =
-  /\b(?:emma|ryan|sarah|james|sophie|daniel|matt|partner|relationship|scenario|situation|contempt|disdain|dismiss(?:ive|ing)?|repair|apolog(?:y|ize|ise)|feel(?:ing|s)?|felt|emotion(?:al)?|angry|hurt|validat(?:e|ion)|listen|understand|empath(?:y|ize|ise)|need(?:ed|s)?|want(?:ed|s)?|wrong|right|both|sides?|mean|rude|respect|disrespect|defensive|attack|blame|accountab(?:le|ility)|perspective|point of view|fight(?:ing)?|argu(?:e|ing|ment)|communicat(?:e|ion|ing)|tone|sarcas(?:m|tic)|eye[\s-]?roll|scoff|bid|comfort|celebration|logistics)\b/i;
+  /\b(?:emma|ryan|sarah|james|sophie|daniel|matt|partner|relationship|scenario|situation|contempt|disdain|dismiss(?:ive|ing)?|repair|apolog(?:y|ize|ise)|feel(?:ing|s)?|felt|emotion(?:al)?|angry|hurt|validat(?:e|ion)|listen|understand|empath(?:y|ize|ise)|need(?:ed|s)?|want(?:ed|s)?|wrong|right|both|sides?|mean|rude|respect|disrespect|defensive|attack|blame|accountab(?:le|ility)|perspective|point of view|fight(?:ing)?|argu(?:e|ing|ment)|communicat(?:e|ion|ing)|tone|sarcas(?:m|tic)|eye[\s-]?roll|scoff|bid|comfort|celebration|logistics|frustrated|disappointed|condescending|contemptuous|resentful|exasperated|annoyed|annoying|bitter|upset|lonely|painful|invalidated|exhausting|draining|abandoned|unheard)\b/i;
 
 /**
  * Mid-utterance cut-offs that name a character / start a plan but never deliver scoring material.
@@ -48,6 +90,9 @@ export function looksLikeIncompleteCutOffUserAnswer(text: string): boolean {
   ) {
     return false;
   }
+  if (looksLikeCompleteShortUserReply(t)) {
+    return false;
+  }
   // Dangling modal / auxiliary with nothing after (classic Whisper / early mic-stop cut-off).
   if (
     /\b(i|he|she|they|we|you|ryan|emma|james|sarah|sophie|daniel)\s+(would|could|should|might|will|can|am|is|are|was|were|have|had|do|did|wanna|gonna)\s*[.,;:!?…—–-]*$/i.test(
@@ -60,19 +105,115 @@ export function looksLikeIncompleteCutOffUserAnswer(text: string): boolean {
   if (/^if\s+i\s+(?:were|was|am|'m)\s+\w+\s*[.,;:!?…—–-]*$/i.test(low)) {
     return true;
   }
-  // Trailing conjunction / thin preposition — utterance stopped before the clause finished.
+  // Bare mentalizing opener with no completed thought — e.g. "I think" / "I think that" (mic-stop).
   if (
-    /\b(and|but|or|so|because|then|that|than|to|for|with|about|like|just|of|if|when)\s*[.,;:!?…—–-]*$/i.test(
+    /^i\s+(?:think|guess|feel|believe|suppose)(?:\s+that)?\s*[.,;:!?…—–-]*$/i.test(
       low,
     )
   ) {
     return true;
   }
-  // Trailing article / possessive opener.
-  if (/\b(a|an|the|my|his|her|their|our|your)\s*[.,;:!?…—–-]*$/i.test(low)) {
+  // "I think Daniel" / "I think that Daniel" — mentalizing opener + character name only (mic-stop cut-off).
+  if (
+    /^i\s+(?:think|guess|feel|believe|suppose)\s+(?:(?:that\s+)(?:the\s+)?)?(?:ryan|emma|james|sarah|sophie|daniel|he|she|they|it)\s*[.,;:!?…—–-]*$/i.test(
+      low,
+    )
+  ) {
+    return true;
+  }
+  // Mentalizing opener + character + dangling modal without object — e.g. "I think that James could have".
+  if (
+    /^i\s+(?:think|guess|feel|believe|suppose)\s+(?:(?:that\s+)(?:the\s+)?)?(?:ryan|emma|james|sarah|sophie|daniel|he|she|they|it)\s+(?:would|could|should|might|will|can)\s+(?:have|be|been|do|done|say|said|go|get|make|talk|tell|ask|listen|help|try|start|stop|kept|keep|told|given|give|shown|show|explained|explain|understood|understand)\s*[.,;:!?…—–-]*$/i.test(
+      low,
+    )
+  ) {
+    return true;
+  }
+  // Character affect mid-clause — e.g. "Daniel felt genuinely" before "at a loss about what to say next".
+  if (
+    /\b(?:felt|feels|feeling|was feeling|is feeling|seemed|seems|looked|looks|sounded|sounds|appeared|appears)\s+(?:genuinely|really|very|quite|pretty|so|just|truly|actually|probably|maybe|clearly|obviously|definitely|totally|absolutely|somewhat|kinda|kind of|sort of|a little|a bit)\s*[.,;:!?…—–-]*$/i.test(
+      low,
+    )
+  ) {
+    return true;
+  }
+  // Trailing conjunction / thin preposition — utterance stopped before the clause finished.
+  const wordCount = low.split(/\s+/).filter(Boolean).length;
+  if (
+    wordCount <= 15 &&
+    /\b(and|but|or|so|because|then|that|than|to|for|with|about|like|just|of|if|when|on|upon|at|in|from|into|by)\s*[.,;:!?…—–-]*$/i.test(
+      low,
+    )
+  ) {
+    return true;
+  }
+  // Incomplete negation — "I don't" / "I do not" with no object (mic-stop mid-clause).
+  if (/\bi\s+(?:do not|don'?t)\s*[.,;:!?…—–-]*$/i.test(low)) {
+    return true;
+  }
+  // Generic self-description opener cut off before completing the thought (M4 grudge).
+  if (
+    /\bi'?m\s+generally\b/i.test(low) &&
+    /\bi\s+(?:do not|don'?t)\s*[.,;:!?…—–-]*$/i.test(low)
+  ) {
+    return true;
+  }
+  if (/\bi\s+generally\s+don'?t\s*[.,;:!?…—–-]*$/i.test(low)) {
+    return true;
+  }
+  // Trailing article / possessive opener (not object pronouns — "with her." is a complete ending).
+  if (/\b(a|an|the|my)\s*[.,;:!?…–-]*$/i.test(low)) {
+    return true;
+  }
+  // Incomplete commitment conditional — e.g. "If someone is willing" before finishing the thought.
+  if (
+    /^if\s+(?:someone|somebody|they|he|she|my\s+partner|the\s+partner|(?:the\s+)?other\s+person)\s+is\s+willing(?:\s+to)?\s*[.,;:!?…—–-]*$/i.test(
+      low,
+    )
+  ) {
+    return true;
+  }
+  if (/^if\s+.{0,48}\s+willing(?:\s+to)?\s*[.,;:!?…—–-]*$/i.test(low)) {
+    if (wordCount <= 10) return true;
+  }
+  // Narrative story opener with no story body — e.g. "This one time" (mic-stop, common on M5).
+  if (
+    /^(?:well,?\s+|so,?\s+|okay,?\s+|um,?\s+|uh,?\s+)?(?:(?:there\s+was\s+(?:this\s+)?one\s+time|there\s+was\s+a\s+time|this\s+one\s+time|one\s+time))(?:\s+(?:when|where|that))?\s*[.,;:!?…—–-]*$/i.test(
+      low,
+    )
+  ) {
+    return true;
+  }
+  // Common Whisper hallucination / media outro — not an interview answer.
+  if (/^thank\s+you\s+for\s+(?:watching|listening|tuning\s+in|joining)\s*[.,;:!?…—–-]*$/i.test(low)) {
+    return true;
+  }
+  // Relationship setup with no episode — e.g. "Yeah, me and my partner" (mic-stop before the story).
+  const incompleteRelationalOpener =
+    /^(?:(?:yeah|yes|yep|sure|ok|okay),?\s+)?(?:(?:me\s+and\s+my|my)\s+(?:partner|boyfriend|girlfriend|wife|husband|spouse|friend|mom|dad|mother|father|brother|sister|parents|ex|boss|coworker|colleague))\s*[.,;:!?…—–-]*$/i;
+  if (wordCount <= 8 && incompleteRelationalOpener.test(low)) {
     return true;
   }
   return false;
+}
+
+/**
+ * True when {@link looksLikeIncompleteCutOffUserAnswer} should bypass meta-comment routing
+ * (ambiguous_short / confusion) and fall through to the cut-off retry gate instead.
+ * Excludes phrasing that ends on "that/on" etc. but is clearly a meta comment, not mic-stop.
+ */
+export function looksLikeMicStopCutOffExemptFromMetaComment(text: string): boolean {
+  const t = (text ?? '').replace(/\s+/g, ' ').trim();
+  if (!t || !looksLikeIncompleteCutOffUserAnswer(t)) return false;
+  const low = t.toLowerCase().replace(/[\u201c\u201d\u2018\u2019]/g, "'");
+  if (/\?\s*$/.test(low) && /\b(?:mean|what|how|why|skip|move on|next question)\b/.test(low)) {
+    return false;
+  }
+  if (/^can we move on\b/i.test(low)) return false;
+  if (/^i already (?:answered|said|told|covered)\b/i.test(low)) return false;
+  if (/^i think i (?:already|just|covered|answered|said|told)\b/i.test(low)) return false;
+  if (/^skip\b/i.test(low) || /\bskip this\b/i.test(low)) return false;
+  return true;
 }
 
 export function looksLikeInterviewerIdentityOrOffTopicAsk(text: string): boolean {
@@ -88,15 +229,45 @@ export function hasMinimalAssessableScenarioContent(text: string): boolean {
 }
 
 /**
+ * Tautological repair answer — restates that something can be repaired/fixed without saying how.
+ * Example: "This situation can be repaired." on "How do you think this situation could be repaired?"
+ */
+export function looksLikeRepairQuestionEchoAnswer(text: string): boolean {
+  const t = (text ?? '').replace(/\s+/g, ' ').trim();
+  if (!t) return false;
+  const low = t.toLowerCase().replace(/[\u201c\u201d\u2018\u2019]/g, "'");
+  const wordCount = low.split(/\s+/).filter(Boolean).length;
+  if (wordCount > 12) return false;
+  if (
+    /^(?:this|that|the|it|(?:this|that|the)\s+(?:situation|relationship|issue|conflict|problem))\s+(?:can|could|should|might|would|needs?\s+to)\s+(?:be\s+)?(?:repair(?:ed)?|fix(?:ed)?|resolv(?:ed)?|work(?:ed)?\s*out)\s*[.!?…—–-]*$/i.test(
+      low,
+    )
+  ) {
+    return true;
+  }
+  if (
+    /^(?:yes|yeah|yep|sure|ok|okay),?\s*(?:it|this|that)\s+(?:can|could)\s+(?:be\s+)?(?:repair(?:ed)?|fix(?:ed)?)\s*[.!?…—–-]*$/i.test(
+      low,
+    )
+  ) {
+    return true;
+  }
+  return false;
+}
+
+/**
  * True when the user turn is not a scorable attempt at the interview question.
  * Prefer handling known meta/skip/repeat intents elsewhere before calling this.
  */
 export function looksLikeUnassessableScenarioAnswer(userText: string): boolean {
   const t = userText.replace(/\s+/g, ' ').trim();
   if (!t) return true;
+  if (looksLikeCompleteShortUserReply(t)) return false;
+  if (looksLikeInterviewScoreStatusRequest(t)) return false;
   if (looksLikeInterviewerIdentityOrOffTopicAsk(t)) return true;
   // Cut-offs can include a character name ("Ryan") without any scorable content — still unassessable.
   if (looksLikeIncompleteCutOffUserAnswer(t)) return true;
+  if (looksLikeRepairQuestionEchoAnswer(t)) return true;
 
   const words = t.split(/\s+/).filter(Boolean);
   const asksInterviewer =

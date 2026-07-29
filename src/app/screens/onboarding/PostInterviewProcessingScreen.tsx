@@ -31,6 +31,7 @@ import { mapInterviewStackRouteForLaunchMode } from '@features/onboarding/postIn
 import { PreparingResultsView } from '@app/screens/PreparingResultsView';
 import { useRedirectRelationshipValidationFromStandardPostInterview } from '@features/relationshipValidation/validationPostInterviewRouting';
 import { useRedirectPostInterviewLaunchWhenEnabled } from '@features/onboarding/postInterviewLaunchMode';
+import { PostInterviewReferFriendSection } from '@features/referrals/PostInterviewReferFriendSection';
 
 const BG = '#0a0a0f';
 const ACCENT = '#3b82f6';
@@ -391,25 +392,11 @@ export const PostInterviewProcessingScreen: React.FC<{
           <DownloadPersonalReportButton userId={userId} variant="dark" />
 
           {myReferralCode ? (
-            <View style={styles.referFriendSection}>
-              <View style={styles.referFriendDivider} />
-              <Text style={styles.referFriendTitle}>Know someone who can pass?</Text>
-              <Text style={styles.referFriendBody}>
-                Share your personal code with someone you think is ready. If they complete the full interview,
-                you will both receive a 20% discount at our next event!
-              </Text>
-              <View style={styles.codeBlockRow}>
-                <Text style={styles.codeBlockText} selectable>
-                  {myReferralCode}
-                </Text>
-                <Pressable
-                  onPress={copyReferralCode}
-                  style={({ pressed }) => [styles.copyCodeBtn, pressed && { opacity: 0.85 }]}
-                >
-                  <Text style={styles.copyCodeBtnLabel}>{copyFeedback ? 'Copied' : 'Copy'}</Text>
-                </Pressable>
-              </View>
-            </View>
+            <PostInterviewReferFriendSection
+              referralCode={myReferralCode}
+              copyFeedback={copyFeedback}
+              onCopyPress={() => void copyReferralCode()}
+            />
           ) : null}
         </View>
     </PostInterviewScrollLayout>
@@ -533,60 +520,5 @@ const styles = StyleSheet.create({
     fontSize: 13,
     fontWeight: '600',
     color: ACCENT,
-  },
-  referFriendSection: {
-    width: '100%',
-    marginTop: 8,
-    marginBottom: 4,
-  },
-  referFriendDivider: {
-    height: 1,
-    backgroundColor: 'rgba(255,255,255,0.08)',
-    marginBottom: 20,
-  },
-  referFriendTitle: {
-    fontFamily: FONT_DISPLAY,
-    fontSize: 19,
-    fontWeight: '600',
-    color: '#f4f4f5',
-    marginBottom: 10,
-  },
-  referFriendBody: {
-    fontFamily: FONT_BODY,
-    fontSize: 14,
-    lineHeight: 21,
-    color: 'rgba(255,255,255,0.78)',
-    marginBottom: 14,
-  },
-  codeBlockRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 12,
-    backgroundColor: 'rgba(0,0,0,0.35)',
-    borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.12)',
-    borderRadius: 10,
-    paddingVertical: 12,
-    paddingHorizontal: 14,
-  },
-  codeBlockText: {
-    flex: 1,
-    fontFamily: Platform.OS === 'ios' ? 'Menlo' : 'monospace',
-    fontSize: 17,
-    fontWeight: '600',
-    letterSpacing: 1.2,
-    color: '#f8fafc',
-  },
-  copyCodeBtn: {
-    backgroundColor: 'rgba(59,130,246,0.25)',
-    borderRadius: 8,
-    paddingVertical: 8,
-    paddingHorizontal: 14,
-  },
-  copyCodeBtnLabel: {
-    fontFamily: FONT_BODY,
-    fontSize: 13,
-    fontWeight: '600',
-    color: '#93c5fd',
   },
 });

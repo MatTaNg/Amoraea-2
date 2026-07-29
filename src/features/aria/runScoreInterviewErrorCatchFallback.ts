@@ -48,7 +48,8 @@ export async function runScoreInterviewErrorCatchFallback(
       applicationStatus: 'under_review',
       onboardingStage: 'complete',
     });
-    deps.queryClient.invalidateQueries({ queryKey: ['deps.profile', deps.userId] });
+    deps.queryClient.invalidateQueries({ queryKey: ['profile', deps.userId] });
+    deps.queryClient.invalidateQueries({ queryKey: ['initialInterviewRoute', deps.userId] });
   }
   await deps.saveInterviewResults(fallbackResults, fallbackResults.gateResult!, deps.userId);
   const standardCatch = isOnboardingFlow && !!deps.userId && !isAdminConsoleAccount;

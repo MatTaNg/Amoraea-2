@@ -11,6 +11,9 @@ import {
   mapRelationshipStyleUiToRelationshipType,
 } from '@/screens/profile/editProfile/editProfileService';
 import { normalizePartnerPoliticalAlignmentToYesNo } from '@/screens/profile/editProfile/constants';
+import { hobbiesStringToIds } from '@/shared/utils/hobbiesHelpers';
+import { MIN_HOBBY_SELECTIONS } from '@/shared/constants/hobbies';
+import { validateProfilePromptsForSetup } from '@/features/profile/profilePromptValidation';
 import {
   firstIncompleteLifeDomainOptionalOpenEndedStep,
   getActiveLifeDomainRequiredQuestionSteps,
@@ -20,13 +23,13 @@ import {
   LIFE_DOMAIN_OPTIONAL_OPEN_ENDED_ONBOARDING_STEPS,
   LIFE_DOMAIN_REQUIRED_QUESTION_ONBOARDING_STEPS,
   normalizeLifeDomainQuestionOnboardingStep,
+  parseLifeDomainQuestionStepId,
   type LifeDomainId,
 } from '@/shared/constants/lifeDomainOnboardingQuestions';
 import {
   shouldShowTypologyOnboardingStep,
-  typologyHasUnansweredFields,
 } from '@/shared/constants/typologyOnboardingOptions';
-import { normalizeArchetypesFromProfile } from '@/shared/constants/archetypes';
+import { normalizeArchetypesFromProfile, isCompleteArchetypeSelection } from '@/shared/constants/archetypes';
 import { fetchLifeDomainAnswersMap } from '@/screens/profile/editProfile/lifeDomainProfileService';
 import { ONBOARDING_STEPS_ORDER } from '../onboardingStepOrder';
 
@@ -48,6 +51,19 @@ class ModalOnboardingService {
     if (!mp || typeof mp !== 'object' || Array.isArray(mp)) return true;
     const arr = (mp as Record<string, unknown>).ethnicityAttraction;
     return !Array.isArray(arr) || !arr.some((value) => String(value ?? '').trim());
+  }
+
+  private hobbiesMissing(ctx: any): boolean {
+    return hobbiesStringToIds((ctx as any)?.hobbies).length < MIN_HOBBY_SELECTIONS;
+  }
+
+  private hobbyDealbreakerMissing(ctx: any): boolean {
+    if (this.hobbiesMissing(ctx)) return false;
+    return (ctx as any)?.hobbyDealbreakerAnswered !== true;
+  }
+
+  private profilePromptsSetupMissing(ctx: any): boolean {
+    return !validateProfilePromptsForSetup((ctx as any)?.profilePrompts).ok;
   }
 
   /** Incomplete partner-alignment steps that appear before `resumeStep` in onboarding order. */
@@ -268,6 +284,15 @@ class ModalOnboardingService {
         (p as any).prefPartnerSharesSexualInterests,
         d.prefPartnerSharesSexualInterests,
       ),
+      hobbies: coalesce((p as any).hobbies, d.hobbies),
+      professionalHobbyId: coalesce((p as any).professionalHobbyId, d.professionalHobbyId),
+      hobbyDealbreakerId: coalesce((p as any).hobbyDealbreakerId, d.hobbyDealbreakerId),
+      hobbyDealbreakerAnswered: coalesce(
+        (p as any).hobbyDealbreakerAnswered,
+        d.hobbyDealbreakerAnswered ??
+          ((p as any)?.hobbyDealbreakerId !== undefined ? true : undefined),
+      ),
+      profilePrompts: coalesce((p as any).profilePrompts, d.profilePrompts),
     };
   }
 
@@ -328,9 +353,8 @@ class ModalOnboardingService {
     const wantKids = (ctx as any)?.wantKids;
     const legacyNormalized = normalizeLifeDomainQuestionOnboardingStep(resumeStep, wantKids);
 
+    // Optional follow-ups are skippable — honor the saved step instead of rewinding to intimacy.
     if (isLifeDomainOptionalOpenEndedStep(resumeStep)) {
-      const incompleteOptional = this.firstIncompleteLifeDomainOptionalStep(ctx);
-      if (incompleteOptional) return incompleteOptional;
       return null;
     }
 
@@ -340,6 +364,15 @@ class ModalOnboardingService {
       resumeStep.startsWith('lifeDomainQuestions');
 
     if (!isRequiredQuestionStep) return null;
+
+    const parsed = parseLifeDomainQuestionStepId(resumeStep);
+    if (parsed) {
+      const answer = this.domainAnswersFromContext(ctx, parsed.domainId)[parsed.questionId];
+      if (!isLifeDomainAnswerFilled(answer)) {
+        return resumeStep;
+      }
+      return null;
+    }
 
     const incomplete = this.firstIncompleteLifeDomainQuestionStep(ctx);
     if (incomplete) return incomplete;
@@ -398,30 +431,11 @@ class ModalOnboardingService {
       return 'lifeDomains';
     }
 
-    const incompleteOptional = this.firstIncompleteLifeDomainOptionalStep(ctx);
-    if (incompleteOptional && lifeDomainsIdx >= 0 && resumeIdx > lifeDomainsIdx) {
-      const incompleteOptionalIdx = ONBOARDING_STEPS_ORDER.indexOf(
-        incompleteOptional as (typeof ONBOARDING_STEPS_ORDER)[number],
-      );
-      if (incompleteOptionalIdx >= 0 && resumeIdx > incompleteOptionalIdx) {
-        return incompleteOptional;
-      }
-    }
-
-    const typologyIdx = ONBOARDING_STEPS_ORDER.indexOf('typology');
-    if (
-      shouldShowTypologyOnboardingStep((ctx as any)?.typology) &&
-      typologyIdx >= 0 &&
-      resumeIdx > typologyIdx &&
-      typologyHasUnansweredFields((ctx as any)?.typology)
-    ) {
-      return 'typology';
-    }
     return null;
   }
 
   private archetypesCompletionSatisfied(ctx: any): boolean {
-    return normalizeArchetypesFromProfile((ctx as any)?.archetypes).length === 2;
+    return isCompleteArchetypeSelection(normalizeArchetypesFromProfile((ctx as any)?.archetypes).length);
   }
 
   /**
@@ -499,6 +513,7 @@ class ModalOnboardingService {
         'lifeDomains',
         ...LIFE_DOMAIN_OPTIONAL_OPEN_ENDED_ONBOARDING_STEPS.map((s) => s.step),
         'typology',
+        'profilePrompts',
         'personalityDocuments',
         'profileComplete',
         'complete',
@@ -541,9 +556,24 @@ class ModalOnboardingService {
       if (preLifeDomainGate) return preLifeDomainGate;
       const lifeDomainGate = this.firstIncompleteLifeDomainBefore(resumeStep, ctx);
       if (lifeDomainGate) return lifeDomainGate;
+      const resumeIdx = ONBOARDING_STEPS_ORDER.indexOf(
+        resumeStep as (typeof ONBOARDING_STEPS_ORDER)[number],
+      );
+      const hobbiesIdx = ONBOARDING_STEPS_ORDER.indexOf('hobbies');
+      if (resumeIdx > hobbiesIdx && this.hobbiesMissing(ctx)) return 'hobbies';
+      const hobbyDealbreakerIdx = ONBOARDING_STEPS_ORDER.indexOf('hobbyDealbreaker');
+      if (resumeIdx > hobbyDealbreakerIdx && this.hobbyDealbreakerMissing(ctx)) {
+        return 'hobbyDealbreaker';
+      }
+      const profilePromptsIdx = ONBOARDING_STEPS_ORDER.indexOf('profilePrompts');
+      if (resumeIdx > profilePromptsIdx && this.profilePromptsSetupMissing(ctx)) {
+        return 'profilePrompts';
+      }
       return resumeStep;
     }
     if (!ctx?.displayName) return 'name';
+    if (this.hobbiesMissing(ctx)) return 'hobbies';
+    if (this.hobbyDealbreakerMissing(ctx)) return 'hobbyDealbreaker';
     if (!ctx?.attractedTo || ctx.attractedTo.length === 0) return 'attraction';
     if (!(ctx as any)?.ethnicity || String((ctx as any).ethnicity).trim() === '') return 'ethnicity';
     if (this.ethnicityAttractionMissing(ctx)) return 'ethnicityAttraction';
@@ -616,6 +646,7 @@ class ModalOnboardingService {
     const incompleteOptionalOpenEnded = this.firstIncompleteLifeDomainOptionalStep(ctx);
     if (incompleteOptionalOpenEnded) return incompleteOptionalOpenEnded;
     if (shouldShowTypologyOnboardingStep((ctx as any)?.typology)) return 'typology';
+    if (this.profilePromptsSetupMissing(ctx)) return 'profilePrompts';
     if (savedStep === 'profileComplete' || savedStep === 'complete') return 'profileComplete';
     if (savedStep === 'personalityDocuments') return 'personalityDocuments';
     return 'personalityDocuments';
@@ -766,6 +797,10 @@ class ModalOnboardingService {
       })(),
       hobbies: profile?.hobbies,
       professionalHobbyId: (profile as any)?.professionalHobbyId,
+      hobbyDealbreakerId: (profile as any)?.hobbyDealbreakerId,
+      hobbyDealbreakerAnswered:
+        (profile as any)?.hobbyDealbreakerId !== undefined ? true : undefined,
+      profilePrompts: (profile as any)?.prompts ?? (profile as any)?.profilePrompts,
       availability: profile?.availability,
       contactPreference: profile?.contactPreference,
       phoneNumber: profile?.phoneNumber,
@@ -786,6 +821,15 @@ class ModalOnboardingService {
       const profileResult = await profilesRepo.getProfile(userId);
       const profile = profileResult.success ? profileResult.data : null;
 
+      const { data: userRow, error: userRowError } = await supabase
+        .from('users')
+        .select('profile_prompts')
+        .eq('id', userId)
+        .maybeSingle();
+      if (userRowError) {
+        return { success: false, error: userRowError as Error };
+      }
+
       // Get saved onboarding progress
       const { data, error } = await supabase
         .from('onboarding_progress')
@@ -799,6 +843,14 @@ class ModalOnboardingService {
 
       // Map profile data to onboarding data format (used only as fallback defaults)
       const profileOnboardingData = profile ? this.mapProfileToOnboardingData(profile) : {};
+      if (userRow?.profile_prompts) {
+        const { normalizeProfilePromptAnswers } = await import(
+          '@/features/profile/profilePromptValidation'
+        );
+        profileOnboardingData.profilePrompts = normalizeProfilePromptAnswers(
+          userRow.profile_prompts,
+        );
+      }
 
       // Saved onboarding_data from progress table (authoritative source for answers)
       const savedOnboardingData: OnboardingData = (data?.onboarding_data as OnboardingData) || {};
@@ -1054,7 +1106,7 @@ class ModalOnboardingService {
         }
       }
       const archetypesComplete = normalizeArchetypesFromProfile(data.archetypes);
-      if (archetypesComplete.length === 2) {
+      if (isCompleteArchetypeSelection(archetypesComplete.length)) {
         (profileUpdates as any).archetypes = archetypesComplete;
       }
       const hw = buildHeightWeightProfileFields({
@@ -1115,6 +1167,9 @@ class ModalOnboardingService {
           data.prefPartnerPoliticalAlignmentImportance;
       if (data.hobbies !== undefined) profileUpdates.hobbies = data.hobbies;
       if (data.professionalHobbyId !== undefined) (profileUpdates as any).professionalHobbyId = data.professionalHobbyId;
+      if (data.hobbyDealbreakerAnswered) {
+        (profileUpdates as any).hobbyDealbreakerId = data.hobbyDealbreakerId ?? null;
+      }
       if (data.availability && data.availability.length > 0) {
         profileUpdates.availability = data.availability;
       }
@@ -1189,6 +1244,11 @@ class ModalOnboardingService {
       if (!updateResult.success) {
         console.error('Failed to update profile during onboarding completion:', updateResult.error);
         return updateResult;
+      }
+
+      if (data.profilePrompts && data.profilePrompts.length > 0) {
+        const { saveEditProfilePrompts } = await import('@/data/repos/editProfileRepo');
+        await saveEditProfilePrompts(userId, data.profilePrompts);
       }
 
       if (data.lifeDomains && !Array.isArray(data.lifeDomains)) {

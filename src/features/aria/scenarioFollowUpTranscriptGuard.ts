@@ -8,14 +8,20 @@ import {
   looksLikeScenarioBRepairAsJamesQuestion,
 } from './interviewDisengagementProbes';
 import {
+  isDeliveredScenarioBJamesDifferentlyProbe,
+  isScenarioBQ1Prompt,
+  looksLikeScenarioBQ1Question,
+} from './scenarioBProbeLogic';
+import {
   findLastUserWithPriorAssistantContent,
   findLastUserWithPriorScenarioARepairContext,
+  userAnswerIncludesExplicitScenarioARepairAsRyan,
   userAnswerSatisfiesScenarioARepairPrompt,
 } from './interviewRepairRefusalDetection';
+import { isNonRepeatableAssistantLineForVerbatimReplay } from './interviewDisengagementTranscriptHelpers';
 import { hasScenarioBoundaryWrapPhrase } from './emotionModalTransitionOrchestration';
 import { textContainsScenarioBVignetteBody } from './emotionScenarioTransitionInference';
 import { isScenarioCRepairAssistantPrompt, isScenarioCQ1Prompt, transcriptContainsScenarioCQ1Prompt } from './scenarioCPromptDetection';
-import { isScenarioBQ1Prompt, looksLikeScenarioBQ1Question } from './scenarioBProbeLogic';
 import {
   isScenarioABoundaryReflectionWithoutNextVignette,
   looksLikeScenarioAContemptProbeQuestion,
@@ -123,6 +129,13 @@ export function looksLikeScenarioARepairQuestionLoose(text: string): boolean {
   return /\bhow would you repair\b/.test(t) && /\bryan\b/.test(t);
 }
 
+function isTransientScenarioARepairCompletionInterstitial(content: string): boolean {
+  const c = (content ?? '').trim();
+  if (!c) return true;
+  if (isNonRepeatableAssistantLineForVerbatimReplay(c)) return true;
+  return false;
+}
+
 /**
  * Repair counts as complete only when the user answered a delivered repair ask.
  * Phantom repair lines glued into the same turn as a contempt probe do not count —
@@ -143,7 +156,15 @@ export function isScenarioARepairFollowUpCompleteInTranscript(
     const hasContemptInTurn = paragraphs.some((p) => looksLikeScenarioAContemptProbeQuestion(p));
     if (hasContemptInTurn && paragraphs.length > 1) continue;
 
-    const next = filtered[i + 1];
+    let j = i + 1;
+    while (
+      j < filtered.length &&
+      filtered[j].role === 'assistant' &&
+      isTransientScenarioARepairCompletionInterstitial((filtered[j] as { content?: string }).content ?? '')
+    ) {
+      j += 1;
+    }
+    const next = filtered[j];
     if (!next) {
       return paragraphs.length === 1 && looksLikeScenarioARepairQuestionLoose(content.trim());
     }
@@ -209,7 +230,7 @@ export function transcriptContainsScenarioBJamesDifferentlyProbe(
   msgs: readonly ScenarioFollowUpTranscriptMessage[],
 ): boolean {
   return priorAssistantTurns(msgs).some((m) =>
-    looksLikeScenarioBJamesDifferentlyQuestion((m as { content?: string }).content ?? ''),
+    isDeliveredScenarioBJamesDifferentlyProbe((m as { content?: string }).content ?? ''),
   );
 }
 
@@ -296,10 +317,7 @@ export function scenarioAMinimumEngagementForHandoff(
     priorRepairAssistantContent &&
     (userAnswerSatisfiesScenarioARepairPrompt(lastUserContent, priorRepairAssistantContent) ||
       (looksLikeScenarioAContemptProbeQuestion(priorRepairAssistantContent) &&
-        userAnswerSatisfiesScenarioARepairPrompt(
-          lastUserContent,
-          SCENARIO_A_REPAIR_QUESTION_AFTER_CONTEMPT_COPY,
-        )))
+        userAnswerIncludesExplicitScenarioARepairAsRyan(lastUserContent)))
   ) {
     return true;
   }

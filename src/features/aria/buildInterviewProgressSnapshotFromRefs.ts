@@ -2,6 +2,8 @@ import type { Dispatch, MutableRefObject, SetStateAction } from 'react';
 
 import type { SupabaseClient } from '@supabase/supabase-js';
 
+import { mergeScenarioOpeningDeliveredFromPlaybackConfirmed } from '@features/aria/scenarioDeliveryResumeCheckpoint';
+import type { ShowScenarioCardCanonicalPlaybackConfirmedKinds } from '@features/aria/showScenarioCardCanonicalTts';
 import type { ScenarioScoreResult } from '@features/aria/scoreInterviewScoringHelpers';
 import { getCurrentScenario } from '@utilities/storage/InterviewStorage';
 
@@ -13,6 +15,9 @@ export type InterviewProgressSnapshotRefs = {
   scenarioScoresRef?: MutableRefObject<Record<number, ScenarioScoreResult>>;
   currentScenarioRef?: MutableRefObject<number>;
   resumeActiveScenarioRef?: MutableRefObject<1 | 2 | 3 | null>;
+  lastQuestionTextRef?: MutableRefObject<string | null>;
+  showScenarioCardCanonicalPlaybackConfirmedKindsRef?: MutableRefObject<ShowScenarioCardCanonicalPlaybackConfirmedKinds>;
+  scenarioSkipConfirmedCountRef?: MutableRefObject<number>;
 };
 
 function readRefCurrent<T>(ref: MutableRefObject<T> | undefined, fallback: T): T {
@@ -42,6 +47,12 @@ export function buildInterviewProgressSnapshotFromRefs(
   });
   const currentScenarioValue = readRefCurrent(refs.currentScenarioRef, 0);
   const resumeActiveScenarioValue = readRefCurrent(refs.resumeActiveScenarioRef, null);
+  const lastQuestionText = readRefCurrent(refs.lastQuestionTextRef, null)?.trim() || null;
+  const scenarioOpeningDeliveredFor = mergeScenarioOpeningDeliveredFromPlaybackConfirmed(
+    undefined,
+    readRefCurrent(refs.showScenarioCardCanonicalPlaybackConfirmedKindsRef, undefined),
+  );
+  const skipRefCount = readRefCurrent(refs.scenarioSkipConfirmedCountRef, 0);
   return {
     messages,
     scenariosCompleted,
@@ -55,6 +66,10 @@ export function buildInterviewProgressSnapshotFromRefs(
       (currentScenarioValue === 1 || currentScenarioValue === 2 || currentScenarioValue === 3
         ? (currentScenarioValue as 1 | 2 | 3)
         : null),
+    lastQuestionText,
+    scenarioOpeningDeliveredFor:
+      scenarioOpeningDeliveredFor.length > 0 ? scenarioOpeningDeliveredFor : undefined,
+    scenarioSkipConfirmedCount: skipRefCount > 0 ? skipRefCount : undefined,
   };
 }
 
@@ -77,6 +92,9 @@ export type InterviewProgressSnapshotPayload = {
   >;
   currentScenario: ReturnType<typeof getCurrentScenario>;
   resumeActiveScenario: 1 | 2 | 3 | null;
+  lastQuestionText?: string | null;
+  scenarioOpeningDeliveredFor?: Array<1 | 2 | 3>;
+  scenarioSkipConfirmedCount?: number;
 };
 
 export type InterviewUnhandledRejectionSaveDeps = InterviewProgressSnapshotRefs & {

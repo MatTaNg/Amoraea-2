@@ -12,16 +12,13 @@ import type {
 } from '@domain/models/Profile';
 import { mapAttractionToDb, normalizeAttractedToUiLabels } from '@/shared/utils/attractionMapper';
 import { mapGenderToDb, mapGenderToUi } from '@/shared/utils/genderMapper';
+import {
+  assertValidProfilePromptsForServerSave,
+  normalizeProfilePromptAnswers,
+} from '@/features/profile/profilePromptValidation';
 
 function parseProfilePrompts(v: unknown): ProfilePromptAnswer[] {
-  if (!Array.isArray(v)) return [];
-  return v
-    .filter((item): item is Record<string, unknown> => item !== null && typeof item === 'object')
-    .map((item) => ({
-      promptId: typeof item.promptId === 'string' ? item.promptId : '',
-      answer: typeof item.answer === 'string' ? item.answer : '',
-    }))
-    .filter((p) => p.promptId.length > 0);
+  return normalizeProfilePromptAnswers(v);
 }
 
 function parseBasicInfo(v: unknown): BasicInfo | null {
@@ -157,7 +154,9 @@ export async function saveEditProfilePrimaryPhoto(userId: string, publicUrl: str
 
 /** Interview UX prompts remain on `users.profile_prompts`. */
 export async function saveEditProfilePrompts(userId: string, prompts: ProfilePromptAnswer[]): Promise<void> {
-  await updateUserInterviewApplication(userId, { prompts });
+  const normalized = normalizeProfilePromptAnswers(prompts);
+  assertValidProfilePromptsForServerSave(normalized, { requireSetupFloor: true });
+  await updateUserInterviewApplication(userId, { prompts: normalized });
 }
 
 function hasDatingProfileFields(update: ProfileUpdate): boolean {
@@ -215,7 +214,11 @@ export async function applyProfileUpdate(userId: string, update: ProfileUpdate):
   }
 
   const appPatch: Parameters<typeof updateUserInterviewApplication>[1] = {};
-  if (update.prompts !== undefined) appPatch.prompts = update.prompts;
+  if (update.prompts !== undefined) {
+    const normalized = normalizeProfilePromptAnswers(update.prompts);
+    assertValidProfilePromptsForServerSave(normalized, { requireSetupFloor: true });
+    appPatch.prompts = normalized;
+  }
   if (update.onboardingStage !== undefined) appPatch.onboardingStage = update.onboardingStage;
   if (update.applicationStatus !== undefined) appPatch.applicationStatus = update.applicationStatus;
   if (update.basicInfo !== undefined) appPatch.basicInfo = update.basicInfo;

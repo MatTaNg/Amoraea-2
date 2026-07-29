@@ -1,7 +1,7 @@
 import * as FileSystem from 'expo-file-system/legacy';
 
 import { logTtsAutoplayPlayOutcome, type TtsTelemetrySource } from '@features/aria/telemetry/tsAutoplayTelemetry';
-import { logAndApplyPlaybackModeForTts } from './audioModeHelpers';
+import { applyNativeTtsPrePlaybackAudioMode } from './audioModeHelpers';
 
 /** Avoid top-level `expo-av` import — it breaks web lazy-load of the interview chunk (SDK 53+). */
 function getExpoAvAudio(): typeof import('expo-av').Audio {
@@ -61,7 +61,7 @@ export async function playNativeElevenLabsMpegArrayBuffer(
   }
   const fileUri = `${dir}tts_${Date.now()}.mp3`;
   await FileSystem.writeAsStringAsync(fileUri, base64, { encoding: FileSystem.EncodingType.Base64 });
-  await logAndApplyPlaybackModeForTts('speakWithElevenLabs:nativeBeforeSoundCreate');
+  await applyNativeTtsPrePlaybackAudioMode('speakWithElevenLabs:nativeBeforeSoundCreate');
   const Audio = getExpoAvAudio();
   const { sound } = await Audio.Sound.createAsync(
     { uri: fileUri },

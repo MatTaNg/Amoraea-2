@@ -28,14 +28,20 @@ export function useAriaInterviewSessionRoutingState(
     routeName === 'ValidationAmoraea' ||
     fromValidationTrack;
   const resumeLoadingFlowActiveRef = useRef(false);
-  const [resumeLoadingVisible, setResumeLoadingVisible] = useState(false);
+  const resumeHandleInFlightRef = useRef(false);
+  const [resumeLoadingVisible, setResumeLoadingVisible] = useState(() => isInterviewAppRoute);
+  /** Blocks "Before you begin" until local resume vs fresh-start routing has finished. */
+  const [resumeHydrationPending, setResumeHydrationPending] = useState(() => isInterviewAppRoute);
   const preparingHandoffPollTick = usePreparingHandoffPollTick(interviewStatus);
 
   return {
     isInterviewAppRoute,
     resumeLoadingFlowActiveRef,
+    resumeHandleInFlightRef,
     resumeLoadingVisible,
     setResumeLoadingVisible,
+    resumeHydrationPending,
+    setResumeHydrationPending,
     preparingHandoffPollTick,
   };
 }

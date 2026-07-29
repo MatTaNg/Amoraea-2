@@ -1,5 +1,12 @@
 import { normalizeInterviewTypography } from './interviewTypography';
 
+/** Spoken transcripts often hyphenate role nouns ("co-worker") that regexes match without a hyphen. */
+function normalizeMoment4RoleNounHyphens(text: string): string {
+  return text.replace(/\bco-workers?\b/gi, (match) =>
+    /s$/i.test(match) ? 'coworkers' : 'coworker',
+  );
+}
+
 export function countInterviewWords(text: string): number {
   const t = (text ?? '').trim();
   if (!t) return 0;
@@ -16,10 +23,10 @@ const ROLE_NOUN_APPOSED_NAME_RE =
 
 /**
  * Named or clearly referenced specific person — mirrors {@link inferResponseConcretenessFromTranscript}
- * moment-4 `namedPerson` heuristic (personalMomentEmotionalVocab.ts).
+ * moment-4 `namedPerson` heuristic (personalMomentSliceEnrichment.ts).
  */
 export function moment4HasNamedOrReferencedPerson(text: string): boolean {
-  const t = normalizeInterviewTypography(text ?? '').trim();
+  const t = normalizeMoment4RoleNounHyphens(normalizeInterviewTypography(text ?? '').trim());
   if (!t) return false;
 
   if (
@@ -29,10 +36,15 @@ export function moment4HasNamedOrReferencedPerson(text: string): boolean {
     /\b(?:(?:i|we) )?had (?:a |an |my |our )(?:close |old |former |childhood )?(?:friend|roommate|coworker|colleague)\b/i.test(
       t,
     ) ||
-    /\b(?:a |an |my |our )(?:close |old |former )?(?:friend|roommate|housemate|coworker|colleague|boss|partner|ex|neighbor|cousin|woman|man|person)\b/i.test(
+    /\b(?:a |an |my |our )(?:close |old |former )?(?:friend|roommate|housemate|coworker|colleague|boss|partner|ex|neighbor|cousin|woman|man)\b/i.test(
       t,
     ) ||
-    /\b(?:a|the)\s+(woman|man|guy|girl|lady|gentleman|person)\b/i.test(t) ||
+    /\b(?:a |an )person who\b/i.test(t) ||
+    /\bthere was (?:a |an |one )?(?:close |old |former )?(?:friend|roommate|housemate|coworker|colleague|boss|partner|ex|neighbor|cousin|woman|man|person|guy|girl)\b/i.test(
+      t,
+    ) ||
+    /\b(?:a|the)\s+(woman|man|guy|girl|lady|gentleman)\b/i.test(t) ||
+    /\b(?:a|the)\s+person who\b/i.test(t) ||
     /\b(with|from)\s+[A-Z][a-z]{1,24}\b/.test(t) ||
     ROLE_NOUN_APPOSED_NAME_RE.test(t) ||
     LIKELY_NAME_IN_RELATION_RE.test(t)
@@ -58,10 +70,15 @@ export function moment4HasNamedOrReferencedPerson(text: string): boolean {
 
   /** Third-person pronoun tied to a concrete interpersonal action — e.g. "She shared…", "He lied…". */
   if (
-    /\b(?:she|he)\s+(?:was|were|shared|betrayed|told|said|texted|called|yelled|lied|cheated|ignored|abandoned|didn'?t|wouldn'?t|left|hurt|angered|cut|giving|pushing|inserting)\b/i.test(
+    /\b(?:she|he)\s+(?:was|were|shared|betrayed|told|said|texted|called|yelled|lied|cheated|ignored|abandoned|didn'?t|wouldn'?t|left|hurt|angered|cut|giving|pushing|inserting|used)\b/i.test(
       t,
     )
   ) {
+    return true;
+  }
+
+  /** Object pronoun after direct address — e.g. "talking to her about it". */
+  if (/\b(talk(?:ed|ing)|speak(?:ing|)|spoke)\s+(?:to|with)\s+(?:her|him)\b/i.test(t)) {
     return true;
   }
 

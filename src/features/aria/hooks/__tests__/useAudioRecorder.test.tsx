@@ -108,4 +108,26 @@ describe('useAudioRecorder', () => {
     });
     expect(result.current.isRecording).toBe(false);
   });
+
+  it('stopRecording ignores stale recorder errors without onError', async () => {
+    const onError = jest.fn();
+    createAsync.mockResolvedValueOnce({
+      recording: {
+        stopAndUnloadAsync: jest.fn(() => Promise.reject(new Error('Recorder does not exist.'))),
+        getURI: () => 'file:///tmp/recording.m4a',
+      },
+    });
+    const { result } = renderHook(() => useAudioRecorder({ onError }));
+    await act(async () => {
+      await result.current.requestPermission();
+    });
+    await act(async () => {
+      await result.current.startRecording({ postAudioSessionDelayMs: 0 });
+    });
+    await act(async () => {
+      await result.current.stopRecording();
+    });
+    expect(result.current.isRecording).toBe(false);
+    expect(onError).not.toHaveBeenCalled();
+  });
 });

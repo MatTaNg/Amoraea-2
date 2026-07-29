@@ -34,7 +34,10 @@ import {
   recalculateAttemptScoresFromStoredSlices,
   snapshotAttemptScoresForAudit,
 } from '@features/aria/adminRecalculateAttemptScores';
-import { buildRecalculationConsistencyPatch } from '@features/aria/recalculationPersistConsistency';
+import {
+  applyPostRecalculationGateOutcomeSync,
+  buildRecalculationConsistencyPatch,
+} from '@features/aria/recalculationPersistConsistency';
 import { evaluateInterviewCompletionGate } from '@features/aria/interviewCompletionGate';
 import { describeScoringStagesIncomplete } from '@features/admin/interviewDashboard/adminInterviewDashboardGateDisplay';
 import { ScoreReceiptCard } from '@features/admin/ScoreReceiptCard';
@@ -61,6 +64,7 @@ import {
   adminNarrativeAutoRetryFinishedAttempts,
   adminNarrativeAutoRetryInFlight,
   buildAdminGateComputeOptions,
+  buildAdminRecalculateAttemptInput,
   buildCommunicationStyleTranscriptOptionsForAdmin,
   buildMomentOrScenarioSummary,
   computeMarkerAggregateFromAttempt,
@@ -517,15 +521,9 @@ export function AdminInterviewSummaryTab({
           egoLevel = repaired;
         }
       }
-      const result = recalculateAttemptScoresFromStoredSlices({
-        transcript: attempt.transcript,
-        scenario_1_scores: attempt.scenario_1_scores,
-        scenario_2_scores: attempt.scenario_2_scores,
-        scenario_3_scores: attempt.scenario_3_scores,
-        scenario_specific_patterns: attempt.scenario_specific_patterns,
-        ego_development_level: egoLevel,
-        language_markers: attempt.language_markers,
-      });
+      const result = recalculateAttemptScoresFromStoredSlices(
+        buildAdminRecalculateAttemptInput(attempt, { ego_development_level: egoLevel }),
+      );
       const nowIso = new Date().toISOString();
 
       if (result.kind === 'success') {
@@ -554,6 +552,7 @@ export function AdminInterviewSummaryTab({
           newWeightedScore: result.gate.weightedScore,
           newPillarScores: result.pillar_scores,
           recalculatedAt: nowIso,
+          forceFinalGateSync: true,
         });
         const reviewFlags = Array.isArray(attempt.review_flags) ? [...attempt.review_flags] : [];
         if (consistencyPatch.review_flags) {
@@ -606,7 +605,26 @@ export function AdminInterviewSummaryTab({
         }
         const psychApply = await applyPsychometricModifierToAttempt(attempt.user_id, attempt.id, {
           forceApply: true,
+          preservePassIfPreviouslyPassing: false,
         });
+        const { data: afterAttempt } = await supabase
+          .from('interview_attempts')
+          .select('passed, final_gate_pass, review_flags, ai_reasoning, weighted_score')
+          .eq('id', attempt.id)
+          .eq('user_id', attempt.user_id)
+          .maybeSingle();
+        if (afterAttempt) {
+          await applyPostRecalculationGateOutcomeSync(supabase, {
+            attemptId: attempt.id,
+            userId: attempt.user_id,
+            oldPassed: attempt.passed,
+            oldFinalGatePass: attempt.final_gate_pass,
+            recalculatedAt: nowIso,
+            afterAttempt,
+            newPillarScores: result.pillar_scores,
+            newWeightedScore: result.gate.weightedScore,
+          });
+        }
         const rollupNote = result.notes.find((n) => n.startsWith('rollup_algorithm:'));
         const rollupVersion = rollupNote?.slice('rollup_algorithm:'.length) ?? 'unknown';
         const pillarPreview = Object.entries(result.pillar_scores)

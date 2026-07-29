@@ -305,6 +305,56 @@ describe('runPostClaudeForcedConstructProbeGates', () => {
           cancelRequested: false,
           accumulatedFullText: sophieProbe,
           spokenCompleteText: sophieProbe,
+          s3SophiePerspectiveProbeDeliveredThisStream: false,
+        },
+      },
+    });
+    const params = createMockPostClaudeParams({
+      shouldForceScenarioCSophiePerspectiveProbe: true,
+      trimmed: 'He probably left because he had to regulate himself.',
+      messagesToUse: [
+        {
+          role: 'assistant',
+          content: "When Daniel comes back and says 'I didn't know what to say' — what do you make of that?",
+        },
+        {
+          role: 'user',
+          content: 'He probably left because he had to regulate himself.',
+        },
+      ],
+    });
+    const speak = createMockSpeakAssistantTurn();
+    const draft = createMockSanitizeDraftResult({
+      strippedText: sophieProbe,
+    });
+
+    const result = await runPostClaudeForcedConstructProbeGates(
+      deps,
+      params,
+      'Got it. What would you say to Sophie at that point?',
+      draft,
+      true,
+      speak,
+    );
+
+    expect(result?.handled).toBe(true);
+    expect(deps.scenarioCSophiePerspectiveProbeFiredRef.current).toBe(true);
+    expect(speak).not.toHaveBeenCalled();
+  });
+
+  it('skips S3 Sophie forced probe when parallel stream marked Sophie delivered before spokenCompleteText updates', async () => {
+    const sophieProbe =
+      'What do you think this pattern of leaving has been like for Sophie over time?';
+    const deps = createMockPostClaudeDeps({
+      currentInterviewMomentRef: { current: 3 },
+      currentScenarioRef: { current: 3 },
+      parallelStreamingTtsRef: {
+        current: {
+          active: true,
+          cancelRequested: false,
+          accumulatedFullText: 'Makes sense. What would you say to Sophie in that moment?',
+          spokenCompleteText: '',
+          s3SophiePerspectiveProbeDeliveredThisStream: true,
         },
       },
     });
@@ -383,6 +433,57 @@ describe('runPostClaudeForcedConstructProbeGates', () => {
 
     expect(result?.handled).toBe(false);
     expect(speak).not.toHaveBeenCalled();
+  });
+
+  it('speaks S3 repair when delivered ref is false positive after Sophie answer', async () => {
+    const sophieProbe =
+      "That makes a lot of sense. What do you think this pattern of leaving has been like for Sophie over time?";
+    const deps = createMockPostClaudeDeps({
+      currentInterviewMomentRef: { current: 3 },
+      currentScenarioRef: { current: 3 },
+      s3RepairProbeDeliveredRef: { current: true },
+      parallelStreamingTtsRef: {
+        current: {
+          active: false,
+          cancelRequested: false,
+          accumulatedFullText: '',
+          spokenCompleteText: '',
+          s3SophiePerspectiveProbeDeliveredThisStream: false,
+        },
+      },
+    });
+    const params = createMockPostClaudeParams({
+      shouldForceScenarioCRepairProbe: true,
+      trimmed:
+        "There's really a lot of hurt and rejection and abandonment.",
+      messagesToUse: [
+        { role: 'assistant', content: sophieProbe },
+        {
+          role: 'user',
+          content:
+            "There's really a lot of hurt and rejection and abandonment.",
+        },
+      ],
+    });
+    const speak = createMockSpeakAssistantTurn();
+    const draft = createMockSanitizeDraftResult({
+      strippedText: SCENARIO_C_REPAIR_QUESTION_CANONICAL,
+    });
+
+    const result = await runPostClaudeForcedConstructProbeGates(
+      deps,
+      params,
+      "That's the end of the three described situations.",
+      draft,
+      true,
+      speak,
+    );
+
+    expect(result?.handled).toBe(true);
+    expect(speak).toHaveBeenCalledWith(
+      SCENARIO_C_REPAIR_QUESTION_CANONICAL,
+      expect.objectContaining({ forceSpeakDespiteParallelStream: true }),
+    );
   });
 
   it('skips re-speaking S3 repair when stream already spoke it but transcript still lags', async () => {

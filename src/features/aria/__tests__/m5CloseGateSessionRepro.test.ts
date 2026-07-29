@@ -28,6 +28,9 @@ import {
 const CONFLICT_ANSWER =
   "Yeah, my friend Devanshu, he said I was a bad coach, I didn't like that, and so I got into an argument with him, I raised my voice, I was kind of pissed at him. So we talked it out, I understand where he's coming from, I don't agree with it, I think it was too immature, but it was facilitated, we listened to each other, and we're okay now, we're on good terms.";
 
+const MATT_DEVON_CONFLICT_ANSWER =
+  'I had a conflict with my friend, Devon Chiu. We disagreed on how good of a coach I was, and I got upset with him and raised my voice. We worked it out, and we\'re good friends now.';
+
 const LOOKING_BACK =
   'Looking back on that argument — do you think there was anything you could have owned or done differently on your side?';
 
@@ -65,6 +68,39 @@ describe('M5 close gate session repro (bee620b3 closing without preparing_result
         resolutionFollowUpStillRequired: false,
       }),
     ).toBe(true);
+  });
+
+  it('recognizes elliptical "got upset and raised my voice" as self-accountability (Matt session)', () => {
+    expect(moment5AnswerHasExplicitSelfAccountability(MATT_DEVON_CONFLICT_ANSWER)).toBe(true);
+    expect(moment5AnswerIncludesResolutionOutcome(MATT_DEVON_CONFLICT_ANSWER)).toBe(true);
+    expect(evaluateMoment5AccountabilityProbe(MATT_DEVON_CONFLICT_ANSWER)).toMatchObject({
+      shouldProbe: false,
+      reason: 'explicit_self_accountability',
+    });
+  });
+
+  it('allows close after thin retry turns when final post-anchor answer has ownership (6d74f8f1)', () => {
+    const msgs = [
+      { role: 'assistant', content: MOMENT_5_ACCOUNTABILITY_QUESTION_TEXT },
+      { role: 'user', content: 'Out of conflict with my friend.', interviewMoment: 5 },
+      { role: 'assistant', content: "I wasn't able to understand that — you may have gotten cut off. Can you try again?" },
+      { role: 'user', content: MATT_DEVON_CONFLICT_ANSWER },
+      {
+        role: 'assistant',
+        content:
+          'Good work getting through all of this. Your interview is complete. Thank you for being so open with me, Matt.',
+      },
+    ];
+    const gate = computeMoment5InterviewCloseGate(msgs, {
+      moment5QuestionDelivered: true,
+      moment5PrimaryAnchorSession: true,
+      postM5UserTurnsRef: 3,
+      accountabilityProbeFired: false,
+      currentInterviewMoment: 5,
+    });
+    expect(gate.moment5CombinedForCloseGate).toContain('raised my voice');
+    expect(gate.accountabilityProbeStillRequired).toBe(false);
+    expect(gate.moment5CloseAllowed).toBe(true);
   });
 
   it('does not treat model looking-back as scripted accountability or resolution follow-up', () => {
@@ -220,5 +256,28 @@ describe('M5 close gate session repro (bee620b3 closing without preparing_result
       moment5ResolutionDelivered: false,
     });
     expect(state.resolutionFollowUpStillRequired).toBe(false);
+  });
+
+  it('Matt mother marriage conflict still requires resolution follow-up before close', () => {
+    const mattAnswer =
+      'I had a massive conflict with my mother regarding when I was going to get married. She understandably was concerned that I was taking too much time, but I was pissed because I thought she was pushing me too hard, but then I realized she lacked some of the context of why I was waiting. Then I explained to her that there is a lot of financial obligation to getting married, and I needed to be ready financially and emotionally before I took that step.';
+    expect(moment5AnswerIncludesResolutionOutcome(mattAnswer)).toBe(false);
+    const gate = computeMoment5InterviewCloseGate(
+      [
+        { role: 'assistant', content: MOMENT_5_ACCOUNTABILITY_QUESTION_TEXT },
+        { role: 'user', content: mattAnswer, interviewMoment: 5 },
+      ],
+      {
+        moment5QuestionDelivered: true,
+        moment5PrimaryAnchorSession: true,
+        postM5UserTurnsRef: 1,
+        accountabilityProbeFired: false,
+        currentInterviewMoment: 5,
+        moment5ResolutionDelivered: false,
+      },
+    );
+    expect(gate.accountabilityProbeStillRequired).toBe(true);
+    expect(gate.resolutionFollowUpStillRequired).toBe(true);
+    expect(gate.moment5CloseAllowed).toBe(false);
   });
 });

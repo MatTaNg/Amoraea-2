@@ -14,12 +14,18 @@ import {
   stripEphemeralWelcomeBackMessages,
   resumeShouldSpeakEmotionCatchUpAfterModal,
   resumeTranscriptAlreadyDeliveredMoment4Question,
+  resumeTranscriptIndicatesPersonalPartActive,
+  transcriptHasPersistedPersonalPartProgress,
   shouldResumeMidInterviewFromSaved,
   storedInterviewHasResumableScenarioProgress,
   transcriptHasInScenarioProgressPastOpening,
   transcriptNeedsScenarioNumberPatch,
 } from '../interviewResumeCursor';
 import { SHOW_SCENARIO_3_OPENING_EXACT, SHOW_SCENARIO_3_VIGNETTE_EXACT } from '../../features/aria/interviewShowScenarioExactCopy';
+import { MOMENT_4_GRUDGE_QUESTION_TEXT } from '../../features/aria/moment4ProbeLogic';
+import { SCENARIO_B_JAMES_REPAIR_CANONICAL } from '../../features/aria/scenarioBProbeLogic';
+import { SCENARIO_C_REPAIR_QUESTION_CANONICAL } from '../../features/aria/scenarioCPromptDetection';
+import { SCENARIO_C_SOPHIE_PERSPECTIVE_PROBE } from '../../features/aria/interviewDisengagementProbeCopy';
 
 describe('interviewResumeCursor', () => {
   it('lastFullyCompletedScenario prefers score bundles', () => {
@@ -34,8 +40,18 @@ describe('interviewResumeCursor', () => {
   it('isResumeWelcomeBackAssistantText detects resume welcome copy', () => {
     expect(
       isResumeWelcomeBackAssistantText(
-        "Welcome back — we'll pick up where we left off. If you'd like me to repeat what I said, let me know."
-      )
+        "Welcome back, we'll pick up where we left off, we were in Scenario two and I just said What do you think is going on here?",
+      ),
+    ).toBe(true);
+    expect(
+      isResumeWelcomeBackAssistantText(
+        "Welcome back, we'll pick up where we left off, we were in Scenario two and I just asked you What do you think is going on here?",
+      ),
+    ).toBe(true);
+    expect(
+      isResumeWelcomeBackAssistantText(
+        "Welcome back — we'll pick up where we left off. If you'd like me to repeat what I said, let me know.",
+      ),
     ).toBe(true);
     expect(isResumeWelcomeBackAssistantText('Can you say more about that?')).toBe(false);
   });
@@ -154,18 +170,23 @@ describe('interviewResumeCursor', () => {
     ).toBe(false);
   });
 
-  it('resume welcome for mid-scenario dropout does not promise a full vignette restart', () => {
-    const msg = buildResumeWelcomeMessage({ mode: 'replay_incomplete', resumeScenario: 2 });
-    expect(msg.toLowerCase()).toContain('pick up where we left off');
-    expect(msg.toLowerCase()).not.toContain('from the beginning');
-    expect(msg).toMatch(/repeat what i said/i);
-    expect(msg.toLowerCase()).not.toMatch(/\bthe (first|second|third) situation\b/);
+  it('resume welcome names scenario and embeds the last main question', () => {
+    const lastQuestion = 'What do you think is going on between Sarah and James in this situation?';
+    const msg = buildResumeWelcomeMessage({
+      mode: 'replay_incomplete',
+      resumeScenario: 2,
+      lastQuestionText: lastQuestion,
+    });
+    expect(msg.toLowerCase()).toContain("we'll pick up where we left off");
+    expect(msg.toLowerCase()).toContain('we were in scenario two');
+    expect(msg).toContain(`I just said ${lastQuestion}`);
+    expect(msg.toLowerCase()).not.toMatch(/repeat (the scenario|what i said)/);
   });
 
-  it('resume welcome for next scenario omits vignette ordinal phrase', () => {
+  it('resume welcome for next scenario names scenario three without repeat offer', () => {
     const msg = buildResumeWelcomeMessage({ mode: 'resume_next', resumeScenario: 3 });
-    expect(msg.toLowerCase()).toContain('pick up where we left off');
-    expect(msg.toLowerCase()).not.toMatch(/\bthe (first|second|third) situation\b/);
+    expect(msg.toLowerCase()).toContain('we were in scenario three');
+    expect(msg.toLowerCase()).not.toMatch(/repeat (the scenario|what i said)/);
   });
 
   it('resumeShouldSpeakEmotionCatchUpAfterModal skips grudge when already in transcript', () => {
@@ -207,7 +228,7 @@ describe('interviewResumeCursor', () => {
     expect(plan.partialScenarioDataWritten).toBe(true);
   });
 
-  it('replay_incomplete uses transcript moment when ahead of resume_active_scenario (M4 after S3)', () => {
+  it('resume_post_scenarios uses synced moment 4 when ahead of resume_active_scenario (M4 after S3)', () => {
     const plan = computeInterviewResumePlan({
       scenariosCompleted: [],
       scenarioScores: undefined,
@@ -219,11 +240,10 @@ describe('interviewResumeCursor', () => {
         personalHandoffInjected: true,
       },
     });
-    expect(plan.mode).toBe('replay_incomplete');
+    expect(plan.mode).toBe('resume_post_scenarios');
     expect(plan.resumeScenario).toBe(3);
     expect(plan.effectiveMoment).toBe(4);
     expect(plan.personalHandoffInjected).toBe(true);
-    expect(plan.momentsComplete[3]).toBe(true);
   });
 
   it('resumes next scenario when active is cleared and last completed is 1', () => {
@@ -279,6 +299,46 @@ describe('interviewResumeCursor', () => {
       { role: 'user', content: 'done', scenarioNumber: 1 },
     ];
     expect(transcriptHasInScenarioProgressPastOpening(msgs, 2)).toBe(false);
+  });
+
+  it('transcriptHasInScenarioProgressPastOpening is true mid-S3 when scenarioNumber lags but interviewMoment is 3', () => {
+    const s3Q1 =
+      "When Daniel comes back and says 'I didn't know what to say,' what do you make of that?";
+    const msgs = [
+      { role: 'assistant', content: SCENARIO_B_JAMES_REPAIR_CANONICAL, scenarioNumber: 2, interviewMoment: 2 },
+      { role: 'assistant', content: s3Q1, scenarioNumber: 2, interviewMoment: 3 },
+      { role: 'user', content: 'Daniel avoids conflict.', scenarioNumber: 2, interviewMoment: 3 },
+    ];
+    expect(firstAssistantIndexForScenarioIntro(msgs, 3)).toBe(-1);
+    expect(transcriptHasInScenarioProgressPastOpening(msgs, 3)).toBe(true);
+  });
+
+  it('computeInterviewResumePlan treats mid-S3 without vignette anchor as replay_incomplete not resume_next', () => {
+    const s3Q1 =
+      "When Daniel comes back and says 'I didn't know what to say,' what do you make of that?";
+    const msgs = [
+      { role: 'assistant', content: SCENARIO_B_JAMES_REPAIR_CANONICAL, scenarioNumber: 2, interviewMoment: 2 },
+      { role: 'assistant', content: s3Q1, scenarioNumber: 2, interviewMoment: 3 },
+      { role: 'user', content: 'Daniel avoids conflict.', scenarioNumber: 2, interviewMoment: 3 },
+    ];
+    const plan = computeInterviewResumePlan({
+      scenariosCompleted: [1, 2, 3],
+      scenarioScores: {
+        1: { pillarScores: { empathy: 1 } },
+        2: { pillarScores: { empathy: 1 } },
+        3: { pillarScores: { empathy: 1 } },
+      },
+      resumeActiveFromStorage: null,
+      resumeActiveFromAttempt: null,
+      transcriptMessages: msgs,
+      syncedMoments: {
+        momentsComplete: { 1: true, 2: true, 3: false, 4: false, 5: false },
+        currentMoment: 3,
+        personalHandoffInjected: false,
+      },
+    });
+    expect(plan.mode).toBe('replay_incomplete');
+    expect(plan.effectiveMoment).toBe(3);
   });
 
   it('sliceMessagesBeforeScenarioIntro drops partial scenario 2 and later', () => {
@@ -418,15 +478,66 @@ describe('interviewResumeCursor', () => {
     expect(plan.rewindDueToCorruptScoring).toBe(false);
   });
 
-  it('rewinds to scenario 1 when scenariosCompleted claims 1 but scores were interrupted', () => {
+  it('resumes scenario 3 when S1 scoring interrupted but transcript already reached S3 vignette', () => {
+    const tagged = assignScenarioNumbersToTranscript([
+      { role: 'assistant', content: "Here's the first situation. Emma and Ryan." },
+      { role: 'user', content: 'Ryan should set boundaries.' },
+      { role: 'assistant', content: "Here's the second situation. Sarah has been job hunting." },
+      { role: 'user', content: 'James should have been more supportive.' },
+      { role: 'assistant', content: SHOW_SCENARIO_3_VIGNETTE_EXACT },
+    ]);
     const plan = computeInterviewResumePlan({
       scenariosCompleted: [1],
       scenarioScores: {},
       resumeActiveFromStorage: 2,
-      resumeActiveFromAttempt: null,
+      resumeActiveFromAttempt: 2,
+      transcriptMessages: tagged,
+      syncedMoments: {
+        momentsComplete: { 1: true, 2: false, 3: false, 4: false, 5: false },
+        currentMoment: 3,
+        personalHandoffInjected: false,
+      },
+    });
+    expect(plan.resumeScenario).toBe(3);
+    expect(plan.mode).toBe('replay_incomplete');
+    expect(plan.rewindDueToCorruptScoring).toBe(false);
+    expect(plan.effectiveMoment).toBe(3);
+  });
+
+  it('resumes scenario 2 when S1 scoring interrupted but user already advanced to S2', () => {
+    const tagged = assignScenarioNumbersToTranscript([
+      { role: 'assistant', content: "Here's the first situation. Emma and Ryan." },
+      { role: 'user', content: 'Ryan should set boundaries.' },
+      { role: 'assistant', content: "Here's the second situation. Sarah has been job hunting." },
+      { role: 'user', content: 'James should have been more supportive.' },
+    ]);
+    const plan = computeInterviewResumePlan({
+      scenariosCompleted: [1],
+      scenarioScores: {},
+      resumeActiveFromStorage: 2,
+      resumeActiveFromAttempt: 2,
+      transcriptMessages: tagged,
       syncedMoments: {
         momentsComplete: { 1: true, 2: false, 3: false, 4: false, 5: false },
         currentMoment: 2,
+        personalHandoffInjected: false,
+      },
+    });
+    expect(plan.resumeScenario).toBe(2);
+    expect(plan.mode).toBe('replay_incomplete');
+    expect(plan.rewindDueToCorruptScoring).toBe(false);
+    expect(plan.effectiveMoment).toBe(2);
+  });
+
+  it('rewinds to scenario 1 when scenariosCompleted claims 1 but scores were interrupted and user still on S1', () => {
+    const plan = computeInterviewResumePlan({
+      scenariosCompleted: [1],
+      scenarioScores: {},
+      resumeActiveFromStorage: 1,
+      resumeActiveFromAttempt: null,
+      syncedMoments: {
+        momentsComplete: { 1: true, 2: false, 3: false, 4: false, 5: false },
+        currentMoment: 1,
         personalHandoffInjected: false,
       },
     });
@@ -505,6 +616,213 @@ describe('interviewResumeCursor', () => {
     expect(plan.rewindToMoment4DueToCorruptScoring).toBe(false);
     expect(plan.mode).toBe('resume_post_scenarios');
     expect(plan.effectiveMoment).toBe(4);
+  });
+
+  it('stays on scenario 3 when all scenarios scored but S3 Q&A is still in progress', () => {
+    const s3Question =
+      "When Daniel comes back and says 'I didn't know what to say,' what do you make of that?";
+    const plan = computeInterviewResumePlan({
+      scenariosCompleted: [1, 2, 3],
+      scenarioScores: {
+        1: { pillarScores: { repair: 6 }, pillarConfidence: {}, keyEvidence: {} },
+        2: { pillarScores: { repair: 6 }, pillarConfidence: {}, keyEvidence: {} },
+        3: { pillarScores: { repair: 6 }, pillarConfidence: {}, keyEvidence: {} },
+      },
+      resumeActiveFromStorage: null,
+      resumeActiveFromAttempt: null,
+      transcriptMessages: [
+        { role: 'assistant', content: s3Question, scenarioNumber: 3 },
+        { role: 'user', content: 'I think Daniel shut down.', scenarioNumber: 3 },
+        {
+          role: 'assistant',
+          content: "Got it. One more situation and then we'll get personal.",
+          scenarioNumber: 3,
+        },
+      ],
+      syncedMoments: {
+        momentsComplete: { 1: true, 2: true, 3: true, 4: false, 5: false },
+        currentMoment: 4,
+        personalHandoffInjected: false,
+      },
+    });
+    expect(plan.mode).toBe('replay_incomplete');
+    expect(plan.resumeScenario).toBe(3);
+    expect(plan.effectiveMoment).toBe(3);
+    expect(
+      buildResumeWelcomeMessage({
+        mode: plan.mode,
+        resumeScenario: plan.resumeScenario,
+        lastQuestionText: s3Question,
+      }).toLowerCase(),
+    ).toContain('scenario three');
+    expect(
+      buildResumeWelcomeMessage({
+        mode: plan.mode,
+        resumeScenario: plan.resumeScenario,
+        lastQuestionText: s3Question,
+      }).toLowerCase(),
+    ).not.toContain('personal part');
+  });
+
+  it('advances to Moment 4 when S3 repair is satisfied but scenario scores never persisted', () => {
+    const s3Q1 =
+      "When Daniel comes back and says 'I didn't know what to say,' what do you make of that?";
+    const s3RepairAnswer =
+      'This situation can be repaired if Daniel would acknowledge how she feels, if he would look for the solutions to find out why he is leaving, what he has avoided and get in touch with his feelings.';
+    const transcriptMessages = [
+      { role: 'assistant', content: SCENARIO_B_JAMES_REPAIR_CANONICAL, scenarioNumber: 2 },
+      { role: 'assistant', content: s3Q1, scenarioNumber: 3 },
+      { role: 'user', content: 'Daniel avoids conflict and shuts down.', scenarioNumber: 3 },
+      { role: 'assistant', content: SCENARIO_C_SOPHIE_PERSPECTIVE_PROBE, scenarioNumber: 3 },
+      { role: 'user', content: 'Sophie feels unheard and invisible.', scenarioNumber: 3 },
+      { role: 'assistant', content: SCENARIO_C_REPAIR_QUESTION_CANONICAL, scenarioNumber: 3 },
+      { role: 'user', content: s3RepairAnswer, scenarioNumber: 3 },
+    ];
+    const plan = computeInterviewResumePlan({
+      scenariosCompleted: [],
+      scenarioScores: {},
+      resumeActiveFromStorage: 3,
+      resumeActiveFromAttempt: 3,
+      transcriptMessages,
+      syncedMoments: {
+        momentsComplete: { 1: false, 2: false, 3: false, 4: false, 5: false },
+        currentMoment: 3,
+        personalHandoffInjected: false,
+      },
+    });
+    expect(plan.lastCompletedScenario).toBe(0);
+    expect(plan.mode).toBe('resume_post_scenarios');
+    expect(plan.effectiveMoment).toBe(4);
+    expect(plan.momentsComplete[3]).toBe(true);
+    expect(plan.rewindDueToCorruptScoring).toBe(false);
+    expect(
+      buildResumeWelcomeMessage({
+        mode: plan.mode,
+        resumeScenario: plan.resumeScenario,
+        lastQuestionText: MOMENT_4_GRUDGE_QUESTION_TEXT,
+      }).toLowerCase(),
+    ).toContain('personal part');
+  });
+
+  it('advances to Moment 4 when S3 repair is satisfied but M4 handoff was not delivered before app close', () => {
+    const s3Q1 =
+      "When Daniel comes back and says 'I didn't know what to say,' what do you make of that?";
+    const s3RepairAnswer =
+      'This situation can be repaired if Daniel acknowledges how he feels, if he would look for the solution to find out why he is leaving, what he is avoiding and get in touch with his feelings, this situation could be reparative.';
+    const transcriptMessages = [
+      { role: 'assistant', content: SCENARIO_B_JAMES_REPAIR_CANONICAL, scenarioNumber: 2 },
+      { role: 'assistant', content: s3Q1, scenarioNumber: 3 },
+      { role: 'user', content: 'Daniel avoids conflict and shuts down.', scenarioNumber: 3 },
+      { role: 'assistant', content: SCENARIO_C_SOPHIE_PERSPECTIVE_PROBE, scenarioNumber: 3 },
+      { role: 'user', content: 'Sophie feels unheard and invisible.', scenarioNumber: 3 },
+      { role: 'assistant', content: SCENARIO_C_REPAIR_QUESTION_CANONICAL, scenarioNumber: 3 },
+      { role: 'user', content: s3RepairAnswer, scenarioNumber: 3 },
+    ];
+    const plan = computeInterviewResumePlan({
+      scenariosCompleted: [1, 2, 3],
+      scenarioScores: {
+        1: { pillarScores: { repair: 6 }, pillarConfidence: {}, keyEvidence: {} },
+        2: { pillarScores: { repair: 6 }, pillarConfidence: {}, keyEvidence: {} },
+        3: { pillarScores: { repair: 6 }, pillarConfidence: {}, keyEvidence: {} },
+      },
+      resumeActiveFromStorage: 3,
+      resumeActiveFromAttempt: 3,
+      transcriptMessages,
+      syncedMoments: {
+        momentsComplete: { 1: true, 2: true, 3: true, 4: false, 5: false },
+        currentMoment: 3,
+        personalHandoffInjected: false,
+      },
+    });
+    expect(plan.mode).toBe('resume_post_scenarios');
+    expect(plan.effectiveMoment).toBe(4);
+    expect(plan.momentsComplete[3]).toBe(true);
+    expect(plan.personalHandoffInjected).toBe(false);
+    expect(plan.rewindDueToCorruptScoring).toBe(false);
+  });
+
+  it('resumes personal part when user turn is tagged interviewMoment 4 even without grudge assistant row', () => {
+    const transcriptMessages = [
+        { role: 'assistant', content: SCENARIO_B_JAMES_REPAIR_CANONICAL, scenarioNumber: 2 },
+        { role: 'assistant', content: 'How do you think this situation could be repaired?', scenarioNumber: 3 },
+        { role: 'user', content: 'Daniel should apologize.', scenarioNumber: 3, interviewMoment: 3 },
+        { role: 'user', content: 'My coworker and I had a falling out.', interviewMoment: 4 },
+      ];
+    const plan = computeInterviewResumePlan({
+      scenariosCompleted: [1, 2, 3],
+      scenarioScores: {
+        1: { pillarScores: { repair: 6 }, pillarConfidence: {}, keyEvidence: {} },
+        2: { pillarScores: { repair: 6 }, pillarConfidence: {}, keyEvidence: {} },
+        3: { pillarScores: { repair: 6 }, pillarConfidence: {}, keyEvidence: {} },
+      },
+      resumeActiveFromStorage: 3,
+      resumeActiveFromAttempt: 3,
+      transcriptMessages,
+      syncedMoments: {
+        momentsComplete: { 1: true, 2: true, 3: true, 4: false, 5: false },
+        currentMoment: 3,
+        personalHandoffInjected: false,
+      },
+    });
+    expect(transcriptHasPersistedPersonalPartProgress(transcriptMessages)).toBe(true);
+    expect(
+      resumeTranscriptIndicatesPersonalPartActive(transcriptMessages, {
+        currentMoment: 3,
+        personalHandoffInjected: false,
+      }),
+    ).toBe(true);
+    expect(plan.mode).toBe('resume_post_scenarios');
+    expect(plan.effectiveMoment).toBe(4);
+    expect(
+      buildResumeWelcomeMessage({
+        mode: plan.mode,
+        resumeScenario: plan.resumeScenario,
+        lastQuestionText: MOMENT_4_GRUDGE_QUESTION_TEXT,
+      }).toLowerCase(),
+    ).toContain('personal part');
+    expect(
+      buildResumeWelcomeMessage({
+        mode: plan.mode,
+        resumeScenario: plan.resumeScenario,
+        lastQuestionText: MOMENT_4_GRUDGE_QUESTION_TEXT,
+      }).toLowerCase(),
+    ).not.toContain('scenario three');
+  });
+
+  it('resumes Moment 4 when user answered grudge after S3 repair even without interviewMoment tags', () => {
+    const s3Q1 =
+      "When Daniel comes back and says 'I didn't know what to say,' what do you make of that?";
+    const grudgeAnswer =
+      'My former roommate and I had a huge falling out over rent and we have not spoken in two years.';
+    const transcriptMessages = [
+      { role: 'assistant', content: SCENARIO_B_JAMES_REPAIR_CANONICAL, scenarioNumber: 2 },
+      { role: 'assistant', content: s3Q1, scenarioNumber: 3 },
+      { role: 'user', content: 'Daniel avoids conflict and shuts down.', scenarioNumber: 3 },
+      { role: 'assistant', content: SCENARIO_C_SOPHIE_PERSPECTIVE_PROBE, scenarioNumber: 3 },
+      { role: 'user', content: 'Sophie feels unheard and invisible.', scenarioNumber: 3 },
+      { role: 'assistant', content: SCENARIO_C_REPAIR_QUESTION_CANONICAL, scenarioNumber: 3 },
+      { role: 'user', content: 'They should talk honestly about how leaving makes her feel.', scenarioNumber: 3 },
+      { role: 'user', content: grudgeAnswer, scenarioNumber: 3 },
+    ];
+    const plan = computeInterviewResumePlan({
+      scenariosCompleted: [1, 2, 3],
+      scenarioScores: {
+        1: { pillarScores: { repair: 6 }, pillarConfidence: {}, keyEvidence: {} },
+        2: { pillarScores: { repair: 6 }, pillarConfidence: {}, keyEvidence: {} },
+        3: { pillarScores: { repair: 6 }, pillarConfidence: {}, keyEvidence: {} },
+      },
+      resumeActiveFromStorage: 3,
+      resumeActiveFromAttempt: 3,
+      transcriptMessages,
+      syncedMoments: {
+        momentsComplete: { 1: true, 2: true, 3: true, 4: false, 5: false },
+        currentMoment: 4,
+        personalHandoffInjected: false,
+      },
+    });
+    expect(plan.mode).toBe('resume_post_scenarios');
+    expect(plan.effectiveMoment).toBe(4);
+    expect(plan.resumeScenario).toBe(3);
   });
 
   it('shouldResumeMidInterviewFromSaved is true mid scenario 2 with saved transcript', () => {
@@ -612,6 +930,21 @@ describe('interviewResumeCursor', () => {
     const out = assignScenarioNumbersToTranscript(raw);
     expect((out[2] as { scenarioNumber?: number }).scenarioNumber).toBe(2);
     expect((out[3] as { scenarioNumber?: number }).scenarioNumber).toBe(2);
+  });
+
+  it('assignScenarioNumbersToTranscript keeps Situation 3 when interviewMoment is 3 without vignette anchor', () => {
+    const s3Q1 =
+      "When Daniel comes back and says 'I didn't know what to say,' what do you make of that?";
+    const raw = [
+      { role: 'assistant', content: SCENARIO_B_JAMES_REPAIR_CANONICAL, interviewMoment: 2 },
+      { role: 'assistant', content: s3Q1, interviewMoment: 3 },
+      { role: 'user', content: 'Daniel felt genuinely at home.', interviewMoment: 3 },
+      { role: 'assistant', content: 'Makes sense. Just say whatever comes to mind.', interviewMoment: 3 },
+    ];
+    const out = assignScenarioNumbersToTranscript(raw);
+    expect((out[1] as { scenarioNumber?: number }).scenarioNumber).toBe(3);
+    expect((out[2] as { scenarioNumber?: number }).scenarioNumber).toBe(3);
+    expect((out[3] as { scenarioNumber?: number }).scenarioNumber).toBe(3);
   });
 
   it('assignScenarioNumbersToTranscript tags Moment 4+ turns as scenario 3', () => {

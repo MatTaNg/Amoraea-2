@@ -316,8 +316,8 @@ describe('runPreClaudeConfusionRepeatReplayGates', () => {
     expect(result).toEqual({ handled: true });
     const spoken = String(speakTextSafe.mock.calls[0]?.[0] ?? '');
     expect(spoken).toMatch(/^Sure\./);
-    expect(spoken).toContain(SHOW_SCENARIO_1_VIGNETTE_EXACT);
     expect(spoken).toMatch(/What's going on between these two\?/i);
+    expect(spoken).not.toContain(SHOW_SCENARIO_1_VIGNETTE_EXACT);
     expect(spoken).not.toMatch(/stay on this one|you've got this/i);
     expect(speakTextSafe).toHaveBeenCalledWith(
       expect.any(String),
@@ -364,8 +364,8 @@ describe('runPreClaudeConfusionRepeatReplayGates', () => {
     expect(result).toEqual({ handled: true });
     const spoken = String(speakTextSafe.mock.calls[0]?.[0] ?? '');
     expect(spoken).toMatch(/^Sure\./);
-    expect(spoken).toContain(SHOW_SCENARIO_2_VIGNETTE_EXACT);
     expect(spoken).toContain(nextQuestion);
+    expect(spoken).not.toContain(SHOW_SCENARIO_2_VIGNETTE_EXACT);
     expect(spoken).not.toMatch(/we can skip this one/i);
     expect(speakTextSafe).toHaveBeenCalledWith(
       expect.any(String),

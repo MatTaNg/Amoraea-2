@@ -1,4 +1,5 @@
 import { assistantTextLooksLikeMoment4HandoffLead } from './interviewTransitionBundles';
+import { looksLikeMoment4GrudgePrompt } from './moment4ProbeLogic';
 import {
   textContainsScenarioBVignetteBody,
   textContainsScenarioCVignetteBody,
@@ -87,17 +88,55 @@ export function resolveHandoffPriorScenario(
   /**
    * Handoff text is authoritative for which scenario was just completed. Prefer vignette body
    * over live refs — refs may already have advanced from canonical show-scenario playback.
+   * Vignette bodies win over M4 teaser phrases in the wrap (e.g. S2→S3 "we'll get personal").
    */
-  if (assistantTextLooksLikeMoment4HandoffLead(transitionText)) {
-    return 3;
-  }
   if (textContainsScenarioCVignetteBody(transitionText)) {
     return 2;
   }
   if (textContainsScenarioBVignetteBody(transitionText)) {
     return 1;
   }
+  if (assistantTextLooksLikeMoment4HandoffLead(transitionText)) {
+    return 3;
+  }
   return active;
+}
+
+/** Stream canonical cards may advance refs before post-Claude emotion orchestration runs. */
+export function resolveScenarioJustCompletedForPostClaudeEmotionTransition(args: {
+  displayText: string;
+  priorScenarioNum: 1 | 2 | 3;
+  emotionCompletedScenario: 1 | 2 | 3 | null;
+  situation3PlaybackConfirmed: boolean;
+  situation2PlaybackConfirmed: boolean;
+  scenarioCRepairStillPending: boolean;
+}): 1 | 2 | 3 {
+  const fromText = completedScenarioForEmotionModalFromTransition({
+    declaredComplete: args.priorScenarioNum,
+    transitionText: args.displayText,
+    priorScenario: args.priorScenarioNum,
+  });
+  if (
+    assistantTextLooksLikeMoment4HandoffLead(args.displayText) ||
+    looksLikeMoment4GrudgePrompt(args.displayText)
+  ) {
+    return 3;
+  }
+  /**
+   * Stream-end / canonical S2→S3 handoff may play Situation 3 before post-Claude emotion
+   * orchestration while refs or displayText already look like S3 / M4 — emotion item is
+   * still for Situation 2 until S3 repair construct is satisfied.
+   */
+  if (args.situation3PlaybackConfirmed && args.scenarioCRepairStillPending) {
+    return 2;
+  }
+  if (args.emotionCompletedScenario != null) {
+    return args.emotionCompletedScenario;
+  }
+  if (args.situation2PlaybackConfirmed && fromText === 2 && args.priorScenarioNum === 2) {
+    return 2;
+  }
+  return fromText;
 }
 
 export function completedScenarioForEmotionModalFromTransition(params: {

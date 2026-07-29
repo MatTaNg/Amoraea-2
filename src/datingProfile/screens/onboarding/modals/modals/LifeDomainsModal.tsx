@@ -1,4 +1,5 @@
 import React, { useMemo } from 'react';
+import { ONBOARDING_STEP_SCREEN_EDGES, ONBOARDING_STEP_SCREEN_EDGES_WITH_BOTTOM } from '../onboardingStepScreenEdges';
 import { View, Text, ScrollView } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Button } from '@/shared/ui/Button';
@@ -54,7 +55,7 @@ export const LifeDomainsModal: React.FC<LifeDomainsModalProps> = ({
   const isValid = total === 100;
 
   return (
-    <SafeAreaView style={styles.screen} edges={['top', 'left', 'right']}>
+    <SafeAreaView style={styles.screen} edges={ONBOARDING_STEP_SCREEN_EDGES}>
       <OnboardingHeader title="Life Domain Priorities" />
       <ScrollView 
         style={styles.scrollView}

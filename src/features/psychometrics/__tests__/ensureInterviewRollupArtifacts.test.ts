@@ -200,7 +200,7 @@ describe('ensureInterviewRollupArtifacts', () => {
     expect(
       transcriptReachedMoment5ForRollup([
         { role: 'assistant', content: 'Think of a time when you had a conflict with someone important to you.' },
-        { role: 'user', content: 'My coworker and I argued about a project deadline.' },
+        { role: 'user', content: 'My coworker and I argued about a project deadline last week.' },
       ]),
     ).toBe(true);
     expect(
@@ -208,6 +208,24 @@ describe('ensureInterviewRollupArtifacts', () => {
         { role: 'user', content: 'Emma felt dismissed.', interviewMoment: 1 },
       ]),
     ).toBe(false);
+  });
+
+  it('does not treat thin skip/meta M5 turns as assessable for rollup', () => {
+    const thinTranscript = [
+      { role: 'assistant', content: 'Think of a time when you had a conflict with someone important to you.' },
+      { role: 'user', content: 'Ah, the conflict wins.' },
+      { role: 'user', content: 'Can we skip this one?' },
+    ];
+    expect(transcriptReachedMoment5ForRollup(thinTranscript)).toBe(false);
+    const rollup = evaluateScoringStagesReadyForRollup({
+      scenario_1_scores: scenarioBundle,
+      scenario_2_scores: scenarioBundle,
+      scenario_3_scores: scenarioBundle,
+      scenario_specific_patterns: { moment_4_scores: scoredMoment },
+      transcript: thinTranscript,
+    });
+    expect(rollup.missing).not.toContain('moment5');
+    expect(rollup.state.moment5Complete).toBe(true);
   });
 
   it('buildPartialInterviewRollupPatchFromAttemptRow fills composites without Moment 5', () => {
@@ -250,7 +268,7 @@ describe('ensureInterviewRollupArtifacts', () => {
           role: 'assistant',
           content: 'Think of a time when you had a conflict with someone important to you.',
         },
-        { role: 'user', content: 'My partner and I argued last week.' },
+        { role: 'user', content: 'My partner and I had a long argument about money last week.' },
       ],
       scenario_composites: null,
       defense_cross_reference: null,

@@ -2,7 +2,6 @@ import {
   aggregatePillarScoresWithCommitmentMergeDetailed,
 } from '@features/aria/aggregateMarkerScoresFromSlices';
 import type { MarkerScoreSlice } from '@features/aria/aggregateMarkerScoresFromSlices';
-import { analyzeLanguageMarkers, buildScenarioBoundaries } from '@features/aria/alphaAssessmentUtils';
 import { attachSkipPenaltyGateOptions } from '@features/aria/interviewSessionUtilities';
 import {
   computeGateResult,
@@ -108,17 +107,10 @@ export async function buildDeferredPersistGateModifierSnapshot(
             }
           : null,
       ];
-      const scenarioBoundariesDeferred = buildScenarioBoundaries(
-        msgsDeferred,
-        Array.from(deps.scoredScenariosRef.current),
-      );
-      const lmDeferred = analyzeLanguageMarkers(msgsDeferred, scenarioBoundariesDeferred);
       const mergedDeferredGate = aggregatePillarScoresWithCommitmentMergeDetailed(markerSlicesDeferredGate, {
         egoDevelopmentLevel: egoLevelForDeferredAggregate,
         defensePatternTranscript: msgsDeferred,
         disclosureCalibrationTranscript: msgsDeferred,
-        scenarioEmotionalVocabDensityPercent: lmDeferred.scenario_emotional_vocab_density,
-        communicationStyleEmotionalVocabDensityPercent: null,
       });
       const scoreForGateDeferred = computeInterviewWeightedCompositeFromPillars(
         mergedDeferredGate.scores,
@@ -163,7 +155,6 @@ export async function buildDeferredPersistGateModifierSnapshot(
         moment5Concreteness: mergedDeferredGate.moment5Concreteness ?? null,
         mentalizingOvercertaintyCount: mergedDeferredGate.mentalizingOvercertaintyCount ?? 0,
         disclosureCalibration: mergedDeferredGate.disclosureCalibration,
-        personalMomentEmotionalVocabLow: mergedDeferredGate.personal_moment_emotional_vocab_low ?? false,
         emotionRecognitionRawScore: emotionRawScoreForGate(),
         emotionRecognitionResponses: emotionResponsesForGate(),
         ...(typeof scoreForGateDeferred === 'number' && Number.isFinite(scoreForGateDeferred)

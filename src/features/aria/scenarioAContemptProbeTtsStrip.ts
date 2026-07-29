@@ -79,9 +79,9 @@ export function scenarioAContemptProbeResumeRepeatTtsText(storedAssistantText: s
   return storedAssistantText;
 }
 
-/** Canonical Scenario A repair ask after the contempt probe — injected when duplicate-strip empties the model turn. */
+/** Canonical Scenario A repair ask after the contempt probe — question only (ack is spoken separately). */
 export const SCENARIO_A_REPAIR_QUESTION_AFTER_CONTEMPT_COPY =
-  'Got it. If you were Ryan, how would you repair this?';
+  'If you were Ryan, how would you repair this?';
 
 /** @deprecated Prefer {@link SCENARIO_A_REPAIR_QUESTION_AFTER_CONTEMPT_COPY}. */
 export const S1_REPAIR_QUESTION = SCENARIO_A_REPAIR_QUESTION_AFTER_CONTEMPT_COPY;

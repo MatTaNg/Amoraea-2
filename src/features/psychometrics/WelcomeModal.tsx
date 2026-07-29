@@ -1,6 +1,5 @@
 import React, { useCallback, useEffect } from 'react';
 import {
-  Modal,
   View,
   Text,
   StyleSheet,
@@ -8,7 +7,7 @@ import {
   TouchableOpacity,
   Platform,
 } from 'react-native';
-import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { useSafeAreaInsets, SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { FlameOrb } from '@app/screens/FlameOrb';
 import { INTRO_FLAME_ORB_SIZE } from '@app/screens/flameOrbLogo';
@@ -128,9 +127,10 @@ export function WelcomeModal({
         },
       ];
 
+  if (!visible) return null;
+
   return (
-    <Modal visible={visible} animationType="fade" statusBarTranslucent>
-      <View style={[styles.safe, { paddingBottom: bottomInset }]}>
+    <SafeAreaView style={styles.safe} edges={['bottom', 'left', 'right']}>
         {onBackPress ? <PsychometricsBackButton onPress={onBackPress} /> : null}
         <TouchableOpacity
           style={[
@@ -152,10 +152,20 @@ export function WelcomeModal({
             scrollContentStyle,
             styles.scrollContent,
             // Top edge is open for absolute chrome; pad content below status bar + logout row.
-            { paddingTop: overlayTop + (onBackPress || onOpenAdminPanel ? 56 : 48) },
+            {
+              paddingTop: overlayTop + (onBackPress || onOpenAdminPanel ? 52 : 44),
+              paddingBottom: Math.max(
+                typeof scrollContentStyle.paddingBottom === 'number'
+                  ? scrollContentStyle.paddingBottom
+                  : spacing.xxl * 2,
+                bottomInset + spacing.lg,
+              ),
+            },
           ]}
-          showsVerticalScrollIndicator={false}
+          showsVerticalScrollIndicator={Platform.OS !== 'web'}
           keyboardShouldPersistTaps="handled"
+          nestedScrollEnabled
+          scrollEnabled
         >
           <View style={styles.logoWrap}>
             <FlameOrb state="idle" size={INTRO_FLAME_ORB_SIZE} minimalGlow />
@@ -203,8 +213,7 @@ export function WelcomeModal({
             />
           </View>
         </ScrollView>
-      </View>
-    </Modal>
+    </SafeAreaView>
   );
 }
 
@@ -224,7 +233,7 @@ const styles = StyleSheet.create({
   },
   logoWrap: {
     alignItems: 'center',
-    marginBottom: spacing.lg,
+    marginBottom: spacing.md,
   },
   title: {
     fontFamily: PSYCHOMETRICS_FONT_DISPLAY,

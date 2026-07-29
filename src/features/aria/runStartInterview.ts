@@ -2,6 +2,8 @@ import { Platform } from 'react-native';
 
 import { applyInterviewStartUnavailableFailure } from '@features/aria/applyInterviewStartUnavailableFailure';
 import { deliverInterviewOpeningGreeting } from '@features/aria/deliverInterviewOpeningGreeting';
+import { resolveDevScenarioJumpTargetFromSession } from '@features/aria/devScenarioJumpReferral';
+import { clearInterviewResumeHandle } from '@features/aria/interviewResumeHandleCoordinator';
 import { isGreetingOnly } from '@features/aria/interviewLocalPersistence';
 import { runHandleResume } from '@features/aria/runHandleResume';
 import { runInterviewSessionStartLogging } from '@features/aria/runInterviewSessionStartLogging';
@@ -13,6 +15,13 @@ import type {
 import { remoteLog } from '@utilities/remoteLog';
 import { clearInterviewFromStorage, loadInterviewFromStorage } from '@utilities/storage/InterviewStorage';
 import { shouldResumeMidInterviewFromSaved } from '@utilities/interviewResumeCursor';
+
+function logStartSkip(reason: string, detail?: Record<string, unknown>): void {
+  void remoteLog(`[START] skipped ${reason}`, detail);
+  if (__DEV__) {
+    console.warn('[START] skipped', reason, detail ?? '');
+  }
+}
 
 export async function runStartInterview(
   deps: StartInterviewDeps,
@@ -29,6 +38,7 @@ export async function runStartInterview(
     setInterviewStartInFlight,
     hasResumedRef,
     resumeLoadingFlowActiveRef,
+    resumeHandleInFlightRef,
     interviewStatusRef,
     interruptAllInterviewTtsOutput,
     setVoiceState,
@@ -39,29 +49,65 @@ export async function runStartInterview(
     currentMessagesRef,
   } = deps;
 
+  const fromUserGesture = params?.fromUserGesture === true;
+
+  if (fromUserGesture && interviewStatusRef.current === 'not_started') {
+    clearInterviewResumeHandle(userId);
+    if (resumeHandleInFlightRef) resumeHandleInFlightRef.current = false;
+    resumeLoadingFlowActiveRef.current = false;
+  }
+
   if (startInterviewInFlightRef.current) {
-    void remoteLog('[START] skipped duplicate in_flight');
+    logStartSkip('duplicate in_flight');
     return;
   }
   if (resumeLoadingFlowActiveRef.current) {
-    void remoteLog('[START] skipped resume_loading_in_flight');
-    return;
+    if (fromUserGesture && interviewStatusRef.current === 'not_started') {
+      void remoteLog('[START] cleared stale resume_loading_in_flight');
+      resumeLoadingFlowActiveRef.current = false;
+    } else {
+      logStartSkip('resume_loading_in_flight');
+      return;
+    }
   }
+
   const hydratedMidInterviewInMemory =
     currentMessagesRef.current.length > 0 && !isGreetingOnly(currentMessagesRef.current);
+
   if (
+    !fromUserGesture &&
     hasResumedRef.current &&
     (interviewStatusRef.current === 'in_progress' || hydratedMidInterviewInMemory)
   ) {
-    void remoteLog('[START] skipped already resume_hydrated', {
+    logStartSkip('already resume_hydrated', {
       interviewStatus: interviewStatusRef.current,
       messageCount: currentMessagesRef.current.length,
     });
     return;
   }
-  if (hasResumedRef.current && interviewStatusRef.current !== 'not_started') {
-    void remoteLog('[START] skipped resume_hydrated');
+  if (!fromUserGesture && hasResumedRef.current && interviewStatusRef.current !== 'not_started') {
+    logStartSkip('resume_hydrated');
     return;
+  }
+
+  if (fromUserGesture && interviewStatusRef.current === 'not_started' && userId && !isAdmin) {
+    const savedOnBegin = await loadInterviewFromStorage(userId);
+    if (savedOnBegin && shouldResumeMidInterviewFromSaved(savedOnBegin)) {
+      void remoteLog('[START] begin_gesture_routing_to_resume', {
+        messageCount: savedOnBegin.messages.length,
+        resumeActiveScenario: savedOnBegin.resumeActiveScenario ?? null,
+      });
+      await runHandleResume(deps as HandleResumeDeps, { saved: savedOnBegin });
+      return;
+    }
+  }
+
+  const devJumpTarget =
+    userId && !isAdmin ? await resolveDevScenarioJumpTargetFromSession(undefined) : null;
+  if (devJumpTarget != null && userId && !isAdmin) {
+    await clearInterviewFromStorage(userId);
+    hasResumedRef.current = false;
+    void remoteLog('[START] Dev scenario jump — cleared saved progress', { target: devJumpTarget });
   }
   if (hasResumedRef.current && interviewStatusRef.current === 'not_started') {
     const savedStaleResume =
@@ -94,6 +140,7 @@ export async function runStartInterview(
       userId: userId ?? null,
       isAdmin,
       platform: Platform.OS,
+      fromUserGesture,
     });
     if (userId && !isAdmin) {
       if (interviewAttemptBootstrap === 'failed') {
@@ -109,7 +156,10 @@ export async function runStartInterview(
       }
     }
     if (isAdmin) await clearInterviewFromStorage(userId);
-    const saved = savedForResumeDecision ?? (await loadInterviewFromStorage(userId));
+    const saved =
+      devJumpTarget != null && userId && !isAdmin
+        ? null
+        : savedForResumeDecision ?? (await loadInterviewFromStorage(userId));
     if (saved && (saved.scenariosCompleted?.length ?? 0) >= 3 && !shouldResumeMidInterviewFromSaved(saved)) {
       await clearInterviewFromStorage(userId);
     } else if (
@@ -119,7 +169,7 @@ export async function runStartInterview(
       shouldResumeMidInterviewFromSaved(saved)
     ) {
       if (hasResumedRef.current && interviewStatusRef.current === 'in_progress') {
-        void remoteLog('[START] skipped already in_progress');
+        logStartSkip('already in_progress');
         return;
       }
       void remoteLog('[START] routing_to_resume_hydration', {

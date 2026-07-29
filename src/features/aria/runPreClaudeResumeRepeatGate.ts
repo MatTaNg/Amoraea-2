@@ -12,17 +12,15 @@ import {
   resolveInterviewQuestionRepeatTtsText,
 } from '@features/aria/interviewDisengagementProbes';
 import {
+  classifyResumeWelcomeBackRepeatIntent,
+} from '@features/aria/resumeWelcomeBackRepeat';
+import {
   buildScenarioPlusQuestionRepeatTts,
   getScenarioVignetteBodyForRepeat,
-  resolveInterviewRepeatRequestTarget,
   shouldAttachScenarioVignetteForRepeat,
   withRepeatRequestAcknowledgment,
 } from '@features/aria/interviewRepeatRequestTarget';
-import {
-  countSpokenWords,
-  looksLikeReadinessAffirmation,
-  looksLikeReadinessYesHomophone,
-} from '@features/aria/interviewLanguageGate';
+import { countSpokenWords } from '@features/aria/interviewLanguageGate';
 import type { MetaCommentClassification } from '@features/aria/metaCommentClassification';
 import { isExplicitRepeatRequestPreClassification } from '@features/aria/metaCommentClassification';
 import type { PreClaudeTurnGateDeps } from '@features/aria/preClaudeTurnGateTypes';
@@ -32,7 +30,6 @@ import {
   looksLikeRepeatCueInAmbiguousReply,
   shouldBypassResumeRepeatGateForLongAnswer,
 } from '@features/aria/resumeRepeatGate';
-import { classifyResumeRepeatIntent } from '@features/aria/resumeRepeatIntent';
 import { fetchElevenLabsMpegArrayBuffer } from '@features/aria/utils/elevenLabsTtsFetch';
 import { remoteLog } from '@utilities/remoteLog';
 import { getSessionLogRuntime, writeSessionLog } from '@utilities/sessionLogging';
@@ -97,23 +94,25 @@ export async function runPreClaudeResumeRepeatGate(
   deps.resumeRepeatChoicePendingRef.current = false;
   let reentryTypeForLogging: PreClaudeResumeRepeatReentryType = null;
 
+  let welcomeIntent = classifyResumeWelcomeBackRepeatIntent(args.trimmed);
+  if (
+    welcomeIntent === 'ambiguous' &&
+    looksLikeRepeatCueInAmbiguousReply(args.trimmed)
+  ) {
+    welcomeIntent = 'repeat_scenario';
+  }
+
   const deferRepeatToMetaVerbatimHandler =
-    (args.metaCommentClassification?.type === 'confusion' &&
+    welcomeIntent === 'ambiguous' &&
+    ((args.metaCommentClassification?.type === 'confusion' &&
       args.metaCommentClassification?.confusion_subtype === 'repeat_request') ||
-    isExplicitRepeatRequestPreClassification(args.trimmed);
+      isExplicitRepeatRequestPreClassification(args.trimmed));
   if (deferRepeatToMetaVerbatimHandler) {
     // Keep resumeLastAssistantTextRef — meta verbatim replay uses it as fallback so a
     // post-reentry "repeat what you said" does not fall through to the opening briefing.
     return { haltTurn: false, reentryTypeForLogging: 'repeat_requested' };
   }
 
-  let intent = classifyResumeRepeatIntent(args.trimmed);
-  if (
-    intent !== 'repeat' &&
-    (looksLikeReadinessYesHomophone(args.spokenText.trim()) || looksLikeReadinessAffirmation(args.trimmed))
-  ) {
-    intent = 'continue';
-  }
   const resumeCueWordCount = countSpokenWords(args.trimmed);
   const resumeLastLooksLikeClosing = looksLikeInterviewClosingAssistantMessage(
     deps.resumeLastAssistantTextRef.current ?? '',
@@ -127,25 +126,25 @@ export async function runPreClaudeResumeRepeatGate(
     return { haltTurn: false, reentryTypeForLogging: 'direct_answer' };
   }
 
-  if ((intent === 'continue' || intent === 'repeat') && resumeCueWordCount > 18) {
-    intent = 'ambiguous';
+  if (
+    (welcomeIntent === 'repeat_scenario' ||
+      welcomeIntent === 'repeat_question' ||
+      welcomeIntent === 'continue') &&
+    resumeCueWordCount > 18
+  ) {
+    welcomeIntent = 'ambiguous';
   }
   if (
-    intent === 'continue' &&
+    welcomeIntent === 'continue' &&
     (args.proactiveScenarioSkipConfirmationInjection || args.skipRequestMetaConfirmationInjection)
   ) {
-    intent = 'ambiguous';
+    welcomeIntent = 'ambiguous';
   }
   const directAnswer =
-    intent === 'ambiguous' &&
+    welcomeIntent === 'ambiguous' &&
     looksLikeDirectResumeAnswer(args.trimmed, deps.resumeLastAssistantTextRef.current);
-  const inferredRepeatFromAmbiguous =
-    intent === 'ambiguous' &&
-    !directAnswer &&
-    resumeCueWordCount <= 18 &&
-    looksLikeRepeatCueInAmbiguousReply(args.trimmed);
 
-  if (intent === 'repeat' || inferredRepeatFromAmbiguous) {
+  if (welcomeIntent === 'repeat_scenario' || welcomeIntent === 'repeat_question') {
     reentryTypeForLogging = 'repeat_requested';
     logResumeRepeatResponseReceived(
       deps,
@@ -176,11 +175,13 @@ export async function runPreClaudeResumeRepeatGate(
           | 1
           | 2
           | 3;
-        const attachVignette = shouldAttachScenarioVignetteForRepeat({
-          target: resolveInterviewRepeatRequestTarget(args.trimmed),
-          interviewMoment: deps.currentInterviewMomentRef.current,
-          scenarioNumber: scenarioNum,
-        });
+        const attachVignette =
+          welcomeIntent === 'repeat_scenario' &&
+          shouldAttachScenarioVignetteForRepeat({
+            target: 'scenario',
+            interviewMoment: deps.currentInterviewMomentRef.current,
+            scenarioNumber: scenarioNum,
+          });
         const repeatTtsText = withRepeatRequestAcknowledgment(
           attachVignette
             ? buildScenarioPlusQuestionRepeatTts(
@@ -239,7 +240,7 @@ export async function runPreClaudeResumeRepeatGate(
     return { haltTurn: true, reentryTypeForLogging };
   }
 
-  if (intent === 'continue') {
+  if (welcomeIntent === 'continue') {
     reentryTypeForLogging = 'continue_requested';
     logResumeRepeatResponseReceived(
       deps,

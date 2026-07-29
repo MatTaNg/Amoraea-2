@@ -8,6 +8,8 @@ import {
 /** Screen order per spec: Name -> Dealbreakers flow. No welcome screen. */
 export type OnboardingStep =
   | 'name'
+  | 'hobbies'
+  | 'hobbyDealbreaker'
   | 'ethnicity'
   | 'ethnicityAttraction'
   | 'attraction'
@@ -51,11 +53,14 @@ export type OnboardingStep =
   | 'photos'
   | 'matchPreferences'
   | 'attractionPreferences'
+  | 'profilePrompts'
   | 'profileComplete'
   | 'complete';
 
 export const ONBOARDING_STEPS_ORDER: OnboardingStep[] = [
   'name',
+  'hobbies',
+  'hobbyDealbreaker',
   'attraction',
   'ethnicity',
   'ethnicityAttraction',
@@ -99,6 +104,7 @@ export const ONBOARDING_STEPS_ORDER: OnboardingStep[] = [
   'lifeDomains',
   ...LIFE_DOMAIN_OPTIONAL_OPEN_ENDED_ONBOARDING_STEPS.map((s) => s.step),
   'typology',
+  'profilePrompts',
   'profileComplete',
   'complete',
 ];

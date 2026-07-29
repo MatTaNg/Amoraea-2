@@ -63,6 +63,22 @@ describe('useAriaInterviewSession', () => {
     expect(result.current.ttsScreenReadyRef.current).toBe(true);
   });
 
+  it('awaitScreenReadySignal resolves via fallback timer when interactions never run', async () => {
+    jest.spyOn(InteractionManager, 'runAfterInteractions').mockImplementation(() => ({
+      cancel: jest.fn(),
+    }));
+    jest.useFakeTimers();
+    const { result } = renderHook(() => useAriaInterviewSession('user-1'));
+    expect(result.current.ttsScreenReadyRef.current).toBe(false);
+    const pending = result.current.awaitScreenReadySignal();
+    await act(async () => {
+      jest.advanceTimersByTime(500);
+      await pending;
+    });
+    expect(result.current.ttsScreenReadyRef.current).toBe(true);
+    jest.useRealTimers();
+  });
+
   it('marks recording restart telemetry once after VAD bypass', () => {
     const { result } = renderHook(() => useAriaInterviewSession('user-1'));
     act(() => {

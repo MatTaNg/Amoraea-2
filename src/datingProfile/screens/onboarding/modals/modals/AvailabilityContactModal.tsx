@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import { ONBOARDING_STEP_SCREEN_EDGES, ONBOARDING_STEP_SCREEN_EDGES_WITH_BOTTOM } from '../onboardingStepScreenEdges';
 import { View, Text, ScrollView } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Button } from '@/shared/ui/Button';
@@ -55,7 +56,7 @@ export const AvailabilityContactModal: React.FC<AvailabilityContactModalProps> =
 
   return (
     <>
-      <SafeAreaView style={styles.screen} edges={['top', 'left', 'right', 'bottom']}>
+      <SafeAreaView style={styles.screen} edges={ONBOARDING_STEP_SCREEN_EDGES_WITH_BOTTOM}>
         <OnboardingHeader title="Set my availability and contact info" onBack={onBack} />
         <ScrollView 
           contentContainerStyle={styles.scrollContent}

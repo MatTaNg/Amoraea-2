@@ -7,10 +7,12 @@ export type InterviewMicLifecycleDeps = {
   voiceState: VoiceState;
   interviewStatus: string;
   interviewStatusRef: React.MutableRefObject<string>;
+  resumeLoadingFlowActiveRef: React.MutableRefObject<boolean>;
   audioRecorder: {
     isRecording: boolean;
     reinitializeMicrophoneSession: () => Promise<boolean>;
     stopRecording: () => void | Promise<void>;
+    releaseRecordingInstance: () => Promise<void>;
   };
   applyRouteProbeAfterResume: (source: 'app_resume' | 'media_services_reset') => Promise<void>;
   setMicSessionRecovering: (v: boolean) => void;
@@ -26,7 +28,16 @@ export type InterviewMicLifecycleDeps = {
   currentInterviewMomentRef: React.MutableRefObject<number>;
   currentScenarioRef: React.MutableRefObject<number | null>;
   lastQuestionTextRef: React.MutableRefObject<string | null>;
+  resumeLastAssistantTextRef: React.MutableRefObject<string | null>;
+  resumeWelcomeMessageRef: React.MutableRefObject<string | null>;
+  currentMessagesRef: React.MutableRefObject<Array<{ role: string; content?: string | null }>>;
+  interviewNameRef: React.MutableRefObject<string | null>;
+  resumeInPersonalPartRef: React.MutableRefObject<boolean>;
   emotionModalPendingTransitionRef: React.MutableRefObject<boolean>;
+  resumeOfferWelcomeTtsRef: React.MutableRefObject<boolean>;
+  resumeRepeatChoicePendingRef: React.MutableRefObject<boolean>;
+  processUserSpeech?: (text: string) => void | Promise<void>;
+  speakTextSafe?: (text: string, opts?: Record<string, unknown>) => Promise<void>;
   interruptAllInterviewTtsOutput: () => void;
   stopElevenLabsPlayback: () => Promise<void>;
   hasInterviewClosingSpeakInFlightForSession: (key: string | null) => boolean;

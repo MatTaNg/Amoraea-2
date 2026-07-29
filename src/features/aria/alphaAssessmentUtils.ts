@@ -5,7 +5,6 @@
 
 import { INTERVIEW_MARKER_IDS, type InterviewMarkerId } from '@features/aria/interviewMarkers';
 import { combinedContemptFromScenarioPillarScores } from '@features/aria/aggregateMarkerScoresFromSlices';
-import { scenarioEmotionalVocabDensityPercentFromTranscript } from '@features/aria/personalMomentEmotionalVocab';
 import { isNotAssessedDueToTechnicalInterruption } from '@features/aria/probeAndScoringUtils';
 
 export const CONSTRUCT_IDS = [...INTERVIEW_MARKER_IDS] as InterviewMarkerId[];
@@ -145,6 +144,26 @@ export function calculateConstructAsymmetry(
     profile_type: profileType,
     low_data_warning,
   };
+}
+
+function scenarioEmotionalVocabDensityPercentFromTranscript(
+  messages: ReadonlyArray<{ role?: string; content?: string; scenarioNumber?: number | null }>,
+  emotionLexicon: readonly string[],
+): number | null {
+  let wordTotal = 0;
+  let hitTotal = 0;
+  for (const m of messages) {
+    if (m.role !== 'user') continue;
+    const sn = m.scenarioNumber;
+    if (sn !== 1 && sn !== 2 && sn !== 3) continue;
+    const tokens = (m.content ?? '').toLowerCase().split(/\s+/).filter(Boolean);
+    wordTotal += tokens.length;
+    for (const t of tokens) {
+      if (emotionLexicon.some((w) => t === w || t.startsWith(w) || w.startsWith(t))) hitTotal++;
+    }
+  }
+  if (wordTotal <= 0) return null;
+  return Math.round((hitTotal / wordTotal) * 100 * 1000) / 1000;
 }
 
 export interface ScenarioBoundaries {
@@ -345,6 +364,7 @@ export function analyzeLanguageMarkers(
     deflection_phrases: countPhrasesInText(fullText, deflectionPhrases),
     scenario_emotional_vocab_density: scenarioEmotionalVocabDensityPercentFromTranscript(
       userMessages as Array<{ role?: string; content?: string; scenarioNumber?: number | null }>,
+      emotionWords,
     ),
     per_scenario: perScenario,
   };

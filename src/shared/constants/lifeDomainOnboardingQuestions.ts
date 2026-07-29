@@ -222,16 +222,15 @@ export function isLifeDomainOptionalOpenEndedStep(
 
 export function getActiveLifeDomainOptionalOpenEndedSteps(
   wantKids?: string | null,
-  lifeDomainAnswers?: Partial<Record<LifeDomainId, Record<string, string | undefined>>>,
+  _lifeDomainAnswers?: Partial<Record<LifeDomainId, Record<string, string | undefined>>>,
 ): Array<{
   step: LifeDomainOptionalOpenEndedOnboardingStep;
   domainId: LifeDomainId;
 }> {
   const ctx = { wantKids };
-  return LIFE_DOMAIN_OPTIONAL_OPEN_ENDED_ONBOARDING_STEPS.filter(({ domainId }) => {
-    const answers = lifeDomainAnswers?.[domainId] ?? {};
-    return getLeftoverOptionalOpenEndedQuestionsForDomain(domainId, answers, ctx).length > 0;
-  }) as Array<{
+  return LIFE_DOMAIN_OPTIONAL_OPEN_ENDED_ONBOARDING_STEPS.filter(({ domainId }) =>
+    getOptionalOpenEndedQuestionsForDomain(domainId, ctx).length > 0,
+  ) as Array<{
     step: LifeDomainOptionalOpenEndedOnboardingStep;
     domainId: LifeDomainId;
   }>;

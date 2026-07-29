@@ -21,7 +21,6 @@ import { CLAUDE_SONNET_MODEL } from './anthropicModel.ts';
 import { communicationFloorFieldsFromTranscript } from './communicationFloorFromTranscript.ts';
 import { evaluateInterviewCompletionGate, type CompletionGateFailure } from './interviewCompletionGate.ts';
 import { mergeMomentConcretenessForGate, normalizeMoment4Concreteness, normalizeResponseConcreteness } from './personalMomentConcreteness.ts';
-import { scenarioEmotionalVocabDensityPercentFromTranscript } from './personalMomentEmotionalVocab.ts';
 import { applyPsychometricModifierToAttempt } from './applyPsychometricModifier.ts';
 import { normalizeGateFailDetailForPersist } from './gateFailDetailForPersist.ts';
 import { buildDefenseCrossReferenceForAttempt } from './crossReferenceDefenseDetection.ts';
@@ -608,12 +607,6 @@ export async function runCompleteStandardInterview(
     return { ok: true, attemptId, skipped: 'completion_gate_incomplete' };
   }
 
-  try {
-    await supabase.rpc('apply_referral_completion_effects', { p_user_id: userId });
-  } catch {
-    /* best-effort */
-  }
-
   // Two separate `users` reads must use distinct binding names (Deno rejects duplicate `userRow` in one scope).
   const { data: userWeights } = await supabase
     .from('users')
@@ -718,8 +711,6 @@ export async function runCompleteStandardInterview(
     egoDevelopmentLevel: holisticEgo,
     defensePatternTranscript: transcript,
     disclosureCalibrationTranscript: transcript as unknown as DisclosureCalibrationTurn[],
-    scenarioEmotionalVocabDensityPercent: scenarioEmotionalVocabDensityPercentFromTranscript(transcript),
-    communicationStyleEmotionalVocabDensityPercent: null,
   });
 
   const disclosureCalibrationForAttempt =
@@ -737,12 +728,6 @@ export async function runCompleteStandardInterview(
   const moment5ConcretenessForAttempt =
     mergeMomentConcretenessForGate(m5StoredObj, rowTyped.moment_5_concreteness) ??
     aggregatedResult.moment5Concreteness;
-  const vocabDensityForAttempt =
-    aggregatedResult.personal_moment_emotional_vocab_density ??
-    finiteNumberOrNull(rowTyped.personal_moment_emotional_vocab_density);
-  const vocabLowForAttempt =
-    aggregatedResult.personal_moment_emotional_vocab_low ||
-    rowTyped.personal_moment_emotional_vocab_low === true;
   const mentalizingOvercertaintyCountForAttempt = aggregatedResult.mentalizingOvercertaintyCount ?? 0;
   const defensePatternsForAttempt = normalizeDefensePatternsForPersist(aggregatedResult.defensePatterns);
 
@@ -760,8 +745,6 @@ export async function runCompleteStandardInterview(
     egoLevel: egoLevelForAttempt,
     m4: moment4ConcretenessForAttempt,
     m5: moment5ConcretenessForAttempt,
-    vocabDensity: vocabDensityForAttempt,
-    vocabLow: vocabLowForAttempt,
     erRaw: emotionRawScoreForAttempt,
     overcertainty: mentalizingOvercertaintyCountForAttempt,
     disclosure: disclosureCalibrationForAttempt,
@@ -799,7 +782,6 @@ export async function runCompleteStandardInterview(
     erRaw: emotionRawScoreForAttempt,
     overcertainty: mentalizingOvercertaintyCountForAttempt,
     disclosure: disclosureCalibrationForAttempt,
-    vocabLow: vocabLowForAttempt,
   });
   const personalWordCounts = personalMomentWordCountsForDisclosure(markerSlices, transcript);
   const pillarScoresForGate: Record<string, number> =
@@ -821,8 +803,6 @@ export async function runCompleteStandardInterview(
     disclosureCalibration: disclosureCalibrationForAttempt,
     moment4WordCount: personalWordCounts.moment4WordCount,
     moment5WordCount: personalWordCounts.moment5WordCount,
-    personalMomentEmotionalVocabDensity: vocabDensityForAttempt,
-    personalMomentEmotionalVocabLow: vocabLowForAttempt,
     emotionRecognitionRawScore: emotionRawScoreForAttempt,
     emotionRecognitionResponses: emotionResponsesForAttempt,
     mentalizingOvercertaintyCount: mentalizingOvercertaintyCountForAttempt,
@@ -906,13 +886,6 @@ export async function runCompleteStandardInterview(
     _queuedAt: new Date().toISOString(),
   };
 
-  console.log(
-    '[VocabFlag] persisting personal_moment_emotional_vocab_low:',
-    vocabLowForAttempt,
-    'density:',
-    vocabDensityForAttempt,
-  );
-
   console.log('[Modifier] persisting score_modifier:', gate.scoreModifier, 'modified_weighted_score:', gate.modifiedWeightedScore);
   const wEdge = gate.weightedScore;
   const smEdge = gate.scoreModifier ?? 0;
@@ -969,8 +942,8 @@ export async function runCompleteStandardInterview(
       disclosure_calibration: disclosureCalibrationForAttempt ?? existingDisclosure,
       moment_4_concreteness: moment4ConcretenessPersist ?? rowTyped.moment_4_concreteness ?? null,
       moment_5_concreteness: moment5ConcretenessPersist ?? rowTyped.moment_5_concreteness ?? null,
-      personal_moment_emotional_vocab_density: vocabDensityForAttempt,
-      personal_moment_emotional_vocab_low: vocabLowForAttempt,
+      personal_moment_emotional_vocab_density: null,
+      personal_moment_emotional_vocab_low: false,
       depth_signal_modifier: persistedDepthModifier,
       score_modifier: persistedScoreModifier,
       modified_weighted_score: persistedModifiedWeighted,
@@ -1028,8 +1001,8 @@ export async function runCompleteStandardInterview(
       defense_cross_reference: defenseCrossReference,
       moment_4_concreteness: moment4ConcretenessPersist ?? rowTyped.moment_4_concreteness ?? null,
       moment_5_concreteness: moment5ConcretenessPersist ?? rowTyped.moment_5_concreteness ?? null,
-      personal_moment_emotional_vocab_density: vocabDensityForAttempt,
-      personal_moment_emotional_vocab_low: vocabLowForAttempt,
+      personal_moment_emotional_vocab_density: null,
+      personal_moment_emotional_vocab_low: false,
       emotion_recognition_raw_score: emotionRawPersist,
       emotion_recognition_score: emotionDisplayPersist,
       emotion_recognition_responses: emotionResponsesForAttempt,
@@ -1057,8 +1030,8 @@ export async function runCompleteStandardInterview(
       defense_cross_reference: defenseCrossReference,
       ego_development_level: egoLevelForAttempt ?? existingEgo,
       disclosure_calibration: disclosureCalibrationForAttempt ?? existingDisclosure,
-      personal_moment_emotional_vocab_density: vocabDensityForAttempt,
-      personal_moment_emotional_vocab_low: vocabLowForAttempt,
+      personal_moment_emotional_vocab_density: null,
+      personal_moment_emotional_vocab_low: false,
       depth_signal_modifier: persistedDepthModifier,
       score_modifier: persistedScoreModifier,
       modified_weighted_score: persistedModifiedWeighted,

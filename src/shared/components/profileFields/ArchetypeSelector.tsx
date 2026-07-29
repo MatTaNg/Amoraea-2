@@ -9,6 +9,7 @@ import {
 import {
   ARCHETYPE_BY_ID,
   ARCHETYPE_CATEGORIES,
+  MAX_PROFILE_ARCHETYPES,
   type ArchetypeId,
 } from '@/shared/constants/archetypes';
 import { theme } from '@/shared/theme/theme';
@@ -16,7 +17,6 @@ import { theme } from '@/shared/theme/theme';
 const FONT_BODY =
   Platform.OS === 'web' ? "'DM Sans', system-ui, sans-serif" : undefined;
 
-const MAX_SELECTION = 2;
 const ACCENT = theme.colors.primary;
 
 type Props = {
@@ -25,7 +25,7 @@ type Props = {
 };
 
 export const ArchetypeSelector: React.FC<Props> = ({ value, onChange }) => {
-  const atCapacity = value.length >= MAX_SELECTION;
+  const atCapacity = value.length >= MAX_PROFILE_ARCHETYPES;
 
   const toggle = useCallback(
     (id: ArchetypeId) => {
@@ -42,11 +42,11 @@ export const ArchetypeSelector: React.FC<Props> = ({ value, onChange }) => {
   return (
     <View style={styles.root}>
       <Text style={styles.lead}>
-        Choose the two archetypes that feel most like you. These help others understand your energy
-        in relationships.
+        Choose up to {MAX_PROFILE_ARCHETYPES} archetypes that feel most like you. These help others
+        understand your energy in relationships.
       </Text>
       <Text style={styles.counter}>
-        {value.length} / {MAX_SELECTION} selected
+        {value.length} / {MAX_PROFILE_ARCHETYPES} selected
       </Text>
 
       {ARCHETYPE_CATEGORIES.map((category) => (

@@ -2,7 +2,10 @@ import { supabase } from '@data/supabase/client';
 import { resolvePillarScoresForNarrativeFromAttempt } from '@features/aria/resolvePillarScoresForNarrative';
 import { fetchMostRecentCompletedInterviewAttemptId } from '@features/psychometrics/interviewCompletionStatus';
 import { finalizeInterviewOnlyGateForAttempt } from '@features/psychometrics/finalizeInterviewOnlyGate';
-import { kickClientInterviewNarrativeIfPending } from '@utilities/kickClientInterviewNarrativeIfPending';
+import {
+  kickClientInterviewNarrativeIfPending,
+  narrativeFailedWithMissingPillarScores,
+} from '@utilities/kickClientInterviewNarrativeIfPending';
 
 export const INTERVIEW_REPORT_PILLAR_KEYS = [
   'repair',
@@ -216,7 +219,11 @@ export async function refreshInterviewReportAttemptForPartialReport(
 
   const refreshed = (await loadInterviewReportAttempt(userId)) ?? row;
 
-  if (refreshed.reasoning_pending) {
+  const shouldKickNarrative =
+    refreshed.reasoning_pending ||
+    (refreshed.hasPersistedPillarScores &&
+      narrativeFailedWithMissingPillarScores(refreshed.ai_reasoning));
+  if (shouldKickNarrative) {
     void kickClientInterviewNarrativeIfPending(
       userId,
       refreshed.id,

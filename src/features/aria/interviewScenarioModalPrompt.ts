@@ -1,3 +1,5 @@
+import { assessablePromptQuestionBody } from '@features/aria/interviewAssessablePromptText';
+import { isIrrelevantAnswerRetryAssistantLine } from '@features/aria/interviewAnswerRelevance';
 import { isClientOrElongatingInterviewProbeAssistant } from '@features/aria/interviewDisengagementProbes';
 import { isMisplacedScenarioMetaRedirectText } from '@features/aria/misplacedScenarioAnswerLogic';
 import {
@@ -97,6 +99,7 @@ function isScriptedScenarioConstructProbeForModal(text: string): boolean {
 export function isScenarioModalFollowUpProbe(text: string | null | undefined): boolean {
   const raw = (text ?? '').trim();
   if (!raw) return false;
+  if (isIrrelevantAnswerRetryAssistantLine(raw)) return true;
   if (isScriptedScenarioConstructProbeForModal(raw)) return false;
   if (isForbiddenScenarioCSophiePrescriptiveFollowUpQuestion(raw)) return true;
   if (isMisplacedScenarioMetaRedirectText(raw)) return true;
@@ -177,6 +180,13 @@ function isScenarioModalFooterQuestionParagraph(para: string): boolean {
   return false;
 }
 
+/** Footer should show the interviewer question only — never repeated vignette dialogue. */
+function finalizeScenarioModalQuestion(candidate: string): string {
+  const trimmed = (candidate ?? '').trim();
+  if (!trimmed) return trimmed;
+  return assessablePromptQuestionBody(trimmed) || trimmed;
+}
+
 export function extractScenarioModalQuestionFromAssistantText(text: string): string | null {
   const t = text.trim();
   if (!t.includes('?')) return null;
@@ -185,7 +195,9 @@ export function extractScenarioModalQuestionFromAssistantText(text: string): str
   const lastParaBreak = t.lastIndexOf('\n\n', lastQ);
   if (lastParaBreak >= 0) {
     const para = t.slice(lastParaBreak + 2, lastQ + 1).trim();
-    if (para.includes('?') && isScenarioModalFooterQuestionParagraph(para)) return para;
+    if (para.includes('?') && isScenarioModalFooterQuestionParagraph(para)) {
+      return finalizeScenarioModalQuestion(para);
+    }
   }
 
   const prefix = t.slice(0, lastQ);
@@ -197,7 +209,7 @@ export function extractScenarioModalQuestionFromAssistantText(text: string): str
   }
   if (startAfterQuote >= 0) {
     const candidate = t.slice(startAfterQuote, lastQ + 1).trim();
-    if (candidate.includes('?')) return candidate;
+    if (candidate.includes('?')) return finalizeScenarioModalQuestion(candidate);
   }
 
   const beforeClose = prefix;
@@ -211,7 +223,7 @@ export function extractScenarioModalQuestionFromAssistantText(text: string): str
     start = m.index + m[0].length;
   }
   const out = t.slice(start, lastQ + 1).trim();
-  return out.length > 0 ? out : null;
+  return out.length > 0 ? finalizeScenarioModalQuestion(out) : null;
 }
 
 /** Footer should show the interviewer question only — never repeated vignette dialogue. */

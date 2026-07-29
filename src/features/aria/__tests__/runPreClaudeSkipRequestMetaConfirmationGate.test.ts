@@ -69,6 +69,40 @@ describe('runPreClaudeSkipRequestMetaConfirmationGate', () => {
     );
   });
 
+  it('offers skip confirmation on moment 5 with scenario tag 3', async () => {
+    const customSpeech = 'Skipping may affect your score — do you still want to skip?';
+    const speakTextSafe = jest.fn().mockResolvedValue(undefined);
+    const setMessages = jest.fn();
+    const deps = createMockPreClaudeDeps({
+      currentInterviewMomentRef: { current: 5 },
+      currentScenarioRef: { current: 3 },
+      speakTextSafe,
+      setMessages,
+    });
+    const m5Messages = [
+      {
+        role: 'assistant',
+        content: 'Think of a time when you had a conflict with someone important to you.',
+        scenarioNumber: 3,
+        interviewMoment: 5,
+      },
+      { role: 'user', content: 'Can we skip this one?', scenarioNumber: 3, interviewMoment: 5 },
+    ];
+
+    const result = await runPreClaudeSkipRequestMetaConfirmationGate(deps, m5Messages, customSpeech);
+
+    expect(result).toEqual({ haltTurn: true });
+    expect(setMessages).toHaveBeenCalledWith(
+      expect.arrayContaining([
+        expect.objectContaining({
+          role: 'assistant',
+          content: customSpeech,
+          scenarioNumber: 3,
+        }),
+      ]),
+    );
+  });
+
   it('marks hadPriorAnswer false when the user has not answered substantively yet', async () => {
     const deps = createMockPreClaudeDeps({
       currentInterviewMomentRef: { current: 1 },

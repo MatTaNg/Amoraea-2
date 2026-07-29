@@ -69,8 +69,7 @@ export function RelationshipTypologyIntroScreen() {
             <Text style={styles.title}>How we learn how you connect</Text>
             <Text style={styles.subtitle}>
               You will complete four brief psychometric tests and your profile—about{' '}
-              {TYPOLOGY_ONBOARDING_TOTAL_DURATION_LABEL} total, with pauses between each step. We
-              start with the shortest questionnaire first.
+              {TYPOLOGY_ONBOARDING_TOTAL_DURATION_LABEL} total, with pauses between each step.
             </Text>
 
             <Text style={styles.sectionLabel}>What you will complete</Text>
@@ -97,13 +96,12 @@ export function RelationshipTypologyIntroScreen() {
 
             <Text style={styles.body}>
               These are validated research instruments. Together they
-              help us understand how you connect, communicate, and show up in relationships. Your
-              results stay private and are used only to improve your matches.
+              help us understand how you connect, communicate, and show up in relationships.
             </Text>
 
             <View style={styles.tip}>
               <Text style={styles.tipText}>
-                Answer honestly—there are no right or wrong patterns. You can leave and come back
+                Answer honestly, there are no right or wrong patterns. You can leave and come back
                 anytime; progress is saved automatically after each test.
               </Text>
             </View>
@@ -114,7 +112,7 @@ export function RelationshipTypologyIntroScreen() {
           </Text>
 
           <View style={styles.buttonBlock}>
-            <Button title="Begin relationship traits →" onPress={handleBegin} variant="solid" />
+            <Button title="Begin Sexual Communication Test →" onPress={handleBegin} variant="solid" />
           </View>
         </View>
       </ScrollView>

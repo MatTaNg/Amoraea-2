@@ -14,6 +14,7 @@ import type { MessageWithScenario } from '@features/aria/interviewScenarioScorin
 import { resolveScenarioUserTextForBoundaryReflection } from '@features/aria/interviewScenarioAdvanceAfterRepair';
 import { buildScenario1To2BundleForInterview } from '@features/aria/interviewTransitionBundles';
 import { ASSISTANT_INTERVIEW_SPEECH } from '@features/aria/interviewTtsSpeakOptions';
+import type { MetaCommentClassification } from '@features/aria/metaCommentClassification';
 import type { PreClaudeTurnGateDeps } from '@features/aria/preClaudeTurnGateTypes';
 import { remoteLog } from '@utilities/remoteLog';
 
@@ -34,6 +35,13 @@ function baseRepairHardStopEligible(deps: PreClaudeTurnGateDeps): boolean {
 /**
  * User refused after a repair ask — advance to Situation 2 without another model turn.
  */
+function metaTurnDefersS1RepairHardStop(
+  metaCommentClassification: MetaCommentClassification | null,
+): boolean {
+  const type = metaCommentClassification?.type;
+  return type === 'inability' || type === 'skip_request';
+}
+
 export async function runPreClaudeScenario1RepairHardStopGate(
   deps: PreClaudeTurnGateDeps,
   trimmed: string,
@@ -41,6 +49,7 @@ export async function runPreClaudeScenario1RepairHardStopGate(
   lastAssistantContent: string,
   userScenarioTag: number,
   participantFirstNameForSpoken: string,
+  metaCommentClassification: MetaCommentClassification | null = null,
 ): Promise<PreClaudeScenario1RepairHardStopGateResult> {
   if (!baseRepairHardStopEligible(deps)) {
     return { handled: false };
@@ -49,7 +58,8 @@ export async function runPreClaudeScenario1RepairHardStopGate(
     userScenarioTag !== 1 ||
     deps.currentInterviewMomentRef.current !== 1 ||
     !isInterviewHardStopUserTurn(trimmed) ||
-    !scenarioALastAssistantIsRepairProbeOrFollowUp(lastAssistantContent)
+    !scenarioALastAssistantIsRepairProbeOrFollowUp(lastAssistantContent) ||
+    metaTurnDefersS1RepairHardStop(metaCommentClassification)
   ) {
     return { handled: false };
   }

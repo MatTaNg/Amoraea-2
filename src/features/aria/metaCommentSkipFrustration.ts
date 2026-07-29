@@ -37,6 +37,12 @@ export function isSufficiencyChallengeFrustrationUtterance(text: string): boolea
 export const SKIP_REQUEST_CONFIRMATION_PROMPT_LINE =
   'Are you sure you want to skip this one? We can, but it may affect your score.';
 
+export function looksLikeSkipConfirmationAssistantPrompt(text: string): boolean {
+  const t = (text ?? '').trim();
+  if (!t) return false;
+  return /may affect your score/i.test(t) && /\bskip\b/i.test(t);
+}
+
 /**
  * Softer skip confirmation after inability / "I don't know" (not an explicit skip ask).
  * Keep distinct from {@link SKIP_REQUEST_CONFIRMATION_PROMPT_LINE}.

@@ -6,6 +6,7 @@ import type {
   OnRecordingCompleteParams,
 } from '@features/aria/onRecordingCompleteTypes';
 import { remoteLog } from '@utilities/remoteLog';
+import { markNativePlaybackBridgeBeforeNextTts } from '@features/aria/utils/audioModeHelpers';
 import { getSessionLogRuntime } from '@utilities/sessionLogging';
 import { writeAudioSessionLog } from '@utilities/sessionLogging/audioSessionLogEnvelope';
 
@@ -28,6 +29,7 @@ export async function runOnRecordingComplete(
     deps.lastRecordingVadSpeechDetectedRef.current = null;
     deps.recordingJustFinishedBeforeNextTtsRef.current = true;
     deps.postRecordingParallelStreamSettleRef.current = true;
+    markNativePlaybackBridgeBeforeNextTts('recording_complete');
     deps.setMicEnginePrimed(false);
     deps.setVoiceState('processing');
 

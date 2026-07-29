@@ -17,6 +17,11 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { FlameOrb, type FlameState } from './FlameOrb';
 import {
+  INTERVIEW_FLAME_ORB_HEIGHT_RATIO,
+  INTERVIEW_FLAME_ORB_MAX_SIZE,
+  INTERVIEW_FLAME_ORB_MIN_SIZE,
+} from './flameOrbLogo';
+import {
   isScenarioModalEligibleScenarioQuestionPrompt,
   resolveScenarioModalDisplayParts,
 } from '@features/aria/interviewLanguageGate';
@@ -306,9 +311,16 @@ export const UserInterviewLayout: React.FC<UserInterviewLayoutProps> = ({
 
   /** Shrink orb on short viewports so mic + SHOW SCENARIO stay above the fold (esp. mobile Safari + home indicator). */
   const flameOrbSize = useMemo(
-    () => Math.round(Math.min(240, Math.max(140, layoutHeight * 0.28))),
-    [layoutHeight]
+    () =>
+      Math.round(
+        Math.min(
+          INTERVIEW_FLAME_ORB_MAX_SIZE,
+          Math.max(INTERVIEW_FLAME_ORB_MIN_SIZE, layoutHeight * INTERVIEW_FLAME_ORB_HEIGHT_RATIO),
+        ),
+      ),
+    [layoutHeight],
   );
+  const ambientGlowSize = Math.round(flameOrbSize * 1.33);
 
   const mainDynamicStyle = useMemo(() => {
     const topPad = layoutHeight < 720 ? 10 : 24;
@@ -355,7 +367,18 @@ export const UserInterviewLayout: React.FC<UserInterviewLayoutProps> = ({
     <View style={styles.interviewMainColumnRoot}>
       {/* Soft blur behind flame — web only; native shadow reads as a misaligned circle behind the orb */}
       {Platform.OS === 'web' ? (
-        <View style={styles.ambientGlow} pointerEvents="none" />
+        <View
+          style={[
+            styles.ambientGlow,
+            {
+              width: ambientGlowSize,
+              height: ambientGlowSize,
+              marginLeft: -ambientGlowSize / 2,
+              borderRadius: ambientGlowSize / 2,
+            },
+          ]}
+          pointerEvents="none"
+        />
       ) : null}
 
       {/* FlameOrb — existing component, no changes */}
@@ -890,10 +913,6 @@ const styles = StyleSheet.create({
     position: 'absolute',
     top: '20%',
     left: '50%',
-    width: 320,
-    height: 320,
-    marginLeft: -160,
-    borderRadius: 160,
     backgroundColor: 'rgba(30, 111, 217, 0.1)',
     ...(Platform.OS === 'web'
       ? { filter: 'blur(40px)' }

@@ -20,6 +20,7 @@ import {
 import {
   coerceScenarioBJamesDifferentlyQuestionForTts,
   coerceScenarioBJamesRepairQuestionForTts,
+  isScenarioBBoundaryReflectionWithoutNextVignette,
   looksLikeScenarioBJamesDifferentlyQuestion,
   looksLikeScenarioBQ1Question,
   looksLikeScenarioBRepairAsJamesQuestion,
@@ -62,6 +63,21 @@ import {
   SKIP_REQUEST_CONFIRMATION_PROMPT_LINE,
 } from './metaCommentSkipFrustration';
 import { CONFUSION_REPEAT_OFFER_LINE } from './confusionRepeatOfferState';
+import { hasScenarioBoundaryWrapPhrase } from './emotionModalTransitionOrchestration';
+import { looksLikeBriefStreamAckOnly } from './interviewSpokenTextHeuristics';
+import { stripControlTokens } from './interviewControlTokens';
+import {
+  looksLikeMoment4GrudgePrompt,
+  looksLikeMoment4ThresholdQuestion,
+  MOMENT_4_COMMITMENT_THRESHOLD_QUESTION_CARD_BODY,
+  MOMENT_4_GRUDGE_QUESTION_TEXT,
+  transcriptIncludesMoment4ThresholdAssistant,
+} from './moment4ProbeLogic';
+import { looksLikeMoment4SpecificityFollowUpEcho } from './moment4SpecificityFollowUp';
+import {
+  MOMENT_5_ACCOUNTABILITY_QUESTION_TEXT,
+  transcriptAssistantContainsMoment5PrimaryConflictQuestion,
+} from './moment5ProbeLogic';
 
 function transcriptContainsScenarioCRepairQuestion(
   messages: Array<{ role: string; content?: string | null; isWelcomeBack?: boolean; isScoreCard?: boolean }>,
@@ -163,11 +179,46 @@ export function looksLikeScenarioTransitionBridgeAssistantLine(content: string):
   );
 }
 
+/** Boundary / pivot lines without a question — not the main prompt to replay on resume. */
+export function looksLikeNonQuestionScenarioTransitionLine(content: string): boolean {
+  const t = normalizeWhitespace(content ?? '').trim();
+  if (!t || /\?/.test(t)) return false;
+  if (looksLikeBriefStreamAckOnly(t)) return true;
+  if (looksLikeScenarioTransitionBridgeAssistantLine(t)) return true;
+  if (hasScenarioBoundaryWrapPhrase(t)) return true;
+  if (
+    /^got it[.!—–-]?\s/i.test(t) &&
+    /\b(one more|get personal|next situation|second one done|moving on|third situation)\b/i.test(t)
+  ) {
+    return true;
+  }
+  return false;
+}
+
+/** Main interview prompts to replay — substantive questions, not boundary pivots or brief acks. */
+export function isRepeatableMainInterviewQuestionLine(content: string): boolean {
+  const raw = normalizeWhitespace(content ?? '').trim();
+  if (!raw) return false;
+  if (looksLikeNonQuestionScenarioTransitionLine(raw)) return false;
+  if (isNonRepeatableAssistantLineForVerbatimReplay(raw)) return false;
+  if (/\?/.test(raw)) return true;
+  if (looksLikeScenarioARepairQuestion(raw)) return true;
+  if (looksLikeScenarioAContemptProbeQuestion(raw)) return true;
+  if (looksLikeScenarioBRepairAsJamesQuestion(raw)) return true;
+  if (looksLikeScenarioBJamesDifferentlyQuestion(raw)) return true;
+  if (isScenarioCRepairAssistantPrompt(raw)) return true;
+  if (looksLikeScenarioCSophiePerspectiveQuestion(raw)) return true;
+  if (looksLikeMoment4GrudgePrompt(raw)) return true;
+  if (looksLikeMoment4ThresholdQuestion(raw)) return true;
+  return false;
+}
+
 export function isNonRepeatableAssistantLineForVerbatimReplay(content: string): boolean {
   if (isStandalonePersonalDisclosureAcknowledgment(content)) return true;
   // Sophie / construct probes are the current question — allow verbatim repeat.
   if (looksLikeScenarioCSophiePerspectiveQuestion(content)) return false;
   if (isClientAudioRecoveryAssistantLine(content)) return true;
+  if (looksLikeNonQuestionScenarioTransitionLine(content)) return true;
   if (looksLikeScenarioTransitionBridgeAssistantLine(content)) return true;
   // Bridge-only skip-accept line (no trailing question) — never verbatim-repeat.
   const afterSkipBridge = stripSkipAcceptedNextQuestionBridge(content);
@@ -316,6 +367,8 @@ export function isPriorScenarioBleedForActiveScenario(raw: string, activeScenari
   if (activeScenario === 3) {
     return (
       isScenarioAConstructProbeBleed(raw) ||
+      looksLikeScenarioBQ1Question(raw) ||
+      isScenarioBBoundaryReflectionWithoutNextVignette(raw) ||
       looksLikeScenarioBRepairAsJamesQuestion(raw) ||
       looksLikeScenarioBJamesDifferentlyQuestion(raw)
     );
@@ -402,6 +455,64 @@ function resolveScenario3RepeatFallbackQuestion(
   return resolveSituation3ExactModalPrompt(messages);
 }
 
+function transcriptHasPersonalPartProgress(
+  messages: ReadonlyArray<{
+    role: string;
+    content?: string | null;
+    interviewMoment?: number;
+    isWelcomeBack?: boolean;
+    isScoreCard?: boolean;
+  }>,
+): boolean {
+  if (messages.some((m) => typeof m.interviewMoment === 'number' && m.interviewMoment >= 4)) {
+    return true;
+  }
+  return messages.some(
+    (m) =>
+      m.role === 'assistant' &&
+      !m.isWelcomeBack &&
+      !m.isScoreCard &&
+      (looksLikeMoment4GrudgePrompt(m.content ?? '') ||
+        looksLikeMoment4ThresholdQuestion(m.content ?? '') ||
+        looksLikeMoment4SpecificityFollowUpEcho(m.content ?? '')),
+  );
+}
+
+/** Last Moment 4 personal question to replay on resume/repeat — grudge, threshold, or specificity follow-up. */
+export function findLastMoment4RepeatableQuestionText(
+  messages: Array<{
+    role: string;
+    content?: string | null;
+    interviewMoment?: number;
+    isWelcomeBack?: boolean;
+    isScoreCard?: boolean;
+  }>,
+): string | null {
+  if (!transcriptHasPersonalPartProgress(messages)) return null;
+  for (let i = messages.length - 1; i >= 0; i--) {
+    const m = messages[i];
+    if (m.role !== 'assistant' || m.isScoreCard || m.isWelcomeBack) continue;
+    const raw = stripControlTokens(m.content ?? '').trim();
+    if (!raw) continue;
+    if (looksLikeMoment4ThresholdQuestion(raw)) {
+      return MOMENT_4_COMMITMENT_THRESHOLD_QUESTION_CARD_BODY;
+    }
+    if (looksLikeMoment4SpecificityFollowUpEcho(raw)) {
+      return raw.includes('?') ? raw : `${raw}?`;
+    }
+    if (looksLikeMoment4GrudgePrompt(raw)) {
+      return MOMENT_4_GRUDGE_QUESTION_TEXT;
+    }
+  }
+  if (messages.some((m) => typeof m.interviewMoment === 'number' && m.interviewMoment >= 4)) {
+    if (transcriptIncludesMoment4ThresholdAssistant(messages)) {
+      return MOMENT_4_COMMITMENT_THRESHOLD_QUESTION_CARD_BODY;
+    }
+    return MOMENT_4_GRUDGE_QUESTION_TEXT;
+  }
+  return null;
+}
+
 /** Last real scenario/interview question to re-read on repeat-request — skips client elongating probes. */
 export function findLastRepeatableInterviewQuestionText(
   messages: Array<{
@@ -414,7 +525,30 @@ export function findLastRepeatableInterviewQuestionText(
   fallbackLastQuestionText?: string | null,
   options?: { activeScenario?: number | null },
 ): string {
+  const hasMoment5PrimaryQuestion = messages.some(
+    (m) =>
+      m.role === 'assistant' &&
+      !m.isWelcomeBack &&
+      !m.isScoreCard &&
+      transcriptAssistantContainsMoment5PrimaryConflictQuestion(m.content ?? ''),
+  );
+  if (!hasMoment5PrimaryQuestion) {
+    const moment4Question = findLastMoment4RepeatableQuestionText(messages);
+    if (moment4Question) return moment4Question;
+  }
+
   const activeScenario = inferActiveScenarioForRepeat(messages, options?.activeScenario);
+  if (hasMoment5PrimaryQuestion) {
+    for (let i = messages.length - 1; i >= 0; i--) {
+      const m = messages[i];
+      if (m.role !== 'assistant' || m.isScoreCard || m.isWelcomeBack) continue;
+      const raw = stripSkipAcceptedNextQuestionBridge((m.content ?? '').trim());
+      if (!raw) continue;
+      if (transcriptAssistantContainsMoment5PrimaryConflictQuestion(raw)) {
+        return MOMENT_5_ACCOUNTABILITY_QUESTION_TEXT;
+      }
+    }
+  }
   for (let i = messages.length - 1; i >= 0; i--) {
     const m = messages[i];
     if (m.role !== 'assistant') continue;
@@ -423,6 +557,7 @@ export function findLastRepeatableInterviewQuestionText(
     const raw = stripSkipAcceptedNextQuestionBridge((m.content ?? '').trim());
     if (!raw) continue;
     if (isNonRepeatableAssistantLineForVerbatimReplay(raw)) continue;
+    if (looksLikeNonQuestionScenarioTransitionLine(raw)) continue;
     if (/^i only caught part of that\b/i.test(raw)) continue;
     if (/^welcome back\b/i.test(raw)) continue;
     if (looksLikeScenarioCSophieReceiveMisparaphraseQuestion(raw)) continue;
@@ -430,7 +565,12 @@ export function findLastRepeatableInterviewQuestionText(
     return finalizeRepeatableInterviewQuestionText(messages, raw, activeScenario);
   }
   const fb = stripSkipAcceptedNextQuestionBridge((fallbackLastQuestionText ?? '').trim());
-  if (fb && !isNonRepeatableAssistantLineForVerbatimReplay(fb) && !looksLikeScenarioCSophieReceiveMisparaphraseQuestion(fb)) {
+  if (
+    fb &&
+    !isNonRepeatableAssistantLineForVerbatimReplay(fb) &&
+    !looksLikeNonQuestionScenarioTransitionLine(fb) &&
+    !looksLikeScenarioCSophieReceiveMisparaphraseQuestion(fb)
+  ) {
     if (activeScenario && isPriorScenarioBleedForActiveScenario(fb, activeScenario)) {
       if (activeScenario === 3) {
         return resolveScenario3RepeatFallbackQuestion(messages);

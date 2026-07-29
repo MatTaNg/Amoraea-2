@@ -25,7 +25,17 @@ jest.mock('@data/repos/usersRoutingRepo', () => ({
   updateUserOnboardingFlags: jest.fn(() => Promise.resolve()),
 }));
 
+jest.mock('@utilities/readLocalFileForUpload', () => ({
+  readLocalFileForUpload: jest.fn(() =>
+    Promise.resolve({
+      body: new Uint8Array([1, 2, 3]),
+      contentType: 'image/jpeg',
+    }),
+  ),
+}));
+
 import { supabase } from '@data/supabase/client';
+import { readLocalFileForUpload } from '@utilities/readLocalFileForUpload';
 import { applyProfileUpdate } from '@data/repos/editProfileRepo';
 import { updateUserOnboardingFlags } from '@data/repos/usersRoutingRepo';
 import { ProfileRepository } from '../ProfileRepository';
@@ -209,11 +219,10 @@ describe('ProfileRepository', () => {
     };
 
     beforeEach(() => {
-      global.fetch = jest.fn(() =>
-        Promise.resolve({
-          blob: () => Promise.resolve({ type: 'image/jpeg' }),
-        })
-      ) as unknown as typeof fetch;
+      (readLocalFileForUpload as jest.Mock).mockResolvedValue({
+        body: new Uint8Array([1, 2, 3]),
+        contentType: 'image/jpeg',
+      });
     });
 
     it('getProfilePhotos maps rows and sorts query', async () => {
@@ -328,7 +337,15 @@ describe('ProfileRepository', () => {
 
       const out = await repo.uploadPhoto('user-1', 'file:///local/photo.jpg', 'pic.jpg');
 
-      expect(upload).toHaveBeenCalled();
+      expect(readLocalFileForUpload).toHaveBeenCalledWith(
+        'file:///local/photo.jpg',
+        'pic.jpg',
+      );
+      expect(upload).toHaveBeenCalledWith(
+        expect.stringMatching(/^user-1\/\d+\.jpg$/),
+        expect.any(Uint8Array),
+        expect.objectContaining({ contentType: 'image/jpeg', upsert: false }),
+      );
       expect(out.publicUrl).toBe('https://cdn.example.com/u/x.jpg');
       expect(out.storagePath).toMatch(/^user-1\/\d+\.jpg$/);
     });

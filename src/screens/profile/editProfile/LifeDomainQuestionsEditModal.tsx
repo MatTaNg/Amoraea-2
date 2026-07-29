@@ -5,12 +5,10 @@ import {
   Text,
   TextInput,
   ActivityIndicator,
-  Platform,
   Modal,
   Pressable,
   StyleSheet,
 } from 'react-native';
-import { Picker } from '@react-native-picker/picker';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { Button } from '@/shared/ui/Button';
@@ -195,46 +193,25 @@ export const LifeDomainQuestionsEditModal: React.FC<Props> = ({
               </Text>
             ) : null}
           </View>
-          {Platform.OS === 'web' ? (
-            <OptionPickerTrigger
-              style={styles.dropdownTrigger}
-              onOpen={(anchor) =>
-                setPickerSheet({
-                  title: q.text,
-                  options: optionRows,
-                  selectedValue: value,
-                  anchor,
-                  onPick: (picked) => setAnswer(q.id, picked),
-                })
-              }
-            >
-              <SelectTriggerRow
-                label={selectedLabel}
-                isPlaceholder={!value}
-                labelStyle={styles.dropdownTriggerText}
-                placeholderStyle={styles.dropdownPlaceholder}
-              />
-            </OptionPickerTrigger>
-          ) : (
-            <View style={styles.pickerWrap}>
-              <Picker
-                selectedValue={value}
-                onValueChange={(v) => setAnswer(q.id, String(v))}
-                mode={Platform.OS === 'android' ? 'dropdown' : undefined}
-                dropdownIconColor={theme.colors.textSecondary}
-                style={styles.picker}
-              >
-                {optionRows.map((opt) => (
-                  <Picker.Item
-                    key={opt.value || '__placeholder'}
-                    label={opt.label}
-                    value={opt.value}
-                    color={theme.colors.text}
-                  />
-                ))}
-              </Picker>
-            </View>
-          )}
+          <OptionPickerTrigger
+            style={styles.dropdownTrigger}
+            onOpen={(anchor) =>
+              setPickerSheet({
+                title: q.text,
+                options: optionRows,
+                selectedValue: value,
+                anchor,
+                onPick: (picked) => setAnswer(q.id, picked),
+              })
+            }
+          >
+            <SelectTriggerRow
+              label={selectedLabel}
+              isPlaceholder={!value}
+              labelStyle={styles.dropdownTriggerText}
+              placeholderStyle={styles.dropdownPlaceholder}
+            />
+          </OptionPickerTrigger>
         </View>
       );
     }

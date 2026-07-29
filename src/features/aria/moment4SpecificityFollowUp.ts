@@ -1,4 +1,5 @@
-import { moment4QualifiesAsValidNonApplicable } from './moment4ConcretenessClassification';
+import { moment4QualifiesAsValidNonApplicable, moment4UserDeclinesToNameSpecificPerson } from './moment4ConcretenessClassification';
+import { looksLikeIncompleteCutOffUserAnswer } from './interviewAnswerRelevance';
 import {
   countInterviewWords,
   moment4HasGenericSelfDescriptionOpener,
@@ -49,6 +50,28 @@ export function evaluateMoment4SpecificityProbe(text: string): Moment4Specificit
       wordCount,
       probeShouldFire: false,
       triggerReason: null,
+    };
+  }
+
+  if (moment4UserDeclinesToNameSpecificPerson(text)) {
+    return {
+      hasNamedPerson,
+      hasSpecificEvent,
+      genericOpenerDetected,
+      wordCount,
+      probeShouldFire: false,
+      triggerReason: 'declined_specific_person',
+    };
+  }
+
+  if (looksLikeIncompleteCutOffUserAnswer(text)) {
+    return {
+      hasNamedPerson,
+      hasSpecificEvent,
+      genericOpenerDetected,
+      wordCount,
+      probeShouldFire: false,
+      triggerReason: 'cutoff',
     };
   }
 
@@ -160,7 +183,7 @@ export function isAnsweringMoment4SpecificityFollowUp(
 ): boolean {
   const lastAssistant =
     (lastAssistantContent ?? '').trim() || lastAssistantContentBeforeCurrentUser(messages);
-  return looksLikeMoment4SpecificityFollowUpPrompt(lastAssistant);
+  return looksLikeMoment4SpecificityFollowUpEcho(lastAssistant);
 }
 
 export function extractLastMoment4GrudgeUserAnswer(
@@ -368,6 +391,17 @@ export function deriveMoment4PostGrudgeSpecificityResolvedFromMessages(
   const afterGrudge = messages.slice(lastGrudgeIdx + 1);
   const firstUserAfterGrudge = afterGrudge.find((m) => m.role === 'user');
   if (!firstUserAfterGrudge?.content?.trim()) return false;
+
+  if (
+    moment4QualifiesAsValidNonApplicable(firstUserAfterGrudge.content) ||
+    moment4UserDeclinesToNameSpecificPerson(firstUserAfterGrudge.content)
+  ) {
+    return true;
+  }
+
+  if (looksLikeIncompleteCutOffUserAnswer(firstUserAfterGrudge.content)) {
+    return false;
+  }
 
   if (!needsMoment4SpecificityFollowUp(firstUserAfterGrudge.content)) {
     return true;

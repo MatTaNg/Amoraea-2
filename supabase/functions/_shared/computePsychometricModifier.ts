@@ -1,5 +1,4 @@
 import {
-  AAQ2_AVERAGE_MAX,
   AAQ2_HIGH_AVOIDANCE_MIN,
   AAQ2_LOW_AVOIDANCE_MAX,
   AAQ2_STRONG_MAX,
@@ -19,9 +18,6 @@ import {
   MSPSS_ADEQUATE_MIN,
   MSPSS_LIMITED_MIN,
   MSPSS_STRONG_MIN,
-  NPI_AVERAGE_MAX,
-  NPI_DIVERGENCE_MIN,
-  NPI_STRONG_MAX,
   PSYCHOMETRIC_MODIFIER_AVERAGE,
   PSYCHOMETRIC_MODIFIER_BELOW_AVERAGE,
   PSYCHOMETRIC_MODIFIER_ISOLATED,
@@ -353,12 +349,9 @@ export function computePsychometricModifier(
     if (s <= AAQ2_STRONG_MAX) {
       aaq2Component = PSYCHOMETRIC_MODIFIER_STRONG;
       aaq2Band = 'strong psychological flexibility';
-    } else if (s <= AAQ2_AVERAGE_MAX) {
+    } else if (s < AAQ2_HIGH_EXPERIENTIAL_AVOIDANCE_FLOOR_THRESHOLD) {
       aaq2Component = PSYCHOMETRIC_MODIFIER_AVERAGE;
       aaq2Band = 'average flexibility';
-    } else if (s < AAQ2_HIGH_EXPERIENTIAL_AVOIDANCE_FLOOR_THRESHOLD) {
-      aaq2Component = PSYCHOMETRIC_MODIFIER_POOR;
-      aaq2Band = 'poor flexibility';
     } else {
       aaq2Component = PSYCHOMETRIC_MODIFIER_STRONG;
       aaq2Band = 'floor breach';
@@ -475,26 +468,7 @@ export function computePsychometricModifier(
   let npiEntitlementBand = 'not assessed';
   if (NPI_ENTITLEMENT_ENABLED) {
     if (scores.npiEntitlementScore !== null) {
-      const s = scores.npiEntitlementScore;
-      if (s <= NPI_STRONG_MAX) {
-        npiEntitlementComponent = PSYCHOMETRIC_MODIFIER_STRONG;
-        npiEntitlementBand = 'strong — low entitlement';
-      } else if (s <= NPI_AVERAGE_MAX) {
-        npiEntitlementComponent = PSYCHOMETRIC_MODIFIER_AVERAGE;
-        npiEntitlementBand = 'average entitlement';
-      } else {
-        npiEntitlementComponent = PSYCHOMETRIC_MODIFIER_STRONG;
-        npiEntitlementBand = 'floor breach';
-      }
-      modifier += npiEntitlementComponent;
-
-      if (
-        interviewSignals &&
-        s >= NPI_DIVERGENCE_MIN &&
-        (interviewSignals.accountabilityPillar ?? 0) >= INTERVIEW_ACCOUNTABILITY_STRONG_MIN
-      ) {
-        consistencyFlags.push('npi_entitlement_accountability_divergence');
-      }
+      npiEntitlementBand = 'collected — no gate modifier';
     }
   } else if (scores.sd3NarcissismScore !== null) {
     const s = scores.sd3NarcissismScore;

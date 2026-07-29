@@ -88,6 +88,7 @@ export type ClaudeParallelStreamTtsCallDeps = {
   >;
   moment5ClientScoringMetaRef: MutableRefObject<Moment5ClientScoringMetadata | null>;
   moment4ClientSpecificityProbeInjectedRef: MutableRefObject<string | null>;
+  moment4ThresholdProbeAskedRef: MutableRefObject<boolean>;
   moment5SpecificityRedirectIssuedRef: MutableRefObject<string | null>;
   elongatingProbeFiredRef: MutableRefObject<boolean>;
   lastQuestionTextRef: MutableRefObject<string>;

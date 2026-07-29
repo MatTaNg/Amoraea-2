@@ -35,6 +35,7 @@ import { computePsychometricModifier } from '../computePsychometricModifier';
 import { NPI_ENTITLEMENT_ENABLED } from '../interviewCompletionStatus';
 import {
   ACTIVE_NARCISSISM_FLOOR_CODE,
+  NARCISSISM_PSYCHOMETRIC_GATE_FLOOR_ENABLED,
   narcissismFloorBreachScores,
 } from '../narcissismInstrumentTestFixtures';
 
@@ -76,7 +77,7 @@ const REGRESSION_FLOOR_SCORES = {
   brsScore: 1.667,
   anxietyTraitScore: null,
   aaq2Score: 34,
-  rsesScore: 22,
+  rsesScore: 20,
   scsPublicScore: 18,
   scsPrivateScore: 9,
 };
@@ -136,6 +137,10 @@ describe('psychometric floor gate merge', () => {
       },
       straightLineFlags: [],
     });
+    if (!NARCISSISM_PSYCHOMETRIC_GATE_FLOOR_ENABLED) {
+      expect(merged.gateFailReasons).not.toContain(ACTIVE_NARCISSISM_FLOOR_CODE);
+      return;
+    }
     expect(merged.gateFailReasons).toContain(ACTIVE_NARCISSISM_FLOOR_CODE);
     const psychFloors = merged.gateFailDetail.psychometric_floors as Record<
       string,
@@ -307,16 +312,16 @@ describe('psychometric floor gate merge', () => {
     expect(breaches).toEqual(
       expect.arrayContaining([
         RFQ_LOW_REFLECTIVE_FUNCTIONING_FLOOR_CODE,
-        ACTIVE_NARCISSISM_FLOOR_CODE,
         GASP_EXTREME_EXTERNALIZATION_FLOOR_CODE,
         DWECK_EXTREME_FIXED_MINDSET_FLOOR_CODE,
         SCS_SF_LOW_SELF_COMPASSION_FLOOR_CODE,
         BRS_LOW_RESILIENCE_FLOOR_CODE,
         AAQ2_HIGH_EXPERIENTIAL_AVOIDANCE_FLOOR_CODE,
         RSES_LOW_SELF_ESTEEM_FLOOR_CODE,
+        ...(NARCISSISM_PSYCHOMETRIC_GATE_FLOOR_ENABLED ? [ACTIVE_NARCISSISM_FLOOR_CODE] : []),
       ]),
     );
-    expect(breaches).toHaveLength(8);
+    expect(breaches).toHaveLength(NARCISSISM_PSYCHOMETRIC_GATE_FLOOR_ENABLED ? 8 : 7);
   });
 
   it('does not trigger any floors at healthy moderate scores', () => {
@@ -400,16 +405,19 @@ describe('psychometric floor gate merge', () => {
         straightLineFlags: ['rses_straight_line'],
         expectedFloor: RSES_LOW_SELF_ESTEEM_FLOOR_CODE,
       },
-      {
-        scores: {
-          ...HEALTHY_FLOOR_SCORES,
-          ...(NPI_ENTITLEMENT_ENABLED
-            ? { npiEntitlementScore: 5, sd3NarcissismScore: null }
-            : { sd3NarcissismScore: 4.5, npiEntitlementScore: null }),
-        },
-        straightLineFlags: NPI_ENTITLEMENT_ENABLED ? [] : ['sd3_narcissism_straight_line'],
-        expectedFloor: ACTIVE_NARCISSISM_FLOOR_CODE,
-      },
+      ...(NARCISSISM_PSYCHOMETRIC_GATE_FLOOR_ENABLED
+        ? [
+            {
+              scores: {
+                ...HEALTHY_FLOOR_SCORES,
+                sd3NarcissismScore: 4.5,
+                npiEntitlementScore: null,
+              },
+              straightLineFlags: ['sd3_narcissism_straight_line'],
+              expectedFloor: ACTIVE_NARCISSISM_FLOOR_CODE,
+            },
+          ]
+        : []),
       {
         scores: { ...HEALTHY_FLOOR_SCORES, brsScore: 1.5 },
         straightLineFlags: ['brs_straight_line'],
@@ -436,7 +444,7 @@ describe('psychometric floor gate merge', () => {
     expect(SCS_SF_LOW_SELF_COMPASSION_FLOOR_THRESHOLD).toBe(2.5);
     expect(BRS_LOW_RESILIENCE_FLOOR_THRESHOLD).toBe(1.8);
     expect(AAQ2_HIGH_EXPERIENTIAL_AVOIDANCE_FLOOR_THRESHOLD).toBe(33);
-    expect(RSES_LOW_SELF_ESTEEM_FLOOR_THRESHOLD).toBe(24);
+    expect(RSES_LOW_SELF_ESTEEM_FLOOR_THRESHOLD).toBe(20);
     expect(SCS_PUBLIC_HIGH_SELF_CONSCIOUSNESS_FLOOR_THRESHOLD).toBe(17);
     expect(SCS_PRIVATE_LOW_SELF_AWARENESS_FLOOR_THRESHOLD).toBe(10);
     if (NPI_ENTITLEMENT_ENABLED) {

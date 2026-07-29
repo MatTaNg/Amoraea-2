@@ -1,3 +1,4 @@
+import { persistScenarioOpeningDeliveredAfterPlayback } from '@features/aria/scenarioDeliveryResumeCheckpoint';
 import { stripControlTokens } from '@features/aria/interviewControlTokens';
 import { getLastSubstantiveScenarioModalQuestion } from '@features/aria/interviewLanguageGate';
 import { SHOW_SCENARIO_2_VIGNETTE_EXACT, SHOW_SCENARIO_3_VIGNETTE_EXACT } from '@features/aria/interviewShowScenarioExactCopy';
@@ -124,7 +125,7 @@ export function createParallelStreamSpeakShowScenarioCardOnce(
       };
       if (
         shouldSkipSituation1CanonicalReplay({
-          playbackConfirmedKinds: deps.showScenarioCardCanonicalPlaybackConfirmedKindsRef.current,
+          playbackConfirmedKinds: deps.showScenarioCardCanonicalPlaybackConfirmedKindsRef?.current ?? {},
           delivery: s1Delivery,
           lastQuestionText: deps.lastQuestionTextRef?.current ?? null,
           contemptSpokeThisStream: state.scenarioAContemptProbeSpokenThisStream,
@@ -135,7 +136,7 @@ export function createParallelStreamSpeakShowScenarioCardOnce(
           kind,
           reason: state.scenarioAContemptProbeSpokenThisStream
             ? 'contempt_spoke_this_stream'
-            : deps.showScenarioCardCanonicalPlaybackConfirmedKindsRef.current.situation_1
+            : deps.showScenarioCardCanonicalPlaybackConfirmedKindsRef?.current?.situation_1
               ? 's1_playback_confirmed'
               : 's1_follow_up_phase',
         });
@@ -148,7 +149,7 @@ export function createParallelStreamSpeakShowScenarioCardOnce(
       shouldTreatShowScenarioCardCanonicalAsAlreadyDelivered({
         messages: params.messagesToUse,
         kind,
-        playbackConfirmedKinds: deps.showScenarioCardCanonicalPlaybackConfirmedKindsRef.current,
+        playbackConfirmedKinds: deps.showScenarioCardCanonicalPlaybackConfirmedKindsRef?.current ?? {},
       })
     ) {
       void remoteLog('[SHOW_SCENARIO_CARD_CANONICAL_SPEAK_SKIPPED]', {
@@ -178,20 +179,22 @@ export function createParallelStreamSpeakShowScenarioCardOnce(
     if (
       streamMatchesCanonical &&
       (isShowScenarioCardCanonicalPlaybackConfirmed(
-        deps.showScenarioCardCanonicalPlaybackConfirmedKindsRef.current,
+        deps.showScenarioCardCanonicalPlaybackConfirmedKindsRef?.current ?? {},
         kind,
       ) ||
         shouldSkipPersonalMomentCanonicalReplay({
           kind,
           spokenCompleteText: spokenSoFar,
           fullStream,
-          playbackConfirmedKinds: deps.showScenarioCardCanonicalPlaybackConfirmedKindsRef.current,
+          playbackConfirmedKinds: deps.showScenarioCardCanonicalPlaybackConfirmedKindsRef?.current ?? {},
         }))
     ) {
-      deps.showScenarioCardCanonicalPlaybackConfirmedKindsRef.current = {
-        ...deps.showScenarioCardCanonicalPlaybackConfirmedKindsRef.current,
-        [kind]: true,
-      };
+      if (deps.showScenarioCardCanonicalPlaybackConfirmedKindsRef) {
+        deps.showScenarioCardCanonicalPlaybackConfirmedKindsRef.current = {
+          ...deps.showScenarioCardCanonicalPlaybackConfirmedKindsRef.current,
+          [kind]: true,
+        };
+      }
       if (kind === 'moment_5') {
         deps.moment5QuestionDeliveredRef.current = true;
         deps.moment5PrimaryAnchorDeliveredSessionRef.current = true;
@@ -277,15 +280,11 @@ export function createParallelStreamSpeakShowScenarioCardOnce(
     });
 
     /**
-     * Arm in-flight refs before speak so tab-hide restore uses the canonical card text,
-     * not a stale lastQuestion (e.g. S2 James repair during S3 open).
+     * Arm utterance text only for tab-hide restore. Do not pre-set line-in-flight or
+     * playback-active — speakTextSafe drains prior playback first and would stall ~8s.
      */
     if (deps.ttsUtteranceInFlightRef) {
       deps.ttsUtteranceInFlightRef.current = textToSpeak;
-    }
-    deps.ttsLineInFlightRef.current = true;
-    if (deps.userId) {
-      setTtsPlaybackActive(true);
     }
     deps.parallelStreamingTtsRef.current.accumulatedFullText = textToSpeak;
     if (kind === 'situation_3' && deps.lastQuestionTextRef) {
@@ -331,6 +330,19 @@ export function createParallelStreamSpeakShowScenarioCardOnce(
         );
       }
       return;
+    }
+    if (
+      deps.userId &&
+      (kind === 'situation_1' || kind === 'situation_2' || kind === 'situation_3')
+    ) {
+      void persistScenarioOpeningDeliveredAfterPlayback({
+        userId: deps.userId,
+        kind,
+        lastQuestionText: deps.lastQuestionTextRef?.current ?? null,
+        sessionAttemptId: deps.interviewSessionAttemptIdRef?.current ?? null,
+        currentScenario: deps.currentScenarioRef?.current as 1 | 2 | 3 | null | undefined,
+        resumeActiveScenario: deps.resumeActiveScenarioRef?.current ?? null,
+      });
     }
     if (kind === 'situation_2' || kind === 'situation_3' || kind === 'moment_4') {
       advanceInterviewScenarioRefsAfterCanonicalShowScenarioCard(

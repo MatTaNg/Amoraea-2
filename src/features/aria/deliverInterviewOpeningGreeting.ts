@@ -7,7 +7,13 @@ import { setPlaybackMode } from '@features/aria/utils/audioModeHelpers';
 import { applyInterviewStartUnavailableFailure } from '@features/aria/applyInterviewStartUnavailableFailure';
 import { resetSessionLogRuntime } from '@utilities/sessionLogging';
 import { remoteLog } from '@utilities/remoteLog';
-import type { StartInterviewDeps, StartInterviewParams } from '@features/aria/sessionLifecycleTypes';
+import { applyDevScenarioJumpAtInterviewStart } from '@features/aria/applyDevScenarioJumpAtInterviewStart';
+import { resolveDevScenarioJumpTargetFromSession } from '@features/aria/devScenarioJumpReferral';
+import type {
+  InterviewSessionLifecycleDeps,
+  StartInterviewDeps,
+  StartInterviewParams,
+} from '@features/aria/sessionLifecycleTypes';
 
 export type DeliverInterviewOpeningParams = {
   opts: StartInterviewParams | undefined;
@@ -118,6 +124,19 @@ export async function deliverInterviewOpeningGreeting(
   }
 
   await remoteLog('[START] Delivering real greeting');
+  const devJumpTarget = await resolveDevScenarioJumpTargetFromSession(undefined);
+  if (devJumpTarget != null && devJumpTarget !== 1) {
+    const jumped = await applyDevScenarioJumpAtInterviewStart(
+      deps as InterviewSessionLifecycleDeps,
+      devJumpTarget,
+      { fromUserGesture: opts?.fromUserGesture },
+    );
+    if (jumped) {
+      await remoteLog('[START] Dev scenario jump greeting sent', { target: devJumpTarget });
+      return;
+    }
+  }
+
   currentScenarioRef.current = 1;
   const openingRowNative: MessageWithScenario = {
     role: 'assistant',

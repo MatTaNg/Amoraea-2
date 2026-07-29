@@ -85,7 +85,6 @@ export function pickClientDisengagementProbe(input: {
 
   if (
     !scenarioCSophiePerspectiveProbeAlreadyFired &&
-    !mentalizingSurfaceProbeAlreadyFired &&
     isScenarioCQ1Prompt(lastAssistantContent) &&
     !isMisplacedScenarioCQ1Answer(userAnswer) &&
     userAnswerAddressesDanielStateForScenarioCQ1(userAnswer) &&

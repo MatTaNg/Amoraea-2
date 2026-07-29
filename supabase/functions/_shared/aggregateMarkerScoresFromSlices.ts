@@ -16,14 +16,13 @@ import {
 } from '../../../src/config/scoring/pillarRollup.ts';
 import {
   computePersonalMomentConcretenessModifier,
+  mergeMoment4ConcretenessForGate,
   normalizeResponseConcreteness,
-  normalizeMoment4Concreteness,
   type ResponseConcretenessLevel,
 } from './personalMomentConcreteness.ts';
 import {
-  aggregatePersonalMomentEmotionalVocab,
   depthEnrichedMarkerSlices,
-} from './personalMomentEmotionalVocab.ts';
+} from './personalMomentSliceEnrichment.ts';
 import {
   disclosureCalibrationFromMarkerSlices,
   personalMomentWordCountsForDisclosure,
@@ -35,11 +34,11 @@ import { INTERVIEW_MARKER_IDS } from './interviewMarkers.ts';
 import { countMentalizingOvercertaintyInMarkerSlices } from './mentalizingOvercertaintyFromTranscript.ts';
 import {
   mergeAccountabilityPillarWhenM4SituationallyExempt,
-  momentUserTextFromInterviewTranscript,
   resolveMoment4AccountabilitySituationalExempt,
   scoredAccountabilityFromSlice,
   type AccountabilityReweightMeta,
 } from './moment4AccountabilitySituationalExempt.ts';
+import { resolveMoment4UserTextForGate } from '../../../src/features/aria/personalMomentSliceEnrichment.ts';
 
 export {
   disclosureCalibrationFromMarkerSlices,
@@ -360,9 +359,9 @@ export type PillarAggregateHolisticMeta = {
   defensePatternTranscript?: readonly DefensePatternTranscriptMsg[] | null;
   /** Tagged turns for disclosure calibration; defaults to {@link PillarAggregateHolisticMeta.defensePatternTranscript}. */
   disclosureCalibrationTranscript?: readonly DisclosureCalibrationTurn[] | null;
-  /** Scenario user-turn emotional token density (%), e.g. from {@link scenarioEmotionalVocabDensityPercentFromTranscript}. */
+  /** Scenario user-turn emotional token density (%) — deprecated; no longer computed. */
   scenarioEmotionalVocabDensityPercent?: number | null;
-  /** Full-interview emotional vocab density (%) from communication style / `language_markers` when available. */
+  /** Full-interview emotional vocab density (%) — deprecated; no longer used for gate. */
   communicationStyleEmotionalVocabDensityPercent?: number | null;
   /** M4 user turns — used for situational accountability exemption heuristics on recompute. */
   moment4UserText?: string | null;
@@ -379,8 +378,9 @@ export type PillarAggregateWithCommitmentDetailed = MomentRestrictedAggregateRes
   moment5Concreteness: ResponseConcretenessLevel | null;
   /** Non-positive adjustment applied to weighted threshold in {@link computeGateResultCore}. */
   personalMomentConcretenessModifier: number;
-  /** (distinct emotion-word counts / user words) × 100 across moments 4–5 when scorer fields are present. */
+  /** Deprecated — personal-moment emotional vocabulary construct removed; always null. */
   personal_moment_emotional_vocab_density: number | null;
+  /** Deprecated — personal-moment emotional vocabulary construct removed; always false. */
   personal_moment_emotional_vocab_low: boolean;
   disclosureCalibration: DisclosureCalibration;
   moment4AccountabilitySituationallyExempt?: boolean;
@@ -524,13 +524,16 @@ export function aggregatePillarScoresWithCommitmentMergeDetailed(
   let merged = mergeCommitmentThresholdWeighted(base, slices[2], slices[3]);
 
   let reweightMeta: AccountabilityReweightMeta | null = null;
+  const moment4UserTextForConcreteness =
+    holisticMeta?.moment4UserText?.trim() ||
+    resolveMoment4UserTextForGate(
+      holisticMeta?.disclosureCalibrationTranscript ?? holisticMeta?.defensePatternTranscript,
+    ) ||
+    null;
   if (applyM4AccountabilityExempt) {
     const m4Slice = slices[3];
     const m5Slice = slices[4];
-    const moment4UserText =
-      holisticMeta?.moment4UserText?.trim() ||
-      momentUserTextFromInterviewTranscript(holisticMeta?.disclosureCalibrationTranscript, 4) ||
-      momentUserTextFromInterviewTranscript(holisticMeta?.defensePatternTranscript, 4);
+    const moment4UserText = moment4UserTextForConcreteness || '';
     const exempt = resolveMoment4AccountabilitySituationalExempt({
       scoringMetadata: m4Slice?.scoringMetadata,
       disclosureText: moment4UserText || null,
@@ -577,26 +580,16 @@ export function aggregatePillarScoresWithCommitmentMergeDetailed(
       holisticMeta?.defensePatternTranscript ?? null,
     ),
   );
-  const moment4Concreteness = normalizeMoment4Concreteness(depthSlices[3]?.response_concreteness);
+  const moment4Concreteness = mergeMoment4ConcretenessForGate(
+    depthSlices[3],
+    depthSlices[3]?.response_concreteness,
+    moment4UserTextForConcreteness,
+  );
   const moment5Concreteness = normalizeResponseConcreteness(depthSlices[4]?.response_concreteness);
   const personalMomentConcretenessModifier = computePersonalMomentConcretenessModifier(
     moment4Concreteness,
     moment5Concreteness,
   );
-  const evAgg = aggregatePersonalMomentEmotionalVocab(depthSlices[3], depthSlices[4], {
-    scenarioEmotionalVocabDensityPercent: holisticMeta?.scenarioEmotionalVocabDensityPercent ?? null,
-    communicationStyleEmotionalVocabDensityPercent: holisticMeta?.communicationStyleEmotionalVocabDensityPercent ?? null,
-  });
-  if (typeof __DEV__ !== 'undefined' && __DEV__) {
-    console.log(
-      '[VocabFlag] density:',
-      evAgg.personal_moment_emotional_vocab_density,
-      'threshold:',
-      0.3,
-      'flag:',
-      evAgg.personal_moment_emotional_vocab_low,
-    );
-  }
   const txForDisc = Array.isArray(discTx) ? discTx : [];
   const s4w = sumUserWordsForInterviewMoment(txForDisc, 4);
   const s5w = sumUserWordsForInterviewMoment(txForDisc, 5);
@@ -611,7 +604,6 @@ export function aggregatePillarScoresWithCommitmentMergeDetailed(
   console.log('[Disclosure] calibration:', disclosureCalibration, {
     moment4Words: moment4WordCount,
     moment5Words: moment5WordCount,
-    vocabDensity: evAgg.personal_moment_emotional_vocab_density,
     moment4Concreteness: moment4Concreteness,
     moment5Concreteness: moment5Concreteness,
   });
@@ -634,8 +626,8 @@ export function aggregatePillarScoresWithCommitmentMergeDetailed(
     moment4Concreteness,
     moment5Concreteness,
     personalMomentConcretenessModifier,
-    personal_moment_emotional_vocab_density: evAgg.personal_moment_emotional_vocab_density,
-    personal_moment_emotional_vocab_low: evAgg.personal_moment_emotional_vocab_low,
+    personal_moment_emotional_vocab_density: null,
+    personal_moment_emotional_vocab_low: false,
     disclosureCalibration,
     moment4AccountabilitySituationallyExempt: reweightMeta != null,
     moment4AccountabilityExemptReason: reweightMeta?.reason ?? null,

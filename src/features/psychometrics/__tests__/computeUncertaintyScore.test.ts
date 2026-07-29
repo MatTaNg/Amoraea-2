@@ -61,7 +61,7 @@ describe('computeUncertaintyScore', () => {
     });
     if (NPI_ENTITLEMENT_ENABLED) {
       expect(result.activeFlags).toContain('npi_entitlement_accountability_divergence');
-      expect(result.activeFlags).toContain(ACTIVE_NARCISSISM_FLOOR_CODE);
+      expect(result.activeFlags).not.toContain(ACTIVE_NARCISSISM_FLOOR_CODE);
     } else {
       expect(result.activeFlags).toContain('sd3_narcissism_contempt_divergence');
       expect(result.activeFlags).toContain('sd3_narcissism_floor');
@@ -75,7 +75,7 @@ describe('computeUncertaintyScore', () => {
         ...EMPTY_ATTEMPT,
         psychometrics_npi_entitlement_score: 5,
       });
-      expect(result.activeFlags).toContain(ACTIVE_NARCISSISM_FLOOR_CODE);
+      expect(result.activeFlags).not.toContain(ACTIVE_NARCISSISM_FLOOR_CODE);
       return;
     }
     const result = computeUncertaintyScore({

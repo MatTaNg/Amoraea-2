@@ -31,6 +31,7 @@ import {
 } from '@features/aria/probeAndScoringUtils';
 import { markMoment5ResolutionFollowUpTtsDelivered } from '@features/aria/moment5DeliveryReconcile';
 import { markS3RepairProbeTtsDelivered } from '@features/aria/scenarioCDeliveryReconcile';
+import { looksLikeScenarioCSophiePerspectiveQuestion } from '@features/aria/scenarioCPromptDetection';
 import { looksLikeMoment5ResolutionFollowUpPrompt } from '@features/aria/moment5SpecificityRedirect';
 import {
   spokenTextStartsMoment5PrimaryConflictQuestion,
@@ -41,6 +42,7 @@ import {
   looksLikeMoment4ThresholdQuestion,
 } from '@features/aria/moment4ProbeLogic';
 import { isIncompleteScenarioAContemptProbeLeadSentence } from '@features/aria/scenarioAContemptProbeLogic';
+import { resolveAssessableQuestionTextForResponseTiming } from '@features/aria/resolveAssessableQuestionTextForResponseTiming';
 import {
   coerceScenarioARepairQuestionForTts,
   looksLikeScenarioARepairQuestion,
@@ -324,7 +326,7 @@ export function createParallelStreamEnqueueTtsUtterance(
                     deps.currentScenarioRef.current,
                     deps.currentInterviewMomentRef.current,
                   ) &&
-                  !deps.showScenarioCardCanonicalPlaybackConfirmedKindsRef.current.situation_1;
+                  !deps.showScenarioCardCanonicalPlaybackConfirmedKindsRef?.current?.situation_1;
                 const skipModalForPrematureS1FollowUp =
                   s1OpeningPending &&
                   !deps.scenarioAContemptProbeAskedRef.current &&
@@ -446,6 +448,13 @@ export function createParallelStreamEnqueueTtsUtterance(
                 markS3RepairProbeTtsDelivered(deps);
               }
               if (
+                deps.currentInterviewMomentRef.current === 3 &&
+                deps.currentScenarioRef.current === 3 &&
+                looksLikeScenarioCSophiePerspectiveQuestion(stripControlTokens(spokenForTts).trim())
+              ) {
+                deps.parallelStreamingTtsRef.current.s3SophiePerspectiveProbeDeliveredThisStream = true;
+              }
+              if (
                 deps.currentInterviewMomentRef.current === 5 &&
                 looksLikeMoment5ResolutionFollowUpPrompt(spokenForTts)
               ) {
@@ -455,6 +464,9 @@ export function createParallelStreamEnqueueTtsUtterance(
                 state.firstSentenceLogged = true;
                 const rtd = getSessionLogRuntime();
                 const cleanedForLog = stripControlTokens(spokenForTts).trim();
+                const questionTextForLog = resolveAssessableQuestionTextForResponseTiming(
+                  cleanedForLog,
+                ).slice(0, 2000);
                 const s1RepairDelivery =
                   isActiveScenarioAConstructProbeTurn(
                     deps.currentScenarioRef.current,
@@ -462,9 +474,6 @@ export function createParallelStreamEnqueueTtsUtterance(
                   ) &&
                   (looksLikeScenarioARepairQuestion(cleanedForLog) ||
                     looksLikeScenarioARepairStreamFragment(cleanedForLog));
-                const questionTextForLog = s1RepairDelivery
-                  ? coerceScenarioARepairQuestionForTts(cleanedForLog).slice(0, 2000)
-                  : cleanedForLog.slice(0, 2000);
                 writeSessionLog({
                   userId: deps.userId,
                   attemptId: rtd.attemptId,

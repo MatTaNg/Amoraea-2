@@ -122,6 +122,29 @@ describe('sanitizePostClaudeAssistantDraftText', () => {
     expect(deps.moment4ThresholdProbeAskedRef.current).toBe(true);
   });
 
+  it('suppresses duplicate M4 threshold draft when client already injected threshold', () => {
+    const deps = createMockPostClaudeDeps({
+      currentInterviewMomentRef: { current: 4 },
+      moment4ThresholdProbeAskedRef: { current: true },
+    });
+    const params = createMockPostClaudeParams();
+    const thresholdDraft =
+      'Thanks for sharing that. At what point do you decide when a relationship is something to work through versus something you need to walk away from?';
+
+    const result = sanitizePostClaudeAssistantDraftText(
+      deps,
+      params,
+      thresholdDraft,
+      '',
+      false,
+    );
+
+    expect(result.strippedText).toBe('');
+    expect(result.assistantIssuedMoment4ThresholdProbe).toBe(false);
+    expect(result.assistantIssuedMoment4AnyQuestion).toBe(false);
+    expect(deps.moment4ThresholdProbeAskedRef.current).toBe(true);
+  });
+
   it('replaces thin modal follow-up with repair question when S1 contempt already satisfied', () => {
     const deps = createMockPostClaudeDeps({
       currentInterviewMomentRef: { current: 1 },

@@ -1,6 +1,6 @@
 import { supabase } from '@data/supabase/client';
 import { assignScenarioNumbersToTranscript, stripEphemeralWelcomeBackMessages } from '@utilities/interviewResumeCursor';
-import { kickCompletionScoring } from '@features/aria/completionScoringKick';
+import { hydrateScenarioSkipConfirmedCount } from '@features/aria/scenarioSkipCountHydration';
 import {
   EMOTION_INTERVIEW_MODAL_ITEMS,
   countAnsweredEmotionItems,
@@ -24,6 +24,7 @@ export async function runHydratePostClosingFromSaved(
     hasResumedRef,
     resumeLoadingFlowActiveRef,
     setResumeLoadingVisible,
+    setResumeHydrationPending,
     setMessages,
     pendingCompletionTranscriptRef,
     emotionItemResponsesRef,
@@ -60,11 +61,13 @@ export async function runHydratePostClosingFromSaved(
         }
         resumeLoadingFlowActiveRef.current = false;
         setResumeLoadingVisible(false);
+        setResumeHydrationPending?.(false);
         return;
       }
       hasResumedRef.current = true;
       resumeLoadingFlowActiveRef.current = false;
       setResumeLoadingVisible(false);
+      setResumeHydrationPending?.(false);
       resumeOfferWelcomeTtsRef.current = false;
       const restored = assignScenarioNumbersToTranscript(
         stripEphemeralWelcomeBackMessages(saved.messages ?? []),
@@ -103,6 +106,16 @@ export async function runHydratePostClosingFromSaved(
       if (userId) markPreparingResultsSession(userId);
       interviewStatusRef.current = 'preparing_results';
       setInterviewStatus('preparing_results');
+      if (deps.scenarioSkipConfirmedCountRef) {
+        await hydrateScenarioSkipConfirmedCount({
+          scenarioSkipConfirmedCountRef: deps.scenarioSkipConfirmedCountRef,
+          scenarioSkipPenaltySumRef: deps.scenarioSkipPenaltySumRef,
+          transcriptMessages: transcript,
+          storedCount: saved.scenarioSkipConfirmedCount,
+          attemptId: aid,
+          userId,
+        });
+      }
       void remoteLog('[REENTRY_POST_CLOSING_HANDOFF]', {
         source,
         transcriptLen: transcript.length,

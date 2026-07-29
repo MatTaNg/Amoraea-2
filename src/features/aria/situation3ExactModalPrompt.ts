@@ -1,9 +1,14 @@
 type ScenarioModalTranscriptTurn = { role: string; content?: string | null };
 
+import { isIrrelevantAnswerRetryAssistantLine } from '@features/aria/interviewAnswerRelevance';
+import { getLastSubstantiveScenarioModalQuestion } from '@features/aria/interviewScenarioModalPrompt';
+import type { InterviewUiPhase } from '@features/aria/sessionLifecycleTypes';
 import {
   detectActiveScenarioFromMessage,
+  normalizeScenarioOpeningForCompare,
   SCENARIO_3_OPENING,
 } from '@features/aria/interviewScenarioOpeningStreamGate';
+import { SHOW_SCENARIO_3_VIGNETTE_EXACT } from '@features/aria/interviewShowScenarioExactCopy';
 import {
   isScenarioCRepairAssistantPrompt,
   looksLikeScenarioCRepairAsDanielQuestion,
@@ -20,6 +25,11 @@ import { SCENARIO_C_SOPHIE_PERSPECTIVE_PROBE } from '@features/aria/interviewDis
 export type Situation3ModalDeliveryState = {
   sophiePerspectiveAsked?: boolean;
   danielRepairAsked?: boolean;
+};
+
+export const SITUATION_3_REFERENCE_SCENARIO: ActiveScenario = {
+  label: 'Situation 3',
+  text: SHOW_SCENARIO_3_VIGNETTE_EXACT,
 };
 
 function scopedSituation3AssistantTurns(
@@ -104,7 +114,7 @@ export function resolveSituation3ExactModalPrompt(
     (looksLikeScenarioARepairQuestion(spoken) ||
       looksLikeScenarioBRepairAsJamesQuestion(spoken) ||
       looksLikeScenarioBJamesDifferentlyQuestion(spoken));
-  if (spoken && !spokenIsPriorScenarioBleed) {
+  if (spoken && !spokenIsPriorScenarioBleed && !isIrrelevantAnswerRetryAssistantLine(spoken)) {
     if (
       looksLikeScenarioCRepairAsDanielQuestion(spoken) ||
       isScenarioCRepairAssistantPrompt(spoken)
@@ -117,33 +127,36 @@ export function resolveSituation3ExactModalPrompt(
   }
 
   const scoped = scopedSituation3AssistantTurns(transcript);
+  const lastSubstantive = getLastSubstantiveScenarioModalQuestion(scoped);
+  if (lastSubstantive) {
+    if (
+      looksLikeScenarioCRepairAsDanielQuestion(lastSubstantive) ||
+      isScenarioCRepairAssistantPrompt(lastSubstantive)
+    ) {
+      return resolveScenarioCRepairModalPromptFromText(lastSubstantive);
+    }
+    if (looksLikeScenarioCSophiePerspectiveQuestion(lastSubstantive)) {
+      return SCENARIO_C_SOPHIE_PERSPECTIVE_PROBE;
+    }
+    if (
+      normalizeScenarioOpeningForCompare(lastSubstantive) ===
+      normalizeScenarioOpeningForCompare(SCENARIO_3_OPENING)
+    ) {
+      return SCENARIO_3_OPENING;
+    }
+  }
+
+  // Resume / delivery-ref fallback when transcript lacks explicit probe lines.
   if (delivery?.danielRepairAsked) {
     const lastRepair = lastScenarioCRepairAssistantContent(scoped);
     if (lastRepair) {
       return resolveScenarioCRepairModalPromptFromText(lastRepair);
     }
   }
-  if (delivery?.sophiePerspectiveAsked) {
+  if (delivery?.sophiePerspectiveAsked && transcriptHasSophiePerspectiveProbe(scoped)) {
     return SCENARIO_C_SOPHIE_PERSPECTIVE_PROBE;
   }
 
-  let lastSophieIdx = -1;
-  let lastDanielRepairIdx = -1;
-  for (let i = 0; i < scoped.length; i++) {
-    if (scoped[i]?.role !== 'assistant') continue;
-    const c = (scoped[i]?.content ?? '').trim();
-    if (looksLikeScenarioCSophiePerspectiveQuestion(c)) lastSophieIdx = i;
-    if (looksLikeScenarioCRepairAsDanielQuestion(c) || isScenarioCRepairAssistantPrompt(c)) {
-      lastDanielRepairIdx = i;
-    }
-  }
-
-  if (lastDanielRepairIdx > lastSophieIdx && lastDanielRepairIdx >= 0) {
-    return resolveScenarioCRepairModalPromptFromText(scoped[lastDanielRepairIdx]?.content ?? '');
-  }
-  if (lastSophieIdx >= 0) {
-    return SCENARIO_C_SOPHIE_PERSPECTIVE_PROBE;
-  }
   return SCENARIO_3_OPENING;
 }
 
@@ -174,4 +187,25 @@ export function applySituation3ExactModalPrompt(
   if (deps.lastQuestionTextRef) {
     deps.lastQuestionTextRef.current = exact;
   }
+}
+
+/** Show-scenario modal body + footer for Situation 3 (vignette must not stay on a prior scenario). */
+export function applySituation3ReferenceCard(
+  deps: {
+    committedScenarioRef?: { current: ActiveScenario | null };
+    setReferenceCardScenario: (scenario: ActiveScenario) => void;
+    setReferenceCardPrompt: (prompt: string) => void;
+    setInterviewUiPhase: (phase: InterviewUiPhase) => void;
+    lastQuestionTextRef?: { current: string };
+  },
+  assistantForModal: ScenarioModalTranscriptTurn[],
+  currentSpoken?: string | null,
+  delivery?: Situation3ModalDeliveryState | null,
+): void {
+  if (deps.committedScenarioRef) {
+    deps.committedScenarioRef.current = SITUATION_3_REFERENCE_SCENARIO;
+  }
+  deps.setReferenceCardScenario(SITUATION_3_REFERENCE_SCENARIO);
+  deps.setInterviewUiPhase('scenario_active');
+  applySituation3ExactModalPrompt(deps, assistantForModal, currentSpoken, delivery);
 }

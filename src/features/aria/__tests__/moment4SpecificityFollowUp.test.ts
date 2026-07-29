@@ -4,6 +4,7 @@ import {
   deriveMoment4PostGrudgeSpecificityResolvedFromMessages,
   evaluateMoment4SpecificityProbe,
   hasMoment4PersonRelationshipOrSituationAnchor,
+  isAnsweringMoment4SpecificityFollowUp,
   isIncompleteMoment4SpecificityFollowUpLeadSentence,
   looksLikeMoment4SpecificityFollowUpEcho,
   looksLikeMoment4SpecificityFollowUpPrompt,
@@ -117,6 +118,40 @@ describe('moment4SpecificityFollowUp', () => {
     expect(needsMoment4SpecificityFollowUp(t)).toBe(false);
   });
 
+  it('does not fire for hyphenated co-worker with specific workplace episode (session log)', () => {
+    const t =
+      "There was a co-worker a while back who used to take credit for things I'd done in meetings and it really bothered me for a few months. I ended up just talking to her directly about it instead of going to our manager and I actually got better after that. We're not close, but we got along fine now.";
+    const evalResult = evaluateMoment4SpecificityProbe(t);
+    expect(evalResult.hasNamedPerson).toBe(true);
+    expect(evalResult.hasSpecificEvent).toBe(true);
+    expect(evalResult.probeShouldFire).toBe(false);
+    expect(needsMoment4SpecificityFollowUp(t)).toBe(false);
+  });
+
+  it('does not fire for cut-off generic opener mid-sentence (session log)', () => {
+    const cutOff = "I'm generally too nice and I don't";
+    const evalResult = evaluateMoment4SpecificityProbe(cutOff);
+    expect(evalResult.genericOpenerDetected).toBe(true);
+    expect(evalResult.probeShouldFire).toBe(false);
+    expect(evalResult.triggerReason).toBe('cutoff');
+    expect(needsMoment4SpecificityFollowUp(cutOff)).toBe(false);
+  });
+
+  it('does not fire for bare mentalizing opener cut-offs on grudge question', () => {
+    for (const cutOff of ['I think', 'I think that']) {
+      const evalResult = evaluateMoment4SpecificityProbe(cutOff);
+      expect(evalResult.probeShouldFire).toBe(false);
+      expect(evalResult.triggerReason).toBe('cutoff');
+      expect(needsMoment4SpecificityFollowUp(cutOff)).toBe(false);
+      expect(
+        deriveMoment4PostGrudgeSpecificityResolvedFromMessages([
+          { role: 'assistant', content: MOMENT_4_GRUDGE_QUESTION_TEXT },
+          { role: 'user', content: cutOff },
+        ]),
+      ).toBe(false);
+    }
+  });
+
   it('fires for long generic habit language without named person', () => {
     const t =
       "I've had grudges before but I work through them generally and try to move on with life overall without dwelling too much on past conflicts in most situations day to day.";
@@ -134,6 +169,30 @@ describe('moment4SpecificityFollowUp', () => {
       { role: 'assistant', content: MOMENT_4_GRUDGE_QUESTION_TEXT },
       { role: 'user', content: EXPLICIT_NO_CURRENT_GRUDGE },
     ])).toBe(true);
+  });
+
+  it('does not fire for session-log forgive-everyone answer without a specific person', () => {
+    const sessionAnswer =
+      "Yeah, I don't usually hold grudges. I think, in general, you should forgive everyone you've met because holding grudges is like drinking poison and hoping the other person dies.";
+    const evalResult = evaluateMoment4SpecificityProbe(sessionAnswer);
+    expect(evalResult.probeShouldFire).toBe(false);
+    expect(evalResult.triggerReason).toBeNull();
+    expect(needsMoment4SpecificityFollowUp(sessionAnswer)).toBe(false);
+  });
+
+  it('does not fire when user explicitly says no specific person or none comes to mind', () => {
+    for (const answer of [
+      "I don't have a specific person in mind.",
+      'No one in particular comes to mind for me.',
+      "A person doesn't come to mind when I think about that.",
+      "I do not have a specific person to point to.",
+      "Can't think of anyone specific.",
+    ]) {
+      const evalResult = evaluateMoment4SpecificityProbe(answer);
+      expect(evalResult.probeShouldFire).toBe(false);
+      expect(['declined_specific_person', null]).toContain(evalResult.triggerReason);
+      expect(needsMoment4SpecificityFollowUp(answer)).toBe(false);
+    }
   });
 
   it('does not fire specificity redirect on valid_non_applicable responses', () => {
@@ -218,6 +277,18 @@ describe('moment4SpecificityFollowUp', () => {
     expect(deriveMoment4PostGrudgeSpecificityResolvedFromMessages(msgs)).toBe(false);
     const msgs2 = [...msgs, { role: 'user' as const, content: 'My old roommate in college argued with me last year.' }];
     expect(deriveMoment4PostGrudgeSpecificityResolvedFromMessages(msgs2)).toBe(true);
+  });
+
+  it('isAnsweringMoment4SpecificityFollowUp matches model paraphrases', () => {
+    const grudge = MOMENT_4_GRUDGE_QUESTION_TEXT;
+    const paraphrase = 'Is there a specific person or situation that comes to mind when you think about that?';
+    const msgs = [
+      { role: 'assistant' as const, content: grudge },
+      { role: 'user' as const, content: 'I try not to hold grudges.' },
+      { role: 'assistant' as const, content: paraphrase },
+      { role: 'user' as const, content: 'My cousin Rita and I fell out last year.' },
+    ];
+    expect(isAnsweringMoment4SpecificityFollowUp(msgs)).toBe(true);
   });
 
   it('derive gate: not resolved until user answers specificity probe', () => {

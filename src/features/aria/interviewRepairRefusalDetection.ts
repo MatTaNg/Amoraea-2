@@ -9,6 +9,7 @@ import {
   looksLikeScenarioAContemptProbeQuestion,
   scenarioAEmmaVeryClearContemptReask,
 } from './scenarioAContemptProbeTextMatch';
+import { isNonRepeatableAssistantLineForVerbatimReplay } from './interviewDisengagementTranscriptHelpers';
 import { isScenarioModalFollowUpProbe } from './interviewScenarioModalPrompt';
 import { isScenarioANonScriptedModalParaphrase } from './situation1ExactModalPrompt';
 import {
@@ -114,14 +115,7 @@ function repairAnswerRedirectsOnlyToOtherParty(userAnswer: string, lastAssistant
   );
 }
 
-/**
- * User answered a Scenario A repair-as-Ryan prompt with a concrete plan (not line-analysis only).
- */
-export function userAnswerSatisfiesScenarioARepairPrompt(
-  answer: string,
-  lastAssistantContent?: string,
-): boolean {
-  if (!repairAnswerHasConcreteSuggestionActionOrStep(answer)) return false;
+function scenarioARepairAsRyanSignalsInAnswer(answer: string): boolean {
   const t = normalizeApostrophes(answer).toLowerCase().trim();
   if (!t) return false;
 
@@ -138,7 +132,29 @@ export function userAnswerSatisfiesScenarioARepairPrompt(
       t,
     );
 
-  if (firstPersonRepair || ryanOwnership) return true;
+  return firstPersonRepair || ryanOwnership;
+}
+
+/**
+ * Contempt-probe answers need repair-as-Ryan framing — not generic "together"/"share" analysis.
+ */
+export function userAnswerIncludesExplicitScenarioARepairAsRyan(answer: string): boolean {
+  if (!repairAnswerHasConcreteSuggestionActionOrStep(answer)) return false;
+  return scenarioARepairAsRyanSignalsInAnswer(answer);
+}
+
+/**
+ * User answered a Scenario A repair-as-Ryan prompt with a concrete plan (not line-analysis only).
+ */
+export function userAnswerSatisfiesScenarioARepairPrompt(
+  answer: string,
+  lastAssistantContent?: string,
+): boolean {
+  if (!repairAnswerHasConcreteSuggestionActionOrStep(answer)) return false;
+  const t = normalizeApostrophes(answer).toLowerCase().trim();
+  if (!t) return false;
+
+  if (scenarioARepairAsRyanSignalsInAnswer(answer)) return true;
 
   const parties = repairFocalAndOtherFromPrompt(lastAssistantContent);
   if (parties?.focal === 'ryan' && repairAnswerHasConcreteSuggestionActionOrStep(answer)) {
@@ -253,6 +269,7 @@ function isTransientScenarioAAssistantInterstitial(content: string): boolean {
   const c = (content ?? '').trim();
   if (!c) return true;
   if (isShortAckOnlySentence(c)) return true;
+  if (isNonRepeatableAssistantLineForVerbatimReplay(c)) return true;
   if (isScenarioModalFollowUpProbe(c)) return true;
   if (looksLikeScenarioAContemptProbeQuestion(c)) return true;
   if (scenarioAEmmaVeryClearContemptReask(c)) return true;
@@ -260,6 +277,51 @@ function isTransientScenarioAAssistantInterstitial(content: string): boolean {
   /** Premature interview closing during Scenario A — keep walking back to the repair prompt. */
   if (looksLikeInterviewClosingAssistantMessage(c)) return true;
   return false;
+}
+
+/** Model wording probe after a satisfied repair-as-Ryan answer — not a valid re-ask. */
+export function looksLikeScenarioARepairWordingFollowUp(text: string): boolean {
+  const t = normalizeApostrophes(text).toLowerCase();
+  if (/\bhow would you actually say\b/.test(t) && /\bemma\b/.test(t)) return true;
+  if (/\bhow would you say that to emma\b/.test(t)) return true;
+  if (/\bwhat would you (actually )?say to emma\b/.test(t)) return true;
+  if (/\bwhat would those words sound like\b/.test(t)) return true;
+  return false;
+}
+
+/** True when the latest user turn already answered a delivered Scenario A repair ask. */
+export function scenarioARepairAnswerAlreadySatisfiedInTranscript(
+  messages: Array<{ role: string; content?: string | null }>,
+): boolean {
+  const repairCtx = findLastUserWithPriorScenarioARepairContext(messages);
+  if (!repairCtx.lastUserContent || !repairCtx.priorRepairAssistantContent) {
+    return false;
+  }
+  return userAnswerSatisfiesScenarioARepairPrompt(
+    repairCtx.lastUserContent,
+    repairCtx.priorRepairAssistantContent,
+  );
+}
+
+/** Parallel-stream guard: drop repair/contempt/modal echoes once Ryan repair is satisfied. */
+export function shouldSuppressScenarioAAssistantLineAfterSatisfiedRepair(
+  spoken: string,
+  messages: Array<{ role: string; content?: string | null }>,
+): boolean {
+  if (!scenarioARepairAnswerAlreadySatisfiedInTranscript(messages)) {
+    return false;
+  }
+  return (
+    looksLikeScenarioARepairQuestion(spoken) ||
+    looksLikeScenarioARepairReAskQuestion(spoken) ||
+    looksLikeScenarioARepairStreamFragment(spoken) ||
+    looksLikeScenarioARepairWordingFollowUp(spoken) ||
+    looksLikeScenarioAContemptProbeQuestion(spoken) ||
+    scenarioAEmmaVeryClearContemptReask(spoken) ||
+    isIncompleteScenarioAContemptProbeLeadSentence(spoken) ||
+    isScenarioModalFollowUpProbe(spoken) ||
+    isScenarioANonScriptedModalParaphrase(spoken)
+  );
 }
 
 /**
@@ -354,10 +416,7 @@ export function shouldAdvanceScenarioAAfterSatisfiedRepair(
 
   const contemptAnswerIncludesRepairSubstance =
     looksLikeScenarioAContemptProbeQuestion(priorRepairAssistantContent) &&
-    userAnswerSatisfiesScenarioARepairPrompt(
-      lastUserContent,
-      SCENARIO_A_REPAIR_QUESTION_AFTER_CONTEMPT_COPY,
-    );
+    userAnswerIncludesExplicitScenarioARepairAsRyan(lastUserContent);
 
   const priorIsRepairContext =
     looksLikeScenarioARepairQuestion(priorRepairAssistantContent) ||
@@ -411,6 +470,7 @@ export function shouldAdvanceScenarioAAfterSatisfiedRepair(
 
   return (
     looksLikeScenarioARepairReAskQuestion(draft) ||
+    looksLikeScenarioARepairWordingFollowUp(draft) ||
     looksLikeScenarioARepairQuestion(draft) ||
     looksLikeScenarioAContemptProbeQuestion(draft) ||
     scenarioAEmmaVeryClearContemptReask(draft) ||

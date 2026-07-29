@@ -53,6 +53,9 @@ export function syncInterviewUnhandledRejectionSaveDeps(
     scenarioScoresRef: ctx.scenarioScoresRef,
     currentScenarioRef: ctx.currentScenarioRef,
     resumeActiveScenarioRef: ctx.resumeActiveScenarioRef,
+    lastQuestionTextRef: ctx.lastQuestionTextRef,
+    showScenarioCardCanonicalPlaybackConfirmedKindsRef:
+      ctx.showScenarioCardCanonicalPlaybackConfirmedKindsRef,
     saveInterviewProgress: ctx.saveInterviewProgress,
   } as InterviewUnhandledRejectionSaveDeps;
 }
@@ -69,6 +72,9 @@ export function syncInterviewAuthSignedOutSaveDeps(
     scenarioScoresRef: ctx.scenarioScoresRef,
     currentScenarioRef: ctx.currentScenarioRef,
     resumeActiveScenarioRef: ctx.resumeActiveScenarioRef,
+    lastQuestionTextRef: ctx.lastQuestionTextRef,
+    showScenarioCardCanonicalPlaybackConfirmedKindsRef:
+      ctx.showScenarioCardCanonicalPlaybackConfirmedKindsRef,
     saveInterviewProgress: ctx.saveInterviewProgress,
     setSessionExpired: ctx.setSessionExpired,
   } as InterviewAuthSignedOutSaveDeps;

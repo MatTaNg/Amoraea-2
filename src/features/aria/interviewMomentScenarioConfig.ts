@@ -57,7 +57,7 @@ export function assistantTextIsPrematureMoment4HandoffDuringScenarioC(text: stri
 }
 
 export const RESUME_WELCOME_BACK_MESSAGE =
-  "Welcome back! Lets continue where we left off. If you'd like me to repeat what I said, let me know.";
+  "Welcome back, we'll pick up where we left off.";
 
 /** True when the next user turn is the first user reply after a Moment 5 conflict-validity clarification (handles resume welcome inserted after clarification). */
 export function isFirstUserTurnAfterMoment5ConflictValidityClarification(

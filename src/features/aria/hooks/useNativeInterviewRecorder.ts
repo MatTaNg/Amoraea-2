@@ -9,9 +9,12 @@ import {
 import { logNativeMicRecordingStopped } from '@features/aria/telemetry/tsAutoplayTelemetry';
 import {
   getLastAppliedAudioModeLabel,
+  markNativePlaybackBridgeBeforeNextTts,
+  setPlaybackMode,
   setRecordingMode,
   transitionFromRecordingToPlaybackNative,
 } from '@features/aria/utils/audioModeHelpers';
+import { isStaleNativeRecorderError } from '@features/aria/utils/nativeRecorderErrors';
 
 import type {
   AudioRecorderPermissionStatus,
@@ -66,6 +69,7 @@ export function useNativeInterviewRecorder(params: UseNativeInterviewRecorderPar
       await recording.stopAndUnloadAsync();
       if (Platform.OS !== 'web') {
         await transitionFromRecordingToPlaybackNative('native_recording_stop');
+        markNativePlaybackBridgeBeforeNextTts('native_recording_stop');
       }
 
       const uri = recording.getURI();
@@ -84,12 +88,19 @@ export function useNativeInterviewRecorder(params: UseNativeInterviewRecorderPar
         recordingCappedThisTurnRef.current = false;
       }
     } catch (err) {
-      if (__DEV__) console.error('Native recording stop failed:', err);
+      recordingRef.current = null;
       setIsRecording(false);
       setInputMeterLevel(0);
       if (Platform.OS !== 'web') {
         await transitionFromRecordingToPlaybackNative('native_recording_stop_error').catch(() => {});
       }
+      if (isStaleNativeRecorderError(err)) {
+        if (__DEV__) {
+          console.warn('[useAudioRecorder] cleared stale native recorder on stop');
+        }
+        return;
+      }
+      if (__DEV__) console.error('Native recording stop failed:', err);
       onError?.(err instanceof Error ? err : new Error(String(err)));
     }
   }, [
@@ -183,23 +194,51 @@ export function useNativeInterviewRecorder(params: UseNativeInterviewRecorderPar
         try {
           await rec.stopAndUnloadAsync();
         } catch (e) {
-          opts?.logCleanupFailed?.({
-            message: e instanceof Error ? e.message : String(e),
-            moment_number: opts.momentNumber,
-          });
+          if (!isStaleNativeRecorderError(e)) {
+            opts?.logCleanupFailed?.({
+              message: e instanceof Error ? e.message : String(e),
+              moment_number: opts.momentNumber,
+            });
+          }
         }
         recordingRef.current = null;
       }
       setIsRecording(false);
       setInputMeterLevel(0);
+      if (Platform.OS !== 'web') {
+        await transitionFromRecordingToPlaybackNative('native_recording_release').catch(() => {});
+      }
     },
     [clearMaxDurationTimer, setIsRecording, setInputMeterLevel],
   );
 
   const reinitializeNativeMicrophoneSession = useCallback(async (): Promise<boolean> => {
-    await setRecordingMode();
+    clearMaxDurationTimer();
+    const rec = recordingRef.current;
+    const hadActiveRecording = Boolean(rec);
+    if (rec) {
+      try {
+        await rec.stopAndUnloadAsync();
+      } catch (e) {
+        if (!isStaleNativeRecorderError(e) && __DEV__) {
+          console.warn('[useAudioRecorder] release during mic reinit failed', e);
+        }
+      }
+      recordingRef.current = null;
+    }
+    setIsRecording(false);
+    setInputMeterLevel(0);
+    if (Platform.OS !== 'web') {
+      if (hadActiveRecording) {
+        await transitionFromRecordingToPlaybackNative('mic_session_reinit');
+      } else {
+        await setPlaybackMode();
+      }
+    } else {
+      await setPlaybackMode();
+    }
     return requestNativePermission();
-  }, [requestNativePermission]);
+  }, [clearMaxDurationTimer, requestNativePermission, setIsRecording, setInputMeterLevel]);
 
   return {
     startNativeRecording,

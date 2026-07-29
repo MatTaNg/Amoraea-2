@@ -1,13 +1,15 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
 
-import {
-  inferScenarioMessages,
-  pickMessagesForScenarioScoring,
-} from '@features/aria/interviewScenarioScoringSlice';
 import type { MessageWithScenario } from '@features/aria/interviewScenarioScoringSlice';
 import type { InterviewResults } from '@features/aria/interviewResultsTypes';
-import { hydrateScenarioScoresFromAttempt } from '@features/aria/hydrateScenarioScoresFromAttempt';
-import { scoreStandardDeferredPersonalMoments } from '@features/aria/scoreStandardDeferredPersonalMoments';
+import {
+  prepareScenarioScoresForCompletion,
+  rescoreMissingStandardScenarioScores,
+} from '@features/aria/prepareScenarioScoresForCompletion';
+import {
+  scoreStandardDeferredMoment4,
+  scoreStandardDeferredMoment5,
+} from '@features/aria/scoreStandardDeferredPersonalMoments';
 import { runStandardDeferredPersistGate } from '@features/aria/scoreStandardDeferredPersistGate';
 import type { ScoreInterviewDeps } from '@features/aria/scoreInterviewTypes';
 import {
@@ -74,35 +76,11 @@ export async function runStandardOnboardingServerDelegate(
       deps.interviewSessionAttemptIdRef.current,
     );
     const msgsDeferred = finalMessages as MessageWithScenario[];
-    await hydrateScenarioScoresFromAttempt(deps, supabase);
-    const missingForDeferred = ([1, 2, 3] as const).filter((n) => !deps.scenarioScoresRef.current[n]);
-    if (missingForDeferred.length > 0) {
-      await remoteLog('[STANDARD] rescore scenarios still missing after DB hydrate (fallback only)', {
-        missing: missingForDeferred,
+    const missingForDeferred = await prepareScenarioScoresForCompletion(deps, supabase);
+    if (missingForDeferred.length === 0) {
+      void remoteLog('[STANDARD] all scenario scores present after hydrate/backfill; skipping rescore', {
+        attemptId: deps.interviewSessionAttemptIdRef.current,
       });
-      for (const scenarioNum of missingForDeferred) {
-        const taggedMessages = msgsDeferred.filter(
-          (m) => (m as MessageWithScenario).scenarioNumber === scenarioNum,
-        );
-        const inferredMessages = inferScenarioMessages(msgsDeferred, scenarioNum);
-        const messagesToScore = pickMessagesForScenarioScoring(msgsDeferred, scenarioNum);
-        if (messagesToScore.length >= 2) {
-          await deps.scoreScenario(scenarioNum, messagesToScore);
-        } else {
-          await remoteLog('[STANDARD] deferred persist: cannot rescore scenario (insufficient messages)', {
-            scenarioNum,
-            tagged: taggedMessages.length,
-            inferred: inferredMessages.length,
-            picked: messagesToScore.length,
-          });
-        }
-      }
-      const stillMissingAfterRescore = ([1, 2, 3] as const).filter((n) => !deps.scenarioScoresRef.current[n]);
-      if (stillMissingAfterRescore.length > 0) {
-        await remoteLog('[STANDARD] rescore attempt finished with missing scenarios', {
-          missing: stillMissingAfterRescore,
-        });
-      }
     }
 
     let moment4ForAggregate: ReturnType<typeof sanitizePersonalMomentScoresForAggregate> | null = null;
@@ -124,7 +102,7 @@ export async function runStandardOnboardingServerDelegate(
       logScorePipelineBaseline(scoringBaseline);
     }
     if (apiUrl) {
-      const deferredPersonal = await scoreStandardDeferredPersonalMoments({
+      const deferredPersonalParams = {
         apiUrl,
         headers,
         msgsDeferred,
@@ -138,10 +116,23 @@ export async function runStandardOnboardingServerDelegate(
         moment5ClientScoringMetaRef: deps.moment5ClientScoringMetaRef,
         moment5AccountabilityProbeFiredRef: deps.moment5AccountabilityProbeFiredRef,
         probeLogRef: deps.probeLogRef,
+      };
+      const [m4Deferred] = await Promise.all([
+        scoreStandardDeferredMoment4(deferredPersonalParams),
+        missingForDeferred.length > 0
+          ? rescoreMissingStandardScenarioScores(deps, msgsDeferred)
+          : Promise.resolve(),
+      ]);
+      moment4ForAggregate = m4Deferred.moment4ForAggregate;
+      scoringBaseline = m4Deferred.scoringBaseline;
+      const m5Deferred = await scoreStandardDeferredMoment5({
+        ...deferredPersonalParams,
+        scoringBaseline,
       });
-      moment4ForAggregate = deferredPersonal.moment4ForAggregate;
-      moment5ForAggregate = deferredPersonal.moment5ForAggregate;
-      scoringBaseline = deferredPersonal.scoringBaseline;
+      moment5ForAggregate = m5Deferred.moment5ForAggregate;
+      scoringBaseline = m5Deferred.scoringBaseline;
+    } else if (missingForDeferred.length > 0) {
+      await rescoreMissingStandardScenarioScores(deps, msgsDeferred);
     }
 
     const deferredPersist = await runStandardDeferredPersistGate({

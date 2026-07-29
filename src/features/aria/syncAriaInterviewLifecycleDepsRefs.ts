@@ -1,6 +1,8 @@
 import type { MutableRefObject } from 'react';
 
-import type { InterviewSessionLifecycleDeps } from '@features/aria/sessionLifecycleTypes';
+import { runApplyRouteProbeAfterResume } from '@features/aria/applyRouteProbeAfterResumeTypes';
+import { markNativePlaybackBridgeBeforeNextTts } from '@features/aria/utils/audioModeHelpers';
+import type { InterviewSessionLifecycleDeps, HandleResumeDeps } from '@features/aria/sessionLifecycleTypes';
 import type { ScoreInterviewDeps } from '@features/aria/scoreInterviewTypes';
 import type {
   AriaInterviewDepsRefs,
@@ -30,7 +32,9 @@ export function syncSessionLifecycleDeps(
         profile: ctx.profile,
         hasResumedRef: ctx.hasResumedRef,
         resumeLoadingFlowActiveRef: ctx.resumeLoadingFlowActiveRef,
+        resumeHandleInFlightRef: ctx.resumeHandleInFlightRef,
         setResumeLoadingVisible: ctx.setResumeLoadingVisible,
+        setResumeHydrationPending: ctx.setResumeHydrationPending,
         interviewSessionAttemptIdRef: ctx.interviewSessionAttemptIdRef,
         interviewSessionIdRef: ctx.interviewSessionIdRef,
         interviewMomentsCompleteRef: ctx.interviewMomentsCompleteRef,
@@ -68,10 +72,13 @@ export function syncSessionLifecycleDeps(
         resumeEmotionCatchUpIndicesRef: ctx.resumeEmotionCatchUpIndicesRef,
         resumeEmotionAfterModalTextRef: ctx.resumeEmotionAfterModalTextRef,
         resumeOfferWelcomeTtsRef: ctx.resumeOfferWelcomeTtsRef,
+        resumeInPersonalPartRef: ctx.resumeInPersonalPartRef,
         resumeWelcomeMessageRef: ctx.resumeWelcomeMessageRef,
         resumeWelcomeHydrationAttemptRef: ctx.resumeWelcomeHydrationAttemptRef,
         resumeLastAssistantTextRef: ctx.resumeLastAssistantTextRef,
         lastQuestionTextRef: ctx.lastQuestionTextRef,
+        scenarioSkipConfirmedCountRef: ctx.scenarioSkipConfirmedCountRef,
+        scenarioSkipPenaltySumRef: ctx.scenarioSkipPenaltySumRef,
         setMessages: ctx.setMessages,
         pendingCompletionTranscriptRef: ctx.pendingCompletionTranscriptRef,
         setPendingCompletion: ctx.setPendingCompletion,
@@ -92,6 +99,22 @@ export function syncSessionLifecycleDeps(
         interruptAllInterviewTtsOutput: ctx.interruptAllInterviewTtsOutput,
         moment5QuestionDeliveryInFlightRef: ctx.moment5QuestionDeliveryInFlightRef,
         interviewUserTurnEpochRef: ctx.interviewUserTurnEpochRef,
+        processUserSpeech: ctx.processUserSpeech as HandleResumeDeps['processUserSpeech'],
+        prepareInterviewAudioForResumePlayback: async () => {
+          const { setRecordingSessionActive } = await import('@utilities/sessionLogging');
+          setRecordingSessionActive(false);
+          markNativePlaybackBridgeBeforeNextTts('resume_prepare_audio');
+          await ctx.audioRecorder.reinitializeMicrophoneSession();
+          await runApplyRouteProbeAfterResume(
+            {
+              userIdRef: (ctx.userIdRef ?? { current: ctx.userId }) as MutableRefObject<string | undefined>,
+              lastAudioRouteFingerprintRef: ctx.lastAudioRouteFingerprintRef,
+              lastHeadphoneProbeRef: ctx.lastHeadphoneProbeRef,
+              setAudioRouteKind: ctx.setAudioRouteKind,
+            },
+            'app_resume',
+          );
+        },
         startInterviewInFlightRef: ctx.startInterviewInFlightRef,
         setInterviewStartInFlight: ctx.setInterviewStartInFlight,
         setMicError: ctx.setMicError,

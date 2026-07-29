@@ -36,6 +36,7 @@ import {
 import {
   getSessionLogRuntime,
 } from '@utilities/sessionLogging';
+import { hydrateScenarioSkipConfirmedCount } from '@features/aria/scenarioSkipCountHydration';
 
 import type { InterviewResults } from './interviewResultsTypes';
 import {
@@ -84,6 +85,12 @@ export async function runScoreInterview(
       userId: deps.userId ?? null,
       interviewStatus: deps.interviewStatusRef.current,
       routeName: deps.routeName,
+    });
+    await hydrateScenarioSkipConfirmedCount({
+      scenarioSkipConfirmedCountRef: deps.scenarioSkipConfirmedCountRef,
+      transcriptMessages: params.finalMessages,
+      attemptId: deps.interviewSessionAttemptIdRef.current,
+      userId: deps.userId ?? null,
     });
     if (__DEV__) {
       console.log('=== [2] Entering completion handler ===');
@@ -185,7 +192,8 @@ export async function runScoreInterview(
         applicationStatus: 'under_review',
         onboardingStage: 'complete',
       });
-      deps.queryClient.invalidateQueries({ queryKey: ['deps.profile', deps.userId] });
+      deps.queryClient.invalidateQueries({ queryKey: ['profile', deps.userId] });
+      deps.queryClient.invalidateQueries({ queryKey: ['initialInterviewRoute', deps.userId] });
     }
 
     if (ALPHA_MODE && deps.userId) {

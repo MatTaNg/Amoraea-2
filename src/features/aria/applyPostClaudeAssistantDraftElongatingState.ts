@@ -1,6 +1,7 @@
 import {
   coerceInvalidContinuationAssistantDraft,
   isApprovedElongatingProbeOnly,
+  userTurnSuppressesElongatingProbe,
 } from '@features/aria/elongatingProbe';
 import type {
   PostClaudeAssistantTurnDeps,
@@ -29,7 +30,7 @@ export function applyPostClaudeAssistantDraftElongatingState(
   if (
     params.elongatingSuppressedForUserTurn &&
     assistantTurnIsElongatingProbeOnly &&
-    !wasCoercedToApprovedProbe
+    (!wasCoercedToApprovedProbe || userTurnSuppressesElongatingProbe(params.trimmed))
   ) {
     void remoteLog('[ELONGATING_PROBE_SUPPRESSED_OVERRIDE]', {
       wordCount: params.trimmed.split(/\s+/).filter(Boolean).length,

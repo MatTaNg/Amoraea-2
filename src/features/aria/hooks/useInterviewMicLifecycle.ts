@@ -2,12 +2,18 @@ import { useEffect, useRef } from 'react';
 import { AppState, Platform } from 'react-native';
 
 import { setRecordingPlaybackTransitionTelemetryHook } from '@features/aria/utils/audioModeHelpers';
+import { runRecoverInterviewMicAfterForeground } from '@features/aria/runRecoverInterviewMicAfterForeground';
+import { runReplayLastQuestionAfterBackgroundInterrupt } from '@features/aria/runReplayLastQuestionAfterBackgroundInterrupt';
+import { markInterviewAudioInterruptedByBackground, takeInterviewAudioInterruptedByBackground, bumpResumeWelcomePlaybackGeneration } from '@features/aria/interviewLocalPersistence';
+import { recoverInterviewAudioSession } from '@features/aria/utils/recoverInterviewAudioSession';
+import { markNativePlaybackBridgeBeforeNextTts } from '@features/aria/utils/audioModeHelpers';
 import { getLateStartThresholdMs } from '@features/aria/config/audioInterviewConfig';
 import { remoteLog } from '@utilities/remoteLog';
 import { writeSessionLog } from '@utilities/sessionLogging/writeSessionLog';
 import {
   getSessionLogRuntime,
   setLastHiddenAtMs,
+  setRecordingSessionActive,
 } from '@utilities/sessionLogging';
 import {
   getInterviewWallClockStartMs,
@@ -39,16 +45,33 @@ export function useInterviewMicLifecycle(
   };
   hardStopInterviewAudioForNavigationRef.current = () => {
     const deps = depsRef.current;
+    const isRecording = audioRecorderRefForLeave.current.isRecording;
+    const ttsActive =
+      getSessionLogRuntime().ttsPlaybackActive ||
+      deps.voiceState === 'speaking' ||
+      deps.voiceState === 'processing';
     deps.interruptAllInterviewTtsOutput();
     void deps.stopElevenLabsPlayback();
     deps.setVoiceState('idle');
     try {
-      if (audioRecorderRefForLeave.current.isRecording) {
-        audioRecorderRefForLeave.current.stopRecording();
+      if (isRecording) {
+        void audioRecorderRefForLeave.current.releaseRecordingInstance();
+        setRecordingSessionActive(false);
+        deps.setVoiceState('idle');
+        markInterviewAudioInterruptedByBackground('recording');
       }
     } catch {
       /* ignore */
     }
+    if (Platform.OS !== 'web' && (isRecording || ttsActive)) {
+      markNativePlaybackBridgeBeforeNextTts(
+        isRecording ? 'navigation_away_during_recording' : 'navigation_away_during_tts',
+      );
+      if (ttsActive && !isRecording) {
+        markInterviewAudioInterruptedByBackground('tts');
+      }
+    }
+    void recoverInterviewAudioSession('navigation_away');
   };
 
   const voiceState = depsRef.current.voiceState;
@@ -111,28 +134,56 @@ export function useInterviewMicLifecycle(
 
   useEffect(() => {
     if (Platform.OS === 'web') return;
-    let cancelled = false;
     const sub = AppState.addEventListener('change', (next) => {
+      if (next === 'background' || next === 'inactive') {
+        const deps = depsRef.current;
+        if (deps.interviewStatusRef.current !== 'in_progress') return;
+        const isRecording = audioRecorderRefForLeave.current.isRecording;
+        const ttsActive =
+          getSessionLogRuntime().ttsPlaybackActive ||
+          deps.voiceState === 'speaking' ||
+          deps.voiceState === 'processing';
+        if (!isRecording && !ttsActive) return;
+        const interruptKind = isRecording ? 'recording' : 'tts';
+        markInterviewAudioInterruptedByBackground(interruptKind);
+        if (ttsActive) {
+          deps.ttsSpeakGenerationRef.current += 1;
+          if (deps.resumeOfferWelcomeTtsRef?.current) {
+            bumpResumeWelcomePlaybackGeneration();
+          }
+        }
+        void (async () => {
+          if (isRecording) {
+            await audioRecorderRefForLeave.current.releaseRecordingInstance();
+            setRecordingSessionActive(false);
+            deps.setVoiceState('idle');
+          } else {
+            deps.interruptAllInterviewTtsOutput();
+            await deps.stopElevenLabsPlayback();
+            deps.setVoiceState('idle');
+          }
+          markNativePlaybackBridgeBeforeNextTts(
+            isRecording ? 'app_background_during_recording' : 'app_background_during_tts',
+          );
+          await recoverInterviewAudioSession(
+            isRecording ? 'app_background_during_recording' : 'app_background_during_tts',
+          );
+        })();
+        return;
+      }
       if (next !== 'active') return;
+      if (depsRef.current.resumeLoadingFlowActiveRef?.current) return;
       if (depsRef.current.interviewStatusRef.current !== 'in_progress') return;
       void (async () => {
-        depsRef.current.setMicSessionRecovering(true);
-        try {
-          const ok = await depsRef.current.audioRecorder.reinitializeMicrophoneSession();
-          if (!cancelled) {
-            if (!ok) depsRef.current.setMicNeedsReconnect(true);
-            else depsRef.current.setMicNeedsReconnect(false);
-          }
-          if (!cancelled && depsRef.current.userIdRef.current) {
-            await depsRef.current.applyRouteProbeAfterResume('app_resume');
-          }
-        } finally {
-          if (!cancelled) depsRef.current.setMicSessionRecovering(false);
+        const deps = depsRef.current;
+        const interrupted = takeInterviewAudioInterruptedByBackground();
+        await runRecoverInterviewMicAfterForeground(deps);
+        if (interrupted) {
+          await runReplayLastQuestionAfterBackgroundInterrupt(deps, interrupted);
         }
       })();
     });
     return () => {
-      cancelled = true;
       sub.remove();
     };
   }, [audioRecorder.reinitializeMicrophoneSession, applyRouteProbeAfterResume, depsRef]);
@@ -181,7 +232,21 @@ export function useInterviewMicLifecycle(
   useEffect(() => {
     const unsubFocus = navigation.addListener('focus', () => {
       const deps = depsRef.current;
-      if (!deps.userId || !navSessionBlurRef.current) return;
+      if (!deps.userId) return;
+      if (
+        Platform.OS !== 'web' &&
+        navSessionBlurRef.current &&
+        deps.interviewStatusRef.current === 'in_progress'
+      ) {
+        void (async () => {
+          const interrupted = takeInterviewAudioInterruptedByBackground();
+          await runRecoverInterviewMicAfterForeground(deps);
+          if (interrupted) {
+            await runReplayLastQuestionAfterBackgroundInterrupt(deps, interrupted);
+          }
+        })();
+      }
+      if (!navSessionBlurRef.current) return;
       navSessionBlurRef.current = false;
       const r = getSessionLogRuntime();
       writeSessionLog({

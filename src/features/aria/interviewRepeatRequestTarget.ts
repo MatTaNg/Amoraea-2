@@ -11,7 +11,7 @@ export const REPEAT_REQUEST_ACK = 'Sure.';
 
 /**
  * Explicit ask to re-hear the situation vignette (story), not only the current probe question.
- * "Repeat the question" stays question-only; "repeat what you/she said" re-reads the scenario.
+ * Generic "repeat what you said" stays question-only; user must name the scenario/situation.
  */
 export function looksLikeScenarioRepeatRequest(text: string): boolean {
   const t = (text ?? '').replace(/\s+/g, ' ').trim().toLowerCase();
@@ -31,18 +31,9 @@ export function looksLikeScenarioRepeatRequest(text: string): boolean {
     return false;
   }
 
-  // Generic "repeat what you/she said" → full situation (vignette + question) on Moments 1–3.
-  if (
-    /\brepeat what (you|she|the interviewer)\b/.test(t) ||
-    /\bwhat did (you|she) say\b/.test(t) ||
-    /\b(can you |could you |please )?(repeat|say) what (you|she) (said|just said)\b/.test(t)
-  ) {
-    return true;
-  }
-
   return (
-    /\brepeat (the |this |that )?(scenario|situation|story|vignette)\b/.test(t) ||
-    /\b(can you |could you |please )?(repeat|replay|reread|re-read) (the |this |that )?(scenario|situation|story|vignette)\b/.test(
+    /\brepeat (the |this |that )?(entire |whole |full )?(scenario|situation|story|vignette)\b/.test(t) ||
+    /\b(can you |could you |please )?(repeat|replay|reread|re-read) (the |this |that )?(entire |whole |full )?(scenario|situation|story|vignette)\b/.test(
       t,
     ) ||
     /\b(say|read|tell|play|go over|run through) (the |this |that )?(scenario|situation|story) again\b/.test(

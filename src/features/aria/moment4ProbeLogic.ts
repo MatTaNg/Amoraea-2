@@ -1,5 +1,11 @@
 import type { BuildPersonalMomentHandoffReflectionOptions } from './personalMomentHandoffReflection';
 import { extractLeadingReflectionFromMoment4ThresholdProbe } from './deliveredReflectionRegistry';
+import { hasCommitmentThresholdSignal } from './interviewMoment5AppreciationBridge';
+import {
+  looksLikeIncompleteCutOffUserAnswer,
+  looksLikeUnassessableScenarioAnswer,
+} from './interviewAnswerRelevance';
+import { looksLikeGoBackToPreviousScenarioRequest } from './interviewGoBackRequest';
 import { normalizeInterviewTypography } from './interviewTypography';
 
 export type Moment4RelationshipType = 'close' | 'non_close' | 'mixed' | 'unknown';
@@ -43,6 +49,31 @@ export const MOMENT_4_GRUDGE_QUESTION_TEXT =
 /** Client-injected Moment 4 commitment-threshold follow-up (verbatim ack + question). */
 export const MOMENT_4_COMMITMENT_THRESHOLD_QUESTION_TEXT =
   'Thanks for sharing that. At what point do you decide when a relationship is something to work through versus something you need to walk away from?' as const;
+
+/** Language that actually addresses the work-through vs walk-away fork (not bare "partner" mention). */
+const MOMENT4_THRESHOLD_FORK_LANGUAGE_RE =
+  /\b(work(?:ing)?\s+(?:through|on|it)|walk(?:ing)?\s+away|leave|leaving|end (?:it|the relationship|things)|stay(?:ing)?\s+(?:and|to)|try(?:ing)?\s+(?:to\s+)?(?:fix|repair|save|work)|break(?:ing)?\s+up|divorce|separat(?:e|ion)|give up|give\s+(?:it|the relationship)\s+(?:up|a chance)|red line|deal[- ]?breaker|not worth|too (?:toxic|broken|far)|when (?:trust|respect|love)|at what point|draw the line|dread(?:ing)?|can't(?:not)?\s+(?:fix|save|continue)|no longer|stop trying)\b/i;
+
+/** Work-through / stay side of the threshold fork (e.g. "worth saving if you love each other"). */
+const MOMENT4_THRESHOLD_WORK_THROUGH_COMMITMENT_RE =
+  /\b(?:worth\s+(?:sav(?:ing|e)|it|trying|fighting\s+for)|save(?:ing)?\s+(?:it|the\s+relationship|when|if)|willing\s+to\s+(?:do\s+)?(?:the\s+)?work|work\s+together|(?:do|put\s+in)\s+the\s+work|no\s+matter\s+how\s+hard|fight\s+for\s+(?:it|the\s+relationship|each\s+other)|keep\s+(?:working|trying|going))\b/i;
+
+/**
+ * True when a user answer to the M4 commitment-threshold question cannot be scored —
+ * including mic-stop conditionals and short replies that never address stay vs leave.
+ */
+export function looksLikeUnassessableMoment4ThresholdAnswer(text: string): boolean {
+  const t = (text ?? '').replace(/\s+/g, ' ').trim();
+  if (!t) return true;
+  if (looksLikeUnassessableScenarioAnswer(t)) return true;
+  if (hasCommitmentThresholdSignal(t)) return false;
+  const low = t.toLowerCase().replace(/[\u201c\u201d\u2018\u2019]/g, "'");
+  if (MOMENT4_THRESHOLD_FORK_LANGUAGE_RE.test(low)) return false;
+  if (MOMENT4_THRESHOLD_WORK_THROUGH_COMMITMENT_RE.test(low)) return false;
+  const wordCount = low.split(/\s+/).filter(Boolean).length;
+  // Partner/relationship keywords alone do not satisfy the threshold fork — block M5 advance.
+  return wordCount <= 30;
+}
 
 /**
  * Moment 4 grudge answer → commitment-threshold follow-up.
@@ -276,14 +307,33 @@ export function isAnsweringFirstUserTurnAfterMoment4Threshold(
   }
   if (lastThresholdIdx < 0) return false;
   for (let j = lastThresholdIdx + 1; j < msgsPriorToCurrentUser.length; j++) {
-    if (msgsPriorToCurrentUser[j].role === 'user') return false;
+    const m = msgsPriorToCurrentUser[j];
+    if (m.role !== 'user') continue;
+    const text = (m.content ?? '').trim();
+    if (!text) continue;
+    /** Unassessable threshold retries do not consume the handoff — M5 injects on the first assessable answer. */
+    if (!looksLikeUnassessableMoment4ThresholdAnswer(text)) {
+      return false;
+    }
   }
   return true;
+}
+
+/** Moment 5 conflict paraphrase — must not match {@link looksLikeMoment4GrudgePrompt}. */
+function looksLikeMoment5ConflictParaphraseForGrudgeGuard(text: string): boolean {
+  const lower = (text ?? '').replace(/\s+/g, ' ').trim().toLowerCase();
+  return (
+    (/\bthink of a time (?:when )?you had a conflict\b/.test(lower) ||
+      lower.includes('think of a time when you had a conflict with someone important') ||
+      lower.includes('think of a time when you had a conflict with someone close')) &&
+    /\b(?:someone (?:important|close)|important to you|close to you)\b/.test(lower)
+  );
 }
 
 /** True when the last assistant turn is the grudge/dislike question (or full Moment 4 handoff), not threshold or appreciation. */
 export function looksLikeMoment4GrudgePrompt(text: string): boolean {
   if (looksLikeMoment4ThresholdQuestion(text)) return false;
+  if (looksLikeMoment5ConflictParaphraseForGrudgeGuard(text)) return false;
   const t = (text ?? '').toLowerCase();
   if (t.includes('think of a time you really celebrated someone') || (t.includes('really celebrated') && t.includes('your life'))) {
     return false;
@@ -300,7 +350,7 @@ export function looksLikeMoment4GrudgePrompt(text: string): boolean {
     (/\bis there anyone in your life\b/.test(t) && /\bhard time\b/.test(t)) ||
     (t.includes('got under your skin') &&
       (t.includes('what happened') || t.includes('where things stand'))) ||
-    (t.includes('falling out') && t.includes('what happened'))
+    (t.includes('falling out') && t.includes('what happened') && !/\bconflict\b/.test(t))
   );
 }
 
@@ -338,6 +388,8 @@ export function shouldForceMoment4ThresholdProbe(params: {
   answeringSpecificityFollowUp?: boolean;
 }): boolean {
   if (!params.isMoment4 || params.probeAlreadyAsked) return false;
+  if (looksLikeGoBackToPreviousScenarioRequest(params.userAnswerText)) return false;
+  if (looksLikeIncompleteCutOffUserAnswer(params.userAnswerText)) return false;
   if (params.answeringSpecificityFollowUp) {
     if (looksLikeMisplacedNonGrudgeMoment4Answer(params.userAnswerText)) return false;
     return true;

@@ -113,6 +113,57 @@ describe('drainPriorTtsPlaybackBeforeSpeak', () => {
     expect(setTtsPlaybackActive).not.toHaveBeenCalled();
   });
 
+  it('clears stale playback-active when no line is in flight', async () => {
+    getRuntime.mockReturnValue({
+      attemptId: 'attempt-test',
+      platform: 'web',
+      recordingSessionActive: false,
+      ttsPlaybackActive: true,
+    } as ReturnType<typeof getSessionLogRuntime>);
+
+    const stopElevenLabsPlayback = jest.fn().mockResolvedValue(undefined);
+    const ttsLineInFlightRef = { current: false };
+
+    await drainPriorTtsPlaybackBeforeSpeak({
+      userId: 'user-test',
+      telemetrySource: 'turn',
+      stopElevenLabsPlayback,
+      ttsLineInFlightRef,
+    });
+
+    expect(stopElevenLabsPlayback).not.toHaveBeenCalled();
+    expect(setTtsPlaybackActive).toHaveBeenCalledWith(false);
+    expect(writeSessionLog).not.toHaveBeenCalled();
+  });
+
+  it('clears stale playback-active mid-wait when the prior line finishes', async () => {
+    getRuntime.mockReturnValue({
+      attemptId: 'attempt-test',
+      platform: 'web',
+      recordingSessionActive: false,
+      ttsPlaybackActive: true,
+    } as ReturnType<typeof getSessionLogRuntime>);
+
+    const stopElevenLabsPlayback = jest.fn().mockResolvedValue(undefined);
+    const ttsLineInFlightRef = { current: true };
+
+    const drainPromise = drainPriorTtsPlaybackBeforeSpeak({
+      userId: 'user-test',
+      telemetrySource: 'turn',
+      stopElevenLabsPlayback,
+      ttsLineInFlightRef,
+    });
+
+    await jest.advanceTimersByTimeAsync(80);
+    ttsLineInFlightRef.current = false;
+    await jest.advanceTimersByTimeAsync(80);
+    await drainPromise;
+
+    expect(stopElevenLabsPlayback).not.toHaveBeenCalled();
+    expect(writeSessionLog).not.toHaveBeenCalled();
+    expect(setTtsPlaybackActive).toHaveBeenCalledWith(false);
+  });
+
   it('forces stop when prior playback is still active after the wait window', async () => {
     getRuntime.mockReturnValue({
       attemptId: 'attempt-test',

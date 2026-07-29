@@ -1,14 +1,11 @@
 /** Canonical gate scoring — imported by app (`@features/aria/computeGateResultCore`) and edge functions. */
 import {
+  countDefensePatternsForDepthModifier,
   DEFENSE_PATTERN_COUNT_MODIFIERS,
-  DEFENSE_PATTERN_FAIL_MIN_COUNT,
   DEFENSE_PATTERN_REVIEW_MIN_COUNT,
-  DISCLOSURE_OVER_MODIFIER,
   DISCLOSURE_UNDER_MODIFIER,
-  EGO_DEVELOPMENT_AUTO_FAIL_LEVEL,
   EGO_DEVELOPMENT_LEVEL_MODIFIERS,
   EGO_DEVELOPMENT_REVIEW_LEVEL,
-  EMOTIONAL_VOCAB_LOW_MODIFIER,
   EMOTION_RECOGNITION_FLOOR_EXCLUSIVE_MAX,
   EMOTION_RECOGNITION_MODIFIER_BELOW_FLOOR,
   EMOTION_RECOGNITION_MODIFIER_BELOW_REVIEW,
@@ -187,14 +184,10 @@ export type ComputeGateResultOptions = {
   /** Personal-moment user word counts for {@link detectOverdisclosure}. */
   moment4WordCount?: number | null;
   moment5WordCount?: number | null;
-  /** Percent density from aggregate (moments 4–5). */
-  personalMomentEmotionalVocabDensity?: number | null;
   /** When `'absent'` and ego ≤ 2, adds `closing_integration_absent` review flag. */
   closingIntegration?: string | null;
   /** Count of marker slices with mentalizing overcertainty; ≥ 2 adds `mentalizing_overcertainty` review flag. */
   mentalizingOvercertaintyCount?: number | null;
-  /** When true, applies personal-moment emotional vocabulary low modifier. */
-  personalMomentEmotionalVocabLow?: boolean;
   /** Runtime review flags collected during the interview session. */
   runtimeReviewFlags?: string[] | null;
   /** M4 situational accountability exemption fired during rollup. */
@@ -513,15 +506,11 @@ export function computeGateResultCore(
     depthSignalModifier += EGO_DEVELOPMENT_LEVEL_MODIFIERS[egoLevel as 1 | 2 | 3 | 4 | 5];
   }
 
-  const _defenseCount = [
-    dpMerged.projection_detected === true,
-    dpMerged.rationalization_detected === true,
-    dpMerged.splitting_detected === true,
-    dpMerged.denial_detected === true,
-  ].filter(Boolean).length;
+  const _defenseCount = countDefensePatternsForDepthModifier(dpMerged);
 
   const defenseCountCapped = Math.min(4, _defenseCount) as 0 | 1 | 2 | 3 | 4;
-  depthSignalModifier += DEFENSE_PATTERN_COUNT_MODIFIERS[defenseCountCapped];
+  const defensePatternModifier = DEFENSE_PATTERN_COUNT_MODIFIERS[defenseCountCapped];
+  depthSignalModifier += defensePatternModifier;
 
   depthSignalModifier += moment4Moment5ConcretenessDepthSignalDelta(m4n, m5n);
 
@@ -544,15 +533,10 @@ export function computeGateResultCore(
 
   const _disclosure = options?.disclosureCalibration ?? null;
   if (_disclosure === 'underdisclosure') depthSignalModifier += DISCLOSURE_UNDER_MODIFIER;
-  else if (_disclosure === 'overdisclosure') depthSignalModifier += DISCLOSURE_OVER_MODIFIER;
-
-  const _vocabLow = options?.personalMomentEmotionalVocabLow === true;
-  if (_vocabLow) depthSignalModifier += EMOTIONAL_VOCAB_LOW_MODIFIER;
 
   depthSignalModifier = Math.round(depthSignalModifier * 100) / 100;
 
   if (_defenseCount === DEFENSE_PATTERN_REVIEW_MIN_COUNT) reviewFlags.push('defense_pattern_review');
-  if (_defenseCount >= DEFENSE_PATTERN_FAIL_MIN_COUNT) gateFailReasons.push('immature_defense_pattern');
 
   if (_erScore !== null && _erScore < EMOTION_RECOGNITION_REVIEW_EXCLUSIVE_MAX) {
     reviewFlags.push('emotion_recognition_review');
@@ -562,8 +546,7 @@ export function computeGateResultCore(
     reviewFlags.push('mentalizing_overcertainty');
   }
 
-  if (egoLevel === EGO_DEVELOPMENT_AUTO_FAIL_LEVEL) gateFailReasons.push('ego_development_floor');
-  else if (egoLevel === EGO_DEVELOPMENT_REVIEW_LEVEL) reviewFlags.push('ego_development_review');
+  if (egoLevel === EGO_DEVELOPMENT_REVIEW_LEVEL) reviewFlags.push('ego_development_review');
 
   const _baseScore =
     typeof precomputedOpt === 'number' && Number.isFinite(precomputedOpt) && !Number.isNaN(precomputedOpt)
@@ -607,8 +590,6 @@ export function computeGateResultCore(
       _overcertaintyCount,
       'disclosure:',
       _disclosure,
-      'vocabLow:',
-      _vocabLow,
     );
   }
   // ─── END DEPTH SIGNAL MODIFIER BLOCK ─────────────────────────────────────────
@@ -626,15 +607,7 @@ export function computeGateResultCore(
   const egoDevelopmentModifier: number | null =
     egoLv === null ? null : EGO_DEVELOPMENT_LEVEL_MODIFIERS[egoLv as 1 | 2 | 3 | 4 | 5];
   const defensePatternScoreAdjustment =
-    _defenseCount === 1
-      ? -0.15
-      : _defenseCount === 2
-        ? -0.35
-        : _defenseCount === 3
-          ? -0.6
-          : _defenseCount >= 4
-            ? -0.8
-            : null;
+    _defenseCount > 0 ? defensePatternModifier : null;
   if (
     m4n !== null &&
     m5n !== null &&
@@ -653,7 +626,6 @@ export function computeGateResultCore(
       disclosureCalibration: options?.disclosureCalibration ?? null,
       moment4Concreteness: m4n,
       moment5Concreteness: m5n,
-      vocabDensity: options?.personalMomentEmotionalVocabDensity ?? null,
     })
   ) {
     reviewFlags.push('overdisclosure_review');

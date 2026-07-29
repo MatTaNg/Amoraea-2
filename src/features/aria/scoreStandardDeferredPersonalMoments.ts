@@ -82,10 +82,15 @@ export type ScoreStandardDeferredPersonalMomentsResult = {
   scoringBaseline: AttemptScoringBaseline;
 };
 
-/** Score Moments 4–5 on the standard onboarding deferred path (before completion gate). */
-export async function scoreStandardDeferredPersonalMoments(
+export type ScoreStandardDeferredMoment4Result = {
+  moment4ForAggregate: ReturnType<typeof sanitizePersonalMomentScoresForAggregate> | null;
+  scoringBaseline: AttemptScoringBaseline;
+};
+
+/** Score Moment 4 only (standard deferred path). Safe to run in parallel with scenario backfill/rescore. */
+export async function scoreStandardDeferredMoment4(
   params: ScoreStandardDeferredPersonalMomentsParams,
-): Promise<ScoreStandardDeferredPersonalMomentsResult> {
+): Promise<ScoreStandardDeferredMoment4Result> {
   const {
     apiUrl,
     headers,
@@ -96,13 +101,8 @@ export async function scoreStandardDeferredPersonalMoments(
     supabase,
     deferredMoment4NarrativeRef,
     moment4SpecificityScoringRef,
-    moment5ClientScoringMetaRef,
-    moment5AccountabilityProbeFiredRef,
-    probeLogRef,
   } = params;
   let scoringBaseline = params.scoringBaseline;
-  let moment4ForAggregate: ReturnType<typeof sanitizePersonalMomentScoresForAggregate> | null = null;
-  let moment5ForAggregate: ReturnType<typeof sanitizeMoment5PersonalScoresForAggregate> | null = null;
 
   await awaitLiveMoment4ScoringIfPending(attemptIdForIncremental);
   if (attemptIdForIncremental && userId) {
@@ -110,33 +110,60 @@ export async function scoreStandardDeferredPersonalMoments(
   }
   const hydratedLiveM4 = moment4AggregateFromBaselinePatterns(scoringBaseline.patterns);
   if (hydratedLiveM4) {
-    moment4ForAggregate = hydratedLiveM4;
     logM4Debug('standard_deferred_m4_skipped_already_persisted', {
       attemptId: attemptIdForIncremental,
     });
     void remoteLog('[STANDARD] moment 4 already persisted (live m5-entry); skipping rescore', {
       attemptId: interviewSessionAttemptId ?? attemptIdForIncremental,
     });
-  } else {
-    const m4Result = await scoreAndPersistMoment4Slice({
-      apiUrl,
-      headers,
-      msgs: msgsDeferred,
-      userId,
-      attemptId: attemptIdForIncremental,
-      scoringBaseline,
-      supabase,
-      deferredMoment4Narrative: deferredMoment4NarrativeRef.current,
-      moment4SpecificityScoring: moment4SpecificityScoringRef.current,
-      retryContext: 'standard deferred moment 4',
-      elaborationAvgTranscript: msgsDeferred,
-      clearDeferredMoment4Narrative: () => {
-        if (deferredMoment4NarrativeRef.current) deferredMoment4NarrativeRef.current = null;
-      },
-    });
-    moment4ForAggregate = m4Result.moment4ForAggregate;
-    scoringBaseline = m4Result.scoringBaseline;
+    return { moment4ForAggregate: hydratedLiveM4, scoringBaseline };
   }
+
+  const m4Result = await scoreAndPersistMoment4Slice({
+    apiUrl,
+    headers,
+    msgs: msgsDeferred,
+    userId,
+    attemptId: attemptIdForIncremental,
+    scoringBaseline,
+    supabase,
+    deferredMoment4Narrative: deferredMoment4NarrativeRef.current,
+    moment4SpecificityScoring: moment4SpecificityScoringRef.current,
+    retryContext: 'standard deferred moment 4',
+    elaborationAvgTranscript: msgsDeferred,
+    clearDeferredMoment4Narrative: () => {
+      if (deferredMoment4NarrativeRef.current) deferredMoment4NarrativeRef.current = null;
+    },
+  });
+  return {
+    moment4ForAggregate: m4Result.moment4ForAggregate,
+    scoringBaseline: m4Result.scoringBaseline,
+  };
+}
+
+export type ScoreStandardDeferredMoment5Result = {
+  moment5ForAggregate: ReturnType<typeof sanitizeMoment5PersonalScoresForAggregate> | null;
+  scoringBaseline: AttemptScoringBaseline;
+};
+
+/** Score Moment 5 only; run after Moment 4 baseline is available. */
+export async function scoreStandardDeferredMoment5(
+  params: ScoreStandardDeferredPersonalMomentsParams & { scoringBaseline: AttemptScoringBaseline },
+): Promise<ScoreStandardDeferredMoment5Result> {
+  const {
+    apiUrl,
+    headers,
+    msgsDeferred,
+    userId,
+    attemptIdForIncremental,
+    interviewSessionAttemptId,
+    supabase,
+    moment5ClientScoringMetaRef,
+    moment5AccountabilityProbeFiredRef,
+    probeLogRef,
+  } = params;
+  let scoringBaseline = params.scoringBaseline;
+  let moment5ForAggregate: ReturnType<typeof sanitizeMoment5PersonalScoresForAggregate> | null = null;
 
   const sliceM5 = resolveMoment5ScoringSlice(msgsDeferred);
   const m5ScoringGuard = { transcript: msgsDeferred, scoringSlice: sliceM5 };
@@ -310,5 +337,18 @@ export async function scoreStandardDeferredPersonalMoments(
     }
   }
 
-  return { moment4ForAggregate, moment5ForAggregate, scoringBaseline };
+  return { moment5ForAggregate, scoringBaseline };
+}
+
+/** Score Moments 4–5 on the standard onboarding deferred path (before completion gate). */
+export async function scoreStandardDeferredPersonalMoments(
+  params: ScoreStandardDeferredPersonalMomentsParams,
+): Promise<ScoreStandardDeferredPersonalMomentsResult> {
+  const m4 = await scoreStandardDeferredMoment4(params);
+  const m5 = await scoreStandardDeferredMoment5({ ...params, scoringBaseline: m4.scoringBaseline });
+  return {
+    moment4ForAggregate: m4.moment4ForAggregate,
+    moment5ForAggregate: m5.moment5ForAggregate,
+    scoringBaseline: m5.scoringBaseline,
+  };
 }

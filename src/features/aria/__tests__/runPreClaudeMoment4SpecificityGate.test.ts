@@ -1,12 +1,16 @@
 import { describe, expect, it, jest } from '@jest/globals';
 
 import { MOMENT_4_GRUDGE_QUESTION_TEXT } from '@features/aria/moment4ProbeLogic';
+import {
+  MOMENT_4_COMMITMENT_THRESHOLD_QUESTION_CARD_BODY,
+  MOMENT_4_COMMITMENT_THRESHOLD_QUESTION_TEXT,
+} from '@features/aria/moment4ProbeLogic';
 import { MOMENT_4_SPECIFICITY_FOLLOW_UP_TEXT } from '@features/aria/moment4SpecificityFollowUp';
 import { runPreClaudeMoment4SpecificityGate } from '@features/aria/runPreClaudeMoment4SpecificityGate';
 import { createMockPreClaudeDeps } from './preClaudeGateTestHelpers';
 
-const VAISHNAVA_GENERIC_OPENER =
-  "I'm generally too nice and don't take offense to many things. So in my life, I've never really had anyone that has ever tried to get under my skin. But there was one time where this one guy who thought I had a crush on his girlfriend tried to get back to me, get back on me in a game and we just talked afterwards and figured out that it was just a misunderstanding and we parted ways amicably after that.";
+const VAGUE_GRUDGE_WITHOUT_NAMED_PERSON =
+  "I've had grudges before but I work through them generally and try to move on with life overall without dwelling too much on past conflicts in most situations day to day.";
 
 const SPECIFIC_GRUDGE_ANSWER =
   "Yes, this woman cut me off 20 years ago. I'm still upset at her. Some people should not be driving.";
@@ -18,12 +22,17 @@ describe('runPreClaudeMoment4SpecificityGate', () => {
   it('pre-injects M4 commitment threshold when grudge answer is specific (skips Claude API)', async () => {
     const speakTextSafe = jest.fn().mockResolvedValue(undefined);
     const setMessages = jest.fn();
+    const setReferenceCardScenario = jest.fn();
+    const setReferenceCardPrompt = jest.fn();
     const deps = createMockPreClaudeDeps({
       currentInterviewMomentRef: { current: 4 },
       currentScenarioRef: { current: 3 },
       moment4ThresholdProbeAskedRef: { current: false },
       speakTextSafe,
       setMessages,
+      setReferenceCardScenario,
+      setReferenceCardPrompt,
+      setInterviewUiPhase: jest.fn(),
     });
     const messagesToUse = [
       { role: 'assistant', content: MOMENT_4_GRUDGE_QUESTION_TEXT },
@@ -52,6 +61,11 @@ describe('runPreClaudeMoment4SpecificityGate', () => {
         }),
       ]),
     );
+    expect(setReferenceCardScenario).toHaveBeenCalledWith({
+      label: 'Personal reflection',
+      text: MOMENT_4_COMMITMENT_THRESHOLD_QUESTION_CARD_BODY,
+    });
+    expect(setReferenceCardPrompt).toHaveBeenCalledWith(null);
   });
 
   it('heals lagged moment refs and injects canonical threshold after grudge (not invented paraphrase)', async () => {
@@ -106,12 +120,12 @@ describe('runPreClaudeMoment4SpecificityGate', () => {
     });
     const messagesToUse = [
       { role: 'assistant', content: MOMENT_4_GRUDGE_QUESTION_TEXT },
-      { role: 'user', content: VAISHNAVA_GENERIC_OPENER },
+      { role: 'user', content: VAGUE_GRUDGE_WITHOUT_NAMED_PERSON },
     ];
 
     const result = await runPreClaudeMoment4SpecificityGate(
       deps,
-      VAISHNAVA_GENERIC_OPENER,
+      VAGUE_GRUDGE_WITHOUT_NAMED_PERSON,
       messagesToUse,
       MOMENT_4_GRUDGE_QUESTION_TEXT,
     );
@@ -200,6 +214,44 @@ describe('runPreClaudeMoment4SpecificityGate', () => {
     );
   });
 
+  it('pre-injects commitment threshold after user answers model-paraphrased specificity probe', async () => {
+    const speakTextSafe = jest.fn().mockResolvedValue(undefined);
+    const setMessages = jest.fn();
+    const deps = createMockPreClaudeDeps({
+      currentInterviewMomentRef: { current: 4 },
+      moment4ThresholdProbeAskedRef: { current: false },
+      moment4ClientSpecificityProbeInjectedRef: { current: false },
+      moment4PostGrudgeSpecificityResolvedRef: { current: false },
+      speakTextSafe,
+      setMessages,
+    });
+    const paraphrase =
+      'Is there a specific person or situation that comes to mind when you think about that?';
+    const specificityAnswer = 'My old roommate in college argued with me last year over rent.';
+    const messagesToUse = [
+      { role: 'assistant', content: MOMENT_4_GRUDGE_QUESTION_TEXT },
+      { role: 'user', content: VAGUE_GRUDGE_WITHOUT_NAMED_PERSON },
+      { role: 'assistant', content: paraphrase },
+      { role: 'user', content: specificityAnswer },
+    ];
+
+    const result = await runPreClaudeMoment4SpecificityGate(
+      deps,
+      specificityAnswer,
+      messagesToUse,
+      paraphrase,
+    );
+
+    expect(result.handled).toBe(true);
+    expect(result.answeringAfterMoment4SpecificityProbe).toBe(true);
+    expect(result.shouldForceMoment4ThresholdProbe).toBe(true);
+    expect(deps.moment4PostGrudgeSpecificityResolvedRef.current).toBe(true);
+    expect(speakTextSafe).toHaveBeenCalledWith(
+      expect.stringMatching(/work through versus.*walk away/i),
+      expect.any(Object),
+    );
+  });
+
   it('pre-injects commitment when grudge answer names a person without a specific event but is substantive', async () => {
     const speakTextSafe = jest.fn().mockResolvedValue(undefined);
     const deps = createMockPreClaudeDeps({
@@ -228,5 +280,91 @@ describe('runPreClaudeMoment4SpecificityGate', () => {
       expect.stringMatching(/work through versus.*walk away/i),
       expect.any(Object),
     );
+  });
+
+  it('pre-injects commitment when valid-non-applicable grudge answer skips specificity probe', async () => {
+    const speakTextSafe = jest.fn().mockResolvedValue(undefined);
+    const deps = createMockPreClaudeDeps({
+      currentInterviewMomentRef: { current: 4 },
+      moment4PostGrudgeSpecificityResolvedRef: { current: false },
+      speakTextSafe,
+    });
+    const reflectiveGrudge =
+      "Yes, I held grudges when I was younger and I learned to reflect and forgive and move on, because mostly the grudges were not based on reality but childhood filters.";
+    const messagesToUse = [
+      { role: 'assistant', content: MOMENT_4_GRUDGE_QUESTION_TEXT },
+      { role: 'user', content: reflectiveGrudge },
+    ];
+
+    const result = await runPreClaudeMoment4SpecificityGate(
+      deps,
+      reflectiveGrudge,
+      messagesToUse,
+      MOMENT_4_GRUDGE_QUESTION_TEXT,
+    );
+
+    expect(result.handled).toBe(true);
+    expect(deps.moment4PostGrudgeSpecificityResolvedRef.current).toBe(true);
+    expect(speakTextSafe).toHaveBeenCalledWith(
+      expect.stringMatching(/work through versus.*walk away/i),
+      expect.any(Object),
+    );
+  });
+
+  it('does not pre-inject M4 threshold when grudge answer is an incomplete cut-off', async () => {
+    const speakTextSafe = jest.fn().mockResolvedValue(undefined);
+    const deps = createMockPreClaudeDeps({
+      currentInterviewMomentRef: { current: 4 },
+      currentScenarioRef: { current: 3 },
+      moment4ThresholdProbeAskedRef: { current: false },
+      moment4ClientSpecificityProbeInjectedRef: { current: false },
+      moment4PostGrudgeSpecificityResolvedRef: { current: false },
+      speakTextSafe,
+    });
+    const messagesToUse = [
+      { role: 'assistant', content: MOMENT_4_GRUDGE_QUESTION_TEXT },
+      { role: 'user', content: 'I think' },
+    ];
+
+    const result = await runPreClaudeMoment4SpecificityGate(
+      deps,
+      'I think',
+      messagesToUse,
+      MOMENT_4_GRUDGE_QUESTION_TEXT,
+    );
+
+    expect(result.handled).toBe(false);
+    expect(result.shouldForceMoment4ThresholdProbe).toBe(false);
+    expect(deps.moment4PostGrudgeSpecificityResolvedRef.current).toBe(false);
+    expect(speakTextSafe).not.toHaveBeenCalled();
+  });
+
+  it('does not pre-inject M4 threshold when user asks to go back after specificity follow-up', async () => {
+    const speakTextSafe = jest.fn().mockResolvedValue(undefined);
+    const deps = createMockPreClaudeDeps({
+      currentInterviewMomentRef: { current: 4 },
+      moment4ThresholdProbeAskedRef: { current: false },
+      moment4ClientSpecificityProbeInjectedRef: { current: true },
+      moment4ExpectingPostSpecificityUserTurnRef: { current: false },
+      moment4PostGrudgeSpecificityResolvedRef: { current: true },
+      speakTextSafe,
+    });
+    const messagesToUse = [
+      { role: 'assistant', content: MOMENT_4_GRUDGE_QUESTION_TEXT },
+      { role: 'user', content: UNNAMED_CLOSE_FRIEND_GRUDGE },
+      { role: 'assistant', content: MOMENT_4_SPECIFICITY_FOLLOW_UP_TEXT },
+      { role: 'user', content: 'Can we go back?' },
+    ];
+
+    const result = await runPreClaudeMoment4SpecificityGate(
+      deps,
+      'Can we go back?',
+      messagesToUse,
+      MOMENT_4_SPECIFICITY_FOLLOW_UP_TEXT,
+    );
+
+    expect(result.handled).toBe(false);
+    expect(result.shouldForceMoment4ThresholdProbe).toBe(false);
+    expect(speakTextSafe).not.toHaveBeenCalled();
   });
 });

@@ -201,3 +201,8 @@ export {
 } from './scenarioCProbeLogic';
 
 export { hasScenarioBQ1OnTopicEngagement } from './scenarioBEngagement';
+
+export {
+  MOMENT_4_SPECIFICITY_FOLLOW_UP_TEXT,
+  stripMoment4SpecificityFollowUpStreamingEcho,
+} from './moment4SpecificityFollowUp';

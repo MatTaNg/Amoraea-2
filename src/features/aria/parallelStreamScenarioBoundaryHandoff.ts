@@ -1,5 +1,7 @@
 import { stripControlTokens } from '@features/aria/interviewControlTokens';
-import { splitScenarioTransitionForEmotionModal } from '@features/aria/emotionModalTransitionOrchestration';
+import { splitScenarioTransitionForEmotionModal, hasScenarioBoundaryWrapPhrase } from '@features/aria/emotionModalTransitionOrchestration';
+import { textContainsScenarioBVignetteBody } from '@features/aria/emotionScenarioTransitionInference';
+import { textContainsScenarioCVignetteBody } from '@features/aria/scenarioVignetteBodyDetection';
 import { looksLikeInterviewClosingAssistantMessage } from '@features/aria/elongatingProbe';
 import { applyPostClaudeScenarioAdvanceBundleOverride } from '@features/aria/interviewScenarioAdvanceAfterRepair';
 import { SHOW_SCENARIO_CARD_CANONICAL_SPEECH } from '@features/aria/interviewTtsSpeakOptions';
@@ -24,6 +26,32 @@ function boundaryTransitionAlreadySpoken(spokenSoFar: string, beforeModal: strin
     return true;
   }
   return false;
+}
+
+/**
+ * When stream-end boundary lead already spoke the wrap, only the next vignette segment remains.
+ */
+export function resolveStreamEndHandoffSpeechAfterPartialBoundaryLead(
+  handoffText: string,
+  spokenSoFar: string,
+  completedScenario: 1 | 2,
+): string | null {
+  const handoff = stripControlTokens(handoffText).trim();
+  const spoken = stripControlTokens(spokenSoFar).trim();
+  if (!handoff) return null;
+  if (completedScenario === 1) {
+    if (textContainsScenarioBVignetteBody(spoken)) return null;
+  } else if (textContainsScenarioCVignetteBody(spoken)) {
+    return null;
+  }
+  if (!hasScenarioBoundaryWrapPhrase(spoken)) {
+    return handoff;
+  }
+  const { afterModal } = splitScenarioTransitionForEmotionModal(handoff);
+  if (afterModal.trim()) {
+    return afterModal.trim();
+  }
+  return handoff;
 }
 
 /** Scenario boundary leads only apply during moments 1–3; skip during M5 close buffering. */

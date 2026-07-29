@@ -1,4 +1,5 @@
 import { assistantTextLooksLikeMoment4HandoffLead } from '@features/aria/interviewTransitionBundles';
+import { assessablePromptQuestionBody } from '@features/aria/interviewAssessablePromptText';
 import { extractScenarioModalQuestionFromAssistantText } from '@features/aria/interviewScenarioModalPrompt';
 import {
   looksLikeMoment4ThresholdQuestion,
@@ -13,6 +14,7 @@ import {
 } from '@features/aria/scenarioCPromptDetection';
 import { SCENARIO_C_SOPHIE_PERSPECTIVE_PROBE } from '@features/aria/interviewDisengagementProbeCopy';
 import { transcriptAssistantContainsMoment5PrimaryConflictQuestion } from '@features/aria/moment5TranscriptHelpers';
+import { resolveInterviewQuestionRepeatTtsText } from '@features/aria/scenarioARepairQuestionHelpers';
 
 /**
  * Narrow bundled assistant TTS (handoffs, reflections + pivot + question) to the assessable
@@ -48,5 +50,21 @@ export function resolveAssessableQuestionTextForResponseTiming(
     return extracted.trim();
   }
 
-  return t;
+  return assessablePromptQuestionBody(t) || t;
+}
+
+/** Resume welcome / replay: strip scenario-close pivots and keep the pending question only. */
+export function resolveQuestionOnlyTextForResumeWelcome(
+  raw: string | null | undefined,
+  options?: {
+    firstName?: string;
+    lastUserAnswer?: string | null;
+    activeScenario?: number;
+  },
+): string {
+  const trimmed = (raw ?? '').trim();
+  if (!trimmed) return '';
+  const assessable = resolveAssessableQuestionTextForResponseTiming(trimmed);
+  const seed = (assessable || trimmed).trim();
+  return resolveInterviewQuestionRepeatTtsText(seed, options).trim();
 }

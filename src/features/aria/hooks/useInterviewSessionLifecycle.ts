@@ -6,9 +6,11 @@ import { supabase } from '@data/supabase/client';
 import { USER_INTERVIEW_ROUTING_TABLE } from '@data/supabase/userInterviewRoutingSelect';
 import { isGreetingOnly } from '@features/aria/interviewLocalPersistence';
 import type { InterviewSessionStatus } from '@features/aria/hooks/useAriaInterviewSession';
+import { isInterviewResumeHandleActive } from '@features/aria/interviewResumeHandleCoordinator';
 import { runHandleResume } from '@features/aria/runHandleResume';
 import { runHydratePostClosingFromSaved } from '@features/aria/runHydratePostClosingFromSaved';
 import { runStartInterview } from '@features/aria/runStartInterview';
+import { resolveDevScenarioJumpTargetFromSession } from '@features/aria/devScenarioJumpReferral';
 import type {
   InterviewAttemptBootstrap,
   InterviewSessionLifecycleDeps,
@@ -57,11 +59,26 @@ export function useInterviewSessionLifecycle(
   }, [depsRef]);
 
   useEffect(() => {
-    if (!userId || isAdmin) return;
+    const finishResumeHydration = () => {
+      depsRef.current.setResumeHydrationPending?.(false);
+    };
+
+    if (!userId || isAdmin) {
+      depsRef.current.resumeLoadingFlowActiveRef.current = false;
+      depsRef.current.setResumeLoadingVisible?.(false);
+      finishResumeHydration();
+      return;
+    }
     const deps = depsRef.current;
 
-    if (deps.interviewStatusRef?.current === 'in_progress') return;
-    if (deps.isInterviewCompleteRef?.current) return;
+    if (deps.interviewStatusRef?.current === 'in_progress') {
+      finishResumeHydration();
+      return;
+    }
+    if (deps.isInterviewCompleteRef?.current) {
+      finishResumeHydration();
+      return;
+    }
 
     let cancelled = false;
     depsRef.current.resumeLoadingFlowActiveRef.current = true;
@@ -96,6 +113,18 @@ export function useInterviewSessionLifecycle(
         await clearInterviewFromStorage(userId);
         depsRef.current.resumeLoadingFlowActiveRef.current = false;
         depsRef.current.setResumeLoadingVisible?.(false);
+        finishResumeHydration();
+        return;
+      }
+
+      const devJumpTarget = await resolveDevScenarioJumpTargetFromSession(undefined);
+      if (cancelled) return;
+      if (devJumpTarget != null) {
+        await clearInterviewFromStorage(userId);
+        depsRef.current.hasResumedRef.current = false;
+        depsRef.current.resumeLoadingFlowActiveRef.current = false;
+        depsRef.current.setResumeLoadingVisible?.(false);
+        finishResumeHydration();
         return;
       }
 
@@ -105,6 +134,7 @@ export function useInterviewSessionLifecycle(
       if (!saved?.messages?.length) {
         depsRef.current.resumeLoadingFlowActiveRef.current = false;
         depsRef.current.setResumeLoadingVisible?.(false);
+        finishResumeHydration();
         return;
       }
 
@@ -113,6 +143,7 @@ export function useInterviewSessionLifecycle(
           saved,
           source: 'resume_effect_post_closing',
         });
+        finishResumeHydration();
         return;
       }
 
@@ -120,16 +151,23 @@ export function useInterviewSessionLifecycle(
         await clearInterviewFromStorage(userId);
         depsRef.current.resumeLoadingFlowActiveRef.current = false;
         depsRef.current.setResumeLoadingVisible?.(false);
+        finishResumeHydration();
         return;
       }
 
       if (shouldResumeMidInterviewFromSaved(saved)) {
+        if (isInterviewResumeHandleActive(userId)) {
+          finishResumeHydration();
+          return;
+        }
         try {
           await handleResume(saved);
+          finishResumeHydration();
         } catch {
           depsRef.current.resumeLoadingFlowActiveRef.current = false;
           depsRef.current.setResumeLoadingVisible?.(false);
           depsRef.current.hasResumedRef.current = false;
+          finishResumeHydration();
         }
         return;
       }
@@ -139,12 +177,15 @@ export function useInterviewSessionLifecycle(
       }
       depsRef.current.resumeLoadingFlowActiveRef.current = false;
       depsRef.current.setResumeLoadingVisible?.(false);
+      finishResumeHydration();
     })();
 
     return () => {
       cancelled = true;
-      if (depsRef.current.interviewStatusRef?.current !== 'in_progress') {
-        depsRef.current.resumeLoadingFlowActiveRef.current = false;
+      if (
+        depsRef.current.interviewStatusRef?.current !== 'in_progress' &&
+        !depsRef.current.resumeLoadingFlowActiveRef.current
+      ) {
         depsRef.current.setResumeLoadingVisible?.(false);
       }
     };

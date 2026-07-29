@@ -25,7 +25,6 @@ describe('buildPersonalMomentScoringPrompt', () => {
     expect(prompt).toContain('MENTALIZING OVERCERTAINTY FLAG');
     expect(prompt).toContain('Ryan clearly doesn\'t care about Emma');
     expect(prompt).toContain('mentalizing score must not exceed 7');
-    expect(prompt).toContain('emotional_vocab_count');
     expect(prompt).toContain('user_slice_word_count');
   });
 

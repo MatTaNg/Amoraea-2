@@ -83,33 +83,33 @@ const FlameOrbNative: React.FC<Props> = ({ state = 'idle', size = 200 }) => {
         ]),
       ).start();
     } else if (state === 'listening') {
+      // Same gentle breathing as idle — logo size stays consistent when mic is active.
       Animated.loop(
         Animated.sequence([
-          Animated.timing(pulseAnim, {
-            toValue: 0.9,
-            duration: 1500,
-            useNativeDriver: true,
-          }),
-          Animated.timing(pulseAnim, {
-            toValue: 0.96,
-            duration: 1500,
-            useNativeDriver: true,
-          }),
-        ]),
-      ).start();
-
-      Animated.loop(
-        Animated.sequence([
-          Animated.timing(glowAnim, {
-            toValue: 0.45,
-            duration: 1200,
-            useNativeDriver: true,
-          }),
-          Animated.timing(glowAnim, {
-            toValue: 0.7,
-            duration: 1200,
-            useNativeDriver: true,
-          }),
+          Animated.parallel([
+            Animated.timing(pulseAnim, {
+              toValue: 1.06,
+              duration: 2500,
+              useNativeDriver: true,
+            }),
+            Animated.timing(glowAnim, {
+              toValue: 0.9,
+              duration: 2500,
+              useNativeDriver: true,
+            }),
+          ]),
+          Animated.parallel([
+            Animated.timing(pulseAnim, {
+              toValue: 0.97,
+              duration: 2500,
+              useNativeDriver: true,
+            }),
+            Animated.timing(glowAnim, {
+              toValue: 0.6,
+              duration: 2500,
+              useNativeDriver: true,
+            }),
+          ]),
         ]),
       ).start();
     } else if (state === 'processing') {

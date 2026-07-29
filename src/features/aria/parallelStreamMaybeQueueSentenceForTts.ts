@@ -5,6 +5,7 @@ import type { MessageWithScenario } from '@features/aria/interviewScenarioScorin
 import { remoteLog } from '@utilities/remoteLog';
 import {
   isActiveScenarioAConstructProbeTurn,
+  isActiveScenarioBConstructProbeTurn,
   scenarioAMinimumEngagementForHandoff,
   shouldDeliverScenarioFollowUpQuestion,
   userIsAnsweringAfterStreamDeliveredScenarioAContemptProbe,
@@ -27,6 +28,7 @@ import {
   isShortAckOnlySentence,
   shouldHoldBoundaryWarmStreamingLine,
 } from '@features/aria/interviewerFrameworkPrompt';
+import { looksLikeSkipConfirmationAssistantPrompt } from '@features/aria/metaCommentSkipFrustration';
 import {
   shouldDeferScenarioVignetteTailForOpeningMerge,
   looksLikeCanonicalScenarioOpeningQuestion,
@@ -37,9 +39,8 @@ import {
   stripScenarioARepairQuestionStreamingEcho,
   shouldSuppressScenarioARepairBeforeContemptAnswer,
   looksLikeScenarioARepairStreamFragment,
-  findLastUserWithPriorAssistantContent,
-  findLastUserWithPriorScenarioARepairContext,
-  userAnswerSatisfiesScenarioARepairPrompt,
+  scenarioARepairAnswerAlreadySatisfiedInTranscript,
+  shouldSuppressScenarioAAssistantLineAfterSatisfiedRepair,
   shouldAdvanceScenarioAAfterSatisfiedRepair,
   shouldAdvanceScenarioBAfterSatisfiedRepair,
 } from '@features/aria/interviewDisengagementProbes';
@@ -53,9 +54,7 @@ import {
   stripMoment5SpecificityRedirectStreamingEcho,
 } from '@features/aria/probeAndScoringUtils';
 import { computeMoment5InterviewCloseGate } from '@features/aria/interviewProgressSync';
-import { markMoment5ResolutionFollowUpTtsDelivered } from '@features/aria/moment5DeliveryReconcile';
 import { markS3RepairProbeTtsDelivered } from '@features/aria/scenarioCDeliveryReconcile';
-import { looksLikeMoment5ResolutionFollowUpPrompt } from '@features/aria/moment5SpecificityRedirect';
 import {
   isIncompleteScenarioAContemptProbeLeadSentence,
   isScenarioABoundaryReflectionWithoutNextVignette,
@@ -307,7 +306,7 @@ export function createParallelStreamMaybeQueueSentenceForTts(
             streamShowScenarioCardMuteActive: state.streamShowScenarioCardMuteActive,
             showScenarioCardCanonicalSpokenThisStream: state.showScenarioCardCanonicalSpokenThisStream,
             streamContemptProbeMuteActive: state.streamContemptProbeMuteActive,
-            playbackConfirmedKinds: deps.showScenarioCardCanonicalPlaybackConfirmedKindsRef.current,
+            playbackConfirmedKinds: deps.showScenarioCardCanonicalPlaybackConfirmedKindsRef?.current ?? {},
             interviewMoment: deps.currentInterviewMomentRef.current,
             interviewScenario: deps.currentScenarioRef.current,
           })
@@ -441,12 +440,6 @@ export function createParallelStreamMaybeQueueSentenceForTts(
           });
           return;
         }
-        if (
-          deps.currentInterviewMomentRef.current === 5 &&
-          looksLikeMoment5ResolutionFollowUpPrompt(spoken)
-        ) {
-          markMoment5ResolutionFollowUpTtsDelivered(deps);
-        }
         const isClosingStreamFragment = isInterviewClosingStreamFragment(spoken);
         const moment5CloseAllowedForStream =
           deps.currentInterviewMomentRef.current !== 5 || !isClosingStreamFragment
@@ -485,6 +478,13 @@ export function createParallelStreamMaybeQueueSentenceForTts(
           state.moment5StickyCloseBufferAll = true;
         }
         if (!bypassMoment5ClosingBuffer && state.moment5StickyCloseBufferAll) {
+          if (looksLikeSkipConfirmationAssistantPrompt(spoken)) {
+            void remoteLog('[M5_SKIP_CONFIRMATION_NOT_BUFFERED_AS_CLOSING]', {
+              interviewSessionId: deps.interviewSessionIdRef.current,
+              preview: spoken.slice(0, 220),
+              postM5UserTurns: deps.moment5PostPromptUserTurnCountRef.current,
+            });
+          } else {
           state.moment5ClosingStreamBuffer = state.moment5ClosingStreamBuffer
             ? `${state.moment5ClosingStreamBuffer} ${spoken}`.trim()
             : spoken;
@@ -495,6 +495,7 @@ export function createParallelStreamMaybeQueueSentenceForTts(
             sticky: !params.bufferAllStreamTtsForMoment5Close,
           });
           return;
+          }
         }
         if (
           !bypassMoment5ClosingBuffer &&
@@ -538,9 +539,9 @@ export function createParallelStreamMaybeQueueSentenceForTts(
         }
         if (
           isScenarioCRepairAssistantPrompt(spoken) &&
-          (deps.s3RepairProbeDeliveredRef.current ||
+          ((isScenarioCRepairAssistantPrompt(deps.parallelStreamingTtsRef.current.spokenCompleteText) ||
+            transcriptContainsScenarioCRepairQuestion(params.messagesToUse)) ||
             deps.currentScenarioRef.current !== 3 ||
-            transcriptContainsScenarioCRepairQuestion(params.messagesToUse) ||
             !scenarioCRepairConstructStillPending(params.messagesToUse))
         ) {
           void remoteLog('[S3_REPAIR_STREAM_SUPPRESSED_ALREADY_DELIVERED]', {
@@ -590,37 +591,25 @@ export function createParallelStreamMaybeQueueSentenceForTts(
           return;
         }
         {
-          const repairCtx = findLastUserWithPriorScenarioARepairContext(params.messagesToUse);
-          const lastUserContent = repairCtx.lastUserContent;
-          const priorRepairAssistantContent =
-            repairCtx.priorRepairAssistantContent ??
-            findLastUserWithPriorAssistantContent(params.messagesToUse).priorAssistantContent;
           if (
             isActiveScenarioAConstructProbeTurn(
               deps.currentScenarioRef.current,
               deps.currentInterviewMomentRef.current,
             ) &&
-            deps.scenarioARepairQuestionAskedRef.current &&
-            lastUserContent &&
-            priorRepairAssistantContent &&
-            userAnswerSatisfiesScenarioARepairPrompt(lastUserContent, priorRepairAssistantContent) &&
-            (looksLikeScenarioAContemptProbeQuestion(spoken) ||
-              scenarioAEmmaVeryClearContemptReask(spoken) ||
-              isIncompleteScenarioAContemptProbeLeadSentence(spoken) ||
-              isScenarioModalFollowUpProbe(spoken) ||
-              isScenarioANonScriptedModalParaphrase(spoken))
+            shouldSuppressScenarioAAssistantLineAfterSatisfiedRepair(spoken, params.messagesToUse)
           ) {
-            void remoteLog(
-              isScenarioModalFollowUpProbe(spoken)
+            const suppressLogTag = looksLikeScenarioARepairQuestion(spoken) ||
+              looksLikeScenarioARepairStreamFragment(spoken)
+              ? '[S1_REPAIR_STREAM_SUPPRESSED_POST_SATISFIED_ANSWER]'
+              : isScenarioModalFollowUpProbe(spoken)
                 ? '[S1_MODAL_FOLLOWUP_STREAM_SUPPRESSED_POST_REPAIR_SATISFIED]'
                 : isScenarioANonScriptedModalParaphrase(spoken)
                   ? '[S1_UNAUTHORIZED_FOLLOWUP_STREAM_SUPPRESSED_POST_REPAIR_SATISFIED]'
-                  : '[S1_POST_REPAIR_CONTEMPT_STREAM_SUPPRESSED]',
-              {
-                preview: spoken.slice(0, 200),
-                s1ContemptFixVersion: 24,
-              },
-            );
+                  : '[S1_POST_REPAIR_CONTEMPT_STREAM_SUPPRESSED]';
+            void remoteLog(suppressLogTag, {
+              preview: spoken.slice(0, 200),
+              s1ContemptFixVersion: 27,
+            });
             /** Stream already confirmed repair satisfaction — stream-end must speak S1→S2 handoff. */
             state.pendingS1RepairSatisfiedHandoff = true;
             return;
@@ -715,7 +704,11 @@ export function createParallelStreamMaybeQueueSentenceForTts(
           }
         }
         if (isActiveScenarioAConstructProbeTurn(deps.currentScenarioRef.current, deps.currentInterviewMomentRef.current)) {
+          const repairAnswerAlreadySatisfied = scenarioARepairAnswerAlreadySatisfiedInTranscript(
+            params.messagesToUse,
+          );
           const scenarioARepairAlreadyDelivered =
+            repairAnswerAlreadySatisfied ||
             !shouldDeliverScenarioFollowUpQuestion(
               params.messagesToUse,
               SCENARIO_A_REPAIR_QUESTION_AFTER_CONTEMPT_COPY,
@@ -1073,11 +1066,11 @@ export function createParallelStreamMaybeQueueSentenceForTts(
           state.deferredScenarioBJamesDifferentlyLeadSentence = spoken;
           return;
         }
-        if (deps.currentScenarioRef.current === 2 && !scenarioBJamesRepairProbeAlreadySatisfied(params.messagesToUse)) {
-          const lastUserAnswer = lastScenarioBUserAnswerContent(
-            params.messagesToUse as MessageWithScenario[],
-          );
-          if (!scenarioBJamesDifferenceOrAppreciationAnswerHasRepairContent(lastUserAnswer)) {
+        const inScenarioBConstructTurn = isActiveScenarioBConstructProbeTurn(
+          deps.currentScenarioRef.current,
+          deps.currentInterviewMomentRef.current,
+        );
+        if (inScenarioBConstructTurn && !scenarioBJamesRepairProbeAlreadySatisfied(params.messagesToUse)) {
           spoken = coerceScenarioBJamesSayToJamesQuestionForTts(
             spoken,
             params.shouldForceScenarioBJamesRepairProbe,
@@ -1087,7 +1080,6 @@ export function createParallelStreamMaybeQueueSentenceForTts(
             interviewMoment: deps.currentInterviewMomentRef.current,
           });
           spoken = coerceScenarioBJamesRepairQuestionForTts(spoken);
-          }
         }
         if (
           deps.currentScenarioRef.current === 2 &&
@@ -1424,7 +1416,7 @@ export function createParallelStreamMaybeQueueSentenceForTts(
           (deps.currentInterviewMomentRef.current === 4 ||
             looksLikeMoment4GrudgePrompt(deps.lastQuestionTextRef.current ?? '')) &&
           !params.shouldForceMoment4ThresholdProbe &&
-          !deps.moment4ThresholdProbeAskedRef.current &&
+          !deps.moment4ThresholdProbeAskedRef?.current &&
           (looksLikeMoment4ThresholdQuestion(spoken) ||
             isIncompleteMoment4ThresholdLeadSentence(spoken) ||
             looksLikeMoment4ThresholdParaphraseInProgress(spoken))
@@ -1458,6 +1450,18 @@ export function createParallelStreamMaybeQueueSentenceForTts(
             deps.currentInterviewMomentRef.current,
           )
         ) {
+          if (
+            scenarioARepairAnswerAlreadySatisfiedInTranscript(params.messagesToUse) &&
+            shouldSuppressScenarioAAssistantLineAfterSatisfiedRepair(spoken, params.messagesToUse)
+          ) {
+            state.pendingS1RepairSatisfiedHandoff = true;
+            void remoteLog('[S1_REPAIR_COERCE_BLOCKED_POST_SATISFIED_ANSWER]', {
+              interviewSessionId: deps.interviewSessionIdRef.current,
+              preview: spoken.slice(0, 220),
+              s1ContemptFixVersion: 27,
+            });
+            return;
+          }
           if (looksLikeScenarioAContemptProbeQuestion(spoken)) {
             spoken = coerceScenarioAContemptProbeForTts(spoken);
           } else if (
@@ -1467,6 +1471,19 @@ export function createParallelStreamMaybeQueueSentenceForTts(
           ) {
             const beforeRepairCoerce = spoken;
             spoken = coerceScenarioARepairQuestionForTts(spoken);
+            if (
+              spoken !== beforeRepairCoerce &&
+              scenarioARepairAnswerAlreadySatisfiedInTranscript(params.messagesToUse)
+            ) {
+              state.pendingS1RepairSatisfiedHandoff = true;
+              void remoteLog('[S1_REPAIR_COERCE_BLOCKED_POST_SATISFIED_ANSWER]', {
+                interviewSessionId: deps.interviewSessionIdRef.current,
+                before: beforeRepairCoerce.slice(0, 220),
+                after: spoken.slice(0, 220),
+                s1ContemptFixVersion: 27,
+              });
+              return;
+            }
             if (spoken !== beforeRepairCoerce) {
               void remoteLog('[S1_REPAIR_QUESTION_COERCED_FOR_TTS]', {
                 interviewSessionId: deps.interviewSessionIdRef.current,

@@ -32,4 +32,6 @@ export type ElevenLabsSpeakOptions = {
   skipPcmStream?: boolean;
   /** Optional playback-rate multiplier for output pipelines that support it. */
   playbackRateMultiplier?: number;
+  /** Guard against infinite Android fetch→fallback loops. */
+  elevenLabsPostBridgeFetchRetried?: boolean;
 };

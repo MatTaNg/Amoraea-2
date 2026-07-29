@@ -124,6 +124,7 @@ export function createInterviewGateResumeEmotionSyncSlice(params: SyncExtraParam
     resumeActiveScenarioRef: params.resumeActiveScenarioRef,
     resumeWelcomeMessageRef: params.resumeWelcomeMessageRef,
     resumeOfferWelcomeTtsRef: params.resumeOfferWelcomeTtsRef,
+    resumeInPersonalPartRef: params.resumeInPersonalPartRef,
     resumeEmotionAfterModalTextRef: params.resumeEmotionAfterModalTextRef,
     resumeWelcomeHydrationAttemptRef: params.resumeWelcomeHydrationAttemptRef,
     pendingScenarioIntroAfterResumeWelcomeRef: params.pendingScenarioIntroAfterResumeWelcomeRef,

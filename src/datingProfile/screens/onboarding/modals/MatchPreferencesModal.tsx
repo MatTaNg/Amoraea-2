@@ -1,4 +1,5 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
+import { ONBOARDING_STEP_SCREEN_EDGES, ONBOARDING_STEP_SCREEN_EDGES_WITH_BOTTOM } from './onboardingStepScreenEdges';
 import { View, Text, ScrollView } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Button } from '@/shared/ui/Button';
@@ -93,6 +94,8 @@ export const MatchPreferencesModal: React.FC<MatchPreferencesModalProps> = ({
     );
     return base;
   });
+  const preferencesRef = useRef(preferences);
+  preferencesRef.current = preferences;
 
   useEffect(() => {
     if (matchPreferences) {
@@ -102,11 +105,10 @@ export const MatchPreferencesModal: React.FC<MatchPreferencesModalProps> = ({
 
   const setPref = useCallback(
     (patch: Partial<DealbreakerPreferences>) => {
-      setPreferences((prevPrefs) => {
-        const newPrefs = { ...prevPrefs, ...patch };
-        onMatchPreferencesChange(withoutRelationshipType(newPrefs));
-        return newPrefs;
-      });
+      const nextPrefs = { ...preferencesRef.current, ...patch };
+      preferencesRef.current = nextPrefs;
+      setPreferences(nextPrefs);
+      onMatchPreferencesChange(withoutRelationshipType(nextPrefs));
     },
     [onMatchPreferencesChange],
   );
@@ -116,7 +118,7 @@ export const MatchPreferencesModal: React.FC<MatchPreferencesModalProps> = ({
   );
 
   return (
-    <SafeAreaView style={styles.screen} edges={['top', 'left', 'right']}>
+    <SafeAreaView style={styles.screen} edges={ONBOARDING_STEP_SCREEN_EDGES}>
       <OnboardingHeader title="Lifestyle" onBack={onBack} />
       <ScrollView
         style={styles.scrollView}

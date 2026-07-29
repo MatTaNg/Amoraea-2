@@ -1,4 +1,5 @@
 import { wrapForcedProbeWithAck } from '@features/aria/interviewAssistantReflection';
+import { userTurnSuppressesElongatingProbe } from '@features/aria/elongatingProbe';
 import { SCENARIO_C_SOPHIE_PERSPECTIVE_PROBE } from '@features/aria/interviewDisengagementProbeCopy';
 import { ASSISTANT_INTERVIEW_SPEECH } from '@features/aria/interviewTtsSpeakOptions';
 import type { PostClaudeSpeakAssistantTurn } from '@features/aria/createPostClaudeSpeakAssistantTurn';
@@ -32,17 +33,23 @@ export async function runPostClaudeScenarioCSophieForcedProbeGate(
   const strippedText = draft.strippedText;
   const { recentAsstForAck, assistantTurnIsElongatingProbeOnly } = draft;
 
+  const elongatingOnlyDraftBlocksSophieInject =
+    assistantTurnIsElongatingProbeOnly &&
+    !(params.elongatingSuppressedForUserTurn && userTurnSuppressesElongatingProbe(params.trimmed));
+
   if (
     !params.shouldForceScenarioCSophiePerspectiveProbe ||
     deps.scenarioCSophiePerspectiveProbeFiredRef.current ||
-    assistantTurnIsElongatingProbeOnly
+    elongatingOnlyDraftBlocksSophieInject
   ) {
     return null;
   }
 
-  const streamAlreadySpokeSophie = looksLikeScenarioCSophiePerspectiveQuestion(
-    deps.parallelStreamingTtsRef.current.spokenCompleteText,
-  );
+  const streamAlreadySpokeSophie =
+    deps.parallelStreamingTtsRef.current.s3SophiePerspectiveProbeDeliveredThisStream ||
+    looksLikeScenarioCSophiePerspectiveQuestion(
+      deps.parallelStreamingTtsRef.current.spokenCompleteText,
+    );
 
   if (
     !shouldDeliverScenarioFollowUpQuestion(params.messagesToUse, SCENARIO_C_SOPHIE_PERSPECTIVE_PROBE) ||
@@ -73,6 +80,8 @@ export async function runPostClaudeScenarioCSophieForcedProbeGate(
       }
       void remoteLog('[S3_SOPHIE_FORCED_SKIPPED_STREAM_ALREADY_SPOKE]', {
         interviewSessionId: deps.interviewSessionIdRef.current,
+        deliveredThisStream:
+          deps.parallelStreamingTtsRef.current.s3SophiePerspectiveProbeDeliveredThisStream,
         spokenPreview: deps.parallelStreamingTtsRef.current.spokenCompleteText.slice(0, 220),
       });
       return finishPostClaudeForcedConstructProbeGate(deps, {

@@ -5,10 +5,13 @@ import {
   coerceScenarioBJamesSayToJamesQuestionForTts,
   assistantTextLooksLikeScenarioBPrematureAnswerRedirect,
   collapseScenarioBJamesSayToJamesWithRepairDuplicate,
+  isBeforeFightOnlyScenarioBJamesQ2Paraphrase,
+  isDeliveredScenarioBJamesDifferentlyProbe,
   isIncompleteScenarioBPrematureRepairRedirectLeadSentence,
   isIncompleteScenarioBQ1LeadSentence,
   isIncompleteScenarioBJamesDifferentlyLeadSentence,
   isIncompleteScenarioBJamesRepairLeadSentence,
+  isIncompleteScenarioBJamesRepairUserAnswer,
   isIncompleteScenarioBJamesSayToJamesLeadSentence,
   looksLikeAssistantSkipsScenarioBJamesIntermediateQuestion,
   looksLikeScenarioBJamesDifferentlyQuestion,
@@ -54,6 +57,7 @@ import {
   looksLikeScenarioCRepairWithUserAnswerEcho,
   looksLikeScenarioCRepairAsDanielQuestion,
   userAnswerSatisfiesScenarioCSophiePerspectiveProbe,
+  looksLikeScenarioCSophiePerspectiveAssessableShortAnswer,
   scenarioCSophiePerspectiveAnsweredInTranscript,
   shouldSuppressScenarioCRepairReplay,
   shouldSuppressScenarioCQ1UntilVignetteSetup,
@@ -155,6 +159,22 @@ describe('scenarioC repair Q2 skip', () => {
     const sessionAnswer =
       'A sit down and honest conversation is the only way the situation can be repaired when this was just a stay as a sticking point for our';
     expect(scenarioCUserAnswerHasSubstantiveRepairContent(sessionAnswer)).toBe(true);
+  });
+
+  it('scenarioCUserAnswerHasSubstantiveRepairContent detects figure-out-leaving repair without explicit repair keyword', () => {
+    const sessionAnswer =
+      'They need to figure out why Daniel keeps leaving, and he needs tools to self-regulate himself.';
+    expect(scenarioCUserAnswerHasSubstantiveRepairContent(sessionAnswer)).toBe(true);
+    expect(
+      scenarioCRepairConstructStillPending([
+        { role: 'assistant', content: scenarioCQ1 },
+        { role: 'user', content: 'Daniel felt at a loss about what to say next.' },
+        { role: 'assistant', content: SCENARIO_C_SOPHIE_PERSPECTIVE_PROBE },
+        { role: 'user', content: 'Sophie probably felt dismissed when he walked out.' },
+        { role: 'assistant', content: SCENARIO_C_REPAIR_QUESTION_CANONICAL },
+        { role: 'user', content: sessionAnswer },
+      ]),
+    ).toBe(false);
   });
 
   it('shouldForceScenarioCSophiePerspectiveProbe fires after Q1 when Sophie not yet delivered', () => {
@@ -270,6 +290,36 @@ describe('scenarioC repair Q2 skip', () => {
         { role: 'user', content: prematureRepairAnswer },
       ]),
     ).toBe(true);
+  });
+
+  it('scenarioCRepairConstructStillPending is false when a personal grudge answer follows repair Q2', () => {
+    expect(
+      scenarioCRepairConstructStillPending([
+        { role: 'assistant', content: scenarioCQ1 },
+        { role: 'user', content: 'Daniel felt at a loss about what to say next.' },
+        { role: 'assistant', content: SCENARIO_C_REPAIR_QUESTION_CANONICAL },
+        { role: 'user', content: 'They should talk honestly about how leaving makes her feel.' },
+        {
+          role: 'user',
+          content:
+            'My former roommate and I had a huge falling out over rent and we have not spoken in two years.',
+        },
+      ]),
+    ).toBe(false);
+  });
+
+  it('scenarioCRepairConstructStillPending is false when grudge question was delivered after repair', () => {
+    expect(
+      scenarioCRepairConstructStillPending([
+        { role: 'assistant', content: SCENARIO_C_REPAIR_QUESTION_CANONICAL },
+        { role: 'user', content: 'Daniel should apologize and stay to talk.' },
+        {
+          role: 'assistant',
+          content:
+            "Have you ever held a grudge against someone, or had someone in your life you really did not like?",
+        },
+      ]),
+    ).toBe(false);
   });
 
   it('shouldForceScenarioCRepairProbe skips when Sophie-perspective answer already repairs', () => {
@@ -430,6 +480,9 @@ describe('scenarioBProbeLogic', () => {
       ),
     ).toBe(true);
     expect(
+      userAnswerLooksLikeAheadOfScheduleScenarioBOnQ1('If I were James, I would...'),
+    ).toBe(false);
+    expect(
       userAnswerLooksLikeAheadOfScheduleScenarioBJamesDifferentlyOnQ1(
         'James should have celebrated with her and listened before asking about salary.',
       ),
@@ -437,6 +490,16 @@ describe('scenarioBProbeLogic', () => {
     expect(
       userAnswerLooksLikeAheadOfScheduleScenarioBOnQ1(
         'Sarah felt unseen because James focused on logistics instead of her emotions.',
+      ),
+    ).toBe(false);
+  });
+
+  it('isIncompleteScenarioBJamesRepairUserAnswer rejects truncated James role-play openers', () => {
+    expect(isIncompleteScenarioBJamesRepairUserAnswer('If I were James, I would...')).toBe(true);
+    expect(isIncompleteScenarioBJamesRepairUserAnswer('If I were James, I would')).toBe(true);
+    expect(
+      isIncompleteScenarioBJamesRepairUserAnswer(
+        'If I were James, I would apologize and reflect on my behavior and assure her that I will try to be better in the future.',
       ),
     ).toBe(false);
   });
@@ -591,6 +654,56 @@ describe('scenarioBProbeLogic', () => {
     expect(coerceScenarioBJamesDifferentlyQuestionForTts(truncated)).toBe(
       SCENARIO_B_JAMES_DIFFERENTLY_CANONICAL,
     );
+  });
+
+  it('coerces complete before-the-fight Q2 paraphrase to canonical appreciation prompt', () => {
+    const paraphrase =
+      'What do you think James could have done before the fight even started?';
+    expect(isBeforeFightOnlyScenarioBJamesQ2Paraphrase(paraphrase)).toBe(true);
+    expect(isDeliveredScenarioBJamesDifferentlyProbe(paraphrase)).toBe(false);
+    expect(coerceScenarioBJamesDifferentlyQuestionForTts(paraphrase)).toBe(
+      SCENARIO_B_JAMES_DIFFERENTLY_CANONICAL,
+    );
+  });
+
+  it('coerces before-the-fight Q2 paraphrase when scenario ref still reads as Situation 1', () => {
+    const paraphrase =
+      'Got it. What do you think James could have done before the fight even started?';
+    const messages = [
+      {
+        role: 'assistant',
+        content:
+          "Sarah has been job hunting for four months. She gets an offer and calls James from the street. What do you think is going on here?",
+        scenarioNumber: 2,
+      },
+      {
+        role: 'user',
+        content: 'James is not listening to how excited Sarah is about the job offer.',
+        scenarioNumber: 2,
+      },
+    ];
+    expect(
+      coerceScenarioBJamesDifferentlyQuestionForTts(paraphrase, {
+        messages,
+        interviewMoment: 2,
+      }),
+    ).toBe(SCENARIO_B_JAMES_DIFFERENTLY_CANONICAL);
+  });
+
+  it('treats canonical appreciation Q2 as delivered in transcript', () => {
+    expect(isDeliveredScenarioBJamesDifferentlyProbe(SCENARIO_B_JAMES_DIFFERENTLY_CANONICAL)).toBe(
+      true,
+    );
+    expect(
+      isDeliveredScenarioBJamesDifferentlyProbe(
+        'What do you think James could have done differently to help Sarah feel appreciated?',
+      ),
+    ).toBe(true);
+    expect(
+      isDeliveredScenarioBJamesDifferentlyProbe(
+        'What do you think James could have done before the fight even started?',
+      ),
+    ).toBe(false);
   });
 
   it('coerces truncated James-repair streaming cutoff from session logs', () => {
@@ -827,6 +940,20 @@ describe('scenarioC repair echo and Sophie replay guards', () => {
   it('treats hurt/abandonment answer as satisfying Sophie perspective without naming Sophie', () => {
     expect(userAnswerSatisfiesScenarioCSophiePerspectiveProbe(hurtAnswer)).toBe(true);
     expect(userAnswerSatisfiesScenarioCSophiePerspectiveProbe(hurtAnswerLivingInResolution)).toBe(true);
+  });
+
+  it('accepts thin Sophie affect reads on the perspective probe', () => {
+    expect(looksLikeScenarioCSophiePerspectiveAssessableShortAnswer('Probably annoying.')).toBe(true);
+    expect(looksLikeScenarioCSophiePerspectiveAssessableShortAnswer("It must've been frustrating")).toBe(
+      true,
+    );
+    expect(
+      looksLikeScenarioCSophiePerspectiveAssessableShortAnswer(
+        'I think it was probably very frustrating for so',
+      ),
+    ).toBe(true);
+    expect(userAnswerSatisfiesScenarioCSophiePerspectiveProbe('Probably annoying.')).toBe(true);
+    expect(userAnswerSatisfiesScenarioCSophiePerspectiveProbe('I think that')).toBe(false);
   });
 
   it('resolveScenarioCNextProbeAfterSatisfiedQ1 returns repair after Sophie answered', () => {

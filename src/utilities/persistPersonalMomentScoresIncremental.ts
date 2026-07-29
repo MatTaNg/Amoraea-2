@@ -3,7 +3,11 @@ import type {
   PersonalMoment5SliceForSanitize,
   PersonalMomentSliceForSanitize,
 } from '@features/aria/personalMomentSliceSanitize';
-import { normalizeResponseConcreteness } from '@features/aria/personalMomentConcreteness';
+import {
+  mergeMoment4ConcretenessForGate,
+  normalizeMoment4Concreteness,
+  normalizeResponseConcreteness,
+} from '@features/aria/personalMomentConcreteness';
 
 import {
   isDefensePatternsShapeIncomplete,
@@ -158,6 +162,20 @@ export function coalesceConcretenessForFinalPersist(
   return baselineValue;
 }
 
+/** Moment 4 column — preserves `valid_non_applicable` from reconciled scoring slices. */
+export function coalesceMoment4ConcretenessForFinalPersist(
+  freshSlice: { response_concreteness?: string | null } | null | undefined,
+  baselineValue: string | null,
+  moment4UserText?: string | null,
+  suppressBaselineBackfill = false,
+): string | null {
+  const fromFresh = normalizeMoment4Concreteness(freshSlice?.response_concreteness);
+  const fromBaseline = suppressBaselineBackfill ? null : normalizeMoment4Concreteness(baselineValue);
+  const merged = mergeMoment4ConcretenessForGate(freshSlice, fromBaseline ?? baselineValue, moment4UserText);
+  if (merged != null) return merged;
+  return fromFresh ?? fromBaseline;
+}
+
 export async function persistMoment4ScoresImmediate(
   supabase: SupabaseClient,
   attemptId: string,
@@ -170,7 +188,10 @@ export async function persistMoment4ScoresImmediate(
   const scenario_specific_patterns = mergeScenarioSpecificPatterns(baseline.patterns, {
     moment_4_scores,
   });
-  const moment_4_concreteness = coalesceConcretenessForFinalPersist(moment4, baseline.moment_4_concreteness);
+  const moment_4_concreteness = coalesceMoment4ConcretenessForFinalPersist(
+    moment4,
+    baseline.moment_4_concreteness,
+  );
   const { error } = await supabase
     .from('interview_attempts')
     .update({ scenario_specific_patterns, moment_4_concreteness })

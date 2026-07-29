@@ -12,7 +12,7 @@ type PostInterviewScrollLayoutProps = {
 /** Scrollable body for post-interview stack screens (header is stack-owned). */
 export function PostInterviewScrollLayout({ children, scrollViewRef }: PostInterviewScrollLayoutProps) {
   return (
-    <SafeAreaContainer style={styles.container}>
+    <SafeAreaContainer edges={['bottom', 'left', 'right']} style={styles.container}>
       <ScrollView
         ref={scrollViewRef}
         style={styles.scroll}

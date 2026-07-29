@@ -140,7 +140,7 @@ export function resolvePreClaudeMetaCommentGateState(
 
   if (metaCommentClassification?.type === 'skip_request') {
     const mSk = deps.currentInterviewMomentRef.current;
-    if (mSk < 1 || mSk > 3 || deps.closingQuestionPending) {
+    if (mSk < 1 || mSk > 5 || deps.closingQuestionPending) {
       metaCommentClassification = null;
     }
   }
@@ -199,7 +199,7 @@ export function resolvePreClaudeMetaCommentGateState(
     !proactiveScenarioSkipConfirmationInjection
   ) {
     const mIn = deps.currentInterviewMomentRef.current;
-    if (mIn >= 1 && mIn <= 3) {
+    if (mIn >= 1 && mIn <= 5) {
       // Same branch as an explicit skip request: offer skip confirmation (score impact if accepted).
       inabilityEscalationSkipInjection = true;
     }

@@ -19,6 +19,7 @@ export type AriaInterviewScreenRouterProps = {
   fromValidationTrack: boolean;
   pendingCompletion: boolean;
   resumeLoadingVisible: boolean;
+  resumeHydrationPending: boolean;
   shouldShowAdminPanel: boolean;
   alphaMode: boolean;
   analysisAttemptId: string | null;
@@ -98,7 +99,7 @@ export function AriaInterviewScreenRouter(
     return <PreparingResultsView />;
   }
 
-  if (props.resumeLoadingVisible) {
+  if (props.resumeLoadingVisible || props.resumeHydrationPending) {
     return <AriaInterviewResumeLoadingScreen />;
   }
 
@@ -176,6 +177,9 @@ export function AriaInterviewScreenRouter(
   }
 
   if (props.status === 'intro') {
+    if (props.interviewStatus === 'in_progress') {
+      return null;
+    }
     const attemptReady = !props.userId || props.isAdmin || props.interviewAttemptBootstrap === 'ready';
     const preInterviewReady =
       props.preInterviewConsentAge &&

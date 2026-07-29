@@ -1,5 +1,6 @@
 import React from 'react';
 import { View, Text, TouchableOpacity, StyleSheet } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { useAuth } from '@features/authentication/hooks/useAuth';
 import { colors } from '@ui/theme/colors';
@@ -29,43 +30,54 @@ export const OnboardingHeader: React.FC<OnboardingHeaderProps> = ({ variant = 'd
   };
 
   return (
-    <View style={[styles.banner, dark && styles.bannerDark]}>
-      {onBackPress ? (
+    <SafeAreaView
+      edges={['top', 'left', 'right']}
+      style={[styles.safeArea, dark && styles.safeAreaDark]}
+    >
+      <View style={styles.banner}>
+        {onBackPress ? (
+          <TouchableOpacity
+            onPress={onBackPress}
+            style={styles.button}
+            hitSlop={12}
+            accessibilityRole="button"
+            accessibilityLabel="Go back"
+          >
+            <Ionicons name="chevron-back" size={26} color={dark ? '#5BA8E8' : colors.primary} />
+          </TouchableOpacity>
+        ) : (
+          <View style={styles.placeholder} />
+        )}
+        <Text style={[styles.title, dark && styles.titleDark]}>Amoraea (BETA)</Text>
         <TouchableOpacity
-          onPress={onBackPress}
+          onPress={handleLogOut}
           style={styles.button}
           hitSlop={12}
-          accessibilityRole="button"
-          accessibilityLabel="Go back"
+          accessibilityLabel="Log out"
         >
-          <Ionicons name="chevron-back" size={26} color={dark ? '#5BA8E8' : colors.primary} />
+          <Ionicons name="log-out-outline" size={24} color={dark ? '#5BA8E8' : colors.primary} />
         </TouchableOpacity>
-      ) : (
-        <View style={styles.placeholder} />
-      )}
-      <Text style={[styles.title, dark && styles.titleDark]}>Amoraea (BETA)</Text>
-      <TouchableOpacity
-        onPress={handleLogOut}
-        style={styles.button}
-        hitSlop={12}
-        accessibilityLabel="Log out"
-      >
-        <Ionicons name="log-out-outline" size={24} color={dark ? '#5BA8E8' : colors.primary} />
-      </TouchableOpacity>
-    </View>
+      </View>
+    </SafeAreaView>
   );
 };
 
 const styles = StyleSheet.create({
+  safeArea: {
+    backgroundColor: colors.background,
+    borderBottomWidth: 1,
+    borderBottomColor: colors.border,
+  },
+  safeAreaDark: {
+    backgroundColor: '#05060D',
+    borderBottomColor: 'rgba(82,142,220,0.15)',
+  },
   banner: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
     paddingHorizontal: spacing.md,
     paddingVertical: spacing.md,
-    borderBottomWidth: 1,
-    borderBottomColor: colors.border,
-    backgroundColor: colors.background,
     minHeight: 56,
   },
   placeholder: {
@@ -79,10 +91,6 @@ const styles = StyleSheet.create({
   },
   button: {
     padding: spacing.sm,
-  },
-  bannerDark: {
-    backgroundColor: '#05060D',
-    borderBottomColor: 'rgba(82,142,220,0.15)',
   },
   titleDark: {
     color: '#E8F0F8',

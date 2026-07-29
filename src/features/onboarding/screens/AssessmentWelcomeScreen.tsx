@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { ActivityIndicator, SafeAreaView, StyleSheet } from 'react-native';
+import { ActivityIndicator, SafeAreaView, StyleSheet, View } from 'react-native';
 import { useQueryClient } from '@tanstack/react-query';
 import { useAuth } from '@/shared/hooks/AuthProvider';
 import { MarketResearchModal } from '@features/onboarding/MarketResearchModal';
@@ -13,6 +13,7 @@ import {
 import { storedInterviewHasResumableScenarioProgress } from '@utilities/interviewResumeCursor';
 import { clearInterviewFromStorage, loadInterviewFromStorage } from '@utilities/storage/InterviewStorage';
 import { PSYCHOMETRICS_ACCENT, PSYCHOMETRICS_BG } from '@features/psychometrics/psychometricsTheme';
+import { markUserEnteredInterviewFlow } from '@utilities/interviewEntryLock';
 
 type Props = {
   navigation: {
@@ -64,6 +65,8 @@ export function AssessmentWelcomeScreen({ navigation, route }: Props) {
 
   function handleContinue() {
     if (!userId || needsMarketResearch) return;
+    markUserEnteredInterviewFlow(userId);
+    queryClient.setQueryData(['interviewEntryLock', userId], true);
     navigation.replace('Amoraea', { userId });
   }
 
@@ -82,7 +85,7 @@ export function AssessmentWelcomeScreen({ navigation, route }: Props) {
   }
 
   return (
-    <>
+    <View style={styles.screen}>
       <WelcomeModal
         visible={!needsMarketResearch}
         variant="interviewFirst"
@@ -97,11 +100,15 @@ export function AssessmentWelcomeScreen({ navigation, route }: Props) {
           onComplete={handleMarketResearchComplete}
         />
       ) : null}
-    </>
+    </View>
   );
 }
 
 const styles = StyleSheet.create({
+  screen: {
+    flex: 1,
+    backgroundColor: PSYCHOMETRICS_BG,
+  },
   loading: {
     flex: 1,
     backgroundColor: PSYCHOMETRICS_BG,

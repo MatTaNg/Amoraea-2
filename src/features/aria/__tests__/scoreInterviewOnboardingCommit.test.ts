@@ -42,7 +42,7 @@ describe('commitStandardOnboardingUsersAfterAttempt', () => {
       }),
     );
     expect(eq).toHaveBeenCalledWith('id', 'user-1');
-    expect(rpc).toHaveBeenCalledWith('apply_referral_completion_effects', { p_user_id: 'user-1' });
+    expect(rpc).not.toHaveBeenCalled();
   });
 
   it('sets interview_passed false when gate not ok', async () => {

@@ -35,7 +35,7 @@ export const styles = StyleSheet.create({
     marginBottom: 14,
     lineHeight: 24,
   },
-  mustHaveEmphasis: {
+  dealbreakerEmphasis: {
     fontWeight: '800',
   },
   option: {

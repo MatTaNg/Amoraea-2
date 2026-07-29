@@ -1,6 +1,7 @@
 import type { MutableRefObject } from 'react';
 
 import type { TtsTelemetrySource } from '@features/aria/telemetry/tsAutoplayTelemetry';
+import { markNativePlaybackBridgeBeforeNextTts } from '@features/aria/utils/audioModeHelpers';
 import {
   getSessionLogRuntime,
   setRecordingSessionActive,
@@ -19,9 +20,19 @@ export async function drainPriorTtsPlaybackBeforeSpeak(args: {
     return;
   }
 
+  // Parallel stream handoffs can leave ttsPlaybackActive set while line-in-flight is already cleared.
+  if (!args.ttsLineInFlightRef.current) {
+    setTtsPlaybackActive(false);
+    return;
+  }
+
   const waitStartMs = Date.now();
   const deadline = waitStartMs + 8000;
   while (Date.now() < deadline && getSessionLogRuntime().ttsPlaybackActive) {
+    if (!args.ttsLineInFlightRef.current) {
+      setTtsPlaybackActive(false);
+      return;
+    }
     await new Promise<void>((res) => setTimeout(res, 80));
   }
 
@@ -69,6 +80,7 @@ export function releaseRecordingSessionBeforeTts(args: {
     });
   }
   setRecordingSessionActive(false);
+  markNativePlaybackBridgeBeforeNextTts(`recording_session_before_tts:${args.telemetrySource}`);
 }
 
 export function consumePriorRecordingFlagsForTts(args: {

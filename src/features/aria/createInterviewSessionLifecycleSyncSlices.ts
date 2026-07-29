@@ -17,7 +17,9 @@ export function createInterviewSessionLifecycleStatusSyncSlice(params: SyncExtra
     hasResumedRef: params.hasResumedRef,
     interviewUserTurnEpochRef: params.interviewUserTurnEpochRef,
     resumeLoadingFlowActiveRef: params.resumeLoadingFlowActiveRef,
+    resumeHandleInFlightRef: params.resumeHandleInFlightRef,
     setResumeLoadingVisible: params.setResumeLoadingVisible,
+    setResumeHydrationPending: params.setResumeHydrationPending,
     startInterviewInFlightRef: params.startInterviewInFlightRef,
     setInterviewStartInFlight: params.setInterviewStartInFlight,
   };
@@ -28,6 +30,7 @@ export function createInterviewSessionLifecycleResumeWelcomeSyncSlice(params: Sy
     resumeEmotionCatchUpIndicesRef: params.resumeEmotionCatchUpIndicesRef,
     resumeEmotionAfterModalTextRef: params.resumeEmotionAfterModalTextRef,
     resumeOfferWelcomeTtsRef: params.resumeOfferWelcomeTtsRef,
+    resumeInPersonalPartRef: params.resumeInPersonalPartRef,
     resumeWelcomeMessageRef: params.resumeWelcomeMessageRef,
     resumeWelcomeHydrationAttemptRef: params.resumeWelcomeHydrationAttemptRef,
     pendingScenarioIntroAfterResumeWelcomeRef: params.pendingScenarioIntroAfterResumeWelcomeRef,

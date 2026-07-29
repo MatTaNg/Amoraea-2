@@ -1,9 +1,29 @@
+import { awaitResumePlaybackAfterLoadingDismissed } from '@features/aria/awaitResumePlaybackAfterLoadingDismissed';
 import { stripControlTokens } from '@features/aria/interviewControlTokens';
-import { findLastRepeatableInterviewQuestionText } from '@features/aria/interviewDisengagementProbes';
+import {
+  acquireResumeWelcomePlaybackLock,
+  getResumeWelcomePlaybackGeneration,
+  releaseResumeWelcomePlaybackLock,
+} from '@features/aria/interviewLocalPersistence';
+import {
+  clearResumeDeferredUserSpeech,
+  flushResumeDeferredUserSpeechWhenUnblocked,
+} from '@features/aria/resumeDeferredUserSpeech';
+import {
+  findLastMoment4RepeatableQuestionText,
+  findLastRepeatableInterviewQuestionText,
+} from '@features/aria/interviewDisengagementProbes';
+import { MOMENT_4_GRUDGE_QUESTION_TEXT } from '@features/aria/moment4ProbeLogic';
 import {
   isAssistantBubbleForTranscript,
+  MOMENT_4_PERSONAL_LABEL,
+  resolveLastMoment4QuestionCardBodyFromTranscript,
   syncReferenceCardStateFromAssistantMessages,
 } from '@features/aria/interviewReferenceCardResumeHelpers';
+import {
+  transcriptAssistantContainsMoment5PrimaryConflictQuestion,
+} from '@features/aria/moment5ProbeLogic';
+import { resolveQuestionOnlyTextForResumeWelcome } from '@features/aria/resolveAssessableQuestionTextForResponseTiming';
 import {
   clearResumeWelcomeSpokenForHydration,
   markResumeWelcomeSpoken,
@@ -15,8 +35,13 @@ import { markSessionResumedForNextRecordingStart } from '@utilities/sessionLoggi
 import type { InterviewResumePlan } from '@utilities/interviewResumeCursor';
 import {
   buildResumeWelcomeMessage,
+  resumeWelcomeMessageEmbedsLastQuestion,
   shouldOfferResumeWelcomeTts,
 } from '@utilities/interviewResumeCursor';
+import { Platform } from 'react-native';
+
+import { remoteLog } from '@utilities/remoteLog';
+import { markNativePlaybackBridgeBeforeNextTts } from '@features/aria/utils/audioModeHelpers';
 
 type ResumeWelcomeDeps = Pick<
   HandleResumeDeps,
@@ -25,6 +50,7 @@ type ResumeWelcomeDeps = Pick<
   | 'currentScenarioRef'
   | 'resumeOfferWelcomeTtsRef'
   | 'resumeWelcomeMessageRef'
+  | 'resumeInPersonalPartRef'
   | 'resumeWelcomeHydrationAttemptRef'
   | 'resumeLastAssistantTextRef'
   | 'lastQuestionTextRef'
@@ -39,7 +65,46 @@ type ResumeWelcomeDeps = Pick<
   | 'resumeEmotionAfterModalTextRef'
   | 'interviewSessionAttemptIdRef'
   | 'currentMessagesRef'
+  | 'resumeLoadingFlowActiveRef'
+  | 'interviewNameRef'
+  | 'processUserSpeech'
 >;
+
+export function resolveResumeWelcomeQuestionText(
+  messages: MessageWithScenario[],
+  fallbackLastQuestionText: string | null | undefined,
+  options: {
+    activeScenario: number | null | undefined;
+    firstName: string | null | undefined;
+    inPersonalPart?: boolean;
+  },
+): string {
+  const lastUserAnswer = [...messages].reverse().find((m) => m.role === 'user')?.content ?? null;
+  const resolveOpts = {
+    firstName: options.firstName ?? '',
+    lastUserAnswer,
+    activeScenario: options.activeScenario ?? undefined,
+  };
+  if (options.inPersonalPart) {
+    const hasMoment5Question = messages.some(
+      (m) =>
+        m.role === 'assistant' &&
+        !m.isWelcomeBack &&
+        !m.isScoreCard &&
+        transcriptAssistantContainsMoment5PrimaryConflictQuestion(m.content ?? ''),
+    );
+    const raw = hasMoment5Question
+      ? findLastRepeatableInterviewQuestionText(messages, fallbackLastQuestionText, {
+          activeScenario: options.activeScenario ?? undefined,
+        })
+      : (findLastMoment4RepeatableQuestionText(messages) ?? MOMENT_4_GRUDGE_QUESTION_TEXT);
+    return resolveQuestionOnlyTextForResumeWelcome(raw, resolveOpts);
+  }
+  const raw = findLastRepeatableInterviewQuestionText(messages, fallbackLastQuestionText, {
+    activeScenario: options.activeScenario ?? undefined,
+  });
+  return resolveQuestionOnlyTextForResumeWelcome(raw, resolveOpts);
+}
 
 export async function applyResumeWelcomeMessagesAndPlayback(params: {
   deps: ResumeWelcomeDeps;
@@ -62,11 +127,83 @@ export async function applyResumeWelcomeMessagesAndPlayback(params: {
     mode: resumePlan.mode,
     transcriptMessages,
   });
+
+  const inPersonalPart = resumePlan.mode === 'resume_post_scenarios';
+  if (deps.resumeInPersonalPartRef) {
+    deps.resumeInPersonalPartRef.current = inPersonalPart;
+  }
+  const hasMoment5PrimaryQuestion = fullMessages.some(
+    (m) =>
+      m.role === 'assistant' &&
+      !m.isWelcomeBack &&
+      !m.isScoreCard &&
+      transcriptAssistantContainsMoment5PrimaryConflictQuestion(m.content ?? ''),
+  );
+
+  deps.resumeLastAssistantTextRef.current = resolveResumeWelcomeQuestionText(
+    fullMessages,
+    deps.lastQuestionTextRef.current,
+    {
+      activeScenario: deps.currentScenarioRef.current,
+      firstName: deps.interviewNameRef.current,
+      inPersonalPart,
+    },
+  );
+  if (deps.resumeLastAssistantTextRef.current?.trim()) {
+    deps.lastQuestionTextRef.current = deps.resumeLastAssistantTextRef.current;
+  }
+
+  const assistantForRef = fullMessages.filter((m) => isAssistantBubbleForTranscript(m));
+  const refSync = syncReferenceCardStateFromAssistantMessages(assistantForRef, {
+    fullTranscript: fullMessages,
+    activeScenario: deps.currentScenarioRef.current,
+    lastQuestionText: deps.lastQuestionTextRef.current,
+  });
+  if (inPersonalPart) {
+    if (hasMoment5PrimaryQuestion && refSync.scenario) {
+      deps.committedScenarioRef.current = refSync.scenario;
+      deps.setReferenceCardScenario(refSync.scenario);
+      deps.setReferenceCardPrompt(refSync.prompt);
+      deps.setInterviewUiPhase('scenario_active');
+    } else {
+      const moment4Question =
+        findLastMoment4RepeatableQuestionText(fullMessages) ??
+        resolveLastMoment4QuestionCardBodyFromTranscript(fullMessages) ??
+        refSync.prompt?.trim() ??
+        MOMENT_4_GRUDGE_QUESTION_TEXT;
+      deps.committedScenarioRef.current = {
+        label: MOMENT_4_PERSONAL_LABEL,
+        text: moment4Question,
+      };
+      deps.setReferenceCardScenario(deps.committedScenarioRef.current);
+      deps.setReferenceCardPrompt(moment4Question);
+      deps.setInterviewUiPhase('scenario_active');
+    }
+  } else {
+    deps.committedScenarioRef.current = refSync.scenario;
+    deps.setReferenceCardScenario(refSync.scenario);
+    deps.setReferenceCardPrompt(refSync.prompt);
+    deps.setInterviewUiPhase(refSync.phase);
+    if (refSync.prompt?.trim() && !deps.resumeLastAssistantTextRef.current?.trim()) {
+      const questionOnly = resolveQuestionOnlyTextForResumeWelcome(refSync.prompt, {
+        firstName: deps.interviewNameRef.current ?? '',
+        lastUserAnswer: [...fullMessages].reverse().find((m) => m.role === 'user')?.content ?? null,
+        activeScenario: deps.currentScenarioRef.current ?? undefined,
+      });
+      deps.lastQuestionTextRef.current = questionOnly;
+      deps.resumeLastAssistantTextRef.current = questionOnly;
+    }
+  }
+
   deps.resumeWelcomeMessageRef.current = buildResumeWelcomeMessage({
     mode: resumePlan.mode,
     resumeScenario: resumePlan.resumeScenario,
+    lastQuestionText: scenarioIntroBody?.trim()
+      ? null
+      : (deps.resumeLastAssistantTextRef.current ?? deps.lastQuestionTextRef.current),
   });
   const welcomeBack = deps.resumeWelcomeMessageRef.current;
+  const welcomeEmbedsLastQuestion = resumeWelcomeMessageEmbedsLastQuestion(welcomeBack);
   const welcomeMsg = {
     role: 'assistant',
     content: welcomeBack,
@@ -102,34 +239,34 @@ export async function applyResumeWelcomeMessagesAndPlayback(params: {
       : scenarioIntroMsg
         ? [...fullMessages, welcomeMsg, scenarioIntroMsg]
         : [...fullMessages, welcomeMsg];
-  deps.resumeLastAssistantTextRef.current = findLastRepeatableInterviewQuestionText(
-    messagesWithWelcome,
-    deps.lastQuestionTextRef.current,
-    { activeScenario: deps.currentScenarioRef.current },
-  );
-  if (deps.resumeLastAssistantTextRef.current?.trim()) {
-    deps.lastQuestionTextRef.current = deps.resumeLastAssistantTextRef.current;
-  }
-  deps.setMessages(messagesWithWelcome);
 
-  const assistantForRef = messagesWithWelcome.filter((m) => isAssistantBubbleForTranscript(m));
-  const refSync = syncReferenceCardStateFromAssistantMessages(assistantForRef);
-  deps.committedScenarioRef.current = refSync.scenario;
-  deps.setReferenceCardScenario(refSync.scenario);
-  deps.setReferenceCardPrompt(refSync.prompt);
-  deps.setInterviewUiPhase(refSync.phase);
-  if (refSync.prompt?.trim()) {
-    deps.lastQuestionTextRef.current = refSync.prompt;
-    deps.resumeLastAssistantTextRef.current = refSync.prompt;
-  }
+  deps.setMessages(messagesWithWelcome);
 
   deps.pendingScenarioIntroAfterResumeWelcomeRef.current = null;
 
   deps.resumeRepeatChoicePendingRef.current = false;
   markSessionResumedForNextRecordingStart();
 
+  const attemptIdForPlaybackLock =
+    typeof persistenceAttemptId === 'string' ? persistenceAttemptId : deps.interviewSessionAttemptIdRef.current;
+  const willRunResumePlayback =
+    deps.resumeOfferWelcomeTtsRef.current ||
+    Boolean(scenarioIntroBody?.trim()) ||
+    (deps.resumeEmotionCatchUpIndicesRef.current?.length ?? 0) > 0;
+  if (willRunResumePlayback) {
+    acquireResumeWelcomePlaybackLock(attemptIdForPlaybackLock);
+  }
+
   void (async () => {
+    const playbackGeneration = getResumeWelcomePlaybackGeneration();
     try {
+      await awaitResumePlaybackAfterLoadingDismissed(deps.resumeLoadingFlowActiveRef);
+      if (getResumeWelcomePlaybackGeneration() !== playbackGeneration) {
+        return;
+      }
+      if (Platform.OS !== 'web') {
+        markNativePlaybackBridgeBeforeNextTts('resume_welcome_playback');
+      }
       const catchUpIndices = deps.resumeEmotionCatchUpIndicesRef.current;
       if (catchUpIndices != null && catchUpIndices.length > 0) {
         for (const itemIndex of catchUpIndices) {
@@ -139,30 +276,50 @@ export async function applyResumeWelcomeMessagesAndPlayback(params: {
       }
       const offerWelcome = deps.resumeOfferWelcomeTtsRef.current;
       const attemptId = deps.interviewSessionAttemptIdRef.current;
-      let spokeWelcome = false;
-      if (offerWelcome && !(await wasResumeWelcomeSpoken(attemptId))) {
+      const speakLastQuestionReplay = async (): Promise<void> => {
+        const last = resolveResumeWelcomeQuestionText(
+          deps.currentMessagesRef.current,
+          deps.resumeLastAssistantTextRef.current ?? deps.lastQuestionTextRef.current,
+          {
+            activeScenario: deps.currentScenarioRef.current,
+            firstName: deps.interviewNameRef.current,
+            inPersonalPart,
+          },
+        );
+        if (!last?.trim()) return;
+        await deps.speakTextSafe(stripControlTokens(last), {
+          telemetrySource: 'replay',
+          ttsTriggerSource: 'callback',
+          skipQuestionDeliveredTelemetry: true,
+          skipInterviewSpeechAdvance: true,
+          skipQuestionTiming: true,
+          skipLastQuestionRef: true,
+        });
+      };
+      const speakWelcomeIfNeeded = async (): Promise<void> => {
+        if (!offerWelcome || (await wasResumeWelcomeSpoken(attemptId))) return;
         await deps.speakTextSafe(welcomeBack, {
           telemetrySource: 'greeting',
           ttsTriggerSource: 'callback',
-          // Do not overwrite lastQuestionTextRef with welcome-back meta.
           skipLastQuestionRef: true,
           skipQuestionDeliveredTelemetry: true,
           skipInterviewSpeechAdvance: true,
           skipQuestionTiming: true,
+          skipScenarioAContemptProbeSessionDedup: true,
         });
         await markResumeWelcomeSpoken(attemptId);
-        spokeWelcome = true;
-      }
+      };
       const hadCatchUp = catchUpIndices != null && catchUpIndices.length > 0;
       if (scenarioIntroBody?.trim()) {
+        await speakWelcomeIfNeeded();
         await deps.speakTextSafe(scenarioIntroBody, {
           telemetrySource: 'greeting',
           ttsTriggerSource: 'callback',
-          // Scenario restart intro is the question to resume; keep lastQuestionTextRef in sync.
         });
       } else if (hadCatchUp && deps.resumeEmotionAfterModalTextRef.current?.trim()) {
         const afterModal = deps.resumeEmotionAfterModalTextRef.current;
         deps.resumeEmotionAfterModalTextRef.current = null;
+        await speakWelcomeIfNeeded();
         await deps.speakTextSafe(stripControlTokens(afterModal), {
           telemetrySource: 'replay',
           ttsTriggerSource: 'callback',
@@ -171,30 +328,28 @@ export async function applyResumeWelcomeMessagesAndPlayback(params: {
           skipQuestionTiming: true,
           skipLastQuestionRef: true,
         });
-      } else if (!spokeWelcome && !offerWelcome) {
-        const last = findLastRepeatableInterviewQuestionText(
-          deps.currentMessagesRef.current,
-          deps.resumeLastAssistantTextRef.current ?? deps.lastQuestionTextRef.current,
-          { activeScenario: deps.currentScenarioRef.current },
-        );
-        if (last?.trim()) {
-          await deps.speakTextSafe(stripControlTokens(last), {
-            telemetrySource: 'replay',
-            ttsTriggerSource: 'callback',
-            skipQuestionDeliveredTelemetry: true,
-            skipInterviewSpeechAdvance: true,
-            skipQuestionTiming: true,
-            skipLastQuestionRef: true,
-          });
+      } else {
+        await speakWelcomeIfNeeded();
+        if (!welcomeEmbedsLastQuestion) {
+          await speakLastQuestionReplay();
         }
       }
-      deps.resumeRepeatChoicePendingRef.current = offerWelcome && spokeWelcome;
-      if (spokeWelcome || !offerWelcome) {
-        deps.resumeOfferWelcomeTtsRef.current = false;
-      }
+      deps.resumeRepeatChoicePendingRef.current = false;
+      deps.resumeOfferWelcomeTtsRef.current = false;
     } catch {
       deps.resumeRepeatChoicePendingRef.current = false;
       deps.resumeOfferWelcomeTtsRef.current = false;
+      clearResumeDeferredUserSpeech();
+    } finally {
+      releaseResumeWelcomePlaybackLock(attemptIdForPlaybackLock);
+      void flushResumeDeferredUserSpeechWhenUnblocked({
+        processUserSpeech: deps.processUserSpeech,
+        resumeLoadingFlowActiveRef: deps.resumeLoadingFlowActiveRef,
+        resumeOfferWelcomeTtsRef: deps.resumeOfferWelcomeTtsRef,
+        resumeRepeatChoicePendingRef: deps.resumeRepeatChoicePendingRef,
+        interviewSessionAttemptIdRef: deps.interviewSessionAttemptIdRef,
+        currentMessagesRef: deps.currentMessagesRef,
+      });
     }
   })();
 }

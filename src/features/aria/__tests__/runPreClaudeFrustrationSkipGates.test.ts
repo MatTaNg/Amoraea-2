@@ -1,5 +1,9 @@
 import { beforeEach, describe, expect, it, jest } from '@jest/globals';
 
+import {
+  fetchAttemptScoringBaseline,
+  persistMoment5ScoresImmediate,
+} from '@utilities/persistPersonalMomentScoresIncremental';
 import { runPreClaudeFrustrationSkipAcceptanceGate } from '@features/aria/runPreClaudeFrustrationSkipAcceptanceGate';
 import { runPreClaudeFrustrationSkipDeclineGate } from '@features/aria/runPreClaudeFrustrationSkipDeclineGate';
 import { createMockPreClaudeDeps } from './preClaudeGateTestHelpers';
@@ -7,6 +11,21 @@ import { createMockPreClaudeDeps } from './preClaudeGateTestHelpers';
 jest.mock('@utilities/sessionLogging', () => ({
   getSessionLogRuntime: jest.fn(() => ({ attemptId: 'attempt-test', platform: 'web' })),
   writeSessionLog: jest.fn(),
+  markQuestionDelivered: jest.fn(),
+}));
+
+jest.mock('@utilities/interviewAttemptLifecycle', () => ({
+  persistInterviewAttemptSessionLifecycle: jest.fn().mockResolvedValue(undefined),
+}));
+
+jest.mock('@features/aria/interviewLocalPersistence', () => ({
+  saveInterviewProgress: jest.fn().mockResolvedValue(undefined),
+  markPreparingResultsSession: jest.fn(),
+}));
+
+jest.mock('@utilities/persistPersonalMomentScoresIncremental', () => ({
+  fetchAttemptScoringBaseline: jest.fn().mockResolvedValue({}),
+  persistMoment5ScoresImmediate: jest.fn().mockResolvedValue({}),
 }));
 
 jest.mock('@data/supabase/client', () => ({
@@ -35,7 +54,7 @@ describe('runPreClaudeFrustrationSkipAcceptanceGate', () => {
     expect(result).toBeNull();
   });
 
-  it('clears skip flags, keeps moment when more scripted questions remain, and falls through to the model', async () => {
+  it('clears skip flags, keeps moment when more scripted questions remain, and client-delivers the next question', async () => {
     const deps = createMockPreClaudeDeps({
       currentInterviewMomentRef: { current: 1 },
       currentScenarioRef: { current: 1 },
@@ -50,7 +69,7 @@ describe('runPreClaudeFrustrationSkipAcceptanceGate', () => {
 
     const result = await runPreClaudeFrustrationSkipAcceptanceGate(deps, baseMessages);
 
-    expect(result).toEqual({ haltTurn: false });
+    expect(result).toEqual({ haltTurn: true });
     expect(deps.frustrationSkipOfferPendingRef.current).toBe(false);
     expect(deps.frustrationSkipAwaitingConfirmationRef.current).toBe(false);
     expect(deps.frustrationSkipHadPriorAnswerRef.current).toBeNull();
@@ -59,7 +78,65 @@ describe('runPreClaudeFrustrationSkipAcceptanceGate', () => {
     expect(deps.interviewMomentsCompleteRef.current[1]).toBeFalsy();
     expect(deps.scenarioFrustrationSkipNullMarkersRef.current[1]).toBeFalsy();
     expect(deps.scenarioSkipConfirmedCountRef.current).toBe(1);
-    expect(deps.skipContinuationSystemSuffixRef.current).toContain('NEXT QUESTION IN SAME SCENARIO');
+    expect(deps.skipContinuationSystemSuffixRef.current).toBe('');
+  });
+
+  it('completes interview and hands off to preparing_results when M5 skip is confirmed', async () => {
+    const speakTextSafe = jest.fn().mockResolvedValue(undefined);
+    const setInterviewStatus = jest.fn();
+    const setPendingCompletion = jest.fn();
+    const kickCompletionScoring = jest.fn().mockReturnValue(true);
+    const deps = createMockPreClaudeDeps({
+      currentInterviewMomentRef: { current: 5 },
+      currentScenarioRef: { current: 3 },
+      scenarioSkipOfferSourceRef: { current: 'skip_request_meta' },
+      frustrationSkipOfferPendingRef: { current: true },
+      frustrationSkipAwaitingConfirmationRef: { current: true },
+      scenarioSkipConfirmedCountRef: { current: 0 },
+      scenarioSkipPenaltySumRef: { current: 0 },
+      interviewNameRef: { current: 'Matt' },
+      interviewSessionAttemptIdRef: { current: 'attempt-1' },
+      isInterviewCompleteRef: { current: false },
+      interviewStatusRef: { current: 'in_progress' },
+      speakTextSafe,
+      setInterviewStatus,
+      setPendingCompletion,
+      kickCompletionScoring,
+    });
+    const m5Messages = [
+      {
+        role: 'assistant',
+        content: 'Think of a time when you had a conflict with someone important to you.',
+        scenarioNumber: 3,
+        interviewMoment: 5,
+      },
+      { role: 'user', content: 'Can we skip this one?', scenarioNumber: 3, interviewMoment: 5 },
+    ];
+
+    const result = await runPreClaudeFrustrationSkipAcceptanceGate(deps, m5Messages);
+
+    expect(result).toEqual({ haltTurn: true });
+    expect(deps.scenarioSkipConfirmedCountRef.current).toBe(1);
+    expect(deps.scenarioSkipPenaltySumRef.current).toBe(-0.3);
+    expect(deps.isInterviewCompleteRef.current).toBe(true);
+    expect(deps.interviewMomentsCompleteRef.current[5]).toBe(true);
+    expect(setInterviewStatus).toHaveBeenCalledWith('preparing_results');
+    expect(setPendingCompletion).toHaveBeenCalledWith(true);
+    expect(kickCompletionScoring).toHaveBeenCalledWith('m5_skip_accepted', expect.any(Array));
+    const spoken = String(speakTextSafe.mock.calls[0]?.[0] ?? '');
+    expect(spoken).toMatch(/your interview is complete/i);
+    expect(spoken).not.toMatch(/may affect your score/i);
+    expect(fetchAttemptScoringBaseline).toHaveBeenCalledWith(expect.anything(), 'attempt-1', 'user-test');
+    expect(persistMoment5ScoresImmediate).toHaveBeenCalledWith(
+      expect.anything(),
+      'attempt-1',
+      'user-test',
+      expect.objectContaining({
+        pillarScores: expect.objectContaining({ accountability: null }),
+      }),
+      expect.anything(),
+      expect.objectContaining({ skipped_by_user: true }),
+    );
   });
 });
 

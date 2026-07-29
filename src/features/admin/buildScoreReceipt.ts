@@ -23,10 +23,17 @@ import {
   formatPsychometricGateFailDescription,
 } from '@features/psychometrics/psychometricFloorBreaches';
 import { sd3NarcissismScoreFromUserRow } from '@features/psychometrics/usersPsychometricsSchemaFallback';
+import { mergeMoment4ConcretenessForGate } from '@features/aria/moment4ConcretenessClassification';
+import { resolveMoment4UserTextForGate } from '@features/aria/personalMomentSliceEnrichment';
 import {
   buildDepthSignalModifierLines,
   sumDepthSignalModifierLines,
 } from '@features/admin/depthSignalModifierLines';
+
+function parseObject(raw: unknown): Record<string, unknown> | null {
+  if (raw == null || typeof raw !== 'object' || Array.isArray(raw)) return null;
+  return raw as Record<string, unknown>;
+}
 
 export type ScoreReceiptLineKind =
   | 'section'
@@ -74,9 +81,9 @@ export type ScoreReceiptAttemptInput = {
   mentalizing_overcertainty_count?: number | null;
   emotion_recognition_raw_score?: number | null;
   emotion_recognition_responses?: unknown;
-  personal_moment_emotional_vocab_low?: boolean | null;
-  personal_moment_emotional_vocab_density?: number | null;
   closing_integration?: string | null;
+  transcript?: Array<{ role?: string; content?: string; interviewMoment?: number }> | null;
+  scenario_specific_patterns?: unknown;
 };
 
 export type ScoreReceiptUserInput = {
@@ -167,12 +174,19 @@ function buildGateComputeOptions(attempt: ScoreReceiptAttemptInput): ComputeGate
     emotionRecognitionCorrectCount: correctOpt,
     emotionRecognitionResponses: attempt.emotion_recognition_responses,
   });
+  const patterns = parseObject(attempt.scenario_specific_patterns);
+  const m4Raw = parseObject(patterns?.moment_4_scores);
+  const moment4UserText = resolveMoment4UserTextForGate(attempt.transcript);
+  const moment4Concreteness =
+    mergeMoment4ConcretenessForGate(m4Raw, attempt.moment_4_concreteness, moment4UserText) ??
+    attempt.moment_4_concreteness ??
+    null;
   return {
     skipPenaltyTotal,
     skipAutoFail: attempt.auto_failed === true,
     egoDevelopmentLevel: attempt.ego_development_level ?? null,
     defensePatterns: attempt.defense_patterns ?? DEFAULT_DEFENSE_PATTERNS,
-    moment4Concreteness: attempt.moment_4_concreteness ?? null,
+    moment4Concreteness,
     moment5Concreteness: attempt.moment_5_concreteness ?? null,
     emotionRecognitionRawScore: rawEmotion ?? undefined,
     emotionRecognitionCorrectCount: correctOpt ?? undefined,
@@ -180,7 +194,6 @@ function buildGateComputeOptions(attempt: ScoreReceiptAttemptInput): ComputeGate
     mentalizingOvercertaintyCount: attempt.mentalizing_overcertainty_count ?? null,
     disclosureCalibration: attempt.disclosure_calibration ?? null,
     closingIntegration: attempt.closing_integration ?? null,
-    personalMomentEmotionalVocabLow: attempt.personal_moment_emotional_vocab_low === true,
     precomputedWeightedScore: attempt.weighted_score ?? undefined,
   };
 }
@@ -219,7 +232,6 @@ function recomputePsychometricModifier(
       disclosureCalibration: attempt.disclosure_calibration ?? null,
       moment5Concreteness: attempt.moment_5_concreteness ?? null,
       moment4Concreteness: attempt.moment_4_concreteness ?? null,
-      personalMomentVocabDensity: attempt.personal_moment_emotional_vocab_density ?? null,
       regulationPillar: pillars.regulation,
       accountabilityPillar: pillars.accountability,
       egoDevelopmentLevel: attempt.ego_development_level ?? null,
@@ -277,7 +289,12 @@ export function buildScoreReceipt(input: {
   }
 
   lines.push({ kind: 'section', label: 'Depth signal adjustments' });
-  const depthLines = buildDepthSignalModifierLines(gateOptions);
+  const depthLines = buildDepthSignalModifierLines({
+    ...gateOptions,
+    emotionRecognitionRawScore: attempt.emotion_recognition_raw_score ?? undefined,
+    emotionRecognitionResponses: attempt.emotion_recognition_responses,
+    emotionRecognitionCorrectCount: undefined,
+  });
   const depthSum = sumDepthSignalModifierLines(depthLines);
   if (depthLines.length === 0) {
     lines.push({ kind: 'note', label: 'No depth signal adjustments applied' });
@@ -289,17 +306,26 @@ export function buildScoreReceipt(input: {
 
   const storedDepthModifier =
     finiteOrNull(attempt.depth_signal_modifier) ?? finiteOrNull(attempt.score_modifier);
-  if (storedDepthModifier != null && Math.abs(storedDepthModifier - depthSum) > 0.02) {
+  const depthModifierMismatch =
+    storedDepthModifier != null && Math.abs(storedDepthModifier - depthSum) > 0.02;
+  if (depthModifierMismatch) {
     lines.push({
       kind: 'note',
       label: 'Stored depth modifier differs from recomputed line items',
-      detail: `Stored ${storedDepthModifier.toFixed(2)} · recomputed ${depthSum.toFixed(2)}`,
+      detail: `Stored ${storedDepthModifier.toFixed(2)} · recomputed ${depthSum.toFixed(2)} — subtotals below use recomputed`,
     });
   }
 
-  const interviewOnlyModified =
-    finiteOrNull(attempt.modified_weighted_score) ??
-    (interviewWeighted != null ? round2(interviewWeighted + (storedDepthModifier ?? depthSum)) : null);
+  const effectiveDepthModifier = depthModifierMismatch
+    ? depthSum
+    : (storedDepthModifier ?? depthSum);
+
+  const interviewOnlyModified = depthModifierMismatch
+    ? interviewWeighted != null
+      ? round2(interviewWeighted + depthSum)
+      : null
+    : finiteOrNull(attempt.modified_weighted_score) ??
+      (interviewWeighted != null ? round2(interviewWeighted + effectiveDepthModifier) : null);
 
   lines.push({
     kind: 'subtotal',
@@ -389,11 +415,14 @@ export function buildScoreReceipt(input: {
     });
   }
 
-  const finalScore =
-    finiteOrNull(attempt.modified_weighted_score_with_psychometrics) ??
-    (interviewOnlyModified != null && correctedPsych != null
+  const finalScore = depthModifierMismatch
+    ? interviewOnlyModified != null && correctedPsych != null
       ? round2(interviewOnlyModified + correctedPsych)
-      : interviewOnlyModified);
+      : interviewOnlyModified
+    : finiteOrNull(attempt.modified_weighted_score_with_psychometrics) ??
+      (interviewOnlyModified != null && correctedPsych != null
+        ? round2(interviewOnlyModified + correctedPsych)
+        : interviewOnlyModified);
 
   lines.push({ kind: 'section', label: 'Final' });
   lines.push({

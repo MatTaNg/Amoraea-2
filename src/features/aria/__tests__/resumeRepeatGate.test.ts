@@ -1,3 +1,4 @@
+import { RESUME_WELCOME_BACK_REPEAT_SCENARIO_OFFER_TAIL } from '@features/aria/resumeWelcomeBackRepeat';
 import {
   looksLikeDirectResumeAnswer,
   looksLikeRepeatCueInAmbiguousReply,
@@ -26,7 +27,7 @@ describe('resumeRepeatGate', () => {
 
   it('allows Whisper-mangled repeat phrases through post-transcribe gate', () => {
     const welcome =
-      "Welcome back — we'll pick up where we left off. If you'd like me to repeat what I said, let me know.";
+      `Welcome back — we'll pick up where we left off.${RESUME_WELCOME_BACK_REPEAT_SCENARIO_OFFER_TAIL}`;
     expect(shouldAllowResumeRepeatChoiceTurnProcessing('He what you said', 4, welcome)).toBe(true);
     expect(shouldAllowResumeRepeatChoiceTurnProcessing('Pee at what you said.', 5, welcome)).toBe(true);
     expect(looksLikeRepeatCueInAmbiguousReply('He what you said')).toBe(true);
@@ -42,7 +43,7 @@ describe('resumeRepeatGate', () => {
     const answer = 'Daniel is very avoidant and he had to leave to regulate his emotions.';
     const repairQ = 'Got it. How do you think this situation could be repaired?';
     const welcome =
-      "Welcome back — we'll pick up where we left off. If you'd like me to repeat what I said, let me know.";
+      `Welcome back — we'll pick up where we left off.${RESUME_WELCOME_BACK_REPEAT_SCENARIO_OFFER_TAIL}`;
     expect(looksLikeDirectResumeAnswer(answer, repairQ)).toBe(true);
     expect(looksLikeDirectResumeAnswer(answer, welcome)).toBe(true);
   });

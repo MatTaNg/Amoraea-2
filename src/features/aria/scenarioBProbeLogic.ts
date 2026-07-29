@@ -6,6 +6,7 @@ import { hasScenarioBoundaryWrapPhrase } from './emotionModalTransitionOrchestra
 import { assistantTextLooksLikeMoment4HandoffLead } from './interviewTransitionBundles';
 import { isScenarioBoundaryPositiveAddressReflection } from './interviewReflectionTextStrips';
 import { isDecline } from './interviewControlTokens';
+import { looksLikeIncompleteCutOffUserAnswer } from './interviewAnswerRelevance';
 import {
   findLastUserWithPriorScenarioARepairContext,
   findLastUserWithPriorScenarioBJamesRepairContext,
@@ -22,6 +23,33 @@ export function looksLikeScenarioBFullAppreciationProbeQuestion(text: string): b
 /** Canonical Scenario B Q2 — client inject + TTS/modal fallback when streaming truncates. */
 export const SCENARIO_B_JAMES_DIFFERENTLY_CANONICAL =
   'What do you think James could have done differently to help Sarah feel appreciated?';
+
+/** True when Scenario B Q2 was delivered with the appreciation construct (canonical or equivalent). */
+export function isDeliveredScenarioBJamesDifferentlyProbe(text: string): boolean {
+  const normalized = normalizeApostrophesForPromptMatch(text).trim();
+  if (!normalized || !/\?\s*$/.test(normalized)) return false;
+  const canonical = normalizeApostrophesForPromptMatch(SCENARIO_B_JAMES_DIFFERENTLY_CANONICAL).toLowerCase();
+  const t = normalized.toLowerCase();
+  if (t.includes(canonical)) return true;
+  if (!/\bjames\b/.test(t)) return false;
+  const hasAppreciationConstruct =
+    /\b(feel appreciated|make sarah feel|help(ed)? sarah feel|help sarah feel|might have helped sarah)\b/.test(
+      t,
+    );
+  const asksJamesAlternative =
+    /\b(could have done|could'?ve done|done differently|what james could|anything james could)\b/.test(t);
+  return hasAppreciationConstruct && asksJamesAlternative;
+}
+
+/** Off-script Q2 that frames the construct as "before the fight" without appreciation language. */
+export function isBeforeFightOnlyScenarioBJamesQ2Paraphrase(text: string): boolean {
+  const normalized = normalizeApostrophesForPromptMatch(text).trim();
+  if (!normalized) return false;
+  if (isDeliveredScenarioBJamesDifferentlyProbe(normalized)) return false;
+  const t = normalized.toLowerCase();
+  if (!/\bjames\b/.test(t)) return false;
+  return /\b(before (the )?(fight|blow|blow-?up)|before things blew up)\b/.test(t);
+}
 
 /** Scenario B Q2 — what James could have done before the rupture (not repair-as-James). */
 export function looksLikeScenarioBJamesDifferentlyQuestion(text: string): boolean {
@@ -350,7 +378,11 @@ export function coerceScenarioBJamesDifferentlyQuestionForTts(
     const userJumpedAheadWithRepair = scenarioBJamesDifferenceOrAppreciationAnswerHasRepairContent(
       lastScenarioBUserAnswerContent(ctx?.messages),
     );
-    if (userJumpedAheadWithRepair && looksLikeScenarioBJamesDifferentlyQuestion(t)) {
+    if (
+      userJumpedAheadWithRepair &&
+      looksLikeScenarioBJamesDifferentlyQuestion(t) &&
+      hasScenarioBUserAnswerAfterOpening(ctx?.messages ?? [])
+    ) {
       return t;
     }
     if (looksLikeScenarioBJamesDifferentlyQuestion(t) && !looksLikeScenarioBQ1Question(t)) {
@@ -368,9 +400,14 @@ export function coerceScenarioBJamesDifferentlyQuestionForTts(
     return coerceScenarioBPrematureRepairRedirectToJamesDifferently(t);
   }
   if (looksLikeScenarioBJamesDifferentlyQuestion(t)) {
-    const ack = extractBriefAckBeforeIncompleteJamesProbe(t);
-    if (ack) return `${ack}. ${SCENARIO_B_JAMES_DIFFERENTLY_CANONICAL}`;
-    return SCENARIO_B_JAMES_DIFFERENTLY_CANONICAL;
+    if (
+      isBeforeFightOnlyScenarioBJamesQ2Paraphrase(t) ||
+      !isDeliveredScenarioBJamesDifferentlyProbe(t)
+    ) {
+      const ack = extractBriefAckBeforeIncompleteJamesProbe(t);
+      if (ack) return `${ack}. ${SCENARIO_B_JAMES_DIFFERENTLY_CANONICAL}`;
+      return SCENARIO_B_JAMES_DIFFERENTLY_CANONICAL;
+    }
   }
   if (isIncompleteScenarioBJamesDifferentlyLeadSentence(t)) {
     const ack = extractBriefAckBeforeIncompleteJamesProbe(t);
@@ -627,16 +664,36 @@ export function findLastUserWithPriorAssistantContent(messages: MessageWithScena
  * True when the user's answer to Scenario B Q2 (James differently) or the optional full appreciation probe
  * already contains repair-oriented content, so Q3 (repair-as-James) should not fire.
  */
+const SCENARIO_B_JAMES_REPAIR_SUBSTANCE_PATTERN =
+  /\b(repair|apolog|fix|make (it|things) right|patch|mend|make up|sort (?:this|it) out|comfort|listen|celebrat|appreciat|acknowledg|reflect|assure|sorry|hear you|understand|better in the future|try to be better)\w*\b/i;
+
+/** User cut off mid James-repair clause (e.g. session log: "If I were James, I would..."). */
+export function isIncompleteScenarioBJamesRepairUserAnswer(answer: string): boolean {
+  const t = normalizeApostrophesForPromptMatch(answer).replace(/\s+/g, ' ').trim();
+  if (!t) return true;
+  const low = t.toLowerCase();
+  const hasJamesRoleSwitch =
+    /\bif i were james\b/.test(low) || /\b(as james|being james)\b/.test(low);
+  if (!hasJamesRoleSwitch) return false;
+  if (SCENARIO_B_JAMES_REPAIR_SUBSTANCE_PATTERN.test(t)) return false;
+  if (/\.{2,}\s*$/.test(t)) return true;
+  if (/\b(i'?d|i would|i will)\s*[\.,…]*\s*$/i.test(t)) return true;
+  return t.split(/\s+/).filter(Boolean).length <= 8;
+}
+
 export function scenarioBJamesDifferenceOrAppreciationAnswerHasRepairContent(answer: string): boolean {
   const t = normalizeApostrophesForPromptMatch(answer).toLowerCase().trim();
   if (!t) return false;
+  if (isIncompleteScenarioBJamesRepairUserAnswer(answer)) return false;
+
+  const hasRepairSubstance = SCENARIO_B_JAMES_REPAIR_SUBSTANCE_PATTERN.test(t);
 
   /** Q3 skip only when the user already answered in James's shoes — not third-person Q2 prescriptions. */
   const firstPersonJamesRepair =
-    /\bif i were james\b/i.test(t) ||
-    /\b(as james|being james)\b/i.test(t) ||
+    ((/\bif i were james\b/i.test(t) || /\b(as james|being james)\b/i.test(t)) &&
+      hasRepairSubstance) ||
     (/\b(i'?d|i would|i will)\b/i.test(t) &&
-      /\b(repair|apolog|fix|make (it|things) right|patch|mend|make up)\b/i.test(t) &&
+      hasRepairSubstance &&
       /\b(james|sarah|her|him)\b/i.test(t));
 
   const explicitRepairAsJames =
@@ -968,6 +1025,7 @@ export function shouldForceScenarioBJamesRepairProbe(params: {
   if (params.currentMoment !== 2) return false;
   if (scenarioBJamesRepairProbeAlreadySatisfied(params.messages)) return false;
   if (isDecline(params.userAnswer)) return false;
+  if (looksLikeIncompleteCutOffUserAnswer(params.userAnswer)) return false;
   if (!looksLikeScenarioBJamesDifferentlyQuestion(params.lastAssistantContent)) return false;
   if (transcriptAlreadyContainsScenarioBRepairAsJamesQuestion(params.messages)) return false;
   if (scenarioBJamesDifferenceOrAppreciationAnswerHasRepairContent(params.userAnswer)) return false;

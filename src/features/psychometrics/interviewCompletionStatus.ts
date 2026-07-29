@@ -88,11 +88,12 @@ export async function resolveInterviewCompletedForUser(
   }
 
   if (!interviewCompleted && latestAttemptId && attemptRow) {
-    interviewCompleted = attemptCompletedAtReflectsScoredInterview(attemptRow);
-    if (
-      !interviewCompleted &&
-      attemptIndicatesInterviewSessionFinished(attemptRow)
-    ) {
+    if (attemptCompletedAtReflectsScoredInterview(attemptRow)) {
+      interviewCompleted = true;
+      if (routingRow?.interview_completed !== true) {
+        await finalizeInterviewAttemptForRouting(userId, latestAttemptId);
+      }
+    } else if (attemptIndicatesInterviewSessionFinished(attemptRow)) {
       interviewCompleted = await finalizeInterviewAttemptForRouting(userId, latestAttemptId);
     }
   }
@@ -214,6 +215,14 @@ export function resolveInterviewStackScreenFromStatus(
     return {
       screen: 'InterviewComplete',
       legacyPsychometricsMode: true,
+      interviewAlreadyCompleted: true,
+    };
+  }
+
+  if (input.gateResultFinalizedAt == null) {
+    return {
+      screen: 'PsychometricsComplete',
+      legacyPsychometricsMode: false,
       interviewAlreadyCompleted: true,
     };
   }

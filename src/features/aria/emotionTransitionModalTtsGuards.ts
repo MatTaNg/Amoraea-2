@@ -8,12 +8,20 @@ import {
   prepareScenarioBEmotionAfterModalForTts,
 } from '@features/aria/scenarioBProbeLogic';
 import { looksLikeMoment4GrudgePrompt } from '@features/aria/moment4ProbeLogic';
+import { looksLikeBriefStreamAckOnly } from '@features/aria/interviewSpokenTextHeuristics';
+import { isShortAckOnlySentence } from '@features/aria/interviewerFrameworkPrompt';
 import {
   isExactShowScenario2VignetteText,
   isShowScenarioCardCanonicalPlaybackConfirmed,
   mergeShowScenarioCardTransitionPrefixWithSpoken,
   type ShowScenarioCardCanonicalPlaybackConfirmedKinds,
 } from '@features/aria/showScenarioCardCanonicalTts';
+
+function isBriefAckOnlyTransitionLead(text: string): boolean {
+  const t = (text ?? '').trim();
+  if (!t) return false;
+  return looksLikeBriefStreamAckOnly(t) || isShortAckOnlySentence(t);
+}
 
 export type EmotionTransitionModalTtsContext = {
   scenarioJustCompleted: 1 | 2 | 3;
@@ -32,9 +40,24 @@ export function prepareEmotionTransitionBeforeModalForTts(
   const raw = (beforeModal ?? '').trim();
   if (!raw) return '';
 
+  const suppressBriefAckAfterCanonicalNextSegment = (merged: string): string => {
+    if (
+      isBriefAckOnlyTransitionLead(merged) &&
+      ((ctx.scenarioJustCompleted === 2 &&
+        isShowScenarioCardCanonicalPlaybackConfirmed(ctx.playbackConfirmedKinds, 'situation_3')) ||
+        (ctx.scenarioJustCompleted === 1 &&
+          isShowScenarioCardCanonicalPlaybackConfirmed(ctx.playbackConfirmedKinds, 'situation_2')))
+    ) {
+      return '';
+    }
+    return merged;
+  };
+
   const tryKeepUnspokenBoundaryLead = (): string => {
     /** Empty merge means stream already covered the prefix — never fall back to re-speaking raw. */
-    return mergeShowScenarioCardTransitionPrefixWithSpoken(raw, ctx.streamSpokeText).trim();
+    return suppressBriefAckAfterCanonicalNextSegment(
+      mergeShowScenarioCardTransitionPrefixWithSpoken(raw, ctx.streamSpokeText).trim(),
+    );
   };
 
   if (
@@ -73,7 +96,7 @@ export function prepareEmotionTransitionBeforeModalForTts(
   if (ctx.streamAlreadySpokeBefore) {
     return tryKeepUnspokenBoundaryLead();
   }
-  return raw;
+  return suppressBriefAckAfterCanonicalNextSegment(raw);
 }
 
 /** Skip duplicate vignette playback after the emotion modal when canonical stream already delivered it. */

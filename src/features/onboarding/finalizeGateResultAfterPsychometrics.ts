@@ -1,4 +1,6 @@
 import { supabase } from '@data/supabase/client';
+import { applyReferralCompletionEffects } from '@features/referrals/referralInterview';
+import { markReferralCompletionCongratsPending } from '@features/referrals/referralCompletionCongratsStorage';
 import { applyPsychometricModifierToAttempt } from '@features/psychometrics/applyPsychometricModifier';
 import { fetchMostRecentCompletedInterviewAttemptId } from '@features/psychometrics/interviewCompletionStatus';
 
@@ -40,6 +42,9 @@ export async function finalizeGateResultAfterPsychometrics(
   if (error) {
     return { ok: false, attemptId: resolvedAttemptId, message: error.message };
   }
+
+  await applyReferralCompletionEffects(userId);
+  await markReferralCompletionCongratsPending(userId);
 
   return { ok: true, attemptId: resolvedAttemptId };
 }

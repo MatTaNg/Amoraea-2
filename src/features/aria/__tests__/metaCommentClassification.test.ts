@@ -21,6 +21,29 @@ import {
   FRUSTRATION_META_WORD_COUNT_THRESHOLD,
   resolveMetaCommentForInterviewTurn,
 } from '../metaCommentClassification';
+import {
+  looksLikeSkipConfirmationAssistantPrompt,
+  SKIP_REQUEST_CONFIRMATION_PROMPT_LINE,
+} from '../metaCommentSkipFrustration';
+
+describe('looksLikeSkipConfirmationAssistantPrompt', () => {
+  it('matches skip confirmation lines', () => {
+    expect(
+      looksLikeSkipConfirmationAssistantPrompt(
+        'Skipping may affect your score — do you still want to skip?',
+      ),
+    ).toBe(true);
+    expect(looksLikeSkipConfirmationAssistantPrompt(SKIP_REQUEST_CONFIRMATION_PROMPT_LINE)).toBe(true);
+  });
+
+  it('does not match interview closing copy', () => {
+    expect(
+      looksLikeSkipConfirmationAssistantPrompt(
+        'Good work getting through all of this. Your interview is complete. Thank you for being so open with me, Matt.',
+      ),
+    ).toBe(false);
+  });
+});
 
 describe('classifyUserMetaComment', () => {
   it('classifies frustration patterns', () => {
@@ -84,6 +107,35 @@ describe('classifyUserMetaComment', () => {
   it('defaults very short non-matching text to ambiguous_short', () => {
     const r = classifyUserMetaComment('maybe');
     expect(r?.type).toBe('ambiguous_short');
+  });
+
+  it('does not classify go-back asks as ambiguous_short meta', () => {
+    expect(classifyUserMetaComment('Can we go back?')).toBeNull();
+    expect(classifyUserMetaComment('I want to go back to the previous scenario')).toBeNull();
+  });
+
+  it('does not classify score-status asks as ambiguous_short meta', () => {
+    expect(classifyUserMetaComment('Can I see my score')).toBeNull();
+    expect(classifyUserMetaComment('Can I see my school')).toBeNull();
+    expect(classifyUserMetaComment("What's my score?")).toBeNull();
+  });
+
+  it('does not classify mid-sentence cut-offs as ambiguous_short meta', () => {
+    expect(classifyUserMetaComment('I think')).toBeNull();
+    expect(classifyUserMetaComment('I think that')).toBeNull();
+    expect(classifyUserMetaComment('I think Daniel')).toBeNull();
+    expect(classifyUserMetaComment('I think that Daniel')).toBeNull();
+    expect(classifyUserMetaComment('Daniel felt genuinely')).toBeNull();
+    expect(classifyUserMetaComment('If I were Ryan, I would')).toBeNull();
+    expect(classifyUserMetaComment("I'm generally too nice and I don't")).toBeNull();
+    expect(classifyUserMetaComment('I think that James could have')).toBeNull();
+    expect(classifyUserMetaComment('This situation can be repaired.')).toBeNull();
+    expect(classifyUserMetaComment('This one time')).toBeNull();
+    expect(classifyUserMetaComment('This one time...')).toBeNull();
+    expect(classifyUserMetaComment('Yeah, me and my partner.')).toBeNull();
+    expect(classifyUserMetaComment('Thank you for watching!')).toBeNull();
+    expect(classifyUserMetaComment('What do you mean by that?')?.type).toBe('confusion');
+    expect(classifyUserMetaComment('can we move on')?.type).toBe('skip_request');
   });
 
   it('returns null for substantive longer answers with no meta signals', () => {

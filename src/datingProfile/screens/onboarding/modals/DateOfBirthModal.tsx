@@ -1,4 +1,5 @@
 import React, { useMemo, useState, useCallback } from 'react';
+import { ONBOARDING_STEP_SCREEN_EDGES, ONBOARDING_STEP_SCREEN_EDGES_WITH_BOTTOM } from './onboardingStepScreenEdges';
 import { View, Text, ScrollView, TouchableOpacity, ActivityIndicator } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Button } from '@/shared/ui/Button';
@@ -38,18 +39,21 @@ export const DateOfBirthModal: React.FC<DateOfBirthModalProps> = ({
     () => (dateOfBirth ? calculateAgeFromBirthdate(dateOfBirth) : null),
     [dateOfBirth]
   );
-  const isUnderage = age !== null && age < MIN_AGE;
-  const timeOk = isValidOptionalBirthTime24h(birthTime);
-
-  const canContinue =
-    !!dateOfBirth && !!dateOfBirth.trim() && !isUnderage && timeOk;
-
   const [birthLocationSuggestions, setBirthLocationSuggestions] = useState<
     Array<{ label: string }>
   >([]);
   const [validatedBirthLocation, setValidatedBirthLocation] = useState<string | undefined>(
     undefined
   );
+
+  const isUnderage = age !== null && age < MIN_AGE;
+  const timeOk = isValidOptionalBirthTime24h(birthTime);
+  const birthLocationTrimmed = birthLocation.trim();
+  const birthLocationOk =
+    !birthLocationTrimmed || validatedBirthLocation === birthLocationTrimmed;
+
+  const canContinue =
+    !!dateOfBirth && !!dateOfBirth.trim() && !isUnderage && timeOk && birthLocationOk;
 
   const onBirthSuggestionsChange = useCallback((suggestions: Array<{ label: string }>) => {
     setBirthLocationSuggestions(suggestions);
@@ -63,7 +67,7 @@ export const DateOfBirthModal: React.FC<DateOfBirthModalProps> = ({
   });
 
   return (
-    <SafeAreaView style={styles.screen} edges={['top', 'left', 'right']}>
+    <SafeAreaView style={styles.screen} edges={ONBOARDING_STEP_SCREEN_EDGES}>
       <OnboardingHeader title="Date of Birth" onBack={onBack} />
       <ScrollView
         style={styles.scrollView}
@@ -118,7 +122,7 @@ export const DateOfBirthModal: React.FC<DateOfBirthModalProps> = ({
                   <Text style={styles.placeSearchLoadingText}>Looking up places…</Text>
                 </View>
               ) : null}
-              {birthLocationSuggestions.length > 0 && (
+              {birthLocationSuggestions.length > 0 && !validatedBirthLocation && (
                 <View style={styles.suggestionsContainer}>
                   {birthLocationSuggestions.map((s, idx) => (
                     <TouchableOpacity
@@ -135,6 +139,13 @@ export const DateOfBirthModal: React.FC<DateOfBirthModalProps> = ({
                   ))}
                 </View>
               )}
+              {birthLocationTrimmed && !birthLocationOk && !birthLocationPlacesLoading ? (
+                <Text style={styles.errorText}>
+                  {birthLocationSuggestions.length > 0
+                    ? 'Please select a location from the suggestions above.'
+                    : 'Keep typing until matching places appear, then select one from the list.'}
+                </Text>
+              ) : null}
             </View>
           </View>
         </View>
